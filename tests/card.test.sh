@@ -1368,6 +1368,27 @@ expect_contains "162: AC-3.4 — the task-scale plan renders its one batch's wid
   "batch 1 · 2 of 8" "$T10_S3"
 expect_absent "162a: …and names no second batch it does not have" "batch 2 ·" "$T10_S3"
 
+# ── wave-19 critic C2: a batch at a later step reads its OWN step ─────────────
+# `_card_batch_widths` rewrites ONE projection path per batch, each time with a
+# different `current:`, and asks `fill_ready_set` in the card's own shell. fill.sh
+# memoises the `current:` answer per process, so a memo that outlived the rewrite
+# answered the Step-5 batch with the Step-4 projection's step: it asked for step-4
+# rows, found none pending, and printed `batch 3 · 0 of 8` at the approval gate.
+# Two Step-5 rows on the two-batch fixture are the shape of every wave table that
+# carries its Step-5 row; the right width is 2 (T6 and T7, both ready once T1-T5
+# are projected landed).
+T10_WAVE_3B="${T10_ROOT_CFG}/wave-98-threebatch.plan.md"
+awk '{ print }
+     /^\| T5 \| 4 \|/ {
+       print "| T6 | 5 | verify | REQ-1: the Step-5 audit. complexity: standard | auditor | T4, T5 | 30 | REQ-1 | — | — | pending |"
+       print "| T7 | 5 | verify | REQ-2: the Step-5 walk. complexity: standard | auditor | T4, T5 | 30 | REQ-2 | — | — | pending |"
+     }' "$T10_WAVE_2B" > "$T10_WAVE_3B"
+whole_card step3 "$T10_WAVE_3B"; T10_3B="$WC_OUT"
+expect_eq "162b: C2 — step3 exits 0 on the plan carrying its Step-5 rows" "0" "$WC_RC"
+expect_contains "162c: …the Step-4 batches keep their widths" "batch 2 · 2 of 8" "$T10_3B"
+expect_contains "162d: …and the Step-5 batch is asked at step 5, not at the first batch's step" \
+  "batch 3 · 2 of 8" "$T10_3B"
+
 # ── AC-4.5: the new cards obey the same budget every other card does ─────────
 # THE ARTIFACTS PATH IS EXCLUDED, and only it: these fixtures live OUTSIDE the
 # project (this suite's hermetic-fixture rule), and an out-of-project artifact path
