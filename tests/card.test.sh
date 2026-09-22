@@ -1394,4 +1394,38 @@ expect_contains "164a: …and depends" "depends" "$T10_WHDR"
 expect_contains "164b: …and agent" "agent" "$T10_WHDR"
 expect_absent "164c: …and never the task-scale headings" "worktree" "$T10_WHDR"
 
+# ── AC-11.1 (wave-19 REQ-11, D12): a task-scale plan carries its own requirements ──
+# THE PARSER WAS NEVER THE GAP. `_card_step1` is scale-blind: it renders whatever
+# `### REQ-<id> — <title>` + `provenance:` blocks sit under a `## Requirements`
+# heading, at any scale. The T10 plan above carries none, because the task-scale plan
+# shape in steps/3.md defined none, so its Step-1 card printed an empty block. The
+# fix is the shape (steps/3.md's task-scale paragraph); these rows pin that the shape
+# it names is the one the card reads, on the T10 plan with that section added. The
+# heading is READ FROM THE RENDERED steps/3.md, not restated here, so a text that names
+# a shape the parser does not read goes red on this row rather than at a Step-1 gate.
+card_reqs_block() {  # <rendered card> -> the non-blank lines between Requirements and Not Doing
+  printf '%s\n' "${1:-}" | awk '/^  Requirements$/ { f = 1; next } /^  [A-Z]/ { f = 0 } f && NF'
+}
+T11_STEP3="${BIONIC_SKILLS_DIR}/canonical-sdlc/steps/3.md"
+T11_REQ_HEAD="$( { grep -o '`### REQ-<n> — <title>`' "$T11_STEP3" 2>/dev/null || true; } | head -1 | tr -d '`' \
+  | sed -e 's/<n>/1/' -e 's/<title>/The card renders what the plan carries/')"
+T11_REQ_PLAN="${T10_ROOT_CFG}/task-run-19-reqs.plan.md"
+awk -v head="$T11_REQ_HEAD" '/^## SDLC State$/ {
+       print "## Requirements\n"
+       print head "\n"
+       print "provenance: user 2026-09-22 \"renders the Requirements block\"\n"
+       print "- AC-1.1\n"
+     } { print }' "$T10_TASK_PLAN" > "$T11_REQ_PLAN"
+whole_card step1 "$T11_REQ_PLAN"; T11_S1="$WC_OUT"
+expect_eq "165: AC-11.1 — step1 exits 0 on a task-scale plan carrying a REQ line" "0" "$WC_RC"
+T11_REQS="$(card_reqs_block "$T11_S1")"
+expect_contains "165a: …and its Requirements block renders the requirement" \
+  "REQ-1   The card renders what the plan carries" "$T11_REQS"
+expect_contains "165b: …with its provenance in the same cell" "provenance user 2026-09-22" "$T11_REQS"
+# THE PAIRED NEGATIVE: the same plan without the section is the RED this criterion
+# names — an empty block — so 165a/165b are about the section, not about step1.
+whole_card step1 "$T10_TASK_PLAN"
+expect_empty "165c: …and the T10 plan, which carries no ## Requirements, renders an empty block" \
+  "$(card_reqs_block "$WC_OUT")"
+
 finish

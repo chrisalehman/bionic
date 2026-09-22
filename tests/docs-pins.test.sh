@@ -1737,10 +1737,10 @@ else
 fi
 
 if has_all "$CARD3" "Problem" "Branches" "Tasks" "kind" "depends" "agent" \
-                    "Eval design" "Verification" "Open at approval" "Artifacts"; then
-  ok "93a: the Step-3 card carries Problem, Branches, Tasks (kind/depends/agent), Eval design, Verification, Open at approval, Artifacts"
+                    "Eval design" "Verification" "Artifacts"; then
+  ok "93a: the Step-3 card carries Problem, Branches, Tasks (kind/depends/agent), Eval design, Verification, Artifacts"
 else
-  no "93a: the Step-3 card carries Problem, Branches, Tasks (kind/depends/agent), Eval design, Verification, Open at approval, Artifacts" \
+  no "93a: the Step-3 card carries Problem, Branches, Tasks (kind/depends/agent), Eval design, Verification, Artifacts" \
      "card body: $CARD3"
 fi
 if has_all "$CARD3" "first batch"; then
@@ -2007,22 +2007,44 @@ else
   ok "107c: a prototype-unit paragraph missing the no-row rule fails 107b's check (pin discriminates)"
 fi
 
-# AC-K4.3: the Step-3 card's "Open at approval" section is a QUESTION → TASK mapping, not
-# just a bare header — 93a already pins the header string; this pins the row shape it
-# names, `closed by task <n>`, which is what makes the section machine-checkable rather
-# than a caption with nothing under it.
-expect_contains "107d: AC-K4.3 — the Step-3 card's Open-at-approval row maps a question to the task that closes it" \
-  "closed by task" "$CARD3"
+# AC-11.2 (wave-19 REQ-11, D12) — RETIRES AC-K4.3's 107d-f. The scaffold's `Open at
+# approval` section and its `governing design` artifact line were never rendered:
+# `_card_step3` (payload/scripts/card.sh) emits neither, so the picture promised a
+# contract the approval never saw. The scaffold is the step's sole statement of what the
+# card carries now (the paragraph above it became a pointer), so it is pinned to the
+# RENDERER, not to a word list: its section headings and its Artifacts labels must equal
+# what `card.sh step3` prints for a plan. A section added to one side only goes red here.
+card3_shape() {  # <card text on stdin> -> each section heading's first word, then each artifact label
+  awk '/^  [A-Z]/ { print $1; art = ($1 == "Artifacts"); next }
+       art && /^    [a-z]/ { print "artifact:" $1 }'
+}
+SHAPE_PLAN="$TMP/wave-97-shape.plan.md"
+printf '%s\n' '---' 'scale: wave' 'walk: required' 'rigor: audited' \
+  'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' \
+  'working-branch: wave/97-shape' 'integration-branch: main' 'base-sha: abc1234' '---' '' \
+  '# fixture wave 97 · plan' '' '## Goal' '' 'Render one card to compare against the scaffold.' '' \
+  '## SDLC State' '' 'current: 3' '' '## Tasks' '' \
+  '| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |' \
+  '|---|---|---|---|---|---|---|---|---|---|---|' \
+  '| T1 | 4 | build | REQ-1: the task. complexity: standard | implementor | — | 30 | REQ-1 | a.sh | — | pending |' \
+  '' '## Verification Matrix' '' '| AC | tier | status | evidence | auditor |' '|---|---|---|---|---|' \
+  '| AC-1.1 | T2 | pending | — | — |' > "$SHAPE_PLAN"
+SHAPE_RENDERED="$(bash "${REPO}/payload/scripts/card.sh" step3 "$SHAPE_PLAN" 2>/dev/null | card3_shape)"
+expect_contains "107d: AC-11.2 — card.sh step3 renders a card with an Artifacts section (the comparison has a subject)" \
+  "Artifacts" "$SHAPE_RENDERED"
+expect_eq "107e: AC-11.2 — the Step-3 scaffold's sections and artifact labels are exactly what card.sh step3 renders" \
+  "$SHAPE_RENDERED" "$(printf '%s\n' "$CARD3" | card3_shape)"
 
-# 107e: Anti-vacuity — a Step-3 card with the mapping text stripped fails 107d.
-anchor "$STEP3_MD" 'closed by task' 1
-DOCTORED_NO_CLOSEDBY="$TMP/skill-k4-no-closedby.md"
-sed 's/closed by task/discharged eventually/' "$STEP3_MD" > "$DOCTORED_NO_CLOSEDBY"
-DOCTORED_CARD3_107="$(card_span "$DOCTORED_NO_CLOSEDBY" 'Step 3 · Plan')"
-case "$DOCTORED_CARD3_107" in
-  *"closed by task"*) no "107f: a Step-3 card missing the 'closed by task' mapping still 'has' it (pin is vacuous)" ;;
-  *) ok "107f: a Step-3 card missing the 'closed by task' mapping fails the K4.3 check (pin discriminates)" ;;
-esac
+# 107f: Anti-vacuity — the retired section put back into a copy of the scaffold fails 107e.
+anchor "$STEP3_MD" '  Artifacts' 1
+DOCTORED_OPEN_AT="$TMP/step3-open-at-approval.md"
+awk '/^  Artifacts$/ { print "  Open at approval"; print "    <question>   → closed by task <n>"; print "" }
+     { print }' "$STEP3_MD" > "$DOCTORED_OPEN_AT"
+if [ "$(card_span "$DOCTORED_OPEN_AT" 'Step 3 · Plan' | card3_shape)" = "$SHAPE_RENDERED" ]; then
+  no "107f: a scaffold carrying a section the renderer never emits still matches (pin is vacuous)"
+else
+  ok "107f: a scaffold carrying a section the renderer never emits fails 107e (pin discriminates)"
+fi
 
 section "Section 16: K5.4 — the goal-paragraph rule text (design ledger K5.4, plan task 21)"
 #
@@ -2756,45 +2778,23 @@ grep -Fv -- "$AC2_SCAFFOLD_LINE" "$SKILL_MD" > "$SKILL_SCAFFOLD_MUT" 2>/dev/null
 expect_eq "131b: a SKILL.md with the fenced line stripped reads 0, not 1 (the count discriminates)" \
   "0" "$(grep -Fc -- "$AC2_SCAFFOLD_LINE" "$SKILL_SCAFFOLD_MUT" 2>/dev/null | tr -cd '0-9')"
 
-# --- AC-8.3: the governing-design line is a conditional slot INSIDE the Step-3 card ---
+# --- AC-8.3, RETIRED by AC-11.2 (wave-19 D12): no governing-design line on the Step-3 card ---
 #
-# fails-when: the rendered steps/3.md still instructs a governing-design line outside the
-# card or unconditionally, or its card template lacks the conditional slot.
-PIN_GOV_SLOT='governing design <the spec'"'"'s `design:` pointer target, or the word "waived">'
-if has_pin "$STEP3_MD" "$PIN_GOV_SLOT"; then
-  ok "132: AC-8.3 — the Step-3 card carries the governing-design line as a slot under Artifacts"
-else
-  no "132: AC-8.3 — the Step-3 card carries the governing-design line as a slot under Artifacts" \
-     "file: $STEP3_MD"
-fi
+# AC-8.3 moved the governing-design line into a conditional slot under Artifacts; the
+# renderer never printed that slot, so it promised a line the approval never saw. D12
+# drops it, and 107e now pins the whole Artifacts label set to card.sh step3's own. What
+# stays pinned here is that neither the slot nor the older unconditional sentence returns
+# — a card printing a governing-design line is a card the renderer does not produce.
+GOV_HITS="$(grep -c 'governing design' "$STEP3_MD" 2>/dev/null | tr -cd '0-9')"
+[ -n "$GOV_HITS" ] || GOV_HITS=0
+expect_eq "132: AC-11.2 — steps/3.md carries no governing-design line, slot or sentence (card.sh step3 prints none)" \
+  "0" "$GOV_HITS"
 
-PIN_GOV_OMIT='omit this line when the spec carries its own ## Design'
-if has_pin "$STEP3_MD" "$PIN_GOV_OMIT"; then
-  ok "132b: …and the slot names its own omission condition (a spec's own ## Design prints nothing extra)"
-else
-  no "132b: …and the slot names its own omission condition (a spec's own ## Design prints nothing extra)" \
-     "file: $STEP3_MD"
-fi
-
-# The retired unconditional sentence must be gone, not just superseded — a template that
-# kept both would print the governing-design line twice on every card.
-GOV_OLD_HITS="$(grep -c 'It names the governing design on one line' "$STEP3_MD" 2>/dev/null | tr -cd '0-9')"
-[ -n "$GOV_OLD_HITS" ] || GOV_OLD_HITS=0
-expect_eq "132c: …and the old unconditional 'It names the governing design on one line' sentence is gone" \
-  "0" "$GOV_OLD_HITS"
-
-# Anti-vacuity: the slot pin must discriminate a card with the line stripped. Stripped by
-# the "governing design" anchor, not by the (flattened, single-spaced) PIN_GOV_SLOT itself —
-# the shipped line double-spaces its label column to align with its Artifacts siblings, and
-# `grep -F` reads the raw file, unflattened.
-GOV_MUT="$TMP/step3-no-gov-slot.md"
-grep -v 'governing design' "$STEP3_MD" > "$GOV_MUT" 2>/dev/null
-if has_pin "$GOV_MUT" "$PIN_GOV_SLOT"; then
-  no "132d: a Step-3 card with the governing-design slot stripped still passes the slot pin (pin discriminates)" \
-     "the mutated copy still matched — the pin does not see the removal"
-else
-  ok "132d: a Step-3 card with the governing-design slot stripped still passes the slot pin (pin discriminates)"
-fi
+# Anti-vacuity: the count must see the slot's own spelling when it is put back.
+GOV_MUT="$TMP/step3-gov-slot-back.md"
+{ cat "$STEP3_MD"; printf '    governing design  <the spec'"'"'s `design:` pointer target>\n'; } > "$GOV_MUT" 2>/dev/null
+expect_eq "132d: a steps/3.md with the governing-design slot put back reads 1, not 0 (the count discriminates)" \
+  "1" "$(grep -c 'governing design' "$GOV_MUT" 2>/dev/null | tr -cd '0-9')"
 
 # ---------------------------------------------------------------------------
 section "Section 24: T3 — the repair rule reaches the rendered survival text (REQ-3, AC-3.3)"
