@@ -143,6 +143,26 @@ if ! declare -F units_rows >/dev/null 2>&1; then
   . "$_STOP_LIB_DIR/units.sh"
 fi
 
+# ─── FILE SCOPE: the ready set, which this file must not compute twice ───────
+#
+# READINESS IS A PROPERTY OF THE UNIT (epic-23 wave-18, REQ-3, D2, ADR-033 decision 2).
+# `stop_patrol_duties`' fill arm used to be entirely derivative of the tick having PRINTED a
+# line: no `poker: FILL` in the turn, no duty. That makes a wall a function of the Patrol's
+# cadence rather than of the run's state, and a turn that ended with three rows ready twenty
+# minutes before the next tick ended in silence. `payload/scripts/lib/fill.sh` is the one
+# computation of the ready set — the same function the tick prints from — so the arm asks the
+# question itself and the two can never name different rows.
+#
+# SOURCED THE WAY fold.sh, root.sh, bounds.sh AND units.sh ARE, and guarded on the verb this
+# file calls. hooks/stop.sh DOES name this one in its `BIONIC_LIB_WANT` — unlike units.sh,
+# which no verdict in that process reads directly — so in the shipped process the loader has
+# already checked it is readable and this guard is what a suite driving the library alone
+# pays. fill.sh sources units.sh under the same kind of guard, so the pair arrives together.
+if ! declare -F fill_ready_set >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/fill.sh"
+fi
+
 # ─── FILE SCOPE: the hook's own directory, resolved at most once ─────────────
 #
 # THREE VERDICTS ASKED THE SAME QUESTION THREE TIMES (REQ-10, T11): `stop_landing_gate`
@@ -1449,6 +1469,7 @@ stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
   local TRANSCRIPT HOOK_DIR PLAN PLAN_NAME SCAN_WINDOW_LINES STREAM
   local RITUAL RITUAL_REASON TICK_MARK VERDICT FILL_MISSING FILL_REASON
+  local FILL_READY FILL_WIDTH FILL_OPEN FILL_SRC FILL_FACT FILL_FIX _FILL_ROW
   local FACT FIX REASON
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
@@ -1761,9 +1782,54 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 # the regex wildcard it would otherwise be — see the escape in the fold below.
 #
 # Folded over the same stream, resetting at every user PROMPT exactly as the duties fold
-# above it does, and inert on every turn with no FILL line in it — which is every turn in
-# every project whose tick prints none.
-FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" '
+# above it does. It is no longer inert on a turn with no FILL line in it: since wave-18
+# (REQ-3) a turn with no TICK in it is judged against the ready set computed just below, and
+# what stays inert is a turn with nothing ready and nothing printed — which is every turn in
+# every project whose plan opts into no budget.
+# ---------- THE READY SET, COMPUTED RATHER THAN OVERHEARD (REQ-3, AC-3.2) ----------
+#
+# THE INVARIANT IS THE RUN'S STATE, NOT THE PATROL'S CADENCE: no turn past Step 3 ends with a
+# fillable gap. `fill_ledger_live` is the cheap gate — one read of `current:`, and a run at
+# Steps 0-3, a run with no plan, or a field that will not parse stops here without touching
+# the table. What follows costs one table read and is paid on the turns where the answer
+# matters.
+#
+# THE WIDTH IS THE RUN'S DECLARED CEILING, AND THE OCCUPANCY IS THE PLAN'S OWN `active` ROWS
+# (A-T2.1, A-T2.2). The tick measures both differently — the rung off the pressure ring it
+# just sampled, and the open rows off the roster it just walked — and both are right for the
+# caller that has them. This one may not have them: a gate WRITES NOTHING (TDD §3.2) and
+# `pressure_level` takes a sample when the ring is cold, so reading the rung here would make
+# this verdict a writer. The ceiling is the conservative direction of the same number (the
+# rung never exceeds it), and the plan's `active` count is the ledger's own record of what is
+# in flight — the one this gate can read without a second definition of "running".
+#
+# A RUN THAT OPTED INTO NO BUDGET OFFERS NO WIDTH, and gets silence: the direction the tick's
+# own budget arm takes, for the reason it states — a ceiling is a thing a run opts into, and
+# inventing one here would refuse turns against a number nobody set.
+FILL_READY=""
+if [ -n "$PLAN" ] && fill_ledger_live "$PLAN"; then
+  FILL_WIDTH="$(plan_frontmatter_get "$PLAN" parallel-budget 2>/dev/null)"
+  case "$FILL_WIDTH" in
+    *writers=*) FILL_WIDTH="${FILL_WIDTH#*writers=}"; FILL_WIDTH="${FILL_WIDTH%% *}" ;;
+    *) FILL_WIDTH="" ;;
+  esac
+  case "$FILL_WIDTH" in ''|*[!0-9]*) FILL_WIDTH="" ;; esac
+  if [ -n "$FILL_WIDTH" ]; then
+    FILL_OPEN=0
+    while IFS= read -r _FILL_ROW; do
+      [ -n "$_FILL_ROW" ] || continue
+      [ "$(units_field "$_FILL_ROW" status)" = "active" ] && FILL_OPEN=$((FILL_OPEN + 1))
+    done <<FILL_LEDGER_ROWS
+$(units_rows "$PLAN" 2>/dev/null)
+FILL_LEDGER_ROWS
+    # ONE LINE, SPACE-SEPARATED, because that is the shape the fold below already reads the
+    # tick's own ids in. A trailing separator opens an empty field, which the id filter in
+    # that fold drops on its own.
+    FILL_READY="$(fill_ready_set "$PLAN" "$FILL_WIDTH" "$FILL_OPEN" | tr '\n' ' ')"
+  fi
+fi
+
+FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" -v ready="$FILL_READY" '
   $1 == "USER" {
     t = $2; sub(/^[ \t]+/, "", t)
     tick = (index(t, mark) == 1)
@@ -1777,8 +1843,15 @@ FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" '
     next
   }
   END {
-    if (!tick || fills == "" || declined) exit
-    n = split(fills, ids, /[ \t]+/)
+    # TWO SOURCES OF IDS, ONE BOUNDARY TEST. On a TICK turn the ids are the ones the tick
+    # printed — it had just walked the roster, which is a fact about this session that no
+    # plan can see, so its reading wins and its wording follows below. On every other turn
+    # they are the ready set this gate computed. A decline answers either.
+    if (declined) exit
+    src = "FILL"; want = fills
+    if (!tick) { src = "GAP"; want = ready }
+    if (want == "") exit
+    n = split(want, ids, /[ \t]+/)
     missing = ""
     for (i = 1; i <= n; i++) {
       id = ids[i]
@@ -1794,12 +1867,31 @@ FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" '
       if (agents ~ ("(^|[^A-Za-z0-9_.-])" pat "([^A-Za-z0-9_.-]|$)")) continue
       missing = missing (missing == "" ? "" : " ") id
     }
-    if (missing != "") print missing
+    # THE SOURCE TRAVELS WITH THE IDS, because the two refusals say different true things
+    # and neither sentence is true of the other turn.
+    if (missing != "") print src "\t" missing
   }
 ')
 
+FILL_SRC=""
 if [ -n "$FILL_MISSING" ]; then
+  FILL_SRC="${FILL_MISSING%%$'\t'*}"
+  FILL_MISSING="${FILL_MISSING#*$'\t'}"
+fi
+
+if [ -n "$FILL_MISSING" ] && [ "$FILL_SRC" = "GAP" ]; then
+  # THE INVARIANT'S OWN WORDING. "The tick printed FILL" is not true of this turn — no tick
+  # fired in it — and a refusal that said so would send its reader looking for a line that is
+  # not in the transcript. What IS true is the state: the ledger is live, these rows are
+  # ready, and nothing was sent. The discharge is the same one the printed duty has, so one
+  # answer satisfies both arms.
+  FILL_REASON="Fillable gap at turn end: the run's ledger is live and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row, or write a line \"fill-declined: <reason>\" saying why not, then stop again — this gate blocks once."
+  FILL_FACT="rows are ready and this turn dispatched none"
+  FILL_FIX="dispatch each row, or decline"
+elif [ -n "$FILL_MISSING" ]; then
   FILL_REASON="Patrol fill unanswered: the tick printed FILL and this turn neither dispatched nor declined ${FILL_MISSING}. Dispatch each named task, or write a line \"fill-declined: <reason>\" saying why not, then stop again — this gate blocks once."
+  FILL_FACT="the tick printed FILL and nothing answered"
+  FILL_FIX="dispatch each task, or decline"
 else
   FILL_REASON=""
 fi
@@ -1880,7 +1972,10 @@ if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
       fold_block block stop "a FILL and a STANDDOWN went unanswered" \
         "dispatch, stop, or decline" "$TELL_REASON"
     elif [ -n "$FILL_REASON" ]; then
-      fold_block block stop "the tick printed FILL and nothing answered" "dispatch each task, or decline" \
+      # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the tick's printed ids, or
+      # the ready set this gate computed. A STANDDOWN cannot pair with the second — the tick
+      # is what prints one — so the pair case above stays the tick's.
+      fold_block block stop "$FILL_FACT" "$FILL_FIX" \
         "$TELL_REASON"
     else
       fold_block block stop "a printed STANDDOWN went unanswered" "stop each agent, or decline" \
