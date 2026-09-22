@@ -4738,11 +4738,12 @@ section "S27p: a trailing # comment is not a dropped Suites: token (T23, review 
 # ============================================================================
 #
 # THE SHIPPED SCAFFOLD CARRIES ONE. `agents-src/blocks/brief-scaffold.md` renders
-# `Suites: none                     # read-only brief; or test-file names only` into all
-# eight surfaces, and an author who fills the scaffold in keeps the comment. The drop
-# refusal above read EVERY whitespace-separated token on the span, so `#`, `read-only`,
-# `brief;` and the rest each scored as a file the shell runner cannot run, and a brief was
-# refused for carrying this repo's own teaching text — with a message that names
+# `Suites: none    # *.test.sh names or a path-qualified run.sh; other runners:
+# Re-executes:` into all eight surfaces, and an author who fills the scaffold in keeps
+# the comment. The drop refusal above read EVERY whitespace-separated token on the span,
+# so `other`, `runners:` and the rest each scored as a file the shell runner cannot run,
+# and a brief was refused for carrying this repo's own teaching text — with a message
+# that names
 # `Re-executes:` and never mentions the comment, so the repair was not discoverable from
 # it (Step-6 review R1, HIGH; the base at 72e07ec admitted the same brief). `suite_names()`
 # now stops reading the span at the first token beginning with `#`.
@@ -4792,7 +4793,7 @@ REPO=$(make_repo r27p3 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: read the tree and report.
 Expected artifact: .bionic/docs/record/w27p3.md
-Suites: none                                           # read-only brief; or test-file names only' \
+Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:' \
   "w27p-waiver")"
 expect_status "27p3 a commented Suites: none is the waiver it always was" "0" "$GATE_ST"
 # ...and on the OTHER channel too: a several-fault refusal exits 0 and denies on stdout, so
@@ -4810,7 +4811,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w27p3b-audit.md
 Expected duration: ~30 minutes.
-Suites: none                                           # read-only brief; or test-file names only
+Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:
 Re-executes: `pytest tests/unit`' "w27p-aud-waiver" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" \
   "bionic:auditor")"
 expect_status "27p3b an auditor waiving suites in a comment-carrying line, declaring runs, is ADMITTED" \
@@ -4823,7 +4824,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w27p3c-audit.md
 Expected duration: ~30 minutes.
-Suites: none                                           # read-only brief; or test-file names only' \
+Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:' \
   "w27p-aud-bare" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
 expect_status "27p3c …and the same line without runs still meets the AUDITOR arm" "2" "$GATE_ST"
 expect_contains "27p3c …named as an auditor that re-executes nothing" \
@@ -6975,8 +6976,8 @@ section "§runs-lift — a brief declares what it will RUN, in any runner (REQ-1
 #
 # THE GRAMMAR IS AUTHOR-MARKED (D3). A run is a backtick-delimited command on the span, in
 # position order, at most three of them; text outside the marks is not a run; a run carrying
-# a pipe, a newline or an unexpanded shell variable is refused at the lift with the token
-# named. The marks are KEPT on the roster field, which is what makes "the exact marked run"
+# an UNQUOTED pipe, a newline or an unexpanded shell variable is refused at the lift with the
+# token named (a pipe inside quotes is an ordinary argument — 18T4a/18T4b below). The marks are KEPT on the roster field, which is what makes "the exact marked run"
 # a thing the budget arm can compare against.
 #
 # fails-when: the field is absent from the row; an auditor brief declaring runs and waiving
@@ -7008,6 +7009,23 @@ expect_status "16la …and the roster row carries the run, marks and all" \
   "$RL_JEST" "$(roster_field "$ROW" re_executes)"
 expect_status "16la …with the waiver still recorded as the declared suite set" \
   "none" "$(roster_field "$ROW" suites_allowed)"
+
+# ---- AC-8.1 (T5, REQ-8, D12): a span WITHIN the cap reads back every run it declared ----
+# THE CONTROL FOR AC-8.2 BELOW. Two runs is under `RUNS_MAX` (3), so neither the cap-hit
+# refusal nor its own drop field should ever fire here — the lift reads back exactly what
+# was declared, space-joined, marks and all, and the dispatch is ADMITTED. Without this row
+# a broken lift that dropped every second run, or one that refused ANY multi-run span, could
+# pass 16le/16lf below green for the wrong reason.
+REPO=$(make_repo r18t5a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/w18-t5a.md
+Expected duration: ~20 minutes.
+Re-executes: ${RL_JEST} ${RL_PYTEST}" "w18-t5a")"
+expect_status "18T5a a two-run span, under the cap, is ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "18T5a …and the lift reads BOTH runs back, in order" \
+  "$RL_JEST $RL_PYTEST" "$(roster_field "$ROW" re_executes)"
 
 # ---- AC-1.2: the auditor arm reads BOTH spellings, and its Fix text shows both ----
 # Row 1 of the seed's §7 table: a named suite list is admitted (33c drives this too; it is
@@ -7143,19 +7161,101 @@ ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "16ld4 …the slot lifted nothing and the ordinary run kept its marks" \
   "$RL_JEST" "$(roster_field "$ROW" re_executes)"
 
-# ---- AC-1.6: at most three runs, loudly; and unmarked text is not a run ----
+# ---- AC-7.1 / AC-7.2 (epic-23 wave-18, T4; REQ-7, D4): a QUOTED pipe is not a pipe ----
+#
+# WHAT WAS WRONG. The lift's pipe test was a whole-token scan — `index(tok, "|") > 0` — so
+# a pipe inside single quotes, double quotes, a bracket expression or a regex alternation
+# was refused identically to shell plumbing. A jest repository cannot declare its own runs
+# without one: `--testPathPattern='(a|b)...'` is the ordinary spelling, and the refusal it
+# drew told the author to "leave the shell plumbing off the span" about a character that
+# was never plumbing. Research R2 §2 measured that the branch had NEVER been executed by a
+# test in either direction, which is how the reading survived two waves.
+#
+# WHY BOTH HALVES ARE HERE. Making the scan quote-aware is necessary and not sufficient:
+# the roster row is pipe-delimited, and the writer folded `|` to a space in every field —
+# so an admitted run reached the row as a command no agent could ever type back, and the
+# writer-side budget arm would refuse at run time the run this wall had just admitted (the
+# wave-16 T25 failure through a different door). The row now percent-encodes the pipe in
+# `re_executes=` and every reader decodes it, so the ADMIT row below asserts the encoded
+# field, not just the exit status.
+#
+# fails-when: the quoted-pipe brief is refused; the unquoted one is admitted; the row
+# carries a folded space where the pipe was; or the refusal still promises that any pipe
+# is plumbing.
+RL_QP_CMD="npx jest --testPathPattern='(a|b)\\.spec\\.ts'"
+RL_QP_ENC="npx jest --testPathPattern='(a%7Cb)\\.spec\\.ts'"
+
+# THE BRIEF CARRIES A VALID `Files:` LINE so the quoted pipe is its ONLY candidate fault.
+# Without one the no-instrument arm fires beside it and the refusal leaves on the
+# SEVERAL-fault wire, which is a `deny` verdict at exit 0 — a status this row would then
+# read as admission, and the whole assertion would be green against the broken lift.
+REPO=$(make_repo r18t4a yes)
+write_attestation "$REPO" "$SID_A"
+# THE STUB DERIVATION, not the real tool — same reason as 16ld1 above.
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
+Expected artifact: .bionic/docs/record/w18-qpipe.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${RL_BT}${RL_QP_CMD}${RL_BT}" "w18-qpipe")"
+expect_status "18T4a a quoted pipe is not a pipe — the run is ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "18T4a2 …and the row carries the run with its pipe percent-encoded" \
+  "${RL_BT}${RL_QP_ENC}${RL_BT}" "$(roster_field "$ROW" re_executes)"
+# THE SEGMENT COUNT IS THE PROPERTY (S25d5's reasoning). A field that still held the raw
+# pipe would read as one more segment to every by-key reader in the fleet.
+expect_status "18T4a3 …and the run forged no segment of its own" "1" \
+  "$(printf '%s' "$ROW" | tr '|' '\n' | grep -c '^re_executes=' | tr -d ' ')"
+
+# THE OTHER DIRECTION, over the same shape. An UNQUOTED pipe is still shell plumbing and
+# is still refused with the token named — the half that keeps 18T4a from being a hole.
+REPO=$(make_repo r18t4b yes)
+write_attestation "$REPO" "$SID_A"
+# THE STUB DERIVATION, not the real tool — same reason as 16ld1 above.
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
+Expected artifact: .bionic/docs/record/w18-upipe.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${RL_BT}bash tests/x.test.sh | tee out${RL_BT}" "w18-upipe")"
+expect_status "18T4b an unquoted pipe IS a pipe — the run is REFUSED" "2" "$GATE_ST"
+expect_contains "18T4b2 …naming the fault as a pipe" "a pipe" "$GATE_VERR"
+expect_empty "18T4b3 …and no roster row was written for the refused dispatch" \
+  "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+
+# THE PROSE IS THE THIRD READER (AC-7.1). A wall whose sentence is false for the shape it
+# now admits sends the author to fix a command that was never wrong; the detail must say
+# UNQUOTED, and must no longer promise that any pipe at all is shell plumbing.
+expect_contains "18T4c the detail names the unquoted pipe" "an unquoted pipe" "$GATE_VERR"
+expect_absent "18T4c2 …and no longer calls every pipe plumbing" \
+  "carrying a pipe" "$GATE_VERR"
+# THE EVIDENCE MUST SHOW THE CHARACTER IT NAMES (T5, T4 carry-over). `C_RUNS_BAD` used to
+# be sanitized with no field name, so `sanitize` folded this token's `|` to a space — the
+# detail said "a pipe" beside a token that, as printed, no longer carried one. Passing the
+# `re_executes` field name (the same case that keeps `re_executes=` itself pipe-intact)
+# keeps the character in the evidence the classification names.
+expect_contains "18T4c3 …and the shown token still carries the pipe it names" \
+  "tests/x.test.sh | tee out" "$GATE_VERR"
+
+# ---- AC-8.2 (T5, REQ-8, D12), supersedes AC-1.6: an over-cap span is REFUSED, naming the
+# dropped run; unmarked text is not a run ----
+# WHAT WAS WRONG. A four-run span used to be ADMITTED with three of the four on the row and
+# a `warn()` line nobody in particular reads; the fourth run was left for the writer-side
+# budget arm to refuse 40 minutes later, as undeclared, for a fact the author was never told
+# at dispatch — the same shape T3 (REQ-8) closed for a dropped `Suites:` token. `RUNS_MAX`
+# (3) is unchanged; only the fourth-and-up runs fate is.
 REPO=$(make_repo r16le yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
 Expected artifact: .bionic/docs/record/w16-cap.md
 Expected duration: ~20 minutes.
 Re-executes: ${RL_JEST} ${RL_PYTEST} ${RL_GO} ${RL_NPM}" "w16-cap")"
-expect_status "16le a four-run span is ADMITTED" "0" "$GATE_ST"
-ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "16le …with exactly the first three runs on the row, in order" \
-  "$RL_JEST $RL_PYTEST $RL_GO" "$(roster_field "$ROW" re_executes)"
-expect_contains "16le …and the cap hit is LOUD, never silent" \
+expect_status "16le a four-run span is REFUSED" "2" "$GATE_ST"
+expect_contains "16le …naming the fourth (dropped) run" "npm test" "$GATE_VERR"
+expect_contains "16le …and the fact names the 3-run cap" \
   "exceeds the 3-run cap" "$GATE_ERR"
+expect_empty "16le …with no roster row written for the refused dispatch" \
+  "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
 
 REPO=$(make_repo r16lf yes)
 write_attestation "$REPO" "$SID_A"

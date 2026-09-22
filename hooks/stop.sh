@@ -49,7 +49,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
 # payload/scripts/lib/loader.sh.
-BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh stop.sh worktree.sh"
+BIONIC_LIB_WANT="context.sh fill.sh fold.sh refuse.sh root.sh run.sh session.sh stop.sh worktree.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -161,6 +161,14 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop"; fi
 . "$BIONIC_LIB/worktree.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/fold.sh"
+# THE READY SET THE FILL DUTY REFUSES BY (epic-23 wave-18, REQ-3, D2; ADR-033 decision 2).
+# `stop_patrol_duties` computes the rows a live ledger has ready rather than overhearing the
+# tick's printed line, so a turn that ends on a fillable gap is refused whether or not a
+# Patrol tick fired in it. Named in the WANT line above — and not merely sourced by
+# payload/scripts/lib/stop.sh the way units.sh is — because the loader's readability check is
+# what makes this process step aside rather than run three verdicts and drop the fourth.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/fill.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/stop.sh"
 

@@ -3,6 +3,40 @@
 Earlier releases are recorded as git tags (`v1.4.3` … `v1.8.3`) rather than in this file,
 which starts at 1.8.4.
 
+## 1.8.5 — 2026-09-22
+
+- REQ-1: `done` is the one terminal word at every scale; the rigor-lane verdict arms are
+  step-gated (numeric `current:` ≥ 6), so a finished task-scale row is not refused for
+  verdicts that cannot exist yet.
+- REQ-2: The PostToolUse bind arm names every exit, resolves the plan against the session's
+  own root, and `bind_plan` names which refusal fired.
+- REQ-3: Readiness is computed once, in `lib/fill.sh`, and read by the tick, the stop
+  library's fill duty and the card; a turn past Step 3 that ends with a fillable gap is
+  refused once, tick or no tick.
+- REQ-4: The card reads `scale:`; a task-scale ledger renders under its own headings, the
+  floor line comes from `impact-command:`, `step2` accepts a task-scale plan, and batch
+  widths are printed per dependency depth.
+- REQ-5: Step 0's budget recipe is the two-call form the library implements.
+- REQ-6: The brief scaffold's `Suites:` line says which shapes count.
+- REQ-7: A quoted pipe in a declared run is an argument, not plumbing; the roster stores
+  `re_executes` percent-encoded and every reader decodes once.
+- REQ-8: An over-cap `Re-executes:` brief is refused naming the dropped run.
+- REQ-9: A matrix `evidence:` cell tolerates a trailing ` — <note>`.
+- REQ-10: `session-poker.sh extend <name> <reason>` re-opens a MET roster row.
+- REQ-11: A substituted step is not a pointer step: a commit from a task row's tree is judged
+  by that row's arms whatever `use_worktree` says; the task-scale subject fork.
+
+### Fixes found in verification
+
+- T8/§S13.4: `extend`'s presence tests no longer spell the row-writer's literal.
+- Floor: `steps/5.md` names `jit_check` and `jit_offer` again after the byte trim.
+- Walk §14: `extend` decodes the copied `re_executes` before the row writer encodes it.
+- R1/C2: the stop wall's fill width is the rung the tick reads, not the declared ceiling.
+- R9: an unengaged session's plan-shaped Write journals nothing under `$HOME`.
+- R15: four meanings the byte trim lost are back, paid inside the same surfaces.
+- C1: `_EG_SUBSTITUTED` is set on both substitution forks, so the `use_worktree: false` twin
+  refuses at `current: 5` what the `true` fixture refuses.
+
 ## 1.8.4 — 2026-09-20
 
 - REQ-1: An active task's commit is never refused by the run's floor.

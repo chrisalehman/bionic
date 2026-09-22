@@ -794,4 +794,76 @@ expect_eq "B13k …and the row's budgeted suite still runs" "0" "$ST"
 expect_empty "B13k …silently" "$OUT$ERR"
 
 
+# ---- B13m/B13n (epic-23 wave-18, T4; REQ-7 AC-7.2, D4): the row ROUND-TRIPS its delimiter ----
+#
+# THE FAR END OF THE QUOTED-PIPE FIX. tests/dispatch-preflight.test.sh 18T4a proves the lift
+# now admits a run whose pipe is inside quotes; this is the half that decides whether that
+# admission was worth anything. The row is pipe-delimited, the writer used to fold `|` to a
+# space in every field, and this arm compares the declared run to the agent's command
+# character for character — so before the fix the dispatch wall admitted a command this
+# wall then refused, forty minutes later, as undeclared. That is the wave-16 T25 failure
+# reached through a different door.
+#
+# THE ROW HERE IS BUILT BY THE PRODUCTION WRITER (this file's `add_row`), so the encoding
+# under test is the one dispatch actually writes, never a spelling this suite invented.
+#
+# fails-when: the declared command is refused; the row carries a raw `|` or a folded space
+# where the pipe was; or the refusal prints the budget with the encoding still in it.
+R13F=$(mk_repo b13f)
+B13_QP="npx jest --testPathPattern='(a|b).spec.ts'"
+add_row "$R13F" name=w-b13f "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
+  suites_source=declared files=src/widget.ts "re_executes=\`${B13_QP}\`"
+
+B13_ROW="$(grep -v '^#' "$R13F/.bionic/tmp/roster-$SID.state" | tail -1)"
+expect_contains "B13m the row carries the declared run with its pipe percent-encoded" \
+  "re_executes=\`npx jest --testPathPattern='(a%7Cb).spec.ts'\`" "$B13_ROW"
+# THE SEGMENT COUNT IS THE PROPERTY, not the field text: a raw pipe would have made the
+# value one more segment to every by-key reader in the fleet, which is what the fold
+# existed to prevent and what the encoding has to prevent without losing the character.
+expect_eq "B13m2 …and it forged no segment of its own" "1" \
+  "$(printf '%s' "$B13_ROW" | tr '|' '\n' | grep -c '^re_executes=' | tr -d ' ')"
+
+guarded "$R13F" "$B13_QP"
+expect_eq "B13n the exact declared run, quoted pipe and all, is ALLOWED" "0" "$ST"
+expect_empty "B13n2 …silently" "$OUT$ERR"
+
+# AND THE REFUSAL SPEAKS THE AUTHOR'S SPELLING. `On the budget:` is read by a human who is
+# about to retype the command; printing the row's storage form there would hand them a
+# command that cannot run.
+guarded "$R13F" 'npx jest'
+expect_eq "B13n3 a command outside the declared set is still REFUSED" "2" "$ST"
+expect_contains "B13n4 …and the budget it prints holds the pipe, not the encoding" \
+  "(a|b).spec.ts" "$VERR"
+expect_absent "B13n5 …with no percent-encoding shown to the reader" "%7C" "$VERR"
+
+# ---- B13o/B13p (epic-23 wave-18, T5; REQ-8 AC-8.1, D12): TWO declared runs, both on the
+# budget, an undeclared third still refused ----
+#
+# THE CONTROL FOR THE DISPATCH-SIDE FIX. `tests/dispatch-preflight.test.sh` 18T5a proves the
+# LIFT reads two runs back onto the roster row; this is the far end, over a row the
+# production writer built the same way B13m/B13n above prove it for one run — the
+# suite-run wall (`_run_is_declared`, `payload/scripts/lib/walls.sh`) loops every
+# backtick-marked run on `re_executes=`, so a row declaring two must admit either one, and
+# still refuse a run neither declares.
+#
+# fails-when: the second declared run is refused, or the undeclared control is admitted.
+R13G=$(mk_repo b13g)
+add_row "$R13G" name=w-b13g "agent_id=$ACTOR" \
+  suites_source=declared files=src/widget.ts \
+  "re_executes=\`npx jest --testPathPatterns 'x'\` \`pytest tests/unit\`"
+
+guarded "$R13G" "npx jest --testPathPatterns 'x'"
+expect_eq "B13o the first declared run is allowed" "0" "$ST"
+expect_empty "B13o …silently" "$OUT$ERR"
+
+guarded "$R13G" 'pytest tests/unit'
+expect_eq "B13o2 the second declared run is allowed too" "0" "$ST"
+expect_empty "B13o2 …silently" "$OUT$ERR"
+
+guarded "$R13G" 'go test ./...'
+expect_eq "B13p a run NEITHER declared run named is still REFUSED" "2" "$ST"
+expect_contains "B13p …naming the run that was asked for" "go test" "$VERR"
+expect_contains "B13p …and calling itself a BUDGET, not a wall" "BUDGET" "$VERR"
+
+
 finish

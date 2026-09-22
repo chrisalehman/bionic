@@ -391,12 +391,22 @@ iso_epoch() {  # <ISO-8601 Z> -> epoch seconds, empty if unreadable
 # calls clean() with one, since none of its own values are the list-valued fields
 # (`suites_allowed=`, `files=`) the poker's `adopt_write_row` exempts from the cut. Every
 # call in THIS file stays on the `*)` branch below, cut at 400 exactly as before.
+#
+# THE `re_executes` ARM IS CARRIED THE SAME WAY (T4, REQ-7/D4). The roster stores the
+# declared runs percent-encoded — `payload/scripts/lib/roster.sh` owns that encoding and
+# carries the reasoning — and the poker's `adopt_write_row` decodes them so its writer can
+# encode them again. This file reads no such field, so the arm is inert here; it is present
+# because the two copies are held identical as CODE, and a twin that drifted by one arm is
+# the drift §O exists to catch.
 clean() {  # <value>
   local out
   out="$(printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
     -e 's/^ *//' -e 's/ *$//')"
   case "${2:-}" in
     suites_allowed|files) printf '%s' "$out" ;;
+    re_executes)
+      out="${out//\%7C/|}"
+      printf '%s' "${out//\%25/%}" ;;
     *) printf '%s' "$out" | cut -c 1-400 ;;
   esac
 }
