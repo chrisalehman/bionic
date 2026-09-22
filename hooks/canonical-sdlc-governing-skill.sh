@@ -317,6 +317,23 @@ if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
   exit 0
 fi
 
+# `log_finding` IS payload/scripts/lib/root.sh's NOW (epic-23 wave-12-fixit-171, REQ-8, spec
+# D6), sourced at :286. It had two definitions — this one and the evidence gate's — and they
+# were NOT byte-identical: one body, three different values. Those three are the caller's
+# now, declared HERE — directly under the root, and above the bind arm, which is the first
+# thing in the file that reports a finding since REQ-2 (epic-23 wave-18-fixit-185) gave its
+# ten silent exits a voice. The root is declared as a FUNCTION rather than a value because
+# the gate's costs a subprocess and must stay lazy; this hook's is a plain variable, so its
+# resolver is one printf — and it reads a variable rather than `$PROJECT_ROOT_FROM_PATH`
+# directly because the bind arm files its findings under the root the SESSION engaged with,
+# which is not always the root walked up from the artifact (spec §1 "Session root", D5).
+# The findings are unchanged: log-only, never blocking, every read fail-open.
+# [INSTRUMENT]
+BIONIC_FINDING_CHANNEL="governing-skill"
+BIONIC_FINDING_SUBJECT="$FILE_PATH"
+GS_FINDING_ROOT="$PROJECT_ROOT_FROM_PATH"
+bionic_finding_root() { printf '%s' "$GS_FINDING_ROOT"; }
+
 # ---------- THE ENGAGEMENT GUARD (AC-7): is this session bionic's at all? ----------
 #
 # FIRST, above the four-clause project disjunction below. Chris, 2026-09-03: "all
@@ -338,8 +355,15 @@ fi
 # EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
 # foreign or unshaped session key, no key at all. The arming partition is the consent
 # boundary (1.3.2 close-out).
+# AND IT SCOPES EVERY EVENT BUT THE BIND ARM (epic-23 wave-18-fixit-185, REQ-2, D5). The arm
+# below asks the same question of the root the SESSION engaged under, which is the one case
+# this line cannot answer — it is asking about a root walked up from the artifact, and the arm
+# exists for the writes where those two roots differ. The line itself is unchanged, at column
+# zero, where every reader of this file and the cross-gate roster both look for it.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+if [ "$EVENT" != "PostToolUse" ]; then
 engaged_session "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" || exit 0
+fi
 
 # ---------- THE BIND ARM (AC-9): a new run's plan claims the session that wrote it ----------
 #
@@ -357,18 +381,164 @@ engaged_session "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" || exit 0
 # IT REBINDS WITHOUT ASKING (T4). A session that writes a second run's plan has moved to
 # that run; the previous binding is not a claim to defend. The one binding this arm cannot
 # make is one `bind_plan` refuses — a file that is not a member of the open-run set — and
-# there the marker is left exactly as it was, silently, because a Write under `plans/` that
-# is not an open run is an ordinary file and not an event.
+# there the marker is left exactly as it was, because a Write under `plans/` that is not an
+# open run is an ordinary file and not an event.
 #
 # WHAT MAKES A FILE A PLAN IS NOT ASKED HERE. `bind_plan` refuses any path `open_runs` does
 # not list, and `open_runs` owns the whole rule — the depth-2 walk, the fence-aware
 # flush-left `## SDLC State` filter, and the open/closed verdict. Spelling that filter a
 # second time inside this hook would give the fleet two readings of "is this a plan", which
 # is the class of drift `lib/run.sh` was extracted to end (spec §Ownership table).
+#
+# THE ENGAGEMENT GUARD ABOVE NO LONGER SPEAKS FOR IT (epic-23 wave-18-fixit-185, REQ-2,
+# spec §1 "Session root", D5). That guard asks its question against the root walked up from
+# the ARTIFACT, and this arm's whole subject is the case where that walk answers a different
+# root than the one the session engaged under — an arm behind it could never see, let alone
+# report, the state it exists to diagnose. So the guard now scopes every OTHER event, byte
+# for byte as before, and this arm asks the same question for itself, of the session's root.
+#
+# AND EVERY EXIT SAYS WHY (REQ-2 AC-2.1). Ten declines used to be silent and one success
+# spoke, so a consumer whose plan did not bind had nothing to read and no way to tell a
+# guard from a crash; research R4 §1.4 had to rebuild the case from fifteen fixtures rather
+# than read it off a log. Each decline now goes through `log_finding`, which puts one line
+# on stderr AND appends it to the project's durable audit file, so the decline outlives the
+# session that earned it.
+#
+# SILENCE IS STILL THE ANSWER FOR A WRITE THAT IS NOT A PLAN (A-T3.2). The arming partition
+# is the consent boundary, and this hook is registered on every Write on the machine: a line
+# per Write would be bionic talking in sessions that never invoked it. So the shape test
+# below runs FIRST and everything outside a docs tree leaves in silence, unengaged sessions
+# get a word only for a real plan path under their own project's docs root, and the ten
+# named exits are all downstream of "this Write is a plan".
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+
+# gs_bind_fold <physicalized target> <engaged root> -> the target re-rooted onto <engaged
+# root>, or exit 1 when it does not belong to a linked worktree of that root.
+#
+# THE ONE PATH REWRITE THIS ARM MAKES, and it is the D5 case: the session engaged under R
+# and wrote R's plan through R's linked worktree, whose `.bionic/` is a tree of its own
+# because `.bionic/` is gitignored and never checked out. `open_runs` lists R's plans, so
+# without this the write is outside the engaged root's docs tree and the run it just created
+# goes unbound — measured as research R4's fixtures E/I and J.
+#
+# THE FOLD IS CONDITIONAL ON THE FOLDED FILE EXISTING, which is what keeps it from inventing
+# a binding. A worktree that is the project in its own right — its own `.bionic/`, no such
+# file in the main repo — folds onto nothing and is told `outside the engaged root` instead,
+# which is the true answer for it.
+gs_bind_fold() {
+  local t="$1" root="$2" dir common main top rel
+  case "$t" in */*) dir="${t%/*}" ;; *) return 1 ;; esac
+  while [ ! -d "$dir" ] && [ -n "$dir" ] && [ "$dir" != "/" ]; do
+    case "$dir" in */*) dir="${dir%/*}" ;; *) dir="" ;; esac
+  done
+  [ -d "$dir" ] || return 1
+  common=$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null) || return 1
+  [ -n "$common" ] || return 1
+  case "$common" in /*) ;; *) common="$dir/$common" ;; esac
+  main=$(cd "$common/.." 2>/dev/null && pwd -P) || return 1
+  [ "$main" = "$root" ] || return 1
+  top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 1
+  top=$(cd "$top" 2>/dev/null && pwd -P) || return 1
+  [ "$top" != "$main" ] || return 1
+  rel="${t#"$top"/}"
+  [ "$rel" != "$t" ] || return 1
+  [ -f "$root/$rel" ] || return 1
+  printf '%s/%s\n' "$root" "$rel"
+}
+
+# gs_bind_decline <the guard, in words> — the ONE way this arm reports a decline.
+#
+# `log_finding` is the channel because it does both halves at once: `canonical-sdlc [bind]:
+# <guard>` on stderr for the session that is running, and `- <utc> governing-skill bind:
+# <guard> (<file>)` appended under $HOME for the reader who comes later. One call, one line
+# each, and no second spelling of the sentence to drift.
+gs_bind_decline() { log_finding "bind" "$1"; }
+
 if [ "$EVENT" = "PostToolUse" ]; then
-  # An Edit never binds (AC-9). It changes a plan; it does not create a run.
+  # An Edit never binds (AC-9). It changes a plan; it does not create a run — and it is the
+  # one exit that stays silent, because a plan under edit is the commonest Write-adjacent
+  # event in a live run and a line per keystroke is not a diagnostic.
   [ "$TOOL" = "Write" ] || exit 0
+
+  # ---------- THE ROOT THIS ARM TRUSTS (REQ-2, D5) ----------
+  #
+  # THE SESSION'S, NOT THE ARTIFACT'S. `project_root` starts its walk at the path it is
+  # given and remaps a linked worktree onto its main repository first, so the walk from
+  # inside `.bionic/docs/plans/` can land on a different root than the walk from the
+  # session's own cwd — and then this arm enforced against one root while the session had
+  # engaged under another (research R4 §1.2; fixtures E/I, J, H, L, all silent). The
+  # engagement marker is the fact that settles it: the session engaged under exactly one
+  # root, and that root is where its marker is.
+  #
+  # THE ARTIFACT'S ROOT IS THE SECOND RUNG, NOT A REJECTED ONE (A-T3.3). `bionic_context`'s
+  # cwd ladder ends at `pwd`, which for a hook process is not the session's directory at all,
+  # so a payload that names no directory of its own would otherwise lose every binding it
+  # makes today — fail-silent, in the one arm this task exists to stop being silent.
+  GS_BIND_ROOT=""
+  if engaged_session "$BIONIC_ROOT" "$BIONIC_SID"; then
+    GS_BIND_ROOT="$BIONIC_ROOT"
+  elif engaged_session "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID"; then
+    GS_BIND_ROOT="$PROJECT_ROOT_FROM_PATH"
+  fi
+  # The root every sentence below names, and the root the journal line is filed under: the
+  # engaged one when there is one, and otherwise the project the artifact fell in, which is
+  # the only root an unengaged session can be told about.
+  GS_BIND_SAY_ROOT="${GS_BIND_ROOT:-$PROJECT_ROOT_FROM_PATH}"
+  GS_FINDING_ROOT="$GS_BIND_SAY_ROOT"
+
+  # Both sides physicalized before comparing, for the reason the wall below states at
+  # greater length: a project reached through a symlink otherwise disagrees with itself
+  # about its own prefix.
+  GS_BIND_TARGET=$(physicalize "$FILE_PATH")
+  GS_BIND_DOCS=$(physicalize "$(docs_root "$GS_BIND_SAY_ROOT")")
+  GS_BIND_DEFAULT=$(physicalize "$GS_BIND_SAY_ROOT/.bionic/docs")
+  if [ -n "$GS_BIND_ROOT" ]; then
+    case "$GS_BIND_TARGET" in
+      "$GS_BIND_DOCS"/*) ;;
+      *) GS_BIND_FOLDED=$(gs_bind_fold "$GS_BIND_TARGET" "$GS_BIND_ROOT") \
+           && GS_BIND_TARGET="$GS_BIND_FOLDED" ;;
+    esac
+  fi
+
+  # ---------- IS THIS WRITE A PLAN AT ALL? ----------
+  #
+  #   run      a plan or an incident of the root this arm is speaking about — the only
+  #            shape that can become a binding
+  #   docs     under that root's docs tree, but neither a plan nor an incident: a spec, an
+  #            ADR, a record artifact
+  #   default  under `<root>/.bionic/docs` while `docs-root:` points somewhere else — the
+  #            override shape, silent since the key was introduced
+  #   foreign  a plan path belonging to some other root's docs tree
+  #   other    not a bionic artifact; the arm has nothing to say and says nothing
+  GS_BIND_SHAPE=other
+  case "$GS_BIND_TARGET" in
+    "$GS_BIND_DOCS"/plans/*|"$GS_BIND_DOCS"/incidents/*) GS_BIND_SHAPE=run ;;
+    "$GS_BIND_DOCS"/*)                                   GS_BIND_SHAPE=docs ;;
+    "$GS_BIND_DEFAULT"/*)                                GS_BIND_SHAPE=default ;;
+    */docs/plans/*|*/docs/incidents/*)                   GS_BIND_SHAPE=foreign ;;
+  esac
+  [ "$GS_BIND_SHAPE" = other ] && exit 0
+
+  # An unengaged session is told one thing and only about one shape: it wrote a plan into
+  # this project and nothing bound it, which is the question a first-time consumer asks.
+  # Everything else it writes is its own business (the arming partition, 1.3.2 close-out).
+  if [ -z "$GS_BIND_ROOT" ]; then
+    [ "$GS_BIND_SHAPE" = run ] \
+      && gs_bind_decline "engagement absent under $GS_BIND_SAY_ROOT"
+    exit 0
+  fi
+
+  case "$GS_BIND_SHAPE" in
+    docs)
+      gs_bind_decline "not under plans/ or incidents/ of $GS_BIND_DOCS"
+      exit 0 ;;
+    default)
+      gs_bind_decline "the engaged root's docs root is $GS_BIND_DOCS, not $GS_BIND_DEFAULT"
+      exit 0 ;;
+    foreign)
+      gs_bind_decline "outside the engaged root $GS_BIND_ROOT"
+      exit 0 ;;
+  esac
 
   # A DISPATCHED AGENT'S WRITE NEVER MOVES ITS DISPATCHER'S BINDING (S10a, review A-2/F5).
   # An agent-context payload carries a top-level `agent_id` AND the DISPATCHING session's
@@ -385,7 +555,8 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # depth-one dispatches": binding is identity state, and a depth-two act must not mutate
   # depth-one identity.
   case "$(echo "$BIONIC_INPUT" | jq -r '.agent_id // empty' 2>/dev/null)" in
-    ?*) exit 0 ;;
+    ?*) gs_bind_decline "a dispatched agent's write never rebinds its dispatcher"
+        exit 0 ;;
   esac
 
   # A WRITE THAT OVERWROTE AN EXISTING FILE IS NOT A NEW RUN. PostToolUse cannot see the
@@ -397,25 +568,31 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # AC-9 the case it exists for, and a redundant rebind to a plan the session is already
   # working in is the harmless direction.
   case "$(echo "$BIONIC_INPUT" | jq -r '.tool_response.type // empty' 2>/dev/null)" in
-    update) exit 0 ;;
+    update) gs_bind_decline "the write updated an existing file (tool_response.type=update)"
+            exit 0 ;;
   esac
 
-  # The file the tool left behind, and where it landed. Both sides physicalized before
-  # comparing, for the reason the wall below states at greater length: a project reached
-  # through a symlink otherwise disagrees with itself about its own prefix.
-  [ -f "$FILE_PATH" ] || exit 0
-  GS_BIND_TARGET=$(physicalize "$FILE_PATH")
-  GS_BIND_DOCS=$(physicalize "$(docs_root "$PROJECT_ROOT_FROM_PATH")")
-  case "$GS_BIND_TARGET" in
-    "$GS_BIND_DOCS"/plans/*|"$GS_BIND_DOCS"/incidents/*) ;;
-    *) exit 0 ;;
-  esac
+  # The file the tool left behind — tested on the path the payload named, never on the
+  # folded one, because "did the tool write it" is a question about the write.
+  if [ ! -f "$FILE_PATH" ]; then
+    gs_bind_decline "the written file is not on disk"
+    exit 0
+  fi
 
-  if bind_plan "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" "$GS_BIND_TARGET"; then
+  GS_BIND_RC=0
+  bind_plan "$GS_BIND_ROOT" "$BIONIC_SID" "$GS_BIND_TARGET" || GS_BIND_RC=$?
+  if [ "$GS_BIND_RC" -eq 0 ]; then
     echo "governing-skill: session bound to $GS_BIND_TARGET" >&2
+  else
+    # WHICH REFUSAL IS THE LIBRARY'S TO NAME, not this arm's to guess (REQ-2 AC-2.2). The
+    # five causes are one status apiece no longer; `BIND_REFUSAL` is read through `:-` so a
+    # library older than this hook degrades to the bare word instead of taking the hook
+    # down under `set -u`.
+    gs_bind_decline "${BIND_REFUSAL:-refused} — $GS_BIND_TARGET under $GS_BIND_ROOT"
   fi
   exit 0
 fi
+
 
 # ---------- THE SESSION'S RUN, NOT THE ROOT'S (AC-1, AC-3, AC-6) ----------
 #
@@ -861,17 +1038,8 @@ rigor_rank() {
   esac
 }
 
-# `log_finding` IS payload/scripts/lib/root.sh's NOW (epic-23 wave-12-fixit-171, REQ-8, spec
-# D6), sourced at :286. It had two definitions — this one and the evidence gate's — and they
-# were NOT byte-identical: one body, three different values. Those three are the caller's
-# now, declared here, where `$PROJECT_ROOT_FROM_PATH` and `$FILE_PATH` are both already
-# resolved. The root is declared as a FUNCTION rather than a value because the gate's costs a
-# subprocess and must stay lazy; this hook's is a plain variable, so its resolver is one
-# printf. The findings below are unchanged: log-only, never blocking, every read fail-open.
-# [INSTRUMENT]
-BIONIC_FINDING_CHANNEL="governing-skill"
-BIONIC_FINDING_SUBJECT="$FILE_PATH"
-bionic_finding_root() { printf '%s' "$PROJECT_ROOT_FROM_PATH"; }
+# The three `log_finding` values this hook declares are DECLARED WITH THE ROOT, above the
+# bind arm — findings fire from both sides of it now (epic-23 wave-18-fixit-185, REQ-2).
 
 # rigor-override: <user> <date> derived=<v> chosen=<v> (epic-14 AC-10/AC-11).
 # Only PRESENCE of the key is detected — the fields are never validated,
