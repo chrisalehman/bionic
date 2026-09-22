@@ -5034,7 +5034,12 @@ expect_ne "25g(p) …and that common dir is not the bound plan's repository" \
 # 25g(d), 25g(f), 25g(i) and 25g(k2). If the exemption were not there this commit would be
 # refused for `pass=331` like all of them, which is what makes the allow below a verdict
 # about the repository boundary and not about a lenient fixture.
-s25x_note="evidence-gate: $s25x_wt is a linked worktree of another repository ($s25x_common) — this run's step arms do not apply"
+# RE-AUTHORED BY wave-19 T6 (REQ-9, D10). The jurisdiction arm now asks every commit which
+# repository it lands in, before the plan is read, and a linked worktree of ANOTHER repository
+# has another common dir — so it leaves there, with the one boundary line every outside
+# repository gets, and never reaches the rc-4 arm whose line this pin used to carry. The
+# verdict is unchanged: admitted, one line, this run's arms silent.
+s25x_note="evidence-gate: $s25x_wt is outside the engaged repository ($s25r_main); the evidence gate has no plan here"
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25x_wt" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25x_note" ]; then
   ok "25g(p) AC-4.1 a commit from another repository's linked worktree is exempt, and one line names the tree and the repository"
@@ -8532,6 +8537,145 @@ h17t17=$(make_home)
 write_plan "$h17t17" "$(plan 5 "$step5_72" "$matrix_complete")" > /dev/null
 expect_allow "17t17 …and a green block that never mentions it is untouched" \
   "$h17t17" 'git commit -m "x"'
+
+
+# ============================================================
+section "REQ-9 — AC-9.1–9.3: jurisdiction ends at the engaged repository (wave-19 T6, D10, ADR-031)"
+# ============================================================
+#
+# WHAT WENT WRONG (A-T11.1, wave-18; reproduced twice in wave-19 R3 Q3). A `git commit` into a
+# repository that is not the engaged one — a scratch repo in a scratchpad, or a test bed
+# `git init`-ed under the root's own record directory — was judged against THIS run's plan and
+# refused for this run's evidence. The gate resolved the plan from the engaged root before it
+# ever asked which repository the commit lands in, and the only repository test it had
+# (`_eg_git_wt_name`) sees linked worktrees and nothing else.
+#
+# THE ROOT IS A REAL REPOSITORY with a bound-free engaged session and a `current: 5` plan whose
+# Step-5 block is red (71/72), so every commit this gate still judges is REFUSED. That is what
+# makes each allow below a verdict about the repository boundary and not about a lenient plan.
+s9_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s9_tmp")
+s9_root="$s9_tmp/root"
+mkdir -p "$s9_root/.bionic/docs/plans"
+git -C "$s9_root" init -q .
+git -C "$s9_root" -c user.email=t@example.com -c user.name=T commit -q --allow-empty -m init
+write_generic_evidence "$s9_root"
+engage "$s9_root"
+s9_plan=$(write_project_plan "$s9_root" "$(plan 5 "$step5_71" "$matrix_complete")")
+s9_home=$(make_home)
+
+# The expected line is built from the FIXTURE's own paths, never from what the arm computes.
+s9_line() {  # <the commit's repository toplevel> -> the one line the gate prints
+  printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here' "$1" "$s9_root"
+}
+s9_expect_outside() {  # <label> <payload cwd> <command> <toplevel>
+  run_hook_cwd "$s9_home" "$s9_root" "$2" "$3"
+  if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$(s9_line "$4")" ] && [ -z "$HOOK_RESOLUTION" ]; then
+    ok "$1"
+  else
+    no "$1" "expected exit 0 and exactly '$(s9_line "$4")'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' resolution='$HOOK_RESOLUTION' detail='$HOOK_VSTDERR'"
+  fi
+}
+s9_expect_judged() {  # <label> <payload cwd> <command> <substring of the refusal detail>
+  run_hook_cwd "$s9_home" "$s9_root" "$2" "$3"
+  if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check && grep -q "$4" <<<"$HOOK_VSTDERR"; then
+    ok "$1"
+  else
+    no "$1" "expected refusal exit 2 naming '$4'; exit=$HOOK_EXIT line='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  fi
+}
+
+# --- 9c: THE CONTROL — inside the root, refused exactly as before ------------------------
+s9_expect_judged "9c AC-9.1 a commit in the engaged root at current: 5 without green evidence is refused as before" \
+  "$s9_root" 'git commit -m "x"' "the suite is not fully green"
+s9_expect_judged "9c …and spelled 'git -C <root> commit', the same refusal" \
+  "$s9_root" "git -C $s9_root commit -m x" "the suite is not fully green"
+s9_expect_judged "9c …and from a subdirectory of the root, the same refusal (inside is the repository, not the path)" \
+  "$s9_root" "git -C $s9_root/.bionic/docs commit -m x" "the suite is not fully green"
+
+# --- 9a: a scratch repository outside the root --------------------------------------------
+s9_scratch="$s9_tmp/scratchpad/q1"
+mkdir -p "$s9_scratch"
+git -C "$s9_scratch" init -q .
+s9_expect_outside "9a AC-9.1 'git -C <scratch repo> commit' is admitted with one line naming both repositories" \
+  "$s9_root" "git -C $s9_scratch commit -q --allow-empty -m x" "$s9_scratch"
+s9_expect_outside "9a …and a leading 'cd <scratch repo> &&' is the same commit, admitted the same way" \
+  "$s9_root" "cd $s9_scratch && git commit -m x" "$s9_scratch"
+s9_expect_outside "9a …and a payload cwd inside the scratch repo is the same commit too" \
+  "$s9_scratch" 'git commit -m "x"' "$s9_scratch"
+# A SUBDIRECTORY of the scratch repo is named by its toplevel, which is the repository.
+mkdir -p "$s9_scratch/sub/dir"
+s9_expect_outside "9a …and '-C' at a subdirectory of the scratch repo names the repository's toplevel" \
+  "$s9_root" "git -C $s9_scratch/sub/dir commit -m x" "$s9_scratch"
+
+# THE TWO-DIRECTORY ARM STILL OWNS AN AMBIGUOUS COMMAND. The leading `cd` names the scratch
+# repo but a second `cd` walks back into the root before the commit: the shell commits in the
+# ROOT. Exempting on the leading directory would be the fail-open that arm exists to close.
+s9_expect_judged "9a …but 'cd <scratch> && cd <root> && git commit' is not exempted — two directories, refused" \
+  "$s9_root" "cd $s9_scratch && cd $s9_root && git commit -m x" "changes into"
+
+# NOT A REPOSITORY AT ALL: git cannot name one, so the gate cannot say it is outside, and it
+# keeps today's verdict (the commit would fail on its own; the wall does not guess).
+s9_bare_dir="$s9_tmp/not-a-repo"; mkdir -p "$s9_bare_dir"
+s9_expect_judged "9a …and a directory git places in no repository is judged as before, never exempted by a failed question" \
+  "$s9_root" "git -C $s9_bare_dir commit -m x" "the suite is not fully green"
+
+# --- 9b / AC-9.3: a repository NESTED under the root is outside it ------------------------
+s9_nested="$s9_root/.bionic/docs/record/x/bed"
+mkdir -p "$s9_nested"
+git -C "$s9_nested" init -q .
+expect_eq "9b the nested bed really is its own repository (its .git is a directory)" "dir" \
+  "$(if [ -d "$s9_nested/.git" ]; then echo dir; else echo other; fi)"
+s9_expect_outside "9b AC-9.3 'git -C <root>/.bionic/docs/record/x/bed commit' is admitted with the line" \
+  "$s9_root" "git -C $s9_nested commit -q --allow-empty -m x" "$s9_nested"
+s9_expect_outside "9b AC-9.3 …and a writer standing in the nested bed (payload cwd) is admitted the same way" \
+  "$s9_nested" 'git commit -m "x"' "$s9_nested"
+
+# --- 9d: a LINKED WORKTREE of the engaged repository is INSIDE ------------------------------
+#
+# It has a toplevel of its own, so a toplevel comparison would call it outside and exempt
+# every writer's commit from the run. The comparison is the COMMON DIR, which a linked worktree
+# shares with its main checkout — so it is judged, exactly as it was before this arm existed.
+git -C "$s9_root" worktree add -q "$s9_root/.worktrees/19-T9" -b wt/19-T9 2>/dev/null
+expect_ne "9d the linked worktree's toplevel differs from the root's (a toplevel test would get it wrong)" \
+  "$s9_root" "$(git -C "$s9_root/.worktrees/19-T9" rev-parse --show-toplevel)"
+s9_expect_judged "9d a commit from a linked worktree of the engaged repository is still judged (-C)" \
+  "$s9_root" "git -C $s9_root/.worktrees/19-T9 commit -m x" "the suite is not fully green"
+s9_expect_judged "9d …and from a leading cd into it" \
+  "$s9_root" "cd $s9_root/.worktrees/19-T9 && git commit -m x" "the suite is not fully green"
+
+# --- 9e: the comparison is PHYSICAL ------------------------------------------------------------
+# A symlink to the root is the root: the same repository reached by another spelling.
+ln -s "$s9_root" "$s9_tmp/root-link"
+s9_expect_judged "9e '-C' through a symlink to the root is the root, and is judged" \
+  "$s9_root" "git -C $s9_tmp/root-link commit -m x" "the suite is not fully green"
+
+# --- 9f / AC-9.2: the plan is never opened on an outside commit (trace) --------------------
+#
+# BASH_XTRACEFD sends the hook's own xtrace to a file of its own, so stderr stays the gate's
+# line and the trace is a record of every command the process ran. The plan's path appears in
+# it the moment the gate resolves the plan (`PLAN=…`, `session_run`, `active_plan`); on an
+# outside commit it must not appear at all. THE POSITIVE CONTROL runs first on the SAME root and
+# the SAME trace channel: an inside commit's trace DOES carry the path, so a trace that recorded
+# nothing cannot pass the negative.
+s9_trace() {  # <command> -> the trace file's path
+  local _in _tr
+  _tr=$(mktemp "$s9_tmp/trace.XXXXXX")
+  _in=$(jq -n --arg c "$1" --arg cwd "$s9_root" --arg s "$EG_SID" \
+          '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
+  HOME="$s9_home" CLAUDE_PROJECT_DIR="$s9_root" CLAUDE_CODE_SESSION_ID="$EG_SID" \
+    BASH_XTRACEFD=9 bash -x "$HOOK" <<< "$_in" >/dev/null 2>/dev/null 9>"$_tr" || true
+  printf '%s' "$_tr"
+}
+s9_tr_in=$(s9_trace 'git commit -m "x"')
+expect_contains "9f control: an inside commit's trace records the plan path (the trace channel works)" \
+  "$s9_plan" "$(cat "$s9_tr_in")"
+s9_tr_out=$(s9_trace "git -C $s9_scratch commit -q --allow-empty -m x")
+expect_contains "9f control: the outside commit's trace is not empty (the hook ran under xtrace)" \
+  "git -C $s9_scratch commit" "$(cat "$s9_tr_out")"
+expect_absent "9f AC-9.2 the outside commit's trace never names the plan path" \
+  "$s9_plan" "$(cat "$s9_tr_out")"
+expect_absent "9f AC-9.2 …and never enters the plan resolution" \
+  "session_run " "$(cat "$s9_tr_out")"
 
 
 finish
