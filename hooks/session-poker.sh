@@ -491,9 +491,12 @@ line_field() {  # <line> <key>
 }
 
 # Whether a versioned pipe-delimited line CARRIES a key at all — present-and-empty and absent
-# are different rows to a by-key reader, and `line_field` returns "" for both. The pipe is
-# joined at runtime on purpose: §S13.4 (tests/cross-gate-agreement.test.sh) pins that only
-# roster.sh's row writer spells `|<key>=` as a literal, and a presence test is not a writer.
+# are different rows to a by-key reader, and `line_field` returns "" for both. This is a
+# SUBSTRING PRESENCE test, not a row assembler: §S13.4 (tests/cross-gate-agreement.test.sh)
+# now discriminates the two by shape — an assembler's `=...|<key>=$` against a presence
+# test's `*"|<key>="*` — so `$2` staying a parameter here is ordinary genericity across the
+# six callers, not a runtime-joined literal kept to dodge a blunter pin (that dodge, needed
+# before §S13.4 could tell the two shapes apart, is gone — REQ-13, wave-19 T9).
 row_has_key() {  # <line> <key>
   case "|$1" in *"|$2="*) return 0 ;; esac
   return 1
@@ -1850,9 +1853,9 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
 # handed for a `landing-swept/v1|…|name=<X>|` line) sees the same answer on the successor
 # that stood on the predecessor.
 #
-# hooks/landing-gate.sh IS THE ONE WRITER of this schema today — its own comment (:561-563)
-# already anticipates a second and calls it "not a live path". This call site is that second
-# writer, made deliberately narrow: it never COMPUTES a verdict, it only APPENDS a line that
+# payload/scripts/lib/stop.sh (`stop_landing_gate`, reached from hooks/stop.sh) is this
+# schema's one ORIGINATING writer. This call site is the second writer, made deliberately
+# narrow: it never COMPUTES a verdict, it only APPENDS a line that
 # writer already produced, byte for byte, off the source roster this verb is only ever
 # permitted to read (never write — the row above is still the one file this verb writes to).
 #
@@ -2028,14 +2031,24 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
 
   # CHANNEL 2 — the agent's own transcript, which the harness appends to on every turn it
   # takes. It is the channel a role with no Write tool has, and the one a working agent
-  # cannot forget to keep. An ADOPTED row is still filed under the session that LAUNCHED it,
-  # which is what `adopted_from=` records.
+  # cannot forget to keep. An ADOPTED row's `adopted_from=` records the session that
+  # LAUNCHED it, which is where its file lives until this session speaks to the agent.
   tx=""
   id="$(line_field "$row" agent_id)"
   if [ -n "$id" ]; then
-    rsid="$(line_field "$row" adopted_from)"
-    [ -n "$rsid" ] || rsid="$SESSION_ID"
-    sub="$(session_subagent_dir "$rsid")" || sub=""
+    # THIS SESSION'S DIR FIRST (wave-19 T1; D4, REQ-2). The harness files an agent's
+    # transcript under the session talking to it NOW, so after an adopt the live file sits
+    # under the adopter while `adopted_from=` still names the launcher — reading only the
+    # launcher's copy reported a working agent quiet (R1 Q4, bed3). The launcher's dir is the
+    # fallback for an agent this session has not yet spoken to. `adopted_from=` itself is
+    # provenance and is never rewritten: adopt's idempotence keys on it.
+    sub="$(session_subagent_dir "$SESSION_ID")" || sub=""
+    if [ -z "$sub" ] || [ ! -f "$sub/agent-${id}.jsonl" ]; then
+      rsid="$(line_field "$row" adopted_from)"
+      if [ -n "$rsid" ] && [ "$rsid" != "$SESSION_ID" ]; then
+        sub="$(session_subagent_dir "$rsid")" || sub=""
+      fi
+    fi
     if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
       tx="$sub/agent-${id}.jsonl"
       OBS_LOG_MTIME="$(file_mtime "$tx")"
@@ -2655,9 +2668,9 @@ case "$VERB" in
                    "${ADOPT_OWN_PLAN:-none}" "$RWAIVER" \
                    "$RFILES" "$RSALLOW" "$RSSRC" "$RREX"; then
                 ROW_JOURNALLED=yes
-                # THE MARKER COPY (S17, AC-12 attempt 2). `hooks/landing-gate.sh` is this
-                # schema's one writer today — its own comment at :561-563 calls a second
-                # writer "not a live path". This makes it one, deliberately: adopt never
+                # THE MARKER COPY (S17, AC-12 attempt 2). `payload/scripts/lib/stop.sh`
+                # (`stop_landing_gate`, reached from hooks/stop.sh) is this schema's one
+                # ORIGINATING writer. This is a second writer, deliberately: adopt never
                 # ORIGINATES a `landing-swept/v1` verdict, it only COPIES a line that writer
                 # already produced onto the roster this session is now the owner of, so
                 # `hooks/session-start.sh`'s `open_rows` and this file's own
@@ -3564,8 +3577,9 @@ EOF
           # the panel. Excluding a swept name here made the common shape at the end of a batch
           # (every writer landed, still idle on the panel) print nothing, which is the 1.7.1
           # pile-up this arm exists to end. Presence is the panel's fact alone (spec
-          # §Assumptions); `$SWEPT_ALL` is read only inside the decision below, to tell a row
-          # already closed by its own sweep from one that is merely moot-and-gone.
+          # §Assumptions), and the marker never closes a name either: only the ack does
+          # (wave-19 T1, ADR-034 d1), which the close below writes when a fresh panel shows
+          # the agent gone.
           if [ "$RSTATE" = "MET" ]; then
             STANDDOWN_NAMES="${STANDDOWN_NAMES}${STANDDOWN_NAMES:+ }$(clean "$RNAME")"
           fi
@@ -3932,14 +3946,25 @@ EOF
             *)
               case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
               SD_CLOSED="${SD_CLOSED}${SD_NAME}|"
-              # ALREADY SWEPT -> ALREADY CLOSED (T10, A-orch-20). The marker means a landing
-              # was seen, not that this arm is first to notice the agent is gone; a second ack
-              # here would be a ledger line saying nothing new. Silent, same as an ack that
-              # succeeds — the row was closed once, just not by this tick.
-              case "$SWEPT_ALL" in *"|name=${SD_NAME}|"*) continue ;; esac
+              # THE ACK IS THE CLOSE (wave-19 T1; D2, ADR-034 d1). Skipped only for a name the
+              # ledger already closed — the verdict walk records those in TICK_ACKED_NAMES —
+              # never for a `landing-swept/v1` marker: the marker says a landing was SEEN, and
+              # skipping on it left every writer that declared an artifact and reported open for
+              # the life of the session (ideas row 16; R1 F1). This branch runs only under a
+              # FRESH panel (SD_PANEL_KNOWN=1 above) that does not list the name.
+              case "$TICK_ACKED_NAMES" in *"|${SD_NAME}|"*) continue ;; esac
+              # THE REASON SAYS WHAT CLOSED IT. A row that declared a deliverable and met it
+              # LANDED; a row that declared nothing stats MET for want of anything to hold it
+              # to, and is closed only because it is moot and gone. Read off the row's latest
+              # contract (schema-filtered: a marker also carries `|name=`), once per close —
+              # a name reaches here at most once in its life, so this is no per-tick walk.
+              SD_REASON=moot-and-gone
+              SD_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+                | grep -F "|name=${SD_NAME}|" | tail -1)"
+              [ -n "$(line_field "$SD_ROW" deliverable)" ] && SD_REASON=landed
               SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
                         CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
-                        bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason moot-and-gone 2>&1 ) \
+                        bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason "$SD_REASON" 2>&1 ) \
                 || say "NOTIFY ${SD_NAME} — contract MET, the agent is gone, and the row could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
               ;;
           esac
