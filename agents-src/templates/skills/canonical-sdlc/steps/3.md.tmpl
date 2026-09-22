@@ -4,7 +4,7 @@
 
 Two sections are required in every plan file.
 
-`## SDLC State` opens with `integration-branch:`, the triple, and `current: <N>` — the hook greps `^current:` and blocks every commit if it is missing or malformed. Write `current:`, never `current-step:`. Then one `Step N: <evidence>` line per step; bump `current:` and replace the line in place when advancing.
+`## SDLC State` opens with `integration-branch:`, the triple, and `current: <N>` — the hook greps `^current:` and blocks every commit if it is missing or malformed. Write `current:`, never `current-step:`. Then one `Step N: <evidence>` line per step; bump `current:` and replace the line in place when advancing. Each `## Tasks` row's `- T<n>:` stub is authored with the table.
 
 ```
 ## SDLC State
@@ -17,9 +17,10 @@ current: <N>
 
 - Step 0: <evidence, ending in the run's parallel-budget string>
 - Step 1: (pending)
+- T<n>: pending dispatch — .worktrees/<wave>-T<n>
 ```
 
-**Task-scale variant.** `current: T<n>`, one `- T<n>: <evidence>` line per task, backed by a `## Tasks` table with columns `| id | intent | rigor | description | status | worktree |`, `id` matching `^T[0-9]+$` and status in `pending|active|done|dropped` — `done` means finished and the tree released; its auditor/critic verdicts are owed from Step 6 (a numeric `current:` ≥ 6), never at `current: T<n>`. A row's rigor cell may RAISE that task above the frontmatter default; lowering it is a downgrade that blocks unless the evidence line carries a `waiver:` marker. Dispatched work is ledgered by the orchestrator, never by the subagent.
+**Task-scale variant.** Requirements go under `## Requirements`, each a `### REQ-<n> — <title>` heading with a `provenance:` line (the Step-1 card renders them). `current: T<n>`, one `- T<n>: <evidence>` line per task, backed by a `## Tasks` table with columns `| id | intent | rigor | description | status | worktree |`, `id` matching `^T[0-9]+$` and status in `pending|active|done|dropped` — `done` means finished and the tree released; its auditor/critic verdicts are owed from Step 6 (a numeric `current:` ≥ 6), never at `current: T<n>`. A row's rigor cell may RAISE that task above the frontmatter default; lowering it is a downgrade that blocks unless the evidence line carries a `waiver:` marker. Dispatched work is ledgered by the orchestrator, never by the subagent.
 
 **Wave-scale variant.** The `## Tasks` table's twelve columns, `deps`, status vocabulary and `working-branch:` are documented in `operational-rules.md`.
 
@@ -29,11 +30,8 @@ current: <N>
 
 Tag every Step-4 task `complexity: standard | complex`; when uncertain, `complex`.
 
-**The approval presentation is the Step-3 card.** It renders the CONTRACT the approval binds:
-the problem, both branch lines, the task table, the parallel width and its batches, the
-Eval design as one counted line, the verification line, and every design question still
-open with the task that closes it. The domain model is not transcribed, but what the
-user is agreeing to is on the card, because approval is against the card.
+**The approval presentation is the Step-3 card below**, rendered from the plan; approval is
+against the card.
 
 **The gate is the literal word `approved`, and nothing else is.** Silence, a question, or a
 partial reply is never transcribed as approval. On that word, write into `## SDLC State`:
@@ -72,15 +70,8 @@ Step 3 · Plan
   Verification
     <n> matrix rows · floor <impact-command> · walk <required|exempt> · auditor <rigor>
 
-  Open at approval
-    <design question still open>   → closed by task <n>
-
   Artifacts
-    requirements  <docs-root>/specs/epic-NN-<slug>/wave-NN-<slug>.requirements.md
-    spec          <docs-root>/specs/epic-NN-<slug>/wave-NN-<slug>.spec.md
-    plan          <docs-root>/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md
-    governing design  <the spec's `design:` pointer target, or the word "waived">
-                                        # omit this line when the spec carries its own ## Design
+    plan  <docs-root>/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md
 
 Do you approve this plan? Reply "approved" to approve it.
 show evals <req> · show task <n> · explain <decision>
