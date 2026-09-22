@@ -3369,8 +3369,12 @@ EOF
     if row_has_key "$EXTEND_ROW" suites_source; then
       EXTEND_RR_ARGS+=("suites_source=$(line_field "$EXTEND_ROW" suites_source)")
     fi
+    # `re_executes=` IS STORED ENCODED (T4, REQ-7/D4) and `roster_row` encodes what it is
+    # handed, so the copy goes back PLAIN — the same `clean … re_executes` decode
+    # `adopt_write_row` takes — or `%7C` becomes `%257C` on the appended row and the
+    # extended agent's declared run is a command no shell ran (walk-bb711e1.md §14, §29f).
     if row_has_key "$EXTEND_ROW" re_executes; then
-      EXTEND_RR_ARGS+=("re_executes=$(line_field "$EXTEND_ROW" re_executes)")
+      EXTEND_RR_ARGS+=("re_executes=$(clean "$(line_field "$EXTEND_ROW" re_executes)" re_executes)")
     fi
     if row_has_key "$EXTEND_ROW" teammate_id; then
       EXTEND_RR_ARGS+=("teammate_id=$(line_field "$EXTEND_ROW" teammate_id)")

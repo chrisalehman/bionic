@@ -5183,6 +5183,33 @@ expect_contains "29e3 …and it counts open after adopt" "open=1" "$OUT"
 unset CLAUDE_CONFIG_DIR
 
 # ============================================================
+# ---------- 29f: THE APPENDED ROW'S `re_executes=` IS BYTE-IDENTICAL TO THE ROW IT COPIED --
+#
+# REQ-7/D4 (T4) stores the declared runs percent-encoded; every writer takes the PLAIN
+# value and encodes once. `extend` copies the field off the stored row, so it must decode
+# before handing it back to `roster_row` — the symmetry `clean … re_executes` gives
+# `adopt_write_row` (:517). Lifted raw, `%7C` is re-encoded to `%257C` and the extended
+# row's declared run decodes to a command holding the literal text `%7C`, which no shell
+# ever ran (wave-18 walk-bb711e1.md §14). Byte-identical stored fields is the whole pin.
+R29F="$(make_repo s29-extend-rex)"; new_roster "$R29F"; armed_ago "$R29F"
+DEL_29F="$R29F/delivered.md"; echo "done" > "$DEL_29F"
+add_row "$R29F" name=t1 deliverable="$DEL_29F" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+S29F_ROSTER="$(roster_of "$R29F")"
+S29F_ENC='npx jest --testPathPattern="(a%7Cb)"'
+S29F_ROW1="$(grep '|name=t1|' "$S29F_ROSTER" | head -1)"
+grep -v '|name=t1|' "$S29F_ROSTER" > "$S29F_ROSTER.tmp"
+printf '%s|re_executes=%s\n' "$S29F_ROW1" "$S29F_ENC" >> "$S29F_ROSTER.tmp"
+mv "$S29F_ROSTER.tmp" "$S29F_ROSTER"
+poke "$R29F" extend t1 "second commit"
+expect_eq "29f extend on a row carrying re_executes= exits 0" "0" "$RC"
+S29F_FIRST="$(grep '|name=t1|' "$S29F_ROSTER" | head -1 | tr '|' '\n' | grep '^re_executes=' | head -1 | cut -d= -f2-)"
+S29F_LAST="$(grep '|name=t1|' "$S29F_ROSTER" | tail -1 | tr '|' '\n' | grep '^re_executes=' | head -1 | cut -d= -f2-)"
+expect_eq "29f2 the appended row stores the declared run exactly as the copied row does (no double encoding)" \
+  "$S29F_ENC" "$S29F_LAST"
+expect_eq "29f3 …so the two stored fields are byte-identical" "$S29F_FIRST" "$S29F_LAST"
+expect_absent "29f4 …and %257C never appears on the roster" "%257C" "$(cat "$S29F_ROSTER")"
+
 section "Section 31: the ledger is live at task scale — the tick fills, and the wall agrees (wave-18 REQ-3, AC-3.1/AC-3.3; ADR-033 d2)"
 # ============================================================
 #
