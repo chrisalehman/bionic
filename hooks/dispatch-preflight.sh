@@ -2258,11 +2258,18 @@ if [ -n "$AGENT_NAME" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; the
   # lives up there rather than here because the budget wall needs the same answer and two
   # spellings of one question are two answers; its header carries the argument.
   #
-  # NO ACK LEDGER IS PASSED. This arm asks who holds the NAME, and an ack is the
-  # orchestrator's judgement about a DELIVERABLE: a row acked while its agent is still
-  # working still holds its name, and handing that name to a second dispatch is the one
-  # collision this wall exists to prevent.
-  DP_INFLIGHT=$(dp_roster_contracts "$ROSTER_FILE" \
+  # THE ACK LEDGER IS PASSED, as the budget wall passes it (ADR-034, wave-19 D1). The ack
+  # in the sweeper ledger is the ONE terminal state of a name: the Patrol writes it only
+  # when a fresh panel confirms the agent gone, and `stop-orders.sh stopped` writes it
+  # beside the stop. So a name acked LATER than its last launch is free here exactly as it
+  # is free to the budget — one question, one answer — and `ack_closes`'s time test keeps
+  # an ack older than a relaunch from freeing the live lineage behind it.
+  #
+  # THE RESIDUAL RISK, NAMED: a hand-written ack for an agent that is still working
+  # unlocks its name, and a second dispatch under it is the collision this arm exists to
+  # prevent. That is a human act on a human's row; no reader here can tell it from a true
+  # close without a live panel, which this wall does not have.
+  DP_INFLIGHT=$(dp_roster_contracts "$ROSTER_FILE" "$ACK_LEDGER_FILE" \
     | /usr/bin/awk -F'|' -v want="$AGENT_NAME" \
         '$1 == want && $3 == "open" { st = $2 } END { if (st != "") print st }' 2>/dev/null) \
     || DP_INFLIGHT=""
@@ -2276,7 +2283,8 @@ name — so two agents under one name is one contract, one address and two proce
 
 Fix: dispatch under the name the Patrol tick's FILL line printed for this task. It derives
 one that is free: the task id, or \`<id>-r<n>\` when that id has already had a run. You never
-choose a name yourself. If this row is finished, land it (its marker frees the name)."
+choose a name yourself. If this row is finished, land it: its marker, or the Patrol's ack
+once the agent is gone, frees the name."
   fi
 fi
 
@@ -2424,8 +2432,8 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # one pair that can never appear together, and that is by construction rather than by
 # ordering: the extractor emits `deliverable=` XOR `deliverable_ambiguous=`.
 #
-# ONE FINDING RENDERS AS ONE REFUSAL, byte for byte what the arm emitted before — the
-# fact, the fix and the detail it already wrote, on `exit2`, its own channel.
+# ONE FINDING RENDERS AS ONE REFUSAL in its arm's own words — the fact, the fix and the
+# detail it already wrote — on `deny`, the same wire as several (wave-19 T4, REQ-7, D8).
 #
 # SEVERAL FINDINGS KEEP THE FIRST ARM'S USER LINE and put one line per remaining fault, the
 # not-checked lines and the marked scaffold in `detail`, and that split is forced rather
@@ -2445,12 +2453,23 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # The model reads every fault; the reader is still interrupted by a sentence with a
 # pointer; neither half is a knob somebody has to know to set.
 #
-# ONE FINDING STAYS ON `exit2`, in its arm's own words and on its arm's own channel. The
-# channel moves for the refusal D-1's single wire was STARVING — a list — and a lone fact
-# with a six-word fix is not starved by being a sentence. Keeping it there also keeps the
-# blast radius of this change at the one shape that needed it: every single-fault refusal
-# in this file, brief-shape and state alike, is byte-for-byte and status-for-status what
-# it was.
+# ONE FINDING TAKES `deny` TOO, and the wire is chosen by AUDIENCE, never by fault count
+# (wave-19 T4, REQ-7, D8). Until then a lone finding stayed on `exit2`, so the status of a
+# refusal of one kind depended on how many faults the brief — and, through the no-impact
+# arm, the repository's own config — happened to add up to (A-T4.8): one fault exited 2,
+# two exited 0. Every pooled finding here is a brief-shape or state fault the dispatching
+# MODEL fixes by re-writing its brief, so every one goes to the model verbatim on the
+# reason field, and the user stream carries the one line. What still differs by count is
+# the reason's SHAPE: a lone finding keeps its arm's own detail byte for byte, several
+# carry the fault lines and the marked scaffold.
+#
+# THE THREE ENVIRONMENT SITES STAY ON `exit2`, and their audience is why: the loader
+# fail-open (a raw `exit 2` at the top of this file, before `refuse` is even loaded), the
+# missing probe (`deny()` → `refuse exit2`) and the probe that ran and failed. Their
+# subject is the machine, not the brief — a missing library, an absent probe, a failing
+# dependency — and the one who fixes a machine is the human at it, so the detail goes to
+# BOTH readers on the one wire that paints it to the user (`detail_to_user=yes`). They are
+# also refusals the pool never sees: they fire before any finding can be trusted.
 #
 # `deny` EXITS 0, AND THAT IS THE BLOCK. The verdict on stdout is what refuses the tool
 # call; the status is not. Two consequences this file must respect: nothing else may print
@@ -2522,17 +2541,18 @@ dp_scaffold_marked() {
 
 # dp_refuse_findings — emit the whole list as ONE refusal and exit, or return having done
 # nothing at all. Called once, after the last brief-shape arm; `refuse` owns the exit, so a
-# caller cannot fall through it into the journal with findings outstanding. ONE finding
-# refuses on `exit2` exactly as its arm always did; SEVERAL refuse on `deny`, where the
-# marked scaffold reaches the model (see the channel note above). The exit STATUS therefore
-# differs by fault count — 2 for one, 0-with-a-deny-verdict for several — and both block.
+# caller cannot fall through it into the journal with findings outstanding. ONE finding and
+# SEVERAL both refuse on `deny` — exit 0 with the verdict on stdout, the verdict being the
+# block — so the exit status never depends on the fault count (wave-19 T4, REQ-7). ONE
+# carries its arm's own detail; SEVERAL carry the fault lines and the marked scaffold
+# (see the channel note above).
 #
 # THE SEVERAL-FAULT WIRE IS ONE LINE PER FAULT, THE NOT-CHECKED LINES, THE MARKED SCAFFOLD
 # AND A POINTER — NO RATIONALE (D3, D11, wave-14 REQ-8). The shape wave-13 retired repeated
 # a `<detail>` paragraph per fault; a reader with three faults got three lectures before a
 # single fix. Each `dp_finding` call above still carries its `<detail>` argument — that text
 # stays in the source as the documentation of WHY each arm fires, and `refuse`'s
-# single-fault path (`exit2`) still emits it unchanged — but it is not collected here.
+# single-fault path still emits it unchanged — but it is not collected here.
 #
 # WHAT WAVE-14 ADDS IS THE FAULT LINES, and they are the reason this wire exists at all.
 # Until now the several-fault wire named NO fault except through the scaffold's `<ADD>`
@@ -2551,7 +2571,7 @@ dp_scaffold_marked() {
 dp_refuse_findings() {
   [ "$DP_FINDING_N" -gt 0 ] || return 0
   if [ "$DP_FINDING_N" -eq 1 ]; then
-    refuse exit2 dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
+    refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
   fi
   # `DP_FAULT_LINES` and `DP_NOTCHECKED` each end in their own newline when non-empty and
   # are empty strings otherwise, so this interpolation adds no blank line when either is
