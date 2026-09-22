@@ -482,6 +482,15 @@ line_field() {  # <line> <key>
   printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
 }
 
+# Whether a versioned pipe-delimited line CARRIES a key at all — present-and-empty and absent
+# are different rows to a by-key reader, and `line_field` returns "" for both. The pipe is
+# joined at runtime on purpose: §S13.4 (tests/cross-gate-agreement.test.sh) pins that only
+# roster.sh's row writer spells `|<key>=` as a literal, and a presence test is not a writer.
+row_has_key() {  # <line> <key>
+  case "|$1" in *"|$2="*) return 0 ;; esac
+  return 1
+}
+
 clean() {  # <value> [<field name>]
   local out
   out="$(printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
@@ -3340,24 +3349,24 @@ EOF
     # discipline `adopt_write_row`'s INSTRUMENT_FIELDS group keeps above: an absent key and
     # a present-but-empty one are different rows to a by-key reader, and this verb must not
     # manufacture the first out of the second.
-    case "$EXTEND_ROW" in *"|files="*)
-      EXTEND_RR_ARGS+=("files=$(line_field "$EXTEND_ROW" files)") ;;
-    esac
-    case "$EXTEND_ROW" in *"|suites_allowed="*)
-      EXTEND_RR_ARGS+=("suites_allowed=$(line_field "$EXTEND_ROW" suites_allowed)") ;;
-    esac
-    case "$EXTEND_ROW" in *"|suites_source="*)
-      EXTEND_RR_ARGS+=("suites_source=$(line_field "$EXTEND_ROW" suites_source)") ;;
-    esac
-    case "$EXTEND_ROW" in *"|re_executes="*)
-      EXTEND_RR_ARGS+=("re_executes=$(line_field "$EXTEND_ROW" re_executes)") ;;
-    esac
-    case "$EXTEND_ROW" in *"|teammate_id="*)
-      EXTEND_RR_ARGS+=("teammate_id=$(line_field "$EXTEND_ROW" teammate_id)") ;;
-    esac
-    case "$EXTEND_ROW" in *"|adopted_from="*)
-      EXTEND_RR_ARGS+=("adopted_from=$(line_field "$EXTEND_ROW" adopted_from)") ;;
-    esac
+    if row_has_key "$EXTEND_ROW" files; then
+      EXTEND_RR_ARGS+=("files=$(line_field "$EXTEND_ROW" files)")
+    fi
+    if row_has_key "$EXTEND_ROW" suites_allowed; then
+      EXTEND_RR_ARGS+=("suites_allowed=$(line_field "$EXTEND_ROW" suites_allowed)")
+    fi
+    if row_has_key "$EXTEND_ROW" suites_source; then
+      EXTEND_RR_ARGS+=("suites_source=$(line_field "$EXTEND_ROW" suites_source)")
+    fi
+    if row_has_key "$EXTEND_ROW" re_executes; then
+      EXTEND_RR_ARGS+=("re_executes=$(line_field "$EXTEND_ROW" re_executes)")
+    fi
+    if row_has_key "$EXTEND_ROW" teammate_id; then
+      EXTEND_RR_ARGS+=("teammate_id=$(line_field "$EXTEND_ROW" teammate_id)")
+    fi
+    if row_has_key "$EXTEND_ROW" adopted_from; then
+      EXTEND_RR_ARGS+=("adopted_from=$(line_field "$EXTEND_ROW" adopted_from)")
+    fi
 
     EXTEND_NEW_ROW="$(roster_row "${EXTEND_RR_ARGS[@]}")" || EXTEND_NEW_ROW=""
     if [ -z "$EXTEND_NEW_ROW" ]; then
