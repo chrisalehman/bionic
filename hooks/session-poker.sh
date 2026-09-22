@@ -491,9 +491,12 @@ line_field() {  # <line> <key>
 }
 
 # Whether a versioned pipe-delimited line CARRIES a key at all — present-and-empty and absent
-# are different rows to a by-key reader, and `line_field` returns "" for both. The pipe is
-# joined at runtime on purpose: §S13.4 (tests/cross-gate-agreement.test.sh) pins that only
-# roster.sh's row writer spells `|<key>=` as a literal, and a presence test is not a writer.
+# are different rows to a by-key reader, and `line_field` returns "" for both. This is a
+# SUBSTRING PRESENCE test, not a row assembler: §S13.4 (tests/cross-gate-agreement.test.sh)
+# now discriminates the two by shape — an assembler's `=...|<key>=$` against a presence
+# test's `*"|<key>="*` — so `$2` staying a parameter here is ordinary genericity across the
+# six callers, not a runtime-joined literal kept to dodge a blunter pin (that dodge, needed
+# before §S13.4 could tell the two shapes apart, is gone — REQ-13, wave-19 T9).
 row_has_key() {  # <line> <key>
   case "|$1" in *"|$2="*) return 0 ;; esac
   return 1
