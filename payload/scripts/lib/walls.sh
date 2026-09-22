@@ -1480,14 +1480,40 @@ is_proof_shaped() {  # $1 = evidence value
 # the addressed row, the rigor-enum check) have already passed. BLOCKS
 # (exit 2) on any lane breach:
 #   - effective rigor peer-reviewed or audited: evidence must be proof-shaped.
-#   - status done AND effective rigor >= peer-reviewed: evidence must name
-#     an `auditor` verdict.
-#   - status done AND effective rigor audited: evidence must ALSO name a
-#     `critic` verdict.
+#   - status done AND effective rigor >= peer-reviewed AND the run has
+#     reached Step 6: evidence must name an `auditor` verdict.
+#   - status done AND effective rigor audited AND the run has reached Step 6:
+#     evidence must ALSO name a `critic` verdict.
 # The `tested` floor carries none of these demands — 4/1's presence +
 # placeholder checks are its entire contract (plan Assumption A4: the literal
 # substrings are sufficient tokens, no pointer-format sub-schema).
+#
+# THE VERDICT LANES ARE STEP-GATED, NOT STATUS-GATED (wave-18 REQ-1, D1, ADR-033).
+# `done` is the one terminal word at task scale and it means the work is finished
+# and the tree released — a fact about the ROW. An auditor verdict and a critic
+# verdict are facts about the RUN: Step 5 produces the first and Step 6 the
+# second, so before Step 6 no honest row can carry them. Demanding them of a
+# `done` row at `current: T<n>` left a finished task with no word it could truthfully
+# write (`active` on a released tree is false, `done` was refused), and a consumer
+# run spawned six worktrees for two lines of work to get around it. The arms
+# below therefore ask `_eg_verdicts_owed` — the plan's own declared `current:`,
+# numeric and >= 6 — before they ask anything of the evidence. Everything else
+# here is unchanged: the proof-shape lane is not a verdict and fires at every
+# `current:`, and a `done` row ALWAYS owes its `- T<n>:` evidence line (the
+# presence/placeholder arms above this call).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+#
+# THE RUN'S OWN `current:`, never the substituted one. `_EG_DECLARED_CURRENT` is
+# recorded where `CURRENT` is first parsed and is not touched by either subject
+# substitution below (a row's step, or a task row's id), because the question this
+# answers is "has the run reached the step that produces verdicts", which no
+# per-commit subject can move.
+_eg_verdicts_owed() {
+  local _c="${_EG_DECLARED_CURRENT%[ab]}"
+  case "$_c" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$_c" -ge 6 ]
+}
+
 apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
   local id="$1" status="$2" eff="$3" ev="$4"
   case "$eff" in
@@ -1500,7 +1526,7 @@ Fix: replace the '- ${id}:' evidence with the actual command invocation and resu
       fi
       ;;
   esac
-  if [ "$status" = "done" ]; then
+  if [ "$status" = "done" ] && _eg_verdicts_owed; then
     case "$eff" in
       peer-reviewed|audited)
         if ! grep -Ewq 'auditor' <<< "$ev"; then
@@ -2055,6 +2081,13 @@ CURRENT=$(echo "$SECTION" \
           | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
           | tr -d '[:space:]')
 
+# THE VALUE THE PLAN DECLARED, kept before anything substitutes a subject (wave-18
+# REQ-1, D1). Two arms below replace `CURRENT` for the length of one commit — a row's
+# own step, and a task row's id — and both are answers to "whose obligations does this
+# commit discharge". `_eg_verdicts_owed` asks a different question, "has this RUN reached
+# the step that produces an auditor and a critic", and it must read the run's own word.
+_EG_DECLARED_CURRENT="$CURRENT"
+
 # Task-scale plans address a ledger TASK, not a numbered step:
 # `current: T<n>` with evidence on `- T<n>:` lines (no `Step N:` line). Validate
 # the ledger (log-only, D12/D14), then — epic-22 K2.5 — run the SAME three Step-4
@@ -2585,6 +2618,7 @@ _eg_row_for_worktree() {
 }
 
 _EG_WT=""
+_EG_SUBSTITUTED=0    # set by BOTH substitution forks below (step-below, active-status); read at the pointer-step exit (D7)
 _eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CDS
 
 # WHICH DIRECTORY DOES THIS COMMIT RUN IN? (critic issue 1; wave-17 REQ-3, D4.) When the
@@ -2696,8 +2730,40 @@ if [ -n "$_EG_WT" ]; then
     _EG_RSTEP="${_EG_RSTEP%%	*}"
     _EG_CURNUM="${CURRENT%[ab]}"
     case "$_EG_RSTEP" in
-      ''|*[!0-9]*) : ;;   # a row whose step cell is unusable decides nothing; units_validate
-                          # is what reports it, at the step that writes the plan
+      ''|*[!0-9]*)
+        # A TASK-SCALE TABLE HAS NO STEP CELL, AND THAT IS NOT AN UNUSABLE ONE (wave-18
+        # REQ-11, D3, ADR-033). The six-column task ledger is `id | intent | rigor |
+        # description | status | worktree`: there is no `step` column to read, so every row
+        # arrived here with an empty cell, this arm decided nothing, and a commit from a
+        # row's own tree was judged by the RUN's numbered-step block — a fixup writer at
+        # `current: 5` refused for a Verify floor its own task exists to produce, which a
+        # consumer answered by hand-writing a mid-discharge Step-5 block. ADR-031's rule is
+        # not wave-only: a row's tree is judged by its row at task scale too. The arms are
+        # the SAME four the `current: T<n>` early exit runs above, reached by naming the row
+        # as the addressed unit — no second arm table, for the reason `CURRENT=4` is spelled
+        # that way at the wave fork below.
+        #
+        # THE DISCRIMINATOR IS THE TABLE'S HEADER, not the empty cell: `units_has_column`
+        # separates "this table never had a step column" from "this row's step cell is
+        # blank or malformed", which is a shape fault `units_validate` reports at the step
+        # that writes the plan and which keeps today's silence here. `scale: task` is asked
+        # too — a wave table missing its step column is a broken wave table, not a task
+        # ledger, and judging it by task arms would answer a shape fault with a verdict.
+        if [ "$SCALE" = "task" ] && ! units_has_column "$PLAN" step; then
+          # THE NOTE IS MANDATORY, for the reason the wave fork's is: this is a wall judging
+          # a commit by something other than the run's declared `current:`, and it names the
+          # ROW, because the row is the subject. Printed before the substitution, so
+          # `current:` reads as the run declared it.
+          printf "evidence-gate: judged by row %s's task arms (run at current: %s)\n" \
+            "$_EG_RID" "$CURRENT" >&2
+          CURRENT="$_EG_RID"
+          validate_task_ledger
+          validate_approved_by
+          validate_fails_when
+          validate_prototype_no_matrix_row
+          exit 0
+        fi
+        : ;;
       *)
         if [ "$_EG_RSTEP" -lt "$_EG_CURNUM" ] 2>/dev/null; then
           # THE ALLOW PATH SPEAKS TOO (architecture review §4.1). Until this line the gate
@@ -2712,6 +2778,13 @@ if [ -n "$_EG_WT" ]; then
           printf "evidence-gate: judged at row %s's step %s (run at current: %s)\n" \
             "$_EG_RID" "$_EG_RSTEP" "$CURRENT" >&2
           CURRENT="$_EG_RSTEP"
+          # A SUBSTITUTED STEP IS NOT A POINTER STEP HERE EITHER (critic C1; wave-18 REQ-11,
+          # D7). This arm substitutes `CURRENT` exactly as the `active`-status arm below does,
+          # and D7's rule is about "a substituted step", not about which of the two forks did
+          # the substituting — so it is flagged the same way, guarded the same way (only at
+          # step 4, the one pointer step the substitution can land on; every other substituted
+          # step stays byte-identical), for the pointer exit a few hundred lines below to read.
+          [ "$_EG_RSTEP" = 4 ] && _EG_SUBSTITUTED=1
         elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null; then
           _eg_detail="canonical-sdlc worktree '${_EG_WT}' belongs to '## Tasks' row ${_EG_RID}, whose step is ${_EG_RSTEP}; the run is at current: ${CURRENT}.
 Plan: $PLAN
@@ -2759,6 +2832,17 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           printf "evidence-gate: judged by row %s's task arms (run at current: %s)\n" \
             "$_EG_RID" "$CURRENT" >&2
           CURRENT=4
+          # A SUBSTITUTED STEP IS NOT A POINTER STEP (wave-18 REQ-11, D7, backlog row 3).
+          # Step 4 is on POINTER_STEPS, so without this flag the pointer exit a few hundred
+          # lines below took `exit 0` on the step this line just substituted — unless the
+          # frontmatter happened to say `use_worktree: true`. The one arm the substitution
+          # exists to reach, `shape_block worktree base-sha branch`, was therefore skipped on
+          # every `use_worktree: false` plan and the note above promised arms that never ran.
+          # The fork owns the arms it announces. THIS IS THE SAME RULE THE step-below ARM
+          # ABOVE NOW CARRIES (critic C1): D7 is about "a substituted step", not about which
+          # of the two forks did the substituting, and both set `CURRENT=4`/`$_EG_RSTEP=4`
+          # without ever asking which arm they came from — so both set the flag.
+          _EG_SUBSTITUTED=1
         fi
         ;;
     esac
@@ -3177,9 +3261,14 @@ validate_prototype_no_matrix_row
 # checks, and now the two arms above, it needs no shape check. Step 4 is the exception:
 # with use_worktree=true it carries worktree fields and falls through to the shape check.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+# AND A SUBSTITUTED STEP IS NOT A POINTER STEP (wave-18 REQ-11, D7). When the fork above
+# replaced the run's `current:` with Step 4 it announced that this commit is judged by the
+# row's TASK arms; the shape check below IS that arm set, so the exit is not taken on a
+# substituted step whatever `use_worktree` says. On an unsubstituted Step 4 the frontmatter
+# key still decides, exactly as before.
 for _ps in $POINTER_STEPS; do
   [ "$CURRENT" = "$_ps" ] || continue
-  if [ "$_ps" = "4" ] && [ "$USE_WORKTREE" = "true" ]; then
+  if [ "$_ps" = "4" ] && { [ "$USE_WORKTREE" = "true" ] || [ "${_EG_SUBSTITUTED:-0}" = "1" ]; }; then
     break  # fall through to the Step-4 worktree shape check below
   fi
   exit 0
@@ -3478,8 +3567,18 @@ validate_matrix() {
         # key first; this branch only bites a block that was otherwise complete.
         # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
         if [ "$key" = "evidence" ]; then
+          # THE CELL MAY CARRY A TRAILING NOTE (wave-18 REQ-9, D13, AC-9.1). Split on the
+          # FIRST ' — ' (space, em dash, space) before either test below: the path half is
+          # all the ';' check and the resolver ever see, so a note that itself carries a
+          # ';' (e.g. 'RED on a; GREEN on b') never trips the "more than one path" refusal.
+          # The note half is discarded right here — never parsed, never resolved, never
+          # required to name anything.
+          # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+          case "$val" in
+            *" — "*) val="${val%% — *}" ;;
+          esac
           # ONE PATH PER AC, AND A `;` IS NOT A SEPARATOR (wave-17 REQ-5, AC-5.3). The
-          # whole cell text is the path — nothing here splits it — so `a.md; b.md` was
+          # path half — see the split above — is tested here, so `a.md; b.md` was
           # handed to the resolver entire, missed, and refused as "names no real file",
           # which sent the author to write a file at a path nobody meant to name. The
           # sibling reader of the walk artifact has truncated at the first `;` since
@@ -4674,6 +4773,23 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   case "$BUDGET_LINE" in
     *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}" ;;
   esac
+  # DECODED ONCE, HERE, BEFORE ANYTHING READS IT (T4; REQ-7, D4). The row stores this field
+  # percent-encoded because the line is pipe-delimited and a declared run may legitimately
+  # hold a pipe inside quotes — `payload/scripts/lib/roster.sh` owns that encoding and
+  # carries the reasoning; `roster_pipe_escape`/`roster_pipe_unescape` there are these two
+  # expansions, and the pair is the definition this copy answers to.
+  #
+  # SPELLED HERE RATHER THAN SOURCED. This file runs inside `hooks/bash-walls.sh`, whose
+  # `BIONIC_LIB_WANT` does not carry `roster.sh`; adding it would grow the wall-library
+  # table and the loader contract for two parameter expansions. The twin is the posture
+  # `sanitize`/`clean` and `parse_seconds` already hold in this fleet.
+  #
+  # ONE DECODE, NOT ONE PER READER. `_run_is_declared` compares against this variable and
+  # `budget_refuse` PRINTS it to a reader who is about to retype the command — so decoding
+  # inside the compare would leave the refusal advertising a command no shell can run,
+  # while decoding in both places would turn a literal `%7C` in a command into a pipe.
+  RE_EXECUTES="${RE_EXECUTES//\%7C/|}"
+  RE_EXECUTES="${RE_EXECUTES//\%25/%}"
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
 
@@ -4775,8 +4891,14 @@ _budget_wire_fact() {
   printf '%s%s' "$label" "$(_budget_wire_list "$allowed" "$room")"
 }
 
-# _run_is_declared <run> <the row's re_executes= field> -> 0 when the row declared EXACTLY
-# this run (REQ-1 AC-1.5).
+# _run_is_declared <run> <the row's re_executes= field, DECODED> -> 0 when the row declared
+# EXACTLY this run (REQ-1 AC-1.5).
+#
+# THE FIELD ARRIVES PLAIN (T4; REQ-7, D4). The row stores it percent-encoded, and the one
+# read of that row decodes it before this function or any refusal sees it — see the decode
+# beside `BUDGET_LINE` above for why there is exactly one decode and not one per reader. A
+# caller that hands this function a raw row field compares against the storage spelling and
+# will not match a command holding a pipe.
 #
 # THE FIELD KEEPS THE AUTHOR S MARKS, space-joined (A-T1.4): `` `npx jest x` `pytest tests` ``.
 # The marks are what make it self-delimiting — a run holds spaces, commas and quotes, so no

@@ -1176,4 +1176,105 @@ expect_contains "16g: the gate judges by the ROW's task arms — T1's cell (17-T
 expect_absent "16h: …never falling back to 'no ## Tasks row names worktree', which is the ONE-SIDED-fold miss (T47 §25g)" \
   "no ## Tasks row names worktree" "$ERR"
 
+# THE `use_worktree: false` TWIN (wave-18 REQ-11, D7, backlog row 3; AC-11.1). 16a-16h both
+# declare `use_worktree: true`, which is why nothing ever measured what the fork's
+# substitution is WORTH. It announces "judged by row T1's task arms" and substitutes
+# `CURRENT=4` — and Step 4 is a POINTER step, so a few hundred lines later the pointer exit
+# takes `exit 0` on it unless the frontmatter says `use_worktree: true`. The one arm the
+# substitution exists to reach — `shape_block worktree base-sha branch`, the task arms the
+# note promises — was therefore skipped on every `use_worktree: false` plan, and the commit
+# was admitted with the note printed and nothing checked. A substituted step is not a
+# pointer step: the fork now flags its substitution and the pointer exit honours it, so the
+# fork owns the arms it announces whatever `use_worktree` says.
+#
+# THE FIXTURE IS 16e-16h's, with two bytes changed: `use_worktree: false`, and a `Step 4:`
+# block that carries a real value but NOT the three worktree fields. Both halves matter —
+# the block is non-empty and placeholder-free, so it clears every arm upstream of the shape
+# check and the shape check is the only thing left to refuse it.
+W18_POINTER_TASKS='
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the row whose tree this commit comes from | senior-implementor | — | 20m | REQ-11 | a.sh | 18-T1 | active |
+'
+
+w18_pointer_plan() {  # $1 = use_worktree value
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: wave\ndeploy_target: none\nuse_worktree: %s\nhas_ui: false\nwalk: exempt\n---\n' "$1"
+  printf '# plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-09-22T00:00Z approved\n'
+  printf 'Step 4: dispatch ledger at .bionic/docs/record/w18/dispatch.md\n'
+  printf '%s\n' "$W18_POINTER_TASKS"
+}
+
+R_PTR_FALSE="$(mk_repo ptrfalse)"
+git -C "$R_PTR_FALSE" worktree add -q "$R_PTR_FALSE/.worktrees/18-T1" -b wt/18-T1 2>/dev/null
+expect_eq "16i: the fixture's tree really is a linked worktree, named 18-T1 by git (a real dispatch shape)" \
+  "18-T1" "$(basename "$(git -C "$R_PTR_FALSE/.worktrees/18-T1" rev-parse --git-dir)")"
+
+w18_pointer_plan false > "$R_PTR_FALSE/.bionic/docs/plans/active.md"
+run_hook "$(mk_payload "$R_PTR_FALSE/.worktrees/18-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_PTR_FALSE"
+expect_contains "16j: the fork still announces the subject it chose, on a use_worktree: false plan" \
+  "evidence-gate: judged by row T1's task arms (run at current: 4)" "$ERR"
+expect_status "16k: …and the arms it announced RUN — the Step-4 shape refuses a block with no worktree fields, though use_worktree is false" \
+  2 "$ST"
+expect_contains "16k: …naming the three fields the task arms owe" \
+  "worktree base-sha branch" "$ERR"
+
+# THE CONTROL: the same plan, the same tree, the same commit, `use_worktree: true` — refused
+# for the same three fields. Two verdicts that now agree; before this they differed on the
+# frontmatter key alone, which is the defect backlog row 3 named.
+R_PTR_TRUE="$(mk_repo ptrtrue)"
+git -C "$R_PTR_TRUE" worktree add -q "$R_PTR_TRUE/.worktrees/18-T1" -b wt/18-T1 2>/dev/null
+w18_pointer_plan true > "$R_PTR_TRUE/.bionic/docs/plans/active.md"
+run_hook "$(mk_payload "$R_PTR_TRUE/.worktrees/18-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_PTR_TRUE"
+expect_status "16l: the use_worktree: true twin refuses the same commit for the same fields" 2 "$ST"
+expect_contains "16l: …naming them" "worktree base-sha branch" "$ERR"
+
+# THE STEP-BELOW TWIN (critic C1; wave-18 REQ-11 AC-11.1, D7). 16i-16l fixed the fork that
+# fires when the row's step EQUALS current: (the `active` arm at walls.sh ~:2835). A second
+# fork substitutes CURRENT the same way when the row's step is BELOW current: (walls.sh
+# ~:2768, `_EG_RSTEP -lt _EG_CURNUM`) — the ordinary shape once a run has advanced past Step 4
+# while writer trees are still live — and until this row it set `CURRENT` without setting
+# `_EG_SUBSTITUTED`, so the pointer exit fell back to the frontmatter key alone on this branch
+# even though 16i-16l closed the other one.
+#
+# THE FIXTURE IS 16i-16l's, with one byte changed: `current: 5` instead of `current: 4`, so
+# the row's step 4 is now BELOW current: and the step-below arm fires instead of the
+# step-equal arm. Same tree, same row, same missing fields.
+W18_BELOW_TASKS='
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the row whose tree this commit comes from | senior-implementor | — | 20m | REQ-11 | a.sh | 18-T1 | active |
+'
+
+w18_below_plan() {  # $1 = use_worktree value
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: wave\ndeploy_target: none\nuse_worktree: %s\nhas_ui: false\nwalk: exempt\n---\n' "$1"
+  printf '# plan\n\n## SDLC State\n\ncurrent: 5\napproved-by: fixture 2026-09-22T00:00Z approved\n'
+  printf 'Step 4: dispatch ledger at .bionic/docs/record/w18/dispatch.md\n'
+  printf '%s\n' "$W18_BELOW_TASKS"
+}
+
+R_BELOW_FALSE="$(mk_repo belowfalse)"
+git -C "$R_BELOW_FALSE" worktree add -q "$R_BELOW_FALSE/.worktrees/18-T1" -b wt/18-T1 2>/dev/null
+w18_below_plan false > "$R_BELOW_FALSE/.bionic/docs/plans/active.md"
+run_hook "$(mk_payload "$R_BELOW_FALSE/.worktrees/18-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_BELOW_FALSE"
+expect_contains "16m: the step-below fork announces the row's step too, on a use_worktree: false plan" \
+  "evidence-gate: judged at row T1's step 4 (run at current: 5)" "$ERR"
+expect_status "16n: …and the arms it announced RUN — the Step-4 shape refuses a block with no worktree fields, though use_worktree is false" \
+  2 "$ST"
+expect_contains "16n: …naming the three fields the task arms owe" \
+  "worktree base-sha branch" "$ERR"
+
+# THE CONTROL: the same plan, the same tree, the same commit, `use_worktree: true` — refused
+# for the same three fields, exactly as 16l controls 16j/16k.
+R_BELOW_TRUE="$(mk_repo belowtrue)"
+git -C "$R_BELOW_TRUE" worktree add -q "$R_BELOW_TRUE/.worktrees/18-T1" -b wt/18-T1 2>/dev/null
+w18_below_plan true > "$R_BELOW_TRUE/.bionic/docs/plans/active.md"
+run_hook "$(mk_payload "$R_BELOW_TRUE/.worktrees/18-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_BELOW_TRUE"
+expect_status "16o: the use_worktree: true twin refuses the same commit for the same fields" 2 "$ST"
+expect_contains "16o: …naming them" "worktree base-sha branch" "$ERR"
+
+
 finish

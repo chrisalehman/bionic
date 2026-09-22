@@ -154,7 +154,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh observe.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh fill.sh observe.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -265,6 +265,14 @@ BIONIC_LOADER_REFUSE
 # from here; this hook parses no plan table of its own.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"
+# THE ONE COMPUTATION OF READINESS (wave-18 REQ-3, D2; ADR-033 decision 2). The FILL arm
+# below asks `fill_ready_set` for the ids and `fill_step_token` for the step it asks them at,
+# and `fill_name` — which lived in this file — moved there with them. What that buys is a
+# SECOND reader: `payload/scripts/lib/stop.sh`'s fill duty computes the same set at the end
+# of every turn, so a turn that ends with rows ready is refused whether or not a tick fired
+# in it, and the two can never name different rows.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/fill.sh"
 # THE ONE PREDICATE FOR "TOO QUIET" (REQ-10 AC-10.1, D9; ADR-028). `observe_class` classifies
 # a dispatched row `delivered`/`alive`/`idle` from two mtimes against the cadence the row's
 # own brief declared. Both readers in this file — the tick's row loop and `adopt`'s liveness
@@ -365,6 +373,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --report-only   the same files, listed, with nothing deleted"
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --window   defer a dead session whose own newest file is younger than the poker interval"
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
+  die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   exit 2
 }
 
@@ -432,6 +441,18 @@ case "$VERB" in
     fi
     BIND_ARG="$1"
     ;;
+  # THE SECOND (AND ONLY OTHER) TWO-OPERAND SHAPE (T-h; D11; REQ-10). `bind`'s comment above
+  # explains why one required operand is a refusal rather than a default; the same holds for
+  # both of these: `extend` with a name but no reason would ask the sweeper's verdict to
+  # explain itself out of nothing, and a default reason would make every extension look the
+  # same on a roster meant to say what the agent is actually doing.
+  extend)
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
+      usage "extend takes exactly two arguments: the name to re-open and the reason."
+    fi
+    EXTEND_NAME="$1"
+    EXTEND_REASON="$2"
+    ;;
   tick|arm|disarm|interval|interval-default|window)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
     ;;
@@ -469,6 +490,15 @@ line_field() {  # <line> <key>
   printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
 }
 
+# Whether a versioned pipe-delimited line CARRIES a key at all — present-and-empty and absent
+# are different rows to a by-key reader, and `line_field` returns "" for both. The pipe is
+# joined at runtime on purpose: §S13.4 (tests/cross-gate-agreement.test.sh) pins that only
+# roster.sh's row writer spells `|<key>=` as a literal, and a presence test is not a writer.
+row_has_key() {  # <line> <key>
+  case "|$1" in *"|$2="*) return 0 ;; esac
+  return 1
+}
+
 clean() {  # <value> [<field name>]
   local out
   out="$(printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
@@ -484,8 +514,23 @@ clean() {  # <value> [<field name>]
   # (name, deliverable, progress, waiver, …) is prose or a path, where a length this
   # generous is already more than any real value needs, so the cut stays for them. Callers
   # that pass no field name (every one but the two below) get today's behaviour exactly.
+  # AND `re_executes=` IS DECODED, NOT JUST UNCUT (T4, REQ-7/D4). This function reads a
+  # field off a roster row that `adopt_write_row` then hands back to `roster_row`, and the
+  # row stores the declared runs percent-encoded (`payload/scripts/lib/roster.sh`, which
+  # owns that encoding and carries the reasoning). Plain in memory, encoded on disk: the
+  # value goes back to the writer as the brief spelled it and the writer encodes it again,
+  # so the row this hook appends is byte-identical to the row it read. Decoding without
+  # that symmetry would put a raw pipe on the line and forge a segment; re-encoding an
+  # already-encoded value would turn `%7C` into `%257C` and hand a resumed agent a budget
+  # holding a command no shell could run. It joins the two LIST-valued fields in skipping
+  # the cut for the reason they do — a declared run is a command, and a command cut at 400
+  # characters is a budget entry nothing can ever equal — and because a cut landing inside
+  # an escape would decode into garbage.
   case "${2:-}" in
     suites_allowed|files) printf '%s' "$out" ;;
+    re_executes)
+      out="${out//\%7C/|}"
+      printf '%s' "${out//\%25/%}" ;;
     *) printf '%s' "$out" | cut -c 1-400 ;;
   esac
 }
@@ -1204,6 +1249,17 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 # DISARM decision to the FILL decision — two arms this wave's scope keeps apart. Sharing the
 # awk/grep/sed pipeline, not the caller, keeps the two readings from ever disagreeing about
 # what one `current:` line says.
+#
+# AND A THIRD READER NOW, FOR THE SAME REASON AND UNDER THE SAME RULE (wave-18 REQ-3, D2;
+# A-T2.3). `payload/scripts/lib/fill.sh` asks whether the run's ledger is live and has no
+# poker to ask, so `_fill_current_field` carries this grammar — fence toggle and translation
+# included. It is not folded into this one: this BODY is what §CG of
+# tests/cross-gate-agreement.test.sh extracts as TEXT and evals beside `run_open`, where a
+# delegating body answers nothing, and re-pointing that suite is outside this row's declared
+# files. §32 of tests/session-poker.test.sh binds the pair instead — both driven for real
+# over one table of `current:` shapes, required to answer identically on every row — which is
+# §CG's own remedy for the duplication it polices. The fold belongs in the edit that
+# re-points §CG.
 _sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed), or "" if
                                # no plan, no ## SDLC State section, or no current: line
   local plan="$1" section
@@ -1326,41 +1382,11 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
 # THE NAME A DISPATCH USES IS DERIVED, NEVER CHOSEN (T22, A-orch-33; Chris, first
 # principles: the roster is the identity register).
 #
-# THE DEFECT IT ENDS. A name is an identity everywhere downstream — `hooks/stop-guard.sh`
-# resolves one, `adopt` prints one as the message address, the landing sweep folds the
-# roster to the latest row per name. When a model invented a name for a task that had
-# already had a run, two agents ended up behind one row and one address, and the stop gate
-# carried a whole ambiguity arm to survive it. Prevention beats the arm: the tick prints the
-# name, the orchestrator copies it, and `hooks/dispatch-preflight.sh` refuses anything else.
-#
-# THE ROSTER IS WHAT "SPENT" MEANS, not the plan. The plan's `## Tasks` row keeps its id —
-# `T5` is still `T5` to a human reading the ledger — and the roster is the record of which
-# names THIS SESSION has actually handed out. A name is spent if any row carries it, in any
-# state: an open row obviously cannot be reused, and a CLOSED one is the common case (a
-# landed task being run again) where reuse would put a second lineage on a name the sweep
-# has already discharged.
-#
-# PER SESSION, exactly as the dispatch wall's in-flight arm reads it, so the two cannot
-# disagree about which names are available. A predecessor's roster reserves nothing.
-#
-# THE COUNT IS A SEARCH, NOT AN INCREMENT: `-r2`, then `-r3`, until a name no row carries.
-# A rule that always appended `-r2` would hand out a taken name on the third run.
-fill_name() {  # <roster file> <task id> -> the agent name to dispatch under
-  local f="$1" id="$2" n=2 cand
-  [ -n "$id" ] || return 0
-  if [ ! -f "$f" ] || [ -L "$f" ] || ! grep -qF "|name=${id}|" "$f" 2>/dev/null; then
-    printf '%s' "$id"; return 0
-  fi
-  # A bound, so a corrupt roster cannot spin here. Ninety-eight runs of one task is a
-  # different problem than this function can solve, and printing the id back is the
-  # fail-visible answer: the dispatch wall refuses it and says the name is in flight.
-  while [ "$n" -le 99 ]; do
-    cand="${id}-r${n}"
-    grep -qF "|name=${cand}|" "$f" 2>/dev/null || { printf '%s' "$cand"; return 0; }
-    n=$((n + 1))
-  done
-  printf '%s' "$id"
-}
+# `fill_name` AND ITS REASONING MOVED TO payload/scripts/lib/fill.sh (wave-18 REQ-3, D2).
+# It went where the ready set went: `payload/scripts/lib/stop.sh`'s fill duty names rows this
+# tick may also have printed, and a second idea of which name is free would let the two
+# disagree about what "dispatch T5" means. The body is unchanged, and the tick and `adopt`
+# call it exactly as they did.
 
 youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
   local roster="$1" sid="$2" swept cands live_cands live_ok tr lrc name tab RL RN CL
@@ -1718,8 +1744,8 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # `hooks/stop-guard.sh`'s own stop refusal exists to police (T29 §7). `live_ids_of_name` is
   # that refusal's own predicate, moved to the one library both files source
   # (`payload/scripts/lib/roster.sh`): a non-empty answer means this name is already live
-  # here, so this adopt takes the `-r<n>` search (`fill_name`, already this file's own
-  # convention for a spent id, :1335) instead of the name it was asked for, and says so once
+  # here, so this adopt takes the `-r<n>` search (`fill_name`, the fleet's one convention for a
+  # spent id, payload/scripts/lib/fill.sh) instead of the name it was asked for, and says so once
   # on stderr — this call site is otherwise silent.
   local ROSTER_FILE="$f"
   if [ -n "$(live_ids_of_name "$name")" ]; then
@@ -1795,11 +1821,18 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # three instrument fields are carried forward to prevent. The fallback is a TRAILING
   # append, which is where the field lives either way, and every reader in the fleet reads a
   # row BY KEY — so the two spellings differ in position and in nothing a reader sees.
+  #
+  # THE FIELD NAME IS PASSED (T4, REQ-7/D4) so `clean` decodes the stored form and skips
+  # the 400-character cut — see its own comment. The value below is therefore the command
+  # as the brief spelled it, and `roster_row` encodes it again on the way out. The fallback
+  # branch bypasses that writer, so it encodes the value itself rather than appending a raw
+  # pipe that would forge a segment on the line it is appending to.
   if [ -n "$rex" ]; then
-    ROW="$(roster_row "${RR_ARGS[@]}" "re_executes=$(clean "$rex")")" || ROW=""
+    local _rex_plain; _rex_plain="$(clean "$rex" re_executes)"
+    ROW="$(roster_row "${RR_ARGS[@]}" "re_executes=$_rex_plain")" || ROW=""
     if [ -z "$ROW" ]; then
       ROW="$(roster_row "${RR_ARGS[@]}")" || return 1
-      ROW="${ROW}|re_executes=$(clean "$rex")"
+      ROW="${ROW}|re_executes=$(roster_pipe_escape "$_rex_plain")"
     fi
   else
     ROW="$(roster_row "${RR_ARGS[@]}")" || return 1
@@ -3254,6 +3287,115 @@ EOF
     fi
     ;;
 
+  # THE RE-OPEN (T-h; D11; REQ-10). `verdict_row` (hooks/session-sweeper.sh) reads a name's
+  # LAST roster row alone, and nothing else — `waiver=`, `deliverable=`, `launched_at=`, the
+  # `claims=`/`progress=`/`cadence=` triple. `standdown-declined:` answers one turn and
+  # writes nothing; `ack` closes a row rather than opening one. Neither re-opens a MET
+  # lineage, so this verb is a plain append: a fresh row for the same name, launched NOW,
+  # with the operator's reason riding in `claims=`. The already-written deliverable then
+  # dates before the new launch instant — `landing_conjunct` returns its `stale=` conjunct —
+  # the verdict leaves MET for STILL-LIVE or UNMET, and the name drops off
+  # `STANDDOWN_NAMES` and rejoins `OPEN`: the truthful accounting, the agent is still
+  # working. The roster is APPEND-ONLY (same invariant `adopt_write_row` keeps at :1799,
+  # above) — this never rewrites the row it found, only adds one after it — and `adopt_fold`
+  # folds by KEY, last non-empty value per field per name, so the bumped `launched_at=` (and
+  # the unmoved `deliverable=`) are exactly what a later `adopt` rebuilds from (AC-10.2).
+  extend)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "An extension answers for ONE session's roster, so without the key there is nothing to write."
+      exit 3
+    fi
+
+    # THE ENGAGEMENT GUARD (AC-10), same reason and the same shape `bind` and `adopt` take
+    # above: nothing bionic does applies until the session invoked the skill.
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
+      die "REFUSED — no row named $EXTEND_NAME: this session has no roster at $ROSTER_FILE."
+      exit 1
+    fi
+
+    # THE LAST ROW CARRYING THIS NAME IS ITS LATEST CONTRACT — the same by-name reading
+    # every other reader in this file takes (e.g. the duration arm inside `tick`, below).
+    EXTEND_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+      | grep -F "|name=${EXTEND_NAME}|" | tail -1)"
+    if [ -z "$EXTEND_ROW" ]; then
+      die "REFUSED — no row named $EXTEND_NAME on this session's roster ($ROSTER_FILE)."
+      exit 1
+    fi
+
+    EXTEND_NOW="$(iso_now)"
+    EXTEND_RR_ARGS=(
+      "status=$(line_field "$EXTEND_ROW" status)"
+      "session=$SESSION_ID"
+      "name=$(clean "$EXTEND_NAME")"
+      "agent_id=$(line_field "$EXTEND_ROW" agent_id)"
+      "launched_at=$EXTEND_NOW"
+      "subagent_type=$(line_field "$EXTEND_ROW" subagent_type)"
+      "model=$(line_field "$EXTEND_ROW" model)"
+      "deliverable=$(line_field "$EXTEND_ROW" deliverable)"
+      "source=$(line_field "$EXTEND_ROW" source)"
+      "duration=$(line_field "$EXTEND_ROW" duration)"
+      "progress=$(line_field "$EXTEND_ROW" progress)"
+      "claims=$(clean "$EXTEND_REASON")"
+      "cadence=$(line_field "$EXTEND_ROW" cadence)"
+      "absent=$(line_field "$EXTEND_ROW" absent)"
+      "waiver=$(line_field "$EXTEND_ROW" waiver)"
+      "tool_use_id=$(line_field "$EXTEND_ROW" tool_use_id)"
+      "plan=$(line_field "$EXTEND_ROW" plan)"
+    )
+    # THE PRESENT-IF-PASSED FIELDS TRAVEL ONLY WHEN THE SOURCE ROW HAD THEM — the same
+    # discipline `adopt_write_row`'s INSTRUMENT_FIELDS group keeps above: an absent key and
+    # a present-but-empty one are different rows to a by-key reader, and this verb must not
+    # manufacture the first out of the second.
+    if row_has_key "$EXTEND_ROW" files; then
+      EXTEND_RR_ARGS+=("files=$(line_field "$EXTEND_ROW" files)")
+    fi
+    if row_has_key "$EXTEND_ROW" suites_allowed; then
+      EXTEND_RR_ARGS+=("suites_allowed=$(line_field "$EXTEND_ROW" suites_allowed)")
+    fi
+    if row_has_key "$EXTEND_ROW" suites_source; then
+      EXTEND_RR_ARGS+=("suites_source=$(line_field "$EXTEND_ROW" suites_source)")
+    fi
+    # `re_executes=` IS STORED ENCODED (T4, REQ-7/D4) and `roster_row` encodes what it is
+    # handed, so the copy goes back PLAIN — the same `clean … re_executes` decode
+    # `adopt_write_row` takes — or `%7C` becomes `%257C` on the appended row and the
+    # extended agent's declared run is a command no shell ran (walk-bb711e1.md §14, §29f).
+    if row_has_key "$EXTEND_ROW" re_executes; then
+      EXTEND_RR_ARGS+=("re_executes=$(clean "$(line_field "$EXTEND_ROW" re_executes)" re_executes)")
+    fi
+    if row_has_key "$EXTEND_ROW" teammate_id; then
+      EXTEND_RR_ARGS+=("teammate_id=$(line_field "$EXTEND_ROW" teammate_id)")
+    fi
+    if row_has_key "$EXTEND_ROW" adopted_from; then
+      EXTEND_RR_ARGS+=("adopted_from=$(line_field "$EXTEND_ROW" adopted_from)")
+    fi
+
+    EXTEND_NEW_ROW="$(roster_row "${EXTEND_RR_ARGS[@]}")" || EXTEND_NEW_ROW=""
+    if [ -z "$EXTEND_NEW_ROW" ]; then
+      die "REFUSED — could not build the extended row for $EXTEND_NAME."
+      exit 2
+    fi
+    printf '%s\n' "$EXTEND_NEW_ROW" >> "$ROSTER_FILE" 2>/dev/null || {
+      die "REFUSED — could not write to $ROSTER_FILE."
+      exit 2
+    }
+    say "extended — $EXTEND_NAME is open again: $ROSTER_FILE"
+    exit 0
+    ;;
+
   tick)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -4066,17 +4208,26 @@ EOF
       # more branch beside them.
       #
       # AN UNREADABLE `current:` WITHHOLDS TOO, UNCONDITIONALLY (Step-6 review-a C-5,
-      # review-b finding (c)/N-2). A task-scale `current: T<n>` (no numbered step to compare
-      # against 4), an empty field, or a line that will not parse are all cases where this
-      # gate cannot tell whether Step 3 has passed — and falling through to the
-      # readiness/budget checks below on THAT basis is DOUBT-then-FILL: the one shape this
-      # arm exists to prevent, measured live on a plan whose `current:` carried a sub-step
-      # letter (`3b`) that the old digit-only read rejected as unreadable and then filled
-      # anyway. So this differs from an unreadable RUNG, which falls back to the ceiling —
-      # there is no safe fallback for "did Step 3 pass," only "no."
+      # review-b finding (c)/N-2). An empty field, a line that will not parse, or a `T<n>`
+      # against a table that NUMBERS its rows are all cases where this gate cannot tell which
+      # unit the run is on — and falling through to the readiness/budget checks on THAT basis
+      # is DOUBT-then-FILL: the one shape this arm exists to prevent, measured live on a plan
+      # whose `current:` carried a sub-step letter (`3b`) that the old digit-only read
+      # rejected as unreadable and then filled anyway. So this differs from an unreadable
+      # RUNG, which falls back to the ceiling — there is no safe fallback for "did Step 3
+      # pass," only "no."
+      #
+      # A TASK-SCALE `current: T<n>` IS READABLE NOW, against a task-shaped table (wave-18
+      # REQ-3, D2; ADR-033 decision 2). It names the unit the run is on, which is a run past
+      # its plan, and `fill_step_token` is what pairs the field with the table's shape: the
+      # token is the number at wave scale, `T<n>` at task scale, and empty when the two
+      # disagree. The withhold above is exactly that empty answer, so the shape this arm was
+      # built for — a wave table sitting at `current: T1` (§22g) — still fills nothing.
       SCHED_CURRENT=""
       [ -n "$SCHED_PLAN" ] && SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
-      if [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_CURRENT" ]; then
+      SCHED_STEP=""
+      [ -n "$SCHED_PLAN" ] && SCHED_STEP="$(fill_step_token "$SCHED_PLAN")"
+      if [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_STEP" ]; then
         SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
         say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
       elif [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
@@ -4109,16 +4260,22 @@ EOF
           # `## Tasks` table covers Steps 3-9 in one schedule, so "pending with every
           # dependency landed" is no longer the whole question: a Step-6 review row
           # whose deps happen to be landed is ready in the dependency sense and is
-          # still not this step's work. `units_ready` takes the step as its second
-          # argument and `SCHED_CURRENT` is the step this run is on — already read
-          # and already proven numeric by the approval gate above, which is why this
-          # needs no second parse and no fallback: a `current:` that would not parse
-          # took the withhold arm and never reached here.
-          SCHED_READY="$(units_ready "$SCHED_PLAN" "$SCHED_CURRENT")"
+          # still not this step's work. `SCHED_STEP` is the unit this run is on —
+          # already read and already proven readable by the approval gate above, which
+          # is why this needs no second parse and no fallback: a `current:` that would
+          # not parse took the withhold arm and never reached here.
+          #
+          # AND THE SET IS THE LIBRARY'S, TRIM INCLUDED (wave-18 REQ-3, D2; ADR-033
+          # decision 2). `fill_ready_set` is what `payload/scripts/lib/stop.sh`'s fill
+          # duty computes at the end of every turn, so the rows this tick ORDERS and the
+          # rows that turn's end REFUSES to leave undispatched are one answer rather than
+          # two. It takes the width and the occupancy this arm measured — the rung, and
+          # the roster's own open count — because the wall measures those two differently
+          # and both are right; what may not differ is the set.
+          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$OPEN")"
           SCHED_IDS=""; SCHED_N=0
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
-            [ "$SCHED_N" -lt "$SCHED_GAP" ] || break
             # THE LINE PRINTS THE AGENT NAME, NOT THE TASK ID (T22, A-orch-33). They are the
             # same string for a task that has never run, which is why every fixture and every
             # doc example still reads `FILL T1 T2`. They diverge when the id is already spent,
@@ -4138,7 +4295,7 @@ EOF
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
           else
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending step-${SCHED_CURRENT} task has all its dependencies landed."
+            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending step-${SCHED_STEP} task has all its dependencies landed."
           fi
         fi
       fi

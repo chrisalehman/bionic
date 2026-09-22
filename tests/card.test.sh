@@ -1143,4 +1143,255 @@ expect_true "84: task — rule 4, no continuation line reaches under kind" \
   right_edge_ok "$(printf '%s\n' "$TASK_LONG_NOHDR" | tail -n +2)" \
   "$(col_of "$(printf '%s\n' "$TASK_LONG_NOHDR" | sed -n 1p)" "build")"
 
+
+section "Section 10: T10 — the task-scale card, the configured floor, and per-batch widths (REQ-4 D8/D9; REQ-3 AC-3.4)"
+
+# WHAT THIS SECTION OWNS. Until this task `card.sh` knew ONE table: the wave-scale
+# eleven-column `## Tasks` ledger. It read the six-column TASK-scale table with the
+# same positional map, so a task-scale card printed the `rigor` cell under a heading
+# saying `kind`, the `worktree` cell under `depends` — a row whose tree existed
+# rendered `.worktrees/18-T2` under a column headed `depends`, which is worse than a
+# blank — and the `status` cell under `agent` (research R3, card.sh:781 at d7e841c).
+# The first-batch line keyed on a wave-scale `step` cell holding the literal `4`, a
+# cell the task table does not have, so every task-scale card said "first batch not
+# declared". The Verification line's floor was the LITERAL `tests/run.sh` in the
+# format string, over a skill picture that says `floor <suite>` — a lying surface at
+# every scale, at a gate whose whole job is to be true. And `step2` refused a
+# task-scale plan outright, because a task-scale run writes a design PARAGRAPH in its
+# plan and owes no `## Eval design` table (steps/2.md:60, "no wall at task scale at
+# all").
+#
+# HERMETIC, and the fixtures live in their OWN roots under the sandbox, because the
+# floor row is a question about `.bionic/config.yaml` under the PLAN's project root
+# and the answer must not be able to come from this repo's own config.
+
+T10_ROOT_CFG="${CARD_SANDBOX}/root-configured"
+T10_ROOT_BARE="${CARD_SANDBOX}/root-bare"
+mkdir -p "${T10_ROOT_CFG}/.bionic" "${T10_ROOT_BARE}/.bionic"
+printf 'poker-interval: 20m\nimpact-command: bash tests/lib/impact.sh\n' \
+  > "${T10_ROOT_CFG}/.bionic/config.yaml"
+
+# ── the task-scale plan fixture ──────────────────────────────────────────────
+# Six columns in the contract's own order (steps/3.md:22,
+# `| id | intent | rigor | description | status | worktree |`), trees spelled the
+# way the product spells them — `<NN>-T<n>`, capital T (wave-17 L1, the charter's
+# standing fixture condition) — a `done` row so the pending predicate has something
+# to exclude, and a design paragraph under its own heading.
+T10_TASK_PLAN="${T10_ROOT_CFG}/task-run-18.plan.md"
+cat > "$T10_TASK_PLAN" <<'FIXEOF'
+---
+sdlc-step: 3
+scale: task
+walk: exempt
+rigor: audited
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
+---
+
+# fixture task run 18 · plan
+
+## Goal
+
+Land the fixture task run's three units under one plan, so the card has a
+task-scale artifact to render.
+
+## Design
+
+The fixture's design paragraph, written in the plan itself because a task-scale run
+carries no spec and owes no heading in one.
+
+A second paragraph the card does not show.
+
+## SDLC State
+
+current: T1
+
+## Tasks
+
+| id | intent | rigor | description | status | worktree |
+|---|---|---|---|---|---|
+| T1 | build | audited | The first unit in one line. It has a second sentence the card does not show. | pending | .worktrees/18-T1 |
+| T2 | test | peer-reviewed | The second unit in one line. | pending | .worktrees/18-T2 |
+| T3 | doc | self-verified | The third unit, already landed. | done | — |
+
+## Verification Matrix
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1.1 | T2 | pending | — | — |
+| AC-1.2 | T0 | pending | — | — |
+FIXEOF
+
+# The same plan under a root with NO `impact-command:` — one fixture, two roots, so
+# the floor row varies in exactly the thing it is about.
+T10_TASK_PLAN_BARE="${T10_ROOT_BARE}/task-run-18.plan.md"
+cp "$T10_TASK_PLAN" "$T10_TASK_PLAN_BARE"
+
+# …and the same plan with NO `## Design` heading at all, which is the shape the
+# contract actually obliges (steps/2.md:60): the design paragraph degrades to the
+# plan's Goal rather than printing nothing.
+T10_TASK_NODESIGN="${T10_ROOT_CFG}/task-run-18-nodesign.plan.md"
+awk '/^## Design$/ { skip = 1; next } /^## SDLC State$/ { skip = 0 } skip != 1' \
+  "$T10_TASK_PLAN" > "$T10_TASK_NODESIGN"
+
+# ── AC-4.1: the six columns under their own headings ─────────────────────────
+whole_card step3 "$T10_TASK_PLAN"; T10_S3="$WC_OUT"
+expect_eq "154: AC-4.1 — step3 exits 0 on a task-scale plan" "0" "$WC_RC"
+expect_empty "154a: …and writes nothing to stderr" "$WC_ERR"
+T10_HDR="$(printf '%s\n' "$T10_S3" | grep -m1 '^  Tasks')"
+T10_ROW1="$(printf '%s\n' "$T10_S3" | grep -m1 '^    T1 ')"
+T10_ROW2="$(printf '%s\n' "$T10_S3" | grep -m1 '^    T2 ')"
+expect_contains "155: AC-4.1 — the Tasks header names rigor, not kind" "rigor" "$T10_HDR"
+expect_contains "155a: …and status" "status" "$T10_HDR"
+expect_contains "155b: …and worktree" "worktree" "$T10_HDR"
+expect_absent "155c: …and no longer says depends over a task table" "depends" "$T10_HDR"
+expect_absent "155d: …nor agent" "agent" "$T10_HDR"
+expect_absent "155e: …nor kind" "kind" "$T10_HDR"
+
+# THE COLUMN, NOT THE PRESENCE. A cell is under the heading it belongs to only if it
+# STARTS at that heading's own column — which is the whole defect: at d7e841c the
+# worktree cell was present and printed under the word `depends`.
+expect_eq "156: AC-4.1 — T1's worktree cell starts at the worktree heading's column" \
+  "$(col_of "$T10_HDR" "worktree")" "$(col_of "$T10_ROW1" ".worktrees/18-T1")"
+expect_eq "156a: …and T1's status cell at the status heading's column" \
+  "$(col_of "$T10_HDR" "status")" "$(col_of "$T10_ROW1" "pending")"
+expect_eq "156b: …and T1's rigor cell at the rigor heading's column" \
+  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW1" "audited")"
+expect_eq "156c: …and T2's rigor cell too, so the batch width holds for both rows" \
+  "$(col_of "$T10_HDR" "rigor")" "$(col_of "$T10_ROW2" "peer-reviewed")"
+expect_contains "156d: …and the description column carries the unit's first sentence" \
+  "The first unit in one line." "$T10_ROW1"
+expect_absent "156e: …and not the rest of the description cell" \
+  "second sentence the card does not show" "$T10_S3"
+
+# ── AC-4.2: the first-batch line is read from the task table's own status cells ──
+T10_PW="$(printf '%s\n' "$T10_S3" | grep -m1 'first batch')"
+expect_absent "157: AC-4.2 — a task-scale card never says the first batch is undeclared" \
+  "first batch not declared" "$T10_S3"
+expect_contains "157a: …it names the pending rows" "first batch T1, T2" "$T10_PW"
+expect_absent "157b: …and never the row that is already done" "T3" "$T10_PW"
+
+# ── AC-4.3: the floor is the configured impact command, or an em dash ────────
+T10_V="$(printf '%s\n' "$T10_S3" | grep -m1 'matrix rows')"
+expect_contains "158: AC-4.3 — the floor is the root's own impact-command" \
+  "floor bash tests/lib/impact.sh" "$T10_V"
+expect_absent "158a: …and never the literal that was in the format string" \
+  "floor tests/run.sh" "$T10_S3"
+whole_card step3 "$T10_TASK_PLAN_BARE"; T10_S3_BARE="$WC_OUT"
+T10_V_BARE="$(printf '%s\n' "$T10_S3_BARE" | grep -m1 'matrix rows')"
+expect_contains "158b: AC-4.3 — a root with no impact-command renders an em dash" \
+  "floor —" "$T10_V_BARE"
+expect_absent "158c: …and still never the literal tests/run.sh" \
+  "floor tests/run.sh" "$T10_S3_BARE"
+
+# ── AC-4.4: step2 accepts a task-scale plan and renders its design paragraph ──
+whole_card step2 "$T10_TASK_PLAN"; T10_S2="$WC_OUT"
+expect_eq "159: AC-4.4 — step2 exits 0 on a task-scale plan" "0" "$WC_RC"
+expect_absent "159a: …and never demands an Eval design table" \
+  "no ## Eval design table" "$WC_ERR"
+expect_contains "159b: …and carries the plan's own design paragraph" \
+  "written in the plan itself because a task-scale run" "$T10_S2"
+expect_absent "159c: …and only the FIRST paragraph of it" \
+  "A second paragraph the card does not show" "$T10_S2"
+expect_contains "159d: …and closes on the Step-2 approval question" \
+  'Do you approve this design? Reply "approved" to approve it.' "$T10_S2"
+whole_card step2 "$T10_TASK_NODESIGN"; T10_S2_ND="$WC_OUT"
+expect_eq "160: AC-4.4 — a task-scale plan with no ## Design heading still renders" "0" "$WC_RC"
+expect_contains "160a: …and degrades to the plan's Goal, the shape steps/2.md:60 obliges" \
+  "Land the fixture task run's three units" "$T10_S2_ND"
+
+# ── AC-3.4: per-batch width against the rung ─────────────────────────────────
+# Rows grouped by dependency DEPTH: three rows depend on nothing, two depend on
+# those, so the plan runs in two batches against a rung of 8. The numbers are the
+# ready set `fill_ready_set` names at each batch, not a row count this file does
+# again in its own way.
+T10_WAVE_2B="${T10_ROOT_CFG}/wave-98-twobatch.plan.md"
+cat > "$T10_WAVE_2B" <<'FIXEOF'
+---
+sdlc-step: 3
+scale: wave
+walk: required
+rigor: audited
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
+working-branch: wave/98-twobatch
+integration-branch: main
+base-sha: abc1234
+---
+
+# fixture wave 98 · plan
+
+## Goal
+
+Land five tasks in two dependency batches, so the card has something to measure a
+per-batch width against.
+
+## SDLC State
+
+integration-branch: main
+current: 4
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | REQ-1: the first task, whose cell carries an escaped \| pipe. complexity: standard | implementor | — | 30 | REQ-1 | lib/a.sh | — | pending |
+| T2 | 4 | build | REQ-1: the second task. complexity: standard | implementor | — | 30 | REQ-1 | lib/b.sh | — | pending |
+| T3 | 4 | build | REQ-2: the third task. complexity: standard | implementor | — | 30 | REQ-2 | lib/c.sh | — | pending |
+| T4 | 4 | test | REQ-1: the fourth task. complexity: standard | implementor | T1 | 30 | REQ-1 | lib/d.sh | — | pending |
+| T5 | 4 | test | REQ-2: the fifth task. complexity: standard | implementor | T1, T2, T3 | 30 | REQ-2 | lib/e.sh | — | pending |
+
+## Verification Matrix
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1.1 | T2 | pending | — | — |
+FIXEOF
+
+whole_card step3 "$T10_WAVE_2B"; T10_2B="$WC_OUT"
+expect_eq "161: AC-3.4 — step3 exits 0 on the two-batch plan" "0" "$WC_RC"
+expect_contains "161a: AC-3.4 — the first batch's width is its ready set against the rung" \
+  "batch 1 · 3 of 8" "$T10_2B"
+expect_contains "161b: …and the second batch's own width" "batch 2 · 2 of 8" "$T10_2B"
+expect_absent "161c: …and there is no third batch to name" "batch 3 ·" "$T10_2B"
+expect_contains "161d: …under the Parallel width heading, beside the writer budget" \
+  "8 writers" "$T10_2B"
+# THE ESCAPED PIPE IN T1 IS WHAT MAKES 161b DISCRIMINATE, and it is in the fixture for
+# that reason: this repo writes `\|` inside ledger cells and `lib/units.sh` folds the
+# escape before it splits. A batch pass that split on every `|` reads T1 status cell one
+# field left of where it is, so T1 is never satisfied — both rows of batch 2 depend on
+# T1, and the card reports `batch 2 · 1 of 8`. A wrong number at the approval gate, not
+# a crash: the shape this row exists to keep out.
+expect_contains "161e: AC-3.4 — the escaped pipe reaches the card as an ordinary pipe" \
+  "cell carries an escaped |" "$T10_2B"
+# THE PIN IS NOT VACUOUS: the task-scale plan has ONE batch (its table carries no
+# deps column at all), and it is counted the same way — two pending rows of three.
+expect_contains "162: AC-3.4 — the task-scale plan renders its one batch's width" \
+  "batch 1 · 2 of 8" "$T10_S3"
+expect_absent "162a: …and names no second batch it does not have" "batch 2 ·" "$T10_S3"
+
+# ── AC-4.5: the new cards obey the same budget every other card does ─────────
+# THE ARTIFACTS PATH IS EXCLUDED, and only it: these fixtures live OUTSIDE the
+# project (this suite's hermetic-fixture rule), and an out-of-project artifact path
+# prints AS GIVEN, whole, unbound by the width invariant — Section 7's rows 67/68
+# own that exemption and its rationale. Everything this task renders is bound.
+without_artifact_path() {  # <rendered card> -> the card without its Artifacts path line
+  printf '%s\n' "${1:-}" | grep -v '^    \(requirements\|spec\|plan\)  /'
+}
+expect_empty "163: AC-4.5 — no line of the task-scale Step-3 card exceeds the budget" \
+  "$(over_budget "$(without_artifact_path "$T10_S3")")"
+expect_empty "163a: …nor of the task-scale Step-2 card" \
+  "$(over_budget "$(without_artifact_path "$T10_S2")")"
+expect_empty "163b: …nor of the two-batch wave card" \
+  "$(over_budget "$(without_artifact_path "$T10_2B")")"
+
+# THE WAVE-SCALE CARD IS UNTOUCHED BY ALL OF IT (AC-4.5). Section 7's own fixture,
+# rendered again here, still reads its eleven columns under the wave headings — a
+# scale switch that fired on the wrong table would show up here rather than on a
+# card at an approval gate.
+whole_card step3 "$PLAN_FIX"; T10_WAVE="$WC_OUT"
+T10_WHDR="$(printf '%s\n' "$T10_WAVE" | grep -m1 '^  Tasks')"
+expect_contains "164: AC-4.5 — a wave-scale plan still reads its headings as kind" "kind" "$T10_WHDR"
+expect_contains "164a: …and depends" "depends" "$T10_WHDR"
+expect_contains "164b: …and agent" "agent" "$T10_WHDR"
+expect_absent "164c: …and never the task-scale headings" "worktree" "$T10_WHDR"
+
 finish
