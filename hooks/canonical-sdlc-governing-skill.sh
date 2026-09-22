@@ -446,13 +446,26 @@ gs_bind_fold() {
   printf '%s/%s\n' "$root" "$rel"
 }
 
-# gs_bind_decline <the guard, in words> — the ONE way this arm reports a decline.
+# gs_bind_decline <the guard, in words> — the ONE way this arm reports a decline, for
+# every exit EXCEPT the unengaged one below.
 #
 # `log_finding` is the channel because it does both halves at once: `canonical-sdlc [bind]:
 # <guard>` on stderr for the session that is running, and `- <utc> governing-skill bind:
 # <guard> (<file>)` appended under $HOME for the reader who comes later. One call, one line
 # each, and no second spelling of the sentence to drift.
 gs_bind_decline() { log_finding "bind" "$1"; }
+
+# gs_bind_decline_unengaged <the guard, in words> — the ONLY decline this arm can reach
+# from a session that never invoked the skill (R9, wave-18-fixit-185 T3b). The arming
+# partition is the consent boundary (A-T3.2: "the arming partition is the consent
+# boundary"), and `log_finding` does more than speak — it `mkdir -p`s and appends a line
+# under $HOME even for a session that was never engaged, which is a durable write bionic
+# has no consent to make. This mirrors `log_finding`'s stderr line byte for byte
+# ("canonical-sdlc [bind]: <guard>") and skips the journal half entirely: no `mkdir`, no
+# append, ever, for this one call site. `payload/scripts/lib/root.sh`'s `log_finding`
+# itself is unchanged — every OTHER decline in this arm is already behind an engaged-root
+# check and keeps calling it, journal and all.
+gs_bind_decline_unengaged() { echo "canonical-sdlc [bind]: $1" >&2; }
 
 if [ "$EVENT" = "PostToolUse" ]; then
   # An Edit never binds (AC-9). It changes a plan; it does not create a run — and it is the
@@ -522,9 +535,12 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # An unengaged session is told one thing and only about one shape: it wrote a plan into
   # this project and nothing bound it, which is the question a first-time consumer asks.
   # Everything else it writes is its own business (the arming partition, 1.3.2 close-out).
+  # STDERR ONLY (R9, wave-18-fixit-185 T3b): the arming partition is the consent boundary,
+  # so a session that never invoked the skill causes no durable write here — `log_finding`
+  # is for engaged exits, `gs_bind_decline_unengaged` for this one.
   if [ -z "$GS_BIND_ROOT" ]; then
     [ "$GS_BIND_SHAPE" = run ] \
-      && gs_bind_decline "engagement absent under $GS_BIND_SAY_ROOT"
+      && gs_bind_decline_unengaged "engagement absent under $GS_BIND_SAY_ROOT"
     exit 0
   fi
 
