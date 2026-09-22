@@ -1372,10 +1372,20 @@ warn() { printf 'dispatch-preflight: WARN %s\n' "$1" >&2; }
 # a single path, where even the smallest existing cap is already more than any real value
 # needs, so they keep the cut. Callers that pass no field name (every one but the two
 # `C_FILES`/`C_SUITES` call sites) get today's behaviour exactly, caps unchanged.
+#
+# AND `re_executes=` KEEPS ITS PIPE (T4, REQ-7, D4). This filter runs on the value that is
+# then handed to `roster_row`, which is the ONE writer of the row and the one place that
+# knows how the row holds a `|` — it escapes the character for this field
+# (`payload/scripts/lib/roster.sh`, `roster_pipe_escape`) rather than folding it. Folding
+# here would destroy the pipe before the writer ever saw it, and the quote-aware lift above
+# would be admitting a command the row could not carry. Every OTHER field still folds: none
+# of them is read back and compared to text a human typed, so for them a forged segment is
+# the only risk worth pricing and the fold is still the right answer.
 sanitize() {  # <value> <max-chars> [<field name>]
-  local out
+  local out _s1='\n\r\t|' _s2='    '
+  case "${3:-}" in re_executes) _s1='\n\r\t'; _s2='   ' ;; esac
   out="$(printf '%s' "$1" \
-    | tr '\n\r\t|' '    ' \
+    | tr "$_s1" "$_s2" \
     | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')"
   case "${3:-}" in
     files|suites_allowed|re_executes) printf '%s' "$out" ;;
@@ -1821,15 +1831,51 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # backtick cannot occur inside a run, because a backtick is what ends one.
     #
     # FOUR REFUSALS AT THE LIFT, each naming the token (REQ-1 AC-1.4, ADR-029; wave-16 T25).
-    # A `|` would forge a roster segment; a newline means the marks never closed on their own
-    # line; an unexpanded `$name` is a budget entry no command can equal (see the same rule on
-    # the `Suites:` span above); and an angle bracket that is not a whole slot is a shell
-    # redirection, which used to be dropped in silence. The refusal is made on the bash side —
-    # this prints the fact.
+    # An UNQUOTED `|` is shell plumbing, and plumbing is not one run; a newline means the
+    # marks never closed on their own line; an unexpanded `$name` is a budget entry no
+    # command can equal (see the same rule on the `Suites:` span above); and an angle bracket
+    # that is not a whole slot is a shell redirection, which used to be dropped in silence.
+    # The refusal is made on the bash side — this prints the fact.
+    #
+    # THE PIPE TEST READS QUOTES (T4, REQ-7, D4). It was `index(tok, "|") > 0`, a whole-token
+    # scan, so a quoted regex alternation — the ordinary way a jest repository names two
+    # suites with --testPathPattern — was refused as plumbing, and its author was told to
+    # leave the shell plumbing off the span about a character that was never plumbing. The
+    # spelling cannot be shown in this comment: the whole awk program is one single-quoted
+    # shell word. tests/dispatch-preflight.test.sh 18T4a carries it. The delimiter problem
+    # that reading was defending against is solved where it lives, in the row
+    # (`payload/scripts/lib/roster.sh` escapes the field), not by refusing the command.
     #
     # A CAP HIT IS LOUD, the `suite_names()` precedent: a silently dropped fourth run is a
     # declared command the budget arm would then refuse at run time, for a reason the author
     # was never told.
+    # WHETHER A TOKEN CARRIES A PIPE THE SHELL WOULD READ AS PLUMBING (T4; REQ-7, D4).
+    #
+    # THE STATE MACHINE IS THE ONE THE SHELL USES, minus what a `|` cannot escape into: a single
+    # quote ends only at the next single quote, a double quote only at the next double
+    # quote, and outside both a backslash protects the character after it. A `|` met while
+    # any of those hold is a literal character in an argument — a regex alternation, a
+    # bracket expression, an awk program — and a run carrying one is still one run.
+    #
+    # AN UNBALANCED QUOTE ADMITS THE REST OF THE TOKEN, and that is the honest answer rather
+    # than a hole: a command whose quote never closes is a shell SYNTAX error, so the pipe
+    # inside it can never run as plumbing either. Refusing it here would invent a fifth
+    # fault word for a brief whose real fault the shell will name the moment it is typed.
+    #
+    # THE QUOTE CHARACTERS ARE READ OFF `QUOTES`, never spelled, for the reason the BEGIN
+    # block records beside `BT`: this whole program is one single-quoted shell word, so a
+    # bare apostrophe anywhere in it — even in a comment — ends the word before awk sees it.
+    function unquoted_pipe(t,   n, k, ch, q) {
+      n = length(t); q = ""
+      for (k = 1; k <= n; k++) {
+        ch = substr(t, k, 1)
+        if (q != "") { if (ch == q) q = ""; continue }
+        if (ch == BS) { k++; continue }
+        if (ch == SQ || ch == DQ) { q = ch; continue }
+        if (ch == "|") return 1
+      }
+      return 0
+    }
     function marked_runs(s,   i, j, tok, out, c, dropped, why) {
       out = ""; c = 0; dropped = ""
       i = 1
@@ -1843,7 +1889,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         i = i + j                              # first character after the closing mark
         why = ""
         if (index(tok, "\n") > 0)       why = "a newline"
-        else if (index(tok, "|") > 0)   why = "a pipe"
+        else if (unquoted_pipe(tok))    why = "a pipe"
         else if (tok ~ /[$][A-Za-z_{]/) why = "an unexpanded shell variable"
         if (why != "") { print "re_executes_bad=" why ": " collapse(tok); continue }
         tok = collapse(tok)
@@ -1922,6 +1968,12 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # backtick first, for claimpat(), and this is the same character read off the same
       # source.
       BT = substr(QUOTES, 1, 1)
+      # THE OTHER TWO, off the same source and for the same reason (T4). `QUOTE_CHARS` is
+      # assembled backtick, double quote, single quote — the order claimpat() reads it in.
+      # `BS` is a single backslash: in an awk string literal it is written doubled.
+      DQ = substr(QUOTES, 2, 1)
+      SQ = substr(QUOTES, 3, 1)
+      BS = "\\"
       # LONGEST FIRST — see the nesting note above. `-` marks a label that only
       # BOUNDS a span; it is a real brief field, just not one the roster lifts.
       #
@@ -2679,9 +2731,10 @@ fi
 #
 # BOTH SPELLINGS, ONE ARM. `Re-executes:` gains the rule at birth and `Suites:` gains it
 # here, because a wall whose prose is true for one of two spellings of one idea is a wall
-# nobody can read. A run also refuses on a `|` (it would forge a roster segment), on a
-# newline (the marks never closed on their own line), or on an angle bracket that is not a
-# whole slot (a redirection — wave-16 T25, walk §W7).
+# nobody can read. A run also refuses on an UNQUOTED `|` (shell plumbing is not one run; a
+# quoted one is an ordinary argument and is admitted — T4, REQ-7), on a newline (the marks
+# never closed on their own line), or on an angle bracket that is not a whole slot (a
+# redirection — wave-16 T25, walk §W7).
 #
 # THE TOKEN IS IN THE DETAIL, NOT THE ONE LINE. A command is arbitrarily long and the
 # refusal line is bounded at 100 columns (AC-E1.3); the fact fits the line, the evidence
@@ -2692,10 +2745,11 @@ if [ -n "$C_RUNS_BAD" ]; then
 
 A declared run is matched against what the agent actually types, before any shell has
 expanded anything — so a name that is still a variable here can be neither derived from
-nor checked against anything, and a run carrying a pipe, a redirection, or spanning a line
-break is not one run. Declare the command; leave the shell plumbing off the span. An
-unfilled \`<slot>\` on its own is guidance and is ignored, but a bracket anywhere else in
-the run is read as redirection.
+nor checked against anything, and a run holding an unquoted pipe, a redirection, or a line
+break is not one run. Declare the command; leave the shell plumbing off the span. A pipe
+INSIDE quotes is an ordinary argument and is admitted, so a regex alternation needs no
+rewriting. An unfilled \`<slot>\` on its own is guidance and is ignored, but a bracket
+anywhere else in the run is read as redirection.
 
 Fix: mark each run with backticks, on a line of its own, at most three —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
