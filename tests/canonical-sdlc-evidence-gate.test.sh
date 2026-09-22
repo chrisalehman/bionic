@@ -8660,6 +8660,26 @@ s9_expect_outside "9a …and '-C' at a subdirectory of the scratch repo names th
 s9_expect_judged "9a …but 'cd <scratch> && cd <root> && git commit' is not exempted — two directories, refused" \
   "$s9_root" "cd $s9_scratch && cd $s9_root && git commit -m x" "changes into"
 
+# ONE COMMIT SEGMENT OR NONE EXEMPTED (review R1, wave-19). The arm places the FIRST commit it
+# finds, so a command carrying two used to be exempted for the first one's repository while the
+# second landed in the root unjudged. Only a positive answer exempts, and a positive answer is
+# about ONE commit: any command text carrying two or more commit segments is judged as before.
+s9_expect_judged "9a R1 'git -C <scratch> commit && git commit' is judged — the second commit lands in the root" \
+  "$s9_root" "git -C $s9_scratch commit -m x && git commit -m y" "the suite is not fully green"
+s9_expect_judged "9a R1 …and 'cd <scratch> && git commit && cd <root> && git commit' is judged too" \
+  "$s9_root" "cd $s9_scratch && git commit -m x && cd $s9_root && git commit -m y" "the suite is not fully green"
+s9_expect_judged "9a R1 …and a second commit inside an 'sh -c' string counts as a second commit" \
+  "$s9_root" "git -C $s9_scratch commit -m x && bash -c 'git -C $s9_root commit -m y'" "the suite is not fully green"
+s9_expect_judged "9a R1 …and 'cd <scratch> && git -C <root> commit' places the one commit in the root" \
+  "$s9_root" "cd $s9_scratch && git -C $s9_root commit -m x" "the suite is not fully green"
+# THE RULE'S STATED COST: two commits both into the scratch repo are judged too. The gate counts
+# commit segments; it does not place each one, so it cannot tell this from the shapes above.
+s9_expect_judged "9a R1 …and two commits both into the scratch repo are judged (the count, not a placement, decides)" \
+  "$s9_root" "git -C $s9_scratch commit -m x && git -C $s9_scratch commit -m y" "the suite is not fully green"
+# CONTROL: the count is of COMMIT segments. One commit beside other git calls is still exempted.
+s9_expect_outside "9a R1 control: one outside commit beside a non-commit git call is still admitted with the line" \
+  "$s9_root" "git -C $s9_scratch add -A && git -C $s9_scratch commit -m x && git -C $s9_scratch log -1" "$s9_scratch"
+
 # NOT A REPOSITORY AT ALL: git cannot name one, so the gate cannot say it is outside, and it
 # keeps today's verdict (the commit would fail on its own; the wall does not guess).
 s9_bare_dir="$s9_tmp/not-a-repo"; mkdir -p "$s9_bare_dir"
