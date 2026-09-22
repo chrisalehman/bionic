@@ -2618,7 +2618,7 @@ _eg_row_for_worktree() {
 }
 
 _EG_WT=""
-_EG_SUBSTITUTED=0    # set by the task-arms fork below; read at the pointer-step exit (D7)
+_EG_SUBSTITUTED=0    # set by BOTH substitution forks below (step-below, active-status); read at the pointer-step exit (D7)
 _eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CDS
 
 # WHICH DIRECTORY DOES THIS COMMIT RUN IN? (critic issue 1; wave-17 REQ-3, D4.) When the
