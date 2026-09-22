@@ -1650,21 +1650,43 @@ STREAM=$(tail -n "$SCAN_WINDOW_LINES" "$TRANSCRIPT" 2>/dev/null | jq -Rr '
       else $line
       end
     ) as $auth
+  | (
+      if ($r != null and $r.type == "user" and (($r.message.content // []) | type) == "array") then
+        ([$r.message.content[]?
+          | select(.type == "tool_result")
+          | (if (.content | type) == "string" then .content
+             elif (.content | type) == "array" then
+               ([.content[]? | select(.type == "text") | .text] | join("\n"))
+             else "" end)
+         ] | join("\n"))
+      else "" end
+    ) as $trc
   | (if (($auth // "") | contains("<command-name>/clear</command-name>")) then "MARK\tclear" else empty end),
     (if (($auth // "") | contains("source: resume")) then "MARK\tresume" else empty end),
     (if ($line | contains("poker: FILL ")) then
        "FILL\t" + (($line | split("poker: FILL ")[1] | split("\\n")[0] | split("\"")[0]))
      else empty end),
     (if (($auth // "") | contains("fill-declined:")) then "DECLINE\t1" else empty end),
-    # THE WITHHELD LINE (wave-19 REQ-4, D6; ADR-034 decision 3): `poker: fill withheld —
-    # <REASON> <measurement>`, printed by the tick on its HOLD and EMERGENCY paths. Read off
-    # the raw line like the FILL above — the stdout of the tick reaches the transcript in a
-    # tool_result — but only off a USER record, which is where a tool_result lives: the
-    # model quoting the words in its own text is not the tick having printed them. The
-    # reason is the first word after the dash (the dash may be raw or `\u2014`-escaped),
-    # and only the fold below decides which reasons exempt.
-    (if ($r != null and $r.type == "user" and ($line | contains("poker: fill withheld"))) then
-       "WITHHELD\t" + (($line | split("poker: fill withheld")[1] // "")
+    # THE WITHHELD LINE (wave-19 REQ-4, D6; ADR-034 decision 3; REQ-4b R5): `poker: fill
+    # withheld -- <REASON> <measurement>`, printed by the tick on its HOLD and EMERGENCY
+    # paths. Read off the PARSED tool_result content of a USER record ($trc, above) -- the
+    # model quoting the words in its own text is not the tick having printed them (that
+    # exclusion is $r.type == "user" and the tool_result selector, unchanged from before).
+    #
+    # ANCHORED, not a bare substring (R5, fixed here). A bare `contains` over the raw
+    # transcript line also matched a tool_result that merely ECHOED the phrase -- reading this
+    # very test file with `cat`/`sed`, or `grep -rn "poker: fill withheld -- ..." tests` --
+    # because the literal sits in a `type: user` record either way, and a `tool_result` IS a
+    # user record. `say()` (hooks/session-poker.sh:350) prints the line as
+    # `printf "poker: %s\n"`, so in the ticks OWN stdout the phrase always starts a line --
+    # either the first line of the tool_result content, or immediately after an embedded
+    # `\n`. A `grep -rn` hit carries a `file:line:` prefix first; a `cat`/`sed` of the source
+    # line carries the surrounding shell text (` echo "...`) first -- neither lands the phrase
+    # at that anchor, which is the gap this regex tests for. The reason is still the first word
+    # after the dash (raw or `\u2014`-escaped), and only the fold below decides which reasons
+    # exempt.
+    (if ($trc | test("(^|\n)poker: fill withheld")) then
+       "WITHHELD\t" + (($trc | split("poker: fill withheld")[1] // "")
                         | sub("^[^A-Za-z]*(u2014)?[^A-Za-z]*"; "")
                         | ([scan("^[A-Z]+")] | .[0] // ""))
      else empty end),
