@@ -1723,12 +1723,41 @@ else
   no "91b: …and a requirement row names its provenance and its criteria count" "card body: $CARD1"
 fi
 
-if has_all "$CARD2" "Decisions" "serves" "ADR" "Ownership" "Eval design" "Open at approval" "Artifacts"; then
-  ok "92a: the Step-2 card carries Decisions (serves/ADR), Ownership, Eval design, Open at approval, Artifacts"
+if has_all "$CARD2" "Decisions" "serves" "ADR" "Ownership" "Eval design" "Artifacts"; then
+  ok "92a: the Step-2 card carries Decisions (serves/ADR), Ownership, Eval design, Artifacts"
 else
-  no "92a: the Step-2 card carries Decisions (serves/ADR), Ownership, Eval design, Open at approval, Artifacts" \
+  no "92a: the Step-2 card carries Decisions (serves/ADR), Ownership, Eval design, Artifacts" \
      "card body: $CARD2"
 fi
+
+# 92a2: AC-11.2's sibling for Step 2 (T8's carry-over, wave-19 REQ-11). `_card_step2`
+# (payload/scripts/card.sh) never prints an `Open at approval` section — the scaffold
+# carried one anyway until this wave, the same lying-surface class C8 found and fixed on
+# Step 3 (docs-pins 107d-g). The scaffold is now the step's sole statement of what the
+# card carries, so the section's absence is pinned directly, not left to an omission from
+# 92a's needle list — a needle list a reintroduced section would still satisfy in silence.
+case "$CARD2" in
+  *"Open at approval"*)
+    no "92a2: the Step-2 card no longer carries the un-rendered Open-at-approval section" \
+       "card body: $CARD2" ;;
+  *)
+    ok "92a2: the Step-2 card no longer carries the un-rendered Open-at-approval section" ;;
+esac
+
+# 92a3: Anti-vacuity — the retired section put back into a copy of the scaffold must fail
+# 92a2's check, proving 92a2 discriminates rather than being vacuously true forever.
+DOCTORED_STEP2_OPEN_AT="$TMP/step2-open-at-approval.md"
+awk '/^  Artifacts$/ { print "  Open at approval"; print "    <design question still open>   → <what closes it>"; print "" }
+     { print }' "$STEP2_MD" > "$DOCTORED_STEP2_OPEN_AT"
+DOCTORED_CARD2="$(card_span "$DOCTORED_STEP2_OPEN_AT" 'Step 2 · Design')"
+case "$DOCTORED_CARD2" in
+  *"Open at approval"*)
+    ok "92a3: a scaffold carrying the retired Open-at-approval section fails 92a2's check (pin discriminates)" ;;
+  *)
+    no "92a3: a scaffold carrying the retired Open-at-approval section still passes 92a2's check (pin is vacuous)" \
+       "doctored card body: $DOCTORED_CARD2" ;;
+esac
+
 if has_all "$CARD2" "static" "unit" "hermetic" "live" "human" "total"; then
   ok "92b: …and its Eval design is one row per requirement with the five type counts and a total"
 else
