@@ -86,6 +86,57 @@ roster_header() {  # -> the roster file's first line
     "$ROSTER_SCHEMA_VERSION"
 }
 
+# ---------- THE DELIMITER, ESCAPED RATHER THAN LOST (T4, REQ-7, D4) ---------------------
+#
+# WHAT THE FOLD COSTS. Every value on this row used to have its `|` replaced by a space,
+# and for prose and paths that is the right answer: nothing reads them back and compares
+# them to something a human typed, so a forged segment is the only risk worth pricing.
+# `re_executes=` is different in kind. Its value is a COMMAND, and
+# `payload/scripts/lib/walls.sh`'s `_run_is_declared` compares it to the agent's own argv
+# text character for character — so a fold there does not merely disfigure the value, it
+# breaks the contract the field exists to carry. A jest or pytest brief declaring
+# `--testPathPattern='(a|b)...'` was admitted at dispatch and then refused at run time for
+# the very run its brief had declared (wave-16 T25's failure, through a different door).
+#
+# THE FORM IS PERCENT-ENCODING, and the choice is between three candidates:
+#   * `%7C` (this one). `%` is rare in a test command, so a row stays readable by eye, and
+#     the encoding is the one a reader already knows on sight from a URL.
+#   * `\|`. Rejected: the commands that carry a pipe are regex commands, and regexes are
+#     made of backslashes — `'(a|b)\.spec\.ts$'` would have to double every one of them,
+#     turning the row into something no reader can check against the brief.
+#   * a private sentinel (`<PIPE>`, `\x7c`). Rejected: a spelling nobody recognises, that
+#     a command could contain by accident with no way to say it meant it.
+#
+# THE ESCAPE CHARACTER IS ESCAPED TOO (`%` -> `%25`, applied FIRST), which is what makes
+# the pair a bijection rather than a one-way fold with better manners. Without it a command
+# holding the literal text `%7C` would decode into a different command holding a pipe, and
+# be admitted under the first one's name. Decoding reverses the order for the same reason.
+#
+# THE DELIMITER IS STILL DEFENDED. `%7C` holds no `|`, so an encoded value cannot forge a
+# segment on a line every reader in the fleet parses BY KEY — the property the fold bought,
+# kept, and now reversible.
+#
+# PLAIN IN MEMORY, ENCODED ON DISK — the rule every caller follows. `roster_row` encodes as
+# it writes, so what is handed to it is always the command as the brief spelled it; every
+# reader of the field decodes before it compares or prints. The one caller that is both,
+# `adopt_write_row` in `hooks/session-poker.sh`, decodes what it lifted so this writer can
+# encode it again, and the row it appends is byte-identical to the row it read.
+#
+# THE READER THAT CANNOT SOURCE THIS FILE. `payload/scripts/lib/walls.sh` runs inside
+# `hooks/bash-walls.sh`, whose `BIONIC_LIB_WANT` does not carry `roster.sh` and whose wall
+# table would have to grow a library for two parameter expansions. It spells the decode
+# twin inline beside its one read of the field, with a comment naming this pair as the
+# definition — the same posture `sanitize`/`clean` and `parse_seconds` already hold.
+roster_pipe_escape() {  # <plain value> -> the value as the row stores it
+  local v="${1//%/%25}"
+  printf '%s' "${v//|/%7C}"
+}
+
+roster_pipe_unescape() {  # <stored value> -> the value as its author typed it
+  local v="${1//\%7C/|}"
+  printf '%s' "${v//\%25/%}"
+}
+
 roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or a bare word
   local status="" session="" name="" agent_id="" launched_at="" subagent_type=""
   local model="" deliverable="" source="" duration="" progress="" claims=""
@@ -102,7 +153,14 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
     esac
     key="${arg%%=*}"
     val="${arg#*=}"
-    val="${val//|/ }"
+    # ONE FIELD ESCAPES, THE REST FOLD — see the pair above for why the two answers are
+    # different answers. A subshell on one field of one row is a cost the dispatch path
+    # does not feel; four of them on every field, which is what the fold's own comment
+    # refused, is a different bill.
+    case "$key" in
+      re_executes) val="$(roster_pipe_escape "$val")" ;;
+      *)           val="${val//|/ }" ;;
+    esac
     val="${val//$'\n'/ }"
     val="${val//$'\r'/ }"
     val="${val//$'\t'/ }"
