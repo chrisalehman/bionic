@@ -1416,6 +1416,94 @@ expect_eq "13.16 reversing every column of the twelve-column table changes not o
 expect_eq "13.17 …and it reports the same three faults, in the same words" \
   "$VAL_BASE" "$(call units_validate "$SANDBOX/base-column-reversed.md")"
 
+# ============================================================
+section "15 — units_ready at TASK scale: T<n>, no step cell, done deps (wave-18 REQ-3, AC-3.3; ADR-033)"
+# ============================================================
+#
+# THE SECOND TABLE SHAPE THIS LIBRARY ALREADY READS. A task-scale plan carries
+# `| id | intent | rigor | description | status | worktree |` — slot 3 under its second name
+# (§2's `rigor` alias), no `step` cell and no `deps` cell — and until this wave `units_ready`
+# refused it at the door: `case "$step" in *[!0-9]*) return 2` rejected the `T<n>` the plan's
+# `current:` carries, so the tick's FILL and the stop library's fill duty could never fire on
+# the one run shape that reported the friction (ADR-033 decision 2).
+#
+# THE STEP CELL IS THE DISCRIMINATOR, NOT THE ARGUMENT ALONE. A row that carries a step is a
+# WAVE row and is never ready at task scale, whatever the caller passed — which is what keeps
+# the DOUBT-then-FILL shape the approval gate closed (session-poker §22g: a wave table sitting
+# at `current: T1`) from re-opening through this door.
+#
+# AND THE DEPENDENCY WORD IS `done`, not `landed`: `done` is the one terminal word at task
+# scale (ADR-033 decision 1), so a task row whose dep is `landed` is NOT ready — the word is
+# not one that table can produce, and reading it as satisfaction would schedule against a
+# status nobody wrote.
+
+cat > "$SANDBOX/task-scale.md" <<'TASK_SCALE_EOF'
+## Tasks
+
+| id | intent | rigor | description | status | worktree |
+|---|---|---|---|---|---|
+| T1 | bugfix | standard | the first unit | done | — |
+| T2 | bugfix | standard | the second unit | pending | — |
+| T3 | bugfix | audited | the third unit | pending | — |
+| T4 | bugfix | standard | a unit already in flight | active | 18-T4 |
+| T5 | bugfix | standard | a dropped unit | dropped | — |
+TASK_SCALE_EOF
+
+expect_eq "15.1 a task-scale current names the pending rows, in TABLE order" \
+  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/task-scale.md" T1)"
+expect_eq "15.2 …and the call succeeds rather than refusing the non-numeric step" \
+  "0" "$(call_rc units_ready "$SANDBOX/task-scale.md" T1)"
+expect_eq "15.3 …a done row is not offered again" "" \
+  "$(call units_ready "$SANDBOX/task-scale.md" T1 | grep -x T1)"
+expect_eq "15.4 …an active row is not offered" "" \
+  "$(call units_ready "$SANDBOX/task-scale.md" T1 | grep -x T4)"
+expect_eq "15.5 …and a dropped row is not offered" "" \
+  "$(call units_ready "$SANDBOX/task-scale.md" T1 | grep -x T5)"
+expect_eq "15.6 the id the run is ON is answered for like any other row — status decides, not identity" \
+  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/task-scale.md" T2)"
+
+# The step argument is still validated: a word that is neither a number nor `T<n>` is a
+# caller fault and keeps the status it has always had.
+expect_eq "15.7 a step that is neither numeric nor T<n> still exits 2" "2" \
+  "$(call_rc units_ready "$SANDBOX/task-scale.md" wednesday)"
+expect_eq "15.8 …and T with no digits is not a task-scale step either" "2" \
+  "$(call_rc units_ready "$SANDBOX/task-scale.md" T)"
+
+# A numeric step against a table whose rows carry no step cell answers nothing — the wave
+# arm's own rule (`the row's step must equal the step asked for`), unchanged.
+expect_eq "15.9 a numeric step against a task-scale table is empty, not everything" "" \
+  "$(call units_ready "$SANDBOX/task-scale.md" 4)"
+
+# THE MIRROR, and the one that matters: a WAVE table asked at `T<n>`. Every row carries a
+# step cell, so none of them is a task row, and the answer is empty rather than the whole
+# pending set (§22g's shape).
+expect_eq "15.10 a wave table asked at a task-scale step answers nothing at all" "" \
+  "$(call units_ready "$SANDBOX/ready-a.md" T1)"
+expect_eq "15.11 …and says so with success, not with the step-refusal status" "0" \
+  "$(call_rc units_ready "$SANDBOX/ready-a.md" T1)"
+
+# THE DEPENDENCY WORD AT TASK SCALE. The shipped six-column table has no `deps` column, so
+# every pending row is ready; a table that grows one is read with `done` as satisfaction,
+# because `landed` is a word no task-scale ledger writes (ADR-033 decision 1).
+cat > "$SANDBOX/task-scale-deps.md" <<'TASK_DEPS_EOF'
+## Tasks
+
+| id | intent | rigor | description | deps | status | worktree |
+|---|---|---|---|---|---|---|
+| T1 | bugfix | standard | the finished unit | — | done | — |
+| T2 | bugfix | standard | behind a done unit | T1 | pending | — |
+| T3 | bugfix | standard | behind a pending unit | T4 | pending | — |
+| T4 | bugfix | standard | the unit T3 waits on | — | pending | — |
+| T5 | bugfix | standard | behind a landed unit | T6 | pending | — |
+| T6 | bugfix | standard | a row carrying the wave word | — | landed | — |
+TASK_DEPS_EOF
+
+expect_eq "15.12 a task row whose every dep is done is ready, and T4 with no dep beside it" \
+  "$(printf 'T2\nT4')" "$(call units_ready "$SANDBOX/task-scale-deps.md" T1)"
+expect_eq "15.13 …a task row behind a pending dep is not ready" "" \
+  "$(call units_ready "$SANDBOX/task-scale-deps.md" T1 | grep -x T3)"
+expect_eq "15.14 …and landed does not satisfy a task-scale dep — done is the word" "" \
+  "$(call units_ready "$SANDBOX/task-scale-deps.md" T1 | grep -x T5)"
 
 
 finish
