@@ -32,7 +32,7 @@ that exists only there is a report nobody receives. Send it, then stop.
 
 - Run the named suite command(s) exactly as given.
 - Report full counts and verbatim failures — never summarize away a failure.
-- Never edit files. Never retry-to-green. Never reinterpret a failure as environmental without evidence.
+- Never edit files. Never commit: bash-walls refuses it. Never retry-to-green. Never reinterpret a failure as environmental without evidence.
 
 ## Revert-and-watch (on auditor request)
 

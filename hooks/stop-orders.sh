@@ -6,10 +6,14 @@
 #
 # This is NOT a hook. Like hooks/session-sweeper.sh and hooks/stop-check.sh it lives in
 # hooks/ for test-harness pairing and to ride the payload's hooks/ directory into the
-# mounted plugin; it is registered on NO channel. Two questions, one invocation each:
+# mounted plugin; it is registered on NO channel. Three verbs, one invocation each:
 #
 #     bash ~/.claude/hooks/stop-orders.sh order <target> [--at <epoch>]
+#     bash ~/.claude/hooks/stop-orders.sh stopped <name>
 #     bash ~/.claude/hooks/stop-orders.sh standdown
+#
+# STOPPED closes the row of an agent that has been stopped, through the sweeper's own ack
+# (wave-19 T1, ADR-034: the ack is the close); an unknown or already-acked name is refused.
 #
 # ORDER records that a human asked for an agent to be stopped, and prints what stopping it
 # gives up. It is not evidence and it does not discharge the contract — it is an
@@ -44,8 +48,9 @@
 #   stop-orders-<session>.state  the orders this script owns (append-only)
 #
 # Exit codes:
-#   0 — the order was recorded / the stand-down was computed
-#   2 — usage error, or a refusal (a state path is a symbolic link, or is unwritable)
+#   0 — the order was recorded / the row was acked / the stand-down was computed
+#   2 — usage error, or a refusal (a state path is a symbolic link, or is unwritable; a
+#       `stopped` name with no row, or already acked)
 #   3 — no session key; nothing read, nothing written
 #
 # Session key: CLAUDE_CODE_SESSION_ID, exactly as hooks/session-sweeper.sh takes it.
@@ -78,6 +83,8 @@ usage() {  # [message]
   die "Usage:"
   die "  bash ${HOOK_DIR}/stop-orders.sh order <target> [--at <epoch>] [--by human|patrol]"
   die "        record a stop order and print what stopping gives up"
+  die "  bash ${HOOK_DIR}/stop-orders.sh stopped <name>"
+  die "        close the row of an agent you have stopped (the sweeper's ack, reason landed)"
   die "  bash ${HOOK_DIR}/stop-orders.sh standdown"
   die "        list every landed row with an address you can stop it by"
   exit 2
@@ -124,6 +131,12 @@ case "$VERB" in
         *) usage "unknown argument: $1" ;;
       esac
     done
+    ;;
+  stopped)
+    [ $# -ge 1 ] || usage "stopped needs a target."
+    case "$1" in -*) usage "the target comes first: '$1' is an option, not a target." ;; esac
+    ORDER_TARGET="$1"; shift
+    [ $# -eq 0 ] || usage "stopped takes one target and no options; got $1."
     ;;
   standdown)
     [ $# -eq 0 ] || usage "standdown takes no arguments; got $#."
@@ -501,6 +514,43 @@ case "$VERB" in
     exit 0
     ;;
 
+  stopped)
+    # THE ACK IS THE CLOSE (wave-19 T1; D3, ADR-034 d1). A TaskStop ends a process and closes
+    # nothing; this verb closes the name beside the stop. It owns no predicate of its own:
+    # ONE verdict read decides whether there is an open row to close, and the close is the
+    # sweeper's `ack` — character for character the call the tick's STANDDOWN close makes
+    # (hooks/session-poker.sh) — so the ledger keeps its one writer. The sweeper records an
+    # unknown name and warns rather than refusing, so the refusal is decided here, first.
+    _target="$(clean "$ORDER_TARGET")"
+    [ -n "$_target" ] || usage "stopped needs a non-empty target."
+    if [ ! -f "$SWEEPER" ]; then
+      die "REFUSED — the sweeper is not beside this script ($SWEEPER); nothing was acked."
+      exit 2
+    fi
+    _v=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+          CLAUDE_CODE_SESSION_ID="$SESSION_ID" bash "$SWEEPER" verdict 2>/dev/null )
+    _line=$(printf '%s\n' "$_v" | grep -F 'landing-verdict/v1|' \
+      | awk -v want="$_target" '{ n = split($0, f, "|"); for (i = 1; i <= n; i++)
+          if (f[i] == "name=" want) { print; exit } }')
+    if [ -z "$_line" ]; then
+      die "REFUSED — no contract row named $_target on this session's roster; nothing was acked."
+      exit 2
+    fi
+    if [ "$(line_field "$_line" acked)" = "yes" ]; then
+      die "REFUSED — $_target is already acked; a second ack would say nothing new."
+      exit 2
+    fi
+    if ! _ack=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                 CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                 bash "$SWEEPER" ack "$_target" --by patrol --reason landed 2>&1 ); then
+      die "REFUSED — the sweeper could not ack $_target: $(printf '%s' "$_ack" | head -1)"
+      exit 2
+    fi
+    [ -n "$_ack" ] && printf '%s\n' "$_ack"
+    say "stopped: $_target — its row is closed (acked by patrol, reason landed)."
+    exit 0
+    ;;
+
   standdown)
     if [ ! -f "$SWEEPER" ]; then
       die "REFUSED — the sweeper is not beside this script ($SWEEPER)."
@@ -576,7 +626,13 @@ case "$VERB" in
       # The ack is read off the SAME LINE this loop is already walking (epic-16 wave-02 S9).
       # It used to come from a private copy of a ledger reader living in this file, one of
       # three; the verb that printed the line owns the ledger, so it prints the answer too.
+      # AN ACKED ROW LEAVES THE LIST ONLY WHEN A FRESH PANEL SHOWS ITS AGENT GONE (wave-19
+      # T1; D3). Acked and gone is closed and has nobody to stop, so it is not listed at all;
+      # acked but still listed — or acked under a stale or absent answer, which is not
+      # evidence of anything — keeps its stop address, because an ack closes a name and
+      # ends no process.
       if [ "$(line_field "$_l" acked)" = "yes" ]; then
+        [ "$_live_ok" -eq 1 ] && ! _is_live "$_name" && continue
         _why="acked"
       elif [ "$_state" = "WAIVED" ]; then
         _why="waived"

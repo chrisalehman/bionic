@@ -2560,10 +2560,10 @@ expect_contains "12a-T22-f2 …and the order is written, same as the unswept cas
   "|by=patrol|target=done-writer" \
   "$(cat "$R12FT/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
 
-# THE TRUE SILENT CASE: the same swept row, but the panel no longer lists it. The landing that
-# swept it already closed the row — a stand-down here would name an agent that is gone, and an
-# ack here would close the row a second time for no new fact. Both are the noise this arm exists
-# to remove.
+# THE SAME SWEPT ROW, GONE FROM THE PANEL: no stand-down — there is nobody to stop — but the
+# row IS closed, by the ack (RE-AUTHORED at wave-19 T1; ADR-034 d1). The marker records that a
+# landing was seen, not that the name was closed; skipping the ack here left every writer that
+# reported open for the life of the session (ideas row 16).
 R12FG="$(make_repo s12-taskstop-swept-gone)"; new_roster "$R12FG"; armed_ago "$R12FG"; delivered_plan "$R12FG"
 DEL_FG="$R12FG/delivered.md"; echo "done" > "$DEL_FG"
 add_row "$R12FG" name=done-writer deliverable="$DEL_FG" duration="1 minute" \
@@ -2575,8 +2575,9 @@ expect_absent "12a-T22-f3 a swept row whose agent the panel no longer lists draw
   "poker: STANDDOWN" "$OUT"
 expect_eq "12a-T22-f4 …and no order is written for it" "no" \
   "$([ -f "$R12FG/.bionic/tmp/stop-orders-$SID.state" ] && echo yes || echo no)"
-expect_eq "12a-T22-f5 …and it is not acked either — the landing already closed it" "no" \
-  "$([ -f "$R12FG/.bionic/tmp/sweeper-$SID.state" ] && echo yes || echo no)"
+expect_contains "12a-T22-f5 …and it is acked by the Patrol, reason landed — the ack is the close" \
+  "|name=done-writer|by=patrol|reason=landed" \
+  "$(cat "$R12FG/.bionic/tmp/sweeper-$SID.state" 2>/dev/null)"
 
 # The second control: an OPEN row is not a MET lineage and is never named.
 R12GT="$(make_repo s12-taskstop-open)"; new_roster "$R12GT"; armed_ago "$R12GT"; delivered_plan "$R12GT"
@@ -4661,8 +4662,11 @@ expect_absent "26a meta: …and no sweep has ever marked it" "landing-swept/v1" 
 s19_answer fresh "some-other-agent:running"
 poke "$R26A" tick
 expect_eq "26a the tick still exits 0 — closing a moot row is not a refusal" "0" "$RC"
-expect_contains "26a an adopted MET row whose agent is gone is acked by the Patrol" \
-  "|name=gone-writer|by=patrol|reason=moot-and-gone" \
+# RE-AUTHORED at wave-19 T1 (D2): the row declared a deliverable and met it, so the close
+# says `landed`; `moot-and-gone` is kept for a row that declared nothing (§33c) and for a
+# duplicate start (26c).
+expect_contains "26a an adopted MET row whose agent is gone is acked by the Patrol, reason landed" \
+  "|name=gone-writer|by=patrol|reason=landed" \
   "$(cat "$(ack_ledger_of "$R26A")" 2>/dev/null)"
 expect_contains "26a2 …through the real ack verb, on the schema its one reader reads" \
   "sweeper-ledger/v1|event=ack|" "$(cat "$(ack_ledger_of "$R26A")" 2>/dev/null)"
@@ -5493,5 +5497,145 @@ s32_row "cr-only" "$S32_CR" "6"
 # A path that is not a file at all — the silent, empty answer both give.
 expect_eq "32 the poker answers nothing for a missing plan" "" "$(s32_poker_read "$TMPROOT/s30-absent.md")"
 expect_eq "32 …and so does fill.sh" "" "$(s32_fill_read "$TMPROOT/s30-absent.md")"
+
+
+# ============================================================
+section "Section 33: the stop acks its row, and the quiet read follows the adopter (wave-19 T1; REQ-1 AC-1.1, REQ-2 AC-2.1/2.2; D2, D4; ADR-034)"
+# ============================================================
+#
+# THE ACK IS THE CLOSE (ADR-034 d1). A `landing-swept/v1` marker records that a landing was
+# SEEN; it is not a second terminal state. The STANDDOWN close used to skip every name that
+# carried one — which is every writer that declared an artifact and reached SubagentStop — so
+# exactly the rows that landed normally were never acked (ideas row 16; R1 F1, bed3/bed2). The
+# close now skips only a name already acked, and writes `--reason landed` for a row that
+# declared a deliverable; `moot-and-gone` stays for a row that declared nothing.
+#
+# THE QUIET READ FOLLOWS THE ADOPTER (D4). An adopted row's `adopted_from=` names the session
+# that LAUNCHED it; the harness files the agent's transcript under whichever session is
+# talking to it now. `row_quiet` reads this session's subagents dir first and falls back to the
+# launcher's; `adopted_from=` itself is provenance and never rewritten (R1 Q4, bed3's false
+# NOTIFY reproduced).
+S33_CFG="$(fake_config_dir s33-ack-close)"
+export CLAUDE_CONFIG_DIR="$S33_CFG"
+s33_answer() {  # <state> <name[:status]>...
+  plant_answer "$S33_CFG/projects/-fixture-project/$SID.jsonl" "$@"
+}
+s33_ledger() { cat "$(ack_ledger_of "$1")" 2>/dev/null; }
+
+# ---------- 33a: the bed3/bed2 shape — two MET rows, one swept, a fresh panel naming neither ----------
+R33A="$(make_repo s33-bed3)"; new_roster "$R33A"
+mkdir -p "$R33A/.bionic/docs/record"
+echo done > "$R33A/.bionic/docs/record/swept.md"
+echo done > "$R33A/.bionic/docs/record/plain.md"
+add_row "$R33A" name=swept-row status=identified agent_id=aswept00000000000000000 \
+  deliverable="$R33A/.bionic/docs/record/swept.md" duration="1 hour" launched_at="$(iso_ago 600)"
+add_row "$R33A" name=plain-row status=identified agent_id=aplain00000000000000000 \
+  deliverable="$R33A/.bionic/docs/record/plain.md" duration="1 hour" launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R33A")" "$(iso_ago 30)" "$SID" swept-row aswept00000000000000000 MET
+s33_answer fresh "some-other-agent:running"
+poke "$R33A" tick
+expect_eq "33a the tick exits 0" "0" "$RC"
+expect_contains "33a a SWEPT MET row gone from a fresh panel is acked, reason landed (AC-1.1)" \
+  "|name=swept-row|by=patrol|reason=landed" "$(s33_ledger "$R33A")"
+expect_contains "33a2 …and the unswept MET row beside it too, reason landed" \
+  "|name=plain-row|by=patrol|reason=landed" "$(s33_ledger "$R33A")"
+expect_contains "33a3 …which the one verdict line now reports closed" "|acked=yes|" \
+  "$( cd "$R33A" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER_FOR_ACK" verdict swept-row 2>/dev/null )"
+poke "$R33A" tick
+expect_eq "33a4 the next tick acks neither a second time" "2" \
+  "$(grep -c '|event=ack|' "$(ack_ledger_of "$R33A")" 2>/dev/null | tr -d ' ')"
+
+# ---------- 33b: the same swept row STILL on the panel — stood down, never acked ----------
+R33B="$(make_repo s33-swept-live)"; new_roster "$R33B"
+mkdir -p "$R33B/.bionic/docs/record"
+echo done > "$R33B/.bionic/docs/record/swept.md"
+add_row "$R33B" name=swept-row status=identified agent_id=aswept00000000000000001 \
+  deliverable="$R33B/.bionic/docs/record/swept.md" duration="1 hour" launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R33B")" "$(iso_ago 30)" "$SID" swept-row aswept00000000000000001 MET
+s33_answer fresh "swept-row:idle"
+poke "$R33B" tick
+expect_contains "33b a swept row the panel still lists is stood down" "poker: STANDDOWN swept-row" "$OUT"
+expect_contains "33b2 …with the order written" "|by=patrol|target=swept-row" \
+  "$(cat "$R33B/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
+expect_eq "33b3 …and it is NOT acked while its agent is on the panel" "no" \
+  "$([ -f "$(ack_ledger_of "$R33B")" ] && echo yes || echo no)"
+
+# ---------- 33c: a row that declared NOTHING keeps moot-and-gone ----------
+R33C="$(make_repo s33-declared-nothing)"; new_roster "$R33C"
+add_row "$R33C" name=bare-row status=identified agent_id=abare000000000000000000 \
+  duration="1 hour" launched_at="$(iso_ago 600)"
+s33_answer fresh "some-other-agent:running"
+poke "$R33C" tick
+expect_contains "33c a MET row that declared no deliverable is closed moot-and-gone" \
+  "|name=bare-row|by=patrol|reason=moot-and-gone" "$(s33_ledger "$R33C")"
+expect_absent "33c2 …never as landed: nothing was produced to land" \
+  "reason=landed" "$(s33_ledger "$R33C")"
+
+# ---------- 33d: the adopted row's quiet read — the bed3 false-NOTIFY shape (AC-2.1) ----------
+#
+# One OPEN row (deliverable absent, so UNMET and the cadence read runs) adopted from a
+# predecessor. The predecessor's transcript is 5400 s old; the adopting session's is fresh.
+S33_PRED="d6d6d6d6-1111-4bbb-8ccc-000000000033"
+S33_ID="aadopt33000000000000000"
+s33_adopted() {  # <label> -> repo with one adopted UNMET row
+  local r; r="$(make_repo "s33-$1")"; new_roster "$r"
+  mkdir -p "$r/.bionic/docs/record"
+  add_row_to "$r" "$S33_PRED" name=w1 status=identified agent_id="$S33_ID" \
+    subagent_type=bionic:senior-implementor deliverable="$r/.bionic/docs/record/never.md" \
+    duration="4 hours" cadence="10 minutes" launched_at="$(iso_ago 6000)"
+  printf '%s' "$r"
+}
+S33_PRED_TX="$S33_CFG/projects/-fixture-project/$S33_PRED/subagents/agent-${S33_ID}.jsonl"
+S33_OWN_TX="$S33_CFG/projects/-fixture-project/$SID/subagents/agent-${S33_ID}.jsonl"
+mkdir -p "$(dirname "$S33_PRED_TX")" "$(dirname "$S33_OWN_TX")"
+
+R33D="$(s33_adopted adopt-live)"
+: > "$S33_PRED_TX"; : > "$S33_OWN_TX"
+poke "$R33D" adopt
+S33_ROW_ADOPTED="$(grep "^${ROSTER_ROW_SCHEMA}|" "$(roster_of "$R33D")" | grep -F "|name=w1|")"
+expect_contains "33d meta: the row really was adopted, provenance the predecessor" \
+  "adopted_from=$S33_PRED" "$S33_ROW_ADOPTED"
+backdate "$S33_PRED_TX" 5400
+touch "$S33_OWN_TX"
+s33_answer fresh "w1:running"
+poke "$R33D" tick
+expect_absent "33d an adopted row whose transcript under THIS session is fresh is not NOTIFYed (AC-2.1)" \
+  "rows=w1" "$OUT"
+expect_absent "33d2 …and the predecessor's stale path is not the one read" \
+  "$S33_PRED_TX" "$OUT"
+
+# ---------- 33e: the reverse — this session's file stale, so the row IS quiet ----------
+R33E="$(s33_adopted adopt-reverse)"
+: > "$S33_PRED_TX"; : > "$S33_OWN_TX"
+poke "$R33E" adopt
+touch "$S33_PRED_TX"
+backdate "$S33_OWN_TX" 5400
+s33_answer fresh "w1:running"
+poke "$R33E" tick
+expect_contains "33e the same row with THIS session's transcript 5400 s old takes NOTIFY" \
+  "decision=NOTIFY" "$OUT"
+expect_contains "33e2 …naming this session's transcript as the channel it read" \
+  "$S33_OWN_TX" "$OUT"
+
+# ---------- 33f: nothing under this session — the launcher's dir is the fallback ----------
+R33F="$(s33_adopted adopt-fallback)"
+rm -f "$S33_OWN_TX"; : > "$S33_PRED_TX"
+poke "$R33F" adopt
+backdate "$S33_PRED_TX" 5400
+s33_answer fresh "w1:running"
+poke "$R33F" tick
+expect_contains "33f with no file under this session the predecessor's path is still read" \
+  "$S33_PRED_TX" "$OUT"
+expect_contains "33f2 …and its staleness still notifies" "decision=NOTIFY" "$OUT"
+
+# ---------- 33g: adopted_from= is provenance — byte-identical across a tick and a re-adopt ----------
+S33_ROW_AFTER="$(grep "^${ROSTER_ROW_SCHEMA}|" "$(roster_of "$R33D")" | grep -F "|name=w1|")"
+poke "$R33D" adopt
+S33_ROW_READOPT="$(grep "^${ROSTER_ROW_SCHEMA}|" "$(roster_of "$R33D")" | grep -F "|name=w1|")"
+expect_eq "33g the adopted row is byte-identical after a tick" "$S33_ROW_ADOPTED" "$S33_ROW_AFTER"
+expect_eq "33g2 …and after a second adopt (idempotent, adopted_from= never rewritten)" \
+  "$S33_ROW_ADOPTED" "$S33_ROW_READOPT"
+
+unset CLAUDE_CONFIG_DIR
 
 finish

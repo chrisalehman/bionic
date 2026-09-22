@@ -834,4 +834,121 @@ expect_absent "cache: …and no suite reads it BY NAME yet" "i.test.sh" "$G_H2_B
 expect_contains "cache: a tree change invalidates — the new reader is derived" \
   "i.test.sh" "$G_H2_AFTER"
 
+# ── §H the template/block → rendered-target edge (REQ-10, D11) ──────────────
+# WHY. No suite reads `agents-src/templates/**` or `agents-src/blocks/**`
+# directly — `agents-src/render.sh` reads them and a suite reads what it
+# WRITES — so a query for a source has to resolve to that source's rendered
+# target(s) before any of §A's edge kinds can answer for it. AC-10.1's own
+# fails-when is the exact regression that motivated this: at a525e0c,
+# `steps/5.md.tmpl` answered `docs-pins` and `render` only, never
+# `jit.test.sh`, even though `jit.test.sh` pins the rendered `steps/5.md`
+# four times over.
+#
+# §H1 walks EVERY real `.md.tmpl` render.sh's own `RENDER_UNITS` table
+# reaches — not a hand-picked few — so AC-10.2 ("a mapped template has no row
+# in impact.test.sh") cannot pass silently: a template render.sh adds
+# tomorrow gets a row the next time this suite runs, with no edit here. Each
+# row's oracle is impact.sh's OWN answer for the rendered file, asked
+# directly — never a hand-kept suite list — so this is a completeness check
+# on the RESOLUTION, not a second copy of §A's edge-kind logic.
+section "§H the template/block → rendered target edge (REQ-10, D11)"
+
+H_RENDER_SH="$REPO/agents-src/render.sh"
+H_UNITS="$(awk '
+  /^RENDER_UNITS="$/ { grab = 1; next }
+  grab && /^"$/       { grab = 0; next }
+  grab && NF           { print }
+' "$H_RENDER_SH")"
+expect_nonempty "real: agents-src/render.sh declares at least one render unit" "$H_UNITS"
+
+H_TARGETS="$TMP/h-targets"   # tmpl_path<TAB>target_path, every real template
+: >"$H_TARGETS"
+printf '%s\n' "$H_UNITS" | while IFS='|' read -r tmpl_dir out_dir; do
+  [ -n "$tmpl_dir" ] && [ -n "$out_dir" ] || continue
+  [ -d "$REPO/$tmpl_dir" ] || continue
+  for tmpl in "$REPO/$tmpl_dir"/*.md.tmpl; do
+    [ -f "$tmpl" ] || continue
+    base="$(basename "$tmpl")"; base="${base%.md.tmpl}"
+    printf '%s/%s.md.tmpl\t%s/%s.md\n' "$tmpl_dir" "$base" "$out_dir" "$base" >>"$H_TARGETS"
+  done
+done
+H_ROWS="$(grep -c . "$H_TARGETS" 2>/dev/null || echo 0)"
+expect_true "real: at least one template maps to a target (the roster this section covers is non-empty)" \
+  bash -c '[ "$0" -gt 0 ]' "$H_ROWS"
+
+# one row per mapped template (AC-10.2): the derived answer for the SOURCE
+# must be a superset of the derived answer for its own rendered TARGET.
+while IFS="$(printf '\t')" read -r h_tmpl h_target; do
+  [ -n "$h_tmpl" ] || continue
+  [ -f "$REPO/$h_target" ] || continue
+  h_want="$(oneline "$REPO" "$h_target")"
+  h_got="$(oneline "$REPO" "$h_tmpl")"
+  h_missing=""
+  for w in $h_want; do
+    case " $h_got " in
+      *" $w "*) ;;
+      *) h_missing="$h_missing $w" ;;
+    esac
+  done
+  if [ -z "$h_missing" ]; then
+    ok "real: $h_tmpl reaches every suite its rendered target ($h_target) reaches"
+  else
+    no "real: $h_tmpl reaches every suite its rendered target ($h_target) reaches" \
+       "missing:$h_missing"
+  fi
+done <"$H_TARGETS"
+
+# THE NAMED CASE (AC-10.1's fails-when, and the plan's own worked example):
+# steps/5.md.tmpl must reach jit.test.sh through its rendered target, by a PIN
+# (jit.test.sh greps the rendered steps/5.md four times — R4 Q1), not merely
+# by the pre-existing directory reference every suite naming agents-src gets.
+expect_contains "real: steps/5.md.tmpl reaches jit.test.sh through its rendered target (AC-10.1)" \
+  "jit.test.sh" "$(oneline "$REPO" agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl)"
+expect_eq "real: …and the reason is a pin on the rendered file, not a directory reference" \
+  "pin" "$(reason_for "$REPO" jit.test.sh agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl | cut -d: -f1)"
+
+# §H2 A BLOCK FANS OUT TO SEVERAL TARGETS. `report-contract` is injected by six
+# role templates (all but nothing shares it with a skill-unit file), so its
+# query must reach suites that only a role file — not the block's own
+# directory reference — would surface. jit.test.sh dir-refs agents/*.md but
+# never names report-contract.md itself, so this is a real fan-out proof, not
+# a restatement of render.test.sh's own dir-ref.
+H_RC_TEMPLATES="$(grep -rl '<!-- INJECT: report-contract -->' "$REPO/agents-src/templates" 2>/dev/null | wc -l | tr -d ' ')"
+expect_true "real: agents-src/blocks/report-contract.md injects into more than one template (fan-out exists to prove)" \
+  bash -c '[ "$0" -gt 1 ]' "$H_RC_TEMPLATES"
+expect_contains "real: agents-src/blocks/report-contract.md fans out to a suite that reads a role file it injects" \
+  "jit.test.sh" "$(oneline "$REPO" agents-src/blocks/report-contract.md)"
+
+# §H3 THE PLANTED PAIR (AC-10.3): a sandbox root with its OWN render.sh and
+# its own `x.md.tmpl -> skills/x.md` mapping — nothing this repo's real
+# render.sh declares — is followed exactly like the real one, proving the
+# derivation reads the mapping from the tree rather than naming this repo's
+# paths.
+FXR="$TMP/fx-render"
+mkdir -p "$FXR/tests/lib" "$FXR/agents-src/templates" "$FXR/skills"
+cat >"$FXR/agents-src/render.sh" <<'EOF'
+#!/usr/bin/env bash
+# a minimal stand-in — only the RENDER_UNITS shape impact.sh reads matters.
+RENDER_UNITS="
+agents-src/templates|skills
+"
+EOF
+: >"$FXR/agents-src/templates/x.md.tmpl"
+: >"$FXR/skills/x.md"
+printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\ngrep -q anything "${BIONIC_SCRIPTS_DIR}/skills/x.md"\n' \
+  >"$FXR/tests/j.test.sh"
+printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\n' >"$FXR/tests/lib/resolve-roots.sh"
+{
+  printf '#!/bin/bash\n'
+  printf 'run "j.test.sh" bash tests/j.test.sh\n'
+} >"$FXR/tests/run.sh"
+
+expect_contains "planted: a sandbox x.tmpl -> skills/x.md pair is followed (AC-10.3)" \
+  "j.test.sh" "$(oneline "$FXR" agents-src/templates/x.md.tmpl)"
+# NOT VACUOUS: a root with no render.sh at all resolves nothing for the same
+# path shape — proving the row above answers from the PLANTED render.sh, not
+# from some universal template-name guess.
+expect_eq "planted: …while the base fixture (no render.sh) resolves nothing for the same shape" \
+  "" "$(suites "$FX" agents-src/templates/x.md.tmpl)"
+
 finish
