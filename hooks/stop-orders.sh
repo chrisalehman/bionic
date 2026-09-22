@@ -13,7 +13,11 @@
 #     bash ~/.claude/hooks/stop-orders.sh standdown
 #
 # STOPPED closes the row of an agent that has been stopped, through the sweeper's own ack
-# (wave-19 T1, ADR-034: the ack is the close); an unknown or already-acked name is refused.
+# (wave-19 T1, ADR-034: the ack is the close); it runs beside a TaskStop, after the agent is
+# gone. An unknown or already-acked name is refused, and so — since the wave-19 T1 follow-up,
+# critic C4 — is a row whose verdict has not landed (MET or WAIVED only) or whose name a
+# fresh panel reading still lists as live; a stale or absent panel reading refuses too. The
+# ack this verb writes is `--by human`, never `--by patrol`.
 #
 # ORDER records that a human asked for an agent to be stopped, and prints what stopping it
 # gives up. It is not evidence and it does not discharge the contract — it is an
@@ -53,7 +57,8 @@
 # Exit codes:
 #   0 — the order was recorded / the row was acked / the stand-down was computed
 #   2 — usage error, or a refusal (a state path is a symbolic link, or is unwritable; a
-#       `stopped` name with no row, or already acked)
+#       `stopped` name with no row, already acked, unlanded (not MET/WAIVED), still live on
+#       a fresh panel, or answered by a stale/absent panel reading)
 #   3 — no session key; nothing read, nothing written
 #
 # Session key: CLAUDE_CODE_SESSION_ID, exactly as hooks/session-sweeper.sh takes it.
@@ -524,6 +529,19 @@ case "$VERB" in
     # sweeper's `ack` — character for character the call the tick's STANDDOWN close makes
     # (hooks/session-poker.sh) — so the ledger keeps its one writer. The sweeper records an
     # unknown name and warns rather than refusing, so the refusal is decided here, first.
+    #
+    # THIS VERB RUNS BESIDE A TaskStop, AFTER THE AGENT IS GONE (wave-19 T1 follow-up, critic
+    # C4). Before this fix it acked ANY open row — still-live or UNMET — on the strength of
+    # the name alone, and since T4 that ack frees the name for a fresh dispatch while the
+    # agent it named is still running (`hooks/dispatch-preflight.sh:2272` treats any ack newer
+    # than the launch as the name closing). So this now checks what `standdown` already
+    # checks, the same way: the verdict must be LANDED (MET or WAIVED — an UNMET row is
+    # refused, naming the state, same as `order`'s own report above), AND a FRESH panel
+    # reading (`own_transcript` / `live_agents`, literal name match, exactly as standdown's
+    # `_is_live`) must confirm the name is gone. Present on the panel -> refused, naming it
+    # live. Stale or absent -> refused: a verb that cannot see does not ack. The ack this verb
+    # writes is `--by human`, never `--by patrol` — this is a deliberate model-callable verb,
+    # not the tick's own automated sweep, and the ledger's `by=` field says which one happened.
     _target="$(clean "$ORDER_TARGET")"
     [ -n "$_target" ] || usage "stopped needs a non-empty target."
     if [ ! -f "$SWEEPER" ]; then
@@ -543,14 +561,41 @@ case "$VERB" in
       die "REFUSED — $_target is already acked; a second ack would say nothing new."
       exit 2
     fi
+    _state=$(line_field "$_line" state)
+    case "$_state" in
+      MET|WAIVED) : ;;
+      *)
+        die "REFUSED — $_target's contract is $_state, not landed; nothing was acked."
+        exit 2
+        ;;
+    esac
+    # THE FRESH PANEL. Read the same way standdown reads it — own_transcript, then
+    # live_agents — so a stale or unreadable answer leaves _live_ok at 0 and this ack refuses
+    # rather than guesses.
+    _live_ok=0
+    _own_tr=$(own_transcript) || _own_tr=""
+    if [ -n "$_own_tr" ]; then
+      if _live=$(live_agents "$_own_tr" 2>/dev/null); then _live_ok=1; else _live=""; fi
+    fi
+    if [ "$_live_ok" -ne 1 ]; then
+      die "REFUSED — no fresh panel reading; a verb that cannot see does not ack $_target."
+      exit 2
+    fi
+    # A NAME IS NOT A PATTERN (same rule standdown's _is_live states): field equality, never
+    # a substring or a regex over a value the fleet does not charset-guard.
+    if printf '%s\n' "$_live" \
+       | awk -F'|' -v want="$_target" '$1 == want { found = 1 } END { exit found ? 0 : 1 }'; then
+      die "REFUSED — $_target is still on the panel (live); stop it, then stopped closes its row."
+      exit 2
+    fi
     if ! _ack=$( cd "$REPO_REAL" 2>/dev/null || exit 9
                  CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
-                 bash "$SWEEPER" ack "$_target" --by patrol --reason landed 2>&1 ); then
+                 bash "$SWEEPER" ack "$_target" --by human --reason landed 2>&1 ); then
       die "REFUSED — the sweeper could not ack $_target: $(printf '%s' "$_ack" | head -1)"
       exit 2
     fi
     [ -n "$_ack" ] && printf '%s\n' "$_ack"
-    say "stopped: $_target — its row is closed (acked by patrol, reason landed)."
+    say "stopped: $_target — its row is closed (acked by human, reason landed)."
     exit 0
     ;;
 
