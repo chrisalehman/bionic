@@ -2778,6 +2778,13 @@ if [ -n "$_EG_WT" ]; then
           printf "evidence-gate: judged at row %s's step %s (run at current: %s)\n" \
             "$_EG_RID" "$_EG_RSTEP" "$CURRENT" >&2
           CURRENT="$_EG_RSTEP"
+          # A SUBSTITUTED STEP IS NOT A POINTER STEP HERE EITHER (critic C1; wave-18 REQ-11,
+          # D7). This arm substitutes `CURRENT` exactly as the `active`-status arm below does,
+          # and D7's rule is about "a substituted step", not about which of the two forks did
+          # the substituting — so it is flagged the same way, guarded the same way (only at
+          # step 4, the one pointer step the substitution can land on; every other substituted
+          # step stays byte-identical), for the pointer exit a few hundred lines below to read.
+          [ "$_EG_RSTEP" = 4 ] && _EG_SUBSTITUTED=1
         elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null; then
           _eg_detail="canonical-sdlc worktree '${_EG_WT}' belongs to '## Tasks' row ${_EG_RID}, whose step is ${_EG_RSTEP}; the run is at current: ${CURRENT}.
 Plan: $PLAN
@@ -2831,7 +2838,10 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           # frontmatter happened to say `use_worktree: true`. The one arm the substitution
           # exists to reach, `shape_block worktree base-sha branch`, was therefore skipped on
           # every `use_worktree: false` plan and the note above promised arms that never ran.
-          # The fork owns the arms it announces.
+          # The fork owns the arms it announces. THIS IS THE SAME RULE THE step-below ARM
+          # ABOVE NOW CARRIES (critic C1): D7 is about "a substituted step", not about which
+          # of the two forks did the substituting, and both set `CURRENT=4`/`$_EG_RSTEP=4`
+          # without ever asking which arm they came from — so both set the flag.
           _EG_SUBSTITUTED=1
         fi
         ;;
