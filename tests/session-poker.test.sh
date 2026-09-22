@@ -315,6 +315,7 @@ R1="$(make_repo s1)"; new_roster "$R1"
 
 poke "$R1"
 expect_eq "no verb is a usage error (exit 2)" "2" "$RC"
+expect_contains "1a-T7 the usage listing names extend (AC-10.3)" "extend" "$OUT"
 
 poke "$R1" tick extra-arg
 expect_eq "more than one arg is a usage error (exit 2)" "2" "$RC"
@@ -5083,5 +5084,103 @@ expect_eq "28g2 …so it still decodes to the command the brief declared" \
   "$S28G_CMD" "$(roster_pipe_unescape "$S28G_FIELD")"
 expect_eq "28g3 …and the value is still ONE field of the row" "1" \
   "$(printf '%s' "$S28G_ROW" | tr '|' '\n' | grep -c '^re_executes=' | tr -d ' ')"
+# ============================================================
+section "Section 29: extend — re-opening a MET row (REQ-10; D11, T-h)"
+# ============================================================
+#
+# THE VERB. `verdict_row` (hooks/session-sweeper.sh) reads a name's LAST roster row alone —
+# `standdown-declined:` answers one turn and writes nothing, and `ack` closes a row instead
+# of opening one — so nothing existing re-opens a MET lineage. `extend <name> <reason>`
+# appends a fresh row for the same name, launched NOW, with `<reason>` riding in `claims=`:
+# the already-written deliverable then dates before the new launch instant, the verdict
+# leaves MET, and the row counts OPEN again — the same append-only shape every other writer
+# in this file keeps.
+
+# ---------- 29a: a MET row is stood down; extend, and the next tick reads it live ----------
+R29A="$(make_repo s29-extend-met)"; new_roster "$R29A"; armed_ago "$R29A"; delivered_plan "$R29A"
+DEL_29A="$R29A/delivered.md"; echo "done" > "$DEL_29A"
+add_row "$R29A" name=t1 deliverable="$DEL_29A" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+S29_CFG="$(fake_config_dir s29-extend)"
+export CLAUDE_CONFIG_DIR="$S29_CFG"
+plant_answer "$S29_CFG/projects/-fixture-project/$SID.jsonl" fresh "t1:running"
+
+poke "$R29A" tick
+expect_contains "29a baseline: the MET row is stood down before any extend" \
+  "poker: STANDDOWN t1" "$OUT"
+
+poke "$R29A" extend t1 "second commit"
+expect_eq "29a2 extend exits 0" "0" "$RC"
+expect_contains "29a3 …and says the row is open again" "extended" "$OUT"
+
+poke "$R29A" tick
+expect_absent "29a4 the same row, same tick, draws no STANDDOWN after extend" \
+  "poker: STANDDOWN t1" "$OUT"
+expect_contains "29a5 …and it counts open, not closed" "open=1" "$OUT"
+
+unset CLAUDE_CONFIG_DIR
+
+# ---------- 29b: extend on a name with no roster row REFUSES, naming it ----------
+R29B="$(make_repo s29-extend-no-row)"; new_roster "$R29B"
+poke "$R29B" extend nobody "a reason"
+expect_eq "29b no such row REFUSES (exit 1)" "1" "$RC"
+expect_contains "29b2 …and names the missing row" "nobody" "$OUT"
+
+# ---------- 29c: an unengaged session decides nothing (AC-10, same guard as bind/adopt) --
+R29C="$(make_repo s29-extend-unengaged)"; new_roster "$R29C"
+add_row "$R29C" name=t1 deliverable="$R29C/never.md" duration="1 minute"
+unengage "$R29C"
+poke "$R29C" extend t1 "a reason"
+expect_eq "29c an unengaged session's extend exits 0 (decides nothing)" "0" "$RC"
+expect_contains "29c2 …and says so" "NOT-ENGAGED" "$OUT"
+expect_eq "29c3 …and the roster is untouched" "1" \
+  "$(/usr/bin/grep -c '|name=t1|' "$(roster_of "$R29C")" || true)"
+
+# ---------- 29d: the arg shape — extend takes exactly two operands ----------
+R29D="$(make_repo s29-extend-usage)"; new_roster "$R29D"
+poke "$R29D" extend
+expect_eq "29d extend with no operands is a usage error (exit 2)" "2" "$RC"
+poke "$R29D" extend only-one
+expect_eq "29d2 extend with one operand is a usage error (exit 2)" "2" "$RC"
+poke "$R29D" extend a b c
+expect_eq "29d3 extend with three operands is a usage error (exit 2)" "2" "$RC"
+
+# ---------- 29e: THE EXTENSION SURVIVES adopt (AC-10.2; §28f pattern) ----------
+#
+# `adopt_fold` folds a roster to the LAST non-empty value per field per name — the same
+# fold §28f pins for `re_executes=`. A predecessor session's row is extended (bumped
+# `launched_at=`, unmoved `deliverable=`); a fresh session then adopts it, and the rebuilt
+# row must carry the BUMP forward, or the adopted copy reads MET again the instant it
+# lands (AC-10.2's fail-when).
+S29_PRED="cccc0000-29cc-4bbb-8ccc-000000000003"
+R29E="$(make_repo s29-extend-adopt)"; new_roster "$R29E"
+mkdir -p "$R29E/.bionic/docs/record"
+P29E_OPEN="$(plan_at "$R29E" 'epic-29/wave-open.plan.md' "$(plan_body 4 'in progress')")"
+DEL_29E="$R29E/.bionic/docs/record/t1.md"; echo "done" > "$DEL_29E"
+add_row_to "$R29E" "$S29_PRED" name=t1 status=identified \
+  agent_id=aextend-2900000000000000001 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" plan="$P29E_OPEN" \
+  deliverable="$DEL_29E" launched_at="$(iso_ago 600)"
+
+# `extend` runs AS the predecessor session, over ITS OWN roster (the shape the verb is
+# for: a writer resuming its own MET row) — so the engagement guard needs the
+# predecessor's own marker, not the adopter's. `engage()` always stamps the suite-global
+# $SID; this is a second session id, stamped by hand the same way that helper does.
+: > "$R29E/.bionic/tmp/engaged-$S29_PRED.state"
+
+( cd "$R29E" && exec env CLAUDE_CODE_SESSION_ID="$S29_PRED" bash "$POKER" extend t1 "second commit" ) \
+  >/dev/null 2>&1
+
+poke "$R29E" adopt
+expect_contains "29e the extended row is still offered for adopt" "t1" "$OUT"
+
+S29E_CFG="$(fake_config_dir s29-extend-adopt)"
+export CLAUDE_CONFIG_DIR="$S29E_CFG"
+plant_answer "$S29E_CFG/projects/-fixture-project/$SID.jsonl" fresh "t1:running"
+poke "$R29E" tick
+expect_absent "29e2 …and the row adopt wrote does not read MET again" \
+  "poker: STANDDOWN t1" "$OUT"
+expect_contains "29e3 …and it counts open after adopt" "open=1" "$OUT"
+unset CLAUDE_CONFIG_DIR
 
 finish
