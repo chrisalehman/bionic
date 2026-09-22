@@ -1220,10 +1220,10 @@ budget_int() {  # <budget line> <key> -> a non-negative integer, or empty
 
 # ---------------------------------------------------------------- the rung report
 #
-# THE CEILINGS THIS RUN OPTED INTO, read once. Both may be absent — a project with no plan,
-# or a plan written before Step 0 ever probed — and absence is INERT: the caller says why it
-# is not filling and fills nothing, exactly as the dispatch wall's budget arm goes inert on
-# the same missing line. A budget is a ceiling a run opts into.
+# THE CEILINGS STEP 0 MEASURED, read once. Both may be absent — a project with no plan, or a
+# plan that slipped past the governing-skill hook's budget arm (wave-19 REQ-3, ADR-035) —
+# and the caller then says why it is not filling and fills nothing; the stop wall refuses
+# the turn on the same absence, naming the key.
 #
 # THE SAME RUN EVERY OTHER DECISION THIS TICK WAS TAKEN ON. `resolve_run` answers once per
 # process and memoizes, so calling this twice on one tick costs one `plan_budget_line` and
@@ -1306,7 +1306,7 @@ sched_plan_current() {  # <plan path> -> the current: value (digits only, sub-st
 # they are different judgments. Nothing is stored; two ticks a second apart over one ring
 # compute one answer.
 #
-# A MISSING CEILING IS REPORTED AS MISSING. A plan that opts into no budget offers nothing to
+# A MISSING CEILING IS REPORTED AS MISSING. A plan with no budget line offers nothing to
 # take a fraction OF, and inventing a ceiling here is the one thing this arm may never do —
 # so the fields read `-` and the line is still printed. "The tick said nothing" and "the tick
 # said there is no ceiling" are different facts, and only the second one is true.
@@ -4182,9 +4182,10 @@ EOF
     case "${SCHED_STATE:-}" in ok|hold|emergency) : ;; *) SCHED_STATE=ok ;; esac
 
     # The plan and its budget, read once. Both may be absent — a project with no plan, or a
-    # plan written before Step 0 ever probed — and absence is INERT: the tick says why it is
-    # not filling and fills nothing, exactly as the dispatch wall's budget arm goes inert on
-    # the same missing line. A budget is a ceiling a run opts into.
+    # plan written before Step 0 ever probed — and the tick then fills nothing and says why.
+    # The budget is a MEASUREMENT Step 0 writes (wave-19 REQ-3, ADR-035): the governing-skill
+    # hook refuses a plan Write without it, so an absent key here is a backstop the note
+    # below names, and the stop wall refuses the turn on the same absence.
     #
     # THE SAME RUN THE DECISION ABOVE WAS TAKEN ON. `resolve_run` answers once per tick, so
     # a session bound to its own plan fills from its own task table and quotes its own
@@ -4204,6 +4205,11 @@ EOF
       else
         say "EMERGENCY free_mb=${SCHED_FREE} — no suite-running writer on this roster to stop; the pressure is not this session's to relieve"
       fi
+      # THE WITHHELD LINE (wave-19 REQ-4 AC-4.1, D6; ADR-034 decision 3). The stop wall
+      # judges a tick turn that printed no FILL against its own ready set, and exempts it
+      # only on this line: a machine fact the plan cannot hold. `payload/scripts/lib/stop.sh`
+      # reads the first word after the dash, so the reason leads and the measurement follows.
+      say "fill withheld — EMERGENCY free_mb=${SCHED_FREE}"
     fi
 
     # THE REPORT, AND THE CEILINGS IT IS TAKEN AGAINST — both in `rung_report` above, which
@@ -4217,8 +4223,12 @@ EOF
       # What they no longer do is accumulate — the counter that made a second consecutive
       # hold mean something was the scheduler's only cross-tick state, and the rung above
       # answers the width question from the ring instead.
-      [ "$SCHED_STATE" = hold ] && \
+      if [ "$SCHED_STATE" = hold ]; then
         say "HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD} — no fills"
+        # …and the withheld line the stop wall exempts on (REQ-4 AC-4.1; the EMERGENCY arm
+        # above prints its own). Only these two paths print one.
+        say "fill withheld — HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD}"
+      fi
     else
       # ── FILL. gap = the RUNG − RUNNING, ready = pending tasks whose deps all landed.
       #
@@ -4258,14 +4268,15 @@ EOF
       elif [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
         say "no FILL — plan at current: ${SCHED_CURRENT}, Step-3 approval pending"
       elif [ -z "$SCHED_WRITERS" ]; then
-        # A NOTE, BECAUSE NOTHING FOLLOWS FROM IT THIS TICK (REQ-10 AC-10.4; seed A 8e). A run
-        # with no budget in its plan gets this line on every tick of its life, and no act the
-        # reader can take makes the next tick quieter — a budget is a ceiling a run opts into,
-        # and opting in is a plan edit nobody is being asked for here.
+        # A NOTE, BECAUSE THE TICK ITSELF CAN DO NOTHING ABOUT IT (REQ-10 AC-10.4; seed A 8e).
+        # The budget is a measurement Step 0 writes (wave-19 REQ-3 AC-3.2, ADR-035): the
+        # governing-skill hook refuses a plan Write without it and the stop wall refuses the
+        # turn, so this line is the backstop's third voice, and it names the key as Step 0
+        # writes it so the one plan edit that quiets it is legible from the line alone.
         if [ -z "$SCHED_PLAN" ]; then
           note "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
         else
-          note "no FILL — ${SCHED_PLAN} carries no readable parallel-budget: writers field in its frontmatter; a budget is a ceiling a run opts into."
+          note "no FILL — ${SCHED_PLAN} carries no parallel-budget: writers=<n> in its frontmatter; Step 0 measures it (resources_probe, then resources_budget) and writes it verbatim."
         fi
       else
         # THE GAP IS MEASURED AGAINST THE RUNG, NOT THE CEILING (AC-17). The ceiling is what
