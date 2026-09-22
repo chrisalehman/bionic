@@ -10977,7 +10977,7 @@ section "SV — the shared brief-scaffold block is byte-identical across all eig
 
 SV_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
 SV_DISPATCH="$BIONIC_SKILLS_DIR/canonical-sdlc/dispatch.md"
-SV_SUITES_LINE='Suites: none                                           # read-only brief; or test-file names only'
+SV_SUITES_LINE='Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:'
 
 sv_suites_line() {  # <file> -> the scaffold's Suites: line, or empty
   awk '/^Suites: none/ { print; exit }' "$1" 2>/dev/null
@@ -11013,7 +11013,7 @@ expect_eq "SV …and none of the eight still carries the retired 'on its own par
 # with the shared constant — proving the equality pin above is load-bearing rather than
 # comparing an empty string to itself.
 SV_MUT="$SANDBOX/skill-stale-scaffold.md"
-sed 's/# read-only brief; or test-file names only$/# read-only brief; or test-file names only, on its own paragraph/' \
+sed 's/other runners: Re-executes:$/other runners: Re-executes:, on its own paragraph/' \
   "$SV_SKILL" > "$SV_MUT" 2>/dev/null
 SV_MUT_LINE="$(sv_suites_line "$SV_MUT")"
 expect_eq "SV MUTANT a doctored copy with the old comment reinstated no longer matches the shared line" \
