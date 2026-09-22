@@ -36,10 +36,11 @@
 # THE SIGNATURE IS THE CONTRACT. `fill_ready_set <plan> <rung> <open>` takes the width and
 # the occupancy from its CALLER rather than reading them itself, because the two callers
 # measure them differently and both are right: the tick counts open rows off the roster it
-# is already walking and takes the rung off the pressure ring it just sampled, while the
-# stop wall — which may not write, and `pressure_level` SAMPLES on a cold ring — counts the
-# plan's own `active` rows against the budget's declared ceiling. What may not differ is the
-# READY SET, and that is what lives here.
+# is already walking, while the stop wall counts the plan's own `active` rows; both take the
+# width from the same reading — `pressure_level` against the budget's declared ceiling, the
+# ceiling itself only when the rung will not parse (wave-18 review R1: a wall that measured
+# against the ceiling refused turns naming rows the tick had withheld). What may not differ
+# is the READY SET, and that is what lives here.
 #
 # TWO TABLE SHAPES, ONE READER. `payload/scripts/lib/units.sh` is the one parser of
 # `## Tasks` at either scale, and `units_ready` grew the task-scale arm in the same wave
