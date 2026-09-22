@@ -9365,21 +9365,33 @@ for _s13_key in files suites_allowed suites_source; do
   expect_eq "S13.4 roster.sh knows the key [$_s13_key]" "1" \
     "$(awk '/^roster_row\(\)/,/^\}/' "$S13_ROSTER_LIB" | grep -cE "^ *${_s13_key}\)")"
 done
-# THE ROW-BUILDING SPELLING IS `=[^=]*|suites_allowed=$` — an assignment whose right-hand
-# side appends the pipe-prefixed key immediately followed by a `$` (the format string a
-# writer uses to splice in the value). A plain literal-substring grep for `|suites_allowed=`
-# cannot tell this apart from a `case`/substring PRESENCE test spelling the same key —
-# `*"|suites_allowed="*`, no trailing `=$` — and T7's `extend` tripped exactly that false
-# positive and had to route its own presence check through a generic, indirected helper
-# (`row_has_key`, session-poker.sh) purely to dodge this pin (ideas row 11). The shape-aware
-# grep below reads 0 on a presence test and 1 on an assembler, so the dodge is no longer
-# needed — `row_has_key` keeps its shape on its own merits, not because of this pin.
+# THE ROW-BUILDING SPELLING IS `|suites_allowed=[$%]` — the pipe-prefixed key immediately
+# followed by the sigil that opens a splice, either `$` (a variable/command-substitution
+# assembler, e.g. `out="$out|suites_allowed=$suites_allowed"`) or `%` (a printf format-string
+# assembler, e.g. `printf '|suites_allowed=%s' "$x"`). A plain literal-substring grep for
+# `|suites_allowed=` cannot tell any of these apart from a `case`/substring PRESENCE test
+# spelling the same key — `*"|suites_allowed="*`, no trailing sigil — and T7's `extend`
+# tripped exactly that false positive and had to route its own presence check through a
+# generic, indirected helper (`row_has_key`, session-poker.sh) purely to dodge this pin
+# (ideas row 11). The shape-aware grep below reads 0 on a presence test and 1 on either
+# assembler shape, so the dodge is no longer needed — `row_has_key` keeps its shape on its
+# own merits, not because of this pin.
+# SPELLING WIDENED (T9, R4): the prior spelling, `=[^=]*\|suites_allowed=\$`, required an
+# `=` sign somewhere before the pipe as well as a literal `$` right after the key — a shape
+# that a concatenation assembler (`row="${row}|suites_allowed=$sa"`) happens to have but a
+# `printf` assembler does not (`printf '|suites_allowed=%s' "$x"` has no `=` before the pipe
+# and closes with `%`, not `$`). That left two of the three legitimate assembler shapes
+# invisible to the pin (AC-13.1's own eval fixture pins a `printf` assembler at 1, and the
+# old grep read 0 on it). The new spelling drops the leading `=[^=]*` requirement and widens
+# the trailing sigil to `[$%]`, so it reads 1 on all three assembler shapes — concatenation,
+# `$(...)`  variable splice, and `printf` — while still reading 0 on the presence test, whose
+# trailing character is a quote, not a sigil.
 expect_eq "S13.4 dispatch-preflight assembles no row segment of its own" "0" \
-  "$(grep -cE '=[^=]*\|suites_allowed=\$' "$S13_DP")"
+  "$(grep -cE '\|suites_allowed=[$%]' "$S13_DP")"
 expect_eq "S13.4 …and neither does session-poker's adopt" "0" \
-  "$(grep -cE '=[^=]*\|suites_allowed=\$' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+  "$(grep -cE '\|suites_allowed=[$%]' "$BIONIC_HOOKS_DIR/session-poker.sh")"
 expect_eq "S13.4 …because the one library that may is the one that does" "1" \
-  "$(grep -cE '=[^=]*\|suites_allowed=\$' "$S13_ROSTER_LIB")"
+  "$(grep -cE '\|suites_allowed=[$%]' "$S13_ROSTER_LIB")"
 # The paired POSITIVE: both writers do pass the key by name, so the two zeros above are
 # "no second speller" and not "nobody writes it".
 expect_eq "S13.4 dispatch-preflight passes suites_allowed= to the writer" "1" \
@@ -9392,19 +9404,26 @@ expect_eq "S13.4 …and session-poker builds its three as one group" "1" \
   "$(grep -c 'suites_allowed=\$(clean "\$sallow" suites_allowed)' "$BIONIC_HOOKS_DIR/session-poker.sh")"
 
 # MUTATION (§N-shaped, :3572-3588) — the shape-aware grep must actually REJECT a planted
-# assembler, not merely fail to see one that was never there. ONE copy of
-# dispatch-preflight.sh is doctored in the SANDBOX — never in the tree — by appending a
-# second, illegitimate `suites_allowed=` format-string line; the same grep that reads 0 on
-# the real tree above must read 1 on the doctored copy.
+# assembler, not merely fail to see one that was never there. TWO copies of
+# dispatch-preflight.sh are doctored in the SANDBOX — never in the tree — one appending a
+# second, illegitimate `suites_allowed=` CONCATENATION assembler line and one appending a
+# `printf` FORMAT-STRING assembler line (R4: the shape the widened grep exists to catch);
+# the same grep that reads 0 on the real tree above must read 1 on both doctored copies.
 mkdir -p "$SANDBOX/fx"
 S13_MUT_DP="$SANDBOX/fx/dispatch-preflight-planted-assembler.sh"
 { cat "$S13_DP"; printf '%s\n' 'out="$out|suites_allowed=$suites_allowed"'; } > "$S13_MUT_DP"
+S13_MUT_DP_PRINTF="$SANDBOX/fx/dispatch-preflight-planted-printf-assembler.sh"
+{ cat "$S13_DP"; printf '%s\n' 'printf '"'"'|suites_allowed=%s'"'"' "$suites_allowed"'; } > "$S13_MUT_DP_PRINTF"
 expect_ne "S13.4 mutation: the planted copy really differs (not a byte-identical copy)" \
   "$(cat "$S13_DP")" "$(cat "$S13_MUT_DP")"
-expect_eq "S13.4 mutation: the shape-aware grep is red on the doctored copy" "1" \
-  "$(grep -cE '=[^=]*\|suites_allowed=\$' "$S13_MUT_DP")"
+expect_ne "S13.4 mutation: …and so does the printf-assembler copy" \
+  "$(cat "$S13_DP")" "$(cat "$S13_MUT_DP_PRINTF")"
+expect_eq "S13.4 mutation: the shape-aware grep is red on the concatenation copy" "1" \
+  "$(grep -cE '\|suites_allowed=[$%]' "$S13_MUT_DP")"
+expect_eq "S13.4 mutation: …and red on the printf copy too (R4)" "1" \
+  "$(grep -cE '\|suites_allowed=[$%]' "$S13_MUT_DP_PRINTF")"
 expect_eq "S13.4 mutation: …and stays green on the real tree" "0" \
-  "$(grep -cE '=[^=]*\|suites_allowed=\$' "$S13_DP")"
+  "$(grep -cE '\|suites_allowed=[$%]' "$S13_DP")"
 
 # --- §S13.5 the field the wall writes is the field the guard reads ---
 #
