@@ -8680,6 +8680,41 @@ s9_expect_judged "9a R1 …and two commits both into the scratch repo are judged
 s9_expect_outside "9a R1 control: one outside commit beside a non-commit git call is still admitted with the line" \
   "$s9_root" "git -C $s9_scratch add -A && git -C $s9_scratch commit -m x && git -C $s9_scratch log -1" "$s9_scratch"
 
+# ONE COMMIT, PLACED WRONG (critic C1, wave-19). Each command below carries ONE commit, and the
+# arm used to place the directory the TEXT names first — the first absolute `-C`, the leading
+# `cd`, the payload cwd — while git obeys the LAST `-C`, `--git-dir`/`--work-tree`/`GIT_DIR`
+# name the repository outright, and a `pushd`, a nested `bash -c 'cd …'` or a piped `cd` moves
+# (or fails to move) the shell where the reader never looks. Every one lands in the ROOT. Only a
+# shape the arm can place exactly as git will is exempted; each of these is judged instead.
+s9_expect_judged "9a C1 'git -C <scratch> -C <root> commit' is judged — git obeys the last -C" \
+  "$s9_root" "git -C $s9_scratch -C $s9_root commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and a relative second -C ('-C <scratch> -C ../../root') is judged" \
+  "$s9_root" "git -C $s9_scratch -C ../../root commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and '-C <scratch> --git-dir=<root>/.git --work-tree=<root>' is judged" \
+  "$s9_root" "git -C $s9_scratch --git-dir=$s9_root/.git --work-tree=$s9_root commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> && git --git-dir=<root>/.git --work-tree=<root> commit' is judged" \
+  "$s9_root" "cd $s9_scratch && git --git-dir=$s9_root/.git --work-tree=$s9_root commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> && GIT_DIR=… GIT_WORK_TREE=… git commit' is judged" \
+  "$s9_root" "cd $s9_scratch && GIT_DIR=$s9_root/.git GIT_WORK_TREE=$s9_root git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> && pushd <root> && git commit' is judged" \
+  "$s9_root" "cd $s9_scratch && pushd $s9_root && git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> && bash -c \"cd <root> && git commit\"' is judged" \
+  "$s9_root" "cd $s9_scratch && bash -c 'cd $s9_root && git commit -m x'" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> && git -C ../../root commit' is judged (a relative -C after the cd)" \
+  "$s9_root" "cd $s9_scratch && git -C ../../root commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> | cat; git commit' is judged (a piped cd moves nothing)" \
+  "$s9_root" "cd $s9_scratch | cat; git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and a payload cwd in the scratch repo with 'pushd <root> && git commit' is judged" \
+  "$s9_scratch" "pushd $s9_root && git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and a payload cwd in the scratch repo with 'git -C ../../root commit' is judged" \
+  "$s9_scratch" "git -C ../../root commit -m x" "the suite is not fully green"
+# CONTROLS: the shapes the arm CAN place stay admitted — the writer brief's own `cd … || exit 1;`
+# lead, and a `-C` AFTER the subcommand (commit's reuse-message flag), which is not git's cwd.
+s9_expect_outside "9a C1 control: 'cd <scratch> || exit 1; git add -A && git commit' is still admitted" \
+  "$s9_root" "cd $s9_scratch || exit 1; git add -A && git commit -m x" "$s9_scratch"
+s9_expect_outside "9a C1 control: 'git -C <scratch> commit -C HEAD' is still admitted (the second -C is commit's)" \
+  "$s9_root" "git -C $s9_scratch commit -C HEAD" "$s9_scratch"
+
 # NOT A REPOSITORY AT ALL: git cannot name one, so the gate cannot say it is outside, and it
 # keeps today's verdict (the commit would fail on its own; the wall does not guess).
 s9_bare_dir="$s9_tmp/not-a-repo"; mkdir -p "$s9_bare_dir"
@@ -8718,19 +8753,35 @@ s9_expect_judged "9e '-C' through a symlink to the root is the root, and is judg
 
 # --- 9f / AC-9.2: the plan is never opened on an outside commit (trace) --------------------
 #
-# BASH_XTRACEFD sends the hook's own xtrace to a file of its own, so stderr stays the gate's
-# line and the trace is a record of every command the process ran. The plan's path appears in
-# it the moment the gate resolves the plan (`PLAN=…`, `session_run`, `active_plan`); on an
-# outside commit it must not appear at all. THE POSITIVE CONTROL runs first on the SAME root and
-# the SAME trace channel: an inside commit's trace DOES carry the path, so a trace that recorded
-# nothing cannot pass the negative.
+# THE TRACE CHANNEL IS STDERR ITSELF, POINTED AT A FILE. A prelude (BASH_ENV, sourced before
+# the hook's first line) runs `exec 2>&9` and `set -x`, so every command the process runs is
+# recorded there. The plan's path appears in it the moment the gate resolves the plan
+# (`PLAN=…`, `session_run`, `active_plan`); on an outside commit it must not appear at all.
+# THE POSITIVE CONTROL runs first on the SAME root and the SAME trace channel: an inside commit's
+# trace DOES carry the path, so a trace that recorded nothing cannot pass the negative.
+#
+# WHY NOT BASH_XTRACEFD (floor #1, wave-19; the class tests/hook-latency.test.sh already met in
+# wave-14 T20). BASH_XTRACEFD arrived in bash 4.1. tests/run.sh pins `/bin/bash` — 3.2 on a Mac —
+# first on PATH, so under the runner the `bash` below is 3.2, which accepts the assignment,
+# ignores it and writes xtrace to stderr; stderr went to /dev/null and both controls read an
+# EMPTY trace. By hand `bash` is Homebrew's 5.3 and the same rows passed. A DEBUG trap under
+# `set -T` re-asserts fd 2 before every command, because a `2>/dev/null` inside the hook would
+# otherwise hide that stretch of the trace. The hook's own stderr lands in the file too; the
+# outside line names the root, never the plan's path, so it cannot satisfy or spoil a row here.
+s9_prelude="$s9_tmp/xtrace-prelude.sh"
+cat > "$s9_prelude" <<'PRELUDE'
+exec 2>&9
+set -T
+trap 'exec 2>&9' DEBUG
+set -x
+PRELUDE
 s9_trace() {  # <command> -> the trace file's path
   local _in _tr
   _tr=$(mktemp "$s9_tmp/trace.XXXXXX")
   _in=$(jq -n --arg c "$1" --arg cwd "$s9_root" --arg s "$EG_SID" \
           '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   HOME="$s9_home" CLAUDE_PROJECT_DIR="$s9_root" CLAUDE_CODE_SESSION_ID="$EG_SID" \
-    BASH_XTRACEFD=9 bash -x "$HOOK" <<< "$_in" >/dev/null 2>/dev/null 9>"$_tr" || true
+    BASH_ENV="$s9_prelude" bash "$HOOK" <<< "$_in" >/dev/null 2>/dev/null 9>"$_tr" || true
   printf '%s' "$_tr"
 }
 s9_tr_in=$(s9_trace 'git commit -m "x"')

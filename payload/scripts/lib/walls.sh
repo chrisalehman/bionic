@@ -1097,6 +1097,15 @@ bionic_context 2>/dev/null || exit 0
 # and counting is what tells them apart from a single commit without placing each one (review
 # R1, wave-19). Zero is judged too — a commit this reader cannot see is not one it can place.
 #
+# AND THE ONE COMMIT MUST BE PLACED EXACTLY AS GIT WILL PLACE IT (critic C1, wave-19). The reader
+# names the FIRST absolute `-C`, the leading `cd` or the payload cwd; git obeys the LAST `-C`,
+# `--git-dir`/`--work-tree`/`GIT_DIR` name the repository outright, and a `pushd`, a nested
+# `bash -c 'cd …'` or a piped `cd` moves the shell where the reader never looks. Every one of
+# those single commits was exempted for a scratch repository while it landed in the root.
+# `_eg_placed` admits only the three shapes the reader reads exactly — one `-C`, a leading `cd`
+# with nothing after it that moves, the payload cwd with nothing that moves — and everything
+# else is judged below. The exotic spellings are not resolved; they are not exempted.
+#
 # NOT A NEW REACH (the D11 freeze, .claude/rules/hook-authoring.md). It is the repair of the
 # gate's existing foreign-repository check — `_eg_git_wt_name` already asks git this question,
 # for linked worktrees only — widened to every repository git can place, as D10 ratified.
@@ -1375,25 +1384,125 @@ _eg_outside_root() {
 }
 
 # _eg_commit_count -> sets _EG_COMMITS to the number of `git … commit` segments in the command
-# text, `sh -c`/`eval` strings included (the jurisdiction arm exempts only when it is 1).
+# text, `sh -c`/`eval` strings included (the jurisdiction arm exempts only when it is 1), and
+# _EG_COMMIT_NC to the number of `-C` options among the GLOBAL options of the last one counted
+# — git's own cwd overrides, before the subcommand, never commit's `-C <commit>` after it.
 # Assigns rather than prints, like `_eg_commit_cwd`, and forks nothing git-side: it is the
 # same pure-shell segment pass the other walls make.
 _EG_COMMITS=0
+_EG_COMMIT_NC=0
 _eg_commit_count() {
-  local _line
-  _EG_COMMITS=0
+  local _line _oldifs="$IFS" _hadf
+  _EG_COMMITS=0; _EG_COMMIT_NC=0
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     git_argv_parse "$_line" || continue
-    [ "$GIT_SUB" = commit ] && _EG_COMMITS=$((_EG_COMMITS + 1))
+    [ "$GIT_SUB" = commit ] || continue
+    _EG_COMMITS=$((_EG_COMMITS + 1))
+    _EG_COMMIT_NC=0
+    _git_argv_skip "$_line"
+    [ -n "$GIT_ARGV_REST" ] || continue
+    _hadf=0
+    case "$-" in *f*) _hadf=1 ;; esac
+    set -f
+    IFS="$GIT_ARGV_US"
+    # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+    set -- $GIT_ARGV_REST
+    IFS="$_oldifs"
+    [ "$_hadf" -eq 1 ] || set +f
+    shift   # argv[0], the git binary
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -C) _EG_COMMIT_NC=$((_EG_COMMIT_NC + 1)); shift; [ $# -gt 0 ] && shift ;;
+        -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix)
+          shift; [ $# -gt 0 ] && shift ;;
+        -*) shift ;;
+        *) break ;;
+      esac
+    done
   done <<< "$(git_argv_expand "$COMMAND")"
   return 0
 }
 
+# _eg_no_cwd_move <text> -> 0 when nothing in <text> can move the shell, or name the
+# repository, between where the reader placed the commit and the commit itself; 1 otherwise.
+#
+# A SEGMENT SCAN, NOT A PARSER. The text is cut on every character that can open a command —
+# `;`, `&`, `|`, a newline, `(`, `)`, `{`, `}` and a backtick — and each piece's first word,
+# after any `NAME=value` prefixes, is read. A `cd`, `pushd`, `popd`, `eval`, `source`, `.`,
+# `exec`, `builtin`, `command` or a shell (`bash`, `sh`, `zsh`, `dash`, `ksh`, by name or path)
+# in command position is a move this reader does not follow, and so is an `sh -c` anywhere
+# (behind `xargs`, `env`, `sudo`). The WHOLE text is scanned, not only what precedes the commit:
+# a move after the commit costs the exemption and nothing else, and finding the commit's own
+# offset in the raw text is the guess this rule exists to stop making.
+_eg_no_cwd_move() {
+  local _t="${1:-}" _seg _w
+  case "$_t" in *'sh -c'*|*'sh	-c'*) return 1 ;; esac
+  while [ -n "$_t" ]; do
+    case "$_t" in
+      *[\;\&\|$'\n'\(\)\{\}\`]*) _seg="${_t%%[;&|$'\n'(){\}\`]*}"; _t="${_t#*[;&|$'\n'(){\}\`]}" ;;
+      *) _seg="$_t"; _t="" ;;
+    esac
+    while :; do
+      while [ "${_seg# }" != "$_seg" ] || [ "${_seg#	}" != "$_seg" ]; do
+        _seg="${_seg# }"; _seg="${_seg#	}"
+      done
+      _w="${_seg%%[ 	]*}"
+      case "$_w" in
+        [A-Za-z_]*=*) _seg="${_seg#"$_w"}" ;;
+        *) break ;;
+      esac
+    done
+    case "$_w" in
+      cd|pushd|popd|eval|source|.|exec|builtin|command) return 1 ;;
+      bash|sh|zsh|dash|ksh|*/bash|*/sh|*/zsh|*/dash|*/ksh) return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# _eg_placed -> 0 when the ONE commit's directory was read in a shape git obeys exactly as the
+# reader does, and 1 for every other shape (critic C1, wave-19). Only these three place:
+#   (a) `git -C <absolute dir> commit` — the commit's global options carry exactly ONE `-C`
+#       (git takes the LAST of several; the reader took the first);
+#   (b) a leading `cd <absolute dir>` followed by `&&`, `||`, `;` or a newline — never a pipe
+#       or a lone `&`, which run the `cd` in a subshell that moves nothing — with no `-C` on
+#       the commit and no move anywhere after it (`_eg_no_cwd_move`);
+#   (c) the payload cwd, with no `-C` on the commit and no move anywhere in the text. This is
+#       the writer standing in the scratch repository or the nested bed (AC-9.1, AC-9.3).
+# And in all three, no `--git-dir`, `--work-tree`, `GIT_DIR`, `GIT_WORK_TREE` or
+# `GIT_COMMON_DIR` anywhere in the command: each names the repository outright, whatever
+# directory the commit runs in. The check is on the raw text, so the words inside a commit
+# message cost the exemption too — the fail-closed direction, and a writer commits with `-F`.
+_eg_placed() {
+  local _c _sep
+  case "$COMMAND" in
+    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
+  esac
+  case "$_EG_CWD_SRC" in
+    -C) [ "$_EG_COMMIT_NC" -eq 1 ] ;;
+    cd)
+      [ "$_EG_COMMIT_NC" -eq 0 ] || return 1
+      _c="$COMMAND"
+      while [ "${_c# }" != "$_c" ] || [ "${_c#	}" != "$_c" ]; do _c="${_c# }"; _c="${_c#	}"; done
+      _sep="${_c#"${_c%%[;&|$'\n']*}"}"
+      case "$_sep" in
+        '&&'*) _sep="${_sep#&&}" ;;
+        '||'*) _sep="${_sep#||}" ;;
+        ';'*|$'\n'*) _sep="${_sep#?}" ;;
+        *) return 1 ;;
+      esac
+      _eg_no_cwd_move "$_sep" ;;
+    payload)
+      [ "$_EG_COMMIT_NC" -eq 0 ] && _eg_no_cwd_move "$COMMAND" ;;
+    *) return 1 ;;
+  esac
+}
+
 _eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CDS — once, for this arm and every reader below
-_eg_commit_count                     # sets _EG_COMMITS — only a command carrying ONE commit can be placed outside
+_eg_commit_count                     # sets _EG_COMMITS and _EG_COMMIT_NC — only ONE commit can be placed outside
 if [ "$_EG_COMMITS" -eq 1 ] \
-   && ! { [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CDS" ] && ! _eg_cd_one_dir; } \
+   && _eg_placed \
    && _eg_outside_root "$_EG_CWD"; then
   printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here\n' \
     "$_EG_JUR_TOP" "$BIONIC_ROOT" >&2
