@@ -81,6 +81,14 @@ if ! declare -F bionic_fold >/dev/null 2>&1; then
   . "$_STOP_LIB_DIR/fold.sh"
 fi
 
+# RESOURCES.SH IS SOURCED THE SAME WAY (wave-18 T2b, R1): `hooks/stop.sh`'s own
+# `BIONIC_LIB_WANT` does not name it, and this row's Files: declaration is this file
+# alone, so the dependency is met here rather than by widening the hook's want-list.
+if ! declare -F pressure_level >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/resources.sh"
+fi
+
 # ─── FILE SCOPE: hooks/context-spend.sh's audit path ─────────────────────────
 #
 # `audit_path` LIVES IN root.sh NOW (epic-23 wave-12-fixit-171, REQ-8, spec D6). This file
@@ -1794,27 +1802,45 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 # the table. What follows costs one table read and is paid on the turns where the answer
 # matters.
 #
-# THE WIDTH IS THE RUN'S DECLARED CEILING, AND THE OCCUPANCY IS THE PLAN'S OWN `active` ROWS
-# (A-T2.1, A-T2.2). The tick measures both differently — the rung off the pressure ring it
-# just sampled, and the open rows off the roster it just walked — and both are right for the
-# caller that has them. This one may not have them: a gate WRITES NOTHING (TDD §3.2) and
-# `pressure_level` takes a sample when the ring is cold, so reading the rung here would make
-# this verdict a writer. The ceiling is the conservative direction of the same number (the
-# rung never exceeds it), and the plan's `active` count is the ledger's own record of what is
-# in flight — the one this gate can read without a second definition of "running".
+# THE WIDTH IS THE SAME NUMBER THE TICK NAMES, NOT A SEPARATE "CONSERVATIVE" ONE (Step-6
+# review R1, wave-18 T2b; fill.sh's own docblock: "What may not differ is the READY SET").
+# The ready set is a function of the width, so a caller passing the declared ceiling while
+# the tick passes the pressure-sampled rung is the two-surfaces-disagree failure the library
+# was extracted to end, moved from the set computation into its argument: on a loaded
+# machine the tick orders two rows against the rung and this wall would refuse the turn
+# naming up to the ceiling's wider count, blocking a dispatch against rows the tick's own
+# turn just declined to order. So this reads `pressure_level` the way the tick's own
+# `rung_report` does (lib/resources.sh, ceiling = the declared `writers=`) and falls back to
+# the ceiling only when the rung will not parse — `SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"`
+# at hooks/session-poker.sh:4253, restated here rather than shared, the way
+# `_fill_current_field` restates its own twin (A-T2.3): this file and the tick are bound by
+# a test, not a delegation. `pressure_level` SAMPLES only when the ring is cold, and by the
+# time a Stop fires the ring has almost always been sampled already this turn — every
+# engaged Bash call appends one (hooks/execution-recorder.sh, spec AC-15) — so on the turns
+# where the tick and this wall could disagree, both are reading the same warm ring; the rare
+# cold-ring sample this pays is the ring's own stated contract for a first reader ("a first
+# consumer on a cold machine must have something to answer from", resources.sh), not a new
+# one invented here. The occupancy stays the plan's own `active` ROWS (A-T2.1, A-T2.2): the
+# tick counts open rows off the roster it is already walking, and this gate has no roster to
+# walk, only the ledger it just read.
 #
 # A RUN THAT OPTED INTO NO BUDGET OFFERS NO WIDTH, and gets silence: the direction the tick's
 # own budget arm takes, for the reason it states — a ceiling is a thing a run opts into, and
 # inventing one here would refuse turns against a number nobody set.
 FILL_READY=""
 if [ -n "$PLAN" ] && fill_ledger_live "$PLAN"; then
-  FILL_WIDTH="$(plan_frontmatter_get "$PLAN" parallel-budget 2>/dev/null)"
-  case "$FILL_WIDTH" in
-    *writers=*) FILL_WIDTH="${FILL_WIDTH#*writers=}"; FILL_WIDTH="${FILL_WIDTH%% *}" ;;
-    *) FILL_WIDTH="" ;;
+  FILL_CEILING="$(plan_frontmatter_get "$PLAN" parallel-budget 2>/dev/null)"
+  case "$FILL_CEILING" in
+    *writers=*) FILL_CEILING="${FILL_CEILING#*writers=}"; FILL_CEILING="${FILL_CEILING%% *}" ;;
+    *) FILL_CEILING="" ;;
   esac
-  case "$FILL_WIDTH" in ''|*[!0-9]*) FILL_WIDTH="" ;; esac
-  if [ -n "$FILL_WIDTH" ]; then
+  case "$FILL_CEILING" in ''|*[!0-9]*) FILL_CEILING="" ;; esac
+  if [ -n "$FILL_CEILING" ]; then
+    # THE RUNG, FALLING BACK TO THE CEILING — the same fallback direction
+    # `SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"` takes in the tick (R1, above).
+    FILL_RUNG="$(pressure_level "$FILL_CEILING" 2>/dev/null)" || FILL_RUNG=""
+    case "$FILL_RUNG" in ''|*[!0-9]*) FILL_RUNG="" ;; esac
+    FILL_WIDTH="${FILL_RUNG:-$FILL_CEILING}"
     FILL_OPEN=0
     while IFS= read -r _FILL_ROW; do
       [ -n "$_FILL_ROW" ] || continue
