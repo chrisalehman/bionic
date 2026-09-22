@@ -365,6 +365,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --report-only   the same files, listed, with nothing deleted"
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --window   defer a dead session whose own newest file is younger than the poker interval"
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
+  die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   exit 2
 }
 
@@ -432,6 +433,18 @@ case "$VERB" in
     fi
     BIND_ARG="$1"
     ;;
+  # THE SECOND (AND ONLY OTHER) TWO-OPERAND SHAPE (T-h; D11; REQ-10). `bind`'s comment above
+  # explains why one required operand is a refusal rather than a default; the same holds for
+  # both of these: `extend` with a name but no reason would ask the sweeper's verdict to
+  # explain itself out of nothing, and a default reason would make every extension look the
+  # same on a roster meant to say what the agent is actually doing.
+  extend)
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
+      usage "extend takes exactly two arguments: the name to re-open and the reason."
+    fi
+    EXTEND_NAME="$1"
+    EXTEND_REASON="$2"
+    ;;
   tick|arm|disarm|interval|interval-default|window)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
     ;;
@@ -467,6 +480,15 @@ iso_epoch() {  # <ISO-8601 Z> -> epoch seconds, empty if unreadable
 # rationale as hooks/session-sweeper.sh's copy: field order is not a contract.
 line_field() {  # <line> <key>
   printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
+}
+
+# Whether a versioned pipe-delimited line CARRIES a key at all — present-and-empty and absent
+# are different rows to a by-key reader, and `line_field` returns "" for both. The pipe is
+# joined at runtime on purpose: §S13.4 (tests/cross-gate-agreement.test.sh) pins that only
+# roster.sh's row writer spells `|<key>=` as a literal, and a presence test is not a writer.
+row_has_key() {  # <line> <key>
+  case "|$1" in *"|$2="*) return 0 ;; esac
+  return 1
 }
 
 clean() {  # <value> [<field name>]
@@ -3274,6 +3296,111 @@ EOF
       die "$BIND_DOCS/{plans,incidents} whose run is still open. This session's binding is unchanged."
       exit 1
     fi
+    ;;
+
+  # THE RE-OPEN (T-h; D11; REQ-10). `verdict_row` (hooks/session-sweeper.sh) reads a name's
+  # LAST roster row alone, and nothing else — `waiver=`, `deliverable=`, `launched_at=`, the
+  # `claims=`/`progress=`/`cadence=` triple. `standdown-declined:` answers one turn and
+  # writes nothing; `ack` closes a row rather than opening one. Neither re-opens a MET
+  # lineage, so this verb is a plain append: a fresh row for the same name, launched NOW,
+  # with the operator's reason riding in `claims=`. The already-written deliverable then
+  # dates before the new launch instant — `landing_conjunct` returns its `stale=` conjunct —
+  # the verdict leaves MET for STILL-LIVE or UNMET, and the name drops off
+  # `STANDDOWN_NAMES` and rejoins `OPEN`: the truthful accounting, the agent is still
+  # working. The roster is APPEND-ONLY (same invariant `adopt_write_row` keeps at :1799,
+  # above) — this never rewrites the row it found, only adds one after it — and `adopt_fold`
+  # folds by KEY, last non-empty value per field per name, so the bumped `launched_at=` (and
+  # the unmoved `deliverable=`) are exactly what a later `adopt` rebuilds from (AC-10.2).
+  extend)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "An extension answers for ONE session's roster, so without the key there is nothing to write."
+      exit 3
+    fi
+
+    # THE ENGAGEMENT GUARD (AC-10), same reason and the same shape `bind` and `adopt` take
+    # above: nothing bionic does applies until the session invoked the skill.
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
+      die "REFUSED — no row named $EXTEND_NAME: this session has no roster at $ROSTER_FILE."
+      exit 1
+    fi
+
+    # THE LAST ROW CARRYING THIS NAME IS ITS LATEST CONTRACT — the same by-name reading
+    # every other reader in this file takes (e.g. the duration arm inside `tick`, below).
+    EXTEND_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+      | grep -F "|name=${EXTEND_NAME}|" | tail -1)"
+    if [ -z "$EXTEND_ROW" ]; then
+      die "REFUSED — no row named $EXTEND_NAME on this session's roster ($ROSTER_FILE)."
+      exit 1
+    fi
+
+    EXTEND_NOW="$(iso_now)"
+    EXTEND_RR_ARGS=(
+      "status=$(line_field "$EXTEND_ROW" status)"
+      "session=$SESSION_ID"
+      "name=$(clean "$EXTEND_NAME")"
+      "agent_id=$(line_field "$EXTEND_ROW" agent_id)"
+      "launched_at=$EXTEND_NOW"
+      "subagent_type=$(line_field "$EXTEND_ROW" subagent_type)"
+      "model=$(line_field "$EXTEND_ROW" model)"
+      "deliverable=$(line_field "$EXTEND_ROW" deliverable)"
+      "source=$(line_field "$EXTEND_ROW" source)"
+      "duration=$(line_field "$EXTEND_ROW" duration)"
+      "progress=$(line_field "$EXTEND_ROW" progress)"
+      "claims=$(clean "$EXTEND_REASON")"
+      "cadence=$(line_field "$EXTEND_ROW" cadence)"
+      "absent=$(line_field "$EXTEND_ROW" absent)"
+      "waiver=$(line_field "$EXTEND_ROW" waiver)"
+      "tool_use_id=$(line_field "$EXTEND_ROW" tool_use_id)"
+      "plan=$(line_field "$EXTEND_ROW" plan)"
+    )
+    # THE PRESENT-IF-PASSED FIELDS TRAVEL ONLY WHEN THE SOURCE ROW HAD THEM — the same
+    # discipline `adopt_write_row`'s INSTRUMENT_FIELDS group keeps above: an absent key and
+    # a present-but-empty one are different rows to a by-key reader, and this verb must not
+    # manufacture the first out of the second.
+    if row_has_key "$EXTEND_ROW" files; then
+      EXTEND_RR_ARGS+=("files=$(line_field "$EXTEND_ROW" files)")
+    fi
+    if row_has_key "$EXTEND_ROW" suites_allowed; then
+      EXTEND_RR_ARGS+=("suites_allowed=$(line_field "$EXTEND_ROW" suites_allowed)")
+    fi
+    if row_has_key "$EXTEND_ROW" suites_source; then
+      EXTEND_RR_ARGS+=("suites_source=$(line_field "$EXTEND_ROW" suites_source)")
+    fi
+    if row_has_key "$EXTEND_ROW" re_executes; then
+      EXTEND_RR_ARGS+=("re_executes=$(line_field "$EXTEND_ROW" re_executes)")
+    fi
+    if row_has_key "$EXTEND_ROW" teammate_id; then
+      EXTEND_RR_ARGS+=("teammate_id=$(line_field "$EXTEND_ROW" teammate_id)")
+    fi
+    if row_has_key "$EXTEND_ROW" adopted_from; then
+      EXTEND_RR_ARGS+=("adopted_from=$(line_field "$EXTEND_ROW" adopted_from)")
+    fi
+
+    EXTEND_NEW_ROW="$(roster_row "${EXTEND_RR_ARGS[@]}")" || EXTEND_NEW_ROW=""
+    if [ -z "$EXTEND_NEW_ROW" ]; then
+      die "REFUSED — could not build the extended row for $EXTEND_NAME."
+      exit 2
+    fi
+    printf '%s\n' "$EXTEND_NEW_ROW" >> "$ROSTER_FILE" 2>/dev/null || {
+      die "REFUSED — could not write to $ROSTER_FILE."
+      exit 2
+    }
+    say "extended — $EXTEND_NAME is open again: $ROSTER_FILE"
+    exit 0
     ;;
 
   tick)

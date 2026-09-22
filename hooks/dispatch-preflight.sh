@@ -1745,8 +1745,9 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
         # A COMMENT ENDS ITS OWN LINE (T23, Step-6 review R1; line-scoped by T35, critic C8).
-        # The brief scaffold this repo ships reads `Suites: none   # read-only brief; or
-        # test-file names only`, and an author who fills that scaffold in keeps the comment.
+        # The brief scaffold this repo ships reads `Suites: none    # *.test.sh names or a
+        # path-qualified run.sh; other runners: Re-executes:`, and an author who fills that
+        # scaffold in keeps the comment.
         # Every word after the `#` is a whitespace-separated token like any other, so the drop
         # refusal below scored `#`, `read-only` and `brief;` as suites the shell runner cannot
         # run and refused briefs the base admitted — with a message pointing at `Re-executes:`
