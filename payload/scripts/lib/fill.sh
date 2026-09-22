@@ -100,12 +100,23 @@ fi
 # by the plan path; every reader goes through it. Because a value set inside `$( )` dies with
 # that subshell, the memo is only as wide as the shell that first asks: the stop wall's gate
 # and the tick both ask in their own shell before any `$( )` reader runs, and every subshell
-# after that inherits the answer. The key is the path alone, which is sound because no
-# process that reads a plan through this file writes one (the stop wall, the tick, the card);
-# a path that is not a file is answered "" and never memoised, so a plan created later in the
-# same process is still read. Sourcing this file resets the memo.
+# after that inherits the answer. The key is the path alone. The stop wall and the tick never
+# write a plan, so for them the path is the whole identity. ONE READER WRITES: `card.sh step3`
+# rewrites one projection path per batch, each with a different `current:`, and asks the ready
+# set in its own shell — so its writer, `_card_project`, calls `fill_current_forget` after
+# every write (wave-19 critic C2: a Step-5 batch answered at the Step-4 projection's step read
+# `0 of <rung>`). A key on mtime and size would not have caught it — the step-4 and step-5
+# projections are the same size and land in the same second — and a content hash is a fork on
+# every read, the cost this memo exists to remove. So the contract is the writer's: a process
+# that rewrites a plan it has read through this file forgets it after the write. A path that
+# is not a file is answered "" and never memoised, so a plan created later in the same process
+# is still read. Sourcing this file resets the memo.
 _FILL_CURRENT_PLAN=""
 _FILL_CURRENT_VALUE=""
+fill_current_forget() {  # -> drops the memo; the next reader parses whatever path it names
+  _FILL_CURRENT_PLAN=""
+  _FILL_CURRENT_VALUE=""
+}
 _fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE for it; parses at most once
   local plan="${1:-}"
   if [ -n "$plan" ] && [ "$plan" = "$_FILL_CURRENT_PLAN" ]; then
