@@ -8128,6 +8128,25 @@ write_plan "$h17t8" "$(plan 6 "$step6_body" "$(evidence_matrix 'record/never-wri
 expect_block "17t8 …and a single path naming no file keeps its own refusal" \
   "$h17t8" 'git commit -m "x"' "names no real file"
 
+# ---- AC-9.1: the evidence: cell tolerates a trailing note (wave-18 REQ-9, D13) ----
+#
+# THE CELL MAY CARRY A NOTE. Split on the first ' — ' (space, em dash, space) before either
+# test above: the path half is what the ';' check and the resolver ever see, so a note that
+# itself carries a ';' never trips the "names more than one path" refusal, and the path half
+# alone resolves under record/. The note half is discarded — never parsed, never required to
+# resolve.
+h17t8a=$(make_home)
+write_plan "$h17t8a" "$(plan 6 "$step6_body" \
+  "$(evidence_matrix 'record/generic-evidence.md — RED on a; GREEN on b')")" > /dev/null
+expect_allow "17t8a an evidence: value with a trailing note (the note itself carrying a ';') → the path resolves, admitted" \
+  "$h17t8a" 'git commit -m "x"'
+
+# AND A BARE ';'-JOINED VALUE WITH NO NOTE (NO EM DASH) IS STILL REFUSED, TODAY'S WORDING.
+h17t8b=$(make_home)
+write_plan "$h17t8b" "$(plan 6 "$step6_body" "$(evidence_matrix 'a.md; b.md')")" > /dev/null
+expect_block "17t8b …while a bare ';'-joined two-path value with no note is refused exactly as before" \
+  "$h17t8b" 'git commit -m "x"' "evidence: names more than one path"
+
 # ---- AC-5.4: the auditor cell is an equality, and the verdict says so ----
 #
 # THE OLD BEHAVIOUR. `CONFIRMED (audit-b3b87dc.md)` refused with "the auditor has not
