@@ -484,8 +484,23 @@ clean() {  # <value> [<field name>]
   # (name, deliverable, progress, waiver, …) is prose or a path, where a length this
   # generous is already more than any real value needs, so the cut stays for them. Callers
   # that pass no field name (every one but the two below) get today's behaviour exactly.
+  # AND `re_executes=` IS DECODED, NOT JUST UNCUT (T4, REQ-7/D4). This function reads a
+  # field off a roster row that `adopt_write_row` then hands back to `roster_row`, and the
+  # row stores the declared runs percent-encoded (`payload/scripts/lib/roster.sh`, which
+  # owns that encoding and carries the reasoning). Plain in memory, encoded on disk: the
+  # value goes back to the writer as the brief spelled it and the writer encodes it again,
+  # so the row this hook appends is byte-identical to the row it read. Decoding without
+  # that symmetry would put a raw pipe on the line and forge a segment; re-encoding an
+  # already-encoded value would turn `%7C` into `%257C` and hand a resumed agent a budget
+  # holding a command no shell could run. It joins the two LIST-valued fields in skipping
+  # the cut for the reason they do — a declared run is a command, and a command cut at 400
+  # characters is a budget entry nothing can ever equal — and because a cut landing inside
+  # an escape would decode into garbage.
   case "${2:-}" in
     suites_allowed|files) printf '%s' "$out" ;;
+    re_executes)
+      out="${out//\%7C/|}"
+      printf '%s' "${out//\%25/%}" ;;
     *) printf '%s' "$out" | cut -c 1-400 ;;
   esac
 }
@@ -1795,11 +1810,18 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # three instrument fields are carried forward to prevent. The fallback is a TRAILING
   # append, which is where the field lives either way, and every reader in the fleet reads a
   # row BY KEY — so the two spellings differ in position and in nothing a reader sees.
+  #
+  # THE FIELD NAME IS PASSED (T4, REQ-7/D4) so `clean` decodes the stored form and skips
+  # the 400-character cut — see its own comment. The value below is therefore the command
+  # as the brief spelled it, and `roster_row` encodes it again on the way out. The fallback
+  # branch bypasses that writer, so it encodes the value itself rather than appending a raw
+  # pipe that would forge a segment on the line it is appending to.
   if [ -n "$rex" ]; then
-    ROW="$(roster_row "${RR_ARGS[@]}" "re_executes=$(clean "$rex")")" || ROW=""
+    local _rex_plain; _rex_plain="$(clean "$rex" re_executes)"
+    ROW="$(roster_row "${RR_ARGS[@]}" "re_executes=$_rex_plain")" || ROW=""
     if [ -z "$ROW" ]; then
       ROW="$(roster_row "${RR_ARGS[@]}")" || return 1
-      ROW="${ROW}|re_executes=$(clean "$rex")"
+      ROW="${ROW}|re_executes=$(roster_pipe_escape "$_rex_plain")"
     fi
   else
     ROW="$(roster_row "${RR_ARGS[@]}")" || return 1
