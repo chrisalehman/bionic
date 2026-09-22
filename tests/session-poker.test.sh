@@ -5372,30 +5372,33 @@ s31_stop "$R31C" "$S31C_TR"
 expect_eq "31c a turn that dispatched both ready rows is not refused" "" "$(s31_decision)"
 
 # ============================================================
-section "Section 32: two readers of the current: field, bound by this row (wave-18 REQ-3, D2; A-T2.3)"
+section "Section 32: one reader of the current: field, delegated to (wave-19 REQ-6, D7; AC-6.1)"
 # ============================================================
 #
-# WHAT IS DUPLICATED, AND WHY IT IS NOT FOLDED. The stop library's fill duty has to know
-# whether this run's ledger is live, and it has no poker to ask — so
-# `payload/scripts/lib/fill.sh` reads `current:` with the same grammar this hook's
-# `_sched_plan_current_field` reads it with: the leading `## SDLC State` section, fence
-# toggle first, CR translated rather than deleted, the first `current:` line, whitespace
-# stripped. The obvious move is a delegation, and it is the one move that is not available:
-# §CG of tests/cross-gate-agreement.test.sh extracts this hook's function AS TEXT and evals
-# it beside `run_open`, so a body that called the library would answer nothing there, and
-# re-pointing that suite is outside this row's declared files.
+# ONE PARSER, TWO NAMES. The stop library's fill duty has to know whether this run's ledger is
+# live and has no poker to ask, so `payload/scripts/lib/fill.sh` owns the `current:` reader:
+# the leading `## SDLC State` section, fence toggle first, CR translated rather than deleted,
+# the first `current:` line, whitespace stripped. Until wave-19 this hook carried a second
+# parser with the same grammar, because §CG of tests/cross-gate-agreement.test.sh extracted it
+# as text; §CG now sources fill.sh beside the extraction, and this hook's
+# `_sched_plan_current_field` is a one-line wrapper over the library's reader.
 #
-# SO THE PAIR IS BOUND HERE INSTEAD — §CG's own choice, taken for the same reason it states
-# ("share one function vs. bind the two readers with a test"). Both are called FOR REAL over
-# one table of shapes, the poker's extracted the way §CG extracts it, and the row fails the
-# moment either moves without the other.
+# THE WRAPPER STAYS, AND SO DOES THIS SECTION. Calling `_fill_current_field` straight from the
+# poker would leave this section driving one function under two names — vacuous. Kept as a
+# wrapper, the poker's body is extracted exactly as §CG extracts it and driven beside the
+# library over one table of shapes, so a wrapper that drops or reorders its argument turns
+# the table red (32m proves it on a mutant), and 32p pins that the body parses nothing itself.
 
 S32_LIB_DIR="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" 2>/dev/null && pwd -P)" \
   || S32_LIB_DIR="$(cd "${BIONIC_HOOKS_DIR}/../scripts/lib" && pwd -P)"
 
-s32_poker_read() {  # <plan> -> _sched_plan_current_field's answer, extracted and eval'd
+s32_extract() {  # <poker file> -> the text of its _sched_plan_current_field, as §CG extracts it
+  awk '$0 ~ "^_sched_plan_current_field\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$1"
+}
+s32_poker_read() {  # <plan> [poker file] -> _sched_plan_current_field's answer, extracted and eval'd
   ( . "$S32_LIB_DIR/run.sh" >/dev/null 2>&1      # normalize_newlines is run.sh's
-    eval "$(awk '$0 ~ "^_sched_plan_current_field\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$POKER")"
+    . "$S32_LIB_DIR/fill.sh" >/dev/null 2>&1     # the reader the wrapper delegates to
+    eval "$(s32_extract "${2:-$POKER}")"
     _sched_plan_current_field "$1" ) 2>/dev/null
 }
 s32_fill_read() {  # <plan> -> _fill_current_field's answer, from the library itself
@@ -5497,6 +5500,23 @@ s32_row "cr-only" "$S32_CR" "6"
 # A path that is not a file at all — the silent, empty answer both give.
 expect_eq "32 the poker answers nothing for a missing plan" "" "$(s32_poker_read "$TMPROOT/s30-absent.md")"
 expect_eq "32 …and so does fill.sh" "" "$(s32_fill_read "$TMPROOT/s30-absent.md")"
+
+# 32p: ONE PARSER. The poker's body delegates and parses nothing itself — a body that grew its
+# own awk back would be the second reader AC-6.1 retires, agreeing today and drifting later.
+S32_BODY="$(s32_extract "$POKER")"
+expect_contains "32p the poker's reader delegates to fill.sh's" "_fill_current_field" "$S32_BODY"
+expect_absent "32p …and runs no parse of its own (no awk)" "awk" "$S32_BODY"
+expect_absent "32p …(no grep)" "grep" "$S32_BODY"
+
+# 32m: THE TABLE CAN GO RED. A mutant poker whose wrapper drops its argument answers nothing
+# for the plain shape, so the agreement rows above discriminate a broken delegation.
+S32_MUT="$TMPROOT/s32-poker-dropped-arg.sh"
+LC_ALL=C awk '{ if ($0 ~ /^  _fill_current_field "\$@"/) print "  _fill_current_field"; else print }' \
+  "$POKER" > "$S32_MUT"
+expect_eq "32m the mutant differs from the shipped poker by exactly the wrapper line" \
+  "1" "$(diff "$POKER" "$S32_MUT" | grep -c '^< ')"
+expect_eq "32m …and its reader answers nothing on the plain shape (the table would go red)" \
+  "" "$(s32_poker_read "$(s32_plan plain "$S32_LF")" "$S32_MUT")"
 
 
 # ============================================================

@@ -53,6 +53,13 @@
 # line naming the required columns the header lacks, which is the one fact the TSV cannot
 # carry (an absent column and an empty cell are the same empty field).
 #
+# AND ONE PARSE PER COMMAND WHEN THE CALLER ASKS FOR IT (wave-19 REQ-6, D7). Each verb still
+# reads the file itself, because a verb asked once should not depend on anything a caller set
+# up. A caller that asks the same plan several questions runs them under `units_memoised
+# <plan> <command…>`: the table is parsed once, and every verb the command reaches answers
+# that plan from the parse. The memo lives exactly as long as the command (bash's dynamic
+# scope for `local`), so no caller outside it can ever be answered from a stale read.
+#
 # SOURCED, NEVER EXECUTED. Only function definitions run at source time; nothing prints.
 # Every caller reads a verb through `$( )`, and a library that greeted them would corrupt
 # the first field of every answer.
@@ -213,6 +220,35 @@ _units_read() {
   '
 }
 
+# _units_table <plan> -> `_units_read`'s output and status for <plan>: from the memo when
+# `units_memoised` is running for that same path, from a fresh parse otherwise. Every verb
+# reads the table through this and nothing else.
+_units_table() {
+  if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "${1:-}" ]; then
+    printf '%s' "$_UNITS_MEMO_OUT"
+    return "$_UNITS_MEMO_RC"
+  fi
+  _units_read "${1:-}"
+}
+
+# units_memoised <plan> <command> [args…] -> runs the command; every verb it reaches answers
+# <plan> from ONE parse of the table, and the command's status is returned.
+#
+# THE MEMO IS THE COMMAND'S, NOT THE PROCESS'S. The three variables are `local` here, so bash's
+# dynamic scope hands them to everything the command calls — subshells included, which is how
+# a verb read through `$( )` still hits the memo — and takes them away when it returns. A
+# process that edits a plan after asking about it (close-out, a suite reusing one fixture
+# path) therefore reads the edit; only the command that asked for the memo sees the one read.
+# A plan with no table is memoised as that answer, status and all, so every verb inside still
+# says "no table". Another plan asked inside the command is read on its own.
+units_memoised() {  # <plan> <command> [args...]
+  local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1
+  _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
+  _UNITS_MEMO_PLAN="${1:-}"
+  shift
+  "$@"
+}
+
 # ── THE THREE VERBS, AND THE ONE ACCESSOR ────────────────────────────────────
 
 # units_has_column <plan> <column> -> 0 when the `## Tasks` header carries that contract
@@ -228,12 +264,25 @@ _units_read() {
 # matched against may have been written in any case, because `_units_read` lower-cases both
 # sides before comparing and records the contract spelling. `grep -qxF` over the field's
 # words, so `status` never matches inside `worktree` and an empty needle matches nothing.
+#
+# NO PROCESS AFTER THE READ (wave-19 REQ-6, D7). The control line is the first line, its fourth
+# tab-separated field the space-separated names, and the answer is whole-word membership —
+# all three taken by parameter expansion rather than the four processes this used to pipe
+# through. A needle carrying a space or a tab can never equal one of those words, so it is
+# answered 1 before the membership test, which would otherwise match across a word boundary.
 units_has_column() {
-  local plan="${1:-}" want="${2:-}" ctl
+  local plan="${1:-}" want="${2:-}" ctl i
   [ -n "$want" ] || return 1
-  ctl="$(_units_read "$plan" 2>/dev/null | awk 'NR == 1')" || return 1
+  case "$want" in *[' '$'\t'$'\n']*) return 1 ;; esac
+  ctl="$(_units_table "$plan" 2>/dev/null)"
+  ctl="${ctl%%$'\n'*}"
   [ -n "$ctl" ] || return 1
-  printf '%s\n' "$ctl" | awk -F'\t' '{ print $4 }' | tr ' ' '\n' | grep -qxF -- "$want"
+  for i in 1 2 3; do
+    case "$ctl" in *$'\t'*) ctl="${ctl#*$'\t'}" ;; *) return 1 ;; esac
+  done
+  ctl="${ctl%%$'\t'*}"
+  case " $ctl " in *" $want "*) return 0 ;; esac
+  return 1
 }
 
 
@@ -278,9 +327,11 @@ units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on 
 # order nobody chose.
 units_rows() {
   local out rc
-  out="$(_units_read "${1:-}")"; rc=$?
+  out="$(_units_table "${1:-}")"; rc=$?
   [ "$rc" -eq 0 ] || return "$rc"
-  printf '%s\n' "$out" | awk 'NR > 1'
+  # Everything after the control line; nothing when the table has no rows.
+  case "$out" in *$'\n'*) printf '%s\n' "${out#*$'\n'}" ;; esac
+  return 0
 }
 
 # units_ready <plan> <step> -> the ids that may be dispatched now, one per line, table order.
@@ -392,7 +443,7 @@ units_ready() {
 units_validate() {
   local plan="${1:-}" out rc ctl missing cols over rows violations _c _o found=0 haswt
 
-  out="$(_units_read "$plan")"; rc=$?
+  out="$(_units_table "$plan")"; rc=$?
   if [ "$rc" -ne 0 ]; then
     printf '## Tasks: no table found in %s\n' "${plan:-<no plan>}"
     return 1

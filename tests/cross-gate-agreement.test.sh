@@ -917,6 +917,10 @@ section "A2 — a LIBRARY mutation moves every party (checklist A9, TDD §9)"
 CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_ER" "$PARTY_LG" "$PARTY_LG_SRC" 2>/dev/null)
 RUN_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh"
 [ -r "$RUN_LIB" ] || RUN_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/run.sh"
+# fill.sh's `current:` reader, which the poker's `_sched_plan_current_field` delegates to since
+# wave-19 (REQ-6, D7): §CG sources it beside the extraction, as the shipped poker does.
+FILL_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/fill.sh"
+[ -r "$FILL_LIB" ] || FILL_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/fill.sh"
 LIB_DIR_SRC="$(dirname "$RUN_LIB")"
 # THE DOCS-ROOT READER IS lib/roots.sh's NOW (epic-22 wave-01, N1), so two of the seven
 # mutations below have to be applied there. run.sh used to carry both `docs_root` and
@@ -4228,7 +4232,10 @@ expect_eq "…writing it back to the same path the consumer reads" "yes" \
 N_LEASE_OUT=$(mk_agent_payload "$SID_A" "$NWT" \
   | jq -c '.tool_input.name = "w99-impl-lease"' \
   | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_LEASE_ST=$?
-expect_eq "a MAIN-THREAD dispatch from the same worktree is refused (AC-14)" "2" "$N_LEASE_ST"
+# A deny verdict, exit 0, since wave-19 T4 (REQ-7): the gate refuses every brief or state
+# fault on one wire whatever the fault count. `2>&1` above keeps the stdout verdict in view.
+expect_eq "a MAIN-THREAD dispatch from the same worktree is refused (AC-14)" "0" "$N_LEASE_ST"
+expect_contains "…on a deny verdict" '"permissionDecision":"deny"' "$N_LEASE_OUT"
 expect_contains "…naming the main checkout the library already resolves to" \
   "main checkout: $NMAIN" "$N_LEASE_OUT"
 
@@ -5161,8 +5168,10 @@ rm -f "$P_REPO"/.bionic/tmp/patrol-*.state
 } > "$P_REPO/.bionic/tmp/preflight-$P_SID.state"
 chmod 600 "$P_REPO/.bionic/tmp/preflight-$P_SID.state"
 
-P_OUT=$(mk_agent_payload "$P_SID" "$P_REPO" | bash "$PARTY_DP" 2>&1 >/dev/null); P_ST=$?
-expect_eq "the gate refuses a dispatch with no Patrol stamp" "2" "$P_ST"
+P_OUT=$(mk_agent_payload "$P_SID" "$P_REPO" | bash "$PARTY_DP" 2>&1); P_ST=$?
+# A deny verdict, exit 0, since wave-19 T4 (REQ-7); stdout is kept so the verdict is read.
+expect_eq "the gate refuses a dispatch with no Patrol stamp" "0" "$P_ST"
+expect_contains "…on a deny verdict" '"permissionDecision":"deny"' "$P_OUT"
 
 # The path the CONSUMER named, taken out of its own words rather than rebuilt here.
 P_READS=$(printf '%s\n' "$P_OUT" | grep -oE '/[^[:space:]]*/patrol-[^[:space:]]+\.state' | head -1)
@@ -9041,8 +9050,11 @@ section "CG — the current: GRAMMAR: sched_plan_current agrees with run.sh's ru
 # awkward abstraction over two unrelated call shapes. An agreement test is the fit.
 #
 # Both parties are called FOR REAL, not compared as text — sched_plan_current's own body
-# calls _sched_plan_current_field and normalize_newlines, so the poker's two are extracted
-# and eval'd together (§I.1's precedent, `q_poker` above). `normalize_newlines` is no longer
+# calls _sched_plan_current_field, so the poker's two are extracted and eval'd together
+# (§I.1's precedent, `q_poker` above). Since wave-19 (REQ-6, D7) the extracted
+# `_sched_plan_current_field` is a one-line wrapper over fill.sh's `_fill_current_field`, the
+# one parser of the field, so FILL_LIB is sourced beside RUN_LIB; the grammar this section
+# binds to `run_open` is that parser's. `normalize_newlines` is no longer
 # among them: since epic-23 wave-12-fixit-171 (REQ-8, spec D6) it has ONE definition, in
 # payload/scripts/lib/run.sh, which this section already had in hand as RUN_LIB — so it is
 # sourced rather than extracted, which is also what the shipped poker does. run_open is
@@ -9052,6 +9064,7 @@ cg_extract_fn() {  # <fn-name> -> that function's body text, from session-poker.
 }
 cg_sched_current() {  # <plan path> -> sched_plan_current's real answer, called for real
   ( . "$RUN_LIB" >/dev/null 2>&1            # normalize_newlines is run.sh's since REQ-8/D6
+    . "$FILL_LIB" >/dev/null 2>&1           # the reader the wrapper delegates to (REQ-6, D7)
     eval "$(cg_extract_fn _sched_plan_current_field)"
     eval "$(cg_extract_fn sched_plan_current)"
     sched_plan_current "$1" ) 2>/dev/null
@@ -9130,6 +9143,7 @@ expect_eq "CG.4 the mutant differs from the shipped file by exactly the strip li
   "1" "$(diff "$PARTY_PK" "$CG_MUT" | grep -c '^< ')"
 cg_sched_current_mut() {  # <plan path> -> sched_plan_current's answer off the MUTANT copy
   ( . "$RUN_LIB" >/dev/null 2>&1            # ditto: the mutant is a poker copy, not a lib copy
+    . "$FILL_LIB" >/dev/null 2>&1
     eval "$(awk -v n=_sched_plan_current_field \
       '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$CG_MUT")"
     eval "$(awk -v n=sched_plan_current \
