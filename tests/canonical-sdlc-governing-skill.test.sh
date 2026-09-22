@@ -2108,8 +2108,15 @@ HOOK_STDOUT=""
 # THE FOURTH ARGUMENT IS THE DEPTH. An agent-context payload carries a top-level `agent_id`
 # alongside the DISPATCHING session's `session_id` (hooks/agent-context-guard.sh's partition
 # rests on exactly that); a main-thread payload has no such key. Empty means main thread.
-run_post() {  # <tool> <file-path> <tool_response.type|NONE> [agent_id]
-  local tool="$1" file_path="$2" rtype="$3" agent="${4:-}"
+# THE FIFTH ARGUMENT IS THE SESSION'S OWN CWD (wave-18-fixit-185, REQ-2). Real PostToolUse
+# payloads carry `.cwd`, and since D5 the bind arm resolves the plan against the root the
+# SESSION engaged under rather than the root walked up from the artifact — so a fixture that
+# posts no cwd is exercising the second rung of that resolution, not the first. Empty (every
+# pre-existing call site) posts no `cwd` key at all, which is the shape those rows were
+# written against. `GS_POST_HOME` moves HOME for the one row whose project IS $HOME.
+GS_POST_HOME=""
+run_post() {  # <tool> <file-path> <tool_response.type|NONE> [agent_id] [cwd]
+  local tool="$1" file_path="$2" rtype="$3" agent="${4:-}" cwd="${5:-}"
   local input
   input=$(jq -n \
     --arg p "$file_path" \
@@ -2117,15 +2124,18 @@ run_post() {  # <tool> <file-path> <tool_response.type|NONE> [agent_id]
     --arg t "$tool" \
     --arg r "$rtype" \
     --arg a "$agent" \
+    --arg c "$cwd" \
     '{session_id: $s,
       hook_event_name: "PostToolUse",
       tool_name: $t,
       tool_input: {file_path: $p, content: ""},
       tool_response: (if $r == "NONE" then {filePath: $p} else {type: $r, filePath: $p} end)}
-     + (if $a == "" then {} else {agent_id: $a} end)')
+     + (if $a == "" then {} else {agent_id: $a} end)
+     + (if $c == "" then {} else {cwd: $c} end)')
   local tmp_err tmp_out
   tmp_err=$(mktemp); tmp_out=$(mktemp)
-  if HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" bash "$HOOK" <<< "$input" >"$tmp_out" 2>"$tmp_err"; then
+  if HOME="${GS_POST_HOME:-$FAKE_HOME}" CLAUDE_CODE_SESSION_ID="$GS_SID" \
+     CLAUDE_PROJECT_DIR="" bash "$HOOK" <<< "$input" >"$tmp_out" 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
     HOOK_EXIT=$?
@@ -2137,10 +2147,23 @@ run_post() {  # <tool> <file-path> <tool_response.type|NONE> [agent_id]
   # the suite runs under `set -e` and the hook exits 2 when it refuses.
   HOOK_VSTDERR=""
   if [ "$HOOK_EXIT" -ne 0 ]; then
-    HOOK_VSTDERR=$(HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" BIONIC_WALL_VERBOSE=1 \
+    HOOK_VSTDERR=$(HOME="${GS_POST_HOME:-$FAKE_HOME}" CLAUDE_CODE_SESSION_ID="$GS_SID" \
+      CLAUDE_PROJECT_DIR="" BIONIC_WALL_VERBOSE=1 \
       bash "$HOOK" <<< "$input" 2>&1 >/dev/null) || true
   fi
   rm -f "$tmp_out" "$tmp_err"
+}
+
+# THE DURABLE HALF OF EVERY DECLINE (AC-2.1). `log_finding` puts the line on stderr AND
+# appends it under $HOME, and the journal is the half that outlives the session — so every
+# exit row below reads both, and a line that only ever reached stderr would fail here.
+journal_of() {  # <project root> -> the audit file the hook's findings land in
+  printf '%s/.claude/logs/%s/sdlc-audit.md' "${GS_POST_HOME:-$FAKE_HOME}" "$(slug_for "$1")"
+}
+journal_has() {  # <project root> <substring> -> yes|no
+  local f; f="$(journal_of "$1")"
+  [ -f "$f" ] || { echo no; return 0; }
+  if /usr/bin/grep -qF -- "$2" "$f"; then echo yes; else echo no; fi
 }
 
 marker_plan() {  # <project> → the marker's `plan=` value; empty when absent or unbound
@@ -2203,7 +2226,12 @@ b_closed="$b_plans/wave-04-closed.plan.md"
 plant_plan "$b_closed" closed
 run_post Write "$b_closed" create
 assert_eq "b4 a plan that reads closed does not become a binding" "$b_c" "$(marker_plan "$b_p")"
-assert_eq "b4 ...and the refusal is silent" "" "$HOOK_STDERR"
+# SILENT UNTIL wave-18-fixit-185 (REQ-2 AC-2.1). The decline is the library's word for it,
+# not a sentence this hook composes: `bind_plan` refuses a path `open_runs` does not list
+# and now says WHICH refusal that was.
+assert_contains "b4 ...and the decline names the open-run set" "bind]: not-an-open-run" "$HOOK_STDERR"
+assert_contains "b4 ...and names the path it declined" "$b_closed" "$HOOK_STDERR"
+assert_eq "b4 ...and the journal keeps it" "yes" "$(journal_has "$b_p" "bind: not-an-open-run")"
 assert_eq "b4 ...exit 0" 0 "$HOOK_EXIT"
 
 # --- b5: an Edit is never a bind trigger ---
@@ -2220,6 +2248,11 @@ b_spec="$b_p/.bionic/docs/specs/epic-01-demo/wave-01.spec.md"
 plant_plan "$b_spec" open
 run_post Write "$b_spec" create
 assert_eq "b6 a specs/ file carrying ## SDLC State does not bind" "$b_c" "$(marker_plan "$b_p")"
+# …and since wave-18-fixit-185 it says which half of the docs tree it wanted (AC-2.1).
+assert_contains "b6 ...and names the two directories that bind" \
+  "bind]: not under plans/ or incidents/ of $b_p/.bionic/docs" "$HOOK_STDERR"
+assert_eq "b6 ...and the journal keeps it" "yes" \
+  "$(journal_has "$b_p" "bind: not under plans/ or incidents/")"
 
 # --- b6b: incidents/ binds, on the same footing as plans/ ---
 b_inc="$b_p/.bionic/docs/incidents/0002-thing/incident.plan.md"
@@ -2236,7 +2269,9 @@ run_post Write "$b_u_plan" create
 assert_eq "b7 an unengaged session does not bind" "" "$(marker_plan "$b_u")"
 assert_eq "b7 ...and no marker is created" 0 "$(marker_lines "$b_u")"
 assert_eq "b7 ...exit 0" 0 "$HOOK_EXIT"
-assert_eq "b7 ...silent" "" "$HOOK_STDERR"
+assert_contains "b7 ...and says the engagement is what is missing" \
+  "bind]: engagement absent under $b_u" "$HOOK_STDERR"
+assert_eq "b7 ...and the journal keeps it" "yes" "$(journal_has "$b_u" "bind: engagement absent")"
 
 # --- b8: PostToolUse NEVER blocks, not even on a plan this hook would refuse ---
 # The same content at PreToolUse is exit 2 (invalid `intent:`), which is the control
@@ -2268,7 +2303,9 @@ b_ov_plan="$b_ov/.bionic/docs/plans/epic-01-demo/wave-01-ov.plan.md"
 plant_plan "$b_ov_plan" open
 run_post Write "$b_ov_plan" update
 assert_eq "b9 a Write that overwrote an existing file does not bind" "" "$(marker_plan "$b_ov")"
-assert_eq "b9 ...silent" "" "$HOOK_STDERR"
+assert_contains "b9 ...and names the result type it read" \
+  "bind]: the write updated an existing file (tool_response.type=update)" "$HOOK_STDERR"
+assert_eq "b9 ...and the journal keeps it" "yes" "$(journal_has "$b_ov" "bind: the write updated")"
 
 # --- b10: a payload with no `type` at all still binds (the documented fallback) ---
 run_post Write "$b_ov_plan" NONE
@@ -2298,7 +2335,10 @@ run_post Write "$b_ag_plan" create "agent_01ABCdefGHIjklMNOpqrs"
 assert_eq "b13 a payload carrying agent_id does not bind" "" "$(marker_plan "$b_ag")"
 assert_eq "b13 ...and creates no marker at all" 0 "$(marker_lines "$b_ag")"
 assert_eq "b13 ...exit 0" 0 "$HOOK_EXIT"
-assert_eq "b13 ...silent" "" "$HOOK_STDERR"
+assert_contains "b13 ...and names the partition it declined on" \
+  "bind]: a dispatched agent's write never rebinds its dispatcher" "$HOOK_STDERR"
+assert_eq "b13 ...and the journal keeps it" "yes" \
+  "$(journal_has "$b_ag" "bind: a dispatched agent")"
 run_post Write "$b_ag_plan" create
 assert_eq "b13 paired: the same Write from the main thread DOES bind" "$b_ag_plan" "$(marker_plan "$b_ag")"
 assert_contains "b13 paired: ...and says so" "session bound to $b_ag_plan" "$HOOK_STDERR"
@@ -2314,6 +2354,172 @@ assert_eq "b13 an agent writing a SECOND plan leaves the live binding where it w
 b_gone="$b_ov/.bionic/docs/plans/epic-01-demo/wave-99-gone.plan.md"
 run_post Write "$b_gone" create
 assert_eq "b12 a target that does not exist on disk does not bind" "$b_ov_plan" "$(marker_plan "$b_ov")"
+assert_contains "b12 ...and says the file is not there" \
+  "bind]: the written file is not on disk" "$HOOK_STDERR"
+assert_eq "b12 ...and the journal keeps it" "yes" "$(journal_has "$b_ov" "bind: the written file is not on disk")"
+
+echo
+echo "--- the shapes that used to bind nothing and say nothing (AC-2.1, AC-2.3, AC-2.4) ---"
+
+# WHY THESE SEVEN AND NOT OTHERS (epic-23 wave-18-fixit-185, REQ-2; research R4 §1.3). Every
+# bind fixture above this line is `make_project`: one plain root, one git repository, no
+# worktree, no symlinked `.bionic`, no `docs-root:` override, no `$HOME` root, and — until
+# now — no task-scale plan anywhere in the file (`grep -n 'current: T' ` returned nothing).
+# The shapes a consumer reported silence on were precisely the untested ones, and four of
+# them reproduce the silence in fifteen scratch fixtures. So they come in here, each one
+# asserting THE LINE IT NOW PRINTS, because an instrumentation change nobody asserts is a
+# comment: the row is what makes the sentence a wall.
+#
+# TWO OF THE SEVEN BIND RATHER THAN DECLINE, and that is the D5 fix itself — the arm resolves
+# the write against the root the SESSION engaged under, so a project that is `$HOME` and a
+# plan written through a linked worktree of the engaged root both reach `bind_plan` now
+# instead of being lost to a second root walked up from the artifact.
+
+gs_git_repo() {  # <dir> -> an initialised repo with one commit, so `git worktree add` works
+  mkdir -p "$1"
+  git -C "$1" init -q .
+  git -C "$1" -c user.email=t@example.invalid -c user.name=bionic-test \
+    commit -q --allow-empty -m init
+}
+gs_sandbox() {  # -> a fresh physical directory, cleaned up with the rest
+  local d; d=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$d"); printf '%s' "$d"
+}
+
+# --- s1: the project IS a linked git worktree ---
+#
+# `project_root` maps a linked worktree onto its MAIN repository before it walks (root.sh:246),
+# so the plan under the worktree's own `.bionic/` resolves to a root that does not contain it.
+# The arm cannot bind it — `open_runs` of the engaged root does not list a file in another
+# tree — but it can say so, which is the whole of REQ-2.
+s1_base=$(gs_sandbox)
+s1_main="$s1_base/main"
+s1_wt="$s1_base/18-T1"
+gs_git_repo "$s1_main"
+git -C "$s1_main" worktree add -q -b wt/18-T1 "$s1_wt"
+engage "$s1_main"
+s1_plan="$s1_wt/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+plant_plan "$s1_plan" open
+run_post Write "$s1_plan" create "" "$s1_wt"
+assert_contains "s1 a plan under a linked worktree's own .bionic names the engaged root" \
+  "bind]: outside the engaged root $s1_main" "$HOOK_STDERR"
+assert_eq "s1 ...and binds nothing" "" "$(marker_plan "$s1_main")"
+assert_eq "s1 ...and the journal keeps it" "yes" \
+  "$(journal_has "$s1_main" "bind: outside the engaged root")"
+assert_eq "s1 ...exit 0" 0 "$HOOK_EXIT"
+
+# --- s2: the project is NESTED INSIDE a linked worktree ---
+s2_base=$(gs_sandbox)
+s2_main="$s2_base/main"
+s2_wt="$s2_base/18-T2"
+gs_git_repo "$s2_main"
+git -C "$s2_main" worktree add -q -b wt/18-T2 "$s2_wt"
+engage "$s2_main"
+s2_plan="$s2_wt/child/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+mkdir -p "$s2_wt/child/.bionic/docs/plans/epic-01-demo"
+plant_plan "$s2_plan" open
+run_post Write "$s2_plan" create "" "$s2_wt/child"
+assert_contains "s2 a project nested inside a worktree names the engaged root too" \
+  "bind]: outside the engaged root $s2_main" "$HOOK_STDERR"
+assert_eq "s2 ...and binds nothing" "" "$(marker_plan "$s2_main")"
+
+# --- s3: the project's `.bionic` is a SYMLINK ---
+#
+# The walk refuses to choose a root whose `.bionic` is a link (root.sh:276), and `bind_plan`
+# refuses to write a marker under one (binding.sh, the marker-path guard). The session is
+# engaged through the link, so the arm gets all the way to the writer and reports the
+# writer's own word for the refusal — which is what AC-2.2 is for.
+s3_base=$(gs_sandbox)
+s3_proj="$s3_base/proj"
+s3_store="$s3_base/store"
+mkdir -p "$s3_store/docs/plans/epic-01-demo" "$s3_store/tmp"
+gs_git_repo "$s3_proj"
+ln -s "$s3_store" "$s3_proj/.bionic"
+: > "$s3_proj/.bionic/tmp/engaged-$GS_SID.state"
+s3_plan="$s3_proj/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+plant_plan "$s3_plan" open
+run_post Write "$s3_plan" create "" "$s3_proj"
+assert_contains "s3 a symlinked .bionic reports the marker-directory refusal by name" \
+  "bind]: marker-dir-symlink" "$HOOK_STDERR"
+assert_eq "s3 ...and binds nothing" "" "$(marker_plan "$s3_proj")"
+assert_eq "s3 ...and the journal keeps it" "yes" "$(journal_has "$s3_proj" "bind: marker-dir-symlink")"
+
+# --- s4: a `docs-root:` override, with the plan written to the DEFAULT path ---
+s4_p=$(make_project)
+printf 'docs-root: alt\n' > "$s4_p/.bionic/config.yaml"
+mkdir -p "$s4_p/alt/plans/epic-01-demo"
+s4_plan="$s4_p/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+plant_plan "$s4_plan" open
+run_post Write "$s4_plan" create "" "$s4_p"
+assert_contains "s4 an override names both roots, so the misplacement is readable" \
+  "bind]: the engaged root's docs root is $s4_p/alt, not $s4_p/.bionic/docs" "$HOOK_STDERR"
+assert_eq "s4 ...and binds nothing" "" "$(marker_plan "$s4_p")"
+assert_eq "s4 ...and the journal keeps it" "yes" "$(journal_has "$s4_p" "bind: the engaged root's docs root")"
+# the pair, one argument apart: the same plan written UNDER the configured root binds.
+s4_right="$s4_p/alt/plans/epic-01-demo/wave-01.plan.md"
+plant_plan "$s4_right" open
+run_post Write "$s4_right" create "" "$s4_p"
+assert_eq "s4 paired: the same plan under the configured root binds" "$s4_right" "$(marker_plan "$s4_p")"
+
+# --- s5: the project root IS `$HOME` (D5: it binds now) ---
+#
+# `project_root` never CHOOSES a root at or above `$HOME` (root.sh:274), so the walk from the
+# artifact ended in a fallback that was not a bionic root at all and the write was lost. The
+# session's own root is the marker's, and the marker is right there.
+# NOT A GIT REPOSITORY, which is what makes the row reproduce the reported silence. With a
+# repo the walk's `git-toplevel-fallback` lands back on the project by luck; without one it
+# falls through to `cwd-fallback`, and the cwd it falls back to is the ARTIFACT's directory —
+# a "root" three levels inside the docs tree, where no marker has ever been written. That is
+# research R4's fixture L, and the session's own root is the answer to it.
+s5_base=$(gs_sandbox)
+s5_home="$s5_base/home"
+mkdir -p "$s5_home/.bionic/docs/plans/epic-01-demo" "$s5_home/.bionic/tmp"
+: > "$s5_home/.bionic/tmp/engaged-$GS_SID.state"
+s5_plan="$s5_home/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+plant_plan "$s5_plan" open
+GS_POST_HOME="$s5_home"
+run_post Write "$s5_plan" create "" "$s5_home"
+GS_POST_HOME=""
+assert_eq "s5 a project that IS \$HOME binds its own plan" "$s5_plan" "$(marker_plan "$s5_home")"
+assert_contains "s5 ...and says so" "governing-skill: session bound to $s5_plan" "$HOOK_STDERR"
+
+# --- s6: a task-scale plan in a root with twelve other open runs BINDS ---
+#
+# The charter named both conditions as suspects and research R4 refuted both; this row is
+# what keeps them refuted. `current: T<n>` is an open run (run.sh's task-scale arm) and
+# twelve siblings cost the walk 0.46 s against a 10 s budget.
+s6_p=$(make_project)
+for s6_i in 01 02 03 04 05 06 07 08 09 10 11 12; do
+  plant_plan "$s6_p/.bionic/docs/plans/epic-01-demo/wave-$s6_i-open.plan.md" open
+done
+s6_plan="$s6_p/.bionic/docs/plans/epic-51-exam-cache/task-07-thing.plan.md"
+mkdir -p "$(dirname "$s6_plan")"
+printf -- '---\ncanonical_sdlc_version: 14\nscale: task\n---\n\n## SDLC State\n\ncurrent: T3\n\n- T3: in flight\n' \
+  > "$s6_plan"
+run_post Write "$s6_plan" create "" "$s6_p"
+assert_eq "s6 a task-scale plan among twelve open runs BINDS" "$s6_plan" "$(marker_plan "$s6_p")"
+assert_contains "s6 ...and says so" "governing-skill: session bound to $s6_plan" "$HOOK_STDERR"
+assert_eq "s6 ...exit 0" 0 "$HOOK_EXIT"
+
+# --- s7 (AC-2.4): a Write through a LINKED WORKTREE of the engaged root binds the run ---
+#
+# The D5 case, and the one this arm rewrites a path for: the session engaged under R, and the
+# plan it wrote is R's plan reached through R's worktree, whose `.bionic/` is a tree of its own
+# because `.bionic/` is gitignored and never checked out. The marker's `plan=` must be R's.
+s7_base=$(gs_sandbox)
+s7_main="$s7_base/main"
+s7_wt="$s7_base/18-T3"
+s7_rel=".bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+gs_git_repo "$s7_main"
+engage "$s7_main"
+plant_plan "$s7_main/$s7_rel" open
+git -C "$s7_main" worktree add -q -b wt/18-T3 "$s7_wt"
+plant_plan "$s7_wt/$s7_rel" open
+run_post Write "$s7_wt/$s7_rel" create "" "$s7_wt"
+assert_eq "s7 (AC-2.4) a Write from a linked worktree binds the ENGAGED ROOT's plan" \
+  "$s7_main/$s7_rel" "$(marker_plan "$s7_main")"
+assert_contains "s7 ...and names the engaged root's spelling, not the worktree's" \
+  "governing-skill: session bound to $s7_main/$s7_rel" "$HOOK_STDERR"
+assert_eq "s7 ...and the worktree grew no marker of its own" 0 "$(marker_lines "$s7_wt")"
 
 echo
 echo "--- the PreToolUse verdict: fallback, bound, and bound-closed ---"
