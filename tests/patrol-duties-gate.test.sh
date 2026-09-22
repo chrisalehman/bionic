@@ -732,6 +732,148 @@ fire "$d"; expect_block "58a: an unanswered FILL and stand-down together name th
 fire "$d"; expect_block "58b: …and the agent, in the same refusal" "W-BETA"
 
 # ============================================================
+section "Section 5c: the fill duty is an INVARIANT — a live ledger with rows ready (wave-18 REQ-3, AC-3.2; ADR-033 d2)"
+#
+# WHAT CHANGED, AND WHY. Every row above this one is about a tick: the duty existed only
+# because the tick had PRINTED a line, so the gate read the transcript for `poker: FILL ` and
+# went inert when it found none. That makes the wall a function of the Patrol's cadence
+# rather than of the run's state — a turn ending with three rows ready, twenty minutes before
+# the next tick, ended in silence. The stop library computes the ready set itself now
+# (payload/scripts/lib/fill.sh, the same function the tick prints from), so the question is
+# the run's: is the ledger live, and is there a fillable gap.
+#
+# THE TICK ARM IS UNCHANGED AND STILL WINS ON A TICK TURN. A tick that printed FILL is
+# answered by its printed ids in the wording §5 pins; a tick that printed none said so about
+# the roster it had just walked, and this arm does not second-guess it. What this section
+# drives is the turn with NO tick in it.
+#
+# THE FIXTURE IS A PLAN, not a transcript: a budget in the frontmatter (the ceiling the run
+# opted into), a `current:` past Step 3, and a `## Tasks` table whose rows are ready or not.
+
+# A project whose plan is a LIVE wave ledger: writers=8, at <current>, with the rows given.
+make_env_ledger() {  # <current> <row>... -> project dir on stdout
+  local cur="$1"; shift
+  local dir; dir=$(mktemp -d)
+  mkdir -p "$dir/.bionic/docs/plans" "$dir/.bionic/tmp"
+  : > "$dir/.bionic/tmp/engaged-$SID.state"
+  {
+    printf -- '---\n'
+    printf 'governing-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n'
+    printf '## SDLC State\n\ncurrent: %s\n\n- Step %s: in progress\n\n' "$cur" "$cur"
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    local row
+    for row in "$@"; do printf '%s\n' "$row"; done
+  } > "$dir/.bionic/docs/plans/$PLAN_REL"
+  : > "$dir/transcript.jsonl"
+  printf '%s' "$dir"
+}
+
+LEDGER_LANDED='| T1 | 4 | build | the landed row | implementor | — | 30m | REQ-x | a.sh | landed | — |'
+LEDGER_READY_2='| T2 | 4 | build | the first ready row | implementor | — | 30m | REQ-x | b.sh | pending | — |'
+LEDGER_READY_3='| T3 | 4 | build | the second ready row | implementor | — | 30m | REQ-x | c.sh | pending | — |'
+LEDGER_ACTIVE='| T4 | 4 | build | the row in flight | implementor | — | 30m | REQ-x | d.sh | active | 18-T4 |'
+LEDGER_BLOCKED='| T5 | 4 | build | a row behind an unlanded dep | implementor | T2 | 30m | REQ-x | e.sh | pending | — |'
+
+# 59: THE INVARIANT. A live ledger, two ready rows, an ordinary turn that dispatched
+# neither and never saw a tick -> REFUSE, naming both rows.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "merge the two landed trees and tell me where we are"
+fire "$d"; expect_block "59a: a turn ending on a fillable gap is refused, naming the first row" "T2"
+fire "$d"; expect_block "59b: …and the second — named, not counted" "T3"
+fire "$d"; expect_block "59c: …and says what answers it" "fill-declined"
+
+# 60: THE DISCHARGE IS THE ONE THE TICK-PRINTED DUTY ALREADY HAD. One line in the record,
+# and the invariant is answered for this turn.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "merge the two landed trees and tell me where we are"
+a_text "$d" "fill-declined: the wave head has not merged, so neither row can base off it."
+fire "$d"; expect_allow "60: a fill-declined line answers the gap as it answers a printed FILL"
+
+# 60b: and a dispatch of every ready row answers it too — the arm names what was NOT sent.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "dispatch the batch"
+a_agent "$d" "T2" "row T2, implementor."
+a_agent "$d" "T3" "row T3, implementor."
+fire "$d"; expect_allow "60b: a turn that dispatched every ready row is not refused"
+
+# 60c: …and a turn that dispatched ONE of the two is refused, naming only the other.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "dispatch the first one"
+a_agent "$d" "T2" "row T2, implementor."
+fire "$d"; expect_block "60c: a half-filled gap names the row left out, and not the one sent" "T3" "T2"
+
+# 61: THE LEDGER IS NOT LIVE BELOW STEP 4. Steps 0-3 are research, spec, plan and review;
+# the same table at `current: 3` is a schedule nobody has ratified, and dispatching into it
+# is what the tick's own approval gate exists to prevent.
+d=$(make_env_ledger 3 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "draft the plan's task table"
+fire "$d"; expect_allow "61: a plan at current: 3 is not a fillable gap — Step 3 has not passed"
+
+# 62: NO GAP, TWO WAYS. Nothing is ready (every row landed, or every pending row sits
+# behind an unlanded dependency) -> silent.
+d=$(make_env_ledger 4 "$LEDGER_LANDED")
+u_prompt "$d" "what is left?"
+fire "$d"; expect_allow "62a: a ledger with no pending row is silent"
+
+d=$(make_env_ledger 4 "$LEDGER_READY_2" "$LEDGER_BLOCKED")
+u_prompt "$d" "start the row behind T2"
+a_agent "$d" "T2" "row T2, implementor."
+fire "$d"; expect_allow "62b: a pending row behind an unlanded dep is not ready, so the turn ends"
+
+# 63: A PLAN WITH NO BUDGET OFFERS NO WIDTH TO FILL AGAINST, and a ceiling is a thing a run
+# opts into — the direction the tick's own budget arm takes, said the same way here: silence.
+d=$(make_env); u_prompt "$d" "carry on"
+fire "$d"; expect_allow "63: a plan carrying no parallel-budget is never refused for a gap"
+
+# 64: THE ARITHMETIC IS THE RUNG MINUS THE OPEN ROWS, and `active` is what the plan calls a
+# row in flight. Eight active rows against writers=8 is a full budget, ready rows or not.
+d=$(make_env_ledger 4 "$LEDGER_READY_2" \
+  '| T11 | 4 | build | in flight | implementor | — | 30m | REQ-x | f.sh | active | 18-T11 |' \
+  '| T12 | 4 | build | in flight | implementor | — | 30m | REQ-x | g.sh | active | 18-T12 |' \
+  '| T13 | 4 | build | in flight | implementor | — | 30m | REQ-x | h.sh | active | 18-T13 |' \
+  '| T14 | 4 | build | in flight | implementor | — | 30m | REQ-x | i.sh | active | 18-T14 |' \
+  '| T15 | 4 | build | in flight | implementor | — | 30m | REQ-x | j.sh | active | 18-T15 |' \
+  '| T16 | 4 | build | in flight | implementor | — | 30m | REQ-x | k.sh | active | 18-T16 |' \
+  '| T17 | 4 | build | in flight | implementor | — | 30m | REQ-x | l.sh | active | 18-T17 |' \
+  '| T18 | 4 | build | in flight | implementor | — | 30m | REQ-x | m.sh | active | 18-T18 |')
+u_prompt "$d" "anything else to start?"
+fire "$d"; expect_allow "64a: eight rows in flight against writers=8 is a full budget, not a gap"
+
+# …and one row in flight leaves room, so the same table with seven refuses.
+d=$(make_env_ledger 4 "$LEDGER_READY_2" "$LEDGER_ACTIVE")
+u_prompt "$d" "anything else to start?"
+fire "$d"; expect_block "64b: one row in flight against writers=8 leaves room, and the gap is named" "T2"
+
+# 65: BLOCKS ONCE, through the same stop_hook_active valve the other three duties use.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
+u_prompt "$d" "carry on"
+fire "$d" Stop true; expect_allow "65: stop_hook_active true passes the same fillable gap"
+
+# 66: A SUBAGENT'S STOP IS NOT THE ORCHESTRATOR'S. A writer ending its own turn owes
+# nothing about the run's schedule — the Stop-only rule this whole function is built on.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
+u_prompt "$d" "carry on"
+fire "$d" SubagentStop; expect_allow "66: a SubagentStop is never asked about the run's gap"
+
+# 67: THE TICK ARM STILL WINS ON A TICK TURN, and keeps its own wording. The tick walked the
+# ROSTER — the session's own record of what is running — and printed one id; the refusal is
+# about that id, in the words §5 pins, not about the plan's ready set.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL T2"
+fire "$d"; expect_block "67a: a tick turn is answered for the ids the tick printed" "T2"
+fire "$d"; expect_block "67b: …in the tick arm's own wording" "the tick printed FILL"
+
+# 68: …and a tick that printed NO fill is not contradicted by this arm: it had just walked
+# the roster, which is a fact about the session this plan cannot see.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 open row(s): the budget is full."
+fire "$d"; expect_allow "68: a tick that printed no FILL is not overruled by the plan's own reading"
+
+# ============================================================
 section "Section 6: marker scope — a file the agent merely READ is not a decline (review F2)"
 #
 # THE DEFECT. `fill-declined:` and the two clear/resume markers were read as a raw-text

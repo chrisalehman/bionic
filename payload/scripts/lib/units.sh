@@ -12,7 +12,9 @@
 #                              `## Tasks` table.
 #   units_ready <plan> <step>  the ids of rows whose status is `pending`, whose step is
 #                              <step>, and whose every dependency has landed. One per line,
-#                              table order. Exit 2 on a step that is not a number.
+#                              table order. <step> is a number (wave scale) or `T<n>` (task
+#                              scale, where the rows carry no step cell and a dependency is
+#                              satisfied by `done`). Exit 2 on anything else.
 #   units_validate <plan>      one line per broken invariant, each naming the offending id
 #                              and the rule. Exit 1 if any line was printed, else 0.
 #
@@ -285,6 +287,27 @@ units_rows() {
 #
 # READY = status `pending`, step equal to <step>, and EVERY dependency `landed`.
 #
+# TWO TABLE SHAPES, ONE ANSWER (wave-18 REQ-3, AC-3.3; ADR-033 decision 2). <step> is the
+# plan's `current:`, and this repo writes it two ways: a WAVE plan numbers its steps, a TASK
+# plan names the unit it is on — `T<n>`. Passed a `T<n>`, this reads the six-column
+# task-scale table (`id · intent · rigor · description · status · worktree`), whose rows
+# carry neither a `step` cell nor a `deps` cell, so READY is `pending` alone. Anything that
+# is neither a number nor `T<n>` is still a caller fault and still exits 2.
+#
+# THE ROW'S STEP CELL DECIDES WHICH ARM JUDGES IT, not the argument by itself: at task scale
+# a row that CARRIES a step is a wave row and is never ready. That is what keeps the shape
+# the tick's approval gate closed — a wave table sitting at `current: T1`, which used to fall
+# through to the readiness checks and fill (tests/session-poker.test.sh §22g) — from
+# re-opening through this door. A wave table asked at `T<n>` answers nothing, and says it
+# with success rather than with the step-refusal status: the table is legible, it simply has
+# no task-scale row in it.
+#
+# AND THE DEPENDENCY WORD IS `done` AT TASK SCALE. `done` is the one terminal word a
+# task-scale ledger writes (ADR-033 decision 1); `landed` is a word that table never carries,
+# and reading it as satisfaction would schedule a row against a status nobody wrote. The
+# shipped six-column table has no `deps` column at all, so the arm is reached only by a table
+# that grows one — it is here because the fill direction has to be stated once, not twice.
+#
 # A dependency cell is a comma-separated list of ids, or an em dash / hyphen / empty cell for
 # "none" — all three spellings are recognised as "no alphanumeric character", which keeps a
 # Unicode literal out of a bash 3.2 awk program for no gain.
@@ -297,17 +320,31 @@ units_rows() {
 # ONE PASS TO REMEMBER, ONE TO DECIDE. A dependency may be named before or after the row that
 # depends on it, so nothing is answerable until the whole table has been read.
 units_ready() {
-  local plan="${1:-}" step="${2:-}" rows
-  case "$step" in ''|*[!0-9]*) return 2 ;; esac
+  local plan="${1:-}" step="${2:-}" rows scale=wave
+  case "$step" in
+    ''|*[!0-9]*)
+      # The task-scale step token, and nothing else: a literal `T` followed by digits.
+      case "$step" in
+        T*) case "${step#T}" in ''|*[!0-9]*) return 2 ;; *) scale=task ;; esac ;;
+        *) return 2 ;;
+      esac ;;
+  esac
   rows="$(units_rows "$plan")" || return 1
   [ -n "$rows" ] || return 0
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$step" '
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$step" -v scale="$scale" '
     $1 == "" { next }
     { n++; id[n] = $1; stp[n] = $2; dep[n] = $6; st[$1] = $10 }
     END {
+      # The word a dependency has to carry, by scale. One assignment, so the two arms
+      # below differ in exactly the thing they are supposed to differ in.
+      satisfied = (scale == "task") ? "done" : "landed"
       for (i = 1; i <= n; i++) {
         if (st[id[i]] != "pending") continue
-        if (stp[i] + 0 != want + 0) continue
+        if (scale == "task") {
+          if (stp[i] != "") continue
+        } else {
+          if (stp[i] + 0 != want + 0) continue
+        }
         d = dep[i]
         gsub(/[ \t]/, "", d)
         if (d !~ /[A-Za-z0-9]/) { print id[i]; continue }
@@ -315,7 +352,7 @@ units_ready() {
         ready = 1
         for (j = 1; j <= m; j++) {
           if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
-          if (st[a[j]] != "landed") { ready = 0; break }
+          if (st[a[j]] != satisfied) { ready = 0; break }
         }
         if (ready) print id[i]
       }
