@@ -4738,11 +4738,12 @@ section "S27p: a trailing # comment is not a dropped Suites: token (T23, review 
 # ============================================================================
 #
 # THE SHIPPED SCAFFOLD CARRIES ONE. `agents-src/blocks/brief-scaffold.md` renders
-# `Suites: none                     # read-only brief; or test-file names only` into all
-# eight surfaces, and an author who fills the scaffold in keeps the comment. The drop
-# refusal above read EVERY whitespace-separated token on the span, so `#`, `read-only`,
-# `brief;` and the rest each scored as a file the shell runner cannot run, and a brief was
-# refused for carrying this repo's own teaching text — with a message that names
+# `Suites: none    # *.test.sh names or a path-qualified run.sh; other runners:
+# Re-executes:` into all eight surfaces, and an author who fills the scaffold in keeps
+# the comment. The drop refusal above read EVERY whitespace-separated token on the span,
+# so `other`, `runners:` and the rest each scored as a file the shell runner cannot run,
+# and a brief was refused for carrying this repo's own teaching text — with a message
+# that names
 # `Re-executes:` and never mentions the comment, so the repair was not discoverable from
 # it (Step-6 review R1, HIGH; the base at 72e07ec admitted the same brief). `suite_names()`
 # now stops reading the span at the first token beginning with `#`.
@@ -4792,7 +4793,7 @@ REPO=$(make_repo r27p3 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: read the tree and report.
 Expected artifact: .bionic/docs/record/w27p3.md
-Suites: none                                           # read-only brief; or test-file names only' \
+Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:' \
   "w27p-waiver")"
 expect_status "27p3 a commented Suites: none is the waiver it always was" "0" "$GATE_ST"
 # ...and on the OTHER channel too: a several-fault refusal exits 0 and denies on stdout, so
@@ -4810,7 +4811,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w27p3b-audit.md
 Expected duration: ~30 minutes.
-Suites: none                                           # read-only brief; or test-file names only
+Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:
 Re-executes: `pytest tests/unit`' "w27p-aud-waiver" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" \
   "bionic:auditor")"
 expect_status "27p3b an auditor waiving suites in a comment-carrying line, declaring runs, is ADMITTED" \
@@ -4823,7 +4824,7 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: audit the wave-99 matrix.
 Expected artifact: .bionic/docs/record/w27p3c-audit.md
 Expected duration: ~30 minutes.
-Suites: none                                           # read-only brief; or test-file names only' \
+Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:' \
   "w27p-aud-bare" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
 expect_status "27p3c …and the same line without runs still meets the AUDITOR arm" "2" "$GATE_ST"
 expect_contains "27p3c …named as an auditor that re-executes nothing" \
