@@ -81,7 +81,7 @@ fi
 # tests/cross-gate-agreement.test.sh extracts that function AS TEXT and evals it beside
 # `run_open`, so a delegating body answers nothing there, and re-pointing that section is
 # outside this row's declared files. §CG's own docblock states the choice this takes ("share
-# one function vs. bind the two readers with a test"); §30 of tests/session-poker.test.sh is
+# one function vs. bind the two readers with a test"); §32 of tests/session-poker.test.sh is
 # the binding, driving both for real over one table of `current:` shapes and requiring the
 # same answer on every row. The fold belongs in the edit that re-points §CG.
 #
