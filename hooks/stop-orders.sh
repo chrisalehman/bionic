@@ -32,8 +32,11 @@
 #
 # STANDDOWN answers "which agents can I stop right now, and how do I address them?" in one
 # read. Every row whose contract has LANDED — MET against a declared artifact, WAIVED, or
-# acked — is listed with an address the platform's stop primitive accepts; every row that
-# is still working, or has not landed, is listed as LEFT ALONE and never as a target. It
+# acked while a fresh panel still lists its agent — is listed with an address the platform's
+# stop primitive accepts. An acked row a fresh panel shows GONE is already closed and has
+# nobody left to stop, so it is left off that list; its worktree lease still ends here, and
+# that landing is reported under LEASES ENDED instead (wave-19 T1 follow-up, R2). Every row
+# that is still working, or has not landed, is listed as LEFT ALONE and never as a target. It
 # stops nothing itself: stopping is the harness's primitive, not a shell script's. What it
 # does is compute the batch, so the N stops that follow are N fact-discharged calls with no
 # ceremony between them, instead of N observations.
@@ -607,6 +610,18 @@ case "$VERB" in
         | awk -F'|' -v want="$1" '$1 == want { found = 1 } END { exit found ? 0 : 1 }'
     }
 
+    # ONE CALL SITE for landing a row's tree, shared by the READY branch (a MET/WAIVED/still-
+    # listed-acked row) and the acked-and-gone branch, which needs the exact same landing but
+    # never enters READY. Appends LANDED or REFUSED to _landed either way, so the operator
+    # sees every tree this pass touched, whichever branch found it.
+    _land_row_tree() {  # <name>
+      declare -f worktree_land >/dev/null 2>&1 || return 0
+      _tree="$(worktree_for_row "$REPO_REAL" "$1")"
+      [ -d "$_tree" ] || return 0
+      _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land "$_tree")   ($1)
+"
+    }
+
     _ready=""; _held=""; _nready=0; _nheld=0; _landed=""
     while IFS= read -r _l; do
       [ -n "$_l" ] || continue
@@ -631,8 +646,18 @@ case "$VERB" in
       # acked but still listed — or acked under a stale or absent answer, which is not
       # evidence of anything — keeps its stop address, because an ack closes a name and
       # ends no process.
+      #
+      # ACKED AND GONE STILL ENDS THE LEASE (wave-19 T1 follow-up; R2). The row above is
+      # closed and never enters READY, but its worktree is a leased slot nobody holds any
+      # more, and this pass — land, stop, tick ack — is the only one that will ever look at
+      # it again. Skipping the land here left every such tree standing until an operator
+      # ran spawn-worktree.sh land by hand, against spec AC-28 (1.4.0): standing an agent
+      # down is where the lease ends, full stop, not "unless the row left by way of an ack".
       if [ "$(line_field "$_l" acked)" = "yes" ]; then
-        [ "$_live_ok" -eq 1 ] && ! _is_live "$_name" && continue
+        if [ "$_live_ok" -eq 1 ] && ! _is_live "$_name"; then
+          _land_row_tree "$_name"
+          continue
+        fi
         _why="acked"
       elif [ "$_state" = "WAIVED" ]; then
         _why="waived"
@@ -645,11 +670,7 @@ case "$VERB" in
 "
         # LANDED or REFUSED, one line per tree, reported either way: a lease
         # this verb could not end is exactly what the operator needs told.
-        if declare -f worktree_land >/dev/null 2>&1; then
-          _tree="$(worktree_for_row "$REPO_REAL" "$_name")"
-          [ -d "$_tree" ] && _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land "$_tree")   ($_name)
-"
-        fi
+        _land_row_tree "$_name"
       else
         _nheld=$((_nheld + 1))
         # WHY THE ROW IS STILL HELD, and — where the harness can say so — whether anyone is
