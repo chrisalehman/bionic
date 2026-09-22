@@ -4165,6 +4165,7 @@ has_ui: false
 multi_agent: false
 deploy_target: none
 model_plan: orchestrator=fable-5-high
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
 ---
 
 ## Goal
@@ -7388,6 +7389,52 @@ for n in 0 1 2; do
   expect_allow "38g control: numbered current: $n with neither approved-by nor fails-when → allow" \
     "$h38g" 'git commit -m "x"'
 done
+
+# ---- 38s: AC-12.1 (wave-19 REQ-12, D12) — the `- T<n>:` stub the Step-3 text prescribes ----
+#
+# A plan authored at Step 3 carries one `- T<n>:` line per `## Tasks` row BEFORE any writer
+# runs, because the first writer's commit moves `current:` to `T<n>` and the gate then
+# demands the addressed row's line (wave-18: eight writers refused at once for the lack of
+# it). At `rigor: audited` that line must also be proof-shaped — a digit plus a `/` or a
+# backtick — so the charter's bare `pending dispatch` is refused as prose one lane below the
+# placeholder ban. The spelling is READ FROM THE RENDERED steps/3.md, not restated here: the
+# rows below pin that what the text tells a planner to write is what the gate admits.
+S38S_STEP3="${BIONIC_SKILLS_DIR}/canonical-sdlc/steps/3.md"
+S38S_TPL="$( { /usr/bin/grep -m1 -E '^- T<n>: ' "$S38S_STEP3" 2>/dev/null || true; } | sed -E 's/^- T<n>: //')"
+if [ -n "$S38S_TPL" ]; then
+  ok "38s0 AC-12.1 — steps/3.md's SDLC State template carries a '- T<n>:' stub line"
+else
+  no "38s0 AC-12.1 — steps/3.md's SDLC State template carries a '- T<n>:' stub line" "file: $S38S_STEP3"
+fi
+s38s_stub() {  # <n> -> the text's stub for row T<n> of wave 19
+  printf '%s' "$S38S_TPL" | sed -e "s/<n>/$1/g" -e 's/<wave>/19/g'
+}
+
+# s38s_plan <T1 evidence> <T2 evidence> -> an audited task-scale plan at current: T1,
+# approved, every AC naming a fails-when, both rows still pending — the first writer's commit.
+s38s_plan() {
+  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n| T1 | build | audited | the first row dispatched | pending | .worktrees/19-T1 |\n| T2 | build | audited | a row not yet dispatched | pending | .worktrees/19-T2 |\n\n## SDLC State\n\nscale: task\ncurrent: T1\n%s\n\n- T1: %s\n- T2: %s\n\n%s\n' \
+    "$(task_frontmatter_rigor audited)" "$K2_APPROVED" "$1" "$2" "$k2_matrix_full"
+}
+
+# 38s1 — only the stubs, spelled as the text spells them → admitted.
+h38s1=$(make_home)
+write_plan "$h38s1" "$(s38s_plan "$(s38s_stub 1)" "$(s38s_stub 2)")" > /dev/null
+expect_allow "38s1 AC-12.1 — audited plan at current: T1 carrying only the text's stubs → allow" \
+  "$h38s1" 'git commit -m "x"'
+
+# 38s2 — the addressed row's stub is a bare `pending` → refused (the placeholder ban).
+h38s2=$(make_home)
+write_plan "$h38s2" "$(s38s_plan "pending" "$(s38s_stub 2)")" > /dev/null
+expect_block "38s2 AC-12.1 — …and a bare 'pending' stub on the addressed row → block" \
+  "$h38s2" 'git commit -m "x"' "task T1 evidence line is a placeholder"
+
+# 38s3 — the stub without its worktree path is prose at audited → refused. This is why the
+# text's spelling carries the path: the path is the digit and the '/' the audited lane reads.
+h38s3=$(make_home)
+write_plan "$h38s3" "$(s38s_plan "pending dispatch" "$(s38s_stub 2)")" > /dev/null
+expect_block "38s3 AC-12.1 — …and 'pending dispatch' with no path is refused as prose at audited" \
+  "$h38s3" 'git commit -m "x"' "task T1 evidence must show a command + counts, not prose"
 
 # ============================================================
 # Section 38: the prototype no-row arm (epic-22 K4, AC-K4.2)
