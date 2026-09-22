@@ -72,8 +72,8 @@ mode.
 
 | Rigor | What you get | What you skip |
 |---|---|---|
-| `tested` | TDD RED→GREEN; matrix discharged at each row's tier; tests floor `pass == total`; 6-axis self-review. | Both independent assurance roles. Self-review only. |
-| `peer-reviewed` | + a separate spec, + the INDEPENDENT Step-5 verification auditor on the evidence. At `scale: task` a ledger row must be proof-shaped and, once `done`, name an `auditor` verdict. | The mandatory adversarial critic. |
+| `tested` | TDD RED→GREEN; matrix discharged at each row's tier; tests floor `pass == total`; 6-axis self-review. | Both independent assurance roles. |
+| `peer-reviewed` | + a separate spec, + the INDEPENDENT Step-5 verification auditor on the evidence. At `scale: task` a ledger row must be proof-shaped and, once `done`, name an `auditor` verdict from Step 6. | The mandatory adversarial critic. |
 | `audited` | + the INDEPENDENT Step-6 adversarial critic, per-step checkpoint commits, expanded stop-and-wake. At `scale: task` a `done` row also names a `critic` verdict; at `scale: wave` an audited multi-agent plan must carry a `## Tasks` section at all. | Nothing. |
 
 **scale** — the decomposition unit.
@@ -163,7 +163,7 @@ Expected artifact: <ONE path inside the repo, e.g. .bionic/docs/record/<wave>/<n
 Progress artifact: <path>
 Cadence: <N> min
 Files: <every path the task may create or edit>        # writers; omit for a read-only brief
-Suites: none                                           # read-only brief; or test-file names only
+Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:
 Re-executes: `<cmd>`
 Deliverable-waiver: <reason>                           # only for a report returned by message
 ```
