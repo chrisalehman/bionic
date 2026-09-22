@@ -285,7 +285,8 @@ wave: wave-01-x
   local flags=("cleanup_on_finish:true" "use_worktree:false" \
     "surface_type:none" "language:none" "has_ui:false" \
     "multi_agent:false" "deploy_target:none" \
-    "model_plan:orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh")
+    "model_plan:orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh" \
+    "parallel-budget:writers=8 suites=4 worktrees=32 test_jobs=8 source=probe")
   local kv key val
   for kv in "${flags[@]}"; do
     key="${kv%%:*}"; val="${kv#*:}"
@@ -1887,12 +1888,14 @@ assert_contains "ac14_phantom names the pinned root (the real workspace tree)" \
 # TWO FACTS, one about the header this hook validates and one about where the write
 # was made from.
 #
-# `parallel-budget:` is Step 0's resource ceiling, written into the plan's frontmatter
-# from the same probe the preflight attestation records (L-RESOURCES/2). This hook
-# neither requires it nor parses it — a plan with it and a plan without it both write.
-# The line is READ by hooks/dispatch-preflight.sh, which is where a budget can actually
-# refuse something; validating it here would put a second opinion about the same string
-# in a second file (assumption WALLS/5).
+# `parallel-budget:` is a MEASUREMENT Step 0 writes, not a ceiling a run opts into (wave-19
+# REQ-3, D5; ADR-035, which reverses spec AC-26 and assumption WALLS/5). `resources_probe`
+# then `resources_budget` derive it and Step 0 writes it verbatim into the plan's
+# frontmatter, the same string the preflight attestation records (L-RESOURCES/2). A
+# `*.plan.md` whose header carries no `parallel-budget:` line with a `writers=<digits>`
+# field does not write: the refusal names the key and the derivation. Every other budget
+# field stays accepted and unparsed here — only `writers=` feeds the fill invariant. The
+# arm is the plan's alone; a spec carrying no budget still writes (walls-1f).
 #
 # The worktree arm is the other half of AC-14's pair. A plan is the run's own artifact
 # and it lives under the MAIN checkout; a plan write issued from inside a leased tree is
@@ -1945,14 +1948,60 @@ walls_tree="$walls_project/.worktrees/one"
 walls_plan="$walls_project/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
 
 # The header, with and without the budget line. Inserted after the opening `---`, which
-# is how Step 0 writes it.
-WALLS_PLAN_WITH_BUDGET=$(printf '%s' "$VALID_FRONTMATTER" | awk '
-  NR == 1 && $0 == "---" { print; print "parallel-budget: writers=22 suites=18 worktrees=32 test_jobs=18 source=probe"; next }
-  { print }')
+# is how Step 0 writes it; the keyless header is build_plan's own with the key omitted.
+WALLS_PLAN_NO_BUDGET="$(build_plan omit=parallel-budget)"
+walls_with_budget() {  # <parallel-budget value> -> the keyless header carrying that line
+  printf '%s' "$WALLS_PLAN_NO_BUDGET" | awk -v v="$1" '
+    NR == 1 && $0 == "---" { print; print "parallel-budget: " v; next }
+    { print }'
+}
+WALLS_PLAN_WITH_BUDGET="$(walls_with_budget "writers=22 suites=18 worktrees=32 test_jobs=18 source=probe")"
 
-echo "Write: plan header WITHOUT parallel-budget: → allow (unchanged)"
-run_write "$walls_plan" "$VALID_FRONTMATTER"
-assert_eq "walls-1 a plan with no parallel-budget: writes" 0 "$HOOK_EXIT"
+echo "Write: plan header WITHOUT parallel-budget: → block, naming the key (REQ-3 AC-3.1)"
+run_write "$walls_plan" "$WALLS_PLAN_NO_BUDGET"
+assert_eq "walls-1 a plan with no parallel-budget: is refused" 2 "$HOOK_EXIT"
+assert_contains "walls-1b …the refusal line names the key" "parallel-budget:" "$HOOK_STDERR"
+assert_contains "walls-1c …and the detail names Step 0's derivation, probe first" "resources_probe" "$HOOK_VSTDERR"
+assert_contains "walls-1d …then the budget it yields" "resources_budget" "$HOOK_VSTDERR"
+
+echo "Write: parallel-budget: with no writers= field → block"
+run_write "$walls_plan" "$(walls_with_budget "suites=18 worktrees=32 test_jobs=18 source=probe")"
+assert_eq "walls-1e a budget line carrying no writers= is refused" 2 "$HOOK_EXIT"
+run_write "$walls_plan" "$(walls_with_budget "writers=many suites=18 source=probe")"
+assert_eq "walls-1e2 …and so is a writers= that is not digits" 2 "$HOOK_EXIT"
+
+echo "Write: a SPEC with no parallel-budget: → allow (the arm is the plan's alone)"
+run_write "$project/.bionic/docs/specs/epic-01-demo/walls-nobudget.spec.md" \
+  "$(build_plan omit=parallel-budget waived="$SPEC_DESIGN_WAIVER")"
+assert_eq "walls-1f a keyless spec still writes" 0 "$HOOK_EXIT"
+
+# AC-3.4, THE TREE HALF: no OPEN plan lacks the key. `run_open` (payload/scripts/lib/run.sh)
+# is the run predicate every gate uses, crossed with `grep -L` for the key — the same pair
+# the Step-2 research drove over the live tree (R2 Q5). A fixture tree carries one plan of
+# each shape a real tree holds: open-and-keyed, closed-and-keyless (delivered), and
+# abandoned-and-keyless. The intersection is empty; the paired mutation (an open keyless
+# plan) makes it non-empty, so the row discriminates.
+AC34_RUN_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh"
+ac34_open_keyless() {  # <plans dir> -> open plans lacking the key, one per line
+  local f
+  ( . "$AC34_RUN_LIB" >/dev/null 2>&1
+    for f in $(/usr/bin/grep -rL '^parallel-budget:.*writers=[0-9]' --include='*.plan.md' "$1" 2>/dev/null); do
+      run_open "$f" && printf '%s\n' "$f"
+    done ) 2>/dev/null
+}
+ac34_tree=$(mktemp -d)
+mkdir -p "$ac34_tree/epic-01"
+printf -- '---\nparallel-budget: writers=8 source=probe\n---\n\n## SDLC State\n\ncurrent: 4\n' \
+  > "$ac34_tree/epic-01/open.plan.md"
+printf -- '---\ngoverning-skill: x\n---\n\n## SDLC State\n\ncurrent: 9\n\n- Step 9: delivered: 2026-09-01\n' \
+  > "$ac34_tree/epic-01/closed.plan.md"
+printf -- '---\nabandoned: 2026-09-07 reset\n---\n\n## SDLC State\n\ncurrent: 4\n' \
+  > "$ac34_tree/epic-01/abandoned.plan.md"
+assert_eq "walls-1g AC-3.4 no open plan in the tree lacks the key" "" "$(ac34_open_keyless "$ac34_tree")"
+printf -- '---\ngoverning-skill: x\n---\n\n## SDLC State\n\ncurrent: 4\n' > "$ac34_tree/epic-01/stray.plan.md"
+assert_contains "walls-1h …and an open keyless plan is found (the row discriminates)" \
+  "stray.plan.md" "$(ac34_open_keyless "$ac34_tree")"
+rm -rf "$ac34_tree"
 
 echo "Write: plan header WITH parallel-budget: → allow"
 run_write "$walls_plan" "$WALLS_PLAN_WITH_BUDGET"
@@ -2828,6 +2877,7 @@ use_worktree: false
 walk: required
 design-interview: true
 model_plan: orchestrator=claude-fable-5-1; implementor=sonnet-high; senior-implementor=opus-high; researcher=opus-high; test-runner=haiku-medium; auditor=opus-high; critic=opus-high
+parallel-budget: writers=22 suites=18 worktrees=32 test_jobs=18 source=probe
 requirements: specs/epic-22-plugin-only/wave-01-plugin-only.requirements.md
 spec: specs/epic-22-plugin-only/wave-01-plugin-only.spec.md
 created: 2026-09-07
