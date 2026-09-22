@@ -1087,6 +1087,16 @@ bionic_context 2>/dev/null || exit 0
 # && cd <root> && git commit` commits in the root, and the leading `cd` must not buy it an
 # exemption; the ambiguity arm further down refuses it as before.
 #
+# AND A POSITIVE ANSWER IS ABOUT ONE COMMIT. `_eg_commit_cwd` places the FIRST commit the text
+# carries — the first `git -C <abs> commit`, else the leading `cd` — and says nothing about any
+# commit after it. So the arm exempts only a command whose text carries EXACTLY ONE commit
+# segment (`_eg_commit_count`, over the same `sh -c`/`eval`-expanded segment list every wall
+# reads) and places that one outside. Two or more commit segments are judged as before, even
+# when every one of them lands outside: `git -C <scratch> commit && git commit` and `cd
+# <scratch> && git commit && cd <root> && git commit` both commit in the root the second time,
+# and counting is what tells them apart from a single commit without placing each one (review
+# R1, wave-19). Zero is judged too — a commit this reader cannot see is not one it can place.
+#
 # NOT A NEW REACH (the D11 freeze, .claude/rules/hook-authoring.md). It is the repair of the
 # gate's existing foreign-repository check — `_eg_git_wt_name` already asks git this question,
 # for linked worktrees only — widened to every repository git can place, as D10 ratified.
@@ -1364,8 +1374,26 @@ _eg_outside_root() {
   return 0
 }
 
+# _eg_commit_count -> sets _EG_COMMITS to the number of `git … commit` segments in the command
+# text, `sh -c`/`eval` strings included (the jurisdiction arm exempts only when it is 1).
+# Assigns rather than prints, like `_eg_commit_cwd`, and forks nothing git-side: it is the
+# same pure-shell segment pass the other walls make.
+_EG_COMMITS=0
+_eg_commit_count() {
+  local _line
+  _EG_COMMITS=0
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    git_argv_parse "$_line" || continue
+    [ "$GIT_SUB" = commit ] && _EG_COMMITS=$((_EG_COMMITS + 1))
+  done <<< "$(git_argv_expand "$COMMAND")"
+  return 0
+}
+
 _eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CDS — once, for this arm and every reader below
-if ! { [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CDS" ] && ! _eg_cd_one_dir; } \
+_eg_commit_count                     # sets _EG_COMMITS — only a command carrying ONE commit can be placed outside
+if [ "$_EG_COMMITS" -eq 1 ] \
+   && ! { [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CDS" ] && ! _eg_cd_one_dir; } \
    && _eg_outside_root "$_EG_CWD"; then
   printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here\n' \
     "$_EG_JUR_TOP" "$BIONIC_ROOT" >&2
