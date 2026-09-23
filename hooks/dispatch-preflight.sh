@@ -313,6 +313,14 @@ case "$BIONIC_RUN_WORD" in
     echo "dispatch-preflight: bound plan closed — $PLAN; this session has no open run" >&2
     PLAN=""
     ;;
+  bound-unreadable)
+    # (wave-20 T1, REQ-2, D2; AC-2.3.) Named, never "no open run", and REFUSED below as a
+    # pooled finding: approval and the budget are both read out of this plan, and a dispatch
+    # admitted against a plan nobody can read is the same fail-open the commit gate closes.
+    echo "dispatch-preflight: bound plan unreadable — $PLAN" >&2
+    DP_PLAN_UNREADABLE="$PLAN"
+    PLAN=""
+    ;;
   none|*)
     PLAN=""
     ;;
@@ -415,6 +423,16 @@ dp_finding() {  # <fact> <fix> <detail> — record one fault. NEVER exits.
   DP_FAULT_LINES="${DP_FAULT_LINES}$1 ($2)
 "
 }
+
+# THE UNREADABLE BOUND PLAN, the first finding (wave-20 T1, REQ-2, D2). Resolved at the run
+# predicate above, recorded here because this is where the pool starts.
+if [ -n "${DP_PLAN_UNREADABLE:-}" ]; then
+  dp_finding "the bound plan cannot be read" "restore read access to the plan" \
+    "The plan this session is bound to exists and cannot be read: ${DP_PLAN_UNREADABLE}
+Approval and the writer budget are read out of it, so neither can be measured. It is not
+closed and not gone, so no other plan is read in its place.
+Fix: restore read access (chmod u+r on the plan, u+rx on its folder), then dispatch."
+fi
 
 # dp_not_checked <arm> <what it needs> — record that an arm could not be evaluated (AC-8.2).
 #
