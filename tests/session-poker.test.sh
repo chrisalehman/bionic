@@ -2697,7 +2697,7 @@ wave_plan "$R12C" "writers=1 suites=1 worktrees=8 test_jobs=8 source=probe" \
 add_row "$R12C" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R12C" 8192 1.0 tick
 expect_absent "a full budget fills nothing" "poker: FILL" "$OUT"
-expect_contains "…and says which number closed the gap" "writers=1 and 1 open row(s): the budget is full" "$OUT"
+expect_contains "…and says which number closed the gap" "writers=1 and 1 unacked roster row(s): the budget is full" "$OUT"
 
 # ---------- 12d: no parallel-budget line -> inert, and it says why ----------
 #
@@ -2882,6 +2882,12 @@ expect_contains "a step with no ready row says which step it asked about" \
 # ONE and TWO; post-fix it reads the roster and names ONE. The row carries no `agent_id=`,
 # so the landing gate in the same Stop hook cannot place it and stays out of the verdict.
 STOP_HOOK_12L="${BIONIC_HOOKS_DIR}/stop.sh"
+# HERMETIC PANEL (T2d, A-T2.13). §12a-T22 unsets CLAUDE_CONFIG_DIR on its way out, and a tick
+# with none reads `$HOME/.claude` — the machine's REAL transcript for whatever session id this
+# suite carries. 12l's own row wants "no answer" (the roster count stands), so it gets one,
+# planted; 12l3–12l6 below plant the panel their shape needs. Unset again after 12l6.
+export CLAUDE_CONFIG_DIR="$S12_CFG"
+s12_answer none
 R12L="$(make_repo s12-differential)"; new_roster "$R12L"
 wave_plan "$R12L" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| BASE | 4 | build | landed, its row still open on the roster | implementor | — | 15m | REQ-x | a.sh | landed |" \
@@ -2909,6 +2915,67 @@ done
 expect_eq "12l the tick fills one row against one open roster row (the fixture discriminates)" \
   "ONE " "$S12L_TICK"
 expect_eq "12l2 AC-5.2 the stop wall names exactly the ids the tick filled" "$S12L_TICK" "$S12L_WALL"
+
+# 12l3–12l6 — THE END-OF-BATCH SHAPE (wave-19 audit V-2; T2d). 12l's BASE row is UNMET, and
+# on an UNMET row the tick and the wall already agreed. They did not agree on a MET row the
+# ack has not closed yet: every writer landed, and the agent is still idle on the panel, so
+# the tick's STANDDOWN names it and does NOT ack it. The wall counts that row (it is not
+# acked). The tick used to drop it (MET closes nothing for the fill any more), so its gap
+# was one wider: writers=2, one MET-unacked row, two ready rows, and the tick filled ONE TWO
+# where the wall allowed ONE. The occupancy the tick sizes its fill from is now the wall's
+# predicate: this session's roster rows that are not acked, read AFTER the tick's own ack
+# step. So the paired control, the same MET row with its agent GONE from a fresh panel, is
+# acked by that step and frees its slot in the same tick.
+s12l_wall_ids() {  # <repo> -> the ids among BASE ONE TWO that the stop wall names, sorted
+  local repo="$1" tr="$1/transcript-wall.jsonl" out reason ids="" id
+  jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"where are we?"}}' > "$tr"
+  out="$(cd "$repo" && jq -nc --arg t "$tr" --arg c "$repo" --arg s "$SID" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
+    | env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PRESSURE_RING="$TMPROOT/ring-$(basename "$repo")" \
+        BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=1.0 \
+        bash "$STOP_HOOK_12L" 2>/dev/null)"
+  reason="$(printf '%s' "$out" | jq -r '.reason // ""' 2>/dev/null)"
+  for id in BASE ONE TWO; do
+    case " $(printf '%s' "$reason" | tr -c 'A-Za-z0-9_.-' ' ') " in *" $id "*) ids="${ids}${id} " ;; esac
+  done
+  printf '%s' "$ids"
+}
+s12l_tick_ids() {  # <the tick's whole channel> -> the FILL ids, sorted, space-terminated
+  printf '%s\n' "$1" | /usr/bin/grep '^poker: FILL [A-Za-z0-9]' | head -1 | sed 's/^poker: FILL //' \
+    | tr ' ' '\n' | /usr/bin/grep -v '^$' | sort | tr '\n' ' '
+}
+s12l_met_repo() {  # <label> -> a repo: writers=2, BASE landed, ONE/TWO ready, one MET row
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "| BASE | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+    "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+    "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
+  echo "done" > "$r/landed-12l3.md"
+  add_row "$r" name=done-writer agent_id= deliverable="$r/landed-12l3.md" duration="4 hours" \
+    launched_at="$(iso_ago 600)"
+  printf '%s' "$r"
+}
+
+R12L3="$(s12l_met_repo s12-differential-met-listed)"
+s12_answer fresh "done-writer:idle"
+poke_pressure "$R12L3" 8192 1.0 tick
+expect_contains "12l3 precondition: the MET row's agent is still listed, so the tick stands it down (no ack)" \
+  "poker: STANDDOWN done-writer" "$OUT"
+S12L3_TICK="$(s12l_tick_ids "$OUT")"
+expect_eq "12l3 a MET row the ack has not closed still occupies: writers=2 fills ONE" "ONE " "$S12L3_TICK"
+expect_eq "12l4 AC-5.2 on the end-of-batch shape: the stop wall names exactly the ids the tick filled" \
+  "$S12L3_TICK" "$(s12l_wall_ids "$R12L3")"
+
+R12L5="$(s12l_met_repo s12-differential-met-gone)"
+s12_answer fresh "somebody-else:running"
+poke_pressure "$R12L5" 8192 1.0 tick
+expect_contains "12l5 precondition: the MET row's agent is gone, so the tick's own step acks it" \
+  "|name=done-writer|by=patrol|reason=landed" "$(cat "$R12L5/.bionic/tmp/sweeper-$SID.state" 2>/dev/null)"
+S12L5_TICK="$(s12l_tick_ids "$OUT")"
+expect_eq "12l5 …and the occupancy is read after that ack: the whole gap of two is filled" "ONE TWO " "$S12L5_TICK"
+expect_eq "12l6 …and the stop wall, reading the same ledger, names the same two" \
+  "$S12L5_TICK" "$(s12l_wall_ids "$R12L5")"
+unset CLAUDE_CONFIG_DIR
 
 # ============================================================
 section "Section 13: the absent roster splits — QUIET before the first dispatch (AC-38)"
@@ -3802,17 +3869,23 @@ expect_eq "a RUNNING row is open: writers=2 minus one leaves a gap of one" \
   "ONE" "$(s19_fill "$OUT")"
 expect_contains "…and the decision line counts it" "|open=1" "$OUT"
 
-# ---------- 19b: THE DEFECT — an idle (finished, unstopped) agent frees the slot ----------
+# ---------- 19b: an idle (finished, unstopped) agent leaves open=, and keeps its fill slot ----------
 #
 # Byte-for-byte 19a's fixture with `running` changed to `idle`. The roster row is untouched
 # and still says `confirmed`; what changed is the harness's own answer about its agent.
+#
+# RE-AUTHORED AT T2d (wave-19 audit V-2; REQ-5, ADR-034 d2). `open=` still follows the live
+# set, as S19 made it. The FILL does not any more: it is sized from every roster row that is
+# not acked, which is the stop wall's predicate, and an unacked row whose agent is idle is
+# still one the wall counts. Filling two here would print a FILL the wall's own arithmetic
+# refuses to call owed. The slot comes back when the row is acked.
 R19B="$(make_repo s19-idle)"; new_roster "$R19B"
 s19_plan "$R19B"
 add_row "$R19B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 s19_answer fresh "live-writer:idle"
 poke_pressure "$R19B" 8192 1.0 tick
-expect_eq "an IDLE row is not open: the whole gap of two is filled" \
-  "ONE TWO" "$(s19_fill "$OUT")"
+expect_eq "an IDLE row still occupies the fill until it is acked: writers=2 fills one (T2d)" \
+  "ONE" "$(s19_fill "$OUT")"
 expect_contains "…and the decision line agrees with the dispatch wall's count" "|open=0" "$OUT"
 # THE ROW ITSELF IS UNTOUCHED. The tick decides; it never writes. A tick that had closed the
 # roster row to make its own arithmetic true would break every other reader of that file.
@@ -3836,8 +3909,9 @@ s19_plan "$R19D"
 add_row "$R19D" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 s19_answer fresh "somebody-else:running"
 poke_pressure "$R19D" 8192 1.0 tick
-expect_eq "a row absent from the fresh answer is not open: the gap is two" \
-  "ONE TWO" "$(s19_fill "$OUT")"
+expect_eq "a row absent from the fresh answer still occupies the fill until acked: one (T2d)" \
+  "ONE" "$(s19_fill "$OUT")"
+expect_contains "…while open= follows the live set and drops it" "|open=0" "$OUT"
 
 # ---------- 19e: STALE — the roster count stands, and the tick says so ----------
 #

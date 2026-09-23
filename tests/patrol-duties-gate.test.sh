@@ -35,6 +35,8 @@ set -uo pipefail
 # write this session's roster through them rather than spelling either shape by hand.
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
+# The one ListAgents-answer builder (T2d, row 64m): the real tick needs a fresh panel.
+. "$(dirname "$0")/lib/live-answer.sh"
 
 # THE MERGED ENTRY POINT (epic-23 wave-11, T12). This gate is a FUNCTION now —
 # `stop_patrol_duties` in payload/scripts/lib/stop.sh — and the process that runs it is
@@ -991,6 +993,53 @@ ledger_roster "$d" open T4
 u_prompt "$d" "anything else to start?"
 fire "$d"; expect_block "64b: one row in flight against writers=8 leaves room, and the gap is named" "T2"
 
+# 64m: THE DIFFERENTIAL ON THE END-OF-BATCH SHAPE (wave-19 audit V-2; T2d). 64a–64a5 drive
+# the wall alone, and session-poker 12l2 compares the two on an UNMET row, where they already
+# agreed. The shape nothing bound: a MET row the ack has not closed, its agent still idle on a
+# FRESH panel (so the tick's STANDDOWN names it and does not ack it), writers=2, two ready
+# rows. The REAL tick runs on this same fixture repo — the same roster, the same plan, the
+# same ledger — and its printed FILL is compared with the ids the wall's refusal names on an
+# ordinary turn. Pre-fix the tick dropped the MET row from its occupancy and filled T2 T3;
+# the wall counts every unacked row and names T2 alone.
+POKER_64M="${BIONIC_HOOKS_DIR}/session-poker.sh"
+d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe' \
+      make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+echo "done" > "$d/landed-64m.md"
+roster_row_fixture status=intended session="$SID" name=W-MET agent_id= \
+  deliverable="$d/landed-64m.md" >> "$d/.bionic/tmp/roster-$SID.state"
+CFG_64M="$(mktemp -d)"; mkdir -p "$CFG_64M/projects/-fixture-project"
+{
+  jq -nc '{type:"user",timestamp:"2026-09-05T00:50:00.000Z",message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:"2026-09-05T00:51:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_0164MLISTAGENTS",name:"ListAgents",input:{}}]}}'
+  jq -nc --arg b "$(live_answer_body "W-MET:idle")" \
+    '{type:"user",timestamp:"2026-09-05T00:52:23.349Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_0164MLISTAGENTS",content:$b}]}}'
+} > "$CFG_64M/projects/-fixture-project/$SID.jsonl"
+( cd "$d" && git init -q . 2>/dev/null )
+# THE TICK'S MACHINE IS PINNED, AND ITS RING IS ITS OWN COPY. Unpinned, the tick samples this
+# machine (a loaded runner reads HOLD and fills nothing) and appends that sample to the ring it
+# is handed — which, shared, is the CLEAR_RING every later row's wall reads. The copy starts
+# from the same clear sample, so both sides answer the same rung.
+RING_64M="$CFG_64M/clear.ring"; cp "$CLEAR_RING" "$RING_64M"
+TICK_64M="$(cd "$d" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$CFG_64M" \
+  BIONIC_PRESSURE_RING="$RING_64M" BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_FREE_PCT=80 \
+  BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=1.0 bash "$POKER_64M" tick 2>&1)"
+FILL_64M="$(printf '%s\n' "$TICK_64M" | sed -n 's/^poker: FILL \([A-Za-z0-9].*\)$/\1/p' | head -1 \
+  | tr ' ' '\n' | /usr/bin/grep -v '^$' | sort | tr '\n' ' ')"
+case "$TICK_64M" in
+  *"poker: STANDDOWN W-MET"*) ok "64m precondition: the real tick stood the MET row down (listed, not acked)" ;;
+  *) no "64m precondition: the real tick stood the MET row down (listed, not acked)" "$TICK_64M" ;;
+esac
+u_prompt "$d" "anything else to start?"
+fire "$d"
+WALL_64M=""
+for _id in T1 T2 T3; do
+  case " $(reason_of | tr -c 'A-Za-z0-9_.-' ' ') " in *" $_id "*) WALL_64M="${WALL_64M}${_id} " ;; esac
+done
+expect_eq "64m: the tick's FILL on a MET-unacked roster is the wall's gap of one" "T2 " "$FILL_64M"
+expect_eq "64m2: …and the wall names exactly the ids the tick printed (AC-5.2 differential)" \
+  "$FILL_64M" "$WALL_64M"
+rm -rf "$CFG_64M"
+
 # 65: BLOCKS ONCE, through the same stop_hook_active valve the other three duties use.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
 u_prompt "$d" "carry on"
@@ -1015,14 +1064,14 @@ fire "$d"; expect_block "67b: …in the tick arm's own wording" "the tick printe
 # same roster and finds the same full budget. Eight open rows, writers=8, rung 8: gap zero.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7 W8
-u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 open row(s): the budget is full."
+u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 unacked roster row(s): the budget is full."
 fire "$d"; expect_allow "68: a budget-full tick turn on a full roster passes on the wall's own arithmetic"
 
 # 68b: …and the same printed words over a roster with room are not an exemption: no withheld
 # line, a gap, ready rows → refused, naming them (REQ-4 AC-4.2 fails-when: "a tick turn with
 # no FILL and no withheld line ends silently with a non-empty ready set").
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
-u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 open row(s): the budget is full."
+u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 unacked roster row(s): the budget is full."
 fire "$d"; expect_block "68b: a tick turn with no FILL and no withheld line is judged on the gap" "T2"
 fire "$d"; expect_block "68c: …naming every ready row, in the gap arm's wording" "T3" "the tick printed FILL"
 
@@ -1344,14 +1393,15 @@ fire "$d"; expect_block "67: re-engaged, the refusal returns unchanged" "$TL_MIS
 # `session-poker.sh tick`, and the canonical-sdlc SKILL.md body — injected into the
 # transcript as a USER row — contains exactly that literal. Invoking the skill was a tick.
 
-# 68: a USER row that merely CONTAINS the tick command is not a tick.
+# 68j: a USER row that merely CONTAINS the tick command is not a tick (renamed from a second
+# `68:` — labels are unique, audit V-8).
 d=$(make_env)
 u_prompt "$d" "Base directory for this skill: /x/skills/canonical-sdlc
 
 # Canonical SDLC
 
 ... **Tick the poker.** \`bash <plugin-root>/hooks/session-poker.sh tick\` is the decision brain — the prompt gathers, the poker decides, per row. ..."
-fire "$d"; expect_allow "68: the injected SKILL.md body is not a Patrol tick"
+fire "$d"; expect_allow "68j: the injected SKILL.md body is not a Patrol tick"
 
 # 69: THE PAIRED POSITIVE, so 68 is not silence-by-vacuity: the same fixture with the real
 # marker at the front of the row refuses.
