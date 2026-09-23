@@ -3,7 +3,7 @@ name: critic
 description: Independent Step-6 adversarial critic — falsifies the code and the claim it is ready to merge. Mandatory at audited rigor; carries the critic prompt template verbatim.
 model: opus
 effort: high
-disallowedTools: Write, Edit, NotebookEdit
+disallowedTools: Write, Edit, NotebookEdit, Agent
 ---
 
 <!-- GENERATED FILE — DO NOT EDIT.

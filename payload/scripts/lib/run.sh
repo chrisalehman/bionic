@@ -312,6 +312,41 @@ active_plan() {
   printf '%s\n' "$plan"
 }
 
+# plan_unreadable <path> -> exit 0 iff the path names a plan that is THERE and cannot be
+# read, and prints the component that cannot be opened; exit 1, silent, otherwise.
+#
+# (wave-20 T1, REQ-2, D2; research D3 N1.) Two shapes, and `-e`/`-f`/`-r` see only the first:
+#   - the path exists and is not a readable regular file (mode 000, a directory, …) -> itself
+#   - the path does not exist as far as this process can tell, and its NEAREST EXISTING
+#     ancestor is a folder that cannot be searched -> that folder. A plan inside a mode-000
+#     folder answers `-e` false exactly as a deleted plan does; only the ancestor can tell the
+#     two apart. `-e` on that ancestor being true means every folder above it is searchable,
+#     so the walk stops at the first one that exists.
+# A genuinely missing plan — absent under folders that open — is exit 1: gone, not unreadable.
+# A symlink whose target is gone reads `-e` false under searchable folders and stays gone.
+plan_unreadable() {
+  local p="${1:-}" d
+  [ -n "$p" ] || return 1
+  if [ -e "$p" ]; then
+    [ -f "$p" ] && [ -r "$p" ] && return 1
+    printf '%s\n' "$p"
+    return 0
+  fi
+  d="$p"
+  while :; do
+    case "$d" in
+      */*) d="${d%/*}"; [ -n "$d" ] || d="/" ;;
+      *)   d="." ;;
+    esac
+    if [ -e "$d" ]; then
+      [ -d "$d" ] && [ ! -x "$d" ] || return 1
+      printf '%s\n' "$d"
+      return 0
+    fi
+    case "$d" in /|.) return 1 ;; esac
+  done
+}
+
 # run_open <plan-path> -> exit 0 iff THAT ONE FILE reads as an open run. Silent both ways.
 #
 # THE VERDICT MOVED HERE, UNCHANGED (wave-session-bound-run S1, 2026-09-04). Until this wave
@@ -329,9 +364,16 @@ active_plan() {
 # was written into a worktree that is now gone). Closed is the right answer there and the
 # safe one: a session whose bound plan has vanished has no run to protect, and AC-6 forbids
 # falling through to somebody else's.
+#
+# GONE AND UNREADABLE ARE TWO ANSWERS, NOT ONE (wave-20 T1, REQ-2, D2). Both are "not open",
+# so every boolean caller (`if run_open …`) is unchanged; the STATUS tells them apart: 1 is
+# closed or gone, 3 is a plan that is there and cannot be read (`plan_unreadable`, below).
+# Closed was the wrong answer for the second: the run may be mid-flight, and a reader that
+# calls it closed stops protecting it — the evidence gate admitted every commit against it.
 run_open() {
   local plan="$1"
   [ -n "$plan" ] || return 1
+  plan_unreadable "$plan" >/dev/null && return 3
   [ -f "$plan" ] || return 1
 
   # THE WHOLE FILE, READ ONCE, HELD IN A VARIABLE — every match below tests this
@@ -699,10 +741,18 @@ session_plan() {
 
 # session_run <root> <sid> -> ONE line naming the verdict, and an exit status per verdict:
 #
-#   bound-open <path>    0   the session's own plan, and it is open
-#   bound-closed <path>  2   the session's own plan: delivered, abandoned, or gone
-#   fallback <path>      0   no binding; today's root-keyed answer, said out loud
-#   none                 1   no binding and no open run in the root
+#   bound-open <path>        0   the session's own plan, and it is open
+#   bound-closed <path>      2   the session's own plan: delivered, abandoned, or gone
+#   bound-unreadable <path>  3   the session's own plan is THERE and cannot be read
+#   fallback <path>          0   no binding; today's root-keyed answer, said out loud
+#   none                     1   no binding and no open run in the root
+#
+# BOUND-UNREADABLE IS NOT CLOSED (wave-20 T1, REQ-2, D2). A plan at mode 000, or inside a
+# folder that cannot be opened (`plan_unreadable`), may be a run mid-flight; nothing can be
+# validated against it and nothing may be resolved in its place. Every consumer names it in
+# an arm of its own — the evidence gate refuses the commit — and none says "no open run".
+# It is asked AFTER `run_open` fails as well as inside it, so a plan whose mode changes
+# between the test and the read still answers unreadable rather than closed.
 #
 # THE INVARIANT (spec §Design "Run verdict"; AC-6): A BOUND SESSION NEVER YIELDS `fallback`.
 # `bound-closed` is a terminal answer, not a miss to recover from — the moment a run closes
@@ -722,9 +772,15 @@ session_run() {
   local root="$1" sid="$2"
   local plan
   if plan=$(session_plan "$root" "$sid"); then
-    if run_open "$plan"; then
+    local st=0
+    run_open "$plan" || st=$?
+    if [ "$st" -eq 0 ]; then
       printf 'bound-open %s\n' "$plan"
       return 0
+    fi
+    if [ "$st" -eq 3 ] || plan_unreadable "$plan" >/dev/null; then
+      printf 'bound-unreadable %s\n' "$plan"
+      return 3
     fi
     printf 'bound-closed %s\n' "$plan"
     return 2

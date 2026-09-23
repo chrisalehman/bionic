@@ -39,7 +39,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/run.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/run-predicate-test.XXXXXX")" && pwd -P)"
-cleanup() { rm -rf "$SANDBOX"; }
+cleanup() { chmod -R u+rwx "$SANDBOX" 2>/dev/null; rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
 # SUBSTRING, AS A FUNCTION. Nine rows below asked this with a one-line `case` inside a
@@ -891,6 +891,61 @@ expect_eq "session_run: …'bound-closed <ghost>', the path it was promised" \
   "bound-closed $GHOST" "$SR_OUT"
 expect_eq "session_run: …and not the newest plan in the root" "no" \
   "$(rp_contains "$SR_OUT" "$BETA")"
+
+# --- R8h: a bound plan that EXISTS but cannot be read is not a closed run (wave-20 T1,
+# REQ-2, AC-2.1/AC-2.2). Closed means delivered, abandoned or gone; a plan this reader cannot
+# open is none of those, and calling it closed is what let the evidence gate admit every
+# commit against it. Two shapes, and the second is the one nobody reported (research D3 N1):
+# the file at mode 000, and a file whose FOLDER cannot be opened — `-e`, `-f` and `-r` are
+# all false for it, exactly as for a deleted file, so only the nearest existing ancestor can
+# tell the two apart. The ghost row above is the control: a genuinely missing plan under
+# searchable folders stays `bound-closed`.
+#
+# PRIVILEGE, CHECKED FIRST. A suite running as root reads a mode-000 file, and the row would
+# then pass for the wrong reason (research D3 §Risks). The premise rows assert the fixture is
+# really unreadable before the verdict is asked.
+LOCKED="$(mk_plan "$R8" "locked.plan.md" "4" "- Step 4: in progress")"
+chmod 000 "$LOCKED"
+expect_eq "r8h premise: the mode-000 plan exists and this user cannot read it" "yes" \
+  "$([ -e "$LOCKED" ] && [ ! -r "$LOCKED" ] && echo yes || echo no)"
+mk_marker "$R8" "b-locked" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$LOCKED")"
+call_session_run "$R8" "b-locked"
+expect_eq "session_run: bound to a mode-000 plan -> exit 3" 3 "$SR_ST"
+expect_eq "session_run: …'bound-unreadable <locked>'" "bound-unreadable $LOCKED" "$SR_OUT"
+expect_eq "session_run: …and not the newest plan in the root" "no" \
+  "$(rp_contains "$SR_OUT" "$BETA")"
+chmod 644 "$LOCKED"
+call_session_run "$R8" "b-locked"
+expect_eq "session_run: the same plan made readable again -> bound-open, exit 0" \
+  "0|bound-open $LOCKED" "$SR_ST|$SR_OUT"
+
+VAULT="$R8/.bionic/docs/plans/vault"
+mkdir -p "$VAULT"
+VPLAN="$VAULT/vaulted.plan.md"
+cp "$LOCKED" "$VPLAN"
+rm -f "$LOCKED"
+chmod 000 "$VAULT"
+expect_eq "r8h premise: the plan's folder cannot be opened, so the plan reads as absent" "no|no" \
+  "$([ -e "$VPLAN" ] && echo yes || echo no)|$([ -x "$VAULT" ] && echo yes || echo no)"
+mk_marker "$R8" "b-vault" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$VPLAN")"
+call_session_run "$R8" "b-vault"
+expect_eq "session_run: bound to a plan inside an unopenable folder -> exit 3" 3 "$SR_ST"
+expect_eq "session_run: …'bound-unreadable <vaulted>', not 'bound-closed'" \
+  "bound-unreadable $VPLAN" "$SR_OUT"
+# Removed, not just reopened: an open plan at depth 2 under plans/ is a candidate, and a
+# fresh mtime would make it the root's newest — every later fallback row in r8 names beta.
+chmod 755 "$VAULT"; rm -rf "$VAULT"
+call_active_run "$R8"
+expect_eq "r8h cleanup: active_run's root-keyed answer is beta again" "$BETA" "$AR_OUT"
+
+# The control, asked again after the two above, from a DEEPER missing path: a plan whose
+# folder does not exist at all, under folders that open. Nothing here is unreadable, so the
+# nearest existing ancestor is searchable and the answer is still the one it always was.
+DEEPGHOST="$R8/.bionic/docs/plans/nowhere/ghost.plan.md"
+mk_marker "$R8" "b-deepghost" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$DEEPGHOST")"
+call_session_run "$R8" "b-deepghost"
+expect_eq "session_run: a missing plan in a missing folder -> still 'bound-closed', exit 2" \
+  "2|bound-closed $DEEPGHOST" "$SR_ST|$SR_OUT"
 
 # --- R8g: line endings on the marker ---
 printf 'plan=%s\r\nengaged_at=2026-09-04T10:00:00Z\r\n' "$ALPHA" \
