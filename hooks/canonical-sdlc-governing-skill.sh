@@ -629,6 +629,10 @@ case "$GS_RUN" in
     # A BINDING IS A COMMITMENT (AC-6). Not active, and deliberately not re-scanned: the
     # moment a run closes is the moment a scan would hand its session somebody else's.
     echo "governing-skill: bound plan closed — ${GS_RUN#bound-closed }; this session has no open run" >&2 ;;
+  bound-unreadable\ *)
+    # (wave-20 T1, REQ-2, AC-2.3.) Named, never "no open run". Announced only: this hook's
+    # verdict has no other reader, and the commit gate carries the refusal.
+    echo "governing-skill: bound plan unreadable — ${GS_RUN#bound-unreadable }" >&2 ;;
 esac
 
 # ---------- WHAT ARMS THIS WALL (AC-7) ----------
