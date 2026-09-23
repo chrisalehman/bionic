@@ -6940,13 +6940,18 @@ expect_eq "§bound-one-owner …and NO other file defines a bound under any pref
   "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -v '/lib/bounds\.sh:' | /usr/bin/grep -c . )"
 expect_eq "§bound-one-owner …lib/bounds.sh owning exactly the two the fleet has (T15's is the second)" \
   "2" "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -c '/lib/bounds\.sh:')"
-# NOT VACUOUS: the sweep reaches this hook, whose READ it declines to count.
-expect_nonempty "§bound-one-owner the sweep reaches dispatch-preflight.sh, whose READ is uncounted" \
-  "$(/usr/bin/grep -rn 'IMPACT_BOUND_S' "${BIONIC_SCRIPTS_DIR}/hooks" 2>/dev/null \
-     | /usr/bin/grep 'dispatch-preflight.sh')"
-DP_GATE_SRC="$(cat "$GATE")"
-expect_nonempty "§bound-one-owner the preflight sources lib/bounds.sh" \
-  "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$GATE")"
+# THE WAIT MOVED WITH THE DERIVATION (wave-20 T6; REQ-4, Δ10). The dispatch wall's derivation
+# is `brief_validate_fields` in payload/scripts/lib/brief.sh now, the contract grammar `amend`
+# and `task-add` call too, so the READ of the bound and the source of lib/bounds.sh are that
+# file's. These rows follow them there; what they assert about the bound is unchanged.
+DP_GRAMMAR="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh"
+# NOT VACUOUS: the sweep reaches the grammar, whose READ it declines to count.
+expect_nonempty "§bound-one-owner the sweep reaches lib/brief.sh, whose READ is uncounted" \
+  "$(/usr/bin/grep -rn 'IMPACT_BOUND_S' "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null \
+     | /usr/bin/grep 'lib/brief.sh')"
+DP_GATE_SRC="$(cat "$DP_GRAMMAR")"
+expect_nonempty "§bound-one-owner the dispatch wall's grammar sources lib/bounds.sh" \
+  "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$DP_GRAMMAR")"
 # RE-SPELLED ONTO THE CLOCK (wave-14 T34). This pair used to read the hook's tick budget,
 # `IMPACT_BOUND_TICKS=$(( IMPACT_BOUND_S * 10 ))`, and assert it was DERIVED from the
 # constant rather than typed as a second literal. The budget is gone: a count of `sleep
@@ -7883,5 +7888,98 @@ expect_contains "E1.5 …and BIONIC_WALL_VERBOSE=1 puts it back" \
   "Then retry the dispatch" "$GATE_VERR"
 expect_contains "E1.5 …with the one line still in it" \
   "bionic: dispatch refused — this brief names no deliverable" "$GATE_VERR"
+
+# ============================================================
+section "§brief-lib — the contract grammar is one library (wave-20 T6; REQ-4, D4, Δ10)"
+# ============================================================
+#
+# A VALID CONTRACT IS DEFINED ONCE (Δ10). The lift, its caps, and every check the lifted
+# Files:/Suites:/Re-executes: fields feed live in payload/scripts/lib/brief.sh, so `amend` (T9)
+# and `task-add` hold an amended or added contract to exactly a fresh dispatch's standard.
+# Every row above this section drives the hook and is the refactor's proof that nothing moved
+# in behaviour; the rows here drive the library ALONE, with no hook around it, which is how
+# its other two callers will meet it. tests/cross-gate-agreement.test.sh §S13c asks the two
+# doors for one verdict on the same fields.
+BRIEF_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh"
+BRIEF_NOCONF="$SANDBOX/brief-noconf"; mkdir -p "$BRIEF_NOCONF"
+BRIEF_CONF="$SANDBOX/brief-conf"; mkdir -p "$BRIEF_CONF/.bionic"
+printf 'impact-command: bash stub-impact.sh\n' > "$BRIEF_CONF/.bionic/config.yaml"
+BT='`'
+# brief_verdict <role> <root> <brief text> -> one `finding: <fact>` or `warn: <line>` per sink
+# call, then `rc=`, `suites=` and `source=`. The library is sourced by nothing but this
+# shell, so a dependency it forgets to bring in is a failure here and not a pass on a
+# neighbour's load.
+brief_verdict() {
+  bash -c '
+    . "$1" || exit 9
+    sink() { case "$1" in finding) printf "finding: %s\n" "$2" ;; warn) printf "warn: %s\n" "$2" ;; esac; }
+    rc=0
+    brief_validate_fields "$(lift_contract_fields "$4" "$2")" "$2" "$3" sink || rc=$?
+    printf "rc=%s\nsuites=%s\nsource=%s\n" "$rc" "${BRIEF_SUITES_ALLOWED-}" "${BRIEF_SUITES_SOURCE-}"
+  ' _ "$BRIEF_LIB" "$1" "$2" "$3" 2>&1
+}
+
+expect_eq "brief-lib the library sources alone and carries the grammar, its caps and the checker" \
+  "ok 200 3" "$(bash -c '. "$1" || exit 9
+    for f in sanitize lift_contract_fields dp_runs_cap dp_runs_cap_words brief_field brief_validate_fields; do
+      declare -F "$f" >/dev/null || { echo "missing $f"; exit 0; }
+    done
+    echo "ok $DP_SUITES_MAX $DP_AUDITOR_RUNS_MAX"' _ "$BRIEF_LIB" 2>&1)"
+
+BV=$(brief_verdict implementor "$BRIEF_NOCONF" "Suites: tests/one.test.sh, tests/two.test.sh")
+expect_contains "brief-lib a declared set passes clean (rc=0)" "rc=0" "$BV"
+expect_absent   "brief-lib …with no finding" "finding:" "$BV"
+expect_contains "brief-lib …and IS the suite set, recorded as declared" "source=declared" "$BV"
+expect_contains "brief-lib …holding the declared basenames" "one.test.sh" "$BV"
+
+BV=$(brief_verdict implementor "$BRIEF_NOCONF" 'Suites: tests/$X.test.sh')
+expect_contains "brief-lib an unexpanded suite name is refused" "finding: a declared suite is not a literal name" "$BV"
+expect_contains "brief-lib …and a finding answers rc=1" "rc=1" "$BV"
+
+BV=$(brief_verdict implementor "$BRIEF_NOCONF" "Suites: tests/unit/foo.spec.ts")
+expect_contains "brief-lib a suite the shell runner cannot run is refused" \
+  "finding: Suites: names a file the shell runner cannot run" "$BV"
+
+BV=$(brief_verdict implementor "$BRIEF_NOCONF" "Re-executes: ${BT}npx jest x | tee log${BT}")
+expect_contains "brief-lib a run with an unquoted pipe is refused" "finding: a declared run is not a literal command" "$BV"
+
+BV_FOUR="Re-executes: ${BT}go test ./a${BT}, ${BT}go test ./b${BT}, ${BT}go test ./c${BT}, ${BT}go test ./d${BT}"
+BV=$(brief_verdict bionic:auditor "$BRIEF_NOCONF" "$BV_FOUR")
+expect_contains "brief-lib an auditor's fourth run passes the auditor's cap of three" \
+  "finding: Re-executes: line exceeds the 3-run cap" "$BV"
+BV=$(brief_verdict implementor "$BRIEF_NOCONF" "$BV_FOUR")
+expect_contains "brief-lib …while the same four runs pass clean for a writer" "rc=0" "$BV"
+
+BV=$(brief_verdict bionic:auditor "$BRIEF_NOCONF" "Suites: none")
+expect_contains "brief-lib an auditor that waives every suite is refused" "finding: an auditor names no suites" "$BV"
+
+BV=$(brief_verdict implementor "$BRIEF_NOCONF" "Expected duration: ~5 minutes.")
+expect_contains "brief-lib a brief with no instrument is refused" \
+  "finding: this brief declares no Files: and no Suites:" "$BV"
+
+BV=$(brief_verdict implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
+expect_contains "brief-lib Files: where no impact command is configured is refused" \
+  "finding: no impact command is configured here" "$BV"
+
+printf '#!/bin/bash\nprintf "beta.test.sh\\tpath-ref\\nalpha.test.sh\\tself\\nalpha.test.sh\\tpath-ref\\n"\n' > "$BRIEF_CONF/stub-impact.sh"
+BV=$(brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")
+expect_contains "brief-lib Files: under an impact command derives the suite set" "suites=alpha.test.sh beta.test.sh" "$BV"
+expect_contains "brief-lib …recorded as derived" "source=derived" "$BV"
+expect_contains "brief-lib …and passes clean" "rc=0" "$BV"
+
+printf '#!/bin/bash\nexit 0\n' > "$BRIEF_CONF/stub-impact.sh"
+BV=$(brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")
+expect_contains "brief-lib a derivation that answers nothing is a warning through the sink, not a finding" \
+  "warn: the impact command derived no suites from the declared files" "$BV"
+expect_absent "brief-lib …never a finding" "finding:" "$BV"
+
+printf '#!/bin/bash\nsleep 8\n' > "$BRIEF_CONF/stub-impact.sh"
+BV=$(IMPACT_BOUND_S=1 brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")
+expect_contains "brief-lib a derivation past its bound is a finding" "finding: the impact command did not answer" "$BV"
+expect_contains "brief-lib …answered rc=2, so the door knows the suite set was never built" "rc=2" "$BV"
+
+expect_eq "brief-lib brief_field hands back the Files: set as the row stores it" \
+  "payload/a.sh,payload/b.sh" \
+  "$(bash -c '. "$1" || exit 9; brief_field "$(lift_contract_fields "Files: payload/a.sh, payload/b.sh")" files' _ "$BRIEF_LIB" 2>&1)"
 
 finish
