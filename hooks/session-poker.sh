@@ -1985,6 +1985,36 @@ EOF
 # and this caller is inside the UNMET arm of a verdict the sweeper has already taken over the
 # same contract — re-deriving delivery from disk here would be a second answer to a question
 # one owner already answered (D0).
+# THE SHARED TRANSCRIPT-DIRECTORY PREFERENCE (T1d, 2026-09-22; walk W-3). An ADOPTED row's
+# transcript lives under whichever session last spoke to the agent: THIS session once it has
+# actually exchanged a turn with it, the launching session before that (`row_quiet`'s own
+# comment above explains why — the harness files a transcript under the session talking to
+# the agent NOW, while `adopted_from=` keeps naming the launcher forever). Both readers of
+# that fact resolve it through this ONE function now: `row_quiet` (the tick's own liveness
+# read) and `adopt`'s report (hooks/session-poker.sh, the ADOPT_SCHEMA block). Before this,
+# `adopt` printed only the launching session's path and age, unconditionally — so the very
+# report that told an operator to run `adopt` could already be looking at a stale copy while
+# the row was live under the session that had just adopted it (e.g. a re-run `adopt
+# --report-only` after this session had already spoken to the agent once). Returns the
+# subagent directory to use on stdout, nonzero if neither session has the file.
+transcript_dir_for() {  # <agent-id> <this-session-id> <fallback-session-id-or-empty>
+  local id="$1" this_sid="$2" fallback_sid="$3" sub=""
+  [ -n "$id" ] || return 1
+  sub="$(session_subagent_dir "$this_sid")" || sub=""
+  if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
+    printf '%s\n' "$sub"
+    return 0
+  fi
+  if [ -n "$fallback_sid" ] && [ "$fallback_sid" != "$this_sid" ]; then
+    sub="$(session_subagent_dir "$fallback_sid")" || sub=""
+    if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
+      printf '%s\n' "$sub"
+      return 0
+    fi
+  fi
+  return 1
+}
+
 TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing to observe
   local row="$1" now="$2" cad cad_s prog pm=0 id rsid sub tx lm=0
@@ -2020,19 +2050,15 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
   tx=""
   id="$(line_field "$row" agent_id)"
   if [ -n "$id" ]; then
-    # THIS SESSION'S DIR FIRST (wave-19 T1; D4, REQ-2). The harness files an agent's
-    # transcript under the session talking to it NOW, so after an adopt the live file sits
-    # under the adopter while `adopted_from=` still names the launcher — reading only the
-    # launcher's copy reported a working agent quiet (R1 Q4, bed3). The launcher's dir is the
-    # fallback for an agent this session has not yet spoken to. `adopted_from=` itself is
-    # provenance and is never rewritten: adopt's idempotence keys on it.
-    sub="$(session_subagent_dir "$SESSION_ID")" || sub=""
-    if [ -z "$sub" ] || [ ! -f "$sub/agent-${id}.jsonl" ]; then
-      rsid="$(line_field "$row" adopted_from)"
-      if [ -n "$rsid" ] && [ "$rsid" != "$SESSION_ID" ]; then
-        sub="$(session_subagent_dir "$rsid")" || sub=""
-      fi
-    fi
+    # THIS SESSION'S DIR FIRST (wave-19 T1; D4, REQ-2), resolved through `transcript_dir_for`
+    # (T1d) so `adopt`'s own report reads the identical preference — see that function's
+    # comment for the full rationale. The harness files an agent's transcript under the
+    # session talking to it NOW, so after an adopt the live file sits under the adopter while
+    # `adopted_from=` still names the launcher — reading only the launcher's copy reported a
+    # working agent quiet (R1 Q4, bed3). `adopted_from=` itself is provenance and is never
+    # rewritten: adopt's idempotence keys on it.
+    rsid="$(line_field "$row" adopted_from)"
+    sub="$(transcript_dir_for "$id" "$SESSION_ID" "$rsid")" || sub=""
     if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
       tx="$sub/agent-${id}.jsonl"
       OBS_LOG_MTIME="$(file_mtime "$tx")"
@@ -2482,21 +2508,32 @@ case "$VERB" in
         CAD_S="$(parse_seconds "$RCAD")" || CAD_S=""
 
         # ---- the three addresses, all of them derived from the one id
+        #
+        # RESOLVED THROUGH THE SAME PREFERENCE `row_quiet` USES (T1d, 2026-09-22; walk W-3).
+        # This report used to quote ONLY the launching session's copy, unconditionally — so a
+        # re-run of `adopt --report-only` after this session had already exchanged a turn
+        # with the agent (the file now sitting under THIS session's subagents dir, per
+        # `transcript_dir_for`'s own comment) still named the launcher's stale path and age,
+        # while the next tick's `row_quiet` read the fresh one: one row, two disagreeing
+        # readers. `transcript_dir_for` is the one function both now ask.
         TX=""
         TX_PRESENT=no
         TX_AGE=""
         TX_MTIME=0
         if [ -n "$RID" ]; then
-          if [ -n "$OSUB" ]; then
+          TX_SUB="$(transcript_dir_for "$RID" "$SESSION_ID" "$OSID")" || TX_SUB=""
+          if [ -n "$TX_SUB" ]; then
+            TX="$TX_SUB/agent-${RID}.jsonl"
+            TX_PRESENT=yes
+            # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
+            # the agent takes, so its mtime is a fact about the agent rather than a
+            # promise the agent has to remember to keep.
+            TX_MTIME="$(file_mtime "$TX")"
+            TX_AGE=$(( ADOPT_NOW - TX_MTIME ))
+          elif [ -n "$OSUB" ]; then
+            # NEITHER SESSION HAS SPOKEN TO THE AGENT YET — still name the launcher's path
+            # (where the file will land once it does) rather than nothing.
             TX="$OSUB/agent-${RID}.jsonl"
-            if [ -f "$TX" ]; then
-              TX_PRESENT=yes
-              # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
-              # the agent takes, so its mtime is a fact about the agent rather than a
-              # promise the agent has to remember to keep.
-              TX_MTIME="$(file_mtime "$TX")"
-              TX_AGE=$(( ADOPT_NOW - TX_MTIME ))
-            fi
           else
             # The slug could not be resolved — say where to look rather than inventing a
             # path that would read as a fact.
