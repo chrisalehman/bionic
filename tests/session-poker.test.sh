@@ -2896,6 +2896,7 @@ wave_plan "$R12L" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
 add_row "$R12L" status=intended name=BASE agent_id= deliverable="$R12L/.bionic/docs/record/base.md" \
   duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R12L" 8192 1.0 tick
+OUT_12L="$OUT"          # kept for the R2-6 stale/none-panel control below (12l7e)
 # The FILL line proper — `poker: FILL <ids>` — not the later `poker: FILL — … named for
 # dispatch` echo beside the decision line (session-poker.sh, the decision block).
 S12L_TICK="$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL [A-Za-z0-9]' | head -1 | sed 's/^poker: FILL //' \
@@ -2969,12 +2970,56 @@ expect_eq "12l4 AC-5.2 on the end-of-batch shape: the stop wall names exactly th
 R12L5="$(s12l_met_repo s12-differential-met-gone)"
 s12_answer fresh "somebody-else:running"
 poke_pressure "$R12L5" 8192 1.0 tick
+OUT_12L5="$OUT"         # kept for the R2-6 MET-gone control below (12l7d)
 expect_contains "12l5 precondition: the MET row's agent is gone, so the tick's own step acks it" \
   "|name=done-writer|by=patrol|reason=landed" "$(cat "$R12L5/.bionic/tmp/sweeper-$SID.state" 2>/dev/null)"
 S12L5_TICK="$(s12l_tick_ids "$OUT")"
 expect_eq "12l5 …and the occupancy is read after that ack: the whole gap of two is filled" "ONE TWO " "$S12L5_TICK"
 expect_eq "12l6 …and the stop wall, reading the same ledger, names the same two" \
   "$S12L5_TICK" "$(s12l_wall_ids "$R12L5")"
+
+# 12l7 — R2-5/R2-6 (delta review at 1dd9133, C2-5). 12l/12l2 above pin the UNMET-open shape
+# under a "no answer" panel, where the liveness trim never ran at all (A-T2.13's own
+# reasoning, never driven by a differential). This pins the shape the trim's removal
+# actually changes: the SAME UNMET row, under a FRESH panel that shows its agent gone. It is
+# the 12l2/64a differential shape, on the UNMET row instead of the MET one — writers=2, BASE
+# UNMET and unacked, ONE and TWO ready: expect the tick to fill exactly ONE, the row the wall
+# names too.
+s12l_unmet_repo() {  # <label> -> a repo: writers=2, BASE UNMET+open on the roster, ONE/TWO ready
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "| BASE | 4 | build | landed, its row still open on the roster | implementor | — | 15m | REQ-x | a.sh | landed |" \
+    "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+    "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
+  add_row "$r" status=intended name=BASE agent_id= deliverable="$r/.bionic/docs/record/base-12l7.md" \
+    duration="4 hours" launched_at="$(iso_ago 60)"
+  printf '%s' "$r"
+}
+R12L7="$(s12l_unmet_repo s12-differential-unmet-gone)"
+s12_answer fresh "somebody-else:idle"
+poke_pressure "$R12L7" 8192 1.0 tick
+S12L7_TICK="$(s12l_tick_ids "$OUT")"
+expect_eq "12l7 R2-5: an UNMET row absent from a fresh panel still occupies: writers=2 fills ONE" \
+  "ONE " "$S12L7_TICK"
+expect_eq "12l7b …and the stop wall, reading the same predicate, names the same one" \
+  "$S12L7_TICK" "$(s12l_wall_ids "$R12L7")"
+
+# 12l7c — R2-6/C2-5: the tick now names the gone-UNMET row and the verb that closes it, so a
+# crashed writer does not stall a fill slot silently until a human happens to run `stopped`.
+expect_contains "12l7c R2-6: the tick names the gone-UNMET row and the closing verb" \
+  "poker: GONE BASE — UNMET and absent from a fresh panel; close it with: bash ${BIONIC_HOOKS_DIR}/stop-orders.sh stopped BASE" \
+  "$OUT"
+
+# 12l7d — the control: a MET-gone row (12l5's own fixture/shape) is never reported as GONE.
+# It is acked instead (D2, ADR-034 d1), and the two candidate sets never overlap.
+expect_absent "12l7d …and a MET-gone row is never reported as GONE (it is acked instead)" \
+  "poker: GONE" "$OUT_12L5"
+
+# 12l7e — the control: a stale/unknown panel (12l/12l2's own fixture, whose UNMET row is
+# read under a "no answer" panel) reports no GONE line either — the same silence the
+# stand-down arm keeps for a STANDDOWN it cannot trust the panel enough to print (A-orch-31).
+expect_absent "12l7e …and an unknown-panel tick reports no GONE line (nothing is fresh enough to trust)" \
+  "poker: GONE" "$OUT_12L"
 unset CLAUDE_CONFIG_DIR
 
 # ============================================================
@@ -4003,6 +4048,17 @@ expect_contains "…while a genuinely MET roster still DISARMs on the same idle 
 # count is a pin and a duration is not: a future edit that reintroduces a per-row parse moves
 # the count on any machine, and the count is 2 (one `_la_scan`, one `_la_body`) however many
 # rows are open.
+#
+# THE DOCTORED COUNT MOVED FROM 12 TO 14 (wave-19 delta review R2-6, T2e). All six of this
+# fixture's rows are UNMET and unacked, so each is a GONE-report candidate (R2-6): the
+# stand-down arm now warms the panel for them too, not only for a MET or duplicate-start
+# name. On the REAL tick that costs nothing — the priming call above already filled the
+# memo before either reader runs, which is exactly what "the tick parsed the transcript
+# exactly twice" just above still pins. The DOCTORED copy has that one priming call cut, so
+# whichever reader is now first to ask pays the parse: the six per-row subshells (12, as
+# before) AND the stand-down arm's own `live_agents` call, unprimed here for the first time
+# in this process (2 more). The anti-vacuity arm's job — proving the priming call is load-
+# bearing — is unweakened: it discriminates 14 from 2 exactly as it discriminated 12 from 2.
 S19I_SHIM="$TMPROOT/s19i-shim"
 mkdir -p "$S19I_SHIM"
 S19I_REAL_JQ="$(command -v jq)"
@@ -4073,7 +4129,7 @@ S19I_POKER_REAL="$POKER"; POKER="$S19I_MUT"
 poke_counted "$R19I" tick
 POKER="$S19I_POKER_REAL"
 expect_eq "…the doctored tick still counts the same six rows" "6" "$(s19_open "$OUT")"
-expect_eq "…and pays a full parse per row: twelve, not two (19i discriminates)" "12" \
+expect_eq "…and pays a full parse per row: fourteen, not two (19i discriminates)" "14" \
   "$(/usr/bin/grep -c . "$S19I_COUNT" | tr -d ' ')"
 rm -rf "$S19I_MUT_ROOT"
 

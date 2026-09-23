@@ -1040,6 +1040,44 @@ expect_eq "64m2: …and the wall names exactly the ids the tick printed (AC-5.2 
   "$FILL_64M" "$WALL_64M"
 rm -rf "$CFG_64M"
 
+# 64n: THE SAME DIFFERENTIAL, ON AN UNMET ROW (wave-19 delta review R2-5/C2-5, on 64m). 64m
+# pins the MET-unacked shape the liveness-trim removal covers; nothing bound the SAME shape
+# on a row that never met its contract — an UNMET row, unacked, whose agent a fresh panel
+# does not list. That is exactly what the trim used to drop for the fill (A-T2.13), so it is
+# the differential's other half. writers=2, one such row, two ready rows: the real tick's
+# FILL is compared with the ids the wall's refusal names on an ordinary turn.
+d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe' \
+      make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+roster_row_fixture status=intended session="$SID" name=W-UNMET agent_id= \
+  deliverable="$d/never-written-64n.md" >> "$d/.bionic/tmp/roster-$SID.state"
+CFG_64N="$(mktemp -d)"; mkdir -p "$CFG_64N/projects/-fixture-project"
+{
+  jq -nc '{type:"user",timestamp:"2026-09-05T00:50:00.000Z",message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:"2026-09-05T00:51:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_0164NLISTAGENTS",name:"ListAgents",input:{}}]}}'
+  jq -nc --arg b "$(live_answer_body "somebody-else:idle")" \
+    '{type:"user",timestamp:"2026-09-05T00:52:23.349Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_0164NLISTAGENTS",content:$b}]}}'
+} > "$CFG_64N/projects/-fixture-project/$SID.jsonl"
+( cd "$d" && git init -q . 2>/dev/null )
+RING_64N="$CFG_64N/clear.ring"; cp "$CLEAR_RING" "$RING_64N"
+TICK_64N="$(cd "$d" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$CFG_64N" \
+  BIONIC_PRESSURE_RING="$RING_64N" BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_FREE_PCT=80 \
+  BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=1.0 bash "$POKER_64M" tick 2>&1)"
+FILL_64N="$(printf '%s\n' "$TICK_64N" | sed -n 's/^poker: FILL \([A-Za-z0-9].*\)$/\1/p' | head -1 \
+  | tr ' ' '\n' | /usr/bin/grep -v '^$' | sort | tr '\n' ' ')"
+u_prompt "$d" "anything else to start?"
+fire "$d"
+WALL_64N=""
+for _id in T1 T2 T3; do
+  case " $(reason_of | tr -c 'A-Za-z0-9_.-' ' ') " in *" $_id "*) WALL_64N="${WALL_64N}${_id} " ;; esac
+done
+expect_eq "64n R2-5: the tick's FILL on an UNMET-gone roster is the wall's gap of one" "T2 " "$FILL_64N"
+expect_eq "64n2 …and the wall names exactly the ids the tick printed (AC-5.2 differential)" \
+  "$FILL_64N" "$WALL_64N"
+expect_contains "64n3 R2-6/C2-5: the tick names the gone-UNMET row and the closing verb" \
+  "poker: GONE W-UNMET — UNMET and absent from a fresh panel; close it with: bash ${BIONIC_HOOKS_DIR}/stop-orders.sh stopped W-UNMET" \
+  "$TICK_64N"
+rm -rf "$CFG_64N"
+
 # 65: BLOCKS ONCE, through the same stop_hook_active valve the other three duties use.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
 u_prompt "$d" "carry on"
