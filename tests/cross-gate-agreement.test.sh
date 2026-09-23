@@ -1124,9 +1124,16 @@ expect_eq "start gate: the producer's own session passes" "0" "$ST"
 # hide a hook gone silent altogether is not a filter, it is a hole — and the remainder is
 # held to the emptiness this section has always claimed.
 DP_RESOLUTION=$(printf '%s\n' "$OUT" | grep -c '^dispatch-preflight: run resolved by newest-plan fallback (session unbound) — /')
-DP_REST=$(printf '%s\n' "$OUT" | grep -v '^dispatch-preflight: run resolved by newest-plan fallback (session unbound) — /')
+# …AND THE BUDGET BACKSTOP, lifted the same way and for the same reason (epic-23 wave-20 T2,
+# REQ-10 AC-10.2): this fixture's plan is live and carries no `parallel-budget:` line, so the
+# gate names the missing key (ADR-035). A line about the budget, not the attestation —
+# asserted positively, then held out of the remainder.
+DP_BACKSTOP=$(printf '%s\n' "$OUT" | grep -c '^dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field')
+DP_REST=$(printf '%s\n' "$OUT" | grep -v '^dispatch-preflight: run resolved by newest-plan fallback (session unbound) — /' \
+  | grep -v '^dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field')
 expect_eq "start gate: it announces the resolution it used, once (AC-3 — the fixture is unbound)" \
   "1" "$DP_RESOLUTION"
+expect_eq "start gate: …and names the keyless live plan's missing budget key, once" "1" "$DP_BACKSTOP"
 expect_eq "start gate: and passes in silence about the attestation" "" "$DP_REST"
 # THE NEAR-MISS SESSION IS ENGAGED TOO (task-engaged-session). Both gates ask
 # `engaged_session` before anything else, keyed to the session in hand — so without a
@@ -10620,99 +10627,58 @@ done <<< "$NR_ENTRIES"
 expect_empty "NR.7 every needs: entry in skills/canonical-sdlc/SKILL.md resolves" "$NR_DEAD"
 
 # ============================================================
-section "LC — THE LATEST-CONTRACT READING: one text, two roster walls, byte for byte (epic-23 wave-12-fixit-171 T26, delta review C1/S2)"
+section "LC — THE LATEST-CONTRACT READING: the recorder's, and no longer the dispatch wall's (epic-23 wave-12-fixit-171 T26; retired half: wave-20 T2, D10)"
 # ============================================================
 #
-# THE TWO WALLS. hooks/dispatch-preflight.sh refuses a dispatch under a name whose contract is
-# still open; hooks/execution-recorder.sh journals a second start under an id whose contract is
-# still open. Different events, different keys (name vs agent_id), different outputs — and one
-# shared question underneath: given an APPEND-ONLY roster, is this name currently under an open
-# contract, or did a `landing-swept/v1|…|state=MET` marker close the last one?
+# WHAT THIS PINNED. hooks/dispatch-preflight.sh and hooks/execution-recorder.sh carried one
+# awk text byte for byte — "is this name currently under an open contract, or did a
+# `landing-swept/v1|…|state=MET` marker close the last one?" — because the recorder loads no
+# library that parses a roster and `BIONIC_LIB_WANT` is fail-closed on the SubagentStart path.
 #
-# WHY THE DUPLICATION IS DELIBERATE. The recorder loads no library that parses a roster, and
-# `BIONIC_LIB_WANT` is a FAIL-CLOSED list — an absent library refuses everything the hook
-# judges — so putting four awk functions behind one would add a file to the SubagentStart path
-# for every dispatch in the fleet. The repo's answer to a shape two files must share is this
-# suite (§A2, §N, §AP's predecessor): hold the copies byte-equal, and prove the holding
-# discriminates.
-#
-# WHAT IT COST TO NOT HAVE THIS PIN. Both programs read the MET markers as a SET, so one
-# landing latched the flag for that name and BOTH walls went inert for it for the rest of the
-# session — the dispatch wall in the exact case it was built for (a task being re-run) and the
-# recorder's fallback beneath it. One defect, two files, found once. T26 fixed it in one text.
+# WHAT CHANGED (epic-23 wave-20 T2, REQ-10, D10; research D3-8). The dispatch wall's question
+# is OCCUPANCY — is this name still under contract for the budget and the name arm — and it
+# now asks the one close predicate every occupancy reader asks, `roster_open_names`
+# (payload/scripts/lib/roster.sh), under which a MET marker closes nothing and a post-launch
+# ack is the one close (ADR-034 d1). The recorder's question is IDENTIFICATION — which open
+# contract does a starting agent id belong to — and it keeps its reading, marker and all,
+# untouched. So the byte-equal pair is retired rather than kept alive over a dead block in
+# the dispatch wall: what is pinned below is that the recorder still carries its reading
+# whole, and that the dispatch wall carries NO private copy of it — no MET latch, no
+# `contract_closed` — so a close reading cannot grow back there beside the predicate.
 
 LC_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
 LC_ER="$BIONIC_HOOKS_DIR/execution-recorder.sh"
 lc_span() {  # <file> -> the shared reading, BEGIN and END markers included
   sed -n '/---- BEGIN latest-contract reading/,/---- END latest-contract reading/p' "$1"
 }
-LC_SPAN_DP="$(lc_span "$LC_DP")"
 LC_SPAN_ER="$(lc_span "$LC_ER")"
 
-# --- (a) BOTH SPANS EXIST AND ARE THE WHOLE READING. A missing marker would make the two
-# extractions empty, and two empty strings compare equal — the vacuous pass this arm forbids
-# before the comparison below is allowed to mean anything. ---
-expect_nonempty "LC.1 hooks/dispatch-preflight.sh carries the delimited shared reading" "$LC_SPAN_DP"
-expect_nonempty "LC.1 hooks/execution-recorder.sh carries the delimited shared reading" "$LC_SPAN_ER"
-expect_eq "LC.1 …exactly one BEGIN marker in dispatch-preflight.sh" \
-  "1" "$(/usr/bin/grep -c -- '---- BEGIN latest-contract reading' "$LC_DP")"
+# --- (a) THE RECORDER'S READING IS WHOLE: one delimited span, all four functions. ---
+expect_nonempty "LC.1 hooks/execution-recorder.sh carries the delimited latest-contract reading" "$LC_SPAN_ER"
 expect_eq "LC.1 …exactly one BEGIN marker in execution-recorder.sh" \
   "1" "$(/usr/bin/grep -c -- '---- BEGIN latest-contract reading' "$LC_ER")"
-expect_eq "LC.1 …and the span carries all four functions (dispatch-preflight)" "4" \
-  "$(printf '%s\n' "$LC_SPAN_DP" | /usr/bin/grep -cE '^ *function (kv|live_status|contract_note|contract_closed)\(')"
-expect_eq "LC.1 …and all four in the recorder too" "4" \
+expect_eq "LC.1 …and all four functions" "4" \
   "$(printf '%s\n' "$LC_SPAN_ER" | /usr/bin/grep -cE '^ *function (kv|live_status|contract_note|contract_closed)\(')"
 
-# --- (b) BYTE FOR BYTE. Not "code-identical": the whole point of a shared text is that a
-# reader of either file is reading the same argument, comments included (§O's distinction,
-# taken the other way). ---
-expect_eq "LC.2 the two walls carry the SAME latest-contract reading, byte for byte" \
-  "$(printf '%s\n' "$LC_SPAN_DP" | shasum | cut -d' ' -f1)" \
-  "$(printf '%s\n' "$LC_SPAN_ER" | shasum | cut -d' ' -f1)"
-
-# --- (c) THE DECISIVE LINE IS IN IT. "Byte-equal" is also satisfied by two copies of a
-# reading that lost the rule — the latch that C1 named — so the line that retires a marker
-# when a live row follows it is pinned by content, in both files. ---
-expect_contains "LC.3 the reading retires a MET marker that a live row follows (dispatch-preflight)" \
-  'if (live_status(kv(line, "status"))) delete MET[nm]' "$LC_SPAN_DP"
-expect_contains "LC.3 …and in the recorder" \
+# --- (b) THE DECISIVE LINE IS IN IT: a live row retires the marker above it (the C1 latch
+# fix), so the recorder never pins an id to a contract a later dispatch reopened. ---
+expect_contains "LC.3 the recorder's reading retires a MET marker that a live row follows" \
   'if (live_status(kv(line, "status"))) delete MET[nm]' "$LC_SPAN_ER"
 
-# --- (d) THE COMPARISON DISCRIMINATES. A doctored copy of one span — the decisive line
-# removed, nothing else touched — must NOT match the other. Without this, LC.2 is consistent
-# with a comparison that always says yes. ---
-LC_MUT="$(printf '%s\n' "$LC_SPAN_DP" | /usr/bin/grep -v 'delete MET\[nm\]')"
-expect_ne "LC.4 the byte-comparison really compares (a doctored span does not match)" \
-  "$(printf '%s\n' "$LC_MUT" | shasum | cut -d' ' -f1)" \
-  "$(printf '%s\n' "$LC_SPAN_ER" | shasum | cut -d' ' -f1)"
-expect_eq "LC.4 meta: the doctoring removed exactly one line" "1" \
-  "$(( $(printf '%s\n' "$LC_SPAN_DP" | wc -l) - $(printf '%s\n' "$LC_MUT" | wc -l) ))"
-
-# --- (e) BOTH WALLS ACTUALLY ASK IT. A shared text neither program calls is a comment. ---
-expect_eq "LC.5 the dispatch wall notes every row through the shared reading" "2" \
-  "$(/usr/bin/grep -c 'contract_note($0)' "$LC_DP")"
-# THE VERDICT ITSELF, NOT A BARE MENTION: `contract_closed` is also the name of a function the
-# shared span DEFINES, so a count would be satisfied by the definition alone. Two lines carry
-# the decision and BOTH are pinned — the line where the wall's answer is COMPUTED from the
-# shared reading, and the line where the arm that refuses ACTS on it. A pin on only the first
-# is satisfied by a wall that computes the verdict and throws it away.
-#
-# RE-SPELLED BY WAVE-14 T16, AGAINST WAVE-14 T5 (ffe3265). Until T5 the dispatch side decided
-# in an awk END rule — `if (open && !contract_closed(want)) print last` — and this arm pinned
-# that literal. T5 moved the reading into `dp_roster_contracts` because the BUDGET wall needed
-# the same answer and two spellings of one question are two answers; that function prints a
-# verdict PER ROW, so the decision is now the printf's ternary and the name-in-flight arm
-# selects on the `open` it printed. What is pinned is unchanged: the dispatch wall decides on
-# open rows through the shared reading, and through nothing else. The behaviour across the
-# move is driven, not inferred — tests/dispatch-preflight.test.sh §T22-name-in-flight (a)–(k2).
-expect_contains "LC.5 …and the dispatch wall DECIDES on it" \
-  '(contract_closed(nm) || ack_closes(nm, born[nm])) ? "closed" : "open"' "$(cat "$LC_DP")"
-expect_contains "LC.5 …and the arm that refuses a re-used name ACTS on that verdict" \
-  '$1 == want && $3 == "open"' "$(cat "$LC_DP")"
-expect_eq "LC.5 the recorder notes every row through the shared reading" "2" \
+# --- (c) THE RECORDER STILL ASKS IT. A reading nobody calls is a comment. ---
+expect_eq "LC.5 the recorder notes every row through its reading" "2" \
   "$(/usr/bin/grep -c 'contract_note($0)' "$LC_ER")"
 expect_contains "LC.5 …and the recorder DECIDES on it" \
   '&& !contract_closed(nm)) print row' "$(cat "$LC_ER")"
+
+# --- (d) THE DISPATCH WALL KEEPS NO COPY (D3-8). No span, no MET latch, no contract_closed:
+# its one close is the library predicate, which §CG-close drives through the wall itself. ---
+expect_eq "LC.6 the dispatch wall carries no latest-contract span any more" "0" \
+  "$(/usr/bin/grep -c -- '---- BEGIN latest-contract reading' "$LC_DP" || true)"
+expect_eq "LC.6 …and no private MET close of any spelling" "0" \
+  "$(/usr/bin/grep -cE 'contract_closed|MET\[' "$LC_DP" || true)"
+expect_true "LC.6 …because it asks the one close predicate instead" \
+  /usr/bin/grep -q 'roster_open_names "' "$LC_DP"
 expect_eq "LC.5 no private MET latch survives in either file" "0" \
   "$(/usr/bin/grep -cE '!\(nm in met\)|&& !met\b' "$LC_DP" "$LC_ER" | awk -F: '{t += $2} END { print t + 0 }')"
 
@@ -11146,5 +11112,355 @@ expect_eq "SV MUTANT a doctored copy with the old comment reinstated no longer m
   "no" "$([ "$SV_MUT_LINE" = "$SV_SUITES_LINE" ] && echo yes || echo no)"
 expect_eq "SV MUTANT …and the un-doctored SKILL.md still does" \
   "yes" "$([ "$(sv_suites_line "$SV_SKILL")" = "$SV_SUITES_LINE" ] && echo yes || echo no)"
+
+# ============================================================
+section "CG-close — ONE close predicate, four readers, one answer (epic-23 wave-20 T2, REQ-10 AC-10.1; D10)"
+# ============================================================
+#
+# THE DEFECT. "Is this name closed" had four spellings (research D3 §REQ-10, triage-C claim 4,
+# driven both ways): dispatch preflight closed a name on a `landing-swept/v1|state=MET` marker
+# OR an ack taken after the row's launch; the sweeper's `row_acked` and the stop wall's
+# occupancy pass closed it on ANY ack of the name, ever; the tick's `adopt_fold` closed it on
+# any ack or any MET marker. So a name acked and then dispatched again was open to preflight
+# and closed to the other three, and a MET-but-unacked row was closed to preflight and adopt
+# and open to the sweeper and the stop wall. D10 gives the question one owner —
+# `roster_open_names` in payload/scripts/lib/roster.sh: a name is closed by an ack whose `at=`
+# is later than its latest live row's `launched_at=`, and by nothing else (ADR-034 d1).
+#
+# THE FIXTURE is one world per name, so each reader answers for exactly one history:
+#   again  dispatched, acked, dispatched again         -> OPEN
+#   met    dispatched, a MET marker, never acked        -> OPEN
+#   done   dispatched, then acked                       -> CLOSED
+# `done` is the paired positive: without a name every reader closes, "all four say open"
+# would pass on readers that never close anything.
+#
+# EACH READER IS ASKED THROUGH ITS OWN SURFACE, never through the library, because the
+# question is whether each reader CALLS the one predicate. Asking the library four times
+# would agree with itself by construction.
+#   preflight   the name-in-flight arm: a dispatch under the name is refused iff it is open
+#   sweeper     the `verdict` machine line's `acked=` (yes = closed)
+#   stop wall   the fill occupancy: writers=1 and one ready row; an open name holds the one
+#               slot and the turn passes, a closed name frees it and the turn is refused
+#   adopt_fold  the tick's fold, run from its own source text: an open name is folded
+#
+# THE STAMPS ARE LEXICAL ISO-8601 Z, as both writers stamp them (`date -u
+# +%Y-%m-%dT%H:%M:%SZ` in the sweeper's `iso_now` and in preflight's row).
+
+CGC_POKER="$BIONIC_HOOKS_DIR/session-poker.sh"
+CGC_STOP="$BIONIC_HOOKS_DIR/stop.sh"
+CGC_LIBDIR="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+CGC_RING="$SANDBOX/cgc/pressure.ring"
+mkdir -p "$SANDBOX/cgc"
+# A CLEAR RING, so the stop wall's rung is its ceiling and nothing but the roster moves the
+# width (tests/patrol-duties-gate.test.sh's CLEAR_RING, the same five fields).
+printf '1700000000|80|0|0.1|16\n' > "$CGC_RING"
+# RESEEDED BEFORE EVERY DRIVE, AND THE SENSORS PINNED. A reader that finds the window empty
+# samples the machine into this ring under the pinned clock — and this suite runs beside
+# other suites, so an unpinned sample reads the runner's real load and a later median lands
+# in the warning band, halving the width for a reason that is not the fixture (§RG's pins).
+CGC_ENV=(BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_NOW_EPOCH=1700000000
+         BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1)
+cgc_ring() { printf '1700000000|80|0|0.1|16\n' > "$CGC_RING"; }
+
+cgc_ack() {  # <ledger> <at> <name> — the sweeper ledger's ack line, in its writer's shape
+  [ -f "$1" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$1"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+    "$2" "$SID_A" "$3" >> "$1"
+}
+cgc_row() {  # <roster> <name> <launched_at> <tool_use_id>
+  roster_row_fixture status=intended session="$SID_A" name="$2" agent_id= \
+    launched_at="$3" tool_use_id="$4" deliverable= >> "$1"
+}
+
+# THE PLAN the stop wall and preflight read: a live ledger (current: 4) with the given budget
+# line and the given number of ready rows.
+cgc_plan() {  # <path> <budget line, verbatim, or empty> <ready rows>
+  local i
+  mkdir -p "$(dirname "$1")"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
+    printf 'intent: build\nrigor: audited\nscale: wave\n'
+    [ -z "$2" ] || printf '%s\n' "$2"
+    printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
+    printf 'current: 4\napproved-by: fixture\n\n- Step 3: prior evidence\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    for i in $(seq 1 "$3"); do
+      printf '| R%s | 4 | build | ready row %s | implementor | — | 30m | REQ-x | r%s.sh | pending | — |\n' \
+        "$i" "$i" "$i"
+    done
+  } > "$1"
+}
+
+# One world holding ONE name's history. The plan carries writers=1 and one ready row, which is
+# the stop wall's whole instrument (the header above).
+cgc_world() {  # <case: again|met|done> -> repo path
+  local r ro le
+  r=$(new_repo "cgc-$1")
+  ro="$r/.bionic/tmp/roster-$SID_A.state"
+  le="$r/.bionic/tmp/sweeper-$SID_A.state"
+  roster_header > "$ro"
+  case "$1" in
+    again)
+      cgc_row "$ro" cgc-again 2026-09-01T00:00:00Z toolu_01CGCAGAIN1
+      cgc_ack "$le" 2026-09-01T01:00:00Z cgc-again
+      cgc_row "$ro" cgc-again 2026-09-01T02:00:00Z toolu_01CGCAGAIN2
+      ;;
+    met)
+      cgc_row "$ro" cgc-met 2026-09-01T00:00:00Z toolu_01CGCMET
+      swept_marker_write "$ro" 2026-09-01T01:00:00Z "$SID_A" cgc-met "" MET
+      ;;
+    done)
+      cgc_row "$ro" cgc-done 2026-09-01T00:00:00Z toolu_01CGCDONE
+      cgc_ack "$le" 2026-09-01T01:00:00Z cgc-done
+      ;;
+  esac
+  cgc_plan "$r/.bionic/docs/plans/epic-99/cgc.plan.md" \
+    'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+  s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/cgc.plan.md"
+  s4_attest "$r" "$SID_A"
+  jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
+           message:{role:"user",content:"carry on"}}' > "$r/cgc-transcript.jsonl"
+  printf '%s' "$r"
+}
+
+cgc_preflight() {  # <repo> <name> -> open | closed
+  local out
+  out=$(mk_agent_payload "$SID_A" "$1" \
+    | jq -c --arg n "$2" --arg t "$1/cgc-transcript.jsonl" \
+        '.tool_input.name = $n | .transcript_path = $t' \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" 2>&1)
+  case "$out" in *"that name is in flight"*) printf 'open' ;; *) printf 'closed' ;; esac
+}
+cgc_sweeper() {  # <repo> <name> -> open | closed | other:<line>
+  local line
+  line=$( ( cd "$1" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict "$2" 2>/dev/null ) \
+    | grep -F 'landing-verdict/v1|' | head -1)
+  case "$line" in
+    *"|acked=yes|"*) printf 'closed' ;;
+    *"|acked=no|"*)  printf 'open' ;;
+    *) printf 'other:%s' "$line" ;;
+  esac
+}
+cgc_stopwall() {  # <repo> -> open | closed | other:<reason>
+  local out
+  cgc_ring
+  out=$(s4_stop_payload "$1" "$SID_A" "$1/cgc-transcript.jsonl" \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_STOP" 2>/dev/null)
+  case "$out" in
+    *"Fillable gap"*"R1"*) printf 'closed' ;;
+    *"Fillable gap"*|*"Fill budget unreadable"*) printf 'other:%s' "$out" ;;
+    *) printf 'open' ;;
+  esac
+}
+cgc_adopt() {  # <repo> <name> -> open | closed
+  local out
+  out=$( ( BIONIC_LIB_WANT=""
+           . "$CGC_LIBDIR/roster.sh" >/dev/null 2>&1
+           eval "$(awk '/^adopt_fold\(\) \{/,/^\}/' "$CGC_POKER")"
+           adopt_fold "$1/.bionic/tmp/roster-$SID_A.state" "$1/.bionic/tmp/sweeper-$SID_A.state" ) 2>/dev/null \
+         | cut -d'|' -f1)
+  if grep -qxF -- "$2" <<< "$out"; then printf 'open'; else printf 'closed'; fi
+}
+
+expect_nonempty "CG-close meta: adopt_fold's source text is extractable" \
+  "$(awk '/^adopt_fold\(\) \{/,/^\}/' "$CGC_POKER")"
+
+for _cgc in again:open met:open done:closed; do
+  _cgc_case="${_cgc%%:*}"; _cgc_want="${_cgc#*:}"; _cgc_name="cgc-$_cgc_case"
+  _cgc_r=$(cgc_world "$_cgc_case")
+  _cgc_sw=$(cgc_sweeper "$_cgc_r" "$_cgc_name")
+  _cgc_st=$(cgc_stopwall "$_cgc_r")
+  _cgc_ad=$(cgc_adopt "$_cgc_r" "$_cgc_name")
+  # PREFLIGHT LAST: an admitted dispatch journals a row, and that row is a new history.
+  _cgc_pf=$(cgc_preflight "$_cgc_r" "$_cgc_name")
+  expect_eq "CG-close ${_cgc_case}: dispatch preflight answers ${_cgc_want}" "$_cgc_want" "$_cgc_pf"
+  expect_eq "CG-close ${_cgc_case}: the sweeper's acked= answers ${_cgc_want}" "$_cgc_want" "$_cgc_sw"
+  expect_eq "CG-close ${_cgc_case}: the stop wall's occupancy answers ${_cgc_want}" "$_cgc_want" "$_cgc_st"
+  expect_eq "CG-close ${_cgc_case}: the tick's adopt_fold answers ${_cgc_want}" "$_cgc_want" "$_cgc_ad"
+done
+
+# ONE DEFINITION, AND EVERY READER CALLS IT. The behaviour above is the proof; this names the
+# owner, so a fifth reader grown with a private ack set fails here rather than in the field.
+expect_eq "CG-close roster_open_names is defined exactly once in the shipped tree" "1" \
+  "$( { grep -l '^roster_open_names()' "$CGC_LIBDIR"/*.sh; grep -l '^roster_open_names()' "$BIONIC_HOOKS_DIR"/*.sh; } 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+for _cgc_f in "$PARTY_DP" "$SWEEPER" "$CGC_LIBDIR/stop.sh" "$CGC_POKER"; do
+  expect_true "CG-close ${_cgc_f##*/} calls roster_open_names" \
+    grep -q 'roster_open_names "' "$_cgc_f"
+done
+expect_eq "CG-close no reader keeps a private name-only ack set (acked[an] = 1)" "0" \
+  "$(cat "$PARTY_DP" "$SWEEPER" "$CGC_LIBDIR/stop.sh" "$CGC_POKER" | grep -c 'acked\[an\] = 1' || true)"
+
+# THE MUTATION PROOF (research D3 §CG-close): the stop wall's old name-only reading restored
+# in a copy of the library, nothing else touched, must make `again` disagree again.
+CGC_MUT="$SANDBOX/cgc-mut"
+CGC_MUT_HOOK="$(plant_hook_tree "$CGC_MUT")"
+cp "$CGC_STOP" "$CGC_MUT_HOOK/stop.sh"
+awk '{
+  if (index($0, "FILL_OPEN=\"$(roster_open_names ") > 0) {
+    print "      FILL_OPEN=1  # mutant: the name-only reading, which reads the fixture as closed"
+    print "      grep -q \"event=ack\" \"$FILL_ACKS\" 2>/dev/null && FILL_OPEN=0"
+    next
+  }
+  print }' "$CGC_LIBDIR/stop.sh" > "$CGC_MUT/scripts/lib/stop.sh"
+expect_eq "CG-close meta: the mutant planted its name-only line" "1" \
+  "$(grep -c 'mutant: the name-only reading' "$CGC_MUT/scripts/lib/stop.sh")"
+_cgc_r=$(cgc_world again)
+cgc_ring
+_cgc_mut=$(s4_stop_payload "$_cgc_r" "$SID_A" "$_cgc_r/cgc-transcript.jsonl" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_MUT_HOOK/stop.sh" 2>/dev/null)
+expect_contains "CG-close MUTANT a name-only stop wall frees the re-dispatched name's slot (the row discriminates)" \
+  "Fillable gap" "$_cgc_mut"
+
+# ============================================================
+section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave-20 T2, REQ-10 AC-10.2; D10)"
+# ============================================================
+#
+# THE DEFECT (triage-D, driven 9 vs 3; research D3 §REQ-10). Four readers took `writers=` out
+# of the plan's `parallel-budget:` line three ways. The governing-skill hook and the stop wall
+# cut at the FIRST substring `writers=`, so `max_writers=9 writers=3` read 9; the stop wall
+# also read the key leniently (`  parallel-budget:`, `parallel-budget :`) where every other
+# reader read nothing; nobody read `writers=08` as the integer it is. D10: `plan_budget_line`
+# and `budget_line_of` (strict `^parallel-budget:`) and `budget_field` (a whole field, a
+# decimal integer) in payload/scripts/lib/run.sh, called by all four.
+#
+# THE ANSWER EACH READER GIVES is its writer count, `-` for none:
+#   tick         the `rung=<r>/<writers>` report line
+#   preflight    the budget refusal's `writers: budget=<n>` (ten open rows, so any n refuses)
+#   stop wall    the width of the ready set it names, over ten ready rows and an empty roster
+#   gov hook     presence only (its one use is "does a writers= exist"): the Write is
+#                refused on the budget arm iff it reads none
+# and the governing-skill hook is driven over TEXT (the Write's content), the other three over
+# a file — the one place the text-level reader exists for.
+
+cgb_world() {  # <label> <budget line verbatim> -> repo path
+  local r i ro
+  r=$(new_repo "cgb-$1")
+  ro="$r/.bionic/tmp/roster-$SID_A.state"
+  cgc_plan "$r/.bionic/docs/plans/epic-99/cgb.plan.md" "$2" 10
+  s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/cgb.plan.md"
+  s4_attest "$r" "$SID_A"
+  jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
+           message:{role:"user",content:"carry on"}}' > "$r/cgc-transcript.jsonl"
+  printf '%s' "$r"
+}
+cgb_open_rows() {  # <repo> — ten intended rows, none closed, for preflight's count
+  local ro="$1/.bionic/tmp/roster-$SID_A.state" i
+  [ -f "$ro" ] || roster_header > "$ro"
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    cgc_row "$ro" "cgb-w$i" 2026-09-01T00:00:00Z "toolu_01CGBW$i"
+  done
+}
+cgb_tick() {  # <repo> -> writers
+  local out
+  cgc_ring
+  out=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
+           "${CGC_ENV[@]}" bash "$PARTY_PK_S" tick 2>&1 ) | sed -n 's/.*poker: rung=[0-9-]*\/\([0-9-]*\) .*/\1/p' | head -1)
+  printf '%s' "${out:-?}"
+}
+# SETS GLOBALS, and is called bare — never inside `$( … )`, whose subshell would take the
+# captured output with it (the first RED run died on exactly that, under `set -u`).
+cgb_preflight() {  # <repo> -> sets CGB_PF_OUT (the wall's whole channel) and CGB_PF (writers)
+  cgc_ring
+  CGB_PF_OUT=$(mk_agent_payload "$SID_A" "$1" \
+    | jq -c --arg t "$1/cgc-transcript.jsonl" '.tool_input.name = "cgb-new" | .transcript_path = $t' \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$PARTY_DP" 2>&1)
+  CGB_PF=$(printf '%s\n' "$CGB_PF_OUT" | sed -n 's/.*writers: budget=\([0-9]*\) .*/\1/p' | head -1)
+  CGB_PF="${CGB_PF:--}"
+}
+cgb_stopwall() {  # <repo> -> writers
+  local out ids
+  cgc_ring
+  out=$(s4_stop_payload "$1" "$SID_A" "$1/cgc-transcript.jsonl" \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_STOP" 2>/dev/null)
+  case "$out" in
+    *"Fill budget unreadable"*) printf -- '-'; return 0 ;;
+  esac
+  ids=$(printf '%s' "$out" | sed -n 's/.*ready to dispatch — \(.*\) — and this turn.*/\1/p' | head -1)
+  if [ -z "$ids" ]; then printf '?'; return 0; fi
+  printf '%s' "$(printf '%s\n' $ids | grep -c '^R[0-9]')"
+}
+cgb_govskill() {  # <budget line verbatim> -> present | absent (sets CGB_GS_OUT)
+  local r plan content
+  r=$(new_repo "cgb-gs-$RANDOM$RANDOM")
+  plan="$r/.bionic/docs/plans/epic-99/cgb-gs.plan.md"
+  mkdir -p "$(dirname "$plan")"
+  content="---
+governing-skill: superpowers:writing-plans
+sdlc-step: 1
+canonical_sdlc_version: 14
+intent: build
+rigor: audited
+scale: wave
+cleanup_on_finish: true
+use_worktree: false
+surface_type: none
+language: none
+has_ui: false
+multi_agent: false
+deploy_target: none
+model_plan: orchestrator=fable-5-high
+${1}
+---
+
+## Goal
+
+A fixture plan for the budget reader.
+"
+  CGB_GS_OUT=$(jq -n --arg p "$plan" --arg c "$content" --arg s "$SID_A" \
+      '{session_id:$s, tool_name:"Write", tool_input:{file_path:$p, content:$c}}' \
+    | env HOME="$r" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SG_W" 2>&1)
+  case "$CGB_GS_OUT" in
+    *"carries no parallel-budget: writers="*) printf 'absent' ;;
+    *) printf 'present' ;;
+  esac
+}
+
+# <label>|<budget line, verbatim>|<the one answer>
+CGB_CASES='max-writers|parallel-budget: max_writers=9 writers=3 suites=2|3
+plain|parallel-budget: writers=3 suites=2|3
+leading-space|  parallel-budget: writers=3 suites=2|-
+space-before-colon|parallel-budget : writers=3 suites=2|-
+leading-zero|parallel-budget: writers=08 suites=2|8
+empty-field|parallel-budget: writers= suites=2|-
+no-writers|parallel-budget: suites=2|-'
+
+while IFS='|' read -r _cgb_label _cgb_line _cgb_want; do
+  [ -n "$_cgb_label" ] || continue
+  _cgb_r=$(cgb_world "$_cgb_label" "$_cgb_line")
+  _cgb_st=$(cgb_stopwall "$_cgb_r")
+  # The tick reaches its report only with a roster carrying a row (§RG); one closed-by-ack
+  # row is enough and holds no slot.
+  cgc_row "$_cgb_r/.bionic/tmp/roster-$SID_A.state" cgb-tickrow 2026-09-01T00:00:00Z toolu_01CGBTICK
+  cgc_ack "$_cgb_r/.bionic/tmp/sweeper-$SID_A.state" 2026-09-01T01:00:00Z cgb-tickrow
+  _cgb_tk=$(cgb_tick "$_cgb_r")
+  cgb_open_rows "$_cgb_r"
+  cgb_preflight "$_cgb_r"; _cgb_pf="$CGB_PF"
+  _cgb_gs=$(cgb_govskill "$_cgb_line")
+  expect_eq "CG-budget ${_cgb_label}: the tick reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_tk"
+  expect_eq "CG-budget ${_cgb_label}: dispatch preflight reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_pf"
+  expect_eq "CG-budget ${_cgb_label}: the stop wall reads writers=${_cgb_want}" "$_cgb_want" "$_cgb_st"
+  expect_eq "CG-budget ${_cgb_label}: the governing-skill hook agrees on presence" \
+    "$([ "$_cgb_want" = "-" ] && echo absent || echo present)" "$_cgb_gs"
+  if [ "$_cgb_want" = "-" ]; then
+    # AC-10.2's second half: a live plan without a readable key is NAMED at dispatch, never
+    # passed in silence (ADR-035's backstop, on preflight's own wire).
+    expect_contains "CG-budget ${_cgb_label}: …and preflight names the missing key" \
+      "no parallel-budget: line with a writers= field" "$CGB_PF_OUT"
+    expect_contains "CG-budget ${_cgb_label}: …citing the decision that makes it a measurement" \
+      "ADR-035" "$CGB_PF_OUT"
+  fi
+done <<< "$CGB_CASES"
+
+# ONE DEFINITION EACH, AND NO PRIVATE CUT SURVIVES.
+for _cgb_fn in plan_budget_line budget_line_of budget_field; do
+  expect_eq "CG-budget ${_cgb_fn} is defined exactly once, in run.sh" "run.sh" \
+    "$( { grep -l "^${_cgb_fn}()" "$CGC_LIBDIR"/*.sh; grep -l "^[[:space:]]*${_cgb_fn}()" "$BIONIC_HOOKS_DIR"/*.sh; } 2>/dev/null | sed 's#.*/##' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+done
+expect_eq "CG-budget no reader cuts writers= at its first substring any more" "0" \
+  "$(cat "$PARTY_SG_W" "$CGC_LIBDIR/stop.sh" "$PARTY_DP" "$CGC_POKER" | grep -c '#\*writers=}' || true)"
+expect_eq "CG-budget the stop wall no longer reads the budget through plan_frontmatter_get" "0" \
+  "$(grep -c 'plan_frontmatter_get "$PLAN" parallel-budget' "$CGC_LIBDIR/stop.sh" || true)"
 
 finish

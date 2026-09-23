@@ -3104,16 +3104,71 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "r22b one open row against writers=2 → the second dispatch passes" "0" "$GATE_ST"
 expect_absent "…and says nothing about a budget on the pass path" "parallel budget" "$GATE_ERR"
 
-# --- inert without the line. The same roster that refused above dispatches freely
-#     when the plan declares no budget, which is every plan written before this wave.
+# --- unmeasured without the line, and SAID (epic-23 wave-20 T2, REQ-10 AC-10.2, D10;
+#     ADR-035). The same roster that refused above still dispatches when the plan declares
+#     no budget — the ceilings cannot be measured, so nothing is refused on them — but a
+#     LIVE plan (past Step 3) without the key is a plan that slipped past the governing-skill
+#     hook's Write wall, and this wall names the key rather than passing it in silence. Until
+#     this wave it was silent here: "inert without the line" was the rule of a budget a run
+#     OPTED INTO, and ADR-035 made the budget a measurement every plan carries.
 REPO=$(make_repo r22c yes)
 write_attestation "$REPO" "$SID_A"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 s22_roster_row "$REPO" "$SID_A" "W-TWO"
 s22_roster_row "$REPO" "$SID_A" "W-THREE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "r22c no parallel-budget: in the plan → the arm is inert, three rows notwithstanding" "0" "$GATE_ST"
-expect_absent "…and prints nothing about a budget it was never given" "parallel budget" "$GATE_ERR"
+expect_status "r22c no parallel-budget: in a live plan → no ceiling refuses, three rows notwithstanding" "0" "$GATE_ST"
+expect_absent "…and no ceiling count is printed" "writers: budget=" "$GATE_ERR"
+expect_contains "r22c2 …but the missing key is NAMED on the pass path (AC-10.2)" \
+  "no parallel-budget: line with a writers= field" "$GATE_ERR"
+expect_contains "r22c2 …citing the decision that makes the budget a measurement" "ADR-035" "$GATE_ERR"
+expect_contains "r22c2 …and naming the plan it read" \
+  "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" "$GATE_ERR"
+
+# r22c3 — A KEY SPELLED ANY OTHER WAY IS NO KEY. A leading space before `parallel-budget:`
+# is the spelling the stop wall used to read as 3 and the tick, preflight and the hook read
+# as nothing; one strict reader now answers "no line" for all four, so it gets the same
+# named backstop as an absent key.
+REPO=$(make_repo r22c3 yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+sed -i '' 's/^parallel-budget: /  parallel-budget: /' "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+expect_contains "r22c3 meta: the plan carries the indented key" "  parallel-budget: writers=1" \
+  "$(cat "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22c3 an indented key reads as no key: nothing is refused on writers=1" "0" "$GATE_ST"
+expect_contains "r22c3 …and the key is named as missing" "no parallel-budget: line with a writers= field" "$GATE_ERR"
+
+# r22c4 — BELOW STEP 4 NOTHING IS OWED. A plan at `current: 3` is still being written, so a
+# missing key there is not a live run's gap and nothing is said (the stop wall's backstop
+# takes the same boundary: fill_ledger_live, past Step 3).
+REPO=$(make_repo r22c4 yes)
+write_attestation "$REPO" "$SID_A"
+sed -i '' 's/^current: 4$/current: 3/' "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22c4 a keyless plan at current: 3 dispatches" "0" "$GATE_ST"
+expect_absent "r22c4 …and nothing is said about the key" "no parallel-budget: line" "$GATE_ERR"
+
+# r22c5 — THE PAIRED CONTROL: a keyed plan at current: 4 says nothing about a missing key.
+# Without it r22c2 is green on a wall that prints the line on every dispatch.
+REPO=$(make_repo r22c5 yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22c5 a keyed live plan dispatches" "0" "$GATE_ST"
+expect_absent "r22c5 …and names no missing key" "no parallel-budget: line" "$GATE_ERR"
+
+# r22c6 — max_writers IS NOT writers. The field is read whole: `max_writers=9 writers=1`
+# carries a ceiling of ONE, so one open row refuses the second dispatch (the 9-vs-3 defect,
+# triage-D, at this wall's own numbers).
+REPO=$(make_repo r22c6 yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "max_writers=9 writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_eq "r22c6 max_writers=9 writers=1 with one open row → REFUSED on writers=1" "deny" "$GATE_VERDICT"
+expect_contains "…naming the whole-field reading" "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
 
 # --- a row absent from the fresh live set is not an open one (AC-7; the
 #     anti-vacuity control: the same fixture refuses while the row is live).
@@ -3374,13 +3429,13 @@ expect_eq "…and the extracted span is non-empty (the pin is not vacuously true
 # once, through the one owner both roster walls share — so a body that had simply dropped
 # the marker again (and taken §budget-markers red) fails here too.
 expect_eq "budget_roster_counts consults the closing reading exactly once, through its one owner" "1" \
-  "$(printf '%s\n' "$BUDGET_FN_BODY" | /usr/bin/grep -c 'dp_roster_contracts' || true)"
+  "$(printf '%s\n' "$BUDGET_FN_BODY" | /usr/bin/grep -c 'roster_open_names' || true)"
 BUDGET_FRESH_SPAN="$(printf '%s\n' "$BUDGET_FN_BODY" \
   | /usr/bin/awk '/BEGIN fresh-panel branch/, /END fresh-panel branch/')"
 expect_nonempty "…and the fresh-panel branch is delimited (the span pin is not vacuous)" \
   "$BUDGET_FRESH_SPAN"
 expect_eq "the fresh-panel branch consults no landing marker at all (never while FRESH)" "0" \
-  "$(printf '%s\n' "$BUDGET_FRESH_SPAN" | /usr/bin/grep -cE 'landing-swept|dp_roster_contracts' || true)"
+  "$(printf '%s\n' "$BUDGET_FRESH_SPAN" | /usr/bin/grep -cE 'landing-swept|roster_open_names' || true)"
 
 # THE ANTI-VACUITY ARM: a doctored copy that reads a marker INSIDE the fresh-panel branch
 # must fail the pin above. The doctor inserts one inert statement right after the span's own
@@ -3390,7 +3445,7 @@ GATE_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-swept-mut.XXXXXX"
 GATE_MUT="$GATE_MUT_ROOT/dispatch-preflight.sh"
 awk '
   { print }
-  /---- BEGIN fresh-panel branch/ { print "        : \"$(dp_roster_contracts \"$f\")\" # landing-swept read on the FRESH path (test-only)" }
+  /---- BEGIN fresh-panel branch/ { print "        : \"$(roster_open_names \"$f\")\" # landing-swept read on the FRESH path (test-only)" }
 ' "$GATE" > "$GATE_MUT"
 expect_eq "swept-mut meta: the doctor's re-added line landed (the anchor still matches)" "1" \
   "$(/usr/bin/grep -c 'landing-swept read on the FRESH path' "$GATE_MUT")"
@@ -3398,7 +3453,7 @@ BUDGET_FN_BODY_MUT="$(sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE_MUT
 BUDGET_FRESH_SPAN_MUT="$(printf '%s\n' "$BUDGET_FN_BODY_MUT" \
   | /usr/bin/awk '/BEGIN fresh-panel branch/, /END fresh-panel branch/')"
 expect_contains "…and the doctored fresh branch now DOES read a marker (the pin above discriminates)" \
-  "dp_roster_contracts" "$BUDGET_FRESH_SPAN_MUT"
+  "roster_open_names" "$BUDGET_FRESH_SPAN_MUT"
 rm -rf "$GATE_MUT_ROOT"
 
 # ================= §budget-markers: A LANDED ROW HOLDS NO WRITER SLOT ON A DARK PANEL
@@ -3413,9 +3468,14 @@ rm -rf "$GATE_MUT_ROOT"
 # sweeper's ledger carries the other, for a row the sweep cannot verdict (a row that
 # declared nothing durable stats MET vacuously).
 #
-# THE RULE (D7). A row is open iff `status=intended` and, WHEN THE PANEL IS STALE OR ABSENT,
-# no landing marker and no ack closes its latest contract. A FRESH panel is still the whole
-# truth and no marker is consulted at all — that is (c).
+# THE RULE (D7, narrowed by epic-23 wave-20 T2, D10; ADR-034 d1). A row is open iff
+# `status=intended` and, WHEN THE PANEL IS STALE OR ABSENT, no ack taken after its latest
+# launch closes it — `roster_open_names` (payload/scripts/lib/roster.sh), the one close
+# predicate every reader calls. A landing marker closes NOTHING any more: wave-14 counted it as
+# a second closing truth here, and that was one of the four readings of "is this name closed"
+# that disagreed (triage-C claim 4). The ack is the one terminal state; the Patrol writes it
+# once a fresh panel shows the agent gone. A FRESH panel is still the whole truth and no
+# closing reading is consulted at all — that is (c).
 #
 # EACH ARM MOVES ONE THING. (a) and (b) share the roster, the ceiling and the stale panel and
 # differ only in whether the markers are there; (b) and (c) share the markers and differ only
@@ -3429,8 +3489,12 @@ S22MK_LANDED="m1 m2 m3 m4 m5 m6 m7"
 expect_nonempty "§budget-markers meta: the ack fixture read a ledger schema out of the writer" \
   "$S22_LEDGER_SCHEMA"
 
-# (a) AC-3.1 — nine intended rows, seven carrying the landing marker, a STALE panel, and a
-# ceiling of eight writers: open=2, this dispatch is the third, ALLOWED.
+# (a) REVERSED BY epic-23 wave-20 T2 (REQ-10 AC-10.1, D10). Wave-14 AC-3.1 drove this arm the
+# other way: nine intended rows, seven carrying a landing marker, a STALE panel and a ceiling
+# of eight read open=2 and ALLOWED the dispatch. A marker without an ack is now OPEN to every
+# reader alike — the sweeper and the stop wall already counted it open, so the Patrol filled
+# against a slot this wall had handed out — and the same fixture is REFUSED at open=9. The
+# marker-free close is (d): the same seven rows ACKED.
 REPO=$(make_repo r22mka yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
@@ -3440,13 +3504,15 @@ R22MK_STALE="$SANDBOX/.r22mk-stale.jsonl"
 # shellcheck disable=SC2086
 mk_transcript "$R22MK_STALE" stale $S22MK_NAMES
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
-expect_status "r22mka nine rows, seven landed, STALE panel, writers=8 -> ALLOWED" "0" "$GATE_ST"
-expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
+expect_eq "r22mka nine rows, seven MET-marked and NONE acked, STALE panel, writers=8 -> REFUSED" \
+  "deny" "$GATE_VERDICT"
+expect_contains "…counting all nine open: a marker closes nothing" \
+  "writers: budget=8 open=9 with-this-dispatch=10" "$GATE_VERR"
 expect_absent "…and nothing is said about the panel's staleness" "live-agents:" "$GATE_ERR"
 
-# (b) AC-3.2 — THE CONTROL, and the discriminator for (a): the same nine rows, the same
-# stale panel and the same ceiling, with NO markers written. open=9 and the dispatch is
-# refused, naming the budget. A rule that had simply stopped counting would pass both.
+# (b) AC-3.2 — THE CONTROL: the same nine rows, the same stale panel and the same ceiling,
+# with NO markers written. open=9 and the dispatch is refused, naming the budget — the same
+# answer (a) now gives, which is the point: the markers changed nothing.
 REPO=$(make_repo r22mkb yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
@@ -3516,29 +3582,28 @@ expect_eq "r22mkf a name re-dispatched below its own marker is open again -> REF
 expect_contains "…counting all nine open" \
   "writers: budget=8 open=9 with-this-dispatch=10" "$GATE_VERR"
 
-# (g) THE CLAIM GOES BACK WITH THE SLOT. A landed row's subprocess claim is not spent
-# either: nine rows each claiming a suite, seven landed, a stale panel and a ceiling of two
-# suites — claimed=2, so this dispatch is the third and the SUITE arm allows it. Without the
-# claim half of the subtraction the same fixture refuses on `suites:`.
+# (g) THE CLAIM GOES BACK WITH THE SLOT. A closed row's subprocess claim is not spent
+# either: nine rows each claiming a suite, seven ACKED (the one close, D10), a stale panel and
+# a ceiling of two suites — claimed=2, so this dispatch is the third and the SUITE arm allows
+# it. Without the claim half of the subtraction the same fixture refuses on `suites:`.
 REPO=$(make_repo r22mkg yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=9 suites=3 worktrees=9 test_jobs=4 source=probe"
 for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n" "bash tests/widget.test.sh"; done
-for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_ack "$REPO" "$SID_A" "$_n"; done
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
-expect_status "r22mkg seven landed rows give their suite claims back too -> ALLOWED at suites=3" \
+expect_status "r22mkg seven acked rows give their suite claims back too -> ALLOWED at suites=3" \
   "0" "$GATE_ST"
 expect_absent "…and no suite count is printed" "suites:" "$GATE_ERR"
 
-# (i) REQ-9 AC-9.3 — A CLOSED ROW STOPS COUNTING, AT THE CEILING EXACTLY. The criterion's
-# own numbers rather than (a)'s: EIGHT rows, SIX closed by a landing marker, a ceiling of
-# eight writers. Nothing on a roster ever says `landed` (research R3 row 5), so "closed" is
-# derived — a `landing-swept/v1|state=MET` marker with no live row after it — and the
-# fallback is the reading that has to derive it, because a dark panel is the state a
-# resumed or unpanelled session is in. open=2 and this dispatch is the third: ALLOWED at
-# eight.
+# (i) REQ-9 AC-9.3 AT ITS OWN NUMBERS, SUPERSEDED IN ITS CLOSING FACT by epic-23 wave-20 T2
+# (REQ-10 AC-10.1, D10). EIGHT rows, a ceiling of eight writers. AC-9.3 closed six of them
+# with a landing marker and ALLOWED the ninth; a marker is no close now, so six marked-but-
+# unacked rows still hold their slots and the ninth is REFUSED at open=8. (i.3) below is the
+# criterion's surviving half — six rows ACKED, open=2, ALLOWED — and is the close this wall
+# honours.
 #
-# fails-when: eight rows, six followed by a landing marker, refuse a dispatch at ceiling 8.
+# fails-when (AC-10.1): six rows MET-marked and never acked stop counting.
 S22MK9_NAMES="n1 n2 n3 n4 n5 n6 n7 n8"
 S22MK9_LANDED="n1 n2 n3 n4 n5 n6"
 R22MK9_STALE="$SANDBOX/.r22mk9-stale.jsonl"
@@ -3551,12 +3616,11 @@ s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=probe"
 for _n in $S22MK9_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
 for _n in $S22MK9_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK9_STALE")"
-expect_status "r22mki eight rows, six closed by a landing marker, writers=8 -> ALLOWED" "0" "$GATE_ST"
-expect_absent "r22mki …so no writers count is printed at all" "writers:" "$GATE_ERR"
+expect_eq "r22mki eight rows, six MET-marked and none acked, writers=8 -> REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "r22mki …counting all eight open" "writers: budget=8 open=8 with-this-dispatch=9" "$GATE_VERR"
 
-# (i.2) THE DISCRIMINATOR. The same eight rows and the same ceiling with no markers: open=8,
-# the ninth is over, and the refusal names the count. Without this arm a rule that had simply
-# stopped counting rows would pass (i) too.
+# (i.2) THE CONTROL. The same eight rows and the same ceiling with no markers: open=8, the
+# ninth is over — the same answer (i) gives, because the markers change nothing.
 REPO=$(make_repo r22mki2 yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=probe"
@@ -3587,13 +3651,15 @@ expect_absent "r22mki3 …and no writers count is printed" "writers:" "$GATE_ERR
 #
 # THE FIXTURE NEEDS THE FAILURE MODE, NOT A ROUND NUMBER. F8's own measurement put the
 # threshold at roughly 4,000-6,000 short lines on this machine; six thousand rows, every
-# one landed, is the margin this pin uses — and the first-inserted name is checked first
-# against a `$closed` list that also starts with it, which is the worst case (the biggest
-# possible queued tail behind an early match). Built through the real roster and
-# landing-swept writers (`roster_row_no_plan`, `swept_marker_write`), never hand-rolled —
-# ONE real row and ONE real marker captured with a placeholder name, then mechanically
-# substituted six thousand times each, so the suite pays one production-writer call per
-# shape rather than twelve thousand subprocess spawns for an equivalent loop.
+# one closed, is the margin this pin uses — and the first-inserted name is checked first
+# against a list that also starts with it, which is the worst case (the biggest possible
+# queued tail behind an early match). Built through the real roster writer
+# (`roster_row_no_plan`) and the ack line `s22_ack` writes in the sweeper's own shape — ONE
+# real row and ONE real ack captured with a placeholder name, then mechanically substituted
+# six thousand times each, so the suite pays one writer call per shape rather than twelve
+# thousand subprocess spawns for an equivalent loop. THE CLOSE IS AN ACK since epic-23
+# wave-20 T2 (D10): a landing marker closes nothing, so the fixture that used to close six
+# thousand rows with markers closes them the one way every reader honours.
 section "§budget-markers-pipe: a closed name past the pipe buffer is still recognised"
 
 R22MKH_N=6000
@@ -3608,13 +3674,14 @@ R22MKH_ROW_TMPL="$(roster_row_no_plan status=intended "session=$SID_A" "name=%%N
   agent_id= launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
   "deliverable=/tmp/d-%%NM%%" source=declared "duration=~10 minutes" progress= \
   claims= cadence= absent= waiver= "tool_use_id=t-%%NM%%")"
-R22MKH_MARK_ONE="$SANDBOX/.r22mkh-mark-one.txt"
-swept_marker_write "$R22MKH_MARK_ONE" 2026-09-02T00:00:01Z "$SID_A" "%%NM%%" "" MET
-R22MKH_MARK_TMPL="$(cat "$R22MKH_MARK_ONE" 2>/dev/null)"
+R22MKH_ACK_REPO="$SANDBOX/.r22mkh-ack-one"
+s22_ack "$R22MKH_ACK_REPO" "$SID_A" "%%NM%%"
+R22MKH_MARK_TMPL="$(cat "$R22MKH_ACK_REPO/.bionic/tmp/sweeper-$SID_A.state" 2>/dev/null)"
+R22MKH_LEDGER="$REPO/.bionic/tmp/sweeper-$SID_A.state"
 
 expect_nonempty "§budget-markers-pipe meta: the row template came from the real writer" \
   "$R22MKH_ROW_TMPL"
-expect_nonempty "§budget-markers-pipe meta: the marker template came from the real writer" \
+expect_nonempty "§budget-markers-pipe meta: the ack template came from the ledger's shape" \
   "$R22MKH_MARK_TMPL"
 
 /usr/bin/awk -v tmpl="$R22MKH_ROW_TMPL" -v n="$R22MKH_N" '
@@ -3636,17 +3703,17 @@ expect_nonempty "§budget-markers-pipe meta: the marker template came from the r
       print row
     }
   }
-' >> "$R22MKH_F"
+' >> "$R22MKH_LEDGER"
 
 expect_eq "§budget-markers-pipe meta: the fixture really wrote six thousand roster rows" \
   "$R22MKH_N" "$(/usr/bin/grep -c "^roster-state/${ROSTER_SCHEMA_VERSION}|status=intended|" "$R22MKH_F" 2>/dev/null || echo 0)"
-expect_eq "§budget-markers-pipe meta: …and six thousand landing markers" \
-  "$R22MKH_N" "$(/usr/bin/grep -c "^${SWEPT_SCHEMA}|" "$R22MKH_F" 2>/dev/null || echo 0)"
+expect_eq "§budget-markers-pipe meta: …and six thousand acks" \
+  "$R22MKH_N" "$(/usr/bin/grep -c "^${S22_LEDGER_SCHEMA}|event=ack|" "$R22MKH_LEDGER" 2>/dev/null || echo 0)"
 
 R22MKH_STALE="$SANDBOX/.r22mkh-stale.jsonl"
 mk_transcript "$R22MKH_STALE" stale f00000
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MKH_STALE")"
-expect_status "r22mkh six thousand landed rows on a stale panel, writers=1 -> ALLOWED" \
+expect_status "r22mkh six thousand acked rows on a stale panel, writers=1 -> ALLOWED" \
   "0" "$GATE_ST"
 expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
 
@@ -4644,6 +4711,9 @@ done
 S27L_SUITES="${S27L_SUITES%, }"
 REPO=$(make_repo r27l yes)
 write_attestation "$REPO" "$SID_A"
+# A BUDGETED PLAN, as every live plan is (ADR-035): since epic-23 wave-20 T2 a keyless live
+# plan earns preflight's named-backstop WARN, and this row's "no WARN" is about the suite cap.
+s22_set_budget "$REPO" "writers=99 suites=99 worktrees=99 test_jobs=4 source=probe"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
 Expected artifact: .bionic/docs/record/w27l.md
 Expected duration: 5 minutes
@@ -5441,6 +5511,10 @@ section "§combined — one refusal, every brief-shape fault (wave-12 T2, D3, AC
 # is refused for a fault the first refusal never named.
 
 REPO=$(make_repo rcomb yes)
+# A BUDGETED PLAN (ADR-035). Since epic-23 wave-20 T2 a keyless live plan adds its own
+# `not checked: budget` line to the wire, and this arm's line cap counts the scaffold's walls,
+# not the budget's; a real plan carries the key, so the fixture does too.
+s22_set_budget "$REPO" "writers=99 suites=99 worktrees=99 test_jobs=4 source=probe"
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "combobot")"
 
@@ -6105,9 +6179,11 @@ expect_contains "§a3 …and still offering the hand re-arm, which is A4's remed
 # an OPEN row on THIS session's roster is not available, and the FILL line already names a
 # free one.
 #
-# OPEN IS A ROSTER-AND-LEDGER READING (P-A; wave-19 T4, D1, ADR-034). `intended`,
-# `confirmed` and `identified` are open; a name closed by a `landing-swept/v1|…|state=MET`
-# marker, or by a sweeper-ledger ack later than its last launch, is free again. No transcript, no live set, no tool call: every fixture below leaves the transcript
+# OPEN IS A ROSTER-AND-LEDGER READING (P-A; wave-19 T4, D1, ADR-034; epic-23 wave-20 T2,
+# D10). `intended`, `confirmed` and `identified` are open; a name is free again only when a
+# sweeper-ledger ack LATER than its last launch closes it — `roster_open_names`, the one
+# close predicate every reader calls. A `landing-swept/v1|…|state=MET` marker closes nothing
+# (it did here until wave-20, and nowhere else agreed). No transcript, no live set, no tool call: every fixture below leaves the transcript
 # in the `none` state deliberately, so a gate that reached for an answer would refuse the
 # control rows too.
 
@@ -6161,15 +6237,22 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5-r2" "claude-sonn
 expect_status "t22nfd the name the FILL line would derive instead is ALLOWED" "0" "$GATE_ST"
 expect_absent "…and nothing is said about a name in flight" "in flight" "$GATE_ERR"
 
-# (e) A CLOSED NAME IS FREE AGAIN — the MET marker is what reopens it. Same name, same
-# roster, one marker's difference.
+# (e) A MET MARKER DOES NOT FREE A NAME (epic-23 wave-20 T2, REQ-10 AC-10.1, D10). Until this
+# wave the marker alone freed it here, while the sweeper and the stop wall still counted the
+# row open — the MET-not-acked half of triage-C claim 4. The marker records that a landing was
+# seen; the agent behind it may still be on the panel. REFUSED.
 REPO=$(make_repo t22nfe yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
 s22_roster_row "$REPO" "$SID_A" "T8"
 s22_sweep "$REPO" "$SID_A" "T8"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T8" "claude-sonnet-5" "$T22NF_NONE")"
-expect_status "t22nfe a name closed by a MET marker is free to dispatch again" "0" "$GATE_ST"
+expect_eq "t22nfe a name with a MET marker and no ack is still in flight: REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "…naming the fact" "that name is in flight" "$GATE_ERR"
+# (e2) …and the ack, once written, frees it: the same roster, one ack's difference.
+s22_ack "$REPO" "$SID_A" "T8"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T8" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfe2 the same name, acked after its launch, is free to dispatch again" "0" "$GATE_ST"
 expect_absent "…and no in-flight refusal" "in flight" "$GATE_ERR"
 
 # (f) ANOTHER SESSION'S ROSTER IS NOT THIS ONE'S REGISTER. The row is planted under SID_B;
@@ -6224,9 +6307,11 @@ expect_contains "…naming the fact" "that name is in flight" "$GATE_ERR"
 expect_contains "…and the status it names is the LATEST row's, not the first lineage's" \
   "identified" "$GATE_VERR"
 
-# (i) THE PAIRED CONTROL — the SAME five rows plus the relaunch's OWN marker. The latest
-# contract is closed, so the name is free again. An arm that simply ignored MET markers
-# once a name had ever been open would pass (h) and fail here.
+# (i) THE PAIRED CONTROL — the same shape, with the relaunch closed by an ack taken AFTER
+# it launched (2026-09-02T02:00Z). The latest contract is closed, so the name is free again.
+# An arm that never freed a name once it had been open would pass (h) and fail here. (Until
+# epic-23 wave-20 T2 the close here was the relaunch's own MET marker; a marker closes
+# nothing now, D10, and the marker is kept to show it.)
 REPO=$(make_repo t22nfi yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
@@ -6238,8 +6323,9 @@ roster_row_no_plan status=identified "session=$SID_A" name=T5 agent_id=aT5-33333
   deliverable=/tmp/d-T5 source=declared "duration=~10 minutes" progress= \
   claims= cadence= absent= waiver= tool_use_id=t-T5c >> "$(roster_path "$REPO" "$SID_A")"
 s22_sweep "$REPO" "$SID_A" "T5"
+s22_ack "$REPO" "$SID_A" "T5" 2026-09-02T02:00:00Z
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
-expect_status "t22nfi a relaunch closed by its OWN marker frees the name again" "0" "$GATE_ST"
+expect_status "t22nfi a relaunch closed by an ack after it launched frees the name again" "0" "$GATE_ST"
 expect_absent "…and no in-flight refusal" "in flight" "$GATE_ERR"
 
 # (j) ADOPTION RE-OPENS A NAME THIS SESSION HAD LANDED — deliberate, and nothing drove it
@@ -6269,13 +6355,13 @@ expect_eq "t22nfj an ADOPTED live row re-opens a name this session had landed: R
 expect_contains "…naming the same fact" "that name is in flight" "$GATE_ERR"
 expect_contains "…and the status it names is the adopted row's" "identified" "$GATE_VERR"
 
-# (j2) THE PAIRED CONTROL, and the recovery — here the LANDING MARKER. (Since wave-19 T4 a
-# post-launch ack on the sweeper's ledger frees a name too; (k) drives that half.) Landing
-# the adopted row frees the name, exactly as (e) and (i) free an ordinary one — and without
-# this row (j) is green on a wall that refuses the name forever.
-s22_sweep "$REPO" "$SID_A" "T5"
+# (j2) THE PAIRED CONTROL, and the recovery — the ACK, the one close since epic-23 wave-20 T2
+# (D10; it was the landing marker until then). Acking the adopted row after its launch frees
+# the name, exactly as (e2) and (i) free an ordinary one — and without this row (j) is green
+# on a wall that refuses the name forever.
+s22_ack "$REPO" "$SID_A" "T5" 2026-09-02T02:00:00Z
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
-expect_status "t22nfj2 landing the adopted row frees the name again" "0" "$GATE_ST"
+expect_status "t22nfj2 acking the adopted row frees the name again" "0" "$GATE_ST"
 expect_absent "…and no in-flight refusal is left" "in flight" "$GATE_ERR"
 
 # (k) A POST-LAUNCH ACK FREES THE NAME (wave-19 T4, REQ-1 AC-1.4, D1; ADR-034).
@@ -6925,8 +7011,9 @@ expect_status "32j …and declares units.sh in its own BIONIC_LIB_WANT" "yes" \
 # NO SECOND TABLE PARSER. The matrix spelled this pin as "`split(` on `|` is zero", which
 # was written against a `grep -r payload/` that returns nothing at all (payload/hooks is a
 # SYMLINK and `grep -r` does not follow one — A-T5.4). The hook has carried exactly one
-# split-on-pipe since epic-16: `dp_roster_contracts` reading a roster-state LINE, which is
-# not a markdown table. So the pin is re-spelled (A-T5.3): the count stays at one, that one
+# split-on-pipe since epic-16: a roster-state LINE reader (`dp_roster_contracts` until
+# epic-23 wave-20 T2; since D10 the name-in-flight arm's status label, the close itself being
+# the library's `roster_open_names`), which is not a markdown table. So the pin is re-spelled (A-T5.3): the count stays at one, that one
 # is the roster reader, and nothing in this hook scans for a `## Tasks` heading.
 expect_eq "32j …and carries exactly one awk split on a pipe, the roster-line reader" \
   "1" "$(/usr/bin/grep -cE 'split\([^)]*\|' "$S32_HOOK")"
