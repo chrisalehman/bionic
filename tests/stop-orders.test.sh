@@ -720,6 +720,10 @@ git -C "$R11/.worktrees/acked-gone-lease" commit -qm "acked-gone-lease work" >/d
 R11SLUG=$(printf '%s' "$R11" | sed 's/[^a-zA-Z0-9]/-/g')
 mkdir -p "$R8CFG/projects/$R11SLUG"
 R11TR="$R8CFG/projects/$R11SLUG/$SID.jsonl"
+# THE DELIVERABLE IS WRITTEN (wave-19 T1f, review R2-1). Before T1f this row's n3.md was never
+# written, so the row was UNMET and this block pinned a merge of work nobody landed. A lease
+# ends in a merge only for a landed row (MET or WAIVED); the UNMET shape is R12 below.
+echo landed > "$R11/.bionic/docs/record/n3.md"
 so_roster_row "$R11" "acked-gone-lease" ".bionic/docs/record/n3.md" "" "acked-gone-lease@session-6c85684c"
 ( cd "$R11" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack acked-gone-lease ) >/dev/null 2>&1
 # A fresh panel that lists nobody: the row's agent is gone, not merely stale.
@@ -730,7 +734,7 @@ expect_status "standdown over an acked-and-gone row with a tree exits clean" 0 "
 R11_SD=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
 expect_absent "the acked-and-gone row is kept out of READY (AC-1.3 unchanged by R2)" \
   "acked-gone-lease" "$R11_SD"
-expect_contains "…but its lease still ends, reported under LEASES ENDED" \
+expect_contains "…but its lease still ends, reported under LEASES" \
   "LANDED branch=acked-gone-lease" "$OUT"
 expect_contains "…attributable to its row by name" \
   "(acked-gone-lease)" "$OUT"
@@ -744,5 +748,62 @@ if git -C "$R11" rev-list --count "HEAD..acked-gone-lease" 2>/dev/null | grep -q
 else
   no "…its work is merged into the main checkout"
 fi
+
+# ============================================================
+# AN ABANDONED ROW'S TREE STANDS (wave-19 T1f, review R2-1). T1b made standdown land the tree
+# of every acked-and-gone row; T1e made `stopped` ack an UNMET-and-gone row as `abandoned`.
+# Together, `stopped` then `standdown` merged an abandoned agent's partial work into whatever
+# branch the main checkout sat on — hidden on main/master by the protected-branch refusal,
+# live everywhere else. So this fixture puts the main checkout on a NON-protected branch
+# (`integration`), the one shape where the refusal cannot mask the merge. The verdict, not
+# the ack's reason, decides: UNMET leaves tree and branch in place for a human to salvage.
+# ============================================================
+R12="$(make_repo standdown-abandoned-stands)"
+echo seed > "$R12/README.md"
+git -C "$R12" add README.md >/dev/null 2>&1
+git -C "$R12" commit -qm seed >/dev/null 2>&1
+git -C "$R12" checkout -qb integration
+git -C "$R12" worktree add -q -b half-done "$R12/.worktrees/half-done" >/dev/null 2>&1
+echo partial > "$R12/.worktrees/half-done/partial.txt"
+git -C "$R12/.worktrees/half-done" add -A >/dev/null 2>&1
+git -C "$R12/.worktrees/half-done" commit -qm "half-done WIP" >/dev/null 2>&1
+
+R12SLUG=$(printf '%s' "$R12" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R12SLUG"
+R12TR="$R8CFG/projects/$R12SLUG/$SID.jsonl"
+# The deliverable is never written: the row is UNMET when its agent goes.
+so_roster_row "$R12" "half-done" ".bionic/docs/record/never.md" "" "half-done@session-6c85684c"
+plant_live "$R12TR" fresh
+
+run_orders_cfg "$R12" stopped half-done
+expect_status "stopped closes the UNMET-and-gone row (the T1e precondition)" 0 "$ST"
+expect_contains "…as abandoned" "reason abandoned" "$OUT"
+
+run_orders_cfg "$R12" standdown
+expect_status "standdown over an abandoned row with a tree exits clean" 0 "$ST"
+if [ "$(git -C "$R12" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "integration" ]; then
+  ok "the main checkout is on a non-protected branch (the refusal cannot mask a merge)"
+else
+  no "the main checkout is on a non-protected branch (the refusal cannot mask a merge)"
+fi
+if [ "$(git -C "$R12" rev-list --count "HEAD..half-done" 2>/dev/null)" = "1" ]; then
+  ok "the abandoned branch is NOT merged: it is still ahead of the main checkout"
+else
+  no "the abandoned branch is NOT merged: it is still ahead of the main checkout" \
+    "HEAD..half-done = $(git -C "$R12" rev-list --count "HEAD..half-done" 2>&1)"
+fi
+expect_absent "…and no LANDED line claims it" "LANDED branch=half-done" "$OUT"
+if [ -d "$R12/.worktrees/half-done" ] && [ -f "$R12/.worktrees/half-done/partial.txt" ]; then
+  ok "…its tree stands, the partial work still in it"
+else
+  no "…its tree stands, the partial work still in it"
+fi
+R12_LE=$(printf '%s\n' "$OUT" | sed -n '/LEASES/,$p')
+R12_REAL=$(cd "$R12" && pwd -P)   # the verb names trees under the physical repo path
+expect_contains "the LEASES report names the tree as abandoned and standing" \
+  "abandoned — tree stands: $R12_REAL/.worktrees/half-done (branch half-done); remove or salvage by hand   (half-done)" \
+  "$R12_LE"
+expect_absent "…and the header no longer reads as if nothing touched a tree" \
+  "nothing has landed; there is nobody to stand down." "$OUT"
 
 finish
