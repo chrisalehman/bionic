@@ -103,7 +103,10 @@ TOOL_NAME=$(_jq '.tool_name')
 # payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
 # dispatch that should have been refused can be stopped and re-run — refusing every
 # Agent call on the machine because a file is missing cannot be undone as cheaply.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh"
+# `cmd-class.sh` (wave-20 T4; REQ-7, D7) carries CMD_RUN_NORM_AWK, the one run normaliser the
+# lift's `collapse()` pastes in — a declared run is stored by the rule the writer-side
+# budget arm reads a claim with.
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh cmd-class.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -223,6 +226,12 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # A second split in this hook is the exact defect REQ-1e removed from the evidence gate.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"
+# ONE RUN RULE ON BOTH SIDES OF THE ROW (wave-20 T4; REQ-7, D7). The lift's `collapse()`
+# runs `cmdnorm_run` out of CMD_RUN_NORM_AWK before a declared run is stored, the rule the
+# writer-side budget arm builds its claim with. The library only defines functions and
+# that one variable, so sourcing it costs a parse and nothing else.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/cmd-class.sh"
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
@@ -729,76 +738,56 @@ fi
 # evidence-gate half refuses the COMMIT; this one refuses the writer that would produce it,
 # which is the half that arrives first and the only one that can stop the work being done.
 #
-# WRITER-CLASS ONLY, BY EXACT NAME. `bionic:implementor` and `bionic:senior-implementor`
-# are the two roles that write into the tree. Researchers, test-runners, auditors and
-# critics read it, and a wave routinely dispatches all four BEFORE the plan is approved —
-# the research that informs the plan is exactly that dispatch. Refusing them would refuse
-# the work that produces the approval. The names are matched whole rather than by
-# substring, so a `general-purpose` agent whose brief merely mentions implementing is not
-# caught, and a fully-qualified name is what the harness actually sends (measured: every
-# `subagent_type=` field in this repo's roster state is `bionic:<role>`).
+# THE READ-ONLY SET PASSES; EVERY OTHER TYPE IS A WRITER (wave-20 T7, REQ-9 AC-9.1). Until
+# 1.8.7 this arm named the two bionic writer roles and let everything else through, so a
+# `fork`, a `general-purpose` or a `claude` agent — each of which can write the tree — was
+# admitted on a plan nobody had approved (triage-B D2a, driven). The class is now an
+# allow-list, asked of `role_is_readonly` (payload/scripts/lib/roster.sh): the four bionic
+# read-only roles and the harness's `Explore` and `Plan`. Researchers, test-runners, auditors
+# and critics still dispatch before approval as a matter of course — the research that
+# informs the plan is exactly that dispatch — and an empty or unknown type is a writer.
 #
-# INERT WITHOUT A PLAN, OR BELOW STEP 4. This is a plan-bound arm, the second in this file
-# after the budget ceiling, and it takes the same direction that one does: an engaged
-# session with no plan on disk has no approval to be missing, and a plan still being
-# authored has not been offered for approval yet. A `current:` whose digits cannot be read
-# leaves the arm unmeasured rather than refusing on a question it cannot ask.
+# BEFORE APPROVAL, AT EVERY STEP. This arm used to be inert below Step 4 ("the plan is still
+# being authored"). A writer launched at Step 2 builds against a plan nobody has seen exactly
+# as one at Step 4 does, and the rule the spec states is "before Step-3 approval only these
+# dispatch" (D9). So the arm reads the one fact that decides it — `approved-by:` — and
+# `current:` only to name the step in the refusal. A task-scale plan (`current: T<n>`) binds
+# the same way it always did.
 #
-# AT TASK SCALE (epic-22 K2.5), a plan's `current: T<n>` is read as past Step 3 the same
-# way the evidence gate's `k2_step_num` reads it: there is no "still being authored" state
-# for a task-scale plan, so any `current: T<n>` (n >= 1) binds this arm exactly as
-# `current: 4`+ does on a numbered-step plan.
+# INERT WITHOUT A PLAN. An engaged session with no plan on disk has no approval to be
+# missing; the arm takes the same direction the budget ceiling's does.
 #
 # WHY IT SITS HERE, after the Patrol checkpoint and before the roster: the roster below is
 # a LEDGER, and a launch this gate is about to refuse must not be journalled as though it
 # happened.
 # [WALL: tests/dispatch-preflight.test.sh]
 DP_SUBAGENT=$(_jq '.tool_input.subagent_type')
-case "$DP_SUBAGENT" in
-  bionic:implementor|bionic:senior-implementor)
-    if [ -n "$PLAN" ]; then
-      # `current:` and `approved-by:` out of `## SDLC State`, in one pass each, fence-blind
-      # on purpose: this arm reads two keys, and the gate that owns the section's grammar is
-      # the evidence gate. A key this reader cannot find reads as absent, never as malformed.
-      DP_CURRENT=$(awk '
-        /^## SDLC State/ { st = 1; next }
-        st && /^## / { exit }
-        st && /^[[:space:]]*current[[:space:]]*:/ {
-          sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, "");
-          print; exit }
-      ' "$PLAN" 2>/dev/null) || DP_CURRENT=""
-      # epic-22 K2.5: `current: T<n>` (n >= 1) reads as past Step 3 — same rule as the
-      # evidence gate's k2_step_num. Every other `current:` value is read digit-first,
-      # the leftmost run before any letter (`4`, `8b` -> `8`).
-      case "$DP_CURRENT" in
-        T[0-9]*) DP_STEP=4 ;;
-        *)
-          DP_STEP="${DP_CURRENT%%[!0-9]*}"
-          case "$DP_STEP" in ''|*[!0-9]*) DP_STEP="" ;; esac
-          ;;
-      esac
-      # THE DEPENDENCY, NAMED (AC-8.2). `current:` decides whether this arm applies at all,
-      # and an unreadable one leaves it unmeasured rather than passed. Said on the wire only
-      # when something else refuses — a dispatch that is otherwise clean is allowed, exactly
-      # as it always was, and is told nothing.
-      if [ -z "$DP_STEP" ]; then
-        dp_not_checked "approval" "a plan with a readable current:"
-      fi
-      if [ -n "$DP_STEP" ] && [ "$DP_STEP" -ge 4 ]; then
-        DP_APPROVED=$(awk '
-          /^## SDLC State/ { st = 1; next }
-          st && /^## / { exit }
-          st && /^[[:space:]]*approved-by[[:space:]]*:/ {
-            sub(/^[[:space:]]*approved-by[[:space:]]*:[[:space:]]*/, "");
-            sub(/[[:space:]]+$/, ""); print; exit }
-        ' "$PLAN" 2>/dev/null) || DP_APPROVED=""
-        if [ -z "$DP_APPROVED" ]; then
-          dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \
-            "Role: ${DP_SUBAGENT}
+if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$PLAN" ]; then
+  # `current:` and `approved-by:` out of `## SDLC State`, in one pass each, fence-blind
+  # on purpose: this arm reads two keys, and the gate that owns the section's grammar is
+  # the evidence gate. A key this reader cannot find reads as absent, never as malformed.
+  DP_CURRENT=$(awk '
+    /^## SDLC State/ { st = 1; next }
+    st && /^## / { exit }
+    st && /^[[:space:]]*current[[:space:]]*:/ {
+      sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, "");
+      print; exit }
+  ' "$PLAN" 2>/dev/null) || DP_CURRENT=""
+  DP_APPROVED=$(awk '
+    /^## SDLC State/ { st = 1; next }
+    st && /^## / { exit }
+    st && /^[[:space:]]*approved-by[[:space:]]*:/ {
+      sub(/^[[:space:]]*approved-by[[:space:]]*:[[:space:]]*/, "");
+      sub(/[[:space:]]+$/, ""); print; exit }
+  ' "$PLAN" 2>/dev/null) || DP_APPROVED=""
+  if [ -z "$DP_APPROVED" ]; then
+    dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \
+      "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
 Plan: ${PLAN}
-Step: ${DP_CURRENT} — writers run against an APPROVED plan, and nothing recorded one.
+Step: ${DP_CURRENT:-(unreadable)} — writers run against an APPROVED plan, and nothing recorded one.
 
-A writer is the first act of a plan that cannot be taken back by closing a file.
+A writer is the first act of a plan that cannot be taken back by closing a file. Before
+approval only a read-only role dispatches: ${ROLE_READONLY_SET}.
 
 Fix: put the Step-3 card to the user and wait for the literal word 'approved'; then
      record it under '## SDLC State' in the plan above:
@@ -806,11 +795,48 @@ Fix: put the Step-3 card to the user and wait for the literal word 'approved'; t
      Silence, a question, or a partial reply is never transcribed as approval.
 
 Then retry the dispatch."
-        fi
-      fi
-    fi
-    ;;
-esac
+  fi
+fi
+
+# ======================================= ONE LEVEL OF DELEGATION (wave-20 T7, AC-9.4)
+# (spec D9 and its Writer-origin invariant; design ledger Δ11 as amended by Δ12.)
+#
+# ONLY THE ORCHESTRATOR DISPATCHES WRITERS. A dispatch made from inside a subagent — a
+# payload carrying a top-level `agent_id` (t1-probe-report §3), or `agent_type`, or the
+# guard's channel variable: `is_agent_context` below — may launch a read-only role and
+# nothing else. The read-only roles' own files disallow the Agent tool (agents-src), so the
+# longest chain there is is orchestrator → writer → read-only helper: every writer is
+# rostered, contracted and dispatched by the orchestrator. Before Δ12 nothing bounded the
+# depth, and the consumer wave that reported it ran orchestrator → implementor → fork →
+# dispatch, with the nested rows accreting onto the orchestrator's roster.
+#
+# is_agent_context — defined HERE, above its first caller, because bash resolves a function
+# at the call. Three spellings mark an agent context and any one is enough:
+#   * `.agent_id` — the harness's own marker, present only when the hook fires inside a
+#     subagent (the Bash walls' ARM C and hooks/stop-guard.sh read the same field). The
+#     dependable one: measured on a nested PreToolUse|Agent payload.
+#   * `.agent_type` — also set in a dispatched agent's payload.
+#   * BIONIC_HOOK_CHANNEL=agent-context — the settings-channel guard's marker. No
+#     registration hands it to THIS hook today (hooks.json runs the guard on SubagentStop
+#     only), so it is kept as one spelling of three, never the one the journal relies on.
+is_agent_context() {
+  [ -n "$(_jq '.agent_id')" ] && return 0
+  [ -n "$(_jq '.agent_type')" ] && return 0
+  [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && return 0
+  return 1
+}
+# [WALL: tests/dispatch-preflight.test.sh]
+if is_agent_context && ! role_is_readonly "$DP_SUBAGENT"; then
+  dp_finding "a subagent may launch only read-only roles" "ask the orchestrator" \
+    "Type: ${DP_SUBAGENT:-(none given, so general-purpose)}
+Caller: $(_jq '.agent_id')${BIONIC_HOOK_CHANNEL:+ (channel ${BIONIC_HOOK_CHANNEL})} $(_jq '.agent_type')
+
+Only the orchestrator dispatches writers. A dispatch made from inside an agent may launch
+one of: ${ROLE_READONLY_SET} — and those cannot launch further.
+
+Fix: launch a read-only role for the help you need, or report back and let the
+     orchestrator dispatch the writer on its own roster."
+fi
 
 # ================================================================== THE ROSTER
 # (design D-5 + spec §Design "Roster"; task 4/3 — the LAUNCH half of AC-1.)
@@ -890,17 +916,9 @@ ACK_LEDGER_FILE="$STATE_DIR/sweeper-${BIONIC_SID}.state"
 # refuse before the row is written, and neither is a journalling failure. Everything
 # from `warn()` down is still the fail-open ledger that comment describes.
 #
-# An agent context passes both. Two spellings mark one, and either is enough: the
-# settings-channel guard hands this script BIONIC_HOOK_CHANNEL=agent-context, and the
-# harness puts `agent_type` in a dispatched agent's own payload. The two walls reach
-# this file through different channels and neither spelling is present on both, so
-# reading only one of them would refuse the arrangement this wave is built on — a
-# writer dispatched INTO a tree works there by construction.
-is_agent_context() {
-  [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && return 0
-  [ -n "$(_jq '.agent_type')" ] && return 0
-  return 1
-}
+# An agent context passes both — `is_agent_context`, defined at the delegation arm above,
+# where its three spellings are listed. A writer dispatched INTO a tree works there by
+# construction, and its own read-only helpers are launched from there.
 
 # ---------- the lease wall: an orchestrator dispatching from a writer's tree ----------
 #
@@ -1391,8 +1409,39 @@ LEAD_CHARS="(\"[<\`$(printf '\047')"
 TRAIL_CHARS=")\"]>\`,;:!?.$(printf '\047')"
 QUOTE_CHARS="\`\"$(printf '\047')"
 
-lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omitted
-  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" '
+# ---------- the re-execution cap is the auditor's (wave-20 T4; REQ-7, Δ3, Δ9) ----------
+#
+# THREE IS THE AUDITOR'S NUMBER. Its source is the auditor mandate — "One auditor, one pass,
+# <=3 re-executions" (skills/canonical-sdlc/steps/5.md) — and it used to bind every role's
+# `Re-executes:`, so a test-runner re-running a jest, pytest and go floor split it into two
+# dispatches for a rule written about auditors (triage-B D3). Chris moved it (Δ3): the
+# auditor keeps three; every other role is bounded by SUITES_MAX (Δ9), the count that
+# already bounds `Suites:`, so the two spellings of one statement share one ceiling and no
+# new number exists.
+#
+# THE ROLE IS MATCHED WHOLE, as the auditor arm below matches it: the prefixed name the
+# harness sends and the bare word a hand-written brief uses. The answer is handed to the
+# lift's awk as `-v RUNS_CAP`; the refusal texts below read the same function, so the
+# number a refusal prints is the number the lift applied.
+DP_AUDITOR_RUNS_MAX=3
+DP_SUITES_MAX=200
+dp_runs_cap() {  # <subagent_type> -> how many runs that role's Re-executes: may declare
+  case "${1-}" in
+    bionic:auditor|auditor) printf '%s' "$DP_AUDITOR_RUNS_MAX" ;;
+    *) printf '%s' "$DP_SUITES_MAX" ;;
+  esac
+}
+# dp_runs_cap_words <subagent_type> -> the cap as the refusal texts say it.
+dp_runs_cap_words() {
+  case "${1-}" in
+    bionic:auditor|auditor) printf 'three' ;;
+    *) printf '%s' "$DP_SUITES_MAX" ;;
+  esac
+}
+
+lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines, absent kinds omitted
+  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" \
+    -v RUNS_CAP="$(dp_runs_cap "${2-}")" -v SUITES_CAP="$DP_SUITES_MAX" "$CMD_RUN_NORM_AWK"'
     # <sep> is the regex between the label and its value; the default is the
     # colon every labeled brief field uses. <bol> marks a label that only counts
     # at the START of a line — see the waiver note in BEGIN.
@@ -1468,7 +1517,13 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       return 1
     }
     function ispath(t) { return (pathshaped(t) && !istemplate(t)) }
-    function collapse(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
+    # ONE COLLAPSE, TWO STRENGTHS, BOTH OUT OF payload/scripts/lib/cmd-class.sh (wave-20 T4;
+    # REQ-7, D7). Every caller but one wants whitespace collapsed and nothing else — a
+    # waiver reason, a claim pattern, a deliverable. The one that stores a DECLARED RUN
+    # passes `run` and gets `cmdnorm_run`, the rule the writer-side budget arm builds its
+    # claim with (CMD_RUN_NORM_AWK, pasted in front of this program), so the two ends of
+    # the row are one rule and not two collapses that happen to agree today.
+    function collapse(s, run) { return (run ? cmdnorm_run(s) : cmdnorm_ws(s)) }
     # The claimed PROCESS PATTERN out of a subprocess-claim span. Author-marked
     # first (a backticked or quoted run is unambiguous), then the punctuation the
     # sentence uses to separate the pattern from its output file.
@@ -1857,6 +1912,12 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         # refused at run time as undeclared, 40 minutes after the author could have fixed it.
         if (tok == "" || wholeslot(tok)) continue
         if (tok ~ /[<>]/) { print "re_executes_bad=a redirection: " tok; continue }
+        # STORED THROUGH THE ONE RUN RULE (wave-20 T4; REQ-7, D7). The refusals above run
+        # first and on the text as written — a declaration naming a redirection is still told
+        # so (16ld3, Chris D14) — so what reaches here carries no redirection, no unquoted
+        # pipe, and this is the identity today. It is here so the rule that builds the claim
+        # is, by construction, the rule that built the declaration.
+        tok = collapse(tok, 1)
         if (c < RUNS_MAX) {
           out = (out == "" ? BT tok BT : out " " BT tok BT)
           c++
@@ -1904,15 +1965,16 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # whole roster with room to grow, and hitting IT is loud: see warncap() below, never a
       # silent exit 0.
       FILES_MAX = 200
-      SUITES_MAX = 200
-      # HOW MANY RUNS A `Re-executes:` SPAN DECLARES (D3; REQ-1 AC-1.6). Three, because
-      # three is the cap the auditor mandate already states for re-executions
-      # (skills/canonical-sdlc/steps/5.md: "One auditor, one pass, <=3 re-executions") and a
-      # second number for the same idea is a second answer. Unlike FILES_MAX/SUITES_MAX this
-      # is not a bound on the width of a row field — it is the ceiling of the declaration
-      # itself — so
-      # hitting it is a fact about the brief, and loud: see marked_runs() above.
-      RUNS_MAX = 3
+      SUITES_MAX = SUITES_CAP + 0
+      # HOW MANY RUNS A `Re-executes:` SPAN DECLARES (D3; REQ-1 AC-1.6; wave-20 T4, Δ3, Δ9).
+      # The ROLE decides, on the bash side (`dp_runs_cap`, above this function): three for an
+      # auditor, whose mandate states "<=3 re-executions" (skills/canonical-sdlc/steps/5.md),
+      # and SUITES_MAX for every other role. Unlike FILES_MAX/SUITES_MAX this is not a bound
+      # on the width of a row field — it is the ceiling of the declaration itself — so
+      # hitting it is a fact about the brief, and loud: see marked_runs() above. A caller that
+      # passes no cap gets SUITES_MAX, never an unbounded lift.
+      RUNS_MAX = RUNS_CAP + 0
+      if (RUNS_MAX <= 0) RUNS_MAX = SUITES_MAX
       # THE MARK THE AUTHOR WRITES, NAMED RATHER THAN SPELT. This whole program is one single-quoted
       # shell word, so a backtick literal inside it would be one more character the shell
       # reads before awk does; `QUOTE_CHARS` is assembled above this function with the
@@ -2241,7 +2303,10 @@ agent is gone, frees the name — a landing marker alone does not."
   fi
 fi
 
-LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')")
+# THE ROLE GOES IN WITH THE BRIEF (wave-20 T4; REQ-7, Δ3, Δ9): it decides the run cap.
+LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
+DP_RUNS_CAP=$(dp_runs_cap "$DP_SUBAGENT")
+DP_RUNS_CAP_WORDS=$(dp_runs_cap_words "$DP_SUBAGENT")
 
 field_of() {  # <kind>
   printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
@@ -2521,6 +2586,16 @@ dp_scaffold_marked() {
 # not-checked line. There is deliberately NO blank between the fault block and the
 # scaffold: a separator there would cost a line the budget does not have, and the two
 # blocks are already told apart by the scaffold's own labels.
+#
+# THE PROMPT-ONLY LINE (wave-20 T7, REQ-9 AC-9.3). Every lift above reads
+# `tool_input.prompt` and nothing else, so a prompt that says "read the brief at <path>" is
+# refused for lines that sit, complete, in a file this wall never opens (triage-B D1,
+# driven) — and the scaffold printed below told that author to add lines they had already
+# written. One line beside the scaffold says why, which grows the fixed part of the wire by
+# exactly one (tests/dispatch-preflight.test.sh §combined and §three-arms carry the sum).
+# The single-fault no-deliverable detail carries the same constant, and the shared
+# brief-scaffold block (agents-src/blocks/brief-scaffold.md) says the same in its header.
+DP_PROMPT_ONLY="The wall reads the prompt text only. A brief file the prompt points at is not read, so copy its scaffold lines into the prompt."
 dp_refuse_findings() {
   [ "$DP_FINDING_N" -gt 0 ] || return 0
   if [ "$DP_FINDING_N" -eq 1 ]; then
@@ -2531,6 +2606,7 @@ dp_refuse_findings() {
   # absent — a two-fault brief with nothing unchecked renders exactly one extra line.
   refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
     "${DP_FAULT_LINES}${DP_NOTCHECKED}$(dp_scaffold_marked)
+${DP_PROMPT_ONLY}
 
 See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required."
 }
@@ -2707,6 +2783,7 @@ Fix: declare a durable artifact path with a canonical label —
     Expected artifact: .bionic/docs/record/my-task-notes.md
   Any of these labels lifts one: Expected artifact(s), Deliverable(s), Artifact(s).
   Name a concrete path — the wall never guesses one from prose, and a <slot> is not a name.
+  ${DP_PROMPT_ONLY}
 
 Or waive it — the reason is recorded on the session roster either way:
     Deliverable-waiver: <why this dispatch produces nothing durable>
@@ -2750,7 +2827,7 @@ INSIDE quotes is an ordinary argument and is admitted, so a regex alternation ne
 rewriting. An unfilled \`<slot>\` on its own is guidance and is ignored, but a bracket
 anywhere else in the run is read as redirection.
 
-Fix: mark each run with backticks, on a line of its own, at most three —
+Fix: mark each run with backticks, on a line of its own, at most ${DP_RUNS_CAP_WORDS} —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
 
 Then retry the dispatch."
@@ -2765,19 +2842,22 @@ fi
 # never told at dispatch. `RUNS_MAX` (3) is unchanged; a brief within the cap never reaches
 # this arm.
 if [ -n "$C_RUNS_DROPPED" ]; then
-  _dp_detail="The Re-executes: span named more runs than the 3-run cap admits, and this one
-was dropped:
+  _dp_detail="The Re-executes: span named more runs than the ${DP_RUNS_CAP}-run cap admits for
+this role (${DP_SUBAGENT:-unnamed}), and this one was dropped:
     ${C_RUNS_DROPPED}
 
 Every declared run goes on the roster row, and the writer-side budget arm compares the
 agent's own command against exactly that set — a run dropped here is a command that would
 be refused there 40 minutes later, for running exactly what its own brief had named.
 
-Fix: mark at most three runs with backticks, one line —
+The cap of three is the auditor's, from its mandate's \"<=3 re-executions\"; every other
+role may declare as many runs as a Suites: line may name suites (${DP_SUITES_MAX}).
+
+Fix: mark at most ${DP_RUNS_CAP_WORDS} runs with backticks, one line —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`, \`go test ./...\`
 
 Then retry the dispatch."
-  dp_finding "Re-executes: line exceeds the 3-run cap" "declare at most three runs" "$_dp_detail"
+  dp_finding "Re-executes: line exceeds the ${DP_RUNS_CAP}-run cap" "declare at most ${DP_RUNS_CAP_WORDS} runs" "$_dp_detail"
 fi
 
 if [ -n "$C_SUITES_BAD" ]; then
@@ -2895,7 +2975,7 @@ Where no impact command is configured, name the closed set yourself —
     Suites: tests/one.test.sh, tests/two.test.sh
 
 Where the tests are not shell suites, name the commands themselves instead — each marked
-with backticks, at most three —
+with backticks, at most ${DP_RUNS_CAP_WORDS} —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
 
 Or waive the budget for a brief that runs no suite at all —
@@ -3359,11 +3439,15 @@ dp_refuse_findings
 # confirms, nobody lands, and nobody was ever going to check — a teammate's
 # deliverable subsumes its subtree.
 #
-# So the channel, not the payload, decides: the guard sets this variable and
-# nothing else does, which keeps the reading local to the one caller that knows
-# which channel it is. Silent, and on the pass side — a dispatch that got this far
-# has been allowed, and this line only declines to write it down.
-if [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ]; then
+# THE PAYLOAD DECIDES (wave-20 T7, AC-9.2). This skip used to key on the guard's
+# BIONIC_HOOK_CHANNEL alone — and hooks.json registers the guard on SubagentStop only, so
+# no dispatch ever reached here carrying it: every nested launch was journalled onto the
+# orchestrator's roster as a contract it owed (triage-B D2c, driven). It asks
+# `is_agent_context` now, whose first spelling is the payload's own top-level `agent_id`.
+# Silent, and on the pass side — a dispatch that got this far has been allowed (and, from
+# inside an agent, is a read-only role by the delegation arm), and this line only declines
+# to write it down.
+if is_agent_context; then
   exit 0
 fi
 
