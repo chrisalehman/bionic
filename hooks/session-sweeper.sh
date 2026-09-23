@@ -171,7 +171,7 @@ esac
 # payload/scripts/lib/loader.sh. FAIL OPEN: nothing this script does is irreversible,
 # and a reporting verb that refused because a file was missing would take the
 # diagnosis down with the thing being diagnosed.
-BIONIC_LIB_WANT="roots.sh root.sh session.sh"
+BIONIC_LIB_WANT="roots.sh root.sh roster.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -270,6 +270,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "session-sweeper"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roots.sh"
 . "$BIONIC_LIB/root.sh"
+# THE ONE CLOSE PREDICATE (epic-23 wave-20 T2, D10): `roster_open_names`, which the `acked=`
+# column asks so it answers what dispatch preflight, the stop wall and the tick's adopt answer.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/roster.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
 
@@ -509,13 +513,24 @@ ledger_count() {  # <pattern> -> a single integer, on stdout
   printf '%s' "$n"
 }
 
-# The ledger's answer: which rows the orchestrator has closed. Re-read on every
-# invocation rather than cached anywhere, because the file is the only durable copy —
-# an ack taken in a session that has since died is still in force in its successor.
-ACKED_NAMES=""; ACKED_COUNT=0
+# The ledger's answer: which names the orchestrator has acked, and — through the one close
+# predicate — which roster rows those acks actually close. Re-read on every invocation rather
+# than cached anywhere, because the file is the only durable copy — an ack taken in a session
+# that has since died is still in force in its successor.
+#
+# AN ACK CLOSES THE ROW IT POSTDATES, NOT THE NAME FOREVER (epic-23 wave-20 T2, D10).
+# `ACKED_NAMES` is the ledger's fact — every name an ack was ever journalled for, which is
+# what the ack verb counts and reports. `ACKED_OPEN` is `roster_open_names`
+# (payload/scripts/lib/roster.sh) over this session's roster and this ledger: the names
+# still under contract, because no ack was taken after their latest live launch. A row is
+# acked when its name was acked AND it is not still open — so a name acked and then
+# dispatched again reads `acked=no` here, as it reads open to dispatch preflight, the stop
+# wall's occupancy and the tick's `adopt_fold`, which all ask the same predicate.
+ACKED_NAMES=""; ACKED_COUNT=0; ACKED_OPEN=""
 read_acked() {
-  ACKED_NAMES=""; ACKED_COUNT=0
+  ACKED_NAMES=""; ACKED_COUNT=0; ACKED_OPEN=""
   [ -f "$LEDGER_FILE" ] || return 0
+  [ -L "$ROSTER_FILE" ] || ACKED_OPEN="$(roster_open_names "$ROSTER_FILE" "$LEDGER_FILE" "$SESSION_ID")"
   local line ev n
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in "$LEDGER_SCHEMA|"*) : ;; *) continue ;; esac
@@ -529,7 +544,7 @@ read_acked() {
     # one than an adversary. Names are cleaned at write time, so no entry here can carry a
     # `|` or a newline to forge a field.
     [ -n "$n" ] || continue
-    row_acked "$n" && continue
+    [ -n "$ACKED_NAMES" ] && grep -qxF -- "$n" <<< "$ACKED_NAMES" && continue
     ACKED_NAMES="${ACKED_NAMES}${n}
 "
     ACKED_COUNT=$((ACKED_COUNT + 1))
@@ -537,6 +552,8 @@ read_acked() {
 }
 
 # Whole-line match, never a substring: `w4-s1` must not be closed by an ack of `w4-s10`.
+# Acked AND not still open (read_acked's header): an ack older than the row's latest launch
+# closes nothing.
 row_acked() {  # <row name>
   # BOTH operands are guarded, and the second guard is the here-string's (T37). `<<<`
   # appends a newline to its word, so a ledger ending in one presents a trailing EMPTY
@@ -544,7 +561,9 @@ row_acked() {  # <row name>
   # emitted no such line and answered 1. An empty row name is not an acked row.
   [ -n "$ACKED_NAMES" ] || return 1
   [ -n "$1" ] || return 1
-  grep -qxF -- "$1" <<< "$ACKED_NAMES"
+  grep -qxF -- "$1" <<< "$ACKED_NAMES" || return 1
+  [ -n "$ACKED_OPEN" ] || return 0
+  ! grep -qxF -- "$1" <<< "$ACKED_OPEN"
 }
 
 # Every name the roster declares, one per line. Read for the ack verb's "is this a row I
@@ -1054,8 +1073,8 @@ EOF
     # would turn every ack into a refusal precisely when the operator most needs the row
     # quieted. A typo's whole blast radius is one inert ledger line and this warning.
     if [ -n "$_unknown" ]; then
-      say "no roster row carries: $_unknown — recorded anyway; each is exempt the moment a"
-      say "row of that name appears. Check the spelling against: $LEDGER_FILE"
+      say "no roster row carries: $_unknown — recorded anyway; each closes a row of that name"
+      say "launched before this ack, never one launched after it. Check the spelling against: $LEDGER_FILE"
     fi
     say "$ACKED_COUNT row(s) acked for this session; an acked row is closed for every reader"
     exit 0

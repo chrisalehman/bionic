@@ -1917,12 +1917,11 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 FILL_READY=""
 FILL_NO_BUDGET=0
 if [ -n "$PLAN" ] && fill_ledger_live "$PLAN"; then
-  FILL_CEILING="$(plan_frontmatter_get "$PLAN" parallel-budget 2>/dev/null)"
-  case "$FILL_CEILING" in
-    *writers=*) FILL_CEILING="${FILL_CEILING#*writers=}"; FILL_CEILING="${FILL_CEILING%% *}" ;;
-    *) FILL_CEILING="" ;;
-  esac
-  case "$FILL_CEILING" in ''|*[!0-9]*) FILL_CEILING="" ;; esac
+  # THE ONE BUDGET READER (epic-23 wave-20 T2, D10): run.sh's strict line and whole-field
+  # integer, the reading the tick, dispatch preflight and the governing-skill hook take too.
+  # Until this wave the stop wall read the key leniently and cut `writers=` at its first
+  # substring, so `max_writers=9 writers=3` sized this wall at 9 and every other reader at 3.
+  FILL_CEILING="$(budget_field "$(plan_budget_line "$PLAN")" writers)"
   FILL_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
   FILL_ACKS="$BIONIC_ROOT/.bionic/tmp/sweeper-${BIONIC_SID}.state"
   if [ -z "$FILL_CEILING" ]; then
@@ -1938,49 +1937,17 @@ if [ -n "$PLAN" ] && fill_ledger_live "$PLAN"; then
     FILL_RUNG="$(pressure_level "$FILL_CEILING" 2>/dev/null)" || FILL_RUNG=""
     case "$FILL_RUNG" in ''|*[!0-9]*) FILL_RUNG="" ;; esac
     FILL_WIDTH="${FILL_RUNG:-$FILL_CEILING}"
-    # THE OCCUPANCY, ONE PASS (the docblock above). The ack ledger is read first, then the
-    # roster; either may be absent (no dispatch yet, no ack yet), and only files that exist
-    # are handed to awk, so an absent one is an empty set rather than an error.
-    set --
-    [ -f "$FILL_ACKS" ] && set -- "$@" "$FILL_ACKS"
-    [ -f "$FILL_ROSTER" ] && set -- "$@" "$FILL_ROSTER"
-    FILL_OPEN=0
-    if [ "$#" -gt 0 ]; then
-      FILL_OPEN="$(awk -v rpfx="roster-state/${ROSTER_VERSION}|" -v lpfx="sweeper-ledger/v1|" \
-                       -v lfile="$FILL_ACKS" -v sid="$BIONIC_SID" '
-        FILENAME == lfile {
-          if (index($0, lpfx) != 1) next
-          ev = ""; an = ""
-          nf = split($0, f, "|")
-          for (i = 1; i <= nf; i++) {
-            if (ev == "" && substr(f[i], 1, 6) == "event=") ev = substr(f[i], 7)
-            if (an == "" && substr(f[i], 1, 5) == "name=")  an = substr(f[i], 6)
-          }
-          # An empty name closes nothing: read loosely it would close the whole roster.
-          if (ev == "ack" && an != "") acked[an] = 1
-          next
-        }
-        index($0, rpfx) != 1 { next }
-        {
-          name = ""; rsession = ""
-          nf = split($0, f, "|")
-          for (i = 1; i <= nf; i++) {
-            if (name == ""     && substr(f[i], 1, 5) == "name=")    name     = substr(f[i], 6)
-            if (rsession == "" && substr(f[i], 1, 8) == "session=") rsession = substr(f[i], 9)
-          }
-          if (rsession != "" && rsession != sid) next
-          if (name == "") name = "(unnamed)"
-          gsub(/\t/, " ", name)
-          if (!(name in seen)) { seen[name] = 1; order[++n] = name }
-        }
-        END {
-          c = 0
-          for (i = 1; i <= n; i++) if (!(order[i] in acked)) c++
-          print c + 0
-        }
-      ' "$@" 2>/dev/null)" || FILL_OPEN=0
-      case "$FILL_OPEN" in ''|*[!0-9]*) FILL_OPEN=0 ;; esac
-    fi
+    # THE OCCUPANCY IS THE ONE CLOSE PREDICATE'S OPEN SET (epic-23 wave-20 T2, D10):
+    # `roster_open_names` (payload/scripts/lib/roster.sh), this session's rows only, counted.
+    # It closes a name on an ack taken after the name's latest live launch and on nothing else
+    # — the reading dispatch preflight, the sweeper's `acked=` and the tick's `adopt_fold`
+    # take. Until this wave this pass closed a name on ANY ack of it, ever, so a name acked and
+    # dispatched again freed a slot here that preflight still counted held; and it counted
+    # every roster name whatever its status, where a name whose rows are none of them live has
+    # no contract to occupy a slot with. An absent roster or ledger is an empty set, not an
+    # error: no dispatch yet, or no ack yet.
+    FILL_OPEN="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | awk 'END { print NR + 0 }')"
+    case "$FILL_OPEN" in ''|*[!0-9]*) FILL_OPEN=0 ;; esac
     # ONE LINE, SPACE-SEPARATED, because that is the shape the fold below already reads the
     # tick's own ids in. A trailing separator opens an empty field, which the id filter in
     # that fold drops on its own. Joined by parameter expansion, not a `tr` process: the

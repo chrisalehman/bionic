@@ -1218,28 +1218,11 @@ space_field() {  # <record> <key> -> value on stdout, empty if absent
   printf '%s' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -1
 }
 
-# The plan header's `parallel-budget:` value, or empty.
-#
-# THE LEADING FRONTMATTER BLOCK ONLY, byte-for-byte the read hooks/dispatch-preflight.sh's
-# budget arm takes: a `parallel-budget:` inside the plan BODY is prose — this wave's own
-# plan quotes the header in a task description — and a reader that took a quotation for
-# configuration would fill against a number nobody set.
-plan_budget_line() {  # <plan> -> the value after `parallel-budget:`, or empty
-  awk '
-    NR == 1 && $0 != "---" { exit }
-    NR == 1 { next }
-    $0 == "---" { exit }
-    /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
-  ' "$1" 2>/dev/null
-}
-
-# One integer field out of that value. NOT AN INTEGER IS ABSENT: an arm this cannot measure
-# goes unmeasured and says so, exactly as the dispatch wall's own budget_field does.
-budget_int() {  # <budget line> <key> -> a non-negative integer, or empty
-  local v
-  v="$(space_field "$1" "$2")"
-  case "${v:-}" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$v" ;; esac
-}
+# THE PLAN HEADER'S BUDGET IS READ BY run.sh (epic-23 wave-20 T2, D10). `plan_budget_line`
+# (the strict `parallel-budget:` line of the leading frontmatter) and `budget_field` (one
+# whole field, as a decimal integer) moved there from this file, so the tick, the stop wall,
+# dispatch preflight and the governing-skill hook size a run from one reading. NOT AN INTEGER
+# IS ABSENT: an arm this cannot measure goes unmeasured and says so.
 
 # THE TASK TABLE IS NOT READ HERE ANY MORE (REQ-1e, spec §2 D3). `slice_table` and
 # `slice_ready` — a header-keyed `id`/`deps`/`status` parse and the readiness pass over it
@@ -1268,8 +1251,8 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
   SCHED_BUDGET=""
   [ -n "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ] \
     && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
-  SCHED_WRITERS="$(budget_int "$SCHED_BUDGET" writers)"
-  SCHED_JOBS="$(budget_int "$SCHED_BUDGET" test_jobs)"
+  SCHED_WRITERS="$(budget_field "$SCHED_BUDGET" writers)"
+  SCHED_JOBS="$(budget_field "$SCHED_BUDGET" test_jobs)"
 }
 
 # ── THE APPROVAL GATE (epic-21 T4, AC-5). A printed FILL is a dispatch instruction — the
@@ -1582,12 +1565,15 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 #   with its cure rather than skipped, because a silent skip is how a predecessor's agent
 #   becomes invisible twice.
 #
-#   A ROW IS CLOSED BY A LANDED MARKER OR BY AN ACK, and by nothing else. `landing-swept/v1`
-#   with `state=MET` is hooks/landing-gate.sh saying the contract landed; the ack ledger is
-#   the orchestrator saying so by hand, and the sweeper's own ledger comment already binds
-#   it across sessions ("an ack taken in a session that has since died is still in force in
-#   its successor"). A `landing-swept` marker reading UNMET closes NOTHING here: an answered
-#   failure is exactly the row a resumed session most needs to see.
+#   A ROW IS CLOSED BY AN ACK TAKEN AFTER ITS LATEST LAUNCH, and by nothing else — the one
+#   close predicate, `roster_open_names` (payload/scripts/lib/roster.sh; epic-23 wave-20 T2,
+#   D10; ADR-034 d1), which dispatch preflight, the sweeper's `acked=` and the stop wall's
+#   occupancy ask too. The ack ledger binds across sessions ("an ack taken in a session that
+#   has since died is still in force in its successor"). A `landing-swept/v1` marker closes
+#   NOTHING here, MET or not: until wave-20 a MET marker did, so an agent swept MET and never
+#   acked — still alive on the panel — came out of a `/clear` with no row on the new roster,
+#   and no stop could reach it (memory adopt-skips-swept-rows). An ack older than a
+#   relaunch closes nothing either: the relaunched agent is the one to adopt.
 #
 # THE ORIGIN IS CARRIED OUT WITH THE ROW, and it is what the stop address is built from
 # (T3 FINDING 1). `adopted_from=` wins over `session=` when the row has one: a row that was
@@ -1600,7 +1586,11 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
 adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes
-  awk -v ackfile="$2" '
+  # THE OPEN SET IS ASKED ONCE, of the one predicate, over the predecessor's roster as it
+  # stands — no session filter, because every row on it carries the predecessor's own id.
+  # Handed to awk through the environment rather than `-v`, which would read a backslash in
+  # a name as an escape.
+  AF_OPEN="$(roster_open_names "$1" "$2")" awk '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
       for (i = 1; i <= n; i++) {
@@ -1612,15 +1602,8 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       return ""
     }
     BEGIN {
-      if (ackfile != "") {
-        while ((getline l < ackfile) > 0) {
-          if (l !~ /^sweeper-ledger\/v1\|/) continue
-          if (kv(l, "event") != "ack") continue
-          an = kv(l, "name")
-          if (an != "") acked[an] = 1
-        }
-        close(ackfile)
-      }
+      no = split(ENVIRON["AF_OPEN"], ol, "\n")
+      for (i = 1; i <= no; i++) if (ol[i] != "") isopen[ol[i]] = 1
     }
     /^roster-state\/v1\|/ {
       n = kv($0, "name"); if (n == "") next
@@ -1669,16 +1652,10 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       }
       next
     }
-    /^landing-swept\/v1\|/ {
-      n = kv($0, "name")
-      if (n != "" && kv($0, "state") == "MET") met[n] = 1
-      next
-    }
     END {
       for (i = 1; i <= cnt; i++) {
         n = order[i]
-        if (n in met) continue
-        if (n in acked) continue
+        if (!(n in isopen)) continue
         printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
                launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
                ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n], \
