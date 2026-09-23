@@ -103,7 +103,10 @@ TOOL_NAME=$(_jq '.tool_name')
 # payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
 # dispatch that should have been refused can be stopped and re-run — refusing every
 # Agent call on the machine because a file is missing cannot be undone as cheaply.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh"
+# `cmd-class.sh` (wave-20 T4; REQ-7, D7) carries CMD_RUN_NORM_AWK, the one run normaliser the
+# lift's `collapse()` pastes in — a declared run is stored by the rule the writer-side
+# budget arm reads a claim with.
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh cmd-class.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -223,6 +226,12 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # A second split in this hook is the exact defect REQ-1e removed from the evidence gate.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"
+# ONE RUN RULE ON BOTH SIDES OF THE ROW (wave-20 T4; REQ-7, D7). The lift's `collapse()`
+# runs `cmdnorm_run` out of CMD_RUN_NORM_AWK before a declared run is stored, the rule the
+# writer-side budget arm builds its claim with. The library only defines functions and
+# that one variable, so sourcing it costs a parse and nothing else.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/cmd-class.sh"
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
@@ -1450,8 +1459,39 @@ LEAD_CHARS="(\"[<\`$(printf '\047')"
 TRAIL_CHARS=")\"]>\`,;:!?.$(printf '\047')"
 QUOTE_CHARS="\`\"$(printf '\047')"
 
-lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omitted
-  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" '
+# ---------- the re-execution cap is the auditor's (wave-20 T4; REQ-7, Δ3, Δ9) ----------
+#
+# THREE IS THE AUDITOR'S NUMBER. Its source is the auditor mandate — "One auditor, one pass,
+# <=3 re-executions" (skills/canonical-sdlc/steps/5.md) — and it used to bind every role's
+# `Re-executes:`, so a test-runner re-running a jest, pytest and go floor split it into two
+# dispatches for a rule written about auditors (triage-B D3). Chris moved it (Δ3): the
+# auditor keeps three; every other role is bounded by SUITES_MAX (Δ9), the count that
+# already bounds `Suites:`, so the two spellings of one statement share one ceiling and no
+# new number exists.
+#
+# THE ROLE IS MATCHED WHOLE, as the auditor arm below matches it: the prefixed name the
+# harness sends and the bare word a hand-written brief uses. The answer is handed to the
+# lift's awk as `-v RUNS_CAP`; the refusal texts below read the same function, so the
+# number a refusal prints is the number the lift applied.
+DP_AUDITOR_RUNS_MAX=3
+DP_SUITES_MAX=200
+dp_runs_cap() {  # <subagent_type> -> how many runs that role's Re-executes: may declare
+  case "${1-}" in
+    bionic:auditor|auditor) printf '%s' "$DP_AUDITOR_RUNS_MAX" ;;
+    *) printf '%s' "$DP_SUITES_MAX" ;;
+  esac
+}
+# dp_runs_cap_words <subagent_type> -> the cap as the refusal texts say it.
+dp_runs_cap_words() {
+  case "${1-}" in
+    bionic:auditor|auditor) printf 'three' ;;
+    *) printf '%s' "$DP_SUITES_MAX" ;;
+  esac
+}
+
+lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines, absent kinds omitted
+  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" \
+    -v RUNS_CAP="$(dp_runs_cap "${2-}")" -v SUITES_CAP="$DP_SUITES_MAX" "$CMD_RUN_NORM_AWK"'
     # <sep> is the regex between the label and its value; the default is the
     # colon every labeled brief field uses. <bol> marks a label that only counts
     # at the START of a line — see the waiver note in BEGIN.
@@ -1527,7 +1567,13 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       return 1
     }
     function ispath(t) { return (pathshaped(t) && !istemplate(t)) }
-    function collapse(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
+    # ONE COLLAPSE, TWO STRENGTHS, BOTH OUT OF payload/scripts/lib/cmd-class.sh (wave-20 T4;
+    # REQ-7, D7). Every caller but one wants whitespace collapsed and nothing else — a
+    # waiver reason, a claim pattern, a deliverable. The one that stores a DECLARED RUN
+    # passes `run` and gets `cmdnorm_run`, the rule the writer-side budget arm builds its
+    # claim with (CMD_RUN_NORM_AWK, pasted in front of this program), so the two ends of
+    # the row are one rule and not two collapses that happen to agree today.
+    function collapse(s, run) { return (run ? cmdnorm_run(s) : cmdnorm_ws(s)) }
     # The claimed PROCESS PATTERN out of a subprocess-claim span. Author-marked
     # first (a backticked or quoted run is unambiguous), then the punctuation the
     # sentence uses to separate the pattern from its output file.
@@ -1916,6 +1962,12 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         # refused at run time as undeclared, 40 minutes after the author could have fixed it.
         if (tok == "" || wholeslot(tok)) continue
         if (tok ~ /[<>]/) { print "re_executes_bad=a redirection: " tok; continue }
+        # STORED THROUGH THE ONE RUN RULE (wave-20 T4; REQ-7, D7). The refusals above run
+        # first and on the text as written — a declaration naming a redirection is still told
+        # so (16ld3, Chris D14) — so what reaches here carries no redirection, no unquoted
+        # pipe, and this is the identity today. It is here so the rule that builds the claim
+        # is, by construction, the rule that built the declaration.
+        tok = collapse(tok, 1)
         if (c < RUNS_MAX) {
           out = (out == "" ? BT tok BT : out " " BT tok BT)
           c++
@@ -1963,15 +2015,16 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # whole roster with room to grow, and hitting IT is loud: see warncap() below, never a
       # silent exit 0.
       FILES_MAX = 200
-      SUITES_MAX = 200
-      # HOW MANY RUNS A `Re-executes:` SPAN DECLARES (D3; REQ-1 AC-1.6). Three, because
-      # three is the cap the auditor mandate already states for re-executions
-      # (skills/canonical-sdlc/steps/5.md: "One auditor, one pass, <=3 re-executions") and a
-      # second number for the same idea is a second answer. Unlike FILES_MAX/SUITES_MAX this
-      # is not a bound on the width of a row field — it is the ceiling of the declaration
-      # itself — so
-      # hitting it is a fact about the brief, and loud: see marked_runs() above.
-      RUNS_MAX = 3
+      SUITES_MAX = SUITES_CAP + 0
+      # HOW MANY RUNS A `Re-executes:` SPAN DECLARES (D3; REQ-1 AC-1.6; wave-20 T4, Δ3, Δ9).
+      # The ROLE decides, on the bash side (`dp_runs_cap`, above this function): three for an
+      # auditor, whose mandate states "<=3 re-executions" (skills/canonical-sdlc/steps/5.md),
+      # and SUITES_MAX for every other role. Unlike FILES_MAX/SUITES_MAX this is not a bound
+      # on the width of a row field — it is the ceiling of the declaration itself — so
+      # hitting it is a fact about the brief, and loud: see marked_runs() above. A caller that
+      # passes no cap gets SUITES_MAX, never an unbounded lift.
+      RUNS_MAX = RUNS_CAP + 0
+      if (RUNS_MAX <= 0) RUNS_MAX = SUITES_MAX
       # THE MARK THE AUTHOR WRITES, NAMED RATHER THAN SPELT. This whole program is one single-quoted
       # shell word, so a backtick literal inside it would be one more character the shell
       # reads before awk does; `QUOTE_CHARS` is assembled above this function with the
@@ -2288,7 +2341,10 @@ once the agent is gone, frees the name."
   fi
 fi
 
-LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')")
+# THE ROLE GOES IN WITH THE BRIEF (wave-20 T4; REQ-7, Δ3, Δ9): it decides the run cap.
+LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
+DP_RUNS_CAP=$(dp_runs_cap "$DP_SUBAGENT")
+DP_RUNS_CAP_WORDS=$(dp_runs_cap_words "$DP_SUBAGENT")
 
 field_of() {  # <kind>
   printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
@@ -2797,7 +2853,7 @@ INSIDE quotes is an ordinary argument and is admitted, so a regex alternation ne
 rewriting. An unfilled \`<slot>\` on its own is guidance and is ignored, but a bracket
 anywhere else in the run is read as redirection.
 
-Fix: mark each run with backticks, on a line of its own, at most three —
+Fix: mark each run with backticks, on a line of its own, at most ${DP_RUNS_CAP_WORDS} —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
 
 Then retry the dispatch."
@@ -2812,19 +2868,22 @@ fi
 # never told at dispatch. `RUNS_MAX` (3) is unchanged; a brief within the cap never reaches
 # this arm.
 if [ -n "$C_RUNS_DROPPED" ]; then
-  _dp_detail="The Re-executes: span named more runs than the 3-run cap admits, and this one
-was dropped:
+  _dp_detail="The Re-executes: span named more runs than the ${DP_RUNS_CAP}-run cap admits for
+this role (${DP_SUBAGENT:-unnamed}), and this one was dropped:
     ${C_RUNS_DROPPED}
 
 Every declared run goes on the roster row, and the writer-side budget arm compares the
 agent's own command against exactly that set — a run dropped here is a command that would
 be refused there 40 minutes later, for running exactly what its own brief had named.
 
-Fix: mark at most three runs with backticks, one line —
+The cap of three is the auditor's, from its mandate's \"<=3 re-executions\"; every other
+role may declare as many runs as a Suites: line may name suites (${DP_SUITES_MAX}).
+
+Fix: mark at most ${DP_RUNS_CAP_WORDS} runs with backticks, one line —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`, \`go test ./...\`
 
 Then retry the dispatch."
-  dp_finding "Re-executes: line exceeds the 3-run cap" "declare at most three runs" "$_dp_detail"
+  dp_finding "Re-executes: line exceeds the ${DP_RUNS_CAP}-run cap" "declare at most ${DP_RUNS_CAP_WORDS} runs" "$_dp_detail"
 fi
 
 if [ -n "$C_SUITES_BAD" ]; then
@@ -2942,7 +3001,7 @@ Where no impact command is configured, name the closed set yourself —
     Suites: tests/one.test.sh, tests/two.test.sh
 
 Where the tests are not shell suites, name the commands themselves instead — each marked
-with backticks, at most three —
+with backticks, at most ${DP_RUNS_CAP_WORDS} —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
 
 Or waive the budget for a brief that runs no suite at all —
