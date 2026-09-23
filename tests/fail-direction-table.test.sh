@@ -86,7 +86,8 @@ write_plan() {  # <path> <current-line>
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
     printf 'intent: build\nrigor: audited\nscale: wave\n---\n\n# Fixture plan\n\n'
-    printf '## SDLC State\n\nintegration-branch: main\n%s\n\n- Step 4: evidence\n' "$2"
+    # APPROVED (wave-20 T7, AC-9.1): the dispatch wall refuses a writer on an unapproved plan.
+    printf '## SDLC State\n\nintegration-branch: main\n%s\napproved-by: dana 2026-09-07T19:05Z "approved"\n\n- Step 4: evidence\n' "$2"
   } > "$1"
 }
 

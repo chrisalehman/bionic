@@ -785,6 +785,8 @@ mkdir -p "$R8/.bionic/docs/plans/epic-99"
   printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
   printf 'intent: build\nrigor: audited\nscale: wave\n'
   printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
+  # APPROVED (wave-20 T7, AC-9.1): the dispatch wall refuses a writer on an unapproved plan.
+  printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n'
 } > "$R8/.bionic/docs/plans/epic-99/wave-01.md"
 printf 'version=v1\nsession_id=%s\n' "$OWN8" > "$R8/.bionic/tmp/preflight-${OWN8}.state"
 # …and this session's Patrol stamp, the third writer precondition since epic-17 W5 4/4: the
