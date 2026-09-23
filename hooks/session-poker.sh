@@ -3558,6 +3558,18 @@ EOF
     # AFTER this walk rather than inside it: one transcript resolution per tick, not one
     # per row, and the roster count survives as its own number (S19).
     OPEN_NAMES=""
+    # THE FILL'S OCCUPANCY IS THE STOP WALL'S PREDICATE (wave-19 REQ-5, ADR-034 d2; audit V-2,
+    # T2d): every roster row of this session that is NOT ACKED. `OPEN` above is a different
+    # number with a different job. It drops MET/WAIVED rows, it is trimmed by liveness, and it
+    # decides `open=`, QUIET and DISARM. The fill used to be sized from it, and on the
+    # end-of-batch shape (a MET row whose agent is still idle on the panel, so no ack yet) the
+    # tick's gap was one wider than the wall's: writers=2, one such row, two ready rows, and the
+    # tick filled two where payload/scripts/lib/stop.sh demands one. The names are collected
+    # here, off the verdict line (which folds the roster by name and filters by session exactly
+    # as the wall's awk does), and counted AFTER the stand-down arm below has written this
+    # tick's own acks. So a MET row gone from a fresh panel is closed and not counted, and a
+    # MET row still listed is counted until its ack.
+    TICK_UNACKED_NAMES=""
     while IFS= read -r LINE; do
       case "$LINE" in "landing-verdict/v1|"*) : ;; *) continue ;; esac
       TOTAL=$((TOTAL + 1))
@@ -3589,6 +3601,8 @@ EOF
         TICK_ACKED_NAMES="${TICK_ACKED_NAMES}$(clean "$RNAME")|"
         continue
       fi
+      TICK_UNACKED_NAMES="${TICK_UNACKED_NAMES}$(clean "$RNAME")
+"
 
       case "$RSTATE" in
         MET|WAIVED)
@@ -3810,7 +3824,7 @@ EOF
         # THE TRIM IS SAID OUT LOUD, or `open=0` over a roster carrying two unmet
         # contracts is a number with no story. Only when it actually moved: a tick whose
         # live set agrees with its roster has nothing to explain.
-        say "live set fresh — ${OPEN_ROSTER} open row(s) on this roster, ${OPEN} still live; open= and any fill are sized from the live set"
+        say "live set fresh — ${OPEN_ROSTER} open row(s) on this roster, ${OPEN} still live; open= is sized from the live set, the fill from every row not yet acked"
       fi
     fi
 
@@ -3918,6 +3932,7 @@ EOF
     # an order and an ack cannot — both are acts this arm cannot take back. So STALE now reads
     # the same as NONE: the arm defers rather than guesses, naming nothing, ordering nothing,
     # acking nothing, and saying once that the next tick's fresh ListAgents will decide.
+    TICK_ACKED_NOW="|"
     if [ -n "$STANDDOWN_NAMES" ] || [ -n "$DUP_START_NAMES" ]; then
       # THE ALREADY-WARMED PARSE, or one read of our own — never a second parse of a
       # transcript this tick has already read. `live_agents` memoizes per process on the
@@ -3983,10 +3998,13 @@ EOF
               SD_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
                 | grep -F "|name=${SD_NAME}|" | tail -1)"
               [ -n "$(line_field "$SD_ROW" deliverable)" ] && SD_REASON=landed
-              SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
-                        CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
-                        bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason "$SD_REASON" 2>&1 ) \
-                || say "NOTIFY ${SD_NAME} — contract MET, the agent is gone, and the row could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+              if SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                           CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                           bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason "$SD_REASON" 2>&1 ); then
+                TICK_ACKED_NOW="${TICK_ACKED_NOW}${SD_NAME}|"
+              else
+                say "NOTIFY ${SD_NAME} — contract MET, the agent is gone, and the row could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+              fi
               ;;
           esac
         done
@@ -3996,10 +4014,13 @@ EOF
           case "$SD_PANEL" in *"|${SD_NAME}|"*) continue ;; esac
           case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
           SD_CLOSED="${SD_CLOSED}${SD_NAME}|"
-          SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
-                    CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
-                    bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason moot-and-gone 2>&1 ) \
-            || say "NOTIFY ${SD_NAME} — a duplicate start whose agent is gone could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+          if SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                       CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                       bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason moot-and-gone 2>&1 ); then
+            TICK_ACKED_NOW="${TICK_ACKED_NOW}${SD_NAME}|"
+          else
+            say "NOTIFY ${SD_NAME} — a duplicate start whose agent is gone could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+          fi
         done
       else
         # A-orch-31: something WOULD have been decided (a MET row, or a duplicate start,
@@ -4008,6 +4029,19 @@ EOF
         note "stand-down deferred — the panel reading is stale; ListAgents and the next tick decides"
       fi
     fi
+
+    # THE FILL'S OCCUPANCY, COUNTED NOW (T2d; the declaration above the verdict walk says why).
+    # Every unacked name the walk saw, minus every name the arm above has just acked. Only an
+    # ack that WROTE counts as a close: a refused `ack` left the row open, and the wall will
+    # count it too.
+    TICK_OCCUPIED=0
+    while IFS= read -r OCC_NAME; do
+      [ -n "$OCC_NAME" ] || continue
+      case "$TICK_ACKED_NOW" in *"|${OCC_NAME}|"*) continue ;; esac
+      TICK_OCCUPIED=$((TICK_OCCUPIED + 1))
+    done <<EOF
+$TICK_UNACKED_NAMES
+EOF
 
     # "No roster" and "empty roster" are different facts, and only the latter may DISARM
     # (ap review A-1, item 2). A roster with zero verdict lines because the file plain does
@@ -4312,10 +4346,10 @@ EOF
         # usable evidence, for the same reason: no reading is not a bad reading, and a wave
         # that stalled on a missing probe would be worse than one that filled its budget.
         SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"
-        SCHED_GAP=$(( SCHED_WIDTH - OPEN ))
+        SCHED_GAP=$(( SCHED_WIDTH - TICK_OCCUPIED ))
         [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
         if [ "$SCHED_GAP" -eq 0 ]; then
-          say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${OPEN} open row(s): the budget is full."
+          say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${TICK_OCCUPIED} unacked roster row(s): the budget is full."
         else
           # READY IS ASKED AT THE STEP THE PLAN IS ON (REQ-1e, AC-1e.4). The widened
           # `## Tasks` table covers Steps 3-9 in one schedule, so "pending with every
@@ -4330,10 +4364,11 @@ EOF
           # decision 2). `fill_ready_set` is what `payload/scripts/lib/stop.sh`'s fill
           # duty computes at the end of every turn, so the rows this tick ORDERS and the
           # rows that turn's end REFUSES to leave undispatched are one answer rather than
-          # two. It takes the width and the occupancy this arm measured — the rung, and
-          # the roster's own open count — because the wall measures those two differently
-          # and both are right; what may not differ is the set.
-          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$OPEN")"
+          # two. It takes the width and the occupancy this arm measured: the rung, and the
+          # roster's unacked rows after this tick's own acks. The wall measures both the
+          # same way (the rung from `pressure_level`, the occupancy by the same predicate:
+          # wave-19 audit V-2, T2d), so what it names is what this prints.
+          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")"
           SCHED_IDS=""; SCHED_N=0
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
@@ -4356,7 +4391,7 @@ EOF
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
           else
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending step-${SCHED_STEP} task has all its dependencies landed."
+            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending step-${SCHED_STEP} task has all its dependencies landed."
           fi
         fi
       fi
