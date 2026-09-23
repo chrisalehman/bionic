@@ -490,6 +490,20 @@ expect_contains "a patrol ack closes the row for every reader" "|acked=yes|" \
   "$( cd "$R8A" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict by-patrol 2>/dev/null \
       | grep -F 'landing-verdict/v1|' )"
 
+# AN ABANDONED CLOSE IS A CLOSE (wave-19 T1e, audit V-1; ADR-034). `stop-orders.sh stopped`
+# closes an UNMET row whose agent a fresh panel shows gone with `--by human --reason
+# abandoned`. The reason says why the row closed without landing; it is never a qualifier
+# on the close, so the verdict line reports the row acked exactly as it does for a hand ack.
+add_row "$R8A" name=by-abandon duration="1 minute" launched_at="$(iso_ago 600)" \
+        deliverable="$R8A/absent-a.md"
+sweep "$R8A" ack by-abandon --by human --reason abandoned
+expect_eq "an abandoned ack exits 0" "0" "$RC"
+expect_contains "…carries its author and reason on the ledger line" \
+  "|name=by-abandon|by=human|reason=abandoned" "$(cat "$(ledger_of "$R8A")" 2>/dev/null)"
+expect_contains "…and closes the row for every reader, like any ack" "|acked=yes|" \
+  "$( cd "$R8A" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict by-abandon 2>/dev/null \
+      | grep -F 'landing-verdict/v1|' )"
+
 # THE FLAGS ARE NOT NAMES. A caller that meant a flag and mistyped it must not quietly close
 # a row called `--bye`.
 sweep "$R8A" ack by-default --by nobody

@@ -581,10 +581,10 @@ section "Section 8: stopped <name> acks the row it stops; standdown drops a row 
 # this fix `stopped` acked ANY open row on the strength of the name alone — still-live or
 # UNMET — and since T4 that ack frees the name for a fresh dispatch while the agent it named
 # is still running (dispatch-preflight.sh:2272 treats any ack newer than the launch as the
-# name closing). So the verdict must be LANDED (MET or WAIVED; an UNMET row is refused,
-# naming the state) AND a FRESH panel reading must confirm the name is gone: present on the
+# name closing). So a FRESH panel reading must confirm the name is gone: present on the
 # panel -> refused, naming it live; a stale or absent panel -> refused, because a verb that
-# cannot see does not ack. The ack it writes is `--by human`, never `--by patrol`: this is a
+# cannot see does not ack. The verdict picks the reason (T1e, audit V-1): MET or WAIVED
+# closes `landed`, UNMET closes `abandoned`, any other state is refused, naming it. The ack it writes is `--by human`, never `--by patrol`: this is a
 # deliberate model-callable verb, not the tick's own automated sweep.
 R9="$(make_repo stopped)"
 R9SLUG=$(printf '%s' "$R9" | sed 's/[^a-zA-Z0-9]/-/g')
@@ -593,14 +593,42 @@ R9TR="$R8CFG/projects/$R9SLUG/$SID.jsonl"
 so_roster_row "$R9" "open-one" ".bionic/docs/record/never.md" "" "open-one@session-6c85684c"
 s9_ledger() { cat "$R9/.bionic/tmp/sweeper-$SID.state" 2>/dev/null; }
 
-# UNMET, and gone from a fresh panel: still refused, naming the verdict. This is the
-# finding's own reproduction — `open-one`'s deliverable never exists — and the old
-# behaviour acked it as `landed` anyway.
-plant_live "$R9TR" fresh
+# UNMET AND STILL ON A FRESH PANEL: refused, naming the verdict (C4, unchanged by T1e). An
+# agent that is visibly working has not been stopped, whatever its contract says.
+plant_live "$R9TR" fresh "open-one"
 run_orders_cfg "$R9" stopped open-one
-expect_status "stopped on an UNMET row is refused, exit 2, even with the agent gone (C4)" 2 "$ST"
+expect_status "stopped on an UNMET row the fresh panel still lists is refused, exit 2 (C4)" 2 "$ST"
+expect_contains "…naming the verdict" "UNMET" "$OUT$ERR"
+expect_contains "…and naming it live" "still on the panel" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=open-one|" "$(s9_ledger)"
+
+# UNMET UNDER A STALE PANEL: refused, naming the verdict (C4). A verb that cannot see does
+# not ack, and "the panel is old" is not evidence that the agent left.
+plant_live "$R9TR" stale
+run_orders_cfg "$R9" stopped open-one
+expect_status "stopped on an UNMET row under a stale panel is refused, exit 2 (C4)" 2 "$ST"
 expect_contains "…naming the verdict" "UNMET" "$OUT$ERR"
 expect_absent "…and acks nothing" "|name=open-one|" "$(s9_ledger)"
+
+# UNMET AND GONE FROM A FRESH PANEL: closed, reason abandoned (wave-19 T1e, audit V-1; REQ-1
+# AC-1.2). This is T1's own original fixture — `open-one`'s deliverable never exists — and
+# the agent it named was stopped before it landed (w19-T6 this wave). Refusing it left the
+# name blocked and counted against the budget with no close but a hand `sweeper ack`. The
+# ack is attributed honestly: `reason=abandoned`, never `landed` — nothing landed — and never
+# the tick's `moot-and-gone`, which names a row that had nothing to produce.
+plant_live "$R9TR" fresh
+run_orders_cfg "$R9" stopped open-one
+expect_status "stopped on an UNMET row the fresh panel shows gone acks it, exit 0 (V-1)" 0 "$ST"
+expect_contains "…through the sweeper, by a human verb, reason abandoned" \
+  "|name=open-one|by=human|reason=abandoned" "$(s9_ledger)"
+expect_absent "…and never as landed" "|name=open-one|by=human|reason=landed" "$(s9_ledger)"
+expect_contains "…saying so to the operator" "reason abandoned" "$OUT"
+expect_contains "…so the one verdict line reports it closed" "|acked=yes|" \
+  "$( cd "$R9" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict open-one 2>/dev/null )"
+run_orders_cfg "$R9" standdown
+expect_status "standdown after an abandoned close exits clean" 0 "$ST"
+expect_absent "…and lists the abandoned row nowhere: closed, and nobody left to stop (AC-1.3)" \
+  "open-one" "$OUT"
 
 # MET, but the fresh panel still lists the agent: refused, naming it live (C4) — the
 # defect's sharper edge, a landed contract whose agent is still working.
@@ -635,7 +663,7 @@ run_orders_cfg "$R9" stopped met-live
 expect_status "stopped on an ALREADY-ACKED name is refused, exit 2" 2 "$ST"
 expect_contains "…saying why in one line" "met-live" "$OUT$ERR"
 expect_eq "…and writes no second ack" "1" \
-  "$(s9_ledger | grep -c '|event=ack|' | tr -d ' ')"
+  "$(s9_ledger | grep -c '|event=ack|.*|name=met-live|' | tr -d ' ')"
 
 run_orders "$R9" stopped nobody-here
 expect_status "stopped on an UNKNOWN name is refused, exit 2" 2 "$ST"
