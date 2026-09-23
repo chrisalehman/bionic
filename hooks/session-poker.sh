@@ -17,6 +17,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
 #     bash <plugin-root>/hooks/session-poker.sh adopt      what OTHER sessions launched here (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
+#     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
 # are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
@@ -374,6 +375,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --window   defer a dead session whose own newest file is younger than the poker interval"
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in"
   exit 2
 }
 
@@ -452,6 +454,17 @@ case "$VERB" in
     fi
     EXTEND_NAME="$1"
     EXTEND_REASON="$2"
+    ;;
+  # THE NINE CELLS AN AUTHOR WRITES, IN THE TABLE'S OWN COLUMN ORDER (wave-20 REQ-5, AC-5.3;
+  # Δ5). `status`, `worktree` and `base` are the dispatcher's cells and are not operands:
+  # a new row is `pending` and names no tree. Every operand is required — `—` is how the
+  # table itself spells "none" — so a short list is the usage error, never a guessed default.
+  task-add)
+    if [ $# -ne 9 ]; then
+      usage "task-add takes exactly nine arguments: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> (write — for none)."
+    fi
+    TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
+    TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"
     ;;
   tick|arm|disarm|interval|interval-default|window)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
@@ -3432,6 +3445,134 @@ EOF
     exit 0
     ;;
 
+  # THE ROW-ADD VERB (wave-20 REQ-5, AC-5.3; Δ5, research D1 §3). A schedule change is a
+  # TRANSACTION: `units_add_row` projects the row onto a COPY of the bound plan (the row, its
+  # `- <id>:` line, and a Step-4 id threaded into the frontier rows that owe it), the copy is
+  # judged twice — by `units_validate`, and by a dry `git commit` through the REAL
+  # hooks/bash-walls.sh — and only a copy both admit is moved over the plan. On any refusal
+  # the plan is byte-identical and the words that refused it print. The precedent is
+  # close-out.sh's D5: a script writes a lifecycle artifact only where a gate validates what
+  # it wrote. Nothing else judges a Bash write of the plan: the governing-skill hook sees
+  # Write and Edit only.
+  #
+  # THE DRY COMMIT IS A WRITER'S, JUDGED BY THE TASK ARMS. The commit AC-5.3 names is the next
+  # writer's, from a row's tree, and the gate judges that commit at Step 4 whatever the run's
+  # step (`CURRENT=4`, walls.sh's row fork). A main-root commit during Verify would instead be
+  # held to the Step-5 block the run is still writing, and no row could ever be added during
+  # Verify — which is when fixups are found. So the dry copy carries `current: 4` when the run
+  # is past it; the copy that is swapped in keeps the run's own `current:`.
+  #
+  # THE DRY RUN IS BOUND TO THE COPY, NEVER TO THE PLAN. It arms its own engagement marker for
+  # a synthetic session whose `plan=` names the dry copy — close-out.sh's pattern, with a
+  # binding instead of the newest-plan fallback — and removes it after. Both copies sit
+  # beside the plan under names that do not end in `.md`, so no plan walk (`_run_candidates`,
+  # the misplaced-plan sweep) can ever read one as a run.
+  #
+  # MAIN THREAD ONLY is the Bash wall's to enforce (wave-20 T9); this verb refuses what it can
+  # see: no session key, an unengaged session, a session with no BOUND open plan (a writing
+  # verb never writes the newest-plan fallback), and a run below Step 4.
+  task-add)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "A row is added to ONE session's bound plan, so without the key there is nothing to write."
+      exit 3
+    fi
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+
+    TA_RUN="$(session_run "$REPO_REAL" "$SESSION_ID")"
+    case "$TA_RUN" in
+      'bound-open '*) TA_PLAN="${TA_RUN#bound-open }" ;;
+      *)
+        die "REFUSED — task-add writes the plan this session is bound to, and it has no bound open run (${TA_RUN:-none})."
+        die "Bind this session to its run first (this script's bind verb), then add the row."
+        exit 1 ;;
+    esac
+
+    TA_CUR="$(_fill_current_field "$TA_PLAN")"
+    TA_CUR="${TA_CUR%[ab]}"
+    case "$TA_CUR" in
+      ''|*[!0-9]*)
+        die "REFUSED — $TA_PLAN has current: ${TA_CUR:-(none)}; task-add changes a wave plan past Step-3 approval, whose current: is a step number."
+        exit 1 ;;
+    esac
+    if [ "$TA_CUR" -lt 4 ]; then
+      die "REFUSED — $TA_PLAN is at current: $TA_CUR; before Step-3 approval the plan is written by hand and reviewed, not added to."
+      exit 1
+    fi
+
+    TA_SUM="$(cksum < "$TA_PLAN" 2>/dev/null)"
+    TA_NEW="${TA_PLAN}.task-add.$$"
+    TA_DRY="${TA_PLAN}.task-add-dry.$$"
+    TA_SID="taskadd-$$"
+    TA_MARK="$(engaged_marker_path "$REPO_REAL" "$TA_SID")" || TA_MARK=""
+    trap 'rm -f "$TA_NEW" "$TA_DRY" ${TA_MARK:+"$TA_MARK"}' EXIT
+
+    if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" \
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" > "$TA_NEW" 2>/dev/null || [ ! -s "$TA_NEW" ]; then
+      die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
+      exit 1
+    fi
+
+    TA_VIOL="$(units_validate "$TA_NEW" 2>&1)"
+    if [ -n "$TA_VIOL" ]; then
+      die "REFUSED — with $TA_ID added, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
+      printf '%s\n' "$TA_VIOL" >&2
+      exit 1
+    fi
+
+    if [ "$TA_CUR" -gt 4 ]; then
+      awk '
+        /^[[:space:]]*```/ { fence = !fence; print; next }
+        fence { print; next }
+        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
+        insdlc && !done && /^[[:space:]]*current[[:space:]]*:/ { print "current: 4"; done = 1; next }
+        { print }' "$TA_NEW" > "$TA_DRY"
+    else
+      cp "$TA_NEW" "$TA_DRY"
+    fi
+
+    TA_HOOK="$HOOK_DIR/bash-walls.sh"
+    if [ ! -f "$TA_HOOK" ] || [ -z "$TA_MARK" ] || ! command -v jq >/dev/null 2>&1; then
+      die "REFUSED — the dry commit cannot be run (no bash-walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
+      exit 2
+    fi
+    mkdir -p "${TA_MARK%/*}" 2>/dev/null
+    printf 'plan=%s\nengaged_at=%s\n' "$TA_DRY" "$(iso_now)" > "$TA_MARK"
+    TA_INPUT="$(jq -n --arg s "$TA_SID" --arg cwd "$REPO_REAL" \
+      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+        tool_input: {command: "git commit -m task-add"}, tool_use_id: "toolu_taskadd"}')"
+    TA_ERR="$(cd "$REPO_REAL" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$TA_SID" BIONIC_WALL_VERBOSE=1 \
+      bash "$TA_HOOK" <<< "$TA_INPUT" 2>&1 >/dev/null)"
+    TA_GATE=$?
+    rm -f "$TA_MARK"
+    if [ "$TA_GATE" -ne 0 ]; then
+      [ -n "$TA_ERR" ] && printf '%s\n' "$TA_ERR" >&2
+      die "REFUSED — the commit gate refused the plan with $TA_ID added (rc=$TA_GATE); the plan is unchanged."
+      exit 1
+    fi
+
+    if [ "$(cksum < "$TA_PLAN" 2>/dev/null)" != "$TA_SUM" ]; then
+      die "REFUSED — $TA_PLAN changed while $TA_ID was being judged; nothing was written. Run task-add again."
+      exit 1
+    fi
+    if ! mv -f "$TA_NEW" "$TA_PLAN"; then
+      die "REFUSED — could not move the judged copy over $TA_PLAN; the plan is unchanged."
+      exit 2
+    fi
+    say "task-add — $TA_ID added to $TA_PLAN: the row, its - $TA_ID: line, and the deps it owes; validated and dry-committed first."
+    exit 0
+    ;;
+
   tick)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -4439,11 +4580,12 @@ EOF
         if [ "$SCHED_GAP" -eq 0 ]; then
           say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${TICK_OCCUPIED} unacked roster row(s): the budget is full."
         else
-          # READY IS ASKED AT THE STEP THE PLAN IS ON (REQ-1e, AC-1e.4). The widened
-          # `## Tasks` table covers Steps 3-9 in one schedule, so "pending with every
-          # dependency landed" is no longer the whole question: a Step-6 review row
-          # whose deps happen to be landed is ready in the dependency sense and is
-          # still not this step's work. `SCHED_STEP` is the unit this run is on —
+          # READY IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036). Through
+          # 1.8.6 ready was asked at the step the plan is on (REQ-1e, AC-1e.4), and a
+          # Step-6 review whose deps had landed sat unfilled all through Verify. A work
+          # row is now ready when it is pending and every dependency has landed, whatever
+          # its step; only an integrate or close row still waits for `current:` to reach
+          # its step. `SCHED_STEP` is still passed — it is what holds those gate acts —
           # already read and already proven readable by the approval gate above, which
           # is why this needs no second parse and no fallback: a `current:` that would
           # not parse took the withhold arm and never reached here.
@@ -4479,7 +4621,7 @@ EOF
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
           else
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending step-${SCHED_STEP} task has all its dependencies landed."
+            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and integrate/close rows wait for their step."
           fi
         fi
       fi
