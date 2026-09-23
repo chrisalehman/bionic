@@ -7409,12 +7409,84 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
 Expected artifact: .bionic/docs/record/w16-cap.md
 Expected duration: ~20 minutes.
 Re-executes: ${RL_JEST} ${RL_PYTEST} ${RL_GO} ${RL_NPM}" "w16-cap")"
-expect_eq "16le a four-run span is REFUSED" "deny" "$GATE_VERDICT"
-expect_contains "16le …naming the fourth (dropped) run" "npm test" "$GATE_VERR"
-expect_contains "16le …and the fact names the 3-run cap" \
+# FLIPPED BY DESIGN (wave-20 T4; Δ3, Δ9). The cap of three is the AUDITOR's — its source is
+# the auditor mandate's "<=3 re-executions" — and this brief is an implementor's (the
+# driver's default role), so four runs is a declaration within SUITES_MAX and is admitted
+# with every run on the row. The auditor twin that keeps the refusal is 16le-aud below.
+expect_eq "16le a four-run span from an implementor is ADMITTED (the cap of three is the auditor's)" \
+  "allow" "$GATE_VERDICT"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_contains "16le …and the row carries the fourth run" "npm test" "$(roster_field "$ROW" re_executes)"
+
+# ---- AC-7.2 (wave-20 T4; REQ-7, Δ3, Δ9): three for auditors, SUITES_MAX for every other role ----
+#
+# fails-when: a test-runner brief with four runs is refused, an auditor brief with four is
+# admitted, or a test-runner brief with 201 is admitted.
+REPO=$(make_repo r16le-tr yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/w16-cap-tr.md
+Expected duration: ~20 minutes.
+Re-executes: ${RL_JEST} ${RL_PYTEST} ${RL_GO} ${RL_NPM}" "w16-cap-tr" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" bionic:test-runner)"
+expect_eq "16le-tr a test-runner brief with four runs is ADMITTED" "allow" "$GATE_VERDICT"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "16le-tr …and its row carries all four runs" \
+  "${RL_JEST} ${RL_PYTEST} ${RL_GO} ${RL_NPM}" "$(roster_field "$ROW" re_executes)"
+
+REPO=$(make_repo r16le-aud yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/w16-cap-aud.md
+Expected duration: ~20 minutes.
+Re-executes: ${RL_JEST} ${RL_PYTEST} ${RL_GO} ${RL_NPM}" "w16-cap-aud" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" bionic:auditor)"
+expect_eq "16le-aud an auditor brief with four runs is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "16le-aud …naming the fourth (dropped) run" "npm test" "$GATE_VERR"
+expect_contains "16le-aud …and the fact names the auditor's 3-run cap" \
   "exceeds the 3-run cap" "$GATE_ERR"
-expect_empty "16le …with no roster row written for the refused dispatch" \
+expect_empty "16le-aud …with no roster row written for the refused dispatch" \
   "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+
+# 201 RUNS, SUITES_MAX + 1: the count that bounds `Suites:` bounds every other role's runs.
+T4_RUNS=""
+for _i in $(seq 1 201); do T4_RUNS="$T4_RUNS ${RL_BT}pytest tests/unit/t${_i}.py${RL_BT}"; done
+REPO=$(make_repo r16le-201 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/w16-cap-201.md
+Expected duration: ~20 minutes.
+Re-executes:${T4_RUNS}" "w16-cap-201" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" bionic:test-runner)"
+expect_eq "16le-201 a test-runner brief with 201 runs is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "16le-201 …naming the 201st run" "pytest tests/unit/t201.py" "$GATE_VERR"
+expect_contains "16le-201 …against the 200-run cap" "exceeds the 200-run cap" "$GATE_ERR"
+expect_empty "16le-201 …with no roster row written" \
+  "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+
+# THE TEXTS ARE ROLE-AWARE. A not-literal run is refused for every role; only the auditor's
+# fix says "at most three". `Files:` and the stub derivation are there so this fault is the
+# brief's ONLY one — with a second fault the refusal lists facts and no detail, and the
+# absence row below would pass on a detail that was never printed. The positive row
+# (`GATE_VERR` carries the not-literal token) proves the detail is on the wire.
+REPO=$(make_repo r16le-txt-tr yes)
+write_attestation "$REPO" "$SID_A"
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/w16-txt-tr.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${RL_BT}pytest \$T${RL_BT}" "w16-txt-tr" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" bionic:test-runner)"
+expect_eq "16le-txt a test-runner's variable run is refused" "deny" "$GATE_VERDICT"
+expect_contains "16le-txt …and its detail is on the wire (non-vacuity)" "pytest \$T" "$GATE_VERR"
+expect_absent "16le-txt …and its fix never tells a test-runner three" "at most three" "$GATE_VERR"
+REPO=$(make_repo r16le-txt-aud yes)
+write_attestation "$REPO" "$SID_A"
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/w16-txt-aud.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${RL_BT}pytest \$T${RL_BT}" "w16-txt-aud" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" bionic:auditor)"
+expect_eq "16le-txt an auditor's variable run is refused" "deny" "$GATE_VERDICT"
+expect_contains "16le-txt …and its fix tells the auditor three" "at most three" "$GATE_VERR"
 
 REPO=$(make_repo r16lf yes)
 write_attestation "$REPO" "$SID_A"
