@@ -103,7 +103,10 @@ TOOL_NAME=$(_jq '.tool_name')
 # payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
 # dispatch that should have been refused can be stopped and re-run — refusing every
 # Agent call on the machine because a file is missing cannot be undone as cheaply.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh"
+# `cmd-class.sh` (wave-20 T4; REQ-7, D7) carries CMD_RUN_NORM_AWK, the one run normaliser the
+# lift's `collapse()` pastes in — a declared run is stored by the rule the writer-side
+# budget arm reads a claim with.
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh cmd-class.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -223,6 +226,12 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # A second split in this hook is the exact defect REQ-1e removed from the evidence gate.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"
+# ONE RUN RULE ON BOTH SIDES OF THE ROW (wave-20 T4; REQ-7, D7). The lift's `collapse()`
+# runs `cmdnorm_run` out of CMD_RUN_NORM_AWK before a declared run is stored, the rule the
+# writer-side budget arm builds its claim with. The library only defines functions and
+# that one variable, so sourcing it costs a parse and nothing else.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/cmd-class.sh"
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
@@ -887,109 +896,18 @@ ROSTER_FILE="$STATE_DIR/${ROSTER_PREFIX}${BIONIC_SID}${ROSTER_SUFFIX}"
 # and only when the live panel has gone dark.
 ACK_LEDGER_FILE="$STATE_DIR/sweeper-${BIONIC_SID}.state"
 
-# ─── THE ROSTER'S OPEN CONTRACTS — ONE READING, TWO WALLS ──────────────────────────────
+# ─── THE ROSTER'S OPEN NAMES — ONE PREDICATE, EVERY READER ─────────────────────────────
 #
-# WHO ASKS. The budget wall below counts the run's open rows; the name-in-flight arm further
-# down asks whether ONE name is still under an open contract. Both questions are the same
-# question asked of the same append-only file, and until wave-14 only the second consulted the
-# closing markers — inline, in its own awk. Two walls carrying one reading is the shape that
-# drifts: cross-gate §LC found it once already, as a LATCH both roster walls shared. So the
-# reading is spelled ONCE, here, and both callers consume its answer.
-#
-# WHAT IT PRINTS: one line per name that ever held a live row, in the order the names first
-# appear —
-#
-#     <name>|<its last live status>|open      still under contract
-#     <name>|<its last live status>|closed    landed, or acked after it was launched
-#
-# CLOSED MEANS THE LATEST CONTRACT IS CLOSED, never the file read as a set: a
-# `landing-swept/v1|…|state=MET` marker closes the contract it was written for and nothing
-# after it, so a name dispatched AGAIN below its marker is open again. That rule is the
-# delimited reading below, held byte-equal with hooks/execution-recorder.sh.
-#
-# THE ACK IS THE SECOND CLOSING TRUTH, AND IT IS OPTIONAL (wave-14 REQ-3, D7).
-# `session-sweeper.sh ack` closes a row the sweep cannot verdict — a row that declared nothing
-# durable stats MET vacuously — and it journals to its OWN file, so the row ordering that
-# decides a marker is not available to it. It is compared by TIME instead: an ack closes a name
-# only when it was taken AFTER that name's last live row was launched, which gives a
-# re-dispatched name the same second life a marker's does. An unreadable stamp on either side
-# closes nothing, because the safe direction here is to spend a slot on a row that MIGHT still
-# be working (rule fail-closed-constants). The ledger is passed by the budget wall alone; the
-# in-flight arm's own header says why it asks without one.
-dp_roster_contracts() {  # <roster file> [ack ledger] -> "<name>|<status>|open|closed" per name
-  [ -f "$1" ] && [ ! -L "$1" ] || return 0
-  /usr/bin/awk -F'|' -v ledger="${2:-}" '
-    # ---- BEGIN latest-contract reading — byte-equal in both roster walls (cross-gate §LC) ----
-    # Both programs ask one question of an append-only file — is this name CURRENTLY under an
-    # open contract — and the ORDERING of the rows is the whole of the answer. The reading is
-    # one text held byte-identical in the two files that need it, rather than a library: the
-    # recorder loads no library that parses a roster, and BIONIC_LIB_WANT is a fail-closed
-    # list, not somewhere to add a file on the SubagentStart path for four awk functions.
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
-    # THE LATEST CONTRACT DECIDES, NEVER THE FILE READ AS A SET (delta review C1/S2). A
-    # landing-swept/v1 marker in state MET closes the contract it was written for and nothing
-    # after it: a name that landed and was then dispatched AGAIN — which the marker is exactly
-    # what permits — carries a fresh intended/confirmed/identified row BELOW its marker, and
-    # that row is an open contract with a live process behind it. Read as a set, the MET flag
-    # was a LATCH: one landing turned both of these walls off for that name for the rest of the
-    # session, which is precisely the case they exist for (a task being re-run). So a live row
-    # RETIRES the marker above it, and only a marker with no live row after it still closes.
-    function contract_note(line,   nm) {
-      if (index(line, "landing-swept/v1|") == 1) {
-        if (kv(line, "state") == "MET") MET[kv(line, "name")] = 1
-        return
-      }
-      nm = kv(line, "name")
-      if (live_status(kv(line, "status"))) delete MET[nm]
-    }
-    function contract_closed(nm) { return (nm in MET) }
-    # ---- END latest-contract reading ----
-    # THE ACK LEDGER, read by key exactly as the roster is, through the same `kv` — a
-    # `sweeper-ledger/v1|event=ack|…|name=<n>` line, and the LATEST `at=` per name wins. An
-    # entry with no name or no stamp is dropped rather than believed: an empty name compared
-    # loosely would read as closing the whole roster at once, in silence (the same validation
-    # `read_acked` states in the writer of this file).
-    function ack_closes(nm, born) {
-      if (born == "" || !(nm in ACK)) return 0
-      return (ACK[nm] > born)
-    }
-    BEGIN {
-      if (ledger != "") {
-        while ((getline aline < ledger) > 0) {
-          if (index(aline, "sweeper-ledger/v1|") != 1) continue
-          if (kv(aline, "event") != "ack") continue
-          anm = kv(aline, "name"); if (anm == "") continue
-          aat = kv(aline, "at");   if (aat == "") continue
-          if (!(anm in ACK) || aat > ACK[anm]) ACK[anm] = aat
-        }
-        close(ledger)
-      }
-    }
-    /^roster-state\/v1\|/ {
-      contract_note($0)
-      nm = kv($0, "name")
-      if (nm != "" && live_status(kv($0, "status"))) {
-        if (!(nm in seen)) { seen[nm] = 1; order[++n] = nm }
-        last[nm] = kv($0, "status")
-        born[nm] = kv($0, "launched_at")
-      }
-      next
-    }
-    /^landing-swept\/v1\|/ { contract_note($0); next }
-    END {
-      for (i = 1; i <= n; i++) {
-        nm = order[i]
-        printf "%s|%s|%s\n", nm, last[nm], \
-          ((contract_closed(nm) || ack_closes(nm, born[nm])) ? "closed" : "open")
-      }
-    }
-  ' "$1" 2>/dev/null
-}
+# WHO ASKS. The budget wall below counts the run's open rows on a dark panel; the
+# name-in-flight arm further down asks whether ONE name is still under an open contract. Both
+# ask `roster_open_names` (payload/scripts/lib/roster.sh; epic-23 wave-20 T2, D10) — the one
+# close predicate the sweeper's `acked=`, the stop wall's occupancy and the tick's
+# `adopt_fold` ask too. Until this wave this file carried its own reading, `dp_roster_contracts`,
+# which closed a name on a `landing-swept/v1|state=MET` marker as well as on an ack; no other
+# reader agreed, so this wall admitted a dispatch into a slot the stop wall still counted
+# held (triage-C claim 4, driven). The ack is the one terminal state of a name (ADR-034 d1):
+# a name is closed only by an ack taken AFTER its latest live launch, so a name re-dispatched
+# after its ack is open again, and an unreadable stamp on either side closes nothing.
 
 # ============================================ THE LEASE WALL AND THE BUDGET WALL
 # (spec AC-14 and AC-26; plan task WALLS; assumptions WALLS/2, WALLS/3, WALLS/4, WALLS/6.)
@@ -1082,25 +1000,49 @@ fi
 # yet has no ceiling to be over and this wall stays silent — while every plan-free wall
 # above and below it fires. The read is guarded rather than left to awk's empty-filename
 # error, so the skip is a decision this file states, not a side effect of a failed open.
+#
+# THE ONE BUDGET READER (epic-23 wave-20 T2, D10). `plan_budget_line` and `budget_field` in
+# payload/scripts/lib/run.sh are the reading the tick, the stop wall and the governing-skill
+# hook take too: the strict `parallel-budget:` line of the leading frontmatter, and one whole
+# field as a decimal integer. A field that is absent or not an integer leaves its own arm
+# unmeasured rather than refusing on a question this wall cannot answer — the §7 direction
+# every start-side ambiguity takes — and says so once.
 PARALLEL_BUDGET=""
-if [ -n "$PLAN" ]; then
-  PARALLEL_BUDGET=$(awk '
-    NR == 1 && $0 != "---" { exit }
-    NR == 1 { next }
-    $0 == "---" { exit }
-    /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
-  ' "$PLAN" 2>/dev/null) || PARALLEL_BUDGET=""
+[ -n "$PLAN" ] && PARALLEL_BUDGET="$(plan_budget_line "$PLAN")"
+
+# NO LINE ON A LIVE PLAN IS NAMED, NEVER PASSED IN SILENCE (REQ-10 AC-10.2; ADR-035). The
+# budget is a measurement every plan carries — the governing-skill hook refuses a plan Write
+# without `writers=` — so a plan past Step 3 reaching here without a readable one slipped
+# past that wall, by a later hand edit or a spelling no reader takes. Nothing is refused on
+# it: with no ceiling there is nothing to be over, and the dispatch goes ahead. It is SAID,
+# on the pass path (one WARN line) and on the refusal wire (AC-8.2's not-checked line), the
+# backstop the stop wall names at turn end. Below Step 4 a plan is still being written and
+# nothing is owed yet — the stop wall's own boundary (fill_ledger_live, past Step 3). A
+# `current: T<n>` is a task-scale plan, past Step 3 by the approval arm's rule.
+DP_BUDGET_WRITERS=""; DP_BUDGET_NAMED=""
+[ -n "$PARALLEL_BUDGET" ] && DP_BUDGET_WRITERS="$(budget_field "$PARALLEL_BUDGET" writers)"
+if [ -n "$PLAN" ] && [ -z "$DP_BUDGET_WRITERS" ]; then
+  DP_BUDGET_CURRENT=$(awk '
+    /^## SDLC State/ { st = 1; next }
+    st && /^## / { exit }
+    st && /^[[:space:]]*current[[:space:]]*:/ {
+      sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, "");
+      print; exit }
+  ' "$PLAN" 2>/dev/null) || DP_BUDGET_CURRENT=""
+  case "$DP_BUDGET_CURRENT" in
+    T[0-9]*) DP_BUDGET_STEP=4 ;;
+    *) DP_BUDGET_STEP="${DP_BUDGET_CURRENT%%[!0-9]*}" ;;
+  esac
+  case "$DP_BUDGET_STEP" in ''|*[!0-9]*) DP_BUDGET_STEP="" ;; esac
+  if [ -n "$DP_BUDGET_STEP" ] && [ "$DP_BUDGET_STEP" -ge 4 ]; then
+    printf 'dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field, so the writer budget is unmeasured (ADR-035: the budget is a measurement Step 0 writes). Plan: %s. Add Step 0'"'"'s line to its frontmatter: parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe\n' \
+      "$PLAN" >&2
+    dp_not_checked "budget" "a parallel-budget: line with a writers= field in the plan (ADR-035)"
+    DP_BUDGET_NAMED=1
+  fi
 fi
 
 if [ -n "$PARALLEL_BUDGET" ]; then
-  # One field out of the one string, by key. A field that is absent or not an integer
-  # leaves its own arm unmeasured rather than refusing on a question this wall cannot
-  # answer — the §7 direction every start-side ambiguity takes — and says so once.
-  budget_field() {  # <key> -> a non-negative integer, or empty
-    local v
-    v=$(printf '%s' "$PARALLEL_BUDGET" | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1)
-    case "$v" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$v" ;; esac
-  }
 
   # OPEN ROWS AND THE SUITES THEY CLAIM, in one pass over the roster (spec AC-7).
   #
@@ -1158,11 +1100,13 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # Wave-12 counted every remaining deduped `status=intended` row OPEN, full stop — which on
   # a wave of nine tasks held nine writer slots for the rest of the session, because a row
   # that LANDED still reads `status=intended` (nothing ever transitions it). The roster
-  # carries the closing fact beside the row: the `landing-swept/v1|…|state=MET` marker the
-  # landing gate writes, and the ack the orchestrator journals for a row the sweep cannot
-  # verdict. Both are read through `dp_roster_contracts` above, once, AFTER the loop, and
-  # only for the rows the panel could not speak for — the generous direction is kept for
-  # every row the roster says nothing about, which is what keeps this fail-closed.
+  # carries the closing fact beside the row: the ack, taken after the row's launch, that the
+  # Patrol or the orchestrator journals once the agent is gone. It is read through
+  # `roster_open_names` (the one close predicate, above), once, AFTER the loop, and only for
+  # the rows the panel could not speak for — the generous direction is kept for every row the
+  # predicate still calls open, which is what keeps this fail-closed. A landing marker closes
+  # nothing here since epic-23 wave-20 T2 (D10): it did until then, and no other reader
+  # agreed.
   #
   # NEVER WHILE THE PANEL IS FRESH (AC-3.3, AC-3.4). A fresh answer is the truth about who is
   # working, and a marker is a claim about who FINISHED — where both can speak, the panel
@@ -1175,7 +1119,7 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # nothing to read has stopped being an error.
   budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
     local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed="" notfresh=""
-    local la_out la_rc row_dark dark="" closed
+    local la_out la_rc row_dark dark="" closed still_open
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
@@ -1252,8 +1196,14 @@ if [ -n "$PARALLEL_BUDGET" ]; then
     # turn where the panel answered for every row. A landed row gives its writer slot back
     # AND the suite its brief claimed: a finished agent runs nothing.
     if [ -n "$dark" ]; then
-      closed=$(dp_roster_contracts "$f" "$ACK_LEDGER_FILE" \
-        | /usr/bin/awk -F'|' '$3 == "closed" { print $1 }')
+      still_open=$(roster_open_names "$f" "$ACK_LEDGER_FILE")
+      closed=$(while IFS='|' read -r nm claims; do
+                 [ -n "$nm" ] || continue
+                 /usr/bin/grep -qxF -- "$nm" <<< "$still_open" || printf '%s\n' "$nm"
+               done <<DARKNAMES
+$dark
+DARKNAMES
+)
       if [ -n "$closed" ]; then
         while IFS='|' read -r nm claims; do
           [ -n "$nm" ] || continue
@@ -1333,16 +1283,16 @@ machine genuinely has the room."
   BUDGET_CLAIMED="${BUDGET_COUNTS##* }"
   BUDGET_UNMEASURED=""
 
-  B_WRITERS=$(budget_field writers)
+  B_WRITERS="$DP_BUDGET_WRITERS"
   if [ -n "$B_WRITERS" ]; then
     [ $(( BUDGET_OPEN + 1 )) -gt "$B_WRITERS" ] && budget_deny \
       "this passes the run's writer budget" \
       "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + 1 ))"
-  else
+  elif [ -z "$DP_BUDGET_NAMED" ]; then
     BUDGET_UNMEASURED="${BUDGET_UNMEASURED} writers"
   fi
 
-  B_SUITES=$(budget_field suites)
+  B_SUITES=$(budget_field "$PARALLEL_BUDGET" suites)
   if [ -n "$B_SUITES" ]; then
     [ $(( BUDGET_CLAIMED + 1 )) -gt "$B_SUITES" ] && budget_deny \
       "this passes the run's suite budget" \
@@ -1351,7 +1301,7 @@ machine genuinely has the room."
     BUDGET_UNMEASURED="${BUDGET_UNMEASURED} suites"
   fi
 
-  B_TREES=$(budget_field worktrees)
+  B_TREES=$(budget_field "$PARALLEL_BUDGET" worktrees)
   if [ -n "$B_TREES" ]; then
     BUDGET_LIVE=$(budget_live_trees "$BIONIC_ROOT")
     [ $(( BUDGET_LIVE + 1 )) -gt "$B_TREES" ] && budget_deny \
@@ -1468,8 +1418,39 @@ LEAD_CHARS="(\"[<\`$(printf '\047')"
 TRAIL_CHARS=")\"]>\`,;:!?.$(printf '\047')"
 QUOTE_CHARS="\`\"$(printf '\047')"
 
-lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omitted
-  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" '
+# ---------- the re-execution cap is the auditor's (wave-20 T4; REQ-7, Δ3, Δ9) ----------
+#
+# THREE IS THE AUDITOR'S NUMBER. Its source is the auditor mandate — "One auditor, one pass,
+# <=3 re-executions" (skills/canonical-sdlc/steps/5.md) — and it used to bind every role's
+# `Re-executes:`, so a test-runner re-running a jest, pytest and go floor split it into two
+# dispatches for a rule written about auditors (triage-B D3). Chris moved it (Δ3): the
+# auditor keeps three; every other role is bounded by SUITES_MAX (Δ9), the count that
+# already bounds `Suites:`, so the two spellings of one statement share one ceiling and no
+# new number exists.
+#
+# THE ROLE IS MATCHED WHOLE, as the auditor arm below matches it: the prefixed name the
+# harness sends and the bare word a hand-written brief uses. The answer is handed to the
+# lift's awk as `-v RUNS_CAP`; the refusal texts below read the same function, so the
+# number a refusal prints is the number the lift applied.
+DP_AUDITOR_RUNS_MAX=3
+DP_SUITES_MAX=200
+dp_runs_cap() {  # <subagent_type> -> how many runs that role's Re-executes: may declare
+  case "${1-}" in
+    bionic:auditor|auditor) printf '%s' "$DP_AUDITOR_RUNS_MAX" ;;
+    *) printf '%s' "$DP_SUITES_MAX" ;;
+  esac
+}
+# dp_runs_cap_words <subagent_type> -> the cap as the refusal texts say it.
+dp_runs_cap_words() {
+  case "${1-}" in
+    bionic:auditor|auditor) printf 'three' ;;
+    *) printf '%s' "$DP_SUITES_MAX" ;;
+  esac
+}
+
+lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines, absent kinds omitted
+  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" \
+    -v RUNS_CAP="$(dp_runs_cap "${2-}")" -v SUITES_CAP="$DP_SUITES_MAX" "$CMD_RUN_NORM_AWK"'
     # <sep> is the regex between the label and its value; the default is the
     # colon every labeled brief field uses. <bol> marks a label that only counts
     # at the START of a line — see the waiver note in BEGIN.
@@ -1545,7 +1526,13 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       return 1
     }
     function ispath(t) { return (pathshaped(t) && !istemplate(t)) }
-    function collapse(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
+    # ONE COLLAPSE, TWO STRENGTHS, BOTH OUT OF payload/scripts/lib/cmd-class.sh (wave-20 T4;
+    # REQ-7, D7). Every caller but one wants whitespace collapsed and nothing else — a
+    # waiver reason, a claim pattern, a deliverable. The one that stores a DECLARED RUN
+    # passes `run` and gets `cmdnorm_run`, the rule the writer-side budget arm builds its
+    # claim with (CMD_RUN_NORM_AWK, pasted in front of this program), so the two ends of
+    # the row are one rule and not two collapses that happen to agree today.
+    function collapse(s, run) { return (run ? cmdnorm_run(s) : cmdnorm_ws(s)) }
     # The claimed PROCESS PATTERN out of a subprocess-claim span. Author-marked
     # first (a backticked or quoted run is unambiguous), then the punctuation the
     # sentence uses to separate the pattern from its output file.
@@ -1934,6 +1921,12 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         # refused at run time as undeclared, 40 minutes after the author could have fixed it.
         if (tok == "" || wholeslot(tok)) continue
         if (tok ~ /[<>]/) { print "re_executes_bad=a redirection: " tok; continue }
+        # STORED THROUGH THE ONE RUN RULE (wave-20 T4; REQ-7, D7). The refusals above run
+        # first and on the text as written — a declaration naming a redirection is still told
+        # so (16ld3, Chris D14) — so what reaches here carries no redirection, no unquoted
+        # pipe, and this is the identity today. It is here so the rule that builds the claim
+        # is, by construction, the rule that built the declaration.
+        tok = collapse(tok, 1)
         if (c < RUNS_MAX) {
           out = (out == "" ? BT tok BT : out " " BT tok BT)
           c++
@@ -1981,15 +1974,16 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # whole roster with room to grow, and hitting IT is loud: see warncap() below, never a
       # silent exit 0.
       FILES_MAX = 200
-      SUITES_MAX = 200
-      # HOW MANY RUNS A `Re-executes:` SPAN DECLARES (D3; REQ-1 AC-1.6). Three, because
-      # three is the cap the auditor mandate already states for re-executions
-      # (skills/canonical-sdlc/steps/5.md: "One auditor, one pass, <=3 re-executions") and a
-      # second number for the same idea is a second answer. Unlike FILES_MAX/SUITES_MAX this
-      # is not a bound on the width of a row field — it is the ceiling of the declaration
-      # itself — so
-      # hitting it is a fact about the brief, and loud: see marked_runs() above.
-      RUNS_MAX = 3
+      SUITES_MAX = SUITES_CAP + 0
+      # HOW MANY RUNS A `Re-executes:` SPAN DECLARES (D3; REQ-1 AC-1.6; wave-20 T4, Δ3, Δ9).
+      # The ROLE decides, on the bash side (`dp_runs_cap`, above this function): three for an
+      # auditor, whose mandate states "<=3 re-executions" (skills/canonical-sdlc/steps/5.md),
+      # and SUITES_MAX for every other role. Unlike FILES_MAX/SUITES_MAX this is not a bound
+      # on the width of a row field — it is the ceiling of the declaration itself — so
+      # hitting it is a fact about the brief, and loud: see marked_runs() above. A caller that
+      # passes no cap gets SUITES_MAX, never an unbounded lift.
+      RUNS_MAX = RUNS_CAP + 0
+      if (RUNS_MAX <= 0) RUNS_MAX = SUITES_MAX
       # THE MARK THE AUTHOR WRITES, NAMED RATHER THAN SPELT. This whole program is one single-quoted
       # shell word, so a backtick literal inside it would be one more character the shell
       # reads before awk does; `QUOTE_CHARS` is assembled above this function with the
@@ -2254,10 +2248,12 @@ TOOL_USE_ID=$(sanitize "$(_jq '.tool_use_id')" 200)
 #
 # OPEN IS A ROSTER READING, AND ONLY A ROSTER READING (ADR-024, P-A/P-B). `intended`,
 # `confirmed` and `identified` are the three live states a dispatch passes through; a name
-# is FREE again once the landing gate has journalled a `landing-swept/v1|…|state=MET` marker
-# for it, which is the same discharge `hooks/session-start.sh`'s `open_rows` and the poker's
-# `adopt_fold` apply. No transcript is read, no live set is consulted, and nothing is asked
-# of the model: the fix names a free name rather than a chore.
+# is FREE again once an ack taken after its latest launch closes it — `roster_open_names`,
+# the one close predicate the budget wall, the sweeper, the stop wall and the poker's
+# `adopt_fold` ask (epic-23 wave-20 T2, D10). A `landing-swept/v1|…|state=MET` marker freed a
+# name here until then and nowhere else; it frees nothing now. No transcript is read, no live
+# set is consulted, and nothing is asked of the model: the fix names a free name rather than
+# a chore.
 #
 # THE SCOPE IS THIS SESSION. Another session's roster reserves nothing here — names are
 # unique per session because the roster is per session, which is the scope every other
@@ -2270,27 +2266,37 @@ TOOL_USE_ID=$(sanitize "$(_jq '.tool_use_id')" 200)
 # AN UNNAMED DISPATCH IS NOT JUDGED HERE. There is no name to be in flight, and the async
 # dispatches that carry none are exactly the ones nothing addresses by name.
 if [ -n "$AGENT_NAME" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
-  # ONE READING, ASKED OF ONE NAME. `dp_roster_contracts` (defined beside ROSTER_FILE above)
-  # walks this roster once and answers, per name, what its LATEST contract says — the half of
-  # this arm that was position-blind until T26 and therefore inert for every landed name. It
-  # lives up there rather than here because the budget wall needs the same answer and two
-  # spellings of one question are two answers; its header carries the argument.
+  # ONE PREDICATE, ASKED OF ONE NAME. `roster_open_names` (payload/scripts/lib/roster.sh)
+  # answers which names this roster still holds under contract, and the budget wall asks the
+  # same function, so the two walls cannot disagree about one name.
   #
   # THE ACK LEDGER IS PASSED, as the budget wall passes it (ADR-034, wave-19 D1). The ack
   # in the sweeper ledger is the ONE terminal state of a name: the Patrol writes it only
   # when a fresh panel confirms the agent gone, and `stop-orders.sh stopped` writes it
   # beside the stop. So a name acked LATER than its last launch is free here exactly as it
-  # is free to the budget — one question, one answer — and `ack_closes`'s time test keeps
-  # an ack older than a relaunch from freeing the live lineage behind it.
+  # is free to the budget — one question, one answer — and the predicate's time test keeps
+  # an ack older than a relaunch from freeing the live lineage behind it. The status the
+  # refusal names is the name's latest live row's: a label read off the roster, not a close.
   #
   # THE RESIDUAL RISK, NAMED: a hand-written ack for an agent that is still working
   # unlocks its name, and a second dispatch under it is the collision this arm exists to
   # prevent. That is a human act on a human's row; no reader here can tell it from a true
   # close without a live panel, which this wall does not have.
-  DP_INFLIGHT=$(dp_roster_contracts "$ROSTER_FILE" "$ACK_LEDGER_FILE" \
-    | /usr/bin/awk -F'|' -v want="$AGENT_NAME" \
-        '$1 == want && $3 == "open" { st = $2 } END { if (st != "") print st }' 2>/dev/null) \
-    || DP_INFLIGHT=""
+  DP_INFLIGHT=""
+  if /usr/bin/grep -qxF -- "$AGENT_NAME" <<< "$(roster_open_names "$ROSTER_FILE" "$ACK_LEDGER_FILE")"; then
+    DP_INFLIGHT=$(/usr/bin/awk -v want="$AGENT_NAME" -v rpfx="roster-state/${ROSTER_VERSION}|" '
+      function kv(line, key,   i, n, parts) {
+        n = split(line, parts, "|")
+        for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+        return ""
+      }
+      index($0, rpfx) == 1 && kv($0, "name") == want {
+        st = kv($0, "status")
+        if (st == "intended" || st == "confirmed" || st == "identified") last = st
+      }
+      END { print (last != "" ? last : "open") }
+    ' "$ROSTER_FILE" 2>/dev/null) || DP_INFLIGHT="open"
+  fi
   if [ -n "$DP_INFLIGHT" ]; then
     dp_finding "that name is in flight" "use the FILL line's name" \
       "    name: ${AGENT_NAME}   ·   its row on this session's roster: ${DP_INFLIGHT}
@@ -2301,12 +2307,15 @@ name — so two agents under one name is one contract, one address and two proce
 
 Fix: dispatch under the name the Patrol tick's FILL line printed for this task. It derives
 one that is free: the task id, or \`<id>-r<n>\` when that id has already had a run. You never
-choose a name yourself. If this row is finished, land it: its marker, or the Patrol's ack
-once the agent is gone, frees the name."
+choose a name yourself. If this row is finished, land it: the Patrol's ack, taken once the
+agent is gone, frees the name — a landing marker alone does not."
   fi
 fi
 
-LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')")
+# THE ROLE GOES IN WITH THE BRIEF (wave-20 T4; REQ-7, Δ3, Δ9): it decides the run cap.
+LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
+DP_RUNS_CAP=$(dp_runs_cap "$DP_SUBAGENT")
+DP_RUNS_CAP_WORDS=$(dp_runs_cap_words "$DP_SUBAGENT")
 
 field_of() {  # <kind>
   printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
@@ -2815,7 +2824,7 @@ INSIDE quotes is an ordinary argument and is admitted, so a regex alternation ne
 rewriting. An unfilled \`<slot>\` on its own is guidance and is ignored, but a bracket
 anywhere else in the run is read as redirection.
 
-Fix: mark each run with backticks, on a line of its own, at most three —
+Fix: mark each run with backticks, on a line of its own, at most ${DP_RUNS_CAP_WORDS} —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
 
 Then retry the dispatch."
@@ -2830,19 +2839,22 @@ fi
 # never told at dispatch. `RUNS_MAX` (3) is unchanged; a brief within the cap never reaches
 # this arm.
 if [ -n "$C_RUNS_DROPPED" ]; then
-  _dp_detail="The Re-executes: span named more runs than the 3-run cap admits, and this one
-was dropped:
+  _dp_detail="The Re-executes: span named more runs than the ${DP_RUNS_CAP}-run cap admits for
+this role (${DP_SUBAGENT:-unnamed}), and this one was dropped:
     ${C_RUNS_DROPPED}
 
 Every declared run goes on the roster row, and the writer-side budget arm compares the
 agent's own command against exactly that set — a run dropped here is a command that would
 be refused there 40 minutes later, for running exactly what its own brief had named.
 
-Fix: mark at most three runs with backticks, one line —
+The cap of three is the auditor's, from its mandate's \"<=3 re-executions\"; every other
+role may declare as many runs as a Suites: line may name suites (${DP_SUITES_MAX}).
+
+Fix: mark at most ${DP_RUNS_CAP_WORDS} runs with backticks, one line —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`, \`go test ./...\`
 
 Then retry the dispatch."
-  dp_finding "Re-executes: line exceeds the 3-run cap" "declare at most three runs" "$_dp_detail"
+  dp_finding "Re-executes: line exceeds the ${DP_RUNS_CAP}-run cap" "declare at most ${DP_RUNS_CAP_WORDS} runs" "$_dp_detail"
 fi
 
 if [ -n "$C_SUITES_BAD" ]; then
@@ -2960,7 +2972,7 @@ Where no impact command is configured, name the closed set yourself —
     Suites: tests/one.test.sh, tests/two.test.sh
 
 Where the tests are not shell suites, name the commands themselves instead — each marked
-with backticks, at most three —
+with backticks, at most ${DP_RUNS_CAP_WORDS} —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
 
 Or waive the budget for a brief that runs no suite at all —

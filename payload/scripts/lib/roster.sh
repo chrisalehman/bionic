@@ -271,3 +271,91 @@ live_ids_of_name() {  # <name> -> the agent ids currently under an open contract
   ' "$f" 2>/dev/null
   return 0
 }
+
+# ---------- THE ONE READER OF "IS THIS NAME CLOSED" (epic-23 wave-20 T2, REQ-10, D10) ----
+#
+# FOUR SPELLINGS, FOUR ANSWERS. Until this wave four readers each carried their own rule:
+# dispatch preflight closed a name on a `landing-swept/v1|state=MET` marker OR an ack taken
+# after the row launched; the sweeper's `row_acked` and the stop wall's occupancy pass closed
+# it on ANY ack of the name, ever; the tick's `adopt_fold` closed it on any ack or any MET
+# marker. Driven both ways (triage-C claim 4): a name acked and dispatched again read open to
+# preflight and closed to the rest, and a MET-but-unacked row read closed to preflight and to
+# adopt and open to the sweeper and the stop wall. So the Patrol offered a FILL the dispatch
+# wall refused, and the dispatch wall admitted a row the stop wall then counted over budget.
+#
+# THE RULE, IN ADR-034's TERMS: the ack is the one terminal state of a name. A name is closed
+# when an ack for it was taken AFTER its latest live row (`intended`, `confirmed` or
+# `identified`) was launched, and by nothing else:
+#   * A MET MARKER CLOSES NOTHING. It records that a landing was seen, not that the agent
+#     left; the Patrol acks the row once a fresh panel shows the agent gone.
+#   * AN ACK OLDER THAN A RELAUNCH CLOSES NOTHING. The ledger holds no ordering against the
+#     roster, so the comparison is by time: a name re-dispatched after its ack is open again.
+#     The stamps compare lexically, which is exact for the one shape both writers stamp —
+#     `date -u +%Y-%m-%dT%H:%M:%SZ` — and the ack is strictly later: an ack in the same
+#     second as a launch cannot say which came first, and the safe direction is open.
+#   * AN UNREADABLE STAMP ON EITHER SIDE CLOSES NOTHING. A stamp that is not that shape
+#     (hand-written, truncated, empty) cannot be ordered, and spending a slot on a row that
+#     might still be working is the fail-closed direction (rule fail-closed-constants).
+#   * A NAME WITH NO LIVE ROW IS NOT ANSWERED. There is no contract to hold open, so it is
+#     neither printed here nor counted; a reader that needs "was it ever acked" asks the
+#     ledger itself (the sweeper's `acked=` does, for such a row).
+#
+# OUTPUT: the open names, one per line, in the order they first appear on the roster. An
+# unnamed row answers as `(unnamed)`, the spelling the sweeper's verdict gives it, so an ack
+# of that name can close it. `[session id]` keeps only rows of that session (a row with no
+# `session=` is kept — the file is per-session by construction, and the filter only guards a
+# hand-copied file); omit it for a predecessor's roster, whose rows carry its own id.
+#
+# A ROSTER THAT IS ABSENT, UNREADABLE OR A SYMLINK answers nothing, as `live_ids_of_name`
+# does; a caller that must not read "nothing" as "all closed" checks for that first (the
+# stop wall does). A LEDGER that is absent, unreadable or a symlink is read as empty — no ack
+# — which leaves every live name open: the generous direction for occupancy.
+roster_open_names() {  # <roster> [ack ledger] [session id] -> the open names, one per line
+  local f="${1:-}" ledger="${2:-}" sid="${3:-}" ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}"
+  [ -n "$f" ] && [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] || return 0
+  if [ -n "$ledger" ]; then
+    { [ -f "$ledger" ] && [ ! -L "$ledger" ] && [ -r "$ledger" ]; } || ledger=""
+  fi
+  awk -v ledger="$ledger" -v sid="$sid" -v rpfx="roster-state/${ver}|" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
+    # The one stamp shape both writers produce, spelled without an interval expression:
+    # /usr/bin/awk here is the one-true-awk, and `{4}` is not a repetition count there.
+    function stamp_ok(s) {
+      return (s ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/)
+    }
+    BEGIN {
+      if (ledger != "") {
+        while ((getline aline < ledger) > 0) {
+          if (index(aline, "sweeper-ledger/v1|") != 1) continue
+          if (kv(aline, "event") != "ack") continue
+          anm = kv(aline, "name"); if (anm == "") continue
+          aat = kv(aline, "at");   if (!stamp_ok(aat)) continue
+          if (!(anm in ACK) || aat "" > ACK[anm] "") ACK[anm] = aat
+        }
+        close(ledger)
+      }
+    }
+    index($0, rpfx) == 1 {
+      if (!live_status(kv($0, "status"))) next
+      rs = kv($0, "session")
+      if (sid != "" && rs != "" && rs != sid) next
+      nm = kv($0, "name"); if (nm == "") nm = "(unnamed)"
+      gsub(/\t/, " ", nm)
+      if (!(nm in seen)) { seen[nm] = 1; order[++n] = nm }
+      born[nm] = kv($0, "launched_at")
+    }
+    END {
+      for (i = 1; i <= n; i++) {
+        nm = order[i]
+        if (stamp_ok(born[nm]) && (nm in ACK) && ACK[nm] "" > born[nm] "") continue
+        print nm
+      }
+    }
+  ' "$f" 2>/dev/null
+  return 0
+}
