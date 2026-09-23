@@ -32,6 +32,8 @@ HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 cleanup_dirs=()
 cleanup() {
   for d in "${cleanup_dirs[@]}"; do
+    # A row below locks a plan folder at mode 000; `rm -rf` cannot descend into it.
+    chmod -R u+rwx "$d" 2>/dev/null
     rm -rf "$d"
   done
 }
@@ -6870,6 +6872,61 @@ s35_bind "$r35g" "$S35_SID_B" "$S35_B"
 s35_run "$r35g" "$S35_SID_B" 'git commit -m "x"'
 s35_assert "35g3 bound to a LIVE plan over the same tree is gated on it, not on the stray" \
   0 - "$S35_STRAY"
+
+# --- 35h AC-2.1, the UNREADABLE plan: it exists, and nothing can be validated against it ---
+#
+# (wave-20 T1, REQ-2, D2.) 35e and 35g1 above allow a commit bound to a plan that is GONE:
+# nothing is left to protect. A plan that is still there but cannot be read is the opposite
+# case — the run may be mid-flight, and admitting the commit waves it past every step check
+# the plan would have made. Two shapes, both driven by triage-D and research D3 N1 as
+# admitted before this wave: the file at mode 000, and the file inside a folder that cannot
+# be opened (which `-e` reports exactly as it reports a deleted file).
+#
+# THE TREE MAKES A FALL-THROUGH VISIBLE. B, the newest, carries the evidence, so a gate that
+# resolved B in place of the unreadable plan would ADMIT this commit — the refusal can only
+# come from the bound-unreadable arm itself.
+r35h=$(s35_root)
+s35_two_plans "$r35h" b
+S35_LOCK="$r35h/.bionic/docs/plans/wave-locked.plan.md"
+printf '%s\n' "$(plan 6 "" "$matrix_complete")" > "$S35_LOCK"
+chmod 000 "$S35_LOCK"
+if [ -e "$S35_LOCK" ] && [ ! -r "$S35_LOCK" ]; then
+  ok "35h premise: the bound plan exists at mode 000 and this user cannot read it"
+else
+  no "35h premise: the bound plan exists at mode 000 and this user cannot read it" \
+    "readable — the suite runs with a privilege that reads mode 000"
+fi
+s35_bind "$r35h" "$S35_SID_A" "$S35_LOCK"
+s35_run "$r35h" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35h1 bound to a mode-000 plan → the commit is refused" 2 "cannot be read" -
+s35_assert "35h1 …and the refusal names the plan's path" 2 "$S35_LOCK" -
+s35_assert "35h1 …and never calls it closed or says there is no open run" 2 - "no open run"
+s35_assert "35h1 …and the open plan beside it is never read" 2 - "$S35_B"
+chmod 644 "$S35_LOCK"
+s35_run "$r35h" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35h1 control: the same plan made readable is gated on its own evidence (BLOCKED for Step 6)" \
+  2 "$S35_LOCK" "cannot be read"
+
+r35i=$(s35_root)
+s35_two_plans "$r35i" b
+mkdir -p "$r35i/.bionic/docs/plans/vault"
+S35_VAULTED="$r35i/.bionic/docs/plans/vault/wave-vaulted.plan.md"
+printf '%s\n' "$(plan 6 "" "$matrix_complete")" > "$S35_VAULTED"
+chmod 000 "$r35i/.bionic/docs/plans/vault"
+if [ ! -e "$S35_VAULTED" ] && [ ! -x "$r35i/.bionic/docs/plans/vault" ]; then
+  ok "35i premise: the plan's folder cannot be opened, so the plan reads as absent"
+else
+  no "35i premise: the plan's folder cannot be opened, so the plan reads as absent" \
+    "the folder opens — the suite runs with a privilege that ignores mode 000"
+fi
+s35_bind "$r35i" "$S35_SID_A" "$S35_VAULTED"
+s35_run "$r35i" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35i bound to a plan inside an unopenable folder → the commit is refused" \
+  2 "cannot be read" -
+s35_assert "35i …and the refusal names the plan's path" 2 "$S35_VAULTED" -
+s35_assert "35i …and does not say the plan is not on disk" 2 - "is not on disk"
+s35_assert "35i …and the open plan beside it is never read" 2 - "$S35_B"
+chmod 755 "$r35i/.bionic/docs/plans/vault"
 
 # ============================================================
 # Section 36: environments arm — declared, covered, fog (S3, AC-4, AC-23)
