@@ -2805,7 +2805,8 @@ _eg_git_wt_name() {
   return 0
 }
 
-# _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step>" for the ONE `## Tasks` row
+# _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step><TAB><status><TAB><kind>" for
+# the ONE `## Tasks` row
 # whose `worktree` cell names that tree, and _EG_ROW_DUP to the ids when more than one does.
 # Returns 1 for "this plan has no register", 3 for "the register is ambiguous", 0 otherwise.
 #
@@ -2856,7 +2857,11 @@ _eg_row_for_worktree() {
       # RUN, and the fork below cannot ask that question of a value it was never handed.
       # One more cell of a table this function already parses — no new fact is fetched
       # (the D11 freeze, .claude/rules/hook-authoring.md).
-      _EG_ROW="$_id	$(units_field "$_line" step)	$(units_field "$_line" status)"
+      # AND A FOURTH, THE KIND (wave-20 REQ-5, Δ6). A row ahead of the run is judged by its
+      # task arms when a writer is at work in it — unless it is a gate act (`integrate`,
+      # `close`), whose commit must wait for the run to reach its step — so the fork needs
+      # the row's kind as well as its status.
+      _EG_ROW="$_id	$(units_field "$_line" step)	$(units_field "$_line" status)	$(units_field "$_line" kind)"
       _EG_ROW_DUP="$_id"
     else
       _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
@@ -2988,6 +2993,8 @@ if [ -n "$_EG_WT" ]; then
     _EG_RSTEP="${_EG_ROW#*	}"
     _EG_RSTATUS="${_EG_RSTEP#*	}"   # third field — empty on a table whose rows are short
     _EG_RSTEP="${_EG_RSTEP%%	*}"
+    _EG_RKIND="${_EG_RSTATUS#*	}"   # fourth field (wave-20 Δ6)
+    _EG_RSTATUS="${_EG_RSTATUS%%	*}"
     _EG_CURNUM="${CURRENT%[ab]}"
     case "$_EG_RSTEP" in
       ''|*[!0-9]*)
@@ -3045,6 +3052,27 @@ if [ -n "$_EG_WT" ]; then
           # step 4, the one pointer step the substitution can land on; every other substituted
           # step stays byte-identical), for the pointer exit a few hundred lines below to read.
           [ "$_EG_RSTEP" = 4 ] && _EG_SUBSTITUTED=1
+        elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null \
+             && [ "$_EG_RSTATUS" = "active" ] && [ "$_EG_CURNUM" -ge 4 ] 2>/dev/null \
+             && [ "$_EG_RKIND" != "integrate" ] && [ "$_EG_RKIND" != "close" ]; then
+          # A WORK ROW AHEAD OF THE RUN, WITH A WRITER AT WORK IN IT (wave-20 REQ-5, AC-5.1;
+          # Δ1, Δ6; ADR-036). Readiness is the prerequisite graph now: a Step-6 review whose
+          # deps have landed IS dispatched while the run sits at Step 5, and the refusal below
+          # would leave its writer finished and unable to commit — the fill's own dead end.
+          # So an `active` row ahead of `current:` is judged exactly as an in-step `active`
+          # row is, by the TASK arms (`CURRENT=4`, the note, the substitution flag), for the
+          # reasons that arm's docblock gives below.
+          #
+          # THREE THINGS KEEP THE REFUSAL, and each is the case the refusal was right about:
+          # a row that is NOT `active` (no writer was dispatched into that tree, so nobody
+          # should be committing from it); an `integrate` or `close` row (a gate act, whose
+          # real prerequisite is a gate passing — the merge must not commit before Verify
+          # has); and a run below Step 4 (nothing fills before Step-3 approval, so nothing
+          # can legitimately be ahead of it).
+          printf "evidence-gate: judged by row %s's task arms (run at current: %s)\n" \
+            "$_EG_RID" "$CURRENT" >&2
+          CURRENT=4
+          _EG_SUBSTITUTED=1
         elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null; then
           _eg_detail="canonical-sdlc worktree '${_EG_WT}' belongs to '## Tasks' row ${_EG_RID}, whose step is ${_EG_RSTEP}; the run is at current: ${CURRENT}.
 Plan: $PLAN
@@ -3076,7 +3104,8 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           #
           # ONLY `active`, AND ONLY AT THE ROW'S OWN STEP. A `pending`, `landed` or
           # `dropped` row is nobody at work: its tree falls through to `current:` exactly as
-          # it does today (25g(k2)), and a row AHEAD of the run keeps its refusal above. A
+          # it does today (25g(k2)). A row AHEAD of the run is the arm above: judged the same
+          # way when it is an active work row (wave-20 Δ6), refused otherwise. A
           # row BEHIND the run keeps the wave-14 substitution and its wording, which for the
           # step-4 rows that make up every real task batch resolves to these same task arms
           # — see A-T1.2 for the residual case that leaves open.

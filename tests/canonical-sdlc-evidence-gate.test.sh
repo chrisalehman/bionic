@@ -4352,7 +4352,9 @@ s25r_tasks="## Tasks
 |---|---|---|---|---|---|---|---|---|---|---|
 | T3 | 4 | build | the build in its own tree | senior-implementor | — | 60m | REQ-2 | a.sh | wt-T3 | active |
 | T9 | 6 | review | the review the run has not reached | critic | T3 | 30m | REQ-2 | b.sh | wt-T9 | pending |
-| T5 | 5 | build | the row standing exactly where the run stands | implementor | — | 20m | REQ-2 | c.sh | wt-T5 | active |"
+| T5 | 5 | build | the row standing exactly where the run stands | implementor | — | 20m | REQ-2 | c.sh | wt-T5 | active |
+| T6 | 6 | review | a review filled ahead of the run, its writer at work | critic | T3 | 30m | REQ-5 | d.sh | wt-T6 | active |
+| T8 | 8 | integrate | the merge, a gate act, ahead of the run | implementor | T3 | 30m | REQ-5 | — | wt-T8 | active |"
 
 s25r_plan() {
   printf '%s\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-14T00:00Z "approved"\nStep 4:\n%s\nStep 5:\n%s\n\n%s\n\n%s\n' \
@@ -4374,6 +4376,8 @@ git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T3" -b s25r-t3
 git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T9" -b s25r-t9
 git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-stray" -b s25r-stray
 git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T5" -b s25r-t5
+git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T6" -b s25r-t6
+git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T8" -b s25r-t8
 
 # THE ALLOW-PATH NOTE, SPELLED ONCE (T24 item (c), architecture review \u00a74.1). Before this
 # wave the gate spoke when it DECLINED to use the register (25g(f)) and stayed silent when it
@@ -4412,20 +4416,51 @@ else
     "expected block naming pass=331; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# --- 25g(e) / AC-2.3: a row AHEAD of the run is refused, naming both steps ----------------
+# --- 25g(e) / AC-2.3, RE-AUTHORED BY wave-20 REQ-5 (Δ6, AC-5.1): a row AHEAD of the run ----
 #
-# The fail-safe direction. A tree whose row sits at Step 6 while the run is at Step 5 is not
-# a writer running early; it is a tree the register says nobody should be committing from
-# yet, and the refusal has to say which row and which two steps or the reader cannot act.
+# Through 1.8.6 every row ahead of `current:` was refused: the step filter meant nothing ahead
+# could be dispatched, so a tree whose row sat past the run was one nobody should be
+# committing from. Readiness is now the prerequisite graph (Δ1), so a Step-6 row whose deps
+# have landed IS dispatched during Step 5, and a writer that cannot commit would be the fill's
+# own dead end. Δ6 draws the line: an ACTIVE work row ahead of the run is a writer at work and
+# is judged by the task arms, exactly as an in-step active row is; a row that is NOT active,
+# and any integrate/close row (a gate act, whose real prerequisite is a gate passing), keeps
+# the refusal — and the refusal still names the row and both steps.
+#
+# 25g(e): T9 is PENDING — no writer was dispatched into its tree — so it keeps the refusal.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T9" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
    && grep -q "T9" <<<"$HOOK_VSTDERR" \
    && grep -qE "(^|[^0-9])6([^0-9]|$)" <<<"$HOOK_VSTDERR" \
    && grep -qE "(^|[^0-9])5([^0-9]|$)" <<<"$HOOK_VSTDERR"; then
-  ok "25g(e) AC-2.3 a commit from a tree whose row is ahead of current: is refused, naming T9, 6 and 5"
+  ok "25g(e) AC-2.3 a commit from a tree whose PENDING row is ahead of current: is refused, naming T9, 6 and 5"
 else
-  no "25g(e) AC-2.3 a commit from a tree whose row is ahead of current: is refused, naming T9, 6 and 5" \
+  no "25g(e) AC-2.3 a commit from a tree whose PENDING row is ahead of current: is refused, naming T9, 6 and 5" \
     "expected block naming T9/6/5; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# 25g(e2) / AC-5.1: T6 is an ACTIVE Step-6 review row, filled at Step 5 because its deps
+# landed. Its commit is judged by the task arms — allowed on the same plan whose Step-5 block
+# refuses a main-root commit (25g(d)) — and the note names the row, as the in-step arm's does.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T6" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] \
+   && [ "$HOOK_STDERR" = "evidence-gate: judged by row T6's task arms (run at current: 5)" ]; then
+  ok "25g(e2) AC-5.1 an ACTIVE row ahead of current: commits, judged by its task arms, and the note says so"
+else
+  no "25g(e2) AC-5.1 an ACTIVE row ahead of current: commits, judged by its task arms, and the note says so" \
+    "expected allow + the task-arms note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# 25g(e3) / Δ6: T8 is an ACTIVE Step-8 integrate row. A gate act ahead of the run keeps the
+# refusal whatever its status: the merge must not commit before Verify has passed.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T8" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -q "T8" <<<"$HOOK_VSTDERR" \
+   && grep -qE "(^|[^0-9])8([^0-9]|$)" <<<"$HOOK_VSTDERR"; then
+  ok "25g(e3) Δ6 an ACTIVE integrate row ahead of current: is still refused, naming T8 and 8"
+else
+  no "25g(e3) Δ6 an ACTIVE integrate row ahead of current: is still refused, naming T8 and 8" \
+    "expected block naming T8/8; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # --- 25g(f): a tree no row owns keeps today's behaviour, and says so ----------------------
