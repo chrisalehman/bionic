@@ -8811,6 +8811,54 @@ ln -s "$s9_root" "$s9_tmp/root-link"
 s9_expect_judged "9e '-C' through a symlink to the root is the root, and is judged" \
   "$s9_root" "git -C $s9_tmp/root-link commit -m x" "the suite is not fully green"
 
+# --- 9g / AC-3.1: an env spelling of the commit gets the git spelling's verdict (wave-20 T3) --
+#
+# THE FAULT (triage-D row 3, Step-6 addition; research D3 REQ-3). The argv reader dropped a bare
+# `env` only, so `env -C <root>`, `env -i` and `/usr/bin/env` left an option as argv[0] and no
+# commit was read at all: `env -C <root> git commit` was ADMITTED in silence where `git -C <root>
+# commit` is refused. The reader now skips env and its options and records its directory, and
+# the gate places the commit there. Every row below is refused exactly as its 9c control is.
+s9_expect_judged "9g AC-3.1 'env -C <root> git commit' is refused as 'git -C <root> commit' is" \
+  "$s9_root" "env -C $s9_root git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g AC-3.1 …and 'env --chdir=<root> git commit'" \
+  "$s9_root" "env --chdir=$s9_root git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g AC-3.1 …and 'env -i git commit' from the root" \
+  "$s9_root" "env -i git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g …and 'env -u FOO git commit' from the root" \
+  "$s9_root" "env -u FOO git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g …and '/usr/bin/env -C <root> git commit'" \
+  "$s9_root" "/usr/bin/env -C $s9_root git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g …and 'env -C<root> git commit' (value inline)" \
+  "$s9_root" "env -C$s9_root git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g …and \"env -S 'git commit -m x'\" (env's own split string)" \
+  "$s9_root" "env -S 'git commit -m x'" "the suite is not fully green"
+# THE SAME VERDICT, BYTE FOR BYTE. The judged rows above match a substring; this one holds the
+# two spellings to one exit and one refusal line.
+run_hook_cwd "$s9_home" "$s9_root" "$s9_root" "git -C $s9_root commit -m x"
+s9g_git="$HOOK_EXIT|$HOOK_STDERR"
+run_hook_cwd "$s9_home" "$s9_root" "$s9_root" "env -C $s9_root git commit -m x"
+s9g_env="$HOOK_EXIT|$HOOK_STDERR"
+expect_eq "9g AC-3.1 'env -C <root>' and 'git -C <root>' get one exit and one refusal line" "$s9g_git" "$s9g_env"
+# THE ROW ATTRIBUTION FOLLOWS THE DIRECTORY: a linked worktree reached by env -C is judged, as
+# 9d judges it reached by git -C.
+s9_expect_judged "9g …and 'env -C <linked worktree> git commit' is judged as 9d's '-C' is" \
+  "$s9_root" "env -C $s9_root/.worktrees/19-T9 git commit -m x" "the suite is not fully green"
+# D3-3, FAIL-CLOSED: an env spelling is never exempted as outside the repository. `_eg_git_only`
+# refuses a first word of `env`, so `env -C <scratch> git commit` is judged against this run's
+# plan where `git -C <scratch> commit` (9a) is admitted. A writer who means the scratch repo
+# spells `git -C`.
+s9_expect_judged "9g D3-3 'env -C <scratch> git commit' is judged, never exempted (fail-closed)" \
+  "$s9_root" "env -C $s9_scratch git commit -q --allow-empty -m x" "the suite is not fully green"
+# CONTROLS: env in front of a non-commit is still no commit, and git's own absolute -C after an
+# env -C places the commit where git will (the scratch repo is still judged: env is the first word).
+run_hook_cwd "$s9_home" "$s9_root" "$s9_root" "env -C $s9_root git status"
+expect_eq "9g control: 'env -C <root> git status' is no commit and is admitted" "0" "$HOOK_EXIT"
+s9_expect_judged "9g control: 'env -C <scratch> git -C <root> commit' is judged in the root" \
+  "$s9_root" "env -C $s9_scratch git -C $s9_root commit -m x" "the suite is not fully green"
+# T6f's DE-QUOTE DISQUALIFIER STILL HOLDS behind env: a quote-split --git-dir naming the root.
+s9_expect_judged "9g T6f 'env git --git-d\"\"ir=<root>/.git commit' from the scratch repo is judged" \
+  "$s9_scratch" "env git --git-d\"\"ir=$s9_root/.git commit -m x" "the suite is not fully green"
+
 # --- 9f / AC-9.2: the plan is never opened on an outside commit (trace) --------------------
 #
 # THE TRACE CHANNEL IS STDERR ITSELF, POINTED AT A FILE. A prelude (BASH_ENV, sourced before
