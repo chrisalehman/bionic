@@ -572,9 +572,13 @@ case "$VERB" in
     # the name is gone. Present on the panel -> refused, naming it live and its verdict.
     # Stale or absent -> refused: a verb that cannot see does not ack. Since T1e (audit V-1)
     # the verdict picks the ack's reason instead of gating it: MET/WAIVED closes `landed`,
-    # UNMET closes `abandoned`, anything else is refused naming the state. The ack this verb
-    # writes is `--by human`, never `--by patrol` — this is a deliberate model-callable verb,
-    # not the tick's own automated sweep, and the ledger's `by=` field says which one happened.
+    # UNMET closes `abandoned`. Since T1g (audit V2-1, critic C2-2) a fresh-and-absent panel
+    # also closes a STILL-LIVE row `abandoned` — a stale progress artifact is not liveness
+    # once the panel says the agent is gone — except when the state's own claimed-process
+    # pattern still matches a live process, which the panel cannot speak to and which stays
+    # refused. AMBIGUOUS is always refused, naming the state. The ack this verb writes is
+    # `--by human`, never `--by patrol` — this is a deliberate model-callable verb, not the
+    # tick's own automated sweep, and the ledger's `by=` field says which one happened.
     _target="$(clean "$ORDER_TARGET")"
     [ -n "$_target" ] || usage "stopped needs a non-empty target."
     if [ ! -f "$SWEEPER" ]; then
@@ -600,13 +604,26 @@ case "$VERB" in
     # blocked and counted against the budget with no close but a hand `sweeper ack`. The word
     # is honest about what happened — never `landed`, since nothing landed, and never the
     # tick's `moot-and-gone`, which names a row that had nothing to produce. Every reader of
-    # the ledger closes the row on the ack alone, whatever its reason (ADR-034). Any other
-    # state (STILL-LIVE, AMBIGUOUS) is refused here, naming it: the verdict itself says the
-    # row is not settled enough to close.
+    # the ledger closes the row on the ack alone, whatever its reason (ADR-034).
+    #
+    # STILL-LIVE IS NOT A CLOSE ON ITS OWN (wave-19 T1g, audit V2-1, critic C2-2). Before this
+    # fix STILL-LIVE was refused unconditionally, whatever the panel showed: a writer
+    # TaskStopped mid-work has, by construction, a progress artifact inside its cadence, so
+    # `stopped` refused it — "not landed" — for up to the whole cadence, and the slot stayed
+    # occupied the entire time (the w19-T6 shape this verb exists for). The panel is the
+    # stronger fact once it is fresh: a name a fresh panel does not list is gone, whatever a
+    # stale progress file still claims. So STILL-LIVE is deferred here (`_still_live=1`,
+    # tentatively `_reason=abandoned`) rather than refused, and decided below, after the same
+    # `read_panel` / `_is_live` check every other state already runs through — no third
+    # predicate. AMBIGUOUS is unaffected: it names a fact about the NAME across rows, which a
+    # single row's panel absence cannot resolve, so it is still refused here.
     _state=$(line_field "$_line" state)
+    _detail=$(line_field "$_line" detail)
+    _still_live=0
     case "$_state" in
-      MET|WAIVED) _reason=landed ;;
-      UNMET)      _reason=abandoned ;;
+      MET|WAIVED)   _reason=landed ;;
+      UNMET)        _reason=abandoned ;;
+      STILL-LIVE)   _reason=abandoned; _still_live=1 ;;
       *)
         die "REFUSED — $_target's contract is $_state, not landed; nothing was acked."
         exit 2
@@ -618,12 +635,38 @@ case "$VERB" in
     # agent that is still working has not been stopped.
     read_panel
     if [ "$_live_ok" -ne 1 ]; then
-      die "REFUSED — no fresh panel reading; a verb that cannot see does not ack $_target ($_state)."
+      if [ "$_still_live" -eq 1 ]; then
+        die "REFUSED — $_target's contract is STILL-LIVE; retry after the cadence elapses, or when a fresh panel no longer lists it."
+      else
+        die "REFUSED — no fresh panel reading; a verb that cannot see does not ack $_target ($_state)."
+      fi
       exit 2
     fi
     if _is_live "$_target"; then
-      die "REFUSED — $_target ($_state) is still on the panel (live); stop it, then stopped closes its row."
+      if [ "$_still_live" -eq 1 ]; then
+        die "REFUSED — $_target's contract is STILL-LIVE; retry after the cadence elapses, or when a fresh panel no longer lists it."
+      else
+        die "REFUSED — $_target ($_state) is still on the panel (live); stop it, then stopped closes its row."
+      fi
       exit 2
+    fi
+    # PANEL-GONE OVERRIDES STILL-LIVE — but only the progress-artifact shape. A claimed
+    # process pattern that matches a live process (`session-sweeper.sh`'s `row_still_live`,
+    # checked before it ever reaches the progress-artifact clause) is a fact about a real OS
+    # process, not about this session's roster of agents; the panel only lists the latter, so
+    # its absence says nothing about whether that process is still running, and the refusal
+    # stands. A progress artifact merely dates the last write from an agent that, by this
+    # point, the fresh panel says is gone — the panel is the stronger fact there, and holding
+    # the row open for the rest of its cadence is exactly the stale-detection gap this row was
+    # opened to close. Logged as A-T1.13.
+    if [ "$_still_live" -eq 1 ] && printf '%s' "$_detail" | grep -q 'claimed process pattern'; then
+      die "REFUSED — $_target's contract is STILL-LIVE (a claimed process pattern still matches a live process); the panel showing it gone does not close this on its own."
+      exit 2
+    fi
+    if [ "$_still_live" -eq 1 ]; then
+      _age=$(printf '%s' "$_detail" | grep -oE 'last changed [0-9]+s ago' | grep -oE '[0-9]+')
+      _cad=$(printf '%s' "$_detail" | grep -oE '\([0-9]+s\)' | tr -d '()s')
+      say "panel-gone overrides STILL-LIVE (progress ${_age:-?}s old, cadence ${_cad:-?}s)"
     fi
     if ! _ack=$( cd "$REPO_REAL" 2>/dev/null || exit 9
                  CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
