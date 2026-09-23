@@ -1590,10 +1590,12 @@ DOCS_ROOT=$(docs_root "$BIONIC_ROOT")
 # the file that gets validated and the run that decides whether to enforce can never
 # disagree about which run this session is in.
 #
-#   bound-open <p>    this session's own plan, open      -> <p> is THE plan; enforce
-#   bound-closed <p>  its own plan, delivered/gone       -> <p> is THE plan; do not enforce
-#   fallback <p>      no binding: today's newest-plan    -> announced, then today's path
-#   none              no binding and no open run         -> today's path, unchanged
+#   bound-open <p>        this session's own plan, open  -> <p> is THE plan; enforce
+#   bound-closed <p>      its own plan, delivered/gone   -> <p> is THE plan; do not enforce
+#   bound-unreadable <p>  its own plan, there, unreadable -> REFUSED, naming <p> (below)
+#   fallback <p>          no binding: today's newest-plan -> announced, then today's path
+#   none                  no binding and no open run      -> today's path, unchanged
+#   anything else         a word this gate does not know  -> no plan is resolved in its place
 #
 # A BOUND SESSION NEVER FALLS THROUGH TO ANOTHER PLAN (AC-6). `bound-closed` is a terminal
 # answer, not a miss to recover from: the moment a run closes is exactly the moment a scan
@@ -1607,17 +1609,43 @@ EG_VPATH=""
 case "$EG_RUN" in *' '*) EG_VPATH="${EG_RUN#* }" ;; esac
 
 case "$EG_VERDICT" in
-  bound-open|bound-closed)
+  bound-open|bound-closed|bound-unreadable)
     PLAN="$EG_VPATH"
     ;;
-  *)
+  fallback|none)
     # UNBOUND: today's line, untouched, and reached by exactly the same code that
     # reached it before this wave. `fallback` and `none` both mean "no binding", and
     # AC-3's promise is that such a session behaves EXACTLY as it did — so the promise is
     # kept by running the old path rather than by a new one that agrees with it.
     PLAN=$(active_plan "$BIONIC_ROOT") || PLAN=""
     ;;
+  *)
+    # A WORD THIS GATE DOES NOT KNOW RESOLVES NOTHING (wave-20 T1, REQ-2). This arm used to
+    # be the unbound arm, so any verdict added to `session_run` without a line here fell
+    # into `active_plan` and was measured against the root's newest plan — somebody else's
+    # run. That is the failure `session_run` exists to end; an unknown word is not "unbound".
+    PLAN=""
+    ;;
 esac
+
+# THE UNREADABLE BOUND PLAN IS REFUSED, and here — above the misplacement sweep and above
+# the gone-plan arm, which a plan inside an unopenable folder would otherwise reach and be
+# admitted by as "not on disk" (wave-20 T1, REQ-2, D2; AC-2.1; research D3 N1). Nothing can
+# be validated against a plan this gate cannot read, and it may be a run mid-flight: the
+# gone-plan arm's answer ("nothing to protect, allow") is exactly wrong for it. The detail
+# names the component that cannot be opened — the plan itself, or the folder above it.
+_eg_refuse_unreadable() {
+  local _blk _ls
+  _blk=$(plan_unreadable "$PLAN") || _blk="$PLAN"
+  _ls=$(ls -ld "$_blk" 2>&1) || :
+  _eg_detail="The plan this session is bound to exists, and this gate cannot read it.
+Bound plan:    $PLAN
+Cannot open:   $_ls
+Nothing in it can be checked, so no commit is admitted against it. It is not closed and it
+is not gone, so no other plan is read in its place.
+Fix: restore read access (for example: chmod u+r on the plan, u+rx on its folder), then commit."
+  refuse exit2 commit "the bound plan cannot be read" "restore read access to the plan" "$_eg_detail"
+}
 
 # THE ANNOUNCEMENT, ONCE PER INVOCATION AND NOT ONCE PER SITE (AC-3, AC-6). It is emitted
 # where the resolution happens, not where each site consumes it, because the fact being
@@ -1629,6 +1657,10 @@ case "$EG_VERDICT" in
     ;;
   bound-closed)
     echo "evidence-gate: bound plan closed — $PLAN; this session has no open run" >&2
+    ;;
+  bound-unreadable)
+    echo "evidence-gate: bound plan unreadable — $PLAN" >&2
+    _eg_refuse_unreadable
     ;;
 esac
 
@@ -2632,10 +2664,17 @@ fi
 # time and landing on somebody else's wave. The unbound arm still asks `active_run` here,
 # in this position, exactly as it did before the wave: that is AC-3's "behaves exactly as
 # today", kept by running the old predicate rather than by trusting a new one to agree.
+#
+# `bound-unreadable` was refused at the resolution above and cannot arrive here; it is named
+# so that no reordering can let it fall to an arm that resolves another plan. The unbound
+# arm is `fallback|none` by name, and a word this gate does not know exits: it is never
+# handed to `active_run` (wave-20 T1, REQ-2).
 case "$EG_VERDICT" in
-  bound-open)   : ;;
-  bound-closed) exit 0 ;;
-  *)            active_run "$BIONIC_ROOT" >/dev/null || exit 0 ;;
+  bound-open)       : ;;
+  bound-closed)     exit 0 ;;
+  bound-unreadable) _eg_refuse_unreadable ;;
+  fallback|none)    active_run "$BIONIC_ROOT" >/dev/null || exit 0 ;;
+  *)                exit 0 ;;
 esac
 
 # ---------- THE ROW'S STEP IS THE JUDGMENT (wave-14 REQ-2, ADR-027) ----------
