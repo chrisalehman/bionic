@@ -659,7 +659,7 @@ case "$VERB" in
     # point, the fresh panel says is gone — the panel is the stronger fact there, and holding
     # the row open for the rest of its cadence is exactly the stale-detection gap this row was
     # opened to close. Logged as A-T1.13.
-    if [ "$_still_live" -eq 1 ] && printf '%s' "$_detail" | grep -q 'claimed process pattern'; then
+    if [ "$_still_live" -eq 1 ] && grep -q 'claimed process pattern' <<< "$_detail"; then
       die "REFUSED — $_target's contract is STILL-LIVE (a claimed process pattern still matches a live process); the panel showing it gone does not close this on its own."
       exit 2
     fi

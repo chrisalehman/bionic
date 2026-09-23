@@ -4083,7 +4083,7 @@ EOF
               SD_VERDICT="UNMET"
               ;;
             STILL-LIVE)
-              if printf '%s' "$SD_GDETAIL" | grep -q 'claimed process pattern'; then
+              if grep -q 'claimed process pattern' <<< "$SD_GDETAIL"; then
                 SD_REFUSE=1
                 SD_WHY="a claimed process pattern still matches a live process; the panel showing it gone does not close this on its own"
               else
