@@ -78,6 +78,39 @@
 
 ROSTER_SCHEMA_VERSION="v1"
 
+# ---------- THE READ-ONLY ROLE SET (wave-20 T7, REQ-9, D9, Δ12) ------------------------
+#
+# ONE DEFINITION OF "READ-ONLY", asked by every reader that has to tell a writer from a
+# reader: the dispatch approval checkpoint (before Step-3 approval only these launch), the
+# nested-dispatch arm (a subagent may launch only these), and the read-only commit arm
+# (`payload/scripts/lib/walls.sh` ARM C). It lives here because the role is a roster field and
+# this library owns the row.
+#
+# AN ALLOW-LIST, NOT A DENY-LIST. The approval arm used to name the two writer roles, so every
+# type it had never heard of — `fork`, `general-purpose`, `claude`, a consumer's own agent —
+# was admitted as if it were a reader (triage-B D2a). Here the unknown answers "writer".
+#
+# THE MEMBERS: the four bionic roles whose role files disallow Write and Edit, plugin-qualified
+# as the harness sends them, plus the harness's two no-write types `Explore` and `Plan`, bare
+# as the harness sends them. A bare `researcher` is NOT a member: a consumer's own agent of
+# that name may carry Write, and ARM C has always read the plugin-qualified spelling only.
+# tests/cross-gate-agreement.test.sh §RC holds this constant equal to the role files.
+#
+# A CONSTANT, NOT A READ OF agents/*.md: ARM C runs on every Bash call in an agent context,
+# and a file read there would be paid by every command (research D3-7).
+ROLE_READONLY_SET="bionic:researcher bionic:test-runner bionic:auditor bionic:critic Explore Plan"
+
+# A WHOLE-WORD MATCH WITHOUT WORD SPLITTING: the callers include walls.sh, which moves IFS
+# around its argv readers, so a `for r in $SET` loop here would answer by whatever IFS it
+# inherited. A type holding whitespace is never one name, and a quoted `$want` inside the
+# pattern is literal text, so `*` or `?` in a type cannot match as a glob.
+role_is_readonly() {  # <subagent_type> -> 0 a read-only role · 1 anything else, empty included
+  local want="${1-}"
+  case "$want" in ''|*[[:space:]]*) return 1 ;; esac
+  case " $ROLE_READONLY_SET " in *" $want "*) return 0 ;; esac
+  return 1
+}
+
 # The header comment line every roster file opens with. Both writers emit it when the file
 # is absent; it carries the schema version, so it belongs beside the row that carries the
 # same one rather than in two format strings that can disagree about which version this is.
