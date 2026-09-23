@@ -6119,6 +6119,57 @@ done <<S4EOF
 $S4_ANNOUNCERS
 S4EOF
 
+# ---- S.4f — BOUND-UNREADABLE: every reader names the plan it cannot read ------------
+#
+# (wave-20 T1, REQ-2, D2; AC-2.1, AC-2.3.) Session A is bound to a plan that is still on
+# disk at mode 000, while B's plan sits open and NEWEST beside it. That is the world where a
+# reader that took the unreadable plan for "closed" says "no open run" and stops protecting a
+# run that may be mid-flight, and a reader whose default arm re-resolved lands on B. So every
+# announcer must name A's plan as unreadable, never B's, never call A closed, never say
+# fallback — and the evidence gate, the one of the seven that owns the commit, refuses it.
+#
+# PRIVILEGE IS CHECKED FIRST: a suite running as root reads a mode-000 file, and every row
+# below would then pass on a readable plan. The premise row makes that visible.
+S4_UNREADABLE_RE='bound plan unreadable — '
+S4_R6=$(s4_world "s4-bound-unreadable")
+S4_R6A="$S4_R6/.bionic/docs/plans/epic-99/run-a.md"
+S4_R6B="$S4_R6/.bionic/docs/plans/epic-99/run-b.md"
+s4_bind "$S4_R6" "$SID_A" "$S4_R6A"
+chmod 000 "$S4_R6A"
+expect_true "S.4f premise: A's plan exists and this user cannot read it" \
+  bash -c '[ -e "$1" ] && [ ! -r "$1" ]' _ "$S4_R6A"
+
+while IFS='|' read -r _n _fn; do
+  [ -n "$_n" ] || continue
+  _out=$("$_fn" "$S4_R6" "$SID_A")
+  expect_true    "$_n says the bound plan is unreadable" \
+    grep -qE "$S4_UNREADABLE_RE" <<<"$_out"
+  expect_contains "…naming the plan THIS session is bound to" "$S4_R6A" "$_out"
+  expect_absent   "…and never the neighbour's open run, which is also the newest" \
+    "$S4_R6B" "$_out"
+  expect_absent   "…and never says this session has no open run" "no open run" "$_out"
+  expect_false   "…and never calls it closed" grep -qE "$S4_CLOSED_RE" <<<"$_out"
+  expect_false   "…and never calls it a fallback" grep -qE "$S4_FALLBACK_RE" <<<"$_out"
+done <<S4EOF
+$S4_ANNOUNCERS
+S4EOF
+
+# THE GATE REFUSES, and the refusal is the gate's own — an exit 2 with the commit verb.
+S4_R6_EG_RC=0
+mk_bash_payload "$SID_A" "$SANDBOX/t.jsonl" "$S4_R6" "git commit -m x" \
+  | env -u CLAUDE_PROJECT_DIR HOME="$S4_R6" CLAUDE_CODE_SESSION_ID="$SID_A" \
+      bash "$PARTY_EG" >/dev/null 2>&1 || S4_R6_EG_RC=$?
+expect_eq "…the evidence gate refuses the commit (exit 2) rather than admitting it" 2 "$S4_R6_EG_RC"
+expect_contains "…and says the bound plan cannot be read" "commit refused — the bound plan cannot be read" \
+  "$(s4_eg "$S4_R6" "$SID_A")"
+
+# THE STOP WALL HOLDS THE TURN, once: patrol-duties refuses the Stop naming the plan. The
+# re-entered Stop (stop_hook_active) is let through by hooks/stop.sh's one guard, so the
+# refusal cannot loop.
+expect_contains "…the stop wall refuses the turn naming the unreadable plan" \
+  "stop refused — the bound plan cannot be read" "$(s4_pdg "$S4_R6" "$SID_A")"
+chmod 644 "$S4_R6A"
+
 # ---- S.4d — session-start: silent when bound, a listing when not (AC-5) ---------
 #
 # The eighth consumer, and the one with no announcement at all. Its whole rendering IS the

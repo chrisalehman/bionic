@@ -450,6 +450,12 @@ case "$BIONIC_RUN_WORD" in
     fold_advise "context-spend: bound plan closed — $PLAN; this session has no open run"; _adv=1
     return "$_adv"
     ;;
+  bound-unreadable)
+    # (wave-20 T1, REQ-2, AC-2.3.) Named, never "no open run": the plan is there and this
+    # instrument cannot read the step it would record. patrol-duties holds the turn for it.
+    fold_advise "context-spend: bound plan unreadable — $PLAN"; _adv=1
+    return "$_adv"
+    ;;
   none|*)
     return "$_adv"
     ;;
@@ -1538,6 +1544,21 @@ case "$BIONIC_RUN_WORD" in
     fold_advise "patrol-duties-gate: bound plan closed — $PLAN; this session has no open run"; _adv=1
     PLAN=""
     ;;
+  bound-unreadable)
+    # THE TURN IS HELD, ONCE (wave-20 T1, REQ-2, D2; AC-2.3). A bound plan that is there and
+    # cannot be read is a run this session may still be in, with every wall that measures
+    # against it blind — the commit gate refuses, the tick cannot fill, the budget cannot be
+    # read. Saying so on the advisory channel alone lets the turn end on it. The refusal is
+    # once per turn by construction: hooks/stop.sh reads `stop_hook_active` ahead of every
+    # verdict, so the re-entered Stop passes and this cannot loop.
+    fold_advise "patrol-duties-gate: bound plan unreadable — $PLAN"
+    fold_block block stop "the bound plan cannot be read" "restore read access to the plan" \
+      "The plan this session is bound to exists and cannot be read: $PLAN
+It is not closed and it is not gone, so no other plan is read in its place. Until it can be
+read, commits against it are refused and the tick cannot fill from it.
+Fix: restore read access (chmod u+r on the plan, u+rx on its folder)."
+    return 2
+    ;;
   none|*)
     PLAN=""
     ;;
@@ -2385,6 +2406,11 @@ case "$BIONIC_RUN_WORD" in
     ;;
   bound-closed)
     fold_advise "patrol-revive: bound plan closed — $_RUN_PLAN; this session has no open run"; _adv=1
+    return "$_adv"
+    ;;
+  bound-unreadable)
+    # (wave-20 T1, REQ-2, AC-2.3.) Named, never "no open run"; patrol-duties holds the turn.
+    fold_advise "patrol-revive: bound plan unreadable — $_RUN_PLAN"; _adv=1
     return "$_adv"
     ;;
   none|*)
