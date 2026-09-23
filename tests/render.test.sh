@@ -371,4 +371,40 @@ rt_yaml_frontmatter_ok "$BV_BROKEN" >/dev/null
 expect_ne "9d: …and reverting the quoting on the same text really does fail it (9b discriminates)" \
   "0" "$?"
 
+
+section "Section 10: a read-only role cannot delegate — its role file disallows the Agent tool (wave-20 T7, AC-9.4)"
+#
+# DELEGATION IS ONE LEVEL DEEP (Δ12): a writer may launch a read-only helper, and the helper
+# may launch nothing. The harness enforces the second half from the role file's own
+# frontmatter — `disallowedTools` names the tool `Agent` (step2-cc-nested-depth.md §3) — so
+# the rendered file is the wall, and this section reads the FINALS the plugin ships, not the
+# templates. The writer roles keep the tool: a writer's read-only helper is the one level
+# the ruling allows, and dispatch-preflight refuses anything else it launches.
+#
+# rt_disallowed <file> -> the frontmatter's disallowedTools names, one per line.
+rt_disallowed() {
+  /usr/bin/awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { exit }
+                fm && /^disallowedTools:/ { sub(/^disallowedTools:[ \t]*/, ""); print }' "$1" \
+    | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | /usr/bin/grep -v '^$'
+}
+for _rt_role in researcher test-runner auditor critic; do
+  _rt_f="$REPO/agents/${_rt_role}.md"
+  _rt_d=$(rt_disallowed "$_rt_f")
+  expect_true "10a: agents/${_rt_role}.md disallows Agent" \
+    bash -c "printf '%s\n' \"\$1\" | /usr/bin/grep -qx Agent" _ "$_rt_d"
+  expect_true "10a: …and still disallows Write and Edit (it stays read-only)" \
+    bash -c "printf '%s\n' \"\$1\" | /usr/bin/grep -qx Write && printf '%s\n' \"\$1\" | /usr/bin/grep -qx Edit" _ "$_rt_d"
+done
+for _rt_role in implementor senior-implementor; do
+  _rt_d=$(rt_disallowed "$REPO/agents/${_rt_role}.md")
+  expect_true "10b: agents/${_rt_role}.md keeps the Agent tool (one level of read-only delegation)" \
+    bash -c "! printf '%s\n' \"\$1\" | /usr/bin/grep -qx Agent" _ "$_rt_d"
+done
+# THE PAIRED NEGATIVE: the reader finds a name that is there and misses one that is not, so
+# 10a cannot pass on an empty read.
+_rt_neg="$TMPROOT/no-agent-role.md"
+printf -- '---\nname: x\ndisallowedTools: Write, Edit, NotebookEdit\n---\nbody\n' > "$_rt_neg"
+expect_eq "10c: the reader lifts every name of a real disallowedTools line (not vacuous)" \
+  "Write Edit NotebookEdit " "$(rt_disallowed "$_rt_neg" | tr '\n' ' ')"
+
 finish

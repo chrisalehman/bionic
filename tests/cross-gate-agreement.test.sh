@@ -548,6 +548,10 @@ verdict_lg() {  # <repo> -> yes|no|other:<detail>
 
 # ---------------------------------------------------------------- fixtures
 
+# THE FIXTURE PLAN IS AN APPROVED ONE (wave-20 T7, AC-9.1). Since 1.8.7 the dispatch wall
+# refuses every non-read-only type — this suite's bare `implementor` included — against a plan
+# with no `approved-by:`, at any step. A live wave at `current: 4` has been approved, so the
+# fixture says so; a body that states its own `approved-by:` keeps it.
 write_plan() {  # <path> <state-body>
   mkdir -p "$(dirname "$1")"
   {
@@ -556,6 +560,7 @@ write_plan() {  # <path> <state-body>
     printf 'intent: build\nrigor: audited\nscale: wave\n'
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
     printf '%s\n' "$2"
+    case "$2" in *approved-by:*) ;; *) printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n' ;; esac
     printf '\n- Step 3: prior evidence\n'
   } > "$1"
 }
@@ -3181,9 +3186,10 @@ for _unguarded in dispatch-preflight canonical-sdlc-governing-skill; do
   expect_absent_ug "…and no longer fronts ${_unguarded}.sh, whose only reason was the partition" \
     "agent-context-guard.sh \${CLAUDE_PLUGIN_ROOT}/hooks/${_unguarded}.sh" "$HOOKS_JSON_ROWS"
 done
-# The wall behind the guard is the one that skips its JOURNAL in an agent context — the
-# reader and the writer of BIONIC_HOOK_CHANNEL are one pair across two files, and a
-# rename on either side silently restores nested rostering.
+# The guard still hands stop.sh the channel marker on SubagentStop. The dispatch wall no
+# longer depends on it: since wave-20 T7 (AC-9.2) its journal skip asks `is_agent_context`,
+# which reads the payload's own top-level `agent_id` first — the variable is one spelling of
+# three, and no registration hands it to dispatch-preflight.sh.
 expect_contains "the guard sets the channel marker the dispatch wall reads" \
   'BIONIC_HOOK_CHANNEL=agent-context' "$(cat "$BIONIC_HOOKS_DIR/agent-context-guard.sh")"
 
@@ -4198,14 +4204,24 @@ expect_eq "…and leaves no phantom .bionic in the worktree (R9: one address spa
 # the ADDRESS SPACE — producer and consumer resolving one root from a worktree cwd — and the
 # dispatch that legitimately happens there is a dispatched writer's, working in the tree it was
 # given. A MAIN-THREAD dispatch from a worktree is now the refusal N.3b drives below, so the
-# drives here carry `agent_type`, the spelling the harness puts in a dispatched agent's own
-# payload. Deliberately not BIONIC_HOOK_CHANNEL, which is the other spelling of the same fact
-# and additionally stops the ledger at depth one — the roster assertion two lines down is what
-# this section came for.
-N_AGENT_PAYLOAD() { mk_agent_payload "$SID_A" "$NWT" | jq '. + {agent_type:"implementor"}'; }
+# drives here carry the fields the harness puts in a subagent's own payload: a top-level
+# `agent_id` (t1-probe-report §3) and `agent_type`.
+#
+# FLIPPED BY DESIGN (wave-20 T7, AC-9.2; Δ11/Δ12). A nested dispatch writes NO roster row — the
+# roster is the orchestrator's depth-one ledger — and it may launch only a read-only role, so
+# the drive launches `bionic:researcher`. This row used to assert the nested launch's roster
+# row "landed under the main repository too"; that row is exactly what AC-9.2 removes, and
+# keeping it by exempting `agent_type`-only payloads would re-open triage-B D2c. The address
+# space is measured instead by the observable this section already relies on: the consumer
+# FINDS the producer's attestation, so it takes none of its own and prints no auto-probe line.
+N_AGENT_PAYLOAD() { mk_agent_payload "$SID_A" "$NWT" \
+  | jq '.tool_input.subagent_type = "bionic:researcher"
+        | . + {agent_id:"aNnested-0123456789abcd", agent_type:"bionic:senior-implementor"}'; }
 N_OUT=$(N_AGENT_PAYLOAD | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
 expect_eq "the CONSUMER, from the same worktree, passes the dispatch" "0" "$N_ST"
-expect_eq "…and its roster row landed under the main repository too" "yes" \
+expect_absent "…having FOUND the producer's attestation under the main repository (no auto-probe)" \
+  "the environment check was run automatically" "$N_OUT"
+expect_eq "…and, nested, it wrote NO roster row anywhere (AC-9.2 — the ledger stays at depth one)" "no" \
   "$([ -f "$NREPO/.bionic/tmp/roster-$SID_A.state" ] && echo yes || echo no)"
 expect_eq "…with no phantom .bionic in the worktree from the gate either" "no" \
   "$([ -e "$NWT/.bionic" ] && echo yes || echo no)"
@@ -4216,10 +4232,13 @@ expect_eq "…with no phantom .bionic in the worktree from the gate either" "no"
 # name-in-flight arm a second dispatch under an open name is refused — which is that arm's
 # subject, not this section's.
 N_AGENT_PAYLOAD() { mk_agent_payload "$SID_A" "$NWT" \
-  | jq '.tool_input.name = "w99-impl-r5" | . + {agent_type:"implementor"}'; }
+  | jq '.tool_input.name = "w99-impl-r5" | .tool_input.subagent_type = "bionic:researcher"
+        | . + {agent_id:"aNnested-0123456789abcd", agent_type:"bionic:senior-implementor"}'; }
 rm -f "$NATT"
 N_OUT=$(N_AGENT_PAYLOAD | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
 expect_eq "with the record gone the dispatch still passes (R5: attestation never blocks)" "0" "$N_ST"
+expect_contains "…and THIS time it announces the probe it ran (the absence above is not vacuous)" \
+  "the environment check was run automatically" "$N_OUT"
 expect_eq "…writing it back to the same path the consumer reads" "yes" \
   "$([ -f "$NATT" ] && echo yes || echo no)"
 
@@ -5873,6 +5892,8 @@ s4_plan() {  # <path> <current> [writers]
     [ -n "${3:-}" ] && printf 'parallel-budget: writers=%s test_jobs=2 model=opus\n' "$3"
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
     printf 'current: %s\n' "$2"
+    # APPROVED, as write_plan's fixtures are and for its reason (wave-20 T7, AC-9.1).
+    printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n'
     printf -- '\n- Step 3: prior evidence\n'
   } > "$1"
   return 0
@@ -9513,6 +9534,47 @@ expect_eq "S18.3 lib/stop.sh reads impact-command exactly once" "1" \
 expect_nonempty "S18.3 …and the call is findable at all (the pin is not comparing air)" "$S18_LG_IMPACT"
 expect_eq "S18.3 …the same call shape dispatch-preflight.sh uses" "$S18_LG_IMPACT" "$S13_DP_IMPACT"
 # ============================================================
+section "S13b — one run normaliser on both sides of the row (wave-20 T4; REQ-7, D7)"
+# ============================================================
+#
+# THE SAME SEAM AS S13, FOR THE OTHER BUDGET FIELD. `re_executes=` is WRITTEN by the
+# dispatch lift (`lift_contract_fields` in hooks/dispatch-preflight.sh, its `collapse()`)
+# and COMPARED by the budget arm to the run the claim reader built (payload/scripts/lib/
+# cmd-class.sh, LAST_RUN). Each side has its own suite and each can pass while the two
+# spell one run two ways — which is exactly how `npx jest x 2>&1 | tee log` came to be
+# refused for the run its brief declared (triage-B B1). Pinned here: the lift, lifted out of
+# the hook and run with the library it loads, stores the run the claim reader reads off
+# every redirected spelling of it.
+S13B_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
+anchor -E "$S13B_DP" '^LEAD_CHARS=' 1
+anchor -E "$S13B_DP" '^lift_contract_fields\(\) \{' 1
+S13B_LIFT_SRC=$(awk '/^LEAD_CHARS=/ { on = 1 } on { print } on && started && /^}$/ { exit } /^lift_contract_fields\(\) \{/ { started = 1 }' "$S13B_DP")
+s13b_lift_runs() {  # <brief text> -> the lifted re_executes= value
+  bash -c '. "$1" || exit 1; eval "$2"; lift_contract_fields "$3" | sed -n "s/^re_executes=//p"' \
+    _ "$S13_CMDCLASS" "$S13B_LIFT_SRC" "$1" 2>&1
+}
+s13b_claim_run() {  # <command> -> the first claim's run column
+  bash -c '. "$1" || exit 1; cmd_suite_claims "$2" | awk -F"\t" "NR == 1 { print \$3 }"' \
+    _ "$S13_CMDCLASS" "$1" 2>&1
+}
+S13B_BT='`'
+S13B_RUN="npx jest --testPathPatterns 'x'"
+S13B_STORED=$(s13b_lift_runs "Re-executes: ${S13B_BT}npx    jest  --testPathPatterns 'x'${S13B_BT}")
+expect_eq "S13b the lift stores the declared run, collapsed, marks kept (non-vacuity)" \
+  "${S13B_BT}${S13B_RUN}${S13B_BT}" "$S13B_STORED"
+for _sp in "2>&1" "> /tmp/s13b.log 2>&1" "&> /tmp/s13b.log" "2>&1 | tee /tmp/s13b.log" "|& tee /tmp/s13b.log" "|| true"; do
+  expect_eq "S13b the claim of the run redirected [$_sp] is the run the lift stored" \
+    "$S13B_STORED" "${S13B_BT}$(s13b_claim_run "$S13B_RUN $_sp")${S13B_BT}"
+done
+# THE DISCRIMINATOR: a different run, however redirected, is a different stored value.
+expect_ne "S13b …and a narrower run redirected the same way is NOT the stored one" \
+  "$S13B_STORED" "${S13B_BT}$(s13b_claim_run 'npx jest 2>&1 | tee /tmp/s13b.log')${S13B_BT}"
+# AND THE DECLARED SIDE'S DECODE (walls.sh) HOLDS THE SAME RULE: a stored field is already
+# normal, so normalising it again changes nothing.
+expect_eq "S13b the walls-side normaliser leaves a lifted field byte-identical" "$S13B_STORED" \
+  "$(bash -c '. "$1" || exit 1; cmd_runs_norm "$2"' _ "$S13_CMDCLASS" "$S13B_STORED" 2>&1)"
+
+# ============================================================
 section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-30/AC-31)"
 # ============================================================
 #
@@ -9720,7 +9782,12 @@ expect_eq "S19.3 …declared by 45 anchor calls (Section 8's doctoring rewrites 
 # before the sed that hands that caller a step again, so the row asserting neither caller
 # passes one is provably able to fail. One anchor call, 31 -> 32. RE-DERIVED BY DIRECT GREP
 # over this file at THIS commit, as every number in this section is.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 32 more" "32" \
+#
+# 34 at epic-23 wave-20-fixit-187 (2026-09-23, T4): §S13b lifts `lift_contract_fields` out of
+# hooks/dispatch-preflight.sh to run it beside the claim reader, and anchors both ends of the
+# lift (the `LEAD_CHARS=` start line and the function's head) so a moved function fails the
+# precondition rather than lifting air. Two anchor calls, 32 -> 34, by direct grep.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 34 more" "34" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -9806,7 +9873,9 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # second row) closing the DOCTORED_STEP2_OPEN_AT and DOCTORED_NO_BATCH gaps.
 # cross-gate-agreement.test.sh, agent-context-guard and landing-gate are unmoved and were
 # re-measured, not assumed.
-expect_eq "S19.3 …81 anchor call sites across the four doctoring suites, all told" "81" \
+# 83 at epic-23 wave-20-fixit-187 (2026-09-23, T4): 45 + 34 + 1 + 3 — §S13b's two lift
+# anchors in this file; the other three files are untouched by that task.
+expect_eq "S19.3 …83 anchor call sites across the four doctoring suites, all told" "83" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
@@ -11064,6 +11133,60 @@ expect_eq "SV MUTANT a doctored copy with the old comment reinstated no longer m
   "no" "$([ "$SV_MUT_LINE" = "$SV_SUITES_LINE" ] && echo yes || echo no)"
 expect_eq "SV MUTANT …and the un-doctored SKILL.md still does" \
   "yes" "$([ "$(sv_suites_line "$SV_SKILL")" = "$SV_SUITES_LINE" ] && echo yes || echo no)"
+
+
+section "RC — THE READ-ONLY ROLE SET: role_is_readonly equals the role files that disallow Write and Edit, plus Explore and Plan (wave-20 T7, AC-9.1)"
+#
+# ONE SET, TWO FACTS THAT MUST AGREE. `role_is_readonly` (payload/scripts/lib/roster.sh) is a
+# constant, read on the dispatch path and in the read-only commit arm, because reading the
+# role files at run time would add a file read to every Bash call (research D3-7). The role
+# files are the other fact: a role whose frontmatter disallows Write and Edit is read-only in
+# the harness's own terms. This section holds the two equal, both directions, plus the
+# harness's two no-write types — so a new read-only role file without a set entry, or a set
+# entry whose role file gained Write, turns this red.
+RC_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/roster.sh"
+rc_disallows_write_edit() {  # <role file> -> 0 when its frontmatter disallows both
+  /usr/bin/awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { exit }
+                fm && /^disallowedTools:/ { sub(/^disallowedTools:[ \t]*/, ""); print }' "$1" \
+    | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' > "$SANDBOX/rc-dis.txt"
+  /usr/bin/grep -qx Write "$SANDBOX/rc-dis.txt" && /usr/bin/grep -qx Edit "$SANDBOX/rc-dis.txt"
+}
+RC_WANT="Explore Plan"; RC_WRITERS=""; RC_FILES=0
+for _rc_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
+  [ -f "$_rc_f" ] || continue
+  RC_FILES=$((RC_FILES + 1))
+  _rc_name="bionic:$(basename "$_rc_f" .md)"
+  if rc_disallows_write_edit "$_rc_f"; then RC_WANT="$RC_WANT $_rc_name"
+  else RC_WRITERS="$RC_WRITERS $_rc_name"; fi
+done
+rc_sorted() { printf '%s\n' $1 | /usr/bin/grep -v '^$' | LC_ALL=C sort | tr '\n' ' '; }
+RC_GOT=$( ( . "$RC_LIB" >/dev/null 2>&1 || exit 1; printf '%s' "${ROLE_READONLY_SET:-}" ) )
+expect_eq "RC the role files read at all: six role files; four read-only plus two harness types (not vacuous)" "6 6" \
+  "$RC_FILES $(printf '%s\n' $RC_WANT | /usr/bin/grep -c .)"
+expect_eq "RC ROLE_READONLY_SET = role files disallowing Write+Edit ∪ {Explore, Plan}" \
+  "$(rc_sorted "$RC_WANT")" "$(rc_sorted "$RC_GOT")"
+# THE PREDICATE, NOT ONLY THE CONSTANT: every member answers yes, every writer role and every
+# harness writer type answers no, and a bare or foreign spelling of a read-only role is not
+# ours (a consumer's own `researcher` agent may carry Write).
+RC_BAD=""
+for _rc_t in $RC_WANT; do
+  ( . "$RC_LIB" >/dev/null 2>&1; role_is_readonly "$_rc_t" ) || RC_BAD="$RC_BAD yes-expected:$_rc_t"
+done
+for _rc_t in $RC_WRITERS fork general-purpose claude researcher test-runner acme:researcher explore; do
+  ( . "$RC_LIB" >/dev/null 2>&1; role_is_readonly "$_rc_t" ) && RC_BAD="$RC_BAD no-expected:$_rc_t"
+done
+( . "$RC_LIB" >/dev/null 2>&1; role_is_readonly "" ) && RC_BAD="$RC_BAD no-expected:<empty>"
+( . "$RC_LIB" >/dev/null 2>&1; role_is_readonly "bionic:researcher bionic:critic" ) \
+  && RC_BAD="$RC_BAD no-expected:<two-words>"
+expect_eq "RC role_is_readonly answers yes for exactly the set and no for every other type" "" "$RC_BAD"
+# ONE SET, NOT TWO: the read-only commit arm (walls.sh ARM C) asks the same predicate rather
+# than spelling the roles again, and so does the dispatch approval checkpoint.
+expect_absent "RC walls.sh carries no second spelling of the read-only role list" \
+  "bionic:test-runner|bionic:researcher" "$(cat "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh")"
+expect_contains "RC …ARM C asks role_is_readonly" "role_is_readonly" \
+  "$(cat "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh")"
+expect_contains "RC …and so does the dispatch approval checkpoint" "role_is_readonly" \
+  "$(cat "$PARTY_DP")"
 
 # ============================================================
 section "CG-close — ONE close predicate, four readers, one answer (epic-23 wave-20 T2, REQ-10 AC-10.1; D10)"
