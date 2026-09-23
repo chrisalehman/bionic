@@ -24,8 +24,8 @@
 # Grouping parentheses end a segment too, so `(git push …)` is read. Then, per
 # segment, everything before the real argv[0] comes off: shell openers (`{`,
 # `then`, `do`, `else`, `!`) and command-taking prefixes (`sudo`, `time`,
-# `nice`, `xargs`, `ssh <host>`, `find … -exec`, `env`, `nohup`, `command`,
-# `exec`) — see _git_argv_skip. Finally a `sh -c '<string>'` or `eval
+# `nice`, `xargs`, `ssh <host>`, `find … -exec`, `env` with its options,
+# `nohup`, `command`, `exec`) — see _git_argv_skip. Finally a `sh -c '<string>'` or `eval
 # '<string>'` segment is re-read, its string expanded into more segments, to
 # depth 2 — see git_argv_expand, which is what the walls iterate.
 # Ported from bionic-omni bundle/policies/_shell.py @ 29fc09e, whose Python
@@ -322,11 +322,38 @@ git_argv_segments() {
 # at argv[1], so the scan skips to there and a `find` with no -exec yields
 # nothing — which is what keeps `find . -name 'git'` a non-command.
 #
+# `env` IS A PREFIX WITH OPTIONS OF ITS OWN (wave-20 T3, REQ-3, D3). It used to
+# be dropped as a bare word only, so `env -C <dir>`, `env -i`, `env -u NAME`
+# and `/usr/bin/env` left an option, or env's own path, as argv[0], and every
+# wall read "not git": the evidence gate admitted `env -C <root> git commit`
+# and protect-main a push to main (research D3 N2). The env arm eats GNU's and
+# BSD's options alike. `-u -P -C -S -L -U -a` take a value, inline (`-uX`) or
+# as the next word, and so do their long forms (`--unset`, `--chdir`,
+# `--split-string`, `--argv0`); a short cluster (`-iC <dir>`) is read letter by
+# letter up to its first value flag; `-` and `--` end nothing but themselves
+# and the options respectively; any other `-…` word is dropped alone, as the
+# sudo arm does, because a value flag missing from the list would otherwise
+# turn its value into argv[0] — the fail-open direction.
+#
+# Two facts about env's options are kept for the callers, both reset on every
+# call:
+#   GIT_ARGV_ENV_CHDIR  the directory `-C`/`--chdir` moves to, as written. The
+#     last one wins, which is what env does. The evidence gate's
+#     `_eg_commit_cwd` places the commit there, exactly as it places a
+#     `git -C <dir>` commit.
+#   GIT_ARGV_ENV_SPLIT  the string `-S`/`--split-string` hands env to split
+#     into the command it runs — env's own `sh -c`. `git_argv_inner` returns
+#     it, so `git_argv_expand` re-reads it the way it re-reads a runner string.
+#
 # OUT OF SCOPE, deliberately: `$(...)` and backticks. Their contents are a
 # command the shell runs, but reading them needs a nesting tokeniser rather
 # than a prefix skip, and no AC asks for it (see the report's Assumptions).
+GIT_ARGV_ENV_CHDIR=""
+GIT_ARGV_ENV_SPLIT=""
 _git_argv_skip() {
-  local _line="$1" _oldifs="$IFS" _hadf=0 _n=0 _w
+  local _line="$1" _oldifs="$IFS" _hadf=0 _n=0 _w _o _c _v
+  GIT_ARGV_ENV_CHDIR=""
+  GIT_ARGV_ENV_SPLIT=""
 
   case "$-" in *f*) _hadf=1 ;; esac
   set -f
@@ -338,8 +365,49 @@ _git_argv_skip() {
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      '('|')'|'{'|'}'|'!'|then|else|elif|do|done|fi|if|while|until|env|command|nohup|exec)
+      '('|')'|'{'|'}'|'!'|then|else|elif|do|done|fi|if|while|until|command|nohup|exec)
         shift
+        ;;
+      env|*/env)
+        shift
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --) shift; break ;;
+            -) shift ;;
+            --chdir=*) GIT_ARGV_ENV_CHDIR="${1#--chdir=}"; shift ;;
+            --split-string=*) GIT_ARGV_ENV_SPLIT="${1#--split-string=}"; shift ;;
+            --chdir|--split-string|--unset|--argv0)
+              _o="$1"; shift
+              _v=""
+              if [ $# -gt 0 ]; then _v="$1"; shift; fi
+              case "$_o" in
+                --chdir) GIT_ARGV_ENV_CHDIR="$_v" ;;
+                --split-string) GIT_ARGV_ENV_SPLIT="$_v" ;;
+              esac
+              ;;
+            --*) shift ;;
+            -*)
+              # A short cluster, letter by letter: the first value flag takes the
+              # rest of the word, or the next word when the rest is empty.
+              _o="${1#-}"; shift
+              while [ -n "$_o" ]; do
+                _c="${_o%"${_o#?}"}"; _o="${_o#?}"
+                case "$_c" in
+                  u|P|C|S|L|U|a)
+                    if [ -n "$_o" ]; then _v="$_o"; _o=""
+                    elif [ $# -gt 0 ]; then _v="$1"; shift
+                    else _v=""; fi
+                    case "$_c" in
+                      C) GIT_ARGV_ENV_CHDIR="$_v" ;;
+                      S) GIT_ARGV_ENV_SPLIT="$_v" ;;
+                    esac
+                    ;;
+                esac
+              done
+              ;;
+            *) break ;;
+          esac
+        done
         ;;
       time)
         shift
@@ -494,8 +562,8 @@ git_argv_parse() {
 # Prints the command STRING a runner segment would execute, and returns 0; on
 # any other segment prints nothing and returns 1.
 #
-# Two runners, both taking one string: `sh|bash|zsh|dash|ksh -c '<string>'` and
-# `eval '<string>'`. The scanner has already stripped the quotes, so the string
+# Three runners, each taking one string: `sh|bash|zsh|dash|ksh -c '<string>'`,
+# `eval '<string>'` and `env -S '<string>'` (read by _git_argv_skip). The scanner has already stripped the quotes, so the string
 # arrives as one token and can be re-read by git_argv_segments as-is. The `-c`
 # match is `-c` or a short cluster ENDING in c (`-lc`, `-ec`) — never a long
 # option that merely contains one, so `bash --norc -c '…'` still finds the
@@ -506,6 +574,16 @@ git_argv_inner() {
   local _oldifs="$IFS" _hadf=0 _b _out="" _n=0 _w
 
   _git_argv_skip "$1"
+  # `env -S '<string>' [args]` runs the split string with the remaining words
+  # appended; re-read the two together. Reading a `;` inside the string as a
+  # separator, which env would not, can only find MORE commands — the
+  # fail-closed direction.
+  if [ -n "$GIT_ARGV_ENV_SPLIT" ]; then
+    _out="$GIT_ARGV_ENV_SPLIT"
+    [ -z "$GIT_ARGV_REST" ] || _out="$_out ${GIT_ARGV_REST//"$GIT_ARGV_US"/ }"
+    printf '%s' "$_out"
+    return 0
+  fi
   [ -n "$GIT_ARGV_REST" ] || return 1
 
   case "$-" in *f*) _hadf=1 ;; esac
@@ -584,6 +662,26 @@ git_argv_has_sub() {
     [ -n "$_line" ] || continue
     git_argv_parse "$_line" || continue
     if [ "$GIT_SUB" = "$_want" ]; then return 0; fi
+  done <<< "$(git_argv_expand "$_cmd")"
+  return 1
+}
+
+# git_argv_has_any_sub <command> <space-separated subcommands>
+#
+# Returns 0 if any segment of the command invokes `git <sub>` for a <sub> in
+# the set; the same pass as git_argv_has_sub, asked of a set in one walk of the
+# expanded segments. A verb is matched whole: `commit` never matches
+# `commit-tree`. On success GIT_SUB/GIT_ARGS describe the segment that matched.
+# The read-only role arm (walls.sh ARM C) asks it for the eight verbs that make
+# a commit (wave-20 T3, AC-3.2).
+git_argv_has_any_sub() {
+  local _cmd="$1" _want=" $2 " _line
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    git_argv_parse "$_line" || continue
+    case "$_want" in
+      *" $GIT_SUB "*) return 0 ;;
+    esac
   done <<< "$(git_argv_expand "$_cmd")"
   return 1
 }

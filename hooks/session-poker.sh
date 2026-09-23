@@ -17,6 +17,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
 #     bash <plugin-root>/hooks/session-poker.sh adopt      what OTHER sessions launched here (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
+#     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
 # are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
@@ -374,6 +375,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --window   defer a dead session whose own newest file is younger than the poker interval"
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in"
   exit 2
 }
 
@@ -452,6 +454,17 @@ case "$VERB" in
     fi
     EXTEND_NAME="$1"
     EXTEND_REASON="$2"
+    ;;
+  # THE NINE CELLS AN AUTHOR WRITES, IN THE TABLE'S OWN COLUMN ORDER (wave-20 REQ-5, AC-5.3;
+  # Δ5). `status`, `worktree` and `base` are the dispatcher's cells and are not operands:
+  # a new row is `pending` and names no tree. Every operand is required — `—` is how the
+  # table itself spells "none" — so a short list is the usage error, never a guessed default.
+  task-add)
+    if [ $# -ne 9 ]; then
+      usage "task-add takes exactly nine arguments: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> (write — for none)."
+    fi
+    TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
+    TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"
     ;;
   tick|arm|disarm|interval|interval-default|window)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
@@ -1185,28 +1198,11 @@ space_field() {  # <record> <key> -> value on stdout, empty if absent
   printf '%s' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -1
 }
 
-# The plan header's `parallel-budget:` value, or empty.
-#
-# THE LEADING FRONTMATTER BLOCK ONLY, byte-for-byte the read hooks/dispatch-preflight.sh's
-# budget arm takes: a `parallel-budget:` inside the plan BODY is prose — this wave's own
-# plan quotes the header in a task description — and a reader that took a quotation for
-# configuration would fill against a number nobody set.
-plan_budget_line() {  # <plan> -> the value after `parallel-budget:`, or empty
-  awk '
-    NR == 1 && $0 != "---" { exit }
-    NR == 1 { next }
-    $0 == "---" { exit }
-    /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
-  ' "$1" 2>/dev/null
-}
-
-# One integer field out of that value. NOT AN INTEGER IS ABSENT: an arm this cannot measure
-# goes unmeasured and says so, exactly as the dispatch wall's own budget_field does.
-budget_int() {  # <budget line> <key> -> a non-negative integer, or empty
-  local v
-  v="$(space_field "$1" "$2")"
-  case "${v:-}" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$v" ;; esac
-}
+# THE PLAN HEADER'S BUDGET IS READ BY run.sh (epic-23 wave-20 T2, D10). `plan_budget_line`
+# (the strict `parallel-budget:` line of the leading frontmatter) and `budget_field` (one
+# whole field, as a decimal integer) moved there from this file, so the tick, the stop wall,
+# dispatch preflight and the governing-skill hook size a run from one reading. NOT AN INTEGER
+# IS ABSENT: an arm this cannot measure goes unmeasured and says so.
 
 # THE TASK TABLE IS NOT READ HERE ANY MORE (REQ-1e, spec §2 D3). `slice_table` and
 # `slice_ready` — a header-keyed `id`/`deps`/`status` parse and the readiness pass over it
@@ -1234,8 +1230,8 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
   SCHED_PLAN="$POKER_RUN_PLAN"
   SCHED_BUDGET=""
   [ -n "$SCHED_PLAN" ] && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
-  SCHED_WRITERS="$(budget_int "$SCHED_BUDGET" writers)"
-  SCHED_JOBS="$(budget_int "$SCHED_BUDGET" test_jobs)"
+  SCHED_WRITERS="$(budget_field "$SCHED_BUDGET" writers)"
+  SCHED_JOBS="$(budget_field "$SCHED_BUDGET" test_jobs)"
 }
 
 # ── THE APPROVAL GATE (epic-21 T4, AC-5). A printed FILL is a dispatch instruction — the
@@ -1548,12 +1544,15 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 #   with its cure rather than skipped, because a silent skip is how a predecessor's agent
 #   becomes invisible twice.
 #
-#   A ROW IS CLOSED BY A LANDED MARKER OR BY AN ACK, and by nothing else. `landing-swept/v1`
-#   with `state=MET` is hooks/landing-gate.sh saying the contract landed; the ack ledger is
-#   the orchestrator saying so by hand, and the sweeper's own ledger comment already binds
-#   it across sessions ("an ack taken in a session that has since died is still in force in
-#   its successor"). A `landing-swept` marker reading UNMET closes NOTHING here: an answered
-#   failure is exactly the row a resumed session most needs to see.
+#   A ROW IS CLOSED BY AN ACK TAKEN AFTER ITS LATEST LAUNCH, and by nothing else — the one
+#   close predicate, `roster_open_names` (payload/scripts/lib/roster.sh; epic-23 wave-20 T2,
+#   D10; ADR-034 d1), which dispatch preflight, the sweeper's `acked=` and the stop wall's
+#   occupancy ask too. The ack ledger binds across sessions ("an ack taken in a session that
+#   has since died is still in force in its successor"). A `landing-swept/v1` marker closes
+#   NOTHING here, MET or not: until wave-20 a MET marker did, so an agent swept MET and never
+#   acked — still alive on the panel — came out of a `/clear` with no row on the new roster,
+#   and no stop could reach it (memory adopt-skips-swept-rows). An ack older than a
+#   relaunch closes nothing either: the relaunched agent is the one to adopt.
 #
 # THE ORIGIN IS CARRIED OUT WITH THE ROW, and it is what the stop address is built from
 # (T3 FINDING 1). `adopted_from=` wins over `session=` when the row has one: a row that was
@@ -1566,7 +1565,11 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
 adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes
-  awk -v ackfile="$2" '
+  # THE OPEN SET IS ASKED ONCE, of the one predicate, over the predecessor's roster as it
+  # stands — no session filter, because every row on it carries the predecessor's own id.
+  # Handed to awk through the environment rather than `-v`, which would read a backslash in
+  # a name as an escape.
+  AF_OPEN="$(roster_open_names "$1" "$2")" awk '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
       for (i = 1; i <= n; i++) {
@@ -1578,15 +1581,8 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       return ""
     }
     BEGIN {
-      if (ackfile != "") {
-        while ((getline l < ackfile) > 0) {
-          if (l !~ /^sweeper-ledger\/v1\|/) continue
-          if (kv(l, "event") != "ack") continue
-          an = kv(l, "name")
-          if (an != "") acked[an] = 1
-        }
-        close(ackfile)
-      }
+      no = split(ENVIRON["AF_OPEN"], ol, "\n")
+      for (i = 1; i <= no; i++) if (ol[i] != "") isopen[ol[i]] = 1
     }
     /^roster-state\/v1\|/ {
       n = kv($0, "name"); if (n == "") next
@@ -1635,16 +1631,10 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       }
       next
     }
-    /^landing-swept\/v1\|/ {
-      n = kv($0, "name")
-      if (n != "" && kv($0, "state") == "MET") met[n] = 1
-      next
-    }
     END {
       for (i = 1; i <= cnt; i++) {
         n = order[i]
-        if (n in met) continue
-        if (n in acked) continue
+        if (!(n in isopen)) continue
         printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
                launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
                ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n], \
@@ -1985,39 +1975,33 @@ EOF
 # and this caller is inside the UNMET arm of a verdict the sweeper has already taken over the
 # same contract — re-deriving delivery from disk here would be a second answer to a question
 # one owner already answered (D0).
-# THE SHARED TRANSCRIPT-DIRECTORY PREFERENCE (T1d, 2026-09-22; walk W-3). An ADOPTED row's
-# transcript lives under whichever session last spoke to the agent: THIS session once it has
-# actually exchanged a turn with it, the launching session before that (`row_quiet`'s own
-# comment above explains why — the harness files a transcript under the session talking to
-# the agent NOW, while `adopted_from=` keeps naming the launcher forever). Both readers of
-# that fact resolve it through this ONE function now: `row_quiet` (the tick's own liveness
-# read) and `adopt`'s report (hooks/session-poker.sh, the ADOPT_SCHEMA block). Before this,
-# `adopt` printed only the launching session's path and age, unconditionally — so the very
-# report that told an operator to run `adopt` could already be looking at a stale copy while
-# the row was live under the session that had just adopted it (e.g. a re-run `adopt
-# --report-only` after this session had already spoken to the agent once). Returns the
-# subagent directory to use on stdout, nonzero if neither session has the file.
-transcript_dir_for() {  # <agent-id> <this-session-id> <fallback-session-id-or-empty>
-  local id="$1" this_sid="$2" fallback_sid="$3" sub=""
-  [ -n "$id" ] || return 1
-  sub="$(session_subagent_dir "$this_sid")" || sub=""
-  if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
-    printf '%s\n' "$sub"
-    return 0
-  fi
-  if [ -n "$fallback_sid" ] && [ "$fallback_sid" != "$this_sid" ]; then
-    sub="$(session_subagent_dir "$fallback_sid")" || sub=""
-    if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
-      printf '%s\n' "$sub"
-      return 0
-    fi
-  fi
+# THE PROJECT DIRECTORY A SESSION'S LOGS LIVE UNDER (D8; REQ-8; epic-23 wave-20 T5). One
+# level above `<project-dir>/<session-id>/subagents/…` — the directory `agent_log_newest`
+# (payload/scripts/lib/observe.sh) globs. Tried through the session's own transcript first
+# (`<project-dir>/<sid>.jsonl`, the ordinary case), falling back to the parent of its
+# subagents directory: a session's `.jsonl` can be reclaimed while its directory survives
+# (`session_subagent_dir`'s own comment). Returns nothing when neither resolves.
+agent_project_dir_for() {  # <session-id> -> project directory on stdout, nonzero if unresolved
+  local sid="$1" tx sub
+  [ -n "$sid" ] || return 1
+  tx="$(session_transcript "$sid")" && { printf '%s\n' "${tx%/*}"; return 0; }
+  sub="$(session_subagent_dir "$sid")" && { printf '%s\n' "${sub%/*/*}"; return 0; }
   return 1
 }
 
+# THE SHARED NEWEST-LOG PREFERENCE (D8; REQ-8; epic-23 wave-20 T5; supersedes the T1d
+# this-session/adopted_from chain, walk W-3). An ADOPTED row's transcript lives under
+# whichever session last spoke to the agent — and after a SECOND `/clear` that can be an
+# INTERMEDIATE adopter this row names nowhere, because `adopted_from=` always names the
+# ORIGINAL launcher. `agent_log_newest` globs every session directory of the project for
+# the exact agent id and returns the newest by mtime, so no chain of sessions has to be
+# walked and no intermediate adopter can be missed. Both readers of the working log —
+# `row_quiet` (the tick's own liveness read) and `adopt`'s report (the ADOPT_SCHEMA block
+# below) — call it through this project-directory resolution.
+
 TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing to observe
-  local row="$1" now="$2" cad cad_s prog pm=0 id rsid sub tx lm=0
+  local row="$1" now="$2" cad cad_s prog pm=0 id proj tx lm=0
 
   TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
   OBS_DELIV_STATE=none
@@ -2050,17 +2034,17 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
   tx=""
   id="$(line_field "$row" agent_id)"
   if [ -n "$id" ]; then
-    # THIS SESSION'S DIR FIRST (wave-19 T1; D4, REQ-2), resolved through `transcript_dir_for`
-    # (T1d) so `adopt`'s own report reads the identical preference — see that function's
-    # comment for the full rationale. The harness files an agent's transcript under the
-    # session talking to it NOW, so after an adopt the live file sits under the adopter while
-    # `adopted_from=` still names the launcher — reading only the launcher's copy reported a
-    # working agent quiet (R1 Q4, bed3). `adopted_from=` itself is provenance and is never
-    # rewritten: adopt's idempotence keys on it.
-    rsid="$(line_field "$row" adopted_from)"
-    sub="$(transcript_dir_for "$id" "$SESSION_ID" "$rsid")" || sub=""
-    if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
-      tx="$sub/agent-${id}.jsonl"
+    # THE NEWEST COPY, ANYWHERE IN THE PROJECT (D8, REQ-8) — never a this-session/
+    # adopted_from CHAIN. The harness files an agent's transcript under whichever session
+    # is talking to it NOW, and after a SECOND `/clear` that can be an intermediate adopter
+    # `adopted_from=` never names (it always names the ORIGINAL launcher) — reading only
+    # the launcher's copy, or only this session's, reported a working agent quiet (R1 Q4,
+    # bed3; triage-A). `adopted_from=` itself is still provenance and is never rewritten:
+    # adopt's idempotence keys on it.
+    proj="$(agent_project_dir_for "$SESSION_ID")" || proj=""
+    tx=""
+    [ -n "$proj" ] && { tx="$(agent_log_newest "$id" "$proj")" || tx=""; }
+    if [ -n "$tx" ]; then
       OBS_LOG_MTIME="$(file_mtime "$tx")"
       lm="$OBS_LOG_MTIME"
       OBS_LOG_AGE=$(( now - OBS_LOG_MTIME ))
@@ -2509,21 +2493,29 @@ case "$VERB" in
 
         # ---- the three addresses, all of them derived from the one id
         #
-        # RESOLVED THROUGH THE SAME PREFERENCE `row_quiet` USES (T1d, 2026-09-22; walk W-3).
-        # This report used to quote ONLY the launching session's copy, unconditionally — so a
-        # re-run of `adopt --report-only` after this session had already exchanged a turn
-        # with the agent (the file now sitting under THIS session's subagents dir, per
-        # `transcript_dir_for`'s own comment) still named the launcher's stale path and age,
-        # while the next tick's `row_quiet` read the fresh one: one row, two disagreeing
-        # readers. `transcript_dir_for` is the one function both now ask.
+        # RESOLVED THROUGH THE SAME NEWEST-COPY PREFERENCE `row_quiet` USES (D8, REQ-8;
+        # supersedes T1d, walk W-3). This report used to quote ONLY the launching session's
+        # copy, unconditionally — so a re-run of `adopt --report-only` after this session
+        # had already exchanged a turn with the agent (the file now sitting under THIS
+        # session's subagents dir) still named the launcher's stale path and age, while the
+        # next tick's `row_quiet` read the fresh one: one row, two disagreeing readers. A
+        # chain of "this session, else the launcher" also missed an INTERMEDIATE adopter
+        # between two `/clear`s — `agent_log_newest` is the one function both readers ask
+        # now, and it globs every session directory rather than walking a chain.
         TX=""
         TX_PRESENT=no
         TX_AGE=""
         TX_MTIME=0
         if [ -n "$RID" ]; then
-          TX_SUB="$(transcript_dir_for "$RID" "$SESSION_ID" "$OSID")" || TX_SUB=""
-          if [ -n "$TX_SUB" ]; then
-            TX="$TX_SUB/agent-${RID}.jsonl"
+          # THIS SESSION'S PROJECT DIRECTORY FIRST, falling back to the PREDECESSOR's — the
+          # two are ordinarily the same physical directory, but this session may never have
+          # spoken to any agent yet (no transcript, no subagents dir of its own), while the
+          # predecessor's directory is exactly what this walk is iterating over.
+          TX_PROJ="$(agent_project_dir_for "$SESSION_ID")" || TX_PROJ=""
+          [ -n "$TX_PROJ" ] || TX_PROJ="$(agent_project_dir_for "$OSID")" || TX_PROJ=""
+          TX=""
+          [ -n "$TX_PROJ" ] && { TX="$(agent_log_newest "$RID" "$TX_PROJ")" || TX=""; }
+          if [ -n "$TX" ]; then
             TX_PRESENT=yes
             # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
             # the agent takes, so its mtime is a fact about the agent rather than a
@@ -3427,6 +3419,134 @@ EOF
       exit 2
     }
     say "extended — $EXTEND_NAME is open again: $ROSTER_FILE"
+    exit 0
+    ;;
+
+  # THE ROW-ADD VERB (wave-20 REQ-5, AC-5.3; Δ5, research D1 §3). A schedule change is a
+  # TRANSACTION: `units_add_row` projects the row onto a COPY of the bound plan (the row, its
+  # `- <id>:` line, and a Step-4 id threaded into the frontier rows that owe it), the copy is
+  # judged twice — by `units_validate`, and by a dry `git commit` through the REAL
+  # hooks/bash-walls.sh — and only a copy both admit is moved over the plan. On any refusal
+  # the plan is byte-identical and the words that refused it print. The precedent is
+  # close-out.sh's D5: a script writes a lifecycle artifact only where a gate validates what
+  # it wrote. Nothing else judges a Bash write of the plan: the governing-skill hook sees
+  # Write and Edit only.
+  #
+  # THE DRY COMMIT IS A WRITER'S, JUDGED BY THE TASK ARMS. The commit AC-5.3 names is the next
+  # writer's, from a row's tree, and the gate judges that commit at Step 4 whatever the run's
+  # step (`CURRENT=4`, walls.sh's row fork). A main-root commit during Verify would instead be
+  # held to the Step-5 block the run is still writing, and no row could ever be added during
+  # Verify — which is when fixups are found. So the dry copy carries `current: 4` when the run
+  # is past it; the copy that is swapped in keeps the run's own `current:`.
+  #
+  # THE DRY RUN IS BOUND TO THE COPY, NEVER TO THE PLAN. It arms its own engagement marker for
+  # a synthetic session whose `plan=` names the dry copy — close-out.sh's pattern, with a
+  # binding instead of the newest-plan fallback — and removes it after. Both copies sit
+  # beside the plan under names that do not end in `.md`, so no plan walk (`_run_candidates`,
+  # the misplaced-plan sweep) can ever read one as a run.
+  #
+  # MAIN THREAD ONLY is the Bash wall's to enforce (wave-20 T9); this verb refuses what it can
+  # see: no session key, an unengaged session, a session with no BOUND open plan (a writing
+  # verb never writes the newest-plan fallback), and a run below Step 4.
+  task-add)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "A row is added to ONE session's bound plan, so without the key there is nothing to write."
+      exit 3
+    fi
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+
+    TA_RUN="$(session_run "$REPO_REAL" "$SESSION_ID")"
+    case "$TA_RUN" in
+      'bound-open '*) TA_PLAN="${TA_RUN#bound-open }" ;;
+      *)
+        die "REFUSED — task-add writes the plan this session is bound to, and it has no bound open run (${TA_RUN:-none})."
+        die "Bind this session to its run first (this script's bind verb), then add the row."
+        exit 1 ;;
+    esac
+
+    TA_CUR="$(_fill_current_field "$TA_PLAN")"
+    TA_CUR="${TA_CUR%[ab]}"
+    case "$TA_CUR" in
+      ''|*[!0-9]*)
+        die "REFUSED — $TA_PLAN has current: ${TA_CUR:-(none)}; task-add changes a wave plan past Step-3 approval, whose current: is a step number."
+        exit 1 ;;
+    esac
+    if [ "$TA_CUR" -lt 4 ]; then
+      die "REFUSED — $TA_PLAN is at current: $TA_CUR; before Step-3 approval the plan is written by hand and reviewed, not added to."
+      exit 1
+    fi
+
+    TA_SUM="$(cksum < "$TA_PLAN" 2>/dev/null)"
+    TA_NEW="${TA_PLAN}.task-add.$$"
+    TA_DRY="${TA_PLAN}.task-add-dry.$$"
+    TA_SID="taskadd-$$"
+    TA_MARK="$(engaged_marker_path "$REPO_REAL" "$TA_SID")" || TA_MARK=""
+    trap 'rm -f "$TA_NEW" "$TA_DRY" ${TA_MARK:+"$TA_MARK"}' EXIT
+
+    if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" \
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" > "$TA_NEW" 2>/dev/null || [ ! -s "$TA_NEW" ]; then
+      die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
+      exit 1
+    fi
+
+    TA_VIOL="$(units_validate "$TA_NEW" 2>&1)"
+    if [ -n "$TA_VIOL" ]; then
+      die "REFUSED — with $TA_ID added, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
+      printf '%s\n' "$TA_VIOL" >&2
+      exit 1
+    fi
+
+    if [ "$TA_CUR" -gt 4 ]; then
+      awk '
+        /^[[:space:]]*```/ { fence = !fence; print; next }
+        fence { print; next }
+        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
+        insdlc && !done && /^[[:space:]]*current[[:space:]]*:/ { print "current: 4"; done = 1; next }
+        { print }' "$TA_NEW" > "$TA_DRY"
+    else
+      cp "$TA_NEW" "$TA_DRY"
+    fi
+
+    TA_HOOK="$HOOK_DIR/bash-walls.sh"
+    if [ ! -f "$TA_HOOK" ] || [ -z "$TA_MARK" ] || ! command -v jq >/dev/null 2>&1; then
+      die "REFUSED — the dry commit cannot be run (no bash-walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
+      exit 2
+    fi
+    mkdir -p "${TA_MARK%/*}" 2>/dev/null
+    printf 'plan=%s\nengaged_at=%s\n' "$TA_DRY" "$(iso_now)" > "$TA_MARK"
+    TA_INPUT="$(jq -n --arg s "$TA_SID" --arg cwd "$REPO_REAL" \
+      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+        tool_input: {command: "git commit -m task-add"}, tool_use_id: "toolu_taskadd"}')"
+    TA_ERR="$(cd "$REPO_REAL" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$TA_SID" BIONIC_WALL_VERBOSE=1 \
+      bash "$TA_HOOK" <<< "$TA_INPUT" 2>&1 >/dev/null)"
+    TA_GATE=$?
+    rm -f "$TA_MARK"
+    if [ "$TA_GATE" -ne 0 ]; then
+      [ -n "$TA_ERR" ] && printf '%s\n' "$TA_ERR" >&2
+      die "REFUSED — the commit gate refused the plan with $TA_ID added (rc=$TA_GATE); the plan is unchanged."
+      exit 1
+    fi
+
+    if [ "$(cksum < "$TA_PLAN" 2>/dev/null)" != "$TA_SUM" ]; then
+      die "REFUSED — $TA_PLAN changed while $TA_ID was being judged; nothing was written. Run task-add again."
+      exit 1
+    fi
+    if ! mv -f "$TA_NEW" "$TA_PLAN"; then
+      die "REFUSED — could not move the judged copy over $TA_PLAN; the plan is unchanged."
+      exit 2
+    fi
+    say "task-add — $TA_ID added to $TA_PLAN: the row, its - $TA_ID: line, and the deps it owes; validated and dry-committed first."
     exit 0
     ;;
 
@@ -4437,11 +4557,12 @@ EOF
         if [ "$SCHED_GAP" -eq 0 ]; then
           say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${TICK_OCCUPIED} unacked roster row(s): the budget is full."
         else
-          # READY IS ASKED AT THE STEP THE PLAN IS ON (REQ-1e, AC-1e.4). The widened
-          # `## Tasks` table covers Steps 3-9 in one schedule, so "pending with every
-          # dependency landed" is no longer the whole question: a Step-6 review row
-          # whose deps happen to be landed is ready in the dependency sense and is
-          # still not this step's work. `SCHED_STEP` is the unit this run is on —
+          # READY IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036). Through
+          # 1.8.6 ready was asked at the step the plan is on (REQ-1e, AC-1e.4), and a
+          # Step-6 review whose deps had landed sat unfilled all through Verify. A work
+          # row is now ready when it is pending and every dependency has landed, whatever
+          # its step; only an integrate or close row still waits for `current:` to reach
+          # its step. `SCHED_STEP` is still passed — it is what holds those gate acts —
           # already read and already proven readable by the approval gate above, which
           # is why this needs no second parse and no fallback: a `current:` that would
           # not parse took the withhold arm and never reached here.
@@ -4477,7 +4598,7 @@ EOF
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
           else
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending step-${SCHED_STEP} task has all its dependencies landed."
+            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and integrate/close rows wait for their step."
           fi
         fi
       fi

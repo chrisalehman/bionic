@@ -1121,6 +1121,33 @@ sweep "$R19" ack durable
 sweep "$R19" verdict durable
 expect_contains "after, from a different process: acked=yes" "|acked=yes|" "$OUT"
 
+# --- an ack closes the row it POSTDATES, not the name forever (epic-23 wave-20 T2, D10) ---
+#
+# The same name dispatched AGAIN after its ack is a new contract, and the old ack is older
+# than its launch. `acked=` is the one close predicate's answer (`roster_open_names`,
+# payload/scripts/lib/roster.sh) — the one dispatch preflight, the stop wall's occupancy and
+# the tick's `adopt_fold` give — so it reads `no` again. Until this wave it read `yes` here
+# on ANY ack of the name, and the stand-down and the stop gate trusted it (triage-C claim 4).
+add_row "$R19" name=durable deliverable="$R19/absent.md" duration="4 hours" \
+  launched_at="$(date -u -v+1H +%Y-%m-%dT%H:%M:%SZ)" tool_use_id=toolu_relaunch
+sweep "$R19" verdict durable
+expect_contains "a relaunch after the ack reads acked=no — the ack predates it" "|acked=no|" "$OUT"
+# …and a fresh ack, taken after that launch, closes it. The relaunch is stamped an hour
+# ahead so no same-second ordering can make this pass by accident; the ack is planted with
+# a stamp after it in the verb's own shape.
+printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=durable|by=human\n' \
+  "$(date -u -v+2H +%Y-%m-%dT%H:%M:%SZ)" "$SID" >> "$(ledger_of "$R19")"
+sweep "$R19" verdict durable
+expect_contains "…and an ack taken after the relaunch closes it again" "|acked=yes|" "$OUT"
+# THE STAMP MUST BE READABLE: an ack whose at= is not the writer's ISO-8601 Z shape orders
+# against nothing and closes nothing — the fail-closed direction for a hand-edited ledger.
+R19B="$(make_repo s19badstamp)"; new_roster "$R19B"
+add_row "$R19B" name=stamped deliverable="$R19B/absent.md" duration="4 hours" launched_at="$(iso_ago 600)"
+printf 'sweeper-ledger/v1|event=ack|at=zzzz|epoch=0|pid=1|session=%s|name=stamped|by=human\n' \
+  "$SID" >> "$(ledger_of "$R19B")"
+sweep "$R19B" verdict stamped
+expect_contains "an ack with an unreadable stamp closes nothing: acked=no" "|acked=no|" "$OUT"
+
 # A symlinked ledger is refused for BOTH verbs before either reads a row (Section 3), so
 # there is no path on which this field is computed over a ledger the script was redirected
 # away from. Asserted here because the field is what the gates now trust.

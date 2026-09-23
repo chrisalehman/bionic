@@ -14,7 +14,9 @@
 #   fill_step_token <plan>             the step the ready set is asked at: the numeric
 #                                      `current:` with its sub-step letter stripped, or
 #                                      `T<n>` when the table is task-shaped. Empty when the
-#                                      two disagree or the field will not parse.
+#                                      two disagree or the field will not parse. At wave
+#                                      scale it decides only the gate acts (integrate,
+#                                      close); a work row is ready at any step (wave-20 Δ1).
 #   fill_ready_set <plan> <rung> <open>
 #                                      the ready ids, one per line, in TABLE order, trimmed
 #                                      to <rung> - <open>. Empty and silent whenever the
@@ -47,6 +49,13 @@
 # `## Tasks` at either scale, and `units_ready` grew the task-scale arm in the same wave
 # (`T<n>` step, no step cell on the row, a dependency satisfied by `done`). Nothing here
 # parses a table.
+#
+# READINESS IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036). The set this library
+# returns stopped being "this step's ready rows": a pending row whose prerequisites have all
+# landed is ready whatever its step, once the run is past Step-3 approval (`fill_ledger_live`,
+# unchanged), and only an `integrate` or `close` row still waits for `current:` to reach its
+# step. The rule is `units_ready`'s; this file passes it the step token and trims the answer,
+# so the tick, the wall and the card inherit it with no change of their own.
 #
 # SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME. Every caller reads a verb through
 # `$( )`, and a library that greeted them would corrupt the first line of every answer.
@@ -186,8 +195,8 @@ fill_ledger_live() {  # <plan> -> 0 live · 1 not
 # the plan's `current:` cannot be read against the table it carries.
 #
 # THE FIELD AND THE TABLE HAVE TO AGREE. A numeric `current:` is answerable whatever the
-# table looks like — the wave arm compares it against each row's own step cell and a table
-# with no step cells simply has no row at that step. A `T<n>` is different: it names a unit,
+# table looks like — the wave arm holds a gate act (integrate, close) until the field reaches
+# the row's own step cell, and a row with no numeric step cell is never a wave row. A `T<n>` is different: it names a unit,
 # and a table that NUMBERS its rows has no unit called `T1` to be on. That shape is a plan in
 # mid-edit (or a fixture), and the honest answer is the one the tick has given since the
 # approval gate landed — UNREADABLE, and no fill. Reading it as task-scale instead would make

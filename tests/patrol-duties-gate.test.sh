@@ -1180,6 +1180,21 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3" "$LED
 u_prompt "$d" "anything else ready?"
 fire "$d"; expect_block "69d: a rung equal to the ceiling names every ready row, T20 included" "T20"
 
+# 69e: READINESS IS THE PREREQUISITE GRAPH (wave-20 REQ-5, AC-5.1; Δ1, Δ6; ADR-036). At
+# current: 5 a pending Step-6 review row whose deps have landed is READY — the step is a label
+# — so a turn that ends with it undispatched and a slot free is refused, naming it. A Step-8
+# integrate row with the same landed deps is a gate act and waits for its step: it is never
+# named at Step 5, and a ledger holding only that row is not a fillable gap.
+LEDGER_REVIEW_6='| T6 | 6 | review | the review whose deps landed | critic | T1 | 30m | REQ-x | — | pending | — |'
+LEDGER_INTEGRATE_8='| T8 | 8 | integrate | the merge, a gate act | implementor | T1 | 30m | REQ-x | — | pending | — |'
+d=$(make_env_ledger 5 "$LEDGER_LANDED" "$LEDGER_REVIEW_6" "$LEDGER_INTEGRATE_8")
+u_prompt "$d" "how is Verify going?"
+fire "$d"; expect_block "69e: AC-5.1 at current: 5 a ready Step-6 row left undispatched is refused, naming it" "T6"
+fire "$d"; expect_block "69f: Δ6 …and the Step-8 integrate row is never named at Step 5" "fill-declined" "T8"
+d=$(make_env_ledger 5 "$LEDGER_LANDED" "$LEDGER_INTEGRATE_8")
+u_prompt "$d" "how is Verify going?"
+fire "$d"; expect_allow "69g: Δ6 a ledger whose only pending row is a gate act ahead of its step is not a gap"
+
 # ============================================================
 # 70: ONE PARSE PER STOP (wave-19 REQ-6, D7; AC-6.2). The fill duty asks three questions of
 # one plan — is the ledger live, which unit is it on, which rows are ready — and each used to
