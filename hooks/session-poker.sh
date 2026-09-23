@@ -1998,39 +1998,33 @@ EOF
 # and this caller is inside the UNMET arm of a verdict the sweeper has already taken over the
 # same contract — re-deriving delivery from disk here would be a second answer to a question
 # one owner already answered (D0).
-# THE SHARED TRANSCRIPT-DIRECTORY PREFERENCE (T1d, 2026-09-22; walk W-3). An ADOPTED row's
-# transcript lives under whichever session last spoke to the agent: THIS session once it has
-# actually exchanged a turn with it, the launching session before that (`row_quiet`'s own
-# comment above explains why — the harness files a transcript under the session talking to
-# the agent NOW, while `adopted_from=` keeps naming the launcher forever). Both readers of
-# that fact resolve it through this ONE function now: `row_quiet` (the tick's own liveness
-# read) and `adopt`'s report (hooks/session-poker.sh, the ADOPT_SCHEMA block). Before this,
-# `adopt` printed only the launching session's path and age, unconditionally — so the very
-# report that told an operator to run `adopt` could already be looking at a stale copy while
-# the row was live under the session that had just adopted it (e.g. a re-run `adopt
-# --report-only` after this session had already spoken to the agent once). Returns the
-# subagent directory to use on stdout, nonzero if neither session has the file.
-transcript_dir_for() {  # <agent-id> <this-session-id> <fallback-session-id-or-empty>
-  local id="$1" this_sid="$2" fallback_sid="$3" sub=""
-  [ -n "$id" ] || return 1
-  sub="$(session_subagent_dir "$this_sid")" || sub=""
-  if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
-    printf '%s\n' "$sub"
-    return 0
-  fi
-  if [ -n "$fallback_sid" ] && [ "$fallback_sid" != "$this_sid" ]; then
-    sub="$(session_subagent_dir "$fallback_sid")" || sub=""
-    if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
-      printf '%s\n' "$sub"
-      return 0
-    fi
-  fi
+# THE PROJECT DIRECTORY A SESSION'S LOGS LIVE UNDER (D8; REQ-8; epic-23 wave-20 T5). One
+# level above `<project-dir>/<session-id>/subagents/…` — the directory `agent_log_newest`
+# (payload/scripts/lib/observe.sh) globs. Tried through the session's own transcript first
+# (`<project-dir>/<sid>.jsonl`, the ordinary case), falling back to the parent of its
+# subagents directory: a session's `.jsonl` can be reclaimed while its directory survives
+# (`session_subagent_dir`'s own comment). Returns nothing when neither resolves.
+agent_project_dir_for() {  # <session-id> -> project directory on stdout, nonzero if unresolved
+  local sid="$1" tx sub
+  [ -n "$sid" ] || return 1
+  tx="$(session_transcript "$sid")" && { printf '%s\n' "${tx%/*}"; return 0; }
+  sub="$(session_subagent_dir "$sid")" && { printf '%s\n' "${sub%/*/*}"; return 0; }
   return 1
 }
 
+# THE SHARED NEWEST-LOG PREFERENCE (D8; REQ-8; epic-23 wave-20 T5; supersedes the T1d
+# this-session/adopted_from chain, walk W-3). An ADOPTED row's transcript lives under
+# whichever session last spoke to the agent — and after a SECOND `/clear` that can be an
+# INTERMEDIATE adopter this row names nowhere, because `adopted_from=` always names the
+# ORIGINAL launcher. `agent_log_newest` globs every session directory of the project for
+# the exact agent id and returns the newest by mtime, so no chain of sessions has to be
+# walked and no intermediate adopter can be missed. Both readers of the working log —
+# `row_quiet` (the tick's own liveness read) and `adopt`'s report (the ADOPT_SCHEMA block
+# below) — call it through this project-directory resolution.
+
 TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing to observe
-  local row="$1" now="$2" cad cad_s prog pm=0 id rsid sub tx lm=0
+  local row="$1" now="$2" cad cad_s prog pm=0 id proj tx lm=0
 
   TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
   OBS_DELIV_STATE=none
@@ -2063,17 +2057,17 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
   tx=""
   id="$(line_field "$row" agent_id)"
   if [ -n "$id" ]; then
-    # THIS SESSION'S DIR FIRST (wave-19 T1; D4, REQ-2), resolved through `transcript_dir_for`
-    # (T1d) so `adopt`'s own report reads the identical preference — see that function's
-    # comment for the full rationale. The harness files an agent's transcript under the
-    # session talking to it NOW, so after an adopt the live file sits under the adopter while
-    # `adopted_from=` still names the launcher — reading only the launcher's copy reported a
-    # working agent quiet (R1 Q4, bed3). `adopted_from=` itself is provenance and is never
-    # rewritten: adopt's idempotence keys on it.
-    rsid="$(line_field "$row" adopted_from)"
-    sub="$(transcript_dir_for "$id" "$SESSION_ID" "$rsid")" || sub=""
-    if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
-      tx="$sub/agent-${id}.jsonl"
+    # THE NEWEST COPY, ANYWHERE IN THE PROJECT (D8, REQ-8) — never a this-session/
+    # adopted_from CHAIN. The harness files an agent's transcript under whichever session
+    # is talking to it NOW, and after a SECOND `/clear` that can be an intermediate adopter
+    # `adopted_from=` never names (it always names the ORIGINAL launcher) — reading only
+    # the launcher's copy, or only this session's, reported a working agent quiet (R1 Q4,
+    # bed3; triage-A). `adopted_from=` itself is still provenance and is never rewritten:
+    # adopt's idempotence keys on it.
+    proj="$(agent_project_dir_for "$SESSION_ID")" || proj=""
+    tx=""
+    [ -n "$proj" ] && { tx="$(agent_log_newest "$id" "$proj")" || tx=""; }
+    if [ -n "$tx" ]; then
       OBS_LOG_MTIME="$(file_mtime "$tx")"
       lm="$OBS_LOG_MTIME"
       OBS_LOG_AGE=$(( now - OBS_LOG_MTIME ))
@@ -2522,21 +2516,29 @@ case "$VERB" in
 
         # ---- the three addresses, all of them derived from the one id
         #
-        # RESOLVED THROUGH THE SAME PREFERENCE `row_quiet` USES (T1d, 2026-09-22; walk W-3).
-        # This report used to quote ONLY the launching session's copy, unconditionally — so a
-        # re-run of `adopt --report-only` after this session had already exchanged a turn
-        # with the agent (the file now sitting under THIS session's subagents dir, per
-        # `transcript_dir_for`'s own comment) still named the launcher's stale path and age,
-        # while the next tick's `row_quiet` read the fresh one: one row, two disagreeing
-        # readers. `transcript_dir_for` is the one function both now ask.
+        # RESOLVED THROUGH THE SAME NEWEST-COPY PREFERENCE `row_quiet` USES (D8, REQ-8;
+        # supersedes T1d, walk W-3). This report used to quote ONLY the launching session's
+        # copy, unconditionally — so a re-run of `adopt --report-only` after this session
+        # had already exchanged a turn with the agent (the file now sitting under THIS
+        # session's subagents dir) still named the launcher's stale path and age, while the
+        # next tick's `row_quiet` read the fresh one: one row, two disagreeing readers. A
+        # chain of "this session, else the launcher" also missed an INTERMEDIATE adopter
+        # between two `/clear`s — `agent_log_newest` is the one function both readers ask
+        # now, and it globs every session directory rather than walking a chain.
         TX=""
         TX_PRESENT=no
         TX_AGE=""
         TX_MTIME=0
         if [ -n "$RID" ]; then
-          TX_SUB="$(transcript_dir_for "$RID" "$SESSION_ID" "$OSID")" || TX_SUB=""
-          if [ -n "$TX_SUB" ]; then
-            TX="$TX_SUB/agent-${RID}.jsonl"
+          # THIS SESSION'S PROJECT DIRECTORY FIRST, falling back to the PREDECESSOR's — the
+          # two are ordinarily the same physical directory, but this session may never have
+          # spoken to any agent yet (no transcript, no subagents dir of its own), while the
+          # predecessor's directory is exactly what this walk is iterating over.
+          TX_PROJ="$(agent_project_dir_for "$SESSION_ID")" || TX_PROJ=""
+          [ -n "$TX_PROJ" ] || TX_PROJ="$(agent_project_dir_for "$OSID")" || TX_PROJ=""
+          TX=""
+          [ -n "$TX_PROJ" ] && { TX="$(agent_log_newest "$RID" "$TX_PROJ")" || TX=""; }
+          if [ -n "$TX" ]; then
             TX_PRESENT=yes
             # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
             # the agent takes, so its mtime is a fact about the agent rather than a
