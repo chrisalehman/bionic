@@ -1624,7 +1624,8 @@ expect_contains "…and the SAME row reads RUNNING against a library whose predi
 # — so a re-run of `adopt --report-only` after this session had already exchanged a turn with
 # the agent (the fresh copy now sitting under THIS session's subagents dir) still quoted the
 # launcher's stale path and its large age, disagreeing with what the very next tick would say
-# about the identical row. `transcript_dir_for` is the fix: one resolver, called by both.
+# about the identical row. `agent_log_newest` is the fix (D8, superseding `transcript_dir_for`):
+# one resolver, called by both.
 R8K="$(make_repo s8-adopter-transcript)"; new_roster "$R8K"
 mkdir -p "$R8K/.bionic/docs/record"
 ID_ADOPTER_PREF="aadopterpref-onexxxxxxxxxxxxx"
@@ -5900,7 +5901,15 @@ expect_absent "33d an adopted row whose transcript under THIS session is fresh i
 expect_absent "33d2 …and the predecessor's stale path is not the one read" \
   "$S33_PRED_TX" "$OUT"
 
-# ---------- 33e: the reverse — this session's file stale, so the row IS quiet ----------
+# ---------- 33e: the reverse — RE-AUTHORED under D8 (REQ-8; epic-23 wave-20 T5) ----------
+#
+# SUPERSEDES T1d's "this session's dir first" preference (walk W-3). Before D8, THIS
+# session's own copy won regardless of age — a stale own copy alone forced NOTIFY even
+# with a fresher copy sitting under the predecessor. `agent_log_newest` reads NEWEST,
+# anywhere in the project: research D2 §REQ-8 named exactly this flip ("the flipped case,
+# launcher newer than adopter, which this session's copy wins today and loses under
+# newest-first — that case is the reason for 'newest'"). So the predecessor's FRESHER copy
+# now keeps the row alive even though this session's own copy is 5400 s old.
 R33E="$(s33_adopted adopt-reverse)"
 : > "$S33_PRED_TX"; : > "$S33_OWN_TX"
 poke "$R33E" adopt
@@ -5908,10 +5917,10 @@ touch "$S33_PRED_TX"
 backdate "$S33_OWN_TX" 5400
 s33_answer fresh "w1:running"
 poke "$R33E" tick
-expect_contains "33e the same row with THIS session's transcript 5400 s old takes NOTIFY" \
-  "decision=NOTIFY" "$OUT"
-expect_contains "33e2 …naming this session's transcript as the channel it read" \
-  "$S33_OWN_TX" "$OUT"
+expect_contains "33e under newest-first the PREDECESSOR's fresher copy keeps it alive (D8 supersedes T1d)" \
+  "decision=QUIET" "$OUT"
+expect_absent "33e2 …never NOTIFYed for this session's own stale copy alone" \
+  "quieter than the declared cadence" "$OUT"
 
 # ---------- 33f: nothing under this session — the launcher's dir is the fallback ----------
 R33F="$(s33_adopted adopt-fallback)"
@@ -5931,6 +5940,37 @@ S33_ROW_READOPT="$(grep "^${ROSTER_ROW_SCHEMA}|" "$(roster_of "$R33D")" | grep -
 expect_eq "33g the adopted row is byte-identical after a tick" "$S33_ROW_ADOPTED" "$S33_ROW_AFTER"
 expect_eq "33g2 …and after a second adopt (idempotent, adopted_from= never rewritten)" \
   "$S33_ROW_ADOPTED" "$S33_ROW_READOPT"
+
+# ---------- 33h: an INTERMEDIATE adopter's copy is found by the newest-id glob (D8, REQ-8, AC-8.2) ----------
+#
+# THE DEFECT (research D2 §REQ-8; triage-A). `row_quiet` used to check only THIS session's
+# subagents directory, then the row's own `adopted_from=` — never a THIRD session that
+# adopted the agent in between two `/clear`s. `adopted_from=` keeps naming the ORIGINAL
+# launcher forever, so an intermediate adopter's own copy of the log is named on no row at
+# all, and the Patrol reported a working agent quieter than its declared cadence against a
+# path frozen since the launch.
+#
+# THE FIX. `agent_log_newest` globs every session directory of the project for the exact
+# agent id and returns the newest by mtime, so the launcher, any intermediate adopter and
+# this session are all equally candidates — no chain of `adopted_from=` to walk.
+S33_INTER="e7e7e7e7-3333-4ddd-8eee-000000000034"
+S33_INTER_TX="$S33_CFG/projects/-fixture-project/$S33_INTER/subagents/agent-${S33_ID}.jsonl"
+mkdir -p "$(dirname "$S33_INTER_TX")"
+
+R33H="$(s33_adopted adopt-intermediate)"
+: > "$S33_PRED_TX"; rm -f "$S33_OWN_TX"
+poke "$R33H" adopt
+backdate "$S33_PRED_TX" 5400
+# THE INTERMEDIATE ADOPTER's own copy — under a THIRD session this roster row names
+# nowhere — FRESH.
+: > "$S33_INTER_TX"
+s33_answer fresh "w1:running"
+poke "$R33H" tick
+expect_absent "33h a row whose newest copy sits under an INTERMEDIATE adopter is not NOTIFYed" \
+  "quieter than the declared cadence" "$OUT"
+expect_absent "33h2 …the launcher's stale path never decided this tick's verdict" \
+  "$S33_PRED_TX" "$OUT"
+expect_absent "33h3 …and no NOTIFY names this row" "rows=w1" "$OUT"
 
 unset CLAUDE_CONFIG_DIR
 
