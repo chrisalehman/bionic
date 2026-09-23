@@ -1242,24 +1242,18 @@ fi
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # Present means a `parallel-budget:` line whose value carries `writers=` followed by digits
-# as its own field, KEYED BY THE SAME SPELLING the tick and the dispatch wall read: exactly
-# `parallel-budget:` at column 0, colon immediately after the key, no leading whitespace and
-# none before the colon (`hooks/session-poker.sh`'s `plan_budget_line`, byte-identical to
-# `hooks/dispatch-preflight.sh`'s budget arm). Before wave-19-fixit-186 C5, this hook's own
-# pattern admitted `  parallel-budget:` and `parallel-budget :` too — spellings the tick and
-# the dispatch wall silently treat as carrying no line at all, so a header this admitted
-# could still leave every other reader unmeasured. A header this admits now is a header
-# every reader can size a run from, and a header it refuses is one they could not.
+# as its own field, READ BY THE ONE BUDGET READER every other reader calls: run.sh's
+# `budget_line_of` (exactly `parallel-budget:` at column 0, colon immediately after the key)
+# over the text being written — this hook has no file yet — and `budget_field` (one whole
+# field, a decimal integer; epic-23 wave-20 T2, D10). Before wave-19-fixit-186 C5 this hook
+# admitted `  parallel-budget:` and `parallel-budget :` too, spellings every other reader
+# treats as no line; until wave-20 it cut `writers=` at its first SUBSTRING, so
+# `max_writers=9 writers=3` read 9 here and 3 to the tick. A header this admits now is a
+# header every reader sizes identically, and a header it refuses is one none of them could.
 case "$BASENAME" in
   *.plan.md)
-    _gs_budget=$(awk '
-      /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
-    ' <<< "$FRONTMATTER")
-    case " $_gs_budget" in
-      *[[:space:]]writers=*) _gs_writers="${_gs_budget#*writers=}"; _gs_writers="${_gs_writers%%[[:space:]]*}" ;;
-      *) _gs_writers="" ;;
-    esac
-    case "$_gs_writers" in ''|*[!0-9]*) _gs_writers="" ;; esac
+    _gs_budget=$(budget_line_of "$FRONTMATTER")
+    _gs_writers=$(budget_field "$_gs_budget" writers)
     if [ -z "$_gs_writers" ]; then
       _gs_detail="canonical-sdlc plan '$BASENAME' carries no parallel-budget: line with a writers=<digits> field.
 Path: $FILE_PATH
