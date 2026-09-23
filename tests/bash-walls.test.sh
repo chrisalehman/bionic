@@ -1361,6 +1361,36 @@ expect_status "17i: a consumer's acme:test-runner row is ADMITTED (the match is 
 run_hook "$(mk_payload "$R_RO" 'git status && echo "git commit later"' "$RO_ID" omit Bash w18-T7c-green)"
 expect_status "17j: a bionic:test-runner's git status / quoted 'git commit' is ADMITTED" 0 "$ST"
 
+# EVERY COMMIT-CREATING VERB, IN BOTH SPELLINGS (wave-20 T3, REQ-3, AC-3.2). The arm read
+# `git commit` only, so a test-runner's `git revert HEAD`, `git cherry-pick <sha>` or `git merge`
+# made a commit the arm never saw, and `env -C <dir> git commit` hid even the one verb it read
+# (triage-D row 3). The arm now asks one set of eight verbs over the env-aware reader.
+for _v in commit merge revert cherry-pick am rebase commit-tree update-ref; do
+  run_hook "$(mk_payload "$R_RO" "git $_v x" "$RO_ID" omit Bash w18-T7c-green)"
+  expect_status "17k: AC-3.2 — a bionic:test-runner's 'git $_v' is REFUSED" 2 "$ST"
+  expect_contains "17k: …by the role arm ('git $_v')" "a read-only role never commits" "$ERR"
+  run_hook "$(mk_payload "$R_RO" "env -C $R_RO git $_v x" "$RO_ID" omit Bash w18-T7c-green)"
+  expect_status "17k: AC-3.2 — a bionic:test-runner's 'env -C <dir> git $_v' is REFUSED" 2 "$ST"
+  expect_contains "17k: …by the role arm ('env -C <dir> git $_v')" "a read-only role never commits" "$ERR"
+done
+run_hook "$(mk_payload "$R_RO" 'git revert HEAD' "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17k: AC-3.2 — the criterion's own 'git revert HEAD' is REFUSED" 2 "$ST"
+run_hook "$(mk_payload "$R_RO" "env -C $R_RO git cherry-pick 0123abc" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17k: AC-3.2 — the criterion's own 'env -C <dir> git cherry-pick <sha>' is REFUSED" 2 "$ST"
+run_hook "$(mk_payload "$R_RO" "env -i git commit -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17k: …and 'env -i git commit' is REFUSED" 2 "$ST"
+# NOT A COMMIT-CREATING VERB: reading history is still a read-only role's work.
+run_hook "$(mk_payload "$R_RO" "env -C $R_RO git log --merge -1 && git diff HEAD~1" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17k: a bionic:test-runner's 'env -C <dir> git log --merge' / 'git diff' is ADMITTED" 0 "$ST"
+
+# AC-3.3: A WRITER IS UNAFFECTED. An implementor merging its wave head into its task branch is
+# exactly what the brief tells it to do before reporting; the widened set is the role arm's only.
+run_hook "$(mk_payload "$R_RO_OK" 'git merge --no-ff wave/20-fixit-187' aimplementor-0123456789abcdef omit Bash w19-T5)"
+expect_status "17l: AC-3.3 — a bionic:implementor's 'git merge --no-ff <wave head>' is ADMITTED" 0 "$ST"
+expect_absent "17l: …and the role arm says nothing" "read-only role" "$ERR"
+run_hook "$(mk_payload "$R_RO_OK" "git -C $R_RO_OK merge --no-ff wave/20-fixit-187" aimplementor-0123456789abcdef omit Bash w19-T5)"
+expect_status "17l: AC-3.3 — …and spelled 'git -C <tree> merge --no-ff', ADMITTED" 0 "$ST"
+
 
 # ---------------------------------------------------------------------------
 section "18 — a commit into another repository is outside the evidence gate, and only it (wave-19 REQ-9, D10)"

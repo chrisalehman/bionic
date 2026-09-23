@@ -424,7 +424,7 @@ echo "Session:       ${OBS_SESSION}"
 echo "Classification: OURS — ${OBS_OURS_BECAUSE}."
 echo "Contract (roster):  deliverables=$(line_field "$OBS_ROW" deliverable || true)  progress=$(line_field "$OBS_ROW" progress || true)"
 if [ -n "$OBS_ADOPTED_FROM" ]; then
-  echo "Note:          its working log is filed under the session that launched it (${OBS_ADOPTED_FROM})."
+  echo "Note:          adopted from ${OBS_ADOPTED_FROM}; its working log was found under session ${OBS_SESSION} (the newest copy of it anywhere in this project — D8)."
 fi
 echo ""
 

@@ -1109,8 +1109,8 @@ _card_floor() {  # <plan path> -> the configured impact command, or an em dash
 # the first is a hypothesis: "when the batches before it are in, what runs together?" So
 # each batch is asked of a copy of the plan with the earlier batches' rows carrying the
 # terminal word their scale uses (`landed` at wave scale, `done` at task scale — ADR-033
-# decision 1) and `current:` naming that batch's own step. The copy is read and deleted;
-# nothing under the project is written.
+# decision 1) and `current:` naming the batch's highest step (never below 4). The copy is
+# read and deleted; nothing under the project is written.
 #
 # A ROW THAT IS ALREADY LANDED IS NOT READY, and that is deliberate: a plan mid-run
 # renders the widths that are LEFT, which is what a reader of a live plan wants, and a
@@ -1213,7 +1213,7 @@ _card_project() {
 }
 
 _card_batch_widths() {  # <plan> <rung> <scale> -> one `batch <k> · <n> of <rung>` per batch
-  local plan="${1:-}" rung="${2:-}" scale="${3:-wave}" rows maxk k prior steps step
+  local plan="${1:-}" rung="${2:-}" scale="${3:-wave}" rows maxk k prior step
   local word tmpd proj idsf n token
   case "$rung" in ''|*[!0-9]*) return 1 ;; esac
   [ "$rung" -gt 0 ] || return 1
@@ -1246,14 +1246,19 @@ _card_batch_widths() {  # <plan> <rung> <scale> -> one `batch <k> · <n> of <run
       _card_project "$plan" "$prior" "$word" "$token" "$proj"
       fill_ready_set "$proj" "$rung" 0 >> "$idsf"
     else
-      # THE STEP CELLS THIS BATCH HOLDS. A wave batch is normally one step, but a
-      # Step-5 row depending on every Step-4 row sits in its own batch at its own
-      # step, so the token is asked per distinct step rather than once for the plan.
-      steps="$(printf '%s\n' "$rows" | awk -F'\t' -v k="$k" '$1 + 0 == k && $2 != "" { print $2 }' | sort -u)"
-      for step in $steps; do
-        _card_project "$plan" "$prior" "$word" "$step" "$proj"
-        fill_ready_set "$proj" "$rung" 0 >> "$idsf"
-      done
+      # ONE PROJECTION PER BATCH, AT THE STEP THE RUN WILL BE ON WHEN IT COMES UP (wave-20
+      # REQ-5, Δ1, Δ6). Readiness is the prerequisite graph, so a work row in batch k is
+      # ready at any step once batches 1..k-1 have landed, and the per-step loop this
+      # replaced asked the same set once per step it held. What the step still decides is
+      # the gate acts: an `integrate` or `close` row waits for `current:` to reach its own
+      # step, so the batch is asked at its HIGHEST step cell — every gate act in it is then
+      # reached — and never below 4, where nothing fills (the tick never runs a batch there).
+      step="$(printf '%s\n' "$rows" | awk -F'\t' -v k="$k" '
+        BEGIN { m = 4 }
+        $1 + 0 == k && $2 ~ /^[0-9]+$/ && $2 + 0 > m { m = $2 + 0 }
+        END { print m }')"
+      _card_project "$plan" "$prior" "$word" "$step" "$proj"
+      fill_ready_set "$proj" "$rung" 0 >> "$idsf"
     fi
     # DISTINCT IDS, counted with a counter rather than `length(array)`: this platform's
     # awk is the 2007 one-true-awk and does not answer that for an array.

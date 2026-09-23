@@ -4352,7 +4352,9 @@ s25r_tasks="## Tasks
 |---|---|---|---|---|---|---|---|---|---|---|
 | T3 | 4 | build | the build in its own tree | senior-implementor | — | 60m | REQ-2 | a.sh | wt-T3 | active |
 | T9 | 6 | review | the review the run has not reached | critic | T3 | 30m | REQ-2 | b.sh | wt-T9 | pending |
-| T5 | 5 | build | the row standing exactly where the run stands | implementor | — | 20m | REQ-2 | c.sh | wt-T5 | active |"
+| T5 | 5 | build | the row standing exactly where the run stands | implementor | — | 20m | REQ-2 | c.sh | wt-T5 | active |
+| T6 | 6 | review | a review filled ahead of the run, its writer at work | critic | T3 | 30m | REQ-5 | d.sh | wt-T6 | active |
+| T8 | 8 | integrate | the merge, a gate act, ahead of the run | implementor | T3 | 30m | REQ-5 | — | wt-T8 | active |"
 
 s25r_plan() {
   printf '%s\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-14T00:00Z "approved"\nStep 4:\n%s\nStep 5:\n%s\n\n%s\n\n%s\n' \
@@ -4374,6 +4376,8 @@ git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T3" -b s25r-t3
 git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T9" -b s25r-t9
 git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-stray" -b s25r-stray
 git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T5" -b s25r-t5
+git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T6" -b s25r-t6
+git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T8" -b s25r-t8
 
 # THE ALLOW-PATH NOTE, SPELLED ONCE (T24 item (c), architecture review \u00a74.1). Before this
 # wave the gate spoke when it DECLINED to use the register (25g(f)) and stayed silent when it
@@ -4412,20 +4416,51 @@ else
     "expected block naming pass=331; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# --- 25g(e) / AC-2.3: a row AHEAD of the run is refused, naming both steps ----------------
+# --- 25g(e) / AC-2.3, RE-AUTHORED BY wave-20 REQ-5 (Δ6, AC-5.1): a row AHEAD of the run ----
 #
-# The fail-safe direction. A tree whose row sits at Step 6 while the run is at Step 5 is not
-# a writer running early; it is a tree the register says nobody should be committing from
-# yet, and the refusal has to say which row and which two steps or the reader cannot act.
+# Through 1.8.6 every row ahead of `current:` was refused: the step filter meant nothing ahead
+# could be dispatched, so a tree whose row sat past the run was one nobody should be
+# committing from. Readiness is now the prerequisite graph (Δ1), so a Step-6 row whose deps
+# have landed IS dispatched during Step 5, and a writer that cannot commit would be the fill's
+# own dead end. Δ6 draws the line: an ACTIVE work row ahead of the run is a writer at work and
+# is judged by the task arms, exactly as an in-step active row is; a row that is NOT active,
+# and any integrate/close row (a gate act, whose real prerequisite is a gate passing), keeps
+# the refusal — and the refusal still names the row and both steps.
+#
+# 25g(e): T9 is PENDING — no writer was dispatched into its tree — so it keeps the refusal.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T9" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
    && grep -q "T9" <<<"$HOOK_VSTDERR" \
    && grep -qE "(^|[^0-9])6([^0-9]|$)" <<<"$HOOK_VSTDERR" \
    && grep -qE "(^|[^0-9])5([^0-9]|$)" <<<"$HOOK_VSTDERR"; then
-  ok "25g(e) AC-2.3 a commit from a tree whose row is ahead of current: is refused, naming T9, 6 and 5"
+  ok "25g(e) AC-2.3 a commit from a tree whose PENDING row is ahead of current: is refused, naming T9, 6 and 5"
 else
-  no "25g(e) AC-2.3 a commit from a tree whose row is ahead of current: is refused, naming T9, 6 and 5" \
+  no "25g(e) AC-2.3 a commit from a tree whose PENDING row is ahead of current: is refused, naming T9, 6 and 5" \
     "expected block naming T9/6/5; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# 25g(e2) / AC-5.1: T6 is an ACTIVE Step-6 review row, filled at Step 5 because its deps
+# landed. Its commit is judged by the task arms — allowed on the same plan whose Step-5 block
+# refuses a main-root commit (25g(d)) — and the note names the row, as the in-step arm's does.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T6" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] \
+   && [ "$HOOK_STDERR" = "evidence-gate: judged by row T6's task arms (run at current: 5)" ]; then
+  ok "25g(e2) AC-5.1 an ACTIVE row ahead of current: commits, judged by its task arms, and the note says so"
+else
+  no "25g(e2) AC-5.1 an ACTIVE row ahead of current: commits, judged by its task arms, and the note says so" \
+    "expected allow + the task-arms note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# 25g(e3) / Δ6: T8 is an ACTIVE Step-8 integrate row. A gate act ahead of the run keeps the
+# refusal whatever its status: the merge must not commit before Verify has passed.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T8" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -q "T8" <<<"$HOOK_VSTDERR" \
+   && grep -qE "(^|[^0-9])8([^0-9]|$)" <<<"$HOOK_VSTDERR"; then
+  ok "25g(e3) Δ6 an ACTIVE integrate row ahead of current: is still refused, naming T8 and 8"
+else
+  no "25g(e3) Δ6 an ACTIVE integrate row ahead of current: is still refused, naming T8 and 8" \
+    "expected block naming T8/8; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # --- 25g(f): a tree no row owns keeps today's behaviour, and says so ----------------------
@@ -8810,6 +8845,54 @@ s9_expect_judged "9d …and from a leading cd into it" \
 ln -s "$s9_root" "$s9_tmp/root-link"
 s9_expect_judged "9e '-C' through a symlink to the root is the root, and is judged" \
   "$s9_root" "git -C $s9_tmp/root-link commit -m x" "the suite is not fully green"
+
+# --- 9g / AC-3.1: an env spelling of the commit gets the git spelling's verdict (wave-20 T3) --
+#
+# THE FAULT (triage-D row 3, Step-6 addition; research D3 REQ-3). The argv reader dropped a bare
+# `env` only, so `env -C <root>`, `env -i` and `/usr/bin/env` left an option as argv[0] and no
+# commit was read at all: `env -C <root> git commit` was ADMITTED in silence where `git -C <root>
+# commit` is refused. The reader now skips env and its options and records its directory, and
+# the gate places the commit there. Every row below is refused exactly as its 9c control is.
+s9_expect_judged "9g AC-3.1 'env -C <root> git commit' is refused as 'git -C <root> commit' is" \
+  "$s9_root" "env -C $s9_root git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g AC-3.1 …and 'env --chdir=<root> git commit'" \
+  "$s9_root" "env --chdir=$s9_root git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g AC-3.1 …and 'env -i git commit' from the root" \
+  "$s9_root" "env -i git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g …and 'env -u FOO git commit' from the root" \
+  "$s9_root" "env -u FOO git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g …and '/usr/bin/env -C <root> git commit'" \
+  "$s9_root" "/usr/bin/env -C $s9_root git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g …and 'env -C<root> git commit' (value inline)" \
+  "$s9_root" "env -C$s9_root git commit -m x" "the suite is not fully green"
+s9_expect_judged "9g …and \"env -S 'git commit -m x'\" (env's own split string)" \
+  "$s9_root" "env -S 'git commit -m x'" "the suite is not fully green"
+# THE SAME VERDICT, BYTE FOR BYTE. The judged rows above match a substring; this one holds the
+# two spellings to one exit and one refusal line.
+run_hook_cwd "$s9_home" "$s9_root" "$s9_root" "git -C $s9_root commit -m x"
+s9g_git="$HOOK_EXIT|$HOOK_STDERR"
+run_hook_cwd "$s9_home" "$s9_root" "$s9_root" "env -C $s9_root git commit -m x"
+s9g_env="$HOOK_EXIT|$HOOK_STDERR"
+expect_eq "9g AC-3.1 'env -C <root>' and 'git -C <root>' get one exit and one refusal line" "$s9g_git" "$s9g_env"
+# THE ROW ATTRIBUTION FOLLOWS THE DIRECTORY: a linked worktree reached by env -C is judged, as
+# 9d judges it reached by git -C.
+s9_expect_judged "9g …and 'env -C <linked worktree> git commit' is judged as 9d's '-C' is" \
+  "$s9_root" "env -C $s9_root/.worktrees/19-T9 git commit -m x" "the suite is not fully green"
+# D3-3, FAIL-CLOSED: an env spelling is never exempted as outside the repository. `_eg_git_only`
+# refuses a first word of `env`, so `env -C <scratch> git commit` is judged against this run's
+# plan where `git -C <scratch> commit` (9a) is admitted. A writer who means the scratch repo
+# spells `git -C`.
+s9_expect_judged "9g D3-3 'env -C <scratch> git commit' is judged, never exempted (fail-closed)" \
+  "$s9_root" "env -C $s9_scratch git commit -q --allow-empty -m x" "the suite is not fully green"
+# CONTROLS: env in front of a non-commit is still no commit, and git's own absolute -C after an
+# env -C places the commit where git will (the scratch repo is still judged: env is the first word).
+run_hook_cwd "$s9_home" "$s9_root" "$s9_root" "env -C $s9_root git status"
+expect_eq "9g control: 'env -C <root> git status' is no commit and is admitted" "0" "$HOOK_EXIT"
+s9_expect_judged "9g control: 'env -C <scratch> git -C <root> commit' is judged in the root" \
+  "$s9_root" "env -C $s9_scratch git -C $s9_root commit -m x" "the suite is not fully green"
+# T6f's DE-QUOTE DISQUALIFIER STILL HOLDS behind env: a quote-split --git-dir naming the root.
+s9_expect_judged "9g T6f 'env git --git-d\"\"ir=<root>/.git commit' from the scratch repo is judged" \
+  "$s9_scratch" "env git --git-d\"\"ir=$s9_root/.git commit -m x" "the suite is not fully green"
 
 # --- 9f / AC-9.2: the plan is never opened on an outside commit (trace) --------------------
 #
