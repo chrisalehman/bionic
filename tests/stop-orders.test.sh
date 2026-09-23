@@ -54,13 +54,14 @@ make_repo() {  # <name> -> repo path
 # RENAMED OFF THE WRITER'S NAME (S17): `roster_row` is the production writer
 # (payload/scripts/lib/roster.sh), and a private definition of that name would shadow the
 # one writer with a fixture.
-so_roster_row() {  # <repo> <name> <deliverable> [waiver] [teammate-id] [claims]
+so_roster_row() {  # <repo> <name> <deliverable> [waiver] [teammate-id] [claims] [progress] [cadence]
   local repo="$1" name="$2" deliv="$3" waiver="${4:-}" tmid="${5:-}" claims="${6:-}"
+  local progress="${7:-}" cadence="${8:-}"
   local f="$repo/.bionic/tmp/roster-$SID.state"
   [ -f "$f" ] || roster_header > "$f"
   roster_row_fixture status=confirmed session="$SID" name="$name" agent_id= \
     launched_at=2026-08-05T00:00:00Z deliverable="$deliv" claims="$claims" \
-    waiver="$waiver" teammate_id="$tmid" >> "$f"
+    waiver="$waiver" teammate_id="$tmid" progress="$progress" cadence="$cadence" >> "$f"
   return 0
 }
 
@@ -805,5 +806,127 @@ expect_contains "the LEASES report names the tree as abandoned and standing" \
   "$R12_LE"
 expect_absent "…and the header no longer reads as if nothing touched a tree" \
   "nothing has landed; there is nobody to stand down." "$OUT"
+
+# ============================================================
+section "Section 9: stopped — STILL-LIVE is not a close on its own; a fresh, absent panel overrides the progress-artifact shape (wave-19 T1g, audit V2-1, critic C2-2)"
+# ============================================================
+#
+# STILL-LIVE used to refuse `stopped` unconditionally, whatever the panel showed: a writer
+# TaskStopped mid-work has, by construction, a progress artifact inside its cadence, so the
+# refusal held for up to the whole cadence and the slot stayed occupied the entire time —
+# the exact w19-T6 shape `stopped` exists to close (A-orch-4). The panel is the stronger
+# fact once it is fresh: absent from it closes the row `abandoned`, exactly like
+# UNMET-and-gone (T1e). A claimed-process pattern that still matches a live process is a
+# fact the panel cannot speak to either way (it lists this session's roster of agents, not
+# the processes one may have started), so that shape stays refused even panel-gone.
+R13="$(make_repo stopped-still-live)"
+R13SLUG=$(printf '%s' "$R13" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R13SLUG"
+R13TR="$R8CFG/projects/$R13SLUG/$SID.jsonl"
+s13_ledger() { cat "$R13/.bionic/tmp/sweeper-$SID.state" 2>/dev/null; }
+
+R13PROG="$R13/.bionic/docs/record/progress13.md"
+mkdir -p "$(dirname "$R13PROG")"
+echo working > "$R13PROG"   # written just now — inside any cadence
+so_roster_row "$R13" "still-live-gone" ".bionic/docs/record/never-slg.md" "" \
+  "still-live-gone@session-6c85684c" "" "$R13PROG" "10 minutes"
+
+# STILL-LIVE, and still on a fresh panel: refused, naming the wait rather than a bare "not
+# landed" — there is something to do, and the line now says what.
+plant_live "$R13TR" fresh "still-live-gone"
+run_orders_cfg "$R13" stopped still-live-gone
+expect_status "STILL-LIVE and still on a fresh panel is refused, exit 2" 2 "$ST"
+expect_contains "…naming the wait" \
+  "retry after the cadence elapses, or when a fresh panel no longer lists it" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=still-live-gone|" "$(s13_ledger)"
+
+# STILL-LIVE under a stale panel: refused too, same wait — a verb that cannot see does not
+# ack, and staleness is not evidence the agent left.
+plant_live "$R13TR" stale
+run_orders_cfg "$R13" stopped still-live-gone
+expect_status "STILL-LIVE under a stale panel is refused, exit 2" 2 "$ST"
+expect_contains "…naming the same wait" \
+  "retry after the cadence elapses, or when a fresh panel no longer lists it" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=still-live-gone|" "$(s13_ledger)"
+
+# STILL-LIVE, and the fresh panel shows the agent GONE: the panel overrides the progress
+# artifact — closed `abandoned`, same as UNMET-and-gone, and the operator is told why.
+plant_live "$R13TR" fresh
+run_orders_cfg "$R13" stopped still-live-gone
+expect_status "STILL-LIVE the fresh panel shows gone is acked, exit 0 (V2-1)" 0 "$ST"
+expect_contains "…through the sweeper, by a human verb, reason abandoned" \
+  "|name=still-live-gone|by=human|reason=abandoned" "$(s13_ledger)"
+expect_contains "…and the operator is told the panel is what decided it" \
+  "panel-gone overrides STILL-LIVE" "$OUT"
+expect_contains "…naming the progress artifact's age and the cadence" "s old, cadence" "$OUT"
+expect_contains "…so the one verdict line reports it closed" "|acked=yes|" \
+  "$( cd "$R13" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict still-live-gone 2>/dev/null )"
+
+# THE CLAIMED-PROCESS SHAPE IS NOT OVERRIDDEN. `claims=` is checked for EXISTENCE by
+# pattern (session-sweeper.sh's `claims_live`, which shells out to `pgrep -f`), so the
+# honest way to fixture a live claim is a process that really is running — a background
+# CHILD of this suite, never the suite's own process. macOS `pgrep` excludes its own
+# ancestor chain by default (`man pgrep`: "the current pgrep or pkill process and all of
+# its ancestors are excluded"), and `claims_live`'s `pgrep -f` runs several processes below
+# this suite (stop-orders.sh -> session-sweeper.sh -> pgrep), so a claim naming the SUITE's
+# own filename is never actually found by it — the standdown LEFT ALONE fixture earlier in
+# this file (`live-one`, claims="stop-orders.test.sh") happens to pass regardless because
+# LEFT ALONE does not distinguish STILL-LIVE from UNMET; it is not proof `claims_live` saw a
+# live process. A background child is not an ancestor and IS matched.
+CLAIMS_MARKER="bionic-t1g-claim-marker-$$"
+( exec -a "$CLAIMS_MARKER" sleep 30 ) &
+CLAIMS_MARKER_PID=$!
+so_roster_row "$R13" "claims-live-gone" ".bionic/docs/record/never-clg.md" "" \
+  "claims-live-gone@session-6c85684c" "$CLAIMS_MARKER"
+plant_live "$R13TR" fresh
+run_orders_cfg "$R13" stopped claims-live-gone
+expect_status "a claimed-process STILL-LIVE row stays refused even panel-gone, exit 2" 2 "$ST"
+expect_contains "…naming the claim, not the panel" "claimed process pattern" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=claims-live-gone|" "$(s13_ledger)"
+kill "$CLAIMS_MARKER_PID" 2>/dev/null
+wait "$CLAIMS_MARKER_PID" 2>/dev/null
+
+# ---------- standdown never merges the tree a panel-gone override closed (T1f unchanged) ----------
+#
+# T1f's rule stands: `_land_row_tree` merges only MET/WAIVED. An acked STILL-LIVE-and-gone
+# row's tree stands, reported the same way an abandoned UNMET tree does — no new lease path
+# was added by this fix, only a new way to reach the same ack.
+R14="$(make_repo standdown-stilllive-stands)"
+echo seed > "$R14/README.md"
+git -C "$R14" add README.md >/dev/null 2>&1
+git -C "$R14" commit -qm seed >/dev/null 2>&1
+git -C "$R14" checkout -qb integration
+git -C "$R14" worktree add -q -b still-working "$R14/.worktrees/still-working" >/dev/null 2>&1
+echo partial > "$R14/.worktrees/still-working/partial14.txt"
+git -C "$R14/.worktrees/still-working" add -A >/dev/null 2>&1
+git -C "$R14/.worktrees/still-working" commit -qm "still-working WIP" >/dev/null 2>&1
+
+R14SLUG=$(printf '%s' "$R14" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R14SLUG"
+R14TR="$R8CFG/projects/$R14SLUG/$SID.jsonl"
+R14PROG="$R14/.bionic/docs/record/progress14.md"
+echo working > "$R14PROG"
+so_roster_row "$R14" "still-working" ".bionic/docs/record/never-sw.md" "" \
+  "still-working@session-6c85684c" "" "$R14PROG" "10 minutes"
+plant_live "$R14TR" fresh
+
+run_orders_cfg "$R14" stopped still-working
+expect_status "stopped closes the STILL-LIVE-and-gone row (V2-1 precondition)" 0 "$ST"
+expect_contains "…as abandoned" "reason abandoned" "$OUT"
+
+run_orders_cfg "$R14" standdown
+expect_status "standdown over the closed row with a tree exits clean" 0 "$ST"
+if [ "$(git -C "$R14" rev-list --count "HEAD..still-working" 2>/dev/null)" = "1" ]; then
+  ok "the closed branch is NOT merged: it is still ahead of the main checkout"
+else
+  no "the closed branch is NOT merged: it is still ahead of the main checkout" \
+    "HEAD..still-working = $(git -C "$R14" rev-list --count "HEAD..still-working" 2>&1)"
+fi
+expect_absent "…and no LANDED line claims it" "LANDED branch=still-working" "$OUT"
+if [ -d "$R14/.worktrees/still-working" ] && [ -f "$R14/.worktrees/still-working/partial14.txt" ]; then
+  ok "…its tree stands, the partial work still in it"
+else
+  no "…its tree stands, the partial work still in it"
+fi
 
 finish
