@@ -1102,9 +1102,13 @@ bionic_context 2>/dev/null || exit 0
 # `--git-dir`/`--work-tree`/`GIT_DIR` name the repository outright, and a `pushd`, a nested
 # `bash -c 'cd …'` or a piped `cd` moves the shell where the reader never looks. Every one of
 # those single commits was exempted for a scratch repository while it landed in the root.
-# `_eg_placed` admits only the three shapes the reader reads exactly — one `-C`, a leading `cd`
-# with nothing after it that moves, the payload cwd with nothing that moves — and everything
-# else is judged below. The exotic spellings are not resolved; they are not exempted.
+# `_eg_placed` admits only the three shapes the reader reads exactly: one `-C`, a leading `cd`,
+# or the payload cwd. Each holds only when every other segment of the text starts with `git`,
+# `true`, `:` or `exit` (`_eg_git_only`), with no `(`, `{` or backtick anywhere. That is an
+# ALLOW-LIST (review R2-2): `if cd <root>; then :; fi; git commit`, `time cd <root> && git
+# commit` and a function named `git` all cost the exemption because their first word is not on
+# it, not because a list of moves names them. Everything else is judged below. The exotic
+# spellings are not resolved; they are not exempted.
 #
 # NOT A NEW REACH (the D11 freeze, .claude/rules/hook-authoring.md). It is the repair of the
 # gate's existing foreign-repository check — `_eg_git_wt_name` already asks git this question,
@@ -1424,63 +1428,91 @@ _eg_commit_count() {
   return 0
 }
 
-# _eg_no_cwd_move <text> -> 0 when nothing in <text> can move the shell, or name the
-# repository, between where the reader placed the commit and the commit itself; 1 otherwise.
+# _eg_git_only <text> -> 0 when every segment of <text> is a simple command whose first word
+# is `git`, `true`, `:` or `exit`; 1 for anything else.
 #
-# A SEGMENT SCAN, NOT A PARSER. The text is cut on every character that can open a command —
-# `;`, `&`, `|`, a newline, `(`, `)`, `{`, `}` and a backtick — and each piece's first word,
-# after any `NAME=value` prefixes, is read. A `cd`, `pushd`, `popd`, `eval`, `source`, `.`,
-# `exec`, `builtin`, `command` or a shell (`bash`, `sh`, `zsh`, `dash`, `ksh`, by name or path)
-# in command position is a move this reader does not follow, and so is an `sh -c` anywhere
-# (behind `xargs`, `env`, `sudo`). The WHOLE text is scanned, not only what precedes the commit:
-# a move after the commit costs the exemption and nothing else, and finding the commit's own
-# offset in the raw text is the guess this rule exists to stop making.
-_eg_no_cwd_move() {
+# AN ALLOW-LIST, NOT A DENY-LIST (review R2-2, wave-19 T6e). This reader used to name the words
+# that move the shell (`cd`, `pushd`, `eval`, a shell) and pass everything else. That was
+# patched three times (R1, C1, R2-2) and was still open: a `cd` behind a reserved word (`if cd`,
+# `while ! cd`, `until cd`, `! cd`, `time cd`) runs in the current shell, and its first word was
+# on no list. So it now names what IS safe and judges everything else. `git` is the commit and
+# its neighbours. `true` and `:` do nothing. `exit` ends the shell before any later commit
+# runs. Every other first word costs the exemption: a reserved word, `eval`, `exec`, `env`,
+# `xargs`, a shell, a `NAME=value` prefix, a function name.
+#
+# A SEGMENT SCAN, NOT A PARSER. The text is cut on `;`, `&`, `|` and a newline, and each
+# piece's first word is read. A redirection's `>&`, `<&` or `&>` is folded to a plain `>` or
+# `<` first, so `2>&1` does not start a segment named `1`. A `(`, `)`, `{`, `}` or backtick
+# anywhere costs the exemption outright. Each opens a subshell, a group or a function body
+# (`git() { … }` shadows the binary), and none is worth reading. An `sh -c` anywhere costs
+# it too, even inside a `git -c` value. The WHOLE text is scanned, before and after the
+# commit. Words inside a quoted commit message are read as words, which is the fail-closed
+# direction; a writer commits with `-F`.
+_eg_git_only() {
   local _t="${1:-}" _seg _w
-  case "$_t" in *'sh -c'*|*'sh	-c'*) return 1 ;; esac
+  case "$_t" in
+    *'sh -c'*|*'sh	-c'*) return 1 ;;
+    *[\(\)\{\}\`]*) return 1 ;;
+  esac
+  _t="${_t//">&"/>}"; _t="${_t//"<&"/<}"; _t="${_t//"&>"/>}"
   while [ -n "$_t" ]; do
     case "$_t" in
-      *[\;\&\|$'\n'\(\)\{\}\`]*) _seg="${_t%%[;&|$'\n'(){\}\`]*}"; _t="${_t#*[;&|$'\n'(){\}\`]}" ;;
+      *[\;\&\|$'\n']*) _seg="${_t%%[;&|$'\n']*}"; _t="${_t#*[;&|$'\n']}" ;;
       *) _seg="$_t"; _t="" ;;
     esac
-    while :; do
-      while [ "${_seg# }" != "$_seg" ] || [ "${_seg#	}" != "$_seg" ]; do
-        _seg="${_seg# }"; _seg="${_seg#	}"
-      done
-      _w="${_seg%%[ 	]*}"
-      case "$_w" in
-        [A-Za-z_]*=*) _seg="${_seg#"$_w"}" ;;
-        *) break ;;
-      esac
+    while [ "${_seg# }" != "$_seg" ] || [ "${_seg#	}" != "$_seg" ]; do
+      _seg="${_seg# }"; _seg="${_seg#	}"
     done
+    _w="${_seg%%[ 	]*}"
     case "$_w" in
-      cd|pushd|popd|eval|source|.|exec|builtin|command) return 1 ;;
-      bash|sh|zsh|dash|ksh|*/bash|*/sh|*/zsh|*/dash|*/ksh) return 1 ;;
+      ''|git|true|:|exit) : ;;
+      *) return 1 ;;
     esac
   done
   return 0
 }
 
 # _eg_placed -> 0 when the ONE commit's directory was read in a shape git obeys exactly as the
-# reader does, and 1 for every other shape (critic C1, wave-19). Only these three place:
-#   (a) `git -C <absolute dir> commit` — the commit's global options carry exactly ONE `-C`
-#       (git takes the LAST of several; the reader took the first);
-#   (b) a leading `cd <absolute dir>` followed by `&&`, `||`, `;` or a newline — never a pipe
-#       or a lone `&`, which run the `cd` in a subshell that moves nothing — with no `-C` on
-#       the commit and no move anywhere after it (`_eg_no_cwd_move`);
-#   (c) the payload cwd, with no `-C` on the commit and no move anywhere in the text. This is
-#       the writer standing in the scratch repository or the nested bed (AC-9.1, AC-9.3).
+# reader does, and 1 for every other shape (critic C1, review R2-2, wave-19). Only these three
+# place, and each needs `_eg_git_only` to hold over the text it names:
+#   (a) `git -C <absolute dir> commit`. The commit's global options carry exactly ONE `-C`,
+#       because git takes the LAST of several and the reader took the first. The WHOLE text
+#       must pass `_eg_git_only`, so a function named `git` cannot redirect the commit.
+#   (b) a leading `cd <absolute dir>` followed by `&&`, `||`, `;` or a newline. A pipe or a
+#       lone `&` runs the `cd` in a subshell that moves nothing, so neither places. The commit
+#       carries no `-C`, and everything after the separator must pass `_eg_git_only`.
+#   (c) the payload cwd. The commit carries no `-C`, and the whole text must pass
+#       `_eg_git_only`. This is the writer standing in the scratch repository or the nested
+#       bed (AC-9.1, AC-9.3).
 # And in all three, no `--git-dir`, `--work-tree`, `GIT_DIR`, `GIT_WORK_TREE` or
 # `GIT_COMMON_DIR` anywhere in the command: each names the repository outright, whatever
 # directory the commit runs in. The check is on the raw text, so the words inside a commit
 # message cost the exemption too — the fail-closed direction, and a writer commits with `-F`.
+#
+# THE DISQUALIFIER ALSO READS A DE-QUOTED COPY (audit V3-1, wave-19 T6f). A `"`, `'` or `\`
+# dropped into the middle of the flag's name (`--git-d""ir`, `--git-di\r`) defeats the raw
+# substring match above while the shell still hands git the flag whole once it strips the
+# quote or backslash, so the commit really lands in the named (root) repository. This is not
+# shell parsing — it strips every `"`, `'` and `\` character from the text with no attempt at
+# fidelity, and any spelling that COULD reach the disqualifier once they are gone is treated
+# as the disqualifier. Both the raw text and this stripped view are tested; either one
+# matching costs the exemption (fail-closed, review R2-2's direction). `_eg_git_only`'s
+# allow-list needs no matching change: it already fails closed on any first word that is not
+# byte-for-byte `git`, `true`, `:` or `exit`, so a quote- or backslash-split `git` itself is
+# already judged rather than exempted (A-T6.13).
 _eg_placed() {
-  local _c _sep
+  local _c _sep _dq
+  _dq="${COMMAND//\"/}"
+  _dq="${_dq//\'/}"
+  _dq="${_dq//\\/}"
   case "$COMMAND" in
     *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
   esac
+  case "$_dq" in
+    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
+  esac
   case "$_EG_CWD_SRC" in
-    -C) [ "$_EG_COMMIT_NC" -eq 1 ] ;;
+    -C) [ "$_EG_COMMIT_NC" -eq 1 ] && _eg_git_only "$COMMAND" ;;
     cd)
       [ "$_EG_COMMIT_NC" -eq 0 ] || return 1
       _c="$COMMAND"
@@ -1492,9 +1524,9 @@ _eg_placed() {
         ';'*|$'\n'*) _sep="${_sep#?}" ;;
         *) return 1 ;;
       esac
-      _eg_no_cwd_move "$_sep" ;;
+      _eg_git_only "$_sep" ;;
     payload)
-      [ "$_EG_COMMIT_NC" -eq 0 ] && _eg_no_cwd_move "$COMMAND" ;;
+      [ "$_EG_COMMIT_NC" -eq 0 ] && _eg_git_only "$COMMAND" ;;
     *) return 1 ;;
   esac
 }
