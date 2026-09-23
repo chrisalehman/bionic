@@ -1139,4 +1139,53 @@ expect_absent_ci "…and nothing is called ambiguous" "ambiguous" "$OUT11B"
 expect_absent_ci "…and no machine line, because no evidence tier was shown" \
   "stop-check-observation/" "$OUT11B"
 
+# ============================================================
+section "Section 12: the newest copy of the log wins, across EVERY session directory (D8; REQ-8; AC-8.1)"
+# ============================================================
+#
+# THE DEFECT (research D2 §REQ-8; triage-A). `observe_agent` used to read `adopted_from=` or
+# nothing else: THIS session's directory, or (if adopted) the LAUNCHER's — never a third
+# session that adopted the agent in between two `/clear`s. That INTERMEDIATE adopter is named
+# on no row (`adopted_from=` keeps pointing at the original launcher forever), and its own
+# copy of the working log can be the freshest one on disk while both old readers keep quoting
+# the launcher's stale copy.
+#
+# THE FIX. `agent_log_newest` (payload/scripts/lib/observe.sh) globs every session directory
+# of the PROJECT for the exact agent id and returns the newest copy by mtime — no chain of
+# `adopted_from=` values to walk, no intermediate session to miss.
+IFS='|' read -r H12 R12 S12 <<< "$(make_world w12)"
+LAUNCHER12="c0c0c0c0-1111-1111-1111-111111111112"
+INTER12="c0c0c0c0-2222-2222-2222-222222222212"
+CUR12="c0c0c0c0-3333-3333-3333-333333333312"
+AID12="aintermed-4040404040404040"
+
+# The LAUNCHER's copy: OLD (2 hours). No roster row of its own — a launcher's directory
+# carries no row once the agent has been adopted onward.
+MK_AGENT_ROW=no make_agent "$H12" "$S12" "$LAUNCHER12" "$AID12" "adoptee" "the stale launcher copy" >/dev/null
+touch -t 202601010000 "$H12/.claude/projects/$S12/$LAUNCHER12/subagents/agent-${AID12}.jsonl"
+
+# The INTERMEDIATE adopter's copy: FRESH, and named on NO row this session's roster carries —
+# not `adopted_from=`, not this session's own id. This is the copy the old chain-following
+# logic could never find.
+MK_AGENT_ROW=no make_agent "$H12" "$S12" "$INTER12" "$AID12" "adoptee" "the fresh intermediate copy" >/dev/null
+
+# THE CURRENT (observing) session's own roster: adopted_from names the ORIGINAL launcher,
+# never the intermediate — exactly what a real second `/clear` leaves behind.
+add_live "$H12" "$S12" "$CUR12" "adoptee"
+mkdir -p "$R12/.bionic/tmp"
+roster_header > "$R12/.bionic/tmp/roster-${CUR12}.state"
+roster_row_fixture status=identified session="$CUR12" name=adoptee agent_id="$AID12" \
+  launched_at=2026-08-05T00:00:00Z source=adopted tool_use_id= \
+  teammate_id="adoptee@session-${LAUNCHER12:0:8}" adopted_from="$LAUNCHER12" \
+  >> "$R12/.bionic/tmp/roster-${CUR12}.state"
+
+OUT12=$(run_check_as "$CUR12" "$H12" "$R12" "adoptee")
+expect_status "an intermediate adopter's fresh copy still resolves" 0 $?
+expect_contains "…the working log named is the INTERMEDIATE's fresh copy" \
+  "Working log:   $H12/.claude/projects/$S12/$INTER12/subagents/agent-${AID12}.jsonl" "$OUT12"
+expect_absent "…never the launcher's stale copy" \
+  "Working log:   $H12/.claude/projects/$S12/$LAUNCHER12/subagents/agent-${AID12}.jsonl" "$OUT12"
+expect_regex "…and the age reads fresh (a few seconds), not the launcher's 2h-old mtime" \
+  '\(age [0-9]+s\)' "$OUT12"
+
 finish
