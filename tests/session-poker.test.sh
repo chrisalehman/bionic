@@ -1065,10 +1065,14 @@ add_row_to "$R8" "$ADOPT_A" name=silent-one status=identified agent_id="$ID_SILE
 add_row_to "$R8" "$ADOPT_A" name=closed-one status=identified agent_id="$ID_CLOSED" \
   subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/closed-one.md"
-# The terminal row: hooks/landing-gate.sh's own marker, the only thing that closes a row
-# without an ack. Written by hand here for the same reason the ack above is NOT — this
-# marker's writer is a Stop hook with a whole payload contract, and the shape is one line.
+# The terminal row. Until epic-23 wave-20 T2 the landing marker alone closed it here; since
+# D10 the ONE close is an ack taken after the row's launch (`roster_open_names`,
+# payload/scripts/lib/roster.sh; ADR-034 d1), so a MET-marked row nobody acked is ADOPTED —
+# its agent may still be on the panel, and an unadopted live agent is one no stop can reach
+# (memory adopt-skips-swept-rows). The marker stays, to show it closes nothing on its own; the
+# ack is written by the real verb, in the PREDECESSOR's own ledger, where adopt reads it.
 swept_marker_write "$(roster_of "$R8" "$ADOPT_A")" "$(iso_ago 300)" "$ADOPT_A" closed-one "$ID_CLOSED" MET
+( cd "$R8" && env CLAUDE_CODE_SESSION_ID="$ADOPT_A" bash "$SWEEPER_FOR_ACK" ack closed-one ) >/dev/null 2>&1
 
 # ---- predecessor A: a Deliverable-waiver row (S17, AC-12 attempt 2) ----
 #
@@ -1087,7 +1091,8 @@ add_row_to "$R8" "$ADOPT_A" name=waived-one status=identified agent_id="$ID_WAIV
 # the `/clear` — hooks/landing-gate.sh's own recheck arm reads exactly this shape to decide
 # "recheck" instead of "first verdict" the next time this name is swept. A MET marker can
 # never coexist with an adopted row (a MET name is filtered out of the fold entirely, never
-# offered — §8d's `closed-one`), so the only history worth carrying forward is a non-MET one.
+# offered — §8d's `closed-one`, which is also ACKED since epic-23 wave-20 T2 made the ack the
+# one close), so the only history worth carrying forward here is a non-MET one.
 add_row_to "$R8" "$ADOPT_A" name=recheck-one status=identified agent_id="$ID_RECHECK" \
   subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/recheck-one.md"
@@ -1230,7 +1235,9 @@ expect_contains "an agent with no transcript on disk says so" "transcript_presen
 
 # ---------- 8d: what adopt must NOT do ----------
 expect_absent "this session's own rows are never adopted" "mine-current" "$OUT"
-expect_absent "a row already swept MET is closed, not adopted" "closed-one" "$OUT"
+expect_contains "8d meta: closed-one's ack is on the predecessor's own ledger" "|name=closed-one|" \
+  "$(cat "$R8/.bionic/tmp/sweeper-$ADOPT_A.state" 2>/dev/null)"
+expect_absent "a row acked after its launch is closed, not adopted" "closed-one" "$OUT"
 expect_eq "no PREDECESSOR roster is modified — not one byte" "$_before" "$_after"
 expect_eq "adopt writes no Patrol stamp — it is not a tick" "no" \
   "$([ -e "$R8/.bionic/tmp/patrol-${SID}.state" ] && echo yes || echo no)"
@@ -1331,8 +1338,8 @@ RECHECK_MARKERS="$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER" | grep -F '|name=rec
 expect_contains "the source's non-MET marker is copied onto the successor roster" \
   "state=UNMET" "$RECHECK_MARKERS"
 expect_eq "…verbatim, exactly once" "1" "$(printf '%s\n' "$RECHECK_MARKERS" | grep -c .)"
-# A MET marker can never reach this path — closed-one (§8d) proves the fold excludes it
-# from adoption entirely, so there is no row here for a MET marker to attach to.
+# closed-one (§8d) is acked, so the fold excludes it from adoption entirely and there is no
+# adopted row here for its MET marker to attach to.
 expect_absent "a MET marker is never copied — there is no adopted row it could attach to" \
   "name=closed-one" "$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER")"
 
