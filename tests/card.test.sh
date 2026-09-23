@@ -1389,6 +1389,33 @@ expect_contains "162c: …the Step-4 batches keep their widths" "batch 2 · 2 of
 expect_contains "162d: …and the Step-5 batch is asked at step 5, not at the first batch's step" \
   "batch 3 · 2 of 8" "$T10_3B"
 
+# ── wave-20 REQ-5 (Δ1, Δ6): one projection per batch, and the gate acts still count ──
+# Readiness is the prerequisite graph now, so a batch is asked ONCE — at the step the run
+# will be on when it comes up (its highest step, and never below 4, where nothing fills) —
+# rather than once per step it holds. Two shapes pin that:
+#   - batch 4 holds a Step-6 review row AND a Step-8 integrate row, both behind the Step-5
+#     rows. A collapse that asked every batch at `current: 4` would drop the integrate row,
+#     whose step the run must reach (Δ6); asked at the batch's own highest step it counts.
+#   - batch 1 holds a pending Step-3 prototype row beside the Step-4 builds. At `current: 4`
+#     the tick fills it (Δ1: whatever its step), so the card counts it; asking the prototype
+#     at its own step 3 — below the approval gate — never could.
+T20_WAVE_4B="${T10_ROOT_CFG}/wave-98-fourbatch.plan.md"
+awk '{ print }
+     /^\| T3 \| 4 \|/ {
+       print "| T9 | 3 | prototype | REQ-2: the prototype nobody ran. complexity: standard | implementor | — | 30 | REQ-2 | — | — | pending |"
+     }
+     /^\| T7 \| 5 \|/ {
+       print "| T10 | 6 | review | REQ-1: the critic. complexity: standard | critic | T6, T7 | 30 | REQ-1 | — | — | pending |"
+       print "| T11 | 8 | integrate | REQ-1: the merge. complexity: standard | implementor | T6, T7 | 30 | REQ-1 | — | — | pending |"
+     }' "$T10_WAVE_3B" > "$T20_WAVE_4B"
+whole_card step3 "$T20_WAVE_4B"; T20_4B="$WC_OUT"
+expect_eq "162e: Δ1 — step3 exits 0 on the plan carrying gate acts and a prototype" "0" "$WC_RC"
+expect_contains "162f: Δ1 — batch 1 counts the Step-3 prototype beside the three builds" \
+  "batch 1 · 4 of 8" "$T20_4B"
+expect_contains "162g: …the Step-5 batch keeps its width" "batch 3 · 2 of 8" "$T20_4B"
+expect_contains "162h: Δ6 — batch 4 counts the review AND the integrate row, asked at its own highest step" \
+  "batch 4 · 2 of 8" "$T20_4B"
+
 # ── AC-4.5: the new cards obey the same budget every other card does ─────────
 # THE ARTIFACTS PATH IS EXCLUDED, and only it: these fixtures live OUTSIDE the
 # project (this suite's hermetic-fixture rule), and an out-of-project artifact path
