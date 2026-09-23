@@ -1865,17 +1865,22 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 # `latest_rows` both use), minus every name the sweeper ledger has acked. One awk over the
 # two files; no sweeper fork, no transcript read.
 #
-# THE DIRECTION OF ERROR: the wall refuses less, never more. The tick's `open` is a subset
-# of this count: it drops a row whose verdict is MET or WAIVED, and then trims by transcript
-# liveness — two facts this wall does not recompute. So the wall's count is never below the
-# tick's, its gap is never wider, and every row it names is a row the tick's own reading would also name. That
-# is also why a `landing-swept/v1` marker does NOT close a row here: the marker records
-# that a landing was seen, not that the agent left (ADR-034 decision 1 — the ack is the one
-# terminal state), and the tick counts a swept row open whenever its verdict is no longer
-# MET (a deliverable since removed), which a wall that skipped swept rows would count
-# below. A row stays in this count until it is acked; the Patrol acks a MET row once a
-# fresh panel shows its agent gone. A roster or ledger that is a symlink is not read, and
-# the duty is skipped rather than judged on zero — zero is the direction that refuses more.
+# THE DIRECTION OF ERROR: ONE PREDICATE, NOT TWO (wave-19 T2d, audit V-2; ADR-034 decision 2).
+# This used to say the wall refuses less, never more, because the tick's `open` was a SUBSET
+# of this count: it dropped a row whose verdict was MET or WAIVED, then trimmed by transcript
+# liveness — two facts this wall did not recompute. Audit V-2 found that subset relationship
+# false whenever the ledger lagged the roster, so the tick's fill and this wall now count the
+# SAME thing: every roster row of this session that is not yet acked. A `landing-swept/v1`
+# marker does NOT close a row here: the marker records that a landing was seen, not that the
+# agent left (ADR-034 decision 1 — the ack is the one terminal state), and a swept-but-unacked
+# row stays open in both counts alike. A row stays in this count until it is acked; the Patrol
+# acks a MET row once a fresh panel shows its agent gone, after its own STANDDOWN line prints.
+# The one remaining ordering edge: an ack written INSIDE a tick turn, after that tick has
+# already printed its own occupancy line, makes this wall's later read one row lower than the
+# number the tick printed for that same turn — a truthful refusal of a row the tick's own next
+# read would also drop, not a disagreement between the two. A roster or ledger that is a
+# symlink is not read, and the duty is skipped rather than judged on zero — zero is the
+# direction that refuses more.
 #
 # THE BUDGET IS A MEASUREMENT THE PLAN CARRIES (wave-19 REQ-3, D5; ADR-035). Step 0 writes
 # `parallel-budget: writers=N …` from `resources_probe` then `resources_budget`, and the
