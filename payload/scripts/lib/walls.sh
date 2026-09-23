@@ -1294,11 +1294,11 @@ _eg_cd_one_dir() {
 # COMMAND that only the caller can act on — an ambiguously named directory is a refusal, not
 # a cwd — and a command substitution would leave them behind in a subshell.
 _eg_commit_cwd() {
-  local _line _oldifs _hadf _p _c
+  local _line _oldifs _hadf _p _c _gc
   _EG_CWD=""; _EG_CWD_SRC=""; _EG_CDS=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
   case " $COMMAND " in
-    *" -C "*|*" -C"[\"\']*)
+    *" -C "*|*" -C"[\"\']*|*env*)
       _oldifs="$IFS"; _hadf=0
       while IFS= read -r _line; do
         [ -n "$_line" ] || continue
@@ -1314,12 +1314,11 @@ _eg_commit_cwd() {
         IFS="$_oldifs"
         [ "$_hadf" -eq 1 ] || set +f
         shift   # argv[0], the git binary
+        _gc=""
         while [ $# -gt 0 ]; do
           case "$1" in
             -C) shift
-                if [ $# -gt 0 ]; then
-                  case "$1" in /*) _EG_CWD="$1"; _EG_CWD_SRC="-C"; return 0 ;; esac
-                fi
+                if [ $# -gt 0 ]; then _gc="$1"; fi
                 break ;;
             -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix)
               shift; [ $# -gt 0 ] && shift ;;
@@ -1327,6 +1326,17 @@ _eg_commit_cwd() {
             *) break ;;
           esac
         done
+        case "$_gc" in /*) _EG_CWD="$_gc"; _EG_CWD_SRC="-C"; return 0 ;; esac
+        # `env -C <dir>` / `env --chdir=<dir>` (wave-20 T3, REQ-3, D3): the argv reader
+        # records env's directory, and an ABSOLUTE one is where the commit runs — joined
+        # with git's own relative `-C` when there is one, since git resolves that against
+        # the directory env moved to. `env-C` is a source `_eg_placed` never admits, so an
+        # env spelling is judged against this run's plan and is never exempted as outside
+        # the repository (D3-3); the directory it names still picks the task row.
+        case "$GIT_ARGV_ENV_CHDIR" in
+          /*) if [ -n "$_gc" ]; then _EG_CWD="${GIT_ARGV_ENV_CHDIR%/}/$_gc"; else _EG_CWD="$GIT_ARGV_ENV_CHDIR"; fi
+              _EG_CWD_SRC="env-C"; return 0 ;;
+        esac
         break
       done <<< "$(git_argv_expand "$COMMAND")"
       ;;
@@ -1390,7 +1400,8 @@ _eg_outside_root() {
 # _eg_commit_count -> sets _EG_COMMITS to the number of `git … commit` segments in the command
 # text, `sh -c`/`eval` strings included (the jurisdiction arm exempts only when it is 1), and
 # _EG_COMMIT_NC to the number of `-C` options among the GLOBAL options of the last one counted
-# — git's own cwd overrides, before the subcommand, never commit's `-C <commit>` after it.
+# — git's own cwd overrides, before the subcommand, never commit's `-C <commit>` after it —
+# plus one for an `env -C`/`--chdir` in front of it (wave-20 T3).
 # Assigns rather than prints, like `_eg_commit_cwd`, and forks nothing git-side: it is the
 # same pure-shell segment pass the other walls make.
 _EG_COMMITS=0
@@ -1406,6 +1417,8 @@ _eg_commit_count() {
     _EG_COMMIT_NC=0
     _git_argv_skip "$_line"
     [ -n "$GIT_ARGV_REST" ] || continue
+    # env's `-C`/`--chdir` is a directory override too (wave-20 T3, D3).
+    [ -z "$GIT_ARGV_ENV_CHDIR" ] || _EG_COMMIT_NC=$((_EG_COMMIT_NC + 1))
     _hadf=0
     case "$-" in *f*) _hadf=1 ;; esac
     set -f
@@ -4891,16 +4904,23 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # committed its own green run. This arm makes the promise a wall.
   #
   # ABOVE THE SUITE FILTER, because a commit is not a suite and everything below returns 0
-  # on a non-suite command. The screen is the evidence gate's own (`_wall_mentions_git` then
-  # `git_argv_has_sub … commit`), so `git -C <dir> commit` is a commit and a quoted
-  # "git commit" is not.
+  # on a non-suite command. The screen is the evidence gate's reader (`_wall_mentions_git`
+  # then the argv parser), so `git -C <dir> commit` is a commit and a quoted "git commit" is
+  # not.
+  #
+  # EVERY VERB THAT MAKES A COMMIT, NOT ONLY `commit` (wave-20 T3, REQ-3, AC-3.2). `revert`,
+  # `cherry-pick`, `merge`, `am`, `rebase`, `commit-tree` and `update-ref` each write history
+  # the arm never saw, and `env -C <dir> git …` hid even `commit` until the reader learned env.
+  # The set is this arm's alone: the evidence gate's own verb stays `commit`, because the
+  # orchestrator lands with `git merge`, and a writer's merge of its wave head is its brief.
   #
   # THE ROLE IS THE ROSTER ROW'S `subagent_type=`, READ BY THE SAME JOIN ARM 2 MAKES — the
   # last row carrying this `agent_id` wins. Never the payload's `agent_type`: for a teammate
   # it is the dispatch NAME (R3 Q2), and a name like `x-runner` is not a role. The match is
   # the exact plugin-qualified spelling, so a consumer's own `acme:test-runner` is not ours.
   # No row, or a row with no role → no statement about this agent, and silence.
-  if _wall_mentions_git "$COMMAND" && git_argv_has_sub "$COMMAND" commit; then
+  if _wall_mentions_git "$COMMAND" \
+     && git_argv_has_any_sub "$COMMAND" "commit merge revert cherry-pick am rebase commit-tree update-ref"; then
     local _bsg_role
     _bsg_role=$(awk -F'|' -v id="$ACTOR" '
       /^roster-state\// {
