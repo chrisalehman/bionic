@@ -3570,6 +3570,14 @@ EOF
     # tick's own acks. So a MET row gone from a fresh panel is closed and not counted, and a
     # MET row still listed is counted until its ack.
     TICK_UNACKED_NAMES=""
+    # THE NAMES A GONE-AGENT REPORT CAN NAME (wave-19 audit V-2 delta review R2-6). An UNMET,
+    # STILL-LIVE or AMBIGUOUS row that is unacked and whose agent a fresh panel does not list
+    # now holds a `TICK_OCCUPIED` slot (A-T2.13) with nothing pointing at the closer T1e
+    # built. This is the candidate set the stand-down arm below checks against the panel it
+    # already warms for `$STANDDOWN_NAMES`; it names MET rows only, so the two sets never
+    # overlap. The report never acks: the tick has no authority over an UNMET verdict (ADR-003),
+    # and closing one is `stop-orders.sh stopped`'s job alone (T1e).
+    GONE_CANDIDATE_NAMES=""
     while IFS= read -r LINE; do
       case "$LINE" in "landing-verdict/v1|"*) : ;; *) continue ;; esac
       TOTAL=$((TOTAL + 1))
@@ -3621,7 +3629,12 @@ EOF
           ;;                                  # closed — not open
         *)          OPEN=$((OPEN + 1))        # STILL-LIVE, UNMET, AMBIGUOUS — open
                     OPEN_NAMES="${OPEN_NAMES}${RNAME}
-" ;;
+"
+                    # A candidate for the GONE report (R2-6): unacked (this branch is only
+                    # reached past the acked-row `continue` above) and not MET/WAIVED, so a
+                    # fresh panel showing it gone is a row nothing has ever named.
+                    GONE_CANDIDATE_NAMES="${GONE_CANDIDATE_NAMES}${GONE_CANDIDATE_NAMES:+ }$(clean "$RNAME")"
+                    ;;
       esac
       [ "$RSTATE" = "UNMET" ] || continue
 
@@ -3933,7 +3946,7 @@ EOF
     # the same as NONE: the arm defers rather than guesses, naming nothing, ordering nothing,
     # acking nothing, and saying once that the next tick's fresh ListAgents will decide.
     TICK_ACKED_NOW="|"
-    if [ -n "$STANDDOWN_NAMES" ] || [ -n "$DUP_START_NAMES" ]; then
+    if [ -n "$STANDDOWN_NAMES" ] || [ -n "$DUP_START_NAMES" ] || [ -n "$GONE_CANDIDATE_NAMES" ]; then
       # THE ALREADY-WARMED PARSE, or one read of our own — never a second parse of a
       # transcript this tick has already read. `live_agents` memoizes per process on the
       # transcript's path, size and mtime, and the trim above primes it IN THIS SHELL, so on
@@ -4022,10 +4035,24 @@ EOF
             say "NOTIFY ${SD_NAME} — a duplicate start whose agent is gone could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
           fi
         done
+
+        # THE GONE REPORT (wave-19 audit V-2 delta review R2-6). An unacked, not-MET/WAIVED
+        # row whose agent this fresh panel does not list now holds a `TICK_OCCUPIED` slot
+        # (A-T2.13) with nothing pointing at the fix: T1e's `stopped` close. This is a
+        # NOTIFY-band report only — never an ack, never an order — because the tick has no
+        # authority to decide an UNMET verdict is done (ADR-003); closing one is the human
+        # verb's job alone. Printed in the same place the STANDDOWN lines print, so it never
+        # changes what this tick decided (QUIET stays QUIET; a FILL sized before this point
+        # is unaffected).
+        for SD_NAME in $GONE_CANDIDATE_NAMES; do
+          case "$SD_PANEL" in *"|${SD_NAME}|"*) continue ;; esac
+          say "GONE ${SD_NAME} — UNMET and absent from a fresh panel; close it with: bash ${ORDERS} stopped ${SD_NAME}"
+        done
       else
-        # A-orch-31: something WOULD have been decided (a MET row, or a duplicate start,
-        # is sitting in the candidate sets above) but the panel reading is not fresh enough
-        # to trust with a write. One line, said once, never a STANDDOWN, an order or an ack.
+        # A-orch-31: something WOULD have been decided (a MET row, a duplicate start, or a
+        # GONE report is sitting in the candidate sets above) but the panel reading is not
+        # fresh enough to trust with a write or a report. One line, said once, never a
+        # STANDDOWN, a GONE report, an order or an ack.
         note "stand-down deferred — the panel reading is stale; ListAgents and the next tick decides"
       fi
     fi
