@@ -1294,11 +1294,11 @@ _eg_cd_one_dir() {
 # COMMAND that only the caller can act on — an ambiguously named directory is a refusal, not
 # a cwd — and a command substitution would leave them behind in a subshell.
 _eg_commit_cwd() {
-  local _line _oldifs _hadf _p _c
+  local _line _oldifs _hadf _p _c _gc
   _EG_CWD=""; _EG_CWD_SRC=""; _EG_CDS=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
   case " $COMMAND " in
-    *" -C "*|*" -C"[\"\']*)
+    *" -C "*|*" -C"[\"\']*|*env*)
       _oldifs="$IFS"; _hadf=0
       while IFS= read -r _line; do
         [ -n "$_line" ] || continue
@@ -1314,12 +1314,11 @@ _eg_commit_cwd() {
         IFS="$_oldifs"
         [ "$_hadf" -eq 1 ] || set +f
         shift   # argv[0], the git binary
+        _gc=""
         while [ $# -gt 0 ]; do
           case "$1" in
             -C) shift
-                if [ $# -gt 0 ]; then
-                  case "$1" in /*) _EG_CWD="$1"; _EG_CWD_SRC="-C"; return 0 ;; esac
-                fi
+                if [ $# -gt 0 ]; then _gc="$1"; fi
                 break ;;
             -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix)
               shift; [ $# -gt 0 ] && shift ;;
@@ -1327,6 +1326,17 @@ _eg_commit_cwd() {
             *) break ;;
           esac
         done
+        case "$_gc" in /*) _EG_CWD="$_gc"; _EG_CWD_SRC="-C"; return 0 ;; esac
+        # `env -C <dir>` / `env --chdir=<dir>` (wave-20 T3, REQ-3, D3): the argv reader
+        # records env's directory, and an ABSOLUTE one is where the commit runs — joined
+        # with git's own relative `-C` when there is one, since git resolves that against
+        # the directory env moved to. `env-C` is a source `_eg_placed` never admits, so an
+        # env spelling is judged against this run's plan and is never exempted as outside
+        # the repository (D3-3); the directory it names still picks the task row.
+        case "$GIT_ARGV_ENV_CHDIR" in
+          /*) if [ -n "$_gc" ]; then _EG_CWD="${GIT_ARGV_ENV_CHDIR%/}/$_gc"; else _EG_CWD="$GIT_ARGV_ENV_CHDIR"; fi
+              _EG_CWD_SRC="env-C"; return 0 ;;
+        esac
         break
       done <<< "$(git_argv_expand "$COMMAND")"
       ;;
@@ -1390,7 +1400,8 @@ _eg_outside_root() {
 # _eg_commit_count -> sets _EG_COMMITS to the number of `git … commit` segments in the command
 # text, `sh -c`/`eval` strings included (the jurisdiction arm exempts only when it is 1), and
 # _EG_COMMIT_NC to the number of `-C` options among the GLOBAL options of the last one counted
-# — git's own cwd overrides, before the subcommand, never commit's `-C <commit>` after it.
+# — git's own cwd overrides, before the subcommand, never commit's `-C <commit>` after it —
+# plus one for an `env -C`/`--chdir` in front of it (wave-20 T3).
 # Assigns rather than prints, like `_eg_commit_cwd`, and forks nothing git-side: it is the
 # same pure-shell segment pass the other walls make.
 _EG_COMMITS=0
@@ -1406,6 +1417,8 @@ _eg_commit_count() {
     _EG_COMMIT_NC=0
     _git_argv_skip "$_line"
     [ -n "$GIT_ARGV_REST" ] || continue
+    # env's `-C`/`--chdir` is a directory override too (wave-20 T3, D3).
+    [ -z "$GIT_ARGV_ENV_CHDIR" ] || _EG_COMMIT_NC=$((_EG_COMMIT_NC + 1))
     _hadf=0
     case "$-" in *f*) _hadf=1 ;; esac
     set -f
@@ -2792,7 +2805,8 @@ _eg_git_wt_name() {
   return 0
 }
 
-# _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step>" for the ONE `## Tasks` row
+# _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step><TAB><status><TAB><kind>" for
+# the ONE `## Tasks` row
 # whose `worktree` cell names that tree, and _EG_ROW_DUP to the ids when more than one does.
 # Returns 1 for "this plan has no register", 3 for "the register is ambiguous", 0 otherwise.
 #
@@ -2843,7 +2857,11 @@ _eg_row_for_worktree() {
       # RUN, and the fork below cannot ask that question of a value it was never handed.
       # One more cell of a table this function already parses — no new fact is fetched
       # (the D11 freeze, .claude/rules/hook-authoring.md).
-      _EG_ROW="$_id	$(units_field "$_line" step)	$(units_field "$_line" status)"
+      # AND A FOURTH, THE KIND (wave-20 REQ-5, Δ6). A row ahead of the run is judged by its
+      # task arms when a writer is at work in it — unless it is a gate act (`integrate`,
+      # `close`), whose commit must wait for the run to reach its step — so the fork needs
+      # the row's kind as well as its status.
+      _EG_ROW="$_id	$(units_field "$_line" step)	$(units_field "$_line" status)	$(units_field "$_line" kind)"
       _EG_ROW_DUP="$_id"
     else
       _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
@@ -2975,6 +2993,8 @@ if [ -n "$_EG_WT" ]; then
     _EG_RSTEP="${_EG_ROW#*	}"
     _EG_RSTATUS="${_EG_RSTEP#*	}"   # third field — empty on a table whose rows are short
     _EG_RSTEP="${_EG_RSTEP%%	*}"
+    _EG_RKIND="${_EG_RSTATUS#*	}"   # fourth field (wave-20 Δ6)
+    _EG_RSTATUS="${_EG_RSTATUS%%	*}"
     _EG_CURNUM="${CURRENT%[ab]}"
     case "$_EG_RSTEP" in
       ''|*[!0-9]*)
@@ -3032,6 +3052,27 @@ if [ -n "$_EG_WT" ]; then
           # step 4, the one pointer step the substitution can land on; every other substituted
           # step stays byte-identical), for the pointer exit a few hundred lines below to read.
           [ "$_EG_RSTEP" = 4 ] && _EG_SUBSTITUTED=1
+        elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null \
+             && [ "$_EG_RSTATUS" = "active" ] && [ "$_EG_CURNUM" -ge 4 ] 2>/dev/null \
+             && [ "$_EG_RKIND" != "integrate" ] && [ "$_EG_RKIND" != "close" ]; then
+          # A WORK ROW AHEAD OF THE RUN, WITH A WRITER AT WORK IN IT (wave-20 REQ-5, AC-5.1;
+          # Δ1, Δ6; ADR-036). Readiness is the prerequisite graph now: a Step-6 review whose
+          # deps have landed IS dispatched while the run sits at Step 5, and the refusal below
+          # would leave its writer finished and unable to commit — the fill's own dead end.
+          # So an `active` row ahead of `current:` is judged exactly as an in-step `active`
+          # row is, by the TASK arms (`CURRENT=4`, the note, the substitution flag), for the
+          # reasons that arm's docblock gives below.
+          #
+          # THREE THINGS KEEP THE REFUSAL, and each is the case the refusal was right about:
+          # a row that is NOT `active` (no writer was dispatched into that tree, so nobody
+          # should be committing from it); an `integrate` or `close` row (a gate act, whose
+          # real prerequisite is a gate passing — the merge must not commit before Verify
+          # has); and a run below Step 4 (nothing fills before Step-3 approval, so nothing
+          # can legitimately be ahead of it).
+          printf "evidence-gate: judged by row %s's task arms (run at current: %s)\n" \
+            "$_EG_RID" "$CURRENT" >&2
+          CURRENT=4
+          _EG_SUBSTITUTED=1
         elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null; then
           _eg_detail="canonical-sdlc worktree '${_EG_WT}' belongs to '## Tasks' row ${_EG_RID}, whose step is ${_EG_RSTEP}; the run is at current: ${CURRENT}.
 Plan: $PLAN
@@ -3063,7 +3104,8 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           #
           # ONLY `active`, AND ONLY AT THE ROW'S OWN STEP. A `pending`, `landed` or
           # `dropped` row is nobody at work: its tree falls through to `current:` exactly as
-          # it does today (25g(k2)), and a row AHEAD of the run keeps its refusal above. A
+          # it does today (25g(k2)). A row AHEAD of the run is the arm above: judged the same
+          # way when it is an active work row (wave-20 Δ6), refused otherwise. A
           # row BEHIND the run keeps the wave-14 substitution and its wording, which for the
           # step-4 rows that make up every real task batch resolves to these same task arms
           # — see A-T1.2 for the residual case that leaves open.
@@ -4862,16 +4904,23 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # committed its own green run. This arm makes the promise a wall.
   #
   # ABOVE THE SUITE FILTER, because a commit is not a suite and everything below returns 0
-  # on a non-suite command. The screen is the evidence gate's own (`_wall_mentions_git` then
-  # `git_argv_has_sub … commit`), so `git -C <dir> commit` is a commit and a quoted
-  # "git commit" is not.
+  # on a non-suite command. The screen is the evidence gate's reader (`_wall_mentions_git`
+  # then the argv parser), so `git -C <dir> commit` is a commit and a quoted "git commit" is
+  # not.
+  #
+  # EVERY VERB THAT MAKES A COMMIT, NOT ONLY `commit` (wave-20 T3, REQ-3, AC-3.2). `revert`,
+  # `cherry-pick`, `merge`, `am`, `rebase`, `commit-tree` and `update-ref` each write history
+  # the arm never saw, and `env -C <dir> git …` hid even `commit` until the reader learned env.
+  # The set is this arm's alone: the evidence gate's own verb stays `commit`, because the
+  # orchestrator lands with `git merge`, and a writer's merge of its wave head is its brief.
   #
   # THE ROLE IS THE ROSTER ROW'S `subagent_type=`, READ BY THE SAME JOIN ARM 2 MAKES — the
   # last row carrying this `agent_id` wins. Never the payload's `agent_type`: for a teammate
   # it is the dispatch NAME (R3 Q2), and a name like `x-runner` is not a role. The match is
   # the exact plugin-qualified spelling, so a consumer's own `acme:test-runner` is not ours.
   # No row, or a row with no role → no statement about this agent, and silence.
-  if _wall_mentions_git "$COMMAND" && git_argv_has_sub "$COMMAND" commit; then
+  if _wall_mentions_git "$COMMAND" \
+     && git_argv_has_any_sub "$COMMAND" "commit merge revert cherry-pick am rebase commit-tree update-ref"; then
     local _bsg_role
     _bsg_role=$(awk -F'|' -v id="$ACTOR" '
       /^roster-state\// {
