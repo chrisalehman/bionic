@@ -4948,17 +4948,32 @@ fi
 # agent's own text going back to the agent — no third party reads this stream — so it is
 # quoted whole rather than scrubbed and truncated the way farm-out-reminder.sh's audit
 # line is.
+#
+# THE REMEDY IS THE RUN, NOT THE COMMAND (wave-20 T4; REQ-7, D7; triage-B B2). It used to echo
+# `$COMMAND` whole — the trailing `&`, the `nohup`, the redirect into a log nobody reads — so
+# the line this arm offered as the fix tripped this arm again when pasted. What is echoed now
+# is each suite claim's RUN (`cmd_suite_claims` column 3): the segment the classifier read,
+# with its wrappers stripped and its trailing redirections normalised off, which is the text
+# the budget arm below compares. A pasted remedy is therefore foreground by construction and
+# on the budget exactly when the run is.
 if [ "$IS_BACKGROUND" = yes ]; then
+  _bg_fix=""
+  while IFS=$'\t' read -r _bg_k _bg_t _bg_run; do
+    [ -n "$_bg_run" ] || continue
+    _bg_fix="${_bg_fix}    $_bg_run 2>&1 | tee <evidence log>"$'\n'
+  done <<< "$(cmd_suite_claims "$COMMAND")"
+  [ -n "$_bg_fix" ] || _bg_fix="    <your suite command> 2>&1 | tee <evidence log>"$'\n'
   fold_block exit2 suite-run "a backgrounded suite's result is never read" "run it in the foreground" \
     "A backgrounded suite returns a shell id, not an outcome. Your turn can end before it
 finishes, and then the evidence this task exists to produce lives nowhere: no file, no
 exit status anyone saw. Reports are turn-scoped; files are not.
 
-Run it in the FOREGROUND instead, bounded by the Bash tool's own timeout parameter (never
-a timeout/gtimeout binary), with the output tee'd to the evidence log your brief names:
+Run it in the FOREGROUND instead: no trailing &, no nohup, and the Bash tool's
+run_in_background: false (or the parameter left out). Bound it by the tool's own timeout
+parameter (never a timeout/gtimeout binary), with the output tee'd to the evidence log
+your brief names:
 
-    $COMMAND 2>&1 | tee <evidence log>
-
+${_bg_fix}
 Then read the log and quote the pass/total line. If the suite is genuinely longer than any
 timeout you can set, say so in your report and stop — do not background it."
   return 2
@@ -5077,6 +5092,15 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   # while decoding in both places would turn a literal `%7C` in a command into a pipe.
   RE_EXECUTES="${RE_EXECUTES//\%7C/|}"
   RE_EXECUTES="${RE_EXECUTES//\%25/%}"
+  # AND NORMALISED, AT THE SAME ONE DECODE (wave-20 T4; REQ-7, D7). The claim side builds
+  # its run with `cmdnorm_run` (payload/scripts/lib/cmd-class.sh, loaded above ARM 1), which
+  # takes trailing redirections, `| tee` and `|| true` off; the declared side goes through
+  # the same rule here, once per hook call, so `_run_is_declared` compares two readings of
+  # one rule and never a raw declaration against a normalised claim. For a row the lift
+  # wrote this is the identity — the lift refuses a redirection in a declaration and runs
+  # the same rule before it stores one — and `cmd_runs_norm` skips its fork when the field
+  # holds nothing the rule could act on.
+  RE_EXECUTES=$(cmd_runs_norm "$RE_EXECUTES")
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
 
@@ -5108,13 +5132,45 @@ case "$SUITES_ALLOWED" in none) SUITES_ALLOWED="" ;; *) : ;; esac
 # it does not cut a name mid-word. Review-correctness-d3930dd.md F3 (mid-name
 # ellipsis via `bionic_trunc`) and F7 (`none` for a non-empty set at cols<=0) are
 # both this shape; fixed together here rather than patched at each call site.
-_budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> text
+#
+# A DECLARED RUN IS ONE ITEM, NOT ITS WORDS (wave-20 T4; REQ-7, D7; triage-B B3). The set
+# this renders is not always suite basenames: a run claim's refusal hands it the row's
+# declared runs, backtick-marked and holding spaces. Split on whitespace, `npx jest
+# --testPathPatterns 'x'` became four "suites", and the line printed an unclosed mark and
+# half a command — `allowed: \`npx jest +3 more` — a remedy nobody could run. The set is
+# read into ITEMS first: a marked run whole, marks kept, every other word alone, one per
+# line. Everything below counts and places items, so "token boundary" now means what the
+# header above always promised, for both kinds. The split lives INSIDE this function, not
+# beside it: tests/bash-walls.test.sh 15g lifts this function alone by its own braces, and
+# a helper it called would be missing from the lift.
+_budget_wire_list() {  # <allowed text: suites and/or marked runs, may be empty> <column budget> -> text
   local set="${1:-}" cols="${2:-0}"
   if [ -z "$set" ]; then printf 'none'; return; fi
-  local total=0 tok
-  for tok in $set; do total=$((total + 1)); done
+  local items="" total=0 nruns=0 tok rest="$set" bt='`' pre w
+  local -a words
+  while :; do
+    case "$rest" in *"$bt"*"$bt"*) : ;; *) break ;; esac
+    pre="${rest%%"$bt"*}"; rest="${rest#*"$bt"}"
+    tok="${rest%%"$bt"*}"; rest="${rest#*"$bt"}"
+    read -r -a words <<< "$pre"
+    for w in ${words[@]+"${words[@]}"}; do items="$items$w"$'\n'; done
+    items="$items$bt$tok$bt"$'\n'
+  done
+  read -r -a words <<< "$rest"
+  for w in ${words[@]+"${words[@]}"}; do items="$items$w"$'\n'; done
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    total=$((total + 1))
+    case "$tok" in '`'*) nruns=$((nruns + 1)) ;; esac
+  done <<< "$items"
+  [ "$total" -gt 0 ] || { printf 'none'; return; }
+  # THE COUNT NAMES WHAT IT COUNTS. Suites, runs, or — when a runner's refusal shows both
+  # halves of the budget — entries.
   local word=suites
-  [ "$total" -eq 1 ] && word=suite
+  if [ "$nruns" -eq "$total" ]; then word=runs
+  elif [ "$nruns" -gt 0 ]; then word=entries; fi
+  [ "$total" -eq 1 ] && word="${word%s}"
+  [ "$word" = entrie ] && word=entry
   if [ "$cols" -le 0 ]; then
     # NO ROOM AT ALL (F7). The set is NOT empty, so `none` would lie; name the
     # count instead. `_budget_wire_fact`'s caller-side self-refuse (refuse.sh's
@@ -5123,12 +5179,19 @@ _budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> 
     printf '%d %s' "$total" "$word"
     return
   fi
-  if [ "$(bionic_cols "$set")" -le "$cols" ]; then
-    printf '%s' "$set"
+  local joined="" first=""
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    [ -n "$first" ] || first="$tok"
+    joined="${joined:+$joined }$tok"
+  done <<< "$items"
+  if [ "$(bionic_cols "$joined")" -le "$cols" ]; then
+    printf '%s' "$joined"
     return
   fi
   local out="" shown=0 cand remain tail
-  for tok in $set; do
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
     if [ -z "$out" ]; then cand="$tok"; else cand="$out $tok"; fi
     remain=$((total - shown - 1))
     tail=""
@@ -5138,15 +5201,14 @@ _budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> 
     else
       break
     fi
-  done
+  done <<< "$items"
   remain=$((total - shown))
   if [ -z "$out" ]; then
     # Not even one whole token fits ALONGSIDE its own "+N more" count. Try the
     # first token bare, count dropped — a real suite name beats one padded
     # with a count it has no room for.
-    set -- $set
-    if [ "$(bionic_cols "$1")" -le "$cols" ]; then
-      printf '%s' "$1"
+    if [ "$(bionic_cols "$first")" -le "$cols" ]; then
+      printf '%s' "$first"
       return
     fi
     # NOT EVEN ONE TOKEN FITS BARE (F3). A character cut here would print a
@@ -5284,6 +5346,12 @@ while IFS=$'\t' read -r _kind _target _run; do
     case " $SUITES_ALLOWED " in
       *" run.sh "*) continue ;;
     esac
+    # THE SPELLING THAT SPENDS THE BUDGET, NAMED (wave-20 T4; REQ-7, D7; triage-B B1a). The
+    # refusal used to name the budget and not the command shape that spends it, so a writer
+    # who reached for `tests/run.sh --one <suite>` learned only that it was refused. The
+    # first budgeted suite, spelled the one way this arm admits, is the remedy; with no suite
+    # on the row the slot stays a slot.
+    _ft_first="${SUITES_ALLOWED%% *}"
     fold_block exit2 suite-run \
       "$(_budget_wire_fact "full tree refused; allowed: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
       "run your brief's suites" \
@@ -5294,8 +5362,12 @@ already did.
 
 On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
 
-Run the suites your brief named instead. If the tree genuinely must be re-proved, say so
-in your report: the orchestrator records the cause on the plan and dispatches the runner."
+Run the suites your brief named instead, one call each, by the suite file itself:
+    bash tests/${_ft_first:-<suite>.test.sh}
+\`tests/run.sh --one\` is not that spelling: it is the runner's internal worker mode, fed a
+queue only the runner itself builds, and it is the full-tree runner as far as this budget
+is concerned. If the tree genuinely must be re-proved, say so in your report: the
+orchestrator records the cause on the plan and dispatches the runner."
     return 2
   fi
   # ---------- WHAT THE BRIEF SAID IT WOULD RUN, RUNS (REQ-1 AC-1.5) ----------
