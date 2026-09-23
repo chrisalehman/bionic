@@ -1505,5 +1505,68 @@ expect_eq "15.13 …a task row behind a pending dep is not ready" "" \
 expect_eq "15.14 …and landed does not satisfy a task-scale dep — done is the word" "" \
   "$(call units_ready "$SANDBOX/task-scale-deps.md" T1 | grep -x T5)"
 
+# ============================================================
+section "16 — units_memoised: one parse answers every verb, for the length of one command (wave-19 REQ-6, D7)"
+#
+# THE FILL DUTY ASKS THE TABLE THREE QUESTIONS — has it a `step` column, has it an `id`
+# column, which rows are ready — and each verb used to parse the file again. `units_memoised
+# <plan> <command…>` reads it once and every verb the command reaches answers <plan> from that
+# read. THE MEMO IS SCOPED TO THE COMMAND, not the process: a caller that edits a plan and
+# reads it back (close-out, a suite reusing one fixture path) must never see a stale table,
+# so the rows below rewrite the file INSIDE the command and prove the verbs still answer the
+# first read, then read it again AFTER the command and prove the edit is seen.
+cat > "$SANDBOX/memo.md" <<'MEMO_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the landed row | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | the ready row | implementor | T1 | 30m | REQ-x | b.sh | pending |
+MEMO_EOF
+# 16.9-16.12 ask the header of an untouched copy: 16.1's command rewrites memo.md on purpose.
+cp "$SANDBOX/memo.md" "$SANDBOX/memo-cols.md"
+MEMO_OUT="$(bash -c '
+  . "$1" >/dev/null 2>&1 || exit 127
+  plan="$2"
+  inner() {
+    # The file changes under the command: no table header, no rows.
+    printf "## Tasks\n\nnothing here\n" > "$plan"
+    printf "in-rows=%s\n" "$(units_rows "$plan" | cut -f1 | tr "\n" ,)"
+    units_has_column "$plan" step && printf "in-step=yes\n" || printf "in-step=no\n"
+    printf "in-ready=%s\n" "$(units_ready "$plan" 4)"
+  }
+  units_memoised "$plan" inner
+  printf "after-rc=%s\n" "$?"
+  units_has_column "$plan" step && printf "after-step=yes\n" || printf "after-step=no\n"
+  printf "after-rows=%s\n" "$(units_rows "$plan" | cut -f1 | tr "\n" ,)"
+' _ "$LIB" "$SANDBOX/memo.md" 2>&1)"
+expect_contains "16.1 inside the command, units_rows answers the first read" "in-rows=T1,T2," "$MEMO_OUT"
+expect_contains "16.2 …units_has_column too" "in-step=yes" "$MEMO_OUT"
+expect_contains "16.3 …and units_ready" "in-ready=T2" "$MEMO_OUT"
+expect_contains "16.4 the command's own status is the helper's" "after-rc=0" "$MEMO_OUT"
+expect_contains "16.5 after the command, the edited file is read fresh" "after-step=no" "$MEMO_OUT"
+expect_eq "16.6 …by every verb (the table is gone, so no rows)" "after-rows=" "$(printf '%s\n' "$MEMO_OUT" | tail -1)"
+
+# A different plan asked inside the command is read on its own, never answered from the memo.
+MEMO_OTHER="$(bash -c '
+  . "$1" >/dev/null 2>&1 || exit 127
+  units_memoised "$2" units_rows "$3"
+' _ "$LIB" "$SANDBOX/memo.md" "$SANDBOX/task-scale-deps.md" 2>&1 | cut -f1 | tr '\n' ,)"
+expect_eq "16.7 a verb asked about another plan inside the command reads that plan" \
+  "T1,T2,T3,T4,T5,T6," "$MEMO_OTHER"
+
+# A plan with no table is memoised as "no table": every verb still answers exit 1 inside.
+printf '## Not tasks\n' > "$SANDBOX/memo-none.md"
+expect_eq "16.8 no table inside the command is still no table (units_rows exits 1)" "1" \
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_memoised "$2" units_rows "$2"; printf %s $?' \
+     _ "$LIB" "$SANDBOX/memo-none.md" 2>/dev/null | tail -c 1)"
+
+# THE HEADER QUESTION IS WORD-EXACT, memo or not: `status` is not found inside `worktree`, a
+# needle carrying a space names no column, and an empty needle matches nothing.
+expect_eq "16.9 units_has_column status on a table with status" "0" "$(call_rc units_has_column "$SANDBOX/memo-cols.md" status)"
+expect_eq "16.10 …worktree is not found inside another word" "1" "$(call_rc units_has_column "$SANDBOX/memo-cols.md" worktree)"
+expect_eq "16.11 …a needle with a space names no column" "1" "$(call_rc units_has_column "$SANDBOX/memo-cols.md" 'id step')"
+expect_eq "16.12 …an empty needle matches nothing" "1" "$(call_rc units_has_column "$SANDBOX/memo-cols.md" '')"
+
 
 finish

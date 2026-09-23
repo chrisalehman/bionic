@@ -31,6 +31,12 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# The one roster-row builder and the one swept-marker writer (S17): wave-19's fill fixtures
+# write this session's roster through them rather than spelling either shape by hand.
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
+# The one ListAgents-answer builder (T2d, row 64m): the real tick needs a fresh panel.
+. "$(dirname "$0")/lib/live-answer.sh"
 
 # THE MERGED ENTRY POINT (epic-23 wave-11, T12). This gate is a FUNCTION now —
 # `stop_patrol_duties` in payload/scripts/lib/stop.sh — and the process that runs it is
@@ -742,15 +748,22 @@ section "Section 5c: the fill duty is an INVARIANT — a live ledger with rows r
 # (payload/scripts/lib/fill.sh, the same function the tick prints from), so the question is
 # the run's: is the ledger live, and is there a fillable gap.
 #
-# THE TICK ARM IS UNCHANGED AND STILL WINS ON A TICK TURN. A tick that printed FILL is
-# answered by its printed ids in the wording §5 pins; a tick that printed none said so about
-# the roster it had just walked, and this arm does not second-guess it. What this section
-# drives is the turn with NO tick in it.
+# A TICK THAT PRINTED FILL IS ANSWERED BY ITS PRINTED IDS in the wording §5 pins. A tick
+# that printed NONE is no longer exempt (wave-19 REQ-4, D6; ADR-034 decision 3): it is judged
+# like a no-tick turn against the ready set this wall computes, and the one exemption left is
+# a `poker: fill withheld — HOLD|EMERGENCY` line — a machine fact the plan cannot hold.
 #
-# THE FIXTURE IS A PLAN, not a transcript: a budget in the frontmatter (the ceiling the run
-# opted into), a `current:` past Step 3, and a `## Tasks` table whose rows are ready or not.
+# THE FIXTURE IS A PLAN AND A ROSTER. The plan carries the budget Step 0 measured, a
+# `current:` past Step 3, and a `## Tasks` table whose rows are ready or not. The ROSTER is
+# the occupancy (wave-19 REQ-5, D6; ADR-034 decision 2): the wall counts this session's
+# roster rows neither acked nor swept, and the plan's `active` column is no longer read —
+# so every row below that means "N rows in flight" says so with `ledger_roster`.
 
 # A project whose plan is a LIVE wave ledger: writers=8, at <current>, with the rows given.
+# LEDGER_BUDGET is the header's budget line; `make_env_ledger_keyless` blanks it, which is
+# the one plan shape REQ-3 refuses at write time and the wall names as a backstop.
+LEDGER_BUDGET='parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe'
+make_env_ledger_keyless() { LEDGER_BUDGET='' make_env_ledger "$@"; }
 make_env_ledger() {  # <current> <row>... -> project dir on stdout
   local cur="$1"; shift
   local dir; dir=$(mktemp -d)
@@ -759,7 +772,7 @@ make_env_ledger() {  # <current> <row>... -> project dir on stdout
   {
     printf -- '---\n'
     printf 'governing-skill: superpowers:writing-plans\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n'
+    [ -z "$LEDGER_BUDGET" ] || printf '%s\n' "$LEDGER_BUDGET"
     printf -- '---\n\n# fixture plan\n\n'
     printf '## SDLC State\n\ncurrent: %s\n\n- Step %s: in progress\n\n' "$cur" "$cur"
     printf '## Tasks\n\n'
@@ -779,6 +792,28 @@ LEDGER_ACTIVE='| T4 | 4 | build | the row in flight | implementor | — | 30m | 
 LEDGER_BLOCKED='| T5 | 4 | build | a row behind an unlanded dep | implementor | T2 | 30m | REQ-x | e.sh | pending | — |'
 LEDGER_READY_20='| T20 | 4 | build | the third ready row | implementor | — | 30m | REQ-x | h2.sh | pending | — |'
 
+# THE ROSTER WRITER (wave-19 REQ-5). One roster row per name on THIS session's roster,
+# through `roster_row_fixture` (tests/lib/roster-row.sh, the production writer), and then the
+# state's own record: `acked` appends the sweeper ledger's `event=ack` line in the shape
+# hooks/session-sweeper.sh journals it (the one terminal state of a name, ADR-034 decision 1),
+# `swept` appends the stop library's MET marker through `swept_marker_write`, keyed by the
+# row's agent id, `open` appends nothing. `deliverable=` is empty on
+# purpose: a row that declares nothing is never a landing-gate candidate, so these fixtures
+# drive the fill duty and nothing else.
+ledger_roster() {  # <dir> <open|acked|swept> <name>...
+  local dir="$1" st="$2"; shift 2
+  local r="$dir/.bionic/tmp/roster-$SID.state" l="$dir/.bionic/tmp/sweeper-$SID.state" n
+  for n in "$@"; do
+    roster_row_fixture status=intended session="$SID" name="$n" agent_id="a${n}0000000000000001" \
+      deliverable= >> "$r"
+    case "$st" in
+      acked) printf 'sweeper-ledger/v1|event=ack|at=2026-09-22T00:01:00Z|epoch=1758499260|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+               "$SID" "$n" >> "$l" ;;
+      swept) swept_marker_write "$r" 2026-09-22T00:01:00Z "$SID" "$n" "a${n}0000000000000001" MET ;;
+    esac
+  done
+}
+
 # THE RING IS SANDBOXED FOR THIS SECTION (wave-18 T2b, R1). Every fixture below carries a
 # `parallel-budget:`, so `stop_patrol_duties`'s fill duty now reads the same rung the tick
 # reads (`pressure_level`, payload/scripts/lib/resources.sh — this row's fix). Undriven, that
@@ -795,6 +830,7 @@ export BIONIC_PRESSURE_RING="$CLEAR_RING" BIONIC_NOW_EPOCH="1700000000"
 # 59: THE INVARIANT. A live ledger, two ready rows, an ordinary turn that dispatched
 # neither and never saw a tick -> REFUSE, naming both rows.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+ledger_roster "$d" acked T1
 u_prompt "$d" "merge the two landed trees and tell me where we are"
 fire "$d"; expect_block "59a: a turn ending on a fillable gap is refused, naming the first row" "T2"
 fire "$d"; expect_block "59b: …and the second — named, not counted" "T3"
@@ -838,13 +874,52 @@ u_prompt "$d" "start the row behind T2"
 a_agent "$d" "T2" "row T2, implementor."
 fire "$d"; expect_allow "62b: a pending row behind an unlanded dep is not ready, so the turn ends"
 
-# 63: A PLAN WITH NO BUDGET OFFERS NO WIDTH TO FILL AGAINST, and a ceiling is a thing a run
-# opts into — the direction the tick's own budget arm takes, said the same way here: silence.
+# 63: THE BUDGET IS A MEASUREMENT, AND ITS ABSENCE IS NAMED, NEVER SILENT (wave-19 REQ-3
+# AC-3.2, D5; ADR-035 decision 2). A live ledger with ready rows and no `parallel-budget:`
+# line is a plan the governing-skill hook would have refused to write; the wall is the
+# backstop, and it names the key rather than ending the turn in silence.
+d=$(make_env_ledger_keyless 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "carry on"
+fire "$d"; expect_block "63a: a live ledger with no budget key is refused, naming the key" "parallel-budget:"
+fire "$d"; expect_block "63b: …and the field the width is read from" "writers="
+# …and the same keyless plan below Step 4 is not a live ledger: nothing is owed yet.
+d=$(make_env_ledger_keyless 3 "$LEDGER_LANDED" "$LEDGER_READY_2")
+u_prompt "$d" "carry on"
+fire "$d"; expect_allow "63c: a keyless plan at current: 3 is not refused — the backstop is past Step 3 only"
+# …and a plan whose `current:` names no unit the table can answer (no table at all) is the
+# tick's unreadable-`current:` withhold, which comes BEFORE its budget note — so it stays
+# silent here too.
 d=$(make_env); u_prompt "$d" "carry on"
-fire "$d"; expect_allow "63: a plan carrying no parallel-budget is never refused for a gap"
+fire "$d"; expect_allow "63d: a keyless plan with no readable unit is the unreadable-current withhold, not a budget refusal"
+# …and a keyless live ledger with NOTHING ready hides no gap: a keyed plan would end the same
+# turn in the same silence, so the absence is not what silenced it. The backstop names the key
+# exactly where the missing width would have hidden a fillable row (A-T2.2).
+d=$(make_env_ledger_keyless 4 "$LEDGER_LANDED")
+u_prompt "$d" "carry on"
+fire "$d"; expect_allow "63f: a keyless live ledger with no ready row is not refused — no gap was hidden"
+# …and the same turn with `stop_hook_active` passes: the backstop blocks once per turn.
+d=$(make_env_ledger_keyless 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
+u_prompt "$d" "carry on"
+fire "$d" Stop true; expect_allow "63e: the budget backstop blocks once — stop_hook_active passes"
 
-# 64: THE ARITHMETIC IS THE RUNG MINUS THE OPEN ROWS, and `active` is what the plan calls a
-# row in flight. Eight active rows against writers=8 is a full budget, ready rows or not.
+# 64: THE ARITHMETIC IS THE RUNG MINUS THE OPEN ROWS, and the open rows are the ROSTER's
+# (REQ-5 AC-5.1). Eight open roster rows against writers=8 is a full budget, ready rows or not.
+d=$(make_env_ledger 4 "$LEDGER_READY_2" \
+  '| T11 | 4 | build | in flight | implementor | — | 30m | REQ-x | f.sh | active | 18-T11 |' \
+  '| T12 | 4 | build | in flight | implementor | — | 30m | REQ-x | g.sh | active | 18-T12 |' \
+  '| T13 | 4 | build | in flight | implementor | — | 30m | REQ-x | h.sh | active | 18-T13 |' \
+  '| T14 | 4 | build | in flight | implementor | — | 30m | REQ-x | i.sh | active | 18-T14 |' \
+  '| T15 | 4 | build | in flight | implementor | — | 30m | REQ-x | j.sh | active | 18-T15 |' \
+  '| T16 | 4 | build | in flight | implementor | — | 30m | REQ-x | k.sh | active | 18-T16 |' \
+  '| T17 | 4 | build | in flight | implementor | — | 30m | REQ-x | l.sh | active | 18-T17 |' \
+  '| T18 | 4 | build | in flight | implementor | — | 30m | REQ-x | m.sh | active | 18-T18 |')
+ledger_roster "$d" open T11 T12 T13 T14 T15 T16 T17 T18
+u_prompt "$d" "anything else to start?"
+fire "$d"; expect_allow "64a: eight open roster rows against writers=8 is a full budget, not a gap"
+
+# 64a2: THE PLAN COLUMN IS NOT READ. The same eight `active` plan rows with NO roster: the
+# occupancy is zero, the gap is eight, and T2 is named. Pre-fix the wall read the column and
+# passed this turn (AC-5.1 fails-when: "the wall still reads the plan's active column").
 d=$(make_env_ledger 4 "$LEDGER_READY_2" \
   '| T11 | 4 | build | in flight | implementor | — | 30m | REQ-x | f.sh | active | 18-T11 |' \
   '| T12 | 4 | build | in flight | implementor | — | 30m | REQ-x | g.sh | active | 18-T12 |' \
@@ -855,12 +930,153 @@ d=$(make_env_ledger 4 "$LEDGER_READY_2" \
   '| T17 | 4 | build | in flight | implementor | — | 30m | REQ-x | l.sh | active | 18-T17 |' \
   '| T18 | 4 | build | in flight | implementor | — | 30m | REQ-x | m.sh | active | 18-T18 |')
 u_prompt "$d" "anything else to start?"
-fire "$d"; expect_allow "64a: eight rows in flight against writers=8 is a full budget, not a gap"
+fire "$d"; expect_block "64a2: eight active PLAN rows with an empty roster are not occupancy — the gap is named" "T2"
+
+# 64a3: …and an ACKED roster row is closed — the ack is the one terminal state of a name
+# (ADR-034 decision 1). Eight acked rows occupy nothing, so the ready row is named.
+d=$(make_env_ledger 4 "$LEDGER_READY_2")
+ledger_roster "$d" acked T11 T12 T13 T14 T15 T16 T17 T18
+u_prompt "$d" "anything else to start?"
+fire "$d"; expect_block "64a3: acked roster rows occupy nothing" "T2"
+
+# 64a3b: A SWEPT ROW IS NOT A CLOSE. The `landing-swept/v1` marker records that a landing
+# was seen; until the ack, the row still occupies the wall's count. That keeps the wall's
+# number at or above the tick's in every case — the tick counts a swept row open whenever
+# its verdict is not MET (a deliverable since removed; session-poker §12a-T22-c), and the
+# wall cannot recompute a verdict — so the wall refuses less, never more. Eight swept,
+# unacked rows against writers=8: full, and the turn passes.
+d=$(make_env_ledger 4 "$LEDGER_READY_2")
+ledger_roster "$d" swept T11 T12 T13 T14 T15 T16 T17 T18
+u_prompt "$d" "anything else to start?"
+fire "$d"; expect_allow "64a3b: swept-but-unacked roster rows still occupy — the wall refuses less, never more"
+
+# 64a3c: THE ROSTER IS THIS SESSION'S. A row another session wrote into this file (a copied
+# or hand-edited roster) is not occupancy here: eight such rows leave the gap open.
+d=$(make_env_ledger 4 "$LEDGER_READY_2")
+for _n in X1 X2 X3 X4 X5 X6 X7 X8; do
+  roster_row_fixture status=intended session=99999999-0000-0000-0000-000000000000 name="$_n" \
+    agent_id= deliverable= >> "$d/.bionic/tmp/roster-$SID.state"
+done
+u_prompt "$d" "anything else to start?"
+fire "$d"; expect_block "64a3c: another session's rows are not this session's occupancy" "T2"
+
+# 64a3d: THE LATEST ROW OF A NAME WINS, as every roster reader folds it: one name written
+# three times (intended, identified, confirmed) is one row in flight, not three. Seven such
+# names fill seven of eight, so exactly one row is named.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
+ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
+ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
+u_prompt "$d" "anything else to start?"
+fire "$d"; expect_block "64a3d: a name written three times occupies once — one row named" "T2" "T3"
+
+# 64a4: AC-5.1's own shape — a roster with two open rows and a plan with no `active` row:
+# gap = rung − 2. On the loaded ring (rung 2) that is zero, so nothing is owed…
+LOADED_RING_64="$(mktemp -d)/loaded.ring"
+printf '1700000000|10|0|1.0|8\n' > "$LOADED_RING_64"
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+ledger_roster "$d" open W1 W2
+u_prompt "$d" "anything else ready?"
+export BIONIC_PRESSURE_RING="$LOADED_RING_64"
+fire "$d"; expect_allow "64a4: two open roster rows against rung 2 leave no gap"
+# …and with one of the two acked the gap is one: exactly T2 is named, never T3.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+ledger_roster "$d" open W1
+ledger_roster "$d" acked W2
+u_prompt "$d" "anything else ready?"
+fire "$d"; expect_block "64a5: one open roster row against rung 2 names one row" "T2" "T3"
+export BIONIC_PRESSURE_RING="$CLEAR_RING"
 
 # …and one row in flight leaves room, so the same table with seven refuses.
 d=$(make_env_ledger 4 "$LEDGER_READY_2" "$LEDGER_ACTIVE")
+ledger_roster "$d" open T4
 u_prompt "$d" "anything else to start?"
 fire "$d"; expect_block "64b: one row in flight against writers=8 leaves room, and the gap is named" "T2"
+
+# 64m: THE DIFFERENTIAL ON THE END-OF-BATCH SHAPE (wave-19 audit V-2; T2d). 64a–64a5 drive
+# the wall alone, and session-poker 12l2 compares the two on an UNMET row, where they already
+# agreed. The shape nothing bound: a MET row the ack has not closed, its agent still idle on a
+# FRESH panel (so the tick's STANDDOWN names it and does not ack it), writers=2, two ready
+# rows. The REAL tick runs on this same fixture repo — the same roster, the same plan, the
+# same ledger — and its printed FILL is compared with the ids the wall's refusal names on an
+# ordinary turn. Pre-fix the tick dropped the MET row from its occupancy and filled T2 T3;
+# the wall counts every unacked row and names T2 alone.
+POKER_64M="${BIONIC_HOOKS_DIR}/session-poker.sh"
+d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe' \
+      make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+echo "done" > "$d/landed-64m.md"
+roster_row_fixture status=intended session="$SID" name=W-MET agent_id= \
+  deliverable="$d/landed-64m.md" >> "$d/.bionic/tmp/roster-$SID.state"
+CFG_64M="$(mktemp -d)"; mkdir -p "$CFG_64M/projects/-fixture-project"
+{
+  jq -nc '{type:"user",timestamp:"2026-09-05T00:50:00.000Z",message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:"2026-09-05T00:51:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_0164MLISTAGENTS",name:"ListAgents",input:{}}]}}'
+  jq -nc --arg b "$(live_answer_body "W-MET:idle")" \
+    '{type:"user",timestamp:"2026-09-05T00:52:23.349Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_0164MLISTAGENTS",content:$b}]}}'
+} > "$CFG_64M/projects/-fixture-project/$SID.jsonl"
+( cd "$d" && git init -q . 2>/dev/null )
+# THE TICK'S MACHINE IS PINNED, AND ITS RING IS ITS OWN COPY. Unpinned, the tick samples this
+# machine (a loaded runner reads HOLD and fills nothing) and appends that sample to the ring it
+# is handed — which, shared, is the CLEAR_RING every later row's wall reads. The copy starts
+# from the same clear sample, so both sides answer the same rung.
+RING_64M="$CFG_64M/clear.ring"; cp "$CLEAR_RING" "$RING_64M"
+TICK_64M="$(cd "$d" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$CFG_64M" \
+  BIONIC_PRESSURE_RING="$RING_64M" BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_FREE_PCT=80 \
+  BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=1.0 bash "$POKER_64M" tick 2>&1)"
+FILL_64M="$(printf '%s\n' "$TICK_64M" | sed -n 's/^poker: FILL \([A-Za-z0-9].*\)$/\1/p' | head -1 \
+  | tr ' ' '\n' | /usr/bin/grep -v '^$' | sort | tr '\n' ' ')"
+case "$TICK_64M" in
+  *"poker: STANDDOWN W-MET"*) ok "64m precondition: the real tick stood the MET row down (listed, not acked)" ;;
+  *) no "64m precondition: the real tick stood the MET row down (listed, not acked)" "$TICK_64M" ;;
+esac
+u_prompt "$d" "anything else to start?"
+fire "$d"
+WALL_64M=""
+for _id in T1 T2 T3; do
+  case " $(reason_of | tr -c 'A-Za-z0-9_.-' ' ') " in *" $_id "*) WALL_64M="${WALL_64M}${_id} " ;; esac
+done
+expect_eq "64m: the tick's FILL on a MET-unacked roster is the wall's gap of one" "T2 " "$FILL_64M"
+expect_eq "64m2: …and the wall names exactly the ids the tick printed (AC-5.2 differential)" \
+  "$FILL_64M" "$WALL_64M"
+rm -rf "$CFG_64M"
+
+# 64n: THE SAME DIFFERENTIAL, ON AN UNMET ROW (wave-19 delta review R2-5/C2-5, on 64m). 64m
+# pins the MET-unacked shape the liveness-trim removal covers; nothing bound the SAME shape
+# on a row that never met its contract — an UNMET row, unacked, whose agent a fresh panel
+# does not list. That is exactly what the trim used to drop for the fill (A-T2.13), so it is
+# the differential's other half. writers=2, one such row, two ready rows: the real tick's
+# FILL is compared with the ids the wall's refusal names on an ordinary turn.
+d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe' \
+      make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+roster_row_fixture status=intended session="$SID" name=W-UNMET agent_id= \
+  deliverable="$d/never-written-64n.md" >> "$d/.bionic/tmp/roster-$SID.state"
+CFG_64N="$(mktemp -d)"; mkdir -p "$CFG_64N/projects/-fixture-project"
+{
+  jq -nc '{type:"user",timestamp:"2026-09-05T00:50:00.000Z",message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:"2026-09-05T00:51:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_0164NLISTAGENTS",name:"ListAgents",input:{}}]}}'
+  jq -nc --arg b "$(live_answer_body "somebody-else:idle")" \
+    '{type:"user",timestamp:"2026-09-05T00:52:23.349Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_0164NLISTAGENTS",content:$b}]}}'
+} > "$CFG_64N/projects/-fixture-project/$SID.jsonl"
+( cd "$d" && git init -q . 2>/dev/null )
+RING_64N="$CFG_64N/clear.ring"; cp "$CLEAR_RING" "$RING_64N"
+TICK_64N="$(cd "$d" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$CFG_64N" \
+  BIONIC_PRESSURE_RING="$RING_64N" BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_FREE_PCT=80 \
+  BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=1.0 bash "$POKER_64M" tick 2>&1)"
+FILL_64N="$(printf '%s\n' "$TICK_64N" | sed -n 's/^poker: FILL \([A-Za-z0-9].*\)$/\1/p' | head -1 \
+  | tr ' ' '\n' | /usr/bin/grep -v '^$' | sort | tr '\n' ' ')"
+u_prompt "$d" "anything else to start?"
+fire "$d"
+WALL_64N=""
+for _id in T1 T2 T3; do
+  case " $(reason_of | tr -c 'A-Za-z0-9_.-' ' ') " in *" $_id "*) WALL_64N="${WALL_64N}${_id} " ;; esac
+done
+expect_eq "64n R2-5: the tick's FILL on an UNMET-gone roster is the wall's gap of one" "T2 " "$FILL_64N"
+expect_eq "64n2 …and the wall names exactly the ids the tick printed (AC-5.2 differential)" \
+  "$FILL_64N" "$WALL_64N"
+expect_contains "64n3 R2-6/C2-5: the tick names the gone-UNMET row and the closing verb" \
+  "poker: GONE W-UNMET — UNMET and absent from a fresh panel; close it with: bash ${BIONIC_HOOKS_DIR}/stop-orders.sh stopped W-UNMET" \
+  "$TICK_64N"
+rm -rf "$CFG_64N"
 
 # 65: BLOCKS ONCE, through the same stop_hook_active valve the other three duties use.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
@@ -881,11 +1097,67 @@ u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL T2"
 fire "$d"; expect_block "67a: a tick turn is answered for the ids the tick printed" "T2"
 fire "$d"; expect_block "67b: …in the tick arm's own wording" "the tick printed FILL"
 
-# 68: …and a tick that printed NO fill is not contradicted by this arm: it had just walked
-# the roster, which is a fact about the session this plan cannot see.
+# 68: BUDGET-FULL ON THE ROSTER (re-authored, wave-19 REQ-4 AC-4.2). A tick that printed
+# "the budget is full" is no longer exempt by its words; it passes because the wall counts the
+# same roster and finds the same full budget. Eight open rows, writers=8, rung 8: gap zero.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
-u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 open row(s): the budget is full."
-fire "$d"; expect_allow "68: a tick that printed no FILL is not overruled by the plan's own reading"
+ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7 W8
+u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 unacked roster row(s): the budget is full."
+fire "$d"; expect_allow "68: a budget-full tick turn on a full roster passes on the wall's own arithmetic"
+
+# 68b: …and the same printed words over a roster with room are not an exemption: no withheld
+# line, a gap, ready rows → refused, naming them (REQ-4 AC-4.2 fails-when: "a tick turn with
+# no FILL and no withheld line ends silently with a non-empty ready set").
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 unacked roster row(s): the budget is full."
+fire "$d"; expect_block "68b: a tick turn with no FILL and no withheld line is judged on the gap" "T2"
+fire "$d"; expect_block "68c: …naming every ready row, in the gap arm's wording" "T3" "the tick printed FILL"
+
+# 68d: THE HOLD. The tick withheld for a machine fact the plan cannot hold → the turn passes
+# although the wall's own arithmetic finds a gap.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_tick "$d"; both_duties "$d"
+u_tick_out "$d" "poker: HOLD free_mb=512 load_1m=1.0 — no fills
+poker: fill withheld — HOLD free_mb=512 load_1m=1.0"
+fire "$d"; expect_allow "68d: a tick turn carrying fill withheld — HOLD passes"
+
+# 68e: THE EMERGENCY, the same way.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_tick "$d"; both_duties "$d"
+u_tick_out "$d" "poker: fill withheld — EMERGENCY free_mb=100"
+fire "$d"; expect_allow "68e: a tick turn carrying fill withheld — EMERGENCY passes"
+
+# 68f: ONLY THOSE TWO. A withheld line naming any other reason is not a machine fact the
+# wall honours, and the gap is refused.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_tick "$d"; both_duties "$d"
+u_tick_out "$d" "poker: fill withheld — BUSY the operator is away"
+fire "$d"; expect_block "68f: a withheld line with a reason other than HOLD or EMERGENCY exempts nothing" "T2"
+
+# 68g: THE LINE IS THE TICK'S, READ OFF A TOOL RESULT. The model's own text quoting the
+# withheld line is not the tick having printed it.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_tick "$d"; both_duties "$d"
+a_text "$d" "poker: fill withheld — HOLD free_mb=512 load_1m=1.0"
+fire "$d"; expect_block "68g: the withheld words in the model's own text exempt nothing" "T2"
+
+# 68h: …and a decline answers a tick turn's gap as it answers any other (REQ-4 AC-4.3's
+# fill-declined row).
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: QUIET"
+a_text "$d" "fill-declined: the wave head is mid-merge; both rows base off it."
+fire "$d"; expect_allow "68h: fill-declined answers a tick turn's gap"
+
+# 68i: THE WITHHELD LINE IS ANCHORED TO THE TICK'S OWN OUTPUT (Step-5/6 review R5, wave-19
+# T2b). A tool_result that merely ECHOES the literal words — a `grep -rn` hit, or a `cat`/`sed`
+# of this very test file's source — is not the tick having printed them. The record below
+# carries the phrase with a GAP before it (a grep-style `file:line:` prefix), exactly the shape
+# `grep -rn 'poker: fill withheld — \(HOLD\|EMERGENCY\)' tests` produces, so it must not exempt
+# the turn: the gap arm judges the ready set and names it.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_tick "$d"; both_duties "$d"
+u_tick_out "$d" "tests/patrol-duties-gate.test.sh:1034:poker: fill withheld — HOLD free_mb=512 load_1m=1.0"
+fire "$d"; expect_block "68i: a withheld line read off a grep/cat echo (a gap before it) exempts nothing" "T2"
 
 # 69: THE RUNG, NOT THE CEILING (Step-6 review R1, wave-18 T2b). Three rows are ready
 # (T2, T3, T20) against a declared ceiling of 8 — the pre-fix wall would have named all
@@ -907,6 +1179,64 @@ export BIONIC_PRESSURE_RING="$CLEAR_RING" BIONIC_NOW_EPOCH="1700000000"
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3" "$LEDGER_READY_20")
 u_prompt "$d" "anything else ready?"
 fire "$d"; expect_block "69d: a rung equal to the ceiling names every ready row, T20 included" "T20"
+
+# ============================================================
+# 70: ONE PARSE PER STOP (wave-19 REQ-6, D7; AC-6.2). The fill duty asks three questions of
+# one plan — is the ledger live, which unit is it on, which rows are ready — and each used to
+# re-read the file: `current:` three times on every live Stop, the `## Tasks` table three
+# times at task scale. The answers are facts of the plan, which no Stop writes, so each is
+# read once. The instrument is the R2 PATH shim (record/wave-19-fixit-186/
+# step2-research-R2-fill-invariant.md Q4): an `awk` in front of PATH that logs its program
+# and execs the real one by ABSOLUTE path (a bare `exec awk` re-enters the shim). A parse is
+# counted by its program's own text, and 70g pins that each text is spelled once in its
+# library, so the count cannot go quietly to zero when a program is rewritten.
+PDG_SHIM="$(mktemp -d)"
+printf '%s\n' '#!/bin/bash' \
+  'a="$*"; a="${a//$'"'"'\n'"'"'/ }"; printf "%s\n" "${a:0:400}" >> "$PDG_AWKLOG"' \
+  'exec /usr/bin/awk "$@"' > "$PDG_SHIM/awk"
+chmod +x "$PDG_SHIM/awk"
+PDG_CUR_SIG='/^## SDLC State/ { flag = 1; next }'   # fill.sh's current: reader
+PDG_TBL_SIG='FOLDS THE ESCAPE'                      # units.sh's _units_read
+fire_counted() {  # <project> -> fire, with every awk this Stop runs logged to $PDG_AWKLOG
+  local _path="$PATH"
+  export PDG_AWKLOG="$1/awk.log"; : > "$PDG_AWKLOG"
+  PATH="$PDG_SHIM:$PATH"; fire "$1"; PATH="$_path"
+}
+pdg_count() { LC_ALL=C grep -cF -- "$1" "$PDG_AWKLOG"; }
+
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+ledger_roster "$d" acked T1
+u_prompt "$d" "merge the landed tree and tell me where we are"
+fire_counted "$d"
+expect_block "70a: the counted Stop still computes the ready set (wave scale), naming T2" "T2"
+expect_eq "70b: …after ONE read of current: (the gate, the step token and the set share it)" \
+  "1" "$(pdg_count "$PDG_CUR_SIG")"
+expect_eq "70c: …and ONE parse of the table" "1" "$(pdg_count "$PDG_TBL_SIG")"
+
+# Task scale: `current: T<n>` against a table of units, where the step token asks the header
+# twice (`units_has_column` step, then id) before the ready set reads the rows.
+d=$(make_env_ledger T2)
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\n%s\n---\n\n# fixture task plan\n\n' "$LEDGER_BUDGET"
+  printf '## SDLC State\n\ncurrent: T2\n\n## Tasks\n\n'
+  printf '| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n'
+  printf '| T1 | bugfix | standard | the done unit | done | — |\n'
+  printf '| T2 | bugfix | standard | the unit the run is on | pending | — |\n'
+  printf '| T3 | bugfix | standard | the next unit | pending | — |\n'
+} > "$d/.bionic/docs/plans/$PLAN_REL"
+u_prompt "$d" "carry on"
+fire_counted "$d"
+expect_block "70d: the counted Stop still computes the ready set (task scale), naming T2" "T2"
+expect_eq "70e: …after ONE read of current:" "1" "$(pdg_count "$PDG_CUR_SIG")"
+expect_eq "70f: …and ONE parse of the table, the header questions included" \
+  "1" "$(pdg_count "$PDG_TBL_SIG")"
+
+# 70g: THE COUNTER'S OWN CONTROL. Each signature is spelled exactly once in its library, so a
+# zero above is a reader that stopped running, never a program that changed its text.
+expect_eq "70g: fill.sh spells the current: reader's program once" \
+  "1" "$(LC_ALL=C grep -cF -- "$PDG_CUR_SIG" "${HOOK_SRC%/*}/fill.sh")"
+expect_eq "70g: …and units.sh the table parse's" \
+  "1" "$(LC_ALL=C grep -cF -- "$PDG_TBL_SIG" "${HOOK_SRC%/*}/units.sh")"
 
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
@@ -1101,14 +1431,15 @@ fire "$d"; expect_block "67: re-engaged, the refusal returns unchanged" "$TL_MIS
 # `session-poker.sh tick`, and the canonical-sdlc SKILL.md body — injected into the
 # transcript as a USER row — contains exactly that literal. Invoking the skill was a tick.
 
-# 68: a USER row that merely CONTAINS the tick command is not a tick.
+# 68j: a USER row that merely CONTAINS the tick command is not a tick (renamed from a second
+# `68:` — labels are unique, audit V-8).
 d=$(make_env)
 u_prompt "$d" "Base directory for this skill: /x/skills/canonical-sdlc
 
 # Canonical SDLC
 
 ... **Tick the poker.** \`bash <plugin-root>/hooks/session-poker.sh tick\` is the decision brain — the prompt gathers, the poker decides, per row. ..."
-fire "$d"; expect_allow "68: the injected SKILL.md body is not a Patrol tick"
+fire "$d"; expect_allow "68j: the injected SKILL.md body is not a Patrol tick"
 
 # 69: THE PAIRED POSITIVE, so 68 is not silence-by-vacuity: the same fixture with the real
 # marker at the front of the row refuses.

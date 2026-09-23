@@ -917,6 +917,10 @@ section "A2 — a LIBRARY mutation moves every party (checklist A9, TDD §9)"
 CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_ER" "$PARTY_LG" "$PARTY_LG_SRC" 2>/dev/null)
 RUN_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh"
 [ -r "$RUN_LIB" ] || RUN_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/run.sh"
+# fill.sh's `current:` reader, which the poker's `_sched_plan_current_field` delegates to since
+# wave-19 (REQ-6, D7): §CG sources it beside the extraction, as the shipped poker does.
+FILL_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/fill.sh"
+[ -r "$FILL_LIB" ] || FILL_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/fill.sh"
 LIB_DIR_SRC="$(dirname "$RUN_LIB")"
 # THE DOCS-ROOT READER IS lib/roots.sh's NOW (epic-22 wave-01, N1), so two of the seven
 # mutations below have to be applied there. run.sh used to carry both `docs_root` and
@@ -4228,7 +4232,10 @@ expect_eq "…writing it back to the same path the consumer reads" "yes" \
 N_LEASE_OUT=$(mk_agent_payload "$SID_A" "$NWT" \
   | jq -c '.tool_input.name = "w99-impl-lease"' \
   | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_LEASE_ST=$?
-expect_eq "a MAIN-THREAD dispatch from the same worktree is refused (AC-14)" "2" "$N_LEASE_ST"
+# A deny verdict, exit 0, since wave-19 T4 (REQ-7): the gate refuses every brief or state
+# fault on one wire whatever the fault count. `2>&1` above keeps the stdout verdict in view.
+expect_eq "a MAIN-THREAD dispatch from the same worktree is refused (AC-14)" "0" "$N_LEASE_ST"
+expect_contains "…on a deny verdict" '"permissionDecision":"deny"' "$N_LEASE_OUT"
 expect_contains "…naming the main checkout the library already resolves to" \
   "main checkout: $NMAIN" "$N_LEASE_OUT"
 
@@ -5161,8 +5168,10 @@ rm -f "$P_REPO"/.bionic/tmp/patrol-*.state
 } > "$P_REPO/.bionic/tmp/preflight-$P_SID.state"
 chmod 600 "$P_REPO/.bionic/tmp/preflight-$P_SID.state"
 
-P_OUT=$(mk_agent_payload "$P_SID" "$P_REPO" | bash "$PARTY_DP" 2>&1 >/dev/null); P_ST=$?
-expect_eq "the gate refuses a dispatch with no Patrol stamp" "2" "$P_ST"
+P_OUT=$(mk_agent_payload "$P_SID" "$P_REPO" | bash "$PARTY_DP" 2>&1); P_ST=$?
+# A deny verdict, exit 0, since wave-19 T4 (REQ-7); stdout is kept so the verdict is read.
+expect_eq "the gate refuses a dispatch with no Patrol stamp" "0" "$P_ST"
+expect_contains "…on a deny verdict" '"permissionDecision":"deny"' "$P_OUT"
 
 # The path the CONSUMER named, taken out of its own words rather than rebuilt here.
 P_READS=$(printf '%s\n' "$P_OUT" | grep -oE '/[^[:space:]]*/patrol-[^[:space:]]+\.state' | head -1)
@@ -9041,8 +9050,11 @@ section "CG — the current: GRAMMAR: sched_plan_current agrees with run.sh's ru
 # awkward abstraction over two unrelated call shapes. An agreement test is the fit.
 #
 # Both parties are called FOR REAL, not compared as text — sched_plan_current's own body
-# calls _sched_plan_current_field and normalize_newlines, so the poker's two are extracted
-# and eval'd together (§I.1's precedent, `q_poker` above). `normalize_newlines` is no longer
+# calls _sched_plan_current_field, so the poker's two are extracted and eval'd together
+# (§I.1's precedent, `q_poker` above). Since wave-19 (REQ-6, D7) the extracted
+# `_sched_plan_current_field` is a one-line wrapper over fill.sh's `_fill_current_field`, the
+# one parser of the field, so FILL_LIB is sourced beside RUN_LIB; the grammar this section
+# binds to `run_open` is that parser's. `normalize_newlines` is no longer
 # among them: since epic-23 wave-12-fixit-171 (REQ-8, spec D6) it has ONE definition, in
 # payload/scripts/lib/run.sh, which this section already had in hand as RUN_LIB — so it is
 # sourced rather than extracted, which is also what the shipped poker does. run_open is
@@ -9052,6 +9064,7 @@ cg_extract_fn() {  # <fn-name> -> that function's body text, from session-poker.
 }
 cg_sched_current() {  # <plan path> -> sched_plan_current's real answer, called for real
   ( . "$RUN_LIB" >/dev/null 2>&1            # normalize_newlines is run.sh's since REQ-8/D6
+    . "$FILL_LIB" >/dev/null 2>&1           # the reader the wrapper delegates to (REQ-6, D7)
     eval "$(cg_extract_fn _sched_plan_current_field)"
     eval "$(cg_extract_fn sched_plan_current)"
     sched_plan_current "$1" ) 2>/dev/null
@@ -9130,6 +9143,7 @@ expect_eq "CG.4 the mutant differs from the shipped file by exactly the strip li
   "1" "$(diff "$PARTY_PK" "$CG_MUT" | grep -c '^< ')"
 cg_sched_current_mut() {  # <plan path> -> sched_plan_current's answer off the MUTANT copy
   ( . "$RUN_LIB" >/dev/null 2>&1            # ditto: the mutant is a poker copy, not a lib copy
+    . "$FILL_LIB" >/dev/null 2>&1
     eval "$(awk -v n=_sched_plan_current_field \
       '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$CG_MUT")"
     eval "$(awk -v n=sched_plan_current \
@@ -9337,22 +9351,47 @@ expect_eq "S13.3 …over a set with something in it" "0" \
 # --- §S13.4 the three fields go through the ONE row writer, from both call sites ---
 #
 # §RA.2 pins that the row has one writer. This pins that the fields S13 added did not
-# quietly acquire a second one: neither hook may hold a `suites_allowed=` literal of its
+# quietly acquire a second one: neither hook may hold a `suites_allowed=` ASSEMBLER of its
 # own, and the library must know all three keys. A hook that built the field into a
 # format string beside the call would pass §RA.2 (the captured rows carry none of the
 # three) and be invisible until a reader met a row with the key in the wrong place.
+#
+# THREE FILES, NAMED INDIVIDUALLY — this is not a directory scan, and a fourth file could
+# spell the assembler shape and this pin would never see it:
+#   hooks/dispatch-preflight.sh ($S13_DP)                 must not assemble the row segment
+#   hooks/session-poker.sh                                must not assemble the row segment
+#   payload/scripts/lib/roster.sh ($S13_ROSTER_LIB)        is the one file that may
 for _s13_key in files suites_allowed suites_source; do
   expect_eq "S13.4 roster.sh knows the key [$_s13_key]" "1" \
     "$(awk '/^roster_row\(\)/,/^\}/' "$S13_ROSTER_LIB" | grep -cE "^ *${_s13_key}\)")"
 done
-# THE ROW-BUILDING SPELLING IS `|suites_allowed=` — a pipe in front of the key is a
-# format string assembling the row, and it may exist in exactly one file.
+# THE ROW-BUILDING SPELLING IS `|suites_allowed=[$%]` — the pipe-prefixed key immediately
+# followed by the sigil that opens a splice, either `$` (a variable/command-substitution
+# assembler, e.g. `out="$out|suites_allowed=$suites_allowed"`) or `%` (a printf format-string
+# assembler, e.g. `printf '|suites_allowed=%s' "$x"`). A plain literal-substring grep for
+# `|suites_allowed=` cannot tell any of these apart from a `case`/substring PRESENCE test
+# spelling the same key — `*"|suites_allowed="*`, no trailing sigil — and T7's `extend`
+# tripped exactly that false positive and had to route its own presence check through a
+# generic, indirected helper (`row_has_key`, session-poker.sh) purely to dodge this pin
+# (ideas row 11). The shape-aware grep below reads 0 on a presence test and 1 on either
+# assembler shape, so the dodge is no longer needed — `row_has_key` keeps its shape on its
+# own merits, not because of this pin.
+# SPELLING WIDENED (T9, R4): the prior spelling, `=[^=]*\|suites_allowed=\$`, required an
+# `=` sign somewhere before the pipe as well as a literal `$` right after the key — a shape
+# that a concatenation assembler (`row="${row}|suites_allowed=$sa"`) happens to have but a
+# `printf` assembler does not (`printf '|suites_allowed=%s' "$x"` has no `=` before the pipe
+# and closes with `%`, not `$`). That left two of the three legitimate assembler shapes
+# invisible to the pin (AC-13.1's own eval fixture pins a `printf` assembler at 1, and the
+# old grep read 0 on it). The new spelling drops the leading `=[^=]*` requirement and widens
+# the trailing sigil to `[$%]`, so it reads 1 on all three assembler shapes — concatenation,
+# `$(...)`  variable splice, and `printf` — while still reading 0 on the presence test, whose
+# trailing character is a quote, not a sigil.
 expect_eq "S13.4 dispatch-preflight assembles no row segment of its own" "0" \
-  "$(grep -c '|suites_allowed=' "$S13_DP")"
+  "$(grep -cE '\|suites_allowed=[$%]' "$S13_DP")"
 expect_eq "S13.4 …and neither does session-poker's adopt" "0" \
-  "$(grep -c '|suites_allowed=' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+  "$(grep -cE '\|suites_allowed=[$%]' "$BIONIC_HOOKS_DIR/session-poker.sh")"
 expect_eq "S13.4 …because the one library that may is the one that does" "1" \
-  "$(grep -c '|suites_allowed=' "$S13_ROSTER_LIB")"
+  "$(grep -cE '\|suites_allowed=[$%]' "$S13_ROSTER_LIB")"
 # The paired POSITIVE: both writers do pass the key by name, so the two zeros above are
 # "no second speller" and not "nobody writes it".
 expect_eq "S13.4 dispatch-preflight passes suites_allowed= to the writer" "1" \
@@ -9363,6 +9402,28 @@ expect_eq "S13.4 dispatch-preflight passes suites_allowed= to the writer" "1" \
 # one call) did not.
 expect_eq "S13.4 …and session-poker builds its three as one group" "1" \
   "$(grep -c 'suites_allowed=\$(clean "\$sallow" suites_allowed)' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+
+# MUTATION (§N-shaped, :3572-3588) — the shape-aware grep must actually REJECT a planted
+# assembler, not merely fail to see one that was never there. TWO copies of
+# dispatch-preflight.sh are doctored in the SANDBOX — never in the tree — one appending a
+# second, illegitimate `suites_allowed=` CONCATENATION assembler line and one appending a
+# `printf` FORMAT-STRING assembler line (R4: the shape the widened grep exists to catch);
+# the same grep that reads 0 on the real tree above must read 1 on both doctored copies.
+mkdir -p "$SANDBOX/fx"
+S13_MUT_DP="$SANDBOX/fx/dispatch-preflight-planted-assembler.sh"
+{ cat "$S13_DP"; printf '%s\n' 'out="$out|suites_allowed=$suites_allowed"'; } > "$S13_MUT_DP"
+S13_MUT_DP_PRINTF="$SANDBOX/fx/dispatch-preflight-planted-printf-assembler.sh"
+{ cat "$S13_DP"; printf '%s\n' 'printf '"'"'|suites_allowed=%s'"'"' "$suites_allowed"'; } > "$S13_MUT_DP_PRINTF"
+expect_ne "S13.4 mutation: the planted copy really differs (not a byte-identical copy)" \
+  "$(cat "$S13_DP")" "$(cat "$S13_MUT_DP")"
+expect_ne "S13.4 mutation: …and so does the printf-assembler copy" \
+  "$(cat "$S13_DP")" "$(cat "$S13_MUT_DP_PRINTF")"
+expect_eq "S13.4 mutation: the shape-aware grep is red on the concatenation copy" "1" \
+  "$(grep -cE '\|suites_allowed=[$%]' "$S13_MUT_DP")"
+expect_eq "S13.4 mutation: …and red on the printf copy too (R4)" "1" \
+  "$(grep -cE '\|suites_allowed=[$%]' "$S13_MUT_DP_PRINTF")"
+expect_eq "S13.4 mutation: …and stays green on the real tree" "0" \
+  "$(grep -cE '\|suites_allowed=[$%]' "$S13_DP")"
 
 # --- §S13.5 the field the wall writes is the field the guard reads ---
 #
@@ -9589,13 +9650,25 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 # mutation arm is deliberately NOT a site: `REPLANTED_FMT` APPENDS a format line to a copy
 # rather than stripping one, and an append cannot silently match nothing — the same call
 # §Roots makes, for the same reason, and the reason this census counts strips.
+# 44 sites / 45 anchors at epic-23 wave-19-fixit-186 (2026-09-22, T9c fold-in), TWO GAPS
+# CLOSED TOGETHER rather than one: wave-19 T11/Tdoc (9d1a7e8) added DOCTORED_STEP2_OPEN_AT
+# (Section 12, rows 92a2/92a3 — the Step-2 sibling to Section 15's 107f/107g pattern,
+# proving the retired "Open at approval" section stays out of the Step-2 card scaffold)
+# without its own anchor call. Auditing the modelled-on pair found the model itself
+# short one: wave-18-fixit-185 T8 (0ee1a5d) had already added DOCTORED_NO_BATCH (Section
+# 15's 107g, the dropped-batch-line anti-vacuity arm) the same way, unanchored, and no
+# task since had it in Files: to close it — the same shape T32's DOCTORED_PATROL_T28 gap
+# held until T33 closed it (A-T32.2, above). T9c closes both: `anchor "$STEP2_MD" '  Arti-
+# facts' 1` immediately above DOCTORED_STEP2_OPEN_AT, and `anchor "$STEP3_MD" '    batch '
+# 1` immediately above DOCTORED_NO_BATCH. Net: sites 42->44 (+2, one per gap), anchor CALLS
+# 43->45 (+2, one new anchor per newly-declared site, no pre-existing offset absorbed).
 # RE-DERIVED BY DIRECT GREP over docs-pins.test.sh at THIS commit, as every number in this
 # section is:
-#   grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' tests/docs-pins.test.sh        -> 42
-#   grep -cE '^[[:space:]]*anchor[[:space:]]' tests/docs-pins.test.sh     -> 43
-expect_eq "S19.3 docs-pins holds 42 doctoring sites" "42" \
+#   grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' tests/docs-pins.test.sh        -> 44
+#   grep -cE '^[[:space:]]*anchor[[:space:]]' tests/docs-pins.test.sh     -> 45
+expect_eq "S19.3 docs-pins holds 44 doctoring sites" "44" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 43 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change; wave-14 T33 adds one, DOCTORED_PATROL_T28's own anchor; wave-14 T36 adds one, the nudged-card-row discriminator)" "43" \
+expect_eq "S19.3 …declared by 45 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change; wave-14 T33 adds one, DOCTORED_PATROL_T28's own anchor; wave-14 T36 adds one, the nudged-card-row discriminator; wave-18 T8's Section-15 107g gap and wave-19 T11/Tdoc's Section-12 92a3 gap each add one, both closed by wave-19 T9c)" "45" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
@@ -9721,7 +9794,12 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # 79 at epic-23 wave-16-fixit-183: +1 from this wave's T4 (§R2's knob-unset splice) and +1
 # from T25 (§bring-forward's caller mutant), both in this file; the other three are
 # untouched by either task.
-expect_eq "S19.3 …79 anchor call sites across the four doctoring suites, all told" "79" \
+# 81 at epic-23 wave-19-fixit-186 (2026-09-22, T9c fold-in): 44 + 32 + 1 + 3, the docs-pins
+# term alone moving again — T9c's two new anchor calls (the row above this one, S19.3's
+# second row) closing the DOCTORED_STEP2_OPEN_AT and DOCTORED_NO_BATCH gaps.
+# cross-gate-agreement.test.sh, agent-context-guard and landing-gate are unmoved and were
+# re-measured, not assumed.
+expect_eq "S19.3 …81 anchor call sites across the four doctoring suites, all told" "81" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"

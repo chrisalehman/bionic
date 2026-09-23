@@ -6,10 +6,19 @@
 #
 # This is NOT a hook. Like hooks/session-sweeper.sh and hooks/stop-check.sh it lives in
 # hooks/ for test-harness pairing and to ride the payload's hooks/ directory into the
-# mounted plugin; it is registered on NO channel. Two questions, one invocation each:
+# mounted plugin; it is registered on NO channel. Three verbs, one invocation each:
 #
 #     bash ~/.claude/hooks/stop-orders.sh order <target> [--at <epoch>]
+#     bash ~/.claude/hooks/stop-orders.sh stopped <name>
 #     bash ~/.claude/hooks/stop-orders.sh standdown
+#
+# STOPPED closes the row of an agent that has been stopped, through the sweeper's own ack
+# (wave-19 T1, ADR-034: the ack is the close); it runs beside a TaskStop, after the agent is
+# gone. An unknown or already-acked name is refused, and so — since the wave-19 T1 follow-up,
+# critic C4 — is a row whose name a fresh panel reading still lists as live; a stale or
+# absent panel reading refuses too. A landed row (MET or WAIVED) closes `reason=landed`; an
+# UNMET row whose agent is gone closes `reason=abandoned` (T1e, audit V-1); any other verdict
+# state is refused. The ack this verb writes is `--by human`, never `--by patrol`.
 #
 # ORDER records that a human asked for an agent to be stopped, and prints what stopping it
 # gives up. It is not evidence and it does not discharge the contract — it is an
@@ -28,8 +37,13 @@
 #
 # STANDDOWN answers "which agents can I stop right now, and how do I address them?" in one
 # read. Every row whose contract has LANDED — MET against a declared artifact, WAIVED, or
-# acked — is listed with an address the platform's stop primitive accepts; every row that
-# is still working, or has not landed, is listed as LEFT ALONE and never as a target. It
+# acked while a fresh panel still lists its agent — is listed with an address the platform's
+# stop primitive accepts. An acked row a fresh panel shows GONE is already closed and has
+# nobody left to stop, so it is left off that list; its worktree lease still ends here, and
+# that landing is reported under LEASES instead (wave-19 T1 follow-up, R2) — merged only when
+# the verdict is MET or WAIVED; an abandoned (UNMET) row's tree is left standing and named
+# there for a human to salvage (T1f, review R2-1). Every row
+# that is still working, or has not landed, is listed as LEFT ALONE and never as a target. It
 # stops nothing itself: stopping is the harness's primitive, not a shell script's. What it
 # does is compute the batch, so the N stops that follow are N fact-discharged calls with no
 # ceremony between them, instead of N observations.
@@ -44,8 +58,10 @@
 #   stop-orders-<session>.state  the orders this script owns (append-only)
 #
 # Exit codes:
-#   0 — the order was recorded / the stand-down was computed
-#   2 — usage error, or a refusal (a state path is a symbolic link, or is unwritable)
+#   0 — the order was recorded / the row was acked / the stand-down was computed
+#   2 — usage error, or a refusal (a state path is a symbolic link, or is unwritable; a
+#       `stopped` name with no row, already acked, in a verdict state other than MET, WAIVED
+#       or UNMET, still live on a fresh panel, or answered by a stale/absent panel reading)
 #   3 — no session key; nothing read, nothing written
 #
 # Session key: CLAUDE_CODE_SESSION_ID, exactly as hooks/session-sweeper.sh takes it.
@@ -78,6 +94,8 @@ usage() {  # [message]
   die "Usage:"
   die "  bash ${HOOK_DIR}/stop-orders.sh order <target> [--at <epoch>] [--by human|patrol]"
   die "        record a stop order and print what stopping gives up"
+  die "  bash ${HOOK_DIR}/stop-orders.sh stopped <name>"
+  die "        close the row of an agent you have stopped (the sweeper's ack, reason landed or abandoned)"
   die "  bash ${HOOK_DIR}/stop-orders.sh standdown"
   die "        list every landed row with an address you can stop it by"
   exit 2
@@ -124,6 +142,12 @@ case "$VERB" in
         *) usage "unknown argument: $1" ;;
       esac
     done
+    ;;
+  stopped)
+    [ $# -ge 1 ] || usage "stopped needs a target."
+    case "$1" in -*) usage "the target comes first: '$1' is an option, not a target." ;; esac
+    ORDER_TARGET="$1"; shift
+    [ $# -eq 0 ] || usage "stopped takes one target and no options; got $1."
     ;;
   standdown)
     [ $# -eq 0 ] || usage "standdown takes no arguments; got $#."
@@ -451,6 +475,33 @@ stop_address() {  # <roster-row> <name>
   printf '%s\n' "$name"
 }
 
+# THE PANEL: ONE READ, ONE LIVENESS RULE, for every verb that asks "is this agent gone?"
+# (wave-19 T1e, audit V-1). `stopped` and `standdown` used to carry a copy each; the rule is
+# now stated once. `read_panel` reads this session's latest ListAgents answer through
+# `own_transcript` then `live_agents`, and sets `_live_ok` to 1 only for a FRESH answer — a
+# stale, absent or unreadable one leaves it at 0, and a caller that must see refuses or
+# withholds rather than guesses. `_is_live` answers from that one read.
+#
+# A NAME IS NOT A PATTERN (Step-6 security review S-5). The name is a value lifted off a
+# roster row — the operator's typed target one step upstream — and nothing in the fleet
+# charset-guards it, so a `.`, `*` or `[` dropped into a basic regular expression
+# over-matches and calls a departed row live off a neighbour's name. Field equality, which
+# is the spelling `live_agents_has` already uses.
+_live=""; _live_ok=0
+read_panel() {  # -> sets _live (the fresh answer, one agent per line) and _live_ok (1 iff fresh)
+  local own_tr
+  _live=""; _live_ok=0
+  own_tr=$(own_transcript) || own_tr=""
+  [ -n "$own_tr" ] || return 0
+  if _live=$(live_agents "$own_tr" 2>/dev/null); then _live_ok=1; else _live=""; fi
+  return 0
+}
+_is_live() {  # <name> -> 0 iff the fresh answer names it; never 0 on a stale read
+  [ "$_live_ok" -eq 1 ] || return 1
+  printf '%s\n' "$_live" \
+    | awk -F'|' -v want="$1" '$1 == want { found = 1 } END { exit found ? 0 : 1 }'
+}
+
 # ---------------------------------------------------------------- verbs
 
 case "$VERB" in
@@ -501,6 +552,133 @@ case "$VERB" in
     exit 0
     ;;
 
+  stopped)
+    # THE ACK IS THE CLOSE (wave-19 T1; D3, ADR-034 d1). A TaskStop ends a process and closes
+    # nothing; this verb closes the name beside the stop. It owns no predicate of its own:
+    # ONE verdict read decides whether there is an open row to close, and the close is the
+    # sweeper's `ack` — the same verb the tick's STANDDOWN close calls (hooks/session-poker.sh),
+    # so the ledger keeps its one writer. The arguments differ, on purpose: this verb writes
+    # `--by human` with a reason derived from the verdict (T1c, T1e; below), where the tick
+    # writes `--by patrol`. The sweeper records an unknown name and warns rather than
+    # refusing, so the refusal is decided here, first. The ack closes the NAME only; whether
+    # the row's tree is merged is standdown's lease question, decided on the verdict (T1f).
+    #
+    # THIS VERB RUNS BESIDE A TaskStop, AFTER THE AGENT IS GONE (wave-19 T1 follow-up, critic
+    # C4). Before this fix it acked ANY open row — still-live or UNMET — on the strength of
+    # the name alone, and since T4 that ack frees the name for a fresh dispatch while the
+    # agent it named is still running (`hooks/dispatch-preflight.sh:2272` treats any ack newer
+    # than the launch as the name closing). So this now checks what `standdown` already
+    # checks, through the same `read_panel` / `_is_live`: a FRESH panel reading must confirm
+    # the name is gone. Present on the panel -> refused, naming it live and its verdict.
+    # Stale or absent -> refused: a verb that cannot see does not ack. Since T1e (audit V-1)
+    # the verdict picks the ack's reason instead of gating it: MET/WAIVED closes `landed`,
+    # UNMET closes `abandoned`. Since T1g (audit V2-1, critic C2-2) a fresh-and-absent panel
+    # also closes a STILL-LIVE row `abandoned` — a stale progress artifact is not liveness
+    # once the panel says the agent is gone — except when the state's own claimed-process
+    # pattern still matches a live process, which the panel cannot speak to and which stays
+    # refused. AMBIGUOUS is always refused, naming the state. The ack this verb writes is
+    # `--by human`, never `--by patrol` — this is a deliberate model-callable verb, not the
+    # tick's own automated sweep, and the ledger's `by=` field says which one happened.
+    _target="$(clean "$ORDER_TARGET")"
+    [ -n "$_target" ] || usage "stopped needs a non-empty target."
+    if [ ! -f "$SWEEPER" ]; then
+      die "REFUSED — the sweeper is not beside this script ($SWEEPER); nothing was acked."
+      exit 2
+    fi
+    _v=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+          CLAUDE_CODE_SESSION_ID="$SESSION_ID" bash "$SWEEPER" verdict 2>/dev/null )
+    _line=$(printf '%s\n' "$_v" | grep -F 'landing-verdict/v1|' \
+      | awk -v want="$_target" '{ n = split($0, f, "|"); for (i = 1; i <= n; i++)
+          if (f[i] == "name=" want) { print; exit } }')
+    if [ -z "$_line" ]; then
+      die "REFUSED — no contract row named $_target on this session's roster; nothing was acked."
+      exit 2
+    fi
+    if [ "$(line_field "$_line" acked)" = "yes" ]; then
+      die "REFUSED — $_target is already acked; a second ack would say nothing new."
+      exit 2
+    fi
+    # THE REASON FOLLOWS THE VERDICT (wave-19 T1e, audit V-1; REQ-1 AC-1.2). A landed row
+    # (MET or WAIVED) closes `landed`. An UNMET row whose agent is gone closes `abandoned`:
+    # the agent was stopped before it landed (w19-T6 this wave), and refusing it left the name
+    # blocked and counted against the budget with no close but a hand `sweeper ack`. The word
+    # is honest about what happened — never `landed`, since nothing landed, and never the
+    # tick's `moot-and-gone`, which names a row that had nothing to produce. Every reader of
+    # the ledger closes the row on the ack alone, whatever its reason (ADR-034).
+    #
+    # STILL-LIVE IS NOT A CLOSE ON ITS OWN (wave-19 T1g, audit V2-1, critic C2-2). Before this
+    # fix STILL-LIVE was refused unconditionally, whatever the panel showed: a writer
+    # TaskStopped mid-work has, by construction, a progress artifact inside its cadence, so
+    # `stopped` refused it — "not landed" — for up to the whole cadence, and the slot stayed
+    # occupied the entire time (the w19-T6 shape this verb exists for). The panel is the
+    # stronger fact once it is fresh: a name a fresh panel does not list is gone, whatever a
+    # stale progress file still claims. So STILL-LIVE is deferred here (`_still_live=1`,
+    # tentatively `_reason=abandoned`) rather than refused, and decided below, after the same
+    # `read_panel` / `_is_live` check every other state already runs through — no third
+    # predicate. AMBIGUOUS is unaffected: it names a fact about the NAME across rows, which a
+    # single row's panel absence cannot resolve, so it is still refused here.
+    _state=$(line_field "$_line" state)
+    _detail=$(line_field "$_line" detail)
+    _still_live=0
+    case "$_state" in
+      MET|WAIVED)   _reason=landed ;;
+      UNMET)        _reason=abandoned ;;
+      STILL-LIVE)   _reason=abandoned; _still_live=1 ;;
+      *)
+        die "REFUSED — $_target's contract is $_state, not landed; nothing was acked."
+        exit 2
+        ;;
+    esac
+    # THE FRESH PANEL, through the one shared read above (`read_panel` / `_is_live`, the same
+    # predicate standdown uses). C4 holds for every state: no fresh answer, or the name still
+    # on it, is a refusal that names the verdict. A verb that cannot see does not ack, and an
+    # agent that is still working has not been stopped.
+    read_panel
+    if [ "$_live_ok" -ne 1 ]; then
+      if [ "$_still_live" -eq 1 ]; then
+        die "REFUSED — $_target's contract is STILL-LIVE; retry after the cadence elapses, or when a fresh panel no longer lists it."
+      else
+        die "REFUSED — no fresh panel reading; a verb that cannot see does not ack $_target ($_state)."
+      fi
+      exit 2
+    fi
+    if _is_live "$_target"; then
+      if [ "$_still_live" -eq 1 ]; then
+        die "REFUSED — $_target's contract is STILL-LIVE; retry after the cadence elapses, or when a fresh panel no longer lists it."
+      else
+        die "REFUSED — $_target ($_state) is still on the panel (live); stop it, then stopped closes its row."
+      fi
+      exit 2
+    fi
+    # PANEL-GONE OVERRIDES STILL-LIVE — but only the progress-artifact shape. A claimed
+    # process pattern that matches a live process (`session-sweeper.sh`'s `row_still_live`,
+    # checked before it ever reaches the progress-artifact clause) is a fact about a real OS
+    # process, not about this session's roster of agents; the panel only lists the latter, so
+    # its absence says nothing about whether that process is still running, and the refusal
+    # stands. A progress artifact merely dates the last write from an agent that, by this
+    # point, the fresh panel says is gone — the panel is the stronger fact there, and holding
+    # the row open for the rest of its cadence is exactly the stale-detection gap this row was
+    # opened to close. Logged as A-T1.13.
+    if [ "$_still_live" -eq 1 ] && grep -q 'claimed process pattern' <<< "$_detail"; then
+      die "REFUSED — $_target's contract is STILL-LIVE (a claimed process pattern still matches a live process); the panel showing it gone does not close this on its own."
+      exit 2
+    fi
+    if [ "$_still_live" -eq 1 ]; then
+      _age=$(printf '%s' "$_detail" | grep -oE 'last changed [0-9]+s ago' | grep -oE '[0-9]+')
+      _cad=$(printf '%s' "$_detail" | grep -oE '\([0-9]+s\)' | tr -d '()s')
+      say "panel-gone overrides STILL-LIVE (progress ${_age:-?}s old, cadence ${_cad:-?}s)"
+    fi
+    if ! _ack=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                 CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                 bash "$SWEEPER" ack "$_target" --by human --reason "$_reason" 2>&1 ); then
+      die "REFUSED — the sweeper could not ack $_target: $(printf '%s' "$_ack" | head -1)"
+      exit 2
+    fi
+    [ -n "$_ack" ] && printf '%s\n' "$_ack"
+    say "stopped: $_target — its row is closed (acked by human, reason $_reason)."
+    exit 0
+    ;;
+
   standdown)
     if [ ! -f "$SWEEPER" ]; then
       die "REFUSED — the sweeper is not beside this script ($SWEEPER)."
@@ -537,24 +715,43 @@ case "$VERB" in
     # shellcheck source=/dev/null
     [ -f "$_wt_lib" ] && . "$_wt_lib"
 
-    # THE LIVE SET, read ONCE for the whole batch and only for the LEFT ALONE reason text.
-    # A stale or absent answer leaves `_live` empty and `_live_ok` at 0, and every held row
-    # is then reported exactly as it was before this task: this verb owes a report, and an
-    # annotation it cannot justify is worse than none.
-    _live=""; _live_ok=0
-    _own_tr=$(own_transcript) || _own_tr=""
-    if [ -n "$_own_tr" ]; then
-      if _live=$(live_agents "$_own_tr" 2>/dev/null); then _live_ok=1; else _live=""; fi
-    fi
-    # A NAME IS NOT A PATTERN (Step-6 security review S-5). The name is a value lifted off a
-    # roster row — the operator's typed target one step upstream — and nothing in the fleet
-    # charset-guards it, so a `.`, `*` or `[` dropped into a basic regular expression
-    # over-matches and annotates a departed row `[live]` off a neighbour's name. Field
-    # equality, which is the spelling `live_agents_has` already uses two functions away.
-    _is_live() {  # <name> -> 0 iff the fresh answer names it
-      [ "$_live_ok" -eq 1 ] || return 1
-      printf '%s\n' "$_live" \
-        | awk -F'|' -v want="$1" '$1 == want { found = 1 } END { exit found ? 0 : 1 }'
+    # THE LIVE SET, read ONCE for the whole batch through the shared `read_panel` above the
+    # verbs: it decides whether an acked row is gone and annotates LEFT ALONE rows. A stale or
+    # absent answer leaves `_live_ok` at 0, and every row is then reported as if nothing were
+    # known about it: this verb owes a report, and an annotation it cannot justify is worse
+    # than none.
+    read_panel
+
+    # ONE CALL SITE for ending a row's lease, shared by the READY branch (a MET/WAIVED/still-
+    # listed-acked row) and the acked-and-gone branch, which needs the exact same landing but
+    # never enters READY. Appends one line to _landed for every tree it finds, so the operator
+    # sees every tree this pass touched, whichever branch found it.
+    #
+    # ONLY A LANDED ROW IS MERGED (wave-19 T1f, review R2-1). `worktree_land` is a --no-ff
+    # merge into whatever branch the main checkout is on. An ack closes a name whatever its
+    # reason (A-T1.11), and since T1e `stopped` acks an UNMET-and-gone row `abandoned` — so
+    # "acked" is not "landed", and merging on the ack alone put an abandoned agent's partial
+    # work into the checkout's branch (masked on main/master by the protected-branch refusal,
+    # live on any other). The VERDICT decides, never the ack's reason: the reason is a label,
+    # the verdict is the fact. MET or WAIVED lands. Anything else leaves tree and branch in
+    # place — no merge and no removal, since a human salvages what the agent left — and says
+    # so on the same LEASES report.
+    _land_row_tree() {  # <name> <verdict state>
+      declare -f worktree_land >/dev/null 2>&1 || return 0
+      _tree="$(worktree_for_row "$REPO_REAL" "$1")"
+      [ -d "$_tree" ] || return 0
+      case "$2" in
+        MET|WAIVED)
+          _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land "$_tree")   ($1)
+"
+          ;;
+        *)
+          _tbr="$(git -C "$_tree" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+          _tword="abandoned"; [ "$2" = "UNMET" ] || _tword="unlanded ($2)"
+          _landed="${_landed}  ${_tword} — tree stands: $_tree (branch ${_tbr:-unknown}); remove or salvage by hand   ($1)
+"
+          ;;
+      esac
     }
 
     _ready=""; _held=""; _nready=0; _nheld=0; _landed=""
@@ -576,7 +773,23 @@ case "$VERB" in
       # The ack is read off the SAME LINE this loop is already walking (epic-16 wave-02 S9).
       # It used to come from a private copy of a ledger reader living in this file, one of
       # three; the verb that printed the line owns the ledger, so it prints the answer too.
+      # AN ACKED ROW LEAVES THE LIST ONLY WHEN A FRESH PANEL SHOWS ITS AGENT GONE (wave-19
+      # T1; D3). Acked and gone is closed and has nobody to stop, so it is not listed at all;
+      # acked but still listed — or acked under a stale or absent answer, which is not
+      # evidence of anything — keeps its stop address, because an ack closes a name and
+      # ends no process.
+      #
+      # ACKED AND GONE STILL ENDS THE LEASE (wave-19 T1 follow-up; R2). The row above is
+      # closed and never enters READY, but its worktree is a leased slot nobody holds any
+      # more, and this pass — land, stop, tick ack — is the only one that will ever look at
+      # it again. Skipping the land here left every such tree standing until an operator
+      # ran spawn-worktree.sh land by hand, against spec AC-28 (1.4.0): standing an agent
+      # down is where the lease ends, full stop, not "unless the row left by way of an ack".
       if [ "$(line_field "$_l" acked)" = "yes" ]; then
+        if [ "$_live_ok" -eq 1 ] && ! _is_live "$_name"; then
+          _land_row_tree "$_name" "$_state"
+          continue
+        fi
         _why="acked"
       elif [ "$_state" = "WAIVED" ]; then
         _why="waived"
@@ -589,11 +802,7 @@ case "$VERB" in
 "
         # LANDED or REFUSED, one line per tree, reported either way: a lease
         # this verb could not end is exactly what the operator needs told.
-        if declare -f worktree_land >/dev/null 2>&1; then
-          _tree="$(worktree_for_row "$REPO_REAL" "$_name")"
-          [ -d "$_tree" ] && _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land "$_tree")   ($_name)
-"
-        fi
+        _land_row_tree "$_name" "$_state"
       else
         _nheld=$((_nheld + 1))
         # WHY THE ROW IS STILL HELD, and — where the harness can say so — whether anyone is
@@ -613,11 +822,15 @@ EOF
     if [ "$_nready" -gt 0 ]; then
       say "STAND DOWN — $_nready row(s) have landed; stop each by the address on its left:"
       printf '%s' "$_ready"
+    elif [ -n "$_landed" ]; then
+      # NOT "nothing has landed" above a LANDED line (review R2-7): the only rows this pass
+      # touched were closed rows whose agents are gone, and their trees are reported below.
+      say "no row awaits a stop; the rows below are closed and their agents gone."
     else
       say "nothing has landed; there is nobody to stand down."
     fi
     if [ -n "$_landed" ]; then
-      say "LEASES ENDED — the worktree of each row above, landed or refused:"
+      say "LEASES — the worktree of each row this pass found, landed, refused, or left standing:"
       printf '%s' "$_landed"
     fi
     if [ "$_nheld" -gt 0 ]; then

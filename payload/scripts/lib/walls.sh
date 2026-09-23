@@ -1058,6 +1058,489 @@ bionic_context 2>/dev/null || exit 0
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 [ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
+# ---------- JURISDICTION (wave-19 REQ-9, D10; ADR-031 amended): whose repository is this? ----------
+#
+# SECOND, right under the engagement guard and above every plan read — the plan hygiene, the
+# misplacement sweep, the run predicate and every step arm all read `$PLAN`, and none of them
+# has anything to say about a commit that lands in another repository. Until this arm the gate
+# resolved the plan from the ENGAGED ROOT first and asked which directory the commit runs in
+# some fifteen hundred lines later, so `git -C <scratch repo> commit` from an engaged session
+# was judged against this run's plan and refused for this run's evidence (A-T11.1, wave-18;
+# reproduced twice, R3 Q3). A repository `git init`-ed under the root's own record directory —
+# a test bed — drew the identical refusal: the gate never looked at the commit's directory.
+#
+# THE QUESTION IS THE REPOSITORY, NOT THE PATH. The commit's directory — the three spellings
+# `_eg_commit_cwd` reads, `-C` first — is handed to git, and git's COMMON DIR is compared to
+# the engaged root's. Common dir, never toplevel: a LINKED WORKTREE of this repository has a
+# toplevel of its own and shares the common dir, so every writer's tree stays inside and keeps
+# today's path (the row fork, the ambiguity arm, `_eg_git_wt_name`) exactly as it was. A
+# repository NESTED under the root has a common dir of its own and is outside, which is
+# AC-9.3; another repository's linked worktree is outside too and leaves here, ahead of the
+# rc-4 arm that used to catch it further down. The comparison is physical — the string, then
+# `-ef` — so a symlinked spelling of the root is the root.
+#
+# ONLY A POSITIVE ANSWER EXEMPTS. No git, a directory git places in no repository, a root
+# whose common dir cannot be read (a `.bionic/` above the repository), a relative directory,
+# a command that names two directories before the commit: each keeps today's verdict and is
+# judged below. A wall that cannot place a commit does not wave it through; only git naming a
+# DIFFERENT repository does. The two-directory case is the one that matters — `cd <scratch>
+# && cd <root> && git commit` commits in the root, and the leading `cd` must not buy it an
+# exemption; the ambiguity arm further down refuses it as before.
+#
+# AND A POSITIVE ANSWER IS ABOUT ONE COMMIT. `_eg_commit_cwd` places the FIRST commit the text
+# carries — the first `git -C <abs> commit`, else the leading `cd` — and says nothing about any
+# commit after it. So the arm exempts only a command whose text carries EXACTLY ONE commit
+# segment (`_eg_commit_count`, over the same `sh -c`/`eval`-expanded segment list every wall
+# reads) and places that one outside. Two or more commit segments are judged as before, even
+# when every one of them lands outside: `git -C <scratch> commit && git commit` and `cd
+# <scratch> && git commit && cd <root> && git commit` both commit in the root the second time,
+# and counting is what tells them apart from a single commit without placing each one (review
+# R1, wave-19). Zero is judged too — a commit this reader cannot see is not one it can place.
+#
+# AND THE ONE COMMIT MUST BE PLACED EXACTLY AS GIT WILL PLACE IT (critic C1, wave-19). The reader
+# names the FIRST absolute `-C`, the leading `cd` or the payload cwd; git obeys the LAST `-C`,
+# `--git-dir`/`--work-tree`/`GIT_DIR` name the repository outright, and a `pushd`, a nested
+# `bash -c 'cd …'` or a piped `cd` moves the shell where the reader never looks. Every one of
+# those single commits was exempted for a scratch repository while it landed in the root.
+# `_eg_placed` admits only the three shapes the reader reads exactly: one `-C`, a leading `cd`,
+# or the payload cwd. Each holds only when every other segment of the text starts with `git`,
+# `true`, `:` or `exit` (`_eg_git_only`), with no `(`, `{` or backtick anywhere. That is an
+# ALLOW-LIST (review R2-2): `if cd <root>; then :; fi; git commit`, `time cd <root> && git
+# commit` and a function named `git` all cost the exemption because their first word is not on
+# it, not because a list of moves names them. Everything else is judged below. The exotic
+# spellings are not resolved; they are not exempted.
+#
+# NOT A NEW REACH (the D11 freeze, .claude/rules/hook-authoring.md). It is the repair of the
+# gate's existing foreign-repository check — `_eg_git_wt_name` already asks git this question,
+# for linked worktrees only — widened to every repository git can place, as D10 ratified.
+#
+# AND IT EXEMPTS THIS GATE ALONE, as the rc-4 arm does: the `exit 0` leaves `_eg_body`'s
+# subshell, and the walls folded beside it in hooks/bash-walls.sh — protect-main, the
+# read-only-role arm, the background-suite guard — keep their verdicts wherever the commit
+# lands (tests/bash-walls.test.sh §18).
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+# _eg_cd_targets <command text> -> sets _EG_CDS to EVERY directory the text changes into
+# before the commit AFTER the leading one, in the order the shell would obey them, one per
+# line; empty when the text names only the leading directory.
+#
+# WHY A SECOND `cd` IS A REFUSAL AND NOT A TIE-BREAK (critic issue 1, FAIL-OPEN). Branch (2)
+# below reads the LEADING `cd` and truncates at the first `;`, `&`, `|` or newline, so every
+# later `cd` in the command was invisible to it — and `cd <worktree> && cd <main> && git
+# commit` was attributed to the worktree while the commit landed in main, at the worktree
+# row's lower step. Nothing in the TEXT says which directory the shell is standing in when
+# the commit finally runs: a `||`, a failed `cd`, a subshell and a plain `&&` all read alike
+# here, and this repo's own dispatch block warns about the neighbouring hazard (A-46, "a
+# failed cd with `;`-chained commands runs them in the main checkout"). So the arm stops
+# guessing: two named directories is an ambiguity the writer can spell away, and a wall that
+# cannot tell refuses.
+#
+# ONLY WHAT PRECEDES THE COMMIT COUNTS. A `cd` after the commit cannot move a commit that has
+# already run, so the scan stops at the first `git` in the text. If the text carries none this
+# reader can see — a spelling only `git_argv_expand` resolves — the whole remainder is
+# scanned, which refuses rather than allows.
+#
+# EVERY TARGET, NOT THE FIRST OF THEM (W6, the re-walk at 4e2ac66). This reader used to take
+# the first `cd` after the first separator and return, which cost nothing while the PRESENCE
+# of a second `cd` refused: the command was already refused before a third target could
+# matter. Once two targets that fold alike became one directory (C3), `cd X && cd X && cd Y
+# && git commit` walked through the arm and was judged at X's row with Y never read — while
+# the shell commits in Y, which another row owns at another step. That is the fail-open this
+# arm exists to close, one `&&` away from the shape it does close. So the scan collects the
+# whole list and the caller folds all of it.
+#
+# ONE PER LINE, AND THE SEPARATOR IS SAFE BY CONSTRUCTION: a newline is one of the four
+# characters this scan splits segments on, so no target it yields can contain one. A path
+# holding a space or a glob character is carried intact, and `_eg_path_fold`'s own `set -f`
+# guard is what keeps it intact downstream.
+_EG_CDS=""
+_eg_cd_targets() {
+  local _t="${1:-}" _rest _seg _p
+  _EG_CDS=""
+  case "$_t" in
+    *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
+    *) return 0 ;;
+  esac
+  case "$_rest" in *git*) _rest="${_rest%%git*}" ;; esac
+  while [ -n "$_rest" ]; do
+    case "$_rest" in
+      *[\;\&\|$'\n']*) _seg="${_rest%%[;&|$'\n']*}"; _rest="${_rest#*[;&|$'\n']}" ;;
+      *) _seg="$_rest"; _rest="" ;;
+    esac
+    while [ -n "$_seg" ]; do
+      case "$_seg" in
+        ' '*|'	'*|'('*|'{'*) _seg="${_seg#?}" ;;
+        *) break ;;
+      esac
+    done
+    case "$_seg" in
+      'cd'|'cd '*|'cd	'*)
+        _p="${_seg#cd}"
+        while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
+        while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
+        while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+        case "$_p" in
+          '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
+          "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
+        esac
+        [ -n "$_p" ] || _p='~'
+        _EG_CDS="${_EG_CDS}${_p}"$'\n'
+        ;;
+    esac
+  done
+  return 0
+}
+
+# _eg_path_fold <path> -> _EG_FOLD, the same path with its empty and `.` components folded
+# away, so `/a/b`, `/a//b`, `/a/b/` and `/a/./b` are one string.
+#
+# LEXICAL, AND THAT IS THE WHOLE CONTRACT. `..` is deliberately NOT folded: through a symlink
+# only a stat could say which directory `/a/b/..` is, and the freeze (D11) forbids a wall
+# fetching its own facts. So a path carrying `..` never folds onto another one, and the caller
+# below keeps refusing it — the direction a wall that cannot tell has to take.
+#
+# IT ASSIGNS RATHER THAN PRINTS, like every reader around it: a command substitution here
+# would be one fork per commit for a pure string operation.
+_EG_FOLD=""
+_eg_path_fold() {
+  local _in="${1:-}" _seg _out="" _oldifs="$IFS" _hadf=0
+  case "$-" in *f*) _hadf=1 ;; esac
+  set -f
+  IFS='/'
+  # shellcheck disable=SC2086  # deliberate split on '/' with globbing disabled
+  set -- $_in
+  IFS="$_oldifs"
+  [ "$_hadf" -eq 1 ] || set +f
+  for _seg in "$@"; do
+    case "$_seg" in ''|'.') continue ;; esac
+    _out="$_out/$_seg"
+  done
+  _EG_FOLD="${_out:-/}"
+}
+
+# _eg_cd_one_dir -> 0 when EVERY `cd` target the text names RESOLVES to ONE directory, and
+# 1 with _EG_CD_DIFF set to the first target that does not — the one the refusal names.
+#
+# THE ARM FIRED ON THE SECOND `cd` TOKEN, NEVER ON A DIFFERENCE (critic C3). `cd X && cd X`
+# and `cd X && cd .` were both refused, and the refusal read "the command changes into 'X'
+# and then into 'X'" — a sentence that answers its own complaint. D4 ratified that the gate
+# does not interpret the shell; comparing targets it has ALREADY extracted is not
+# interpretation, and every value is in hand here.
+#
+# ALL OF THEM, IN ORDER (W6). Reading only the first two let a third `cd` into another
+# directory through: two matching targets answered for a command that goes on to name a
+# third. So the whole list is walked and the command names one directory only when every
+# target folds onto the leading one. Each target is read as the leading one is, and a
+# relative target is joined to the directory the PREVIOUS target left the shell standing in.
+# The walk stops at the first difference, so that previous directory is always the leading
+# one — a relative target after a divergence is never resolved against a guess.
+#
+# NOTHING IS STAT-ED AND NOTHING IS EXPANDED, so `~`, an unexpanded variable and any `..`
+# component stay a second directory and stay refused (A-T22.2, and the D11 freeze).
+#
+# IT NAMES THE PAIR THAT DISAGREES rather than the first two tokens: the refusal's detail is
+# built from `_EG_CWD` and `_EG_CD_DIFF`, so a reader is always shown a real disagreement.
+_EG_CD_DIFF=""
+_eg_cd_one_dir() {
+  local _first _prev _rest _one
+  _EG_CD_DIFF=""
+  _eg_path_fold "$_EG_CWD"; _first="$_EG_FOLD"; _prev="$_first"
+  _rest="$_EG_CDS"
+  while [ -n "$_rest" ]; do
+    # THE LIST IS CONSUMED WITHOUT ASSUMING ITS SHAPE. Every entry `_eg_cd_targets` writes is
+    # newline-TERMINATED, so the `*` branch is unreachable today — and a `${_rest#*NL}` on a
+    # string carrying no newline returns it unchanged, which is a wall that never returns and
+    # therefore a commit that never lands. The branch costs one `case` and removes that class.
+    case "$_rest" in
+      *$'\n'*) _one="${_rest%%$'\n'*}"; _rest="${_rest#*$'\n'}" ;;
+      *)        _one="$_rest"; _rest="" ;;
+    esac
+    [ -n "$_one" ] || continue
+    case "$_one" in
+      /*) _eg_path_fold "$_one" ;;
+      *)  _eg_path_fold "${_prev%/}/${_one}" ;;
+    esac
+    if [ "$_EG_FOLD" != "$_first" ]; then
+      _EG_CD_DIFF="$_one"
+      return 1
+    fi
+    _prev="$_EG_FOLD"
+  done
+  return 0
+}
+
+# _eg_commit_cwd -> sets _EG_CWD (the directory the commit is made IN), _EG_CWD_SRC (which
+# of the three spellings answered) and, through `_eg_cd_targets`, _EG_CDS.
+#
+# THREE SPELLINGS, IN PRECEDENCE ORDER, and the order is which one the commit actually obeys:
+#   1. `git -C <dir> commit` — git's own cwd override, and it wins over everything;
+#   2. a LEADING `cd <absolute dir>` — the shape every bionic writer brief mandates
+#      (`cd <worktree> || exit 1` as the first statement). The harness posts the SESSION's
+#      cwd in the payload and the `cd` runs afterwards, so without this the dominant real
+#      shape would read as a main-root commit and REQ-2 would hold only for fixtures;
+#   3. the payload's `.cwd`.
+# Only an ABSOLUTE path is taken from the command: a relative path is resolved against a cwd
+# this hook would have to re-derive, and guessing it wrong is how a commit gets judged at
+# another task's step. Anything unreadable falls through to (3), which is today's answer.
+#
+# A RELATIVE `-C` FALLS THROUGH RATHER THAN ANSWERING (critic issue 2, wave-14 T24). Branch
+# (1) used to return `.` or `sub` verbatim; `_eg_wt_name` then rejected it for not starting
+# with `/` and the row was LOST, so `git -C . commit` from inside a worktree was refused for
+# Step-5 evidence that cannot exist yet — the exact failure REQ-2 exists to remove, and the
+# same commit spelled `git commit` was allowed. A relative `-C` resolves against the shell's
+# cwd at that moment, which is precisely what (2) and (3) answer, so it defers to them.
+#
+# IT ASSIGNS RATHER THAN PRINTS (the `_wall_flatten` pattern, and now a correctness
+# requirement rather than a saved fork): two of its three answers are facts about the
+# COMMAND that only the caller can act on — an ambiguously named directory is a refusal, not
+# a cwd — and a command substitution would leave them behind in a subshell.
+_eg_commit_cwd() {
+  local _line _oldifs _hadf _p _c
+  _EG_CWD=""; _EG_CWD_SRC=""; _EG_CDS=""
+  # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
+  case " $COMMAND " in
+    *" -C "*|*" -C"[\"\']*)
+      _oldifs="$IFS"; _hadf=0
+      while IFS= read -r _line; do
+        [ -n "$_line" ] || continue
+        git_argv_parse "$_line" || continue
+        [ "$GIT_SUB" = commit ] || continue
+        _git_argv_skip "$_line"
+        [ -n "$GIT_ARGV_REST" ] || break
+        case "$-" in *f*) _hadf=1 ;; esac
+        set -f
+        IFS="$GIT_ARGV_US"
+        # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+        set -- $GIT_ARGV_REST
+        IFS="$_oldifs"
+        [ "$_hadf" -eq 1 ] || set +f
+        shift   # argv[0], the git binary
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            -C) shift
+                if [ $# -gt 0 ]; then
+                  case "$1" in /*) _EG_CWD="$1"; _EG_CWD_SRC="-C"; return 0 ;; esac
+                fi
+                break ;;
+            -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix)
+              shift; [ $# -gt 0 ] && shift ;;
+            -*) shift ;;
+            *) break ;;
+          esac
+        done
+        break
+      done <<< "$(git_argv_expand "$COMMAND")"
+      ;;
+  esac
+  # (2) — the leading `cd`, read off the front of the command and nowhere else.
+  _c="$COMMAND"
+  while [ "${_c# }" != "$_c" ]; do _c="${_c# }"; done
+  while [ "${_c#	}" != "$_c" ]; do _c="${_c#	}"; done
+  case "$_c" in
+    'cd '*|'cd	'*)
+      _p="${_c#cd}"
+      while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
+      while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
+      _p="${_p%%[;&|$'\n']*}"
+      while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+      case "$_p" in
+        '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
+        "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
+      esac
+      case "$_p" in
+        /*) if [ -d "$_p" ]; then
+              _EG_CWD="$_p"; _EG_CWD_SRC="cd"
+              _eg_cd_targets "$_c"
+              return 0
+            fi ;;
+      esac
+      ;;
+  esac
+  # (3)
+  _EG_CWD="$(bionic_jq .cwd)"
+  _EG_CWD_SRC="payload"
+  return 0
+}
+
+# _eg_outside_root <dir> -> 0 with _EG_JUR_TOP set to the repository's toplevel when git
+# places <dir> in a repository whose common dir is NOT the engaged root's; 1 for inside AND
+# for every failure (no git, no repository, an unreadable root) — the caller judges those.
+_EG_JUR_TOP=""
+_eg_outside_root() {
+  local _d="${1:-}" _both _common _main
+  _EG_JUR_TOP=""
+  case "$_d" in /*) : ;; *) return 1 ;; esac
+  _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --show-toplevel 2>/dev/null)" || return 1
+  _common="${_both%%$'\n'*}"
+  [ "$_common" != "$_both" ] || return 1
+  _EG_JUR_TOP="${_both#*$'\n'}"
+  [ -n "$_common" ] && [ -n "$_EG_JUR_TOP" ] || { _EG_JUR_TOP=""; return 1; }
+  if [ -d "$BIONIC_ROOT/.git" ]; then
+    _main="$BIONIC_ROOT/.git"
+  else
+    _main="$(git -C "$BIONIC_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || { _EG_JUR_TOP=""; return 1; }
+    _main="${_main%%$'\n'*}"
+  fi
+  if [ -z "$_main" ] || [ "$_common" = "$_main" ] || [ "$_common" -ef "$_main" ]; then
+    _EG_JUR_TOP=""
+    return 1
+  fi
+  return 0
+}
+
+# _eg_commit_count -> sets _EG_COMMITS to the number of `git … commit` segments in the command
+# text, `sh -c`/`eval` strings included (the jurisdiction arm exempts only when it is 1), and
+# _EG_COMMIT_NC to the number of `-C` options among the GLOBAL options of the last one counted
+# — git's own cwd overrides, before the subcommand, never commit's `-C <commit>` after it.
+# Assigns rather than prints, like `_eg_commit_cwd`, and forks nothing git-side: it is the
+# same pure-shell segment pass the other walls make.
+_EG_COMMITS=0
+_EG_COMMIT_NC=0
+_eg_commit_count() {
+  local _line _oldifs="$IFS" _hadf
+  _EG_COMMITS=0; _EG_COMMIT_NC=0
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    git_argv_parse "$_line" || continue
+    [ "$GIT_SUB" = commit ] || continue
+    _EG_COMMITS=$((_EG_COMMITS + 1))
+    _EG_COMMIT_NC=0
+    _git_argv_skip "$_line"
+    [ -n "$GIT_ARGV_REST" ] || continue
+    _hadf=0
+    case "$-" in *f*) _hadf=1 ;; esac
+    set -f
+    IFS="$GIT_ARGV_US"
+    # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+    set -- $GIT_ARGV_REST
+    IFS="$_oldifs"
+    [ "$_hadf" -eq 1 ] || set +f
+    shift   # argv[0], the git binary
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -C) _EG_COMMIT_NC=$((_EG_COMMIT_NC + 1)); shift; [ $# -gt 0 ] && shift ;;
+        -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix)
+          shift; [ $# -gt 0 ] && shift ;;
+        -*) shift ;;
+        *) break ;;
+      esac
+    done
+  done <<< "$(git_argv_expand "$COMMAND")"
+  return 0
+}
+
+# _eg_git_only <text> -> 0 when every segment of <text> is a simple command whose first word
+# is `git`, `true`, `:` or `exit`; 1 for anything else.
+#
+# AN ALLOW-LIST, NOT A DENY-LIST (review R2-2, wave-19 T6e). This reader used to name the words
+# that move the shell (`cd`, `pushd`, `eval`, a shell) and pass everything else. That was
+# patched three times (R1, C1, R2-2) and was still open: a `cd` behind a reserved word (`if cd`,
+# `while ! cd`, `until cd`, `! cd`, `time cd`) runs in the current shell, and its first word was
+# on no list. So it now names what IS safe and judges everything else. `git` is the commit and
+# its neighbours. `true` and `:` do nothing. `exit` ends the shell before any later commit
+# runs. Every other first word costs the exemption: a reserved word, `eval`, `exec`, `env`,
+# `xargs`, a shell, a `NAME=value` prefix, a function name.
+#
+# A SEGMENT SCAN, NOT A PARSER. The text is cut on `;`, `&`, `|` and a newline, and each
+# piece's first word is read. A redirection's `>&`, `<&` or `&>` is folded to a plain `>` or
+# `<` first, so `2>&1` does not start a segment named `1`. A `(`, `)`, `{`, `}` or backtick
+# anywhere costs the exemption outright. Each opens a subshell, a group or a function body
+# (`git() { … }` shadows the binary), and none is worth reading. An `sh -c` anywhere costs
+# it too, even inside a `git -c` value. The WHOLE text is scanned, before and after the
+# commit. Words inside a quoted commit message are read as words, which is the fail-closed
+# direction; a writer commits with `-F`.
+_eg_git_only() {
+  local _t="${1:-}" _seg _w
+  case "$_t" in
+    *'sh -c'*|*'sh	-c'*) return 1 ;;
+    *[\(\)\{\}\`]*) return 1 ;;
+  esac
+  _t="${_t//">&"/>}"; _t="${_t//"<&"/<}"; _t="${_t//"&>"/>}"
+  while [ -n "$_t" ]; do
+    case "$_t" in
+      *[\;\&\|$'\n']*) _seg="${_t%%[;&|$'\n']*}"; _t="${_t#*[;&|$'\n']}" ;;
+      *) _seg="$_t"; _t="" ;;
+    esac
+    while [ "${_seg# }" != "$_seg" ] || [ "${_seg#	}" != "$_seg" ]; do
+      _seg="${_seg# }"; _seg="${_seg#	}"
+    done
+    _w="${_seg%%[ 	]*}"
+    case "$_w" in
+      ''|git|true|:|exit) : ;;
+      *) return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# _eg_placed -> 0 when the ONE commit's directory was read in a shape git obeys exactly as the
+# reader does, and 1 for every other shape (critic C1, review R2-2, wave-19). Only these three
+# place, and each needs `_eg_git_only` to hold over the text it names:
+#   (a) `git -C <absolute dir> commit`. The commit's global options carry exactly ONE `-C`,
+#       because git takes the LAST of several and the reader took the first. The WHOLE text
+#       must pass `_eg_git_only`, so a function named `git` cannot redirect the commit.
+#   (b) a leading `cd <absolute dir>` followed by `&&`, `||`, `;` or a newline. A pipe or a
+#       lone `&` runs the `cd` in a subshell that moves nothing, so neither places. The commit
+#       carries no `-C`, and everything after the separator must pass `_eg_git_only`.
+#   (c) the payload cwd. The commit carries no `-C`, and the whole text must pass
+#       `_eg_git_only`. This is the writer standing in the scratch repository or the nested
+#       bed (AC-9.1, AC-9.3).
+# And in all three, no `--git-dir`, `--work-tree`, `GIT_DIR`, `GIT_WORK_TREE` or
+# `GIT_COMMON_DIR` anywhere in the command: each names the repository outright, whatever
+# directory the commit runs in. The check is on the raw text, so the words inside a commit
+# message cost the exemption too — the fail-closed direction, and a writer commits with `-F`.
+#
+# THE DISQUALIFIER ALSO READS A DE-QUOTED COPY (audit V3-1, wave-19 T6f). A `"`, `'` or `\`
+# dropped into the middle of the flag's name (`--git-d""ir`, `--git-di\r`) defeats the raw
+# substring match above while the shell still hands git the flag whole once it strips the
+# quote or backslash, so the commit really lands in the named (root) repository. This is not
+# shell parsing — it strips every `"`, `'` and `\` character from the text with no attempt at
+# fidelity, and any spelling that COULD reach the disqualifier once they are gone is treated
+# as the disqualifier. Both the raw text and this stripped view are tested; either one
+# matching costs the exemption (fail-closed, review R2-2's direction). `_eg_git_only`'s
+# allow-list needs no matching change: it already fails closed on any first word that is not
+# byte-for-byte `git`, `true`, `:` or `exit`, so a quote- or backslash-split `git` itself is
+# already judged rather than exempted (A-T6.13).
+_eg_placed() {
+  local _c _sep _dq
+  _dq="${COMMAND//\"/}"
+  _dq="${_dq//\'/}"
+  _dq="${_dq//\\/}"
+  case "$COMMAND" in
+    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
+  esac
+  case "$_dq" in
+    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
+  esac
+  case "$_EG_CWD_SRC" in
+    -C) [ "$_EG_COMMIT_NC" -eq 1 ] && _eg_git_only "$COMMAND" ;;
+    cd)
+      [ "$_EG_COMMIT_NC" -eq 0 ] || return 1
+      _c="$COMMAND"
+      while [ "${_c# }" != "$_c" ] || [ "${_c#	}" != "$_c" ]; do _c="${_c# }"; _c="${_c#	}"; done
+      _sep="${_c#"${_c%%[;&|$'\n']*}"}"
+      case "$_sep" in
+        '&&'*) _sep="${_sep#&&}" ;;
+        '||'*) _sep="${_sep#||}" ;;
+        ';'*|$'\n'*) _sep="${_sep#?}" ;;
+        *) return 1 ;;
+      esac
+      _eg_git_only "$_sep" ;;
+    payload)
+      [ "$_EG_COMMIT_NC" -eq 0 ] && _eg_git_only "$COMMAND" ;;
+    *) return 1 ;;
+  esac
+}
+
+_eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CDS — once, for this arm and every reader below
+_eg_commit_count                     # sets _EG_COMMITS and _EG_COMMIT_NC — only ONE commit can be placed outside
+if [ "$_EG_COMMITS" -eq 1 ] \
+   && _eg_placed \
+   && _eg_outside_root "$_EG_CWD"; then
+  printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here\n' \
+    "$_EG_JUR_TOP" "$BIONIC_ROOT" >&2
+  exit 0
+fi
+
 # THE DOCS ROOT, FROM THE LIBRARY. This hook carried `resolve_docs_root()` and was the
 # designated ORIGIN of the four hook copies cross-gate §R held body-for-body. There are no
 # copies now: lib/roots.sh's `docs_root` is the one definition and every former carrier is
@@ -2309,248 +2792,6 @@ _eg_git_wt_name() {
   return 0
 }
 
-# _eg_cd_targets <command text> -> sets _EG_CDS to EVERY directory the text changes into
-# before the commit AFTER the leading one, in the order the shell would obey them, one per
-# line; empty when the text names only the leading directory.
-#
-# WHY A SECOND `cd` IS A REFUSAL AND NOT A TIE-BREAK (critic issue 1, FAIL-OPEN). Branch (2)
-# below reads the LEADING `cd` and truncates at the first `;`, `&`, `|` or newline, so every
-# later `cd` in the command was invisible to it — and `cd <worktree> && cd <main> && git
-# commit` was attributed to the worktree while the commit landed in main, at the worktree
-# row's lower step. Nothing in the TEXT says which directory the shell is standing in when
-# the commit finally runs: a `||`, a failed `cd`, a subshell and a plain `&&` all read alike
-# here, and this repo's own dispatch block warns about the neighbouring hazard (A-46, "a
-# failed cd with `;`-chained commands runs them in the main checkout"). So the arm stops
-# guessing: two named directories is an ambiguity the writer can spell away, and a wall that
-# cannot tell refuses.
-#
-# ONLY WHAT PRECEDES THE COMMIT COUNTS. A `cd` after the commit cannot move a commit that has
-# already run, so the scan stops at the first `git` in the text. If the text carries none this
-# reader can see — a spelling only `git_argv_expand` resolves — the whole remainder is
-# scanned, which refuses rather than allows.
-#
-# EVERY TARGET, NOT THE FIRST OF THEM (W6, the re-walk at 4e2ac66). This reader used to take
-# the first `cd` after the first separator and return, which cost nothing while the PRESENCE
-# of a second `cd` refused: the command was already refused before a third target could
-# matter. Once two targets that fold alike became one directory (C3), `cd X && cd X && cd Y
-# && git commit` walked through the arm and was judged at X's row with Y never read — while
-# the shell commits in Y, which another row owns at another step. That is the fail-open this
-# arm exists to close, one `&&` away from the shape it does close. So the scan collects the
-# whole list and the caller folds all of it.
-#
-# ONE PER LINE, AND THE SEPARATOR IS SAFE BY CONSTRUCTION: a newline is one of the four
-# characters this scan splits segments on, so no target it yields can contain one. A path
-# holding a space or a glob character is carried intact, and `_eg_path_fold`'s own `set -f`
-# guard is what keeps it intact downstream.
-_EG_CDS=""
-_eg_cd_targets() {
-  local _t="${1:-}" _rest _seg _p
-  _EG_CDS=""
-  case "$_t" in
-    *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
-    *) return 0 ;;
-  esac
-  case "$_rest" in *git*) _rest="${_rest%%git*}" ;; esac
-  while [ -n "$_rest" ]; do
-    case "$_rest" in
-      *[\;\&\|$'\n']*) _seg="${_rest%%[;&|$'\n']*}"; _rest="${_rest#*[;&|$'\n']}" ;;
-      *) _seg="$_rest"; _rest="" ;;
-    esac
-    while [ -n "$_seg" ]; do
-      case "$_seg" in
-        ' '*|'	'*|'('*|'{'*) _seg="${_seg#?}" ;;
-        *) break ;;
-      esac
-    done
-    case "$_seg" in
-      'cd'|'cd '*|'cd	'*)
-        _p="${_seg#cd}"
-        while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
-        while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
-        while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
-        case "$_p" in
-          '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
-          "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
-        esac
-        [ -n "$_p" ] || _p='~'
-        _EG_CDS="${_EG_CDS}${_p}"$'\n'
-        ;;
-    esac
-  done
-  return 0
-}
-
-# _eg_path_fold <path> -> _EG_FOLD, the same path with its empty and `.` components folded
-# away, so `/a/b`, `/a//b`, `/a/b/` and `/a/./b` are one string.
-#
-# LEXICAL, AND THAT IS THE WHOLE CONTRACT. `..` is deliberately NOT folded: through a symlink
-# only a stat could say which directory `/a/b/..` is, and the freeze (D11) forbids a wall
-# fetching its own facts. So a path carrying `..` never folds onto another one, and the caller
-# below keeps refusing it — the direction a wall that cannot tell has to take.
-#
-# IT ASSIGNS RATHER THAN PRINTS, like every reader around it: a command substitution here
-# would be one fork per commit for a pure string operation.
-_EG_FOLD=""
-_eg_path_fold() {
-  local _in="${1:-}" _seg _out="" _oldifs="$IFS" _hadf=0
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS='/'
-  # shellcheck disable=SC2086  # deliberate split on '/' with globbing disabled
-  set -- $_in
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
-  for _seg in "$@"; do
-    case "$_seg" in ''|'.') continue ;; esac
-    _out="$_out/$_seg"
-  done
-  _EG_FOLD="${_out:-/}"
-}
-
-# _eg_cd_one_dir -> 0 when EVERY `cd` target the text names RESOLVES to ONE directory, and
-# 1 with _EG_CD_DIFF set to the first target that does not — the one the refusal names.
-#
-# THE ARM FIRED ON THE SECOND `cd` TOKEN, NEVER ON A DIFFERENCE (critic C3). `cd X && cd X`
-# and `cd X && cd .` were both refused, and the refusal read "the command changes into 'X'
-# and then into 'X'" — a sentence that answers its own complaint. D4 ratified that the gate
-# does not interpret the shell; comparing targets it has ALREADY extracted is not
-# interpretation, and every value is in hand here.
-#
-# ALL OF THEM, IN ORDER (W6). Reading only the first two let a third `cd` into another
-# directory through: two matching targets answered for a command that goes on to name a
-# third. So the whole list is walked and the command names one directory only when every
-# target folds onto the leading one. Each target is read as the leading one is, and a
-# relative target is joined to the directory the PREVIOUS target left the shell standing in.
-# The walk stops at the first difference, so that previous directory is always the leading
-# one — a relative target after a divergence is never resolved against a guess.
-#
-# NOTHING IS STAT-ED AND NOTHING IS EXPANDED, so `~`, an unexpanded variable and any `..`
-# component stay a second directory and stay refused (A-T22.2, and the D11 freeze).
-#
-# IT NAMES THE PAIR THAT DISAGREES rather than the first two tokens: the refusal's detail is
-# built from `_EG_CWD` and `_EG_CD_DIFF`, so a reader is always shown a real disagreement.
-_EG_CD_DIFF=""
-_eg_cd_one_dir() {
-  local _first _prev _rest _one
-  _EG_CD_DIFF=""
-  _eg_path_fold "$_EG_CWD"; _first="$_EG_FOLD"; _prev="$_first"
-  _rest="$_EG_CDS"
-  while [ -n "$_rest" ]; do
-    # THE LIST IS CONSUMED WITHOUT ASSUMING ITS SHAPE. Every entry `_eg_cd_targets` writes is
-    # newline-TERMINATED, so the `*` branch is unreachable today — and a `${_rest#*NL}` on a
-    # string carrying no newline returns it unchanged, which is a wall that never returns and
-    # therefore a commit that never lands. The branch costs one `case` and removes that class.
-    case "$_rest" in
-      *$'\n'*) _one="${_rest%%$'\n'*}"; _rest="${_rest#*$'\n'}" ;;
-      *)        _one="$_rest"; _rest="" ;;
-    esac
-    [ -n "$_one" ] || continue
-    case "$_one" in
-      /*) _eg_path_fold "$_one" ;;
-      *)  _eg_path_fold "${_prev%/}/${_one}" ;;
-    esac
-    if [ "$_EG_FOLD" != "$_first" ]; then
-      _EG_CD_DIFF="$_one"
-      return 1
-    fi
-    _prev="$_EG_FOLD"
-  done
-  return 0
-}
-
-# _eg_commit_cwd -> sets _EG_CWD (the directory the commit is made IN), _EG_CWD_SRC (which
-# of the three spellings answered) and, through `_eg_cd_targets`, _EG_CDS.
-#
-# THREE SPELLINGS, IN PRECEDENCE ORDER, and the order is which one the commit actually obeys:
-#   1. `git -C <dir> commit` — git's own cwd override, and it wins over everything;
-#   2. a LEADING `cd <absolute dir>` — the shape every bionic writer brief mandates
-#      (`cd <worktree> || exit 1` as the first statement). The harness posts the SESSION's
-#      cwd in the payload and the `cd` runs afterwards, so without this the dominant real
-#      shape would read as a main-root commit and REQ-2 would hold only for fixtures;
-#   3. the payload's `.cwd`.
-# Only an ABSOLUTE path is taken from the command: a relative path is resolved against a cwd
-# this hook would have to re-derive, and guessing it wrong is how a commit gets judged at
-# another task's step. Anything unreadable falls through to (3), which is today's answer.
-#
-# A RELATIVE `-C` FALLS THROUGH RATHER THAN ANSWERING (critic issue 2, wave-14 T24). Branch
-# (1) used to return `.` or `sub` verbatim; `_eg_wt_name` then rejected it for not starting
-# with `/` and the row was LOST, so `git -C . commit` from inside a worktree was refused for
-# Step-5 evidence that cannot exist yet — the exact failure REQ-2 exists to remove, and the
-# same commit spelled `git commit` was allowed. A relative `-C` resolves against the shell's
-# cwd at that moment, which is precisely what (2) and (3) answer, so it defers to them.
-#
-# IT ASSIGNS RATHER THAN PRINTS (the `_wall_flatten` pattern, and now a correctness
-# requirement rather than a saved fork): two of its three answers are facts about the
-# COMMAND that only the caller can act on — an ambiguously named directory is a refusal, not
-# a cwd — and a command substitution would leave them behind in a subshell.
-_eg_commit_cwd() {
-  local _line _oldifs _hadf _p _c
-  _EG_CWD=""; _EG_CWD_SRC=""; _EG_CDS=""
-  # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
-  case " $COMMAND " in
-    *" -C "*|*" -C"[\"\']*)
-      _oldifs="$IFS"; _hadf=0
-      while IFS= read -r _line; do
-        [ -n "$_line" ] || continue
-        git_argv_parse "$_line" || continue
-        [ "$GIT_SUB" = commit ] || continue
-        _git_argv_skip "$_line"
-        [ -n "$GIT_ARGV_REST" ] || break
-        case "$-" in *f*) _hadf=1 ;; esac
-        set -f
-        IFS="$GIT_ARGV_US"
-        # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
-        set -- $GIT_ARGV_REST
-        IFS="$_oldifs"
-        [ "$_hadf" -eq 1 ] || set +f
-        shift   # argv[0], the git binary
-        while [ $# -gt 0 ]; do
-          case "$1" in
-            -C) shift
-                if [ $# -gt 0 ]; then
-                  case "$1" in /*) _EG_CWD="$1"; _EG_CWD_SRC="-C"; return 0 ;; esac
-                fi
-                break ;;
-            -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix)
-              shift; [ $# -gt 0 ] && shift ;;
-            -*) shift ;;
-            *) break ;;
-          esac
-        done
-        break
-      done <<< "$(git_argv_expand "$COMMAND")"
-      ;;
-  esac
-  # (2) — the leading `cd`, read off the front of the command and nowhere else.
-  _c="$COMMAND"
-  while [ "${_c# }" != "$_c" ]; do _c="${_c# }"; done
-  while [ "${_c#	}" != "$_c" ]; do _c="${_c#	}"; done
-  case "$_c" in
-    'cd '*|'cd	'*)
-      _p="${_c#cd}"
-      while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
-      while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
-      _p="${_p%%[;&|$'\n']*}"
-      while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
-      case "$_p" in
-        '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
-        "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
-      esac
-      case "$_p" in
-        /*) if [ -d "$_p" ]; then
-              _EG_CWD="$_p"; _EG_CWD_SRC="cd"
-              _eg_cd_targets "$_c"
-              return 0
-            fi ;;
-      esac
-      ;;
-  esac
-  # (3)
-  _EG_CWD="$(bionic_jq .cwd)"
-  _EG_CWD_SRC="payload"
-  return 0
-}
-
 # _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step>" for the ONE `## Tasks` row
 # whose `worktree` cell names that tree, and _EG_ROW_DUP to the ids when more than one does.
 # Returns 1 for "this plan has no register", 3 for "the register is ambiguous", 0 otherwise.
@@ -2619,7 +2860,8 @@ _eg_row_for_worktree() {
 
 _EG_WT=""
 _EG_SUBSTITUTED=0    # set by BOTH substitution forks below (step-below, active-status); read at the pointer-step exit (D7)
-_eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CDS
+# _EG_CWD, _EG_CWD_SRC and _EG_CDS were set by `_eg_commit_cwd` at the jurisdiction arm, above
+# the plan read (wave-19 REQ-9); the command and the payload have not changed since.
 
 # WHICH DIRECTORY DOES THIS COMMIT RUN IN? (critic issue 1; wave-17 REQ-3, D4.) When the
 # command text names a second directory before the commit, no reading of the text answers
@@ -2689,6 +2931,11 @@ elif [ -n "$_EG_CWD" ] && [ -n "$(_eg_wt_name "$_EG_CWD")" ]; then
     # `wall_evidence_gate`'s subshell; the walls folded beside it in hooks/bash-walls.sh —
     # protect-main, protect-database, farm-out, the background-suite guard — never see it and
     # keep their verdicts, which is what 25g(q) pins.
+    #
+    # SHADOWED SINCE wave-19 REQ-9. The jurisdiction arm above the plan read asks the same
+    # common-dir question of every commit and exits first for another repository's tree, so
+    # this line is reached only if git answers there and not here; it stays as the backstop
+    # until a later wave retires it with its pins (T6 carry-over).
     printf "evidence-gate: %s is a linked worktree of another repository (%s) — this run's step arms do not apply\n" \
       "$_EG_CWD" "$_EG_GITWT_FOREIGN" >&2
     exit 0
@@ -4570,14 +4817,16 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   [ "$(bionic_jq .tool_name)" = "Bash" ] || return 0
   [ -n "$COMMAND" ] || return 0
 
-  # TWO REFUSING ARMS LIVE IN THIS FUNCTION, and the cheap pre-filter is their union. (A
-  # third, ARM R, repairs rather than refuses and rides the same union — it needs no gate of
+  # THREE REFUSING ARMS LIVE IN THIS FUNCTION, and the cheap pre-filter is their union. (A
+  # fourth, ARM R, repairs rather than refuses and rides the same union — it needs no gate of
   # its own; see its header, below ARM 2.)
   #
   #   B-9 (AC-23)  a BACKGROUNDED suite — nobody reads the result.
   #   S13 (AC-21)  a suite OUTSIDE THE ROW'S BUDGET, inside a dispatched agent —
   #                foreground or not, because an extra full-tree run costs 40 minutes
   #                either way.
+  #   ARM C        a `git commit` from a READ-ONLY ROLE's row (wave-19 REQ-8) — inside a
+  #                dispatched agent only, answered below the partition.
   IS_BACKGROUND=no
   [ "$(bionic_jq '.tool_input.run_in_background|tostring')" = "true" ] && IS_BACKGROUND=yes
   # THE ACTOR (design D1, task 4/1 probe): an agent-context payload carries a top-level
@@ -4605,6 +4854,44 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   [ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] || return 0
   _bsg_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
   [ ! -L "$_bsg_roster" ] && [ -f "$_bsg_roster" ] || return 0
+
+  # ---------- ARM C (wave-19 REQ-8, D9): a read-only role never commits ----------
+  #
+  # THE BREACH (wave-18 T7c-green). The four read-only roles carry `disallowedTools: Write,
+  # Edit, NotebookEdit` and never `Bash`, so "never commits" was prose: a `bionic:test-runner`
+  # committed its own green run. This arm makes the promise a wall.
+  #
+  # ABOVE THE SUITE FILTER, because a commit is not a suite and everything below returns 0
+  # on a non-suite command. The screen is the evidence gate's own (`_wall_mentions_git` then
+  # `git_argv_has_sub … commit`), so `git -C <dir> commit` is a commit and a quoted
+  # "git commit" is not.
+  #
+  # THE ROLE IS THE ROSTER ROW'S `subagent_type=`, READ BY THE SAME JOIN ARM 2 MAKES — the
+  # last row carrying this `agent_id` wins. Never the payload's `agent_type`: for a teammate
+  # it is the dispatch NAME (R3 Q2), and a name like `x-runner` is not a role. The match is
+  # the exact plugin-qualified spelling, so a consumer's own `acme:test-runner` is not ours.
+  # No row, or a row with no role → no statement about this agent, and silence.
+  if _wall_mentions_git "$COMMAND" && git_argv_has_sub "$COMMAND" commit; then
+    local _bsg_role
+    _bsg_role=$(awk -F'|' -v id="$ACTOR" '
+      /^roster-state\// {
+        hit = 0; role = ""
+        for (i = 1; i <= NF; i++) {
+          if ($i == "agent_id=" id) hit = 1
+          else if ($i ~ /^subagent_type=/) role = substr($i, 15)
+        }
+        if (hit) last = role
+      }
+      END { print last }
+    ' "$_bsg_roster" 2>/dev/null)
+    case "$_bsg_role" in
+      bionic:test-runner|bionic:researcher|bionic:auditor|bionic:critic)
+        fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \
+          "Your roster row names you $_bsg_role, and a read-only role's deliverable is its report,
+never a commit. Leave the tree as it is and send the report; the orchestrator lands the work."
+        return 2 ;;
+    esac
+  fi
 
 # ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
 #

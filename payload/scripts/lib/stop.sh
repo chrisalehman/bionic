@@ -1650,12 +1650,46 @@ STREAM=$(tail -n "$SCAN_WINDOW_LINES" "$TRANSCRIPT" 2>/dev/null | jq -Rr '
       else $line
       end
     ) as $auth
+  | (
+      if ($r != null and $r.type == "user" and (($r.message.content // []) | type) == "array") then
+        ([$r.message.content[]?
+          | select(.type == "tool_result")
+          | (if (.content | type) == "string" then .content
+             elif (.content | type) == "array" then
+               ([.content[]? | select(.type == "text") | .text] | join("\n"))
+             else "" end)
+         ] | join("\n"))
+      else "" end
+    ) as $trc
   | (if (($auth // "") | contains("<command-name>/clear</command-name>")) then "MARK\tclear" else empty end),
     (if (($auth // "") | contains("source: resume")) then "MARK\tresume" else empty end),
     (if ($line | contains("poker: FILL ")) then
        "FILL\t" + (($line | split("poker: FILL ")[1] | split("\\n")[0] | split("\"")[0]))
      else empty end),
     (if (($auth // "") | contains("fill-declined:")) then "DECLINE\t1" else empty end),
+    # THE WITHHELD LINE (wave-19 REQ-4, D6; ADR-034 decision 3; REQ-4b R5): `poker: fill
+    # withheld -- <REASON> <measurement>`, printed by the tick on its HOLD and EMERGENCY
+    # paths. Read off the PARSED tool_result content of a USER record ($trc, above) -- the
+    # model quoting the words in its own text is not the tick having printed them (that
+    # exclusion is $r.type == "user" and the tool_result selector, unchanged from before).
+    #
+    # ANCHORED, not a bare substring (R5, fixed here). A bare `contains` over the raw
+    # transcript line also matched a tool_result that merely ECHOED the phrase -- reading this
+    # very test file with `cat`/`sed`, or `grep -rn "poker: fill withheld -- ..." tests` --
+    # because the literal sits in a `type: user` record either way, and a `tool_result` IS a
+    # user record. `say()` (hooks/session-poker.sh:350) prints the line as
+    # `printf "poker: %s\n"`, so in the ticks OWN stdout the phrase always starts a line --
+    # either the first line of the tool_result content, or immediately after an embedded
+    # `\n`. A `grep -rn` hit carries a `file:line:` prefix first; a `cat`/`sed` of the source
+    # line carries the surrounding shell text (` echo "...`) first -- neither lands the phrase
+    # at that anchor, which is the gap this regex tests for. The reason is still the first word
+    # after the dash (raw or `\u2014`-escaped), and only the fold below decides which reasons
+    # exempt.
+    (if ($trc | test("(^|\n)poker: fill withheld")) then
+       "WITHHELD\t" + (($trc | split("poker: fill withheld")[1] // "")
+                        | sub("^[^A-Za-z]*(u2014)?[^A-Za-z]*"; "")
+                        | ([scan("^[A-Z]+")] | .[0] // ""))
+     else empty end),
     ($line | [scan("poker: STANDDOWN ([A-Za-z0-9_.-]+)")] | .[] | "STANDDOWN\t" + .[0]),
     (($auth // "") | [scan("standdown-declined:[ \t]*([A-Za-z0-9_.-]+)")] | .[] | "SD-DECLINE\t" + .[0]),
     (
@@ -1792,8 +1826,8 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 # Folded over the same stream, resetting at every user PROMPT exactly as the duties fold
 # above it does. It is no longer inert on a turn with no FILL line in it: since wave-18
 # (REQ-3) a turn with no TICK in it is judged against the ready set computed just below, and
-# what stays inert is a turn with nothing ready and nothing printed — which is every turn in
-# every project whose plan opts into no budget.
+# since wave-19 (REQ-4) so is a tick turn that printed no FILL. What stays inert is a turn
+# with nothing ready, a turn the tick withheld for a machine fact, and a declined turn.
 # ---------- THE READY SET, COMPUTED RATHER THAN OVERHEARD (REQ-3, AC-3.2) ----------
 #
 # THE INVARIANT IS THE RUN'S STATE, NOT THE PATROL'S CADENCE: no turn past Step 3 ends with a
@@ -1812,22 +1846,55 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 # turn just declined to order. So this reads `pressure_level` the way the tick's own
 # `rung_report` does (lib/resources.sh, ceiling = the declared `writers=`) and falls back to
 # the ceiling only when the rung will not parse — `SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"`
-# at hooks/session-poker.sh:4253, restated here rather than shared, the way
-# `_fill_current_field` restates its own twin (A-T2.3): this file and the tick are bound by
-# a test, not a delegation. `pressure_level` SAMPLES only when the ring is cold, and by the
+# in hooks/session-poker.sh, restated here rather than shared: the width is one line of
+# arithmetic over a reading both sides take from `pressure_level`, and this file and the tick
+# are bound on it by a test (patrol-duties-gate 69, session-poker 12l2), not a delegation. `pressure_level` SAMPLES only when the ring is cold, and by the
 # time a Stop fires the ring has almost always been sampled already this turn — every
 # engaged Bash call appends one (hooks/execution-recorder.sh, spec AC-15) — so on the turns
 # where the tick and this wall could disagree, both are reading the same warm ring; the rare
 # cold-ring sample this pays is the ring's own stated contract for a first reader ("a first
 # consumer on a cold machine must have something to answer from", resources.sh), not a new
-# one invented here. The occupancy stays the plan's own `active` ROWS (A-T2.1, A-T2.2): the
-# tick counts open rows off the roster it is already walking, and this gate has no roster to
-# walk, only the ledger it just read.
+# one invented here.
 #
-# A RUN THAT OPTED INTO NO BUDGET OFFERS NO WIDTH, and gets silence: the direction the tick's
-# own budget arm takes, for the reason it states — a ceiling is a thing a run opts into, and
-# inventing one here would refuse turns against a number nobody set.
+# THE OCCUPANCY IS THE ROSTER'S, NOT THE PLAN'S (wave-19 REQ-5, D6; ADR-034 decision 2).
+# This used to count the plan's `active` column — a hand-maintained rendering of what is
+# running — while the tick counted the roster, so the two surfaces measured occupancy two
+# ways and disagreed exactly when the ledger lagged the fleet (audit V-3). Both now read the
+# one source: THIS session's `roster-state/v1` rows, folded by name (latest row wins, rows
+# of another session skipped — the fold the landing sweep above and the sweeper's own
+# `latest_rows` both use), minus every name the sweeper ledger has acked. One awk over the
+# two files; no sweeper fork, no transcript read.
+#
+# THE DIRECTION OF ERROR: ONE PREDICATE, NOT TWO (wave-19 T2d, audit V-2; ADR-034 decision 2).
+# This used to say the wall refuses less, never more, because the tick's `open` was a SUBSET
+# of this count: it dropped a row whose verdict was MET or WAIVED, then trimmed by transcript
+# liveness — two facts this wall did not recompute. Audit V-2 found that subset relationship
+# false whenever the ledger lagged the roster, so the tick's fill and this wall now count the
+# SAME thing: every roster row of this session that is not yet acked. A `landing-swept/v1`
+# marker does NOT close a row here: the marker records that a landing was seen, not that the
+# agent left (ADR-034 decision 1 — the ack is the one terminal state), and a swept-but-unacked
+# row stays open in both counts alike. A row stays in this count until it is acked; the Patrol
+# acks a MET row once a fresh panel shows its agent gone, after its own STANDDOWN line prints.
+# The one remaining ordering edge: an ack written INSIDE a tick turn, after that tick has
+# already printed its own occupancy line, makes this wall's later read one row lower than the
+# number the tick printed for that same turn — a truthful refusal of a row the tick's own next
+# read would also drop, not a disagreement between the two. A roster or ledger that is a
+# symlink is not read, and the duty is skipped rather than judged on zero — zero is the
+# direction that refuses more.
+#
+# THE BUDGET IS A MEASUREMENT THE PLAN CARRIES (wave-19 REQ-3, D5; ADR-035). Step 0 writes
+# `parallel-budget: writers=N …` from `resources_probe` then `resources_budget`, and the
+# governing-skill hook refuses a plan Write without it — so a live ledger reaching this line
+# without a readable `writers=` is a plan that slipped past that wall, and the turn is
+# refused once, naming the key, instead of ending in silence. The backstop fires exactly
+# where the missing width would have hidden a fillable row: a live ledger (past Step 3)
+# whose `current:` names a unit the table can answer, with at least one row ready at that
+# unit. With nothing ready a keyed plan ends the turn in the same silence, so the absence
+# silenced nothing and is not refused here (the tick's note still names it every tick). A
+# `current:` the table cannot answer is the tick's unreadable-`current:` withhold, which the
+# tick takes BEFORE its own budget note, and it stays silent here too.
 FILL_READY=""
+FILL_NO_BUDGET=0
 if [ -n "$PLAN" ] && fill_ledger_live "$PLAN"; then
   FILL_CEILING="$(plan_frontmatter_get "$PLAN" parallel-budget 2>/dev/null)"
   case "$FILL_CEILING" in
@@ -1835,23 +1902,70 @@ if [ -n "$PLAN" ] && fill_ledger_live "$PLAN"; then
     *) FILL_CEILING="" ;;
   esac
   case "$FILL_CEILING" in ''|*[!0-9]*) FILL_CEILING="" ;; esac
-  if [ -n "$FILL_CEILING" ]; then
+  FILL_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  FILL_ACKS="$BIONIC_ROOT/.bionic/tmp/sweeper-${BIONIC_SID}.state"
+  if [ -z "$FILL_CEILING" ]; then
+    # "AT LEAST ONE ROW READY AT THE UNIT" IS THE READY SET AT WIDTH ONE: the same step token,
+    # the same `units_ready`, one parse of the table (wave-19 REQ-6, D7) instead of two calls
+    # that each read it.
+    [ -n "$(fill_ready_set "$PLAN" 1 0 2>/dev/null)" ] && FILL_NO_BUDGET=1
+  elif [ -L "$FILL_ROSTER" ] || [ -L "$FILL_ACKS" ]; then
+    :   # an unreadable occupancy: skipped, never judged on zero (the docblock above)
+  else
     # THE RUNG, FALLING BACK TO THE CEILING — the same fallback direction
     # `SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"` takes in the tick (R1, above).
     FILL_RUNG="$(pressure_level "$FILL_CEILING" 2>/dev/null)" || FILL_RUNG=""
     case "$FILL_RUNG" in ''|*[!0-9]*) FILL_RUNG="" ;; esac
     FILL_WIDTH="${FILL_RUNG:-$FILL_CEILING}"
+    # THE OCCUPANCY, ONE PASS (the docblock above). The ack ledger is read first, then the
+    # roster; either may be absent (no dispatch yet, no ack yet), and only files that exist
+    # are handed to awk, so an absent one is an empty set rather than an error.
+    set --
+    [ -f "$FILL_ACKS" ] && set -- "$@" "$FILL_ACKS"
+    [ -f "$FILL_ROSTER" ] && set -- "$@" "$FILL_ROSTER"
     FILL_OPEN=0
-    while IFS= read -r _FILL_ROW; do
-      [ -n "$_FILL_ROW" ] || continue
-      [ "$(units_field "$_FILL_ROW" status)" = "active" ] && FILL_OPEN=$((FILL_OPEN + 1))
-    done <<FILL_LEDGER_ROWS
-$(units_rows "$PLAN" 2>/dev/null)
-FILL_LEDGER_ROWS
+    if [ "$#" -gt 0 ]; then
+      FILL_OPEN="$(awk -v rpfx="roster-state/${ROSTER_VERSION}|" -v lpfx="sweeper-ledger/v1|" \
+                       -v lfile="$FILL_ACKS" -v sid="$BIONIC_SID" '
+        FILENAME == lfile {
+          if (index($0, lpfx) != 1) next
+          ev = ""; an = ""
+          nf = split($0, f, "|")
+          for (i = 1; i <= nf; i++) {
+            if (ev == "" && substr(f[i], 1, 6) == "event=") ev = substr(f[i], 7)
+            if (an == "" && substr(f[i], 1, 5) == "name=")  an = substr(f[i], 6)
+          }
+          # An empty name closes nothing: read loosely it would close the whole roster.
+          if (ev == "ack" && an != "") acked[an] = 1
+          next
+        }
+        index($0, rpfx) != 1 { next }
+        {
+          name = ""; rsession = ""
+          nf = split($0, f, "|")
+          for (i = 1; i <= nf; i++) {
+            if (name == ""     && substr(f[i], 1, 5) == "name=")    name     = substr(f[i], 6)
+            if (rsession == "" && substr(f[i], 1, 8) == "session=") rsession = substr(f[i], 9)
+          }
+          if (rsession != "" && rsession != sid) next
+          if (name == "") name = "(unnamed)"
+          gsub(/\t/, " ", name)
+          if (!(name in seen)) { seen[name] = 1; order[++n] = name }
+        }
+        END {
+          c = 0
+          for (i = 1; i <= n; i++) if (!(order[i] in acked)) c++
+          print c + 0
+        }
+      ' "$@" 2>/dev/null)" || FILL_OPEN=0
+      case "$FILL_OPEN" in ''|*[!0-9]*) FILL_OPEN=0 ;; esac
+    fi
     # ONE LINE, SPACE-SEPARATED, because that is the shape the fold below already reads the
     # tick's own ids in. A trailing separator opens an empty field, which the id filter in
-    # that fold drops on its own.
-    FILL_READY="$(fill_ready_set "$PLAN" "$FILL_WIDTH" "$FILL_OPEN" | tr '\n' ' ')"
+    # that fold drops on its own. Joined by parameter expansion, not a `tr` process: the
+    # substitution drops the last newline, so the separator it stood for is put back.
+    FILL_READY="$(fill_ready_set "$PLAN" "$FILL_WIDTH" "$FILL_OPEN")"
+    [ -z "$FILL_READY" ] || FILL_READY="${FILL_READY//$'\n'/ } "
   fi
 fi
 
@@ -1859,23 +1973,30 @@ FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" -v read
   $1 == "USER" {
     t = $2; sub(/^[ \t]+/, "", t)
     tick = (index(t, mark) == 1)
-    fills = ""; declined = 0; agents = " "
+    fills = ""; declined = 0; withheld = 0; agents = " "
     next
   }
   $1 == "FILL"    { fills = $2; next }
   $1 == "DECLINE" { declined = 1; next }
+  $1 == "WITHHELD" { if ($2 == "HOLD" || $2 == "EMERGENCY") withheld = 1; next }
   $1 == "TOOL" {
     if ($2 == "Agent") agents = agents $3 " " $4 " "
     next
   }
   END {
-    # TWO SOURCES OF IDS, ONE BOUNDARY TEST. On a TICK turn the ids are the ones the tick
-    # printed — it had just walked the roster, which is a fact about this session that no
-    # plan can see, so its reading wins and its wording follows below. On every other turn
-    # they are the ready set this gate computed. A decline answers either.
+    # TWO SOURCES OF IDS, ONE BOUNDARY TEST. A tick turn that printed FILL is answered for
+    # the ids it printed, in its own wording below. Every other turn — a turn with no tick in
+    # it, AND a tick turn that printed no FILL (wave-19 REQ-4, D6) — is judged against the
+    # ready set this gate computed; the tick no longer exempts a turn by printing nothing.
+    # The one exemption is the withheld line, and only for HOLD or EMERGENCY: a machine fact
+    # the plan cannot hold (ADR-034 decision 3). Every other reason, and every other printed
+    # line ("the budget is full" included), passes or fails on the arithmetic alone — a
+    # full budget on the roster leaves the ready set empty, so it passes on its own.
+    # A decline answers any of them.
     if (declined) exit
+    if (withheld) exit
     src = "FILL"; want = fills
-    if (!tick) { src = "GAP"; want = ready }
+    if (!tick || want == "") { src = "GAP"; want = ready }
     if (want == "") exit
     n = split(want, ids, /[ \t]+/)
     missing = ""
@@ -1900,12 +2021,21 @@ FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" -v read
 ')
 
 FILL_SRC=""
-if [ -n "$FILL_MISSING" ]; then
+if [ "$FILL_NO_BUDGET" = 1 ]; then
+  # THE BACKSTOP, NAMED (REQ-3 AC-3.2). No ids: without a width there is no ready set to
+  # name, and inventing one would be a second budget. The fix is the plan edit Step 0 makes.
+  FILL_MISSING=""
+  FILL_SRC="BUDGET"
+elif [ -n "$FILL_MISSING" ]; then
   FILL_SRC="${FILL_MISSING%%$'\t'*}"
   FILL_MISSING="${FILL_MISSING#*$'\t'}"
 fi
 
-if [ -n "$FILL_MISSING" ] && [ "$FILL_SRC" = "GAP" ]; then
+if [ "$FILL_SRC" = "BUDGET" ]; then
+  FILL_REASON="Fill budget unreadable: the run's ledger is live past Step 3, and its plan (${PLAN_NAME}) carries no parallel-budget: line with a writers=<digits> field, so no turn can be judged for a fillable gap. The budget is a measurement Step 0 writes — resources_probe, then resources_budget over what it printed — verbatim into the plan's frontmatter as parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe (source=override when the probe cannot read the machine). Add it, then stop again — this gate blocks once."
+  FILL_FACT="the plan carries no parallel-budget: writers="
+  FILL_FIX="add Step 0's budget line"
+elif [ -n "$FILL_MISSING" ] && [ "$FILL_SRC" = "GAP" ]; then
   # THE INVARIANT'S OWN WORDING. "The tick printed FILL" is not true of this turn — no tick
   # fired in it — and a refusal that said so would send its reader looking for a line that is
   # not in the transcript. What IS true is the state: the ledger is live, these rows are
@@ -1994,7 +2124,10 @@ if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
     # always had. Both halves are budgeted: `bionic: stop refused — <fact> (<fix>)` is capped
     # at 100 columns and the fix at six words (payload/scripts/lib/refuse.sh), which is why
     # these read as tightly as they do.
-    if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
+    if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ] && [ "$FILL_SRC" = "BUDGET" ]; then
+      fold_block block stop "no parallel-budget: key, and a STANDDOWN unanswered" \
+        "add the key; stop or decline" "$TELL_REASON"
+    elif [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
       fold_block block stop "a FILL and a STANDDOWN went unanswered" \
         "dispatch, stop, or decline" "$TELL_REASON"
     elif [ -n "$FILL_REASON" ]; then

@@ -45,6 +45,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 HOOK="${BIONIC_BASH_WALLS_UNDER_TEST:-${BIONIC_HOOKS_DIR}/bash-walls.sh}"
 
@@ -1275,6 +1276,141 @@ w18_below_plan true > "$R_BELOW_TRUE/.bionic/docs/plans/active.md"
 run_hook "$(mk_payload "$R_BELOW_TRUE/.worktrees/18-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_BELOW_TRUE"
 expect_status "16o: the use_worktree: true twin refuses the same commit for the same fields" 2 "$ST"
 expect_contains "16o: …naming them" "worktree base-sha branch" "$ERR"
+
+
+# ---------------------------------------------------------------------------
+section "17 — a read-only role's commit is refused by its roster row (wave-19 REQ-8, D9)"
+#
+# THE BREACH (wave-18 T7c-green, ideas row 5). A `bionic:test-runner` dispatched to run the
+# green suites committed on its own. Nothing stopped it: the four read-only roles carry
+# `disallowedTools: Write, Edit, NotebookEdit`, never `Bash`, so `git commit` was a promise
+# in prose. The role arm in wall_background_suite_guard joins the payload's `agent_id` to the
+# roster and reads the winning row's `subagent_type=`.
+#
+# FIXTURE FIDELITY. The rows are the LIVE teammate shape R3 Q2 measured: an `intended` and a
+# `confirmed` row with `agent_id=` EMPTY, then the `identified` row the recorder's
+# SubagentStart arm writes carrying the id. The role is plugin-qualified (`bionic:<role>`)
+# and `agent_type` carries the dispatch NAME, not the role (R3 Q2, meta.json). No plan in the
+# repo, so the evidence gate admits every commit here and the role arm is the only speaker.
+
+RO_ID="aw18-T7c-green-0123456789abcdef"
+R_RO="$(mk_repo readonly)"
+roster_header > "$R_RO/.bionic/tmp/roster-$SID.state"
+
+ro_rows() {  # <repo> <name> <agent_id> <subagent_type> — the three live rows, in order
+  local rf="$1/.bionic/tmp/roster-$SID.state"
+  roster_row_fixture "session=$SID" status=intended   "name=$2" agent_id=   "subagent_type=$4" >> "$rf"
+  roster_row_fixture "session=$SID" status=confirmed  "name=$2" agent_id=   "subagent_type=$4" \
+    "teammate_id=$2@session-x" >> "$rf"
+  roster_row_fixture "session=$SID" status=identified "name=$2" "agent_id=$3" "subagent_type=$4" >> "$rf"
+}
+ro_rows "$R_RO" w18-T7c-green "$RO_ID" bionic:test-runner
+RO_COMMIT="git -C $R_RO add -A && git -C $R_RO commit -qm \"T7c-green: suites green\""
+
+run_hook "$(mk_payload "$R_RO" "$RO_COMMIT" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17a: AC-8.1 — the T7c-green shape (a bionic:test-runner row's git commit) is REFUSED" 2 "$ST"
+expect_contains "17a: …naming the role" "bionic:test-runner" "$ERR"
+expect_contains "17a: …and the rule" "a read-only role never commits" "$ERR"
+expect_eq "17a: …on ONE refusal line" "1" "$(printf '%s\n' "$ERR" | grep -c 'a read-only role never commits')"
+
+# THE OTHER THREE READ-ONLY ROLES, one row each on the same repo, each with its own id.
+for _ro in researcher auditor critic; do
+  ro_rows "$R_RO" "w19-$_ro" "a$_ro-0123456789abcdef" "bionic:$_ro"
+  run_hook "$(mk_payload "$R_RO" 'git commit -m "x"' "a$_ro-0123456789abcdef" omit Bash "w19-$_ro")"
+  expect_status "17b: AC-8.1 — a bionic:$_ro row's git commit is REFUSED" 2 "$ST"
+  expect_contains "17b: …naming bionic:$_ro" "bionic:$_ro" "$ERR"
+done
+
+# `git -C <dir> commit` and `git -c k=v commit` are commits by argv position — the same
+# parser the evidence gate reads (tests/git-argv.test.sh).
+run_hook "$(mk_payload "$R_RO" "git -c user.name=x -C $R_RO commit -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17c: a global-option spelling of the commit is refused too" 2 "$ST"
+
+# THE CONTROLS (AC-8.1's second half, AC-8.2). Each is refused by nothing else here, so an
+# arm that over-reaches turns one of these to 2.
+R_RO_OK="$(mk_repo readonly-controls)"
+roster_header > "$R_RO_OK/.bionic/tmp/roster-$SID.state"
+ro_rows "$R_RO_OK" w19-T5 aimplementor-0123456789abcdef bionic:implementor
+run_hook "$(mk_payload "$R_RO_OK" 'git commit -m "x"' aimplementor-0123456789abcdef omit Bash w19-T5)"
+expect_status "17d: AC-8.1 — a bionic:implementor row's commit is ADMITTED" 0 "$ST"
+expect_absent "17d: …and this arm says nothing" "read-only role" "$ERR"
+
+run_hook "$(mk_payload "$R_RO_OK" 'git commit -m "x"')"
+expect_status "17e: AC-8.2 — a nameless (main-thread, no agent_id) commit is ADMITTED" 0 "$ST"
+expect_absent "17e: …silently on this arm" "read-only role" "$ERR"
+
+run_hook "$(mk_payload "$R_RO_OK" 'git commit -m "x"' anorow-0123456789abcdef omit Bash w19-norow)"
+expect_status "17f: AC-8.2 — an agent_id with NO roster row is ADMITTED" 0 "$ST"
+
+ro_rows "$R_RO_OK" w19-norole anorole-0123456789abcdef ""
+run_hook "$(mk_payload "$R_RO_OK" 'git commit -m "x"' anorole-0123456789abcdef omit Bash w19-norole)"
+expect_status "17g: AC-8.2 — a row with an EMPTY subagent_type is ADMITTED" 0 "$ST"
+
+# THE SUFFIX TRAP (AC-8.2: "a role is guessed from a -runner suffix"). The dispatch NAME and
+# `agent_type` both read `x-runner`; the row's role is an implementor. Admitted.
+ro_rows "$R_RO_OK" x-runner axrunner-0123456789abcdef bionic:implementor
+run_hook "$(mk_payload "$R_RO_OK" 'git commit -m "x"' axrunner-0123456789abcdef omit Bash x-runner)"
+expect_status "17h: AC-8.2 — a row NAMED x-runner with an implementor role is ADMITTED" 0 "$ST"
+
+# A CONSUMER'S OWN ROLE of the same bare name is not bionic's (R3 Q2 spelling 1).
+ro_rows "$R_RO_OK" w19-acme aacme-0123456789abcdef acme:test-runner
+run_hook "$(mk_payload "$R_RO_OK" 'git commit -m "x"' aacme-0123456789abcdef omit Bash w19-acme)"
+expect_status "17i: a consumer's acme:test-runner row is ADMITTED (the match is exact, never a suffix)" 0 "$ST"
+
+# NOT A COMMIT: a read-only role reading git, or quoting the words, is not this arm's.
+run_hook "$(mk_payload "$R_RO" 'git status && echo "git commit later"' "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17j: a bionic:test-runner's git status / quoted 'git commit' is ADMITTED" 0 "$ST"
+
+
+# ---------------------------------------------------------------------------
+section "18 — a commit into another repository is outside the evidence gate, and only it (wave-19 REQ-9, D10)"
+#
+# THE FAULT (A-T11.1). From an engaged session, `git -C <scratch repo> commit` was judged by
+# the evidence gate against THIS repository's plan and refused for its evidence. The gate now
+# asks which repository the commit lands in before it reads a plan; another repository — a
+# scratch one, or one NESTED under the root — is admitted with one line. The walls folded
+# beside the gate never read a plan and are not exempted with it: the read-only-role arm (T5)
+# still refuses a test-runner's commit wherever it lands.
+#
+# R_COMMIT carries `block_plan` (current: 5, a placeholder Step-5 line), so every commit the
+# gate still judges there is refused — the control that makes each allow a boundary verdict.
+R_SCR="$SANDBOX/scratchpad/scratch-repo"
+mkdir -p "$R_SCR"; git -C "$R_SCR" init -q 2>/dev/null
+R_NEST="$R_COMMIT/.bionic/docs/record/x/bed"
+mkdir -p "$R_NEST"; git -C "$R_NEST" init -q 2>/dev/null
+jur_line() {  # <the commit's repository> [engaged root, default R_COMMIT]
+  printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here' "$1" "${2:-$R_COMMIT}"
+}
+
+run_hook "$(mk_payload "$R_COMMIT" 'git commit -m "x"')"
+expect_status "18a: control — a commit inside the engaged root under block_plan is refused as before" 2 "$ST"
+expect_contains "18a: …by the evidence gate" "commit refused" "$ERR"
+
+run_hook "$(mk_payload "$R_COMMIT" "git -C $R_SCR commit -q --allow-empty -m x")"
+expect_status "18b: AC-9.1 — 'git -C <scratch repo> commit' from the engaged root is ADMITTED" 0 "$ST"
+expect_eq "18b: …with exactly one line naming both repositories" "$(jur_line "$R_SCR")" "$ERR"
+expect_empty "18b: …and nothing on stdout" "$OUT"
+
+run_hook "$(mk_payload "$R_COMMIT" "git -C $R_NEST commit -q --allow-empty -m x")"
+expect_status "18c: AC-9.3 — a repository nested at <root>/.bionic/docs/record/x/bed is ADMITTED" 0 "$ST"
+expect_eq "18c: …with the same one line" "$(jur_line "$R_NEST")" "$ERR"
+
+# THE EXEMPTION IS THE GATE'S ALONE. A bionic:test-runner row committing into the scratch
+# repo is outside the gate's jurisdiction and still inside the role arm's: refused, by ARM C.
+R_JUR_RO="$(mk_repo jurisdiction-ro)"; block_plan "$R_JUR_RO"
+roster_header > "$R_JUR_RO/.bionic/tmp/roster-$SID.state"
+ro_rows "$R_JUR_RO" w19-jur-runner ajurrunner-0123456789abcdef bionic:test-runner
+run_hook "$(mk_payload "$R_JUR_RO" "git -C $R_SCR commit -q --allow-empty -m x" ajurrunner-0123456789abcdef omit Bash w19-jur-runner)"
+expect_status "18d: a bionic:test-runner's commit into the scratch repo is still REFUSED (the role arm is not exempt)" 2 "$ST"
+expect_contains "18d: …by the role arm" "a read-only role never commits" "$ERR"
+expect_contains "18d: …while the gate itself only names the boundary" "$(jur_line "$R_SCR" "$R_JUR_RO")" "$ERR"
+expect_eq "18d: …so exactly one refusal is rendered" "1" "$(printf '%s\n' "$ERR" | grep -c 'refused')"
+
+# A LINKED WORKTREE of the engaged repository shares its common dir and is inside: judged.
+git -C "$R_COMMIT" worktree add -q "$R_COMMIT/.worktrees/19-T6" -b wt/19-T6 2>/dev/null
+run_hook "$(mk_payload "$R_COMMIT" "git -C $R_COMMIT/.worktrees/19-T6 commit -m x")"
+expect_status "18e: a commit from a linked worktree of the engaged repository is still judged — refused" 2 "$ST"
+expect_absent "18e: …and never called outside" "outside the engaged repository" "$ERR"
 
 
 finish
