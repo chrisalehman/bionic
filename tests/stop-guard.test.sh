@@ -1826,4 +1826,43 @@ expect_eq "E1.5 …with the one line still first" \
   "bionic: stop refused — the session roster carries no id for it (stop it yourself or order it)" \
   "$(printf '%s\n' "$GUARD_VERR" | head -1)"
 
+section "Section 17: an INTERMEDIATE adopter's copy is found by the newest-id glob (D8; REQ-8; AC-8.1)"
+#
+# THE DEFECT (research D2 §REQ-8; triage-A). Before this the look checked THIS session's
+# directory, then (if adopted) the LAUNCHER's — never a THIRD session that adopted the agent
+# in between two `/clear`s. `adopted_from=` keeps naming the ORIGINAL launcher forever, so an
+# intermediate adopter's own copy of the working log is named on no row at all, and a stop
+# refusal that should see it ALIVE there instead reads the launcher's stale copy and lets the
+# stop through.
+#
+# THE FIX. `agent_log_newest` globs every session directory of the project for the exact
+# agent id and returns the newest by mtime — the launcher, any intermediate adopter and this
+# session are all equally candidates, with no chain of `adopted_from=` to walk.
+IFS='|' read -r AL17_REPO AL17_TR AL17_SUB <<< "$(make_world adoptintermediate yes)"
+AL17_PROJ="${AL17_SUB%/*/*}"
+SID_C="99999999-8888-7777-6666-555555555555"
+AID17="aadoptee-9999999999999999"
+
+# The LAUNCHER's copy (predecessor $SID_B): OLD.
+AL17_TR_B="${AL17_TR%/*}/$SID_B.jsonl"
+AL17_SUB_B="${AL17_TR_B%.jsonl}/subagents"
+plant_agent "$AL17_SUB_B" "$AID17" "adoptee"
+age_log "$AL17_SUB_B" "$AID17"
+
+# The INTERMEDIATE adopter's copy, under a THIRD session this roster row names nowhere: FRESH.
+mkdir -p "$AL17_PROJ/$SID_C/subagents"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"fresh from the intermediate adopter"}]}}\n' \
+  > "$AL17_PROJ/$SID_C/subagents/agent-${AID17}.jsonl"
+
+plant_live "$AL17_TR" fresh "adoptee"
+sg_roster_row "$AL17_REPO" "$SID_A" "adoptee" "$AID17" "" "identified" "" "" \
+  "adoptee@session-${SID_B:0:8}" "$SID_B"
+
+run_guard "$(mk_stop_payload "$SID_A" "$AL17_TR" "$AL17_REPO" "adoptee")"
+expect_status "alive under the INTERMEDIATE adopter's fresh copy: still refused" 2 "$GUARD_ST"
+expect_contains "…and the working log named is the intermediate adopter's own path" \
+  "$AL17_PROJ/$SID_C/subagents/agent-${AID17}.jsonl" "$GUARD_VERR"
+expect_absent "…never the launcher's stale path" \
+  "$AL17_SUB_B/agent-${AID17}.jsonl" "$GUARD_VERR"
+
 finish
