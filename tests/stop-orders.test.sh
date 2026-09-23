@@ -54,13 +54,14 @@ make_repo() {  # <name> -> repo path
 # RENAMED OFF THE WRITER'S NAME (S17): `roster_row` is the production writer
 # (payload/scripts/lib/roster.sh), and a private definition of that name would shadow the
 # one writer with a fixture.
-so_roster_row() {  # <repo> <name> <deliverable> [waiver] [teammate-id] [claims]
+so_roster_row() {  # <repo> <name> <deliverable> [waiver] [teammate-id] [claims] [progress] [cadence]
   local repo="$1" name="$2" deliv="$3" waiver="${4:-}" tmid="${5:-}" claims="${6:-}"
+  local progress="${7:-}" cadence="${8:-}"
   local f="$repo/.bionic/tmp/roster-$SID.state"
   [ -f "$f" ] || roster_header > "$f"
   roster_row_fixture status=confirmed session="$SID" name="$name" agent_id= \
     launched_at=2026-08-05T00:00:00Z deliverable="$deliv" claims="$claims" \
-    waiver="$waiver" teammate_id="$tmid" >> "$f"
+    waiver="$waiver" teammate_id="$tmid" progress="$progress" cadence="$cadence" >> "$f"
   return 0
 }
 
@@ -564,5 +565,368 @@ expect_absent "…never annotated live off the neighbour its pattern would have 
 # row above is a statement about the match and not about a live set that had gone empty.
 expect_contains "…while the real still-at-it beside it is still live" "[live]" \
   "$(printf '%s\n' "$R8_LA4" | grep -F 'still-at-it   (UNMET')"
+
+
+# ============================================================
+section "Section 8: stopped <name> acks the row it stops; standdown drops a row only when acked AND gone (wave-19 T1; REQ-1 AC-1.2/1.3; D3; ADR-034)"
+# ============================================================
+#
+# THE ACK IS THE CLOSE (ADR-034 d1). A TaskStop ends a process; nothing in it closes the
+# name. `stopped <name>` is the verb that does, beside the stop: one verdict read decides
+# whether there is a row to close, and the close goes through the sweeper's own `ack` verb —
+# the same call shape the tick's STANDDOWN close makes — never a private ledger write.
+# An unknown or already-acked name is a refusal, exit 2: the sweeper would record an unknown
+# name and warn, and a second ack says nothing new.
+#
+# STOPPED NOW CHECKS WHAT STANDDOWN ALREADY CHECKS (wave-19 T1 follow-up, critic C4). Before
+# this fix `stopped` acked ANY open row on the strength of the name alone — still-live or
+# UNMET — and since T4 that ack frees the name for a fresh dispatch while the agent it named
+# is still running (dispatch-preflight.sh:2272 treats any ack newer than the launch as the
+# name closing). So a FRESH panel reading must confirm the name is gone: present on the
+# panel -> refused, naming it live; a stale or absent panel -> refused, because a verb that
+# cannot see does not ack. The verdict picks the reason (T1e, audit V-1): MET or WAIVED
+# closes `landed`, UNMET closes `abandoned`, any other state is refused, naming it. The ack it writes is `--by human`, never `--by patrol`: this is a
+# deliberate model-callable verb, not the tick's own automated sweep.
+R9="$(make_repo stopped)"
+R9SLUG=$(printf '%s' "$R9" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R9SLUG"
+R9TR="$R8CFG/projects/$R9SLUG/$SID.jsonl"
+so_roster_row "$R9" "open-one" ".bionic/docs/record/never.md" "" "open-one@session-6c85684c"
+s9_ledger() { cat "$R9/.bionic/tmp/sweeper-$SID.state" 2>/dev/null; }
+
+# UNMET AND STILL ON A FRESH PANEL: refused, naming the verdict (C4, unchanged by T1e). An
+# agent that is visibly working has not been stopped, whatever its contract says.
+plant_live "$R9TR" fresh "open-one"
+run_orders_cfg "$R9" stopped open-one
+expect_status "stopped on an UNMET row the fresh panel still lists is refused, exit 2 (C4)" 2 "$ST"
+expect_contains "…naming the verdict" "UNMET" "$OUT$ERR"
+expect_contains "…and naming it live" "still on the panel" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=open-one|" "$(s9_ledger)"
+
+# UNMET UNDER A STALE PANEL: refused, naming the verdict (C4). A verb that cannot see does
+# not ack, and "the panel is old" is not evidence that the agent left.
+plant_live "$R9TR" stale
+run_orders_cfg "$R9" stopped open-one
+expect_status "stopped on an UNMET row under a stale panel is refused, exit 2 (C4)" 2 "$ST"
+expect_contains "…naming the verdict" "UNMET" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=open-one|" "$(s9_ledger)"
+
+# UNMET AND GONE FROM A FRESH PANEL: closed, reason abandoned (wave-19 T1e, audit V-1; REQ-1
+# AC-1.2). This is T1's own original fixture — `open-one`'s deliverable never exists — and
+# the agent it named was stopped before it landed (w19-T6 this wave). Refusing it left the
+# name blocked and counted against the budget with no close but a hand `sweeper ack`. The
+# ack is attributed honestly: `reason=abandoned`, never `landed` — nothing landed — and never
+# the tick's `moot-and-gone`, which names a row that had nothing to produce.
+plant_live "$R9TR" fresh
+run_orders_cfg "$R9" stopped open-one
+expect_status "stopped on an UNMET row the fresh panel shows gone acks it, exit 0 (V-1)" 0 "$ST"
+expect_contains "…through the sweeper, by a human verb, reason abandoned" \
+  "|name=open-one|by=human|reason=abandoned" "$(s9_ledger)"
+expect_absent "…and never as landed" "|name=open-one|by=human|reason=landed" "$(s9_ledger)"
+expect_contains "…saying so to the operator" "reason abandoned" "$OUT"
+expect_contains "…so the one verdict line reports it closed" "|acked=yes|" \
+  "$( cd "$R9" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict open-one 2>/dev/null )"
+run_orders_cfg "$R9" standdown
+expect_status "standdown after an abandoned close exits clean" 0 "$ST"
+expect_absent "…and lists the abandoned row nowhere: closed, and nobody left to stop (AC-1.3)" \
+  "open-one" "$OUT"
+
+# MET, but the fresh panel still lists the agent: refused, naming it live (C4) — the
+# defect's sharper edge, a landed contract whose agent is still working.
+echo landed > "$R9/.bionic/docs/record/met-live.md"
+so_roster_row "$R9" "met-live" ".bionic/docs/record/met-live.md" "" "met-live@session-6c85684c"
+plant_live "$R9TR" fresh "met-live"
+run_orders_cfg "$R9" stopped met-live
+expect_status "stopped on a row the fresh panel still lists is refused, exit 2 (C4)" 2 "$ST"
+expect_contains "…naming it as live" "met-live" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=met-live|" "$(s9_ledger)"
+
+# A STALE panel: refused too — a verb that cannot see does not ack (C4). Still MET, still
+# actually gone; only the panel reading is untrustworthy.
+plant_live "$R9TR" stale
+run_orders_cfg "$R9" stopped met-live
+expect_status "stopped under a stale panel is refused, exit 2 (C4)" 2 "$ST"
+expect_absent "…and acks nothing" "|name=met-live|" "$(s9_ledger)"
+
+# MET, and the fresh panel shows the agent gone: acked, by a human verb, reason landed (C4).
+# This is the one case `stopped` still closes — the verb runs beside TaskStop, after the
+# agent is gone.
+plant_live "$R9TR" fresh
+run_orders_cfg "$R9" stopped met-live
+expect_status "stopped on a MET row the fresh panel shows gone acks it, exit 0" 0 "$ST"
+expect_contains "…acked through the sweeper, by a human verb, reason landed" \
+  "|name=met-live|by=human|reason=landed" "$(s9_ledger)"
+expect_contains "…on the sweeper's own ledger schema" "sweeper-ledger/v1|event=ack|" "$(s9_ledger)"
+expect_contains "…so the one verdict line now reports it closed" "|acked=yes|" \
+  "$( cd "$R9" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict met-live 2>/dev/null )"
+
+run_orders_cfg "$R9" stopped met-live
+expect_status "stopped on an ALREADY-ACKED name is refused, exit 2" 2 "$ST"
+expect_contains "…saying why in one line" "met-live" "$OUT$ERR"
+expect_eq "…and writes no second ack" "1" \
+  "$(s9_ledger | grep -c '|event=ack|.*|name=met-live|' | tr -d ' ')"
+
+run_orders "$R9" stopped nobody-here
+expect_status "stopped on an UNKNOWN name is refused, exit 2" 2 "$ST"
+expect_eq "…in exactly one line" "1" \
+  "$(printf '%s\n' "$OUT$ERR" | grep -c . | tr -d ' ')"
+expect_absent "…and nothing is recorded for it" "|name=nobody-here|" "$(s9_ledger)"
+
+run_orders "$R9" stopped
+expect_status "stopped with no target is a usage refusal" 2 "$ST"
+run_orders "$R9" stopped --by human
+expect_status "stopped takes the target first, as order does" 2 "$ST"
+expect_contains "…and says so" "the target comes first" "$ERR"
+
+# ---------- standdown: an acked row keeps its address until a FRESH panel shows it gone ----------
+R10="$(make_repo standdown-acked)"
+R10SLUG=$(printf '%s' "$R10" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R10SLUG"
+R10TR="$R8CFG/projects/$R10SLUG/$SID.jsonl"
+so_roster_row "$R10" "acked-live" ".bionic/docs/record/n1.md" "" "acked-live@session-6c85684c"
+so_roster_row "$R10" "acked-gone" ".bionic/docs/record/n2.md" "" "acked-gone@session-6c85684c"
+( cd "$R10" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack acked-live acked-gone ) >/dev/null 2>&1
+plant_live "$R10TR" fresh "acked-live"
+run_orders_cfg "$R10" standdown
+expect_status "standdown with acked rows exits clean" 0 "$ST"
+R10_SD=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
+expect_contains "an acked row the fresh panel still lists keeps its stop address (AC-1.3)" \
+  "acked-live@session-6c85684c   (acked — acked-live)" "$R10_SD"
+expect_absent "an acked row a fresh panel shows GONE is not listed at all (AC-1.3)" \
+  "acked-gone" "$OUT"
+
+# A STALE panel is not evidence the agent left: the acked row keeps its address.
+plant_live "$R10TR" stale "acked-live"
+run_orders_cfg "$R10" standdown
+expect_contains "under a stale panel the acked-gone row keeps its address" \
+  "acked-gone@session-6c85684c   (acked — acked-gone)" "$OUT"
+
+# ---------- standdown ENDS THE LEASE of an acked-and-gone row too (wave-19 T1b, R2) ----------
+#
+# `continue`-ing out of the acked-and-gone branch before the LANDED/REFUSED block runs
+# means the common path — land, stop, tick ack — never reaches worktree_land for that row:
+# the tree stands until someone runs `spawn-worktree.sh land` by hand, which undoes spec
+# AC-28 (1.4.0, "standing an agent down is where the lease ends"). The row stays out of
+# READY — an ack already closed it and there is nobody left to stop — but its lease still
+# has to end here, because standdown is the only pass that will ever look at this row again.
+R11="$(make_repo standdown-acked-gone-lease)"
+echo seed > "$R11/README.md"
+git -C "$R11" add README.md >/dev/null 2>&1
+git -C "$R11" commit -qm seed >/dev/null 2>&1
+git -C "$R11" worktree add -q -b acked-gone-lease "$R11/.worktrees/acked-gone-lease" >/dev/null 2>&1
+echo work > "$R11/.worktrees/acked-gone-lease/work.txt"
+git -C "$R11/.worktrees/acked-gone-lease" add -A >/dev/null 2>&1
+git -C "$R11/.worktrees/acked-gone-lease" commit -qm "acked-gone-lease work" >/dev/null 2>&1
+
+R11SLUG=$(printf '%s' "$R11" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R11SLUG"
+R11TR="$R8CFG/projects/$R11SLUG/$SID.jsonl"
+# THE DELIVERABLE IS WRITTEN (wave-19 T1f, review R2-1). Before T1f this row's n3.md was never
+# written, so the row was UNMET and this block pinned a merge of work nobody landed. A lease
+# ends in a merge only for a landed row (MET or WAIVED); the UNMET shape is R12 below.
+echo landed > "$R11/.bionic/docs/record/n3.md"
+so_roster_row "$R11" "acked-gone-lease" ".bionic/docs/record/n3.md" "" "acked-gone-lease@session-6c85684c"
+( cd "$R11" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack acked-gone-lease ) >/dev/null 2>&1
+# A fresh panel that lists nobody: the row's agent is gone, not merely stale.
+plant_live "$R11TR" fresh
+run_orders_cfg "$R11" standdown
+expect_status "standdown over an acked-and-gone row with a tree exits clean" 0 "$ST"
+
+R11_SD=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
+expect_absent "the acked-and-gone row is kept out of READY (AC-1.3 unchanged by R2)" \
+  "acked-gone-lease" "$R11_SD"
+expect_contains "…but its lease still ends, reported under LEASES" \
+  "LANDED branch=acked-gone-lease" "$OUT"
+expect_contains "…attributable to its row by name" \
+  "(acked-gone-lease)" "$OUT"
+if [ ! -d "$R11/.worktrees/acked-gone-lease" ]; then
+  ok "the acked-and-gone row's tree is actually landed, not just reported"
+else
+  no "the acked-and-gone row's tree is actually landed, not just reported"
+fi
+if git -C "$R11" rev-list --count "HEAD..acked-gone-lease" 2>/dev/null | grep -qx 0; then
+  ok "…its work is merged into the main checkout"
+else
+  no "…its work is merged into the main checkout"
+fi
+
+# ============================================================
+# AN ABANDONED ROW'S TREE STANDS (wave-19 T1f, review R2-1). T1b made standdown land the tree
+# of every acked-and-gone row; T1e made `stopped` ack an UNMET-and-gone row as `abandoned`.
+# Together, `stopped` then `standdown` merged an abandoned agent's partial work into whatever
+# branch the main checkout sat on — hidden on main/master by the protected-branch refusal,
+# live everywhere else. So this fixture puts the main checkout on a NON-protected branch
+# (`integration`), the one shape where the refusal cannot mask the merge. The verdict, not
+# the ack's reason, decides: UNMET leaves tree and branch in place for a human to salvage.
+# ============================================================
+R12="$(make_repo standdown-abandoned-stands)"
+echo seed > "$R12/README.md"
+git -C "$R12" add README.md >/dev/null 2>&1
+git -C "$R12" commit -qm seed >/dev/null 2>&1
+git -C "$R12" checkout -qb integration
+git -C "$R12" worktree add -q -b half-done "$R12/.worktrees/half-done" >/dev/null 2>&1
+echo partial > "$R12/.worktrees/half-done/partial.txt"
+git -C "$R12/.worktrees/half-done" add -A >/dev/null 2>&1
+git -C "$R12/.worktrees/half-done" commit -qm "half-done WIP" >/dev/null 2>&1
+
+R12SLUG=$(printf '%s' "$R12" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R12SLUG"
+R12TR="$R8CFG/projects/$R12SLUG/$SID.jsonl"
+# The deliverable is never written: the row is UNMET when its agent goes.
+so_roster_row "$R12" "half-done" ".bionic/docs/record/never.md" "" "half-done@session-6c85684c"
+plant_live "$R12TR" fresh
+
+run_orders_cfg "$R12" stopped half-done
+expect_status "stopped closes the UNMET-and-gone row (the T1e precondition)" 0 "$ST"
+expect_contains "…as abandoned" "reason abandoned" "$OUT"
+
+run_orders_cfg "$R12" standdown
+expect_status "standdown over an abandoned row with a tree exits clean" 0 "$ST"
+if [ "$(git -C "$R12" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "integration" ]; then
+  ok "the main checkout is on a non-protected branch (the refusal cannot mask a merge)"
+else
+  no "the main checkout is on a non-protected branch (the refusal cannot mask a merge)"
+fi
+if [ "$(git -C "$R12" rev-list --count "HEAD..half-done" 2>/dev/null)" = "1" ]; then
+  ok "the abandoned branch is NOT merged: it is still ahead of the main checkout"
+else
+  no "the abandoned branch is NOT merged: it is still ahead of the main checkout" \
+    "HEAD..half-done = $(git -C "$R12" rev-list --count "HEAD..half-done" 2>&1)"
+fi
+expect_absent "…and no LANDED line claims it" "LANDED branch=half-done" "$OUT"
+if [ -d "$R12/.worktrees/half-done" ] && [ -f "$R12/.worktrees/half-done/partial.txt" ]; then
+  ok "…its tree stands, the partial work still in it"
+else
+  no "…its tree stands, the partial work still in it"
+fi
+R12_LE=$(printf '%s\n' "$OUT" | sed -n '/LEASES/,$p')
+R12_REAL=$(cd "$R12" && pwd -P)   # the verb names trees under the physical repo path
+expect_contains "the LEASES report names the tree as abandoned and standing" \
+  "abandoned — tree stands: $R12_REAL/.worktrees/half-done (branch half-done); remove or salvage by hand   (half-done)" \
+  "$R12_LE"
+expect_absent "…and the header no longer reads as if nothing touched a tree" \
+  "nothing has landed; there is nobody to stand down." "$OUT"
+
+# ============================================================
+section "Section 9: stopped — STILL-LIVE is not a close on its own; a fresh, absent panel overrides the progress-artifact shape (wave-19 T1g, audit V2-1, critic C2-2)"
+# ============================================================
+#
+# STILL-LIVE used to refuse `stopped` unconditionally, whatever the panel showed: a writer
+# TaskStopped mid-work has, by construction, a progress artifact inside its cadence, so the
+# refusal held for up to the whole cadence and the slot stayed occupied the entire time —
+# the exact w19-T6 shape `stopped` exists to close (A-orch-4). The panel is the stronger
+# fact once it is fresh: absent from it closes the row `abandoned`, exactly like
+# UNMET-and-gone (T1e). A claimed-process pattern that still matches a live process is a
+# fact the panel cannot speak to either way (it lists this session's roster of agents, not
+# the processes one may have started), so that shape stays refused even panel-gone.
+R13="$(make_repo stopped-still-live)"
+R13SLUG=$(printf '%s' "$R13" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R13SLUG"
+R13TR="$R8CFG/projects/$R13SLUG/$SID.jsonl"
+s13_ledger() { cat "$R13/.bionic/tmp/sweeper-$SID.state" 2>/dev/null; }
+
+R13PROG="$R13/.bionic/docs/record/progress13.md"
+mkdir -p "$(dirname "$R13PROG")"
+echo working > "$R13PROG"   # written just now — inside any cadence
+so_roster_row "$R13" "still-live-gone" ".bionic/docs/record/never-slg.md" "" \
+  "still-live-gone@session-6c85684c" "" "$R13PROG" "10 minutes"
+
+# STILL-LIVE, and still on a fresh panel: refused, naming the wait rather than a bare "not
+# landed" — there is something to do, and the line now says what.
+plant_live "$R13TR" fresh "still-live-gone"
+run_orders_cfg "$R13" stopped still-live-gone
+expect_status "STILL-LIVE and still on a fresh panel is refused, exit 2" 2 "$ST"
+expect_contains "…naming the wait" \
+  "retry after the cadence elapses, or when a fresh panel no longer lists it" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=still-live-gone|" "$(s13_ledger)"
+
+# STILL-LIVE under a stale panel: refused too, same wait — a verb that cannot see does not
+# ack, and staleness is not evidence the agent left.
+plant_live "$R13TR" stale
+run_orders_cfg "$R13" stopped still-live-gone
+expect_status "STILL-LIVE under a stale panel is refused, exit 2" 2 "$ST"
+expect_contains "…naming the same wait" \
+  "retry after the cadence elapses, or when a fresh panel no longer lists it" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=still-live-gone|" "$(s13_ledger)"
+
+# STILL-LIVE, and the fresh panel shows the agent GONE: the panel overrides the progress
+# artifact — closed `abandoned`, same as UNMET-and-gone, and the operator is told why.
+plant_live "$R13TR" fresh
+run_orders_cfg "$R13" stopped still-live-gone
+expect_status "STILL-LIVE the fresh panel shows gone is acked, exit 0 (V2-1)" 0 "$ST"
+expect_contains "…through the sweeper, by a human verb, reason abandoned" \
+  "|name=still-live-gone|by=human|reason=abandoned" "$(s13_ledger)"
+expect_contains "…and the operator is told the panel is what decided it" \
+  "panel-gone overrides STILL-LIVE" "$OUT"
+expect_contains "…naming the progress artifact's age and the cadence" "s old, cadence" "$OUT"
+expect_contains "…so the one verdict line reports it closed" "|acked=yes|" \
+  "$( cd "$R13" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict still-live-gone 2>/dev/null )"
+
+# THE CLAIMED-PROCESS SHAPE IS NOT OVERRIDDEN. `claims=` is checked for EXISTENCE by
+# pattern (session-sweeper.sh's `claims_live`, which shells out to `pgrep -f`), so the
+# honest way to fixture a live claim is a process that really is running — a background
+# CHILD of this suite, never the suite's own process. macOS `pgrep` excludes its own
+# ancestor chain by default (`man pgrep`: "the current pgrep or pkill process and all of
+# its ancestors are excluded"), and `claims_live`'s `pgrep -f` runs several processes below
+# this suite (stop-orders.sh -> session-sweeper.sh -> pgrep), so a claim naming the SUITE's
+# own filename is never actually found by it — the standdown LEFT ALONE fixture earlier in
+# this file (`live-one`, claims="stop-orders.test.sh") happens to pass regardless because
+# LEFT ALONE does not distinguish STILL-LIVE from UNMET; it is not proof `claims_live` saw a
+# live process. A background child is not an ancestor and IS matched.
+CLAIMS_MARKER="bionic-t1g-claim-marker-$$"
+( exec -a "$CLAIMS_MARKER" sleep 30 ) &
+CLAIMS_MARKER_PID=$!
+so_roster_row "$R13" "claims-live-gone" ".bionic/docs/record/never-clg.md" "" \
+  "claims-live-gone@session-6c85684c" "$CLAIMS_MARKER"
+plant_live "$R13TR" fresh
+run_orders_cfg "$R13" stopped claims-live-gone
+expect_status "a claimed-process STILL-LIVE row stays refused even panel-gone, exit 2" 2 "$ST"
+expect_contains "…naming the claim, not the panel" "claimed process pattern" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=claims-live-gone|" "$(s13_ledger)"
+kill "$CLAIMS_MARKER_PID" 2>/dev/null
+wait "$CLAIMS_MARKER_PID" 2>/dev/null
+
+# ---------- standdown never merges the tree a panel-gone override closed (T1f unchanged) ----------
+#
+# T1f's rule stands: `_land_row_tree` merges only MET/WAIVED. An acked STILL-LIVE-and-gone
+# row's tree stands, reported the same way an abandoned UNMET tree does — no new lease path
+# was added by this fix, only a new way to reach the same ack.
+R14="$(make_repo standdown-stilllive-stands)"
+echo seed > "$R14/README.md"
+git -C "$R14" add README.md >/dev/null 2>&1
+git -C "$R14" commit -qm seed >/dev/null 2>&1
+git -C "$R14" checkout -qb integration
+git -C "$R14" worktree add -q -b still-working "$R14/.worktrees/still-working" >/dev/null 2>&1
+echo partial > "$R14/.worktrees/still-working/partial14.txt"
+git -C "$R14/.worktrees/still-working" add -A >/dev/null 2>&1
+git -C "$R14/.worktrees/still-working" commit -qm "still-working WIP" >/dev/null 2>&1
+
+R14SLUG=$(printf '%s' "$R14" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R14SLUG"
+R14TR="$R8CFG/projects/$R14SLUG/$SID.jsonl"
+R14PROG="$R14/.bionic/docs/record/progress14.md"
+echo working > "$R14PROG"
+so_roster_row "$R14" "still-working" ".bionic/docs/record/never-sw.md" "" \
+  "still-working@session-6c85684c" "" "$R14PROG" "10 minutes"
+plant_live "$R14TR" fresh
+
+run_orders_cfg "$R14" stopped still-working
+expect_status "stopped closes the STILL-LIVE-and-gone row (V2-1 precondition)" 0 "$ST"
+expect_contains "…as abandoned" "reason abandoned" "$OUT"
+
+run_orders_cfg "$R14" standdown
+expect_status "standdown over the closed row with a tree exits clean" 0 "$ST"
+if [ "$(git -C "$R14" rev-list --count "HEAD..still-working" 2>/dev/null)" = "1" ]; then
+  ok "the closed branch is NOT merged: it is still ahead of the main checkout"
+else
+  no "the closed branch is NOT merged: it is still ahead of the main checkout" \
+    "HEAD..still-working = $(git -C "$R14" rev-list --count "HEAD..still-working" 2>&1)"
+fi
+expect_absent "…and no LANDED line claims it" "LANDED branch=still-working" "$OUT"
+if [ -d "$R14/.worktrees/still-working" ] && [ -f "$R14/.worktrees/still-working/partial14.txt" ]; then
+  ok "…its tree stands, the partial work still in it"
+else
+  no "…its tree stands, the partial work still in it"
+fi
 
 finish

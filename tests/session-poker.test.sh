@@ -1607,6 +1607,55 @@ OUT="$( cd "$R8M" && env CLAUDE_CODE_SESSION_ID="$SID" \
 expect_contains "…and the SAME row reads RUNNING against a library whose predicate says alive" \
   "name=between|verdict=RUNNING" "$OUT"
 
+# ---------- 8k: the ADOPT REPORT reads the ADOPTER's transcript too (T1d, walk W-3) ----------
+#
+# THE DEFECT THIS PINS. `row_quiet` (§8j's own comment, D4/REQ-2) already prefers THIS
+# session's copy of an agent's transcript over the launching session's — the harness re-files
+# a transcript under whichever session is talking to the agent NOW. But `adopt`'s own report
+# (the `poker-adopt/v1|...` line and the human-readable `observe :` tail) used to build its
+# `transcript=`/`transcript_age=` fields from the LAUNCHING session's copy only, unconditionally
+# — so a re-run of `adopt --report-only` after this session had already exchanged a turn with
+# the agent (the fresh copy now sitting under THIS session's subagents dir) still quoted the
+# launcher's stale path and its large age, disagreeing with what the very next tick would say
+# about the identical row. `transcript_dir_for` is the fix: one resolver, called by both.
+R8K="$(make_repo s8-adopter-transcript)"; new_roster "$R8K"
+mkdir -p "$R8K/.bionic/docs/record"
+ID_ADOPTER_PREF="aadopterpref-onexxxxxxxxxxxxx"
+add_row_to "$R8K" "$ADOPT_A" name=adopter-pref status=identified \
+  agent_id="$ID_ADOPTER_PREF" subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8K/.bionic/docs/record/adopter-pref.md" \
+  progress="$R8K/.bionic/tmp/progress-adopter-pref.md"
+# The progress channel is stale on BOTH candidate reads, so the transcript channel is the one
+# this case is about.
+printf 'progress\n' > "$R8K/.bionic/tmp/progress-adopter-pref.md"
+backdate "$R8K/.bionic/tmp/progress-adopter-pref.md" 5400
+
+# THE LAUNCHER'S COPY: old, the shape the pre-fix report always named.
+mkdir -p "$C8/projects/-fixture-project/$ADOPT_A/subagents"
+: > "$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_ADOPTER_PREF}.jsonl"
+backdate "$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_ADOPTER_PREF}.jsonl" 1415
+
+# THE ADOPTER'S OWN COPY (this session, $SID — what `poke` sets CLAUDE_CODE_SESSION_ID to):
+# newer, because this is the session `adopt --report-only` is about to run as.
+mkdir -p "$C8/projects/-fixture-project/$SID/subagents"
+: > "$C8/projects/-fixture-project/$SID/subagents/agent-${ID_ADOPTER_PREF}.jsonl"
+backdate "$C8/projects/-fixture-project/$SID/subagents/agent-${ID_ADOPTER_PREF}.jsonl" 60
+
+poke "$R8K" adopt --report-only
+expect_contains "the report names the ADOPTER's transcript path, not the launcher's" \
+  "transcript=$C8/projects/-fixture-project/$SID/subagents/agent-${ID_ADOPTER_PREF}.jsonl|" \
+  "$OUT"
+expect_absent "…never the launcher's stale path" \
+  "transcript=$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_ADOPTER_PREF}.jsonl|" \
+  "$OUT"
+expect_regex "…and the small (adopter-side) age, not the launcher's large one" \
+  'transcript_age=6[0-9][|]plan=' "$OUT"
+expect_absent "…never the launcher's 1415s age" "transcript_age=1415|" "$OUT"
+expect_contains "…the human-readable tail names the same adopter path" \
+  "observe     : $C8/projects/-fixture-project/$SID/subagents/agent-${ID_ADOPTER_PREF}.jsonl" \
+  "$OUT"
+
 unset CLAUDE_CONFIG_DIR
 
 # ============================================================
@@ -2070,6 +2119,10 @@ expect_contains "…and prints HOLD with the free-memory reading" "poker: HOLD f
 expect_contains "…and the load reading beside it" "load_1m=1.0" "$OUT"
 expect_contains "…saying plainly that nothing is being filled" "no fills" "$OUT"
 expect_absent "…and fills nothing, though a ready task and a gap both exist" "poker: FILL" "$OUT"
+# THE WITHHELD LINE (wave-19 REQ-4 AC-4.1, D6). The stop wall exempts a tick turn from the
+# fill invariant only on this line, so the HOLD path prints it beside its measurement.
+expect_contains "11a2 …and prints the withheld line the stop wall reads, with the measurement" \
+  "poker: fill withheld — HOLD free_mb=512 load_1m=1.0" "$OUT"
 
 # The paired positive: the SAME repo, the SAME plan, with the machine reading healthy.
 # Without it, 11a passes on a tick that can never fill anything.
@@ -2077,6 +2130,7 @@ poke_pressure "$R11A" 8192 1.0 tick
 expect_contains "the same fixture with memory to spare DOES fill (11a discriminates)" \
   "poker: FILL NEXT" "$OUT"
 expect_absent "…and prints no HOLD" "poker: HOLD" "$OUT"
+expect_absent "11a3 …and withholds nothing" "fill withheld" "$OUT"
 
 # ---------- 11b: ONE rung line per tick, on QUIET and on FILL alike (AC-17) ----------
 #
@@ -2291,7 +2345,8 @@ wave_plan "$R11C6" "-" "| A | 4 | build | fixture task | implementor | — | 15m
 poke_rung "$R11C6" 60 0 tick
 expect_contains "a plan with no parallel-budget still prints the rung line" \
   "poker: rung=-/- writers=- test_jobs=-" "$OUT"
-expect_contains "…and says why it is not filling" "no readable parallel-budget" "$OUT"
+expect_contains "…and says why it is not filling, naming the key (wave-19 REQ-3 AC-3.2)" \
+  "carries no parallel-budget: writers=" "$OUT"
 
 # ---------- 11c3: NARROW and its counter file are GONE (AC-17) ----------
 #
@@ -2375,6 +2430,8 @@ expect_contains "…naming the YOUNGEST suite-running writer, at the stop addres
 expect_absent "…never the older one" "old-suite-runner@" "$OUT"
 expect_absent "…and never a writer that claimed no suite" "no-claim-writer@" "$OUT"
 expect_absent "…and fills nothing at the kill floor" "poker: FILL" "$OUT"
+expect_contains "11d2 …and prints the withheld line the stop wall reads, with the measurement" \
+  "poker: fill withheld — EMERGENCY free_mb=100" "$OUT"
 
 # A roster with no suite-claiming row says so rather than naming a writer at random: the
 # pressure is real and it is not this session's to relieve.
@@ -2386,6 +2443,8 @@ add_row "$R11E" status=intended name=quiet-writer deliverable=a.md duration="4 h
 poke_pressure "$R11E" 100 1.0 tick
 expect_contains "an EMERGENCY with no suite-running writer names no one" \
   "no suite-running writer on this roster to stop" "$OUT"
+expect_contains "11e2 …and still withholds the fill, by its measurement" \
+  "poker: fill withheld — EMERGENCY free_mb=100" "$OUT"
 
 # ---------- 11f: an unreadable reading is ZERO FREE MEMORY, and that is the kill floor ----
 #
@@ -2550,10 +2609,10 @@ expect_contains "12a-T22-f2 …and the order is written, same as the unswept cas
   "|by=patrol|target=done-writer" \
   "$(cat "$R12FT/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
 
-# THE TRUE SILENT CASE: the same swept row, but the panel no longer lists it. The landing that
-# swept it already closed the row — a stand-down here would name an agent that is gone, and an
-# ack here would close the row a second time for no new fact. Both are the noise this arm exists
-# to remove.
+# THE SAME SWEPT ROW, GONE FROM THE PANEL: no stand-down — there is nobody to stop — but the
+# row IS closed, by the ack (RE-AUTHORED at wave-19 T1; ADR-034 d1). The marker records that a
+# landing was seen, not that the name was closed; skipping the ack here left every writer that
+# reported open for the life of the session (ideas row 16).
 R12FG="$(make_repo s12-taskstop-swept-gone)"; new_roster "$R12FG"; armed_ago "$R12FG"; delivered_plan "$R12FG"
 DEL_FG="$R12FG/delivered.md"; echo "done" > "$DEL_FG"
 add_row "$R12FG" name=done-writer deliverable="$DEL_FG" duration="1 minute" \
@@ -2565,8 +2624,9 @@ expect_absent "12a-T22-f3 a swept row whose agent the panel no longer lists draw
   "poker: STANDDOWN" "$OUT"
 expect_eq "12a-T22-f4 …and no order is written for it" "no" \
   "$([ -f "$R12FG/.bionic/tmp/stop-orders-$SID.state" ] && echo yes || echo no)"
-expect_eq "12a-T22-f5 …and it is not acked either — the landing already closed it" "no" \
-  "$([ -f "$R12FG/.bionic/tmp/sweeper-$SID.state" ] && echo yes || echo no)"
+expect_contains "12a-T22-f5 …and it is acked by the Patrol, reason landed — the ack is the close" \
+  "|name=done-writer|by=patrol|reason=landed" \
+  "$(cat "$R12FG/.bionic/tmp/sweeper-$SID.state" 2>/dev/null)"
 
 # The second control: an OPEN row is not a MET lineage and is never named.
 R12GT="$(make_repo s12-taskstop-open)"; new_roster "$R12GT"; armed_ago "$R12GT"; delivered_plan "$R12GT"
@@ -2637,7 +2697,7 @@ wave_plan "$R12C" "writers=1 suites=1 worktrees=8 test_jobs=8 source=probe" \
 add_row "$R12C" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R12C" 8192 1.0 tick
 expect_absent "a full budget fills nothing" "poker: FILL" "$OUT"
-expect_contains "…and says which number closed the gap" "writers=1 and 1 open row(s): the budget is full" "$OUT"
+expect_contains "…and says which number closed the gap" "writers=1 and 1 unacked roster row(s): the budget is full" "$OUT"
 
 # ---------- 12d: no parallel-budget line -> inert, and it says why ----------
 #
@@ -2651,7 +2711,8 @@ wave_plan "$R12D" "-" \
 poke_pressure "$R12D" 8192 1.0 tick
 expect_eq "a plan with no parallel-budget line still ticks cleanly (exit 0)" "0" "$RC"
 expect_absent "…and fills nothing" "poker: FILL" "$OUT"
-expect_contains "…naming the missing field as the reason" "no readable parallel-budget: writers field" "$OUT"
+expect_contains "…naming the missing key as the reason, as Step 0 writes it" \
+  "carries no parallel-budget: writers=<n>" "$OUT"
 
 # ---------- 12e: a pending task with an unlanded dependency is not ready ----------
 R12E="$(make_repo s12-unlanded-dep)"; new_roster "$R12E"
@@ -2811,6 +2872,245 @@ sp_plan_at_step "$R12K3" 6 \
 poke_pressure "$R12K3" 8192 1.0 tick
 expect_contains "a step with no ready row says which step it asked about" \
   "no pending step-6 task has all its dependencies landed" "$OUT"
+
+# 12l — THE DIFFERENTIAL (wave-19 REQ-5 AC-5.2, D6; ADR-034 decision 2). The tick and the
+# stop wall now count ONE occupancy — this session's roster rows that are not acked — so on
+# the fixture where the roster and the plan disagree they must name the same rows. The
+# mismatch: BASE is `landed` in the plan (no `active` row anywhere) while its roster row is
+# still open (never acked; its deliverable is not on disk). writers=2, one open → gap one.
+# The tick fills ONE. Pre-fix the wall read the plan's `active` column (zero) and named
+# ONE and TWO; post-fix it reads the roster and names ONE. The row carries no `agent_id=`,
+# so the landing gate in the same Stop hook cannot place it and stays out of the verdict.
+STOP_HOOK_12L="${BIONIC_HOOKS_DIR}/stop.sh"
+# HERMETIC PANEL (T2d, A-T2.13). §12a-T22 unsets CLAUDE_CONFIG_DIR on its way out, and a tick
+# with none reads `$HOME/.claude` — the machine's REAL transcript for whatever session id this
+# suite carries. 12l's own row wants "no answer" (the roster count stands), so it gets one,
+# planted; 12l3–12l6 below plant the panel their shape needs. Unset again after 12l6.
+export CLAUDE_CONFIG_DIR="$S12_CFG"
+s12_answer none
+R12L="$(make_repo s12-differential)"; new_roster "$R12L"
+wave_plan "$R12L" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| BASE | 4 | build | landed, its row still open on the roster | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+  "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
+add_row "$R12L" status=intended name=BASE agent_id= deliverable="$R12L/.bionic/docs/record/base.md" \
+  duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R12L" 8192 1.0 tick
+OUT_12L="$OUT"          # kept for the R2-6 stale/none-panel control below (12l7e)
+# The FILL line proper — `poker: FILL <ids>` — not the later `poker: FILL — … named for
+# dispatch` echo beside the decision line (session-poker.sh, the decision block).
+S12L_TICK="$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL [A-Za-z0-9]' | head -1 | sed 's/^poker: FILL //' \
+  | tr ' ' '\n' | /usr/bin/grep -v '^$' | sort | tr '\n' ' ')"
+# The wall, on the same repo: an ordinary (non-tick) turn that dispatched nothing.
+S12L_TR="$R12L/transcript-12l.jsonl"
+jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"where are we?"}}' > "$S12L_TR"
+S12L_OUT="$(cd "$R12L" && jq -nc --arg t "$S12L_TR" --arg c "$R12L" --arg s "$SID" \
+  '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
+  | env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PRESSURE_RING="$TMPROOT/ring-12l" BIONIC_PROBE_FREE_PCT=80 \
+      BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=1.0 bash "$STOP_HOOK_12L" 2>/dev/null)"
+S12L_REASON="$(printf '%s' "$S12L_OUT" | jq -r '.reason // ""' 2>/dev/null)"
+S12L_WALL=""
+for _id in BASE ONE TWO; do
+  case " $(printf '%s' "$S12L_REASON" | tr -c 'A-Za-z0-9_.-' ' ') " in *" $_id "*) S12L_WALL="${S12L_WALL}${_id} " ;; esac
+done
+expect_eq "12l the tick fills one row against one open roster row (the fixture discriminates)" \
+  "ONE " "$S12L_TICK"
+expect_eq "12l2 AC-5.2 the stop wall names exactly the ids the tick filled" "$S12L_TICK" "$S12L_WALL"
+
+# 12l3–12l6 — THE END-OF-BATCH SHAPE (wave-19 audit V-2; T2d). 12l's BASE row is UNMET, and
+# on an UNMET row the tick and the wall already agreed. They did not agree on a MET row the
+# ack has not closed yet: every writer landed, and the agent is still idle on the panel, so
+# the tick's STANDDOWN names it and does NOT ack it. The wall counts that row (it is not
+# acked). The tick used to drop it (MET closes nothing for the fill any more), so its gap
+# was one wider: writers=2, one MET-unacked row, two ready rows, and the tick filled ONE TWO
+# where the wall allowed ONE. The occupancy the tick sizes its fill from is now the wall's
+# predicate: this session's roster rows that are not acked, read AFTER the tick's own ack
+# step. So the paired control, the same MET row with its agent GONE from a fresh panel, is
+# acked by that step and frees its slot in the same tick.
+s12l_wall_ids() {  # <repo> -> the ids among BASE ONE TWO that the stop wall names, sorted
+  local repo="$1" tr="$1/transcript-wall.jsonl" out reason ids="" id
+  jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"where are we?"}}' > "$tr"
+  out="$(cd "$repo" && jq -nc --arg t "$tr" --arg c "$repo" --arg s "$SID" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
+    | env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PRESSURE_RING="$TMPROOT/ring-$(basename "$repo")" \
+        BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=1.0 \
+        bash "$STOP_HOOK_12L" 2>/dev/null)"
+  reason="$(printf '%s' "$out" | jq -r '.reason // ""' 2>/dev/null)"
+  for id in BASE ONE TWO; do
+    case " $(printf '%s' "$reason" | tr -c 'A-Za-z0-9_.-' ' ') " in *" $id "*) ids="${ids}${id} " ;; esac
+  done
+  printf '%s' "$ids"
+}
+s12l_tick_ids() {  # <the tick's whole channel> -> the FILL ids, sorted, space-terminated
+  printf '%s\n' "$1" | /usr/bin/grep '^poker: FILL [A-Za-z0-9]' | head -1 | sed 's/^poker: FILL //' \
+    | tr ' ' '\n' | /usr/bin/grep -v '^$' | sort | tr '\n' ' '
+}
+s12l_met_repo() {  # <label> -> a repo: writers=2, BASE landed, ONE/TWO ready, one MET row
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "| BASE | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+    "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+    "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
+  echo "done" > "$r/landed-12l3.md"
+  add_row "$r" name=done-writer agent_id= deliverable="$r/landed-12l3.md" duration="4 hours" \
+    launched_at="$(iso_ago 600)"
+  printf '%s' "$r"
+}
+
+R12L3="$(s12l_met_repo s12-differential-met-listed)"
+s12_answer fresh "done-writer:idle"
+poke_pressure "$R12L3" 8192 1.0 tick
+expect_contains "12l3 precondition: the MET row's agent is still listed, so the tick stands it down (no ack)" \
+  "poker: STANDDOWN done-writer" "$OUT"
+S12L3_TICK="$(s12l_tick_ids "$OUT")"
+expect_eq "12l3 a MET row the ack has not closed still occupies: writers=2 fills ONE" "ONE " "$S12L3_TICK"
+expect_eq "12l4 AC-5.2 on the end-of-batch shape: the stop wall names exactly the ids the tick filled" \
+  "$S12L3_TICK" "$(s12l_wall_ids "$R12L3")"
+
+R12L5="$(s12l_met_repo s12-differential-met-gone)"
+s12_answer fresh "somebody-else:running"
+poke_pressure "$R12L5" 8192 1.0 tick
+OUT_12L5="$OUT"         # kept for the R2-6 MET-gone control below (12l7d)
+expect_contains "12l5 precondition: the MET row's agent is gone, so the tick's own step acks it" \
+  "|name=done-writer|by=patrol|reason=landed" "$(cat "$R12L5/.bionic/tmp/sweeper-$SID.state" 2>/dev/null)"
+S12L5_TICK="$(s12l_tick_ids "$OUT")"
+expect_eq "12l5 …and the occupancy is read after that ack: the whole gap of two is filled" "ONE TWO " "$S12L5_TICK"
+expect_eq "12l6 …and the stop wall, reading the same ledger, names the same two" \
+  "$S12L5_TICK" "$(s12l_wall_ids "$R12L5")"
+
+# 12l7 — R2-5/R2-6 (delta review at 1dd9133, C2-5). 12l/12l2 above pin the UNMET-open shape
+# under a "no answer" panel, where the liveness trim never ran at all (A-T2.13's own
+# reasoning, never driven by a differential). This pins the shape the trim's removal
+# actually changes: the SAME UNMET row, under a FRESH panel that shows its agent gone. It is
+# the 12l2/64a differential shape, on the UNMET row instead of the MET one — writers=2, BASE
+# UNMET and unacked, ONE and TWO ready: expect the tick to fill exactly ONE, the row the wall
+# names too.
+s12l_unmet_repo() {  # <label> -> a repo: writers=2, BASE UNMET+open on the roster, ONE/TWO ready
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "| BASE | 4 | build | landed, its row still open on the roster | implementor | — | 15m | REQ-x | a.sh | landed |" \
+    "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+    "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
+  add_row "$r" status=intended name=BASE agent_id= deliverable="$r/.bionic/docs/record/base-12l7.md" \
+    duration="4 hours" launched_at="$(iso_ago 60)"
+  printf '%s' "$r"
+}
+R12L7="$(s12l_unmet_repo s12-differential-unmet-gone)"
+s12_answer fresh "somebody-else:idle"
+poke_pressure "$R12L7" 8192 1.0 tick
+S12L7_TICK="$(s12l_tick_ids "$OUT")"
+expect_eq "12l7 R2-5: an UNMET row absent from a fresh panel still occupies: writers=2 fills ONE" \
+  "ONE " "$S12L7_TICK"
+expect_eq "12l7b …and the stop wall, reading the same predicate, names the same one" \
+  "$S12L7_TICK" "$(s12l_wall_ids "$R12L7")"
+
+# 12l7c — R2-6/C2-5: the tick now names the gone-UNMET row and the verb that closes it, so a
+# crashed writer does not stall a fill slot silently until a human happens to run `stopped`.
+expect_contains "12l7c R2-6: the tick names the gone-UNMET row and the closing verb" \
+  "poker: GONE BASE — UNMET and absent from a fresh panel; close it with: bash ${BIONIC_HOOKS_DIR}/stop-orders.sh stopped BASE" \
+  "$OUT"
+
+# 12l7d — the control: a MET-gone row (12l5's own fixture/shape) is never reported as GONE.
+# It is acked instead (D2, ADR-034 d1), and the two candidate sets never overlap.
+expect_absent "12l7d …and a MET-gone row is never reported as GONE (it is acked instead)" \
+  "poker: GONE" "$OUT_12L5"
+
+# 12l7e — the control: a stale/unknown panel (12l/12l2's own fixture, whose UNMET row is
+# read under a "no answer" panel) reports no GONE line either — the same silence the
+# stand-down arm keeps for a STANDDOWN it cannot trust the panel enough to print (A-orch-31).
+expect_absent "12l7e …and an unknown-panel tick reports no GONE line (nothing is fresh enough to trust)" \
+  "poker: GONE" "$OUT_12L"
+
+# 12l7f/12l7g — audit V3-2: `GONE_CANDIDATE_NAMES` covers STILL-LIVE too, and 12l7c's line
+# hardcoded "UNMET" for every candidate. A STILL-LIVE row, progress-artifact shape, absent
+# from a fresh panel is a row `stopped` DOES accept (T1g/A-T1.13's panel-gone override), so
+# the report still recommends it — but has to name what it actually is.
+s12l_stilllive_repo() {  # <label> -> a repo: writers=2, BASE STILL-LIVE (progress artifact), ONE/TWO ready
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "| BASE | 4 | build | still working, progress artifact fresh | implementor | — | 15m | REQ-x | a.sh | landed |" \
+    "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+    "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
+  echo working > "$r/progress-12l7f.md"
+  add_row "$r" status=intended name=BASE agent_id= deliverable="$r/.bionic/docs/record/base-12l7f.md" \
+    duration="4 hours" launched_at="$(iso_ago 60)" progress="$r/progress-12l7f.md" cadence="10 minutes"
+  printf '%s' "$r"
+}
+R12L7F="$(s12l_stilllive_repo s12-gone-still-live-no-claim)"
+s12_answer fresh "somebody-else:idle"
+poke_pressure "$R12L7F" 8192 1.0 tick
+expect_contains "12l7f V3-2: a STILL-LIVE (progress-artifact) row absent from a fresh panel names STILL-LIVE, not UNMET" \
+  "poker: GONE BASE — STILL-LIVE (progress" "$OUT"
+expect_contains "12l7g …and still recommends the closing verb (T1g/A-T1.13 accepts this shape)" \
+  "and absent from a fresh panel; close it with: bash ${BIONIC_HOOKS_DIR}/stop-orders.sh stopped BASE" "$OUT"
+
+# 12l7h/12l7i/12l7j — the claimed-process STILL-LIVE shape: `stopped` refuses this one even
+# panel-gone (T1g/A-T1.13 — a claimed process pattern is a fact about a real OS process, not
+# this session's roster), so the report must not recommend a command that will be refused;
+# it prints `GONE?` and names why. A claim is checked for EXISTENCE by pattern
+# (`claims_live`, `pgrep -f`), so the honest fixture is a real background CHILD process,
+# never this suite's own filename (macOS `pgrep` excludes its own ancestor chain — see
+# tests/stop-orders.test.sh's Section 9 for the same note).
+S12L7H_MARKER="bionic-t2f-claim-marker-$$"
+( exec -a "$S12L7H_MARKER" sleep 30 ) &
+S12L7H_PID=$!
+s12l_stilllive_claim_repo() {  # <label> -> a repo: writers=2, BASE STILL-LIVE (claimed process), ONE/TWO ready
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "| BASE | 4 | build | still working, claimed process live | implementor | — | 15m | REQ-x | a.sh | landed |" \
+    "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+    "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
+  add_row "$r" status=intended name=BASE agent_id= deliverable="$r/.bionic/docs/record/base-12l7h.md" \
+    duration="4 hours" launched_at="$(iso_ago 60)" claims="$S12L7H_MARKER"
+  printf '%s' "$r"
+}
+R12L7H="$(s12l_stilllive_claim_repo s12-gone-still-live-claim)"
+s12_answer fresh "somebody-else:idle"
+poke_pressure "$R12L7H" 8192 1.0 tick
+expect_contains "12l7h V3-2: a claimed-process STILL-LIVE row absent from a fresh panel prints GONE?, never a bare GONE" \
+  "poker: GONE? BASE — STILL-LIVE" "$OUT"
+expect_contains "12l7i …naming the refusal stopped will give, not a command that will fail" \
+  "stopped will refuse it: a claimed process pattern still matches a live process" "$OUT"
+expect_absent "12l7j …and the bare GONE (without the ?) is never printed for this row" \
+  "poker: GONE BASE" "$OUT"
+kill "$S12L7H_PID" 2>/dev/null
+wait "$S12L7H_PID" 2>/dev/null
+
+# 12l7k/12l7l — AMBIGUOUS, absent from a fresh panel: `stopped` refuses AMBIGUOUS
+# unconditionally, at its verdict-state `case`, before it ever reads a panel
+# (hooks/stop-orders.sh:618-630) — so this shape must print `GONE?` too, never a `GONE`
+# that recommends a doomed command (audit V3-2).
+s12l_ambiguous_repo() {  # <label> -> a repo: writers=2, two contracts share BASE's name, ONE/TWO ready
+  #
+  # TWO DISTINCT `tool_use_id=` VALUES, NOT `add_row`/`mkrow`. AMBIGUOUS is counted in
+  # hooks/session-sweeper.sh's `latest_rows` by DISTINCT (name, tool_use_id) pairs
+  # (`contracts[name]++`, keyed on `seen[name SUBSEP tuid]`) — this file's own `mkrow`
+  # hardcodes `tool_use_id=toolu_x` for every row and has no override key for it (its `case`
+  # has no `tool_use_id=*` arm), so two `add_row` calls for the same name would write ONE
+  # contract, never two. `roster_row_fixture` (the same production-shaped writer `mkrow`
+  # itself calls into, tests/lib/roster-row.sh) takes the override directly, the same way
+  # tests/session-sweeper.test.sh's own "one name, two contracts" fixture (`RA`/`dup`) does.
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  wave_plan "$r" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "| BASE | 4 | build | two dispatches share this name | implementor | — | 15m | REQ-x | a.sh | landed |" \
+    "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+    "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
+  roster_row_fixture status=intended session="$SID" name=BASE agent_id= \
+    deliverable="$r/.bionic/docs/record/base-12l7k-first.md" duration="4 hours" \
+    launched_at="$(iso_ago 900)" tool_use_id=toolu_0112L7KFIRST >> "$(roster_of "$r")"
+  roster_row_fixture status=intended session="$SID" name=BASE agent_id= \
+    deliverable="$r/.bionic/docs/record/base-12l7k-second.md" duration="4 hours" \
+    launched_at="$(iso_ago 60)" tool_use_id=toolu_0112L7KSECOND >> "$(roster_of "$r")"
+  printf '%s' "$r"
+}
+R12L7K="$(s12l_ambiguous_repo s12-gone-ambiguous)"
+s12_answer fresh "somebody-else:idle"
+poke_pressure "$R12L7K" 8192 1.0 tick
+expect_contains "12l7k V3-2: an AMBIGUOUS row absent from a fresh panel prints GONE?, naming the refusal" \
+  "poker: GONE? BASE — AMBIGUOUS and absent from a fresh panel; stopped will refuse it: two or more contracts share this name; stopped always refuses AMBIGUOUS" \
+  "$OUT"
+expect_absent "12l7l …and never the bare GONE" "poker: GONE BASE" "$OUT"
+unset CLAUDE_CONFIG_DIR
 
 # ============================================================
 section "Section 13: the absent roster splits — QUIET before the first dispatch (AC-38)"
@@ -3704,17 +4004,23 @@ expect_eq "a RUNNING row is open: writers=2 minus one leaves a gap of one" \
   "ONE" "$(s19_fill "$OUT")"
 expect_contains "…and the decision line counts it" "|open=1" "$OUT"
 
-# ---------- 19b: THE DEFECT — an idle (finished, unstopped) agent frees the slot ----------
+# ---------- 19b: an idle (finished, unstopped) agent leaves open=, and keeps its fill slot ----------
 #
 # Byte-for-byte 19a's fixture with `running` changed to `idle`. The roster row is untouched
 # and still says `confirmed`; what changed is the harness's own answer about its agent.
+#
+# RE-AUTHORED AT T2d (wave-19 audit V-2; REQ-5, ADR-034 d2). `open=` still follows the live
+# set, as S19 made it. The FILL does not any more: it is sized from every roster row that is
+# not acked, which is the stop wall's predicate, and an unacked row whose agent is idle is
+# still one the wall counts. Filling two here would print a FILL the wall's own arithmetic
+# refuses to call owed. The slot comes back when the row is acked.
 R19B="$(make_repo s19-idle)"; new_roster "$R19B"
 s19_plan "$R19B"
 add_row "$R19B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 s19_answer fresh "live-writer:idle"
 poke_pressure "$R19B" 8192 1.0 tick
-expect_eq "an IDLE row is not open: the whole gap of two is filled" \
-  "ONE TWO" "$(s19_fill "$OUT")"
+expect_eq "an IDLE row still occupies the fill until it is acked: writers=2 fills one (T2d)" \
+  "ONE" "$(s19_fill "$OUT")"
 expect_contains "…and the decision line agrees with the dispatch wall's count" "|open=0" "$OUT"
 # THE ROW ITSELF IS UNTOUCHED. The tick decides; it never writes. A tick that had closed the
 # roster row to make its own arithmetic true would break every other reader of that file.
@@ -3738,8 +4044,9 @@ s19_plan "$R19D"
 add_row "$R19D" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 s19_answer fresh "somebody-else:running"
 poke_pressure "$R19D" 8192 1.0 tick
-expect_eq "a row absent from the fresh answer is not open: the gap is two" \
-  "ONE TWO" "$(s19_fill "$OUT")"
+expect_eq "a row absent from the fresh answer still occupies the fill until acked: one (T2d)" \
+  "ONE" "$(s19_fill "$OUT")"
+expect_contains "…while open= follows the live set and drops it" "|open=0" "$OUT"
 
 # ---------- 19e: STALE — the roster count stands, and the tick says so ----------
 #
@@ -3831,6 +4138,17 @@ expect_contains "…while a genuinely MET roster still DISARMs on the same idle 
 # count is a pin and a duration is not: a future edit that reintroduces a per-row parse moves
 # the count on any machine, and the count is 2 (one `_la_scan`, one `_la_body`) however many
 # rows are open.
+#
+# THE DOCTORED COUNT MOVED FROM 12 TO 14 (wave-19 delta review R2-6, T2e). All six of this
+# fixture's rows are UNMET and unacked, so each is a GONE-report candidate (R2-6): the
+# stand-down arm now warms the panel for them too, not only for a MET or duplicate-start
+# name. On the REAL tick that costs nothing — the priming call above already filled the
+# memo before either reader runs, which is exactly what "the tick parsed the transcript
+# exactly twice" just above still pins. The DOCTORED copy has that one priming call cut, so
+# whichever reader is now first to ask pays the parse: the six per-row subshells (12, as
+# before) AND the stand-down arm's own `live_agents` call, unprimed here for the first time
+# in this process (2 more). The anti-vacuity arm's job — proving the priming call is load-
+# bearing — is unweakened: it discriminates 14 from 2 exactly as it discriminated 12 from 2.
 S19I_SHIM="$TMPROOT/s19i-shim"
 mkdir -p "$S19I_SHIM"
 S19I_REAL_JQ="$(command -v jq)"
@@ -3901,7 +4219,7 @@ S19I_POKER_REAL="$POKER"; POKER="$S19I_MUT"
 poke_counted "$R19I" tick
 POKER="$S19I_POKER_REAL"
 expect_eq "…the doctored tick still counts the same six rows" "6" "$(s19_open "$OUT")"
-expect_eq "…and pays a full parse per row: twelve, not two (19i discriminates)" "12" \
+expect_eq "…and pays a full parse per row: fourteen, not two (19i discriminates)" "14" \
   "$(/usr/bin/grep -c . "$S19I_COUNT" | tr -d ' ')"
 rm -rf "$S19I_MUT_ROOT"
 
@@ -4613,8 +4931,11 @@ expect_absent "26a meta: …and no sweep has ever marked it" "landing-swept/v1" 
 s19_answer fresh "some-other-agent:running"
 poke "$R26A" tick
 expect_eq "26a the tick still exits 0 — closing a moot row is not a refusal" "0" "$RC"
-expect_contains "26a an adopted MET row whose agent is gone is acked by the Patrol" \
-  "|name=gone-writer|by=patrol|reason=moot-and-gone" \
+# RE-AUTHORED at wave-19 T1 (D2): the row declared a deliverable and met it, so the close
+# says `landed`; `moot-and-gone` is kept for a row that declared nothing (§33c) and for a
+# duplicate start (26c).
+expect_contains "26a an adopted MET row whose agent is gone is acked by the Patrol, reason landed" \
+  "|name=gone-writer|by=patrol|reason=landed" \
   "$(cat "$(ack_ledger_of "$R26A")" 2>/dev/null)"
 expect_contains "26a2 …through the real ack verb, on the schema its one reader reads" \
   "sweeper-ledger/v1|event=ack|" "$(cat "$(ack_ledger_of "$R26A")" 2>/dev/null)"
@@ -4875,8 +5196,10 @@ expect_contains "27g the stale-panel deferral prints as a note" \
   "poker: note: stand-down deferred" "$S27_OUT"
 expect_contains "27g2 …the missing budget prints as a note" \
   "poker: note: no FILL —" "$S27_OUT"
-expect_contains "27g3 …and names the field it could not read" \
-  "parallel-budget: writers" "$S27_OUT"
+expect_contains "27g3 …and names the key it could not read, as Step 0 writes it" \
+  "parallel-budget: writers=" "$S27_OUT"
+expect_absent "27g3b …and no longer calls the budget an opt-in (wave-19 REQ-3, ADR-035)" \
+  "opts into" "$S27_OUT"
 expect_eq "27g4 the LAST stdout line is the decision line" "poker-tick/v1" \
   "$(printf '%s' "$(last_line "$S27_OUT")" | cut -d'|' -f1)"
 expect_contains "27g5 …and that line is QUIET, the band the facts leave" "decision=QUIET" \
@@ -5318,30 +5641,33 @@ s31_stop "$R31C" "$S31C_TR"
 expect_eq "31c a turn that dispatched both ready rows is not refused" "" "$(s31_decision)"
 
 # ============================================================
-section "Section 32: two readers of the current: field, bound by this row (wave-18 REQ-3, D2; A-T2.3)"
+section "Section 32: one reader of the current: field, delegated to (wave-19 REQ-6, D7; AC-6.1)"
 # ============================================================
 #
-# WHAT IS DUPLICATED, AND WHY IT IS NOT FOLDED. The stop library's fill duty has to know
-# whether this run's ledger is live, and it has no poker to ask — so
-# `payload/scripts/lib/fill.sh` reads `current:` with the same grammar this hook's
-# `_sched_plan_current_field` reads it with: the leading `## SDLC State` section, fence
-# toggle first, CR translated rather than deleted, the first `current:` line, whitespace
-# stripped. The obvious move is a delegation, and it is the one move that is not available:
-# §CG of tests/cross-gate-agreement.test.sh extracts this hook's function AS TEXT and evals
-# it beside `run_open`, so a body that called the library would answer nothing there, and
-# re-pointing that suite is outside this row's declared files.
+# ONE PARSER, TWO NAMES. The stop library's fill duty has to know whether this run's ledger is
+# live and has no poker to ask, so `payload/scripts/lib/fill.sh` owns the `current:` reader:
+# the leading `## SDLC State` section, fence toggle first, CR translated rather than deleted,
+# the first `current:` line, whitespace stripped. Until wave-19 this hook carried a second
+# parser with the same grammar, because §CG of tests/cross-gate-agreement.test.sh extracted it
+# as text; §CG now sources fill.sh beside the extraction, and this hook's
+# `_sched_plan_current_field` is a one-line wrapper over the library's reader.
 #
-# SO THE PAIR IS BOUND HERE INSTEAD — §CG's own choice, taken for the same reason it states
-# ("share one function vs. bind the two readers with a test"). Both are called FOR REAL over
-# one table of shapes, the poker's extracted the way §CG extracts it, and the row fails the
-# moment either moves without the other.
+# THE WRAPPER STAYS, AND SO DOES THIS SECTION. Calling `_fill_current_field` straight from the
+# poker would leave this section driving one function under two names — vacuous. Kept as a
+# wrapper, the poker's body is extracted exactly as §CG extracts it and driven beside the
+# library over one table of shapes, so a wrapper that drops or reorders its argument turns
+# the table red (32m proves it on a mutant), and 32p pins that the body parses nothing itself.
 
 S32_LIB_DIR="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" 2>/dev/null && pwd -P)" \
   || S32_LIB_DIR="$(cd "${BIONIC_HOOKS_DIR}/../scripts/lib" && pwd -P)"
 
-s32_poker_read() {  # <plan> -> _sched_plan_current_field's answer, extracted and eval'd
+s32_extract() {  # <poker file> -> the text of its _sched_plan_current_field, as §CG extracts it
+  awk '$0 ~ "^_sched_plan_current_field\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$1"
+}
+s32_poker_read() {  # <plan> [poker file] -> _sched_plan_current_field's answer, extracted and eval'd
   ( . "$S32_LIB_DIR/run.sh" >/dev/null 2>&1      # normalize_newlines is run.sh's
-    eval "$(awk '$0 ~ "^_sched_plan_current_field\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$POKER")"
+    . "$S32_LIB_DIR/fill.sh" >/dev/null 2>&1     # the reader the wrapper delegates to
+    eval "$(s32_extract "${2:-$POKER}")"
     _sched_plan_current_field "$1" ) 2>/dev/null
 }
 s32_fill_read() {  # <plan> -> _fill_current_field's answer, from the library itself
@@ -5443,5 +5769,162 @@ s32_row "cr-only" "$S32_CR" "6"
 # A path that is not a file at all — the silent, empty answer both give.
 expect_eq "32 the poker answers nothing for a missing plan" "" "$(s32_poker_read "$TMPROOT/s30-absent.md")"
 expect_eq "32 …and so does fill.sh" "" "$(s32_fill_read "$TMPROOT/s30-absent.md")"
+
+# 32p: ONE PARSER. The poker's body delegates and parses nothing itself — a body that grew its
+# own awk back would be the second reader AC-6.1 retires, agreeing today and drifting later.
+S32_BODY="$(s32_extract "$POKER")"
+expect_contains "32p the poker's reader delegates to fill.sh's" "_fill_current_field" "$S32_BODY"
+expect_absent "32p …and runs no parse of its own (no awk)" "awk" "$S32_BODY"
+expect_absent "32p …(no grep)" "grep" "$S32_BODY"
+
+# 32m: THE TABLE CAN GO RED. A mutant poker whose wrapper drops its argument answers nothing
+# for the plain shape, so the agreement rows above discriminate a broken delegation.
+S32_MUT="$TMPROOT/s32-poker-dropped-arg.sh"
+LC_ALL=C awk '{ if ($0 ~ /^  _fill_current_field "\$@"/) print "  _fill_current_field"; else print }' \
+  "$POKER" > "$S32_MUT"
+expect_eq "32m the mutant differs from the shipped poker by exactly the wrapper line" \
+  "1" "$(diff "$POKER" "$S32_MUT" | grep -c '^< ')"
+expect_eq "32m …and its reader answers nothing on the plain shape (the table would go red)" \
+  "" "$(s32_poker_read "$(s32_plan plain "$S32_LF")" "$S32_MUT")"
+
+
+# ============================================================
+section "Section 33: the stop acks its row, and the quiet read follows the adopter (wave-19 T1; REQ-1 AC-1.1, REQ-2 AC-2.1/2.2; D2, D4; ADR-034)"
+# ============================================================
+#
+# THE ACK IS THE CLOSE (ADR-034 d1). A `landing-swept/v1` marker records that a landing was
+# SEEN; it is not a second terminal state. The STANDDOWN close used to skip every name that
+# carried one — which is every writer that declared an artifact and reached SubagentStop — so
+# exactly the rows that landed normally were never acked (ideas row 16; R1 F1, bed3/bed2). The
+# close now skips only a name already acked, and writes `--reason landed` for a row that
+# declared a deliverable; `moot-and-gone` stays for a row that declared nothing.
+#
+# THE QUIET READ FOLLOWS THE ADOPTER (D4). An adopted row's `adopted_from=` names the session
+# that LAUNCHED it; the harness files the agent's transcript under whichever session is
+# talking to it now. `row_quiet` reads this session's subagents dir first and falls back to the
+# launcher's; `adopted_from=` itself is provenance and never rewritten (R1 Q4, bed3's false
+# NOTIFY reproduced).
+S33_CFG="$(fake_config_dir s33-ack-close)"
+export CLAUDE_CONFIG_DIR="$S33_CFG"
+s33_answer() {  # <state> <name[:status]>...
+  plant_answer "$S33_CFG/projects/-fixture-project/$SID.jsonl" "$@"
+}
+s33_ledger() { cat "$(ack_ledger_of "$1")" 2>/dev/null; }
+
+# ---------- 33a: the bed3/bed2 shape — two MET rows, one swept, a fresh panel naming neither ----------
+R33A="$(make_repo s33-bed3)"; new_roster "$R33A"
+mkdir -p "$R33A/.bionic/docs/record"
+echo done > "$R33A/.bionic/docs/record/swept.md"
+echo done > "$R33A/.bionic/docs/record/plain.md"
+add_row "$R33A" name=swept-row status=identified agent_id=aswept00000000000000000 \
+  deliverable="$R33A/.bionic/docs/record/swept.md" duration="1 hour" launched_at="$(iso_ago 600)"
+add_row "$R33A" name=plain-row status=identified agent_id=aplain00000000000000000 \
+  deliverable="$R33A/.bionic/docs/record/plain.md" duration="1 hour" launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R33A")" "$(iso_ago 30)" "$SID" swept-row aswept00000000000000000 MET
+s33_answer fresh "some-other-agent:running"
+poke "$R33A" tick
+expect_eq "33a the tick exits 0" "0" "$RC"
+expect_contains "33a a SWEPT MET row gone from a fresh panel is acked, reason landed (AC-1.1)" \
+  "|name=swept-row|by=patrol|reason=landed" "$(s33_ledger "$R33A")"
+expect_contains "33a2 …and the unswept MET row beside it too, reason landed" \
+  "|name=plain-row|by=patrol|reason=landed" "$(s33_ledger "$R33A")"
+expect_contains "33a3 …which the one verdict line now reports closed" "|acked=yes|" \
+  "$( cd "$R33A" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER_FOR_ACK" verdict swept-row 2>/dev/null )"
+poke "$R33A" tick
+expect_eq "33a4 the next tick acks neither a second time" "2" \
+  "$(grep -c '|event=ack|' "$(ack_ledger_of "$R33A")" 2>/dev/null | tr -d ' ')"
+
+# ---------- 33b: the same swept row STILL on the panel — stood down, never acked ----------
+R33B="$(make_repo s33-swept-live)"; new_roster "$R33B"
+mkdir -p "$R33B/.bionic/docs/record"
+echo done > "$R33B/.bionic/docs/record/swept.md"
+add_row "$R33B" name=swept-row status=identified agent_id=aswept00000000000000001 \
+  deliverable="$R33B/.bionic/docs/record/swept.md" duration="1 hour" launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R33B")" "$(iso_ago 30)" "$SID" swept-row aswept00000000000000001 MET
+s33_answer fresh "swept-row:idle"
+poke "$R33B" tick
+expect_contains "33b a swept row the panel still lists is stood down" "poker: STANDDOWN swept-row" "$OUT"
+expect_contains "33b2 …with the order written" "|by=patrol|target=swept-row" \
+  "$(cat "$R33B/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
+expect_eq "33b3 …and it is NOT acked while its agent is on the panel" "no" \
+  "$([ -f "$(ack_ledger_of "$R33B")" ] && echo yes || echo no)"
+
+# ---------- 33c: a row that declared NOTHING keeps moot-and-gone ----------
+R33C="$(make_repo s33-declared-nothing)"; new_roster "$R33C"
+add_row "$R33C" name=bare-row status=identified agent_id=abare000000000000000000 \
+  duration="1 hour" launched_at="$(iso_ago 600)"
+s33_answer fresh "some-other-agent:running"
+poke "$R33C" tick
+expect_contains "33c a MET row that declared no deliverable is closed moot-and-gone" \
+  "|name=bare-row|by=patrol|reason=moot-and-gone" "$(s33_ledger "$R33C")"
+expect_absent "33c2 …never as landed: nothing was produced to land" \
+  "reason=landed" "$(s33_ledger "$R33C")"
+
+# ---------- 33d: the adopted row's quiet read — the bed3 false-NOTIFY shape (AC-2.1) ----------
+#
+# One OPEN row (deliverable absent, so UNMET and the cadence read runs) adopted from a
+# predecessor. The predecessor's transcript is 5400 s old; the adopting session's is fresh.
+S33_PRED="d6d6d6d6-1111-4bbb-8ccc-000000000033"
+S33_ID="aadopt33000000000000000"
+s33_adopted() {  # <label> -> repo with one adopted UNMET row
+  local r; r="$(make_repo "s33-$1")"; new_roster "$r"
+  mkdir -p "$r/.bionic/docs/record"
+  add_row_to "$r" "$S33_PRED" name=w1 status=identified agent_id="$S33_ID" \
+    subagent_type=bionic:senior-implementor deliverable="$r/.bionic/docs/record/never.md" \
+    duration="4 hours" cadence="10 minutes" launched_at="$(iso_ago 6000)"
+  printf '%s' "$r"
+}
+S33_PRED_TX="$S33_CFG/projects/-fixture-project/$S33_PRED/subagents/agent-${S33_ID}.jsonl"
+S33_OWN_TX="$S33_CFG/projects/-fixture-project/$SID/subagents/agent-${S33_ID}.jsonl"
+mkdir -p "$(dirname "$S33_PRED_TX")" "$(dirname "$S33_OWN_TX")"
+
+R33D="$(s33_adopted adopt-live)"
+: > "$S33_PRED_TX"; : > "$S33_OWN_TX"
+poke "$R33D" adopt
+S33_ROW_ADOPTED="$(grep "^${ROSTER_ROW_SCHEMA}|" "$(roster_of "$R33D")" | grep -F "|name=w1|")"
+expect_contains "33d meta: the row really was adopted, provenance the predecessor" \
+  "adopted_from=$S33_PRED" "$S33_ROW_ADOPTED"
+backdate "$S33_PRED_TX" 5400
+touch "$S33_OWN_TX"
+s33_answer fresh "w1:running"
+poke "$R33D" tick
+expect_absent "33d an adopted row whose transcript under THIS session is fresh is not NOTIFYed (AC-2.1)" \
+  "rows=w1" "$OUT"
+expect_absent "33d2 …and the predecessor's stale path is not the one read" \
+  "$S33_PRED_TX" "$OUT"
+
+# ---------- 33e: the reverse — this session's file stale, so the row IS quiet ----------
+R33E="$(s33_adopted adopt-reverse)"
+: > "$S33_PRED_TX"; : > "$S33_OWN_TX"
+poke "$R33E" adopt
+touch "$S33_PRED_TX"
+backdate "$S33_OWN_TX" 5400
+s33_answer fresh "w1:running"
+poke "$R33E" tick
+expect_contains "33e the same row with THIS session's transcript 5400 s old takes NOTIFY" \
+  "decision=NOTIFY" "$OUT"
+expect_contains "33e2 …naming this session's transcript as the channel it read" \
+  "$S33_OWN_TX" "$OUT"
+
+# ---------- 33f: nothing under this session — the launcher's dir is the fallback ----------
+R33F="$(s33_adopted adopt-fallback)"
+rm -f "$S33_OWN_TX"; : > "$S33_PRED_TX"
+poke "$R33F" adopt
+backdate "$S33_PRED_TX" 5400
+s33_answer fresh "w1:running"
+poke "$R33F" tick
+expect_contains "33f with no file under this session the predecessor's path is still read" \
+  "$S33_PRED_TX" "$OUT"
+expect_contains "33f2 …and its staleness still notifies" "decision=NOTIFY" "$OUT"
+
+# ---------- 33g: adopted_from= is provenance — byte-identical across a tick and a re-adopt ----------
+S33_ROW_AFTER="$(grep "^${ROSTER_ROW_SCHEMA}|" "$(roster_of "$R33D")" | grep -F "|name=w1|")"
+poke "$R33D" adopt
+S33_ROW_READOPT="$(grep "^${ROSTER_ROW_SCHEMA}|" "$(roster_of "$R33D")" | grep -F "|name=w1|")"
+expect_eq "33g the adopted row is byte-identical after a tick" "$S33_ROW_ADOPTED" "$S33_ROW_AFTER"
+expect_eq "33g2 …and after a second adopt (idempotent, adopted_from= never rewritten)" \
+  "$S33_ROW_ADOPTED" "$S33_ROW_READOPT"
+
+unset CLAUDE_CONFIG_DIR
 
 finish

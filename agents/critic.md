@@ -48,7 +48,7 @@ Neither is a wall: no hook sees the duplication axis or the agreement-test oblig
 
 - Output at least one specific, reproducible issue, OR an explicit "no issues found" plus the three strongest falsification attempts you made and why each failed.
 - Confirmation-seeking agreement is not acceptable output.
-- Independence is non-negotiable: never review code you wrote.
+- Independence is non-negotiable: never review code you wrote. Never commit: bash-walls refuses it.
 - You write no files, so the findings ARE the deliverable: deliver them with the SendMessage tool. A finding left as plain final text is discarded, and an unread critique is indistinguishable from a clean pass.
 
 <!-- BRIEF-SCAFFOLD-BEGIN -->

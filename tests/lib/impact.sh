@@ -86,6 +86,22 @@
 # read every file and the answer would be the roster, always. A path expression
 # must name something BELOW a root to count.
 #
+# TEMPLATES AND BLOCKS RESOLVE TO THEIR RENDERED TARGET (REQ-10, D11). No suite
+# reads `agents-src/templates/**` or `agents-src/blocks/**` — `agents-src/
+# render.sh` reads them and a suite reads what IT writes, so a query naming a
+# source resolves to that source's rendered target(s) too, and the target's own
+# edges (pin, anchor, path-ref, dir-ref, …) answer for it from there. A `.tmpl`
+# maps to exactly one target, off render.sh's OWN `RENDER_UNITS` table (`tmpl_dir
+# -> out_dir`, one level deep by construction — see render.sh's own note on the
+# glob); a block maps to every template that injects it (`<!-- INJECT: <name>
+# -->`), which can be several — the six role templates and both skill-unit
+# templates share `brief-scaffold`, for instance — so a block's query fans out to
+# every one of their targets. Both tables are read from THIS root's own
+# `agents-src/render.sh` at every call, never hand-kept, so a sandbox tree with
+# its own render.sh and its own planted `x.md.tmpl -> skills/x.md` pair is
+# followed exactly like the real one (AC-10.3). A root with no render.sh (most
+# fixtures in this suite) simply resolves nothing — harmless, not an error.
+#
 # bash 3.2 (ADR-001), awk, grep, sed. No associative arrays, no `mapfile`, no
 # process substitution, no GNU-only flags.
 #
@@ -211,6 +227,69 @@ _canon() {
   _dealias "$(_norm "$p")"
 }
 
+# ── the template/block → rendered-target table (REQ-10, D11) ─────────────────
+# Built from THIS ROOT's own agents-src/render.sh, never hand-kept, and always
+# freshly — it is NOT part of $WORK/all and never touches the cache (the plan's
+# "keep the answer cache-free"): render.sh's own RENDER_UNITS table changing
+# shape, or a template being added or dropped, is visible on the very next
+# call, the same freshness the self edge below gets by the same means.
+#
+# $WORK/render_targets holds one `<tmpl-path>\t<target-path>` row per real
+# `*.md.tmpl` found under any unit's template directory — the unit table is one
+# level deep by construction, exactly as render.sh's own note beside its glob
+# says, so this glob matches render.sh's glob file for file.
+#
+# NO ROLE FILTER. render.sh additionally skips a stray, non-role template
+# dropped straight in agents-src/templates (the A15 guard) so it never WRITES a
+# phantom final; this table is sound rather than tight (file-header policy), so
+# it maps such a file to the agents/<name>.md path anyway — an entry nothing
+# happens to read, not a wrong one, and one fewer hand-kept fact (the role
+# roster) for this file to duplicate from render.sh.
+_render_map_build() {
+  local render_sh="$ROOT/agents-src/render.sh" tmpl_dir out_dir tmpl base
+  : >"$WORK/render_units"
+  : >"$WORK/render_targets"
+  [ -f "$render_sh" ] || return 0
+  awk '
+    /^RENDER_UNITS="$/ { grab = 1; next }
+    grab && /^"$/       { grab = 0; next }
+    grab && NF           { print }
+  ' "$render_sh" >"$WORK/render_units"
+  [ -s "$WORK/render_units" ] || return 0
+  while IFS='|' read -r tmpl_dir out_dir; do
+    [ -n "$tmpl_dir" ] && [ -n "$out_dir" ] || continue
+    [ -d "$ROOT/$tmpl_dir" ] || continue
+    for tmpl in "$ROOT/$tmpl_dir"/*.md.tmpl; do
+      [ -f "$tmpl" ] || continue
+      base="${tmpl##*/}"; base="${base%.md.tmpl}"
+      printf '%s/%s.md.tmpl\t%s/%s.md\n' "$tmpl_dir" "$base" "$out_dir" "$base" \
+        >>"$WORK/render_targets"
+    done
+  done <"$WORK/render_units"
+}
+_render_map_build
+
+# _render_targets_for <canonical query path> — the rendered target path(s) for
+# a template (exactly one row) or a block (every template that injects it, so
+# possibly several — a block shared by all six role templates fans out to all
+# six). Prints nothing for anything else, including a root with no render.sh
+# (render_targets is then empty and every lookup below misses harmlessly).
+_render_targets_for() {
+  local q="$1" name tf tgt
+  case "$q" in
+    *.md.tmpl)
+      awk -F'\t' -v q="$q" '$1 == q { print $2 }' "$WORK/render_targets"
+      ;;
+    agents-src/blocks/*.md)
+      name="${q#agents-src/blocks/}"; name="${name%.md}"
+      while IFS="$(printf '\t')" read -r tf tgt; do
+        [ -n "$tf" ] || continue
+        grep -qF "<!-- INJECT: $name -->" "$ROOT/$tf" 2>/dev/null && printf '%s\n' "$tgt"
+      done <"$WORK/render_targets"
+      ;;
+  esac
+}
+
 # ── the query, answered off the finished graph ───────────────────────────────
 # DEFINED HERE, ABOVE THE GRAPH THAT FEEDS IT, because there are two ways to
 # reach it: a cache hit answers from a graph this process never built, and a
@@ -218,8 +297,10 @@ _canon() {
 # copy — the byte-for-byte agreement between a hit and a miss is a property of
 # there being one answering path, not of two being kept in step.
 #
-# It reads exactly three things: "$@", $WORK/all, and the alias map through
-# _canon. Everything else the build below produces is scaffolding.
+# It reads four things: "$@", $WORK/all, the alias map through _canon, and
+# $WORK/render_targets (built once above, read-only from here on — see there
+# for why that stays outside $WORK/all and the cache). Everything else the
+# build below produces is scaffolding.
 _impact_answer() {
   local a c
   : >"$WORK/query"
@@ -241,6 +322,20 @@ _impact_answer() {
           done >>"$WORK/query"
     fi
   done
+  sort -u "$WORK/query" -o "$WORK/query"
+
+  # TEMPLATE/BLOCK QUERIES RESOLVE TO THEIR RENDERED TARGET (REQ-10, D11). Read
+  # from a SNAPSHOT of the query built so far, never from $WORK/query itself
+  # while appending to it — the same reason canon.awk keys on FILENAME rather
+  # than NR==FNR below: growing the file a loop is reading from mid-read is the
+  # bug, not a feature, even though in practice a target path never matches the
+  # template/block case again and the loop would just no-op on it. A directory
+  # argument under agents-src/templates or agents-src/blocks already expanded to
+  # per-file entries above, so this sees every source file, never a directory.
+  cp "$WORK/query" "$WORK/query.pretmpl" 2>/dev/null || : >"$WORK/query.pretmpl"
+  while IFS= read -r _tq; do
+    _render_targets_for "$_tq"
+  done <"$WORK/query.pretmpl" >>"$WORK/query"
   sort -u "$WORK/query" -o "$WORK/query"
 
   # SELF EDGE FOR A NOT-YET-EXISTING SUITE (REQ-4 AC-4.1/4.2, D6). $WORK/all is a

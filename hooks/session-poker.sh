@@ -491,9 +491,12 @@ line_field() {  # <line> <key>
 }
 
 # Whether a versioned pipe-delimited line CARRIES a key at all — present-and-empty and absent
-# are different rows to a by-key reader, and `line_field` returns "" for both. The pipe is
-# joined at runtime on purpose: §S13.4 (tests/cross-gate-agreement.test.sh) pins that only
-# roster.sh's row writer spells `|<key>=` as a literal, and a presence test is not a writer.
+# are different rows to a by-key reader, and `line_field` returns "" for both. This is a
+# SUBSTRING PRESENCE test, not a row assembler: §S13.4 (tests/cross-gate-agreement.test.sh)
+# now discriminates the two by shape — an assembler's `=...|<key>=$` against a presence
+# test's `*"|<key>="*` — so `$2` staying a parameter here is ordinary genericity across the
+# six callers, not a runtime-joined literal kept to dodge a blunter pin (that dodge, needed
+# before §S13.4 could tell the two shapes apart, is gone — REQ-13, wave-19 T9).
 row_has_key() {  # <line> <key>
   case "|$1" in *"|$2="*) return 0 ;; esac
   return 1
@@ -1217,10 +1220,10 @@ budget_int() {  # <budget line> <key> -> a non-negative integer, or empty
 
 # ---------------------------------------------------------------- the rung report
 #
-# THE CEILINGS THIS RUN OPTED INTO, read once. Both may be absent — a project with no plan,
-# or a plan written before Step 0 ever probed — and absence is INERT: the caller says why it
-# is not filling and fills nothing, exactly as the dispatch wall's budget arm goes inert on
-# the same missing line. A budget is a ceiling a run opts into.
+# THE CEILINGS STEP 0 MEASURED, read once. Both may be absent — a project with no plan, or a
+# plan that slipped past the governing-skill hook's budget arm (wave-19 REQ-3, ADR-035) —
+# and the caller then says why it is not filling and fills nothing; the stop wall refuses
+# the turn on the same absence, naming the key.
 #
 # THE SAME RUN EVERY OTHER DECISION THIS TICK WAS TAKEN ON. `resolve_run` answers once per
 # process and memoizes, so calling this twice on one tick costs one `plan_budget_line` and
@@ -1250,31 +1253,15 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 # awk/grep/sed pipeline, not the caller, keeps the two readings from ever disagreeing about
 # what one `current:` line says.
 #
-# AND A THIRD READER NOW, FOR THE SAME REASON AND UNDER THE SAME RULE (wave-18 REQ-3, D2;
-# A-T2.3). `payload/scripts/lib/fill.sh` asks whether the run's ledger is live and has no
-# poker to ask, so `_fill_current_field` carries this grammar — fence toggle and translation
-# included. It is not folded into this one: this BODY is what §CG of
-# tests/cross-gate-agreement.test.sh extracts as TEXT and evals beside `run_open`, where a
-# delegating body answers nothing, and re-pointing that suite is outside this row's declared
-# files. §32 of tests/session-poker.test.sh binds the pair instead — both driven for real
-# over one table of `current:` shapes, required to answer identically on every row — which is
-# §CG's own remedy for the duplication it polices. The fold belongs in the edit that
-# re-points §CG.
-_sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed), or "" if
-                               # no plan, no ## SDLC State section, or no current: line
-  local plan="$1" section
-  [ -n "$plan" ] && [ -f "$plan" ] || { printf ''; return 0; }
-  section="$(normalize_newlines "$plan" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { flag=1; next }
-    /^## / { flag=0 }
-    flag')"
-  printf '%s\n' "$section" \
-    | grep -E '^[[:space:]]*current[[:space:]]*:' \
-    | head -1 \
-    | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-    | tr -d '[:space:]'
+# AND THE PARSER IS THE LIBRARY'S (wave-19 REQ-6, D7; AC-6.1). The fence-aware read described
+# above lives once, in `payload/scripts/lib/fill.sh`'s `_fill_current_field` (sourced above
+# with units.sh), which the stop wall's fill duty reads through as well. This name stays as a
+# one-line wrapper rather than disappearing: §CG of tests/cross-gate-agreement.test.sh
+# extracts it as text and drives it beside `run_open` with fill.sh sourced, and §32 of
+# tests/session-poker.test.sh drives it beside the library — a poker that called the library
+# directly would leave §32 comparing one function with itself.
+_sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed), or ""
+  _fill_current_field "$@"
 }
 
 # THE ONE GRAMMAR THIS REPO ALREADY HAS (Step-6 review-a C-5, review-b finding (c)/N-2).
@@ -1303,7 +1290,7 @@ sched_plan_current() {  # <plan path> -> the current: value (digits only, sub-st
 # they are different judgments. Nothing is stored; two ticks a second apart over one ring
 # compute one answer.
 #
-# A MISSING CEILING IS REPORTED AS MISSING. A plan that opts into no budget offers nothing to
+# A MISSING CEILING IS REPORTED AS MISSING. A plan with no budget line offers nothing to
 # take a fraction OF, and inventing a ceiling here is the one thing this arm may never do —
 # so the fields read `-` and the line is still printed. "The tick said nothing" and "the tick
 # said there is no ceiling" are different facts, and only the second one is true.
@@ -1850,9 +1837,9 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
 # handed for a `landing-swept/v1|…|name=<X>|` line) sees the same answer on the successor
 # that stood on the predecessor.
 #
-# hooks/landing-gate.sh IS THE ONE WRITER of this schema today — its own comment (:561-563)
-# already anticipates a second and calls it "not a live path". This call site is that second
-# writer, made deliberately narrow: it never COMPUTES a verdict, it only APPENDS a line that
+# payload/scripts/lib/stop.sh (`stop_landing_gate`, reached from hooks/stop.sh) is this
+# schema's one ORIGINATING writer. This call site is the second writer, made deliberately
+# narrow: it never COMPUTES a verdict, it only APPENDS a line that
 # writer already produced, byte for byte, off the source roster this verb is only ever
 # permitted to read (never write — the row above is still the one file this verb writes to).
 #
@@ -1998,6 +1985,36 @@ EOF
 # and this caller is inside the UNMET arm of a verdict the sweeper has already taken over the
 # same contract — re-deriving delivery from disk here would be a second answer to a question
 # one owner already answered (D0).
+# THE SHARED TRANSCRIPT-DIRECTORY PREFERENCE (T1d, 2026-09-22; walk W-3). An ADOPTED row's
+# transcript lives under whichever session last spoke to the agent: THIS session once it has
+# actually exchanged a turn with it, the launching session before that (`row_quiet`'s own
+# comment above explains why — the harness files a transcript under the session talking to
+# the agent NOW, while `adopted_from=` keeps naming the launcher forever). Both readers of
+# that fact resolve it through this ONE function now: `row_quiet` (the tick's own liveness
+# read) and `adopt`'s report (hooks/session-poker.sh, the ADOPT_SCHEMA block). Before this,
+# `adopt` printed only the launching session's path and age, unconditionally — so the very
+# report that told an operator to run `adopt` could already be looking at a stale copy while
+# the row was live under the session that had just adopted it (e.g. a re-run `adopt
+# --report-only` after this session had already spoken to the agent once). Returns the
+# subagent directory to use on stdout, nonzero if neither session has the file.
+transcript_dir_for() {  # <agent-id> <this-session-id> <fallback-session-id-or-empty>
+  local id="$1" this_sid="$2" fallback_sid="$3" sub=""
+  [ -n "$id" ] || return 1
+  sub="$(session_subagent_dir "$this_sid")" || sub=""
+  if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
+    printf '%s\n' "$sub"
+    return 0
+  fi
+  if [ -n "$fallback_sid" ] && [ "$fallback_sid" != "$this_sid" ]; then
+    sub="$(session_subagent_dir "$fallback_sid")" || sub=""
+    if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
+      printf '%s\n' "$sub"
+      return 0
+    fi
+  fi
+  return 1
+}
+
 TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing to observe
   local row="$1" now="$2" cad cad_s prog pm=0 id rsid sub tx lm=0
@@ -2028,14 +2045,20 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
 
   # CHANNEL 2 — the agent's own transcript, which the harness appends to on every turn it
   # takes. It is the channel a role with no Write tool has, and the one a working agent
-  # cannot forget to keep. An ADOPTED row is still filed under the session that LAUNCHED it,
-  # which is what `adopted_from=` records.
+  # cannot forget to keep. An ADOPTED row's `adopted_from=` records the session that
+  # LAUNCHED it, which is where its file lives until this session speaks to the agent.
   tx=""
   id="$(line_field "$row" agent_id)"
   if [ -n "$id" ]; then
+    # THIS SESSION'S DIR FIRST (wave-19 T1; D4, REQ-2), resolved through `transcript_dir_for`
+    # (T1d) so `adopt`'s own report reads the identical preference — see that function's
+    # comment for the full rationale. The harness files an agent's transcript under the
+    # session talking to it NOW, so after an adopt the live file sits under the adopter while
+    # `adopted_from=` still names the launcher — reading only the launcher's copy reported a
+    # working agent quiet (R1 Q4, bed3). `adopted_from=` itself is provenance and is never
+    # rewritten: adopt's idempotence keys on it.
     rsid="$(line_field "$row" adopted_from)"
-    [ -n "$rsid" ] || rsid="$SESSION_ID"
-    sub="$(session_subagent_dir "$rsid")" || sub=""
+    sub="$(transcript_dir_for "$id" "$SESSION_ID" "$rsid")" || sub=""
     if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
       tx="$sub/agent-${id}.jsonl"
       OBS_LOG_MTIME="$(file_mtime "$tx")"
@@ -2485,21 +2508,32 @@ case "$VERB" in
         CAD_S="$(parse_seconds "$RCAD")" || CAD_S=""
 
         # ---- the three addresses, all of them derived from the one id
+        #
+        # RESOLVED THROUGH THE SAME PREFERENCE `row_quiet` USES (T1d, 2026-09-22; walk W-3).
+        # This report used to quote ONLY the launching session's copy, unconditionally — so a
+        # re-run of `adopt --report-only` after this session had already exchanged a turn
+        # with the agent (the file now sitting under THIS session's subagents dir, per
+        # `transcript_dir_for`'s own comment) still named the launcher's stale path and age,
+        # while the next tick's `row_quiet` read the fresh one: one row, two disagreeing
+        # readers. `transcript_dir_for` is the one function both now ask.
         TX=""
         TX_PRESENT=no
         TX_AGE=""
         TX_MTIME=0
         if [ -n "$RID" ]; then
-          if [ -n "$OSUB" ]; then
+          TX_SUB="$(transcript_dir_for "$RID" "$SESSION_ID" "$OSID")" || TX_SUB=""
+          if [ -n "$TX_SUB" ]; then
+            TX="$TX_SUB/agent-${RID}.jsonl"
+            TX_PRESENT=yes
+            # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
+            # the agent takes, so its mtime is a fact about the agent rather than a
+            # promise the agent has to remember to keep.
+            TX_MTIME="$(file_mtime "$TX")"
+            TX_AGE=$(( ADOPT_NOW - TX_MTIME ))
+          elif [ -n "$OSUB" ]; then
+            # NEITHER SESSION HAS SPOKEN TO THE AGENT YET — still name the launcher's path
+            # (where the file will land once it does) rather than nothing.
             TX="$OSUB/agent-${RID}.jsonl"
-            if [ -f "$TX" ]; then
-              TX_PRESENT=yes
-              # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
-              # the agent takes, so its mtime is a fact about the agent rather than a
-              # promise the agent has to remember to keep.
-              TX_MTIME="$(file_mtime "$TX")"
-              TX_AGE=$(( ADOPT_NOW - TX_MTIME ))
-            fi
           else
             # The slug could not be resolved — say where to look rather than inventing a
             # path that would read as a fact.
@@ -2655,9 +2689,9 @@ case "$VERB" in
                    "${ADOPT_OWN_PLAN:-none}" "$RWAIVER" \
                    "$RFILES" "$RSALLOW" "$RSSRC" "$RREX"; then
                 ROW_JOURNALLED=yes
-                # THE MARKER COPY (S17, AC-12 attempt 2). `hooks/landing-gate.sh` is this
-                # schema's one writer today — its own comment at :561-563 calls a second
-                # writer "not a live path". This makes it one, deliberately: adopt never
+                # THE MARKER COPY (S17, AC-12 attempt 2). `payload/scripts/lib/stop.sh`
+                # (`stop_landing_gate`, reached from hooks/stop.sh) is this schema's one
+                # ORIGINATING writer. This is a second writer, deliberately: adopt never
                 # ORIGINATES a `landing-swept/v1` verdict, it only COPIES a line that writer
                 # already produced onto the roster this session is now the owner of, so
                 # `hooks/session-start.sh`'s `open_rows` and this file's own
@@ -3524,6 +3558,36 @@ EOF
     # AFTER this walk rather than inside it: one transcript resolution per tick, not one
     # per row, and the roster count survives as its own number (S19).
     OPEN_NAMES=""
+    # THE FILL'S OCCUPANCY IS THE STOP WALL'S PREDICATE (wave-19 REQ-5, ADR-034 d2; audit V-2,
+    # T2d): every roster row of this session that is NOT ACKED. `OPEN` above is a different
+    # number with a different job. It drops MET/WAIVED rows, it is trimmed by liveness, and it
+    # decides `open=`, QUIET and DISARM. The fill used to be sized from it, and on the
+    # end-of-batch shape (a MET row whose agent is still idle on the panel, so no ack yet) the
+    # tick's gap was one wider than the wall's: writers=2, one such row, two ready rows, and the
+    # tick filled two where payload/scripts/lib/stop.sh demands one. The names are collected
+    # here, off the verdict line (which folds the roster by name and filters by session exactly
+    # as the wall's awk does), and counted AFTER the stand-down arm below has written this
+    # tick's own acks. So a MET row gone from a fresh panel is closed and not counted, and a
+    # MET row still listed is counted until its ack.
+    TICK_UNACKED_NAMES=""
+    # THE NAMES A GONE-AGENT REPORT CAN NAME (wave-19 audit V-2 delta review R2-6). An UNMET,
+    # STILL-LIVE or AMBIGUOUS row that is unacked and whose agent a fresh panel does not list
+    # now holds a `TICK_OCCUPIED` slot (A-T2.13) with nothing pointing at the closer T1e
+    # built. This is the candidate set the stand-down arm below checks against the panel it
+    # already warms for `$STANDDOWN_NAMES`; it names MET rows only, so the two sets never
+    # overlap. The report never acks: the tick has no authority over an UNMET verdict (ADR-003),
+    # and closing one is `stop-orders.sh stopped`'s job alone (T1e).
+    GONE_CANDIDATE_NAMES=""
+    # THE STATE AND DETAIL RIDE ALONG (audit V3-2). `stopped` does not accept every row in
+    # the candidate set above: it refuses AMBIGUOUS unconditionally and refuses a STILL-LIVE
+    # row whose own detail names a claimed process pattern still matching a live process
+    # (hooks/stop-orders.sh:618-663, T1g/A-T1.13 — not exposed as a sourceable function, so
+    # its acceptance predicate is mirrored below rather than re-derived; A-T2.18). The report
+    # line has to know which shape a row is BEFORE it prints, so `$RSTATE` and the row's
+    # `detail=` are captured here, one newline-joined `name|state|detail` record per
+    # candidate, in the same pass that already reads `$LINE` for this row — never a second
+    # parse of `$VERDICT_OUT` later.
+    GONE_CANDIDATE_INFO=""
     while IFS= read -r LINE; do
       case "$LINE" in "landing-verdict/v1|"*) : ;; *) continue ;; esac
       TOTAL=$((TOTAL + 1))
@@ -3555,6 +3619,8 @@ EOF
         TICK_ACKED_NAMES="${TICK_ACKED_NAMES}$(clean "$RNAME")|"
         continue
       fi
+      TICK_UNACKED_NAMES="${TICK_UNACKED_NAMES}$(clean "$RNAME")
+"
 
       case "$RSTATE" in
         MET|WAIVED)
@@ -3564,15 +3630,27 @@ EOF
           # the panel. Excluding a swept name here made the common shape at the end of a batch
           # (every writer landed, still idle on the panel) print nothing, which is the 1.7.1
           # pile-up this arm exists to end. Presence is the panel's fact alone (spec
-          # §Assumptions); `$SWEPT_ALL` is read only inside the decision below, to tell a row
-          # already closed by its own sweep from one that is merely moot-and-gone.
+          # §Assumptions), and the marker never closes a name either: only the ack does
+          # (wave-19 T1, ADR-034 d1), which the close below writes when a fresh panel shows
+          # the agent gone.
           if [ "$RSTATE" = "MET" ]; then
             STANDDOWN_NAMES="${STANDDOWN_NAMES}${STANDDOWN_NAMES:+ }$(clean "$RNAME")"
           fi
           ;;                                  # closed — not open
         *)          OPEN=$((OPEN + 1))        # STILL-LIVE, UNMET, AMBIGUOUS — open
                     OPEN_NAMES="${OPEN_NAMES}${RNAME}
-" ;;
+"
+                    # A candidate for the GONE report (R2-6): unacked (this branch is only
+                    # reached past the acked-row `continue` above) and not MET/WAIVED, so a
+                    # fresh panel showing it gone is a row nothing has ever named.
+                    GONE_CANDIDATE_NAMES="${GONE_CANDIDATE_NAMES}${GONE_CANDIDATE_NAMES:+ }$(clean "$RNAME")"
+                    # `$RSTATE` is one of STILL-LIVE/UNMET/AMBIGUOUS here (this branch's own
+                    # `case`), never `|`-bearing. `clean` on the detail strips any `|` (and
+                    # tab/newline) a brief's free text could otherwise smuggle in, which is
+                    # what keeps this record's third field from being mistaken for a fourth.
+                    GONE_CANDIDATE_INFO="${GONE_CANDIDATE_INFO}$(clean "$RNAME")|${RSTATE}|$(clean "$(line_field "$LINE" detail)")
+"
+                    ;;
       esac
       [ "$RSTATE" = "UNMET" ] || continue
 
@@ -3775,7 +3853,7 @@ EOF
         # THE TRIM IS SAID OUT LOUD, or `open=0` over a roster carrying two unmet
         # contracts is a number with no story. Only when it actually moved: a tick whose
         # live set agrees with its roster has nothing to explain.
-        say "live set fresh — ${OPEN_ROSTER} open row(s) on this roster, ${OPEN} still live; open= and any fill are sized from the live set"
+        say "live set fresh — ${OPEN_ROSTER} open row(s) on this roster, ${OPEN} still live; open= is sized from the live set, the fill from every row not yet acked"
       fi
     fi
 
@@ -3883,7 +3961,8 @@ EOF
     # an order and an ack cannot — both are acts this arm cannot take back. So STALE now reads
     # the same as NONE: the arm defers rather than guesses, naming nothing, ordering nothing,
     # acking nothing, and saying once that the next tick's fresh ListAgents will decide.
-    if [ -n "$STANDDOWN_NAMES" ] || [ -n "$DUP_START_NAMES" ]; then
+    TICK_ACKED_NOW="|"
+    if [ -n "$STANDDOWN_NAMES" ] || [ -n "$DUP_START_NAMES" ] || [ -n "$GONE_CANDIDATE_NAMES" ]; then
       # THE ALREADY-WARMED PARSE, or one read of our own — never a second parse of a
       # transcript this tick has already read. `live_agents` memoizes per process on the
       # transcript's path, size and mtime, and the trim above primes it IN THIS SHELL, so on
@@ -3932,15 +4011,29 @@ EOF
             *)
               case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
               SD_CLOSED="${SD_CLOSED}${SD_NAME}|"
-              # ALREADY SWEPT -> ALREADY CLOSED (T10, A-orch-20). The marker means a landing
-              # was seen, not that this arm is first to notice the agent is gone; a second ack
-              # here would be a ledger line saying nothing new. Silent, same as an ack that
-              # succeeds — the row was closed once, just not by this tick.
-              case "$SWEPT_ALL" in *"|name=${SD_NAME}|"*) continue ;; esac
-              SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
-                        CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
-                        bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason moot-and-gone 2>&1 ) \
-                || say "NOTIFY ${SD_NAME} — contract MET, the agent is gone, and the row could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+              # THE ACK IS THE CLOSE (wave-19 T1; D2, ADR-034 d1). Skipped only for a name the
+              # ledger already closed — the verdict walk records those in TICK_ACKED_NAMES —
+              # never for a `landing-swept/v1` marker: the marker says a landing was SEEN, and
+              # skipping on it left every writer that declared an artifact and reported open for
+              # the life of the session (ideas row 16; R1 F1). This branch runs only under a
+              # FRESH panel (SD_PANEL_KNOWN=1 above) that does not list the name.
+              case "$TICK_ACKED_NAMES" in *"|${SD_NAME}|"*) continue ;; esac
+              # THE REASON SAYS WHAT CLOSED IT. A row that declared a deliverable and met it
+              # LANDED; a row that declared nothing stats MET for want of anything to hold it
+              # to, and is closed only because it is moot and gone. Read off the row's latest
+              # contract (schema-filtered: a marker also carries `|name=`), once per close —
+              # a name reaches here at most once in its life, so this is no per-tick walk.
+              SD_REASON=moot-and-gone
+              SD_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+                | grep -F "|name=${SD_NAME}|" | tail -1)"
+              [ -n "$(line_field "$SD_ROW" deliverable)" ] && SD_REASON=landed
+              if SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                           CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                           bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason "$SD_REASON" 2>&1 ); then
+                TICK_ACKED_NOW="${TICK_ACKED_NOW}${SD_NAME}|"
+              else
+                say "NOTIFY ${SD_NAME} — contract MET, the agent is gone, and the row could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+              fi
               ;;
           esac
         done
@@ -3950,18 +4043,91 @@ EOF
           case "$SD_PANEL" in *"|${SD_NAME}|"*) continue ;; esac
           case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
           SD_CLOSED="${SD_CLOSED}${SD_NAME}|"
-          SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
-                    CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
-                    bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason moot-and-gone 2>&1 ) \
-            || say "NOTIFY ${SD_NAME} — a duplicate start whose agent is gone could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+          if SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                       CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                       bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason moot-and-gone 2>&1 ); then
+            TICK_ACKED_NOW="${TICK_ACKED_NOW}${SD_NAME}|"
+          else
+            say "NOTIFY ${SD_NAME} — a duplicate start whose agent is gone could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+          fi
         done
+
+        # THE GONE REPORT (wave-19 audit V-2 delta review R2-6). An unacked, not-MET/WAIVED
+        # row whose agent this fresh panel does not list now holds a `TICK_OCCUPIED` slot
+        # (A-T2.13) with nothing pointing at the fix: T1e's `stopped` close. This is a
+        # NOTIFY-band report only — never an ack, never an order — because the tick has no
+        # authority to decide an UNMET verdict is done (ADR-003); closing one is the human
+        # verb's job alone. Printed in the same place the STANDDOWN lines print, so it never
+        # changes what this tick decided (QUIET stays QUIET; a FILL sized before this point
+        # is unaffected).
+        #
+        # THE LINE NAMES A VERB THAT WILL RUN (audit V3-2). `GONE_CANDIDATE_NAMES` covers
+        # STILL-LIVE, UNMET and AMBIGUOUS alike, but `stopped` does not accept all three: it
+        # refuses AMBIGUOUS unconditionally, and refuses a STILL-LIVE row whose own detail
+        # names a claimed process pattern still matching a live process — a fact about a real
+        # OS process the panel cannot speak to (hooks/stop-orders.sh:618-663, T1g/A-T1.13).
+        # `stopped` is not exposed as a sourceable predicate (A-T2.18), so its acceptance
+        # rule is mirrored here rather than re-derived, kept beside this comment so the two
+        # copies are found together. A row the verb WILL close prints the verdict it actually
+        # holds (never a hardcoded "UNMET") and the runnable command; a row the verb WILL
+        # REFUSE prints `GONE?` instead, naming the verdict and the refusal reason, so the
+        # operator is told rather than misdirected into a command that fails.
+        while IFS='|' read -r SD_GNAME SD_GSTATE SD_GDETAIL; do
+          [ -n "$SD_GNAME" ] || continue
+          case "$SD_PANEL" in *"|${SD_GNAME}|"*) continue ;; esac
+          SD_REFUSE=0
+          SD_WHY=""
+          SD_VERDICT="$SD_GSTATE"
+          case "$SD_GSTATE" in
+            UNMET)
+              SD_VERDICT="UNMET"
+              ;;
+            STILL-LIVE)
+              if grep -q 'claimed process pattern' <<< "$SD_GDETAIL"; then
+                SD_REFUSE=1
+                SD_WHY="a claimed process pattern still matches a live process; the panel showing it gone does not close this on its own"
+              else
+                SD_AGE="$(printf '%s' "$SD_GDETAIL" | grep -oE 'last changed [0-9]+s ago' | grep -oE '[0-9]+')"
+                SD_CAD="$(printf '%s' "$SD_GDETAIL" | grep -oE '\([0-9]+s\)' | tr -d '()s')"
+                SD_VERDICT="STILL-LIVE (progress ${SD_AGE:-?}s old, cadence ${SD_CAD:-?}s)"
+              fi
+              ;;
+            *)
+              # AMBIGUOUS — `stopped`'s verdict-state `case` refuses it unconditionally,
+              # before it ever reads a panel (hooks/stop-orders.sh:618-630).
+              SD_REFUSE=1
+              SD_WHY="two or more contracts share this name; stopped always refuses ${SD_GSTATE}"
+              ;;
+          esac
+          if [ "$SD_REFUSE" -eq 1 ]; then
+            say "GONE? ${SD_GNAME} — ${SD_VERDICT} and absent from a fresh panel; stopped will refuse it: ${SD_WHY}"
+          else
+            say "GONE ${SD_GNAME} — ${SD_VERDICT} and absent from a fresh panel; close it with: bash ${ORDERS} stopped ${SD_GNAME}"
+          fi
+        done <<EOF
+$GONE_CANDIDATE_INFO
+EOF
       else
-        # A-orch-31: something WOULD have been decided (a MET row, or a duplicate start,
-        # is sitting in the candidate sets above) but the panel reading is not fresh enough
-        # to trust with a write. One line, said once, never a STANDDOWN, an order or an ack.
+        # A-orch-31: something WOULD have been decided (a MET row, a duplicate start, or a
+        # GONE report is sitting in the candidate sets above) but the panel reading is not
+        # fresh enough to trust with a write or a report. One line, said once, never a
+        # STANDDOWN, a GONE report, an order or an ack.
         note "stand-down deferred — the panel reading is stale; ListAgents and the next tick decides"
       fi
     fi
+
+    # THE FILL'S OCCUPANCY, COUNTED NOW (T2d; the declaration above the verdict walk says why).
+    # Every unacked name the walk saw, minus every name the arm above has just acked. Only an
+    # ack that WROTE counts as a close: a refused `ack` left the row open, and the wall will
+    # count it too.
+    TICK_OCCUPIED=0
+    while IFS= read -r OCC_NAME; do
+      [ -n "$OCC_NAME" ] || continue
+      case "$TICK_ACKED_NOW" in *"|${OCC_NAME}|"*) continue ;; esac
+      TICK_OCCUPIED=$((TICK_OCCUPIED + 1))
+    done <<EOF
+$TICK_UNACKED_NAMES
+EOF
 
     # "No roster" and "empty roster" are different facts, and only the latter may DISARM
     # (ap review A-1, item 2). A roster with zero verdict lines because the file plain does
@@ -4157,9 +4323,10 @@ EOF
     case "${SCHED_STATE:-}" in ok|hold|emergency) : ;; *) SCHED_STATE=ok ;; esac
 
     # The plan and its budget, read once. Both may be absent — a project with no plan, or a
-    # plan written before Step 0 ever probed — and absence is INERT: the tick says why it is
-    # not filling and fills nothing, exactly as the dispatch wall's budget arm goes inert on
-    # the same missing line. A budget is a ceiling a run opts into.
+    # plan written before Step 0 ever probed — and the tick then fills nothing and says why.
+    # The budget is a MEASUREMENT Step 0 writes (wave-19 REQ-3, ADR-035): the governing-skill
+    # hook refuses a plan Write without it, so an absent key here is a backstop the note
+    # below names, and the stop wall refuses the turn on the same absence.
     #
     # THE SAME RUN THE DECISION ABOVE WAS TAKEN ON. `resolve_run` answers once per tick, so
     # a session bound to its own plan fills from its own task table and quotes its own
@@ -4179,6 +4346,11 @@ EOF
       else
         say "EMERGENCY free_mb=${SCHED_FREE} — no suite-running writer on this roster to stop; the pressure is not this session's to relieve"
       fi
+      # THE WITHHELD LINE (wave-19 REQ-4 AC-4.1, D6; ADR-034 decision 3). The stop wall
+      # judges a tick turn that printed no FILL against its own ready set, and exempts it
+      # only on this line: a machine fact the plan cannot hold. `payload/scripts/lib/stop.sh`
+      # reads the first word after the dash, so the reason leads and the measurement follows.
+      say "fill withheld — EMERGENCY free_mb=${SCHED_FREE}"
     fi
 
     # THE REPORT, AND THE CEILINGS IT IS TAKEN AGAINST — both in `rung_report` above, which
@@ -4192,8 +4364,12 @@ EOF
       # What they no longer do is accumulate — the counter that made a second consecutive
       # hold mean something was the scheduler's only cross-tick state, and the rung above
       # answers the width question from the ring instead.
-      [ "$SCHED_STATE" = hold ] && \
+      if [ "$SCHED_STATE" = hold ]; then
         say "HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD} — no fills"
+        # …and the withheld line the stop wall exempts on (REQ-4 AC-4.1; the EMERGENCY arm
+        # above prints its own). Only these two paths print one.
+        say "fill withheld — HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD}"
+      fi
     else
       # ── FILL. gap = the RUNG − RUNNING, ready = pending tasks whose deps all landed.
       #
@@ -4223,6 +4399,10 @@ EOF
       # token is the number at wave scale, `T<n>` at task scale, and empty when the two
       # disagree. The withhold above is exactly that empty answer, so the shape this arm was
       # built for — a wave table sitting at `current: T1` (§22g) — still fills nothing.
+      # ONE READ OF THE FIELD FOR THE WHOLE TICK (wave-19 REQ-6, D7): loaded here, in this
+      # shell, so every `$( )` reader below — the step, the approval gate, the unreadable
+      # report, the ready set — inherits the answer instead of parsing the plan again.
+      [ -n "$SCHED_PLAN" ] && _fill_current_load "$SCHED_PLAN"
       SCHED_CURRENT=""
       [ -n "$SCHED_PLAN" ] && SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
       SCHED_STEP=""
@@ -4233,14 +4413,15 @@ EOF
       elif [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
         say "no FILL — plan at current: ${SCHED_CURRENT}, Step-3 approval pending"
       elif [ -z "$SCHED_WRITERS" ]; then
-        # A NOTE, BECAUSE NOTHING FOLLOWS FROM IT THIS TICK (REQ-10 AC-10.4; seed A 8e). A run
-        # with no budget in its plan gets this line on every tick of its life, and no act the
-        # reader can take makes the next tick quieter — a budget is a ceiling a run opts into,
-        # and opting in is a plan edit nobody is being asked for here.
+        # A NOTE, BECAUSE THE TICK ITSELF CAN DO NOTHING ABOUT IT (REQ-10 AC-10.4; seed A 8e).
+        # The budget is a measurement Step 0 writes (wave-19 REQ-3 AC-3.2, ADR-035): the
+        # governing-skill hook refuses a plan Write without it and the stop wall refuses the
+        # turn, so this line is the backstop's third voice, and it names the key as Step 0
+        # writes it so the one plan edit that quiets it is legible from the line alone.
         if [ -z "$SCHED_PLAN" ]; then
           note "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
         else
-          note "no FILL — ${SCHED_PLAN} carries no readable parallel-budget: writers field in its frontmatter; a budget is a ceiling a run opts into."
+          note "no FILL — ${SCHED_PLAN} carries no parallel-budget: writers=<n> in its frontmatter; Step 0 measures it (resources_probe, then resources_budget) and writes it verbatim."
         fi
       else
         # THE GAP IS MEASURED AGAINST THE RUNG, NOT THE CEILING (AC-17). The ceiling is what
@@ -4251,10 +4432,10 @@ EOF
         # usable evidence, for the same reason: no reading is not a bad reading, and a wave
         # that stalled on a missing probe would be worse than one that filled its budget.
         SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"
-        SCHED_GAP=$(( SCHED_WIDTH - OPEN ))
+        SCHED_GAP=$(( SCHED_WIDTH - TICK_OCCUPIED ))
         [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
         if [ "$SCHED_GAP" -eq 0 ]; then
-          say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${OPEN} open row(s): the budget is full."
+          say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${TICK_OCCUPIED} unacked roster row(s): the budget is full."
         else
           # READY IS ASKED AT THE STEP THE PLAN IS ON (REQ-1e, AC-1e.4). The widened
           # `## Tasks` table covers Steps 3-9 in one schedule, so "pending with every
@@ -4269,10 +4450,11 @@ EOF
           # decision 2). `fill_ready_set` is what `payload/scripts/lib/stop.sh`'s fill
           # duty computes at the end of every turn, so the rows this tick ORDERS and the
           # rows that turn's end REFUSES to leave undispatched are one answer rather than
-          # two. It takes the width and the occupancy this arm measured — the rung, and
-          # the roster's own open count — because the wall measures those two differently
-          # and both are right; what may not differ is the set.
-          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$OPEN")"
+          # two. It takes the width and the occupancy this arm measured: the rung, and the
+          # roster's unacked rows after this tick's own acks. The wall measures both the
+          # same way (the rung from `pressure_level`, the occupancy by the same predicate:
+          # wave-19 audit V-2, T2d), so what it names is what this prints.
+          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")"
           SCHED_IDS=""; SCHED_N=0
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
@@ -4295,7 +4477,7 @@ EOF
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
           else
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending step-${SCHED_STEP} task has all its dependencies landed."
+            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending step-${SCHED_STEP} task has all its dependencies landed."
           fi
         fi
       fi

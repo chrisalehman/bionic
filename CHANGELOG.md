@@ -3,6 +3,39 @@
 Earlier releases are recorded as git tags (`v1.4.3` … `v1.8.3`) rather than in this file,
 which starts at 1.8.4.
 
+## 1.8.6 — 2026-09-23
+
+- REQ-1: A stop closes its own roster row — the tick acks a MET row once a fresh panel
+  shows its agent gone, `stop-orders.sh stopped <name>` closes a row through the same
+  sweeper path, and `standdown` drops a row only when it is acked and gone from a fresh
+  panel; an abandoned tree still stands.
+- REQ-2: `adopt` and the tick read an adopted agent's transcript against this session's
+  own subagents dir first, falling back to the launching session's; the adopt report
+  says the same.
+- REQ-3: The writer budget is a measurement every plan carries — a `*.plan.md` Write
+  without a readable `parallel-budget: writers=N` is refused where the plan is written,
+  per Chris's Option 3 ruling.
+- REQ-4: The stop wall's fill arm honours a tick's `fill withheld — HOLD` or
+  `… EMERGENCY` line, anchored at line start; every other tick turn is judged against
+  the wall's own ready set.
+- REQ-5: The tick and the stop wall count occupancy from one source — every roster row
+  of this session not yet acked; a gone UNMET row is named `poker: GONE <name>`.
+- REQ-6: `current:` is read by one delegating body, and a Stop parses the ledger and the
+  task table once each instead of twice.
+- REQ-7: Every dispatch-preflight refusal takes the same exit status regardless of how
+  many faults a brief carries.
+- REQ-8: A read-only role's `git commit` — test-runner, researcher, auditor, or critic —
+  is refused by name; other roles are untouched.
+- REQ-9: The evidence gate's jurisdiction ends at the engaged repository — a scratch or
+  nested-repo commit is admitted, judged only against an exact allow-list of placeable
+  `-C`/`cd` shapes, with quote- and backslash-split spellings still caught.
+- REQ-10: The impact command maps a template edit to its rendered file's suites, so a
+  shared-block change reaches every consumer.
+- REQ-11/REQ-12: The Step-3 plan template renders one `- T<n>:` evidence stub per task
+  row, and its scaffold text is trimmed to what the card actually emits.
+- REQ-13: §S13.4 distinguishes a row-assembling file from a presence test, and anchors
+  every docs-pins doctoring site added since.
+
 ## 1.8.5 — 2026-09-22
 
 - REQ-1: `done` is the one terminal word at every scale; the rigor-lane verdict arms are

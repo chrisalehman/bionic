@@ -36,7 +36,8 @@
 # THE SIGNATURE IS THE CONTRACT. `fill_ready_set <plan> <rung> <open>` takes the width and
 # the occupancy from its CALLER rather than reading them itself, because the two callers
 # measure them differently and both are right: the tick counts open rows off the roster it
-# is already walking, while the stop wall counts the plan's own `active` rows; both take the
+# is already walking, trimmed by transcript liveness, while the stop wall counts the same
+# roster's rows minus acks (wave-19 REQ-5; the wall's count is never below the tick's); both take the
 # width from the same reading — `pressure_level` against the budget's declared ceiling, the
 # ceiling itself only when the rung will not parse (wave-18 review R1: a wall that measured
 # against the ceiling refused turns naming rows the tick had withheld). What may not differ
@@ -76,33 +77,73 @@ fi
 # _fill_current_field <plan> -> the RAW `current:` value (whitespace stripped), or "" when
 # there is no plan, no `## SDLC State` section, or no `current:` line inside it.
 #
-# TWO READERS, BOUND BY A TEST RATHER THAN FOLDED (A-T2.3). `hooks/session-poker.sh` reads
-# the same line with the same grammar as `_sched_plan_current_field`, and the obvious move —
-# delegate there to here — is the one move that is NOT available: §CG of
-# tests/cross-gate-agreement.test.sh extracts that function AS TEXT and evals it beside
-# `run_open`, so a delegating body answers nothing there, and re-pointing that section is
-# outside this row's declared files. §CG's own docblock states the choice this takes ("share
-# one function vs. bind the two readers with a test"); §32 of tests/session-poker.test.sh is
-# the binding, driving both for real over one table of `current:` shapes and requiring the
-# same answer on every row. The fold belongs in the edit that re-points §CG.
+# THE ONE READER OF THE FIELD (wave-19 REQ-6, D7; AC-6.1). `hooks/session-poker.sh`'s
+# `_sched_plan_current_field` is a one-line wrapper over this function (the tick sources this
+# file), and §CG of tests/cross-gate-agreement.test.sh, which extracts the poker's wrapper as
+# text, sources this file beside it — so the grammar §CG binds to `run.sh`'s `run_open` is
+# this parser's. §32 of tests/session-poker.test.sh drives the wrapper and this function over
+# one table of shapes and pins that the wrapper parses nothing itself.
 #
 # FENCE-AWARE, and the line endings are translated rather than deleted, for the reason every
 # other plan read in this tree gives: a plan documenting its own `## SDLC State` inside a
 # fence is prose, and a CR-only file that collapsed to one record would read as "no section"
-# — the fail-dangerous direction.
-_fill_current_field() {  # <plan path> -> the raw current: value, or ""
+# — the fail-dangerous direction. TWO PROCESSES, NOT SIX: the translation is its own `awk`
+# (the same program `normalize_newlines` runs, because splitting a record on CR inside the
+# reader would be a second spelling of it), and the section walk, the first `current:` line,
+# the prefix strip and the whitespace strip are one pass after it. The pass reads to the end
+# of its input rather than exiting at the match, so the translating `awk` upstream is never
+# cut off mid-write.
+#
+# READ ONCE PER PROCESS (AC-6.2). One Stop asks this field three times — `fill_ledger_live`
+# at the gate, then `fill_step_token` and `fill_ledger_live` again inside `fill_ready_set` —
+# and a tick asks it as often. `_fill_current_load` keeps the last answer in two scalars keyed
+# by the plan path; every reader goes through it. Because a value set inside `$( )` dies with
+# that subshell, the memo is only as wide as the shell that first asks: the stop wall's gate
+# and the tick both ask in their own shell before any `$( )` reader runs, and every subshell
+# after that inherits the answer. The key is the path alone. The stop wall and the tick never
+# write a plan, so for them the path is the whole identity. ONE READER WRITES: `card.sh step3`
+# rewrites one projection path per batch, each with a different `current:`, and asks the ready
+# set in its own shell — so its writer, `_card_project`, calls `fill_current_forget` after
+# every write (wave-19 critic C2: a Step-5 batch answered at the Step-4 projection's step read
+# `0 of <rung>`). A key on mtime and size would not have caught it — the step-4 and step-5
+# projections are the same size and land in the same second — and a content hash is a fork on
+# every read, the cost this memo exists to remove. So the contract is the writer's: a process
+# that rewrites a plan it has read through this file forgets it after the write. A path that
+# is not a file is answered "" and never memoised, so a plan created later in the same process
+# is still read. Sourcing this file resets the memo.
+_FILL_CURRENT_PLAN=""
+_FILL_CURRENT_VALUE=""
+fill_current_forget() {  # -> drops the memo; the next reader parses whatever path it names
+  _FILL_CURRENT_PLAN=""
+  _FILL_CURRENT_VALUE=""
+}
+_fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE for it; parses at most once
   local plan="${1:-}"
-  [ -n "$plan" ] && [ -f "$plan" ] || { printf ''; return 0; }
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null | awk '
+  if [ -n "$plan" ] && [ "$plan" = "$_FILL_CURRENT_PLAN" ]; then
+    return 0
+  fi
+  if [ -z "$plan" ] || [ ! -f "$plan" ]; then
+    _FILL_CURRENT_VALUE=""
+    _FILL_CURRENT_PLAN=""
+    return 0
+  fi
+  _FILL_CURRENT_VALUE="$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
+    fence || got { next }
     /^## SDLC State/ { flag = 1; next }
     /^## / { flag = 0 }
-    flag' \
-    | grep -E '^[[:space:]]*current[[:space:]]*:' \
-    | head -1 \
-    | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-    | tr -d '[:space:]'
+    flag && /^[[:space:]]*current[[:space:]]*:/ {
+      v = $0
+      sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, "", v)
+      gsub(/[[:space:]]/, "", v)
+      printf "%s", v
+      got = 1
+    }')"
+  _FILL_CURRENT_PLAN="$plan"
+}
+_fill_current_field() {  # <plan path> -> the raw current: value, or ""
+  _fill_current_load "${1:-}"
+  printf '%s' "$_FILL_CURRENT_VALUE"
 }
 
 # ── IS THE LEDGER LIVE? ───────────────────────────────────────────────────────
@@ -124,7 +165,8 @@ _fill_current_field() {  # <plan path> -> the raw current: value, or ""
 # gate a caller asks before paying for a table read.
 fill_ledger_live() {  # <plan> -> 0 live · 1 not
   local raw step
-  raw="$(_fill_current_field "${1:-}")"
+  _fill_current_load "${1:-}"
+  raw="$_FILL_CURRENT_VALUE"
   [ -n "$raw" ] || return 1
   step="${raw%[ab]}"
   case "$step" in
@@ -163,7 +205,8 @@ fill_ledger_live() {  # <plan> -> 0 live · 1 not
 # whose rows are unnumbered pays the second read.
 fill_step_token() {  # <plan> -> a numeric step, a `T<n>`, or ""
   local plan="${1:-}" raw step
-  raw="$(_fill_current_field "$plan")"
+  _fill_current_load "$plan"
+  raw="$_FILL_CURRENT_VALUE"
   [ -n "$raw" ] || { printf ''; return 0; }
   step="${raw%[ab]}"
   case "$step" in
@@ -191,16 +234,17 @@ fill_step_token() {  # <plan> -> a numeric step, a `T<n>`, or ""
 # fill_ready_set <plan> <rung> <open> -> the ids that may be dispatched RIGHT NOW, one per
 # line, in table order, at most <rung> - <open> of them.
 #
-# THREE GATES, IN THIS ORDER, and each of them prints nothing when it holds:
+# THREE GATES, CHEAPEST FIRST, and each of them prints nothing when it holds:
 #
-#   1. the step token — no readable step, no schedule (which folds in the Step-3 gate: a
-#      numeric `current:` below 4 is not live, so the token is asked for and the ledger
-#      predicate refuses it);
+#   1. the ledger — `fill_ledger_live`, which is the Step-3 gate: a numeric `current:` below
+#      4, or a field that will not parse, is not live;
 #   2. the arithmetic — a rung that is not a non-negative integer offers nothing to fill
-#      AGAINST (a run that opted into no budget opted into no ceiling), and a gap of zero or
+#      AGAINST (a plan with no readable width has no ceiling to fill to), and a gap of zero or
 #      less is a full budget;
-#   3. the table — `units_ready` at that token, trimmed to the gap in TABLE order, which is
-#      the orchestrator's own dependency ordering and never re-sorted.
+#   3. the table — the step token (empty when `current:` and the table's shape disagree),
+#      then `units_ready` at that token, trimmed to the gap in TABLE order, which is the
+#      orchestrator's own dependency ordering and never re-sorted. Only this gate reads the
+#      table, and it reads it once (`_fill_ready_rows`, below).
 #
 # THE TRIM IS HERE, NOT IN THE CALLER. Two callers trimming their own way is how the tick and
 # the wall would come to name different rows on one turn, which is the disagreement this
@@ -210,14 +254,25 @@ fill_step_token() {  # <plan> -> a numeric step, a `T<n>`, or ""
 # which is a session's fact rather than a plan's; the tick maps what it prints, the wall
 # names the rows.
 fill_ready_set() {  # <plan> <rung> <open> -> ready ids, one per line
-  local plan="${1:-}" rung="${2:-}" open="${3:-}" step gap ready id n=0
-  step="$(fill_step_token "$plan")"
-  [ -n "$step" ] || return 0
+  local plan="${1:-}" rung="${2:-}" open="${3:-}" gap
   fill_ledger_live "$plan" || return 0
   case "$rung" in ''|*[!0-9]*) return 0 ;; esac
   case "$open" in ''|*[!0-9]*) open=0 ;; esac
   gap=$(( rung - open ))
   [ "$gap" -gt 0 ] || return 0
+  units_memoised "$plan" _fill_ready_rows "$plan" "$gap"
+}
+
+# _fill_ready_rows <plan> <gap> -> the step token's ready ids, trimmed to <gap>. The body of
+# `fill_ready_set` past its cheap gates, run under `units_memoised` so the header questions
+# `fill_step_token` asks at task scale and the rows `units_ready` reads are ONE parse of the
+# table (wave-19 REQ-6, D7; AC-6.2). The gates above ask only `current:` (already read once
+# per process) and arithmetic, so a closed gap or a ledger that is not live still reads no
+# table at all; which gate refuses first changes nothing, since each of them prints nothing.
+_fill_ready_rows() {  # <plan> <gap>
+  local plan="${1:-}" gap="${2:-0}" step ready id n=0
+  step="$(fill_step_token "$plan")"
+  [ -n "$step" ] || return 0
   ready="$(units_ready "$plan" "$step")" || return 0
   [ -n "$ready" ] || return 0
   while IFS= read -r id; do

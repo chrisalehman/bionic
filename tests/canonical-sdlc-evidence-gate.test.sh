@@ -4165,6 +4165,7 @@ has_ui: false
 multi_agent: false
 deploy_target: none
 model_plan: orchestrator=fable-5-high
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
 ---
 
 ## Goal
@@ -5034,7 +5035,12 @@ expect_ne "25g(p) …and that common dir is not the bound plan's repository" \
 # 25g(d), 25g(f), 25g(i) and 25g(k2). If the exemption were not there this commit would be
 # refused for `pass=331` like all of them, which is what makes the allow below a verdict
 # about the repository boundary and not about a lenient fixture.
-s25x_note="evidence-gate: $s25x_wt is a linked worktree of another repository ($s25x_common) — this run's step arms do not apply"
+# RE-AUTHORED BY wave-19 T6 (REQ-9, D10). The jurisdiction arm now asks every commit which
+# repository it lands in, before the plan is read, and a linked worktree of ANOTHER repository
+# has another common dir — so it leaves there, with the one boundary line every outside
+# repository gets, and never reaches the rc-4 arm whose line this pin used to carry. The
+# verdict is unchanged: admitted, one line, this run's arms silent.
+s25x_note="evidence-gate: $s25x_wt is outside the engaged repository ($s25r_main); the evidence gate has no plan here"
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25x_wt" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25x_note" ]; then
   ok "25g(p) AC-4.1 a commit from another repository's linked worktree is exempt, and one line names the tree and the repository"
@@ -7384,6 +7390,52 @@ for n in 0 1 2; do
     "$h38g" 'git commit -m "x"'
 done
 
+# ---- 38s: AC-12.1 (wave-19 REQ-12, D12) — the `- T<n>:` stub the Step-3 text prescribes ----
+#
+# A plan authored at Step 3 carries one `- T<n>:` line per `## Tasks` row BEFORE any writer
+# runs, because the first writer's commit moves `current:` to `T<n>` and the gate then
+# demands the addressed row's line (wave-18: eight writers refused at once for the lack of
+# it). At `rigor: audited` that line must also be proof-shaped — a digit plus a `/` or a
+# backtick — so the charter's bare `pending dispatch` is refused as prose one lane below the
+# placeholder ban. The spelling is READ FROM THE RENDERED steps/3.md, not restated here: the
+# rows below pin that what the text tells a planner to write is what the gate admits.
+S38S_STEP3="${BIONIC_SKILLS_DIR}/canonical-sdlc/steps/3.md"
+S38S_TPL="$( { /usr/bin/grep -m1 -E '^- T<n>: ' "$S38S_STEP3" 2>/dev/null || true; } | sed -E 's/^- T<n>: //')"
+if [ -n "$S38S_TPL" ]; then
+  ok "38s0 AC-12.1 — steps/3.md's SDLC State template carries a '- T<n>:' stub line"
+else
+  no "38s0 AC-12.1 — steps/3.md's SDLC State template carries a '- T<n>:' stub line" "file: $S38S_STEP3"
+fi
+s38s_stub() {  # <n> -> the text's stub for row T<n> of wave 19
+  printf '%s' "$S38S_TPL" | sed -e "s/<n>/$1/g" -e 's/<wave>/19/g'
+}
+
+# s38s_plan <T1 evidence> <T2 evidence> -> an audited task-scale plan at current: T1,
+# approved, every AC naming a fails-when, both rows still pending — the first writer's commit.
+s38s_plan() {
+  printf '%s\n## Tasks\n\n| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n| T1 | build | audited | the first row dispatched | pending | .worktrees/19-T1 |\n| T2 | build | audited | a row not yet dispatched | pending | .worktrees/19-T2 |\n\n## SDLC State\n\nscale: task\ncurrent: T1\n%s\n\n- T1: %s\n- T2: %s\n\n%s\n' \
+    "$(task_frontmatter_rigor audited)" "$K2_APPROVED" "$1" "$2" "$k2_matrix_full"
+}
+
+# 38s1 — only the stubs, spelled as the text spells them → admitted.
+h38s1=$(make_home)
+write_plan "$h38s1" "$(s38s_plan "$(s38s_stub 1)" "$(s38s_stub 2)")" > /dev/null
+expect_allow "38s1 AC-12.1 — audited plan at current: T1 carrying only the text's stubs → allow" \
+  "$h38s1" 'git commit -m "x"'
+
+# 38s2 — the addressed row's stub is a bare `pending` → refused (the placeholder ban).
+h38s2=$(make_home)
+write_plan "$h38s2" "$(s38s_plan "pending" "$(s38s_stub 2)")" > /dev/null
+expect_block "38s2 AC-12.1 — …and a bare 'pending' stub on the addressed row → block" \
+  "$h38s2" 'git commit -m "x"' "task T1 evidence line is a placeholder"
+
+# 38s3 — the stub without its worktree path is prose at audited → refused. This is why the
+# text's spelling carries the path: the path is the digit and the '/' the audited lane reads.
+h38s3=$(make_home)
+write_plan "$h38s3" "$(s38s_plan "pending dispatch" "$(s38s_stub 2)")" > /dev/null
+expect_block "38s3 AC-12.1 — …and 'pending dispatch' with no path is refused as prose at audited" \
+  "$h38s3" 'git commit -m "x"' "task T1 evidence must show a command + counts, not prose"
+
 # ============================================================
 # Section 38: the prototype no-row arm (epic-22 K4, AC-K4.2)
 # ============================================================
@@ -8532,6 +8584,276 @@ h17t17=$(make_home)
 write_plan "$h17t17" "$(plan 5 "$step5_72" "$matrix_complete")" > /dev/null
 expect_allow "17t17 …and a green block that never mentions it is untouched" \
   "$h17t17" 'git commit -m "x"'
+
+
+# ============================================================
+section "REQ-9 — AC-9.1–9.3: jurisdiction ends at the engaged repository (wave-19 T6, D10, ADR-031)"
+# ============================================================
+#
+# WHAT WENT WRONG (A-T11.1, wave-18; reproduced twice in wave-19 R3 Q3). A `git commit` into a
+# repository that is not the engaged one — a scratch repo in a scratchpad, or a test bed
+# `git init`-ed under the root's own record directory — was judged against THIS run's plan and
+# refused for this run's evidence. The gate resolved the plan from the engaged root before it
+# ever asked which repository the commit lands in, and the only repository test it had
+# (`_eg_git_wt_name`) sees linked worktrees and nothing else.
+#
+# THE ROOT IS A REAL REPOSITORY with a bound-free engaged session and a `current: 5` plan whose
+# Step-5 block is red (71/72), so every commit this gate still judges is REFUSED. That is what
+# makes each allow below a verdict about the repository boundary and not about a lenient plan.
+s9_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s9_tmp")
+s9_root="$s9_tmp/root"
+mkdir -p "$s9_root/.bionic/docs/plans"
+git -C "$s9_root" init -q .
+git -C "$s9_root" -c user.email=t@example.com -c user.name=T commit -q --allow-empty -m init
+write_generic_evidence "$s9_root"
+engage "$s9_root"
+s9_plan=$(write_project_plan "$s9_root" "$(plan 5 "$step5_71" "$matrix_complete")")
+s9_home=$(make_home)
+
+# The expected line is built from the FIXTURE's own paths, never from what the arm computes.
+s9_line() {  # <the commit's repository toplevel> -> the one line the gate prints
+  printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here' "$1" "$s9_root"
+}
+s9_expect_outside() {  # <label> <payload cwd> <command> <toplevel>
+  run_hook_cwd "$s9_home" "$s9_root" "$2" "$3"
+  if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$(s9_line "$4")" ] && [ -z "$HOOK_RESOLUTION" ]; then
+    ok "$1"
+  else
+    no "$1" "expected exit 0 and exactly '$(s9_line "$4")'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' resolution='$HOOK_RESOLUTION' detail='$HOOK_VSTDERR'"
+  fi
+}
+s9_expect_judged() {  # <label> <payload cwd> <command> <substring of the refusal detail>
+  run_hook_cwd "$s9_home" "$s9_root" "$2" "$3"
+  if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check && grep -q "$4" <<<"$HOOK_VSTDERR"; then
+    ok "$1"
+  else
+    no "$1" "expected refusal exit 2 naming '$4'; exit=$HOOK_EXIT line='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  fi
+}
+
+# --- 9c: THE CONTROL — inside the root, refused exactly as before ------------------------
+s9_expect_judged "9c AC-9.1 a commit in the engaged root at current: 5 without green evidence is refused as before" \
+  "$s9_root" 'git commit -m "x"' "the suite is not fully green"
+s9_expect_judged "9c …and spelled 'git -C <root> commit', the same refusal" \
+  "$s9_root" "git -C $s9_root commit -m x" "the suite is not fully green"
+s9_expect_judged "9c …and from a subdirectory of the root, the same refusal (inside is the repository, not the path)" \
+  "$s9_root" "git -C $s9_root/.bionic/docs commit -m x" "the suite is not fully green"
+
+# --- 9a: a scratch repository outside the root --------------------------------------------
+s9_scratch="$s9_tmp/scratchpad/q1"
+mkdir -p "$s9_scratch"
+git -C "$s9_scratch" init -q .
+s9_expect_outside "9a AC-9.1 'git -C <scratch repo> commit' is admitted with one line naming both repositories" \
+  "$s9_root" "git -C $s9_scratch commit -q --allow-empty -m x" "$s9_scratch"
+s9_expect_outside "9a …and a leading 'cd <scratch repo> &&' is the same commit, admitted the same way" \
+  "$s9_root" "cd $s9_scratch && git commit -m x" "$s9_scratch"
+s9_expect_outside "9a …and a payload cwd inside the scratch repo is the same commit too" \
+  "$s9_scratch" 'git commit -m "x"' "$s9_scratch"
+# A SUBDIRECTORY of the scratch repo is named by its toplevel, which is the repository.
+mkdir -p "$s9_scratch/sub/dir"
+s9_expect_outside "9a …and '-C' at a subdirectory of the scratch repo names the repository's toplevel" \
+  "$s9_root" "git -C $s9_scratch/sub/dir commit -m x" "$s9_scratch"
+
+# THE TWO-DIRECTORY ARM STILL OWNS AN AMBIGUOUS COMMAND. The leading `cd` names the scratch
+# repo but a second `cd` walks back into the root before the commit: the shell commits in the
+# ROOT. Exempting on the leading directory would be the fail-open that arm exists to close.
+s9_expect_judged "9a …but 'cd <scratch> && cd <root> && git commit' is not exempted — two directories, refused" \
+  "$s9_root" "cd $s9_scratch && cd $s9_root && git commit -m x" "changes into"
+
+# ONE COMMIT SEGMENT OR NONE EXEMPTED (review R1, wave-19). The arm places the FIRST commit it
+# finds, so a command carrying two used to be exempted for the first one's repository while the
+# second landed in the root unjudged. Only a positive answer exempts, and a positive answer is
+# about ONE commit: any command text carrying two or more commit segments is judged as before.
+s9_expect_judged "9a R1 'git -C <scratch> commit && git commit' is judged — the second commit lands in the root" \
+  "$s9_root" "git -C $s9_scratch commit -m x && git commit -m y" "the suite is not fully green"
+s9_expect_judged "9a R1 …and 'cd <scratch> && git commit && cd <root> && git commit' is judged too" \
+  "$s9_root" "cd $s9_scratch && git commit -m x && cd $s9_root && git commit -m y" "the suite is not fully green"
+s9_expect_judged "9a R1 …and a second commit inside an 'sh -c' string counts as a second commit" \
+  "$s9_root" "git -C $s9_scratch commit -m x && bash -c 'git -C $s9_root commit -m y'" "the suite is not fully green"
+s9_expect_judged "9a R1 …and 'cd <scratch> && git -C <root> commit' places the one commit in the root" \
+  "$s9_root" "cd $s9_scratch && git -C $s9_root commit -m x" "the suite is not fully green"
+# THE RULE'S STATED COST: two commits both into the scratch repo are judged too. The gate counts
+# commit segments; it does not place each one, so it cannot tell this from the shapes above.
+s9_expect_judged "9a R1 …and two commits both into the scratch repo are judged (the count, not a placement, decides)" \
+  "$s9_root" "git -C $s9_scratch commit -m x && git -C $s9_scratch commit -m y" "the suite is not fully green"
+# CONTROL: the count is of COMMIT segments. One commit beside other git calls is still exempted.
+s9_expect_outside "9a R1 control: one outside commit beside a non-commit git call is still admitted with the line" \
+  "$s9_root" "git -C $s9_scratch add -A && git -C $s9_scratch commit -m x && git -C $s9_scratch log -1" "$s9_scratch"
+
+# ONE COMMIT, PLACED WRONG (critic C1, wave-19). Each command below carries ONE commit, and the
+# arm used to place the directory the TEXT names first — the first absolute `-C`, the leading
+# `cd`, the payload cwd — while git obeys the LAST `-C`, `--git-dir`/`--work-tree`/`GIT_DIR`
+# name the repository outright, and a `pushd`, a nested `bash -c 'cd …'` or a piped `cd` moves
+# (or fails to move) the shell where the reader never looks. Every one lands in the ROOT. Only a
+# shape the arm can place exactly as git will is exempted; each of these is judged instead.
+s9_expect_judged "9a C1 'git -C <scratch> -C <root> commit' is judged — git obeys the last -C" \
+  "$s9_root" "git -C $s9_scratch -C $s9_root commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and a relative second -C ('-C <scratch> -C ../../root') is judged" \
+  "$s9_root" "git -C $s9_scratch -C ../../root commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and '-C <scratch> --git-dir=<root>/.git --work-tree=<root>' is judged" \
+  "$s9_root" "git -C $s9_scratch --git-dir=$s9_root/.git --work-tree=$s9_root commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> && git --git-dir=<root>/.git --work-tree=<root> commit' is judged" \
+  "$s9_root" "cd $s9_scratch && git --git-dir=$s9_root/.git --work-tree=$s9_root commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> && GIT_DIR=… GIT_WORK_TREE=… git commit' is judged" \
+  "$s9_root" "cd $s9_scratch && GIT_DIR=$s9_root/.git GIT_WORK_TREE=$s9_root git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> && pushd <root> && git commit' is judged" \
+  "$s9_root" "cd $s9_scratch && pushd $s9_root && git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> && bash -c \"cd <root> && git commit\"' is judged" \
+  "$s9_root" "cd $s9_scratch && bash -c 'cd $s9_root && git commit -m x'" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> && git -C ../../root commit' is judged (a relative -C after the cd)" \
+  "$s9_root" "cd $s9_scratch && git -C ../../root commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and 'cd <scratch> | cat; git commit' is judged (a piped cd moves nothing)" \
+  "$s9_root" "cd $s9_scratch | cat; git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and a payload cwd in the scratch repo with 'pushd <root> && git commit' is judged" \
+  "$s9_scratch" "pushd $s9_root && git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a C1 …and a payload cwd in the scratch repo with 'git -C ../../root commit' is judged" \
+  "$s9_scratch" "git -C ../../root commit -m x" "the suite is not fully green"
+# CONTROLS: the shapes the arm CAN place stay admitted — the writer brief's own `cd … || exit 1;`
+# lead, and a `-C` AFTER the subcommand (commit's reuse-message flag), which is not git's cwd.
+s9_expect_outside "9a C1 control: 'cd <scratch> || exit 1; git add -A && git commit' is still admitted" \
+  "$s9_root" "cd $s9_scratch || exit 1; git add -A && git commit -m x" "$s9_scratch"
+s9_expect_outside "9a C1 control: 'git -C <scratch> commit -C HEAD' is still admitted (the second -C is commit's)" \
+  "$s9_root" "git -C $s9_scratch commit -C HEAD" "$s9_scratch"
+
+# AN ALLOW-LIST, NOT A DENY-LIST (review R2-2, wave-19 T6e). The reader used to name the words
+# that move the shell — `cd`, `pushd`, `eval`, a shell — and exempt everything else. A `cd` behind
+# a reserved word (`if`, `while`, `until`, `!`, `time`) runs in the current shell all the same,
+# and its first word was none of those, so each command below was exempted for the scratch repo
+# while it committed in the ROOT. Three rounds (R1, C1, R2-2) each patched that list. Now every
+# segment after the placing prefix must start with `git`, `true`, `:` or `exit`, and any `(`,
+# `)`, `{`, `}` or backtick costs the exemption. Each of these is judged at the run's step.
+s9_expect_judged "9a R2-2 payload cwd in the scratch repo with 'if cd <root>; then :; fi; git commit' is judged" \
+  "$s9_scratch" "if cd $s9_root; then :; fi; git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and 'time cd <root> && git commit' is judged" \
+  "$s9_scratch" "time cd $s9_root && git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and '! cd <root> || git commit' is judged" \
+  "$s9_scratch" "! cd $s9_root || git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and 'while ! cd <root>; do :; done; git commit' is judged" \
+  "$s9_scratch" "while ! cd $s9_root; do :; done; git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and 'cd <scratch> && if cd <root>; then git commit; fi' is judged" \
+  "$s9_root" "cd $s9_scratch && if cd $s9_root; then git commit -m x; fi" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and 'cd <scratch> && time cd <root> && git commit' is judged" \
+  "$s9_root" "cd $s9_scratch && time cd $s9_root && git commit -m x" "the suite is not fully green"
+# THE LIST IS OF WHAT IS ALLOWED, SO A WORD NOBODY NAMED IS JUDGED TOO. `until` is a reserved
+# word the old reader never listed; a function named `git` shadows the binary, so the one
+# `git -C <scratch> commit` in the text runs `git -C <root> commit` instead.
+s9_expect_judged "9a R2-2 …and 'until cd <root>; do :; done; git commit' is judged (a word no list named)" \
+  "$s9_scratch" "until cd $s9_root; do :; done; git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and a function named git shadowing 'git -C <scratch> commit' is judged" \
+  "$s9_root" "git() { command git -C $s9_root commit -m x; }; git -C $s9_scratch commit -m y" "the suite is not fully green"
+# CONTROL: a redirection is not a segment. '2>&1' carries an '&' and still leaves the one commit
+# placed where the payload cwd stands.
+s9_expect_outside "9a R2-2 control: 'git add -A && git commit 2>&1' from the scratch repo is still admitted" \
+  "$s9_scratch" "git add -A && git commit -m x 2>&1" "$s9_scratch"
+
+# A QUOTE- OR BACKSLASH-SPLIT --git-dir/--work-tree/GIT_* SPELLING STILL NAMES THE REPOSITORY
+# (audit V3-1, wave-19 T6f). `_eg_git_only`'s allow-list judges the first word of each segment,
+# but the :1494 disqualifier that costs the exemption for `--git-dir`/`--work-tree`/`GIT_DIR`/
+# `GIT_WORK_TREE`/`GIT_COMMON_DIR` is a raw substring test over $COMMAND. A quote or backslash
+# dropped into the middle of the word defeats the substring match while git (after the shell
+# removes the quote/backslash) still receives the flag whole, and the commit lands in the
+# root. `--git-d""ir`, `--git-di\r` and `'--git-dir'` are three ways to split it; `GIT_D""IR` is
+# ALREADY judged (its first word fails the allow-list outright) and stays as a control.
+s9_expect_judged "9a V3-1 'git --git-d\"\"ir=<root>/.git commit' from the scratch repo is judged" \
+  "$s9_scratch" "git --git-d\"\"ir=$s9_root/.git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a V3-1 'git --git-di\\r=<root>/.git commit' from the scratch repo is judged" \
+  "$s9_scratch" "git --git-di\r=$s9_root/.git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a V3-1 \"git '--git-dir'=<root>/.git commit\" from the scratch repo is judged" \
+  "$s9_scratch" "git '--git-dir'=$s9_root/.git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a V3-1 control: 'GIT_D\"\"IR=<root>/.git git commit' from the scratch repo is already judged (non-git first word)" \
+  "$s9_scratch" "GIT_D\"\"IR=$s9_root/.git git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a V3-1 …and 'git -C <scratch> --git-d\"\"ir=<root>/.git commit' from the root is judged" \
+  "$s9_root" "git -C $s9_scratch --git-d\"\"ir=$s9_root/.git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a V3-1 …and 'git -C <scratch> --git-di\\r=<root>/.git commit' from the root is judged" \
+  "$s9_root" "git -C $s9_scratch --git-di\r=$s9_root/.git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a V3-1 …and \"git -C <scratch> '--git-dir'=<root>/.git commit\" from the root is judged" \
+  "$s9_root" "git -C $s9_scratch '--git-dir'=$s9_root/.git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a V3-1 control: 'GIT_D\"\"IR=<root>/.git git -C <scratch> commit' from the root is already judged" \
+  "$s9_root" "GIT_D\"\"IR=$s9_root/.git git -C $s9_scratch commit -m x" "the suite is not fully green"
+# THE SAME CLASS, --work-tree (auditor V3-1's read, driven here): a quote-split spelling of
+# --work-tree defeats the same raw substring test.
+s9_expect_judged "9a V3-1 'git --work-t\"\"ree=<root> --git-dir=<root>/.git commit' from the scratch repo is judged" \
+  "$s9_scratch" "git --work-t\"\"ree=$s9_root --git-dir=$s9_root/.git commit -m x" "the suite is not fully green"
+
+# NOT A REPOSITORY AT ALL: git cannot name one, so the gate cannot say it is outside, and it
+# keeps today's verdict (the commit would fail on its own; the wall does not guess).
+s9_bare_dir="$s9_tmp/not-a-repo"; mkdir -p "$s9_bare_dir"
+s9_expect_judged "9a …and a directory git places in no repository is judged as before, never exempted by a failed question" \
+  "$s9_root" "git -C $s9_bare_dir commit -m x" "the suite is not fully green"
+
+# --- 9b / AC-9.3: a repository NESTED under the root is outside it ------------------------
+s9_nested="$s9_root/.bionic/docs/record/x/bed"
+mkdir -p "$s9_nested"
+git -C "$s9_nested" init -q .
+expect_eq "9b the nested bed really is its own repository (its .git is a directory)" "dir" \
+  "$(if [ -d "$s9_nested/.git" ]; then echo dir; else echo other; fi)"
+s9_expect_outside "9b AC-9.3 'git -C <root>/.bionic/docs/record/x/bed commit' is admitted with the line" \
+  "$s9_root" "git -C $s9_nested commit -q --allow-empty -m x" "$s9_nested"
+s9_expect_outside "9b AC-9.3 …and a writer standing in the nested bed (payload cwd) is admitted the same way" \
+  "$s9_nested" 'git commit -m "x"' "$s9_nested"
+
+# --- 9d: a LINKED WORKTREE of the engaged repository is INSIDE ------------------------------
+#
+# It has a toplevel of its own, so a toplevel comparison would call it outside and exempt
+# every writer's commit from the run. The comparison is the COMMON DIR, which a linked worktree
+# shares with its main checkout — so it is judged, exactly as it was before this arm existed.
+git -C "$s9_root" worktree add -q "$s9_root/.worktrees/19-T9" -b wt/19-T9 2>/dev/null
+expect_ne "9d the linked worktree's toplevel differs from the root's (a toplevel test would get it wrong)" \
+  "$s9_root" "$(git -C "$s9_root/.worktrees/19-T9" rev-parse --show-toplevel)"
+s9_expect_judged "9d a commit from a linked worktree of the engaged repository is still judged (-C)" \
+  "$s9_root" "git -C $s9_root/.worktrees/19-T9 commit -m x" "the suite is not fully green"
+s9_expect_judged "9d …and from a leading cd into it" \
+  "$s9_root" "cd $s9_root/.worktrees/19-T9 && git commit -m x" "the suite is not fully green"
+
+# --- 9e: the comparison is PHYSICAL ------------------------------------------------------------
+# A symlink to the root is the root: the same repository reached by another spelling.
+ln -s "$s9_root" "$s9_tmp/root-link"
+s9_expect_judged "9e '-C' through a symlink to the root is the root, and is judged" \
+  "$s9_root" "git -C $s9_tmp/root-link commit -m x" "the suite is not fully green"
+
+# --- 9f / AC-9.2: the plan is never opened on an outside commit (trace) --------------------
+#
+# THE TRACE CHANNEL IS STDERR ITSELF, POINTED AT A FILE. A prelude (BASH_ENV, sourced before
+# the hook's first line) runs `exec 2>&9` and `set -x`, so every command the process runs is
+# recorded there. The plan's path appears in it the moment the gate resolves the plan
+# (`PLAN=…`, `session_run`, `active_plan`); on an outside commit it must not appear at all.
+# THE POSITIVE CONTROL runs first on the SAME root and the SAME trace channel: an inside commit's
+# trace DOES carry the path, so a trace that recorded nothing cannot pass the negative.
+#
+# WHY NOT BASH_XTRACEFD (floor #1, wave-19; the class tests/hook-latency.test.sh already met in
+# wave-14 T20). BASH_XTRACEFD arrived in bash 4.1. tests/run.sh pins `/bin/bash` — 3.2 on a Mac —
+# first on PATH, so under the runner the `bash` below is 3.2, which accepts the assignment,
+# ignores it and writes xtrace to stderr; stderr went to /dev/null and both controls read an
+# EMPTY trace. By hand `bash` is Homebrew's 5.3 and the same rows passed. A DEBUG trap under
+# `set -T` re-asserts fd 2 before every command, because a `2>/dev/null` inside the hook would
+# otherwise hide that stretch of the trace. The hook's own stderr lands in the file too; the
+# outside line names the root, never the plan's path, so it cannot satisfy or spoil a row here.
+s9_prelude="$s9_tmp/xtrace-prelude.sh"
+cat > "$s9_prelude" <<'PRELUDE'
+exec 2>&9
+set -T
+trap 'exec 2>&9' DEBUG
+set -x
+PRELUDE
+s9_trace() {  # <command> -> the trace file's path
+  local _in _tr
+  _tr=$(mktemp "$s9_tmp/trace.XXXXXX")
+  _in=$(jq -n --arg c "$1" --arg cwd "$s9_root" --arg s "$EG_SID" \
+          '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
+  HOME="$s9_home" CLAUDE_PROJECT_DIR="$s9_root" CLAUDE_CODE_SESSION_ID="$EG_SID" \
+    BASH_ENV="$s9_prelude" bash "$HOOK" <<< "$_in" >/dev/null 2>/dev/null 9>"$_tr" || true
+  printf '%s' "$_tr"
+}
+s9_tr_in=$(s9_trace 'git commit -m "x"')
+expect_contains "9f control: an inside commit's trace records the plan path (the trace channel works)" \
+  "$s9_plan" "$(cat "$s9_tr_in")"
+s9_tr_out=$(s9_trace "git -C $s9_scratch commit -q --allow-empty -m x")
+expect_contains "9f control: the outside commit's trace is not empty (the hook ran under xtrace)" \
+  "git -C $s9_scratch commit" "$(cat "$s9_tr_out")"
+expect_absent "9f AC-9.2 the outside commit's trace never names the plan path" \
+  "$s9_plan" "$(cat "$s9_tr_out")"
+expect_absent "9f AC-9.2 …and never enters the plan resolution" \
+  "session_run " "$(cat "$s9_tr_out")"
 
 
 finish
