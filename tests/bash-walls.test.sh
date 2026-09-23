@@ -1443,4 +1443,143 @@ expect_status "18e: a commit from a linked worktree of the engaged repository is
 expect_absent "18e: …and never called outside" "outside the engaged repository" "$ERR"
 
 
+
+# ---------------------------------------------------------------------------
+section "REQ7 — a redirected run is the budgeted run, and every refusal's remedy is admitted (wave-20 T4, D7)"
+#
+# AC-7.1. The budget arm compared a run claim, redirections and all, to the author's
+# declared run — so the spelling every role file prescribes for saving evidence,
+# `<command> 2>&1 | tee <log>`, was refused for exactly the run the brief declared
+# (triage-B B1, driven there). Eight spellings, three kinds of budget: a shell suite on
+# `suites_allowed=`, a non-shell runner on `re_executes=`, and a shell suite that is on the
+# budget only through `Re-executes:`. Every cell is admitted where the bare command is.
+#
+# AC-7.3. Three refusals suggested a command the same wall then refused: the full-tree
+# refusal named no single-suite spelling (B1a), the backgrounded-suite remedy echoed the
+# `&` that tripped it (B2), and the budget one-liner cut a declared run mid-token (B3).
+# Each remedy row below takes the suggestion OFF the refusal's own text and drives it back
+# through the wall.
+#
+# fails-when: a spelling is refused where the bare command is admitted; a remedy the wall
+# printed is refused when run; the one-liner carries half a run.
+
+T4_LOG="$SANDBOX/t4-ev.log"
+T4_BT='`'
+# WHAT A REMEDY ROW RUNS WHEN THE REFUSAL SUGGESTED NOTHING: an off-budget suite, which every
+# row below refuses — so a missing suggestion fails the "admitted" row instead of passing it
+# on a command no wall has an opinion about.
+T4_NONE='bash tests/no-suggestion-was-printed.test.sh'
+t4_row() {  # <repo> <name> <key=value>... — an armed roster with one budgeted row for ACTOR
+  local repo="$1" name="$2"; shift 2
+  roster_header > "$repo/.bionic/tmp/roster-$SID.state"
+  roster_row_fixture "session=$SID" "name=$name" "agent_id=$ACTOR" "$@" \
+    >> "$repo/.bionic/tmp/roster-$SID.state"
+}
+t4_drive() {  # <repo> <command> [run_in_background] — as a dispatched test-runner, timeout set
+  run_hook "$(mk_payload "$1" "$2" "$ACTOR" "${3:-omit}" Bash test-runner 600000)"
+}
+t4_admitted() {  # <label> <repo> <command>
+  t4_drive "$2" "$3"
+  expect_status "$1" 0 "$ST"
+  expect_absent "$1 …with no refusal on stderr" "refused" "$ERR"
+}
+t4_refused() {  # <label> <repo> <command>
+  t4_drive "$2" "$3"
+  expect_status "$1" 2 "$ST"
+}
+t4_eight() {  # <kind label> <repo> <bare command>
+  local k="$1" r="$2" j="$3"
+  t4_admitted "REQ7 $k: the bare command is admitted (control)" "$r" "$j"
+  t4_admitted "REQ7 $k: > p"            "$r" "$j > $T4_LOG"
+  t4_admitted "REQ7 $k: >> p"           "$r" "$j >> $T4_LOG"
+  t4_admitted "REQ7 $k: 2>&1"           "$r" "$j 2>&1"
+  t4_admitted "REQ7 $k: &> p"           "$r" "$j &> $T4_LOG"
+  t4_admitted "REQ7 $k: | tee p"        "$r" "$j | tee $T4_LOG"
+  t4_admitted "REQ7 $k: 2>&1 | tee p"   "$r" "$j 2>&1 | tee $T4_LOG"
+  t4_admitted "REQ7 $k: |& tee p"       "$r" "$j |& tee $T4_LOG"
+  t4_admitted "REQ7 $k: || true"        "$r" "$j || true"
+}
+
+# --- AC-7.1, the three budget kinds ---
+R7S="$(mk_repo t4shell)"
+t4_row "$R7S" t4shell suites_allowed=alpha.test.sh suites_source=declared files=
+t4_eight "shell suite" "$R7S" 'bash tests/alpha.test.sh'
+
+R7N="$(mk_repo t4runner)"
+t4_row "$R7N" t4runner suites_allowed=alpha.test.sh suites_source=declared files= \
+  "re_executes=${T4_BT}npx jest --testPathPatterns 'x'${T4_BT}"
+t4_eight "non-shell runner" "$R7N" "npx jest --testPathPatterns 'x'"
+
+R7R="$(mk_repo t4reonly)"
+t4_row "$R7R" t4reonly suites_allowed=none suites_source=declared files= \
+  "re_executes=${T4_BT}bash tests/gamma.test.sh${T4_BT}"
+t4_eight "Re-executes-only budget" "$R7R" 'bash tests/gamma.test.sh'
+
+# THE NEGATIVE CONTROLS: normalising cannot widen the budget. A run that is not the declared
+# one is still refused however it is redirected, and so is a suite neither channel names.
+t4_refused "REQ7 control: the whole-tree jest, redirected, is still REFUSED against a narrower declaration" \
+  "$R7N" "npx jest 2>&1 | tee $T4_LOG"
+t4_refused "REQ7 control: an undeclared shell suite, redirected, is still REFUSED on a Re-executes-only row" \
+  "$R7R" "bash tests/delta.test.sh > $T4_LOG 2>&1"
+
+# THE DECLARED SIDE IS NORMALISED AT ITS ONE DECODE. A row written before the lift refused
+# redirections (or by hand) carries one inside its marks; the rule is written once and held
+# on both sides of the compare, so the bare command and its redirected spelling both match.
+R7L="$(mk_repo t4legacy)"
+t4_row "$R7L" t4legacy suites_allowed=alpha.test.sh suites_source=declared files= \
+  "re_executes=${T4_BT}npx jest --testPathPatterns 'x' 2>&1${T4_BT}"
+t4_admitted "REQ7 decode: a declared run stored with a redirect admits the bare command" \
+  "$R7L" "npx jest --testPathPatterns 'x'"
+t4_admitted "REQ7 decode: …and its tee spelling" \
+  "$R7L" "npx jest --testPathPatterns 'x' 2>&1 | tee $T4_LOG"
+
+# --- AC-7.3 (1): the full-tree refusal names the single-suite spelling, and it runs ---
+t4_refused "REQ7 remedy 1: bash tests/run.sh --one is refused as the full tree" \
+  "$R7S" 'bash tests/run.sh --one alpha.test.sh'
+T4_R1=$(printf '%s\n' "$ERR" | grep -o 'bash tests/[A-Za-z0-9._-]*\.test\.sh' | head -1)
+expect_eq "REQ7 remedy 1: …and the refusal names the per-suite spelling from the budget" \
+  "bash tests/alpha.test.sh" "$T4_R1"
+expect_contains "REQ7 remedy 1: …and says --one is the runner's internal worker mode" "--one" "$ERR"
+t4_admitted "REQ7 remedy 1: …and that spelling, run, is admitted" "$R7S" "${T4_R1:-$T4_NONE}"
+
+# --- AC-7.3 (2): the backgrounded-suite remedy carries no &, and it runs ---
+t4_remedy_bg() {  # <label> <repo> <backgrounded command>
+  local label="$1" r="$2" cmd="$3" fix
+  t4_refused "$label: the backgrounded suite is refused" "$r" "$cmd"
+  expect_contains "$label: …by the backgrounded arm" "a backgrounded suite" "$ERR"
+  fix=$(printf '%s\n' "$ERR" | grep '| tee <evidence log>' | head -1 | sed 's/^[[:space:]]*//')
+  expect_nonempty "$label: …suggesting a foreground command" "$fix"
+  fix="${fix//<evidence log>/$T4_LOG}"
+  t4_admitted "$label: …and the suggestion, run as printed, is admitted" "$r" "${fix:-$T4_NONE}"
+}
+t4_remedy_bg "REQ7 remedy 2a shell suite &" "$R7S" 'bash tests/alpha.test.sh &'
+t4_remedy_bg "REQ7 remedy 2b runner &" "$R7N" "npx jest --testPathPatterns 'x' &"
+t4_remedy_bg "REQ7 remedy 2c nohup, redirected, &" "$R7S" "nohup bash tests/alpha.test.sh > $T4_LOG 2>&1 &"
+# THE TOOL-FLAG CASE: the text is already foreground, so the remedy is the flag.
+t4_drive "$R7S" 'bash tests/alpha.test.sh' true
+expect_status "REQ7 remedy 2d: run_in_background true on a suite is refused" 2 "$ST"
+expect_contains "REQ7 remedy 2d: …and the remedy names the flag to clear" "run_in_background: false" "$ERR"
+
+# --- AC-7.3 (3): the budget one-liner shows whole runs or a count, never half a run ---
+R7W="$(mk_repo t4wire)"
+t4_row "$R7W" t4wire suites_allowed=none suites_source=declared files= \
+  "re_executes=${T4_BT}npm test${T4_BT} ${T4_BT}pytest tests/unit/test_widget_rendering_pipeline_end_to_end.py${T4_BT} ${T4_BT}go test ./internal/rendering/pipeline/...${T4_BT}"
+t4_refused "REQ7 remedy 3: an undeclared run is refused" "$R7W" 'npx jest'
+T4_LINE=$(printf '%s\n' "$ERR" | grep -m1 '^bionic: ')
+expect_eq "REQ7 remedy 3: …on a verdict line whose marks are balanced" "0" \
+  "$(( $(printf '%s' "$T4_LINE" | tr -cd '`' | wc -c) % 2 ))"
+expect_contains "REQ7 remedy 3: …showing the first declared run whole, and the rest counted as runs" \
+  "${T4_BT}npm test${T4_BT} +2 more" "$T4_LINE"
+T4_R3=$(printf '%s' "$T4_LINE" | awk -F'`' 'NF >= 3 { print $2 }')
+t4_admitted "REQ7 remedy 3: …and the run it shows, run, is admitted" "$R7W" "${T4_R3:-$T4_NONE}"
+# NOTHING FITS: the count, never a cut. Three runs each wider than the line has room for.
+R7X="$(mk_repo t4wirewide)"
+T4_LONG="pytest tests/unit/test_a_very_long_module_name_that_cannot_fit_on_any_line.py -k"
+t4_row "$R7X" t4wirewide suites_allowed=none suites_source=declared files= \
+  "re_executes=${T4_BT}$T4_LONG one${T4_BT} ${T4_BT}$T4_LONG two${T4_BT} ${T4_BT}$T4_LONG three${T4_BT}"
+t4_refused "REQ7 remedy 3b: an undeclared run against three over-wide runs is refused" "$R7X" 'npx jest'
+T4_LINE=$(printf '%s\n' "$ERR" | grep -m1 '^bionic: ')
+expect_contains "REQ7 remedy 3b: …and the line counts them as runs" "3 runs" "$T4_LINE"
+expect_absent "REQ7 remedy 3b: …never a cut run" "pytest" "$T4_LINE"
+
 finish
