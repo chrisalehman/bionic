@@ -1013,6 +1013,9 @@ count_refused_dispatches() {  # <transcript> [<since ISO>] -> count on stdout
 #   bound-open <p>    this session's own run, and it is open        -> p, open
 #   fallback <p>      no binding; today's root-keyed answer, said out loud (AC-3) -> p, open
 #   bound-closed <p>  this session's own run, and it has closed     -> p, NOT open
+#   bound-unreadable <p>  its own run's plan is there, unreadable   -> p, OPEN=unreadable:
+#                     named, never "no open run"; run_state keeps the Patrol (doubt is open)
+#                     and the scheduler fills nothing from a plan it cannot read (wave-20 T1)
 #   none              no binding and no open run in the root        -> today's newest plan,
 #                                                                      NOT open
 #
@@ -1054,9 +1057,19 @@ resolve_run() {  # <project root> <session id> -> sets POKER_RUN_PLAN / POKER_RU
       # second opinion cannot re-open a run this session already finished.
       POKER_RUN_PLAN="$path"; POKER_RUN_OPEN=no
       die "bound plan closed — $path; this session has no open run" ;;
-    *)
+    bound-unreadable)
+      # A BINDING IS A COMMITMENT, AND AN UNREADABLE ONE IS STILL ONE (wave-20 T1, REQ-2).
+      # The plan is carried, the neighbour's is never read, and "open" is neither yes nor no.
+      POKER_RUN_PLAN="$path"; POKER_RUN_OPEN=unreadable
+      die "bound plan unreadable — $path; restore read access to it" ;;
+    none)
       POKER_RUN_PLAN="$(active_plan "$repo")" || POKER_RUN_PLAN=""
       POKER_RUN_OPEN=no ;;
+    *)
+      # A WORD THIS TICK DOES NOT KNOW RESOLVES NOTHING. This arm was `none`'s, and a verdict
+      # added to `session_run` without an arm here fell into `active_plan` — another run's
+      # plan (wave-20 T1, REQ-2). `none` keeps that read by name, for the reason above.
+      POKER_RUN_PLAN=""; POKER_RUN_OPEN=no ;;
   esac
   return 0
 }
@@ -1082,8 +1095,15 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
   # error on stderr and an empty answer. DOUBT IS `open` (ADR-002 §3), which is the same
   # answer the no-plan arm above gives, so the Patrol keeps its stamp rather than stopping
   # on a file nobody can read.
-  if [ ! -f "$plan" ]; then
+  if [ ! -f "$plan" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
     printf 'open|%s is this session'"'"'s bound plan and it is not on disk' "$plan"
+    return 0
+  fi
+  # AN UNREADABLE BOUND PLAN IS DOUBT, AND DOUBT IS `open` (ADR-002 §3; wave-20 T1, REQ-2).
+  # It is not gone — the arm above would say "not on disk", which for a plan inside an
+  # unopenable folder is false — and nothing below could read its `current:`.
+  if [ "$POKER_RUN_OPEN" = unreadable ]; then
+    printf 'open|%s is this session'"'"'s bound plan and it cannot be read' "$plan"
     return 0
   fi
   section="$(normalize_newlines "$plan" | awk '
@@ -1240,7 +1260,8 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
   resolve_run "$1" "${2:-}"
   SCHED_PLAN="$POKER_RUN_PLAN"
   SCHED_BUDGET=""
-  [ -n "$SCHED_PLAN" ] && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
+  [ -n "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ] \
+    && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
   SCHED_WRITERS="$(budget_field "$SCHED_BUDGET" writers)"
   SCHED_JOBS="$(budget_field "$SCHED_BUDGET" test_jobs)"
 }
@@ -4611,12 +4632,20 @@ EOF
       # ONE READ OF THE FIELD FOR THE WHOLE TICK (wave-19 REQ-6, D7): loaded here, in this
       # shell, so every `$( )` reader below — the step, the approval gate, the unreadable
       # report, the ready set — inherits the answer instead of parsing the plan again.
-      [ -n "$SCHED_PLAN" ] && _fill_current_load "$SCHED_PLAN"
-      SCHED_CURRENT=""
-      [ -n "$SCHED_PLAN" ] && SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
-      SCHED_STEP=""
-      [ -n "$SCHED_PLAN" ] && SCHED_STEP="$(fill_step_token "$SCHED_PLAN")"
-      if [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_STEP" ]; then
+      #
+      # AN UNREADABLE BOUND PLAN FILLS NOTHING, AND SAYS WHICH PLAN (wave-20 T1, REQ-2). Its
+      # `current:`, its approval and its task table are all unreadable, and no other plan is
+      # read in its place; the three reads below are skipped so the line names the cause
+      # rather than a symptom ("current: unreadable (none)").
+      SCHED_CURRENT=""; SCHED_STEP=""
+      if [ -n "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
+        _fill_current_load "$SCHED_PLAN"
+        SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
+        SCHED_STEP="$(fill_step_token "$SCHED_PLAN")"
+      fi
+      if [ "$POKER_RUN_OPEN" = unreadable ]; then
+        say "no FILL — bound plan unreadable — ${SCHED_PLAN}"
+      elif [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_STEP" ]; then
         SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
         say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
       elif [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
