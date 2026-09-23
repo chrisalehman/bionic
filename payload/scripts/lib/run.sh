@@ -145,6 +145,77 @@ plan_frontmatter_get() {
   return 0
 }
 
+# ---------- THE BUDGET, READ ONE WAY (epic-23 wave-20 T2, REQ-10, D10; ADR-035) ----------
+#
+# FOUR READERS, THREE READINGS. Step 0 writes one line into the plan's frontmatter —
+# `parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=…` — and four readers
+# took `writers=` out of it: the governing-skill hook (at Write, over the text being
+# written), the stop wall, the Patrol tick and dispatch preflight. Driven over one plan
+# (research D3 §REQ-10), `max_writers=9 writers=3` read 9 to the hook and the stop wall and 3
+# to the other two, because the first two cut at the first SUBSTRING `writers=`; and the stop
+# wall read `  parallel-budget:` and `parallel-budget :` where every other reader read no line
+# at all. One run sized three ways is the fill disagreeing with the dispatch wall about the
+# same slot. These three functions are the one reading, and every reader calls them.
+#
+# THE KEY IS STRICT: `parallel-budget:` at column 0, the colon directly after it. That is the
+# spelling the governing-skill hook admits at Write (wave-19 C5), so a line any other
+# spelling carries arrived by a later hand edit, and it reads as no line — which every reader
+# answers with ADR-035's named backstop rather than with a number.
+#
+# THE FIELD IS WHOLE: `writers=` preceded by the start of the value or by whitespace, so
+# `max_writers=9` is not a writers field. Its value must be decimal digits, and it is returned
+# as the integer it names — `08` is 8, not an octal error in the next `$(( ))` and not a
+# string that compares unequal to 8 — or empty when it is absent, empty, not digits, or
+# longer than nine digits (a number no machine budget reaches, and one shell arithmetic would
+# wrap). Empty means UNMEASURED, and each caller says so in its own words.
+
+# budget_line_of <frontmatter text> -> the value after `parallel-budget:`, or empty.
+#
+# TEXT, NOT A FILE, because one reader has no file: the governing-skill hook judges the
+# content of a Write before it lands. The text is the frontmatter block's lines, without the
+# `---` delimiters — the shape that hook already holds as `$FRONTMATTER`.
+budget_line_of() {  # <frontmatter text> -> the budget line's value, or empty
+  awk '
+    /^parallel-budget:/ { sub(/^parallel-budget:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }
+  ' <<< "${1:-}" 2>/dev/null
+  return 0
+}
+
+# plan_budget_line <plan> -> the value after `parallel-budget:` in the plan's LEADING
+# frontmatter block, or empty. A `parallel-budget:` in the plan body is prose (a plan quoting
+# its own header in a task description), and reading it would take a quotation for
+# configuration. The file goes through `_run_lines`, so a CRLF plan reads as an LF one — the
+# line-ending rule every other reader of the plan here already applies.
+plan_budget_line() {  # <plan> -> the budget line's value, or empty
+  local plan="${1:-}" fm
+  [ -n "$plan" ] && [ -f "$plan" ] || return 0
+  fm=$(_run_lines "$plan" | awk '
+        NR == 1 && $0 == "---" { f = 1; next }
+        f && $0 == "---" { exit }
+        f { print }')
+  budget_line_of "$fm"
+}
+
+# budget_field <budget line> <key> -> that key's value as a decimal integer, or empty.
+#
+# PARAMETER EXPANSION, NO PROCESS: this runs on the dispatch path and at every turn end.
+# Tabs are folded to spaces and the value is padded with one space each side, so " <key>="
+# matches a whole field only, wherever it sits; the FIRST such field wins, as every by-key
+# reader in this tree takes the first match.
+budget_field() {  # <budget line> <key> -> a non-negative integer, or empty
+  local s=" ${1:-} " key="${2:-}" v
+  [ -n "$key" ] || return 0
+  s="${s//$'\t'/ }"
+  case "$s" in
+    *" ${key}="*) v="${s#* "${key}"=}"; v="${v%% *}" ;;
+    *) return 0 ;;
+  esac
+  case "$v" in ''|*[!0-9]*) return 0 ;; esac
+  [ "${#v}" -le 9 ] || return 0
+  printf '%s' "$((10#$v))"
+  return 0
+}
+
 # _run_candidates <droot> -> every file under <droot>/plans and <droot>/incidents (each
 # walked to depth <= 2) that carries a flush-left `## SDLC State`, NUL-separated, in walk
 # order: plans/ then incidents/, and within each whatever order `find` produced. Prints

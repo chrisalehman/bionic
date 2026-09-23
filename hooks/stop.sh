@@ -49,7 +49,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
 # payload/scripts/lib/loader.sh.
-BIONIC_LIB_WANT="context.sh fill.sh fold.sh refuse.sh root.sh run.sh session.sh stop.sh worktree.sh"
+BIONIC_LIB_WANT="context.sh fill.sh fold.sh refuse.sh root.sh roster.sh run.sh session.sh stop.sh worktree.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -151,6 +151,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop"; fi
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/roster.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
