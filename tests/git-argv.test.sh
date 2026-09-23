@@ -222,6 +222,111 @@ parse_cmd "env GIT_AUTHOR_DATE='2026-04-11' git commit -m x" && eq "env prefix i
 parse_cmd '/usr/bin/git commit -m x' && eq "an absolute git path still parses" "commit" "$GIT_SUB" \
   || no "an absolute git path still parses" "no git segment parsed"
 
+# ENV IS A COMMAND-TAKING PREFIX WITH OPTIONS OF ITS OWN (wave-20 T3, REQ-3, D3). The reader
+# used to drop the bare word `env` and stop at the first word after it that was not an
+# assignment, so `env -C <dir>`, `env -i`, `env -u NAME` and `/usr/bin/env` left an option
+# (or the env binary's path) as argv[0], and nothing read the git behind it: the evidence
+# gate admitted `env -C <root> git commit` and protect-main a push to main. Each spelling
+# below, BSD's and GNU's, is a commit read by argv position.
+parse_cmd 'env -C /tmp/r git commit -m x' && eq "env -C <dir> is skipped with its value" "commit" "$GIT_SUB" \
+  || no "env -C <dir> is skipped with its value" "no git segment parsed"
+parse_cmd 'env -C/tmp/r git commit -m x' && eq "env -C<dir> (value inline) is skipped" "commit" "$GIT_SUB" \
+  || no "env -C<dir> (value inline) is skipped" "no git segment parsed"
+parse_cmd 'env --chdir=/tmp/r git commit -m x' && eq "env --chdir=<dir> is skipped" "commit" "$GIT_SUB" \
+  || no "env --chdir=<dir> is skipped" "no git segment parsed"
+parse_cmd 'env --chdir /tmp/r git commit -m x' && eq "env --chdir <dir> (separate value) is skipped" "commit" "$GIT_SUB" \
+  || no "env --chdir <dir> (separate value) is skipped" "no git segment parsed"
+parse_cmd 'env -i git commit -m x' && eq "env -i is skipped" "commit" "$GIT_SUB" \
+  || no "env -i is skipped" "no git segment parsed"
+parse_cmd 'env - git commit -m x' && eq "env - (the old -i) is skipped" "commit" "$GIT_SUB" \
+  || no "env - (the old -i) is skipped" "no git segment parsed"
+parse_cmd 'env -u FOO git commit -m x' && eq "env -u NAME is skipped with its value" "commit" "$GIT_SUB" \
+  || no "env -u NAME is skipped with its value" "no git segment parsed"
+parse_cmd 'env -uFOO git commit -m x' && eq "env -uNAME (value inline) is skipped" "commit" "$GIT_SUB" \
+  || no "env -uNAME (value inline) is skipped" "no git segment parsed"
+parse_cmd 'env --unset=FOO git commit -m x' && eq "env --unset=NAME is skipped" "commit" "$GIT_SUB" \
+  || no "env --unset=NAME is skipped" "no git segment parsed"
+parse_cmd 'env -P /usr/bin git commit -m x' && eq "env -P <path> is skipped with its value" "commit" "$GIT_SUB" \
+  || no "env -P <path> is skipped with its value" "no git segment parsed"
+parse_cmd 'env -v -0 git commit -m x' && eq "env -v -0 (valueless flags) are skipped" "commit" "$GIT_SUB" \
+  || no "env -v -0 (valueless flags) are skipped" "no git segment parsed"
+parse_cmd 'env -iC /tmp/r git commit -m x' && eq "env -iC <dir> (a cluster ending in a value flag) is skipped" "commit" "$GIT_SUB" \
+  || no "env -iC <dir> (a cluster ending in a value flag) is skipped" "no git segment parsed"
+parse_cmd 'env -i -u FOO BAR=1 git commit -m x' && eq "env options then an assignment are skipped" "commit" "$GIT_SUB" \
+  || no "env options then an assignment are skipped" "no git segment parsed"
+parse_cmd 'env -- git commit -m x' && eq "env -- ends env's options" "commit" "$GIT_SUB" \
+  || no "env -- ends env's options" "no git segment parsed"
+parse_cmd '/usr/bin/env git commit -m x' && eq "/usr/bin/env is skipped" "commit" "$GIT_SUB" \
+  || no "/usr/bin/env is skipped" "no git segment parsed"
+parse_cmd '/usr/bin/env -C /tmp/r git commit -m x' && eq "/usr/bin/env -C <dir> is skipped" "commit" "$GIT_SUB" \
+  || no "/usr/bin/env -C <dir> is skipped" "no git segment parsed"
+parse_cmd 'env -C /tmp/r env -u X git commit -m x' && eq "two stacked envs are skipped" "commit" "$GIT_SUB" \
+  || no "two stacked envs are skipped" "no git segment parsed"
+parse_cmd 'sudo env -C /tmp/r git commit -m x' && eq "sudo then env -C is skipped" "commit" "$GIT_SUB" \
+  || no "sudo then env -C is skipped" "no git segment parsed"
+# `env -S <string>` is env's own `sh -c`: the string is split into the command it runs, so it
+# is re-read the way a runner string is (git_argv_inner).
+parse_cmd "env -S 'git commit -m x'" && eq "env -S '<string>' is re-read as a command" "commit" "$GIT_SUB" \
+  || no "env -S '<string>' is re-read as a command" "no git segment parsed"
+parse_cmd "env --split-string='git commit -m x'" && eq "env --split-string='<string>' is re-read as a command" "commit" "$GIT_SUB" \
+  || no "env --split-string='<string>' is re-read as a command" "no git segment parsed"
+# THE NEGATIVES: env in front of something else is still not git, and prose about it is prose.
+if parse_cmd 'env -C /tmp/r ls -la'; then
+  no "env -C <dir> ls is not a git command" "parsed as git ${GIT_SUB}"
+else
+  ok "env -C <dir> ls is not a git command"
+fi
+if parse_cmd 'echo "env -C /tmp/r git commit -m x"'; then
+  no "quoted env prose is not a git command" "parsed as git ${GIT_SUB}"
+else
+  ok "quoted env prose is not a git command"
+fi
+
+section "Section 1e: env's directory is recorded for the evidence gate (wave-20 T3, D3)"
+#
+# `_eg_commit_cwd` places a commit by the directory it runs in; `env -C <dir>` moves that
+# directory exactly as `git -C <dir>` does, so the skip records it in GIT_ARGV_ENV_CHDIR.
+# Last one wins, as env itself does. It is reset on every call, so a segment without env
+# never inherits the previous segment's directory.
+chdir_of() {  # <command> -> GIT_ARGV_ENV_CHDIR after skipping its first segment
+  _git_argv_skip "$(git_argv_segments "$1" | head -1)"
+  printf '%s' "${GIT_ARGV_ENV_CHDIR-<unset>}"
+}
+eq "env -C <dir> records <dir>"                 "/tmp/r" "$(chdir_of 'env -C /tmp/r git commit -m x')"
+eq "env -C<dir> records <dir>"                  "/tmp/r" "$(chdir_of 'env -C/tmp/r git commit -m x')"
+eq "env --chdir=<dir> records <dir>"            "/tmp/r" "$(chdir_of 'env --chdir=/tmp/r git commit -m x')"
+eq "env --chdir <dir> records <dir>"            "/tmp/r" "$(chdir_of 'env --chdir /tmp/r git commit -m x')"
+eq "env -iC <dir> records <dir>"                "/tmp/r" "$(chdir_of 'env -iC /tmp/r git commit -m x')"
+eq "/usr/bin/env -C <dir> records <dir>"        "/tmp/r" "$(chdir_of '/usr/bin/env -C /tmp/r git commit -m x')"
+eq "the last env -C wins"                       "/tmp/b" "$(chdir_of 'env -C /tmp/a env -C /tmp/b git commit -m x')"
+eq "a relative env -C is recorded as written"   "sub"    "$(chdir_of 'env -C sub git commit -m x')"
+eq "env -i records no directory"                ""       "$(chdir_of 'env -i git commit -m x')"
+eq "git's own -C is not env's"                  ""       "$(chdir_of 'git -C /tmp/r commit -m x')"
+eq "the record is reset per call" "" "$(_git_argv_skip "env${US}-C${US}/tmp/r${US}git${US}commit"; chdir_of 'git commit -m x')"
+
+section "Section 1f: git_argv_has_any_sub — one pass over a verb set (wave-20 T3, D3)"
+#
+# The read-only role arm asks one question over eight commit-creating verbs. Each verb, plain
+# and behind `env -C`, answers yes and names itself in GIT_SUB; a verb outside the set, or
+# prose naming one, answers no.
+RO_VERBS="commit merge revert cherry-pick am rebase commit-tree update-ref"
+any_of() {  # <command> [verbs] -> yes:<sub> | no
+  if git_argv_has_any_sub "$1" "${2:-$RO_VERBS}"; then echo "yes:$GIT_SUB"; else echo no; fi
+}
+for _v in commit merge revert cherry-pick am rebase commit-tree update-ref; do
+  eq "has_any_sub: git $_v is in the set"           "yes:$_v" "$(any_of "git $_v x")"
+  eq "has_any_sub: env -C <dir> git $_v is in the set" "yes:$_v" "$(any_of "env -C /tmp/r git $_v x")"
+done
+eq "has_any_sub: git -C <dir> cherry-pick is in the set" "yes:cherry-pick" "$(any_of 'git -C /tmp/r cherry-pick abc')"
+eq "has_any_sub: a verb inside sh -c is in the set"   "yes:revert" "$(any_of "sh -c 'git revert HEAD'")"
+eq "has_any_sub: the second segment is read"          "yes:merge"  "$(any_of 'git status && git merge x')"
+eq "has_any_sub: git status is not in the set"        "no" "$(any_of 'git status')"
+eq "has_any_sub: git push is not in the set"          "no" "$(any_of 'git push origin x')"
+eq "has_any_sub: git log --merge is not in the set"   "no" "$(any_of 'git log --merge')"
+eq "has_any_sub: quoted prose is not in the set"      "no" "$(any_of 'echo "git revert HEAD"')"
+eq "has_any_sub: a one-verb set is has_sub"           "yes:commit" "$(any_of 'git commit -m x' commit)"
+eq "has_any_sub: a verb is matched whole, never as a prefix" "no" "$(any_of 'git commit-tree t' commit)"
+
 if parse_cmd "echo 'git push origin main'"; then
   no "quoted prose is not a git command" "parsed as git ${GIT_SUB}"
 else
@@ -615,17 +720,30 @@ eq "R-12 sh -c"             "yes" "$(has_push "sh -c 'git push origin main'")"
 eq "R-12 eval"              "yes" "$(has_push 'eval "git push origin main"')"
 eq "R-12 bare & separator"  "yes" "$(has_push 'true & git push origin main')"
 
+# REQ-3 N2 (wave-20 T3): the env spellings are pushes too — protect-main reads this list.
+eq "REQ-3 env -C <dir>"        "yes" "$(has_push 'env -C /tmp/r git push origin main')"
+eq "REQ-3 env --chdir=<dir>"   "yes" "$(has_push 'env --chdir=/tmp/r git push origin main')"
+eq "REQ-3 env -i"              "yes" "$(has_push 'env -i git push origin main')"
+eq "REQ-3 env -u NAME"         "yes" "$(has_push 'env -u FOO git push origin main')"
+eq "REQ-3 /usr/bin/env"        "yes" "$(has_push '/usr/bin/env git push origin main')"
+eq "REQ-3 env -- "             "yes" "$(has_push 'env -- git push origin main')"
+eq "REQ-3 env -S string"       "yes" "$(has_push "env -S 'git push origin main'")"
+
 # The destination reading must survive the skip: a prefix must not swallow the
 # refspec, and it must not invent one.
 eq "R-12 sudo push keeps its destinations"  "origin|main" "$(dests_of 'sudo git push origin main')"
 eq "R-12 subshell push keeps its dests"     "origin|main" "$(dests_of '( git push origin main )')"
 eq "R-12 sh -c push keeps its dests"        "origin|main" "$(dests_of "sh -c 'git push origin main'")"
 eq "R-12 find -exec push keeps main"        "origin|main|;" "$(dests_of 'find . -exec git push origin main \;')"
+eq "REQ-3 env -C push keeps its destinations" "origin|main" "$(dests_of 'env -C /tmp/r git push origin main')"
+eq "REQ-3 env -u push keeps its destinations" "origin|main" "$(dests_of 'env -u FOO git push origin main')"
 
 eq "R-12 prose is still not a push"         "no"  "$(has_push 'echo "sudo git push origin main"')"
 eq "R-12 find without -exec is not a push"  "no"  "$(has_push "find . -name 'git'")"
 eq "R-12 a heredoc body is still not a push" "no" "$(has_push "$HD_PUSH")"
 eq "R-12 command substitution stays OUT of scope" "no" "$(has_push 'echo $(git push origin main)')"
+eq "REQ-3 env prose is still not a push"       "no"  "$(has_push 'echo "env -C /r git push origin main"')"
+eq "REQ-3 env -C <dir> of a non-git is not a push" "no" "$(has_push 'env -C /tmp/r ls')"
 
 # ============================================================
 # Section 5: git_branch_protected — ONE list of protected branches (F1)
