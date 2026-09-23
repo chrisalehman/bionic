@@ -4919,6 +4919,12 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # it is the dispatch NAME (R3 Q2), and a name like `x-runner` is not a role. The match is
   # the exact plugin-qualified spelling, so a consumer's own `acme:test-runner` is not ours.
   # No row, or a row with no role → no statement about this agent, and silence.
+  #
+  # THE SET IS `role_is_readonly`'s (wave-20 T7, REQ-9), the one the dispatch approval
+  # checkpoint and the nested-dispatch arm ask — so `Explore` and `Plan`, which the harness
+  # gives Bash, are read-only here too. roster.sh is not in the carrier's BIONIC_LIB_WANT, so
+  # it is sourced through `wall_libs` at the one moment it is needed: a commit in an agent
+  # context. A missing library steps this arm aside with the advisory line, like cmd-class.sh.
   if _wall_mentions_git "$COMMAND" \
      && git_argv_has_any_sub "$COMMAND" "commit merge revert cherry-pick am rebase commit-tree update-ref"; then
     local _bsg_role
@@ -4933,13 +4939,13 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
       }
       END { print last }
     ' "$_bsg_roster" 2>/dev/null)
-    case "$_bsg_role" in
-      bionic:test-runner|bionic:researcher|bionic:auditor|bionic:critic)
-        fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \
-          "Your roster row names you $_bsg_role, and a read-only role's deliverable is its report,
+    wall_libs background-suite-guard roster.sh || return 0
+    if role_is_readonly "$_bsg_role"; then
+      fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \
+        "Your roster row names you $_bsg_role, and a read-only role's deliverable is its report,
 never a commit. Leave the tree as it is and send the report; the orchestrator lands the work."
-        return 2 ;;
-    esac
+      return 2
+    fi
   fi
 
 # ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------

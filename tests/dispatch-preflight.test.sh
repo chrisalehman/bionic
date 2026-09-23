@@ -497,6 +497,7 @@ scale: wave
 
 integration-branch: main
 current: 4
+approved-by: dana 2026-09-07T19:05Z "approved"
 
 - Step 4: tasks in flight
 PLAN
@@ -2651,25 +2652,32 @@ section "S20 — the agent-context channel: walls travel, the LEDGER does not (T
 # ledger of what the ORCHESTRATOR launched, and rows for a teammate's own subagents
 # are contracts nobody confirms, lands or checks.
 #
-# The guard is the only writer of BIONIC_HOOK_CHANNEL and this is its only reader;
-# tests/cross-gate-agreement.test.sh §L.6 pins the pair across the two files.
+# THE PAYLOAD DECIDES, NOT A CHANNEL VARIABLE (wave-20 T7, AC-9.2, triage-B D2c). This
+# section used to prove the skip by setting BIONIC_HOOK_CHANNEL itself — and no production
+# registration sets it for this hook (hooks.json registers the guard on SubagentStop only),
+# so the suite was green on a path production never took. The drive now carries what the
+# harness really sends from inside a subagent: a top-level `agent_id` (t1-probe-report §3),
+# with the variable unset. A nested launch is a read-only role (Δ12); §role-class drives the
+# writer-class refusal.
 #
 # BOTH DIRECTIONS, because a suppression that suppressed the WALL as well would look
 # identical from the roster's side — and would be the R2 hole reopening in the act of
 # closing it.
+unset BIONIC_HOOK_CHANNEL
 REPO=$(make_repo r20 yes)
 write_attestation "$REPO" "$SID_A"
 S20_SAVED_ENV="$GATE_ENV"
-GATE_ENV="$GATE_ENV BIONIC_HOOK_CHANNEL=agent-context"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" \
+             "$S5_LIVE_TRANSCRIPT" "bionic:researcher" | jq -c '. + {agent_id:"a20nested-0123456789ab"}')"
 expect_status "a contract-complete dispatch in an agent context passes" "0" "$GATE_ST"
 expect_status "…and writes NO roster row (the ledger stays at depth one)" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
-# The wall itself is untouched by the channel — a deliverable-less brief is refused
+# The wall itself is untouched by the nesting — a deliverable-less brief is refused
 # at depth, which is the entire point of the second registration.
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Canonical-sdlc Step 4. Do the thing.
-Exit condition: the suite is green.')"
+Exit condition: the suite is green.' "w99-impl" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" \
+  "bionic:researcher" | jq -c '. + {agent_id:"a20nested-0123456789ab"}')"
 # T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
 # on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
 # unchanged; only the channel the wall blocks on is.
@@ -3972,13 +3980,17 @@ expect_contains "…and the tree it was made from" "$S23_TREE" "$GATE_VERR"
 # A DISTINCT NAME per dispatch from here (T22): r23a's ALLOWED dispatch journalled a
 # `w99-impl` row on this repo's roster, and a name with an open row cannot be handed out
 # twice — which is the arm under test in §T22-name-in-flight, not this section's subject.
+# A READ-ONLY TYPE (wave-20 T7): an agent context may launch only a read-only role (Δ12),
+# and this arm's subject is the lease wall, not the class.
 GATE_ENV="$GATE_ENV BIONIC_HOOK_CHANNEL=agent-context"
-run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-c")"
+run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-c" "claude-sonnet-5" \
+             "$S5_LIVE_TRANSCRIPT" "bionic:researcher")"
 GATE_ENV="${GATE_ENV% BIONIC_HOOK_CHANNEL=agent-context}"
 expect_status "r23c the same dispatch in an agent context (BIONIC_HOOK_CHANNEL) is allowed" "0" "$GATE_ST"
 
 # The payload spelling.
-S23_AGENT_PAYLOAD=$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-d" | jq '. + {agent_type:"senior-implementor"}')
+S23_AGENT_PAYLOAD=$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-d" "claude-sonnet-5" \
+  "$S5_LIVE_TRANSCRIPT" "bionic:researcher" | jq '. + {agent_type:"senior-implementor"}')
 run_gate "$S23_AGENT_PAYLOAD"
 expect_status "r23d …and so is one whose payload carries agent_type" "0" "$GATE_ST"
 
@@ -4148,6 +4160,7 @@ parallel-budget: $budget_a
 ## SDLC State
 
 current: 4
+approved-by: dana 2026-09-07T19:05Z "approved"
 
 - Step 4: plan A in flight
 PLANA
@@ -4161,6 +4174,7 @@ parallel-budget: $budget_b
 ## SDLC State
 
 current: 4
+approved-by: dana 2026-09-07T19:05Z "approved"
 
 - Step 4: plan B in flight
 PLANB
@@ -5384,13 +5398,16 @@ for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic; 
   expect_status "30e a ${_role} dispatch against the SAME unapproved plan passes" "0" "$GATE_ST"
 done
 
-# --- 30f: below Step 4 the arm is inert — the plan is still being authored ---
+# --- 30f: below Step 4 the arm BINDS too (wave-20 T7, AC-9.1) ---
+# It used to be inert here ("the plan is still being authored"). Flipped by design: before
+# Step-3 approval only the read-only set dispatches, and a writer at Step 3 builds against a
+# plan nobody has approved exactly as one at Step 4 does. §role-class drives current: 2.
 REPO=$(make_repo r30f yes)
 write_attestation "$REPO" "$SID_A"
 k2_write_plan "$REPO" 3 ""
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w30f" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
-expect_status "30f current: 3 with no approved-by — the arm is inert" "0" "$GATE_ST"
+expect_eq "30f current: 3 with no approved-by — a writer is refused" "deny" "$GATE_VERDICT"
 
 # --- 30g: the durable half — the approval still binds after Step 4 ---
 REPO=$(make_repo r30g yes)
@@ -5488,6 +5505,156 @@ expect_eq "31f task-scale current: T3 with no approved-by is refused (any n >= 1
 
 
 # ============================================================================
+section "§role-class — one read-only role set, delegation one level deep (wave-20 T7, REQ-9, D9, Δ12)"
+# ============================================================================
+#
+# THE CLASS IS AN ALLOW-LIST NOW (AC-9.1). The approval checkpoint used to name the two
+# writer roles and let every other `subagent_type` through, so a `fork`, a `general-purpose`
+# or a `claude` agent — each of which can write the tree — was admitted on a plan nobody had
+# approved (triage-B D2a, driven). The set that passes before approval is
+# `role_is_readonly`'s (payload/scripts/lib/roster.sh): the four bionic read-only roles,
+# plugin-qualified, plus the harness's `Explore` and `Plan`. Everything else is writer-class,
+# the empty type (the harness's general-purpose default) and an unknown type included.
+#
+# BEFORE APPROVAL MEANS BEFORE APPROVAL, not "at Step 4 and later". The plan exists from
+# Step 0, and a writer launched at Step 2 builds against a plan nobody has seen either; the
+# spec's eval drives `current: 2`.
+#
+# DELEGATION IS ONE LEVEL DEEP (AC-9.2, AC-9.4; Δ12). A payload carrying a top-level
+# `agent_id` comes from inside a subagent (t1-probe-report §3: main-thread payloads carry
+# none). It may launch only a read-only role, and it writes NO roster row: the roster is the
+# orchestrator's ledger. The channel variable is UNSET for every drive here — the old §S20
+# proved the skip by setting `BIONIC_HOOK_CHANNEL` itself, a variable no production
+# registration ever hands this hook (triage-B D2c).
+unset BIONIC_HOOK_CHANNEL
+expect_eq "rc0 the channel variable is unset for this section (the seam D2c named)" "unset" \
+  "${BIONIC_HOOK_CHANNEL-unset}"
+case "$GATE_ENV" in *BIONIC_HOOK_CHANNEL*) _rc_env=set ;; *) _rc_env=clean ;; esac
+expect_eq "rc0 …and the gate's own environment list does not carry it either" "clean" "$_rc_env"
+
+RC_NESTED_ID="a7nested-0123456789abcdef"
+rc_nested() {  # <payload> -> the same payload as a subagent's hook sees it
+  printf '%s' "$1" | jq -c --arg a "$RC_NESTED_ID" '. + {agent_id:$a}'
+}
+
+# --- rc1: before approval, every writer-class type is refused ---
+_rc=0
+for _role in fork general-purpose claude acme:helper "" researcher bionic:implementor; do
+  _rc=$((_rc + 1))
+  REPO=$(make_repo "rrc1-$_rc" yes)
+  write_attestation "$REPO" "$SID_A"
+  k2_write_plan "$REPO" 2 ""
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc1-$_rc" "claude-sonnet-5" \
+                               "$S5_LIVE_TRANSCRIPT" "$_role")"
+  expect_eq "rc1 '${_role:-<empty>}' at current: 2 with no approved-by is refused" "deny" "$GATE_VERDICT"
+  expect_contains "rc1 …by the approval checkpoint, in its own words" \
+    "writers run against an APPROVED plan" "$GATE_VERR"
+  expect_eq "rc1 …and journals nothing" "no" \
+    "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo yes || echo no)"
+done
+
+# --- rc2: before approval, the read-only set dispatches ---
+for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic Explore Plan; do
+  REPO=$(make_repo "rrc2-${_role##*:}" yes)
+  write_attestation "$REPO" "$SID_A"
+  k2_write_plan "$REPO" 2 ""
+  _rc_brief="$BRIEF_FULL"
+  # S33: an auditor brief may not waive Suites:, and BRIEF_FULL declares one — no change.
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$_rc_brief" "wrc2" "claude-sonnet-5" \
+                               "$S5_LIVE_TRANSCRIPT" "$_role")"
+  expect_status "rc2 '${_role}' at current: 2 with no approved-by is admitted" "0" "$GATE_ST"
+  expect_eq "rc2 …on no deny verdict" "allow" "$GATE_VERDICT"
+done
+
+# --- rc3: THE CONTROL — approval admits the writer at the same step ---
+REPO=$(make_repo rrc3 yes)
+write_attestation "$REPO" "$SID_A"
+k2_write_plan "$REPO" 2 "$K2_APPROVED_LINE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc3" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "general-purpose")"
+expect_eq "rc3 control: general-purpose with approved-by present is admitted" "allow" "$GATE_VERDICT"
+
+# --- rc4: a nested read-only launch is admitted and writes NO roster row (AC-9.2) ---
+REPO=$(make_repo rrc4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(rc_nested "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc4" "claude-sonnet-5" \
+                                          "$S5_LIVE_TRANSCRIPT" "bionic:researcher")")"
+expect_eq "rc4 a subagent's bionic:researcher launch is admitted" "allow" "$GATE_VERDICT"
+expect_eq "rc4 …and the orchestrator's roster gains no row (no roster file at all)" "no" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo yes || echo no)"
+
+# rc4b: an existing roster is left byte-identical by a nested launch — the ledger a real
+# wave holds is not appended to, not merely absent in a fresh repo.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc4-main" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:researcher")"
+expect_eq "rc4b control: the same launch from the main thread journals exactly one row" "1" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+RC4_BEFORE=$(cksum < "$(roster_path "$REPO" "$SID_A")")
+run_gate "$(rc_nested "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc4-sub" "claude-sonnet-5" \
+                                          "$S5_LIVE_TRANSCRIPT" "Explore")")"
+expect_eq "rc4b a nested Explore launch is admitted" "allow" "$GATE_VERDICT"
+expect_eq "rc4b …and the roster is byte-identical after it" "$RC4_BEFORE" \
+  "$(cksum < "$(roster_path "$REPO" "$SID_A")")"
+
+# --- rc5: a nested writer-class launch is refused, on an APPROVED plan (AC-9.4) ---
+_rc=0
+for _role in fork general-purpose claude bionic:implementor bionic:senior-implementor ""; do
+  _rc=$((_rc + 1))
+  REPO=$(make_repo "rrc5-$_rc" yes)
+  write_attestation "$REPO" "$SID_A"
+  run_gate "$(rc_nested "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc5-$_rc" "claude-sonnet-5" \
+                                            "$S5_LIVE_TRANSCRIPT" "$_role")")"
+  expect_eq "rc5 a subagent's '${_role:-<empty>}' launch is refused" "deny" "$GATE_VERDICT"
+  expect_contains "rc5 …saying a subagent launches read-only roles only" \
+    "a subagent may launch only read-only roles" "$GATE_ERR"
+  expect_eq "rc5 …and journals nothing" "no" \
+    "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo yes || echo no)"
+done
+
+# rc5b: THE MAIN-THREAD CONTROL — the same writer launch with no agent_id passes, so rc5 is
+# the nesting and not the brief or the plan.
+REPO=$(make_repo rrc5b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc5b" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
+expect_eq "rc5b control: bionic:implementor from the main thread on an approved plan is admitted" \
+  "allow" "$GATE_VERDICT"
+
+# rc5c: the payload's `agent_type` alone is the other spelling of an agent context, and it
+# binds the same way.
+REPO=$(make_repo rrc5c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc5c" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "fork" | jq -c '. + {agent_type:"bionic:implementor"}')"
+expect_eq "rc5c a fork launched from an agent_type-only payload is refused" "deny" "$GATE_VERDICT"
+
+# --- rc6: the scaffold refusal says the wall reads the prompt only (AC-9.3) ---
+# A brief FILE carrying the whole scaffold, and a prompt that only points at it: the lift
+# reads `tool_input.prompt` and nothing else (triage-B D1, driven).
+REPO=$(make_repo rrc6 yes)
+write_attestation "$REPO" "$SID_A"
+mkdir -p "$REPO/.bionic/docs/record/w99"
+printf '%s\n' "$BRIEF_FULL" > "$REPO/.bionic/docs/record/w99/brief.md"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" \
+  "Read the brief at .bionic/docs/record/w99/brief.md and do what it says." "wrc6")"
+expect_eq "rc6 a prompt that only points at a brief file is refused" "deny" "$GATE_VERDICT"
+expect_contains "rc6 …and the model's wire says the wall reads the prompt text only" \
+  "reads the prompt text only" "$GATE_REASON"
+expect_contains "rc6 …and says to copy the scaffold lines into the prompt" \
+  "copy its scaffold lines into the prompt" "$GATE_REASON"
+
+# rc6b: the single-fault no-deliverable refusal carries the same sentence in its detail.
+RC6B_BRIEF=$(printf '%s\n' "$BRIEF_FULL" | /usr/bin/grep -v '^Expected artifact:')
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$RC6B_BRIEF" "wrc6b")"
+expect_eq "rc6b a brief missing only its artifact line is refused" "deny" "$GATE_VERDICT"
+expect_contains "rc6b …as naming no deliverable" "this brief names no deliverable" "$GATE_ERR"
+expect_contains "rc6b …and its detail says the wall reads the prompt text only" \
+  "reads the prompt text only" "$GATE_VERR"
+expect_contains "rc6b …and to copy the scaffold lines into the prompt" \
+  "copy its scaffold lines into the prompt" "$GATE_VERR"
+
+
+# ============================================================================
 section "§combined — one refusal, every brief-shape fault (wave-12 T2, D3, AC-1.1/AC-1.2)"
 # ============================================================================
 #
@@ -5581,8 +5748,14 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # `Re-executes:` line. The FIXED part is now eleven — one refusal line, a blank, EIGHT
 # scaffold lines, a blank, the pointer — and the variable part is unmoved at one extra
 # fault plus three not-checked lines. No fault and no wall was added by that change.
-expect_status "§combined …the wire is at most 15 lines (11 + 1 extra fault + 3 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 15 ] && echo 0 || echo 1)"
+#
+# RAISED 15 -> 16 (wave-20 T7, REQ-9 AC-9.3), in the FIXED part: the wire now carries one
+# line saying the wall reads the prompt text only, beside the scaffold it tells the author to
+# copy. The fixed part is twelve; the variable part is unmoved.
+expect_status "§combined …the wire is at most 16 lines (12 + 1 extra fault + 3 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 16 ] && echo 0 || echo 1)"
+expect_contains "§combined …and the fixed line that grew it is the prompt-only sentence" \
+  "The wall reads the prompt text only." "$GATE_REASON"
 # AND THE THIRD LINE IS THE NEW WALL'S, NAMED — a cap raised without saying which line
 # filled it is a widened tolerance, which is the mistake the comment above warns about.
 expect_contains "§combined …and the line that filled it is the floor-once wall's" \
@@ -6523,12 +6696,14 @@ expect_contains "§three-arms …and the brief-shape fault" \
 # per ADDITIONAL fault: the first fault is already the user line and costs nothing, faults
 # 2..N cost a line each, and so does every `not checked:` line. Three faults, no not-checked
 # line: eleven plus two.
-expect_status "§three-arms …and the wire is at most 13 lines (11 + one per additional fault)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 13 ] && echo 0 || echo 1)"
-# NOT VACUOUS: a wire that named nothing extra would also be under twelve. It has to have
+# The fixed part is TWELVE since wave-20 T7 (AC-9.3): the prompt-only line sits beside the
+# scaffold. Three faults, no not-checked line: twelve plus two.
+expect_status "§three-arms …and the wire is at most 14 lines (12 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 14 ] && echo 0 || echo 1)"
+# NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
-expect_status "§three-arms …and it really grew: more than the ten-line single-arm wire" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 11 ] && echo 0 || echo 1)"
+expect_status "§three-arms …and it really grew: more than the eleven-line single-arm wire" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 12 ] && echo 0 || echo 1)"
 # THE SHAPE BANS OF WAVE-13 STAND: no per-fault heading, no fault-count sentence, no
 # stacked `Fix:` paragraphs. One line per fault is a LINE, not a section.
 expect_absent "§three-arms …no fault-count header sentence" "SHAPE FAULTS" "$GATE_REASON"
@@ -6837,7 +7012,8 @@ s32_plan() {
     printf '# Test wave plan\n\n'
     printf '## SDLC State\n\n'
     printf 'integration-branch: main\n'
-    printf 'current: 4\n\n'
+    printf 'current: 4\n'
+    printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n\n'
     printf -- '- Step 4: tasks in flight\n'
     [ -z "$cause" ] || printf 'regression-cause: %s\n' "$cause"
     printf '\n## Tasks\n\n'
