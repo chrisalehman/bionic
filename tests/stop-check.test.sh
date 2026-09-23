@@ -785,6 +785,8 @@ mkdir -p "$R8/.bionic/docs/plans/epic-99"
   printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
   printf 'intent: build\nrigor: audited\nscale: wave\n'
   printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
+  # APPROVED (wave-20 T7, AC-9.1): the dispatch wall refuses a writer on an unapproved plan.
+  printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n'
 } > "$R8/.bionic/docs/plans/epic-99/wave-01.md"
 printf 'version=v1\nsession_id=%s\n' "$OWN8" > "$R8/.bionic/tmp/preflight-${OWN8}.state"
 # …and this session's Patrol stamp, the third writer precondition since epic-17 W5 4/4: the
@@ -813,11 +815,25 @@ Exit condition: the artifact exists.
 Suites: tests/widget.test.sh"
 # THE PLANTED LINEAGE IS LANDED FIRST (T22). `make_agent` journals an `identified` row for
 # this name, and since the name-in-flight arm a dispatch cannot reuse a name whose row is
-# still open — so the planted lineage is closed with the marker that frees it, exactly as a
-# landed task's would be, and the dispatch below is the second run under that name. The row
-# this case reads is still the one the real start gate wrote.
-swept_marker_write "$R8/.bionic/tmp/roster-${OWN8}.state" 2026-08-05T01:00:00Z "$OWN8" \
-  ours-claims aours-4444444444444444 MET
+# still open — so the planted lineage is closed before the dispatch below, which is the
+# second run under that name. The row this case reads is still the one the real start gate
+# wrote.
+#
+# CLOSED WITH AN ACK, NOT A MET MARKER (epic-23 wave-20 T2, REQ-10, D10). Before T2, a
+# `landing-swept/v1|state=MET` marker on the roster file closed a name outright. T2's one
+# close predicate, `roster_open_names` (payload/scripts/lib/roster.sh), never asks the
+# roster's own MET markers — a MET marker records that a landing was seen, not that the
+# agent left. A name closes only on an ack in the sweeper's ledger (`ACK_LEDGER_FILE`,
+# `$STATE_DIR/sweeper-<session>.state`) stamped strictly later than the row's
+# `launched_at=`. The line below is that ack, real schema and field order
+# (hooks/session-sweeper.sh's own `ledger_write` call), at a stamp after the
+# `launched_at=2026-08-05T00:00:00Z` `make_agent` planted.
+mkdir -p "$R8/.bionic/tmp"
+{
+  printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n'
+  printf 'sweeper-ledger/v1|event=ack|at=2026-08-05T01:00:00Z|epoch=1754355600|pid=999999|session=%s|name=ours-claims\n' \
+    "$OWN8"
+} > "$R8/.bionic/tmp/sweeper-${OWN8}.state"
 jq -n --arg s "$OWN8" --arg c "$R8" --arg p "$BRIEF_G" \
   '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
     hook_event_name:"PreToolUse", tool_name:"Agent",
