@@ -36,7 +36,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/version.sh
 The printed line begins with:
 
 ```
-bionic 1.8.5 (installed)
+bionic 1.8.6 (installed)
 ```
 
 and continues with the commit or feed, the install path, and whether this session is

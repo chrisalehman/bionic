@@ -3570,6 +3570,24 @@ EOF
     # tick's own acks. So a MET row gone from a fresh panel is closed and not counted, and a
     # MET row still listed is counted until its ack.
     TICK_UNACKED_NAMES=""
+    # THE NAMES A GONE-AGENT REPORT CAN NAME (wave-19 audit V-2 delta review R2-6). An UNMET,
+    # STILL-LIVE or AMBIGUOUS row that is unacked and whose agent a fresh panel does not list
+    # now holds a `TICK_OCCUPIED` slot (A-T2.13) with nothing pointing at the closer T1e
+    # built. This is the candidate set the stand-down arm below checks against the panel it
+    # already warms for `$STANDDOWN_NAMES`; it names MET rows only, so the two sets never
+    # overlap. The report never acks: the tick has no authority over an UNMET verdict (ADR-003),
+    # and closing one is `stop-orders.sh stopped`'s job alone (T1e).
+    GONE_CANDIDATE_NAMES=""
+    # THE STATE AND DETAIL RIDE ALONG (audit V3-2). `stopped` does not accept every row in
+    # the candidate set above: it refuses AMBIGUOUS unconditionally and refuses a STILL-LIVE
+    # row whose own detail names a claimed process pattern still matching a live process
+    # (hooks/stop-orders.sh:618-663, T1g/A-T1.13 — not exposed as a sourceable function, so
+    # its acceptance predicate is mirrored below rather than re-derived; A-T2.18). The report
+    # line has to know which shape a row is BEFORE it prints, so `$RSTATE` and the row's
+    # `detail=` are captured here, one newline-joined `name|state|detail` record per
+    # candidate, in the same pass that already reads `$LINE` for this row — never a second
+    # parse of `$VERDICT_OUT` later.
+    GONE_CANDIDATE_INFO=""
     while IFS= read -r LINE; do
       case "$LINE" in "landing-verdict/v1|"*) : ;; *) continue ;; esac
       TOTAL=$((TOTAL + 1))
@@ -3621,7 +3639,18 @@ EOF
           ;;                                  # closed — not open
         *)          OPEN=$((OPEN + 1))        # STILL-LIVE, UNMET, AMBIGUOUS — open
                     OPEN_NAMES="${OPEN_NAMES}${RNAME}
-" ;;
+"
+                    # A candidate for the GONE report (R2-6): unacked (this branch is only
+                    # reached past the acked-row `continue` above) and not MET/WAIVED, so a
+                    # fresh panel showing it gone is a row nothing has ever named.
+                    GONE_CANDIDATE_NAMES="${GONE_CANDIDATE_NAMES}${GONE_CANDIDATE_NAMES:+ }$(clean "$RNAME")"
+                    # `$RSTATE` is one of STILL-LIVE/UNMET/AMBIGUOUS here (this branch's own
+                    # `case`), never `|`-bearing. `clean` on the detail strips any `|` (and
+                    # tab/newline) a brief's free text could otherwise smuggle in, which is
+                    # what keeps this record's third field from being mistaken for a fourth.
+                    GONE_CANDIDATE_INFO="${GONE_CANDIDATE_INFO}$(clean "$RNAME")|${RSTATE}|$(clean "$(line_field "$LINE" detail)")
+"
+                    ;;
       esac
       [ "$RSTATE" = "UNMET" ] || continue
 
@@ -3933,7 +3962,7 @@ EOF
     # the same as NONE: the arm defers rather than guesses, naming nothing, ordering nothing,
     # acking nothing, and saying once that the next tick's fresh ListAgents will decide.
     TICK_ACKED_NOW="|"
-    if [ -n "$STANDDOWN_NAMES" ] || [ -n "$DUP_START_NAMES" ]; then
+    if [ -n "$STANDDOWN_NAMES" ] || [ -n "$DUP_START_NAMES" ] || [ -n "$GONE_CANDIDATE_NAMES" ]; then
       # THE ALREADY-WARMED PARSE, or one read of our own — never a second parse of a
       # transcript this tick has already read. `live_agents` memoizes per process on the
       # transcript's path, size and mtime, and the trim above primes it IN THIS SHELL, so on
@@ -4022,10 +4051,67 @@ EOF
             say "NOTIFY ${SD_NAME} — a duplicate start whose agent is gone could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
           fi
         done
+
+        # THE GONE REPORT (wave-19 audit V-2 delta review R2-6). An unacked, not-MET/WAIVED
+        # row whose agent this fresh panel does not list now holds a `TICK_OCCUPIED` slot
+        # (A-T2.13) with nothing pointing at the fix: T1e's `stopped` close. This is a
+        # NOTIFY-band report only — never an ack, never an order — because the tick has no
+        # authority to decide an UNMET verdict is done (ADR-003); closing one is the human
+        # verb's job alone. Printed in the same place the STANDDOWN lines print, so it never
+        # changes what this tick decided (QUIET stays QUIET; a FILL sized before this point
+        # is unaffected).
+        #
+        # THE LINE NAMES A VERB THAT WILL RUN (audit V3-2). `GONE_CANDIDATE_NAMES` covers
+        # STILL-LIVE, UNMET and AMBIGUOUS alike, but `stopped` does not accept all three: it
+        # refuses AMBIGUOUS unconditionally, and refuses a STILL-LIVE row whose own detail
+        # names a claimed process pattern still matching a live process — a fact about a real
+        # OS process the panel cannot speak to (hooks/stop-orders.sh:618-663, T1g/A-T1.13).
+        # `stopped` is not exposed as a sourceable predicate (A-T2.18), so its acceptance
+        # rule is mirrored here rather than re-derived, kept beside this comment so the two
+        # copies are found together. A row the verb WILL close prints the verdict it actually
+        # holds (never a hardcoded "UNMET") and the runnable command; a row the verb WILL
+        # REFUSE prints `GONE?` instead, naming the verdict and the refusal reason, so the
+        # operator is told rather than misdirected into a command that fails.
+        while IFS='|' read -r SD_GNAME SD_GSTATE SD_GDETAIL; do
+          [ -n "$SD_GNAME" ] || continue
+          case "$SD_PANEL" in *"|${SD_GNAME}|"*) continue ;; esac
+          SD_REFUSE=0
+          SD_WHY=""
+          SD_VERDICT="$SD_GSTATE"
+          case "$SD_GSTATE" in
+            UNMET)
+              SD_VERDICT="UNMET"
+              ;;
+            STILL-LIVE)
+              if printf '%s' "$SD_GDETAIL" | grep -q 'claimed process pattern'; then
+                SD_REFUSE=1
+                SD_WHY="a claimed process pattern still matches a live process; the panel showing it gone does not close this on its own"
+              else
+                SD_AGE="$(printf '%s' "$SD_GDETAIL" | grep -oE 'last changed [0-9]+s ago' | grep -oE '[0-9]+')"
+                SD_CAD="$(printf '%s' "$SD_GDETAIL" | grep -oE '\([0-9]+s\)' | tr -d '()s')"
+                SD_VERDICT="STILL-LIVE (progress ${SD_AGE:-?}s old, cadence ${SD_CAD:-?}s)"
+              fi
+              ;;
+            *)
+              # AMBIGUOUS — `stopped`'s verdict-state `case` refuses it unconditionally,
+              # before it ever reads a panel (hooks/stop-orders.sh:618-630).
+              SD_REFUSE=1
+              SD_WHY="two or more contracts share this name; stopped always refuses ${SD_GSTATE}"
+              ;;
+          esac
+          if [ "$SD_REFUSE" -eq 1 ]; then
+            say "GONE? ${SD_GNAME} — ${SD_VERDICT} and absent from a fresh panel; stopped will refuse it: ${SD_WHY}"
+          else
+            say "GONE ${SD_GNAME} — ${SD_VERDICT} and absent from a fresh panel; close it with: bash ${ORDERS} stopped ${SD_GNAME}"
+          fi
+        done <<EOF
+$GONE_CANDIDATE_INFO
+EOF
       else
-        # A-orch-31: something WOULD have been decided (a MET row, or a duplicate start,
-        # is sitting in the candidate sets above) but the panel reading is not fresh enough
-        # to trust with a write. One line, said once, never a STANDDOWN, an order or an ack.
+        # A-orch-31: something WOULD have been decided (a MET row, a duplicate start, or a
+        # GONE report is sitting in the candidate sets above) but the panel reading is not
+        # fresh enough to trust with a write or a report. One line, said once, never a
+        # STANDDOWN, a GONE report, an order or an ack.
         note "stand-down deferred — the panel reading is stale; ListAgents and the next tick decides"
       fi
     fi
