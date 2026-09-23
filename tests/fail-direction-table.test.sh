@@ -85,7 +85,16 @@ write_plan() {  # <path> <current-line>
   mkdir -p "$(dirname "$1")"
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: audited\nscale: wave\n---\n\n# Fixture plan\n\n'
+    printf 'intent: build\nrigor: audited\nscale: wave\n'
+    # A LIVE PLAN CARRIES A MEASURED BUDGET (epic-23 wave-20 T2, REQ-10, D10; ADR-035).
+    # `budget_line_of`/`plan_budget_line` (payload/scripts/lib/run.sh) read this line, at
+    # column 0 with the colon directly after the key, out of the LEADING frontmatter block
+    # only. Every dispatch driven against a `wave:yes` world below reaches `current: 4`, so
+    # without this line dispatch preflight's missing-budget backstop prints an unmeasured-
+    # budget WARN on every one of them — breaking `start|attested`'s literal silence, the
+    # one row in this table that demands it (found by T7, wave-20 T14).
+    printf 'parallel-budget: writers=4 suites=2 worktrees=8 test_jobs=4 source=probe\n'
+    printf -- '---\n\n# Fixture plan\n\n'
     # APPROVED (wave-20 T7, AC-9.1): the dispatch wall refuses a writer on an unapproved plan.
     printf '## SDLC State\n\nintegration-branch: main\n%s\napproved-by: dana 2026-09-07T19:05Z "approved"\n\n- Step 4: evidence\n' "$2"
   } > "$1"
