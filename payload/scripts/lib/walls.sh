@@ -1488,9 +1488,27 @@ _eg_git_only() {
 # `GIT_COMMON_DIR` anywhere in the command: each names the repository outright, whatever
 # directory the commit runs in. The check is on the raw text, so the words inside a commit
 # message cost the exemption too — the fail-closed direction, and a writer commits with `-F`.
+#
+# THE DISQUALIFIER ALSO READS A DE-QUOTED COPY (audit V3-1, wave-19 T6f). A `"`, `'` or `\`
+# dropped into the middle of the flag's name (`--git-d""ir`, `--git-di\r`) defeats the raw
+# substring match above while the shell still hands git the flag whole once it strips the
+# quote or backslash, so the commit really lands in the named (root) repository. This is not
+# shell parsing — it strips every `"`, `'` and `\` character from the text with no attempt at
+# fidelity, and any spelling that COULD reach the disqualifier once they are gone is treated
+# as the disqualifier. Both the raw text and this stripped view are tested; either one
+# matching costs the exemption (fail-closed, review R2-2's direction). `_eg_git_only`'s
+# allow-list needs no matching change: it already fails closed on any first word that is not
+# byte-for-byte `git`, `true`, `:` or `exit`, so a quote- or backslash-split `git` itself is
+# already judged rather than exempted (A-T6.13).
 _eg_placed() {
-  local _c _sep
+  local _c _sep _dq
+  _dq="${COMMAND//\"/}"
+  _dq="${_dq//\'/}"
+  _dq="${_dq//\\/}"
   case "$COMMAND" in
+    *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
+  esac
+  case "$_dq" in
     *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
   esac
   case "$_EG_CWD_SRC" in
