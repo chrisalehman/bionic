@@ -40,7 +40,9 @@
 # acked while a fresh panel still lists its agent — is listed with an address the platform's
 # stop primitive accepts. An acked row a fresh panel shows GONE is already closed and has
 # nobody left to stop, so it is left off that list; its worktree lease still ends here, and
-# that landing is reported under LEASES ENDED instead (wave-19 T1 follow-up, R2). Every row
+# that landing is reported under LEASES instead (wave-19 T1 follow-up, R2) — merged only when
+# the verdict is MET or WAIVED; an abandoned (UNMET) row's tree is left standing and named
+# there for a human to salvage (T1f, review R2-1). Every row
 # that is still working, or has not landed, is listed as LEFT ALONE and never as a target. It
 # stops nothing itself: stopping is the harness's primitive, not a shell script's. What it
 # does is compute the batch, so the N stops that follow are N fact-discharged calls with no
@@ -554,9 +556,12 @@ case "$VERB" in
     # THE ACK IS THE CLOSE (wave-19 T1; D3, ADR-034 d1). A TaskStop ends a process and closes
     # nothing; this verb closes the name beside the stop. It owns no predicate of its own:
     # ONE verdict read decides whether there is an open row to close, and the close is the
-    # sweeper's `ack` — character for character the call the tick's STANDDOWN close makes
-    # (hooks/session-poker.sh) — so the ledger keeps its one writer. The sweeper records an
-    # unknown name and warns rather than refusing, so the refusal is decided here, first.
+    # sweeper's `ack` — the same verb the tick's STANDDOWN close calls (hooks/session-poker.sh),
+    # so the ledger keeps its one writer. The arguments differ, on purpose: this verb writes
+    # `--by human` with a reason derived from the verdict (T1c, T1e; below), where the tick
+    # writes `--by patrol`. The sweeper records an unknown name and warns rather than
+    # refusing, so the refusal is decided here, first. The ack closes the NAME only; whether
+    # the row's tree is merged is standdown's lease question, decided on the verdict (T1f).
     #
     # THIS VERB RUNS BESIDE A TaskStop, AFTER THE AGENT IS GONE (wave-19 T1 follow-up, critic
     # C4). Before this fix it acked ANY open row — still-live or UNMET — on the strength of
@@ -674,16 +679,36 @@ case "$VERB" in
     # than none.
     read_panel
 
-    # ONE CALL SITE for landing a row's tree, shared by the READY branch (a MET/WAIVED/still-
+    # ONE CALL SITE for ending a row's lease, shared by the READY branch (a MET/WAIVED/still-
     # listed-acked row) and the acked-and-gone branch, which needs the exact same landing but
-    # never enters READY. Appends LANDED or REFUSED to _landed either way, so the operator
+    # never enters READY. Appends one line to _landed for every tree it finds, so the operator
     # sees every tree this pass touched, whichever branch found it.
-    _land_row_tree() {  # <name>
+    #
+    # ONLY A LANDED ROW IS MERGED (wave-19 T1f, review R2-1). `worktree_land` is a --no-ff
+    # merge into whatever branch the main checkout is on. An ack closes a name whatever its
+    # reason (A-T1.11), and since T1e `stopped` acks an UNMET-and-gone row `abandoned` — so
+    # "acked" is not "landed", and merging on the ack alone put an abandoned agent's partial
+    # work into the checkout's branch (masked on main/master by the protected-branch refusal,
+    # live on any other). The VERDICT decides, never the ack's reason: the reason is a label,
+    # the verdict is the fact. MET or WAIVED lands. Anything else leaves tree and branch in
+    # place — no merge and no removal, since a human salvages what the agent left — and says
+    # so on the same LEASES report.
+    _land_row_tree() {  # <name> <verdict state>
       declare -f worktree_land >/dev/null 2>&1 || return 0
       _tree="$(worktree_for_row "$REPO_REAL" "$1")"
       [ -d "$_tree" ] || return 0
-      _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land "$_tree")   ($1)
+      case "$2" in
+        MET|WAIVED)
+          _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land "$_tree")   ($1)
 "
+          ;;
+        *)
+          _tbr="$(git -C "$_tree" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+          _tword="abandoned"; [ "$2" = "UNMET" ] || _tword="unlanded ($2)"
+          _landed="${_landed}  ${_tword} — tree stands: $_tree (branch ${_tbr:-unknown}); remove or salvage by hand   ($1)
+"
+          ;;
+      esac
     }
 
     _ready=""; _held=""; _nready=0; _nheld=0; _landed=""
@@ -719,7 +744,7 @@ case "$VERB" in
       # down is where the lease ends, full stop, not "unless the row left by way of an ack".
       if [ "$(line_field "$_l" acked)" = "yes" ]; then
         if [ "$_live_ok" -eq 1 ] && ! _is_live "$_name"; then
-          _land_row_tree "$_name"
+          _land_row_tree "$_name" "$_state"
           continue
         fi
         _why="acked"
@@ -734,7 +759,7 @@ case "$VERB" in
 "
         # LANDED or REFUSED, one line per tree, reported either way: a lease
         # this verb could not end is exactly what the operator needs told.
-        _land_row_tree "$_name"
+        _land_row_tree "$_name" "$_state"
       else
         _nheld=$((_nheld + 1))
         # WHY THE ROW IS STILL HELD, and — where the harness can say so — whether anyone is
@@ -754,11 +779,15 @@ EOF
     if [ "$_nready" -gt 0 ]; then
       say "STAND DOWN — $_nready row(s) have landed; stop each by the address on its left:"
       printf '%s' "$_ready"
+    elif [ -n "$_landed" ]; then
+      # NOT "nothing has landed" above a LANDED line (review R2-7): the only rows this pass
+      # touched were closed rows whose agents are gone, and their trees are reported below.
+      say "no row awaits a stop; the rows below are closed and their agents gone."
     else
       say "nothing has landed; there is nobody to stand down."
     fi
     if [ -n "$_landed" ]; then
-      say "LEASES ENDED — the worktree of each row above, landed or refused:"
+      say "LEASES — the worktree of each row this pass found, landed, refused, or left standing:"
       printf '%s' "$_landed"
     fi
     if [ "$_nheld" -gt 0 ]; then
