@@ -5639,11 +5639,17 @@ expect_contains "31b4 …and saying what answers it" "fill-declined:" "$(s31_rea
 
 # ---------- 31c: the same turn, with the rows dispatched, ends in silence ----------
 #
-# The discharge the tick-printed duty already had, on the ids this arm computed itself: an
-# `Agent` tool_use naming each row answers for it.
+# RE-AUTHORED FOR WAVE-20 (REQ-5, Δ7): the wall judges by count on the facts a dispatch leaves
+# on disk — the roster row the dispatch wall writes at launch, and the plan row the orchestrator
+# ledgers `active` — never by finding the id in an Agent call's words. So the dispatched turn
+# carries both: T2 and T3 on the roster, and `active` in the table.
 R31C="$(make_repo s29-task-dispatched)"; new_roster "$R31C"
-s31_task_plan "$R31C" T1 >/dev/null
+P31C="$(s31_task_plan "$R31C" T1)"
+sed -i.bak -e 's/^\(| T2 |.*\)| pending |/\1| active |/' -e 's/^\(| T3 |.*\)| pending |/\1| active |/' "$P31C"
 add_row "$R31C" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
+add_row "$R31C" name=T2 deliverable=t2.md duration="4 hours" launched_at="$(iso_ago 30)"
+add_row "$R31C" name=T3 deliverable=t3.md duration="4 hours" launched_at="$(iso_ago 30)"
+expect_contains "31c0 precondition: both rows are ledgered active" "| active |" "$(grep '^| T3 |' "$P31C")"
 S31C_TR="$(s31_transcript "$R31C" "dispatch the batch")"
 jq -nc '{type:"assistant",isSidechain:false,
          message:{role:"assistant",content:[
@@ -6144,5 +6150,109 @@ expect_eq "34h no projection copy is left beside any plan" "" \
 expect_eq "34h2 …and no dry-run engagement marker is left in .bionic/tmp" "" \
   "$(find "$R34A/.bionic/tmp" "$R34E/.bionic/tmp" "$R34F/.bionic/tmp" -name 'engaged-*' ! -name "engaged-$SID.state" 2>/dev/null)"
 POKE_BOUND="$S34_BOUND_WAS"
+
+# ============================================================
+section "Section 35: fill-report — missed opportunity, HOLD and declines, from the fill ledger (wave-20 REQ-5, AC-5.6; Δ2)"
+# ============================================================
+#
+# THE MEASURE (ADR-036 decision 4). Every Stop of an engaged run appends a `fill-ledger/v1`
+# line; `fill-report` folds the lines by turn key (the last line of a turn wins — a refused
+# Stop and its re-entry are one turn), orders them by `at`, and gives each line the interval
+# up to the next. Missed minutes are the intervals whose line is `state=ok`, `missed>0` and
+# undeclined; HOLD minutes are `state=hold|emergency` with a row ready; declined minutes are
+# listed per reason. While the run is open the last line's interval runs to now; once it is
+# closed, nothing after the last line is counted.
+#
+# THE FIXTURE: 10 minutes missed and 5 of HOLD, with a superseded line inside the missed turn
+# (at 10:02, missed=1) that an unfolded sum would count as 3.5 more minutes.
+s35_iso_epoch() {  # <ISO Z> -> epoch seconds, BSD or GNU date
+  date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null || date -u -d "$1" +%s
+}
+s35_line() {  # <at> <turn> <state> <ready> <launched> <declined> <missed>
+  printf 'fill-ledger/v1|at=%s|session=%s|turn=%s|current=5|state=%s|ceiling=8|width=8|open=2|free=6|ready=%s|launched=%s|declined=%s|missed=%s\n' \
+    "$1" "$SID" "$2" "$3" "$4" "$5" "$6" "$7"
+}
+s35_fixture() {  # <repo> <last line's missed> -> the plan path; writes plan + ledger
+  local r="$1" plan led
+  plan="$(plan_at "$r" epic-99-fixture/wave-35-fill.plan.md "$(plan_body 5)")"
+  led="$r/.bionic/docs/record/wave-35-fill/fill-ledger.log"
+  mkdir -p "${led%/*}"
+  {
+    s35_line 2026-09-23T10:00:00Z u-t1 ok ''    W-T1 ''          0
+    s35_line 2026-09-23T10:02:00Z u-t2 ok T2    ''   ''          1
+    s35_line 2026-09-23T10:05:30Z u-t2 ok T2    ''   ''          1
+    s35_line 2026-09-23T10:15:30Z u-t3 hold T4  ''   ''          1
+    s35_line 2026-09-23T10:20:30Z u-t4 ok ''    W-T4 ''          0
+    s35_line 2026-09-23T10:25:30Z u-t5 ok T5    ''   'mid-merge' 1
+    s35_line 2026-09-23T10:30:30Z u-t6 ok T6    ''   ''          "$2"
+  } > "$led"
+  printf '%s' "$plan"
+}
+S35_NOW="$(( $(s35_iso_epoch 2026-09-23T10:30:30Z) + 120 ))"
+
+R35="$(make_repo s35)"
+P35="$(s35_fixture "$R35" 0)"
+OUT="$( cd "$R35" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35" 2>&1 )"; RC=$?
+expect_eq "35a fill-report exits 0" "0" "$RC"
+expect_contains "35b AC-5.6 the fixture's 10 missed minutes, exactly" "missed=10|" "$OUT"
+expect_contains "35c …and its 5 HOLD minutes, separately" "hold=5|" "$OUT"
+expect_contains "35d …and the declined minutes, with their reason" "declined=5|" "$OUT"
+expect_contains "35e …the reason listed on its own line" "mid-merge" "$OUT"
+expect_contains "35f …the superseded line folded away: six turns, not seven" "turns=6|" "$OUT"
+expect_contains "35g …the line is the report's schema" "fill-report/v1|plan=wave-35-fill|" "$OUT"
+
+# 35h: THE OPEN RUN'S LAST INTERVAL RUNS TO NOW. The last line misses one ready row, two minutes
+# ago: open, those two minutes are missed; closed, nothing after the last line counts.
+R35H="$(make_repo s35h)"
+P35H="$(s35_fixture "$R35H" 1)"
+OUT="$( cd "$R35H" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35H" 2>&1 )"
+expect_contains "35h an open run's last interval runs to now: 10 + 2 missed" "missed=12|" "$OUT"
+printf '%s' "$(plan_body 9 'delivered: bionic 9.9.9; report: record/x.md')" > "$P35H"
+OUT="$( cd "$R35H" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35H" 2>&1 )"
+expect_contains "35i …and a delivered run's does not: 10 missed" "missed=10|" "$OUT"
+expect_contains "35j …and says the run is closed" "open=no" "$OUT"
+
+# 35k: WITH NO OPERAND, the session's own run — the bound plan, as every verb resolves it.
+R35K="$(make_repo s35k)"
+P35K="$(s35_fixture "$R35K" 0)"
+bind_marker "$R35K" "$P35K"
+OUT="$( cd "$R35K" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report 2>&1 )"
+expect_contains "35k with no operand the bound run's ledger is read" "plan=wave-35-fill|" "$OUT"
+expect_contains "35l …with the same answer" "missed=10|" "$OUT"
+
+# 35m: a plan with no ledger yet says so, and reports zeros rather than failing.
+R35M="$(make_repo s35m)"
+P35M="$(plan_at "$R35M" epic-99-fixture/wave-36-none.plan.md "$(plan_body 5)")"
+poke "$R35M" fill-report "$P35M"
+expect_eq "35m a run with no ledger exits 0" "0" "$RC"
+expect_contains "35n …and names the file it looked for" "record/wave-36-none/fill-ledger.log" "$OUT"
+
+# 35o: an operand that names no plan is a refusal, exit 2.
+poke "$R35M" fill-report "$R35M/no-such.plan.md"
+expect_eq "35o a plan that does not exist is refused (exit 2)" "2" "$RC"
+poke "$R35M" fill-report a b
+expect_eq "35p two operands is a usage error (exit 2)" "2" "$RC"
+
+# ============================================================
+section "Section 36: prompt — the canonical Patrol prompt (wave-20 REQ-6, AC-6.1; D6)"
+# ============================================================
+#
+# THE PROMPT IS PRINTED, NOT COMPOSED. Report #1: a Patrol job whose prompt was the bare tick
+# command (or a marker with no tick) was never a tick turn, or ran no tick. `prompt` prints the
+# one prompt a CronCreate should carry — the session's marker first, the tick command in it.
+R36="$(make_repo s36)"
+poke "$R36" prompt
+expect_eq "36a prompt exits 0" "0" "$RC"
+case "$OUT" in
+  "bionic-patrol session=${SID:0:8} "*) ok "36b AC-6.1 the prompt starts with this session's marker" ;;
+  *) no "36b AC-6.1 the prompt starts with this session's marker" "$OUT" ;;
+esac
+expect_contains "36c …and carries the tick command, by this poker's absolute path" "bash $POKER tick" "$OUT"
+expect_eq "36d …on one line (a CronCreate prompt)" "1" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+expect_contains "36e …and names the fill answer" "fill-declined:" "$OUT"
+OUT="$( cd "$R36" && CLAUDE_CODE_SESSION_ID="" bash "$POKER" prompt 2>&1 )"; RC=$?
+expect_eq "36f with no session key there is no marker to print (exit 3)" "3" "$RC"
+poke "$R36" prompt extra
+expect_eq "36g prompt takes no arguments (exit 2)" "2" "$RC"
 
 finish

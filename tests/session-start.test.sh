@@ -275,8 +275,13 @@ has  "1.8 …then CronCreate" "CronCreate" "$OUT"
 # the line entirely, not just reworded.
 hasnt "1.9 …no arm hand step — the stamp arms itself at engagement (D4)" \
   "session-poker.sh arm" "$OUT"
-has  "1.9b …the re-arm line itself, exactly: CronCreate hands straight to adopt" \
-  "re-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate → adopt" "$OUT"
+# wave-20 REQ-6 (AC-6.1, D6): the CronCreate step names the verb that prints the canonical
+# Patrol prompt, by the poker's absolute path, so the job it creates carries the marker AND the
+# tick — the ritual alone produced jobs that were never tick turns (report #1).
+S1_POKER="$(cd "$(dirname "$HOOK")/.." && pwd -P)/hooks/session-poker.sh"
+has  "1.9b …the re-arm line itself, exactly: CronCreate with the printed prompt, then adopt" \
+  "re-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate with the prompt \`bash $S1_POKER prompt\` prints → adopt" "$OUT"
+has  "1.9c AC-6.1 …the re-arm line names the prompt verb" "session-poker.sh prompt" "$OUT"
 has  "1.10 …then adopt" "adopt" "$OUT"
 has  "1.11 the session-id triple agrees" "— agree" "$OUT"
 eq   "1.12 the hook wrote nothing under .bionic" "$S1_BEFORE" "$(snap "$P1")"
