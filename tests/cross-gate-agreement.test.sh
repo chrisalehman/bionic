@@ -9296,25 +9296,29 @@ expect_contains "S13.1 …and the suite that owns that file is in the answer" \
 # weakening the real coverage would believe this still held the line.
 #
 # It is an agreement now. The two lines that build `suites_allowed=` are lifted OUT of
-# payload/hooks/dispatch-preflight.sh by text and run here over the same raw output, so a
+# payload/scripts/lib/brief.sh by text and run here over the same raw output, so a
 # change to the hook's spelling — a third column kept, a different sort, the trailing-space
 # trim dropped — is red HERE. The end-to-end coverage (a real dispatch, a real row) is
 # tests/dispatch-preflight.test.sh S27a and its mutation arm S27a2; this section is the
 # alphabet check that sits under it.
-S13_HOOK="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
-expect_eq "S13.2 the hook this section reads is present" "yes" \
+# THE REDUCTION LIVES IN THE CONTRACT GRAMMAR NOW (wave-20 T6; REQ-4, Δ10): the dispatch wall,
+# `amend` and `task-add` all record the set `brief_validate_fields` builds, so that is the
+# spelling this pin reads. The variable keeps its name; it names the file that holds the rule.
+S13_HOOK="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
+[ -r "$S13_HOOK" ] || S13_HOOK="$BIONIC_HOOKS_DIR/../scripts/lib/brief.sh"
+expect_eq "S13.2 the library this section reads is present" "yes" \
   "$([ -r "$S13_HOOK" ] && echo yes || echo no)"
 # THE PRECONDITION OF THE LIFT (AC-29): the two lines are still there, exactly once each.
-anchor -E "$S13_HOOK" '^[[:space:]]*SUITES_ALLOWED=\$\(printf' 1
-anchor -E "$S13_HOOK" '^[[:space:]]*SUITES_ALLOWED="\$\{SUITES_ALLOWED% \}"' 1
-S13_REDUCTION=$(awk '/^[[:space:]]*SUITES_ALLOWED=\$\(printf/,/^[[:space:]]*SUITES_ALLOWED="\$\{SUITES_ALLOWED% \}"/' "$S13_HOOK")
+anchor -E "$S13_HOOK" '^[[:space:]]*BRIEF_SUITES_ALLOWED=\$\(printf' 1
+anchor -E "$S13_HOOK" '^[[:space:]]*BRIEF_SUITES_ALLOWED="\$\{BRIEF_SUITES_ALLOWED% \}"' 1
+S13_REDUCTION=$(awk '/^[[:space:]]*BRIEF_SUITES_ALLOWED=\$\(printf/,/^[[:space:]]*BRIEF_SUITES_ALLOWED="\$\{BRIEF_SUITES_ALLOWED% \}"/' "$S13_HOOK")
 expect_eq "S13.2 the lift took exactly the two assignment lines" "2" \
   "$(printf '%s\n' "$S13_REDUCTION" | grep -c 'SUITES_ALLOWED=')"
 expect_eq "S13.2 …and nothing else came with them" "0" \
   "$(printf '%s\n' "$S13_REDUCTION" | grep -vc 'SUITES_ALLOWED=')"
 
 # The hook's own reduction, over the derivation's own output.
-S13_HOOK_SET=$(_impact_out="$S13_RAW"; eval "$S13_REDUCTION"; printf '%s' "$SUITES_ALLOWED")
+S13_HOOK_SET=$(_impact_out="$S13_RAW"; eval "$S13_REDUCTION"; printf '%s' "$BRIEF_SUITES_ALLOWED")
 # This test's reading of the same rule, spelled independently.
 S13_SET=$(printf '%s\n' "$S13_RAW" | cut -f1 | sort -u | tr '\n' ' ')
 S13_SET="${S13_SET% }"
@@ -9325,7 +9329,7 @@ expect_eq "S13.2 the wall's own reduction and this test's agree, to the byte" \
 # THE MUTATION: doctor the raw output the way a derivation that grew a column would, and the
 # two sides must part. Without this the row above could be two spellings of `true`.
 S13_RAW_MUT="$(printf '%s\n' "$S13_RAW" | sed 's/^/x-/')"
-S13_HOOK_SET_MUT=$(_impact_out="$S13_RAW_MUT"; eval "$S13_REDUCTION"; printf '%s' "$SUITES_ALLOWED")
+S13_HOOK_SET_MUT=$(_impact_out="$S13_RAW_MUT"; eval "$S13_REDUCTION"; printf '%s' "$BRIEF_SUITES_ALLOWED")
 expect_ne "S13.2 …and the comparison discriminates on a doctored raw output" \
   "$S13_SET" "$S13_HOOK_SET_MUT"
 
@@ -9506,31 +9510,46 @@ expect_eq "S18.2 …declaring the dependency, per the loader contract" "1" \
 # ONE key through ONE call shape, so each hook's own call line is derived and the two are
 # compared to each other — which is a stronger statement than either literal was, and one
 # no rename can falsify.
-S18_LG_IMPACT=$(/usr/bin/grep -o 'config_value "[^"]*" "impact-command" ""' "$S18_LG" | sort -u)
-S13_DP_IMPACT=$(/usr/bin/grep -o 'config_value "[^"]*" "impact-command" ""' "$S13_DP" | sort -u)
+#
+# THE DISPATCH SIDE'S CALL IS IN THE CONTRACT GRAMMAR NOW (wave-20 T6; REQ-4, Δ10), where it is
+# asked of the root the door passes in rather than of the hook's `BIONIC_ROOT`. The root is
+# which tree, not which key, so both lines are compared with the root argument read as `<root>`:
+# the property is still one key, one default, one call shape.
+s18_impact_call() {  # <file> -> the impact-command call, root argument abstracted
+  /usr/bin/grep -o 'config_value "[^"]*" "impact-command" ""' "$1" \
+    | sed 's/^config_value "[^"]*"/config_value <root>/' | sort -u
+}
+S18_LG_IMPACT=$(s18_impact_call "$S18_LG")
+S13_DP_IMPACT=$(s18_impact_call "$S13_HOOK")
 expect_eq "S18.3 lib/stop.sh reads impact-command exactly once" "1" \
   "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S18_LG" | tr -d ' ')"
+expect_eq "S18.3 …and so does the contract grammar the dispatch wall calls" "1" \
+  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S13_HOOK" | tr -d ' ')"
+expect_eq "S18.3 …and the dispatch wall no longer reads it itself" "0" \
+  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S13_DP" | tr -d ' ')"
 expect_nonempty "S18.3 …and the call is findable at all (the pin is not comparing air)" "$S18_LG_IMPACT"
-expect_eq "S18.3 …the same call shape dispatch-preflight.sh uses" "$S18_LG_IMPACT" "$S13_DP_IMPACT"
+expect_eq "S18.3 …the same call shape the dispatch wall's grammar uses" "$S18_LG_IMPACT" "$S13_DP_IMPACT"
 # ============================================================
 section "S13b — one run normaliser on both sides of the row (wave-20 T4; REQ-7, D7)"
 # ============================================================
 #
 # THE SAME SEAM AS S13, FOR THE OTHER BUDGET FIELD. `re_executes=` is WRITTEN by the
-# dispatch lift (`lift_contract_fields` in hooks/dispatch-preflight.sh, its `collapse()`)
-# and COMPARED by the budget arm to the run the claim reader built (payload/scripts/lib/
-# cmd-class.sh, LAST_RUN). Each side has its own suite and each can pass while the two
-# spell one run two ways — which is exactly how `npx jest x 2>&1 | tee log` came to be
-# refused for the run its brief declared (triage-B B1). Pinned here: the lift, lifted out of
-# the hook and run with the library it loads, stores the run the claim reader reads off
-# every redirected spelling of it.
-S13B_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
-anchor -E "$S13B_DP" '^LEAD_CHARS=' 1
-anchor -E "$S13B_DP" '^lift_contract_fields\(\) \{' 1
-S13B_LIFT_SRC=$(awk '/^LEAD_CHARS=/ { on = 1 } on { print } on && started && /^}$/ { exit } /^lift_contract_fields\(\) \{/ { started = 1 }' "$S13B_DP")
+# dispatch lift (`lift_contract_fields`, its `collapse()`) and COMPARED by the budget arm to
+# the run the claim reader built (payload/scripts/lib/cmd-class.sh, LAST_RUN). Each side has
+# its own suite and each can pass while the two spell one run two ways — which is exactly how
+# `npx jest x 2>&1 | tee log` came to be refused for the run its brief declared (triage-B
+# B1). Pinned here: the lift, run with the library it loads, stores the run the claim reader
+# reads off every redirected spelling of it.
+#
+# THE LIFT IS A LIBRARY NOW (wave-20 T6; REQ-4, Δ10), so this section sources
+# payload/scripts/lib/brief.sh — the one file every contract door calls — where it used to
+# lift the function's text out of hooks/dispatch-preflight.sh between two anchors. Sourcing
+# it alone also proves it brings in cmd-class.sh for itself: nothing else is loaded here.
+S13B_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
+[ -r "$S13B_LIB" ] || S13B_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/brief.sh"
 s13b_lift_runs() {  # <brief text> -> the lifted re_executes= value
-  bash -c '. "$1" || exit 1; eval "$2"; lift_contract_fields "$3" | sed -n "s/^re_executes=//p"' \
-    _ "$S13_CMDCLASS" "$S13B_LIFT_SRC" "$1" 2>&1
+  bash -c '. "$1" || exit 1; lift_contract_fields "$2" | sed -n "s/^re_executes=//p"' \
+    _ "$S13B_LIB" "$1" 2>&1
 }
 s13b_claim_run() {  # <command> -> the first claim's run column
   bash -c '. "$1" || exit 1; cmd_suite_claims "$2" | awk -F"\t" "NR == 1 { print \$3 }"' \
@@ -9552,6 +9571,89 @@ expect_ne "S13b …and a narrower run redirected the same way is NOT the stored 
 # normal, so normalising it again changes nothing.
 expect_eq "S13b the walls-side normaliser leaves a lifted field byte-identical" "$S13B_STORED" \
   "$(bash -c '. "$1" || exit 1; cmd_runs_norm "$2"' _ "$S13_CMDCLASS" "$S13B_STORED" 2>&1)"
+
+# ============================================================
+section "S13c — one contract grammar, one verdict at every door (wave-20 T6; REQ-4, D4, Δ10)"
+# ============================================================
+#
+# THE GRAMMAR HAS THREE DOORS AND ONE BODY. A dispatch, an `amend` (T9) and a `task-add` each
+# hand Files:/Suites:/Re-executes: to payload/scripts/lib/brief.sh's `brief_validate_fields`,
+# so an amended contract is held to exactly a fresh dispatch's standard (Δ10). This pins the
+# door that exists today against the library the other two call: the same brief, driven
+# through the real dispatch wall and through the library alone, names the same grammar faults
+# — no fault the library finds is missing from the wall's refusal, and no grammar fault the
+# library does NOT find appears there. The wall's other arms (arming, approval, budget) pool
+# beside these and are not this section's; the comparison reads only the grammar's facts.
+#
+# THE FACT SET IS DERIVED, never typed: it is the union of what the library answered across
+# the table, so a new check in the library joins the comparison without an edit here, and a
+# clean brief in the table makes the "absent" half of the comparison carry weight.
+S13C_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
+[ -r "$S13C_LIB" ] || S13C_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/brief.sh"
+S13C_R=$(s4_world "s13c-one-verdict")
+s4_bind "$S13C_R" "$SID_A" "$S13C_R/.bionic/docs/plans/epic-99/run-b.md"
+S13C_BT='`'
+s13c_lib() {  # <repo> <role> <brief> -> one fact per line, sorted
+  bash -c '
+    . "$1" || exit 9
+    sink() { [ "$1" = finding ] && printf "%s\n" "$2"; return 0; }
+    brief_validate_fields "$(lift_contract_fields "$4" "$3")" "$3" "$2" sink
+    exit 0
+  ' _ "$S13C_LIB" "$1" "$2" "$3" 2>/dev/null | sort -u
+}
+s13c_dp() {  # <repo> <role> <name> <brief> -> the dispatch wall's whole channel
+  jq -nc --arg s "$SID_A" --arg c "$1" --arg t "$1/s4-transcript.jsonl" \
+         --arg r "$2" --arg n "$3" --arg p "$4" \
+    '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent",
+      tool_input:{description:"a dispatch", subagent_type:$r, name:$n, prompt:$p},
+      tool_use_id:"toolu_S13C"}' \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" 2>&1
+  return 0
+}
+S13C_HEAD="Expected artifact: .bionic/docs/record/s13c.md
+Expected duration: ~10 minutes.
+Progress artifact: .bionic/tmp/s13c.progress, cadence ~5m"
+# role|brief tail — one row per grammar fault, and one row with none.
+S13C_CASES="implementor|Suites: tests/widget.test.sh
+implementor|Suites: tests/\$X.test.sh
+implementor|Suites: tests/unit/foo.spec.ts
+implementor|Re-executes: ${S13C_BT}npx jest x | tee log${S13C_BT}
+bionic:auditor|Re-executes: ${S13C_BT}go test ./a${S13C_BT}, ${S13C_BT}go test ./b${S13C_BT}, ${S13C_BT}go test ./c${S13C_BT}, ${S13C_BT}go test ./d${S13C_BT}
+bionic:auditor|Suites: none
+implementor|Notes: none of the three instrument labels
+implementor|Files: payload/scripts/lib/widget.sh"
+S13C_UNION=""
+while IFS='|' read -r _s13c_role _s13c_tail; do
+  S13C_UNION="${S13C_UNION}$(s13c_lib "$S13C_R" "$_s13c_role" "${S13C_HEAD}
+${_s13c_tail}")
+"
+done <<< "$S13C_CASES"
+S13C_UNION=$(printf '%s' "$S13C_UNION" | /usr/bin/grep -v '^$' | sort -u)
+expect_eq "S13c the library answered a distinct grammar fact for each of the seven faulty briefs (non-vacuity)" \
+  "7" "$(printf '%s\n' "$S13C_UNION" | /usr/bin/grep -c .)"
+_s13c_i=0
+while IFS='|' read -r _s13c_role _s13c_tail; do
+  _s13c_i=$((_s13c_i + 1))
+  _s13c_brief="${S13C_HEAD}
+${_s13c_tail}"
+  _s13c_want=$(s13c_lib "$S13C_R" "$_s13c_role" "$_s13c_brief" | tr '\n' '|')
+  _s13c_out=$(s13c_dp "$S13C_R" "$_s13c_role" "s13c-${_s13c_i}" "$_s13c_brief")
+  _s13c_got=""
+  while IFS= read -r _s13c_fact; do
+    [ -n "$_s13c_fact" ] || continue
+    case "$_s13c_out" in *"$_s13c_fact"*) _s13c_got="${_s13c_got}${_s13c_fact}|" ;; esac
+  done <<< "$S13C_UNION"
+  expect_eq "S13c case ${_s13c_i} [${_s13c_role}] ${_s13c_tail%%:*}: the wall and the library name the same grammar faults" \
+    "$_s13c_want" "$_s13c_got"
+done <<< "$S13C_CASES"
+# THE CLEAN ROW REALLY REACHED THE WALL: an empty want and an empty got would also agree for
+# a wall that exited before reading the brief. So the clean brief must have been either
+# refused by a named arm or journalled onto the roster, and either one is the wall at work.
+_s13c_out=$(s13c_dp "$S13C_R" implementor s13c-clean "${S13C_HEAD}
+Suites: tests/widget.test.sh")
+expect_eq "S13c …and the wall answered the clean brief at all (the empty agreement is not silence)" "yes" \
+  "$(if /usr/bin/grep -qE '^bionic: dispatch refused' <<< "$_s13c_out" \
+        || /usr/bin/grep -qs 'name=s13c-clean' "$S13C_R/.bionic/tmp/roster-$SID_A.state"; then echo yes; else echo no; fi)"
 
 # ============================================================
 section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-30/AC-31)"
@@ -9766,7 +9868,13 @@ expect_eq "S19.3 …declared by 45 anchor calls (Section 8's doctoring rewrites 
 # hooks/dispatch-preflight.sh to run it beside the claim reader, and anchors both ends of the
 # lift (the `LEAD_CHARS=` start line and the function's head) so a moved function fails the
 # precondition rather than lifting air. Two anchor calls, 32 -> 34, by direct grep.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 34 more" "34" \
+#
+# 32 at epic-23 wave-20-fixit-187 (2026-09-23, T6): the lift moved into
+# payload/scripts/lib/brief.sh, and §S13b sources that library instead of lifting the
+# function's text out of the hook, so its two anchors have nothing left to guard. §S13.2's two
+# anchors moved with the reduction they guard and stay. Two anchor calls, 34 -> 32, by direct
+# grep.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 32 more" "32" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -9854,7 +9962,9 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # re-measured, not assumed.
 # 83 at epic-23 wave-20-fixit-187 (2026-09-23, T4): 45 + 34 + 1 + 3 — §S13b's two lift
 # anchors in this file; the other three files are untouched by that task.
-expect_eq "S19.3 …83 anchor call sites across the four doctoring suites, all told" "83" \
+# 81 at epic-23 wave-20-fixit-187 (2026-09-23, T6): 45 + 32 + 1 + 3 — §S13b sources the
+# grammar library instead of lifting its text, and its two anchors go with the lift.
+expect_eq "S19.3 …81 anchor call sites across the four doctoring suites, all told" "81" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
