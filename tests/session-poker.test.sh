@@ -1607,6 +1607,55 @@ OUT="$( cd "$R8M" && env CLAUDE_CODE_SESSION_ID="$SID" \
 expect_contains "…and the SAME row reads RUNNING against a library whose predicate says alive" \
   "name=between|verdict=RUNNING" "$OUT"
 
+# ---------- 8k: the ADOPT REPORT reads the ADOPTER's transcript too (T1d, walk W-3) ----------
+#
+# THE DEFECT THIS PINS. `row_quiet` (§8j's own comment, D4/REQ-2) already prefers THIS
+# session's copy of an agent's transcript over the launching session's — the harness re-files
+# a transcript under whichever session is talking to the agent NOW. But `adopt`'s own report
+# (the `poker-adopt/v1|...` line and the human-readable `observe :` tail) used to build its
+# `transcript=`/`transcript_age=` fields from the LAUNCHING session's copy only, unconditionally
+# — so a re-run of `adopt --report-only` after this session had already exchanged a turn with
+# the agent (the fresh copy now sitting under THIS session's subagents dir) still quoted the
+# launcher's stale path and its large age, disagreeing with what the very next tick would say
+# about the identical row. `transcript_dir_for` is the fix: one resolver, called by both.
+R8K="$(make_repo s8-adopter-transcript)"; new_roster "$R8K"
+mkdir -p "$R8K/.bionic/docs/record"
+ID_ADOPTER_PREF="aadopterpref-onexxxxxxxxxxxxx"
+add_row_to "$R8K" "$ADOPT_A" name=adopter-pref status=identified \
+  agent_id="$ID_ADOPTER_PREF" subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8K/.bionic/docs/record/adopter-pref.md" \
+  progress="$R8K/.bionic/tmp/progress-adopter-pref.md"
+# The progress channel is stale on BOTH candidate reads, so the transcript channel is the one
+# this case is about.
+printf 'progress\n' > "$R8K/.bionic/tmp/progress-adopter-pref.md"
+backdate "$R8K/.bionic/tmp/progress-adopter-pref.md" 5400
+
+# THE LAUNCHER'S COPY: old, the shape the pre-fix report always named.
+mkdir -p "$C8/projects/-fixture-project/$ADOPT_A/subagents"
+: > "$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_ADOPTER_PREF}.jsonl"
+backdate "$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_ADOPTER_PREF}.jsonl" 1415
+
+# THE ADOPTER'S OWN COPY (this session, $SID — what `poke` sets CLAUDE_CODE_SESSION_ID to):
+# newer, because this is the session `adopt --report-only` is about to run as.
+mkdir -p "$C8/projects/-fixture-project/$SID/subagents"
+: > "$C8/projects/-fixture-project/$SID/subagents/agent-${ID_ADOPTER_PREF}.jsonl"
+backdate "$C8/projects/-fixture-project/$SID/subagents/agent-${ID_ADOPTER_PREF}.jsonl" 60
+
+poke "$R8K" adopt --report-only
+expect_contains "the report names the ADOPTER's transcript path, not the launcher's" \
+  "transcript=$C8/projects/-fixture-project/$SID/subagents/agent-${ID_ADOPTER_PREF}.jsonl|" \
+  "$OUT"
+expect_absent "…never the launcher's stale path" \
+  "transcript=$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_ADOPTER_PREF}.jsonl|" \
+  "$OUT"
+expect_regex "…and the small (adopter-side) age, not the launcher's large one" \
+  'transcript_age=6[0-9][|]plan=' "$OUT"
+expect_absent "…never the launcher's 1415s age" "transcript_age=1415|" "$OUT"
+expect_contains "…the human-readable tail names the same adopter path" \
+  "observe     : $C8/projects/-fixture-project/$SID/subagents/agent-${ID_ADOPTER_PREF}.jsonl" \
+  "$OUT"
+
 unset CLAUDE_CONFIG_DIR
 
 # ============================================================
