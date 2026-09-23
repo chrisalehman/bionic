@@ -8715,6 +8715,37 @@ s9_expect_outside "9a C1 control: 'cd <scratch> || exit 1; git add -A && git com
 s9_expect_outside "9a C1 control: 'git -C <scratch> commit -C HEAD' is still admitted (the second -C is commit's)" \
   "$s9_root" "git -C $s9_scratch commit -C HEAD" "$s9_scratch"
 
+# AN ALLOW-LIST, NOT A DENY-LIST (review R2-2, wave-19 T6e). The reader used to name the words
+# that move the shell — `cd`, `pushd`, `eval`, a shell — and exempt everything else. A `cd` behind
+# a reserved word (`if`, `while`, `until`, `!`, `time`) runs in the current shell all the same,
+# and its first word was none of those, so each command below was exempted for the scratch repo
+# while it committed in the ROOT. Three rounds (R1, C1, R2-2) each patched that list. Now every
+# segment after the placing prefix must start with `git`, `true`, `:` or `exit`, and any `(`,
+# `)`, `{`, `}` or backtick costs the exemption. Each of these is judged at the run's step.
+s9_expect_judged "9a R2-2 payload cwd in the scratch repo with 'if cd <root>; then :; fi; git commit' is judged" \
+  "$s9_scratch" "if cd $s9_root; then :; fi; git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and 'time cd <root> && git commit' is judged" \
+  "$s9_scratch" "time cd $s9_root && git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and '! cd <root> || git commit' is judged" \
+  "$s9_scratch" "! cd $s9_root || git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and 'while ! cd <root>; do :; done; git commit' is judged" \
+  "$s9_scratch" "while ! cd $s9_root; do :; done; git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and 'cd <scratch> && if cd <root>; then git commit; fi' is judged" \
+  "$s9_root" "cd $s9_scratch && if cd $s9_root; then git commit -m x; fi" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and 'cd <scratch> && time cd <root> && git commit' is judged" \
+  "$s9_root" "cd $s9_scratch && time cd $s9_root && git commit -m x" "the suite is not fully green"
+# THE LIST IS OF WHAT IS ALLOWED, SO A WORD NOBODY NAMED IS JUDGED TOO. `until` is a reserved
+# word the old reader never listed; a function named `git` shadows the binary, so the one
+# `git -C <scratch> commit` in the text runs `git -C <root> commit` instead.
+s9_expect_judged "9a R2-2 …and 'until cd <root>; do :; done; git commit' is judged (a word no list named)" \
+  "$s9_scratch" "until cd $s9_root; do :; done; git commit -m x" "the suite is not fully green"
+s9_expect_judged "9a R2-2 …and a function named git shadowing 'git -C <scratch> commit' is judged" \
+  "$s9_root" "git() { command git -C $s9_root commit -m x; }; git -C $s9_scratch commit -m y" "the suite is not fully green"
+# CONTROL: a redirection is not a segment. '2>&1' carries an '&' and still leaves the one commit
+# placed where the payload cwd stands.
+s9_expect_outside "9a R2-2 control: 'git add -A && git commit 2>&1' from the scratch repo is still admitted" \
+  "$s9_scratch" "git add -A && git commit -m x 2>&1" "$s9_scratch"
+
 # NOT A REPOSITORY AT ALL: git cannot name one, so the gate cannot say it is outside, and it
 # keeps today's verdict (the commit would fail on its own; the wall does not guess).
 s9_bare_dir="$s9_tmp/not-a-repo"; mkdir -p "$s9_bare_dir"
