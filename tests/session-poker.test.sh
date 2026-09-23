@@ -2786,7 +2786,7 @@ touch "$f12i"
 poke_pressure "$R12I" 8192 1.0 tick
 expect_absent "a fenced task table is documentation, and fills nothing" "poker: FILL" "$OUT"
 expect_contains "…and the tick says the table gave it nothing ready" \
-  "no pending step-4 task has all its dependencies landed" "$OUT"
+  "no pending task is ready" "$OUT"
 
 # ---------- 12j: a DELIVERED run is never filled ----------
 #
@@ -2812,14 +2812,14 @@ poke_pressure "$R12J" 8192 1.0 tick
 expect_contains "a delivered run DISARMs" "decision=DISARM" "$OUT"
 expect_absent "…and is never filled" "poker: FILL" "$OUT"
 
-# ---------- 12k: READY IS ASKED AT THE PLAN'S OWN STEP (REQ-1e, AC-1e.4) ----------
+# ---------- 12k: READINESS IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036) ----------
 #
-# The widened `## Tasks` table is ONE schedule covering Steps 3-9, so "pending with every
-# dependency landed" stopped being the whole question the moment the step column arrived.
-# A Step-6 review row whose dependencies happen to be landed is ready in the dependency
-# sense and is still not this step's work; filling it would send a critic against code the
-# Verify gate has not passed. `units_ready <plan> <step>` takes the step, and the step is
-# the plan's own `current:`.
+# RE-AUTHORED. Through 1.8.6 ready was asked at the plan's own step (REQ-1e, AC-1e.4): a
+# Step-6 review row whose deps had landed was "not this step's work" and sat unfilled while
+# Verify ran. Δ1 made the prerequisite graph the whole schedule — a work row is ready when it
+# is pending and every dependency has landed, whatever its step — and Δ6 kept the step for
+# the two gate acts: an `integrate` or `close` row waits for `current:` to reach its step,
+# because its real prerequisite is a gate passing, not a task landing.
 sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   local repo="$1" current="$2"; shift 2
   local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" row
@@ -2837,17 +2837,18 @@ sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   printf '%s' "$f"
 }
 
-# 12k1 — at current: 5, a ready Step-5 row and a ready Step-6 row. Only the Step-5 id is
-# named. Both rows are `pending` and both have every dependency `landed`, so the OLD
-# reader — which had no step to ask about — would have named both.
+# 12k1 — AC-5.1 at current: 5: a ready Step-5 row, a ready Step-6 row and a Step-8
+# integrate row, all three with every dependency landed. The two work rows are filled; the
+# integrate row is not, because the run has not reached Step 8.
 R12K1="$(make_repo s12-step-scoped)"; new_roster "$R12K1"
 sp_plan_at_step "$R12K1" 5 \
   "| T1 | 4 | build | the build that landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 5 | verify | this step's work | auditor | T1 | 15m | REQ-x | b.sh | pending |" \
-  "| T3 | 6 | review | the NEXT step's work | critic | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
+  "| T3 | 6 | review | the next step's work, deps landed | critic | T1 | 15m | REQ-x | c.sh | pending |" \
+  "| T4 | 8 | integrate | the merge, a gate act | implementor | T1 | 15m | REQ-x | — | pending |" > /dev/null
 poke_pressure "$R12K1" 8192 1.0 tick
-expect_contains "at current: 5 the ready Step-5 task is filled" "poker: FILL T2" "$OUT"
-expect_absent "…and the ready Step-6 task is not" "T3" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
+expect_contains "AC-5.1 at current: 5 the ready Step-5 AND Step-6 tasks are filled" "poker: FILL T2 T3" "$OUT"
+expect_absent "…and the Step-8 integrate row is not (Δ6)" "T4" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # 12k2 — at current: 4, two ready Step-4 rows and one held back by an unlanded dependency,
 # named in TABLE order (the orchestrator's own dependency ordering, not an ordering the
@@ -2863,15 +2864,19 @@ expect_contains "two ready Step-4 tasks are filled in table order" "poker: FILL 
 # ISO timestamp (`at=2026-09-12T21:…`) whose `T2` made this case red for UTC hours 20–23 (A-86).
 expect_absent "…and the one whose dependency has not landed is held back" "T2" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
-# 12k3 — the same table at current: 6, where nothing is ready: the tick says so, naming
-# the step it asked about rather than reporting an empty table.
+# 12k3 — at current: 6 a table where nothing is ready: the review waits behind an ACTIVE
+# floor, and the integrate row waits for Step 8. The tick says no task is ready, and no
+# longer names a step — the step is no longer what it asked about.
 R12K3="$(make_repo s12-step-none)"; new_roster "$R12K3"
 sp_plan_at_step "$R12K3" 6 \
   "| T1 | 4 | build | landed long ago | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 5 | verify | pending, but not at this step | auditor | T1 | 15m | REQ-x | b.sh | pending |" > /dev/null
+  "| T2 | 5 | verify | the floor, in flight | auditor | T1 | 15m | REQ-x | b.sh | active |" \
+  "| T3 | 6 | review | behind the floor | critic | T2 | 15m | REQ-x | c.sh | pending |" \
+  "| T4 | 8 | integrate | deps landed, step not reached | implementor | T1 | 15m | REQ-x | — | pending |" > /dev/null
 poke_pressure "$R12K3" 8192 1.0 tick
-expect_contains "a step with no ready row says which step it asked about" \
-  "no pending step-6 task has all its dependencies landed" "$OUT"
+expect_contains "a table with no ready row says so" \
+  "no pending task is ready: none has all its dependencies landed, and integrate/close rows wait for their step." "$OUT"
+expect_absent "…and names no step it filtered by" "pending step-" "$OUT"
 
 # 12l — THE DIFFERENTIAL (wave-19 REQ-5 AC-5.2, D6; ADR-034 decision 2). The tick and the
 # stop wall now count ONE occupancy — this session's roster rows that are not acked — so on
@@ -5926,5 +5931,171 @@ expect_eq "33g2 …and after a second adopt (idempotent, adopted_from= never rew
   "$S33_ROW_ADOPTED" "$S33_ROW_READOPT"
 
 unset CLAUDE_CONFIG_DIR
+
+# ============================================================
+section "Section 34: task-add — a schedule change is a transaction (wave-20 REQ-5, AC-5.3; Δ5)"
+# ============================================================
+#
+# `task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>` — the table's
+# own column order, the nine cells an author writes (status, worktree and base are the
+# dispatcher's). It projects the row onto a COPY of the bound plan (`units_add_row`: the row,
+# its `- <id>:` line, and a Step-4 id threaded into the frontier Step-5+ rows), runs
+# `units_validate` on the copy and a dry commit through the REAL hooks/bash-walls.sh, and only
+# then moves the copy over the plan. On any refusal the plan is byte-identical and the words
+# that refused it print. AC-5.3 fails-when: "after task-add of a Step-4 row mid-run the next
+# writer commit is refused for a dependency the verb should have written, or a refused add
+# changes the plan".
+#
+# THE FIXTURE IS A PLAN THE REAL GATE ADMITS: audited, multi_agent, use_worktree, a Step-4
+# block with its three fields, a `- T<n>:` line per row, and a matrix whose row carries its
+# `fails-when:`. S34_GATE drives the same gate on a plan exactly as a session bound to it
+# would, so the hand-edited control below is judged by the wall the verb dry-runs.
+s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the session is bound to it
+  local repo="$1" cur="$2" block="${3:-}" f
+  f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")" "$repo/.bionic/docs/specs/epic-99-fixture"
+  printf '# requirements\n' > "$repo/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$repo/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  [ -n "$block" ] || block='  worktree: .worktrees/01-fixture
+  base-sha: abc1234
+  branch: wave/01-fixture'
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: audited\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: %s\n' "$cur"
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n%s\n' "$block"
+    [ "$cur" = 5 ] && printf -- '- Step 5: (pending)\n'
+    printf -- '- T1: landed at record/T1.md\n- T2: dispatched to w-T2\n- T5: pending dispatch — .worktrees/01-T5\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+    printf '| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | 01-T2 | abc1234 | active |\n'
+    printf '| T5 | 5 | verify | the floor | test-runner | T1, T2 | 30 | REQ-1 | — | — | — | pending |\n\n'
+    printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+  } > "$f"
+  bound_marker "$repo" "$SID" "$f" >/dev/null 2>&1
+  printf '%s' "$f"
+}
+
+# S34_GATE <repo> -> rc of the REAL commit gate on a main-root `git commit` in this session.
+s34_gate() {
+  local repo="$1" input
+  input="$(jq -n --arg s "$SID" --arg cwd "$repo" '{session_id: $s, cwd: $cwd,
+    hook_event_name: "PreToolUse", tool_name: "Bash",
+    tool_input: {command: "git commit -m x"}, tool_use_id: "toolu_s34"}')"
+  GATE_ERR="$( cd "$repo" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 \
+    bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" <<< "$input" 2>&1 >/dev/null )"
+  GATE_RC=$?
+}
+
+# The verb runs the whole commit gate once per call; on a loaded machine that is longer than
+# the bound the tick's rows are held to, so this section widens it and restores it after.
+S34_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+
+# ---------- 34a: the fixture is admitted as it stands (the control every row below leans on) ----------
+R34A="$(make_repo s34-add)"; ( cd "$R34A" && git commit -q --allow-empty -m init )
+P34A="$(s34_plan "$R34A" 4)"
+s34_gate "$R34A"
+expect_eq "34a the fixture plan is admitted by the real commit gate before any add" "0" "$GATE_RC"
+
+# ---------- 34b: AC-5.3 — a Step-4 row added mid-run, and the next commit admitted ----------
+poke "$R34A" task-add T6 4 build 'the fixup found mid-run' bionic:implementor '—' 30 REQ-5 'c.sh'
+expect_eq "34b task-add of a Step-4 row exits 0" "0" "$RC"
+expect_contains "34b2 …and says what it did" "task-add — T6 added" "$OUT"
+expect_contains "34b3 …the row is in the plan, pending" \
+  "| T6 | 4 | build | the fixup found mid-run | bionic:implementor | — | 30 | REQ-5 | c.sh | — | — | pending |" "$(cat "$P34A")"
+expect_contains "34b4 …with its - T6: line" "- T6: pending dispatch — added by task-add" "$(cat "$P34A")"
+expect_contains "34b5 …and threaded into the Step-5 row's deps" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2, T6 |" "$(cat "$P34A")"
+s34_gate "$R34A"
+expect_eq "34b6 AC-5.3 the next commit is admitted: no dependency the verb should have written is missing" \
+  "0" "$GATE_RC"
+
+# ---------- 34c: the CONTROL — the same row hand-added without the threading is refused ----------
+R34C="$(make_repo s34-hand)"; ( cd "$R34C" && git commit -q --allow-empty -m init )
+P34C="$(s34_plan "$R34C" 4)"
+awk '{ print }
+     /^\| T5 \| 5 \|/ { print "| T6 | 4 | build | the fixup, hand-added | implementor | — | 30 | REQ-5 | c.sh | — | — | pending |" }
+     /^- T5: / { print "- T6: pending dispatch — by hand" }' "$P34C" > "$P34C.tmp" && mv "$P34C.tmp" "$P34C"
+s34_gate "$R34C"
+expect_eq "34c the hand-added row without the threading is refused by the same gate" "2" "$GATE_RC"
+expect_contains "34c2 …naming the missing prerequisite" "T5: step 5 is missing 1 step-4 prerequisite: T6" "$GATE_ERR"
+
+# ---------- 34d: refused by the validator — the plan is byte-identical, the words print ----------
+SUM34="$(cksum < "$P34A")"
+poke "$R34A" task-add T7 5 verify 'a second floor, unthreaded' test-runner 'T1' 30 REQ-5 '—'
+expect_eq "34d a row the validator refuses exits 1" "1" "$RC"
+expect_eq "34d2 AC-5.3 …and the plan is byte-identical" "$SUM34" "$(cksum < "$P34A")"
+expect_contains "34d3 …and the validator's words print" "T7: step 5 is missing 2 step-4 prerequisites: T2, T6" "$OUT"
+
+poke "$R34A" task-add T6 4 build 'the same id again' implementor '—' 30 REQ-5 'd.sh'
+expect_eq "34d4 a duplicate id is refused" "1" "$RC"
+expect_eq "34d5 …the plan is byte-identical" "$SUM34" "$(cksum < "$P34A")"
+expect_contains "34d6 …naming the duplicate" "T6: duplicate id" "$OUT"
+
+poke "$R34A" task-add T8 4 build 'a dep nobody defines' implementor 'T99' 30 REQ-5 'e.sh'
+expect_eq "34d7 a dep naming no row is refused, the plan unchanged" "1 $SUM34" "$RC $(cksum < "$P34A")"
+
+# ---------- 34e: refused by the GATE, not the validator — the dry run is real ----------
+# The row is valid, but the plan's Step-4 block has lost its base-sha: the validator is
+# silent and the commit gate refuses. The verb must hear the gate, not only the validator.
+R34E="$(make_repo s34-gate)"; ( cd "$R34E" && git commit -q --allow-empty -m init )
+P34E="$(s34_plan "$R34E" 4 '  worktree: .worktrees/01-fixture
+  branch: wave/01-fixture')"
+SUM34E="$(cksum < "$P34E")"
+poke "$R34E" task-add T6 4 build 'a valid row on a plan the gate refuses' implementor '—' 30 REQ-5 'c.sh'
+expect_eq "34e a valid row on a plan the commit gate refuses exits 1" "1" "$RC"
+expect_eq "34e2 …the plan is byte-identical" "$SUM34E" "$(cksum < "$P34E")"
+expect_contains "34e3 …and the gate's own words print" "bionic: commit refused" "$OUT"
+expect_contains "34e4 …naming the field it wants" "base-sha" "$OUT"
+
+# ---------- 34f: mid-Verify — the dry commit is a writer's, judged by the task arms ----------
+# At current: 5 the Step-5 block is still pending, so a main-root commit would be refused for
+# it. A writer's commit from a Step-4 row's tree is judged at Step 4, and that commit is the
+# one AC-5.3 names — so the verb's dry run must be judged there too, or no row could ever be
+# added during Verify, which is when fixups are found.
+R34F="$(make_repo s34-verify)"; ( cd "$R34F" && git commit -q --allow-empty -m init )
+P34F="$(s34_plan "$R34F" 5)"
+poke "$R34F" task-add T6 4 build 'a fixup found during Verify' implementor '—' 30 REQ-5 'c.sh'
+expect_eq "34f a Step-4 row added at current: 5 is admitted" "0" "$RC"
+expect_contains "34f2 …and written, current: untouched" "current: 5" "$(cat "$P34F")"
+expect_contains "34f3 …with the row" "| T6 | 4 | build | a fixup found during Verify |" "$(cat "$P34F")"
+
+# ---------- 34g: the refusals that precede any projection ----------
+poke "$R34A" task-add T9 4 build
+expect_eq "34g a short argument list is a usage error (exit 2)" "2" "$RC"
+
+R34G="$(make_repo s34-unbound)"; ( cd "$R34G" && git commit -q --allow-empty -m init )
+P34G="$(s34_plan "$R34G" 4)"; engage "$R34G"      # re-engaged EMPTY: the session is unbound
+SUM34G="$(cksum < "$P34G")"
+poke "$R34G" task-add T6 4 build 'onto no bound plan' implementor '—' 30 REQ-5 'c.sh'
+expect_eq "34g2 an unbound session is refused and the newest plan is not written" "1 $SUM34G" "$RC $(cksum < "$P34G")"
+expect_contains "34g3 …saying why" "bound" "$OUT"
+
+R34H="$(make_repo s34-step3)"; ( cd "$R34H" && git commit -q --allow-empty -m init )
+P34H="$(s34_plan "$R34H" 3)"
+SUM34H="$(cksum < "$P34H")"
+poke "$R34H" task-add T6 4 build 'before approval' implementor '—' 30 REQ-5 'c.sh'
+expect_eq "34g4 a plan below current: 4 is refused, unchanged" "1 $SUM34H" "$RC $(cksum < "$P34H")"
+
+unengage "$R34A"
+poke "$R34A" task-add T9 4 build 'unengaged' implementor '—' 30 REQ-5 'f.sh'
+expect_contains "34g5 an unengaged session decides nothing" "NOT-ENGAGED" "$OUT"
+engage "$R34A"
+
+# ---------- 34h: nothing is left behind ----------
+expect_eq "34h no projection copy is left beside any plan" "" \
+  "$(find "$R34A" "$R34E" "$R34F" -name '*task-add*' 2>/dev/null)"
+expect_eq "34h2 …and no dry-run engagement marker is left in .bionic/tmp" "" \
+  "$(find "$R34A/.bionic/tmp" "$R34E/.bionic/tmp" "$R34F/.bionic/tmp" -name 'engaged-*' ! -name "engaged-$SID.state" 2>/dev/null)"
+POKE_BOUND="$S34_BOUND_WAS"
 
 finish

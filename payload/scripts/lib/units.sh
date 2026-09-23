@@ -10,13 +10,18 @@
 #                              id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base,
 #                              in TABLE order. Exit 1 and silent when the plan carries no
 #                              `## Tasks` table.
-#   units_ready <plan> <step>  the ids of rows whose status is `pending`, whose step is
-#                              <step>, and whose every dependency has landed. One per line,
-#                              table order. <step> is a number (wave scale) or `T<n>` (task
-#                              scale, where the rows carry no step cell and a dependency is
-#                              satisfied by `done`). Exit 2 on anything else.
+#   units_ready <plan> <step>  the ids of rows whose status is `pending` and whose every
+#                              dependency has landed, whatever their step; a row of kind
+#                              `integrate` or `close` also waits until <step> reaches its
+#                              own (wave-20 Δ1, Δ6). One per line, table order. <step> is a
+#                              number (wave scale) or `T<n>` (task scale, where the rows
+#                              carry no step cell and a dependency is satisfied by `done`).
+#                              Exit 2 on anything else.
 #   units_validate <plan>      one line per broken invariant, each naming the offending id
 #                              and the rule. Exit 1 if any line was printed, else 0.
+#   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>
+#                              the WHOLE plan with one row added, on stdout; the file is
+#                              not written (wave-20 REQ-5, AC-5.3). `task-add` is its caller.
 #
 # THE CALLERS (D3), all re-pointed by T8: the evidence gate's two ledger checks and its
 # prototype check, the tick's FILL, the governing-skill's Step-3 wall, and any report. No
@@ -336,7 +341,17 @@ units_rows() {
 
 # units_ready <plan> <step> -> the ids that may be dispatched now, one per line, table order.
 #
-# READY = status `pending`, step equal to <step>, and EVERY dependency `landed`.
+# READY = status `pending` and EVERY dependency `landed` — whatever the row's step (wave-20
+# REQ-5, Δ1; ADR-036). Through 1.8.6 the row's step also had to EQUAL <step>, and that one
+# comparison is why a Step-6 review whose deps had landed sat unfilled while Verify ran, and
+# why a Step-4 row added during Step 5 never filled at all. Order is the prerequisite graph's
+# job now; the validator below is what guards a forgotten edge.
+#
+# <step> STILL DECIDES THE GATE ACTS (Δ6). A row of kind `integrate` or `close` is ready only
+# once <step> has reached its own step: its real prerequisite is a gate passing (Verify
+# CONFIRMED), not a task landing, and without this a merge writer could be named the moment
+# its deps landed, before any auditor had spoken. The signature is unchanged, so every caller
+# (fill.sh's `_fill_ready_rows`, which passes the plan's `current:`) is untouched.
 #
 # TWO TABLE SHAPES, ONE ANSWER (wave-18 REQ-3, AC-3.3; ADR-033 decision 2). <step> is the
 # plan's `current:`, and this repo writes it two ways: a WAVE plan numbers its steps, a TASK
@@ -384,7 +399,7 @@ units_ready() {
   [ -n "$rows" ] || return 0
   printf '%s\n' "$rows" | awk -F'\t' -v want="$step" -v scale="$scale" '
     $1 == "" { next }
-    { n++; id[n] = $1; stp[n] = $2; dep[n] = $6; st[$1] = $10 }
+    { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; st[$1] = $10 }
     END {
       # The word a dependency has to carry, by scale. One assignment, so the two arms
       # below differ in exactly the thing they are supposed to differ in.
@@ -394,7 +409,13 @@ units_ready() {
         if (scale == "task") {
           if (stp[i] != "") continue
         } else {
-          if (stp[i] + 0 != want + 0) continue
+          # A WAVE ROW CARRIES A NUMERIC STEP, and that is all the step still decides for a
+          # work row (wave-20 Δ1): the step is a label, and readiness is the graph below.
+          if (stp[i] !~ /^[0-9]+$/) continue
+          # A GATE ACT WAITS FOR ITS STEP (Δ6). Its real prerequisite is a gate passing,
+          # which no dependency cell can name, so it is ready only once the run has REACHED
+          # its step — reached, not equalled: a gate act the run has passed is still due.
+          if ((knd[i] == "integrate" || knd[i] == "close") && stp[i] + 0 > want + 0) continue
         }
         d = dep[i]
         gsub(/[ \t]/, "", d)
@@ -408,6 +429,106 @@ units_ready() {
         if (ready) print id[i]
       }
     }'
+}
+
+# _units_graph_awk -> the awk functions that decide the transitive rule, printed for a caller
+# to put in front of its own program (wave-20 REQ-5, AC-5.2, AC-5.3).
+#
+# ONE DEFINITION, TWO CALLERS. `units_validate` asks it which rows break the rule and prints a
+# line per row; `units_add_row` asks it which rows a new Step-4 row must be threaded into. The
+# two questions are the same question — "which rows owe this id, and which of them is the
+# edit" — so they are answered by one program, and the row-add verb cannot thread a plan the
+# validator would then refuse.
+#
+# THE CALLER'S PROGRAM FILLS THE ARRAYS: `n`, and per row `id[]`, `stp[]`, `dep[]`, `sta[]`,
+# with `skip[id]` set for a row the raw-pipe rule has already named (its cells cannot be
+# trusted to accuse anyone). Then:
+#
+#   units_graph()      the CANDIDATES — rows with a numeric step of 5 or more whose status is
+#                      neither `landed` nor `dropped` (`cand[1..nc]`, table order) — each with
+#                      its transitive closure `R[i, <id>]`, and `M[i, k]` for every Step-4 row
+#                      k that candidate i does not reach.
+#   units_frontier(i)  the Step-4 ids row i must add itself (FR_IDS, comma-joined, table order;
+#                      FR_CNT; FR_LIST[k]), and the candidates that reach them through it
+#                      (FR_FOLD). Returns FR_CNT.
+#
+# LANDED AND DROPPED ROWS ARE NOT CANDIDATES (research D1 T-2). The rule is a scheduling
+# invariant, and a terminal row can no longer be scheduled: a fixup Step-4 row added during
+# Verify would otherwise force an edge onto the already-landed audit row, and that edge would
+# record something false. They still carry edges, so a candidate reaches THROUGH them.
+#
+# THE FRONTIER (triage-C claim 3). Candidate i is FOLDED for Step-4 row k when it reaches
+# another candidate j that also misses k, and j does not reach i: adding k to j repairs i, so
+# i owes no edit of its own for k and its line would be a second instruction for one fix. The
+# "j does not reach i" half is what keeps a dependency CYCLE from folding both of its rows into
+# each other and printing nothing — every missing edge is still named somewhere.
+_units_graph_awk() {
+  printf '%s' '
+    function units_graph(   i, k, m, j, d, dd, a, b, h, qn, cur, x) {
+      nc = 0
+      split("", R); split("", M); split("", alld)
+      for (i = 1; i <= n; i++) {
+        d = dep[i]; gsub(/[ \t]/, "", d)
+        alld[id[i]] = alld[id[i]] "," d
+      }
+      for (i = 1; i <= n; i++) {
+        if (id[i] in skip) continue
+        if (stp[i] !~ /^[0-9]+$/ || stp[i] + 0 < 5) continue
+        if (sta[i] == "landed" || sta[i] == "dropped") continue
+        cand[++nc] = i
+        # BREADTH-FIRST over the dependency edges. The reachable set is reset per row: a rule
+        # decided once for the whole table is a different rule (tests/units.test.sh 6b), and a
+        # cycle terminates because an id is enqueued once.
+        split("", reach)
+        qn = 0
+        d = dep[i]; gsub(/[ \t]/, "", d)
+        m = split(d, a, ",")
+        for (j = 1; j <= m; j++)
+          if (a[j] != "" && a[j] ~ /[A-Za-z0-9]/ && !(a[j] in reach)) { reach[a[j]] = 1; q[++qn] = a[j] }
+        h = 1
+        while (h <= qn) {
+          cur = q[h++]
+          dd = alld[cur]
+          m = split(dd, b, ",")
+          for (j = 1; j <= m; j++)
+            if (b[j] != "" && b[j] ~ /[A-Za-z0-9]/ && !(b[j] in reach)) { reach[b[j]] = 1; q[++qn] = b[j] }
+        }
+        for (x in reach) R[i, x] = 1
+        for (k = 1; k <= n; k++) {
+          if (id[k] in skip) continue
+          if (stp[k] + 0 != 4) continue
+          if ((i, id[k]) in R) continue
+          M[i, k] = 1
+        }
+      }
+    }
+    function units_frontier(i,   k, e, j, fold, hit) {
+      FR_IDS = ""; FR_CNT = 0; FR_FOLD = ""
+      split("", FR_LIST)
+      for (k = 1; k <= n; k++) {
+        if (!((i, k) in M)) continue
+        fold = 0
+        for (e = 1; e <= nc; e++) {
+          j = cand[e]
+          if (j == i || !((j, k) in M)) continue
+          if (((i, id[j]) in R) && !((j, id[i]) in R)) { fold = 1; break }
+        }
+        if (fold) continue
+        # COLLECT ONE MISSING PREREQUISITE (tests/units.test.sh 14.7 plants a break after the next line)
+        FR_IDS = FR_IDS (FR_IDS == "" ? "" : ", ") id[k]; FR_CNT++; FR_LIST[k] = 1
+      }
+      if (FR_CNT == 0) return 0
+      for (e = 1; e <= nc; e++) {
+        j = cand[e]
+        if (j == i) continue
+        if (!((j, id[i]) in R) || ((i, id[j]) in R)) continue
+        hit = 0
+        for (k in FR_LIST) if ((j, k) in M) { hit = 1; break }
+        if (hit) FR_FOLD = FR_FOLD (FR_FOLD == "" ? "" : ", ") id[j]
+      }
+      return FR_CNT
+    }
+  '
 }
 
 # units_validate <plan> -> one line per broken invariant; exit 1 if any, else 0.
@@ -437,6 +558,14 @@ units_ready() {
 # `step` cell alone: a row whose id is also malformed is still one, and naming it is more
 # useful than silently exempting it. Reachability is keyed on the ID, so a duplicated id
 # that the row reaches is reached in both of its rows.
+#
+# ONE LINE PER OFFENDING ROW, NOT PER MISSING EDGE (wave-20 REQ-5, AC-5.2; triage-C claim 3).
+# `<id>: step <n> is missing <count> step-4 prerequisite(s): <ids>` — through 1.8.6 a row
+# missing forty edges printed forty lines, and one mid-run row on a large table buried a
+# one-edge fix under N×M of them. Only FRONTIER rows get a line: a row that reaches another
+# offending row missing the same id is folded into that row's line, `(<rows> reach it through
+# <id>)`, so the line count is the number of edits the author owes. `landed` and `dropped`
+# rows are exempt. The closures and the fold are `_units_graph_awk`'s, above.
 #
 # EVERY FAULT IS REPORTED, not just the first. A writer fixing one line at a time against a
 # wall that stops at the first complaint pays a round trip per fault.
@@ -481,7 +610,7 @@ units_validate() {
 
   rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
   if [ -n "$rows" ]; then
-    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" '
+    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" "$(_units_graph_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: its step cell cannot be trusted to make it a Step-4 row others must reach.
@@ -571,35 +700,16 @@ units_validate() {
           }
         }
 
-        # THE TRANSITIVE RULE. Breadth-first over the dependency edges, once per Step-5+ row.
-        # `reach` is reset per row — a rule decided once for the whole
-        # table is a different rule — and a cycle terminates because an id is enqueued once.
-        for (i = 1; i <= n; i++) {
-          if (id[i] in skip) continue
-          if (stp[i] !~ /^[0-9]+$/ || stp[i] + 0 < 5) continue
-          split("", reach)
-          qn = 0
-          d = dep[i]; gsub(/[ \t]/, "", d)
-          m = split(d, a, ",")
-          for (j = 1; j <= m; j++)
-            if (a[j] != "" && a[j] ~ /[A-Za-z0-9]/ && !(a[j] in reach)) { reach[a[j]] = 1; q[++qn] = a[j] }
-          h = 1
-          while (h <= qn) {
-            cur = q[h++]
-            for (k = 1; k <= n; k++) {
-              if (id[k] != cur) continue
-              dd = dep[k]; gsub(/[ \t]/, "", dd)
-              mm = split(dd, b, ",")
-              for (j = 1; j <= mm; j++)
-                if (b[j] != "" && b[j] ~ /[A-Za-z0-9]/ && !(b[j] in reach)) { reach[b[j]] = 1; q[++qn] = b[j] }
-            }
-          }
-          for (k = 1; k <= n; k++) {
-            if (id[k] in skip) continue
-            if (stp[k] + 0 != 4) continue
-            if (id[k] in reach) continue
-            printf "%s: step %s does not depend transitively on step-4 row %s\n", id[i], stp[i], id[k]
-          }
+        # THE TRANSITIVE RULE, ONE LINE PER OFFENDING ROW (wave-20 REQ-5, AC-5.2). The
+        # closures and the frontier are `_units_graph_awk`s, the one definition this verb
+        # and `units_add_row` share; this loop only prints what they found.
+        units_graph()
+        for (c = 1; c <= nc; c++) {
+          i = cand[c]
+          if (units_frontier(i) == 0) continue
+          printf "%s: step %s is missing %d step-4 prerequisite%s: %s%s\n", id[i], stp[i], \
+            FR_CNT, (FR_CNT == 1 ? "" : "s"), FR_IDS, \
+            (FR_FOLD == "" ? "" : " (" FR_FOLD " reach " (FR_CNT == 1 ? "it" : "them") " through " id[i] ")")
         }
       }')"
     if [ -n "$violations" ]; then
@@ -609,4 +719,132 @@ units_validate() {
   fi
 
   [ "$found" -eq 0 ]
+}
+
+# units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>
+#   -> the WHOLE plan with one `## Tasks` row added, on stdout; exit 1 and silent when the plan
+#      carries no `## Tasks` table or no `## SDLC State` section. Nothing is written.
+#
+# THE PROJECTOR UNDER `task-add` (wave-20 REQ-5, AC-5.3; Δ5). A mid-run row needs three edits
+# to pass the two walls that read the table (memory note: mid-run task row needs evidence and
+# deps), and a hand edit that forgets one stalls every writer in the wave at its next commit:
+#
+#   1. THE ROW, as the table's last data row, cells placed by the HEADER's column order (the
+#      table is header-keyed, so the projection follows whatever order this plan carries);
+#      status `pending`, and `—` for `worktree`, `base` and any column this library does not
+#      read. A `|` inside a value is written `\|`, the one escape a GFM cell defines.
+#   2. ITS `- <id>:` LINE under `## SDLC State`, after the last `- T<n>:` line and that line's
+#      indented continuation — or at the end of the section when the plan carries none yet.
+#      `pending dispatch — added by task-add at <iso>` is not a placeholder to the evidence
+#      gate (`is_placeholder_value` refuses only the bare words).
+#   3. FOR A STEP-4 ROW, THE THREADING: the id appended to the `deps` cell of every FRONTIER
+#      row that owes it — `_units_graph_awk`'s answer, the same one `units_validate` prints —
+#      so the projection is threaded exactly as far as the validator demands and no further.
+#      A row at any other step threads nothing: the only ordering rule is Step-5+ reaching
+#      every Step-4 row.
+#
+# PURE, AS EVERY VERB HERE IS: it prints and never writes, so `task-add` can judge the
+# projection (the validator, then a dry commit through the real gate) before anything is
+# swapped in, and a refusal leaves the plan byte-identical. Fence-aware like `_units_read`:
+# a table or a state line inside a ``` example is documentation and is never edited.
+units_add_row() {
+  local plan="${1:-}" nid="${2:-}" nstep="${3:-}" thread="" now
+  [ -n "$plan" ] && [ -f "$plan" ] || return 1
+  _units_table "$plan" >/dev/null 2>&1 || return 1
+  if [ "$nstep" = 4 ]; then
+    thread="$( { units_rows "$plan"; printf '%s\t%s\t\t\t\t%s\t\t\t\tpending\t\t\n' "$nid" "$nstep" "${7:-}"; } \
+      | awk -F'\t' -v newid="$nid" "$(_units_graph_awk)"'
+        $1 == "" { next }
+        { n++; id[n] = $1; stp[n] = $2; dep[n] = $6; sta[n] = $10 }
+        END {
+          units_graph()
+          kx = 0
+          for (k = 1; k <= n; k++) if (id[k] == newid) kx = k
+          if (kx == 0) exit 0
+          for (c = 1; c <= nc; c++) {
+            i = cand[c]
+            units_frontier(i)
+            if (kx in FR_LIST) printf "%s ", id[i]
+          }
+        }')"
+  fi
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  awk -v nid="$nid" -v nstep="$nstep" -v nkind="${4:-}" -v ntask="${5:-}" -v nagent="${6:-}" \
+      -v ndeps="${7:-}" -v nsize="${8:-}" -v nserves="${9:-}" -v nfiles="${10:-}" \
+      -v thread=" $thread " -v now="$now" '
+    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+    # A VALUE BECOMES A CELL: tabs and line breaks to spaces, every `|` escaped by
+    # concatenation (a backslash in a gsub replacement is the one character awks disagree on),
+    # and an empty value spelled `—`, which is how the table itself writes "none".
+    function cellv(v,   parts, m, i, out) {
+      gsub(/[\t\r\n]/, " ", v); v = trim(v)
+      m = split(v, parts, "|"); out = parts[1]
+      for (i = 2; i <= m; i++) out = out "\\" "|" parts[i]
+      return (out == "" ? "—" : out)
+    }
+    # A CELL IS SPLIT ON THE UNESCAPED PIPE ONLY: `\|` is folded to SUBSEP first and restored
+    # verbatim, so a row this projection rewrites keeps every escape it carried.
+    function esc(v)   { gsub(/\\[|]/, SUBSEP, v); return v }
+    function unesc(v,   parts, m, i, out) {
+      m = split(v, parts, SUBSEP); out = parts[1]
+      for (i = 2; i <= m; i++) out = out "\\" "|" parts[i]
+      return out
+    }
+    { L[++nl] = $0 }
+    END {
+      state = 0; sdlc = 0
+      for (i = 1; i <= nl; i++) {
+        line = L[i]
+        if (line ~ /^[ \t]*```/) { fence = !fence; continue }
+        if (fence) continue
+        if (line ~ /^##[ \t]/) {
+          if (tstate == 2 || tstate == 1) tstate = 3
+          if (sdlc == 1) sdlc = 2
+          if (!seensdlc && line ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seensdlc = 1; sdlc_head = i; sdlc_last = i; continue }
+          if (!seentasks && line ~ /^##[ \t]+[Tt]asks([ \t].*)?$/) { tstate = 1; seentasks = 1 }
+          continue
+        }
+        if (sdlc == 1) {
+          if (line ~ /[^ \t]/) sdlc_last = i
+          if (line ~ /^[ \t]*-?[ \t]*T[0-9]+[ \t]*:/) { tline = i; intl = 1; continue }
+          if (intl && line ~ /^[ \t]+[^ \t]/ && line !~ /^[ \t]*-/) { tline = i; continue }
+          intl = 0
+        }
+        if (tstate == 1) {
+          if (line !~ /^[ \t]*\|/) continue
+          nh = split(esc(line), hc, "|")
+          for (c = 1; c <= nh; c++) {
+            t = tolower(trim(hc[c]))
+            if (t != "" && !(t in col)) { col[t] = c; name[c] = t }
+          }
+          if (!("id" in col)) { split("", col); split("", name); continue }
+          tstate = 2; continue
+        }
+        if (tstate == 2) {
+          if (line !~ /^[ \t]*\|/) { tstate = 3; continue }
+          lastrow = i                   # the separator counts: an empty table takes its first row
+          m = split(esc(line), f, "|")
+          rid = trim(f[col["id"]])
+          if (rid == "" || rid ~ /^[-: ]+$/) continue
+          if (("deps" in col) && index(thread, " " rid " ") > 0) {
+            dc = col["deps"]; d = trim(f[dc])
+            f[dc] = " " ((d ~ /[A-Za-z0-9]/) ? d ", " nid : nid) " "
+            out = f[1]; for (c = 2; c <= m; c++) out = out "|" f[c]
+            L[i] = unesc(out)
+          }
+        }
+      }
+      if (!lastrow || !seensdlc) exit 1
+      val["id"] = nid; val["step"] = nstep; val["kind"] = nkind; val["rigor"] = nkind
+      val["task"] = ntask; val["agent"] = nagent; val["deps"] = ndeps; val["size"] = nsize
+      val["serves"] = nserves; val["files"] = nfiles; val["status"] = "pending"
+      row = "|"
+      for (c = 2; c < nh; c++) row = row " " ((name[c] in val) ? cellv(val[name[c]]) : "—") " |"
+      at = (tline ? tline : sdlc_last)
+      for (i = 1; i <= nl; i++) {
+        print L[i]
+        if (i == at) printf "- %s: pending dispatch — added by task-add at %s\n", nid, now
+        if (i == lastrow) print row
+      }
+    }' "$plan"
 }
