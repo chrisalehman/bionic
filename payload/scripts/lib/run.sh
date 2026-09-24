@@ -22,6 +22,8 @@
 #   _run_candidates <droot> -> every qualifying candidate under <droot>, NUL-separated, in
 #                         walk order. The ONE fence-aware walk; active_plan and open_runs
 #                         are now a selection and a filter over it and nothing else.
+#                         A candidate it cannot read is named on stderr as
+#                         `bound-unreadable <path>` and skipped, never dropped silently.
 #   live_runs <root>   -> the subset of open_runs whose plan mtime is within the
 #                         `live-window:` config value (default 7d) of now, same order.
 #                         `BIONIC_NOW_EPOCH` overrides now, so a suite can backdate a plan
@@ -243,12 +245,43 @@ budget_field() {  # <budget line> <key> -> a non-negative integer, or empty
 # the `## SDLC State` filter exists to close. Every hook reads this one walk now, so the
 # bound is stated once and pinned by number in three suites (run-predicate §R3,
 # cross-gate §S.2, and the fixture battery's `nested-three-deep`).
+#
+# AN UNREADABLE CANDIDATE IS NAMED, NEVER DROPPED (wave-20 T18, REQ-2, D2; T1's carry-over).
+# A mode-000 plan read as empty text here, carried no `## SDLC State`, and vanished from both
+# readers without a word — so `active_plan` moved on to the next-newest run and `open_runs`
+# answered without it, while the run may be mid-flight. Each one now prints
+# `bound-unreadable <path>` on STDERR and is skipped: it is not a member of the open set and
+# it is never read as closed. The word is `session_run`'s, so a bound and an unbound reader
+# say one thing about one plan (cross-gate §S.4g). A FOLDER in the walk that cannot be opened
+# is named the same way — `find` cannot list it, so the folder is the only thing that can be —
+# which is `plan_unreadable`'s rule for a bound path. Stdout is unchanged: every caller that
+# parses the set still gets exactly the runs it can read.
 _run_candidates() {
   local droot="$1"
   local f d
   for d in "$droot/plans" "$droot/incidents"; do
     [ -d "$d" ] || continue
+    if [ ! -r "$d" ] || [ ! -x "$d" ]; then
+      printf 'bound-unreadable %s\n' "$d" >&2
+      continue
+    fi
+    # THE FOLDERS AT DEPTH 1, asked only whether they open: a plan under one that does not is
+    # invisible to the file walk below. Depth-2 folders hold depth-3 files, out of bound.
+    # A SHELL GLOB, NOT A SECOND `find`: tests/hook-latency.test.sh §6 pins this walk at one
+    # `find` fork, and the file walk's `find` line stays the one line cross-gate §S.2 and the
+    # fixture battery's `depth-1` mutation anchor on. The hidden-name pattern is there because
+    # `find` descends dot-folders too; a symlink is skipped because `find` does not follow it,
+    # and an unmatched pattern stays literal and fails `-d`.
+    for f in "$d"/*/ "$d"/.[!.]*/; do
+      f="${f%/}"
+      [ -d "$f" ] && [ ! -L "$f" ] || continue
+      [ -r "$f" ] && [ -x "$f" ] || printf 'bound-unreadable %s\n' "$f" >&2
+    done
     while IFS= read -r -d '' f; do
+      if plan_unreadable "$f" >/dev/null; then
+        printf 'bound-unreadable %s\n' "$f" >&2
+        continue
+      fi
       # FENCE-AWARE, and line endings TRANSLATED rather than deleted. Two failure modes,
       # opposite directions, both recorded:
       #   - a `## SDLC State` heading that appears only inside a ``` fenced example is
