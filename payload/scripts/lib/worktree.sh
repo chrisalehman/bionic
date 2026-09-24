@@ -156,14 +156,24 @@ _wt_cwd_in_project() {  # <cwd> <main-root> [target-checkout]
 # The D1 predicate. Prints `session=<name> pid=<pid> cwd=<cwd>` for the first
 # session that satisfies it and returns 0; returns 1 when nothing does.
 #
+# THE CALLER'S OWN SESSION NEVER COUNTS AGAINST ITSELF (wave-20 T8b, review R8/F3). A
+# session is BUSY for the whole span of the tool call that is asking this question, so
+# without an exclusion the conjunction always found at least one hit — the caller's own
+# session file, busy, in this project — and D1 reduced to "any tests/run.sh anywhere,
+# landed by anybody" (T12's live bed: the first head attempt was refused naming its own
+# session, F3). `<exclude-sid>` is the landing session's own id, threaded down from
+# `worktree_land`'s third argument; a busy session file whose `sessionId` equals it is
+# skipped, but every OTHER busy session in this project still refuses the land — that
+# refusal is the reason this predicate exists.
+#
 # NO JQ, NO OPINION. jq is this repo's only parser, and a machine without it
 # cannot be shown a busy session — so the predicate answers "not proven" and the
 # land proceeds. Refusing on a missing parser would make the verb unusable on
 # exactly the degraded machine whose trees most need giving back, and D1 is a
 # guard against a merge under a suite, not a guard against an unreadable
 # directory.
-_wt_busy_suite() {  # <main-root> [target-checkout] -> session=... pid=... cwd=...
-  local root="${1:-}" co="${2:-}" dir f pid cwd status name
+_wt_busy_suite() {  # <main-root> [target-checkout] [exclude-sid] -> session=... pid=... cwd=...
+  local root="${1:-}" co="${2:-}" exclude="${3:-}" dir f pid cwd status name sid
   dir="$(claude_home)/sessions"
   [ -d "$dir" ] || return 1
   command -v jq >/dev/null 2>&1 || return 1
@@ -176,6 +186,8 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> session=... pid=... cwd=.
     [ "$status" = "busy" ] || continue
     cwd="$(jq -r '.cwd // empty' "$f" 2>/dev/null)"
     _wt_cwd_in_project "$cwd" "$root" "$co" || continue
+    sid="$(jq -r '.sessionId // empty' "$f" 2>/dev/null)"
+    [ -n "$exclude" ] && [ -n "$sid" ] && [ "$sid" = "$exclude" ] && continue
     kill -0 "$pid" 2>/dev/null || continue
     name="$(jq -r '.name // .sessionId // empty' "$f" 2>/dev/null)"
     printf 'session=%s pid=%s cwd=%s' "${name:-unknown}" "$pid" "$cwd"
@@ -268,8 +280,8 @@ EOF
   printf '%s' "$abs"
 }
 
-worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
-  local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
+worktree_land() {  # <worktree path> <onto> [caller-sid] -> LANDED | REFUSED
+  local target="${1:-}" onto="${2:-}" sid="${3:-}" wt_abs root branch co ahead busy merge_sha rc
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -333,7 +345,7 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     _wt_refuse "onto-checkout-dirty checkout=${co} branch=${onto}"; return 2
   fi
 
-  busy="$(_wt_busy_suite "$root" "$co")" && {
+  busy="$(_wt_busy_suite "$root" "$co" "$sid")" && {
     _wt_refuse "suite-running ${busy}"; return 2
   }
 
@@ -381,7 +393,7 @@ worktree_land_for_session() {  # <worktree path> <root> <sid> -> LANDED | REFUSE
       || { _wt_refuse "run-library-unloadable path=${lib}"; return 2; }
   fi
   onto="$(session_working_branch "$root" "$sid")" || { _wt_refuse "${onto:-no-bound-plan}"; return 2; }
-  worktree_land "$target" "$onto"
+  worktree_land "$target" "$onto" "$sid"
 }
 
 # ---------------------------------------------------------------------------
