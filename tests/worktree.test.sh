@@ -460,6 +460,40 @@ session_file "$SUITE_PID" "$SWAVE" idle W-OUTWAVE
 expect_match "the same land goes through once that session is idle (the arm discriminates)" \
   "spawn-worktree: LANDED branch=into-outside onto=wave/out checkout=${SWAVE} *" \
   "$(worktree_land "$BT6" wave/out)"
+
+# Arm 7 — THE LANDING SESSION NEVER COUNTS AGAINST ITSELF (wave-20 T8b, review R8/F3). D1
+# used to be `busy session in project` AND `a live tests/run.sh`, full stop — and the
+# session running the land is always busy and always in-project, so the conjunction
+# collapsed to "any tests/run.sh anywhere" (T12's live bed named the drive's OWN session in
+# a refusal). `worktree_land` takes the caller's own session id as an optional third
+# argument (threaded from `worktree_land_for_session`'s `sid`, Group 7 below); a busy
+# session file whose `sessionId` equals it is excluded from the predicate — the refusal for
+# a suite this project has running under ANY OTHER session is unchanged (Arm 8).
+BT7="$(new_tree "$S" self-arm)"
+session_file "$SUITE_PID" "$S" busy W-SELF
+expect_match "the lander's OWN busy session does not refuse its own land" \
+  "spawn-worktree: LANDED *" "$(worktree_land "$BT7" wave/fixture "fixture-W-SELF")"
+
+# Arm 8 — a DIFFERENT session's busy suite in this project still refuses: the exclusion is
+# scoped to the caller's own identity, never a blanket suppression, because this refusal is
+# the reason D1 exists in the first place.
+BT8="$(new_tree "$S" other-session-arm)"
+session_file "$SUITE_PID" "$S" busy W-PEER2
+OUTB8="$(worktree_land "$BT8" wave/fixture "some-other-session-id")"; RCB8=$?
+expect_match "a different session's busy suite in this project still refuses" \
+  "spawn-worktree: REFUSED reason=suite-running*" "$OUTB8"
+expect_eq    "that refusal exits 2" "2" "$RCB8"
+
+# Arm 9 — no sid argument at all (the pre-T8b call shape, still valid): behaves exactly as
+# before, refusing on any busy in-project session. Backward compatible on purpose — every
+# existing 2-argument call site above (Arms 1-6) already proves this, this one just says so
+# beside the arm that changed.
+BT9="$(new_tree "$S" no-sid-arm)"
+OUTB9="$(worktree_land "$BT9" wave/fixture)"; RCB9=$?
+expect_match "no sid argument -> the busy session still refuses (unchanged default)" \
+  "spawn-worktree: REFUSED reason=suite-running*" "$OUTB9"
+expect_eq    "that refusal exits 2" "2" "$RCB9"
+
 rm -f "$CLAUDE_HOME/sessions/${SUITE_PID}.json"
 
 section "Group 6: worktree_land — the legacy link, and the branch, and prune"
@@ -519,6 +553,38 @@ expect_match "the same tree lands from the bound session (the arm discriminates)
   "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VD" 2>/dev/null )"
 expect_true "the usage text names the land verb" \
   grep -q 'spawn-worktree.sh land' "$SPAWN"
+
+# T8b (review R8/F3) END TO END: the verb reads its own session id off
+# CLAUDE_CODE_SESSION_ID (`cmd_land`) and now threads it through to `_wt_busy_suite`, so a
+# busy `tests/run.sh` recorded under the CALLING session's own session file never refuses
+# its own land — the exact topology T12's live bed hit (its first head attempt was refused
+# `session=<its own session>`, F3).
+VSUITE="$TMP/verb-suite/tests"; mkdir -p "$VSUITE"
+printf '#!/bin/bash\nsleep 120\n' > "$VSUITE/run.sh"; chmod +x "$VSUITE/run.sh"
+bash "$VSUITE/run.sh" >/dev/null 2>&1 & VSUITE_PID=$!
+# Folded into the ONE exit trap (never a second `trap ... EXIT`, which would replace
+# rather than add to the first and leak $TMP and $SUITE_PID on an early exit).
+trap 'kill "$SUITE_PID" 2>/dev/null; kill "$VSUITE_PID" 2>/dev/null; rm -rf "$TMP"' EXIT
+i=0; while [ $i -lt 50 ] && ! pgrep -f 'tests/run.sh' >/dev/null 2>&1; do i=$((i+1)); done
+
+VSELF="$(new_tree "$V" verb-self-busy)"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"busy","name":"self"}\n' \
+  "$VSUITE_PID" "$VSID" "$V" > "$CLAUDE_HOME/sessions/${VSUITE_PID}.json"
+expect_match "the verb's own busy suite does not refuse its own land" \
+  "spawn-worktree: LANDED branch=verb-self-busy onto=wave/fixture *" \
+  "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VSELF" 2>/dev/null )"
+
+# The same running suite, recorded under a DIFFERENT session's file: still refused.
+VOTHER="$(new_tree "$V" verb-other-busy)"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"busy","name":"peer"}\n' \
+  "$VSUITE_PID" "verb-peer-session" "$V" > "$CLAUDE_HOME/sessions/${VSUITE_PID}.json"
+OUTVB="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VOTHER" 2>/dev/null )"; RCVB=$?
+expect_match "a different session's busy suite in this project still refuses" \
+  "spawn-worktree: REFUSED reason=suite-running*" "$OUTVB"
+expect_eq   "that refusal exits 2" "2" "$RCVB"
+
+kill "$VSUITE_PID" 2>/dev/null
+rm -f "$CLAUDE_HOME/sessions/${VSUITE_PID}.json"
 
 section "Group 8: worktree_lease_overruns — a tree outliving its row"
 #
