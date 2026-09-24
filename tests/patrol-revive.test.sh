@@ -122,6 +122,16 @@ write_stamp() {  # <project> <session>
   : > "$1/.bionic/tmp/engaged-$2.state"
 }
 
+# THE STAMP A TICK WRITES (wave-20 REQ-6, D6): `verb=tick`, dated when it ran, and its mtime
+# set to the same instant. The stop wall now refuses a marker turn unless such a stamp sits at
+# or after the marker row, so the rows that describe a Patrol that fired AND ticked plant this
+# rather than `write_stamp`'s arm stamp.
+write_tick_stamp() {  # <project> <session> <seconds ago>
+  printf 'patrol-stamp/v1|at=%s|session=%s|verb=tick\n' "$(pr_iso "$3")" "$2" > "$(stamp_path "$1" "$2")"
+  : > "$1/.bionic/tmp/engaged-$2.state"
+  backdate "$(stamp_path "$1" "$2")" "$3"
+}
+
 # The `s21_backdate` idiom of tests/dispatch-preflight.test.sh, verbatim in
 # behaviour: age is a MTIME, never a sleep.
 backdate() {  # <file> <seconds ago>
@@ -148,6 +158,10 @@ mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
 # AFTER the reference instant, and the reference instant is a stamp this suite backdates by
 # between 50 and 4000 seconds. A file written once at suite start would drift out from
 # under the later groups. Nothing here sleeps.
+# THE LIBRARY DIRECTORY, for the rows that call `patrol_verdict` directly (AC-6.3). Resolved
+# the way Group 13's own structural rows resolve it, below.
+PR_LIB_DIR_EARLY="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+[ -d "$PR_LIB_DIR_EARLY" ] || PR_LIB_DIR_EARLY="${BIONIC_SCRIPTS_DIR}/scripts/lib"
 PR_TRANSCRIPT="$(mktemp)"
 PR_TRANSCRIPT_MODE=idle
 
@@ -180,17 +194,38 @@ pr_build_transcript() {
               for _pr_s in 2400 2100 1800 1500 1200 900 600 300 120 30 5; do
                 pr_assistant "$_pr_s"
               done ; } > "$PR_TRANSCRIPT" ;;
-    # THE TICK ITSELF, inside what would otherwise be an idle gap: the Patrol fired, so the
-    # reference instant moves to the tick and there is nothing left to be dead about.
-    # AND THE TICK'S OWN DUTY IS DISCHARGED IN IT. `stop_patrol_duties` — the OTHER Stop
-    # verdict in this library — refuses a stop that follows a tick with no task-list
-    # refresh in it, so a fixture carrying a bare tick would be blocked by that gate and
-    # this one's silence would be unobservable. A TaskList after the tick is what a healthy
-    # session actually does.
+    # A MARKER TURN WHOSE TICK RAN (re-authored, wave-20 REQ-6, D6). The tick stamps before it
+    # decides, so a ticked marker row always sits BEFORE the stamp: here the marker fires at
+    # -1600s, its tick stamps (the fixture's own stamp, backdated to -1500s by the row that
+    # drives this mode), and the session then works without an idle gap to now. The marker is
+    # no proof of life on its own any more — the stamp is — and this one is followed by it.
+    # The TaskList after the marker keeps `stop_patrol_duties`'s refresh duty discharged, so
+    # this verdict's silence stays observable.
     tick)   { pr_assistant 10000
-              pr_user 2 "bionic-patrol session=11111111 — patrol tick"
+              pr_user 1600 "bionic-patrol session=11111111 — patrol tick"
               printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"tool_use","name":"TaskList","input":{}}]}}\n' \
-                "$(pr_iso 1)"
+                "$(pr_iso 1590)"
+              for _pr_s in 1400 1100 800 500 200 5; do pr_assistant "$_pr_s"; done
+            } > "$PR_TRANSCRIPT" ;;
+    # MARKER TURNS AFTER THE STAMP, AND NO TICK IN THEM (wave-20 REQ-6, AC-6.3). The clock
+    # fires — two marker rows, each followed by work — but neither turn ran the tick, so the
+    # stamp never moved. A clock that fires without ticking is a dead Patrol; the marker rows
+    # used to move the reference instant and read it healthy.
+    markers) { pr_assistant 10000
+               pr_user 1500 "bionic-patrol session=11111111 — patrol tick"
+               pr_assistant 1490
+               pr_user 300 "bionic-patrol session=11111111 — patrol tick"
+               pr_assistant 290
+             } > "$PR_TRANSCRIPT" ;;
+    # THE CONTROL FOR `markers`: the same two marker rows, both BEFORE the stamp (each ticked,
+    # the stamp written after the second), and unbroken work since.
+    ticked) { pr_assistant 10000
+              pr_user 2800 "bionic-patrol session=11111111 — patrol tick"
+              pr_assistant 2790
+              pr_user 2000 "bionic-patrol session=11111111 — patrol tick"
+              printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"tool_use","name":"TaskList","input":{}}]}}\n' \
+                "$(pr_iso 1990)"
+              for _pr_s in 1600 1200 800 400 5; do pr_assistant "$_pr_s"; done
             } > "$PR_TRANSCRIPT" ;;
     # NO USER RECORD IN THE WINDOW — the first of AC-1.3's three unreadable shapes.
     nouser) { pr_assistant 900; pr_assistant 60; } > "$PR_TRANSCRIPT" ;;
@@ -570,10 +605,14 @@ section "Group 5: it writes nothing, and stamps nothing"
 # over an empty cron table — a Patrol that reads alive forever and fires never.
 D=$(make_env); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
 BEFORE_M=$(mtime_of "$(stamp_path "$D" "$SID")")
-BEFORE_T=$(find "$D" -type f | sort | cksum)
+# THE FILL LEDGER IS NOT THIS HOOK'S WRITE (wave-20 REQ-5, AC-5.5). The Stop process's one file
+# write is the recorder's line under the run's record directory; this verdict writes nothing,
+# and the tree outside that one path is what 26 compares.
+PR_LED="$D/.bionic/docs/record/wave-01/fill-ledger.log"
+BEFORE_T=$(find "$D" -type f ! -path "$PR_LED" | sort | cksum)
 fire "$D"
 AFTER_M=$(mtime_of "$(stamp_path "$D" "$SID")")
-AFTER_T=$(find "$D" -type f | sort | cksum)
+AFTER_T=$(find "$D" -type f ! -path "$PR_LED" | sort | cksum)
 
 if [ "$BEFORE_M" = "$AFTER_M" ]; then
   ok "25: the stamp's mtime is untouched — the hook never arms"
@@ -1102,12 +1141,47 @@ else
   no "55: the fix orders CronCreate before CronList" "$R54"
 fi
 
-# THE TICK IS THE PROOF OF LIFE. A `bionic-patrol session=` prompt after the stamp is the
-# cron firing, whatever the stamp's own mtime says, so the reference instant moves to it and
-# there is no gap left to be dead about.
+# THE STAMP IS THE PROOF OF LIFE, NOT THE MARKER (re-authored, wave-20 REQ-6, D6). A marker
+# row that its tick stamped after, followed by unbroken work, is a Patrol that fired and ticked:
+# the reference instant is the stamp, no idle gap follows it, and there is nothing to accuse.
+D=$(make_env 20m); write_tick_stamp "$D" "$SID" 1500
 PR_TRANSCRIPT_MODE=tick
 fire "$D"
-expect_quiet "56: a tick prompt since the stamp is the Patrol firing — no notice"
+expect_quiet "56: a marker turn its tick stamped after, then busy work — no notice"
+
+# ---------- AC-6.3: marker turns after the stamp, and no tick in them ----------
+#
+# The stamp is older than two intervals (2700s at a 1200s interval) and two marker rows ran
+# after it with no tick. Before wave-20 the latest marker row moved the reference instant, no
+# idle gap followed it, and the verdict read `busy` — a Patrol whose clock fires without ticking
+# looked healthy to this notice, to the dispatch arming wall and to doctor.
+D=$(make_env 20m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 2700
+PR_TRANSCRIPT_MODE=markers
+fire "$D"
+expect_block "56b: AC-6.3 a stamp two intervals old with marker turns after it and no tick reads dead"
+expect_reason_names "56c: …and the death notice says the clock fires without ticking" "fires but never ticks"
+expect_reason_names "56d: …and names the verb that prints the canonical prompt" "session-poker.sh prompt"
+
+# THE LIBRARY SAYS SO DIRECTLY — the predicate both blocking readers and doctor call.
+PR_VL="$(bash -c '. "$1/patrol.sh"; patrol_verdict "$2" "$3" 1200' _ "$PR_LIB_DIR_EARLY" "$(stamp_path "$D" "$SID")" "$PR_TRANSCRIPT")"
+case "$PR_VL" in
+  verdict=dead*) ok "56e: AC-6.3 patrol_verdict reads marker turns after the stamp as dead" ;;
+  *) no "56e: AC-6.3 patrol_verdict reads marker turns after the stamp as dead" "$PR_VL" ;;
+esac
+
+# THE PAIRED CONTROL: two marker rows BEFORE the stamp — each ticked, the stamp written after
+# the second — and unbroken work since. The stamp is past the fire window, so the transcript is
+# read, and it reads busy: no marker turn went unticked and no idle gap followed the stamp.
+D=$(make_env 20m); write_tick_stamp "$D" "$SID" 1900
+PR_TRANSCRIPT_MODE=ticked
+fire "$D"
+expect_quiet "56f: marker turns that ticked before the stamp, then busy work — no notice"
+pr_build_transcript
+PR_VL="$(bash -c '. "$1/patrol.sh"; patrol_verdict "$2" "$3" 1200' _ "$PR_LIB_DIR_EARLY" "$(stamp_path "$D" "$SID")" "$PR_TRANSCRIPT")"
+case "$PR_VL" in
+  verdict=busy*) ok "56g: …and patrol_verdict reads it busy" ;;
+  *) no "56g: …and patrol_verdict reads it busy" "$PR_VL" ;;
+esac
 
 # ---------- AC-1.3: idle time that cannot be read is advisory, with the reason ----------
 #

@@ -49,7 +49,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
 # payload/scripts/lib/loader.sh.
-BIONIC_LIB_WANT="context.sh fill.sh fold.sh refuse.sh root.sh roster.sh run.sh session.sh stop.sh worktree.sh"
+BIONIC_LIB_WANT="context.sh fill.sh fold.sh patrol.sh refuse.sh root.sh roster.sh run.sh session.sh stop.sh worktree.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -171,6 +171,12 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop"; fi
 # what makes this process step aside rather than run three verdicts and drop the fourth.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/fill.sh"
+# THE FILL LEDGER'S PATH AND THE PATROL VERDICT (epic-23 wave-20, REQ-5 and REQ-6).
+# `stop_fill_ledger` appends to `fill_ledger_path`, the path `session-poker.sh fill-report`
+# reads, and the death notice asks `patrol_verdict`; both live in patrol.sh. Wanted and
+# sourced here for fill.sh's reason above: a partial library steps this process aside.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/patrol.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/stop.sh"
 
@@ -187,11 +193,6 @@ BIONIC_CONTEXT_WANT_RUN=1
 # stop to two different roots; one call cannot.
 bionic_context 2>/dev/null || exit 0
 
-# BLOCKS ONCE. (jq's `//` folds `false` to empty, so a literal "true" is the only
-# value that can match here — which is the comparison we want anyway.) Nothing is
-# verdicted on a re-entry: every row is still owed its one answer.
-[ "$(bionic_jq .stop_hook_active)" = "true" ] && exit 0
-
 # AN ABSENT FIELD IS PASSED ON AS THE EMPTY STRING, and what each function makes of it
 # is the function's own business — not a rule this line imposes. Only `stop_context_spend`
 # treats an absent event as Stop (`case "$_ev" in ''|Stop)`, payload/scripts/lib/stop.sh),
@@ -199,8 +200,22 @@ bionic_context 2>/dev/null || exit 0
 # function keeps. The other three match `Stop` strictly, exactly as their hooks did before
 # the merge, so a hand-run payload with no event field wakes the spend instrument and
 # nothing else. Base-faithful in both directions; the comment claimed a uniformity the
-# four never had.
+# four never had. Read ABOVE the guard since wave-20, because the recorder below needs it.
 EVENT=$(bionic_jq .hook_event_name)
+
+# EVERY STOP IS RECORDED, THE RE-ENTRY INCLUDED (epic-23 wave-20 REQ-5, AC-5.5; Δ2). The fill
+# ledger's recorder runs HERE, before the guard: after a refusal, the Stop that actually ends
+# the turn carries `stop_hook_active` and runs nothing below — and it is the one that sees the
+# launches the model made in answer to the refusal. A recorder, never a verdict: it prints
+# nothing, refuses nothing and swallows its own failures, so this line cannot change what the
+# guard or the fold decide. It also computes the turn's facts once for the fill duty below
+# (`stop_turn_facts`), so the ledger line and the verdict are one computation.
+stop_fill_ledger "$EVENT" 2>/dev/null
+
+# BLOCKS ONCE. (jq's `//` folds `false` to empty, so a literal "true" is the only
+# value that can match here — which is the comparison we want anyway.) Nothing is
+# verdicted on a re-entry: every row is still owed its one answer.
+[ "$(bionic_jq .stop_hook_active)" = "true" ] && exit 0
 
 bionic_fold "$EVENT" \
   stop_context_spend \
