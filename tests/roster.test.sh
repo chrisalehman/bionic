@@ -249,4 +249,39 @@ ln -s "$R6_DIR/link/real-ledger" "$R6_DIR/link/sweeper-s1.state"
 expect_eq "R6f a symlinked ledger closes nothing" \
   "a-link-1" "$(r6_ids "$R6_DIR/link" w-link)"
 
+section "R7 — roster_open_names takes the LATEST launch, not the last row in file order (epic-23 wave-20 T20b, C7)"
+
+# THE DEFECT (critic C7, roster.sh:374). `_roster_open_of`'s `born[nm]` was overwritten by
+# EVERY live row of a name, in file order — so the name's remembered launch was whichever row
+# happened to be LAST on disk, not the latest `launched_at`. Adoption
+# (`adopt_write_row`, hooks/session-poker.sh:1841) can append a PREDECESSOR's row, carrying
+# its own original — and OLDER — `launched_at`, after a fresher live row already on the file
+# for the same name. An ack taken between the two stamps then closed a name whose real latest
+# launch was still open.
+R7_DIR="$(mktemp -d "${TMPDIR:-/tmp}/roster-r7.XXXXXX")"
+trap 'rm -rf "$R7_DIR"' EXIT
+r7_open() {  # <case dir> -> the open names, space-joined
+  lib roster_open_names "$1/roster-s1.state" "$1/sweeper-s1.state" | tr '\n' ' ' | sed 's/ $//'
+}
+
+mkdir -p "$R7_DIR/outoforder"
+# The FRESHER launch is written FIRST in file order...
+r6_row "$R7_DIR/outoforder/roster-s1.state" w-outoforder a-outoforder-1 2026-09-01T05:00:00Z
+# ...and an OLDER launch for the SAME name is appended SECOND — the adopt-order shape (a
+# predecessor's row, carrying its own earlier stamp, landing after a fresher dispatch).
+r6_row "$R7_DIR/outoforder/roster-s1.state" w-outoforder a-outoforder-2 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/outoforder/sweeper-s1.state" 2026-09-01T02:00:00Z w-outoforder
+expect_eq "R7a the name stays open: the ack (02:00) is not later than the LATEST launch (05:00), whichever row is last on disk" \
+  "w-outoforder" "$(r7_open "$R7_DIR/outoforder")"
+
+# THE PAIRED CONTROL: in FILE order (fresher last), the same two stamps and the same ack
+# already gave the right answer before this fix — the bug is order-dependent, not present on
+# every input, and this pins the direction that was never wrong.
+mkdir -p "$R7_DIR/infileorder"
+r6_row "$R7_DIR/infileorder/roster-s1.state" w-infileorder a-infileorder-1 2026-09-01T01:00:00Z
+r6_row "$R7_DIR/infileorder/roster-s1.state" w-infileorder a-infileorder-2 2026-09-01T05:00:00Z
+r6_ack "$R7_DIR/infileorder/sweeper-s1.state" 2026-09-01T02:00:00Z w-infileorder
+expect_eq "R7b …and stays open when the fresher launch is already last on disk (the control)" \
+  "w-infileorder" "$(r7_open "$R7_DIR/infileorder")"
+
 finish
