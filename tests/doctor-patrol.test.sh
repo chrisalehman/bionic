@@ -138,9 +138,26 @@ make_repo_with_roster() {  # <sid> <open-names...> -- <closed-names...> -> repo 
     # predecessor's verdict verbatim onto a successor's roster. A fixture that
     # wrote no `state=` at all could not tell the two apart, which is precisely
     # the distinction `patrol_roster_state` now makes.
-    [ "$mode" = "closed" ] && swept_marker_write "$f" 2026-08-27T00:00:01Z "$sid" "$nm" a000 MET
+    #
+    # AND THE ACK THAT ACTUALLY CLOSES IT (epic-23 wave-20 T17, D10). A MET marker records that
+    # a landing was seen, not that the agent left, so it closes nothing on its own any more:
+    # `patrol_roster_state` asks `roster_open_names`, which closes a name only on a sweeper
+    # ledger ack stamped after the row's `launched_at=` (the fixture writer's default,
+    # 2026-09-02T00:00:00Z). The marker stays because it is what a landed row carries; the ack
+    # is what a closed one carries.
+    if [ "$mode" = "closed" ]; then
+      swept_marker_write "$f" 2026-08-27T00:00:01Z "$sid" "$nm" a000 MET
+      ack_write "$dir/.bionic/tmp/sweeper-${sid}.state" 2026-09-02T01:00:00Z "$sid" "$nm"
+    fi
   done
   printf '%s' "$dir"
+}
+
+# THE SWEEPER LEDGER'S ACK LINE, in its writer's shape (hooks/session-sweeper.sh `ack`).
+ack_write() {  # <ledger> <at> <sid> <name>
+  [ -f "$1" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$1"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+    "$2" "$3" "$4" >> "$1"
 }
 
 # THE STAMP hooks/session-poker.sh touches on every tick, and the ONE fact that
@@ -967,7 +984,7 @@ else
     "line is $(bionic_cols "$WIDE_ENG") columns: $WIDE_ENG"
 fi
 
-section "Section 15: only a MET marker closes a row (Step-6 security review, out-of-axis 2)"
+section "Section 15: a marker alone closes no row — an UNMET one never did, a MET one no longer does (Step-6 security review, out-of-axis 2; epic-23 wave-20 T17, D10)"
 
 # FOUR READERS OF ONE SCHEMA DISAGREED ABOUT WHETHER `state=` MATTERS.
 # hooks/session-start.sh's `open_rows` and the poker's `adopt_fold` require
@@ -997,18 +1014,38 @@ PB17="$(patrol_block "$OUT17")"
 
 expect_match "54: an UNMET marker leaves its row OPEN — one open dispatch, not zero" \
   "*✓ session ${SHORT17} · 1 open dispatch*" "$PB17"
-expect_no_match "55: …and the MET row beside it is still closed (the count is 1, never 2)" \
+expect_no_match "55: …and the acked MET row beside it is still closed (the count is 1, never 2)" \
   "*2 open dispatches*" "$PB17"
 
-# THE PAIRED POSITIVE, on the same two-row roster: flip the UNMET marker to MET
-# and the count falls to zero. Without it, "1 open" above is consistent with a
-# reader that had simply stopped closing rows at all.
+# RE-AUTHORED BY T17 (epic-23 wave-20, D10). This row used to read "flipping that same marker
+# to MET closes it", pinning the MET close T17 removes: `patrol_roster_state` now asks
+# `roster_open_names`, the predicate the dispatch wall, the sweeper, the stop wall and the
+# tick's adopt fold already share, and a MET marker there closes nothing — it records a
+# landing seen, not an agent gone. So the flip leaves the count where it was.
 sed 's/|name=unmet-row|agent_id=a000|state=UNMET$/|name=unmet-row|agent_id=a000|state=MET/' \
   "$ROSTER17" > "$ROSTER17.met" && mv "$ROSTER17.met" "$ROSTER17"
 OUT17B="$(run_doctor "$HOME17" "$REPO17")"
 PB17B="$(patrol_block "$OUT17B")"
-expect_match "56: …and flipping that same marker to MET closes it (54 discriminates)" \
-  "*✓ session ${SHORT17} · 0 open dispatches*" "$PB17B"
+expect_match "56 (T17: was '…flipping that same marker to MET closes it'): a MET marker with no ack closes nothing — still one open dispatch" \
+  "*✓ session ${SHORT17} · 1 open dispatch*" "$PB17B"
+
+# THE PAIRED POSITIVE the old 56 was: the one thing that does close the row. An ack stamped
+# after the row's launch takes the count to zero, so "1 open" above is not a reader that has
+# stopped closing rows at all.
+ack_write "$REPO17/.bionic/tmp/sweeper-${SID17}.state" 2026-09-02T01:00:00Z "$SID17" unmet-row
+OUT17C="$(run_doctor "$HOME17" "$REPO17")"
+PB17C="$(patrol_block "$OUT17C")"
+expect_match "56b …and an ack after its launch closes it (56 discriminates)" \
+  "*✓ session ${SHORT17} · 0 open dispatches*" "$PB17C"
+
+# AN ACK OLDER THAN A RELAUNCH CLOSES NOTHING. The same name dispatched again after its ack
+# is open work again — the case a MET latch used to hide for the rest of the session.
+roster_row_fixture status=intended session="$SID17" name=unmet-row launched_at=2026-09-02T02:00:00Z \
+  >> "$ROSTER17"
+OUT17D="$(run_doctor "$HOME17" "$REPO17")"
+PB17D="$(patrol_block "$OUT17D")"
+expect_match "56c …and dispatching it again after that ack opens it again" \
+  "*✓ session ${SHORT17} · 1 open dispatch*" "$PB17D"
 
 section "Section 16: dead-session state — one collapsed line, one fix, no \"Nothing to do\" (1.5.1 T5, AC-8)"
 

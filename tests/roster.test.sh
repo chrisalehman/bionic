@@ -31,6 +31,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# R6's MET marker, written by hooks/landing-gate.sh's own function (S17: no suite hand-writes it).
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 ROSTER_SH="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh"
 
@@ -147,7 +149,6 @@ expect_status "R4a an unrecognised key is still a refusal" "2" "$?"
 lib roster_row status=intended barewordarg >/dev/null 2>&1
 expect_status "R4b a bare word is still a refusal" "2" "$?"
 
-
 section "R5 — the two audit keys a successor row carries (wave-20 T9, REQ-4, AC-4.2/4.4)"
 
 # `amend` records when and why a live contract widened (`amended=`), and `extend` records its
@@ -167,5 +168,85 @@ expect_contains "R5c extended= is written when passed, its pipe folded like ever
 expect_contains "R5d …and claims= is whatever the caller passed, untouched by it" "|claims=worker-proc|" "$R5_EX"
 expect_eq "R5e the keys sit before tool_use_id=, after the instrument fields: the row minus them is the plain row" \
   "$R5_PLAIN" "$(printf '%s' "$R5_AM" | sed 's/|amended=[^|]*//')"
+
+section "R6 — live_ids_of_name asks the one close predicate (epic-23 wave-20 T17, REQ-10; D10)"
+
+# THE DEFECT (T2's carry-over, research D3 §REQ-10). `live_ids_of_name` — the stop wall's
+# ambiguity refusal and `adopt_write_row`'s "is this name already live here" — discharged a
+# name's ids on a `landing-swept/v1|…|state=MET` marker and never read the sweeper's ledger.
+# Every other occupancy reader closes a name only on an ack taken after its latest launch
+# (`roster_open_names`), so after a /clear the two could disagree about the same file: a
+# MET-but-unacked agent that the dispatch wall, the sweeper and the stop wall all hold open
+# read as gone here, and an acked one read as still live.
+#
+# THE RULE HERE: nothing is live unless `roster_open_names` answers the name open, and within
+# an open name an id is discharged exactly as a name is — by an ack whose stamp is later than
+# that row's `launched_at=`. The ledger is the roster's sibling, `sweeper-<sid>.state`, the
+# path the sweeper writes it to.
+#
+# A TEMP DIRECTORY, not the hermetic no-file shape R0–R4 keep: the function reads a file.
+R6_DIR="$(mktemp -d "${TMPDIR:-/tmp}/roster-r6.XXXXXX")"
+trap 'rm -rf "$R6_DIR"' EXIT
+r6_row() {  # <roster> <name> <agent id> <launched_at> — the intended then identified pair
+  lib roster_row status=intended session=s1 name="$2" agent_id= launched_at="$4" \
+    subagent_type=implementor model=opus deliverable= source=declared duration= progress= \
+    claims= cadence= absent= waiver= tool_use_id=toolu_r6 plan=none >> "$1"
+  lib roster_row status=identified session=s1 name="$2" agent_id="$3" launched_at="$4" \
+    subagent_type=implementor model=opus deliverable= source=declared duration= progress= \
+    claims= cadence= absent= waiver= tool_use_id=toolu_r6 plan=none >> "$1"
+}
+r6_ack() {  # <ledger> <at> <name> — the sweeper ledger's ack line, in its writer's shape
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=s1|name=%s|by=patrol|reason=landed\n' \
+    "$2" "$3" >> "$1"
+}
+r6_met() {  # <roster> <at> <name> <agent id> — through the landing gate's own writer (S17)
+  swept_marker_write "$1" "$2" s1 "$3" "$4" MET
+}
+r6_ids() {  # <case dir> <name> -> the live ids, space-joined
+  ROSTER_FILE="$1/roster-s1.state" lib live_ids_of_name "$2" | tr '\n' ' ' | sed 's/ $//'
+}
+
+mkdir -p "$R6_DIR/met"
+r6_row "$R6_DIR/met/roster-s1.state" w-met a-met-1 2026-09-01T00:00:00Z
+r6_met "$R6_DIR/met/roster-s1.state" 2026-09-01T01:00:00Z w-met a-met-1
+expect_eq "R6a a MET marker with no ack discharges nothing: the id is still live" \
+  "a-met-1" "$(r6_ids "$R6_DIR/met" w-met)"
+
+mkdir -p "$R6_DIR/acked"
+r6_row "$R6_DIR/acked/roster-s1.state" w-acked a-acked-1 2026-09-01T00:00:00Z
+r6_ack "$R6_DIR/acked/sweeper-s1.state" 2026-09-01T01:00:00Z w-acked
+expect_eq "R6b an ack after the launch discharges the name: nothing is live" \
+  "" "$(r6_ids "$R6_DIR/acked" w-acked)"
+
+mkdir -p "$R6_DIR/again"
+r6_row "$R6_DIR/again/roster-s1.state" w-again a-again-1 2026-09-01T00:00:00Z
+r6_ack "$R6_DIR/again/sweeper-s1.state" 2026-09-01T01:00:00Z w-again
+r6_row "$R6_DIR/again/roster-s1.state" w-again a-again-2 2026-09-01T02:00:00Z
+expect_eq "R6c acked, then dispatched again: only the id launched after the ack is live" \
+  "a-again-2" "$(r6_ids "$R6_DIR/again" w-again)"
+
+# THE PAIRED POSITIVE for the ambiguity the stop wall polices: two ids of one name, neither
+# acked, are BOTH live. Without it R6b is equally green on a function that answers nothing.
+mkdir -p "$R6_DIR/twin"
+r6_row "$R6_DIR/twin/roster-s1.state" w-twin a-twin-1 2026-09-01T00:00:00Z
+r6_row "$R6_DIR/twin/roster-s1.state" w-twin a-twin-2 2026-09-01T02:00:00Z
+expect_eq "R6d two unacked ids of one name are both live (the ambiguity)" \
+  "a-twin-1 a-twin-2" "$(r6_ids "$R6_DIR/twin" w-twin)"
+
+# STRICTLY LATER, as the predicate says: an ack in the launch's own second cannot be ordered
+# against it, and the safe direction is live.
+mkdir -p "$R6_DIR/same"
+r6_row "$R6_DIR/same/roster-s1.state" w-same a-same-1 2026-09-01T00:00:00Z
+r6_ack "$R6_DIR/same/sweeper-s1.state" 2026-09-01T00:00:00Z w-same
+expect_eq "R6e an ack stamped in the launch's own second discharges nothing" \
+  "a-same-1" "$(r6_ids "$R6_DIR/same" w-same)"
+
+# A SYMLINKED LEDGER IS READ AS EMPTY, as `roster_open_names` reads it: every id stays live.
+mkdir -p "$R6_DIR/link"
+r6_row "$R6_DIR/link/roster-s1.state" w-link a-link-1 2026-09-01T00:00:00Z
+r6_ack "$R6_DIR/link/real-ledger" 2026-09-01T01:00:00Z w-link
+ln -s "$R6_DIR/link/real-ledger" "$R6_DIR/link/sweeper-s1.state"
+expect_eq "R6f a symlinked ledger closes nothing" \
+  "a-link-1" "$(r6_ids "$R6_DIR/link" w-link)"
 
 finish

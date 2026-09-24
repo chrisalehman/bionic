@@ -82,6 +82,13 @@ if ! declare -F claude_home >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/roots.sh"
 fi
+# roster.sh, THE SAME SOFT SOURCE, for `roster_open_names` (epic-23 wave-20 T17, D10):
+# `patrol_roster_state` asks the one close predicate every wall asks, and this file is sourced
+# by callers (doctor, the stop library, suites) that never declared roster.sh themselves.
+if ! declare -F roster_open_names >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/roster.sh"
+fi
 
 # Values ride on `|`-delimited lines read BY KEY, so a value carrying a pipe or
 # a newline would forge a field. Same normalisation the roster writer applies to
@@ -767,45 +774,40 @@ EOF
 # is appended per status transition — `intended` at the wall, then `confirmed`,
 # then `identified` — so the number of DISPATCHES the wall saw is the number of
 # `status=intended` rows, and counting rows outright would multiply every
-# dispatch by however far it got. A dispatch is CLOSED when hooks/landing-gate.sh
-# has journalled a `landing-swept/v1` marker for its name SAYING `state=MET`;
-# anything else — no marker, or a marker carrying any other verdict — is open.
+# dispatch by however far it got.
 #
-# `state=` IS LOAD-BEARING, and this reader used to ignore it (Step-6 security
-# review, out-of-axis note 2). hooks/session-start.sh's `open_rows` and the
-# poker's `adopt_fold` have always required MET; this function and the poker's
-# `youngest_suite_writer` took ANY marker, so four readers of one schema held
-# two rules. S17's `adopt_copy_marker` then became a second WRITER that copies a
-# predecessor's verdict — UNMET included — verbatim onto a successor's roster,
-# which is how a non-MET marker reaches a roster this function reads. Reporting
-# an UNMET contract as closed is reporting a wave as finished.
+# OPEN AND CLOSED ARE THE ONE CLOSE PREDICATE'S (epic-23 wave-20 T17, D10; T2's
+# carry-over). A dispatched name is CLOSED only when `roster_open_names`
+# (lib/roster.sh) says so — an ack in this session's sweeper ledger stamped after
+# the name's latest launch — the reading the dispatch wall, the sweeper, the stop
+# wall and the tick's adopt fold already share. This function used to close a name
+# on a `landing-swept/v1|…|state=MET` marker instead (and before the Step-6
+# security review, on any marker at all), so doctor and the Patrol report could
+# call a wave's writer finished while every wall still held its name open. A MET
+# marker records a landing seen, not an agent gone; an UNMET one never closed
+# anything and still does not.
 patrol_roster_state() {  # <repo-root> <sid> -> rows=…|open=…|closed=…|names=…|path=…
-  local repo="${1:-}" sid="${2:-}" f rows names closed open swept nm
+  local repo="${1:-}" sid="${2:-}" f ledger rows names closed open open_names nm nl='
+'
   f="$(tmp_root "$repo")/roster-${sid}.state"
   if [ ! -f "$f" ] || [ -L "$f" ]; then
     printf 'rows=0|open=0|closed=0|present=no|path=%s' "$f"
     return 0
   fi
+  ledger="$(tmp_root "$repo")/sweeper-${sid}.state"
   rows=$(grep -c '^roster-state/v1|status=intended|' "$f" 2>/dev/null || true)
   case "$rows" in ''|*[!0-9]*) rows=0 ;; esac
   names="$(grep '^roster-state/v1|status=intended|' "$f" 2>/dev/null \
            | tr '|' '\n' | sed -n 's/^name=//p' | sort -u)"
-  # CAPTURED, THEN MATCHED — never `grep <file> | grep -q`. Under `pipefail` a
-  # `-q` consumer closes the pipe on its first hit and the producer dies of
-  # SIGPIPE with status 141, which a caller reads as a failed search rather than
-  # a successful one.
-  # MATCHED BY FIELD EQUALITY, never by substring: `state=` is last in the
-  # originator's printf today, and a field appended after it must not silently
-  # turn every marker in the fleet into a non-closing one.
-  swept="$(grep '^landing-swept/v1|' "$f" 2>/dev/null \
-           | awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i == "state=MET") { print; break } }' \
-           || true)"
+  # The predicate reads the ledger as empty when it is absent, unreadable or a symlink,
+  # which leaves every name open: the generous direction for a count of work in flight.
+  open_names="$(roster_open_names "$f" "$ledger")"
   closed=0; open=0
   while IFS= read -r nm; do
     [ -n "$nm" ] || continue
-    case "$swept" in
-      *"|name=${nm}|"*) closed=$((closed + 1)) ;;
-      *)                open=$((open + 1)) ;;
+    case "$nl$open_names$nl" in
+      *"$nl$nm$nl"*) open=$((open + 1)) ;;
+      *)             closed=$((closed + 1)) ;;
     esac
   done <<EOF
 $names
