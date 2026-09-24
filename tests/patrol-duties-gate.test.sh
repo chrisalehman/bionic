@@ -1386,6 +1386,29 @@ expect_eq "70g: …and units.sh the table parse's" \
   "1" "$(LC_ALL=C grep -cF -- "$PDG_TBL_SIG" "${HOOK_SRC%/*}/units.sh")"
 
 # ============================================================
+section "Section 5c2: the release waits for its step — the fill duty never presses for it during Verify (wave-20 T10b; critic C3, Δ6)"
+# ============================================================
+#
+# C3: at current: 5, the moment its Step-5 dependency landed, the Step-7 release row (kind
+# `doc`) was ready, and this wall refused every orchestrator Stop with a free slot until the
+# release was dispatched or declined — before any auditor or critic verdict. Δ6's accepted
+# reading holds a gate act until `current:` reaches its step; the release is the Document
+# step's gate act, so it joins `integrate` and `close`. Work rows ahead of `current:` are
+# unchanged (69e above).
+LEDGER_BED_5='| T2 | 5 | verify | the live bed, landed | implementor | T1 | 30m | REQ-x | — | landed | — |'
+LEDGER_RELEASE_7='| T13 | 7 | doc | Release 1.8.7 | implementor | T2 | 30m | REQ-x | CHANGELOG.md | pending | — |'
+d=$(make_env_ledger 5 "$LEDGER_LANDED" "$LEDGER_BED_5" "$LEDGER_RELEASE_7")
+u_prompt "$d" "how is Verify going?"
+fire "$d"; expect_allow "69h: C3 at current: 5 a ledger whose only pending row is the landed-dep release is not a gap"
+d=$(make_env_ledger 5 "$LEDGER_LANDED" "$LEDGER_BED_5" "$LEDGER_REVIEW_6" "$LEDGER_RELEASE_7")
+u_prompt "$d" "how is Verify going?"
+fire "$d"; expect_block "69i: …beside a ready Step-6 review the duty names the review" "T6"
+fire "$d"; expect_block "69j: …and never the held release" "fill-declined" "T13"
+d=$(make_env_ledger 7 "$LEDGER_LANDED" "$LEDGER_BED_5" "$LEDGER_RELEASE_7")
+u_prompt "$d" "where are we?"
+fire "$d"; expect_block "69k: at current: 7 the release is due, and an undispatched release is refused, naming it" "T13"
+
+# ============================================================
 section "Section 5d: nothing quoted plants a verdict (wave-20 REQ-5, AC-5.4; Δ7)"
 #
 # THE FOUR PLANTS research D1 §4 reproduced at b60efe2, each of which moved this wall's

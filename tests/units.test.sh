@@ -1800,4 +1800,89 @@ expect_eq "17.33 …and nothing is printed" "" \
   "$(call units_add_row "$SANDBOX/no-table.md" T1 4 build x implementor — 1 x x)"
 
 
+
+# ============================================================
+section "17b — wave-20 T10b: the release waits for its step (critic C3, Δ6), author text reaches the row byte for byte (review R6)"
+# ============================================================
+#
+# C3: at current: 5 the Step-7 release row, kind `doc`, was READY the moment its Step-5
+# dependency landed — the stop wall then pressed for the release before any auditor or critic
+# verdict, which is the case Δ6 rejected literal Δ1 for. The accepted reading: a gate act waits
+# for its step. The release is the Document step's gate act, so a `doc` row at Step 7 or later
+# joins `integrate` and `close`; every other row ahead of `current:` stays ready (D5 part 1).
+cat > "$SANDBOX/held.md" <<'HELD_EOF'
+---
+current: 5
+---
+
+## SDLC State
+
+current: 5
+
+- Step 5: in flight
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 5 | verify | the live bed, landed | implementor | T1 | 30m | REQ-x | — | landed |
+| T3 | 7 | doc | Release 1.8.7 | implementor | T2 | 30m | REQ-x | — | pending |
+| T4 | 6 | review | the review, deps landed | critic | T1 | 30m | REQ-x | — | pending |
+| T5 | 8 | integrate | the merge, deps landed | implementor | T2 | 30m | REQ-x | — | pending |
+| T6 | 7 | doc | a second doc row behind a pending review | implementor | T4 | 30m | REQ-x | — | pending |
+HELD_EOF
+sed 's/^current: 5$/current: 7/' "$SANDBOX/held.md" > "$SANDBOX/held-at-7.md"
+
+expect_eq "17b.1 C3 at current: 5 the landed-dep Step-7 doc row (the release) is NOT ready; the Step-6 review is" \
+  "T4" "$(call units_ready "$SANDBOX/held.md" 5)"
+expect_eq "17b.2 …at current: 6 it still waits" "T4" "$(call units_ready "$SANDBOX/held.md" 6)"
+expect_eq "17b.3 …at current: 7 the release joins the ready set (the integrate row still waits)" \
+  "$(printf 'T3\nT4')" "$(call units_ready "$SANDBOX/held-at-7.md" 7)"
+expect_eq "17b.4 through the fill: fill_ready_set at current: 5, rung 8, none open, omits the release" \
+  "T4" "$(fill_call "$SANDBOX/held.md" 8 0)"
+
+# THE WORK ROWS AHEAD OF current: ARE UNTOUCHED (D5 part 1). A Step-4 build row whose deps
+# landed is ready at current: 3 as before; so is a Step-6 review at current: 5 (17b.1).
+cat > "$SANDBOX/ahead.md" <<'AHEAD_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 3 | prototype | landed | implementor | — | 30m | REQ-x | — | landed |
+| T2 | 4 | build | ahead of current: 3 | implementor | T1 | 30m | REQ-x | a.sh | pending |
+| T3 | 6 | doc | a Step-6 doc row, not the release | implementor | T1 | 30m | REQ-x | — | pending |
+AHEAD_EOF
+expect_eq "17b.5 a Step-4 build row ahead of current: 3 with landed deps is still ready, and a Step-6 doc row too" \
+  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/ahead.md" 3)"
+
+# THE HOLD IS NAMED, ONE LINE PER ROW (`units_held <plan> <step>`): a row that would be ready
+# but for its step. A row still waiting on a dependency is not a hold — it is not ready for a
+# reason the graph already states — so T6 is not named.
+expect_eq "17b.6 units_held at current: 5 names the release and the integrate row, in table order" \
+  "$(printf 'T3: step 7 doc row waits for current: 7\nT5: step 8 integrate row waits for current: 8')" \
+  "$(call units_held "$SANDBOX/held.md" 5)"
+expect_eq "17b.7 …at current: 7 only the integrate row is still held" \
+  "T5: step 8 integrate row waits for current: 8" "$(call units_held "$SANDBOX/held-at-7.md" 7)"
+expect_eq "17b.8 …a caller fault is still exit 2" "2" "$(call_rc units_held "$SANDBOX/held.md" five)"
+expect_eq "17b.9 a hold is not a broken invariant: the validator admits the plan" "0" \
+  "$(call_rc units_validate "$SANDBOX/held.md")"
+
+# R6: author text reached awk through -v, which interprets backslash escapes, so
+# `C:\new\table` became `C:<newline>ew<tab>able`. Every operand now reaches the program
+# through ENVIRON. An author's own `\|` is already the one GFM cell escape and stays as it
+# was typed; a raw `|` is still escaped (17b.11).
+R6_OUT="$(call units_add_row "$SANDBOX/add.md" T8 6 review 'match C:\new\table and a\|b' 'bionic:critic' 'T3' 30 'costs $5 \t' 'x\y.sh')"
+expect_eq "17b.10 R6 a backslash, an author-escaped \\| and a \$ survive byte for byte into the row" \
+  '| T8 | 6 | review | match C:\new\table and a\|b | bionic:critic | T3 | 30 | costs $5 \t | x\y.sh | — | — | pending |' \
+  "$(printf '%s\n' "$R6_OUT" | grep '^| T8 ')"
+R6_OUT4="$(call units_add_row "$SANDBOX/add.md" T9 4 build 'raw a|b and \n' 'bionic:implementor' '—' 30 REQ-5 'b.sh')"
+expect_eq "17b.11 …through the Step-4 (threading) arm as well" \
+  '| T9 | 4 | build | raw a\|b and \n | bionic:implementor | — | 30 | REQ-5 | b.sh | — | — | pending |' \
+  "$(printf '%s\n' "$R6_OUT4" | grep '^| T9 ')"
+expect_contains "17b.12 …and the Step-5 frontier row is still threaded with the new id" \
+  "| T3 | 5 | verify | the floor | test-runner | T1, T9 |" "$R6_OUT4"
+printf '%s\n' "$R6_OUT" > "$SANDBOX/r6-projected.md"
+expect_eq "17b.13 …and the projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/r6-projected.md")"
+
 finish
