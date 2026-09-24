@@ -5001,11 +5001,12 @@ EOF
           # 1.8.6 ready was asked at the step the plan is on (REQ-1e, AC-1e.4), and a
           # Step-6 review whose deps had landed sat unfilled all through Verify. A work
           # row is now ready when it is pending and every dependency has landed, whatever
-          # its step; only an integrate or close row still waits for `current:` to reach
-          # its step. `SCHED_STEP` is still passed — it is what holds those gate acts —
-          # already read and already proven readable by the approval gate above, which
-          # is why this needs no second parse and no fallback: a `current:` that would
-          # not parse took the withhold arm and never reached here.
+          # its step; only a gate act — an integrate or close row, or a doc row at Step 7
+          # or later (the release; T10b) — still waits for `current:` to reach its step.
+          # `SCHED_STEP` is still passed — it is what holds those gate acts — already read
+          # and already proven readable by the approval gate above, which is why this needs
+          # no second parse and no fallback: a `current:` that would not parse took the
+          # withhold arm and never reached here.
           #
           # AND THE SET IS THE LIBRARY'S, TRIM INCLUDED (wave-18 REQ-3, D2; ADR-033
           # decision 2). `fill_ready_set` is what `payload/scripts/lib/stop.sh`'s fill
@@ -5038,7 +5039,13 @@ EOF
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
           else
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and integrate/close rows wait for their step."
+            # THE HOLD IS NAMED ON THIS LINE (wave-20 T10b; critic C3, Δ6). "Nothing is ready"
+            # and "the release waits for Step 7" are different states of a run, and through T10
+            # this line said the first for both. `units_held` is the same readiness program as
+            # the set above, asked the other question, so it names exactly the rows the set
+            # left out for their step and no others.
+            SCHED_HELD="$(units_held "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null | awk 'NF { printf "%s%s", (n++ ? "; " : ""), $0 }')"
+            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
           fi
         fi
       fi
