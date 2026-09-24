@@ -11960,6 +11960,58 @@ expect_eq "CG-close T20 MUTANT a MET-closing recorder journals no duplicate on a
   "closed" "$(cgt_recorder "$_cgt_r" met "$CGT_MUT_HOOK/execution-recorder.sh")"
 
 # ============================================================
+section "CG-close T20b — a restart after an ack is counted again by every occupancy reader (epic-23 wave-20 T20b, review R5)"
+# ============================================================
+#
+# THE HISTORY. `done` above (identified, MET, then acked) proves the ack closes the name to
+# all three readers. This proves the close is not permanent: the SAME agent id starts a THIRD
+# time — a restart after the ack, which is exactly what messaging a stopped agent does (R2) —
+# and T20b's fix stamps the fresh identification with its OWN launch time rather than the
+# closed lineage's original one (review R5; walk §9b/9c). Afterwards `roster_open_names`, the
+# recorder's own duplicate-start check on a FOURTH start, and the sweeper's `acked=` (against
+# the reused name, T2's reference) must all agree the name is open again — while the sweeper's
+# ledger still carries the old ack as history, unrewritten and unconsulted for anything but
+# its stamp.
+_cgtb_r=$(cgt_world done)
+_cgtb_name="cgt-done"
+_cgtb_id="acgtdone-5f0e3c2a9b7d4e61"
+_cgtb_roster="$_cgtb_r/.bionic/tmp/roster-$SID_A.state"
+_cgtb_ledger="$_cgtb_r/.bionic/tmp/sweeper-$SID_A.state"
+
+# THE RESTART: a THIRD SubagentStart for the id `cgt_world done` already identified once
+# (the world's own build is the first identification; `done`'s ack closes that lineage).
+# THE PAYLOAD NAMES THE DISPATCH, not "general-purpose" as `cgt_recorder`'s own calls do:
+# `cgt_world`'s `intended` row carries no agent_id (a teammate's own shape), so the
+# fallthrough this restart drives can only re-identify through the NAME join — which reads
+# `agent_type`, and needs it to equal the roster's `name=` to find that row at all.
+mk_start_payload "$SID_A" "$_cgtb_r/cgc-transcript.jsonl" "$_cgtb_r" "$_cgtb_name" "$_cgtb_id" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_ER" >/dev/null 2>&1
+expect_eq "CG-close T20b: the restart is not journalled a duplicate (a reused, finished lineage)" \
+  "0" "$(grep -c '|status=duplicate-start|' "$_cgtb_roster")"
+expect_eq "CG-close T20b: …and it identifies a second time" \
+  "2" "$(grep -c '|status=identified|' "$_cgtb_roster")"
+_cgtb_la2=$(grep '|status=identified|' "$_cgtb_roster" | tail -1 | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)
+expect_ne "CG-close T20b: …carrying a FRESH launch, not the closed lineage's original" \
+  "2026-09-01T00:00:00Z" "$_cgtb_la2"
+
+_cgtb_open=$( ( BIONIC_LIB_WANT=""; . "$CGC_LIBDIR/roster.sh" >/dev/null 2>&1
+                roster_open_names "$_cgtb_roster" "$_cgtb_ledger" "$SID_A" ) 2>/dev/null )
+expect_contains "CG-close T20b: roster_open_names counts the restarted name open again" \
+  "$_cgtb_name" "$_cgtb_open"
+
+# A FOURTH START now against the OPEN name IS a live duplicate — proving the recorder's own
+# check reads its own fresh row, not the finished lineage it just replaced.
+mk_start_payload "$SID_A" "$_cgtb_r/cgc-transcript.jsonl" "$_cgtb_r" "$_cgtb_name" "$_cgtb_id" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_ER" >/dev/null 2>&1
+expect_eq "CG-close T20b: a start against the now-open name IS a live duplicate" \
+  "1" "$(grep -c '|status=duplicate-start|' "$_cgtb_roster")"
+
+# THE SWEEPER'S OWN VERDICT (T2's reference), against the reused name: the ack is history, not
+# a lock — exactly the shape CG-close's own `again` case already proves for this reader.
+expect_eq "CG-close T20b: the sweeper's acked= (T2's reference) agrees: open" \
+  "open" "$(cgc_sweeper "$_cgtb_r" "$_cgtb_name")"
+
+# ============================================================
 section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave-20 T2, REQ-10 AC-10.2; D10)"
 # ============================================================
 #
