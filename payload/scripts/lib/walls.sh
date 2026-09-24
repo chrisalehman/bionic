@@ -4868,6 +4868,62 @@ fi
 return 0
 }
 
+# ─── _wall_poker_contract_verb — is this a call of a contract-changing poker verb ─
+#
+# 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
+# `session-poker.sh amend|extend|task-add`; 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+#
+# READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
+# (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
+# / `eval` strings re-read to depth 2), and everything before the real argv[0] comes off by
+# `_git_argv_skip` — `cd … &&` is its own segment, `env` with its options, `VAR=value`,
+# `sudo`, `nohup` and the rest. What is left is either the script itself (`./hooks/
+# session-poker.sh amend …`) or an interpreter that runs it (`bash`, `sh`, `zsh`, `dash`,
+# `ksh`, and `.`/`source`) with its own options before the script. The verb is the next word.
+# A quoted mention (`echo 'session-poker.sh amend'`) is one argument to `echo` and is never
+# argv[0], so it is not a call.
+#
+# RESIDUAL, NAMED: a script path built at run time (`bash "$P" amend`, `sh -c "$(printf …)"`)
+# is not text any reader of the command can resolve. This arm guards a writer against
+# granting itself a wider budget by habit, not an adversary; the same residual stands for
+# every argv reader here.
+_WALL_POKER_VERB=""
+_wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKER_VERB) · 1 not
+  local _line _oldifs _hadf _w _i _script _next
+  _WALL_POKER_VERB=""
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    _git_argv_skip "$_line"
+    [ -n "$GIT_ARGV_REST" ] || continue
+    _oldifs="$IFS"; _hadf=0
+    case "$-" in *f*) _hadf=1 ;; esac
+    set -f
+    IFS="$GIT_ARGV_US"
+    # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+    set -- $GIT_ARGV_REST
+    IFS="$_oldifs"
+    [ "$_hadf" -eq 1 ] || set +f
+    [ $# -gt 0 ] || continue
+    _script=""
+    case "${1##*/}" in
+      bash|sh|zsh|dash|ksh|.|source)
+        shift
+        while [ $# -gt 0 ]; do
+          case "$1" in -*) shift ;; *) break ;; esac
+        done
+        [ $# -gt 0 ] && _script="$1" ;;
+      *) _script="$1" ;;
+    esac
+    [ "${_script##*/}" = "session-poker.sh" ] || continue
+    shift
+    _next="${1:-}"
+    case "$_next" in
+      amend|extend|task-add) _WALL_POKER_VERB="$_next"; return 0 ;;
+    esac
+  done <<< "$(git_argv_expand "$1")"
+  return 1
+}
+
 # ─── wall_background_suite_guard — hooks/background-suite-guard.sh ───────────
 #
 # A subagent may not run a suite where nobody reads the output (B-9,
@@ -4986,6 +5042,33 @@ never a commit. Leave the tree as it is and send the report; the orchestrator la
       return 2
     fi
   fi
+
+  # ---------- ARM A (wave-20 T9; REQ-4, AC-4.2; spec D4): a subagent changes no contract ----
+  #
+  # `session-poker.sh amend` widens a live row's Files/Suites/Re-executes, `extend` re-opens a
+  # MET row, and `task-add` writes the bound plan. All three are the orchestrator's: a writer
+  # that could run them would grant itself a wider budget or schedule its own work. The
+  # script cannot see who called it — in-process teammates share the session's environment —
+  # so the refusal is here, below the partition every arm of this function shares: a payload
+  # carrying a top-level `agent_id`, in an armed session. Main-thread calls never reach it.
+  #
+  # THE SCREEN is the literal name with quotes and backslashes removed, as `_wall_mentions_git`
+  # screens git; a hit runs the argv reader (`_wall_poker_contract_verb`, above), which decides.
+  local _bsg_p="${COMMAND//\\$'\n'/}"
+  _bsg_p="${_bsg_p//\\/}"; _bsg_p="${_bsg_p//\'/}"; _bsg_p="${_bsg_p//\"/}"
+  case "$_bsg_p" in
+    *session-poker*)
+      if _wall_poker_contract_verb "$COMMAND"; then
+        fold_block exit2 "$_WALL_POKER_VERB" \
+          "a subagent may not change a contract or the plan" "ask the orchestrator" \
+          "\`session-poker.sh $_WALL_POKER_VERB\` changes a roster contract or the bound plan, and
+only the orchestrator does that: a dispatched agent that could would widen its own budget or
+schedule its own work. Send the orchestrator what you need — the files, suites or runs to
+add and why, or the row to add — and it runs the verb."
+        return 2
+      fi
+      ;;
+  esac
 
 # ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
 #

@@ -2672,13 +2672,36 @@ expect_eq "12a-T22-i2 …and no order is written for it" "no" \
 expect_eq "12a-T22-i3 …and it is not acked either — a stale reading is not evidence it is gone" "no" \
   "$([ -f "$R12ST/.bionic/tmp/sweeper-$SID.state" ] && echo yes || echo no)"
 # RE-AUTHORED AT REQ-10 AC-10.4 (D5): the deferral is a FACT the reader cannot act on
-# differently for knowing it, so it prints as `poker: note:` above the decision line. The
-# sentence is unchanged; the channel marker in front of it is new.
-expect_contains "12a-T22-i4 …and the tick says exactly why, once, as a note" \
-  "poker: note: stand-down deferred — the panel reading is stale; ListAgents and the next tick decides" \
+# differently for knowing it, so it prints as `poker: note:` above the decision line.
+# RE-AUTHORED AGAIN AT wave-20 T9 (REQ-4, AC-4.5; consumer report #11): the line NAMES the
+# rows it held back — a deferral that names nothing leaves the operator to guess which agent
+# is waiting on a ListAgents — and says `stale` only for a reading that is stale.
+expect_contains "12a-T22-i4 …and the tick says exactly why, once, as a note naming the row" \
+  "poker: note: stand-down deferred for done-writer — the panel reading is stale; ListAgents and the next tick decides" \
   "$OUT"
 expect_eq "12a-T22-i5 …and only once" "1" \
   "$(printf '%s\n' "$OUT" | grep -c 'stand-down deferred' | tr -d ' ')"
+
+# ---------- 12a-T22-i6: NO ANSWER AT ALL IS `absent`, NEVER `stale` (AC-4.5) ----------
+#
+# `live_agents` answers 4 (NONE) for a transcript with no ListAgents answer, and the tick
+# finds no transcript at all for a session whose file does not exist. Both used to print
+# "stale" — a word about a reading's AGE for a reading that was never taken. Both rows are
+# named, the MET one and the duplicate-free open one alike.
+R12SN="$(make_repo s12-taskstop-none)"; new_roster "$R12SN"; armed_ago "$R12SN"; delivered_plan "$R12SN"
+DEL_SN="$R12SN/delivered.md"; echo "done" > "$DEL_SN"
+add_row "$R12SN" name=met-a deliverable="$DEL_SN" duration="1 minute" launched_at="$(iso_ago 600)"
+add_row "$R12SN" name=met-b deliverable="$DEL_SN" duration="1 minute" launched_at="$(iso_ago 600)"
+s12_answer none
+poke "$R12SN" tick
+expect_contains "12a-T22-i6 a panel with no answer defers, naming both rows, and says absent" \
+  "poker: note: stand-down deferred for met-a met-b — the panel reading is absent; ListAgents and the next tick decides" \
+  "$OUT"
+expect_absent "12a-T22-i7 …never stale" "the panel reading is stale" "$OUT"
+rm -f "$S12_CFG/projects/-fixture-project/$SID.jsonl"
+poke "$R12SN" tick
+expect_contains "12a-T22-i8 no transcript at all is absent too, naming the rows" \
+  "poker: note: stand-down deferred for met-a met-b — the panel reading is absent" "$OUT"
 
 # THE CONFIG DIR IS HANDED BACK. Every case after this one is an ordinary fill case with no
 # live answer of its own, and leaving the pointer here would let THIS section's transcript
@@ -5546,6 +5569,200 @@ expect_eq "29f2 the appended row stores the declared run exactly as the copied r
 expect_eq "29f3 …so the two stored fields are byte-identical" "$S29F_FIRST" "$S29F_LAST"
 expect_absent "29f4 …and %257C never appears on the roster" "%257C" "$(cat "$S29F_ROSTER")"
 
+
+# ---------- 29g: THE REASON IS DATA, NEVER A PROCESS PATTERN (wave-20 T9, REQ-4, AC-4.4) ----------
+#
+# `extend` used to write its reason into `claims=` — the one field the sweeper hands to
+# `pgrep -f` as a process pattern (`claims_live`). A reason is prose: `retry .* [a-z]+` in
+# `claims=` is a regular expression that matches half the machine and reads the row
+# STILL-LIVE for the life of the session. The reason now rides `extended=<iso> <reason>`,
+# and `claims=` is copied from the row it extends, unchanged.
+R29G="$(make_repo s29-extend-reason)"; new_roster "$R29G"
+DEL_29G="$R29G/delivered.md"; echo "done" > "$DEL_29G"
+add_row "$R29G" name=t1 deliverable="$DEL_29G" duration="1 minute" claims="build-worker-29g" \
+  launched_at="$(iso_ago 600)"
+S29G_ROSTER="$(roster_of "$R29G")"
+poke "$R29G" extend t1 'retry .* [a-z]+ (x|y) $HOME'
+expect_eq "29g extend with a metacharacter reason exits 0" "0" "$RC"
+S29G_LAST="$(grep '|name=t1|' "$S29G_ROSTER" | tail -1)"
+expect_eq "29g2 AC-4.4 claims= is the copied row's, not the reason" "build-worker-29g" \
+  "$(printf '%s' "$S29G_LAST" | tr '|' '\n' | grep '^claims=' | cut -d= -f2-)"
+expect_regex "29g3 …the reason rides extended=<iso> <reason>" \
+  '^extended=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z retry \.\* \[a-z\]\+ \(x y\) \$HOME$' \
+  "$(printf '%s' "$S29G_LAST" | tr '|' '\n' | grep '^extended=')"
+expect_eq "29g4 …on the appended row only — the original carries no extended=" "0" \
+  "$(grep '|name=t1|' "$S29G_ROSTER" | head -1 | grep -c '|extended=' || true)"
+
+# ============================================================
+section "Section 30: amend — a live contract changes through the shared grammar (wave-20 T9, REQ-4, AC-4.1/4.2; D4, Δ10)"
+# ============================================================
+#
+# `amend <name> [--files+ p]… [--suites+ s]… [--reexec+ 'cmd']… --reason r` appends a
+# successor row copied from the name's latest, with the added paths, suites and runs merged
+# in (a union, never a narrowing), and `amended=<iso> <reason>`. The identity is copied
+# verbatim: `status=`, `launched_at=`, `agent_id=`, `teammate_id=`, `tool_use_id=` — so the
+# agent's verdict, its stop gate and its budget join see the same contract, wider. The stop
+# wall and the budget wall already read the latest row, so a successor is read with no reader
+# change. The merged fields are judged by `brief_validate_fields`, the dispatch wall's own
+# grammar (payload/scripts/lib/brief.sh): whatever a dispatch carrying those lines would have
+# been refused for, amend refuses.
+#
+# Refused: an unengaged session (decides nothing), an unknown name, a CLOSED row (the one
+# close predicate, `roster_open_names`: an ack later than the latest launch), an empty change
+# (no flag, or flags the row already carries), and anything the grammar refuses.
+s30_row() {  # <repo> <key=value>... — one live row through the one writer
+  local repo="$1"; shift
+  roster_row_fixture status=identified "session=$SID" name=w1 agent_id=aw1-3000000000000001 \
+    "launched_at=$(iso_ago 600)" subagent_type=bionic:implementor source=declared \
+    "deliverable=$repo/never-yet.md" duration="2 hours" \
+    files=hooks/a.sh suites_allowed=a.test.sh suites_source=declared \
+    teammate_id=w1@session-8a41c2e0 tool_use_id=toolu_w1 "$@" >> "$(roster_of "$repo")"
+}
+s30_last() { grep -F "|name=${2:-w1}|" "$(roster_of "$1")" | tail -1; }
+s30_field() { printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-; }
+
+R30="$(make_repo s30-amend)"; new_roster "$R30"; s30_row "$R30"
+S30_BEFORE="$(s30_last "$R30")"
+S30_N0="$(grep -c '|name=w1|' "$(roster_of "$R30")")"
+
+# ---------- 30a: AC-4.1 — --files+ widens files=, and the row's identity is kept ----------
+poke "$R30" amend w1 --files+ hooks/b.sh --reason 'the fix touches b'
+expect_eq "30a amend --files+ exits 0" "0" "$RC"
+expect_contains "30a2 …and says what it did" "amended" "$OUT"
+S30_AFTER="$(s30_last "$R30")"
+expect_eq "30a3 …one successor row appended" "$((S30_N0 + 1))" "$(grep -c '|name=w1|' "$(roster_of "$R30")")"
+expect_eq "30a4 AC-4.1 files= is the union, old first" "hooks/a.sh,hooks/b.sh" "$(s30_field "$S30_AFTER" files)"
+for _k in status launched_at agent_id teammate_id tool_use_id subagent_type deliverable suites_allowed suites_source; do
+  expect_eq "30a5 AC-4.2 $_k= is copied verbatim" "$(s30_field "$S30_BEFORE" "$_k")" "$(s30_field "$S30_AFTER" "$_k")"
+done
+expect_regex "30a6 …and amended=<iso> <reason> records when and why" \
+  '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z the fix touches b$' "$(s30_field "$S30_AFTER" amended)"
+expect_eq "30a7 …the original row is untouched (append-only)" "$S30_BEFORE" \
+  "$(grep -F '|name=w1|' "$(roster_of "$R30")" | sed -n "${S30_N0}p")"
+
+# ---------- 30b: --suites+ and --reexec+, repeated, union into the row ----------
+poke "$R30" amend w1 --suites+ tests/b.test.sh --suites+ tests/c.test.sh \
+  --reexec+ 'npx jest --testPathPatterns widget' --reason 'b and c cover the fix'
+expect_eq "30b amend --suites+ --reexec+ exits 0" "0" "$RC"
+S30_B="$(s30_last "$R30")"
+expect_eq "30b2 suites_allowed= is the old set plus both added, as basenames" \
+  "a.test.sh b.test.sh c.test.sh" "$(s30_field "$S30_B" suites_allowed)"
+expect_contains "30b3 re_executes= carries the added run, marked" \
+  '`npx jest --testPathPatterns widget`' "$(s30_field "$S30_B" re_executes)"
+expect_eq "30b4 files= keeps what the last amend added" "hooks/a.sh,hooks/b.sh" "$(s30_field "$S30_B" files)"
+expect_eq "30b5 launched_at= still the dispatch's" "$(s30_field "$S30_BEFORE" launched_at)" "$(s30_field "$S30_B" launched_at)"
+
+# ---------- 30c: an empty change is refused, and writes nothing ----------
+S30_SUM="$(cksum < "$(roster_of "$R30")")"
+poke "$R30" amend w1 --reason 'nothing'
+expect_eq "30c amend with no change flag is a usage error (exit 2)" "2" "$RC"
+poke "$R30" amend w1 --files+ hooks/a.sh --suites+ tests/a.test.sh --reason 'already there'
+expect_eq "30c2 flags the row already carries are an empty change: REFUSED (exit 1)" "1" "$RC"
+expect_contains "30c3 …saying so" "changes nothing" "$OUT"
+poke "$R30" amend w1 --files+ hooks/z.sh
+expect_eq "30c4 no --reason is a usage error (exit 2)" "2" "$RC"
+expect_eq "30c5 …and none of the three wrote a row" "$S30_SUM" "$(cksum < "$(roster_of "$R30")")"
+
+# ---------- 30d: AC-4.2 — an unknown name, and a closed row ----------
+poke "$R30" amend nobody --files+ hooks/b.sh --reason r
+expect_eq "30d an unknown name is REFUSED (exit 1)" "1" "$RC"
+expect_contains "30d2 …naming it" "nobody" "$OUT"
+R30C="$(make_repo s30-closed)"; new_roster "$R30C"; s30_row "$R30C"
+ack_rows "$R30C" w1
+S30C_SUM="$(cksum < "$(roster_of "$R30C")")"
+poke "$R30C" amend w1 --files+ hooks/b.sh --reason 'too late'
+expect_eq "30d3 AC-4.2 a closed (acked) row is REFUSED (exit 1)" "1" "$RC"
+expect_contains "30d4 …saying it is closed" "closed" "$OUT"
+expect_eq "30d5 …and the roster is unchanged" "$S30C_SUM" "$(cksum < "$(roster_of "$R30C")")"
+
+# ---------- 30e: an unengaged session decides nothing ----------
+R30E="$(make_repo s30-unengaged)"; new_roster "$R30E"; s30_row "$R30E"; unengage "$R30E"
+S30E_SUM="$(cksum < "$(roster_of "$R30E")")"
+poke "$R30E" amend w1 --files+ hooks/b.sh --reason r
+expect_eq "30e an unengaged session's amend exits 0 (decides nothing)" "0" "$RC"
+expect_contains "30e2 …and says so" "NOT-ENGAGED" "$OUT"
+expect_eq "30e3 …and the roster is untouched" "$S30E_SUM" "$(cksum < "$(roster_of "$R30E")")"
+
+# ---------- 30f: THE GRAMMAR — what a dispatch would refuse, amend refuses (Δ10) ----------
+R30F="$(make_repo s30-grammar)"; new_roster "$R30F"; s30_row "$R30F"
+S30F_SUM="$(cksum < "$(roster_of "$R30F")")"
+poke "$R30F" amend w1 --suites+ '$SUITE.test.sh' --reason 'a variable'
+expect_eq "30f a suite that is not a literal name is REFUSED (exit 1)" "1" "$RC"
+expect_contains "30f2 …in the dispatch wall's own words" "a declared suite is not a literal name" "$OUT"
+poke "$R30F" amend w1 --suites+ tests/widget.spec.js --reason 'a jest spec'
+expect_eq "30f3 a suite the shell runner cannot run is REFUSED (exit 1)" "1" "$RC"
+expect_contains "30f4 …naming the fix" "Re-executes:" "$OUT"
+expect_eq "30f5 …and neither wrote a row" "$S30F_SUM" "$(cksum < "$(roster_of "$R30F")")"
+# THE ROLE'S CAP: an auditor's Re-executes: holds three runs; a fourth is the dispatch wall's
+# refusal, and so it is amend's (wave-20 T4, Δ3).
+R30G="$(make_repo s30-auditor)"; new_roster "$R30G"
+s30_row "$R30G" subagent_type=bionic:auditor suites_allowed=none \
+  're_executes=`npm test` `pytest tests/unit` `go test ./...`'
+S30G_SUM="$(cksum < "$(roster_of "$R30G")")"
+poke "$R30G" amend w1 --reexec+ 'cargo test' --reason 'a fourth run'
+expect_eq "30f6 an auditor's fourth run is REFUSED (exit 1)" "1" "$RC"
+expect_contains "30f7 …by the three-run cap" "3-run cap" "$OUT"
+expect_eq "30f8 …and the roster is unchanged" "$S30G_SUM" "$(cksum < "$(roster_of "$R30G")")"
+
+# ---------- 30g: a waived budget takes the added set; suites_source is copied ----------
+R30W="$(make_repo s30-waived)"; new_roster "$R30W"; s30_row "$R30W" suites_allowed=none
+poke "$R30W" amend w1 --suites+ tests/d.test.sh --reason 'now it runs one'
+expect_eq "30g amend onto a waived budget exits 0" "0" "$RC"
+expect_eq "30g2 …none is replaced by the added set" "d.test.sh" "$(s30_field "$(s30_last "$R30W")" suites_allowed)"
+poke "$R30W" amend w1 --files+ hooks/q.sh --reason 'files only'
+expect_eq "30g3 a files-only amend of a declared budget needs no impact command (exit 0)" "0" "$RC"
+expect_eq "30g4 …and keeps the declared set" "d.test.sh" "$(s30_field "$(s30_last "$R30W")" suites_allowed)"
+
+# ---------- 30h: the arg shape ----------
+poke "$R30" amend
+expect_eq "30h amend with no name is a usage error (exit 2)" "2" "$RC"
+poke "$R30" amend w1 --files+ --reason r
+expect_eq "30h2 a flag with no value is a usage error (exit 2)" "2" "$RC"
+poke "$R30" amend w1 --bogus x --reason r
+expect_eq "30h3 an unknown flag is a usage error (exit 2)" "2" "$RC"
+
+# ============================================================
+section "Section 30b: FOLLOW-UP — the tick holds a MET row whose agent has a message waiting (wave-20 T9, REQ-4, AC-4.3; Δ8)"
+# ============================================================
+#
+# The orchestrator sent a MET agent a follow-up and the agent has not answered: the sweeper
+# reads FOLLOW-UP, and the tick inherits it — counted open, never a STANDDOWN, no stop order.
+# The transcript is the orchestrator's own, carrying the three shapes in the order the CLI
+# writes them: the agent's report (a user record opening `<teammate-message`), the
+# SendMessage tool_use, then a FRESH ListAgents answer — the agent `running`, as a message
+# resumes it, and `idle` again once it has answered.
+S30B_CFG="$(fake_config_dir s30b-followup)"
+export CLAUDE_CONFIG_DIR="$S30B_CFG"
+S30B_TR="$S30B_CFG/projects/-fixture-project/$SID.jsonl"
+s30b_msg() {
+  jq -nc --arg b "<teammate-message teammate_id=\"$1\" color=\"blue\" summary=\"r\">
+report
+</teammate-message>" '{type:"user",timestamp:"2026-09-05T00:50:10.000Z",message:{role:"user",content:$b}}'
+}
+s30b_send() {
+  jq -nc --arg to "$1" '{type:"assistant",timestamp:"2026-09-05T00:50:20.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_s30b",name:"SendMessage",input:{to:$to,message:"also x"}}]}}'
+}
+s30b_transcript() {  # <fw status> <record-producing commands…> — spliced between the prompt and the answer
+  local tmp="$TMPROOT/s30b.panel" cmd st="$1"; shift
+  plant_answer "$tmp" fresh "fw:$st"
+  { head -1 "$tmp"; for cmd in "$@"; do eval "$cmd"; done; tail -n +2 "$tmp"; } > "$S30B_TR"
+}
+R30B="$(make_repo s30b-followup)"; new_roster "$R30B"; armed_ago "$R30B"; delivered_plan "$R30B"
+DEL_30B="$R30B/delivered.md"; echo "done" > "$DEL_30B"
+add_row "$R30B" name=fw deliverable="$DEL_30B" duration="1 minute" launched_at="$(iso_ago 600)"
+
+s30b_transcript running "s30b_msg fw" "s30b_send fw"
+poke "$R30B" tick
+expect_absent "30b-a AC-4.3 a MET row with a follow-up in flight draws no STANDDOWN" "poker: STANDDOWN fw" "$OUT"
+expect_contains "30b-a2 …it counts open" "open=1" "$OUT"
+expect_eq "30b-a3 …and no stop order is written for it" "no" \
+  "$([ -f "$R30B/.bionic/tmp/stop-orders-$SID.state" ] && echo yes || echo no)"
+
+s30b_transcript idle "s30b_msg fw" "s30b_send fw" "s30b_msg fw"
+poke "$R30B" tick
+expect_contains "30b-b the reply closes it: the same row is stood down" "poker: STANDDOWN fw" "$OUT"
+unset CLAUDE_CONFIG_DIR
+
 section "Section 31: the ledger is live at task scale — the tick fills, and the wall agrees (wave-18 REQ-3, AC-3.1/AC-3.3; ADR-033 d2)"
 # ============================================================
 #
@@ -6060,11 +6277,17 @@ s34_gate "$R34A"
 expect_eq "34a the fixture plan is admitted by the real commit gate before any add" "0" "$GATE_RC"
 
 # ---------- 34b: AC-5.3 — a Step-4 row added mid-run, and the next commit admitted ----------
-poke "$R34A" task-add T6 4 build 'the fixup found mid-run' bionic:implementor '—' 30 REQ-5 'c.sh'
+poke "$R34A" task-add T6 4 build 'the fixup found mid-run' bionic:implementor '—' 30 REQ-5 'lib/c.sh'
 expect_eq "34b task-add of a Step-4 row exits 0" "0" "$RC"
 expect_contains "34b2 …and says what it did" "task-add — T6 added" "$OUT"
+# THE GRAMMAR SPOKE AND ADMITTED (wave-20 T9, Δ10): the Files operand is a path the dispatch
+# wall's lift reads. This fixture repo configures no impact command, which a dispatch carrying
+# only this Files: line would be refused for — a fact about the repository, answered at
+# dispatch by a Suites: line the plan row has no column for, so here it is a note.
+expect_contains "34b2g …and the repository-level grammar fact is a note, not a refusal" \
+  "poker: note: no impact command is configured here" "$OUT"
 expect_contains "34b3 …the row is in the plan, pending" \
-  "| T6 | 4 | build | the fixup found mid-run | bionic:implementor | — | 30 | REQ-5 | c.sh | — | — | pending |" "$(cat "$P34A")"
+  "| T6 | 4 | build | the fixup found mid-run | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" "$(cat "$P34A")"
 expect_contains "34b4 …with its - T6: line" "- T6: pending dispatch — added by task-add" "$(cat "$P34A")"
 expect_contains "34b5 …and threaded into the Step-5 row's deps" \
   "| T5 | 5 | verify | the floor | test-runner | T1, T2, T6 |" "$(cat "$P34A")"
@@ -6076,7 +6299,7 @@ expect_eq "34b6 AC-5.3 the next commit is admitted: no dependency the verb shoul
 R34C="$(make_repo s34-hand)"; ( cd "$R34C" && git commit -q --allow-empty -m init )
 P34C="$(s34_plan "$R34C" 4)"
 awk '{ print }
-     /^\| T5 \| 5 \|/ { print "| T6 | 4 | build | the fixup, hand-added | implementor | — | 30 | REQ-5 | c.sh | — | — | pending |" }
+     /^\| T5 \| 5 \|/ { print "| T6 | 4 | build | the fixup, hand-added | implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" }
      /^- T5: / { print "- T6: pending dispatch — by hand" }' "$P34C" > "$P34C.tmp" && mv "$P34C.tmp" "$P34C"
 s34_gate "$R34C"
 expect_eq "34c the hand-added row without the threading is refused by the same gate" "2" "$GATE_RC"
@@ -6089,13 +6312,25 @@ expect_eq "34d a row the validator refuses exits 1" "1" "$RC"
 expect_eq "34d2 AC-5.3 …and the plan is byte-identical" "$SUM34" "$(cksum < "$P34A")"
 expect_contains "34d3 …and the validator's words print" "T7: step 5 is missing 2 step-4 prerequisites: T2, T6" "$OUT"
 
-poke "$R34A" task-add T6 4 build 'the same id again' implementor '—' 30 REQ-5 'd.sh'
+poke "$R34A" task-add T6 4 build 'the same id again' implementor '—' 30 REQ-5 'lib/d.sh'
 expect_eq "34d4 a duplicate id is refused" "1" "$RC"
 expect_eq "34d5 …the plan is byte-identical" "$SUM34" "$(cksum < "$P34A")"
 expect_contains "34d6 …naming the duplicate" "T6: duplicate id" "$OUT"
 
-poke "$R34A" task-add T8 4 build 'a dep nobody defines' implementor 'T99' 30 REQ-5 'e.sh'
+poke "$R34A" task-add T8 4 build 'a dep nobody defines' implementor 'T99' 30 REQ-5 'lib/e.sh'
 expect_eq "34d7 a dep naming no row is refused, the plan unchanged" "1 $SUM34" "$RC $(cksum < "$P34A")"
+
+# ---------- 34d8: THE FILES OPERAND IS JUDGED BY THE DISPATCH GRAMMAR (wave-20 T9; D4, Δ10) ----------
+# task-add used to write its Files cell with no check at all (T6 carry-over). A cell the
+# dispatch wall's lift reads as no path — a template slot, a bare word — is a row whose
+# brief could never be admitted with that Files: line; the verb refuses it, in the grammar's
+# own words, and the plan is byte-identical.
+poke "$R34A" task-add T8 4 build 'a template for Files' implementor '—' 30 REQ-5 '<path>/x.sh'
+expect_eq "34d8 a Files operand the grammar reads as no path is REFUSED (exit 1)" "1" "$RC"
+expect_contains "34d9 …in the dispatch wall's words" "declares no Files:" "$OUT"
+expect_eq "34d10 …and the plan is byte-identical" "$SUM34" "$(cksum < "$P34A")"
+poke "$R34A" task-add T8 4 build 'a bare word for Files' implementor '—' 30 REQ-5 'CHANGELOG'
+expect_eq "34d11 a bare word is REFUSED too, the plan unchanged" "1 $SUM34" "$RC $(cksum < "$P34A")"
 
 # ---------- 34e: refused by the GATE, not the validator — the dry run is real ----------
 # The row is valid, but the plan's Step-4 block has lost its base-sha: the validator is
@@ -6104,7 +6339,7 @@ R34E="$(make_repo s34-gate)"; ( cd "$R34E" && git commit -q --allow-empty -m ini
 P34E="$(s34_plan "$R34E" 4 '  worktree: .worktrees/01-fixture
   branch: wave/01-fixture')"
 SUM34E="$(cksum < "$P34E")"
-poke "$R34E" task-add T6 4 build 'a valid row on a plan the gate refuses' implementor '—' 30 REQ-5 'c.sh'
+poke "$R34E" task-add T6 4 build 'a valid row on a plan the gate refuses' implementor '—' 30 REQ-5 'lib/c.sh'
 expect_eq "34e a valid row on a plan the commit gate refuses exits 1" "1" "$RC"
 expect_eq "34e2 …the plan is byte-identical" "$SUM34E" "$(cksum < "$P34E")"
 expect_contains "34e3 …and the gate's own words print" "bionic: commit refused" "$OUT"
@@ -6117,7 +6352,7 @@ expect_contains "34e4 …naming the field it wants" "base-sha" "$OUT"
 # added during Verify, which is when fixups are found.
 R34F="$(make_repo s34-verify)"; ( cd "$R34F" && git commit -q --allow-empty -m init )
 P34F="$(s34_plan "$R34F" 5)"
-poke "$R34F" task-add T6 4 build 'a fixup found during Verify' implementor '—' 30 REQ-5 'c.sh'
+poke "$R34F" task-add T6 4 build 'a fixup found during Verify' implementor '—' 30 REQ-5 'lib/c.sh'
 expect_eq "34f a Step-4 row added at current: 5 is admitted" "0" "$RC"
 expect_contains "34f2 …and written, current: untouched" "current: 5" "$(cat "$P34F")"
 expect_contains "34f3 …with the row" "| T6 | 4 | build | a fixup found during Verify |" "$(cat "$P34F")"
@@ -6129,18 +6364,18 @@ expect_eq "34g a short argument list is a usage error (exit 2)" "2" "$RC"
 R34G="$(make_repo s34-unbound)"; ( cd "$R34G" && git commit -q --allow-empty -m init )
 P34G="$(s34_plan "$R34G" 4)"; engage "$R34G"      # re-engaged EMPTY: the session is unbound
 SUM34G="$(cksum < "$P34G")"
-poke "$R34G" task-add T6 4 build 'onto no bound plan' implementor '—' 30 REQ-5 'c.sh'
+poke "$R34G" task-add T6 4 build 'onto no bound plan' implementor '—' 30 REQ-5 'lib/c.sh'
 expect_eq "34g2 an unbound session is refused and the newest plan is not written" "1 $SUM34G" "$RC $(cksum < "$P34G")"
 expect_contains "34g3 …saying why" "bound" "$OUT"
 
 R34H="$(make_repo s34-step3)"; ( cd "$R34H" && git commit -q --allow-empty -m init )
 P34H="$(s34_plan "$R34H" 3)"
 SUM34H="$(cksum < "$P34H")"
-poke "$R34H" task-add T6 4 build 'before approval' implementor '—' 30 REQ-5 'c.sh'
+poke "$R34H" task-add T6 4 build 'before approval' implementor '—' 30 REQ-5 'lib/c.sh'
 expect_eq "34g4 a plan below current: 4 is refused, unchanged" "1 $SUM34H" "$RC $(cksum < "$P34H")"
 
 unengage "$R34A"
-poke "$R34A" task-add T9 4 build 'unengaged' implementor '—' 30 REQ-5 'f.sh'
+poke "$R34A" task-add T9 4 build 'unengaged' implementor '—' 30 REQ-5 'lib/f.sh'
 expect_contains "34g5 an unengaged session decides nothing" "NOT-ENGAGED" "$OUT"
 engage "$R34A"
 

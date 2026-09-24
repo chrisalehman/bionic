@@ -1159,4 +1159,109 @@ expect_eq "a symlinked ledger refuses the verdict outright (exit 2)" "2" "$RC"
 expect_absent "…printing no line for any reader to trust" "landing-verdict/v1|" "$OUT"
 rm -f "$(ledger_of "$R19")"
 
+
+# ============================================================
+section "Section 9: FOLLOW-UP — a message to a MET agent holds its row until the reply (wave-20 T9, REQ-4, AC-4.3; Δ8)"
+# ============================================================
+#
+# THE DEFECT (consumer report #2). The orchestrator sends a MET agent a follow-up; the next
+# tick reads the row MET, prints STANDDOWN, and `standdown` merges and removes the tree of an
+# agent that is still working on the reply. No hook fires on SendMessage, but the
+# orchestrator's transcript records both halves: the SendMessage tool_use (`input.to`) and
+# every `<teammate-message teammate_id="…">` the agent sends back, its idle notice included.
+# `verdict_row` is the one owner of the state: a row that would read MET reads FOLLOW-UP when
+# a SendMessage to its name sits after the agent's last message, and the agent's next
+# message of any kind closes it. Every consumer (tick, standdown, lease walk, stop guard)
+# inherits it.
+#
+# FIXTURES: the transcript is `<CLAUDE_CONFIG_DIR>/projects/<any>/<sid>.jsonl`, the one place
+# the CLI writes it, under a config dir this section owns. Records are the shapes measured
+# live (research D2 REQ-4): an assistant record whose content holds a `tool_use` named
+# SendMessage, and a user record whose STRING content opens with `<teammate-message`.
+F9_CFG="$TMPROOT/s9-config"
+mkdir -p "$F9_CFG/projects/-fixture-project"
+F9_TR="$F9_CFG/projects/-fixture-project/$SID.jsonl"
+export CLAUDE_CONFIG_DIR="$F9_CFG"
+
+tx_send() {  # <to> [sidechain true|false] — the orchestrator's SendMessage
+  jq -nc --arg to "$1" --argjson sc "${2:-false}" \
+    '{type:"assistant",isSidechain:$sc,timestamp:"2026-09-23T10:00:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_send",name:"SendMessage",input:{to:$to,summary:"s",message:"please also do x"}}]}}' \
+    >> "$F9_TR"
+}
+tx_msg() {  # <teammate_id> [idle] — a message from the agent, as the orchestrator receives it
+  local body="<teammate-message teammate_id=\"$1\" color=\"blue\" summary=\"r\">
+report text
+</teammate-message>"
+  [ "${2:-}" = idle ] && body="<teammate-message teammate_id=\"$1\" color=\"blue\">
+{\"type\":\"idle_notification\",\"from\":\"$1\"}
+</teammate-message>"
+  jq -nc --arg b "$body" '{type:"user",isSidechain:false,timestamp:"2026-09-23T10:00:01.000Z",message:{role:"user",content:$b}}' \
+    >> "$F9_TR"
+}
+tx_quote() {  # <teammate_id> — a tool RESULT that merely quotes a teammate-message (a grep)
+  jq -nc --arg b "<teammate-message teammate_id=\"$1\" color=\"blue\">quoted</teammate-message>" \
+    '{type:"user",isSidechain:false,timestamp:"2026-09-23T10:00:02.000Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_grep",content:$b}]}}' \
+    >> "$F9_TR"
+}
+# SETS GLOBALS, never prints: `sweep` leaves OUT and RC in the caller's shell, and a `$( )`
+# around this would strand them in a subshell where the rows below could not read them.
+F9_STATE=""
+f9_state() {  # <repo> <name> -> sets F9_STATE (and sweep's OUT, RC)
+  sweep "$1" verdict "$2"
+  F9_STATE="$(printf '%s\n' "$OUT" | grep -F 'landing-verdict/v1|' | tr '|' '\n' | grep '^state=' | cut -d= -f2-)"
+}
+
+R9="$(make_repo s9followup)"; new_roster "$R9"
+F9_DEL="$R9/fw.md"; echo done > "$F9_DEL"
+add_row "$R9" name=fw deliverable="$F9_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_fw
+add_row "$R9" name=fw2 deliverable="$F9_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_fw2
+add_row "$R9" name=unmetw deliverable="$R9/never.md" launched_at="$(iso_ago 600)" tool_use_id=toolu_um
+
+: > "$F9_TR"
+f9_state "$R9" fw; expect_eq "9a: a MET row with no message in the transcript reads MET" "MET" "$F9_STATE"
+
+tx_msg fw; tx_send fw
+f9_state "$R9" fw; expect_eq "9b: a SendMessage after the agent's last message reads FOLLOW-UP" "FOLLOW-UP" "$F9_STATE"
+expect_contains "9b2: …and the detail says a follow-up is in flight" "follow-up" "$OUT"
+expect_eq "9b3: …a FOLLOW-UP is no failure: exit 0" "0" "$RC"
+f9_state "$R9" fw2; expect_eq "9b4: …and a name that merely starts with it is untouched" "MET" "$F9_STATE"
+
+tx_quote fw
+f9_state "$R9" fw; expect_eq "9c: a tool result quoting the agent's message closes nothing" "FOLLOW-UP" "$F9_STATE"
+
+tx_msg fw
+f9_state "$R9" fw; expect_eq "9d: the agent's next message closes it — MET again" "MET" "$F9_STATE"
+
+tx_send fw; tx_msg fw idle
+f9_state "$R9" fw; expect_eq "9e: an idle notice is a message too, and closes it" "MET" "$F9_STATE"
+
+tx_send fw true
+f9_state "$R9" fw; expect_eq "9f: a sidechain SendMessage is not the orchestrator's" "MET" "$F9_STATE"
+
+tx_send "fw [a1b2c3]"
+f9_state "$R9" fw; expect_eq "9g: the send addressed by name plus its [ref] still counts" "FOLLOW-UP" "$F9_STATE"
+tx_msg fw
+
+tx_send unmetw
+f9_state "$R9" unmetw; expect_eq "9h: only a MET row turns FOLLOW-UP — an UNMET row stays UNMET" "UNMET" "$F9_STATE"
+
+# THE ADDRESS ON THE ROW: a teammate row carries `teammate_id=<name>@session-<sid8>`; the
+# orchestrator sends to the bare name, and the teammate-message names the bare name too.
+R9T="$(make_repo s9teammate)"; new_roster "$R9T"
+F9T_DEL="$R9T/t.md"; echo done > "$F9T_DEL"
+roster_row_fixture status=identified "session=$SID" name=w20-mate agent_id=amate-01 \
+  "launched_at=$(iso_ago 600)" "deliverable=$F9T_DEL" source=declared \
+  teammate_id=w20-mate@session-4b2f7a10 tool_use_id=toolu_mate >> "$(roster_of "$R9T")"
+: > "$F9_TR"
+tx_msg w20-mate; tx_send w20-mate
+f9_state "$R9T" w20-mate; expect_eq "9i: a teammate row reads FOLLOW-UP by its bare name" "FOLLOW-UP" "$F9_STATE"
+sweep "$R9T" verdict
+expect_contains "9j: the summary line counts the FOLLOW-UP row" "1 FOLLOW-UP" "$OUT"
+tx_send other-agent
+f9_state "$R9T" w20-mate; expect_eq "9k: a send to another name leaves it as it was" "FOLLOW-UP" "$F9_STATE"
+tx_msg w20-mate
+f9_state "$R9T" w20-mate; expect_eq "9l: …and its reply closes it" "MET" "$F9_STATE"
+
+unset CLAUDE_CONFIG_DIR
+
 finish
