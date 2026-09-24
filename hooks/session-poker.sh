@@ -1403,19 +1403,23 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
 # spawn per row inside a Patrol tick.
 #
 # "OPEN" IS THE ONE PREDICATE THE REST OF THE TICK USES (S19; Step-6 correctness review,
-# out-of-axis note). A `status=intended` row survives the roster pass if no `landing-swept/v1`
-# marker has CLOSED it, and it survives the live pass if `live_row_open` — the fleet's single
-# row-openness predicate, payload/scripts/lib/agents.sh — still calls its agent live on this
-# session's transcript. Before this fix the arm stopped at the roster pass, so the tick's
+# out-of-axis note). A `status=intended` row survives the roster pass if its name is OPEN by
+# the one close predicate, and it survives the live pass if `live_row_open` — the fleet's
+# single row-openness predicate, payload/scripts/lib/agents.sh — still calls its agent live on
+# this session's transcript. Before S19 the arm stopped at the roster pass, so the tick's
 # advisory `open=` asked the live set while the one NAME it prints for the operator to act on
 # did not: the kill floor could hand back a stop address for an agent the harness had already
 # let go.
 #
-# CLOSED MEANS `state=MET`, not "a marker exists". `hooks/session-start.sh`'s `open_rows` and
-# `adopt_fold` below both require it; this arm and lib/patrol.sh's `patrol_roster_state` did
-# not, and S17's `adopt_copy_marker` is a second writer that copies a predecessor's UNMET
-# verdict verbatim onto a successor's roster BY DESIGN. An UNMET contract is open work by
-# every other reader in the fleet.
+# CLOSED MEANS ACKED AFTER THE LATEST LAUNCH (epic-23 wave-20 T20, REQ-10, D10; found by T17,
+# approved by Chris). The roster pass asks `roster_open_names` (payload/scripts/lib/roster.sh)
+# over this session's roster and ack ledger, the predicate the dispatch wall, the sweeper, the
+# stop wall and `adopt_fold` below all ask. Until T20 this arm closed a name on a
+# `landing-swept/v1|…|state=MET` marker alone (and before S17's review, on any marker). A MET
+# marker records that a landing was SEEN, not that the agent left, so a writer still running
+# behind one was invisible to the kill floor while every other reader counted it open. An
+# UNMET marker, which S17's `adopt_copy_marker` copies onto a successor's roster by design,
+# closes nothing either — as it never did.
 #
 # STALE AND NONE KEEP THE ROSTER SPELLING, the same fallback and the same reason as the
 # tick's `open=` below: the Patrol's prompt runs before any ListAgents, so an arm that went
@@ -1438,19 +1442,17 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
 # call it exactly as they did.
 
 youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
-  local roster="$1" sid="$2" swept cands live_cands live_ok tr lrc name tab RL RN CL
+  local roster="$1" sid="$2" open cands live_cands live_ok tr lrc name tab nl RL RN CL
   [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] || return 0
   tab="$(printf '\t')"
+  nl="
+"
 
-  # THE CLOSING MARKERS, BY FIELD EQUALITY rather than by substring: `state=` is last in the
-  # originator's printf today and a future field appended after it must not turn every marker
-  # into a non-closing one.
-  # THE SHARED CONSTANT (declared above), NOT A SECOND SPELLING (S17, on A-14b). This was
-  # the third hand-rolled spelling of the schema in the fleet and the one S15 did not reach:
-  # a rename on landing-gate.sh's side would have left this function silently matching
-  # nothing, and "no closing markers" reads here as "every row is still open".
-  swept="$(grep "^${SWEPT_SCHEMA}|" "$roster" 2>/dev/null \
-    | awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i == "state=MET") { print; break } }' || true)"
+  # THE OPEN NAMES, ONCE (epic-23 wave-20 T20): the one close predicate over this roster and
+  # the session's ack ledger beside it, the ledger `session-sweeper.sh ack` writes. One process
+  # for the whole pass; each row below is a membership test in the shell. An unnamed row
+  # answers `(unnamed)` there and has no stop address here, so it is skipped before the test.
+  open="$(roster_open_names "$roster" "${roster%/*}/sweeper-${sid}.state" "$sid")"
 
   # PASS ONE — THE ROSTER. Kept in the current shell rather than a pipeline subshell, because
   # the live pass below carries a decision ACROSS rows (the first STALE abandons all of them)
@@ -1461,7 +1463,7 @@ youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>,
     [ -n "$(line_field "$RL" claims)" ] || continue
     RN="$(line_field "$RL" name)"
     [ -n "$RN" ] || continue
-    case "$swept" in *"|name=${RN}|"*) continue ;; esac
+    case "$nl$open$nl" in *"$nl$RN$nl"*) : ;; *) continue ;; esac
     cands="${cands}$(line_field "$RL" launched_at)${tab}${RN}
 "
   done <<ROSTER_ROWS
