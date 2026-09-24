@@ -29,6 +29,7 @@
 #     WAIVED      the brief waived this contract, and declared no artifact beside it
 #     AMBIGUOUS   two or more contracts share this name; none of them is judged
 #     MET         every declared artifact is on disk, non-empty, written after the launch
+#     FOLLOW-UP   MET, but the orchestrator has sent the agent a message it has not answered
 #     STILL-LIVE  not landed, but the row's own claimed process or progress says it is working
 #     UNMET       declared, not delivered, nothing running
 #
@@ -748,6 +749,96 @@ row_still_live() {  # <claims> <progress> <cadence> <launched_at>
   return 0
 }
 
+# ---------------------------------------------------------------- the follow-up in flight
+#
+# FOLLOW-UP (wave-20 T9; REQ-4, AC-4.3; spec D4, ledger Δ8). The orchestrator sends a MET
+# agent a follow-up and the agent sets to work on it — and until this state existed every
+# reader saw MET: the tick printed STANDDOWN, and `stop-orders.sh standdown` merged and
+# removed the tree of an agent still writing its reply. No hook fires on SendMessage, but the
+# orchestrator's own transcript records both halves of the exchange:
+#
+#   the send   an assistant record whose content holds a `tool_use` named `SendMessage`;
+#              `input.to` is the name it was addressed to (a trailing ` [ref]` is dropped)
+#   a reply    a user record whose TEXT carries `<teammate-message teammate_id="<name>"` —
+#              every message an agent sends the orchestrator, its idle notice included
+#
+# A NAME HAS A FOLLOW-UP IN FLIGHT when its latest send comes after its latest reply, in the
+# transcript's own record order (the order the CLI appended them, which no clock skew can
+# reorder). The agent's next message of any kind closes it. ONE OWNER: the state is decided
+# here, in `verdict_row`, and the tick, standdown, the lease walk and the stop guard inherit
+# it unchanged — no consumer reads the transcript for this itself (Δ8's rejected
+# alternative). A declaring verb beside each message was rejected too: forgetting it fails
+# silently, and destructively.
+#
+# WHAT IS NOT A REPLY. A `tool_result` that merely QUOTES a teammate message (a grep of a
+# record file) is not the harness delivering one, so only a user record's string content and
+# its text blocks are read. A sidechain SendMessage is not the orchestrator's.
+#
+# FAIL DIRECTION: no transcript, no jq, or nothing parseable is "no follow-up" — the state
+# every reader had before this existed, so a missing input can never hold a row it did not
+# hold yesterday. The accepted cost is the other way round: a message that was not a
+# follow-up holds the row until the agent answers it (Δ8, "conservative cost accepted").
+#
+# READ ONCE PER PROCESS, and only when a row reads MET — a verdict over rows none of which
+# landed never opens the transcript. `grep -F` on the two literals first: a session's
+# transcript is tens of megabytes and the records this asks about are a handful of lines.
+FOLLOWUP_READ=0; FOLLOWUP_OPEN=""; FOLLOWUP_AT=""
+read_followups() {
+  local d tr=""
+  FOLLOWUP_READ=1; FOLLOWUP_OPEN=""
+  command -v jq >/dev/null 2>&1 || return 0
+  for d in "$(transcripts_dir)"/*/; do
+    if [ -f "${d}${SESSION_ID}.jsonl" ] && [ ! -L "${d}${SESSION_ID}.jsonl" ]; then
+      tr="${d}${SESSION_ID}.jsonl"; break
+    fi
+  done
+  [ -n "$tr" ] || return 0
+  FOLLOWUP_OPEN="$(grep -F -e '"name":"SendMessage"' -e '<teammate-message' "$tr" 2>/dev/null \
+    | jq -R -r '
+        (fromjson? // empty)
+        | select(type == "object" and .isSidechain != true)
+        | (.timestamp // "") as $ts
+        | if .type == "assistant" then
+            (.message.content // [] | if type == "array" then .[] else empty end
+             | select(type == "object" and .type == "tool_use" and .name == "SendMessage")
+             | "S\t\(.input.to // "" | tostring)\t\($ts)")
+          elif .type == "user" then
+            (.message.content
+             | if type == "string" then .
+               elif type == "array" then ([.[] | select(type == "object" and .type == "text") | .text] | join("\n"))
+               else "" end
+             | [scan("<teammate-message teammate_id=\"([^\"]+)\"")] | .[]
+             | "R\t\(.[0])\t\($ts)")
+          else empty end' 2>/dev/null \
+    | awk -F'\t' '
+        { n = $2; sub(/ \[[^]]*\]$/, "", n); sub(/@.*$/, "", n); if (n == "") next
+          if ($1 == "S") { sent[n] = NR; at[n] = $3 } else if ($1 == "R") { rep[n] = NR } }
+        END { for (n in sent) if (!(n in rep) || sent[n] > rep[n]) printf "%s\t%s\n", n, at[n] }')"
+  return 0
+}
+
+# A MET row whose agent has a follow-up in flight becomes FOLLOW-UP. The row is matched by
+# its name, and by its teammate address with the `@session-…` suffix off — the orchestrator
+# sends to the bare name, and the teammate-message names the bare name too.
+verdict_followup() {  # <roster row> — rewrites VERDICT_STATE/VERDICT_DETAIL when it applies
+  local name tid n at
+  [ "$FOLLOWUP_READ" = 1 ] || read_followups
+  [ -n "$FOLLOWUP_OPEN" ] || return 0
+  name="$(line_field "$1" name)"
+  tid="$(line_field "$1" teammate_id)"; tid="${tid%%@*}"
+  while IFS=$'\t' read -r n at; do
+    [ -n "$n" ] || continue
+    if [ "$n" = "$name" ] || { [ -n "$tid" ] && [ "$n" = "$tid" ]; }; then
+      VERDICT_STATE="FOLLOW-UP"
+      VERDICT_DETAIL="follow-up in flight — a message was sent to this agent${at:+ at $at} and it has not answered since; nothing lands or stands down until it does. The contract itself is met: $VERDICT_DETAIL"
+      return 0
+    fi
+  done <<EOF
+$FOLLOWUP_OPEN
+EOF
+  return 0
+}
+
 # One row in, one state out. PRECEDENCE, and each step is a decision:
 #   WAIVED      first — but NOT unconditionally, and that is the Step-6 review's S-1. A
 #               waiver is an explicit designation that this row's contract is not held, and
@@ -761,6 +852,8 @@ row_still_live() {  # <claims> <progress> <cadence> <launched_at>
 #               an INFERRED path still wins: there only the waiver was declared.
 #   MET         a landed contract is MET whatever else is true of the row, including a
 #               still-running process: the artifacts are on disk and that is the question.
+#   FOLLOW-UP   a MET row the orchestrator has since messaged, until the agent answers
+#               (`verdict_followup`, above): the only state MET yields to.
 #   STILL-LIVE  only for a row that has NOT landed. Visible work in flight is not a failure.
 #   UNMET       what is left: declared, not delivered, nothing running.
 # AMBIGUOUS is decided one level up, in the verdict loop, because it is a fact about the
@@ -818,11 +911,13 @@ verdict_row() {  # <roster row>
   if [ "$n" -eq 0 ]; then
     VERDICT_STATE="MET"
     VERDICT_DETAIL="${note:+$note; }no deliverable declared — this row names nothing to hold it to"
+    verdict_followup "$row"
     return 0
   fi
   if [ -z "$fails" ]; then
     VERDICT_STATE="MET"; VERDICT_DETAIL="${note:+$note; }$oks"
     [ -n "$le" ] || VERDICT_DETAIL="${note:+$note; }$oks (launched_at \"$launched\" unreadable: not judged for staleness)"
+    verdict_followup "$row"
     return 0
   fi
   if row_still_live "$claims" "$prog" "$cadence" "$launched"; then
@@ -942,7 +1037,7 @@ case "$VERB" in
     # claim the stop-side consumers rest on.
     read_acked
     _rows="$(latest_rows)"
-    _n=0; _met=0; _unmet=0; _waived=0; _live=0; _ambig=0; _unmet_lines=""
+    _n=0; _met=0; _unmet=0; _waived=0; _live=0; _ambig=0; _follow=0; _unmet_lines=""
     # The fold hands over the name and the contract count it already parsed; re-deriving
     # them here with `line_field` is what made this loop 9.665 s at 1000 rows (see
     # latest_rows). IFS is scoped to the read, and spelled `$'\t'` rather than as a command
@@ -977,6 +1072,7 @@ case "$VERB" in
         WAIVED)     _waived=$((_waived + 1)) ;;
         STILL-LIVE) _live=$((_live + 1)) ;;
         AMBIGUOUS)  _ambig=$((_ambig + 1)) ;;
+        FOLLOW-UP)  _follow=$((_follow + 1)) ;;
         UNMET)
           _unmet=$((_unmet + 1))
           _unmet_lines="${_unmet_lines}UNMET — ${_rname}: $(clean "$VERDICT_DETAIL")
@@ -1000,7 +1096,7 @@ EOF
       exit 0
     fi
 
-    say "$_n row(s): $_met MET, $_unmet UNMET, $_waived WAIVED, $_live STILL-LIVE, $_ambig AMBIGUOUS"
+    say "$_n row(s): $_met MET, $_unmet UNMET, $_waived WAIVED, $_live STILL-LIVE, $_ambig AMBIGUOUS, $_follow FOLLOW-UP"
     if [ "$_unmet" -gt 0 ]; then
       printf '%s' "$_unmet_lines" | while IFS= read -r _l; do
         [ -n "$_l" ] && say "$_l"

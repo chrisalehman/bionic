@@ -620,8 +620,12 @@ case "$VERB" in
     _state=$(line_field "$_line" state)
     _detail=$(line_field "$_line" detail)
     _still_live=0
+    # FOLLOW-UP IS A MET CONTRACT WHOSE AGENT OWES A REPLY (wave-20 T9, Δ8). Once a fresh panel
+    # shows the agent gone — checked below, as for every state — that reply can never come,
+    # and the row closes `landed`: refusing it would leave the name open with no close but a
+    # hand `sweeper ack`.
     case "$_state" in
-      MET|WAIVED)   _reason=landed ;;
+      MET|WAIVED|FOLLOW-UP) _reason=landed ;;
       UNMET)        _reason=abandoned ;;
       STILL-LIVE)   _reason=abandoned; _still_live=1 ;;
       *)
@@ -785,7 +789,15 @@ case "$VERB" in
       # it again. Skipping the land here left every such tree standing until an operator
       # ran spawn-worktree.sh land by hand, against spec AC-28 (1.4.0): standing an agent
       # down is where the lease ends, full stop, not "unless the row left by way of an ack".
-      if [ "$(line_field "$_l" acked)" = "yes" ]; then
+      #
+      # A FOLLOW-UP IN FLIGHT HOLDS THE ROW, ACKED OR NOT (wave-20 T9; REQ-4, AC-4.3; Δ8). The
+      # sweeper reads FOLLOW-UP for a MET row the orchestrator has since messaged and the agent
+      # has not answered: the agent is working on the reply, in this tree. Nothing here may
+      # stand it down, land its tree or remove it until the reply closes the state — it is
+      # listed LEFT ALONE with the verdict's own reason, and the next pass decides.
+      if [ "$_state" = "FOLLOW-UP" ]; then
+        :
+      elif [ "$(line_field "$_l" acked)" = "yes" ]; then
         if [ "$_live_ok" -eq 1 ] && ! _is_live "$_name"; then
           _land_row_tree "$_name" "$_state"
           continue
