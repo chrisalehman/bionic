@@ -65,6 +65,18 @@ so_roster_row() {  # <repo> <name> <deliverable> [waiver] [teammate-id] [claims]
   return 0
 }
 
+# A BOUND PLAN (wave-20 T8, REQ-1, D1). standdown lands a tree onto the session's bound
+# plan's `working-branch:` and nowhere else, so every fixture that expects a LANDED line binds
+# this session to a plan naming the branch its checkout holds. The marker is binding.sh's shape.
+so_bind_plan() {  # <repo> <working-branch> -> echoes the plan path
+  local repo="$1" wb="$2" p
+  p="$repo/.bionic/docs/plans/epic-x/wave-x.plan.md"
+  mkdir -p "${p%/*}" "$repo/.bionic/tmp"
+  printf -- '---\nworking-branch: %s\n---\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n' "$wb" > "$p"
+  printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$p" > "$repo/.bionic/tmp/engaged-$SID.state"
+  printf '%s\n' "$p"
+}
+
 OUT=""; ERR=""; ST=0
 run_orders() {  # <repo> <args…>
   local repo="$1"; shift
@@ -376,6 +388,7 @@ for n in land-a land-b land-c; do
   so_roster_row "$R8" "$n" ".bionic/docs/record/$n.md" "" "$n@session-6c85684c"
 done
 so_roster_row "$R8" "still-working" ".bionic/docs/record/nothing.md" "" "still-working@session-6c85684c"
+so_bind_plan "$R8" wave/fixture >/dev/null
 
 run_orders "$R8" standdown
 expect_status "standdown with trees exits clean" 0 "$ST"
@@ -383,6 +396,8 @@ expect_status "standdown with trees exits clean" 0 "$ST"
 expect_contains "the first discharged row's tree is reported LANDED" \
   "LANDED branch=land-a" "$OUT"
 expect_contains "…and so is the second" "LANDED branch=land-b" "$OUT"
+expect_contains "the LANDED line names the plan's working branch as its target (AC-1.3)" \
+  "LANDED branch=land-a onto=wave/fixture checkout=" "$OUT"
 expect_contains "the dirty tree is reported REFUSED, naming why" \
   "REFUSED reason=dirty-tree" "$OUT"
 expect_contains "…and the refusal is attributable to its row" "land-c" "$OUT"
@@ -427,6 +442,7 @@ git -C "$R9/.worktrees/land-p" commit -qm "land-p work" >/dev/null 2>&1
 git -C "$R9" checkout -q -b main
 echo land-p > "$R9/.bionic/docs/record/land-p.md"
 so_roster_row "$R9" "land-p" ".bionic/docs/record/land-p.md" "" "land-p@session-6c85684c"
+so_bind_plan "$R9" main >/dev/null
 
 run_orders "$R9" standdown
 expect_status "standdown on a protected checkout still exits clean" 0 "$ST"
@@ -438,6 +454,135 @@ if git -C "$R9" rev-list --count "HEAD..land-p" 2>/dev/null | grep -qx 0; then
 else
   ok "main was NOT merged into"
 fi
+
+# THE TWO-CHECKOUT TOPOLOGY THROUGH STANDDOWN (wave-20 T8, REQ-1, AC-1.1/AC-1.3). The main
+# checkout sits on a feature branch; the plan's working branch is checked out in its own tree
+# under .worktrees/. standdown lands through worktree_land_for_session — the path
+# `spawn-worktree.sh land` takes too — so the merge goes into the wave checkout and the
+# feature branch does not move.
+R8B="$(make_repo standdown-topology)"
+R8B_REAL="$(cd "$R8B" && pwd -P)"
+echo seed > "$R8B/README.md"
+git -C "$R8B" add README.md >/dev/null 2>&1
+git -C "$R8B" commit -qm seed >/dev/null 2>&1
+git -C "$R8B" worktree add -q -b wave/20-demo "$R8B/.worktrees/20-demo" >/dev/null 2>&1
+git -C "$R8B" checkout -q -b feature/human
+git -C "$R8B" worktree add -q -b topo-a "$R8B/.worktrees/topo-a" wave/20-demo >/dev/null 2>&1
+echo topo > "$R8B/.worktrees/topo-a/topo-a.txt"
+git -C "$R8B/.worktrees/topo-a" add -A >/dev/null 2>&1
+git -C "$R8B/.worktrees/topo-a" commit -qm "topo-a work" >/dev/null 2>&1
+echo topo-a > "$R8B/.bionic/docs/record/topo-a.md"
+so_roster_row "$R8B" "topo-a" ".bionic/docs/record/topo-a.md" "" "topo-a@session-6c85684c"
+so_bind_plan "$R8B" wave/20-demo >/dev/null
+R8B_FEAT0="$(git -C "$R8B" rev-parse feature/human)"
+
+run_orders "$R8B" standdown
+expect_status "standdown in the two-checkout topology exits clean" 0 "$ST"
+expect_contains "the tree lands onto the working branch, in the checkout that holds it" \
+  "LANDED branch=topo-a onto=wave/20-demo checkout=$R8B_REAL/.worktrees/20-demo merge=" "$OUT"
+expect_eq "the feature branch the main checkout sits on did not move" \
+  "$R8B_FEAT0" "$(git -C "$R8B" rev-parse feature/human)"
+expect_eq "topo-a's work is in the wave branch" "0" \
+  "$(git -C "$R8B" rev-list --count wave/20-demo..topo-a 2>/dev/null)"
+expect_eq "topo-a's work is NOT in the feature branch" "1" \
+  "$(git -C "$R8B" rev-list --count feature/human..topo-a 2>/dev/null)"
+
+# D1 THROUGH STANDDOWN (wave-20 T8c; review R2-1; critic C2-1). standdown passes its own
+# SESSION_ID to worktree_land_for_session, and that id picks the target branch and nothing
+# else. A `tests/run.sh` working in the wave checkout, the orchestrator's own floor, refuses
+# the land whoever started it; one working in ANOTHER repository does not (T12 F3). The
+# runner is a stand-in that only sleeps, never the real runner.
+SO_RUNNER_PID=""
+so_start_runner() {  # <cwd> <script as invoked>
+  ( cd "$1" && exec bash "$2" ) >/dev/null 2>&1 &
+  SO_RUNNER_PID=$!
+  local i=0
+  while [ $i -lt 100 ]; do
+    case "$(ps -o command= -p "$SO_RUNNER_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
+    i=$((i+1)); sleep 0.05
+  done
+  return 1
+}
+so_stop_runner() {
+  [ -n "$SO_RUNNER_PID" ] || return 0
+  kill "$SO_RUNNER_PID" 2>/dev/null; wait "$SO_RUNNER_PID" 2>/dev/null
+  SO_RUNNER_PID=""
+}
+trap 'so_stop_runner; rm -rf "$SANDBOX"' EXIT
+so_topology() {  # <name> <row> -> repo path; wave/20-demo in .worktrees/20-demo, <row>'s tree beside it
+  local r
+  r="$(make_repo "$1")"
+  echo seed > "$r/README.md"
+  git -C "$r" add README.md >/dev/null 2>&1
+  git -C "$r" commit -qm seed >/dev/null 2>&1
+  git -C "$r" worktree add -q -b wave/20-demo "$r/.worktrees/20-demo" >/dev/null 2>&1
+  git -C "$r" worktree add -q -b "$2" "$r/.worktrees/$2" wave/20-demo >/dev/null 2>&1
+  echo "$2" > "$r/.worktrees/$2/$2.txt"
+  git -C "$r/.worktrees/$2" add -A >/dev/null 2>&1
+  git -C "$r/.worktrees/$2" commit -qm "$2 work" >/dev/null 2>&1
+  echo "$2" > "$r/.bionic/docs/record/$2.md"
+  so_roster_row "$r" "$2" ".bionic/docs/record/$2.md" "" "$2@session-6c85684c"
+  so_bind_plan "$r" wave/20-demo >/dev/null
+  printf '%s\n' "$r"
+}
+SO_OTHER="$(make_repo standdown-d1-other-repo)"
+mkdir -p "$SO_OTHER/tests"
+printf '#!/bin/bash\nwhile :; do sleep 1; done\n' > "$SO_OTHER/tests/run.sh"; chmod +x "$SO_OTHER/tests/run.sh"
+
+R8D="$(so_topology standdown-d1-floor floor-a)"
+R8D_REAL="$(cd "$R8D" && pwd -P)"
+mkdir -p "$R8D/.worktrees/20-demo/tests"
+printf '#!/bin/bash\nwhile :; do sleep 1; done\n' > "$R8D/.worktrees/20-demo/tests/run.sh"
+chmod +x "$R8D/.worktrees/20-demo/tests/run.sh"
+R8D_WAVE0="$(git -C "$R8D" rev-parse wave/20-demo)"
+if so_start_runner "$R8D_REAL/.worktrees/20-demo" "$R8D_REAL/.worktrees/20-demo/tests/run.sh"; then
+  ok "a stand-in floor started in the wave checkout"
+else
+  no "a stand-in floor started in the wave checkout"
+fi
+run_orders "$R8D" standdown
+so_stop_runner
+expect_status "standdown under a floor in the wave checkout exits clean" 0 "$ST"
+expect_contains "the land is REFUSED, naming the running suite's script" \
+  "REFUSED reason=suite-running pid=" "$OUT"
+expect_contains "…in the wave checkout" "script=$R8D_REAL/.worktrees/20-demo/tests/run.sh" "$OUT"
+expect_absent "…and no LANDED line claims it" "LANDED branch=floor-a" "$OUT"
+if [ -d "$R8D/.worktrees/floor-a" ]; then ok "the tree under the floor still stands"; else no "the tree under the floor still stands"; fi
+expect_eq "the wave branch did not move" "$R8D_WAVE0" "$(git -C "$R8D" rev-parse wave/20-demo)"
+
+R8E="$(so_topology standdown-d1-elsewhere floor-b)"
+if so_start_runner "$SO_OTHER" "tests/run.sh"; then
+  ok "a stand-in runner started in another repository"
+else
+  no "a stand-in runner started in another repository"
+fi
+run_orders "$R8E" standdown
+so_stop_runner
+expect_status "standdown with a runner in another repository exits clean" 0 "$ST"
+expect_contains "the land goes through: another repository's suite is not this merge's (T12 F3)" \
+  "LANDED branch=floor-b onto=wave/20-demo" "$OUT"
+
+# AN UNBOUND SESSION LANDS NOTHING (AC-1.2 through standdown). The same shape with no binding:
+# the row is MET and stood down, and its lease is REFUSED naming why — tree and refs stay.
+R8C="$(make_repo standdown-unbound)"
+echo seed > "$R8C/README.md"
+git -C "$R8C" add README.md >/dev/null 2>&1
+git -C "$R8C" commit -qm seed >/dev/null 2>&1
+git -C "$R8C" worktree add -q -b unbound-a "$R8C/.worktrees/unbound-a" >/dev/null 2>&1
+echo u > "$R8C/.worktrees/unbound-a/u.txt"
+git -C "$R8C/.worktrees/unbound-a" add -A >/dev/null 2>&1
+git -C "$R8C/.worktrees/unbound-a" commit -qm "unbound-a work" >/dev/null 2>&1
+echo unbound-a > "$R8C/.bionic/docs/record/unbound-a.md"
+so_roster_row "$R8C" "unbound-a" ".bionic/docs/record/unbound-a.md" "" "unbound-a@session-6c85684c"
+R8C_REFS0="$(git -C "$R8C" for-each-ref --format='%(refname) %(objectname)')"
+
+run_orders "$R8C" standdown
+expect_status "standdown from an unbound session exits clean" 0 "$ST"
+expect_contains "the lease is REFUSED, naming the missing binding, attributable to its row" \
+  "REFUSED reason=no-bound-plan state=none" "$OUT"
+expect_absent "…and no LANDED line claims it" "LANDED branch=unbound-a" "$OUT"
+if [ -d "$R8C/.worktrees/unbound-a" ]; then ok "the unbound session's tree still stands"; else no "the unbound session's tree still stands"; fi
+expect_eq "no ref moved" "$R8C_REFS0" "$(git -C "$R8C" for-each-ref --format='%(refname) %(objectname)')"
 
 # A roster with no trees at all must behave exactly as it did before this
 # feature: the landing report is additive, never a precondition.
@@ -565,6 +710,42 @@ expect_absent "…never annotated live off the neighbour its pattern would have 
 # row above is a statement about the match and not about a live set that had gone empty.
 expect_contains "…while the real still-at-it beside it is still live" "[live]" \
   "$(printf '%s\n' "$R8_LA4" | grep -F 'still-at-it   (UNMET')"
+
+# STANDDOWN'S "GONE FROM A FRESH PANEL" READING AGAINST A SUBAGENTS-ONLY PANEL (wave-20
+# T8b, F2). A `claude -p` ListAgents answer lists a running subagent under its own
+# `Subagents (N):` header rather than `Teammates (N):` — before the fix, `live_agents`
+# (payload/scripts/lib/agents.sh) parsed only the Teammates block, so a panel carrying
+# ONLY a Subagents block answered zero live agents and every held row read `[not live]`
+# regardless of whether its agent was still running. T12's live bed hit exactly this
+# (live-rows-802ee6d.md F2): the literal `STANDDOWN <name>` line could never print in a
+# `-p` bed for the same reason. `tests/lib/live-answer.sh`'s composer only substitutes
+# into the corpus's Teammates shape (its own header says so), so this body is hand-built —
+# the same precedent that suite's Teammates-forgery shapes are hand-written rather than
+# routed through the composer.
+plant_live_subagent() {  # <transcript> <name>
+  local tr="$1" name="$2" body
+  body="This session is bionic-test [aaaaaa] — the name other sessions use to message it.
+
+Subagents (1):
+  ${name} [238027]  ·  general-purpose  ·  running  ·  started 13s ago
+"
+  jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
+    '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}' > "$tr"
+  jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
+    '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01FIXTURESUBAGENT",name:"ListAgents",input:{}}]}}' >> "$tr"
+  jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
+    '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01FIXTURESUBAGENT",content:$b}]}}' >> "$tr"
+}
+
+plant_live_subagent "$R8TR" "still-at-it"
+run_orders_cfg "$R8" standdown
+expect_status "standdown against a Subagents-only panel still reports and exits clean" 0 "$ST"
+R8_LA5=$(printf '%s\n' "$OUT" | sed -n '/LEFT ALONE/,$p')
+expect_contains "a Subagents-only panel still reports the held row" "still-at-it" "$R8_LA5"
+expect_contains "…and now marks it live — the Subagents block is read, not just Teammates" \
+  "[live]" "$(printf '%s\n' "$R8_LA5" | grep -F 'still-at-it   (UNMET')"
+expect_contains "…while a row the Subagents block does NOT name is still not live" \
+  "[not live]" "$(printf '%s\n' "$R8_LA5" | grep -F 'walked-off')"
 
 
 # ============================================================
@@ -726,6 +907,7 @@ R11TR="$R8CFG/projects/$R11SLUG/$SID.jsonl"
 # ends in a merge only for a landed row (MET or WAIVED); the UNMET shape is R12 below.
 echo landed > "$R11/.bionic/docs/record/n3.md"
 so_roster_row "$R11" "acked-gone-lease" ".bionic/docs/record/n3.md" "" "acked-gone-lease@session-6c85684c"
+so_bind_plan "$R11" wave/fixture >/dev/null
 ( cd "$R11" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack acked-gone-lease ) >/dev/null 2>&1
 # A fresh panel that lists nobody: the row's agent is gone, not merely stale.
 plant_live "$R11TR" fresh
@@ -735,8 +917,8 @@ expect_status "standdown over an acked-and-gone row with a tree exits clean" 0 "
 R11_SD=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
 expect_absent "the acked-and-gone row is kept out of READY (AC-1.3 unchanged by R2)" \
   "acked-gone-lease" "$R11_SD"
-expect_contains "…but its lease still ends, reported under LEASES" \
-  "LANDED branch=acked-gone-lease" "$OUT"
+expect_contains "…but its lease still ends, reported under LEASES, onto the plan's working branch" \
+  "LANDED branch=acked-gone-lease onto=wave/fixture" "$OUT"
 expect_contains "…attributable to its row by name" \
   "(acked-gone-lease)" "$OUT"
 if [ ! -d "$R11/.worktrees/acked-gone-lease" ]; then
@@ -927,6 +1109,139 @@ if [ -d "$R14/.worktrees/still-working" ] && [ -f "$R14/.worktrees/still-working
   ok "…its tree stands, the partial work still in it"
 else
   no "…its tree stands, the partial work still in it"
+fi
+
+
+# ============================================================
+section "Section 9: standdown holds a row with a follow-up in flight (wave-20 T9, REQ-4, AC-4.3; Δ8)"
+# ============================================================
+#
+# THE DESTRUCTIVE HALF OF CONSUMER REPORT #2. A MET row's standdown merges and removes its
+# tree — right for a finished agent, wrong for one the orchestrator has just sent a follow-up
+# and which is working on the reply. The sweeper's verdict reads FOLLOW-UP for that row (a
+# SendMessage to its name after its last message, in the orchestrator's transcript); this
+# verb inherits the state and never lands, removes or stands down a FOLLOW-UP row. The reply
+# closes it and the same row is stood down on the next pass.
+R15="$(make_repo standdown-followup)"
+echo seed > "$R15/README.md"
+git -C "$R15" add README.md >/dev/null 2>&1
+git -C "$R15" commit -qm seed >/dev/null 2>&1
+git -C "$R15" worktree add -q -b fu-row "$R15/.worktrees/fu-row" >/dev/null 2>&1
+echo reply-in-progress > "$R15/.worktrees/fu-row/fu.txt"
+git -C "$R15/.worktrees/fu-row" add -A >/dev/null 2>&1
+git -C "$R15/.worktrees/fu-row" commit -qm "fu work" >/dev/null 2>&1
+echo landed > "$R15/.bionic/docs/record/fu.md"
+so_roster_row "$R15" fu-row ".bionic/docs/record/fu.md" "" "fu-row@session-6c85684c"
+
+R15CFG="$SANDBOX/r15-config"
+mkdir -p "$R15CFG/projects/-fixture"
+R15TR="$R15CFG/projects/-fixture/$SID.jsonl"
+r15_msg() {  # [name]
+  jq -nc --arg b "<teammate-message teammate_id=\"${1:-fu-row}\" color=\"blue\" summary=\"done\">
+report
+</teammate-message>" '{type:"user",timestamp:"2026-09-23T10:00:01.000Z",message:{role:"user",content:$b}}' >> "$R15TR"
+}
+r15_send() {  # [name]
+  jq -nc --arg to "${1:-fu-row}" '{type:"assistant",timestamp:"2026-09-23T10:00:02.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_fu",name:"SendMessage",input:{to:$to,message:"one more thing"}}]}}' >> "$R15TR"
+}
+r15_orders() {
+  OUT=$( cd "$R15" && CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$R15CFG" \
+         bash "$ORDERS" standdown 2>"$SANDBOX/.err" ); ST=$?
+  ERR=$(cat "$SANDBOX/.err")
+}
+: > "$R15TR"; r15_msg; r15_send
+r15_orders
+expect_status "9a: standdown over a FOLLOW-UP row exits clean" 0 "$ST"
+expect_absent "9b: …the row is not stood down" "(met — fu-row)" "$OUT"
+expect_absent "9c: …and no LANDED line claims its tree" "LANDED branch=fu-row" "$OUT"
+expect_contains "9d: …it is LEFT ALONE, and says why" "fu-row   (FOLLOW-UP" "$OUT"
+if [ -d "$R15/.worktrees/fu-row" ] && [ -f "$R15/.worktrees/fu-row/fu.txt" ]; then
+  ok "9e: …its tree stands, the reply in progress still in it"
+else
+  no "9e: …its tree stands, the reply in progress still in it"
+fi
+if [ "$(git -C "$R15" rev-list --count "HEAD..fu-row" 2>/dev/null)" = "1" ]; then
+  ok "9f: …and its branch is NOT merged"
+else
+  no "9f: …and its branch is NOT merged" "HEAD..fu-row = $(git -C "$R15" rev-list --count "HEAD..fu-row" 2>&1)"
+fi
+
+# THE REPLY CLOSES IT: the same row, one message later, is a MET row to stand down.
+r15_msg
+r15_orders
+expect_contains "9g: after the reply the row is stood down" "(met — fu-row)" "$OUT"
+
+# A FOLLOW-UP WHOSE AGENT IS GONE CAN NEVER BE ANSWERED. `stopped` — the human close after a
+# stop — closes it `landed` once a fresh panel shows the agent gone (the contract is MET);
+# refusing it would leave the name open with no close but a hand ack.
+so_roster_row "$R15" fu-gone ".bionic/docs/record/fu.md" "" "fu-gone@session-6c85684c"
+plant_live "$SANDBOX/r15.panel" fresh "somebody-else"
+R15TR_SAVE="$R15TR"; R15TR="$SANDBOX/r15.tr.parts"; : > "$R15TR"
+r15_msg fu-gone; r15_send fu-gone
+# Dated inside the panel's own window (between its prompt and its answer), or the answer
+# reads stale against a later user record and nothing may be acked on it.
+{ head -1 "$SANDBOX/r15.panel"; sed 's/"timestamp":"[^"]*"/"timestamp":"2026-09-05T00:50:30.000Z"/' "$R15TR"
+  tail -n +2 "$SANDBOX/r15.panel"; } > "$R15TR_SAVE"
+R15TR="$R15TR_SAVE"
+OUT=$( cd "$R15" && CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$R15CFG" \
+       bash "$ORDERS" stopped fu-gone 2>"$SANDBOX/.err" ); ST=$?
+ERR=$(cat "$SANDBOX/.err")
+expect_status "9h: stopped closes a FOLLOW-UP row whose agent a fresh panel shows gone" 0 "$ST"
+expect_contains "9i: …as landed — the contract is met" "reason landed" "$OUT"
+
+# ============================================================
+section "Section 9b: a follow-up to a row stopped has closed does not hold it; standdown still ends its lease (wave-20 T9b; review R2; walk §8c)"
+# ============================================================
+#
+# THE WALK'S SURPRISE 1. The orchestrator stopped a MET agent, `stopped` acked it, and then
+# messaged it. The sweeper read FOLLOW-UP, so `standdown` listed the row LEFT ALONE "[not live]"
+# waiting for a reply from an agent that is gone, while the tick read open=0: two readers
+# disagreed and the tree's lease had no exit. The close predicate (`roster_open_names`: an ack
+# after the latest launch) is the one answer; a send after the close cannot reopen the row, so
+# standdown takes its acked-and-gone branch and lands the tree.
+R16="$(make_repo standdown-followup-closed)"
+echo seed > "$R16/README.md"
+git -C "$R16" add README.md >/dev/null 2>&1
+git -C "$R16" commit -qm seed >/dev/null 2>&1
+git -C "$R16" worktree add -q -b fu-closed "$R16/.worktrees/fu-closed" >/dev/null 2>&1
+echo work > "$R16/.worktrees/fu-closed/work.txt"
+git -C "$R16/.worktrees/fu-closed" add -A >/dev/null 2>&1
+git -C "$R16/.worktrees/fu-closed" commit -qm "fu-closed work" >/dev/null 2>&1
+# ITS OWN CONFIG DIR: the sweeper reads the first project folder holding this session's
+# transcript, and R8CFG holds one per section above, so a shared dir would hide this send.
+R16CFG="$SANDBOX/r16-config"
+R16SLUG=$(printf '%s' "$R16" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R16CFG/projects/$R16SLUG"
+R16TR="$R16CFG/projects/$R16SLUG/$SID.jsonl"
+r16_orders() {  # <args…> — run_orders_cfg with this section's config dir
+  OUT=$( cd "$R16" && CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$R16CFG" \
+         bash "$ORDERS" "$@" 2>"$SANDBOX/.err" ); ST=$?
+  ERR=$(cat "$SANDBOX/.err")
+}
+echo landed > "$R16/.bionic/docs/record/fc.md"
+so_roster_row "$R16" fu-closed ".bionic/docs/record/fc.md" "" "fu-closed@session-6c85684c"
+so_bind_plan "$R16" wave/fixture >/dev/null
+# A fresh panel that lists nobody: the agent is gone. `stopped` closes the row through the
+# sweeper's ack, by human, reason landed.
+plant_live "$R16TR" fresh
+r16_orders stopped fu-closed
+expect_status "9b-a: precondition — stopped closes the MET row whose agent is gone" 0 "$ST"
+# THE FOLLOW-UP AFTER THE CLOSE: the orchestrator's SendMessage to the stopped name, later in
+# the same transcript (an assistant record, so the panel answer stays the freshest reading).
+jq -nc '{type:"assistant",isSidechain:false,timestamp:"2026-09-05T00:52:30.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_fc",name:"SendMessage",input:{to:"fu-closed",summary:"s",message:"one more thing"}}]}}' >> "$R16TR"
+R16_V=$( cd "$R16" && CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$R16CFG" bash "$SWEEPER" verdict fu-closed 2>/dev/null )
+expect_contains "9b-b: the verdict keeps the row closed — MET, acked" "|state=MET|acked=yes|" "$R16_V"
+expect_contains "9b-c: …and says the follow-up was ignored" "follow-up ignored: row acked at" "$R16_V"
+r16_orders standdown
+expect_status "9b-d: standdown after a follow-up to a stopped row exits clean" 0 "$ST"
+expect_absent "9b-e: …the row is not LEFT ALONE waiting for a reply that cannot come" "fu-closed   (FOLLOW-UP" "$OUT"
+expect_absent "9b-f: …nothing is left alone at all" "LEFT ALONE" "$OUT"
+expect_contains "9b-g: …its lease ends: the tree is landed onto the plan's working branch" \
+  "LANDED branch=fu-closed onto=wave/fixture" "$OUT"
+if [ ! -d "$R16/.worktrees/fu-closed" ]; then
+  ok "9b-h: …and the tree is actually gone, not just reported"
+else
+  no "9b-h: …and the tree is actually gone, not just reported"
 fi
 
 finish

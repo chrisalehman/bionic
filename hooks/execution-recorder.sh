@@ -191,7 +191,7 @@ fi
 # payload/scripts/lib/loader.sh. FAIL OPEN: the roster row is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh resources.sh"
+BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh resources.sh roster.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -297,6 +297,24 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "execution-recorder"; fi
 . "$BIONIC_LIB/session.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/resources.sh"
+# THE ONE CLOSE PREDICATE (epic-23 wave-20 T20, REQ-10, D10): `roster_open_names`, asked by
+# the duplicate-start check below. STILL WANTED HERE (so the loader's directory pick still
+# requires it to exist beside the other five), but no longer sourced on this line — every
+# Bash call and every dispatch confirmation in the session reaches this far, and parsing
+# roster.sh's ~460 lines for a definition only the SubagentStart duplicate-start check ever
+# calls cost every one of them (epic-23 wave-20 T20b, review R5's perf note: ~2ms/call
+# measured on the Bash path, `.bionic/docs/record/wave-20-fixit-187/T20b-restart-reads-open.md`
+# "Hook latency"). `roster_sh_load` below sources it exactly once, lazily, on the one path
+# that ever needs `roster_open_names`. THE SOURCE LINE ITSELF IS UNINDENTED, deliberately —
+# it is still the one literal `. "$BIONIC_LIB/roster.sh"` tests/hook-adoption.test.sh pins
+# byte for byte, and the loop pinning "every wanted basename is sourced" reads it by that
+# same literal regardless of which function body it sits in.
+roster_sh_load() {
+  [ -n "${_ROSTER_SH_LOADED:-}" ] && return 0
+  _ROSTER_SH_LOADED=1
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/roster.sh"
+}
 
 # THE ROOT (spec AC-10, lib/root.sh). `git rev-parse --show-toplevel` answered with the
 # WORKTREE's own root, so a stop raised from a linked worktree looked for the roster
@@ -423,6 +441,41 @@ prior_launch_for_agent() {  # <agent-id> -> earliest launched_at for that id thi
     printf '%s' "$found"
     return 0
   done < "$ROSTER_FILE"
+  return 0
+}
+
+# THE LATEST LAUNCH, FOR THE RESTART-AFTER-ACK PATH ONLY (epic-23 wave-20 T20d, critic
+# C3-1). `prior_launch_for_agent` above answers "the contract's original launch", which is
+# right for an ordinary resume — the takeover case, where the roster's own first row for
+# this id IS the contract, however many join rows have picked the id up since. A restart
+# after an ack is a different question: `hooks/session-poker.sh`'s `extend` verb re-opens a
+# MET row by appending a FRESH row for the SAME id, "launched now, so the old deliverable
+# reads stale" (session-poker.sh, `extend`). If that extended contract is then acked and the
+# id restarts, "the contract as it stood at the ack" is the EXTEND's launch, not the first
+# dispatch's — carrying the earliest stamp forward instead rolls a revoked, abandoned
+# contract's clock back past the extend, so the stale pre-extend deliverable reads MET again
+# with acked=no, and a tree `stopped` had left standing for salvage becomes landable.
+# Same scan as `prior_launch_for_agent`, but kept running to the LAST match rather than
+# returning at the first: this session's roster is append-only, so the last matching row is
+# the latest launch, whatever else has been appended for other ids in between.
+latest_launch_for_agent() {  # <agent-id> -> latest launched_at for that id this session, or empty
+  local aid="$1" line found=""
+  [ -n "$aid" ] || return 0
+  [ -f "$ROSTER_FILE" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in '#'*|'') continue ;; esac
+    case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+    case "$line" in
+      *"|agent_id=$aid"|*"|agent_id=$aid|"*) : ;;
+      *) continue ;;
+    esac
+    [ "$(line_field "$line" agent_id)" = "$aid" ] || continue
+    [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
+    local lf
+    lf=$(line_field "$line" launched_at)
+    [ -n "$lf" ] && found="$lf"
+  done < "$ROSTER_FILE"
+  printf '%s' "$found"
   return 0
 }
 
@@ -709,12 +762,26 @@ if [ -n "$IS_START" ]; then
   # is what names it; the door that can actually close is one event earlier, at
   # `hooks/dispatch-preflight.sh`'s name-in-flight arm.
   #
-  # THE PREDICATE IS THE ROSTER'S OWN OPEN/CLOSED READING, not a second liveness truth. A row
-  # already `identified` for this id, with no `landing-swept/v1|…|state=MET` marker closing its
-  # name's LATEST contract, is a lineage that has started and has not finished — the same discharge
-  # `hooks/session-start.sh`'s `open_rows`, the poker's `adopt_fold` and the dispatch wall's
-  # in-flight arm all apply. A lineage already swept MET is a finished one, and a start
-  # against a finished one is a name being reused, which is allowed.
+  # THE PREDICATE IS THE ROSTER'S ONE CLOSE READING, not a second liveness truth. A row
+  # already `identified` for this id is a lineage that has started; it has finished only when
+  # its name is CLOSED, and a name is closed by the one predicate every roster reader in the
+  # fleet asks — `roster_open_names` (payload/scripts/lib/roster.sh): an ack stamped after the
+  # name's latest launch, and nothing else (ADR-034 d1). A start against a finished lineage is
+  # a name being reused, which is allowed; a start against an open one is a resumed copy.
+  #
+  # A MET MARKER CLOSES NOTHING HERE ANY MORE (epic-23 wave-20 T20, REQ-10, D10; found by T17,
+  # approved by Chris). Until T20 this check carried its own latest-contract reading — four awk
+  # functions, byte-pinned by cross-gate §LC — under which a `landing-swept/v1|…|state=MET`
+  # marker with no live row after it closed the name. The marker records that a landing was
+  # SEEN, not that the agent left, so a second start behind one was let through unjournalled
+  # while the dispatch wall, the sweeper, the stop wall and the tick's adopt fold all called the
+  # same name open (cross-gate §CG-close T20). The reading's own fix — a live row after the
+  # marker re-opens the name (delta review C1) — is the predicate's by construction: an ack
+  # older than the latest launch closes nothing.
+  #
+  # TWO STEPS, SO THE COMMON PATH PAYS NOTHING. The awk below reads only this id's LAST row;
+  # the predicate is asked after it, of that one name, and only when that row already says
+  # the id started — the first start of every id is `confirmed` there and never asks.
   #
   # IT IS PURELY ADDITIVE. Before this, a second start for an already-`identified` id matched
   # neither join below (both accept `intended|confirmed` only) and exited silently — except
@@ -722,38 +789,12 @@ if [ -n "$IS_START" ]; then
   # was joined a second time and a second `identified` row appended. Both of those are what
   # this replaces.
   DUP_PRIOR=$(awk -F'|' -v id="$START_ID" -v sid="$BIONIC_SID" '
-    # ---- BEGIN latest-contract reading — byte-equal in both roster walls (cross-gate §LC) ----
-    # Both programs ask one question of an append-only file — is this name CURRENTLY under an
-    # open contract — and the ORDERING of the rows is the whole of the answer. The reading is
-    # one text held byte-identical in the two files that need it, rather than a library: the
-    # recorder loads no library that parses a roster, and BIONIC_LIB_WANT is a fail-closed
-    # list, not somewhere to add a file on the SubagentStart path for four awk functions.
     function kv(line, key,   i, n, parts) {
       n = split(line, parts, "|")
       for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
       return ""
     }
-    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
-    # THE LATEST CONTRACT DECIDES, NEVER THE FILE READ AS A SET (delta review C1/S2). A
-    # landing-swept/v1 marker in state MET closes the contract it was written for and nothing
-    # after it: a name that landed and was then dispatched AGAIN — which the marker is exactly
-    # what permits — carries a fresh intended/confirmed/identified row BELOW its marker, and
-    # that row is an open contract with a live process behind it. Read as a set, the MET flag
-    # was a LATCH: one landing turned both of these walls off for that name for the rest of the
-    # session, which is precisely the case they exist for (a task being re-run). So a live row
-    # RETIRES the marker above it, and only a marker with no live row after it still closes.
-    function contract_note(line,   nm) {
-      if (index(line, "landing-swept/v1|") == 1) {
-        if (kv(line, "state") == "MET") MET[kv(line, "name")] = 1
-        return
-      }
-      nm = kv(line, "name")
-      if (live_status(kv(line, "status"))) delete MET[nm]
-    }
-    function contract_closed(nm) { return (nm in MET) }
-    # ---- END latest-contract reading ----
     /^roster-state\/v1\|/ {
-      contract_note($0)
       if (kv($0, "agent_id") != id) next
       if (kv($0, "session") != sid) next
       # THE LAST ROW OF THIS ID, WHATEVER ITS STATUS. A RESUME is a fresh
@@ -762,16 +803,38 @@ if [ -n "$IS_START" ]; then
       # identification of. A DUPLICATE START has no such cycle: the last thing said about
       # this id is that it already started. That difference is the whole predicate, and it
       # is read off the ordering of an append-only file.
-      row = $0; nm = kv($0, "name"); st = kv($0, "status")
+      row = $0; st = kv($0, "status")
       next
     }
-    /^landing-swept\/v1\|/ { contract_note($0); next }
     # A DUPLICATE-START ROW IS NOT A RE-CONTRACT EITHER. The predicate is "nothing has
     # re-opened a contract for this id since it started": `identified` is the first start,
     # `duplicate-start` is the second, and a third start is the third. Only an `intended` or
     # `confirmed` row — written by the dispatch wall and ARM 2 — is a fresh cycle.
-    END { if (row != "" && (st == "identified" || st == "duplicate-start") && !contract_closed(nm)) print row }
+    END { if (row != "" && (st == "identified" || st == "duplicate-start")) print row }
   ' "$ROSTER_FILE" 2>/dev/null) || DUP_PRIOR=""
+  # LAZY, ONLY WHEN THIS ARM MIGHT ASK roster_open_names (epic-23 wave-20 T20b, review R5's
+  # perf note). Every other SubagentStart — the first start of every id, which is the common
+  # path — never reaches this condition and never pays for roster.sh's definitions at all.
+  DUP_PRIOR_BEFORE="$DUP_PRIOR"
+  [ -n "$DUP_PRIOR" ] && roster_sh_load
+  # ---- BEGIN open-contract reading — the one close predicate, asked of one name (cross-gate §LC) ----
+  if [ -n "$DUP_PRIOR" ]; then
+    case "$DUP_PRIOR" in *"|name="*) DUP_NAME="${DUP_PRIOR#*|name=}"; DUP_NAME="${DUP_NAME%%|*}" ;; *) DUP_NAME="" ;; esac
+    [ -n "$DUP_NAME" ] || DUP_NAME="(unnamed)"
+    DUP_NAME="${DUP_NAME//$'\t'/ }"
+    grep -qxF -- "$DUP_NAME" <<< "$(roster_open_names "$ROSTER_FILE" "$STATE_DIR/sweeper-${BIONIC_SID}.state" "$BIONIC_SID")" || DUP_PRIOR=""
+  fi
+  # ---- END open-contract reading ----
+  # A RESTART AFTER AN ACK (epic-23 wave-20 T20b, review R5). The span above reset DUP_PRIOR to
+  # empty because roster_open_names found the name CLOSED — this WAS a duplicate reading (the
+  # id's last row already says it started) against a lineage the ack has since finished. The
+  # fallthrough below re-identifies this id as a reused name, and that identification must
+  # carry a FRESH occupancy stamp — `restarted_at=`, beside the contract's unchanged
+  # `launched_at` (T20c; see RESTARTED_AT further down) — otherwise the row reads exactly as
+  # old as the row the ack already discharged, and roster_open_names keeps reading the name
+  # closed forever (walk §9b/9c; the restarted agent held no slot at all).
+  RESTART_AFTER_ACK=""
+  [ -n "$DUP_PRIOR_BEFORE" ] && [ -z "$DUP_PRIOR" ] && RESTART_AFTER_ACK=1
   if [ -n "$DUP_PRIOR" ]; then
     # EVERY FIELD CARRIED FORWARD, exactly as the identification below does: the row is a
     # CONTRACT, and a row that dropped a field would silently retract what it inherited.
@@ -894,21 +957,50 @@ if [ -n "$IS_START" ]; then
   # including one this very join just picked up.
   PRIOR_LAUNCH=$(prior_launch_for_agent "$START_ID")
 
+  # ON THE RESTART_AFTER_ACK PATH ONLY, take the id's LATEST launched_at instead of its
+  # earliest (epic-23 wave-20 T20d, critic C3-1; see latest_launch_for_agent() above). Every
+  # other identification — the first, and an ordinary resume — keeps the earliest reading:
+  # this override reaches only the one case where a contract may have been extended (a fresh
+  # row for this same id, launched later) since the first dispatch and before the ack that
+  # `RESTART_AFTER_ACK` names.
+  if [ -n "${RESTART_AFTER_ACK:-}" ]; then
+    LATEST_LAUNCH=$(latest_launch_for_agent "$START_ID")
+    [ -n "$LATEST_LAUNCH" ] && PRIOR_LAUNCH="$LATEST_LAUNCH"
+  fi
+
+  # A RESTART AFTER AN ACK HOLDS A SLOT BY ITS OWN STAMP, NOT BY MOVING THE CONTRACT'S CLOCK
+  # (epic-23 wave-20 T20b, review R5; repaired at T20c, critic C2-2). The name must read open
+  # again — the agent is back on the panel — and roster_open_names only re-opens a name whose
+  # latest occupancy stamp postdates its ack. T20b gave the restart that stamp by overriding
+  # PRIOR_LAUNCH, i.e. `launched_at`. But `launched_at` is ALSO the clock the sweeper dates the
+  # deliverable against, so a contract met before the ack read UNMET for good and `stopped`
+  # closed a landed row `abandoned`. Occupancy and the contract are two questions (D10), so
+  # they are two fields: `launched_at` keeps the contract's launch, carried forward exactly as
+  # every ordinary resume carries it, and the restart's own time rides `restarted_at=`, which
+  # roster_open_names — the one close predicate — reads, and no contract reader does.
+  RESTARTED_AT=""
+  [ -n "${RESTART_AFTER_ACK:-}" ] && RESTARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
   # `agent_id` is appended when the joined row has no such field and substituted
   # when it has one — ARM 2's rule for `teammate_id`, for ARM 2's reason: every
   # reader takes the FIRST match for a key, so a row carrying two of them would
   # answer with whichever the writer happened to put first. Today's writer always
   # emits the field, so the append branch is a belt against a writer that stops.
-  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" '
-    BEGIN { RS = "|"; ORS = ""; seen = 0 }
+  # `restarted_at` follows the same substitute-or-append rule, and only on a restart: the
+  # joined row is an intended/confirmed row, which no writer stamps with one, so on every
+  # other identification the row is byte-identical to before T20b.
+  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" -v ra="$RESTARTED_AT" '
+    BEGIN { RS = "|"; ORS = ""; seen = 0; rseen = 0 }
     {
       f = $0
       if (f ~ /^status=/)   f = "status=identified"
       if (f ~ /^agent_id=/) { f = "agent_id=" id; seen = 1 }
       if (pl != "" && f ~ /^launched_at=/) f = "launched_at=" pl
+      if (ra != "" && f ~ /^restarted_at=/) { f = "restarted_at=" ra; rseen = 1 }
       printf "%s%s", (NR > 1 ? "|" : ""), f
     }
-    END { if (!seen) printf "|agent_id=%s", id }')
+    END { if (!seen) printf "|agent_id=%s", id
+          if (ra != "" && !rseen) printf "|restarted_at=%s", ra }')
   printf '%s\n' "$IDENTIFIED" >> "$ROSTER_FILE" 2>/dev/null
 
   # NO BOUND ON THE ROSTER, for the reason ARM 2 gives above: a roster row is a

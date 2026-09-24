@@ -620,8 +620,12 @@ case "$VERB" in
     _state=$(line_field "$_line" state)
     _detail=$(line_field "$_line" detail)
     _still_live=0
+    # FOLLOW-UP IS A MET CONTRACT WHOSE AGENT OWES A REPLY (wave-20 T9, Δ8). Once a fresh panel
+    # shows the agent gone — checked below, as for every state — that reply can never come,
+    # and the row closes `landed`: refusing it would leave the name open with no close but a
+    # hand `sweeper ack`.
     case "$_state" in
-      MET|WAIVED)   _reason=landed ;;
+      MET|WAIVED|FOLLOW-UP) _reason=landed ;;
       UNMET)        _reason=abandoned ;;
       STILL-LIVE)   _reason=abandoned; _still_live=1 ;;
       *)
@@ -703,10 +707,11 @@ case "$VERB" in
     # THE LEASE ENDS HERE (bionic 1.4.0, spec AC-28, design ledger C1). A
     # discharged row's worktree is a leased slot nobody holds any more, and
     # standing the agent down is the moment to give the disk back. The act — a
-    # --no-ff merge, a removal, a prune, and the refusals around them — belongs
-    # to payload/scripts/lib/worktree.sh, which the Patrol tick and
-    # spawn-worktree.sh's `land` verb call too; this is a call site and not a
-    # second copy of the judgment. Two spellings of the library path because
+    # --no-ff merge into the bound plan's working branch, a removal, a prune,
+    # and the refusals around them — belongs to payload/scripts/lib/worktree.sh,
+    # whose `worktree_land_for_session` spawn-worktree.sh's `land` verb calls
+    # too (wave-20 T8, REQ-1, D1); this is a call site and not a second copy of
+    # the judgment. The Patrol tick lands nothing. Two spellings of the library path because
     # the repo ships payload/hooks as a symlink to hooks/ and `$0` is textual.
     # A missing library costs nothing: the stand-down report is what this verb
     # owes, and the landing is additive to it.
@@ -727,22 +732,22 @@ case "$VERB" in
     # never enters READY. Appends one line to _landed for every tree it finds, so the operator
     # sees every tree this pass touched, whichever branch found it.
     #
-    # ONLY A LANDED ROW IS MERGED (wave-19 T1f, review R2-1). `worktree_land` is a --no-ff
-    # merge into whatever branch the main checkout is on. An ack closes a name whatever its
+    # ONLY A LANDED ROW IS MERGED (wave-19 T1f, review R2-1). The land is a --no-ff merge into
+    # this session's bound plan's working branch. An ack closes a name whatever its
     # reason (A-T1.11), and since T1e `stopped` acks an UNMET-and-gone row `abandoned` — so
     # "acked" is not "landed", and merging on the ack alone put an abandoned agent's partial
-    # work into the checkout's branch (masked on main/master by the protected-branch refusal,
+    # work into the target branch (masked on main/master by the protected-branch refusal,
     # live on any other). The VERDICT decides, never the ack's reason: the reason is a label,
     # the verdict is the fact. MET or WAIVED lands. Anything else leaves tree and branch in
     # place — no merge and no removal, since a human salvages what the agent left — and says
     # so on the same LEASES report.
     _land_row_tree() {  # <name> <verdict state>
-      declare -f worktree_land >/dev/null 2>&1 || return 0
+      declare -f worktree_land_for_session >/dev/null 2>&1 || return 0
       _tree="$(worktree_for_row "$REPO_REAL" "$1")"
       [ -d "$_tree" ] || return 0
       case "$2" in
         MET|WAIVED)
-          _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land "$_tree")   ($1)
+          _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land_for_session "$_tree" "$REPO_REAL" "$SESSION_ID")   ($1)
 "
           ;;
         *)
@@ -785,7 +790,15 @@ case "$VERB" in
       # it again. Skipping the land here left every such tree standing until an operator
       # ran spawn-worktree.sh land by hand, against spec AC-28 (1.4.0): standing an agent
       # down is where the lease ends, full stop, not "unless the row left by way of an ack".
-      if [ "$(line_field "$_l" acked)" = "yes" ]; then
+      #
+      # A FOLLOW-UP IN FLIGHT HOLDS THE ROW, ACKED OR NOT (wave-20 T9; REQ-4, AC-4.3; Δ8). The
+      # sweeper reads FOLLOW-UP for a MET row the orchestrator has since messaged and the agent
+      # has not answered: the agent is working on the reply, in this tree. Nothing here may
+      # stand it down, land its tree or remove it until the reply closes the state — it is
+      # listed LEFT ALONE with the verdict's own reason, and the next pass decides.
+      if [ "$_state" = "FOLLOW-UP" ]; then
+        :
+      elif [ "$(line_field "$_l" acked)" = "yes" ]; then
         if [ "$_live_ok" -eq 1 ] && ! _is_live "$_name"; then
           _land_row_tree "$_name" "$_state"
           continue

@@ -31,6 +31,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# R6's MET marker, written by hooks/landing-gate.sh's own function (S17: no suite hand-writes it).
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 ROSTER_SH="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh"
 
@@ -146,5 +148,255 @@ lib roster_row status=intended "ts=2026-09-22" >/dev/null 2>&1
 expect_status "R4a an unrecognised key is still a refusal" "2" "$?"
 lib roster_row status=intended barewordarg >/dev/null 2>&1
 expect_status "R4b a bare word is still a refusal" "2" "$?"
+
+section "R5 — the two audit keys a successor row carries (wave-20 T9, REQ-4, AC-4.2/4.4)"
+
+# `amend` records when and why a live contract widened (`amended=`), and `extend` records its
+# reason as data (`extended=`) rather than in `claims=`, which the sweeper hands to `pgrep -f`.
+# Both are PRESENT-IF-PASSED, like `adopted_from=`: a row that names neither is byte-identical
+# to the rows before this wave, and every captured fixture still reproduces.
+R5_BASE=(status=identified session=s1 name=w-t9 agent_id=a9 launched_at=2026-09-23T00:00:00Z
+  subagent_type=bionic:implementor model=opus deliverable=rec/x.md source=declared duration=
+  progress= claims=worker-proc cadence= absent= waiver= tool_use_id=toolu_x plan=none)
+R5_PLAIN="$(lib roster_row "${R5_BASE[@]}")"
+R5_AM="$(lib roster_row "${R5_BASE[@]}" "amended=2026-09-23T01:00:00Z the fix touches b")"
+R5_EX="$(lib roster_row "${R5_BASE[@]}" "extended=2026-09-23T01:00:00Z retry .* (x|y)")"
+expect_absent "R5a a row that names neither carries neither" "amended=" "$R5_PLAIN$(printf '%s' "$R5_PLAIN" | grep -o 'extended=')"
+expect_contains "R5b amended= is written when passed" "|amended=2026-09-23T01:00:00Z the fix touches b|" "$R5_AM"
+expect_contains "R5c extended= is written when passed, its pipe folded like every prose field" \
+  "|extended=2026-09-23T01:00:00Z retry .* (x y)|" "$R5_EX"
+expect_contains "R5d …and claims= is whatever the caller passed, untouched by it" "|claims=worker-proc|" "$R5_EX"
+expect_eq "R5e the keys sit before tool_use_id=, after the instrument fields: the row minus them is the plain row" \
+  "$R5_PLAIN" "$(printf '%s' "$R5_AM" | sed 's/|amended=[^|]*//')"
+
+section "R6 — live_ids_of_name asks the one close predicate (epic-23 wave-20 T17, REQ-10; D10)"
+
+# THE DEFECT (T2's carry-over, research D3 §REQ-10). `live_ids_of_name` — the stop wall's
+# ambiguity refusal and `adopt_write_row`'s "is this name already live here" — discharged a
+# name's ids on a `landing-swept/v1|…|state=MET` marker and never read the sweeper's ledger.
+# Every other occupancy reader closes a name only on an ack taken after its latest launch
+# (`roster_open_names`), so after a /clear the two could disagree about the same file: a
+# MET-but-unacked agent that the dispatch wall, the sweeper and the stop wall all hold open
+# read as gone here, and an acked one read as still live.
+#
+# THE RULE HERE: nothing is live unless `roster_open_names` answers the name open, and within
+# an open name an id is discharged exactly as a name is — by an ack whose stamp is later than
+# that row's `launched_at=`. The ledger is the roster's sibling, `sweeper-<sid>.state`, the
+# path the sweeper writes it to.
+#
+# A TEMP DIRECTORY, not the hermetic no-file shape R0–R4 keep: the function reads a file.
+R6_DIR="$(mktemp -d "${TMPDIR:-/tmp}/roster-r6.XXXXXX")"
+trap 'rm -rf "$R6_DIR"' EXIT
+r6_row() {  # <roster> <name> <agent id> <launched_at> — the intended then identified pair
+  lib roster_row status=intended session=s1 name="$2" agent_id= launched_at="$4" \
+    subagent_type=implementor model=opus deliverable= source=declared duration= progress= \
+    claims= cadence= absent= waiver= tool_use_id=toolu_r6 plan=none >> "$1"
+  lib roster_row status=identified session=s1 name="$2" agent_id="$3" launched_at="$4" \
+    subagent_type=implementor model=opus deliverable= source=declared duration= progress= \
+    claims= cadence= absent= waiver= tool_use_id=toolu_r6 plan=none >> "$1"
+}
+r6_ack() {  # <ledger> <at> <name> — the sweeper ledger's ack line, in its writer's shape
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=s1|name=%s|by=patrol|reason=landed\n' \
+    "$2" "$3" >> "$1"
+}
+r6_met() {  # <roster> <at> <name> <agent id> — through the landing gate's own writer (S17)
+  swept_marker_write "$1" "$2" s1 "$3" "$4" MET
+}
+r6_ids() {  # <case dir> <name> -> the live ids, space-joined
+  ROSTER_FILE="$1/roster-s1.state" lib live_ids_of_name "$2" | tr '\n' ' ' | sed 's/ $//'
+}
+
+mkdir -p "$R6_DIR/met"
+r6_row "$R6_DIR/met/roster-s1.state" w-met a-met-1 2026-09-01T00:00:00Z
+r6_met "$R6_DIR/met/roster-s1.state" 2026-09-01T01:00:00Z w-met a-met-1
+expect_eq "R6a a MET marker with no ack discharges nothing: the id is still live" \
+  "a-met-1" "$(r6_ids "$R6_DIR/met" w-met)"
+
+mkdir -p "$R6_DIR/acked"
+r6_row "$R6_DIR/acked/roster-s1.state" w-acked a-acked-1 2026-09-01T00:00:00Z
+r6_ack "$R6_DIR/acked/sweeper-s1.state" 2026-09-01T01:00:00Z w-acked
+expect_eq "R6b an ack after the launch discharges the name: nothing is live" \
+  "" "$(r6_ids "$R6_DIR/acked" w-acked)"
+
+mkdir -p "$R6_DIR/again"
+r6_row "$R6_DIR/again/roster-s1.state" w-again a-again-1 2026-09-01T00:00:00Z
+r6_ack "$R6_DIR/again/sweeper-s1.state" 2026-09-01T01:00:00Z w-again
+r6_row "$R6_DIR/again/roster-s1.state" w-again a-again-2 2026-09-01T02:00:00Z
+expect_eq "R6c acked, then dispatched again: only the id launched after the ack is live" \
+  "a-again-2" "$(r6_ids "$R6_DIR/again" w-again)"
+
+# THE PAIRED POSITIVE for the ambiguity the stop wall polices: two ids of one name, neither
+# acked, are BOTH live. Without it R6b is equally green on a function that answers nothing.
+mkdir -p "$R6_DIR/twin"
+r6_row "$R6_DIR/twin/roster-s1.state" w-twin a-twin-1 2026-09-01T00:00:00Z
+r6_row "$R6_DIR/twin/roster-s1.state" w-twin a-twin-2 2026-09-01T02:00:00Z
+expect_eq "R6d two unacked ids of one name are both live (the ambiguity)" \
+  "a-twin-1 a-twin-2" "$(r6_ids "$R6_DIR/twin" w-twin)"
+
+# STRICTLY LATER, as the predicate says: an ack in the launch's own second cannot be ordered
+# against it, and the safe direction is live.
+mkdir -p "$R6_DIR/same"
+r6_row "$R6_DIR/same/roster-s1.state" w-same a-same-1 2026-09-01T00:00:00Z
+r6_ack "$R6_DIR/same/sweeper-s1.state" 2026-09-01T00:00:00Z w-same
+expect_eq "R6e an ack stamped in the launch's own second discharges nothing" \
+  "a-same-1" "$(r6_ids "$R6_DIR/same" w-same)"
+
+# A SYMLINKED LEDGER IS READ AS EMPTY, as `roster_open_names` reads it: every id stays live.
+mkdir -p "$R6_DIR/link"
+r6_row "$R6_DIR/link/roster-s1.state" w-link a-link-1 2026-09-01T00:00:00Z
+r6_ack "$R6_DIR/link/real-ledger" 2026-09-01T01:00:00Z w-link
+ln -s "$R6_DIR/link/real-ledger" "$R6_DIR/link/sweeper-s1.state"
+expect_eq "R6f a symlinked ledger closes nothing" \
+  "a-link-1" "$(r6_ids "$R6_DIR/link" w-link)"
+
+section "R7 — roster_open_names takes the LATEST launch, not the last row in file order (epic-23 wave-20 T20b, C7)"
+
+# THE DEFECT (critic C7, roster.sh:374). `_roster_open_of`'s `born[nm]` was overwritten by
+# EVERY live row of a name, in file order — so the name's remembered launch was whichever row
+# happened to be LAST on disk, not the latest `launched_at`. Adoption
+# (`adopt_write_row`, hooks/session-poker.sh:1841) can append a PREDECESSOR's row, carrying
+# its own original — and OLDER — `launched_at`, after a fresher live row already on the file
+# for the same name. An ack taken between the two stamps then closed a name whose real latest
+# launch was still open.
+R7_DIR="$(mktemp -d "${TMPDIR:-/tmp}/roster-r7.XXXXXX")"
+trap 'rm -rf "$R7_DIR"' EXIT
+r7_open() {  # <case dir> -> the open names, space-joined
+  lib roster_open_names "$1/roster-s1.state" "$1/sweeper-s1.state" | tr '\n' ' ' | sed 's/ $//'
+}
+
+mkdir -p "$R7_DIR/outoforder"
+# The FRESHER launch is written FIRST in file order...
+r6_row "$R7_DIR/outoforder/roster-s1.state" w-outoforder a-outoforder-1 2026-09-01T05:00:00Z
+# ...and an OLDER launch for the SAME name is appended SECOND — the adopt-order shape (a
+# predecessor's row, carrying its own earlier stamp, landing after a fresher dispatch).
+r6_row "$R7_DIR/outoforder/roster-s1.state" w-outoforder a-outoforder-2 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/outoforder/sweeper-s1.state" 2026-09-01T02:00:00Z w-outoforder
+expect_eq "R7a the name stays open: the ack (02:00) is not later than the LATEST launch (05:00), whichever row is last on disk" \
+  "w-outoforder" "$(r7_open "$R7_DIR/outoforder")"
+
+# THE PAIRED CONTROL: in FILE order (fresher last), the same two stamps and the same ack
+# already gave the right answer before this fix — the bug is order-dependent, not present on
+# every input, and this pins the direction that was never wrong.
+mkdir -p "$R7_DIR/infileorder"
+r6_row "$R7_DIR/infileorder/roster-s1.state" w-infileorder a-infileorder-1 2026-09-01T01:00:00Z
+r6_row "$R7_DIR/infileorder/roster-s1.state" w-infileorder a-infileorder-2 2026-09-01T05:00:00Z
+r6_ack "$R7_DIR/infileorder/sweeper-s1.state" 2026-09-01T02:00:00Z w-infileorder
+expect_eq "R7b …and stays open when the fresher launch is already last on disk (the control)" \
+  "w-infileorder" "$(r7_open "$R7_DIR/infileorder")"
+
+section "R8 — an unreadable stamp on ANY live row of a name keeps it open, in either file order (epic-23 wave-20 T20c, review R2-2)"
+
+# THE DEFECT (review R2-2, INTRODUCED by T20b's max-stamp rule). `born[nm]` kept the maximum
+# WELL-FORMED stamp, and an unreadable candidate never displaced it — so an older well-formed
+# launch won over a later live row whose stamp could not be read, and an ack between them
+# closed the name. That is the predicate's own rule read backwards: "AN UNREADABLE STAMP ON
+# EITHER SIDE CLOSES NOTHING". The fix: an unreadable stamp on any live row makes `born`
+# unreadable, and that sticks, whatever order the rows sit in. The fixture is the review's:
+# `unread` launched 01:00Z, then a row with `launched_at=` empty, and an ack at 02:00Z.
+# bionic's own writers cannot produce the empty stamp (preflight and the recorder both stamp
+# `date -u`); a hand-edited or legacy row can.
+mkdir -p "$R7_DIR/unread"
+r6_row "$R7_DIR/unread/roster-s1.state" unread a-unread-1 2026-09-01T01:00:00Z
+r6_row "$R7_DIR/unread/roster-s1.state" unread a-unread-2 ""
+r6_ack "$R7_DIR/unread/sweeper-s1.state" 2026-09-01T02:00:00Z unread
+expect_eq "R8a the review's fixture: a later live row with an unreadable stamp keeps the name open (fail closed)" \
+  "unread" "$(r7_open "$R7_DIR/unread")"
+
+# THE ORDER CONTROL: the same two rows the other way round. Stickiness is the point — the
+# unreadable row seen FIRST must not be displaced by the well-formed one after it either.
+mkdir -p "$R7_DIR/unreadfirst"
+r6_row "$R7_DIR/unreadfirst/roster-s1.state" unreadfirst a-unreadfirst-1 "not-a-time"
+r6_row "$R7_DIR/unreadfirst/roster-s1.state" unreadfirst a-unreadfirst-2 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/unreadfirst/sweeper-s1.state" 2026-09-01T02:00:00Z unreadfirst
+expect_eq "R8b …and in the other file order: an unreadable stamp seen first sticks (the order control)" \
+  "unreadfirst" "$(r7_open "$R7_DIR/unreadfirst")"
+
+# THE PAIRED POSITIVE: the same history with both stamps readable closes the name. Without it
+# R8a and R8b are equally green on a predicate that never closes anything.
+mkdir -p "$R7_DIR/readable"
+r6_row "$R7_DIR/readable/roster-s1.state" readable a-readable-1 2026-09-01T00:30:00Z
+r6_row "$R7_DIR/readable/roster-s1.state" readable a-readable-2 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/readable/sweeper-s1.state" 2026-09-01T02:00:00Z readable
+expect_eq "R8c …while the same history with every stamp readable is closed by the ack (the row discriminates)" \
+  "" "$(r7_open "$R7_DIR/readable")"
+
+section "R9 — a restart after an ack holds the name open by its restarted_at, not by moving launched_at (epic-23 wave-20 T20c, critic C2-2)"
+
+# OCCUPANCY AND THE CONTRACT ARE TWO QUESTIONS (D10). A SubagentStart for an id whose lineage
+# an ack already closed is a restart: the agent is back on the panel and holds a slot. T20b
+# answered that by stamping the restart row's `launched_at` fresh — and `launched_at` is also
+# the clock the sweeper dates the deliverable against, so a contract met before the ack read
+# UNMET for good, and `stopped` closed it `abandoned` (critic C2-2). The recorder now keeps
+# `launched_at` as the contract's launch and writes the restart's own time as `restarted_at=`;
+# this predicate — the one close predicate — takes a row's occupancy stamp from
+# `restarted_at` when the row carries one. The row is built the way the recorder builds it:
+# the production row, with `restarted_at=` appended at the end.
+r9_restart_row() {  # <roster> <name> <agent id> <launched_at> <restarted_at>
+  printf '%s|restarted_at=%s\n' "$(lib roster_row status=identified session=s1 name="$2" agent_id="$3" \
+    launched_at="$4" subagent_type=implementor model=opus deliverable= source=declared duration= \
+    progress= claims= cadence= absent= waiver= tool_use_id=toolu_r6 plan=none)" "$5" >> "$1"
+}
+mkdir -p "$R7_DIR/restart"
+r6_row "$R7_DIR/restart/roster-s1.state" w-restart a-restart-1 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/restart/sweeper-s1.state" 2026-09-01T02:00:00Z w-restart
+r9_restart_row "$R7_DIR/restart/roster-s1.state" w-restart a-restart-1 2026-09-01T01:00:00Z 2026-09-01T03:00:00Z
+expect_eq "R9a a restart row whose restarted_at postdates the ack holds the name open — though its launched_at does not" \
+  "w-restart" "$(r7_open "$R7_DIR/restart")"
+
+# THE CONTROL: the same row with no restarted_at is an ordinary resume carrying the original
+# launch, and the ack closes it — so R9a's answer comes from the new field and nothing else.
+mkdir -p "$R7_DIR/norestart"
+r6_row "$R7_DIR/norestart/roster-s1.state" w-norestart a-norestart-1 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/norestart/sweeper-s1.state" 2026-09-01T02:00:00Z w-norestart
+r6_row "$R7_DIR/norestart/roster-s1.state" w-norestart a-norestart-1 2026-09-01T01:00:00Z
+expect_eq "R9b …the same history with no restarted_at is closed by the ack (the control)" \
+  "" "$(r7_open "$R7_DIR/norestart")"
+
+# A RESTART BEFORE THE ACK closes like any launch: the ack after it discharges the name.
+mkdir -p "$R7_DIR/restartacked"
+r6_row "$R7_DIR/restartacked/roster-s1.state" w-racked a-racked-1 2026-09-01T01:00:00Z
+r9_restart_row "$R7_DIR/restartacked/roster-s1.state" w-racked a-racked-1 2026-09-01T01:00:00Z 2026-09-01T03:00:00Z
+r6_ack "$R7_DIR/restartacked/sweeper-s1.state" 2026-09-01T04:00:00Z w-racked
+expect_eq "R9c …and an ack after the restart closes the restarted name (the close still works)" \
+  "" "$(r7_open "$R7_DIR/restartacked")"
+
+section "R10 — live_ids_of_name discharges by the occupancy stamp, not launched_at alone (epic-23 wave-20 T20d, review R3-1)"
+
+# THE DEFECT (review R3-1). R9 above proved `roster_open_names` re-opens a restarted NAME by
+# its `restarted_at`. `live_ids_of_name` is the per-ID half of the same close predicate — the
+# stop wall's ambiguity refusal and `adopt_write_row`'s same-name guard both call it — and
+# until this fix it still discharged an id by `launched_at` alone, never `restarted_at`. So a
+# restarted id read discharged (not live) even while its own name read open: the stop wall's
+# ambiguity refusal and the adopt rename both went quiet for exactly the row R9 proves is
+# open. The row is the production shape again: `r9_restart_row`, with the SAME ack the R9
+# fixtures use.
+mkdir -p "$R7_DIR/restartid"
+r6_row "$R7_DIR/restartid/roster-s1.state" w-restartid a-restartid-1 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/restartid/sweeper-s1.state" 2026-09-01T02:00:00Z w-restartid
+r9_restart_row "$R7_DIR/restartid/roster-s1.state" w-restartid a-restartid-1 2026-09-01T01:00:00Z 2026-09-01T03:00:00Z
+expect_eq "R10a a restarted id after an ack is live under live_ids_of_name too (occupancy stamp, not launched_at)" \
+  "a-restartid-1" "$(r6_ids "$R7_DIR/restartid" w-restartid)"
+
+# THE PAIRED CASE R3-1 NAMES DIRECTLY: a restarted id plus a FRESH re-dispatch under the same
+# name. Both must read live for the stop wall's ambiguity refusal to fire and for
+# `adopt_write_row`'s same-name guard to see the name occupied twice — the exact ambiguity a
+# `launched_at`-only discharge silently dropped to one.
+mkdir -p "$R7_DIR/restarttwin"
+r6_row "$R7_DIR/restarttwin/roster-s1.state" w-restarttwin a-restarttwin-1 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/restarttwin/sweeper-s1.state" 2026-09-01T02:00:00Z w-restarttwin
+r9_restart_row "$R7_DIR/restarttwin/roster-s1.state" w-restarttwin a-restarttwin-1 2026-09-01T01:00:00Z 2026-09-01T03:00:00Z
+r6_row "$R7_DIR/restarttwin/roster-s1.state" w-restarttwin a-restarttwin-2 2026-09-01T04:00:00Z
+expect_eq "R10b …and a fresh re-dispatch after the restart still counts BOTH ids (the ambiguity, restored)" \
+  "a-restarttwin-1 a-restarttwin-2" "$(r6_ids "$R7_DIR/restarttwin" w-restarttwin)"
+
+# THE CONTROL: the same restart row, but the ack comes AFTER the restart. The id should
+# discharge exactly as R9c's name does — this proves R10a's answer comes from the occupancy
+# stamp, not from a discharge rule that stopped firing altogether.
+mkdir -p "$R7_DIR/restartidacked"
+r6_row "$R7_DIR/restartidacked/roster-s1.state" w-restartidacked a-restartidacked-1 2026-09-01T01:00:00Z
+r9_restart_row "$R7_DIR/restartidacked/roster-s1.state" w-restartidacked a-restartidacked-1 2026-09-01T01:00:00Z 2026-09-01T03:00:00Z
+r6_ack "$R7_DIR/restartidacked/sweeper-s1.state" 2026-09-01T04:00:00Z w-restartidacked
+expect_eq "R10c …and an ack after the restart discharges the id too (the close still works)" \
+  "" "$(r6_ids "$R7_DIR/restartidacked" w-restartidacked)"
 
 finish

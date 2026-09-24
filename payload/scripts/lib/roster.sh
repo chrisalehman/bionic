@@ -54,13 +54,22 @@
 # writes `teammate_id=` empty today, and a reader distinguishing "no address" from "not an
 # adopted row" would break if the field vanished with its value.
 #
+# THE TWO AUDIT KEYS OF A SUCCESSOR ROW (wave-20 T9, REQ-4) follow `adopted_from=` on the
+# same terms. `amended=<iso> <reason>` is written by `session-poker.sh amend`, which widens a
+# live contract; `extended=<iso> <reason>` by `session-poker.sh extend`, which re-opens a MET
+# one. Each says when and why that row was appended, so the history is the row sequence. The
+# extend reason used to ride `claims=`, which the sweeper hands to `pgrep -f` as a process
+# pattern — a reason carrying `.*` then matched half the machine and held the row live. A row
+# that names neither is byte-identical to the rows written before them.
+#
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
 # `re_executes=` say how wide the dispatched agent's instrument may be: the files its brief
 # declared, the suite basenames it may run, whether that set was DERIVED from the tree by the
 # configured impact command or DECLARED by the brief, and — for a repository whose tests are
 # not shell suites at all — the author-marked commands the brief declared it will re-run,
-# marks kept, space-joined, at most three (hooks/dispatch-preflight.sh lifts them from the
+# marks kept, space-joined, capped per role since T4 (wave-20, REQ-7) — three for an
+# auditor, DP_SUITES_MAX for every other role (hooks/dispatch-preflight.sh lifts them from the
 # brief text under `Re-executes:`). `re_executes=` is the LAST of the four and TRAILS them,
 # so a row written before the field existed reproduces byte for byte through this writer. They are present-if-passed rather than always-emitted so that the captured
 # rows in `tests/fixtures/roster-row.captured` — real rows written before this task
@@ -77,6 +86,39 @@
 # appends at the END either way.
 
 ROSTER_SCHEMA_VERSION="v1"
+
+# ---------- THE READ-ONLY ROLE SET (wave-20 T7, REQ-9, D9, Δ12) ------------------------
+#
+# ONE DEFINITION OF "READ-ONLY", asked by every reader that has to tell a writer from a
+# reader: the dispatch approval checkpoint (before Step-3 approval only these launch), the
+# nested-dispatch arm (a subagent may launch only these), and the read-only commit arm
+# (`payload/scripts/lib/walls.sh` ARM C). It lives here because the role is a roster field and
+# this library owns the row.
+#
+# AN ALLOW-LIST, NOT A DENY-LIST. The approval arm used to name the two writer roles, so every
+# type it had never heard of — `fork`, `general-purpose`, `claude`, a consumer's own agent —
+# was admitted as if it were a reader (triage-B D2a). Here the unknown answers "writer".
+#
+# THE MEMBERS: the four bionic roles whose role files disallow Write and Edit, plugin-qualified
+# as the harness sends them, plus the harness's two no-write types `Explore` and `Plan`, bare
+# as the harness sends them. A bare `researcher` is NOT a member: a consumer's own agent of
+# that name may carry Write, and ARM C has always read the plugin-qualified spelling only.
+# tests/cross-gate-agreement.test.sh §RC holds this constant equal to the role files.
+#
+# A CONSTANT, NOT A READ OF agents/*.md: ARM C runs on every Bash call in an agent context,
+# and a file read there would be paid by every command (research D3-7).
+ROLE_READONLY_SET="bionic:researcher bionic:test-runner bionic:auditor bionic:critic Explore Plan"
+
+# A WHOLE-WORD MATCH WITHOUT WORD SPLITTING: the callers include walls.sh, which moves IFS
+# around its argv readers, so a `for r in $SET` loop here would answer by whatever IFS it
+# inherited. A type holding whitespace is never one name, and a quoted `$want` inside the
+# pattern is literal text, so `*` or `?` in a type cannot match as a glob.
+role_is_readonly() {  # <subagent_type> -> 0 a read-only role · 1 anything else, empty included
+  local want="${1-}"
+  case "$want" in ''|*[[:space:]]*) return 1 ;; esac
+  case " $ROLE_READONLY_SET " in *" $want "*) return 0 ;; esac
+  return 1
+}
 
 # The header comment line every roster file opens with. Both writers emit it when the file
 # is absent; it carries the schema version, so it belongs beside the row that carries the
@@ -141,8 +183,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local status="" session="" name="" agent_id="" launched_at="" subagent_type=""
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
-  local files="" suites_allowed="" suites_source="" re_executes=""
-  local has_teammate_id=0 has_adopted_from=0
+  local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
+  local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
@@ -184,6 +226,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       plan)          plan="$val" ;;
       teammate_id)   teammate_id="$val"; has_teammate_id=1 ;;
       adopted_from)  adopted_from="$val"; has_adopted_from=1 ;;
+      amended)       amended="$val";      has_amended=1 ;;
+      extended)      extended="$val";     has_extended=1 ;;
       files)          files="$val";          has_files=1 ;;
       suites_allowed) suites_allowed="$val"; has_suites_allowed=1 ;;
       suites_source)  suites_source="$val";  has_suites_source=1 ;;
@@ -204,6 +248,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_re_executes" -eq 1 ]; then    out="$out|re_executes=$re_executes"; fi
   if [ "$has_teammate_id" -eq 1 ]; then out="$out|teammate_id=$teammate_id"; fi
   if [ "$has_adopted_from" -eq 1 ]; then out="$out|adopted_from=$adopted_from"; fi
+  if [ "$has_amended" -eq 1 ]; then  out="$out|amended=$amended"; fi
+  if [ "$has_extended" -eq 1 ]; then out="$out|extended=$extended"; fi
   out="$out|tool_use_id=$tool_use_id|plan=$plan"
   printf '%s\n' "$out"
   return 0
@@ -221,14 +267,23 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
 # is that fix for the QUESTION asked of one.
 #
 # THE QUESTION, IN THE REGISTER'S OWN TERMS. Two rows of one name are an ambiguity — "this
-# name is live twice" — when BOTH are under an open contract: `intended`/`confirmed`/
-# `identified`, with no `landing-swept/v1|…|state=MET` marker closing them, and DIFFERENT
-# agent ids. A MET marker for this name discharges every id above it (the generation counter
-# below is how that is spelled without `delete arr`, which is not in the one-true-awk this
-# machine runs as `/usr/bin/awk`); rows below the marker start a fresh set. An `intended` row
-# carries no id yet — the recorder writes it one state later — and a lifecycle (intended ->
-# confirmed -> identified) is ONE identity, so ids are counted DISTINCT: neither an
-# unidentified row nor a re-stated one is a second agent.
+# name is live twice" — when BOTH are under an open contract and carry DIFFERENT agent ids.
+# An `intended` row carries no id yet — the recorder writes it one state later — and a
+# lifecycle (intended -> confirmed -> identified) is ONE identity, so ids are counted
+# DISTINCT: neither an unidentified row nor a re-stated one is a second agent.
+#
+# OPEN IS THE ONE CLOSE PREDICATE'S (epic-23 wave-20 T17, D10; T2's carry-over). This reader
+# used to discharge a name's ids on a `landing-swept/v1|…|state=MET` marker and never read the
+# sweeper's ledger, so it could call a name gone that every wall held open, and the reverse.
+# Now nothing is live unless `roster_open_names` (below) answers the name open, and within an
+# open name an id is discharged the way a name is: by an ack stamped strictly later than that
+# row's OCCUPANCY STAMP (`_roster_occupied_at`: `restarted_at=` when the row carries one, else
+# `launched_at=`; `_roster_discharged`) (T20d, review R3-1: was `launched_at=` alone, which
+# left a restarted id discharged even while `roster_open_names` read its name open). So a name
+# acked and dispatched again names only the id launched after the ack, a restarted id reads
+# live again exactly as its name does, and a MET marker discharges nothing. The ledger is the
+# roster's sibling, `sweeper-<sid>.state` — the path the sweeper writes it to — so neither
+# caller grows an argument.
 #
 # READS `$ROSTER_FILE` (required, caller-set — every hook in the fleet already sets it
 # before touching its own roster) and `$ROSTER_VERSION` (optional; defaults to this
@@ -236,38 +291,210 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
 # declare its own roster-schema constant, e.g. `adopt_write_row`, does not need to grow one
 # just to call this).
 live_ids_of_name() {  # <name> -> the agent ids currently under an open contract, one per line
-  local f="$ROSTER_FILE" ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}"
+  local f="$ROSTER_FILE" ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}" base ledger="" open nl='
+'
   [ -f "$f" ] || return 0
   [ -L "$f" ] && return 0
   [ -r "$f" ] || return 0
-  awk -v want="$1" -v ver="$ver" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
+  base="${f##*/}"
+  case "$base" in
+    roster-*.state) case "$f" in */*) ledger="${f%/*}/" ;; esac
+                    ledger="${ledger}sweeper-${base#roster-}" ;;
+  esac
+  { [ -n "$ledger" ] && [ -f "$ledger" ] && [ ! -L "$ledger" ] && [ -r "$ledger" ]; } || ledger=""
+  open="$(roster_open_names "$f" "$ledger")"
+  case "$nl$open$nl" in *"$nl$1$nl"*) : ;; *) return 0 ;; esac
+  ROSTER_OPEN_F="$f" ROSTER_OPEN_LEDGER="$ledger" \
+  awk -v want="$1" -v rpfx="roster-state/${ver}|" "$_ROSTER_OPEN_AWK"'
+    BEGIN {
+      _roster_acks(ENVIRON["ROSTER_OPEN_LEDGER"], ACK)
+      f = ENVIRON["ROSTER_OPEN_F"]
+      while ((getline line < f) > 0) {
+        if (index(line, rpfx) != 1) continue
+        if (_roster_kv(line, "name") != want) continue
+        if (!_roster_live(_roster_kv(line, "status"))) continue
+        id = _roster_kv(line, "agent_id")
+        if (id == "" || (id in seen)) continue
+        if ((want in ACK) && _roster_discharged(_roster_occupied_at(line), ACK[want])) continue
+        seen[id] = 1
+        print id
+      }
+      close(f)
+    }' </dev/null 2>/dev/null
+  return 0
+}
+
+# ---------- THE PREDICATE'S ONE AWK TEXT (epic-23 wave-20 T17, D10) ----------------------
+#
+# `roster_open_names`, `roster_open_counts` and `live_ids_of_name` each run an awk program that
+# BEGINS with this text, so the rule below (THE ONE READER OF "IS THIS NAME CLOSED") is spelled
+# once and three readers cannot drift apart. It defines functions only; each caller adds its own
+# driver. File paths reach it through ENVIRON or a field, never `-v`, which would read the
+# backslashes in a path as escapes. Local arrays (`ACK`, `seen`, …) are fresh per call — that is
+# how a function resets its sets without `delete arr`, which the one-true-awk this machine runs
+# as `/usr/bin/awk` does not promise.
+# shellcheck disable=SC2016  # awk source, expanded by awk and never by the shell
+_ROSTER_OPEN_AWK='
+  function _roster_kv(line, key,   i, n, parts) {
+    n = split(line, parts, "|")
+    for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+    return ""
+  }
+  function _roster_live(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
+  # The one stamp shape both writers produce, spelled without an interval expression:
+  # /usr/bin/awk here is the one-true-awk, and `{4}` is not a repetition count there.
+  function _roster_stamp_ok(s) {
+    return (s ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/)
+  }
+  # ACK[name] = the latest well-stamped ack of that name in the ledger ("" reads nothing).
+  function _roster_acks(ledger, ACK,   aline, anm, aat) {
+    if (ledger == "") return
+    while ((getline aline < ledger) > 0) {
+      if (index(aline, "sweeper-ledger/v1|") != 1) continue
+      if (_roster_kv(aline, "event") != "ack") continue
+      anm = _roster_kv(aline, "name"); if (anm == "") continue
+      aat = _roster_kv(aline, "at");   if (!_roster_stamp_ok(aat)) continue
+      if (!(anm in ACK) || aat "" > ACK[anm] "") ACK[anm] = aat
     }
-    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
-    # A MET MARKER FOR THIS NAME DISCHARGES EVERY ID ABOVE IT, and the generation counter is
-    # how that is spelled without `delete arr` — which is not in the one-true-awk this
-    # machine runs as /usr/bin/awk. Rows below the marker start a fresh set.
-    index($0, "landing-swept/v1|") == 1 {
-      if (kv($0, "name") == want && kv($0, "state") == "MET") { n = 0; gen++ }
-      next
+    close(ledger)
+  }
+  # An ack discharges a launch only when both stamps are readable and the ack is strictly later.
+  function _roster_discharged(born, ack) {
+    return (_roster_stamp_ok(born) && _roster_stamp_ok(ack) && ack "" > born "")
+  }
+  # THE OCCUPANCY STAMP OF ONE ROW: its `restarted_at` when it carries one, else its
+  # `launched_at` (epic-23 wave-20 T20c, critic C2-2; ONE FUNCTION as of T20d, review R3-1).
+  # `hooks/execution-recorder.sh` writes `restarted_at=` on the one row that re-identifies an
+  # id whose lineage an ack closed — the agent restarted, and holds a slot again — and keeps
+  # `launched_at` as the launch of the contract, the clock the sweeper dates the deliverable
+  # against. EVERY reader that answers whether a row is occupancy-discharged calls this, so a
+  # restart re-opens what it should everywhere at once: the per-NAME answer `_roster_open_of`
+  # gives AND the per-ID answer `live_ids_of_name` gives below. Before T20d each spelled its
+  # own inline `restarted_at`-else-`launched_at` read (or, for `live_ids_of_name`, none at
+  # all), and they drifted apart within the same commit that introduced the field — the file
+  # design note two functions below ("three readers cannot drift apart") did not reach a
+  # fourth call site, for want of a shared function for it to be a call site of.
+  function _roster_occupied_at(line,   cand) {
+    cand = _roster_kv(line, "restarted_at")
+    if (cand == "") cand = _roster_kv(line, "launched_at")
+    return cand
+  }
+  # The open names of one roster, each followed by a newline, in first-seen order.
+  function _roster_open_of(f, ledger, sid, rpfx,   ACK, seen, order, born, n, line, rs, nm, i, out, cand) {
+    _roster_acks(ledger, ACK)
+    n = 0
+    while ((getline line < f) > 0) {
+      if (index(line, rpfx) != 1) continue
+      if (!_roster_live(_roster_kv(line, "status"))) continue
+      rs = _roster_kv(line, "session")
+      if (sid != "" && rs != "" && rs != sid) continue
+      nm = _roster_kv(line, "name"); if (nm == "") nm = "(unnamed)"
+      gsub(/\t/, " ", nm)
+      if (!(nm in seen)) { seen[nm] = 1; order[++n] = nm }
+      # THE OCCUPANCY STAMP, the one shared function above (T20d) — restarted_at when the
+      # row carries one, else launched_at — so the restart re-opens the NAME here without
+      # re-opening the CONTRACT there.
+      cand = _roster_occupied_at(line)
+      # THE MAXIMUM STAMP, not whichever row happens to be LAST in file order (critic C7,
+      # epic-23 wave-20 T20b). Adoption can append a predecessor row, carrying its own
+      # earlier launched_at, after a fresher live row for the same name already on the file;
+      # born[nm] must still read as the LATEST launch, or an ack taken between the two stamps
+      # closes a name whose real latest launch is still open. The comparison is lexical (the
+      # one stamp shape every writer emits).
+      # AN UNREADABLE STAMP ON ANY LIVE ROW STICKS (T20c, review R2-2). A stamp that cannot be
+      # ordered might be the latest launch, so once one is seen born[nm] stays unreadable and
+      # _roster_discharged closes nothing, whatever order the rows sit in. The T20b rule let an
+      # older well-formed stamp displace it, and an ack between them closed the name — the
+      # rule below read backwards (fail-closed-constants: spending a slot on a row that might
+      # still be working is the safe direction).
+      if (!(nm in born) || (_roster_stamp_ok(born[nm]) && (!_roster_stamp_ok(cand) || cand "" > born[nm] ""))) born[nm] = cand
     }
-    index($0, "roster-state/" ver "|") == 1 {
-      if (kv($0, "name") != want) next
-      if (!live_status(kv($0, "status"))) next
-      id = kv($0, "agent_id")
-      # An `intended` row carries no id yet — the recorder writes it one state later — and a
-      # lifecycle (intended → confirmed → identified) is ONE identity, so ids are counted
-      # DISTINCT. Neither an unidentified row nor a re-stated one is a second agent.
-      if (id == "") next
-      if ((gen SUBSEP id) in seen) next
-      seen[gen SUBSEP id] = 1
-      ids[++n] = id
-      next
+    close(f)
+    out = ""
+    for (i = 1; i <= n; i++) {
+      nm = order[i]
+      if ((nm in ACK) && _roster_discharged(born[nm], ACK[nm])) continue
+      out = out nm "\n"
     }
-    END { for (i = 1; i <= n; i++) print ids[i] }
-  ' "$f" 2>/dev/null
+    return out
+  }
+'
+
+# ---------- THE ONE READER OF "IS THIS NAME CLOSED" (epic-23 wave-20 T2, REQ-10, D10) ----
+#
+# FOUR SPELLINGS, FOUR ANSWERS. Until this wave four readers each carried their own rule:
+# dispatch preflight closed a name on a `landing-swept/v1|state=MET` marker OR an ack taken
+# after the row launched; the sweeper's `row_acked` and the stop wall's occupancy pass closed
+# it on ANY ack of the name, ever; the tick's `adopt_fold` closed it on any ack or any MET
+# marker. Driven both ways (triage-C claim 4): a name acked and dispatched again read open to
+# preflight and closed to the rest, and a MET-but-unacked row read closed to preflight and to
+# adopt and open to the sweeper and the stop wall. So the Patrol offered a FILL the dispatch
+# wall refused, and the dispatch wall admitted a row the stop wall then counted over budget.
+#
+# THE RULE, IN ADR-034's TERMS: the ack is the one terminal state of a name. A name is closed
+# when an ack for it was taken AFTER its latest live row (`intended`, `confirmed` or
+# `identified`) was launched, and by nothing else. A row's launch, for this question, is its
+# `restarted_at` when it carries one (a restart after an ack, T20c), else its `launched_at`:
+#   * A MET MARKER CLOSES NOTHING. It records that a landing was seen, not that the agent
+#     left; the Patrol acks the row once a fresh panel shows the agent gone.
+#   * AN ACK OLDER THAN A RELAUNCH CLOSES NOTHING. The ledger holds no ordering against the
+#     roster, so the comparison is by time: a name re-dispatched after its ack is open again.
+#     The stamps compare lexically, which is exact for the one shape both writers stamp —
+#     `date -u +%Y-%m-%dT%H:%M:%SZ` — and the ack is strictly later: an ack in the same
+#     second as a launch cannot say which came first, and the safe direction is open.
+#   * AN UNREADABLE STAMP ON EITHER SIDE CLOSES NOTHING. A stamp that is not that shape
+#     (hand-written, truncated, empty) cannot be ordered, and spending a slot on a row that
+#     might still be working is the fail-closed direction (rule fail-closed-constants).
+#   * A NAME WITH NO LIVE ROW IS NOT ANSWERED. There is no contract to hold open, so it is
+#     neither printed here nor counted; a reader that needs "was it ever acked" asks the
+#     ledger itself (the sweeper's `acked=` does, for such a row).
+#
+# OUTPUT: the open names, one per line, in the order they first appear on the roster. An
+# unnamed row answers as `(unnamed)`, the spelling the sweeper's verdict gives it, so an ack
+# of that name can close it. `[session id]` keeps only rows of that session (a row with no
+# `session=` is kept — the file is per-session by construction, and the filter only guards a
+# hand-copied file); omit it for a predecessor's roster, whose rows carry its own id.
+#
+# A ROSTER THAT IS ABSENT, UNREADABLE OR A SYMLINK answers nothing, as `live_ids_of_name`
+# does; a caller that must not read "nothing" as "all closed" checks for that first (the
+# stop wall does). A LEDGER that is absent, unreadable or a symlink is read as empty — no ack
+# — which leaves every live name open: the generous direction for occupancy.
+roster_open_names() {  # <roster> [ack ledger] [session id] -> the open names, one per line
+  local f="${1:-}" ledger="${2:-}" sid="${3:-}" ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}"
+  [ -n "$f" ] && [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] || return 0
+  if [ -n "$ledger" ]; then
+    { [ -f "$ledger" ] && [ ! -L "$ledger" ] && [ -r "$ledger" ]; } || ledger=""
+  fi
+  ROSTER_OPEN_F="$f" ROSTER_OPEN_LEDGER="$ledger" \
+  awk -v sid="$sid" -v rpfx="roster-state/${ver}|" "$_ROSTER_OPEN_AWK"'
+    BEGIN { printf "%s", _roster_open_of(ENVIRON["ROSTER_OPEN_F"], ENVIRON["ROSTER_OPEN_LEDGER"], sid, rpfx) }
+  ' </dev/null 2>/dev/null
+  return 0
+}
+
+# ---------- THE SAME PREDICATE OVER MANY ROSTERS, IN ONE PROCESS (epic-23 wave-20 T17) --------
+#
+# `hooks/session-start.sh` counts the open rows of EVERY predecessor roster under `.bionic/tmp`,
+# and that count is bounded to one awk process however many files have piled up (REQ-6,
+# carry-over P9: an awk per file measured ~10.4s at 400 dead sessions against the CLI's 10s hook
+# timeout). So it cannot call `roster_open_names` once per file. It calls this, which runs the
+# SAME awk text — `_ROSTER_OPEN_AWK`'s `_roster_open_of` — once per manifest line, so the
+# post-/clear block and every wall close a name the same way (it used to close one on a MET
+# marker or on any ack ever, D10's defect in a fifth place).
+#
+# INPUT on stdin, one line per roster: `<key>TAB<roster>TAB<ledger>` (ledger may be empty).
+# The CALLER has already filtered each path — regular file, not a symlink — as the hook's
+# loop does with builtins; a file that cannot be read answers no names here.
+# OUTPUT: `<key>TAB<open-name count>TAB<roster>` for each roster with at least one open name.
+# No session filter: a predecessor's rows carry its own id (see `roster_open_names`).
+roster_open_counts() {  # stdin: key<TAB>roster<TAB>ledger -> key<TAB>count<TAB>roster
+  local ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}"
+  awk -F'\t' -v rpfx="roster-state/${ver}|" "$_ROSTER_OPEN_AWK"'
+    $2 != "" {
+      s = _roster_open_of($2, $3, "", rpfx)
+      c = gsub(/\n/, "", s)
+      if (c > 0) printf "%s\t%d\t%s\n", $1, c, $2
+    }
+  ' 2>/dev/null
   return 0
 }

@@ -111,8 +111,20 @@ roster_rows() {  # <file> <sid> <name>
 #
 # The old spelling here also REORDERED the fields (`name=` before `state=` before `at=`),
 # which no reader noticed and no writer has ever produced.
-swept() {  # <file> <sid> <name>   the landing gate's closing marker
+swept() {  # <file> <sid> <name>   the landing gate's marker — a landing SEEN
   swept_marker_write "$1" 2026-09-02T21:00:00Z "$2" "$3" "" MET
+}
+
+# THE ACK — the one thing that closes a name (epic-23 wave-20 T17, D10). The sweeper's ledger
+# line in its writer's shape, beside the roster as `sweeper-<sid>.state`. The hook's open-row
+# count asks `roster_open_names`' predicate, which closes a name only on an ack stamped after
+# its latest live row's `launched_at=` (roster_rows stamps 2026-09-02T20:00:00Z); a MET marker
+# alone closes nothing.
+acked() {  # <project> <sid> <name> [at]
+  local l="$1/.bionic/tmp/sweeper-$2.state"
+  [ -f "$l" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$l"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+    "${4:-2026-09-02T21:30:00Z}" "$2" "$3" >> "$l"
 }
 
 backdate() {  # <file> <seconds ago>
@@ -257,6 +269,11 @@ P1=$(make_env 3600s)
 roster_rows "$P1/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-ALPHA"
 roster_rows "$P1/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-BETA"
 swept "$P1/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-BETA"
+# RE-AUTHORED BY T17 (epic-23 wave-20, D10): W-BETA used to be closed by the MET marker above
+# alone. It is now closed by the ack the Patrol takes once it sees the agent gone — the marker
+# stays because a landed row carries one — so 1.3's "ONE open row" still counts W-ALPHA only.
+# §18 pins the marker-alone case directly.
+acked "$P1" "$OLD_SID" "W-BETA"
 # THIS session's own roster, also with an open row: it must NOT be listed. Without
 # this the "predecessor" filter could be a no-op and every assertion still pass.
 roster_rows "$P1/.bionic/tmp/roster-$CUR_SID.state" "$CUR_SID" "W-MINE"
@@ -275,8 +292,13 @@ has  "1.8 …then CronCreate" "CronCreate" "$OUT"
 # the line entirely, not just reworded.
 hasnt "1.9 …no arm hand step — the stamp arms itself at engagement (D4)" \
   "session-poker.sh arm" "$OUT"
-has  "1.9b …the re-arm line itself, exactly: CronCreate hands straight to adopt" \
-  "re-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate → adopt" "$OUT"
+# wave-20 REQ-6 (AC-6.1, D6): the CronCreate step names the verb that prints the canonical
+# Patrol prompt, by the poker's absolute path, so the job it creates carries the marker AND the
+# tick — the ritual alone produced jobs that were never tick turns (report #1).
+S1_POKER="$(cd "$(dirname "$HOOK")/.." && pwd -P)/hooks/session-poker.sh"
+has  "1.9b …the re-arm line itself, exactly: CronCreate with the printed prompt, then adopt" \
+  "re-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate with the prompt \`bash $S1_POKER prompt\` prints → adopt" "$OUT"
+has  "1.9c AC-6.1 …the re-arm line names the prompt verb" "session-poker.sh prompt" "$OUT"
 has  "1.10 …then adopt" "adopt" "$OUT"
 has  "1.11 the session-id triple agrees" "— agree" "$OUT"
 eq   "1.12 the hook wrote nothing under .bionic" "$S1_BEFORE" "$(snap "$P1")"
@@ -1131,5 +1153,55 @@ expect_true "17.13 …inside the bound rather than at the sweep's own pace" \
 has "17.14 …and its grandchild is not left running on the machine afterwards" \
   "grandchild_alive=no" "$S17_TO"
 echo "      (timeout arm: $S17_TO, bound=2s, sweep sleeps 40s)"
+
+section "18 — a predecessor's open rows are the one close predicate's (epic-23 wave-20 T17, REQ-10; D10)"
+# THE DEFECT (T2's carry-over). This hook's open-row count closed a name on a
+# `landing-swept/v1|…|state=MET` marker OR on any ack of the name, ever, while the dispatch
+# wall, the sweeper, the stop wall and the tick's adopt fold close it only on an ack stamped
+# after its latest launch (`roster_open_names`). So after a /clear the block could tell the
+# operator a predecessor held nothing open while every wall held its name open — or the
+# reverse, for a name acked and dispatched again. One predecessor roster per history, and one
+# block reads all four:
+#   MET-ONLY  dispatched, a MET marker, never acked        -> open  (was closed)
+#   AGAIN     dispatched, acked, dispatched again          -> open  (was closed)
+#   DONE      dispatched, acked after the launch           -> closed
+#   SAMESEC   an ack in the launch's own second            -> open  (cannot be ordered)
+# DONE is the paired positive: without a history that closes, "open" everywhere would pass
+# on a hook that had stopped closing anything.
+P18=$(make_env 3600s)
+S18_MET="18181818-0000-4000-8000-00000000000a"
+S18_AGAIN="18181818-0000-4000-8000-00000000000b"
+S18_DONE="18181818-0000-4000-8000-00000000000c"
+S18_SAME="18181818-0000-4000-8000-00000000000d"
+roster_rows "$P18/.bionic/tmp/roster-$S18_MET.state" "$S18_MET" "W-METONLY"
+swept "$P18/.bionic/tmp/roster-$S18_MET.state" "$S18_MET" "W-METONLY"
+roster_rows "$P18/.bionic/tmp/roster-$S18_AGAIN.state" "$S18_AGAIN" "W-AGAIN"
+acked "$P18" "$S18_AGAIN" "W-AGAIN"
+roster_row_fixture status=intended session="$S18_AGAIN" name=W-AGAIN agent_id= \
+  launched_at=2026-09-02T22:00:00Z model= deliverable= >> "$P18/.bionic/tmp/roster-$S18_AGAIN.state"
+roster_rows "$P18/.bionic/tmp/roster-$S18_DONE.state" "$S18_DONE" "W-DONE"
+swept "$P18/.bionic/tmp/roster-$S18_DONE.state" "$S18_DONE" "W-DONE"
+acked "$P18" "$S18_DONE" "W-DONE"
+roster_rows "$P18/.bionic/tmp/roster-$S18_SAME.state" "$S18_SAME" "W-SAMESEC"
+acked "$P18" "$S18_SAME" "W-SAMESEC" 2026-09-02T20:00:00Z
+S18_BEFORE=$(snap "$P18")
+OUT=$(drive "$P18" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "18.1 exit 0" "0" "$(rc)"
+has   "18.2 a MET marker with no ack closes nothing: the predecessor is listed, 1 open row" \
+  "${S18_MET:0:8} — 1 open row(s) — roster-$S18_MET.state" "$OUT"
+has   "18.3 acked and dispatched again: the name is open again" \
+  "${S18_AGAIN:0:8} — 1 open row(s) — roster-$S18_AGAIN.state" "$OUT"
+hasnt "18.4 acked after its launch: closed, so the roster is not listed" \
+  "roster-$S18_DONE.state" "$OUT"
+has   "18.5 an ack in the launch's own second closes nothing" \
+  "${S18_SAME:0:8} — 1 open row(s) — roster-$S18_SAME.state" "$OUT"
+eq    "18.6 the hook wrote nothing under .bionic" "$S18_BEFORE" "$(snap "$P18")"
+
+# ONE PREDICATE, NOT A THIRD SPELLING. The behaviour above is the proof; this names where it
+# lives, so a private ack or MET set regrown in the hook fails here as well as in the field.
+eq    "18.7 the hook's open-row count is the roster library's (roster_open_counts)" "yes" \
+  "$(grep -q '| roster_open_counts' "$HOOK" && echo yes || echo no)"
+eq    "18.8 …and the hook keeps no MET close of its own" "0" \
+  "$(grep -c 'state") == "MET"' "$HOOK" | tr -d ' ')"
 
 finish

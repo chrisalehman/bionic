@@ -17,6 +17,10 @@
 #     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
 #     bash <plugin-root>/hooks/session-poker.sh adopt      what OTHER sessions launched here (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
+#     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
+#     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
+#     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
 # are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
@@ -374,6 +378,10 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --window   defer a dead session whose own newest file is younger than the poker interval"
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in"
+  die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
+  die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
+  die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   exit 2
 }
 
@@ -398,6 +406,7 @@ ADOPT_REPORT_ONLY=no
 SWEEP_REPORT_ONLY=no
 SWEEP_WINDOWED=no
 BIND_ARG=""
+FILL_REPORT_ARG=""
 case "$VERB" in
   adopt)
     if [ $# -eq 1 ]; then
@@ -453,8 +462,57 @@ case "$VERB" in
     EXTEND_NAME="$1"
     EXTEND_REASON="$2"
     ;;
-  tick|arm|disarm|interval|interval-default|window)
+  # THE NINE CELLS AN AUTHOR WRITES, IN THE TABLE'S OWN COLUMN ORDER (wave-20 REQ-5, AC-5.3;
+  # Δ5). `status`, `worktree` and `base` are the dispatcher's cells and are not operands:
+  # a new row is `pending` and names no tree. Every operand is required — `—` is how the
+  # table itself spells "none" — so a short list is the usage error, never a guessed default.
+  task-add)
+    if [ $# -ne 9 ]; then
+      usage "task-add takes exactly nine arguments: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> (write — for none)."
+    fi
+    TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
+    TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"
+    ;;
+  # THE ONE VERB WITH REPEATABLE FLAGS (wave-20 T9, REQ-4; spec D4). Each `--files+`,
+  # `--suites+` and `--reexec+` names ONE addition and may be given again; `--reason` is
+  # required, for the reason `extend`'s is — a roster meant to say why a contract changed
+  # cannot default that sentence. The additions are held newline-joined rather than in
+  # arrays: this file runs `set -u` under bash 3.2, where an empty array is unbound.
+  # A flag with no change flag at all is a usage error; a change the row already carries is
+  # the verb's own refusal (exit 1), because only the row can say so.
+  amend)
+    if [ $# -lt 1 ] || [ -z "$1" ]; then
+      usage "amend takes a name, then --files+/--suites+/--reexec+ additions and --reason."
+    fi
+    AMEND_NAME="$1"; shift
+    AMEND_FILES=""; AMEND_SUITES=""; AMEND_RUNS=""; AMEND_REASON=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --files+|--suites+|--reexec+|--reason)
+          if [ $# -lt 2 ] || [ -z "$2" ]; then usage "amend: $1 takes a value."; fi
+          case "$2" in --*) usage "amend: $1 takes a value, and got the flag $2." ;; esac
+          case "$1" in
+            --files+)  AMEND_FILES="${AMEND_FILES}$2"$'\n' ;;
+            --suites+) AMEND_SUITES="${AMEND_SUITES}$2"$'\n' ;;
+            --reexec+) AMEND_RUNS="${AMEND_RUNS}$2"$'\n' ;;
+            --reason)  AMEND_REASON="$2" ;;
+          esac
+          shift 2 ;;
+        *) usage "unknown argument for amend: $1" ;;
+      esac
+    done
+    [ -n "$AMEND_REASON" ] || usage "amend takes --reason <why>: the roster says why a contract changed."
+    [ -n "$AMEND_FILES$AMEND_SUITES$AMEND_RUNS" ] \
+      || usage "amend changes nothing without --files+, --suites+ or --reexec+."
+    ;;
+  tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
+    ;;
+  # ONE OPTIONAL OPERAND (wave-20 REQ-5, AC-5.6): the plan whose ledger to read. Without it, the
+  # session's own run — the one every other verb here resolves.
+  fill-report)
+    [ $# -le 1 ] || usage "fill-report takes at most one argument: the plan whose fill ledger to read."
+    FILL_REPORT_ARG="${1:-}"
     ;;
   *) usage "unknown verb: $VERB" ;;
 esac
@@ -989,6 +1047,9 @@ count_refused_dispatches() {  # <transcript> [<since ISO>] -> count on stdout
 #   bound-open <p>    this session's own run, and it is open        -> p, open
 #   fallback <p>      no binding; today's root-keyed answer, said out loud (AC-3) -> p, open
 #   bound-closed <p>  this session's own run, and it has closed     -> p, NOT open
+#   bound-unreadable <p>  its own run's plan is there, unreadable   -> p, OPEN=unreadable:
+#                     named, never "no open run"; run_state keeps the Patrol (doubt is open)
+#                     and the scheduler fills nothing from a plan it cannot read (wave-20 T1)
 #   none              no binding and no open run in the root        -> today's newest plan,
 #                                                                      NOT open
 #
@@ -1030,9 +1091,19 @@ resolve_run() {  # <project root> <session id> -> sets POKER_RUN_PLAN / POKER_RU
       # second opinion cannot re-open a run this session already finished.
       POKER_RUN_PLAN="$path"; POKER_RUN_OPEN=no
       die "bound plan closed — $path; this session has no open run" ;;
-    *)
+    bound-unreadable)
+      # A BINDING IS A COMMITMENT, AND AN UNREADABLE ONE IS STILL ONE (wave-20 T1, REQ-2).
+      # The plan is carried, the neighbour's is never read, and "open" is neither yes nor no.
+      POKER_RUN_PLAN="$path"; POKER_RUN_OPEN=unreadable
+      die "bound plan unreadable — $path; restore read access to it" ;;
+    none)
       POKER_RUN_PLAN="$(active_plan "$repo")" || POKER_RUN_PLAN=""
       POKER_RUN_OPEN=no ;;
+    *)
+      # A WORD THIS TICK DOES NOT KNOW RESOLVES NOTHING. This arm was `none`'s, and a verdict
+      # added to `session_run` without an arm here fell into `active_plan` — another run's
+      # plan (wave-20 T1, REQ-2). `none` keeps that read by name, for the reason above.
+      POKER_RUN_PLAN=""; POKER_RUN_OPEN=no ;;
   esac
   return 0
 }
@@ -1058,8 +1129,15 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
   # error on stderr and an empty answer. DOUBT IS `open` (ADR-002 §3), which is the same
   # answer the no-plan arm above gives, so the Patrol keeps its stamp rather than stopping
   # on a file nobody can read.
-  if [ ! -f "$plan" ]; then
+  if [ ! -f "$plan" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
     printf 'open|%s is this session'"'"'s bound plan and it is not on disk' "$plan"
+    return 0
+  fi
+  # AN UNREADABLE BOUND PLAN IS DOUBT, AND DOUBT IS `open` (ADR-002 §3; wave-20 T1, REQ-2).
+  # It is not gone — the arm above would say "not on disk", which for a plan inside an
+  # unopenable folder is false — and nothing below could read its `current:`.
+  if [ "$POKER_RUN_OPEN" = unreadable ]; then
+    printf 'open|%s is this session'"'"'s bound plan and it cannot be read' "$plan"
     return 0
   fi
   section="$(normalize_newlines "$plan" | awk '
@@ -1185,28 +1263,11 @@ space_field() {  # <record> <key> -> value on stdout, empty if absent
   printf '%s' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -1
 }
 
-# The plan header's `parallel-budget:` value, or empty.
-#
-# THE LEADING FRONTMATTER BLOCK ONLY, byte-for-byte the read hooks/dispatch-preflight.sh's
-# budget arm takes: a `parallel-budget:` inside the plan BODY is prose — this wave's own
-# plan quotes the header in a task description — and a reader that took a quotation for
-# configuration would fill against a number nobody set.
-plan_budget_line() {  # <plan> -> the value after `parallel-budget:`, or empty
-  awk '
-    NR == 1 && $0 != "---" { exit }
-    NR == 1 { next }
-    $0 == "---" { exit }
-    /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
-  ' "$1" 2>/dev/null
-}
-
-# One integer field out of that value. NOT AN INTEGER IS ABSENT: an arm this cannot measure
-# goes unmeasured and says so, exactly as the dispatch wall's own budget_field does.
-budget_int() {  # <budget line> <key> -> a non-negative integer, or empty
-  local v
-  v="$(space_field "$1" "$2")"
-  case "${v:-}" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$v" ;; esac
-}
+# THE PLAN HEADER'S BUDGET IS READ BY run.sh (epic-23 wave-20 T2, D10). `plan_budget_line`
+# (the strict `parallel-budget:` line of the leading frontmatter) and `budget_field` (one
+# whole field, as a decimal integer) moved there from this file, so the tick, the stop wall,
+# dispatch preflight and the governing-skill hook size a run from one reading. NOT AN INTEGER
+# IS ABSENT: an arm this cannot measure goes unmeasured and says so.
 
 # THE TASK TABLE IS NOT READ HERE ANY MORE (REQ-1e, spec §2 D3). `slice_table` and
 # `slice_ready` — a header-keyed `id`/`deps`/`status` parse and the readiness pass over it
@@ -1233,9 +1294,10 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
   resolve_run "$1" "${2:-}"
   SCHED_PLAN="$POKER_RUN_PLAN"
   SCHED_BUDGET=""
-  [ -n "$SCHED_PLAN" ] && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
-  SCHED_WRITERS="$(budget_int "$SCHED_BUDGET" writers)"
-  SCHED_JOBS="$(budget_int "$SCHED_BUDGET" test_jobs)"
+  [ -n "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ] \
+    && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
+  SCHED_WRITERS="$(budget_field "$SCHED_BUDGET" writers)"
+  SCHED_JOBS="$(budget_field "$SCHED_BUDGET" test_jobs)"
 }
 
 # ── THE APPROVAL GATE (epic-21 T4, AC-5). A printed FILL is a dispatch instruction — the
@@ -1341,19 +1403,23 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
 # spawn per row inside a Patrol tick.
 #
 # "OPEN" IS THE ONE PREDICATE THE REST OF THE TICK USES (S19; Step-6 correctness review,
-# out-of-axis note). A `status=intended` row survives the roster pass if no `landing-swept/v1`
-# marker has CLOSED it, and it survives the live pass if `live_row_open` — the fleet's single
-# row-openness predicate, payload/scripts/lib/agents.sh — still calls its agent live on this
-# session's transcript. Before this fix the arm stopped at the roster pass, so the tick's
+# out-of-axis note). A `status=intended` row survives the roster pass if its name is OPEN by
+# the one close predicate, and it survives the live pass if `live_row_open` — the fleet's
+# single row-openness predicate, payload/scripts/lib/agents.sh — still calls its agent live on
+# this session's transcript. Before S19 the arm stopped at the roster pass, so the tick's
 # advisory `open=` asked the live set while the one NAME it prints for the operator to act on
 # did not: the kill floor could hand back a stop address for an agent the harness had already
 # let go.
 #
-# CLOSED MEANS `state=MET`, not "a marker exists". `hooks/session-start.sh`'s `open_rows` and
-# `adopt_fold` below both require it; this arm and lib/patrol.sh's `patrol_roster_state` did
-# not, and S17's `adopt_copy_marker` is a second writer that copies a predecessor's UNMET
-# verdict verbatim onto a successor's roster BY DESIGN. An UNMET contract is open work by
-# every other reader in the fleet.
+# CLOSED MEANS ACKED AFTER THE LATEST LAUNCH (epic-23 wave-20 T20, REQ-10, D10; found by T17,
+# approved by Chris). The roster pass asks `roster_open_names` (payload/scripts/lib/roster.sh)
+# over this session's roster and ack ledger, the predicate the dispatch wall, the sweeper, the
+# stop wall and `adopt_fold` below all ask. Until T20 this arm closed a name on a
+# `landing-swept/v1|…|state=MET` marker alone (and before S17's review, on any marker). A MET
+# marker records that a landing was SEEN, not that the agent left, so a writer still running
+# behind one was invisible to the kill floor while every other reader counted it open. An
+# UNMET marker, which S17's `adopt_copy_marker` copies onto a successor's roster by design,
+# closes nothing either — as it never did.
 #
 # STALE AND NONE KEEP THE ROSTER SPELLING, the same fallback and the same reason as the
 # tick's `open=` below: the Patrol's prompt runs before any ListAgents, so an arm that went
@@ -1376,19 +1442,17 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
 # call it exactly as they did.
 
 youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
-  local roster="$1" sid="$2" swept cands live_cands live_ok tr lrc name tab RL RN CL
+  local roster="$1" sid="$2" open cands live_cands live_ok tr lrc name tab nl RL RN CL
   [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] || return 0
   tab="$(printf '\t')"
+  nl="
+"
 
-  # THE CLOSING MARKERS, BY FIELD EQUALITY rather than by substring: `state=` is last in the
-  # originator's printf today and a future field appended after it must not turn every marker
-  # into a non-closing one.
-  # THE SHARED CONSTANT (declared above), NOT A SECOND SPELLING (S17, on A-14b). This was
-  # the third hand-rolled spelling of the schema in the fleet and the one S15 did not reach:
-  # a rename on landing-gate.sh's side would have left this function silently matching
-  # nothing, and "no closing markers" reads here as "every row is still open".
-  swept="$(grep "^${SWEPT_SCHEMA}|" "$roster" 2>/dev/null \
-    | awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i == "state=MET") { print; break } }' || true)"
+  # THE OPEN NAMES, ONCE (epic-23 wave-20 T20): the one close predicate over this roster and
+  # the session's ack ledger beside it, the ledger `session-sweeper.sh ack` writes. One process
+  # for the whole pass; each row below is a membership test in the shell. An unnamed row
+  # answers `(unnamed)` there and has no stop address here, so it is skipped before the test.
+  open="$(roster_open_names "$roster" "${roster%/*}/sweeper-${sid}.state" "$sid")"
 
   # PASS ONE — THE ROSTER. Kept in the current shell rather than a pipeline subshell, because
   # the live pass below carries a decision ACROSS rows (the first STALE abandons all of them)
@@ -1399,7 +1463,7 @@ youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>,
     [ -n "$(line_field "$RL" claims)" ] || continue
     RN="$(line_field "$RL" name)"
     [ -n "$RN" ] || continue
-    case "$swept" in *"|name=${RN}|"*) continue ;; esac
+    case "$nl$open$nl" in *"$nl$RN$nl"*) : ;; *) continue ;; esac
     cands="${cands}$(line_field "$RL" launched_at)${tab}${RN}
 "
   done <<ROSTER_ROWS
@@ -1548,12 +1612,15 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 #   with its cure rather than skipped, because a silent skip is how a predecessor's agent
 #   becomes invisible twice.
 #
-#   A ROW IS CLOSED BY A LANDED MARKER OR BY AN ACK, and by nothing else. `landing-swept/v1`
-#   with `state=MET` is hooks/landing-gate.sh saying the contract landed; the ack ledger is
-#   the orchestrator saying so by hand, and the sweeper's own ledger comment already binds
-#   it across sessions ("an ack taken in a session that has since died is still in force in
-#   its successor"). A `landing-swept` marker reading UNMET closes NOTHING here: an answered
-#   failure is exactly the row a resumed session most needs to see.
+#   A ROW IS CLOSED BY AN ACK TAKEN AFTER ITS LATEST LAUNCH, and by nothing else — the one
+#   close predicate, `roster_open_names` (payload/scripts/lib/roster.sh; epic-23 wave-20 T2,
+#   D10; ADR-034 d1), which dispatch preflight, the sweeper's `acked=` and the stop wall's
+#   occupancy ask too. The ack ledger binds across sessions ("an ack taken in a session that
+#   has since died is still in force in its successor"). A `landing-swept/v1` marker closes
+#   NOTHING here, MET or not: until wave-20 a MET marker did, so an agent swept MET and never
+#   acked — still alive on the panel — came out of a `/clear` with no row on the new roster,
+#   and no stop could reach it (memory adopt-skips-swept-rows). An ack older than a
+#   relaunch closes nothing either: the relaunched agent is the one to adopt.
 #
 # THE ORIGIN IS CARRIED OUT WITH THE ROW, and it is what the stop address is built from
 # (T3 FINDING 1). `adopted_from=` wins over `session=` when the row has one: a row that was
@@ -1566,7 +1633,11 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
 adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes
-  awk -v ackfile="$2" '
+  # THE OPEN SET IS ASKED ONCE, of the one predicate, over the predecessor's roster as it
+  # stands — no session filter, because every row on it carries the predecessor's own id.
+  # Handed to awk through the environment rather than `-v`, which would read a backslash in
+  # a name as an escape.
+  AF_OPEN="$(roster_open_names "$1" "$2")" awk '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
       for (i = 1; i <= n; i++) {
@@ -1578,15 +1649,8 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       return ""
     }
     BEGIN {
-      if (ackfile != "") {
-        while ((getline l < ackfile) > 0) {
-          if (l !~ /^sweeper-ledger\/v1\|/) continue
-          if (kv(l, "event") != "ack") continue
-          an = kv(l, "name")
-          if (an != "") acked[an] = 1
-        }
-        close(ackfile)
-      }
+      no = split(ENVIRON["AF_OPEN"], ol, "\n")
+      for (i = 1; i <= no; i++) if (ol[i] != "") isopen[ol[i]] = 1
     }
     /^roster-state\/v1\|/ {
       n = kv($0, "name"); if (n == "") next
@@ -1635,16 +1699,10 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       }
       next
     }
-    /^landing-swept\/v1\|/ {
-      n = kv($0, "name")
-      if (n != "" && kv($0, "state") == "MET") met[n] = 1
-      next
-    }
     END {
       for (i = 1; i <= cnt; i++) {
         n = order[i]
-        if (n in met) continue
-        if (n in acked) continue
+        if (!(n in isopen)) continue
         printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
                launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
                ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n], \
@@ -1833,9 +1891,11 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
 # the waiver above. `adopt_write_row` puts the row on this session's roster; this puts the
 # SOURCE roster's own landing verdict for that name beside it, verbatim, so a reader that
 # trusts the marker rather than re-deriving from disk (`hooks/session-start.sh`'s
-# `open_rows`, this file's own `youngest_suite_writer`, both scanning the roster they were
-# handed for a `landing-swept/v1|…|name=<X>|` line) sees the same answer on the successor
-# that stood on the predecessor.
+# `open_rows`, which scans the roster it was handed for a `landing-swept/v1|…|name=<X>|`
+# line) sees the same answer on the successor that stood on the predecessor. This file's own
+# `youngest_suite_writer` no longer needs the marker for that: since T20 (epic-23 wave-20) it
+# asks `roster_open_names` once for the whole open set and checks each candidate name against
+# it directly, so its answer already agrees with the sweep without reading a copied line.
 #
 # payload/scripts/lib/stop.sh (`stop_landing_gate`, reached from hooks/stop.sh) is this
 # schema's one ORIGINATING writer. This call site is the second writer, made deliberately
@@ -1844,10 +1904,11 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
 # permitted to read (never write — the row above is still the one file this verb writes to).
 #
 # THE LATEST LINE, because the marker stream is append-only the same way the roster is: a
-# name can be superseded (UNMET -> MET) and the last line wins. A MET line can never be the
-# one found here — `adopt_fold`'s `met[]` filter above excludes any name carrying one from
-# the fold entirely, so a name that reaches this call was never offered one to adopt in the
-# first place, and the only history left to find is non-MET.
+# name can be superseded (UNMET -> MET) and the last line wins. `adopt_fold` excludes a
+# closed name through the same `roster_open_names` predicate (an ack later than the row's
+# launch), not a `met[]` filter, so a name that reaches this call was never offered one to
+# adopt in the first place, and the only history left to find is whatever the source
+# roster's own ack state has not yet closed.
 #
 # IDEMPOTENT BY EXACT-LINE PRESENCE, the same posture `adopt_write_row` takes: the source
 # session is the one and only writer of ITS OWN marker lines, so a line copied once from it
@@ -1985,39 +2046,33 @@ EOF
 # and this caller is inside the UNMET arm of a verdict the sweeper has already taken over the
 # same contract — re-deriving delivery from disk here would be a second answer to a question
 # one owner already answered (D0).
-# THE SHARED TRANSCRIPT-DIRECTORY PREFERENCE (T1d, 2026-09-22; walk W-3). An ADOPTED row's
-# transcript lives under whichever session last spoke to the agent: THIS session once it has
-# actually exchanged a turn with it, the launching session before that (`row_quiet`'s own
-# comment above explains why — the harness files a transcript under the session talking to
-# the agent NOW, while `adopted_from=` keeps naming the launcher forever). Both readers of
-# that fact resolve it through this ONE function now: `row_quiet` (the tick's own liveness
-# read) and `adopt`'s report (hooks/session-poker.sh, the ADOPT_SCHEMA block). Before this,
-# `adopt` printed only the launching session's path and age, unconditionally — so the very
-# report that told an operator to run `adopt` could already be looking at a stale copy while
-# the row was live under the session that had just adopted it (e.g. a re-run `adopt
-# --report-only` after this session had already spoken to the agent once). Returns the
-# subagent directory to use on stdout, nonzero if neither session has the file.
-transcript_dir_for() {  # <agent-id> <this-session-id> <fallback-session-id-or-empty>
-  local id="$1" this_sid="$2" fallback_sid="$3" sub=""
-  [ -n "$id" ] || return 1
-  sub="$(session_subagent_dir "$this_sid")" || sub=""
-  if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
-    printf '%s\n' "$sub"
-    return 0
-  fi
-  if [ -n "$fallback_sid" ] && [ "$fallback_sid" != "$this_sid" ]; then
-    sub="$(session_subagent_dir "$fallback_sid")" || sub=""
-    if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
-      printf '%s\n' "$sub"
-      return 0
-    fi
-  fi
+# THE PROJECT DIRECTORY A SESSION'S LOGS LIVE UNDER (D8; REQ-8; epic-23 wave-20 T5). One
+# level above `<project-dir>/<session-id>/subagents/…` — the directory `agent_log_newest`
+# (payload/scripts/lib/observe.sh) globs. Tried through the session's own transcript first
+# (`<project-dir>/<sid>.jsonl`, the ordinary case), falling back to the parent of its
+# subagents directory: a session's `.jsonl` can be reclaimed while its directory survives
+# (`session_subagent_dir`'s own comment). Returns nothing when neither resolves.
+agent_project_dir_for() {  # <session-id> -> project directory on stdout, nonzero if unresolved
+  local sid="$1" tx sub
+  [ -n "$sid" ] || return 1
+  tx="$(session_transcript "$sid")" && { printf '%s\n' "${tx%/*}"; return 0; }
+  sub="$(session_subagent_dir "$sid")" && { printf '%s\n' "${sub%/*/*}"; return 0; }
   return 1
 }
 
+# THE SHARED NEWEST-LOG PREFERENCE (D8; REQ-8; epic-23 wave-20 T5; supersedes the T1d
+# this-session/adopted_from chain, walk W-3). An ADOPTED row's transcript lives under
+# whichever session last spoke to the agent — and after a SECOND `/clear` that can be an
+# INTERMEDIATE adopter this row names nowhere, because `adopted_from=` always names the
+# ORIGINAL launcher. `agent_log_newest` globs every session directory of the project for
+# the exact agent id and returns the newest by mtime, so no chain of sessions has to be
+# walked and no intermediate adopter can be missed. Both readers of the working log —
+# `row_quiet` (the tick's own liveness read) and `adopt`'s report (the ADOPT_SCHEMA block
+# below) — call it through this project-directory resolution.
+
 TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing to observe
-  local row="$1" now="$2" cad cad_s prog pm=0 id rsid sub tx lm=0
+  local row="$1" now="$2" cad cad_s prog pm=0 id proj tx lm=0
 
   TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
   OBS_DELIV_STATE=none
@@ -2050,17 +2105,17 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
   tx=""
   id="$(line_field "$row" agent_id)"
   if [ -n "$id" ]; then
-    # THIS SESSION'S DIR FIRST (wave-19 T1; D4, REQ-2), resolved through `transcript_dir_for`
-    # (T1d) so `adopt`'s own report reads the identical preference — see that function's
-    # comment for the full rationale. The harness files an agent's transcript under the
-    # session talking to it NOW, so after an adopt the live file sits under the adopter while
-    # `adopted_from=` still names the launcher — reading only the launcher's copy reported a
-    # working agent quiet (R1 Q4, bed3). `adopted_from=` itself is provenance and is never
-    # rewritten: adopt's idempotence keys on it.
-    rsid="$(line_field "$row" adopted_from)"
-    sub="$(transcript_dir_for "$id" "$SESSION_ID" "$rsid")" || sub=""
-    if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
-      tx="$sub/agent-${id}.jsonl"
+    # THE NEWEST COPY, ANYWHERE IN THE PROJECT (D8, REQ-8) — never a this-session/
+    # adopted_from CHAIN. The harness files an agent's transcript under whichever session
+    # is talking to it NOW, and after a SECOND `/clear` that can be an intermediate adopter
+    # `adopted_from=` never names (it always names the ORIGINAL launcher) — reading only
+    # the launcher's copy, or only this session's, reported a working agent quiet (R1 Q4,
+    # bed3; triage-A). `adopted_from=` itself is still provenance and is never rewritten:
+    # adopt's idempotence keys on it.
+    proj="$(agent_project_dir_for "$SESSION_ID")" || proj=""
+    tx=""
+    [ -n "$proj" ] && { tx="$(agent_log_newest "$id" "$proj")" || tx=""; }
+    if [ -n "$tx" ]; then
       OBS_LOG_MTIME="$(file_mtime "$tx")"
       lm="$OBS_LOG_MTIME"
       OBS_LOG_AGE=$(( now - OBS_LOG_MTIME ))
@@ -2123,6 +2178,101 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
 # against, a plan with no budget — used to print as ordinary lines, two of them BELOW the
 # decision. `poker: note:` is what a fact gets, and every note prints above the decision line.
 note() { printf 'poker: note: %s\n' "$1"; }
+
+# ---------------------------------------------------------------- a successor row
+#
+# ONE COPY OF A ROW, FOR THE TWO VERBS THAT APPEND ONE (wave-20 T9; research D2 REQ-4).
+# `extend` and `amend` both write a row for a name that already has one, and they differ
+# only in what they override: `extend` a fresh launch instant and its reason, `amend` the
+# three instrument fields and its reason. `roster_row` assigns its arguments in order, so a
+# caller overrides a field by passing it again AFTER these. Every field is copied verbatim
+# but the session (the caller's own key) and `re_executes=`, which the row stores encoded
+# and `roster_row` encodes again, so it goes back plain (`clean … re_executes`, the same
+# decode `adopt_write_row` takes). The present-if-passed fields travel only when the source
+# row had them, the discipline `adopt_write_row`'s INSTRUMENT_FIELDS group keeps: an absent
+# key and a present-but-empty one are different rows to a by-key reader. The two audit keys
+# (`amended=`, `extended=`) are NOT copied — each belongs to the row that did the act, and
+# the history is the row sequence.
+ROW_COPY_ARGS=()
+row_copy_args() {  # <row> <session id> -> sets ROW_COPY_ARGS
+  local row="$1" k
+  ROW_COPY_ARGS=("session=$2")
+  for k in status name agent_id launched_at subagent_type model deliverable source duration \
+           progress claims cadence absent waiver tool_use_id plan; do
+    ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
+  done
+  for k in files suites_allowed suites_source teammate_id adopted_from; do
+    row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
+  done
+  if row_has_key "$row" re_executes; then
+    ROW_COPY_ARGS+=("re_executes=$(clean "$(line_field "$row" re_executes)" re_executes)")
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------- the contract grammar
+#
+# THE DISPATCH WALL'S GRAMMAR, AT THIS FILE'S TWO DOORS (wave-20 T9; spec D4, ledger Δ10).
+# `amend` widens a live contract and `task-add` writes a Files cell a brief is later built
+# from; both hand what they were given to payload/scripts/lib/brief.sh's
+# `brief_validate_fields`, so a contract that enters here is held to exactly a fresh
+# dispatch's standard. Loaded on first use, never at the top: the tick runs every Patrol
+# interval and needs none of it.
+poker_brief_load() {
+  declare -F brief_validate_fields >/dev/null 2>&1 && return 0
+  [ -f "$BIONIC_LIB/brief.sh" ] || return 1
+  # shellcheck source=/dev/null
+  . "$BIONIC_LIB/brief.sh"
+  declare -F brief_validate_fields >/dev/null 2>&1
+}
+
+# The sink `brief_validate_fields` calls: a finding is collected — its fact alone, and its
+# fact, fix and detail as the words a refusal prints — and a loud pass is a note.
+POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
+poker_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
+  case "$1" in
+    finding)
+      POKER_BRIEF_FACTS="${POKER_BRIEF_FACTS}$2"$'\n'
+      POKER_BRIEF_WORDS="${POKER_BRIEF_WORDS}  $2 — $3"$'\n'"$(printf '%s\n' "$4" | sed 's/^/    /')"$'\n\n'
+      ;;
+    warn) note "$2" ;;
+  esac
+}
+
+# A brief span out of newline-joined additions: `Files:` and `Suites:` take the words as
+# they are, `Re-executes:` marks each run with backticks, the one spelling the lift reads a
+# run from. <runs, marked> is text already in that shape (a row's stored value).
+poker_brief_span() {  # <files lines> <suites lines> <runs, marked> <runs lines> -> brief text
+  local f s r="$3" line
+  f="$(printf '%s' "$1" | tr '\n,' '  ')"
+  s="$(printf '%s' "$2" | tr '\n,' '  ')"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    r="${r:+$r }\`${line}\`"
+  done <<EOF
+$4
+EOF
+  case "$f" in *[![:space:]]*) printf 'Files: %s\n' "$f" ;; esac
+  case "$s" in *[![:space:]]*) printf 'Suites: %s\n' "$s" ;; esac
+  [ -n "$r" ] && printf 'Re-executes: %s\n' "$r"
+  return 0
+}
+
+# Order-keeping unions: the old value's members first, then each new member it lacks. A
+# widening can never drop what the row already held.
+poker_union() {  # <separator: , or space> <old list> <new list>... -> the union
+  local sep="$1"; shift
+  printf '%s\n' "$@" | awk -v sep="$sep" '
+    { n = (sep == ",") ? split($0, a, ",") : split($0, a, /[ \t]+/)
+      for (i = 1; i <= n; i++) if (a[i] != "" && !(a[i] in seen)) { seen[a[i]] = 1; out = out (out == "" ? "" : sep) a[i] } }
+    END { print out }'
+}
+
+# The marked runs of a stored `re_executes=` value, one per line: the text between each pair
+# of backticks. The same reading the budget arm takes of the field.
+poker_marked_runs() {  # <runs, marked> -> one run per line
+  printf '%s' "$1" | awk -F'`' '{ for (i = 2; i <= NF; i += 2) if ($i != "") print $i }'
+}
 
 # ---------------------------------------------------------------- the sweep
 #
@@ -2245,6 +2395,84 @@ case "$VERB" in
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
     WINDOW="$(roster_window "$ROSTER_FILE" "$SESSION_ID")" || WINDOW=""
     [ -n "$WINDOW" ] && printf '%s\n' "$WINDOW"
+    exit 0
+    ;;
+
+  # THE CANONICAL PATROL PROMPT (wave-20 REQ-6, AC-6.1; D6). Report #1: a Patrol job created
+  # with a composed prompt — the bare tick command, or the marker without the tick — produced
+  # turns the stop wall never saw as ticks, or ticks that never ran. The prompt is a fact of
+  # the session and of this poker's own path, so it is printed rather than composed: the
+  # marker `bionic-patrol session=<sid[0:8]>` FIRST (the stop wall's TICK_MARK, and the prefix
+  # the resume ritual deletes stray jobs by), then the tick by this script's absolute path.
+  # One line, because it is a CronCreate prompt. READ-ONLY and outside the engagement gate,
+  # like `interval`: it decides nothing.
+  prompt)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
+      exit 3
+    fi
+    printf 'bionic-patrol session=%s — Patrol tick. ListAgents, then run: bash %s tick — the tick decides per row. Then: TaskList and reconcile; dispatch every ready row the wall names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>"; TaskStop each STANDDOWN or write "standdown-declined: <name> <reason>"; then continue the run toward its goal until a wall.\n' \
+      "${SESSION_ID:0:8}" "${HOOK_DIR}/session-poker.sh"
+    exit 0
+    ;;
+
+  # THE FILL'S MEASURE (wave-20 REQ-5, AC-5.6; Δ2; ADR-036 decision 4). The stop library appends
+  # one `fill-ledger/v1` line per Stop of an engaged run; this folds them into the run's
+  # missed-opportunity minutes (a free slot, a ready row, nothing launched — target zero), with
+  # HOLD and declines listed separately with their idle cost. The path and the fold are
+  # lib/patrol.sh's (`fill_ledger_path`, `fill_ledger_report`), the ones the recorder writes by.
+  #
+  # THE PLAN: the operand — absolute, project-root-relative or docs-root-relative, `bind`'s
+  # three spellings — or, without one, the session's own run as `resolve_run` names it. OPEN is
+  # `run_open`'s answer: an open run's last line owns the interval to now, a closed one's owns
+  # nothing. READ-ONLY and outside the engagement gate, like `window`.
+  fill-report)
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    FR_PLAN=""
+    if [ -n "$FILL_REPORT_ARG" ]; then
+      case "$FILL_REPORT_ARG" in
+        /*) FR_PLAN="$FILL_REPORT_ARG" ;;
+        *)  FR_PLAN="$REPO_REAL/$FILL_REPORT_ARG"
+            [ -f "$FR_PLAN" ] || FR_PLAN="$(docs_root "$REPO_REAL")/$FILL_REPORT_ARG" ;;
+      esac
+      if [ ! -f "$FR_PLAN" ] || [ -L "$FR_PLAN" ]; then
+        die "REFUSED — no plan file at $FILL_REPORT_ARG; name the plan whose fill ledger to read."
+        exit 2
+      fi
+    else
+      SESSION_ID="$(session_id)" || SESSION_ID=""
+      if [ -z "$SESSION_ID" ]; then
+        die "REFUSED — no session key, and no plan named; a report without an operand is for THIS session's run."
+        exit 3
+      fi
+      resolve_run "$REPO_REAL" "$SESSION_ID"
+      FR_PLAN="$POKER_RUN_PLAN"
+      if [ -z "$FR_PLAN" ] || [ ! -f "$FR_PLAN" ]; then
+        die "REFUSED — this session has no run to report on; name the plan: fill-report <plan>."
+        exit 2
+      fi
+    fi
+    FR_SLUG="${FR_PLAN##*/}"; FR_SLUG="${FR_SLUG%.plan.md}"
+    FR_OPEN=no
+    run_open "$FR_PLAN" && FR_OPEN=yes
+    FR_FILE="$(fill_ledger_path "$REPO_REAL" "$FR_PLAN")"
+    if [ ! -f "$FR_FILE" ] || [ -L "$FR_FILE" ]; then
+      say "fill-report — no fill ledger yet for ${FR_SLUG}: ${FR_FILE} (the stop hook writes it from the first Stop past Step 3)"
+    fi
+    FR_OUT="$(fill_ledger_report "$FR_FILE" "$FR_SLUG" "$FR_OPEN" "${BIONIC_NOW_EPOCH:-}")"
+    printf '%s\n' "$FR_OUT"
+    FR_HEAD="$(printf '%s\n' "$FR_OUT" | head -n 1)"
+    FR_M="${FR_HEAD#*|missed=}"; FR_M="${FR_M%%|*}"
+    FR_H="${FR_HEAD#*|hold=}"; FR_H="${FR_H%%|*}"
+    FR_D="${FR_HEAD#*|declined=}"; FR_D="${FR_D%%|*}"
+    say "fill-report ${FR_SLUG}: missed opportunity ${FR_M} min (a free slot, a ready row, nothing launched) · HOLD ${FR_H} min · declined ${FR_D} min$( [ "$FR_OPEN" = yes ] && printf ' · run open, last interval to now')"
     exit 0
     ;;
 
@@ -2371,6 +2599,7 @@ case "$VERB" in
     ADOPT_ADOPTED=0
     ADOPT_LISTED=0
     ADOPT_CLOSED=0
+    ADOPT_UNREADABLE=0
     ADOPT_DUPES=0
     ADOPT_LAST_PART=""
     # THE IDS THIS RUN HAS ALREADY OFFERED (REQ-9 AC-9.2; D10). Adoption files a copy of the
@@ -2440,15 +2669,28 @@ case "$VERB" in
         # closed binding is residue exactly as a neighbour's is, and adopting it would take
         # ownership of an agent whose contract nothing is left to discharge.
         #
-        # AN UNREADABLE PLAN IS NOT A CLOSED ONE. `run_open` says nothing about a path that
-        # is not a file here — another root's plan, a plan since deleted — so the row keeps
-        # today's partition and is listed. A verb that cannot read a fact does not guess it.
+        # A GONE PLAN IS NOT A CLOSED ONE. `run_open` says nothing about a path that is not
+        # a file here — another root's plan, a plan since deleted — so the row keeps today's
+        # partition and is listed. A verb that cannot read a fact does not guess it.
+        #
+        # AND AN UNREADABLE PLAN IS NEITHER (wave-20 T18, REQ-2, D2; T1's carry-over). A plan
+        # that is THERE and cannot be read — mode 000, or inside a folder that cannot be
+        # opened (`plan_unreadable`, lib/run.sh) — was read two wrong ways here: at mode 000
+        # `-f` held and `run_open` failed, so its rows were counted closed and printed
+        # nowhere; in an unopenable folder `-f` failed, so the row fell through to the
+        # partition and an unbound caller ADOPTED it. Its run may be mid-flight and nothing
+        # about it can be read, so the row is listed as UNREADABLE with the path, never
+        # adopted and never counted closed — `session_run`'s `bound-unreadable`, asked of the
+        # row's plan instead of the session's (cross-gate §S.4g).
         ADOPT_ROW_CLOSED=no
+        ADOPT_ROW_UNREADABLE=""
         if [ "$ADOPT_SESSION_SWEPT" = yes ]; then
           ADOPT_ROW_CLOSED=yes
         elif [ -n "$RPLAN" ] && [ "$RPLAN" != none ]; then
           ADOPT_ROW_PLAN_ABS="$(adopt_abs "$RPLAN" "$REPO_REAL")"
-          if [ -f "$ADOPT_ROW_PLAN_ABS" ] && ! run_open "$ADOPT_ROW_PLAN_ABS"; then
+          if plan_unreadable "$ADOPT_ROW_PLAN_ABS" >/dev/null; then
+            ADOPT_ROW_UNREADABLE="$ADOPT_ROW_PLAN_ABS"
+          elif [ -f "$ADOPT_ROW_PLAN_ABS" ] && ! run_open "$ADOPT_ROW_PLAN_ABS"; then
             ADOPT_ROW_CLOSED=yes
           fi
         fi
@@ -2509,21 +2751,29 @@ case "$VERB" in
 
         # ---- the three addresses, all of them derived from the one id
         #
-        # RESOLVED THROUGH THE SAME PREFERENCE `row_quiet` USES (T1d, 2026-09-22; walk W-3).
-        # This report used to quote ONLY the launching session's copy, unconditionally — so a
-        # re-run of `adopt --report-only` after this session had already exchanged a turn
-        # with the agent (the file now sitting under THIS session's subagents dir, per
-        # `transcript_dir_for`'s own comment) still named the launcher's stale path and age,
-        # while the next tick's `row_quiet` read the fresh one: one row, two disagreeing
-        # readers. `transcript_dir_for` is the one function both now ask.
+        # RESOLVED THROUGH THE SAME NEWEST-COPY PREFERENCE `row_quiet` USES (D8, REQ-8;
+        # supersedes T1d, walk W-3). This report used to quote ONLY the launching session's
+        # copy, unconditionally — so a re-run of `adopt --report-only` after this session
+        # had already exchanged a turn with the agent (the file now sitting under THIS
+        # session's subagents dir) still named the launcher's stale path and age, while the
+        # next tick's `row_quiet` read the fresh one: one row, two disagreeing readers. A
+        # chain of "this session, else the launcher" also missed an INTERMEDIATE adopter
+        # between two `/clear`s — `agent_log_newest` is the one function both readers ask
+        # now, and it globs every session directory rather than walking a chain.
         TX=""
         TX_PRESENT=no
         TX_AGE=""
         TX_MTIME=0
         if [ -n "$RID" ]; then
-          TX_SUB="$(transcript_dir_for "$RID" "$SESSION_ID" "$OSID")" || TX_SUB=""
-          if [ -n "$TX_SUB" ]; then
-            TX="$TX_SUB/agent-${RID}.jsonl"
+          # THIS SESSION'S PROJECT DIRECTORY FIRST, falling back to the PREDECESSOR's — the
+          # two are ordinarily the same physical directory, but this session may never have
+          # spoken to any agent yet (no transcript, no subagents dir of its own), while the
+          # predecessor's directory is exactly what this walk is iterating over.
+          TX_PROJ="$(agent_project_dir_for "$SESSION_ID")" || TX_PROJ=""
+          [ -n "$TX_PROJ" ] || TX_PROJ="$(agent_project_dir_for "$OSID")" || TX_PROJ=""
+          TX=""
+          [ -n "$TX_PROJ" ] && { TX="$(agent_log_newest "$RID" "$TX_PROJ")" || TX=""; }
+          if [ -n "$TX" ]; then
             TX_PRESENT=yes
             # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
             # the agent takes, so its mtime is a fact about the agent rather than a
@@ -2613,7 +2863,12 @@ case "$VERB" in
         # carrying it names no run at all — and calling it "another run in this root" would
         # assert a run that does not exist. Both answers are un-adoptable, so the choice
         # only decides which heading the operator reads it under.
-        if [ -z "$ADOPT_OWN_KEY" ]; then
+        #
+        # UNREADABLE OUTRANKS ALL FOUR, `own` and `all` included: ownership is taken against a
+        # run, and this row's run cannot be read.
+        if [ -n "$ADOPT_ROW_UNREADABLE" ]; then
+          PARTITION=unreadable
+        elif [ -z "$ADOPT_OWN_KEY" ]; then
           PARTITION=all
         elif [ -z "$RPLAN" ] || [ "$RPLAN" = none ]; then
           PARTITION=unattributed
@@ -2623,8 +2878,9 @@ case "$VERB" in
           PARTITION=other
         fi
         case "$PARTITION" in
-          own|all) ADOPT_ADOPTED=$((ADOPT_ADOPTED + 1)) ;;
-          *)       ADOPT_LISTED=$((ADOPT_LISTED + 1)) ;;
+          own|all)    ADOPT_ADOPTED=$((ADOPT_ADOPTED + 1)) ;;
+          unreadable) ADOPT_UNREADABLE=$((ADOPT_UNREADABLE + 1)) ;;
+          *)          ADOPT_LISTED=$((ADOPT_LISTED + 1)) ;;
         esac
 
         # THE HEADING IS A GROUP SEPARATOR, printed when the partition CHANGES rather than
@@ -2637,6 +2893,7 @@ case "$VERB" in
           case "$PARTITION" in
             other)        say "other runs in this root — listed, never adopted" ;;
             unattributed) say "unattributed rows (pre-wave rosters) — listed, never adopted" ;;
+            unreadable)   say "UNREADABLE — rows whose plan is there and cannot be read — listed, never adopted, never counted closed" ;;
           esac
         fi
         ADOPT_LAST_PART="$PARTITION"
@@ -2694,13 +2951,15 @@ case "$VERB" in
                 # ORIGINATING writer. This is a second writer, deliberately: adopt never
                 # ORIGINATES a `landing-swept/v1` verdict, it only COPIES a line that writer
                 # already produced onto the roster this session is now the owner of, so
-                # `hooks/session-start.sh`'s `open_rows` and this file's own
-                # `youngest_suite_writer` — both of which read a marker straight off the
-                # SAME roster file as ground truth, with no re-derivation — see the same
-                # history on the successor that stood on the predecessor. A MET marker can
-                # never reach here: `adopt_fold`'s own `met[]` filter (above) excludes any
-                # name carrying one from the fold entirely, so only a non-MET history
-                # (UNMET/STILL-LIVE/AMBIGUOUS) is ever offered to copy.
+                # `hooks/session-start.sh`'s `open_rows` — which still reads a marker
+                # straight off the SAME roster file as ground truth, with no re-derivation —
+                # sees the same history on the successor that stood on the predecessor. This
+                # file's own `youngest_suite_writer` no longer needs the copy for that: since
+                # T20 (epic-23 wave-20) it asks `roster_open_names` once for the open set and
+                # checks each candidate against it directly. A closed name can never reach
+                # here either way: `adopt_fold` excludes it through that same
+                # `roster_open_names` predicate (an ack later than the row's launch), not a
+                # `met[]` filter, so only a still-open history is ever offered to copy.
                 adopt_copy_marker "$ADOPT_RF" "$ADOPT_OWN_ROSTER" "$(clean "$RNAME")"
               else
                 die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
@@ -2710,6 +2969,9 @@ case "$VERB" in
         esac
 
         say "$(clean "$RNAME") ($(clean "$RTYPE")) from session $OSID — $VERDICT"
+        # THE PATH, ON EVERY UNREADABLE ROW WHATEVER ITS ID, because the cure is on the plan.
+        [ "$PARTITION" = unreadable ] \
+          && printf '  plan        : UNREADABLE — %s is there and cannot be read\n' "$(clean "$ADOPT_ROW_UNREADABLE")"
         if [ -n "$RID" ] && [ "$ROW_JOURNALLED" = yes ]; then
           printf '  agent id    : %s\n' "$RID"
           printf '  observe     : %s (%s)\n' "$TX" \
@@ -2754,7 +3016,10 @@ case "$VERB" in
           printf '  observe     : %s (%s)\n' "$TX" \
             "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
           printf '  message     : SendMessage to:%s\n' "$(clean "$RNAME")"
-          if [ "$PARTITION" = other ]; then
+          if [ "$PARTITION" = unreadable ]; then
+            printf '  stop        : not adopted — this row'"'"'s plan cannot be read, so there is no\n'
+            printf '                run to take ownership against. Restore read access and re-run adopt.\n'
+          elif [ "$PARTITION" = other ]; then
             printf '  stop        : not adopted — this row belongs to another run in this root\n'
             printf '                (%s), and ownership stays with the session working it.\n' "${RPLAN:-none}"
           else
@@ -2810,13 +3075,17 @@ EOF
     # dropped is invisible by design — that is the fix — so the COUNT of what was dropped is
     # on the line that answers for the run, or the drop could not be told from a walk that
     # found nothing.
-    printf '%s|at=%s|session=%s|scanned=%s|open=%s|adopted=%s|listed=%s|closed=%s|dupes=%s\n' \
+    # `unreadable=` TRAILS THEM, the same way (wave-20 T18): a row neither adopted, listed as
+    # another run's, nor closed is counted where the operator reads the other three.
+    printf '%s|at=%s|session=%s|scanned=%s|open=%s|adopted=%s|listed=%s|closed=%s|dupes=%s|unreadable=%s\n' \
       "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$ADOPT_SESSIONS" "$ADOPT_ROWS" \
-      "$ADOPT_ADOPTED" "$ADOPT_LISTED" "$ADOPT_CLOSED" "$ADOPT_DUPES"
+      "$ADOPT_ADOPTED" "$ADOPT_LISTED" "$ADOPT_CLOSED" "$ADOPT_DUPES" "$ADOPT_UNREADABLE"
     # SAID ONCE, AND ONLY WHEN THERE IS SOMETHING TO SAY. An operator who expected a
     # predecessor's rows and was shown none is owed the reason.
     [ "$ADOPT_CLOSED" -gt 0 ] \
       && say "$ADOPT_CLOSED row(s) skipped: their run is closed, or their session is dead and its state files are already sweepable — there is nothing left to take over."
+    [ "$ADOPT_UNREADABLE" -gt 0 ] \
+      && say "$ADOPT_UNREADABLE row(s) UNREADABLE: their plan is there and cannot be read, so they are neither adopted nor counted closed — restore read access and re-run adopt."
     [ "$ADOPT_DUPES" -gt 0 ] \
       && say "$ADOPT_DUPES duplicate row(s) folded: one agent id is one agent, however many rosters carry a row for it."
     if [ "$ADOPT_ROWS" -eq 0 ]; then
@@ -3326,7 +3595,10 @@ EOF
   # `claims=`/`progress=`/`cadence=` triple. `standdown-declined:` answers one turn and
   # writes nothing; `ack` closes a row rather than opening one. Neither re-opens a MET
   # lineage, so this verb is a plain append: a fresh row for the same name, launched NOW,
-  # with the operator's reason riding in `claims=`. The already-written deliverable then
+  # with the operator's reason recorded as `extended=<iso> <reason>`. It used to ride
+  # `claims=`, the process pattern the sweeper hands to `pgrep -f`, so a reason carrying
+  # `.*` held the row STILL-LIVE on any process at all (wave-20 T9, AC-4.4); `claims=` is
+  # now copied from the row, like every field but the launch. The already-written deliverable then
   # dates before the new launch instant — `landing_conjunct` returns its `stale=` conjunct —
   # the verdict leaves MET for STILL-LIVE or UNMET, and the name drops off
   # `STANDDOWN_NAMES` and rejoins `OPEN`: the truthful accounting, the agent is still
@@ -3371,51 +3643,12 @@ EOF
     fi
 
     EXTEND_NOW="$(iso_now)"
-    EXTEND_RR_ARGS=(
-      "status=$(line_field "$EXTEND_ROW" status)"
-      "session=$SESSION_ID"
-      "name=$(clean "$EXTEND_NAME")"
-      "agent_id=$(line_field "$EXTEND_ROW" agent_id)"
-      "launched_at=$EXTEND_NOW"
-      "subagent_type=$(line_field "$EXTEND_ROW" subagent_type)"
-      "model=$(line_field "$EXTEND_ROW" model)"
-      "deliverable=$(line_field "$EXTEND_ROW" deliverable)"
-      "source=$(line_field "$EXTEND_ROW" source)"
-      "duration=$(line_field "$EXTEND_ROW" duration)"
-      "progress=$(line_field "$EXTEND_ROW" progress)"
-      "claims=$(clean "$EXTEND_REASON")"
-      "cadence=$(line_field "$EXTEND_ROW" cadence)"
-      "absent=$(line_field "$EXTEND_ROW" absent)"
-      "waiver=$(line_field "$EXTEND_ROW" waiver)"
-      "tool_use_id=$(line_field "$EXTEND_ROW" tool_use_id)"
-      "plan=$(line_field "$EXTEND_ROW" plan)"
-    )
-    # THE PRESENT-IF-PASSED FIELDS TRAVEL ONLY WHEN THE SOURCE ROW HAD THEM — the same
-    # discipline `adopt_write_row`'s INSTRUMENT_FIELDS group keeps above: an absent key and
-    # a present-but-empty one are different rows to a by-key reader, and this verb must not
-    # manufacture the first out of the second.
-    if row_has_key "$EXTEND_ROW" files; then
-      EXTEND_RR_ARGS+=("files=$(line_field "$EXTEND_ROW" files)")
-    fi
-    if row_has_key "$EXTEND_ROW" suites_allowed; then
-      EXTEND_RR_ARGS+=("suites_allowed=$(line_field "$EXTEND_ROW" suites_allowed)")
-    fi
-    if row_has_key "$EXTEND_ROW" suites_source; then
-      EXTEND_RR_ARGS+=("suites_source=$(line_field "$EXTEND_ROW" suites_source)")
-    fi
-    # `re_executes=` IS STORED ENCODED (T4, REQ-7/D4) and `roster_row` encodes what it is
-    # handed, so the copy goes back PLAIN — the same `clean … re_executes` decode
-    # `adopt_write_row` takes — or `%7C` becomes `%257C` on the appended row and the
-    # extended agent's declared run is a command no shell ran (walk-bb711e1.md §14, §29f).
-    if row_has_key "$EXTEND_ROW" re_executes; then
-      EXTEND_RR_ARGS+=("re_executes=$(clean "$(line_field "$EXTEND_ROW" re_executes)" re_executes)")
-    fi
-    if row_has_key "$EXTEND_ROW" teammate_id; then
-      EXTEND_RR_ARGS+=("teammate_id=$(line_field "$EXTEND_ROW" teammate_id)")
-    fi
-    if row_has_key "$EXTEND_ROW" adopted_from; then
-      EXTEND_RR_ARGS+=("adopted_from=$(line_field "$EXTEND_ROW" adopted_from)")
-    fi
+    # THE COPY IS `row_copy_args`'s, shared with `amend`; this verb overrides two fields: the
+    # launch, bumped to now (the whole point — the old deliverable then predates it), and
+    # its reason, as data. `claims=` travels with the copy, untouched.
+    row_copy_args "$EXTEND_ROW" "$SESSION_ID"
+    EXTEND_RR_ARGS=("${ROW_COPY_ARGS[@]}" "launched_at=$EXTEND_NOW"
+      "extended=$EXTEND_NOW $(clean "$EXTEND_REASON")")
 
     EXTEND_NEW_ROW="$(roster_row "${EXTEND_RR_ARGS[@]}")" || EXTEND_NEW_ROW=""
     if [ -z "$EXTEND_NEW_ROW" ]; then
@@ -3427,6 +3660,317 @@ EOF
       exit 2
     }
     say "extended — $EXTEND_NAME is open again: $ROSTER_FILE"
+    exit 0
+    ;;
+
+  # THE CONTRACT CHANGE (wave-20 T9; REQ-4, AC-4.1/4.2; spec D4, ledger Δ10). A writer's
+  # Files:, Suites: and Re-executes: are read from its roster row, captured at dispatch —
+  # editing the plan row changes nothing — and until this verb the only way to widen one was
+  # a re-dispatch. `amend` appends a SUCCESSOR row, copied from the name's latest
+  # (`row_copy_args`, the copy `extend` takes), with each addition merged in: a union, old
+  # members first, never a narrowing. The identity is not touched — `status=`,
+  # `launched_at=`, `agent_id=`, `teammate_id=` and `tool_use_id=` are the copy's — so the
+  # verdict, the stop gate and the budget join see the same contract, wider, and the stop
+  # wall and the budget wall, which already read a name's latest row, need no change.
+  # `amended=<iso> <reason>` records when and why; `session=` who.
+  #
+  # THE MERGED FIELDS ARE JUDGED BY THE DISPATCH WALL'S GRAMMAR (Δ10). The verb builds the
+  # span a brief carrying the merged contract would hold — `Files:`, `Suites:`,
+  # `Re-executes:` — and hands it to `brief_validate_fields` with the row's own role, so the
+  # auditor's three-run cap binds here as it does at dispatch. A declared budget stays
+  # declared (the old set plus the added suites); a DERIVED one is re-derived from the
+  # merged files by the configured impact command, and the old set is kept beside it.
+  #
+  # REFUSED: no session key (3), an unengaged session (decides nothing, 0), no row of the
+  # name, a CLOSED row — `roster_open_names`, the one close predicate: an ack later than the
+  # latest launch — and a change the row already carries (1), and anything the grammar
+  # refuses (1). A subagent cannot reach this verb at all: the Bash wall refuses `amend`,
+  # `extend` and `task-add` in any payload carrying an `agent_id` (payload/scripts/lib/walls.sh).
+  amend)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "An amendment answers for ONE session's roster, so without the key there is nothing to write."
+      exit 3
+    fi
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
+      die "REFUSED — no row named $AMEND_NAME: this session has no roster at $ROSTER_FILE."
+      exit 1
+    fi
+    AM_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+      | grep -F "|name=${AMEND_NAME}|" | tail -1)"
+    if [ -z "$AM_ROW" ]; then
+      die "REFUSED — no row named $AMEND_NAME on this session's roster ($ROSTER_FILE)."
+      exit 1
+    fi
+    AM_OPEN="$(roster_open_names "$ROSTER_FILE" "$REPO_REAL/.bionic/tmp/sweeper-${SESSION_ID}.state" "$SESSION_ID")"
+    if ! grep -qxF -- "$AMEND_NAME" <<< "$AM_OPEN"; then
+      die "REFUSED — $AMEND_NAME is closed: it was acked after its latest launch, or holds no live row. A closed contract is not amended; dispatch the work again."
+      exit 1
+    fi
+    if ! poker_brief_load; then
+      die "REFUSED — the contract grammar (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
+      exit 2
+    fi
+
+    AM_ROLE="$(line_field "$AM_ROW" subagent_type)"
+    AM_OLD_FILES="$(line_field "$AM_ROW" files)"
+    AM_OLD_SA="$(line_field "$AM_ROW" suites_allowed)"
+    AM_OLD_SRC="$(line_field "$AM_ROW" suites_source)"
+    AM_OLD_RUNS=""
+    row_has_key "$AM_ROW" re_executes && AM_OLD_RUNS="$(clean "$(line_field "$AM_ROW" re_executes)" re_executes)"
+
+    # THE ADDITIONS AS THE GRAMMAR READS THEM, alone: what each flag contributes once lifted.
+    AM_ADD="$(lift_contract_fields "$(poker_brief_span "$AMEND_FILES" "$AMEND_SUITES" "" "$AMEND_RUNS")" "$AM_ROLE")"
+    AM_NEW_FILES="$(poker_union , "$AM_OLD_FILES" "$(brief_field "$AM_ADD" files)")"
+
+    # THE DECLARED HALF OF THE BUDGET. A declared (or unlabelled) budget carries its old set
+    # into the span; a derived one is not a declaration and is re-derived below. `none` is a
+    # waiver, and it yields to the first suite actually added.
+    AM_DECL=""
+    [ "$AM_OLD_SRC" = derived ] || AM_DECL="$AM_OLD_SA"
+    AM_DECL="$(poker_union ' ' "$AM_DECL" "$(printf '%s' "$AMEND_SUITES" | tr '\n,' '  ')")"
+    case " $AM_DECL " in
+      *" none "*) [ "$AM_DECL" = none ] \
+                    || AM_DECL="$(printf '%s' "$AM_DECL" | tr ' ' '\n' | awk '$0 != "none" && $0 != ""' | tr '\n' ' ')"
+                  AM_DECL="${AM_DECL% }" ;;
+    esac
+
+    AM_SPAN="$(poker_brief_span "$(printf '%s' "$AM_NEW_FILES" | tr ',' '\n')" "$AM_DECL" "$AM_OLD_RUNS" "$AMEND_RUNS")"
+    AM_LIFT="$(lift_contract_fields "$AM_SPAN" "$AM_ROLE")"
+    POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
+    AM_RC=0
+    brief_validate_fields "$AM_LIFT" "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
+    AM_SA="$BRIEF_SUITES_ALLOWED"; AM_SRC="$BRIEF_SUITES_SOURCE"
+    # A derived budget with suites added too: the span declared, so nothing was derived — ask
+    # the impact command for the merged files on their own.
+    if [ "$AM_RC" -eq 0 ] && [ "$AM_OLD_SRC" = derived ] && [ -n "$AM_DECL" ] && [ -n "$AM_NEW_FILES" ]; then
+      brief_validate_fields "$(lift_contract_fields "Files: ${AM_NEW_FILES//,/ }" "$AM_ROLE")" \
+        "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
+      AM_SA="$(poker_union ' ' "$AM_SA" "$BRIEF_SUITES_ALLOWED")"
+    fi
+    if [ "$AM_RC" -ne 0 ]; then
+      die "REFUSED — a dispatch carrying $AMEND_NAME's amended contract would be refused; nothing was written:"
+      printf '%s' "$POKER_BRIEF_WORDS" >&2
+      exit 1
+    fi
+
+    # THE UNION ON THE ROW. A derived budget keeps its old set beside the new derivation, and a
+    # waiver that nothing replaced stays the waiver.
+    [ "$AM_OLD_SRC" = derived ] && AM_SA="$(poker_union ' ' "$AM_OLD_SA" "$AM_SA")"
+    [ -n "$AM_SA" ] || AM_SA="$AM_OLD_SA"
+    AM_SRC="${AM_OLD_SRC:-$AM_SRC}"
+    AM_NEW_RUNS="$AM_OLD_RUNS"
+    AM_OLD_RUN_SET="$(poker_marked_runs "$AM_OLD_RUNS")"
+    while IFS= read -r AM_R; do
+      [ -n "$AM_R" ] || continue
+      grep -qxF -- "$AM_R" <<< "$AM_OLD_RUN_SET" && continue
+      AM_NEW_RUNS="${AM_NEW_RUNS:+$AM_NEW_RUNS }\`${AM_R}\`"
+    done <<EOF
+$(poker_marked_runs "$(brief_field "$AM_ADD" re_executes)")
+EOF
+
+    if [ "$AM_NEW_FILES" = "$AM_OLD_FILES" ] && [ "$AM_SA" = "$AM_OLD_SA" ] \
+       && [ "$AM_NEW_RUNS" = "$AM_OLD_RUNS" ]; then
+      die "REFUSED — this amend changes nothing: every addition is already on $AMEND_NAME's row, or is not a path, suite or run the dispatch grammar reads (a Files: path carries a /). Nothing was written."
+      exit 1
+    fi
+
+    row_copy_args "$AM_ROW" "$SESSION_ID"
+    AM_ARGS=("${ROW_COPY_ARGS[@]}")
+    { [ -n "$AM_NEW_FILES" ] || row_has_key "$AM_ROW" files; } && AM_ARGS+=("files=$AM_NEW_FILES")
+    if [ -n "$AM_SA" ] || row_has_key "$AM_ROW" suites_allowed; then
+      AM_ARGS+=("suites_allowed=$AM_SA")
+      [ -n "$AM_SRC" ] && AM_ARGS+=("suites_source=$AM_SRC")
+    fi
+    { [ -n "$AM_NEW_RUNS" ] || row_has_key "$AM_ROW" re_executes; } && AM_ARGS+=("re_executes=$AM_NEW_RUNS")
+    AM_ARGS+=("amended=$(iso_now) $(clean "$AMEND_REASON")")
+    AM_NEW_ROW="$(roster_row "${AM_ARGS[@]}")" || AM_NEW_ROW=""
+    if [ -z "$AM_NEW_ROW" ]; then
+      die "REFUSED — could not build the amended row for $AMEND_NAME."
+      exit 2
+    fi
+    printf '%s\n' "$AM_NEW_ROW" >> "$ROSTER_FILE" 2>/dev/null || {
+      die "REFUSED — could not write to $ROSTER_FILE."
+      exit 2
+    }
+    say "amended — $AMEND_NAME: files=${AM_NEW_FILES:-(none)} suites=${AM_SA:-(none)}${AM_NEW_RUNS:+ runs=$AM_NEW_RUNS}; the stop and budget walls read this row from now on."
+    exit 0
+    ;;
+
+  # THE ROW-ADD VERB (wave-20 REQ-5, AC-5.3; Δ5, research D1 §3). A schedule change is a
+  # TRANSACTION: `units_add_row` projects the row onto a COPY of the bound plan (the row, its
+  # `- <id>:` line, and a Step-4 id threaded into the frontier rows that owe it), the copy is
+  # judged twice — by `units_validate`, and by a dry `git commit` through the REAL
+  # hooks/bash-walls.sh — and only a copy both admit is moved over the plan. On any refusal
+  # the plan is byte-identical and the words that refused it print. The precedent is
+  # close-out.sh's D5: a script writes a lifecycle artifact only where a gate validates what
+  # it wrote. Nothing else judges a Bash write of the plan: the governing-skill hook sees
+  # Write and Edit only.
+  #
+  # THE DRY COMMIT IS A WRITER'S, JUDGED BY THE TASK ARMS. The commit AC-5.3 names is the next
+  # writer's, from a row's tree, and the gate judges that commit at Step 4 whatever the run's
+  # step (`CURRENT=4`, walls.sh's row fork). A main-root commit during Verify would instead be
+  # held to the Step-5 block the run is still writing, and no row could ever be added during
+  # Verify — which is when fixups are found. So the dry copy carries `current: 4` when the run
+  # is past it; the copy that is swapped in keeps the run's own `current:`.
+  #
+  # THE DRY RUN IS BOUND TO THE COPY, NEVER TO THE PLAN. It arms its own engagement marker for
+  # a synthetic session whose `plan=` names the dry copy — close-out.sh's pattern, with a
+  # binding instead of the newest-plan fallback — and removes it after. Both copies sit
+  # beside the plan under names that do not end in `.md`, so no plan walk (`_run_candidates`,
+  # the misplaced-plan sweep) can ever read one as a run.
+  #
+  # MAIN THREAD ONLY is the Bash wall's to enforce (wave-20 T9); this verb refuses what it can
+  # see: no session key, an unengaged session, a session with no BOUND open plan (a writing
+  # verb never writes the newest-plan fallback), and a run below Step 4.
+  task-add)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "A row is added to ONE session's bound plan, so without the key there is nothing to write."
+      exit 3
+    fi
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+
+    TA_RUN="$(session_run "$REPO_REAL" "$SESSION_ID")"
+    case "$TA_RUN" in
+      'bound-open '*) TA_PLAN="${TA_RUN#bound-open }" ;;
+      *)
+        die "REFUSED — task-add writes the plan this session is bound to, and it has no bound open run (${TA_RUN:-none})."
+        die "Bind this session to its run first (this script's bind verb), then add the row."
+        exit 1 ;;
+    esac
+
+    TA_CUR="$(_fill_current_field "$TA_PLAN")"
+    TA_CUR="${TA_CUR%[ab]}"
+    case "$TA_CUR" in
+      ''|*[!0-9]*)
+        die "REFUSED — $TA_PLAN has current: ${TA_CUR:-(none)}; task-add changes a wave plan past Step-3 approval, whose current: is a step number."
+        exit 1 ;;
+    esac
+    if [ "$TA_CUR" -lt 4 ]; then
+      die "REFUSED — $TA_PLAN is at current: $TA_CUR; before Step-3 approval the plan is written by hand and reviewed, not added to."
+      exit 1
+    fi
+
+    # THE FILES CELL IS JUDGED BY THE DISPATCH GRAMMAR (wave-20 T9; D4, Δ10; T6 carry-over).
+    # The cell becomes a brief's `Files:` line at dispatch, so it is read here exactly as the
+    # dispatch wall will read it: a cell the lift reads as no path — a template slot, a bare
+    # word — is refused now, in the grammar's words, rather than forty minutes later at the
+    # dispatch of a row nobody can fix from the table. `—` is the table's "none" and declares
+    # nothing to judge. TWO FACTS ARE THE REPOSITORY'S, NOT THE CELL'S: no configured impact
+    # command, and one that overran its bound. A dispatch answers either with a `Suites:`
+    # line, which the plan row has no column for, so here they are notes and the row goes in.
+    case "$TA_FILES" in
+      ''|'—'|'-') : ;;
+      *)
+        if ! poker_brief_load; then
+          die "REFUSED — the contract grammar (lib/brief.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+          exit 2
+        fi
+        POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
+        brief_validate_fields "$(lift_contract_fields "Files: $TA_FILES" "$TA_AGENT")" \
+          "$TA_AGENT" "$REPO_REAL" poker_brief_sink || :
+        TA_CELL_FACTS=""
+        while IFS= read -r TA_FACT; do
+          [ -n "$TA_FACT" ] || continue
+          case "$TA_FACT" in
+            'no impact command is configured here'|'the impact command did not answer')
+              note "$TA_FACT — a dispatch of $TA_ID whose brief carries only this Files: line will need a Suites: line" ;;
+            *) TA_CELL_FACTS="${TA_CELL_FACTS}${TA_FACT}"$'\n' ;;
+          esac
+        done <<EOF
+$POKER_BRIEF_FACTS
+EOF
+        if [ -n "$TA_CELL_FACTS" ]; then
+          die "REFUSED — a dispatch of $TA_ID with Files: $TA_FILES would be refused by the dispatch grammar; the plan is unchanged:"
+          printf '%s' "$POKER_BRIEF_WORDS" >&2
+          exit 1
+        fi
+        ;;
+    esac
+
+    TA_SUM="$(cksum < "$TA_PLAN" 2>/dev/null)"
+    TA_NEW="${TA_PLAN}.task-add.$$"
+    TA_DRY="${TA_PLAN}.task-add-dry.$$"
+    TA_SID="taskadd-$$"
+    TA_MARK="$(engaged_marker_path "$REPO_REAL" "$TA_SID")" || TA_MARK=""
+    trap 'rm -f "$TA_NEW" "$TA_DRY" ${TA_MARK:+"$TA_MARK"}' EXIT
+
+    if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" \
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" > "$TA_NEW" 2>/dev/null || [ ! -s "$TA_NEW" ]; then
+      die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
+      exit 1
+    fi
+
+    TA_VIOL="$(units_validate "$TA_NEW" 2>&1)"
+    if [ -n "$TA_VIOL" ]; then
+      die "REFUSED — with $TA_ID added, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
+      printf '%s\n' "$TA_VIOL" >&2
+      exit 1
+    fi
+
+    if [ "$TA_CUR" -gt 4 ]; then
+      awk '
+        /^[[:space:]]*```/ { fence = !fence; print; next }
+        fence { print; next }
+        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
+        insdlc && !done && /^[[:space:]]*current[[:space:]]*:/ { print "current: 4"; done = 1; next }
+        { print }' "$TA_NEW" > "$TA_DRY"
+    else
+      cp "$TA_NEW" "$TA_DRY"
+    fi
+
+    TA_HOOK="$HOOK_DIR/bash-walls.sh"
+    if [ ! -f "$TA_HOOK" ] || [ -z "$TA_MARK" ] || ! command -v jq >/dev/null 2>&1; then
+      die "REFUSED — the dry commit cannot be run (no bash-walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
+      exit 2
+    fi
+    mkdir -p "${TA_MARK%/*}" 2>/dev/null
+    printf 'plan=%s\nengaged_at=%s\n' "$TA_DRY" "$(iso_now)" > "$TA_MARK"
+    TA_INPUT="$(jq -n --arg s "$TA_SID" --arg cwd "$REPO_REAL" \
+      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+        tool_input: {command: "git commit -m task-add"}, tool_use_id: "toolu_taskadd"}')"
+    TA_ERR="$(cd "$REPO_REAL" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$TA_SID" BIONIC_WALL_VERBOSE=1 \
+      bash "$TA_HOOK" <<< "$TA_INPUT" 2>&1 >/dev/null)"
+    TA_GATE=$?
+    rm -f "$TA_MARK"
+    if [ "$TA_GATE" -ne 0 ]; then
+      [ -n "$TA_ERR" ] && printf '%s\n' "$TA_ERR" >&2
+      die "REFUSED — the commit gate refused the plan with $TA_ID added (rc=$TA_GATE); the plan is unchanged."
+      exit 1
+    fi
+
+    if [ "$(cksum < "$TA_PLAN" 2>/dev/null)" != "$TA_SUM" ]; then
+      die "REFUSED — $TA_PLAN changed while $TA_ID was being judged; nothing was written. Run task-add again."
+      exit 1
+    fi
+    if ! mv -f "$TA_NEW" "$TA_PLAN"; then
+      die "REFUSED — could not move the judged copy over $TA_PLAN; the plan is unchanged."
+      exit 2
+    fi
+    say "task-add — $TA_ID added to $TA_PLAN: the row, its - $TA_ID: line, and the deps it owes; validated and dry-committed first."
     exit 0
     ;;
 
@@ -4082,6 +4626,11 @@ EOF
             UNMET)
               SD_VERDICT="UNMET"
               ;;
+            FOLLOW-UP)
+              # MET, with a message the agent never answered (wave-20 T9, Δ8): gone from a
+              # fresh panel, the reply cannot come, and `stopped` closes it `landed`.
+              SD_VERDICT="FOLLOW-UP (met; the follow-up went unanswered)"
+              ;;
             STILL-LIVE)
               if grep -q 'claimed process pattern' <<< "$SD_GDETAIL"; then
                 SD_REFUSE=1
@@ -4112,7 +4661,15 @@ EOF
         # GONE report is sitting in the candidate sets above) but the panel reading is not
         # fresh enough to trust with a write or a report. One line, said once, never a
         # STANDDOWN, a GONE report, an order or an ack.
-        note "stand-down deferred — the panel reading is stale; ListAgents and the next tick decides"
+        # NAMED, AND TRUTHFUL ABOUT WHY (wave-20 T9, REQ-4, AC-4.5; consumer report #11). The
+        # line names every row it held back — the union of the three candidate sets, once each
+        # — so the operator knows which agent waits on a ListAgents. `stale` is a reading that
+        # exists but predates the last prompt (`live_agents` rc 3); no answer at all (rc 4) or
+        # no transcript is `absent`, and used to be called stale too.
+        SD_DEFERRED="$(poker_union ' ' "$STANDDOWN_NAMES" "${DUP_START_NAMES//|/ }" "$GONE_CANDIDATE_NAMES")"
+        SD_WHY=absent
+        [ -n "$TICK_TR" ] && [ "${SD_LRC:-4}" -eq 3 ] && SD_WHY=stale
+        note "stand-down deferred for ${SD_DEFERRED} — the panel reading is ${SD_WHY}; ListAgents and the next tick decides"
       fi
     fi
 
@@ -4402,12 +4959,20 @@ EOF
       # ONE READ OF THE FIELD FOR THE WHOLE TICK (wave-19 REQ-6, D7): loaded here, in this
       # shell, so every `$( )` reader below — the step, the approval gate, the unreadable
       # report, the ready set — inherits the answer instead of parsing the plan again.
-      [ -n "$SCHED_PLAN" ] && _fill_current_load "$SCHED_PLAN"
-      SCHED_CURRENT=""
-      [ -n "$SCHED_PLAN" ] && SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
-      SCHED_STEP=""
-      [ -n "$SCHED_PLAN" ] && SCHED_STEP="$(fill_step_token "$SCHED_PLAN")"
-      if [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_STEP" ]; then
+      #
+      # AN UNREADABLE BOUND PLAN FILLS NOTHING, AND SAYS WHICH PLAN (wave-20 T1, REQ-2). Its
+      # `current:`, its approval and its task table are all unreadable, and no other plan is
+      # read in its place; the three reads below are skipped so the line names the cause
+      # rather than a symptom ("current: unreadable (none)").
+      SCHED_CURRENT=""; SCHED_STEP=""
+      if [ -n "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
+        _fill_current_load "$SCHED_PLAN"
+        SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
+        SCHED_STEP="$(fill_step_token "$SCHED_PLAN")"
+      fi
+      if [ "$POKER_RUN_OPEN" = unreadable ]; then
+        say "no FILL — bound plan unreadable — ${SCHED_PLAN}"
+      elif [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_STEP" ]; then
         SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
         say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
       elif [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
@@ -4437,14 +5002,16 @@ EOF
         if [ "$SCHED_GAP" -eq 0 ]; then
           say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${TICK_OCCUPIED} unacked roster row(s): the budget is full."
         else
-          # READY IS ASKED AT THE STEP THE PLAN IS ON (REQ-1e, AC-1e.4). The widened
-          # `## Tasks` table covers Steps 3-9 in one schedule, so "pending with every
-          # dependency landed" is no longer the whole question: a Step-6 review row
-          # whose deps happen to be landed is ready in the dependency sense and is
-          # still not this step's work. `SCHED_STEP` is the unit this run is on —
-          # already read and already proven readable by the approval gate above, which
-          # is why this needs no second parse and no fallback: a `current:` that would
-          # not parse took the withhold arm and never reached here.
+          # READY IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036). Through
+          # 1.8.6 ready was asked at the step the plan is on (REQ-1e, AC-1e.4), and a
+          # Step-6 review whose deps had landed sat unfilled all through Verify. A work
+          # row is now ready when it is pending and every dependency has landed, whatever
+          # its step; only a gate act — an integrate or close row, or a doc row at Step 7
+          # or later (the release; T10b) — still waits for `current:` to reach its step.
+          # `SCHED_STEP` is still passed — it is what holds those gate acts — already read
+          # and already proven readable by the approval gate above, which is why this needs
+          # no second parse and no fallback: a `current:` that would not parse took the
+          # withhold arm and never reached here.
           #
           # AND THE SET IS THE LIBRARY'S, TRIM INCLUDED (wave-18 REQ-3, D2; ADR-033
           # decision 2). `fill_ready_set` is what `payload/scripts/lib/stop.sh`'s fill
@@ -4477,7 +5044,13 @@ EOF
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
           else
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending step-${SCHED_STEP} task has all its dependencies landed."
+            # THE HOLD IS NAMED ON THIS LINE (wave-20 T10b; critic C3, Δ6). "Nothing is ready"
+            # and "the release waits for Step 7" are different states of a run, and through T10
+            # this line said the first for both. `units_held` is the same readiness program as
+            # the set above, asked the other question, so it names exactly the rows the set
+            # left out for their step and no others.
+            SCHED_HELD="$(units_held "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null | awk 'NF { printf "%s%s", (n++ ? "; " : ""), $0 }')"
+            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
           fi
         fi
       fi

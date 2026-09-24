@@ -78,6 +78,14 @@
 #                                that `make widget && bash tests/run.sh` still routes to
 #                                the test-runner, which is how the regex classifier that
 #                                came before it ordered its arms.
+#   cmd_run_norm       <cmd>  -> the RUN a command makes, with its trailing redirections,
+#                                `| tee <path>`, `|& tee <path>` and `|| true` removed and
+#                                its whitespace collapsed, quoted text kept whole (REQ-7, D7).
+#   cmd_runs_norm      <field>-> a `re_executes=` field with each backtick-marked run put
+#                                through the same rule inside its own marks.
+#   CMD_RUN_NORM_AWK          -> the awk text both of those, `classify_argv` below and
+#                                hooks/dispatch-preflight.sh's `collapse()` run: one rule,
+#                                pasted into each awk program that needs it, never re-typed.
 #   cmd_backgrounded   <cmd>  -> exit 0 when the TEXT backgrounds it (D8, REQ-6): a bare
 #                                `&` control operator outside quotes, never one folded
 #                                into `&&` or a redirect, or a `nohup`/`setsid` wrapper.
@@ -87,17 +95,116 @@
 #
 # [WALL: tests/cmd-class.test.sh]
 
+# ---------- ONE RUN, ONE SPELLING, BOTH SIDES OF THE ROW (wave-20 T4; REQ-7, D7) ----------
+#
+# WHAT WAS WRONG. The budget arm (payload/scripts/lib/walls.sh) compares the run a command
+# CLAIMS to the runs its brief DECLARED, exactly. The claim was the segment text with its
+# redirections still in it, so `npx jest x 2>&1 | tee log` claimed `npx jest x 2>&1` and was
+# refused for the run its own brief declared — while `| tee log` alone passed, because the
+# segment splitter had already cut it. The spelling every role file prescribes for saving
+# evidence was the one the wall refused (triage-B B1, measured there cell by cell).
+#
+# WHAT IT STRIPS, AND ONLY AT THE END. Redirections and `| tee` change where output goes;
+# `|| true` changes whether a failure stops the shell. None changes what runs, so none is
+# part of the spend. Stripped, repeatedly, from the END of the text: `[n]> p`, `[n]>> p`,
+# `[n]>| p`, `&> p`, `&>> p`, the duplications `[n]>&m` and `[n]>&-`, a pipe or `|&` into
+# `tee` and its words, and `|| true`. Anything else at the end stops it — a pipe into
+# something that is not tee is a different command, and an INPUT redirection changes what
+# runs, so neither is ever taken off.
+#
+# QUOTES ARE READ, NEVER GUESSED. A character scanner in the discipline `segments()` below
+# uses: a `>` or `|` inside quotes is an argument, and a quoted target (`> "a b.log"`) is one
+# word. It deliberately does not use `argv_tok`, which maps a token holding a quoted space to
+# one opaque marker — through it `jest -t 'a b'` and `jest -t 'c d'` would be the same run.
+#
+# ONE TEXT, THREE PROGRAMS. The rule is written once, here, as awk source. `_cmd_class_awk`
+# pastes it in front of its own program and builds LAST_RUN with it (the claim side);
+# `cmd_runs_norm` is what walls.sh runs at its one decode of the declared field; and
+# hooks/dispatch-preflight.sh pastes it into the lift, whose `collapse()` calls it before a
+# declared run is stored. Three copies of a scanner would disagree the first time one moved.
+#
+# NO APOSTROPHE MAY APPEAR IN THIS TEXT: every program it is pasted into is one single-quoted
+# shell word. The quote characters are written as awk escapes for that reason.
+CMD_RUN_NORM_AWK='
+    function cmdnorm_ws(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
+    function cmdnorm_run(s,   L, i, c, q, n, T, K, P, cur, cs, st, op, nx, j, w, k, cut, hit) {
+      L = length(s); q = ""; n = 0; cur = ""; cs = 0
+      for (i = 1; i <= L; i++) {
+        c = substr(s, i, 1)
+        if (q != "") {
+          cur = cur c
+          if (c == q) q = ""
+          else if (c == "\\" && q == "\"") { i++; cur = cur substr(s, i, 1) }
+          continue
+        }
+        if (c == "\047" || c == "\"") { if (cur == "") cs = i; q = c; cur = cur c; continue }
+        if (c == "\\") { if (cur == "") cs = i; cur = cur c; i++; cur = cur substr(s, i, 1); continue }
+        if (c == " " || c == "\t" || c == "\r" || c == "\n") {
+          if (cur != "") { n++; T[n] = cur; K[n] = "W"; P[n] = cs; cur = "" }
+          continue
+        }
+        if (c == ">" || (c == "&" && substr(s, i + 1, 1) == ">")) {
+          # A NUMBERED STREAM: digits touching the operator are its stream, not a word.
+          if (c == ">" && cur ~ /^[0-9]+$/) { st = cs; cur = "" }
+          else { if (cur != "") { n++; T[n] = cur; K[n] = "W"; P[n] = cs; cur = "" }; st = i }
+          op = ">"
+          if (c == "&") { i++; op = "&>" }
+          nx = substr(s, i + 1, 1)
+          if (nx == ">") { op = op ">"; i++ }
+          else if (nx == "|" && op == ">") { op = ">|"; i++ }
+          else if (nx == "&" && op == ">") {
+            j = i + 2; w = ""
+            while (j <= L && substr(s, j, 1) ~ /[0-9]/) { w = w substr(s, j, 1); j++ }
+            if (w == "" && substr(s, j, 1) == "-") { w = "-"; j++ }
+            if (w != "" && (j > L || substr(s, j, 1) ~ /[ \t\r\n;&|<>()]/)) {
+              n++; T[n] = substr(s, st, j - st); K[n] = "D"; P[n] = st; i = j - 1; continue
+            }
+            i++; op = ">&"
+          }
+          n++; T[n] = op; K[n] = "R"; P[n] = st; continue
+        }
+        if (c == "|" || c == "&" || c == ";" || c == "<" || c == "(" || c == ")") {
+          if (cur != "") { n++; T[n] = cur; K[n] = "W"; P[n] = cs; cur = "" }
+          nx = substr(s, i + 1, 1)
+          n++; P[n] = i; K[n] = "O"; T[n] = c
+          if (c == "|" && nx == "|") { K[n] = "OR"; T[n] = "||"; i++ }
+          else if (c == "|" && nx == "&") { K[n] = "PA"; T[n] = "|&"; i++ }
+          else if (c == "|") K[n] = "P"
+          else if (c == "&" && nx == "&") { T[n] = "&&"; i++ }
+          continue
+        }
+        if (cur == "") cs = i
+        cur = cur c
+      }
+      if (cur != "") { n++; T[n] = cur; K[n] = "W"; P[n] = cs }
+      cut = L + 1
+      for (;;) {
+        hit = 0
+        if (n >= 2 && K[n] == "W" && K[n - 1] == "R") { cut = P[n - 1]; n -= 2; hit = 1 }
+        else if (n >= 1 && K[n] == "D") { cut = P[n]; n--; hit = 1 }
+        else if (n >= 2 && K[n] == "W" && T[n] == "true" && K[n - 1] == "OR") { cut = P[n - 1]; n -= 2; hit = 1 }
+        else {
+          for (k = n; k >= 1 && K[k] == "W"; k--) ;
+          if (k >= 1 && k < n && (K[k] == "P" || K[k] == "PA") && T[k + 1] == "tee") { cut = P[k]; n = k - 1; hit = 1 }
+        }
+        if (!hit) break
+      }
+      return cmdnorm_ws(substr(s, 1, cut - 1))
+    }
+'
+
 # The awk program. `mode=heredoc` stops after step 1; `mode=lines` runs the whole reading.
 _cmd_class_awk() {  # <mode> ; command on stdin
-  awk -v mode="$1" '
+  awk -v mode="$1" "$CMD_RUN_NORM_AWK"'
     function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     function base(p) { sub(/.*\//, "", p); return p }
     # ONE RUN, ONE SPELLING (REQ-1 AC-1.5). The same collapse
     # `hooks/dispatch-preflight.sh` applies to an author-marked run before it writes it onto
-    # the roster row (its `collapse()`, :1508), so a run typed with wider spacing here and a
-    # run declared with narrower spacing there are the same string when the budget arm
-    # compares them. Two collapses that disagreed would be a budget nobody could satisfy.
-    function ws1(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
+    # the roster row (its `collapse()`), so a run typed with wider spacing here and a run
+    # declared with narrower spacing there are the same string when the budget arm compares
+    # them. Two collapses that disagreed would be a budget nobody could satisfy — which is
+    # why both now call `cmdnorm_ws` out of CMD_RUN_NORM_AWK above rather than each typing it.
+    function ws1(s) { return cmdnorm_ws(s) }
     # NON-EXECUTING RUNNER FLAGS (REQ-5, D13). A TABLE, because the difference between
     # reading a suite and running one is a property of the flag and of nothing else: `-n`
     # (and its long spelling) makes the shell parse the file and stop, `--help`/`--version`
@@ -448,8 +555,14 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # claim carries a command the budget compares against `re_executes=`. They are different
     # comparisons, and a caller that had to guess which one it held would guess wrong the
     # first time a suite file was named by a runner that is not a shell.
+    #
+    # THE RUN IS NORMALISED, NOT MERELY COLLAPSED (wave-20 T4; REQ-7, D7). `cmdnorm_run`
+    # takes the segment`s trailing redirections off, so `npx jest x 2>&1` and
+    # `npx jest x > log 2>&1` claim the run `npx jest x` — the run the brief declared. The
+    # class reading below still sees the whole segment: what a command IS was never a
+    # question its redirections could change.
     function classify_argv(s,   c) {
-      LAST_RUN = ws1(s)
+      LAST_RUN = cmdnorm_run(s)
       c = classify_argv_read(s)
       if (c != "suite") { LAST_KIND = ""; return c }
       if (LAST_TARGET != "") { LAST_KIND = "file"; return c }
@@ -573,6 +686,48 @@ cmd_strip_heredocs() {  # <command> -> the command with every heredoc body remov
 
 cmd_unwrap_head() {  # <command> -> the command reduced to what argv[0] reads
   printf '%s' "${1-}" | _cmd_class_awk head
+}
+
+cmd_run_norm() {  # <command> -> the run it makes: trailing redirections, tee and || true off
+  # THE ONE RULE, as a shell function, for a caller holding a whole command rather than an
+  # awk program — the tests' spelling table, and the remedy text walls.sh builds. See
+  # CMD_RUN_NORM_AWK above for what comes off and why only at the end.
+  printf '%s' "${1-}" | awk "$CMD_RUN_NORM_AWK"'
+    { a[++n] = $0 }
+    END { s = ""; for (i = 1; i <= n; i++) s = s (i > 1 ? "\n" : "") a[i]; printf "%s", cmdnorm_run(s) }'
+}
+
+cmd_runs_norm() {  # <re_executes field, decoded> -> the same field, each marked run normalised
+  # THE DECLARED SIDE OF THE COMPARE (wave-20 T4; REQ-7, D7). walls.sh decodes the row`s
+  # `re_executes=` once per hook call and hands the result here, so the rule that built the
+  # claim is the rule that reads the declaration. The field keeps the author`s backtick
+  # marks, space-joined (A-T1.4), and that is what comes back: each run normalised INSIDE its
+  # own marks, marks kept, one space between. A mark that never closes is not a run, the
+  # same reading `_run_is_declared` gives it.
+  #
+  # THE FORK IS SKIPPED WHEN THE RULE HAS NOTHING TO DO. Every character the rule can act on
+  # is one of `>`, `|` or `&`, or a run of whitespace a collapse would shorten; a field with
+  # none of them is already normal, and the lift writes every field collapsed. The test is
+  # the crude one on purpose, in the posture `cmd_strip_heredocs` takes: when in doubt, ask awk.
+  case "${1-}" in
+    *'>'*|*'|'*|*'&'*|*'  '*|*$'\t'*|*$'\n'*|*$'\r'*) : ;;
+    *) printf '%s' "${1-}"; return 0 ;;
+  esac
+  printf '%s' "$1" | awk "$CMD_RUN_NORM_AWK"'
+    { a[++n] = $0 }
+    END {
+      s = ""; for (i = 1; i <= n; i++) s = s (i > 1 ? "\n" : "") a[i]
+      out = ""
+      for (;;) {
+        j = index(s, "`"); if (j == 0) break
+        s = substr(s, j + 1)
+        j = index(s, "`"); if (j == 0) break
+        r = "`" cmdnorm_run(substr(s, 1, j - 1)) "`"
+        s = substr(s, j + 1)
+        out = (out == "" ? r : out " " r)
+      }
+      printf "%s", out
+    }'
 }
 
 cmd_backgrounded() {  # <command> -> 0 when the TEXT backgrounds it, 1 otherwise (D8, REQ-6)

@@ -58,7 +58,7 @@
 
 set -u
 
-BIONIC_LIB_WANT="context.sh root.sh session.sh patrol.sh run.sh"
+BIONIC_LIB_WANT="context.sh root.sh session.sh patrol.sh run.sh roster.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -162,6 +162,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/session.sh"  || exit 0   # session_id, and its one divergence warning
 . "$BIONIC_LIB/patrol.sh"   || exit 0   # patrol_fire_window, patrol_verdict, patrol_dead_sessions
 . "$BIONIC_LIB/run.sh"      || exit 0   # active_run, engaged_session
+. "$BIONIC_LIB/roster.sh"   || exit 0   # roster_open_counts — the one close predicate (T17, D10)
 . "$BIONIC_LIB/worktree.sh" || exit 0   # worktree_legacy_links (AC-11/AC-7.1, A-orch-24)
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
@@ -387,11 +388,14 @@ done
 # OPEN ROWS ARE COUNTED BY NAME, not by line: the roster is append-only and one
 # dispatch writes a row per status transition (`intended`, `identified`,
 # `confirmed`), so counting lines would multiply every agent by however far it got.
-# A name is CLOSED when the landing gate journalled a `landing-swept/v1|…|state=MET`
-# marker for it, or when the sweeper's ledger carries an `ack` for it — the same
-# two discharges `adopt_fold` in hooks/session-poker.sh applies, mirrored here
-# rather than shelled out to, because task POKER owns that file and this hook must
-# read the same disk with or without its `--report-only` verb.
+# A name is CLOSED only by the one close predicate every wall asks (epic-23 wave-20
+# T17, D10; T2's carry-over): an `ack` in that session's sweeper ledger stamped after
+# the name's latest launch. This block used to close a name on a
+# `landing-swept/v1|…|state=MET` marker, or on any ack of it ever, so after a /clear
+# it could tell the operator a predecessor held nothing open while the dispatch wall
+# still refused its names — or the reverse, for a name acked and dispatched again.
+# The count is `roster_open_counts` (lib/roster.sh), which runs `roster_open_names`'
+# own awk text over every roster in the manifest below.
 #
 # ONE AWK PROCESS FOR EVERY PREDECESSOR ROSTER, not one per file (REQ-6, carry-over
 # P9). The per-file shape below — `for RF in …; do N="$(open_rows "$RF" …)"; done` —
@@ -401,9 +405,9 @@ done
 # before any file count a real project ever carries deliberately). The FILTERING
 # loop below stays pure bash builtins (glob + `[ -f ]`/`[ -L ]`, no fork), and
 # builds a tab-separated manifest of every SURVIVING (osid, roster, ledger) triple;
-# ONE awk invocation then walks the manifest and, for each row, reads that roster
-# file and its ledger with `getline < file` (awk's own multi-file idiom, not a
-# subprocess), resetting its per-file `seen`/`met`/`acked` arrays between rows —
+# ONE awk invocation (`roster_open_counts`) then walks the manifest and, for each
+# row, reads that roster file and its ledger with `getline < file` (awk's own
+# multi-file idiom, not a subprocess), its per-file sets local to one function call —
 # the exact per-file reset the old per-invocation `awk` got for free by exiting.
 # Output is unchanged: one `osid<TAB>count<TAB>roster-path` line per roster with at
 # least one open row, read back below into the same `ROSTERS` text as today.
@@ -451,44 +455,7 @@ done
 
 ROSTERS=""
 if [ -n "$ROSTER_MANIFEST" ]; then
-  ROSTER_RAW="$(printf '%s' "$ROSTER_MANIFEST" | awk -F'\t' '
-    function kv(line, key,   n, a, i, eq, k) {
-      n = split(line, a, "|")
-      for (i = 1; i <= n; i++) {
-        eq = index(a[i], "=")
-        if (eq == 0) continue
-        k = substr(a[i], 1, eq - 1)
-        if (k == key) return substr(a[i], eq + 1)
-      }
-      return ""
-    }
-    {
-      osid = $1; rf = $2; ledger = $3
-      delete seen; delete met; delete acked
-      if (ledger != "") {
-        while ((getline l < ledger) > 0) {
-          if (l !~ /^sweeper-ledger\/v1\|/) continue
-          if (kv(l, "event") != "ack") continue
-          an = kv(l, "name"); if (an != "") acked[an] = 1
-        }
-        close(ledger)
-      }
-      while ((getline l < rf) > 0) {
-        if (l ~ /^roster-state\/v1\|/) {
-          n = kv(l, "name"); if (n != "") seen[n] = 1
-          continue
-        }
-        if (l ~ /^landing-swept\/v1\|/) {
-          n = kv(l, "name")
-          if (n != "" && kv(l, "state") == "MET") met[n] = 1
-        }
-      }
-      close(rf)
-      c = 0
-      for (n in seen) { if (n in met) continue; if (n in acked) continue; c++ }
-      if (c > 0) printf "%s\t%s\t%s\n", osid, c, rf
-    }
-  ' 2>/dev/null)"
+  ROSTER_RAW="$(printf '%s' "$ROSTER_MANIFEST" | roster_open_counts)"
   if [ -n "$ROSTER_RAW" ]; then
     while IFS="$(printf '\t')" read -r OSID N RF; do
       [ -n "$OSID" ] || continue
@@ -527,8 +494,8 @@ ss_interval() {
 # payload/scripts/lib/detect.sh, which is the ORIGINAL and carries the full
 # reasoning and the measurements. Copied rather than sourced for the reason the
 # header below already gives for the runner itself: this hook's loader wants
-# root/session/patrol/run only (BIONIC_LIB_WANT), and a fifth required library
-# would fail the whole DETECTOR closed on a machine that lacks it, to buy a kill
+# only the libraries its report reads (BIONIC_LIB_WANT), and one more required
+# library would fail the whole DETECTOR closed on a machine that lacks it, to buy a kill
 # only the one `sweep` call needs. The two copies are meant to stay in step —
 # change one and change the other.
 #
@@ -585,8 +552,8 @@ ss_bound_kill() {  # <pid> — stop the bounded sweep and its children, group or
 # does not), and stdout captured to a file this shell alone reads
 # afterwards so a run that outlives its bound can never hold this hook's own
 # stdout open. Kept LOCAL rather than sourced from detect.sh: this hook's loader
-# wants root/session/patrol/run only (BIONIC_LIB_WANT above), and a fifth required
-# library would fail the whole DETECTOR closed on a machine that lacks it, to buy
+# wants only the libraries its report reads (BIONIC_LIB_WANT above), and one more
+# required library would fail the whole DETECTOR closed on a machine that lacks it, to buy
 # a bound only the one `sweep` call below needs.
 # POLL GRANULARITY IS 0.1s, NOT 1s (T16, follow-up to T6, AC-6.1). The
 # bound (`limit`, whole seconds — the external contract `BIONIC_SWEEP_BOUND_SECONDS`
@@ -877,7 +844,12 @@ fi
 # T19 (A-orch-19.3): the stamp now arms itself at engagement (hooks/engage.sh, D4), so the
 # hand step after CronCreate is `adopt` alone — this line no longer names `session-poker.sh
 # arm`, which would send the model to redo a step engage.sh already did.
-printf 're-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate → adopt\n'
+# wave-20 REQ-6 (AC-6.1, D6): the CronCreate step names the verb that PRINTS the canonical
+# Patrol prompt, by this tree's absolute poker path. A prompt the model composed from the
+# ritual alone produced jobs whose turns were never ticks, or ticks that never ran (report #1);
+# the printed one leads with this session's marker and runs the tick.
+printf 're-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate with the prompt `bash %s/hooks/session-poker.sh prompt` prints → adopt\n' \
+  "$HOOK_ROOT"
 [ -n "$SWEEP_FAIL_LINE" ] && printf '%s\n' "$SWEEP_FAIL_LINE"
 
 exit 0

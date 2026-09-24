@@ -22,6 +22,8 @@
 #   _run_candidates <droot> -> every qualifying candidate under <droot>, NUL-separated, in
 #                         walk order. The ONE fence-aware walk; active_plan and open_runs
 #                         are now a selection and a filter over it and nothing else.
+#                         A candidate it cannot read is named on stderr as
+#                         `bound-unreadable <path>` and skipped, never dropped silently.
 #   live_runs <root>   -> the subset of open_runs whose plan mtime is within the
 #                         `live-window:` config value (default 7d) of now, same order.
 #                         `BIONIC_NOW_EPOCH` overrides now, so a suite can backdate a plan
@@ -145,6 +147,77 @@ plan_frontmatter_get() {
   return 0
 }
 
+# ---------- THE BUDGET, READ ONE WAY (epic-23 wave-20 T2, REQ-10, D10; ADR-035) ----------
+#
+# FOUR READERS, THREE READINGS. Step 0 writes one line into the plan's frontmatter —
+# `parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=…` — and four readers
+# took `writers=` out of it: the governing-skill hook (at Write, over the text being
+# written), the stop wall, the Patrol tick and dispatch preflight. Driven over one plan
+# (research D3 §REQ-10), `max_writers=9 writers=3` read 9 to the hook and the stop wall and 3
+# to the other two, because the first two cut at the first SUBSTRING `writers=`; and the stop
+# wall read `  parallel-budget:` and `parallel-budget :` where every other reader read no line
+# at all. One run sized three ways is the fill disagreeing with the dispatch wall about the
+# same slot. These three functions are the one reading, and every reader calls them.
+#
+# THE KEY IS STRICT: `parallel-budget:` at column 0, the colon directly after it. That is the
+# spelling the governing-skill hook admits at Write (wave-19 C5), so a line any other
+# spelling carries arrived by a later hand edit, and it reads as no line — which every reader
+# answers with ADR-035's named backstop rather than with a number.
+#
+# THE FIELD IS WHOLE: `writers=` preceded by the start of the value or by whitespace, so
+# `max_writers=9` is not a writers field. Its value must be decimal digits, and it is returned
+# as the integer it names — `08` is 8, not an octal error in the next `$(( ))` and not a
+# string that compares unequal to 8 — or empty when it is absent, empty, not digits, or
+# longer than nine digits (a number no machine budget reaches, and one shell arithmetic would
+# wrap). Empty means UNMEASURED, and each caller says so in its own words.
+
+# budget_line_of <frontmatter text> -> the value after `parallel-budget:`, or empty.
+#
+# TEXT, NOT A FILE, because one reader has no file: the governing-skill hook judges the
+# content of a Write before it lands. The text is the frontmatter block's lines, without the
+# `---` delimiters — the shape that hook already holds as `$FRONTMATTER`.
+budget_line_of() {  # <frontmatter text> -> the budget line's value, or empty
+  awk '
+    /^parallel-budget:/ { sub(/^parallel-budget:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }
+  ' <<< "${1:-}" 2>/dev/null
+  return 0
+}
+
+# plan_budget_line <plan> -> the value after `parallel-budget:` in the plan's LEADING
+# frontmatter block, or empty. A `parallel-budget:` in the plan body is prose (a plan quoting
+# its own header in a task description), and reading it would take a quotation for
+# configuration. The file goes through `_run_lines`, so a CRLF plan reads as an LF one — the
+# line-ending rule every other reader of the plan here already applies.
+plan_budget_line() {  # <plan> -> the budget line's value, or empty
+  local plan="${1:-}" fm
+  [ -n "$plan" ] && [ -f "$plan" ] || return 0
+  fm=$(_run_lines "$plan" | awk '
+        NR == 1 && $0 == "---" { f = 1; next }
+        f && $0 == "---" { exit }
+        f { print }')
+  budget_line_of "$fm"
+}
+
+# budget_field <budget line> <key> -> that key's value as a decimal integer, or empty.
+#
+# PARAMETER EXPANSION, NO PROCESS: this runs on the dispatch path and at every turn end.
+# Tabs are folded to spaces and the value is padded with one space each side, so " <key>="
+# matches a whole field only, wherever it sits; the FIRST such field wins, as every by-key
+# reader in this tree takes the first match.
+budget_field() {  # <budget line> <key> -> a non-negative integer, or empty
+  local s=" ${1:-} " key="${2:-}" v
+  [ -n "$key" ] || return 0
+  s="${s//$'\t'/ }"
+  case "$s" in
+    *" ${key}="*) v="${s#* "${key}"=}"; v="${v%% *}" ;;
+    *) return 0 ;;
+  esac
+  case "$v" in ''|*[!0-9]*) return 0 ;; esac
+  [ "${#v}" -le 9 ] || return 0
+  printf '%s' "$((10#$v))"
+  return 0
+}
+
 # _run_candidates <droot> -> every file under <droot>/plans and <droot>/incidents (each
 # walked to depth <= 2) that carries a flush-left `## SDLC State`, NUL-separated, in walk
 # order: plans/ then incidents/, and within each whatever order `find` produced. Prints
@@ -172,12 +245,43 @@ plan_frontmatter_get() {
 # the `## SDLC State` filter exists to close. Every hook reads this one walk now, so the
 # bound is stated once and pinned by number in three suites (run-predicate §R3,
 # cross-gate §S.2, and the fixture battery's `nested-three-deep`).
+#
+# AN UNREADABLE CANDIDATE IS NAMED, NEVER DROPPED (wave-20 T18, REQ-2, D2; T1's carry-over).
+# A mode-000 plan read as empty text here, carried no `## SDLC State`, and vanished from both
+# readers without a word — so `active_plan` moved on to the next-newest run and `open_runs`
+# answered without it, while the run may be mid-flight. Each one now prints
+# `bound-unreadable <path>` on STDERR and is skipped: it is not a member of the open set and
+# it is never read as closed. The word is `session_run`'s, so a bound and an unbound reader
+# say one thing about one plan (cross-gate §S.4g). A FOLDER in the walk that cannot be opened
+# is named the same way — `find` cannot list it, so the folder is the only thing that can be —
+# which is `plan_unreadable`'s rule for a bound path. Stdout is unchanged: every caller that
+# parses the set still gets exactly the runs it can read.
 _run_candidates() {
   local droot="$1"
   local f d
   for d in "$droot/plans" "$droot/incidents"; do
     [ -d "$d" ] || continue
+    if [ ! -r "$d" ] || [ ! -x "$d" ]; then
+      printf 'bound-unreadable %s\n' "$d" >&2
+      continue
+    fi
+    # THE FOLDERS AT DEPTH 1, asked only whether they open: a plan under one that does not is
+    # invisible to the file walk below. Depth-2 folders hold depth-3 files, out of bound.
+    # A SHELL GLOB, NOT A SECOND `find`: tests/hook-latency.test.sh §6 pins this walk at one
+    # `find` fork, and the file walk's `find` line stays the one line cross-gate §S.2 and the
+    # fixture battery's `depth-1` mutation anchor on. The hidden-name pattern is there because
+    # `find` descends dot-folders too; a symlink is skipped because `find` does not follow it,
+    # and an unmatched pattern stays literal and fails `-d`.
+    for f in "$d"/*/ "$d"/.[!.]*/; do
+      f="${f%/}"
+      [ -d "$f" ] && [ ! -L "$f" ] || continue
+      [ -r "$f" ] && [ -x "$f" ] || printf 'bound-unreadable %s\n' "$f" >&2
+    done
     while IFS= read -r -d '' f; do
+      if plan_unreadable "$f" >/dev/null; then
+        printf 'bound-unreadable %s\n' "$f" >&2
+        continue
+      fi
       # FENCE-AWARE, and line endings TRANSLATED rather than deleted. Two failure modes,
       # opposite directions, both recorded:
       #   - a `## SDLC State` heading that appears only inside a ``` fenced example is
@@ -241,6 +345,41 @@ active_plan() {
   printf '%s\n' "$plan"
 }
 
+# plan_unreadable <path> -> exit 0 iff the path names a plan that is THERE and cannot be
+# read, and prints the component that cannot be opened; exit 1, silent, otherwise.
+#
+# (wave-20 T1, REQ-2, D2; research D3 N1.) Two shapes, and `-e`/`-f`/`-r` see only the first:
+#   - the path exists and is not a readable regular file (mode 000, a directory, …) -> itself
+#   - the path does not exist as far as this process can tell, and its NEAREST EXISTING
+#     ancestor is a folder that cannot be searched -> that folder. A plan inside a mode-000
+#     folder answers `-e` false exactly as a deleted plan does; only the ancestor can tell the
+#     two apart. `-e` on that ancestor being true means every folder above it is searchable,
+#     so the walk stops at the first one that exists.
+# A genuinely missing plan — absent under folders that open — is exit 1: gone, not unreadable.
+# A symlink whose target is gone reads `-e` false under searchable folders and stays gone.
+plan_unreadable() {
+  local p="${1:-}" d
+  [ -n "$p" ] || return 1
+  if [ -e "$p" ]; then
+    [ -f "$p" ] && [ -r "$p" ] && return 1
+    printf '%s\n' "$p"
+    return 0
+  fi
+  d="$p"
+  while :; do
+    case "$d" in
+      */*) d="${d%/*}"; [ -n "$d" ] || d="/" ;;
+      *)   d="." ;;
+    esac
+    if [ -e "$d" ]; then
+      [ -d "$d" ] && [ ! -x "$d" ] || return 1
+      printf '%s\n' "$d"
+      return 0
+    fi
+    case "$d" in /|.) return 1 ;; esac
+  done
+}
+
 # run_open <plan-path> -> exit 0 iff THAT ONE FILE reads as an open run. Silent both ways.
 #
 # THE VERDICT MOVED HERE, UNCHANGED (wave-session-bound-run S1, 2026-09-04). Until this wave
@@ -258,9 +397,16 @@ active_plan() {
 # was written into a worktree that is now gone). Closed is the right answer there and the
 # safe one: a session whose bound plan has vanished has no run to protect, and AC-6 forbids
 # falling through to somebody else's.
+#
+# GONE AND UNREADABLE ARE TWO ANSWERS, NOT ONE (wave-20 T1, REQ-2, D2). Both are "not open",
+# so every boolean caller (`if run_open …`) is unchanged; the STATUS tells them apart: 1 is
+# closed or gone, 3 is a plan that is there and cannot be read (`plan_unreadable`, below).
+# Closed was the wrong answer for the second: the run may be mid-flight, and a reader that
+# calls it closed stops protecting it — the evidence gate admitted every commit against it.
 run_open() {
   local plan="$1"
   [ -n "$plan" ] || return 1
+  plan_unreadable "$plan" >/dev/null && return 3
   [ -f "$plan" ] || return 1
 
   # THE WHOLE FILE, READ ONCE, HELD IN A VARIABLE — every match below tests this
@@ -628,10 +774,18 @@ session_plan() {
 
 # session_run <root> <sid> -> ONE line naming the verdict, and an exit status per verdict:
 #
-#   bound-open <path>    0   the session's own plan, and it is open
-#   bound-closed <path>  2   the session's own plan: delivered, abandoned, or gone
-#   fallback <path>      0   no binding; today's root-keyed answer, said out loud
-#   none                 1   no binding and no open run in the root
+#   bound-open <path>        0   the session's own plan, and it is open
+#   bound-closed <path>      2   the session's own plan: delivered, abandoned, or gone
+#   bound-unreadable <path>  3   the session's own plan is THERE and cannot be read
+#   fallback <path>          0   no binding; today's root-keyed answer, said out loud
+#   none                     1   no binding and no open run in the root
+#
+# BOUND-UNREADABLE IS NOT CLOSED (wave-20 T1, REQ-2, D2). A plan at mode 000, or inside a
+# folder that cannot be opened (`plan_unreadable`), may be a run mid-flight; nothing can be
+# validated against it and nothing may be resolved in its place. Every consumer names it in
+# an arm of its own — the evidence gate refuses the commit — and none says "no open run".
+# It is asked AFTER `run_open` fails as well as inside it, so a plan whose mode changes
+# between the test and the read still answers unreadable rather than closed.
 #
 # THE INVARIANT (spec §Design "Run verdict"; AC-6): A BOUND SESSION NEVER YIELDS `fallback`.
 # `bound-closed` is a terminal answer, not a miss to recover from — the moment a run closes
@@ -651,9 +805,15 @@ session_run() {
   local root="$1" sid="$2"
   local plan
   if plan=$(session_plan "$root" "$sid"); then
-    if run_open "$plan"; then
+    local st=0
+    run_open "$plan" || st=$?
+    if [ "$st" -eq 0 ]; then
       printf 'bound-open %s\n' "$plan"
       return 0
+    fi
+    if [ "$st" -eq 3 ] || plan_unreadable "$plan" >/dev/null; then
+      printf 'bound-unreadable %s\n' "$plan"
+      return 3
     fi
     printf 'bound-closed %s\n' "$plan"
     return 2
@@ -664,4 +824,40 @@ session_run() {
   fi
   printf 'none\n'
   return 1
+}
+
+# session_working_branch <root> <sid> -> the bound plan's `working-branch:` on stdout, exit 0;
+# otherwise ONE refusal line on stdout — `<reason> key=value…` — and a status per reason:
+#
+#   no-bound-plan state=none                 1   no binding, and the root has no open run
+#   no-bound-plan state=fallback plan=<p>    1   no binding; the root's newest open run is
+#                                                somebody's, never this session's target
+#   bound-unreadable plan=<p>                3   the bound plan is THERE and cannot be read
+#   no-working-branch plan=<p>               4   the bound plan is gone, or names no branch
+#
+# (wave-20 T8, REQ-1, D1.) THE ONE PLACE THE PLAN-TO-BRANCH RULE IS WRITTEN: a land merges
+# into the plan's working branch and nowhere else, and this is where "the plan's working
+# branch" is read. `bound-open` and `bound-closed` both answer — a closed run's plan still
+# names its branch, and the last land of a run happens as it closes. The verdict is
+# `session_run`'s, so `bound-unreadable` is T1's answer and never a plan read in its place.
+#
+# THE REFUSAL LINE IS THE REASON, written here once, so the land that prints it and the
+# suite that pins it read the same words. It asks nothing of git: whether the branch is a ref
+# and which checkout holds it are the land's questions (lib/worktree.sh), not the plan's.
+session_working_branch() {
+  local root="$1" sid="$2" verdict plan wb
+  verdict=$(session_run "$root" "$sid") || :
+  plan="${verdict#* }"
+  case "$verdict" in
+    bound-open\ *|bound-closed\ *) : ;;
+    bound-unreadable\ *) printf 'bound-unreadable plan=%s\n' "$plan"; return 3 ;;
+    fallback\ *) printf 'no-bound-plan state=fallback plan=%s\n' "$plan"; return 1 ;;
+    *) printf 'no-bound-plan state=none\n'; return 1 ;;
+  esac
+  wb=$(plan_frontmatter_get "$plan" "working-branch")
+  if [ -z "$wb" ]; then
+    printf 'no-working-branch plan=%s\n' "$plan"
+    return 4
+  fi
+  printf '%s\n' "$wb"
 }

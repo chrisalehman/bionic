@@ -1121,6 +1121,33 @@ sweep "$R19" ack durable
 sweep "$R19" verdict durable
 expect_contains "after, from a different process: acked=yes" "|acked=yes|" "$OUT"
 
+# --- an ack closes the row it POSTDATES, not the name forever (epic-23 wave-20 T2, D10) ---
+#
+# The same name dispatched AGAIN after its ack is a new contract, and the old ack is older
+# than its launch. `acked=` is the one close predicate's answer (`roster_open_names`,
+# payload/scripts/lib/roster.sh) — the one dispatch preflight, the stop wall's occupancy and
+# the tick's `adopt_fold` give — so it reads `no` again. Until this wave it read `yes` here
+# on ANY ack of the name, and the stand-down and the stop gate trusted it (triage-C claim 4).
+add_row "$R19" name=durable deliverable="$R19/absent.md" duration="4 hours" \
+  launched_at="$(date -u -v+1H +%Y-%m-%dT%H:%M:%SZ)" tool_use_id=toolu_relaunch
+sweep "$R19" verdict durable
+expect_contains "a relaunch after the ack reads acked=no — the ack predates it" "|acked=no|" "$OUT"
+# …and a fresh ack, taken after that launch, closes it. The relaunch is stamped an hour
+# ahead so no same-second ordering can make this pass by accident; the ack is planted with
+# a stamp after it in the verb's own shape.
+printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=durable|by=human\n' \
+  "$(date -u -v+2H +%Y-%m-%dT%H:%M:%SZ)" "$SID" >> "$(ledger_of "$R19")"
+sweep "$R19" verdict durable
+expect_contains "…and an ack taken after the relaunch closes it again" "|acked=yes|" "$OUT"
+# THE STAMP MUST BE READABLE: an ack whose at= is not the writer's ISO-8601 Z shape orders
+# against nothing and closes nothing — the fail-closed direction for a hand-edited ledger.
+R19B="$(make_repo s19badstamp)"; new_roster "$R19B"
+add_row "$R19B" name=stamped deliverable="$R19B/absent.md" duration="4 hours" launched_at="$(iso_ago 600)"
+printf 'sweeper-ledger/v1|event=ack|at=zzzz|epoch=0|pid=1|session=%s|name=stamped|by=human\n' \
+  "$SID" >> "$(ledger_of "$R19B")"
+sweep "$R19B" verdict stamped
+expect_contains "an ack with an unreadable stamp closes nothing: acked=no" "|acked=no|" "$OUT"
+
 # A symlinked ledger is refused for BOTH verbs before either reads a row (Section 3), so
 # there is no path on which this field is computed over a ledger the script was redirected
 # away from. Asserted here because the field is what the gates now trust.
@@ -1131,5 +1158,319 @@ sweep "$R19" verdict durable
 expect_eq "a symlinked ledger refuses the verdict outright (exit 2)" "2" "$RC"
 expect_absent "…printing no line for any reader to trust" "landing-verdict/v1|" "$OUT"
 rm -f "$(ledger_of "$R19")"
+
+
+# ============================================================
+section "Section 9: FOLLOW-UP — a message to a MET agent holds its row until the reply (wave-20 T9, REQ-4, AC-4.3; Δ8)"
+# ============================================================
+#
+# THE DEFECT (consumer report #2). The orchestrator sends a MET agent a follow-up; the next
+# tick reads the row MET, prints STANDDOWN, and `standdown` merges and removes the tree of an
+# agent that is still working on the reply. No hook fires on SendMessage, but the
+# orchestrator's transcript records both halves: the SendMessage tool_use (`input.to`) and
+# every `<teammate-message teammate_id="…">` the agent sends back (an idle notice is no reply
+# since T9b; Section 10 has the reply shapes the current CLI writes).
+# `verdict_row` is the one owner of the state: a row that would read MET reads FOLLOW-UP when
+# a SendMessage to its name sits after the agent's last message, and the agent's next
+# message of any kind closes it. Every consumer (tick, standdown, lease walk, stop guard)
+# inherits it.
+#
+# FIXTURES: the transcript is `<CLAUDE_CONFIG_DIR>/projects/<any>/<sid>.jsonl`, the one place
+# the CLI writes it, under a config dir this section owns. Records are the shapes measured
+# live (research D2 REQ-4): an assistant record whose content holds a `tool_use` named
+# SendMessage, and a user record whose STRING content opens with `<teammate-message`.
+F9_CFG="$TMPROOT/s9-config"
+mkdir -p "$F9_CFG/projects/-fixture-project"
+F9_TR="$F9_CFG/projects/-fixture-project/$SID.jsonl"
+export CLAUDE_CONFIG_DIR="$F9_CFG"
+
+tx_send() {  # <to> [sidechain true|false] — the orchestrator's SendMessage
+  jq -nc --arg to "$1" --argjson sc "${2:-false}" \
+    '{type:"assistant",isSidechain:$sc,timestamp:"2026-09-23T10:00:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_send",name:"SendMessage",input:{to:$to,summary:"s",message:"please also do x"}}]}}' \
+    >> "$F9_TR"
+}
+tx_msg() {  # <teammate_id> [idle] — a message from the agent, as the orchestrator receives it
+  local body="<teammate-message teammate_id=\"$1\" color=\"blue\" summary=\"r\">
+report text
+</teammate-message>"
+  [ "${2:-}" = idle ] && body="<teammate-message teammate_id=\"$1\" color=\"blue\">
+{\"type\":\"idle_notification\",\"from\":\"$1\"}
+</teammate-message>"
+  jq -nc --arg b "$body" '{type:"user",isSidechain:false,timestamp:"2026-09-23T10:00:01.000Z",message:{role:"user",content:$b}}' \
+    >> "$F9_TR"
+}
+tx_quote() {  # <teammate_id> — a tool RESULT that merely quotes a teammate-message (a grep)
+  jq -nc --arg b "<teammate-message teammate_id=\"$1\" color=\"blue\">quoted</teammate-message>" \
+    '{type:"user",isSidechain:false,timestamp:"2026-09-23T10:00:02.000Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_grep",content:$b}]}}' \
+    >> "$F9_TR"
+}
+# SETS GLOBALS, never prints: `sweep` leaves OUT and RC in the caller's shell, and a `$( )`
+# around this would strand them in a subshell where the rows below could not read them.
+F9_STATE=""
+f9_state() {  # <repo> <name> -> sets F9_STATE (and sweep's OUT, RC)
+  sweep "$1" verdict "$2"
+  F9_STATE="$(printf '%s\n' "$OUT" | grep -F 'landing-verdict/v1|' | tr '|' '\n' | grep '^state=' | cut -d= -f2-)"
+}
+
+R9="$(make_repo s9followup)"; new_roster "$R9"
+F9_DEL="$R9/fw.md"; echo done > "$F9_DEL"
+add_row "$R9" name=fw deliverable="$F9_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_fw
+add_row "$R9" name=fw2 deliverable="$F9_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_fw2
+add_row "$R9" name=unmetw deliverable="$R9/never.md" launched_at="$(iso_ago 600)" tool_use_id=toolu_um
+
+: > "$F9_TR"
+f9_state "$R9" fw; expect_eq "9a: a MET row with no message in the transcript reads MET" "MET" "$F9_STATE"
+
+tx_msg fw; tx_send fw
+f9_state "$R9" fw; expect_eq "9b: a SendMessage after the agent's last message reads FOLLOW-UP" "FOLLOW-UP" "$F9_STATE"
+expect_contains "9b2: …and the detail says a follow-up is in flight" "follow-up" "$OUT"
+expect_eq "9b3: …a FOLLOW-UP is no failure: exit 0" "0" "$RC"
+f9_state "$R9" fw2; expect_eq "9b4: …and a name that merely starts with it is untouched" "MET" "$F9_STATE"
+
+tx_quote fw
+f9_state "$R9" fw; expect_eq "9c: a tool result quoting the agent's message closes nothing" "FOLLOW-UP" "$F9_STATE"
+
+tx_msg fw
+f9_state "$R9" fw; expect_eq "9d: the agent's next message closes it — MET again" "MET" "$F9_STATE"
+
+# RE-AUTHORED (T9b, critic C5): an idle notice carries none of the agent's own words, and one
+# from the report turn can land after the send, so it is no reply and the row stays held.
+tx_send fw; tx_msg fw idle
+f9_state "$R9" fw; expect_eq "9e: an idle notice is no reply, and the follow-up stays in flight (T9b: was \"an idle notice is a message too, and closes it\", MET)" "FOLLOW-UP" "$F9_STATE"
+tx_msg fw
+
+tx_send fw true
+f9_state "$R9" fw; expect_eq "9f: a sidechain SendMessage is not the orchestrator's" "MET" "$F9_STATE"
+
+tx_send "fw [a1b2c3]"
+f9_state "$R9" fw; expect_eq "9g: the send addressed by name plus its [ref] still counts" "FOLLOW-UP" "$F9_STATE"
+tx_msg fw
+
+tx_send unmetw
+f9_state "$R9" unmetw; expect_eq "9h: only a MET row turns FOLLOW-UP — an UNMET row stays UNMET" "UNMET" "$F9_STATE"
+
+# THE ADDRESS ON THE ROW: a teammate row carries `teammate_id=<name>@session-<sid8>`; the
+# orchestrator sends to the bare name, and the teammate-message names the bare name too.
+R9T="$(make_repo s9teammate)"; new_roster "$R9T"
+F9T_DEL="$R9T/t.md"; echo done > "$F9T_DEL"
+roster_row_fixture status=identified "session=$SID" name=w20-mate agent_id=amate-01 \
+  "launched_at=$(iso_ago 600)" "deliverable=$F9T_DEL" source=declared \
+  teammate_id=w20-mate@session-4b2f7a10 tool_use_id=toolu_mate >> "$(roster_of "$R9T")"
+: > "$F9_TR"
+tx_msg w20-mate; tx_send w20-mate
+f9_state "$R9T" w20-mate; expect_eq "9i: a teammate row reads FOLLOW-UP by its bare name" "FOLLOW-UP" "$F9_STATE"
+sweep "$R9T" verdict
+expect_contains "9j: the summary line counts the FOLLOW-UP row" "1 FOLLOW-UP" "$OUT"
+tx_send other-agent
+f9_state "$R9T" w20-mate; expect_eq "9k: a send to another name leaves it as it was" "FOLLOW-UP" "$F9_STATE"
+tx_msg w20-mate
+f9_state "$R9T" w20-mate; expect_eq "9l: …and its reply closes it" "MET" "$F9_STATE"
+
+# ============================================================
+section "Section 10: FOLLOW-UP closes on the reply shapes the CLI writes, never on an idle notice, and never reopens a closed row (wave-20 T9b; review R1, R2; critic C5)"
+# ============================================================
+#
+# R1. Section 9's fixtures spoke `<teammate-message>` only, so they could not see that CLI
+# 2.1.281 hands a background agent's report back in another envelope: an `isMeta` user record
+# whose text is `Another Claude session sent a message:\n<agent-message from="<name>">…`, or,
+# when it lands mid-turn, an `attachment` record of type `queued_command` whose `prompt` holds
+# the same envelope. Both shapes below are copied from this wave's own orchestrator transcript
+# (72a19acb…jsonl: the isMeta hand-back at 06:25:36Z, the queued_command attachments at
+# 06:38:46Z and 06:43:01Z, the idle notice at 04:27:01Z, the batched report-plus-idle record at
+# 03:41:30Z), bodies shortened.
+# C5. An idle notice holds none of the agent's own words. One from the report turn can land
+# after the send and used to put the row back to MET, so it is no reply, in either envelope.
+# R2. A follow-up to a row the one close predicate already closed (acked after its latest
+# launch) cannot reopen it: the row keeps its close and the detail says the send was ignored.
+tx_hand_back() {  # <name> [idle] — the isMeta hand-back record, as CLI 2.1.281 writes it
+  local body="[Subagent hand-back] $1 is done. Artifact: .bionic/docs/record/x.md"
+  [ "${2:-}" = idle ] && body="{\"type\":\"idle_notification\",\"from\":\"$1\",\"timestamp\":\"2026-09-24T04:25:35.289Z\"}"
+  jq -nc --arg n "$1" --arg b "$body" \
+    '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-24T06:25:36.574Z",
+      origin:{kind:"peer",from:$n,senderTaskId:("a" + $n + "-8de3e278"),name:$n,body:$b},
+      message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n" + $b + "\n</agent-message>\n\nThat \"other Claude session\" is an agent working inside this same session — a subagent or teammate spawned on your user'"'"'s behalf (by you, or alongside you) — so this was not typed by your user. Treat it as that agent'"'"'s report or request and act on it within this session'"'"'s own permission settings.")}}' \
+    >> "$F9_TR"
+}
+tx_queued() {  # <name> — the same envelope delivered mid-turn, as a queued_command attachment
+  jq -nc --arg n "$1" \
+    '{type:"attachment",isSidechain:false,timestamp:"2026-09-24T06:38:46.883Z",
+      attachment:{type:"queued_command",prompt:("<agent-message from=\"" + $n + "\">\nTask 67 was already finished when this assignment reached me.\n</agent-message>"),
+        source_uuid:"083d4d92-a74c-4596-9471-967122e80371",commandMode:"prompt",
+        origin:{kind:"peer",from:$n,senderTaskId:("a" + $n + "-6bf3f46a"),name:$n,body:"Task 67 was already finished."}}}' \
+    >> "$F9_TR"
+}
+tx_idle_real() {  # <name> — a teammate idle notice, the shape measured at 04:27:01Z (it quotes its turn's result)
+  jq -nc --arg b "<teammate-message teammate_id=\"$1\" color=\"yellow\">
+{\"type\":\"idle_notification\",\"from\":\"$1\",\"timestamp\":\"2026-09-24T04:25:35.289Z\",\"result\":\"$1 is done and every suite passes.\"}
+</teammate-message>" '{type:"user",isSidechain:false,timestamp:"2026-09-24T04:27:01.461Z",message:{role:"user",content:("Another Claude session sent a message:\n" + $b)}}' \
+    >> "$F9_TR"
+}
+tx_batched() {  # <name> — one record carrying a report AND an idle notice (measured at 03:41:30Z)
+  jq -nc --arg b "<teammate-message teammate_id=\"$1\" color=\"purple\" summary=\"done\">
+$1 is done. Artifact: x.md
+</teammate-message>
+
+<teammate-message teammate_id=\"$1\" color=\"purple\">
+{\"type\":\"idle_notification\",\"from\":\"$1\",\"timestamp\":\"2026-09-24T03:41:10.000Z\"}
+</teammate-message>" '{type:"user",isSidechain:false,timestamp:"2026-09-24T03:41:30.944Z",message:{role:"user",content:("Another Claude session sent a message:\n" + $b)}}' \
+    >> "$F9_TR"
+}
+
+R10="$(make_repo s10replies)"; new_roster "$R10"
+F10_DEL="$R10/hb.md"; echo done > "$F10_DEL"
+add_row "$R10" name=hb deliverable="$F10_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_hb
+add_row "$R10" name=hb-2 deliverable="$F10_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_hb2
+
+# (1) THE REPLY IN BOTH ENVELOPES, by the exact name.
+: > "$F9_TR"; tx_msg hb; tx_send hb
+f9_state "$R10" hb; expect_eq "10a0: precondition — the send holds the row" "FOLLOW-UP" "$F9_STATE"
+tx_hand_back hb
+f9_state "$R10" hb; expect_eq "10a: an isMeta <agent-message from=…> hand-back answers the follow-up — MET again" "MET" "$F9_STATE"
+: > "$F9_TR"; tx_send hb; tx_queued hb
+f9_state "$R10" hb; expect_eq "10b: the same envelope delivered mid-turn (a queued_command attachment) answers it too" "MET" "$F9_STATE"
+: > "$F9_TR"; tx_send hb; tx_hand_back hb-2
+f9_state "$R10" hb; expect_eq "10c: a hand-back from a name that merely starts with it answers nothing" "FOLLOW-UP" "$F9_STATE"
+: > "$F9_TR"; tx_send hb-2; tx_hand_back hb
+f9_state "$R10" hb-2; expect_eq "10c2: …nor does one from the shorter name answer the longer one" "FOLLOW-UP" "$F9_STATE"
+: > "$F9_TR"; tx_send hb; tx_batched hb
+f9_state "$R10" hb; expect_eq "10d: a record carrying a report beside an idle notice answers it (the report is the agent's text)" "MET" "$F9_STATE"
+
+# (2) AN IDLE NOTICE IS NO REPLY, in either envelope.
+: > "$F9_TR"; tx_send hb; tx_idle_real hb
+f9_state "$R10" hb; expect_eq "10e: a teammate idle notice after the send is no reply — FOLLOW-UP stays" "FOLLOW-UP" "$F9_STATE"
+: > "$F9_TR"; tx_send hb; tx_hand_back hb idle
+f9_state "$R10" hb; expect_eq "10f: an idle notice inside <agent-message> is no reply either" "FOLLOW-UP" "$F9_STATE"
+: > "$F9_TR"; tx_msg hb; tx_send hb; tx_idle_real hb
+f9_state "$R10" hb; expect_eq "10g: C5 — the report turn's idle notice delivered after the send leaves the row held" "FOLLOW-UP" "$F9_STATE"
+tx_hand_back hb
+f9_state "$R10" hb; expect_eq "10h: …and the agent's real reply after it closes the follow-up" "MET" "$F9_STATE"
+
+# (3) A CLOSED ROW STAYS CLOSED. `stopped` closes a row with the sweeper's own ack, `--by human
+# --reason landed`; this is that call. The row is acked after its only launch, so
+# roster_open_names omits it, and a send after the close changes nothing.
+R10A="$(make_repo s10acked)"; new_roster "$R10A"
+F10A_DEL="$R10A/done.md"; echo done > "$F10A_DEL"
+add_row "$R10A" name=done-row deliverable="$F10A_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_done
+add_row "$R10A" name=open-row deliverable="$F10A_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_open
+sweep "$R10A" ack done-row --by human --reason landed
+F10A_AT="$(grep -F '|event=ack|' "$(ledger_of "$R10A")" | grep -F '|name=done-row|' | tail -1 | tr '|' '\n' | sed -n 's/^at=//p')"
+: > "$F9_TR"; tx_msg done-row; tx_msg open-row; tx_send done-row; tx_send open-row
+f9_state "$R10A" done-row
+F10A_LINE="$(printf '%s\n' "$OUT" | grep -F 'landing-verdict/v1|')"
+expect_eq "10i: a follow-up to a row acked after its launch does not reopen it — MET, not FOLLOW-UP" "MET" "$F9_STATE"
+expect_contains "10j: …the line keeps its close" "|state=MET|acked=yes|" "$F10A_LINE"
+expect_contains "10k: …and the detail says the send was ignored, and when the row was acked" \
+  "follow-up ignored: row acked at $F10A_AT" "$F10A_LINE"
+expect_contains "10l: …naming who closed it and why (a stop order's close is by human, landed)" \
+  "by human, reason landed" "$F10A_LINE"
+f9_state "$R10A" open-row
+expect_eq "10m: the open sibling sent the same follow-up is still held (the row discriminates)" "FOLLOW-UP" "$F9_STATE"
+sweep "$R10A" verdict
+expect_contains "10n: the summary counts one FOLLOW-UP, the open row's, and not the closed one" "1 FOLLOW-UP" "$OUT"
+
+unset CLAUDE_CONFIG_DIR
+
+# ============================================================
+section "Section 11: a restart after an ack re-opens the NAME, never the contract — delivered, acked, restarted, answered, stopped (wave-20 T20c; critic C2-2)"
+# ============================================================
+#
+# THE HISTORY, end to end, through the real recorder, the real sweeper and the real
+# `stop-orders.sh stopped` (critic C2-2's own reproduction). An agent delivers and is acked:
+# the row is landed. The orchestrator then messages it, the CLI restarts it, and the restart's
+# SubagentStart reaches the recorder for the same id. T20b stamped that row's `launched_at`
+# fresh so the name would hold a slot again — and `launched_at` is the clock the sweeper dates
+# the deliverable against, so the row read UNMET for good (the reply rewrites nothing), and once
+# the agent was gone `stopped` closed a landed row `abandoned`.
+# The fix keeps the two questions apart: the restart row keeps `launched_at` (the contract's
+# clock) and carries `restarted_at=` (occupancy, read by `roster_open_names` alone). So:
+#   after the restart  the name is open again (acked=no) and the send is a live FOLLOW-UP —
+#                      the contract itself still met
+#   after the reply    MET, acked=no, the detail naming the restart
+#   `stopped`          closes it `landed`, never `abandoned`
+# Never UNMET at any point. Own config dir and transcript (A-T9b.6: `read_followups` takes the
+# first `projects/*/<sid>.jsonl` it finds).
+S11_CFG="$TMPROOT/s11-config"
+mkdir -p "$S11_CFG/projects/-fixture-s11"
+F9_TR="$S11_CFG/projects/-fixture-s11/$SID.jsonl"; : > "$F9_TR"
+export CLAUDE_CONFIG_DIR="$S11_CFG"
+. "$(dirname "$0")/lib/live-answer.sh"
+S11_REC="${BIONIC_HOOKS_DIR}/execution-recorder.sh"
+S11_ORDERS="${BIONIC_HOOKS_DIR}/stop-orders.sh"
+
+R11="$(make_repo s11restart)"; new_roster "$R11"
+: > "$(state_dir_of "$R11")/engaged-$SID.state"
+S11_DEL="$R11/w-t1-report.md"; echo delivered > "$S11_DEL"; backdate "$S11_DEL" 400
+S11_LAUNCH="$(iso_ago 900)"
+roster_row_fixture status=confirmed "session=$SID" name=w-T1 agent_id=a-w-t1-01 \
+  "launched_at=$S11_LAUNCH" subagent_type=bionic:implementor model=opus "deliverable=$S11_DEL" \
+  source=declared tool_use_id=toolu_s11 >> "$(roster_of "$R11")"
+roster_row_fixture status=identified "session=$SID" name=w-T1 agent_id=a-w-t1-01 \
+  "launched_at=$S11_LAUNCH" subagent_type=bionic:implementor model=opus "deliverable=$S11_DEL" \
+  source=declared tool_use_id=toolu_s11 >> "$(roster_of "$R11")"
+# The ack in the ack verb's own shape, stamped 300 s ago rather than by the verb: the restart
+# below stamps `date -u`, and an ack in that same second would close nothing by design.
+printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$(ledger_of "$R11")"
+printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=w-T1|by=human|reason=landed\n' \
+  "$(iso_ago 300)" "$SID" >> "$(ledger_of "$R11")"
+
+S11_LINE=""
+s11_verdict() {  # sets S11_LINE (the verdict line) and F9_STATE
+  f9_state "$R11" w-T1
+  S11_LINE="$(printf '%s\n' "$OUT" | grep -F 'landing-verdict/v1|')"
+}
+s11_verdict
+expect_contains "11a: delivered, then acked — MET, acked=yes (the landed row)" "|state=MET|acked=yes|" "$S11_LINE"
+
+tx_send w-T1
+s11_verdict
+expect_contains "11b: a follow-up to the acked row, before any restart, keeps its close (T9b, unchanged)" \
+  "|state=MET|acked=yes|" "$S11_LINE"
+expect_contains "11b2: …and says the send was ignored" "follow-up ignored" "$S11_LINE"
+
+# THE RESTART: the CLI's SubagentStart for the same id, through the real recorder.
+jq -nc --arg s "$SID" --arg t "$F9_TR" --arg c "$R11" \
+  '{session_id:$s, transcript_path:$t, cwd:$c, agent_id:"a-w-t1-01", agent_type:"w-T1", hook_event_name:"SubagentStart"}' \
+  | ( cd "$R11" && env HOME="$TMPROOT/s11-home" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="$R11" \
+        bash "$S11_REC" >/dev/null 2>&1 )
+S11_ROW="$(grep -F '|status=identified|' "$(roster_of "$R11")" | tail -1)"
+expect_eq "11c: the recorder identifies the restart (a second identified row)" \
+  "2" "$(grep -c '|status=identified|' "$(roster_of "$R11")")"
+expect_contains "11c2: …keeping the contract's launch on it" "|launched_at=$S11_LAUNCH|" "$S11_ROW"
+expect_contains "11c3: …and carrying the restart's own time as restarted_at" "|restarted_at=" "$S11_ROW"
+
+s11_verdict
+expect_eq "11d: after the restart the unanswered send is a live FOLLOW-UP — never UNMET" "FOLLOW-UP" "$F9_STATE"
+expect_contains "11d2: …the name is open again, so acked=no" "|acked=no|" "$S11_LINE"
+expect_contains "11d3: …and the contract itself is still met against its own launch" \
+  "The contract itself is met: delivered=$S11_DEL" "$S11_LINE"
+expect_contains "11d4: …with the detail naming the restart" "restarted at " "$S11_LINE"
+expect_contains "11d5: the name holds a slot: roster_open_names counts it" "w-T1" \
+  "$(bash -c '. "$1"; shift; roster_open_names "$@"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" \
+       "$(roster_of "$R11")" "$(ledger_of "$R11")" "$SID")"
+
+tx_hand_back w-T1
+s11_verdict
+expect_contains "11e: the reply answers it — MET, acked=no (the restarted name awaits its own close)" \
+  "|state=MET|acked=no|" "$S11_LINE"
+expect_contains "11e2: …the detail still naming the restart and the launch it is judged against" \
+  "judged against its launch at $S11_LAUNCH" "$S11_LINE"
+sweep "$R11" verdict
+expect_contains "11e3: the summary counts no UNMET row" " 0 UNMET," "$OUT"
+
+# THE AGENT GOES: a fresh panel that lists nobody, then the stop order's close.
+{
+  jq -nc '{type:"user",timestamp:"2026-09-30T00:00:00.000Z",message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:"2026-09-30T00:00:01.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S11LISTAGENTS",name:"ListAgents",input:{}}]}}'
+  jq -nc --arg b "$(live_answer_body)" \
+    '{type:"user",timestamp:"2026-09-30T00:00:02.000Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01S11LISTAGENTS",content:$b}]}}'
+} >> "$F9_TR"
+S11_OUT="$( cd "$R11" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$S11_CFG" bash "$S11_ORDERS" stopped w-T1 2>&1 )"; S11_RC=$?
+expect_eq "11f: stopped on the restarted-and-answered row, agent gone, acks it — exit 0" "0" "$S11_RC"
+S11_LAST_ACK="$(grep -F '|event=ack|' "$(ledger_of "$R11")" | grep -F '|name=w-T1|' | tail -1)"
+expect_contains "11g: …reason landed: the contract was met" "|reason=landed" "$S11_LAST_ACK"
+expect_absent "11h: …and never abandoned — a landed row is not recorded as abandoned (C2-2)" \
+  "reason=abandoned" "$(cat "$(ledger_of "$R11")")"
+
+unset CLAUDE_CONFIG_DIR
 
 finish

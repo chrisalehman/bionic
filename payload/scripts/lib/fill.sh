@@ -14,7 +14,9 @@
 #   fill_step_token <plan>             the step the ready set is asked at: the numeric
 #                                      `current:` with its sub-step letter stripped, or
 #                                      `T<n>` when the table is task-shaped. Empty when the
-#                                      two disagree or the field will not parse.
+#                                      two disagree or the field will not parse. At wave
+#                                      scale it decides only the gate acts (integrate,
+#                                      close); a work row is ready at any step (wave-20 Δ1).
 #   fill_ready_set <plan> <rung> <open>
 #                                      the ready ids, one per line, in TABLE order, trimmed
 #                                      to <rung> - <open>. Empty and silent whenever the
@@ -22,6 +24,9 @@
 #                                      carries no ready row.
 #   fill_name <roster> <task id>       the agent NAME to dispatch that id under, which is the
 #                                      id itself until this session has already spent it.
+#   fill_row_launched <task id> <names>
+#                                      0 when one of <names> (comma-joined Agent names) is a
+#                                      dispatch name for that id — the inverse of fill_name.
 #
 # WHY A LIBRARY AT ALL (D2). Both of these lived inside `hooks/session-poker.sh` — the ready
 # set inline in the `tick` verb, reading five shell variables the tick had built, and
@@ -47,6 +52,13 @@
 # `## Tasks` at either scale, and `units_ready` grew the task-scale arm in the same wave
 # (`T<n>` step, no step cell on the row, a dependency satisfied by `done`). Nothing here
 # parses a table.
+#
+# READINESS IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036). The set this library
+# returns stopped being "this step's ready rows": a pending row whose prerequisites have all
+# landed is ready whatever its step, once the run is past Step-3 approval (`fill_ledger_live`,
+# unchanged), and only an `integrate` or `close` row still waits for `current:` to reach its
+# step. The rule is `units_ready`'s; this file passes it the step token and trims the answer,
+# so the tick, the wall and the card inherit it with no change of their own.
 #
 # SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME. Every caller reads a verb through
 # `$( )`, and a library that greeted them would corrupt the first line of every answer.
@@ -186,8 +198,8 @@ fill_ledger_live() {  # <plan> -> 0 live · 1 not
 # the plan's `current:` cannot be read against the table it carries.
 #
 # THE FIELD AND THE TABLE HAVE TO AGREE. A numeric `current:` is answerable whatever the
-# table looks like — the wave arm compares it against each row's own step cell and a table
-# with no step cells simply has no row at that step. A `T<n>` is different: it names a unit,
+# table looks like — the wave arm holds a gate act (integrate, close) until the field reaches
+# the row's own step cell, and a row with no numeric step cell is never a wave row. A `T<n>` is different: it names a unit,
 # and a table that NUMBERS its rows has no unit called `T1` to be on. That shape is a plan in
 # mid-edit (or a fixture), and the honest answer is the one the tick has given since the
 # approval gate landed — UNREADABLE, and no fill. Reading it as task-scale instead would make
@@ -320,4 +332,32 @@ fill_name() {  # <roster file> <task id> -> the agent name to dispatch under
     n=$((n + 1))
   done
   printf '%s' "$id"
+}
+
+# ── WHICH READY ROWS A TURN LAUNCHED (wave-20 T11b; Step-6 review R4) ─────────
+#
+# THE INVERSE OF `fill_name`. The stop wall's fill duty counts a turn's launches against the
+# plan's ready set, and a row the turn launched but has not yet ledgered `active` is still in
+# that set (A-T11.1). So the wall asks, per ready id, whether one of the turn's Agent names is
+# a name that row is dispatched under: the id itself or the id with `fill_name`'s `-r<n>`
+# suffix, standing alone or behind a `<prefix>-` (the fleet dispatches `T5` as `w20-T5`, and a
+# bed as `w-bed-T2`). Whole dash-separated tokens only: `w20-T11b` is T11b's, never T1's.
+#
+# THE NAME, NEVER THE PROMPT (AC-5.4). The Agent call's `name` is the roster's key for the
+# launch — the dispatch wall rosters it and the occupancy already counts it — so matching it
+# subtracts a launch the wall has already seen. The prompt's words are still never read.
+fill_row_launched() {  # <task id> <names, comma-joined> -> 0 launched · 1 not
+  local id="${1:-}" names="${2:-}" n base
+  local -a list
+  [ -n "$id" ] && [ -n "$names" ] || return 1
+  IFS=, read -r -a list <<< "$names"
+  for n in "${list[@]}"; do
+    base="$n"
+    case "$base" in
+      *-r[0-9]*) case "${base##*-r}" in ''|*[!0-9]*) : ;; *) base="${base%-r*}" ;; esac ;;
+    esac
+    [ "$base" = "$id" ] && return 0
+    case "$base" in *"-$id") return 0 ;; esac
+  done
+  return 1
 }

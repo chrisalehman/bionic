@@ -1361,6 +1361,36 @@ expect_status "17i: a consumer's acme:test-runner row is ADMITTED (the match is 
 run_hook "$(mk_payload "$R_RO" 'git status && echo "git commit later"' "$RO_ID" omit Bash w18-T7c-green)"
 expect_status "17j: a bionic:test-runner's git status / quoted 'git commit' is ADMITTED" 0 "$ST"
 
+# EVERY COMMIT-CREATING VERB, IN BOTH SPELLINGS (wave-20 T3, REQ-3, AC-3.2). The arm read
+# `git commit` only, so a test-runner's `git revert HEAD`, `git cherry-pick <sha>` or `git merge`
+# made a commit the arm never saw, and `env -C <dir> git commit` hid even the one verb it read
+# (triage-D row 3). The arm now asks one set of eight verbs over the env-aware reader.
+for _v in commit merge revert cherry-pick am rebase commit-tree update-ref; do
+  run_hook "$(mk_payload "$R_RO" "git $_v x" "$RO_ID" omit Bash w18-T7c-green)"
+  expect_status "17k: AC-3.2 — a bionic:test-runner's 'git $_v' is REFUSED" 2 "$ST"
+  expect_contains "17k: …by the role arm ('git $_v')" "a read-only role never commits" "$ERR"
+  run_hook "$(mk_payload "$R_RO" "env -C $R_RO git $_v x" "$RO_ID" omit Bash w18-T7c-green)"
+  expect_status "17k: AC-3.2 — a bionic:test-runner's 'env -C <dir> git $_v' is REFUSED" 2 "$ST"
+  expect_contains "17k: …by the role arm ('env -C <dir> git $_v')" "a read-only role never commits" "$ERR"
+done
+run_hook "$(mk_payload "$R_RO" 'git revert HEAD' "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17k: AC-3.2 — the criterion's own 'git revert HEAD' is REFUSED" 2 "$ST"
+run_hook "$(mk_payload "$R_RO" "env -C $R_RO git cherry-pick 0123abc" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17k: AC-3.2 — the criterion's own 'env -C <dir> git cherry-pick <sha>' is REFUSED" 2 "$ST"
+run_hook "$(mk_payload "$R_RO" "env -i git commit -m x" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17k: …and 'env -i git commit' is REFUSED" 2 "$ST"
+# NOT A COMMIT-CREATING VERB: reading history is still a read-only role's work.
+run_hook "$(mk_payload "$R_RO" "env -C $R_RO git log --merge -1 && git diff HEAD~1" "$RO_ID" omit Bash w18-T7c-green)"
+expect_status "17k: a bionic:test-runner's 'env -C <dir> git log --merge' / 'git diff' is ADMITTED" 0 "$ST"
+
+# AC-3.3: A WRITER IS UNAFFECTED. An implementor merging its wave head into its task branch is
+# exactly what the brief tells it to do before reporting; the widened set is the role arm's only.
+run_hook "$(mk_payload "$R_RO_OK" 'git merge --no-ff wave/20-fixit-187' aimplementor-0123456789abcdef omit Bash w19-T5)"
+expect_status "17l: AC-3.3 — a bionic:implementor's 'git merge --no-ff <wave head>' is ADMITTED" 0 "$ST"
+expect_absent "17l: …and the role arm says nothing" "read-only role" "$ERR"
+run_hook "$(mk_payload "$R_RO_OK" "git -C $R_RO_OK merge --no-ff wave/20-fixit-187" aimplementor-0123456789abcdef omit Bash w19-T5)"
+expect_status "17l: AC-3.3 — …and spelled 'git -C <tree> merge --no-ff', ADMITTED" 0 "$ST"
+
 
 # ---------------------------------------------------------------------------
 section "18 — a commit into another repository is outside the evidence gate, and only it (wave-19 REQ-9, D10)"
@@ -1412,5 +1442,272 @@ run_hook "$(mk_payload "$R_COMMIT" "git -C $R_COMMIT/.worktrees/19-T6 commit -m 
 expect_status "18e: a commit from a linked worktree of the engaged repository is still judged — refused" 2 "$ST"
 expect_absent "18e: …and never called outside" "outside the engaged repository" "$ERR"
 
+
+
+# ---------------------------------------------------------------------------
+section "REQ7 — a redirected run is the budgeted run, and every refusal's remedy is admitted (wave-20 T4, D7)"
+#
+# AC-7.1. The budget arm compared a run claim, redirections and all, to the author's
+# declared run — so the spelling every role file prescribes for saving evidence,
+# `<command> 2>&1 | tee <log>`, was refused for exactly the run the brief declared
+# (triage-B B1, driven there). Eight spellings, three kinds of budget: a shell suite on
+# `suites_allowed=`, a non-shell runner on `re_executes=`, and a shell suite that is on the
+# budget only through `Re-executes:`. Every cell is admitted where the bare command is.
+#
+# AC-7.3. Three refusals suggested a command the same wall then refused: the full-tree
+# refusal named no single-suite spelling (B1a), the backgrounded-suite remedy echoed the
+# `&` that tripped it (B2), and the budget one-liner cut a declared run mid-token (B3).
+# Each remedy row below takes the suggestion OFF the refusal's own text and drives it back
+# through the wall.
+#
+# fails-when: a spelling is refused where the bare command is admitted; a remedy the wall
+# printed is refused when run; the one-liner carries half a run.
+
+T4_LOG="$SANDBOX/t4-ev.log"
+T4_BT='`'
+# WHAT A REMEDY ROW RUNS WHEN THE REFUSAL SUGGESTED NOTHING: an off-budget suite, which every
+# row below refuses — so a missing suggestion fails the "admitted" row instead of passing it
+# on a command no wall has an opinion about.
+T4_NONE='bash tests/no-suggestion-was-printed.test.sh'
+t4_row() {  # <repo> <name> <key=value>... — an armed roster with one budgeted row for ACTOR
+  local repo="$1" name="$2"; shift 2
+  roster_header > "$repo/.bionic/tmp/roster-$SID.state"
+  roster_row_fixture "session=$SID" "name=$name" "agent_id=$ACTOR" "$@" \
+    >> "$repo/.bionic/tmp/roster-$SID.state"
+}
+t4_drive() {  # <repo> <command> [run_in_background] — as a dispatched test-runner, timeout set
+  run_hook "$(mk_payload "$1" "$2" "$ACTOR" "${3:-omit}" Bash test-runner 600000)"
+}
+t4_admitted() {  # <label> <repo> <command>
+  t4_drive "$2" "$3"
+  expect_status "$1" 0 "$ST"
+  expect_absent "$1 …with no refusal on stderr" "refused" "$ERR"
+}
+t4_refused() {  # <label> <repo> <command>
+  t4_drive "$2" "$3"
+  expect_status "$1" 2 "$ST"
+}
+t4_eight() {  # <kind label> <repo> <bare command>
+  local k="$1" r="$2" j="$3"
+  t4_admitted "REQ7 $k: the bare command is admitted (control)" "$r" "$j"
+  t4_admitted "REQ7 $k: > p"            "$r" "$j > $T4_LOG"
+  t4_admitted "REQ7 $k: >> p"           "$r" "$j >> $T4_LOG"
+  t4_admitted "REQ7 $k: 2>&1"           "$r" "$j 2>&1"
+  t4_admitted "REQ7 $k: &> p"           "$r" "$j &> $T4_LOG"
+  t4_admitted "REQ7 $k: | tee p"        "$r" "$j | tee $T4_LOG"
+  t4_admitted "REQ7 $k: 2>&1 | tee p"   "$r" "$j 2>&1 | tee $T4_LOG"
+  t4_admitted "REQ7 $k: |& tee p"       "$r" "$j |& tee $T4_LOG"
+  t4_admitted "REQ7 $k: || true"        "$r" "$j || true"
+}
+
+# --- AC-7.1, the three budget kinds ---
+R7S="$(mk_repo t4shell)"
+t4_row "$R7S" t4shell suites_allowed=alpha.test.sh suites_source=declared files=
+t4_eight "shell suite" "$R7S" 'bash tests/alpha.test.sh'
+
+R7N="$(mk_repo t4runner)"
+t4_row "$R7N" t4runner suites_allowed=alpha.test.sh suites_source=declared files= \
+  "re_executes=${T4_BT}npx jest --testPathPatterns 'x'${T4_BT}"
+t4_eight "non-shell runner" "$R7N" "npx jest --testPathPatterns 'x'"
+
+R7R="$(mk_repo t4reonly)"
+t4_row "$R7R" t4reonly suites_allowed=none suites_source=declared files= \
+  "re_executes=${T4_BT}bash tests/gamma.test.sh${T4_BT}"
+t4_eight "Re-executes-only budget" "$R7R" 'bash tests/gamma.test.sh'
+
+# THE NEGATIVE CONTROLS: normalising cannot widen the budget. A run that is not the declared
+# one is still refused however it is redirected, and so is a suite neither channel names.
+t4_refused "REQ7 control: the whole-tree jest, redirected, is still REFUSED against a narrower declaration" \
+  "$R7N" "npx jest 2>&1 | tee $T4_LOG"
+t4_refused "REQ7 control: an undeclared shell suite, redirected, is still REFUSED on a Re-executes-only row" \
+  "$R7R" "bash tests/delta.test.sh > $T4_LOG 2>&1"
+
+# THE DECLARED SIDE IS NORMALISED AT ITS ONE DECODE. A row written before the lift refused
+# redirections (or by hand) carries one inside its marks; the rule is written once and held
+# on both sides of the compare, so the bare command and its redirected spelling both match.
+R7L="$(mk_repo t4legacy)"
+t4_row "$R7L" t4legacy suites_allowed=alpha.test.sh suites_source=declared files= \
+  "re_executes=${T4_BT}npx jest --testPathPatterns 'x' 2>&1${T4_BT}"
+t4_admitted "REQ7 decode: a declared run stored with a redirect admits the bare command" \
+  "$R7L" "npx jest --testPathPatterns 'x'"
+t4_admitted "REQ7 decode: …and its tee spelling" \
+  "$R7L" "npx jest --testPathPatterns 'x' 2>&1 | tee $T4_LOG"
+
+# --- AC-7.3 (1): the full-tree refusal names the single-suite spelling, and it runs ---
+t4_refused "REQ7 remedy 1: bash tests/run.sh --one is refused as the full tree" \
+  "$R7S" 'bash tests/run.sh --one alpha.test.sh'
+T4_R1=$(printf '%s\n' "$ERR" | grep -o 'bash tests/[A-Za-z0-9._-]*\.test\.sh' | head -1)
+expect_eq "REQ7 remedy 1: …and the refusal names the per-suite spelling from the budget" \
+  "bash tests/alpha.test.sh" "$T4_R1"
+expect_contains "REQ7 remedy 1: …and says --one is the runner's internal worker mode" "--one" "$ERR"
+t4_admitted "REQ7 remedy 1: …and that spelling, run, is admitted" "$R7S" "${T4_R1:-$T4_NONE}"
+
+# --- AC-7.3 (2): the backgrounded-suite remedy carries no &, and it runs ---
+t4_remedy_bg() {  # <label> <repo> <backgrounded command>
+  local label="$1" r="$2" cmd="$3" fix
+  t4_refused "$label: the backgrounded suite is refused" "$r" "$cmd"
+  expect_contains "$label: …by the backgrounded arm" "a backgrounded suite" "$ERR"
+  fix=$(printf '%s\n' "$ERR" | grep '| tee <evidence log>' | head -1 | sed 's/^[[:space:]]*//')
+  expect_nonempty "$label: …suggesting a foreground command" "$fix"
+  fix="${fix//<evidence log>/$T4_LOG}"
+  t4_admitted "$label: …and the suggestion, run as printed, is admitted" "$r" "${fix:-$T4_NONE}"
+}
+t4_remedy_bg "REQ7 remedy 2a shell suite &" "$R7S" 'bash tests/alpha.test.sh &'
+t4_remedy_bg "REQ7 remedy 2b runner &" "$R7N" "npx jest --testPathPatterns 'x' &"
+t4_remedy_bg "REQ7 remedy 2c nohup, redirected, &" "$R7S" "nohup bash tests/alpha.test.sh > $T4_LOG 2>&1 &"
+# THE TOOL-FLAG CASE: the text is already foreground, so the remedy is the flag.
+t4_drive "$R7S" 'bash tests/alpha.test.sh' true
+expect_status "REQ7 remedy 2d: run_in_background true on a suite is refused" 2 "$ST"
+expect_contains "REQ7 remedy 2d: …and the remedy names the flag to clear" "run_in_background: false" "$ERR"
+
+# --- AC-7.3 (3): the budget one-liner shows whole runs or a count, never half a run ---
+R7W="$(mk_repo t4wire)"
+t4_row "$R7W" t4wire suites_allowed=none suites_source=declared files= \
+  "re_executes=${T4_BT}npm test${T4_BT} ${T4_BT}pytest tests/unit/test_widget_rendering_pipeline_end_to_end.py${T4_BT} ${T4_BT}go test ./internal/rendering/pipeline/...${T4_BT}"
+t4_refused "REQ7 remedy 3: an undeclared run is refused" "$R7W" 'npx jest'
+T4_LINE=$(printf '%s\n' "$ERR" | grep -m1 '^bionic: ')
+expect_eq "REQ7 remedy 3: …on a verdict line whose marks are balanced" "0" \
+  "$(( $(printf '%s' "$T4_LINE" | tr -cd '`' | wc -c) % 2 ))"
+expect_contains "REQ7 remedy 3: …showing the first declared run whole, and the rest counted as runs" \
+  "${T4_BT}npm test${T4_BT} +2 more" "$T4_LINE"
+T4_R3=$(printf '%s' "$T4_LINE" | awk -F'`' 'NF >= 3 { print $2 }')
+t4_admitted "REQ7 remedy 3: …and the run it shows, run, is admitted" "$R7W" "${T4_R3:-$T4_NONE}"
+# NOTHING FITS: the count, never a cut. Three runs each wider than the line has room for.
+R7X="$(mk_repo t4wirewide)"
+T4_LONG="pytest tests/unit/test_a_very_long_module_name_that_cannot_fit_on_any_line.py -k"
+t4_row "$R7X" t4wirewide suites_allowed=none suites_source=declared files= \
+  "re_executes=${T4_BT}$T4_LONG one${T4_BT} ${T4_BT}$T4_LONG two${T4_BT} ${T4_BT}$T4_LONG three${T4_BT}"
+t4_refused "REQ7 remedy 3b: an undeclared run against three over-wide runs is refused" "$R7X" 'npx jest'
+T4_LINE=$(printf '%s\n' "$ERR" | grep -m1 '^bionic: ')
+expect_contains "REQ7 remedy 3b: …and the line counts them as runs" "3 runs" "$T4_LINE"
+expect_absent "REQ7 remedy 3b: …never a cut run" "pytest" "$T4_LINE"
+
+
+# ---------------------------------------------------------------------------
+section "19 — a subagent may not change a contract or the plan (wave-20 T9, REQ-4, AC-4.2)"
+#
+# `session-poker.sh amend` widens a live row's Files/Suites/Re-executes, `extend` re-opens a
+# MET row, and `task-add` writes the bound plan. All three are the orchestrator's: an agent
+# that could run them would grant itself a wider budget, or schedule its own work. The
+# script cannot tell who called it (in-process teammates share the session's environment,
+# research D2 REQ-4), so the refusal is the Bash wall's, keyed on the payload's top-level
+# `agent_id` — the same partition ARM C and the budget arm take. The match is on the
+# segment's argv after `cd …&&` and `env` prefixes, never on the text: a quoted mention is
+# an argument to something else and is admitted.
+#
+# The roster exists (the session is armed) and carries the writer's own row, so the
+# refusal is not an artefact of an unarmed session.
+R_AM="$(mk_repo amendwall)"
+AM_ID="aw20-T9sub-0123456789abcdef"
+roster_header > "$R_AM/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" status=identified name=w20-sub "agent_id=$AM_ID" \
+  subagent_type=bionic:senior-implementor >> "$R_AM/.bionic/tmp/roster-$SID.state"
+AM_POKER="/opt/plugin/hooks/session-poker.sh"
+
+am_refused() {  # <label> <command>
+  run_hook "$(mk_payload "$R_AM" "$2" "$AM_ID" omit Bash w20-sub)"
+  expect_status "$1 — refused from a subagent" 2 "$ST"
+  expect_contains "$1 — …naming the rule" "a subagent may not change a contract or the plan" "$ERR"
+}
+am_admitted() {  # <label> <command> [agent_id]
+  run_hook "$(mk_payload "$R_AM" "$2" "${3-$AM_ID}" omit Bash w20-sub)"
+  expect_status "$1 — admitted" 0 "$ST"
+  expect_absent "$1 — …with no contract refusal" "a subagent may not change a contract" "$ERR"
+}
+
+am_refused "19a: bash session-poker.sh amend" \
+  "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --reason 'need x'"
+am_refused "19b: bash session-poker.sh extend" "bash $AM_POKER extend w20-sub 'more time'"
+am_refused "19c: bash session-poker.sh task-add" \
+  "bash $AM_POKER task-add T99 4 build 'x' bionic:implementor — 30 REQ-1 hooks/x.sh"
+am_refused "19d: behind cd … &&" "cd $R_AM && bash $AM_POKER amend w20-sub --suites+ a.test.sh --reason r"
+am_refused "19e: behind an env prefix with options and an assignment" \
+  "env -u FOO BAR=1 bash $AM_POKER extend w20-sub r"
+am_refused "19f: the script run directly, by relative path" "./hooks/session-poker.sh amend w20-sub --reason r --files+ a/b.sh"
+am_refused "19g: second segment of a chain" "echo hi; bash hooks/session-poker.sh task-add a b c d e f g h i"
+am_refused "19h: inside bash -c" "bash -c 'bash $AM_POKER amend w20-sub --reason r --files+ a/b.sh'"
+
+# THE PAIRED POSITIVES. The same verbs from the main thread (no agent_id) are the
+# orchestrator's and pass this arm; a subagent's own read-only poker verbs pass; and a quoted
+# mention is an argument to echo, not a call.
+am_admitted "19i: amend from the main thread" "bash $AM_POKER amend w20-sub --reason r --files+ a/b.sh" ""
+am_admitted "19j: task-add from the main thread" "bash $AM_POKER task-add a b c d e f g h i" ""
+am_admitted "19k: a subagent's tick" "bash $AM_POKER tick"
+am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
+am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"
+am_admitted "19n: a different script's amend verb" "bash tools/other.sh amend w20-sub"
+
+# ---------------------------------------------------------------------------
+section "20 — an UNROSTERED nested delegate is bound by the verb wall through its own agent_type (wave-20 T7b; review R15)"
+#
+# THE COMPOSITION HOLE (review R15, security high). Δ12 made a delegate read-only by "no
+# Write/Edit tools PLUS REQ-3's commit refusal", and AC-9.2 made every nested delegate
+# UNROSTERED by design — the orchestrator's roster is the depth-one ledger. ARM C read the role
+# only from a roster row, so the one population Δ12 created was admitted for every
+# commit-creating verb (walk §3, "no row" column).
+#
+# THE PAYLOAD SHAPE IS THE LIVE ONE (T12, live-rows-802ee6d.md §AC-9.2/9.4): a nested
+# delegate's own Bash payload carries its `agent_id` AND its own `agent_type`. When no roster
+# row carries that `agent_id`, the arm reads the role from `agent_type`; a rostered agent keeps
+# the row reading (§17: a teammate's `agent_type` is its dispatch NAME), and a payload with no
+# `agent_id` is the orchestrator and never reaches the arm.
+R_NEST="$(mk_repo nested-unrostered)"
+roster_header > "$R_NEST/.bionic/tmp/roster-$SID.state"
+# the orchestrator's own writer, so the roster is a live one and the join has rows to miss
+ro_rows "$R_NEST" w20-T7 awriter-0123456789abcdef bionic:senior-implementor
+NEST_ID="a8b824d95c81dd996"
+
+for _nt in bionic:researcher Explore bionic:test-runner; do
+  run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' "$NEST_ID" omit Bash "$_nt")"
+  expect_status "20a: an unrostered nested $_nt's 'git commit' is REFUSED" 2 "$ST"
+  expect_contains "20a: …naming the role $_nt" "$_nt: a read-only role never commits" "$ERR"
+  run_hook "$(mk_payload "$R_NEST" 'git merge wave/20-fixit-187' "$NEST_ID" omit Bash "$_nt")"
+  expect_status "20a: an unrostered nested $_nt's 'git merge' is REFUSED" 2 "$ST"
+  expect_contains "20a: …naming the role $_nt (merge)" "$_nt: a read-only role never commits" "$ERR"
+  run_hook "$(mk_payload "$R_NEST" "env -C $R_NEST git commit -m x" "$NEST_ID" omit Bash "$_nt")"
+  expect_status "20a: an unrostered nested $_nt's 'env -C <r> git commit' is REFUSED" 2 "$ST"
+  expect_contains "20a: …naming the role $_nt (env -C)" "$_nt: a read-only role never commits" "$ERR"
+done
+# every verb of the eight, once, from the harness's no-write type the live bed drove
+for _v in revert cherry-pick am rebase commit-tree update-ref; do
+  run_hook "$(mk_payload "$R_NEST" "git $_v x" "$NEST_ID" omit Bash Explore)"
+  expect_status "20b: an unrostered nested Explore's 'git $_v' is REFUSED" 2 "$ST"
+done
+# the detail says where the role came from: there is no roster row to name
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' "$NEST_ID" omit Bash Explore)"
+expect_contains "20c: the refusal's detail names the agent type, not a roster row" \
+  "no roster row names you" "$ERR"
+expect_eq "20c: …on ONE refusal line" "1" "$(printf '%s\n' "$ERR" | grep -c 'a read-only role never commits')"
+
+# NOT A COMMIT: the read-only delegate's reading of history is its work.
+run_hook "$(mk_payload "$R_NEST" 'git log -1 && git status' "$NEST_ID" omit Bash Explore)"
+expect_status "20d: an unrostered nested Explore's 'git log' / 'git status' is ADMITTED" 0 "$ST"
+
+# THE CONTROLS. Each is refused by nothing else here, so an arm that over-reaches turns one to 2.
+for _nt in general-purpose bionic:implementor fork researcher; do
+  run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' "$NEST_ID" omit Bash "$_nt")"
+  expect_status "20e: an unrostered '$_nt'-typed payload's commit is ADMITTED (not a read-only type)" 0 "$ST"
+  expect_absent "20e: …and the role arm says nothing ($_nt)" "read-only role" "$ERR"
+done
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"')"
+expect_status "20f: the orchestrator's own commit (no agent_id, no agent_type) is ADMITTED" 0 "$ST"
+expect_absent "20f: …silently on this arm" "read-only role" "$ERR"
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' '' omit Bash bionic:test-runner)"
+expect_status "20g: a 'claude --agent' main session (agent_type, no agent_id) commits — ADMITTED, it is the orchestrator" 0 "$ST"
+expect_absent "20g: …silently on this arm" "read-only role" "$ERR"
+
+# A ROSTERED AGENT KEEPS THE ROW READING: the row wins over the payload's agent_type in both
+# directions, so a teammate named like a read-only type is not refused and a read-only row is
+# not escaped by its name.
+ro_rows "$R_NEST" Explore arowimpl-0123456789abcdef bionic:implementor
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' arowimpl-0123456789abcdef omit Bash Explore)"
+expect_status "20h: a ROSTERED implementor whose agent_type reads 'Explore' is ADMITTED (the row wins)" 0 "$ST"
+ro_rows "$R_NEST" w20-runner arowrun-0123456789abcdef bionic:test-runner
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' arowrun-0123456789abcdef omit Bash general-purpose)"
+expect_status "20h: a ROSTERED test-runner whose agent_type reads 'general-purpose' is REFUSED (the row wins)" 2 "$ST"
+expect_contains "20h: …naming the row's role" "bionic:test-runner: a read-only role never commits" "$ERR"
+ro_rows "$R_NEST" w20-norole arownorole-0123456789abcdef ""
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' arownorole-0123456789abcdef omit Bash Explore)"
+expect_status "20h: a ROSTERED row with an empty role is ADMITTED whatever its agent_type (§17g's reading)" 0 "$ST"
 
 finish

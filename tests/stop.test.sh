@@ -136,6 +136,7 @@ fire() {  # <project> <event> <stop_hook_active> [extra JSON object]
                    --argjson a "$sha" --argjson x "$extra" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:$e,stop_hook_active:$a,background_tasks:[]} + $x')
   STOP_OUT=$(env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" \
+    BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
     bash "$HOOK" <<< "$payload" 2>"$STOP_ERRFILE")
   STOP_RC=$?
   STOP_ERR=$(cat "$STOP_ERRFILE" 2>/dev/null)
@@ -433,9 +434,15 @@ expect_empty "6u: …and a copy with that line cut has no source line left to fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "7: the tick's FILL still reaches the duty wall (REQ-10 AC-10.2; D5)"
+section "7: the real tick's turn, judged by the wall's own ready set (REQ-10 AC-10.2; D5; wave-20 Δ7)"
 
-# THE SEAM THIS SECTION OWNS. `decision=` became the ranked maximum DISARM > NOTIFY > FILL >
+# RE-POINTED AT WAVE-20 (REQ-5, Δ7; ADR-036 decision 3). The wall no longer reads the printed
+# FILL at all: it computes the ready set and the pressure state itself and judges by count, so
+# the seam below is now "the real tick's turn ends refused on the same gap the tick named".
+# What this section still owns is that the whole channel — a real tick's output in the turn,
+# the real stop process — reaches that verdict, and that a real dispatch clears it.
+#
+# THE SEAM THIS SECTION OWNED. `decision=` became the ranked maximum DISARM > NOTIFY > FILL >
 # QUIET, with the fill ids carried in a `fill=` field on the `poker-tick/v1` line. The duty
 # wall does not read that line: it reads the PRINTED `poker: FILL <ids>` out of the tick's
 # tool result, cuts the ids at the first escaped newline, and refuses a turn that neither
@@ -512,6 +519,7 @@ s7_fire() {  # <project> <transcript>
   payload=$(jq -nc --arg c "$1" --arg t "$2" --arg s "$SID" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}')
   STOP_OUT=$(env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" \
+    BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
     bash "$HOOK" <<< "$payload" 2>"$STOP_ERRFILE")
   STOP_RC=$?
   STOP_ERR=$(cat "$STOP_ERRFILE" 2>/dev/null)
@@ -522,15 +530,158 @@ require_helpers s7_fixture s7_transcript s7_fire
 S7_TX="$(mktemp)"
 s7_transcript "$S7_TX" "$S7_TICK"
 s7_fire "$S7_D" "$S7_TX"
-expect_contains "7d: an undispatched FILL still refuses the turn's end" \
-  "Patrol fill unanswered" "$(reason_of)"
+expect_contains "7d: an undispatched ready row refuses the real tick's turn" \
+  "Fillable gap at turn end" "$(reason_of)"
 expect_contains "7e: …naming the task the tick asked for" "T13" "$(reason_of)"
 
-# THE PAIRED POSITIVE, or 7d passes against a wall that refuses every Patrol turn.
+# THE PAIRED POSITIVE, or 7d passes against a wall that refuses every Patrol turn. A dispatch
+# is two facts on disk the wall reads — the roster row the dispatch wall writes at launch, and
+# the plan row ledgered `active` — and the Agent call's words are not read (Δ7).
 S7_TX2="$(mktemp)"
 s7_transcript "$S7_TX2" "$S7_TICK" "T13"
+roster_row_fixture status=intended session="$SID" name=T13 agent_id=aT130000000000001 deliverable= \
+  >> "$S7_D/.bionic/tmp/roster-$SID.state"
+sed -i.bak 's/| a.sh | pending |$/| a.sh | active |/' "$S7_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 s7_fire "$S7_D" "$S7_TX2"
 expect_absent "7f: …and a turn that dispatched the named task is not refused for the fill" \
-  "Patrol fill unanswered" "$(reason_of)$STOP_ERR"
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+expect_absent "7g: …nor for the retired printed-FILL arm" "Patrol fill unanswered" "$(reason_of)$STOP_ERR"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "8: an amended Files: is the one the landing reads (wave-20 T9, REQ-4, AC-4.1)"
+
+# THE DEFECT (consumer report #4). A writer's brief declared its Files:, the work turned out to
+# need one more file, and nothing but a re-dispatch could widen the row — so the landing's
+# Files: reconciliation refused the writer's stop for exactly the file the orchestrator had
+# asked for. `session-poker.sh amend <name> --files+ <p> --reason r` appends a successor row;
+# the landing reads the latest row's files=, so the SAME stop, the SAME tree and the SAME diff
+# pass once the row is amended. The pair below differs only by that one command.
+S8_POKER="$(dirname "$HOOK")/session-poker.sh"
+s8_fixture() {  # -> a git project, on main, with a delivered row whose tree touched undeclared/two.sh
+  local d wt
+  d=$(mkfix)
+  git -C "$d" init -q 2>/dev/null
+  git -C "$d" symbolic-ref HEAD refs/heads/main
+  git -C "$d" config user.email t@example.invalid; git -C "$d" config user.name T
+  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"; echo base > "$d/base.txt"
+  git -C "$d" add .gitignore base.txt; git -C "$d" commit -qm base
+  wt="$d/.worktrees/s8-writer"
+  git -C "$d" worktree add -q "$wt" -b wt/s8-writer >/dev/null 2>&1
+  git -C "$wt" config user.email t@example.invalid; git -C "$wt" config user.name T
+  mkdir -p "$wt/declared" "$wt/undeclared"
+  echo one > "$wt/declared/one.sh"; echo two > "$wt/undeclared/two.sh"
+  git -C "$wt" add -A; git -C "$wt" commit -qm work
+  {
+    roster_header
+    roster_row_fixture status=identified session="$SID" name=s8-writer agent_id="$AID" \
+      deliverable=.bionic/docs/record/s8.md launched_at=2026-09-01T00:00:00Z \
+      subagent_type=bionic:implementor files=declared/ suites_allowed=none suites_source=declared \
+      tool_use_id=toolu_S8
+  } > "$d/.bionic/tmp/roster-$SID.state"
+  mkdir -p "$d/.bionic/docs/record"; echo done > "$d/.bionic/docs/record/s8.md"
+  printf '%s' "$d"
+}
+
+D=$(s8_fixture)
+fire "$D"
+expect_status "8a: the control — a tree touching a file outside Files: refuses the stop" "2" "$STOP_RC"
+expect_contains "8b: …naming the file" "undeclared/two.sh" "$STOP_ERR$(reason_of)"
+
+D=$(s8_fixture)
+S8_AMEND=$( cd "$D" && CLAUDE_CODE_SESSION_ID="$SID" bash "$S8_POKER" amend s8-writer \
+  --files+ undeclared/two.sh --reason 'the fix needs two.sh' 2>&1 ); S8_RC=$?
+expect_eq "8c: amend --files+ on the writer's row exits 0" "0" "$S8_RC"
+fire "$D"
+expect_absent "8d: AC-4.1 after the amend the same diff is inside Files: — no landing refusal" \
+  "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
+expect_status "8e: …and the stop is admitted" "0" "$STOP_RC"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "9: the fill refusal's headline counts the turn's launches and names only the rows left out (wave-20 T11b; review R4)"
+
+# THE DEFECT (review R4, T12 F7). The headline said "rows are ready and this turn dispatched
+# none" beside a ledger line that named the turn's launches, and the refusal named the first
+# ready rows in table order, the launched one included. A launched row stays in the plan's
+# ready set until the orchestrator ledgers it `active` (A-T11.1), so the naming subtracts the
+# turn's launches by dispatch name. Two ready rows, one launched under a wave-prefixed name
+# and still `pending`: the headline says 1 of 2 and names the other.
+s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  : > "$d/.bionic/tmp/engaged-$SID.state"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T13 | 4 | build | first task | implementor | — | 15m | REQ-x | a.sh | pending | — |\n'
+    printf '| T14 | 4 | build | second task | implementor | — | 15m | REQ-x | b.sh | pending | — |\n'
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
+  roster_header > "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+s9_transcript() {  # <file> [agent name]...
+  local f="$1"; shift
+  { jq -nc '{type:"user",uuid:"u-s9",isSidechain:false,timestamp:"2026-09-19T00:00:00Z",message:{role:"user",content:"dispatch what is ready"}}'
+    local n
+    for n in "$@"; do
+      jq -nc --arg n "$n" '{type:"assistant",isSidechain:false,timestamp:"2026-09-19T00:00:04Z",
+               message:{role:"assistant",content:[{type:"tool_use",id:("toolu_" + $n),name:"Agent",
+                        input:{name:$n,description:"task",subagent_type:"bionic:implementor",prompt:("Task " + $n)}}]}}'
+    done
+  } > "$f"
+}
+s9_headline() { printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ' || true; }
+require_helpers s9_fixture s9_transcript s9_headline
+
+# THE WIDTH IS PINNED (the idiom of tests/patrol-duties-gate.test.sh §5c): a warm, clear ring so
+# `pressure_level 8` answers 8 whatever this machine is doing; unset again after the section.
+S9_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$S9_RING"
+export BIONIC_PRESSURE_RING="$S9_RING" BIONIC_NOW_EPOCH=1700000000
+
+S9_D="$(s9_fixture)"
+roster_row_fixture status=intended session="$SID" name=w9-T13 agent_id=aw9T130000000001 deliverable= \
+  >> "$S9_D/.bionic/tmp/roster-$SID.state"
+S9_TX="$(mktemp)"; s9_transcript "$S9_TX" w9-T13
+s7_fire "$S9_D" "$S9_TX"
+expect_contains "9a: the turn that launched one of two ready rows is refused for the fill" \
+  "Fillable gap at turn end" "$(reason_of)"
+expect_contains "9b: T11b the headline states the counts — launched 1 of 2" "launched 1 of 2" "$(s9_headline)"
+expect_contains "9c: …and names the row that was not launched" "not launched: T14" "$(s9_headline)"
+expect_contains "9d: …as the reason does" "T14" "$(reason_of)"
+expect_absent "9e: T11b the row this turn launched is never named as missed, pending or not" \
+  "T13" "$(s9_headline)$(reason_of)"
+S9_LED="$S9_D/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
+expect_contains "9f: …and the ledger's ready set is still the plan's, both rows" "|ready=T13,T14|" "$(cat "$S9_LED" 2>/dev/null)"
+expect_contains "9g: …with one row missed, not two" "|missed=1" "$(cat "$S9_LED" 2>/dev/null)"
+
+# THE ZERO CASE, so 9b cannot pass on a constant: nothing launched reads 0 of 2, both named.
+S9_D0="$(s9_fixture)"
+S9_TX0="$(mktemp)"; s9_transcript "$S9_TX0"
+s7_fire "$S9_D0" "$S9_TX0"
+expect_contains "9h: a turn that launched nothing reads 0 of 2" "launched 0 of 2" "$(s9_headline)"
+expect_contains "9i: …and names both rows" "not launched: T13 T14" "$(s9_headline)"
+
+# THE LINE BUDGET (found while implementing, not at RED): the user line is width.sh's 100
+# columns and refuse.sh refuses a longer one, which would turn this refusal into a refuse-call
+# error. Eight ready rows, nothing launched: the headline names what fits and counts the rest,
+# and the reason still names every row.
+S9_D8="$(s9_fixture)"
+S9_P8="$S9_D8/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
+for _s9_i in 101 102 103 104 105 106; do
+  printf '| T%s | 4 | build | more | implementor | — | 15m | REQ-x | x%s.sh | pending | — |\n' "$_s9_i" "$_s9_i" >> "$S9_P8"
+done
+S9_TX8="$(mktemp)"; s9_transcript "$S9_TX8"
+s7_fire "$S9_D8" "$S9_TX8"
+expect_eq "9j: eight ready rows still refuse through the JSON block, not a refuse-call error" "block" \
+  "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_contains "9k: …the headline counts the names it could not fit" "more (dispatch or decline)" "$(s9_headline)"
+expect_true "9l: …and keeps to 100 columns" test "$(printf '%s' "$(s9_headline)" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
+expect_contains "9m: …while the reason names every row" "T106" "$(reason_of)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
 
 finish

@@ -80,6 +80,7 @@ scale: wave
 
 integration-branch: main
 current: 4
+approved-by: dana 2026-09-07T19:05Z "approved"
 
 - Step 4: tasks in flight
 PLAN
