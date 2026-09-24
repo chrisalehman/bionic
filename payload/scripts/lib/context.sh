@@ -16,8 +16,8 @@
 #   BIONIC_ROOT       project_root "$BIONIC_CWD"
 #   BIONIC_SID        the session id, past the ONE shape guard
 #   BIONIC_ENGAGED    0 or 1
-#   BIONIC_RUN_WORD   bound-open | bound-closed | fallback | none — or the
-#                     sentinel `unset` when the caller did not ask for it (§6)
+#   BIONIC_RUN_WORD   bound-open | bound-closed | bound-unreadable | fallback | none — or
+#                     the sentinel `unset` when the caller did not ask for it (§6)
 #   BIONIC_RUN_PLAN   the plan path the verdict names; empty for `none` and for
 #                     the `unset` sentinel
 #   BIONIC_WORKTREE   the linked worktree the root was mapped from, empty when

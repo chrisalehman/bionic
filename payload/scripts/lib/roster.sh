@@ -68,7 +68,8 @@
 # declared, the suite basenames it may run, whether that set was DERIVED from the tree by the
 # configured impact command or DECLARED by the brief, and — for a repository whose tests are
 # not shell suites at all — the author-marked commands the brief declared it will re-run,
-# marks kept, space-joined, at most three (hooks/dispatch-preflight.sh lifts them from the
+# marks kept, space-joined, capped per role since T4 (wave-20, REQ-7) — three for an
+# auditor, DP_SUITES_MAX for every other role (hooks/dispatch-preflight.sh lifts them from the
 # brief text under `Re-executes:`). `re_executes=` is the LAST of the four and TRAILS them,
 # so a row written before the field existed reproduces byte for byte through this writer. They are present-if-passed rather than always-emitted so that the captured
 # rows in `tests/fixtures/roster-row.captured` — real rows written before this task
