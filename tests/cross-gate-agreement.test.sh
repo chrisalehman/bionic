@@ -12239,6 +12239,65 @@ expect_contains "CG-standdown the wall refuses the tick's turn for the stand-dow
 expect_eq "CG-standdown the wall's computed set is the tick's printed set, with no line to read" \
   "$CGSD_PRINTED" "$CGSD_WALL"
 
+
+# ============================================================
+section "CG-turn — the ledger writer and fill-report agree on what a turn is (epic-23 wave-20 T11b; Step-6 review R3, critic C1)"
+# ============================================================
+#
+# TWO READERS OF ONE WORD. The stop hook's recorder keys each ledger line by the turn's prompt
+# (`stop_turn_facts`), and `fill-report` counts turns by folding those keys. The CLI writes two
+# user records that are not prompts: the Stop hook's refusal fed back ("Stop hook feedback:",
+# isMeta) and a skill's body after a Skill call (turnCompanion, sourceToolUseID). If the writer
+# opens a turn on either, the report counts turns nobody prompted. One transcript, two prompts:
+#   turn A  launch W-R1, refused (R2 left out), feedback record, launch W-R2, re-entry Stop
+#   turn B  a Skill call and its body, both rows now active, a clean Stop
+# The writer's distinct keys, the report's turns= and the prompts in the transcript must all be 2.
+CGT_STOP="$BIONIC_HOOKS_DIR/stop.sh"
+CGT_POKER="$BIONIC_HOOKS_DIR/session-poker.sh"
+CGT_R=$(new_repo cgturn)
+CGT_PLAN="$CGT_R/.bionic/docs/plans/epic-99/cgturn.plan.md"
+cgc_plan "$CGT_PLAN" 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+s4_bind "$CGT_R" "$SID_A" "$CGT_PLAN"
+CGT_RO="$CGT_R/.bionic/tmp/roster-$SID_A.state"
+roster_header > "$CGT_RO"
+CGT_TR="$CGT_R/cgturn-transcript.jsonl"
+cgt_agent() {  # <tool_use id> <name>
+  jq -nc --arg i "$1" --arg n "$2" '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:$i,name:"Agent",input:{name:$n,description:"task",subagent_type:"bionic:implementor",prompt:"x"}}]}}' >> "$CGT_TR"
+  jq -nc --arg i "$1" '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:$i,is_error:false,content:"Spawned"}]}}' >> "$CGT_TR"
+  cgc_row "$CGT_RO" "$2" 2026-09-23T10:00:00Z "$1"
+}
+cgt_stop() {  # <stop_hook_active true|false>
+  cgc_ring
+  jq -nc --arg c "$CGT_R" --arg s "$SID_A" --arg t "$CGT_TR" --argjson a "$1" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:$a}' \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 \
+        BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 bash "$CGT_STOP" 2>/dev/null
+}
+jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:"dispatch the batch"}}' > "$CGT_TR"
+cgt_agent toolu_01CGTA1 W-R1
+CGT_OUT="$(cgt_stop false)"
+expect_contains "CG-turn precondition: turn A's first Stop is refused, so the CLI feeds it back" "Fillable gap" "$CGT_OUT"
+jq -nc '{type:"user",isMeta:true,uuid:"u-cgt-fb",timestamp:"2026-09-23T10:00:30.000Z",isSidechain:false,userType:"external",message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready"}}' >> "$CGT_TR"
+cgt_agent toolu_01CGTA2 W-R2
+cgt_stop true >/dev/null
+sed -i.bak 's/| pending | — |$/| active | — |/' "$CGT_PLAN"
+{
+  jq -nc '{type:"user",uuid:"u-cgt-B",timestamp:"2026-09-23T10:10:00.000Z",isSidechain:false,message:{role:"user",content:"load the skill and carry on"}}'
+  jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01CGTSK",name:"Skill",input:{skill:"bionic:canonical-sdlc"}}]}}'
+  jq -nc '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01CGTSK",content:"Launching skill: bionic:canonical-sdlc"}]}}'
+  jq -nc '{type:"user",isMeta:true,turnCompanion:true,sourceToolUseID:"toolu_01CGTSK",uuid:"u-cgt-skill",timestamp:"2026-09-23T10:10:02.000Z",isSidechain:false,message:{role:"user",content:[{type:"text",text:"Base directory for this skill: /abs/skills/canonical-sdlc"}]}}'
+} >> "$CGT_TR"
+cgt_stop false >/dev/null
+CGT_LED="$CGT_R/.bionic/docs/record/cgturn/fill-ledger.log"
+CGT_PROMPTS="$(jq -r 'select(.type=="user" and (.message.content|type)=="string" and ((.isMeta // false) | not)) | .uuid' "$CGT_TR" | wc -l | tr -d ' ')"
+CGT_KEYS="$(sed -n 's/.*|turn=\([^|]*\)|.*/\1/p' "$CGT_LED" 2>/dev/null | LC_ALL=C sort -u | wc -l | tr -d ' ')"
+CGT_REPORT="$( cd "$CGT_R" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$CGT_POKER" fill-report "$CGT_PLAN" 2>&1 )"
+CGT_TURNS="$(printf '%s\n' "$CGT_REPORT" | sed -n 's/.*|turns=\([0-9]*\)|.*/\1/p' | head -1)"
+expect_eq "CG-turn precondition: the fixture carries two prompts" "2" "$CGT_PROMPTS"
+expect_eq "CG-turn precondition: three Stops, three ledger lines" "3" "$(grep -c '^fill-ledger/v1|' "$CGT_LED" 2>/dev/null)"
+expect_eq "CG-turn the writer keys the three lines by the two prompts" "$CGT_PROMPTS" "$CGT_KEYS"
+expect_eq "CG-turn fill-report counts the writer's turns, and they are the prompts" "$CGT_PROMPTS" "$CGT_TURNS"
+
 # ============================================================
 section "RC-nest — ARM C and the delegation arm read ONE role and ONE agent context off the same nested payload (wave-20 T7b; review R15, critic C4)"
 # ============================================================

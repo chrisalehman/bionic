@@ -6625,6 +6625,50 @@ expect_eq "35o a plan that does not exist is refused (exit 2)" "2" "$RC"
 poke "$R35M" fill-report a b
 expect_eq "35p two operands is a usage error (exit 2)" "2" "$RC"
 
+# 35q: A REFUSED TURN IS ONE TURN IN THE REPORT, END TO END (wave-20 T11b; review R3, critic C1).
+# The ledger above is hand-written; this one is written by the REAL stop hook over a transcript
+# in the CLI's own shape. One prompt, a launch, a refusal (T2 ready and left out), the Stop
+# hook's feedback record — the synthetic user record the CLI writes after every Stop refusal —
+# a second launch, and the re-entry Stop. Two ledger lines, one prompt: the report counts one.
+S35Q_STOP="$(dirname "$POKER")/stop.sh"
+R35Q="$(make_repo s35q)"
+P35Q="$(plan_at "$R35Q" epic-99-fixture/wave-35q-refused.plan.md "$(
+  printf -- '---\ngoverning-skill: canonical-sdlc\nparallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n---\n\n'
+  plan_body 4
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | first | implementor | — | 30m | REQ-x | a.sh | pending | — |\n'
+  printf '| T2 | 4 | build | second | implementor | — | 30m | REQ-x | b.sh | pending | — |\n')")"
+bind_marker "$R35Q" "$P35Q"
+roster_header > "$R35Q/.bionic/tmp/roster-$SID.state"
+S35Q_TR="$R35Q/s35q-transcript.jsonl"
+S35Q_RING="$TMPROOT/s35q.ring"; printf '1700000000|80|0|1.0|8\n' > "$S35Q_RING"
+s35q_agent() {  # <tool_use id> <name>
+  jq -nc --arg i "$1" --arg n "$2" '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:$i,name:"Agent",input:{name:$n,description:"task",subagent_type:"bionic:implementor",prompt:"x"}}]}}' >> "$S35Q_TR"
+  jq -nc --arg i "$1" '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:$i,is_error:false,content:"Spawned"}]}}' >> "$S35Q_TR"
+  roster_row_fixture status=intended session="$SID" name="$2" agent_id="a${2}000000000001" deliverable= \
+    >> "$R35Q/.bionic/tmp/roster-$SID.state"
+}
+s35q_stop() {  # <stop_hook_active true|false> -> the hook's stdout
+  jq -nc --arg c "$R35Q" --arg s "$SID" --arg t "$S35Q_TR" --argjson a "$1" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:$a}' \
+    | ( cd "$R35Q" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PRESSURE_RING="$S35Q_RING" \
+          BIONIC_NOW_EPOCH=1700000000 bash "$S35Q_STOP" 2>/dev/null )
+}
+jq -nc '{type:"user",uuid:"u-35q-1",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:"dispatch the batch"}}' > "$S35Q_TR"
+s35q_agent toolu_35Q1 W-T1
+S35Q_OUT1="$(s35q_stop false)"
+expect_contains "35q precondition: the first Stop is refused for the row left out" "Fillable gap" "$S35Q_OUT1"
+jq -nc '{type:"user",isMeta:true,uuid:"u-35q-fb",timestamp:"2026-09-23T10:00:30.000Z",isSidechain:false,userType:"external",message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready"}}' >> "$S35Q_TR"
+s35q_agent toolu_35Q2 W-T2
+s35q_stop true >/dev/null
+S35Q_LED="$R35Q/.bionic/docs/record/wave-35q-refused/fill-ledger.log"
+expect_eq "35q …the two Stops wrote two ledger lines" "2" "$(grep -c '^fill-ledger/v1|' "$S35Q_LED" 2>/dev/null)"
+OUT="$( cd "$R35Q" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35Q" 2>&1 )"
+expect_contains "35r T11b fill-report folds the refused turn's two lines into one turn" "turns=1|" "$OUT"
+expect_contains "35s …and the turn's final line is the one that saw both launches: nothing missed" \
+  "|launched=W-T1,W-T2|" "$(tail -n 1 "$S35Q_LED" 2>/dev/null)"
+
 # ============================================================
 section "Section 36: prompt — the canonical Patrol prompt (wave-20 REQ-6, AC-6.1; D6)"
 # ============================================================

@@ -209,7 +209,9 @@ EVENT=$(bionic_jq .hook_event_name)
 # launches the model made in answer to the refusal. A recorder, never a verdict: it prints
 # nothing, refuses nothing and swallows its own failures, so this line cannot change what the
 # guard or the fold decide. It also computes the turn's facts once for the fill duty below
-# (`stop_turn_facts`), so the ledger line and the verdict are one computation.
+# (`stop_turn_facts`), so the ledger line and the verdict are one computation. The refusal the
+# CLI feeds back before that re-entry ("Stop hook feedback:") opens no turn there, so both of a
+# refused turn's lines carry its prompt's key and `fill-report` counts them once (wave-20 T11b).
 stop_fill_ledger "$EVENT" 2>/dev/null
 
 # BLOCKS ONCE. (jq's `//` folds `false` to empty, so a literal "true" is the only

@@ -594,4 +594,50 @@ expect_eq   "wt/20-T1's work is in the wave branch" "0" "$(git -C "$LR" rev-list
 expect_true "and in the wave checkout's working tree" test -f "$LWAVE/t1.txt"
 expect_false "the task tree is gone" test -d "$LTREE"
 
+# D1, THE VERB'S OWN SESSION (wave-20 T8b, review R8/F3). `land` refuses under a busy
+# `tests/run.sh` in this project (D1) — but the busy predicate used to count the LANDING
+# session itself: a session is always busy while its own tool call runs, so the check
+# reduced to "any tests/run.sh anywhere". T12's live bed hit this for real
+# (live-rows-802ee6d.md F3): the first head attempt was refused naming its OWN session.
+# `BIONIC_CLAUDE_HOME` is the override `payload/scripts/lib/patrol.sh` and
+# `tests/worktree.test.sh` already use for a fixture claude-home — this suite otherwise
+# has none, per its header ("no contact with ~/.claude"), so it is scoped to one export
+# around this one arm and unset immediately after.
+LD1="$TMP/land-d1"
+mkdir -p "$LD1/sessions"
+LD1SUITE="$TMP/land-d1-suite/tests"; mkdir -p "$LD1SUITE"
+printf '#!/bin/bash\nsleep 120\n' > "$LD1SUITE/run.sh"; chmod +x "$LD1SUITE/run.sh"
+bash "$LD1SUITE/run.sh" >/dev/null 2>&1 & LD1_PID=$!
+# Folded into the ONE exit trap (never a second `trap ... EXIT`, which would replace
+# rather than add to the first and leak $TMP on an early exit).
+trap 'kill "$LD1_PID" 2>/dev/null; rm -rf "$TMP"' EXIT
+i=0; while [ $i -lt 50 ] && ! pgrep -f 'tests/run.sh' >/dev/null 2>&1; do i=$((i+1)); done
+
+LTREE2_OUT="$(spawn_out "$LR" create "$(sha_of "$LR" wave/20-demo)" wt/20-T2)"
+LTREE2="$(printf '%s\n' "$LTREE2_OUT" | tr ' ' '\n' | sed -n 's/^path=//p')"
+echo work2 > "$LTREE2/t2.txt"
+git -C "$LTREE2" add t2.txt
+git -C "$LTREE2" commit --quiet -m "T2 work"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"busy","name":"self"}\n' \
+  "$LD1_PID" "$LSID" "$LR" > "$LD1/sessions/${LD1_PID}.json"
+export BIONIC_CLAUDE_HOME="$LD1"
+LOUT2="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE2" 2>/dev/null )"; LRC2=$?
+expect_match "the verb's own busy suite does not refuse its own land" \
+  "spawn-worktree: LANDED branch=wt/20-T2*" "$LOUT2"
+expect_eq   "it exits 0" "0" "$LRC2"
+
+LTREE3_OUT="$(spawn_out "$LR" create "$(sha_of "$LR" wave/20-demo)" wt/20-T3)"
+LTREE3="$(printf '%s\n' "$LTREE3_OUT" | tr ' ' '\n' | sed -n 's/^path=//p')"
+echo work3 > "$LTREE3/t3.txt"
+git -C "$LTREE3" add t3.txt
+git -C "$LTREE3" commit --quiet -m "T3 work"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"busy","name":"peer"}\n' \
+  "$LD1_PID" "verb-peer-session" "$LR" > "$LD1/sessions/${LD1_PID}.json"
+LOUT3="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE3" 2>/dev/null )"; LRC3=$?
+expect_match "a different session's busy suite in this project still refuses" \
+  "spawn-worktree: REFUSED reason=suite-running*" "$LOUT3"
+expect_eq   "that refusal exits 2" "2" "$LRC3"
+unset BIONIC_CLAUDE_HOME
+kill "$LD1_PID" 2>/dev/null
+
 finish
