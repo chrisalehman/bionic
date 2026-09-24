@@ -3993,8 +3993,9 @@ expect_eq "…and the grep really can see that string when it is there (not vacu
 # AN AGENT CONTEXT IS ALLOWED, and that is the whole point of the arm: a writer
 # dispatched INTO a tree works there by construction, and refusing it would refuse the
 # arrangement the wave is built on. Two spellings mark an agent context — the guard's
-# BIONIC_HOOK_CHANNEL on the settings channel, and the payload's own `agent_type`,
-# which the harness sets for a dispatched agent — and either one is enough.
+# BIONIC_HOOK_CHANNEL on the settings channel, and the payload's own `agent_id`, which
+# the harness sets for a dispatched agent — and either one is enough. (T7b: was
+# `agent_type`, which a `claude --agent` main session carries too — critic C4.)
 
 section "S23: a main-thread dispatch from inside a linked worktree"
 
@@ -4033,11 +4034,21 @@ run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-c" "cl
 GATE_ENV="${GATE_ENV% BIONIC_HOOK_CHANNEL=agent-context}"
 expect_status "r23c the same dispatch in an agent context (BIONIC_HOOK_CHANNEL) is allowed" "0" "$GATE_ST"
 
-# The payload spelling.
+# The payload spelling IS `agent_id` (T7b; critic C4). A dispatched agent's payload carries
+# it (T12 measured it on every nested payload); `agent_type` alone is a `claude --agent` main
+# session — the orchestrator — and the lease wall is about the orchestrator.
 S23_AGENT_PAYLOAD=$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-d" "claude-sonnet-5" \
-  "$S5_LIVE_TRANSCRIPT" "bionic:researcher" | jq '. + {agent_type:"senior-implementor"}')
+  "$S5_LIVE_TRANSCRIPT" "bionic:researcher" | jq '. + {agent_id:"a23d-0123456789abcdef", agent_type:"senior-implementor"}')
 run_gate "$S23_AGENT_PAYLOAD"
-expect_status "r23d …and so is one whose payload carries agent_type" "0" "$GATE_ST"
+expect_status "r23d …and so is one whose payload carries agent_id (T7b: was agent_type alone)" "0" "$GATE_ST"
+# r23e: agent_type WITHOUT agent_id, from inside the tree — an --agent main session sitting
+# in a writer's lease. It is the orchestrator, so the lease wall refuses it as it refuses r23b.
+S23_MAIN_AGENT=$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-e" "claude-sonnet-5" \
+  "$S5_LIVE_TRANSCRIPT" "bionic:researcher" | jq '. + {agent_type:"senior-implementor"}')
+run_gate "$S23_MAIN_AGENT"
+expect_eq "r23e (T7b: was allowed) an agent_type-only payload in the tree is the orchestrator — REFUSED" \
+  "deny" "$GATE_VERDICT"
+expect_contains "r23e …by the lease wall, naming the main checkout" "main checkout: $S23_MAIN" "$GATE_VERR"
 
 section "S24 — THE ENGAGEMENT SWITCH (AC-5, AC-13, AC-14, AC-23)"
 #
@@ -5666,13 +5677,54 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc5b" "claude-sonn
 expect_eq "rc5b control: bionic:implementor from the main thread on an approved plan is admitted" \
   "allow" "$GATE_VERDICT"
 
-# rc5c: the payload's `agent_type` alone is the other spelling of an agent context, and it
-# binds the same way.
+# rc5c (T7b: was "a fork launched from an agent_type-only payload is refused"). The payload's
+# `agent_type` ALONE is not an agent context: the harness sets it on a main session started
+# with `claude --agent <x>` too ("present when the session uses --agent or the hook fires
+# inside a subagent" — critic C4), and that session is the orchestrator. Only `agent_id`
+# marks a subagent (A1's dependable spelling; T12 measured it on every nested payload).
 REPO=$(make_repo rrc5c yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc5c" "claude-sonnet-5" \
                              "$S5_LIVE_TRANSCRIPT" "fork" | jq -c '. + {agent_type:"bionic:implementor"}')"
-expect_eq "rc5c a fork launched from an agent_type-only payload is refused" "deny" "$GATE_VERDICT"
+expect_eq "rc5c (T7b: was refused) a fork launched from an agent_type-only payload is ADMITTED — it is the orchestrator" \
+  "allow" "$GATE_VERDICT"
+
+# --- rc7: a `claude --agent` MAIN SESSION dispatches writers and journals them (T7b; critic C4) ---
+# agent_type present, agent_id absent: the orchestrator, launched through --agent. Its writer
+# dispatch is admitted and rostered exactly as a plain main session's is (rc5b, S20's r20b).
+REPO=$(make_repo rrc7 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc7" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor" | jq -c '. + {agent_type:"my-orchestrator"}')"
+expect_eq "rc7 an --agent main session's bionic:implementor dispatch is ADMITTED" "allow" "$GATE_VERDICT"
+expect_absent "rc7 …the delegation arm says nothing" "a subagent may launch only read-only roles" "$GATE_ERR"
+expect_eq "rc7 …and the roster journals exactly one row" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+expect_eq "rc7 …the row names the dispatch" "wrc7" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" name)"
+# rc7b: a --agent main session's read-only launch is journalled too — the skip is for nested
+# launches, and this is not one.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc7b" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:researcher" | jq -c '. + {agent_type:"bionic:researcher"}')"
+expect_eq "rc7b an --agent main session's bionic:researcher dispatch is admitted" "allow" "$GATE_VERDICT"
+expect_eq "rc7b …and journalled: two rows now" "2" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# --- rc8: THE NESTED SHAPE AS T12 MEASURED IT — agent_id AND the caller's agent_type ---
+# (live-rows-802ee6d.md §AC-9.2/9.4: `"agent_id":"a8b8…","agent_type":"general-purpose"`.)
+# Today's refusal unchanged: the writer launch is refused, the read-only launch admitted,
+# and neither journals a row.
+REPO=$(make_repo rrc8 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc8" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor" \
+            | jq -c '. + {agent_id:"a8b824d95c81dd996", agent_type:"general-purpose"}')"
+expect_eq "rc8 a nested (agent_id + agent_type) bionic:implementor launch is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "rc8 …by the delegation arm" "a subagent may launch only read-only roles" "$GATE_ERR"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "wrc8b" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "Explore" \
+            | jq -c '. + {agent_id:"a8b824d95c81dd996", agent_type:"general-purpose"}')"
+expect_eq "rc8b a nested (agent_id + agent_type) Explore launch is admitted" "allow" "$GATE_VERDICT"
+expect_eq "rc8b …and neither nested launch journals a row" "no" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo yes || echo no)"
 
 # --- rc6: the scaffold refusal says the wall reads the prompt only (AC-9.3) ---
 # A brief FILE carrying the whole scaffold, and a prompt that only points at it: the lift
