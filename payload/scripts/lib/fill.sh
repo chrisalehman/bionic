@@ -24,6 +24,9 @@
 #                                      carries no ready row.
 #   fill_name <roster> <task id>       the agent NAME to dispatch that id under, which is the
 #                                      id itself until this session has already spent it.
+#   fill_row_launched <task id> <names>
+#                                      0 when one of <names> (comma-joined Agent names) is a
+#                                      dispatch name for that id — the inverse of fill_name.
 #
 # WHY A LIBRARY AT ALL (D2). Both of these lived inside `hooks/session-poker.sh` — the ready
 # set inline in the `tick` verb, reading five shell variables the tick had built, and
@@ -329,4 +332,32 @@ fill_name() {  # <roster file> <task id> -> the agent name to dispatch under
     n=$((n + 1))
   done
   printf '%s' "$id"
+}
+
+# ── WHICH READY ROWS A TURN LAUNCHED (wave-20 T11b; Step-6 review R4) ─────────
+#
+# THE INVERSE OF `fill_name`. The stop wall's fill duty counts a turn's launches against the
+# plan's ready set, and a row the turn launched but has not yet ledgered `active` is still in
+# that set (A-T11.1). So the wall asks, per ready id, whether one of the turn's Agent names is
+# a name that row is dispatched under: the id itself or the id with `fill_name`'s `-r<n>`
+# suffix, standing alone or behind a `<prefix>-` (the fleet dispatches `T5` as `w20-T5`, and a
+# bed as `w-bed-T2`). Whole dash-separated tokens only: `w20-T11b` is T11b's, never T1's.
+#
+# THE NAME, NEVER THE PROMPT (AC-5.4). The Agent call's `name` is the roster's key for the
+# launch — the dispatch wall rosters it and the occupancy already counts it — so matching it
+# subtracts a launch the wall has already seen. The prompt's words are still never read.
+fill_row_launched() {  # <task id> <names, comma-joined> -> 0 launched · 1 not
+  local id="${1:-}" names="${2:-}" n base
+  local -a list
+  [ -n "$id" ] && [ -n "$names" ] || return 1
+  IFS=, read -r -a list <<< "$names"
+  for n in "${list[@]}"; do
+    base="$n"
+    case "$base" in
+      *-r[0-9]*) case "${base##*-r}" in ''|*[!0-9]*) : ;; *) base="${base%-r*}" ;; esac ;;
+    esac
+    [ "$base" = "$id" ] && return 0
+    case "$base" in *"-$id") return 0 ;; esac
+  done
+  return 1
 }
