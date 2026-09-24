@@ -1891,9 +1891,11 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
 # the waiver above. `adopt_write_row` puts the row on this session's roster; this puts the
 # SOURCE roster's own landing verdict for that name beside it, verbatim, so a reader that
 # trusts the marker rather than re-deriving from disk (`hooks/session-start.sh`'s
-# `open_rows`, this file's own `youngest_suite_writer`, both scanning the roster they were
-# handed for a `landing-swept/v1|…|name=<X>|` line) sees the same answer on the successor
-# that stood on the predecessor.
+# `open_rows`, which scans the roster it was handed for a `landing-swept/v1|…|name=<X>|`
+# line) sees the same answer on the successor that stood on the predecessor. This file's own
+# `youngest_suite_writer` no longer needs the marker for that: since T20 (epic-23 wave-20) it
+# asks `roster_open_names` once for the whole open set and checks each candidate name against
+# it directly, so its answer already agrees with the sweep without reading a copied line.
 #
 # payload/scripts/lib/stop.sh (`stop_landing_gate`, reached from hooks/stop.sh) is this
 # schema's one ORIGINATING writer. This call site is the second writer, made deliberately
@@ -1902,10 +1904,11 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
 # permitted to read (never write — the row above is still the one file this verb writes to).
 #
 # THE LATEST LINE, because the marker stream is append-only the same way the roster is: a
-# name can be superseded (UNMET -> MET) and the last line wins. A MET line can never be the
-# one found here — `adopt_fold`'s `met[]` filter above excludes any name carrying one from
-# the fold entirely, so a name that reaches this call was never offered one to adopt in the
-# first place, and the only history left to find is non-MET.
+# name can be superseded (UNMET -> MET) and the last line wins. `adopt_fold` excludes a
+# closed name through the same `roster_open_names` predicate (an ack later than the row's
+# launch), not a `met[]` filter, so a name that reaches this call was never offered one to
+# adopt in the first place, and the only history left to find is whatever the source
+# roster's own ack state has not yet closed.
 #
 # IDEMPOTENT BY EXACT-LINE PRESENCE, the same posture `adopt_write_row` takes: the source
 # session is the one and only writer of ITS OWN marker lines, so a line copied once from it
@@ -2948,13 +2951,15 @@ case "$VERB" in
                 # ORIGINATING writer. This is a second writer, deliberately: adopt never
                 # ORIGINATES a `landing-swept/v1` verdict, it only COPIES a line that writer
                 # already produced onto the roster this session is now the owner of, so
-                # `hooks/session-start.sh`'s `open_rows` and this file's own
-                # `youngest_suite_writer` — both of which read a marker straight off the
-                # SAME roster file as ground truth, with no re-derivation — see the same
-                # history on the successor that stood on the predecessor. A MET marker can
-                # never reach here: `adopt_fold`'s own `met[]` filter (above) excludes any
-                # name carrying one from the fold entirely, so only a non-MET history
-                # (UNMET/STILL-LIVE/AMBIGUOUS) is ever offered to copy.
+                # `hooks/session-start.sh`'s `open_rows` — which still reads a marker
+                # straight off the SAME roster file as ground truth, with no re-derivation —
+                # sees the same history on the successor that stood on the predecessor. This
+                # file's own `youngest_suite_writer` no longer needs the copy for that: since
+                # T20 (epic-23 wave-20) it asks `roster_open_names` once for the open set and
+                # checks each candidate against it directly. A closed name can never reach
+                # here either way: `adopt_fold` excludes it through that same
+                # `roster_open_names` predicate (an ack later than the row's launch), not a
+                # `met[]` filter, so only a still-open history is ever offered to copy.
                 adopt_copy_marker "$ADOPT_RF" "$ADOPT_OWN_ROSTER" "$(clean "$RNAME")"
               else
                 die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
