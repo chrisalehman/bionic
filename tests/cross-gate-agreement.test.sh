@@ -1874,6 +1874,29 @@ G_MUTANT="$IREPO/.bionic/tmp/roster-$SID_A.txt"
 # again — the exact discharge T26's latest-contract reading was built to honour.
 swept_marker_write "$G_ROSTER" "2026-09-14T00:00:00Z" "$SID_A" "w99-impl" \
   "aw99impl-8888888888888888" "MET"
+# RE-AUTHORED BY T17 (epic-23 wave-20, D10): the marker above used to be the whole discharge,
+# because `live_ids_of_name` — the ambiguity arm's predicate — closed a name on a MET marker.
+# It now asks `roster_open_names`, which closes a name only on the sweeper ledger's ack stamped
+# after the row's launch; a MET marker records the landing and frees nothing. So §F's agent
+# finishing is stated the way the Patrol states it, by an ack — and §G using the name again is
+# stated the way the machine states it, by a re-dispatch: the wall's fresh `intended` row with a
+# later launch, forward-copied from section B's (as `roster_identify` forward-copies), carrying
+# the tool_use_id `g_confirm` completes. The ack discharges §F's id and not the re-dispatch, so
+# the name is open with one live id, and the gate answers about the roster filename rather
+# than about an ambiguity (or, with the whole name acked, a silent pass).
+G_ACK_AT="$(date -u -v+1S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+1 second' +%Y-%m-%dT%H:%M:%SZ)"
+G_RELAUNCH_AT="$(date -u -v+2S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+2 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+[ -f "$IREPO/.bionic/tmp/sweeper-$SID_A.state" ] \
+  || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' \
+       > "$IREPO/.bionic/tmp/sweeper-$SID_A.state"
+printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=w99-impl|by=patrol|reason=landed\n' \
+  "$G_ACK_AT" "$SID_A" >> "$IREPO/.bionic/tmp/sweeper-$SID_A.state"
+G_RELAUNCH_ROW="$(grep -F '|status=intended|' "$G_ROSTER" | grep -F '|name=w99-impl|' \
+  | grep -F '|tool_use_id=toolu_018jyjgop7KMxP6yKtoAWWtB|' | tail -1 \
+  | sed "s/|launched_at=[^|]*|/|launched_at=$G_RELAUNCH_AT|/")"
+expect_contains "§G meta: the re-dispatch row was forward-copied with its later launch" \
+  "launched_at=$G_RELAUNCH_AT" "$G_RELAUNCH_ROW"
+printf '%s\n' "$G_RELAUNCH_ROW" >> "$G_ROSTER"
 
 # READER 1 — the recorder's completion arm. At the canonical name a dispatch's
 # `intended` row reaches `confirmed`; at any other name there is no row to
@@ -11548,6 +11571,148 @@ _cgc_mut=$(s4_stop_payload "$_cgc_r" "$SID_A" "$_cgc_r/cgc-transcript.jsonl" \
   | env CLAUDE_CODE_SESSION_ID="$SID_A" "${CGC_ENV[@]}" bash "$CGC_MUT_HOOK/stop.sh" 2>/dev/null)
 expect_contains "CG-close MUTANT a name-only stop wall frees the re-dispatched name's slot (the row discriminates)" \
   "Fillable gap" "$_cgc_mut"
+
+# ============================================================
+section "CG-close-all — the three remaining readers ask the one close predicate (epic-23 wave-20 T17, REQ-10 AC-10.1; D10)"
+# ============================================================
+#
+# THE DEFECT (T2's carry-over, approved 2026-09-23). CG-close made the four readers D10 named
+# agree. Three more readers of "is this name closed" still closed it on a
+# `landing-swept/v1|…|state=MET` marker alone and never asked `roster_open_names`:
+#   session-start   the post-/clear block's predecessor open-row count
+#   live_ids        `live_ids_of_name`, the stop wall's ambiguity refusal and
+#                   `adopt_write_row`'s "is this name already live here"
+#   patrol          `patrol_roster_state`, doctor's and the Patrol report's `open=`
+# So after a /clear a MET-but-unacked name read closed to all three and open to the four.
+#
+# ONE FIXTURE PER HISTORY, each reader asked through its own entry point, plus the sweeper's
+# `acked=` (one of T2's four, driven as the hook) as the reference answer:
+#   met    dispatched, a MET marker, never acked   -> OPEN   (the carry-over's case)
+#   again  dispatched, acked, dispatched again     -> OPEN
+#   done   dispatched, a MET marker, then acked    -> CLOSED (the paired positive)
+# The rows carry agent ids (an intended row, then its identified row, one launch stamp), since
+# `live_ids_of_name` answers ids and an id-less row is not an identity to it.
+
+CGA_CLAUDE_HOME="$SANDBOX/cga-home"
+mkdir -p "$CGA_CLAUDE_HOME"
+cga_rows() {  # <roster> <name> <agent id> <launched_at>
+  roster_row_fixture status=intended session="$SID_A" name="$2" agent_id= \
+    launched_at="$4" tool_use_id=toolu_01CGA deliverable= >> "$1"
+  roster_row_fixture status=identified session="$SID_A" name="$2" agent_id="$3" \
+    launched_at="$4" tool_use_id=toolu_01CGA deliverable= >> "$1"
+}
+cga_world() {  # <case: met|again|done> [repo label] -> repo path
+  local r ro le
+  r=$(new_repo "${2:-cga-$1}")
+  ro="$r/.bionic/tmp/roster-$SID_A.state"
+  le="$r/.bionic/tmp/sweeper-$SID_A.state"
+  roster_header > "$ro"
+  case "$1" in
+    met)
+      cga_rows "$ro" cga-met acga-met-1 2026-09-01T00:00:00Z
+      swept_marker_write "$ro" 2026-09-01T01:00:00Z "$SID_A" cga-met acga-met-1 MET
+      ;;
+    again)
+      cga_rows "$ro" cga-again acga-again-1 2026-09-01T00:00:00Z
+      cgc_ack "$le" 2026-09-01T01:00:00Z cga-again
+      cga_rows "$ro" cga-again acga-again-2 2026-09-01T02:00:00Z
+      ;;
+    done)
+      cga_rows "$ro" cga-done acga-done-1 2026-09-01T00:00:00Z
+      swept_marker_write "$ro" 2026-09-01T00:30:00Z "$SID_A" cga-done acga-done-1 MET
+      cgc_ack "$le" 2026-09-01T01:00:00Z cga-done
+      ;;
+  esac
+  printf '%s' "$r"
+}
+
+# SESSION-START: the hook, driven as a /clear into SID_B, lists SID_A's roster iff it counts
+# an open row there.
+cga_session_start() {  # <repo> [hook] -> open | closed
+  local out
+  out=$( cd "$1" && printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"clear"}' \
+           "$SID_B" "$CGA_CLAUDE_HOME/t.jsonl" "$1" \
+         | env CLAUDE_CODE_SESSION_ID="$SID_B" BIONIC_CLAUDE_HOME="$CGA_CLAUDE_HOME" \
+             bash "${2:-$BIONIC_HOOKS_DIR/session-start.sh}" 2>/dev/null )
+  case "$out" in *"open row(s) — roster-$SID_A.state"*) printf 'open' ;; *) printf 'closed' ;; esac
+}
+# LIVE_IDS: the library function the two walls call, with the roster they set.
+cga_live_ids() {  # <repo> <name> [lib dir] -> the live ids, space-joined
+  ( BIONIC_LIB_WANT=""
+    . "${3:-$CGC_LIBDIR}/roster.sh" >/dev/null 2>&1
+    ROSTER_FILE="$1/.bionic/tmp/roster-$SID_A.state" live_ids_of_name "$2" ) 2>/dev/null \
+    | tr '\n' ' ' | sed 's/ $//'
+}
+# PATROL: `patrol_roster_state`'s open= for SID_A (one name per world, so 1 or 0).
+cga_patrol() {  # <repo> [lib dir] -> open | closed | other:<line>
+  local line
+  line=$( ( . "${2:-$CGC_LIBDIR}/patrol.sh" >/dev/null 2>&1 \
+            && patrol_roster_state "$1" "$SID_A" ) 2>/dev/null )
+  case "$line" in
+    *"|open=1|"*) printf 'open' ;;
+    *"|open=0|"*) printf 'closed' ;;
+    *) printf 'other:%s' "$line" ;;
+  esac
+}
+
+for _cga in met:open:acga-met-1 again:open:acga-again-2 done:closed:; do
+  _cga_case="${_cga%%:*}"; _cga_rest="${_cga#*:}"; _cga_want="${_cga_rest%%:*}"; _cga_ids="${_cga_rest#*:}"
+  _cga_name="cga-$_cga_case"
+  _cga_r=$(cga_world "$_cga_case")
+  _cga_sw=$(cgc_sweeper "$_cga_r" "$_cga_name")
+  _cga_li=$(cga_live_ids "$_cga_r" "$_cga_name")
+  _cga_lo=closed; [ -n "$_cga_li" ] && _cga_lo=open
+  _cga_pa=$(cga_patrol "$_cga_r")
+  # SESSION-START LAST: its sweep may tidy a dead predecessor's files on the way out.
+  _cga_ss=$(cga_session_start "$_cga_r")
+  expect_eq "CG-close-all ${_cga_case}: the sweeper's acked= (T2's reference) answers ${_cga_want}" "$_cga_want" "$_cga_sw"
+  expect_eq "CG-close-all ${_cga_case}: session-start's predecessor count answers ${_cga_want}" "$_cga_want" "$_cga_ss"
+  expect_eq "CG-close-all ${_cga_case}: live_ids_of_name answers ${_cga_want}" "$_cga_want" "$_cga_lo"
+  expect_eq "CG-close-all ${_cga_case}: live_ids_of_name names only the undischarged id" "$_cga_ids" "$_cga_li"
+  expect_eq "CG-close-all ${_cga_case}: patrol_roster_state answers ${_cga_want}" "$_cga_want" "$_cga_pa"
+  expect_eq "CG-close-all ${_cga_case}: the four readers give ONE answer" "1" \
+    "$(printf '%s\n' "$_cga_sw" "$_cga_ss" "$_cga_lo" "$_cga_pa" | sort -u | wc -l | tr -d ' ')"
+done
+
+# EVERY READER NAMES THE ONE PREDICATE, and none keeps a MET close of its own. The two
+# `roster_open_names "` callers call it by name; session-start's count goes through
+# `roster_open_counts`, which runs the same awk text over many rosters in one process (the
+# REQ-6/P9 bound on predecessor files), so the pin there is that the two share `_ROSTER_OPEN_AWK`.
+CGA_SS="$BIONIC_HOOKS_DIR/session-start.sh"
+expect_true "CG-close-all patrol.sh's patrol_roster_state calls roster_open_names" \
+  grep -q 'roster_open_names "' "$CGC_LIBDIR/patrol.sh"
+expect_eq "CG-close-all live_ids_of_name calls roster_open_names" "1" \
+  "$(awk '/^live_ids_of_name\(\) \{/,/^\}/' "$CGC_LIBDIR/roster.sh" | grep -c 'roster_open_names "' | tr -d ' ')"
+expect_true "CG-close-all session-start.sh counts through roster_open_counts" \
+  grep -q '| roster_open_counts' "$CGA_SS"
+expect_eq "CG-close-all roster_open_names and roster_open_counts run one awk text" "2" \
+  "$( { awk '/^roster_open_names\(\) \{/,/^\}/' "$CGC_LIBDIR/roster.sh"; awk '/^roster_open_counts\(\) \{/,/^\}/' "$CGC_LIBDIR/roster.sh"; } \
+      | grep -c '_ROSTER_OPEN_AWK' | tr -d ' ')"
+expect_eq "CG-close-all none of the three keeps a MET close (state == MET, or a state=MET field match)" "0" \
+  "$(cat "$CGA_SS" "$CGC_LIBDIR/roster.sh" "$CGC_LIBDIR/patrol.sh" \
+      | grep -v '^[[:space:]]*#' | grep -cE '"state"\) == "MET"|== "state=MET"' || true)"
+
+# THE MUTATION PROOF: patrol_roster_state's old reading restored in a copy of the library —
+# a name with a MET marker is dropped from the open set — nothing else touched. (The mutant
+# selects the marker by its `state=MET` field alone: no roster row carries `state=`, and S17
+# forbids a suite to spell the marker's schema token.) The one-answer
+# row over the `met` world must go red: the mutant says closed where the other three say open.
+CGA_MUT="$SANDBOX/cga-mut"
+plant_hook_tree "$CGA_MUT" >/dev/null
+awk '{
+  if (index($0, "open_names=\"$(roster_open_names ") > 0) {
+    print "  open_names=\"$(roster_open_names \"$f\" \"$ledger\" | grep -vxF -e \"$(grep \"|state=MET\" \"$f\" | tr \"|\" \"\\n\" | sed -n \"s/^name=//p\")\")\"  # mutant: a MET marker closes"
+    next
+  }
+  print }' "$CGC_LIBDIR/patrol.sh" > "$CGA_MUT/scripts/lib/patrol.sh"
+expect_eq "CG-close-all meta: the mutant planted its MET close" "1" \
+  "$(grep -c 'mutant: a MET marker closes' "$CGA_MUT/scripts/lib/patrol.sh")"
+_cga_r=$(cga_world met cga-mut-met)
+_cga_mpa=$(cga_patrol "$_cga_r" "$CGA_MUT/scripts/lib")
+_cga_msw=$(cgc_sweeper "$_cga_r" cga-met)
+expect_eq "CG-close-all MUTANT a MET-closing patrol_roster_state answers closed on the met world" "closed" "$_cga_mpa"
+expect_eq "CG-close-all MUTANT …so the one-answer row sees two answers (the row discriminates)" "2" \
+  "$(printf '%s\n' "$_cga_msw" "$_cga_mpa" | sort -u | wc -l | tr -d ' ')"
 
 # ============================================================
 section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave-20 T2, REQ-10 AC-10.2; D10)"
