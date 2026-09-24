@@ -16,17 +16,17 @@
 # HERMETIC. No network, no `claude` CLI, no contact with the bionic checkout
 # this suite runs inside beyond sourcing the library under test. Every git
 # command is `-C <fixture>` or inside a subshell that has cd'd into one; global
-# and system git config are pointed at /dev/null. The session files the D1
-# predicate reads come from a fixture claude-home reached through
-# BIONIC_CLAUDE_HOME — the knob payload/scripts/lib/patrol.sh already uses for
-# exactly this directory, so there is one override chain and not two.
+# and system git config are pointed at /dev/null. The session files some arms plant
+# (to show that a session plays no part in D1) go to a fixture claude-home reached
+# through BIONIC_CLAUDE_HOME — the knob payload/scripts/lib/patrol.sh already uses
+# for exactly this directory, so there is one override chain and not two.
 #
-# THE SUITE-RUNNING ARM STARTS ITS OWN PROCESS. D1 is a conjunction: a busy
-# session in this project AND a live `tests/run.sh`. This suite is itself run BY
-# tests/run.sh, so the process half is ambient-true there and ambient-false
-# standalone. A test that relied on the ambient answer would pass for a
-# different reason in each mode, so the positive arm spawns a real script at
-# <fixture>/tests/run.sh and the negative arms turn the session half off.
+# THE SUITE-RUNNING ARMS START THEIR OWN PROCESSES. D1 (wave-20 T8c) refuses while a
+# `tests/run.sh` process has its script path or its working directory in the project
+# root or the land's target checkout. When this suite runs under tests/run.sh, that
+# runner sits in the bionic checkout, outside every fixture, so it never answers for
+# one. The arms start a stand-in `<dir>/tests/run.sh` that only sleeps, from a chosen
+# working directory, and stop it to show the matching admission.
 #
 # BOTH ARMS, ALWAYS. Every refusal is asserted against the matching acceptance.
 #
@@ -57,9 +57,10 @@ export GIT_AUTHOR_NAME="Bionic Test" GIT_AUTHOR_EMAIL="test@example.invalid"
 export GIT_COMMITTER_NAME="Bionic Test" GIT_COMMITTER_EMAIL="test@example.invalid"
 unset GIT_DIR GIT_WORK_TREE 2>/dev/null || true
 
-# An EMPTY fixture claude-home by default: no session file means the D1
-# predicate's session half is false, so every test that is not about D1 gets a
-# deterministic "no suite running" regardless of what the real machine is doing.
+# An EMPTY fixture claude-home by default. D1 no longer reads it (T8c); the arms that
+# plant a session file there show that a session changes nothing. No stand-in runner
+# works inside any fixture outside Group 5 and Group 7, so every other land sees
+# "no suite running" whatever the real machine is doing.
 CLAUDE_HOME="$TMP/claude-home"; mkdir -p "$CLAUDE_HOME/sessions"
 export BIONIC_CLAUDE_HOME="$CLAUDE_HOME"
 
@@ -383,19 +384,50 @@ expect_true "a refused out-of-scope land does not even drop the legacy link" \
 
 section "Group 5: worktree_land — D1, never land under a running suite"
 #
-# D1 is a CONJUNCTION: a `busy` session whose cwd is this project or a linked
-# worktree of it, AND a live `tests/run.sh`. This suite is itself run by
-# tests/run.sh, so the process half is ambient-true there and ambient-false
-# standalone; the arms below spawn their own so the answer is the same in both
-# modes, and turn the SESSION half on and off to discriminate.
+# D1 IS A FACT ABOUT PROCESSES AND DIRECTORIES (wave-20 T8c; review R2-1, R2-8; critic
+# C2-1). The land refuses while a `tests/run.sh` process has its script path or its working
+# directory inside the project root or inside the land's TARGET checkout. No session file is
+# read. In-process teammates and Agent-tool subagents share their orchestrator's session and
+# have no session file of their own, so a session can never tell the orchestrator from the
+# floor it dispatched (T8b tried, and switched D1 off for exactly that floor).
+#
+# Every arm starts its own STAND-IN RUNNER: a script at `<dir>/tests/run.sh` that only
+# sleeps, run as `bash <script>` from a chosen working directory. The real runner is never
+# started. When this suite itself runs under tests/run.sh, that runner sits in the bionic
+# checkout, outside every fixture here, so the answer is the same in both modes.
 
 S="$(new_repo "$TMP/land-busy")"
-FAKESUITE="$TMP/fakeproj/tests"; mkdir -p "$FAKESUITE"
-printf '#!/bin/bash\nsleep 120\n' > "$FAKESUITE/run.sh"; chmod +x "$FAKESUITE/run.sh"
-bash "$FAKESUITE/run.sh" >/dev/null 2>&1 & SUITE_PID=$!
-trap 'kill "$SUITE_PID" 2>/dev/null; rm -rf "$TMP"' EXIT
-# Give the process a moment to be visible to pgrep before anything asks.
-i=0; while [ $i -lt 50 ] && ! pgrep -f 'tests/run.sh' >/dev/null 2>&1; do i=$((i+1)); done
+
+RUNNER_PID=""
+# <cwd> <script as invoked> -> RUNNER_PID. Returns once the process shows the command line
+# the predicate matches, so no arm races the exec.
+start_runner() {
+  ( cd "$1" && exec bash "$2" ) >/dev/null 2>&1 &
+  RUNNER_PID=$!
+  local i=0
+  while [ $i -lt 100 ]; do
+    case "$(ps -o command= -p "$RUNNER_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
+    i=$((i+1)); sleep 0.05
+  done
+  return 1
+}
+stop_runner() {
+  [ -n "$RUNNER_PID" ] || return 0
+  kill "$RUNNER_PID" 2>/dev/null; wait "$RUNNER_PID" 2>/dev/null
+  RUNNER_PID=""
+}
+make_runner() {  # <dir> -> <dir>/tests/run.sh
+  mkdir -p "$1/tests"
+  printf '#!/bin/bash\nwhile :; do sleep 1; done\n' > "$1/tests/run.sh"
+  chmod +x "$1/tests/run.sh"
+}
+trap 'stop_runner; rm -rf "$TMP"' EXIT
+
+# Somewhere that is no repository at all, and ANOTHER repository (T12 F3's topology: the
+# floor of one project and the land of another).
+ELSE="$TMP/elsewhere"; make_runner "$ELSE"
+OTHER="$(new_repo "$TMP/other-repo")"; make_runner "$OTHER"
+make_runner "$S"
 
 session_file() {  # <pid> <cwd> <status> <name>
   printf '{"pid":%s,"sessionId":"fixture-%s","cwd":"%s","status":"%s","name":"%s","kind":"interactive"}\n' \
@@ -404,97 +436,129 @@ session_file() {  # <pid> <cwd> <status> <name>
 
 BT="$(new_tree "$S" busy-arm)"
 
-# Arm 1 — a busy session in the project, suite alive: refused, naming it.
-session_file "$SUITE_PID" "$S" busy W-PEER
+# Arm 1 — a runner whose SCRIPT is in the project root, started from elsewhere: refused,
+# naming the process. No session file exists anywhere in this fixture.
+expect_true "a stand-in runner started (script in the root, cwd elsewhere)" \
+  start_runner "$ELSE" "$S/tests/run.sh"
+SREFS0="$(refs_of "$S")"
 OUTB="$(worktree_land "$BT" wave/fixture)"; RCB=$?
-expect_match "a busy session in this project refuses the land" \
+expect_match "a runner whose script is in this project refuses the land" \
   "spawn-worktree: REFUSED reason=suite-running*" "$OUTB"
-expect_match "and the refusal NAMES the session" "*session=W-PEER*" "$OUTB"
-expect_match "and its pid" "*pid=${SUITE_PID}*" "$OUTB"
+expect_match "and the refusal NAMES the process" "*pid=${RUNNER_PID}*" "$OUTB"
+expect_match "and the script it runs" "*script=${S}/tests/run.sh*" "$OUTB"
 expect_eq    "the refusal exits 2" "2" "$RCB"
 expect_true  "the tree survives the refusal" test -d "$BT"
+expect_eq    "no ref moved" "$SREFS0" "$(refs_of "$S")"
 
-# Arm 2 — the same world with the session IDLE: the conjunction is false.
-session_file "$SUITE_PID" "$S" idle W-PEER
-expect_match "an idle session does not refuse (the status half discriminates)" \
+# Arm 2 — the same world once the runner has exited: the land goes through. A process that
+# is gone is not a running suite.
+stop_runner
+expect_match "the same land goes through once the runner is gone (the arm discriminates)" \
   "spawn-worktree: LANDED *" "$(worktree_land "$BT" wave/fixture)"
 
-# Arm 3 — busy again, but the session is working in ANOTHER project.
-BT3="$(new_tree "$S" other-project)"
-session_file "$SUITE_PID" "$TMP/somewhere-else" busy W-STRANGER
-expect_match "a busy session in a different project does not refuse" \
-  "spawn-worktree: LANDED *" "$(worktree_land "$BT3" wave/fixture)"
+# Arm 3 — a RELATIVE invocation, `bash tests/run.sh` from the root. The command line names
+# no directory, so only the process's working directory places it.
+BT3="$(new_tree "$S" relative-arm)"
+expect_true "a stand-in runner started (relative, cwd the root)" start_runner "$S" "tests/run.sh"
+OUTB3="$(worktree_land "$BT3" wave/fixture)"; RCB3=$?
+expect_match "a relative runner whose working directory is the root refuses" \
+  "spawn-worktree: REFUSED reason=suite-running*cwd=${S} *" "$OUTB3"
+expect_eq    "that refusal exits 2" "2" "$RCB3"
+stop_runner
 
-# Arm 4 — a busy session in a LINKED WORKTREE of this project counts as this
-# project: that is where a writer running a suite actually sits.
+# Arm 4 — a runner working inside a LINKED WORKTREE of this project counts as this project:
+# that is where a writer running a suite sits. The script itself lives elsewhere.
 BT4="$(new_tree "$S" from-a-tree)"
-session_file "$SUITE_PID" "$BT4" busy W-INTREE
-expect_match "a busy session inside one of the project's own trees refuses" \
-  "spawn-worktree: REFUSED reason=suite-running*" "$(worktree_land "$BT4" wave/fixture)"
+OT4="$(new_tree "$S" writers-tree)"
+expect_true "a stand-in runner started (cwd a linked worktree)" start_runner "$OT4" "$ELSE/tests/run.sh"
+expect_match "a runner working inside one of the project's own trees refuses" \
+  "spawn-worktree: REFUSED reason=suite-running*cwd=${OT4} *" "$(worktree_land "$BT4" wave/fixture)"
+stop_runner
 
-# Arm 5 — a busy session whose PROCESS IS GONE is not a running suite. A stale
-# session file outlives its process routinely, and a lease that could never end
-# on a machine carrying one is worse than no lease.
-DEADPID=$(bash -c 'echo $$')
-while kill -0 "$DEADPID" 2>/dev/null; do :; done
-rm -f "$CLAUDE_HOME/sessions/${SUITE_PID}.json"
-session_file "$DEADPID" "$S" busy W-GHOST
-expect_match "a busy session whose process is dead does not refuse" \
-  "spawn-worktree: LANDED *" "$(worktree_land "$BT4" wave/fixture)"
-rm -f "$CLAUDE_HOME/sessions/${DEADPID}.json"
+# Arm 5 — T12 F3: a runner in ANOTHER repository never refuses this project's land, whether
+# it was invoked relatively from that repository or by its absolute path.
+expect_true "a stand-in runner started (relative, in another repository)" \
+  start_runner "$OTHER" "tests/run.sh"
+expect_match "a runner in a different repository does not refuse (T12 F3)" \
+  "spawn-worktree: LANDED branch=from-a-tree *" "$(worktree_land "$BT4" wave/fixture)"
+stop_runner
+BT5="$(new_tree "$S" other-abs-arm)"
+expect_true "a stand-in runner started (absolute, another repository's script, cwd elsewhere)" \
+  start_runner "$ELSE" "$OTHER/tests/run.sh"
+expect_match "…nor does one invoked by its absolute path" \
+  "spawn-worktree: LANDED branch=other-abs-arm *" "$(worktree_land "$BT5" wave/fixture)"
+stop_runner
 
-# Arm 6 — THE TARGET CHECKOUT IS WHERE THE MERGE HAPPENS (T8, D1), so a busy session sitting
-# in it refuses even when that checkout lives OUTSIDE the project root, which
+# Arm 6 — THE TARGET CHECKOUT IS WHERE THE MERGE HAPPENS (T8, D1), so a runner working in it
+# refuses even when that checkout lives OUTSIDE the project root, which
 # `spawn-worktree.sh create` allows with an absolute parent. The check is widened to the
 # target, never narrowed.
 SWAVE="$TMP/outside-wave"
 git -C "$S" worktree add --quiet -b wave/out "$SWAVE" wave/fixture >/dev/null 2>&1
 SWAVE="$(cd "$SWAVE" && pwd -P)"
 BT6="$(new_tree "$S" into-outside)"
-session_file "$SUITE_PID" "$SWAVE" busy W-OUTWAVE
+expect_true "a stand-in runner started (cwd the outside target checkout)" \
+  start_runner "$SWAVE" "$ELSE/tests/run.sh"
 OUTB6="$(worktree_land "$BT6" wave/out)"; RCB6=$?
-expect_match "a busy session in the TARGET checkout, outside the root, refuses" \
-  "spawn-worktree: REFUSED reason=suite-running*session=W-OUTWAVE*" "$OUTB6"
+expect_match "a runner in the TARGET checkout, outside the root, refuses" \
+  "spawn-worktree: REFUSED reason=suite-running*cwd=${SWAVE} *" "$OUTB6"
 expect_eq    "that refusal exits 2" "2" "$RCB6"
-session_file "$SUITE_PID" "$SWAVE" idle W-OUTWAVE
-expect_match "the same land goes through once that session is idle (the arm discriminates)" \
+stop_runner
+expect_match "the same land goes through once that runner is gone (the arm discriminates)" \
   "spawn-worktree: LANDED branch=into-outside onto=wave/out checkout=${SWAVE} *" \
   "$(worktree_land "$BT6" wave/out)"
 
-# Arm 7 — THE LANDING SESSION NEVER COUNTS AGAINST ITSELF (wave-20 T8b, review R8/F3). D1
-# used to be `busy session in project` AND `a live tests/run.sh`, full stop — and the
-# session running the land is always busy and always in-project, so the conjunction
-# collapsed to "any tests/run.sh anywhere" (T12's live bed named the drive's OWN session in
-# a refusal). `worktree_land` takes the caller's own session id as an optional third
-# argument (threaded from `worktree_land_for_session`'s `sid`, Group 7 below); a busy
-# session file whose `sessionId` equals it is excluded from the predicate — the refusal for
-# a suite this project has running under ANY OTHER session is unchanged (Arm 8).
+# Arm 7 — THE ORCHESTRATOR'S OWN FLOOR (T8c; review R2-1, critic C2-1). The real fleet
+# shape: ONE session file, the orchestrator's, busy, its cwd the root; the floor it
+# dispatched runs `<wave checkout>/tests/run.sh` in the wave checkout; the land goes onto
+# the wave branch. Called with the lander's own session id (T8b's call shape, which still
+# parses) and without it: both refuse, because who runs the suite plays no part.
+SINNER="$S/.worktrees/inner"
+git -C "$S" worktree add --quiet -b wave/inner "$SINNER" wave/fixture >/dev/null 2>&1
+make_runner "$SINNER"
 BT7="$(new_tree "$S" self-arm)"
-session_file "$SUITE_PID" "$S" busy W-SELF
-expect_match "the lander's OWN busy session does not refuse its own land" \
-  "spawn-worktree: LANDED *" "$(worktree_land "$BT7" wave/fixture "fixture-W-SELF")"
+session_file "$$" "$S" busy W-SELF
+expect_true "a stand-in runner started (the floor: absolute script in the wave checkout)" \
+  start_runner "$SINNER" "$SINNER/tests/run.sh"
+OUTB7="$(worktree_land "$BT7" wave/inner "fixture-W-SELF")"; RCB7=$?
+expect_match "(T8c: was \"the lander's OWN busy session does not refuse its own land\") the lander's own session's floor in the target checkout refuses" \
+  "spawn-worktree: REFUSED reason=suite-running*script=${SINNER}/tests/run.sh*" "$OUTB7"
+expect_eq    "that refusal exits 2" "2" "$RCB7"
+expect_match "and the call without a session id refuses the same" \
+  "spawn-worktree: REFUSED reason=suite-running*" "$(worktree_land "$BT7" wave/inner)"
+expect_true  "the tree survives" test -d "$BT7"
+stop_runner
+expect_match "the same land goes through once the floor has finished (the arm discriminates)" \
+  "spawn-worktree: LANDED branch=self-arm onto=wave/inner *" \
+  "$(worktree_land "$BT7" wave/inner "fixture-W-SELF")"
 
-# Arm 8 — a DIFFERENT session's busy suite in this project still refuses: the exclusion is
-# scoped to the caller's own identity, never a blanket suppression, because this refusal is
-# the reason D1 exists in the first place.
+# Arm 8 — a runner in this root refuses whoever's session started it: here a DIFFERENT
+# session's file is the busy one, and the land still refuses.
 BT8="$(new_tree "$S" other-session-arm)"
-session_file "$SUITE_PID" "$S" busy W-PEER2
+rm -f "$CLAUDE_HOME/sessions/$$.json"
+session_file "$$" "$S" busy W-PEER2
+expect_true "a stand-in runner started (relative, cwd the root)" start_runner "$S" "tests/run.sh"
 OUTB8="$(worktree_land "$BT8" wave/fixture "some-other-session-id")"; RCB8=$?
-expect_match "a different session's busy suite in this project still refuses" \
+expect_match "(T8c: was \"a different session's busy suite in this project still refuses\") a suite in this root refuses, from any session" \
   "spawn-worktree: REFUSED reason=suite-running*" "$OUTB8"
 expect_eq    "that refusal exits 2" "2" "$RCB8"
+stop_runner
 
-# Arm 9 — no sid argument at all (the pre-T8b call shape, still valid): behaves exactly as
-# before, refusing on any busy in-project session. Backward compatible on purpose — every
-# existing 2-argument call site above (Arms 1-6) already proves this, this one just says so
-# beside the arm that changed.
+# Arm 9 — THE SESSION PLAYS NO PART IN AN ADMISSION EITHER (T12 F3 as it was measured): the
+# lander's session file busy at the root, the only runner in ANOTHER repository. The
+# pre-T8b predicate refused this, naming the lander's own session. Both call shapes land.
+rm -f "$CLAUDE_HOME/sessions/$$.json"
+session_file "$$" "$S" busy W-SELF
+expect_true "a stand-in runner started (relative, in another repository)" \
+  start_runner "$OTHER" "tests/run.sh"
+expect_match "(T8c: was \"no sid argument -> the busy session still refuses (unchanged default)\") a busy session with its only runner in another repository does not refuse" \
+  "spawn-worktree: LANDED branch=other-session-arm *" "$(worktree_land "$BT8" wave/fixture)"
 BT9="$(new_tree "$S" no-sid-arm)"
-OUTB9="$(worktree_land "$BT9" wave/fixture)"; RCB9=$?
-expect_match "no sid argument -> the busy session still refuses (unchanged default)" \
-  "spawn-worktree: REFUSED reason=suite-running*" "$OUTB9"
-expect_eq    "that refusal exits 2" "2" "$RCB9"
+expect_match "…nor with the lander's session id" \
+  "spawn-worktree: LANDED branch=no-sid-arm *" "$(worktree_land "$BT9" wave/fixture "fixture-W-SELF")"
+stop_runner
 
-rm -f "$CLAUDE_HOME/sessions/${SUITE_PID}.json"
+rm -f "$CLAUDE_HOME/sessions/$$.json"
 
 section "Group 6: worktree_land — the legacy link, and the branch, and prune"
 
@@ -554,37 +618,42 @@ expect_match "the same tree lands from the bound session (the arm discriminates)
 expect_true "the usage text names the land verb" \
   grep -q 'spawn-worktree.sh land' "$SPAWN"
 
-# T8b (review R8/F3) END TO END: the verb reads its own session id off
-# CLAUDE_CODE_SESSION_ID (`cmd_land`) and now threads it through to `_wt_busy_suite`, so a
-# busy `tests/run.sh` recorded under the CALLING session's own session file never refuses
-# its own land — the exact topology T12's live bed hit (its first head attempt was refused
-# `session=<its own session>`, F3).
-VSUITE="$TMP/verb-suite/tests"; mkdir -p "$VSUITE"
-printf '#!/bin/bash\nsleep 120\n' > "$VSUITE/run.sh"; chmod +x "$VSUITE/run.sh"
-bash "$VSUITE/run.sh" >/dev/null 2>&1 & VSUITE_PID=$!
-# Folded into the ONE exit trap (never a second `trap ... EXIT`, which would replace
-# rather than add to the first and leak $TMP and $SUITE_PID on an early exit).
-trap 'kill "$SUITE_PID" 2>/dev/null; kill "$VSUITE_PID" 2>/dev/null; rm -rf "$TMP"' EXIT
-i=0; while [ $i -lt 50 ] && ! pgrep -f 'tests/run.sh' >/dev/null 2>&1; do i=$((i+1)); done
-
+# T8c (review R2-1, critic C2-1) END TO END through the verb. The verb reads its session id
+# off CLAUDE_CODE_SESSION_ID (`cmd_land`) and uses it for one thing: the target branch.
+# The orchestrator's shape is one busy session file at the root; the floor it dispatched
+# runs in the checkout the land merges into.
+VELSE="$TMP/verb-else"; make_runner "$VELSE"
+VOTHERREPO="$(new_repo "$TMP/verb-other-repo")"; make_runner "$VOTHERREPO"
 VSELF="$(new_tree "$V" verb-self-busy)"
 printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"busy","name":"self"}\n' \
-  "$VSUITE_PID" "$VSID" "$V" > "$CLAUDE_HOME/sessions/${VSUITE_PID}.json"
-expect_match "the verb's own busy suite does not refuse its own land" \
+  "$$" "$VSID" "$V" > "$CLAUDE_HOME/sessions/$$.json"
+expect_true "a stand-in runner started (cwd the verb's target checkout)" \
+  start_runner "$V" "$VELSE/tests/run.sh"
+VREFS0="$(refs_of "$V")"
+OUTVS="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VSELF" 2>/dev/null )"; RCVS=$?
+expect_match "(T8c: was \"the verb's own busy suite does not refuse its own land\") the verb's own session's floor in the target checkout refuses its own land" \
+  "spawn-worktree: REFUSED reason=suite-running*cwd=${V} *" "$OUTVS"
+expect_eq   "that refusal exits 2" "2" "$RCVS"
+expect_eq   "no ref moved" "$VREFS0" "$(refs_of "$V")"
+stop_runner
+
+# The same session, its only runner in another repository: the verb lands.
+expect_true "a stand-in runner started (relative, in another repository)" \
+  start_runner "$VOTHERREPO" "tests/run.sh"
+expect_match "a runner in another repository does not refuse the verb's land" \
   "spawn-worktree: LANDED branch=verb-self-busy onto=wave/fixture *" \
   "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VSELF" 2>/dev/null )"
+stop_runner
 
-# The same running suite, recorded under a DIFFERENT session's file: still refused.
+# A runner in this root with NO session file at all (a human's terminal): still refused.
+rm -f "$CLAUDE_HOME/sessions/$$.json"
 VOTHER="$(new_tree "$V" verb-other-busy)"
-printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"busy","name":"peer"}\n' \
-  "$VSUITE_PID" "verb-peer-session" "$V" > "$CLAUDE_HOME/sessions/${VSUITE_PID}.json"
+expect_true "a stand-in runner started (cwd the root)" start_runner "$V" "$VELSE/tests/run.sh"
 OUTVB="$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VOTHER" 2>/dev/null )"; RCVB=$?
-expect_match "a different session's busy suite in this project still refuses" \
+expect_match "a suite in this root with no session file at all still refuses" \
   "spawn-worktree: REFUSED reason=suite-running*" "$OUTVB"
 expect_eq   "that refusal exits 2" "2" "$RCVB"
-
-kill "$VSUITE_PID" 2>/dev/null
-rm -f "$CLAUDE_HOME/sessions/${VSUITE_PID}.json"
+stop_runner
 
 section "Group 8: worktree_lease_overruns — a tree outliving its row"
 #

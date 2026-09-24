@@ -487,6 +487,81 @@ expect_eq "topo-a's work is in the wave branch" "0" \
 expect_eq "topo-a's work is NOT in the feature branch" "1" \
   "$(git -C "$R8B" rev-list --count feature/human..topo-a 2>/dev/null)"
 
+# D1 THROUGH STANDDOWN (wave-20 T8c; review R2-1; critic C2-1). standdown passes its own
+# SESSION_ID to worktree_land_for_session, and that id picks the target branch and nothing
+# else. A `tests/run.sh` working in the wave checkout, the orchestrator's own floor, refuses
+# the land whoever started it; one working in ANOTHER repository does not (T12 F3). The
+# runner is a stand-in that only sleeps, never the real runner.
+SO_RUNNER_PID=""
+so_start_runner() {  # <cwd> <script as invoked>
+  ( cd "$1" && exec bash "$2" ) >/dev/null 2>&1 &
+  SO_RUNNER_PID=$!
+  local i=0
+  while [ $i -lt 100 ]; do
+    case "$(ps -o command= -p "$SO_RUNNER_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
+    i=$((i+1)); sleep 0.05
+  done
+  return 1
+}
+so_stop_runner() {
+  [ -n "$SO_RUNNER_PID" ] || return 0
+  kill "$SO_RUNNER_PID" 2>/dev/null; wait "$SO_RUNNER_PID" 2>/dev/null
+  SO_RUNNER_PID=""
+}
+trap 'so_stop_runner; rm -rf "$SANDBOX"' EXIT
+so_topology() {  # <name> <row> -> repo path; wave/20-demo in .worktrees/20-demo, <row>'s tree beside it
+  local r
+  r="$(make_repo "$1")"
+  echo seed > "$r/README.md"
+  git -C "$r" add README.md >/dev/null 2>&1
+  git -C "$r" commit -qm seed >/dev/null 2>&1
+  git -C "$r" worktree add -q -b wave/20-demo "$r/.worktrees/20-demo" >/dev/null 2>&1
+  git -C "$r" worktree add -q -b "$2" "$r/.worktrees/$2" wave/20-demo >/dev/null 2>&1
+  echo "$2" > "$r/.worktrees/$2/$2.txt"
+  git -C "$r/.worktrees/$2" add -A >/dev/null 2>&1
+  git -C "$r/.worktrees/$2" commit -qm "$2 work" >/dev/null 2>&1
+  echo "$2" > "$r/.bionic/docs/record/$2.md"
+  so_roster_row "$r" "$2" ".bionic/docs/record/$2.md" "" "$2@session-6c85684c"
+  so_bind_plan "$r" wave/20-demo >/dev/null
+  printf '%s\n' "$r"
+}
+SO_OTHER="$(make_repo standdown-d1-other-repo)"
+mkdir -p "$SO_OTHER/tests"
+printf '#!/bin/bash\nwhile :; do sleep 1; done\n' > "$SO_OTHER/tests/run.sh"; chmod +x "$SO_OTHER/tests/run.sh"
+
+R8D="$(so_topology standdown-d1-floor floor-a)"
+R8D_REAL="$(cd "$R8D" && pwd -P)"
+mkdir -p "$R8D/.worktrees/20-demo/tests"
+printf '#!/bin/bash\nwhile :; do sleep 1; done\n' > "$R8D/.worktrees/20-demo/tests/run.sh"
+chmod +x "$R8D/.worktrees/20-demo/tests/run.sh"
+R8D_WAVE0="$(git -C "$R8D" rev-parse wave/20-demo)"
+if so_start_runner "$R8D_REAL/.worktrees/20-demo" "$R8D_REAL/.worktrees/20-demo/tests/run.sh"; then
+  ok "a stand-in floor started in the wave checkout"
+else
+  no "a stand-in floor started in the wave checkout"
+fi
+run_orders "$R8D" standdown
+so_stop_runner
+expect_status "standdown under a floor in the wave checkout exits clean" 0 "$ST"
+expect_contains "the land is REFUSED, naming the running suite's script" \
+  "REFUSED reason=suite-running pid=" "$OUT"
+expect_contains "…in the wave checkout" "script=$R8D_REAL/.worktrees/20-demo/tests/run.sh" "$OUT"
+expect_absent "…and no LANDED line claims it" "LANDED branch=floor-a" "$OUT"
+if [ -d "$R8D/.worktrees/floor-a" ]; then ok "the tree under the floor still stands"; else no "the tree under the floor still stands"; fi
+expect_eq "the wave branch did not move" "$R8D_WAVE0" "$(git -C "$R8D" rev-parse wave/20-demo)"
+
+R8E="$(so_topology standdown-d1-elsewhere floor-b)"
+if so_start_runner "$SO_OTHER" "tests/run.sh"; then
+  ok "a stand-in runner started in another repository"
+else
+  no "a stand-in runner started in another repository"
+fi
+run_orders "$R8E" standdown
+so_stop_runner
+expect_status "standdown with a runner in another repository exits clean" 0 "$ST"
+expect_contains "the land goes through: another repository's suite is not this merge's (T12 F3)" \
+  "LANDED branch=floor-b onto=wave/20-demo" "$OUT"
+
 # AN UNBOUND SESSION LANDS NOTHING (AC-1.2 through standdown). The same shape with no binding:
 # the row is MET and stood down, and its lease is REFUSED naming why — tree and refs stay.
 R8C="$(make_repo standdown-unbound)"
