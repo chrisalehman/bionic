@@ -65,6 +65,18 @@ so_roster_row() {  # <repo> <name> <deliverable> [waiver] [teammate-id] [claims]
   return 0
 }
 
+# A BOUND PLAN (wave-20 T8, REQ-1, D1). standdown lands a tree onto the session's bound
+# plan's `working-branch:` and nowhere else, so every fixture that expects a LANDED line binds
+# this session to a plan naming the branch its checkout holds. The marker is binding.sh's shape.
+so_bind_plan() {  # <repo> <working-branch> -> echoes the plan path
+  local repo="$1" wb="$2" p
+  p="$repo/.bionic/docs/plans/epic-x/wave-x.plan.md"
+  mkdir -p "${p%/*}" "$repo/.bionic/tmp"
+  printf -- '---\nworking-branch: %s\n---\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n' "$wb" > "$p"
+  printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$p" > "$repo/.bionic/tmp/engaged-$SID.state"
+  printf '%s\n' "$p"
+}
+
 OUT=""; ERR=""; ST=0
 run_orders() {  # <repo> <args…>
   local repo="$1"; shift
@@ -376,6 +388,7 @@ for n in land-a land-b land-c; do
   so_roster_row "$R8" "$n" ".bionic/docs/record/$n.md" "" "$n@session-6c85684c"
 done
 so_roster_row "$R8" "still-working" ".bionic/docs/record/nothing.md" "" "still-working@session-6c85684c"
+so_bind_plan "$R8" wave/fixture >/dev/null
 
 run_orders "$R8" standdown
 expect_status "standdown with trees exits clean" 0 "$ST"
@@ -383,6 +396,8 @@ expect_status "standdown with trees exits clean" 0 "$ST"
 expect_contains "the first discharged row's tree is reported LANDED" \
   "LANDED branch=land-a" "$OUT"
 expect_contains "…and so is the second" "LANDED branch=land-b" "$OUT"
+expect_contains "the LANDED line names the plan's working branch as its target (AC-1.3)" \
+  "LANDED branch=land-a onto=wave/fixture checkout=" "$OUT"
 expect_contains "the dirty tree is reported REFUSED, naming why" \
   "REFUSED reason=dirty-tree" "$OUT"
 expect_contains "…and the refusal is attributable to its row" "land-c" "$OUT"
@@ -427,6 +442,7 @@ git -C "$R9/.worktrees/land-p" commit -qm "land-p work" >/dev/null 2>&1
 git -C "$R9" checkout -q -b main
 echo land-p > "$R9/.bionic/docs/record/land-p.md"
 so_roster_row "$R9" "land-p" ".bionic/docs/record/land-p.md" "" "land-p@session-6c85684c"
+so_bind_plan "$R9" main >/dev/null
 
 run_orders "$R9" standdown
 expect_status "standdown on a protected checkout still exits clean" 0 "$ST"
@@ -438,6 +454,60 @@ if git -C "$R9" rev-list --count "HEAD..land-p" 2>/dev/null | grep -qx 0; then
 else
   ok "main was NOT merged into"
 fi
+
+# THE TWO-CHECKOUT TOPOLOGY THROUGH STANDDOWN (wave-20 T8, REQ-1, AC-1.1/AC-1.3). The main
+# checkout sits on a feature branch; the plan's working branch is checked out in its own tree
+# under .worktrees/. standdown lands through worktree_land_for_session — the path
+# `spawn-worktree.sh land` takes too — so the merge goes into the wave checkout and the
+# feature branch does not move.
+R8B="$(make_repo standdown-topology)"
+R8B_REAL="$(cd "$R8B" && pwd -P)"
+echo seed > "$R8B/README.md"
+git -C "$R8B" add README.md >/dev/null 2>&1
+git -C "$R8B" commit -qm seed >/dev/null 2>&1
+git -C "$R8B" worktree add -q -b wave/20-demo "$R8B/.worktrees/20-demo" >/dev/null 2>&1
+git -C "$R8B" checkout -q -b feature/human
+git -C "$R8B" worktree add -q -b topo-a "$R8B/.worktrees/topo-a" wave/20-demo >/dev/null 2>&1
+echo topo > "$R8B/.worktrees/topo-a/topo-a.txt"
+git -C "$R8B/.worktrees/topo-a" add -A >/dev/null 2>&1
+git -C "$R8B/.worktrees/topo-a" commit -qm "topo-a work" >/dev/null 2>&1
+echo topo-a > "$R8B/.bionic/docs/record/topo-a.md"
+so_roster_row "$R8B" "topo-a" ".bionic/docs/record/topo-a.md" "" "topo-a@session-6c85684c"
+so_bind_plan "$R8B" wave/20-demo >/dev/null
+R8B_FEAT0="$(git -C "$R8B" rev-parse feature/human)"
+
+run_orders "$R8B" standdown
+expect_status "standdown in the two-checkout topology exits clean" 0 "$ST"
+expect_contains "the tree lands onto the working branch, in the checkout that holds it" \
+  "LANDED branch=topo-a onto=wave/20-demo checkout=$R8B_REAL/.worktrees/20-demo merge=" "$OUT"
+expect_eq "the feature branch the main checkout sits on did not move" \
+  "$R8B_FEAT0" "$(git -C "$R8B" rev-parse feature/human)"
+expect_eq "topo-a's work is in the wave branch" "0" \
+  "$(git -C "$R8B" rev-list --count wave/20-demo..topo-a 2>/dev/null)"
+expect_eq "topo-a's work is NOT in the feature branch" "1" \
+  "$(git -C "$R8B" rev-list --count feature/human..topo-a 2>/dev/null)"
+
+# AN UNBOUND SESSION LANDS NOTHING (AC-1.2 through standdown). The same shape with no binding:
+# the row is MET and stood down, and its lease is REFUSED naming why — tree and refs stay.
+R8C="$(make_repo standdown-unbound)"
+echo seed > "$R8C/README.md"
+git -C "$R8C" add README.md >/dev/null 2>&1
+git -C "$R8C" commit -qm seed >/dev/null 2>&1
+git -C "$R8C" worktree add -q -b unbound-a "$R8C/.worktrees/unbound-a" >/dev/null 2>&1
+echo u > "$R8C/.worktrees/unbound-a/u.txt"
+git -C "$R8C/.worktrees/unbound-a" add -A >/dev/null 2>&1
+git -C "$R8C/.worktrees/unbound-a" commit -qm "unbound-a work" >/dev/null 2>&1
+echo unbound-a > "$R8C/.bionic/docs/record/unbound-a.md"
+so_roster_row "$R8C" "unbound-a" ".bionic/docs/record/unbound-a.md" "" "unbound-a@session-6c85684c"
+R8C_REFS0="$(git -C "$R8C" for-each-ref --format='%(refname) %(objectname)')"
+
+run_orders "$R8C" standdown
+expect_status "standdown from an unbound session exits clean" 0 "$ST"
+expect_contains "the lease is REFUSED, naming the missing binding, attributable to its row" \
+  "REFUSED reason=no-bound-plan state=none" "$OUT"
+expect_absent "…and no LANDED line claims it" "LANDED branch=unbound-a" "$OUT"
+if [ -d "$R8C/.worktrees/unbound-a" ]; then ok "the unbound session's tree still stands"; else no "the unbound session's tree still stands"; fi
+expect_eq "no ref moved" "$R8C_REFS0" "$(git -C "$R8C" for-each-ref --format='%(refname) %(objectname)')"
 
 # A roster with no trees at all must behave exactly as it did before this
 # feature: the landing report is additive, never a precondition.
@@ -726,6 +796,7 @@ R11TR="$R8CFG/projects/$R11SLUG/$SID.jsonl"
 # ends in a merge only for a landed row (MET or WAIVED); the UNMET shape is R12 below.
 echo landed > "$R11/.bionic/docs/record/n3.md"
 so_roster_row "$R11" "acked-gone-lease" ".bionic/docs/record/n3.md" "" "acked-gone-lease@session-6c85684c"
+so_bind_plan "$R11" wave/fixture >/dev/null
 ( cd "$R11" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack acked-gone-lease ) >/dev/null 2>&1
 # A fresh panel that lists nobody: the row's agent is gone, not merely stale.
 plant_live "$R11TR" fresh
@@ -735,8 +806,8 @@ expect_status "standdown over an acked-and-gone row with a tree exits clean" 0 "
 R11_SD=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
 expect_absent "the acked-and-gone row is kept out of READY (AC-1.3 unchanged by R2)" \
   "acked-gone-lease" "$R11_SD"
-expect_contains "…but its lease still ends, reported under LEASES" \
-  "LANDED branch=acked-gone-lease" "$OUT"
+expect_contains "…but its lease still ends, reported under LEASES, onto the plan's working branch" \
+  "LANDED branch=acked-gone-lease onto=wave/fixture" "$OUT"
 expect_contains "…attributable to its row by name" \
   "(acked-gone-lease)" "$OUT"
 if [ ! -d "$R11/.worktrees/acked-gone-lease" ]; then

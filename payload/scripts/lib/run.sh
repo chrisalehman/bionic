@@ -792,3 +792,39 @@ session_run() {
   printf 'none\n'
   return 1
 }
+
+# session_working_branch <root> <sid> -> the bound plan's `working-branch:` on stdout, exit 0;
+# otherwise ONE refusal line on stdout — `<reason> key=value…` — and a status per reason:
+#
+#   no-bound-plan state=none                 1   no binding, and the root has no open run
+#   no-bound-plan state=fallback plan=<p>    1   no binding; the root's newest open run is
+#                                                somebody's, never this session's target
+#   bound-unreadable plan=<p>                3   the bound plan is THERE and cannot be read
+#   no-working-branch plan=<p>               4   the bound plan is gone, or names no branch
+#
+# (wave-20 T8, REQ-1, D1.) THE ONE PLACE THE PLAN-TO-BRANCH RULE IS WRITTEN: a land merges
+# into the plan's working branch and nowhere else, and this is where "the plan's working
+# branch" is read. `bound-open` and `bound-closed` both answer — a closed run's plan still
+# names its branch, and the last land of a run happens as it closes. The verdict is
+# `session_run`'s, so `bound-unreadable` is T1's answer and never a plan read in its place.
+#
+# THE REFUSAL LINE IS THE REASON, written here once, so the land that prints it and the
+# suite that pins it read the same words. It asks nothing of git: whether the branch is a ref
+# and which checkout holds it are the land's questions (lib/worktree.sh), not the plan's.
+session_working_branch() {
+  local root="$1" sid="$2" verdict plan wb
+  verdict=$(session_run "$root" "$sid") || :
+  plan="${verdict#* }"
+  case "$verdict" in
+    bound-open\ *|bound-closed\ *) : ;;
+    bound-unreadable\ *) printf 'bound-unreadable plan=%s\n' "$plan"; return 3 ;;
+    fallback\ *) printf 'no-bound-plan state=fallback plan=%s\n' "$plan"; return 1 ;;
+    *) printf 'no-bound-plan state=none\n'; return 1 ;;
+  esac
+  wb=$(plan_frontmatter_get "$plan" "working-branch")
+  if [ -z "$wb" ]; then
+    printf 'no-working-branch plan=%s\n' "$plan"
+    return 4
+  fi
+  printf '%s\n' "$wb"
+}
