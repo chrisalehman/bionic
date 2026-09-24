@@ -5618,7 +5618,7 @@ s30_row() {  # <repo> <key=value>... — one live row through the one writer
     files=hooks/a.sh suites_allowed=a.test.sh suites_source=declared \
     teammate_id=w1@session-8a41c2e0 tool_use_id=toolu_w1 "$@" >> "$(roster_of "$repo")"
 }
-s30_last() { grep -F 'roster-state/v1|' "$(roster_of "$1")" | grep -F "|name=${2:-w1}|" | tail -1; }
+s30_last() { grep -F "|name=${2:-w1}|" "$(roster_of "$1")" | tail -1; }
 s30_field() { printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-; }
 
 R30="$(make_repo s30-amend)"; new_roster "$R30"; s30_row "$R30"
