@@ -284,4 +284,80 @@ r6_ack "$R7_DIR/infileorder/sweeper-s1.state" 2026-09-01T02:00:00Z w-infileorder
 expect_eq "R7b …and stays open when the fresher launch is already last on disk (the control)" \
   "w-infileorder" "$(r7_open "$R7_DIR/infileorder")"
 
+section "R8 — an unreadable stamp on ANY live row of a name keeps it open, in either file order (epic-23 wave-20 T20c, review R2-2)"
+
+# THE DEFECT (review R2-2, INTRODUCED by T20b's max-stamp rule). `born[nm]` kept the maximum
+# WELL-FORMED stamp, and an unreadable candidate never displaced it — so an older well-formed
+# launch won over a later live row whose stamp could not be read, and an ack between them
+# closed the name. That is the predicate's own rule read backwards: "AN UNREADABLE STAMP ON
+# EITHER SIDE CLOSES NOTHING". The fix: an unreadable stamp on any live row makes `born`
+# unreadable, and that sticks, whatever order the rows sit in. The fixture is the review's:
+# `unread` launched 01:00Z, then a row with `launched_at=` empty, and an ack at 02:00Z.
+# bionic's own writers cannot produce the empty stamp (preflight and the recorder both stamp
+# `date -u`); a hand-edited or legacy row can.
+mkdir -p "$R7_DIR/unread"
+r6_row "$R7_DIR/unread/roster-s1.state" unread a-unread-1 2026-09-01T01:00:00Z
+r6_row "$R7_DIR/unread/roster-s1.state" unread a-unread-2 ""
+r6_ack "$R7_DIR/unread/sweeper-s1.state" 2026-09-01T02:00:00Z unread
+expect_eq "R8a the review's fixture: a later live row with an unreadable stamp keeps the name open (fail closed)" \
+  "unread" "$(r7_open "$R7_DIR/unread")"
+
+# THE ORDER CONTROL: the same two rows the other way round. Stickiness is the point — the
+# unreadable row seen FIRST must not be displaced by the well-formed one after it either.
+mkdir -p "$R7_DIR/unreadfirst"
+r6_row "$R7_DIR/unreadfirst/roster-s1.state" unreadfirst a-unreadfirst-1 "not-a-time"
+r6_row "$R7_DIR/unreadfirst/roster-s1.state" unreadfirst a-unreadfirst-2 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/unreadfirst/sweeper-s1.state" 2026-09-01T02:00:00Z unreadfirst
+expect_eq "R8b …and in the other file order: an unreadable stamp seen first sticks (the order control)" \
+  "unreadfirst" "$(r7_open "$R7_DIR/unreadfirst")"
+
+# THE PAIRED POSITIVE: the same history with both stamps readable closes the name. Without it
+# R8a and R8b are equally green on a predicate that never closes anything.
+mkdir -p "$R7_DIR/readable"
+r6_row "$R7_DIR/readable/roster-s1.state" readable a-readable-1 2026-09-01T00:30:00Z
+r6_row "$R7_DIR/readable/roster-s1.state" readable a-readable-2 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/readable/sweeper-s1.state" 2026-09-01T02:00:00Z readable
+expect_eq "R8c …while the same history with every stamp readable is closed by the ack (the row discriminates)" \
+  "" "$(r7_open "$R7_DIR/readable")"
+
+section "R9 — a restart after an ack holds the name open by its restarted_at, not by moving launched_at (epic-23 wave-20 T20c, critic C2-2)"
+
+# OCCUPANCY AND THE CONTRACT ARE TWO QUESTIONS (D10). A SubagentStart for an id whose lineage
+# an ack already closed is a restart: the agent is back on the panel and holds a slot. T20b
+# answered that by stamping the restart row's `launched_at` fresh — and `launched_at` is also
+# the clock the sweeper dates the deliverable against, so a contract met before the ack read
+# UNMET for good, and `stopped` closed it `abandoned` (critic C2-2). The recorder now keeps
+# `launched_at` as the contract's launch and writes the restart's own time as `restarted_at=`;
+# this predicate — the one close predicate — takes a row's occupancy stamp from
+# `restarted_at` when the row carries one. The row is built the way the recorder builds it:
+# the production row, with `restarted_at=` appended at the end.
+r9_restart_row() {  # <roster> <name> <agent id> <launched_at> <restarted_at>
+  printf '%s|restarted_at=%s\n' "$(lib roster_row status=identified session=s1 name="$2" agent_id="$3" \
+    launched_at="$4" subagent_type=implementor model=opus deliverable= source=declared duration= \
+    progress= claims= cadence= absent= waiver= tool_use_id=toolu_r6 plan=none)" "$5" >> "$1"
+}
+mkdir -p "$R7_DIR/restart"
+r6_row "$R7_DIR/restart/roster-s1.state" w-restart a-restart-1 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/restart/sweeper-s1.state" 2026-09-01T02:00:00Z w-restart
+r9_restart_row "$R7_DIR/restart/roster-s1.state" w-restart a-restart-1 2026-09-01T01:00:00Z 2026-09-01T03:00:00Z
+expect_eq "R9a a restart row whose restarted_at postdates the ack holds the name open — though its launched_at does not" \
+  "w-restart" "$(r7_open "$R7_DIR/restart")"
+
+# THE CONTROL: the same row with no restarted_at is an ordinary resume carrying the original
+# launch, and the ack closes it — so R9a's answer comes from the new field and nothing else.
+mkdir -p "$R7_DIR/norestart"
+r6_row "$R7_DIR/norestart/roster-s1.state" w-norestart a-norestart-1 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/norestart/sweeper-s1.state" 2026-09-01T02:00:00Z w-norestart
+r6_row "$R7_DIR/norestart/roster-s1.state" w-norestart a-norestart-1 2026-09-01T01:00:00Z
+expect_eq "R9b …the same history with no restarted_at is closed by the ack (the control)" \
+  "" "$(r7_open "$R7_DIR/norestart")"
+
+# A RESTART BEFORE THE ACK closes like any launch: the ack after it discharges the name.
+mkdir -p "$R7_DIR/restartacked"
+r6_row "$R7_DIR/restartacked/roster-s1.state" w-racked a-racked-1 2026-09-01T01:00:00Z
+r9_restart_row "$R7_DIR/restartacked/roster-s1.state" w-racked a-racked-1 2026-09-01T01:00:00Z 2026-09-01T03:00:00Z
+r6_ack "$R7_DIR/restartacked/sweeper-s1.state" 2026-09-01T04:00:00Z w-racked
+expect_eq "R9c …and an ack after the restart closes the restarted name (the close still works)" \
+  "" "$(r7_open "$R7_DIR/restartacked")"
+
 finish

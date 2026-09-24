@@ -371,18 +371,27 @@ _ROSTER_OPEN_AWK='
       nm = _roster_kv(line, "name"); if (nm == "") nm = "(unnamed)"
       gsub(/\t/, " ", nm)
       if (!(nm in seen)) { seen[nm] = 1; order[++n] = nm }
-      # THE MAXIMUM WELL-FORMED STAMP, not whichever row happens to be LAST in file order
-      # (critic C7, epic-23 wave-20 T20b). Adoption can append a predecessor row, carrying
-      # its own earlier launched_at, after a fresher live row for the same name already on
-      # the file; born[nm] must still read as the LATEST launch, or an ack taken between the
-      # two stamps closes a name whose real latest launch is still open. The comparison is
-      # already lexical (the one stamp shape every writer emits), so the direction here is
-      # exactly the one _roster_discharged already takes: an unreadable candidate never
-      # displaces a well-formed born[nm], and the first row seen for a name is kept even
-      # when it is itself unreadable
-      # (fail-closed-constants: nothing here reads "no stamp yet" as "never launched").
-      cand = _roster_kv(line, "launched_at")
-      if (!(nm in born) || (_roster_stamp_ok(cand) && (!_roster_stamp_ok(born[nm]) || cand "" > born[nm] ""))) born[nm] = cand
+      # THE OCCUPANCY STAMP OF A ROW is its `restarted_at` when it carries one, else its
+      # `launched_at` (epic-23 wave-20 T20c, critic C2-2). hooks/execution-recorder.sh writes
+      # `restarted_at=` on the one row that re-identifies an id whose lineage an ack closed —
+      # the agent restarted, and holds a slot again — and keeps `launched_at` as the
+      # launch of the contract, the clock the sweeper dates the deliverable against. So the
+      # restart re-opens the NAME here without re-opening the CONTRACT there.
+      cand = _roster_kv(line, "restarted_at")
+      if (cand == "") cand = _roster_kv(line, "launched_at")
+      # THE MAXIMUM STAMP, not whichever row happens to be LAST in file order (critic C7,
+      # epic-23 wave-20 T20b). Adoption can append a predecessor row, carrying its own
+      # earlier launched_at, after a fresher live row for the same name already on the file;
+      # born[nm] must still read as the LATEST launch, or an ack taken between the two stamps
+      # closes a name whose real latest launch is still open. The comparison is lexical (the
+      # one stamp shape every writer emits).
+      # AN UNREADABLE STAMP ON ANY LIVE ROW STICKS (T20c, review R2-2). A stamp that cannot be
+      # ordered might be the latest launch, so once one is seen born[nm] stays unreadable and
+      # _roster_discharged closes nothing, whatever order the rows sit in. The T20b rule let an
+      # older well-formed stamp displace it, and an ack between them closed the name — the
+      # rule below read backwards (fail-closed-constants: spending a slot on a row that might
+      # still be working is the safe direction).
+      if (!(nm in born) || (_roster_stamp_ok(born[nm]) && (!_roster_stamp_ok(cand) || cand "" > born[nm] ""))) born[nm] = cand
     }
     close(f)
     out = ""
@@ -408,7 +417,8 @@ _ROSTER_OPEN_AWK='
 #
 # THE RULE, IN ADR-034's TERMS: the ack is the one terminal state of a name. A name is closed
 # when an ack for it was taken AFTER its latest live row (`intended`, `confirmed` or
-# `identified`) was launched, and by nothing else:
+# `identified`) was launched, and by nothing else. A row's launch, for this question, is its
+# `restarted_at` when it carries one (a restart after an ack, T20c), else its `launched_at`:
 #   * A MET MARKER CLOSES NOTHING. It records that a landing was seen, not that the agent
 #     left; the Patrol acks the row once a fresh panel shows the agent gone.
 #   * AN ACK OLDER THAN A RELAUNCH CLOSES NOTHING. The ledger holds no ordering against the
