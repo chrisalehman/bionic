@@ -11990,9 +11990,14 @@ expect_eq "CG-close T20b: the restart is not journalled a duplicate (a reused, f
   "0" "$(grep -c '|status=duplicate-start|' "$_cgtb_roster")"
 expect_eq "CG-close T20b: …and it identifies a second time" \
   "2" "$(grep -c '|status=identified|' "$_cgtb_roster")"
-_cgtb_la2=$(grep '|status=identified|' "$_cgtb_roster" | tail -1 | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)
-expect_ne "CG-close T20b: …carrying a FRESH launch, not the closed lineage's original" \
-  "2026-09-01T00:00:00Z" "$_cgtb_la2"
+# RE-AUTHORED (epic-23 wave-20 T20c, critic C2-2): the fresh time rides `restarted_at=`, and
+# `launched_at` stays the contract's launch, which the sweeper dates the deliverable against.
+_cgtb_row2=$(grep '|status=identified|' "$_cgtb_roster" | tail -1)
+_cgtb_ra2=$(printf '%s' "$_cgtb_row2" | tr '|' '\n' | grep '^restarted_at=' | cut -d= -f2-)
+expect_true "CG-close T20b: …carrying a FRESH restart stamp, later than the closed lineage's ack (T20c: was \"…carrying a FRESH launch, not the closed lineage's original\", expect_ne on launched_at)" \
+  test "$_cgtb_ra2" \> "2026-09-01T01:00:00Z"
+expect_contains "CG-close T20b: …while launched_at stays the contract's own launch (T20c)" \
+  "|launched_at=2026-09-01T00:00:00Z|" "$_cgtb_row2"
 
 _cgtb_open=$( ( BIONIC_LIB_WANT=""; . "$CGC_LIBDIR/roster.sh" >/dev/null 2>&1
                 roster_open_names "$_cgtb_roster" "$_cgtb_ledger" "$SID_A" ) 2>/dev/null )
@@ -12010,6 +12015,63 @@ expect_eq "CG-close T20b: a start against the now-open name IS a live duplicate"
 # a lock — exactly the shape CG-close's own `again` case already proves for this reader.
 expect_eq "CG-close T20b: the sweeper's acked= (T2's reference) agrees: open" \
   "open" "$(cgc_sweeper "$_cgtb_r" "$_cgtb_name")"
+
+# ============================================================
+section "CG-close T20c — after a restart, occupancy reads open and the contract reads MET, to every party (epic-23 wave-20 T20c, critic C2-2)"
+# ============================================================
+#
+# THE HISTORY (critic C2-2). A contract with a real deliverable is launched, delivered and
+# acked; then the SAME id starts again — the restart a message to a finished agent causes.
+# Two questions, and each party answers both the same way:
+#   occupancy  the name is open again: the recorder's own duplicate-start check (a further
+#              start is journalled), `roster_open_names`, and the sweeper's acked=no
+#   contract   MET: the deliverable written after the launch and before the ack still
+#              satisfies it, because the restart moved no clock the sweeper dates it against
+# Until T20c the recorder moved `launched_at` itself, so occupancy agreed and the contract
+# read UNMET — the one row this section adds is the proof that the parties agree on BOTH.
+_cgtc_r=$(new_repo cgtc-restart)
+_cgtc_name="cgtc-w"
+_cgtc_id="acgtc-7a1e0c3b5d9f2e64"
+_cgtc_roster="$_cgtc_r/.bionic/tmp/roster-$SID_A.state"
+_cgtc_ledger="$_cgtc_r/.bionic/tmp/sweeper-$SID_A.state"
+_cgtc_del="$_cgtc_r/cgtc-report.md"
+echo delivered > "$_cgtc_del"
+touch -t 202609011200 "$_cgtc_del"      # after the launch below, in any zone within 12 h of UTC
+roster_header > "$_cgtc_roster"
+roster_row_fixture status=confirmed session="$SID_A" name="$_cgtc_name" agent_id="$_cgtc_id" \
+  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtc_del" tool_use_id=toolu_01CGTC >> "$_cgtc_roster"
+roster_row_fixture status=identified session="$SID_A" name="$_cgtc_name" agent_id="$_cgtc_id" \
+  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtc_del" tool_use_id=toolu_01CGTC >> "$_cgtc_roster"
+cgc_ack "$_cgtc_ledger" 2026-09-02T00:00:00Z "$_cgtc_name"
+jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
+         message:{role:"user",content:"carry on"}}' > "$_cgtc_r/cgc-transcript.jsonl"
+_cgtc_verdict() {
+  ( cd "$_cgtc_r" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict "$_cgtc_name" 2>/dev/null ) \
+    | grep -F 'landing-verdict/v1|' | head -1
+}
+expect_contains "CG-close T20c precondition: delivered and acked — MET, acked=yes" \
+  "|state=MET|acked=yes|" "$(_cgtc_verdict)"
+
+# THE RESTART, through the real recorder.
+mk_start_payload "$SID_A" "$_cgtc_r/cgc-transcript.jsonl" "$_cgtc_r" general-purpose "$_cgtc_id" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_ER" >/dev/null 2>&1
+_cgtc_open=$( ( BIONIC_LIB_WANT=""; . "$CGC_LIBDIR/roster.sh" >/dev/null 2>&1
+                roster_open_names "$_cgtc_roster" "$_cgtc_ledger" "$SID_A" ) 2>/dev/null )
+_cgtc_line=$(_cgtc_verdict)
+case "$_cgtc_line" in *"|acked=no|"*) _cgtc_sw_occ=open ;; *"|acked=yes|"*) _cgtc_sw_occ=closed ;; *) _cgtc_sw_occ="other:$_cgtc_line" ;; esac
+if grep -qxF -- "$_cgtc_name" <<< "$_cgtc_open"; then _cgtc_pr_occ=open; else _cgtc_pr_occ=closed; fi
+# The recorder's own occupancy answer: a FURTHER start against an open name is a live duplicate.
+mk_start_payload "$SID_A" "$_cgtc_r/cgc-transcript.jsonl" "$_cgtc_r" general-purpose "$_cgtc_id" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_ER" >/dev/null 2>&1
+if grep -qF '|status=duplicate-start|' "$_cgtc_roster"; then _cgtc_er_occ=open; else _cgtc_er_occ=closed; fi
+expect_eq "CG-close T20c occupancy: the recorder, roster_open_names and the sweeper's acked= all answer open" \
+  "open open open" "$_cgtc_er_occ $_cgtc_pr_occ $_cgtc_sw_occ"
+expect_contains "CG-close T20c contract: the sweeper reads the restarted row MET, not UNMET" \
+  "|state=MET|acked=no|" "$_cgtc_line"
+expect_contains "CG-close T20c contract: …because the restart row the recorder wrote keeps the contract's launch" \
+  "|launched_at=2026-09-01T00:00:00Z|" "$(grep -F '|status=identified|' "$_cgtc_roster" | tail -1)"
+expect_contains "CG-close T20c contract: …and the duplicate the further start journalled keeps it too" \
+  "|launched_at=2026-09-01T00:00:00Z|" "$(grep -F '|status=duplicate-start|' "$_cgtc_roster" | tail -1)"
 
 # ============================================================
 section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave-20 T2, REQ-10 AC-10.2; D10)"
