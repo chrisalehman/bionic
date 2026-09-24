@@ -2905,8 +2905,10 @@ sp_plan_at_step "$R12K3" 6 \
   "| T3 | 6 | review | behind the floor | critic | T2 | 15m | REQ-x | c.sh | pending |" \
   "| T4 | 8 | integrate | deps landed, step not reached | implementor | T1 | 15m | REQ-x | — | pending |" > /dev/null
 poke_pressure "$R12K3" 8192 1.0 tick
-expect_contains "a table with no ready row says so" \
-  "no pending task is ready: none has all its dependencies landed, and integrate/close rows wait for their step." "$OUT"
+expect_contains "a table with no ready row says so (T10b: was '…and integrate/close rows wait for their step.')" \
+  "no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step." "$OUT"
+expect_contains "…and names the integrate row it holds (T10b)" \
+  "Held for their step: T4: step 8 integrate row waits for current: 8." "$OUT"
 expect_absent "…and names no step it filtered by" "pending step-" "$OUT"
 
 # 12l — THE DIFFERENTIAL (wave-19 REQ-5 AC-5.2, D6; ADR-034 decision 2). The tick and the
@@ -6689,4 +6691,48 @@ expect_eq "36f with no session key there is no marker to print (exit 3)" "3" "$R
 poke "$R36" prompt extra
 expect_eq "36g prompt takes no arguments (exit 2)" "2" "$RC"
 
+
+# ============================================================
+section "Section 37: T10b — the release waits for its step and the tick names the hold; task-add keeps author text byte for byte (critic C3, review R6)"
+# ============================================================
+#
+# C3: at current: 5, with its Step-5 dependency landed, the Step-7 release row (kind `doc`) was
+# ready, so the tick ordered `FILL` for a release before any auditor or critic verdict. Δ6's
+# accepted reading holds a gate act until `current:` reaches its step; the release is the
+# Document step's gate act. The tick's no-FILL line now NAMES each row held for its step, so a
+# reader of the line can tell "nothing is ready" from "the release waits for Step 7".
+R37A="$(make_repo s37-held)"; new_roster "$R37A"
+sp_plan_at_step "$R37A" 5 \
+  "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 5 | verify | the live bed, landed | implementor | T1 | 15m | REQ-x | — | landed |" \
+  "| T3 | 7 | doc | Release 1.8.7 | implementor | T2 | 15m | REQ-x | CHANGELOG.md | pending |" > /dev/null
+poke_pressure "$R37A" 8192 1.0 tick
+expect_absent "37a C3 at current: 5 the landed-dep Step-7 release row is not filled" \
+  "poker: FILL" "$OUT"
+expect_contains "37b …and the tick's no-FILL line names the hold" \
+  "T3: step 7 doc row waits for current: 7" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: no FILL')"
+
+# 37c — AT ITS STEP THE RELEASE FILLS. Same table at current: 7.
+R37C="$(make_repo s37-at-step)"; new_roster "$R37C"
+sp_plan_at_step "$R37C" 7 \
+  "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 5 | verify | the live bed, landed | implementor | T1 | 15m | REQ-x | — | landed |" \
+  "| T3 | 7 | doc | Release 1.8.7 | implementor | T2 | 15m | REQ-x | CHANGELOG.md | pending |" > /dev/null
+poke_pressure "$R37C" 8192 1.0 tick
+expect_contains "37c at current: 7 the release row is filled" "poker: FILL T3" "$OUT"
+
+# 37d–37f — TASK-ADD ACCEPTS A STEP-HELD ROW, AND KEEPS ITS TEXT (R6). The hold is a
+# schedule fact, not a broken invariant, so the validator stays silent and the dry commit
+# admits it. Author text reached awk through -v, which read `\n` and `\t` as escapes; now a
+# backslash, an author-escaped `\|` and a `$` land in the row exactly as typed.
+S37_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R37D="$(make_repo s37-task-add)"; ( cd "$R37D" && git commit -q --allow-empty -m init )
+P37D="$(s34_plan "$R37D" 5)"
+poke "$R37D" task-add T7 7 doc 'Release: match C:\new\table and a\|b for $5' bionic:implementor 'T5' 30 REQ-5 '—'
+expect_eq "37d task-add of a Step-7 doc row at current: 5 is accepted (exit 0)" "0" "$RC"
+expect_contains "37e R6 …and the task text lands byte for byte: backslashes, \\| and \$ intact" \
+  '| T7 | 7 | doc | Release: match C:\new\table and a\|b for $5 | bionic:implementor | T5 | 30 | REQ-5 | — | — | — | pending |' \
+  "$(cat "$P37D")"
+expect_contains "37f …with its - T7: line" "- T7: pending dispatch — added by task-add" "$(cat "$P37D")"
+POKE_BOUND="$S37_BOUND_WAS"
 finish
