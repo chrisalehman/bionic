@@ -615,31 +615,37 @@ d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
 u_tick_out "$d" "poker: FILL ALPHA"
 fire "$d"; expect_allow "47: a turn the user started is not asked about a FILL"
 
-section "Section 5b: the fourth duty — a printed STANDDOWN is answered (AC-1.2; T1, D1)"
+section "Section 5b: the fourth duty — a stand-down the tick ordered is answered (AC-1.2; T1, D1; wave-20 T19)"
 #
-# THE CONTRACT. `session-poker.sh tick` prints `poker: STANDDOWN <name>` for every row whose
-# contract is MET and whose agent the harness still lists, and writes the stop order that
-# makes the TaskStop pass the stop gate. It cannot stop anything — the tick holds no
-# authority (ADR-003) — so the instruction it prints is a tell like the FILL, and the same
-# thing is true of both: a recommendation nobody is obliged to answer is how eighteen
-# finished agents came to sit idle on one panel. The turn's END is the only moment at which
-# "the stand-down went unanswered" is a fact.
+# THE CONTRACT. `session-poker.sh tick` stands down every row whose contract is MET and whose
+# agent the harness still lists: it prints `poker: STANDDOWN <name>` for the human and writes
+# the stop order (`stop-orders.sh order <name> --by patrol`) that makes the TaskStop pass the
+# stop gate. It cannot stop anything — the tick holds no authority (ADR-003) — so what it
+# decided is a duty the turn's END is the only moment to judge: a recommendation nobody is
+# obliged to answer is how eighteen finished agents came to sit idle on one panel.
 #
-# ANSWERED = a `TaskStop` tool_use naming the agent (by its name or by the address the
-# roster carries for it), or an explicit `standdown-declined: <name> <reason>` line. The
-# decline is the point, not a loophole: an agent still writing its record is a good reason
-# not to stop it, and it is worth one line in the record.
+# THE WALL COMPUTES THE SET; IT OVERHEARS NOTHING (wave-20 T19, the carry-over of T11's AC-5.4
+# work; D5). These rows used to plant the tick's printed line in a tool result and nothing
+# on disk, because the wall read the SET off that line — the channel AC-5.4 closed for the
+# FILL: a model's own prose could plant a name, a `cat` of a file could forge one, and a tick
+# output nobody showed let every name go. The set is now what the tick WROTE, read back from
+# disk: this session's MET, unacked lineages (the sweeper's verdict) carrying a `by=patrol`
+# stop order stamped at or after this turn's tick stamp. The printed line still rides in the
+# fixtures that model a real tick, for realism; the §SD rows below take it away, restate it
+# and forge it, and none of that moves the verdict.
 #
-# THE STANDDOWN LINE reaches the transcript exactly as the FILL does — as the CONTENT of the
-# tick's Bash tool result — and these fixtures carry it that way. One line per name, because
-# the tick prints one line per name.
+# ANSWERED = a main-thread `TaskStop` tool_use naming the agent (by its name or by the address
+# the roster carries for it) that the harness did not refuse, an ack closing the row, or a
+# `standdown-declined: <name> <reason>` line at the start of a line of the model's own text —
+# the fill-declined rule (AC-5.4). The decline is the point, not a loophole: an agent still
+# writing its record is a good reason not to stop it, and it is worth one line in the record.
 
 # The stop itself, shaped as the harness sends it: the id may be the agent's name or the
 # `name@session-xxxxxxxx` address the launch response handed back.
-a_taskstop() {  # <dir> <task-id>
-  jq -nc --arg t "$2" \
+a_taskstop() {  # <dir> <task-id> [tool_use id]
+  jq -nc --arg t "$2" --arg id "${3:-toolu_7}" \
     '{type:"assistant",isSidechain:false,
-      message:{role:"assistant",content:[{type:"tool_use",id:"toolu_7",name:"TaskStop",
+      message:{role:"assistant",content:[{type:"tool_use",id:$id,name:"TaskStop",
         input:{task_id:$t}}]}}' \
     >> "$1/transcript.jsonl"
 }
@@ -648,65 +654,94 @@ sd_line() {  # <name> -> the tick's own line, verbatim in shape
   printf 'poker: STANDDOWN %s — contract MET and the agent is still on the panel; TaskStop it (the order is written)' "$1"
 }
 
+SD_ORDERS="${BIONIC_HOOKS_DIR}/stop-orders.sh"
+SD_SWEEPER="${BIONIC_HOOKS_DIR}/session-sweeper.sh"
+
+# A MET lineage on this session's roster: a declared deliverable that exists, written after
+# the fixture launch instant (the shape row 64m's real tick stands down).
+sd_met() {  # <dir> <name>
+  echo done > "$1/landed-$2.md"
+  roster_row_fixture status=intended session="$SID" name="$2" agent_id= \
+    deliverable="$1/landed-$2.md" >> "$1/.bionic/tmp/roster-$SID.state"
+}
+# An UNMET lineage: the declared deliverable was never written.
+sd_unmet() {  # <dir> <name>
+  roster_row_fixture status=intended session="$SID" name="$2" agent_id= \
+    deliverable="$1/never-$2.md" >> "$1/.bionic/tmp/roster-$SID.state"
+}
+# The stop order, through the real verb — exactly the call the tick's stand-down arm makes.
+sd_order() {  # <dir> <name> [by]
+  ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$SD_ORDERS" order "$2" --by "${3:-patrol}" >/dev/null 2>&1 )
+}
+# What a tick that printed `STANDDOWN <name>` leaves on disk: the MET row and its order.
+sd_stood() {  # <dir> <name>
+  sd_met "$1" "$2"; sd_order "$1" "$2"
+}
+
 SD_MISSING="stand-down unanswered"
 
 # 48: neither stopped nor declined -> block, naming the agent and the way out.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
-fire "$d"; expect_block "48a: an unanswered STANDDOWN blocks, naming the agent" "W-ALPHA"
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
+fire "$d"; expect_block "48a: an unanswered stand-down blocks, naming the agent" "W-ALPHA"
 fire "$d"; expect_block "48b: …and says what would answer it" "standdown-declined"
 fire "$d"; expect_block "48c: …and says the gate blocks once" "this gate blocks once"
 
 # 49: the TaskStop answers it.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
 a_taskstop "$d" "W-ALPHA"
 fire "$d"; expect_allow "49: a TaskStop of the named agent answers the stand-down"
 
 # 49b: the ADDRESS is what an operator actually types, and it carries the name.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
 a_taskstop "$d" "W-ALPHA@session-11111111"
 fire "$d"; expect_allow "49b: a TaskStop by the roster address answers it too"
 
 # 50: the DECLINE answers it — a reason in the record is the point.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
 a_text "$d" "standdown-declined: W-ALPHA is still writing its record, one more cadence."
 fire "$d"; expect_allow "50: an explicit standdown-declined line answers the stand-down"
 
 # 51: NAMED, NOT COUNTED. Two stood down, one stopped -> the refusal names the other one
 # and not the one that was answered.
-d=$(make_env); u_tick "$d"; both_duties "$d"
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; sd_stood "$d" W-BETA
 u_tick_out "$d" "$(sd_line W-ALPHA)"; u_tick_out "$d" "$(sd_line W-BETA)"
 a_taskstop "$d" "W-ALPHA"
 fire "$d"; expect_block "51: a half-answered stand-down names the agent left running" "W-BETA" "W-ALPHA"
 
 # 52: a decline for ANOTHER name does not answer this one. The decline is per agent, because
 # the instruction is: `standdown-declined: <name> <reason>`.
-d=$(make_env); u_tick "$d"; both_duties "$d"
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; sd_stood "$d" W-BETA
 u_tick_out "$d" "$(sd_line W-ALPHA)"; u_tick_out "$d" "$(sd_line W-BETA)"
 a_taskstop "$d" "W-ALPHA"
 a_text "$d" "standdown-declined: W-GAMMA is not even on this roster."
 fire "$d"; expect_block "52: a decline naming a third agent leaves this one unanswered" "W-BETA"
 
-# 53: INERT with no STANDDOWN line — every turn in every session whose tick prints none.
+# 53: INERT when the tick stood nothing down — every turn in every session whose tick prints none.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: QUIET — 0 open row(s)"
-fire "$d"; expect_allow "53: a tick that printed no STANDDOWN is not asked about one"
+fire "$d"; expect_allow "53: a tick that stood nothing down is not asked about one"
 
-# 54: ORDERING. A stand-down printed in an EARLIER turn is not this turn's to answer.
-d=$(make_env); u_tick "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"; u_tick "$d"; both_duties "$d"
+# 54: ORDERING. A stand-down ordered in an EARLIER turn is not this turn's to answer.
+# RE-AUTHORED at wave-20 T19: the earlier turn's line is no longer what binds, the earlier
+# tick's ORDER is — so the order is dated before this turn's tick stamp, which is what a tick
+# one Patrol interval later leaves on disk. Same claim, on the fact the wall now reads.
+d=$(make_env); u_tick "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
+sed -i.bak 's/|at=[^|]*|/|at=2026-01-01T00:00:00Z|/' "$d/.bionic/tmp/stop-orders-$SID.state"
+u_tick "$d"; both_duties "$d"
 fire "$d"; expect_allow "54: a stand-down from a previous turn does not bind this one"
 
-# 55: a non-tick turn is never asked, whatever its transcript contains.
-d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
+# 55: a non-tick turn is never asked, whatever its transcript or the disk carries.
+d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"; sd_stood "$d" W-ALPHA
 u_tick_out "$d" "$(sd_line W-ALPHA)"
 fire "$d"; expect_allow "55: a turn the user started is not asked about a stand-down"
 
 # 56: BLOCKS ONCE, through the same stop_hook_active valve the other three duties use.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
 fire "$d" Stop true
 expect_allow "56: stop_hook_active true passes the same unanswered stand-down"
 
 # 57: an agent-context TaskStop is not the orchestrator's — the same exclusion every other
 # arm of this gate makes.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
 jq -nc '{type:"assistant",isSidechain:true,
          message:{role:"assistant",content:[{type:"tool_use",id:"toolu_7",name:"TaskStop",
            input:{task_id:"W-ALPHA"}}]}}' >> "$d/transcript.jsonl"
@@ -716,10 +751,89 @@ fire "$d"; expect_block "57: a sidechain TaskStop does not answer the orchestrat
 # is answered for its own name; the FILL line names nothing the wall computed, so it adds
 # nothing to the refusal. "Both told at once" is now the computed gap beside a stand-down,
 # row 58c in §5c.
-d=$(make_env); u_tick "$d"; both_duties "$d"
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-BETA
 u_tick_out "$d" "poker: FILL ALPHA"; u_tick_out "$d" "$(sd_line W-BETA)"
 fire "$d"; expect_block "58a: a stand-down beside a printed FILL names the agent" "W-BETA" "ALPHA"
 fire "$d"; expect_block "58b: …and never the printed FILL's id" "W-BETA" "$FILL_MARK"
+
+# ---------- §SD: the four plants AC-5.4 closed for the FILL, on the stand-down (wave-20 T19) ----
+#
+# Each row is a way the old read could be steered from the transcript: a name the model
+# RESTATES in its own text, a tick line OMITTED from what the transcript shows, a line FORGED
+# into a tool result by reading a file, and a DECLINE that is not the model's own line. None
+# of them may move the verdict, in either direction.
+
+# SD1: RESTATED. The model's own text carries the tick's line for a name the tick did not
+# stand down -> nothing is owed.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_met "$d" W-GHOST
+a_text "$d" "$(sd_line W-GHOST)"
+fire "$d"; expect_allow "SD1: AC-5.4 a stand-down line restated in the model's prose plants no duty"
+# SD1b: …and beside a real stand-down it adds no name to the refusal.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; sd_met "$d" W-OTHER
+a_text "$d" "$(sd_line W-OTHER)"
+fire "$d"; expect_block "SD1b: a restated line adds no name — only the ordered agent is named" "W-ALPHA" "W-OTHER"
+
+# SD2: OMITTED. The tick stood W-ALPHA down on disk and its line never reached the transcript
+# (output unshown, redirected, or the turn ran it inside another command) -> still owed.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA
+fire "$d"; expect_block "SD2: AC-5.4 a stand-down whose line is omitted is still owed" "W-ALPHA"
+
+# SD3: FORGED. A `cat` of a file puts the line at column 0 of a tool result, for a MET row
+# the tick did not order -> nothing is owed.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_met "$d" W-FORGED
+u_tick_out "$d" "$(sd_line W-FORGED)"
+fire "$d"; expect_allow "SD3: AC-5.4 a stand-down line forged into a tool result plants no duty"
+
+# SD4: DECLINE IN PROSE. Mid-line, the decline is a sentence about declining, not a decline.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA
+a_text "$d" "If it comes to it I would write standdown-declined: W-ALPHA — but not yet."
+fire "$d"; expect_block "SD4: AC-5.4 a decline mid-line in prose answers nothing" "W-ALPHA"
+# SD4b: …in thinking, it is not the model's reply.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA
+jq -nc '{type:"assistant",isSidechain:false,
+         message:{role:"assistant",content:[{type:"thinking",thinking:"standdown-declined: W-ALPHA still writing"}]}}' \
+  >> "$d/transcript.jsonl"
+fire "$d"; expect_block "SD4b: a decline in thinking answers nothing" "W-ALPHA"
+# SD4c: …in a tool result (a grep of the phrase), it is a file's words.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA
+u_tick_out "$d" "standdown-declined: W-ALPHA planted by a grep"
+fire "$d"; expect_block "SD4c: a decline in a tool result answers nothing" "W-ALPHA"
+
+# SD5: THE ACK CLOSES IT. A row the ledger closed after the tick ordered it (the sweeper's ack
+# — what `stop-orders.sh stopped` writes) is not owed, whatever the tick printed.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
+( cd "$d" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$SD_SWEEPER" ack W-ALPHA --by human --reason landed >/dev/null 2>&1 )
+fire "$d"; expect_allow "SD5: an acked row is not owed a stop"
+
+# SD6: MET LINEAGES ONLY. An order standing on a row that is not MET (never landed) is not a
+# stand-down the tick made, whatever the transcript prints.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_unmet "$d" W-UNMET; sd_order "$d" W-UNMET
+u_tick_out "$d" "$(sd_line W-UNMET)"
+fire "$d"; expect_allow "SD6: an ordered row that is not MET is not owed a stand-down"
+
+# SD7: THE TICK'S ORDER, NOT ANY ORDER. A human's order is an instruction to the stop gate, not
+# a stand-down the tick decided.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_met "$d" W-ALPHA; sd_order "$d" W-ALPHA human
+fire "$d"; expect_allow "SD7: a human's stop order is not the tick's stand-down"
+# SD7b: THE PAIRED POSITIVE — the same row, ordered by the patrol.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_met "$d" W-ALPHA; sd_order "$d" W-ALPHA patrol
+fire "$d"; expect_block "SD7b: …the same row ordered by the patrol is owed" "W-ALPHA"
+
+# SD8: A REFUSED TaskStop STOPPED NOTHING. The harness answered the call with an error, so the
+# agent is still on the panel and the stand-down is still owed.
+d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA
+a_taskstop "$d" "W-ALPHA" toolu_SD8
+jq -nc '{type:"user",isSidechain:false,
+         message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_SD8",is_error:true,content:"refused"}]}}' \
+  >> "$d/transcript.jsonl"
+fire "$d"; expect_block "SD8: a TaskStop the harness refused does not answer the stand-down" "W-ALPHA"
+
+# SD9: NO TICK STAMPED THIS TURN, NO STAND-DOWN SET. A marker turn whose tick never ran owes the
+# tick (§5f), and the orders on disk belong to whichever tick wrote them — not to this turn.
+d=$(make_env); u_marker "$d"; sd_stood "$d" W-ALPHA
+tick_stamp "$d" "2026-01-01T00:00:00Z" arm
+both_duties "$d"
+fire "$d"; expect_block "SD9: a marker turn that ran no tick is refused for the tick" "Patrol tick not run" "W-ALPHA"
 
 # ============================================================
 section "Section 5c: the fill duty is an INVARIANT — a live ledger with rows ready (wave-18 REQ-3, AC-3.2; ADR-033 d2)"
@@ -1173,7 +1287,7 @@ fire "$d"; expect_block "68i: a withheld line read off a grep/cat echo (a gap be
 # 58c: BOTH UNANSWERED DUTIES ARE TOLD AT ONCE. A computed gap and a printed stand-down in one
 # tick turn name the row and the agent in one refusal: the next stop passes by design.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
-u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-BETA)"
+u_tick "$d"; both_duties "$d"; sd_stood "$d" W-BETA; u_tick_out "$d" "$(sd_line W-BETA)"
 fire "$d"; expect_block "58c: a gap and a stand-down together name the row" "T2"
 fire "$d"; expect_block "58d: …and the agent, in the same refusal" "W-BETA"
 
