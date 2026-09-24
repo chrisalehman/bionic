@@ -60,12 +60,18 @@
 # TEARDOWN IS NEVER AUTOMATIC — BUT IT IS ONE ACT WHEN IT COMES (bionic 1.4.0,
 # design ledger C1). A spawned tree is a LEASED slot bound to the ledger row
 # that dispatched its writer, and the lease ends when that row is
-# fact-discharged. `land` ends it: merge the branch --no-ff into the main
-# checkout's current branch, remove the tree, prune — refusing, and saying
-# exactly why, when the tree is dirty, when there is nothing to land, or when a
-# suite is running (D1). The behaviour lives in payload/scripts/lib/worktree.sh
-# because `hooks/stop-orders.sh standdown` and the Patrol tick need the same
-# act and the same predicate; this verb is a call site.
+# fact-discharged. `land` ends it: merge the branch --no-ff into the session's
+# bound plan's `working-branch:`, in the checkout that holds that branch,
+# remove the tree, prune — refusing, and saying exactly why, when the session
+# has no bound plan or the plan names no branch, when the tree is dirty, when
+# there is nothing to land, or when a suite is running (D1). The target is the
+# plan's and never the main checkout's current branch (wave-20 T8, REQ-1): a
+# human's feature branch in the main checkout is not where a wave's work goes.
+# There is no target argument, on purpose — a target the operator names is
+# exactly what REQ-1 takes away; a human who needs another one merges by hand.
+# The behaviour lives in payload/scripts/lib/worktree.sh, whose
+# `worktree_land_for_session` is also what `hooks/stop-orders.sh standdown`
+# calls; this verb is a call site.
 #
 # Usage:
 #   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir]
@@ -126,9 +132,12 @@ remove  removes the worktree and KEEPS the branch, deleting the
         <worktree>/.bionic link first (the one create planted, or a legacy
         one an older bionic left).
 land    ends the lease in one act: merges the tree's branch --no-ff into the
-        main checkout's CURRENT branch, removes the tree, prunes. Keeps the
-        branch. Refuses — naming why — on a dirty tree, on nothing to land,
-        or while a suite is running.
+        session's bound plan's working-branch, in the checkout that holds
+        it, removes the tree, prunes. Keeps the branch. Reads the session
+        from CLAUDE_CODE_SESSION_ID. Refuses — naming why — with no session
+        or no bound plan, when the plan names no branch or a branch no one
+        checkout holds, on a dirty tree, on nothing to land, or while a
+        suite is running.
 USAGE
 }
 
@@ -283,15 +292,24 @@ cmd_remove() {
   contract "REMOVED path=${wt_abs} branch=${wt_branch} kept=yes"
 }
 
+# THE SESSION IS THE TARGET'S SOURCE (wave-20 T8, D1): `session_id` (lib/session.sh)
+# reads CLAUDE_CODE_SESSION_ID, the root is the main checkout the tree belongs to — or the
+# cwd's, when the path names no directory and the land will refuse it anyway — and
+# `worktree_land_for_session` reads the working branch off that session's bound plan.
 cmd_land() {
-  local target="${1:-}"
+  local target="${1:-}" lib_session sid root
   if [ ! -f "$LIB_WORKTREE" ]; then
     contract "REFUSED reason=library-missing path=${LIB_WORKTREE}"
     exit 2
   fi
   # shellcheck source=/dev/null
   . "$LIB_WORKTREE" || { contract "REFUSED reason=library-unloadable path=${LIB_WORKTREE}"; exit 2; }
-  WORKTREE_CONTRACT_PROG="$PROG" worktree_land "$target"
+  lib_session="${LIB_WORKTREE%/*}/session.sh"
+  # shellcheck source=/dev/null
+  . "$lib_session" 2>/dev/null || { contract "REFUSED reason=library-unloadable path=${lib_session}"; exit 2; }
+  sid="$(session_id 2>/dev/null)" || sid=""
+  root="$(worktree_root "${target:-.}" 2>/dev/null)" || root="$(worktree_root 2>/dev/null)" || root=""
+  WORKTREE_CONTRACT_PROG="$PROG" worktree_land_for_session "$target" "$root" "$sid"
   exit $?
 }
 
