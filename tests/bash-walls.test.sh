@@ -1637,4 +1637,77 @@ am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
 am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"
 am_admitted "19n: a different script's amend verb" "bash tools/other.sh amend w20-sub"
 
+# ---------------------------------------------------------------------------
+section "20 — an UNROSTERED nested delegate is bound by the verb wall through its own agent_type (wave-20 T7b; review R15)"
+#
+# THE COMPOSITION HOLE (review R15, security high). Δ12 made a delegate read-only by "no
+# Write/Edit tools PLUS REQ-3's commit refusal", and AC-9.2 made every nested delegate
+# UNROSTERED by design — the orchestrator's roster is the depth-one ledger. ARM C read the role
+# only from a roster row, so the one population Δ12 created was admitted for every
+# commit-creating verb (walk §3, "no row" column).
+#
+# THE PAYLOAD SHAPE IS THE LIVE ONE (T12, live-rows-802ee6d.md §AC-9.2/9.4): a nested
+# delegate's own Bash payload carries its `agent_id` AND its own `agent_type`. When no roster
+# row carries that `agent_id`, the arm reads the role from `agent_type`; a rostered agent keeps
+# the row reading (§17: a teammate's `agent_type` is its dispatch NAME), and a payload with no
+# `agent_id` is the orchestrator and never reaches the arm.
+R_NEST="$(mk_repo nested-unrostered)"
+roster_header > "$R_NEST/.bionic/tmp/roster-$SID.state"
+# the orchestrator's own writer, so the roster is a live one and the join has rows to miss
+ro_rows "$R_NEST" w20-T7 awriter-0123456789abcdef bionic:senior-implementor
+NEST_ID="a8b824d95c81dd996"
+
+for _nt in bionic:researcher Explore bionic:test-runner; do
+  run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' "$NEST_ID" omit Bash "$_nt")"
+  expect_status "20a: an unrostered nested $_nt's 'git commit' is REFUSED" 2 "$ST"
+  expect_contains "20a: …naming the role $_nt" "$_nt: a read-only role never commits" "$ERR"
+  run_hook "$(mk_payload "$R_NEST" 'git merge wave/20-fixit-187' "$NEST_ID" omit Bash "$_nt")"
+  expect_status "20a: an unrostered nested $_nt's 'git merge' is REFUSED" 2 "$ST"
+  expect_contains "20a: …naming the role $_nt (merge)" "$_nt: a read-only role never commits" "$ERR"
+  run_hook "$(mk_payload "$R_NEST" "env -C $R_NEST git commit -m x" "$NEST_ID" omit Bash "$_nt")"
+  expect_status "20a: an unrostered nested $_nt's 'env -C <r> git commit' is REFUSED" 2 "$ST"
+  expect_contains "20a: …naming the role $_nt (env -C)" "$_nt: a read-only role never commits" "$ERR"
+done
+# every verb of the eight, once, from the harness's no-write type the live bed drove
+for _v in revert cherry-pick am rebase commit-tree update-ref; do
+  run_hook "$(mk_payload "$R_NEST" "git $_v x" "$NEST_ID" omit Bash Explore)"
+  expect_status "20b: an unrostered nested Explore's 'git $_v' is REFUSED" 2 "$ST"
+done
+# the detail says where the role came from: there is no roster row to name
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' "$NEST_ID" omit Bash Explore)"
+expect_contains "20c: the refusal's detail names the agent type, not a roster row" \
+  "no roster row names you" "$ERR"
+expect_eq "20c: …on ONE refusal line" "1" "$(printf '%s\n' "$ERR" | grep -c 'a read-only role never commits')"
+
+# NOT A COMMIT: the read-only delegate's reading of history is its work.
+run_hook "$(mk_payload "$R_NEST" 'git log -1 && git status' "$NEST_ID" omit Bash Explore)"
+expect_status "20d: an unrostered nested Explore's 'git log' / 'git status' is ADMITTED" 0 "$ST"
+
+# THE CONTROLS. Each is refused by nothing else here, so an arm that over-reaches turns one to 2.
+for _nt in general-purpose bionic:implementor fork researcher; do
+  run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' "$NEST_ID" omit Bash "$_nt")"
+  expect_status "20e: an unrostered '$_nt'-typed payload's commit is ADMITTED (not a read-only type)" 0 "$ST"
+  expect_absent "20e: …and the role arm says nothing ($_nt)" "read-only role" "$ERR"
+done
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"')"
+expect_status "20f: the orchestrator's own commit (no agent_id, no agent_type) is ADMITTED" 0 "$ST"
+expect_absent "20f: …silently on this arm" "read-only role" "$ERR"
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' '' omit Bash bionic:test-runner)"
+expect_status "20g: a 'claude --agent' main session (agent_type, no agent_id) commits — ADMITTED, it is the orchestrator" 0 "$ST"
+expect_absent "20g: …silently on this arm" "read-only role" "$ERR"
+
+# A ROSTERED AGENT KEEPS THE ROW READING: the row wins over the payload's agent_type in both
+# directions, so a teammate named like a read-only type is not refused and a read-only row is
+# not escaped by its name.
+ro_rows "$R_NEST" Explore arowimpl-0123456789abcdef bionic:implementor
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' arowimpl-0123456789abcdef omit Bash Explore)"
+expect_status "20h: a ROSTERED implementor whose agent_type reads 'Explore' is ADMITTED (the row wins)" 0 "$ST"
+ro_rows "$R_NEST" w20-runner arowrun-0123456789abcdef bionic:test-runner
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' arowrun-0123456789abcdef omit Bash general-purpose)"
+expect_status "20h: a ROSTERED test-runner whose agent_type reads 'general-purpose' is REFUSED (the row wins)" 2 "$ST"
+expect_contains "20h: …naming the row's role" "bionic:test-runner: a read-only role never commits" "$ERR"
+ro_rows "$R_NEST" w20-norole arownorole-0123456789abcdef ""
+run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' arownorole-0123456789abcdef omit Bash Explore)"
+expect_status "20h: a ROSTERED row with an empty role is ADMITTED whatever its agent_type (§17g's reading)" 0 "$ST"
+
 finish

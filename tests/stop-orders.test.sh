@@ -1114,4 +1114,59 @@ ERR=$(cat "$SANDBOX/.err")
 expect_status "9h: stopped closes a FOLLOW-UP row whose agent a fresh panel shows gone" 0 "$ST"
 expect_contains "9i: …as landed — the contract is met" "reason landed" "$OUT"
 
+# ============================================================
+section "Section 9b: a follow-up to a row stopped has closed does not hold it; standdown still ends its lease (wave-20 T9b; review R2; walk §8c)"
+# ============================================================
+#
+# THE WALK'S SURPRISE 1. The orchestrator stopped a MET agent, `stopped` acked it, and then
+# messaged it. The sweeper read FOLLOW-UP, so `standdown` listed the row LEFT ALONE "[not live]"
+# waiting for a reply from an agent that is gone, while the tick read open=0: two readers
+# disagreed and the tree's lease had no exit. The close predicate (`roster_open_names`: an ack
+# after the latest launch) is the one answer; a send after the close cannot reopen the row, so
+# standdown takes its acked-and-gone branch and lands the tree.
+R16="$(make_repo standdown-followup-closed)"
+echo seed > "$R16/README.md"
+git -C "$R16" add README.md >/dev/null 2>&1
+git -C "$R16" commit -qm seed >/dev/null 2>&1
+git -C "$R16" worktree add -q -b fu-closed "$R16/.worktrees/fu-closed" >/dev/null 2>&1
+echo work > "$R16/.worktrees/fu-closed/work.txt"
+git -C "$R16/.worktrees/fu-closed" add -A >/dev/null 2>&1
+git -C "$R16/.worktrees/fu-closed" commit -qm "fu-closed work" >/dev/null 2>&1
+# ITS OWN CONFIG DIR: the sweeper reads the first project folder holding this session's
+# transcript, and R8CFG holds one per section above, so a shared dir would hide this send.
+R16CFG="$SANDBOX/r16-config"
+R16SLUG=$(printf '%s' "$R16" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R16CFG/projects/$R16SLUG"
+R16TR="$R16CFG/projects/$R16SLUG/$SID.jsonl"
+r16_orders() {  # <args…> — run_orders_cfg with this section's config dir
+  OUT=$( cd "$R16" && CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$R16CFG" \
+         bash "$ORDERS" "$@" 2>"$SANDBOX/.err" ); ST=$?
+  ERR=$(cat "$SANDBOX/.err")
+}
+echo landed > "$R16/.bionic/docs/record/fc.md"
+so_roster_row "$R16" fu-closed ".bionic/docs/record/fc.md" "" "fu-closed@session-6c85684c"
+so_bind_plan "$R16" wave/fixture >/dev/null
+# A fresh panel that lists nobody: the agent is gone. `stopped` closes the row through the
+# sweeper's ack, by human, reason landed.
+plant_live "$R16TR" fresh
+r16_orders stopped fu-closed
+expect_status "9b-a: precondition — stopped closes the MET row whose agent is gone" 0 "$ST"
+# THE FOLLOW-UP AFTER THE CLOSE: the orchestrator's SendMessage to the stopped name, later in
+# the same transcript (an assistant record, so the panel answer stays the freshest reading).
+jq -nc '{type:"assistant",isSidechain:false,timestamp:"2026-09-05T00:52:30.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_fc",name:"SendMessage",input:{to:"fu-closed",summary:"s",message:"one more thing"}}]}}' >> "$R16TR"
+R16_V=$( cd "$R16" && CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$R16CFG" bash "$SWEEPER" verdict fu-closed 2>/dev/null )
+expect_contains "9b-b: the verdict keeps the row closed — MET, acked" "|state=MET|acked=yes|" "$R16_V"
+expect_contains "9b-c: …and says the follow-up was ignored" "follow-up ignored: row acked at" "$R16_V"
+r16_orders standdown
+expect_status "9b-d: standdown after a follow-up to a stopped row exits clean" 0 "$ST"
+expect_absent "9b-e: …the row is not LEFT ALONE waiting for a reply that cannot come" "fu-closed   (FOLLOW-UP" "$OUT"
+expect_absent "9b-f: …nothing is left alone at all" "LEFT ALONE" "$OUT"
+expect_contains "9b-g: …its lease ends: the tree is landed onto the plan's working branch" \
+  "LANDED branch=fu-closed onto=wave/fixture" "$OUT"
+if [ ! -d "$R16/.worktrees/fu-closed" ]; then
+  ok "9b-h: …and the tree is actually gone, not just reported"
+else
+  no "9b-h: …and the tree is actually gone, not just reported"
+fi
+
 finish
