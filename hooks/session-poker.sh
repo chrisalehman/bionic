@@ -18,6 +18,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh adopt      what OTHER sessions launched here (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
 #     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -378,6 +379,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in"
+  die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   exit 2
@@ -470,6 +472,38 @@ case "$VERB" in
     fi
     TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
     TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"
+    ;;
+  # THE ONE VERB WITH REPEATABLE FLAGS (wave-20 T9, REQ-4; spec D4). Each `--files+`,
+  # `--suites+` and `--reexec+` names ONE addition and may be given again; `--reason` is
+  # required, for the reason `extend`'s is — a roster meant to say why a contract changed
+  # cannot default that sentence. The additions are held newline-joined rather than in
+  # arrays: this file runs `set -u` under bash 3.2, where an empty array is unbound.
+  # A flag with no change flag at all is a usage error; a change the row already carries is
+  # the verb's own refusal (exit 1), because only the row can say so.
+  amend)
+    if [ $# -lt 1 ] || [ -z "$1" ]; then
+      usage "amend takes a name, then --files+/--suites+/--reexec+ additions and --reason."
+    fi
+    AMEND_NAME="$1"; shift
+    AMEND_FILES=""; AMEND_SUITES=""; AMEND_RUNS=""; AMEND_REASON=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --files+|--suites+|--reexec+|--reason)
+          if [ $# -lt 2 ] || [ -z "$2" ]; then usage "amend: $1 takes a value."; fi
+          case "$2" in --*) usage "amend: $1 takes a value, and got the flag $2." ;; esac
+          case "$1" in
+            --files+)  AMEND_FILES="${AMEND_FILES}$2"$'\n' ;;
+            --suites+) AMEND_SUITES="${AMEND_SUITES}$2"$'\n' ;;
+            --reexec+) AMEND_RUNS="${AMEND_RUNS}$2"$'\n' ;;
+            --reason)  AMEND_REASON="$2" ;;
+          esac
+          shift 2 ;;
+        *) usage "unknown argument for amend: $1" ;;
+      esac
+    done
+    [ -n "$AMEND_REASON" ] || usage "amend takes --reason <why>: the roster says why a contract changed."
+    [ -n "$AMEND_FILES$AMEND_SUITES$AMEND_RUNS" ] \
+      || usage "amend changes nothing without --files+, --suites+ or --reexec+."
     ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
@@ -2140,6 +2174,101 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
 # decision. `poker: note:` is what a fact gets, and every note prints above the decision line.
 note() { printf 'poker: note: %s\n' "$1"; }
 
+# ---------------------------------------------------------------- a successor row
+#
+# ONE COPY OF A ROW, FOR THE TWO VERBS THAT APPEND ONE (wave-20 T9; research D2 REQ-4).
+# `extend` and `amend` both write a row for a name that already has one, and they differ
+# only in what they override: `extend` a fresh launch instant and its reason, `amend` the
+# three instrument fields and its reason. `roster_row` assigns its arguments in order, so a
+# caller overrides a field by passing it again AFTER these. Every field is copied verbatim
+# but the session (the caller's own key) and `re_executes=`, which the row stores encoded
+# and `roster_row` encodes again, so it goes back plain (`clean … re_executes`, the same
+# decode `adopt_write_row` takes). The present-if-passed fields travel only when the source
+# row had them, the discipline `adopt_write_row`'s INSTRUMENT_FIELDS group keeps: an absent
+# key and a present-but-empty one are different rows to a by-key reader. The two audit keys
+# (`amended=`, `extended=`) are NOT copied — each belongs to the row that did the act, and
+# the history is the row sequence.
+ROW_COPY_ARGS=()
+row_copy_args() {  # <row> <session id> -> sets ROW_COPY_ARGS
+  local row="$1" k
+  ROW_COPY_ARGS=("session=$2")
+  for k in status name agent_id launched_at subagent_type model deliverable source duration \
+           progress claims cadence absent waiver tool_use_id plan; do
+    ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
+  done
+  for k in files suites_allowed suites_source teammate_id adopted_from; do
+    row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
+  done
+  if row_has_key "$row" re_executes; then
+    ROW_COPY_ARGS+=("re_executes=$(clean "$(line_field "$row" re_executes)" re_executes)")
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------- the contract grammar
+#
+# THE DISPATCH WALL'S GRAMMAR, AT THIS FILE'S TWO DOORS (wave-20 T9; spec D4, ledger Δ10).
+# `amend` widens a live contract and `task-add` writes a Files cell a brief is later built
+# from; both hand what they were given to payload/scripts/lib/brief.sh's
+# `brief_validate_fields`, so a contract that enters here is held to exactly a fresh
+# dispatch's standard. Loaded on first use, never at the top: the tick runs every Patrol
+# interval and needs none of it.
+poker_brief_load() {
+  declare -F brief_validate_fields >/dev/null 2>&1 && return 0
+  [ -f "$BIONIC_LIB/brief.sh" ] || return 1
+  # shellcheck source=/dev/null
+  . "$BIONIC_LIB/brief.sh"
+  declare -F brief_validate_fields >/dev/null 2>&1
+}
+
+# The sink `brief_validate_fields` calls: a finding is collected — its fact alone, and its
+# fact, fix and detail as the words a refusal prints — and a loud pass is a note.
+POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
+poker_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
+  case "$1" in
+    finding)
+      POKER_BRIEF_FACTS="${POKER_BRIEF_FACTS}$2"$'\n'
+      POKER_BRIEF_WORDS="${POKER_BRIEF_WORDS}  $2 — $3"$'\n'"$(printf '%s\n' "$4" | sed 's/^/    /')"$'\n\n'
+      ;;
+    warn) note "$2" ;;
+  esac
+}
+
+# A brief span out of newline-joined additions: `Files:` and `Suites:` take the words as
+# they are, `Re-executes:` marks each run with backticks, the one spelling the lift reads a
+# run from. <runs, marked> is text already in that shape (a row's stored value).
+poker_brief_span() {  # <files lines> <suites lines> <runs, marked> <runs lines> -> brief text
+  local f s r="$3" line
+  f="$(printf '%s' "$1" | tr '\n,' '  ')"
+  s="$(printf '%s' "$2" | tr '\n,' '  ')"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    r="${r:+$r }\`${line}\`"
+  done <<EOF
+$4
+EOF
+  case "$f" in *[![:space:]]*) printf 'Files: %s\n' "$f" ;; esac
+  case "$s" in *[![:space:]]*) printf 'Suites: %s\n' "$s" ;; esac
+  [ -n "$r" ] && printf 'Re-executes: %s\n' "$r"
+  return 0
+}
+
+# Order-keeping unions: the old value's members first, then each new member it lacks. A
+# widening can never drop what the row already held.
+poker_union() {  # <separator: , or space> <old list> <new list>... -> the union
+  local sep="$1"; shift
+  printf '%s\n' "$@" | awk -v sep="$sep" '
+    { n = (sep == ",") ? split($0, a, ",") : split($0, a, /[ \t]+/)
+      for (i = 1; i <= n; i++) if (a[i] != "" && !(a[i] in seen)) { seen[a[i]] = 1; out = out (out == "" ? "" : sep) a[i] } }
+    END { print out }'
+}
+
+# The marked runs of a stored `re_executes=` value, one per line: the text between each pair
+# of backticks. The same reading the budget arm takes of the field.
+poker_marked_runs() {  # <runs, marked> -> one run per line
+  printf '%s' "$1" | awk -F'`' '{ for (i = 2; i <= NF; i += 2) if ($i != "") print $i }'
+}
+
 # ---------------------------------------------------------------- the sweep
 #
 # THE OTHER HALF OF `adopt` (fixit 1.5.1 T5; ideas/fixit-1.5.2-dead-session-sweep.md).
@@ -3459,7 +3588,10 @@ EOF
   # `claims=`/`progress=`/`cadence=` triple. `standdown-declined:` answers one turn and
   # writes nothing; `ack` closes a row rather than opening one. Neither re-opens a MET
   # lineage, so this verb is a plain append: a fresh row for the same name, launched NOW,
-  # with the operator's reason riding in `claims=`. The already-written deliverable then
+  # with the operator's reason recorded as `extended=<iso> <reason>`. It used to ride
+  # `claims=`, the process pattern the sweeper hands to `pgrep -f`, so a reason carrying
+  # `.*` held the row STILL-LIVE on any process at all (wave-20 T9, AC-4.4); `claims=` is
+  # now copied from the row, like every field but the launch. The already-written deliverable then
   # dates before the new launch instant — `landing_conjunct` returns its `stale=` conjunct —
   # the verdict leaves MET for STILL-LIVE or UNMET, and the name drops off
   # `STANDDOWN_NAMES` and rejoins `OPEN`: the truthful accounting, the agent is still
@@ -3504,51 +3636,12 @@ EOF
     fi
 
     EXTEND_NOW="$(iso_now)"
-    EXTEND_RR_ARGS=(
-      "status=$(line_field "$EXTEND_ROW" status)"
-      "session=$SESSION_ID"
-      "name=$(clean "$EXTEND_NAME")"
-      "agent_id=$(line_field "$EXTEND_ROW" agent_id)"
-      "launched_at=$EXTEND_NOW"
-      "subagent_type=$(line_field "$EXTEND_ROW" subagent_type)"
-      "model=$(line_field "$EXTEND_ROW" model)"
-      "deliverable=$(line_field "$EXTEND_ROW" deliverable)"
-      "source=$(line_field "$EXTEND_ROW" source)"
-      "duration=$(line_field "$EXTEND_ROW" duration)"
-      "progress=$(line_field "$EXTEND_ROW" progress)"
-      "claims=$(clean "$EXTEND_REASON")"
-      "cadence=$(line_field "$EXTEND_ROW" cadence)"
-      "absent=$(line_field "$EXTEND_ROW" absent)"
-      "waiver=$(line_field "$EXTEND_ROW" waiver)"
-      "tool_use_id=$(line_field "$EXTEND_ROW" tool_use_id)"
-      "plan=$(line_field "$EXTEND_ROW" plan)"
-    )
-    # THE PRESENT-IF-PASSED FIELDS TRAVEL ONLY WHEN THE SOURCE ROW HAD THEM — the same
-    # discipline `adopt_write_row`'s INSTRUMENT_FIELDS group keeps above: an absent key and
-    # a present-but-empty one are different rows to a by-key reader, and this verb must not
-    # manufacture the first out of the second.
-    if row_has_key "$EXTEND_ROW" files; then
-      EXTEND_RR_ARGS+=("files=$(line_field "$EXTEND_ROW" files)")
-    fi
-    if row_has_key "$EXTEND_ROW" suites_allowed; then
-      EXTEND_RR_ARGS+=("suites_allowed=$(line_field "$EXTEND_ROW" suites_allowed)")
-    fi
-    if row_has_key "$EXTEND_ROW" suites_source; then
-      EXTEND_RR_ARGS+=("suites_source=$(line_field "$EXTEND_ROW" suites_source)")
-    fi
-    # `re_executes=` IS STORED ENCODED (T4, REQ-7/D4) and `roster_row` encodes what it is
-    # handed, so the copy goes back PLAIN — the same `clean … re_executes` decode
-    # `adopt_write_row` takes — or `%7C` becomes `%257C` on the appended row and the
-    # extended agent's declared run is a command no shell ran (walk-bb711e1.md §14, §29f).
-    if row_has_key "$EXTEND_ROW" re_executes; then
-      EXTEND_RR_ARGS+=("re_executes=$(clean "$(line_field "$EXTEND_ROW" re_executes)" re_executes)")
-    fi
-    if row_has_key "$EXTEND_ROW" teammate_id; then
-      EXTEND_RR_ARGS+=("teammate_id=$(line_field "$EXTEND_ROW" teammate_id)")
-    fi
-    if row_has_key "$EXTEND_ROW" adopted_from; then
-      EXTEND_RR_ARGS+=("adopted_from=$(line_field "$EXTEND_ROW" adopted_from)")
-    fi
+    # THE COPY IS `row_copy_args`'s, shared with `amend`; this verb overrides two fields: the
+    # launch, bumped to now (the whole point — the old deliverable then predates it), and
+    # its reason, as data. `claims=` travels with the copy, untouched.
+    row_copy_args "$EXTEND_ROW" "$SESSION_ID"
+    EXTEND_RR_ARGS=("${ROW_COPY_ARGS[@]}" "launched_at=$EXTEND_NOW"
+      "extended=$EXTEND_NOW $(clean "$EXTEND_REASON")")
 
     EXTEND_NEW_ROW="$(roster_row "${EXTEND_RR_ARGS[@]}")" || EXTEND_NEW_ROW=""
     if [ -z "$EXTEND_NEW_ROW" ]; then
@@ -3560,6 +3653,152 @@ EOF
       exit 2
     }
     say "extended — $EXTEND_NAME is open again: $ROSTER_FILE"
+    exit 0
+    ;;
+
+  # THE CONTRACT CHANGE (wave-20 T9; REQ-4, AC-4.1/4.2; spec D4, ledger Δ10). A writer's
+  # Files:, Suites: and Re-executes: are read from its roster row, captured at dispatch —
+  # editing the plan row changes nothing — and until this verb the only way to widen one was
+  # a re-dispatch. `amend` appends a SUCCESSOR row, copied from the name's latest
+  # (`row_copy_args`, the copy `extend` takes), with each addition merged in: a union, old
+  # members first, never a narrowing. The identity is not touched — `status=`,
+  # `launched_at=`, `agent_id=`, `teammate_id=` and `tool_use_id=` are the copy's — so the
+  # verdict, the stop gate and the budget join see the same contract, wider, and the stop
+  # wall and the budget wall, which already read a name's latest row, need no change.
+  # `amended=<iso> <reason>` records when and why; `session=` who.
+  #
+  # THE MERGED FIELDS ARE JUDGED BY THE DISPATCH WALL'S GRAMMAR (Δ10). The verb builds the
+  # span a brief carrying the merged contract would hold — `Files:`, `Suites:`,
+  # `Re-executes:` — and hands it to `brief_validate_fields` with the row's own role, so the
+  # auditor's three-run cap binds here as it does at dispatch. A declared budget stays
+  # declared (the old set plus the added suites); a DERIVED one is re-derived from the
+  # merged files by the configured impact command, and the old set is kept beside it.
+  #
+  # REFUSED: no session key (3), an unengaged session (decides nothing, 0), no row of the
+  # name, a CLOSED row — `roster_open_names`, the one close predicate: an ack later than the
+  # latest launch — and a change the row already carries (1), and anything the grammar
+  # refuses (1). A subagent cannot reach this verb at all: the Bash wall refuses `amend`,
+  # `extend` and `task-add` in any payload carrying an `agent_id` (payload/scripts/lib/walls.sh).
+  amend)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "An amendment answers for ONE session's roster, so without the key there is nothing to write."
+      exit 3
+    fi
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
+      die "REFUSED — no row named $AMEND_NAME: this session has no roster at $ROSTER_FILE."
+      exit 1
+    fi
+    AM_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+      | grep -F "|name=${AMEND_NAME}|" | tail -1)"
+    if [ -z "$AM_ROW" ]; then
+      die "REFUSED — no row named $AMEND_NAME on this session's roster ($ROSTER_FILE)."
+      exit 1
+    fi
+    AM_OPEN="$(roster_open_names "$ROSTER_FILE" "$REPO_REAL/.bionic/tmp/sweeper-${SESSION_ID}.state" "$SESSION_ID")"
+    if ! grep -qxF -- "$AMEND_NAME" <<< "$AM_OPEN"; then
+      die "REFUSED — $AMEND_NAME is closed: it was acked after its latest launch, or holds no live row. A closed contract is not amended; dispatch the work again."
+      exit 1
+    fi
+    if ! poker_brief_load; then
+      die "REFUSED — the contract grammar (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
+      exit 2
+    fi
+
+    AM_ROLE="$(line_field "$AM_ROW" subagent_type)"
+    AM_OLD_FILES="$(line_field "$AM_ROW" files)"
+    AM_OLD_SA="$(line_field "$AM_ROW" suites_allowed)"
+    AM_OLD_SRC="$(line_field "$AM_ROW" suites_source)"
+    AM_OLD_RUNS=""
+    row_has_key "$AM_ROW" re_executes && AM_OLD_RUNS="$(clean "$(line_field "$AM_ROW" re_executes)" re_executes)"
+
+    # THE ADDITIONS AS THE GRAMMAR READS THEM, alone: what each flag contributes once lifted.
+    AM_ADD="$(lift_contract_fields "$(poker_brief_span "$AMEND_FILES" "$AMEND_SUITES" "" "$AMEND_RUNS")" "$AM_ROLE")"
+    AM_NEW_FILES="$(poker_union , "$AM_OLD_FILES" "$(brief_field "$AM_ADD" files)")"
+
+    # THE DECLARED HALF OF THE BUDGET. A declared (or unlabelled) budget carries its old set
+    # into the span; a derived one is not a declaration and is re-derived below. `none` is a
+    # waiver, and it yields to the first suite actually added.
+    AM_DECL=""
+    [ "$AM_OLD_SRC" = derived ] || AM_DECL="$AM_OLD_SA"
+    AM_DECL="$(poker_union ' ' "$AM_DECL" "$(printf '%s' "$AMEND_SUITES" | tr '\n,' '  ')")"
+    case " $AM_DECL " in
+      *" none "*) [ "$AM_DECL" = none ] \
+                    || AM_DECL="$(printf '%s' "$AM_DECL" | tr ' ' '\n' | awk '$0 != "none" && $0 != ""' | tr '\n' ' ')"
+                  AM_DECL="${AM_DECL% }" ;;
+    esac
+
+    AM_SPAN="$(poker_brief_span "$(printf '%s' "$AM_NEW_FILES" | tr ',' '\n')" "$AM_DECL" "$AM_OLD_RUNS" "$AMEND_RUNS")"
+    AM_LIFT="$(lift_contract_fields "$AM_SPAN" "$AM_ROLE")"
+    POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
+    AM_RC=0
+    brief_validate_fields "$AM_LIFT" "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
+    AM_SA="$BRIEF_SUITES_ALLOWED"; AM_SRC="$BRIEF_SUITES_SOURCE"
+    # A derived budget with suites added too: the span declared, so nothing was derived — ask
+    # the impact command for the merged files on their own.
+    if [ "$AM_RC" -eq 0 ] && [ "$AM_OLD_SRC" = derived ] && [ -n "$AM_DECL" ] && [ -n "$AM_NEW_FILES" ]; then
+      brief_validate_fields "$(lift_contract_fields "Files: ${AM_NEW_FILES//,/ }" "$AM_ROLE")" \
+        "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
+      AM_SA="$(poker_union ' ' "$AM_SA" "$BRIEF_SUITES_ALLOWED")"
+    fi
+    if [ "$AM_RC" -ne 0 ]; then
+      die "REFUSED — a dispatch carrying $AMEND_NAME's amended contract would be refused; nothing was written:"
+      printf '%s' "$POKER_BRIEF_WORDS" >&2
+      exit 1
+    fi
+
+    # THE UNION ON THE ROW. A derived budget keeps its old set beside the new derivation, and a
+    # waiver that nothing replaced stays the waiver.
+    [ "$AM_OLD_SRC" = derived ] && AM_SA="$(poker_union ' ' "$AM_OLD_SA" "$AM_SA")"
+    [ -n "$AM_SA" ] || AM_SA="$AM_OLD_SA"
+    AM_SRC="${AM_OLD_SRC:-$AM_SRC}"
+    AM_NEW_RUNS="$AM_OLD_RUNS"
+    AM_OLD_RUN_SET="$(poker_marked_runs "$AM_OLD_RUNS")"
+    while IFS= read -r AM_R; do
+      [ -n "$AM_R" ] || continue
+      grep -qxF -- "$AM_R" <<< "$AM_OLD_RUN_SET" && continue
+      AM_NEW_RUNS="${AM_NEW_RUNS:+$AM_NEW_RUNS }\`${AM_R}\`"
+    done <<EOF
+$(poker_marked_runs "$(brief_field "$AM_ADD" re_executes)")
+EOF
+
+    if [ "$AM_NEW_FILES" = "$AM_OLD_FILES" ] && [ "$AM_SA" = "$AM_OLD_SA" ] \
+       && [ "$AM_NEW_RUNS" = "$AM_OLD_RUNS" ]; then
+      die "REFUSED — this amend changes nothing: every addition is already on $AMEND_NAME's row, or is not a path, suite or run the dispatch grammar reads (a Files: path carries a /). Nothing was written."
+      exit 1
+    fi
+
+    row_copy_args "$AM_ROW" "$SESSION_ID"
+    AM_ARGS=("${ROW_COPY_ARGS[@]}")
+    { [ -n "$AM_NEW_FILES" ] || row_has_key "$AM_ROW" files; } && AM_ARGS+=("files=$AM_NEW_FILES")
+    if [ -n "$AM_SA" ] || row_has_key "$AM_ROW" suites_allowed; then
+      AM_ARGS+=("suites_allowed=$AM_SA")
+      [ -n "$AM_SRC" ] && AM_ARGS+=("suites_source=$AM_SRC")
+    fi
+    { [ -n "$AM_NEW_RUNS" ] || row_has_key "$AM_ROW" re_executes; } && AM_ARGS+=("re_executes=$AM_NEW_RUNS")
+    AM_ARGS+=("amended=$(iso_now) $(clean "$AMEND_REASON")")
+    AM_NEW_ROW="$(roster_row "${AM_ARGS[@]}")" || AM_NEW_ROW=""
+    if [ -z "$AM_NEW_ROW" ]; then
+      die "REFUSED — could not build the amended row for $AMEND_NAME."
+      exit 2
+    fi
+    printf '%s\n' "$AM_NEW_ROW" >> "$ROSTER_FILE" 2>/dev/null || {
+      die "REFUSED — could not write to $ROSTER_FILE."
+      exit 2
+    }
+    say "amended — $AMEND_NAME: files=${AM_NEW_FILES:-(none)} suites=${AM_SA:-(none)}${AM_NEW_RUNS:+ runs=$AM_NEW_RUNS}; the stop and budget walls read this row from now on."
     exit 0
     ;;
 
@@ -3627,6 +3866,43 @@ EOF
       die "REFUSED — $TA_PLAN is at current: $TA_CUR; before Step-3 approval the plan is written by hand and reviewed, not added to."
       exit 1
     fi
+
+    # THE FILES CELL IS JUDGED BY THE DISPATCH GRAMMAR (wave-20 T9; D4, Δ10; T6 carry-over).
+    # The cell becomes a brief's `Files:` line at dispatch, so it is read here exactly as the
+    # dispatch wall will read it: a cell the lift reads as no path — a template slot, a bare
+    # word — is refused now, in the grammar's words, rather than forty minutes later at the
+    # dispatch of a row nobody can fix from the table. `—` is the table's "none" and declares
+    # nothing to judge. TWO FACTS ARE THE REPOSITORY'S, NOT THE CELL'S: no configured impact
+    # command, and one that overran its bound. A dispatch answers either with a `Suites:`
+    # line, which the plan row has no column for, so here they are notes and the row goes in.
+    case "$TA_FILES" in
+      ''|'—'|'-') : ;;
+      *)
+        if ! poker_brief_load; then
+          die "REFUSED — the contract grammar (lib/brief.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+          exit 2
+        fi
+        POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
+        brief_validate_fields "$(lift_contract_fields "Files: $TA_FILES" "$TA_AGENT")" \
+          "$TA_AGENT" "$REPO_REAL" poker_brief_sink || :
+        TA_CELL_FACTS=""
+        while IFS= read -r TA_FACT; do
+          [ -n "$TA_FACT" ] || continue
+          case "$TA_FACT" in
+            'no impact command is configured here'|'the impact command did not answer')
+              note "$TA_FACT — a dispatch of $TA_ID whose brief carries only this Files: line will need a Suites: line" ;;
+            *) TA_CELL_FACTS="${TA_CELL_FACTS}${TA_FACT}"$'\n' ;;
+          esac
+        done <<EOF
+$POKER_BRIEF_FACTS
+EOF
+        if [ -n "$TA_CELL_FACTS" ]; then
+          die "REFUSED — a dispatch of $TA_ID with Files: $TA_FILES would be refused by the dispatch grammar; the plan is unchanged:"
+          printf '%s' "$POKER_BRIEF_WORDS" >&2
+          exit 1
+        fi
+        ;;
+    esac
 
     TA_SUM="$(cksum < "$TA_PLAN" 2>/dev/null)"
     TA_NEW="${TA_PLAN}.task-add.$$"
@@ -4343,6 +4619,11 @@ EOF
             UNMET)
               SD_VERDICT="UNMET"
               ;;
+            FOLLOW-UP)
+              # MET, with a message the agent never answered (wave-20 T9, Δ8): gone from a
+              # fresh panel, the reply cannot come, and `stopped` closes it `landed`.
+              SD_VERDICT="FOLLOW-UP (met; the follow-up went unanswered)"
+              ;;
             STILL-LIVE)
               if grep -q 'claimed process pattern' <<< "$SD_GDETAIL"; then
                 SD_REFUSE=1
@@ -4373,7 +4654,15 @@ EOF
         # GONE report is sitting in the candidate sets above) but the panel reading is not
         # fresh enough to trust with a write or a report. One line, said once, never a
         # STANDDOWN, a GONE report, an order or an ack.
-        note "stand-down deferred — the panel reading is stale; ListAgents and the next tick decides"
+        # NAMED, AND TRUTHFUL ABOUT WHY (wave-20 T9, REQ-4, AC-4.5; consumer report #11). The
+        # line names every row it held back — the union of the three candidate sets, once each
+        # — so the operator knows which agent waits on a ListAgents. `stale` is a reading that
+        # exists but predates the last prompt (`live_agents` rc 3); no answer at all (rc 4) or
+        # no transcript is `absent`, and used to be called stale too.
+        SD_DEFERRED="$(poker_union ' ' "$STANDDOWN_NAMES" "${DUP_START_NAMES//|/ }" "$GONE_CANDIDATE_NAMES")"
+        SD_WHY=absent
+        [ -n "$TICK_TR" ] && [ "${SD_LRC:-4}" -eq 3 ] && SD_WHY=stale
+        note "stand-down deferred for ${SD_DEFERRED} — the panel reading is ${SD_WHY}; ListAgents and the next tick decides"
       fi
     fi
 

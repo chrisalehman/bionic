@@ -147,4 +147,25 @@ expect_status "R4a an unrecognised key is still a refusal" "2" "$?"
 lib roster_row status=intended barewordarg >/dev/null 2>&1
 expect_status "R4b a bare word is still a refusal" "2" "$?"
 
+
+section "R5 — the two audit keys a successor row carries (wave-20 T9, REQ-4, AC-4.2/4.4)"
+
+# `amend` records when and why a live contract widened (`amended=`), and `extend` records its
+# reason as data (`extended=`) rather than in `claims=`, which the sweeper hands to `pgrep -f`.
+# Both are PRESENT-IF-PASSED, like `adopted_from=`: a row that names neither is byte-identical
+# to the rows before this wave, and every captured fixture still reproduces.
+R5_BASE=(status=identified session=s1 name=w-t9 agent_id=a9 launched_at=2026-09-23T00:00:00Z
+  subagent_type=bionic:implementor model=opus deliverable=rec/x.md source=declared duration=
+  progress= claims=worker-proc cadence= absent= waiver= tool_use_id=toolu_x plan=none)
+R5_PLAIN="$(lib roster_row "${R5_BASE[@]}")"
+R5_AM="$(lib roster_row "${R5_BASE[@]}" "amended=2026-09-23T01:00:00Z the fix touches b")"
+R5_EX="$(lib roster_row "${R5_BASE[@]}" "extended=2026-09-23T01:00:00Z retry .* (x|y)")"
+expect_absent "R5a a row that names neither carries neither" "amended=" "$R5_PLAIN$(printf '%s' "$R5_PLAIN" | grep -o 'extended=')"
+expect_contains "R5b amended= is written when passed" "|amended=2026-09-23T01:00:00Z the fix touches b|" "$R5_AM"
+expect_contains "R5c extended= is written when passed, its pipe folded like every prose field" \
+  "|extended=2026-09-23T01:00:00Z retry .* (x y)|" "$R5_EX"
+expect_contains "R5d …and claims= is whatever the caller passed, untouched by it" "|claims=worker-proc|" "$R5_EX"
+expect_eq "R5e the keys sit before tool_use_id=, after the instrument fields: the row minus them is the plain row" \
+  "$R5_PLAIN" "$(printf '%s' "$R5_AM" | sed 's/|amended=[^|]*//')"
+
 finish
