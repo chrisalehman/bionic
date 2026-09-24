@@ -3,6 +3,87 @@
 Earlier releases are recorded as git tags (`v1.4.3` … `v1.8.3`) rather than in this file,
 which starts at 1.8.4.
 
+## 1.8.7 — 2026-09-24
+
+- REQ-1: A task branch now lands onto the branch the bound plan names as its working
+  branch, in whichever checkout has that branch checked out, whatever branch the main
+  checkout happens to be on; a land with no bound plan, no readable working branch, or a
+  working branch checked out nowhere is refused by name and merges nothing, and
+  `stop-orders.sh standdown` lands through the same path, naming what it merged into.
+  The busy check that holds a land back now reads where a suite is actually running —
+  the process, not which session started it — so a land is no longer refused by an
+  unrelated session's activity, and is no longer waved through by a suite the landing
+  session itself is running.
+- REQ-2: The commit gate now refuses a commit in a session bound to a plan that exists
+  but cannot be read, naming the path; a bound plan that no longer exists still reads as
+  closed, as before. The stop wall, dispatch preflight, the tick and the governing-skill
+  hook all give an unreadable bound plan this same answer, instead of the "no open run"
+  or "bound plan closed" some of them used to report for it.
+- REQ-3: The evidence gate now reads `env`-prefixed git invocations, including `env -C
+  <dir>` and `env --chdir=<dir>`, as the commit they perform, judged exactly as the
+  un-prefixed form is. The read-only role arm refuses every git subcommand that creates
+  a commit or moves a branch onto one, in every spelling the gate reads, while a writer
+  role's ordinary merges are unaffected.
+- REQ-4: A main-thread verb can now amend a live row's files, suites and re-execute
+  budget, recording who changed it, when and why beside the row, and both the stop wall
+  and the budget wall read the amended contract from then on; the verb refuses a call
+  made from inside a subagent, an unknown name, or a closed row, and never touches the
+  row's launch time, status or agent id. A message sent to a writer whose row already
+  reports done puts that row back in flight, so the tick no longer stands it down before
+  it reports again. A follow-up's reply closes the row on either reply shape the agent
+  may send, and never reopens a row that was already acknowledged or stopped. `extend`'s
+  reason is stored as plain data and no longer changes what any process-liveness check
+  matches, and a stand-down deferred on a stale panel now names every row it deferred.
+- REQ-5: Once a plan is past its Step-3 approval, a task is ready the moment it is
+  pending and every prerequisite has landed, whatever step it belongs to; the tick's
+  fill duty and the stop wall's fill duty both read this one ready set. The plan
+  validator now requires every row at Step 5 or later to depend, directly or
+  transitively, on every Step-4 row, reporting one line per offending row. A
+  documentation row at Step 7 or later now waits for its own step to open — the release
+  row can no longer be filled early, during Verify — and a main-thread verb adds a new
+  row to the task table together with its evidence line and its prerequisites in a
+  single act. Every turn of an engaged run appends one line to a fill ledger recording
+  the free slots, the ready task ids, the agents actually launched, and any withheld or
+  declined task with its reason; a report can read that ledger back as
+  missed-opportunity minutes, and a fill refusal now states its counts and names the
+  specific rows it could not launch.
+- REQ-6: `session-poker.sh prompt` now prints the canonical Patrol prompt carrying both
+  the marker and the tick command, and the session-start guidance points to it. A
+  Patrol-marker turn that never ran the tick is refused once, naming the tick command,
+  and Patrol's health is now judged by its last tick rather than its last marker turn,
+  so a clock that fires without ticking reads as dead to both the death notice and the
+  dispatch arming wall.
+- REQ-7: A budgeted suite command is now admitted the same way whether or not it is
+  followed by an output redirection or a `tee`, for every runner and for budgets
+  declared only under a re-executes line. The cap of three re-executions now applies to
+  the auditor role alone, with every other role bounded only by the field's own length
+  limit, and every suite-wall refusal now suggests only spellings the wall itself
+  admits, so running a refusal's own suggested remedy is no longer refused in turn.
+- REQ-8: `stop-check.sh` and the stop guard now read the newest of an adopted agent's
+  candidate transcripts — the launcher's and every adopter's — the same file the tick
+  reads, so an adopted agent whose adopter holds the fresher copy is no longer reported
+  idle against a frozen launcher transcript. After an adoption and a resume by name, the
+  tick's liveness for that row now follows the file the agent is actually writing.
+- REQ-9: Before Step-3 approval, only the read-only roles may dispatch; every other type
+  — including a fork, a general-purpose agent, a bare `claude` invocation, or any
+  unrecognized type — takes the writer path and is refused. A dispatch made from inside
+  a subagent writes no row to the orchestrator's own roster, and delegation is one level
+  deep: a nested dispatch may only launch a read-only role, a read-only role can never
+  call the Agent tool itself, and a nested read-only helper remains bound by the commit
+  wall even when it holds no roster row of its own. A dispatch refused for a missing
+  scaffold now says plainly that the wall reads only the prompt text, and that the
+  brief's scaffold must be copied into it.
+- REQ-10: Dispatch preflight, the sweeper and the stop wall now close a name through one
+  shared predicate — an acknowledgment later than the row's launch — instead of
+  disagreeing on a MET marker without an ack. The governing-skill hook, the stop wall,
+  the tick and dispatch preflight all read the writer budget through that same one
+  strict reader, which refuses a `parallel-budget:` line whose `writers=` value is not a
+  plain positive integer where the plan is read, rather than guessing at it downstream,
+  and preflight prints the named backstop when a live plan carries no budget line at
+  all. A restarted agent now re-occupies its existing slot without resetting the
+  contract's original launch time, so occupancy and liveness checks see one continuous
+  history across the restart instead of a fresh one.
+
 ## 1.8.6 — 2026-09-23
 
 - REQ-1: A stop closes its own roster row — the tick acks a MET row once a fresh panel
