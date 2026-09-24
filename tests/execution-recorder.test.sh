@@ -1018,13 +1018,28 @@ expect_eq "T20b: the restart identifies a second time" \
 IDC_LA2=$(grep 'status=identified' "$IDC_ROSTER" | tail -1 | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)
 expect_regex "T20b: …and its launch stamp is well-formed" \
   '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$IDC_LA2"
-expect_ne "T20b: …and it is NOT the original launch carried forward" \
+# RE-AUTHORED (epic-23 wave-20 T20c, critic C2-2). T20b put the fresh stamp in `launched_at`,
+# and `launched_at` is ALSO the clock the sweeper dates the deliverable against: a contract met
+# before the ack then read UNMET for good, and `stopped` closed a landed row `abandoned`.
+# Occupancy and the contract are two questions, so they are two fields now. `launched_at` stays
+# the contract's launch, carried forward as it was before T20b; the restart's own time rides
+# `restarted_at=`, which `roster_open_names` reads for occupancy and no contract reader reads.
+expect_eq "T20c: the restart row keeps the contract's launch (T20c: was \"T20b: …and it is NOT the original launch carried forward\", expect_ne on launched_at)" \
   "2026-08-08T09:00:00Z" "$IDC_LA2"
-if [[ "$IDC_LA2" > "2026-08-08T09:31:00Z" ]]; then IDC_LA2_FRESH=yes; else IDC_LA2_FRESH=no; fi
-expect_eq "T20b: …and it is strictly later than the ack that had closed the name" \
-  "yes" "$IDC_LA2_FRESH"
+IDC_RA2=$(grep 'status=identified' "$IDC_ROSTER" | tail -1 | tr '|' '\n' | grep '^restarted_at=' | cut -d= -f2-)
+expect_regex "T20c: …and carries the restart's own time as a well-formed restarted_at" \
+  '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$IDC_RA2"
+if [[ "$IDC_RA2" > "2026-08-08T09:31:00Z" ]]; then IDC_RA2_FRESH=yes; else IDC_RA2_FRESH=no; fi
+expect_eq "T20c: …strictly later than the ack that had closed the name (T20c: was \"T20b: …and it is strictly later than the ack that had closed the name\", on launched_at)" \
+  "yes" "$IDC_RA2_FRESH"
+expect_eq "T20c: …exactly one restarted_at on the row (a by-key reader takes the first)" \
+  "1" "$(grep 'status=identified' "$IDC_ROSTER" | tail -1 | tr '|' '\n' | grep -c '^restarted_at=')"
 expect_contains "T20b: …so roster_open_names counts the restarted agent again" \
   "probemate" "$(open_names_of "$IDC_ROSTER" "$IDC_LEDGER" "$SID_A")"
+# THE PAIRED NEGATIVE: the FIRST identification of the same id is no restart and carries no
+# restarted_at, so the field marks exactly the case the ack had closed.
+expect_eq "T20c: the first identification of the id carries no restarted_at" \
+  "0" "$(grep 'status=identified' "$IDC_ROSTER" | head -1 | tr '|' '\n' | grep -c '^restarted_at=')"
 
 # THE LANDED-THEN-RELAUNCHED LINEAGE (delta review C1; RE-AUTHORED at epic-23 wave-20 T20).
 # The control above proves an ack frees the name; this proves the ack does NOT free it
@@ -1059,6 +1074,10 @@ expect_contains "T22-dup: a second start against the RELAUNCHED lineage is journ
 expect_contains "…carrying the relaunch's id, not the landed one" \
   "agent_id=$START_ID_R2" "$IDR_DUP"
 expect_eq "…exactly once" "1" "$(grep -c 'status=duplicate-start' "$IDR_ROSTER")"
+# A RELAUNCH UNDER A NEW ID is a fresh dispatch cycle, not a restart: its own launch stamp
+# already postdates the ack, so it carries no restarted_at (T20c).
+expect_eq "T20c: a relaunch under a new id carries no restarted_at (only a restart of an acked id does)" \
+  "0" "$(grep 'status=identified' "$IDR_ROSTER" | grep -c '|restarted_at=')"
 
 # ---------- the full chain: intended → confirmed → identified ----------
 #

@@ -1370,4 +1370,107 @@ expect_contains "10n: the summary counts one FOLLOW-UP, the open row's, and not 
 
 unset CLAUDE_CONFIG_DIR
 
+# ============================================================
+section "Section 11: a restart after an ack re-opens the NAME, never the contract — delivered, acked, restarted, answered, stopped (wave-20 T20c; critic C2-2)"
+# ============================================================
+#
+# THE HISTORY, end to end, through the real recorder, the real sweeper and the real
+# `stop-orders.sh stopped` (critic C2-2's own reproduction). An agent delivers and is acked:
+# the row is landed. The orchestrator then messages it, the CLI restarts it, and the restart's
+# SubagentStart reaches the recorder for the same id. T20b stamped that row's `launched_at`
+# fresh so the name would hold a slot again — and `launched_at` is the clock the sweeper dates
+# the deliverable against, so the row read UNMET for good (the reply rewrites nothing), and once
+# the agent was gone `stopped` closed a landed row `abandoned`.
+# The fix keeps the two questions apart: the restart row keeps `launched_at` (the contract's
+# clock) and carries `restarted_at=` (occupancy, read by `roster_open_names` alone). So:
+#   after the restart  the name is open again (acked=no) and the send is a live FOLLOW-UP —
+#                      the contract itself still met
+#   after the reply    MET, acked=no, the detail naming the restart
+#   `stopped`          closes it `landed`, never `abandoned`
+# Never UNMET at any point. Own config dir and transcript (A-T9b.6: `read_followups` takes the
+# first `projects/*/<sid>.jsonl` it finds).
+S11_CFG="$TMPROOT/s11-config"
+mkdir -p "$S11_CFG/projects/-fixture-s11"
+F9_TR="$S11_CFG/projects/-fixture-s11/$SID.jsonl"; : > "$F9_TR"
+export CLAUDE_CONFIG_DIR="$S11_CFG"
+. "$(dirname "$0")/lib/live-answer.sh"
+S11_REC="${BIONIC_HOOKS_DIR}/execution-recorder.sh"
+S11_ORDERS="${BIONIC_HOOKS_DIR}/stop-orders.sh"
+
+R11="$(make_repo s11restart)"; new_roster "$R11"
+: > "$(state_dir_of "$R11")/engaged-$SID.state"
+S11_DEL="$R11/w-t1-report.md"; echo delivered > "$S11_DEL"; backdate "$S11_DEL" 400
+S11_LAUNCH="$(iso_ago 900)"
+roster_row_fixture status=confirmed "session=$SID" name=w-T1 agent_id=a-w-t1-01 \
+  "launched_at=$S11_LAUNCH" subagent_type=bionic:implementor model=opus "deliverable=$S11_DEL" \
+  source=declared tool_use_id=toolu_s11 >> "$(roster_of "$R11")"
+roster_row_fixture status=identified "session=$SID" name=w-T1 agent_id=a-w-t1-01 \
+  "launched_at=$S11_LAUNCH" subagent_type=bionic:implementor model=opus "deliverable=$S11_DEL" \
+  source=declared tool_use_id=toolu_s11 >> "$(roster_of "$R11")"
+# The ack in the ack verb's own shape, stamped 300 s ago rather than by the verb: the restart
+# below stamps `date -u`, and an ack in that same second would close nothing by design.
+printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$(ledger_of "$R11")"
+printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=w-T1|by=human|reason=landed\n' \
+  "$(iso_ago 300)" "$SID" >> "$(ledger_of "$R11")"
+
+S11_LINE=""
+s11_verdict() {  # sets S11_LINE (the verdict line) and F9_STATE
+  f9_state "$R11" w-T1
+  S11_LINE="$(printf '%s\n' "$OUT" | grep -F 'landing-verdict/v1|')"
+}
+s11_verdict
+expect_contains "11a: delivered, then acked — MET, acked=yes (the landed row)" "|state=MET|acked=yes|" "$S11_LINE"
+
+tx_send w-T1
+s11_verdict
+expect_contains "11b: a follow-up to the acked row, before any restart, keeps its close (T9b, unchanged)" \
+  "|state=MET|acked=yes|" "$S11_LINE"
+expect_contains "11b2: …and says the send was ignored" "follow-up ignored" "$S11_LINE"
+
+# THE RESTART: the CLI's SubagentStart for the same id, through the real recorder.
+jq -nc --arg s "$SID" --arg t "$F9_TR" --arg c "$R11" \
+  '{session_id:$s, transcript_path:$t, cwd:$c, agent_id:"a-w-t1-01", agent_type:"w-T1", hook_event_name:"SubagentStart"}' \
+  | ( cd "$R11" && env HOME="$TMPROOT/s11-home" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="$R11" \
+        bash "$S11_REC" >/dev/null 2>&1 )
+S11_ROW="$(grep -F '|status=identified|' "$(roster_of "$R11")" | tail -1)"
+expect_eq "11c: the recorder identifies the restart (a second identified row)" \
+  "2" "$(grep -c '|status=identified|' "$(roster_of "$R11")")"
+expect_contains "11c2: …keeping the contract's launch on it" "|launched_at=$S11_LAUNCH|" "$S11_ROW"
+expect_contains "11c3: …and carrying the restart's own time as restarted_at" "|restarted_at=" "$S11_ROW"
+
+s11_verdict
+expect_eq "11d: after the restart the unanswered send is a live FOLLOW-UP — never UNMET" "FOLLOW-UP" "$F9_STATE"
+expect_contains "11d2: …the name is open again, so acked=no" "|acked=no|" "$S11_LINE"
+expect_contains "11d3: …and the contract itself is still met against its own launch" \
+  "The contract itself is met: delivered=$S11_DEL" "$S11_LINE"
+expect_contains "11d4: …with the detail naming the restart" "restarted at " "$S11_LINE"
+expect_contains "11d5: the name holds a slot: roster_open_names counts it" "w-T1" \
+  "$(bash -c '. "$1"; shift; roster_open_names "$@"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" \
+       "$(roster_of "$R11")" "$(ledger_of "$R11")" "$SID")"
+
+tx_hand_back w-T1
+s11_verdict
+expect_contains "11e: the reply answers it — MET, acked=no (the restarted name awaits its own close)" \
+  "|state=MET|acked=no|" "$S11_LINE"
+expect_contains "11e2: …the detail still naming the restart and the launch it is judged against" \
+  "judged against its launch at $S11_LAUNCH" "$S11_LINE"
+sweep "$R11" verdict
+expect_contains "11e3: the summary counts no UNMET row" " 0 UNMET," "$OUT"
+
+# THE AGENT GOES: a fresh panel that lists nobody, then the stop order's close.
+{
+  jq -nc '{type:"user",timestamp:"2026-09-30T00:00:00.000Z",message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:"2026-09-30T00:00:01.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S11LISTAGENTS",name:"ListAgents",input:{}}]}}'
+  jq -nc --arg b "$(live_answer_body)" \
+    '{type:"user",timestamp:"2026-09-30T00:00:02.000Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01S11LISTAGENTS",content:$b}]}}'
+} >> "$F9_TR"
+S11_OUT="$( cd "$R11" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$S11_CFG" bash "$S11_ORDERS" stopped w-T1 2>&1 )"; S11_RC=$?
+expect_eq "11f: stopped on the restarted-and-answered row, agent gone, acks it — exit 0" "0" "$S11_RC"
+S11_LAST_ACK="$(grep -F '|event=ack|' "$(ledger_of "$R11")" | grep -F '|name=w-T1|' | tail -1)"
+expect_contains "11g: …reason landed: the contract was met" "|reason=landed" "$S11_LAST_ACK"
+expect_absent "11h: …and never abandoned — a landed row is not recorded as abandoned (C2-2)" \
+  "reason=abandoned" "$(cat "$(ledger_of "$R11")")"
+
+unset CLAUDE_CONFIG_DIR
+
 finish

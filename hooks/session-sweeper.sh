@@ -928,7 +928,7 @@ EOF
 VERDICT_STATE=""; VERDICT_DETAIL=""
 verdict_row() {  # <roster row>
   local row="$1" launched deliv waiver source claims prog cadence le p n=0 fails="" oks="" old
-  local note=""
+  local note="" restarted rnote=""
   waiver="$(line_field "$row" waiver)"
   source="$(line_field "$row" source)"
   launched="$(line_field "$row" launched_at)"
@@ -951,6 +951,15 @@ verdict_row() {  # <roster row>
     fi
   fi
 
+  # A RESTART AFTER AN ACK IS NAMED, NEVER JUDGED AGAINST (wave-20 T20c, critic C2-2).
+  # hooks/execution-recorder.sh stamps `restarted_at=` on the row that re-identifies an id
+  # whose lineage an ack closed, and leaves `launched_at` as the contract's launch. The
+  # restart is occupancy — the name holds a slot again, which `roster_open_names` reads and
+  # `acked=` reports — and it moves no clock this verdict dates a deliverable against: the
+  # artifact written before the ack still meets the contract. The detail says so, so a
+  # reader seeing `acked=no` on a MET row knows why the name is open.
+  restarted="$(line_field "$row" restarted_at)"
+  [ -z "$restarted" ] || rnote="restarted at $restarted after the ack of this name — it holds a slot again, and the contract is judged against its launch at ${launched:-an unreadable time}"
   le="$(iso_epoch "$launched")"
   # Deliverables are comma-separated, as hooks/stop-check.sh reads them. Every declared path
   # is stat'd, not just up to the first failure: the readback
@@ -972,23 +981,25 @@ verdict_row() {  # <roster row>
 
   if [ "$n" -eq 0 ]; then
     VERDICT_STATE="MET"
-    VERDICT_DETAIL="${note:+$note; }no deliverable declared — this row names nothing to hold it to"
+    VERDICT_DETAIL="${note:+$note; }no deliverable declared — this row names nothing to hold it to${rnote:+; $rnote}"
     verdict_followup "$row"
     return 0
   fi
   if [ -z "$fails" ]; then
     VERDICT_STATE="MET"; VERDICT_DETAIL="${note:+$note; }$oks"
     [ -n "$le" ] || VERDICT_DETAIL="${note:+$note; }$oks (launched_at \"$launched\" unreadable: not judged for staleness)"
+    VERDICT_DETAIL="$VERDICT_DETAIL${rnote:+; $rnote}"
     verdict_followup "$row"
     return 0
   fi
   if row_still_live "$claims" "$prog" "$cadence" "$launched"; then
     VERDICT_STATE="STILL-LIVE"
-    VERDICT_DETAIL="${note:+$note; }$LIVE_REASON; outstanding: $fails"
+    VERDICT_DETAIL="${note:+$note; }$LIVE_REASON; outstanding: $fails${rnote:+; $rnote}"
     return 0
   fi
   VERDICT_STATE="UNMET"; VERDICT_DETAIL="${note:+$note; }$fails"
   [ -n "$le" ] || VERDICT_DETAIL="${note:+$note; }$fails (launched_at \"$launched\" unreadable: not judged for staleness)"
+  VERDICT_DETAIL="$VERDICT_DETAIL${rnote:+; $rnote}"
   return 0
 }
 

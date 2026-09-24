@@ -794,10 +794,10 @@ if [ -n "$IS_START" ]; then
   # empty because roster_open_names found the name CLOSED — this WAS a duplicate reading (the
   # id's last row already says it started) against a lineage the ack has since finished. The
   # fallthrough below re-identifies this id as a reused name, and that identification must
-  # carry a FRESH launch stamp rather than the finished lineage's original one (see
-  # PRIOR_LAUNCH further down) — otherwise the "fresh" row reads exactly as old as the row the
-  # ack already discharged, and roster_open_names keeps reading the name closed forever (walk
-  # §9b/9c; the restarted agent held no slot at all).
+  # carry a FRESH occupancy stamp — `restarted_at=`, beside the contract's unchanged
+  # `launched_at` (T20c; see RESTARTED_AT further down) — otherwise the row reads exactly as
+  # old as the row the ack already discharged, and roster_open_names keeps reading the name
+  # closed forever (walk §9b/9c; the restarted agent held no slot at all).
   RESTART_AFTER_ACK=""
   [ -n "$DUP_PRIOR_BEFORE" ] && [ -z "$DUP_PRIOR" ] && RESTART_AFTER_ACK=1
   if [ -n "$DUP_PRIOR" ]; then
@@ -922,29 +922,39 @@ if [ -n "$IS_START" ]; then
   # including one this very join just picked up.
   PRIOR_LAUNCH=$(prior_launch_for_agent "$START_ID")
 
-  # A RESTART AFTER AN ACK GETS ITS OWN, FRESH LAUNCH (epic-23 wave-20 T20b, review R5). The
-  # PRIOR_LAUNCH just recovered is the FINISHED lineage's ORIGINAL stamp — exactly the value
-  # that must not survive into this identification: the roster row this id last held said it
-  # already started, and what freed it just now was an ack, not a fresh dispatch cycle. This
-  # is the one caller with a reason to override it; every ordinary resume (RESTART_AFTER_ACK
-  # unset) keeps PRIOR_LAUNCH exactly as it was before this wave.
-  [ -n "${RESTART_AFTER_ACK:-}" ] && PRIOR_LAUNCH=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # A RESTART AFTER AN ACK HOLDS A SLOT BY ITS OWN STAMP, NOT BY MOVING THE CONTRACT'S CLOCK
+  # (epic-23 wave-20 T20b, review R5; repaired at T20c, critic C2-2). The name must read open
+  # again — the agent is back on the panel — and roster_open_names only re-opens a name whose
+  # latest occupancy stamp postdates its ack. T20b gave the restart that stamp by overriding
+  # PRIOR_LAUNCH, i.e. `launched_at`. But `launched_at` is ALSO the clock the sweeper dates the
+  # deliverable against, so a contract met before the ack read UNMET for good and `stopped`
+  # closed a landed row `abandoned`. Occupancy and the contract are two questions (D10), so
+  # they are two fields: `launched_at` keeps the contract's launch, carried forward exactly as
+  # every ordinary resume carries it, and the restart's own time rides `restarted_at=`, which
+  # roster_open_names — the one close predicate — reads, and no contract reader does.
+  RESTARTED_AT=""
+  [ -n "${RESTART_AFTER_ACK:-}" ] && RESTARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   # `agent_id` is appended when the joined row has no such field and substituted
   # when it has one — ARM 2's rule for `teammate_id`, for ARM 2's reason: every
   # reader takes the FIRST match for a key, so a row carrying two of them would
   # answer with whichever the writer happened to put first. Today's writer always
   # emits the field, so the append branch is a belt against a writer that stops.
-  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" '
-    BEGIN { RS = "|"; ORS = ""; seen = 0 }
+  # `restarted_at` follows the same substitute-or-append rule, and only on a restart: the
+  # joined row is an intended/confirmed row, which no writer stamps with one, so on every
+  # other identification the row is byte-identical to before T20b.
+  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" -v ra="$RESTARTED_AT" '
+    BEGIN { RS = "|"; ORS = ""; seen = 0; rseen = 0 }
     {
       f = $0
       if (f ~ /^status=/)   f = "status=identified"
       if (f ~ /^agent_id=/) { f = "agent_id=" id; seen = 1 }
       if (pl != "" && f ~ /^launched_at=/) f = "launched_at=" pl
+      if (ra != "" && f ~ /^restarted_at=/) { f = "restarted_at=" ra; rseen = 1 }
       printf "%s%s", (NR > 1 ? "|" : ""), f
     }
-    END { if (!seen) printf "|agent_id=%s", id }')
+    END { if (!seen) printf "|agent_id=%s", id
+          if (ra != "" && !rseen) printf "|restarted_at=%s", ra }')
   printf '%s\n' "$IDENTIFIED" >> "$ROSTER_FILE" 2>/dev/null
 
   # NO BOUND ON THE ROSTER, for the reason ARM 2 gives above: a roster row is a
