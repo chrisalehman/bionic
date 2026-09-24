@@ -929,4 +929,82 @@ else
   no "…its tree stands, the partial work still in it"
 fi
 
+
+# ============================================================
+section "Section 9: standdown holds a row with a follow-up in flight (wave-20 T9, REQ-4, AC-4.3; Δ8)"
+# ============================================================
+#
+# THE DESTRUCTIVE HALF OF CONSUMER REPORT #2. A MET row's standdown merges and removes its
+# tree — right for a finished agent, wrong for one the orchestrator has just sent a follow-up
+# and which is working on the reply. The sweeper's verdict reads FOLLOW-UP for that row (a
+# SendMessage to its name after its last message, in the orchestrator's transcript); this
+# verb inherits the state and never lands, removes or stands down a FOLLOW-UP row. The reply
+# closes it and the same row is stood down on the next pass.
+R15="$(make_repo standdown-followup)"
+echo seed > "$R15/README.md"
+git -C "$R15" add README.md >/dev/null 2>&1
+git -C "$R15" commit -qm seed >/dev/null 2>&1
+git -C "$R15" worktree add -q -b fu-row "$R15/.worktrees/fu-row" >/dev/null 2>&1
+echo reply-in-progress > "$R15/.worktrees/fu-row/fu.txt"
+git -C "$R15/.worktrees/fu-row" add -A >/dev/null 2>&1
+git -C "$R15/.worktrees/fu-row" commit -qm "fu work" >/dev/null 2>&1
+echo landed > "$R15/.bionic/docs/record/fu.md"
+so_roster_row "$R15" fu-row ".bionic/docs/record/fu.md" "" "fu-row@session-6c85684c"
+
+R15CFG="$SANDBOX/r15-config"
+mkdir -p "$R15CFG/projects/-fixture"
+R15TR="$R15CFG/projects/-fixture/$SID.jsonl"
+r15_msg() {  # [name]
+  jq -nc --arg b "<teammate-message teammate_id=\"${1:-fu-row}\" color=\"blue\" summary=\"done\">
+report
+</teammate-message>" '{type:"user",timestamp:"2026-09-23T10:00:01.000Z",message:{role:"user",content:$b}}' >> "$R15TR"
+}
+r15_send() {  # [name]
+  jq -nc --arg to "${1:-fu-row}" '{type:"assistant",timestamp:"2026-09-23T10:00:02.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_fu",name:"SendMessage",input:{to:$to,message:"one more thing"}}]}}' >> "$R15TR"
+}
+r15_orders() {
+  OUT=$( cd "$R15" && CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$R15CFG" \
+         bash "$ORDERS" standdown 2>"$SANDBOX/.err" ); ST=$?
+  ERR=$(cat "$SANDBOX/.err")
+}
+: > "$R15TR"; r15_msg; r15_send
+r15_orders
+expect_status "9a: standdown over a FOLLOW-UP row exits clean" 0 "$ST"
+expect_absent "9b: …the row is not stood down" "(met — fu-row)" "$OUT"
+expect_absent "9c: …and no LANDED line claims its tree" "LANDED branch=fu-row" "$OUT"
+expect_contains "9d: …it is LEFT ALONE, and says why" "fu-row   (FOLLOW-UP" "$OUT"
+if [ -d "$R15/.worktrees/fu-row" ] && [ -f "$R15/.worktrees/fu-row/fu.txt" ]; then
+  ok "9e: …its tree stands, the reply in progress still in it"
+else
+  no "9e: …its tree stands, the reply in progress still in it"
+fi
+if [ "$(git -C "$R15" rev-list --count "HEAD..fu-row" 2>/dev/null)" = "1" ]; then
+  ok "9f: …and its branch is NOT merged"
+else
+  no "9f: …and its branch is NOT merged" "HEAD..fu-row = $(git -C "$R15" rev-list --count "HEAD..fu-row" 2>&1)"
+fi
+
+# THE REPLY CLOSES IT: the same row, one message later, is a MET row to stand down.
+r15_msg
+r15_orders
+expect_contains "9g: after the reply the row is stood down" "(met — fu-row)" "$OUT"
+
+# A FOLLOW-UP WHOSE AGENT IS GONE CAN NEVER BE ANSWERED. `stopped` — the human close after a
+# stop — closes it `landed` once a fresh panel shows the agent gone (the contract is MET);
+# refusing it would leave the name open with no close but a hand ack.
+so_roster_row "$R15" fu-gone ".bionic/docs/record/fu.md" "" "fu-gone@session-6c85684c"
+plant_live "$SANDBOX/r15.panel" fresh "somebody-else"
+R15TR_SAVE="$R15TR"; R15TR="$SANDBOX/r15.tr.parts"; : > "$R15TR"
+r15_msg fu-gone; r15_send fu-gone
+# Dated inside the panel's own window (between its prompt and its answer), or the answer
+# reads stale against a later user record and nothing may be acked on it.
+{ head -1 "$SANDBOX/r15.panel"; sed 's/"timestamp":"[^"]*"/"timestamp":"2026-09-05T00:50:30.000Z"/' "$R15TR"
+  tail -n +2 "$SANDBOX/r15.panel"; } > "$R15TR_SAVE"
+R15TR="$R15TR_SAVE"
+OUT=$( cd "$R15" && CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$R15CFG" \
+       bash "$ORDERS" stopped fu-gone 2>"$SANDBOX/.err" ); ST=$?
+ERR=$(cat "$SANDBOX/.err")
+expect_status "9h: stopped closes a FOLLOW-UP row whose agent a fresh panel shows gone" 0 "$ST"
+expect_contains "9i: …as landed — the contract is met" "reason landed" "$OUT"
+
 finish

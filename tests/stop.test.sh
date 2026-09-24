@@ -533,4 +533,54 @@ s7_fire "$S7_D" "$S7_TX2"
 expect_absent "7f: …and a turn that dispatched the named task is not refused for the fill" \
   "Patrol fill unanswered" "$(reason_of)$STOP_ERR"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "8: an amended Files: is the one the landing reads (wave-20 T9, REQ-4, AC-4.1)"
+
+# THE DEFECT (consumer report #4). A writer's brief declared its Files:, the work turned out to
+# need one more file, and nothing but a re-dispatch could widen the row — so the landing's
+# Files: reconciliation refused the writer's stop for exactly the file the orchestrator had
+# asked for. `session-poker.sh amend <name> --files+ <p> --reason r` appends a successor row;
+# the landing reads the latest row's files=, so the SAME stop, the SAME tree and the SAME diff
+# pass once the row is amended. The pair below differs only by that one command.
+S8_POKER="$(dirname "$HOOK")/session-poker.sh"
+s8_fixture() {  # -> a git project, on main, with a delivered row whose tree touched undeclared/two.sh
+  local d wt
+  d=$(mkfix)
+  git -C "$d" init -q 2>/dev/null
+  git -C "$d" symbolic-ref HEAD refs/heads/main
+  git -C "$d" config user.email t@example.invalid; git -C "$d" config user.name T
+  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"; echo base > "$d/base.txt"
+  git -C "$d" add .gitignore base.txt; git -C "$d" commit -qm base
+  wt="$d/.worktrees/s8-writer"
+  git -C "$d" worktree add -q "$wt" -b wt/s8-writer >/dev/null 2>&1
+  git -C "$wt" config user.email t@example.invalid; git -C "$wt" config user.name T
+  mkdir -p "$wt/declared" "$wt/undeclared"
+  echo one > "$wt/declared/one.sh"; echo two > "$wt/undeclared/two.sh"
+  git -C "$wt" add -A; git -C "$wt" commit -qm work
+  {
+    roster_header
+    roster_row_fixture status=identified session="$SID" name=s8-writer agent_id="$AID" \
+      deliverable=.bionic/docs/record/s8.md launched_at=2026-09-01T00:00:00Z \
+      subagent_type=bionic:implementor files=declared/ suites_allowed=none suites_source=declared \
+      tool_use_id=toolu_S8
+  } > "$d/.bionic/tmp/roster-$SID.state"
+  mkdir -p "$d/.bionic/docs/record"; echo done > "$d/.bionic/docs/record/s8.md"
+  printf '%s' "$d"
+}
+
+D=$(s8_fixture)
+fire "$D"
+expect_status "8a: the control — a tree touching a file outside Files: refuses the stop" "2" "$STOP_RC"
+expect_contains "8b: …naming the file" "undeclared/two.sh" "$STOP_ERR$(reason_of)"
+
+D=$(s8_fixture)
+S8_AMEND=$( cd "$D" && CLAUDE_CODE_SESSION_ID="$SID" bash "$S8_POKER" amend s8-writer \
+  --files+ undeclared/two.sh --reason 'the fix needs two.sh' 2>&1 ); S8_RC=$?
+expect_eq "8c: amend --files+ on the writer's row exits 0" "0" "$S8_RC"
+fire "$D"
+expect_absent "8d: AC-4.1 after the amend the same diff is inside Files: — no landing refusal" \
+  "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
+expect_status "8e: …and the stop is admitted" "0" "$STOP_RC"
+
 finish

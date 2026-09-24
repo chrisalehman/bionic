@@ -54,6 +54,14 @@
 # writes `teammate_id=` empty today, and a reader distinguishing "no address" from "not an
 # adopted row" would break if the field vanished with its value.
 #
+# THE TWO AUDIT KEYS OF A SUCCESSOR ROW (wave-20 T9, REQ-4) follow `adopted_from=` on the
+# same terms. `amended=<iso> <reason>` is written by `session-poker.sh amend`, which widens a
+# live contract; `extended=<iso> <reason>` by `session-poker.sh extend`, which re-opens a MET
+# one. Each says when and why that row was appended, so the history is the row sequence. The
+# extend reason used to ride `claims=`, which the sweeper hands to `pgrep -f` as a process
+# pattern — a reason carrying `.*` then matched half the machine and held the row live. A row
+# that names neither is byte-identical to the rows written before them.
+#
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
 # `re_executes=` say how wide the dispatched agent's instrument may be: the files its brief
@@ -174,8 +182,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local status="" session="" name="" agent_id="" launched_at="" subagent_type=""
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
-  local files="" suites_allowed="" suites_source="" re_executes=""
-  local has_teammate_id=0 has_adopted_from=0
+  local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
+  local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
@@ -217,6 +225,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       plan)          plan="$val" ;;
       teammate_id)   teammate_id="$val"; has_teammate_id=1 ;;
       adopted_from)  adopted_from="$val"; has_adopted_from=1 ;;
+      amended)       amended="$val";      has_amended=1 ;;
+      extended)      extended="$val";     has_extended=1 ;;
       files)          files="$val";          has_files=1 ;;
       suites_allowed) suites_allowed="$val"; has_suites_allowed=1 ;;
       suites_source)  suites_source="$val";  has_suites_source=1 ;;
@@ -237,6 +247,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_re_executes" -eq 1 ]; then    out="$out|re_executes=$re_executes"; fi
   if [ "$has_teammate_id" -eq 1 ]; then out="$out|teammate_id=$teammate_id"; fi
   if [ "$has_adopted_from" -eq 1 ]; then out="$out|adopted_from=$adopted_from"; fi
+  if [ "$has_amended" -eq 1 ]; then  out="$out|amended=$amended"; fi
+  if [ "$has_extended" -eq 1 ]; then out="$out|extended=$extended"; fi
   out="$out|tool_use_id=$tool_use_id|plan=$plan"
   printf '%s\n' "$out"
   return 0
