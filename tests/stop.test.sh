@@ -136,6 +136,7 @@ fire() {  # <project> <event> <stop_hook_active> [extra JSON object]
                    --argjson a "$sha" --argjson x "$extra" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:$e,stop_hook_active:$a,background_tasks:[]} + $x')
   STOP_OUT=$(env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" \
+    BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
     bash "$HOOK" <<< "$payload" 2>"$STOP_ERRFILE")
   STOP_RC=$?
   STOP_ERR=$(cat "$STOP_ERRFILE" 2>/dev/null)
@@ -433,9 +434,15 @@ expect_empty "6u: …and a copy with that line cut has no source line left to fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "7: the tick's FILL still reaches the duty wall (REQ-10 AC-10.2; D5)"
+section "7: the real tick's turn, judged by the wall's own ready set (REQ-10 AC-10.2; D5; wave-20 Δ7)"
 
-# THE SEAM THIS SECTION OWNS. `decision=` became the ranked maximum DISARM > NOTIFY > FILL >
+# RE-POINTED AT WAVE-20 (REQ-5, Δ7; ADR-036 decision 3). The wall no longer reads the printed
+# FILL at all: it computes the ready set and the pressure state itself and judges by count, so
+# the seam below is now "the real tick's turn ends refused on the same gap the tick named".
+# What this section still owns is that the whole channel — a real tick's output in the turn,
+# the real stop process — reaches that verdict, and that a real dispatch clears it.
+#
+# THE SEAM THIS SECTION OWNED. `decision=` became the ranked maximum DISARM > NOTIFY > FILL >
 # QUIET, with the fill ids carried in a `fill=` field on the `poker-tick/v1` line. The duty
 # wall does not read that line: it reads the PRINTED `poker: FILL <ids>` out of the tick's
 # tool result, cuts the ids at the first escaped newline, and refuses a turn that neither
@@ -512,6 +519,7 @@ s7_fire() {  # <project> <transcript>
   payload=$(jq -nc --arg c "$1" --arg t "$2" --arg s "$SID" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}')
   STOP_OUT=$(env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" \
+    BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
     bash "$HOOK" <<< "$payload" 2>"$STOP_ERRFILE")
   STOP_RC=$?
   STOP_ERR=$(cat "$STOP_ERRFILE" 2>/dev/null)
@@ -522,15 +530,21 @@ require_helpers s7_fixture s7_transcript s7_fire
 S7_TX="$(mktemp)"
 s7_transcript "$S7_TX" "$S7_TICK"
 s7_fire "$S7_D" "$S7_TX"
-expect_contains "7d: an undispatched FILL still refuses the turn's end" \
-  "Patrol fill unanswered" "$(reason_of)"
+expect_contains "7d: an undispatched ready row refuses the real tick's turn" \
+  "Fillable gap at turn end" "$(reason_of)"
 expect_contains "7e: …naming the task the tick asked for" "T13" "$(reason_of)"
 
-# THE PAIRED POSITIVE, or 7d passes against a wall that refuses every Patrol turn.
+# THE PAIRED POSITIVE, or 7d passes against a wall that refuses every Patrol turn. A dispatch
+# is two facts on disk the wall reads — the roster row the dispatch wall writes at launch, and
+# the plan row ledgered `active` — and the Agent call's words are not read (Δ7).
 S7_TX2="$(mktemp)"
 s7_transcript "$S7_TX2" "$S7_TICK" "T13"
+roster_row_fixture status=intended session="$SID" name=T13 agent_id=aT130000000000001 deliverable= \
+  >> "$S7_D/.bionic/tmp/roster-$SID.state"
+sed -i.bak 's/| a.sh | pending |$/| a.sh | active |/' "$S7_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 s7_fire "$S7_D" "$S7_TX2"
 expect_absent "7f: …and a turn that dispatched the named task is not refused for the fill" \
-  "Patrol fill unanswered" "$(reason_of)$STOP_ERR"
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+expect_absent "7g: …nor for the retired printed-FILL arm" "Patrol fill unanswered" "$(reason_of)$STOP_ERR"
 
 finish
