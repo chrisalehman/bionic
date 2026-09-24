@@ -1225,11 +1225,14 @@ expect_match "81: an idle gap of a full fire window since the stamp, with no tic
 expect_no_match "82: …and the section prints no running row for it" \
   "*✓ session ${SHORT17B}*" "$PB17B"
 
-# ---------- the tick itself is the proof of life ----------
+# ---------- the TICK's stamp is the proof of life, not the marker (wave-20 REQ-6, AC-6.3) ----------
 #
-# A `bionic-patrol session=` prompt after the stamp IS the cron firing, whatever the
-# stamp's own mtime says: the reference instant moves to the tick and there is no gap left
-# to be dead about. The stamp here is three hours old.
+# RE-AUTHORED AT WAVE-20 (D6). This used to read a `bionic-patrol session=` prompt after the
+# stamp as the cron firing, moving the reference instant to it — so a Patrol whose job carried
+# the marker but never ran the tick read healthy here for as long as it kept firing (report #1).
+# The tick stamps before it decides, so a marker its tick answered sits BEFORE the stamp: here
+# the marker fires at -2000s, its tick stamps at -1900s (past the 1320s fire window, so the
+# verdict is read), and the session works on with no idle gap since. Still running.
 SID17C="17cccccc-1111-2222-3333-444455556666"
 SHORT17C="${SID17C%%-*}"
 spawn_live_pid; PID17C="$LIVE_PID"
@@ -1238,17 +1241,37 @@ dp_pin_interval "$REPO17C"
 HOME17C="$(make_claude_home "$SID17C" "$PID17C" "$REPO17C")"
 TR17C="$(transcript_of "$HOME17C" "$SID17C")"
 plant_patrol_job_dated "$TR17C" "toolu_1" "abc12345" 10000
-dp_user "$TR17C" 60 "bionic-patrol session=${SID17C} — patrol tick"
+dp_user "$TR17C" 2000 "bionic-patrol session=${SID17C} — patrol tick"
+dp_assistant "$TR17C" 1990
 dp_assistant "$TR17C" 30
-plant_patrol_stamp "$REPO17C" "$SID17C" 3
+plant_patrol_stamp "$REPO17C" "$SID17C"
+dp_backdate "$REPO17C/.bionic/tmp/patrol-$SID17C.state" 1900
 
 OUT17C="$(run_doctor "$HOME17C" "$REPO17C")"
 PB17C="$(patrol_block "$OUT17C")"
 
-expect_match "83: a tick since the stamp is the Patrol firing — the row prints" \
+expect_match "83: a marker turn its tick stamped after, then busy work — the row prints" \
   "*✓ session ${SHORT17C}*" "$PB17C"
 expect_no_match "84: …and no fix line" \
   "*session ${SHORT17C}: the Patrol is armed but not firing*" "$OUT17C"
+
+# THE PAIRED ROW: the old fixture, kept — a marker turn 60s ago over a three-hour-old stamp,
+# and no tick after it. A clock that fires without ticking is not a running Patrol (AC-6.3).
+SID17E="17eeeeee-1111-2222-3333-444455556666"
+SHORT17E="${SID17E%%-*}"
+spawn_live_pid; PID17E="$LIVE_PID"
+REPO17E="$(make_repo_with_roster "$SID17E" beta -- alpha)"
+dp_pin_interval "$REPO17E"
+HOME17E="$(make_claude_home "$SID17E" "$PID17E" "$REPO17E")"
+TR17E="$(transcript_of "$HOME17E" "$SID17E")"
+plant_patrol_job_dated "$TR17E" "toolu_1" "abc12345" 10000
+dp_user "$TR17E" 60 "bionic-patrol session=${SID17E} — patrol tick"
+dp_assistant "$TR17E" 30
+plant_patrol_stamp "$REPO17E" "$SID17E" 3
+
+OUT17E="$(run_doctor "$HOME17E" "$REPO17E")"
+expect_match "84b: AC-6.3 a marker turn after a stale stamp, with no tick, is armed but not firing" \
+  "*session ${SHORT17E}: the Patrol is armed but not firing*" "$OUT17E"
 
 # ---------- idle time that cannot be read is an advisory, with the reason ----------
 #

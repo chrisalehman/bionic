@@ -877,7 +877,12 @@ fi
 # T19 (A-orch-19.3): the stamp now arms itself at engagement (hooks/engage.sh, D4), so the
 # hand step after CronCreate is `adopt` alone — this line no longer names `session-poker.sh
 # arm`, which would send the model to redo a step engage.sh already did.
-printf 're-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate → adopt\n'
+# wave-20 REQ-6 (AC-6.1, D6): the CronCreate step names the verb that PRINTS the canonical
+# Patrol prompt, by this tree's absolute poker path. A prompt the model composed from the
+# ritual alone produced jobs whose turns were never ticks, or ticks that never ran (report #1);
+# the printed one leads with this session's marker and runs the tick.
+printf 're-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate with the prompt `bash %s/hooks/session-poker.sh prompt` prints → adopt\n' \
+  "$HOOK_ROOT"
 [ -n "$SWEEP_FAIL_LINE" ] && printf '%s\n' "$SWEEP_FAIL_LINE"
 
 exit 0

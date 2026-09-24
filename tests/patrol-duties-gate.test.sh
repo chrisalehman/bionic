@@ -119,8 +119,22 @@ u_prompt() {  # <dir> <text>
 # Invoking the skill was therefore a Patrol tick as far as this gate could tell, and the
 # gate refused the invoking turn for duties no tick had asked for. What identifies a tick
 # is the marker the prompt was designed to carry, at the front, naming THIS session.
-u_tick() {  # <dir>
+#
+# A TICK TURN IS THE MARKER AND THE TICK (wave-20 REQ-6, D6; AC-6.2). The stop wall now refuses
+# a marker turn whose tick never stamped, so a fixture that means "the Patrol fired and ticked"
+# plants both halves: the prompt, and the `verb=tick` stamp the tick writes before it decides
+# (hooks/session-poker.sh `write_patrol_stamp`). The marker row is undated here, so the stamp's
+# verb alone answers for it; the dated rows of §5f drive the "at or after" half. `u_marker` is
+# the prompt alone — a cron that fired and a turn that never ran the tick.
+u_marker() {  # <dir>
   u_prompt "$1" "bionic-patrol session=$SID8 — Patrol tick for the fixture wave (bionic). Run: bash /abs/hooks/session-poker.sh tick — the poker decides per row; QUIET/DISARM = no-op. Then continue toward the goal until a wall."
+}
+tick_stamp() {  # <dir> [at ISO] [verb] — the stamp the tick (or `arm`) writes
+  printf 'patrol-stamp/v1|at=%s|session=%s|verb=%s\n' \
+    "${2:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$SID" "${3:-tick}" > "$1/.bionic/tmp/patrol-$SID.state"
+}
+u_tick() {  # <dir>
+  u_marker "$1"; tick_stamp "$1"
 }
 
 # A tool_result carrier: a `user`-typed entry that is NOT a prompt. It must not
@@ -381,16 +395,20 @@ fire "$d"; expect_block "22: …and with a plan, that same unrelated Edit satisf
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/unrelated-file.txt"
 fire "$d"; expect_block "22b: an Edit that does not name the plan leaves the task-list duty owed" "$TL_MISSING" "$LA_MISSING"
 
-# 23: THE GATE WRITES NOTHING. It is a gate, and gates only read (TDD §3.2).
+# 23: THE GATE WRITES NOTHING. It is a gate, and gates only read (TDD §3.2). The one file the
+# Stop process writes is the fill ledger's recorder's (wave-20 REQ-5, AC-5.5), which is not
+# this gate: it appends one line under the run's record directory and touches nothing else.
 d=$(make_env); u_tick "$d"
-_before=$(find "$d" -type f | sort | cksum)
+_led="$d/.bionic/docs/record/${PLAN_REL%.plan.md}/fill-ledger.log"
+_before=$(find "$d" -type f ! -path "$_led" | sort | cksum)
 fire "$d"
-_after=$(find "$d" -type f | sort | cksum)
+_after=$(find "$d" -type f ! -path "$_led" | sort | cksum)
 if [ "$_before" = "$_after" ]; then
   ok "23: the gate creates and removes no file in the project"
 else
   no "23: the gate touched the project tree" "$_before -> $_after"
 fi
+expect_eq "23b: …and the Stop's one write is the fill ledger's line" "1" "$(wc -l < "$_led" 2>/dev/null | tr -d ' ')"
 
 # 25: THE GATE IS REGISTERED ON THE STOP CHANNEL. A hook with a suite, a run line
 # and no registration is the exact shape the landing sweep spent a wave being:
@@ -509,7 +527,7 @@ fire "$d"; expect_allow "34: a marker followed only by CronList passes — nothi
 d=$(make_env); u_clear_marker "$d"; a_tool_sidechain "$d" CronCreate
 fire "$d"; expect_allow "35: a sidechain CronCreate does not count against the ritual"
 
-section "Section 5: the third duty — a printed FILL is answered (AC-29)"
+section "Section 5: a printed FILL is advice, not evidence (AC-29, retired by wave-20 Δ7)"
 
 # THE CONTRACT. `session-poker.sh tick` can compute the gap between the plan's budget and
 # the roster and name the tasks that are ready, but it cannot dispatch — and a
@@ -565,73 +583,37 @@ both_duties() {  # <dir> — the two standing duties, so §5 measures the THIRD 
 
 FILL_MARK="fill unanswered"
 
-# 36: every named task dispatched -> allow.
+# THE PRINTED FILL IS ADVICE NOW (wave-20 REQ-5, AC-5.4; Δ7; ADR-036 decision 3). Rows 36-47
+# used to pin a wall that read the tick's `poker: FILL <ids>` out of the transcript and asked
+# for each printed id to be answered by an Agent call NAMING it. Every way of planting that
+# line reproduced (research D1 §4): the model's own prose, a file read, a grep. The wall now
+# computes the ready set and the pressure state itself and judges the turn by count (§5c,
+# §5d), so on this section's fixture — a task-shaped plan with no table, nothing ready — a
+# printed FILL is owed nothing, whoever printed it.
+
+# 36: a tick turn whose tick printed FILL, both duties done, nothing dispatched: the wall's own
+# ready set is empty, so the printed line binds nothing.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
-a_agent "$d" "W-ALPHA" "Task ALPHA, senior-implementor."
-a_agent "$d" "W-BETA" "Task BETA, implementor."
-fire "$d"; expect_allow "36: a FILL whose every task was dispatched passes"
+fire "$d"; expect_allow "36: Δ7 a printed FILL over an empty computed ready set is not a duty"
 
-# 37: one of two dispatched -> block, naming the one that was not, and NOT the one that was.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
-a_agent "$d" "W-ALPHA" "Task ALPHA, senior-implementor."
-fire "$d"; expect_block "37: a half-answered FILL blocks, naming the task left out" "BETA" "ALPHA"
+# 37: …and the wording of the retired arm never appears.
+d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_tick_out "$d" "poker: FILL ALPHA"
+fire "$d"; expect_block "37: a tick turn missing its task-list refresh still names that duty" "$TL_MISSING" "$FILL_MARK"
+fire "$d"; expect_block "37b: …and never the printed id — the FILL line is not evidence" "$TL_MISSING" "ALPHA"
 
-# 38: neither dispatched nor declined -> block, naming both.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
-fire "$d"; expect_block "38a: an unanswered FILL blocks, naming the first task" "ALPHA"
-fire "$d"; expect_block "38b: …and the second" "BETA"
-fire "$d"; expect_block "38c: …and says what would answer it" "fill-declined"
-
-# 39: the DECLINE answers it. Not a loophole — a reason in the record is the point.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
-a_text "$d" "fill-declined: ADOPT has not merged, so neither task can base off the wave head."
-fire "$d"; expect_allow "39: an explicit fill-declined line answers the FILL"
-
-# 40: the decline may be written anywhere the orchestrator writes — including a plan-ledger
-# line, which is where a run without the task tools keeps its record.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
-a_tool "$d" Bash "printf '%s\\n' 'fill-declined: peers not idle (D1)' >> .bionic/docs/plans/$PLAN_NAME"
-fire "$d"; expect_allow "40: a decline written into the plan ledger answers it too"
-
-# 41: INERT with no FILL line. Every turn in every project whose tick prints none — which is
-# every project with no budget in its plan — must pass exactly as it did before.
+# 41: INERT with no FILL line, as before.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: QUIET — 0 open row(s)"
 fire "$d"; expect_allow "41: a tick that printed no FILL is not asked about one"
 
-# 42: ORDERING. A FILL printed in an EARLIER turn is not this turn's to answer — the fold
-# resets at every user prompt, exactly as the duties fold does.
-d=$(make_env); u_tick "$d"; u_tick_out "$d" "poker: FILL ALPHA"; u_tick "$d"; both_duties "$d"
-fire "$d"; expect_allow "42: a FILL from a previous turn does not bind this one"
-
-# 43: an agent-context dispatch is not the orchestrator's. A subagent that dispatched
-# does not discharge the orchestrator's fill — the same exclusion every other arm makes.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
-a_agent_sidechain "$d" "W-ALPHA"
-fire "$d"; expect_block "43: a sidechain Agent does not answer the orchestrator's FILL" "ALPHA"
-
-# 44: WORD BOUNDARY. A dispatch that merely CONTAINS the id inside a longer word has not
-# named it — the difference between matching `ONE` and matching `PHONE`.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ONE"
-a_agent "$d" "W-PHONE" "Task PHONEBOOK, implementor."
-fire "$d"; expect_block "44: an id inside a longer word does not answer the FILL" "ONE"
-
 # 45: BLOCKS ONCE, through the existing stop_hook_active valve — no new bookkeeping.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
-fire "$d" Stop true
-expect_allow "45: stop_hook_active true passes the same unanswered FILL"
-
-# 46: BOTH FAILURES AT ONCE are told at once. Blocking on the standing duty and staying
-# silent about the FILL would hide the second behind the one-shot: the next stop passes by
-# design, so a duty not named in the first refusal is a duty never named at all.
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_tick_out "$d" "poker: FILL ALPHA"
-fire "$d"; expect_block "46a: a turn missing a standing duty AND a fill names the duty" "$TL_MISSING"
-fire "$d"; expect_block "46b: …and names the unanswered task in the same refusal" "ALPHA"
+fire "$d" Stop true
+expect_allow "45: stop_hook_active true passes the same turn"
 
-# 47: a non-tick turn is never asked, whatever its transcript contains.
+# 47: a non-tick turn is never asked about a printed line either.
 d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
 u_tick_out "$d" "poker: FILL ALPHA"
 fire "$d"; expect_allow "47: a turn the user started is not asked about a FILL"
-
 
 section "Section 5b: the fourth duty — a printed STANDDOWN is answered (AC-1.2; T1, D1)"
 #
@@ -730,12 +712,14 @@ jq -nc '{type:"assistant",isSidechain:true,
            input:{task_id:"W-ALPHA"}}]}}' >> "$d/transcript.jsonl"
 fire "$d"; expect_block "57: a sidechain TaskStop does not answer the orchestrator's stand-down" "W-ALPHA"
 
-# 58: BOTH UNANSWERED DUTIES ARE TOLD AT ONCE. Blocking on the FILL and staying silent about
-# the stand-down would hide the second behind the one-shot: the next stop passes by design.
+# 58: THE PRINTED FILL BESIDE A STAND-DOWN IS STILL ONLY ADVICE (wave-20 Δ7). The stand-down
+# is answered for its own name; the FILL line names nothing the wall computed, so it adds
+# nothing to the refusal. "Both told at once" is now the computed gap beside a stand-down,
+# row 58c in §5c.
 d=$(make_env); u_tick "$d"; both_duties "$d"
 u_tick_out "$d" "poker: FILL ALPHA"; u_tick_out "$d" "$(sd_line W-BETA)"
-fire "$d"; expect_block "58a: an unanswered FILL and stand-down together name the task" "ALPHA"
-fire "$d"; expect_block "58b: …and the agent, in the same refusal" "W-BETA"
+fire "$d"; expect_block "58a: a stand-down beside a printed FILL names the agent" "W-BETA" "ALPHA"
+fire "$d"; expect_block "58b: …and never the printed FILL's id" "W-BETA" "$FILL_MARK"
 
 # ============================================================
 section "Section 5c: the fill duty is an INVARIANT — a live ledger with rows ready (wave-18 REQ-3, AC-3.2; ADR-033 d2)"
@@ -826,6 +810,13 @@ ledger_roster() {  # <dir> <open|acked|swept> <name>...
 CLEAR_RING="$(mktemp -d)/clear.ring"
 printf '1700000000|80|0|1.0|8\n' > "$CLEAR_RING"
 export BIONIC_PRESSURE_RING="$CLEAR_RING" BIONIC_NOW_EPOCH="1700000000"
+# THE MACHINE IS PINNED CLEAR TOO (wave-20 REQ-5, Δ7). The wall reads the pressure STATE
+# itself now (`resources_pressure`, the reading the tick's HOLD and EMERGENCY come from), so
+# an unpinned suite on a loaded runner would read HOLD and exempt every gap below. The
+# BIONIC_PROBE_* pins are the idiom the tick's own rows (64m) already use; 68d/68e override
+# them per row to drive the two withholding states. They stay exported for the rest of the
+# suite, whose later sections drive the same wall.
+export BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0
 
 # 59: THE INVARIANT. A live ledger, two ready rows, an ordinary turn that dispatched
 # neither and never saw a tick -> REFUSE, naming both rows.
@@ -843,18 +834,37 @@ u_prompt "$d" "merge the two landed trees and tell me where we are"
 a_text "$d" "fill-declined: the wave head has not merged, so neither row can base off it."
 fire "$d"; expect_allow "60: a fill-declined line answers the gap as it answers a printed FILL"
 
-# 60b: and a dispatch of every ready row answers it too — the arm names what was NOT sent.
-d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+# 60b: and a dispatch of every ready row answers it too. A DISPATCH IS TWO FACTS ON DISK
+# (wave-20 Δ7, count not names): the roster row the dispatch wall writes at launch, and the
+# plan row the orchestrator ledgers `active` the moment it dispatches (dispatch.md, "Ledger
+# the dispatch, not the return"). The wall reads those two, never the Agent call's words.
+LEDGER_SENT_2='| T2 | 4 | build | the first ready row | implementor | — | 30m | REQ-x | b.sh | active | 20-T2 |'
+LEDGER_SENT_3='| T3 | 4 | build | the second ready row | implementor | — | 30m | REQ-x | c.sh | active | 20-T3 |'
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_SENT_3")
+ledger_roster "$d" open W-T2 W-T3
 u_prompt "$d" "dispatch the batch"
-a_agent "$d" "T2" "row T2, implementor."
-a_agent "$d" "T3" "row T3, implementor."
+a_agent "$d" "W-T2" "row T2, implementor."
+a_agent "$d" "W-T3" "row T3, implementor."
 fire "$d"; expect_allow "60b: a turn that dispatched every ready row is not refused"
 
 # 60c: …and a turn that dispatched ONE of the two is refused, naming only the other.
-d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_READY_3")
+ledger_roster "$d" open W-T2
 u_prompt "$d" "dispatch the first one"
-a_agent "$d" "T2" "row T2, implementor."
+a_agent "$d" "W-T2" "row T2, implementor."
 fire "$d"; expect_block "60c: a half-filled gap names the row left out, and not the one sent" "T3" "T2"
+
+# 60d: THE LEDGER IS WHAT SAYS A ROW WAS SENT (A-T11.1). Two agents launched and rostered, but
+# both plan rows still read `pending`: the schedule says two rows are ready and six slots are
+# free, so the gap stands and both rows are named. Marking a dispatched row `active` is the
+# half of dispatching the wall can see.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+ledger_roster "$d" open W-T2 W-T3
+u_prompt "$d" "dispatch the batch"
+a_agent "$d" "W-T2" "row T2, implementor."
+a_agent "$d" "W-T3" "row T3, implementor."
+fire "$d"; expect_block "60d: launched but still pending in the plan — the gap stands, T2 named" "T2"
+fire "$d"; expect_block "60e: …and T3" "T3"
 
 # 61: THE LEDGER IS NOT LIVE BELOW STEP 4. Steps 0-3 are research, spec, plan and review;
 # the same table at `current: 3` is a schedule nobody has ratified, and dispatching into it
@@ -869,9 +879,10 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED")
 u_prompt "$d" "what is left?"
 fire "$d"; expect_allow "62a: a ledger with no pending row is silent"
 
-d=$(make_env_ledger 4 "$LEDGER_READY_2" "$LEDGER_BLOCKED")
+d=$(make_env_ledger 4 "$LEDGER_SENT_2" "$LEDGER_BLOCKED")
+ledger_roster "$d" open W-T2
 u_prompt "$d" "start the row behind T2"
-a_agent "$d" "T2" "row T2, implementor."
+a_agent "$d" "W-T2" "row T2, implementor."
 fire "$d"; expect_allow "62b: a pending row behind an unlanded dep is not ready, so the turn ends"
 
 # 63: THE BUDGET IS A MEASUREMENT, AND ITS ABSENCE IS NAMED, NEVER SILENT (wave-19 REQ-3
@@ -1089,13 +1100,13 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
 u_prompt "$d" "carry on"
 fire "$d" SubagentStop; expect_allow "66: a SubagentStop is never asked about the run's gap"
 
-# 67: THE TICK ARM STILL WINS ON A TICK TURN, and keeps its own wording. The tick walked the
-# ROSTER — the session's own record of what is running — and printed one id; the refusal is
-# about that id, in the words §5 pins, not about the plan's ready set.
+# 67: THE TICK ARM IS GONE (wave-20 Δ7). A tick turn whose tick printed `FILL T2` is judged
+# on the ready set the wall computes, like every other turn: both ready rows are named, in the
+# one gap wording, and never in the retired "the tick printed FILL" sentence.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL T2"
-fire "$d"; expect_block "67a: a tick turn is answered for the ids the tick printed" "T2"
-fire "$d"; expect_block "67b: …in the tick arm's own wording" "the tick printed FILL"
+fire "$d"; expect_block "67a: a tick turn that printed FILL T2 is judged on the computed gap" "T3"
+fire "$d"; expect_block "67b: …in the gap arm's wording, never the retired tick arm's" "T2" "the tick printed FILL"
 
 # 68: BUDGET-FULL ON THE ROSTER (re-authored, wave-19 REQ-4 AC-4.2). A tick that printed
 # "the budget is full" is no longer exempt by its words; it passes because the wall counts the
@@ -1113,26 +1124,26 @@ u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of wri
 fire "$d"; expect_block "68b: a tick turn with no FILL and no withheld line is judged on the gap" "T2"
 fire "$d"; expect_block "68c: …naming every ready row, in the gap arm's wording" "T3" "the tick printed FILL"
 
-# 68d: THE HOLD. The tick withheld for a machine fact the plan cannot hold → the turn passes
-# although the wall's own arithmetic finds a gap.
+# 68d: THE HOLD, MEASURED BY THE WALL (wave-20 Δ7). The machine reads HOLD — free memory under
+# the warning line — and the wall takes that reading itself, the one the tick's HOLD comes
+# from: the turn passes although the arithmetic finds a gap, and no printed line is needed.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "carry on"
+BIONIC_PROBE_FREE_MB=512 fire "$d"; expect_allow "68d: a machine at HOLD withholds the fill — the wall measured it"
+
+# 68e: THE EMERGENCY, the same way.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "carry on"
+BIONIC_PROBE_FREE_MB=100 fire "$d"; expect_allow "68e: a machine at EMERGENCY withholds the fill"
+
+# 68f: THE PRINTED LINE IS NOT THE MEASUREMENT. The tick's own `fill withheld — HOLD` line in
+# its tool result, on a machine that reads clear at the wall, exempts nothing: the line is
+# advice, and the turn is judged on the wall's reading.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_tick "$d"; both_duties "$d"
 u_tick_out "$d" "poker: HOLD free_mb=512 load_1m=1.0 — no fills
 poker: fill withheld — HOLD free_mb=512 load_1m=1.0"
-fire "$d"; expect_allow "68d: a tick turn carrying fill withheld — HOLD passes"
-
-# 68e: THE EMERGENCY, the same way.
-d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
-u_tick "$d"; both_duties "$d"
-u_tick_out "$d" "poker: fill withheld — EMERGENCY free_mb=100"
-fire "$d"; expect_allow "68e: a tick turn carrying fill withheld — EMERGENCY passes"
-
-# 68f: ONLY THOSE TWO. A withheld line naming any other reason is not a machine fact the
-# wall honours, and the gap is refused.
-d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
-u_tick "$d"; both_duties "$d"
-u_tick_out "$d" "poker: fill withheld — BUSY the operator is away"
-fire "$d"; expect_block "68f: a withheld line with a reason other than HOLD or EMERGENCY exempts nothing" "T2"
+fire "$d"; expect_block "68f: a printed withheld line on a clear machine exempts nothing" "T2"
 
 # 68g: THE LINE IS THE TICK'S, READ OFF A TOOL RESULT. The model's own text quoting the
 # withheld line is not the tick having printed it.
@@ -1158,6 +1169,13 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_tick "$d"; both_duties "$d"
 u_tick_out "$d" "tests/patrol-duties-gate.test.sh:1034:poker: fill withheld — HOLD free_mb=512 load_1m=1.0"
 fire "$d"; expect_block "68i: a withheld line read off a grep/cat echo (a gap before it) exempts nothing" "T2"
+
+# 58c: BOTH UNANSWERED DUTIES ARE TOLD AT ONCE. A computed gap and a printed stand-down in one
+# tick turn name the row and the agent in one refusal: the next stop passes by design.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
+u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-BETA)"
+fire "$d"; expect_block "58c: a gap and a stand-down together name the row" "T2"
+fire "$d"; expect_block "58d: …and the agent, in the same refusal" "W-BETA"
 
 # 69: THE RUNG, NOT THE CEILING (Step-6 review R1, wave-18 T2b). Three rows are ready
 # (T2, T3, T20) against a declared ceiling of 8 — the pre-fix wall would have named all
@@ -1253,7 +1271,256 @@ expect_eq "70g: fill.sh spells the current: reader's program once" \
 expect_eq "70g: …and units.sh the table parse's" \
   "1" "$(LC_ALL=C grep -cF -- "$PDG_TBL_SIG" "${HOOK_SRC%/*}/units.sh")"
 
-unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+# ============================================================
+section "Section 5d: nothing quoted plants a verdict (wave-20 REQ-5, AC-5.4; Δ7)"
+#
+# THE FOUR PLANTS research D1 §4 reproduced at b60efe2, each of which moved this wall's
+# verdict: the model's own prose carrying `poker: FILL T9`, a `cat` of a file whose line 1 is
+# a withheld line, a Bash command that greps `fill-declined:`, and an Agent call whose PROMPT
+# names the ready ids. The wall now computes the ready set and the pressure state, judges by
+# count, and reads only a decline anchored at a line start in the model's own text, so each
+# plant leaves the baseline verdict exactly where it was: refused, naming T2 and T3.
+#
+# The fixture is a TICK turn with both standing duties done, so the only thing that can move
+# the verdict is the fill duty — and the tick arm, where the old wall read a printed FILL, is
+# reachable by the plant.
+plant_env() {  # -> a live ledger, two rows ready, a tick turn with both duties done
+  local d; d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+  u_tick "$d"; both_duties "$d"
+  printf '%s' "$d"
+}
+expect_plant_inert() {  # <label> — the baseline verdict: refused, both ready rows named
+  local r; r="$(reason_of)"
+  if [ "$(decision_of)" != "block" ]; then no "$1" "decision=<$(decision_of)> stdout=<$HOOK_OUT>"; return; fi
+  case "$r" in *T2*) ;; *) no "$1" "T2 not named: $r"; return ;; esac
+  case "$r" in *T3*) ;; *) no "$1" "T3 not named: $r"; return ;; esac
+  case "$r" in *T9*) no "$1" "the planted T9 was named: $r"; return ;; esac
+  ok "$1"
+}
+
+d=$(plant_env)
+fire "$d"; expect_plant_inert "P0: the baseline — two rows ready, nothing sent: refused, both named"
+
+# P1: THE MODEL'S OWN PROSE, quoting the tick's line at a line start of its text.
+d=$(plant_env)
+a_text "$d" "The last tick said:
+poker: FILL T9
+so I will look at it after this."
+fire "$d"; expect_plant_inert "P1: AC-5.4 assistant prose carrying 'poker: FILL T9' changes nothing"
+
+# P2: A `cat` OF A FILE whose first line is the withheld line, at column 0 of the result.
+d=$(plant_env)
+a_tool "$d" Bash "cat notes.md"
+u_tick_out "$d" "poker: fill withheld — HOLD free_mb=512 load_1m=1.0
+(notes from the last wave)"
+fire "$d"; expect_plant_inert "P2: AC-5.4 a cat of a withheld line at column 0 changes nothing"
+
+# P3: A GREP OF THE DECLINE LITERAL — the words in a Bash command, not a decline.
+d=$(plant_env)
+a_tool "$d" Bash "grep -n fill-declined: .bionic/docs/record/notes.md"
+fire "$d"; expect_plant_inert "P3: AC-5.4 a grep of fill-declined: changes nothing"
+
+# P4: AN AGENT WHOSE PROMPT NAMES THE IDS. The helper is launched and rostered — it holds a
+# slot — but it is not T2 or T3, and the plan still has both rows pending with slots free.
+d=$(plant_env)
+ledger_roster "$d" open helper
+a_agent "$d" "helper" "Read the diffs for T2 and T3 and summarise them."
+fire "$d"; expect_plant_inert "P4: AC-5.4 an Agent prompt naming the ids changes nothing"
+
+# P5: THE DECLINE THAT DOES COUNT — the paired positive, so P1-P4 are not a wall that refuses
+# everything. At a line start of the model's own text, mid-message.
+d=$(plant_env)
+a_text "$d" "Both rows are ready.
+fill-declined: the wave head is mid-merge; both rows base off it."
+fire "$d"; expect_allow "P5: a decline at a line start of the model's own text answers the gap"
+
+# P6: …and the same words NOT at a line start are prose about a decline, not one.
+d=$(plant_env)
+a_text "$d" "If I had to, I would write fill-declined: with a reason, but I will not."
+fire "$d"; expect_plant_inert "P6: fill-declined: mid-line is not a decline"
+
+# P7: …nor is a decline written only in the model's thinking.
+d=$(plant_env)
+jq -nc '{type:"assistant",isSidechain:false,
+         message:{role:"assistant",content:[{type:"thinking",thinking:"fill-declined: I would rather not"}]}}' \
+  >> "$d/transcript.jsonl"
+fire "$d"; expect_plant_inert "P7: a decline in thinking only is not the model's decline record"
+
+# ============================================================
+section "Section 5e: every Stop writes the fill ledger (wave-20 REQ-5, AC-5.5; Δ2)"
+#
+# THE RECORD. `hooks/stop.sh` appends one `fill-ledger/v1` line per Stop of an engaged run to
+# `<docs-root>/record/<plan slug>/fill-ledger.log` — BEFORE the re-entry guard, so the Stop
+# that ends a refused turn is recorded too, with the launches the model made after the
+# refusal. The report folds by the turn key (the prompt's uuid), so a refused turn's two
+# lines count once, as the last.
+#
+# THREE STOPS. Turn 1 dispatches T2 (rostered, ledgered active) and ends clean. Turn 2 finds
+# T3 ready and sends nothing, and is refused; the model then dispatches T3 and one more agent
+# whose dispatch the preflight refused (an `is_error` result, no roster row), and stops again
+# with `stop_hook_active`. Each line's `launched=` names that turn's Agent calls that were not
+# refused.
+LEDGER_T3_BEHIND='| T3 | 4 | build | the row behind T2 | implementor | T2 | 30m | REQ-x | c.sh | pending | — |'
+LEDGER_T2_LANDED='| T2 | 4 | build | the first ready row | implementor | — | 30m | REQ-x | b.sh | landed | 20-T2 |'
+LEDGER_T3_READY='| T3 | 4 | build | the row behind T2 | implementor | T2 | 30m | REQ-x | c.sh | pending | — |'
+LEDGER_T3_SENT='| T3 | 4 | build | the row behind T2 | implementor | T2 | 30m | REQ-x | c.sh | active | 20-T3 |'
+led_plan() {  # <dir> <row>... — rewrite the plan's table, keeping the fixture's header
+  local dir="$1"; shift
+  local tmp; tmp="$(make_env_ledger 4 "$@")"
+  cp "$tmp/.bionic/docs/plans/$PLAN_REL" "$dir/.bionic/docs/plans/$PLAN_REL"
+  rm -rf "$tmp"
+}
+led_user() {  # <dir> <uuid> <iso> <text>
+  jq -nc --arg u "$2" --arg ts "$3" --arg t "$4" \
+    '{type:"user",uuid:$u,timestamp:$ts,isSidechain:false,message:{role:"user",content:$t}}' >> "$1/transcript.jsonl"
+}
+led_agent() {  # <dir> <tool_use id> <name> <iso>
+  jq -nc --arg i "$2" --arg n "$3" --arg ts "$4" \
+    '{type:"assistant",timestamp:$ts,isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:$i,name:"Agent",
+       input:{name:$n,description:"task",subagent_type:"bionic:implementor",prompt:("Task " + $n)}}]}}' >> "$1/transcript.jsonl"
+}
+led_result() {  # <dir> <tool_use id> <iso> <is_error true|false> <text>
+  jq -nc --arg i "$2" --arg ts "$3" --argjson e "$4" --arg t "$5" \
+    '{type:"user",timestamp:$ts,isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:$i,is_error:$e,content:$t}]}}' \
+    >> "$1/transcript.jsonl"
+}
+LED_LOG_REL=".bionic/docs/record/${PLAN_REL%.plan.md}/fill-ledger.log"
+led_line() {  # <dir> <n> -> the n-th ledger line
+  sed -n "${2}p" "$1/$LED_LOG_REL" 2>/dev/null
+}
+led_field() {  # <line> <key>
+  printf '%s\n' "$1" | tr '|' '\n' | sed -n "s/^$2=//p" | head -1
+}
+
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_T3_BEHIND")
+ledger_roster "$d" open W-T2
+led_user "$d" "u-turn-0001" "2026-09-23T10:00:00.000Z" "dispatch T2"
+led_agent "$d" "toolu_A1" "W-T2" "2026-09-23T10:00:05.000Z"
+led_result "$d" "toolu_A1" "2026-09-23T10:00:06.000Z" false "Spawned W-T2"
+fire "$d"; expect_allow "L1a: Stop 1 — the dispatching turn ends clean"
+L1="$(led_line "$d" 1)"
+expect_contains "L1b: AC-5.5 Stop 1 appended a fill-ledger/v1 line" "fill-ledger/v1|" "$L1"
+expect_eq "L1c: …keyed by the turn's prompt" "u-turn-0001" "$(led_field "$L1" turn)"
+expect_eq "L1d: …launched names the turn's Agent call" "W-T2" "$(led_field "$L1" launched)"
+expect_eq "L1e: …and nothing was missed" "0" "$(led_field "$L1" missed)"
+expect_eq "L1f: …with fourteen fields, schema first" "14" "$(printf '%s' "$L1" | awk -F'|' '{ print NF }')"
+expect_eq "L1g: …the session it belongs to" "$SID" "$(led_field "$L1" session)"
+
+# Stop 2: T2 has landed, T3 is ready, the turn sends nothing -> refused, and recorded missed.
+led_plan "$d" "$LEDGER_LANDED" "$LEDGER_T2_LANDED" "$LEDGER_T3_READY"
+ledger_roster "$d" acked W-T2
+led_user "$d" "u-turn-0002" "2026-09-23T10:20:00.000Z" "where are we?"
+fire "$d"; expect_block "L2a: Stop 2 — T3 ready and nothing sent is refused" "T3"
+L2="$(led_line "$d" 2)"
+expect_eq "L2b: AC-5.5 the refused Stop is recorded too — same turn key" "u-turn-0002" "$(led_field "$L2" turn)"
+expect_eq "L2c: …nothing launched" "" "$(led_field "$L2" launched)"
+expect_eq "L2d: …one ready row missed" "1" "$(led_field "$L2" missed)"
+expect_eq "L2e: …the ready row named" "T3" "$(led_field "$L2" ready)"
+
+# Stop 3: after the refusal the model dispatches T3 and one refused dispatch, then stops with
+# stop_hook_active — the re-entry the guard waves through, recorded before it does.
+led_agent "$d" "toolu_A2" "W-T3" "2026-09-23T10:21:00.000Z"
+led_result "$d" "toolu_A2" "2026-09-23T10:21:01.000Z" false "Spawned W-T3"
+led_agent "$d" "toolu_A3" "W-BAD" "2026-09-23T10:21:02.000Z"
+led_result "$d" "toolu_A3" "2026-09-23T10:21:03.000Z" true "PreToolUse:Agent hook error: dispatch refused — the name is in flight"
+led_plan "$d" "$LEDGER_LANDED" "$LEDGER_T2_LANDED" "$LEDGER_T3_SENT"
+ledger_roster "$d" open W-T3
+fire "$d" Stop true; expect_allow "L3a: Stop 3 — the re-entry passes"
+L3="$(led_line "$d" 3)"
+expect_eq "L3b: AC-5.5 the re-entered Stop wrote a third line" "u-turn-0002" "$(led_field "$L3" turn)"
+expect_eq "L3c: …launched is the post-refusal Agent call, the refused one left out" "W-T3" "$(led_field "$L3" launched)"
+expect_eq "L3d: …and the turn now misses nothing" "0" "$(led_field "$L3" missed)"
+expect_eq "L3e: three Stops, three lines" "3" "$(wc -l < "$d/$LED_LOG_REL" | tr -d ' ')"
+
+# L4: a SubagentStop records nothing — a writer's turn end is not the run's.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
+led_user "$d" "u-turn-0004" "2026-09-23T11:00:00.000Z" "carry on"
+fire "$d" SubagentStop
+expect_false "L4: a SubagentStop appends no ledger line" test -s "$d/$LED_LOG_REL"
+
+# L5: an unengaged session records nothing — the consent boundary.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
+rm -f "$d/.bionic/tmp/engaged-$SID.state"
+led_user "$d" "u-turn-0005" "2026-09-23T11:00:00.000Z" "carry on"
+fire "$d"
+expect_false "L5: an unengaged session appends no ledger line" test -s "$d/$LED_LOG_REL"
+
+# L6: a machine at HOLD is recorded as HOLD, the gap with it — the report's HOLD minutes.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
+led_user "$d" "u-turn-0006" "2026-09-23T11:00:00.000Z" "carry on"
+BIONIC_PROBE_FREE_MB=512 fire "$d"
+expect_eq "L6: a HOLD Stop records state=hold" "hold" "$(led_field "$(led_line "$d" 1)" state)"
+
+# L7: a decline is recorded with its reason, pipes squashed so the line keeps its fields.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
+led_user "$d" "u-turn-0007" "2026-09-23T11:00:00.000Z" "carry on"
+a_text "$d" "fill-declined: the head is mid-merge | back in ten"
+fire "$d"; expect_allow "L7a: the declined turn ends"
+expect_contains "L7b: …and its reason is on the ledger line" "the head is mid-merge" "$(led_field "$(led_line "$d" 1)" declined)"
+expect_eq "L7c: …with the line still fourteen fields" "14" "$(led_line "$d" 1 | awk -F'|' '{ print NF }')"
+
+# ============================================================
+section "Section 5f: a Patrol marker turn that ran no tick is refused once (wave-20 REQ-6, AC-6.2; D6)"
+#
+# THE DEFECT (report #1, M4). A Patrol job whose prompt carried the marker but not the tick
+# produced turns this wall called ticks — the task-list refresh was asked for, nothing else —
+# while the tick never ran and nothing decided anything. The tick's own record is its stamp:
+# it writes `verb=tick` before it decides. So a marker turn ends only when a `verb=tick`
+# stamp sits at or after the marker row; otherwise it is refused once, naming the tick.
+MK_TICK="session-poker.sh tick"
+mk_env() {  # <stamp at|none> [verb] -> a marker turn at 10:00:00Z with both duties done
+  local d; d=$(make_env)
+  jq -nc --arg t "bionic-patrol session=$SID8 — Patrol tick. Run: bash /abs/hooks/session-poker.sh tick" \
+    '{type:"user",uuid:"u-mk",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:$t}}' \
+    >> "$d/transcript.jsonl"
+  both_duties "$d"
+  [ "$1" = none ] || tick_stamp "$d" "$1" "${2:-tick}"
+  printf '%s' "$d"
+}
+
+d=$(mk_env 2026-09-23T09:59:00Z arm)
+fire "$d"; expect_block "M1: AC-6.2 a marker turn over an older arm stamp is refused" "$MK_TICK"
+fire "$d" Stop true; expect_allow "M2: …once — stop_hook_active passes"
+
+d=$(mk_env 2026-09-23T09:40:00Z tick)
+fire "$d"; expect_block "M3: a tick stamp from BEFORE the marker does not answer it" "$MK_TICK"
+
+d=$(mk_env 2026-09-23T10:00:05Z tick)
+fire "$d"; expect_allow "M4: a verb=tick stamp after the marker answers it"
+
+d=$(mk_env 2026-09-23T10:00:00Z tick)
+fire "$d"; expect_allow "M5: …and one at the marker's own second does too (at or after)"
+
+d=$(mk_env 2026-09-23T10:00:05Z arm)
+fire "$d"; expect_block "M6: an arm stamp after the marker is not a tick" "$MK_TICK"
+
+# M7: the refusal names the canonical prompt verb as well, for the job that never runs it.
+d=$(mk_env 2026-09-23T09:59:00Z arm)
+fire "$d"; expect_block "M7: …and names the verb that prints the canonical prompt" "session-poker.sh prompt"
+
+# M8: an undated marker row (the older fixture shape) is answered by the stamp's verb alone.
+d=$(make_env); u_marker "$d"; both_duties "$d"; tick_stamp "$d" "" arm
+fire "$d"; expect_block "M8: an undated marker with only an arm stamp is refused" "$MK_TICK"
+d=$(make_env); u_tick "$d"; both_duties "$d"
+fire "$d"; expect_allow "M9: …and with a tick stamp it passes"
+
+# M10: a turn that is not a marker turn owes no tick, whatever the stamp says.
+d=$(make_env); u_prompt "$d" "carry on"; tick_stamp "$d" 2026-09-01T00:00:00Z arm
+fire "$d"; expect_allow "M10: a non-marker turn is never asked for a tick"
+
+# M11: no stamp at all — a disarmed Patrol, or none armed — is not asked (the tick's DISARM
+# removes the stamp as its last act; the revive notice's absent state is silent for the same
+# reason).
+d=$(mk_env none)
+fire "$d"; expect_allow "M11: a marker turn with no stamp on disk is not refused"
+
+# M12: the duty and the missing tick are told together.
+d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm
+fire "$d"; expect_block "M12: a marker turn missing its task-list refresh AND its tick names the refresh" "$TL_MISSING"
+fire "$d"; expect_block "M12b: …and the tick, in the same refusal" "$MK_TICK"
+
+# THE RING AND THE PROBES STAY PINNED for the rest of the suite (wave-20): §6 drives the same
+# fill duty on live ledgers, and an unpinned ring is this machine's real one.
 
 # ============================================================
 section "Section 6: marker scope — a file the agent merely READ is not a decline (review F2)"
@@ -1286,11 +1553,13 @@ a_text_sidechain() {  # <dir> <text>
 
 # 48/49: THE PAIR. The same literal decline text, once as file content the agent read and
 # once as the orchestrator's own writing. Only the second answers.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
-u_tick_out "$d" "README.md:4  Write a \"fill-declined: <reason>\" line when you decline a fill."
-fire "$d"; expect_block "48: a fill-declined: inside a tool result does not answer the FILL" "ALPHA"
+# RE-POINTED AT THE COMPUTED GAP (wave-20 Δ7): the printed FILL these rows used to carry is not
+# evidence any more, so the duty they decline is §5d's two-row ledger gap.
+d=$(plant_env)
+u_tick_out "$d" "fill-declined: <reason> is the line to write when you decline a fill."
+fire "$d"; expect_plant_inert "48: a fill-declined: inside a tool result does not answer the gap"
 
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+d=$(plant_env)
 a_text "$d" "fill-declined: peers not idle (D1)."
 fire "$d"; expect_allow "49: …and the same words in the orchestrator's own assistant row do"
 
@@ -1316,54 +1585,29 @@ fire "$d"; expect_block "53: …and a system-typed session-start report still do
 
 # 54: a SUBAGENT's decline is not the orchestrator's — the same agent-context exclusion
 # every other arm of this gate makes, now applied to the decline it never applied to.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+d=$(plant_env)
 a_text_sidechain "$d" "fill-declined: the subagent decided not to."
-fire "$d"; expect_block "54: a sidechain assistant's decline does not answer the orchestrator's FILL" "ALPHA"
+fire "$d"; expect_plant_inert "54: a sidechain assistant's decline does not answer the orchestrator's gap"
 
-# 55: THE FILL LINE ITSELF STAYS RAW. It reaches the transcript as the content of the
-# tick's own Bash tool result and nothing else carries it — scoping it the way the decline
-# is scoped would make the third duty unreachable. §36-§47 all rest on this; asserted here
-# so the F2 scoping cannot be widened onto it by a later edit without a red test.
+# 55: THE FILL LINE IS NOT READ AT ALL (wave-20 Δ7, reversing this row's old pin). It used to
+# be read raw out of the tick's tool result and nothing else; now nothing reads it. A tick
+# turn that printed `FILL ALPHA BETA` over an empty computed ready set, with one of the two
+# "answered" by an Agent call, owes nothing either way.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
 a_agent "$d" "W-ALPHA" "Task ALPHA, implementor."
-fire "$d"; expect_block "55: the FILL line is still read out of the tick's tool result" "BETA" "ALPHA"
+fire "$d"; expect_allow "55: the printed FILL line is read by nothing — the ready set is the wall's"
 
-section "Section 7: a dot in a task id is a dot, not a wildcard (review correctness F1)"
+section "Section 7: RETIRED — no id is matched against a dispatch's words (wave-20 Δ7)"
 #
-# THE DEFECT. The word-boundary test splices the task id into a DYNAMIC awk regex:
-#   agents ~ ("(^|[^A-Za-z0-9_.-])" id "([^A-Za-z0-9_.-]|$)")
-# The validity filter one line above admits `.` as a legal task-id character, and in a
-# regex `.` is not a dot — it matches any single character. So a FILL naming `a.b` was
-# answered by a dispatch that named `axb` and never named `a.b` at all. That is a FALSE
-# NEGATIVE on FILL_MISSING, which passes a turn this wall exists to refuse: the fail-open
-# direction. Latent in this wave — every id it dispatched is letters, digits and hyphens —
-# and reachable the moment anyone names a task `4.2`, which the filter says is legal.
-#
-# `.` is the ONE extended-regex metacharacter reachable through `[A-Za-z0-9_.-]`: `-` is
-# special only inside a bracket expression and is spliced outside one here, and `_` is
-# never special. So the pair below is the whole class.
-
-# 56: THE BUG'S OWN SHAPE. `a.b` against a dispatch naming `axb` — same length, differing
-# only where the dot is. Answered under a wildcard read; unanswered under a literal one.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
-a_agent "$d" "W-AXB" "Task axb, implementor."
-fire "$d"; expect_block "56: a dispatch naming axb does not answer a FILL for a.b" "a.b"
-
-# 57: THE PAIRED POSITIVE, which is what keeps 56 from passing by over-escaping: the same
-# id, named literally, still answers.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
-a_agent "$d" "W-AB" "Task a.b, implementor."
-fire "$d"; expect_allow "57: …and a dispatch naming a.b does answer it"
-
-# 58: the word boundary still holds around a dotted id — `a.b` is not found inside
-# `xa.by`, exactly as §44's `ONE` is not found inside `PHONE`.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
-a_agent "$d" "W-XABY" "Task xa.by, implementor."
-fire "$d"; expect_block "58: a dotted id inside a longer word does not answer the FILL" "a.b"
-
-# 59: a hyphen in an id is a literal too, and the id is echoed back verbatim in the reason.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL W-FIX.GATE"
-fire "$d"; expect_block "59: an unanswered id carrying both a dot and a hyphen is named verbatim" "W-FIX.GATE"
+# This section pinned the word-boundary regex that matched a printed FILL id against an Agent
+# call's name, description and prompt, and the escape that kept a `.` in an id literal
+# (review correctness F1). The wall no longer matches ids to words at all: a turn is judged by
+# count, the ready set is the plan's and the occupancy the roster's (§5c, §5d P4). The regex
+# is gone, and with it the class of defect these four rows guarded; a dotted id reaching the
+# refusal verbatim is the one property left, and it is asserted here.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" '| T4.2 | 4 | build | a dotted row | implementor | — | 30m | REQ-x | z.sh | pending | — |')
+u_prompt "$d" "carry on"
+fire "$d"; expect_block "59: a ready id carrying a dot is named verbatim" "T4.2"
 
 section "Section 8: the scan is windowed (review performance, finding 1)"
 #
@@ -1472,10 +1716,10 @@ d=$(make_env)
 u_prompt "$d" "Here is what the cron job carries: bionic-patrol session=$SID8 — and that is all I wanted to show you."
 fire "$d"; expect_allow "71: the marker mid-row is not a tick — it must be the first token"
 
-# 72: the FILL duty reads the same marker. A tick that printed FILL and a turn that
-# neither dispatched nor declined is refused; the SKILL.md body carrying the literal is not.
-d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL S3 S4"
-fire "$d"; expect_block "72: an unanswered FILL after a real tick blocks" "S3"
+# 72: the tick-turn arms read the same marker. A real tick turn missing its refresh is
+# refused; the SKILL.md body carrying the literal is not a tick at all (73).
+d=$(make_env); u_tick "$d"; u_tick_out "$d" "poker: FILL S3 S4"
+fire "$d"; expect_block "72: a real tick turn missing its refresh blocks" "$TL_MISSING"
 
 d=$(make_env)
 u_prompt "$d" "... \`bash <plugin-root>/hooks/session-poker.sh tick\` is the decision brain ..."
