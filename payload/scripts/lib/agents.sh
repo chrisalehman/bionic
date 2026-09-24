@@ -24,9 +24,12 @@
 # IS the reported bug. All three were rejected in D1′.
 #
 #   live_agents <transcript.jsonl>
-#     stdout  one `name|type|status` line per teammate of the NEWEST recorded
-#             ListAgents answer, in the order the harness printed them; zero lines
-#             when that answer carries no Teammates block.
+#     stdout  one `name|type|status` line per teammate AND per subagent of the NEWEST
+#             recorded ListAgents answer (the `Teammates (N):` block, then the
+#             `Subagents (N):` block — wave-20 T8b, review F2), in the order the harness
+#             printed them; zero lines when that answer carries neither block. A subagent
+#             with no chosen name of its own is printed by the harness as a bare agent id
+#             with no `[ref]` suffix, and that id lands unchanged in the name slot.
 #     exit 0  FRESH — the answer's entry timestamp is later than the last user-prompt
 #             entry's, i.e. it was recorded this turn.
 #     exit 3  STALE — an answer exists but does not postdate the last user prompt.
@@ -167,23 +170,44 @@ _la_body() {  # <transcript> <tool_use_id>
   ' "$1" 2>/dev/null
 }
 
-# The Teammates block, on stdin -> `name|type|status` lines. Exit 9 when the body
-# carries none of the harness's section markers, i.e. this is not an answer we can
-# read. LC_ALL=C so the middot separator is compared as its two UTF-8 bytes and a
-# body with any invalid sequence in it cannot abort the parse.
+# The Teammates block AND the Subagents block, on stdin -> `name|type|status` lines. Exit
+# 9 when the body carries none of the harness's section markers, i.e. this is not an
+# answer we can read. LC_ALL=C so the middot separator is compared as its two UTF-8 bytes
+# and a body with any invalid sequence in it cannot abort the parse.
+#
+# SUBAGENTS ARE A SECOND BLOCK, NOT A TEAMMATE VARIANT (wave-20 T8b, review F2). A `claude
+# -p` ListAgents answer lists agents THIS session dispatched with the Agent tool under
+# their own `Subagents (N):` header, separate from `Teammates (N):` (adopted peers). Before
+# this fix the parser read only Teammates, so a Subagents-only panel answered zero live
+# agents and every consumer (the Patrol tick's STANDDOWN/GONE reading, `standdown`'s own
+# panel check) read a running agent as already gone — T12's live bed measured this directly
+# (no `STANDDOWN <name>` line can ever print in a `-p` bed, F2). The row grammar is
+# identical to a Teammates row (`name · type · status · …`), EXCEPT a subagent the calling
+# session dispatched with no chosen name of its own prints only its bare agent id, with no
+# `[ref]` suffix to strip — the id lands in the name slot unchanged, which is how a
+# consumer keyed on ids (rather than names) still finds it in this same `name|type|status`
+# shape.
 _la_parse_teammates() {
   LC_ALL=C awk '
-    BEGIN { inblk = 0; recog = 0; seen = 0 }
+    BEGIN { inblk = 0; recog = 0; seenT = 0; seenS = 0 }
     /^This session is / { recog = 1 }
-    # ANCHORED ON THE FIRST HEADER (Step-6 review S-2). This used to re-open the block on
-    # ANY flush-left `Teammates (N):` line, anywhere in the body, including after
-    # `Peer sessions`. The body carries free-form operator-visible text — the session name
-    # and the peer titles — and a newline embedded in either produces a flush-left line, so
-    # a second header could forge a teammate into the live set. The format the harness
-    # writes was the only thing keeping the parser honest. One block per answer, the first.
+    # ANCHORED ON THE FIRST HEADER (Step-6 review S-2), for BOTH block kinds. This used to
+    # re-open the Teammates block on ANY flush-left `Teammates (N):` line, anywhere in the
+    # body, including after `Peer sessions`. The body carries free-form operator-visible
+    # text — the session name and the peer titles — and a newline embedded in either
+    # produces a flush-left line, so a second header could forge a teammate into the live
+    # set. The format the harness writes was the only thing keeping the parser honest. One
+    # block of each kind per answer, the first — Subagents gets the identical protection,
+    # never a shared "seen" flag, so a forged Subagents header cannot reopen (or close) the
+    # Teammates state and the reverse.
     /^Teammates \([0-9]+\):[ \t]*$/ {
       recog = 1
-      if (!seen) { seen = 1; inblk = 1 } else { inblk = 0 }
+      if (!seenT) { seenT = 1; inblk = 1 } else { inblk = 0 }
+      next
+    }
+    /^Subagents \([0-9]+\):[ \t]*$/ {
+      recog = 1
+      if (!seenS) { seenS = 1; inblk = 1 } else { inblk = 0 }
       next
     }
     /^Peer sessions \([0-9]+\):[ \t]*$/ { recog = 1; inblk = 0; next }

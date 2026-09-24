@@ -57,19 +57,21 @@
 # taken later. Nor does it force: git's own refusal to discard uncommitted work
 # is a feature this script declines to override.
 #
-# TEARDOWN IS NEVER AUTOMATIC — BUT IT IS ONE ACT WHEN IT COMES (bionic 1.4.0,
-# design ledger C1). A spawned tree is a LEASED slot bound to the ledger row
-# that dispatched its writer, and the lease ends when that row is
-# fact-discharged. `land` ends it: merge the branch --no-ff into the session's
-# bound plan's `working-branch:`, in the checkout that holds that branch,
-# remove the tree, prune — refusing, and saying exactly why, when the session
-# has no bound plan or the plan names no branch, when the tree is dirty, when
-# there is nothing to land, or when a suite is running (D1). The target is the
-# plan's and never the main checkout's current branch (wave-20 T8, REQ-1): a
-# human's feature branch in the main checkout is not where a wave's work goes.
-# There is no target argument, on purpose — a target the operator names is
-# exactly what REQ-1 takes away; a human who needs another one merges by hand.
-# The behaviour lives in payload/scripts/lib/worktree.sh, whose
+# LAND IS ONE ACT, TAKEN THE MOMENT IT IS CALLED (bionic 1.4.0, design ledger C1;
+# wording caught up with the behaviour at wave-20 T8b — landing IS automatic now,
+# `skills/canonical-sdlc/dispatch.md`'s own words, and this comment used to say the
+# opposite of what the code below it does). The MERGE DECISION — whether and when a
+# task's work is ready to land — is the dispatcher's to make, by choosing to call this
+# verb; nothing here decides that on its own. But once called, `land` performs the
+# whole act without asking again: merge the branch --no-ff into the session's bound
+# plan's `working-branch:`, in the checkout that holds that branch, remove the tree,
+# prune — refusing, and saying exactly why, when the session has no bound plan or the
+# plan names no branch, when the tree is dirty, when there is nothing to land, or when
+# a suite is running (D1). The target is the plan's and never the main checkout's
+# current branch (wave-20 T8, REQ-1): a human's feature branch in the main checkout is
+# not where a wave's work goes. There is no target argument, on purpose — a target the
+# operator names is exactly what REQ-1 takes away; a human who needs another one
+# merges by hand. The behaviour lives in payload/scripts/lib/worktree.sh, whose
 # `worktree_land_for_session` is also what `hooks/stop-orders.sh standdown`
 # calls; this verb is a call site.
 #
