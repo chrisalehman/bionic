@@ -11699,4 +11699,82 @@ expect_eq "CG-budget no reader cuts writers= at its first substring any more" "0
 expect_eq "CG-budget the stop wall no longer reads the budget through plan_frontmatter_get" "0" \
   "$(grep -c 'plan_frontmatter_get "$PLAN" parallel-budget' "$CGC_LIBDIR/stop.sh" || true)"
 
+
+# ============================================================
+section "CG-standdown — the tick's printed stand-down set IS the stop wall's computed one (epic-23 wave-20 T19; REQ-5 AC-5.4's plants, on the stand-down)"
+# ============================================================
+#
+# THE DEFECT (T11's carry-over 4). The stop wall's fourth duty read the stand-down SET off the
+# tick's printed `poker: STANDDOWN <name>` lines in the transcript: the channel AC-5.4 closed
+# for the FILL. It now computes the set from what the tick WROTE — this session's MET, unacked
+# lineages carrying a `by=patrol` stop order stamped at or after this turn's tick stamp. Two
+# readers, so one fixture: the REAL tick runs on a world with four rows,
+#   sd-a, sd-b   MET, listed on a fresh panel     -> stood down (printed + ordered)
+#   sd-gone      MET, absent from the panel        -> acked by the tick, never printed
+#   sd-open      UNMET, listed                     -> left alone
+# and then the REAL stop wall judges that tick's turn with the tick's STANDDOWN lines taken
+# out of the transcript — so a wall that still read them would name nobody. The names each
+# side gives must be the same set, and the precondition makes the set non-empty.
+CGSD_POKER="$BIONIC_HOOKS_DIR/session-poker.sh"
+CGSD_STOP="$BIONIC_HOOKS_DIR/stop.sh"
+CGSD_R=$(new_repo cgsd)
+CGSD_RO="$CGSD_R/.bionic/tmp/roster-$SID_A.state"
+roster_header > "$CGSD_RO"
+for _cgsd_n in sd-a sd-b sd-gone; do
+  echo done > "$CGSD_R/landed-$_cgsd_n.md"
+  roster_row_fixture status=intended session="$SID_A" name="$_cgsd_n" agent_id= \
+    tool_use_id="toolu_01CGSD${_cgsd_n#sd-}" deliverable="$CGSD_R/landed-$_cgsd_n.md" >> "$CGSD_RO"
+done
+roster_row_fixture status=intended session="$SID_A" name=sd-open agent_id= \
+  tool_use_id=toolu_01CGSDOPEN deliverable="$CGSD_R/never-written.md" >> "$CGSD_RO"
+# writers=1 and one ready row against three open rows: no fillable gap, so the stand-down is
+# the only duty the wall can name.
+cgc_plan "$CGSD_R/.bionic/docs/plans/epic-99/cgsd.plan.md" \
+  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+s4_bind "$CGSD_R" "$SID_A" "$CGSD_R/.bionic/docs/plans/epic-99/cgsd.plan.md"
+s4_attest "$CGSD_R" "$SID_A"
+# THE TICK'S PANEL: a fresh ListAgents answer in this session's transcript, where the tick
+# looks for it (CLAUDE_CONFIG_DIR/projects/<project>/<sid>.jsonl).
+CGSD_CFG="$SANDBOX/cgsd-config"; mkdir -p "$CGSD_CFG/projects/-cgsd"
+{
+  jq -nc '{type:"user",timestamp:"2026-09-05T00:50:00.000Z",message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:"2026-09-05T00:51:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01CGSDLIST",name:"ListAgents",input:{}}]}}'
+  jq -nc --arg b "$(live_answer_body "sd-a:idle" "sd-b:idle" "sd-open:running")" \
+    '{type:"user",timestamp:"2026-09-05T00:52:23.349Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01CGSDLIST",content:$b}]}}'
+} > "$CGSD_CFG/projects/-cgsd/$SID_A.jsonl"
+cgc_ring
+CGSD_TICK=$( cd "$CGSD_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CGSD_CFG" \
+  BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+  BIONIC_PROBE_LOAD_1M=0.1 bash "$CGSD_POKER" tick 2>&1 )
+CGSD_PRINTED=$(printf '%s\n' "$CGSD_TICK" | sed -n 's/^poker: STANDDOWN \([A-Za-z0-9_.-]*\) .*/\1/p' | LC_ALL=C sort -u | tr '\n' ' ')
+expect_eq "CG-standdown precondition: the real tick stood down exactly the two listed MET rows" \
+  "sd-a sd-b " "$CGSD_PRINTED"
+# THE TICK'S TURN, as the wall reads it: the marker, the tick's Bash call, its output with every
+# STANDDOWN line removed, and the task-list refresh — nothing else owed but the stand-down.
+CGSD_TR="$CGSD_R/cgsd-transcript.jsonl"
+{
+  jq -nc --arg t "bionic-patrol session=${SID_A:0:8} — Patrol tick. Run: bash $CGSD_POKER tick" \
+    '{type:"user",isMeta:true,isSidechain:false,userType:"external",message:{role:"user",content:$t}}'
+  jq -nc --arg c "bash $CGSD_POKER tick" \
+    '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01CGSDTICK",name:"Bash",input:{command:$c}}]}}'
+  jq -nc --arg o "$(printf '%s\n' "$CGSD_TICK" | grep -v 'STANDDOWN')" \
+    '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01CGSDTICK",content:$o}]}}'
+  jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01CGSDTL",name:"TaskList",input:{}}]}}'
+} > "$CGSD_TR"
+cgc_ring
+CGSD_OUT=$(s4_stop_payload "$CGSD_R" "$SID_A" "$CGSD_TR" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 \
+      BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 bash "$CGSD_STOP" 2>/dev/null)
+CGSD_REASON=$(printf '%s' "$CGSD_OUT" | jq -r '.reason // ""' 2>/dev/null)
+CGSD_WALL=""
+for _cgsd_n in sd-a sd-b sd-gone sd-open; do
+  case " $(printf '%s' "$CGSD_REASON" | tr -c 'A-Za-z0-9_.-' ' ') " in
+    *" $_cgsd_n "*) CGSD_WALL="${CGSD_WALL}${_cgsd_n} " ;;
+  esac
+done
+expect_contains "CG-standdown the wall refuses the tick's turn for the stand-down" \
+  "stand-down unanswered" "$CGSD_REASON"
+expect_eq "CG-standdown the wall's computed set is the tick's printed set, with no line to read" \
+  "$CGSD_PRINTED" "$CGSD_WALL"
+
 finish

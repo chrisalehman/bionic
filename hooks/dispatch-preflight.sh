@@ -728,13 +728,41 @@ else
         PATROL_WHY="$(_patrol_field "$PATROL_VLINE" reason)"
         case "$PATROL_VERDICT" in
           dead)
-            patrol_deny "the Patrol was armed and stopped firing" "re-arm the Patrol, both halves" \
-              "$PATROL_FIX_STOPPED" \
-              "The Patrol was armed on this session and has stopped firing." \
-              "Its last stamp is ${PATROL_AGE}s old, and this session has since sat idle for" \
-              "${PATROL_GAP}s in one stretch with no tick in it — past the ${PATROL_WINDOW}s fire window," \
-              "which is ${PATROL_INTERVAL_WORDS} plus the scheduler's jitter:" \
-              "    ${PATROL_STAMP_FILE}"
+            # TWO CAUSES READ `dead`, and the reason says which (wave-20 T19; REQ-6, AC-6.3).
+            # `patrol_verdict` also answers `dead` when Patrol marker turns ran after the stamp
+            # and none of them ticked — a job whose prompt carries the marker but not the tick.
+            # That is not idleness, and its repair is not a re-arm: the job exists and fires,
+            # so re-creating it as it is buys the same silence. Named the way the stop wall's
+            # death notice names it (payload/scripts/lib/stop.sh, stop_patrol_revive).
+            case "$PATROL_WHY" in
+              *"marker turn"*)
+                dp_finding "the Patrol fires but never ticks" "run the tick; replace the job" \
+"The Patrol was armed on this session and its job still fires, but it never ticks.
+Its last tick stamp is ${PATROL_AGE}s old, and since then ${PATROL_WHY%% marker turn*} Patrol marker turn(s)
+have run on this session without the tick stamping — the job's prompt carries the marker
+but does not run \`bash ${POKER_SCRIPT} tick\`, so nothing has decided anything since:
+    ${PATROL_STAMP_FILE}
+
+A dispatch with no Patrol behind it is an agent nobody is waiting on.
+
+Fix: repair the job, not the clock:
+  1. Run the tick now: bash ${POKER_SCRIPT} tick
+  2. CronList, and CronDelete this session's Patrol job.
+  3. CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
+     reports, carrying exactly the prompt \`bash ${POKER_SCRIPT} prompt\` prints.
+
+Then retry the dispatch."
+                ;;
+              *)
+                patrol_deny "the Patrol was armed and stopped firing" "re-arm the Patrol, both halves" \
+                  "$PATROL_FIX_STOPPED" \
+                  "The Patrol was armed on this session and has stopped firing." \
+                  "Its last stamp is ${PATROL_AGE}s old, and this session has since sat idle for" \
+                  "${PATROL_GAP}s in one stretch with no tick in it — past the ${PATROL_WINDOW}s fire window," \
+                  "which is ${PATROL_INTERVAL_WORDS} plus the scheduler's jitter:" \
+                  "    ${PATROL_STAMP_FILE}"
+                ;;
+            esac
             ;;
           busy)
             echo "dispatch-preflight: the Patrol stamp is ${PATROL_AGE}s old, but this session has been busy — its longest idle gap since the stamp is ${PATROL_GAP}s, under the ${PATROL_WINDOW}s fire window, so the clock has had no opportunity to fire and its silence proves nothing." >&2
