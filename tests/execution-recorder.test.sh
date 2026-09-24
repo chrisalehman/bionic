@@ -997,6 +997,35 @@ run_rec "$(mk_subagent_start "$SID_A" "$IDC_TR" "$IDC_REPO" "general-purpose" "$
 expect_eq "T22-dup: a start against a lineage acked after its launch records no duplicate (T20: the ack closes, not the marker)" \
   "0" "$(grep -c 'status=duplicate-start' "$IDC_ROSTER")"
 
+# ---------- T20b: A RESTART AFTER AN ACK GETS A FRESH LAUNCH STAMP (review R5) ----------
+#
+# The control above proves the restart is not journalled a duplicate — a name closed by an
+# ack is a finished lineage, and a start against it is a reused name, identified afresh. Until
+# this fix the fresh identification still carried the ORIGINAL launch forward:
+# `prior_launch_for_agent` finds the FIRST row on the roster for this id, which is the very
+# lineage the ack just closed, and substitutes ITS `launched_at` into the new row. So the
+# "fresh" row read exactly as old as the one the ack had already discharged, and
+# `roster_open_names` kept reading the name closed — the restarted agent held no slot at all
+# (walk §9b/9c; review R5). The fix stamps this one case — a start whose DUP_PRIOR reading
+# was reset because the name was found CLOSED, not a start that was never a duplicate reading
+# to begin with — with the event's OWN time, so the reused lineage reads open again.
+open_names_of() {  # <roster> <ledger> <sid> -> roster_open_names, sourced in a private subshell
+  bash -c '. "$1"; shift; roster_open_names "$@"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" "$@"
+}
+IDC_LEDGER="$IDC_REPO/.bionic/tmp/sweeper-${SID_A}.state"
+expect_eq "T20b: the restart identifies a second time" \
+  "2" "$(grep -c 'status=identified' "$IDC_ROSTER")"
+IDC_LA2=$(grep 'status=identified' "$IDC_ROSTER" | tail -1 | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)
+expect_regex "T20b: …and its launch stamp is well-formed" \
+  '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$IDC_LA2"
+expect_ne "T20b: …and it is NOT the original launch carried forward" \
+  "2026-08-08T09:00:00Z" "$IDC_LA2"
+if [[ "$IDC_LA2" > "2026-08-08T09:31:00Z" ]]; then IDC_LA2_FRESH=yes; else IDC_LA2_FRESH=no; fi
+expect_eq "T20b: …and it is strictly later than the ack that had closed the name" \
+  "yes" "$IDC_LA2_FRESH"
+expect_contains "T20b: …so roster_open_names counts the restarted agent again" \
+  "probemate" "$(open_names_of "$IDC_ROSTER" "$IDC_LEDGER" "$SID_A")"
+
 # THE LANDED-THEN-RELAUNCHED LINEAGE (delta review C1; RE-AUTHORED at epic-23 wave-20 T20).
 # The control above proves an ack frees the name; this proves the ack does NOT free it
 # forever. `probemate` runs under one id, lands, is acked, and is dispatched again under the

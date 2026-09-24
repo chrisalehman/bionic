@@ -850,8 +850,8 @@ fi
 # (spec D9 and its Writer-origin invariant; design ledger Δ11 as amended by Δ12.)
 #
 # ONLY THE ORCHESTRATOR DISPATCHES WRITERS. A dispatch made from inside a subagent — a
-# payload carrying a top-level `agent_id` (t1-probe-report §3), or `agent_type`, or the
-# guard's channel variable: `is_agent_context` below — may launch a read-only role and
+# payload carrying a top-level `agent_id` (t1-probe-report §3), or the guard's channel
+# variable: `is_agent_context` below — may launch a read-only role and
 # nothing else. The read-only roles' own files disallow the Agent tool (agents-src), so the
 # longest chain there is is orchestrator → writer → read-only helper: every writer is
 # rostered, contracted and dispatched by the orchestrator. Before Δ12 nothing bounded the
@@ -859,17 +859,20 @@ fi
 # dispatch, with the nested rows accreting onto the orchestrator's roster.
 #
 # is_agent_context — defined HERE, above its first caller, because bash resolves a function
-# at the call. Three spellings mark an agent context and any one is enough:
+# at the call. Two spellings mark an agent context and either one is enough:
 #   * `.agent_id` — the harness's own marker, present only when the hook fires inside a
 #     subagent (the Bash walls' ARM C and hooks/stop-guard.sh read the same field). The
-#     dependable one: measured on a nested PreToolUse|Agent payload.
-#   * `.agent_type` — also set in a dispatched agent's payload.
+#     dependable one: measured on a nested PreToolUse|Agent payload (T12).
 #   * BIONIC_HOOK_CHANNEL=agent-context — the settings-channel guard's marker. No
 #     registration hands it to THIS hook today (hooks.json runs the guard on SubagentStop
-#     only), so it is kept as one spelling of three, never the one the journal relies on.
+#     only), so it is kept as one spelling of two, never the one the journal relies on.
+# NOT `.agent_type` (wave-20 T7b; critic C4). The harness sets it "when the session uses
+# --agent or the hook fires inside a subagent", so a main session started as `claude --agent
+# <x>` carries it with no `agent_id` — and that session is the orchestrator: reading it as a
+# subagent refused its every writer dispatch and journalled none of its launches. A real
+# subagent's payload carries `agent_id` beside its `agent_type`, so nothing is lost.
 is_agent_context() {
   [ -n "$(_jq '.agent_id')" ] && return 0
-  [ -n "$(_jq '.agent_type')" ] && return 0
   [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && return 0
   return 1
 }
@@ -965,7 +968,7 @@ ACK_LEDGER_FILE="$STATE_DIR/sweeper-${BIONIC_SID}.state"
 # from `warn()` down is still the fail-open ledger that comment describes.
 #
 # An agent context passes both — `is_agent_context`, defined at the delegation arm above,
-# where its three spellings are listed. A writer dispatched INTO a tree works there by
+# where its two spellings are listed. A writer dispatched INTO a tree works there by
 # construction, and its own read-only helpers are launched from there.
 
 # ---------- the lease wall: an orchestrator dispatching from a writer's tree ----------

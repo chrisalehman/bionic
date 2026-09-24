@@ -4962,7 +4962,8 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   #   S13 (AC-21)  a suite OUTSIDE THE ROW'S BUDGET, inside a dispatched agent —
   #                foreground or not, because an extra full-tree run costs 40 minutes
   #                either way.
-  #   ARM C        a `git commit` from a READ-ONLY ROLE's row (wave-19 REQ-8) — inside a
+  #   ARM C        a commit-creating verb from a READ-ONLY ROLE (wave-19 REQ-8) — its roster
+  #                row's role, or its own agent_type when it has no row (T7b) — inside a
   #                dispatched agent only, answered below the partition.
   IS_BACKGROUND=no
   [ "$(bionic_jq '.tool_input.run_in_background|tostring')" = "true" ] && IS_BACKGROUND=yes
@@ -5010,10 +5011,19 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # orchestrator lands with `git merge`, and a writer's merge of its wave head is its brief.
   #
   # THE ROLE IS THE ROSTER ROW'S `subagent_type=`, READ BY THE SAME JOIN ARM 2 MAKES — the
-  # last row carrying this `agent_id` wins. Never the payload's `agent_type`: for a teammate
-  # it is the dispatch NAME (R3 Q2), and a name like `x-runner` is not a role. The match is
-  # the exact plugin-qualified spelling, so a consumer's own `acme:test-runner` is not ours.
-  # No row, or a row with no role → no statement about this agent, and silence.
+  # last row carrying this `agent_id` wins, and a row with no role is no statement and
+  # silence. A ROSTERED agent is never read off the payload's `agent_type`: for a teammate it
+  # is the dispatch NAME (R3 Q2), and a name like `x-runner` is not a role. The match is the
+  # exact plugin-qualified spelling, so a consumer's own `acme:test-runner` is not ours.
+  #
+  # NO ROW AT ALL → THE PAYLOAD'S OWN `agent_type` (wave-20 T7b; review R15). AC-9.2 made every
+  # nested delegate UNROSTERED — the roster is the orchestrator's depth-one ledger — and Δ12
+  # made its read-only-ness "no Write/Edit plus this arm", so reading silence off a missing row
+  # admitted every commit verb from exactly the agents Δ12 created. A nested delegate's own
+  # payload carries its `agent_id` and its own type (T12, live-rows-802ee6d.md §AC-9.2), and
+  # the teammate-name ambiguity above cannot arise: a teammate is dispatched by the
+  # orchestrator and has a row. A payload with no `agent_id` is the orchestrator and returned
+  # at the partition above, `claude --agent` sessions included.
   #
   # THE SET IS `role_is_readonly`'s (wave-20 T7, REQ-9), the one the dispatch approval
   # checkpoint and the nested-dispatch arm ask — so `Explore` and `Plan`, which the harness
@@ -5022,7 +5032,8 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # context. A missing library steps this arm aside with the advisory line, like cmd-class.sh.
   if _wall_mentions_git "$COMMAND" \
      && git_argv_has_any_sub "$COMMAND" "commit merge revert cherry-pick am rebase commit-tree update-ref"; then
-    local _bsg_role
+    local _bsg_role _bsg_whence
+    # `row:<role>` when some row carries this agent_id (the role may be empty), else nothing.
     _bsg_role=$(awk -F'|' -v id="$ACTOR" '
       /^roster-state\// {
         hit = 0; role = ""
@@ -5030,15 +5041,21 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
           if ($i == "agent_id=" id) hit = 1
           else if ($i ~ /^subagent_type=/) role = substr($i, 15)
         }
-        if (hit) last = role
+        if (hit) { seen = 1; last = role }
       }
-      END { print last }
+      END { if (seen) print "row:" last }
     ' "$_bsg_roster" 2>/dev/null)
+    case "$_bsg_role" in
+      row:*) _bsg_role="${_bsg_role#row:}"
+             _bsg_whence="Your roster row names you $_bsg_role" ;;
+      *)     _bsg_role=$(bionic_jq .agent_type)
+             _bsg_whence="Your agent type is $_bsg_role and no roster row names you" ;;
+    esac
     wall_libs background-suite-guard roster.sh || return 0
     if role_is_readonly "$_bsg_role"; then
       fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \
-        "Your roster row names you $_bsg_role, and a read-only role's deliverable is its report,
-never a commit. Leave the tree as it is and send the report; the orchestrator lands the work."
+        "$_bsg_whence, and a read-only role's deliverable is its report, never a commit. Leave
+the tree as it is and send the report; the orchestrator lands the work."
       return 2
     fi
   fi

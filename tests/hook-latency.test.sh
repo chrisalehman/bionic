@@ -608,4 +608,56 @@ expect_true "8b: the header names the hook's own shebang binary, not PATH's bash
 
 rm -rf "$BENCH_SANDBOX_8"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "9: execution-recorder.sh's Bash path forks at most 10 external commands (epic-23 wave-20 T20b)"
+
+# THE GAP THE REVIEW NAMED (T20-last-two-readers.md "carry-overs": "the recorder has no
+# timing pin in tests/hook-latency.test.sh"). hooks/execution-recorder.sh's PostToolUse|Bash
+# arm runs on EVERY Bash call in an engaged session — the same hot path §1 pins for
+# bash-walls.sh — and until now nothing in this suite had ever traced it.
+#
+# WHAT THIS SECTION DOES NOT PROVE. T20b's own fix here is a WALL-CLOCK saving — roster.sh
+# is now sourced lazily, only on the SubagentStart path that asks `roster_open_names` — and
+# sourcing a file forks nothing, so this suite's fork-count method (deliberately timing-free,
+# see the file header) cannot see that saving directly. What it DOES add is a regression
+# floor this hook never had: nothing on the Bash path should newly fork a subprocess,
+# whichever library ends up sourced there.
+REC_HOOK="${BIONIC_EXEC_RECORDER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/execution-recorder.sh}"
+[ -f "$REC_HOOK" ] || { echo "hook-latency: no hook at $REC_HOOK — suite refuses to run"; exit 1; }
+bash -n "$REC_HOOK" || { echo "hook-latency: $REC_HOOK does not parse — suite refuses to run"; exit 1; }
+
+REC_PAYLOAD=$(jq -nc --arg s "$SID" --arg c "$PROJECT" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PostToolUse", tool_name:"Bash",
+    tool_input:{command:"ls -la"}, tool_response:{}, tool_use_id:"toolu_hook_latency_rec"}')
+
+TRACE_REC="$SANDBOX/trace-recorder.txt"
+trace_best "$REC_HOOK" "$REC_PAYLOAD" "$TRACE_REC"
+REC_COUNT=$(count_external "$TRACE_REC")
+
+echo "hook-latency: execution-recorder.sh (Bash path) external-command count = $REC_COUNT (cap 10)"
+echo "hook-latency: execution-recorder.sh (Bash path) histogram:"
+histogram "$TRACE_REC" | sed 's/^/hook-latency:   /'
+
+expect_true "9a: execution-recorder.sh (Bash path) count <= 10" test "$REC_COUNT" -le 10
+
+# THE WALL-CLOCK NUMBER THE REVIEW ASKED FOR, stated here rather than gated — this suite's
+# own discipline (file header) is that timing is noisy and not what it gates on. Twenty
+# back-to-back runs of the SAME payload, median in ms: T20's own scratch-bench shape
+# (T20-last-two-readers.md "Hook latency" table), reused rather than re-invented, so a
+# reader of this suite's own output sees the before/after number without a separate script.
+rec_median_ms() {  # <hook> <payload> <n> -> median wall-clock ms across n runs
+  local hook="$1" payload="$2" n="$3" i t0 t1
+  local -a samples=()
+  for i in $(seq 1 "$n"); do
+    t0=$(date +%s%N)
+    printf '%s' "$payload" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" \
+      CLAUDE_PROJECT_DIR="" BIONIC_PLUGINS_DIR="$NO_PLUGINS" bash "$hook" >/dev/null 2>&1
+    t1=$(date +%s%N)
+    samples+=( $(( (t1 - t0) / 1000000 )) )
+  done
+  printf '%s\n' "${samples[@]}" | sort -n | awk '{a[NR]=$1} END{print a[int((NR+1)/2)]}'
+}
+REC_MEDIAN=$(rec_median_ms "$REC_HOOK" "$REC_PAYLOAD" 20)
+echo "hook-latency: execution-recorder.sh (Bash path) median over 20 runs = ${REC_MEDIAN}ms (informational, not gated — see file header)"
+
 finish
