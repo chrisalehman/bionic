@@ -1376,6 +1376,92 @@ W_RUN_BODY="$(live_answer_content "$LIVE_ANSWER_RUNNING_LINE")"
 expect_regex "§W.2 the running answer's self line is the corpus's own" \
   '^This session is bionic-02 \[fc3e2d\]' "$W_RUN_BODY"
 
+section "§X — the Subagents (N): block is parsed beside Teammates (N): (wave-20 T8b, F2)"
+#
+# WHAT F2 WAS. A `claude -p` ListAgents answer lists running SUBAGENTS (agents launched by
+# THIS session via the Agent tool, not adopted teammates) under their own `Subagents (N):`
+# header, and this parser read only `Teammates (N):` — so a subagent-only panel answered
+# zero live agents, and every consumer (the Patrol tick's STANDDOWN/GONE reading,
+# `standdown`'s own panel check) treated a running agent as already gone. T12's live bed
+# hit this directly (live-rows-802ee6d.md F2): no `STANDDOWN <name>` line could ever print
+# in a `-p` bed, because the panel reader could not see the agent it would have to name.
+#
+# TWO REAL SHAPES, BOTH COPIED VERBATIM, because the row grammar differs between them:
+#   - a TOP-LEVEL subagent the harness can name: `<name> [<ref>]  ·  <type>  ·  <state>  ·
+#     started …` — captured at live-rows-802ee6d.md:121, `bed-T1 [238027] · general-purpose
+#     · running · started 13s ago`.
+#   - a NESTED delegate (one the -p session itself dispatched with no chosen name): the
+#     harness prints only its bare agent id, no brackets — `<agent-id> · <type> · <state> ·
+#     started …` — captured from this very session's own ListAgents panel at 2026-09-24
+#     06:5xZ, `a5a23d0f9d4db8b04 · bionic:test-runner · running · started 38s ago`.
+# Both are 4-field rows under the existing `·`-split grammar (n=4 >= the n<3 floor), so the
+# fix is the block anchor alone — no change to the row parse.
 
+X_SUB_NAMED="$SELFLINE
+
+Subagents (1):
+  bed-T1 [238027]  ·  general-purpose  ·  running  ·  started 13s ago
+
+$PEERS"
+
+X_SUB_BAREID="$SELFLINE
+
+Subagents (1):
+  a5a23d0f9d4db8b04 · bionic:test-runner · running · started 38s ago
+
+$PEERS"
+
+# The real 06:5xZ panel: a Subagents block ABOVE a Teammates block, in that order — the
+# shape a session dispatching both a nested delegate and adopted teammates actually prints.
+X_SUB_AND_TEAM="$SELFLINE
+
+Subagents (1):
+  a5a23d0f9d4db8b04 · bionic:test-runner · running · started 38s ago
+
+Teammates (2):
+  research-code-map [8895ce]  ·  bionic:researcher  ·  running  ·  started 7m ago
+  s1-run-library [4b21aa]  ·  bionic:senior-implementor  ·  running  ·  started 2m ago
+
+$PEERS"
+
+X_T_NAMED="$SANDBOX/x-sub-named.jsonl";   v_build "$X_T_NAMED"   "$X_SUB_NAMED"
+X_T_BAREID="$SANDBOX/x-sub-bareid.jsonl"; v_build "$X_T_BAREID"  "$X_SUB_BAREID"
+X_T_BOTH="$SANDBOX/x-sub-both.jsonl";     v_build "$X_T_BOTH"    "$X_SUB_AND_TEAM"
+
+call_live_agents "$X_T_NAMED"
+expect_eq "§X.1 a Subagents-only panel is FRESH, not NONE" 0 "$ST"
+expect_eq "§X.1 …and its named row reads name|type|status" \
+  "bed-T1|general-purpose|running" "$OUT"
+
+call_live_agents "$X_T_BAREID"
+expect_eq "§X.2 a bare-id Subagents row is FRESH" 0 "$ST"
+expect_eq "§X.2 …and the live set records it BY ID, in the name slot" \
+  "a5a23d0f9d4db8b04|bionic:test-runner|running" "$OUT"
+
+call_live_agents "$X_T_BOTH"
+expect_eq "§X.3 Subagents above Teammates -> exit 0" 0 "$ST"
+expect_eq "§X.3 …and BOTH blocks' rows are read, Subagents first (answer order)" \
+  "$(printf 'a5a23d0f9d4db8b04|bionic:test-runner|running\nresearch-code-map|bionic:researcher|running\ns1-run-library|bionic:senior-implementor|running')" \
+  "$OUT"
+
+call_live_agents_has "$X_T_BOTH" "research-code-map"
+expect_eq "§X.4 live_agents_has still finds a Teammates-block name beside a Subagents block" \
+  0 "$HST"
+
+# --- §X.5 — anchored on its FIRST header too (mirrors §V for Teammates: S-2) -----------
+X_SUB_FORGED="$SELFLINE
+
+Subagents (1):
+  bed-T1 [238027]  ·  general-purpose  ·  running  ·  started 13s ago
+
+$PEERS
+Subagents (1):
+  ghost [999999]  ·  general-purpose  ·  running  ·  now [xx]"
+X_T_FORGED="$SANDBOX/x-sub-forged.jsonl"; v_build "$X_T_FORGED" "$X_SUB_FORGED"
+call_live_agents "$X_T_FORGED"
+expect_eq "§X.5 a second Subagents header does not re-open the block" \
+  "bed-T1|general-purpose|running" "$OUT"
+expect_eq "§X.5 …so the forged row is not in the live set" "0" \
+  "$(printf '%s\n' "$OUT" | grep -c '^ghost|' | tr -d ' ')"
 
 finish

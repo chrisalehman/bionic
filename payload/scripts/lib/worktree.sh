@@ -4,11 +4,15 @@
 #
 # WHAT THIS FILE OWNS. A spawned worktree is a leased slot, bound to the ledger
 # row that dispatched its writer. The lease ends when the row is
-# fact-discharged, and ending it is ONE act: merge the branch, remove the tree,
-# prune. Three callers need that act and the two facts around it —
-# `spawn-worktree.sh land`, `hooks/stop-orders.sh standdown`, and the Patrol
-# tick's lease-overrun line — so the behaviour lives here and each caller is a
-# call site rather than a fourth definition of "discharged".
+# fact-discharged, and ending it is ONE act: merge the branch into the plan's
+# working branch, remove the tree, prune. TWO callers end a lease —
+# `spawn-worktree.sh land` and `hooks/stop-orders.sh standdown` — and both call
+# `worktree_land_for_session`, the one path from a session to a land (wave-20
+# T8, REQ-1, D1). The Patrol tick is a READER here and never a caller of the
+# act: its lease-overrun line (`worktree_lease_overruns`) reports a tree that
+# outlived its row, and it lands nothing and removes nothing. The behaviour
+# lives here so each caller is a call site rather than another definition of
+# "discharged".
 #
 # SOURCED, NOT EXECUTED. Function names are prefixed `worktree_` (public) or
 # `_wt_` (internal); nothing here runs at source time and nothing here exits.
@@ -31,8 +35,9 @@ _wt_self_dir() { dirname "${BASH_SOURCE[0]}"; }
 # roots.sh, THE SOFT SOURCE — the idiom this file already uses for git-argv.sh, taken at
 # source time because two of this file's roots are wanted on every path through it. Every
 # root resolver in the tree has one definition there (epic-22 wave-01, N1); this file is a
-# caller of `claude_home` (three copies before N1: here, lib/patrol.sh, lib/deps.sh) and
-# `worktree_root` (three: here as `_wt_main_root`, lib/patrol.sh, spawn-worktree.sh).
+# caller of `worktree_root` (three copies before N1: here as `_wt_main_root`, lib/patrol.sh,
+# spawn-worktree.sh). `claude_home` is only the probe for "already loaded": D1 read session
+# files through it until wave-20 T8c, and reads processes now.
 if ! declare -F claude_home >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/roots.sh"
@@ -108,67 +113,117 @@ _wt_drop_legacy_link() {  # <worktree abs> -> 0 if one was deleted
 # ---------------------------------------------------------------------------
 # D1 — "never merge under a running suite", as one predicate.
 #
-# A CONJUNCTION, and deliberately so. `busy` alone is every session that is
-# doing anything at all, and a live `tests/run.sh` alone belongs to whichever
-# project started it. Together they are the world the constraint names: this
-# project has a session working, and a suite is running on the machine. The
-# session half carries the project scoping — a session file states its cwd —
-# and the process half carries the suite scoping.
+# A FACT ABOUT PROCESSES AND DIRECTORIES (wave-20 T8c; review R2-1, R2-8; critic C2-1).
+# The land refuses while a `tests/run.sh` process has its SCRIPT PATH or its WORKING
+# DIRECTORY inside the project root (every linked worktree under it included) or inside
+# the land's target checkout. Nothing else is read.
 #
-# A SESSION FILE OUTLIVES ITS PROCESS. `kill -0` is a builtin, so the liveness
-# question is asked of the kernel rather than of the file, exactly as
-# lib/patrol.sh asks it: a stale file left by a crashed CLI must never be able
-# to hold a lease open forever.
+# NO SESSION PLAYS ANY PART. Until T8b the predicate was a conjunction: a busy session
+# file in this project AND a `tests/run.sh` anywhere on the machine. The process half never
+# said where the suite ran, so a land in one repository was refused by another project's
+# floor (T12 F3), and the session running the land was always busy and in-project. T8b then
+# excluded the lander's own session, but in-process teammates and Agent-tool subagents have
+# no session file of their own: the only busy file in the project is the orchestrator's, so
+# the exclusion switched D1 off for the orchestrator's own dispatched floor, its main case.
+# Where the suite runs is the whole question, and the process answers it.
+#
+# ONLY THE RUNNER. A lone `*.test.sh` does not count. That is T8's design: the runner is the
+# floor and the integration run, and the root scope covers every tree under `.worktrees/`,
+# so counting a writer's own suite in its own tree would refuse every land in the wave
+# while any writer tests.
+#
+# UNREADABLE, NO OPINION. A process whose working directory cannot be read is judged by its
+# script path alone, and a relative script path with no working directory places nothing.
+# That is the stance this predicate has always taken on a machine it cannot read (it used to
+# be a missing jq): D1 guards a merge under a suite, not an unreadable process table, and
+# refusing on it would make the verb unusable where trees most need giving back.
 
-# Existence only. Same shape as hooks/stop-check.sh's and session-sweeper.sh's,
-# for the same reason: `pgrep -f` matches the full command line, and `ps` covers
-# a machine without pgrep.
-_wt_proc_running() {  # <pattern>
+# The pids whose command line names `tests/run.sh`, one per line. `pgrep -f` matches the
+# full command line and, on macOS, leaves out its own ancestors, so a land that a runner
+# itself drives never sees that runner. `ps` covers a machine without pgrep.
+_wt_suite_pids() {
   if command -v pgrep >/dev/null 2>&1; then
-    pgrep -f -- "$1" >/dev/null 2>&1
-    return $?
+    pgrep -f -- 'tests/run\.sh' 2>/dev/null
+    return 0
   fi
-  ps -eo command 2>/dev/null | grep -qF -- "$1"
+  ps -eo pid=,command= 2>/dev/null | awk '/tests\/run\.sh/ { print $1 }'
 }
 
-# Is <cwd> this project? The main checkout itself, or any linked worktree under
-# its `.worktrees` — which is where a writer running a suite actually sits, and
-# so the case that matters most.
-_wt_cwd_in_project() {  # <cwd> <main-root>
-  local cwd="${1:-}" root="${2:-}"
+# `<pid> <cwd>` per pid whose working directory can be read, the path physical. Linux has
+# /proc/<pid>/cwd. macOS has no /proc and BSD `ps` has no cwd column, so it takes ONE `lsof`
+# call for all the pids, about 12 ms on this machine. An empty pid list never reaches lsof,
+# because `lsof -p ""` lists every process.
+_wt_proc_cwds() {  # <pid>...
+  local pid list="" d
+  [ "$#" -gt 0 ] || return 0
+  if [ -e /proc/self/cwd ]; then
+    for pid in "$@"; do
+      d="$(readlink "/proc/${pid}/cwd" 2>/dev/null)" && [ -n "$d" ] && printf '%s %s\n' "$pid" "$d"
+    done
+    return 0
+  fi
+  command -v lsof >/dev/null 2>&1 || return 0
+  for pid in "$@"; do list="${list:+${list},}${pid}"; done
+  lsof -a -d cwd -Fn -p "$list" 2>/dev/null \
+    | awk '/^p/ { p = substr($0, 2) } /^n/ && p != "" { print p " " substr($0, 2); p = "" }'
+}
+
+# Is <path> this project? The main checkout itself, or anything under it, which takes in
+# every linked worktree under its `.worktrees` — where a writer running a suite actually
+# sits. A second directory, when given, counts too: the land's TARGET checkout (T8, D1),
+# which `spawn-worktree.sh create` can place outside the root with an absolute parent. The
+# merge happens there, so a suite running there is the one the constraint names. <path> is
+# a process's working directory or its script's path.
+_wt_cwd_in_project() {  # <path> <main-root> [target-checkout]
+  local cwd="${1:-}" root="${2:-}" co="${3:-}"
   [ -n "$cwd" ] && [ -n "$root" ] || return 1
   [ "$cwd" = "$root" ] && return 0
   case "$cwd/" in "$root"/*) return 0 ;; esac
+  if [ -n "$co" ]; then
+    [ "$cwd" = "$co" ] && return 0
+    case "$cwd/" in "$co"/*) return 0 ;; esac
+  fi
   return 1
 }
 
-# The D1 predicate. Prints `session=<name> pid=<pid> cwd=<cwd>` for the first
-# session that satisfies it and returns 0; returns 1 when nothing does.
-#
-# NO JQ, NO OPINION. jq is this repo's only parser, and a machine without it
-# cannot be shown a busy session — so the predicate answers "not proven" and the
-# land proceeds. Refusing on a missing parser would make the verb unusable on
-# exactly the degraded machine whose trees most need giving back, and D1 is a
-# guard against a merge under a suite, not a guard against an unreadable
-# directory.
-_wt_busy_suite() {  # <main-root> -> session=... pid=... cwd=...
-  local root="${1:-}" dir f pid cwd status name
-  dir="$(claude_home)/sessions"
-  [ -d "$dir" ] || return 1
-  command -v jq >/dev/null 2>&1 || return 1
-  _wt_proc_running 'tests/run.sh' || return 1
-  for f in "$dir"/*.json; do
-    [ -f "$f" ] || continue
-    pid="$(jq -r '.pid // empty' "$f" 2>/dev/null)"
+# The D1 predicate. Prints `pid=<pid> cwd=<cwd> script=<path>` for the first runner that
+# satisfies it and returns 0; returns 1 when none does. A field that could not be read
+# prints `unreadable`. The script path is the first command-line word ending in
+# `tests/run.sh`, taken against the working directory when it is relative, with its
+# directory made physical when that directory exists, so a symlinked spelling (`/tmp` for
+# `/private/tmp`) still compares.
+_wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=...
+  local root="${1:-}" co="${2:-}" pids cwds pid cmd cwd script dir tok
+  local -a words
+  [ -n "$root" ] || return 1
+  pids="$(_wt_suite_pids)"
+  [ -n "$pids" ] || return 1
+  # shellcheck disable=SC2086  # one pid per word, digits only
+  cwds="$(_wt_proc_cwds $pids)"
+  for pid in $pids; do
     case "$pid" in ''|*[!0-9]*) continue ;; esac
-    status="$(jq -r '.status // empty' "$f" 2>/dev/null)"
-    [ "$status" = "busy" ] || continue
-    cwd="$(jq -r '.cwd // empty' "$f" 2>/dev/null)"
-    _wt_cwd_in_project "$cwd" "$root" || continue
-    kill -0 "$pid" 2>/dev/null || continue
-    name="$(jq -r '.name // .sessionId // empty' "$f" 2>/dev/null)"
-    printf 'session=%s pid=%s cwd=%s' "${name:-unknown}" "$pid" "$cwd"
-    return 0
+    cmd="$(ps -o command= -p "$pid" 2>/dev/null)"
+    # Re-read, not trusted from the listing: the process may have exited, or its pid been
+    # reused, since pgrep answered.
+    case "$cmd" in *tests/run.sh*) : ;; *) continue ;; esac
+    cwd="$(printf '%s\n' "$cwds" | awk -v p="$pid" '$1 == p { sub(/^[^ ]* /, ""); print; exit }')"
+    script=""
+    read -r -a words <<< "$cmd"
+    for tok in "${words[@]}"; do
+      case "$tok" in *tests/run.sh) script="$tok"; break ;; esac
+    done
+    case "$script" in
+      '') : ;;
+      /*) : ;;
+      *) if [ -n "$cwd" ]; then script="${cwd}/${script}"; else script=""; fi ;;
+    esac
+    if [ -n "$script" ]; then
+      dir="$(cd "${script%/*}" 2>/dev/null && pwd -P)" && script="${dir}/${script##*/}"
+    fi
+    if _wt_cwd_in_project "$script" "$root" "$co" || _wt_cwd_in_project "$cwd" "$root" "$co"; then
+      printf 'pid=%s cwd=%s script=%s' "$pid" "${cwd:-unreadable}" "${script:-unreadable}"
+      return 0
+    fi
   done
   return 1
 }
@@ -176,9 +231,19 @@ _wt_busy_suite() {  # <main-root> -> session=... pid=... cwd=...
 # ---------------------------------------------------------------------------
 # The land verb.
 #
-# ONE ACT (C1). Merge the tree's branch --no-ff into the main checkout's CURRENT
-# branch, remove the tree, prune. A land that did two of the three is a lease
-# half-ended, and the third would be somebody's later chore.
+# ONE ACT (C1). Merge the tree's branch --no-ff into <onto>, IN THE CHECKOUT
+# THAT HOLDS <onto>, remove the tree, prune. A land that did two of the three is
+# a lease half-ended, and the third would be somebody's later chore.
+#
+# THE TARGET IS NAMED, NEVER READ OFF THE MAIN CHECKOUT (wave-20 T8, REQ-1, D1).
+# Until 1.8.7 the merge went into whatever branch the main checkout sat on. A
+# wave's integration branch lives in its own checkout under `.worktrees/`, and a
+# human may have the main checkout on a feature branch of their own: the land
+# merged a task into that feature branch and left the wave branch unmerged
+# (report #9). <onto> is required; `worktree_land_for_session`, below, reads it
+# off the session's bound plan, and that is the path every caller takes. The
+# checkout holding <onto> is found in `git worktree list --porcelain`
+# (`worktree_checkout_of`), and the merge runs there with `git -C`.
 #
 # EVERY REFUSAL BEFORE THE MERGE. The order is cheapest-and-most-local first,
 # and every one of them is checked before anything is changed, so a refused land
@@ -186,18 +251,17 @@ _wt_busy_suite() {  # <main-root> -> session=... pid=... cwd=...
 # exception of a legacy `.bionic` link, which is deleted on the way in because
 # C2 retires it whatever the verdict.
 #
-# TWO BOUNDS ON THE POWER (security review F1). This function merges into the
-# main checkout's current branch and deletes a worktree; both of those are
-# irreversible enough that WHICH branch and WHICH tree cannot be left to the
-# caller's word for it.
+# TWO BOUNDS ON THE POWER (security review F1). This function merges into a
+# branch and deletes a worktree; both of those are irreversible enough that
+# WHICH branch and WHICH tree cannot be left to the caller's word for it.
 #
-#   PROTECTED BRANCH. The branch merged into is never `main`/`master`.
+#   PROTECTED BRANCH. The branch merged into — <onto> — is never `main`/`master`.
 #   hooks/protect-main.sh is the wall that keeps unreviewed work off those
 #   branches, and it reads `git push` argv — a local `git merge --no-ff` is
-#   invisible to it. Without this refusal a main checkout left on `main` (which
-#   is where every checkout starts) turned an ordinary `land` into an unwalled
-#   write to the protected branch, with the unmerged tree deleted in the same
-#   call. The list is `git_branch_protected`'s, not a second copy of it.
+#   invisible to it. Without this refusal a land onto `main` — before T8, any
+#   land from a main checkout left where every checkout starts — was an
+#   unwalled write to the protected branch, with the unmerged tree deleted in
+#   the same call. The list is `git_branch_protected`'s, not a second copy of it.
 #
 #   INSIDE THE FARM. The tree landed sits under `<main-root>/.worktrees/`,
 #   the only place this lease ever hands one out. `.git`-is-a-file proves the
@@ -218,8 +282,38 @@ _wt_busy_suite() {  # <main-root> -> session=... pid=... cwd=...
 _wt_say() { printf '%s: %s\n' "${WORKTREE_CONTRACT_PROG:-spawn-worktree}" "$*"; }
 _wt_refuse() { _wt_say "REFUSED reason=$*"; return 2; }
 
-worktree_land() {  # <worktree path> -> LANDED | REFUSED
-  local target="${1:-}" wt_abs root branch main_branch ahead busy merge_sha
+# The checkout holding <branch>, from `git worktree list --porcelain`: one
+# `worktree <path>` stanza per checkout, its `branch refs/heads/<b>` line naming
+# what it holds. A detached or bare stanza holds no branch and is skipped. The
+# path is printed physically (`pwd -P`), the form every other path in this file
+# is compared in.
+#
+#   0  one checkout holds it -> its path
+#   1  no checkout holds it
+#   2  more than one does (`worktree add --force` makes that possible) -> the
+#      paths, space-separated: which of them to merge in is not a guess to make
+#   3  the one stanza's directory cannot be entered (a prunable entry) -> its path
+worktree_checkout_of() {  # <root> <branch>
+  local root="${1:-}" want="refs/heads/${2:-}" line path="" hits="" n=0 abs
+  [ -n "${2:-}" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) path="${line#worktree }" ;;
+      "branch "*)
+        [ "${line#branch }" = "$want" ] || continue
+        n=$((n + 1)); hits="${hits:+$hits }${path}" ;;
+    esac
+  done <<EOF
+$(git -C "$root" worktree list --porcelain 2>/dev/null)
+EOF
+  [ "$n" -eq 0 ] && return 1
+  if [ "$n" -gt 1 ]; then printf '%s' "$hits"; return 2; fi
+  abs="$(_wt_abs "$hits")" || { printf '%s' "$hits"; return 3; }
+  printf '%s' "$abs"
+}
+
+worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
+  local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -240,13 +334,22 @@ worktree_land() {  # <worktree path> -> LANDED | REFUSED
     *) _wt_refuse "outside-worktrees path=${wt_abs} root=${root}"; return 2 ;;
   esac
 
-  # THE BRANCH MERGED INTO, read and judged before anything is touched.
-  main_branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-  [ -n "$main_branch" ] || { _wt_refuse "main-head-unreadable root=${root}"; return 2; }
-  _wt_branch_protected "$main_branch"
+  # THE BRANCH MERGED INTO, named by the caller and judged before anything is
+  # touched: it must be a branch, held by exactly one checkout, and not protected.
+  [ -n "$onto" ] || { _wt_refuse "onto-missing path=${wt_abs}"; return 2; }
+  git -C "$root" show-ref --verify --quiet "refs/heads/${onto}" \
+    || { _wt_refuse "onto-unknown branch=${onto} root=${root}"; return 2; }
+  co="$(worktree_checkout_of "$root" "$onto")"; rc=$?
+  case $rc in
+    0) : ;;
+    1) _wt_refuse "onto-not-checked-out branch=${onto} root=${root}"; return 2 ;;
+    2) _wt_refuse "onto-ambiguous branch=${onto} checkouts=${co// /,}"; return 2 ;;
+    *) _wt_refuse "onto-checkout-unresolvable branch=${onto} checkout=${co}"; return 2 ;;
+  esac
+  _wt_branch_protected "$onto"
   case $? in
-    0) _wt_refuse "protected-branch branch=${main_branch} root=${root}"; return 2 ;;
-    2) _wt_refuse "protected-branch-unknowable branch=${main_branch} root=${root}"; return 2 ;;
+    0) _wt_refuse "protected-branch branch=${onto} checkout=${co}"; return 2 ;;
+    2) _wt_refuse "protected-branch-unknowable branch=${onto} checkout=${co}"; return 2 ;;
   esac
 
   branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null)"
@@ -260,23 +363,31 @@ worktree_land() {  # <worktree path> -> LANDED | REFUSED
     _wt_refuse "dirty-tree path=${wt_abs} branch=${branch}"; return 2
   fi
 
-  ahead="$(git -C "$root" rev-list --count "HEAD..${branch}" 2>/dev/null)"
+  ahead="$(git -C "$root" rev-list --count "refs/heads/${onto}..${branch}" 2>/dev/null)"
   case "$ahead" in ''|*[!0-9]*) _wt_refuse "branch-unreadable branch=${branch}"; return 2 ;; esac
   if [ "$ahead" -eq 0 ]; then
-    _wt_refuse "nothing-to-land branch=${branch} onto=${main_branch}"; return 2
+    _wt_refuse "nothing-to-land branch=${branch} onto=${onto}"; return 2
   fi
 
-  busy="$(_wt_busy_suite "$root")" && {
+  # THE TARGET CHECKOUT IS CLEAN IN WHAT GIT TRACKS. A merge into a checkout
+  # holding staged or modified tracked files mixes somebody's unfinished work
+  # into the merge — or fails half-way on it. Untracked files are not read: the
+  # `.bionic` alias and `.worktrees/` live there by design.
+  if [ -n "$(git -C "$co" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    _wt_refuse "onto-checkout-dirty checkout=${co} branch=${onto}"; return 2
+  fi
+
+  busy="$(_wt_busy_suite "$root" "$co")" && {
     _wt_refuse "suite-running ${busy}"; return 2
   }
 
   # --no-ff ALWAYS: a fast-forward would erase the fact that this was a task,
   # and the merge commit is what the ledger row points at.
-  if ! git -C "$root" merge --no-ff -m "merge ${branch} (land)" "$branch" >/dev/null 2>&1; then
-    git -C "$root" merge --abort >/dev/null 2>&1
-    _wt_refuse "merge-failed branch=${branch} onto=${main_branch}"; return 2
+  if ! git -C "$co" merge --no-ff -m "merge ${branch} (land)" "$branch" >/dev/null 2>&1; then
+    git -C "$co" merge --abort >/dev/null 2>&1
+    _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co}"; return 2
   fi
-  merge_sha="$(git -C "$root" rev-parse HEAD 2>/dev/null)"
+  merge_sha="$(git -C "$co" rev-parse HEAD 2>/dev/null)"
 
   # No --force here either. If git refuses now, the merge has landed and the
   # tree has not gone; the line says both so the operator is not left guessing
@@ -286,8 +397,35 @@ worktree_land() {  # <worktree path> -> LANDED | REFUSED
   fi
   git -C "$root" worktree prune >/dev/null 2>&1
 
-  _wt_say "LANDED branch=${branch} merge=${merge_sha} removed=${wt_abs}"
+  _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} removed=${wt_abs}"
   return 0
+}
+
+# THE ONE PATH FROM A SESSION TO A LAND (wave-20 T8, REQ-1, D1). `spawn-worktree.sh
+# land` and `hooks/stop-orders.sh standdown` both call this and nothing else, so
+# "where does this tree land" has one answer: the session's bound plan's
+# `working-branch:`, read by `session_working_branch` (lib/run.sh). Every
+# answer that is not a branch is a refusal naming its reason — no session id,
+# `no-bound-plan` (the unbound `fallback` and `none` alike: the root's newest
+# run is not this session's target), `bound-unreadable`, `no-working-branch` —
+# and nothing is touched on any of them.
+#
+# run.sh IS LOADED LAZILY, from this file's own directory, the way
+# `_wt_branch_protected` loads git-argv.sh: neither caller's library list has
+# to change, and a caller that already sourced it pays nothing. A run.sh that
+# cannot be loaded is a refusal, never a land onto a guessed branch.
+worktree_land_for_session() {  # <worktree path> <root> <sid> -> LANDED | REFUSED
+  local target="${1:-}" root="${2:-}" sid="${3:-}" lib onto
+  [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
+  if ! declare -f session_working_branch >/dev/null 2>&1; then
+    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/run.sh"
+    # shellcheck source=/dev/null
+    [ -r "$lib" ] && . "$lib" 2>/dev/null
+    declare -f session_working_branch >/dev/null 2>&1 \
+      || { _wt_refuse "run-library-unloadable path=${lib}"; return 2; }
+  fi
+  onto="$(session_working_branch "$root" "$sid")" || { _wt_refuse "${onto:-no-bound-plan}"; return 2; }
+  worktree_land "$target" "$onto"
 }
 
 # ---------------------------------------------------------------------------

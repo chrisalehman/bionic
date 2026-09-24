@@ -39,7 +39,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/run.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/run-predicate-test.XXXXXX")" && pwd -P)"
-cleanup() { rm -rf "$SANDBOX"; }
+cleanup() { chmod -R u+rwx "$SANDBOX" 2>/dev/null; rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
 # SUBSTRING, AS A FUNCTION. Nine rows below asked this with a one-line `case` inside a
@@ -702,6 +702,79 @@ call_open_runs "$R"
 expect_eq "open_runs: no plans dir -> exit 1" 1 "$OR_ST"
 expect_empty "open_runs: no plans dir -> prints nothing" "$OR_OUT"
 
+# --- R6i: an UNREADABLE candidate is named, and neither opened nor closed (wave-20 T18) ---
+#
+# (REQ-2, D2; T1's carry-over, research D3's residual.) T1 made a BOUND session's plan answer
+# `bound-unreadable`. The unbound walk still read a mode-000 candidate through `_run_lines`,
+# got no text, found no `## SDLC State`, and dropped it: an unreadable plan vanished from
+# `open_runs` and `active_plan` without a word, and the walk moved on to the next-newest run
+# as if nothing were there. It now prints `bound-unreadable <path>` on STDERR — stdout stays
+# the set of runs it CAN read, so every caller that parses the set is unchanged — and the
+# candidate is in neither answer: not a member of the open set, and never read as closed.
+#
+# PRIVILEGE, CHECKED FIRST (R8h's reason): as root the mode-000 file reads, and every row
+# would pass on a readable plan.
+R="$SANDBOX/r6i"; mkdir -p "$R/.bionic"
+I_OK=$(mk_plan "$R" "readable.plan.md" "4" "- Step 4: in progress")
+I_LOCKED=$(mk_plan "$R" "locked.plan.md" "4" "- Step 4: in progress")
+touch -t 202601010000 "$I_OK"
+touch -t 202603010000 "$I_LOCKED"
+chmod 000 "$I_LOCKED"
+expect_eq "r6i premise: the newest candidate exists and this user cannot read it" "yes" \
+  "$([ -e "$I_LOCKED" ] && [ ! -r "$I_LOCKED" ] && echo yes || echo no)"
+call_open_runs "$R"
+expect_eq "open_runs: an unreadable candidate beside a readable open one -> exit 0, the readable one only" \
+  "0|$I_OK" "$OR_ST|$OR_OUT"
+expect_eq "open_runs: …and names the unreadable one on stderr, never silently" \
+  "bound-unreadable $I_LOCKED" "$(grep -F "$I_LOCKED" "$SANDBOX/.err")"
+call_active_plan "$R"
+expect_eq "active_plan: …selects over the same walk, so it names it too" \
+  "bound-unreadable $I_LOCKED" "$(grep -F "$I_LOCKED" "$SANDBOX/.err")"
+# session_run's own driver is R8's; this is its body, because R8 is further down the file.
+I_SR_ST=0
+I_SR=$(bash -c '. "$1" || exit 1; session_run "$2" "$3"' _ "$LIB" "$R" "u-i" 2>"$SANDBOX/.err") || I_SR_ST=$?
+expect_eq "session_run, unbound: …the fallback is the readable run" "0|fallback $I_OK" "$I_SR_ST|$I_SR"
+expect_eq "session_run, unbound: …and the unreadable candidate is named beside it" \
+  "bound-unreadable $I_LOCKED" "$(grep -F "$I_LOCKED" "$SANDBOX/.err")"
+I_RO=0; bash -c '. "$1" || exit 1; run_open "$2"' _ "$LIB" "$I_LOCKED" 2>/dev/null || I_RO=$?
+expect_eq "run_open: …the same file is neither open (0) nor closed (1): unreadable (3)" 3 "$I_RO"
+# THE PAIRED POSITIVE, ON THE SAME ROOT: one fact moves — the mode — and the file is a member
+# again, newest first, with nothing on stderr.
+chmod 644 "$I_LOCKED"
+call_open_runs "$R"
+expect_eq "open_runs: …the same file readable again -> a member, newest first" \
+  "$(printf '%s\n%s' "$I_LOCKED" "$I_OK")" "$OR_OUT"
+expect_empty "open_runs: …and nothing is named on stderr" "$(cat "$SANDBOX/.err")"
+
+# --- R6j: the ONLY candidate is unreadable -> no open run, and still named ---
+R="$SANDBOX/r6j"; mkdir -p "$R/.bionic"
+J_LOCKED=$(mk_plan "$R" "only.plan.md" "4" "- Step 4: in progress")
+chmod 000 "$J_LOCKED"
+call_open_runs "$R"
+expect_eq "open_runs: the only candidate unreadable -> exit 1, nothing on stdout" "1|" "$OR_ST|$OR_OUT"
+expect_eq "open_runs: …and it is named on stderr" \
+  "bound-unreadable $J_LOCKED" "$(grep -F "$J_LOCKED" "$SANDBOX/.err")"
+chmod 644 "$J_LOCKED"
+
+# --- R6k: a FOLDER in the walk that cannot be opened is named (research D3 N1's shape) ---
+#
+# `find` cannot list a mode-000 folder, so a plan inside it never reaches the loop at all and
+# only the folder can be named — the same rule `plan_unreadable` applies to a bound path.
+R="$SANDBOX/r6k"; mkdir -p "$R/.bionic"
+K_OK=$(mk_plan "$R" "readable.plan.md" "4" "- Step 4: in progress")
+K_IN=$(mk_plan_in "$R" "plans/epic-vault" "vaulted.plan.md" "4" "- Step 4: in progress")
+K_VAULT="$R/.bionic/docs/plans/epic-vault"
+chmod 000 "$K_VAULT"
+call_open_runs "$R"
+expect_eq "open_runs: a plan inside an unopenable folder is not a member" "0|$K_OK" "$OR_ST|$OR_OUT"
+expect_eq "open_runs: …and the folder is named on stderr" \
+  "bound-unreadable $K_VAULT" "$(grep -F "$K_VAULT" "$SANDBOX/.err")"
+chmod 755 "$K_VAULT"
+call_open_runs "$R"
+expect_eq "open_runs: …the folder opened again -> the plan inside is a member" "yes" \
+  "$(rp_contains "$OR_OUT" "$K_IN")"
+expect_empty "open_runs: …and nothing is named on stderr" "$(cat "$SANDBOX/.err")"
+
 # ============================================================
 echo
 section "R7 — session_plan <root> <sid>: the marker's plan= field, and only that"
@@ -891,6 +964,61 @@ expect_eq "session_run: …'bound-closed <ghost>', the path it was promised" \
   "bound-closed $GHOST" "$SR_OUT"
 expect_eq "session_run: …and not the newest plan in the root" "no" \
   "$(rp_contains "$SR_OUT" "$BETA")"
+
+# --- R8h: a bound plan that EXISTS but cannot be read is not a closed run (wave-20 T1,
+# REQ-2, AC-2.1/AC-2.2). Closed means delivered, abandoned or gone; a plan this reader cannot
+# open is none of those, and calling it closed is what let the evidence gate admit every
+# commit against it. Two shapes, and the second is the one nobody reported (research D3 N1):
+# the file at mode 000, and a file whose FOLDER cannot be opened — `-e`, `-f` and `-r` are
+# all false for it, exactly as for a deleted file, so only the nearest existing ancestor can
+# tell the two apart. The ghost row above is the control: a genuinely missing plan under
+# searchable folders stays `bound-closed`.
+#
+# PRIVILEGE, CHECKED FIRST. A suite running as root reads a mode-000 file, and the row would
+# then pass for the wrong reason (research D3 §Risks). The premise rows assert the fixture is
+# really unreadable before the verdict is asked.
+LOCKED="$(mk_plan "$R8" "locked.plan.md" "4" "- Step 4: in progress")"
+chmod 000 "$LOCKED"
+expect_eq "r8h premise: the mode-000 plan exists and this user cannot read it" "yes" \
+  "$([ -e "$LOCKED" ] && [ ! -r "$LOCKED" ] && echo yes || echo no)"
+mk_marker "$R8" "b-locked" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$LOCKED")"
+call_session_run "$R8" "b-locked"
+expect_eq "session_run: bound to a mode-000 plan -> exit 3" 3 "$SR_ST"
+expect_eq "session_run: …'bound-unreadable <locked>'" "bound-unreadable $LOCKED" "$SR_OUT"
+expect_eq "session_run: …and not the newest plan in the root" "no" \
+  "$(rp_contains "$SR_OUT" "$BETA")"
+chmod 644 "$LOCKED"
+call_session_run "$R8" "b-locked"
+expect_eq "session_run: the same plan made readable again -> bound-open, exit 0" \
+  "0|bound-open $LOCKED" "$SR_ST|$SR_OUT"
+
+VAULT="$R8/.bionic/docs/plans/vault"
+mkdir -p "$VAULT"
+VPLAN="$VAULT/vaulted.plan.md"
+cp "$LOCKED" "$VPLAN"
+rm -f "$LOCKED"
+chmod 000 "$VAULT"
+expect_eq "r8h premise: the plan's folder cannot be opened, so the plan reads as absent" "no|no" \
+  "$([ -e "$VPLAN" ] && echo yes || echo no)|$([ -x "$VAULT" ] && echo yes || echo no)"
+mk_marker "$R8" "b-vault" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$VPLAN")"
+call_session_run "$R8" "b-vault"
+expect_eq "session_run: bound to a plan inside an unopenable folder -> exit 3" 3 "$SR_ST"
+expect_eq "session_run: …'bound-unreadable <vaulted>', not 'bound-closed'" \
+  "bound-unreadable $VPLAN" "$SR_OUT"
+# Removed, not just reopened: an open plan at depth 2 under plans/ is a candidate, and a
+# fresh mtime would make it the root's newest — every later fallback row in r8 names beta.
+chmod 755 "$VAULT"; rm -rf "$VAULT"
+call_active_run "$R8"
+expect_eq "r8h cleanup: active_run's root-keyed answer is beta again" "$BETA" "$AR_OUT"
+
+# The control, asked again after the two above, from a DEEPER missing path: a plan whose
+# folder does not exist at all, under folders that open. Nothing here is unreadable, so the
+# nearest existing ancestor is searchable and the answer is still the one it always was.
+DEEPGHOST="$R8/.bionic/docs/plans/nowhere/ghost.plan.md"
+mk_marker "$R8" "b-deepghost" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$DEEPGHOST")"
+call_session_run "$R8" "b-deepghost"
+expect_eq "session_run: a missing plan in a missing folder -> still 'bound-closed', exit 2" \
+  "2|bound-closed $DEEPGHOST" "$SR_ST|$SR_OUT"
 
 # --- R8g: line endings on the marker ---
 printf 'plan=%s\r\nengaged_at=2026-09-04T10:00:00Z\r\n' "$ALPHA" \

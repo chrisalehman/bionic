@@ -171,6 +171,13 @@ if ! declare -F fill_ready_set >/dev/null 2>&1; then
   . "$_STOP_LIB_DIR/fill.sh"
 fi
 
+# THE FILL LEDGER'S PATH (wave-20 REQ-5, D5) and the Patrol verdict: patrol.sh owns both, and
+# the recorder below writes to the path `session-poker.sh fill-report` reads from.
+if ! declare -F fill_ledger_path >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/patrol.sh"
+fi
+
 # ─── FILE SCOPE: the hook's own directory, resolved at most once ─────────────
 #
 # THREE VERDICTS ASKED THE SAME QUESTION THREE TIMES (REQ-10, T11): `stop_landing_gate`
@@ -448,6 +455,12 @@ case "$BIONIC_RUN_WORD" in
     ;;
   bound-closed)
     fold_advise "context-spend: bound plan closed — $PLAN; this session has no open run"; _adv=1
+    return "$_adv"
+    ;;
+  bound-unreadable)
+    # (wave-20 T1, REQ-2, AC-2.3.) Named, never "no open run": the plan is there and this
+    # instrument cannot read the step it would record. patrol-duties holds the turn for it.
+    fold_advise "context-spend: bound plan unreadable — $PLAN"; _adv=1
     return "$_adv"
     ;;
   none|*)
@@ -1434,10 +1447,15 @@ return 2
 #   - the last user prompt is not a Patrol tick           -> pass, silent
 #   - both duties done since that prompt                  -> pass, silent
 #   - either duty missing                                 -> REFUSE, naming which
-#   - no `poker: FILL` line in the turn                   -> pass, silent (fill arm inert)
-#   - every named task dispatched, or a decline present  -> pass, silent
-#   - a named task neither dispatched nor declined       -> REFUSE, naming that task
-#   - a marker or a decline read out of a TOOL RESULT      -> ignored (not the orchestrator's)
+#   - a live ledger with no free slot or no ready row      -> pass, silent (wave-20 Δ7: the
+#                                                           ready set and occupancy computed)
+#   - the machine reads HOLD or EMERGENCY                 -> pass, silent (measured here)
+#   - a decline at a line start of the model's own text   -> pass, silent
+#   - a free slot and a ready row after the launches      -> REFUSE, naming the ready rows
+#   - a printed FILL or withheld line, anywhere           -> ignored (advice, not evidence)
+#   - a decline in a tool result, thinking or a tool input-> ignored (not the model's record)
+#   - a marker read out of a TOOL RESULT                  -> ignored (not the orchestrator's)
+#   - a Patrol marker turn with no verb=tick stamp since  -> REFUSE, naming the tick (REQ-6)
 #   - no clear/resume marker anywhere in the transcript   -> pass, silent (ritual arm inert)
 #   - CronList precedes any CronCreate since the marker   -> pass, silent (ritual arm inert)
 #   - a CronCreate since the marker with no prior CronList-> REFUSE, naming the ritual
@@ -1462,7 +1480,9 @@ return 2
 #
 # IT WRITES NOTHING AND DECIDES NOTHING ELSE. No state file, no roster append, no
 # stamp: this is a gate, and gates may only read (TDD §3.2). It takes no view on
-# whether the tick's WORK was right, only on whether the two duties happened.
+# whether the tick's WORK was right, only on whether the two duties happened. The fill
+# ledger is written by `stop_fill_ledger` (below), a recorder hooks/stop.sh runs before
+# this gate, never by the gate itself (wave-20 REQ-5).
 #
 # Registered once on the Stop channel in hooks/hooks.json, and scoped by ENGAGEMENT — this
 # session having invoked canonical-sdlc — not by the repo merely holding an open plan
@@ -1475,9 +1495,12 @@ return 2
 
 stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
-  local TRANSCRIPT HOOK_DIR PLAN PLAN_NAME SCAN_WINDOW_LINES STREAM
+  local TRANSCRIPT HOOK_DIR PLAN PLAN_NAME STREAM
   local RITUAL RITUAL_REASON TICK_MARK VERDICT FILL_MISSING FILL_REASON
-  local FILL_READY FILL_WIDTH FILL_OPEN FILL_SRC FILL_FACT FILL_FIX _FILL_ROW
+  local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON _FF_SHOWN _FF_MORE _FF_ID
+  local -a _FF_IDS
+  local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
+  local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
   local FACT FIX REASON
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
@@ -1538,6 +1561,21 @@ case "$BIONIC_RUN_WORD" in
     fold_advise "patrol-duties-gate: bound plan closed — $PLAN; this session has no open run"; _adv=1
     PLAN=""
     ;;
+  bound-unreadable)
+    # THE TURN IS HELD, ONCE (wave-20 T1, REQ-2, D2; AC-2.3). A bound plan that is there and
+    # cannot be read is a run this session may still be in, with every wall that measures
+    # against it blind — the commit gate refuses, the tick cannot fill, the budget cannot be
+    # read. Saying so on the advisory channel alone lets the turn end on it. The refusal is
+    # once per turn by construction: hooks/stop.sh reads `stop_hook_active` ahead of every
+    # verdict, so the re-entered Stop passes and this cannot loop.
+    fold_advise "patrol-duties-gate: bound plan unreadable — $PLAN"
+    fold_block block stop "the bound plan cannot be read" "restore read access to the plan" \
+      "The plan this session is bound to exists and cannot be read: $PLAN
+It is not closed and it is not gone, so no other plan is read in its place. Until it can be
+read, commits against it are refused and the tick cannot fill from it.
+Fix: restore read access (chmod u+r on the plan, u+rx on its folder)."
+    return 2
+    ;;
   none|*)
     PLAN=""
     ;;
@@ -1557,163 +1595,14 @@ PLAN_NAME=""
 
 # ---------- reading the turn ----------
 #
-# One pass, two stages. jq flattens each transcript line into at most one record
-# per event we care about; awk then folds that stream, resetting at every user
-# PROMPT so that what survives to END describes the LAST turn only.
-#
-# A user-typed entry is a PROMPT only if it carries text. The `user` type is also
-# how the CLI records every TOOL RESULT, and treating those as prompts would end
-# the tick's turn at its first tool call — the wall would then be permanently
-# silent, passing every tick in the fleet while looking installed and green.
-#
-# Newlines and tabs are squashed inside values because the stream is
-# line-and-tab delimited; a prompt is many lines long and would otherwise forge
-# records. Nothing downstream reads a value except by substring, so squashing
-# costs no fidelity.
-# A MARK line is emitted for EITHER marker, and a DECLINE line for the fill duty's
-# explicit decline, on any record the ORCHESTRATOR AUTHORED whose text contains it —
-# independent of the USER/TOOL typing below, and independent of the record's `type`,
-# because the marker is a literal substring search over "a transcript record whose
-# content contains" it, not a field read (STOPGATES/1).
-#
-# WHICH ROWS ARE THE ORCHESTRATOR'S (review F2). Every file the agent reads enters the
-# transcript as a `tool_result` element of a `user` record. Read raw, that made a README,
-# a fixture or a code comment carrying the literal `fill-declined:` discharge the AC-29
-# fill duty nobody had declined — fail-open on the exact wall AC-29 is — and made a file
-# carrying the /clear or resume marker force a spurious ritual refusal. So `$auth` below
-# is the row's AUTHORED text and these two markers are read only out of it:
-#   assistant, or any other type   -> the whole raw line. An assistant record's content is
-#                                     the model's own — text, thinking, tool_use inputs —
-#                                     and no other type carries a tool result. A
-#                                     SessionStart report reaches the transcript as one of
-#                                     those other types, which is how `source: resume`
-#                                     still arrives (pinned by tests §53).
-#   user                           -> the content when it is a STRING (the CLI's own
-#                                     command records, the operator's own typing), else
-#                                     ONLY the `text` elements of the array. Never a
-#                                     `tool_result` element.
-#   sidechain / agent-context      -> nothing. A subagent's decline is not the
-#                                     orchestrator's, the same exclusion every other arm
-#                                     of this gate makes.
-#   unparsable                     -> nothing. A line that is not JSON has no author.
-# The type-agnostic substring read is unchanged WITHIN a qualifying row; what is scoped is
-# which rows qualify.
-#
-# ONE MORE RAW-TEXT RECORD, DELIBERATELY NOT SCOPED, for the fill duty (AC-29). The tick's
-# `poker: FILL <ids>` line arrives as the CONTENT of a Bash tool result — a `user`-typed
-# entry whose content is an array, which the prompt rule below deliberately does not treat
-# as a prompt, and which the scoping above excludes — so it is read off the RAW line. That
-# is the one direction where a planted marker costs a false BLOCK rather than a false
-# silence, and this gate blocks once.
-#
-# The ids are cut at the first `\n` or `"` in the RAW line, which are the escaped newline and
-# the closing quote of the JSON string the line is embedded in — so the record carries the
-# FILL line and nothing that followed it.
-#
-# THE STAND-DOWN LINE (T1, D1) arrives the same way and is read off the RAW line for the same
-# reason. It differs from the FILL in one respect: the tick prints ONE LINE PER NAME, so every
-# occurrence in the record is SCANNED rather than the first one split out of it — a
-# stand-down of three agents is three lines inside one tool result. Its decline —
-# `standdown-declined: <name> <reason>` — is read only out of AUTHORED text, exactly as
-# `fill-declined:` is and for the identical reason: a file the orchestrator merely READ that
-# happens to carry the literal must not discharge a duty nobody answered. The decline is per
-# AGENT because the instruction is per agent, so the name is captured with it.
-#
-# THE WINDOW (review, performance finding 1). This used to read the whole transcript on
-# every Stop of an open run — one jq pass from byte zero, ~85 ms of CPU per MB, 4.3 s over
-# the 50 MB a long wave session reaches, rising monotonically for the life of the run. Every
-# fact this scan needs is a "since the most recent X" fact — the last user prompt, the last
-# clear/resume marker, the last FILL line — so a window suffices provided it holds a whole
-# orchestrator turn. 2000 lines does: the largest single turn in this repo's own two busiest
-# wave transcripts (494cf1b6, b1a850c1, measured 2026-09-03) is 264 records, so the window
-# carries ~7.5x the worst turn observed, and 5x hooks/context-spend.sh's `tail -n 400` for a
-# scan that must reach further back than that hook's does.
-#
-# WHAT SCROLLING OUT COSTS, named rather than left to be discovered: when the clear/resume
-# marker is older than the window, the ritual arm reads "no marker" and goes INERT — it does
-# not refuse. That is FAIL-OPEN, and it is the right direction for a marker whose whole
-# purpose is to catch the FIRST stop after a resume: by the time 2000 records have gone by,
-# the ritual is either long done or long moot. Same for the tick-duties and fill arms, which
-# reset at the last user prompt anyway and can only lose a turn that is 2000 records old.
-SCAN_WINDOW_LINES=2000
-STREAM=$(tail -n "$SCAN_WINDOW_LINES" "$TRANSCRIPT" 2>/dev/null | jq -Rr '
-  . as $line
-  | (($line | fromjson?) // null) as $r
-  | (
-      if $r == null then ""
-      elif (($r.isSidechain // false) == true) then ""
-      elif (((($r.agentId // $r.agent_id) // "") | tostring) != "") then ""
-      elif $r.type == "user" then
-        ( if ($r.message.content | type) == "string" then $r.message.content
-          else ([$r.message.content[]? | select(.type == "text") | .text] | join(" "))
-          end )
-      else $line
-      end
-    ) as $auth
-  | (
-      if ($r != null and $r.type == "user" and (($r.message.content // []) | type) == "array") then
-        ([$r.message.content[]?
-          | select(.type == "tool_result")
-          | (if (.content | type) == "string" then .content
-             elif (.content | type) == "array" then
-               ([.content[]? | select(.type == "text") | .text] | join("\n"))
-             else "" end)
-         ] | join("\n"))
-      else "" end
-    ) as $trc
-  | (if (($auth // "") | contains("<command-name>/clear</command-name>")) then "MARK\tclear" else empty end),
-    (if (($auth // "") | contains("source: resume")) then "MARK\tresume" else empty end),
-    (if ($line | contains("poker: FILL ")) then
-       "FILL\t" + (($line | split("poker: FILL ")[1] | split("\\n")[0] | split("\"")[0]))
-     else empty end),
-    (if (($auth // "") | contains("fill-declined:")) then "DECLINE\t1" else empty end),
-    # THE WITHHELD LINE (wave-19 REQ-4, D6; ADR-034 decision 3; REQ-4b R5): `poker: fill
-    # withheld -- <REASON> <measurement>`, printed by the tick on its HOLD and EMERGENCY
-    # paths. Read off the PARSED tool_result content of a USER record ($trc, above) -- the
-    # model quoting the words in its own text is not the tick having printed them (that
-    # exclusion is $r.type == "user" and the tool_result selector, unchanged from before).
-    #
-    # ANCHORED, not a bare substring (R5, fixed here). A bare `contains` over the raw
-    # transcript line also matched a tool_result that merely ECHOED the phrase -- reading this
-    # very test file with `cat`/`sed`, or `grep -rn "poker: fill withheld -- ..." tests` --
-    # because the literal sits in a `type: user` record either way, and a `tool_result` IS a
-    # user record. `say()` (hooks/session-poker.sh:350) prints the line as
-    # `printf "poker: %s\n"`, so in the ticks OWN stdout the phrase always starts a line --
-    # either the first line of the tool_result content, or immediately after an embedded
-    # `\n`. A `grep -rn` hit carries a `file:line:` prefix first; a `cat`/`sed` of the source
-    # line carries the surrounding shell text (` echo "...`) first -- neither lands the phrase
-    # at that anchor, which is the gap this regex tests for. The reason is still the first word
-    # after the dash (raw or `\u2014`-escaped), and only the fold below decides which reasons
-    # exempt.
-    (if ($trc | test("(^|\n)poker: fill withheld")) then
-       "WITHHELD\t" + (($trc | split("poker: fill withheld")[1] // "")
-                        | sub("^[^A-Za-z]*(u2014)?[^A-Za-z]*"; "")
-                        | ([scan("^[A-Z]+")] | .[0] // ""))
-     else empty end),
-    ($line | [scan("poker: STANDDOWN ([A-Za-z0-9_.-]+)")] | .[] | "STANDDOWN\t" + .[0]),
-    (($auth // "") | [scan("standdown-declined:[ \t]*([A-Za-z0-9_.-]+)")] | .[] | "SD-DECLINE\t" + .[0]),
-    (
-      ($r // empty)
-      | select((.isSidechain // false) != true)
-      | select((((.agentId // .agent_id) // "") | tostring) == "")
-      | if .type == "user" then
-          ( if (.message.content | type) == "string" then .message.content
-            else ([.message.content[]? | select(.type == "text") | .text] | join(" "))
-            end ) as $t
-          | select(($t // "") != "")
-          | "USER\t" + ($t | gsub("[\n\t\r]"; " "))
-        elif .type == "assistant" then
-          .message.content[]?
-          | select(.type == "tool_use")
-          | "TOOL\t" + (.name // "")
-            + "\t" + (((.input.file_path // .input.path // .input.command // "") | tostring) | gsub("[\n\t\r]"; " "))
-            + "\t" + (([.input.name?, .input.description?, .input.subagent_type?, .input.prompt?,
-                        .input.task_id?]
-                       | map(select(. != null) | tostring) | join(" ")) | gsub("[\n\t\r]"; " "))
-        else empty
-        end
-    )
-' 2>/dev/null) || STREAM=""
+# THE TURN'S FACTS ARE COMPUTED ONCE PER STOP, by `stop_turn_facts` below, and shared with the
+# fill ledger's recorder (wave-20 REQ-5, D5): `hooks/stop.sh` runs the recorder BEFORE its
+# re-entry guard, so on an ordinary Stop the transcript pass and the fill arithmetic have
+# already run by the time this duty asks, and the ledger line and this verdict are one
+# computation — they cannot disagree. The stream's records, the window and the scoping of
+# each marker are documented there.
+stop_turn_facts || return "$_adv"
+STREAM="$_ST_STREAM"
 [ -n "$STREAM" ] || return "$_adv"
 
 # ---------- THE RESUME/CLEAR RITUAL (AC-3), judged FIRST ----------
@@ -1802,257 +1691,131 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
   }
 ')
 
-# ---------- THE THIRD DUTY: a printed FILL is answered before the turn ends (AC-29) ----
+# ---------- THE THIRD DUTY: no turn ends on a fillable gap (AC-29; wave-20 REQ-5, Δ7) ----
 #
 # WHY THIS IS A WALL AND NOT A LINE IN THE PROMPT. The tick can compute the gap between the
 # budget and the roster, and it can name the tasks that are ready — but it cannot dispatch,
 # and a recommendation nobody is obliged to answer is how this repo's own 1.4.0 wave ran six
-# writers against a budget of twenty-two. The turn's END is the only moment at which
-# "the FILL went unanswered" is a fact, so it is the moment this asks.
+# writers against a budget of twenty-two. The turn's END is the only moment at which "the
+# gap went unfilled" is a fact, so it is the moment this asks.
 #
-# ANSWERED MEANS EITHER: an `Agent` tool_use naming the task, or an explicit
-# `fill-declined: <reason>` anywhere in the turn. The decline is not a loophole — it is the
-# point. There are good reasons not to fill (a dependency landing this minute, peers not yet
-# idle, a merge in flight), and every one of them is worth one line in the record. What is
-# refused is SILENCE.
+# THE WALL COMPUTES THE TURN'S FACTS; IT OVERHEARS NOTHING (Δ7; ADR-036 decision 3). Until
+# wave-20 this duty read the tick's printed `poker: FILL <ids>` and `poker: fill withheld`
+# lines out of the transcript and answered each printed id by finding it in an Agent call's
+# words. Every way of planting those lines reproduced (research D1 §4): the model's own prose
+# planted a FILL, a `cat` of a file planted a HOLD exemption, a grep of `fill-declined:`
+# planted a decline, and an Agent prompt that mentioned an id answered it. Now:
+#   - the READY SET is the plan's (`fill_ready_set`, T10's prerequisite graph), untrimmed;
+#   - the OCCUPANCY is the roster's (`roster_open_names`), which a dispatch joins at launch,
+#     so it already counts this turn's launches when the Stop fires;
+#   - the PRESSURE STATE is `resources_pressure`'s, the reading the tick's HOLD and EMERGENCY
+#     come from, taken here rather than read back out of the tick's words;
+#   - the only transcript fact is a DECLINE, and only the model's own: a main-thread assistant
+#     `text` block, `fill-declined: <reason>` at the start of a line.
+# JUDGED BY COUNT: after the turn's launches, `missed = min(free slots, ready rows this turn did
+# not launch)`, and a turn with `missed > 0` on a machine that reads `ok` and no decline is
+# refused once, naming the first `missed` of those rows. No id is ever matched against a
+# dispatch's PROMPT words. A dispatched row leaves the plan's ready set when the orchestrator
+# ledgers it `active` — "Ledger the dispatch, not the return" (dispatch.md; A-T11.1) — and until
+# then the turn that launched it is not charged for it: its dispatch NAME (`fill_row_launched`,
+# the inverse of `fill_name`) takes it out of what the turn missed (wave-20 T11b, A-T11b.2).
+# The headline says how many of the ready rows the turn launched and names the ones it did not.
 #
-# NAMED, not counted: a turn that dispatched two of three named tasks is missing one, and
-# the reason says which. An id is matched on a WORD BOUNDARY inside the dispatch's own
-# fields — its name, description, subagent_type and prompt — so `ONE` is not found inside
-# `PHONE`, and only ids shaped like task ids (letters, digits, `_`, `.`, `-`) are ever
-# echoed back into the refusal. A `.` in an id is a LITERAL dot in that boundary test, not
-# the regex wildcard it would otherwise be — see the escape in the fold below.
-#
-# Folded over the same stream, resetting at every user PROMPT exactly as the duties fold
-# above it does. It is no longer inert on a turn with no FILL line in it: since wave-18
-# (REQ-3) a turn with no TICK in it is judged against the ready set computed just below, and
-# since wave-19 (REQ-4) so is a tick turn that printed no FILL. What stays inert is a turn
-# with nothing ready, a turn the tick withheld for a machine fact, and a declined turn.
-# ---------- THE READY SET, COMPUTED RATHER THAN OVERHEARD (REQ-3, AC-3.2) ----------
-#
-# THE INVARIANT IS THE RUN'S STATE, NOT THE PATROL'S CADENCE: no turn past Step 3 ends with a
-# fillable gap. `fill_ledger_live` is the cheap gate — one read of `current:`, and a run at
-# Steps 0-3, a run with no plan, or a field that will not parse stops here without touching
-# the table. What follows costs one table read and is paid on the turns where the answer
-# matters.
-#
-# THE WIDTH IS THE SAME NUMBER THE TICK NAMES, NOT A SEPARATE "CONSERVATIVE" ONE (Step-6
-# review R1, wave-18 T2b; fill.sh's own docblock: "What may not differ is the READY SET").
-# The ready set is a function of the width, so a caller passing the declared ceiling while
-# the tick passes the pressure-sampled rung is the two-surfaces-disagree failure the library
-# was extracted to end, moved from the set computation into its argument: on a loaded
-# machine the tick orders two rows against the rung and this wall would refuse the turn
-# naming up to the ceiling's wider count, blocking a dispatch against rows the tick's own
-# turn just declined to order. So this reads `pressure_level` the way the tick's own
-# `rung_report` does (lib/resources.sh, ceiling = the declared `writers=`) and falls back to
-# the ceiling only when the rung will not parse — `SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"`
-# in hooks/session-poker.sh, restated here rather than shared: the width is one line of
-# arithmetic over a reading both sides take from `pressure_level`, and this file and the tick
-# are bound on it by a test (patrol-duties-gate 69, session-poker 12l2), not a delegation. `pressure_level` SAMPLES only when the ring is cold, and by the
-# time a Stop fires the ring has almost always been sampled already this turn — every
-# engaged Bash call appends one (hooks/execution-recorder.sh, spec AC-15) — so on the turns
-# where the tick and this wall could disagree, both are reading the same warm ring; the rare
-# cold-ring sample this pays is the ring's own stated contract for a first reader ("a first
-# consumer on a cold machine must have something to answer from", resources.sh), not a new
-# one invented here.
-#
-# THE OCCUPANCY IS THE ROSTER'S, NOT THE PLAN'S (wave-19 REQ-5, D6; ADR-034 decision 2).
-# This used to count the plan's `active` column — a hand-maintained rendering of what is
-# running — while the tick counted the roster, so the two surfaces measured occupancy two
-# ways and disagreed exactly when the ledger lagged the fleet (audit V-3). Both now read the
-# one source: THIS session's `roster-state/v1` rows, folded by name (latest row wins, rows
-# of another session skipped — the fold the landing sweep above and the sweeper's own
-# `latest_rows` both use), minus every name the sweeper ledger has acked. One awk over the
-# two files; no sweeper fork, no transcript read.
-#
-# THE DIRECTION OF ERROR: ONE PREDICATE, NOT TWO (wave-19 T2d, audit V-2; ADR-034 decision 2).
-# This used to say the wall refuses less, never more, because the tick's `open` was a SUBSET
-# of this count: it dropped a row whose verdict was MET or WAIVED, then trimmed by transcript
-# liveness — two facts this wall did not recompute. Audit V-2 found that subset relationship
-# false whenever the ledger lagged the roster, so the tick's fill and this wall now count the
-# SAME thing: every roster row of this session that is not yet acked. A `landing-swept/v1`
-# marker does NOT close a row here: the marker records that a landing was seen, not that the
-# agent left (ADR-034 decision 1 — the ack is the one terminal state), and a swept-but-unacked
-# row stays open in both counts alike. A row stays in this count until it is acked; the Patrol
-# acks a MET row once a fresh panel shows its agent gone, after its own STANDDOWN line prints.
-# The one remaining ordering edge: an ack written INSIDE a tick turn, after that tick has
-# already printed its own occupancy line, makes this wall's later read one row lower than the
-# number the tick printed for that same turn — a truthful refusal of a row the tick's own next
-# read would also drop, not a disagreement between the two. A roster or ledger that is a
-# symlink is not read, and the duty is skipped rather than judged on zero — zero is the
-# direction that refuses more.
+# THE DECLINE IS NOT A LOOPHOLE — it is the point. There are good reasons not to fill (a
+# dependency landing this minute, a merge in flight), and every one of them is worth one line
+# in the record; the fill ledger keeps it with its idle cost. What is refused is SILENCE.
 #
 # THE BUDGET IS A MEASUREMENT THE PLAN CARRIES (wave-19 REQ-3, D5; ADR-035). Step 0 writes
-# `parallel-budget: writers=N …` from `resources_probe` then `resources_budget`, and the
-# governing-skill hook refuses a plan Write without it — so a live ledger reaching this line
-# without a readable `writers=` is a plan that slipped past that wall, and the turn is
-# refused once, naming the key, instead of ending in silence. The backstop fires exactly
-# where the missing width would have hidden a fillable row: a live ledger (past Step 3)
-# whose `current:` names a unit the table can answer, with at least one row ready at that
-# unit. With nothing ready a keyed plan ends the turn in the same silence, so the absence
-# silenced nothing and is not refused here (the tick's note still names it every tick). A
-# `current:` the table cannot answer is the tick's unreadable-`current:` withhold, which the
-# tick takes BEFORE its own budget note, and it stays silent here too.
-FILL_READY=""
-FILL_NO_BUDGET=0
-if [ -n "$PLAN" ] && fill_ledger_live "$PLAN"; then
-  FILL_CEILING="$(plan_frontmatter_get "$PLAN" parallel-budget 2>/dev/null)"
-  case "$FILL_CEILING" in
-    *writers=*) FILL_CEILING="${FILL_CEILING#*writers=}"; FILL_CEILING="${FILL_CEILING%% *}" ;;
-    *) FILL_CEILING="" ;;
-  esac
-  case "$FILL_CEILING" in ''|*[!0-9]*) FILL_CEILING="" ;; esac
-  FILL_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
-  FILL_ACKS="$BIONIC_ROOT/.bionic/tmp/sweeper-${BIONIC_SID}.state"
-  if [ -z "$FILL_CEILING" ]; then
-    # "AT LEAST ONE ROW READY AT THE UNIT" IS THE READY SET AT WIDTH ONE: the same step token,
-    # the same `units_ready`, one parse of the table (wave-19 REQ-6, D7) instead of two calls
-    # that each read it.
-    [ -n "$(fill_ready_set "$PLAN" 1 0 2>/dev/null)" ] && FILL_NO_BUDGET=1
-  elif [ -L "$FILL_ROSTER" ] || [ -L "$FILL_ACKS" ]; then
-    :   # an unreadable occupancy: skipped, never judged on zero (the docblock above)
-  else
-    # THE RUNG, FALLING BACK TO THE CEILING — the same fallback direction
-    # `SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"` takes in the tick (R1, above).
-    FILL_RUNG="$(pressure_level "$FILL_CEILING" 2>/dev/null)" || FILL_RUNG=""
-    case "$FILL_RUNG" in ''|*[!0-9]*) FILL_RUNG="" ;; esac
-    FILL_WIDTH="${FILL_RUNG:-$FILL_CEILING}"
-    # THE OCCUPANCY, ONE PASS (the docblock above). The ack ledger is read first, then the
-    # roster; either may be absent (no dispatch yet, no ack yet), and only files that exist
-    # are handed to awk, so an absent one is an empty set rather than an error.
-    set --
-    [ -f "$FILL_ACKS" ] && set -- "$@" "$FILL_ACKS"
-    [ -f "$FILL_ROSTER" ] && set -- "$@" "$FILL_ROSTER"
-    FILL_OPEN=0
-    if [ "$#" -gt 0 ]; then
-      FILL_OPEN="$(awk -v rpfx="roster-state/${ROSTER_VERSION}|" -v lpfx="sweeper-ledger/v1|" \
-                       -v lfile="$FILL_ACKS" -v sid="$BIONIC_SID" '
-        FILENAME == lfile {
-          if (index($0, lpfx) != 1) next
-          ev = ""; an = ""
-          nf = split($0, f, "|")
-          for (i = 1; i <= nf; i++) {
-            if (ev == "" && substr(f[i], 1, 6) == "event=") ev = substr(f[i], 7)
-            if (an == "" && substr(f[i], 1, 5) == "name=")  an = substr(f[i], 6)
-          }
-          # An empty name closes nothing: read loosely it would close the whole roster.
-          if (ev == "ack" && an != "") acked[an] = 1
-          next
-        }
-        index($0, rpfx) != 1 { next }
-        {
-          name = ""; rsession = ""
-          nf = split($0, f, "|")
-          for (i = 1; i <= nf; i++) {
-            if (name == ""     && substr(f[i], 1, 5) == "name=")    name     = substr(f[i], 6)
-            if (rsession == "" && substr(f[i], 1, 8) == "session=") rsession = substr(f[i], 9)
-          }
-          if (rsession != "" && rsession != sid) next
-          if (name == "") name = "(unnamed)"
-          gsub(/\t/, " ", name)
-          if (!(name in seen)) { seen[name] = 1; order[++n] = name }
-        }
-        END {
-          c = 0
-          for (i = 1; i <= n; i++) if (!(order[i] in acked)) c++
-          print c + 0
-        }
-      ' "$@" 2>/dev/null)" || FILL_OPEN=0
-      case "$FILL_OPEN" in ''|*[!0-9]*) FILL_OPEN=0 ;; esac
-    fi
-    # ONE LINE, SPACE-SEPARATED, because that is the shape the fold below already reads the
-    # tick's own ids in. A trailing separator opens an empty field, which the id filter in
-    # that fold drops on its own. Joined by parameter expansion, not a `tr` process: the
-    # substitution drops the last newline, so the separator it stood for is put back.
-    FILL_READY="$(fill_ready_set "$PLAN" "$FILL_WIDTH" "$FILL_OPEN")"
-    [ -z "$FILL_READY" ] || FILL_READY="${FILL_READY//$'\n'/ } "
-  fi
-fi
-
-FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" -v ready="$FILL_READY" '
-  $1 == "USER" {
-    t = $2; sub(/^[ \t]+/, "", t)
-    tick = (index(t, mark) == 1)
-    fills = ""; declined = 0; withheld = 0; agents = " "
-    next
-  }
-  $1 == "FILL"    { fills = $2; next }
-  $1 == "DECLINE" { declined = 1; next }
-  $1 == "WITHHELD" { if ($2 == "HOLD" || $2 == "EMERGENCY") withheld = 1; next }
-  $1 == "TOOL" {
-    if ($2 == "Agent") agents = agents $3 " " $4 " "
-    next
-  }
-  END {
-    # TWO SOURCES OF IDS, ONE BOUNDARY TEST. A tick turn that printed FILL is answered for
-    # the ids it printed, in its own wording below. Every other turn — a turn with no tick in
-    # it, AND a tick turn that printed no FILL (wave-19 REQ-4, D6) — is judged against the
-    # ready set this gate computed; the tick no longer exempts a turn by printing nothing.
-    # The one exemption is the withheld line, and only for HOLD or EMERGENCY: a machine fact
-    # the plan cannot hold (ADR-034 decision 3). Every other reason, and every other printed
-    # line ("the budget is full" included), passes or fails on the arithmetic alone — a
-    # full budget on the roster leaves the ready set empty, so it passes on its own.
-    # A decline answers any of them.
-    if (declined) exit
-    if (withheld) exit
-    src = "FILL"; want = fills
-    if (!tick || want == "") { src = "GAP"; want = ready }
-    if (want == "") exit
-    n = split(want, ids, /[ \t]+/)
-    missing = ""
-    for (i = 1; i <= n; i++) {
-      id = ids[i]
-      if (id !~ /^[A-Za-z0-9_.-]+$/) continue
-      # THE ID IS DATA, THE PATTERN IS CODE. The boundary test below is a DYNAMIC regex
-      # and the id is spliced into it, so every metacharacter the validity filter above
-      # admits has to be neutralised first or it reads as syntax. `.` is the whole class:
-      # `-` is special only inside a bracket expression and is spliced outside one, `_`
-      # is never special. Unescaped, a FILL for `a.b` was answered by a dispatch naming
-      # `axb` — a false negative on the wall, the fail-open direction (review F1).
-      pat = id
-      gsub(/\./, "[.]", pat)
-      if (agents ~ ("(^|[^A-Za-z0-9_.-])" pat "([^A-Za-z0-9_.-]|$)")) continue
-      missing = missing (missing == "" ? "" : " ") id
-    }
-    # THE SOURCE TRAVELS WITH THE IDS, because the two refusals say different true things
-    # and neither sentence is true of the other turn.
-    if (missing != "") print src "\t" missing
-  }
-')
-
+# `parallel-budget: writers=N …` and the governing-skill hook refuses a plan Write without it,
+# so a live ledger reaching this wall without a readable `writers=` is a plan that slipped past
+# that wall, and the turn is refused once, naming the key — exactly where the missing width
+# would have hidden a fillable row (at least one row ready at width one). `stop_turn_facts`
+# computes that too.
 FILL_SRC=""
-if [ "$FILL_NO_BUDGET" = 1 ]; then
-  # THE BACKSTOP, NAMED (REQ-3 AC-3.2). No ids: without a width there is no ready set to
-  # name, and inventing one would be a second budget. The fix is the plan edit Step 0 makes.
-  FILL_MISSING=""
+FILL_MISSING=""
+if [ "$_ST_NO_BUDGET" = 1 ]; then
   FILL_SRC="BUDGET"
-elif [ -n "$FILL_MISSING" ]; then
-  FILL_SRC="${FILL_MISSING%%$'\t'*}"
-  FILL_MISSING="${FILL_MISSING#*$'\t'}"
+elif [ "${_ST_MISSED:-0}" -gt 0 ] 2>/dev/null && [ "$_ST_STATE" = ok ] && [ -z "$_ST_DECLINED" ]; then
+  FILL_SRC="GAP"
+  FILL_MISSING="$_ST_NAMED"
 fi
 
 if [ "$FILL_SRC" = "BUDGET" ]; then
   FILL_REASON="Fill budget unreadable: the run's ledger is live past Step 3, and its plan (${PLAN_NAME}) carries no parallel-budget: line with a writers=<digits> field, so no turn can be judged for a fillable gap. The budget is a measurement Step 0 writes — resources_probe, then resources_budget over what it printed — verbatim into the plan's frontmatter as parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe (source=override when the probe cannot read the machine). Add it, then stop again — this gate blocks once."
   FILL_FACT="the plan carries no parallel-budget: writers="
   FILL_FIX="add Step 0's budget line"
-elif [ -n "$FILL_MISSING" ] && [ "$FILL_SRC" = "GAP" ]; then
-  # THE INVARIANT'S OWN WORDING. "The tick printed FILL" is not true of this turn — no tick
-  # fired in it — and a refusal that said so would send its reader looking for a line that is
-  # not in the transcript. What IS true is the state: the ledger is live, these rows are
-  # ready, and nothing was sent. The discharge is the same one the printed duty has, so one
-  # answer satisfies both arms.
-  FILL_REASON="Fillable gap at turn end: the run's ledger is live and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row, or write a line \"fill-declined: <reason>\" saying why not, then stop again — this gate blocks once."
-  FILL_FACT="rows are ready and this turn dispatched none"
-  FILL_FIX="dispatch each row, or decline"
-elif [ -n "$FILL_MISSING" ]; then
-  FILL_REASON="Patrol fill unanswered: the tick printed FILL and this turn neither dispatched nor declined ${FILL_MISSING}. Dispatch each named task, or write a line \"fill-declined: <reason>\" saying why not, then stop again — this gate blocks once."
-  FILL_FACT="the tick printed FILL and nothing answered"
-  FILL_FIX="dispatch each task, or decline"
+elif [ "$FILL_SRC" = "GAP" ]; then
+  # THE INVARIANT'S OWN WORDING, and the only one left: what is true of every refused turn is
+  # the state — the ledger is live, these rows are ready, slots are free after this turn's
+  # launches — whether or not a tick fired in it.
+  FILL_REASON="Fillable gap at turn end: the run's ledger is live, ${_ST_FREE} slot(s) are free after this turn's launches, and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row and ledger it active in ## Tasks (the wall reads the plan and the roster, never the Agent call's words), or write \"fill-declined: <reason>\" at the start of a line of your own reply, then stop again — this gate blocks once."
+  # THE HEADLINE COUNTS AND NAMES (wave-20 T11b; Step-6 review R4). "dispatched none" was false
+  # beside a ledger line that named the turn's launches. It now says how many of the plan's
+  # ready rows the turn launched and names the ones it did not — never a row it launched. The
+  # user line has width.sh's 100 columns, so the fact keeps to 55 of them: every name when they
+  # all fit, else the names that fit within 46 and "+N more" for the rest, which the detail
+  # below names in full.
+  FILL_FACT="launched ${_ST_SENT:-0} of ${_ST_READY_N:-0} ready rows; not launched:"
+  _FF_SHOWN=""; _FF_MORE=0
+  read -r -a _FF_IDS <<< "$FILL_MISSING"
+  if [ $(( ${#FILL_FACT} + 1 + ${#FILL_MISSING} )) -le 55 ]; then
+    _FF_SHOWN=" ${FILL_MISSING}"
+  else
+    for _FF_ID in ${_FF_IDS[@]+"${_FF_IDS[@]}"}; do
+      if [ "$_FF_MORE" -eq 0 ] && [ $(( ${#FILL_FACT} + ${#_FF_SHOWN} + 1 + ${#_FF_ID} )) -le 46 ]; then
+        _FF_SHOWN="${_FF_SHOWN} ${_FF_ID}"
+      else
+        _FF_MORE=$((_FF_MORE + 1))
+      fi
+    done
+  fi
+  FILL_FACT="${FILL_FACT}${_FF_SHOWN}"
+  [ "$_FF_MORE" -gt 0 ] && FILL_FACT="${FILL_FACT} +${_FF_MORE} more"
+  FILL_FIX="dispatch or decline"
 else
   FILL_REASON=""
 fi
 
-# ---------- THE FOURTH DUTY: a printed STANDDOWN is answered before the turn ends ------
+# ---------- THE PATROL MARKER OWES A TICK (wave-20 REQ-6, AC-6.2; D6) ----------
+#
+# THE DEFECT (report #1, M4). A Patrol job whose prompt carried the marker but not the tick
+# made turns this wall called ticks — the task-list refresh was asked for and nothing else —
+# while the tick never ran and nothing decided anything. The tick's own record is its stamp,
+# written with `verb=tick` BEFORE it decides (hooks/session-poker.sh), so the proof a marker
+# turn ticked is on disk: a `verb=tick` stamp whose `at=` sits at or after the marker row's
+# timestamp. Compared to the second, the precision the stamp carries.
+#
+# THE THREE SILENCES, each the direction every other reader of the stamp takes:
+#   - no stamp, or a symlink where it goes -> silent. `disarm` and a DISARM tick remove it on
+#     purpose, and a session that never armed is the arming wall's finding, not this one's.
+#   - an undated marker row               -> the stamp's verb alone answers: a row nothing can
+#     order against is not refused for the order.
+#   - not a marker turn                    -> nothing is owed.
+# BLOCKS ONCE, through the same `stop_hook_active` guard as every duty here.
+NOTICK_REASON=""
+if [ "$_ST_TICK" = 1 ]; then
+  _NT_STAMP="$BIONIC_ROOT/.bionic/tmp/patrol-${BIONIC_SID}.state"
+  if [ -f "$_NT_STAMP" ] && [ ! -L "$_NT_STAMP" ]; then
+    _NT_PRESENT=1
+    _NT_LINE="$(head -n 1 "$_NT_STAMP" 2>/dev/null)"
+    _NT_VERB=""; _NT_AT=""
+    case "|$_NT_LINE|" in *"|verb="*) _NT_VERB="${_NT_LINE#*|verb=}"; _NT_VERB="${_NT_VERB%%|*}" ;; esac
+    case "|$_NT_LINE|" in *"|at="*)   _NT_AT="${_NT_LINE#*|at=}";     _NT_AT="${_NT_AT%%|*}" ;; esac
+    _NT_OK=0
+    if [ "$_NT_VERB" = tick ]; then
+      if [ -z "$_ST_MARK_TS" ]; then
+        _NT_OK=1
+      elif [ -n "$_NT_AT" ] && ! [ "${_NT_AT:0:19}" \< "${_ST_MARK_TS:0:19}" ]; then
+        _NT_OK=1
+      fi
+    fi
+    if [ "$_NT_OK" = 0 ]; then
+      NOTICK_REASON="Patrol tick not run: this turn began with this session's Patrol marker, and no tick has stamped since it (the stamp reads verb=${_NT_VERB:-none} at=${_NT_AT:-unknown}). The tick is the Patrol's whole decision — run: bash ${HOOK_DIR}/session-poker.sh tick — then stop again; this gate blocks once. If the Patrol job's prompt does not run the tick, replace the job with the prompt bash ${HOOK_DIR}/session-poker.sh prompt prints."
+    fi
+  fi
+fi
+
+# ---------- THE FOURTH DUTY: a stand-down the tick ordered is answered before the turn ends ----
 #
 # (AC-1.2; T1, D1.) The mirror of the FILL, and it exists for the same reason. The tick can
 # see that a contract landed while its agent is still on the panel, and it can write the stop
@@ -2061,49 +1824,82 @@ fi
 # wave ran around them. The turn END is the only moment at which "the stand-down went
 # unanswered" is a fact.
 #
-# ANSWERED MEANS EITHER: a `TaskStop` tool_use naming the agent — by its name or by the
-# `name@session-xxxxxxxx` address the roster carries, which contains the name and so matches
-# the same word-boundary test — or an explicit `standdown-declined: <name> <reason>` line.
+# THE SET IS COMPUTED, NEVER OVERHEARD (wave-20 T19; T11's carry-over, the AC-5.4 plants on
+# this duty). It used to be read off the tick's printed `poker: STANDDOWN <name>` lines in the
+# transcript — the channel AC-5.4 closed for the FILL: the model's own prose planted a name, a
+# `cat` of a file forged one, and a tick output that never reached the transcript let every
+# name go. It is now what the tick WROTE: `stop_standdown_set` (below) reads this session's
+# stop orders and roster verdicts from disk. The tick still prints the line, for the human.
+#
+# ANSWERED MEANS ONE OF THREE, per name:
+#   - a main-thread `TaskStop` tool_use naming the agent — by its name or by the
+#     `name@session-xxxxxxxx` address the roster carries, which contains the name and so
+#     matches the same word-boundary test — whose tool_result was not an error: a stop the
+#     harness refused stopped nothing;
+#   - an ack closing the row (the sweeper's, which `stop-orders.sh stopped` writes): the
+#     computed set leaves out an acked row, so it is never asked about;
+#   - a `standdown-declined: <name> <reason>` line at the start of a line of the model's own
+#     reply — the fill-declined rule (AC-5.4): never thinking, a tool input or a tool result.
 # The decline is not a loophole, it is the point: an agent still writing its record is a good
 # reason not to stop it, and that reason is worth one line in the record. What is refused is
 # SILENCE.
 #
+# THE LOWER BOUND IS THIS TURN'S TICK. The tick writes its stamp before it decides, and its
+# orders after, so the orders this turn's tick wrote are the ones stamped at or after that
+# stamp's `at=` — the stamp the NOTICK arm above has just read and found current (a marker
+# turn whose tick never stamped is that arm's refusal, and owes no stand-down from an older
+# tick's orders). A DISARM tick removes its stamp as its last act; with no stamp, the dated
+# marker row is the bound, and an undated one gives none — silence, the direction every other
+# unreadable fact here takes.
+#
 # NAMED, NOT COUNTED, and per agent: a turn that stopped two of three is missing one, and the
-# reason says which. Same boundary rules as the fill fold below it — ids are validated
-# against `[A-Za-z0-9_.-]+` before they are echoed back, and a `.` inside one is escaped to a
-# literal before it is spliced into the boundary pattern.
-STANDDOWN_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" '
-  $1 == "USER" {
-    t = $2; sub(/^[ \t]+/, "", t)
-    tick = (index(t, mark) == 1)
-    names = " "; answered = " "
-    next
-  }
-  $1 == "STANDDOWN"  { if (index(names, " " $2 " ") == 0) names = names $2 " "; next }
-  $1 == "SD-DECLINE" { answered = answered $2 " "; next }
-  $1 == "TOOL" {
-    if ($2 == "TaskStop") answered = answered $3 " " $4 " "
-    next
-  }
-  END {
-    if (!tick || names == " ") exit
-    n = split(names, want, /[ \t]+/)
-    missing = ""
-    for (i = 1; i <= n; i++) {
-      id = want[i]
-      if (id == "" || id !~ /^[A-Za-z0-9_.-]+$/) continue
-      pat = id
-      gsub(/\./, "[.]", pat)
-      if (answered ~ ("(^|[^A-Za-z0-9_.-])" pat "([^A-Za-z0-9_.-]|$)")) continue
-      if (index(" " missing " ", " " id " ") > 0) continue
-      missing = missing (missing == "" ? "" : " ") id
+# reason says which. Ids are validated against `[A-Za-z0-9_.-]+` before they are echoed back,
+# and a `.` inside one is escaped to a literal before it is spliced into the boundary pattern.
+STANDDOWN_MISSING=""
+_SD_BOUND=""
+if [ "$_ST_TICK" = 1 ]; then
+  if [ "${_NT_PRESENT:-0}" = 1 ]; then
+    [ "${_NT_OK:-0}" = 1 ] && [ "$_NT_VERB" = tick ] && _SD_BOUND="$_NT_AT"
+  else
+    _SD_BOUND="$_ST_MARK_TS"
+  fi
+fi
+_SD_SET="$(stop_standdown_set "$_SD_BOUND")"
+if [ -n "$_SD_SET" ]; then
+  STANDDOWN_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" -v want="$_SD_SET" '
+    $1 == "USER" {
+      t = $2; sub(/^[ \t]+/, "", t)
+      tick = (index(t, mark) == 1)
+      n = 0; answered = " "
+      next
     }
-    if (missing != "") print missing
-  }
-')
+    $1 == "SD-DECLINE" { answered = answered $2 " "; next }
+    $1 == "STOP"       { n++; sw[n] = $2; sid[n] = $3; next }
+    $1 == "AGENTERR"   { if ($2 != "") err[$2] = 1; next }
+    END {
+      if (!tick) exit
+      for (i = 1; i <= n; i++) {
+        if (sid[i] != "" && (sid[i] in err)) continue
+        answered = answered sw[i] " "
+      }
+      m = split(want, names, /[ \t\n]+/)
+      missing = ""
+      for (i = 1; i <= m; i++) {
+        id = names[i]
+        if (id == "" || id !~ /^[A-Za-z0-9_.-]+$/) continue
+        pat = id
+        gsub(/\./, "[.]", pat)
+        if (answered ~ ("(^|[^A-Za-z0-9_.-])" pat "([^A-Za-z0-9_.-]|$)")) continue
+        if (index(" " missing " ", " " id " ") > 0) continue
+        missing = missing (missing == "" ? "" : " ") id
+      }
+      if (missing != "") print missing
+    }
+  ')
+fi
 
 if [ -n "$STANDDOWN_MISSING" ]; then
-  STANDDOWN_REASON="Patrol stand-down unanswered: the tick printed STANDDOWN and this turn neither stopped nor declined ${STANDDOWN_MISSING}. TaskStop each, or write a line \"standdown-declined: <name> <reason>\", then stop again — this gate blocks once."
+  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped nor declined them. TaskStop each, or write a line \"standdown-declined: <name> <reason>\", then stop again — this gate blocks once."
 else
   STANDDOWN_REASON=""
 fi
@@ -2114,6 +1910,7 @@ fi
 # refusal is a duty never named at all.
 TELL_REASON="$FILL_REASON"
 [ -n "$STANDDOWN_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${STANDDOWN_REASON}"
+[ -n "$NOTICK_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${NOTICK_REASON}"
 
 # The two folds are judged TOGETHER, so a turn that skipped a duty AND left a FILL
 # unanswered is told both things once. Blocking on one and staying silent about the other
@@ -2131,13 +1928,17 @@ if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
       fold_block block stop "a FILL and a STANDDOWN went unanswered" \
         "dispatch, stop, or decline" "$TELL_REASON"
     elif [ -n "$FILL_REASON" ]; then
-      # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the tick's printed ids, or
-      # the ready set this gate computed. A STANDDOWN cannot pair with the second — the tick
-      # is what prints one — so the pair case above stays the tick's.
+      # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the budget backstop or the
+      # computed gap.
       fold_block block stop "$FILL_FACT" "$FILL_FIX" \
         "$TELL_REASON"
+    elif [ -n "$STANDDOWN_REASON" ]; then
+      fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
+        "$TELL_REASON"
     else
-      fold_block block stop "a printed STANDDOWN went unanswered" "stop each agent, or decline" \
+      # THE MARKER TURN THAT RAN NO TICK (wave-20 REQ-6, AC-6.2), alone. Beside another duty it
+      # rides in the same paragraph under that duty's fact, so one refusal names every miss.
+      fold_block block stop "a Patrol marker turn ran no tick" "run the tick, then stop again" \
         "$TELL_REASON"
     fi
     return 2
@@ -2172,6 +1973,369 @@ esac
 # share a mechanism they never share a code path with.)
 fold_block block stop "$FACT" "$FIX" "$REASON"
 return 2
+}
+
+
+# ─── stop_turn_facts and stop_fill_ledger (epic-23 wave-20, REQ-5 part 2 and REQ-6; D5, D6) ───
+#
+# ONE COMPUTATION OF A TURN'S FACTS, TWO READERS. The fill duty above judges a turn and the
+# fill ledger records it (ADR-036 decisions 3 and 4); if each computed its own facts, the
+# verdict and the record could disagree, and the record is what a run's fill is measured by.
+# So `stop_turn_facts` computes them once per process into `_ST_*` globals, and both call it:
+# `hooks/stop.sh` runs `stop_fill_ledger` BEFORE its re-entry guard, then `bionic_fold` runs the
+# duty, which finds the facts already computed.
+#
+# WHAT IT SETS, and nothing else:
+#   _ST_STREAM      the transcript records below, one per line, tab-separated
+#   _ST_PLAN        the run's plan (bound-open or fallback), or empty
+#   _ST_LIVE        1 when that plan's ledger is live (past Step 3), else 0
+#   _ST_TICK        1 when the turn's prompt leads with THIS session's Patrol marker
+#   _ST_TURN        the turn key: the prompt record's uuid, else its timestamp, else empty
+#   _ST_MARK_TS     the prompt record's timestamp, or empty
+#   _ST_LAUNCHED    comma-joined names of this turn's main-thread Agent calls, less the ones
+#                   whose result was an error (a dispatch the preflight refused)
+#   _ST_DECLINED    the turn's last `fill-declined:` reason, from the model's own text only
+#   _ST_CURRENT _ST_STATE _ST_CEILING _ST_WIDTH _ST_OPEN _ST_FREE   the ledger's numbers
+#   _ST_READY       every ready id, space-joined, untrimmed — the plan's set, launches included
+#   _ST_READY_N     how many ids _ST_READY holds
+#   _ST_SENT        how many of them this turn launched (`fill_row_launched`, by dispatch name)
+#   _ST_MISSED      min(free, |ready not launched this turn|) — after this turn's launches, since
+#                   the roster holds them
+#   _ST_NAMED       the first _ST_MISSED ready ids this turn did NOT launch, the ones a refusal
+#                   names
+#   _ST_NO_BUDGET   1 when a live ledger has no readable writers= and a row is ready
+# Return 0 when the turn could be read at all (a Stop, an engaged session, a transcript), 1
+# otherwise — and the caller then has nothing to judge and nothing to record.
+#
+# THE RECORDS. jq flattens each transcript line into at most a few records; the awk folds
+# below reset at every user PROMPT so that what survives describes the LAST turn only.
+#   USER <text> <timestamp> <uuid>   a user record carrying text — a turn's prompt. The `user`
+#                                    type is also how the CLI records every TOOL RESULT, and
+#                                    treating those as prompts would end the tick's turn at its
+#                                    first tool call. Nor is every user TEXT record a prompt:
+#                                    the CLI writes two into the turn they interrupt, and they
+#                                    open no turn (wave-20 T11b; Step-6 review R3, critic C1):
+#                                      the Stop hook's refusal fed back — isMeta (the stream-json
+#                                        spelling is isSynthetic) and text starting
+#                                        "Stop hook feedback:" (refuse.sh's channel table);
+#                                      a companion record — turnCompanion: a skill's body after a
+#                                        Skill call or a slash command, an attached image.
+#                                    isMeta ALONE marks neither: a cron-fired Patrol prompt is
+#                                    isMeta too, and it is a turn. So the re-entry Stop after a
+#                                    refusal keeps the prompt's key, launches, decline and tick
+#                                    flag, and a launch made before a Skill call stays the turn's.
+#                                    Survey behind the rule: A-T11b.1.
+#   TOOL <name> <path/cmd> <fields>  a main-thread assistant tool_use
+#   AGENT <name> <tool_use id>       a main-thread Agent tool_use — the launch the ledger names
+#   AGENTERR <tool_use id>           a tool_result with `is_error: true`: a refused dispatch,
+#                                    which writes no roster row and launched nothing — or a
+#                                    refused TaskStop, which stopped nothing (any tool's error)
+#   STOP <task id words> <tool_use id>  a main-thread TaskStop tool_use — the stand-down's answer
+#   DECLINE <reason>                 `fill-declined: <reason>` at a LINE START of a main-thread
+#                                    assistant TEXT block — never thinking, never a tool_use
+#                                    input, never a tool result (AC-5.4: prose quoting, a file
+#                                    read and a grep plant nothing)
+#   MARK clear|resume                the ritual arm, scoped as before (review F2): a marker is
+#                                    read only off rows the orchestrator authored, never a tool
+#                                    result
+#   SD-DECLINE <name>                `standdown-declined: <name>` at a LINE START of a main-thread
+#                                    assistant TEXT block — the DECLINE rule, for the stand-down
+#                                    (wave-20 T19). The tick's printed `poker: STANDDOWN` line is
+#                                    no longer a record at all: the set is computed from disk
+#                                    (`stop_standdown_set`), never read out of the transcript
+# Newlines and tabs are squashed inside values because the stream is line-and-tab delimited.
+#
+# THE WINDOW (review, performance finding 1). Every fact here is a "since the most recent X"
+# fact, so a 2000-line tail suffices provided it holds a whole orchestrator turn: the largest
+# single turn in this repo's two busiest wave transcripts is 264 records (measured 2026-09-03),
+# so the window carries ~7.5x the worst turn observed. A clear/resume marker older than the
+# window reads as no marker — the ritual arm goes INERT, which is fail-open and the right
+# direction for a marker whose purpose is the first stop after a resume.
+SCAN_WINDOW_LINES=2000
+stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
+  [ "${_ST_DONE:-0}" = 1 ] && return "${_ST_RC:-1}"
+  _ST_DONE=1; _ST_RC=1
+  _ST_STREAM=""; _ST_PLAN=""; _ST_LIVE=0; _ST_TICK=0; _ST_TURN=""; _ST_MARK_TS=""
+  _ST_LAUNCHED=""; _ST_DECLINED=""; _ST_CURRENT=""; _ST_STATE=""; _ST_CEILING=""
+  _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
+  _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
+  local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
+
+  [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
+  [ "${BIONIC_ENGAGED:-0}" = 1 ] || return 1
+  tr="$(bionic_jq .transcript_path)"
+  [ -n "$tr" ] && [ -f "$tr" ] && [ ! -L "$tr" ] || return 1
+
+  case "$BIONIC_RUN_WORD" in
+    bound-open|fallback) _ST_PLAN="$BIONIC_RUN_PLAN" ;;
+  esac
+  [ -n "$_ST_PLAN" ] && [ -f "$_ST_PLAN" ] || _ST_PLAN=""
+
+  _ST_STREAM=$(tail -n "$SCAN_WINDOW_LINES" "$tr" 2>/dev/null | jq -Rr '
+    . as $line
+    | (($line | fromjson?) // null) as $r
+    | ($r != null
+       and (($r.isSidechain // false) != true)
+       and ((((($r.agentId // $r.agent_id) // "") | tostring)) == "")) as $main
+    | (
+        if ($main | not) then ""
+        elif $r.type == "user" then
+          ( if ($r.message.content | type) == "string" then $r.message.content
+            else ([$r.message.content[]? | select(.type == "text") | .text] | join(" "))
+            end )
+        else $line
+        end
+      ) as $auth
+    | ($main and $r.type == "user"
+       and ( (($r.turnCompanion // false) == true)
+             or ( ((($r.isMeta // false) == true) or (($r.isSynthetic // false) == true))
+                  and (($auth // "") | startswith("Stop hook feedback:")) ) )) as $cont
+    | (if (($auth // "") | contains("<command-name>/clear</command-name>")) then "MARK\tclear" else empty end),
+      (if (($auth // "") | contains("source: resume")) then "MARK\tresume" else empty end),
+      ( if ($main and $r.type == "assistant" and (($r.message.content // []) | type) == "array") then
+          ([$r.message.content[]? | select(.type == "text") | .text] | join("\n"))
+          | [scan("(?:^|\n)fill-declined:[ \t]*([^\n]*)")] | .[]
+          | select(.[0] | test("[^ \t\r]"))
+          | "DECLINE\t" + (.[0] | gsub("[\t\r]"; " "))
+        else empty end ),
+      ( if ($main and $r.type == "user" and (($r.message.content // []) | type) == "array") then
+          $r.message.content[]?
+          | select(.type == "tool_result" and (.is_error // false) == true)
+          | "AGENTERR\t" + ((.tool_use_id // "") | tostring)
+        else empty end ),
+      ( if ($main and $r.type == "assistant" and (($r.message.content // []) | type) == "array") then
+          ([$r.message.content[]? | select(.type == "text") | .text] | join("\n"))
+          | [scan("(?:^|\n)standdown-declined:[ \t]*([A-Za-z0-9_.-]+)")] | .[]
+          | "SD-DECLINE\t" + .[0]
+        else empty end ),
+      (
+        if ($main | not) then empty
+        elif $r.type == "user" then
+          ( if ($r.message.content | type) == "string" then $r.message.content
+            else ([$r.message.content[]? | select(.type == "text") | .text] | join(" "))
+            end ) as $t
+          | select(($t // "") != "" and ($cont | not))
+          | "USER\t" + ($t | gsub("[\n\t\r]"; " "))
+            + "\t" + ((($r.timestamp // "") | tostring) | gsub("[\n\t\r]"; " "))
+            + "\t" + ((($r.uuid // "") | tostring) | gsub("[\n\t\r]"; " "))
+        elif $r.type == "assistant" then
+          $r.message.content[]?
+          | select(.type == "tool_use")
+          | ( "TOOL\t" + (.name // "")
+              + "\t" + (((.input.file_path // .input.path // .input.command // "") | tostring) | gsub("[\n\t\r]"; " "))
+              + "\t" + (([.input.name?, .input.description?, .input.subagent_type?, .input.prompt?,
+                          .input.task_id?]
+                         | map(select(. != null) | tostring) | join(" ")) | gsub("[\n\t\r]"; " ")) ),
+            ( if .name == "Agent" then
+                "AGENT\t" + (((.input.name // .input.subagent_type // "agent") | tostring) | gsub("[\n\t\r|, ]"; "_"))
+                + "\t" + ((.id // "") | tostring)
+              else empty end ),
+            ( if .name == "TaskStop" then
+                "STOP\t" + (([.input.task_id?, .input.name?, .input.shell_id?]
+                              | map(select(. != null) | tostring) | join(" ")) | gsub("[\n\t\r]"; " "))
+                + "\t" + ((.id // "") | tostring)
+              else empty end )
+        else empty
+        end
+      )
+  ' 2>/dev/null) || _ST_STREAM=""
+  [ -n "$_ST_STREAM" ] || return 1
+  _ST_RC=0
+
+  # THE TURN, FOLDED ONCE. One output line, its fields joined by the unit separator (0x1f):
+  # a tab is whitespace to `read`, so two empty fields in a row would collapse into one.
+  mark="bionic-patrol session=${BIONIC_SID:0:8}"
+  fold="$(printf '%s\n' "$_ST_STREAM" | awk -F'\t' -v mark="$mark" '
+    $1 == "USER" {
+      t = $2; sub(/^[ \t]+/, "", t)
+      tick = (index(t, mark) == 1)
+      ts = $3; key = ($4 != "" ? $4 : $3)
+      n = 0; decl = ""
+      next
+    }
+    $1 == "AGENT"    { n++; an[n] = $2; aid[n] = $3; next }
+    $1 == "AGENTERR" { if ($2 != "") err[$2] = 1; next }
+    $1 == "DECLINE"  { decl = $2; next }
+    END {
+      launched = ""
+      for (i = 1; i <= n; i++) {
+        if (aid[i] != "" && (aid[i] in err)) continue
+        launched = launched (launched == "" ? "" : ",") an[i]
+      }
+      printf "%d\037%s\037%s\037%s\037%s\n", tick + 0, key, ts, launched, decl
+    }')"
+  IFS=$'\037' read -r _ST_TICK _ST_TURN _ST_MARK_TS _ST_LAUNCHED _ST_DECLINED <<< "$fold"
+  case "$_ST_TICK" in 1) : ;; *) _ST_TICK=0 ;; esac
+
+  # THE FILL'S NUMBERS — only on a live ledger (past Step 3), exactly as before: a run at
+  # Steps 0-3, a run with no plan, or a `current:` that will not parse stops here without
+  # touching the table, and records no ledger line.
+  [ -n "$_ST_PLAN" ] && fill_ledger_live "$_ST_PLAN" || return 0
+  _ST_LIVE=1
+  _ST_CURRENT="$(_fill_current_field "$_ST_PLAN")"
+  # THE ONE BUDGET READER (wave-20 T2, D10): run.sh's strict line and whole-field integer.
+  _ST_CEILING="$(budget_field "$(plan_budget_line "$_ST_PLAN")" writers)"
+
+  # THE PRESSURE STATE, MEASURED HERE (Δ7): `resources_pressure`, the reading the tick's HOLD
+  # and EMERGENCY come from. An unreadable reading is `ok` — the tick's own fallback — which
+  # is the direction that refuses more, never less.
+  cores="$(_res_cores 2>/dev/null)"
+  case "$cores" in ''|*[!0-9]*|0) cores=1 ;; esac
+  pressure="$(resources_pressure "$cores" 2>/dev/null)" || pressure=""
+  _ST_STATE="${pressure#state=}"; _ST_STATE="${_ST_STATE%% *}"
+  case "$_ST_STATE" in ok|hold|emergency) : ;; *) _ST_STATE=ok ;; esac
+
+  if [ -z "$_ST_CEILING" ]; then
+    # "AT LEAST ONE ROW READY AT THE UNIT" IS THE READY SET AT WIDTH ONE (wave-19 REQ-6, D7).
+    [ -n "$(fill_ready_set "$_ST_PLAN" 1 0 2>/dev/null)" ] && _ST_NO_BUDGET=1
+    return 0
+  fi
+
+  # THE OCCUPANCY IS THE ONE CLOSE PREDICATE'S OPEN SET (wave-20 T2, D10): this session's
+  # roster rows not closed by a later ack. A roster or ledger that is a symlink is not read,
+  # and the numbers are left unknown rather than judged on zero — zero refuses more.
+  FILL_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  FILL_ACKS="$BIONIC_ROOT/.bionic/tmp/sweeper-${BIONIC_SID}.state"
+  if [ -L "$FILL_ROSTER" ] || [ -L "$FILL_ACKS" ]; then
+    return 0
+  fi
+  # THE RUNG, FALLING BACK TO THE CEILING — the width the tick names (Step-6 review R1,
+  # wave-18 T2b): `pressure_level` over the declared `writers=`, bound to the tick's own
+  # `SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"` by patrol-duties-gate 69 and session-poker 12l2.
+  rung="$(pressure_level "$_ST_CEILING" 2>/dev/null)" || rung=""
+  case "$rung" in ''|*[!0-9]*) rung="" ;; esac
+  _ST_WIDTH="${rung:-$_ST_CEILING}"
+  FILL_OPEN="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | awk 'END { print NR + 0 }')"
+  case "$FILL_OPEN" in ''|*[!0-9]*) FILL_OPEN=0 ;; esac
+  _ST_OPEN="$FILL_OPEN"
+  _ST_FREE=$(( _ST_WIDTH - _ST_OPEN ))
+  [ "$_ST_FREE" -ge 0 ] || _ST_FREE=0
+
+  # EVERY READY ROW, UNTRIMMED, in one parse of the table (wave-19 REQ-6, D7): the width passed
+  # is wide enough that `fill_ready_set`'s own trim never bites, and the trim to the free
+  # slots is taken here, so the ledger records the whole ready set and the refusal names the
+  # rows a free slot could have taken.
+  #
+  # A ROW THIS TURN LAUNCHED IS NEVER MISSED (wave-20 T11b; Step-6 review R4, T12 F7). A launch
+  # joins the roster at PreToolUse, so it is already in `open` and has already taken its slot;
+  # its plan row stays ready until the orchestrator ledgers it `active` (A-T11.1). Counting it
+  # ready as well charged one launch twice, and the refusal named the rows the turn had just
+  # sent. So the ledger's ready set stays the plan's, and what the turn missed is that set less
+  # the rows this turn launched, matched by the dispatch name `fill_name` hands out.
+  ready="$(fill_ready_set "$_ST_PLAN" 99999 0 2>/dev/null)"
+  count=0; _ST_READY=""; _ST_NAMED=""
+  while IFS= read -r rest; do
+    [ -n "$rest" ] || continue
+    _ST_READY_N=$((_ST_READY_N + 1))
+    _ST_READY="${_ST_READY}${_ST_READY:+ }${rest}"
+    if fill_row_launched "$rest" "$_ST_LAUNCHED"; then
+      _ST_SENT=$((_ST_SENT + 1))
+      continue
+    fi
+    count=$((count + 1))
+    [ "$count" -le "$_ST_FREE" ] && _ST_NAMED="${_ST_NAMED}${_ST_NAMED:+ }${rest}"
+  done <<ST_READY
+$ready
+ST_READY
+  _ST_MISSED=$(( count < _ST_FREE ? count : _ST_FREE ))
+  return 0
+}
+
+# THE FILL LEDGER'S RECORDER (wave-20 REQ-5, AC-5.5; Δ2; ADR-036 decision 4). One line per Stop
+# of an engaged run whose ledger is live, appended to `fill_ledger_path` for the run's plan:
+#
+#   fill-ledger/v1|at|session|turn|current|state|ceiling|width|open|free|ready|launched|declined|missed
+#
+# A RECORDER, NOT A WALL. It never refuses and is silent on every failure: the stop it rides
+# on is a turn somebody has to be able to end. It runs BEFORE `hooks/stop.sh`'s re-entry guard,
+# so the Stop that ends a refused turn — the one carrying the launches the model made after
+# the refusal — is recorded too; `fill-report` folds lines by `turn=`, so a refused turn's two
+# lines count once, as the later. That holds because the refusal the CLI feeds back ("Stop hook
+# feedback:") opens no turn in `stop_turn_facts`: both lines carry the prompt's key, and the
+# later one still holds the launches and the decline made before the refusal (wave-20 T11b).
+#
+# APPEND-ONLY, ONE printf PER STOP, so a crash leaves at most a line that did not happen and a
+# concurrent reader never sees a rewrite. A ledger path that is a symlink is not written through.
+stop_fill_ledger() {  # <event> -> always 0
+  [ "${1:-}" = Stop ] || return 0
+  stop_turn_facts || return 0
+  [ "$_ST_LIVE" = 1 ] || return 0
+  local f d ready launched declined line
+  f="$(fill_ledger_path "$BIONIC_ROOT" "$_ST_PLAN" 2>/dev/null)" || return 0
+  [ -n "$f" ] || return 0
+  d="${f%/*}"
+  [ -L "$f" ] && return 0
+  mkdir -p "$d" 2>/dev/null || return 0
+  ready="${_ST_READY// /,}"
+  launched="$_ST_LAUNCHED"
+  declined="$(printf '%s' "$_ST_DECLINED" | tr '|\n\r\t' '    ')"
+  declined="${declined:0:200}"
+  # ONE STRING, BUILT BY EXPANSION, then one write. Every value is either a number this
+  # function computed or has had its `|` squashed above, so no field can forge another.
+  line="fill-ledger/v1|at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|session=${BIONIC_SID}|turn=${_ST_TURN//|/ }"
+  line="${line}|current=${_ST_CURRENT//|/ }|state=${_ST_STATE}|ceiling=${_ST_CEILING}|width=${_ST_WIDTH}"
+  line="${line}|open=${_ST_OPEN}|free=${_ST_FREE}|ready=${ready}|launched=${launched//|/_}"
+  line="${line}|declined=${declined}|missed=${_ST_MISSED}"
+  printf '%s\n' "$line" >> "$f" 2>/dev/null
+  return 0
+}
+
+# THE STAND-DOWN SET, COMPUTED FROM WHAT THE TICK WROTE (wave-20 T19; T11's carry-over; the
+# AC-5.4 plants on the fourth duty). `session-poker.sh tick` stands a row down by doing two
+# things at once: it prints `poker: STANDDOWN <name>` for the human, and it writes
+# `stop-orders.sh order <name> --by patrol` so the TaskStop it asks for passes the stop gate.
+# The line is words in a transcript anyone can type; the order is a fact on disk only the verb
+# writes. So the set is:
+#   this session's `by=patrol` stop orders stamped at or after <lower bound>   (what this
+#       turn's tick decided — a human's order is an instruction to the stop gate, not a
+#       stand-down the tick made)
+#   whose row the sweeper's verdict still reads MET and not acked               (a row closed
+#       since, or no longer landed — a FOLLOW-UP, a re-dispatch — is owed nothing)
+# ONE `verdict` read over the whole roster, and only when an order is in the window: the same
+# verb, the same fold and the same `acked=` the tick's own stand-down arm reads, so the two
+# cannot disagree about a row (tests/cross-gate-agreement.test.sh CG-standdown).
+#
+# SILENT ON EVERY UNREADABLE FACT — no bound, no orders file, a symlink where it goes, a
+# verdict the sweeper refused: nothing is named. A wall that cannot read what the tick wrote
+# does not invent a duty from it.
+stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
+  local lb="${1:-}" orders targets vout
+  [ -n "$lb" ] || return 0
+  orders="$BIONIC_ROOT/.bionic/tmp/stop-orders-${BIONIC_SID}.state"
+  [ -f "$orders" ] && [ ! -L "$orders" ] && [ -r "$orders" ] || return 0
+  targets="$(awk -v lb="${lb:0:19}" -v sid="$BIONIC_SID" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    index($0, "stop-order/v1|") == 1 {
+      if (kv($0, "by") != "patrol") next
+      s = kv($0, "session"); if (s != "" && s != sid) next
+      at = substr(kv($0, "at"), 1, 19); if (at == "" || at < lb) next
+      t = kv($0, "target"); if (t !~ /^[A-Za-z0-9_.-]+$/) next
+      if (!(t in seen)) { seen[t] = 1; printf "%s ", t }
+    }' "$orders" 2>/dev/null)"
+  [ -n "$targets" ] || return 0
+  [ -f "${_STOP_HOOK_DIR_ABS}/session-sweeper.sh" ] || return 0
+  # Run from the root with the session key, exactly as the landing sweep above asks it;
+  # `|| exit 9` keeps a failed `cd` out of the verb's exit-1 band.
+  vout=$( cd "$BIONIC_ROOT" 2>/dev/null || exit 9
+          CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "${_STOP_HOOK_DIR_ABS}/session-sweeper.sh" verdict 2>/dev/null )
+  case "$?" in 0|1) : ;; *) return 0 ;; esac
+  printf '%s\n' "$vout" | awk -v want=" $targets" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    index($0, "landing-verdict/v1|") == 1 {
+      nm = kv($0, "name")
+      if (kv($0, "state") != "MET" || kv($0, "acked") != "no") next
+      if (index(want, " " nm " ") == 0 || (nm in seen)) next
+      seen[nm] = 1; out = out (out == "" ? "" : " ") nm
+    }
+    END { if (out != "") print out }'
 }
 
 
@@ -2387,6 +2551,11 @@ case "$BIONIC_RUN_WORD" in
     fold_advise "patrol-revive: bound plan closed — $_RUN_PLAN; this session has no open run"; _adv=1
     return "$_adv"
     ;;
+  bound-unreadable)
+    # (wave-20 T1, REQ-2, AC-2.3.) Named, never "no open run"; patrol-duties holds the turn.
+    fold_advise "patrol-revive: bound plan unreadable — $_RUN_PLAN"; _adv=1
+    return "$_adv"
+    ;;
   none|*)
     return "$_adv"
     ;;
@@ -2541,6 +2710,30 @@ esac
 # after a refused step 1 produces the exact state the header above argues is worse than
 # the death: an undetectably dead Patrol. The way OUT is named too, because a notice that
 # offers only "re-arm" to a run that meant to stop is the loop critic C-2 found.
+# THE CLOCK THAT FIRES AND NEVER TICKS (wave-20 REQ-6, AC-6.3; D6). `patrol_verdict` reads a
+# Patrol marker turn after the stamp as a firing that ran no tick, and says so in its reason.
+# The repair is not the one below: the job exists and fires, so re-creating it as it is buys
+# the same silence, and arming the stamp over it would make a Patrol that never decides read
+# alive. The job's prompt is what is wrong, and the canonical one is printed by a verb.
+case "$WHY" in
+  *"marker turn"*)
+    REASON="The Patrol fires but never ticks.
+
+Its last tick stamp is ${AGE}s old, and since then ${WHY%% marker turn*} Patrol marker turn(s) have run on this session without the tick stamping — the clock is firing into turns that never run \`bash ${POKER} tick\`, so nothing has decided anything since the stamp:
+    ${STAMP_FILE}
+
+Repair the job, not the clock:
+  1. Run the tick now: bash ${POKER} tick
+  2. CronList, and CronDelete this session's Patrol job.
+  3. CronCreate a RECURRING session job at the interval \`bash ${POKER} interval\` reports, carrying exactly the prompt \`bash ${POKER} prompt\` prints — it leads with this session's marker and runs the tick.
+
+Then stop again — this notice blocks once per turn, and it returns on the next turn until a tick stamps."
+    fold_block block stop "the Patrol fires but never ticks" "run the tick; replace the job" \
+      "$REASON"
+    return 2
+    ;;
+esac
+
 REASON="The Patrol died mid-run and nothing said so.
 
 Its last stamp is ${AGE}s old, and this session has since sat idle for ${GAP}s in one stretch with no tick in it — past the ${WINDOW}s fire window, which is the ${INTERVAL}s poker-interval in force for this project plus the scheduler's jitter. An idle session is exactly when a session cron fires, so a whole window of idleness with no firing is the job being gone, not the machine being busy:

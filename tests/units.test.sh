@@ -389,8 +389,13 @@ expect_eq "…and says so with a non-zero status" "1" "$(call_rc units_rows "$SA
 expect_eq "a plan that has the table exits 0" "0" "$(call_rc units_rows "$SANDBOX/live.md")"
 
 # ============================================================
-section "4 — units_ready: pending, at this step, every dep landed"
+section "4 — units_ready: pending and every dep landed; the step is a label (wave-20 Δ1)"
 # ============================================================
+#
+# RE-AUTHORED FOR wave-20 REQ-5 (Δ1, ADR-036). Through 1.8.6 the step argument FILTERED: a
+# row was ready only at its own step. Readiness is now the prerequisite graph — a work row is
+# ready when it is pending and every prerequisite has landed, whatever its step — so the
+# argument no longer filters a work row. It still decides the gate-act rows (§17).
 
 expect_eq "step 4: a row whose dep is still pending is not ready, and its siblings are" \
   "$(printf 'T3\nT5')" "$(call units_ready "$SANDBOX/ready-a.md" 4)"
@@ -398,17 +403,17 @@ expect_eq "…so T4, blocked behind pending T3, is absent" "" \
   "$(call units_ready "$SANDBOX/ready-a.md" 4 | grep -x T4)"
 expect_eq "…and T2, already landed, is not offered again" "" \
   "$(call units_ready "$SANDBOX/ready-a.md" 4 | grep -x T2)"
-expect_eq "…and step 3, whose only row is landed, is empty" "" \
-  "$(call units_ready "$SANDBOX/ready-a.md" 3)"
+expect_eq "…and asked at step 3 the same rows are ready: the argument is not a filter (Δ1)" \
+  "$(printf 'T3\nT5')" "$(call units_ready "$SANDBOX/ready-a.md" 3)"
 
 expect_eq "step 5 with every Step-4 row landed: the ready rows, in TABLE order" \
   "$(printf 'T7\nT5')" "$(call units_ready "$SANDBOX/ready-b.md" 5)"
 expect_eq "…a dep naming an id the table does not carry is never ready" "" \
   "$(call units_ready "$SANDBOX/ready-b.md" 5 | grep -x T6)"
-expect_eq "…the step argument filters: step 4 is all landed, so nothing is ready" "" \
-  "$(call units_ready "$SANDBOX/ready-b.md" 4)"
-expect_eq "…and a step with no rows at all answers nothing" "" \
-  "$(call units_ready "$SANDBOX/ready-b.md" 9)"
+expect_eq "…asked at step 4 the Step-5 rows are still ready: their deps landed (Δ1)" \
+  "$(printf 'T7\nT5')" "$(call units_ready "$SANDBOX/ready-b.md" 4)"
+expect_eq "…and at step 9 too: no work row waits for the run to reach its step" \
+  "$(printf 'T7\nT5')" "$(call units_ready "$SANDBOX/ready-b.md" 9)"
 
 # A `—` deps cell names no dependency; so do `-` and an empty cell.
 cat > "$SANDBOX/ready-dashes.md" <<'DASH_EOF'
@@ -437,10 +442,10 @@ section "6 — units_validate: one line per broken invariant, naming the id and 
 
 VAL_BAD="$(call units_validate "$SANDBOX/broken.md")"
 
-# TEN, NOT SEVEN (wave-17 REQ-5, AC-5.2). Seven invariants are broken, but the transitive
-# arm now reports EVERY Step-4 row the offending row fails to reach rather than the first —
-# T7 reaches only T1, so it misses X1, T4, T5 and T6, which is four lines from one row.
-expect_eq "a table breaking seven invariants reports ten violations" "10" "$(nlines "$VAL_BAD")"
+# SEVEN (wave-20 REQ-5, AC-5.2). Seven invariants are broken, and the transitive arm reports
+# ONE line per offending row: T7 reaches only T1, so it misses X1, T4, T5 and T6, which is
+# one line naming four ids. Through 1.8.6 that was four lines (one per missing edge).
+expect_eq "a table breaking seven invariants reports seven violations" "7" "$(nlines "$VAL_BAD")"
 expect_eq "…and exits 1" "1" "$(call_rc units_validate "$SANDBOX/broken.md")"
 
 expect_contains "an id used twice is named once, as a duplicate" \
@@ -455,15 +460,14 @@ expect_contains "a status outside the four names the status and the vocabulary" 
   "T5: status done is not one of pending active landed dropped" "$VAL_BAD"
 expect_contains "a dep naming no row names the dep" \
   "T6: dep T99 names no row in the table" "$VAL_BAD"
-expect_contains "a Step-6 row that reaches no Step-4 row names the ones it misses" \
-  "T7: step 6 does not depend transitively on step-4 row X1" "$VAL_BAD"
-# …AND NAMES ALL OF THEM, IN TABLE ORDER. The author threading a plan reads the whole debt
-# in one pass instead of one edge per round trip (AC-5.2; A-orch-59 of wave-16 is the
-# ten-round-trip specimen). The duplicate `T1` row is a Step-4 row too, and it is NOT
+# …AND NAMES ALL OF THEM, IN TABLE ORDER, ON ONE LINE. The author threading a plan reads the
+# whole debt in one pass instead of one edge per round trip (AC-5.2; A-orch-59 of wave-16 is
+# the ten-round-trip specimen). The duplicate `T1` row is a Step-4 row too, and it is NOT
 # reported: T7 reaches the id, and reachability is keyed on the id, not on the row.
-expect_eq "…every one of them, once each, in table order" \
-  "X1 T4 T5 T6" \
-  "$(printf '%s\n' "$VAL_BAD" | /usr/bin/grep '^T7: step 6 does not depend' | sed -E 's/.*step-4 row //' | tr '\n' ' ' | sed -E 's/ $//')"
+expect_contains "a Step-6 row that reaches no Step-4 row names the ones it misses, with the count, in table order" \
+  "T7: step 6 is missing 4 step-4 prerequisites: X1, T4, T5, T6" "$VAL_BAD"
+expect_eq "…on exactly one line" "1" \
+  "$(printf '%s\n' "$VAL_BAD" | /usr/bin/grep -c '^T7: ' | tr -d ' ')"
 
 # PAIRED POSITIVE. The good row is in the same table and is not accused of anything.
 expect_eq "the one well-formed row draws no violation of its own" "0" \
@@ -496,7 +500,7 @@ VAL_LEAK="$(call units_validate "$SANDBOX/leak.md")"
 expect_eq "of two Step-5 rows, only the one that misses a Step-4 row is reported" "1" \
   "$(nlines "$VAL_LEAK")"
 expect_contains "…naming the row and the Step-4 row it never reaches" \
-  "T5: step 5 does not depend transitively on step-4 row T3" "$VAL_LEAK"
+  "T5: step 5 is missing 1 step-4 prerequisite: T3" "$VAL_LEAK"
 expect_eq "…and the Step-5 row that does reach both draws nothing" "" \
   "$(printf '%s\n' "$VAL_LEAK" | grep '^T4:')"
 
@@ -755,7 +759,9 @@ union_ready() {
     u="${u}$(new_ready "$SANDBOX/diff-wave.md" "$st")
 "
   done
-  printf '%s' "$u" | grep -v '^$' | sort || true
+  # `sort -u`, NOT `sort` (wave-20 Δ1): the per-step answers were disjoint while the step
+  # filtered, and now a work row is ready at every step, so the union is a set of repeats.
+  printf '%s' "$u" | grep -v '^$' | sort -u || true
 }
 
 # Three states of the wave's own schedule: one with work at a single step, one with work at
@@ -790,10 +796,24 @@ expect_eq "…with T10 (step 4), T13 and T14 (step 5) all ready at once" \
   "T10
 T13
 T14" "$WAVE_UNION"
-expect_eq "asked about Step 4 alone, units_ready names only the Step-4 row" \
-  "T10" "$(sorted "$(new_ready "$SANDBOX/diff-wave.md" 4)")"
-expect_eq "…and the old whole-table reader could not make that distinction" \
-  "no" "$([ "$WAVE_OLD" = "T10" ] && echo yes || echo no)"
+# RE-AUTHORED FOR wave-20 REQ-5 (Δ1, Δ6; ADR-036). Through 1.8.6 the per-step split was the
+# point of this row: asked about Step 4, units_ready named only T10. Readiness is now the
+# prerequisite graph, so for WORK rows the answer at any step IS the old whole-table answer.
+expect_eq "asked at Step 4, units_ready names every work row whose deps landed, whatever its step (Δ1)" \
+  "T10
+T13
+T14" "$(sorted "$(new_ready "$SANDBOX/diff-wave.md" 4)")"
+expect_eq "…which is exactly the old whole-table reader's answer" \
+  "$WAVE_OLD" "$(sorted "$(new_ready "$SANDBOX/diff-wave.md" 4)")"
+# THE ONE PLACE THEY STILL DIFFER (Δ6): a gate act. T20 is the Step-8 `integrate` row; its
+# real prerequisite is a gate passing, so it waits for `current:` to reach Step 8 even when
+# its deps have landed. The old reader, which had no step, would have named it at Step 4.
+wave_at T20
+expect_contains "the old reader names the Step-8 integrate row whose deps landed" "T20" \
+  "$(old_ready "$SANDBOX/diff-wave.md")"
+expect_absent "…units_ready at Step 4 does not: a gate act waits for its step (Δ6)" "T20" \
+  "$(new_ready "$SANDBOX/diff-wave.md" 4)"
+expect_eq "…and at Step 8 it does" "T20" "$(new_ready "$SANDBOX/diff-wave.md" 8)"
 
 # ============================================================
 section "9 — a markdown-escaped pipe in a cell (the critic's Issue 1)"
@@ -1270,33 +1290,32 @@ THREE_EOF
 
 VAL_THREE="$(call units_validate "$SANDBOX/three-missing.md")"
 
-expect_eq "14.1 a Step-5 row missing three step-4 rows reports three violations" "3" \
+# RE-AUTHORED FOR wave-20 REQ-5 (AC-5.2). Every missing edge is still named in one round
+# trip; what changed is the SHAPE — one line per offending row, with the count and the ids,
+# instead of one line per missing edge (N×M lines on a large table, triage-C claim 3).
+expect_eq "14.1 a Step-5 row missing three step-4 rows reports ONE line" "1" \
   "$(nlines "$VAL_THREE")"
-expect_contains "14.2 …naming the first" \
-  "T9: step 5 does not depend transitively on step-4 row T3" "$VAL_THREE"
-expect_contains "14.3 …the second" \
-  "T9: step 5 does not depend transitively on step-4 row T4" "$VAL_THREE"
-expect_contains "14.4 …and the third" \
-  "T9: step 5 does not depend transitively on step-4 row T5" "$VAL_THREE"
+expect_eq "14.2 …naming the row, the count and all three ids, in table order" \
+  "T9: step 5 is missing 3 step-4 prerequisites: T3, T4, T5" "$VAL_THREE"
 expect_eq "14.5 …and exits 1" "1" "$(call_rc units_validate "$SANDBOX/three-missing.md")"
 # THE ROW IT DOES REACH IS NOT ACCUSED, and neither is the Step-3 row: only Step-4 rows are
 # owed, and only the unreached ones are named.
 expect_eq "14.6 the reached step-4 row and the step-3 row draw nothing" "" \
-  "$(printf '%s\n' "$VAL_THREE" | /usr/bin/grep -E 'step-4 row (T1|T2)$')"
+  "$(printf '%s\n' "$VAL_THREE" | /usr/bin/grep -E '(: |, )(T1|T2)(,|$)')"
 
-# THE MUTATION ARM. Put the `break` back into a scratch copy of the shipped library: the
-# same table then yields one line instead of three. Without this arm, an implementation
-# that reported three lines for some other reason — or a fixture that happened to miss one
+# THE MUTATION ARM. A `break` after the line that collects a missing id, in a scratch copy of
+# the shipped library: the same table then names one id instead of three. Without this arm,
+# a line that named three ids for some other reason — or a fixture that happened to miss one
 # row — would read identically.
-anchor "$LIB" 'does not depend transitively on step-4 row %s' 1
+anchor "$LIB" 'COLLECT ONE MISSING PREREQUISITE' 1
 MUTANT_BREAK="$SANDBOX/units-mutant-break.sh"
 awk '{ print }
-     index($0, "does not depend transitively on step-4 row %s") { print "            break" }' \
+     index($0, "COLLECT ONE MISSING PREREQUISITE") { getline; print; print "            break" }' \
   "$LIB" > "$MUTANT_BREAK"
 MUTANT_BREAK_OUT="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_validate "$2"' \
   _ "$MUTANT_BREAK" "$SANDBOX/three-missing.md")"
-expect_eq "14.7 the shipped library reports three; the mutant that breaks reports one" \
-  "3 1" "$(nlines "$VAL_THREE") $(nlines "$MUTANT_BREAK_OUT")"
+expect_eq "14.7 the shipped library names three ids; the mutant that breaks names one" \
+  "3 1" "$(printf '%s\n' "$VAL_THREE" | sed -nE 's/.*is missing ([0-9]+) .*/\1/p') $(printf '%s\n' "$MUTANT_BREAK_OUT" | sed -nE 's/.*is missing ([0-9]+) .*/\1/p')"
 
 
 # ============================================================
@@ -1568,5 +1587,302 @@ expect_eq "16.10 …worktree is not found inside another word" "1" "$(call_rc un
 expect_eq "16.11 …a needle with a space names no column" "1" "$(call_rc units_has_column "$SANDBOX/memo-cols.md" 'id step')"
 expect_eq "16.12 …an empty needle matches nothing" "1" "$(call_rc units_has_column "$SANDBOX/memo-cols.md" '')"
 
+# ============================================================
+section "17 — wave-20 REQ-5: readiness is the graph, the validator speaks per row, the row-add projector (AC-5.1, AC-5.2, AC-5.3)"
+# ============================================================
+#
+# AC-5.1 fails-when: "at current: 5 a pending Step-6 row with landed prerequisites is absent
+# from the ready set while a slot is free, an integrate row at Step 8 is present, or …". The
+# fixture is research D1 §1's own shape, widened by the two gate-act kinds (Δ6) and a
+# pending Step-3 prototype row (Δ1's "whatever its step" reaches it too).
+cat > "$SANDBOX/graph.md" <<'GRAPH_EOF'
+---
+current: 5
+---
+
+## SDLC State
+
+current: 5
+
+- Step 5: in flight
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | landed | implementor | — | 30m | REQ-x | b.sh | landed |
+| T3 | 5 | verify | the floor, in flight | test-runner | T1, T2 | 30m | REQ-x | — | active |
+| T4 | 6 | review | the review whose deps landed | critic | T1, T2 | 30m | REQ-x | — | pending |
+| T5 | 7 | doc | behind the active floor | implementor | T3 | 30m | REQ-x | — | pending |
+| T6 | 4 | build | a Step-4 row added late | implementor | — | 30m | REQ-x | c.sh | pending |
+| T7 | 8 | integrate | the merge, deps landed | implementor | T1, T2 | 30m | REQ-x | — | pending |
+| T8 | 9 | close | the close-out, deps landed | implementor | T1 | 30m | REQ-x | — | pending |
+| T9 | 3 | prototype | an unfinished prototype | implementor | — | 30m | REQ-x | — | pending |
+GRAPH_EOF
+
+expect_eq "17.1 AC-5.1 at current: 5 the Step-6 row with landed deps is ready, with the late Step-4 row and the prototype" \
+  "$(printf 'T4\nT6\nT9')" "$(call units_ready "$SANDBOX/graph.md" 5)"
+expect_eq "17.2 …the Step-7 row behind an ACTIVE dep is not" "" \
+  "$(call units_ready "$SANDBOX/graph.md" 5 | grep -x T5)"
+expect_eq "17.3 AC-5.1 …the Step-8 integrate row is NOT ready at current: 5 though its deps landed (Δ6)" "" \
+  "$(call units_ready "$SANDBOX/graph.md" 5 | grep -x T7)"
+expect_eq "17.4 …nor the Step-9 close row" "" \
+  "$(call units_ready "$SANDBOX/graph.md" 5 | grep -x T8)"
+expect_eq "17.5 at current: 8 the integrate row joins the work rows; the close row still waits" \
+  "$(printf 'T4\nT6\nT7\nT9')" "$(call units_ready "$SANDBOX/graph.md" 8)"
+expect_eq "17.6 at current: 9 a gate act whose step the run has REACHED stays ready (reached, not equal)" \
+  "$(printf 'T4\nT6\nT7\nT8\nT9')" "$(call units_ready "$SANDBOX/graph.md" 9)"
+expect_eq "17.7 …and the argument is still checked: a word is a caller fault" "2" \
+  "$(call_rc units_ready "$SANDBOX/graph.md" five)"
+
+# THROUGH THE FILL. `fill_ready_set` is what the tick prints from and the stop wall refuses
+# from (ADR-033), so AC-5.1 is asked of it too: rung 8, one slot occupied.
+FILL_LIB="$REPO_ROOT/payload/scripts/lib/fill.sh"
+fill_call() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; shift; fill_ready_set "$@"' _ "$FILL_LIB" "$@" 2>/dev/null; }
+expect_eq "17.8 AC-5.1 fill_ready_set at current: 5, rung 8, one open: the Step-6 row is in the set, the integrate row is not" \
+  "$(printf 'T4\nT6\nT9')" "$(fill_call "$SANDBOX/graph.md" 8 1)"
+sed 's/^current: 5$/current: 3/' "$SANDBOX/graph.md" > "$SANDBOX/graph-at-3.md"
+expect_eq "17.9 …and the Step-3 approval gate still holds: nothing fills at current: 3" "" \
+  "$(fill_call "$SANDBOX/graph-at-3.md" 8 0)"
+
+# ---------- AC-5.2: one line per offending row ----------
+#
+# FORTY STEP-4 ROWS AND ONE MISPLACED STEP-6 ROW that reaches only the first. Through 1.8.6
+# that printed thirty-nine lines; the fails-when is "one misplaced row prints more than one
+# line".
+{
+  printf -- '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
+  printf -- '|---|---|---|---|---|---|---|---|---|---|\n'
+  i=1
+  while [ "$i" -le 40 ]; do
+    printf '| T%s | 4 | build | row %s | implementor | — | 30m | REQ-x | f%s.sh | landed |\n' "$i" "$i" "$i"
+    i=$((i + 1))
+  done
+  printf '| T41 | 6 | review | the misplaced review | critic | T1 | 30m | REQ-x | — | pending |\n'
+} > "$SANDBOX/forty.md"
+VAL_FORTY="$(call units_validate "$SANDBOX/forty.md")"
+expect_eq "17.10 AC-5.2 one misplaced row over forty Step-4 rows prints ONE line" "1" "$(nlines "$VAL_FORTY")"
+expect_contains "17.11 …naming the row and the missing count" \
+  "T41: step 6 is missing 39 step-4 prerequisites: T2, T3," "$VAL_FORTY"
+expect_contains "17.12 …and the last id too" ", T40" "$VAL_FORTY"
+expect_eq "17.13 AC-5.2 …and the Step-6 row missing a Step-4 prerequisite is NOT admitted (exit 1)" "1" \
+  "$(call_rc units_validate "$SANDBOX/forty.md")"
+
+# THE FRONTIER (triage-C claim 3, research D1 T-1). T90 is a Step-5 row, T91 depends on T90 and
+# T92 on T91; the late Step-4 row T11 is reached by none of them. Adding T11 to T90's deps
+# repairs all three, so ONE line names T90 and T11, and T91/T92 are folded into it — the line
+# count is the number of edits the author owes.
+cat > "$SANDBOX/added11.md" <<'ADDED_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the planned build | implementor | — | 30m | REQ-x | a.sh | landed |
+| T11 | 4 | build | the fixup added mid-run | implementor | — | 30m | REQ-x | b.sh | pending |
+| T90 | 5 | verify | the floor | test-runner | T1 | 30m | REQ-x | — | pending |
+| T91 | 6 | review | after the floor | critic | T90 | 30m | REQ-x | — | pending |
+| T92 | 7 | doc | after the review | implementor | T91 | 30m | REQ-x | — | pending |
+ADDED_EOF
+VAL_ADDED="$(call units_validate "$SANDBOX/added11.md")"
+expect_eq "17.14 the frontier: one line for three rows that miss the same id through one chain" "1" "$(nlines "$VAL_ADDED")"
+expect_contains "17.15 …naming the frontier row and the id to add" \
+  "T90: step 5 is missing 1 step-4 prerequisite: T11" "$VAL_ADDED"
+expect_contains "17.16 …and the rows it repairs" "(T91, T92 reach it through T90)" "$VAL_ADDED"
+expect_eq "17.17 …and no line begins with a folded row" "" \
+  "$(printf '%s\n' "$VAL_ADDED" | grep -E '^T9[12]:')"
+
+# LANDED AND DROPPED ROWS ARE EXEMPT (research D1 T-2): a terminal row can no longer be
+# scheduled, and an edge added to it would record something false. The same late T11 with a
+# landed Step-5 row and a dropped Step-6 row: neither is accused; the pending Step-7 row is.
+cat > "$SANDBOX/terminal.md" <<'TERMINAL_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the planned build | implementor | — | 30m | REQ-x | a.sh | landed |
+| T11 | 4 | build | the fixup added mid-run | implementor | — | 30m | REQ-x | b.sh | pending |
+| T50 | 5 | verify | the floor, landed | test-runner | T1 | 30m | REQ-x | — | landed |
+| T51 | 6 | review | a dropped review | critic | T1 | 30m | REQ-x | — | dropped |
+| T52 | 7 | doc | the doc, still pending | implementor | T1 | 30m | REQ-x | — | pending |
+TERMINAL_EOF
+VAL_TERM="$(call units_validate "$SANDBOX/terminal.md")"
+expect_eq "17.18 landed and dropped rows are exempt from the transitive rule" "" \
+  "$(printf '%s\n' "$VAL_TERM" | grep -E '^T5[01]:')"
+expect_eq "17.19 …the pending row is still held to it, on one line" \
+  "T52: step 7 is missing 1 step-4 prerequisite: T11" "$VAL_TERM"
+
+# A CYCLE NEVER HIDES A MISSING EDGE. Two Step-5 rows that depend on each other both miss T2;
+# folding each into the other would print nothing and admit the table.
+cat > "$SANDBOX/cycle.md" <<'CYCLE_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | reached | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | reached by nobody | implementor | — | 30m | REQ-x | b.sh | landed |
+| T60 | 5 | verify | one half of a cycle | test-runner | T1, T61 | 30m | REQ-x | — | pending |
+| T61 | 5 | verify | the other half | test-runner | T60 | 30m | REQ-x | — | pending |
+CYCLE_EOF
+expect_eq "17.20 a dependency cycle between two offending rows still refuses (exit 1)" "1" \
+  "$(call_rc units_validate "$SANDBOX/cycle.md")"
+expect_contains "17.21 …and names the missing id" "T2" "$(call units_validate "$SANDBOX/cycle.md")"
+
+# ---------- AC-5.3: units_add_row, the pure projector under `task-add` ----------
+#
+# `units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>`
+# prints the WHOLE plan with the row added: the row as the last table row, status `pending`,
+# its `- <id>:` line under `## SDLC State`, and — for a Step-4 row — the id threaded into the
+# deps of the frontier Step-5+ rows that are not landed or dropped. It writes nothing.
+cat > "$SANDBOX/add.md" <<'ADD_EOF'
+---
+current: 5
+---
+
+# a plan
+
+## SDLC State
+
+current: 5
+
+- Step 4: opened
+  worktree: .worktrees/wave
+- Step 5: in flight
+- T1: landed at record/T1.md
+- T3: dispatched to w-T3
+  base: abc1234
+- T4: pending dispatch — .worktrees/T4
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build \| with a pipe | implementor | — | 30m | REQ-x | a.sh | — | — | landed |
+| T3 | 5 | verify | the floor | test-runner | T1 | 30m | REQ-x | — | 20-T3 | abc1234 | active |
+| T4 | 6 | review | after the floor | critic | T3 | 30m | REQ-x | — | — | — | pending |
+| T5 | 7 | doc | a landed doc | implementor | T1 | 30m | REQ-x | — | — | — | landed |
+
+## Verification Matrix
+
+| AC | tier |
+|---|---|
+ADD_EOF
+ADD_SUM_BEFORE="$(cksum < "$SANDBOX/add.md")"
+ADD_OUT="$(call units_add_row "$SANDBOX/add.md" T6 4 build 'the fixup' 'bionic:implementor' '—' 30 REQ-5 'b.sh, c.sh')"
+ADD_RC="$(call_rc units_add_row "$SANDBOX/add.md" T6 4 build 'the fixup' 'bionic:implementor' '—' 30 REQ-5 'b.sh, c.sh')"
+printf '%s\n' "$ADD_OUT" > "$SANDBOX/add-projected.md"
+expect_eq "17.22 AC-5.3 the projector exits 0" "0" "$ADD_RC"
+expect_eq "17.23 …and writes nothing: the plan is byte-identical" "$ADD_SUM_BEFORE" "$(cksum < "$SANDBOX/add.md")"
+expect_eq "17.24 …the new row is the table's last row, pending, header-keyed (worktree and base empty)" \
+  "| T6 | 4 | build | the fixup | bionic:implementor | — | 30 | REQ-5 | b.sh, c.sh | — | — | pending |" \
+  "$(printf '%s\n' "$ADD_OUT" | grep '^| T' | tail -1)"
+expect_eq "17.25 …its - T6: line sits after the last - T<n>: line and its continuation" \
+  "  base: abc1234|- T4: pending dispatch — .worktrees/T4|- T6: pending dispatch — added by task-add" \
+  "$(printf '%s\n' "$ADD_OUT" | grep -B2 '^- T6:' | sed -E 's/ at [0-9TZ:-]+$//' | tr '\n' '|' | sed 's/|$//')"
+expect_contains "17.26 …the Step-4 id is threaded into the frontier Step-5 row T3" \
+  "| T3 | 5 | verify | the floor | test-runner | T1, T6 |" "$ADD_OUT"
+expect_contains "17.27 …but not into T4, which reaches it through T3" \
+  "| T4 | 6 | review | after the floor | critic | T3 |" "$ADD_OUT"
+expect_contains "17.28 …nor into the landed T5 (exempt)" \
+  "| T5 | 7 | doc | a landed doc | implementor | T1 |" "$ADD_OUT"
+expect_contains "17.29 …and an escaped pipe in another row's cell survives the rewrite" \
+  'the build \| with a pipe' "$ADD_OUT"
+expect_eq "17.30 …and the projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/add-projected.md")"
+
+# A LATER-STEP ROW THREADS NOTHING: the validator's only ordering rule is Step-5+ reaching
+# every Step-4 row, so a Step-6 addition changes no other row.
+ADD_OUT6="$(call units_add_row "$SANDBOX/add.md" T7 6 review 'a second review' critic 'T3' 30 REQ-5 '—')"
+expect_eq "17.31 a Step-6 row threads nothing: every other row is byte-identical" \
+  "$(grep '^| T[0-9]' "$SANDBOX/add.md")" "$(printf '%s\n' "$ADD_OUT6" | grep '^| T[0-9]' | grep -v '^| T7 ')"
+expect_eq "17.32 a plan with no ## Tasks table is not projected (exit 1…)" "1" \
+  "$(call_rc units_add_row "$SANDBOX/no-table.md" T1 4 build x implementor — 1 x x)"
+expect_eq "17.33 …and nothing is printed" "" \
+  "$(call units_add_row "$SANDBOX/no-table.md" T1 4 build x implementor — 1 x x)"
+
+
+
+# ============================================================
+section "17b — wave-20 T10b: the release waits for its step (critic C3, Δ6), author text reaches the row byte for byte (review R6)"
+# ============================================================
+#
+# C3: at current: 5 the Step-7 release row, kind `doc`, was READY the moment its Step-5
+# dependency landed — the stop wall then pressed for the release before any auditor or critic
+# verdict, which is the case Δ6 rejected literal Δ1 for. The accepted reading: a gate act waits
+# for its step. The release is the Document step's gate act, so a `doc` row at Step 7 or later
+# joins `integrate` and `close`; every other row ahead of `current:` stays ready (D5 part 1).
+cat > "$SANDBOX/held.md" <<'HELD_EOF'
+---
+current: 5
+---
+
+## SDLC State
+
+current: 5
+
+- Step 5: in flight
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 5 | verify | the live bed, landed | implementor | T1 | 30m | REQ-x | — | landed |
+| T3 | 7 | doc | Release 1.8.7 | implementor | T2 | 30m | REQ-x | — | pending |
+| T4 | 6 | review | the review, deps landed | critic | T1 | 30m | REQ-x | — | pending |
+| T5 | 8 | integrate | the merge, deps landed | implementor | T2 | 30m | REQ-x | — | pending |
+| T6 | 7 | doc | a second doc row behind a pending review | implementor | T4 | 30m | REQ-x | — | pending |
+HELD_EOF
+sed 's/^current: 5$/current: 7/' "$SANDBOX/held.md" > "$SANDBOX/held-at-7.md"
+
+expect_eq "17b.1 C3 at current: 5 the landed-dep Step-7 doc row (the release) is NOT ready; the Step-6 review is" \
+  "T4" "$(call units_ready "$SANDBOX/held.md" 5)"
+expect_eq "17b.2 …at current: 6 it still waits" "T4" "$(call units_ready "$SANDBOX/held.md" 6)"
+expect_eq "17b.3 …at current: 7 the release joins the ready set (the integrate row still waits)" \
+  "$(printf 'T3\nT4')" "$(call units_ready "$SANDBOX/held-at-7.md" 7)"
+expect_eq "17b.4 through the fill: fill_ready_set at current: 5, rung 8, none open, omits the release" \
+  "T4" "$(fill_call "$SANDBOX/held.md" 8 0)"
+
+# THE WORK ROWS AHEAD OF current: ARE UNTOUCHED (D5 part 1). A Step-4 build row whose deps
+# landed is ready at current: 3 as before; so is a Step-6 review at current: 5 (17b.1).
+cat > "$SANDBOX/ahead.md" <<'AHEAD_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 3 | prototype | landed | implementor | — | 30m | REQ-x | — | landed |
+| T2 | 4 | build | ahead of current: 3 | implementor | T1 | 30m | REQ-x | a.sh | pending |
+| T3 | 6 | doc | a Step-6 doc row, not the release | implementor | T1 | 30m | REQ-x | — | pending |
+AHEAD_EOF
+expect_eq "17b.5 a Step-4 build row ahead of current: 3 with landed deps is still ready, and a Step-6 doc row too" \
+  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/ahead.md" 3)"
+
+# THE HOLD IS NAMED, ONE LINE PER ROW (`units_held <plan> <step>`): a row that would be ready
+# but for its step. A row still waiting on a dependency is not a hold — it is not ready for a
+# reason the graph already states — so T6 is not named.
+expect_eq "17b.6 units_held at current: 5 names the release and the integrate row, in table order" \
+  "$(printf 'T3: step 7 doc row waits for current: 7\nT5: step 8 integrate row waits for current: 8')" \
+  "$(call units_held "$SANDBOX/held.md" 5)"
+expect_eq "17b.7 …at current: 7 only the integrate row is still held" \
+  "T5: step 8 integrate row waits for current: 8" "$(call units_held "$SANDBOX/held-at-7.md" 7)"
+expect_eq "17b.8 …a caller fault is still exit 2" "2" "$(call_rc units_held "$SANDBOX/held.md" five)"
+expect_eq "17b.9 a hold is not a broken invariant: the validator admits the plan" "0" \
+  "$(call_rc units_validate "$SANDBOX/held.md")"
+
+# R6: author text reached awk through -v, which interprets backslash escapes, so
+# `C:\new\table` became `C:<newline>ew<tab>able`. Every operand now reaches the program
+# through ENVIRON. An author's own `\|` is already the one GFM cell escape and stays as it
+# was typed; a raw `|` is still escaped (17b.11).
+R6_OUT="$(call units_add_row "$SANDBOX/add.md" T8 6 review 'match C:\new\table and a\|b' 'bionic:critic' 'T3' 30 'costs $5 \t' 'x\y.sh')"
+expect_eq "17b.10 R6 a backslash, an author-escaped \\| and a \$ survive byte for byte into the row" \
+  '| T8 | 6 | review | match C:\new\table and a\|b | bionic:critic | T3 | 30 | costs $5 \t | x\y.sh | — | — | pending |' \
+  "$(printf '%s\n' "$R6_OUT" | grep '^| T8 ')"
+R6_OUT4="$(call units_add_row "$SANDBOX/add.md" T9 4 build 'raw a|b and \n' 'bionic:implementor' '—' 30 REQ-5 'b.sh')"
+expect_eq "17b.11 …through the Step-4 (threading) arm as well" \
+  '| T9 | 4 | build | raw a\|b and \n | bionic:implementor | — | 30 | REQ-5 | b.sh | — | — | pending |' \
+  "$(printf '%s\n' "$R6_OUT4" | grep '^| T9 ')"
+expect_contains "17b.12 …and the Step-5 frontier row is still threaded with the new id" \
+  "| T3 | 5 | verify | the floor | test-runner | T1, T9 |" "$R6_OUT4"
+printf '%s\n' "$R6_OUT" > "$SANDBOX/r6-projected.md"
+expect_eq "17b.13 …and the projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/r6-projected.md")"
 
 finish

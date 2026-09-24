@@ -69,6 +69,35 @@ OBSERVE_CADENCE_DEFAULT_S=900
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
 file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
 
+# THE NEWEST COPY OF AN AGENT'S LOG, ANYWHERE UNDER ONE PROJECT DIRECTORY (D8; REQ-8;
+# epic-23 wave-20 T5). The harness re-files a dispatched agent's transcript under whichever
+# session is talking to it NOW, and `adopted_from=` only ever names the session that
+# LAUNCHED it — a second `/clear`+resume leaves an INTERMEDIATE adopter's own copy named on
+# no row at all, invisible to a reader that walks "this session, then the launcher" as a
+# fixed chain (research D2 §REQ-8, triage-A). The newest copy of the id's log, by mtime,
+# anywhere under the project directory, is the one to trust: the glob is scoped to the
+# EXACT agent id, a 16-hex random suffix, so no other agent's log is ever a candidate.
+#
+# <project-dir> is the directory one level above every session directory —
+# `<project-dir>/<session-id>/subagents/agent-<id>.jsonl` — which is what
+# `${transcript%/*}` already is for a transcript path shaped `<project-dir>/<sid>.jsonl`.
+agent_log_newest() {  # <agent-id> <project-dir> -> newest matching path on stdout, nonzero if none
+  local id="$1" proj="$2" f newest="" newest_m=-1 m
+  [ -n "$id" ] || return 1
+  [ -n "$proj" ] && [ -d "$proj" ] || return 1
+  for f in "$proj"/*/subagents/"agent-${id}.jsonl"; do
+    [ -f "$f" ] || continue
+    m="$(file_mtime "$f")"
+    case "$m" in ''|*[!0-9]*) m=0 ;; esac
+    if [ "$m" -gt "$newest_m" ]; then
+      newest="$f"; newest_m="$m"
+    fi
+  done
+  [ -n "$newest" ] || return 1
+  printf '%s' "$newest"
+  return 0
+}
+
 # One field out of a versioned pipe-delimited line, BY KEY, never by position (checklist
 # A6): a fixed-field-order parser breaks undiagnosably the moment a field is added, so an
 # unknown extra field must be inert here.
@@ -286,17 +315,33 @@ observe_agent() {  # <typed-target> [deliverable …]
     return 1
   fi
 
-  OBS_SESSION="${OBS_ADOPTED_FROM:-$OBSERVE_SESSION}"
+  # THE WORKING LOG, RESOLVED BY GLOB (D8; REQ-8), never by chasing `adopted_from` alone.
   # `adopted_from` names the session that LAUNCHED an agent this one took over after a
-  # `/clear`: the working log stays filed there, and the row is where `adopt` wrote that down.
-  local session_dir="${OBSERVE_TRANSCRIPT%.jsonl}"
-  [ -n "$OBS_ADOPTED_FROM" ] && session_dir="${OBSERVE_TRANSCRIPT%/*}/$OBS_ADOPTED_FROM"
-  OBS_LOG="$session_dir/subagents/agent-${OBS_ID}.jsonl"
-  OBS_META="$session_dir/subagents/agent-${OBS_ID}.meta.json"
+  # `/clear` — provenance, not a location — and the harness re-files the live copy under
+  # whichever session is TALKING TO IT NOW, which after a SECOND `/clear` can be a session
+  # this row names nowhere. `agent_log_newest` globs every session directory of this
+  # project for the exact id and returns the newest, so the launcher, any intermediate
+  # adopter and this session are all equally candidates.
+  local proj_dir="${OBSERVE_TRANSCRIPT%/*}" found_log="" found_sid="" session_dir
+  found_log="$(agent_log_newest "$OBS_ID" "$proj_dir")" || found_log=""
+  if [ -n "$found_log" ]; then
+    found_sid="$(basename "$(dirname "$(dirname "$found_log")")")"
+    OBS_LOG="$found_log"
+    OBS_META="${found_log%.jsonl}.meta.json"
+    OBS_SESSION="$found_sid"
+  else
+    # NOTHING WRITTEN YET — name where the log WILL land rather than nothing: the
+    # launcher's directory when adopted, this session's otherwise (the pre-glob default).
+    session_dir="${OBSERVE_TRANSCRIPT%.jsonl}"
+    [ -n "$OBS_ADOPTED_FROM" ] && session_dir="${proj_dir}/$OBS_ADOPTED_FROM"
+    OBS_LOG="$session_dir/subagents/agent-${OBS_ID}.jsonl"
+    OBS_META="$session_dir/subagents/agent-${OBS_ID}.meta.json"
+    OBS_SESSION="${OBS_ADOPTED_FROM:-$OBSERVE_SESSION}"
+  fi
 
   OBS_OURS_BECAUSE="the harness reports it as a teammate of this session (roster-${OBSERVE_SESSION}.state carries its row)"
   if [ -n "$OBS_ADOPTED_FROM" ]; then
-    OBS_OURS_BECAUSE="this session ADOPTED it (adopted_from=${OBS_ADOPTED_FROM}); the harness reports it as a teammate and its working log is still filed under the session that launched it"
+    OBS_OURS_BECAUSE="this session ADOPTED it (adopted_from=${OBS_ADOPTED_FROM}); the harness reports it as a teammate, and its working log was found under session ${OBS_SESSION}"
   fi
 
   # THE TYPE IS DISPLAY ONLY, and it is read only where the live-set reader is loaded. The

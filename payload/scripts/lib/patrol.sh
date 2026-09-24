@@ -82,6 +82,13 @@ if ! declare -F claude_home >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/roots.sh"
 fi
+# roster.sh, THE SAME SOFT SOURCE, for `roster_open_names` (epic-23 wave-20 T17, D10):
+# `patrol_roster_state` asks the one close predicate every wall asks, and this file is sourced
+# by callers (doctor, the stop library, suites) that never declared roster.sh themselves.
+if ! declare -F roster_open_names >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/roster.sh"
+fi
 
 # Values ride on `|`-delimited lines read BY KEY, so a value carrying a pipe or
 # a newline would forge a field. Same normalisation the roster writer applies to
@@ -547,7 +554,9 @@ patrol_stamp_state() {  # <repo-root> <sid> [<transcript>] -> state=…|age=…|
 #
 # THE THREE VERDICTS, and only one of them blocks:
 #   dead        an idle gap at least one fire window long has passed since the reference
-#               instant with no tick in it
+#               instant with no tick in it, OR a Patrol marker turn ran after the stamp and
+#               its tick never stamped (wave-20 REQ-6, AC-6.3: a clock that fires without
+#               ticking is as dead as one that stopped)
 #   busy        every idle gap since the reference instant is shorter than one fire window
 #   unreadable  no transcript, no user record inside the scan window, or a record that
 #               cannot be dated — the wall cannot observe, so it does not refuse
@@ -611,7 +620,7 @@ _patrol_verdict_jq='
 # file's whole subject is not doing that. It is also the fail-open direction — `unreadable`
 # never blocks — and the advisory names it, so the degradation is visible rather than
 # silent.
-_patrol_verdict_awk='
+_PATROL_ISO_AWK='
 function alldig(s,   i, c) {
   if (length(s) == 0) return 0
   for (i = 1; i <= length(s); i++) { c = substr(s, i, 1); if (c < "0" || c > "9") return 0 }
@@ -638,6 +647,9 @@ function iso2epoch(s,   y, mo, d, h, mi, se, tail) {
   if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || se > 60) return -1
   return days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + se
 }
+'
+# THE VERDICT'S OWN PROGRAM, after the date functions it shares with `fill_ledger_report`.
+_patrol_verdict_awk="$_PATROL_ISO_AWK"'
 {
   e = iso2epoch($2)
   if (e < 0) { bad = 1; next }
@@ -654,7 +666,15 @@ END {
     exit
   }
   ref = ref0
-  for (i = 1; i <= n; i++) if (kind[i] == "T" && ep[i] > ref) ref = ep[i]
+  # A MARKER TURN AFTER THE STAMP IS A FIRING THAT DID NOT TICK (wave-20 REQ-6, AC-6.3; D6).
+  # The tick writes the stamp before it decides, so a marker row its tick answered always
+  # sits at or before the stamp. One AFTER it is the clock firing into a turn that never ran
+  # the tick — and a clock that fires without ticking is a dead Patrol. This used to be the
+  # other way round: a marker row moved the reference instant forward, as if the marker were
+  # the proof of life, and a Patrol whose job carried the marker but not the tick read healthy
+  # to the death notice, the arming wall and doctor for as long as it kept firing (report #1).
+  fired = 0
+  for (i = 1; i <= n; i++) if (kind[i] == "T" && ep[i] > ref) fired++
   haslast = 0; last = 0; gap = 0
   for (i = 1; i <= n; i++) {
     if (kind[i] == "U" && haslast) {
@@ -663,7 +683,8 @@ END {
     }
     last = ep[i]; haslast = 1
   }
-  if (gap >= window) print "dead|" ref "|" gap "|"
+  if (fired > 0) print "dead|" ref "|" gap "|" fired " marker turn(s) since the stamp ran no tick"
+  else if (gap >= window) print "dead|" ref "|" gap "|"
   else print "busy|" ref "|" gap "|"
 }
 '
@@ -753,45 +774,40 @@ EOF
 # is appended per status transition — `intended` at the wall, then `confirmed`,
 # then `identified` — so the number of DISPATCHES the wall saw is the number of
 # `status=intended` rows, and counting rows outright would multiply every
-# dispatch by however far it got. A dispatch is CLOSED when hooks/landing-gate.sh
-# has journalled a `landing-swept/v1` marker for its name SAYING `state=MET`;
-# anything else — no marker, or a marker carrying any other verdict — is open.
+# dispatch by however far it got.
 #
-# `state=` IS LOAD-BEARING, and this reader used to ignore it (Step-6 security
-# review, out-of-axis note 2). hooks/session-start.sh's `open_rows` and the
-# poker's `adopt_fold` have always required MET; this function and the poker's
-# `youngest_suite_writer` took ANY marker, so four readers of one schema held
-# two rules. S17's `adopt_copy_marker` then became a second WRITER that copies a
-# predecessor's verdict — UNMET included — verbatim onto a successor's roster,
-# which is how a non-MET marker reaches a roster this function reads. Reporting
-# an UNMET contract as closed is reporting a wave as finished.
+# OPEN AND CLOSED ARE THE ONE CLOSE PREDICATE'S (epic-23 wave-20 T17, D10; T2's
+# carry-over). A dispatched name is CLOSED only when `roster_open_names`
+# (lib/roster.sh) says so — an ack in this session's sweeper ledger stamped after
+# the name's latest launch — the reading the dispatch wall, the sweeper, the stop
+# wall and the tick's adopt fold already share. This function used to close a name
+# on a `landing-swept/v1|…|state=MET` marker instead (and before the Step-6
+# security review, on any marker at all), so doctor and the Patrol report could
+# call a wave's writer finished while every wall still held its name open. A MET
+# marker records a landing seen, not an agent gone; an UNMET one never closed
+# anything and still does not.
 patrol_roster_state() {  # <repo-root> <sid> -> rows=…|open=…|closed=…|names=…|path=…
-  local repo="${1:-}" sid="${2:-}" f rows names closed open swept nm
+  local repo="${1:-}" sid="${2:-}" f ledger rows names closed open open_names nm nl='
+'
   f="$(tmp_root "$repo")/roster-${sid}.state"
   if [ ! -f "$f" ] || [ -L "$f" ]; then
     printf 'rows=0|open=0|closed=0|present=no|path=%s' "$f"
     return 0
   fi
+  ledger="$(tmp_root "$repo")/sweeper-${sid}.state"
   rows=$(grep -c '^roster-state/v1|status=intended|' "$f" 2>/dev/null || true)
   case "$rows" in ''|*[!0-9]*) rows=0 ;; esac
   names="$(grep '^roster-state/v1|status=intended|' "$f" 2>/dev/null \
            | tr '|' '\n' | sed -n 's/^name=//p' | sort -u)"
-  # CAPTURED, THEN MATCHED — never `grep <file> | grep -q`. Under `pipefail` a
-  # `-q` consumer closes the pipe on its first hit and the producer dies of
-  # SIGPIPE with status 141, which a caller reads as a failed search rather than
-  # a successful one.
-  # MATCHED BY FIELD EQUALITY, never by substring: `state=` is last in the
-  # originator's printf today, and a field appended after it must not silently
-  # turn every marker in the fleet into a non-closing one.
-  swept="$(grep '^landing-swept/v1|' "$f" 2>/dev/null \
-           | awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i == "state=MET") { print; break } }' \
-           || true)"
+  # The predicate reads the ledger as empty when it is absent, unreadable or a symlink,
+  # which leaves every name open: the generous direction for a count of work in flight.
+  open_names="$(roster_open_names "$f" "$ledger")"
   closed=0; open=0
   while IFS= read -r nm; do
     [ -n "$nm" ] || continue
-    case "$swept" in
-      *"|name=${nm}|"*) closed=$((closed + 1)) ;;
-      *)                open=$((open + 1)) ;;
+    case "$nl$open_names$nl" in
+      *"$nl$nm$nl"*) open=$((open + 1)) ;;
+      *)             closed=$((closed + 1)) ;;
     esac
   done <<EOF
 $names
@@ -874,4 +890,87 @@ EOF
   done <<EOF
 $(patrol_live_sessions)
 EOF
+}
+
+# ─── THE FILL LEDGER'S PATH AND ITS REPORT (epic-23 wave-20 REQ-5, AC-5.5/AC-5.6; Δ2; ADR-036) ──
+#
+# TWO PROCESSES READ ONE FILE, so its path and its fold are written once, here: the stop
+# library's recorder (`stop_fill_ledger`, payload/scripts/lib/stop.sh) appends a line per Stop,
+# and `session-poker.sh fill-report` folds them. This file is already sourced by both — the
+# poker's loader wants it and the stop library sources it for the death notice — and the fold
+# shares the verdict's date arithmetic (`_PATROL_ISO_AWK`, above) rather than growing a second
+# copy of it. The ledger is the Patrol's measure: did the scheduler keep every slot busy.
+#
+# THE PATH IS DERIVED, NOT CONFIGURED: `<docs-root>/record/<plan slug>/fill-ledger.log`, the
+# slug being the plan's basename less `.plan.md` — exactly how close-out.sh derives a run's
+# record directory, so no new plan key exists to drift. `.bionic/` is machine-local, so the
+# ledger is too, like every record.
+fill_ledger_path() {  # <project root> <plan path> -> the ledger's absolute path
+  local root="${1:-}" plan="${2:-}" slug
+  [ -n "$root" ] && [ -n "$plan" ] || return 1
+  slug="${plan##*/}"; slug="${slug%.plan.md}"
+  [ -n "$slug" ] || return 1
+  printf '%s/record/%s/fill-ledger.log\n' "$(docs_root "$root")" "$slug"
+}
+
+# THE REPORT (AC-5.6). Lines are folded by `turn=` — the last line of a turn wins, because a
+# refused Stop and the re-entered Stop that ends the same turn are one turn, and the later
+# line is the one that saw the launches. A line with no turn key stands alone. The folded
+# lines are ordered by `at` and each owns the interval up to the next; the last one owns the
+# interval to <now> only while the run is open, and nothing once it has closed. Each interval
+# is charged to exactly one bucket, in this order:
+#   declined  the line carries a decline — listed per reason, with its idle cost
+#   hold      state=hold|emergency and a row was ready — a machine fact the plan cannot hold
+#   missed    state=ok and missed>0 — a free slot, a ready row, nothing launched: the measure,
+#             target zero
+# Minutes are rounded to the nearest whole minute; the seconds are printed beside them. A line
+# whose `at` cannot be dated is skipped rather than guessed at.
+fill_ledger_report() {  # <ledger> <plan slug> <open: yes|no> <now epoch> -> report lines
+  local f="${1:-}" slug="${2:-}" open="${3:-no}" now="${4:-}"
+  case "$now" in ''|*[!0-9]*) now="$(date -u +%s)" ;; esac
+  [ -f "$f" ] && [ ! -L "$f" ] || f=/dev/null
+  awk -v slug="$slug" -v open="$open" -v now="$now" "$_PATROL_ISO_AWK"'
+    function field(line, key,   i, n, parts, kv) {
+      n = split(line, parts, "|")
+      for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    function mins(s) { return int((s + 30) / 60) }
+    index($0, "fill-ledger/v1|") == 1 {
+      e = iso2epoch(field($0, "at"))
+      if (e < 0) next
+      k = field($0, "turn")
+      if (k != "" && (k in slot)) { i = slot[k] } else { i = ++n; if (k != "") slot[k] = i }
+      ep[i] = e; st[i] = field($0, "state"); rd[i] = field($0, "ready")
+      ms[i] = field($0, "missed") + 0; dc[i] = field($0, "declined")
+    }
+    END {
+      # ORDER BY at — an insertion sort over an index, stable, so equal instants keep file order.
+      for (i = 1; i <= n; i++) ord[i] = i
+      for (i = 2; i <= n; i++) {
+        v = ord[i]; j = i - 1
+        while (j >= 1 && ep[ord[j]] > ep[v]) { ord[j + 1] = ord[j]; j-- }
+        ord[j + 1] = v
+      }
+      missed = 0; hold = 0; declined = 0; nr = 0
+      for (x = 1; x <= n; x++) {
+        i = ord[x]
+        if (x < n) end = ep[ord[x + 1]]
+        else end = (open == "yes" ? now : ep[i])
+        dur = end - ep[i]; if (dur < 0) dur = 0
+        if (dc[i] != "") {
+          declined += dur
+          if (!(dc[i] in why)) { rs[++nr] = dc[i]; why[dc[i]] = 0 }
+          why[dc[i]] += dur
+        } else if ((st[i] == "hold" || st[i] == "emergency") && rd[i] != "") {
+          hold += dur
+        } else if (st[i] == "ok" && ms[i] > 0) {
+          missed += dur
+        }
+      }
+      printf "fill-report/v1|plan=%s|turns=%d|missed=%d|hold=%d|declined=%d|missed_s=%d|hold_s=%d|declined_s=%d|open=%s\n", \
+        slug, n, mins(missed), mins(hold), mins(declined), missed, hold, declined, open
+      for (r = 1; r <= nr; r++)
+        printf "fill-report-decline/v1|minutes=%d|seconds=%d|reason=%s\n", mins(why[rs[r]]), why[rs[r]], rs[r]
+    }' "$f"
 }

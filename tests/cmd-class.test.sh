@@ -758,11 +758,19 @@ expect_eq "the installed-plugin reading of the cmd-class source lands on the shi
 expect_contains "…and the extractor sees the cmd-class library (shape A)" "cmd-class.sh" "$SRC_LITERALS"
 expect_contains "…and the sweeper handoff (shape B)" "session-sweeper.sh" "$SRC_LITERALS"
 # WHERE SHAPE A FINDS THE CLASSIFIER NOW, stated so the row above cannot pass on the
-# wrong declaration: no hook's WANT line names cmd-class.sh any more, and the per-wall
-# table does. If the sweep of that table were dropped, the row above would go red — which
-# is what it did when the fold moved the source site and this sweep had not followed.
-expect_absent "…and no hook's own WANT line names it, which is why the table is swept" \
-  "cmd-class.sh" "$(/usr/bin/grep -hoE '^BIONIC_LIB_WANT="[^"]*"' "$PAYLOAD_HOOKS"/*.sh)"
+# wrong declaration: the Bash walls' process does not name cmd-class.sh on its WANT line,
+# and the per-wall table does — the two walls that read it source it there, below the
+# partition. If the sweep of that table were dropped, the Bash process's declaration would
+# be missing from the sweep, which is what happened when the fold moved the source site.
+#
+# SCOPED TO hooks/bash-walls.sh SINCE wave-20 T4 (REQ-7, D7). hooks/dispatch-preflight.sh
+# now declares cmd-class.sh on its own WANT line — its lift pastes the library's one run
+# normaliser into `collapse()` — so "no hook's WANT line names it" stopped being true by
+# design. What this row guards is the Bash process's declaration, and that is unchanged.
+expect_absent "…and the Bash walls' own WANT line does not name it, which is why the table is swept" \
+  "cmd-class.sh" "$(/usr/bin/grep -hoE '^BIONIC_LIB_WANT="[^"]*"' "$PAYLOAD_HOOKS"/bash-walls.sh)"
+expect_nonempty "…(non-vacuity: the Bash walls do declare a WANT line to read)" \
+  "$(/usr/bin/grep -hoE '^BIONIC_LIB_WANT="[^"]*"' "$PAYLOAD_HOOKS"/bash-walls.sh)"
 expect_contains "…while the per-wall table declares it, for the two walls that read it" \
   "cmd-class.sh" "$(/usr/bin/grep -hoE '^BIONIC_WALL_LIBS_[A-Za-z0-9_]*="[^"]*"' "$WALLS_LIB")"
 
@@ -1116,5 +1124,86 @@ still_runs 'bash -o errexit tests/x.test.sh' 'x.test.sh'
 # as a substring of every flag that happens to contain it.
 still_runs 'bash --verbose tests/x.test.sh' 'x.test.sh'
 
+
+
+section "C11 — REQ-7 AC-7.1 (wave-20 T4, D7): a redirected run is the same run"
+# THE SPELLING TABLE. A run claim used to carry its segment's redirections, so
+# `npx jest x 2>&1` claimed the run `npx jest x 2>&1` and the budget arm compared that,
+# exactly, to the author's declared `npx jest x` — and refused the spelling every role
+# file prescribes for saving evidence (triage-B B1). Redirections, a trailing `| tee`,
+# and `|| true` change where the output goes and whether a failure stops the shell; none
+# of them changes what runs. ONE HELPER, `cmd_run_norm`, strips them; it is what builds
+# LAST_RUN here, what walls.sh applies to the declared side, and what the dispatch lift's
+# `collapse()` calls. This section owns the table; the walls' rows are in
+# tests/bash-walls.test.sh section 19.
+#
+# fails-when: any of the eight spellings normalises to anything but the bare command, a
+# quoted `>` or `|` is stripped, or two runs differing only inside quotes normalise equal.
+
+norm_of() {  # <command> -> cmd_run_norm's answer
+  bash -c '. "$1" || { echo "SOURCE-FAILED"; exit 1; }; cmd_run_norm "$2"' _ "$LIB" "$1" 2>&1
+}
+runs_norm_of() {  # <marked field> -> cmd_runs_norm's answer
+  bash -c '. "$1" || { echo "SOURCE-FAILED"; exit 1; }; cmd_runs_norm "$2"' _ "$LIB" "$1" 2>&1
+}
+T4_P='/tmp/t4-ev.log'
+t4_spellings() {  # <bare run> — the eight spellings AC-7.1 names, each against the bare run
+  local j="$1"
+  expect_eq "C11 [$j] > p normalises to the bare run"          "$j" "$(norm_of "$j > $T4_P")"
+  expect_eq "C11 [$j] >> p normalises to the bare run"         "$j" "$(norm_of "$j >> $T4_P")"
+  expect_eq "C11 [$j] 2>&1 normalises to the bare run"         "$j" "$(norm_of "$j 2>&1")"
+  expect_eq "C11 [$j] &> p normalises to the bare run"         "$j" "$(norm_of "$j &> $T4_P")"
+  expect_eq "C11 [$j] | tee p normalises to the bare run"      "$j" "$(norm_of "$j | tee $T4_P")"
+  expect_eq "C11 [$j] 2>&1 | tee p normalises to the bare run" "$j" "$(norm_of "$j 2>&1 | tee $T4_P")"
+  expect_eq "C11 [$j] |& tee p normalises to the bare run"     "$j" "$(norm_of "$j |& tee $T4_P")"
+  expect_eq "C11 [$j] || true normalises to the bare run"      "$j" "$(norm_of "$j || true")"
+  # THE CLAIM SIDE, through the same reading the budget arm uses. The splitter already cut
+  # `|`, `|&` and `||`; what reaches LAST_RUN for the other spellings is the redirect.
+  expect_eq "C11 [$j] > p 2>&1 CLAIMS the bare run"           "$j" "$(claim_run_of "$j > $T4_P 2>&1")"
+  expect_eq "C11 [$j] 2>&1 CLAIMS the bare run"               "$j" "$(claim_run_of "$j 2>&1")"
+  expect_eq "C11 [$j] &> p CLAIMS the bare run"               "$j" "$(claim_run_of "$j &> $T4_P")"
+  expect_eq "C11 [$j] 2>&1 | tee p CLAIMS the bare run"       "$j" "$(claim_run_of "$j 2>&1 | tee $T4_P")"
+}
+t4_spellings "npx jest --testPathPatterns 'x'"
+t4_spellings 'bash tests/gamma.test.sh'
+t4_spellings 'pytest tests/unit'
+
+# THE OTHER SHAPES A REDIRECTION TAKES, each one a trailing redirection too.
+J4="npx jest --testPathPatterns 'x'"
+expect_eq "C11 a target glued to its operator (>p) is one redirection" "$J4" "$(norm_of "$J4 >$T4_P")"
+expect_eq "C11 a numbered stream to a file (2>/dev/null)" "$J4" "$(norm_of "$J4 2>/dev/null")"
+expect_eq "C11 both orders of the pair (2>&1 > p)" "$J4" "$(norm_of "$J4 2>&1 > $T4_P")"
+expect_eq "C11 tee with its append flag (| tee -a p)" "$J4" "$(norm_of "$J4 2>&1 | tee -a $T4_P")"
+expect_eq "C11 a quoted target with a space in it is one word" "$J4" "$(norm_of "$J4 > \"a b.log\" 2>&1")"
+expect_eq "C11 wider spacing collapses as it always did" "$J4" "$(norm_of "npx   jest  --testPathPatterns 'x'   2>&1")"
+
+# QUOTED TEXT IS AN ARGUMENT, NOT PLUMBING — kept whole, character for character.
+expect_eq "C11 a quoted > is kept" "jest -t 'a > b'" "$(norm_of "jest -t 'a > b'")"
+expect_eq "C11 a quoted | tee is kept" 'jest -t "x | tee y"' "$(norm_of 'jest -t "x | tee y"')"
+expect_eq "C11 a quoted run with a redirect after it keeps the quotes" \
+  "jest -t 'a b'" "$(norm_of "jest -t 'a b' > $T4_P")"
+expect_ne "C11 two runs differing only inside quotes stay different" \
+  "$(norm_of "jest -t 'a b' 2>&1")" "$(norm_of "jest -t 'c d' 2>&1")"
+
+# WHAT IS NOT A TRAILING REDIRECTION STAYS. Anti-vacuity for the table above: a helper that
+# cut at the first operator, or kept only argv[0..1], would pass every row before this.
+expect_eq "C11 a pipe into something that is not tee is kept" \
+  'pytest tests/unit | grep -v skip' "$(norm_of 'pytest tests/unit | grep -v skip')"
+expect_eq "C11 a chain is kept" 'pytest tests/unit && echo done' "$(norm_of 'pytest tests/unit && echo done')"
+expect_eq "C11 || with something other than true is kept" \
+  'pytest tests/unit || echo failed' "$(norm_of 'pytest tests/unit || echo failed')"
+expect_eq "C11 an input redirection is not stripped (it changes what runs)" \
+  'pytest tests/unit < in.txt' "$(norm_of 'pytest tests/unit < in.txt')"
+expect_eq "C11 a bare run is itself" "$J4" "$(norm_of "$J4")"
+
+# THE DECLARED SIDE: a marked field, each run normalised inside its own marks.
+T4_BT='`'
+expect_eq "C11 cmd_runs_norm normalises each marked run and keeps the marks" \
+  "${T4_BT}npx jest x${T4_BT} ${T4_BT}pytest tests/unit${T4_BT}" \
+  "$(runs_norm_of "${T4_BT}npx jest x 2>&1${T4_BT} ${T4_BT}pytest tests/unit > $T4_P${T4_BT}")"
+expect_eq "C11 …and leaves a field with nothing to strip byte-identical" \
+  "${T4_BT}npx jest --testPathPatterns 'x|y'${T4_BT}" \
+  "$(runs_norm_of "${T4_BT}npx jest --testPathPatterns 'x|y'${T4_BT}")"
+expect_eq "C11 …and an empty field is empty" "" "$(runs_norm_of '')"
 
 finish

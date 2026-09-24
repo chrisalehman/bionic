@@ -1294,11 +1294,11 @@ _eg_cd_one_dir() {
 # COMMAND that only the caller can act on — an ambiguously named directory is a refusal, not
 # a cwd — and a command substitution would leave them behind in a subshell.
 _eg_commit_cwd() {
-  local _line _oldifs _hadf _p _c
+  local _line _oldifs _hadf _p _c _gc
   _EG_CWD=""; _EG_CWD_SRC=""; _EG_CDS=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
   case " $COMMAND " in
-    *" -C "*|*" -C"[\"\']*)
+    *" -C "*|*" -C"[\"\']*|*env*)
       _oldifs="$IFS"; _hadf=0
       while IFS= read -r _line; do
         [ -n "$_line" ] || continue
@@ -1314,12 +1314,11 @@ _eg_commit_cwd() {
         IFS="$_oldifs"
         [ "$_hadf" -eq 1 ] || set +f
         shift   # argv[0], the git binary
+        _gc=""
         while [ $# -gt 0 ]; do
           case "$1" in
             -C) shift
-                if [ $# -gt 0 ]; then
-                  case "$1" in /*) _EG_CWD="$1"; _EG_CWD_SRC="-C"; return 0 ;; esac
-                fi
+                if [ $# -gt 0 ]; then _gc="$1"; fi
                 break ;;
             -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix)
               shift; [ $# -gt 0 ] && shift ;;
@@ -1327,6 +1326,17 @@ _eg_commit_cwd() {
             *) break ;;
           esac
         done
+        case "$_gc" in /*) _EG_CWD="$_gc"; _EG_CWD_SRC="-C"; return 0 ;; esac
+        # `env -C <dir>` / `env --chdir=<dir>` (wave-20 T3, REQ-3, D3): the argv reader
+        # records env's directory, and an ABSOLUTE one is where the commit runs — joined
+        # with git's own relative `-C` when there is one, since git resolves that against
+        # the directory env moved to. `env-C` is a source `_eg_placed` never admits, so an
+        # env spelling is judged against this run's plan and is never exempted as outside
+        # the repository (D3-3); the directory it names still picks the task row.
+        case "$GIT_ARGV_ENV_CHDIR" in
+          /*) if [ -n "$_gc" ]; then _EG_CWD="${GIT_ARGV_ENV_CHDIR%/}/$_gc"; else _EG_CWD="$GIT_ARGV_ENV_CHDIR"; fi
+              _EG_CWD_SRC="env-C"; return 0 ;;
+        esac
         break
       done <<< "$(git_argv_expand "$COMMAND")"
       ;;
@@ -1390,7 +1400,8 @@ _eg_outside_root() {
 # _eg_commit_count -> sets _EG_COMMITS to the number of `git … commit` segments in the command
 # text, `sh -c`/`eval` strings included (the jurisdiction arm exempts only when it is 1), and
 # _EG_COMMIT_NC to the number of `-C` options among the GLOBAL options of the last one counted
-# — git's own cwd overrides, before the subcommand, never commit's `-C <commit>` after it.
+# — git's own cwd overrides, before the subcommand, never commit's `-C <commit>` after it —
+# plus one for an `env -C`/`--chdir` in front of it (wave-20 T3).
 # Assigns rather than prints, like `_eg_commit_cwd`, and forks nothing git-side: it is the
 # same pure-shell segment pass the other walls make.
 _EG_COMMITS=0
@@ -1406,6 +1417,8 @@ _eg_commit_count() {
     _EG_COMMIT_NC=0
     _git_argv_skip "$_line"
     [ -n "$GIT_ARGV_REST" ] || continue
+    # env's `-C`/`--chdir` is a directory override too (wave-20 T3, D3).
+    [ -z "$GIT_ARGV_ENV_CHDIR" ] || _EG_COMMIT_NC=$((_EG_COMMIT_NC + 1))
     _hadf=0
     case "$-" in *f*) _hadf=1 ;; esac
     set -f
@@ -1577,10 +1590,12 @@ DOCS_ROOT=$(docs_root "$BIONIC_ROOT")
 # the file that gets validated and the run that decides whether to enforce can never
 # disagree about which run this session is in.
 #
-#   bound-open <p>    this session's own plan, open      -> <p> is THE plan; enforce
-#   bound-closed <p>  its own plan, delivered/gone       -> <p> is THE plan; do not enforce
-#   fallback <p>      no binding: today's newest-plan    -> announced, then today's path
-#   none              no binding and no open run         -> today's path, unchanged
+#   bound-open <p>        this session's own plan, open  -> <p> is THE plan; enforce
+#   bound-closed <p>      its own plan, delivered/gone   -> <p> is THE plan; do not enforce
+#   bound-unreadable <p>  its own plan, there, unreadable -> REFUSED, naming <p> (below)
+#   fallback <p>          no binding: today's newest-plan -> announced, then today's path
+#   none                  no binding and no open run      -> today's path, unchanged
+#   anything else         a word this gate does not know  -> no plan is resolved in its place
 #
 # A BOUND SESSION NEVER FALLS THROUGH TO ANOTHER PLAN (AC-6). `bound-closed` is a terminal
 # answer, not a miss to recover from: the moment a run closes is exactly the moment a scan
@@ -1594,17 +1609,43 @@ EG_VPATH=""
 case "$EG_RUN" in *' '*) EG_VPATH="${EG_RUN#* }" ;; esac
 
 case "$EG_VERDICT" in
-  bound-open|bound-closed)
+  bound-open|bound-closed|bound-unreadable)
     PLAN="$EG_VPATH"
     ;;
-  *)
+  fallback|none)
     # UNBOUND: today's line, untouched, and reached by exactly the same code that
     # reached it before this wave. `fallback` and `none` both mean "no binding", and
     # AC-3's promise is that such a session behaves EXACTLY as it did — so the promise is
     # kept by running the old path rather than by a new one that agrees with it.
     PLAN=$(active_plan "$BIONIC_ROOT") || PLAN=""
     ;;
+  *)
+    # A WORD THIS GATE DOES NOT KNOW RESOLVES NOTHING (wave-20 T1, REQ-2). This arm used to
+    # be the unbound arm, so any verdict added to `session_run` without a line here fell
+    # into `active_plan` and was measured against the root's newest plan — somebody else's
+    # run. That is the failure `session_run` exists to end; an unknown word is not "unbound".
+    PLAN=""
+    ;;
 esac
+
+# THE UNREADABLE BOUND PLAN IS REFUSED, and here — above the misplacement sweep and above
+# the gone-plan arm, which a plan inside an unopenable folder would otherwise reach and be
+# admitted by as "not on disk" (wave-20 T1, REQ-2, D2; AC-2.1; research D3 N1). Nothing can
+# be validated against a plan this gate cannot read, and it may be a run mid-flight: the
+# gone-plan arm's answer ("nothing to protect, allow") is exactly wrong for it. The detail
+# names the component that cannot be opened — the plan itself, or the folder above it.
+_eg_refuse_unreadable() {
+  local _blk _ls
+  _blk=$(plan_unreadable "$PLAN") || _blk="$PLAN"
+  _ls=$(ls -ld "$_blk" 2>&1) || :
+  _eg_detail="The plan this session is bound to exists, and this gate cannot read it.
+Bound plan:    $PLAN
+Cannot open:   $_ls
+Nothing in it can be checked, so no commit is admitted against it. It is not closed and it
+is not gone, so no other plan is read in its place.
+Fix: restore read access (for example: chmod u+r on the plan, u+rx on its folder), then commit."
+  refuse exit2 commit "the bound plan cannot be read" "restore read access to the plan" "$_eg_detail"
+}
 
 # THE ANNOUNCEMENT, ONCE PER INVOCATION AND NOT ONCE PER SITE (AC-3, AC-6). It is emitted
 # where the resolution happens, not where each site consumes it, because the fact being
@@ -1616,6 +1657,10 @@ case "$EG_VERDICT" in
     ;;
   bound-closed)
     echo "evidence-gate: bound plan closed — $PLAN; this session has no open run" >&2
+    ;;
+  bound-unreadable)
+    echo "evidence-gate: bound plan unreadable — $PLAN" >&2
+    _eg_refuse_unreadable
     ;;
 esac
 
@@ -2619,10 +2664,17 @@ fi
 # time and landing on somebody else's wave. The unbound arm still asks `active_run` here,
 # in this position, exactly as it did before the wave: that is AC-3's "behaves exactly as
 # today", kept by running the old predicate rather than by trusting a new one to agree.
+#
+# `bound-unreadable` was refused at the resolution above and cannot arrive here; it is named
+# so that no reordering can let it fall to an arm that resolves another plan. The unbound
+# arm is `fallback|none` by name, and a word this gate does not know exits: it is never
+# handed to `active_run` (wave-20 T1, REQ-2).
 case "$EG_VERDICT" in
-  bound-open)   : ;;
-  bound-closed) exit 0 ;;
-  *)            active_run "$BIONIC_ROOT" >/dev/null || exit 0 ;;
+  bound-open)       : ;;
+  bound-closed)     exit 0 ;;
+  bound-unreadable) _eg_refuse_unreadable ;;
+  fallback|none)    active_run "$BIONIC_ROOT" >/dev/null || exit 0 ;;
+  *)                exit 0 ;;
 esac
 
 # ---------- THE ROW'S STEP IS THE JUDGMENT (wave-14 REQ-2, ADR-027) ----------
@@ -2792,7 +2844,8 @@ _eg_git_wt_name() {
   return 0
 }
 
-# _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step>" for the ONE `## Tasks` row
+# _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step><TAB><status><TAB><kind>" for
+# the ONE `## Tasks` row
 # whose `worktree` cell names that tree, and _EG_ROW_DUP to the ids when more than one does.
 # Returns 1 for "this plan has no register", 3 for "the register is ambiguous", 0 otherwise.
 #
@@ -2843,7 +2896,11 @@ _eg_row_for_worktree() {
       # RUN, and the fork below cannot ask that question of a value it was never handed.
       # One more cell of a table this function already parses — no new fact is fetched
       # (the D11 freeze, .claude/rules/hook-authoring.md).
-      _EG_ROW="$_id	$(units_field "$_line" step)	$(units_field "$_line" status)"
+      # AND A FOURTH, THE KIND (wave-20 REQ-5, Δ6). A row ahead of the run is judged by its
+      # task arms when a writer is at work in it — unless it is a gate act (`integrate`,
+      # `close`), whose commit must wait for the run to reach its step — so the fork needs
+      # the row's kind as well as its status.
+      _EG_ROW="$_id	$(units_field "$_line" step)	$(units_field "$_line" status)	$(units_field "$_line" kind)"
       _EG_ROW_DUP="$_id"
     else
       _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
@@ -2975,6 +3032,8 @@ if [ -n "$_EG_WT" ]; then
     _EG_RSTEP="${_EG_ROW#*	}"
     _EG_RSTATUS="${_EG_RSTEP#*	}"   # third field — empty on a table whose rows are short
     _EG_RSTEP="${_EG_RSTEP%%	*}"
+    _EG_RKIND="${_EG_RSTATUS#*	}"   # fourth field (wave-20 Δ6)
+    _EG_RSTATUS="${_EG_RSTATUS%%	*}"
     _EG_CURNUM="${CURRENT%[ab]}"
     case "$_EG_RSTEP" in
       ''|*[!0-9]*)
@@ -3032,6 +3091,27 @@ if [ -n "$_EG_WT" ]; then
           # step 4, the one pointer step the substitution can land on; every other substituted
           # step stays byte-identical), for the pointer exit a few hundred lines below to read.
           [ "$_EG_RSTEP" = 4 ] && _EG_SUBSTITUTED=1
+        elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null \
+             && [ "$_EG_RSTATUS" = "active" ] && [ "$_EG_CURNUM" -ge 4 ] 2>/dev/null \
+             && [ "$_EG_RKIND" != "integrate" ] && [ "$_EG_RKIND" != "close" ]; then
+          # A WORK ROW AHEAD OF THE RUN, WITH A WRITER AT WORK IN IT (wave-20 REQ-5, AC-5.1;
+          # Δ1, Δ6; ADR-036). Readiness is the prerequisite graph now: a Step-6 review whose
+          # deps have landed IS dispatched while the run sits at Step 5, and the refusal below
+          # would leave its writer finished and unable to commit — the fill's own dead end.
+          # So an `active` row ahead of `current:` is judged exactly as an in-step `active`
+          # row is, by the TASK arms (`CURRENT=4`, the note, the substitution flag), for the
+          # reasons that arm's docblock gives below.
+          #
+          # THREE THINGS KEEP THE REFUSAL, and each is the case the refusal was right about:
+          # a row that is NOT `active` (no writer was dispatched into that tree, so nobody
+          # should be committing from it); an `integrate` or `close` row (a gate act, whose
+          # real prerequisite is a gate passing — the merge must not commit before Verify
+          # has); and a run below Step 4 (nothing fills before Step-3 approval, so nothing
+          # can legitimately be ahead of it).
+          printf "evidence-gate: judged by row %s's task arms (run at current: %s)\n" \
+            "$_EG_RID" "$CURRENT" >&2
+          CURRENT=4
+          _EG_SUBSTITUTED=1
         elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null; then
           _eg_detail="canonical-sdlc worktree '${_EG_WT}' belongs to '## Tasks' row ${_EG_RID}, whose step is ${_EG_RSTEP}; the run is at current: ${CURRENT}.
 Plan: $PLAN
@@ -3063,7 +3143,8 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           #
           # ONLY `active`, AND ONLY AT THE ROW'S OWN STEP. A `pending`, `landed` or
           # `dropped` row is nobody at work: its tree falls through to `current:` exactly as
-          # it does today (25g(k2)), and a row AHEAD of the run keeps its refusal above. A
+          # it does today (25g(k2)). A row AHEAD of the run is the arm above: judged the same
+          # way when it is an active work row (wave-20 Δ6), refused otherwise. A
           # row BEHIND the run keeps the wave-14 substitution and its wording, which for the
           # step-4 rows that make up every real task batch resolves to these same task arms
           # — see A-T1.2 for the residual case that leaves open.
@@ -4787,6 +4868,62 @@ fi
 return 0
 }
 
+# ─── _wall_poker_contract_verb — is this a call of a contract-changing poker verb ─
+#
+# 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
+# `session-poker.sh amend|extend|task-add`; 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+#
+# READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
+# (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
+# / `eval` strings re-read to depth 2), and everything before the real argv[0] comes off by
+# `_git_argv_skip` — `cd … &&` is its own segment, `env` with its options, `VAR=value`,
+# `sudo`, `nohup` and the rest. What is left is either the script itself (`./hooks/
+# session-poker.sh amend …`) or an interpreter that runs it (`bash`, `sh`, `zsh`, `dash`,
+# `ksh`, and `.`/`source`) with its own options before the script. The verb is the next word.
+# A quoted mention (`echo 'session-poker.sh amend'`) is one argument to `echo` and is never
+# argv[0], so it is not a call.
+#
+# RESIDUAL, NAMED: a script path built at run time (`bash "$P" amend`, `sh -c "$(printf …)"`)
+# is not text any reader of the command can resolve. This arm guards a writer against
+# granting itself a wider budget by habit, not an adversary; the same residual stands for
+# every argv reader here.
+_WALL_POKER_VERB=""
+_wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKER_VERB) · 1 not
+  local _line _oldifs _hadf _w _i _script _next
+  _WALL_POKER_VERB=""
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    _git_argv_skip "$_line"
+    [ -n "$GIT_ARGV_REST" ] || continue
+    _oldifs="$IFS"; _hadf=0
+    case "$-" in *f*) _hadf=1 ;; esac
+    set -f
+    IFS="$GIT_ARGV_US"
+    # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+    set -- $GIT_ARGV_REST
+    IFS="$_oldifs"
+    [ "$_hadf" -eq 1 ] || set +f
+    [ $# -gt 0 ] || continue
+    _script=""
+    case "${1##*/}" in
+      bash|sh|zsh|dash|ksh|.|source)
+        shift
+        while [ $# -gt 0 ]; do
+          case "$1" in -*) shift ;; *) break ;; esac
+        done
+        [ $# -gt 0 ] && _script="$1" ;;
+      *) _script="$1" ;;
+    esac
+    [ "${_script##*/}" = "session-poker.sh" ] || continue
+    shift
+    _next="${1:-}"
+    case "$_next" in
+      amend|extend|task-add) _WALL_POKER_VERB="$_next"; return 0 ;;
+    esac
+  done <<< "$(git_argv_expand "$1")"
+  return 1
+}
+
 # ─── wall_background_suite_guard — hooks/background-suite-guard.sh ───────────
 #
 # A subagent may not run a suite where nobody reads the output (B-9,
@@ -4825,7 +4962,8 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   #   S13 (AC-21)  a suite OUTSIDE THE ROW'S BUDGET, inside a dispatched agent —
   #                foreground or not, because an extra full-tree run costs 40 minutes
   #                either way.
-  #   ARM C        a `git commit` from a READ-ONLY ROLE's row (wave-19 REQ-8) — inside a
+  #   ARM C        a commit-creating verb from a READ-ONLY ROLE (wave-19 REQ-8) — its roster
+  #                row's role, or its own agent_type when it has no row (T7b) — inside a
   #                dispatched agent only, answered below the partition.
   IS_BACKGROUND=no
   [ "$(bionic_jq '.tool_input.run_in_background|tostring')" = "true" ] && IS_BACKGROUND=yes
@@ -4862,17 +5000,40 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # committed its own green run. This arm makes the promise a wall.
   #
   # ABOVE THE SUITE FILTER, because a commit is not a suite and everything below returns 0
-  # on a non-suite command. The screen is the evidence gate's own (`_wall_mentions_git` then
-  # `git_argv_has_sub … commit`), so `git -C <dir> commit` is a commit and a quoted
-  # "git commit" is not.
+  # on a non-suite command. The screen is the evidence gate's reader (`_wall_mentions_git`
+  # then the argv parser), so `git -C <dir> commit` is a commit and a quoted "git commit" is
+  # not.
+  #
+  # EVERY VERB THAT MAKES A COMMIT, NOT ONLY `commit` (wave-20 T3, REQ-3, AC-3.2). `revert`,
+  # `cherry-pick`, `merge`, `am`, `rebase`, `commit-tree` and `update-ref` each write history
+  # the arm never saw, and `env -C <dir> git …` hid even `commit` until the reader learned env.
+  # The set is this arm's alone: the evidence gate's own verb stays `commit`, because the
+  # orchestrator lands with `git merge`, and a writer's merge of its wave head is its brief.
   #
   # THE ROLE IS THE ROSTER ROW'S `subagent_type=`, READ BY THE SAME JOIN ARM 2 MAKES — the
-  # last row carrying this `agent_id` wins. Never the payload's `agent_type`: for a teammate
-  # it is the dispatch NAME (R3 Q2), and a name like `x-runner` is not a role. The match is
-  # the exact plugin-qualified spelling, so a consumer's own `acme:test-runner` is not ours.
-  # No row, or a row with no role → no statement about this agent, and silence.
-  if _wall_mentions_git "$COMMAND" && git_argv_has_sub "$COMMAND" commit; then
-    local _bsg_role
+  # last row carrying this `agent_id` wins, and a row with no role is no statement and
+  # silence. A ROSTERED agent is never read off the payload's `agent_type`: for a teammate it
+  # is the dispatch NAME (R3 Q2), and a name like `x-runner` is not a role. The match is the
+  # exact plugin-qualified spelling, so a consumer's own `acme:test-runner` is not ours.
+  #
+  # NO ROW AT ALL → THE PAYLOAD'S OWN `agent_type` (wave-20 T7b; review R15). AC-9.2 made every
+  # nested delegate UNROSTERED — the roster is the orchestrator's depth-one ledger — and Δ12
+  # made its read-only-ness "no Write/Edit plus this arm", so reading silence off a missing row
+  # admitted every commit verb from exactly the agents Δ12 created. A nested delegate's own
+  # payload carries its `agent_id` and its own type (T12, live-rows-802ee6d.md §AC-9.2), and
+  # the teammate-name ambiguity above cannot arise: a teammate is dispatched by the
+  # orchestrator and has a row. A payload with no `agent_id` is the orchestrator and returned
+  # at the partition above, `claude --agent` sessions included.
+  #
+  # THE SET IS `role_is_readonly`'s (wave-20 T7, REQ-9), the one the dispatch approval
+  # checkpoint and the nested-dispatch arm ask — so `Explore` and `Plan`, which the harness
+  # gives Bash, are read-only here too. roster.sh is not in the carrier's BIONIC_LIB_WANT, so
+  # it is sourced through `wall_libs` at the one moment it is needed: a commit in an agent
+  # context. A missing library steps this arm aside with the advisory line, like cmd-class.sh.
+  if _wall_mentions_git "$COMMAND" \
+     && git_argv_has_any_sub "$COMMAND" "commit merge revert cherry-pick am rebase commit-tree update-ref"; then
+    local _bsg_role _bsg_whence
+    # `row:<role>` when some row carries this agent_id (the role may be empty), else nothing.
     _bsg_role=$(awk -F'|' -v id="$ACTOR" '
       /^roster-state\// {
         hit = 0; role = ""
@@ -4880,18 +5041,51 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
           if ($i == "agent_id=" id) hit = 1
           else if ($i ~ /^subagent_type=/) role = substr($i, 15)
         }
-        if (hit) last = role
+        if (hit) { seen = 1; last = role }
       }
-      END { print last }
+      END { if (seen) print "row:" last }
     ' "$_bsg_roster" 2>/dev/null)
     case "$_bsg_role" in
-      bionic:test-runner|bionic:researcher|bionic:auditor|bionic:critic)
-        fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \
-          "Your roster row names you $_bsg_role, and a read-only role's deliverable is its report,
-never a commit. Leave the tree as it is and send the report; the orchestrator lands the work."
-        return 2 ;;
+      row:*) _bsg_role="${_bsg_role#row:}"
+             _bsg_whence="Your roster row names you $_bsg_role" ;;
+      *)     _bsg_role=$(bionic_jq .agent_type)
+             _bsg_whence="Your agent type is $_bsg_role and no roster row names you" ;;
     esac
+    wall_libs background-suite-guard roster.sh || return 0
+    if role_is_readonly "$_bsg_role"; then
+      fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \
+        "$_bsg_whence, and a read-only role's deliverable is its report, never a commit. Leave
+the tree as it is and send the report; the orchestrator lands the work."
+      return 2
+    fi
   fi
+
+  # ---------- ARM A (wave-20 T9; REQ-4, AC-4.2; spec D4): a subagent changes no contract ----
+  #
+  # `session-poker.sh amend` widens a live row's Files/Suites/Re-executes, `extend` re-opens a
+  # MET row, and `task-add` writes the bound plan. All three are the orchestrator's: a writer
+  # that could run them would grant itself a wider budget or schedule its own work. The
+  # script cannot see who called it — in-process teammates share the session's environment —
+  # so the refusal is here, below the partition every arm of this function shares: a payload
+  # carrying a top-level `agent_id`, in an armed session. Main-thread calls never reach it.
+  #
+  # THE SCREEN is the literal name with quotes and backslashes removed, as `_wall_mentions_git`
+  # screens git; a hit runs the argv reader (`_wall_poker_contract_verb`, above), which decides.
+  local _bsg_p="${COMMAND//\\$'\n'/}"
+  _bsg_p="${_bsg_p//\\/}"; _bsg_p="${_bsg_p//\'/}"; _bsg_p="${_bsg_p//\"/}"
+  case "$_bsg_p" in
+    *session-poker*)
+      if _wall_poker_contract_verb "$COMMAND"; then
+        fold_block exit2 "$_WALL_POKER_VERB" \
+          "a subagent may not change a contract or the plan" "ask the orchestrator" \
+          "\`session-poker.sh $_WALL_POKER_VERB\` changes a roster contract or the bound plan, and
+only the orchestrator does that: a dispatched agent that could would widen its own budget or
+schedule its own work. Send the orchestrator what you need — the files, suites or runs to
+add and why, or the row to add — and it runs the verb."
+        return 2
+      fi
+      ;;
+  esac
 
 # ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
 #
@@ -4948,17 +5142,32 @@ fi
 # agent's own text going back to the agent — no third party reads this stream — so it is
 # quoted whole rather than scrubbed and truncated the way farm-out-reminder.sh's audit
 # line is.
+#
+# THE REMEDY IS THE RUN, NOT THE COMMAND (wave-20 T4; REQ-7, D7; triage-B B2). It used to echo
+# `$COMMAND` whole — the trailing `&`, the `nohup`, the redirect into a log nobody reads — so
+# the line this arm offered as the fix tripped this arm again when pasted. What is echoed now
+# is each suite claim's RUN (`cmd_suite_claims` column 3): the segment the classifier read,
+# with its wrappers stripped and its trailing redirections normalised off, which is the text
+# the budget arm below compares. A pasted remedy is therefore foreground by construction and
+# on the budget exactly when the run is.
 if [ "$IS_BACKGROUND" = yes ]; then
+  _bg_fix=""
+  while IFS=$'\t' read -r _bg_k _bg_t _bg_run; do
+    [ -n "$_bg_run" ] || continue
+    _bg_fix="${_bg_fix}    $_bg_run 2>&1 | tee <evidence log>"$'\n'
+  done <<< "$(cmd_suite_claims "$COMMAND")"
+  [ -n "$_bg_fix" ] || _bg_fix="    <your suite command> 2>&1 | tee <evidence log>"$'\n'
   fold_block exit2 suite-run "a backgrounded suite's result is never read" "run it in the foreground" \
     "A backgrounded suite returns a shell id, not an outcome. Your turn can end before it
 finishes, and then the evidence this task exists to produce lives nowhere: no file, no
 exit status anyone saw. Reports are turn-scoped; files are not.
 
-Run it in the FOREGROUND instead, bounded by the Bash tool's own timeout parameter (never
-a timeout/gtimeout binary), with the output tee'd to the evidence log your brief names:
+Run it in the FOREGROUND instead: no trailing &, no nohup, and the Bash tool's
+run_in_background: false (or the parameter left out). Bound it by the tool's own timeout
+parameter (never a timeout/gtimeout binary), with the output tee'd to the evidence log
+your brief names:
 
-    $COMMAND 2>&1 | tee <evidence log>
-
+${_bg_fix}
 Then read the log and quote the pass/total line. If the suite is genuinely longer than any
 timeout you can set, say so in your report and stop — do not background it."
   return 2
@@ -5077,6 +5286,15 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   # while decoding in both places would turn a literal `%7C` in a command into a pipe.
   RE_EXECUTES="${RE_EXECUTES//\%7C/|}"
   RE_EXECUTES="${RE_EXECUTES//\%25/%}"
+  # AND NORMALISED, AT THE SAME ONE DECODE (wave-20 T4; REQ-7, D7). The claim side builds
+  # its run with `cmdnorm_run` (payload/scripts/lib/cmd-class.sh, loaded above ARM 1), which
+  # takes trailing redirections, `| tee` and `|| true` off; the declared side goes through
+  # the same rule here, once per hook call, so `_run_is_declared` compares two readings of
+  # one rule and never a raw declaration against a normalised claim. For a row the lift
+  # wrote this is the identity — the lift refuses a redirection in a declaration and runs
+  # the same rule before it stores one — and `cmd_runs_norm` skips its fork when the field
+  # holds nothing the rule could act on.
+  RE_EXECUTES=$(cmd_runs_norm "$RE_EXECUTES")
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
 
@@ -5108,13 +5326,45 @@ case "$SUITES_ALLOWED" in none) SUITES_ALLOWED="" ;; *) : ;; esac
 # it does not cut a name mid-word. Review-correctness-d3930dd.md F3 (mid-name
 # ellipsis via `bionic_trunc`) and F7 (`none` for a non-empty set at cols<=0) are
 # both this shape; fixed together here rather than patched at each call site.
-_budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> text
+#
+# A DECLARED RUN IS ONE ITEM, NOT ITS WORDS (wave-20 T4; REQ-7, D7; triage-B B3). The set
+# this renders is not always suite basenames: a run claim's refusal hands it the row's
+# declared runs, backtick-marked and holding spaces. Split on whitespace, `npx jest
+# --testPathPatterns 'x'` became four "suites", and the line printed an unclosed mark and
+# half a command — `allowed: \`npx jest +3 more` — a remedy nobody could run. The set is
+# read into ITEMS first: a marked run whole, marks kept, every other word alone, one per
+# line. Everything below counts and places items, so "token boundary" now means what the
+# header above always promised, for both kinds. The split lives INSIDE this function, not
+# beside it: tests/bash-walls.test.sh 15g lifts this function alone by its own braces, and
+# a helper it called would be missing from the lift.
+_budget_wire_list() {  # <allowed text: suites and/or marked runs, may be empty> <column budget> -> text
   local set="${1:-}" cols="${2:-0}"
   if [ -z "$set" ]; then printf 'none'; return; fi
-  local total=0 tok
-  for tok in $set; do total=$((total + 1)); done
+  local items="" total=0 nruns=0 tok rest="$set" bt='`' pre w
+  local -a words
+  while :; do
+    case "$rest" in *"$bt"*"$bt"*) : ;; *) break ;; esac
+    pre="${rest%%"$bt"*}"; rest="${rest#*"$bt"}"
+    tok="${rest%%"$bt"*}"; rest="${rest#*"$bt"}"
+    read -r -a words <<< "$pre"
+    for w in ${words[@]+"${words[@]}"}; do items="$items$w"$'\n'; done
+    items="$items$bt$tok$bt"$'\n'
+  done
+  read -r -a words <<< "$rest"
+  for w in ${words[@]+"${words[@]}"}; do items="$items$w"$'\n'; done
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    total=$((total + 1))
+    case "$tok" in '`'*) nruns=$((nruns + 1)) ;; esac
+  done <<< "$items"
+  [ "$total" -gt 0 ] || { printf 'none'; return; }
+  # THE COUNT NAMES WHAT IT COUNTS. Suites, runs, or — when a runner's refusal shows both
+  # halves of the budget — entries.
   local word=suites
-  [ "$total" -eq 1 ] && word=suite
+  if [ "$nruns" -eq "$total" ]; then word=runs
+  elif [ "$nruns" -gt 0 ]; then word=entries; fi
+  [ "$total" -eq 1 ] && word="${word%s}"
+  [ "$word" = entrie ] && word=entry
   if [ "$cols" -le 0 ]; then
     # NO ROOM AT ALL (F7). The set is NOT empty, so `none` would lie; name the
     # count instead. `_budget_wire_fact`'s caller-side self-refuse (refuse.sh's
@@ -5123,12 +5373,19 @@ _budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> 
     printf '%d %s' "$total" "$word"
     return
   fi
-  if [ "$(bionic_cols "$set")" -le "$cols" ]; then
-    printf '%s' "$set"
+  local joined="" first=""
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    [ -n "$first" ] || first="$tok"
+    joined="${joined:+$joined }$tok"
+  done <<< "$items"
+  if [ "$(bionic_cols "$joined")" -le "$cols" ]; then
+    printf '%s' "$joined"
     return
   fi
   local out="" shown=0 cand remain tail
-  for tok in $set; do
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
     if [ -z "$out" ]; then cand="$tok"; else cand="$out $tok"; fi
     remain=$((total - shown - 1))
     tail=""
@@ -5138,15 +5395,14 @@ _budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> 
     else
       break
     fi
-  done
+  done <<< "$items"
   remain=$((total - shown))
   if [ -z "$out" ]; then
     # Not even one whole token fits ALONGSIDE its own "+N more" count. Try the
     # first token bare, count dropped — a real suite name beats one padded
     # with a count it has no room for.
-    set -- $set
-    if [ "$(bionic_cols "$1")" -le "$cols" ]; then
-      printf '%s' "$1"
+    if [ "$(bionic_cols "$first")" -le "$cols" ]; then
+      printf '%s' "$first"
       return
     fi
     # NOT EVEN ONE TOKEN FITS BARE (F3). A character cut here would print a
@@ -5284,6 +5540,12 @@ while IFS=$'\t' read -r _kind _target _run; do
     case " $SUITES_ALLOWED " in
       *" run.sh "*) continue ;;
     esac
+    # THE SPELLING THAT SPENDS THE BUDGET, NAMED (wave-20 T4; REQ-7, D7; triage-B B1a). The
+    # refusal used to name the budget and not the command shape that spends it, so a writer
+    # who reached for `tests/run.sh --one <suite>` learned only that it was refused. The
+    # first budgeted suite, spelled the one way this arm admits, is the remedy; with no suite
+    # on the row the slot stays a slot.
+    _ft_first="${SUITES_ALLOWED%% *}"
     fold_block exit2 suite-run \
       "$(_budget_wire_fact "full tree refused; allowed: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
       "run your brief's suites" \
@@ -5294,8 +5556,12 @@ already did.
 
 On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
 
-Run the suites your brief named instead. If the tree genuinely must be re-proved, say so
-in your report: the orchestrator records the cause on the plan and dispatches the runner."
+Run the suites your brief named instead, one call each, by the suite file itself:
+    bash tests/${_ft_first:-<suite>.test.sh}
+\`tests/run.sh --one\` is not that spelling: it is the runner's internal worker mode, fed a
+queue only the runner itself builds, and it is the full-tree runner as far as this budget
+is concerned. If the tree genuinely must be re-proved, say so in your report: the
+orchestrator records the cause on the plan and dispatches the runner."
     return 2
   fi
   # ---------- WHAT THE BRIEF SAID IT WOULD RUN, RUNS (REQ-1 AC-1.5) ----------

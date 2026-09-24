@@ -26,11 +26,9 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
-# THE LANDING SWEEP'S OWN MARKER WRITER (S15, tests/lib/swept-marker.sh). §10(c4) needs a
-# `landing-swept/v1|…|state=MET` line on a fixture roster — the thing that CLOSES a name's
-# contract — and a hand-rolled printf of it would be a second spelling of a schema this repo
-# holds to one writer, which is exactly what that library exists to stop.
-. "$(dirname "$0")/lib/swept-marker.sh"
+# NO LANDING MARKER WRITER ANY MORE (epic-23 wave-20 T17, D10). §10(c4) was its one user: it
+# closed a name with a `landing-swept/v1|…|state=MET` line, and a MET marker closes nothing
+# now — the sweeper's ack does, through `ack_row` below.
 
 HERE="${BIONIC_HOOKS_DIR}"
 GUARD="$HERE/stop-guard.sh"
@@ -1106,17 +1104,29 @@ expect_contains "…and the look names the row it resolved" \
 # (c4) THE CONTROL — A LANDED ROW BESIDE A LIVE ONE IS NOT AN AMBIGUITY (T26's reading).
 #
 # A name that landed and was dispatched AGAIN carries two rows and two ids, and only the row
-# BELOW the MET marker is under an open contract. Read as a set that file is (c3); read in
-# ORDER — which is what T26 fixed in both roster walls — the marker closes the id above it
-# and the live row below it is the one identity there is. Without this row the arm above is
+# launched AFTER the first run's ack is under an open contract (T17: the ack, not a MET
+# marker, is what closes). Read as a set that file is (c3); read against the ack — T26
+# fixed this latch by order, T17 by the ack's stamp — the ack closes the id launched before
+# it and the live row after it is the one identity there is. Without this row the arm above is
 # green on a gate that refuses every re-run of every task, which is the latch C1 named.
 IFS='|' read -r RL_REPO RL_TR RL_SUB <<< "$(make_world relaunched yes)"
 plant_agent "$RL_SUB" "arerun-1111111111111111" "rerun"
 plant_agent "$RL_SUB" "arerun-2222222222222222" "rerun"
+# RE-AUTHORED BY T17 (epic-23 wave-20, D10): the first run was closed by a MET marker, which
+# `live_ids_of_name` — this arm's predicate — used to read as discharging every id above it.
+# It now asks `roster_open_names`, the predicate every wall shares: an id is discharged only
+# by an ack stamped after its launch, and a MET marker discharges nothing. So the first run
+# is closed the way the Patrol closes it, through the sweeper's own ack verb, and the re-run
+# is launched after that ack (a launch stamp is what orders the two; `sg_roster_row` stamps
+# every row alike, so the re-run's row is written with its own later one).
 sg_roster_row "$RL_REPO" "$SID_A" "rerun" "arerun-1111111111111111"
-swept_marker_write "$RL_REPO/.bionic/tmp/roster-$SID_A.state" \
-  "2026-09-14T00:00:00Z" "$SID_A" "rerun" "arerun-1111111111111111" "MET"
-sg_roster_row "$RL_REPO" "$SID_A" "rerun" "arerun-2222222222222222"
+ack_row "$RL_REPO" "$SID_A" "rerun"
+RL_RELAUNCH_AT="$(date -u -v+5S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+5 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+roster_row_fixture status=confirmed session="$SID_A" name=rerun agent_id=arerun-2222222222222222 \
+  launched_at="$RL_RELAUNCH_AT" deliverable= progress= waiver= teammate_id= adopted_from= cadence= \
+  >> "$RL_REPO/.bionic/tmp/roster-$SID_A.state"
+expect_contains "(c4) meta: the sweeper's ack verb journalled the first run's ack" \
+  "event=ack" "$(cat "$RL_REPO/.bionic/tmp/sweeper-$SID_A.state" 2>/dev/null)"
 # A BYSTANDER WITH A ROW OF ITS OWN, kept from the world this case was first written in: it
 # is what proves the refusal below is about the re-run's own row rather than about anything
 # repo-wide.
@@ -1125,10 +1135,47 @@ sg_roster_row "$RL_REPO" "$SID_A" "bystander" "abystander-3333333333333333"
 run_guard "$(mk_stop_payload "$SID_A" "$RL_TR" "$RL_REPO" "rerun")"
 expect_status "a landed row beside the re-run's live row: NOT ambiguous — the live row answers" \
   2 "$GUARD_ST"
-expect_absent "…nothing calls the re-run ambiguous" "more than one live row" "$GUARD_ERR"
+expect_absent "…nothing calls the re-run ambiguous (T17: the first run is now closed by an ack, not a MET marker)" "more than one live row" "$GUARD_ERR"
 expect_contains "…and resolution lands on the LIVE row's id" \
   "arerun-2222222222222222" "$GUARD_VERR"
-expect_absent "…never on the id the MET marker closed" "arerun-1111111111111111" "$GUARD_VERR"
+expect_absent "…never on the id the ack discharged (T17: was '…the id the MET marker closed')" "arerun-1111111111111111" "$GUARD_VERR"
+
+# (c6) A RESTARTED ID PLUS A FRESH RE-DISPATCH OF ONE NAME: STILL AMBIGUOUS (epic-23 wave-20
+# T20d, review R3-1). `live_ids_of_name` — this arm's own predicate — used to discharge an id
+# by `launched_at` alone, never `restarted_at` (T20c introduced the field; R3-1 found the
+# gap). So a restarted id read discharged even while `roster_open_names` read its NAME open
+# (R9 of tests/roster.test.sh), and a fresh re-dispatch under that name then read as the
+# ONLY live id — no ambiguity, where the register plainly holds two open contracts: the
+# restarted id (back on the panel) and the fresh dispatch. The row is the recorder's own
+# shape: `launched_at` unmoved, `restarted_at` riding a fresh stamp strictly after the ack.
+IFS='|' read -r RS_REPO RS_TR RS_SUB <<< "$(make_world restartambig yes)"
+plant_agent "$RS_SUB" "arestart-1111111111111111" "restartee"
+plant_agent "$RS_SUB" "arestart-2222222222222222" "restartee"
+sg_roster_row "$RS_REPO" "$SID_A" "restartee" "arestart-1111111111111111"
+ack_row "$RS_REPO" "$SID_A" "restartee"
+RS_RESTART_AT="$(date -u -v+5S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+5 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+printf '%s|restarted_at=%s\n' \
+  "$(roster_row_fixture status=identified session="$SID_A" name=restartee \
+      agent_id=arestart-1111111111111111 launched_at=2026-08-05T00:00:00Z \
+      deliverable= progress= waiver= teammate_id= adopted_from= cadence=)" \
+  "$RS_RESTART_AT" >> "$RS_REPO/.bionic/tmp/roster-$SID_A.state"
+# THE FRESH RE-DISPATCH: a SECOND agent id under the SAME name, launched AFTER the ack
+# (`sg_roster_row` always stamps 2026-08-05, the same as the FIRST run's launch, which the
+# ack has already discharged — a fresh dispatch has to carry its own later launch to be live
+# at all, exactly as R6c/R7's fixtures do in tests/roster.test.sh).
+RS_FRESH_AT="$(date -u -v+10S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+10 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+roster_row_fixture status=identified session="$SID_A" name=restartee \
+  agent_id=arestart-2222222222222222 launched_at="$RS_FRESH_AT" \
+  deliverable= progress= waiver= teammate_id= adopted_from= cadence= \
+  >> "$RS_REPO/.bionic/tmp/roster-$SID_A.state"
+run_guard "$(mk_stop_payload "$SID_A" "$RS_TR" "$RS_REPO" "restartee")"
+expect_status "a restarted id plus a fresh re-dispatch of one name: REFUSED — the ambiguity is back (T20d)" \
+  2 "$GUARD_ST"
+expect_regex "…and the one line names the fault" 'more than one live row' "$GUARD_ERR"
+expect_contains "…naming the restarted id as one live spelling" \
+  "arestart-1111111111111111" "$GUARD_VERR"
+expect_contains "…and the fresh dispatch's id as the other" \
+  "arestart-2222222222222222" "$GUARD_VERR"
 
 # (c2) A NAME CARRYING A REGEX METACHARACTER must count and list ONLY its own two entries,
 # never a bystander name that merely LOOKS like it under BRE matching (Step-6 security review
@@ -1825,5 +1872,44 @@ expect_contains "E1.5 …along with the pasteable observe command the frame teac
 expect_eq "E1.5 …with the one line still first" \
   "bionic: stop refused — the session roster carries no id for it (stop it yourself or order it)" \
   "$(printf '%s\n' "$GUARD_VERR" | head -1)"
+
+section "Section 17: an INTERMEDIATE adopter's copy is found by the newest-id glob (D8; REQ-8; AC-8.1)"
+#
+# THE DEFECT (research D2 §REQ-8; triage-A). Before this the look checked THIS session's
+# directory, then (if adopted) the LAUNCHER's — never a THIRD session that adopted the agent
+# in between two `/clear`s. `adopted_from=` keeps naming the ORIGINAL launcher forever, so an
+# intermediate adopter's own copy of the working log is named on no row at all, and a stop
+# refusal that should see it ALIVE there instead reads the launcher's stale copy and lets the
+# stop through.
+#
+# THE FIX. `agent_log_newest` globs every session directory of the project for the exact
+# agent id and returns the newest by mtime — the launcher, any intermediate adopter and this
+# session are all equally candidates, with no chain of `adopted_from=` to walk.
+IFS='|' read -r AL17_REPO AL17_TR AL17_SUB <<< "$(make_world adoptintermediate yes)"
+AL17_PROJ="${AL17_SUB%/*/*}"
+SID_C="99999999-8888-7777-6666-555555555555"
+AID17="aadoptee-9999999999999999"
+
+# The LAUNCHER's copy (predecessor $SID_B): OLD.
+AL17_TR_B="${AL17_TR%/*}/$SID_B.jsonl"
+AL17_SUB_B="${AL17_TR_B%.jsonl}/subagents"
+plant_agent "$AL17_SUB_B" "$AID17" "adoptee"
+age_log "$AL17_SUB_B" "$AID17"
+
+# The INTERMEDIATE adopter's copy, under a THIRD session this roster row names nowhere: FRESH.
+mkdir -p "$AL17_PROJ/$SID_C/subagents"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"fresh from the intermediate adopter"}]}}\n' \
+  > "$AL17_PROJ/$SID_C/subagents/agent-${AID17}.jsonl"
+
+plant_live "$AL17_TR" fresh "adoptee"
+sg_roster_row "$AL17_REPO" "$SID_A" "adoptee" "$AID17" "" "identified" "" "" \
+  "adoptee@session-${SID_B:0:8}" "$SID_B"
+
+run_guard "$(mk_stop_payload "$SID_A" "$AL17_TR" "$AL17_REPO" "adoptee")"
+expect_status "alive under the INTERMEDIATE adopter's fresh copy: still refused" 2 "$GUARD_ST"
+expect_contains "…and the working log named is the intermediate adopter's own path" \
+  "$AL17_PROJ/$SID_C/subagents/agent-${AID17}.jsonl" "$GUARD_VERR"
+expect_absent "…never the launcher's stale path" \
+  "$AL17_SUB_B/agent-${AID17}.jsonl" "$GUARD_VERR"
 
 finish

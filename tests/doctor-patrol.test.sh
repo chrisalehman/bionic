@@ -138,9 +138,26 @@ make_repo_with_roster() {  # <sid> <open-names...> -- <closed-names...> -> repo 
     # predecessor's verdict verbatim onto a successor's roster. A fixture that
     # wrote no `state=` at all could not tell the two apart, which is precisely
     # the distinction `patrol_roster_state` now makes.
-    [ "$mode" = "closed" ] && swept_marker_write "$f" 2026-08-27T00:00:01Z "$sid" "$nm" a000 MET
+    #
+    # AND THE ACK THAT ACTUALLY CLOSES IT (epic-23 wave-20 T17, D10). A MET marker records that
+    # a landing was seen, not that the agent left, so it closes nothing on its own any more:
+    # `patrol_roster_state` asks `roster_open_names`, which closes a name only on a sweeper
+    # ledger ack stamped after the row's `launched_at=` (the fixture writer's default,
+    # 2026-09-02T00:00:00Z). The marker stays because it is what a landed row carries; the ack
+    # is what a closed one carries.
+    if [ "$mode" = "closed" ]; then
+      swept_marker_write "$f" 2026-08-27T00:00:01Z "$sid" "$nm" a000 MET
+      ack_write "$dir/.bionic/tmp/sweeper-${sid}.state" 2026-09-02T01:00:00Z "$sid" "$nm"
+    fi
   done
   printf '%s' "$dir"
+}
+
+# THE SWEEPER LEDGER'S ACK LINE, in its writer's shape (hooks/session-sweeper.sh `ack`).
+ack_write() {  # <ledger> <at> <sid> <name>
+  [ -f "$1" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$1"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+    "$2" "$3" "$4" >> "$1"
 }
 
 # THE STAMP hooks/session-poker.sh touches on every tick, and the ONE fact that
@@ -967,7 +984,7 @@ else
     "line is $(bionic_cols "$WIDE_ENG") columns: $WIDE_ENG"
 fi
 
-section "Section 15: only a MET marker closes a row (Step-6 security review, out-of-axis 2)"
+section "Section 15: a marker alone closes no row — an UNMET one never did, a MET one no longer does (Step-6 security review, out-of-axis 2; epic-23 wave-20 T17, D10)"
 
 # FOUR READERS OF ONE SCHEMA DISAGREED ABOUT WHETHER `state=` MATTERS.
 # hooks/session-start.sh's `open_rows` and the poker's `adopt_fold` require
@@ -997,18 +1014,38 @@ PB17="$(patrol_block "$OUT17")"
 
 expect_match "54: an UNMET marker leaves its row OPEN — one open dispatch, not zero" \
   "*✓ session ${SHORT17} · 1 open dispatch*" "$PB17"
-expect_no_match "55: …and the MET row beside it is still closed (the count is 1, never 2)" \
+expect_no_match "55: …and the acked MET row beside it is still closed (the count is 1, never 2)" \
   "*2 open dispatches*" "$PB17"
 
-# THE PAIRED POSITIVE, on the same two-row roster: flip the UNMET marker to MET
-# and the count falls to zero. Without it, "1 open" above is consistent with a
-# reader that had simply stopped closing rows at all.
+# RE-AUTHORED BY T17 (epic-23 wave-20, D10). This row used to read "flipping that same marker
+# to MET closes it", pinning the MET close T17 removes: `patrol_roster_state` now asks
+# `roster_open_names`, the predicate the dispatch wall, the sweeper, the stop wall and the
+# tick's adopt fold already share, and a MET marker there closes nothing — it records a
+# landing seen, not an agent gone. So the flip leaves the count where it was.
 sed 's/|name=unmet-row|agent_id=a000|state=UNMET$/|name=unmet-row|agent_id=a000|state=MET/' \
   "$ROSTER17" > "$ROSTER17.met" && mv "$ROSTER17.met" "$ROSTER17"
 OUT17B="$(run_doctor "$HOME17" "$REPO17")"
 PB17B="$(patrol_block "$OUT17B")"
-expect_match "56: …and flipping that same marker to MET closes it (54 discriminates)" \
-  "*✓ session ${SHORT17} · 0 open dispatches*" "$PB17B"
+expect_match "56 (T17: was '…flipping that same marker to MET closes it'): a MET marker with no ack closes nothing — still one open dispatch" \
+  "*✓ session ${SHORT17} · 1 open dispatch*" "$PB17B"
+
+# THE PAIRED POSITIVE the old 56 was: the one thing that does close the row. An ack stamped
+# after the row's launch takes the count to zero, so "1 open" above is not a reader that has
+# stopped closing rows at all.
+ack_write "$REPO17/.bionic/tmp/sweeper-${SID17}.state" 2026-09-02T01:00:00Z "$SID17" unmet-row
+OUT17C="$(run_doctor "$HOME17" "$REPO17")"
+PB17C="$(patrol_block "$OUT17C")"
+expect_match "56b …and an ack after its launch closes it (56 discriminates)" \
+  "*✓ session ${SHORT17} · 0 open dispatches*" "$PB17C"
+
+# AN ACK OLDER THAN A RELAUNCH CLOSES NOTHING. The same name dispatched again after its ack
+# is open work again — the case a MET latch used to hide for the rest of the session.
+roster_row_fixture status=intended session="$SID17" name=unmet-row launched_at=2026-09-02T02:00:00Z \
+  >> "$ROSTER17"
+OUT17D="$(run_doctor "$HOME17" "$REPO17")"
+PB17D="$(patrol_block "$OUT17D")"
+expect_match "56c …and dispatching it again after that ack opens it again" \
+  "*✓ session ${SHORT17} · 1 open dispatch*" "$PB17D"
 
 section "Section 16: dead-session state — one collapsed line, one fix, no \"Nothing to do\" (1.5.1 T5, AC-8)"
 
@@ -1225,11 +1262,14 @@ expect_match "81: an idle gap of a full fire window since the stamp, with no tic
 expect_no_match "82: …and the section prints no running row for it" \
   "*✓ session ${SHORT17B}*" "$PB17B"
 
-# ---------- the tick itself is the proof of life ----------
+# ---------- the TICK's stamp is the proof of life, not the marker (wave-20 REQ-6, AC-6.3) ----------
 #
-# A `bionic-patrol session=` prompt after the stamp IS the cron firing, whatever the
-# stamp's own mtime says: the reference instant moves to the tick and there is no gap left
-# to be dead about. The stamp here is three hours old.
+# RE-AUTHORED AT WAVE-20 (D6). This used to read a `bionic-patrol session=` prompt after the
+# stamp as the cron firing, moving the reference instant to it — so a Patrol whose job carried
+# the marker but never ran the tick read healthy here for as long as it kept firing (report #1).
+# The tick stamps before it decides, so a marker its tick answered sits BEFORE the stamp: here
+# the marker fires at -2000s, its tick stamps at -1900s (past the 1320s fire window, so the
+# verdict is read), and the session works on with no idle gap since. Still running.
 SID17C="17cccccc-1111-2222-3333-444455556666"
 SHORT17C="${SID17C%%-*}"
 spawn_live_pid; PID17C="$LIVE_PID"
@@ -1238,17 +1278,37 @@ dp_pin_interval "$REPO17C"
 HOME17C="$(make_claude_home "$SID17C" "$PID17C" "$REPO17C")"
 TR17C="$(transcript_of "$HOME17C" "$SID17C")"
 plant_patrol_job_dated "$TR17C" "toolu_1" "abc12345" 10000
-dp_user "$TR17C" 60 "bionic-patrol session=${SID17C} — patrol tick"
+dp_user "$TR17C" 2000 "bionic-patrol session=${SID17C} — patrol tick"
+dp_assistant "$TR17C" 1990
 dp_assistant "$TR17C" 30
-plant_patrol_stamp "$REPO17C" "$SID17C" 3
+plant_patrol_stamp "$REPO17C" "$SID17C"
+dp_backdate "$REPO17C/.bionic/tmp/patrol-$SID17C.state" 1900
 
 OUT17C="$(run_doctor "$HOME17C" "$REPO17C")"
 PB17C="$(patrol_block "$OUT17C")"
 
-expect_match "83: a tick since the stamp is the Patrol firing — the row prints" \
+expect_match "83: a marker turn its tick stamped after, then busy work — the row prints" \
   "*✓ session ${SHORT17C}*" "$PB17C"
 expect_no_match "84: …and no fix line" \
   "*session ${SHORT17C}: the Patrol is armed but not firing*" "$OUT17C"
+
+# THE PAIRED ROW: the old fixture, kept — a marker turn 60s ago over a three-hour-old stamp,
+# and no tick after it. A clock that fires without ticking is not a running Patrol (AC-6.3).
+SID17E="17eeeeee-1111-2222-3333-444455556666"
+SHORT17E="${SID17E%%-*}"
+spawn_live_pid; PID17E="$LIVE_PID"
+REPO17E="$(make_repo_with_roster "$SID17E" beta -- alpha)"
+dp_pin_interval "$REPO17E"
+HOME17E="$(make_claude_home "$SID17E" "$PID17E" "$REPO17E")"
+TR17E="$(transcript_of "$HOME17E" "$SID17E")"
+plant_patrol_job_dated "$TR17E" "toolu_1" "abc12345" 10000
+dp_user "$TR17E" 60 "bionic-patrol session=${SID17E} — patrol tick"
+dp_assistant "$TR17E" 30
+plant_patrol_stamp "$REPO17E" "$SID17E" 3
+
+OUT17E="$(run_doctor "$HOME17E" "$REPO17E")"
+expect_match "84b: AC-6.3 a marker turn after a stale stamp, with no tick, is armed but not firing" \
+  "*session ${SHORT17E}: the Patrol is armed but not firing*" "$OUT17E"
 
 # ---------- idle time that cannot be read is an advisory, with the reason ----------
 #

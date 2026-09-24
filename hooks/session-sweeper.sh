@@ -29,6 +29,8 @@
 #     WAIVED      the brief waived this contract, and declared no artifact beside it
 #     AMBIGUOUS   two or more contracts share this name; none of them is judged
 #     MET         every declared artifact is on disk, non-empty, written after the launch
+#     FOLLOW-UP   MET, but the orchestrator has sent the agent a message it has not answered
+#                 (never a row the ack has already closed: a send after the close is ignored)
 #     STILL-LIVE  not landed, but the row's own claimed process or progress says it is working
 #     UNMET       declared, not delivered, nothing running
 #
@@ -171,7 +173,7 @@ esac
 # payload/scripts/lib/loader.sh. FAIL OPEN: nothing this script does is irreversible,
 # and a reporting verb that refused because a file was missing would take the
 # diagnosis down with the thing being diagnosed.
-BIONIC_LIB_WANT="roots.sh root.sh session.sh"
+BIONIC_LIB_WANT="roots.sh root.sh roster.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -270,6 +272,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "session-sweeper"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roots.sh"
 . "$BIONIC_LIB/root.sh"
+# THE ONE CLOSE PREDICATE (epic-23 wave-20 T2, D10): `roster_open_names`, which the `acked=`
+# column asks so it answers what dispatch preflight, the stop wall and the tick's adopt answer.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/roster.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
 
@@ -509,13 +515,24 @@ ledger_count() {  # <pattern> -> a single integer, on stdout
   printf '%s' "$n"
 }
 
-# The ledger's answer: which rows the orchestrator has closed. Re-read on every
-# invocation rather than cached anywhere, because the file is the only durable copy —
-# an ack taken in a session that has since died is still in force in its successor.
-ACKED_NAMES=""; ACKED_COUNT=0
+# The ledger's answer: which names the orchestrator has acked, and — through the one close
+# predicate — which roster rows those acks actually close. Re-read on every invocation rather
+# than cached anywhere, because the file is the only durable copy — an ack taken in a session
+# that has since died is still in force in its successor.
+#
+# AN ACK CLOSES THE ROW IT POSTDATES, NOT THE NAME FOREVER (epic-23 wave-20 T2, D10).
+# `ACKED_NAMES` is the ledger's fact — every name an ack was ever journalled for, which is
+# what the ack verb counts and reports. `ACKED_OPEN` is `roster_open_names`
+# (payload/scripts/lib/roster.sh) over this session's roster and this ledger: the names
+# still under contract, because no ack was taken after their latest live launch. A row is
+# acked when its name was acked AND it is not still open — so a name acked and then
+# dispatched again reads `acked=no` here, as it reads open to dispatch preflight, the stop
+# wall's occupancy and the tick's `adopt_fold`, which all ask the same predicate.
+ACKED_NAMES=""; ACKED_COUNT=0; ACKED_OPEN=""; ACKED_READ=0
 read_acked() {
-  ACKED_NAMES=""; ACKED_COUNT=0
+  ACKED_NAMES=""; ACKED_COUNT=0; ACKED_OPEN=""; ACKED_READ=1
   [ -f "$LEDGER_FILE" ] || return 0
+  [ -L "$ROSTER_FILE" ] || ACKED_OPEN="$(roster_open_names "$ROSTER_FILE" "$LEDGER_FILE" "$SESSION_ID")"
   local line ev n
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in "$LEDGER_SCHEMA|"*) : ;; *) continue ;; esac
@@ -529,14 +546,39 @@ read_acked() {
     # one than an adversary. Names are cleaned at write time, so no entry here can carry a
     # `|` or a newline to forge a field.
     [ -n "$n" ] || continue
-    row_acked "$n" && continue
+    [ -n "$ACKED_NAMES" ] && grep -qxF -- "$n" <<< "$ACKED_NAMES" && continue
     ACKED_NAMES="${ACKED_NAMES}${n}
 "
     ACKED_COUNT=$((ACKED_COUNT + 1))
   done < "$LEDGER_FILE"
 }
 
+# THE LATEST ACK OF ONE NAME, for a sentence and never for a decision (wave-20 T9b). Whether
+# the name is closed is `row_acked`'s answer, which is `roster_open_names`'; this only says
+# when and by whom, so a detail can name the close a follow-up was ignored against. One awk
+# pass, run only on that rare path: `at by reason`, space-separated, empty when none reads.
+# The name reaches awk through ENVIRON, never `-v`, which reads backslashes as escapes, and the
+# ledger on stdin, never as an operand, which awk reads as an assignment when it holds a `=`.
+ack_stamp_of() {  # <name> -> "<at> <by> <reason>" of its latest well-formed ack
+  [ -f "$LEDGER_FILE" ] && [ ! -L "$LEDGER_FILE" ] || return 0
+  SWEEP_ACK_NAME="$1" awk -F'|' '
+    index($0, "sweeper-ledger/v1|") == 1 {
+      ev = ""; nm = ""; at = ""; by = ""; rs = ""
+      for (i = 2; i <= NF; i++) {
+        k = substr($i, 1, index($i, "=") - 1); v = substr($i, index($i, "=") + 1)
+        if (k == "event") ev = v; else if (k == "name") nm = v; else if (k == "at") at = v
+        else if (k == "by") by = v; else if (k == "reason") rs = v
+      }
+      if (ev == "ack" && nm == ENVIRON["SWEEP_ACK_NAME"] && at != "" && at "" >= best "") {
+        best = at; line = at " " by " " rs
+      }
+    }
+    END { if (line != "") print line }' < "$LEDGER_FILE" 2>/dev/null
+}
+
 # Whole-line match, never a substring: `w4-s1` must not be closed by an ack of `w4-s10`.
+# Acked AND not still open (read_acked's header): an ack older than the row's latest launch
+# closes nothing.
 row_acked() {  # <row name>
   # BOTH operands are guarded, and the second guard is the here-string's (T37). `<<<`
   # appends a newline to its word, so a ledger ending in one presents a trailing EMPTY
@@ -544,7 +586,9 @@ row_acked() {  # <row name>
   # emitted no such line and answered 1. An empty row name is not an acked row.
   [ -n "$ACKED_NAMES" ] || return 1
   [ -n "$1" ] || return 1
-  grep -qxF -- "$1" <<< "$ACKED_NAMES"
+  grep -qxF -- "$1" <<< "$ACKED_NAMES" || return 1
+  [ -n "$ACKED_OPEN" ] || return 0
+  ! grep -qxF -- "$1" <<< "$ACKED_OPEN"
 }
 
 # Every name the roster declares, one per line. Read for the ack verb's "is this a row I
@@ -729,6 +773,134 @@ row_still_live() {  # <claims> <progress> <cadence> <launched_at>
   return 0
 }
 
+# ---------------------------------------------------------------- the follow-up in flight
+#
+# FOLLOW-UP (wave-20 T9; REQ-4, AC-4.3; spec D4, ledger Δ8). The orchestrator sends a MET
+# agent a follow-up and the agent sets to work on it — and until this state existed every
+# reader saw MET: the tick printed STANDDOWN, and `stop-orders.sh standdown` merged and
+# removed the tree of an agent still writing its reply. No hook fires on SendMessage, but the
+# orchestrator's own transcript records both halves of the exchange:
+#
+#   the send   an assistant record whose content holds a `tool_use` named `SendMessage`;
+#              `input.to` is the name it was addressed to (a trailing ` [ref]` is dropped)
+#   a reply    an envelope carrying the agent's own words, in either shape the CLI writes
+#              (wave-20 T9b, review R1, measured in this wave's orchestrator transcript):
+#                `<teammate-message teammate_id="<name>" …>` — a teammate's message
+#                `<agent-message from="<name>">` — a background agent's hand-back, in an
+#                  `isMeta` user record (`Another Claude session sent a message:` …)
+#              and in either carrier: a user record's text, or — when it lands mid-turn —
+#              an `attachment` record of type `queued_command`, whose `prompt` holds it
+#
+# AN IDLE NOTICE IS NO REPLY (wave-20 T9b, critic C5). An envelope whose body is the JSON
+# `{"type":"idle_notification",…}` says the agent's turn ended, not that it answered; the one
+# from the report turn can be delivered after the send, and counting it put a row the agent
+# was still working on back to MET, so standdown could land the tree under it. A record that
+# carries a report beside an idle notice still answers, by the report.
+#
+# A NAME HAS A FOLLOW-UP IN FLIGHT when its latest send comes after its latest reply, in the
+# transcript's own record order (the order the CLI appended them, which no clock skew can
+# reorder). The agent's next reply closes it. ONE OWNER: the state is decided
+# here, in `verdict_row`, and the tick, standdown, the lease walk and the stop guard inherit
+# it unchanged — no consumer reads the transcript for this itself (Δ8's rejected
+# alternative). A declaring verb beside each message was rejected too: forgetting it fails
+# silently, and destructively.
+#
+# WHAT IS NOT A REPLY. A `tool_result` that merely QUOTES a teammate message (a grep of a
+# record file) is not the harness delivering one, so only a user record's string content and
+# its text blocks are read. A sidechain SendMessage is not the orchestrator's.
+#
+# FAIL DIRECTION: no transcript, no jq, or nothing parseable is "no follow-up" — the state
+# every reader had before this existed, so a missing input can never hold a row it did not
+# hold yesterday. The accepted cost is the other way round: a message that was not a
+# follow-up holds the row until the agent answers it (Δ8, "conservative cost accepted").
+#
+# READ ONCE PER PROCESS, and only when a row reads MET — a verdict over rows none of which
+# landed never opens the transcript. `grep -F` on the two literals first: a session's
+# transcript is tens of megabytes and the records this asks about are a handful of lines.
+FOLLOWUP_READ=0; FOLLOWUP_OPEN=""; FOLLOWUP_AT=""
+read_followups() {
+  local d tr=""
+  FOLLOWUP_READ=1; FOLLOWUP_OPEN=""
+  command -v jq >/dev/null 2>&1 || return 0
+  for d in "$(transcripts_dir)"/*/; do
+    if [ -f "${d}${SESSION_ID}.jsonl" ] && [ ! -L "${d}${SESSION_ID}.jsonl" ]; then
+      tr="${d}${SESSION_ID}.jsonl"; break
+    fi
+  done
+  [ -n "$tr" ] || return 0
+  FOLLOWUP_OPEN="$(grep -F -e '"name":"SendMessage"' -e '<teammate-message' -e '<agent-message' "$tr" 2>/dev/null \
+    | jq -R -r '
+        # Every envelope in a text, as [name, body]; the body runs to its closing tag, or to
+        # the end of the text when a truncated record has none.
+        def replies:
+          [scan("<(?:teammate-message teammate_id|agent-message from)=\"([^\"]+)\"[^>]*>((?:(?!</(?:teammate-message|agent-message)>)[\\s\\S])*)")]
+          | .[]
+          | select((.[1] | (fromjson? // null) | type == "object" and .type == "idle_notification") | not)
+          | .[0];
+        (fromjson? // empty)
+        | select(type == "object" and .isSidechain != true)
+        | (.timestamp // "") as $ts
+        | if .type == "assistant" then
+            (.message.content // [] | if type == "array" then .[] else empty end
+             | select(type == "object" and .type == "tool_use" and .name == "SendMessage")
+             | "S\t\(.input.to // "" | tostring)\t\($ts)")
+          elif .type == "user" then
+            (.message.content
+             | if type == "string" then .
+               elif type == "array" then ([.[] | select(type == "object" and .type == "text") | .text] | join("\n"))
+               else "" end
+             | replies | "R\t\(.)\t\($ts)")
+          elif .type == "attachment" then
+            (.attachment
+             | select(type == "object" and .type == "queued_command")
+             | .prompt | select(type == "string")
+             | replies | "R\t\(.)\t\($ts)")
+          else empty end' 2>/dev/null \
+    | awk -F'\t' '
+        { n = $2; sub(/ \[[^]]*\]$/, "", n); sub(/@.*$/, "", n); if (n == "") next
+          if ($1 == "S") { sent[n] = NR; at[n] = $3 } else if ($1 == "R") { rep[n] = NR } }
+        END { for (n in sent) if (!(n in rep) || sent[n] > rep[n]) printf "%s\t%s\n", n, at[n] }')"
+  return 0
+}
+
+# A MET row whose agent has a follow-up in flight becomes FOLLOW-UP. The row is matched by
+# its name, and by its teammate address with the `@session-…` suffix off — the orchestrator
+# sends to the bare name, and the teammate-message names the bare name too.
+#
+# A CLOSED ROW STAYS CLOSED (wave-20 T9b, review R2, walk §8c). A send to a row the ack has
+# already closed — the tick's stand-down close, or `stop-orders.sh stopped` beside a stop —
+# reopens nothing: the close is the name's one terminal state (ADR-034), and reading FOLLOW-UP
+# there held the row LEFT ALONE in standdown for a reply that could not come, while the tick
+# counted it closed. "Closed" is `row_acked`'s answer, which is `roster_open_names`' (read_acked
+# above); nothing here re-derives it. The row keeps its MET and the detail says the send was
+# ignored, naming the close. A name dispatched again after its ack is open, and a follow-up to
+# it counts as it always did.
+verdict_followup() {  # <roster row> — rewrites VERDICT_STATE/VERDICT_DETAIL when it applies
+  local name tid n at stamp s_at s_by s_why
+  [ "$FOLLOWUP_READ" = 1 ] || read_followups
+  [ -n "$FOLLOWUP_OPEN" ] || return 0
+  name="$(line_field "$1" name)"
+  tid="$(line_field "$1" teammate_id)"; tid="${tid%%@*}"
+  while IFS=$'\t' read -r n at; do
+    [ -n "$n" ] || continue
+    if [ "$n" = "$name" ] || { [ -n "$tid" ] && [ "$n" = "$tid" ]; }; then
+      [ "$ACKED_READ" = 1 ] || read_acked
+      if row_acked "$(clean "$name")"; then
+        stamp="$(ack_stamp_of "$(clean "$name")")"
+        read -r s_at s_by s_why <<< "$stamp"
+        VERDICT_DETAIL="follow-up ignored: row acked at ${s_at:-an unreadable time}${s_by:+ (by $s_by${s_why:+, reason $s_why})} — the close stands, and a send after it reopens nothing${at:+ (sent $at)}. The contract itself is met: $VERDICT_DETAIL"
+        return 0
+      fi
+      VERDICT_STATE="FOLLOW-UP"
+      VERDICT_DETAIL="follow-up in flight — a message was sent to this agent${at:+ at $at} and it has not answered since; nothing lands or stands down until it does. The contract itself is met: $VERDICT_DETAIL"
+      return 0
+    fi
+  done <<EOF
+$FOLLOWUP_OPEN
+EOF
+  return 0
+}
+
 # One row in, one state out. PRECEDENCE, and each step is a decision:
 #   WAIVED      first — but NOT unconditionally, and that is the Step-6 review's S-1. A
 #               waiver is an explicit designation that this row's contract is not held, and
@@ -742,6 +914,8 @@ row_still_live() {  # <claims> <progress> <cadence> <launched_at>
 #               an INFERRED path still wins: there only the waiver was declared.
 #   MET         a landed contract is MET whatever else is true of the row, including a
 #               still-running process: the artifacts are on disk and that is the question.
+#   FOLLOW-UP   a MET row the orchestrator has since messaged, until the agent answers
+#               (`verdict_followup`, above): the only state MET yields to.
 #   STILL-LIVE  only for a row that has NOT landed. Visible work in flight is not a failure.
 #   UNMET       what is left: declared, not delivered, nothing running.
 # AMBIGUOUS is decided one level up, in the verdict loop, because it is a fact about the
@@ -754,7 +928,7 @@ row_still_live() {  # <claims> <progress> <cadence> <launched_at>
 VERDICT_STATE=""; VERDICT_DETAIL=""
 verdict_row() {  # <roster row>
   local row="$1" launched deliv waiver source claims prog cadence le p n=0 fails="" oks="" old
-  local note=""
+  local note="" restarted rnote=""
   waiver="$(line_field "$row" waiver)"
   source="$(line_field "$row" source)"
   launched="$(line_field "$row" launched_at)"
@@ -777,6 +951,15 @@ verdict_row() {  # <roster row>
     fi
   fi
 
+  # A RESTART AFTER AN ACK IS NAMED, NEVER JUDGED AGAINST (wave-20 T20c, critic C2-2).
+  # hooks/execution-recorder.sh stamps `restarted_at=` on the row that re-identifies an id
+  # whose lineage an ack closed, and leaves `launched_at` as the contract's launch. The
+  # restart is occupancy — the name holds a slot again, which `roster_open_names` reads and
+  # `acked=` reports — and it moves no clock this verdict dates a deliverable against: the
+  # artifact written before the ack still meets the contract. The detail says so, so a
+  # reader seeing `acked=no` on a MET row knows why the name is open.
+  restarted="$(line_field "$row" restarted_at)"
+  [ -z "$restarted" ] || rnote="restarted at $restarted after the ack of this name — it holds a slot again, and the contract is judged against its launch at ${launched:-an unreadable time}"
   le="$(iso_epoch "$launched")"
   # Deliverables are comma-separated, as hooks/stop-check.sh reads them. Every declared path
   # is stat'd, not just up to the first failure: the readback
@@ -798,21 +981,25 @@ verdict_row() {  # <roster row>
 
   if [ "$n" -eq 0 ]; then
     VERDICT_STATE="MET"
-    VERDICT_DETAIL="${note:+$note; }no deliverable declared — this row names nothing to hold it to"
+    VERDICT_DETAIL="${note:+$note; }no deliverable declared — this row names nothing to hold it to${rnote:+; $rnote}"
+    verdict_followup "$row"
     return 0
   fi
   if [ -z "$fails" ]; then
     VERDICT_STATE="MET"; VERDICT_DETAIL="${note:+$note; }$oks"
     [ -n "$le" ] || VERDICT_DETAIL="${note:+$note; }$oks (launched_at \"$launched\" unreadable: not judged for staleness)"
+    VERDICT_DETAIL="$VERDICT_DETAIL${rnote:+; $rnote}"
+    verdict_followup "$row"
     return 0
   fi
   if row_still_live "$claims" "$prog" "$cadence" "$launched"; then
     VERDICT_STATE="STILL-LIVE"
-    VERDICT_DETAIL="${note:+$note; }$LIVE_REASON; outstanding: $fails"
+    VERDICT_DETAIL="${note:+$note; }$LIVE_REASON; outstanding: $fails${rnote:+; $rnote}"
     return 0
   fi
   VERDICT_STATE="UNMET"; VERDICT_DETAIL="${note:+$note; }$fails"
   [ -n "$le" ] || VERDICT_DETAIL="${note:+$note; }$fails (launched_at \"$launched\" unreadable: not judged for staleness)"
+  VERDICT_DETAIL="$VERDICT_DETAIL${rnote:+; $rnote}"
   return 0
 }
 
@@ -923,7 +1110,7 @@ case "$VERB" in
     # claim the stop-side consumers rest on.
     read_acked
     _rows="$(latest_rows)"
-    _n=0; _met=0; _unmet=0; _waived=0; _live=0; _ambig=0; _unmet_lines=""
+    _n=0; _met=0; _unmet=0; _waived=0; _live=0; _ambig=0; _follow=0; _unmet_lines=""
     # The fold hands over the name and the contract count it already parsed; re-deriving
     # them here with `line_field` is what made this loop 9.665 s at 1000 rows (see
     # latest_rows). IFS is scoped to the read, and spelled `$'\t'` rather than as a command
@@ -958,6 +1145,7 @@ case "$VERB" in
         WAIVED)     _waived=$((_waived + 1)) ;;
         STILL-LIVE) _live=$((_live + 1)) ;;
         AMBIGUOUS)  _ambig=$((_ambig + 1)) ;;
+        FOLLOW-UP)  _follow=$((_follow + 1)) ;;
         UNMET)
           _unmet=$((_unmet + 1))
           _unmet_lines="${_unmet_lines}UNMET — ${_rname}: $(clean "$VERDICT_DETAIL")
@@ -981,7 +1169,7 @@ EOF
       exit 0
     fi
 
-    say "$_n row(s): $_met MET, $_unmet UNMET, $_waived WAIVED, $_live STILL-LIVE, $_ambig AMBIGUOUS"
+    say "$_n row(s): $_met MET, $_unmet UNMET, $_waived WAIVED, $_live STILL-LIVE, $_ambig AMBIGUOUS, $_follow FOLLOW-UP"
     if [ "$_unmet" -gt 0 ]; then
       printf '%s' "$_unmet_lines" | while IFS= read -r _l; do
         [ -n "$_l" ] && say "$_l"
@@ -1054,8 +1242,8 @@ EOF
     # would turn every ack into a refusal precisely when the operator most needs the row
     # quieted. A typo's whole blast radius is one inert ledger line and this warning.
     if [ -n "$_unknown" ]; then
-      say "no roster row carries: $_unknown — recorded anyway; each is exempt the moment a"
-      say "row of that name appears. Check the spelling against: $LEDGER_FILE"
+      say "no roster row carries: $_unknown — recorded anyway; each closes a row of that name"
+      say "launched before this ack, never one launched after it. Check the spelling against: $LEDGER_FILE"
     fi
     say "$ACKED_COUNT row(s) acked for this session; an acked row is closed for every reader"
     exit 0
