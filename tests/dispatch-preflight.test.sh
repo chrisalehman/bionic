@@ -3278,9 +3278,10 @@ expect_status "r22i a bare directory under .worktrees is not a lease → passes"
 
 # --- r22g: the wall and the Patrol count the same open rows on THIS fixture. AC-7
 #     retires `landing-swept` as the wall's own signal — W-FOUR is left off the fresh
-#     transcript instead — but lib/patrol.sh's `patrol_roster_state` is untouched by
-#     this task and still reads the swept marker, so both are kept: one closes
-#     W-FOUR for the Patrol's own count, the other closes it for the wall's.
+#     transcript instead. RE-AUTHORED BY T17 (epic-23 wave-20, D10): lib/patrol.sh's
+#     `patrol_roster_state` used to close W-FOUR on a MET marker; it now asks
+#     `roster_open_names`, which closes a name only on a sweeper ledger ack stamped after
+#     its launch, so W-FOUR is closed for the Patrol's count by an ack instead.
 REPO=$(make_repo r22g yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=probe"
@@ -3288,7 +3289,7 @@ s22_roster_row "$REPO" "$SID_A" "W-ONE"
 s22_roster_row "$REPO" "$SID_A" "W-TWO"
 s22_roster_row "$REPO" "$SID_A" "W-THREE"
 s22_roster_row "$REPO" "$SID_A" "W-FOUR"
-s22_sweep "$REPO" "$SID_A" "W-FOUR"
+s22_ack "$REPO" "$SID_A" "W-FOUR"
 R22G_TRANSCRIPT="$SANDBOX/.r22g-live.jsonl"
 mk_transcript "$R22G_TRANSCRIPT" fresh W-ONE W-TWO W-THREE
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22G_TRANSCRIPT")"
@@ -3297,7 +3298,7 @@ expect_contains "…the wall counts three open" "writers: budget=3 open=3 with-t
 # shellcheck source=/dev/null
 ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/patrol.sh" 2>/dev/null \
   && patrol_roster_state "$REPO" "$SID_A" ) > "$SANDBOX/.r22g" 2>/dev/null
-expect_contains "…and so does lib/patrol.sh's patrol_roster_state, on the same file" \
+expect_contains "…and so does lib/patrol.sh's patrol_roster_state, on the same file (T17: W-FOUR closed by an ack, not a MET marker)" \
   "open=3" "$(cat "$SANDBOX/.r22g")"
 
 # ================================== S22b: LIVE-AGENTS FRESHNESS GATES THE COUNT
