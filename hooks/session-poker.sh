@@ -2465,6 +2465,7 @@ case "$VERB" in
     ADOPT_ADOPTED=0
     ADOPT_LISTED=0
     ADOPT_CLOSED=0
+    ADOPT_UNREADABLE=0
     ADOPT_DUPES=0
     ADOPT_LAST_PART=""
     # THE IDS THIS RUN HAS ALREADY OFFERED (REQ-9 AC-9.2; D10). Adoption files a copy of the
@@ -2534,15 +2535,28 @@ case "$VERB" in
         # closed binding is residue exactly as a neighbour's is, and adopting it would take
         # ownership of an agent whose contract nothing is left to discharge.
         #
-        # AN UNREADABLE PLAN IS NOT A CLOSED ONE. `run_open` says nothing about a path that
-        # is not a file here — another root's plan, a plan since deleted — so the row keeps
-        # today's partition and is listed. A verb that cannot read a fact does not guess it.
+        # A GONE PLAN IS NOT A CLOSED ONE. `run_open` says nothing about a path that is not
+        # a file here — another root's plan, a plan since deleted — so the row keeps today's
+        # partition and is listed. A verb that cannot read a fact does not guess it.
+        #
+        # AND AN UNREADABLE PLAN IS NEITHER (wave-20 T18, REQ-2, D2; T1's carry-over). A plan
+        # that is THERE and cannot be read — mode 000, or inside a folder that cannot be
+        # opened (`plan_unreadable`, lib/run.sh) — was read two wrong ways here: at mode 000
+        # `-f` held and `run_open` failed, so its rows were counted closed and printed
+        # nowhere; in an unopenable folder `-f` failed, so the row fell through to the
+        # partition and an unbound caller ADOPTED it. Its run may be mid-flight and nothing
+        # about it can be read, so the row is listed as UNREADABLE with the path, never
+        # adopted and never counted closed — `session_run`'s `bound-unreadable`, asked of the
+        # row's plan instead of the session's (cross-gate §S.4g).
         ADOPT_ROW_CLOSED=no
+        ADOPT_ROW_UNREADABLE=""
         if [ "$ADOPT_SESSION_SWEPT" = yes ]; then
           ADOPT_ROW_CLOSED=yes
         elif [ -n "$RPLAN" ] && [ "$RPLAN" != none ]; then
           ADOPT_ROW_PLAN_ABS="$(adopt_abs "$RPLAN" "$REPO_REAL")"
-          if [ -f "$ADOPT_ROW_PLAN_ABS" ] && ! run_open "$ADOPT_ROW_PLAN_ABS"; then
+          if plan_unreadable "$ADOPT_ROW_PLAN_ABS" >/dev/null; then
+            ADOPT_ROW_UNREADABLE="$ADOPT_ROW_PLAN_ABS"
+          elif [ -f "$ADOPT_ROW_PLAN_ABS" ] && ! run_open "$ADOPT_ROW_PLAN_ABS"; then
             ADOPT_ROW_CLOSED=yes
           fi
         fi
@@ -2715,7 +2729,12 @@ case "$VERB" in
         # carrying it names no run at all — and calling it "another run in this root" would
         # assert a run that does not exist. Both answers are un-adoptable, so the choice
         # only decides which heading the operator reads it under.
-        if [ -z "$ADOPT_OWN_KEY" ]; then
+        #
+        # UNREADABLE OUTRANKS ALL FOUR, `own` and `all` included: ownership is taken against a
+        # run, and this row's run cannot be read.
+        if [ -n "$ADOPT_ROW_UNREADABLE" ]; then
+          PARTITION=unreadable
+        elif [ -z "$ADOPT_OWN_KEY" ]; then
           PARTITION=all
         elif [ -z "$RPLAN" ] || [ "$RPLAN" = none ]; then
           PARTITION=unattributed
@@ -2725,8 +2744,9 @@ case "$VERB" in
           PARTITION=other
         fi
         case "$PARTITION" in
-          own|all) ADOPT_ADOPTED=$((ADOPT_ADOPTED + 1)) ;;
-          *)       ADOPT_LISTED=$((ADOPT_LISTED + 1)) ;;
+          own|all)    ADOPT_ADOPTED=$((ADOPT_ADOPTED + 1)) ;;
+          unreadable) ADOPT_UNREADABLE=$((ADOPT_UNREADABLE + 1)) ;;
+          *)          ADOPT_LISTED=$((ADOPT_LISTED + 1)) ;;
         esac
 
         # THE HEADING IS A GROUP SEPARATOR, printed when the partition CHANGES rather than
@@ -2739,6 +2759,7 @@ case "$VERB" in
           case "$PARTITION" in
             other)        say "other runs in this root — listed, never adopted" ;;
             unattributed) say "unattributed rows (pre-wave rosters) — listed, never adopted" ;;
+            unreadable)   say "UNREADABLE — rows whose plan is there and cannot be read — listed, never adopted, never counted closed" ;;
           esac
         fi
         ADOPT_LAST_PART="$PARTITION"
@@ -2812,6 +2833,9 @@ case "$VERB" in
         esac
 
         say "$(clean "$RNAME") ($(clean "$RTYPE")) from session $OSID — $VERDICT"
+        # THE PATH, ON EVERY UNREADABLE ROW WHATEVER ITS ID, because the cure is on the plan.
+        [ "$PARTITION" = unreadable ] \
+          && printf '  plan        : UNREADABLE — %s is there and cannot be read\n' "$(clean "$ADOPT_ROW_UNREADABLE")"
         if [ -n "$RID" ] && [ "$ROW_JOURNALLED" = yes ]; then
           printf '  agent id    : %s\n' "$RID"
           printf '  observe     : %s (%s)\n' "$TX" \
@@ -2856,7 +2880,10 @@ case "$VERB" in
           printf '  observe     : %s (%s)\n' "$TX" \
             "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
           printf '  message     : SendMessage to:%s\n' "$(clean "$RNAME")"
-          if [ "$PARTITION" = other ]; then
+          if [ "$PARTITION" = unreadable ]; then
+            printf '  stop        : not adopted — this row'"'"'s plan cannot be read, so there is no\n'
+            printf '                run to take ownership against. Restore read access and re-run adopt.\n'
+          elif [ "$PARTITION" = other ]; then
             printf '  stop        : not adopted — this row belongs to another run in this root\n'
             printf '                (%s), and ownership stays with the session working it.\n' "${RPLAN:-none}"
           else
@@ -2912,13 +2939,17 @@ EOF
     # dropped is invisible by design — that is the fix — so the COUNT of what was dropped is
     # on the line that answers for the run, or the drop could not be told from a walk that
     # found nothing.
-    printf '%s|at=%s|session=%s|scanned=%s|open=%s|adopted=%s|listed=%s|closed=%s|dupes=%s\n' \
+    # `unreadable=` TRAILS THEM, the same way (wave-20 T18): a row neither adopted, listed as
+    # another run's, nor closed is counted where the operator reads the other three.
+    printf '%s|at=%s|session=%s|scanned=%s|open=%s|adopted=%s|listed=%s|closed=%s|dupes=%s|unreadable=%s\n' \
       "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$ADOPT_SESSIONS" "$ADOPT_ROWS" \
-      "$ADOPT_ADOPTED" "$ADOPT_LISTED" "$ADOPT_CLOSED" "$ADOPT_DUPES"
+      "$ADOPT_ADOPTED" "$ADOPT_LISTED" "$ADOPT_CLOSED" "$ADOPT_DUPES" "$ADOPT_UNREADABLE"
     # SAID ONCE, AND ONLY WHEN THERE IS SOMETHING TO SAY. An operator who expected a
     # predecessor's rows and was shown none is owed the reason.
     [ "$ADOPT_CLOSED" -gt 0 ] \
       && say "$ADOPT_CLOSED row(s) skipped: their run is closed, or their session is dead and its state files are already sweepable — there is nothing left to take over."
+    [ "$ADOPT_UNREADABLE" -gt 0 ] \
+      && say "$ADOPT_UNREADABLE row(s) UNREADABLE: their plan is there and cannot be read, so they are neither adopted nor counted closed — restore read access and re-run adopt."
     [ "$ADOPT_DUPES" -gt 0 ] \
       && say "$ADOPT_DUPES duplicate row(s) folded: one agent id is one agent, however many rosters carry a row for it."
     if [ "$ADOPT_ROWS" -eq 0 ]; then
