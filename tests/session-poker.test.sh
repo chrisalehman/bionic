@@ -4309,14 +4309,45 @@ poke_pressure "$R20A" 100 1.0 tick
 expect_contains "an UNMET landing-swept marker leaves the row open, so the kill floor names it" \
   "$S20_TARGET" "$OUT"
 
-# ---------- 20b: the paired positive — a MET marker DOES close it ----------
+# ---------- 20b: the paired positive — RE-AUTHORED (epic-23 wave-20 T20, REQ-10, D10) ----------
+#
+# It read "a MET marker DOES close it". `youngest_suite_writer` was one of the last two roster
+# readers that closed a name on a `landing-swept/v1|state=MET` marker alone (found by T17,
+# approved by Chris); it now asks the one close predicate, `roster_open_names`
+# (payload/scripts/lib/roster.sh): a name is closed by an ack stamped after its latest launch,
+# and by nothing else (ADR-034 d1). So the MET marker joins the UNMET one above — it leaves
+# the row open, and a running writer behind it is still the one to stop — and the paired
+# positive that keeps 20a honest is the ack. Both halves are pinned.
+s20_ack() {  # <repo> <name> <at> — the sweeper ledger's ack line, in its writer's shape
+  local le; le="$1/.bionic/tmp/sweeper-${SID}.state"
+  [ -f "$le" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$le"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+    "$3" "$SID" "$2" >> "$le"
+}
 R20B="$(s20_repo s20-met-marker)"
 swept_marker "$R20B" suite-writer MET
 s19_answer fresh "suite-writer:running"
 poke_pressure "$R20B" 100 1.0 tick
-expect_contains "…while a MET marker closes it, and the kill floor names no one (20a discriminates)" \
+expect_contains "20b T20: a MET marker with no ack leaves the row open, so the kill floor still names it" \
+  "$S20_TARGET" "$OUT"
+
+R20B2="$(s20_repo s20-acked)"
+swept_marker "$R20B2" suite-writer MET
+s20_ack "$R20B2" suite-writer "$(iso_ago 0)"
+s19_answer fresh "suite-writer:running"
+poke_pressure "$R20B2" 100 1.0 tick
+expect_contains "…while an ack after its launch closes it, and the kill floor names no one (20a discriminates)" \
   "$S20_NONE" "$OUT"
-expect_absent "…and never the swept writer's address" "suite-writer@" "$OUT"
+expect_absent "…and never the acked writer's address" "suite-writer@" "$OUT"
+
+# 20b3: AN ACK OLDER THAN THE LAUNCH CLOSES NOTHING. The predicate orders the two stamps; a
+# name acked before this dispatch was launched is a relaunch, and it is open again.
+R20B3="$(s20_repo s20-acked-before-launch)"
+s20_ack "$R20B3" suite-writer "$(iso_ago 600)"
+s19_answer fresh "suite-writer:running"
+poke_pressure "$R20B3" 100 1.0 tick
+expect_contains "…and an ack older than the launch closes nothing: the kill floor names the relaunched writer" \
+  "$S20_TARGET" "$OUT"
 
 # ---------- 20c: an IDLE agent is not a writer to stop ----------
 #
