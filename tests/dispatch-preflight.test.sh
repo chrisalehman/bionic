@@ -4611,8 +4611,9 @@ expect_status "27f …non-vacuity: an impact command WAS configured for this rep
 # T7's repro (record/wave-14-tune-181/T7-req5-repro.md §3, RUN 2) drove this exact shape —
 # Files: + a Suites: paragraph naming a suite the task itself is about to create, path-
 # prefixed, own paragraph — against the REAL hook and found it already passing: lift
-# (`lift_contract_fields`/`suite_names()`, :1388-1406) performs no on-disk existence check,
-# and selection (`:2192-2194`) takes the declared set whole. This is that RUN, kept as a
+# (`lift_contract_fields`/`suite_names()`, moved by T6 into payload/scripts/lib/brief.sh)
+# performs no on-disk existence check, and selection (the `brief_field` calls in
+# hooks/dispatch-preflight.sh) takes the declared set whole. This is that RUN, kept as a
 # PIN beside 27f rather than a new implementation — 27f's own "declared wins whole"
 # assertion is unchanged by it. Per the T8 brief: if this never goes red against the
 # parent, it is reported as a pin, not as RED→GREEN.
