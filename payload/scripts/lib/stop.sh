@@ -1497,7 +1497,8 @@ stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
   local TRANSCRIPT HOOK_DIR PLAN PLAN_NAME STREAM
   local RITUAL RITUAL_REASON TICK_MARK VERDICT FILL_MISSING FILL_REASON
-  local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON
+  local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON _FF_SHOWN _FF_MORE _FF_ID
+  local -a _FF_IDS
   local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
   local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
   local FACT FIX REASON
@@ -1711,11 +1712,14 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 #     come from, taken here rather than read back out of the tick's words;
 #   - the only transcript fact is a DECLINE, and only the model's own: a main-thread assistant
 #     `text` block, `fill-declined: <reason>` at the start of a line.
-# JUDGED BY COUNT: after the turn's launches, `missed = min(free slots, ready rows)`, and a turn
-# with `missed > 0` on a machine that reads `ok` and no decline is refused once, naming the
-# first `missed` ready rows. No id is ever matched against a dispatch's words. A dispatched row
-# leaves the ready set when the orchestrator ledgers it `active` — "Ledger the dispatch, not
-# the return" (dispatch.md) — which is the half of dispatching this wall can read (A-T11.1).
+# JUDGED BY COUNT: after the turn's launches, `missed = min(free slots, ready rows this turn did
+# not launch)`, and a turn with `missed > 0` on a machine that reads `ok` and no decline is
+# refused once, naming the first `missed` of those rows. No id is ever matched against a
+# dispatch's PROMPT words. A dispatched row leaves the plan's ready set when the orchestrator
+# ledgers it `active` — "Ledger the dispatch, not the return" (dispatch.md; A-T11.1) — and until
+# then the turn that launched it is not charged for it: its dispatch NAME (`fill_row_launched`,
+# the inverse of `fill_name`) takes it out of what the turn missed (wave-20 T11b, A-T11b.2).
+# The headline says how many of the ready rows the turn launched and names the ones it did not.
 #
 # THE DECLINE IS NOT A LOOPHOLE — it is the point. There are good reasons not to fill (a
 # dependency landing this minute, a merge in flight), and every one of them is worth one line
@@ -1745,8 +1749,29 @@ elif [ "$FILL_SRC" = "GAP" ]; then
   # the state — the ledger is live, these rows are ready, slots are free after this turn's
   # launches — whether or not a tick fired in it.
   FILL_REASON="Fillable gap at turn end: the run's ledger is live, ${_ST_FREE} slot(s) are free after this turn's launches, and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row and ledger it active in ## Tasks (the wall reads the plan and the roster, never the Agent call's words), or write \"fill-declined: <reason>\" at the start of a line of your own reply, then stop again — this gate blocks once."
-  FILL_FACT="rows are ready and this turn dispatched none"
-  FILL_FIX="dispatch each row, or decline"
+  # THE HEADLINE COUNTS AND NAMES (wave-20 T11b; Step-6 review R4). "dispatched none" was false
+  # beside a ledger line that named the turn's launches. It now says how many of the plan's
+  # ready rows the turn launched and names the ones it did not — never a row it launched. The
+  # user line has width.sh's 100 columns, so the fact keeps to 55 of them: every name when they
+  # all fit, else the names that fit within 46 and "+N more" for the rest, which the detail
+  # below names in full.
+  FILL_FACT="launched ${_ST_SENT:-0} of ${_ST_READY_N:-0} ready rows; not launched:"
+  _FF_SHOWN=""; _FF_MORE=0
+  read -r -a _FF_IDS <<< "$FILL_MISSING"
+  if [ $(( ${#FILL_FACT} + 1 + ${#FILL_MISSING} )) -le 55 ]; then
+    _FF_SHOWN=" ${FILL_MISSING}"
+  else
+    for _FF_ID in ${_FF_IDS[@]+"${_FF_IDS[@]}"}; do
+      if [ "$_FF_MORE" -eq 0 ] && [ $(( ${#FILL_FACT} + ${#_FF_SHOWN} + 1 + ${#_FF_ID} )) -le 46 ]; then
+        _FF_SHOWN="${_FF_SHOWN} ${_FF_ID}"
+      else
+        _FF_MORE=$((_FF_MORE + 1))
+      fi
+    done
+  fi
+  FILL_FACT="${FILL_FACT}${_FF_SHOWN}"
+  [ "$_FF_MORE" -gt 0 ] && FILL_FACT="${FILL_FACT} +${_FF_MORE} more"
+  FILL_FIX="dispatch or decline"
 else
   FILL_REASON=""
 fi
@@ -1971,9 +1996,13 @@ return 2
 #                   whose result was an error (a dispatch the preflight refused)
 #   _ST_DECLINED    the turn's last `fill-declined:` reason, from the model's own text only
 #   _ST_CURRENT _ST_STATE _ST_CEILING _ST_WIDTH _ST_OPEN _ST_FREE   the ledger's numbers
-#   _ST_READY       every ready id, space-joined, untrimmed
-#   _ST_MISSED      min(free, |ready|) — after this turn's launches, since the roster holds them
-#   _ST_NAMED       the first _ST_MISSED ready ids, the ones a refusal names
+#   _ST_READY       every ready id, space-joined, untrimmed — the plan's set, launches included
+#   _ST_READY_N     how many ids _ST_READY holds
+#   _ST_SENT        how many of them this turn launched (`fill_row_launched`, by dispatch name)
+#   _ST_MISSED      min(free, |ready not launched this turn|) — after this turn's launches, since
+#                   the roster holds them
+#   _ST_NAMED       the first _ST_MISSED ready ids this turn did NOT launch, the ones a refusal
+#                   names
 #   _ST_NO_BUDGET   1 when a live ledger has no readable writers= and a row is ready
 # Return 0 when the turn could be read at all (a Stop, an engaged session, a transcript), 1
 # otherwise — and the caller then has nothing to judge and nothing to record.
@@ -1983,7 +2012,19 @@ return 2
 #   USER <text> <timestamp> <uuid>   a user record carrying text — a turn's prompt. The `user`
 #                                    type is also how the CLI records every TOOL RESULT, and
 #                                    treating those as prompts would end the tick's turn at its
-#                                    first tool call.
+#                                    first tool call. Nor is every user TEXT record a prompt:
+#                                    the CLI writes two into the turn they interrupt, and they
+#                                    open no turn (wave-20 T11b; Step-6 review R3, critic C1):
+#                                      the Stop hook's refusal fed back — isMeta (the stream-json
+#                                        spelling is isSynthetic) and text starting
+#                                        "Stop hook feedback:" (refuse.sh's channel table);
+#                                      a companion record — turnCompanion: a skill's body after a
+#                                        Skill call or a slash command, an attached image.
+#                                    isMeta ALONE marks neither: a cron-fired Patrol prompt is
+#                                    isMeta too, and it is a turn. So the re-entry Stop after a
+#                                    refusal keeps the prompt's key, launches, decline and tick
+#                                    flag, and a launch made before a Skill call stays the turn's.
+#                                    Survey behind the rule: A-T11b.1.
 #   TOOL <name> <path/cmd> <fields>  a main-thread assistant tool_use
 #   AGENT <name> <tool_use id>       a main-thread Agent tool_use — the launch the ledger names
 #   AGENTERR <tool_use id>           a tool_result with `is_error: true`: a refused dispatch,
@@ -2017,7 +2058,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_STREAM=""; _ST_PLAN=""; _ST_LIVE=0; _ST_TICK=0; _ST_TURN=""; _ST_MARK_TS=""
   _ST_LAUNCHED=""; _ST_DECLINED=""; _ST_CURRENT=""; _ST_STATE=""; _ST_CEILING=""
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
-  _ST_NO_BUDGET=0
+  _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
   local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
 
   [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
@@ -2045,6 +2086,10 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
         else $line
         end
       ) as $auth
+    | ($main and $r.type == "user"
+       and ( (($r.turnCompanion // false) == true)
+             or ( ((($r.isMeta // false) == true) or (($r.isSynthetic // false) == true))
+                  and (($auth // "") | startswith("Stop hook feedback:")) ) )) as $cont
     | (if (($auth // "") | contains("<command-name>/clear</command-name>")) then "MARK\tclear" else empty end),
       (if (($auth // "") | contains("source: resume")) then "MARK\tresume" else empty end),
       ( if ($main and $r.type == "assistant" and (($r.message.content // []) | type) == "array") then
@@ -2069,7 +2114,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
           ( if ($r.message.content | type) == "string" then $r.message.content
             else ([$r.message.content[]? | select(.type == "text") | .text] | join(" "))
             end ) as $t
-          | select(($t // "") != "")
+          | select(($t // "") != "" and ($cont | not))
           | "USER\t" + ($t | gsub("[\n\t\r]"; " "))
             + "\t" + ((($r.timestamp // "") | tostring) | gsub("[\n\t\r]"; " "))
             + "\t" + ((($r.uuid // "") | tostring) | gsub("[\n\t\r]"; " "))
@@ -2170,12 +2215,24 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # is wide enough that `fill_ready_set`'s own trim never bites, and the trim to the free
   # slots is taken here, so the ledger records the whole ready set and the refusal names the
   # rows a free slot could have taken.
+  #
+  # A ROW THIS TURN LAUNCHED IS NEVER MISSED (wave-20 T11b; Step-6 review R4, T12 F7). A launch
+  # joins the roster at PreToolUse, so it is already in `open` and has already taken its slot;
+  # its plan row stays ready until the orchestrator ledgers it `active` (A-T11.1). Counting it
+  # ready as well charged one launch twice, and the refusal named the rows the turn had just
+  # sent. So the ledger's ready set stays the plan's, and what the turn missed is that set less
+  # the rows this turn launched, matched by the dispatch name `fill_name` hands out.
   ready="$(fill_ready_set "$_ST_PLAN" 99999 0 2>/dev/null)"
   count=0; _ST_READY=""; _ST_NAMED=""
   while IFS= read -r rest; do
     [ -n "$rest" ] || continue
-    count=$((count + 1))
+    _ST_READY_N=$((_ST_READY_N + 1))
     _ST_READY="${_ST_READY}${_ST_READY:+ }${rest}"
+    if fill_row_launched "$rest" "$_ST_LAUNCHED"; then
+      _ST_SENT=$((_ST_SENT + 1))
+      continue
+    fi
+    count=$((count + 1))
     [ "$count" -le "$_ST_FREE" ] && _ST_NAMED="${_ST_NAMED}${_ST_NAMED:+ }${rest}"
   done <<ST_READY
 $ready
@@ -2193,7 +2250,9 @@ ST_READY
 # on is a turn somebody has to be able to end. It runs BEFORE `hooks/stop.sh`'s re-entry guard,
 # so the Stop that ends a refused turn — the one carrying the launches the model made after
 # the refusal — is recorded too; `fill-report` folds lines by `turn=`, so a refused turn's two
-# lines count once, as the later.
+# lines count once, as the later. That holds because the refusal the CLI feeds back ("Stop hook
+# feedback:") opens no turn in `stop_turn_facts`: both lines carry the prompt's key, and the
+# later one still holds the launches and the decline made before the refusal (wave-20 T11b).
 #
 # APPEND-ONLY, ONE printf PER STOP, so a crash leaves at most a line that did not happen and a
 # concurrent reader never sees a rewrite. A ledger path that is a symlink is not written through.

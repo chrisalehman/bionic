@@ -968,17 +968,24 @@ u_prompt "$d" "dispatch the first one"
 a_agent "$d" "W-T2" "row T2, implementor."
 fire "$d"; expect_block "60c: a half-filled gap names the row left out, and not the one sent" "T3" "T2"
 
-# 60d: THE LEDGER IS WHAT SAYS A ROW WAS SENT (A-T11.1). Two agents launched and rostered, but
-# both plan rows still read `pending`: the schedule says two rows are ready and six slots are
-# free, so the gap stands and both rows are named. Marking a dispatched row `active` is the
-# half of dispatching the wall can see.
+# 60d: A ROW THIS TURN LAUNCHED IS NEVER NAMED AS MISSED (T11b; review R4, T12 F7). Two agents
+# launched and rostered while both plan rows still read `pending`. The launch already holds a
+# roster slot, so counting the row as ready as well charged it twice: the refusal named the
+# rows the turn had just sent. The ready set stays the plan's; what the turn missed is that set
+# less this turn's launches, matched by the dispatch name `fill_name` hands out (the id, or
+# the id with a `-r<n>` suffix, behind any `<prefix>-`). A-T11b.2.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 ledger_roster "$d" open W-T2 W-T3
 u_prompt "$d" "dispatch the batch"
 a_agent "$d" "W-T2" "row T2, implementor."
 a_agent "$d" "W-T3" "row T3, implementor."
-fire "$d"; expect_block "60d: launched but still pending in the plan — the gap stands, T2 named" "T2"
-fire "$d"; expect_block "60e: …and T3" "T3"
+fire "$d"; expect_allow "60d: (T11b: was \"launched but still pending in the plan — the gap stands, T2 named\") a turn that launched every ready row is not refused, ledgered active or not"
+# 60e: …and one launched of two, both pending: the one left out is named, the launched one never.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+ledger_roster "$d" open W-T2
+u_prompt "$d" "dispatch the first"
+a_agent "$d" "W-T2" "row T2, implementor."
+fire "$d"; expect_block "60e: (T11b: was \"…and T3\") launched-but-pending T2 is not named; unlaunched T3 is" "T3" "T2"
 
 # 61: THE LEDGER IS NOT LIVE BELOW STEP 4. Steps 0-3 are research, spec, plan and review;
 # the same table at `current: 3` is a schedule nobody has ratified, and dispatching into it
@@ -1498,6 +1505,34 @@ led_result() {  # <dir> <tool_use id> <iso> <is_error true|false> <text>
     '{type:"user",timestamp:$ts,isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:$i,is_error:$e,content:$t}]}}' \
     >> "$1/transcript.jsonl"
 }
+# THE CLI'S OWN SYNTHETIC USER RECORDS (T11b; Step-6 review R3, critic C1). Two `user` records
+# the CLI writes into the transcript that no person typed, each INSIDE the turn it interrupts.
+# Shapes read out of the r2 bed transcript (record/wave-20-fixit-187/bed, session 1899e04c,
+# records 27 and 37) and checked against 528 transcripts on this machine (2026-09-24):
+#   the Stop hook's refusal   -> isMeta:true, content a STRING that starts "Stop hook feedback:"
+#                                (187 of 187 such records; payload/scripts/lib/refuse.sh names the
+#                                channel: "a synthetic user turn \"Stop hook feedback\" on Stop")
+#   a skill's body            -> isMeta:true, turnCompanion:true, sourceToolUseID = the Skill call,
+#                                content an ARRAY of one text block (135 of 135 carry the id)
+# isMeta alone marks neither: a cron-fired Patrol prompt is isMeta:true too, and it IS a turn.
+led_feedback() {  # <dir> <uuid> <iso> — the Stop hook's refusal, fed back to the model
+  jq -nc --arg u "$2" --arg ts "$3" \
+    '{type:"user",isMeta:true,uuid:$u,timestamp:$ts,isSidechain:false,userType:"external",
+      message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready and this turn dispatched none (dispatch each row, or decline)\n\nFillable gap at turn end: the run'"'"'s ledger is live."}}' \
+    >> "$1/transcript.jsonl"
+}
+led_skill() {  # <dir> <tool_use id> <body uuid> <iso> — a Skill call, its result, and the body after it
+  jq -nc --arg i "$2" --arg ts "$4" \
+    '{type:"assistant",timestamp:$ts,isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:$i,name:"Skill",
+       input:{skill:"bionic:canonical-sdlc"}}]}}' >> "$1/transcript.jsonl"
+  jq -nc --arg i "$2" --arg ts "$4" \
+    '{type:"user",timestamp:$ts,isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:$i,content:"Launching skill: bionic:canonical-sdlc"}]}}' \
+    >> "$1/transcript.jsonl"
+  jq -nc --arg i "$2" --arg u "$3" --arg ts "$4" \
+    '{type:"user",isMeta:true,turnCompanion:true,sourceToolUseID:$i,uuid:$u,timestamp:$ts,isSidechain:false,userType:"external",
+      message:{role:"user",content:[{type:"text",text:"Base directory for this skill: /abs/skills/canonical-sdlc\n\n# Canonical SDLC\n\nThe Patrol runs: bash /abs/hooks/session-poker.sh tick"}]}}' \
+    >> "$1/transcript.jsonl"
+}
 LED_LOG_REL=".bionic/docs/record/${PLAN_REL%.plan.md}/fill-ledger.log"
 led_line() {  # <dir> <n> -> the n-th ledger line
   sed -n "${2}p" "$1/$LED_LOG_REL" 2>/dev/null
@@ -1532,7 +1567,10 @@ expect_eq "L2d: …one ready row missed" "1" "$(led_field "$L2" missed)"
 expect_eq "L2e: …the ready row named" "T3" "$(led_field "$L2" ready)"
 
 # Stop 3: after the refusal the model dispatches T3 and one refused dispatch, then stops with
-# stop_hook_active — the re-entry the guard waves through, recorded before it does.
+# stop_hook_active — the re-entry the guard waves through, recorded before it does. The CLI
+# feeds the refusal back first, as the synthetic user record it always writes (T11b: the
+# fixture gained it; without it L3b was red-green against a transcript the CLI never writes).
+led_feedback "$d" "u-fb-0002" "2026-09-23T10:20:30.000Z"
 led_agent "$d" "toolu_A2" "W-T3" "2026-09-23T10:21:00.000Z"
 led_result "$d" "toolu_A2" "2026-09-23T10:21:01.000Z" false "Spawned W-T3"
 led_agent "$d" "toolu_A3" "W-BAD" "2026-09-23T10:21:02.000Z"
@@ -1545,6 +1583,92 @@ expect_eq "L3b: AC-5.5 the re-entered Stop wrote a third line" "u-turn-0002" "$(
 expect_eq "L3c: …launched is the post-refusal Agent call, the refused one left out" "W-T3" "$(led_field "$L3" launched)"
 expect_eq "L3d: …and the turn now misses nothing" "0" "$(led_field "$L3" missed)"
 expect_eq "L3e: three Stops, three lines" "3" "$(wc -l < "$d/$LED_LOG_REL" | tr -d ' ')"
+
+# L8: THE REFUSED TURN IS ONE TURN (T11b; review R3, critic C1). A launch BEFORE the refusal,
+# the Stop hook's feedback record, a launch after it, and the re-entry Stop: both lines carry
+# the prompt's key, and the final line names both launches.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+ledger_roster "$d" open W-T2
+led_user "$d" "u-turn-0008" "2026-09-23T12:00:00.000Z" "dispatch the batch"
+led_agent "$d" "toolu_B1" "W-T2" "2026-09-23T12:00:05.000Z"
+led_result "$d" "toolu_B1" "2026-09-23T12:00:06.000Z" false "Spawned W-T2"
+fire "$d"; expect_block "L8a: T11b Stop 1 — T2 launched, T3 left out: refused naming T3 and not T2" "T3" "T2"
+expect_eq "L8b: …its line names the launch" "W-T2" "$(led_field "$(led_line "$d" 1)" launched)"
+led_feedback "$d" "u-fb-0008" "2026-09-23T12:00:10.000Z"
+led_agent "$d" "toolu_B2" "W-T3" "2026-09-23T12:00:20.000Z"
+led_result "$d" "toolu_B2" "2026-09-23T12:00:21.000Z" false "Spawned W-T3"
+ledger_roster "$d" open W-T3
+led_plan "$d" "$LEDGER_LANDED" "$LEDGER_SENT_2" "$LEDGER_SENT_3"
+fire "$d" Stop true; expect_allow "L8c: the re-entry passes"
+L8_2="$(led_line "$d" 2)"
+expect_eq "L8d: T11b the re-entry line keeps the prompt's key across the Stop hook's feedback record" \
+  "u-turn-0008" "$(led_field "$L8_2" turn)"
+expect_eq "L8e: …and the launch made before the refusal survives into the turn's final line" \
+  "W-T2,W-T3" "$(led_field "$L8_2" launched)"
+expect_eq "L8f: …two lines, one turn key" "1" \
+  "$(sed -n 's/.*|turn=\([^|]*\)|.*/\1/p' "$d/$LED_LOG_REL" | sort -u | wc -l | tr -d ' ')"
+
+# L9: THE DECLINE SURVIVES THE REFUSAL TOO. A Patrol marker turn declines the fill, ends without
+# running its tick and is refused for that (§5f); the model runs the tick and stops again. The
+# decline was written before the refusal, so only a turn that the feedback record did not
+# split still carries it.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
+tick_stamp "$d" 2026-09-23T12:59:00Z arm
+jq -nc --arg t "bionic-patrol session=$SID8 — Patrol tick. Run: bash /abs/hooks/session-poker.sh tick" \
+  '{type:"user",isMeta:true,uuid:"u-turn-0009",timestamp:"2026-09-23T13:00:00.000Z",isSidechain:false,message:{role:"user",content:$t}}' \
+  >> "$d/transcript.jsonl"
+both_duties "$d"
+a_text "$d" "fill-declined: the wave head is mid-merge"
+fire "$d"; expect_block "L9a: the marker turn that ran no tick is refused (the refusal whose feedback follows)" "session-poker.sh tick"
+led_feedback "$d" "u-fb-0009" "2026-09-23T13:00:10.000Z"
+tick_stamp "$d" 2026-09-23T13:00:20Z tick
+fire "$d" Stop true; expect_allow "L9b: the re-entry passes"
+L9_2="$(led_line "$d" 2)"
+expect_eq "L9c: T11b the re-entry line keeps the marker prompt's key" "u-turn-0009" "$(led_field "$L9_2" turn)"
+expect_contains "L9d: …and the decline written before the refusal is still the turn's" \
+  "mid-merge" "$(led_field "$L9_2" declined)"
+
+# L10: A SKILL'S BODY IS NOT A PROMPT (T11b; T21 bed item 6). A launch, then a Skill call whose
+# body the CLI injects as a user record: the turn is still the prompt's, launch included.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2")
+ledger_roster "$d" open W-T2
+led_user "$d" "u-turn-0010" "2026-09-23T14:00:00.000Z" "dispatch T2, then load the skill"
+led_agent "$d" "toolu_C1" "W-T2" "2026-09-23T14:00:05.000Z"
+led_result "$d" "toolu_C1" "2026-09-23T14:00:06.000Z" false "Spawned W-T2"
+led_skill "$d" "toolu_C2" "u-skill-0010" "2026-09-23T14:00:07.000Z"
+fire "$d"; expect_allow "L10a: the turn ends clean"
+expect_eq "L10b: T11b the skill body opens no turn — the line is keyed by the prompt" \
+  "u-turn-0010" "$(led_field "$(led_line "$d" 1)" turn)"
+expect_eq "L10c: …and the launch before the Skill call is the turn's" "W-T2" "$(led_field "$(led_line "$d" 1)" launched)"
+
+# L11: …AND A MARKER TURN THAT LOADS A SKILL IS STILL A MARKER TURN: the tick flag survives the
+# body, so a turn that never ran its tick is refused for it (§5f), and one that did is not.
+l11_env() {  # <stamp at> <verb>
+  local d; d=$(make_env_ledger 4 "$LEDGER_LANDED")
+  tick_stamp "$d" "$1" "$2"
+  jq -nc --arg t "bionic-patrol session=$SID8 — Patrol tick. Run: bash /abs/hooks/session-poker.sh tick" \
+    '{type:"user",isMeta:true,uuid:"u-turn-0011",timestamp:"2026-09-23T15:00:00.000Z",isSidechain:false,message:{role:"user",content:$t}}' \
+    >> "$d/transcript.jsonl"
+  led_skill "$d" "toolu_D1" "u-skill-0011" "2026-09-23T15:00:03.000Z"
+  both_duties "$d"
+  printf '%s' "$d"
+}
+d=$(l11_env 2026-09-23T14:59:00Z arm)
+fire "$d"; expect_block "L11a: T11b a marker turn that loads a skill and runs no tick is refused for the tick" "session-poker.sh tick"
+d=$(l11_env 2026-09-23T15:00:05Z tick)
+fire "$d"; expect_allow "L11b: …and with the tick stamped after the marker it passes"
+
+# L12: THE FEEDBACK MARK IS THE CLI'S, NOT THE WORDS. A prompt a person typed that merely starts
+# "Stop hook feedback:" carries no isMeta, and it is a turn of its own.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_SENT_2")
+ledger_roster "$d" open W-T2
+led_user "$d" "u-turn-0012" "2026-09-23T16:00:00.000Z" "dispatch T2"
+led_agent "$d" "toolu_E1" "W-T2" "2026-09-23T16:00:05.000Z"
+led_result "$d" "toolu_E1" "2026-09-23T16:00:06.000Z" false "Spawned W-T2"
+led_user "$d" "u-turn-0012b" "2026-09-23T16:01:00.000Z" "Stop hook feedback: pasted from another window"
+fire "$d"
+expect_eq "L12a: a typed prompt that quotes the feedback prefix opens a turn" "u-turn-0012b" "$(led_field "$(led_line "$d" 1)" turn)"
+expect_eq "L12b: …and the previous turn's launch is not its" "" "$(led_field "$(led_line "$d" 1)" launched)"
 
 # L4: a SubagentStop records nothing — a writer's turn end is not the run's.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2")
