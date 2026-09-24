@@ -360,7 +360,7 @@ _ROSTER_OPEN_AWK='
     return (_roster_stamp_ok(born) && _roster_stamp_ok(ack) && ack "" > born "")
   }
   # The open names of one roster, each followed by a newline, in first-seen order.
-  function _roster_open_of(f, ledger, sid, rpfx,   ACK, seen, order, born, n, line, rs, nm, i, out) {
+  function _roster_open_of(f, ledger, sid, rpfx,   ACK, seen, order, born, n, line, rs, nm, i, out, cand) {
     _roster_acks(ledger, ACK)
     n = 0
     while ((getline line < f) > 0) {
@@ -371,7 +371,18 @@ _ROSTER_OPEN_AWK='
       nm = _roster_kv(line, "name"); if (nm == "") nm = "(unnamed)"
       gsub(/\t/, " ", nm)
       if (!(nm in seen)) { seen[nm] = 1; order[++n] = nm }
-      born[nm] = _roster_kv(line, "launched_at")
+      # THE MAXIMUM WELL-FORMED STAMP, not whichever row happens to be LAST in file order
+      # (critic C7, epic-23 wave-20 T20b). Adoption can append a predecessor row, carrying
+      # its own earlier launched_at, after a fresher live row for the same name already on
+      # the file; born[nm] must still read as the LATEST launch, or an ack taken between the
+      # two stamps closes a name whose real latest launch is still open. The comparison is
+      # already lexical (the one stamp shape every writer emits), so the direction here is
+      # exactly the one _roster_discharged already takes: an unreadable candidate never
+      # displaces a well-formed born[nm], and the first row seen for a name is kept even
+      # when it is itself unreadable
+      # (fail-closed-constants: nothing here reads "no stamp yet" as "never launched").
+      cand = _roster_kv(line, "launched_at")
+      if (!(nm in born) || (_roster_stamp_ok(cand) && (!_roster_stamp_ok(born[nm]) || cand "" > born[nm] ""))) born[nm] = cand
     }
     close(f)
     out = ""

@@ -298,10 +298,23 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "execution-recorder"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/resources.sh"
 # THE ONE CLOSE PREDICATE (epic-23 wave-20 T20, REQ-10, D10): `roster_open_names`, asked by
-# the duplicate-start check below. Sourcing is definitions only; the call is made on the
-# SubagentStart path, and only when an id's last row already says it started.
+# the duplicate-start check below. STILL WANTED HERE (so the loader's directory pick still
+# requires it to exist beside the other five), but no longer sourced on this line — every
+# Bash call and every dispatch confirmation in the session reaches this far, and parsing
+# roster.sh's ~460 lines for a definition only the SubagentStart duplicate-start check ever
+# calls cost every one of them (epic-23 wave-20 T20b, review R5's perf note: ~2ms/call
+# measured on the Bash path, `.bionic/docs/record/wave-20-fixit-187/T20b-restart-reads-open.md`
+# "Hook latency"). `roster_sh_load` below sources it exactly once, lazily, on the one path
+# that ever needs `roster_open_names`. THE SOURCE LINE ITSELF IS UNINDENTED, deliberately —
+# it is still the one literal `. "$BIONIC_LIB/roster.sh"` tests/hook-adoption.test.sh pins
+# byte for byte, and the loop pinning "every wanted basename is sourced" reads it by that
+# same literal regardless of which function body it sits in.
+roster_sh_load() {
+  [ -n "${_ROSTER_SH_LOADED:-}" ] && return 0
+  _ROSTER_SH_LOADED=1
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roster.sh"
+}
 
 # THE ROOT (spec AC-10, lib/root.sh). `git rev-parse --show-toplevel` answered with the
 # WORKTREE's own root, so a stop raised from a linked worktree looked for the roster
@@ -764,6 +777,11 @@ if [ -n "$IS_START" ]; then
     # `confirmed` row — written by the dispatch wall and ARM 2 — is a fresh cycle.
     END { if (row != "" && (st == "identified" || st == "duplicate-start")) print row }
   ' "$ROSTER_FILE" 2>/dev/null) || DUP_PRIOR=""
+  # LAZY, ONLY WHEN THIS ARM MIGHT ASK roster_open_names (epic-23 wave-20 T20b, review R5's
+  # perf note). Every other SubagentStart — the first start of every id, which is the common
+  # path — never reaches this condition and never pays for roster.sh's definitions at all.
+  DUP_PRIOR_BEFORE="$DUP_PRIOR"
+  [ -n "$DUP_PRIOR" ] && roster_sh_load
   # ---- BEGIN open-contract reading — the one close predicate, asked of one name (cross-gate §LC) ----
   if [ -n "$DUP_PRIOR" ]; then
     case "$DUP_PRIOR" in *"|name="*) DUP_NAME="${DUP_PRIOR#*|name=}"; DUP_NAME="${DUP_NAME%%|*}" ;; *) DUP_NAME="" ;; esac
@@ -772,6 +790,16 @@ if [ -n "$IS_START" ]; then
     grep -qxF -- "$DUP_NAME" <<< "$(roster_open_names "$ROSTER_FILE" "$STATE_DIR/sweeper-${BIONIC_SID}.state" "$BIONIC_SID")" || DUP_PRIOR=""
   fi
   # ---- END open-contract reading ----
+  # A RESTART AFTER AN ACK (epic-23 wave-20 T20b, review R5). The span above reset DUP_PRIOR to
+  # empty because roster_open_names found the name CLOSED — this WAS a duplicate reading (the
+  # id's last row already says it started) against a lineage the ack has since finished. The
+  # fallthrough below re-identifies this id as a reused name, and that identification must
+  # carry a FRESH launch stamp rather than the finished lineage's original one (see
+  # PRIOR_LAUNCH further down) — otherwise the "fresh" row reads exactly as old as the row the
+  # ack already discharged, and roster_open_names keeps reading the name closed forever (walk
+  # §9b/9c; the restarted agent held no slot at all).
+  RESTART_AFTER_ACK=""
+  [ -n "$DUP_PRIOR_BEFORE" ] && [ -z "$DUP_PRIOR" ] && RESTART_AFTER_ACK=1
   if [ -n "$DUP_PRIOR" ]; then
     # EVERY FIELD CARRIED FORWARD, exactly as the identification below does: the row is a
     # CONTRACT, and a row that dropped a field would silently retract what it inherited.
@@ -893,6 +921,14 @@ if [ -n "$IS_START" ]; then
   # launch reference regardless of how many fresher rows now name the same id,
   # including one this very join just picked up.
   PRIOR_LAUNCH=$(prior_launch_for_agent "$START_ID")
+
+  # A RESTART AFTER AN ACK GETS ITS OWN, FRESH LAUNCH (epic-23 wave-20 T20b, review R5). The
+  # PRIOR_LAUNCH just recovered is the FINISHED lineage's ORIGINAL stamp — exactly the value
+  # that must not survive into this identification: the roster row this id last held said it
+  # already started, and what freed it just now was an ack, not a fresh dispatch cycle. This
+  # is the one caller with a reason to override it; every ordinary resume (RESTART_AFTER_ACK
+  # unset) keeps PRIOR_LAUNCH exactly as it was before this wave.
+  [ -n "${RESTART_AFTER_ACK:-}" ] && PRIOR_LAUNCH=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   # `agent_id` is appended when the joined row has no such field and substituted
   # when it has one — ARM 2's rule for `teammate_id`, for ARM 2's reason: every
