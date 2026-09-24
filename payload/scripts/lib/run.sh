@@ -266,12 +266,17 @@ _run_candidates() {
       continue
     fi
     # THE FOLDERS AT DEPTH 1, asked only whether they open: a plan under one that does not is
-    # invisible to the file walk below. Depth-2 folders hold depth-3 files, out of bound. A
-    # pass of its own, so the file walk's `find` line stays the one line cross-gate §S.2 and
-    # the fixture battery's `depth-1` mutation anchor on.
-    while IFS= read -r -d '' f; do
+    # invisible to the file walk below. Depth-2 folders hold depth-3 files, out of bound.
+    # A SHELL GLOB, NOT A SECOND `find`: tests/hook-latency.test.sh §6 pins this walk at one
+    # `find` fork, and the file walk's `find` line stays the one line cross-gate §S.2 and the
+    # fixture battery's `depth-1` mutation anchor on. The hidden-name pattern is there because
+    # `find` descends dot-folders too; a symlink is skipped because `find` does not follow it,
+    # and an unmatched pattern stays literal and fails `-d`.
+    for f in "$d"/*/ "$d"/.[!.]*/; do
+      f="${f%/}"
+      [ -d "$f" ] && [ ! -L "$f" ] || continue
       [ -r "$f" ] && [ -x "$f" ] || printf 'bound-unreadable %s\n' "$f" >&2
-    done < <(find "$d" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+    done
     while IFS= read -r -d '' f; do
       if plan_unreadable "$f" >/dev/null; then
         printf 'bound-unreadable %s\n' "$f" >&2
