@@ -444,6 +444,41 @@ prior_launch_for_agent() {  # <agent-id> -> earliest launched_at for that id thi
   return 0
 }
 
+# THE LATEST LAUNCH, FOR THE RESTART-AFTER-ACK PATH ONLY (epic-23 wave-20 T20d, critic
+# C3-1). `prior_launch_for_agent` above answers "the contract's original launch", which is
+# right for an ordinary resume — the takeover case, where the roster's own first row for
+# this id IS the contract, however many join rows have picked the id up since. A restart
+# after an ack is a different question: `hooks/session-poker.sh`'s `extend` verb re-opens a
+# MET row by appending a FRESH row for the SAME id, "launched now, so the old deliverable
+# reads stale" (session-poker.sh, `extend`). If that extended contract is then acked and the
+# id restarts, "the contract as it stood at the ack" is the EXTEND's launch, not the first
+# dispatch's — carrying the earliest stamp forward instead rolls a revoked, abandoned
+# contract's clock back past the extend, so the stale pre-extend deliverable reads MET again
+# with acked=no, and a tree `stopped` had left standing for salvage becomes landable.
+# Same scan as `prior_launch_for_agent`, but kept running to the LAST match rather than
+# returning at the first: this session's roster is append-only, so the last matching row is
+# the latest launch, whatever else has been appended for other ids in between.
+latest_launch_for_agent() {  # <agent-id> -> latest launched_at for that id this session, or empty
+  local aid="$1" line found=""
+  [ -n "$aid" ] || return 0
+  [ -f "$ROSTER_FILE" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in '#'*|'') continue ;; esac
+    case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+    case "$line" in
+      *"|agent_id=$aid"|*"|agent_id=$aid|"*) : ;;
+      *) continue ;;
+    esac
+    [ "$(line_field "$line" agent_id)" = "$aid" ] || continue
+    [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
+    local lf
+    lf=$(line_field "$line" launched_at)
+    [ -n "$lf" ] && found="$lf"
+  done < "$ROSTER_FILE"
+  printf '%s' "$found"
+  return 0
+}
+
 # ============================================================
 # ARM 2 — the ROSTER (PostToolUse|Agent).
 # ============================================================
@@ -921,6 +956,17 @@ if [ -n "$IS_START" ]; then
   # launch reference regardless of how many fresher rows now name the same id,
   # including one this very join just picked up.
   PRIOR_LAUNCH=$(prior_launch_for_agent "$START_ID")
+
+  # ON THE RESTART_AFTER_ACK PATH ONLY, take the id's LATEST launched_at instead of its
+  # earliest (epic-23 wave-20 T20d, critic C3-1; see latest_launch_for_agent() above). Every
+  # other identification — the first, and an ordinary resume — keeps the earliest reading:
+  # this override reaches only the one case where a contract may have been extended (a fresh
+  # row for this same id, launched later) since the first dispatch and before the ack that
+  # `RESTART_AFTER_ACK` names.
+  if [ -n "${RESTART_AFTER_ACK:-}" ]; then
+    LATEST_LAUNCH=$(latest_launch_for_agent "$START_ID")
+    [ -n "$LATEST_LAUNCH" ] && PRIOR_LAUNCH="$LATEST_LAUNCH"
+  fi
 
   # A RESTART AFTER AN ACK HOLDS A SLOT BY ITS OWN STAMP, NOT BY MOVING THE CONTRACT'S CLOCK
   # (epic-23 wave-20 T20b, review R5; repaired at T20c, critic C2-2). The name must read open
