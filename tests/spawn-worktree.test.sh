@@ -547,4 +547,51 @@ mutate_check "mutation: a path built from something other than the branch's last
   's|^  wt="${parent_abs}/${branch##\*/}"$|  wt="${parent_abs}/renamed-tree"|' \
   verify_wt_contract "broken"
 
+
+section "Group 12: land — the verb lands onto the bound plan's working branch, in the checkout that holds it (wave-20 T8, REQ-1, D1)"
+#
+# END TO END THROUGH THIS SCRIPT'S OWN VERBS. `create` makes the wave checkout and the task
+# tree exactly as a wave does; the main checkout then moves to a FEATURE branch a human is
+# working on, which is the topology the reported defect came from (report #9). `land` reads
+# its target off the session's bound plan — the verb takes no target of its own — so the
+# merge goes into the wave checkout and the feature branch does not move. The library's own
+# arms are tests/worktree.test.sh Groups 9-10; this pins the verb's wiring and its session.
+
+LR="$(new_repo "$TMP/land-topology")"
+LSID="spawn-land-session-01"
+LBASE="$(sha_of "$LR")"
+LWAVE_OUT="$(spawn_out "$LR" create "$LBASE" wave/20-demo)"
+LWAVE="$(printf '%s\n' "$LWAVE_OUT" | tr ' ' '\n' | sed -n 's/^path=//p')"
+LTREE_OUT="$(spawn_out "$LR" create "$LBASE" wt/20-T1)"
+LTREE="$(printf '%s\n' "$LTREE_OUT" | tr ' ' '\n' | sed -n 's/^path=//p')"
+echo work > "$LTREE/t1.txt"
+git -C "$LTREE" add t1.txt
+git -C "$LTREE" commit --quiet -m "T1 work"
+git -C "$LR" checkout --quiet -b feature/human
+LFEAT0="$(sha_of "$LR" feature/human)"
+mkdir -p "$LR/.bionic/docs/plans/epic-x" "$LR/.bionic/tmp"
+LPLAN="$LR/.bionic/docs/plans/epic-x/wave-x.plan.md"
+printf -- '---\nworking-branch: wave/20-demo\n---\n# plan\n\n## SDLC State\n\ncurrent: 4\n' > "$LPLAN"
+printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LPLAN" > "$LR/.bionic/tmp/engaged-${LSID}.state"
+
+# Refused first: no session id means no binding, so no target — and nothing moves.
+LREFS0="$(git -C "$LR" for-each-ref --format='%(refname) %(objectname)')"
+LNOSID="$( cd "$LR" && env -u CLAUDE_CODE_SESSION_ID bash "$SPAWN" land "$LTREE" 2>/dev/null )"; LNOSID_RC=$?
+expect_match "land with no session id is refused, naming why" \
+  "spawn-worktree: REFUSED reason=no-session*" "$LNOSID"
+expect_eq "that refusal exits 2" "2" "$LNOSID_RC"
+expect_eq "no ref moved" "$LREFS0" "$(git -C "$LR" for-each-ref --format='%(refname) %(objectname)')"
+expect_true "the tree survives" test -d "$LTREE"
+
+LOUT="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE" 2>/dev/null )"; LRC=$?
+expect_match "land from the bound session names the working branch and its checkout" \
+  "spawn-worktree: LANDED branch=wt/20-T1 onto=wave/20-demo checkout=${LWAVE} merge=* removed=${LTREE}" "$LOUT"
+expect_eq   "it exits 0" "0" "$LRC"
+expect_eq   "the feature branch did not move" "$LFEAT0" "$(sha_of "$LR" feature/human)"
+expect_eq   "the main checkout is still on the feature branch" "feature/human" \
+  "$(git -C "$LR" rev-parse --abbrev-ref HEAD)"
+expect_eq   "wt/20-T1's work is in the wave branch" "0" "$(git -C "$LR" rev-list --count wave/20-demo..wt/20-T1)"
+expect_true "and in the wave checkout's working tree" test -f "$LWAVE/t1.txt"
+expect_false "the task tree is gone" test -d "$LTREE"
+
 finish
