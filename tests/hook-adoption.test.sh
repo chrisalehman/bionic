@@ -176,6 +176,17 @@ done <<EOF
 $ADOPTED
 EOF
 
+# THE RECORDER WANTS THE CLOSE PREDICATE'S LIBRARY (epic-23 wave-20 T20, REQ-10, D10). Its
+# duplicate-start check asks `roster_open_names` (payload/scripts/lib/roster.sh) whether the
+# name an id started under is still open, so roster.sh is on its WANT line and sourced
+# directly — the loop above holds the two together, and this names the pair, so a revert
+# that drops both at once (and so still agrees with itself) goes red here.
+REC_WANT="$(want_line "$HOOKS/execution-recorder.sh")"
+expect_contains "execution-recorder wants roster.sh, the close predicate's library (T20)" \
+  " roster.sh" " ${REC_WANT#BIONIC_LIB_WANT=\"}"
+expect_eq "…and sources it directly, exactly once (T20)" "1" \
+  "$(grep -cxF '. "$BIONIC_LIB/roster.sh"' "$HOOKS/execution-recorder.sh")"
+
 section "2 — one root: no hook restates the walk"
 #
 # The eight `resolve_project_root` copies this replaces were byte-identical by
