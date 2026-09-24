@@ -858,6 +858,10 @@ mk_subagent_start() {  # <sid> <transcript> <cwd> <agent-type> <agent-id>
 seed_roster_full() {  # <repo> <sid> <name> <tool_use_id> [status] [agent-id] [teammate-id]
   local repo="$1" sid="$2" name="$3" tuid="$4"
   local status="${5:-intended}" aid="${6:-}" tid="${7:-}"
+  # THE LAUNCH STAMP, overridable by `SEED_LAUNCHED_AT` for the one case that needs a relaunch
+  # dated after an ack (T22-dup, re-authored at epic-23 wave-20 T20): the close predicate
+  # compares the two stamps, so a relaunch carrying the first launch's stamp would read closed.
+  local la="${SEED_LAUNCHED_AT:-2026-08-08T09:00:00Z}"
   local f="$repo/.bionic/tmp/roster-${sid}.state"
   mkdir -p "$repo/.bionic/tmp"
   [ -f "$f" ] || roster_header > "$f"
@@ -865,13 +869,13 @@ seed_roster_full() {  # <repo> <sid> <name> <tool_use_id> [status] [agent-id] [t
   # optional field can be added by naming it rather than by appending a segment by hand.
   if [ -n "$tid" ]; then
     roster_row_fixture status="$status" session="$sid" name="$name" agent_id="$aid" \
-      launched_at=2026-08-08T09:00:00Z model=claude-opus-5 \
+      launched_at="$la" model=claude-opus-5 \
       deliverable=.bionic/docs/record/w1-slice1-report.md duration='~25 minutes.' \
       progress=.bionic/tmp/w1-s1-progress.md cadence='~8m.' teammate_id="$tid" \
       tool_use_id="$tuid" >> "$f"
   else
     roster_row_fixture status="$status" session="$sid" name="$name" agent_id="$aid" \
-      launched_at=2026-08-08T09:00:00Z model=claude-opus-5 \
+      launched_at="$la" model=claude-opus-5 \
       deliverable=.bionic/docs/record/w1-slice1-report.md duration='~25 minutes.' \
       progress=.bionic/tmp/w1-s1-progress.md cadence='~8m.' tool_use_id="$tuid" >> "$f"
   fi
@@ -957,37 +961,65 @@ expect_eq "…and it does not identify a second time" \
 # here would put stderr in front of the human for a condition only the tick can act on.
 expect_eq "T22-dup: the recorder still exits 0 — a start hook cannot block" "0" "$REC_ST"
 
-# THE CONTROL. A row CLOSED by a MET marker is a finished lineage, and a start against a
-# finished lineage is not a live duplicate — it is a name being reused, which the dispatch
-# wall already allowed. No duplicate row.
+# THE CONTROL — RE-AUTHORED (epic-23 wave-20 T20, REQ-10, D10; found by T17, approved by
+# Chris). It read "a row CLOSED by a MET marker is a finished lineage, and a start against
+# it records no duplicate". The recorder was the last roster reader but one that closed a
+# name on a `landing-swept/v1|state=MET` marker alone; it now asks the one close predicate,
+# `roster_open_names` (payload/scripts/lib/roster.sh): a name is closed by an ack stamped
+# after its latest launch, and by nothing else (ADR-034 d1). A MET marker records that a
+# landing was SEEN, not that the agent left, so a second start behind one is a resumed copy
+# against a contract nobody has closed. The claim the control came for is unchanged — a
+# start against a FINISHED lineage is a name being reused and is not journalled — and the
+# finish is now the ack. Both halves are pinned: the marker alone journals (the reading that
+# changed), and an ack after launch does not (the control, kept).
+ack_write() {  # <repo> <sid> <at> <name> — the sweeper ledger's ack line, in its writer's shape
+  local le="$1/.bionic/tmp/sweeper-$2.state"
+  [ -f "$le" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$le"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+    "$3" "$2" "$4" >> "$le"
+}
+IFS='|' read -r IDM_REPO IDM_TR IDM_SUB IDM_CFG <<< "$(make_world identdupmet yes)"
+seed_roster_full "$IDM_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPM" confirmed "$START_ID"
+IDM_ROSTER="$IDM_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$IDM_TR" "$IDM_REPO" "general-purpose" "$START_ID")"
+swept_marker_write "$IDM_ROSTER" 2026-08-08T09:30:00Z "$SID_A" probemate "$START_ID" MET
+run_rec "$(mk_subagent_start "$SID_A" "$IDM_TR" "$IDM_REPO" "general-purpose" "$START_ID")"
+expect_eq "T20: a start behind a MET marker with no ack IS journalled — the marker closes nothing" \
+  "1" "$(grep -c 'status=duplicate-start' "$IDM_ROSTER")"
+
 IFS='|' read -r IDC_REPO IDC_TR IDC_SUB IDC_CFG <<< "$(make_world identdupclosed yes)"
 seed_roster_full "$IDC_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPC" confirmed "$START_ID"
 IDC_ROSTER="$IDC_REPO/.bionic/tmp/roster-${SID_A}.state"
 run_rec "$(mk_subagent_start "$SID_A" "$IDC_TR" "$IDC_REPO" "general-purpose" "$START_ID")"
 swept_marker_write "$IDC_ROSTER" 2026-08-08T09:30:00Z "$SID_A" probemate "$START_ID" MET
+ack_write "$IDC_REPO" "$SID_A" 2026-08-08T09:31:00Z probemate
 run_rec "$(mk_subagent_start "$SID_A" "$IDC_TR" "$IDC_REPO" "general-purpose" "$START_ID")"
-expect_eq "T22-dup: a start against a lineage already swept MET records no duplicate" \
+expect_eq "T22-dup: a start against a lineage acked after its launch records no duplicate (T20: the ack closes, not the marker)" \
   "0" "$(grep -c 'status=duplicate-start' "$IDC_ROSTER")"
 
-# THE LANDED-THEN-RELAUNCHED LINEAGE (delta review C1). The control above proves a MET
-# marker frees the name; this proves the marker does NOT free it forever. `probemate` runs
-# under one id, lands, and is dispatched again under the SAME name and a NEW id — which the
-# dispatch wall allows, because the marker closed the first contract. A second start under
-# the SECOND id is a live duplicate and must be journalled.
+# THE LANDED-THEN-RELAUNCHED LINEAGE (delta review C1; RE-AUTHORED at epic-23 wave-20 T20).
+# The control above proves an ack frees the name; this proves the ack does NOT free it
+# forever. `probemate` runs under one id, lands, is acked, and is dispatched again under the
+# SAME name and a NEW id — which the dispatch wall allows, because the ack closed the first
+# contract. A second start under the SECOND id is a live duplicate and must be journalled.
+# Until T20 the first lineage was closed here by a MET marker; the close is the ack now
+# (`roster_open_names`), and the marker stays in the fixture because a landing writes one.
 #
 # WHY IT NEEDS ITS OWN CASE. `met[]` was filled from ANY marker for the name, anywhere in
 # the file, so one landing silenced the duplicate arm for that name for the rest of the
-# session — and the control above, whose marker is the LAST thing said about the name,
-# cannot tell a position-blind reading from a position-aware one. The rule is that the
-# LATEST contract decides.
+# session; the predicate that replaced it compares the ack against the LATEST launch, and an
+# ack older than a relaunch closes nothing. The rule is still that the LATEST contract
+# decides — by its launch stamp now, which is why the relaunch is dated after the ack.
 START_ID_R2="aprobemate-8c17f42b0d6e5591"
 IFS='|' read -r IDR_REPO IDR_TR IDR_SUB IDR_CFG <<< "$(make_world identduprelaunch yes)"
 seed_roster_full "$IDR_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPR1" confirmed "$START_ID"
 IDR_ROSTER="$IDR_REPO/.bionic/tmp/roster-${SID_A}.state"
 run_rec "$(mk_subagent_start "$SID_A" "$IDR_TR" "$IDR_REPO" "general-purpose" "$START_ID")"
 swept_marker_write "$IDR_ROSTER" 2026-08-08T09:30:00Z "$SID_A" probemate "$START_ID" MET
-# …the relaunch: a fresh contract for the same NAME under a new id, written after the marker.
-seed_roster_full "$IDR_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPR2" confirmed "$START_ID_R2"
+ack_write "$IDR_REPO" "$SID_A" 2026-08-08T09:31:00Z probemate
+# …the relaunch: a fresh contract for the same NAME under a new id, launched after the ack.
+SEED_LAUNCHED_AT=2026-08-08T10:00:00Z \
+  seed_roster_full "$IDR_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPR2" confirmed "$START_ID_R2"
 run_rec "$(mk_subagent_start "$SID_A" "$IDR_TR" "$IDR_REPO" "general-purpose" "$START_ID_R2")"
 expect_eq "T22-dup: the relaunched lineage identifies once and records no duplicate yet" \
   "0" "$(grep -c 'status=duplicate-start' "$IDR_ROSTER")"
