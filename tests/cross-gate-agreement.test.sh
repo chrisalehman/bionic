@@ -12240,6 +12240,93 @@ expect_eq "CG-standdown the wall's computed set is the tick's printed set, with 
   "$CGSD_PRINTED" "$CGSD_WALL"
 
 # ============================================================
+section "RC-nest — ARM C and the delegation arm read ONE role and ONE agent context off the same nested payload (wave-20 T7b; review R15, critic C4)"
+# ============================================================
+#
+# TWO READERS OF "WHO IS CALLING". The dispatch wall's delegation arm decides which types a
+# subagent may launch (`role_is_readonly` of the launched type) and what an agent context is
+# (`is_agent_context`); the verb wall's ARM C decides which callers may not commit. Δ12's
+# promise is their composition: a type the delegation arm admits as read-only must be one ARM C
+# holds read-only when that delegate — unrostered by AC-9.2 — runs git with its own payload.
+# R15 found the composition open: ARM C read no role off an unrostered payload. C4 found the
+# context split: an `agent_type`-only payload (a `claude --agent` main session) was a subagent
+# to the dispatch wall and the orchestrator to ARM C.
+#
+# BOTH HOOKS ARE DRIVEN, never their functions: the dispatch wall on a nested Agent payload of
+# the live shape (T12: `agent_id` plus the caller's `agent_type`), the verb wall on that
+# delegate's own Bash payload (its `agent_id`, no roster row, its own `agent_type`). Each
+# observable is the arm's own phrase, so the other arms the two hooks pool are not read.
+RCN_R=$(s4_world "rc-nest")
+s4_bind "$RCN_R" "$SID_A" "$RCN_R/.bionic/docs/plans/epic-99/run-b.md"
+printf '# bionic session roster — fixture\n' > "$RCN_R/.bionic/tmp/roster-$SID_A.state"
+RCN_ID="a8b824d95c81dd996"
+# rcn_ctx <agent_id> <agent_type> — the caller half of a payload; an empty argument omits the key
+rcn_ctx() { jq -c --arg a "$1" --arg t "$2" '. + (if $a == "" then {} else {agent_id:$a} end)
+                                               + (if $t == "" then {} else {agent_type:$t} end)'; }
+rcn_dp_admits() {  # <launched type> <caller agent_id> <caller agent_type> -> yes when the delegation arm is silent
+  local out
+  out=$(jq -nc --arg s "$SID_A" --arg c "$RCN_R" --arg t "$RCN_R/s4-transcript.jsonl" --arg y "$1" \
+    '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent",
+      tool_input:{description:"a nested dispatch", subagent_type:$y, name:"rcn-helper",
+                  prompt:"Expected artifact: .bionic/docs/record/rcn.md\nExpected duration: ~10 minutes.\nProgress artifact: .bionic/tmp/rcn.progress, cadence ~5m\nSuites: tests/widget.test.sh"},
+      tool_use_id:"toolu_RCNEST"}' | rcn_ctx "$2" "$3" \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" 2>&1)
+  case "$out" in *"a subagent may launch only read-only roles"*) echo no ;; *) echo yes ;; esac
+}
+rcn_eg_refuses() {  # <agent_id> <agent_type> -> yes when ARM C refuses that caller's `git commit`
+  local out
+  out=$(mk_bash_payload "$SID_A" "$RCN_R/s4-transcript.jsonl" "$RCN_R" "git commit -m x" | rcn_ctx "$1" "$2" \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_EG" 2>&1)
+  case "$out" in *"a read-only role never commits"*) echo yes ;; *) echo no ;; esac
+}
+
+# ---- the role: the types the delegation arm lets a subagent launch = the types ARM C stops ----
+# One type per line, read line by line, so no IFS a earlier section left behind can fuse them.
+RCN_DP=""; RCN_EG=""; RCN_N=0
+while IFS= read -r _rcn_t; do
+  [ -n "$_rcn_t" ] || continue
+  RCN_N=$((RCN_N + 1))
+  [ "$(rcn_dp_admits "$_rcn_t" "$RCN_ID" general-purpose)" = yes ] && RCN_DP="${RCN_DP}${_rcn_t};"
+  [ "$(rcn_eg_refuses "$RCN_ID" "$_rcn_t")" = yes ] && RCN_EG="${RCN_EG}${_rcn_t};"
+done <<'RCNTYPES'
+bionic:researcher
+bionic:test-runner
+bionic:auditor
+bionic:critic
+Explore
+Plan
+general-purpose
+fork
+claude
+bionic:implementor
+bionic:senior-implementor
+acme:test-runner
+researcher
+RCNTYPES
+expect_eq "RC-nest thirteen types driven through both hooks" "13" "$RCN_N"
+expect_eq "RC-nest the delegation arm admits exactly the six read-only types from a subagent (non-vacuity)" \
+  "bionic:researcher;bionic:test-runner;bionic:auditor;bionic:critic;Explore;Plan;" "$RCN_DP"
+expect_eq "RC-nest ARM C refuses an unrostered delegate's commit for exactly the types the delegation arm admitted" \
+  "$RCN_DP" "$RCN_EG"
+
+# ---- the context: which payload shapes each hook reads as a subagent ----
+# id+type is the nested delegate; type-only is a `claude --agent` main session; none is the
+# plain main session. Each hook's reading is observed through its own refusal: the dispatch
+# wall refusing a writer launch, ARM C refusing a bionic:test-runner-typed commit.
+RCN_CTX_DP=""; RCN_CTX_EG=""
+for _rcn_shape in id+type type-only none; do
+  case "$_rcn_shape" in
+    id+type)   _rcn_a="$RCN_ID"; _rcn_ty=bionic:test-runner ;;
+    type-only) _rcn_a="";        _rcn_ty=bionic:test-runner ;;
+    none)      _rcn_a="";        _rcn_ty="" ;;
+  esac
+  [ "$(rcn_dp_admits bionic:implementor "$_rcn_a" "$_rcn_ty")" = no ] && RCN_CTX_DP="${RCN_CTX_DP}${_rcn_shape};"
+  [ "$(rcn_eg_refuses "$_rcn_a" "$_rcn_ty")" = yes ] && RCN_CTX_EG="${RCN_CTX_EG}${_rcn_shape};"
+done
+expect_eq "RC-nest the dispatch wall reads only the agent_id-carrying shape as a subagent" "id+type;" "$RCN_CTX_DP"
+expect_eq "RC-nest …and ARM C reads the same shapes as a subagent" "$RCN_CTX_DP" "$RCN_CTX_EG"
+
+# ============================================================
 section "CG-followup — the sweeper's FOLLOW-UP reading and roster_open_names agree on a messaged name (epic-23 wave-20 T9b; review R2; D4, D10)"
 # ============================================================
 #
