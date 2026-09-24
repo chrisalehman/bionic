@@ -636,6 +636,42 @@ expect_absent "…never annotated live off the neighbour its pattern would have 
 expect_contains "…while the real still-at-it beside it is still live" "[live]" \
   "$(printf '%s\n' "$R8_LA4" | grep -F 'still-at-it   (UNMET')"
 
+# STANDDOWN'S "GONE FROM A FRESH PANEL" READING AGAINST A SUBAGENTS-ONLY PANEL (wave-20
+# T8b, F2). A `claude -p` ListAgents answer lists a running subagent under its own
+# `Subagents (N):` header rather than `Teammates (N):` — before the fix, `live_agents`
+# (payload/scripts/lib/agents.sh) parsed only the Teammates block, so a panel carrying
+# ONLY a Subagents block answered zero live agents and every held row read `[not live]`
+# regardless of whether its agent was still running. T12's live bed hit exactly this
+# (live-rows-802ee6d.md F2): the literal `STANDDOWN <name>` line could never print in a
+# `-p` bed for the same reason. `tests/lib/live-answer.sh`'s composer only substitutes
+# into the corpus's Teammates shape (its own header says so), so this body is hand-built —
+# the same precedent that suite's Teammates-forgery shapes are hand-written rather than
+# routed through the composer.
+plant_live_subagent() {  # <transcript> <name>
+  local tr="$1" name="$2" body
+  body="This session is bionic-test [aaaaaa] — the name other sessions use to message it.
+
+Subagents (1):
+  ${name} [238027]  ·  general-purpose  ·  running  ·  started 13s ago
+"
+  jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
+    '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}' > "$tr"
+  jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
+    '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01FIXTURESUBAGENT",name:"ListAgents",input:{}}]}}' >> "$tr"
+  jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
+    '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01FIXTURESUBAGENT",content:$b}]}}' >> "$tr"
+}
+
+plant_live_subagent "$R8TR" "still-at-it"
+run_orders_cfg "$R8" standdown
+expect_status "standdown against a Subagents-only panel still reports and exits clean" 0 "$ST"
+R8_LA5=$(printf '%s\n' "$OUT" | sed -n '/LEFT ALONE/,$p')
+expect_contains "a Subagents-only panel still reports the held row" "still-at-it" "$R8_LA5"
+expect_contains "…and now marks it live — the Subagents block is read, not just Teammates" \
+  "[live]" "$(printf '%s\n' "$R8_LA5" | grep -F 'still-at-it   (UNMET')"
+expect_contains "…while a row the Subagents block does NOT name is still not live" \
+  "[not live]" "$(printf '%s\n' "$R8_LA5" | grep -F 'walked-off')"
+
 
 # ============================================================
 section "Section 8: stopped <name> acks the row it stops; standdown drops a row only when acked AND gone (wave-19 T1; REQ-1 AC-1.2/1.3; D3; ADR-034)"
