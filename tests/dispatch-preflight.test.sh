@@ -2824,6 +2824,50 @@ expect_absent "…and does not claim the Patrol stopped firing" "stopped firing"
 expect_contains "…but says the stamp is stale and why that is not a verdict" \
   "busy" "$GATE_ERR"
 
+# ---------- stale stamp, marker turns after it that ran no tick: the job fires, it never ticks ----
+#
+# wave-20 T19 (T11's carry-over 2; REQ-6, AC-6.3; D6). `patrol_verdict` reads a Patrol marker
+# turn after the stamp as a firing that ran no tick, and answers `dead` with that reason — a
+# job whose prompt carries the marker but not the tick. The SAME 4000s stamp as r21b2 and a
+# transcript just as busy (no idle gap reaches the fire window), with two marker turns in it:
+# the verdict is dead for a cause that is not idleness, so the refusal must not say the session
+# "sat idle" and must name what it found and the repair — the job's prompt, not the clock.
+s21_marker_tr() {  # -> path of a busy transcript with two marker turns after the stamp
+  { printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"bionic-patrol session=%s — Patrol tick for the wave."}}\n' \
+      "$(s21_iso 2500)" "${SID_A:0:8}"
+    for _s21_s in 2400 2100 1800 1500; do
+      printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
+        "$(s21_iso "$_s21_s")"
+    done
+    printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"bionic-patrol session=%s — Patrol tick for the wave."}}\n' \
+      "$(s21_iso 1200)" "${SID_A:0:8}"
+    for _s21_s in 1100 900 600 300 120 30 5; do
+      printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
+        "$(s21_iso "$_s21_s")"
+    done
+  } > "$SANDBOX/.s21-marker.jsonl"
+  printf '%s' "$SANDBOX/.s21-marker.jsonl"
+}
+REPO=$(make_repo r21b4 yes)
+write_attestation "$REPO" "$SID_A"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" w99-impl claude-sonnet-5 "$(s21_marker_tr)")"
+expect_eq "r21b4: marker turns after a stale stamp that ran no tick refuse the dispatch" "deny" "$GATE_VERDICT"
+expect_contains "r21b4 …naming the cause: the Patrol fires and never ticks" \
+  "the Patrol fires but never ticks" "$GATE_ERR"
+expect_contains "r21b4 …counting the marker turns that ran no tick" \
+  "2 Patrol marker turn(s)" "$GATE_VERR"
+expect_contains "r21b4 …and naming the verb that prints the canonical prompt" \
+  "session-poker.sh prompt" "$GATE_VERR"
+expect_absent "r21b4 …and never the idle-gap cause it did not find" "sat idle" "$GATE_VERR"
+# THE PAIRED CASE: r21b's idle-gap death keeps its own cause and never claims a marker turn.
+REPO=$(make_repo r21b5 yes)
+write_attestation "$REPO" "$SID_A"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
+expect_contains "r21b5: an idle-gap death still names the idle stretch" "sat idle" "$GATE_VERR"
+expect_absent "r21b5 …and not a marker turn it did not find" "marker turn" "$GATE_VERR"
+
 # ---------- stale stamp, unreadable idle time: an advisory naming the reason ----------
 #
 # AC-1.3 at this wall. The transcript path in the payload names a file that is not there;

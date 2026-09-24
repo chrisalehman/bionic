@@ -1498,7 +1498,8 @@ stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local TRANSCRIPT HOOK_DIR PLAN PLAN_NAME STREAM
   local RITUAL RITUAL_REASON TICK_MARK VERDICT FILL_MISSING FILL_REASON
   local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON
-  local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK
+  local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
+  local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
   local FACT FIX REASON
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
@@ -1770,6 +1771,7 @@ NOTICK_REASON=""
 if [ "$_ST_TICK" = 1 ]; then
   _NT_STAMP="$BIONIC_ROOT/.bionic/tmp/patrol-${BIONIC_SID}.state"
   if [ -f "$_NT_STAMP" ] && [ ! -L "$_NT_STAMP" ]; then
+    _NT_PRESENT=1
     _NT_LINE="$(head -n 1 "$_NT_STAMP" 2>/dev/null)"
     _NT_VERB=""; _NT_AT=""
     case "|$_NT_LINE|" in *"|verb="*) _NT_VERB="${_NT_LINE#*|verb=}"; _NT_VERB="${_NT_VERB%%|*}" ;; esac
@@ -1788,7 +1790,7 @@ if [ "$_ST_TICK" = 1 ]; then
   fi
 fi
 
-# ---------- THE FOURTH DUTY: a printed STANDDOWN is answered before the turn ends ------
+# ---------- THE FOURTH DUTY: a stand-down the tick ordered is answered before the turn ends ----
 #
 # (AC-1.2; T1, D1.) The mirror of the FILL, and it exists for the same reason. The tick can
 # see that a contract landed while its agent is still on the panel, and it can write the stop
@@ -1797,49 +1799,82 @@ fi
 # wave ran around them. The turn END is the only moment at which "the stand-down went
 # unanswered" is a fact.
 #
-# ANSWERED MEANS EITHER: a `TaskStop` tool_use naming the agent — by its name or by the
-# `name@session-xxxxxxxx` address the roster carries, which contains the name and so matches
-# the same word-boundary test — or an explicit `standdown-declined: <name> <reason>` line.
+# THE SET IS COMPUTED, NEVER OVERHEARD (wave-20 T19; T11's carry-over, the AC-5.4 plants on
+# this duty). It used to be read off the tick's printed `poker: STANDDOWN <name>` lines in the
+# transcript — the channel AC-5.4 closed for the FILL: the model's own prose planted a name, a
+# `cat` of a file forged one, and a tick output that never reached the transcript let every
+# name go. It is now what the tick WROTE: `stop_standdown_set` (below) reads this session's
+# stop orders and roster verdicts from disk. The tick still prints the line, for the human.
+#
+# ANSWERED MEANS ONE OF THREE, per name:
+#   - a main-thread `TaskStop` tool_use naming the agent — by its name or by the
+#     `name@session-xxxxxxxx` address the roster carries, which contains the name and so
+#     matches the same word-boundary test — whose tool_result was not an error: a stop the
+#     harness refused stopped nothing;
+#   - an ack closing the row (the sweeper's, which `stop-orders.sh stopped` writes): the
+#     computed set leaves out an acked row, so it is never asked about;
+#   - a `standdown-declined: <name> <reason>` line at the start of a line of the model's own
+#     reply — the fill-declined rule (AC-5.4): never thinking, a tool input or a tool result.
 # The decline is not a loophole, it is the point: an agent still writing its record is a good
 # reason not to stop it, and that reason is worth one line in the record. What is refused is
 # SILENCE.
 #
+# THE LOWER BOUND IS THIS TURN'S TICK. The tick writes its stamp before it decides, and its
+# orders after, so the orders this turn's tick wrote are the ones stamped at or after that
+# stamp's `at=` — the stamp the NOTICK arm above has just read and found current (a marker
+# turn whose tick never stamped is that arm's refusal, and owes no stand-down from an older
+# tick's orders). A DISARM tick removes its stamp as its last act; with no stamp, the dated
+# marker row is the bound, and an undated one gives none — silence, the direction every other
+# unreadable fact here takes.
+#
 # NAMED, NOT COUNTED, and per agent: a turn that stopped two of three is missing one, and the
-# reason says which. Same boundary rules as the fill fold below it — ids are validated
-# against `[A-Za-z0-9_.-]+` before they are echoed back, and a `.` inside one is escaped to a
-# literal before it is spliced into the boundary pattern.
-STANDDOWN_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" '
-  $1 == "USER" {
-    t = $2; sub(/^[ \t]+/, "", t)
-    tick = (index(t, mark) == 1)
-    names = " "; answered = " "
-    next
-  }
-  $1 == "STANDDOWN"  { if (index(names, " " $2 " ") == 0) names = names $2 " "; next }
-  $1 == "SD-DECLINE" { answered = answered $2 " "; next }
-  $1 == "TOOL" {
-    if ($2 == "TaskStop") answered = answered $3 " " $4 " "
-    next
-  }
-  END {
-    if (!tick || names == " ") exit
-    n = split(names, want, /[ \t]+/)
-    missing = ""
-    for (i = 1; i <= n; i++) {
-      id = want[i]
-      if (id == "" || id !~ /^[A-Za-z0-9_.-]+$/) continue
-      pat = id
-      gsub(/\./, "[.]", pat)
-      if (answered ~ ("(^|[^A-Za-z0-9_.-])" pat "([^A-Za-z0-9_.-]|$)")) continue
-      if (index(" " missing " ", " " id " ") > 0) continue
-      missing = missing (missing == "" ? "" : " ") id
+# reason says which. Ids are validated against `[A-Za-z0-9_.-]+` before they are echoed back,
+# and a `.` inside one is escaped to a literal before it is spliced into the boundary pattern.
+STANDDOWN_MISSING=""
+_SD_BOUND=""
+if [ "$_ST_TICK" = 1 ]; then
+  if [ "${_NT_PRESENT:-0}" = 1 ]; then
+    [ "${_NT_OK:-0}" = 1 ] && [ "$_NT_VERB" = tick ] && _SD_BOUND="$_NT_AT"
+  else
+    _SD_BOUND="$_ST_MARK_TS"
+  fi
+fi
+_SD_SET="$(stop_standdown_set "$_SD_BOUND")"
+if [ -n "$_SD_SET" ]; then
+  STANDDOWN_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" -v want="$_SD_SET" '
+    $1 == "USER" {
+      t = $2; sub(/^[ \t]+/, "", t)
+      tick = (index(t, mark) == 1)
+      n = 0; answered = " "
+      next
     }
-    if (missing != "") print missing
-  }
-')
+    $1 == "SD-DECLINE" { answered = answered $2 " "; next }
+    $1 == "STOP"       { n++; sw[n] = $2; sid[n] = $3; next }
+    $1 == "AGENTERR"   { if ($2 != "") err[$2] = 1; next }
+    END {
+      if (!tick) exit
+      for (i = 1; i <= n; i++) {
+        if (sid[i] != "" && (sid[i] in err)) continue
+        answered = answered sw[i] " "
+      }
+      m = split(want, names, /[ \t\n]+/)
+      missing = ""
+      for (i = 1; i <= m; i++) {
+        id = names[i]
+        if (id == "" || id !~ /^[A-Za-z0-9_.-]+$/) continue
+        pat = id
+        gsub(/\./, "[.]", pat)
+        if (answered ~ ("(^|[^A-Za-z0-9_.-])" pat "([^A-Za-z0-9_.-]|$)")) continue
+        if (index(" " missing " ", " " id " ") > 0) continue
+        missing = missing (missing == "" ? "" : " ") id
+      }
+      if (missing != "") print missing
+    }
+  ')
+fi
 
 if [ -n "$STANDDOWN_MISSING" ]; then
-  STANDDOWN_REASON="Patrol stand-down unanswered: the tick printed STANDDOWN and this turn neither stopped nor declined ${STANDDOWN_MISSING}. TaskStop each, or write a line \"standdown-declined: <name> <reason>\", then stop again — this gate blocks once."
+  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped nor declined them. TaskStop each, or write a line \"standdown-declined: <name> <reason>\", then stop again — this gate blocks once."
 else
   STANDDOWN_REASON=""
 fi
@@ -1873,7 +1908,7 @@ if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
       fold_block block stop "$FILL_FACT" "$FILL_FIX" \
         "$TELL_REASON"
     elif [ -n "$STANDDOWN_REASON" ]; then
-      fold_block block stop "a printed STANDDOWN went unanswered" "stop each agent, or decline" \
+      fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
         "$TELL_REASON"
     else
       # THE MARKER TURN THAT RAN NO TICK (wave-20 REQ-6, AC-6.2), alone. Beside another duty it
@@ -1952,14 +1987,21 @@ return 2
 #   TOOL <name> <path/cmd> <fields>  a main-thread assistant tool_use
 #   AGENT <name> <tool_use id>       a main-thread Agent tool_use — the launch the ledger names
 #   AGENTERR <tool_use id>           a tool_result with `is_error: true`: a refused dispatch,
-#                                    which writes no roster row and launched nothing
+#                                    which writes no roster row and launched nothing — or a
+#                                    refused TaskStop, which stopped nothing (any tool's error)
+#   STOP <task id words> <tool_use id>  a main-thread TaskStop tool_use — the stand-down's answer
 #   DECLINE <reason>                 `fill-declined: <reason>` at a LINE START of a main-thread
 #                                    assistant TEXT block — never thinking, never a tool_use
 #                                    input, never a tool result (AC-5.4: prose quoting, a file
 #                                    read and a grep plant nothing)
-#   MARK clear|resume, STANDDOWN <name>, SD-DECLINE <name>   the ritual and stand-down arms,
-#                                    scoped as before (review F2): a marker is read only off
-#                                    rows the orchestrator authored, never a tool result
+#   MARK clear|resume                the ritual arm, scoped as before (review F2): a marker is
+#                                    read only off rows the orchestrator authored, never a tool
+#                                    result
+#   SD-DECLINE <name>                `standdown-declined: <name>` at a LINE START of a main-thread
+#                                    assistant TEXT block — the DECLINE rule, for the stand-down
+#                                    (wave-20 T19). The tick's printed `poker: STANDDOWN` line is
+#                                    no longer a record at all: the set is computed from disk
+#                                    (`stop_standdown_set`), never read out of the transcript
 # Newlines and tabs are squashed inside values because the stream is line-and-tab delimited.
 #
 # THE WINDOW (review, performance finding 1). Every fact here is a "since the most recent X"
@@ -2016,8 +2058,11 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
           | select(.type == "tool_result" and (.is_error // false) == true)
           | "AGENTERR\t" + ((.tool_use_id // "") | tostring)
         else empty end ),
-      ($line | [scan("poker: STANDDOWN ([A-Za-z0-9_.-]+)")] | .[] | "STANDDOWN\t" + .[0]),
-      (($auth // "") | [scan("standdown-declined:[ \t]*([A-Za-z0-9_.-]+)")] | .[] | "SD-DECLINE\t" + .[0]),
+      ( if ($main and $r.type == "assistant" and (($r.message.content // []) | type) == "array") then
+          ([$r.message.content[]? | select(.type == "text") | .text] | join("\n"))
+          | [scan("(?:^|\n)standdown-declined:[ \t]*([A-Za-z0-9_.-]+)")] | .[]
+          | "SD-DECLINE\t" + .[0]
+        else empty end ),
       (
         if ($main | not) then empty
         elif $r.type == "user" then
@@ -2038,6 +2083,11 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
                          | map(select(. != null) | tostring) | join(" ")) | gsub("[\n\t\r]"; " ")) ),
             ( if .name == "Agent" then
                 "AGENT\t" + (((.input.name // .input.subagent_type // "agent") | tostring) | gsub("[\n\t\r|, ]"; "_"))
+                + "\t" + ((.id // "") | tostring)
+              else empty end ),
+            ( if .name == "TaskStop" then
+                "STOP\t" + (([.input.task_id?, .input.name?, .input.shell_id?]
+                              | map(select(. != null) | tostring) | join(" ")) | gsub("[\n\t\r]"; " "))
                 + "\t" + ((.id // "") | tostring)
               else empty end )
         else empty
@@ -2169,6 +2219,64 @@ stop_fill_ledger() {  # <event> -> always 0
   line="${line}|declined=${declined}|missed=${_ST_MISSED}"
   printf '%s\n' "$line" >> "$f" 2>/dev/null
   return 0
+}
+
+# THE STAND-DOWN SET, COMPUTED FROM WHAT THE TICK WROTE (wave-20 T19; T11's carry-over; the
+# AC-5.4 plants on the fourth duty). `session-poker.sh tick` stands a row down by doing two
+# things at once: it prints `poker: STANDDOWN <name>` for the human, and it writes
+# `stop-orders.sh order <name> --by patrol` so the TaskStop it asks for passes the stop gate.
+# The line is words in a transcript anyone can type; the order is a fact on disk only the verb
+# writes. So the set is:
+#   this session's `by=patrol` stop orders stamped at or after <lower bound>   (what this
+#       turn's tick decided — a human's order is an instruction to the stop gate, not a
+#       stand-down the tick made)
+#   whose row the sweeper's verdict still reads MET and not acked               (a row closed
+#       since, or no longer landed — a FOLLOW-UP, a re-dispatch — is owed nothing)
+# ONE `verdict` read over the whole roster, and only when an order is in the window: the same
+# verb, the same fold and the same `acked=` the tick's own stand-down arm reads, so the two
+# cannot disagree about a row (tests/cross-gate-agreement.test.sh CG-standdown).
+#
+# SILENT ON EVERY UNREADABLE FACT — no bound, no orders file, a symlink where it goes, a
+# verdict the sweeper refused: nothing is named. A wall that cannot read what the tick wrote
+# does not invent a duty from it.
+stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
+  local lb="${1:-}" orders targets vout
+  [ -n "$lb" ] || return 0
+  orders="$BIONIC_ROOT/.bionic/tmp/stop-orders-${BIONIC_SID}.state"
+  [ -f "$orders" ] && [ ! -L "$orders" ] && [ -r "$orders" ] || return 0
+  targets="$(awk -v lb="${lb:0:19}" -v sid="$BIONIC_SID" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    index($0, "stop-order/v1|") == 1 {
+      if (kv($0, "by") != "patrol") next
+      s = kv($0, "session"); if (s != "" && s != sid) next
+      at = substr(kv($0, "at"), 1, 19); if (at == "" || at < lb) next
+      t = kv($0, "target"); if (t !~ /^[A-Za-z0-9_.-]+$/) next
+      if (!(t in seen)) { seen[t] = 1; printf "%s ", t }
+    }' "$orders" 2>/dev/null)"
+  [ -n "$targets" ] || return 0
+  [ -f "${_STOP_HOOK_DIR_ABS}/session-sweeper.sh" ] || return 0
+  # Run from the root with the session key, exactly as the landing sweep above asks it;
+  # `|| exit 9` keeps a failed `cd` out of the verb's exit-1 band.
+  vout=$( cd "$BIONIC_ROOT" 2>/dev/null || exit 9
+          CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "${_STOP_HOOK_DIR_ABS}/session-sweeper.sh" verdict 2>/dev/null )
+  case "$?" in 0|1) : ;; *) return 0 ;; esac
+  printf '%s\n' "$vout" | awk -v want=" $targets" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    index($0, "landing-verdict/v1|") == 1 {
+      nm = kv($0, "name")
+      if (kv($0, "state") != "MET" || kv($0, "acked") != "no") next
+      if (index(want, " " nm " ") == 0 || (nm in seen)) next
+      seen[nm] = 1; out = out (out == "" ? "" : " ") nm
+    }
+    END { if (out != "") print out }'
 }
 
 
