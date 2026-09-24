@@ -1400,7 +1400,7 @@ Fix: repair every line above in one pass — each is a separate arm that would o
                 _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) has a '## Tasks' table that breaks the Task invariants:
 ${_gs_units_bad}
 Path: $FILE_PATH
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status, plus an optional worktree cell."
+Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status."
                 refuse exit2 write "this plan's Tasks table is invalid" "fix the row the detail names" "$_gs_detail"
               fi
             fi
