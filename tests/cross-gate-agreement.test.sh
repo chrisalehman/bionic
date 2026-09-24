@@ -12187,4 +12187,70 @@ expect_contains "CG-standdown the wall refuses the tick's turn for the stand-dow
 expect_eq "CG-standdown the wall's computed set is the tick's printed set, with no line to read" \
   "$CGSD_PRINTED" "$CGSD_WALL"
 
+# ============================================================
+section "CG-followup — the sweeper's FOLLOW-UP reading and roster_open_names agree on a messaged name (epic-23 wave-20 T9b; review R2; D4, D10)"
+# ============================================================
+#
+# THE DEFECT (review R2, walk §8c). FOLLOW-UP rewrote any MET row a SendMessage followed, so a
+# row acked after its launch (closed to `roster_open_names`, the one close predicate) read
+# FOLLOW-UP to the sweeper, and standdown held it for a reply that could never come. One
+# fixture per history, each a MET row the orchestrator messaged after its last reply:
+#   closed   launched, acked, then messaged              -> CLOSED to both readers
+#   open     launched, never acked, then messaged        -> OPEN   (held FOLLOW-UP)
+#   again    launched, acked, launched again, messaged   -> OPEN   (the relaunch reopens it)
+# The sweeper's reading: FOLLOW-UP is a held row (open); MET with acked=yes is closed.
+cgfu_world() {  # <case: closed|open|again> -> repo path
+  local r ro le cfg n="cgfu-$1"
+  r=$(new_repo "cgfu-$1")
+  ro="$r/.bionic/tmp/roster-$SID_A.state"; le="$r/.bionic/tmp/sweeper-$SID_A.state"
+  echo done > "$r/landed.md"
+  roster_header > "$ro"
+  roster_row_fixture status=identified session="$SID_A" name="$n" agent_id="a$n-1" \
+    launched_at=2026-09-01T00:00:00Z tool_use_id=toolu_01CGFU deliverable="$r/landed.md" >> "$ro"
+  case "$1" in
+    closed) cgc_ack "$le" 2026-09-01T01:00:00Z "$n" ;;
+    again)
+      cgc_ack "$le" 2026-09-01T01:00:00Z "$n"
+      roster_row_fixture status=identified session="$SID_A" name="$n" agent_id="a$n-2" \
+        launched_at=2026-09-01T02:00:00Z tool_use_id=toolu_01CGFU deliverable="$r/landed.md" >> "$ro"
+      ;;
+  esac
+  cfg="$SANDBOX/cgfu-cfg-$1"; mkdir -p "$cfg/projects/-cgfu"
+  {
+    jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T00:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done\n</agent-message>")}}'
+    jq -nc --arg n "$n" '{type:"assistant",isSidechain:false,timestamp:"2026-09-01T03:00:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01CGFUSEND",name:"SendMessage",input:{to:$n,summary:"s",message:"one more thing"}}]}}'
+  } > "$cfg/projects/-cgfu/$SID_A.jsonl"
+  printf '%s' "$r"
+}
+cgfu_sweeper() {  # <repo> <name> <case> -> open | closed | other:<line>
+  local line
+  line=$( ( cd "$1" && CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$SANDBOX/cgfu-cfg-$3" \
+            bash "$SWEEPER" verdict "$2" 2>/dev/null ) | grep -F 'landing-verdict/v1|' | head -1)
+  case "$line" in
+    *"|state=FOLLOW-UP|"*)          printf 'open' ;;
+    *"|state=MET|acked=yes|"*)      printf 'closed' ;;
+    *) printf 'other:%s' "$line" ;;
+  esac
+}
+cgfu_open_names() {  # <repo> <name> -> open | closed
+  local names
+  names=$( ( BIONIC_LIB_WANT=""; . "$CGC_LIBDIR/roster.sh" >/dev/null 2>&1
+             roster_open_names "$1/.bionic/tmp/roster-$SID_A.state" "$1/.bionic/tmp/sweeper-$SID_A.state" "$SID_A" ) 2>/dev/null )
+  if grep -qxF -- "$2" <<< "$names"; then printf 'open'; else printf 'closed'; fi
+}
+for _cgfu in closed:closed open:open again:open; do
+  _cgfu_case="${_cgfu%%:*}"; _cgfu_want="${_cgfu#*:}"
+  _cgfu_r=$(cgfu_world "$_cgfu_case")
+  _cgfu_sw=$(cgfu_sweeper "$_cgfu_r" "cgfu-$_cgfu_case" "$_cgfu_case")
+  _cgfu_ro=$(cgfu_open_names "$_cgfu_r" "cgfu-$_cgfu_case")
+  expect_eq "CG-followup ${_cgfu_case}: roster_open_names answers ${_cgfu_want}" "$_cgfu_want" "$_cgfu_ro"
+  expect_eq "CG-followup ${_cgfu_case}: the sweeper's FOLLOW-UP reading answers ${_cgfu_want}" "$_cgfu_want" "$_cgfu_sw"
+done
+# ONE OWNER: the sweeper's follow-up path asks row_acked, which reads ACKED_OPEN, which is
+# roster_open_names; it keeps no ack reading of its own.
+CGFU_FN=$(awk '/^verdict_followup\(\)/{f=1} f{print} f && /^}/{exit}' "$SWEEPER")
+expect_contains "CG-followup verdict_followup asks row_acked (the close predicate's answer)" "row_acked" "$CGFU_FN"
+expect_eq "CG-followup verdict_followup reads no ledger itself" "0" \
+  "$(grep -c 'LEDGER_FILE\|event=ack' <<< "$CGFU_FN")"
+
 finish
