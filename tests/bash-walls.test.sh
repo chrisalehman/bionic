@@ -1582,4 +1582,59 @@ T4_LINE=$(printf '%s\n' "$ERR" | grep -m1 '^bionic: ')
 expect_contains "REQ7 remedy 3b: …and the line counts them as runs" "3 runs" "$T4_LINE"
 expect_absent "REQ7 remedy 3b: …never a cut run" "pytest" "$T4_LINE"
 
+
+# ---------------------------------------------------------------------------
+section "19 — a subagent may not change a contract or the plan (wave-20 T9, REQ-4, AC-4.2)"
+#
+# `session-poker.sh amend` widens a live row's Files/Suites/Re-executes, `extend` re-opens a
+# MET row, and `task-add` writes the bound plan. All three are the orchestrator's: an agent
+# that could run them would grant itself a wider budget, or schedule its own work. The
+# script cannot tell who called it (in-process teammates share the session's environment,
+# research D2 REQ-4), so the refusal is the Bash wall's, keyed on the payload's top-level
+# `agent_id` — the same partition ARM C and the budget arm take. The match is on the
+# segment's argv after `cd …&&` and `env` prefixes, never on the text: a quoted mention is
+# an argument to something else and is admitted.
+#
+# The roster exists (the session is armed) and carries the writer's own row, so the
+# refusal is not an artefact of an unarmed session.
+R_AM="$(mk_repo amendwall)"
+AM_ID="aw20-T9sub-0123456789abcdef"
+roster_header > "$R_AM/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" status=identified name=w20-sub "agent_id=$AM_ID" \
+  subagent_type=bionic:senior-implementor >> "$R_AM/.bionic/tmp/roster-$SID.state"
+AM_POKER="/opt/plugin/hooks/session-poker.sh"
+
+am_refused() {  # <label> <command>
+  run_hook "$(mk_payload "$R_AM" "$2" "$AM_ID" omit Bash w20-sub)"
+  expect_status "$1 — refused from a subagent" 2 "$ST"
+  expect_contains "$1 — …naming the rule" "a subagent may not change a contract or the plan" "$ERR"
+}
+am_admitted() {  # <label> <command> [agent_id]
+  run_hook "$(mk_payload "$R_AM" "$2" "${3-$AM_ID}" omit Bash w20-sub)"
+  expect_status "$1 — admitted" 0 "$ST"
+  expect_absent "$1 — …with no contract refusal" "a subagent may not change a contract" "$ERR"
+}
+
+am_refused "19a: bash session-poker.sh amend" \
+  "bash $AM_POKER amend w20-sub --files+ hooks/x.sh --reason 'need x'"
+am_refused "19b: bash session-poker.sh extend" "bash $AM_POKER extend w20-sub 'more time'"
+am_refused "19c: bash session-poker.sh task-add" \
+  "bash $AM_POKER task-add T99 4 build 'x' bionic:implementor — 30 REQ-1 hooks/x.sh"
+am_refused "19d: behind cd … &&" "cd $R_AM && bash $AM_POKER amend w20-sub --suites+ a.test.sh --reason r"
+am_refused "19e: behind an env prefix with options and an assignment" \
+  "env -u FOO BAR=1 bash $AM_POKER extend w20-sub r"
+am_refused "19f: the script run directly, by relative path" "./hooks/session-poker.sh amend w20-sub --reason r --files+ a/b.sh"
+am_refused "19g: second segment of a chain" "echo hi; bash hooks/session-poker.sh task-add a b c d e f g h i"
+am_refused "19h: inside bash -c" "bash -c 'bash $AM_POKER amend w20-sub --reason r --files+ a/b.sh'"
+
+# THE PAIRED POSITIVES. The same verbs from the main thread (no agent_id) are the
+# orchestrator's and pass this arm; a subagent's own read-only poker verbs pass; and a quoted
+# mention is an argument to echo, not a call.
+am_admitted "19i: amend from the main thread" "bash $AM_POKER amend w20-sub --reason r --files+ a/b.sh" ""
+am_admitted "19j: task-add from the main thread" "bash $AM_POKER task-add a b c d e f g h i" ""
+am_admitted "19k: a subagent's tick" "bash $AM_POKER tick"
+am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
+am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"
+am_admitted "19n: a different script's amend verb" "bash tools/other.sh amend w20-sub"
+
 finish
