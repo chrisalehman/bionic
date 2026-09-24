@@ -12,11 +12,15 @@
 #                              `## Tasks` table.
 #   units_ready <plan> <step>  the ids of rows whose status is `pending` and whose every
 #                              dependency has landed, whatever their step; a row of kind
-#                              `integrate` or `close` also waits until <step> reaches its
-#                              own (wave-20 Δ1, Δ6). One per line, table order. <step> is a
+#                              `integrate` or `close`, or a `doc` row at Step 7 or later (the
+#                              release), also waits until <step> reaches its own (wave-20 Δ1,
+#                              Δ6, T10b). One per line, table order. <step> is a
 #                              number (wave scale) or `T<n>` (task scale, where the rows
 #                              carry no step cell and a dependency is satisfied by `done`).
 #                              Exit 2 on anything else.
+#   units_held <plan> <step>   one line per row held for its step (would be ready but for
+#                              it): `<id>: step <n> <kind> row waits for current: <n>`. A
+#                              report, never an invariant (wave-20 T10b).
 #   units_validate <plan>      one line per broken invariant, each naming the offending id
 #                              and the rule. Exit 1 if any line was printed, else 0.
 #   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>
@@ -347,8 +351,9 @@ units_rows() {
 # why a Step-4 row added during Step 5 never filled at all. Order is the prerequisite graph's
 # job now; the validator below is what guards a forgotten edge.
 #
-# <step> STILL DECIDES THE GATE ACTS (Δ6). A row of kind `integrate` or `close` is ready only
-# once <step> has reached its own step: its real prerequisite is a gate passing (Verify
+# <step> STILL DECIDES THE GATE ACTS (Δ6). A row of kind `integrate` or `close`, or a `doc`
+# row at Step 7 or later (the release; T10b), is ready only once <step> has reached its own
+# step: its real prerequisite is a gate passing (Verify
 # CONFIRMED), not a task landing, and without this a merge writer could be named the moment
 # its deps landed, before any auditor had spoken. The signature is unchanged, so every caller
 # (fill.sh's `_fill_ready_rows`, which passes the plan's `current:`) is untouched.
@@ -385,8 +390,34 @@ units_rows() {
 #
 # ONE PASS TO REMEMBER, ONE TO DECIDE. A dependency may be named before or after the row that
 # depends on it, so nothing is answerable until the whole table has been read.
-units_ready() {
-  local plan="${1:-}" step="${2:-}" rows scale=wave
+units_ready() { _units_readiness ready "$@"; }
+
+# units_held <plan> <step> -> one line per row HELD FOR ITS STEP, table order (wave-20 T10b;
+# critic C3, Δ6): `<id>: step <n> <kind> row waits for current: <n>`.
+#
+# A HOLD IS A ROW THAT WOULD BE READY BUT FOR ITS STEP: pending, every dependency landed, and
+# a gate act (below) whose step <step> has not reached. A row still waiting on a dependency is
+# not named — the graph already says why it is not ready. This is a REPORT, not an invariant:
+# `units_validate` never prints it, because a plan holding its release for Step 7 is the plan
+# working, and `task-add` refuses on any validator output. The tick prints these lines on its
+# no-FILL line, so "nothing is ready" and "the release waits for Step 7" read differently.
+# Same argument rules as `units_ready`; at task scale nothing is ever held (rows carry no step).
+units_held() { _units_readiness held "$@"; }
+
+# _units_readiness <ready|held> <plan> <step> — the ONE readiness program behind both verbs, so
+# the gate-act rule is spelled once and the two answers cannot drift apart.
+#
+# A GATE ACT (Δ6, accepted reading: "the step governs gate acts only"). Its real prerequisite is
+# a gate passing — Verify CONFIRMED, Review's verdict — which no dependency cell can name:
+#   - kind `integrate` or `close`, at any step (the merge and the close-out; Δ6 verbatim);
+#   - kind `doc` at Step 7 or later: the Document step's release — version surfaces, CHANGELOG,
+#     manifest — which records what Verify and Review passed (wave-20 T10b, critic C3). Through
+#     T10 it filled the moment its Step-5 dependency landed, and the stop wall pressed for the
+#     release before any auditor or critic verdict — the very case Δ6 rejected literal Δ1 for.
+# Every other row ahead of <step> — build, test, verify, review, prototype, and a `doc` row
+# before Step 7 — is a WORK row and stays ready on its graph alone (D5 part 1).
+_units_readiness() {
+  local mode="${1:-}" plan="${2:-}" step="${3:-}" rows scale=wave
   case "$step" in
     ''|*[!0-9]*)
       # The task-scale step token, and nothing else: a literal `T` followed by digits.
@@ -397,7 +428,7 @@ units_ready() {
   esac
   rows="$(units_rows "$plan")" || return 1
   [ -n "$rows" ] || return 0
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$step" -v scale="$scale" '
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$step" -v scale="$scale" -v mode="$mode" '
     $1 == "" { next }
     { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; st[$1] = $10 }
     END {
@@ -406,27 +437,33 @@ units_ready() {
       satisfied = (scale == "task") ? "done" : "landed"
       for (i = 1; i <= n; i++) {
         if (st[id[i]] != "pending") continue
+        held = 0
         if (scale == "task") {
           if (stp[i] != "") continue
         } else {
           # A WAVE ROW CARRIES A NUMERIC STEP, and that is all the step still decides for a
           # work row (wave-20 Δ1): the step is a label, and readiness is the graph below.
           if (stp[i] !~ /^[0-9]+$/) continue
-          # A GATE ACT WAITS FOR ITS STEP (Δ6). Its real prerequisite is a gate passing,
-          # which no dependency cell can name, so it is ready only once the run has REACHED
+          # A GATE ACT WAITS FOR ITS STEP (Δ6; T10b). Ready only once the run has REACHED
           # its step — reached, not equalled: a gate act the run has passed is still due.
-          if ((knd[i] == "integrate" || knd[i] == "close") && stp[i] + 0 > want + 0) continue
+          gate = (knd[i] == "integrate" || knd[i] == "close" || (knd[i] == "doc" && stp[i] + 0 >= 7))
+          if (gate && stp[i] + 0 > want + 0) held = 1
         }
+        if (mode == "ready" && held) continue
+        if (mode == "held" && !held) continue
         d = dep[i]
         gsub(/[ \t]/, "", d)
-        if (d !~ /[A-Za-z0-9]/) { print id[i]; continue }
-        m = split(d, a, ",")
         ready = 1
-        for (j = 1; j <= m; j++) {
-          if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
-          if (st[a[j]] != satisfied) { ready = 0; break }
+        if (d ~ /[A-Za-z0-9]/) {
+          m = split(d, a, ",")
+          for (j = 1; j <= m; j++) {
+            if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
+            if (st[a[j]] != satisfied) { ready = 0; break }
+          }
         }
-        if (ready) print id[i]
+        if (!ready) continue
+        if (mode == "held") printf "%s: step %s %s row waits for current: %s\n", id[i], stp[i], knd[i], stp[i]
+        else print id[i]
       }
     }'
 }
@@ -753,7 +790,8 @@ units_add_row() {
   _units_table "$plan" >/dev/null 2>&1 || return 1
   if [ "$nstep" = 4 ]; then
     thread="$( { units_rows "$plan"; printf '%s\t%s\t\t\t\t%s\t\t\t\tpending\t\t\n' "$nid" "$nstep" "${7:-}"; } \
-      | awk -F'\t' -v newid="$nid" "$(_units_graph_awk)"'
+      | UA_NEWID="$nid" awk -F'\t' "$(_units_graph_awk)"'
+        BEGIN { newid = ENVIRON["UA_NEWID"] }
         $1 == "" { next }
         { n++; id[n] = $1; stp[n] = $2; dep[n] = $6; sta[n] = $10 }
         END {
@@ -769,17 +807,31 @@ units_add_row() {
         }')"
   fi
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-  awk -v nid="$nid" -v nstep="$nstep" -v nkind="${4:-}" -v ntask="${5:-}" -v nagent="${6:-}" \
-      -v ndeps="${7:-}" -v nsize="${8:-}" -v nserves="${9:-}" -v nfiles="${10:-}" \
-      -v thread=" $thread " -v now="$now" '
+  # EVERY OPERAND REACHES awk THROUGH ENVIRON, NEVER -v (wave-20 T10b, review R6). `-v`
+  # interprets backslash escapes, so `C:\new\table` arrived as `C:<newline>ew<tab>able` and a
+  # `\t` in a serves cell became a space. ENVIRON hands awk the bytes the author typed — the
+  # rule roster.sh's docblock already states for file paths.
+  UA_NID="$nid" UA_NSTEP="$nstep" UA_NKIND="${4:-}" UA_NTASK="${5:-}" UA_NAGENT="${6:-}" \
+  UA_NDEPS="${7:-}" UA_NSIZE="${8:-}" UA_NSERVES="${9:-}" UA_NFILES="${10:-}" \
+  UA_THREAD=" $thread " UA_NOW="$now" awk '
+    BEGIN {
+      nid = ENVIRON["UA_NID"]; nstep = ENVIRON["UA_NSTEP"]; nkind = ENVIRON["UA_NKIND"]
+      ntask = ENVIRON["UA_NTASK"]; nagent = ENVIRON["UA_NAGENT"]; ndeps = ENVIRON["UA_NDEPS"]
+      nsize = ENVIRON["UA_NSIZE"]; nserves = ENVIRON["UA_NSERVES"]; nfiles = ENVIRON["UA_NFILES"]
+      thread = ENVIRON["UA_THREAD"]; now = ENVIRON["UA_NOW"]
+    }
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
-    # A VALUE BECOMES A CELL: tabs and line breaks to spaces, every `|` escaped by
+    # A VALUE BECOMES A CELL: tabs and line breaks to spaces, every RAW `|` escaped by
     # concatenation (a backslash in a gsub replacement is the one character awks disagree on),
-    # and an empty value spelled `—`, which is how the table itself writes "none".
+    # and an empty value spelled `—`, which is how the table itself writes "none". An author
+    # who already wrote `\|` wrote the cell escape; it is folded aside first and kept as typed
+    # (T10b), where escaping it again would print `\\|`.
     function cellv(v,   parts, m, i, out) {
       gsub(/[\t\r\n]/, " ", v); v = trim(v)
+      v = esc(v)
       m = split(v, parts, "|"); out = parts[1]
       for (i = 2; i <= m; i++) out = out "\\" "|" parts[i]
+      out = unesc(out)
       return (out == "" ? "—" : out)
     }
     # A CELL IS SPLIT ON THE UNESCAPED PIPE ONLY: `\|` is folded to SUBSEP first and restored
