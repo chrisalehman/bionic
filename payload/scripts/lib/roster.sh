@@ -254,14 +254,20 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
 # is that fix for the QUESTION asked of one.
 #
 # THE QUESTION, IN THE REGISTER'S OWN TERMS. Two rows of one name are an ambiguity — "this
-# name is live twice" — when BOTH are under an open contract: `intended`/`confirmed`/
-# `identified`, with no `landing-swept/v1|…|state=MET` marker closing them, and DIFFERENT
-# agent ids. A MET marker for this name discharges every id above it (the generation counter
-# below is how that is spelled without `delete arr`, which is not in the one-true-awk this
-# machine runs as `/usr/bin/awk`); rows below the marker start a fresh set. An `intended` row
-# carries no id yet — the recorder writes it one state later — and a lifecycle (intended ->
-# confirmed -> identified) is ONE identity, so ids are counted DISTINCT: neither an
-# unidentified row nor a re-stated one is a second agent.
+# name is live twice" — when BOTH are under an open contract and carry DIFFERENT agent ids.
+# An `intended` row carries no id yet — the recorder writes it one state later — and a
+# lifecycle (intended -> confirmed -> identified) is ONE identity, so ids are counted
+# DISTINCT: neither an unidentified row nor a re-stated one is a second agent.
+#
+# OPEN IS THE ONE CLOSE PREDICATE'S (epic-23 wave-20 T17, D10; T2's carry-over). This reader
+# used to discharge a name's ids on a `landing-swept/v1|…|state=MET` marker and never read the
+# sweeper's ledger, so it could call a name gone that every wall held open, and the reverse.
+# Now nothing is live unless `roster_open_names` (below) answers the name open, and within an
+# open name an id is discharged the way a name is: by an ack stamped strictly later than that
+# row's `launched_at=` (`_roster_discharged`). So a name acked and dispatched again names only
+# the id launched after the ack, and a MET marker discharges nothing. The ledger is the
+# roster's sibling, `sweeper-<sid>.state` — the path the sweeper writes it to — so neither
+# caller grows an argument.
 #
 # READS `$ROSTER_FILE` (required, caller-set — every hook in the fleet already sets it
 # before touching its own roster) and `$ROSTER_VERSION` (optional; defaults to this
@@ -269,41 +275,101 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
 # declare its own roster-schema constant, e.g. `adopt_write_row`, does not need to grow one
 # just to call this).
 live_ids_of_name() {  # <name> -> the agent ids currently under an open contract, one per line
-  local f="$ROSTER_FILE" ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}"
+  local f="$ROSTER_FILE" ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}" base ledger="" open nl='
+'
   [ -f "$f" ] || return 0
   [ -L "$f" ] && return 0
   [ -r "$f" ] || return 0
-  awk -v want="$1" -v ver="$ver" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
-    # A MET MARKER FOR THIS NAME DISCHARGES EVERY ID ABOVE IT, and the generation counter is
-    # how that is spelled without `delete arr` — which is not in the one-true-awk this
-    # machine runs as /usr/bin/awk. Rows below the marker start a fresh set.
-    index($0, "landing-swept/v1|") == 1 {
-      if (kv($0, "name") == want && kv($0, "state") == "MET") { n = 0; gen++ }
-      next
-    }
-    index($0, "roster-state/" ver "|") == 1 {
-      if (kv($0, "name") != want) next
-      if (!live_status(kv($0, "status"))) next
-      id = kv($0, "agent_id")
-      # An `intended` row carries no id yet — the recorder writes it one state later — and a
-      # lifecycle (intended → confirmed → identified) is ONE identity, so ids are counted
-      # DISTINCT. Neither an unidentified row nor a re-stated one is a second agent.
-      if (id == "") next
-      if ((gen SUBSEP id) in seen) next
-      seen[gen SUBSEP id] = 1
-      ids[++n] = id
-      next
-    }
-    END { for (i = 1; i <= n; i++) print ids[i] }
-  ' "$f" 2>/dev/null
+  base="${f##*/}"
+  case "$base" in
+    roster-*.state) case "$f" in */*) ledger="${f%/*}/" ;; esac
+                    ledger="${ledger}sweeper-${base#roster-}" ;;
+  esac
+  { [ -n "$ledger" ] && [ -f "$ledger" ] && [ ! -L "$ledger" ] && [ -r "$ledger" ]; } || ledger=""
+  open="$(roster_open_names "$f" "$ledger")"
+  case "$nl$open$nl" in *"$nl$1$nl"*) : ;; *) return 0 ;; esac
+  ROSTER_OPEN_F="$f" ROSTER_OPEN_LEDGER="$ledger" \
+  awk -v want="$1" -v rpfx="roster-state/${ver}|" "$_ROSTER_OPEN_AWK"'
+    BEGIN {
+      _roster_acks(ENVIRON["ROSTER_OPEN_LEDGER"], ACK)
+      f = ENVIRON["ROSTER_OPEN_F"]
+      while ((getline line < f) > 0) {
+        if (index(line, rpfx) != 1) continue
+        if (_roster_kv(line, "name") != want) continue
+        if (!_roster_live(_roster_kv(line, "status"))) continue
+        id = _roster_kv(line, "agent_id")
+        if (id == "" || (id in seen)) continue
+        if ((want in ACK) && _roster_discharged(_roster_kv(line, "launched_at"), ACK[want])) continue
+        seen[id] = 1
+        print id
+      }
+      close(f)
+    }' </dev/null 2>/dev/null
   return 0
 }
+
+# ---------- THE PREDICATE'S ONE AWK TEXT (epic-23 wave-20 T17, D10) ----------------------
+#
+# `roster_open_names`, `roster_open_counts` and `live_ids_of_name` each run an awk program that
+# BEGINS with this text, so the rule below (THE ONE READER OF "IS THIS NAME CLOSED") is spelled
+# once and three readers cannot drift apart. It defines functions only; each caller adds its own
+# driver. File paths reach it through ENVIRON or a field, never `-v`, which would read the
+# backslashes in a path as escapes. Local arrays (`ACK`, `seen`, …) are fresh per call — that is
+# how a function resets its sets without `delete arr`, which the one-true-awk this machine runs
+# as `/usr/bin/awk` does not promise.
+# shellcheck disable=SC2016  # awk source, expanded by awk and never by the shell
+_ROSTER_OPEN_AWK='
+  function _roster_kv(line, key,   i, n, parts) {
+    n = split(line, parts, "|")
+    for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+    return ""
+  }
+  function _roster_live(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
+  # The one stamp shape both writers produce, spelled without an interval expression:
+  # /usr/bin/awk here is the one-true-awk, and `{4}` is not a repetition count there.
+  function _roster_stamp_ok(s) {
+    return (s ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/)
+  }
+  # ACK[name] = the latest well-stamped ack of that name in the ledger ("" reads nothing).
+  function _roster_acks(ledger, ACK,   aline, anm, aat) {
+    if (ledger == "") return
+    while ((getline aline < ledger) > 0) {
+      if (index(aline, "sweeper-ledger/v1|") != 1) continue
+      if (_roster_kv(aline, "event") != "ack") continue
+      anm = _roster_kv(aline, "name"); if (anm == "") continue
+      aat = _roster_kv(aline, "at");   if (!_roster_stamp_ok(aat)) continue
+      if (!(anm in ACK) || aat "" > ACK[anm] "") ACK[anm] = aat
+    }
+    close(ledger)
+  }
+  # An ack discharges a launch only when both stamps are readable and the ack is strictly later.
+  function _roster_discharged(born, ack) {
+    return (_roster_stamp_ok(born) && _roster_stamp_ok(ack) && ack "" > born "")
+  }
+  # The open names of one roster, each followed by a newline, in first-seen order.
+  function _roster_open_of(f, ledger, sid, rpfx,   ACK, seen, order, born, n, line, rs, nm, i, out) {
+    _roster_acks(ledger, ACK)
+    n = 0
+    while ((getline line < f) > 0) {
+      if (index(line, rpfx) != 1) continue
+      if (!_roster_live(_roster_kv(line, "status"))) continue
+      rs = _roster_kv(line, "session")
+      if (sid != "" && rs != "" && rs != sid) continue
+      nm = _roster_kv(line, "name"); if (nm == "") nm = "(unnamed)"
+      gsub(/\t/, " ", nm)
+      if (!(nm in seen)) { seen[nm] = 1; order[++n] = nm }
+      born[nm] = _roster_kv(line, "launched_at")
+    }
+    close(f)
+    out = ""
+    for (i = 1; i <= n; i++) {
+      nm = order[i]
+      if ((nm in ACK) && _roster_discharged(born[nm], ACK[nm])) continue
+      out = out nm "\n"
+    }
+    return out
+  }
+'
 
 # ---------- THE ONE READER OF "IS THIS NAME CLOSED" (epic-23 wave-20 T2, REQ-10, D10) ----
 #
@@ -349,46 +415,36 @@ roster_open_names() {  # <roster> [ack ledger] [session id] -> the open names, o
   if [ -n "$ledger" ]; then
     { [ -f "$ledger" ] && [ ! -L "$ledger" ] && [ -r "$ledger" ]; } || ledger=""
   fi
-  awk -v ledger="$ledger" -v sid="$sid" -v rpfx="roster-state/${ver}|" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
+  ROSTER_OPEN_F="$f" ROSTER_OPEN_LEDGER="$ledger" \
+  awk -v sid="$sid" -v rpfx="roster-state/${ver}|" "$_ROSTER_OPEN_AWK"'
+    BEGIN { printf "%s", _roster_open_of(ENVIRON["ROSTER_OPEN_F"], ENVIRON["ROSTER_OPEN_LEDGER"], sid, rpfx) }
+  ' </dev/null 2>/dev/null
+  return 0
+}
+
+# ---------- THE SAME PREDICATE OVER MANY ROSTERS, IN ONE PROCESS (epic-23 wave-20 T17) --------
+#
+# `hooks/session-start.sh` counts the open rows of EVERY predecessor roster under `.bionic/tmp`,
+# and that count is bounded to one awk process however many files have piled up (REQ-6,
+# carry-over P9: an awk per file measured ~10.4s at 400 dead sessions against the CLI's 10s hook
+# timeout). So it cannot call `roster_open_names` once per file. It calls this, which runs the
+# SAME awk text — `_ROSTER_OPEN_AWK`'s `_roster_open_of` — once per manifest line, so the
+# post-/clear block and every wall close a name the same way (it used to close one on a MET
+# marker or on any ack ever, D10's defect in a fifth place).
+#
+# INPUT on stdin, one line per roster: `<key>TAB<roster>TAB<ledger>` (ledger may be empty).
+# The CALLER has already filtered each path — regular file, not a symlink — as the hook's
+# loop does with builtins; a file that cannot be read answers no names here.
+# OUTPUT: `<key>TAB<open-name count>TAB<roster>` for each roster with at least one open name.
+# No session filter: a predecessor's rows carry its own id (see `roster_open_names`).
+roster_open_counts() {  # stdin: key<TAB>roster<TAB>ledger -> key<TAB>count<TAB>roster
+  local ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}"
+  awk -F'\t' -v rpfx="roster-state/${ver}|" "$_ROSTER_OPEN_AWK"'
+    $2 != "" {
+      s = _roster_open_of($2, $3, "", rpfx)
+      c = gsub(/\n/, "", s)
+      if (c > 0) printf "%s\t%d\t%s\n", $1, c, $2
     }
-    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
-    # The one stamp shape both writers produce, spelled without an interval expression:
-    # /usr/bin/awk here is the one-true-awk, and `{4}` is not a repetition count there.
-    function stamp_ok(s) {
-      return (s ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/)
-    }
-    BEGIN {
-      if (ledger != "") {
-        while ((getline aline < ledger) > 0) {
-          if (index(aline, "sweeper-ledger/v1|") != 1) continue
-          if (kv(aline, "event") != "ack") continue
-          anm = kv(aline, "name"); if (anm == "") continue
-          aat = kv(aline, "at");   if (!stamp_ok(aat)) continue
-          if (!(anm in ACK) || aat "" > ACK[anm] "") ACK[anm] = aat
-        }
-        close(ledger)
-      }
-    }
-    index($0, rpfx) == 1 {
-      if (!live_status(kv($0, "status"))) next
-      rs = kv($0, "session")
-      if (sid != "" && rs != "" && rs != sid) next
-      nm = kv($0, "name"); if (nm == "") nm = "(unnamed)"
-      gsub(/\t/, " ", nm)
-      if (!(nm in seen)) { seen[nm] = 1; order[++n] = nm }
-      born[nm] = kv($0, "launched_at")
-    }
-    END {
-      for (i = 1; i <= n; i++) {
-        nm = order[i]
-        if (stamp_ok(born[nm]) && (nm in ACK) && ACK[nm] "" > born[nm] "") continue
-        print nm
-      }
-    }
-  ' "$f" 2>/dev/null
+  ' 2>/dev/null
   return 0
 }

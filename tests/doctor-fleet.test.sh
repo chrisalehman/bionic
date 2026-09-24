@@ -273,40 +273,60 @@ section "Section 5: predecessor rosters with open rows"
 # `state=`, and S21 (`6775c7d`) made `state=MET` the requirement at every reader
 # at once. The suite then failed on the fixture, not on the code.
 #
-# THE UNMET ROW IS THE DISCRIMINATOR. With one MET, one unanswered and one UNMET
-# the expected count is 2: a reader that ignored the MET marker would say 3, and
-# one that closed on any marker at all would say 1. The count alone therefore
-# pins both halves of the rule on the predecessor path, which renders through
-# doctor's `_run_add` rather than through the live PATROL block that
-# doctor-patrol.test.sh Section 15 covers.
+# THE UNMET ROW IS THE DISCRIMINATOR. With one closed, one unanswered and one UNMET
+# the expected count is 2: a reader that ignored the close would say 3, and one
+# that closed on any marker at all would say 1. The count alone therefore pins both
+# halves of the rule on the predecessor path, which renders through doctor's
+# `_run_add` rather than through the live PATROL block that doctor-patrol.test.sh
+# Section 15 covers.
+#
+# RE-AUTHORED BY T17 (epic-23 wave-20, D10): W-ALPHA used to be closed by a MET
+# marker. `patrol_roster_state` now asks `roster_open_names`, the predicate every
+# wall shares, which closes a name only on a sweeper ledger ack stamped after its
+# launch — so W-ALPHA is closed by an ack, and the rows carry a real launch stamp
+# (an unreadable one, like the `x` they had, can never be ordered against an ack).
 {
   roster_header
-  roster_row_fixture status=intended session="$GONE_SID" name=W-ALPHA agent_id= launched_at=x
-  roster_row_fixture status=intended session="$GONE_SID" name=W-BETA  agent_id= launched_at=x
-  roster_row_fixture status=intended session="$GONE_SID" name=W-GAMMA agent_id= launched_at=x
-  swept_marker_write /dev/stdout 2026-09-02T00:00:01Z "$GONE_SID" W-ALPHA a000 MET
+  roster_row_fixture status=intended session="$GONE_SID" name=W-ALPHA agent_id= launched_at=2026-09-02T00:00:00Z
+  roster_row_fixture status=intended session="$GONE_SID" name=W-BETA  agent_id= launched_at=2026-09-02T00:00:00Z
+  roster_row_fixture status=intended session="$GONE_SID" name=W-GAMMA agent_id= launched_at=2026-09-02T00:00:00Z
   swept_marker_write /dev/stdout 2026-09-02T00:00:02Z "$GONE_SID" W-GAMMA a001 UNMET
 } > "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state"
+GONE_LEDGER="${PROJ}/.bionic/tmp/sweeper-${GONE_SID}.state"
+fleet_ack() {  # <name> — the sweeper ledger's ack line, in its writer's shape, after the launch
+  [ -f "$GONE_LEDGER" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$GONE_LEDGER"
+  printf 'sweeper-ledger/v1|event=ack|at=2026-09-02T00:00:03Z|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+    "$GONE_SID" "$1" >> "$GONE_LEDGER"
+}
+fleet_ack W-ALPHA
 
 OUT6="$(run_doctor)"
 
 expect_match "13: the predecessor roster is listed by its short id" \
   "*predecessor*${GONE_SID%%-*}*" "$OUT6"
-expect_match "14: with the count of rows nobody closed — the MET row is not among them" \
+expect_match "14 (T17: was '…the MET row is not among them'): with the count of rows nobody closed — the acked row is not among them" \
   "*predecessor*2 open*" "$OUT6"
-# THE PAIRED HALF, on the same roster: flip the UNMET verdict to MET and the
-# count falls to 1. Without it, "2 open" above is equally consistent with a
-# reader that had stopped closing rows altogether.
+# THE PAIRED HALF, on the same roster. Flipping W-GAMMA's UNMET verdict to MET
+# no longer closes it (T17, D10: a MET marker records a landing, not an agent
+# gone), so the count holds at 2; acking it is what takes the count to 1. Without
+# the ack arm, "2 open" above is equally consistent with a reader that had
+# stopped closing rows altogether.
 sed 's/|name=W-GAMMA|agent_id=a001|state=UNMET$/|name=W-GAMMA|agent_id=a001|state=MET/' \
   "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state" > "${PROJ}/.bionic/tmp/roster.met" \
   && mv "${PROJ}/.bionic/tmp/roster.met" "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state"
 OUT6B="$(run_doctor)"
-expect_match "14b: …and flipping that same marker to MET closes it (14 discriminates)" \
-  "*predecessor*1 open row*" "$OUT6B"
-# Restored to the two-open state the rest of the section reads.
+expect_match "14b (T17: was '…and flipping that same marker to MET closes it'): a MET marker alone closes nothing — still 2 open" \
+  "*predecessor*2 open*" "$OUT6B"
+fleet_ack W-GAMMA
+OUT6C="$(run_doctor)"
+expect_match "14c …and an ack after its launch closes it (14 discriminates)" \
+  "*predecessor*1 open row*" "$OUT6C"
+# Restored to the two-open state the rest of the section reads: the marker back
+# to UNMET, and W-GAMMA's ack taken back off the ledger.
 sed 's/|name=W-GAMMA|agent_id=a001|state=MET$/|name=W-GAMMA|agent_id=a001|state=UNMET/' \
   "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state" > "${PROJ}/.bionic/tmp/roster.unmet" \
   && mv "${PROJ}/.bionic/tmp/roster.unmet" "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state"
+grep -v '|name=W-GAMMA|' "$GONE_LEDGER" > "$GONE_LEDGER.tmp" && mv "$GONE_LEDGER.tmp" "$GONE_LEDGER"
 # MATCHED PER LINE. A whole-output glob would happily span from the predecessor
 # row down to the RESOURCES section, where a live session's short id legitimately
 # appears — and pass or fail for the wrong reason.
