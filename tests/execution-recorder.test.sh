@@ -1041,6 +1041,60 @@ expect_contains "T20b: …so roster_open_names counts the restarted agent again"
 expect_eq "T20c: the first identification of the id carries no restarted_at" \
   "0" "$(grep 'status=identified' "$IDC_ROSTER" | head -1 | tr '|' '\n' | grep -c '^restarted_at=')"
 
+# ---------- T20d: A RESTART AFTER AN EXTEND CARRIES THE EXTENDED LAUNCH (critic C3-1) ----------
+#
+# `hooks/session-poker.sh`'s `extend` verb re-opens a MET row by appending a FRESH row for
+# the SAME id, "launched now, so the old deliverable reads stale" (session-poker.sh, the
+# `extend` verb's own comment). Until this fix `prior_launch_for_agent` — which restart used
+# unconditionally — answers the id's EARLIEST launched_at, so a restart after that EXTENDED
+# contract's own ack rolled `launched_at` back past the extend, to the ORIGINAL dispatch:
+# a contract the extend had revoked (its stale deliverable predates the bumped launch) read
+# met again by that same stale deliverable, with acked=no — a tree `stopped` had left
+# standing for salvage becomes landable again. The world: the confirmed seed row is the
+# first dispatch (09:00Z); the extend is a fresh `identified` row for the SAME id, the shape
+# `session-poker.sh extend` writes (row_copy_args carries `status=identified` forward
+# unchanged); the ack is taken after the extend's own launch, not the first dispatch's.
+IFS='|' read -r IDX_REPO IDX_TR IDX_SUB IDX_CFG <<< "$(make_world identextend yes)"
+seed_roster_full "$IDX_REPO" "$SID_A" "probemate" "toolu_01IDENTEXT" confirmed "$START_ID"
+IDX_ROSTER="$IDX_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$IDX_TR" "$IDX_REPO" "general-purpose" "$START_ID")"
+# THE EXTEND, in `session-poker.sh`'s own row shape: a fresh `identified` row for the SAME
+# id, launched later, with its `extended=<iso> <reason>` audit key.
+roster_row_fixture status=identified session="$SID_A" name=probemate agent_id="$START_ID" \
+  launched_at=2026-08-08T09:15:00Z subagent_type=implementor model=opus deliverable= \
+  source=declared duration= progress= claims= cadence= absent= waiver= \
+  tool_use_id=toolu_01IDENTEXT plan=none "extended=2026-08-08T09:15:00Z retry" \
+  >> "$IDX_ROSTER"
+ack_write "$IDX_REPO" "$SID_A" 2026-08-08T09:31:00Z probemate
+run_rec "$(mk_subagent_start "$SID_A" "$IDX_TR" "$IDX_REPO" "general-purpose" "$START_ID")"
+IDX_LA3=$(grep 'status=identified' "$IDX_ROSTER" | tail -1 | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)
+expect_eq "T20d: a restart after an extend's ack carries the EXTENDED launch, not the first dispatch's (critic C3-1)" \
+  "2026-08-08T09:15:00Z" "$IDX_LA3"
+IDX_RA3=$(grep 'status=identified' "$IDX_ROSTER" | tail -1 | tr '|' '\n' | grep '^restarted_at=' | cut -d= -f2-)
+expect_regex "T20d: …and the restart still carries its own restarted_at, occupancy unaffected by the fix" \
+  '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$IDX_RA3"
+# THE PAIRED CONTROL: an extend with NO ack afterward is not a restart at all — the name is
+# still open, so DUP_PRIOR is never reset and the fix's `if RESTART_AFTER_ACK` never fires. A
+# further start against it is an ordinary live duplicate, journalled verbatim (no new
+# `identified` row, no PRIOR_LAUNCH of any kind computed) — proving the fix reaches the
+# RESTART_AFTER_ACK path only, not every id with more than one row.
+IFS='|' read -r IDX2_REPO IDX2_TR IDX2_SUB IDX2_CFG <<< "$(make_world identextendnoack yes)"
+seed_roster_full "$IDX2_REPO" "$SID_A" "probemate" "toolu_01IDENTEXT2" confirmed "$START_ID"
+IDX2_ROSTER="$IDX2_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$IDX2_TR" "$IDX2_REPO" "general-purpose" "$START_ID")"
+roster_row_fixture status=identified session="$SID_A" name=probemate agent_id="$START_ID" \
+  launched_at=2026-08-08T09:15:00Z subagent_type=implementor model=opus deliverable= \
+  source=declared duration= progress= claims= cadence= absent= waiver= \
+  tool_use_id=toolu_01IDENTEXT2 plan=none "extended=2026-08-08T09:15:00Z retry" \
+  >> "$IDX2_ROSTER"
+run_rec "$(mk_subagent_start "$SID_A" "$IDX2_TR" "$IDX2_REPO" "general-purpose" "$START_ID")"
+expect_eq "T20d: …the control — an extend with NO ack is not a restart: a live duplicate is journalled, not a new identification" \
+  "1" "$(grep -c 'status=duplicate-start' "$IDX2_ROSTER")"
+expect_eq "T20d: …still exactly two identified rows (the seed's and the extend's, neither touched)" \
+  "2" "$(grep -c 'status=identified' "$IDX2_ROSTER")"
+expect_contains "T20d: …and the duplicate-start row carries the extend's own launch, untouched by any PRIOR_LAUNCH read" \
+  "|launched_at=2026-08-08T09:15:00Z|" "$(grep 'status=duplicate-start' "$IDX2_ROSTER" | tail -1)"
+
 # THE LANDED-THEN-RELAUNCHED LINEAGE (delta review C1; RE-AUTHORED at epic-23 wave-20 T20).
 # The control above proves an ack frees the name; this proves the ack does NOT free it
 # forever. `probemate` runs under one id, lands, is acked, and is dispatched again under the

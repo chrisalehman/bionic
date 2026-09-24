@@ -1140,6 +1140,43 @@ expect_contains "…and resolution lands on the LIVE row's id" \
   "arerun-2222222222222222" "$GUARD_VERR"
 expect_absent "…never on the id the ack discharged (T17: was '…the id the MET marker closed')" "arerun-1111111111111111" "$GUARD_VERR"
 
+# (c6) A RESTARTED ID PLUS A FRESH RE-DISPATCH OF ONE NAME: STILL AMBIGUOUS (epic-23 wave-20
+# T20d, review R3-1). `live_ids_of_name` — this arm's own predicate — used to discharge an id
+# by `launched_at` alone, never `restarted_at` (T20c introduced the field; R3-1 found the
+# gap). So a restarted id read discharged even while `roster_open_names` read its NAME open
+# (R9 of tests/roster.test.sh), and a fresh re-dispatch under that name then read as the
+# ONLY live id — no ambiguity, where the register plainly holds two open contracts: the
+# restarted id (back on the panel) and the fresh dispatch. The row is the recorder's own
+# shape: `launched_at` unmoved, `restarted_at` riding a fresh stamp strictly after the ack.
+IFS='|' read -r RS_REPO RS_TR RS_SUB <<< "$(make_world restartambig yes)"
+plant_agent "$RS_SUB" "arestart-1111111111111111" "restartee"
+plant_agent "$RS_SUB" "arestart-2222222222222222" "restartee"
+sg_roster_row "$RS_REPO" "$SID_A" "restartee" "arestart-1111111111111111"
+ack_row "$RS_REPO" "$SID_A" "restartee"
+RS_RESTART_AT="$(date -u -v+5S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+5 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+printf '%s|restarted_at=%s\n' \
+  "$(roster_row_fixture status=identified session="$SID_A" name=restartee \
+      agent_id=arestart-1111111111111111 launched_at=2026-08-05T00:00:00Z \
+      deliverable= progress= waiver= teammate_id= adopted_from= cadence=)" \
+  "$RS_RESTART_AT" >> "$RS_REPO/.bionic/tmp/roster-$SID_A.state"
+# THE FRESH RE-DISPATCH: a SECOND agent id under the SAME name, launched AFTER the ack
+# (`sg_roster_row` always stamps 2026-08-05, the same as the FIRST run's launch, which the
+# ack has already discharged — a fresh dispatch has to carry its own later launch to be live
+# at all, exactly as R6c/R7's fixtures do in tests/roster.test.sh).
+RS_FRESH_AT="$(date -u -v+10S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+10 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+roster_row_fixture status=identified session="$SID_A" name=restartee \
+  agent_id=arestart-2222222222222222 launched_at="$RS_FRESH_AT" \
+  deliverable= progress= waiver= teammate_id= adopted_from= cadence= \
+  >> "$RS_REPO/.bionic/tmp/roster-$SID_A.state"
+run_guard "$(mk_stop_payload "$SID_A" "$RS_TR" "$RS_REPO" "restartee")"
+expect_status "a restarted id plus a fresh re-dispatch of one name: REFUSED — the ambiguity is back (T20d)" \
+  2 "$GUARD_ST"
+expect_regex "…and the one line names the fault" 'more than one live row' "$GUARD_ERR"
+expect_contains "…naming the restarted id as one live spelling" \
+  "arestart-1111111111111111" "$GUARD_VERR"
+expect_contains "…and the fresh dispatch's id as the other" \
+  "arestart-2222222222222222" "$GUARD_VERR"
+
 # (c2) A NAME CARRYING A REGEX METACHARACTER must count and list ONLY its own two entries,
 # never a bystander name that merely LOOKS like it under BRE matching (Step-6 security review
 # S-5, third instance). `a.b`'s `.` would match any single character, so an unfixed reader

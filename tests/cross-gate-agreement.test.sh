@@ -12074,6 +12074,48 @@ expect_contains "CG-close T20c contract: …and the duplicate the further start 
   "|launched_at=2026-09-01T00:00:00Z|" "$(grep -F '|status=duplicate-start|' "$_cgtc_roster" | tail -1)"
 
 # ============================================================
+section "CG-close T20d — a restarted id agrees between roster_open_names and live_ids_of_name (epic-23 wave-20 T20d, review R3-1)"
+# ============================================================
+#
+# T20c proved the NAME reopens after a restart. R3-1 found the PER-ID reader —
+# `live_ids_of_name`, the stop wall's ambiguity refusal and `adopt_write_row`'s same-name
+# guard — never picked the new `restarted_at` field up, so the restarted id itself read
+# discharged even while its name read open: the two halves of the one close predicate
+# disagreed within the same commit that introduced the field. Same world as CG-close T20c: a
+# real deliverable, launched, delivered, acked, then the SAME id restarts through the real
+# recorder — and this time both readers are asked about the id, not only the name.
+_cgtd_r=$(new_repo cgtd-restart)
+_cgtd_name="cgtd-w"
+_cgtd_id="acgtd-3b8f1e6a9c2d5074"
+_cgtd_roster="$_cgtd_r/.bionic/tmp/roster-$SID_A.state"
+_cgtd_ledger="$_cgtd_r/.bionic/tmp/sweeper-$SID_A.state"
+_cgtd_del="$_cgtd_r/cgtd-report.md"
+echo delivered > "$_cgtd_del"
+touch -t 202609011200 "$_cgtd_del"
+roster_header > "$_cgtd_roster"
+roster_row_fixture status=confirmed session="$SID_A" name="$_cgtd_name" agent_id="$_cgtd_id" \
+  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtd_del" tool_use_id=toolu_01CGTD >> "$_cgtd_roster"
+roster_row_fixture status=identified session="$SID_A" name="$_cgtd_name" agent_id="$_cgtd_id" \
+  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtd_del" tool_use_id=toolu_01CGTD >> "$_cgtd_roster"
+cgc_ack "$_cgtd_ledger" 2026-09-02T00:00:00Z "$_cgtd_name"
+jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
+         message:{role:"user",content:"carry on"}}' > "$_cgtd_r/cgc-transcript.jsonl"
+
+# THE RESTART, through the real recorder — identical to CG-close T20c's own drive.
+mk_start_payload "$SID_A" "$_cgtd_r/cgc-transcript.jsonl" "$_cgtd_r" general-purpose "$_cgtd_id" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_ER" >/dev/null 2>&1
+
+_cgtd_open=$( ( BIONIC_LIB_WANT=""; . "$CGC_LIBDIR/roster.sh" >/dev/null 2>&1
+                roster_open_names "$_cgtd_roster" "$_cgtd_ledger" "$SID_A" ) 2>/dev/null )
+_cgtd_live=$( ( BIONIC_LIB_WANT=""; ROSTER_FILE="$_cgtd_roster"
+                . "$CGC_LIBDIR/roster.sh" >/dev/null 2>&1
+                live_ids_of_name "$_cgtd_name" ) 2>/dev/null )
+if grep -qxF -- "$_cgtd_name" <<< "$_cgtd_open"; then _cgtd_name_occ=open; else _cgtd_name_occ=closed; fi
+if grep -qxF -- "$_cgtd_id" <<< "$_cgtd_live"; then _cgtd_id_occ=live; else _cgtd_id_occ=gone; fi
+expect_eq "CG-close T20d: roster_open_names (the name) and live_ids_of_name (the id) agree on the SAME restart history" \
+  "open live" "$_cgtd_name_occ $_cgtd_id_occ"
+
+# ============================================================
 section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave-20 T2, REQ-10 AC-10.2; D10)"
 # ============================================================
 #
