@@ -103,11 +103,11 @@ TOOL_NAME=$(_jq '.tool_name')
 # payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
 # dispatch that should have been refused can be stopped and re-run — refusing every
 # Agent call on the machine because a file is missing cannot be undone as cheaply.
-# `brief.sh` (wave-20 T6; REQ-4, Δ10) is the contract grammar this wall and `amend` share, and
-# `cmd-class.sh` (wave-20 T4; REQ-7, D7) carries CMD_RUN_NORM_AWK, the one run normaliser its
-# lift pastes in. brief.sh sources cmd-class.sh itself; both are named here so the loader
-# checks the pair is readable and a missing one steps this wall aside instead of crashing it.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh cmd-class.sh brief.sh"
+# `brief.sh` (wave-20 T6; REQ-4, Δ10) is the contract grammar this wall and `amend` share; it
+# brings `cmd-class.sh` (wave-20 T4; REQ-7, D7) in itself for CMD_RUN_NORM_AWK, the one run
+# normaliser its lift pastes in, so this hook names only brief.sh and lets that source do
+# the pulling.
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the

@@ -19,6 +19,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
 #     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
+#     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
+#     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
 # are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
@@ -378,6 +380,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
+  die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
+  die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   exit 2
 }
 
@@ -402,6 +406,7 @@ ADOPT_REPORT_ONLY=no
 SWEEP_REPORT_ONLY=no
 SWEEP_WINDOWED=no
 BIND_ARG=""
+FILL_REPORT_ARG=""
 case "$VERB" in
   adopt)
     if [ $# -eq 1 ]; then
@@ -500,8 +505,14 @@ case "$VERB" in
     [ -n "$AMEND_FILES$AMEND_SUITES$AMEND_RUNS" ] \
       || usage "amend changes nothing without --files+, --suites+ or --reexec+."
     ;;
-  tick|arm|disarm|interval|interval-default|window)
+  tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
+    ;;
+  # ONE OPTIONAL OPERAND (wave-20 REQ-5, AC-5.6): the plan whose ledger to read. Without it, the
+  # session's own run — the one every other verb here resolves.
+  fill-report)
+    [ $# -le 1 ] || usage "fill-report takes at most one argument: the plan whose fill ledger to read."
+    FILL_REPORT_ARG="${1:-}"
     ;;
   *) usage "unknown verb: $VERB" ;;
 esac
@@ -2379,6 +2390,84 @@ case "$VERB" in
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
     WINDOW="$(roster_window "$ROSTER_FILE" "$SESSION_ID")" || WINDOW=""
     [ -n "$WINDOW" ] && printf '%s\n' "$WINDOW"
+    exit 0
+    ;;
+
+  # THE CANONICAL PATROL PROMPT (wave-20 REQ-6, AC-6.1; D6). Report #1: a Patrol job created
+  # with a composed prompt — the bare tick command, or the marker without the tick — produced
+  # turns the stop wall never saw as ticks, or ticks that never ran. The prompt is a fact of
+  # the session and of this poker's own path, so it is printed rather than composed: the
+  # marker `bionic-patrol session=<sid[0:8]>` FIRST (the stop wall's TICK_MARK, and the prefix
+  # the resume ritual deletes stray jobs by), then the tick by this script's absolute path.
+  # One line, because it is a CronCreate prompt. READ-ONLY and outside the engagement gate,
+  # like `interval`: it decides nothing.
+  prompt)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
+      exit 3
+    fi
+    printf 'bionic-patrol session=%s — Patrol tick. ListAgents, then run: bash %s tick — the tick decides per row. Then: TaskList and reconcile; dispatch every ready row the wall names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>"; TaskStop each STANDDOWN or write "standdown-declined: <name> <reason>"; then continue the run toward its goal until a wall.\n' \
+      "${SESSION_ID:0:8}" "${HOOK_DIR}/session-poker.sh"
+    exit 0
+    ;;
+
+  # THE FILL'S MEASURE (wave-20 REQ-5, AC-5.6; Δ2; ADR-036 decision 4). The stop library appends
+  # one `fill-ledger/v1` line per Stop of an engaged run; this folds them into the run's
+  # missed-opportunity minutes (a free slot, a ready row, nothing launched — target zero), with
+  # HOLD and declines listed separately with their idle cost. The path and the fold are
+  # lib/patrol.sh's (`fill_ledger_path`, `fill_ledger_report`), the ones the recorder writes by.
+  #
+  # THE PLAN: the operand — absolute, project-root-relative or docs-root-relative, `bind`'s
+  # three spellings — or, without one, the session's own run as `resolve_run` names it. OPEN is
+  # `run_open`'s answer: an open run's last line owns the interval to now, a closed one's owns
+  # nothing. READ-ONLY and outside the engagement gate, like `window`.
+  fill-report)
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    FR_PLAN=""
+    if [ -n "$FILL_REPORT_ARG" ]; then
+      case "$FILL_REPORT_ARG" in
+        /*) FR_PLAN="$FILL_REPORT_ARG" ;;
+        *)  FR_PLAN="$REPO_REAL/$FILL_REPORT_ARG"
+            [ -f "$FR_PLAN" ] || FR_PLAN="$(docs_root "$REPO_REAL")/$FILL_REPORT_ARG" ;;
+      esac
+      if [ ! -f "$FR_PLAN" ] || [ -L "$FR_PLAN" ]; then
+        die "REFUSED — no plan file at $FILL_REPORT_ARG; name the plan whose fill ledger to read."
+        exit 2
+      fi
+    else
+      SESSION_ID="$(session_id)" || SESSION_ID=""
+      if [ -z "$SESSION_ID" ]; then
+        die "REFUSED — no session key, and no plan named; a report without an operand is for THIS session's run."
+        exit 3
+      fi
+      resolve_run "$REPO_REAL" "$SESSION_ID"
+      FR_PLAN="$POKER_RUN_PLAN"
+      if [ -z "$FR_PLAN" ] || [ ! -f "$FR_PLAN" ]; then
+        die "REFUSED — this session has no run to report on; name the plan: fill-report <plan>."
+        exit 2
+      fi
+    fi
+    FR_SLUG="${FR_PLAN##*/}"; FR_SLUG="${FR_SLUG%.plan.md}"
+    FR_OPEN=no
+    run_open "$FR_PLAN" && FR_OPEN=yes
+    FR_FILE="$(fill_ledger_path "$REPO_REAL" "$FR_PLAN")"
+    if [ ! -f "$FR_FILE" ] || [ -L "$FR_FILE" ]; then
+      say "fill-report — no fill ledger yet for ${FR_SLUG}: ${FR_FILE} (the stop hook writes it from the first Stop past Step 3)"
+    fi
+    FR_OUT="$(fill_ledger_report "$FR_FILE" "$FR_SLUG" "$FR_OPEN" "${BIONIC_NOW_EPOCH:-}")"
+    printf '%s\n' "$FR_OUT"
+    FR_HEAD="$(printf '%s\n' "$FR_OUT" | head -n 1)"
+    FR_M="${FR_HEAD#*|missed=}"; FR_M="${FR_M%%|*}"
+    FR_H="${FR_HEAD#*|hold=}"; FR_H="${FR_H%%|*}"
+    FR_D="${FR_HEAD#*|declined=}"; FR_D="${FR_D%%|*}"
+    say "fill-report ${FR_SLUG}: missed opportunity ${FR_M} min (a free slot, a ready row, nothing launched) · HOLD ${FR_H} min · declined ${FR_D} min$( [ "$FR_OPEN" = yes ] && printf ' · run open, last interval to now')"
     exit 0
     ;;
 
