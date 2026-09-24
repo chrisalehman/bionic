@@ -10238,8 +10238,15 @@ expect_eq "S17b …and the key-set pin goes red on it (the pin discriminates)" \
 # markers found reads there as "every row is still open", which fills the writer budget.
 expect_eq "S17c youngest_suite_writer greps the shared constant, not a literal" \
   "0" "$(awk '/^youngest_suite_writer\(\)/,/^\}/' "$PARTY_PK" | grep -cF "grep '^${SWEPT_SCHEMA}|'")"
-expect_eq "S17c …and it does grep the marker, through the constant (the zero is not absence)" \
-  "1" "$(awk '/^youngest_suite_writer\(\)/,/^\}/' "$PARTY_PK" | grep -cF 'grep "^${SWEPT_SCHEMA}|"')"
+# RE-AUTHORED (epic-23 wave-20 T20, REQ-10, D10). It read "…and it does grep the marker,
+# through the constant", expecting 1. `youngest_suite_writer` no longer reads a marker at all:
+# it closes a name through `roster_open_names`, under which a MET marker closes nothing
+# (§CG-close T20 drives it). The zero above is still not absence — the function's close is
+# now the predicate call, and that is what the non-vacuity row asks for.
+expect_eq "S17c …and it greps no marker at all any more, through the constant or otherwise (T20: was 1)" \
+  "0" "$(awk '/^youngest_suite_writer\(\)/,/^\}/' "$PARTY_PK" | grep -cF '${SWEPT_SCHEMA}')"
+expect_eq "S17c …because it closes through the one predicate (the zero is not absence)" \
+  "1" "$(awk '/^youngest_suite_writer\(\)/,/^\}/' "$PARTY_PK" | grep -cF 'roster_open_names "$roster"')"
 
 
 # ============================================================
@@ -10832,49 +10839,88 @@ done <<< "$NR_ENTRIES"
 expect_empty "NR.7 every needs: entry in skills/canonical-sdlc/SKILL.md resolves" "$NR_DEAD"
 
 # ============================================================
-section "LC — THE LATEST-CONTRACT READING: the recorder's, and no longer the dispatch wall's (epic-23 wave-12-fixit-171 T26; retired half: wave-20 T2, D10)"
+section "LC — THE LATEST-CONTRACT READING, retired in both walls: the recorder asks the one close predicate (epic-23 wave-12-fixit-171 T26; dispatch-wall half retired wave-20 T2, recorder half wave-20 T20, D10)"
 # ============================================================
 #
 # WHAT THIS PINNED. hooks/dispatch-preflight.sh and hooks/execution-recorder.sh carried one
 # awk text byte for byte — "is this name currently under an open contract, or did a
-# `landing-swept/v1|…|state=MET` marker close the last one?" — because the recorder loads no
+# `landing-swept/v1|…|state=MET` marker close the last one?" — because the recorder loaded no
 # library that parses a roster and `BIONIC_LIB_WANT` is fail-closed on the SubagentStart path.
 #
-# WHAT CHANGED (epic-23 wave-20 T2, REQ-10, D10; research D3-8). The dispatch wall's question
-# is OCCUPANCY — is this name still under contract for the budget and the name arm — and it
-# now asks the one close predicate every occupancy reader asks, `roster_open_names`
+# WHAT CHANGED, TWICE. (1) epic-23 wave-20 T2 (REQ-10, D10; research D3-8): the dispatch wall
+# stopped carrying the reading and asks the one close predicate, `roster_open_names`
 # (payload/scripts/lib/roster.sh), under which a MET marker closes nothing and a post-launch
-# ack is the one close (ADR-034 d1). The recorder's question is IDENTIFICATION — which open
-# contract does a starting agent id belong to — and it keeps its reading, marker and all,
-# untouched. So the byte-equal pair is retired rather than kept alive over a dead block in
-# the dispatch wall: what is pinned below is that the recorder still carries its reading
-# whole, and that the dispatch wall carries NO private copy of it — no MET latch, no
-# `contract_closed` — so a close reading cannot grow back there beside the predicate.
+# ack is the one close (ADR-034 d1). T2 left the recorder's copy whole, on the view that its
+# question was IDENTIFICATION rather than occupancy. (2) epic-23 wave-20 T20 (found by T17,
+# approved by Chris): the recorder's question — is the contract this id started under still
+# OPEN, so that a second start against it is a resumed copy — IS the close question, and its
+# MET latch was the last reader but one that disagreed with the four (§CG-close T20 drives
+# it). The recorder now sources roster.sh (on its WANT line and by a direct source line —
+# tests/hook-adoption.test.sh's pin) and asks the predicate once, for the one name, and only
+# when the id's last row already says it started: the first start of every id — the common
+# path — pays nothing for it.
+#
+# SO THE PIN MOVED WITH THE READING. What was pinned whole below — the recorder's four-function
+# awk span — is retired, and what is pinned whole in its place is the recorder's new
+# open-contract block, byte for byte, with the dispatch wall still carrying no private copy.
 
 LC_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
 LC_ER="$BIONIC_HOOKS_DIR/execution-recorder.sh"
-lc_span() {  # <file> -> the shared reading, BEGIN and END markers included
-  sed -n '/---- BEGIN latest-contract reading/,/---- END latest-contract reading/p' "$1"
+lc_span() {  # <file> -> the delimited reading, BEGIN and END markers included
+  sed -n '/---- BEGIN open-contract reading/,/---- END open-contract reading/p' "$1"
 }
 LC_SPAN_ER="$(lc_span "$LC_ER")"
 
-# --- (a) THE RECORDER'S READING IS WHOLE: one delimited span, all four functions. ---
-expect_nonempty "LC.1 hooks/execution-recorder.sh carries the delimited latest-contract reading" "$LC_SPAN_ER"
+# --- (a) THE RECORDER'S BLOCK IS WHOLE, BYTE FOR BYTE (re-authored at T20: it pinned one
+# delimited latest-contract span holding four awk functions; the span is gone and this is the
+# block that replaced it). ---
+# READ, NOT SUBSTITUTED: the block carries `$'\t'` and nested `$( )`, and /bin/bash 3.2 mis-parses
+# a quoted heredoc inside a command substitution. `read -d ''` returns 1 at EOF by design.
+LC_WANT=""
+IFS= read -r -d '' LC_WANT <<'LCBLOCK' || :
+  # ---- BEGIN open-contract reading — the one close predicate, asked of one name (cross-gate §LC) ----
+  if [ -n "$DUP_PRIOR" ]; then
+    case "$DUP_PRIOR" in *"|name="*) DUP_NAME="${DUP_PRIOR#*|name=}"; DUP_NAME="${DUP_NAME%%|*}" ;; *) DUP_NAME="" ;; esac
+    [ -n "$DUP_NAME" ] || DUP_NAME="(unnamed)"
+    DUP_NAME="${DUP_NAME//$'\t'/ }"
+    grep -qxF -- "$DUP_NAME" <<< "$(roster_open_names "$ROSTER_FILE" "$STATE_DIR/sweeper-${BIONIC_SID}.state" "$BIONIC_SID")" || DUP_PRIOR=""
+  fi
+  # ---- END open-contract reading ----
+LCBLOCK
+LC_WANT="${LC_WANT%$'\n'}"
+expect_eq "LC.1 hooks/execution-recorder.sh carries the open-contract block, byte for byte (T20)" \
+  "$LC_WANT" "$LC_SPAN_ER"
 expect_eq "LC.1 …exactly one BEGIN marker in execution-recorder.sh" \
-  "1" "$(/usr/bin/grep -c -- '---- BEGIN latest-contract reading' "$LC_ER")"
-expect_eq "LC.1 …and all four functions" "4" \
-  "$(printf '%s\n' "$LC_SPAN_ER" | /usr/bin/grep -cE '^ *function (kv|live_status|contract_note|contract_closed)\(')"
+  "1" "$(/usr/bin/grep -c -- '---- BEGIN open-contract reading' "$LC_ER")"
+expect_eq "LC.1 …and none of the four latest-contract functions survives (T20: was 'all four')" "0" \
+  "$(/usr/bin/grep -cE '^ *function (live_status|contract_note|contract_closed)\(' "$LC_ER" || true)"
+expect_eq "LC.1 …and no latest-contract span either (T20)" "0" \
+  "$(/usr/bin/grep -c -- '---- BEGIN latest-contract reading' "$LC_ER" || true)"
 
-# --- (b) THE DECISIVE LINE IS IN IT: a live row retires the marker above it (the C1 latch
-# fix), so the recorder never pins an id to a contract a later dispatch reopened. ---
-expect_contains "LC.3 the recorder's reading retires a MET marker that a live row follows" \
-  'if (live_status(kv(line, "status"))) delete MET[nm]' "$LC_SPAN_ER"
+# --- (b) THE DECISIVE LINE IS IN IT (re-authored at T20: it was "a live row retires the MET
+# marker above it", the C1 latch fix). The predicate compares the ack against the name's
+# LATEST launch, which is the same fix by construction — an ack older than a relaunch closes
+# nothing — and the line that asks it is the one pinned. ---
+expect_contains "LC.3 the recorder's block asks roster_open_names for the one name, over this session's ack ledger" \
+  'grep -qxF -- "$DUP_NAME" <<< "$(roster_open_names "$ROSTER_FILE" "$STATE_DIR/sweeper-${BIONIC_SID}.state" "$BIONIC_SID")" || DUP_PRIOR=""' \
+  "$LC_SPAN_ER"
 
-# --- (c) THE RECORDER STILL ASKS IT. A reading nobody calls is a comment. ---
-expect_eq "LC.5 the recorder notes every row through its reading" "2" \
-  "$(/usr/bin/grep -c 'contract_note($0)' "$LC_ER")"
-expect_contains "LC.5 …and the recorder DECIDES on it" \
-  '&& !contract_closed(nm)) print row' "$(cat "$LC_ER")"
+# --- (c) THE RECORDER STILL ASKS IT (re-authored at T20: it counted two `contract_note($0)`
+# calls and the `!contract_closed(nm)` decision). A block nobody reaches is a comment, so the
+# block must sit between the candidate read and the journal write it gates. ---
+expect_eq "LC.5 the recorder notes no row through a private reading any more (T20: was 2)" "0" \
+  "$(/usr/bin/grep -c 'contract_note($0)' "$LC_ER" || true)"
+lc_line() {  # <fixed string> -> the first line number of the recorder carrying it, or 0
+  /usr/bin/grep -nF -- "$1" "$LC_ER" | head -1 | cut -d: -f1 | awk '{ print $1 + 0 } END { if (NR == 0) print 0 }'
+}
+LC_L_READ=$(lc_line '  DUP_PRIOR=$(awk ')
+LC_L_BEGIN=$(lc_line '---- BEGIN open-contract reading')
+LC_L_END=$(lc_line '---- END open-contract reading')
+LC_L_WRITE=$(lc_line 'f = "status=duplicate-start"')
+expect_true "LC.5 …and DECIDES on the block: candidate read ($LC_L_READ) < block (${LC_L_BEGIN}–${LC_L_END}) < journal write ($LC_L_WRITE)" \
+  test "$LC_L_READ" -gt 0 -a "$LC_L_READ" -lt "$LC_L_BEGIN" -a "$LC_L_BEGIN" -lt "$LC_L_END" -a "$LC_L_END" -lt "$LC_L_WRITE"
+expect_true "LC.5 …and the recorder sources the predicate's library" \
+  /usr/bin/grep -qx '\. "\$BIONIC_LIB/roster.sh"' "$LC_ER"
 
 # --- (d) THE DISPATCH WALL KEEPS NO COPY (D3-8). No span, no MET latch, no contract_closed:
 # its one close is the library predicate, which §CG-close drives through the wall itself. ---
@@ -10884,8 +10930,8 @@ expect_eq "LC.6 …and no private MET close of any spelling" "0" \
   "$(/usr/bin/grep -cE 'contract_closed|MET\[' "$LC_DP" || true)"
 expect_true "LC.6 …because it asks the one close predicate instead" \
   /usr/bin/grep -q 'roster_open_names "' "$LC_DP"
-expect_eq "LC.5 no private MET latch survives in either file" "0" \
-  "$(/usr/bin/grep -cE '!\(nm in met\)|&& !met\b' "$LC_DP" "$LC_ER" | awk -F: '{t += $2} END { print t + 0 }')"
+expect_eq "LC.5 no private MET latch survives in either file (T20: the recorder's MET[] counted too)" "0" \
+  "$(/usr/bin/grep -cE '!\(nm in met\)|&& !met\b|MET\[' "$LC_DP" "$LC_ER" | awk -F: '{t += $2} END { print t + 0 }')"
 
 # ============================================================
 section "BR — the bounded-runner copies: detect.sh and session-start.sh, CODE-identical (Step-6 duplication review F1, epic-23 wave-14 T27)"
@@ -11713,6 +11759,121 @@ _cga_msw=$(cgc_sweeper "$_cga_r" cga-met)
 expect_eq "CG-close-all MUTANT a MET-closing patrol_roster_state answers closed on the met world" "closed" "$_cga_mpa"
 expect_eq "CG-close-all MUTANT …so the one-answer row sees two answers (the row discriminates)" "2" \
   "$(printf '%s\n' "$_cga_msw" "$_cga_mpa" | sort -u | wc -l | tr -d ' ')"
+
+# ============================================================
+section "CG-close T20 — the last two MET-closing readers give the four's answer (epic-23 wave-20 T20, REQ-10 AC-10.1; D10)"
+# ============================================================
+#
+# THE DEFECT (found by T17, approved by Chris). After T2 and T17 two readers still closed a
+# name on a `landing-swept/v1|…|state=MET` marker alone, and never asked `roster_open_names`:
+#   recorder     hooks/execution-recorder.sh's duplicate-start check (DUP_PRIOR): a second
+#                SubagentStart for an `identified` id is journalled `duplicate-start` unless
+#                the name's contract is closed — and a MET marker read as closed
+#   kill floor   hooks/session-poker.sh's `youngest_suite_writer`: the EMERGENCY arm's one
+#                stop address skipped every name carrying a MET marker
+# So on a MET-but-unacked name the recorder let a resumed copy start unjournalled and the
+# kill floor named nobody, while the four readers CG-close drives called the same name open.
+#
+# ONE FIXTURE PER HISTORY, the two new readers and one of the four (adopt_fold, T2's cheapest
+# surface) driven over it, each through its own surface:
+#   met    a suite-claiming row, identified, a MET marker, never acked   -> OPEN
+#   done   the same, then acked after its launch                          -> CLOSED
+# `done` is the paired positive: without it, readers that never close anything would pass.
+#   recorder     a second SubagentStart for the identified id: journalled = open
+#   kill floor   a tick at free_mb=100: names `<name>@session-…` = open, "no suite-running
+#                writer" = closed
+#   adopt_fold   CG-close's own driver (`cgc_adopt`)
+# THE RECORDER IS DRIVEN LAST: the row it journals is a new history for the next reader.
+
+cgt_world() {  # <case: met|done> -> repo path
+  local r ro le nm="cgt-$1"
+  r=$(new_repo "cgt-$1")
+  ro="$r/.bionic/tmp/roster-$SID_A.state"
+  le="$r/.bionic/tmp/sweeper-$SID_A.state"
+  roster_header > "$ro"
+  roster_row_fixture status=intended session="$SID_A" name="$nm" agent_id= \
+    launched_at=2026-09-01T00:00:00Z claims="bash tests/run.sh" tool_use_id="toolu_01CGT$1" deliverable= >> "$ro"
+  roster_row_fixture status=identified session="$SID_A" name="$nm" agent_id="acgt$1-5f0e3c2a9b7d4e61" \
+    launched_at=2026-09-01T00:00:00Z claims="bash tests/run.sh" tool_use_id="toolu_01CGT$1" deliverable= >> "$ro"
+  swept_marker_write "$ro" 2026-09-01T01:00:00Z "$SID_A" "$nm" "acgt$1-5f0e3c2a9b7d4e61" MET
+  [ "$1" != done ] || cgc_ack "$le" 2026-09-01T01:00:00Z "$nm"
+  cgc_plan "$r/.bionic/docs/plans/epic-99/cgt.plan.md" \
+    'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+  s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/cgt.plan.md"
+  s4_attest "$r" "$SID_A"
+  jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
+           message:{role:"user",content:"carry on"}}' > "$r/cgc-transcript.jsonl"
+  printf '%s' "$r"
+}
+
+cgt_recorder() {  # <repo> <case> [recorder] -> open | closed
+  local ro="$1/.bionic/tmp/roster-$SID_A.state"
+  mk_start_payload "$SID_A" "$1/cgc-transcript.jsonl" "$1" general-purpose "acgt$2-5f0e3c2a9b7d4e61" \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "${3:-$PARTY_ER}" >/dev/null 2>&1
+  if grep -qF "|status=duplicate-start|" "$ro"; then printf 'open'; else printf 'closed'; fi
+}
+cgt_killfloor() {  # <repo> <name> [poker] -> open | closed | other:<channel>
+  local out
+  cgc_ring
+  out=$( ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
+           "${CGC_ENV[@]}" BIONIC_PROBE_FREE_MB=100 BIONIC_PROBE_LOAD_1M=1.0 \
+           bash "${3:-$PARTY_PK_S}" tick 2>&1 ) )
+  case "$out" in
+    *"stop youngest suite-running writer $2@session-"*) printf 'open' ;;
+    *"no suite-running writer on this roster to stop"*) printf 'closed' ;;
+    *) printf 'other:%s' "$out" ;;
+  esac
+}
+
+for _cgt in met:open done:closed; do
+  _cgt_case="${_cgt%%:*}"; _cgt_want="${_cgt#*:}"; _cgt_name="cgt-$_cgt_case"
+  _cgt_r=$(cgt_world "$_cgt_case")
+  _cgt_ad=$(cgc_adopt "$_cgt_r" "$_cgt_name")
+  _cgt_kf=$(cgt_killfloor "$_cgt_r" "$_cgt_name")
+  _cgt_er=$(cgt_recorder "$_cgt_r" "$_cgt_case")
+  expect_eq "CG-close T20 ${_cgt_case}: the tick's adopt_fold (one of the four) answers ${_cgt_want}" "$_cgt_want" "$_cgt_ad"
+  expect_eq "CG-close T20 ${_cgt_case}: the kill floor's youngest_suite_writer answers ${_cgt_want}" "$_cgt_want" "$_cgt_kf"
+  expect_eq "CG-close T20 ${_cgt_case}: the recorder's duplicate-start check answers ${_cgt_want}" "$_cgt_want" "$_cgt_er"
+  expect_eq "CG-close T20 ${_cgt_case}: ONE answer across the three readers" "1" \
+    "$(printf '%s\n' "$_cgt_ad" "$_cgt_kf" "$_cgt_er" | sort -u | wc -l | tr -d ' ')"
+done
+
+# BOTH NEW READERS NAME THE ONE PREDICATE, and neither keeps a private MET close. The
+# behaviour above is the proof; this names the owner, as CG-close does for the four.
+for _cgt_f in "$PARTY_ER" "$CGC_POKER"; do
+  expect_true "CG-close T20 ${_cgt_f##*/} calls roster_open_names" \
+    grep -q 'roster_open_names "' "$_cgt_f"
+done
+expect_eq "CG-close T20 youngest_suite_writer keeps no MET-marker skip" "0" \
+  "$(awk '/^youngest_suite_writer\(\) \{/,/^\}/' "$CGC_POKER" | grep -cE 'state=MET|SWEPT_SCHEMA' || true)"
+
+# THE MUTATION PROOF: each new reader's old MET close restored in a copy, nothing else
+# touched, must answer `closed` on `met` — the one-answer row above would then go red.
+CGT_MUT="$SANDBOX/cgt-mut"
+CGT_MUT_HOOK="$(plant_hook_tree "$CGT_MUT")"
+cp "$SWEEPER" "$CGT_MUT_HOOK/session-sweeper.sh"   # the tick refuses without its sibling
+# The marker token is read off the shared constant, never spelled (§S17's scan).
+awk -v mk="${SWEPT_SCHEMA}|" '{
+  if (index($0, "*\"$nl$RN$nl\"*) : ;; *) continue ;; esac") > 0) {
+    print "    case \"$(grep -F \"" mk "\" \"$roster\" | grep -F \"|state=MET\")\" in *\"|name=${RN}|\"*) continue ;; esac  # mutant: the MET skip"
+    next
+  }
+  print }' "$CGC_POKER" > "$CGT_MUT_HOOK/session-poker.sh"
+awk -v mk="${SWEPT_SCHEMA}|" '{
+  if (index($0, "grep -qxF -- \"$DUP_NAME\" <<< \"$(roster_open_names ") > 0) {
+    print "    grep -F \"" mk "\" \"$ROSTER_FILE\" | grep -F \"|name=${DUP_NAME}|\" | grep -qF \"|state=MET\" && DUP_PRIOR=\"\"  # mutant: the MET close"
+    next
+  }
+  print }' "$PARTY_ER" > "$CGT_MUT_HOOK/execution-recorder.sh"
+expect_eq "CG-close T20 meta: the kill-floor mutant planted its MET skip" "1" \
+  "$(grep -c 'mutant: the MET skip' "$CGT_MUT_HOOK/session-poker.sh")"
+expect_eq "CG-close T20 meta: the recorder mutant planted its MET close" "1" \
+  "$(grep -c 'mutant: the MET close' "$CGT_MUT_HOOK/execution-recorder.sh")"
+_cgt_r=$(cgt_world met)
+expect_eq "CG-close T20 MUTANT a MET-skipping kill floor names nobody on a MET-but-unacked name (the row discriminates)" \
+  "closed" "$(cgt_killfloor "$_cgt_r" cgt-met "$CGT_MUT_HOOK/session-poker.sh")"
+expect_eq "CG-close T20 MUTANT a MET-closing recorder journals no duplicate on a MET-but-unacked name (the row discriminates)" \
+  "closed" "$(cgt_recorder "$_cgt_r" met "$CGT_MUT_HOOK/execution-recorder.sh")"
 
 # ============================================================
 section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave-20 T2, REQ-10 AC-10.2; D10)"
