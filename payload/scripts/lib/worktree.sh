@@ -35,8 +35,9 @@ _wt_self_dir() { dirname "${BASH_SOURCE[0]}"; }
 # roots.sh, THE SOFT SOURCE — the idiom this file already uses for git-argv.sh, taken at
 # source time because two of this file's roots are wanted on every path through it. Every
 # root resolver in the tree has one definition there (epic-22 wave-01, N1); this file is a
-# caller of `claude_home` (three copies before N1: here, lib/patrol.sh, lib/deps.sh) and
-# `worktree_root` (three: here as `_wt_main_root`, lib/patrol.sh, spawn-worktree.sh).
+# caller of `worktree_root` (three copies before N1: here as `_wt_main_root`, lib/patrol.sh,
+# spawn-worktree.sh). `claude_home` is only the probe for "already loaded": D1 read session
+# files through it until wave-20 T8c, and reads processes now.
 if ! declare -F claude_home >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/roots.sh"
@@ -112,36 +113,68 @@ _wt_drop_legacy_link() {  # <worktree abs> -> 0 if one was deleted
 # ---------------------------------------------------------------------------
 # D1 — "never merge under a running suite", as one predicate.
 #
-# A CONJUNCTION, and deliberately so. `busy` alone is every session that is
-# doing anything at all, and a live `tests/run.sh` alone belongs to whichever
-# project started it. Together they are the world the constraint names: this
-# project has a session working, and a suite is running on the machine. The
-# session half carries the project scoping — a session file states its cwd —
-# and the process half carries the suite scoping.
+# A FACT ABOUT PROCESSES AND DIRECTORIES (wave-20 T8c; review R2-1, R2-8; critic C2-1).
+# The land refuses while a `tests/run.sh` process has its SCRIPT PATH or its WORKING
+# DIRECTORY inside the project root (every linked worktree under it included) or inside
+# the land's target checkout. Nothing else is read.
 #
-# A SESSION FILE OUTLIVES ITS PROCESS. `kill -0` is a builtin, so the liveness
-# question is asked of the kernel rather than of the file, exactly as
-# lib/patrol.sh asks it: a stale file left by a crashed CLI must never be able
-# to hold a lease open forever.
+# NO SESSION PLAYS ANY PART. Until T8b the predicate was a conjunction: a busy session
+# file in this project AND a `tests/run.sh` anywhere on the machine. The process half never
+# said where the suite ran, so a land in one repository was refused by another project's
+# floor (T12 F3), and the session running the land was always busy and in-project. T8b then
+# excluded the lander's own session, but in-process teammates and Agent-tool subagents have
+# no session file of their own: the only busy file in the project is the orchestrator's, so
+# the exclusion switched D1 off for the orchestrator's own dispatched floor, its main case.
+# Where the suite runs is the whole question, and the process answers it.
+#
+# ONLY THE RUNNER. A lone `*.test.sh` does not count. That is T8's design: the runner is the
+# floor and the integration run, and the root scope covers every tree under `.worktrees/`,
+# so counting a writer's own suite in its own tree would refuse every land in the wave
+# while any writer tests.
+#
+# UNREADABLE, NO OPINION. A process whose working directory cannot be read is judged by its
+# script path alone, and a relative script path with no working directory places nothing.
+# That is the stance this predicate has always taken on a machine it cannot read (it used to
+# be a missing jq): D1 guards a merge under a suite, not an unreadable process table, and
+# refusing on it would make the verb unusable where trees most need giving back.
 
-# Existence only. Same shape as hooks/stop-check.sh's and session-sweeper.sh's,
-# for the same reason: `pgrep -f` matches the full command line, and `ps` covers
-# a machine without pgrep.
-_wt_proc_running() {  # <pattern>
+# The pids whose command line names `tests/run.sh`, one per line. `pgrep -f` matches the
+# full command line and, on macOS, leaves out its own ancestors, so a land that a runner
+# itself drives never sees that runner. `ps` covers a machine without pgrep.
+_wt_suite_pids() {
   if command -v pgrep >/dev/null 2>&1; then
-    pgrep -f -- "$1" >/dev/null 2>&1
-    return $?
+    pgrep -f -- 'tests/run\.sh' 2>/dev/null
+    return 0
   fi
-  ps -eo command 2>/dev/null | grep -qF -- "$1"
+  ps -eo pid=,command= 2>/dev/null | awk '/tests\/run\.sh/ { print $1 }'
 }
 
-# Is <cwd> this project? The main checkout itself, or any linked worktree under
-# its `.worktrees` — which is where a writer running a suite actually sits, and
-# so the case that matters most. A second directory, when given, counts too:
-# the land's TARGET checkout (T8, D1), which `spawn-worktree.sh create` can
-# place outside the root with an absolute parent. The merge happens there, so a
-# suite running there is the one the constraint names.
-_wt_cwd_in_project() {  # <cwd> <main-root> [target-checkout]
+# `<pid> <cwd>` per pid whose working directory can be read, the path physical. Linux has
+# /proc/<pid>/cwd. macOS has no /proc and BSD `ps` has no cwd column, so it takes ONE `lsof`
+# call for all the pids, about 12 ms on this machine. An empty pid list never reaches lsof,
+# because `lsof -p ""` lists every process.
+_wt_proc_cwds() {  # <pid>...
+  local pid list="" d
+  [ "$#" -gt 0 ] || return 0
+  if [ -e /proc/self/cwd ]; then
+    for pid in "$@"; do
+      d="$(readlink "/proc/${pid}/cwd" 2>/dev/null)" && [ -n "$d" ] && printf '%s %s\n' "$pid" "$d"
+    done
+    return 0
+  fi
+  command -v lsof >/dev/null 2>&1 || return 0
+  for pid in "$@"; do list="${list:+${list},}${pid}"; done
+  lsof -a -d cwd -Fn -p "$list" 2>/dev/null \
+    | awk '/^p/ { p = substr($0, 2) } /^n/ && p != "" { print p " " substr($0, 2); p = "" }'
+}
+
+# Is <path> this project? The main checkout itself, or anything under it, which takes in
+# every linked worktree under its `.worktrees` — where a writer running a suite actually
+# sits. A second directory, when given, counts too: the land's TARGET checkout (T8, D1),
+# which `spawn-worktree.sh create` can place outside the root with an absolute parent. The
+# merge happens there, so a suite running there is the one the constraint names. <path> is
+# a process's working directory or its script's path.
+_wt_cwd_in_project() {  # <path> <main-root> [target-checkout]
   local cwd="${1:-}" root="${2:-}" co="${3:-}"
   [ -n "$cwd" ] && [ -n "$root" ] || return 1
   [ "$cwd" = "$root" ] && return 0
@@ -153,45 +186,44 @@ _wt_cwd_in_project() {  # <cwd> <main-root> [target-checkout]
   return 1
 }
 
-# The D1 predicate. Prints `session=<name> pid=<pid> cwd=<cwd>` for the first
-# session that satisfies it and returns 0; returns 1 when nothing does.
-#
-# THE CALLER'S OWN SESSION NEVER COUNTS AGAINST ITSELF (wave-20 T8b, review R8/F3). A
-# session is BUSY for the whole span of the tool call that is asking this question, so
-# without an exclusion the conjunction always found at least one hit — the caller's own
-# session file, busy, in this project — and D1 reduced to "any tests/run.sh anywhere,
-# landed by anybody" (T12's live bed: the first head attempt was refused naming its own
-# session, F3). `<exclude-sid>` is the landing session's own id, threaded down from
-# `worktree_land`'s third argument; a busy session file whose `sessionId` equals it is
-# skipped, but every OTHER busy session in this project still refuses the land — that
-# refusal is the reason this predicate exists.
-#
-# NO JQ, NO OPINION. jq is this repo's only parser, and a machine without it
-# cannot be shown a busy session — so the predicate answers "not proven" and the
-# land proceeds. Refusing on a missing parser would make the verb unusable on
-# exactly the degraded machine whose trees most need giving back, and D1 is a
-# guard against a merge under a suite, not a guard against an unreadable
-# directory.
-_wt_busy_suite() {  # <main-root> [target-checkout] [exclude-sid] -> session=... pid=... cwd=...
-  local root="${1:-}" co="${2:-}" exclude="${3:-}" dir f pid cwd status name sid
-  dir="$(claude_home)/sessions"
-  [ -d "$dir" ] || return 1
-  command -v jq >/dev/null 2>&1 || return 1
-  _wt_proc_running 'tests/run.sh' || return 1
-  for f in "$dir"/*.json; do
-    [ -f "$f" ] || continue
-    pid="$(jq -r '.pid // empty' "$f" 2>/dev/null)"
+# The D1 predicate. Prints `pid=<pid> cwd=<cwd> script=<path>` for the first runner that
+# satisfies it and returns 0; returns 1 when none does. A field that could not be read
+# prints `unreadable`. The script path is the first command-line word ending in
+# `tests/run.sh`, taken against the working directory when it is relative, with its
+# directory made physical when that directory exists, so a symlinked spelling (`/tmp` for
+# `/private/tmp`) still compares.
+_wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=...
+  local root="${1:-}" co="${2:-}" pids cwds pid cmd cwd script dir tok
+  local -a words
+  [ -n "$root" ] || return 1
+  pids="$(_wt_suite_pids)"
+  [ -n "$pids" ] || return 1
+  # shellcheck disable=SC2086  # one pid per word, digits only
+  cwds="$(_wt_proc_cwds $pids)"
+  for pid in $pids; do
     case "$pid" in ''|*[!0-9]*) continue ;; esac
-    status="$(jq -r '.status // empty' "$f" 2>/dev/null)"
-    [ "$status" = "busy" ] || continue
-    cwd="$(jq -r '.cwd // empty' "$f" 2>/dev/null)"
-    _wt_cwd_in_project "$cwd" "$root" "$co" || continue
-    sid="$(jq -r '.sessionId // empty' "$f" 2>/dev/null)"
-    [ -n "$exclude" ] && [ -n "$sid" ] && [ "$sid" = "$exclude" ] && continue
-    kill -0 "$pid" 2>/dev/null || continue
-    name="$(jq -r '.name // .sessionId // empty' "$f" 2>/dev/null)"
-    printf 'session=%s pid=%s cwd=%s' "${name:-unknown}" "$pid" "$cwd"
-    return 0
+    cmd="$(ps -o command= -p "$pid" 2>/dev/null)"
+    # Re-read, not trusted from the listing: the process may have exited, or its pid been
+    # reused, since pgrep answered.
+    case "$cmd" in *tests/run.sh*) : ;; *) continue ;; esac
+    cwd="$(printf '%s\n' "$cwds" | awk -v p="$pid" '$1 == p { sub(/^[^ ]* /, ""); print; exit }')"
+    script=""
+    read -r -a words <<< "$cmd"
+    for tok in "${words[@]}"; do
+      case "$tok" in *tests/run.sh) script="$tok"; break ;; esac
+    done
+    case "$script" in
+      '') : ;;
+      /*) : ;;
+      *) if [ -n "$cwd" ]; then script="${cwd}/${script}"; else script=""; fi ;;
+    esac
+    if [ -n "$script" ]; then
+      dir="$(cd "${script%/*}" 2>/dev/null && pwd -P)" && script="${dir}/${script##*/}"
+    fi
+    if _wt_cwd_in_project "$script" "$root" "$co" || _wt_cwd_in_project "$cwd" "$root" "$co"; then
+      printf 'pid=%s cwd=%s script=%s' "$pid" "${cwd:-unreadable}" "${script:-unreadable}"
+      return 0
+    fi
   done
   return 1
 }
@@ -280,8 +312,8 @@ EOF
   printf '%s' "$abs"
 }
 
-worktree_land() {  # <worktree path> <onto> [caller-sid] -> LANDED | REFUSED
-  local target="${1:-}" onto="${2:-}" sid="${3:-}" wt_abs root branch co ahead busy merge_sha rc
+worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
+  local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -345,7 +377,7 @@ worktree_land() {  # <worktree path> <onto> [caller-sid] -> LANDED | REFUSED
     _wt_refuse "onto-checkout-dirty checkout=${co} branch=${onto}"; return 2
   fi
 
-  busy="$(_wt_busy_suite "$root" "$co" "$sid")" && {
+  busy="$(_wt_busy_suite "$root" "$co")" && {
     _wt_refuse "suite-running ${busy}"; return 2
   }
 
@@ -393,7 +425,7 @@ worktree_land_for_session() {  # <worktree path> <root> <sid> -> LANDED | REFUSE
       || { _wt_refuse "run-library-unloadable path=${lib}"; return 2; }
   fi
   onto="$(session_working_branch "$root" "$sid")" || { _wt_refuse "${onto:-no-bound-plan}"; return 2; }
-  worktree_land "$target" "$onto" "$sid"
+  worktree_land "$target" "$onto"
 }
 
 # ---------------------------------------------------------------------------
