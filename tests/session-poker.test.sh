@@ -5419,6 +5419,130 @@ expect_eq "28g2 …so it still decodes to the command the brief declared" \
   "$S28G_CMD" "$(roster_pipe_unescape "$S28G_FIELD")"
 expect_eq "28g3 …and the value is still ONE field of the row" "1" \
   "$(printf '%s' "$S28G_ROW" | tr '|' '\n' | grep -c '^re_executes=' | tr -d ' ')"
+
+# ---------- 28h: a row whose plan is THERE and cannot be read is UNREADABLE, never closed ----
+#
+# (wave-20 T18, REQ-2, D2; T1's carry-over.) T1 made `session_run` answer `bound-unreadable`
+# for a plan at mode 000, and every reader of the session's OWN binding names it. This verb
+# reads a different plan — the one each foreign row names — and asked `[ -f p ] && ! run_open
+# p`, so a mode-000 plan (`-f` true, `run_open` 3) read as CLOSED: its rows were counted
+# `closed=` and printed nowhere, while the run they belong to may be mid-flight. A plan inside
+# a folder that cannot be opened (`-f` false) fell the other way, through to the partition, so
+# an unbound caller ADOPTED a row whose run it could not read. Both now print the row as
+# UNREADABLE, naming the path; count it `unreadable=`, never `closed=`; and write nothing.
+#
+# THE CALLER IS UNBOUND, the partition that adopts every row (`all`): a verb that only LISTED
+# the row would pass a bound caller's `other` arm for the wrong reason.
+#
+# PRIVILEGE, CHECKED FIRST (run-predicate R8h's reason): a suite running as root reads a
+# mode-000 file, and every row below would pass on a readable plan.
+S28_C="cccc0000-28cc-4bbb-8ccc-000000000003"
+s28_tmp_sums() {  # <repo> -> one cksum line per file in .bionic/tmp, sorted: what adopt wrote
+  ( cd "$1/.bionic/tmp" && for _f in *; do [ -f "$_f" ] && cksum "$_f"; done ) | sort
+}
+s28_line() {  # <row name> <output> -> that row's poker-adopt/v1 line
+  printf '%s\n' "$2" | /usr/bin/grep "^poker-adopt/v1|.*|name=$1|" | head -1
+}
+R28H="$(make_repo s28-unreadable)"; new_roster "$R28H"
+mkdir -p "$R28H/.bionic/docs/record"
+P28H="$(plan_at "$R28H" 'epic-28/wave-locked.plan.md' "$(plan_body 4 'in progress')")"
+add_row_to "$R28H" "$S28_C" name=locked-run-writer status=identified \
+  agent_id=alocked-run-2800000000000008 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" plan="$P28H" \
+  deliverable="$R28H/.bionic/docs/record/locked-run.md"
+chmod 000 "$P28H"
+expect_eq "28h premise: the row's plan exists and this user cannot read it" "yes" \
+  "$([ -e "$P28H" ] && [ ! -r "$P28H" ] && echo yes || echo no)"
+S28H_BEFORE="$(s28_tmp_sums "$R28H")"
+poke "$R28H" adopt
+expect_contains "28h a row whose plan cannot be read is LISTED, never dropped as closed" \
+  "partition=unreadable" "$(s28_line locked-run-writer "$OUT")"
+expect_contains "28h2 …the report says UNREADABLE" "UNREADABLE" "$OUT"
+expect_contains "28h3 …and names the plan it cannot read" "$P28H" "$OUT"
+expect_eq "28h4 …it is never counted closed" "0" "$(s28_field "$OUT" closed)"
+expect_eq "28h5 …it is counted unreadable, on the summary line" "1" "$(s28_field "$OUT" unreadable)"
+expect_absent "28h6 …and the closed-run sentence is not said about it" "row(s) skipped" "$OUT"
+expect_eq "28h7 …and nothing under .bionic/tmp changed: no row adopted, no marker copied, no ack" \
+  "$S28H_BEFORE" "$(s28_tmp_sums "$R28H")"
+# THE PAIRED POSITIVE, ON THE SAME FIXTURE: one fact moves — the plan's mode — and the same
+# unbound caller adopts the same row. Without it, 28h passes against a verb that adopts nothing.
+chmod 644 "$P28H"
+poke "$R28H" adopt
+expect_contains "28h8 …the same row, its plan readable again, is adopted" \
+  "partition=all" "$(s28_line locked-run-writer "$OUT")"
+expect_eq "28h9 …counted neither unreadable nor closed" "0|0" \
+  "$(s28_field "$OUT" unreadable)|$(s28_field "$OUT" closed)"
+expect_eq "28h10 …and it lands on this session's roster" "1" \
+  "$(/usr/bin/grep -c '|name=locked-run-writer|' "$(roster_of "$R28H")" || true)"
+
+# ---------- 28i: a BOUND caller whose own binding is that plan still never adopts it -----
+#
+# The row names the caller's own plan, so the partition alone would say `own` and write it.
+# An unreadable plan outranks the partition: nothing can be read to take ownership against.
+R28I="$(make_repo s28-unreadable-own)"; new_roster "$R28I"
+mkdir -p "$R28I/.bionic/docs/record"
+P28I="$(plan_at "$R28I" 'epic-28/wave-own.plan.md' "$(plan_body 4 'in progress')")"
+add_row_to "$R28I" "$S28_C" name=own-locked-writer status=identified \
+  agent_id=aown-locked-2800000000000009 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" plan="$P28I" \
+  deliverable="$R28I/.bionic/docs/record/own-locked.md"
+bind_marker "$R28I" "$P28I"
+chmod 000 "$P28I"
+S28I_BEFORE="$(s28_tmp_sums "$R28I")"
+poke "$R28I" adopt
+expect_contains "28i bound to the unreadable plan: its own row is UNREADABLE, not own" \
+  "partition=unreadable" "$(s28_line own-locked-writer "$OUT")"
+expect_eq "28i2 …counted unreadable, never closed" "1|0" \
+  "$(s28_field "$OUT" unreadable)|$(s28_field "$OUT" closed)"
+expect_eq "28i3 …and nothing is written" "$S28I_BEFORE" "$(s28_tmp_sums "$R28I")"
+chmod 644 "$P28I"
+poke "$R28I" adopt
+expect_contains "28i4 …the paired positive: readable again, the same row is its own" \
+  "partition=own" "$(s28_line own-locked-writer "$OUT")"
+
+# ---------- 28j: a plan inside a folder that cannot be opened is UNREADABLE too ---------
+#
+# research D3 N1's shape: `-e`, `-f` and `-r` are all false for the plan, exactly as for a
+# deleted one, so only the nearest existing ancestor tells the two apart. This is the shape
+# that was ADOPTED, not dropped: `[ -f p ]` failed, so the row fell through to `all`.
+R28J="$(make_repo s28-unreadable-vault)"; new_roster "$R28J"
+mkdir -p "$R28J/.bionic/docs/record"
+P28J="$(plan_at "$R28J" 'epic-28/vault/wave-vaulted.plan.md' "$(plan_body 4 'in progress')")"
+V28J="$R28J/.bionic/docs/plans/epic-28/vault"
+add_row_to "$R28J" "$S28_C" name=vaulted-writer status=identified \
+  agent_id=avaulted-run-280000000000010 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" plan="$P28J" \
+  deliverable="$R28J/.bionic/docs/record/vaulted.md"
+chmod 000 "$V28J"
+expect_eq "28j premise: the plan reads as absent and its folder cannot be opened" "no|no" \
+  "$([ -e "$P28J" ] && echo yes || echo no)|$([ -x "$V28J" ] && echo yes || echo no)"
+S28J_BEFORE="$(s28_tmp_sums "$R28J")"
+poke "$R28J" adopt
+expect_contains "28j a row whose plan sits in an unopenable folder is UNREADABLE, not adopted" \
+  "partition=unreadable" "$(s28_line vaulted-writer "$OUT")"
+expect_eq "28j2 …counted unreadable, never closed" "1|0" \
+  "$(s28_field "$OUT" unreadable)|$(s28_field "$OUT" closed)"
+expect_eq "28j3 …and nothing is written" "$S28J_BEFORE" "$(s28_tmp_sums "$R28J")"
+chmod 755 "$V28J"
+
+# ---------- 28k: THE CONTROL — a plan that is GONE is not unreadable ---------------------
+#
+# The row's plan was deleted under folders that open. That is today's behaviour, unchanged:
+# `run_open` says nothing about a path that is not a file here, so the row keeps its
+# partition (an unbound caller adopts it) and is neither unreadable nor closed.
+R28K="$(make_repo s28-gone-plan)"; new_roster "$R28K"
+mkdir -p "$R28K/.bionic/docs/record"
+P28K="$R28K/.bionic/docs/plans/epic-28/wave-gone.plan.md"
+add_row_to "$R28K" "$S28_C" name=gone-plan-writer status=identified \
+  agent_id=agone-plan-2800000000000011 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" plan="$P28K" \
+  deliverable="$R28K/.bionic/docs/record/gone.md"
+poke "$R28K" adopt
+expect_contains "28k a row whose plan is gone keeps today's partition" \
+  "partition=all" "$(s28_line gone-plan-writer "$OUT")"
+expect_eq "28k2 …and is counted neither unreadable nor closed" "0|0" \
+  "$(s28_field "$OUT" unreadable)|$(s28_field "$OUT" closed)"
+expect_absent "28k3 …and the report never says UNREADABLE" "UNREADABLE" "$OUT"
 # ============================================================
 section "Section 29: extend — re-opening a MET row (REQ-10; D11, T-h)"
 # ============================================================
