@@ -4,11 +4,15 @@
 #
 # WHAT THIS FILE OWNS. A spawned worktree is a leased slot, bound to the ledger
 # row that dispatched its writer. The lease ends when the row is
-# fact-discharged, and ending it is ONE act: merge the branch, remove the tree,
-# prune. Three callers need that act and the two facts around it —
-# `spawn-worktree.sh land`, `hooks/stop-orders.sh standdown`, and the Patrol
-# tick's lease-overrun line — so the behaviour lives here and each caller is a
-# call site rather than a fourth definition of "discharged".
+# fact-discharged, and ending it is ONE act: merge the branch into the plan's
+# working branch, remove the tree, prune. TWO callers end a lease —
+# `spawn-worktree.sh land` and `hooks/stop-orders.sh standdown` — and both call
+# `worktree_land_for_session`, the one path from a session to a land (wave-20
+# T8, REQ-1, D1). The Patrol tick is a READER here and never a caller of the
+# act: its lease-overrun line (`worktree_lease_overruns`) reports a tree that
+# outlived its row, and it lands nothing and removes nothing. The behaviour
+# lives here so each caller is a call site rather than another definition of
+# "discharged".
 #
 # SOURCED, NOT EXECUTED. Function names are prefixed `worktree_` (public) or
 # `_wt_` (internal); nothing here runs at source time and nothing here exits.
@@ -133,12 +137,19 @@ _wt_proc_running() {  # <pattern>
 
 # Is <cwd> this project? The main checkout itself, or any linked worktree under
 # its `.worktrees` — which is where a writer running a suite actually sits, and
-# so the case that matters most.
-_wt_cwd_in_project() {  # <cwd> <main-root>
-  local cwd="${1:-}" root="${2:-}"
+# so the case that matters most. A second directory, when given, counts too:
+# the land's TARGET checkout (T8, D1), which `spawn-worktree.sh create` can
+# place outside the root with an absolute parent. The merge happens there, so a
+# suite running there is the one the constraint names.
+_wt_cwd_in_project() {  # <cwd> <main-root> [target-checkout]
+  local cwd="${1:-}" root="${2:-}" co="${3:-}"
   [ -n "$cwd" ] && [ -n "$root" ] || return 1
   [ "$cwd" = "$root" ] && return 0
   case "$cwd/" in "$root"/*) return 0 ;; esac
+  if [ -n "$co" ]; then
+    [ "$cwd" = "$co" ] && return 0
+    case "$cwd/" in "$co"/*) return 0 ;; esac
+  fi
   return 1
 }
 
@@ -151,8 +162,8 @@ _wt_cwd_in_project() {  # <cwd> <main-root>
 # exactly the degraded machine whose trees most need giving back, and D1 is a
 # guard against a merge under a suite, not a guard against an unreadable
 # directory.
-_wt_busy_suite() {  # <main-root> -> session=... pid=... cwd=...
-  local root="${1:-}" dir f pid cwd status name
+_wt_busy_suite() {  # <main-root> [target-checkout] -> session=... pid=... cwd=...
+  local root="${1:-}" co="${2:-}" dir f pid cwd status name
   dir="$(claude_home)/sessions"
   [ -d "$dir" ] || return 1
   command -v jq >/dev/null 2>&1 || return 1
@@ -164,7 +175,7 @@ _wt_busy_suite() {  # <main-root> -> session=... pid=... cwd=...
     status="$(jq -r '.status // empty' "$f" 2>/dev/null)"
     [ "$status" = "busy" ] || continue
     cwd="$(jq -r '.cwd // empty' "$f" 2>/dev/null)"
-    _wt_cwd_in_project "$cwd" "$root" || continue
+    _wt_cwd_in_project "$cwd" "$root" "$co" || continue
     kill -0 "$pid" 2>/dev/null || continue
     name="$(jq -r '.name // .sessionId // empty' "$f" 2>/dev/null)"
     printf 'session=%s pid=%s cwd=%s' "${name:-unknown}" "$pid" "$cwd"
@@ -176,9 +187,19 @@ _wt_busy_suite() {  # <main-root> -> session=... pid=... cwd=...
 # ---------------------------------------------------------------------------
 # The land verb.
 #
-# ONE ACT (C1). Merge the tree's branch --no-ff into the main checkout's CURRENT
-# branch, remove the tree, prune. A land that did two of the three is a lease
-# half-ended, and the third would be somebody's later chore.
+# ONE ACT (C1). Merge the tree's branch --no-ff into <onto>, IN THE CHECKOUT
+# THAT HOLDS <onto>, remove the tree, prune. A land that did two of the three is
+# a lease half-ended, and the third would be somebody's later chore.
+#
+# THE TARGET IS NAMED, NEVER READ OFF THE MAIN CHECKOUT (wave-20 T8, REQ-1, D1).
+# Until 1.8.7 the merge went into whatever branch the main checkout sat on. A
+# wave's integration branch lives in its own checkout under `.worktrees/`, and a
+# human may have the main checkout on a feature branch of their own: the land
+# merged a task into that feature branch and left the wave branch unmerged
+# (report #9). <onto> is required; `worktree_land_for_session`, below, reads it
+# off the session's bound plan, and that is the path every caller takes. The
+# checkout holding <onto> is found in `git worktree list --porcelain`
+# (`worktree_checkout_of`), and the merge runs there with `git -C`.
 #
 # EVERY REFUSAL BEFORE THE MERGE. The order is cheapest-and-most-local first,
 # and every one of them is checked before anything is changed, so a refused land
@@ -186,18 +207,17 @@ _wt_busy_suite() {  # <main-root> -> session=... pid=... cwd=...
 # exception of a legacy `.bionic` link, which is deleted on the way in because
 # C2 retires it whatever the verdict.
 #
-# TWO BOUNDS ON THE POWER (security review F1). This function merges into the
-# main checkout's current branch and deletes a worktree; both of those are
-# irreversible enough that WHICH branch and WHICH tree cannot be left to the
-# caller's word for it.
+# TWO BOUNDS ON THE POWER (security review F1). This function merges into a
+# branch and deletes a worktree; both of those are irreversible enough that
+# WHICH branch and WHICH tree cannot be left to the caller's word for it.
 #
-#   PROTECTED BRANCH. The branch merged into is never `main`/`master`.
+#   PROTECTED BRANCH. The branch merged into — <onto> — is never `main`/`master`.
 #   hooks/protect-main.sh is the wall that keeps unreviewed work off those
 #   branches, and it reads `git push` argv — a local `git merge --no-ff` is
-#   invisible to it. Without this refusal a main checkout left on `main` (which
-#   is where every checkout starts) turned an ordinary `land` into an unwalled
-#   write to the protected branch, with the unmerged tree deleted in the same
-#   call. The list is `git_branch_protected`'s, not a second copy of it.
+#   invisible to it. Without this refusal a land onto `main` — before T8, any
+#   land from a main checkout left where every checkout starts — was an
+#   unwalled write to the protected branch, with the unmerged tree deleted in
+#   the same call. The list is `git_branch_protected`'s, not a second copy of it.
 #
 #   INSIDE THE FARM. The tree landed sits under `<main-root>/.worktrees/`,
 #   the only place this lease ever hands one out. `.git`-is-a-file proves the
@@ -218,8 +238,38 @@ _wt_busy_suite() {  # <main-root> -> session=... pid=... cwd=...
 _wt_say() { printf '%s: %s\n' "${WORKTREE_CONTRACT_PROG:-spawn-worktree}" "$*"; }
 _wt_refuse() { _wt_say "REFUSED reason=$*"; return 2; }
 
-worktree_land() {  # <worktree path> -> LANDED | REFUSED
-  local target="${1:-}" wt_abs root branch main_branch ahead busy merge_sha
+# The checkout holding <branch>, from `git worktree list --porcelain`: one
+# `worktree <path>` stanza per checkout, its `branch refs/heads/<b>` line naming
+# what it holds. A detached or bare stanza holds no branch and is skipped. The
+# path is printed physically (`pwd -P`), the form every other path in this file
+# is compared in.
+#
+#   0  one checkout holds it -> its path
+#   1  no checkout holds it
+#   2  more than one does (`worktree add --force` makes that possible) -> the
+#      paths, space-separated: which of them to merge in is not a guess to make
+#   3  the one stanza's directory cannot be entered (a prunable entry) -> its path
+worktree_checkout_of() {  # <root> <branch>
+  local root="${1:-}" want="refs/heads/${2:-}" line path="" hits="" n=0 abs
+  [ -n "${2:-}" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) path="${line#worktree }" ;;
+      "branch "*)
+        [ "${line#branch }" = "$want" ] || continue
+        n=$((n + 1)); hits="${hits:+$hits }${path}" ;;
+    esac
+  done <<EOF
+$(git -C "$root" worktree list --porcelain 2>/dev/null)
+EOF
+  [ "$n" -eq 0 ] && return 1
+  if [ "$n" -gt 1 ]; then printf '%s' "$hits"; return 2; fi
+  abs="$(_wt_abs "$hits")" || { printf '%s' "$hits"; return 3; }
+  printf '%s' "$abs"
+}
+
+worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
+  local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -240,13 +290,22 @@ worktree_land() {  # <worktree path> -> LANDED | REFUSED
     *) _wt_refuse "outside-worktrees path=${wt_abs} root=${root}"; return 2 ;;
   esac
 
-  # THE BRANCH MERGED INTO, read and judged before anything is touched.
-  main_branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-  [ -n "$main_branch" ] || { _wt_refuse "main-head-unreadable root=${root}"; return 2; }
-  _wt_branch_protected "$main_branch"
+  # THE BRANCH MERGED INTO, named by the caller and judged before anything is
+  # touched: it must be a branch, held by exactly one checkout, and not protected.
+  [ -n "$onto" ] || { _wt_refuse "onto-missing path=${wt_abs}"; return 2; }
+  git -C "$root" show-ref --verify --quiet "refs/heads/${onto}" \
+    || { _wt_refuse "onto-unknown branch=${onto} root=${root}"; return 2; }
+  co="$(worktree_checkout_of "$root" "$onto")"; rc=$?
+  case $rc in
+    0) : ;;
+    1) _wt_refuse "onto-not-checked-out branch=${onto} root=${root}"; return 2 ;;
+    2) _wt_refuse "onto-ambiguous branch=${onto} checkouts=${co// /,}"; return 2 ;;
+    *) _wt_refuse "onto-checkout-unresolvable branch=${onto} checkout=${co}"; return 2 ;;
+  esac
+  _wt_branch_protected "$onto"
   case $? in
-    0) _wt_refuse "protected-branch branch=${main_branch} root=${root}"; return 2 ;;
-    2) _wt_refuse "protected-branch-unknowable branch=${main_branch} root=${root}"; return 2 ;;
+    0) _wt_refuse "protected-branch branch=${onto} checkout=${co}"; return 2 ;;
+    2) _wt_refuse "protected-branch-unknowable branch=${onto} checkout=${co}"; return 2 ;;
   esac
 
   branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null)"
@@ -260,23 +319,31 @@ worktree_land() {  # <worktree path> -> LANDED | REFUSED
     _wt_refuse "dirty-tree path=${wt_abs} branch=${branch}"; return 2
   fi
 
-  ahead="$(git -C "$root" rev-list --count "HEAD..${branch}" 2>/dev/null)"
+  ahead="$(git -C "$root" rev-list --count "refs/heads/${onto}..${branch}" 2>/dev/null)"
   case "$ahead" in ''|*[!0-9]*) _wt_refuse "branch-unreadable branch=${branch}"; return 2 ;; esac
   if [ "$ahead" -eq 0 ]; then
-    _wt_refuse "nothing-to-land branch=${branch} onto=${main_branch}"; return 2
+    _wt_refuse "nothing-to-land branch=${branch} onto=${onto}"; return 2
   fi
 
-  busy="$(_wt_busy_suite "$root")" && {
+  # THE TARGET CHECKOUT IS CLEAN IN WHAT GIT TRACKS. A merge into a checkout
+  # holding staged or modified tracked files mixes somebody's unfinished work
+  # into the merge — or fails half-way on it. Untracked files are not read: the
+  # `.bionic` alias and `.worktrees/` live there by design.
+  if [ -n "$(git -C "$co" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    _wt_refuse "onto-checkout-dirty checkout=${co} branch=${onto}"; return 2
+  fi
+
+  busy="$(_wt_busy_suite "$root" "$co")" && {
     _wt_refuse "suite-running ${busy}"; return 2
   }
 
   # --no-ff ALWAYS: a fast-forward would erase the fact that this was a task,
   # and the merge commit is what the ledger row points at.
-  if ! git -C "$root" merge --no-ff -m "merge ${branch} (land)" "$branch" >/dev/null 2>&1; then
-    git -C "$root" merge --abort >/dev/null 2>&1
-    _wt_refuse "merge-failed branch=${branch} onto=${main_branch}"; return 2
+  if ! git -C "$co" merge --no-ff -m "merge ${branch} (land)" "$branch" >/dev/null 2>&1; then
+    git -C "$co" merge --abort >/dev/null 2>&1
+    _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co}"; return 2
   fi
-  merge_sha="$(git -C "$root" rev-parse HEAD 2>/dev/null)"
+  merge_sha="$(git -C "$co" rev-parse HEAD 2>/dev/null)"
 
   # No --force here either. If git refuses now, the merge has landed and the
   # tree has not gone; the line says both so the operator is not left guessing
@@ -286,8 +353,35 @@ worktree_land() {  # <worktree path> -> LANDED | REFUSED
   fi
   git -C "$root" worktree prune >/dev/null 2>&1
 
-  _wt_say "LANDED branch=${branch} merge=${merge_sha} removed=${wt_abs}"
+  _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} removed=${wt_abs}"
   return 0
+}
+
+# THE ONE PATH FROM A SESSION TO A LAND (wave-20 T8, REQ-1, D1). `spawn-worktree.sh
+# land` and `hooks/stop-orders.sh standdown` both call this and nothing else, so
+# "where does this tree land" has one answer: the session's bound plan's
+# `working-branch:`, read by `session_working_branch` (lib/run.sh). Every
+# answer that is not a branch is a refusal naming its reason — no session id,
+# `no-bound-plan` (the unbound `fallback` and `none` alike: the root's newest
+# run is not this session's target), `bound-unreadable`, `no-working-branch` —
+# and nothing is touched on any of them.
+#
+# run.sh IS LOADED LAZILY, from this file's own directory, the way
+# `_wt_branch_protected` loads git-argv.sh: neither caller's library list has
+# to change, and a caller that already sourced it pays nothing. A run.sh that
+# cannot be loaded is a refusal, never a land onto a guessed branch.
+worktree_land_for_session() {  # <worktree path> <root> <sid> -> LANDED | REFUSED
+  local target="${1:-}" root="${2:-}" sid="${3:-}" lib onto
+  [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
+  if ! declare -f session_working_branch >/dev/null 2>&1; then
+    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/run.sh"
+    # shellcheck source=/dev/null
+    [ -r "$lib" ] && . "$lib" 2>/dev/null
+    declare -f session_working_branch >/dev/null 2>&1 \
+      || { _wt_refuse "run-library-unloadable path=${lib}"; return 2; }
+  fi
+  onto="$(session_working_branch "$root" "$sid")" || { _wt_refuse "${onto:-no-bound-plan}"; return 2; }
+  worktree_land "$target" "$onto"
 }
 
 # ---------------------------------------------------------------------------
