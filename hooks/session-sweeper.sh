@@ -30,6 +30,7 @@
 #     AMBIGUOUS   two or more contracts share this name; none of them is judged
 #     MET         every declared artifact is on disk, non-empty, written after the launch
 #     FOLLOW-UP   MET, but the orchestrator has sent the agent a message it has not answered
+#                 (never a row the ack has already closed: a send after the close is ignored)
 #     STILL-LIVE  not landed, but the row's own claimed process or progress says it is working
 #     UNMET       declared, not delivered, nothing running
 #
@@ -527,9 +528,9 @@ ledger_count() {  # <pattern> -> a single integer, on stdout
 # acked when its name was acked AND it is not still open — so a name acked and then
 # dispatched again reads `acked=no` here, as it reads open to dispatch preflight, the stop
 # wall's occupancy and the tick's `adopt_fold`, which all ask the same predicate.
-ACKED_NAMES=""; ACKED_COUNT=0; ACKED_OPEN=""
+ACKED_NAMES=""; ACKED_COUNT=0; ACKED_OPEN=""; ACKED_READ=0
 read_acked() {
-  ACKED_NAMES=""; ACKED_COUNT=0; ACKED_OPEN=""
+  ACKED_NAMES=""; ACKED_COUNT=0; ACKED_OPEN=""; ACKED_READ=1
   [ -f "$LEDGER_FILE" ] || return 0
   [ -L "$ROSTER_FILE" ] || ACKED_OPEN="$(roster_open_names "$ROSTER_FILE" "$LEDGER_FILE" "$SESSION_ID")"
   local line ev n
@@ -550,6 +551,29 @@ read_acked() {
 "
     ACKED_COUNT=$((ACKED_COUNT + 1))
   done < "$LEDGER_FILE"
+}
+
+# THE LATEST ACK OF ONE NAME, for a sentence and never for a decision (wave-20 T9b). Whether
+# the name is closed is `row_acked`'s answer, which is `roster_open_names`'; this only says
+# when and by whom, so a detail can name the close a follow-up was ignored against. One awk
+# pass, run only on that rare path: `at by reason`, space-separated, empty when none reads.
+# The name reaches awk through ENVIRON, never `-v`, which reads backslashes as escapes, and the
+# ledger on stdin, never as an operand, which awk reads as an assignment when it holds a `=`.
+ack_stamp_of() {  # <name> -> "<at> <by> <reason>" of its latest well-formed ack
+  [ -f "$LEDGER_FILE" ] && [ ! -L "$LEDGER_FILE" ] || return 0
+  SWEEP_ACK_NAME="$1" awk -F'|' '
+    index($0, "sweeper-ledger/v1|") == 1 {
+      ev = ""; nm = ""; at = ""; by = ""; rs = ""
+      for (i = 2; i <= NF; i++) {
+        k = substr($i, 1, index($i, "=") - 1); v = substr($i, index($i, "=") + 1)
+        if (k == "event") ev = v; else if (k == "name") nm = v; else if (k == "at") at = v
+        else if (k == "by") by = v; else if (k == "reason") rs = v
+      }
+      if (ev == "ack" && nm == ENVIRON["SWEEP_ACK_NAME"] && at != "" && at "" >= best "") {
+        best = at; line = at " " by " " rs
+      }
+    }
+    END { if (line != "") print line }' < "$LEDGER_FILE" 2>/dev/null
 }
 
 # Whole-line match, never a substring: `w4-s1` must not be closed by an ack of `w4-s10`.
@@ -759,12 +783,23 @@ row_still_live() {  # <claims> <progress> <cadence> <launched_at>
 #
 #   the send   an assistant record whose content holds a `tool_use` named `SendMessage`;
 #              `input.to` is the name it was addressed to (a trailing ` [ref]` is dropped)
-#   a reply    a user record whose TEXT carries `<teammate-message teammate_id="<name>"` —
-#              every message an agent sends the orchestrator, its idle notice included
+#   a reply    an envelope carrying the agent's own words, in either shape the CLI writes
+#              (wave-20 T9b, review R1, measured in this wave's orchestrator transcript):
+#                `<teammate-message teammate_id="<name>" …>` — a teammate's message
+#                `<agent-message from="<name>">` — a background agent's hand-back, in an
+#                  `isMeta` user record (`Another Claude session sent a message:` …)
+#              and in either carrier: a user record's text, or — when it lands mid-turn —
+#              an `attachment` record of type `queued_command`, whose `prompt` holds it
+#
+# AN IDLE NOTICE IS NO REPLY (wave-20 T9b, critic C5). An envelope whose body is the JSON
+# `{"type":"idle_notification",…}` says the agent's turn ended, not that it answered; the one
+# from the report turn can be delivered after the send, and counting it put a row the agent
+# was still working on back to MET, so standdown could land the tree under it. A record that
+# carries a report beside an idle notice still answers, by the report.
 #
 # A NAME HAS A FOLLOW-UP IN FLIGHT when its latest send comes after its latest reply, in the
 # transcript's own record order (the order the CLI appended them, which no clock skew can
-# reorder). The agent's next message of any kind closes it. ONE OWNER: the state is decided
+# reorder). The agent's next reply closes it. ONE OWNER: the state is decided
 # here, in `verdict_row`, and the tick, standdown, the lease walk and the stop guard inherit
 # it unchanged — no consumer reads the transcript for this itself (Δ8's rejected
 # alternative). A declaring verb beside each message was rejected too: forgetting it fails
@@ -793,8 +828,15 @@ read_followups() {
     fi
   done
   [ -n "$tr" ] || return 0
-  FOLLOWUP_OPEN="$(grep -F -e '"name":"SendMessage"' -e '<teammate-message' "$tr" 2>/dev/null \
+  FOLLOWUP_OPEN="$(grep -F -e '"name":"SendMessage"' -e '<teammate-message' -e '<agent-message' "$tr" 2>/dev/null \
     | jq -R -r '
+        # Every envelope in a text, as [name, body]; the body runs to its closing tag, or to
+        # the end of the text when a truncated record has none.
+        def replies:
+          [scan("<(?:teammate-message teammate_id|agent-message from)=\"([^\"]+)\"[^>]*>((?:(?!</(?:teammate-message|agent-message)>)[\\s\\S])*)")]
+          | .[]
+          | select((.[1] | (fromjson? // null) | type == "object" and .type == "idle_notification") | not)
+          | .[0];
         (fromjson? // empty)
         | select(type == "object" and .isSidechain != true)
         | (.timestamp // "") as $ts
@@ -807,8 +849,12 @@ read_followups() {
              | if type == "string" then .
                elif type == "array" then ([.[] | select(type == "object" and .type == "text") | .text] | join("\n"))
                else "" end
-             | [scan("<teammate-message teammate_id=\"([^\"]+)\"")] | .[]
-             | "R\t\(.[0])\t\($ts)")
+             | replies | "R\t\(.)\t\($ts)")
+          elif .type == "attachment" then
+            (.attachment
+             | select(type == "object" and .type == "queued_command")
+             | .prompt | select(type == "string")
+             | replies | "R\t\(.)\t\($ts)")
           else empty end' 2>/dev/null \
     | awk -F'\t' '
         { n = $2; sub(/ \[[^]]*\]$/, "", n); sub(/@.*$/, "", n); if (n == "") next
@@ -820,8 +866,17 @@ read_followups() {
 # A MET row whose agent has a follow-up in flight becomes FOLLOW-UP. The row is matched by
 # its name, and by its teammate address with the `@session-…` suffix off — the orchestrator
 # sends to the bare name, and the teammate-message names the bare name too.
+#
+# A CLOSED ROW STAYS CLOSED (wave-20 T9b, review R2, walk §8c). A send to a row the ack has
+# already closed — the tick's stand-down close, or `stop-orders.sh stopped` beside a stop —
+# reopens nothing: the close is the name's one terminal state (ADR-034), and reading FOLLOW-UP
+# there held the row LEFT ALONE in standdown for a reply that could not come, while the tick
+# counted it closed. "Closed" is `row_acked`'s answer, which is `roster_open_names`' (read_acked
+# above); nothing here re-derives it. The row keeps its MET and the detail says the send was
+# ignored, naming the close. A name dispatched again after its ack is open, and a follow-up to
+# it counts as it always did.
 verdict_followup() {  # <roster row> — rewrites VERDICT_STATE/VERDICT_DETAIL when it applies
-  local name tid n at
+  local name tid n at stamp s_at s_by s_why
   [ "$FOLLOWUP_READ" = 1 ] || read_followups
   [ -n "$FOLLOWUP_OPEN" ] || return 0
   name="$(line_field "$1" name)"
@@ -829,6 +884,13 @@ verdict_followup() {  # <roster row> — rewrites VERDICT_STATE/VERDICT_DETAIL w
   while IFS=$'\t' read -r n at; do
     [ -n "$n" ] || continue
     if [ "$n" = "$name" ] || { [ -n "$tid" ] && [ "$n" = "$tid" ]; }; then
+      [ "$ACKED_READ" = 1 ] || read_acked
+      if row_acked "$(clean "$name")"; then
+        stamp="$(ack_stamp_of "$(clean "$name")")"
+        read -r s_at s_by s_why <<< "$stamp"
+        VERDICT_DETAIL="follow-up ignored: row acked at ${s_at:-an unreadable time}${s_by:+ (by $s_by${s_why:+, reason $s_why})} — the close stands, and a send after it reopens nothing${at:+ (sent $at)}. The contract itself is met: $VERDICT_DETAIL"
+        return 0
+      fi
       VERDICT_STATE="FOLLOW-UP"
       VERDICT_DETAIL="follow-up in flight — a message was sent to this agent${at:+ at $at} and it has not answered since; nothing lands or stands down until it does. The contract itself is met: $VERDICT_DETAIL"
       return 0

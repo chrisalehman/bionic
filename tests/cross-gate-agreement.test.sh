@@ -11960,6 +11960,58 @@ expect_eq "CG-close T20 MUTANT a MET-closing recorder journals no duplicate on a
   "closed" "$(cgt_recorder "$_cgt_r" met "$CGT_MUT_HOOK/execution-recorder.sh")"
 
 # ============================================================
+section "CG-close T20b — a restart after an ack is counted again by every occupancy reader (epic-23 wave-20 T20b, review R5)"
+# ============================================================
+#
+# THE HISTORY. `done` above (identified, MET, then acked) proves the ack closes the name to
+# all three readers. This proves the close is not permanent: the SAME agent id starts a THIRD
+# time — a restart after the ack, which is exactly what messaging a stopped agent does (R2) —
+# and T20b's fix stamps the fresh identification with its OWN launch time rather than the
+# closed lineage's original one (review R5; walk §9b/9c). Afterwards `roster_open_names`, the
+# recorder's own duplicate-start check on a FOURTH start, and the sweeper's `acked=` (against
+# the reused name, T2's reference) must all agree the name is open again — while the sweeper's
+# ledger still carries the old ack as history, unrewritten and unconsulted for anything but
+# its stamp.
+_cgtb_r=$(cgt_world done)
+_cgtb_name="cgt-done"
+_cgtb_id="acgtdone-5f0e3c2a9b7d4e61"
+_cgtb_roster="$_cgtb_r/.bionic/tmp/roster-$SID_A.state"
+_cgtb_ledger="$_cgtb_r/.bionic/tmp/sweeper-$SID_A.state"
+
+# THE RESTART: a THIRD SubagentStart for the id `cgt_world done` already identified once
+# (the world's own build is the first identification; `done`'s ack closes that lineage).
+# THE PAYLOAD NAMES THE DISPATCH, not "general-purpose" as `cgt_recorder`'s own calls do:
+# `cgt_world`'s `intended` row carries no agent_id (a teammate's own shape), so the
+# fallthrough this restart drives can only re-identify through the NAME join — which reads
+# `agent_type`, and needs it to equal the roster's `name=` to find that row at all.
+mk_start_payload "$SID_A" "$_cgtb_r/cgc-transcript.jsonl" "$_cgtb_r" "$_cgtb_name" "$_cgtb_id" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_ER" >/dev/null 2>&1
+expect_eq "CG-close T20b: the restart is not journalled a duplicate (a reused, finished lineage)" \
+  "0" "$(grep -c '|status=duplicate-start|' "$_cgtb_roster")"
+expect_eq "CG-close T20b: …and it identifies a second time" \
+  "2" "$(grep -c '|status=identified|' "$_cgtb_roster")"
+_cgtb_la2=$(grep '|status=identified|' "$_cgtb_roster" | tail -1 | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)
+expect_ne "CG-close T20b: …carrying a FRESH launch, not the closed lineage's original" \
+  "2026-09-01T00:00:00Z" "$_cgtb_la2"
+
+_cgtb_open=$( ( BIONIC_LIB_WANT=""; . "$CGC_LIBDIR/roster.sh" >/dev/null 2>&1
+                roster_open_names "$_cgtb_roster" "$_cgtb_ledger" "$SID_A" ) 2>/dev/null )
+expect_contains "CG-close T20b: roster_open_names counts the restarted name open again" \
+  "$_cgtb_name" "$_cgtb_open"
+
+# A FOURTH START now against the OPEN name IS a live duplicate — proving the recorder's own
+# check reads its own fresh row, not the finished lineage it just replaced.
+mk_start_payload "$SID_A" "$_cgtb_r/cgc-transcript.jsonl" "$_cgtb_r" "$_cgtb_name" "$_cgtb_id" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_ER" >/dev/null 2>&1
+expect_eq "CG-close T20b: a start against the now-open name IS a live duplicate" \
+  "1" "$(grep -c '|status=duplicate-start|' "$_cgtb_roster")"
+
+# THE SWEEPER'S OWN VERDICT (T2's reference), against the reused name: the ack is history, not
+# a lock — exactly the shape CG-close's own `again` case already proves for this reader.
+expect_eq "CG-close T20b: the sweeper's acked= (T2's reference) agrees: open" \
+  "open" "$(cgc_sweeper "$_cgtb_r" "$_cgtb_name")"
+
+# ============================================================
 section "CG-budget — ONE budget reader, four readers, one answer (epic-23 wave-20 T2, REQ-10 AC-10.2; D10)"
 # ============================================================
 #
@@ -12245,5 +12297,158 @@ expect_eq "CG-turn precondition: the fixture carries two prompts" "2" "$CGT_PROM
 expect_eq "CG-turn precondition: three Stops, three ledger lines" "3" "$(grep -c '^fill-ledger/v1|' "$CGT_LED" 2>/dev/null)"
 expect_eq "CG-turn the writer keys the three lines by the two prompts" "$CGT_PROMPTS" "$CGT_KEYS"
 expect_eq "CG-turn fill-report counts the writer's turns, and they are the prompts" "$CGT_PROMPTS" "$CGT_TURNS"
+
+# ============================================================
+section "RC-nest — ARM C and the delegation arm read ONE role and ONE agent context off the same nested payload (wave-20 T7b; review R15, critic C4)"
+# ============================================================
+#
+# TWO READERS OF "WHO IS CALLING". The dispatch wall's delegation arm decides which types a
+# subagent may launch (`role_is_readonly` of the launched type) and what an agent context is
+# (`is_agent_context`); the verb wall's ARM C decides which callers may not commit. Δ12's
+# promise is their composition: a type the delegation arm admits as read-only must be one ARM C
+# holds read-only when that delegate — unrostered by AC-9.2 — runs git with its own payload.
+# R15 found the composition open: ARM C read no role off an unrostered payload. C4 found the
+# context split: an `agent_type`-only payload (a `claude --agent` main session) was a subagent
+# to the dispatch wall and the orchestrator to ARM C.
+#
+# BOTH HOOKS ARE DRIVEN, never their functions: the dispatch wall on a nested Agent payload of
+# the live shape (T12: `agent_id` plus the caller's `agent_type`), the verb wall on that
+# delegate's own Bash payload (its `agent_id`, no roster row, its own `agent_type`). Each
+# observable is the arm's own phrase, so the other arms the two hooks pool are not read.
+RCN_R=$(s4_world "rc-nest")
+s4_bind "$RCN_R" "$SID_A" "$RCN_R/.bionic/docs/plans/epic-99/run-b.md"
+printf '# bionic session roster — fixture\n' > "$RCN_R/.bionic/tmp/roster-$SID_A.state"
+RCN_ID="a8b824d95c81dd996"
+# rcn_ctx <agent_id> <agent_type> — the caller half of a payload; an empty argument omits the key
+rcn_ctx() { jq -c --arg a "$1" --arg t "$2" '. + (if $a == "" then {} else {agent_id:$a} end)
+                                               + (if $t == "" then {} else {agent_type:$t} end)'; }
+rcn_dp_admits() {  # <launched type> <caller agent_id> <caller agent_type> -> yes when the delegation arm is silent
+  local out
+  out=$(jq -nc --arg s "$SID_A" --arg c "$RCN_R" --arg t "$RCN_R/s4-transcript.jsonl" --arg y "$1" \
+    '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent",
+      tool_input:{description:"a nested dispatch", subagent_type:$y, name:"rcn-helper",
+                  prompt:"Expected artifact: .bionic/docs/record/rcn.md\nExpected duration: ~10 minutes.\nProgress artifact: .bionic/tmp/rcn.progress, cadence ~5m\nSuites: tests/widget.test.sh"},
+      tool_use_id:"toolu_RCNEST"}' | rcn_ctx "$2" "$3" \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" 2>&1)
+  case "$out" in *"a subagent may launch only read-only roles"*) echo no ;; *) echo yes ;; esac
+}
+rcn_eg_refuses() {  # <agent_id> <agent_type> -> yes when ARM C refuses that caller's `git commit`
+  local out
+  out=$(mk_bash_payload "$SID_A" "$RCN_R/s4-transcript.jsonl" "$RCN_R" "git commit -m x" | rcn_ctx "$1" "$2" \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_EG" 2>&1)
+  case "$out" in *"a read-only role never commits"*) echo yes ;; *) echo no ;; esac
+}
+
+# ---- the role: the types the delegation arm lets a subagent launch = the types ARM C stops ----
+# One type per line, read line by line, so no IFS a earlier section left behind can fuse them.
+RCN_DP=""; RCN_EG=""; RCN_N=0
+while IFS= read -r _rcn_t; do
+  [ -n "$_rcn_t" ] || continue
+  RCN_N=$((RCN_N + 1))
+  [ "$(rcn_dp_admits "$_rcn_t" "$RCN_ID" general-purpose)" = yes ] && RCN_DP="${RCN_DP}${_rcn_t};"
+  [ "$(rcn_eg_refuses "$RCN_ID" "$_rcn_t")" = yes ] && RCN_EG="${RCN_EG}${_rcn_t};"
+done <<'RCNTYPES'
+bionic:researcher
+bionic:test-runner
+bionic:auditor
+bionic:critic
+Explore
+Plan
+general-purpose
+fork
+claude
+bionic:implementor
+bionic:senior-implementor
+acme:test-runner
+researcher
+RCNTYPES
+expect_eq "RC-nest thirteen types driven through both hooks" "13" "$RCN_N"
+expect_eq "RC-nest the delegation arm admits exactly the six read-only types from a subagent (non-vacuity)" \
+  "bionic:researcher;bionic:test-runner;bionic:auditor;bionic:critic;Explore;Plan;" "$RCN_DP"
+expect_eq "RC-nest ARM C refuses an unrostered delegate's commit for exactly the types the delegation arm admitted" \
+  "$RCN_DP" "$RCN_EG"
+
+# ---- the context: which payload shapes each hook reads as a subagent ----
+# id+type is the nested delegate; type-only is a `claude --agent` main session; none is the
+# plain main session. Each hook's reading is observed through its own refusal: the dispatch
+# wall refusing a writer launch, ARM C refusing a bionic:test-runner-typed commit.
+RCN_CTX_DP=""; RCN_CTX_EG=""
+for _rcn_shape in id+type type-only none; do
+  case "$_rcn_shape" in
+    id+type)   _rcn_a="$RCN_ID"; _rcn_ty=bionic:test-runner ;;
+    type-only) _rcn_a="";        _rcn_ty=bionic:test-runner ;;
+    none)      _rcn_a="";        _rcn_ty="" ;;
+  esac
+  [ "$(rcn_dp_admits bionic:implementor "$_rcn_a" "$_rcn_ty")" = no ] && RCN_CTX_DP="${RCN_CTX_DP}${_rcn_shape};"
+  [ "$(rcn_eg_refuses "$_rcn_a" "$_rcn_ty")" = yes ] && RCN_CTX_EG="${RCN_CTX_EG}${_rcn_shape};"
+done
+expect_eq "RC-nest the dispatch wall reads only the agent_id-carrying shape as a subagent" "id+type;" "$RCN_CTX_DP"
+expect_eq "RC-nest …and ARM C reads the same shapes as a subagent" "$RCN_CTX_DP" "$RCN_CTX_EG"
+
+# ============================================================
+section "CG-followup — the sweeper's FOLLOW-UP reading and roster_open_names agree on a messaged name (epic-23 wave-20 T9b; review R2; D4, D10)"
+# ============================================================
+#
+# THE DEFECT (review R2, walk §8c). FOLLOW-UP rewrote any MET row a SendMessage followed, so a
+# row acked after its launch (closed to `roster_open_names`, the one close predicate) read
+# FOLLOW-UP to the sweeper, and standdown held it for a reply that could never come. One
+# fixture per history, each a MET row the orchestrator messaged after its last reply:
+#   closed   launched, acked, then messaged              -> CLOSED to both readers
+#   open     launched, never acked, then messaged        -> OPEN   (held FOLLOW-UP)
+#   again    launched, acked, launched again, messaged   -> OPEN   (the relaunch reopens it)
+# The sweeper's reading: FOLLOW-UP is a held row (open); MET with acked=yes is closed.
+cgfu_world() {  # <case: closed|open|again> -> repo path
+  local r ro le cfg n="cgfu-$1"
+  r=$(new_repo "cgfu-$1")
+  ro="$r/.bionic/tmp/roster-$SID_A.state"; le="$r/.bionic/tmp/sweeper-$SID_A.state"
+  echo done > "$r/landed.md"
+  roster_header > "$ro"
+  roster_row_fixture status=identified session="$SID_A" name="$n" agent_id="a$n-1" \
+    launched_at=2026-09-01T00:00:00Z tool_use_id=toolu_01CGFU deliverable="$r/landed.md" >> "$ro"
+  case "$1" in
+    closed) cgc_ack "$le" 2026-09-01T01:00:00Z "$n" ;;
+    again)
+      cgc_ack "$le" 2026-09-01T01:00:00Z "$n"
+      roster_row_fixture status=identified session="$SID_A" name="$n" agent_id="a$n-2" \
+        launched_at=2026-09-01T02:00:00Z tool_use_id=toolu_01CGFU deliverable="$r/landed.md" >> "$ro"
+      ;;
+  esac
+  cfg="$SANDBOX/cgfu-cfg-$1"; mkdir -p "$cfg/projects/-cgfu"
+  {
+    jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T00:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done\n</agent-message>")}}'
+    jq -nc --arg n "$n" '{type:"assistant",isSidechain:false,timestamp:"2026-09-01T03:00:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01CGFUSEND",name:"SendMessage",input:{to:$n,summary:"s",message:"one more thing"}}]}}'
+  } > "$cfg/projects/-cgfu/$SID_A.jsonl"
+  printf '%s' "$r"
+}
+cgfu_sweeper() {  # <repo> <name> <case> -> open | closed | other:<line>
+  local line
+  line=$( ( cd "$1" && CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$SANDBOX/cgfu-cfg-$3" \
+            bash "$SWEEPER" verdict "$2" 2>/dev/null ) | grep -F 'landing-verdict/v1|' | head -1)
+  case "$line" in
+    *"|state=FOLLOW-UP|"*)          printf 'open' ;;
+    *"|state=MET|acked=yes|"*)      printf 'closed' ;;
+    *) printf 'other:%s' "$line" ;;
+  esac
+}
+cgfu_open_names() {  # <repo> <name> -> open | closed
+  local names
+  names=$( ( BIONIC_LIB_WANT=""; . "$CGC_LIBDIR/roster.sh" >/dev/null 2>&1
+             roster_open_names "$1/.bionic/tmp/roster-$SID_A.state" "$1/.bionic/tmp/sweeper-$SID_A.state" "$SID_A" ) 2>/dev/null )
+  if grep -qxF -- "$2" <<< "$names"; then printf 'open'; else printf 'closed'; fi
+}
+for _cgfu in closed:closed open:open again:open; do
+  _cgfu_case="${_cgfu%%:*}"; _cgfu_want="${_cgfu#*:}"
+  _cgfu_r=$(cgfu_world "$_cgfu_case")
+  _cgfu_sw=$(cgfu_sweeper "$_cgfu_r" "cgfu-$_cgfu_case" "$_cgfu_case")
+  _cgfu_ro=$(cgfu_open_names "$_cgfu_r" "cgfu-$_cgfu_case")
+  expect_eq "CG-followup ${_cgfu_case}: roster_open_names answers ${_cgfu_want}" "$_cgfu_want" "$_cgfu_ro"
+  expect_eq "CG-followup ${_cgfu_case}: the sweeper's FOLLOW-UP reading answers ${_cgfu_want}" "$_cgfu_want" "$_cgfu_sw"
+done
+# ONE OWNER: the sweeper's follow-up path asks row_acked, which reads ACKED_OPEN, which is
+# roster_open_names; it keeps no ack reading of its own.
+CGFU_FN=$(awk '/^verdict_followup\(\)/{f=1} f{print} f && /^}/{exit}' "$SWEEPER")
+expect_contains "CG-followup verdict_followup asks row_acked (the close predicate's answer)" "row_acked" "$CGFU_FN"
+expect_eq "CG-followup verdict_followup reads no ledger itself" "0" \
+  "$(grep -c 'LEDGER_FILE\|event=ack' <<< "$CGFU_FN")"
 
 finish
