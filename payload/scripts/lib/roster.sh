@@ -277,8 +277,11 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
 # sweeper's ledger, so it could call a name gone that every wall held open, and the reverse.
 # Now nothing is live unless `roster_open_names` (below) answers the name open, and within an
 # open name an id is discharged the way a name is: by an ack stamped strictly later than that
-# row's `launched_at=` (`_roster_discharged`). So a name acked and dispatched again names only
-# the id launched after the ack, and a MET marker discharges nothing. The ledger is the
+# row's OCCUPANCY STAMP (`_roster_occupied_at`: `restarted_at=` when the row carries one, else
+# `launched_at=`; `_roster_discharged`) (T20d, review R3-1: was `launched_at=` alone, which
+# left a restarted id discharged even while `roster_open_names` read its name open). So a name
+# acked and dispatched again names only the id launched after the ack, a restarted id reads
+# live again exactly as its name does, and a MET marker discharges nothing. The ledger is the
 # roster's sibling, `sweeper-<sid>.state` — the path the sweeper writes it to — so neither
 # caller grows an argument.
 #
@@ -312,7 +315,7 @@ live_ids_of_name() {  # <name> -> the agent ids currently under an open contract
         if (!_roster_live(_roster_kv(line, "status"))) continue
         id = _roster_kv(line, "agent_id")
         if (id == "" || (id in seen)) continue
-        if ((want in ACK) && _roster_discharged(_roster_kv(line, "launched_at"), ACK[want])) continue
+        if ((want in ACK) && _roster_discharged(_roster_occupied_at(line), ACK[want])) continue
         seen[id] = 1
         print id
       }
@@ -359,6 +362,23 @@ _ROSTER_OPEN_AWK='
   function _roster_discharged(born, ack) {
     return (_roster_stamp_ok(born) && _roster_stamp_ok(ack) && ack "" > born "")
   }
+  # THE OCCUPANCY STAMP OF ONE ROW: its `restarted_at` when it carries one, else its
+  # `launched_at` (epic-23 wave-20 T20c, critic C2-2; ONE FUNCTION as of T20d, review R3-1).
+  # `hooks/execution-recorder.sh` writes `restarted_at=` on the one row that re-identifies an
+  # id whose lineage an ack closed — the agent restarted, and holds a slot again — and keeps
+  # `launched_at` as the launch of the contract, the clock the sweeper dates the deliverable
+  # against. EVERY reader that answers whether a row is occupancy-discharged calls this, so a
+  # restart re-opens what it should everywhere at once: the per-NAME answer `_roster_open_of`
+  # gives AND the per-ID answer `live_ids_of_name` gives below. Before T20d each spelled its
+  # own inline `restarted_at`-else-`launched_at` read (or, for `live_ids_of_name`, none at
+  # all), and they drifted apart within the same commit that introduced the field — the file
+  # design note two functions below ("three readers cannot drift apart") did not reach a
+  # fourth call site, for want of a shared function for it to be a call site of.
+  function _roster_occupied_at(line,   cand) {
+    cand = _roster_kv(line, "restarted_at")
+    if (cand == "") cand = _roster_kv(line, "launched_at")
+    return cand
+  }
   # The open names of one roster, each followed by a newline, in first-seen order.
   function _roster_open_of(f, ledger, sid, rpfx,   ACK, seen, order, born, n, line, rs, nm, i, out, cand) {
     _roster_acks(ledger, ACK)
@@ -371,14 +391,10 @@ _ROSTER_OPEN_AWK='
       nm = _roster_kv(line, "name"); if (nm == "") nm = "(unnamed)"
       gsub(/\t/, " ", nm)
       if (!(nm in seen)) { seen[nm] = 1; order[++n] = nm }
-      # THE OCCUPANCY STAMP OF A ROW is its `restarted_at` when it carries one, else its
-      # `launched_at` (epic-23 wave-20 T20c, critic C2-2). hooks/execution-recorder.sh writes
-      # `restarted_at=` on the one row that re-identifies an id whose lineage an ack closed —
-      # the agent restarted, and holds a slot again — and keeps `launched_at` as the
-      # launch of the contract, the clock the sweeper dates the deliverable against. So the
-      # restart re-opens the NAME here without re-opening the CONTRACT there.
-      cand = _roster_kv(line, "restarted_at")
-      if (cand == "") cand = _roster_kv(line, "launched_at")
+      # THE OCCUPANCY STAMP, the one shared function above (T20d) — restarted_at when the
+      # row carries one, else launched_at — so the restart re-opens the NAME here without
+      # re-opening the CONTRACT there.
+      cand = _roster_occupied_at(line)
       # THE MAXIMUM STAMP, not whichever row happens to be LAST in file order (critic C7,
       # epic-23 wave-20 T20b). Adoption can append a predecessor row, carrying its own
       # earlier launched_at, after a fresher live row for the same name already on the file;

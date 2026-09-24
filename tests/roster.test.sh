@@ -360,4 +360,43 @@ r6_ack "$R7_DIR/restartacked/sweeper-s1.state" 2026-09-01T04:00:00Z w-racked
 expect_eq "R9c …and an ack after the restart closes the restarted name (the close still works)" \
   "" "$(r7_open "$R7_DIR/restartacked")"
 
+section "R10 — live_ids_of_name discharges by the occupancy stamp, not launched_at alone (epic-23 wave-20 T20d, review R3-1)"
+
+# THE DEFECT (review R3-1). R9 above proved `roster_open_names` re-opens a restarted NAME by
+# its `restarted_at`. `live_ids_of_name` is the per-ID half of the same close predicate — the
+# stop wall's ambiguity refusal and `adopt_write_row`'s same-name guard both call it — and
+# until this fix it still discharged an id by `launched_at` alone, never `restarted_at`. So a
+# restarted id read discharged (not live) even while its own name read open: the stop wall's
+# ambiguity refusal and the adopt rename both went quiet for exactly the row R9 proves is
+# open. The row is the production shape again: `r9_restart_row`, with the SAME ack the R9
+# fixtures use.
+mkdir -p "$R7_DIR/restartid"
+r6_row "$R7_DIR/restartid/roster-s1.state" w-restartid a-restartid-1 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/restartid/sweeper-s1.state" 2026-09-01T02:00:00Z w-restartid
+r9_restart_row "$R7_DIR/restartid/roster-s1.state" w-restartid a-restartid-1 2026-09-01T01:00:00Z 2026-09-01T03:00:00Z
+expect_eq "R10a a restarted id after an ack is live under live_ids_of_name too (occupancy stamp, not launched_at)" \
+  "a-restartid-1" "$(r6_ids "$R7_DIR/restartid" w-restartid)"
+
+# THE PAIRED CASE R3-1 NAMES DIRECTLY: a restarted id plus a FRESH re-dispatch under the same
+# name. Both must read live for the stop wall's ambiguity refusal to fire and for
+# `adopt_write_row`'s same-name guard to see the name occupied twice — the exact ambiguity a
+# `launched_at`-only discharge silently dropped to one.
+mkdir -p "$R7_DIR/restarttwin"
+r6_row "$R7_DIR/restarttwin/roster-s1.state" w-restarttwin a-restarttwin-1 2026-09-01T01:00:00Z
+r6_ack "$R7_DIR/restarttwin/sweeper-s1.state" 2026-09-01T02:00:00Z w-restarttwin
+r9_restart_row "$R7_DIR/restarttwin/roster-s1.state" w-restarttwin a-restarttwin-1 2026-09-01T01:00:00Z 2026-09-01T03:00:00Z
+r6_row "$R7_DIR/restarttwin/roster-s1.state" w-restarttwin a-restarttwin-2 2026-09-01T04:00:00Z
+expect_eq "R10b …and a fresh re-dispatch after the restart still counts BOTH ids (the ambiguity, restored)" \
+  "a-restarttwin-1 a-restarttwin-2" "$(r6_ids "$R7_DIR/restarttwin" w-restarttwin)"
+
+# THE CONTROL: the same restart row, but the ack comes AFTER the restart. The id should
+# discharge exactly as R9c's name does — this proves R10a's answer comes from the occupancy
+# stamp, not from a discharge rule that stopped firing altogether.
+mkdir -p "$R7_DIR/restartidacked"
+r6_row "$R7_DIR/restartidacked/roster-s1.state" w-restartidacked a-restartidacked-1 2026-09-01T01:00:00Z
+r9_restart_row "$R7_DIR/restartidacked/roster-s1.state" w-restartidacked a-restartidacked-1 2026-09-01T01:00:00Z 2026-09-01T03:00:00Z
+r6_ack "$R7_DIR/restartidacked/sweeper-s1.state" 2026-09-01T04:00:00Z w-restartidacked
+expect_eq "R10c …and an ack after the restart discharges the id too (the close still works)" \
+  "" "$(r6_ids "$R7_DIR/restartidacked" w-restartidacked)"
+
 finish
