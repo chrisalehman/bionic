@@ -702,6 +702,79 @@ call_open_runs "$R"
 expect_eq "open_runs: no plans dir -> exit 1" 1 "$OR_ST"
 expect_empty "open_runs: no plans dir -> prints nothing" "$OR_OUT"
 
+# --- R6i: an UNREADABLE candidate is named, and neither opened nor closed (wave-20 T18) ---
+#
+# (REQ-2, D2; T1's carry-over, research D3's residual.) T1 made a BOUND session's plan answer
+# `bound-unreadable`. The unbound walk still read a mode-000 candidate through `_run_lines`,
+# got no text, found no `## SDLC State`, and dropped it: an unreadable plan vanished from
+# `open_runs` and `active_plan` without a word, and the walk moved on to the next-newest run
+# as if nothing were there. It now prints `bound-unreadable <path>` on STDERR — stdout stays
+# the set of runs it CAN read, so every caller that parses the set is unchanged — and the
+# candidate is in neither answer: not a member of the open set, and never read as closed.
+#
+# PRIVILEGE, CHECKED FIRST (R8h's reason): as root the mode-000 file reads, and every row
+# would pass on a readable plan.
+R="$SANDBOX/r6i"; mkdir -p "$R/.bionic"
+I_OK=$(mk_plan "$R" "readable.plan.md" "4" "- Step 4: in progress")
+I_LOCKED=$(mk_plan "$R" "locked.plan.md" "4" "- Step 4: in progress")
+touch -t 202601010000 "$I_OK"
+touch -t 202603010000 "$I_LOCKED"
+chmod 000 "$I_LOCKED"
+expect_eq "r6i premise: the newest candidate exists and this user cannot read it" "yes" \
+  "$([ -e "$I_LOCKED" ] && [ ! -r "$I_LOCKED" ] && echo yes || echo no)"
+call_open_runs "$R"
+expect_eq "open_runs: an unreadable candidate beside a readable open one -> exit 0, the readable one only" \
+  "0|$I_OK" "$OR_ST|$OR_OUT"
+expect_eq "open_runs: …and names the unreadable one on stderr, never silently" \
+  "bound-unreadable $I_LOCKED" "$(grep -F "$I_LOCKED" "$SANDBOX/.err")"
+call_active_plan "$R"
+expect_eq "active_plan: …selects over the same walk, so it names it too" \
+  "bound-unreadable $I_LOCKED" "$(grep -F "$I_LOCKED" "$SANDBOX/.err")"
+# session_run's own driver is R8's; this is its body, because R8 is further down the file.
+I_SR_ST=0
+I_SR=$(bash -c '. "$1" || exit 1; session_run "$2" "$3"' _ "$LIB" "$R" "u-i" 2>"$SANDBOX/.err") || I_SR_ST=$?
+expect_eq "session_run, unbound: …the fallback is the readable run" "0|fallback $I_OK" "$I_SR_ST|$I_SR"
+expect_eq "session_run, unbound: …and the unreadable candidate is named beside it" \
+  "bound-unreadable $I_LOCKED" "$(grep -F "$I_LOCKED" "$SANDBOX/.err")"
+I_RO=0; bash -c '. "$1" || exit 1; run_open "$2"' _ "$LIB" "$I_LOCKED" 2>/dev/null || I_RO=$?
+expect_eq "run_open: …the same file is neither open (0) nor closed (1): unreadable (3)" 3 "$I_RO"
+# THE PAIRED POSITIVE, ON THE SAME ROOT: one fact moves — the mode — and the file is a member
+# again, newest first, with nothing on stderr.
+chmod 644 "$I_LOCKED"
+call_open_runs "$R"
+expect_eq "open_runs: …the same file readable again -> a member, newest first" \
+  "$(printf '%s\n%s' "$I_LOCKED" "$I_OK")" "$OR_OUT"
+expect_empty "open_runs: …and nothing is named on stderr" "$(cat "$SANDBOX/.err")"
+
+# --- R6j: the ONLY candidate is unreadable -> no open run, and still named ---
+R="$SANDBOX/r6j"; mkdir -p "$R/.bionic"
+J_LOCKED=$(mk_plan "$R" "only.plan.md" "4" "- Step 4: in progress")
+chmod 000 "$J_LOCKED"
+call_open_runs "$R"
+expect_eq "open_runs: the only candidate unreadable -> exit 1, nothing on stdout" "1|" "$OR_ST|$OR_OUT"
+expect_eq "open_runs: …and it is named on stderr" \
+  "bound-unreadable $J_LOCKED" "$(grep -F "$J_LOCKED" "$SANDBOX/.err")"
+chmod 644 "$J_LOCKED"
+
+# --- R6k: a FOLDER in the walk that cannot be opened is named (research D3 N1's shape) ---
+#
+# `find` cannot list a mode-000 folder, so a plan inside it never reaches the loop at all and
+# only the folder can be named — the same rule `plan_unreadable` applies to a bound path.
+R="$SANDBOX/r6k"; mkdir -p "$R/.bionic"
+K_OK=$(mk_plan "$R" "readable.plan.md" "4" "- Step 4: in progress")
+K_IN=$(mk_plan_in "$R" "plans/epic-vault" "vaulted.plan.md" "4" "- Step 4: in progress")
+K_VAULT="$R/.bionic/docs/plans/epic-vault"
+chmod 000 "$K_VAULT"
+call_open_runs "$R"
+expect_eq "open_runs: a plan inside an unopenable folder is not a member" "0|$K_OK" "$OR_ST|$OR_OUT"
+expect_eq "open_runs: …and the folder is named on stderr" \
+  "bound-unreadable $K_VAULT" "$(grep -F "$K_VAULT" "$SANDBOX/.err")"
+chmod 755 "$K_VAULT"
+call_open_runs "$R"
+expect_eq "open_runs: …the folder opened again -> the plan inside is a member" "yes" \
+  "$(rp_contains "$OR_OUT" "$K_IN")"
+expect_empty "open_runs: …and nothing is named on stderr" "$(cat "$SANDBOX/.err")"
+
 # ============================================================
 echo
 section "R7 — session_plan <root> <sid>: the marker's plan= field, and only that"

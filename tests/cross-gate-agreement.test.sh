@@ -6198,6 +6198,90 @@ expect_contains "…the stop wall refuses the turn naming the unreadable plan" \
   "stop refused — the bound plan cannot be read" "$(s4_pdg "$S4_R6" "$SID_A")"
 chmod 644 "$S4_R6A"
 
+# ---- S.4g — ONE UNREADABLE PLAN, THREE READERS: session_run, adopt and the walk agree ----
+#
+# (wave-20 T18, REQ-2, D2; T1's carry-over.) §S.4f drives the seven readers of the SESSION'S
+# OWN binding. Two more readers take a plan's verdict without going through it: `adopt`, which
+# asks it of the plan each FOREIGN row names, and the unbound candidate walk (`open_runs`,
+# `active_plan`), which asks it of every plan in the root. Both read a plan that is there and
+# cannot be read as if it were not there at all — adopt counted its rows `closed=` and printed
+# nothing, the walk dropped it without a word. So the three are driven over ONE mode-000 plan
+# and must give ONE answer about it: unreadable, never closed, never open.
+#
+# THE ADOPTER IS BOUND TO THAT PLAN, so its partition alone would say `own` and write the row:
+# a reader that fell through to the partition fails here, not only one that called it closed.
+S4_R7=$(s4_world "s4-unreadable-three")
+S4_R7A="$S4_R7/.bionic/docs/plans/epic-99/run-a.md"
+S4_R7B="$S4_R7/.bionic/docs/plans/epic-99/run-b.md"
+S4_R7_PRED="d4d4d4d4-7777-4bbb-8ccc-000000000077"
+S4_R7_ID="as4g-pred-7777777777777777"
+s4_bind "$S4_R7" "$SID_A" "$S4_R7A"
+roster_row_fixture status=identified session="$S4_R7_PRED" name=s4g-writer \
+  agent_id="$S4_R7_ID" launched_at=2026-08-05T00:00:00Z tool_use_id=toolu_01S4GFIX \
+  plan="$S4_R7A" >> "$S4_R7/.bionic/tmp/roster-$S4_R7_PRED.state"
+
+# ONE CLASSIFIER PER READER, each reducing that reader's own channel to one word about plan A:
+# `unreadable`, `closed`, `open`, or `silent` (the reader said nothing about A at all). The
+# two that also keep their whole channel are called with stdout to a FILE, never inside
+# `$( )`, so the globals they set survive into this shell.
+s4g_sr() {  # <repo> <sid> -> session_run's word for its bound plan
+  local out
+  out=$(bash -c '. "$1" || exit 1; session_run "$2" "$3"' _ "$RUN_LIB" "$1" "$2" 2>/dev/null)
+  case "$out" in
+    "bound-unreadable $S4_R7A") echo unreadable ;;
+    "bound-closed $S4_R7A")     echo closed ;;
+    "bound-open $S4_R7A")       echo open ;;
+    *)                          echo "silent:$out" ;;
+  esac
+}
+s4g_adopt() {  # <repo> <sid> -> adopt's word for the row naming plan A; sets S4G_ADOPT_OUT
+  S4G_ADOPT_OUT=$( cd "$1" && env CLAUDE_CODE_SESSION_ID="$2" bash "$PARTY_PK_S" adopt 2>&1 )
+  local row closed
+  row=$(printf '%s\n' "$S4G_ADOPT_OUT" | grep "^poker-adopt/v1|.*|name=s4g-writer|" | head -1)
+  closed=$(printf '%s\n' "$S4G_ADOPT_OUT" | grep '^poker-adopt/v1|.*|scanned=' | tail -1 \
+    | tr '|' '\n' | grep '^closed=' | cut -d= -f2)
+  case "$row" in
+    *'|partition=unreadable'*)  echo unreadable ;;
+    *'|partition=own'*|*'|partition=all'*) echo open ;;
+    '') [ "${closed:-0}" -gt 0 ] && echo closed || echo silent ;;
+    *)  echo "listed:$row" ;;
+  esac
+}
+s4g_walk() {  # <repo> -> the unbound walk's word for plan A; sets S4G_WALK_OUT / S4G_WALK_ERR
+  S4G_WALK_OUT=$(bash -c '. "$1" || exit 1; open_runs "$2"' _ "$RUN_LIB" "$1" 2>"$SANDBOX/s4g.err")
+  S4G_WALK_ERR=$(cat "$SANDBOX/s4g.err")
+  if grep -qxF "bound-unreadable $S4_R7A" <<<"$S4G_WALK_ERR"; then echo unreadable
+  elif grep -qxF "$S4_R7A" <<<"$S4G_WALK_OUT"; then echo open
+  else echo silent
+  fi
+}
+
+chmod 000 "$S4_R7A"
+expect_true "S.4g premise: plan A exists and this user cannot read it" \
+  bash -c '[ -e "$1" ] && [ ! -r "$1" ]' _ "$S4_R7A"
+S4G_SR=$(s4g_sr "$S4_R7" "$SID_A")
+s4g_adopt "$S4_R7" "$SID_A" > "$SANDBOX/s4g.adopt"; S4G_AD=$(cat "$SANDBOX/s4g.adopt")
+s4g_walk "$S4_R7" > "$SANDBOX/s4g.walk"; S4G_WK=$(cat "$SANDBOX/s4g.walk")
+expect_eq "S.4g the three readers agree: session_run|adopt|walk all say A is unreadable" \
+  "unreadable|unreadable|unreadable" "$S4G_SR|$S4G_AD|$S4G_WK"
+expect_contains "…adopt names the plan it cannot read" "$S4_R7A" "$S4G_ADOPT_OUT"
+expect_absent   "…and never takes the row onto the adopter's roster" "$S4_R7_ID" \
+  "$(cat "$S4_R7/.bionic/tmp/roster-$SID_A.state" 2>/dev/null)"
+expect_contains "…the walk still answers for the run it CAN read — B is a member" \
+  "$S4_R7B" "$S4G_WALK_OUT"
+expect_absent   "…and A is not" "$S4_R7A" "$S4G_WALK_OUT"
+
+# THE PAIRED POSITIVE, ON THE SAME WORLD: one fact moves — A's mode — and all three readers
+# move together to `open`. Without it, the row above passes against three readers that simply
+# agree on saying nothing.
+chmod 644 "$S4_R7A"
+S4G_SR=$(s4g_sr "$S4_R7" "$SID_A")
+s4g_adopt "$S4_R7" "$SID_A" > "$SANDBOX/s4g.adopt"; S4G_AD=$(cat "$SANDBOX/s4g.adopt")
+s4g_walk "$S4_R7" > "$SANDBOX/s4g.walk"; S4G_WK=$(cat "$SANDBOX/s4g.walk")
+expect_eq "…A readable again: session_run|adopt|walk all say open" \
+  "open|open|open" "$S4G_SR|$S4G_AD|$S4G_WK"
+expect_eq "…and the walk names nothing on stderr" "" "$S4G_WALK_ERR"
+
 # ---- S.4d — session-start: silent when bound, a listing when not (AC-5) ---------
 #
 # The eighth consumer, and the one with no announcement at all. Its whole rendering IS the
