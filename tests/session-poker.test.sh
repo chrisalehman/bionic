@@ -7000,4 +7000,29 @@ expect_contains "40d AC-3.3 with no budget the ext:-held row prints its HELD lin
 expect_contains "40d2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
 expect_eq "40d3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40d4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
+
+# 40e — DISARM: the terminal tick (critic-4e6d4a9 I3). An empty roster on a run that says it is
+# delivered — `current: 9`, `delivered:` on the Step-9 line, armed before that — decides DISARM,
+# and a delivered run whose ledger still carries a finding is one the gate would refuse, so this
+# last tick says so. No other case ticks DISARM over a plan with a hold and a finding, so the
+# report's call on that arm was unpinned: deleting it left every suite green.
+R40E="$(make_repo s40-disarm)"; new_roster "$R40E"
+armed_ago "$R40E"
+P40E="$(sp_plan_at_step "$R40E" 9 \
+  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40e | 15m | REQ-x | b.sh | pending |")"
+sed -e 's/^- Step 9: in progress$/- Step 9: delivered: bionic 9.9.9; report: record\/fixture\/close-out.md/' \
+  "$P40E" > "$P40E.new" && mv "$P40E.new" "$P40E" && touch "$P40E"
+poke_pressure "$R40E" 8192 1.0 tick
+expect_contains "40e precondition: the plan's Step-9 line records the delivery" \
+  "- Step 9: delivered: bionic 9.9.9" "$(cat "$P40E")"
+expect_contains "40e precondition: …and the tick decides DISARM" "decision=DISARM" "$OUT"
+expect_contains "40e AC-3.3 the DISARM tick prints the ext:-held row's HELD line" "poker: HELD T2 ext:ci-40e" "$OUT"
+expect_contains "40e2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_eq "40e3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
+expect_eq "40e4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
+S40_RUNG="$(s38_line_no 'poker: rung=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
+S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_DISARM="$(s38_line_no 'poker: DISARM')"
+expect_true "40e5 …after the rung line and before the DISARM line (rung=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER disarm=$S40_DISARM)" \
+  test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_LEDGER" -gt "$S40_HELD" -a "$S40_DISARM" -gt "$S40_LEDGER"
 finish

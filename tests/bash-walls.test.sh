@@ -930,6 +930,14 @@ expect_contains "15a6: …naming the remedy verb, amend" "session-poker.sh amend
 expect_contains "15a7: …and the flag that widens a SUITE, --suites+, naming the refused suite" \
   "amend t15writer --suites+ close-out.test.sh" "$ERR"
 expect_absent "15a7b: …never the run flag --reexec+ for a suite" "--reexec+" "$ERR"
+# THE LINE PASTES (wave-21 T14; critic-4e6d4a9 I4). `--reason <why>` was a redirect from a file
+# named `why` with no word after it — a parse error, not a usage error — so the line the remedy
+# promises is pasteable was not. The placeholder is quoted, and the whole line parses as bash.
+expect_contains "15a7c: …and the reason placeholder is quoted, one shell word" \
+  "amend t15writer --suites+ close-out.test.sh --reason '<why>' (main runs it)" "$ERR"
+B15_LINE="$(printf '%s\n' "$ERR" | sed -n 's/.*widen it: \(.*\) (main runs it).*/\1/p' | head -1)"
+expect_contains "15a7d precondition: the remedy line was read off the refusal" "session-poker.sh amend" "$B15_LINE"
+expect_true "15a7e: …and the pasted line parses as bash [$B15_LINE]" bash -n -c "$B15_LINE"
 expect_contains "15a8: …with the real plugin root, not the placeholder" "/hooks/session-poker.sh amend" "$ERR"
 expect_absent "15a9: …never the literal <plugin-root> placeholder" "<plugin-root>" "$ERR"
 
@@ -945,6 +953,10 @@ expect_status "15a10: an undeclared run is refused" 2 "$ST"
 expect_contains "15a11: …and its remedy names the run flag, --reexec+ '<cmd>'" \
   "amend t15runner --reexec+ '<cmd>'" "$ERR"
 expect_absent "15a12: …never the suite flag" "--suites+" "$ERR"
+expect_contains "15a12b: …with the reason placeholder quoted there too" \
+  "amend t15runner --reexec+ '<cmd>' --reason '<why>' (main runs it)" "$ERR"
+B15_LINE="$(printf '%s\n' "$ERR" | sed -n 's/.*widen it: \(.*\) (main runs it).*/\1/p' | head -1)"
+expect_true "15a12c: …and that line parses as bash too [$B15_LINE]" bash -n -c "$B15_LINE"
 
 # (a3) THE NAME AS THE ROSTER CARRIES IT. A row named `w budget;rm` was printed as
 # `amend wbudgetrm`, a name no row carries, so the pasted command addressed nobody. A name a
