@@ -3888,19 +3888,25 @@ fi
 # stale "no bionic machinery relies on it existing" is gone.
 T9_CI='A CI or PR wait is such a backgrounded command, and its brief carries a `Subprocess claim:` line'
 if has_pin "$DISPATCH_MD" "$T9_CI" && ! has_pin "$DISPATCH_MD" 'no bionic machinery relies on it existing'; then
-  ok "193: AC-4.4 — dispatch.md names a CI or PR wait as a backgrounded command with a Subprocess claim: line, and the stale 'no machinery relies on it' sentence is gone"
+  ok "193: AC-7.1 — dispatch.md names a CI or PR wait as a backgrounded command with a Subprocess claim: line, and the stale 'no machinery relies on it' sentence is gone"
 else
-  no "193: AC-4.4 — dispatch.md names a CI or PR wait as a backgrounded command with a Subprocess claim: line, and the stale 'no machinery relies on it' sentence is gone" \
+  no "193: AC-7.1 — dispatch.md names a CI or PR wait as a backgrounded command with a Subprocess claim: line, and the stale 'no machinery relies on it' sentence is gone" \
      "ci sentence: $(has_pin "$DISPATCH_MD" "$T9_CI" && echo present || echo absent); stale: $(has_pin "$DISPATCH_MD" 'no bionic machinery relies on it existing' && echo present || echo absent)"
 fi
 
-# 194 — SKILL.md's Known-holes paragraph says both ledger facts.
+# 194 — SKILL.md's Known-holes paragraph says both ledger facts, the second WITH ITS CONDITION
+# (wave-21 T13; audit-3b45d05 finding 3). "An `active` row needs no evidence line." was true only
+# when the row's agent cell names a row on the session's roster; with no roster the gate still
+# demands the line from an agent-named active row. The unconditional sentence is gone.
+T13_ACT='An `active` row whose agent the session'"'"'s roster names needs no evidence line'
+T13_NOR='with no roster, an agent-named one still does.'
 if has_pin "$SKILL_MD" 'Task-scale ledgers have no write-time check.' \
-   && has_pin "$SKILL_MD" 'An `active` row needs no evidence line.'; then
-  ok "194: AC-7.1 — SKILL.md's Known holes says task-scale ledgers have no write-time check and an active row needs no evidence line"
+   && has_pin "$SKILL_MD" "$T13_ACT" && has_pin "$SKILL_MD" "$T13_NOR" \
+   && ! has_pin "$SKILL_MD" 'An `active` row needs no evidence line.'; then
+  ok "194: AC-4.4 — SKILL.md's Known holes says task-scale ledgers have no write-time check, and an active row needs no evidence line only when the roster names its agent"
 else
-  no "194: AC-7.1 — SKILL.md's Known holes says task-scale ledgers have no write-time check and an active row needs no evidence line" \
-     "check sentence: $(has_pin "$SKILL_MD" 'Task-scale ledgers have no write-time check.' && echo present || echo absent); evidence sentence: $(has_pin "$SKILL_MD" 'An `active` row needs no evidence line.' && echo present || echo absent)"
+  no "194: AC-4.4 — SKILL.md's Known holes says task-scale ledgers have no write-time check, and an active row needs no evidence line only when the roster names its agent" \
+     "check sentence: $(has_pin "$SKILL_MD" 'Task-scale ledgers have no write-time check.' && echo present || echo absent); roster sentence: $(has_pin "$SKILL_MD" "$T13_ACT" && echo present || echo absent); no-roster clause: $(has_pin "$SKILL_MD" "$T13_NOR" && echo present || echo absent); unconditional sentence: $(has_pin "$SKILL_MD" 'An `active` row needs no evidence line.' && echo present || echo absent)"
 fi
 
 # 195 — the ledger text says the agent cell carries the ROSTER NAME (A-T5.5), in both homes.

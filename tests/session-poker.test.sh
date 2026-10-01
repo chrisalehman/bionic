@@ -6914,4 +6914,90 @@ sp_plan_at_step "$R39K" 4 \
 poke_pressure "$R39K" 8192 1.0 tick
 expect_contains "39k an empty roster: the agent-named active row ticks a launch line" \
   "poker: LEDGER T1 launch w-T1" "$OUT"
+
+# ============================================================
+section "Section 40: HELD and LEDGER print in EVERY tick state — no roster, HOLD, EMERGENCY, no budget (wave-21 T13; REQ-3 AC-3.3, REQ-4 AC-4.1/AC-4.2)"
+# ============================================================
+#
+# THE AUDIT'S REFUTATION, PINNED (record/wave-21-fixit-188/audit-3b45d05.md). Through T5 the
+# HELD and LEDGER lines printed only inside the FILL branch, and three reachable states never
+# reach it: the first tick of a run (no roster file yet: rung, QUIET, exit), HOLD or EMERGENCY
+# under machine pressure, and a plan with no `parallel-budget`. The commit gate reads the
+# ledger in every one of them, so a plan the gate refused ticked clean. Every case here holds
+# an ext:-held row and a defective ledger row, and expects each line EXACTLY ONCE — printed
+# before the state split, never a second time inside an arm. Sections 38/39 pin the probes to
+# a healthy machine; these pin them to the states those sections never reach.
+s40_count() { printf '%s\n' "$OUT" | /usr/bin/grep -c "^$1" 2>/dev/null; }
+
+# 40a — THE FIRST TICK: armed, nothing dispatched, no roster file. With no roster the reader
+# takes its no-roster rule, the gate's: an agent-named active row with no line is an
+# `evidence` finding, not a `launch` one.
+R40A="$(make_repo s40-no-roster)"
+poke "$R40A" arm
+sp_plan_at_step "$R40A" 4 \
+  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40a | 15m | REQ-x | b.sh | pending |" \
+  "| T3 | 4 | build | active, agent-named, no line | w-T3 | — | 15m | REQ-x | c.sh | active |" > /dev/null
+poke_pressure "$R40A" 8192 1.0 tick
+expect_contains "40a precondition: the no-roster first tick decides QUIET" "poker: QUIET — armed, nothing dispatched yet on this session" "$OUT"
+expect_contains "40a AC-3.3 the first tick prints the ext:-held row's HELD line" "poker: HELD T2 ext:ci-40a" "$OUT"
+expect_contains "40a2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "40a3 AC-4.1 …and the agent-named active row owes its line, as the gate's no-roster rule says" \
+  "poker: LEDGER T3 evidence" "$OUT"
+expect_eq "40a4 …each HELD line once" "1" "$(s40_count 'poker: HELD ')"
+expect_eq "40a5 …each LEDGER line once" "2" "$(s40_count 'poker: LEDGER ')"
+S40_RUNG="$(s38_line_no 'poker: rung=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
+S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_QUIET="$(s38_line_no 'poker: QUIET')"
+expect_true "40a6 …after the rung line and before the QUIET line (rung=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER quiet=$S40_QUIET)" \
+  test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_LEDGER" -gt "$S40_HELD" -a "$S40_QUIET" -gt "$S40_LEDGER"
+
+# 40b — HOLD: a roster, a ready row and a gap, and the machine short on memory. No fill, and
+# the lint still runs: a busy machine has nothing to do with the ledger.
+R40B="$(make_repo s40-hold)"; new_roster "$R40B"
+sp_plan_at_step "$R40B" 4 \
+  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40b | 15m | REQ-x | b.sh | pending |" \
+  "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
+poke_pressure "$R40B" 512 1.0 tick
+expect_contains "40b precondition: the tick is under HOLD" "poker: HOLD free_mb=512" "$OUT"
+expect_absent "40b precondition: …and fills nothing" "poker: FILL" "$OUT"
+expect_contains "40b AC-3.3 under HOLD the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40b" "$OUT"
+expect_contains "40b2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_eq "40b3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
+expect_eq "40b4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
+S40_RUNG="$(s38_line_no 'poker: rung=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
+S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_HOLD="$(s38_line_no 'poker: HOLD ')"
+expect_true "40b5 …after the rung line and before the HOLD line (rung=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER hold=$S40_HOLD)" \
+  test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_LEDGER" -gt "$S40_HELD" -a "$S40_HOLD" -gt "$S40_LEDGER"
+# THE PAIRED POSITIVE: the same repo on a healthy machine fills T3 and prints each line once.
+poke_pressure "$R40B" 8192 1.0 tick
+expect_contains "40b6 …the same plan on a healthy machine fills the ready row" "poker: FILL T3" "$OUT"
+expect_eq "40b7 …and still prints HELD once, not once per arm" "1" "$(s40_count 'poker: HELD ')"
+expect_eq "40b8 …and LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
+
+# 40c — EMERGENCY: the same pair under the kill floor.
+R40C="$(make_repo s40-emergency)"; new_roster "$R40C"
+sp_plan_at_step "$R40C" 4 \
+  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40c | 15m | REQ-x | b.sh | pending |" > /dev/null
+poke_pressure "$R40C" 100 1.0 tick
+expect_contains "40c precondition: the tick is under EMERGENCY" "poker: fill withheld — EMERGENCY free_mb=100" "$OUT"
+expect_contains "40c AC-3.3 under EMERGENCY the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40c" "$OUT"
+expect_contains "40c2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_eq "40c3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
+expect_eq "40c4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
+
+# 40d — NO BUDGET: the plan carries no `parallel-budget:` line, so the fill arm takes its
+# no-budget note — and the lint does not wait on a budget it has no use for.
+R40D="$(make_repo s40-no-budget)"; new_roster "$R40D"
+P40D="$(sp_plan_at_step "$R40D" 4 \
+  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40d | 15m | REQ-x | b.sh | pending |")"
+/usr/bin/grep -v '^parallel-budget:' "$P40D" > "$P40D.new" && mv "$P40D.new" "$P40D"
+poke_pressure "$R40D" 8192 1.0 tick
+expect_contains "40d precondition: the tick takes the no-budget note" "carries no parallel-budget: writers=<n>" "$OUT"
+expect_contains "40d AC-3.3 with no budget the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40d" "$OUT"
+expect_contains "40d2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_eq "40d3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
+expect_eq "40d4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 finish

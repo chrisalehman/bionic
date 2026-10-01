@@ -1635,9 +1635,13 @@ RITUAL=$(printf '%s\n' "$STREAM" | awk -F'\t' '
 ')
 
 if [ "$RITUAL" = "block" ]; then
-  RITUAL_REASON="This is the first Stop after a /clear or a resume, and the transcript shows a CronCreate with no CronList before it since then. A predecessor Patrol cron survives a /clear and keeps firing into the new conversation — creating a job before listing and deleting the stray one leaves two clocks on one project.
+  # THE TEXT SAYS WHAT IS TRUE ON EVERY STOP IT FIRES ON (wave-21 T13; walk-3b45d05 item 3).
+  # The window opened by the marker stays open until a CronList, so the refusal repeats on the
+  # turns after the one that made the cron; it used to open "This is the first Stop after a
+  # /clear or a resume", which is false on all of them.
+  RITUAL_REASON="Since the last /clear or resume, the transcript shows a CronCreate with no CronList before it, and that window stays open until a CronList: every Stop until then is refused, whether or not the turn made a Cron call. A predecessor Patrol cron survives a /clear and keeps firing into the new conversation — creating a job before listing and deleting the stray one leaves two clocks on one project.
 
-Do the resume ritual, in order, then stop again — this gate blocks once:
+Do the resume ritual, in order, then stop again — this gate blocks once per turn, every turn until a CronList:
   1. CronList
   2. delete every bionic-patrol session=<other> job it lists
   3. CronCreate — only if step 2 left this session with no Patrol job of its own

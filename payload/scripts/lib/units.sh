@@ -260,7 +260,18 @@ _units_table() {
 # path) therefore reads the edit; only the command that asked for the memo sees the one read.
 # A plan with no table is memoised as that answer, status and all, so every verb inside still
 # says "no table". Another plan asked inside the command is read on its own.
+#
+# A MEMO ALREADY LIVE FOR THE SAME PLAN IS KEPT (wave-21 T13). A caller that memoises a plan
+# and then reaches a verb that memoises it again — the tick's schedule reaching
+# `fill_ready_set`, or `units_findings` — runs the inner command on the outer parse rather than
+# reading the table a second time. The outer command is still running, so the answer is the
+# same read the outer command already holds.
 units_memoised() {  # <plan> <command> [args...]
+  if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "${1:-}" ]; then
+    shift
+    "$@"
+    return
+  fi
   local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
   _UNITS_MEMO_PLAN="${1:-}"
@@ -764,12 +775,17 @@ units_validate() {
               && (bsc[i] !~ /^[0-9a-fA-F]+$/ || length(bsc[i]) < 7 || length(bsc[i]) > 40))
             printf "%s: base %s is not a commit id\n", id[i], bsc[i]
 
+          # BLANKS AROUND A TOKEN ARE PADDING; A BLANK INSIDE ONE IS NOT (wave-21 T13). The
+          # cell used to lose every blank before it was split, so `ext:ci green` was admitted
+          # as `ext:cigreen`, a token nobody wrote. Each token is trimmed at its ends only, and
+          # one still holding a blank is refused naming what the author wrote.
           d = dep[i]
-          gsub(/[ \t]/, "", d)
           if (d ~ /[A-Za-z0-9]/) {
             m = split(d, a, ",")
             for (j = 1; j <= m; j++) {
+              gsub(/^[ \t]+|[ \t]+$/, "", a[j])
               if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
+              if (a[j] ~ /[ \t]/) { printf "%s: dep %s names no row in the table\n", id[i], a[j]; continue }
               # AN EXTERNAL PREREQUISITE NAMES NO ROW BY DESIGN (wave-21 T4; D3, ADR-037
               # decision 2): `ext:<slug>` in its one shape is admitted beside the task ids.
               # Any other id the table does not carry, a malformed token included, is still
@@ -839,7 +855,11 @@ units_validate() {
 #
 # ONLY `T<digit>…` ROWS ARE JUDGED, as the gate's arms have always filtered: a legend or a
 # non-unit row in the table is not a ledger row. No table is no finding, exit 0.
-units_findings() { _units_ledger findings "${1:-}" "${2:-}"; }
+#
+# ONE PARSE PER CALL. The reader asks the table twice — its rows, then whether the header
+# carries `step` — so it runs under `units_memoised`; a caller already holding a memo for the
+# plan (the tick) pays nothing more (wave-21 T13; review-bed/perf/report.md observation 3).
+units_findings() { units_memoised "${1:-}" _units_ledger findings "${1:-}" "${2:-}"; }
 
 # units_unlined <plan> -> the `T<digit>…` ids with no non-empty `- <id>:` line under
 # `## SDLC State`, table order, whatever their status; always exit 0.
