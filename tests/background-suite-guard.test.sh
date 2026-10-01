@@ -323,6 +323,23 @@ guarded "$R5" 'bash tests/epsilon.test.sh'
 expect_eq "B5b …and one neither row allows is still refused" "2" "$ST"
 expect_contains "B5b …against the later row's set" "alpha.test.sh delta.test.sh" "$VERR"
 
+section "B5c — a successor row carrying re_executes= admits the run (T6, AC-5.3)"
+# The remedy the refusal now names is `amend --reexec+`, which appends a successor row with
+# `re_executes=`. The round trip is green today; this pins it so the remedy cannot rot into
+# a command that is accepted and then does nothing. The positive and its refused control sit
+# together: a pin on the admit alone would also pass a wall that admitted everything.
+R5C=$(mk_repo b5c)
+add_row "$R5C" name=w-b5c "agent_id=$ACTOR" status=intended suites_allowed=alpha.test.sh \
+  suites_source=declared files=
+guarded "$R5C" "npx jest --testPathPatterns 'x'"
+expect_eq "B5c before the widen, the run is refused" "2" "$ST"
+add_row "$R5C" name=w-b5c "agent_id=$ACTOR" status=confirmed suites_allowed=alpha.test.sh \
+  suites_source=declared files= "re_executes=\`npx jest --testPathPatterns 'x'\`"
+guarded "$R5C" "npx jest --testPathPatterns 'x'"
+expect_eq "B5c after the successor row, the declared run is admitted" "0" "$ST"
+guarded "$R5C" 'npx jest'
+expect_eq "B5c …and an undeclared run is still refused" "2" "$ST"
+
 section "B6 — scope: the arm is the AGENT's, and the session must be engaged"
 # A main-thread payload has no top-level agent_id (t1-probe-report.md §3). The
 # orchestrator's own thread is hooks/farm-out-reminder.sh's, which answers the same
