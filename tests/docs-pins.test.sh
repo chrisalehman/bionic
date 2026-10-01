@@ -3909,14 +3909,34 @@ else
      "check sentence: $(has_pin "$SKILL_MD" 'Task-scale ledgers have no write-time check.' && echo present || echo absent); roster sentence: $(has_pin "$SKILL_MD" "$T13_ACT" && echo present || echo absent); no-roster clause: $(has_pin "$SKILL_MD" "$T13_NOR" && echo present || echo absent); unconditional sentence: $(has_pin "$SKILL_MD" 'An `active` row needs no evidence line.' && echo present || echo absent)"
 fi
 
-# 195 — the ledger text says the agent cell carries the ROSTER NAME (A-T5.5), in both homes.
+# 195 — the ledger text says the agent cell carries the ROSTER NAME (A-T5.5), in all three homes.
+# THE THIRD HOME IS THE ONE THAT DEFINES THE COLUMN (wave-21 T14; critic-4e6d4a9 I1).
+# operational-rules.md's column list still said "the `subagent_type` this row dispatches to", and
+# the 1.8.8 gate refuses an `active` row whose agent cell names no roster row — so a plan authored
+# from the reference, or one mid-run at upgrade, was refused at its writers' next commit. The
+# definition carries dispatch.md's sentence, the upgrade step for a pre-1.8.8 row, and never the
+# old role wording.
 T9_AG='carries the ROSTER NAME the dispatch gave the agent'
 T9_AG2='carries the agent'"'"'s ROSTER NAME'
-if has_pin "$DISPATCH_MD" "$T9_AG" && has_pin "$SKILL_MD" "$T9_AG2"; then
-  ok "195: A-T5.5 — dispatch.md and SKILL.md say a ledger row's agent cell carries the roster name, never the role"
+T14_MIG='A row dispatched before 1.8.8 with a role in this cell is refused by the 1.8.8 commit gate once a roster exists'
+T14_OLD='the `subagent_type` this row dispatches to'
+if has_pin "$DISPATCH_MD" "$T9_AG" && has_pin "$SKILL_MD" "$T9_AG2" && has_pin "$OPRULES" "$T9_AG" \
+   && has_pin "$OPRULES" "$T14_MIG" && ! has_pin "$OPRULES" "$T14_OLD"; then
+  ok "195: A-T5.5 — dispatch.md, SKILL.md and operational-rules.md say a ledger row's agent cell carries the roster name, never the role"
 else
-  no "195: A-T5.5 — dispatch.md and SKILL.md say a ledger row's agent cell carries the roster name, never the role" \
-     "dispatch.md: $(has_pin "$DISPATCH_MD" "$T9_AG" && echo present || echo absent); SKILL.md: $(has_pin "$SKILL_MD" "$T9_AG2" && echo present || echo absent)"
+  no "195: A-T5.5 — dispatch.md, SKILL.md and operational-rules.md say a ledger row's agent cell carries the roster name, never the role" \
+     "dispatch.md: $(has_pin "$DISPATCH_MD" "$T9_AG" && echo present || echo absent); SKILL.md: $(has_pin "$SKILL_MD" "$T9_AG2" && echo present || echo absent); operational-rules.md: $(has_pin "$OPRULES" "$T9_AG" && echo present || echo absent); migration: $(has_pin "$OPRULES" "$T14_MIG" && echo present || echo absent); role wording: $(has_pin "$OPRULES" "$T14_OLD" && echo present || echo absent)"
+fi
+
+# 195b — the `deps` definition admits the `ext:<slug>` token T4 added beside the task ids; "bare
+# task ids only" is no longer the whole grammar the validator accepts.
+T14_EXT='or an external prerequisite `ext:<slug>`'
+T14_BARE='bare task ids only'
+if has_pin "$OPRULES" "$T14_EXT" && ! has_pin "$OPRULES" "$T14_BARE"; then
+  ok "195b: wave-21 T4 — operational-rules.md's deps definition admits ext:<slug> beside the task ids"
+else
+  no "195b: wave-21 T4 — operational-rules.md's deps definition admits ext:<slug> beside the task ids" \
+     "ext sentence: $(has_pin "$OPRULES" "$T14_EXT" && echo present || echo absent); bare-ids sentence: $(has_pin "$OPRULES" "$T14_BARE" && echo present || echo absent)"
 fi
 
 finish

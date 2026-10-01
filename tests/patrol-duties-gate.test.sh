@@ -185,6 +185,16 @@ a_tool_agentid() {  # <dir> <name>
     >> "$1/transcript.jsonl"
 }
 
+# The orchestrator's own words: a turn's prose, and one of the places a decline may be
+# written. DEFINED WITH THE OTHER ENTRY BUILDERS, above every case (wave-21 T14): §4's 35e calls
+# it, and a definition in §5 left those calls printing "command not found" while the case passed.
+a_text() {  # <dir> <text>
+  jq -nc --arg t "$2" \
+    '{type:"assistant",isSidechain:false,
+      message:{role:"assistant",content:[{type:"text",text:$t}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
 junk() { printf 'not json at all {{{\n' >> "$1/transcript.jsonl"; }
 
 # ---------- driving the hook ----------
@@ -559,6 +569,19 @@ esac
 # The text says what is true on every turn it fires: the window is open until a CronList.
 d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_text "$d" "armed."
 u_prompt "$d" "carry on with the wave"; a_text "$d" "on it."
+# THE LATER TURN IS REAL ONLY IF ITS TEXT LANDED (wave-21 T14; floor-4e6d4a9). `a_text` was
+# defined below this case, so both calls printed "command not found" and the fixture had no
+# assistant entry after the prompt — the case still passed, on a transcript that was not the
+# one it describes. The fixture is asserted first: the CronCreate's turn said "armed.", the
+# later turn said only "on it." and made no Cron call.
+expect_eq "35e0 precondition: the CronCreate's turn and the later turn each carry their text" "armed.|on it." \
+  "$(jq -sr '[.[] | select(.type=="assistant") | .message.content[] | select(.type=="text") | .text] | join("|")' \
+       "$d/transcript.jsonl" 2>/dev/null)"
+expect_eq "35e0b precondition: …and the later turn made no Cron call" "0" \
+  "$(jq -sr '(map(.type=="user" and (.message.content|type)=="string") | rindex(true)) as $i
+             | .[($i+1):] | [.[] | select(.type=="assistant") | .message.content[]
+             | select(.type=="tool_use" and (.name|startswith("Cron")))] | length' \
+       "$d/transcript.jsonl" 2>/dev/null)"
 fire "$d"; expect_block "35e: a later turn with the window still open is refused, saying the window is open until a CronList" \
   "stays open until a CronList" "This is the first Stop"
 fire "$d"; expect_block "35e2: …and it says the gate blocks once per turn, every turn, until then" \
@@ -603,14 +626,6 @@ a_agent_sidechain() {  # <dir> <name>
     '{type:"assistant",isSidechain:true,
       message:{role:"assistant",content:[{type:"tool_use",id:"toolu_9",name:"Agent",
         input:{name:$n,prompt:"x",subagent_type:"implementor"}}]}}' \
-    >> "$1/transcript.jsonl"
-}
-
-# The orchestrator's own words, which is one of the places a decline may be written.
-a_text() {  # <dir> <text>
-  jq -nc --arg t "$2" \
-    '{type:"assistant",isSidechain:false,
-      message:{role:"assistant",content:[{type:"text",text:$t}]}}' \
     >> "$1/transcript.jsonl"
 }
 

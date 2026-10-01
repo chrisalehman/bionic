@@ -310,6 +310,34 @@ for c in 'cd x && sort -o f f && git log -1' 'cd x && sort --output=f f && git l
   expect_contains "4y: production chain nudges [$c]" "chain-class command" \
     "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
 done
+# A WRITE IS A WRITE WHATEVER THE HEAD (wave-21 T14; critic-4e6d4a9 I2). The exempt set judged
+# a segment by its first word, so an observation head that wrote through a redirect or a pipe
+# passed: `jq . a > b`, `date > f`, `sort f>out`, `uniq f>g`, `jq … | tee f` were silent at
+# 4e6d4a9 and nudged at 0b9935d. A segment that writes a file through an unquoted `>`, `>>`,
+# `&>` or `2>` is production; every command of a pipe or a `;` list is judged on its own, so a
+# pipe into `tee`, `sponge` or `xargs rm` nudges; and `gh api` takes its LAST method, as gh does.
+# The controls are the same heads observing: no redirect, a redirect to /dev/null or onto
+# another descriptor, a `>` inside quotes, and a pipe into another observer.
+for c in 'cd x && git status && date' 'cd x && git status && jq . a' 'cd x && git status && sort f | head' \
+         'cd x && git status && jq ".a > 1" f' 'cd x && git diff 2>/dev/null && git log 2>&1 | head -5' \
+         'cd x && git status; git log -1 && date' 'cd x && gh api -X POST -X GET repos/o/r && git log -1'; do
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$c")"
+  expect_empty "4z: observation chain is silent [$c]" "$OUT"
+done
+for c in 'cd x && git status && jq . a.json > b.json' 'cd x && git status && date > stamp' \
+         'cd x && git status && sort f>out' 'cd x && git status && uniq f>g' \
+         'cd x && git status && jq -n "{}" | tee out.json' 'cd x && git status && cat f >> log' \
+         'cd x && git status && grep x f &> out' 'cd x && git status && grep x f 2> err' \
+         'cd x && git status && echo x > f' 'cd x && git status && jq . a | sponge a' \
+         'cd x && git status && find . -name y | xargs rm' 'cd x && git status; rm -rf build && date' \
+         'cd x && gh api -X GET -X POST repos/o/r && git log -1' \
+         'cd x && gh api --method GET repos/o/r --method PATCH && git log -1'; do
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$c")"
+  expect_contains "4z2: a write behind an observation head nudges [$c]" "chain-class command" \
+    "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
+done
 cp "$SANDBOX/.state.keep" "$FO_STATE"
 
 # ---------------------------------------------------------------------------

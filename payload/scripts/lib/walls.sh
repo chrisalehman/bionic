@@ -4627,6 +4627,173 @@ dispatch
 exit 0
 }
 
+# ─── the chain arm's exempt set — one `&&` segment, read as the shell runs it ──
+#
+# `_chain_seg_split <segment>` sets `_CHAIN_STAGES` (the segment's commands, newline-joined, split
+# at every unquoted `|`, `|&`, `;` and lone `&`) and `_CHAIN_WRITES` (1 when an unquoted redirect
+# writes a file: `>`, `>>`, `>|`, `&>`, `N>`, `>&word`, `>(…)`; never `>/dev/null`, `>&2`, `2>&1`,
+# `>&-`). Quotes are honoured — `jq ".a > 1" f` carries no redirect — and a backslash escapes the
+# next character. A `>` with no readable word after it fails closed, as a write.
+#
+# WHY A SEGMENT IS NOT ITS HEAD (wave-21 T14; critic-4e6d4a9 I2). The exempt set judged an `&&`
+# segment by its first word, so `date > stamp`, `jq . a > b`, `sort f>out`, `uniq f>g` and
+# `jq … | tee f` all passed as observation, and `git status; rm -rf build` hid a `rm` behind a
+# `git`. Spec D8 calls the set an allowlist of OBSERVATION, and none of those observes.
+#
+# A SCREEN FIRST: a segment holding none of `|`, `;`, `&`, `>` is one command that writes nothing
+# through a redirect, and pays for no character walk.
+_CHAIN_STAGES=""; _CHAIN_WRITES=""
+_chain_seg_split() {  # <segment> -> sets _CHAIN_STAGES, _CHAIN_WRITES
+  local s="$1" n i=0 c q="" cur="" out="" t dup
+  _CHAIN_WRITES=""
+  case "$s" in
+    *[\|\;\&\>]*) : ;;
+    *) _CHAIN_STAGES="$s"; return 0 ;;
+  esac
+  n=${#s}
+  while [ "$i" -lt "$n" ]; do
+    c="${s:i:1}"
+    if [ -n "$q" ]; then
+      cur="$cur$c"
+      if [ "$q" = '"' ] && [ "$c" = '\' ]; then
+        i=$((i + 1)); cur="$cur${s:i:1}"
+      elif [ "$c" = "$q" ]; then
+        q=""
+      fi
+      i=$((i + 1)); continue
+    fi
+    case "$c" in
+      \\) cur="$cur$c${s:i+1:1}"; i=$((i + 2)); continue ;;
+      \'|\") q="$c"; cur="$cur$c" ;;
+      \||\;)
+        out="$out$cur"$'\n'; cur=""
+        if [ "$c" = '|' ] && [ "${s:i+1:1}" = '&' ]; then i=$((i + 1)); fi ;;
+      \&)
+        # `&>` is a redirect, read at its `>`; a lone `&` ends a command.
+        if [ "${s:i+1:1}" != '>' ]; then out="$out$cur"$'\n'; cur=""; fi ;;
+      \>)
+        # A descriptor number written against the `>` (`2>`) belongs to the redirect, not to the
+        # command's operands.
+        case "$cur" in
+          [0-9]|[0-9][0-9]) cur="" ;;
+          *' '[0-9]|*' '[0-9][0-9]) cur="${cur% *} " ;;
+        esac
+        i=$((i + 1))
+        if [ "${s:i:1}" = '>' ]; then i=$((i + 1)); fi
+        if [ "${s:i:1}" = '|' ]; then i=$((i + 1)); fi
+        dup=""
+        if [ "${s:i:1}" = '&' ]; then dup=1; i=$((i + 1)); fi
+        while [ "${s:i:1}" = ' ' ]; do i=$((i + 1)); done
+        t=""
+        while [ "$i" -lt "$n" ]; do
+          c="${s:i:1}"
+          case "$c" in ' '|\||\;|\&|\<|\>|\(|\)) break ;; esac
+          t="$t$c"; i=$((i + 1))
+        done
+        t="${t//\'/}"; t="${t//\"/}"
+        case "$t" in
+          '') _CHAIN_WRITES=1 ;;
+          /dev/null|/dev/stdout|/dev/stderr) : ;;
+          *)
+            if [ -z "$dup" ]; then
+              _CHAIN_WRITES=1
+            else
+              case "$t" in -|[0-9]|[0-9][0-9]) : ;; *) _CHAIN_WRITES=1 ;; esac
+            fi ;;
+        esac
+        continue ;;
+      *) cur="$cur$c" ;;
+    esac
+    i=$((i + 1))
+  done
+  _CHAIN_STAGES="$out$cur"
+}
+
+# `_chain_stage_observes <command>` -> 0 when the one command only reads or reports, 1 otherwise.
+#
+# THE LINE THIS LIST DRAWS: observation is exempt, production is nudged. A command that only
+# reads or reports (git, read tools, date/pwd/jq/sort, gh view/list/watch, a GET gh api) never
+# makes a chain production-shaped; one that writes the tree (rm, mv, cp, mkdir, touch, tee) or
+# the remote (gh api -X POST, gh pr merge) does. Redirects never reach here: `_chain_seg_split`
+# has already answered them for the whole segment.
+# THE SAME EXEMPT SET, ASKED WITH A BUILTIN. The regex was anchored at `^` over literal words
+# each followed by a literal space, which is exactly what these patterns are — a bare `git` with
+# no argument stays non-exempt in both spellings. The read tools that take stdin are exempt bare
+# too (wave-21 T14): a pipe stage reads its input, so `sort f | head` observes.
+_chain_stage_observes() {  # <one trimmed command>
+  local _xo _xn _xdd _xw _xm _xf _xp
+  local -a _xws
+  case "$1" in
+    'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
+    'sed '*|'echo '*|'printf '*|'test '*|'cd '*|'which '*|'command '*|'false '*|\
+    'pwd'|'pwd '*|'true'|'true '*|'date'|'date '*|'jq'|'jq '*|\
+    'basename'|'basename '*|\
+    'ls'|'cat'|'head'|'tail'|'wc'|\
+    'gh run watch'|'gh run watch '*) return 0 ;;
+    'sort'|'sort '*|'uniq'|'uniq '*)
+      # `sort`/`uniq` observe only with NO OUTPUT FLAG and AT MOST ONE OPERAND (wave-21 T13
+      # item 8): `sort -o f f` / `--output` writes a file, and `uniq in out` writes its second
+      # operand. A short-option cluster carrying `o` counts as the output flag; a word after
+      # `--` is an operand; an option's separate argument (`-k 2`) counts as an operand,
+      # which can only ever turn an observation into a nudge.
+      _xo=0; _xn=0; _xdd=""
+      # SPLIT BY `read -a`, never by an unquoted expansion: a `*` in the segment is a word
+      # here, not a glob over the cwd.
+      read -r -a _xws <<< "$1"
+      for _xw in "${_xws[@]:1}"; do
+        if [ -z "$_xdd" ]; then
+          case "$_xw" in
+            --) _xdd=1; continue ;;
+            --output|--output=*) _xo=1; break ;;
+            --*) continue ;;
+            -) : ;;
+            -*o*) _xo=1; break ;;
+            -*) continue ;;
+          esac
+        fi
+        _xn=$((_xn + 1))
+      done
+      [ "$_xo" -eq 0 ] && [ "$_xn" -le 1 ] ;;
+    'gh api'|'gh api '*)
+      # `gh api` observes unless a method other than GET is named — and a field or an input
+      # body (`-f`, `-F`, `--field`, `--raw-field`, `--input`) makes it a POST unless GET is
+      # named (wave-21 T13 item 8). Under a named GET, gh sends fields as query parameters,
+      # so they still observe; `--input` is a request BODY and is never an observation.
+      # THE LAST METHOD WINS, as gh reads its flags (wave-21 T14; critic-4e6d4a9 I2): a GET
+      # matched anywhere let `gh api -X GET -X POST` pass as an observation.
+      _xm=""; _xf=""; _xp=""
+      read -r -a _xws <<< "$1"
+      for _xw in "${_xws[@]:2}"; do
+        if [ -n "$_xp" ]; then _xm="$_xw"; _xp=""; continue; fi
+        case "$_xw" in
+          --input|--input=*) return 1 ;;
+          -X|--method) _xp=1 ;;
+          --method=*) _xm="${_xw#--method=}" ;;
+          -X?*) _xm="${_xw#-X}" ;;
+          -f|-F|--field|--raw-field|-f?*|-F?*|--field=*|--raw-field=*) _xf=1 ;;
+        esac
+      done
+      # A method flag with no word after it names no method gh would send: fail closed.
+      [ -z "$_xp" ] || return 1
+      _xm="${_xm//\'/}"; _xm="${_xm//\"/}"
+      case "$_xm" in
+        [Gg][Ee][Tt]) return 0 ;;
+        '') [ -z "$_xf" ]; return ;;
+        *) return 1 ;;
+      esac ;;
+    'gh '*)
+      # `gh <noun> view` / `gh <noun> list` observe; every other verb is production. The verb
+      # is the word AFTER THE NOUN (wave-21 T13 item 8): matched anywhere, `gh pr merge 5
+      # --body view` passed as an observation.
+      _xw="${1#gh }"; _xw="${_xw#* }"; _xw="${_xw%% *}"
+      case "$_xw" in
+        view|list) return 0 ;;
+        *) return 1 ;;
+      esac ;;
+    *) return 1 ;;
+  esac
+}
+
 # ─── wall_farm_out_reminder — hooks/farm-out-reminder.sh ─────────────────────
 #
 # FARM-OUT: tiered enforcement — long-running main-thread commands DENY with a
@@ -4917,8 +5084,7 @@ fi
 # have exited otherwise), ≥1 non-exempt segment → nudge as class=chain.
 if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
   _has_nonexempt=""
-  local _xo _xn _xdd _xw
-  local -a _xws
+  local _xst
   while IFS= read -r _seg; do
     # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
     # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
@@ -4931,69 +5097,26 @@ if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
       esac
     done
     [ -n "$_seg" ] || continue
-    # THE LINE THIS LIST DRAWS: observation is exempt, production is nudged. A segment
-    # that only reads or reports (git, read tools, date/pwd/jq/sort, gh view/list/watch,
-    # a GET gh api) never makes a chain production-shaped; one that writes the tree
-    # (rm, mv, cp, mkdir, touch) or the remote (gh api -X POST, gh pr merge) does.
-    # THE SAME EXEMPT SET, ASKED WITH A BUILTIN. The regex was anchored at `^` over
-    # literal words each followed by a literal space, which is exactly what these
-    # patterns are — a bare `git` with no argument stays non-exempt in both spellings.
-    case "$_seg" in
-      'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
-      'sed '*|'echo '*|'printf '*|'test '*|'cd '*|'which '*|'command '*|'false '*|\
-      'pwd'|'pwd '*|'true'|'true '*|'date'|'date '*|'jq'|'jq '*|\
-      'basename'|'basename '*|\
-      'gh run watch'|'gh run watch '*) : ;;
-      'sort'|'sort '*|'uniq'|'uniq '*)
-        # `sort`/`uniq` observe only with NO OUTPUT FLAG and AT MOST ONE OPERAND (wave-21 T13
-        # item 8): `sort -o f f` / `--output` writes a file, and `uniq in out` writes its second
-        # operand. A short-option cluster carrying `o` counts as the output flag; a word after
-        # `--` is an operand; an option's separate argument (`-k 2`) counts as an operand,
-        # which can only ever turn an observation into a nudge.
-        _xo=0; _xn=0; _xdd=""
-        # SPLIT BY `read -a`, never by an unquoted expansion: a `*` in the segment is a word
-        # here, not a glob over the cwd.
-        read -r -a _xws <<< "$_seg"
-        for _xw in "${_xws[@]:1}"; do
-          if [ -z "$_xdd" ]; then
-            case "$_xw" in
-              --) _xdd=1; continue ;;
-              --output|--output=*) _xo=1; break ;;
-              --*) continue ;;
-              -) : ;;
-              -*o*) _xo=1; break ;;
-              -*) continue ;;
-            esac
-          fi
-          _xn=$((_xn + 1))
-        done
-        if [ "$_xo" -eq 1 ] || [ "$_xn" -gt 1 ]; then _has_nonexempt=1; break; fi ;;
-      'gh api'|'gh api '*)
-        # `gh api` observes unless a method other than GET is named — and a field or an input
-        # body (`-f`, `-F`, `--field`, `--raw-field`, `--input`) makes it a POST unless GET is
-        # named (wave-21 T13 item 8). Under a named GET, gh sends fields as query parameters,
-        # so they still observe; `--input` is a request BODY and is never an observation.
-        case " $_seg " in
-          *' --input '*|*' --input='*) _has_nonexempt=1; break ;;
+    # A SEGMENT IS JUDGED AS THE SHELL RUNS IT (wave-21 T14; critic-4e6d4a9 I2): a write through
+    # an unquoted redirect makes it production whatever its head, and every command of a pipe or
+    # a `;` list is judged on its own — `_chain_seg_split` reads both, `_chain_stage_observes`
+    # is the exempt set.
+    _chain_seg_split "$_seg"
+    if [ -n "$_CHAIN_WRITES" ]; then _has_nonexempt=1; break; fi
+    while IFS= read -r _xst; do
+      while :; do
+        case "$_xst" in
+          ' '*) _xst="${_xst# }" ;;
+          *' ') _xst="${_xst% }" ;;
+          *)    break ;;
         esac
-        case " $_seg " in
-          *' -X '[Gg][Ee][Tt]' '*|*' --method '[Gg][Ee][Tt]' '*|*' --method='[Gg][Ee][Tt]' '*|*' -X'[Gg][Ee][Tt]' '*) : ;;
-          *' -X '*|*' -X'?*|*' --method '*|*' --method='*) _has_nonexempt=1; break ;;
-          *' -f '*|*' -f'?*|*' -F '*|*' -F'?*|*' --field '*|*' --field='*|*' --raw-field '*|*' --raw-field='*)
-            _has_nonexempt=1; break ;;
-          *) : ;;
-        esac ;;
-      'gh '*)
-        # `gh <noun> view` / `gh <noun> list` observe; every other verb is production. The verb
-        # is the word AFTER THE NOUN (wave-21 T13 item 8): matched anywhere, `gh pr merge 5
-        # --body view` passed as an observation.
-        _xw="${_seg#gh }"; _xw="${_xw#* }"; _xw="${_xw%% *}"
-        case "$_xw" in
-          view|list) : ;;
-          *) _has_nonexempt=1; break ;;
-        esac ;;
-      *) _has_nonexempt=1; break ;;
-    esac
+      done
+      [ -n "$_xst" ] || continue
+      _chain_stage_observes "$_xst" || { _has_nonexempt=1; break; }
+    done <<EOF
+$_CHAIN_STAGES
+EOF
+    [ -z "$_has_nonexempt" ] || break
   done <<EOF
 $CHAIN_SEGS
 EOF
@@ -5669,6 +5792,10 @@ $(_budget_remedy_line "$1")"
 # `--suites+ <suite>` and a run with `--reexec+ '<cmd>'`. A refused suite FILE — one word, a
 # `*.test.sh` basename — names its own flag and itself; anything else the wall refused is a run,
 # and keeps the run flag with the placeholder, since a run is retyped by the reader who knows it.
+#
+# EVERY PLACEHOLDER IS QUOTED (wave-21 T14; critic-4e6d4a9 I4). A bare `<why>` is a redirect from
+# a file named `why` followed by a `>` with no word, so the pasted line was a parse error before
+# `amend` ever read its arguments. `'<why>'` is one word, like `'<cmd>'`.
 _budget_remedy_line() {  # <the refused suite or run>
   local _root="<plugin-root>" _widen="--reexec+ '<cmd>'"
   if [ -n "${BIONIC_LIB:-}" ] && [ -d "$BIONIC_LIB/../.." ]; then
@@ -5678,7 +5805,7 @@ _budget_remedy_line() {  # <the refused suite or run>
     *[[:space:]]*) : ;;
     *.test.sh) _widen="--suites+ $(_budget_shell_word "$1")" ;;
   esac
-  printf "widen it: bash %s/hooks/session-poker.sh amend %s %s --reason <why> (main runs it)" \
+  printf "widen it: bash %s/hooks/session-poker.sh amend %s %s --reason '<why>' (main runs it)" \
     "$_root" "$(_budget_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
 }
 
