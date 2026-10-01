@@ -11384,7 +11384,7 @@ expect_eq "control: the same scratch tree with the plant removed reads back to 2
   "$(bf_3rd_calls | grep -c 'plan_bring_forward "')"
 
 # ============================================================
-section "SV — the shared brief-scaffold block is byte-identical across all eight rendered surfaces, and re-authored to the new span rule (epic-23 wave-17-fixit-184 T9, REQ-7 AC-7.1)"
+section "SV — the shared brief-scaffold block is byte-identical across its two author surfaces (the six role files carry its reader view, Δ9), and re-authored to the new span rule (epic-23 wave-17-fixit-184 T9, REQ-7 AC-7.1)"
 # ============================================================
 #
 # WHY THIS LIVES HERE, NOT IN docs-pins.test.sh. `agents-src/blocks/brief-scaffold.md` is
@@ -11410,10 +11410,11 @@ sv_suites_line() {  # <file> -> the scaffold's Suites: line, or empty
   awk '/^Suites: none/ { print; exit }' "$1" 2>/dev/null
 }
 
+# RE-POINTED (wave-21 T7b, design ledger Δ9): the author block renders into SKILL.md and
+# dispatch.md only. The six role files carry the reader view (brief-scaffold-reader.md),
+# which has no fenced `Suites: none` line; the arm after the count pins that each of them
+# carries that view, so a role file that lost its scaffold altogether still turns this red.
 SV_SURFACES="$SV_SKILL $SV_DISPATCH"
-for _sv_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
-  [ -f "$_sv_f" ] && SV_SURFACES="$SV_SURFACES $_sv_f"
-done
 
 SV_DISAGREE=""
 SV_COUNT=0
@@ -11422,8 +11423,18 @@ for _sv_f in $SV_SURFACES; do
   _sv_got="$(sv_suites_line "$_sv_f")"
   [ "$_sv_got" = "$SV_SUITES_LINE" ] || SV_DISAGREE="${SV_DISAGREE} ${_sv_f##*/}=[${_sv_got:-<absent>}]"
 done
-expect_eq "SV all eight rendered surfaces carry the shared scaffold's new Suites: line" \
-  "8 " "$SV_COUNT $SV_DISAGREE"
+expect_eq "SV both author surfaces (SKILL.md, dispatch.md) carry the shared scaffold's new Suites: line" \
+  "2 " "$SV_COUNT $SV_DISAGREE"
+
+SV_ROLES=0
+SV_NOREADER=""
+for _sv_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
+  [ -f "$_sv_f" ] || continue
+  SV_ROLES=$((SV_ROLES + 1))
+  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_sv_f" || SV_NOREADER="${SV_NOREADER} ${_sv_f##*/}"
+done
+expect_eq "SV …and all six role files carry the reader view of the scaffold" \
+  "6 " "$SV_ROLES $SV_NOREADER"
 
 # THE OLD LINE IS GONE, EVERYWHERE, NOT JUST REPLACED SOMEWHERE. A partial render (the
 # block updated in the source but only some templates re-rendered) would leave some copies
@@ -11433,7 +11444,7 @@ SV_STALE=0
 for _sv_f in $SV_SURFACES; do
   /usr/bin/grep -qF 'on its own paragraph' "$_sv_f" 2>/dev/null && SV_STALE=$((SV_STALE + 1))
 done
-expect_eq "SV …and none of the eight still carries the retired 'on its own paragraph' comment" \
+expect_eq "SV …and neither author surface still carries the retired 'on its own paragraph' comment" \
   "0" "$SV_STALE"
 
 # ANTI-VACUITY: a doctored copy of one surface, reverted to the old comment, DOES disagree
