@@ -665,12 +665,15 @@ fi
 # WHAT THE REPAIR COSTS, stated rather than left to be discovered. An `intended`
 # row carries an EMPTY `agent_id` until ARM 2 completes it, and an empty id is not
 # a key — so this arm can no longer rescue a dispatch whose PostToolUse never
-# fired. A TEAMMATE row is never identified at all, because ARM 2 deliberately
+# fired. A TEAMMATE row is not identified by this id join, because ARM 2 deliberately
 # leaves its `agent_id=` empty (the launch response carries only the ADDRESSING
 # form, and writing that into `agent_id=` would turn every by-id wall's input from
-# unknown into wrong). Both were ALREADY missing — a join on a field that carries
-# no name matches nothing either — and what changes is that the miss is structural
-# and visible instead of silent. The alternative, keeping a name join beside this
+# unknown into wrong). A teammate IS identified, by the NAME join at SubagentStart
+# below, and its `confirmed` row carries no id by design; the roster's one rule for
+# the rows written after that moment is stated in payload/scripts/lib/roster.sh at
+# `roster_row_for_id` (ADR-039). Both misses were ALREADY there — a join on a field
+# that carries no name matches nothing either — and what changes is that the miss is
+# structural and visible instead of silent. The alternative, keeping a name join beside this
 # one, is keeping the defect: `agent_type` is not a name.
 #
 # LATEST WINS, and `intended` is accepted alongside `confirmed`. The roster is
@@ -838,10 +841,12 @@ if [ -n "$IS_START" ]; then
   if [ -n "$DUP_PRIOR" ]; then
     # EVERY FIELD CARRIED FORWARD, exactly as the identification below does: the row is a
     # CONTRACT, and a row that dropped a field would silently retract what it inherited.
-    # Only `status=` moves, to a value no other reader recognises — which is deliberate:
-    # every roster reader in the fleet filters by status, so a `duplicate-start` row is
-    # inert to the budget, to the sweep and to both stop gates, and visible to the tick,
-    # which is the one surface that should say something about it.
+    # Only `status=` moves, to a value the status-filtered readers do not recognise: the
+    # sweep and the stop gates skip a `duplicate-start` row, and the tick is the surface
+    # that says something about it. The BUDGET arm does not filter by status — it reads the
+    # last row carrying the id (`roster_row_for_id`, payload/scripts/lib/roster.sh) — so
+    # this row IS what it reads after a restart. That is the intent: the successor copied
+    # here is identified, so it carries the id and the contract, amended or not (ADR-039).
     printf '%s\n' "$DUP_PRIOR" | awk '
       BEGIN { RS = "|"; ORS = "" }
       { f = $0; sub(/\n$/, "", f)

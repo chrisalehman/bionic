@@ -451,4 +451,24 @@ expect_eq "R11f a forged second agent_id= is not the row's id (first key wins)" 
   "$(lib roster_row_for_id "$R11_FF" aforged-11)"
 expect_eq "R11f2 …the row answers to its first id" "$R11_FORGED" "$(lib roster_row_for_id "$R11_FF" aw1-11)"
 
+# ---------------------------------------------------------------------------------------
+section "R12 — the one rule is stated once and the six comments that restated it cite it (epic-23 wave-22 T5; REQ-1 AC-1.7, D8)"
+# STATIC. The invariant sentence lives in roster.sh's docblock for `roster_row_for_id`; the
+# sites below once said four other things about the same order, each false for a teammate
+# (triage-12574e2 Q3/Q4). A comment is not behaviour, so the pin is on the SENTENCES: the
+# rule is present at its one home, and none of the four old claims survives in a file that
+# used to carry one. Real paths: hooks/ is the real directory, payload/hooks a symlink.
+R12_RULE="Every row written after an agent's id is known carries that id, and the status the id was learned under"
+expect_eq "R12a the invariant sentence is in roster.sh" "1" "$(grep -cF "$R12_RULE" "$ROSTER_SH")"
+R12_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+R12_FILES=("${BIONIC_HOOKS_DIR}/session-poker.sh" "$R12_LIB/walls.sh" "${BIONIC_HOOKS_DIR}/execution-recorder.sh" \
+  "$R12_LIB/stop.sh" "${BIONIC_HOOKS_DIR}/stop-guard.sh" "$ROSTER_SH")
+R12_N=0
+for R12_S in "already read a name's latest row" "never goes back to empty" "A TEAMMATE row is never identified at all" \
+  "filters by status, so a \`duplicate-start\` row is"; do
+  R12_N=$((R12_N + 1))
+  R12_HITS="$(grep -nF "$R12_S" "${R12_FILES[@]}" 2>/dev/null | cut -c1-120)"
+  expect_eq "R12b$R12_N no file carries the old sentence \"$R12_S\"" "" "$R12_HITS"
+done
+
 finish
