@@ -5004,6 +5004,25 @@ EOF
         done <<EOF
 $SCHED_HOLDS
 EOF
+        # THE LEDGER, LINTED (wave-21 T5; REQ-4, AC-4.2; D4, ADR-037 decision 3). `units_findings`
+        # is the reader the commit gate refuses on — a status off the enum, a row at its terminal
+        # word with no `- T<n>:` line, an `active` row whose agent cell names no row on THIS
+        # session's roster — and each finding is printed here, every interval, as
+        # `poker: LEDGER <id> <kind> [<value>]`, after the HELD lines and before the FILL line.
+        # The ledger is the orchestrator's to write; a finding the gate would refuse at a
+        # writer's first commit reaches the one actor who can fix it a tick earlier. The roster
+        # is the one this tick already reads; a missing one is the reader's no-roster rule.
+        SCHED_FINDINGS="$(units_findings "$SCHED_PLAN" "$ROSTER_FILE" 2>/dev/null)"
+        while IFS= read -r SCHED_FINDING; do
+          [ -n "$SCHED_FINDING" ] || continue
+          SCHED_FKIND="${SCHED_FINDING%% *}"
+          SCHED_FREST="${SCHED_FINDING#* }"
+          SCHED_FVAL=""
+          case "$SCHED_FREST" in *" "*) SCHED_FVAL="${SCHED_FREST#* }" ;; esac
+          say "LEDGER ${SCHED_FREST%% *} ${SCHED_FKIND}${SCHED_FVAL:+ $(clean "$SCHED_FVAL")}"
+        done <<EOF
+$SCHED_FINDINGS
+EOF
         # THE GAP IS MEASURED AGAINST THE RUNG, NOT THE CEILING (AC-17). The ceiling is what
         # the run may ever run at; the rung is what the machine will carry right now, and
         # filling to the first while the second says otherwise is the mistake this whole arm
