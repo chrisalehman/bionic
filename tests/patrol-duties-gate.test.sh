@@ -527,6 +527,32 @@ fire "$d"; expect_allow "34: a marker followed only by CronList passes — nothi
 d=$(make_env); u_clear_marker "$d"; a_tool_sidechain "$d" CronCreate
 fire "$d"; expect_allow "35: a sidechain CronCreate does not count against the ritual"
 
+# 35a-c: THE RITUAL DISCHARGES. The offending CronCreate never leaves the transcript, so a
+# verdict that only ever set `violated` latched: every later turn's first Stop was refused
+# again, "blocks once" holding within one turn (case 32) and failing across turns. A CronList
+# since the marker is the look the gate exists to force, so it clears the violation whichever
+# side of the CronCreate it falls on; a LATER marker still opens a fresh window (35c).
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_tool "$d" CronList
+fire "$d"; expect_allow "35a: a CronList after the CronCreate discharges the ritual"
+
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_tool "$d" CronList
+a_tool "$d" CronDelete; a_tool "$d" CronCreate
+fire "$d"; expect_allow "35b: CronCreate, CronList, CronDelete, CronCreate — the whole ritual in the order the refusal asks — passes"
+
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_tool "$d" CronList
+u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "35c: a CronList before a LATER marker does not discharge the new window" "$RITUAL_CRONLIST"
+
+# 35d: THE STEP-3 TEXT. A session whose own Patrol job already exists has nothing to re-create,
+# so the refusal's step 3 is conditional on what step 2 left.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"
+case "$(reason_of)" in
+  *"3. CronCreate — only if step 2 left this session with no Patrol job of its own"*)
+    ok "35d: step 3 of the refusal is conditional on step 2's result" ;;
+  *) no "35d: step 3 of the refusal is still unconditional" "$(reason_of)" ;;
+esac
+
 section "Section 5: a printed FILL is advice, not evidence (AC-29, retired by wave-20 Δ7)"
 
 # THE CONTRACT. `session-poker.sh tick` can compute the gap between the plan's budget and
@@ -947,6 +973,17 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_prompt "$d" "merge the two landed trees and tell me where we are"
 a_text "$d" "fill-declined: the wave head has not merged, so neither row can base off it."
 fire "$d"; expect_allow "60: a fill-declined line answers the gap as it answers a printed FILL"
+
+# 60a: A DECLINE ANSWERS ONE TURN. The line is the model's text in turn N; turn N+1 is a new
+# user prompt with the gap still open and no decline in it, so it is refused again — block,
+# allow, block. The wall judges every Stop on the computed gap (wave-20 D5), not on what an
+# earlier turn said.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "first turn"
+a_text "$d" "fill-declined: waiting on the wave head."
+fire "$d"; expect_allow "60a: turn N — the decline answers the gap"
+u_prompt "$d" "second turn, nothing said about the gap"
+fire "$d"; expect_block "60a: F3 — turn N+1, gap still open, no decline in it — is refused again" "T2"
 
 # 60b: and a dispatch of every ready row answers it too. A DISPATCH IS TWO FACTS ON DISK
 # (wave-20 Δ7, count not names): the roster row the dispatch wall writes at launch, and the
