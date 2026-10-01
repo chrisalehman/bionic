@@ -5327,7 +5327,7 @@ fi
 # separators does not trip the symlink guards, it reads outside the directory those guards
 # protect.
 local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES BUDGET_LINE
-local _CLAIMS _kind _target _run _shown
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME=""
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
@@ -5349,15 +5349,16 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   # newline, both refused at the lift, so a marker is the only safe join).
   BUDGET_LINE=$(awk -F'|' -v id="$ACTOR" '
     /^roster-state\// {
-      hit = 0; stated = 0; allowed = ""; runs = ""
+      hit = 0; stated = 0; allowed = ""; runs = ""; nm = ""
       for (i = 1; i <= NF; i++) {
         if ($i == "agent_id=" id) hit = 1
         else if ($i ~ /^suites_allowed=/) { stated = 1; allowed = substr($i, 16) }
         else if ($i ~ /^re_executes=/) { runs = substr($i, 13) }
+        else if ($i ~ /^name=/) { nm = substr($i, 6) }
       }
-      if (hit) { last = stated ":" allowed; lastruns = runs }
+      if (hit) { last = stated ":" allowed; lastruns = runs; lastname = nm }
     }
-    END { if (last != "") { print last; print "R:" lastruns } }
+    END { if (last != "") { print last; print "R:" lastruns; print "N:" lastname } }
   ' "$ROSTER_FILE" 2>/dev/null)
   case "$BUDGET_LINE" in
     1:*) BUDGET_STATED=yes
@@ -5365,7 +5366,13 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
          SUITES_ALLOWED="${SUITES_ALLOWED#1:}" ;;
   esac
   case "$BUDGET_LINE" in
-    *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}" ;;
+    *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}"; RE_EXECUTES="${RE_EXECUTES%%$'\n'N:*}" ;;
+  esac
+  # THE ROW'S NAME, for the remedy line (T6): the verb that widens this budget addresses a
+  # row by name, and the winning row is the one already read above. Whitespace and anything
+  # a shell would treat specially is dropped, so the printed command stays pasteable.
+  case "$BUDGET_LINE" in
+    *$'\n'N:*) _BUDGET_ROW_NAME="${BUDGET_LINE##*$'\n'N:}"; _BUDGET_ROW_NAME="${_BUDGET_ROW_NAME//[!A-Za-z0-9._-]/}" ;;
   esac
   # DECODED ONCE, HERE, BEFORE ANYTHING READS IT (T4; REQ-7, D4). The row stores this field
   # percent-encoded because the line is pipe-delimited and a declared run may legitimately
@@ -5604,8 +5611,25 @@ You asked for: $1
 
 Run only what is on it. If the change genuinely reaches further than the brief said,
 say so in your report and let the orchestrator widen the brief — a wider instrument is
-its decision to make, and it is the one holding the one-regression budget for the run."
+its decision to make, and it is the one holding the one-regression budget for the run.
+$(_budget_remedy_line)"
   return 2
+}
+
+# THE REMEDY LINE (T6, REQ-5, AC-5.2). A refusal that names the budget and not the verb that
+# widens it sent two readers to hunt for it. The plugin root is the tree this library was
+# loaded from — `$BIONIC_LIB` is `<root>/scripts/lib`, and `hooks/session-poker.sh` sits
+# beside `scripts/` in every layout the loader accepts — so the line carries a path the
+# orchestrator can paste, never the `<plugin-root>` placeholder. When the loader's variable
+# is absent the placeholder is the honest fallback. `<name>` is the row's own name, read off
+# the roster by the arm that refuses, when that arm has it.
+_budget_remedy_line() {
+  local _root="<plugin-root>"
+  if [ -n "${BIONIC_LIB:-}" ] && [ -d "$BIONIC_LIB/../.." ]; then
+    _root="$(cd "$BIONIC_LIB/../.." 2>/dev/null && pwd)" || _root="<plugin-root>"
+  fi
+  printf "widen it: bash %s/hooks/session-poker.sh amend %s --reexec+ '<cmd>' --reason <why> (main runs it)" \
+    "$_root" "${_BUDGET_ROW_NAME:-<name>}"
 }
 
 # THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named
