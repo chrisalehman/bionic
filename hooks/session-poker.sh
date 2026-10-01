@@ -2300,14 +2300,16 @@ row_copy_args() {  # <row> <session id> -> sets ROW_COPY_ARGS
 # `identified` row later inherits it whole. `teammate_id=` travels only when that row has the
 # key — present-if-passed, as `row_copy_args` keeps it. On an async roster the latest row IS
 # the id-bearing one, so the three values equal the copy's and the row is byte-identical.
-# Sets POKER_ID too: the id the walls will key this agent on, or empty.
+# Sets POKER_ID too: the id the walls will key this agent on, or empty. The roster-state prefix is
+# `roster_row_for_id`'s — any `roster-state/` row, not one schema — so the verb's self-check and the
+# wall's pick read the same rows (wave-22 T10; review 5).
 POKER_ID_ARGS=()
 POKER_ID=""
 identity_args() {  # <roster> <name> <the name's latest row> -> sets POKER_ID_ARGS, POKER_ID
   local tuid row
   POKER_ID_ARGS=(); POKER_ID=""
   tuid="$(line_field "$3" tool_use_id)"
-  row="$(grep -F "roster-state/v1|" "$1" 2>/dev/null | grep -F "|name=${2}|" \
+  row="$(grep '^roster-state/' "$1" 2>/dev/null | grep -F "|name=${2}|" \
     | POKER_TUID="$tuid" awk -F'|' '
         { id = ""; tu = ""; gi = 0; gt = 0
           for (i = 1; i <= NF; i++) {
@@ -3957,7 +3959,14 @@ EOF
       die "amend written, but the budget wall reads $(line_field "$AM_PICK" status) row for $POKER_ID — $AM_WHY"
       exit 1
     fi
-    say "amended — $AMEND_NAME: files=${AM_NEW_FILES:-(none)} suites=${AM_SA:-(none)}${AM_NEW_RUNS:+ runs=$AM_NEW_RUNS}; the stop and budget walls read this row from now on."
+    # The stop wall and observe pick an id's row from `confirmed|identified` rows only
+    # (stop-guard.sh), so a successor that copied a `duplicate-start` row is read by the budget
+    # wall alone — the line names only the walls that read it (wave-22 T10; review 4).
+    case "$(line_field "$AM_NEW_ROW" status)" in
+      confirmed|identified) AM_WALLS="the stop and budget walls read" ;;
+      *)                    AM_WALLS="the budget wall reads" ;;
+    esac
+    say "amended — $AMEND_NAME: files=${AM_NEW_FILES:-(none)} suites=${AM_SA:-(none)}${AM_NEW_RUNS:+ runs=$AM_NEW_RUNS}; $AM_WALLS this row from now on."
     exit 0
     ;;
 

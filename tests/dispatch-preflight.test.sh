@@ -8257,9 +8257,52 @@ expect_contains "brief-lib four one-command lines meet the cap over the union (A
   "finding: Re-executes: line exceeds the 3-run cap" "$BV"
 expect_contains "brief-lib …naming the fourth run" "${BT}go test ./d${BT}" \
   "$(brief_detail bionic:auditor "$BRIEF_NOCONF" "$BV_FOURL")"
+BV_CAPD="$(brief_detail bionic:auditor "$BRIEF_NOCONF" "$BV_FOURL")"
+expect_contains "brief-lib …the refusal speaks of the Re-executes: lines (the union), not a span" \
+  "The Re-executes: lines name more runs than the 3-run cap" "$BV_CAPD"
+expect_absent "brief-lib …never 'one line' (four one-run lines are the case it refuses)" "one line" "$BV_CAPD"
+expect_absent "brief-lib …nor the old singular 'span named'" "span named" "$BV_CAPD"
 BV=$(brief_verdict bionic:auditor "$BRIEF_NOCONF" "Re-executes: ${BT}go test ./a${BT}
 Re-executes: ${BT}go test ./a${BT}, ${BT}go test ./b${BT}")
 expect_absent "brief-lib …a run repeated across lines counts once" "finding:" "$BV"
+# wave-22 T10 (review 1 / critic C2): a `Re-executes:` line inside a ``` fence, or indented four
+# spaces (a Markdown code block), is an EXAMPLE, not a declaration — it never joins the union.
+lift_runs() { bash -c '. "$1" || exit 9; lift_contract_fields "$3" "$2" | grep "^re_executes="' _ "$BRIEF_LIB" "${2:-implementor}" "$1"; }
+FENCE3='```'
+expect_eq "brief-lib a fenced Re-executes: example after the real line lifts only the real run (C2 case A)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Re-executes: ${BT}npm test -- a${BT}
+
+For reference, a brief looks like:
+${FENCE3}
+Re-executes: ${BT}rm -rf build && npm run e2e${BT}
+${FENCE3}
+")"
+expect_eq "brief-lib …a fenced example BEFORE the real line is not the lift either" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "${FENCE3}
+Re-executes: ${BT}rm -rf build${BT}
+${FENCE3}
+Re-executes: ${BT}npm test -- a${BT}")"
+expect_eq "brief-lib …an indented (four-space) example lifts only the real run" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Re-executes: ${BT}npm test -- a${BT}
+
+An example:
+
+    Re-executes: ${BT}rm -rf build${BT}
+")"
+expect_eq "brief-lib …a mid-sentence quote stays un-lifted (C2 case B)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Re-executes: ${BT}npm test -- a${BT}
+Note: never write Re-executes: ${BT}npm test${BT} without a path.")"
+expect_eq "brief-lib …a real second line after a closed fence still unions" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT}" \
+  "$(lift_runs "Re-executes: ${BT}go test ./a${BT}
+${FENCE3}
+Re-executes: ${BT}rm -rf x${BT}
+${FENCE3}
+Re-executes: ${BT}go test ./b${BT}")"
 BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh
 Re-executes: ${BT}go test ./a${BT}")
 expect_contains "brief-lib Files: + Re-executes: with no impact command is still refused (AC-3.1)" "rc=1" "$BV"
@@ -8267,6 +8310,11 @@ FIRSTFIX=$(printf '%s\n' "$BV" | awk '/^Fix:/{f=1} f{print} /^$/{if(f)exit}')
 expect_contains "brief-lib …the first Fix: block names Suites: none" "Suites: none" "$FIRSTFIX"
 expect_contains "brief-lib …beside the brief's Re-executes:" "Re-executes:" "$FIRSTFIX"
 expect_contains "brief-lib …the two existing remedies follow" "impact-command: bash tests/lib/impact.sh" "$BV"
+expect_contains "brief-lib …and the SHORT fix names Suites: none beside Re-executes: (C3)" \
+  "fix: add Suites: none beside Re-executes:" "$BV"
+BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
+expect_contains "brief-lib …no runs declared: the short fix is still the impact-command one" \
+  "fix: set impact-command in config.yaml" "$BV"
 BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
 IFS= read -r -d '' BV_PIN <<'PIN_EOF' || true
 finding: no impact command is configured here
@@ -8286,6 +8334,20 @@ rc=1
 PIN_EOF
 BV_PIN=${BV_PIN%$'\n'}
 expect_eq "brief-lib no Re-executes: leaves the refusal text unchanged, verbatim (AC-3.2)" "$BV_PIN" "$BV"
+# wave-22 T10 (critic C3): on a several-fault brief the detail block is dropped and only the
+# short fix reaches the author — so the short fix must be the one that applies.
+REPO=$(make_repo r22t10c3 yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$REPO/.bionic/config.yaml"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected duration: ~15 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${BT}npx jest --testPathPatterns alpha${BT}" "w22t10c3")"
+expect_eq "brief-lib a missing deliverable AND a missing impact command is refused (C3)" "deny" "$GATE_VERDICT"
+expect_contains "brief-lib …the impact finding's short fix names Suites: none beside Re-executes:" \
+  "no impact command is configured here (add Suites: none beside Re-executes:)" "$GATE_REASON"
+expect_absent "brief-lib …and no longer points a Re-executes: brief at impact-command" \
+  "(set impact-command in config.yaml)" "$GATE_REASON"
 
 printf '#!/bin/bash\nprintf "beta.test.sh\\tpath-ref\\nalpha.test.sh\\tself\\nalpha.test.sh\\tpath-ref\\n"\n' > "$BRIEF_CONF/stub-impact.sh"
 BV=$(brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")

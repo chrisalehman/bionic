@@ -5290,26 +5290,25 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # context. A missing library steps this arm aside with the advisory line, like cmd-class.sh.
   if _wall_mentions_git "$COMMAND" \
      && git_argv_has_any_sub "$COMMAND" "commit merge revert cherry-pick am rebase commit-tree update-ref"; then
-    local _bsg_role _bsg_whence
-    # `row:<role>` when some row carries this agent_id (the role may be empty), else nothing.
-    _bsg_role=$(awk -F'|' -v id="$ACTOR" '
-      /^roster-state\// {
-        hit = 0; role = ""
-        for (i = 1; i <= NF; i++) {
-          if ($i == "agent_id=" id) hit = 1
-          else if ($i ~ /^subagent_type=/) role = substr($i, 15)
-        }
-        if (hit) { seen = 1; last = role }
-      }
-      END { if (seen) print "row:" last }
-    ' "$_bsg_roster" 2>/dev/null)
-    case "$_bsg_role" in
-      row:*) _bsg_role="${_bsg_role#row:}"
-             _bsg_whence="Your roster row names you $_bsg_role" ;;
-      *)     _bsg_role=$(bionic_jq .agent_type)
-             _bsg_whence="Your agent type is $_bsg_role and no roster row names you" ;;
-    esac
+    local _bsg_role _bsg_whence _bsg_pick _bsg_seg _bsg_segs _bsg_row=0
+    # ONE PICK, ONE SITE (wave-22 T10; review 2): the row is `roster_row_for_id`'s — the budget
+    # arm's own pick, the LAST `roster-state/` row whose FIRST `agent_id=` is this actor — and
+    # the role is that row's first `subagent_type=` (the role may be empty). roster.sh is
+    # sourced here, before its first use, through the carrier's lazy loader.
     wall_libs background-suite-guard roster.sh || return 0
+    if _bsg_pick="$(roster_row_for_id "$_bsg_roster" "$ACTOR")"; then
+      _bsg_row=1; _bsg_role=""
+      IFS='|' read -r -a _bsg_segs <<< "$_bsg_pick"
+      for _bsg_seg in "${_bsg_segs[@]}"; do
+        case "$_bsg_seg" in subagent_type=*) _bsg_role="${_bsg_seg#subagent_type=}"; break ;; esac
+      done
+    fi
+    if [ "$_bsg_row" -eq 1 ]; then
+      _bsg_whence="Your roster row names you $_bsg_role"
+    else
+      _bsg_role=$(bionic_jq .agent_type)
+      _bsg_whence="Your agent type is $_bsg_role and no roster row names you"
+    fi
     if role_is_readonly "$_bsg_role"; then
       fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \
         "$_bsg_whence, and a read-only role's deliverable is its report, never a commit. Leave

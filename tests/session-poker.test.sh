@@ -6068,6 +6068,35 @@ expect_eq "30t4c …the successor keeps the new cycle's identity, not the earlie
 expect_ne "30t4d …so the earlier agent's id still picks its own row, not the new contract" \
   "$(s30_last "$R30T4")" "$(s30_pick "$R30T4")"
 
+# 30t5: ONE ROSTER-STATE PREFIX (wave-22 T10; review 5). `identity_args` read `roster-state/v1|`
+# while `roster_row_for_id` (the pick the self-check compares against) reads any `roster-state/`
+# row, so under a schema bump the verb saw no id, printed "once identified" and never checked.
+# The function is driven alone, extracted from the verb, on a v2 row.
+S30T5_DIR="$TMPROOT/s30t5"; mkdir -p "$S30T5_DIR"
+S30T5_ROW="$(roster_row_fixture status=identified "session=$SID" name=w1 agent_id=aw1-3000000000000001 \
+  "launched_at=$(iso_ago 600)" subagent_type=bionic:implementor tool_use_id=toolu_w1 | sed 's#^roster-state/v1|#roster-state/v2|#')"
+printf '%s\n' "$S30T5_ROW" > "$S30T5_DIR/roster.state"
+S30T5_OUT="$(bash -c '
+  eval "$(awk "/^(line_field|row_has_key|identity_args)\\(\\) \\{/{p=1} p{print} p&&/^}/{p=0}" "$1")"
+  POKER_ID_ARGS=(); POKER_ID=""
+  identity_args "$2" w1 "$3"; printf "%s" "$POKER_ID"' _ "$POKER" "$S30T5_DIR/roster.state" "$S30T5_ROW" 2>&1)"
+expect_eq "30t5 a roster-state/v2| row carrying the id is found by identity_args" "aw1-3000000000000001" "$S30T5_OUT"
+expect_eq "30t5b …and by roster_row_for_id, the one pick (one prefix, two readers)" "$S30T5_ROW" \
+  "$(roster_row_for_id "$S30T5_DIR/roster.state" aw1-3000000000000001 2>/dev/null)"
+
+# 30t6: THE SUCCESS LINE NAMES ONLY THE WALLS THAT READ THE ROW (review 4). stop-guard and
+# observe pick an id's row from `confirmed|identified` rows only, so a successor that copied a
+# `duplicate-start` row is read by the budget wall alone; the teammate fixture (30t1) keeps both.
+R30T6="$(make_repo s30-dupstart)"; new_roster "$R30T6"
+s30_row "$R30T6"; s30_row "$R30T6" status=duplicate-start
+poke "$R30T6" amend w1 --files+ hooks/b.sh --reason 'twinned agent'
+expect_eq "30t6 amend whose latest id-bearing row is duplicate-start exits 0" "0" "$RC"
+expect_contains "30t6b …the line says what was amended" "poker: amended — w1:" "$OUT"
+expect_contains "30t6c …and names the budget wall" "the budget wall reads this row from now on" "$OUT"
+expect_absent "30t6d …never the stop wall, which does not read a duplicate-start row" "stop and budget walls" "$OUT"
+poke "$R30T" amend w1 --files+ hooks/c.sh --reason 'teammate again'
+expect_contains "30t6e the teammate fixture's line keeps both walls" "the stop and budget walls read this row from now on" "$OUT"
+
 # ============================================================
 section "Section 30b: FOLLOW-UP — the tick holds a MET row whose agent has a message waiting (wave-20 T9, REQ-4, AC-4.3; Δ8)"
 # ============================================================
