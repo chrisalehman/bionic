@@ -506,11 +506,14 @@ AGENT_ID=""
 # stop is irreversible), and this is what makes that way out arrive where it says it does.
 #
 # WITHIN ONE LIFECYCLE THIS CHANGES NOTHING, which is why it is an override and not a fourth
-# walk. A lifecycle is `intended` (the dispatch's contract, no id yet) → `confirmed` →
-# `identified` (hooks/execution-recorder.sh, both carrying the id), so the LAST row of a name
-# with one lifecycle is the row with the id and `ROW_BY_NAME` and `TYPED_ROW` are the same
-# line. They diverge only where a second lifecycle exists — which is the defect's whole
-# domain.
+# walk. A lifecycle is `intended` (the dispatch's contract, no id yet), then `confirmed` and
+# `identified` (hooks/execution-recorder.sh). For an async agent both carry the id; for a
+# teammate the order varies and `confirmed` carries none, so the id comes with `identified`.
+# The by-id pick reads the latest confirmed|identified row carrying the id, which after an
+# `amend` is the successor (the roster's one rule: `roster_row_for_id`'s docblock in
+# payload/scripts/lib/roster.sh; ADR-039). With one lifecycle that row is the name's latest
+# id-bearing row and `ROW_BY_NAME` and `TYPED_ROW` are the same line. They diverge only where
+# a second lifecycle exists — which is the defect's whole domain.
 if [ -n "$TYPED_ROW" ]; then
   ROSTER_ROW="$TYPED_ROW"
   AGENT_ID=$(line_field "$TYPED_ROW" agent_id)

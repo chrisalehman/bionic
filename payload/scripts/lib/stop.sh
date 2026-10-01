@@ -854,9 +854,12 @@ SWEEPER="${_STOP_HOOK_DIR_ABS}/session-sweeper.sh"
 #
 # `agent_id` is taken from the latest row that CARRIES one rather than from the latest row
 # outright. The field starts empty on the `intended` row the dispatch wall writes and is
-# filled by hooks/execution-recorder.sh at confirmation; it never goes back to empty, so
-# this is monotone rather than a preference, and it keeps a row joinable if a future writer
-# ever appends without copying it forward.
+# filled by hooks/execution-recorder.sh at confirmation or identification. A teammate's
+# `confirmed` row carries none (its id is learned at SubagentStart), so the latest row can
+# have an empty id after an earlier one had it. This reader takes the id from the latest
+# row that carries one, which is the roster's one rule for "the id's row" (the docblock of
+# `roster_row_for_id`, payload/scripts/lib/roster.sh; ADR-039), and it keeps a row joinable
+# if a writer ever appends without copying the id forward.
 #
 # The output is TAB-delimited `<agent_id> <name> <kind>`, one line per unswept, joinable,
 # contract-bearing row. A tab cannot appear inside a field — every writer on this roster runs
