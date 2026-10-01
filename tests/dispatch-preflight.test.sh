@@ -8222,6 +8222,71 @@ BV=$(brief_verdict implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widge
 expect_contains "brief-lib Files: where no impact command is configured is refused" \
   "finding: no impact command is configured here" "$BV"
 
+# wave-22 T3 (D5/D6): EVERY Re-executes: line counts, and the missing-impact refusal names the
+# fix that applies when runs are declared.
+# the sink's fourth argument is the refusal body, which brief_verdict does not print
+brief_detail() {
+  bash -c '
+    . "$1" || exit 9
+    sink() { case "$1" in finding) printf "finding: %s\nfix: %s\n%s\n" "$2" "$3" "$4" ;; esac; }
+    rc=0
+    brief_validate_fields "$(lift_contract_fields "$4" "$2")" "$2" "$3" sink || rc=$?
+    printf "rc=%s\n" "$rc"
+  ' _ "$BRIEF_LIB" "$1" "$2" "$3" 2>&1
+}
+BV_THREE="Re-executes: ${BT}go test ./a${BT}
+Re-executes: ${BT}go test ./b${BT}
+Re-executes: ${BT}go test ./c${BT}"
+expect_contains "brief-lib three one-command Re-executes: lines all lift (AC-2.1)" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT} ${BT}go test ./c${BT}" \
+  "$(bash -c '. "$1" || exit 9; lift_contract_fields "$3" "$2"' _ "$BRIEF_LIB" "$BRIEF_NOCONF" "$BV_THREE")"
+REPO=$(make_repo r22t3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: run three things.
+Expected artifact: .bionic/docs/record/w22t3.md
+${BV_THREE}" "w22t3-three")"
+expect_status "brief-lib …and a full dispatch admits the brief with three runs (AC-2.1)" "0" "$GATE_ST"
+expect_status "brief-lib …no refusal verdict on either channel" "allow" "$GATE_VERDICT"
+expect_eq "brief-lib …the roster row carries all three runs" \
+  "${BT}go test ./a${BT} ${BT}go test ./b${BT} ${BT}go test ./c${BT}" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" re_executes)"
+BV_FOURL="${BV_THREE}
+Re-executes: ${BT}go test ./d${BT}"
+BV=$(brief_verdict bionic:auditor "$BRIEF_NOCONF" "$BV_FOURL")
+expect_contains "brief-lib four one-command lines meet the cap over the union (AC-2.2)" \
+  "finding: Re-executes: line exceeds the 3-run cap" "$BV"
+expect_contains "brief-lib …naming the fourth run" "${BT}go test ./d${BT}" \
+  "$(brief_detail bionic:auditor "$BRIEF_NOCONF" "$BV_FOURL")"
+BV=$(brief_verdict bionic:auditor "$BRIEF_NOCONF" "Re-executes: ${BT}go test ./a${BT}
+Re-executes: ${BT}go test ./a${BT}, ${BT}go test ./b${BT}")
+expect_absent "brief-lib …a run repeated across lines counts once" "finding:" "$BV"
+BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh
+Re-executes: ${BT}go test ./a${BT}")
+expect_contains "brief-lib Files: + Re-executes: with no impact command is still refused (AC-3.1)" "rc=1" "$BV"
+FIRSTFIX=$(printf '%s\n' "$BV" | awk '/^Fix:/{f=1} f{print} /^$/{if(f)exit}')
+expect_contains "brief-lib …the first Fix: block names Suites: none" "Suites: none" "$FIRSTFIX"
+expect_contains "brief-lib …beside the brief's Re-executes:" "Re-executes:" "$FIRSTFIX"
+expect_contains "brief-lib …the two existing remedies follow" "impact-command: bash tests/lib/impact.sh" "$BV"
+BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
+IFS= read -r -d '' BV_PIN <<'PIN_EOF' || true
+finding: no impact command is configured here
+fix: set impact-command in config.yaml
+`Files:` states which paths the task will touch. Turning that into the set of
+suites the agent may run is the tree's job, and this repository has not named the
+command that asks it.
+
+Fix: name the closed set in the brief instead —
+    Suites: tests/one.test.sh, tests/two.test.sh
+
+Or configure the derivation once, in .bionic/config.yaml —
+    impact-command: bash tests/lib/impact.sh
+
+Then retry the dispatch.
+rc=1
+PIN_EOF
+BV_PIN=${BV_PIN%$'\n'}
+expect_eq "brief-lib no Re-executes: leaves the refusal text unchanged, verbatim (AC-3.2)" "$BV_PIN" "$BV"
+
 printf '#!/bin/bash\nprintf "beta.test.sh\\tpath-ref\\nalpha.test.sh\\tself\\nalpha.test.sh\\tpath-ref\\n"\n' > "$BRIEF_CONF/stub-impact.sh"
 BV=$(brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")
 expect_contains "brief-lib Files: under an impact command derives the suite set" "suites=alpha.test.sh beta.test.sh" "$BV"
