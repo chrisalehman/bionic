@@ -951,6 +951,18 @@ if [ -n "$IS_START" ]; then
       ROW="$line"
     done < "$ROSTER_FILE"
   fi
+  # A RESTART AFTER AN ACK RE-IDENTIFIES FROM THE ID'S LATEST STARTED ROW (epic-23 wave-22 T9;
+  # ADR-039 Δ2; critic-b2f70c1 C1). Both joins above accept `intended|confirmed` only, and the
+  # contract a restart must carry is on neither: `session-poker.sh amend` and `extend` append
+  # their successor as an `identified` row carrying the id (ADR-039), which both joins skip. A
+  # teammate's id join finds nothing and its name join takes the recorder's ORIGINAL `confirmed`
+  # row; an async agent's id join takes the pre-amend `confirmed` row. Either copy carried the
+  # first contract, became the id's last row, and the budget arm refused the amended run again.
+  # `DUP_PRIOR_BEFORE` is the id's last row when that row says it started (identified or
+  # duplicate-start) — the amended or extended successor whenever there is one. Placed after
+  # BOTH joins: the async id join would overwrite it otherwise. The awk below rewrites its
+  # status, launch and restarted_at as it does for a joined row.
+  [ -n "${RESTART_AFTER_ACK:-}" ] && [ -n "$DUP_PRIOR_BEFORE" ] && ROW="$DUP_PRIOR_BEFORE"
   [ -n "$ROW" ] || exit 0
 
   # S6 (AC-5, R6): THE RESUME CASE. `agent_id` here is the transcript form, and
