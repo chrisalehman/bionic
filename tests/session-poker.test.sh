@@ -131,8 +131,10 @@ mkrow() {  # <key=value>...
   # describe a pre-wall roster, and the third state — key absent, as opposed to key present
   # and empty — is the one the writer-side budget guard partitions on.
   local files="" sallow="" ssrc="" instrument_set=no
+  local rexec="" rexec_set=no
   for kv in "$@"; do
     case "$kv" in
+      re_executes=*) rexec="${kv#*=}"; rexec_set=yes ;;
       plan=*)        plan="${kv#*=}"; plan_set=yes ;;
       status=*)      status="${kv#*=}" ;;
       session=*)     session="${kv#*=}" ;;
@@ -164,6 +166,7 @@ mkrow() {  # <key=value>...
   if [ "$instrument_set" = yes ]; then
     instrument=("files=$files" "suites_allowed=$sallow" "suites_source=$ssrc")
   fi
+  [ "$rexec_set" = yes ] && instrument+=("re_executes=$rexec")
   "$emit" \
     "status=$status" "session=$session" "name=$name" "agent_id=$agent_id" \
     "launched_at=$launched_at" "subagent_type=$subagent_type" model=opus \
@@ -4739,6 +4742,42 @@ expect_contains "23c meta: this row too is adopted (not vacuous)" \
 expect_eq "an ordinary (non-list) field is still cut at 400 characters" "400" \
   "$(field_len "$OVERLONG_ROW" name)"
 
+# ---------- 23d: adopt prints each adopted row's BUDGET beside `launched` (T6, REQ-5, AC-5.1) ----------
+#
+# THE REPORT (#1): a resumed orchestrator had to read the roster file to learn what a writer
+# it just adopted was allowed to run, and the answer it needed to widen a refused suite was
+# on the row all along. Both shapes are pinned, and a row carrying only a declared run is
+# the AC-5.1 failure shape: its suites cell is empty, so a reader of `suites=` alone would
+# call it a row with no budget.
+R23D="$(make_repo s23d-budget-line)"; new_roster "$R23D"
+S23D_PRED="55555555-aaaa-4bbb-8ccc-00000000023d"
+add_row_to "$R23D" "$S23D_PRED" name=budget-both status=identified \
+  agent_id=abudget-both-23232323232323d1 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R23D/.bionic/docs/record/budget-both.md" \
+  files=hooks/a.sh suites_allowed="alpha.test.sh beta.test.sh" suites_source=declared \
+  re_executes="\`npx jest --testPathPatterns 'x'\`"
+add_row_to "$R23D" "$S23D_PRED" name=budget-runs-only status=identified \
+  agent_id=abudget-runs-23232323232323d2 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R23D/.bionic/docs/record/budget-runs-only.md" \
+  files=hooks/a.sh suites_allowed= suites_source=declared \
+  re_executes="\`pytest tests/unit\`"
+add_row_to "$R23D" "$S23D_PRED" name=budget-none status=identified \
+  agent_id=abudget-none-23232323232323d3 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R23D/.bionic/docs/record/budget-none.md" \
+  files=hooks/a.sh suites_allowed= suites_source=declared
+poke "$R23D" adopt
+expect_contains "23d meta: the three rows ARE offered (not vacuous)" "budget-none" "$OUT"
+expect_contains "23d a row with suites and a declared run prints both" \
+  "  budget      : suites=alpha.test.sh beta.test.sh runs=\`npx jest --testPathPatterns 'x'\`" "$OUT"
+expect_contains "23d2 a row with ONLY a declared run still prints a budget line (AC-5.1)" \
+  "  budget      : suites=none runs=\`pytest tests/unit\`" "$OUT"
+expect_contains "23d3 a row with neither prints the plain 'none'" "  budget      : none" "$OUT"
+expect_eq "23d4 …one budget line per adopted row, three rows, three lines" "3" \
+  "$(printf '%s\n' "$OUT" | grep -c '^  budget      : ')"
+
 # ============================================================
 section "Section 24: sweep — per-session pruning, not all-or-nothing (D5's prune half, T9)"
 # ============================================================
@@ -5297,6 +5336,45 @@ poke_split "$R27J" tick
 expect_contains "27j an armed session with nothing dispatched is QUIET" "decision=QUIET" "$S27_OUT"
 expect_eq "27j2 …and ends on the decision line too" "poker-tick/v1" \
   "$(printf '%s' "$(last_line "$S27_OUT")" | cut -d'|' -f1)"
+
+# ---------- 27k: a live claimed process silences the cadence NOTIFY (T6, REQ-7, AC-7.3) ----------
+#
+# THE REPORT (#7): a writer waiting on a CI run (`gh run watch`) wrote nothing for 26 minutes
+# and drew "quieter than the declared cadence". The machine already treats a live claimed
+# process as work (triage-B §6.2) and the docs said otherwise; nothing pinned the composition.
+# The driver is triage-B §6.2's: one UNMET row, deliverable absent, cadence 10 minutes, the
+# transcript backdated 1563 s, a fresh ListAgents answer showing it running, and a stand-in
+# watcher whose COMMAND LINE carries the claimed pattern (`pgrep -f` reads command lines).
+# Beside it the SAME fixture with the claim DEAD must NOTIFY, so QUIET is the claim speaking.
+S27K_PAT="gh-run-watch-27k-$$"
+S27K_ID="apurge-27k-0000000000000006"
+s27k_repo() {  # <label> <claim pattern> -> a repo carrying the 6.2 row
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  add_row "$r" name=s-purge-ledger status=identified agent_id="$S27K_ID" \
+    deliverable="$r/.bionic/docs/record/s-purge-ledger.md" duration="4 hours" \
+    launched_at="$(iso_ago 3000)" cadence="10 minutes" claims="$2"
+  mkdir -p "$S19_CFG/projects/-fixture-project/$SID/subagents"
+  printf '{"type":"user","message":{"role":"user","content":"go"}}\n' \
+    > "$S19_CFG/projects/-fixture-project/$SID/subagents/agent-$S27K_ID.jsonl"
+  backdate "$S19_CFG/projects/-fixture-project/$SID/subagents/agent-$S27K_ID.jsonl" 1563
+  printf '%s' "$r"
+}
+( exec -a "$S27K_PAT" sleep 120 ) &
+S27K_PID=$!
+R27K="$(s27k_repo s27-live-claim "$S27K_PAT")"
+s19_answer fresh "s-purge-ledger:running"
+poke "$R27K" tick
+expect_contains "27k an undelivered, quiet row whose claimed process is LIVE ticks QUIET" \
+  "decision=QUIET" "$OUT"
+expect_absent "27k2 …and never draws the cadence NOTIFY" "quieter than the declared cadence" "$OUT"
+kill "$S27K_PID" 2>/dev/null; wait "$S27K_PID" 2>/dev/null
+R27KD="$(s27k_repo s27-dead-claim "$S27K_PAT")"
+s19_answer fresh "s-purge-ledger:running"
+poke "$R27KD" tick
+expect_contains "27k3 CONTROL: the same row with the claim DEAD takes the NOTIFY band" \
+  "decision=NOTIFY" "$OUT"
+expect_contains "27k4 …naming the quiet row, so 27k's QUIET was the claim and not a blind tick" \
+  "s-purge-ledger" "$OUT"
 
 # ============================================================
 section "Section 28: adopt offers only OPEN runs' rows, once each (REQ-9; D10)"
@@ -6735,4 +6813,105 @@ expect_contains "37e R6 …and the task text lands byte for byte: backslashes, \
   "$(cat "$P37D")"
 expect_contains "37f …with its - T7: line" "- T7: pending dispatch — added by task-add" "$(cat "$P37D")"
 POKE_BOUND="$S37_BOUND_WAS"
+
+
+# ============================================================
+section "Section 38: the tick names an ext:-held row — poker: HELD <id> ext:<slug> (wave-21 T4; REQ-3, AC-3.3; D3, ADR-037 decision 2)"
+# ============================================================
+#
+# A ROW WAITING ON THE WORLD IS DECLARED ONCE, IN ITS DEPS CELL, as `ext:<slug>`. The ready
+# set already leaves it out (an ext: token never equals `landed`); what the tick adds is the
+# report: one `poker: HELD <id> ext:<slug>` line per held row, every interval, AFTER the rung
+# line and BEFORE the FILL line, so the hold is printed to the only actor who can lift it and
+# nobody writes a decline for it turn after turn (triage-A §F.3).
+# s38_line_no <pattern> — the first line of $OUT starting with <pattern>, by number; 0 if none.
+s38_line_no() { printf '%s\n' "$OUT" | awk -v p="$1" 'index($0, p) == 1 { print NR; f = 1; exit } END { if (!f) print 0 }'; }
+
+R38A="$(make_repo s38-held)"; new_roster "$R38A"
+sp_plan_at_step "$R38A" 4 \
+  "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-ce9520e | 15m | REQ-x | b.sh | pending |" \
+  "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
+poke_pressure "$R38A" 8192 1.0 tick
+expect_contains "38a AC-3.3 the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-ce9520e" "$OUT"
+expect_contains "38b …the ready row is filled" "poker: FILL T3" "$OUT"
+expect_absent "38c …and the held row is not on the FILL line" "T2" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
+S38_RUNG="$(s38_line_no 'poker: rung=')"; S38_HELD="$(s38_line_no 'poker: HELD ')"; S38_FILL="$(s38_line_no 'poker: FILL ')"
+expect_true "38d …and the HELD line sits after the rung line and before the FILL line (rung=$S38_RUNG held=$S38_HELD fill=$S38_FILL)" \
+  test "$S38_RUNG" -gt 0 -a "$S38_HELD" -gt "$S38_RUNG" -a "$S38_FILL" -gt "$S38_HELD"
+
+# 38e — NOTHING ELSE READY: the HELD line still prints, and the no-FILL line's step sentence
+# does not borrow it (the step hold and the ext hold are different facts).
+R38E="$(make_repo s38-held-only)"; new_roster "$R38E"
+sp_plan_at_step "$R38E" 4 \
+  "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | waits on a rig and CI | implementor | ext:rig-2, T1, ext:ci-9 | 15m | REQ-x | b.sh | pending |" > /dev/null
+poke_pressure "$R38E" 8192 1.0 tick
+expect_contains "38e a row with two tokens prints one HELD line naming both, in cell order" "poker: HELD T2 ext:rig-2 ext:ci-9" "$OUT"
+expect_absent "38f …no FILL line is printed" "poker: FILL" "$OUT"
+expect_absent "38g …and the no-FILL line names no step hold for it" "Held for their step" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: no FILL')"
+
+# 38h — THE TOKEN REMOVED, the row is ready again and no HELD line is printed (AC-3.4's tick side).
+R38H="$(make_repo s38-cleared)"; new_roster "$R38H"
+sp_plan_at_step "$R38H" 4 \
+  "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | CI went green | implementor | T1 | 15m | REQ-x | b.sh | pending |" \
+  "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
+poke_pressure "$R38H" 8192 1.0 tick
+expect_contains "38h with the token removed the row is filled again" "poker: FILL T2 T3" "$OUT"
+expect_absent "38i …and no HELD line is printed" "poker: HELD" "$OUT"
+
+# ============================================================
+section "Section 39: the tick lints the ledger — poker: LEDGER <id> <finding> (wave-21 T5; REQ-4, AC-4.2; D4, ADR-037 decision 3)"
+# ============================================================
+#
+# THE SAME READER THE GATE ASKS. `units_findings` names every ledger defect — a status off
+# the enum, a landed row with no `- T<n>:` line, an active row whose agent cell names no row
+# on this session's roster — and the tick prints each one, every interval, as
+# `poker: LEDGER <id> <kind> [<value>]`, after the HELD lines and before the FILL line. The
+# finding reaches the orchestrator, who owns the ledger, before a writer's commit meets it.
+R39A="$(make_repo s39-ledger)"; new_roster "$R39A"
+mkrow name=w-T2 agent_id=a-w-T2 >> "$(roster_of "$R39A")"
+P39A="$(sp_plan_at_step "$R39A" 4 \
+  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | active, launched | w-T2 | — | 15m | REQ-x | b.sh | active |" \
+  "| T3 | 4 | build | active, agent names no roster row | implementor | — | 15m | REQ-x | c.sh | active |" \
+  "| T4 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | d.sh | doing |" \
+  "| T5 | 4 | build | active, self-owned | — | — | 15m | REQ-x | e.sh | active |" \
+  "| T6 | 4 | build | waits on CI | implementor | T1, ext:ci-6 | 15m | REQ-x | f.sh | pending |" \
+  "| T7 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | g.sh | pending |")"
+poke_pressure "$R39A" 8192 1.0 tick
+expect_contains "39a AC-4.2 a landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "39b …an active row whose agent is not on the roster ticks a launch line, naming the cell" \
+  "poker: LEDGER T3 launch implementor" "$OUT"
+expect_contains "39c …a status off the enum ticks a status line, naming the value" "poker: LEDGER T4 status doing" "$OUT"
+expect_absent "39d …the launched active row is not a finding" "poker: LEDGER T2" "$OUT"
+expect_absent "39e …nor is the self-owned one" "poker: LEDGER T5" "$OUT"
+expect_eq "39f …exactly three LEDGER lines" "3" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: LEDGER ')"
+S39_HELD="$(s38_line_no 'poker: HELD ')"; S39_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S39_FILL="$(s38_line_no 'poker: FILL ')"
+expect_true "39g …and the LEDGER lines sit after the HELD line and before the FILL line (held=$S39_HELD ledger=$S39_LEDGER fill=$S39_FILL)" \
+  test "$S39_HELD" -gt 0 -a "$S39_LEDGER" -gt "$S39_HELD" -a "$S39_FILL" -gt "$S39_LEDGER"
+expect_contains "39h …and the fill is unchanged by the lint" "poker: FILL T7" "$OUT"
+
+# 39i — THE LEDGER REPAIRED: T1's line written, T3's cell naming its roster row, T4 back on
+# the enum. No LEDGER line.
+mkrow name=w-T3 agent_id=a-w-T3 >> "$(roster_of "$R39A")"
+awk '{ print } $0 == "- Step 4: in progress" { print "- T1: bash suite 9/9 green" }' "$P39A" \
+  | sed -e 's/| active, agent names no roster row | implementor |/| active, agent names no roster row | w-T3 |/' \
+        -e 's/| d.sh | doing |/| d.sh | pending |/' > "$P39A.new" && mv "$P39A.new" "$P39A"
+poke_pressure "$R39A" 8192 1.0 tick
+expect_contains "39i precondition: T1's line is in the plan" "- T1: bash suite 9/9 green" "$(cat "$P39A")"
+expect_absent "39j a repaired ledger ticks no LEDGER line" "poker: LEDGER" "$OUT"
+
+# 39k — AN EMPTY ROSTER LAUNCHES NOBODY. The tick reaches its fill arm only with a roster file
+# (no file is its own REFUSED/QUIET answer, §13), so the reader's no-roster rule is the gate's
+# alone; what the tick can meet is a roster with no rows, and there an agent-named active row is
+# a launch finding, not an evidence one.
+R39K="$(make_repo s39-empty-roster)"; new_roster "$R39K"
+sp_plan_at_step "$R39K" 4 \
+  "| T1 | 4 | build | active, agent-named, nobody launched | w-T1 | — | 15m | REQ-x | a.sh | active |" \
+  "| T2 | 4 | build | ordinary, ready | implementor | — | 15m | REQ-x | b.sh | pending |" > /dev/null
+poke_pressure "$R39K" 8192 1.0 tick
+expect_contains "39k an empty roster: the agent-named active row ticks a launch line" \
+  "poker: LEDGER T1 launch w-T1" "$OUT"
 finish

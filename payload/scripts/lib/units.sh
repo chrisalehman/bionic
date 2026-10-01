@@ -19,10 +19,20 @@
 #                              carry no step cell and a dependency is satisfied by `done`).
 #                              Exit 2 on anything else.
 #   units_held <plan> <step>   one line per row held for its step (would be ready but for
-#                              it): `<id>: step <n> <kind> row waits for current: <n>`. A
-#                              report, never an invariant (wave-20 T10b).
+#                              it): `<id>: step <n> <kind> row waits for current: <n>`, and
+#                              one per row held by an external prerequisite (every task
+#                              dependency landed, one or more `ext:<slug>` tokens left):
+#                              `<id>: held by ext:<a> [ext:<b> ...]`. A report, never an
+#                              invariant (wave-20 T10b; wave-21 T4).
 #   units_validate <plan>      one line per broken invariant, each naming the offending id
 #                              and the rule. Exit 1 if any line was printed, else 0.
+#   units_findings <plan> <roster>
+#                              one line per ledger finding — `status <id> <value>`,
+#                              `evidence <id>`, `launch <id> <agent>` — the one reader the
+#                              commit gate and the Patrol tick share (wave-21 T5; D4). Exit 1
+#                              if any line was printed, else 0.
+#   units_unlined <plan>       the T-ids with no non-empty `- <id>:` line under
+#                              `## SDLC State`, whatever their status (wave-21 T5).
 #   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>
 #                              the WHOLE plan with one row added, on stdout; the file is
 #                              not written (wave-20 REQ-5, AC-5.3). `task-add` is its caller.
@@ -401,8 +411,26 @@ units_ready() { _units_readiness ready "$@"; }
 # `units_validate` never prints it, because a plan holding its release for Step 7 is the plan
 # working, and `task-add` refuses on any validator output. The tick prints these lines on its
 # no-FILL line, so "nothing is ready" and "the release waits for Step 7" read differently.
-# Same argument rules as `units_ready`; at task scale nothing is ever held (rows carry no step).
+# Same argument rules as `units_ready`; at task scale nothing is ever held FOR ITS STEP (rows
+# carry no step).
+#
+# AND A ROW HELD BY THE WORLD (wave-21 T4; REQ-3, D3, ADR-037 decision 2): pending, every TASK
+# dependency landed, and one or more `ext:<slug>` tokens left in its deps cell —
+# `<id>: held by ext:<a> ext:<b>`, the tokens in cell order on one line. The token is a
+# prerequisite nothing mechanical satisfies (CI, a rig, a triage); its owner removes it from
+# the cell when the world moves, and the row is ready again. `units_ready` needs nothing for
+# this: a token is never a row id, so it never carries the satisfied status. A row held both
+# ways prints both lines, the step line first. The tick prints the ext lines as
+# `poker: HELD <id> ext:<slug>`, and the stop wall, computing the same ready set, never counts
+# the row as a missed fill.
 units_held() { _units_readiness held "$@"; }
+
+# _units_ext_re -> the shape of an external prerequisite token, as an awk ERE (wave-21 T4; D3).
+# ONE SPELLING for the validator that admits it and the readiness program that reports it, so
+# a token the validator lets into a plan is exactly a token the held report names. A bare
+# `ext:`, a slug opening on punctuation and an upper-case prefix are not this shape, and the
+# validator refuses them the way it refuses any id the table does not carry.
+_units_ext_re() { printf '%s' '^ext:[A-Za-z0-9][A-Za-z0-9._-]*$'; }
 
 # _units_readiness <ready|held> <plan> <step> — the ONE readiness program behind both verbs, so
 # the gate-act rule is spelled once and the two answers cannot drift apart.
@@ -428,7 +456,8 @@ _units_readiness() {
   esac
   rows="$(units_rows "$plan")" || return 1
   [ -n "$rows" ] || return 0
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$step" -v scale="$scale" -v mode="$mode" '
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$step" -v scale="$scale" -v mode="$mode" \
+    -v extre="$(_units_ext_re)" '
     $1 == "" { next }
     { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; st[$1] = $10 }
     END {
@@ -450,19 +479,26 @@ _units_readiness() {
           if (gate && stp[i] + 0 > want + 0) held = 1
         }
         if (mode == "ready" && held) continue
-        if (mode == "held" && !held) continue
         d = dep[i]
         gsub(/[ \t]/, "", d)
         ready = 1
+        ext = ""
         if (d ~ /[A-Za-z0-9]/) {
           m = split(d, a, ",")
           for (j = 1; j <= m; j++) {
             if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
+            # AN EXTERNAL PREREQUISITE IS SET ASIDE ONLY TO BE REPORTED (wave-21 T4; D3). The
+            # ready arm never takes this branch: a token is never a row id, so the comparison
+            # below already finds it unsatisfied and the row stays out of the ready set.
+            if (mode == "held" && a[j] ~ extre) { ext = ext (ext == "" ? "" : " ") a[j]; continue }
             if (st[a[j]] != satisfied) { ready = 0; break }
           }
         }
         if (!ready) continue
-        if (mode == "held") printf "%s: step %s %s row waits for current: %s\n", id[i], stp[i], knd[i], stp[i]
+        if (mode == "held") {
+          if (held) printf "%s: step %s %s row waits for current: %s\n", id[i], stp[i], knd[i], stp[i]
+          if (ext != "") printf "%s: held by %s\n", id[i], ext
+        }
         else print id[i]
       }
     }'
@@ -580,7 +616,8 @@ _units_graph_awk() {
 #
 # THE INVARIANTS (spec Design §1 "Task", verbatim): id unique and matching `^T[0-9]+$`; step
 # in 3–9; kind in build · test · verify · review · doc · integrate · close · prototype;
-# status in pending · active · landed · dropped; every dep naming an id present in the table;
+# status in pending · active · landed · dropped; every dep naming an id present in the table
+# or an external prerequisite `ext:<slug>` (wave-21 T4; `_units_ext_re` is its one shape);
 # and a Step-N row with N ≥ 5 depending TRANSITIVELY on every Step-4 row.
 #
 # EVERY LINE NAMES THE OFFENDING ID AND THE RULE, because the Step-3 wall prints these back
@@ -647,7 +684,8 @@ units_validate() {
 
   rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
   if [ -n "$rows" ]; then
-    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" "$(_units_graph_awk)"'
+    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" \
+      -v extre="$(_units_ext_re)" "$(_units_graph_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: its step cell cannot be trusted to make it a Step-4 row others must reach.
@@ -732,6 +770,11 @@ units_validate() {
             m = split(d, a, ",")
             for (j = 1; j <= m; j++) {
               if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
+              # AN EXTERNAL PREREQUISITE NAMES NO ROW BY DESIGN (wave-21 T4; D3, ADR-037
+              # decision 2): `ext:<slug>` in its one shape is admitted beside the task ids.
+              # Any other id the table does not carry, a malformed token included, is still
+              # refused here.
+              if (a[j] ~ extre) continue
               if (!(a[j] in count)) printf "%s: dep %s names no row in the table\n", id[i], a[j]
             }
           }
@@ -756,6 +799,137 @@ units_validate() {
   fi
 
   [ "$found" -eq 0 ]
+}
+
+# units_findings <plan> <roster> -> one line per LEDGER FINDING, table order; exit 1 if any.
+#
+# THE ONE LEDGER READER (wave-21 T5; REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3). Three
+# findings and no more, each naming its row:
+#
+#   status <id> <value>    the row's status is outside the scale's enum — `(empty)` for a blank
+#                          cell, the spelling `units_validate` uses
+#   evidence <id>          the row is at the scale's terminal word and `## SDLC State` carries
+#                          no non-empty `- <id>:` line for it
+#   launch <id> <agent>    the row is `active`, its agent cell names someone, and no
+#                          `roster-state/` row on <roster> carries that `name=`
+#
+# BOTH CALLERS ASK THIS AND NEITHER PARSES THE TABLE. The commit gate refuses on these lines and
+# the Patrol tick prints them as `poker: LEDGER <id> <kind> [<value>]`, so a plan the gate would
+# refuse cannot tick clean and a plan that ticks a finding cannot commit (AC-4.1).
+#
+# LAUNCHED IS WHAT THE ROSTER SAYS (Δ4, Chris "Option 3"). The `- T<n>:` line was a hand copy of
+# the launch record the dispatch hook writes to the roster, owed at `active` and checked by
+# nothing until a writer's first commit. The roster is now the record: an `active` row whose
+# agent cell is a roster `name=` owes no line. The line is owed where it carries something only
+# a human can write — the evidence — at `done` (task scale) or `landed` (wave scale).
+#
+# SELF-OWNED IS AN AGENT CELL WITH NO ALPHANUMERIC — empty, an em dash, a hyphen — the same
+# four-spellings-of-nothing reading the `deps` and `worktree` cells take. Nobody was launched
+# for that row, so neither a roster row nor a line is asked of it. A task-scale table has no
+# agent column at all, so every task-scale row is self-owned.
+#
+# NO ROSTER TO READ, TODAY'S RULE (spec assumption 1). An empty <roster>, a path naming no
+# regular file, or a symlink (the fleet never follows one into a roster) computes no `launch`
+# finding: an agent-named `active` row then owes its line, exactly as it did before this
+# reader. A missing roster therefore fails toward the old refusal, never toward silence.
+#
+# THE SCALE COMES FROM THE HEADER, the discriminator the gate's row arm already uses: a table
+# with a `step` column is a wave table (pending · active · landed · dropped, terminal `landed`);
+# one without is the task-scale ledger (pending · active · done · dropped, terminal `done`).
+#
+# ONLY `T<digit>…` ROWS ARE JUDGED, as the gate's arms have always filtered: a legend or a
+# non-unit row in the table is not a ledger row. No table is no finding, exit 0.
+units_findings() { _units_ledger findings "${1:-}" "${2:-}"; }
+
+# units_unlined <plan> -> the `T<digit>…` ids with no non-empty `- <id>:` line under
+# `## SDLC State`, table order, whatever their status; always exit 0.
+#
+# THE LOOKUP THE GATE'S ADDRESSED-UNIT ARM COUNTS (wave-21 T5). It lived in walls.sh as
+# `missing_evidence_ids`, a grep over the gate's own `## SDLC State` extract asked once per row;
+# it is the same question `units_findings` asks for its `evidence` finding, so it is answered by
+# the same program and the two cannot disagree about whether a row has its line.
+units_unlined() { _units_ledger unlined "${1:-}" ""; }
+
+# _units_ledger <findings|unlined> <plan> <roster> — the ONE program behind both verbs.
+#
+# THE `- <id>:` LOOKUP IS THE GATE'S, TO THE BYTE OF ITS MEANING: line endings normalised
+# (`normalize_newlines`' two substitutions), fences skipped, every `## SDLC State` section read
+# up to the next `## ` heading, and for each id the FIRST line shaped
+# `^[[:space:]]*-?[[:space:]]*<id>[[:space:]]*:` — its value trimmed, an empty value counting as
+# no line. Keyed on the whole id, so `- T1:` never answers for T10.
+#
+# ONE STREAM, THREE PARTS, each opened by a SUBSEP-led marker line no table row, plan line or
+# roster row can begin with: the rows (`units_rows`, so a memoised caller pays no second parse),
+# the plan's text, and — only when there is one to read — the roster.
+_units_ledger() {
+  local mode="${1:-}" plan="${2:-}" roster="${3:-}" rows scale=wave useroster=0
+  rows="$(units_rows "$plan")" || return 0
+  [ -n "$rows" ] || return 0
+  units_has_column "$plan" step || scale=task
+  if [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ]; then useroster=1; fi
+  {
+    printf '\034rows\n'; printf '%s\n' "$rows"
+    printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
+    if [ "$useroster" -eq 1 ]; then printf '\034roster\n'; cat "$roster" 2>/dev/null; fi
+  } | awk -F'\t' -v mode="$mode" -v scale="$scale" -v useroster="$useroster" '
+    $0 == SUBSEP "rows"   { part = 1; next }
+    $0 == SUBSEP "plan"   { part = 2; next }
+    $0 == SUBSEP "roster" { part = 3; next }
+    part == 1 {
+      if ($1 == "") next
+      n++; id[n] = $1; ag[n] = $5; st[n] = $10
+      next
+    }
+    part == 2 {
+      if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
+      if (fence) next
+      if ($0 ~ /^## SDLC State/) { insec = 1; next }
+      if ($0 ~ /^## /) { insec = 0 }
+      if (!insec) next
+      l = $0
+      sub(/^[[:space:]]*-?[[:space:]]*/, "", l)
+      c = index(l, ":")
+      if (c == 0) next
+      k = substr(l, 1, c - 1)
+      sub(/[[:space:]]+$/, "", k)
+      if (k == "" || (k in seen)) next
+      seen[k] = 1
+      v = substr(l, c + 1)
+      sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v)
+      val[k] = v
+      next
+    }
+    part == 3 {
+      # A LAUNCH ROW, by its schema prefix — never a `landing-swept/` marker, which carries a
+      # `name=` too. The FIRST `name=` field, the fleet-wide by-key reading (roster.sh).
+      if (index($0, "roster-state/") != 1) next
+      m = split($0, f, "|")
+      for (j = 2; j <= m; j++) if (index(f[j], "name=") == 1) { names[substr(f[j], 6)] = 1; break }
+      next
+    }
+    END {
+      if (scale == "task") { split("pending active done dropped", e, " "); term = "done" }
+      else                 { split("pending active landed dropped", e, " "); term = "landed" }
+      for (i in e) enum[e[i]] = 1
+      found = 0
+      for (i = 1; i <= n; i++) {
+        if (id[i] !~ /^T[0-9]/) continue
+        lined = ((id[i] in val) && val[id[i]] != "")
+        if (mode == "unlined") { if (!lined) print id[i]; continue }
+        if (!(st[i] in enum)) {
+          printf "status %s %s\n", id[i], (st[i] == "" ? "(empty)" : st[i]); found = 1; continue
+        }
+        if (st[i] == term) {
+          if (!lined) { printf "evidence %s\n", id[i]; found = 1 }
+          continue
+        }
+        if (st[i] != "active" || ag[i] !~ /[A-Za-z0-9]/) continue
+        if (useroster == 1) {
+          if (!(ag[i] in names)) { printf "launch %s %s\n", id[i], ag[i]; found = 1 }
+        } else if (!lined) { printf "evidence %s\n", id[i]; found = 1 }
+      }
+      exit (found ? 1 : 0)
+    }'
 }
 
 # units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>

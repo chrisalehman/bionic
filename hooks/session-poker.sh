@@ -3053,6 +3053,15 @@ case "$VERB" in
           printf '                dispatching, or the same thing happens again.\n'
         fi
         printf '  launched    : %s\n' "${RLAUNCH:-unknown}"
+        # THE BUDGET, BESIDE THE LAUNCH (T6, REQ-5, AC-5.1). A resumed orchestrator needs the
+        # row's allowance to widen it, and a row can carry only declared RUNS: its suites cell
+        # is then empty, so the line names both cells rather than reading as no budget.
+        _AD_RUNS="$(clean "$RREX" re_executes)"
+        if [ -z "$RSALLOW" ] && [ -z "$_AD_RUNS" ]; then
+          printf '  budget      : none\n'
+        else
+          printf '  budget      : suites=%s runs=%s\n' "${RSALLOW:-none}" "${_AD_RUNS:-none}"
+        fi
         printf '  deliverable : %s (%s)\n' "${RDELIV_ABS:-none declared}" \
           "$([ "$DELIV_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
         printf '  progress    : %s (%s)\n' "${RPROG_ABS:-none declared}" \
@@ -4989,6 +4998,40 @@ EOF
           note "no FILL — ${SCHED_PLAN} carries no parallel-budget: writers=<n> in its frontmatter; Step 0 measures it (resources_probe, then resources_budget) and writes it verbatim."
         fi
       else
+        # THE HOLDS, READ ONCE (wave-21 T4; REQ-3, AC-3.3; D3, ADR-037 decision 2). `units_held`
+        # names two kinds of row the ready set leaves out: one held FOR ITS STEP (a gate act
+        # ahead of `current:`) and one held BY THE WORLD (`ext:<slug>` left in its deps cell).
+        # Each ext-held row is printed here as `poker: HELD <id> ext:<slug>`, every tick, after
+        # the rung line and before the FILL line, whatever the gap: it is the one report of a
+        # wait nothing mechanical lifts, addressed to the only actor who can lift it (remove the
+        # token from the cell). The step-held lines keep their place on the no-FILL line below.
+        SCHED_HOLDS="$(units_held "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null)"
+        while IFS= read -r SCHED_HOLD; do
+          case "$SCHED_HOLD" in
+            *": held by ext:"*) say "HELD ${SCHED_HOLD%%: held by *} ${SCHED_HOLD#*: held by }" ;;
+          esac
+        done <<EOF
+$SCHED_HOLDS
+EOF
+        # THE LEDGER, LINTED (wave-21 T5; REQ-4, AC-4.2; D4, ADR-037 decision 3). `units_findings`
+        # is the reader the commit gate refuses on — a status off the enum, a row at its terminal
+        # word with no `- T<n>:` line, an `active` row whose agent cell names no row on THIS
+        # session's roster — and each finding is printed here, every interval, as
+        # `poker: LEDGER <id> <kind> [<value>]`, after the HELD lines and before the FILL line.
+        # The ledger is the orchestrator's to write; a finding the gate would refuse at a
+        # writer's first commit reaches the one actor who can fix it a tick earlier. The roster
+        # is the one this tick already reads; a missing one is the reader's no-roster rule.
+        SCHED_FINDINGS="$(units_findings "$SCHED_PLAN" "$ROSTER_FILE" 2>/dev/null)"
+        while IFS= read -r SCHED_FINDING; do
+          [ -n "$SCHED_FINDING" ] || continue
+          SCHED_FKIND="${SCHED_FINDING%% *}"
+          SCHED_FREST="${SCHED_FINDING#* }"
+          SCHED_FVAL=""
+          case "$SCHED_FREST" in *" "*) SCHED_FVAL="${SCHED_FREST#* }" ;; esac
+          say "LEDGER ${SCHED_FREST%% *} ${SCHED_FKIND}${SCHED_FVAL:+ $(clean "$SCHED_FVAL")}"
+        done <<EOF
+$SCHED_FINDINGS
+EOF
         # THE GAP IS MEASURED AGAINST THE RUNG, NOT THE CEILING (AC-17). The ceiling is what
         # the run may ever run at; the rung is what the machine will carry right now, and
         # filling to the first while the second says otherwise is the mistake this whole arm
@@ -5049,7 +5092,8 @@ EOF
             # this line said the first for both. `units_held` is the same readiness program as
             # the set above, asked the other question, so it names exactly the rows the set
             # left out for their step and no others.
-            SCHED_HELD="$(units_held "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null | awk 'NF { printf "%s%s", (n++ ? "; " : ""), $0 }')"
+            # The ext-held rows were printed as HELD lines above and are not step holds.
+            SCHED_HELD="$(printf '%s\n' "$SCHED_HOLDS" | awk 'NF && index($0, ": held by ext:") == 0 { printf "%s%s", (n++ ? "; " : ""), $0 }')"
             say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
           fi
         fi
