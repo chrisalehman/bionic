@@ -243,6 +243,50 @@ expect_contains "4l: a second session gets its own first nudge" "chain-class com
 expect_eq "4m: the state file carries one row per (session, class)" "3" \
   "$(grep -c . "$ENGAGED/.bionic/tmp/farm-out.state" 2>/dev/null)"
 
+# THE CHAIN EXEMPT SET IS AN ALLOWLIST OF OBSERVATION (wave-21 T8). Every fixture below
+# runs on a FRESH farm-out.state: the nudge is once per (session, class), so a chain that
+# was silent only because an earlier chain spent the class would pass for the wrong reason.
+# The state is saved aside and restored so sections 5+ see what 4m left.
+FO_STATE="$ENGAGED/.bionic/tmp/farm-out.state"
+cp "$FO_STATE" "$SANDBOX/.state.keep"
+fresh_state() { rm -f "$FO_STATE"; }
+
+fresh_state
+run_hook "$(mk_payload "$ENGAGED" 'cd x && git fetch -q origin develop && git rev-parse HEAD && date')"
+expect_status "4n: the read-only chain ending in date exits 0" 0 "$ST"
+expect_empty "4o: …silent on stdout" "$OUT"
+expect_absent "4p: …and no [nudge] on stderr" "[nudge]" "$ERR"
+
+fresh_state
+run_hook "$(mk_payload "$ENGAGED" 'cd x && git status && rm -rf build')"
+expect_contains "4q: a chain carrying rm is a production chain and nudges" "chain-class command on the main thread" \
+  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
+expect_contains "4r: …recorded once as class=chain" "farm-out [nudge] class=chain" "$ERR"
+run_hook "$(mk_payload "$ENGAGED" 'cd x && git status && rm -rf build')"
+expect_empty "4s: …and the second is suppressed" "$OUT"
+
+fresh_state
+run_hook "$(mk_payload "$ENGAGED" 'cd x && gh pr view 611 --json state && git log -1')"
+expect_empty "4t: a chain with gh pr view is silent" "$OUT"
+expect_absent "4u: …no [nudge]" "[nudge]" "$ERR"
+
+for c in 'cd x && gh run watch 9 && git log -1' 'cd x && gh issue list && git log -1' \
+         'cd x && gh api repos/o/r/pulls && git log -1' 'cd x && gh api -X GET repos/o/r && git log -1' \
+         'cd x && pwd && true' 'cd x && git log | jq . && sort' 'cd x && uniq && basename y && date'; do
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$c")"
+  expect_empty "4v: observation chain is silent [$c]" "$OUT"
+done
+for c in 'cd x && gh api -X POST repos/o/r && git log -1' 'cd x && gh api --method DELETE repos/o/r && git log -1' \
+         'cd x && gh pr merge 5 && git log -1' 'cd x && mv a b && git log -1' 'cd x && cp a b && git log -1' \
+         'cd x && mkdir d && git log -1' 'cd x && touch f && git log -1'; do
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$c")"
+  expect_contains "4w: production chain nudges [$c]" "chain-class command" \
+    "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
+done
+cp "$SANDBOX/.state.keep" "$FO_STATE"
+
 # ---------------------------------------------------------------------------
 section "5 — the sanctioned override, and the config modes"
 
