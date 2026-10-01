@@ -527,6 +527,32 @@ fire "$d"; expect_allow "34: a marker followed only by CronList passes — nothi
 d=$(make_env); u_clear_marker "$d"; a_tool_sidechain "$d" CronCreate
 fire "$d"; expect_allow "35: a sidechain CronCreate does not count against the ritual"
 
+# 35a-c: THE RITUAL DISCHARGES. The offending CronCreate never leaves the transcript, so a
+# verdict that only ever set `violated` latched: every later turn's first Stop was refused
+# again, "blocks once" holding within one turn (case 32) and failing across turns. A CronList
+# since the marker is the look the gate exists to force, so it clears the violation whichever
+# side of the CronCreate it falls on; a LATER marker still opens a fresh window (35c).
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_tool "$d" CronList
+fire "$d"; expect_allow "35a: a CronList after the CronCreate discharges the ritual"
+
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_tool "$d" CronList
+a_tool "$d" CronDelete; a_tool "$d" CronCreate
+fire "$d"; expect_allow "35b: CronCreate, CronList, CronDelete, CronCreate — the whole ritual in the order the refusal asks — passes"
+
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_tool "$d" CronList
+u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "35c: a CronList before a LATER marker does not discharge the new window" "$RITUAL_CRONLIST"
+
+# 35d: THE STEP-3 TEXT. A session whose own Patrol job already exists has nothing to re-create,
+# so the refusal's step 3 is conditional on what step 2 left.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"
+case "$(reason_of)" in
+  *"3. CronCreate — only if step 2 left this session with no Patrol job of its own"*)
+    ok "35d: step 3 of the refusal is conditional on step 2's result" ;;
+  *) no "35d: step 3 of the refusal is still unconditional" "$(reason_of)" ;;
+esac
+
 section "Section 5: a printed FILL is advice, not evidence (AC-29, retired by wave-20 Δ7)"
 
 # THE CONTRACT. `session-poker.sh tick` can compute the gap between the plan's budget and
@@ -947,6 +973,17 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_prompt "$d" "merge the two landed trees and tell me where we are"
 a_text "$d" "fill-declined: the wave head has not merged, so neither row can base off it."
 fire "$d"; expect_allow "60: a fill-declined line answers the gap as it answers a printed FILL"
+
+# 60a: A DECLINE ANSWERS ONE TURN. The line is the model's text in turn N; turn N+1 is a new
+# user prompt with the gap still open and no decline in it, so it is refused again — block,
+# allow, block. The wall judges every Stop on the computed gap (wave-20 D5), not on what an
+# earlier turn said.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "first turn"
+a_text "$d" "fill-declined: waiting on the wave head."
+fire "$d"; expect_allow "60a: turn N — the decline answers the gap"
+u_prompt "$d" "second turn, nothing said about the gap"
+fire "$d"; expect_block "60a: F3 — turn N+1, gap still open, no decline in it — is refused again" "T2"
 
 # 60b: and a dispatch of every ready row answers it too. A DISPATCH IS TWO FACTS ON DISK
 # (wave-20 Δ7, count not names): the roster row the dispatch wall writes at launch, and the
@@ -1414,6 +1451,35 @@ fire "$d"; expect_block "69j: …and never the held release" "fill-declined" "T1
 d=$(make_env_ledger 7 "$LEDGER_LANDED" "$LEDGER_BED_5" "$LEDGER_RELEASE_7")
 u_prompt "$d" "where are we?"
 fire "$d"; expect_block "69k: at current: 7 the release is due, and an undispatched release is refused, naming it" "T13"
+
+# ============================================================
+section "Section 5c3: an ext:-held row is not a gap — the wall needs no change (wave-21 T4; REQ-3, AC-3.2; D3, ADR-037 decision 2)"
+# ============================================================
+#
+# A ROW WAITING ON THE WORLD — CI, a rig, a triage — was ready by its graph, so this wall
+# refused every Stop that neither dispatched it nor declined it again (triage-A §F.2, repro-F:
+# block, allow, block). The wait is now a prerequisite, `ext:<slug>` in the deps cell. The wall
+# computes the same ready set the tick prints (fill_ready_set → units_ready), and an ext: token
+# never equals `landed`, so the held row is simply absent from the gap: no decline is owed.
+#
+# ONE FREE SLOT, so the gap is exactly the one row under test: writers=8 and seven open rows on
+# this session's roster. The control is the SAME fixture with the token removed — refused,
+# naming the row — which is what proves the allow is the token's and not the fixture's.
+LEDGER_EXT_HELD='| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-ce9520e | 30m | REQ-x | b.sh | pending | — |'
+LEDGER_EXT_CLEARED='| T2 | 4 | build | waits on CI | implementor | T1 | 30m | REQ-x | b.sh | pending | — |'
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_HELD")
+ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
+u_prompt "$d" "how is CI looking?"
+fire "$d"; expect_allow "71a: AC-3.2 a live ledger, one free slot, one ext:-held row and no decline — the turn passes"
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_CLEARED")
+ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
+u_prompt "$d" "how is CI looking?"
+fire "$d"; expect_block "71b: …the same row with the token removed is a gap, refused naming it" "T2"
+# 71c: BESIDE A READY ROW the one free slot is the ready row's, and the held row is never named.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_HELD" "$LEDGER_READY_3")
+ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
+u_prompt "$d" "how is CI looking?"
+fire "$d"; expect_block "71c: …beside a ready row the duty names the ready row and never the held one" "T3" "T2"
 
 # ============================================================
 section "Section 5d: nothing quoted plants a verdict (wave-20 REQ-5, AC-5.4; Δ7)"

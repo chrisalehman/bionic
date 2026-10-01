@@ -4872,13 +4872,32 @@ if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
       esac
     done
     [ -n "$_seg" ] || continue
+    # THE LINE THIS LIST DRAWS: observation is exempt, production is nudged. A segment
+    # that only reads or reports (git, read tools, date/pwd/jq/sort, gh view/list/watch,
+    # a GET gh api) never makes a chain production-shaped; one that writes the tree
+    # (rm, mv, cp, mkdir, touch) or the remote (gh api -X POST, gh pr merge) does.
     # THE SAME EXEMPT SET, ASKED WITH A BUILTIN. The regex was anchored at `^` over
     # literal words each followed by a literal space, which is exactly what these
     # patterns are — a bare `git` with no argument stays non-exempt in both spellings.
     case "$_seg" in
       'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
-      'sed '*|'mkdir '*|'cp '*|'mv '*|'rm '*|'touch '*|'echo '*|'printf '*|'test '*|\
-      'cd '*|'pwd '*|'which '*|'command '*|'true '*|'false '*) : ;;
+      'sed '*|'echo '*|'printf '*|'test '*|'cd '*|'which '*|'command '*|'false '*|\
+      'pwd'|'pwd '*|'true'|'true '*|'date'|'date '*|'jq'|'jq '*|'sort'|'sort '*|\
+      'uniq'|'uniq '*|'basename'|'basename '*|\
+      'gh run watch'|'gh run watch '*) : ;;
+      'gh api'|'gh api '*)
+        # `gh api` observes unless a method other than GET is named.
+        case " $_seg " in
+          *' -X '[Gg][Ee][Tt]' '*|*' --method '[Gg][Ee][Tt]' '*|*' --method='[Gg][Ee][Tt]' '*|*' -X'[Gg][Ee][Tt]' '*) : ;;
+          *' -X '*|*' -X'?*|*' --method '*|*' --method='*) _has_nonexempt=1; break ;;
+          *) : ;;
+        esac ;;
+      'gh '*)
+        # `gh <noun> view` / `gh <noun> list` observe; every other verb is production.
+        case "$_seg" in
+          'gh '*' view'|'gh '*' view '*|'gh '*' list'|'gh '*' list '*) : ;;
+          *) _has_nonexempt=1; break ;;
+        esac ;;
       *) _has_nonexempt=1; break ;;
     esac
   done <<EOF
