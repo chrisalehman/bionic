@@ -1453,6 +1453,35 @@ u_prompt "$d" "where are we?"
 fire "$d"; expect_block "69k: at current: 7 the release is due, and an undispatched release is refused, naming it" "T13"
 
 # ============================================================
+section "Section 5c3: an ext:-held row is not a gap — the wall needs no change (wave-21 T4; REQ-3, AC-3.2; D3, ADR-037 decision 2)"
+# ============================================================
+#
+# A ROW WAITING ON THE WORLD — CI, a rig, a triage — was ready by its graph, so this wall
+# refused every Stop that neither dispatched it nor declined it again (triage-A §F.2, repro-F:
+# block, allow, block). The wait is now a prerequisite, `ext:<slug>` in the deps cell. The wall
+# computes the same ready set the tick prints (fill_ready_set → units_ready), and an ext: token
+# never equals `landed`, so the held row is simply absent from the gap: no decline is owed.
+#
+# ONE FREE SLOT, so the gap is exactly the one row under test: writers=8 and seven open rows on
+# this session's roster. The control is the SAME fixture with the token removed — refused,
+# naming the row — which is what proves the allow is the token's and not the fixture's.
+LEDGER_EXT_HELD='| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-ce9520e | 30m | REQ-x | b.sh | pending | — |'
+LEDGER_EXT_CLEARED='| T2 | 4 | build | waits on CI | implementor | T1 | 30m | REQ-x | b.sh | pending | — |'
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_HELD")
+ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
+u_prompt "$d" "how is CI looking?"
+fire "$d"; expect_allow "71a: AC-3.2 a live ledger, one free slot, one ext:-held row and no decline — the turn passes"
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_CLEARED")
+ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
+u_prompt "$d" "how is CI looking?"
+fire "$d"; expect_block "71b: …the same row with the token removed is a gap, refused naming it" "T2"
+# 71c: BESIDE A READY ROW the one free slot is the ready row's, and the held row is never named.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_EXT_HELD" "$LEDGER_READY_3")
+ledger_roster "$d" open W1 W2 W3 W4 W5 W6 W7
+u_prompt "$d" "how is CI looking?"
+fire "$d"; expect_block "71c: …beside a ready row the duty names the ready row and never the held one" "T3" "T2"
+
+# ============================================================
 section "Section 5d: nothing quoted plants a verdict (wave-20 REQ-5, AC-5.4; Δ7)"
 #
 # THE FOUR PLANTS research D1 §4 reproduced at b60efe2, each of which moved this wall's
