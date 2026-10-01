@@ -49,6 +49,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/units.sh"
@@ -1990,5 +1992,140 @@ cat > "$SANDBOX/ext-task.md" <<'EXTT_EOF'
 EXTT_EOF
 expect_eq "17c.17 task scale: units_ready at T2 omits the ext:-held row" "T3" "$(call units_ready "$SANDBOX/ext-task.md" T2)"
 expect_eq "17c.18 task scale: units_held names it" "T2: held by ext:ci-1" "$(call units_held "$SANDBOX/ext-task.md" T2)"
+
+# ============================================================
+section "17d — wave-21 T5: one ledger reader, units_findings (REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3)"
+# ============================================================
+#
+# THREE FINDINGS AND NO MORE: `status <id> <value>` (a status outside the scale's enum),
+# `evidence <id>` (a row at the scale's terminal word with no `- T<n>:` line under
+# `## SDLC State`), `launch <id> <agent>` (an `active` row whose agent cell names no `name=`
+# on the roster). An empty or em-dash agent cell is SELF-OWNED and never a finding. With no
+# roster to read (an empty argument, a missing file, a symlink) no `launch` finding is
+# computed and an agent-named `active` row falls back to today's rule: it owes its line.
+cat > "$SANDBOX/ledger.md" <<'LEDGER_EOF'
+---
+scale: wave
+---
+
+## SDLC State
+
+current: 4
+
+- T1: bash suite 9/9 green
+  T9:
+- T11: dispatched to w-T11
+
+```
+- T2: a fenced example is documentation, not a line
+```
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed with its line | w-T1 | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | landed, its only line fenced | w-T2 | — | 30m | REQ-x | b.sh | landed |
+| T3 | 4 | build | a status off the enum | w-T3 | — | 30m | REQ-x | c.sh | doing |
+| T4 | 4 | build | active, launched | w-T4 | — | 30m | REQ-x | d.sh | active |
+| T5 | 4 | build | active, agent cell names no roster row | bionic:implementor | — | 30m | REQ-x | e.sh | active |
+| T6 | 4 | build | active, self-owned by an em dash | — | — | 30m | REQ-x | f.sh | active |
+| T7 | 4 | build | active, self-owned by an empty cell |  | — | 30m | REQ-x | g.sh | active |
+| T8 | 4 | build | pending, no line owed | w-T8 | — | 30m | REQ-x | h.sh | pending |
+| T9 | 4 | build | landed, its line empty | w-T9 | — | 30m | REQ-x | i.sh | landed |
+| T10 | 4 | build | landed, only T1's line (T1 never matches T10) | w-T10 | — | 30m | REQ-x | j.sh | landed |
+| T11 | 4 | build | dropped | w-T11 | — | 30m | REQ-x | k.sh | dropped |
+LEDGER_EOF
+# The roster through the fleet's own builders (tests/lib/roster-row.sh, swept-marker.sh): two
+# launch rows, and a landing-swept marker whose name= must NOT count as a launch.
+{
+  roster_header
+  roster_row_fixture status=identified session=s name=w-T4 agent_id=a4
+  roster_row_fixture status=intended session=s name=w-T9x agent_id=
+} > "$SANDBOX/ledger.roster"
+swept_marker_write "$SANDBOX/ledger.roster" 2026-10-01T00:00:00Z s bionic:implementor a5 MET
+expect_eq "17d.1 AC-4.1 the three kinds, table order: evidence, status, launch — and no finding for the launched, self-owned, pending or dropped rows" \
+  "$(printf 'evidence T2\nstatus T3 doing\nlaunch T5 bionic:implementor\nevidence T9\nevidence T10')" \
+  "$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger.roster")"
+expect_eq "17d.2 …and the verb exits 1 when it printed a finding" "1" \
+  "$(call_rc units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger.roster")"
+# A landing-swept line carrying name= is not a roster row: only `roster-state/` rows launch.
+expect_contains "17d.3 a name= on a landing-swept line launches nobody" "launch T5 bionic:implementor" \
+  "$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger.roster")"
+
+# NO ROSTER TO READ: the agent-named active rows owe their line again (spec assumption 1);
+# the self-owned rows still owe nothing.
+S17D_FALLBACK="$(printf 'evidence T2\nstatus T3 doing\nevidence T4\nevidence T5\nevidence T9\nevidence T10')"
+expect_eq "17d.4 AC-4.3 with no roster argument, an agent-named active row falls back to the line rule" \
+  "$S17D_FALLBACK" "$(call units_findings "$SANDBOX/ledger.md" "")"
+expect_eq "17d.5 …and a roster path that names no file reads the same as none" \
+  "$S17D_FALLBACK" "$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/no-such.roster")"
+ln -s "$SANDBOX/ledger.roster" "$SANDBOX/ledger-link.roster"
+expect_eq "17d.6 …and so does a symlinked roster (the fleet never follows one)" \
+  "$S17D_FALLBACK" "$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger-link.roster")"
+expect_absent "17d.7 AC-4.3 the self-owned rows are never a finding, roster or none" "T6" \
+  "$(call units_findings "$SANDBOX/ledger.md" "")$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger.roster")"
+expect_absent "17d.8 …the empty-cell one included" "T7" \
+  "$(call units_findings "$SANDBOX/ledger.md" "")$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger.roster")"
+
+# THE CLEAN LEDGER: every terminal row carries its line, every active row is launched or
+# self-owned. Nothing printed, exit 0.
+cat > "$SANDBOX/ledger-clean.md" <<'LEDGERC_EOF'
+## SDLC State
+
+current: 4
+
+- T1: bash suite 9/9 green
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed with its line | w-T1 | — | 30m | REQ-x | a.sh | landed |
+| T4 | 4 | build | active, launched, no line | w-T4 | — | 30m | REQ-x | d.sh | active |
+| T6 | 4 | build | active, self-owned, no line | — | — | 30m | REQ-x | f.sh | active |
+| T8 | 4 | build | pending, no line | w-T8 | T1 | 30m | REQ-x | h.sh | pending |
+LEDGERC_EOF
+expect_eq "17d.9 a clean ledger prints nothing" "" "$(call units_findings "$SANDBOX/ledger-clean.md" "$SANDBOX/ledger.roster")"
+expect_eq "17d.10 …and exits 0" "0" "$(call_rc units_findings "$SANDBOX/ledger-clean.md" "$SANDBOX/ledger.roster")"
+
+# TASK SCALE: no step column, so the enum is pending · active · done · dropped and the
+# terminal word is `done`. The table carries no agent column, so every row is self-owned.
+cat > "$SANDBOX/ledger-task.md" <<'LEDGERT_EOF'
+## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | tested | done with its line | done |
+| T2 | build | tested | done, no line | done |
+| T3 | build | tested | landed is not a task-scale word | landed |
+| T4 | build | tested | active, self-owned | active |
+
+## SDLC State
+
+scale: task
+current: T4
+
+- T1: bash suite 5/5 green
+LEDGERT_EOF
+expect_eq "17d.11 task scale: done owes its line, landed is off the enum, an active row owes nothing" \
+  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task.md" "")"
+expect_eq "17d.12 …the same with a roster" \
+  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task.md" "$SANDBOX/ledger.roster")"
+
+# AN EMPTY STATUS CELL is named, the way the validator names it.
+sed 's/| d.sh | active |/| d.sh |  |/' "$SANDBOX/ledger-clean.md" > "$SANDBOX/ledger-empty-status.md"
+expect_eq "17d.13 an empty status cell is a status finding spelled (empty)" "status T4 (empty)" \
+  "$(call units_findings "$SANDBOX/ledger-empty-status.md" "$SANDBOX/ledger.roster")"
+expect_eq "17d.14 no table, no findings, exit 0" "0" "$(call_rc units_findings "$SANDBOX/no-such.md" "")"
+
+# THE LOOKUP THE GATE'S ADDRESSED-UNIT ARM COUNTS (it moved here from walls.sh's
+# missing_evidence_ids): every T-row with no non-empty `- T<n>:` line, whatever its status.
+expect_eq "17d.15 units_unlined names every T-row short of a line, table order, the fenced and empty ones included" \
+  "$(printf 'T2\nT3\nT4\nT5\nT6\nT7\nT8\nT9\nT10')" "$(call units_unlined "$SANDBOX/ledger.md")"
+# CR-ONLY INPUT (the gate's 19j-cr pin): the reader translates line endings itself.
+tr '\n' '\r' < "$SANDBOX/ledger-task.md" > "$SANDBOX/ledger-task-cr.md"
+expect_eq "17d.16 a CR-only plan reads the same" \
+  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task-cr.md" "")"
 
 finish

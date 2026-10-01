@@ -6782,4 +6782,58 @@ sp_plan_at_step "$R38H" 4 \
 poke_pressure "$R38H" 8192 1.0 tick
 expect_contains "38h with the token removed the row is filled again" "poker: FILL T2 T3" "$OUT"
 expect_absent "38i …and no HELD line is printed" "poker: HELD" "$OUT"
+
+# ============================================================
+section "Section 39: the tick lints the ledger — poker: LEDGER <id> <finding> (wave-21 T5; REQ-4, AC-4.2; D4, ADR-037 decision 3)"
+# ============================================================
+#
+# THE SAME READER THE GATE ASKS. `units_findings` names every ledger defect — a status off
+# the enum, a landed row with no `- T<n>:` line, an active row whose agent cell names no row
+# on this session's roster — and the tick prints each one, every interval, as
+# `poker: LEDGER <id> <kind> [<value>]`, after the HELD lines and before the FILL line. The
+# finding reaches the orchestrator, who owns the ledger, before a writer's commit meets it.
+R39A="$(make_repo s39-ledger)"; new_roster "$R39A"
+mkrow name=w-T2 agent_id=a-w-T2 >> "$(roster_of "$R39A")"
+P39A="$(sp_plan_at_step "$R39A" 4 \
+  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | active, launched | w-T2 | — | 15m | REQ-x | b.sh | active |" \
+  "| T3 | 4 | build | active, agent names no roster row | implementor | — | 15m | REQ-x | c.sh | active |" \
+  "| T4 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | d.sh | doing |" \
+  "| T5 | 4 | build | active, self-owned | — | — | 15m | REQ-x | e.sh | active |" \
+  "| T6 | 4 | build | waits on CI | implementor | T1, ext:ci-6 | 15m | REQ-x | f.sh | pending |" \
+  "| T7 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | g.sh | pending |")"
+poke_pressure "$R39A" 8192 1.0 tick
+expect_contains "39a AC-4.2 a landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "39b …an active row whose agent is not on the roster ticks a launch line, naming the cell" \
+  "poker: LEDGER T3 launch implementor" "$OUT"
+expect_contains "39c …a status off the enum ticks a status line, naming the value" "poker: LEDGER T4 status doing" "$OUT"
+expect_absent "39d …the launched active row is not a finding" "poker: LEDGER T2" "$OUT"
+expect_absent "39e …nor is the self-owned one" "poker: LEDGER T5" "$OUT"
+expect_eq "39f …exactly three LEDGER lines" "3" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: LEDGER ')"
+S39_HELD="$(s38_line_no 'poker: HELD ')"; S39_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S39_FILL="$(s38_line_no 'poker: FILL ')"
+expect_true "39g …and the LEDGER lines sit after the HELD line and before the FILL line (held=$S39_HELD ledger=$S39_LEDGER fill=$S39_FILL)" \
+  test "$S39_HELD" -gt 0 -a "$S39_LEDGER" -gt "$S39_HELD" -a "$S39_FILL" -gt "$S39_LEDGER"
+expect_contains "39h …and the fill is unchanged by the lint" "poker: FILL T7" "$OUT"
+
+# 39i — THE LEDGER REPAIRED: T1's line written, T3's cell naming its roster row, T4 back on
+# the enum. No LEDGER line.
+mkrow name=w-T3 agent_id=a-w-T3 >> "$(roster_of "$R39A")"
+awk '{ print } $0 == "- Step 4: in progress" { print "- T1: bash suite 9/9 green" }' "$P39A" \
+  | sed -e 's/| active, agent names no roster row | implementor |/| active, agent names no roster row | w-T3 |/' \
+        -e 's/| d.sh | doing |/| d.sh | pending |/' > "$P39A.new" && mv "$P39A.new" "$P39A"
+poke_pressure "$R39A" 8192 1.0 tick
+expect_contains "39i precondition: T1's line is in the plan" "- T1: bash suite 9/9 green" "$(cat "$P39A")"
+expect_absent "39j a repaired ledger ticks no LEDGER line" "poker: LEDGER" "$OUT"
+
+# 39k — AN EMPTY ROSTER LAUNCHES NOBODY. The tick reaches its fill arm only with a roster file
+# (no file is its own REFUSED/QUIET answer, §13), so the reader's no-roster rule is the gate's
+# alone; what the tick can meet is a roster with no rows, and there an agent-named active row is
+# a launch finding, not an evidence one.
+R39K="$(make_repo s39-empty-roster)"; new_roster "$R39K"
+sp_plan_at_step "$R39K" 4 \
+  "| T1 | 4 | build | active, agent-named, nobody launched | w-T1 | — | 15m | REQ-x | a.sh | active |" \
+  "| T2 | 4 | build | ordinary, ready | implementor | — | 15m | REQ-x | b.sh | pending |" > /dev/null
+poke_pressure "$R39K" 8192 1.0 tick
+expect_contains "39k an empty roster: the agent-named active row ticks a launch line" \
+  "poker: LEDGER T1 launch w-T1" "$OUT"
 finish
