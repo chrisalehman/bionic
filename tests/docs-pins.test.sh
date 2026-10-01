@@ -3851,4 +3851,66 @@ else
      "the old header equals the wall's list — the comparison cannot discriminate"
 fi
 
+# ── T9 (wave-21-fixit-188, D9; AC-1.4 dispatch half, AC-2.2, AC-4.4, AC-7.1) ──────────────────
+# dispatch.md says what is true after this wave. Four facts, one pin each, all read from the
+# rendered file through _flatten so a wrapped sentence still matches. Every pin carries its
+# paired control: the sentence is present AND its stale predecessor is absent, so neither a
+# vacuous "absent" nor a vacuous "present" can pass.
+T9_FLAT="$(_flatten "$DISPATCH_MD")"
+
+# 191 — the arming sentence names the line session-start printed, and CronList comes before
+# CronCreate in what follows it (the arm is CronList-first for a fresh run and a resume alike).
+T9_ARM='run the arm line session-start printed — it begins with CronList, so a fresh run and a resume read one sentence'
+T9_REST="${T9_FLAT#*"$T9_ARM"}"
+T9_PRE_LIST="${T9_ARM}${T9_REST}"; T9_PRE_LIST="${T9_PRE_LIST%%CronList*}"
+if [ "$T9_REST" != "$T9_FLAT" ] && case "$T9_REST" in *CronList*) true ;; *) false ;; esac \
+   && case "$T9_PRE_LIST" in *CronCreate*) false ;; *) true ;; esac \
+   && case "$T9_FLAT" in *'On a `/clear`+resume session-start prints no arm line'*) true ;; *) false ;; esac; then
+  ok "191: AC-1.4 — dispatch.md's arming sentence names the arm line session-start printed, CronList before CronCreate, and says the /clear+resume path prints none"
+else
+  no "191: AC-1.4 — dispatch.md's arming sentence names the arm line session-start printed, CronList before CronCreate, and says the /clear+resume path prints none" \
+     "sentence present: $([ "$T9_REST" != "$T9_FLAT" ] && echo yes || echo no)"
+fi
+
+# 192 — the registry resolver and its false pin claim are gone; one sentence names the line.
+T9_BAD=""
+case "$T9_FLAT" in *installed_plugins.json*) T9_BAD="$T9_BAD installed_plugins.json" ;; esac
+case "$T9_FLAT" in *'held byte-identical'*)  T9_BAD="$T9_BAD held-byte-identical" ;; esac
+case "$T9_FLAT" in *'`<plugin-root>` is the absolute plugin path the printed arm line carries'*) T9_ROOT=yes ;; *) T9_ROOT=no ;; esac
+if [ -z "$T9_BAD" ] && [ "$T9_ROOT" = yes ]; then
+  ok "192: AC-2.2 — dispatch.md has no installed_plugins.json expression and no 'held byte-identical' claim, and names the printed line as the root's source"
+else
+  no "192: AC-2.2 — dispatch.md has no installed_plugins.json expression and no 'held byte-identical' claim, and names the printed line as the root's source" \
+     "stale:${T9_BAD:- none}; root sentence present: $T9_ROOT"
+fi
+
+# 193 — a CI or PR wait is a backgrounded command carrying a Subprocess claim: line; the
+# stale "no bionic machinery relies on it existing" is gone.
+T9_CI='A CI or PR wait is such a backgrounded command, and its brief carries a `Subprocess claim:` line'
+if has_pin "$DISPATCH_MD" "$T9_CI" && ! has_pin "$DISPATCH_MD" 'no bionic machinery relies on it existing'; then
+  ok "193: AC-4.4 — dispatch.md names a CI or PR wait as a backgrounded command with a Subprocess claim: line, and the stale 'no machinery relies on it' sentence is gone"
+else
+  no "193: AC-4.4 — dispatch.md names a CI or PR wait as a backgrounded command with a Subprocess claim: line, and the stale 'no machinery relies on it' sentence is gone" \
+     "ci sentence: $(has_pin "$DISPATCH_MD" "$T9_CI" && echo present || echo absent); stale: $(has_pin "$DISPATCH_MD" 'no bionic machinery relies on it existing' && echo present || echo absent)"
+fi
+
+# 194 — SKILL.md's Known-holes paragraph says both ledger facts.
+if has_pin "$SKILL_MD" 'Task-scale ledgers have no write-time check.' \
+   && has_pin "$SKILL_MD" 'An `active` row needs no evidence line.'; then
+  ok "194: AC-7.1 — SKILL.md's Known holes says task-scale ledgers have no write-time check and an active row needs no evidence line"
+else
+  no "194: AC-7.1 — SKILL.md's Known holes says task-scale ledgers have no write-time check and an active row needs no evidence line" \
+     "check sentence: $(has_pin "$SKILL_MD" 'Task-scale ledgers have no write-time check.' && echo present || echo absent); evidence sentence: $(has_pin "$SKILL_MD" 'An `active` row needs no evidence line.' && echo present || echo absent)"
+fi
+
+# 195 — the ledger text says the agent cell carries the ROSTER NAME (A-T5.5), in both homes.
+T9_AG='carries the ROSTER NAME the dispatch gave the agent'
+T9_AG2='carries the agent'"'"'s ROSTER NAME'
+if has_pin "$DISPATCH_MD" "$T9_AG" && has_pin "$SKILL_MD" "$T9_AG2"; then
+  ok "195: A-T5.5 — dispatch.md and SKILL.md say a ledger row's agent cell carries the roster name, never the role"
+else
+  no "195: A-T5.5 — dispatch.md and SKILL.md say a ledger row's agent cell carries the roster name, never the role" \
+     "dispatch.md: $(has_pin "$DISPATCH_MD" "$T9_AG" && echo present || echo absent); SKILL.md: $(has_pin "$SKILL_MD" "$T9_AG2" && echo present || echo absent)"
+fi
+
 finish
