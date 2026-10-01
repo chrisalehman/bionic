@@ -326,9 +326,9 @@ live_ids_of_name() {  # <name> -> the agent ids currently under an open contract
 
 # ---------- THE ROW THE WALLS READ FOR AN ID (epic-23 wave-22 T1; REQ-1 AC-1.1/AC-1.6, D2) ----
 #
-# Every row written after an agent's id is known carries that id, and the status the id was learned under — so the name's latest row and the id's latest row never disagree.
+# Every successor row written after an agent's id is known carries that id, and the status the id was learned under — so a row `amend` or `extend` writes is the row every reader picks. The recorder's teammate `confirmed` copy carries no id by design, so an un-amended roster can still show an id-less latest row for a name; a reader that needs the id takes it from the latest row that carries one.
 #
-# That sentence is the roster's one rule for successor rows, and this function is the half of
+# The first sentence is the roster's one rule for successor rows, and this function is the half of
 # it a reader can call. The suite-budget wall (payload/scripts/lib/walls.sh, the budget arm)
 # keys on the transcript id the hook payload carries, so its contract for an agent is the LAST
 # `roster-state/` row whose `agent_id=` is that id — no status filter, because a widened
