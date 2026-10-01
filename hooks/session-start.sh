@@ -50,8 +50,11 @@
 # STDOUT IS THE DELIVERY MECHANISM. A SessionStart hook's stdout is added to the
 # new conversation's context, so the block below is written to be read by the model
 # that is about to act, not by a terminal. It prints ONLY when there is something
-# to report: a clean `startup` on a project with no predecessor state produces no
-# output at all, because a block that prints every session is a block nobody reads.
+# to report: a clean start of a session that is NOT engaged, on a project with no
+# predecessor state, produces no output at all, because a block that prints every
+# session is a block nobody reads. An ENGAGED session always has something — the
+# arm line, the finished Patrol arm command baked from this hook's own root
+# (wave-21 T2, REQ-2; see "the arm line" below).
 #
 # Registered once, in hooks/hooks.json, on SessionStart with matcher
 # `startup|clear|resume|compact` — pinned by tests/cross-gate-agreement.test.sh §L.
@@ -810,14 +813,62 @@ if [ -d "$TMP" ] && [ ! -L "$TMP" ]; then
   fi
 fi
 
+# ---------------------------------------------------------------- the arm line
+#
+# THE FINISHED ARM COMMAND (epic-23 wave-21 T2; REQ-2, AC-2.1; D2; ADR-037 decision 1). The
+# model resolves no plugin root. It used to look one up in the CLI's registry and bake that
+# into the Patrol prompt, and on a directory-source install the registry can name an older
+# build than the tree these hooks run from — measured: the 1.8.6 cache against the 1.8.7 tree,
+# the two pokers differing (triage-C §R2), so the Patrol ticked an old poker against new walls.
+# This line names `$HOOK_ROOT`, the tree this hook was launched from, and nothing else.
+#
+# THE ORDER IS THE INSTRUCTION. CronList first, because a predecessor's recurring job survives
+# `/clear` and keeps firing (A-probe-4); creating before deleting leaves two clocks on one
+# project, which is the 1.3.2 B-8 bug by another route. Then CronCreate with the prompt BAKED
+# IN: it is the poker's own `prompt` verb's output for this session, so the prompt text keeps
+# one owner (session-poker.sh) and its first token is this session's marker. Then `arm`: on
+# the starts that reach this line without an engage.sh run — `compact`, `resume` — the stamp is
+# whatever the last firing left and the armed instant (R-13) predates the clock just created,
+# so the hand step restamps both. `arm` is idempotent; running it after engage.sh did costs
+# nothing. (T19 dropped it from the old re-arm line on the engaged-just-now path alone.)
+#
+# THE INTERVAL is the one the stamps above were graded by, the poker's own. Its cron spelling
+# is printed only when it is exact — whole minutes that divide the hour.
+ss_arm_line() {
+  local poker="$HOOK_ROOT/hooks/session-poker.sh" every prompt m
+  every="every ${SS_INTERVAL_VAL}s"
+  case "$SS_INTERVAL_VAL" in
+    ''|*[!0-9]*) ;;
+    *)
+      if [ $((SS_INTERVAL_VAL % 60)) -eq 0 ]; then
+        m=$((SS_INTERVAL_VAL / 60))
+        if [ "$m" -ge 1 ] && [ "$m" -le 30 ] && [ $((60 % m)) -eq 0 ]; then
+          every="$every (cron */$m * * * *)"
+        fi
+      fi
+      ;;
+  esac
+  prompt="$( cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "$poker" prompt 2>/dev/null )"
+  if [ -n "$prompt" ]; then
+    printf 're-arm: CronList → delete every job whose prompt begins with bionic-patrol session= → CronCreate, recurring %s, with the prompt `%s` → bash %s arm\n' \
+      "$every" "$prompt" "$poker"
+  else
+    # The poker could not print it (absent, or refused): name the verb rather than guess the text.
+    printf 're-arm: CronList → delete every job whose prompt begins with bionic-patrol session= → CronCreate, recurring %s, with the prompt `bash %s prompt` prints → bash %s arm\n' \
+      "$every" "$poker" "$poker"
+  fi
+}
+
 # ---------------------------------------------------------------- the block
 #
-# SILENCE IS THE DEFAULT. Four findings and one verdict; if every finding is empty
-# and the three channels agree, there is nothing a reader could act on and the hook
-# says nothing at all — EXCEPT a sweep failure, which is worth one line even on an
-# otherwise quiet session start (AC-R2.4): it is the one write this hook can make,
-# and a write that fails silently is worse than the noise of saying so.
+# SILENCE IS THE DEFAULT, FOR A SESSION THAT IS NOT ENGAGED. Four findings and one verdict; if
+# every finding is empty and the three channels agree, a bystander has nothing to act on and
+# the hook says nothing at all. An ENGAGED session always gets the arm line (REQ-2): the Patrol
+# carries the session, and this is the one surface that names the root to arm it from. A sweep
+# failure is worth one line on any start (AC-R2.4): it is the one write this hook can make, and
+# a write that fails silently is worse than the noise of saying so.
 if [ -z "$ROSTERS" ] && [ -z "$STAMPS" ] && [ -z "$LINKS" ] && [ "$AGREE" = "agree" ]; then
+  [ "$BIONIC_ENGAGED" = 1 ] && ss_arm_line
   [ -n "$SWEEP_FAIL_LINE" ] && printf '%s\n' "$SWEEP_FAIL_LINE"
   exit 0
 fi
@@ -838,18 +889,12 @@ fi
 if [ -n "$LINKS" ]; then
   printf 'legacy .bionic symlinks:\n%s' "$LINKS"
 fi
-# THE ORDER IS THE INSTRUCTION. CronList first, because a predecessor's recurring
-# job survives `/clear` and keeps firing (A-probe-4); creating before deleting
-# leaves two clocks on one project, which is the 1.3.2 B-8 bug by another route.
-# T19 (A-orch-19.3): the stamp now arms itself at engagement (hooks/engage.sh, D4), so the
-# hand step after CronCreate is `adopt` alone — this line no longer names `session-poker.sh
-# arm`, which would send the model to redo a step engage.sh already did.
-# wave-20 REQ-6 (AC-6.1, D6): the CronCreate step names the verb that PRINTS the canonical
-# Patrol prompt, by this tree's absolute poker path. A prompt the model composed from the
-# ritual alone produced jobs whose turns were never ticks, or ticks that never ran (report #1);
-# the printed one leads with this session's marker and runs the tick.
-printf 're-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate with the prompt `bash %s/hooks/session-poker.sh prompt` prints → adopt\n' \
-  "$HOOK_ROOT"
+ss_arm_line
+# THE PREDECESSOR VARIANT'S EXTRA STEP, on its own line after the arm: `adopt` takes the rows
+# listed above onto this session before its first dispatch. It was the old re-arm line's last
+# step; the arm line is the same on every start now, so the step that only the predecessor
+# block needs lives with that block.
+printf 'adopt: bash %s/hooks/session-poker.sh adopt — before the first dispatch, after the arm\n' "$HOOK_ROOT"
 [ -n "$SWEEP_FAIL_LINE" ] && printf '%s\n' "$SWEEP_FAIL_LINE"
 
 exit 0
