@@ -1941,6 +1941,19 @@ expect_eq "17c.5 …and so is 'ext:-ci' (the slug opens on punctuation)" \
 sed 's/| T1, ext:ci-ce9520e |/| T1, EXT:ci |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-upper.md"
 expect_eq "17c.6 …and so is 'EXT:ci' (the prefix is lower-case, exactly)" \
   "T2: dep EXT:ci names no row in the table" "$(call units_validate "$SANDBOX/ext-upper.md")"
+# A SPACE INSIDE A TOKEN IS NOT SQUASHED INTO ONE (wave-21 T13; walk-3b45d05 item 10). The
+# deps cell used to lose every blank before it was split, so `ext:ci green` was admitted and
+# held as `ext:cigreen`, a token nobody wrote. Blanks around a token are the cell's padding;
+# a blank inside one makes it no token, and it is refused naming what the author wrote.
+sed 's/| T1, ext:ci-ce9520e |/| T1, ext:ci green |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-space.md"
+expect_eq "17c.6b a slug with a space inside is refused, naming the token as written" \
+  "T2: dep ext:ci green names no row in the table" "$(call units_validate "$SANDBOX/ext-space.md")"
+sed 's/| T1, ext:ci-ce9520e |/|  T1 ,  ext:ci-ce9520e  |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-pad.md"
+expect_eq "17c.6d …while blanks AROUND each token are padding: the padded cell still validates clean" \
+  "0" "$(call_rc units_validate "$SANDBOX/ext-pad.md")"
+sed 's/| T1, ext:ci-ce9520e |/| T 1, ext:ci-ce9520e |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-tid.md"
+expect_eq "17c.6e …and a task id with a space inside is refused the same way" \
+  "T2: dep T 1 names no row in the table" "$(call units_validate "$SANDBOX/ext-tid.md")"
 
 # AC-3.2 (hermetic twin): the held row is not in the ready set. units_ready is UNCHANGED for
 # this — an ext: token never equals `landed` — and this pins that it stays so.

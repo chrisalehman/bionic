@@ -4917,6 +4917,8 @@ fi
 # have exited otherwise), ≥1 non-exempt segment → nudge as class=chain.
 if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
   _has_nonexempt=""
+  local _xo _xn _xdd _xw
+  local -a _xws
   while IFS= read -r _seg; do
     # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
     # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
@@ -4939,20 +4941,55 @@ if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
     case "$_seg" in
       'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
       'sed '*|'echo '*|'printf '*|'test '*|'cd '*|'which '*|'command '*|'false '*|\
-      'pwd'|'pwd '*|'true'|'true '*|'date'|'date '*|'jq'|'jq '*|'sort'|'sort '*|\
-      'uniq'|'uniq '*|'basename'|'basename '*|\
+      'pwd'|'pwd '*|'true'|'true '*|'date'|'date '*|'jq'|'jq '*|\
+      'basename'|'basename '*|\
       'gh run watch'|'gh run watch '*) : ;;
+      'sort'|'sort '*|'uniq'|'uniq '*)
+        # `sort`/`uniq` observe only with NO OUTPUT FLAG and AT MOST ONE OPERAND (wave-21 T13
+        # item 8): `sort -o f f` / `--output` writes a file, and `uniq in out` writes its second
+        # operand. A short-option cluster carrying `o` counts as the output flag; a word after
+        # `--` is an operand; an option's separate argument (`-k 2`) counts as an operand,
+        # which can only ever turn an observation into a nudge.
+        _xo=0; _xn=0; _xdd=""
+        # SPLIT BY `read -a`, never by an unquoted expansion: a `*` in the segment is a word
+        # here, not a glob over the cwd.
+        read -r -a _xws <<< "$_seg"
+        for _xw in "${_xws[@]:1}"; do
+          if [ -z "$_xdd" ]; then
+            case "$_xw" in
+              --) _xdd=1; continue ;;
+              --output|--output=*) _xo=1; break ;;
+              --*) continue ;;
+              -) : ;;
+              -*o*) _xo=1; break ;;
+              -*) continue ;;
+            esac
+          fi
+          _xn=$((_xn + 1))
+        done
+        if [ "$_xo" -eq 1 ] || [ "$_xn" -gt 1 ]; then _has_nonexempt=1; break; fi ;;
       'gh api'|'gh api '*)
-        # `gh api` observes unless a method other than GET is named.
+        # `gh api` observes unless a method other than GET is named — and a field or an input
+        # body (`-f`, `-F`, `--field`, `--raw-field`, `--input`) makes it a POST unless GET is
+        # named (wave-21 T13 item 8). Under a named GET, gh sends fields as query parameters,
+        # so they still observe; `--input` is a request BODY and is never an observation.
+        case " $_seg " in
+          *' --input '*|*' --input='*) _has_nonexempt=1; break ;;
+        esac
         case " $_seg " in
           *' -X '[Gg][Ee][Tt]' '*|*' --method '[Gg][Ee][Tt]' '*|*' --method='[Gg][Ee][Tt]' '*|*' -X'[Gg][Ee][Tt]' '*) : ;;
           *' -X '*|*' -X'?*|*' --method '*|*' --method='*) _has_nonexempt=1; break ;;
+          *' -f '*|*' -f'?*|*' -F '*|*' -F'?*|*' --field '*|*' --field='*|*' --raw-field '*|*' --raw-field='*)
+            _has_nonexempt=1; break ;;
           *) : ;;
         esac ;;
       'gh '*)
-        # `gh <noun> view` / `gh <noun> list` observe; every other verb is production.
-        case "$_seg" in
-          'gh '*' view'|'gh '*' view '*|'gh '*' list'|'gh '*' list '*) : ;;
+        # `gh <noun> view` / `gh <noun> list` observe; every other verb is production. The verb
+        # is the word AFTER THE NOUN (wave-21 T13 item 8): matched anywhere, `gh pr merge 5
+        # --body view` passed as an observation.
+        _xw="${_seg#gh }"; _xw="${_xw#* }"; _xw="${_xw%% *}"
+        case "$_xw" in
+          view|list) : ;;
           *) _has_nonexempt=1; break ;;
         esac ;;
       *) _has_nonexempt=1; break ;;
@@ -5369,10 +5406,13 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
     *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}"; RE_EXECUTES="${RE_EXECUTES%%$'\n'N:*}" ;;
   esac
   # THE ROW'S NAME, for the remedy line (T6): the verb that widens this budget addresses a
-  # row by name, and the winning row is the one already read above. Whitespace and anything
-  # a shell would treat specially is dropped, so the printed command stays pasteable.
+  # row by name, and the winning row is the one already read above. It is kept AS THE ROSTER
+  # CARRIES IT (wave-21 T13): dropping the characters a shell treats specially printed
+  # `amend wbudgetrm` for a row named `w budget;rm`, a name no row carries. The remedy line
+  # quotes a name like that instead, so the pasted command stays one argument and still
+  # addresses the row.
   case "$BUDGET_LINE" in
-    *$'\n'N:*) _BUDGET_ROW_NAME="${BUDGET_LINE##*$'\n'N:}"; _BUDGET_ROW_NAME="${_BUDGET_ROW_NAME//[!A-Za-z0-9._-]/}" ;;
+    *$'\n'N:*) _BUDGET_ROW_NAME="${BUDGET_LINE##*$'\n'N:}" ;;
   esac
   # DECODED ONCE, HERE, BEFORE ANYTHING READS IT (T4; REQ-7, D4). The row stores this field
   # percent-encoded because the line is pipe-delimited and a declared run may legitimately
@@ -5612,7 +5652,7 @@ You asked for: $1
 Run only what is on it. If the change genuinely reaches further than the brief said,
 say so in your report and let the orchestrator widen the brief — a wider instrument is
 its decision to make, and it is the one holding the one-regression budget for the run.
-$(_budget_remedy_line)"
+$(_budget_remedy_line "$1")"
   return 2
 }
 
@@ -5622,14 +5662,35 @@ $(_budget_remedy_line)"
 # beside `scripts/` in every layout the loader accepts — so the line carries a path the
 # orchestrator can paste, never the `<plugin-root>` placeholder. When the loader's variable
 # is absent the placeholder is the honest fallback. `<name>` is the row's own name, read off
-# the roster by the arm that refuses, when that arm has it.
-_budget_remedy_line() {
-  local _root="<plugin-root>"
+# the roster by the arm that refuses, when that arm has it — printed as the roster carries it,
+# single-quoted when a shell would split it or act on it (wave-21 T13).
+#
+# THE FLAG FITS WHAT WAS REFUSED (wave-21 T13; walk-3b45d05 item 4). `amend` widens a suite with
+# `--suites+ <suite>` and a run with `--reexec+ '<cmd>'`. A refused suite FILE — one word, a
+# `*.test.sh` basename — names its own flag and itself; anything else the wall refused is a run,
+# and keeps the run flag with the placeholder, since a run is retyped by the reader who knows it.
+_budget_remedy_line() {  # <the refused suite or run>
+  local _root="<plugin-root>" _widen="--reexec+ '<cmd>'"
   if [ -n "${BIONIC_LIB:-}" ] && [ -d "$BIONIC_LIB/../.." ]; then
     _root="$(cd "$BIONIC_LIB/../.." 2>/dev/null && pwd)" || _root="<plugin-root>"
   fi
-  printf "widen it: bash %s/hooks/session-poker.sh amend %s --reexec+ '<cmd>' --reason <why> (main runs it)" \
-    "$_root" "${_BUDGET_ROW_NAME:-<name>}"
+  case "${1:-}" in
+    *[[:space:]]*) : ;;
+    *.test.sh) _widen="--suites+ $(_budget_shell_word "$1")" ;;
+  esac
+  printf "widen it: bash %s/hooks/session-poker.sh amend %s %s --reason <why> (main runs it)" \
+    "$_root" "$(_budget_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
+}
+
+# _budget_shell_word <word> [placeholder] -> <word> as one shell argument: bare when it is made
+# only of characters no shell treats specially, single-quoted otherwise (an embedded `'` closed,
+# escaped and reopened). An empty word prints the placeholder, unquoted.
+_budget_shell_word() {
+  case "${1:-}" in
+    '') printf '%s' "${2:-}" ;;
+    *[!A-Za-z0-9._/@:+=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 
 # THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named

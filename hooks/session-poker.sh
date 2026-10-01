@@ -1393,6 +1393,77 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
   say "rung=${SCHED_RUNG:--}/${SCHED_WRITERS:--} writers=${SCHED_RUNG:--} test_jobs=${SCHED_JOBS_RUNG:--}"
 }
 
+# ---------------------------------------------------------------- the plan report
+#
+# THE HOLDS AND THE LEDGER, ON EVERY TICK THAT DECIDES (wave-21 T13; REQ-3 AC-3.3, REQ-4
+# AC-4.1/AC-4.2; the audit's refutation at 3b45d05). Through T5 both reports lived inside the
+# FILL branch, and three reachable states never reached it: the first tick of a run (no roster
+# yet: rung, QUIET, exit), HOLD or EMERGENCY under machine pressure, and a plan with no
+# `parallel-budget`. The commit gate reads the ledger in every state, so a plan the gate
+# refused ticked clean — AC-4.1's fails-when, word for word. Neither report has anything to do
+# with the machine or the budget, so neither waits on them: every arm that decides calls this
+# once, after its rung line and before its own sentence, and no arm prints them a second time.
+#
+#   HELD (T4; D3, ADR-037 decision 2). `units_held` names two kinds of row the ready set leaves
+#     out: one held FOR ITS STEP (a gate act ahead of `current:`) and one held BY THE WORLD
+#     (`ext:<slug>` left in its deps cell). Each ext-held row prints as
+#     `poker: HELD <id> ext:<slug>`: the one report of a wait nothing mechanical lifts,
+#     addressed to the only actor who can lift it (remove the token from the cell). The
+#     step-held lines are left in `SCHED_HOLDS` for the no-FILL line, where they have always
+#     been printed.
+#   LEDGER (T5; D4, ADR-037 decision 3). `units_findings` is the reader the commit gate refuses
+#     on — a status off the enum, a row at its terminal word with no `- T<n>:` line, an
+#     `active` row whose agent cell names no row on THIS session's roster — and each finding
+#     prints as `poker: LEDGER <id> <kind> [<value>]`. The roster is the one this tick reads;
+#     a missing one (the first tick) is the reader's no-roster rule, which is the gate's too.
+#
+# AN UNREADABLE BOUND PLAN, OR NO PLAN, REPORTS NOTHING: there is no table to read, and the
+# arms that decide say why themselves. A `current:` that will not parse still lints the
+# ledger — the findings ask no step — and only the holds, which are a readiness question,
+# need the step token.
+#
+# CALLED UNDER `tick_plan_memoised`, so the holds, the findings and — on the arm that fills —
+# the ready set are answered from ONE parse of the table (review-bed/perf/report.md measured
+# four parses per tick before this).
+SCHED_HOLDS=""
+tick_plan_report() {  # -> says the HELD and LEDGER lines; sets SCHED_HOLDS
+  local step hold finding kind rest val
+  SCHED_HOLDS=""
+  [ -n "${SCHED_PLAN:-}" ] && [ "$POKER_RUN_OPEN" != unreadable ] || return 0
+  _fill_current_load "$SCHED_PLAN"
+  step="$(fill_step_token "$SCHED_PLAN")"
+  [ -z "$step" ] || SCHED_HOLDS="$(units_held "$SCHED_PLAN" "$step" 2>/dev/null)"
+  while IFS= read -r hold; do
+    case "$hold" in
+      *": held by ext:"*) say "HELD ${hold%%: held by *} ${hold#*: held by }" ;;
+    esac
+  done <<EOF
+$SCHED_HOLDS
+EOF
+  while IFS= read -r finding; do
+    [ -n "$finding" ] || continue
+    kind="${finding%% *}"
+    rest="${finding#* }"
+    val=""
+    case "$rest" in *" "*) val="${rest#* }" ;; esac
+    say "LEDGER ${rest%% *} ${kind}${val:+ $(clean "$val")}"
+  done <<EOF
+$(units_findings "$SCHED_PLAN" "$ROSTER_FILE" 2>/dev/null)
+EOF
+  return 0
+}
+
+# tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
+# once for everything it asks (`units_memoised`, payload/scripts/lib/units.sh); a tick with no
+# readable plan runs it bare, since there is no table to hold.
+tick_plan_memoised() {
+  if [ -n "${SCHED_PLAN:-}" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
+    units_memoised "$SCHED_PLAN" "$@"
+  else
+    "$@"
+  fi
+}
+
 # THE YOUNGEST SUITE-RUNNING WRITER on this session's roster, as the address the stopping
 # standard takes — `<name>@session-<id8>`, the one spelling both stop gates accept
 # (POKER/8). Empty when there is none.
@@ -4732,6 +4803,10 @@ EOF
         # dispatch by design — so it is also the tick where the width the machine will carry
         # is most worth knowing, right before the batch that has not been sent yet.
         rung_report "$REPO_REAL" "$SESSION_ID"
+        # THE HOLDS AND THE LEDGER ON THE FIRST TICK TOO (wave-21 T13). No roster yet is the
+        # reader's no-roster rule, the gate's own, so what this prints is what the gate would
+        # refuse a writer's first commit on.
+        tick_plan_memoised tick_plan_report
         # THE SENTENCE FIRST, THE DECISION LINE LAST (REQ-10 AC-10.4). Every band in this
         # verb prints its explanation above its machine line, so the last line a tick prints
         # is always the answer — whichever arm answered.
@@ -4795,6 +4870,9 @@ EOF
       # reports it, and an operator reading the last tick of a run in a transcript should not
       # have to know which arm printed the line and which did not.
       rung_report "$REPO_REAL" "$SESSION_ID"
+      # …AND THE PLAN REPORT, for the same reason (wave-21 T13): a delivered run whose ledger
+      # still carries a finding is one the gate would refuse, and this is the last tick to say so.
+      tick_plan_memoised tick_plan_report
       say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
       tick_decision_line DISARM "$TOTAL" "$OPEN"
       # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
@@ -4919,10 +4997,20 @@ EOF
       say "fill withheld — EMERGENCY free_mb=${SCHED_FREE}"
     fi
 
+    # THE SCHEDULER'S BODY, RUN UNDER ONE PARSE OF THE TABLE (wave-21 T13; review-bed/perf).
+    # The holds, the findings and the ready set are three questions of one table; asked bare
+    # they parsed it four times a tick. Defined here and called once, just below its body, so
+    # every assignment it makes is this shell's — nothing in it runs in a subshell.
+    tick_schedule() {
     # THE REPORT, AND THE CEILINGS IT IS TAKEN AGAINST — both in `rung_report` above, which
     # the two arms that exit ABOVE this block call for themselves (AC-17, Step-6 review C-5).
     # The budget read is memoized, so reaching it a second time here costs one plan read.
     rung_report "$REPO_REAL" "$SESSION_ID"
+
+    # THE HOLDS AND THE LEDGER, BEFORE THE HOLD SPLIT (wave-21 T13). Every arm below — HOLD,
+    # EMERGENCY, no plan, an unreadable `current:`, Step-3 approval pending, no budget, a full
+    # budget, a fill — gets them once, here, and none prints them again.
+    tick_plan_report
 
     if [ "$SCHED_STATE" = hold ] || [ "$SCHED_STATE" = emergency ]; then
       # HOLD AND EMERGENCY ARE ADVICE TO THE MODEL, and that is all they have ever been.
@@ -4998,40 +5086,8 @@ EOF
           note "no FILL — ${SCHED_PLAN} carries no parallel-budget: writers=<n> in its frontmatter; Step 0 measures it (resources_probe, then resources_budget) and writes it verbatim."
         fi
       else
-        # THE HOLDS, READ ONCE (wave-21 T4; REQ-3, AC-3.3; D3, ADR-037 decision 2). `units_held`
-        # names two kinds of row the ready set leaves out: one held FOR ITS STEP (a gate act
-        # ahead of `current:`) and one held BY THE WORLD (`ext:<slug>` left in its deps cell).
-        # Each ext-held row is printed here as `poker: HELD <id> ext:<slug>`, every tick, after
-        # the rung line and before the FILL line, whatever the gap: it is the one report of a
-        # wait nothing mechanical lifts, addressed to the only actor who can lift it (remove the
-        # token from the cell). The step-held lines keep their place on the no-FILL line below.
-        SCHED_HOLDS="$(units_held "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null)"
-        while IFS= read -r SCHED_HOLD; do
-          case "$SCHED_HOLD" in
-            *": held by ext:"*) say "HELD ${SCHED_HOLD%%: held by *} ${SCHED_HOLD#*: held by }" ;;
-          esac
-        done <<EOF
-$SCHED_HOLDS
-EOF
-        # THE LEDGER, LINTED (wave-21 T5; REQ-4, AC-4.2; D4, ADR-037 decision 3). `units_findings`
-        # is the reader the commit gate refuses on — a status off the enum, a row at its terminal
-        # word with no `- T<n>:` line, an `active` row whose agent cell names no row on THIS
-        # session's roster — and each finding is printed here, every interval, as
-        # `poker: LEDGER <id> <kind> [<value>]`, after the HELD lines and before the FILL line.
-        # The ledger is the orchestrator's to write; a finding the gate would refuse at a
-        # writer's first commit reaches the one actor who can fix it a tick earlier. The roster
-        # is the one this tick already reads; a missing one is the reader's no-roster rule.
-        SCHED_FINDINGS="$(units_findings "$SCHED_PLAN" "$ROSTER_FILE" 2>/dev/null)"
-        while IFS= read -r SCHED_FINDING; do
-          [ -n "$SCHED_FINDING" ] || continue
-          SCHED_FKIND="${SCHED_FINDING%% *}"
-          SCHED_FREST="${SCHED_FINDING#* }"
-          SCHED_FVAL=""
-          case "$SCHED_FREST" in *" "*) SCHED_FVAL="${SCHED_FREST#* }" ;; esac
-          say "LEDGER ${SCHED_FREST%% *} ${SCHED_FKIND}${SCHED_FVAL:+ $(clean "$SCHED_FVAL")}"
-        done <<EOF
-$SCHED_FINDINGS
-EOF
+        # THE HOLDS AND THE LEDGER were printed by `tick_plan_report` above the HOLD split, and
+        # `SCHED_HOLDS` still carries the step holds for the no-FILL line below (wave-21 T13).
         # THE GAP IS MEASURED AGAINST THE RUNG, NOT THE CEILING (AC-17). The ceiling is what
         # the run may ever run at; the rung is what the machine will carry right now, and
         # filling to the first while the second says otherwise is the mistake this whole arm
@@ -5099,6 +5155,9 @@ EOF
         fi
       fi
     fi
+
+    }
+    tick_plan_memoised tick_schedule
 
     # ─────────────────────────────────────── the ranked decision (REQ-10 AC-10.2; D5)
     #

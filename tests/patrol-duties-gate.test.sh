@@ -553,6 +553,17 @@ case "$(reason_of)" in
   *) no "35d: step 3 of the refusal is still unconditional" "$(reason_of)" ;;
 esac
 
+# 35e: THE LATER TURN (wave-21 T13; walk-3b45d05 item 3). The window since the marker stays open
+# until a CronList, so the block repeats on the turn AFTER the one that created the cron — and
+# its reason opened "This is the first Stop after a /clear or a resume", false on that turn.
+# The text says what is true on every turn it fires: the window is open until a CronList.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_text "$d" "armed."
+u_prompt "$d" "carry on with the wave"; a_text "$d" "on it."
+fire "$d"; expect_block "35e: a later turn with the window still open is refused, saying the window is open until a CronList" \
+  "stays open until a CronList" "This is the first Stop"
+fire "$d"; expect_block "35e2: …and it says the gate blocks once per turn, every turn, until then" \
+  "this gate blocks once per turn" "this gate blocks once:"
+
 section "Section 5: a printed FILL is advice, not evidence (AC-29, retired by wave-20 Δ7)"
 
 # THE CONTRACT. `session-poker.sh tick` can compute the gap between the plan's budget and
