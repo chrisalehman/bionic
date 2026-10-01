@@ -413,14 +413,14 @@ section "Section 11: the scaffold's Files: comment and its optional claim line r
 # `Suites: none` a read-only brief must keep — an author who omitted both was refused for
 # declaring nothing. The block now says so in one clause, and carries the optional
 # `Subprocess claim:` line a CI wait declares (REQ-7, D7). Section 1 proves the finals match
-# a fresh render; this proves the render carries the words, in all eight files the block
-# lands in, so a template that stopped injecting the block cannot stay green here.
+# a fresh render; this proves the render carries the words, in both files the block lands
+# in, so a template that stopped injecting the block cannot stay green here. RE-POINTED
+# (wave-21 T7b, Δ9): the six role files carry the reader view (brief-scaffold-reader.md)
+# instead, pinned by docs-pins 111d/111f; they no longer carry this block.
 #
 # fails-when: any rendered copy carries the old comment, lacks the new one, or lacks the
 # claim line.
-for _sc_f in agents/implementor.md agents/senior-implementor.md agents/researcher.md \
-             agents/test-runner.md agents/auditor.md agents/critic.md \
-             skills/canonical-sdlc/SKILL.md skills/canonical-sdlc/dispatch.md; do
+for _sc_f in skills/canonical-sdlc/SKILL.md skills/canonical-sdlc/dispatch.md; do
   _sc_body=$(cat "$REPO/$_sc_f" 2>/dev/null)
   expect_true "11a: $_sc_f says a read-only brief keeps Suites: none" \
     bash -c 'case "$1" in *"# writers; a read-only brief omits this and keeps Suites: none"*) exit 0 ;; esac; exit 1' _ "$_sc_body"

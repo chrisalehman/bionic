@@ -2247,6 +2247,49 @@ else
      "total=${ROLE_TOTAL} — was 57013 before wave-11 1c"
 fi
 
+# TWO VIEWS OF ONE SCAFFOLD (wave-21 T7b, design ledger Δ9). The scaffold has two readers.
+# The orchestrator AUTHORS briefs from `agents-src/blocks/brief-scaffold.md`, rendered into
+# dispatch.md and SKILL.md. A dispatched agent READS a brief and needs only what each label
+# obliges it to do, so the six role files carry `brief-scaffold-reader.md` instead. Two
+# blocks can drift where one could not; 111d holds their label sets equal (order-free), so a
+# label added to the author view without a reader clause turns this red. 111c's cap is why
+# the reader view exists; it does not move.
+#
+# fails-when: a `<Label>:` line is in one view and not the other; a role file carries the
+# author block or lacks the reader block; dispatch.md or SKILL.md lacks the author block.
+scaffold_label_set() {  # <file> -> its line-start `<Label>:` tokens, sorted, one line
+  /usr/bin/grep -oE '^[A-Z][A-Za-z-]*( [a-z]+)?:' "$1" 2>/dev/null | LC_ALL=C sort -u | tr '\n' ' '
+}
+SV2_AUTHOR="${REPO}/agents-src/blocks/brief-scaffold.md"
+SV2_READER="${REPO}/agents-src/blocks/brief-scaffold-reader.md"
+SV2_A="$(scaffold_label_set "$SV2_AUTHOR")"
+SV2_R="$(scaffold_label_set "$SV2_READER")"
+if [ -n "$SV2_A" ] && [ "$SV2_A" = "$SV2_R" ]; then
+  ok "111d: Δ9 — the reader scaffold names the same label set as the author scaffold"
+else
+  no "111d: Δ9 — the reader scaffold names the same label set as the author scaffold" \
+     "author=[${SV2_A}] reader=[${SV2_R}]"
+fi
+# Anti-vacuity: a copy of the reader block with one label line removed must fail 111d's check.
+SV2_MUT="$TMP/reader-one-label-short.md"
+/usr/bin/grep -v '^Subprocess claim:' "$SV2_READER" > "$SV2_MUT" 2>/dev/null
+SV2_M="$(scaffold_label_set "$SV2_MUT")"
+expect_eq "111e: a reader block missing one label fails 111d's check (the pin discriminates)" \
+  "differs" "$([ -n "$SV2_M" ] && [ "$SV2_M" != "$SV2_A" ] && echo differs || echo same-or-empty)"
+
+# Which view lands where: the reader block in all six role files and the author block in none
+# of them; the author block in dispatch.md and SKILL.md.
+SV2_BAD=""
+for _rf in "${REPO}"/agents/*.md; do
+  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_rf" || SV2_BAD="${SV2_BAD} ${_rf##*/}:no-reader"
+  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-BEGIN -->' "$_rf" && SV2_BAD="${SV2_BAD} ${_rf##*/}:author"
+done
+for _sf in "${REPO}/skills/canonical-sdlc/dispatch.md" "${REPO}/skills/canonical-sdlc/SKILL.md"; do
+  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-BEGIN -->' "$_sf" || SV2_BAD="${SV2_BAD} ${_sf##*/}:no-author"
+done
+expect_eq "111f: Δ9 — role files carry the reader scaffold only; dispatch.md and SKILL.md the author scaffold" \
+  "" "$SV2_BAD"
+
 # EVERY ROLE POINTS AT THE TERMS. Dropping the injection without leaving the pointer would
 # satisfy the cap and strand the agent, which is the failure this arm exists for.
 SURVIVAL_POINTER='Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.'
@@ -2629,7 +2672,10 @@ section "Section 22: T3 — the brief scaffold renders into all seven surfaces, 
 # HERMETIC. Reads the committed rendered finals by path; the doctored copy for the
 # anti-vacuity arm lives under this file's own mktemp dir.
 
-AC2_SURFACES="${REPO}/skills/canonical-sdlc/dispatch.md ${REPO}/agents/researcher.md ${REPO}/agents/implementor.md ${REPO}/agents/senior-implementor.md ${REPO}/agents/test-runner.md ${REPO}/agents/auditor.md ${REPO}/agents/critic.md"
+# RE-POINTED (wave-21 T7b, Δ9): the six role files carry the reader view of the scaffold
+# (agents-src/blocks/brief-scaffold-reader.md), not this fenced block; 111d/111f pin that
+# view. The author block's surface here is dispatch.md (SKILL.md's copy is 131's).
+AC2_SURFACES="${REPO}/skills/canonical-sdlc/dispatch.md"
 
 # AC-2.1: the scaffold's own FENCED LINE — not the bare label — appears EXACTLY ONCE in
 # each of the seven surfaces. The bare label alone is the wrong instrument here:
@@ -2655,16 +2701,16 @@ for _sf in $AC2_SURFACES; do
   esac
 done
 if [ -z "$AC2_MISSING" ] && [ -z "$AC2_DOUBLED" ]; then
-  ok "124a: AC-2.1 — the brief scaffold's fenced 'Expected artifact:' line appears exactly once in all seven surfaces"
+  ok "124a: AC-2.1 — the brief scaffold's fenced 'Expected artifact:' line appears exactly once in dispatch.md"
 else
-  no "124a: AC-2.1 — the brief scaffold's fenced 'Expected artifact:' line appears exactly once in all seven surfaces" \
+  no "124a: AC-2.1 — the brief scaffold's fenced 'Expected artifact:' line appears exactly once in dispatch.md" \
      "missing:${AC2_MISSING:-none} doubled:${AC2_DOUBLED:-none}"
 fi
 
 # Anti-vacuity: the count must actually discriminate a surface that lost the block.
 AC2_MUT_DIR="$TMP/ac2-scaffold"; mkdir -p "$AC2_MUT_DIR"
 AC2_MUT="$AC2_MUT_DIR/no-scaffold.md"
-grep -Fv -- "$AC2_SCAFFOLD_LINE" "${REPO}/agents/researcher.md" > "$AC2_MUT" 2>/dev/null
+grep -Fv -- "$AC2_SCAFFOLD_LINE" "${REPO}/skills/canonical-sdlc/dispatch.md" > "$AC2_MUT" 2>/dev/null
 expect_eq "124b: a surface with the fenced line stripped reads 0, not 1 (the count discriminates)" \
   "0" "$(grep -Fc -- "$AC2_SCAFFOLD_LINE" "$AC2_MUT" 2>/dev/null | tr -cd '0-9')"
 

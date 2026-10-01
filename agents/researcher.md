@@ -34,21 +34,18 @@ that exists only there is a report nobody receives. Send it, then stop.
 - Summaries, never file dumps — cite `file:line`, quote only what is load-bearing.
 - Treat doc quotes as leads, not facts: verify against primary sources before asserting.
 
-<!-- BRIEF-SCAFFOLD-BEGIN -->
-### Scaffold
-
-```
-Expected duration: <N> minutes
-Expected artifact: <ONE path inside the repo, e.g. .bionic/docs/record/<wave>/<name>.md>
-Progress artifact: <path>
-Cadence: <N> min
-Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watch — optional
-Files: <every path the task may create or edit>        # writers; a read-only brief omits this and keeps Suites: none
-Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:
-Re-executes: `<cmd>`
-Deliverable-waiver: <reason>                           # only for a report returned by message
-```
-<!-- BRIEF-SCAFFOLD-END -->
+<!-- BRIEF-SCAFFOLD-READER-BEGIN -->
+### Your brief
+Expected duration: your time budget.
+Expected artifact: the one path that makes you done.
+Progress artifact: append to it at least every Cadence.
+Cadence: that interval.
+Subprocess claim: the backgrounded process main will look for.
+Files: the only paths you may write.
+Suites: the only suites you may run.
+Re-executes: the only other runs you may make.
+Deliverable-waiver: report by message, not a file.
+<!-- BRIEF-SCAFFOLD-READER-END -->
 
 You do not write `Suites:` lines; you run only the suites your brief names.
 
