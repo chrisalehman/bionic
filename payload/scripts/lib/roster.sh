@@ -324,6 +324,49 @@ live_ids_of_name() {  # <name> -> the agent ids currently under an open contract
   return 0
 }
 
+# ---------- THE ROW THE WALLS READ FOR AN ID (epic-23 wave-22 T1; REQ-1 AC-1.1/AC-1.6, D2) ----
+#
+# Every row written after an agent's id is known carries that id, and the status the id was learned under — so the name's latest row and the id's latest row never disagree.
+#
+# That sentence is the roster's one rule for successor rows, and this function is the half of
+# it a reader can call. The suite-budget wall (payload/scripts/lib/walls.sh, the budget arm)
+# keys on the transcript id the hook payload carries, so its contract for an agent is the LAST
+# `roster-state/` row whose `agent_id=` is that id — no status filter, because a widened
+# successor is as much the current statement as the row it copied. `session-poker.sh amend`
+# asks the same question of the row it just wrote, so the verb's success line and the wall's
+# reading cannot be two implementations that drift (wave-22 seed: `poker: amended` printed
+# while the wall still read the pre-amend row). The verbs that append successors
+# (`amend`, `extend`) hold the rule by copying the identity — `status=`, `agent_id=`,
+# `teammate_id=` — from the agent's latest identified row; this reader only states it.
+#
+# FIRST OCCURRENCE OF A KEY WINS, as `line_field` and every by-key reader in the fleet take it
+# (the writer refuses a forged second field; see THE DELIMITER above). The budget arm's inline
+# awk this replaces matched `agent_id=<id>` in any segment and took the LAST `suites_allowed=`;
+# only a forged row tells the two apart, and one reader settles which wins.
+#
+# EMPTY ID -> NOTHING, rc 1: an unidentified row carries `agent_id=` empty, and an empty key
+# is not a key — matching it would hand every unidentified row to a caller with no id. A
+# missing, unreadable or symlinked roster is rc 1 as well; a found row is printed, rc 0.
+roster_row_for_id() {  # <roster> <id> -> the last roster-state/ row whose agent_id= is <id>; 1 when none
+  local f="$1" id="$2"
+  [ -n "$id" ] || return 1
+  { [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ]; } || return 1
+  ROSTER_FOR_ID_F="$f" ROSTER_FOR_ID="$id" \
+  awk "$_ROSTER_OPEN_AWK"'
+    BEGIN {
+      f = ENVIRON["ROSTER_FOR_ID_F"]; want = ENVIRON["ROSTER_FOR_ID"]; found = 0
+      while ((getline line < f) > 0) {
+        if (index(line, "roster-state/") != 1) continue
+        if (_roster_kv(line, "agent_id") != want) continue
+        last = line; found = 1
+      }
+      close(f)
+      if (!found) exit 1
+      print last
+      exit 0
+    }' </dev/null 2>/dev/null
+}
+
 # ---------- THE PREDICATE'S ONE AWK TEXT (epic-23 wave-20 T17, D10) ----------------------
 #
 # `roster_open_names`, `roster_open_counts` and `live_ids_of_name` each run an awk program that

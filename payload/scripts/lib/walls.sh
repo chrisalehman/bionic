@@ -5486,67 +5486,68 @@ fi
 # this line. The reason is hooks/landing-gate.sh:284's about `agent_id`: a key carrying path
 # separators does not trip the symlink guards, it reads outside the directory those guards
 # protect.
-local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES BUDGET_LINE
+local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _bseen _bseg _bkey
+local -a _bsegs
 local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME=""
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
 RE_EXECUTES=""
 if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; then
-  # THE LAST ROW CARRYING THIS ID WINS, which is the whole fleet`s reading of the roster
-  # (hooks/stop-guard.sh, hooks/session-poker.sh: "the last row carrying a name wins"). A
-  # launch row is later joined by the recorder`s `status=confirmed` copy and, across a
-  # /clear, by the poker`s adopted row; each carries the budget forward, and the newest is
-  # the current statement about this agent.
+  # THE LAST ROW CARRYING THIS ID WINS, any status (epic-23 wave-22 T1; REQ-1 AC-1.1, D2).
+  # The pick is `roster_row_for_id` (payload/scripts/lib/roster.sh), the one reader of "the
+  # row the wall reads for this id": `session-poker.sh amend` asks it the same question about
+  # the row it just wrote, so the verb's success line and this arm cannot read two rows. The
+  # roster's one rule for successor rows is stated once, in that function's docblock. What
+  # it means here: a launch row is joined by the recorder's `status=confirmed` copy, which
+  # carries the budget forward — but for a TEAMMATE not the id, which the recorder learns
+  # one event later and writes on the `identified` row — and, across a /clear, by the
+  # poker's adopted row. A row with no id is invisible to this arm, which keys on the id the
+  # payload carries; `amend` and `extend` therefore copy the id onto every successor they
+  # write once it is known, and the newest row carrying it is the current statement.
   #
   # TWO FIELDS, ONE READ (REQ-1 AC-1.5). `re_executes=` is the same statement in the
   # spelling a repository whose tests are not shell suites can make — the author-marked
   # runs its brief declared under `Re-executes:`, marks kept and space-joined (A-T1.4) —
   # and it is read off the SAME winning row, because a budget assembled from two different
-  # rows would hold an agent to a contract no single dispatch ever wrote. The answer comes
-  # back as two lines: the `<stated>:<allowed>` pair this arm has always read, then the
-  # declared runs behind an `R:` marker (a run may hold any character but `|` and a
-  # newline, both refused at the lift, so a marker is the only safe join).
-  BUDGET_LINE=$(awk -F'|' -v id="$ACTOR" '
-    /^roster-state\// {
-      hit = 0; stated = 0; allowed = ""; runs = ""; nm = ""
-      for (i = 1; i <= NF; i++) {
-        if ($i == "agent_id=" id) hit = 1
-        else if ($i ~ /^suites_allowed=/) { stated = 1; allowed = substr($i, 16) }
-        else if ($i ~ /^re_executes=/) { runs = substr($i, 13) }
-        else if ($i ~ /^name=/) { nm = substr($i, 6) }
-      }
-      if (hit) { last = stated ":" allowed; lastruns = runs; lastname = nm }
-    }
-    END { if (last != "") { print last; print "R:" lastruns; print "N:" lastname } }
-  ' "$ROSTER_FILE" 2>/dev/null)
-  case "$BUDGET_LINE" in
-    1:*) BUDGET_STATED=yes
-         SUITES_ALLOWED="${BUDGET_LINE%%$'\n'*}"
-         SUITES_ALLOWED="${SUITES_ALLOWED#1:}" ;;
-  esac
-  case "$BUDGET_LINE" in
-    *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}"; RE_EXECUTES="${RE_EXECUTES%%$'\n'N:*}" ;;
-  esac
+  # rows would hold an agent to a contract no single dispatch ever wrote. Each key is read
+  # at its FIRST occurrence on that row, as every by-key reader takes it; `suites_allowed=`
+  # PRESENT (even empty) is what makes the budget stated.
+  #
   # THE ROW'S NAME, for the remedy line (T6): the verb that widens this budget addresses a
-  # row by name, and the winning row is the one already read above. It is kept AS THE ROSTER
+  # row by name, and the winning row is the one read here. It is kept AS THE ROSTER
   # CARRIES IT (wave-21 T13): dropping the characters a shell treats specially printed
   # `amend wbudgetrm` for a row named `w budget;rm`, a name no row carries. The remedy line
   # quotes a name like that instead, so the pasted command stays one argument and still
   # addresses the row.
-  case "$BUDGET_LINE" in
-    *$'\n'N:*) _BUDGET_ROW_NAME="${BUDGET_LINE##*$'\n'N:}" ;;
-  esac
+  wall_libs background-suite-guard roster.sh || return 0
+  _BUDGET_ROW="$(roster_row_for_id "$ROSTER_FILE" "$ACTOR")" || _BUDGET_ROW=""
+  if [ -n "$_BUDGET_ROW" ]; then
+    _bseen=" "
+    IFS='|' read -r -a _bsegs <<< "$_BUDGET_ROW"
+    for _bseg in "${_bsegs[@]}"; do
+      _bkey="${_bseg%%=*}"
+      [ "$_bkey" != "$_bseg" ] || continue
+      case "$_bseen" in *" $_bkey "*) continue ;; esac
+      _bseen="$_bseen$_bkey "
+      case "$_bkey" in
+        suites_allowed) BUDGET_STATED=yes; SUITES_ALLOWED="${_bseg#suites_allowed=}" ;;
+        re_executes)    RE_EXECUTES="${_bseg#re_executes=}" ;;
+        name)           _BUDGET_ROW_NAME="${_bseg#name=}" ;;
+      esac
+    done
+  fi
   # DECODED ONCE, HERE, BEFORE ANYTHING READS IT (T4; REQ-7, D4). The row stores this field
   # percent-encoded because the line is pipe-delimited and a declared run may legitimately
   # hold a pipe inside quotes — `payload/scripts/lib/roster.sh` owns that encoding and
   # carries the reasoning; `roster_pipe_escape`/`roster_pipe_unescape` there are these two
   # expansions, and the pair is the definition this copy answers to.
   #
-  # SPELLED HERE RATHER THAN SOURCED. This file runs inside `hooks/bash-walls.sh`, whose
-  # `BIONIC_LIB_WANT` does not carry `roster.sh`; adding it would grow the wall-library
-  # table and the loader contract for two parameter expansions. The twin is the posture
-  # `sanitize`/`clean` and `parse_seconds` already hold in this fleet.
+  # STILL SPELLED HERE, though `roster.sh` is now loaded above for the row pick (wave-22
+  # T1). It is loaded lazily, by `wall_libs`, and only on this arm's path: `hooks/bash-walls.sh`'s
+  # `BIONIC_LIB_WANT` still does not carry it. Moving these two expansions onto
+  # `roster_pipe_unescape` is a change of its own, outside T1's; until then the twin is the
+  # posture `sanitize`/`clean` and `parse_seconds` already hold in this fleet.
   #
   # ONE DECODE, NOT ONE PER READER. `_run_is_declared` compares against this variable and
   # `budget_refuse` PRINTS it to a reader who is about to retype the command — so decoding
@@ -5707,7 +5708,7 @@ _budget_wire_fact() {
 #
 # THE FIELD ARRIVES PLAIN (T4; REQ-7, D4). The row stores it percent-encoded, and the one
 # read of that row decodes it before this function or any refusal sees it — see the decode
-# beside `BUDGET_LINE` above for why there is exactly one decode and not one per reader. A
+# beside the row read above for why there is exactly one decode and not one per reader. A
 # caller that hands this function a raw row field compares against the storage spelling and
 # will not match a command holding a pipe.
 #
