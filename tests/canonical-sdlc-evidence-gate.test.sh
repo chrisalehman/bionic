@@ -19,6 +19,7 @@ set -euo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 # THE SEAM IS hooks/bash-walls.sh (epic-23 wave-11-lean-spine, T23). This wall is a
 # FUNCTION now — `wall_evidence_gate` in payload/scripts/lib/walls.sh — registered through
@@ -8995,5 +8996,133 @@ expect_absent "9f AC-9.2 the outside commit's trace never names the plan path" \
 expect_absent "9f AC-9.2 …and never enters the plan resolution" \
   "session_run " "$(cat "$s9_tr_out")"
 
+
+# ============================================================
+section "Section D4: launched is what the roster says — the gate reads the ledger through units_findings (wave-21 T5; REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3)"
+# ============================================================
+#
+# THE DEFECT (report #2a, triage-A §2.2). The wave arm demanded a hand-written `- T<n>:` line
+# for EVERY row, so an `active` row the dispatch hook had just put on the roster was refused
+# at the writer's first commit for a copy of the launch record nobody had written. Now the
+# gate asks `units_findings`: a `landed` row still owes its line, an `active` row whose agent
+# cell names a roster row owes nothing, and an empty agent cell is self-owned. The roster is
+# THIS session's, `.bionic/tmp/roster-<sid>.state` under the root; with no roster file the
+# gate keeps today's line rule for agent-named `active` rows (spec assumption 1).
+#
+# fails-when: the launched active row is refused for a missing line, the landed row passes
+# without one, or the self-owned row is refused for no roster row.
+sD4_roster() {  # <home> <name>... — this session's roster, one launch row per name
+  local h="$1" n; shift
+  mkdir -p "$h/.bionic/tmp"
+  roster_header > "$h/.bionic/tmp/roster-$EG_SID.state"
+  for n in "$@"; do
+    roster_row_fixture status=identified session="$EG_SID" name="$n" agent_id="a-$n" \
+      >> "$h/.bionic/tmp/roster-$EG_SID.state"
+  done
+}
+sD4_tasks() {  # <T2 agent cell> <T2 status> -> a ten-column table, T1 landed with its line below
+  printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first unit | w21-T1 | — | 30m | REQ-x | a.sh | landed |\n'
+  printf '| T2 | 4 | build | the second unit | %s | — | 30m | REQ-x | b.sh | %s |\n' "$1" "$2"
+}
+
+# D4a — THE SPECIMEN: an active row whose agent cell names this session's roster row, and no
+# `- T2:` line. The launch record IS the record; the commit goes through.
+hD4a=$(make_home)
+write_plan "$hD4a" "$(d7_wave_plan "$(sD4_tasks w21-T2 active)" "- T1: bash suite 9/9 green")" > /dev/null
+sD4_roster "$hD4a" w21-T1 w21-T2
+expect_allow "D4a AC-4.3 an active row its roster names commits with no '- T2:' line" \
+  "$hD4a" 'git commit -m "x"'
+
+# D4b — THE SAME ROW AT `landed` OWES ITS LINE, roster or not, in the words 17t pins.
+hD4b=$(make_home)
+write_plan "$hD4b" "$(d7_wave_plan "$(sD4_tasks w21-T2 landed)" "- T1: bash suite 9/9 green")" > /dev/null
+sD4_roster "$hD4b" w21-T1 w21-T2
+expect_block "D4b AC-4.3 a landed row with no line is still refused" \
+  "$hD4b" 'git commit -m "x"' "1 task has no evidence line"
+expect_contains "D4b2 …and the detail names T2" "- T2:" "$HOOK_VSTDERR"
+
+# D4c — SELF-OWNED: an empty agent cell (em dash, then a blank cell) and NO roster file at all.
+hD4c=$(make_home)
+write_plan "$hD4c" "$(d7_wave_plan "$(sD4_tasks — active)" "- T1: bash suite 9/9 green")" > /dev/null
+expect_allow "D4c AC-4.3 an active row with an em-dash agent cell and no roster commits with no line" \
+  "$hD4c" 'git commit -m "x"'
+hD4c2=$(make_home)
+write_plan "$hD4c2" "$(d7_wave_plan "$(sD4_tasks '' active)" "- T1: bash suite 9/9 green")" > /dev/null
+expect_allow "D4c2 …and so does a blank agent cell" "$hD4c2" 'git commit -m "x"'
+
+# D4d — THE LAUNCH FINDING: a roster that names nobody in T2's agent cell. Refused, and the
+# refusal says what is wrong — the agent is not on the roster — not that a line is missing.
+hD4d=$(make_home)
+write_plan "$hD4d" "$(d7_wave_plan "$(sD4_tasks bionic:implementor active)" "- T1: bash suite 9/9 green")" > /dev/null
+sD4_roster "$hD4d" w21-T1 w21-T9
+expect_block "D4d AC-4.1 an active row whose agent names no roster row is refused" \
+  "$hD4d" 'git commit -m "x"' "names no row on this session's roster"
+expect_eq "D4d2 …its verdict line names the launch, not a missing line" \
+  "bionic: commit refused — 1 active task names no launched agent (write the roster name as agent)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "D4d3 …and the detail names the row and the cell" "- T2: bionic:implementor" "$HOOK_VSTDERR"
+
+# D4e — NO ROSTER FILE, AN AGENT-NAMED ACTIVE ROW: today's line rule, unchanged.
+hD4e=$(make_home)
+write_plan "$hD4e" "$(d7_wave_plan "$(sD4_tasks w21-T2 active)" "- T1: bash suite 9/9 green")" > /dev/null
+expect_block "D4e assumption 1 with no roster file, an agent-named active row still owes its line" \
+  "$hD4e" 'git commit -m "x"' "1 task has no evidence line"
+
+# D4f — A PENDING ROW OWES NOTHING: no line until it lands (the one-edit trap, ADR-037).
+hD4f=$(make_home)
+write_plan "$hD4f" "$(d7_wave_plan "$(sD4_tasks w21-T2 pending)" "- T1: bash suite 9/9 green")" > /dev/null
+expect_allow "D4f a pending row with no line commits" "$hD4f" 'git commit -m "x"'
+
+# D4g — TASK SCALE: a non-addressed `active` row with no line, on an audited plan. The table
+# has no agent column, so the row is self-owned; with no roster at all it commits.
+vD4g="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | do the thing | active |
+| T2 | build | tested | second thing, in flight | active |
+
+## SDLC State
+
+scale: task
+current: T1
+approved-by: fixture 2026-09-07T00:00Z \"approved\"
+
+- T1: bash suite 12/12 green"
+hD4g=$(make_home)
+write_plan "$hD4g" "$(task_plan "$vD4g")" > /dev/null
+expect_allow "D4g AC-4.3 task scale, a non-addressed active row with no line and no roster commits" \
+  "$hD4g" 'git commit -m "x"'
+# …and the same table with T2 `done` is still refused in 22c3's words.
+hD4g2=$(make_home)
+write_plan "$hD4g2" "$(task_plan "${vD4g/| second thing, in flight | active |/| second thing, in flight | done |}")" > /dev/null
+expect_block "D4g2 …and at done it owes its line, refused in the words 22c3 pins" \
+  "$hD4g2" 'git commit -m "x"' "task T2 is done but has no evidence"
+expect_eq "D4g3 …verdict line byte for byte" \
+  "bionic: commit refused — task T2 is done and shows no evidence (record what proves it)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+
+# D4h — THE ENUM TEXTS ARE UNCHANGED (19f, 22c1, 22c-t2): the enum case calls the reader and
+# keeps every byte it printed.
+hD4h=$(make_home)
+write_plan "$hD4h" "$(task_plan "$v22c_bad_enum")" > /dev/null
+expect_block "D4h 22c1's fixture is still refused" "$hD4h" 'git commit -m "x"' \
+  "task T2 has invalid status 'wip' (want pending|active|done|dropped)"
+expect_eq "D4h2 …verdict line byte for byte" \
+  "bionic: commit refused — task T2's status is unknown (use pending, active, done or dropped)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+hD4h3=$(make_home)
+write_plan "$hD4h3" "$(task_plan "$v22ct_bad_enum")" > /dev/null
+expect_block "D4h3 22c-t2's six-column fixture is still refused, naming the enum" "$hD4h3" 'git commit -m "x"' \
+  "task T1 has invalid status 'wip' (want pending|active|done|dropped)"
+hD4h4=$(make_home)
+write_plan "$hD4h4" "$(task_plan_rigor tested "$ledger_bad_status")" > /dev/null
+run_hook "$hD4h4" 'git commit -m "x"'
+expect_eq "D4h4 19f's fixture: exit 0" "0" "$HOOK_EXIT"
+expect_contains "D4h5 …and the finding line byte for byte" \
+  "canonical-sdlc [task-ledger]: task T2 has invalid status 'doing' (want pending|active|done|dropped)" \
+  "$HOOK_STDERR"
 
 finish
