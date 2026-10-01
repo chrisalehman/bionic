@@ -891,6 +891,33 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
   return 1
 }
 
+# The plan is read off disk when the CALL starts (PLAN is resolved at :245
+# before any of the command runs). So a single Bash call that edits the plan
+# and THEN commits is judged against the pre-edit plan: the fix the agent just
+# wrote is invisible to every arm below, and the refusal reads as though it had
+# never been made. The observed reflex on that refusal is to re-run the same
+# combined call, which fails identically forever. When the refused command's
+# text names the plan, say so. Matched against the absolute path and against
+# the path relative to the project root — the two spellings an agent writes.
+# A commit MESSAGE that merely quotes the path also matches; the line is
+# advice appended to an already-refused call, so a false positive costs a
+# sentence and a false negative costs the loop this exists to break.
+plan_write_note() {
+  local rel="$PLAN"
+  [ -n "$PLAN" ] || return 0
+  case "$PLAN" in "$BIONIC_ROOT"/*) rel="${PLAN#"$BIONIC_ROOT"/}" ;; esac
+  case "$COMMAND" in
+    *"$PLAN"*|*"$rel"*)
+      echo "Note: this command also writes the plan — run the edit first, then commit in a separate call." ;;
+  esac
+}
+#
+# FILE SCOPE, DELIBERATELY (T12). The arms live inside `_eg_body`, whose nested function
+# definitions exist only once execution has reached them; the dispatch-ledger arm refuses
+# BEFORE this definition's old position was reached, so it found no function and printed
+# no note. The `refuse` shim in `wall_evidence_gate` calls it, so it is defined above that.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+
 _eg_stage_refusal() {  # <dir> <mode> <verb> <fact> <fix> <detail> -> 0 staged · 1 not
   local d="${1:-}" i=1 a
   shift
@@ -922,7 +949,24 @@ wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
     # TWO ABORT CODES, because the staging can fail and the parent has to be able to tell.
     # 2 is "the five files are written, read them"; 3 is "this was a refusal and its words
     # are gone", which the malformed-refusal arm below turns into a refusal that still holds.
-    refuse() { _eg_stage_refusal "$_eg_stage" "$@" && exit 2; exit 3; }
+    #
+    # THE ONE SITE FOR THE EDIT-THEN-COMMIT NOTE (wave-21 T12, AC-9.1). `$PLAN` and `$COMMAND`
+    # exist only in THIS subshell — the parent's `refuse` call never sees the plan — so the
+    # note is computed here, once, and staged as the FIRST line of `detail`, where the
+    # twelve-line fold in refuse.sh can only cut the tail. Every `refuse exit2 commit` arm
+    # of the gate goes through this shim, so none of them is edited. A wrong argument count
+    # is passed through untouched for the renderer to refuse as malformed.
+    refuse() {
+      if [ "$#" -eq 5 ] && [ "$2" = "commit" ]; then
+        local _eg_note
+        _eg_note="$(plan_write_note 2>/dev/null)"
+        if [ -n "$_eg_note" ]; then
+          if [ -n "$5" ]; then set -- "$1" "$2" "$3" "$4" "$_eg_note
+$5"; else set -- "$1" "$2" "$3" "$4" "$_eg_note"; fi
+        fi
+      fi
+      _eg_stage_refusal "$_eg_stage" "$@" && exit 2; exit 3
+    }
     _eg_body
   )
   _eg_rc=$?
@@ -2175,29 +2219,21 @@ Audited rigor makes the ledger-shape checks blocking; a non-audited plan would l
 # (ledger_shape_fail, blocking only at audited rigor) and stays that way. What changed is
 # what the refusal then says.
 #
-# NO NEW FACT IS FETCHED (D11): the rows are the caller's own `units_rows` output and the
-# lookup is the same anchored grep over `$SECTION` both arms already ran, asked once per
-# row instead of once.
-missing_evidence_ids() {  # $1 = units_rows output -> the T-ids with no line, one per line
-  local line id ev
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    id=$(units_field "$line" id)
-    case "$id" in T[0-9]*) : ;; *) continue ;; esac
-    ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
-         | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-    [ -n "$ev" ] || printf '%s\n' "$id"
-  done <<< "$1"
-}
+# THE LOOKUP IS THE READER'S (wave-21 T5; D4, ADR-037 decision 3). It lived here as
+# `missing_evidence_ids`, a grep over `$SECTION` asked once per row; it is `units_unlined` and
+# `units_findings` in lib/units.sh now, one program, so the gate and the Patrol tick cannot
+# disagree about whether a row carries its line. What each arm passes below is the reader's
+# answer: every unlined T-row for the task-scale addressed unit (the trigger and the listing
+# AC-5.1 pinned), the `evidence` findings for the wave arm (a row owes its line at `landed`).
 
-# Refuse for EVERY row short of its evidence line, or return 0 if none is. The id list is
-# printed as the lines the author has to write, so the repair is a copy out of the refusal;
-# it sits LAST so refuse.sh's twelve-line fold (BIONIC_REFUSE_DETAIL_LINES, a ratified
-# bound this does not move) bites the list rather than the instruction above it.
+# Refuse for EVERY id named, or return 0 if none is. The id list is printed as the lines the
+# author has to write, so the repair is a copy out of the refusal; it sits LAST so refuse.sh's
+# twelve-line fold (BIONIC_REFUSE_DETAIL_LINES, a ratified bound this does not move) bites the
+# list rather than the instruction above it.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-refuse_missing_evidence_lines() {  # $1 = units_rows output
+refuse_missing_evidence_lines() {  # $1 = the T-ids owing a line, one per line (the reader's)
   local ids count subject verdict
-  ids="$(missing_evidence_ids "$1")"
+  ids="$(printf '%s\n' "$1" | awk 'NF')"
   [ -n "$ids" ] || return 0
   count=$(printf '%s\n' "$ids" | wc -l | tr -d ' ')
   if [ "$count" -eq 1 ]; then
@@ -2217,8 +2253,48 @@ $(printf '%s\n' "$ids" | sed -E 's/^/- /; s/$/:/')"
   refuse exit2 commit "$verdict" "add one '- T<id>:' per row" "$_eg_detail"
 }
 
+# THIS SESSION'S ROSTER, as the gate reads it (wave-21 T5; spec assumption 1). The same path the
+# suite-budget arm builds from the same two facts (`roster-<sid>.state` under the root's
+# `.bionic/tmp`). With no session id there is no roster to name, and `units_findings` then
+# computes no `launch` finding: an agent-named `active` row owes its line, as it did before.
+_eg_roster_path() {
+  [ -n "${BIONIC_SID:-}" ] || return 0
+  printf '%s' "$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+}
+
+# _eg_finding <findings> <kind> <id> -> 0 when the reader named that row for that kind.
+_eg_finding() {
+  printf '%s\n' "$1" | awk -v k="$2" -v id="$3" '$1 == k && $2 == id { f = 1 } END { exit !f }'
+}
+
+# THE LAUNCH FINDING, REFUSED (wave-21 T5; REQ-4, AC-4.1; D4). An `active` row whose agent cell
+# names someone no row on this session's roster names: the dispatch that would have launched it
+# left no record, so the row claims a writer the machine never saw. Every such row in one pass,
+# as the line arm does, each with the cell it carries — the repair is that cell, written as the
+# name the dispatch recorded, or emptied for a row this session works itself (self-owned).
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+refuse_unlaunched_rows() {  # $1 = `<id>: <agent cell>` lines (the reader's launch findings)
+  local rows count subject verdict
+  rows="$(printf '%s\n' "$1" | awk 'NF')"
+  [ -n "$rows" ] || return 0
+  count=$(printf '%s\n' "$rows" | wc -l | tr -d ' ')
+  if [ "$count" -eq 1 ]; then
+    verdict="1 active task names no launched agent"
+    subject="1 active '## Tasks' row has"
+  else
+    verdict="${count} active tasks name no launched agent"
+    subject="${count} active '## Tasks' rows have"
+  fi
+  _eg_detail="canonical-sdlc: ${subject} an agent cell that names no row on this session's roster.
+Plan: $PLAN
+Roster: $(_eg_roster_path)
+Fix: write the name the dispatch recorded (the roster row's name=) in each agent cell below, or empty the cell for a row this session works itself.
+$(printf '%s\n' "$rows" | sed -E 's/^/- /')"
+  refuse exit2 commit "$verdict" "write the roster name as agent" "$_eg_detail"
+}
+
 validate_task_ledger() {
-  local rows rc line id status rigor_cell ev eff addressed_found=0
+  local rows rc line id status rigor_cell ev eff addressed_found=0 findings
   # THE ROWS COME FROM lib/units.sh (REQ-1e, AC-1e.1), header-keyed. The cells this
   # function wants are slot 1 `id`, slot 10 `status` and slot 3 — which the widened
   # wave schema spells `kind` and this task-scale registration table spells `rigor`,
@@ -2243,6 +2319,10 @@ validate_task_ledger() {
       "task-scale plan has no '## Tasks' registration section"
     return 0
   fi
+  # THE LEDGER FINDINGS, READ ONCE (wave-21 T5; D4). The status enum and the presence of a
+  # row's line are the reader's answers now; this loop keeps the order it has always judged
+  # in (status, then rigor, then evidence, row by row) and the words it has always printed.
+  findings="$(units_findings "$PLAN" "$(_eg_roster_path)")"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     id=$(units_field "$line" id)
@@ -2254,11 +2334,10 @@ validate_task_ledger() {
     rigor_cell=$(units_field "$line" rigor)
     # status enum — routed through ledger_shape_fail (4/3): blocking on audited
     # plans, log-only otherwise (was unconditionally log-only in D12).
-    case "$status" in
-      pending|active|done|dropped) : ;;
-      *) ledger_shape_fail "task ${id}'s status is unknown" "use pending, active, done or dropped" \
-        "task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)" ;;
-    esac
+    if _eg_finding "$findings" status "$id"; then
+      ledger_shape_fail "task ${id}'s status is unknown" "use pending, active, done or dropped" \
+        "task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)"
+    fi
     # Per-row INVALID rigor-cell guard (4/7): resolve this row's rigor cell and
     # block if it is off-enum. A malformed rigor cell makes the row's lane
     # indeterminate — a hard STRUCTURAL error, the exact sibling of the
@@ -2291,7 +2370,7 @@ Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited b
       if [ -z "$ev" ]; then
         # The addressed unit is short, which is what fires the arm; the refusal then
         # names EVERY row that is (AC-5.1), the addressed one among them.
-        refuse_missing_evidence_lines "$rows"
+        refuse_missing_evidence_lines "$(units_unlined "$PLAN")"
       fi
       if is_placeholder_value "$ev"; then
         _eg_detail="canonical-sdlc task ${id} evidence line is a placeholder ('${ev}').
@@ -2312,11 +2391,20 @@ Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before
     else
       # Every OTHER row's presence/placeholder checks route through
       # ledger_shape_fail (4/3): blocking on audited plans, log-only otherwise.
+      #
+      # LAUNCHED IS WHAT THE ROSTER SAYS (wave-21 T5; REQ-4, AC-4.3; D4, ADR-037 decision 3).
+      # A `done` row owes its line; an `active` row owes one only when the reader says so — an
+      # agent-named row with no roster to read it from (spec assumption 1). A self-owned row,
+      # which every row of the agent-less task table is, owes neither. A line that IS there is
+      # still judged for a placeholder, whatever the row's status: a placeholder is a claim.
       case "$status" in
         active|done)
-          if [ -z "$ev" ]; then
+          if _eg_finding "$findings" evidence "$id"; then
             ledger_shape_fail "task ${id} is ${status} and shows no evidence" "record what proves it" \
               "task ${id} is ${status} but has no evidence on a '- ${id}:' line in ## SDLC State"
+          elif _eg_finding "$findings" launch "$id"; then
+            ledger_shape_fail "task ${id} names no launched agent" "write the roster name as agent" \
+              "task ${id} is active but its agent cell names no row on this session's roster ($(_eg_roster_path))"
           elif is_placeholder_value "$ev"; then
             ledger_shape_fail "task ${id}'s evidence is still a placeholder" "record what actually ran" \
               "task ${id} is ${status} but its evidence is a placeholder ('${ev}')"
@@ -3627,31 +3715,10 @@ user_confirmed_form_ok() {
     | grep -qE '^[A-Za-z][A-Za-z0-9._-]*[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[^[:space:]]'
 }
 
-# The plan is read off disk when the CALL starts (PLAN is resolved at :245
-# before any of the command runs). So a single Bash call that edits the plan
-# and THEN commits is judged against the pre-edit plan: the fix the agent just
-# wrote is invisible to every arm below, and the refusal reads as though it had
-# never been made. The observed reflex on that refusal is to re-run the same
-# combined call, which fails identically forever. When the refused command's
-# text names the plan, say so. Matched against the absolute path and against
-# the path relative to the project root — the two spellings an agent writes.
-# A commit MESSAGE that merely quotes the path also matches; the line is
-# advice appended to an already-refused call, so a false positive costs a
-# sentence and a false negative costs the loop this exists to break.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-plan_write_note() {
-  local rel="$PLAN"
-  [ -n "$PLAN" ] || return 0
-  case "$PLAN" in "$BIONIC_ROOT"/*) rel="${PLAN#"$BIONIC_ROOT"/}" ;; esac
-  case "$COMMAND" in
-    *"$PLAN"*|*"$rel"*)
-      echo "Note: this command also writes the plan — run the edit first, then commit in a separate call." ;;
-  esac
-}
-
 # 3-line BLOCKED/Plan/Fix emit for the matrix arm (mirrors the pattern
-# every other validator uses), plus the edit-then-commit note when the refused
-# command also writes the plan. $1 = message tail, $2 = fix line.
+# every other validator uses). The edit-then-commit note is no longer appended here:
+# the gate's `refuse` shim (wall_evidence_gate) stages it as detail line 1 of every commit
+# refusal (T12, AC-9.1).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 block_matrix() {  # <fact> <fix> <observation> <repair prose>
   # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (task 13, ruling D-1, parametric
@@ -3661,8 +3728,7 @@ block_matrix() {  # <fact> <fix> <observation> <repair prose>
   # the caller's own repair prose and the plan-write note all become `detail` (F-P1, F-P3).
   refuse exit2 commit "$1" "$2" "canonical-sdlc step ${CURRENT} — $3
 Plan: $PLAN
-Fix: $4
-$(plan_write_note 2>&1)"
+Fix: $4"
 }
 
 # Placeholder-token test on a single field value. The matrix section lives
@@ -4419,16 +4485,18 @@ validate_intent_evidence() {
 #      `none dispatched` prose line is documentation, not required by the
 #      parser — the shape this refusal's own Fix text advertises). return 0.
 #   3. Each data row: the Task invariants, delegated to `units_validate` (REQ-1e)
-#      — status in {pending,active,landed,dropped} among them — else exit 2; a
-#      non-placeholder `- T<n>:` evidence line must exist in the ## SDLC State
-#      section (SECTION) else exit 2.
+#      — status in {pending,active,landed,dropped} among them — else exit 2; then
+#      the reader's ledger findings (`units_findings`, wave-21 T5, D4): a `landed`
+#      row with no `- T<n>:` line in ## SDLC State, or an `active` row whose agent
+#      cell names no row on this session's roster, else exit 2; a line that is
+#      there must not be a placeholder, else exit 2.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
   [ "$SCALE" = "wave" ] || return 0
   [ "$RIGOR" = "audited" ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
-  local tasks rows line id ev violations
+  local tasks rows line id ev violations findings
   # THE ROWS AND THE INVARIANTS BOTH COME FROM lib/units.sh (REQ-1e, spec §2 D3).
   # This is the check the widened table breaks hardest: `| id | step | kind | task |
   # agent | deps | size | serves | Files | status |` puts `agent` at the `$6` this
@@ -4485,8 +4553,19 @@ Fix: repair each row named above; the columns are id | step | kind | task | agen
   # shared arm below counts every row and prints the lines the author owes. It runs ahead
   # of the placeholder walk: "you wrote nothing" and "you wrote a placeholder" are two
   # findings, and the first is the one a whole-table answer can give.
+  #
+  # AND WHAT A ROW OWES IS THE READER'S ANSWER (wave-21 T5; REQ-4, AC-4.1, AC-4.3; D4,
+  # ADR-037 decision 3). Through 1.8.7 every row owed a line, so an `active` row the dispatch
+  # hook had just written to the roster was refused for a hand copy of that record at its
+  # writer's first commit. A `landed` row owes its line; an `active` row whose agent cell is
+  # a roster name owes nothing; a self-owned row owes neither; and an agent cell naming no
+  # roster row is its own refusal, after the lines. The status enum stays `units_validate`'s,
+  # above, whose ids the reader's `status` findings equal.
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  refuse_missing_evidence_lines "$rows"
+  findings="$(units_findings "$PLAN" "$(_eg_roster_path)")"
+  refuse_missing_evidence_lines "$(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }')"
+  refuse_unlaunched_rows "$(printf '%s\n' "$findings" \
+    | awk '$1 == "launch" { v = $0; sub(/^launch [^ ]+ /, "", v); print $2 ": " v }')"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     id=$(units_field "$line" id)
@@ -4546,6 +4625,173 @@ dispatch() {
 
 dispatch
 exit 0
+}
+
+# ─── the chain arm's exempt set — one `&&` segment, read as the shell runs it ──
+#
+# `_chain_seg_split <segment>` sets `_CHAIN_STAGES` (the segment's commands, newline-joined, split
+# at every unquoted `|`, `|&`, `;` and lone `&`) and `_CHAIN_WRITES` (1 when an unquoted redirect
+# writes a file: `>`, `>>`, `>|`, `&>`, `N>`, `>&word`, `>(…)`; never `>/dev/null`, `>&2`, `2>&1`,
+# `>&-`). Quotes are honoured — `jq ".a > 1" f` carries no redirect — and a backslash escapes the
+# next character. A `>` with no readable word after it fails closed, as a write.
+#
+# WHY A SEGMENT IS NOT ITS HEAD (wave-21 T14; critic-4e6d4a9 I2). The exempt set judged an `&&`
+# segment by its first word, so `date > stamp`, `jq . a > b`, `sort f>out`, `uniq f>g` and
+# `jq … | tee f` all passed as observation, and `git status; rm -rf build` hid a `rm` behind a
+# `git`. Spec D8 calls the set an allowlist of OBSERVATION, and none of those observes.
+#
+# A SCREEN FIRST: a segment holding none of `|`, `;`, `&`, `>` is one command that writes nothing
+# through a redirect, and pays for no character walk.
+_CHAIN_STAGES=""; _CHAIN_WRITES=""
+_chain_seg_split() {  # <segment> -> sets _CHAIN_STAGES, _CHAIN_WRITES
+  local s="$1" n i=0 c q="" cur="" out="" t dup
+  _CHAIN_WRITES=""
+  case "$s" in
+    *[\|\;\&\>]*) : ;;
+    *) _CHAIN_STAGES="$s"; return 0 ;;
+  esac
+  n=${#s}
+  while [ "$i" -lt "$n" ]; do
+    c="${s:i:1}"
+    if [ -n "$q" ]; then
+      cur="$cur$c"
+      if [ "$q" = '"' ] && [ "$c" = '\' ]; then
+        i=$((i + 1)); cur="$cur${s:i:1}"
+      elif [ "$c" = "$q" ]; then
+        q=""
+      fi
+      i=$((i + 1)); continue
+    fi
+    case "$c" in
+      \\) cur="$cur$c${s:i+1:1}"; i=$((i + 2)); continue ;;
+      \'|\") q="$c"; cur="$cur$c" ;;
+      \||\;)
+        out="$out$cur"$'\n'; cur=""
+        if [ "$c" = '|' ] && [ "${s:i+1:1}" = '&' ]; then i=$((i + 1)); fi ;;
+      \&)
+        # `&>` is a redirect, read at its `>`; a lone `&` ends a command.
+        if [ "${s:i+1:1}" != '>' ]; then out="$out$cur"$'\n'; cur=""; fi ;;
+      \>)
+        # A descriptor number written against the `>` (`2>`) belongs to the redirect, not to the
+        # command's operands.
+        case "$cur" in
+          [0-9]|[0-9][0-9]) cur="" ;;
+          *' '[0-9]|*' '[0-9][0-9]) cur="${cur% *} " ;;
+        esac
+        i=$((i + 1))
+        if [ "${s:i:1}" = '>' ]; then i=$((i + 1)); fi
+        if [ "${s:i:1}" = '|' ]; then i=$((i + 1)); fi
+        dup=""
+        if [ "${s:i:1}" = '&' ]; then dup=1; i=$((i + 1)); fi
+        while [ "${s:i:1}" = ' ' ]; do i=$((i + 1)); done
+        t=""
+        while [ "$i" -lt "$n" ]; do
+          c="${s:i:1}"
+          case "$c" in ' '|\||\;|\&|\<|\>|\(|\)) break ;; esac
+          t="$t$c"; i=$((i + 1))
+        done
+        t="${t//\'/}"; t="${t//\"/}"
+        case "$t" in
+          '') _CHAIN_WRITES=1 ;;
+          /dev/null|/dev/stdout|/dev/stderr) : ;;
+          *)
+            if [ -z "$dup" ]; then
+              _CHAIN_WRITES=1
+            else
+              case "$t" in -|[0-9]|[0-9][0-9]) : ;; *) _CHAIN_WRITES=1 ;; esac
+            fi ;;
+        esac
+        continue ;;
+      *) cur="$cur$c" ;;
+    esac
+    i=$((i + 1))
+  done
+  _CHAIN_STAGES="$out$cur"
+}
+
+# `_chain_stage_observes <command>` -> 0 when the one command only reads or reports, 1 otherwise.
+#
+# THE LINE THIS LIST DRAWS: observation is exempt, production is nudged. A command that only
+# reads or reports (git, read tools, date/pwd/jq/sort, gh view/list/watch, a GET gh api) never
+# makes a chain production-shaped; one that writes the tree (rm, mv, cp, mkdir, touch, tee) or
+# the remote (gh api -X POST, gh pr merge) does. Redirects never reach here: `_chain_seg_split`
+# has already answered them for the whole segment.
+# THE SAME EXEMPT SET, ASKED WITH A BUILTIN. The regex was anchored at `^` over literal words
+# each followed by a literal space, which is exactly what these patterns are — a bare `git` with
+# no argument stays non-exempt in both spellings. The read tools that take stdin are exempt bare
+# too (wave-21 T14): a pipe stage reads its input, so `sort f | head` observes.
+_chain_stage_observes() {  # <one trimmed command>
+  local _xo _xn _xdd _xw _xm _xf _xp
+  local -a _xws
+  case "$1" in
+    'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
+    'sed '*|'echo '*|'printf '*|'test '*|'cd '*|'which '*|'command '*|'false '*|\
+    'pwd'|'pwd '*|'true'|'true '*|'date'|'date '*|'jq'|'jq '*|\
+    'basename'|'basename '*|\
+    'ls'|'cat'|'head'|'tail'|'wc'|\
+    'gh run watch'|'gh run watch '*) return 0 ;;
+    'sort'|'sort '*|'uniq'|'uniq '*)
+      # `sort`/`uniq` observe only with NO OUTPUT FLAG and AT MOST ONE OPERAND (wave-21 T13
+      # item 8): `sort -o f f` / `--output` writes a file, and `uniq in out` writes its second
+      # operand. A short-option cluster carrying `o` counts as the output flag; a word after
+      # `--` is an operand; an option's separate argument (`-k 2`) counts as an operand,
+      # which can only ever turn an observation into a nudge.
+      _xo=0; _xn=0; _xdd=""
+      # SPLIT BY `read -a`, never by an unquoted expansion: a `*` in the segment is a word
+      # here, not a glob over the cwd.
+      read -r -a _xws <<< "$1"
+      for _xw in "${_xws[@]:1}"; do
+        if [ -z "$_xdd" ]; then
+          case "$_xw" in
+            --) _xdd=1; continue ;;
+            --output|--output=*) _xo=1; break ;;
+            --*) continue ;;
+            -) : ;;
+            -*o*) _xo=1; break ;;
+            -*) continue ;;
+          esac
+        fi
+        _xn=$((_xn + 1))
+      done
+      [ "$_xo" -eq 0 ] && [ "$_xn" -le 1 ] ;;
+    'gh api'|'gh api '*)
+      # `gh api` observes unless a method other than GET is named — and a field or an input
+      # body (`-f`, `-F`, `--field`, `--raw-field`, `--input`) makes it a POST unless GET is
+      # named (wave-21 T13 item 8). Under a named GET, gh sends fields as query parameters,
+      # so they still observe; `--input` is a request BODY and is never an observation.
+      # THE LAST METHOD WINS, as gh reads its flags (wave-21 T14; critic-4e6d4a9 I2): a GET
+      # matched anywhere let `gh api -X GET -X POST` pass as an observation.
+      _xm=""; _xf=""; _xp=""
+      read -r -a _xws <<< "$1"
+      for _xw in "${_xws[@]:2}"; do
+        if [ -n "$_xp" ]; then _xm="$_xw"; _xp=""; continue; fi
+        case "$_xw" in
+          --input|--input=*) return 1 ;;
+          -X|--method) _xp=1 ;;
+          --method=*) _xm="${_xw#--method=}" ;;
+          -X?*) _xm="${_xw#-X}" ;;
+          -f|-F|--field|--raw-field|-f?*|-F?*|--field=*|--raw-field=*) _xf=1 ;;
+        esac
+      done
+      # A method flag with no word after it names no method gh would send: fail closed.
+      [ -z "$_xp" ] || return 1
+      _xm="${_xm//\'/}"; _xm="${_xm//\"/}"
+      case "$_xm" in
+        [Gg][Ee][Tt]) return 0 ;;
+        '') [ -z "$_xf" ]; return ;;
+        *) return 1 ;;
+      esac ;;
+    'gh '*)
+      # `gh <noun> view` / `gh <noun> list` observe; every other verb is production. The verb
+      # is the word AFTER THE NOUN (wave-21 T13 item 8): matched anywhere, `gh pr merge 5
+      # --body view` passed as an observation.
+      _xw="${1#gh }"; _xw="${_xw#* }"; _xw="${_xw%% *}"
+      case "$_xw" in
+        view|list) return 0 ;;
+        *) return 1 ;;
+      esac ;;
+    *) return 1 ;;
+  esac
 }
 
 # ─── wall_farm_out_reminder — hooks/farm-out-reminder.sh ─────────────────────
@@ -4838,6 +5084,7 @@ fi
 # have exited otherwise), ≥1 non-exempt segment → nudge as class=chain.
 if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
   _has_nonexempt=""
+  local _xst
   while IFS= read -r _seg; do
     # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
     # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
@@ -4850,15 +5097,26 @@ if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
       esac
     done
     [ -n "$_seg" ] || continue
-    # THE SAME EXEMPT SET, ASKED WITH A BUILTIN. The regex was anchored at `^` over
-    # literal words each followed by a literal space, which is exactly what these
-    # patterns are — a bare `git` with no argument stays non-exempt in both spellings.
-    case "$_seg" in
-      'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
-      'sed '*|'mkdir '*|'cp '*|'mv '*|'rm '*|'touch '*|'echo '*|'printf '*|'test '*|\
-      'cd '*|'pwd '*|'which '*|'command '*|'true '*|'false '*) : ;;
-      *) _has_nonexempt=1; break ;;
-    esac
+    # A SEGMENT IS JUDGED AS THE SHELL RUNS IT (wave-21 T14; critic-4e6d4a9 I2): a write through
+    # an unquoted redirect makes it production whatever its head, and every command of a pipe or
+    # a `;` list is judged on its own — `_chain_seg_split` reads both, `_chain_stage_observes`
+    # is the exempt set.
+    _chain_seg_split "$_seg"
+    if [ -n "$_CHAIN_WRITES" ]; then _has_nonexempt=1; break; fi
+    while IFS= read -r _xst; do
+      while :; do
+        case "$_xst" in
+          ' '*) _xst="${_xst# }" ;;
+          *' ') _xst="${_xst% }" ;;
+          *)    break ;;
+        esac
+      done
+      [ -n "$_xst" ] || continue
+      _chain_stage_observes "$_xst" || { _has_nonexempt=1; break; }
+    done <<EOF
+$_CHAIN_STAGES
+EOF
+    [ -z "$_has_nonexempt" ] || break
   done <<EOF
 $CHAIN_SEGS
 EOF
@@ -5229,7 +5487,7 @@ fi
 # separators does not trip the symlink guards, it reads outside the directory those guards
 # protect.
 local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES BUDGET_LINE
-local _CLAIMS _kind _target _run _shown
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME=""
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
@@ -5251,15 +5509,16 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   # newline, both refused at the lift, so a marker is the only safe join).
   BUDGET_LINE=$(awk -F'|' -v id="$ACTOR" '
     /^roster-state\// {
-      hit = 0; stated = 0; allowed = ""; runs = ""
+      hit = 0; stated = 0; allowed = ""; runs = ""; nm = ""
       for (i = 1; i <= NF; i++) {
         if ($i == "agent_id=" id) hit = 1
         else if ($i ~ /^suites_allowed=/) { stated = 1; allowed = substr($i, 16) }
         else if ($i ~ /^re_executes=/) { runs = substr($i, 13) }
+        else if ($i ~ /^name=/) { nm = substr($i, 6) }
       }
-      if (hit) { last = stated ":" allowed; lastruns = runs }
+      if (hit) { last = stated ":" allowed; lastruns = runs; lastname = nm }
     }
-    END { if (last != "") { print last; print "R:" lastruns } }
+    END { if (last != "") { print last; print "R:" lastruns; print "N:" lastname } }
   ' "$ROSTER_FILE" 2>/dev/null)
   case "$BUDGET_LINE" in
     1:*) BUDGET_STATED=yes
@@ -5267,7 +5526,16 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
          SUITES_ALLOWED="${SUITES_ALLOWED#1:}" ;;
   esac
   case "$BUDGET_LINE" in
-    *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}" ;;
+    *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}"; RE_EXECUTES="${RE_EXECUTES%%$'\n'N:*}" ;;
+  esac
+  # THE ROW'S NAME, for the remedy line (T6): the verb that widens this budget addresses a
+  # row by name, and the winning row is the one already read above. It is kept AS THE ROSTER
+  # CARRIES IT (wave-21 T13): dropping the characters a shell treats specially printed
+  # `amend wbudgetrm` for a row named `w budget;rm`, a name no row carries. The remedy line
+  # quotes a name like that instead, so the pasted command stays one argument and still
+  # addresses the row.
+  case "$BUDGET_LINE" in
+    *$'\n'N:*) _BUDGET_ROW_NAME="${BUDGET_LINE##*$'\n'N:}" ;;
   esac
   # DECODED ONCE, HERE, BEFORE ANYTHING READS IT (T4; REQ-7, D4). The row stores this field
   # percent-encoded because the line is pipe-delimited and a declared run may legitimately
@@ -5506,8 +5774,50 @@ You asked for: $1
 
 Run only what is on it. If the change genuinely reaches further than the brief said,
 say so in your report and let the orchestrator widen the brief — a wider instrument is
-its decision to make, and it is the one holding the one-regression budget for the run."
+its decision to make, and it is the one holding the one-regression budget for the run.
+$(_budget_remedy_line "$1")"
   return 2
+}
+
+# THE REMEDY LINE (T6, REQ-5, AC-5.2). A refusal that names the budget and not the verb that
+# widens it sent two readers to hunt for it. The plugin root is the tree this library was
+# loaded from — `$BIONIC_LIB` is `<root>/scripts/lib`, and `hooks/session-poker.sh` sits
+# beside `scripts/` in every layout the loader accepts — so the line carries a path the
+# orchestrator can paste, never the `<plugin-root>` placeholder. When the loader's variable
+# is absent the placeholder is the honest fallback. `<name>` is the row's own name, read off
+# the roster by the arm that refuses, when that arm has it — printed as the roster carries it,
+# single-quoted when a shell would split it or act on it (wave-21 T13).
+#
+# THE FLAG FITS WHAT WAS REFUSED (wave-21 T13; walk-3b45d05 item 4). `amend` widens a suite with
+# `--suites+ <suite>` and a run with `--reexec+ '<cmd>'`. A refused suite FILE — one word, a
+# `*.test.sh` basename — names its own flag and itself; anything else the wall refused is a run,
+# and keeps the run flag with the placeholder, since a run is retyped by the reader who knows it.
+#
+# EVERY PLACEHOLDER IS QUOTED (wave-21 T14; critic-4e6d4a9 I4). A bare `<why>` is a redirect from
+# a file named `why` followed by a `>` with no word, so the pasted line was a parse error before
+# `amend` ever read its arguments. `'<why>'` is one word, like `'<cmd>'`.
+_budget_remedy_line() {  # <the refused suite or run>
+  local _root="<plugin-root>" _widen="--reexec+ '<cmd>'"
+  if [ -n "${BIONIC_LIB:-}" ] && [ -d "$BIONIC_LIB/../.." ]; then
+    _root="$(cd "$BIONIC_LIB/../.." 2>/dev/null && pwd)" || _root="<plugin-root>"
+  fi
+  case "${1:-}" in
+    *[[:space:]]*) : ;;
+    *.test.sh) _widen="--suites+ $(_budget_shell_word "$1")" ;;
+  esac
+  printf "widen it: bash %s/hooks/session-poker.sh amend %s %s --reason '<why>' (main runs it)" \
+    "$_root" "$(_budget_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
+}
+
+# _budget_shell_word <word> [placeholder] -> <word> as one shell argument: bare when it is made
+# only of characters no shell treats specially, single-quoted otherwise (an embedded `'` closed,
+# escaped and reopened). An empty word prints the placeholder, unquoted.
+_budget_shell_word() {
+  case "${1:-}" in
+    '') printf '%s' "${2:-}" ;;
+    *[!A-Za-z0-9._/@:+=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 
 # THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named
