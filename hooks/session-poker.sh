@@ -4989,6 +4989,21 @@ EOF
           note "no FILL — ${SCHED_PLAN} carries no parallel-budget: writers=<n> in its frontmatter; Step 0 measures it (resources_probe, then resources_budget) and writes it verbatim."
         fi
       else
+        # THE HOLDS, READ ONCE (wave-21 T4; REQ-3, AC-3.3; D3, ADR-037 decision 2). `units_held`
+        # names two kinds of row the ready set leaves out: one held FOR ITS STEP (a gate act
+        # ahead of `current:`) and one held BY THE WORLD (`ext:<slug>` left in its deps cell).
+        # Each ext-held row is printed here as `poker: HELD <id> ext:<slug>`, every tick, after
+        # the rung line and before the FILL line, whatever the gap: it is the one report of a
+        # wait nothing mechanical lifts, addressed to the only actor who can lift it (remove the
+        # token from the cell). The step-held lines keep their place on the no-FILL line below.
+        SCHED_HOLDS="$(units_held "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null)"
+        while IFS= read -r SCHED_HOLD; do
+          case "$SCHED_HOLD" in
+            *": held by ext:"*) say "HELD ${SCHED_HOLD%%: held by *} ${SCHED_HOLD#*: held by }" ;;
+          esac
+        done <<EOF
+$SCHED_HOLDS
+EOF
         # THE GAP IS MEASURED AGAINST THE RUNG, NOT THE CEILING (AC-17). The ceiling is what
         # the run may ever run at; the rung is what the machine will carry right now, and
         # filling to the first while the second says otherwise is the mistake this whole arm
@@ -5049,7 +5064,8 @@ EOF
             # this line said the first for both. `units_held` is the same readiness program as
             # the set above, asked the other question, so it names exactly the rows the set
             # left out for their step and no others.
-            SCHED_HELD="$(units_held "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null | awk 'NF { printf "%s%s", (n++ ? "; " : ""), $0 }')"
+            # The ext-held rows were printed as HELD lines above and are not step holds.
+            SCHED_HELD="$(printf '%s\n' "$SCHED_HOLDS" | awk 'NF && index($0, ": held by ext:") == 0 { printf "%s%s", (n++ ? "; " : ""), $0 }')"
             say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
           fi
         fi
