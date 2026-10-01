@@ -3,6 +3,72 @@
 Earlier releases are recorded as git tags (`v1.4.3` … `v1.8.3`) rather than in this file,
 which starts at 1.8.4.
 
+## 1.8.8 — 2026-10-01
+
+- REQ-1: The cron-ritual stop gate now blocks once and is discharged by the next
+  `CronList`, whichever side of a `CronCreate` it falls on: a `CronCreate` with no
+  `CronList` since the latest clear or resume marker still blocks, and the refusal's third
+  step says `CronCreate` is needed only if the list left the session with no Patrol job of
+  its own. The ritual text is one sentence true on the first Stop and on every later one.
+  The skill's fresh-run arming instruction names `CronList` before `CronCreate`, in
+  `dispatch.md` and its source block, and so does dispatch preflight's never-armed fix text.
+- REQ-2: `session-start` now prints one `re-arm:` line on every engaged start, with or
+  without predecessor state, whose tick and arm commands carry the hook's own resolved
+  directory, so the root a session bakes into its Patrol is the root its hooks run from.
+  `dispatch.md` directs the model to that line for `<plugin-root>` and no longer directs a
+  registry read, and `/bionic:doctor` reports, naming both paths, when the registry root's
+  `session-poker.sh` differs from the running hook root's.
+- REQ-3: A `deps` cell may carry an external prerequisite token `ext:<slug>` beside task
+  ids, and the plan validator admits it, refusing any token with a blank inside it. A
+  pending row with an unsatisfied token is not in the ready set, so the fill wall passes a
+  turn with a free slot and such a row without a decline line, and the tick names every
+  held row on a `poker: HELD <id> ext:<slug>` line of its own. Removing the token returns
+  the row to the ready set on the next read, and a decline line lasts one turn. The tick
+  reads the plan table once per tick instead of four times.
+- REQ-4: One library reader now produces every ledger finding — a status outside the
+  scale's enum, a terminal row with no evidence line, an active row whose agent matches no
+  roster row — and the tick prints each as a `poker: LEDGER <id> <finding>` line, before a
+  subagent's commit finds it. The tick prints the HELD and LEDGER report in every state
+  that decides a tick, once, including the disarm tick and the no-fill arms. The commit
+  gate reads the roster, so an active row whose agent cell names a roster row commits with
+  no `- T<n>:` line, and with no roster an agent-named row still needs one. The skill says
+  task-scale ledgers have no write-time check.
+- REQ-5: `adopt` now prints, per adopted row, one `budget:` line giving its suites and
+  runs, or `none`. A suite-run refusal names the verb that widens the budget, `session-poker.sh
+  amend <name> --reexec+ '<cmd>' --reason <why>`, using `--suites+ <suite>` when the
+  refused command is a suite file, with the row name quoted as the roster carries it, so
+  the line can be pasted as it stands. A row widened by `amend --reexec+` admits the named
+  run on its next attempt.
+- REQ-6: A `Re-executes:` run carrying an unfilled placeholder glued into a path is now
+  refused as an unfilled placeholder, never as a redirection, and a brief whose only
+  instrument was refused at the lift is refused for that instrument, never for having no
+  `Files:` and no `Suites:`. The scaffold's `Files:` comment says a read-only brief omits
+  it and keeps its other fields.
+- REQ-7: A CI or PR wait is now a backgrounded command with a declared `Subprocess claim:
+  <process pattern>`, named in the skill's Liveness paragraph and carried as an optional
+  scaffold line. An undelivered row with a backdated transcript and a live claimed process
+  ticks QUIET rather than NOTIFY, while a dead claim still notifies.
+- REQ-8: The farm-out chain exemption now reads read-only chains as cheap and write chains
+  as not. A chain of `git fetch`, `git rev-parse`, `date`, `gh pr view` and the like draws
+  no nudge, while a chain that ends in `rm`, `mv`, `cp`, `mkdir` or `touch`, a `gh` verb
+  other than `view` or `list`, or a non-GET `gh api` does. Each chain is split at every
+  unquoted `|`, `;` and `&` and each command judged on its own, a redirect or pipe that
+  writes a file counts as a write, and `sort` or `uniq` with an output flag or extra
+  operands is not an observation.
+- REQ-9: A commit refusal whose refused command also edits the bound plan now leads with a
+  line saying so, because the gate read the plan at call start and the edit is not yet
+  there; a commit whose command does not name the plan carries no such line. The line leads
+  in every arm of the gate, not only the matrix arm.
+
+Two views of one scaffold (ADR-038): the six role files now carry a reader view of the
+brief scaffold, one clause per label, while `dispatch.md` and `SKILL.md` carry the author
+template, and the two label sets are pinned equal. The role files shrink from 27060 to
+26040 B under the unchanged 26400 B cap.
+
+Migration for plans in flight: from 1.8.8 a task row's agent cell is the roster name the
+dispatch gave the agent, not the role, and a row still carrying a role is refused by the
+gate as naming no launched agent.
+
 ## 1.8.7 — 2026-09-24
 
 - REQ-1: A task branch now lands onto the branch the bound plan names as its working
