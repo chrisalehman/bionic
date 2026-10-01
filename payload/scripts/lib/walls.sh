@@ -5369,10 +5369,13 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
     *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}"; RE_EXECUTES="${RE_EXECUTES%%$'\n'N:*}" ;;
   esac
   # THE ROW'S NAME, for the remedy line (T6): the verb that widens this budget addresses a
-  # row by name, and the winning row is the one already read above. Whitespace and anything
-  # a shell would treat specially is dropped, so the printed command stays pasteable.
+  # row by name, and the winning row is the one already read above. It is kept AS THE ROSTER
+  # CARRIES IT (wave-21 T13): dropping the characters a shell treats specially printed
+  # `amend wbudgetrm` for a row named `w budget;rm`, a name no row carries. The remedy line
+  # quotes a name like that instead, so the pasted command stays one argument and still
+  # addresses the row.
   case "$BUDGET_LINE" in
-    *$'\n'N:*) _BUDGET_ROW_NAME="${BUDGET_LINE##*$'\n'N:}"; _BUDGET_ROW_NAME="${_BUDGET_ROW_NAME//[!A-Za-z0-9._-]/}" ;;
+    *$'\n'N:*) _BUDGET_ROW_NAME="${BUDGET_LINE##*$'\n'N:}" ;;
   esac
   # DECODED ONCE, HERE, BEFORE ANYTHING READS IT (T4; REQ-7, D4). The row stores this field
   # percent-encoded because the line is pipe-delimited and a declared run may legitimately
@@ -5612,7 +5615,7 @@ You asked for: $1
 Run only what is on it. If the change genuinely reaches further than the brief said,
 say so in your report and let the orchestrator widen the brief — a wider instrument is
 its decision to make, and it is the one holding the one-regression budget for the run.
-$(_budget_remedy_line)"
+$(_budget_remedy_line "$1")"
   return 2
 }
 
@@ -5622,14 +5625,35 @@ $(_budget_remedy_line)"
 # beside `scripts/` in every layout the loader accepts — so the line carries a path the
 # orchestrator can paste, never the `<plugin-root>` placeholder. When the loader's variable
 # is absent the placeholder is the honest fallback. `<name>` is the row's own name, read off
-# the roster by the arm that refuses, when that arm has it.
-_budget_remedy_line() {
-  local _root="<plugin-root>"
+# the roster by the arm that refuses, when that arm has it — printed as the roster carries it,
+# single-quoted when a shell would split it or act on it (wave-21 T13).
+#
+# THE FLAG FITS WHAT WAS REFUSED (wave-21 T13; walk-3b45d05 item 4). `amend` widens a suite with
+# `--suites+ <suite>` and a run with `--reexec+ '<cmd>'`. A refused suite FILE — one word, a
+# `*.test.sh` basename — names its own flag and itself; anything else the wall refused is a run,
+# and keeps the run flag with the placeholder, since a run is retyped by the reader who knows it.
+_budget_remedy_line() {  # <the refused suite or run>
+  local _root="<plugin-root>" _widen="--reexec+ '<cmd>'"
   if [ -n "${BIONIC_LIB:-}" ] && [ -d "$BIONIC_LIB/../.." ]; then
     _root="$(cd "$BIONIC_LIB/../.." 2>/dev/null && pwd)" || _root="<plugin-root>"
   fi
-  printf "widen it: bash %s/hooks/session-poker.sh amend %s --reexec+ '<cmd>' --reason <why> (main runs it)" \
-    "$_root" "${_BUDGET_ROW_NAME:-<name>}"
+  case "${1:-}" in
+    *[[:space:]]*) : ;;
+    *.test.sh) _widen="--suites+ $(_budget_shell_word "$1")" ;;
+  esac
+  printf "widen it: bash %s/hooks/session-poker.sh amend %s %s --reason <why> (main runs it)" \
+    "$_root" "$(_budget_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
+}
+
+# _budget_shell_word <word> [placeholder] -> <word> as one shell argument: bare when it is made
+# only of characters no shell treats specially, single-quoted otherwise (an embedded `'` closed,
+# escaped and reopened). An empty word prints the placeholder, unquoted.
+_budget_shell_word() {
+  case "${1:-}" in
+    '') printf '%s' "${2:-}" ;;
+    *[!A-Za-z0-9._/@:+=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 
 # THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named
