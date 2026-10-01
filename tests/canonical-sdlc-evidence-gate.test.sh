@@ -8995,5 +8995,63 @@ expect_absent "9f AC-9.2 the outside commit's trace never names the plan path" \
 expect_absent "9f AC-9.2 …and never enters the plan resolution" \
   "session_run " "$(cat "$s9_tr_out")"
 
+# ============================================================
+# Section 32: EVERY commit refusal carries the edit-then-commit note first (T12, AC-9.1/9.2)
+# ============================================================
+#
+# Section 31 pinned the note on the matrix arm only, where it rode LAST in `detail`. The
+# note is now computed once for the whole `commit` class and is detail line 1 on every
+# arm, so the twelve-line fold cannot cut it. Two arms stand for the rest: the missing-
+# fields arm (a plan at current: 9 with no Step 9 `delivered` field; Step 4 is a pointer step, A-T12.1) and the dispatch-ledger arm
+# (an active|done row with no evidence line).
+
+section "Section 32: the note is detail line 1 on every commit refusal"
+
+T12_NOTE="Note: this command also writes the plan — run the edit first, then commit in a separate call."
+t12_first_detail() {  # first non-empty line after the user line, from the verbose stream
+  printf '%s\n' "$HOOK_VSTDERR" | awk '/^bionic: /{f=1; next} f && NF {print; exit}'
+}
+t12_expect_note_first() {  # <label> <home> <command>
+  run_hook "$2" "$3"
+  local got; got=$(t12_first_detail)
+  if [ "$HOOK_EXIT" -eq 2 ] && [ "$got" = "$T12_NOTE" ]; then
+    ok "$1"
+  else
+    no "$1" "expected exit 2 with detail line 1 == the note; exit=$HOOK_EXIT line1='$got'"
+  fi
+}
+t12_expect_no_note() {  # <label> <home> <command>
+  run_hook "$2" "$3"
+  if [ "$HOOK_EXIT" -eq 2 ] && ! grep -q "also writes the plan" <<<"$HOOK_VSTDERR"; then
+    ok "$1"
+  else
+    no "$1" "expected a refusal with NO note; exit=$HOOK_EXIT detail='$HOOK_VSTDERR'"
+  fi
+}
+
+# 32a/32b — missing-fields arm.
+h32a=$(make_home)
+p32a=$(write_plan "$h32a" "$(plan 9 "  scratch: nothing here" "$matrix_complete")")
+t12_expect_note_first "T12-a missing-fields arm, absolute plan path → note is detail line 1" \
+  "$h32a" "sed -i 's/x/y/' $p32a && git commit -q -m m"
+t12_expect_note_first "T12-b missing-fields arm, root-relative plan path → note is detail line 1" \
+  "$h32a" "sed -i 's/x/y/' .bionic/docs/plans/active.md && git commit -q -m m"
+t12_expect_no_note "T12-c missing-fields arm, plain commit → refused, no note" \
+  "$h32a" "git commit -q -m m"
+
+# 32d/32e — dispatch-ledger arm.
+h32d=$(make_home)
+p32d=$(write_plan "$h32d" "$(task_plan_rigor tested "$ledger_active_no_line")")
+t12_expect_note_first "T12-d ledger arm, absolute plan path → note is detail line 1" \
+  "$h32d" "sed -i 's/x/y/' $p32d && git commit -q -m m"
+t12_expect_note_first "T12-e ledger arm, root-relative plan path → note is detail line 1" \
+  "$h32d" "sed -i 's/x/y/' .bionic/docs/plans/active.md && git commit -q -m m"
+t12_expect_no_note "T12-f ledger arm, plain commit → refused, no note" \
+  "$h32d" "git commit -q -m m"
+
+# 32g — the matrix arm (section 31's case) keeps the note, now first rather than last.
+t12_expect_note_first "T12-g matrix arm → the note is detail line 1, not the last line" \
+  "$h31a" "$cmd31a"
+
 
 finish
