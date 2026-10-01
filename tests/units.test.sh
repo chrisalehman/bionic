@@ -49,6 +49,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/units.sh"
@@ -1884,5 +1886,259 @@ expect_contains "17b.12 …and the Step-5 frontier row is still threaded with th
   "| T3 | 5 | verify | the floor | test-runner | T1, T9 |" "$R6_OUT4"
 printf '%s\n' "$R6_OUT" > "$SANDBOX/r6-projected.md"
 expect_eq "17b.13 …and the projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/r6-projected.md")"
+
+
+# ============================================================
+section "17c — wave-21 T4: an external wait is a declared prerequisite, ext:<slug> (REQ-3, AC-3.1, AC-3.2, AC-3.4; D3, ADR-037 decision 2)"
+# ============================================================
+#
+# A ROW WAITING ON CI, A RIG OR A TRIAGE HAD NO LEGAL WAY TO SAY SO (triage-A §F.3): `pending`
+# made it ready, `active`/`dropped` were false, and the stop wall refused every turn that did
+# not dispatch it or decline it again. The prerequisite now carries the wait: a deps token
+# `ext:<slug>` beside the task ids. Nothing mechanical satisfies it; its owner removes it.
+#
+# T2 is the held row (a landed task dep plus the token); T3 is the ordinary ready row; T5
+# carries a token AND an unlanded task dep, so the graph already says why it waits and the
+# held report does not name it (the 17b.6 rule). T4 is the Step-5 row that reaches every
+# Step-4 row, so the transitive rule is satisfied and the only question asked is the token.
+cat > "$SANDBOX/ext.md" <<'EXT_EOF'
+---
+current: 4
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: in flight
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-ce9520e | 30m | REQ-x | b.sh | pending |
+| T3 | 4 | build | ordinary, ready | implementor | T1 | 30m | REQ-x | c.sh | pending |
+| T5 | 4 | build | waits on T2 and a rig | implementor | T2, ext:rig.mac_2 | 30m | REQ-x | d.sh | pending |
+| T4 | 5 | verify | the floor | test-runner | T1, T2, T3, T5 | 30m | REQ-x | — | pending |
+EXT_EOF
+
+# AC-3.1: the validator admits the token and still refuses an unknown task id.
+expect_eq "17c.1 AC-3.1 units_validate admits deps 'T1, ext:ci-ce9520e' (rc 0)" "0" \
+  "$(call_rc units_validate "$SANDBOX/ext.md")"
+expect_eq "17c.2 …and prints nothing" "" "$(call units_validate "$SANDBOX/ext.md")"
+sed 's/| T1, ext:ci-ce9520e |/| T1, ext:ci-ce9520e, T99 |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-t99.md"
+expect_eq "17c.3 AC-3.1 …beside an unknown task id T99 the row is still refused, naming T99 alone" \
+  "T2: dep T99 names no row in the table" "$(call units_validate "$SANDBOX/ext-t99.md")"
+# THE TOKEN HAS A SHAPE: `ext:` and a slug that starts alphanumeric. A bare `ext:` or a slug
+# that opens on punctuation is not a declaration, and is refused the way any unknown id is.
+sed 's/| T1, ext:ci-ce9520e |/| T1, ext: |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-bare.md"
+expect_eq "17c.4 a bare 'ext:' is refused as a dep naming no row" \
+  "T2: dep ext: names no row in the table" "$(call units_validate "$SANDBOX/ext-bare.md")"
+sed 's/| T1, ext:ci-ce9520e |/| T1, ext:-ci |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-punct.md"
+expect_eq "17c.5 …and so is 'ext:-ci' (the slug opens on punctuation)" \
+  "T2: dep ext:-ci names no row in the table" "$(call units_validate "$SANDBOX/ext-punct.md")"
+sed 's/| T1, ext:ci-ce9520e |/| T1, EXT:ci |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-upper.md"
+expect_eq "17c.6 …and so is 'EXT:ci' (the prefix is lower-case, exactly)" \
+  "T2: dep EXT:ci names no row in the table" "$(call units_validate "$SANDBOX/ext-upper.md")"
+# A SPACE INSIDE A TOKEN IS NOT SQUASHED INTO ONE (wave-21 T13; walk-3b45d05 item 10). The
+# deps cell used to lose every blank before it was split, so `ext:ci green` was admitted and
+# held as `ext:cigreen`, a token nobody wrote. Blanks around a token are the cell's padding;
+# a blank inside one makes it no token, and it is refused naming what the author wrote.
+sed 's/| T1, ext:ci-ce9520e |/| T1, ext:ci green |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-space.md"
+expect_eq "17c.6b a slug with a space inside is refused, naming the token as written" \
+  "T2: dep ext:ci green names no row in the table" "$(call units_validate "$SANDBOX/ext-space.md")"
+sed 's/| T1, ext:ci-ce9520e |/|  T1 ,  ext:ci-ce9520e  |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-pad.md"
+expect_eq "17c.6d …while blanks AROUND each token are padding: the padded cell still validates clean" \
+  "0" "$(call_rc units_validate "$SANDBOX/ext-pad.md")"
+sed 's/| T1, ext:ci-ce9520e |/| T 1, ext:ci-ce9520e |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-tid.md"
+expect_eq "17c.6e …and a task id with a space inside is refused the same way" \
+  "T2: dep T 1 names no row in the table" "$(call units_validate "$SANDBOX/ext-tid.md")"
+
+# AC-3.2 (hermetic twin): the held row is not in the ready set. units_ready is UNCHANGED for
+# this — an ext: token never equals `landed` — and this pins that it stays so.
+expect_eq "17c.7 AC-3.2 units_ready at current: 4 omits the ext:-held T2 (and T5, behind T2); T3 is ready" \
+  "T3" "$(call units_ready "$SANDBOX/ext.md" 4)"
+expect_eq "17c.8 AC-3.2 …through the fill: fill_ready_set at rung 8, none open, omits T2" \
+  "T3" "$(fill_call "$SANDBOX/ext.md" 8 0)"
+# THE HELD REPORT NAMES IT, beside the step-held lines: `<id>: held by ext:<slug>`. T5 is not
+# named: its unlanded task dep T2 already says why it waits.
+expect_eq "17c.9 units_held names the ext:-held row and its token, and not T5" \
+  "T2: held by ext:ci-ce9520e" "$(call units_held "$SANDBOX/ext.md" 4)"
+
+# AC-3.4: removing the token returns the row to ready — the one declaration that clears it.
+sed 's/| T1, ext:ci-ce9520e |/| T1 |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-cleared.md"
+expect_eq "17c.10 AC-3.4 with the token removed, units_ready names T2 again (table order)" \
+  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/ext-cleared.md" 4)"
+expect_eq "17c.11 AC-3.4 …and units_held no longer names it" "" "$(call units_held "$SANDBOX/ext-cleared.md" 4)"
+
+# TWO TOKENS ON ONE ROW ARE ONE LINE, both named in cell order; a token on a step-held gate
+# act names both holds, the step line first (the order 17b.6 already prints in).
+sed 's/| T1, ext:ci-ce9520e |/| ext:ci-ce9520e, T1, ext:rig-2 |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-two.md"
+expect_eq "17c.12 two tokens on one row: one held line naming both, in cell order" \
+  "T2: held by ext:ci-ce9520e ext:rig-2" "$(call units_held "$SANDBOX/ext-two.md" 4)"
+expect_eq "17c.13 …and the plan still validates clean" "0" "$(call_rc units_validate "$SANDBOX/ext-two.md")"
+cat > "$SANDBOX/ext-gate.md" <<'EXTG_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 8 | integrate | the merge, waits for its step and for CI | implementor | T1, ext:ci-main | 30m | REQ-x | — | pending |
+EXTG_EOF
+expect_eq "17c.14 a step-held gate act with a token: the step line, then the ext line" \
+  "$(printf 'T2: step 8 integrate row waits for current: 8\nT2: held by ext:ci-main')" \
+  "$(call units_held "$SANDBOX/ext-gate.md" 5)"
+expect_eq "17c.15 …at its step the step hold lifts and the ext hold stays; it is still not ready" \
+  "T2: held by ext:ci-main" "$(call units_held "$SANDBOX/ext-gate.md" 8)"
+expect_eq "17c.16 …units_ready at its step still omits it" "" "$(call units_ready "$SANDBOX/ext-gate.md" 8)"
+
+# AT TASK SCALE the readiness program reads the same cell, so a token holds a T<n> row too.
+cat > "$SANDBOX/ext-task.md" <<'EXTT_EOF'
+## Tasks
+
+| id | task | deps | status |
+|---|---|---|---|
+| T1 | first | — | done |
+| T2 | waits on CI | T1, ext:ci-1 | pending |
+| T3 | ordinary | T1 | pending |
+EXTT_EOF
+expect_eq "17c.17 task scale: units_ready at T2 omits the ext:-held row" "T3" "$(call units_ready "$SANDBOX/ext-task.md" T2)"
+expect_eq "17c.18 task scale: units_held names it" "T2: held by ext:ci-1" "$(call units_held "$SANDBOX/ext-task.md" T2)"
+
+# ============================================================
+section "17d — wave-21 T5: one ledger reader, units_findings (REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3)"
+# ============================================================
+#
+# THREE FINDINGS AND NO MORE: `status <id> <value>` (a status outside the scale's enum),
+# `evidence <id>` (a row at the scale's terminal word with no `- T<n>:` line under
+# `## SDLC State`), `launch <id> <agent>` (an `active` row whose agent cell names no `name=`
+# on the roster). An empty or em-dash agent cell is SELF-OWNED and never a finding. With no
+# roster to read (an empty argument, a missing file, a symlink) no `launch` finding is
+# computed and an agent-named `active` row falls back to today's rule: it owes its line.
+cat > "$SANDBOX/ledger.md" <<'LEDGER_EOF'
+---
+scale: wave
+---
+
+## SDLC State
+
+current: 4
+
+- T1: bash suite 9/9 green
+  T9:
+- T11: dispatched to w-T11
+
+```
+- T2: a fenced example is documentation, not a line
+```
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed with its line | w-T1 | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | landed, its only line fenced | w-T2 | — | 30m | REQ-x | b.sh | landed |
+| T3 | 4 | build | a status off the enum | w-T3 | — | 30m | REQ-x | c.sh | doing |
+| T4 | 4 | build | active, launched | w-T4 | — | 30m | REQ-x | d.sh | active |
+| T5 | 4 | build | active, agent cell names no roster row | bionic:implementor | — | 30m | REQ-x | e.sh | active |
+| T6 | 4 | build | active, self-owned by an em dash | — | — | 30m | REQ-x | f.sh | active |
+| T7 | 4 | build | active, self-owned by an empty cell |  | — | 30m | REQ-x | g.sh | active |
+| T8 | 4 | build | pending, no line owed | w-T8 | — | 30m | REQ-x | h.sh | pending |
+| T9 | 4 | build | landed, its line empty | w-T9 | — | 30m | REQ-x | i.sh | landed |
+| T10 | 4 | build | landed, only T1's line (T1 never matches T10) | w-T10 | — | 30m | REQ-x | j.sh | landed |
+| T11 | 4 | build | dropped | w-T11 | — | 30m | REQ-x | k.sh | dropped |
+LEDGER_EOF
+# The roster through the fleet's own builders (tests/lib/roster-row.sh, swept-marker.sh): two
+# launch rows, and a landing-swept marker whose name= must NOT count as a launch.
+{
+  roster_header
+  roster_row_fixture status=identified session=s name=w-T4 agent_id=a4
+  roster_row_fixture status=intended session=s name=w-T9x agent_id=
+} > "$SANDBOX/ledger.roster"
+swept_marker_write "$SANDBOX/ledger.roster" 2026-10-01T00:00:00Z s bionic:implementor a5 MET
+expect_eq "17d.1 AC-4.1 the three kinds, table order: evidence, status, launch — and no finding for the launched, self-owned, pending or dropped rows" \
+  "$(printf 'evidence T2\nstatus T3 doing\nlaunch T5 bionic:implementor\nevidence T9\nevidence T10')" \
+  "$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger.roster")"
+expect_eq "17d.2 …and the verb exits 1 when it printed a finding" "1" \
+  "$(call_rc units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger.roster")"
+# A landing-swept line carrying name= is not a roster row: only `roster-state/` rows launch.
+expect_contains "17d.3 a name= on a landing-swept line launches nobody" "launch T5 bionic:implementor" \
+  "$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger.roster")"
+
+# NO ROSTER TO READ: the agent-named active rows owe their line again (spec assumption 1);
+# the self-owned rows still owe nothing.
+S17D_FALLBACK="$(printf 'evidence T2\nstatus T3 doing\nevidence T4\nevidence T5\nevidence T9\nevidence T10')"
+expect_eq "17d.4 AC-4.3 with no roster argument, an agent-named active row falls back to the line rule" \
+  "$S17D_FALLBACK" "$(call units_findings "$SANDBOX/ledger.md" "")"
+expect_eq "17d.5 …and a roster path that names no file reads the same as none" \
+  "$S17D_FALLBACK" "$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/no-such.roster")"
+ln -s "$SANDBOX/ledger.roster" "$SANDBOX/ledger-link.roster"
+expect_eq "17d.6 …and so does a symlinked roster (the fleet never follows one)" \
+  "$S17D_FALLBACK" "$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger-link.roster")"
+expect_absent "17d.7 AC-4.3 the self-owned rows are never a finding, roster or none" "T6" \
+  "$(call units_findings "$SANDBOX/ledger.md" "")$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger.roster")"
+expect_absent "17d.8 …the empty-cell one included" "T7" \
+  "$(call units_findings "$SANDBOX/ledger.md" "")$(call units_findings "$SANDBOX/ledger.md" "$SANDBOX/ledger.roster")"
+
+# THE CLEAN LEDGER: every terminal row carries its line, every active row is launched or
+# self-owned. Nothing printed, exit 0.
+cat > "$SANDBOX/ledger-clean.md" <<'LEDGERC_EOF'
+## SDLC State
+
+current: 4
+
+- T1: bash suite 9/9 green
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed with its line | w-T1 | — | 30m | REQ-x | a.sh | landed |
+| T4 | 4 | build | active, launched, no line | w-T4 | — | 30m | REQ-x | d.sh | active |
+| T6 | 4 | build | active, self-owned, no line | — | — | 30m | REQ-x | f.sh | active |
+| T8 | 4 | build | pending, no line | w-T8 | T1 | 30m | REQ-x | h.sh | pending |
+LEDGERC_EOF
+expect_eq "17d.9 a clean ledger prints nothing" "" "$(call units_findings "$SANDBOX/ledger-clean.md" "$SANDBOX/ledger.roster")"
+expect_eq "17d.10 …and exits 0" "0" "$(call_rc units_findings "$SANDBOX/ledger-clean.md" "$SANDBOX/ledger.roster")"
+
+# TASK SCALE: no step column, so the enum is pending · active · done · dropped and the
+# terminal word is `done`. The table carries no agent column, so every row is self-owned.
+cat > "$SANDBOX/ledger-task.md" <<'LEDGERT_EOF'
+## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | tested | done with its line | done |
+| T2 | build | tested | done, no line | done |
+| T3 | build | tested | landed is not a task-scale word | landed |
+| T4 | build | tested | active, self-owned | active |
+
+## SDLC State
+
+scale: task
+current: T4
+
+- T1: bash suite 5/5 green
+LEDGERT_EOF
+expect_eq "17d.11 task scale: done owes its line, landed is off the enum, an active row owes nothing" \
+  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task.md" "")"
+expect_eq "17d.12 …the same with a roster" \
+  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task.md" "$SANDBOX/ledger.roster")"
+
+# AN EMPTY STATUS CELL is named, the way the validator names it.
+sed 's/| d.sh | active |/| d.sh |  |/' "$SANDBOX/ledger-clean.md" > "$SANDBOX/ledger-empty-status.md"
+expect_eq "17d.13 an empty status cell is a status finding spelled (empty)" "status T4 (empty)" \
+  "$(call units_findings "$SANDBOX/ledger-empty-status.md" "$SANDBOX/ledger.roster")"
+expect_eq "17d.14 no table, no findings, exit 0" "0" "$(call_rc units_findings "$SANDBOX/no-such.md" "")"
+
+# THE LOOKUP THE GATE'S ADDRESSED-UNIT ARM COUNTS (it moved here from walls.sh's
+# missing_evidence_ids): every T-row with no non-empty `- T<n>:` line, whatever its status.
+expect_eq "17d.15 units_unlined names every T-row short of a line, table order, the fenced and empty ones included" \
+  "$(printf 'T2\nT3\nT4\nT5\nT6\nT7\nT8\nT9\nT10')" "$(call units_unlined "$SANDBOX/ledger.md")"
+# CR-ONLY INPUT (the gate's 19j-cr pin): the reader translates line endings itself.
+tr '\n' '\r' < "$SANDBOX/ledger-task.md" > "$SANDBOX/ledger-task-cr.md"
+expect_eq "17d.16 a CR-only plan reads the same" \
+  "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task-cr.md" "")"
 
 finish

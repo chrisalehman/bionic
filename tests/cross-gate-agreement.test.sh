@@ -11384,7 +11384,7 @@ expect_eq "control: the same scratch tree with the plant removed reads back to 2
   "$(bf_3rd_calls | grep -c 'plan_bring_forward "')"
 
 # ============================================================
-section "SV — the shared brief-scaffold block is byte-identical across all eight rendered surfaces, and re-authored to the new span rule (epic-23 wave-17-fixit-184 T9, REQ-7 AC-7.1)"
+section "SV — the shared brief-scaffold block is byte-identical across its two author surfaces (the six role files carry its reader view, Δ9), and re-authored to the new span rule (epic-23 wave-17-fixit-184 T9, REQ-7 AC-7.1)"
 # ============================================================
 #
 # WHY THIS LIVES HERE, NOT IN docs-pins.test.sh. `agents-src/blocks/brief-scaffold.md` is
@@ -11410,10 +11410,11 @@ sv_suites_line() {  # <file> -> the scaffold's Suites: line, or empty
   awk '/^Suites: none/ { print; exit }' "$1" 2>/dev/null
 }
 
+# RE-POINTED (wave-21 T7b, design ledger Δ9): the author block renders into SKILL.md and
+# dispatch.md only. The six role files carry the reader view (brief-scaffold-reader.md),
+# which has no fenced `Suites: none` line; the arm after the count pins that each of them
+# carries that view, so a role file that lost its scaffold altogether still turns this red.
 SV_SURFACES="$SV_SKILL $SV_DISPATCH"
-for _sv_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
-  [ -f "$_sv_f" ] && SV_SURFACES="$SV_SURFACES $_sv_f"
-done
 
 SV_DISAGREE=""
 SV_COUNT=0
@@ -11422,8 +11423,18 @@ for _sv_f in $SV_SURFACES; do
   _sv_got="$(sv_suites_line "$_sv_f")"
   [ "$_sv_got" = "$SV_SUITES_LINE" ] || SV_DISAGREE="${SV_DISAGREE} ${_sv_f##*/}=[${_sv_got:-<absent>}]"
 done
-expect_eq "SV all eight rendered surfaces carry the shared scaffold's new Suites: line" \
-  "8 " "$SV_COUNT $SV_DISAGREE"
+expect_eq "SV both author surfaces (SKILL.md, dispatch.md) carry the shared scaffold's new Suites: line" \
+  "2 " "$SV_COUNT $SV_DISAGREE"
+
+SV_ROLES=0
+SV_NOREADER=""
+for _sv_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
+  [ -f "$_sv_f" ] || continue
+  SV_ROLES=$((SV_ROLES + 1))
+  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_sv_f" || SV_NOREADER="${SV_NOREADER} ${_sv_f##*/}"
+done
+expect_eq "SV …and all six role files carry the reader view of the scaffold" \
+  "6 " "$SV_ROLES $SV_NOREADER"
 
 # THE OLD LINE IS GONE, EVERYWHERE, NOT JUST REPLACED SOMEWHERE. A partial render (the
 # block updated in the source but only some templates re-rendered) would leave some copies
@@ -11433,7 +11444,7 @@ SV_STALE=0
 for _sv_f in $SV_SURFACES; do
   /usr/bin/grep -qF 'on its own paragraph' "$_sv_f" 2>/dev/null && SV_STALE=$((SV_STALE + 1))
 done
-expect_eq "SV …and none of the eight still carries the retired 'on its own paragraph' comment" \
+expect_eq "SV …and neither author surface still carries the retired 'on its own paragraph' comment" \
   "0" "$SV_STALE"
 
 # ANTI-VACUITY: a doctored copy of one surface, reverted to the old comment, DOES disagree
@@ -12554,5 +12565,145 @@ CGFU_FN=$(awk '/^verdict_followup\(\)/{f=1} f{print} f && /^}/{exit}' "$SWEEPER"
 expect_contains "CG-followup verdict_followup asks row_acked (the close predicate's answer)" "row_acked" "$CGFU_FN"
 expect_eq "CG-followup verdict_followup reads no ledger itself" "0" \
   "$(grep -c 'LEDGER_FILE\|event=ack' <<< "$CGFU_FN")"
+
+
+# ============================================================
+section "CG-ledger — ONE ledger reader: the gate's refusal ids ARE the tick's LEDGER ids (epic-23 wave-21 T5; REQ-4 AC-4.1; D4, ADR-037 decision 3)"
+# ============================================================
+#
+# TWO CALLERS, ONE READER. `units_findings` names every ledger defect; the commit gate refuses
+# on it and the Patrol tick prints it as `poker: LEDGER <id> <kind> [<value>]`. AC-4.1 fails
+# when a plan the gate refuses ticks clean, or a plan that ticks a finding commits. So one
+# wave plan carrying all three kinds — a status off the enum (T1), a landed row with no line
+# (T2), an active row whose agent cell names no roster row (T3) — beside a launched active row
+# (T4) and a self-owned one (T5) that are NOT findings. The REAL tick reads it once; the REAL
+# gate is then driven to a commit, one refusal at a time, each refused row repaired by the
+# kind the tick named for it. The ids the gate refused on must be the ids the tick printed,
+# and the repaired plan must both commit and tick clean.
+#
+# AND IN EVERY TICK STATE (wave-21 T13; the audit's refutation of AC-4.1 at 3b45d05). The tick
+# printed its LEDGER lines only inside the FILL branch, while the gate reads the ledger in every
+# state — so under HOLD, or on the first tick before any roster exists, a plan the gate refused
+# ticked clean. `cgl_case` runs the whole agreement once per state: FILL (a healthy machine and
+# a roster), HOLD (free memory below the hold floor) and NO ROSTER (armed, nothing dispatched:
+# the first tick of every run). With no roster both readers take the no-roster rule, so T3's
+# agent-named active row is an `evidence` finding there rather than a `launch` one, and the
+# gate folds the two evidence rows into one refusal.
+# cgl_case <label> <free_mb> <roster: yes|no> <want kinds> <want refusals>
+cgl_case() {
+  local lbl="$1" free="$2" roster="$3" want_kinds="$4" want_n="$5"
+  CGL_R=$(new_repo "cgl${lbl}")
+  CGL_P="$CGL_R/.bionic/docs/plans/epic-99/cgl.plan.md"
+  CGL_RO="$CGL_R/.bionic/tmp/roster-$SID_A.state"
+  CGL_FREE="$free"
+  mkdir -p "$(dirname "$CGL_P")"
+  cat > "$CGL_P" <<CGLEOF
+---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 14
+intent: build
+rigor: audited
+scale: wave
+multi_agent: true
+use_worktree: true
+parallel-budget: writers=8 suites=4 worktrees=8 test_jobs=8 source=probe
+---
+
+# Fixture plan
+
+## SDLC State
+
+integration-branch: main
+current: 4
+Step 1: requirements: $CGL_P
+approved-by: fixture 2026-10-01T00:00Z approved
+
+- Step 3: prior evidence
+Step 4:
+  worktree: .worktrees/cgl
+  base-sha: 0b9935d
+  branch: wave/cgl
+
+- T4: dispatched to w-T4
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | a status off the enum | w-T1 | — | 30m | REQ-x | a.sh | doing |
+| T2 | 4 | build | landed, no line | w-T2 | — | 30m | REQ-x | b.sh | landed |
+| T3 | 4 | build | active, agent names no roster row | bionic:implementor | — | 30m | REQ-x | c.sh | active |
+| T4 | 4 | build | active, launched | w-T4 | — | 30m | REQ-x | d.sh | active |
+| T5 | 4 | build | active, self-owned | — | — | 30m | REQ-x | e.sh | active |
+CGLEOF
+  if [ "$roster" = yes ]; then
+    roster_header > "$CGL_RO"
+    roster_row_fixture status=identified session="$SID_A" name=w-T4 agent_id=a-w-T4 \
+      tool_use_id=toolu_01CGLT4 deliverable= >> "$CGL_RO"
+  fi
+  s4_bind "$CGL_R" "$SID_A" "$CGL_P"
+  s4_attest "$CGL_R" "$SID_A"
+  # THE FIRST TICK OF A RUN IS AN ARMED ONE: with no roster file the tick answers QUIET only
+  # for a session that armed here (session-poker.sh's AC-38 split), and refuses otherwise.
+  [ "$roster" = yes ] || ( cd "$CGL_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$CGC_POKER" arm >/dev/null 2>&1 )
+  CGL_TICK="$(cgl_tick)"
+  case "$lbl" in
+    -hold) expect_contains "CG-ledger${lbl} precondition: the tick is under HOLD" "poker: HOLD free_mb=${free}" "$CGL_TICK" ;;
+    -noroster) expect_contains "CG-ledger${lbl} precondition: the tick is the armed first tick, QUIET" \
+                 "poker: QUIET — armed, nothing dispatched yet on this session" "$CGL_TICK" ;;
+  esac
+  CGL_LEDGER="$(printf '%s\n' "$CGL_TICK" | sed -n 's/^poker: LEDGER //p')"
+  CGL_TICK_IDS="$(printf '%s\n' "$CGL_LEDGER" | awk 'NF { print $1 }' | LC_ALL=C sort -u | tr '\n' ' ')"
+  expect_eq "CG-ledger${lbl} precondition: the real tick names exactly the three defective rows" "T1 T2 T3 " "$CGL_TICK_IDS"
+  expect_eq "CG-ledger${lbl} precondition: …one of each kind" "$want_kinds" \
+    "$(printf '%s\n' "$CGL_LEDGER" | awk 'NF { print $2 }' | LC_ALL=C sort -u | tr '\n' ' ')"
+
+  # THE GATE, TO A COMMIT. Each refusal's detail names its rows (`T1: status …` from the
+  # validator, `- T2:` and `- T3: <agent>` from the two ledger arms); each named row is repaired
+  # by the kind the tick printed for it. Bounded: three kinds, so a fifth refusal is a loop.
+  CGL_GATE_IDS=""; CGL_N=0; CGL_RC=2; CGL_OUT=""
+  while [ "$CGL_N" -lt 5 ]; do
+    cgl_gate
+    [ "$CGL_RC" -eq 2 ] || break
+    CGL_N=$((CGL_N + 1))
+    CGL_NAMED="$(printf '%s\n' "$CGL_OUT" | sed -n -E 's/^(- )?(T[0-9]+):.*/\2/p' | LC_ALL=C sort -u)"
+    if [ -z "$CGL_NAMED" ]; then no "CG-ledger${lbl} refusal $CGL_N names no ledger row" "$CGL_OUT"; break; fi
+    for _cgl_id in $CGL_NAMED; do
+      CGL_GATE_IDS="${CGL_GATE_IDS}${_cgl_id}"$'\n'
+      case "$(printf '%s\n' "$CGL_LEDGER" | awk -v id="$_cgl_id" '$1 == id { print $2; exit }')" in
+        status)   sed -i.bak "s/| a.sh | doing |/| a.sh | pending |/" "$CGL_P" ;;
+        evidence) awk -v id="$_cgl_id" '{ print } $0 == "- T4: dispatched to w-T4" { print "- " id ": bash suite 9/9 green" }' \
+                    "$CGL_P" > "$CGL_P.new" && mv "$CGL_P.new" "$CGL_P" ;;
+        launch)   sed -i.bak "s/| bionic:implementor |/| w-${_cgl_id} |/" "$CGL_P"
+                  roster_row_fixture status=identified session="$SID_A" name="w-${_cgl_id}" \
+                    agent_id="a-w-${_cgl_id}" tool_use_id="toolu_01CGL${_cgl_id}" deliverable= >> "$CGL_RO" ;;
+        *) no "CG-ledger${lbl} the gate refused $_cgl_id, which the tick never named" "$CGL_OUT" ;;
+      esac
+    done
+  done
+  rm -f "$CGL_P.bak"
+  expect_eq "CG-ledger${lbl} AC-4.1 the gate's refusal ids are the tick's LEDGER ids" \
+    "$CGL_TICK_IDS" "$(printf '%s' "$CGL_GATE_IDS" | LC_ALL=C sort -u | tr '\n' ' ')"
+  expect_eq "CG-ledger${lbl} …one refusal per kind" "$want_n" "$CGL_N"
+  expect_eq "CG-ledger${lbl} AC-4.1 the repaired plan commits" "0" "$CGL_RC"
+  expect_absent "CG-ledger${lbl} AC-4.1 …and ticks clean" "poker: LEDGER" "$(cgl_tick)"
+}
+cgl_tick() {
+  cgc_ring
+  ( cd "$CGL_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" \
+      BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+      BIONIC_PROBE_FREE_MB="${CGL_FREE:-8192}" \
+      bash "$CGC_POKER" tick 2>&1 )
+}
+# The gate's whole channel goes to CGL_OUT and its status to CGL_RC, in this shell: a
+# `$( )` caller would lose the status with the subshell.
+cgl_gate() {
+  CGL_OUT=$(mk_bash_payload "$SID_A" "$SANDBOX/t.jsonl" "$CGL_R" "git commit -m x" \
+    | env -u CLAUDE_PROJECT_DIR HOME="$CGL_R" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_EG" 2>&1)
+  CGL_RC=$?
+}
+cgl_case ""          8192 yes "evidence launch status " 3
+cgl_case "-hold"     512  yes "evidence launch status " 3
+cgl_case "-noroster" 8192 no  "evidence status " 2
 
 finish

@@ -831,4 +831,41 @@ expect_match "58: a payload with no manifest answers unknown" "*state=unknown*" 
 expect_match "59: …naming integrity/rendered.sha256 as what it looked for" \
   "*integrity/rendered.sha256*" "$LINE_NONE"
 
+# ---------- plugin-root drift (wave-21 T3, AC-2.3) ----------
+#
+# The registry's root and the root the hooks run from can be two trees (triage-C R2: the
+# registry on 1.8.6 while the hooks ran 1.8.7). The Patrol must be armed from the RUNNING
+# root, so doctor names the pair when their hooks/session-poker.sh differ byte-wise.
+# The running root here is doctor's own location (the repo's payload/), by design. Both
+# paths print PHYSICAL (pwd -P), so the fixture's expectation is resolved the same way:
+# macOS's mktemp lives under the /var -> /private/var symlink.
+make_drift_home() {  # <poker: differ|same|none> -> claude-home on stdout; registry root is <home>/root
+  local h; h="$(make_registry_home)"
+  mkdir -p "$h/root/hooks"
+  case "$1" in
+    differ) printf '#!/bin/bash\n# an older poker\n' > "$h/root/hooks/session-poker.sh" ;;
+    same)   cp "${PAYLOAD}/hooks/session-poker.sh" "$h/root/hooks/session-poker.sh" ;;
+  esac
+  write_installed_plugins_sha "$h" "$h/root" "0000000"
+  printf '%s' "$h"
+}
+drift_line() { printf '%s\n' "$1" | awk '/plugin-root drift:/'; }
+
+H_DIFFER="$(make_drift_home differ)"
+OUT_DIFFER="$(run_doctor "$H_DIFFER")"
+LINE_DIFFER="$(drift_line "$OUT_DIFFER")"
+expect_match "60: a registry poker that differs prints the drift line, naming the registry root"   "*plugin-root drift: registry=$(cd "$H_DIFFER/root" && pwd -P) running=*" "$LINE_DIFFER"
+expect_match "61: …naming the running root and the remedy" \
+  "*running=${PAYLOAD} — the Patrol must be armed from the running root*" "$LINE_DIFFER"
+
+H_SAME="$(make_drift_home same)"
+OUT_SAME="$(run_doctor "$H_SAME")"
+expect_eq "62: byte-identical pokers print no drift line" "" "$(drift_line "$OUT_SAME")"
+expect_match "62b: …and the page still rendered (the PATROL section is there)" "*PATROL*" "$OUT_SAME"
+
+OUT_NOENTRY="$(run_doctor "$(make_registry_home)")"
+expect_eq "63: no registry entry for bionic prints no drift line" "" "$(drift_line "$OUT_NOENTRY")"
+expect_match "63b: …and the page still rendered" "*PATROL*" "$OUT_NOENTRY"
+
+
 finish

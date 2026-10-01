@@ -1365,8 +1365,11 @@ return 2
 # refuse the stop once unless the tick's TWO standing duties were performed
 # inside it — a task-list refresh (`TaskList`, or a write naming the active plan
 # file), and an ANSWER to any `poker: FILL` line the tick printed (the named
-# dispatches, or an explicit `fill-declined: <reason>`). Any other turn passes
-# untouched, as does any ambiguity along the way.
+# dispatches, or an explicit `fill-declined: <reason>`). THAT IS THE TICK ARM'S HALF ONLY. The
+# GAP arm (wave-20 Δ7, ADR-033 d2) judges EVERY Stop, Patrol or not: a live ledger with
+# fillable ready rows the turn neither dispatched nor declined is refused, and a decline answers
+# the turn it is written in, never the next. A turn that is neither a tick nor a fillable gap
+# passes untouched, as does any ambiguity along the way.
 #
 # WHY A WALL AND NOT BETTER WORDING. The duties live in the Patrol prompt today,
 # and a prompt is text: it asks. Every rule in this repo that actually binds is a
@@ -1612,12 +1615,19 @@ STREAM="$_ST_STREAM"
 # it. TOOL rows here are already main-thread-only (the select() above excludes
 # sidechain and agentId-carrying entries), the same exclusion the tick-duties fold
 # below relies on.
+#
+# A CronList AFTER THE CREATE DISCHARGES IT. The offending CronCreate never leaves the transcript,
+# so a fold that only ever set `violated` latched: every later turn's first Stop was refused again
+# and "this gate blocks once" held within one turn (stop_hook_active) but not across turns. The
+# look the gate exists to force is the look at the job table, so a CronList since the marker
+# clears the violation whichever side of the CronCreate it falls on. A later marker still starts
+# a fresh window, and a CronCreate with no CronList since the marker still blocks, once.
 RITUAL=$(printf '%s\n' "$STREAM" | awk -F'\t' '
   BEGIN { marker = 0; listed = 0; violated = 0 }
   $1 == "MARK" { marker = 1; listed = 0; violated = 0; next }
   $1 == "TOOL" {
     if (!marker) next
-    if ($2 == "CronList") { listed = 1; next }
+    if ($2 == "CronList") { listed = 1; violated = 0; next }
     if ($2 == "CronCreate" && !listed) { violated = 1; next }
     next
   }
@@ -1625,12 +1635,16 @@ RITUAL=$(printf '%s\n' "$STREAM" | awk -F'\t' '
 ')
 
 if [ "$RITUAL" = "block" ]; then
-  RITUAL_REASON="This is the first Stop after a /clear or a resume, and the transcript shows a CronCreate with no CronList before it since then. A predecessor Patrol cron survives a /clear and keeps firing into the new conversation — creating a job before listing and deleting the stray one leaves two clocks on one project.
+  # THE TEXT SAYS WHAT IS TRUE ON EVERY STOP IT FIRES ON (wave-21 T13; walk-3b45d05 item 3).
+  # The window opened by the marker stays open until a CronList, so the refusal repeats on the
+  # turns after the one that made the cron; it used to open "This is the first Stop after a
+  # /clear or a resume", which is false on all of them.
+  RITUAL_REASON="Since the last /clear or resume, the transcript shows a CronCreate with no CronList before it, and that window stays open until a CronList: every Stop until then is refused, whether or not the turn made a Cron call. A predecessor Patrol cron survives a /clear and keeps firing into the new conversation — creating a job before listing and deleting the stray one leaves two clocks on one project.
 
-Do the resume ritual, in order, then stop again — this gate blocks once:
+Do the resume ritual, in order, then stop again — this gate blocks once per turn, every turn until a CronList:
   1. CronList
   2. delete every bionic-patrol session=<other> job it lists
-  3. CronCreate
+  3. CronCreate — only if step 2 left this session with no Patrol job of its own
   4. bash ${HOOK_DIR}/session-poker.sh arm
   5. … adopt"
   fold_block block stop "a cron was created with no CronList first" "list and delete stray jobs first" \

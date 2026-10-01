@@ -1270,6 +1270,35 @@ expect_status "a brief with no cadence leaves cadence= empty" "" "$(roster_field
 expect_absent "an undeclared subprocess claim is NOT an absence finding" \
   "claims" "$(roster_field "$ROW" absent)"
 
+# THE SCAFFOLD'S OWN OPTIONAL LINE, PASTED (wave-21 T7; REQ-7, D7). The shipped scaffold
+# carries `Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run
+# watch — optional`. Pasted unfilled, the slot is guidance, exactly as an unfilled
+# `Deliverable-waiver: <reason>` is: a claim lifted from it would put a pattern no process
+# carries on the row, and the P2 display reads that as `live: no`, the alarm direction.
+# Filled, the trailing `#` comment is the scaffold's, not the pattern's: `pgrep -f` with
+# the comment glued on matches nothing. Both directions, over the scaffold line itself.
+#
+# fails-when: the unfilled line lifts a claim, or a filled line's claim carries the comment.
+T7_CLAIM_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Subprocess claim")"
+expect_nonempty "r10Lc1 meta: the scaffold carries the optional Subprocess claim: line" \
+  "$T7_CLAIM_LINE"
+REPO=$(make_repo r10Lc1 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "${BRIEF_FULL}
+${T7_CLAIM_LINE}" "w99-claim-slot")"
+expect_status "r10Lc1 a brief carrying the unfilled scaffold claim line is ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_nonempty "r10Lc1 …and wrote its row" "$ROW"
+expect_status "r10Lc1 …with no claim lifted from the slot" "" "$(roster_field "$ROW" claims)"
+
+REPO=$(make_repo r10Lc2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "${BRIEF_FULL}
+$(printf '%s\n' "$T7_CLAIM_LINE" | sed 's/<process pattern>/gh run watch 4242/')" "w99-claim-filled")"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "r10Lc2 a filled scaffold claim line lifts the pattern alone, comment dropped" \
+  "gh run watch 4242" "$(roster_field "$ROW" claims)"
+
 # THE NEGATIVE DIRECTION, which is the one that was missing (Step-6 critic F-2).
 # Every case above declares a liveness contract and checks it is read correctly.
 # None checked the far more common brief that declares NONE and merely uses one
@@ -5850,8 +5879,17 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # RAISED 15 -> 16 (wave-20 T7, REQ-9 AC-9.3), in the FIXED part: the wire now carries one
 # line saying the wall reads the prompt text only, beside the scaffold it tells the author to
 # copy. The fixed part is twelve; the variable part is unmoved.
-expect_status "§combined …the wire is at most 16 lines (12 + 1 extra fault + 3 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 16 ] && echo 0 || echo 1)"
+#
+# RAISED 16 -> 17 (wave-21 T7, REQ-7 AC-7.2), by the oldest clause again: the scaffold gained
+# the optional `Subprocess claim:` line, which `dp_scaffold_marked` reproduces like every
+# other. The FIXED part is thirteen — one refusal line, a blank, NINE scaffold lines, the
+# prompt-only line, a blank, the pointer — and the variable part is unmoved. The meta row
+# below holds the scaffold at nine lines, so the next line added to it moves this cap on
+# purpose rather than by surprise.
+expect_eq "§combined meta: the shipped scaffold is nine lines, the count both caps are built on" \
+  "9" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
+expect_status "§combined …the wire is at most 17 lines (13 + 1 extra fault + 3 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 17 ] && echo 0 || echo 1)"
 expect_contains "§combined …and the fixed line that grew it is the prompt-only sentence" \
   "The wall reads the prompt text only." "$GATE_REASON"
 # AND THE THIRD LINE IS THE NEW WALL'S, NAMED — a cap raised without saying which line
@@ -5966,8 +6004,8 @@ section "§scaffold-marks — the scaffold marks what the brief LACKS, not what 
 # ` <ADD>` to the lines this brief still needs. Until wave-14 it asked only "did this brief
 # spell this label", which is A-T2.1's literal-presence rule — and three of the scaffold's
 # labels are not standalone requirements at all. The scaffold says so itself: `Files:` is
-# "writers; omit for a read-only brief", `Deliverable-waiver:` is "only for a report returned
-# by message". So a read-only brief that had correctly declared `Suites:` was told to add
+# "writers; a read-only brief omits this and keeps Suites: none" (wave-21 T7's wording),
+# `Deliverable-waiver:` is "only for a report returned by message". So a read-only brief that had correctly declared `Suites:` was told to add
 # files it will not touch, and a brief that had declared its artifact was told to waive it —
 # an instruction that, followed, would make the dispatch worse. Two of the three items on
 # wave-13's walk.
@@ -6078,6 +6116,32 @@ expect_contains "§scaffold-marks (d) neither instrument -> the Files: line is m
   "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
 expect_contains "§scaffold-marks (d) neither instrument -> the Suites: line is marked" \
   "${SM_SUITES_LINE} <ADD>" "$GATE_VERR"
+
+# (e)/(f) AC-7.2 (wave-21 T7; REQ-7, D7) — THE OPTIONAL LINE IS NEVER MARKED. The scaffold
+# carries `Subprocess claim:` for a task that backgrounds a watcher (a CI wait, `gh run
+# watch`); a task that backgrounds nothing omits it, and that is the ordinary case, so its
+# absence is never a fault and never an `<ADD>`. (f) reads (d)'s several-fault wire above —
+# the brief carries no claim, and every instrument line on that wire IS marked, so an
+# unmarked claim line there is the rule, not an accident of a wire that marks nothing. (e)
+# is the admit direction: the canonical brief, which carries no claim, passes.
+#
+# fails-when: the claim line is marked `<ADD>`, missing from the wire, or a brief without
+# it is refused.
+SM_CLAIM_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Subprocess claim")"
+expect_nonempty "§scaffold-marks meta: the optional Subprocess claim: line was read out of dispatch.md" \
+  "$SM_CLAIM_LINE"
+expect_contains "§scaffold-marks (f) the several-fault wire renders the optional claim line, as shipped" \
+  "${SM_CLAIM_LINE:-<no Subprocess claim: line in the scaffold>}" "$GATE_VERR"
+expect_absent "§scaffold-marks (f) …and never marks it, though the brief carries no claim" \
+  "${SM_CLAIM_LINE:-<no Subprocess claim: line in the scaffold>} <ADD>" "$GATE_VERR"
+
+REPO=$(make_repo rsm-noclaim yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "smbot5")"
+expect_eq "§scaffold-marks (e) a brief with no Subprocess claim: line is ADMITTED" \
+  "allow" "$GATE_VERDICT"
+expect_absent "§scaffold-marks (e) …and its absence is not an absence finding" \
+  "claims" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" absent)"
 # ============================================================================
 section "§combined-deny — the combined refusal reaches the MODEL (wave-12 T17, AC-1.1)"
 # ============================================================================
@@ -6426,6 +6490,15 @@ expect_contains "§a3 …and the fix names engagement as what writes the stamp" 
 expect_absent "§a3 …and no longer orders the hand-run arm" \
   "session-poker.sh arm" "$GATE_VERR"
 expect_contains "§a3 …while still naming the one half the model owns" "CronCreate" "$GATE_VERR"
+# LOOK FIRST (wave-21 T7; REQ-1 AC-1.4, the preflight half). A `/clear` or a resume leaves a
+# predecessor's job running, and the stop gate's ritual fold refuses a CronCreate that no
+# CronList preceded — so a fix that names CronCreate alone walks the model into the next
+# refusal. The fix text names CronList, and names it FIRST.
+#
+# fails-when: the never-armed fix names CronCreate with no CronList before it.
+T7_FIX_TEXT="$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -m1 '^Fix: ' || true)"
+expect_contains "§a3 …and the fix line looks before it creates" "Fix: CronList, then CronCreate" \
+  "$T7_FIX_TEXT"
 
 # THE PAIRED ARM, and the anti-vacuity one. A4 (armed, then stopped firing) is a different
 # finding with a different remedy — the clock died, the stamp did not — and it keeps both
@@ -6796,12 +6869,16 @@ expect_contains "§three-arms …and the brief-shape fault" \
 # line: eleven plus two.
 # The fixed part is TWELVE since wave-20 T7 (AC-9.3): the prompt-only line sits beside the
 # scaffold. Three faults, no not-checked line: twelve plus two.
-expect_status "§three-arms …and the wire is at most 14 lines (12 + one per additional fault)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 14 ] && echo 0 || echo 1)"
+# The fixed part is THIRTEEN since wave-21 T7 (AC-7.2): the scaffold's ninth line is the
+# optional `Subprocess claim:` (§combined holds the nine). Three faults: thirteen plus two.
+expect_status "§three-arms …and the wire is at most 15 lines (13 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 15 ] && echo 0 || echo 1)"
 # NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
-expect_status "§three-arms …and it really grew: more than the eleven-line single-arm wire" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 12 ] && echo 0 || echo 1)"
+# MOVED WITH THE FIXED PART (wave-21 T7): a wire that grew by nothing is thirteen lines now,
+# so the floor that proves growth is fourteen.
+expect_status "§three-arms …and it really grew: more than the thirteen-line fixed part" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 14 ] && echo 0 || echo 1)"
 # THE SHAPE BANS OF WAVE-13 STAND: no per-fault heading, no fault-count sentence, no
 # stacked `Fix:` paragraphs. One line per fault is a LINE, not a section.
 expect_absent "§three-arms …no fault-count header sentence" "SHAPE FAULTS" "$GATE_REASON"
@@ -7578,6 +7655,9 @@ Re-executes: ${RL_BT}bash tests/x.test.sh > out 2>&1${RL_BT}" "w16-redir-run")"
 expect_eq "16ld3 a marked run carrying a shell redirection is REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "16ld3 …naming the whole token it saw, redirection and all" \
   "bash tests/x.test.sh > out 2>&1" "$GATE_VERR"
+# THE PAIRED POSITIVE FOR 16ld5 (wave-21 T7, AC-6.1): a real redirection is still called one.
+expect_contains "16ld3 …and the fault it names is still a redirection" \
+  "a redirection: bash tests/x.test.sh > out 2>&1" "$GATE_VERR"
 # AND NOTHING REACHED THE ROSTER. Under the old lift the row was written with the
 # redirection tokens silently gone; this reads the absence of the row itself, and its
 # failure message prints whatever row was written instead. Paired with the two positive
@@ -7598,6 +7678,89 @@ expect_status "16ld4 a whole <cmd> slot beside an ordinary run is still ADMITTED
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "16ld4 …the slot lifted nothing and the ordinary run kept its marks" \
   "$RL_JEST" "$(roster_field "$ROW" re_executes)"
+
+# ---- AC-6.1 (wave-21 T7; REQ-6, D6): a placeholder GLUED inside a run is a placeholder ----
+#
+# WHAT WAS WRONG (triage-B §3). `wholeslot()` admits a run that is NOTHING BUT `<...>`, and
+# every other run holding a bracket was refused as "a redirection" — so
+# `gh api repos/o/r/actions/jobs/<id>/logs`, a path with an unfilled `<id>` in it, sent its
+# author to rewrite a correct command for a redirection it never had. Refusing it is right
+# (a budget entry no typed command can equal is the `$name` rule); the WORD was wrong. A
+# `<name>` with a non-space neighbour is an unfilled placeholder and is named as one; 16ld3
+# above is the paired positive — `> out 2>&1` is still a redirection.
+#
+# fails-when: the glued run is admitted, called a redirection, or the detail does not say
+# to fill it.
+REPO=$(make_repo r16ld5 yes)
+write_attestation "$REPO" "$SID_A"
+# THE STUB DERIVATION, not the real tool — same reason as 16ld1 above.
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: read the failed job's log.
+Expected artifact: .bionic/docs/record/w21-placeholder.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${RL_BT}gh api repos/o/r/actions/jobs/<id>/logs${RL_BT}" "w21-ph-run")"
+expect_eq "16ld5 a run with a placeholder glued inside a path is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "16ld5 …named as an unfilled placeholder, with the run it sat in" \
+  "an unfilled placeholder: gh api repos/o/r/actions/jobs/<id>/logs" "$GATE_VERR"
+expect_absent "16ld5 …and never called a redirection" "a redirection: " "$GATE_VERR"
+expect_contains "16ld5 …and the detail says a placeholder is filled with a real value" \
+  "filled with a real value" "$GATE_VERR"
+expect_empty "16ld5 …with no roster row written for the refused dispatch" \
+  "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+
+# ---- AC-6.2 (wave-21 T7; REQ-6, D6): a refused instrument is not a missing one ----
+#
+# WHAT WAS WRONG (triage-B §4.2, the cascade). 16ld1-16ld5 each carry a valid `Files:` line,
+# so the refused run is their only fault. Take that line away and the run's own refusal
+# came with a second, false one — "this brief declares no Files: and no Suites:" — because
+# the no-instrument guard tested `suites_dropped` and none of its three siblings. A brief
+# that declared its instrument and had it refused declared something; the fault it has is
+# the one its own arm names. 27c is the control: a brief that declares nothing still draws
+# the no-instrument refusal.
+#
+# fails-when: any of the four refusals below also carries the no-instrument sentence.
+T7_NOFILES_HEAD="Your task: re-run the unit tests.
+Expected artifact: .bionic/docs/record/w21-nofiles.md
+Expected duration: ~20 minutes."
+
+REPO=$(make_repo r16ld6a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "${T7_NOFILES_HEAD}
+Re-executes: ${RL_BT}\$JEST x${RL_BT}" "w21-nofiles-var")"
+expect_eq "16ld6a the 16ld1 run with no Files: is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "16ld6a …for its own fault, the token named" "\$JEST x" "$GATE_VERR"
+expect_absent "16ld6a …and never for declaring nothing" \
+  "declares no Files: and no Suites:" "$GATE_ERR$GATE_REASON"
+
+REPO=$(make_repo r16ld6b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "${T7_NOFILES_HEAD}
+Re-executes: ${RL_BT}bash tests/x.test.sh > out 2>&1${RL_BT}" "w21-nofiles-redir")"
+expect_eq "16ld6b the 16ld3 run with no Files: is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "16ld6b …for its own fault, the token named" \
+  "a redirection: bash tests/x.test.sh > out 2>&1" "$GATE_VERR"
+expect_absent "16ld6b …and never for declaring nothing" \
+  "declares no Files: and no Suites:" "$GATE_ERR$GATE_REASON"
+
+REPO=$(make_repo r16ld6c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "${T7_NOFILES_HEAD}
+Re-executes: ${RL_BT}gh api repos/o/r/actions/jobs/<id>/logs${RL_BT}" "w21-nofiles-ph")"
+expect_eq "16ld6c the 16ld5 run with no Files: is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "16ld6c …for its own fault, the token named" \
+  "an unfilled placeholder: gh api repos/o/r/actions/jobs/<id>/logs" "$GATE_VERR"
+expect_absent "16ld6c …and never for declaring nothing" \
+  "declares no Files: and no Suites:" "$GATE_ERR$GATE_REASON"
+
+REPO=$(make_repo r16ld6d yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "${T7_NOFILES_HEAD}
+Suites: \$SUITE" "w21-nofiles-suite")"
+expect_eq "16ld6d the 16ld2 suite with no Files: is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "16ld6d …for its own fault, the token named" "\$SUITE" "$GATE_VERR"
+expect_absent "16ld6d …and never for declaring nothing" \
+  "declares no Files: and no Suites:" "$GATE_ERR$GATE_REASON"
 
 # ---- AC-7.1 / AC-7.2 (epic-23 wave-18, T4; REQ-7, D4): a QUOTED pipe is not a pipe ----
 #

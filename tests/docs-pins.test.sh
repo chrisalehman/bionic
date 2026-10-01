@@ -2247,6 +2247,49 @@ else
      "total=${ROLE_TOTAL} — was 57013 before wave-11 1c"
 fi
 
+# TWO VIEWS OF ONE SCAFFOLD (wave-21 T7b, design ledger Δ9). The scaffold has two readers.
+# The orchestrator AUTHORS briefs from `agents-src/blocks/brief-scaffold.md`, rendered into
+# dispatch.md and SKILL.md. A dispatched agent READS a brief and needs only what each label
+# obliges it to do, so the six role files carry `brief-scaffold-reader.md` instead. Two
+# blocks can drift where one could not; 111d holds their label sets equal (order-free), so a
+# label added to the author view without a reader clause turns this red. 111c's cap is why
+# the reader view exists; it does not move.
+#
+# fails-when: a `<Label>:` line is in one view and not the other; a role file carries the
+# author block or lacks the reader block; dispatch.md or SKILL.md lacks the author block.
+scaffold_label_set() {  # <file> -> its line-start `<Label>:` tokens, sorted, one line
+  /usr/bin/grep -oE '^[A-Z][A-Za-z-]*( [a-z]+)?:' "$1" 2>/dev/null | LC_ALL=C sort -u | tr '\n' ' '
+}
+SV2_AUTHOR="${REPO}/agents-src/blocks/brief-scaffold.md"
+SV2_READER="${REPO}/agents-src/blocks/brief-scaffold-reader.md"
+SV2_A="$(scaffold_label_set "$SV2_AUTHOR")"
+SV2_R="$(scaffold_label_set "$SV2_READER")"
+if [ -n "$SV2_A" ] && [ "$SV2_A" = "$SV2_R" ]; then
+  ok "111d: Δ9 — the reader scaffold names the same label set as the author scaffold"
+else
+  no "111d: Δ9 — the reader scaffold names the same label set as the author scaffold" \
+     "author=[${SV2_A}] reader=[${SV2_R}]"
+fi
+# Anti-vacuity: a copy of the reader block with one label line removed must fail 111d's check.
+SV2_MUT="$TMP/reader-one-label-short.md"
+/usr/bin/grep -v '^Subprocess claim:' "$SV2_READER" > "$SV2_MUT" 2>/dev/null
+SV2_M="$(scaffold_label_set "$SV2_MUT")"
+expect_eq "111e: a reader block missing one label fails 111d's check (the pin discriminates)" \
+  "differs" "$([ -n "$SV2_M" ] && [ "$SV2_M" != "$SV2_A" ] && echo differs || echo same-or-empty)"
+
+# Which view lands where: the reader block in all six role files and the author block in none
+# of them; the author block in dispatch.md and SKILL.md.
+SV2_BAD=""
+for _rf in "${REPO}"/agents/*.md; do
+  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_rf" || SV2_BAD="${SV2_BAD} ${_rf##*/}:no-reader"
+  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-BEGIN -->' "$_rf" && SV2_BAD="${SV2_BAD} ${_rf##*/}:author"
+done
+for _sf in "${REPO}/skills/canonical-sdlc/dispatch.md" "${REPO}/skills/canonical-sdlc/SKILL.md"; do
+  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-BEGIN -->' "$_sf" || SV2_BAD="${SV2_BAD} ${_sf##*/}:no-author"
+done
+expect_eq "111f: Δ9 — role files carry the reader scaffold only; dispatch.md and SKILL.md the author scaffold" \
+  "" "$SV2_BAD"
+
 # EVERY ROLE POINTS AT THE TERMS. Dropping the injection without leaving the pointer would
 # satisfy the cap and strand the agent, which is the failure this arm exists for.
 SURVIVAL_POINTER='Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.'
@@ -2629,7 +2672,10 @@ section "Section 22: T3 — the brief scaffold renders into all seven surfaces, 
 # HERMETIC. Reads the committed rendered finals by path; the doctored copy for the
 # anti-vacuity arm lives under this file's own mktemp dir.
 
-AC2_SURFACES="${REPO}/skills/canonical-sdlc/dispatch.md ${REPO}/agents/researcher.md ${REPO}/agents/implementor.md ${REPO}/agents/senior-implementor.md ${REPO}/agents/test-runner.md ${REPO}/agents/auditor.md ${REPO}/agents/critic.md"
+# RE-POINTED (wave-21 T7b, Δ9): the six role files carry the reader view of the scaffold
+# (agents-src/blocks/brief-scaffold-reader.md), not this fenced block; 111d/111f pin that
+# view. The author block's surface here is dispatch.md (SKILL.md's copy is 131's).
+AC2_SURFACES="${REPO}/skills/canonical-sdlc/dispatch.md"
 
 # AC-2.1: the scaffold's own FENCED LINE — not the bare label — appears EXACTLY ONCE in
 # each of the seven surfaces. The bare label alone is the wrong instrument here:
@@ -2655,16 +2701,16 @@ for _sf in $AC2_SURFACES; do
   esac
 done
 if [ -z "$AC2_MISSING" ] && [ -z "$AC2_DOUBLED" ]; then
-  ok "124a: AC-2.1 — the brief scaffold's fenced 'Expected artifact:' line appears exactly once in all seven surfaces"
+  ok "124a: AC-2.1 — the brief scaffold's fenced 'Expected artifact:' line appears exactly once in dispatch.md"
 else
-  no "124a: AC-2.1 — the brief scaffold's fenced 'Expected artifact:' line appears exactly once in all seven surfaces" \
+  no "124a: AC-2.1 — the brief scaffold's fenced 'Expected artifact:' line appears exactly once in dispatch.md" \
      "missing:${AC2_MISSING:-none} doubled:${AC2_DOUBLED:-none}"
 fi
 
 # Anti-vacuity: the count must actually discriminate a surface that lost the block.
 AC2_MUT_DIR="$TMP/ac2-scaffold"; mkdir -p "$AC2_MUT_DIR"
 AC2_MUT="$AC2_MUT_DIR/no-scaffold.md"
-grep -Fv -- "$AC2_SCAFFOLD_LINE" "${REPO}/agents/researcher.md" > "$AC2_MUT" 2>/dev/null
+grep -Fv -- "$AC2_SCAFFOLD_LINE" "${REPO}/skills/canonical-sdlc/dispatch.md" > "$AC2_MUT" 2>/dev/null
 expect_eq "124b: a surface with the fenced line stripped reads 0, not 1 (the count discriminates)" \
   "0" "$(grep -Fc -- "$AC2_SCAFFOLD_LINE" "$AC2_MUT" 2>/dev/null | tr -cd '0-9')"
 
@@ -3803,6 +3849,94 @@ if [ "$T35_OLD_HEADER" != "$T35_WALL_HEADER" ]; then
 else
   no "190: the pre-1.8.4 eleven-column header reads back negative (187/188 are not vacuous)" \
      "the old header equals the wall's list — the comparison cannot discriminate"
+fi
+
+# ── T9 (wave-21-fixit-188, D9; AC-1.4 dispatch half, AC-2.2, AC-4.4, AC-7.1) ──────────────────
+# dispatch.md says what is true after this wave. Four facts, one pin each, all read from the
+# rendered file through _flatten so a wrapped sentence still matches. Every pin carries its
+# paired control: the sentence is present AND its stale predecessor is absent, so neither a
+# vacuous "absent" nor a vacuous "present" can pass.
+T9_FLAT="$(_flatten "$DISPATCH_MD")"
+
+# 191 — the arming sentence names the line session-start printed, and CronList comes before
+# CronCreate in what follows it (the arm is CronList-first for a fresh run and a resume alike).
+T9_ARM='run the arm line session-start printed — it begins with CronList, so a fresh run and a resume read one sentence'
+T9_REST="${T9_FLAT#*"$T9_ARM"}"
+T9_PRE_LIST="${T9_ARM}${T9_REST}"; T9_PRE_LIST="${T9_PRE_LIST%%CronList*}"
+if [ "$T9_REST" != "$T9_FLAT" ] && case "$T9_REST" in *CronList*) true ;; *) false ;; esac \
+   && case "$T9_PRE_LIST" in *CronCreate*) false ;; *) true ;; esac \
+   && case "$T9_FLAT" in *'On a `/clear`+resume session-start prints no arm line'*) true ;; *) false ;; esac; then
+  ok "191: AC-1.4 — dispatch.md's arming sentence names the arm line session-start printed, CronList before CronCreate, and says the /clear+resume path prints none"
+else
+  no "191: AC-1.4 — dispatch.md's arming sentence names the arm line session-start printed, CronList before CronCreate, and says the /clear+resume path prints none" \
+     "sentence present: $([ "$T9_REST" != "$T9_FLAT" ] && echo yes || echo no)"
+fi
+
+# 192 — the registry resolver and its false pin claim are gone; one sentence names the line.
+T9_BAD=""
+case "$T9_FLAT" in *installed_plugins.json*) T9_BAD="$T9_BAD installed_plugins.json" ;; esac
+case "$T9_FLAT" in *'held byte-identical'*)  T9_BAD="$T9_BAD held-byte-identical" ;; esac
+case "$T9_FLAT" in *'`<plugin-root>` is the absolute plugin path the printed arm line carries'*) T9_ROOT=yes ;; *) T9_ROOT=no ;; esac
+if [ -z "$T9_BAD" ] && [ "$T9_ROOT" = yes ]; then
+  ok "192: AC-2.2 — dispatch.md has no installed_plugins.json expression and no 'held byte-identical' claim, and names the printed line as the root's source"
+else
+  no "192: AC-2.2 — dispatch.md has no installed_plugins.json expression and no 'held byte-identical' claim, and names the printed line as the root's source" \
+     "stale:${T9_BAD:- none}; root sentence present: $T9_ROOT"
+fi
+
+# 193 — a CI or PR wait is a backgrounded command carrying a Subprocess claim: line; the
+# stale "no bionic machinery relies on it existing" is gone.
+T9_CI='A CI or PR wait is such a backgrounded command, and its brief carries a `Subprocess claim:` line'
+if has_pin "$DISPATCH_MD" "$T9_CI" && ! has_pin "$DISPATCH_MD" 'no bionic machinery relies on it existing'; then
+  ok "193: AC-7.1 — dispatch.md names a CI or PR wait as a backgrounded command with a Subprocess claim: line, and the stale 'no machinery relies on it' sentence is gone"
+else
+  no "193: AC-7.1 — dispatch.md names a CI or PR wait as a backgrounded command with a Subprocess claim: line, and the stale 'no machinery relies on it' sentence is gone" \
+     "ci sentence: $(has_pin "$DISPATCH_MD" "$T9_CI" && echo present || echo absent); stale: $(has_pin "$DISPATCH_MD" 'no bionic machinery relies on it existing' && echo present || echo absent)"
+fi
+
+# 194 — SKILL.md's Known-holes paragraph says both ledger facts, the second WITH ITS CONDITION
+# (wave-21 T13; audit-3b45d05 finding 3). "An `active` row needs no evidence line." was true only
+# when the row's agent cell names a row on the session's roster; with no roster the gate still
+# demands the line from an agent-named active row. The unconditional sentence is gone.
+T13_ACT='An `active` row whose agent the session'"'"'s roster names needs no evidence line'
+T13_NOR='with no roster, an agent-named one still does.'
+if has_pin "$SKILL_MD" 'Task-scale ledgers have no write-time check.' \
+   && has_pin "$SKILL_MD" "$T13_ACT" && has_pin "$SKILL_MD" "$T13_NOR" \
+   && ! has_pin "$SKILL_MD" 'An `active` row needs no evidence line.'; then
+  ok "194: AC-4.4 — SKILL.md's Known holes says task-scale ledgers have no write-time check, and an active row needs no evidence line only when the roster names its agent"
+else
+  no "194: AC-4.4 — SKILL.md's Known holes says task-scale ledgers have no write-time check, and an active row needs no evidence line only when the roster names its agent" \
+     "check sentence: $(has_pin "$SKILL_MD" 'Task-scale ledgers have no write-time check.' && echo present || echo absent); roster sentence: $(has_pin "$SKILL_MD" "$T13_ACT" && echo present || echo absent); no-roster clause: $(has_pin "$SKILL_MD" "$T13_NOR" && echo present || echo absent); unconditional sentence: $(has_pin "$SKILL_MD" 'An `active` row needs no evidence line.' && echo present || echo absent)"
+fi
+
+# 195 — the ledger text says the agent cell carries the ROSTER NAME (A-T5.5), in all three homes.
+# THE THIRD HOME IS THE ONE THAT DEFINES THE COLUMN (wave-21 T14; critic-4e6d4a9 I1).
+# operational-rules.md's column list still said "the `subagent_type` this row dispatches to", and
+# the 1.8.8 gate refuses an `active` row whose agent cell names no roster row — so a plan authored
+# from the reference, or one mid-run at upgrade, was refused at its writers' next commit. The
+# definition carries dispatch.md's sentence, the upgrade step for a pre-1.8.8 row, and never the
+# old role wording.
+T9_AG='carries the ROSTER NAME the dispatch gave the agent'
+T9_AG2='carries the agent'"'"'s ROSTER NAME'
+T14_MIG='A row dispatched before 1.8.8 with a role in this cell is refused by the 1.8.8 commit gate once a roster exists'
+T14_OLD='the `subagent_type` this row dispatches to'
+if has_pin "$DISPATCH_MD" "$T9_AG" && has_pin "$SKILL_MD" "$T9_AG2" && has_pin "$OPRULES" "$T9_AG" \
+   && has_pin "$OPRULES" "$T14_MIG" && ! has_pin "$OPRULES" "$T14_OLD"; then
+  ok "195: A-T5.5 — dispatch.md, SKILL.md and operational-rules.md say a ledger row's agent cell carries the roster name, never the role"
+else
+  no "195: A-T5.5 — dispatch.md, SKILL.md and operational-rules.md say a ledger row's agent cell carries the roster name, never the role" \
+     "dispatch.md: $(has_pin "$DISPATCH_MD" "$T9_AG" && echo present || echo absent); SKILL.md: $(has_pin "$SKILL_MD" "$T9_AG2" && echo present || echo absent); operational-rules.md: $(has_pin "$OPRULES" "$T9_AG" && echo present || echo absent); migration: $(has_pin "$OPRULES" "$T14_MIG" && echo present || echo absent); role wording: $(has_pin "$OPRULES" "$T14_OLD" && echo present || echo absent)"
+fi
+
+# 195b — the `deps` definition admits the `ext:<slug>` token T4 added beside the task ids; "bare
+# task ids only" is no longer the whole grammar the validator accepts.
+T14_EXT='or an external prerequisite `ext:<slug>`'
+T14_BARE='bare task ids only'
+if has_pin "$OPRULES" "$T14_EXT" && ! has_pin "$OPRULES" "$T14_BARE"; then
+  ok "195b: wave-21 T4 — operational-rules.md's deps definition admits ext:<slug> beside the task ids"
+else
+  no "195b: wave-21 T4 — operational-rules.md's deps definition admits ext:<slug> beside the task ids" \
+     "ext sentence: $(has_pin "$OPRULES" "$T14_EXT" && echo present || echo absent); bare-ids sentence: $(has_pin "$OPRULES" "$T14_BARE" && echo present || echo absent)"
 fi
 
 finish

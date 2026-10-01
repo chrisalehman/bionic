@@ -591,7 +591,7 @@ POKER_SCRIPT="${HOOK_DIR}/session-poker.sh"
 # stamp is stale rather than absent, and re-engaging is not what an operator does about a
 # cron job that stopped. `arm` is offered there because a fresh stamp is what proves the
 # revived clock is landing.
-PATROL_FIX_NEVER="Fix: CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
+PATROL_FIX_NEVER="Fix: CronList, then CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
   reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch). That is the
   one half this model owns. The stamp is the other half and it is written for you:
   hooks/engage.sh arms it as the session engages canonical-sdlc, so a session that engaged
@@ -1659,8 +1659,9 @@ dp_scaffold_marked() {
     case "$label" in
       # A MARK IS WHAT THIS BRIEF LACKS, NOT WHAT IT OMITS (wave-14 REQ-6, D8). Three of
       # these labels are halves of a pair, and the scaffold's own comments say so: `Files:`
-      # is "writers; omit for a read-only brief", `Deliverable-waiver:` is "only for a report
-      # returned by message". Marking each one purely because its own field came back empty
+      # is "writers; a read-only brief omits this and keeps Suites: none" (wave-21 T7 reworded
+      # it from "omit for a read-only brief", which read as "omit the instrument"),
+      # `Deliverable-waiver:` is "only for a report returned by message". Marking each one purely because its own field came back empty
       # told a read-only author to declare files it will not touch and an artifact-bearing
       # author to waive the artifact it just declared — an instruction that, followed, makes
       # the dispatch worse. Each pair is now marked only when NEITHER half is satisfied,
@@ -1696,6 +1697,12 @@ dp_scaffold_marked() {
       "Re-executes")         [ -n "$C_RE_EXECUTES" ] || [ -n "$C_SUITES" ] || \
                              [ -n "$C_FILES" ]       || line="${line} <ADD>" ;;
       "Deliverable-waiver")  [ -n "$C_WAIVER" ]      || [ -n "$C_DELIVERABLE" ] || line="${line} <ADD>" ;;
+      # AN OPTIONAL LINE IS NEVER MARKED (wave-21 T7; REQ-7 AC-7.2, D7). `Subprocess claim:`
+      # is declared iff the task backgrounds a watcher — a CI wait, `gh run watch` — so its
+      # absence is the ordinary case and no wall reads it as a fault (the roster's absence
+      # list leaves it off for the same reason). Named here, rather than left to fall
+      # through, so the next label added to this case cannot sweep it in by a default arm.
+      "Subprocess claim")    ;;
     esac
     printf '%s\n' "$line"
   done < <(/usr/bin/awk '
