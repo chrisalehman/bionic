@@ -285,21 +285,27 @@ has  "1.3 …with ONE open row (three status rows for W-ALPHA are one agent)" "1
 has  "1.4 …under the predecessor's sid8" "${OLD_SID:0:8}" "$OUT"
 hasnt "1.5 …and THIS session's own open roster is not a predecessor" "roster-$CUR_SID.state" "$OUT"
 has  "1.6 the re-arm sequence: CronList first" "re-arm: CronList" "$OUT"
-has  "1.7 …then the stray delete" "delete bionic-patrol session=" "$OUT"
+has  "1.7 …then the stray delete" "delete every job whose prompt begins with bionic-patrol session=" "$OUT"
 has  "1.8 …then CronCreate" "CronCreate" "$OUT"
-# T19 (A-orch-19.3): the stamp now arms itself at engagement (hooks/engage.sh, D4), so the
-# ritual's hand step after CronCreate is `adopt` alone — `session-poker.sh arm` is gone from
-# the line entirely, not just reworded.
-hasnt "1.9 …no arm hand step — the stamp arms itself at engagement (D4)" \
-  "session-poker.sh arm" "$OUT"
-# wave-20 REQ-6 (AC-6.1, D6): the CronCreate step names the verb that prints the canonical
-# Patrol prompt, by the poker's absolute path, so the job it creates carries the marker AND the
-# tick — the ritual alone produced jobs that were never tick turns (report #1).
+# RE-AUTHORED BY wave-21 T2 (REQ-2, D2, ADR-037 decision 1). T19 (A-orch-19.3) dropped
+# `session-poker.sh arm` from this line because engage.sh arms the stamp at engagement. That
+# holds for the session that engages; it does not hold for the starts this line now serves —
+# a `compact` or `resume` of an engaged session runs no engage.sh, so its stamp is whatever the
+# last firing left, and the armed instant (R-13) predates the clock the model is about to
+# create. The line is now the FINISHED arm command the model runs as written: CronList, delete
+# every marked job, CronCreate with the prompt baked in (the poker's own `prompt` verb's output,
+# so the prompt text keeps one owner), then `arm`, all by this hook's own root.
 S1_POKER="$(cd "$(dirname "$HOOK")/.." && pwd -P)/hooks/session-poker.sh"
-has  "1.9b …the re-arm line itself, exactly: CronCreate with the printed prompt, then adopt" \
-  "re-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate with the prompt \`bash $S1_POKER prompt\` prints → adopt" "$OUT"
-has  "1.9c AC-6.1 …the re-arm line names the prompt verb" "session-poker.sh prompt" "$OUT"
-has  "1.10 …then adopt" "adopt" "$OUT"
+S1_PROMPT="$(CLAUDE_CODE_SESSION_ID="$CUR_SID" bash "$S1_POKER" prompt 2>/dev/null)"
+has  "1.9 …then the arm hand step, by this hook's own poker" "bash $S1_POKER arm" "$OUT"
+has  "1.9b …the re-arm line itself, exactly: CronList, delete, CronCreate with the baked prompt, arm" \
+  "re-arm: CronList → delete every job whose prompt begins with bionic-patrol session= → CronCreate, recurring every 3600s, with the prompt \`$S1_PROMPT\` → bash $S1_POKER arm" "$OUT"
+has  "1.9c …the baked prompt's first token is THIS session's marker" \
+  "with the prompt \`bionic-patrol session=${CUR_SID:0:8} " "$OUT"
+has  "1.9e …and its tick is this hook's own poker" "bash $S1_POKER tick" "$OUT"
+eq   "1.9d exactly one re-arm line" "1" "$(printf '%s\n' "$OUT" | grep -c '^re-arm: ')"
+# The predecessor variant keeps its extra step: adopt, on its own line after the arm line.
+has  "1.10 …then adopt, by this hook's own poker" "adopt: bash $S1_POKER adopt" "$OUT"
 has  "1.11 the session-id triple agrees" "— agree" "$OUT"
 eq   "1.12 the hook wrote nothing under .bionic" "$S1_BEFORE" "$(snap "$P1")"
 
@@ -495,7 +501,14 @@ P11b=$(make_env 1s)
 plant_engaged "$P11b" "$CUR_SID"
 OUT=$(drive "$P11b" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq "11.3 exit 0 with the marker present too" "0" "$(rc)"
-eq "11.4 still nothing on stdout — no run, no notice, no block" "" "$OUT"
+# RE-AUTHORED BY wave-21 T2 (REQ-2, AC-2.1). This row used to read "still nothing on stdout":
+# the marker changed nothing when no run was open. It changes one thing now — an ENGAGED start
+# prints the arm line whatever else is on disk, because the Patrol carries the session, not the
+# run, and the model has no other surface that names the root to arm from (ADR-037 decision 1).
+# No run, no notice, no predecessor block: the arm line is the whole output.
+eq "11.4 no run, marker present: the arm line and nothing else" "1" \
+  "$(printf '%s\n' "$OUT" | grep -c .)"
+has "11.5 …and that one line is the arm line" "re-arm: CronList" "$OUT"
 
 section "12 — two or more open runs (AC-5, S7)"
 
@@ -694,8 +707,12 @@ has "14a.2 the bound line names the docs-root-relative plan and its current step
 # tells the model to read at that step. The count is still pinned exactly, not loosened to
 # "at least one" — a third line here would be predecessor state this fixture has none of,
 # which is what 14a.3 has always been guarding.
-eq  "14a.3 exactly two lines of output — the bound line and its step-file pointer, no predecessor state" \
-  "2" "$(printf '%s\n' "$OUT" | grep -c .)"
+# THREE SINCE wave-21 T2 (REQ-2, AC-2.1): the third is the arm line every engaged start now
+# prints. Still pinned exactly — a fourth line would be predecessor state this fixture has none
+# of, which is what this row has always guarded.
+eq  "14a.3 exactly three lines — the bound line, its step-file pointer, the arm line; no predecessor state" \
+  "3" "$(printf '%s\n' "$OUT" | grep -c .)"
+has "14a.3c …the third is the arm line" "re-arm: CronList" "$OUT"
 has "14a.3b the second line points at the step file for the plan's own current step" \
   "skills/canonical-sdlc/steps/3.md" "$OUT"
 eq  "14a.4 wrote nothing" "$S14_BEFORE" "$(snap "$P14")"
@@ -1203,5 +1220,68 @@ eq    "18.7 the hook's open-row count is the roster library's (roster_open_count
   "$(grep -q '| roster_open_counts' "$HOOK" && echo yes || echo no)"
 eq    "18.8 …and the hook keeps no MET close of its own" "0" \
   "$(grep -c 'state") == "MET"' "$HOOK" | tr -d ' ')"
+
+section "19 — every engaged start prints the arm line, from this hook's root (wave-21 T2, REQ-2, AC-2.1; D2)"
+# THE DEFECT (triage-C §R2; seed 2 "related defect 2"). The arm line printed only inside the
+# predecessor block, so an engaged start on a clean project — a `compact` of a run with no
+# /clear residue — printed nothing, and the model resolved the plugin root from the CLI's
+# registry instead. On a directory-source install the registry can name an older build than
+# the tree the hooks run from (measured: 1.8.6 cache vs the 1.8.7 tree, the two pokers
+# differing), so the Patrol ticked an old poker against new walls. The fix: the hook prints the
+# finished arm command on EVERY engaged start, its path baked from its own directory.
+#
+# PAIRED CONTROLS. 19a is the clean engaged start; §2/§11.2 are the clean NOT-engaged start,
+# still silent. 19c plants a registry naming another root WITH a poker in it, so a hook that
+# read the registry would have a real path to print — and pins the arm line present beside the
+# absence, so the absence cannot pass over a hook that printed nothing.
+S19_PROMPT="$(CLAUDE_CODE_SESSION_ID="$CUR_SID" bash "$S1_POKER" prompt 2>/dev/null)"
+
+echo "--- 19a: engaged, no run, no predecessor state, on compact: exactly one arm line ---"
+P19=$(make_env 1s)
+plant_engaged "$P19" "$CUR_SID"
+S19_BEFORE=$(snap "$P19")
+OUT=$(drive "$P19" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "19a.1 exit 0" "0" "$(rc)"
+eq    "19a.2 exactly one arm line" "1" "$(printf '%s\n' "$OUT" | grep -c '^re-arm: ')"
+has   "19a.3 the arm line, exactly, baking \$S1_POKER" \
+  "re-arm: CronList → delete every job whose prompt begins with bionic-patrol session= → CronCreate, recurring every 1s, with the prompt \`$S19_PROMPT\` → bash $S1_POKER arm" "$OUT"
+hasnt "19a.4 no predecessor block title — nothing was left here" "bionic session-start (source:" "$OUT"
+hasnt "19a.5 no adopt line — there is nothing to adopt" "adopt:" "$OUT"
+eq    "19a.6 wrote nothing" "$S19_BEFORE" "$(snap "$P19")"
+
+echo "--- 19b: the same clean engaged project on every source ---"
+for S19SRC in startup clear resume; do
+  OUT=$(drive "$P19" "$S19SRC" "$CUR_SID" "$CUR_SID" "$CUR_SID")
+  has "19b.$S19SRC the arm line prints on source=$S19SRC" "bash $S1_POKER arm" "$OUT"
+done
+
+echo "--- 19c: a registry naming another root: the line still names this hook's own root ---"
+P19c=$(make_env 1s)
+plant_engaged "$P19c" "$CUR_SID"
+S19_REG="$WORK/registry-home"
+S19_OTHER="$S19_REG/plugins/cache/bionic/bionic/1.8.6"
+mkdir -p "$S19_OTHER/hooks" "$S19_OTHER/scripts/lib"
+cp "$S1_POKER" "$S19_OTHER/hooks/session-poker.sh"
+printf '{"version":2,"plugins":{"bionic@bionic":[{"scope":"user","installPath":"%s","version":"1.8.6"}]}}\n' \
+  "$S19_OTHER" > "$S19_REG/plugins/installed_plugins.json"
+OUT=$(
+  export CLAUDE_CONFIG_DIR="$S19_REG" BIONIC_PLUGINS_DIR="$S19_REG/plugins"
+  drive "$P19c" compact "$CUR_SID" "$CUR_SID" "$CUR_SID"
+)
+eq    "19c.1 exit 0" "0" "$(rc)"
+has   "19c.2 the arm line names this hook's own poker" "bash $S1_POKER arm" "$OUT"
+hasnt "19c.3 …and the registry's root appears nowhere in the output" "$S19_OTHER" "$OUT"
+
+echo "--- 19d: the interval is the poker's: 20m reads as 1200s and its cron expression ---"
+P19d=$(make_env 20m)
+plant_engaged "$P19d" "$CUR_SID"
+OUT=$(drive "$P19d" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "19d.1 CronCreate names the configured interval and its cron spelling" \
+  "CronCreate, recurring every 1200s (cron */20 * * * *), with the prompt" "$OUT"
+
+echo "--- 19e: not engaged, no run, no predecessor state: still silent (the paired control) ---"
+P19e=$(make_env 1s)
+OUT=$(drive "$P19e" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "19e.1 nothing on stdout" "" "$OUT"
 
 finish
