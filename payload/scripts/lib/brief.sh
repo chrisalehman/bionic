@@ -308,6 +308,20 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       for (j = 1; j <= nh; j++) if (HK[j] == kind && (best == 0 || HLS[j] < HLS[best])) best = j
       return best
     }
+    # EVERY hit of a label, in position order, as a space-joined list of hit numbers (wave-22
+    # T3, D5). The runs lift reads every `Re-executes:` span, not only the first.
+    function allhits(kind,   j, k, n, idx, t, out) {
+      n = 0
+      for (j = 1; j <= nh; j++) if (HK[j] == kind) idx[++n] = j
+      for (j = 2; j <= n; j++) {
+        t = idx[j]
+        for (k = j - 1; k >= 1 && HLS[idx[k]] > HLS[t]; k--) idx[k + 1] = idx[k]
+        idx[k + 1] = t
+      }
+      out = ""
+      for (j = 1; j <= n; j++) out = (out == "" ? idx[j] : out " " idx[j])
+      return out
+    }
     # The last character index of the span belonging to hit h. `skip` names one
     # hit to IGNORE when looking for the terminator, which the cadence rule in
     # END needs: it asks where the PROGRESS span would end if the cadence label
@@ -659,7 +673,10 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       return ""
     }
     function marked_runs(s,   i, j, tok, out, c, dropped, why) {
-      out = ""; c = 0; dropped = ""
+      # THE UNION OF SEVERAL SPANS (wave-22 T3, D5). The caller resets MRprev, MRc, MRout and
+      # MRdropped once per brief; a run an EARLIER span already carried is skipped, first-seen
+      # order kept, and the cap counts the union. One span behaves as it always did.
+      out = MRout; c = MRc; dropped = MRdropped
       i = 1
       for (;;) {
         j = index(substr(s, i), BT)
@@ -705,6 +722,8 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
         # pipe, and this is the identity today. It is here so the rule that builds the claim
         # is, by construction, the rule that built the declaration.
         tok = collapse(tok, 1)
+        if ((tok in MRprev) && MRprev[tok] != MRspan) continue
+        MRprev[tok] = MRspan
         if (c < RUNS_MAX) {
           out = (out == "" ? BT tok BT : out " " BT tok BT)
           c++
@@ -716,9 +735,7 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       # channel `suites_dropped=` does — read by the bash side below, which turns a non-empty
       # value into a `dp_finding` — never `warn()`, which is the several-fault ADMIT wire the
       # old `re_executes_capwarn=` field used.
-      if (dropped != "") {
-        print "re_executes_dropped=" dropped
-      }
+      MRout = out; MRc = c; MRdropped = dropped
       return out
     }
     function paths(s, maxn, warnlabel,   n, arr, i, t, out, seen, c, dropped) {
@@ -970,8 +987,11 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       # a real command against an exact marked run. There is no `none` waiver here — the
       # absence of the label IS the absence of the declaration, and `Suites: none` remains the
       # one way a brief waives a budget outright.
-      h = firsthit("runs")
-      if (h > 0) { v = marked_runs(spanof(h)); if (v != "") print "re_executes=" v }
+      nr = split(allhits("runs"), RH, " ")
+      split("", MRprev); MRout = ""; MRc = 0; MRdropped = ""; v = ""
+      for (r = 1; r <= nr; r++) { MRspan = r; v = marked_runs(spanof(RH[r])) }
+      if (MRdropped != "") print "re_executes_dropped=" MRdropped
+      if (v != "") print "re_executes=" v
     }
   ' 2>/dev/null
 }
@@ -1454,6 +1474,22 @@ Or configure the derivation once, in .bionic/config.yaml —
     impact-command: bash tests/lib/impact.sh
 
 Then retry the dispatch."
+    if [ -n "$re_executes" ]; then
+      detail="\`Files:\` states which paths the task will touch. Turning that into the set of
+suites the agent may run is the tree's job, and this repository has not named the
+command that asks it.
+
+Fix: your runs are declared under Re-executes:; waive the suite set with \`Suites: none\` beside it —
+    Suites: none
+
+Or name the closed set in the brief instead —
+    Suites: tests/one.test.sh, tests/two.test.sh
+
+Or configure the derivation once, in .bionic/config.yaml —
+    impact-command: bash tests/lib/impact.sh
+
+Then retry the dispatch."
+    fi
     found=1; "$sink" finding "no impact command is configured here" "set impact-command in config.yaml" "$detail"
   fi
 
