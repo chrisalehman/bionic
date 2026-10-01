@@ -259,7 +259,7 @@ section "R7 — roster_open_names takes the LATEST launch, not the last row in f
 # for the same name. An ack taken between the two stamps then closed a name whose real latest
 # launch was still open.
 R7_DIR="$(mktemp -d "${TMPDIR:-/tmp}/roster-r7.XXXXXX")"
-trap 'rm -rf "$R7_DIR"' EXIT
+trap 'rm -rf "$R6_DIR" "$R7_DIR"' EXIT  # one trap for both: a second `trap … EXIT` replaces the first
 r7_open() {  # <case dir> -> the open names, space-joined
   lib roster_open_names "$1/roster-s1.state" "$1/sweeper-s1.state" | tr '\n' ' ' | sed 's/ $//'
 }
@@ -398,5 +398,57 @@ r9_restart_row "$R7_DIR/restartidacked/roster-s1.state" w-restartidacked a-resta
 r6_ack "$R7_DIR/restartidacked/sweeper-s1.state" 2026-09-01T04:00:00Z w-restartidacked
 expect_eq "R10c …and an ack after the restart discharges the id too (the close still works)" \
   "" "$(r6_ids "$R7_DIR/restartidacked" w-restartidacked)"
+
+
+section "R11 — roster_row_for_id is the wall's pick for an id: the last row carrying it, any status (epic-23 wave-22 T1; REQ-1 AC-1.1/AC-1.6, D2)"
+
+# THE ONE READER OF "THE ROW THE WALL READS FOR THIS ID". The suite-budget arm
+# (payload/scripts/lib/walls.sh) and `session-poker.sh amend`'s self-check both call it, so
+# the verb's success line and the wall cannot read two different rows. The roster is the
+# teammate shape the wave-22 seed tripped on — intended (no id) -> identified (id) ->
+# confirmed (no id) — plus a later `duplicate-start` row for the same id, a second agent, and
+# a line that is not a roster row at all but carries the id.
+mkdir -p "$R7_DIR/r11"
+R11_F="$R7_DIR/r11/roster-s1.state"
+R11_BASE=(session=s1 name=w1 launched_at=2026-10-01T10:00:00Z deliverable=d.md duration=1h
+  tool_use_id=toolu_w1 teammate_id=w1@s)
+R11_INT="$(lib roster_row status=intended agent_id= "${R11_BASE[@]}" suites_allowed=a.test.sh)"
+R11_IDN="$(lib roster_row status=identified agent_id=aw1-11 "${R11_BASE[@]}" suites_allowed=a.test.sh)"
+R11_CNF="$(lib roster_row status=confirmed agent_id= "${R11_BASE[@]}" suites_allowed=a.test.sh)"
+R11_DUP="$(lib roster_row status=duplicate-start agent_id=aw1-11 "${R11_BASE[@]}" suites_allowed=b.test.sh)"
+R11_W2="$(lib roster_row status=identified agent_id=aw2-11 session=s1 name=w2 launched_at=2026-10-01T10:00:00Z deliverable=e.md duration=1h)"
+printf '%s\n' "$R11_INT" "$R11_IDN" "$R11_CNF" "$R11_DUP" "$R11_W2" \
+  'sweeper-ledger/v1|event=ack|name=w1|agent_id=aw1-11|at=2026-10-01T11:00:00Z' > "$R11_F"
+
+R11_OUT="$(lib roster_row_for_id "$R11_F" aw1-11)"; R11_RC=$?
+expect_eq "R11a the LAST roster row carrying the id is the pick (a later non-roster line carrying it is not)" \
+  "$R11_DUP" "$R11_OUT"
+expect_eq "R11a2 …found is rc 0" "0" "$R11_RC"
+expect_eq "R11b no status filter: a duplicate-start row is picked like any other" \
+  "duplicate-start" "$(field_of_row "$R11_OUT" status)"
+expect_eq "R11b2 …and its budget is the one the wall then reads" "b.test.sh" "$(field_of_row "$R11_OUT" suites_allowed)"
+expect_eq "R11c another agent's id picks that agent's row" "$R11_W2" "$(lib roster_row_for_id "$R11_F" aw2-11)"
+
+# AN EMPTY ID IS NOT A KEY. Two rows above carry `agent_id=` empty; matching them would hand
+# an unidentified row to a caller that has no id at all.
+R11_OUT="$(lib roster_row_for_id "$R11_F" "")"; R11_RC=$?
+expect_eq "R11d an empty id prints nothing, though rows with an empty agent_id= exist" "" "$R11_OUT"
+expect_eq "R11d2 …and is rc 1" "1" "$R11_RC"
+R11_OUT="$(lib roster_row_for_id "$R11_F" anobody-11)"; R11_RC=$?
+expect_eq "R11e an id on no row prints nothing" "" "$R11_OUT"
+expect_eq "R11e2 …and is rc 1" "1" "$R11_RC"
+R11_OUT="$(lib roster_row_for_id "$R7_DIR/r11/no-such.state" aw1-11)"; R11_RC=$?
+expect_eq "R11e3 a missing roster is rc 1, nothing printed" "1:" "$R11_RC:$R11_OUT"
+
+# FIRST OCCURRENCE OF A KEY WINS, as `line_field` and every by-key reader take it. A row
+# hand-forged with a second `agent_id=` answers to its FIRST id only; the budget arm's old
+# inline awk matched the id in any segment and would have picked it for both.
+mkdir -p "$R7_DIR/r11forge"
+R11_FF="$R7_DIR/r11forge/roster-s1.state"
+R11_FORGED="${R11_IDN}|agent_id=aforged-11|suites_allowed=forged.test.sh"
+printf '%s\n' "$R11_FORGED" > "$R11_FF"
+expect_eq "R11f a forged second agent_id= is not the row's id (first key wins)" "" \
+  "$(lib roster_row_for_id "$R11_FF" aforged-11)"
+expect_eq "R11f2 …the row answers to its first id" "$R11_FORGED" "$(lib roster_row_for_id "$R11_FF" aw1-11)"
 
 finish
