@@ -922,6 +922,12 @@ expect_status "15a: an off-budget suite is still refused" 2 "$ST"
 expect_contains "15a2: …and the DEFAULT (non-verbose) exit-2 stderr carries the FIRST allowed token" \
   "archive.test.sh" "$ERR"
 expect_contains "15a3: …and the SECOND" "run.sh" "$ERR"
+# THE REMEDY (T6, REQ-5, AC-5.2): a refused writer is told who widens the budget and with
+# which verb, so the report it sends is one the orchestrator can act on in one command.
+expect_contains "15a6: …naming the remedy verb, amend" "session-poker.sh amend t15writer" "$ERR"
+expect_contains "15a7: …and the flag that widens a RUN, --reexec+" "--reexec+" "$ERR"
+expect_contains "15a8: …with the real plugin root, not the placeholder" "/hooks/session-poker.sh amend" "$ERR"
+expect_absent "15a9: …never the literal <plugin-root> placeholder" "<plugin-root>" "$ERR"
 # ONE VERDICT LINE, AND A DETAIL BENEATH IT (ADR-030). Until field 9 flipped, "the stream
 # is one line" and "the verdict is one line" were the same measurement on `exit2`. AC-E1.3
 # asks for the second — a sentence the reader is interrupted by, never wrapped — so that is
