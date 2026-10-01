@@ -458,7 +458,7 @@ section "R12 — the one rule is stated once and the six comments that restated 
 # (triage-12574e2 Q3/Q4). A comment is not behaviour, so the pin is on the SENTENCES: the
 # rule is present at its one home, and none of the four old claims survives in a file that
 # used to carry one. Real paths: hooks/ is the real directory, payload/hooks a symlink.
-R12_RULE="Every row written after an agent's id is known carries that id, and the status the id was learned under"
+R12_RULE="Every successor row written after an agent's id is known carries that id, and the status the id was learned under"
 expect_eq "R12a the invariant sentence is in roster.sh" "1" "$(grep -cF "$R12_RULE" "$ROSTER_SH")"
 R12_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
 R12_FILES=("${BIONIC_HOOKS_DIR}/session-poker.sh" "$R12_LIB/walls.sh" "${BIONIC_HOOKS_DIR}/execution-recorder.sh" \
