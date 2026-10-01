@@ -6735,4 +6735,51 @@ expect_contains "37e R6 …and the task text lands byte for byte: backslashes, \
   "$(cat "$P37D")"
 expect_contains "37f …with its - T7: line" "- T7: pending dispatch — added by task-add" "$(cat "$P37D")"
 POKE_BOUND="$S37_BOUND_WAS"
+
+
+# ============================================================
+section "Section 38: the tick names an ext:-held row — poker: HELD <id> ext:<slug> (wave-21 T4; REQ-3, AC-3.3; D3, ADR-037 decision 2)"
+# ============================================================
+#
+# A ROW WAITING ON THE WORLD IS DECLARED ONCE, IN ITS DEPS CELL, as `ext:<slug>`. The ready
+# set already leaves it out (an ext: token never equals `landed`); what the tick adds is the
+# report: one `poker: HELD <id> ext:<slug>` line per held row, every interval, AFTER the rung
+# line and BEFORE the FILL line, so the hold is printed to the only actor who can lift it and
+# nobody writes a decline for it turn after turn (triage-A §F.3).
+# s38_line_no <pattern> — the first line of $OUT starting with <pattern>, by number; 0 if none.
+s38_line_no() { printf '%s\n' "$OUT" | awk -v p="$1" 'index($0, p) == 1 { print NR; f = 1; exit } END { if (!f) print 0 }'; }
+
+R38A="$(make_repo s38-held)"; new_roster "$R38A"
+sp_plan_at_step "$R38A" 4 \
+  "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-ce9520e | 15m | REQ-x | b.sh | pending |" \
+  "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
+poke_pressure "$R38A" 8192 1.0 tick
+expect_contains "38a AC-3.3 the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-ce9520e" "$OUT"
+expect_contains "38b …the ready row is filled" "poker: FILL T3" "$OUT"
+expect_absent "38c …and the held row is not on the FILL line" "T2" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
+S38_RUNG="$(s38_line_no 'poker: rung=')"; S38_HELD="$(s38_line_no 'poker: HELD ')"; S38_FILL="$(s38_line_no 'poker: FILL ')"
+expect_true "38d …and the HELD line sits after the rung line and before the FILL line (rung=$S38_RUNG held=$S38_HELD fill=$S38_FILL)" \
+  test "$S38_RUNG" -gt 0 -a "$S38_HELD" -gt "$S38_RUNG" -a "$S38_FILL" -gt "$S38_HELD"
+
+# 38e — NOTHING ELSE READY: the HELD line still prints, and the no-FILL line's step sentence
+# does not borrow it (the step hold and the ext hold are different facts).
+R38E="$(make_repo s38-held-only)"; new_roster "$R38E"
+sp_plan_at_step "$R38E" 4 \
+  "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | waits on a rig and CI | implementor | ext:rig-2, T1, ext:ci-9 | 15m | REQ-x | b.sh | pending |" > /dev/null
+poke_pressure "$R38E" 8192 1.0 tick
+expect_contains "38e a row with two tokens prints one HELD line naming both, in cell order" "poker: HELD T2 ext:rig-2 ext:ci-9" "$OUT"
+expect_absent "38f …no FILL line is printed" "poker: FILL" "$OUT"
+expect_absent "38g …and the no-FILL line names no step hold for it" "Held for their step" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: no FILL')"
+
+# 38h — THE TOKEN REMOVED, the row is ready again and no HELD line is printed (AC-3.4's tick side).
+R38H="$(make_repo s38-cleared)"; new_roster "$R38H"
+sp_plan_at_step "$R38H" 4 \
+  "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T2 | 4 | build | CI went green | implementor | T1 | 15m | REQ-x | b.sh | pending |" \
+  "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
+poke_pressure "$R38H" 8192 1.0 tick
+expect_contains "38h with the token removed the row is filled again" "poker: FILL T2 T3" "$OUT"
+expect_absent "38i …and no HELD line is printed" "poker: HELD" "$OUT"
 finish

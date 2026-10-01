@@ -19,8 +19,11 @@
 #                              carry no step cell and a dependency is satisfied by `done`).
 #                              Exit 2 on anything else.
 #   units_held <plan> <step>   one line per row held for its step (would be ready but for
-#                              it): `<id>: step <n> <kind> row waits for current: <n>`. A
-#                              report, never an invariant (wave-20 T10b).
+#                              it): `<id>: step <n> <kind> row waits for current: <n>`, and
+#                              one per row held by an external prerequisite (every task
+#                              dependency landed, one or more `ext:<slug>` tokens left):
+#                              `<id>: held by ext:<a> [ext:<b> ...]`. A report, never an
+#                              invariant (wave-20 T10b; wave-21 T4).
 #   units_validate <plan>      one line per broken invariant, each naming the offending id
 #                              and the rule. Exit 1 if any line was printed, else 0.
 #   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>
@@ -401,8 +404,26 @@ units_ready() { _units_readiness ready "$@"; }
 # `units_validate` never prints it, because a plan holding its release for Step 7 is the plan
 # working, and `task-add` refuses on any validator output. The tick prints these lines on its
 # no-FILL line, so "nothing is ready" and "the release waits for Step 7" read differently.
-# Same argument rules as `units_ready`; at task scale nothing is ever held (rows carry no step).
+# Same argument rules as `units_ready`; at task scale nothing is ever held FOR ITS STEP (rows
+# carry no step).
+#
+# AND A ROW HELD BY THE WORLD (wave-21 T4; REQ-3, D3, ADR-037 decision 2): pending, every TASK
+# dependency landed, and one or more `ext:<slug>` tokens left in its deps cell —
+# `<id>: held by ext:<a> ext:<b>`, the tokens in cell order on one line. The token is a
+# prerequisite nothing mechanical satisfies (CI, a rig, a triage); its owner removes it from
+# the cell when the world moves, and the row is ready again. `units_ready` needs nothing for
+# this: a token is never a row id, so it never carries the satisfied status. A row held both
+# ways prints both lines, the step line first. The tick prints the ext lines as
+# `poker: HELD <id> ext:<slug>`, and the stop wall, computing the same ready set, never counts
+# the row as a missed fill.
 units_held() { _units_readiness held "$@"; }
+
+# _units_ext_re -> the shape of an external prerequisite token, as an awk ERE (wave-21 T4; D3).
+# ONE SPELLING for the validator that admits it and the readiness program that reports it, so
+# a token the validator lets into a plan is exactly a token the held report names. A bare
+# `ext:`, a slug opening on punctuation and an upper-case prefix are not this shape, and the
+# validator refuses them the way it refuses any id the table does not carry.
+_units_ext_re() { printf '%s' '^ext:[A-Za-z0-9][A-Za-z0-9._-]*$'; }
 
 # _units_readiness <ready|held> <plan> <step> — the ONE readiness program behind both verbs, so
 # the gate-act rule is spelled once and the two answers cannot drift apart.
@@ -428,7 +449,8 @@ _units_readiness() {
   esac
   rows="$(units_rows "$plan")" || return 1
   [ -n "$rows" ] || return 0
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$step" -v scale="$scale" -v mode="$mode" '
+  printf '%s\n' "$rows" | awk -F'\t' -v want="$step" -v scale="$scale" -v mode="$mode" \
+    -v extre="$(_units_ext_re)" '
     $1 == "" { next }
     { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; st[$1] = $10 }
     END {
@@ -450,19 +472,26 @@ _units_readiness() {
           if (gate && stp[i] + 0 > want + 0) held = 1
         }
         if (mode == "ready" && held) continue
-        if (mode == "held" && !held) continue
         d = dep[i]
         gsub(/[ \t]/, "", d)
         ready = 1
+        ext = ""
         if (d ~ /[A-Za-z0-9]/) {
           m = split(d, a, ",")
           for (j = 1; j <= m; j++) {
             if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
+            # AN EXTERNAL PREREQUISITE IS SET ASIDE ONLY TO BE REPORTED (wave-21 T4; D3). The
+            # ready arm never takes this branch: a token is never a row id, so the comparison
+            # below already finds it unsatisfied and the row stays out of the ready set.
+            if (mode == "held" && a[j] ~ extre) { ext = ext (ext == "" ? "" : " ") a[j]; continue }
             if (st[a[j]] != satisfied) { ready = 0; break }
           }
         }
         if (!ready) continue
-        if (mode == "held") printf "%s: step %s %s row waits for current: %s\n", id[i], stp[i], knd[i], stp[i]
+        if (mode == "held") {
+          if (held) printf "%s: step %s %s row waits for current: %s\n", id[i], stp[i], knd[i], stp[i]
+          if (ext != "") printf "%s: held by %s\n", id[i], ext
+        }
         else print id[i]
       }
     }'
@@ -580,7 +609,8 @@ _units_graph_awk() {
 #
 # THE INVARIANTS (spec Design §1 "Task", verbatim): id unique and matching `^T[0-9]+$`; step
 # in 3–9; kind in build · test · verify · review · doc · integrate · close · prototype;
-# status in pending · active · landed · dropped; every dep naming an id present in the table;
+# status in pending · active · landed · dropped; every dep naming an id present in the table
+# or an external prerequisite `ext:<slug>` (wave-21 T4; `_units_ext_re` is its one shape);
 # and a Step-N row with N ≥ 5 depending TRANSITIVELY on every Step-4 row.
 #
 # EVERY LINE NAMES THE OFFENDING ID AND THE RULE, because the Step-3 wall prints these back
@@ -647,7 +677,8 @@ units_validate() {
 
   rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
   if [ -n "$rows" ]; then
-    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" "$(_units_graph_awk)"'
+    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" \
+      -v extre="$(_units_ext_re)" "$(_units_graph_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: its step cell cannot be trusted to make it a Step-4 row others must reach.
@@ -732,6 +763,11 @@ units_validate() {
             m = split(d, a, ",")
             for (j = 1; j <= m; j++) {
               if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
+              # AN EXTERNAL PREREQUISITE NAMES NO ROW BY DESIGN (wave-21 T4; D3, ADR-037
+              # decision 2): `ext:<slug>` in its one shape is admitted beside the task ids.
+              # Any other id the table does not carry, a malformed token included, is still
+              # refused here.
+              if (a[j] ~ extre) continue
               if (!(a[j] in count)) printf "%s: dep %s names no row in the table\n", id[i], a[j]
             }
           }
