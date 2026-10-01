@@ -891,6 +891,33 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
   return 1
 }
 
+# The plan is read off disk when the CALL starts (PLAN is resolved at :245
+# before any of the command runs). So a single Bash call that edits the plan
+# and THEN commits is judged against the pre-edit plan: the fix the agent just
+# wrote is invisible to every arm below, and the refusal reads as though it had
+# never been made. The observed reflex on that refusal is to re-run the same
+# combined call, which fails identically forever. When the refused command's
+# text names the plan, say so. Matched against the absolute path and against
+# the path relative to the project root — the two spellings an agent writes.
+# A commit MESSAGE that merely quotes the path also matches; the line is
+# advice appended to an already-refused call, so a false positive costs a
+# sentence and a false negative costs the loop this exists to break.
+plan_write_note() {
+  local rel="$PLAN"
+  [ -n "$PLAN" ] || return 0
+  case "$PLAN" in "$BIONIC_ROOT"/*) rel="${PLAN#"$BIONIC_ROOT"/}" ;; esac
+  case "$COMMAND" in
+    *"$PLAN"*|*"$rel"*)
+      echo "Note: this command also writes the plan — run the edit first, then commit in a separate call." ;;
+  esac
+}
+#
+# FILE SCOPE, DELIBERATELY (T12). The arms live inside `_eg_body`, whose nested function
+# definitions exist only once execution has reached them; the dispatch-ledger arm refuses
+# BEFORE this definition's old position was reached, so it found no function and printed
+# no note. The `refuse` shim in `wall_evidence_gate` calls it, so it is defined above that.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+
 _eg_stage_refusal() {  # <dir> <mode> <verb> <fact> <fix> <detail> -> 0 staged · 1 not
   local d="${1:-}" i=1 a
   shift
@@ -922,7 +949,24 @@ wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
     # TWO ABORT CODES, because the staging can fail and the parent has to be able to tell.
     # 2 is "the five files are written, read them"; 3 is "this was a refusal and its words
     # are gone", which the malformed-refusal arm below turns into a refusal that still holds.
-    refuse() { _eg_stage_refusal "$_eg_stage" "$@" && exit 2; exit 3; }
+    #
+    # THE ONE SITE FOR THE EDIT-THEN-COMMIT NOTE (wave-21 T12, AC-9.1). `$PLAN` and `$COMMAND`
+    # exist only in THIS subshell — the parent's `refuse` call never sees the plan — so the
+    # note is computed here, once, and staged as the FIRST line of `detail`, where the
+    # twelve-line fold in refuse.sh can only cut the tail. Every `refuse exit2 commit` arm
+    # of the gate goes through this shim, so none of them is edited. A wrong argument count
+    # is passed through untouched for the renderer to refuse as malformed.
+    refuse() {
+      if [ "$#" -eq 5 ] && [ "$2" = "commit" ]; then
+        local _eg_note
+        _eg_note="$(plan_write_note 2>/dev/null)"
+        if [ -n "$_eg_note" ]; then
+          if [ -n "$5" ]; then set -- "$1" "$2" "$3" "$4" "$_eg_note
+$5"; else set -- "$1" "$2" "$3" "$4" "$_eg_note"; fi
+        fi
+      fi
+      _eg_stage_refusal "$_eg_stage" "$@" && exit 2; exit 3
+    }
     _eg_body
   )
   _eg_rc=$?
@@ -3627,31 +3671,10 @@ user_confirmed_form_ok() {
     | grep -qE '^[A-Za-z][A-Za-z0-9._-]*[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[^[:space:]]'
 }
 
-# The plan is read off disk when the CALL starts (PLAN is resolved at :245
-# before any of the command runs). So a single Bash call that edits the plan
-# and THEN commits is judged against the pre-edit plan: the fix the agent just
-# wrote is invisible to every arm below, and the refusal reads as though it had
-# never been made. The observed reflex on that refusal is to re-run the same
-# combined call, which fails identically forever. When the refused command's
-# text names the plan, say so. Matched against the absolute path and against
-# the path relative to the project root — the two spellings an agent writes.
-# A commit MESSAGE that merely quotes the path also matches; the line is
-# advice appended to an already-refused call, so a false positive costs a
-# sentence and a false negative costs the loop this exists to break.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-plan_write_note() {
-  local rel="$PLAN"
-  [ -n "$PLAN" ] || return 0
-  case "$PLAN" in "$BIONIC_ROOT"/*) rel="${PLAN#"$BIONIC_ROOT"/}" ;; esac
-  case "$COMMAND" in
-    *"$PLAN"*|*"$rel"*)
-      echo "Note: this command also writes the plan — run the edit first, then commit in a separate call." ;;
-  esac
-}
-
 # 3-line BLOCKED/Plan/Fix emit for the matrix arm (mirrors the pattern
-# every other validator uses), plus the edit-then-commit note when the refused
-# command also writes the plan. $1 = message tail, $2 = fix line.
+# every other validator uses). The edit-then-commit note is no longer appended here:
+# the gate's `refuse` shim (wall_evidence_gate) stages it as detail line 1 of every commit
+# refusal (T12, AC-9.1).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 block_matrix() {  # <fact> <fix> <observation> <repair prose>
   # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (task 13, ruling D-1, parametric
@@ -3661,8 +3684,7 @@ block_matrix() {  # <fact> <fix> <observation> <repair prose>
   # the caller's own repair prose and the plan-write note all become `detail` (F-P1, F-P3).
   refuse exit2 commit "$1" "$2" "canonical-sdlc step ${CURRENT} — $3
 Plan: $PLAN
-Fix: $4
-$(plan_write_note 2>&1)"
+Fix: $4"
 }
 
 # Placeholder-token test on a single field value. The matrix section lives
