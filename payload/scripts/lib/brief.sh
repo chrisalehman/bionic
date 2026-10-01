@@ -294,6 +294,10 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
         b = index(substr(s, a + 1), q)
         if (b > 1) return substr(s, a + 1, b - 1)
       }
+      # A TRAILING ` # ...` IS A COMMENT FROM THE SCAFFOLD, NOT THE PATTERN (wave-21 T7, D7).
+      # The shipped `Subprocess claim:` line ends in one, and `pgrep -f` with the comment
+      # glued on matches no process, which the P2 display reads as `live: no`.
+      a = index(s, " #"); if (a > 0) s = substr(s, 1, a - 1)
       a = index(s, ",");  if (a > 0) s = substr(s, 1, a - 1)
       a = index(s, "->"); if (a > 0) s = substr(s, 1, a - 1)
       a = index(s, "→");  if (a > 0) s = substr(s, 1, a - 1)
@@ -585,12 +589,13 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
     # when the row still carries the marks. It also makes the field self-delimiting: a
     # backtick cannot occur inside a run, because a backtick is what ends one.
     #
-    # FOUR REFUSALS AT THE LIFT, each naming the token (REQ-1 AC-1.4, ADR-029; wave-16 T25).
-    # An UNQUOTED `|` is shell plumbing, and plumbing is not one run; a newline means the
-    # marks never closed on their own line; an unexpanded `$name` is a budget entry no
-    # command can equal (see the same rule on the `Suites:` span above); and an angle bracket
-    # that is not a whole slot is a shell redirection, which used to be dropped in silence.
-    # The refusal is made on the bash side — this prints the fact.
+    # FIVE REFUSALS AT THE LIFT, each naming the token (REQ-1 AC-1.4, ADR-029; wave-16 T25;
+    # wave-21 T7). An UNQUOTED `|` is shell plumbing, and plumbing is not one run; a newline
+    # means the marks never closed on their own line; an unexpanded `$name` is a budget entry
+    # no command can equal (see the same rule on the `Suites:` span above); a `<name>` glued
+    # to a neighbour is an unfilled placeholder, the same budget entry by another spelling;
+    # and any other angle bracket that is not a whole slot is a shell redirection, which used
+    # to be dropped in silence. The refusal is made on the bash side — this prints the fact.
     #
     # THE PIPE TEST READS QUOTES (T4, REQ-7, D4). It was `index(tok, "|") > 0`, a whole-token
     # scan, so a quoted regex alternation — the ordinary way a jest repository names two
@@ -619,7 +624,7 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
     #
     # AN UNBALANCED QUOTE ADMITS THE REST OF THE TOKEN, and that is the honest answer rather
     # than a hole: a command whose quote never closes is a shell SYNTAX error, so the pipe
-    # inside it can never run as plumbing either. Refusing it here would invent a fifth
+    # inside it can never run as plumbing either. Refusing it here would invent a sixth
     # fault word for a brief whose real fault the shell will name the moment it is typed.
     #
     # THE QUOTE CHARACTERS ARE READ OFF `QUOTES`, never spelled, for the reason the BEGIN
@@ -635,6 +640,23 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
         if (ch == "|") return 1
       }
       return 0
+    }
+    # THE FIRST `<name>` IN A RUN THAT TOUCHES A NEIGHBOUR, or "" (wave-21 T7; REQ-6, D6).
+    # A name in brackets with a non-space character on either side is a slot an author
+    # forgot to fill — `jobs/<id>/logs`, `<ver>.tar.gz` — and no shell spelling of a
+    # redirection puts a bare word in brackets against a path. A name standing alone between
+    # spaces is not judged here: the shell reads that shape as two redirections, and the
+    # redirect test below keeps it.
+    function glued_slot(t,   rest, off, a, b, pre, post) {
+      rest = t; off = 0
+      while (match(rest, /<[A-Za-z_][A-Za-z0-9_-]*>/)) {
+        a = off + RSTART; b = a + RLENGTH - 1
+        pre  = (a > 1)         ? substr(t, a - 1, 1) : " "
+        post = (b < length(t)) ? substr(t, b + 1, 1) : " "
+        if (pre !~ /[ \t]/ || post !~ /[ \t]/) return substr(t, a, RLENGTH)
+        off = b; rest = substr(t, b + 1)
+      }
+      return ""
     }
     function marked_runs(s,   i, j, tok, out, c, dropped, why) {
       out = ""; c = 0; dropped = ""
@@ -669,6 +691,13 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
         # with an empty or truncated `re_executes=` that the writer-side budget arm then
         # refused at run time as undeclared, 40 minutes after the author could have fixed it.
         if (tok == "" || wholeslot(tok)) continue
+        # A PLACEHOLDER BEFORE A REDIRECTION (wave-21 T7; REQ-6, D6; triage-B §3). The
+        # bracket test below read `gh api repos/o/r/actions/jobs/<id>/logs` as a
+        # redirection, and its author rewrote a correct command looking for one. The run
+        # is still refused — `<id>` is a budget entry no typed command can equal, the
+        # `$name` rule — but under the fault it has. A run carrying both is told the
+        # placeholder first; filling it leaves the redirection to be named on the retry.
+        if (glued_slot(tok) != "") { print "re_executes_bad=an unfilled placeholder: " tok; continue }
         if (tok ~ /[<>]/) { print "re_executes_bad=a redirection: " tok; continue }
         # STORED THROUGH THE ONE RUN RULE (wave-20 T4; REQ-7, D7). The refusals above run
         # first and on the text as written — a declaration naming a redirection is still told
@@ -906,7 +935,11 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
           v = bound_field(spanof(h)); if (v != "") print "cadence=" v
         }
       }
-      h = firsthit("claims");      if (h > 0) { v = claimpat(spanof(h));      if (v != "") print "claims=" v }
+      # AN UNFILLED SLOT CLAIMS NOTHING (wave-21 T7, D7): the line the scaffold ships,
+      # `Subprocess claim: <process pattern>`, pasted as shipped, is guidance — the same
+      # rule the waiver below applies to `<reason>`.
+      h = firsthit("claims")
+      if (h > 0) { v = claimpat(spanof(h)); if (v != "" && !isplaceholder(v)) print "claims=" v }
       # The waiver is free text — a REASON, never a path — so it lifts collapsed
       # and whole, ending where the next labelled field begins. An EMPTY value is
       # not printed, which is the whole of the "a reasonless waiver is not a
@@ -1009,8 +1042,9 @@ brief_validate_fields() {
   # here, because a wall whose prose is true for one of two spellings of one idea is a wall
   # nobody can read. A run also refuses on an UNQUOTED `|` (shell plumbing is not one run; a
   # quoted one is an ordinary argument and is admitted — T4, REQ-7), on a newline (the marks
-  # never closed on their own line), or on an angle bracket that is not a whole slot (a
-  # redirection — wave-16 T25, walk §W7).
+  # never closed on their own line), on a `<name>` glued to a neighbour (an unfilled
+  # placeholder — wave-21 T7, REQ-6), or on any other angle bracket that is not a whole slot
+  # (a redirection — wave-16 T25, walk §W7).
   #
   # THE TOKEN IS IN THE DETAIL, NOT THE ONE LINE. A command is arbitrarily long and the
   # refusal line is bounded at 100 columns (AC-E1.3); the fact fits the line, the evidence
@@ -1024,8 +1058,9 @@ expanded anything — so a name that is still a variable here can be neither der
 nor checked against anything, and a run holding an unquoted pipe, a redirection, or a line
 break is not one run. Declare the command; leave the shell plumbing off the span. A pipe
 INSIDE quotes is an ordinary argument and is admitted, so a regex alternation needs no
-rewriting. An unfilled \`<slot>\` on its own is guidance and is ignored, but a bracket
-anywhere else in the run is read as redirection.
+rewriting. An unfilled \`<slot>\` on its own is guidance and is ignored. A placeholder
+inside a run, such as \`jobs/<id>/logs\`, is filled with a real value, the same as a
+variable. Any other bracket in the run is read as redirection.
 
 Fix: mark each run with backticks, on a line of its own, at most ${capw} —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
@@ -1147,12 +1182,17 @@ Then retry the dispatch."
   # to an agent in a repository whose tests are not shell suites, so refusing a brief that
   # carries it for "declaring no instrument" would be the wall contradicting itself.
   #
-  # A BRIEF THAT NAMED A DROPPED TOKEN DECLARED SOMETHING (T3, REQ-8). `suites_dropped`
-  # is checked here too, so a `Suites:` line that lost ANY token to the filter above — not
-  # only one that lost every token — never falls through to this arm's "declares no Files:
-  # and no Suites:" (walk W4b). That refusal is the suite-drop arm's above, named by the
-  # actual token, not this one's guess that nothing was declared at all.
-  if [ -z "$files" ] && [ -z "$suites" ] && [ -z "$re_executes" ] && [ -z "$suites_dropped" ]; then
+  # A BRIEF WHOSE INSTRUMENT WAS REFUSED DECLARED SOMETHING (T3, REQ-8; wave-21 T7, REQ-6
+  # AC-6.2). Four lift faults are checked here — `suites_dropped`, `suites_bad`, `runs_bad`
+  # and `runs_dropped` — so a `Suites:` or `Re-executes:` span that lost ANY token to a
+  # refusal above never falls through to this arm's "declares no Files: and no Suites:"
+  # (walk W4b). That refusal is the arm's above that refused the token, named by the actual
+  # token, not this one's guess that nothing was declared at all. Until wave-21 only
+  # `suites_dropped` was here, so a brief whose one `Re-executes:` run was refused drew two
+  # faults, the second false (triage-B §4.2).
+  if [ -z "$files" ] && [ -z "$suites" ] && [ -z "$re_executes" ] && \
+     [ -z "$suites_dropped" ] && [ -z "$suites_bad" ] && \
+     [ -z "$runs_bad" ] && [ -z "$runs_dropped" ]; then
     # THE CLAUSE GOES FIRST, NOT LAST (critic C9). refuse.sh folds a detail to twelve lines on
     # the channel that hands it to a reader who did not ask for it, and this detail is already
     # longer than that, so a sentence appended at the end is bytes nobody sees. One clause, at
