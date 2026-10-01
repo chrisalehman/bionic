@@ -131,8 +131,10 @@ mkrow() {  # <key=value>...
   # describe a pre-wall roster, and the third state — key absent, as opposed to key present
   # and empty — is the one the writer-side budget guard partitions on.
   local files="" sallow="" ssrc="" instrument_set=no
+  local rexec="" rexec_set=no
   for kv in "$@"; do
     case "$kv" in
+      re_executes=*) rexec="${kv#*=}"; rexec_set=yes ;;
       plan=*)        plan="${kv#*=}"; plan_set=yes ;;
       status=*)      status="${kv#*=}" ;;
       session=*)     session="${kv#*=}" ;;
@@ -164,6 +166,7 @@ mkrow() {  # <key=value>...
   if [ "$instrument_set" = yes ]; then
     instrument=("files=$files" "suites_allowed=$sallow" "suites_source=$ssrc")
   fi
+  [ "$rexec_set" = yes ] && instrument+=("re_executes=$rexec")
   "$emit" \
     "status=$status" "session=$session" "name=$name" "agent_id=$agent_id" \
     "launched_at=$launched_at" "subagent_type=$subagent_type" model=opus \
@@ -4739,6 +4742,42 @@ expect_contains "23c meta: this row too is adopted (not vacuous)" \
 expect_eq "an ordinary (non-list) field is still cut at 400 characters" "400" \
   "$(field_len "$OVERLONG_ROW" name)"
 
+# ---------- 23d: adopt prints each adopted row's BUDGET beside `launched` (T6, REQ-5, AC-5.1) ----------
+#
+# THE REPORT (#1): a resumed orchestrator had to read the roster file to learn what a writer
+# it just adopted was allowed to run, and the answer it needed to widen a refused suite was
+# on the row all along. Both shapes are pinned, and a row carrying only a declared run is
+# the AC-5.1 failure shape: its suites cell is empty, so a reader of `suites=` alone would
+# call it a row with no budget.
+R23D="$(make_repo s23d-budget-line)"; new_roster "$R23D"
+S23D_PRED="55555555-aaaa-4bbb-8ccc-00000000023d"
+add_row_to "$R23D" "$S23D_PRED" name=budget-both status=identified \
+  agent_id=abudget-both-23232323232323d1 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R23D/.bionic/docs/record/budget-both.md" \
+  files=hooks/a.sh suites_allowed="alpha.test.sh beta.test.sh" suites_source=declared \
+  re_executes="\`npx jest --testPathPatterns 'x'\`"
+add_row_to "$R23D" "$S23D_PRED" name=budget-runs-only status=identified \
+  agent_id=abudget-runs-23232323232323d2 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R23D/.bionic/docs/record/budget-runs-only.md" \
+  files=hooks/a.sh suites_allowed= suites_source=declared \
+  re_executes="\`pytest tests/unit\`"
+add_row_to "$R23D" "$S23D_PRED" name=budget-none status=identified \
+  agent_id=abudget-none-23232323232323d3 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R23D/.bionic/docs/record/budget-none.md" \
+  files=hooks/a.sh suites_allowed= suites_source=declared
+poke "$R23D" adopt
+expect_contains "23d meta: the three rows ARE offered (not vacuous)" "budget-none" "$OUT"
+expect_contains "23d a row with suites and a declared run prints both" \
+  "  budget      : suites=alpha.test.sh beta.test.sh runs=\`npx jest --testPathPatterns 'x'\`" "$OUT"
+expect_contains "23d2 a row with ONLY a declared run still prints a budget line (AC-5.1)" \
+  "  budget      : suites=none runs=\`pytest tests/unit\`" "$OUT"
+expect_contains "23d3 a row with neither prints the plain 'none'" "  budget      : none" "$OUT"
+expect_eq "23d4 …one budget line per adopted row, three rows, three lines" "3" \
+  "$(printf '%s\n' "$OUT" | grep -c '^  budget      : ')"
+
 # ============================================================
 section "Section 24: sweep — per-session pruning, not all-or-nothing (D5's prune half, T9)"
 # ============================================================
@@ -5297,6 +5336,45 @@ poke_split "$R27J" tick
 expect_contains "27j an armed session with nothing dispatched is QUIET" "decision=QUIET" "$S27_OUT"
 expect_eq "27j2 …and ends on the decision line too" "poker-tick/v1" \
   "$(printf '%s' "$(last_line "$S27_OUT")" | cut -d'|' -f1)"
+
+# ---------- 27k: a live claimed process silences the cadence NOTIFY (T6, REQ-7, AC-7.3) ----------
+#
+# THE REPORT (#7): a writer waiting on a CI run (`gh run watch`) wrote nothing for 26 minutes
+# and drew "quieter than the declared cadence". The machine already treats a live claimed
+# process as work (triage-B §6.2) and the docs said otherwise; nothing pinned the composition.
+# The driver is triage-B §6.2's: one UNMET row, deliverable absent, cadence 10 minutes, the
+# transcript backdated 1563 s, a fresh ListAgents answer showing it running, and a stand-in
+# watcher whose COMMAND LINE carries the claimed pattern (`pgrep -f` reads command lines).
+# Beside it the SAME fixture with the claim DEAD must NOTIFY, so QUIET is the claim speaking.
+S27K_PAT="gh-run-watch-27k-$$"
+S27K_ID="apurge-27k-0000000000000006"
+s27k_repo() {  # <label> <claim pattern> -> a repo carrying the 6.2 row
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  add_row "$r" name=s-purge-ledger status=identified agent_id="$S27K_ID" \
+    deliverable="$r/.bionic/docs/record/s-purge-ledger.md" duration="4 hours" \
+    launched_at="$(iso_ago 3000)" cadence="10 minutes" claims="$2"
+  mkdir -p "$S19_CFG/projects/-fixture-project/$SID/subagents"
+  printf '{"type":"user","message":{"role":"user","content":"go"}}\n' \
+    > "$S19_CFG/projects/-fixture-project/$SID/subagents/agent-$S27K_ID.jsonl"
+  backdate "$S19_CFG/projects/-fixture-project/$SID/subagents/agent-$S27K_ID.jsonl" 1563
+  printf '%s' "$r"
+}
+( exec -a "$S27K_PAT" sleep 120 ) &
+S27K_PID=$!
+R27K="$(s27k_repo s27-live-claim "$S27K_PAT")"
+s19_answer fresh "s-purge-ledger:running"
+poke "$R27K" tick
+expect_contains "27k an undelivered, quiet row whose claimed process is LIVE ticks QUIET" \
+  "decision=QUIET" "$OUT"
+expect_absent "27k2 …and never draws the cadence NOTIFY" "quieter than the declared cadence" "$OUT"
+kill "$S27K_PID" 2>/dev/null; wait "$S27K_PID" 2>/dev/null
+R27KD="$(s27k_repo s27-dead-claim "$S27K_PAT")"
+s19_answer fresh "s-purge-ledger:running"
+poke "$R27KD" tick
+expect_contains "27k3 CONTROL: the same row with the claim DEAD takes the NOTIFY band" \
+  "decision=NOTIFY" "$OUT"
+expect_contains "27k4 …naming the quiet row, so 27k's QUIET was the claim and not a blind tick" \
+  "s-purge-ledger" "$OUT"
 
 # ============================================================
 section "Section 28: adopt offers only OPEN runs' rows, once each (REQ-9; D10)"

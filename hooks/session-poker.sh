@@ -3053,6 +3053,15 @@ case "$VERB" in
           printf '                dispatching, or the same thing happens again.\n'
         fi
         printf '  launched    : %s\n' "${RLAUNCH:-unknown}"
+        # THE BUDGET, BESIDE THE LAUNCH (T6, REQ-5, AC-5.1). A resumed orchestrator needs the
+        # row's allowance to widen it, and a row can carry only declared RUNS: its suites cell
+        # is then empty, so the line names both cells rather than reading as no budget.
+        _AD_RUNS="$(clean "$RREX" re_executes)"
+        if [ -z "$RSALLOW" ] && [ -z "$_AD_RUNS" ]; then
+          printf '  budget      : none\n'
+        else
+          printf '  budget      : suites=%s runs=%s\n' "${RSALLOW:-none}" "${_AD_RUNS:-none}"
+        fi
         printf '  deliverable : %s (%s)\n' "${RDELIV_ABS:-none declared}" \
           "$([ "$DELIV_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
         printf '  progress    : %s (%s)\n' "${RPROG_ABS:-none declared}" \
