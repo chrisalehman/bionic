@@ -1885,4 +1885,110 @@ expect_contains "17b.12 …and the Step-5 frontier row is still threaded with th
 printf '%s\n' "$R6_OUT" > "$SANDBOX/r6-projected.md"
 expect_eq "17b.13 …and the projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/r6-projected.md")"
 
+
+# ============================================================
+section "17c — wave-21 T4: an external wait is a declared prerequisite, ext:<slug> (REQ-3, AC-3.1, AC-3.2, AC-3.4; D3, ADR-037 decision 2)"
+# ============================================================
+#
+# A ROW WAITING ON CI, A RIG OR A TRIAGE HAD NO LEGAL WAY TO SAY SO (triage-A §F.3): `pending`
+# made it ready, `active`/`dropped` were false, and the stop wall refused every turn that did
+# not dispatch it or decline it again. The prerequisite now carries the wait: a deps token
+# `ext:<slug>` beside the task ids. Nothing mechanical satisfies it; its owner removes it.
+#
+# T2 is the held row (a landed task dep plus the token); T3 is the ordinary ready row; T5
+# carries a token AND an unlanded task dep, so the graph already says why it waits and the
+# held report does not name it (the 17b.6 rule). T4 is the Step-5 row that reaches every
+# Step-4 row, so the transitive rule is satisfied and the only question asked is the token.
+cat > "$SANDBOX/ext.md" <<'EXT_EOF'
+---
+current: 4
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: in flight
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-ce9520e | 30m | REQ-x | b.sh | pending |
+| T3 | 4 | build | ordinary, ready | implementor | T1 | 30m | REQ-x | c.sh | pending |
+| T5 | 4 | build | waits on T2 and a rig | implementor | T2, ext:rig.mac_2 | 30m | REQ-x | d.sh | pending |
+| T4 | 5 | verify | the floor | test-runner | T1, T2, T3, T5 | 30m | REQ-x | — | pending |
+EXT_EOF
+
+# AC-3.1: the validator admits the token and still refuses an unknown task id.
+expect_eq "17c.1 AC-3.1 units_validate admits deps 'T1, ext:ci-ce9520e' (rc 0)" "0" \
+  "$(call_rc units_validate "$SANDBOX/ext.md")"
+expect_eq "17c.2 …and prints nothing" "" "$(call units_validate "$SANDBOX/ext.md")"
+sed 's/| T1, ext:ci-ce9520e |/| T1, ext:ci-ce9520e, T99 |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-t99.md"
+expect_eq "17c.3 AC-3.1 …beside an unknown task id T99 the row is still refused, naming T99 alone" \
+  "T2: dep T99 names no row in the table" "$(call units_validate "$SANDBOX/ext-t99.md")"
+# THE TOKEN HAS A SHAPE: `ext:` and a slug that starts alphanumeric. A bare `ext:` or a slug
+# that opens on punctuation is not a declaration, and is refused the way any unknown id is.
+sed 's/| T1, ext:ci-ce9520e |/| T1, ext: |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-bare.md"
+expect_eq "17c.4 a bare 'ext:' is refused as a dep naming no row" \
+  "T2: dep ext: names no row in the table" "$(call units_validate "$SANDBOX/ext-bare.md")"
+sed 's/| T1, ext:ci-ce9520e |/| T1, ext:-ci |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-punct.md"
+expect_eq "17c.5 …and so is 'ext:-ci' (the slug opens on punctuation)" \
+  "T2: dep ext:-ci names no row in the table" "$(call units_validate "$SANDBOX/ext-punct.md")"
+sed 's/| T1, ext:ci-ce9520e |/| T1, EXT:ci |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-upper.md"
+expect_eq "17c.6 …and so is 'EXT:ci' (the prefix is lower-case, exactly)" \
+  "T2: dep EXT:ci names no row in the table" "$(call units_validate "$SANDBOX/ext-upper.md")"
+
+# AC-3.2 (hermetic twin): the held row is not in the ready set. units_ready is UNCHANGED for
+# this — an ext: token never equals `landed` — and this pins that it stays so.
+expect_eq "17c.7 AC-3.2 units_ready at current: 4 omits the ext:-held T2 (and T5, behind T2); T3 is ready" \
+  "T3" "$(call units_ready "$SANDBOX/ext.md" 4)"
+expect_eq "17c.8 AC-3.2 …through the fill: fill_ready_set at rung 8, none open, omits T2" \
+  "T3" "$(fill_call "$SANDBOX/ext.md" 8 0)"
+# THE HELD REPORT NAMES IT, beside the step-held lines: `<id>: held by ext:<slug>`. T5 is not
+# named: its unlanded task dep T2 already says why it waits.
+expect_eq "17c.9 units_held names the ext:-held row and its token, and not T5" \
+  "T2: held by ext:ci-ce9520e" "$(call units_held "$SANDBOX/ext.md" 4)"
+
+# AC-3.4: removing the token returns the row to ready — the one declaration that clears it.
+sed 's/| T1, ext:ci-ce9520e |/| T1 |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-cleared.md"
+expect_eq "17c.10 AC-3.4 with the token removed, units_ready names T2 again (table order)" \
+  "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/ext-cleared.md" 4)"
+expect_eq "17c.11 AC-3.4 …and units_held no longer names it" "" "$(call units_held "$SANDBOX/ext-cleared.md" 4)"
+
+# TWO TOKENS ON ONE ROW ARE ONE LINE, both named in cell order; a token on a step-held gate
+# act names both holds, the step line first (the order 17b.6 already prints in).
+sed 's/| T1, ext:ci-ce9520e |/| ext:ci-ce9520e, T1, ext:rig-2 |/' "$SANDBOX/ext.md" > "$SANDBOX/ext-two.md"
+expect_eq "17c.12 two tokens on one row: one held line naming both, in cell order" \
+  "T2: held by ext:ci-ce9520e ext:rig-2" "$(call units_held "$SANDBOX/ext-two.md" 4)"
+expect_eq "17c.13 …and the plan still validates clean" "0" "$(call_rc units_validate "$SANDBOX/ext-two.md")"
+cat > "$SANDBOX/ext-gate.md" <<'EXTG_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 8 | integrate | the merge, waits for its step and for CI | implementor | T1, ext:ci-main | 30m | REQ-x | — | pending |
+EXTG_EOF
+expect_eq "17c.14 a step-held gate act with a token: the step line, then the ext line" \
+  "$(printf 'T2: step 8 integrate row waits for current: 8\nT2: held by ext:ci-main')" \
+  "$(call units_held "$SANDBOX/ext-gate.md" 5)"
+expect_eq "17c.15 …at its step the step hold lifts and the ext hold stays; it is still not ready" \
+  "T2: held by ext:ci-main" "$(call units_held "$SANDBOX/ext-gate.md" 8)"
+expect_eq "17c.16 …units_ready at its step still omits it" "" "$(call units_ready "$SANDBOX/ext-gate.md" 8)"
+
+# AT TASK SCALE the readiness program reads the same cell, so a token holds a T<n> row too.
+cat > "$SANDBOX/ext-task.md" <<'EXTT_EOF'
+## Tasks
+
+| id | task | deps | status |
+|---|---|---|---|
+| T1 | first | — | done |
+| T2 | waits on CI | T1, ext:ci-1 | pending |
+| T3 | ordinary | T1 | pending |
+EXTT_EOF
+expect_eq "17c.17 task scale: units_ready at T2 omits the ext:-held row" "T3" "$(call units_ready "$SANDBOX/ext-task.md" T2)"
+expect_eq "17c.18 task scale: units_held names it" "T2: held by ext:ci-1" "$(call units_held "$SANDBOX/ext-task.md" T2)"
+
 finish
