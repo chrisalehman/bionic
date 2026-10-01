@@ -4917,6 +4917,8 @@ fi
 # have exited otherwise), ≥1 non-exempt segment → nudge as class=chain.
 if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
   _has_nonexempt=""
+  local _xo _xn _xdd _xw
+  local -a _xws
   while IFS= read -r _seg; do
     # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
     # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
@@ -4939,20 +4941,55 @@ if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
     case "$_seg" in
       'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
       'sed '*|'echo '*|'printf '*|'test '*|'cd '*|'which '*|'command '*|'false '*|\
-      'pwd'|'pwd '*|'true'|'true '*|'date'|'date '*|'jq'|'jq '*|'sort'|'sort '*|\
-      'uniq'|'uniq '*|'basename'|'basename '*|\
+      'pwd'|'pwd '*|'true'|'true '*|'date'|'date '*|'jq'|'jq '*|\
+      'basename'|'basename '*|\
       'gh run watch'|'gh run watch '*) : ;;
+      'sort'|'sort '*|'uniq'|'uniq '*)
+        # `sort`/`uniq` observe only with NO OUTPUT FLAG and AT MOST ONE OPERAND (wave-21 T13
+        # item 8): `sort -o f f` / `--output` writes a file, and `uniq in out` writes its second
+        # operand. A short-option cluster carrying `o` counts as the output flag; a word after
+        # `--` is an operand; an option's separate argument (`-k 2`) counts as an operand,
+        # which can only ever turn an observation into a nudge.
+        _xo=0; _xn=0; _xdd=""
+        # SPLIT BY `read -a`, never by an unquoted expansion: a `*` in the segment is a word
+        # here, not a glob over the cwd.
+        read -r -a _xws <<< "$_seg"
+        for _xw in "${_xws[@]:1}"; do
+          if [ -z "$_xdd" ]; then
+            case "$_xw" in
+              --) _xdd=1; continue ;;
+              --output|--output=*) _xo=1; break ;;
+              --*) continue ;;
+              -) : ;;
+              -*o*) _xo=1; break ;;
+              -*) continue ;;
+            esac
+          fi
+          _xn=$((_xn + 1))
+        done
+        if [ "$_xo" -eq 1 ] || [ "$_xn" -gt 1 ]; then _has_nonexempt=1; break; fi ;;
       'gh api'|'gh api '*)
-        # `gh api` observes unless a method other than GET is named.
+        # `gh api` observes unless a method other than GET is named — and a field or an input
+        # body (`-f`, `-F`, `--field`, `--raw-field`, `--input`) makes it a POST unless GET is
+        # named (wave-21 T13 item 8). Under a named GET, gh sends fields as query parameters,
+        # so they still observe; `--input` is a request BODY and is never an observation.
+        case " $_seg " in
+          *' --input '*|*' --input='*) _has_nonexempt=1; break ;;
+        esac
         case " $_seg " in
           *' -X '[Gg][Ee][Tt]' '*|*' --method '[Gg][Ee][Tt]' '*|*' --method='[Gg][Ee][Tt]' '*|*' -X'[Gg][Ee][Tt]' '*) : ;;
           *' -X '*|*' -X'?*|*' --method '*|*' --method='*) _has_nonexempt=1; break ;;
+          *' -f '*|*' -f'?*|*' -F '*|*' -F'?*|*' --field '*|*' --field='*|*' --raw-field '*|*' --raw-field='*)
+            _has_nonexempt=1; break ;;
           *) : ;;
         esac ;;
       'gh '*)
-        # `gh <noun> view` / `gh <noun> list` observe; every other verb is production.
-        case "$_seg" in
-          'gh '*' view'|'gh '*' view '*|'gh '*' list'|'gh '*' list '*) : ;;
+        # `gh <noun> view` / `gh <noun> list` observe; every other verb is production. The verb
+        # is the word AFTER THE NOUN (wave-21 T13 item 8): matched anywhere, `gh pr merge 5
+        # --body view` passed as an observation.
+        _xw="${_seg#gh }"; _xw="${_xw#* }"; _xw="${_xw%% *}"
+        case "$_xw" in
+          view|list) : ;;
           *) _has_nonexempt=1; break ;;
         esac ;;
       *) _has_nonexempt=1; break ;;

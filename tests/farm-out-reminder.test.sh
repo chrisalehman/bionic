@@ -285,6 +285,31 @@ for c in 'cd x && gh api -X POST repos/o/r && git log -1' 'cd x && gh api --meth
   expect_contains "4w: production chain nudges [$c]" "chain-class command" \
     "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
 done
+
+# THE EXEMPT HEADS, TIGHTENED (wave-21 T13 item 8; review-summary-3b45d05 fix candidate 9). Three
+# heads T8 let through could write: `sort -o f f` (and `--output`) writes a file, `uniq in out`
+# writes its second operand, a `gh api` carrying a field or an input body is a POST unless GET is
+# named, and `gh <noun> view|list` matched a `view`/`list` ANYWHERE in the segment, so
+# `gh pr merge 5 --body view` passed as an observation. `sort`/`uniq` are exempt with no output
+# flag and at most one operand; the gh verb is the word after the noun.
+for c in 'cd x && sort f && git log -1' 'cd x && sort -u -k2 f && git log -1' 'cd x && uniq -c f && git log -1' \
+         'cd x && sort && git log -1' 'cd x && gh api repos/x && git log -1' \
+         'cd x && gh api -X GET search/issues -f q=x && git log -1' 'cd x && gh repo view o/r && git log -1'; do
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$c")"
+  expect_empty "4x: observation chain is silent [$c]" "$OUT"
+done
+for c in 'cd x && sort -o f f && git log -1' 'cd x && sort --output=f f && git log -1' 'cd x && sort -uo f f && git log -1' \
+         'cd x && uniq a b && git log -1' 'cd x && sort a b && git log -1' \
+         'cd x && gh api -f k=v repos/x && git log -1' 'cd x && gh api repos/x -F n=1 && git log -1' \
+         'cd x && gh api repos/x --field k=v && git log -1' 'cd x && gh api repos/x --raw-field=k=v && git log -1' \
+         'cd x && gh api repos/x --input body.json && git log -1' 'cd x && gh api -X GET repos/x --input body.json && git log -1' \
+         'cd x && gh pr merge 5 --body view && git log -1' 'cd x && gh pr comment 5 --body list && git log -1'; do
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$c")"
+  expect_contains "4y: production chain nudges [$c]" "chain-class command" \
+    "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
+done
 cp "$SANDBOX/.state.keep" "$FO_STATE"
 
 # ---------------------------------------------------------------------------
