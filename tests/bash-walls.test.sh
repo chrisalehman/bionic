@@ -1791,4 +1791,25 @@ ro_rows "$R_NEST" w20-norole arownorole-0123456789abcdef ""
 run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' arownorole-0123456789abcdef omit Bash Explore)"
 expect_status "20h: a ROSTERED row with an empty role is ADMITTED whatever its agent_type (§17g's reading)" 0 "$ST"
 
+# 20i: ONE PICK, ONE SITE (wave-22 T10; review 2). The arm asks `roster_row_for_id` — the budget
+# arm's own pick — which takes a row's FIRST `agent_id=` as its id. A forged row that carries a
+# read-only role and a SECOND `agent_id=<id>` segment is not this agent's row (the old inline
+# awk matched the id in any segment and would have refused it); a row naming the id in any
+# other segment (`teammate_id=`) is not either. The payload's own agent_type then decides.
+R_FORGE="$(mk_repo forged-segment)"
+roster_header > "$R_FORGE/.bionic/tmp/roster-$SID.state"
+FORGE_ID="aforged-0123456789abcdef"
+printf '%s|agent_id=%s\n' "$(roster_row_fixture "session=$SID" status=identified name=w20-other \
+  "agent_id=aother-0123456789abcdef" subagent_type=bionic:test-runner)" "$FORGE_ID" >> "$R_FORGE/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" status=identified name=w20-tm "agent_id=atm-0123456789abcdef" "teammate_id=$FORGE_ID" \
+  subagent_type=bionic:test-runner >> "$R_FORGE/.bionic/tmp/roster-$SID.state"
+expect_eq "20i meta: the forged roster holds the id in a second agent_id= segment" "1" \
+  "$(grep -c "|agent_id=aother-0123456789abcdef|.*|agent_id=$FORGE_ID\$" "$R_FORGE/.bionic/tmp/roster-$SID.state")"
+run_hook "$(mk_payload "$R_FORGE" 'git commit -m "x"' "$FORGE_ID" omit Bash general-purpose)"
+expect_status "20i: an id found only in a SECOND agent_id= segment (or a teammate_id=) is no roster row — ADMITTED on its own type" 0 "$ST"
+expect_absent "20i: …the role arm says nothing" "read-only role" "$ERR"
+run_hook "$(mk_payload "$R_FORGE" 'git commit -m "x"' "$FORGE_ID" omit Bash bionic:test-runner)"
+expect_status "20i: …and with no row the payload's own read-only type still binds (the fallback)" 2 "$ST"
+expect_contains "20i: …saying no roster row names it" "no roster row names you" "$ERR"
+
 finish

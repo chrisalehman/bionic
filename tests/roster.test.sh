@@ -450,6 +450,12 @@ printf '%s\n' "$R11_FORGED" > "$R11_FF"
 expect_eq "R11f a forged second agent_id= is not the row's id (first key wins)" "" \
   "$(lib roster_row_for_id "$R11_FF" aforged-11)"
 expect_eq "R11f2 …the row answers to its first id" "$R11_FORGED" "$(lib roster_row_for_id "$R11_FF" aw1-11)"
+# R11g (wave-22 T10; review 5): the pick reads any `roster-state/` schema, as session-poker's
+# identity_args must — a v2 row carrying the id is found.
+R11_V2="${R11_IDN/roster-state\/v1|/roster-state/v2|}"
+mkdir -p "$R7_DIR/r11v2"; printf '%s\n' "$R11_V2" > "$R7_DIR/r11v2/roster-s1.state"
+expect_eq "R11g a roster-state/v2| row carrying the id is the pick" "$R11_V2" \
+  "$(lib roster_row_for_id "$R7_DIR/r11v2/roster-s1.state" aw1-11)"
 
 # ---------------------------------------------------------------------------------------
 section "R12 — the one rule is stated once and the six comments that restated it cite it (epic-23 wave-22 T5; REQ-1 AC-1.7, D8)"
@@ -458,8 +464,17 @@ section "R12 — the one rule is stated once and the six comments that restated 
 # (triage-12574e2 Q3/Q4). A comment is not behaviour, so the pin is on the SENTENCES: the
 # rule is present at its one home, and none of the four old claims survives in a file that
 # used to carry one. Real paths: hooks/ is the real directory, payload/hooks a symlink.
-R12_RULE="Every successor row written after an agent's id is known carries that id, and the status the id was learned under"
+# The sentence is wrapped at 100 columns (wave-22 T10; review 6), so it is pinned as its two
+# lines: the first clause, then the status half that opens the next.
+R12_RULE="Every successor row written after an agent's id is known carries that id,"
+R12_RULE2="and the status the id was learned under — so a row"
 expect_eq "R12a the invariant sentence is in roster.sh" "1" "$(grep -cF "$R12_RULE" "$ROSTER_SH")"
+expect_eq "R12a2 …its status half follows on the next line" "1" "$(grep -cF "$R12_RULE2" "$ROSTER_SH")"
+expect_eq "R12a3 …with the status half directly after the first clause" "1" \
+  "$(grep -A1 -F "$R12_RULE" "$ROSTER_SH" | grep -cF "$R12_RULE2")"
+expect_eq "R12a4 …scoped to the readers with no status filter" "1" "$(grep -cF "reader with no status filter picks" "$ROSTER_SH")"
+expect_eq "R12a5 …and no docblock line over 100 columns around it" "0" \
+  "$(sed -n '/THE ROW THE WALLS READ FOR AN ID/,/^# EMPTY ID/p' "$ROSTER_SH" | awk 'length($0) > 100' | wc -l | tr -d ' ')"
 R12_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
 R12_FILES=("${BIONIC_HOOKS_DIR}/session-poker.sh" "$R12_LIB/walls.sh" "${BIONIC_HOOKS_DIR}/execution-recorder.sh" \
   "$R12_LIB/stop.sh" "${BIONIC_HOOKS_DIR}/stop-guard.sh" "$ROSTER_SH")
@@ -469,6 +484,15 @@ for R12_S in "already read a name's latest row" "never goes back to empty" "A TE
   R12_N=$((R12_N + 1))
   R12_HITS="$(grep -nF "$R12_S" "${R12_FILES[@]}" 2>/dev/null | cut -c1-120)"
   expect_eq "R12b$R12_N no file carries the old sentence \"$R12_S\"" "" "$R12_HITS"
+done
+# R12c (wave-22 T10; auditor C4): the six comments cite the rule — each of the five files other
+# than roster.sh (its home) names `roster_row_for_id` or ADR-039 at least once. A citation deleted
+# from a file turns its row red; the count is the file's own, so one file cannot cover another.
+R12_CITE="roster_row_for_id|ADR-039"
+for R12_F in "${R12_FILES[@]}"; do
+  [ "$R12_F" = "$ROSTER_SH" ] && continue
+  R12_C="$(grep -cE "$R12_CITE" "$R12_F" 2>/dev/null)"; [ "${R12_C:-0}" -ge 1 ] && R12_C=cites || R12_C=none
+  expect_eq "R12c $(basename "$R12_F") cites roster_row_for_id or ADR-039 at least once" "cites" "$R12_C"
 done
 
 finish
