@@ -61,20 +61,17 @@ Every resolution is logged: append one line to `record/<wave>/assumptions.md` pe
 - Test authoring: a negative or empty-readback assertion (`expect_not_*`, `expect_eq ""`, an absence check) is written only beside a positive assertion on the SAME extractor in the SAME fixture; if the positive cannot be written, the negative is not a test. Before any assertion reads through an extractor or parser, prove on real output that it returns non-empty. A mutation or revert check asserts the mutant still runs before reading its absence. Under macOS awk, never compare multibyte glyphs with `==` — use `index()`.
 <!-- SHARED-CORE-END -->
 
-<!-- BRIEF-SCAFFOLD-BEGIN -->
-### Scaffold
-
-```
-Expected duration: <N> minutes
-Expected artifact: <ONE path inside the repo, e.g. .bionic/docs/record/<wave>/<name>.md>
-Progress artifact: <path>
-Cadence: <N> min
-Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watch — optional
-Files: <every path the task may create or edit>        # writers; a read-only brief omits this and keeps Suites: none
-Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:
-Re-executes: `<cmd>`
-Deliverable-waiver: <reason>                           # only for a report returned by message
-```
-<!-- BRIEF-SCAFFOLD-END -->
+<!-- BRIEF-SCAFFOLD-READER-BEGIN -->
+### Your brief
+Expected duration: your time budget.
+Expected artifact: the one path that makes you done.
+Progress artifact: append to it at least every Cadence.
+Cadence: that interval.
+Subprocess claim: the backgrounded process main will look for.
+Files: the only paths you may write.
+Suites: the only suites you may run.
+Re-executes: the only other runs you may make.
+Deliverable-waiver: report by message, not a file.
+<!-- BRIEF-SCAFFOLD-READER-END -->
 
 Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.
