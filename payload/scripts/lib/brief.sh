@@ -310,9 +310,26 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
     }
     # EVERY hit of a label, in position order, as a space-joined list of hit numbers (wave-22
     # T3, D5). The runs lift reads every `Re-executes:` span, not only the first.
+    #
+    # A HIT IN A CODE BLOCK IS AN EXAMPLE, NOT A DECLARATION (wave-22 T10; review 1, critic C2).
+    # At base only the first hit counted, so a quoted `Re-executes:` line after the real one was
+    # harmless; the union reads them all, so a line inside a ``` fence, or indented four spaces
+    # or a tab (a Markdown code block), would widen the run contract with a command the author
+    # only showed. The callers of firsthit are untouched.
+    function in_code_block(p,   pre, n, i, ls, fence, k, w, ch) {
+      pre = substr(lc, 1, p - 1); n = split(pre, ls, "\n"); fence = 0
+      for (i = 1; i < n; i++) if (ls[i] ~ /^[ \t]*```/) fence = !fence
+      if (fence) return 1
+      w = 0
+      for (k = length(ls[n]); k >= 1; k--) {
+        ch = substr(ls[n], k, 1)
+        if (ch == "\t") w += 4; else if (ch == " ") w++; else return 0
+      }
+      return (w >= 4)
+    }
     function allhits(kind,   j, k, n, idx, t, out) {
       n = 0
-      for (j = 1; j <= nh; j++) if (HK[j] == kind) idx[++n] = j
+      for (j = 1; j <= nh; j++) if (HK[j] == kind && !in_code_block(HLS[j])) idx[++n] = j
       for (j = 2; j <= n; j++) {
         t = idx[j]
         for (k = j - 1; k >= 1 && HLS[idx[k]] > HLS[t]; k--) idx[k + 1] = idx[k]
@@ -1097,7 +1114,7 @@ Then retry the dispatch."
   # never told at dispatch. `RUNS_MAX` (3) is unchanged; a brief within the cap never reaches
   # this arm.
   if [ -n "$runs_dropped" ]; then
-    detail="The Re-executes: span named more runs than the ${cap}-run cap admits for
+    detail="The Re-executes: lines name more runs than the ${cap}-run cap admits for
 this role (${role:-unnamed}), and this one was dropped:
     ${runs_dropped}
 
@@ -1108,7 +1125,7 @@ be refused there 40 minutes later, for running exactly what its own brief had na
 The cap of three is the auditor's, from its mandate's \"<=3 re-executions\"; every other
 role may declare as many runs as a Suites: line may name suites (${DP_SUITES_MAX}).
 
-Fix: mark at most ${capw} runs with backticks, one line —
+Fix: mark at most ${capw} runs with backticks, across all your Re-executes: lines —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`, \`go test ./...\`
 
 Then retry the dispatch."
@@ -1490,7 +1507,11 @@ Or configure the derivation once, in .bionic/config.yaml —
 
 Then retry the dispatch."
     fi
-    found=1; "$sink" finding "no impact command is configured here" "set impact-command in config.yaml" "$detail"
+    # THE SHORT FIX IS THE ONE THAT APPLIES (wave-22 T10; critic C3). On a several-fault brief the
+    # detail block above is dropped and only this line reaches the author.
+    local short_fix="set impact-command in config.yaml"
+    if [ -n "$re_executes" ]; then short_fix="add Suites: none beside Re-executes:"; fi
+    found=1; "$sink" finding "no impact command is configured here" "$short_fix" "$detail"
   fi
 
   return "$found"
