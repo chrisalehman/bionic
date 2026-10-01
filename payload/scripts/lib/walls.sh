@@ -5634,12 +5634,16 @@ _budget_wire_list() {  # <allowed text: suites and/or marked runs, may be empty>
   elif [ "$nruns" -gt 0 ]; then word=entries; fi
   [ "$total" -eq 1 ] && word="${word%s}"
   [ "$word" = entrie ] && word=entry
+  # A COUNT OF RUNS NAMES DECLARATIONS (wave-22 T4; REQ-4, D7): the full command prints in the
+  # detail block, so the bare count says so instead of a lone "1 run".
+  local bare="$total $word"
+  [ "$nruns" -eq "$total" ] && bare="$total declared $word (printed below)"
   if [ "$cols" -le 0 ]; then
     # NO ROOM AT ALL (F7). The set is NOT empty, so `none` would lie; name the
     # count instead. `_budget_wire_fact`'s caller-side self-refuse (refuse.sh's
     # own line-width check) is what catches an overlong line from here, per
     # A-T8.1 — this function's job is to be honest, not to guarantee a fit.
-    printf '%d %s' "$total" "$word"
+    printf '%s' "$bare"
     return
   fi
   local joined="" first=""
@@ -5677,7 +5681,7 @@ _budget_wire_list() {  # <allowed text: suites and/or marked runs, may be empty>
     # NOT EVEN ONE TOKEN FITS BARE (F3). A character cut here would print a
     # truncated, unrunnable suite name — exactly what token-boundary rendering
     # exists to avoid — so the honest floor is the bare count, same as cols<=0.
-    printf '%d %s' "$total" "$word"
+    printf '%s' "$bare"
   elif [ "$remain" -gt 0 ]; then
     printf '%s +%d more' "$out" "$remain"
   else

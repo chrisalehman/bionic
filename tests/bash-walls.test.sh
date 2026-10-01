@@ -958,6 +958,37 @@ expect_contains "15a12b: …with the reason placeholder quoted there too" \
 B15_LINE="$(printf '%s\n' "$ERR" | sed -n 's/.*widen it: \(.*\) (main runs it).*/\1/p' | head -1)"
 expect_true "15a12c: …and that line parses as bash too [$B15_LINE]" bash -n -c "$B15_LINE"
 
+# (a3) THE WIRE-LIST COUNT NAMES DECLARATIONS (wave-22 T4; REQ-4, D7, AC-4.1/4.2). When the one
+# declared run does not fit the verdict line's room, the line says what the count counts —
+# `1 declared run (printed below)` — and the full command still prints after `On the budget:`.
+# A fitting run is the command itself, unchanged (the short form, pinned below from a RED run).
+R15W="$(mk_repo budgetwirelongrun)"
+: > "$R15W/.bionic/tmp/roster-$SID.state"
+W15_RUN="pytest tests/unit/test_a_very_long_module_name_that_cannot_fit_on_any_line.py -k widget"
+roster_row_fixture "session=$SID" name=t15wide "agent_id=$ACTOR" \
+  "re_executes=\`$W15_RUN\`" suites_source=declared files= \
+  >> "$R15W/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15W" 'npx jest --testPathPatterns y' "$ACTOR" omit Bash test-runner)"
+expect_status "15a20: an undeclared run against one over-wide declared run is refused" 2 "$ST"
+W15_LINE="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "15a21: …and the allowed clause counts the declaration, naming where the run prints" \
+  "allowed: 1 declared run (printed below)" "$W15_LINE"
+W15_BLOCK="$(printf '%s\n' "$ERR" | sed -n '/On the budget:/,$p')"
+expect_contains "15a22: …and the full command still prints in the On the budget: block" \
+  "$W15_RUN" "$W15_BLOCK"
+expect_absent "15a23: …and the line no longer reads the bare count 'allowed: 1 run'" \
+  "allowed: 1 run" "$W15_LINE"
+# THE SHORT FORM, PINNED VERBATIM (AC-4.2): a declared run that FITS prints as itself; the verdict
+# line below was copied from a RED-time run at a220bd6 and must not change.
+R15S="$(mk_repo budgetwireshortrun)"
+: > "$R15S/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" name=t15short "agent_id=$ACTOR" \
+  "re_executes=\`npm test\`" suites_source=declared files= \
+  >> "$R15S/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15S" 'npx jest --testPathPatterns y' "$ACTOR" omit Bash test-runner)"
+expect_eq "15a24: a fitting declared run keeps the verdict line byte-for-byte" \
+  "bionic: suite-run refused — allowed: \`npm test\` (run only the budgeted suites)" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+
 # (a3) THE NAME AS THE ROSTER CARRIES IT. A row named `w budget;rm` was printed as
 # `amend wbudgetrm`, a name no row carries, so the pasted command addressed nobody. A name a
 # shell would split or act on is single-quoted instead, so the line is still pasteable and
@@ -1629,7 +1660,7 @@ t4_row "$R7X" t4wirewide suites_allowed=none suites_source=declared files= \
   "re_executes=${T4_BT}$T4_LONG one${T4_BT} ${T4_BT}$T4_LONG two${T4_BT} ${T4_BT}$T4_LONG three${T4_BT}"
 t4_refused "REQ7 remedy 3b: an undeclared run against three over-wide runs is refused" "$R7X" 'npx jest'
 T4_LINE=$(printf '%s\n' "$ERR" | grep -m1 '^bionic: ')
-expect_contains "REQ7 remedy 3b: …and the line counts them as runs" "3 runs" "$T4_LINE"
+expect_contains "REQ7 remedy 3b: …and the line counts them as declared runs, printed below (wave-22 T4)" "3 declared runs (printed below)" "$T4_LINE"
 expect_absent "REQ7 remedy 3b: …never a cut run" "pytest" "$T4_LINE"
 
 
