@@ -407,4 +407,27 @@ printf -- '---\nname: x\ndisallowedTools: Write, Edit, NotebookEdit\n---\nbody\n
 expect_eq "10c: the reader lifts every name of a real disallowedTools line (not vacuous)" \
   "Write Edit NotebookEdit " "$(rt_disallowed "$_rt_neg" | tr '\n' ' ')"
 
+section "Section 11: the scaffold's Files: comment and its optional claim line reach every rendered copy (wave-21 T7, AC-6.3)"
+# THE COMMENT THAT READ AS "OMIT THE INSTRUMENT" (triage-B §4.3, 4a). The scaffold's `Files:`
+# comment said "writers; omit for a read-only brief", and the very next line is the
+# `Suites: none` a read-only brief must keep — an author who omitted both was refused for
+# declaring nothing. The block now says so in one clause, and carries the optional
+# `Subprocess claim:` line a CI wait declares (REQ-7, D7). Section 1 proves the finals match
+# a fresh render; this proves the render carries the words, in both files the block lands
+# in, so a template that stopped injecting the block cannot stay green here. RE-POINTED
+# (wave-21 T7b, Δ9): the six role files carry the reader view (brief-scaffold-reader.md)
+# instead, pinned by docs-pins 111d/111f; they no longer carry this block.
+#
+# fails-when: any rendered copy carries the old comment, lacks the new one, or lacks the
+# claim line.
+for _sc_f in skills/canonical-sdlc/SKILL.md skills/canonical-sdlc/dispatch.md; do
+  _sc_body=$(cat "$REPO/$_sc_f" 2>/dev/null)
+  expect_true "11a: $_sc_f says a read-only brief keeps Suites: none" \
+    bash -c 'case "$1" in *"# writers; a read-only brief omits this and keeps Suites: none"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
+  expect_true "11b: …and no longer says to omit the line" \
+    bash -c 'case "$1" in *"omit for a read-only brief"*) exit 1 ;; esac; exit 0' _ "$_sc_body"
+  expect_true "11c: …and carries the optional Subprocess claim: line" \
+    bash -c 'case "$1" in *"Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watch — optional"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
+done
+
 finish
