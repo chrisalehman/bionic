@@ -1133,6 +1133,78 @@ expect_eq "…exactly once" "1" "$(grep -c 'status=duplicate-start' "$IDR_ROSTER
 expect_eq "T20c: a relaunch under a new id carries no restarted_at (only a restart of an acked id does)" \
   "0" "$(grep 'status=identified' "$IDR_ROSTER" | grep -c '|restarted_at=')"
 
+# ---------- T9: A RESTART AFTER AN ACK CARRIES AN AMENDED CONTRACT (epic-23 wave-22 T9) ----------
+#
+# `session-poker.sh amend` appends the amended successor as an `identified` row carrying the
+# id (ADR-039, D1). The restart-after-ack path re-identified from its two joins, and both
+# accept `intended|confirmed` only, so neither could see that successor: a TEAMMATE's id join
+# found nothing (its intended and confirmed rows carry no id) and its name join took the
+# recorder's original `confirmed` row (critic-b2f70c1 C1); an ASYNC agent's id join took the
+# pre-amend `confirmed` row (carry-over row 1, design probe Q3 `async_amend_second`). Either
+# way the re-identified row carried the original contract, became the id's last row, and the
+# budget arm refused the amended run again. The restart now re-identifies from the id's latest
+# STARTED row (`DUP_PRIOR_BEFORE`), which is the amended successor. Each world below is the
+# roster as the writers leave it, then the ack, then the restart.
+T9_RUN_A='`npx jest --testPathPatterns gadget`'
+T9_RUN_B='`npx jest --testPathPatterns widget`'
+t9_row() {  # <roster> <status> <agent-id> [extra key=value...] — the seed's field set plus a run
+  local f="$1" st="$2" aid="$3"; shift 3
+  roster_row_fixture status="$st" session="$SID_A" name=probemate agent_id="$aid" \
+    launched_at=2026-08-08T09:00:00Z model=claude-opus-5 \
+    deliverable=.bionic/docs/record/w1-slice1-report.md duration='~25 minutes.' \
+    progress=.bionic/tmp/w1-s1-progress.md cadence='~8m.' re_executes="$T9_RUN_A" "$@" >> "$f"
+}
+t9_last_identified() { grep 'status=identified' "$1" | tail -1; }
+t9_re() { printf '%s' "$1" | tr '|' '\n' | grep '^re_executes=' | head -1 | cut -d= -f2-; }
+
+# THE TEAMMATE SHAPE: intended (no id) -> identified (the id, at SubagentStart) -> confirmed
+# with an EMPTY id (ARM 2's copy) -> the amend's identified successor, id and run B added.
+IFS='|' read -r T9T_REPO T9T_TR T9T_SUB T9T_CFG <<< "$(make_world t9amendtm yes)"
+T9T_ROSTER="$T9T_REPO/.bionic/tmp/roster-${SID_A}.state"
+roster_header > "$T9T_ROSTER"
+t9_row "$T9T_ROSTER" intended "" tool_use_id=toolu_01T9TM
+t9_row "$T9T_ROSTER" identified "$START_ID" teammate_id=probemate@session-8a41c2e0 tool_use_id=toolu_01T9TM
+t9_row "$T9T_ROSTER" confirmed "" teammate_id=probemate@session-8a41c2e0 tool_use_id=toolu_01T9TM
+t9_row "$T9T_ROSTER" identified "$START_ID" teammate_id=probemate@session-8a41c2e0 tool_use_id=toolu_01T9TM \
+  re_executes="$T9_RUN_A $T9_RUN_B" "amended=2026-08-08T09:20:00Z fix-up run"
+ack_write "$T9T_REPO" "$SID_A" 2026-08-08T09:31:00Z probemate
+# The teammate's start: its NAME in agent_type, the transcript-form id in agent_id.
+run_rec "$(mk_subagent_start "$SID_A" "$T9T_TR" "$T9T_REPO" "probemate" "$START_ID")"
+T9T_LAST=$(t9_last_identified "$T9T_ROSTER")
+expect_eq "T9-tm: the restart after the ack identifies a third time (no duplicate-start: the ack closed the name)" \
+  "3" "$(grep -c 'status=identified' "$T9T_ROSTER")"
+expect_contains "T9-tm: …the re-identified row is the restart (restarted_at)" "|restarted_at=" "$T9T_LAST"
+expect_contains "T9-tm: …and carries the AMENDED run, not only the original (critic-b2f70c1 C1)" \
+  "widget" "$(t9_re "$T9T_LAST")"
+expect_eq "T9-tm: …its re_executes is the amended successor's, byte for byte" \
+  "$T9_RUN_A $T9_RUN_B" "$(t9_re "$T9T_LAST")"
+expect_eq "T9-tm: …keeping the contract's launch" \
+  "2026-08-08T09:00:00Z" "$(printf '%s' "$T9T_LAST" | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)"
+expect_eq "T9-tm: …and the id it was started under" \
+  "$START_ID" "$(printf '%s' "$T9T_LAST" | tr '|' '\n' | grep '^agent_id=' | head -1 | cut -d= -f2-)"
+
+# THE ASYNC SHAPE (carry-over row 1; probe Q3 `async_amend_second`): ARM 2's `confirmed` row
+# carries the id, the recorder identifies it, the amend appends the identified successor, the
+# ack closes the name, the agent restarts. The fall-through id join took the pre-amend
+# `confirmed` row here.
+IFS='|' read -r T9A_REPO T9A_TR T9A_SUB T9A_CFG <<< "$(make_world t9amendasync yes)"
+T9A_ROSTER="$T9A_REPO/.bionic/tmp/roster-${SID_A}.state"
+roster_header > "$T9A_ROSTER"
+t9_row "$T9A_ROSTER" confirmed "$START_ID" tool_use_id=toolu_01T9AS
+run_rec "$(mk_subagent_start "$SID_A" "$T9A_TR" "$T9A_REPO" "general-purpose" "$START_ID")"
+expect_eq "T9-async: the first start identifies the confirmed row (the precondition)" \
+  "1" "$(grep -c 'status=identified' "$T9A_ROSTER")"
+t9_row "$T9A_ROSTER" identified "$START_ID" tool_use_id=toolu_01T9AS \
+  re_executes="$T9_RUN_A $T9_RUN_B" "amended=2026-08-08T09:20:00Z fix-up run"
+ack_write "$T9A_REPO" "$SID_A" 2026-08-08T09:31:00Z probemate
+run_rec "$(mk_subagent_start "$SID_A" "$T9A_TR" "$T9A_REPO" "general-purpose" "$START_ID")"
+T9A_LAST=$(t9_last_identified "$T9A_ROSTER")
+expect_eq "T9-async: the restart after the ack identifies again, no duplicate-start" \
+  "0" "$(grep -c 'status=duplicate-start' "$T9A_ROSTER")"
+expect_contains "T9-async: …the re-identified row is the restart (restarted_at)" "|restarted_at=" "$T9A_LAST"
+expect_eq "T9-async: …and carries the AMENDED runs A and B (carry-over row 1 closed)" \
+  "$T9_RUN_A $T9_RUN_B" "$(t9_re "$T9A_LAST")"
+
 # ---------- the full chain: intended → confirmed → identified ----------
 #
 # The async dispatch lifecycle, which is the one the id join can span end to end:
