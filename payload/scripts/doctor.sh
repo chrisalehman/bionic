@@ -2548,6 +2548,24 @@ if [ -n "$PATROL_ROWS" ]; then
 else
   _doctor_item "$DOCTOR_NIL" "none running" ""
 fi
+# PLUGIN-ROOT DRIFT (wave-21 T3, AC-2.3). The registry's root and the root the hooks are
+# running from can be two trees: the CLI resolves a cached older build while the session's
+# hooks run a newer one (triage-C R2). The Patrol is armed by a prompt that names the poker
+# by path, so arming from the registry's copy runs the wrong script. The test is byte-wise on
+# the poker alone, the one file the Patrol is armed from; identical copies, no registry entry,
+# or a registry root with no poker (cmp exits 2, not 1) all print nothing. The running root is
+# this script's own location, resolved the way DOCTOR_REPO_ROOT is, never from the env.
+_drift_reg="$(detect_plugin_root 2>/dev/null)" || _drift_reg=""
+_drift_run="$(cd "${DOCTOR_LIB}/../.." && pwd -P)"
+if [ -n "$_drift_reg" ]; then
+  _drift_reg="$(cd "$_drift_reg" 2>/dev/null && pwd -P)" || _drift_reg=""
+fi
+if [ -n "$_drift_reg" ] && [ "$_drift_reg" != "$_drift_run" ]; then
+  cmp -s "${_drift_reg}/hooks/session-poker.sh" "${_drift_run}/hooks/session-poker.sh" 2>/dev/null
+  if [ "$?" -eq 1 ]; then
+    echo "  plugin-root drift: registry=${_drift_reg} running=${_drift_run} — the Patrol must be armed from the running root"
+  fi
+fi
 # THE RUN, THE PREDECESSORS AND THE LEGACY LINKS — the three rows that are about
 # this PROJECT rather than about this machine, printed under the Patrol because
 # the Patrol is what acts on them.
