@@ -1135,6 +1135,7 @@ _setup_env_why() {  # <key>
     CLAUDE_CODE_ENABLE_TODO_TOOLS)        echo "the task list a plan's steps are tracked in" ;;
     BASH_MAX_TIMEOUT_MS)                  echo "how long a command may run before it is taken away from whoever started it" ;;
     CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) echo "the channel a dispatched agent reports back through" ;;
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY)      echo "auto memory off: it loads unreviewed notes into every session" ;;
     *)                                    echo "a setting bionic needs" ;;
   esac
 }
