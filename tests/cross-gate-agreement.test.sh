@@ -492,14 +492,40 @@ verdict_er() {  # <repo> -> yes|no|other:<detail>
 
 # The evidence gate is the only party that reports the DERIVED VALUE, so its
 # answer is `yes:<value>` where the others answer `yes`. Callers split on `:`.
+# THE EVIDENCE GATE JUDGES ONLY A BOUND SESSION'S RUN (wave-23-fixit-1810, REQ-1, D1; spec
+# Δ1). These parties drive an engaged, UNBOUND session — the empty marker new_repo plants —
+# and since that wave the gate announces an unbound session's newest-plan fallback and acts
+# on nothing, so it would answer "no" on every fixture and this battery would lose its
+# fifth voice. So for the drive alone the session is bound to the plan the PARTY'S OWN
+# library resolves as the newest open run — the shipped one here, the mutant under §A2 —
+# and the empty marker is put back after. The gate then derives `current:` from exactly the
+# plan the library found, which is what this battery has always compared; a library that
+# finds no open run leaves the marker empty, and the gate answers "no" as the others do.
+cg_eg_libdir() {
+  local h; h="$(dirname "$PARTY_EG")"
+  if [ -r "$h/../scripts/lib/run.sh" ]; then printf '%s' "$h/../scripts/lib"
+  else printf '%s' "$h/../payload/scripts/lib"; fi
+}
+cg_eg_bind() {  # <repo> <sid> -> 0 when an EMPTY marker was bound for this drive
+  local m="$1/.bionic/tmp/engaged-$2.state" p
+  [ -f "$m" ] && [ ! -L "$m" ] && [ ! -s "$m" ] || return 1
+  p=$(bash -c '. "$1/run.sh" 2>/dev/null && active_run "$2"' _ "$(cg_eg_libdir)" "$1" 2>/dev/null) || p=""
+  [ -n "$p" ] || return 1
+  printf 'plan=%s\nengaged_at=2026-09-04T00:00:00Z\n' "$p" > "$m"; chmod 600 "$m"
+  return 0
+}
+cg_eg_unbind() { : > "$1/.bionic/tmp/engaged-$2.state"; }
+
 verdict_eg() {  # <repo> -> yes:<current>|no|other:<detail>
-  local out st
+  local out st _b=0
   # BIONIC_WALL_VERBOSE=1 (task 13, ruling D-1). The gate's user line is one sentence
   # now and the DERIVED VALUE this party reports — the step number the plan has no line
   # for — lives in `detail`. Reading the line alone would make every row here
   # `other:<prefix>`; the knob is how the party keeps reporting a value at all.
+  cg_eg_bind "$1" "$SID_A" && _b=1
   out=$(mk_bash_payload "$SID_A" "$SANDBOX/t.jsonl" "$1" "git commit -m x" \
         | env -u CLAUDE_PROJECT_DIR BIONIC_WALL_VERBOSE=1 bash "$PARTY_EG" 2>&1); st=$?
+  [ "$_b" = 1 ] && cg_eg_unbind "$1" "$SID_A"
   if [ "$st" -eq 0 ]; then echo no; return; fi
   case "$out" in
     *"has no 'Step "*)
@@ -5766,9 +5792,13 @@ s_backdate() {  # <file> — an hour older than everything else in the fixture
 # a property of the SESSION, and a helper that hard-coded one sid could only ever ask half
 # the question. Both default to $SID_A so every case below §S.3 reads exactly as it did.
 s_eg_read() {  # <repo> [sid] -> "<plan path>|<current>", or "none"
-  local out st plan cur sid="${2:-$SID_A}"
+  local out st plan cur sid="${2:-$SID_A}" _b=0
+  # An UNBOUND session is bound for the drive to its library's newest open run (cg_eg_bind,
+  # wave-23-fixit-1810 D1); a session a case bound itself is read as it stands.
+  cg_eg_bind "$1" "$sid" && _b=1
   out=$(mk_bash_payload "$sid" "$SANDBOX/t.jsonl" "$1" "git commit -m x" \
         | env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$sid" bash "$PARTY_EG" 2>&1); st=$?
+  [ "$_b" = 1 ] && cg_eg_unbind "$1" "$sid"
   [ "$st" -eq 0 ] && { echo none; return; }
   plan=$(printf '%s\n' "$out" | sed -n 's/^Plan: //p' | head -1)
   cur=$(printf '%s\n' "$out" | sed -n "s/.*has no 'Step \([^']*\):' line.*/\1/p" | head -1)
