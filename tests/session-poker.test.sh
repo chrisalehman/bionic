@@ -6097,6 +6097,38 @@ expect_absent "30t6d …never the stop wall, which does not read a duplicate-sta
 poke "$R30T" amend w1 --files+ hooks/c.sh --reason 'teammate again'
 expect_contains "30t6e the teammate fixture's line keeps both walls" "the stop and budget walls read this row from now on" "$OUT"
 
+# 30t7: THE COPY SOURCE AND THE ID STAMP ARE ONE ROW (wave-22 T13; critic-3598752 I4). `amend`'s
+# and `extend`'s source rows were read on `roster-state/v1|` while `identity_args` reads any
+# `roster-state/` row (30t5), so under a schema bump the copy came from the last v1 row and the
+# identity from a later row. The roster here is one v1 row, then a later row on another schema
+# version carrying the same id and cycle with its own files= and teammate_id=: both verbs copy
+# AND stamp from that later row. The v1 row keeps the name open (`roster_open_names` reads v1).
+s30t7_world() {  # <repo> — a v1 identified row, then a v2 copy of it with its own files/teammate_id
+  local v2
+  s30_row "$1"
+  v2="$(roster_row_fixture status=identified "session=$SID" name=w1 agent_id=aw1-3000000000000001 \
+    "launched_at=$(iso_ago 300)" subagent_type=bionic:implementor source=declared \
+    "deliverable=$1/never-yet.md" duration="2 hours" files=hooks/v2.sh suites_allowed=a.test.sh \
+    suites_source=declared teammate_id=w1@session-v2v2v2v2 tool_use_id=toolu_w1 \
+    | sed "s#^${ROSTER_ROW_SCHEMA}|#roster-state/v2|#")"
+  printf '%s\n' "$v2" >> "$(roster_of "$1")"
+}
+R30T7="$(make_repo s30-v2-amend)"; new_roster "$R30T7"; s30t7_world "$R30T7"
+expect_contains "30t7 meta: the roster's last row is on another schema version" "roster-state/v2|" \
+  "$(tail -1 "$(roster_of "$R30T7")")"
+poke "$R30T7" amend w1 --reexec+ 'npx jest --testPathPatterns widget' --reason 'run B'
+expect_eq "30t7b amend over a later non-v1 row exits 0" "0" "$RC"
+expect_eq "30t7c …copying files= from that later row, not the last v1 row" "hooks/v2.sh" \
+  "$(s30_field "$(s30_last "$R30T7")" files)"
+expect_eq "30t7d …and stamping the same row's teammate_id (one source row)" "w1@session-v2v2v2v2" \
+  "$(s30_field "$(s30_last "$R30T7")" teammate_id)"
+R30T7E="$(make_repo s30-v2-extend)"; new_roster "$R30T7E"; s30t7_world "$R30T7E"
+poke "$R30T7E" extend w1 "one more commit"
+expect_eq "30t7e extend over a later non-v1 row exits 0" "0" "$RC"
+expect_eq "30t7f …copying files= from that later row" "hooks/v2.sh" "$(s30_field "$(s30_last "$R30T7E")" files)"
+expect_eq "30t7g …and stamping the same row's teammate_id" "w1@session-v2v2v2v2" \
+  "$(s30_field "$(s30_last "$R30T7E")" teammate_id)"
+
 # ============================================================
 section "Section 30b: FOLLOW-UP — the tick holds a MET row whose agent has a message waiting (wave-20 T9, REQ-4, AC-4.3; Δ8)"
 # ============================================================

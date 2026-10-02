@@ -3759,7 +3759,9 @@ EOF
 
     # THE LAST ROW CARRYING THIS NAME IS ITS LATEST CONTRACT — the same by-name reading
     # every other reader in this file takes (e.g. the duration arm inside `tick`, below).
-    EXTEND_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+    # Any `roster-state/` row, the prefix `identity_args` reads, so the copy and the id stamp
+    # come from one row under a schema bump (wave-22 T13; critic-3598752 I4).
+    EXTEND_ROW="$(grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null \
       | grep -F "|name=${EXTEND_NAME}|" | tail -1)"
     if [ -z "$EXTEND_ROW" ]; then
       die "REFUSED — no row named $EXTEND_NAME on this session's roster ($ROSTER_FILE)."
@@ -3836,7 +3838,8 @@ EOF
       die "REFUSED — no row named $AMEND_NAME: this session has no roster at $ROSTER_FILE."
       exit 1
     fi
-    AM_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+    # Any `roster-state/` row, as `identity_args` reads (wave-22 T13; critic-3598752 I4).
+    AM_ROW="$(grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null \
       | grep -F "|name=${AMEND_NAME}|" | tail -1)"
     if [ -z "$AM_ROW" ]; then
       die "REFUSED — no row named $AMEND_NAME on this session's roster ($ROSTER_FILE)."

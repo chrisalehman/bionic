@@ -370,6 +370,9 @@ run_gate() {  # <payload-json>
       return 0
     fi
     DP_E1_SEEN=$(( ${DP_E1_SEEN:-0} + 1 ))
+    # refuse.sh REFUSING ITS OWN CALL fits the shape, but the author never sees the real fault
+    # (wave-22 T13; critic-3598752 I1).
+    case "$_dp_line" in "bionic: refuse-call refused"*) DP_E1_BAD_SHAPE="${DP_E1_BAD_SHAPE:-}[$_dp_line] " ;; esac
     printf '%s' "$_dp_line" | /usr/bin/grep -qE '^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$' \
       || DP_E1_BAD_SHAPE="${DP_E1_BAD_SHAPE:-}[$_dp_line] "
     [ "$(printf '%s\n' "$_dp_line" | wc -l | tr -d ' ')" = "1" ] \
@@ -8303,6 +8306,39 @@ ${FENCE3}
 Re-executes: ${BT}rm -rf x${BT}
 ${FENCE3}
 Re-executes: ${BT}go test ./b${BT}")"
+# wave-22 T13 (critic-3598752 I2, I2b): a `~~~` fence is a fence too, and a label whose EVERY hit
+# sits in a code block falls back to its first hit — an indented, tabbed or after-unbalanced-fence
+# real line is still the declaration, as it was before the union (cases D, E, H).
+FENCE4='~~~'
+expect_eq "brief-lib a ~~~-fenced Re-executes: example after the real line lifts only the real run (I2b case B)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Re-executes: ${BT}npm test -- a${BT}
+
+${FENCE4}
+Re-executes: ${BT}rm -rf build${BT}
+${FENCE4}")"
+expect_eq "brief-lib …a ${FENCE3} line inside a ~~~ fence does not close it" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Re-executes: ${BT}npm test -- a${BT}
+
+${FENCE4}
+${FENCE3}
+Re-executes: ${BT}rm -rf build${BT}
+${FENCE4}")"
+expect_eq "brief-lib an unbalanced ${FENCE3} line before the only real line still lifts it (I2 case D)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "${FENCE3}
+some example
+Re-executes: ${BT}npm test -- a${BT}")"
+expect_eq "brief-lib a contract indented four spaces still lifts its only Re-executes: line (I2 case E)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Task:
+    Files: hooks/a.sh
+    Suites: a.test.sh
+    Re-executes: ${BT}npm test -- a${BT}")"
+expect_eq "brief-lib a tab-indented only Re-executes: line still lifts (I2 case H)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "	Re-executes: ${BT}npm test -- a${BT}")"
 BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh
 Re-executes: ${BT}go test ./a${BT}")
 expect_contains "brief-lib Files: + Re-executes: with no impact command is still refused (AC-3.1)" "rc=1" "$BV"
@@ -8311,7 +8347,7 @@ expect_contains "brief-lib …the first Fix: block names Suites: none" "Suites: 
 expect_contains "brief-lib …beside the brief's Re-executes:" "Re-executes:" "$FIRSTFIX"
 expect_contains "brief-lib …the two existing remedies follow" "impact-command: bash tests/lib/impact.sh" "$BV"
 expect_contains "brief-lib …and the SHORT fix names Suites: none beside Re-executes: (C3)" \
-  "fix: add Suites: none beside Re-executes:" "$BV"
+  "fix: Suites: none beside Re-executes:" "$BV"
 BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
 expect_contains "brief-lib …no runs declared: the short fix is still the impact-command one" \
   "fix: set impact-command in config.yaml" "$BV"
@@ -8345,9 +8381,74 @@ Files: payload/scripts/lib/widget.sh
 Re-executes: ${BT}npx jest --testPathPatterns alpha${BT}" "w22t10c3")"
 expect_eq "brief-lib a missing deliverable AND a missing impact command is refused (C3)" "deny" "$GATE_VERDICT"
 expect_contains "brief-lib …the impact finding's short fix names Suites: none beside Re-executes:" \
-  "no impact command is configured here (add Suites: none beside Re-executes:)" "$GATE_REASON"
+  "no impact command is configured here (Suites: none beside Re-executes:)" "$GATE_REASON"
 expect_absent "brief-lib …and no longer points a Re-executes: brief at impact-command" \
   "(set impact-command in config.yaml)" "$GATE_REASON"
+# wave-22 T13 (critic-3598752 I1): the ONE-FAULT path. With runs declared and nothing else wrong,
+# the impact finding is the capped user line itself, so its short fix must fit: at 3598752 the
+# line was 102 columns and refuse.sh refused its own call (exit 2) instead of the brief.
+REPO=$(make_repo r22t13one yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$REPO/.bionic/config.yaml"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: $REPO/out.md
+Expected duration: ~15 minutes.
+Progress artifact: .bionic/tmp/p.md
+Cadence: 15 min
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${BT}npx jest --testPathPatterns alpha${BT}" "w22t13one")"
+expect_eq "brief-lib a one-fault Re-executes: brief with no impact command is DENIED, not a self-refusal (I1)" \
+  "deny" "$GATE_VERDICT"
+expect_eq "brief-lib …its user line is the impact refusal, short fix and all" \
+  "bionic: dispatch refused — no impact command is configured here (Suites: none beside Re-executes:)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_true "brief-lib …within 100 columns" \
+  test "$(bionic_cols "bionic: dispatch refused — no impact command is configured here (Suites: none beside Re-executes:)")" -le 100
+# THE DRIVER SWEEP SEES IT TOO. The AC-E1.3 readout runs before this section, so the sweep's
+# self-refusal flag (run_gate) is read here for every drive up to this one.
+expect_absent "brief-lib …and the driver sweep flagged no refuse.sh self-refusal" \
+  "refuse-call refused" "${DP_E1_BAD_SHAPE:-}"
+# wave-22 T13 (critic-3598752 I2, dp3.sh/armind.sh): the REAL gate on a brief whose whole contract is
+# indented four spaces. The gate admits it, the row it journals carries the declared run, and the
+# budget arm admits that run once the recorder identifies the agent. At 3598752 the row carried
+# `re_executes=` empty and the arm refused the run the brief declared.
+REPO=$(make_repo r22t13ind yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$REPO/.bionic/config.yaml"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it. The contract:
+
+    Expected artifact: $REPO/out.md
+    Expected duration: ~15 minutes.
+    Progress artifact: .bionic/tmp/p.md
+    Cadence: 15 min
+    Files: payload/scripts/lib/widget.sh
+    Suites: none
+    Re-executes: ${BT}npx jest --testPathPatterns alpha${BT}" "w22t13ind")"
+expect_eq "brief-lib an indented contract with Suites: none is admitted (I2 real gate)" "allow" "$GATE_VERDICT"
+T13_ROW=$(grep -F '|name=w22t13ind|' "$(roster_path "$REPO" "$SID_A")" | tail -1)
+expect_eq "brief-lib …its roster row carries the declared run" \
+  "${BT}npx jest --testPathPatterns alpha${BT}" "$(roster_field "$T13_ROW" re_executes)"
+T13_ID="aw13-4000000000000001"
+printf '{}\n' > "$REPO/t13-transcript.jsonl"
+jq -n --arg s "$SID_A" --arg c "$REPO" --arg a "$T13_ID" \
+  '{session_id:$s, transcript_path:($c+"/t13-transcript.jsonl"), cwd:$c, agent_id:$a,
+    agent_type:"w22t13ind", hook_event_name:"SubagentStart"}' \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "${BIONIC_HOOKS_DIR}/execution-recorder.sh" >/dev/null 2>&1
+expect_contains "brief-lib …the recorder identifies it, carrying the run forward" \
+  "${BT}npx jest --testPathPatterns alpha${BT}" \
+  "$(roster_field "$(grep -F "|agent_id=$T13_ID|" "$(roster_path "$REPO" "$SID_A")" | tail -1)" re_executes)"
+t13_arm() {  # <command> -> the budget arm's exit status for the identified agent
+  jq -n --arg s "$SID_A" --arg c "$REPO" --arg m "$1" --arg a "$T13_ID" \
+    '{session_id:$s, transcript_path:($c+"/t13-transcript.jsonl"), cwd:$c,
+      permission_mode:"bypassPermissions", hook_event_name:"PreToolUse", tool_name:"Bash",
+      tool_input:{command:$m}, tool_use_id:"toolu_t13", agent_id:$a, agent_type:"bionic:implementor"}' \
+    | env -u CLAUDE_PROJECT_DIR HOME="$REPO" CLAUDE_CODE_SESSION_ID="$SID_A" \
+        bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" >/dev/null 2>&1
+  echo "$?"
+}
+expect_eq "brief-lib …and the budget arm ADMITS the declared run" "0" "$(t13_arm 'npx jest --testPathPatterns alpha')"
+expect_eq "brief-lib …while still refusing an undeclared one (the arm is live)" "2" \
+  "$(t13_arm 'npx jest --testPathPatterns undeclared')"
 
 printf '#!/bin/bash\nprintf "beta.test.sh\\tpath-ref\\nalpha.test.sh\\tself\\nalpha.test.sh\\tpath-ref\\n"\n' > "$BRIEF_CONF/stub-impact.sh"
 BV=$(brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")
