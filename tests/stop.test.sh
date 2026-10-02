@@ -40,6 +40,9 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 # THE ONE ROW BUILDER (cross-gate §S17): no suite hand-writes a roster row.
 . "$(dirname "$0")/lib/roster-row.sh"
+# The one bound-marker builder (wave-23-fixit-1810 T1): mkfix binds its session, and §UB
+# plants the unbound one beside it.
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOK="${BIONIC_STOP_UNDER_TEST:-${BIONIC_HOOKS_DIR}/stop.sh}"
 
@@ -62,9 +65,12 @@ mkfix() {
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans"
-  : > "$d/.bionic/tmp/engaged-$SID.state"
   printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4\n' \
     > "$d/.bionic/docs/plans/wave-01.plan.md"
+  # BOUND (wave-23-fixit-1810, REQ-1, D1): an empty marker beside an open plan is the
+  # unbound state, whose fallback is announced and never acted on — the Patrol verdict
+  # would return before reading the stamp §1 needs. §2 and §UB drive the unbound state.
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/wave-01.plan.md"
   printf '%s' "$d"
 }
 
@@ -186,30 +192,29 @@ expect_eq "1e: the user stream carries exactly ONE rendered refusal, not two" \
 expect_contains "1f: …and it is the first blocker's line" \
   "bionic: stop refused — a dispatched agent's contract is unmet" "$STOP_ERR"
 
-# THE ADVISORIES ARE STILL THERE, AND THEY ARE LAST. Three of the four resolve this
-# unbound session's run by the newest-plan fallback and say so; a fold that put them
-# first would bury the refusal under them.
-expect_contains "1g: an advisory from a non-blocking verdict survives the block" \
-  "context-spend: run resolved by newest-plan fallback" "$STOP_ERR"
-expect_true "1h: …and prints AFTER the refusal line" \
-  test "$(awk '/^bionic: /{print NR; exit}' <<<"$STOP_ERR")" -lt \
-       "$(awk '/^context-spend: /{print NR; exit}' <<<"$STOP_ERR")"
+# A BOUND SESSION HEARS NO UNBOUND ADVISORY (wave-23-fixit-1810, REQ-1, D1). This session
+# is bound to the run it is in, which is what lets the Patrol verdict reach the stamp at all;
+# §2 drives the unbound session, where the advisory survives the block and prints last.
+expect_absent "1g: a bound session's composed verdict carries no unbound advisory" \
+  "session unbound" "$STOP_ERR"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "2: one block and one advisory"
 
-D=$(mkfix); unmet_row "$D"
+# UNBOUND (wave-23-fixit-1810, REQ-1, D1): the landing sweep reads no plan, so it blocks as it
+# always did, and lib/run.sh's one advisory is the non-blocking verdict that rides beside it.
+D=$(mkfix); unmet_row "$D"; unbound_marker "$D" "$SID" empty
 fire "$D"
 expect_status "2a: a lone landing block exits 2, the channel that verdict has always used" \
   "2" "$STOP_RC"
 expect_contains "2b: its line is on stderr" \
   "bionic: stop refused — a dispatched agent's contract is unmet" "$STOP_ERR"
 expect_eq "2c: exactly one rendered refusal" "1" "$(refusal_lines)"
-expect_contains "2d: the advisories are kept" \
-  "patrol-revive: run resolved by newest-plan fallback" "$STOP_ERR"
+expect_contains "2d: the advisory is kept" \
+  "run resolved by newest-plan fallback (session unbound) — " "$STOP_ERR"
 expect_true "2e: …after the refusal" \
   test "$(awk '/^bionic: /{print NR; exit}' <<<"$STOP_ERR")" -lt \
-       "$(awk '/^patrol-revive: /{print NR; exit}' <<<"$STOP_ERR")"
+       "$(awk '/^run resolved by newest-plan fallback/{print NR; exit}' <<<"$STOP_ERR")"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "3: four quiet verdicts — silence, exit 0"
@@ -235,10 +240,17 @@ D=$(mkfix); unmet_row "$D"; stale_stamp "$D"
 fire "$D" SubagentStop false "$(jq -nc --arg a "$AID" '{agent_id:$a,agent_type:"worker"}')"
 expect_absent "4a: the PATROL verdict does not speak on SubagentStop" \
   "The Patrol died mid-run" "$STOP_OUT$STOP_ERR"
-expect_absent "4b: nor does the instrument's fallback advisory" \
-  "context-spend: run resolved" "$STOP_ERR"
-expect_absent "4c: nor the duties gate's" \
-  "patrol-duties-gate: run resolved" "$STOP_ERR"
+# THE STOP-ONLY ARMS' ADVISORY, on an UNBOUND copy of the fixture: the instrument, the duties
+# gate and the revive arm are the ones that announce the unbound state, and none of them runs
+# on SubagentStop — while the same unbound fixture on a Stop does announce it, so the absence
+# is the event's doing (wave-23-fixit-1810: the three used to carry their own prefixes).
+D3=$(mkfix); unmet_row "$D3"; unbound_marker "$D3" "$SID" empty
+fire "$D3" SubagentStop false "$(jq -nc --arg a "$AID" '{agent_id:$a,agent_type:"worker"}')"
+expect_absent "4b: nor does an unbound session's advisory, on SubagentStop" \
+  "session unbound" "$STOP_ERR"
+fire "$D3"
+expect_contains "4c: …which the SAME unbound fixture on a Stop does print" \
+  "session unbound" "$STOP_ERR"
 
 # THE PAIRED POSITIVE: the same fixture on a Stop does make the patrol verdict
 # speak, so §4a is a claim about the event and not about the fixture.
@@ -463,7 +475,6 @@ s7_fixture() {  # -> project dir on stdout
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
-  : > "$d/.bionic/tmp/engaged-$SID.state"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
@@ -472,6 +483,9 @@ s7_fixture() {  # -> project dir on stdout
     printf '|---|---|---|---|---|---|---|---|---|---|\n'
     printf '| T13 | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |\n'
   } > "$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  # BOUND to the plan the tick fills from: the stop wall charges only a bound session's own
+  # ledger (wave-23-fixit-1810, REQ-1, D1).
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
   printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
     > "$d/.bionic/tmp/roster-$SID.state"
   printf '%s' "$d"
@@ -610,7 +624,6 @@ s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
-  : > "$d/.bionic/tmp/engaged-$SID.state"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
@@ -620,6 +633,7 @@ s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8
     printf '| T13 | 4 | build | first task | implementor | — | 15m | REQ-x | a.sh | pending | — |\n'
     printf '| T14 | 4 | build | second task | implementor | — | 15m | REQ-x | b.sh | pending | — |\n'
   } > "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
   roster_header > "$d/.bionic/tmp/roster-$SID.state"
   printf '%s' "$d"
 }
@@ -681,6 +695,89 @@ expect_eq "9j: eight ready rows still refuse through the JSON block, not a refus
 expect_contains "9k: …the headline counts the names it could not fit" "more (dispatch or decline)" "$(s9_headline)"
 expect_true "9l: …and keeps to 100 columns" test "$(printf '%s' "$(s9_headline)" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
 expect_contains "9m: …while the reason names every row" "T106" "$(reason_of)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "UB: unbound means no run — two plans, two sessions, the real Stop per session (wave-23-fixit-1810, REQ-1, AC-1.1/AC-1.2)"
+
+# THE SEED, REPRODUCED (record/wave-23-fixit-1810/seed-bug-fill-gate-acts-on-fallback-plan-
+# 2026-10-02.md). One root, two open runs. Session A is bound to p1, whose ledger is live past
+# Step 3 with one ready row (T5, its dependency landed). Session B engaged with no plan yet,
+# so engagement wrote `plan=none`. p1 is the NEWEST open plan, which makes it B's
+# newest-plan fallback — the exact state in which the fill gate charged B with A's row on
+# every turn end ("launched 0 of 1 ready rows; not launched: T5"). The fallback is announced
+# and never acted on now: B's Stop passes and says why, once; A's Stop is refused as before.
+# p2 sits at Step 2 beside them so the root holds several runs, the shape that leaves a
+# session unbound in the first place.
+UB_SID_A="aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+UB_SID_B="bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"
+ub_world() {  # -> the root on stdout; p1 newest, p2 older
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-ub"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# p1\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T4 | 4 | build | the merge in flight | implementor | — | 15m | REQ-x | a.sh | landed | — |\n'
+    printf '| T5 | 4 | build | the next row | implementor | T4 | 15m | REQ-x | b.sh | pending | — |\n'
+  } > "$d/.bionic/docs/plans/epic-99-ub/p1.plan.md"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n---\n\n# p2\n\n'
+    printf '## SDLC State\n\ncurrent: 2\n\n- Step 2: designing\n'
+  } > "$d/.bionic/docs/plans/epic-99-ub/p2.plan.md"
+  touch -t 202601010000 "$d/.bionic/docs/plans/epic-99-ub/p2.plan.md"
+  bound_marker "$d" "$UB_SID_A" "$d/.bionic/docs/plans/epic-99-ub/p1.plan.md"
+  unbound_marker "$d" "$UB_SID_B" none
+  roster_header > "$d/.bionic/tmp/roster-$UB_SID_A.state"
+  roster_header > "$d/.bionic/tmp/roster-$UB_SID_B.state"
+  printf '%s' "$d"
+}
+ub_fire() {  # <root> <sid> — an ordinary turn that dispatched nothing, ended by a real Stop
+  local home tx payload
+  home=$(cd "$(mktemp -d)" && pwd -P)
+  tx=$(mktemp)
+  jq -nc '{type:"user",uuid:"u-ub",isSidechain:false,timestamp:"2026-10-02T19:40:00Z",message:{role:"user",content:"scope wave 21"}}' > "$tx"
+  payload=$(jq -nc --arg c "$1" --arg t "$tx" --arg s "$2" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}')
+  STOP_OUT=$(env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$2" \
+    BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+    bash "$HOOK" <<< "$payload" 2>"$STOP_ERRFILE")
+  STOP_RC=$?
+  STOP_ERR=$(cat "$STOP_ERRFILE" 2>/dev/null)
+}
+require_helpers ub_world ub_fire
+
+UB_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$UB_RING"
+export BIONIC_PRESSURE_RING="$UB_RING" BIONIC_NOW_EPOCH=1700000000
+
+UB_D="$(ub_world)"
+UB_P1="$UB_D/.bionic/docs/plans/epic-99-ub/p1.plan.md"
+expect_eq "UB0: premise — p1 is the newest open run, so it is B's fallback" \
+  "fallback $UB_P1" \
+  "$(bash -c '. "$1/payload/scripts/lib/run.sh" && session_run "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR" "$UB_D" "$UB_SID_B")"
+
+# UB1 (AC-1.1): the unbound session's Stop is not refused for p1's rows.
+ub_fire "$UB_D" "$UB_SID_B"
+expect_status "UB1: B (plan=none) ends its turn — exit 0" "0" "$STOP_RC"
+expect_empty "UB1b: …with no block on stdout" "$STOP_OUT"
+expect_absent "UB1c: …and is never told about p1's rows" "not launched" "$STOP_ERR"
+expect_absent "UB1d: …nor names T5 anywhere" "T5" "$STOP_OUT$STOP_ERR"
+
+# UB3 (AC-1.3): B is told why, in lib/run.sh's one sentence, once — three verdicts meet the
+# same fallback on this Stop, and the process says it once.
+UB_LINE="run resolved by newest-plan fallback (session unbound) — $UB_P1; bind with session-poker.sh bind $UB_P1, or write this session's plan"
+expect_eq "UB3: B's stderr carries the unbound advisory exactly once" \
+  "1" "$(printf '%s\n' "$STOP_ERR" | grep -cxF "$UB_LINE")"
+expect_eq "UB3b: …and that is the whole of what the Stop says to B" "$UB_LINE" "$STOP_ERR"
+
+# UB2 (AC-1.2): the BOUND session, same root, same turn shape, T5 untouched -> refused.
+ub_fire "$UB_D" "$UB_SID_A"
+expect_eq "UB2: A (bound to p1) is refused — the fill gate's JSON block" "block" \
+  "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_contains "UB2b: …naming T5 as not launched" "not launched: T5" "$STOP_ERR"
+expect_absent "UB2c: …and A hears no unbound advisory" "session unbound" "$STOP_ERR"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 

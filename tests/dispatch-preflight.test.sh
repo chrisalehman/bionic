@@ -504,6 +504,18 @@ approved-by: dana 2026-09-07T19:05Z "approved"
 
 - Step 4: tasks in flight
 PLAN
+    # A LIVE WAVE'S SESSIONS ARE BOUND TO IT (wave-23-fixit-1810, REQ-1, D1). An empty marker
+    # beside an open plan is the UNBOUND state, whose `fallback` plan is announced and never
+    # acted on — so a fixture that meant "this session is running this wave" and left the
+    # marker empty would now test the unbound arm in every case of the file. The binding is
+    # written through the real `bind_plan` (tests/lib/bound-marker.sh), which stores the
+    # canonical path. Sections that drive the unbound state unbind explicitly (S25).
+    local _pplan
+    _pplan="$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+    for _psid in "${SID_A:-}" "${SID_B:-}" "${SID_DEAD:-}" "${SID_LIVE:-}"; do
+      [ -n "$_psid" ] || continue
+      bound_marker "$repo" "$_psid" "$_pplan"
+    done
   fi
   printf '%s' "$repo"
 }
@@ -3178,7 +3190,10 @@ expect_eq "r22a two open rows against writers=2 → the third dispatch is REFUSE
 expect_contains "…naming the budget line verbatim" \
   "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe" "$GATE_VERR"
 expect_contains "…and the count that broke it" "writers: budget=2 open=2 with-this-dispatch=3" "$GATE_VERR"
-expect_contains "…naming the plan the budget came from" "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" "$GATE_ERR"
+# IN THE REFUSAL'S DETAIL, which is where the gate names it (`declared by <plan>`). This row
+# used to read the user stream and was satisfied there by the unbound session's fallback
+# announcement, not by the refusal (wave-23-fixit-1810 T1: make_repo binds its sessions now).
+expect_contains "…naming the plan the budget came from" "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" "$GATE_VERR"
 
 REPO=$(make_repo r22b yes)
 write_attestation "$REPO" "$SID_A"
@@ -4098,6 +4113,10 @@ S24_REPO=$(make_repo r24 yes)
 # confound so "byte-identical" tests only the engagement switch.
 write_attestation "$S24_REPO" "$SID_A"
 S24_MARK="$S24_REPO/.bionic/tmp/engaged-$SID_A.state"
+# THE MARKER'S BODY IS KEPT, so (e) restores the same binding make_repo wrote rather than an
+# empty marker — which is the unbound state, a different session (wave-23-fixit-1810 T1).
+S24_MARK_BODY="$SANDBOX/r24-marker-body"
+cp "$S24_MARK" "$S24_MARK_BODY"
 
 # (a) ENGAGED — the positive. A dispatch whose brief carries no deliverable is refused
 # exactly as it was before this wave existed.
@@ -4138,7 +4157,7 @@ rm -f "$S24_REPO/.bionic/tmp/engaged-$SID_B.state"
 
 # (e) THE REFUSAL TEXT IS BYTE-UNCHANGED for an engaged session (AC-13, AC-14). Restoring
 # the marker must reproduce (a) exactly — not merely refuse, but refuse in the same words.
-: > "$S24_MARK"
+cp "$S24_MARK_BODY" "$S24_MARK"
 run_gate "$(mk_agent_payload "$SID_A" "$S24_REPO" "$S24_BARE")"
 expect_eq "r24e re-engaged: the refusal is byte-identical to r24a" "$S24_REFUSAL" "$GATE_ERR"
 
@@ -4212,13 +4231,15 @@ setup_section "S25 — active_run -> session_run (wave-session-bound-run S5)"
 # `active_run "$REPO"` — the newest open plan in the root, with no session input at
 # all. It now comes from `session_run "$REPO" "$PAYLOAD_SID"`: a session BOUND to a
 # plan (`.bionic/tmp/engaged-<sid>.state` carrying `plan=<path>`) is gated on that
-# plan and that plan alone, whatever else is open in the root; an UNBOUND session
-# (the marker empty, as make_repo's own engaged-* fixtures are) resolves by
-# newest-plan exactly as before, and says so on stderr; a session bound to a plan
-# that has since closed is treated as having no open run at all, and says that too.
+# plan and that plan alone, whatever else is open in the root; a session bound to a plan
+# that has since closed is treated as having no open run at all, and says that too. An
+# UNBOUND session (the marker empty) still resolves to the newest plan, and since
+# wave-23-fixit-1810 (REQ-1, D1) that plan is announced and never acted on: the gate prints
+# lib/run.sh's one advisory, judges the dispatch with no plan, and refuses a writer with
+# the bind instruction — never with the other plan's budget or step (S25b).
 #
-# s25_bind <repo> <sid> <plan-abs-path> — overwrites the marker make_repo already
-# planted (empty = unbound) with a real binding, under the same two-line shape
+# s25_bind <repo> <sid> <plan-abs-path> — overwrites the marker s25_repo leaves (empty =
+# unbound) with a real binding, under the same two-line shape
 # hooks/engage.sh writes (spec §Session binding), via the real `bind_plan` (S11,
 # tests/lib/bound-marker.sh).
 s25_bind() {
@@ -4235,6 +4256,12 @@ s25_repo() {
   local name="$1" budget_a="$2" budget_b="$3"
   local repo; repo=$(make_repo "$name" yes)
   rm -f "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  # UNBOUND TO START: make_repo bound its sessions to the plan just removed, which would
+  # read `bound-closed`. Each section below binds what it means to bind.
+  local _usid
+  for _usid in "${SID_A:-}" "${SID_B:-}"; do
+    [ -n "$_usid" ] && unbound_marker "$repo" "$_usid" empty
+  done
   S25_REPO="$repo"
   S25_PLAN_A="$repo/.bionic/docs/plans/epic-99-test/plan-a.plan.md"
   S25_PLAN_B="$repo/.bionic/docs/plans/epic-99-test/plan-b.plan.md"
@@ -4303,13 +4330,14 @@ expect_absent "25a3: …and B's path is never named" "$S25_PLAN_B" "$GATE_ERR$GA
 expect_absent "25a4: bound: no fallback line is printed" \
   "run resolved by newest-plan fallback" "$GATE_ERR$GATE_REASON"
 
-section "S25b: fallback — unbound resolves to the newest plan, and says so"
+section "S25b: fallback — unbound, the newest plan is announced and never acted on"
 
-# The SAME shape, a fresh repo, budgets swapped so B (the newest, and now the
-# fallback target) is the tight one. Left UNBOUND (make_repo's own empty marker,
-# untouched), the dispatch is refused by B's ceiling, not A's — and the gate
-# prints the fallback advisory naming B. The positive (line present, B used) sits
-# beside its negative (line absent once bound) on the same fixture.
+# The SAME shape, a fresh repo, budgets swapped so B (the newest, and the fallback target)
+# is the tight one. Left UNBOUND, the gate prints lib/run.sh's one advisory naming B and
+# then judges the dispatch with no plan (wave-23-fixit-1810, REQ-1, D1): B's ceiling is
+# never read, and the writer is refused with the bind instruction instead — not with B's
+# budget, which is somebody else's run. The positive (advisory, bind refusal) sits beside
+# its negative (gone once bound) on the same fixture.
 s25_repo r25b "writers=99 suites=9 worktrees=9 test_jobs=4 source=probe" \
               "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
 S25_REPO2="$S25_REPO"
@@ -4325,12 +4353,19 @@ S25_PLAN_B_PHYS="$(cd "$S25_REPO2" && pwd -P)/.bionic/docs/plans/epic-99-test/pl
 write_attestation "$S25_REPO2" "$SID_A"
 s22_roster_row "$S25_REPO2" "$SID_A" "W-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO2")"
-expect_eq "25b1: unbound, the dispatch is REFUSED by B's (newest) ceiling" "deny" "$GATE_VERDICT"
-expect_contains "25b2: …naming B as the plan the budget came from" "$S25_PLAN_B" "$GATE_ERR"
+expect_eq "25b1: unbound, a writer dispatch is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "25b2: …with the bind instruction, not another run's verdict" \
+  "dispatch refused — this session is bound to no run (bind it, or write its plan)" "$GATE_ERR"
+expect_absent "25b2b: …and B's budget is never read: its writers=1 line is named nowhere" \
+  "writers=1" "$GATE_ERR$GATE_REASON"
 expect_absent "25b3: …and A's path is never named" "$S25_PLAN_A" "$GATE_ERR$GATE_REASON"
-expect_contains "25b4: …and the fallback advisory names B, verbatim" \
-  "dispatch-preflight: run resolved by newest-plan fallback (session unbound) — $S25_PLAN_B_PHYS" \
+expect_contains "25b4: …and the advisory is lib/run.sh's one sentence, naming B verbatim" \
+  "run resolved by newest-plan fallback (session unbound) — $S25_PLAN_B_PHYS; bind with session-poker.sh bind $S25_PLAN_B_PHYS, or write this session's plan" \
   "$GATE_ERR"
+# A READ-ONLY ROLE STILL DISPATCHES: the pre-approval roster applies to an unbound session as
+# it does to any plan nobody approved (D1's consumer table).
+run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO2" "$BRIEF_FULL" "w99-res" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:researcher")"
+expect_status "25b4b: unbound, a read-only researcher dispatch is admitted" "0" "$GATE_ST"
 
 # THE NEGATIVE, same repo, same payload, only the binding added: once bound to A
 # the fallback line disappears (A's loose budget also lets the dispatch through).
@@ -4385,8 +4420,11 @@ s25_repo r25e "suites=9 worktrees=9 test_jobs=4 source=probe" \
               "suites=9 worktrees=9 test_jobs=4 source=probe"
 S25_REPO5="$S25_REPO"
 write_attestation "$S25_REPO5" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO5")"
-expect_status "25d3: unbound dispatch passes" "0" "$GATE_ST"
+# A READ-ONLY ROLE, because an unbound session's writer is refused with the bind instruction
+# (wave-23-fixit-1810, REQ-1, D1; S25b) and writes no row; the researcher is admitted and is
+# rostered like any dispatch.
+run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO5" "$BRIEF_FULL" "w99-res" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:researcher")"
+expect_status "25d3: unbound read-only dispatch passes" "0" "$GATE_ST"
 S25_ROW2=$(roster_nth_row "$(roster_path "$S25_REPO5" "$SID_A")" 1)
 expect_status "25d4: the row's plan= field is the literal 'none'" "none" \
   "$(roster_field "$S25_ROW2" plan)"
@@ -4947,15 +4985,16 @@ expect_absent "27p …and the suite-drop refusal never fires" \
 
 # THE CONTROL: the same brief with the comment deleted. The row is compared WHOLE, field
 # for field, `launched_at=` excepted — that cell is one `date -u` per drive and the two
-# drives can straddle a second boundary.
+# drives can straddle a second boundary — and `plan=` excepted, because the two drives are
+# two repos and each session is bound to its own repo's plan (wave-23-fixit-1810 T1).
 REPO=$(make_repo r27p2 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$R27P_BARE" "w27p-comment")"
 expect_status "27p2 the same brief without the comment is ADMITTED too" "0" "$GATE_ST"
 ROW_BARE=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "27p2 …and its row is the commented brief's row, field for field" \
-  "$(printf '%s' "$ROW_COMMENTED" | sed 's/launched_at=[^|]*/launched_at=/')" \
-  "$(printf '%s' "$ROW_BARE"      | sed 's/launched_at=[^|]*/launched_at=/')"
+  "$(printf '%s' "$ROW_COMMENTED" | sed 's/launched_at=[^|]*/launched_at=/; s/|plan=[^|]*$/|plan=/')" \
+  "$(printf '%s' "$ROW_BARE"      | sed 's/launched_at=[^|]*/launched_at=/; s/|plan=[^|]*$/|plan=/')"
 expect_contains "27p2 …non-vacuity: the compared row really carries the budget" \
   "suites_allowed=a.test.sh" "$ROW_BARE"
 
@@ -5071,8 +5110,8 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S27Q_WRAP_BARE" "w27q-wrap")"
 expect_status "27q2 the same wrapped span without the comment is ADMITTED too" "0" "$GATE_ST"
 ROW_WRAP_BARE=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "27q2 …and its row is the commented span's row, field for field" \
-  "$(printf '%s' "$ROW_WRAP"      | sed 's/launched_at=[^|]*/launched_at=/')" \
-  "$(printf '%s' "$ROW_WRAP_BARE" | sed 's/launched_at=[^|]*/launched_at=/')"
+  "$(printf '%s' "$ROW_WRAP"      | sed 's/launched_at=[^|]*/launched_at=/; s/|plan=[^|]*$/|plan=/')" \
+  "$(printf '%s' "$ROW_WRAP_BARE" | sed 's/launched_at=[^|]*/launched_at=/; s/|plan=[^|]*$/|plan=/')"
 expect_contains "27q2 …non-vacuity: the compared row really carries all three suites" \
   "suites_allowed=a.test.sh b.test.sh c.test.sh" "$ROW_WRAP_BARE"
 
@@ -5543,6 +5582,10 @@ k2_write_task_plan() {
     [ -n "$approved" ] && printf -- '%s\n' "$approved"
     printf -- '\n- %s: bash tests/dispatch-preflight.test.sh green\n' "$cur"
   } > "$dir/task-99-test.plan.md"
+  # BOUND TO THE TASK PLAN (wave-23-fixit-1810 T1): make_repo bound the session to its own
+  # wave plan, which is approved; the checkpoint under test reads the plan this session is
+  # bound to, never the root's newest.
+  bound_marker "$repo" "$SID_A" "$dir/task-99-test.plan.md"
 }
 
 # --- 31a/31b: the two writer roles are refused while the line is absent ---

@@ -38,6 +38,8 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
+# The one bound-marker builder (wave-23-fixit-1810 T1): new_roster binds its session.
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 
@@ -286,7 +288,16 @@ new_roster() {  # <repo> [sid]
   # before it looks for a roster at all. Without the marker every assertion in this file
   # would be satisfied by a hook that exits at its first line. §E drives the other
   # direction, on the same fixtures.
-  : > "$1/.bionic/tmp/engaged-${2:-$SID}.state"
+  #
+  # BOUND TO THE WAVE'S PLAN WHEN IT IS AN OPEN RUN (wave-23-fixit-1810, REQ-1, D1). An
+  # empty marker beside an open plan is the unbound state, whose newest-plan fallback is
+  # announced and never acted on: the guard would read no row and no `working-branch:` of
+  # it. `bind_plan` (the real writer) refuses a plan that is not an open run — the fenced and
+  # plan-less fixtures — and those sessions stay engaged and unbound, as before.
+  local _lg_plan="$1/.bionic/docs/plans/epic-16-landing-contract/wave-01-landing-contract.plan.md"
+  if ! { [ -f "$_lg_plan" ] && bind_plan "$1" "${2:-$SID}" "$_lg_plan" 2>/dev/null; }; then
+    : > "$1/.bionic/tmp/engaged-${2:-$SID}.state"
+  fi
 }
 
 add_row() {  # <repo> <key=value>...

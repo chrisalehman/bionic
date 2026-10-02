@@ -37,6 +37,10 @@ set -uo pipefail
 . "$(dirname "$0")/lib/swept-marker.sh"
 # The one ListAgents-answer builder (T2d, row 64m): the real tick needs a fresh panel.
 . "$(dirname "$0")/lib/live-answer.sh"
+# The one bound-marker builder (wave-23-fixit-1810 T1): a fixture that means "this session is
+# running this plan" binds to it, because an unbound session's newest-plan fallback is
+# announced and never acted on.
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 # THE MERGED ENTRY POINT (epic-23 wave-11, T12). This gate is a FUNCTION now —
 # `stop_patrol_duties` in payload/scripts/lib/stop.sh — and the process that runs it is
@@ -89,6 +93,10 @@ governing-skill: canonical-sdlc
 
 current: T5
 EOF
+  # BOUND TO ITS PLAN (wave-23-fixit-1810, REQ-1, D1). An empty marker beside an open plan is
+  # the unbound state, whose `fallback` plan is announced and never acted on — the basename
+  # discharge below would never count. Group 24/25 drive the unbound state on purpose.
+  bound_marker "$dir" "$SID" "$dir/.bionic/docs/plans/$PLAN_REL"
   : > "$dir/transcript.jsonl"
   printf '%s' "$dir"
 }
@@ -931,6 +939,9 @@ make_env_ledger() {  # <current> <row>... -> project dir on stdout
     local row
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$dir/.bionic/docs/plans/$PLAN_REL"
+  # BOUND, for make_env's reason: the fill duty charges only a BOUND session's own ledger
+  # (wave-23-fixit-1810, REQ-1, D1).
+  bound_marker "$dir" "$SID" "$dir/.bionic/docs/plans/$PLAN_REL"
   : > "$dir/transcript.jsonl"
   printf '%s' "$dir"
 }
@@ -2086,11 +2097,13 @@ setup_section "Section S5: active_run -> session_run (wave-session-bound-run S5)
 # from `active_run "$PROJECT_DIR"`: the newest open plan in the root, with no
 # session input at all. It now comes from `session_run "$PROJECT_DIR" "$SID"`: a
 # session BOUND to a plan is policed against that plan's basename alone, whatever
-# else is open in the root; UNBOUND (the marker empty, as make_env's own marker
-# is) it falls back to the newest plan exactly as before, and says so on stderr;
-# bound to a plan that has since closed, it is policed exactly as an engaged
-# session with no plan at all (no basename can ever discharge the duty), and
-# that closure is announced too.
+# else is open in the root; bound to a plan that has since closed, it is policed
+# exactly as an engaged session with no plan at all (no basename can ever discharge
+# the duty), and that closure is announced too. UNBOUND (the marker empty), the
+# newest plan is announced and never acted on (wave-23-fixit-1810, REQ-1, D1): the
+# gate prints lib/run.sh's one advisory once and polices the turn as engaged-with-
+# no-plan, so a write naming somebody else's plan discharges nothing and that plan's
+# ledger is never charged to this session (group 25).
 
 # Captures stderr SEPARATELY from fire() (which discards it) — the advisory is a
 # diagnostic line, and this is the only way to read it. Mirrors
@@ -2173,7 +2186,7 @@ case "$HOOK_ERR" in
   *) ok "24c: bound to A prints no fallback line" ;;
 esac
 
-section "25: fallback — unbound resolves to the newest plan (B), and says so"
+section "25: fallback — unbound, the newest plan (B) is announced and never acted on"
 
 d=$(make_env_two_plans)
 # PHYSICAL, because the fallback path comes off active_plan's own resolution —
@@ -2184,13 +2197,32 @@ d=$(make_env_two_plans)
 # it needs the physical form the hook itself prints.
 d_phys=$(cd "$d" && pwd -P)
 u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_B_REL"
-fire "$d"; expect_allow "25a: unbound, an Edit naming B (the newest) satisfies the duty"
+fire "$d"; expect_block "25a: unbound, an Edit naming B (the newest, somebody else's run) discharges nothing" \
+  "$TL_MISSING" "$LA_MISSING"
 fire_stderr "$d"
-case "$HOOK_ERR" in
-  *"patrol-duties-gate: run resolved by newest-plan fallback (session unbound) — $d_phys/.bionic/docs/plans/$PLAN_B_REL"*)
-    ok "25b: unbound prints the fallback line, naming B verbatim" ;;
-  *) no "25b: unbound prints the fallback line, naming B verbatim" "$HOOK_ERR" ;;
-esac
+UB_LINE="run resolved by newest-plan fallback (session unbound) — $d_phys/.bionic/docs/plans/$PLAN_B_REL; bind with session-poker.sh bind $d_phys/.bionic/docs/plans/$PLAN_B_REL, or write this session's plan"
+expect_eq "25b: unbound prints lib/run.sh's one advisory, naming B verbatim, once" \
+  "1" "$(printf '%s\n' "$HOOK_ERR" | grep -cxF "$UB_LINE")"
+
+# THE SAME UNBOUND SESSION IS STILL POLICED as engaged-with-no-plan: TaskList discharges the
+# refresh, exactly as it does for a session with no plan at all.
+d=$(make_env_two_plans)
+u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" TaskList
+fire "$d"; expect_allow "25d: unbound, TaskList still discharges the refresh (policed as no plan)"
+
+# THE FILL DUTY CHARGES ONLY A BOUND SESSION'S OWN LEDGER (the seed: an unbound session was
+# refused every turn for another session's ready rows). The SAME live ledger, two rows ready,
+# the same ordinary turn: bound, refused naming both (59a's verdict); unbound, it is
+# somebody else's run, so nothing is charged and the advisory says why.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_prompt "$d" "merge the two landed trees and tell me where we are"
+fire "$d"; expect_block "25e: bound to the live ledger, the fillable gap is refused (the control)" "T2"
+unbound_marker "$d" "$SID" empty
+fire "$d"; expect_allow "25f: unbound beside the same live ledger, the turn is not charged for its rows"
+fire_stderr "$d"
+expect_contains "25g: …and the advisory names that ledger's plan as announced, not acted on" \
+  "run resolved by newest-plan fallback (session unbound) — " "$HOOK_ERR"
+expect_absent "25h: …and no row of it is named" "T2" "$HOOK_ERR"
 
 # THE PAIRED NEGATIVE: unbound, A's name (the OLDER plan, not the fallback
 # target) does not satisfy the duty.

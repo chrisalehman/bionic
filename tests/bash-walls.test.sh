@@ -46,6 +46,8 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
+# The one bound-marker builder (wave-23-fixit-1810 T1), for bw_bind below.
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOK="${BIONIC_BASH_WALLS_UNDER_TEST:-${BIONIC_HOOKS_DIR}/bash-walls.sh}"
 
@@ -99,6 +101,15 @@ mk_repo() {
   printf '%s' "$repo"
 }
 
+# bw_bind <repo> — an ENGAGED session in <repo> is bound to the plan the case just wrote at
+# `active.md` (wave-23-fixit-1810, REQ-1, D1). An empty marker beside an open plan is the
+# unbound state, whose newest-plan fallback is announced and never acted on: the evidence
+# gate would judge no commit at all. An unengaged repo stays unengaged.
+bw_bind() {
+  [ -f "$1/.bionic/tmp/engaged-$SID.state" ] || return 0
+  bound_marker "$1" "$SID" "$1/.bionic/docs/plans/active.md"
+}
+
 # block_plan <repo> — a plan whose current step's evidence is a placeholder, so the
 # evidence gate refuses any `git commit` made under it.
 block_plan() {
@@ -109,6 +120,7 @@ block_plan() {
 current: 5
 approved-by: fixture 2026-09-07T00:00Z \"approved\"
 Step 5: TODO" > "$1/.bionic/docs/plans/active.md"
+  bw_bind "$1"
 }
 
 # arm_roster <repo> — the roster file agent-context-guard.sh required before it would let
@@ -1199,6 +1211,7 @@ Step 4:
 | T1 | 4 | build | mis-cased worktree cell against the real (lowercase) tree | senior-implementor | — | 20m | REQ-2 | a.sh | 17-T5 | active |
 '
 printf '%s\n' "$T46_ROWFOLD_PLAN" > "$R_ROWFOLD/.bionic/docs/plans/active.md"
+bw_bind "$R_ROWFOLD"
 
 run_hook "$(mk_payload "$R_ROWFOLD/.worktrees/17-t5" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_ROWFOLD"
 expect_status "16b: the commit is still allowed either way (Step 4's shape is honest regardless of which row answers)" 0 "$ST"
@@ -1250,6 +1263,7 @@ Step 4:
 | T1 | 4 | build | mixed-case worktree cell against the real (mixed-case) tree | senior-implementor | — | 20m | REQ-2 | a.sh | 17-T7 | active |
 '
 printf '%s\n' "$T50_ROWFOLD_PLAN" > "$R_ROWFOLD2/.bionic/docs/plans/active.md"
+bw_bind "$R_ROWFOLD2"
 
 run_hook "$(mk_payload "$R_ROWFOLD2/.worktrees/17-T7" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_ROWFOLD2"
 expect_status "16f: the commit is still allowed either way (Step 4's shape is honest regardless of which row answers)" 0 "$ST"
@@ -1294,6 +1308,7 @@ expect_eq "16i: the fixture's tree really is a linked worktree, named 18-T1 by g
   "18-T1" "$(basename "$(git -C "$R_PTR_FALSE/.worktrees/18-T1" rev-parse --git-dir)")"
 
 w18_pointer_plan false > "$R_PTR_FALSE/.bionic/docs/plans/active.md"
+bw_bind "$R_PTR_FALSE"
 run_hook "$(mk_payload "$R_PTR_FALSE/.worktrees/18-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_PTR_FALSE"
 expect_contains "16j: the fork still announces the subject it chose, on a use_worktree: false plan" \
   "evidence-gate: judged by row T1's task arms (run at current: 4)" "$ERR"
@@ -1308,6 +1323,7 @@ expect_contains "16k: …naming the three fields the task arms owe" \
 R_PTR_TRUE="$(mk_repo ptrtrue)"
 git -C "$R_PTR_TRUE" worktree add -q "$R_PTR_TRUE/.worktrees/18-T1" -b wt/18-T1 2>/dev/null
 w18_pointer_plan true > "$R_PTR_TRUE/.bionic/docs/plans/active.md"
+bw_bind "$R_PTR_TRUE"
 run_hook "$(mk_payload "$R_PTR_TRUE/.worktrees/18-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_PTR_TRUE"
 expect_status "16l: the use_worktree: true twin refuses the same commit for the same fields" 2 "$ST"
 expect_contains "16l: …naming them" "worktree base-sha branch" "$ERR"
@@ -1341,6 +1357,7 @@ w18_below_plan() {  # $1 = use_worktree value
 R_BELOW_FALSE="$(mk_repo belowfalse)"
 git -C "$R_BELOW_FALSE" worktree add -q "$R_BELOW_FALSE/.worktrees/18-T1" -b wt/18-T1 2>/dev/null
 w18_below_plan false > "$R_BELOW_FALSE/.bionic/docs/plans/active.md"
+bw_bind "$R_BELOW_FALSE"
 run_hook "$(mk_payload "$R_BELOW_FALSE/.worktrees/18-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_BELOW_FALSE"
 expect_contains "16m: the step-below fork announces the row's step too, on a use_worktree: false plan" \
   "evidence-gate: judged at row T1's step 4 (run at current: 5)" "$ERR"
@@ -1354,6 +1371,7 @@ expect_contains "16n: …naming the three fields the task arms owe" \
 R_BELOW_TRUE="$(mk_repo belowtrue)"
 git -C "$R_BELOW_TRUE" worktree add -q "$R_BELOW_TRUE/.worktrees/18-T1" -b wt/18-T1 2>/dev/null
 w18_below_plan true > "$R_BELOW_TRUE/.bionic/docs/plans/active.md"
+bw_bind "$R_BELOW_TRUE"
 run_hook "$(mk_payload "$R_BELOW_TRUE/.worktrees/18-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_BELOW_TRUE"
 expect_status "16o: the use_worktree: true twin refuses the same commit for the same fields" 2 "$ST"
 expect_contains "16o: …naming them" "worktree base-sha branch" "$ERR"
