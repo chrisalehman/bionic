@@ -42,7 +42,7 @@
 # IS recognisably a ListAgents answer and simply lists no teammates is FRESH with zero
 # lines. §D and §F are that pair, and they are the reason both exist.
 #
-# FIXTURE FIDELITY (declared, per .claude memory fixtures-can-pin-away-the-test). The two
+# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"). The two
 # answer bodies below are REAL, captured verbatim from this project's own session
 # transcript into
 # `.bionic/docs/record/wave-roster-lifecycle/fixtures/listagents-results.jsonl` (12

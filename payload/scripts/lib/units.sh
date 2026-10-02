@@ -957,8 +957,10 @@ _units_ledger() {
 #      carries no `## Tasks` table or no `## SDLC State` section. Nothing is written.
 #
 # THE PROJECTOR UNDER `task-add` (wave-20 REQ-5, AC-5.3; Δ5). A mid-run row needs three edits
-# to pass the two walls that read the table (memory note: mid-run task row needs evidence and
-# deps), and a hand edit that forgets one stalls every writer in the wave at its next commit:
+# to pass the two walls that read the table: the commit gate refuses any commit while a task row
+# has no `- T<n>:` line under `## SDLC State`, and `units_validate` refuses while a Step-5+ row
+# does not depend, transitively, on every Step-4 row. Both refuse the WRITER, not the author of
+# the row, so a hand edit that forgets one stalls every writer in the wave at its next commit:
 #
 #   1. THE ROW, as the table's last data row, cells placed by the HEADER's column order (the
 #      table is header-keyed, so the projection follows whatever order this plan carries);

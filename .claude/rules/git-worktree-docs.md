@@ -6,8 +6,8 @@ paths:
 
 # Doc paths and worktree discipline
 
-Migrated from `.bionic/memory/git-rules.md` (epic-12 wave-01 slice 6) with the correction
-ledger applied.
+Text migrated from bionic's retired memory tier (ADR-002) at epic-12 wave-01 slice 6, with
+the correction ledger applied.
 
 ## Gitignored doc paths
 

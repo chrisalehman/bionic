@@ -25,7 +25,7 @@
 # reach this machine's installed plugin and the audit stream cannot reach this machine's
 # real one.
 #
-# FIXTURE FIDELITY (declared, per .claude memory fixtures-can-pin-away-the-test):
+# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * PreToolUse|Bash payload envelope — the shape tests/cmd-class.test.sh pins.
 #   * `agent_type` — the field hooks/farm-out-reminder.sh:34 reads to discriminate a
 #     subagent from the main thread (epic-08 Q1 spike).
