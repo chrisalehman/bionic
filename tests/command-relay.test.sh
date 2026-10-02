@@ -176,7 +176,7 @@ mkdir -p "$TMP/home"
 # setup.sh's `[ -n "$missing" ] ||` fires with no consent needed.
 write_env_fixture() {  # <settings-file>
   mkdir -p "$(dirname "$1")"
-  jq -n '{env: {CLAUDE_CODE_ENABLE_TODO_TOOLS: "1", BASH_MAX_TIMEOUT_MS: "1800000", CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"}}' \
+  jq -n '{env: {CLAUDE_CODE_ENABLE_TODO_TOOLS: "1", BASH_MAX_TIMEOUT_MS: "1800000", CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"}}' \
     > "$1"
 }
 
