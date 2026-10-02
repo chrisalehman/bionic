@@ -1183,6 +1183,49 @@ expect_eq "T9-tm: …keeping the contract's launch" \
 expect_eq "T9-tm: …and the id it was started under" \
   "$START_ID" "$(printf '%s' "$T9T_LAST" | tr '|' '\n' | grep '^agent_id=' | head -1 | cut -d= -f2-)"
 
+# THE TEAMMATE SHAPE WITH NO AMEND (wave-22 T13; critic-3598752 I3). The restart-after-ack copy
+# source is the id's latest started row for EVERY restart after an ack, amended or not. On a
+# teammate that row is usually the recorder's first `identified` row, which has no teammate_id
+# (ARM 2 adds it only to the `confirmed` row). The re-identified row keeps the joined row's
+# teammate_id, or `stop-orders.sh standdown` would address the transcript id.
+IFS='|' read -r T13N_REPO T13N_TR T13N_SUB T13N_CFG <<< "$(make_world t13tidnoamend yes)"
+T13N_ROSTER="$T13N_REPO/.bionic/tmp/roster-${SID_A}.state"
+roster_header > "$T13N_ROSTER"
+t9_row "$T13N_ROSTER" intended "" tool_use_id=toolu_01T13N
+t9_row "$T13N_ROSTER" identified "$START_ID" tool_use_id=toolu_01T13N
+t9_row "$T13N_ROSTER" confirmed "" teammate_id=probemate@session-8a41c2e0 tool_use_id=toolu_01T13N
+ack_write "$T13N_REPO" "$SID_A" 2026-08-08T09:31:00Z probemate
+run_rec "$(mk_subagent_start "$SID_A" "$T13N_TR" "$T13N_REPO" "probemate" "$START_ID")"
+T13N_LAST=$(t9_last_identified "$T13N_ROSTER")
+expect_eq "T13-tid: a teammate restarted after an ack with no amend identifies a second time" \
+  "2" "$(grep -c 'status=identified' "$T13N_ROSTER")"
+expect_contains "T13-tid: …the re-identified row is the restart (restarted_at)" "|restarted_at=" "$T13N_LAST"
+expect_contains "T13-tid: …and keeps the confirmed row's teammate_id (critic-3598752 I3)" \
+  "|teammate_id=probemate@session-8a41c2e0" "$T13N_LAST"
+expect_eq "T13-tid: …once, not twice" \
+  "1" "$(printf '%s' "$T13N_LAST" | tr '|' '\n' | grep -c '^teammate_id=')"
+expect_eq "T13-tid: …and the contract is the started row's, unchanged" "$T9_RUN_A" "$(t9_re "$T13N_LAST")"
+
+# THE SAME WITH AN AMEND WHOSE SUCCESSOR HAS NO teammate_id: the run is the successor's (T9) and
+# the teammate_id is the joined row's (T13), so neither fix undoes the other.
+IFS='|' read -r T13M_REPO T13M_TR T13M_SUB T13M_CFG <<< "$(make_world t13tidamend yes)"
+T13M_ROSTER="$T13M_REPO/.bionic/tmp/roster-${SID_A}.state"
+roster_header > "$T13M_ROSTER"
+t9_row "$T13M_ROSTER" intended "" tool_use_id=toolu_01T13M
+t9_row "$T13M_ROSTER" identified "$START_ID" tool_use_id=toolu_01T13M
+t9_row "$T13M_ROSTER" confirmed "" teammate_id=probemate@session-8a41c2e0 tool_use_id=toolu_01T13M
+t9_row "$T13M_ROSTER" identified "$START_ID" tool_use_id=toolu_01T13M \
+  re_executes="$T9_RUN_A $T9_RUN_B" "amended=2026-08-08T09:20:00Z fix-up run"
+ack_write "$T13M_REPO" "$SID_A" 2026-08-08T09:31:00Z probemate
+run_rec "$(mk_subagent_start "$SID_A" "$T13M_TR" "$T13M_REPO" "probemate" "$START_ID")"
+T13M_LAST=$(t9_last_identified "$T13M_ROSTER")
+expect_eq "T13-tid-amend: the restart after an amend and an ack still carries run B" \
+  "$T9_RUN_A $T9_RUN_B" "$(t9_re "$T13M_LAST")"
+expect_contains "T13-tid-amend: …and the confirmed row's teammate_id" \
+  "|teammate_id=probemate@session-8a41c2e0" "$T13M_LAST"
+expect_contains "T9-tm: the re-identified row keeps the successor's own teammate_id" \
+  "|teammate_id=probemate@session-8a41c2e0" "$T9T_LAST"
+
 # THE ASYNC SHAPE (carry-over row 1; probe Q3 `async_amend_second`): ARM 2's `confirmed` row
 # carries the id, the recorder identifies it, the amend appends the identified successor, the
 # ack closes the name, the agent restarts. The fall-through id join took the pre-amend
