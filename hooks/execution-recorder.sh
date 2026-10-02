@@ -665,12 +665,15 @@ fi
 # WHAT THE REPAIR COSTS, stated rather than left to be discovered. An `intended`
 # row carries an EMPTY `agent_id` until ARM 2 completes it, and an empty id is not
 # a key — so this arm can no longer rescue a dispatch whose PostToolUse never
-# fired. A TEAMMATE row is never identified at all, because ARM 2 deliberately
+# fired. A TEAMMATE row is not identified by this id join, because ARM 2 deliberately
 # leaves its `agent_id=` empty (the launch response carries only the ADDRESSING
 # form, and writing that into `agent_id=` would turn every by-id wall's input from
-# unknown into wrong). Both were ALREADY missing — a join on a field that carries
-# no name matches nothing either — and what changes is that the miss is structural
-# and visible instead of silent. The alternative, keeping a name join beside this
+# unknown into wrong). A teammate IS identified, by the NAME join at SubagentStart
+# below, and its `confirmed` row carries no id by design; the roster's one rule for
+# the rows written after that moment is stated in payload/scripts/lib/roster.sh at
+# `roster_row_for_id` (ADR-039). Both misses were ALREADY there — a join on a field
+# that carries no name matches nothing either — and what changes is that the miss is
+# structural and visible instead of silent. The alternative, keeping a name join beside this
 # one, is keeping the defect: `agent_type` is not a name.
 #
 # LATEST WINS, and `intended` is accepted alongside `confirmed`. The roster is
@@ -838,10 +841,12 @@ if [ -n "$IS_START" ]; then
   if [ -n "$DUP_PRIOR" ]; then
     # EVERY FIELD CARRIED FORWARD, exactly as the identification below does: the row is a
     # CONTRACT, and a row that dropped a field would silently retract what it inherited.
-    # Only `status=` moves, to a value no other reader recognises — which is deliberate:
-    # every roster reader in the fleet filters by status, so a `duplicate-start` row is
-    # inert to the budget, to the sweep and to both stop gates, and visible to the tick,
-    # which is the one surface that should say something about it.
+    # Only `status=` moves, to a value the status-filtered readers do not recognise: the
+    # sweep and the stop gates skip a `duplicate-start` row, and the tick is the surface
+    # that says something about it. The BUDGET arm does not filter by status — it reads the
+    # last row carrying the id (`roster_row_for_id`, payload/scripts/lib/roster.sh) — so
+    # this row IS what it reads after a restart. That is the intent: the successor copied
+    # here is identified, so it carries the id and the contract, amended or not (ADR-039).
     printf '%s\n' "$DUP_PRIOR" | awk '
       BEGIN { RS = "|"; ORS = "" }
       { f = $0; sub(/\n$/, "", f)
@@ -945,6 +950,27 @@ if [ -n "$IS_START" ]; then
       [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
       ROW="$line"
     done < "$ROSTER_FILE"
+  fi
+  # A RESTART AFTER AN ACK RE-IDENTIFIES FROM THE ID'S LATEST STARTED ROW (epic-23 wave-22 T9;
+  # ADR-039 Δ2; critic-b2f70c1 C1). Both joins above accept `intended|confirmed` only, and the
+  # contract a restart must carry is on neither: `session-poker.sh amend` and `extend` append
+  # their successor as an `identified` row carrying the id (ADR-039), which both joins skip. A
+  # teammate's id join finds nothing and its name join takes the recorder's ORIGINAL `confirmed`
+  # row; an async agent's id join takes the pre-amend `confirmed` row. Either copy carried the
+  # first contract, became the id's last row, and the budget arm refused the amended run again.
+  # `DUP_PRIOR_BEFORE` is the id's last row when that row says it started (identified or
+  # duplicate-start) — the amended or extended successor whenever there is one. Placed after
+  # BOTH joins: the async id join would overwrite it otherwise. The awk below rewrites its
+  # status, launch and restarted_at as it does for a joined row.
+  # THE COPY SOURCE CHANGES FOR EVERY RESTART AFTER AN ACK, AMENDED OR NOT (wave-22 T13;
+  # critic-3598752 I3). With no amend, a teammate's latest started row is usually the
+  # recorder's first `identified` row, which carries no teammate_id (ARM 2 adds it to the
+  # `confirmed` row only), so the joined row's teammate_id is kept when the source has none —
+  # without it `stop-orders.sh standdown` addresses the transcript id.
+  if [ -n "${RESTART_AFTER_ACK:-}" ] && [ -n "$DUP_PRIOR_BEFORE" ]; then
+    RA_TID=$(line_field "$ROW" teammate_id)
+    ROW="$DUP_PRIOR_BEFORE"
+    case "$ROW" in *"|teammate_id="*) : ;; *) [ -n "$RA_TID" ] && ROW="$ROW|teammate_id=$RA_TID" ;; esac
   fi
   [ -n "$ROW" ] || exit 0
 
