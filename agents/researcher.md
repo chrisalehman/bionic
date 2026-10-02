@@ -20,7 +20,9 @@ Every factual claim in your report — a test result, a file's existence, a comm
 outcome — carries the command that proves it and that command's output, or the explicit
 label `unverified`. An `unverified` claim obligates the orchestrator to re-check before
 acting; a claim with neither proof nor label is a contract violation. Completion is
-signaled, never inferred: idle is never a substitute for it.
+signaled, never inferred: idle is never a substitute for it. Evidence samples a moment. For
+behavior over time (drift, accumulation) say 'implemented, operation unproven', never
+'verified'.
 
 **Deliver the report with the SendMessage tool**, addressed to whoever dispatched you
 (`to: "main"` unless your brief names another recipient). Plain final text is discarded —

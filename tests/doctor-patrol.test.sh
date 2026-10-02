@@ -321,7 +321,7 @@ expect_no_match "4: 'dispatches' (plural) does not also appear on that line" \
 
 # The five deleted detail classes, checked as absences BESIDE the positive
 # assertions above on the SAME fixture and the SAME extractor
-# (memory/no-vacuous-tests-at-authoring) — this is not an empty-fixture
+# (.claude/rules/test-harness.md, "Anti-vacuity") — this is not an empty-fixture
 # vacuous negative, it is a section proven non-empty (3/4 above) that must not
 # also carry the retired detail.
 expect_no_match "5: the reconstruction narrative header is gone" \

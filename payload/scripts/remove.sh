@@ -12,8 +12,8 @@
 # THE NEVER-LIST IS NOT A PREFERENCE. Three classes are excluded from removal and
 # consent does not unlock them:
 #
-#   `.bionic/` trees      plans, specs, the operational record, memory. These are
-#                         the user's work, not bionic's footprint.
+#   `.bionic/` trees      plans, specs, the operational record. These are the
+#                         user's work, not bionic's footprint.
 #   shared binaries       git, node, jq, docker, ... bionic ENSURED them; it does
 #                         not own them. deps.sh marks every such row `keep-shared`
 #                         and `remove_dep` declines them even when told yes.
@@ -220,11 +220,13 @@ RM_ENV_START='# ─── bionic:env:start ───'
 RM_ENV_END='# ─── bionic:env:end ───'
 # from env.sh: the names bionic owns in settings.json `env`, and the program
 # that deletes one of them. The standalone door cannot source env.sh, so both
-# are copies. No test compares these copies' bytes against env.sh's originals
-# since tests/remove.test.sh was deleted at 8582861 — logged debt, like every
-# other literal here. A name that is in env.sh and not here is a name bionic
-# sets and never removes.
-RM_ENV_KEYS='CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'
+# are copies. A name that is in env.sh and not here is a name bionic sets and
+# never removes, so the names list is pinned: tests/env.test.sh Group 1 reads
+# this literal and env.sh's `ENV_KEYS` with `sed` and fails when the two differ
+# by a byte (wave-23 D4). The jq program below is still an unpinned copy, logged
+# debt like every other literal here since tests/remove.test.sh was deleted at
+# 8582861.
+RM_ENV_KEYS='CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS CLAUDE_CODE_DISABLE_AUTO_MEMORY'
 RM_ENV_UNSET_JQ='if has("env") then (.env |= del(.[$k])) | (if (.env | length) == 0 then del(.env) else . end) else . end'
 RM_LEGACY_ALIAS_RE='alias claude=.*dangerously-skip-permissions'
 # from detect.sh: the substring that puts a managed-hook entry on the legacy channel
@@ -2013,7 +2015,7 @@ if [ -n "$RM_LEFTOVERS" ]; then
 fi
 
 echo "  Left in place by design"
-echo "    • .bionic/ trees — plans, specs, the record and memory are your work, not bionic's footprint"
+echo "    • .bionic/ trees — plans, specs and the record are your work, not bionic's footprint"
 echo "    • shared binaries bionic ensured but does not own (git, node, jq, docker, ...)"
 echo "    • the pnpm store — a shared cache other projects hard-link from (reclaim with: pnpm store prune)"
 echo ""
