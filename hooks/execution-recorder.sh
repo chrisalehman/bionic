@@ -962,7 +962,16 @@ if [ -n "$IS_START" ]; then
   # duplicate-start) — the amended or extended successor whenever there is one. Placed after
   # BOTH joins: the async id join would overwrite it otherwise. The awk below rewrites its
   # status, launch and restarted_at as it does for a joined row.
-  [ -n "${RESTART_AFTER_ACK:-}" ] && [ -n "$DUP_PRIOR_BEFORE" ] && ROW="$DUP_PRIOR_BEFORE"
+  # THE COPY SOURCE CHANGES FOR EVERY RESTART AFTER AN ACK, AMENDED OR NOT (wave-22 T13;
+  # critic-3598752 I3). With no amend, a teammate's latest started row is usually the
+  # recorder's first `identified` row, which carries no teammate_id (ARM 2 adds it to the
+  # `confirmed` row only), so the joined row's teammate_id is kept when the source has none —
+  # without it `stop-orders.sh standdown` addresses the transcript id.
+  if [ -n "${RESTART_AFTER_ACK:-}" ] && [ -n "$DUP_PRIOR_BEFORE" ]; then
+    RA_TID=$(line_field "$ROW" teammate_id)
+    ROW="$DUP_PRIOR_BEFORE"
+    case "$ROW" in *"|teammate_id="*) : ;; *) [ -n "$RA_TID" ] && ROW="$ROW|teammate_id=$RA_TID" ;; esac
+  fi
   [ -n "$ROW" ] || exit 0
 
   # S6 (AC-5, R6): THE RESUME CASE. `agent_id` here is the transcript form, and

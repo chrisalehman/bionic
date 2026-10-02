@@ -316,10 +316,16 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
     # harmless; the union reads them all, so a line inside a ``` fence, or indented four spaces
     # or a tab (a Markdown code block), would widen the run contract with a command the author
     # only showed. The callers of firsthit are untouched.
-    function in_code_block(p,   pre, n, i, ls, fence, k, w, ch) {
-      pre = substr(lc, 1, p - 1); n = split(pre, ls, "\n"); fence = 0
-      for (i = 1; i < n; i++) if (ls[i] ~ /^[ \t]*```/) fence = !fence
-      if (fence) return 1
+    # A FENCE IS ``` OR ~~~, AND ONLY ITS OWN CHARACTER CLOSES IT (wave-22 T13; critic-3598752
+    # I2b): a ``` line inside a ~~~ block is content of that block, as in CommonMark.
+    function in_code_block(p,   pre, n, i, ls, fence, k, w, ch, t) {
+      pre = substr(lc, 1, p - 1); n = split(pre, ls, "\n"); fence = ""
+      for (i = 1; i < n; i++) {
+        t = ls[i]; sub(/^[ \t]*/, "", t)
+        if (fence == "" && (t ~ /^```/ || t ~ /^~~~/)) fence = substr(t, 1, 3)
+        else if (fence != "" && index(t, fence) == 1) fence = ""
+      }
+      if (fence != "") return 1
       w = 0
       for (k = length(ls[n]); k >= 1; k--) {
         ch = substr(ls[n], k, 1)
@@ -327,9 +333,15 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       }
       return (w >= 4)
     }
+    # A LABEL WHOSE EVERY HIT SITS IN A CODE BLOCK STILL DECLARES (wave-22 T13; critic-3598752 I2). A brief
+    # indented whole, tab-indented, or after one unbalanced ``` line has its only real line in
+    # what reads as a block; dropping it lifted no run while Files: and Suites: still lifted, and
+    # the budget wall refused the declared run later. Such a label falls back to its first hit,
+    # the reading before the union.
     function allhits(kind,   j, k, n, idx, t, out) {
       n = 0
       for (j = 1; j <= nh; j++) if (HK[j] == kind && !in_code_block(HLS[j])) idx[++n] = j
+      if (n == 0 && (j = firsthit(kind)) > 0) idx[++n] = j
       for (j = 2; j <= n; j++) {
         t = idx[j]
         for (k = j - 1; k >= 1 && HLS[idx[k]] > HLS[t]; k--) idx[k + 1] = idx[k]
@@ -1510,7 +1522,9 @@ Then retry the dispatch."
     # THE SHORT FIX IS THE ONE THAT APPLIES (wave-22 T10; critic C3). On a several-fault brief the
     # detail block above is dropped and only this line reaches the author.
     local short_fix="set impact-command in config.yaml"
-    if [ -n "$re_executes" ]; then short_fix="add Suites: none beside Re-executes:"; fi
+    # THE CAPPED USER LINE (wave-22 T13; critic-3598752 I1): on a one-fault brief this short fix
+    # ends the 100-column line, so it stays at 98 columns or refuse.sh refuses its own call.
+    if [ -n "$re_executes" ]; then short_fix="Suites: none beside Re-executes:"; fi
     found=1; "$sink" finding "no impact command is configured here" "$short_fix" "$detail"
   fi
 
