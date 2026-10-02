@@ -6074,7 +6074,7 @@ expect_ne "30t4d …so the earlier agent's id still picks its own row, not the n
 # The function is driven alone, extracted from the verb, on a v2 row.
 S30T5_DIR="$TMPROOT/s30t5"; mkdir -p "$S30T5_DIR"
 S30T5_ROW="$(roster_row_fixture status=identified "session=$SID" name=w1 agent_id=aw1-3000000000000001 \
-  "launched_at=$(iso_ago 600)" subagent_type=bionic:implementor tool_use_id=toolu_w1 | sed 's#^roster-state/v1|#roster-state/v2|#')"
+  "launched_at=$(iso_ago 600)" subagent_type=bionic:implementor tool_use_id=toolu_w1 | sed "s#^${ROSTER_ROW_SCHEMA}|#roster-state/v2|#")"
 printf '%s\n' "$S30T5_ROW" > "$S30T5_DIR/roster.state"
 S30T5_OUT="$(bash -c '
   eval "$(awk "/^(line_field|row_has_key|identity_args)\\(\\) \\{/{p=1} p{print} p&&/^}/{p=0}" "$1")"
