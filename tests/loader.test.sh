@@ -38,7 +38,7 @@
 # root. Nothing in this suite reads or writes the real ~/.claude — the machine's own
 # registry is read-only truth for the DESIGN, never an input to an assertion.
 #
-# ANTI-VACUITY (memory/no-vacuous-tests-at-authoring). Three guards, each of which
+# ANTI-VACUITY (.claude/rules/test-harness.md, "Anti-vacuity"). Three guards, each of which
 # would go red on a suite that had quietly stopped testing anything:
 #   - §0 proves the block exists, is marker-delimited, and parses as bash before any
 #     behavioural assertion runs.

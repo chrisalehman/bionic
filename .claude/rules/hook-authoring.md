@@ -6,8 +6,18 @@ paths:
 
 # Hook authoring
 
-Anchors for the recurring traps when changing hooks in `bionic/hooks/`. Migrated from
-`.bionic/memory/hooks-rules.md` (epic-12 wave-01 slice 6) with the correction ledger applied.
+Anchors for the recurring traps when changing hooks in `bionic/hooks/`, migrated from
+bionic's retired memory tier (ADR-002) at epic-12 wave-01 slice 6 with the correction ledger
+applied.
+
+## Walls, not wishes
+
+- **Rules are walls, not wishes.** A rule binds only as a wall. Nagging and prose do not. When
+  behavior can't be enforced, the fix is a required artifact shape, never a louder reminder.
+- **Detection is the wrong target.** A bad escalation is a generation-time failure. Act before
+  the turn is written, never by intercepting it afterwards.
+- **Fail-closed constants.** A threshold is the smallest value consistent with telemetry. A
+  fixture goes inert by explicit declaration, never through a conveniently loose constant.
 
 ## The freeze (D11, 2026-09-20)
 
