@@ -338,12 +338,16 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
     # what reads as a block; dropping it lifted no run while Files: and Suites: still lifted, and
     # the budget wall refused the declared run later. Such a label falls back to its first hit,
     # the reading before the union.
-    # WHEN THE FENCES END UNBALANCED, PARITY MEANS NOTHING (wave-22 T15; critic-f9c2c8d N1): one
-    # stray ``` before the real line flips every later line, so the real line reads as inside a
-    # block and a later example reads as outside. Such a brief takes the first-hit reading, as
-    # before the union. Handled: A-J, M (and N, O), including D, E, H and the ~~~ cases. ACCEPTED
-    # TRADE, reading as at 12574e2: K (the only hit is a balanced fenced example, which lifts) and
-    # L (a balanced fenced example before a wholly indented real contract lifts the example).
+    # WHEN PARITY MEANS NOTHING, EVERY HIT COUNTS (wave-22 T15; critic-f9c2c8d N1, auditor finding,
+    # A-orch-13). One stray ``` before the real line flips every later line, so a brief whose
+    # fences end open cannot say which hits are examples; and a label whose every hit sits in a
+    # code block (an indented contract) has no hit left to trust. Both lift the UNION of ALL
+    # hits in position order, never the first alone: a first-hit fallback dropped every run
+    # after the first, the silent drop REQ-2 exists to remove. ACCEPTED TRADE: in those
+    # malformed shapes a fenced example lifts beside the real runs. An over-admitted run shows
+    # on the roster row; a dropped real run does not. Handled by parity: A-J, N, O. Union
+    # fallback: D, E, H, M, P1-P3, P5, and K and L (a balanced fenced example as the only hit,
+    # or before a wholly indented contract, lifts the example, as at 12574e2).
     function fences_unbalanced(   n, i, ls, fence, t) {
       n = split(lc, ls, "\n"); fence = ""
       for (i = 1; i <= n; i++) {
@@ -354,10 +358,11 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       return (fence != "")
     }
     function allhits(kind,   j, k, n, idx, t, out) {
-      if (fences_unbalanced()) { j = firsthit(kind); return (j > 0 ? j "" : "") }
       n = 0
-      for (j = 1; j <= nh; j++) if (HK[j] == kind && !in_code_block(HLS[j])) idx[++n] = j
-      if (n == 0 && (j = firsthit(kind)) > 0) idx[++n] = j
+      if (!fences_unbalanced())
+        for (j = 1; j <= nh; j++) if (HK[j] == kind && !in_code_block(HLS[j])) idx[++n] = j
+      if (n == 0)
+        for (j = 1; j <= nh; j++) if (HK[j] == kind) idx[++n] = j
       for (j = 2; j <= n; j++) {
         t = idx[j]
         for (k = j - 1; k >= 1 && HLS[idx[k]] > HLS[t]; k--) idx[k + 1] = idx[k]
