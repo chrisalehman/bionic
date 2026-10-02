@@ -3939,4 +3939,67 @@ else
      "ext sentence: $(has_pin "$OPRULES" "$T14_EXT" && echo present || echo absent); bare-ids sentence: $(has_pin "$OPRULES" "$T14_BARE" && echo present || echo absent)"
 fi
 
+# ---------------------------------------------------------------------------
+section "Section UB: wave-23 T1 — the fallback is announced and never acted on, in the contract text (REQ-1, AC-1.4; D1)"
+#
+# WHAT THIS OWNS. AC-1.4's fails-when: "exactly as before" survives in the fill gate's facts
+# docblock (payload/scripts/lib/stop.sh, `stop_turn_facts`), in `session_run`'s consumer
+# contract (payload/scripts/lib/run.sh), or in any of the five suites that pinned "unbound
+# falls back exactly as before", or a doctored copy stays green. The contract an unbound
+# session lives under changed (Chris 2026-10-02, spec D1): the newest-plan fallback is
+# announced and never acted on. A comment still promising the old behaviour is how the old
+# behaviour comes back, so each carrier must say the new sentence and none the old one.
+#
+# SPANS, NOT WHOLE FILES, for the two libraries: stop.sh says "exactly as before" once more,
+# about the fill's own numbers (`stop_turn_facts`'s ledger read), which is not this contract.
+# Each span is extracted by its own opening and closing lines, so a span that moved is an
+# empty span and fails here rather than passing on nothing.
+UB_PIN_NEW="announced and never acted on"
+UB_PIN_OLD="exactly as before"
+UB_STOP_LIB="${REPO}/payload/scripts/lib/stop.sh"
+UB_RUN_LIB="${REPO}/payload/scripts/lib/run.sh"
+
+ub_span() {  # <file> <first-line ERE> <stop-line ERE> -> the span on stdout (start inclusive)
+  awk -v a="$2" -v b="$3" '$0 ~ a { on = 1 } on && $0 ~ b { exit } on { print }' "$1"
+}
+ub_carrier_ok() {  # <file> -> 0 when it carries the new sentence and not the old one
+  [ -s "$1" ] || return 1
+  grep -qF "$UB_PIN_NEW" "$1" || return 1
+  if grep -qiF "$UB_PIN_OLD" "$1"; then return 1; fi
+  return 0
+}
+ub_check() {  # <label> <file>
+  if ub_carrier_ok "$2"; then ok "$1"; else
+    no "$1" "new=$(grep -cF "$UB_PIN_NEW" "$2" 2>/dev/null) old=$(grep -ciF "$UB_PIN_OLD" "$2" 2>/dev/null) lines=$(wc -l < "$2" 2>/dev/null)"
+  fi
+}
+
+ub_span "$UB_STOP_LIB" '^# ─── stop_turn_facts and stop_fill_ledger' '^SCAN_WINDOW_LINES=' > "$TMP/ub-stop-facts.txt"
+ub_span "$UB_RUN_LIB" '^# session_run <root> <sid> -> ONE line' '^session_run\(\) \{' > "$TMP/ub-run-contract.txt"
+expect_true "UB0: the two spans were found (non-empty)" \
+  test -s "$TMP/ub-stop-facts.txt" -a -s "$TMP/ub-run-contract.txt"
+ub_check "UB1: stop.sh's stop_turn_facts docblock says the fallback is announced and never acted on" "$TMP/ub-stop-facts.txt"
+ub_check "UB2: run.sh's session_run consumer contract says it too" "$TMP/ub-run-contract.txt"
+for _ub_suite in context-spend patrol-duties-gate patrol-revive dispatch-preflight cross-gate-agreement; do
+  ub_check "UB3: tests/${_ub_suite}.test.sh carries the new contract and not the old one" \
+    "${REPO}/tests/${_ub_suite}.test.sh"
+done
+
+# THE PINS DISCRIMINATE, three ways: the old phrase planted back into a span, the new phrase
+# removed from a suite, and the run.sh span emptied by a renamed heading.
+sed 's/announced and never acted on/announced, then followed exactly as before/' \
+  "$TMP/ub-stop-facts.txt" > "$TMP/ub-doctored-stop.txt"
+if ub_carrier_ok "$TMP/ub-doctored-stop.txt"; then
+  no "UB4: a doctored stop_turn_facts docblock goes red" "the doctored copy still passed — the pin is vacuous"
+else ok "UB4: a doctored stop_turn_facts docblock goes red"; fi
+grep -vF "$UB_PIN_NEW" "${REPO}/tests/patrol-revive.test.sh" > "$TMP/ub-doctored-suite.txt"
+if ub_carrier_ok "$TMP/ub-doctored-suite.txt"; then
+  no "UB5: a suite with the new sentence removed goes red" "the doctored copy still passed — the pin is vacuous"
+else ok "UB5: a suite with the new sentence removed goes red"; fi
+sed 's/^# session_run <root> <sid> -> ONE line/# session_run, renamed/' "$UB_RUN_LIB" > "$TMP/ub-doctored-run.sh"
+ub_span "$TMP/ub-doctored-run.sh" '^# session_run <root> <sid> -> ONE line' '^session_run\(\) \{' > "$TMP/ub-doctored-run.txt"
+if ub_carrier_ok "$TMP/ub-doctored-run.txt"; then
+  no "UB6: a span that cannot be found is red, never green on nothing" "an empty span passed"
+else ok "UB6: a span that cannot be found is red, never green on nothing"; fi
+
 finish

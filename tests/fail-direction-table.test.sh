@@ -23,6 +23,8 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
+# The one bound-marker builder (wave-23-fixit-1810 T1).
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 # Overridable so the table can be driven against a MUTATED COPY without the
 # shipped file ever being modified — §9's mutation-and-restore proof, repeatable
@@ -140,7 +142,10 @@ make_world() {
                  # rewrite this whole table to one answer — open, silent — exactly the way
                  # an unarmed Patrol would have. The unengaged direction is a row of its
                  # own below, never the table's default.
-                 : > "$repo/.bionic/tmp/engaged-$_psid.state"
+                 # BOUND TO THE WAVE'S PLAN (wave-23-fixit-1810, REQ-1, D1): an unbound
+                 # session's newest-plan fallback is announced and never acted on, and the
+                 # start gate refuses its writer with the bind instruction.
+                 bound_marker "$repo" "$_psid" "$repo/.bionic/docs/plans/epic-99/wave-01.md"
                done ;;
     nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: pending" ;;
     no)        mkdir -p "$repo/.bionic/docs" ;;
@@ -277,10 +282,12 @@ printf 'plan=%s\nengaged_at=%s\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$T_REPO/.bionic/tmp/engaged-$SID_A.state"
 chmod 600 "$T_REPO/.bionic/tmp/engaged-$SID_A.state"
 
-# An attested active world whose session is engaged but UNBOUND — the marker `make_world`
-# plants, untouched. The wall lets the dispatch through and says which plan it fell back
-# to (AC-3): one operator-facing line, exit 0. Distinct from the auto-probe's announce.
+# An attested active world whose session is engaged but UNBOUND — `make_world` binds, so the
+# marker is emptied here. Since wave-23-fixit-1810 (REQ-1, D1) the newest open plan is
+# announced and never acted on: the wall judges the dispatch with no plan and refuses this
+# writer with the bind instruction — a deny, loud, never another plan's verdict.
 IFS='|' read -r TU_REPO TU_TR TU_SUB <<< "$(make_world attested-unbound yes)"
+unbound_marker "$TU_REPO" "$SID_A" empty
 mkdir -p "$TU_REPO/.bionic/tmp"
 printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
   > "$TU_REPO/.bionic/tmp/preflight-$SID_A.state"
@@ -585,7 +592,7 @@ start|no-session-key|0|silent|Payload missing its session key — start: OPEN
 start|unattested|0|silent-with-announce|Start gate — R5 attestation never blocks: the wall auto-runs the probe, the probe succeeds, and the dispatch proceeds with one announce line
 start|foreign-attestation|0|silent-with-announce|Start gate — R5 attestation never blocks: a foreign-only attestation does not belong to this session, so the wall auto-probes exactly as unattested does and proceeds
 start|attested|0|silent|Start gate — the positive pair: pass in silence
-start|attested-unbound|0|silent-with-announce|Start gate — engaged but UNBOUND session: the dispatch proceeds and the wall announces the newest-plan fallback it took (wave-session-bound-run AC-3), one line on stderr, exit 0
+start|attested-unbound|deny|loud|Start gate — engaged but UNBOUND session: the newest-plan fallback is announced and never acted on (wave-23-fixit-1810 D1), so the writer is REFUSED with the bind instruction
 start|probe-refuses|2|loud|Start gate — one of two surviving refusals under R5: the auto-probe itself genuinely fails (unwritable state dir), so the dispatch is REFUSED quoting the reason the probe gives
 start|patrol-unarmed|deny|loud|Start gate — the arming wall: environment sound, brief well-formed, but no Patrol has stamped this session, so nothing would notice the dispatched agent dying — REFUSED with both re-arm commands named
 stop|irrelevant-tool|0|silent|Stop gate — before the active-wave verdict: OPEN, silent

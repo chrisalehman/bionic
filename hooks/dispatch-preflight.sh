@@ -299,17 +299,27 @@ bionic_context 2>/dev/null || exit 0
 # trio, the roster — is plan-free and runs unchanged (AC-23).
 #
 # wave-session-bound-run S5: `active_run` (no session input, newest-plan only) is now
-# `session_run` (lib/run.sh) — the caller's OWN bound plan when one exists, the same
-# newest-plan fallback when it does not. A BOUND session is gated on that plan alone,
-# whatever else is open in the root (AC-1); UNBOUND behaves exactly as before, and this
-# gate says so once on its advisory channel (AC-3); bound to a plan that has since
-# closed is treated as having no open run at all (AC-6) — the same PLAN="" arm this
-# code already took for "no run".
+# `session_run` (lib/run.sh) — the caller's OWN bound plan when one exists. A BOUND session
+# is gated on that plan alone, whatever else is open in the root (AC-1); bound to a plan
+# that has since closed is treated as having no open run at all (AC-6) — the same PLAN=""
+# arm this code already took for "no run".
+#
+# UNBOUND, THE NEWEST PLAN IS ANNOUNCED AND NEVER ACTED ON (wave-23-fixit-1810, REQ-1, D1).
+# `fallback <plan>` names somebody else's run. The advisory goes out once on this gate's
+# advisory channel — lib/run.sh's one sentence, the words every other consumer prints — and
+# the dispatch is judged with no plan, as under `none`: no budget, no step and no ledger of
+# the other run is read. One thing differs from `none`, and it is the approval checkpoint's
+# business below: a root that HAS an open run is a wave in flight, and a writer launched by
+# a session bound to none of it builds against a plan nobody approved for it, so a writer
+# is refused there with the bind instruction — never with the other plan's step.
+DP_UNBOUND_PLAN=""
 PLAN="$BIONIC_RUN_PLAN"
 case "$BIONIC_RUN_WORD" in
   bound-open) : ;;
   fallback)
-    echo "dispatch-preflight: run resolved by newest-plan fallback (session unbound) — $PLAN" >&2
+    run_unbound_advisory "$PLAN" >&2
+    DP_UNBOUND_PLAN="$PLAN"
+    PLAN=""
     ;;
   bound-closed)
     echo "dispatch-preflight: bound plan closed — $PLAN; this session has no open run" >&2
@@ -805,6 +815,13 @@ fi
 # INERT WITHOUT A PLAN. An engaged session with no plan on disk has no approval to be
 # missing; the arm takes the same direction the budget ceiling's does.
 #
+# EXCEPT AN UNBOUND SESSION IN A ROOT WITH AN OPEN RUN (wave-23-fixit-1810, REQ-1, D1). Its
+# `fallback` plan is announced and never acted on, so there is no plan here to read an
+# approval out of — and a writer it launched would build in somebody else's run on
+# nobody's approval. Before approval only the read-only roles dispatch, and an unbound
+# session has approved nothing: the writer is refused with the instruction that ends the
+# state (bind, or write this session's plan), and the other run's step is never named.
+#
 # WHY IT SITS HERE, after the Patrol checkpoint and before the roster: the roster below is
 # a LEDGER, and a launch this gate is about to refuse must not be journalled as though it
 # happened.
@@ -844,6 +861,18 @@ Fix: put the Step-3 card to the user and wait for the literal word 'approved'; t
 
 Then retry the dispatch."
   fi
+fi
+if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$DP_UNBOUND_PLAN" ]; then
+  dp_finding "this session is bound to no run" "bind it, or write its plan" \
+    "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
+$(run_unbound_advisory "$DP_UNBOUND_PLAN")
+
+A writer is the first act of a plan that cannot be taken back by closing a file, and this
+session has no plan of its own: the run above is the root's newest, announced and never
+acted on. Before approval only a read-only role dispatches: ${ROLE_READONLY_SET}.
+
+Fix: bind this session to the run it is working, or write this session's own plan (the
+     governing-skill hook binds it on the first write), then retry the dispatch."
 fi
 
 # ======================================= ONE LEVEL OF DELEGATION (wave-20 T7, AC-9.4)

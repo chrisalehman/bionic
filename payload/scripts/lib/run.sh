@@ -701,13 +701,14 @@ live_runs() {
 #   is delivered, abandoned or gone answers `bound-closed`, which is engaged-with-no-run,
 #   NOT a licence to fall through to whatever is newest (AC-6: a binding is a commitment).
 #
-#   NEWEST-PLAN IS THE ANNOUNCED FALLBACK, not the default. A session with no binding —
-#   never engaged, or `plan=none`, which is what engagement writes when the root holds zero
-#   or several open runs — resolves exactly as it did before this wave, by `active_run`, and
-#   every consumer THAT ACTS ON THE RESOLUTION says `fallback` out loud, so the resolution
-#   it used is visible (AC-3). Two callers announce nothing and are right not to:
-#   `hooks/engage.sh` is deciding a binding rather than acting on a verdict, and
-#   `hooks/session-start.sh` prints its own listing instead.
+#   NEWEST-PLAN IS AN ANNOUNCED FALLBACK, NEVER A RUN. A session with no binding — never
+#   engaged, or `plan=none`, which is what engagement writes when the root holds zero or
+#   several open runs — still resolves by `active_run`, and the answer comes back as
+#   `fallback <plan>` so that every consumer can say which plan the root would have handed
+#   it. Since wave-23 (REQ-1, D1) that answer is announced and never acted on: no consumer
+#   measures, refuses, revives or dispatches against it — see `session_run` below. Two
+#   callers announce nothing and are right not to: `hooks/engage.sh` is deciding a binding
+#   rather than acting on a verdict, and `hooks/session-start.sh` prints its own listing.
 #
 # The marker is still never written from here: this file reads disk and nothing else. The
 # one writer is `payload/scripts/lib/binding.sh`.
@@ -777,8 +778,20 @@ session_plan() {
 #   bound-open <path>        0   the session's own plan, and it is open
 #   bound-closed <path>      2   the session's own plan: delivered, abandoned, or gone
 #   bound-unreadable <path>  3   the session's own plan is THERE and cannot be read
-#   fallback <path>          0   no binding; today's root-keyed answer, said out loud
+#   fallback <path>          0   no binding; the root's newest open run, announced and never acted on
 #   none                     1   no binding and no open run in the root
+#
+# FALLBACK IS SAID, NEVER ACTED ON (wave-23-fixit-1810, REQ-1, D1; Chris 2026-10-02). The
+# newest open run in the root is somebody's run, and it is never this unbound session's. So
+# `fallback <plan>` is announced and never acted on: every consumer prints the ONE advisory
+# `run_unbound_advisory` below builds, then takes the same path its `none` arm takes —
+# context-spend records nothing, the landing guard reads no row and no `working-branch:`,
+# the patrol-duties and fill gates judge the turn with no plan, patrol-revive returns, and
+# the dispatch wall judges the dispatch with no plan and refuses a writer with the bind
+# instruction. The word stays in the vocabulary because the advisory needs the plan it
+# names: the bind verb takes exactly that path. The defect it closed: the fill gate charged
+# an unbound session for another live session's ready rows on every turn end
+# (record/wave-23-fixit-1810/seed-bug-fill-gate-acts-on-fallback-plan-2026-10-02.md).
 #
 # BOUND-UNREADABLE IS NOT CLOSED (wave-20 T1, REQ-2, D2). A plan at mode 000, or inside a
 # folder that cannot be opened (`plan_unreadable`), may be a run mid-flight; nothing can be
@@ -794,7 +807,7 @@ session_plan() {
 # engaged-with-no-run branch they already have.
 #
 # IT DOES NOT ASK WHETHER THE SESSION IS ENGAGED. An unengaged caller is simply unbound and
-# gets the fallback; `engaged_session` answers the other question, and every hook asks it
+# gets the fallback, to announce; `engaged_session` answers the other question, and every hook asks it
 # first and separately. Two readers, two questions, no coupling.
 #
 # EXIT 2 IS A THIRD VALUE ON PURPOSE. `bound-closed` is neither "here is your run" (0) nor
@@ -824,6 +837,23 @@ session_run() {
   fi
   printf 'none\n'
   return 1
+}
+
+# run_unbound_advisory <plan> -> THE ONE SENTENCE an unbound session is told, on stdout.
+#
+# ONE STRING, ONE OWNER (wave-23-fixit-1810, REQ-1, D1). Every consumer that meets
+# `fallback <plan>` prints exactly this and nothing of its own: five arms of
+# payload/scripts/lib/stop.sh and the dispatch wall. Six hand-typed copies would be six
+# chances for one to drift, and tests/cross-gate-agreement.test.sh §UB pins the six
+# byte-identical. It names the plan the root would have handed the session, because that is
+# the path the bind verb takes, and it names the other way out — writing this session's own
+# plan binds it (the governing-skill hook binds on first write).
+#
+# A STRING BUILDER, NOT A VERDICT. It decides nothing and reads nothing; the consumer has
+# already decided to act as under `none`.
+run_unbound_advisory() {  # <plan>
+  printf "run resolved by newest-plan fallback (session unbound) — %s; bind with session-poker.sh bind %s, or write this session's plan\n" \
+    "${1:-}" "${1:-}"
 }
 
 # session_working_branch <root> <sid> -> the bound plan's `working-branch:` on stdout, exit 0;
