@@ -8318,6 +8318,21 @@ DSREG
     printf '%s\n' 'alias claude="claude --dangerously-skip-permissions"' > "$h/.zshrc"
     cp "$h/.zshrc" "$h/.bashrc"
   fi
+  # AND THE PROJECT THIS MACHINE IS ASKED ABOUT, CARRYING BOTH AUTO-MEMORY FACTS
+  # (wave-23 D5, AC-3.4). The `auto-memory` row is the second project-scoped row in
+  # the table: it reads the project's own `.claude/settings.json` for an `env`
+  # value that sets CLAUDE_CODE_DISABLE_AUTO_MEMORY back to "0", and the CLI's
+  # `projects/<slug>/memory/` directory for files written before the switch was
+  # set. A row whose detector never fires on this fixture passes DS.2a vacuously,
+  # so both facts are planted, on every home, at `<home>/project` — which every
+  # runner below names as the project through `BIONIC_ROOT`. The slug is the
+  # physical path with every non-alphanumeric replaced by `-`, as the CLI names it.
+  mkdir -p "$h/project/.claude"
+  printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}}\n' > "$h/project/.claude/settings.json"
+  DS_AM_DIR="$h/.claude/projects/$( (cd "$h/project" && pwd -P) | sed 's/[^a-zA-Z0-9]/-/g')/memory"
+  mkdir -p "$DS_AM_DIR"
+  printf 'index\n' > "$DS_AM_DIR/MEMORY.md"
+  printf 'a fact\n' > "$DS_AM_DIR/some-fact.md"
   if [ "$want_agents" = "yes" ]; then
     mkdir -p "$h/.claude/agents"
     for f in "$DS_PAYLOAD"/agents/*.md; do
@@ -8331,7 +8346,7 @@ DSREG
 }
 
 ds_doctor() {  # <home> -> doctor's whole report
-  HOME="$1" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" \
+  HOME="$1" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" BIONIC_ROOT="$1/project" \
     bash "$PARTY_DOCTOR" 2>/dev/null
 }
 
@@ -8340,14 +8355,14 @@ ds_doctor() {  # <home> -> doctor's whole report
 # what makes a pending item observable without consenting to anything.
 ds_setup() {  # <home> <args…> -> setup's whole run
   local h="$1"; shift
-  HOME="$h" BIONIC_CLAUDE_HOME="$h/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" \
+  HOME="$h" BIONIC_CLAUDE_HOME="$h/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" BIONIC_ROOT="$h/project" \
     bash "$PARTY_SETUP" "$@" < /dev/null 2>/dev/null
 }
 
 # The one arm that consents, for the removal rows: exactly one `y`, to exactly one question.
 ds_setup_yes() {  # <home> <args…>
   local h="$1"; shift
-  printf 'y\n' | HOME="$h" BIONIC_CLAUDE_HOME="$h/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" \
+  printf 'y\n' | HOME="$h" BIONIC_CLAUDE_HOME="$h/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" BIONIC_ROOT="$h/project" \
     bash "$PARTY_SETUP" "$@" 2>/dev/null
 }
 
@@ -8371,7 +8386,7 @@ ds_setup_yes() {  # <home> <args…>
 DS_CHECKS_LIB="${W1R_PARTY_CHECKS:-$DS_PAYLOAD/scripts/lib/checks.sh}"
 
 ds_rows() {  # <home> -> the whole check table, one row per line
-  HOME="$1" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" \
+  HOME="$1" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" BIONIC_ROOT="$1/project" \
     bash -c '. "$1" >/dev/null 2>&1 || exit 1; bionic_check_rows' _ "$DS_CHECKS_LIB" 2>/dev/null
 }
 
@@ -8425,7 +8440,7 @@ $(ds_section "$1" "THIRD PARTY")"
 # the TABLE instead: every row with a label whose detector fires, whatever its
 # party, so the walk below can require a rendering rather than notice one.
 ds_fired_rows() {  # <home> -> id|label|hint for every labelled row that fires
-  HOME="$1" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" \
+  HOME="$1" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" BIONIC_ROOT="$1/project" \
     bash -c '. "$1" >/dev/null 2>&1 || exit 1
              bionic_check_rows | while IFS="|" read -r ds_i ds_l ds_d ds_p ds_it ds_h; do
                [ -n "$ds_l" ] || continue
@@ -8553,7 +8568,7 @@ ds_pending() {  # <home> <item>
 # so this asks setup's own predicate in one process. DS.2c pairs the two below, so
 # the cheap oracle is bound to the expensive one rather than trusted.
 ds_pending_items() {  # <home> -> the items that fire on it, one per line
-  HOME="$1" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" \
+  HOME="$1" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$DS_PAYLOAD" BIONIC_ROOT="$1/project" \
     bash -c '. "$1" >/dev/null 2>&1 || exit 1
              bionic_check_items | while IFS= read -r i; do
                [ -n "$i" ] || continue
@@ -8608,6 +8623,10 @@ expect_true "DS.2a the table names labelled rows that fire on this fixture (the 
   test "$(printf '%s\n' "$DS_FIRED" | grep -c '|')" -ge 6
 expect_eq "DS.2a every labelled row that fires renders on doctor's page, with its hint" \
   "" "$DS_UNRENDERED"
+# THE PROJECT-SCOPED ROW IS AMONG THEM (wave-23 D5, AC-3.4): `ds_plant` planted both
+# of its facts, so the walk above exercised it rather than passing over it.
+expect_contains "DS.2a …and the auto-memory row is one of the rows that fired" \
+  "auto-memory|" "$DS_FIRED"
 # The empty-route half said on its own, so a table that lost a hint fails here
 # even if the row still renders: an empty hint matches every line ever printed,
 # which is how a vacuous scan looks from the inside (review A-2, A-5).
@@ -9116,6 +9135,26 @@ expect_contains "DS.10 …so the page-wide walk goes RED on it, by name" \
 # doctor's page only if someone wrote the call site.
 expect_absent "DS.10 …while the roster gains nothing from it" \
   "probe-unrendered" "$( PARTY_SETUP="$DS_MUT10/scripts/setup.sh"; ds_setup "$DS_HOME" --list )"
+
+# ── DS.10b mutation: the auto-memory row loses its doctor call site ──────────
+#
+# DS.10 plants a NEW row with no call site; this takes the call site away from the
+# real one (wave-23 D5, AC-3.4). The row is labelled, party `user`, no item, so
+# setup never carries it, and the only thing putting it on the page is the
+# hand-written `_run_add` in doctor's project section. A copy of doctor.sh with
+# those lines deleted must take the fired-row walk red, by name.
+DS_MUT10B="$DS_DIR/mutant-am"
+rm -rf "$DS_MUT10B"; mkdir -p "$DS_MUT10B"
+cp -R "$DS_PAYLOAD/scripts" "$DS_MUT10B/scripts"
+DS_MUT_DOC10B="$DS_MUT10B/scripts/doctor-no-am-row.sh"
+anchor -E "$PARTY_DOCTOR" '_run_add .*bionic_check_label auto-memory' 3
+LC_ALL=C awk '/_run_add .*bionic_check_label auto-memory/ { next } { print }' \
+  "$PARTY_DOCTOR" > "$DS_MUT_DOC10B"
+expect_eq "DS.10b the doctored doctor gained nothing" \
+  "0" "$(diff "$PARTY_DOCTOR" "$DS_MUT_DOC10B" | grep -c '^> ')"
+DS_MUT_REPORT10B="$( PARTY_DOCTOR="$DS_MUT_DOC10B"; ds_doctor "$DS_HOME" )"
+expect_contains "DS.10b …so the page-wide walk goes RED on it, by name" \
+  "auto-memory" "$(ds_unrendered "$DS_MUT_REPORT10B" "$DS_FIRED")"
 
 # ── DS.11 mutation: a renderer that keeps its OWN firing rule goes red ──────
 #
@@ -10070,7 +10109,12 @@ expect_eq "S19.3 …declared by 45 anchor calls (Section 8's doctoring rewrites 
 # function's text out of the hook, so its two anchors have nothing left to guard. §S13.2's two
 # anchors moved with the reduction they guard and stay. Two anchor calls, 34 -> 32, by direct
 # grep.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 32 more" "32" \
+#
+# 33 at epic-23 wave-23-fixit-1810 (2026-10-02, T2): §DS DS.10b — the auto-memory row's
+# doctor call site deleted from a copy of doctor.sh — anchors the three `_run_add` lines
+# before the awk that drops them, so a renamed call site cannot leave the mutant identical
+# to the shipped page. One anchor call, 32 -> 33, by direct grep.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 33 more" "33" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -10160,7 +10204,10 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # anchors in this file; the other three files are untouched by that task.
 # 81 at epic-23 wave-20-fixit-187 (2026-09-23, T6): 45 + 32 + 1 + 3 — §S13b sources the
 # grammar library instead of lifting its text, and its two anchors go with the lift.
-expect_eq "S19.3 …81 anchor call sites across the four doctoring suites, all told" "81" \
+# 82 at epic-23 wave-23-fixit-1810 (2026-10-02, T2): 45 + 33 + 1 + 3 — §DS DS.10b's anchor
+# in this file; the other three files are untouched by that task. MEASURE AGAIN AT THE
+# WAVE MERGE: T1 edits this file in parallel.
+expect_eq "S19.3 …82 anchor call sites across the four doctoring suites, all told" "82" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"

@@ -674,6 +674,80 @@ expect_match "…and its grandchild is not left running on the machine afterward
 echo "      (timeout arm: $T22_TO, bound=2s, probe sleeps 40s)"
 
 
+section "Group 6e: detect_auto_memory — the four states (wave-23 D5, AC-3.2, AC-3.3)"
+#
+# TWO FACTS ABOUT ONE PROJECT, read from two places: the project's own settings
+# files, where an `env` block can set CLAUDE_CODE_DISABLE_AUTO_MEMORY back to "0"
+# over the user-scope "1" setup writes, and the CLI's projects directory, where
+# memory files written before the switch was set still sit. Driven in all four
+# combinations, each against a root and a claude-home of its own.
+#
+# THE SLUG IS TAKEN FROM THE PHYSICAL ROOT, because the CLI names the directory
+# from the resolved path (`/tmp` lands under `-private-tmp-…` on macOS), and
+# `mktemp -d` here hands back a `/var/folders` path whose `/var` is a symlink.
+am_slug() { (cd "$1" && pwd -P) | sed 's/[^a-zA-Z0-9]/-/g'; }
+am_fixture() {  # <name> <override: yes|no> <files: yes|no> -> sets AM_ROOT, AM_HOME
+  AM_ROOT="$TMP/am-$1-root"; AM_HOME="$TMP/am-$1-home"
+  mkdir -p "$AM_ROOT" "$AM_HOME"
+  if [ "$2" = yes ]; then
+    mkdir -p "$AM_ROOT/.claude"
+    printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}}\n' > "$AM_ROOT/.claude/settings.json"
+  fi
+  if [ "$3" = yes ]; then
+    mkdir -p "$AM_HOME/projects/$(am_slug "$AM_ROOT")/memory"
+    printf 'index\n' > "$AM_HOME/projects/$(am_slug "$AM_ROOT")/memory/MEMORY.md"
+    printf 'a fact\n' > "$AM_HOME/projects/$(am_slug "$AM_ROOT")/memory/some-fact.md"
+  fi
+}
+am_probe() { probe_run BIONIC_CLAUDE_HOME="$AM_HOME" BIONIC_ROOT="$AM_ROOT" -- detect_auto_memory; }
+
+am_fixture clean no no
+expect_eq "clean: no override, no directory" \
+  "env:auto-memory override=none dir=none files=0" "$(am_probe)"
+
+am_fixture override yes no
+expect_eq "override: the project settings.json carrying \"0\" is named, relative to the root" \
+  "env:auto-memory override=.claude/settings.json dir=none files=0" "$(am_probe)"
+
+am_fixture dir no yes
+expect_eq "dir: the memory directory and its two files" \
+  "env:auto-memory override=none dir=$AM_HOME/projects/$(am_slug "$AM_ROOT")/memory files=2" "$(am_probe)"
+
+am_fixture both yes yes
+expect_eq "both: the override and the directory on one line" \
+  "env:auto-memory override=.claude/settings.json dir=$AM_HOME/projects/$(am_slug "$AM_ROOT")/memory files=2" "$(am_probe)"
+
+# THE LOCAL FILE OUTRANKS THE SHARED ONE. A local "1" restores the switch over a
+# shared "0"; a local "0" overrides a shared "1" and is the file named.
+am_fixture local-wins yes no
+printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}}\n' > "$AM_ROOT/.claude/settings.local.json"
+expect_eq "a local \"1\" over a shared \"0\" is no override" \
+  "env:auto-memory override=none dir=none files=0" "$(am_probe)"
+am_fixture local-off no no
+mkdir -p "$AM_ROOT/.claude"
+printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": 0}}\n' > "$AM_ROOT/.claude/settings.local.json"
+expect_eq "a local numeric 0 is an override, and the local file is the one named" \
+  "env:auto-memory override=.claude/settings.local.json dir=none files=0" "$(am_probe)"
+
+# AN EMPTY DIRECTORY IS NAMED BUT COUNTS NOTHING, and the row reads files, not the directory.
+am_fixture empty no no
+mkdir -p "$AM_HOME/projects/$(am_slug "$AM_ROOT")/memory"
+expect_eq "an empty memory directory: named, zero files" \
+  "env:auto-memory override=none dir=$AM_HOME/projects/$(am_slug "$AM_ROOT")/memory files=0" "$(am_probe)"
+
+# NO jq, A SETTINGS FILE PRESENT: the override cannot be read, and says so.
+am_fixture nojq yes no
+expect_eq "no jq: an unreadable override is unknown, never none" \
+  "env:auto-memory override=unknown dir=none files=0" \
+  "$(R_PATH="$NOJQ_BIN" probe_run BIONIC_CLAUDE_HOME="$AM_HOME" BIONIC_ROOT="$AM_ROOT" -- detect_auto_memory)"
+
+# READ-ONLY: the probe over the fullest fixture changes nothing it read.
+am_fixture ro yes yes
+AM_RO_BEFORE="$(cd "$TMP" && ls -laR "am-ro-root" "am-ro-home" 2>/dev/null; cat "$AM_ROOT/.claude/settings.json")"
+am_probe >/dev/null
+AM_RO_AFTER="$(cd "$TMP" && ls -laR "am-ro-root" "am-ro-home" 2>/dev/null; cat "$AM_ROOT/.claude/settings.json")"
+expect_eq "the probe wrote nothing under the root or the home" "$AM_RO_BEFORE" "$AM_RO_AFTER"
+
 section "Group 7: read-only is a contract, not an intention"
 #
 # Same wall the rest of detect.sh lives under: fingerprint the inputs, run

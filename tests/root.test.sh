@@ -38,7 +38,7 @@
 # no `.bionic` — because `cwd-fallback` is otherwise never exercised.
 #
 # ANTI-VACUITY BY DIFFERENTIAL CONTROL, not by mutation of the library
-# (memory/no-vacuous-tests-at-authoring). A positive answer alone cannot tell a
+# (.claude/rules/test-harness.md, "Anti-vacuity"). A positive answer alone cannot tell a
 # rule from a coincidence: §3 could pass because the phantom won OR because the
 # walk never looked below the repo root and landed somewhere that happens to
 # share the name. So each rule-bearing fixture is run TWICE, once with the

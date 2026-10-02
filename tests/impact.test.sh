@@ -27,11 +27,11 @@
 # WHY A FIXTURE TREE FOR THE EDGE KINDS (§A–§C). Asserting edge kinds against
 # the real tree would pin this suite to whatever 51 suites happen to reference
 # today: every unrelated edit to any suite would rewrite the expected sets, and
-# an assertion nobody can re-derive by hand is a pin, not a test (memory
-# "good-tests-doctrine"). So each edge kind is proved over a MINIATURE tree this
+# an assertion nobody can re-derive by hand is a pin, not a test
+# (.claude/rules/test-harness.md, "Good tests"). So each edge kind is proved over a MINIATURE tree this
 # suite builds and owns, where the whole dependency graph fits on a screen — and
 # every positive is paired with a MUTATION that removes the edge and re-proves
-# the same call goes empty (memory "no-vacuous-tests-at-authoring": a positive
+# the same call goes empty (.claude/rules/test-harness.md, "Anti-vacuity": a positive
 # assertion alone cannot tell a real derivation from a program that prints
 # everything).
 #
@@ -48,8 +48,8 @@
 # it does not run in the gating roster. `BIONIC_IMPACT_PLANTED=1` runs it, and
 # its authoring-time output is committed as the durable record at
 # .bionic/docs/record/wave-verification-cannot-lie/s12-planted-edits.log
-# (memory "red-evidence-is-perishable": the red counts die at green, the
-# mutation-and-restore log does not).
+# (RED evidence is perishable: the red counts die at green, the mutation-and-restore
+# log does not).
 #
 # Usage: bash tests/impact.test.sh
 #   BIONIC_IMPACT_PLANTED=1 bash tests/impact.test.sh    # + the §F proof
@@ -587,7 +587,7 @@ else
 # and resolve-roots takes an existing export verbatim. Inherited, those three
 # send every suite in the scratch tree to read the REAL files, so the planted
 # edit is never seen and the proof reports a clean superset while testing
-# nothing (memory "seam-blindness-class": a seam that substitutes the value
+# nothing (.claude/rules/test-harness.md, "Seam blindness": a seam that substitutes the value
 # under test leaves the production path unverified). Unset them and each suite
 # re-derives its roots from its own location, which is the scratch tree.
 unset BIONIC_HOOKS_DIR BIONIC_SKILLS_DIR BIONIC_SCRIPTS_DIR

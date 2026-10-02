@@ -27,7 +27,7 @@
 # what this suite reads first — hardcoding the string here would make the test
 # agree with itself, not with the SSoT.
 #
-# ANTI-VACUITY (memory/no-vacuous-tests-at-authoring; styled after
+# ANTI-VACUITY (.claude/rules/test-harness.md, "Anti-vacuity"; styled after
 # tests/patrol-revive.test.sh :50-56's "prove the subject exists and parses
 # before any of it runs", and the Diagrams section of SKILL.md: "every pin
 # re-proves itself against a doctored copy on each run"). A positive
@@ -63,7 +63,7 @@ SKILL_DOC="${BIONIC_PATROL_SKILL_UNDER_TEST:-${PAYLOAD}/skills/canonical-sdlc/di
 
 # THE SUITE IS NOT ALLOWED TO BE VACUOUS over a missing subject: three absent
 # files would make every "does not carry the marker" assertion below pass
-# over nothing (memory/no-vacuous-tests-at-authoring).
+# over nothing (.claude/rules/test-harness.md, "Anti-vacuity").
 for f in "$PATROL_LIB" "$GATE_HOOK" "$SKILL_DOC"; do
   [ -f "$f" ] || { echo "patrol-marker: no file at $f — suite refuses to run"; exit 1; }
 done
