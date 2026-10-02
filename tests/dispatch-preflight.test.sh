@@ -8339,17 +8339,41 @@ expect_eq "brief-lib a contract indented four spaces still lifts its only Re-exe
 expect_eq "brief-lib a tab-indented only Re-executes: line still lifts (I2 case H)" \
   "re_executes=${BT}npm test -- a${BT}" \
   "$(lift_runs "	Re-executes: ${BT}npm test -- a${BT}")"
-# wave-22 T15 (critic-f9c2c8d N1): one unbalanced fence makes parity meaningless, so a brief whose
-# fences end open reads as before the union (first hit). Case M: unbalanced ``` line, the real
-# line, then a balanced block holding an example.
-expect_eq "brief-lib an unbalanced ${FENCE3} line, the real line, then a fenced example lifts only the real run (N1 case M)" \
-  "re_executes=${BT}npm test -- a${BT}" \
+# wave-22 T15 (critic-f9c2c8d N1; auditor finding; ruling A-orch-13): a label whose every hit sits
+# in a code block, or a brief whose fences end unbalanced, lifts the UNION of ALL its hits. A
+# first-hit fallback silently dropped every run after the first. Accepted: a fenced example lifts
+# beside the real runs in those malformed shapes (visible on the roster row; a dropped run is not).
+expect_eq "brief-lib N1 case M: unbalanced ${FENCE3}, real line, fenced example — the real run is never dropped" \
+  "re_executes=${BT}npm test -- a${BT} ${BT}npm test -- example${BT}" \
   "$(lift_runs "${FENCE3}
 Re-executes: ${BT}npm test -- a${BT}
 
 ${FENCE3}
 Re-executes: ${BT}npm test -- example${BT}
 ${FENCE3}")"
+expect_eq "brief-lib P1: an indented two-run contract lifts both runs" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT}" \
+  "$(lift_runs "Task:
+    Re-executes: ${BT}go test ./a${BT}
+    Re-executes: ${BT}go test ./b${BT}")"
+expect_eq "brief-lib P2: an unclosed ${FENCE3} then two real lines lifts both runs" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT}" \
+  "$(lift_runs "${FENCE3}
+Re-executes: ${BT}go test ./a${BT}
+Re-executes: ${BT}go test ./b${BT}")"
+expect_eq "brief-lib P3: real line, an unclosed ${FENCE3}, real line lifts both runs" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT}" \
+  "$(lift_runs "Re-executes: ${BT}go test ./a${BT}
+${FENCE3}
+Re-executes: ${BT}go test ./b${BT}")"
+_p5=$(bash -c '. "$1" || exit 9; lift_contract_fields "$3" "$2"' _ "$BRIEF_LIB" auditor "Task:
+    Re-executes: ${BT}go test ./a${BT}
+    Re-executes: ${BT}go test ./b${BT}
+    Re-executes: ${BT}go test ./c${BT}
+    Re-executes: ${BT}go test ./d${BT}")
+expect_contains "brief-lib P5: a four-run indented auditor contract keeps three runs" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT} ${BT}go test ./c${BT}" "$_p5"
+expect_contains "brief-lib …and the cap finding fires, naming ./d as dropped" "go test ./d" "$(printf '%s\n' "$_p5" | grep '^re_executes_dropped=')"
 # PINS of the accepted trade (A-T15.2), not goals: both read as they did at 12574e2.
 expect_eq "brief-lib PIN (case K): a brief whose only Re-executes: line is a balanced fenced example lifts it" \
   "re_executes=${BT}npm test -- example${BT}" \
