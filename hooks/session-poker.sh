@@ -2281,6 +2281,50 @@ row_copy_args() {  # <row> <session id> -> sets ROW_COPY_ARGS
   return 0
 }
 
+# THE IDENTITY OF A SUCCESSOR ROW (epic-23 wave-22 T1; REQ-1 AC-1.1/AC-1.2, D1; ADR-039). The
+# rule is payload/scripts/lib/roster.sh's, stated once above `roster_row_for_id`: every row
+# written after an agent's id is known carries that id, and the status the id was learned
+# under. `row_copy_args` copies the name's LATEST row, and for a teammate that row can be the
+# recorder's `status=confirmed` copy, which carries no id (the recorder learns the transcript
+# id one event later and writes it on the `identified` row; the two land in either order). A
+# successor copied from it had no id either, and every by-id reader — the suite-budget wall
+# first — kept reading the row before it (wave-22 seed). So `extend` and `amend` append these
+# three fields AFTER the copy, and `roster_row`'s last-wins assignment makes them the row's.
+#
+# THE SOURCE is the name's latest row whose `agent_id=` is non-empty, within the SAME DISPATCH
+# CYCLE as the latest row — the same `tool_use_id=`, when the latest row carries one. A name
+# dispatched again is a new agent under an old name; the earlier agent's id is not its id, and
+# stamping it would hand the old id the new contract while the new agent's identification
+# (which joins `intended|confirmed` rows by name) skipped the successor. No row in the cycle
+# carries an id yet → nothing is appended, the copy is today's, and the recorder's
+# `identified` row later inherits it whole. `teammate_id=` travels only when that row has the
+# key — present-if-passed, as `row_copy_args` keeps it. On an async roster the latest row IS
+# the id-bearing one, so the three values equal the copy's and the row is byte-identical.
+# Sets POKER_ID too: the id the walls will key this agent on, or empty. The roster-state prefix is
+# `roster_row_for_id`'s — any `roster-state/` row, not one schema — so the verb's self-check and the
+# wall's pick read the same rows (wave-22 T10; review 5).
+POKER_ID_ARGS=()
+POKER_ID=""
+identity_args() {  # <roster> <name> <the name's latest row> -> sets POKER_ID_ARGS, POKER_ID
+  local tuid row
+  POKER_ID_ARGS=(); POKER_ID=""
+  tuid="$(line_field "$3" tool_use_id)"
+  row="$(grep '^roster-state/' "$1" 2>/dev/null | grep -F "|name=${2}|" \
+    | POKER_TUID="$tuid" awk -F'|' '
+        { id = ""; tu = ""; gi = 0; gt = 0
+          for (i = 1; i <= NF; i++) {
+            if (!gi && index($i, "agent_id=") == 1)    { id = substr($i, 10); gi = 1 }
+            if (!gt && index($i, "tool_use_id=") == 1) { tu = substr($i, 13); gt = 1 }
+          }
+          if (id != "" && (ENVIRON["POKER_TUID"] == "" || tu == ENVIRON["POKER_TUID"])) last = $0 }
+        END { if (last != "") print last }')"
+  [ -n "$row" ] || return 0
+  POKER_ID="$(line_field "$row" agent_id)"
+  POKER_ID_ARGS=("status=$(line_field "$row" status)" "agent_id=$POKER_ID")
+  row_has_key "$row" teammate_id && POKER_ID_ARGS+=("teammate_id=$(line_field "$row" teammate_id)")
+  return 0
+}
+
 # ---------------------------------------------------------------- the contract grammar
 #
 # THE DISPATCH WALL'S GRAMMAR, AT THIS FILE'S TWO DOORS (wave-20 T9; spec D4, ledger Δ10).
@@ -3715,7 +3759,9 @@ EOF
 
     # THE LAST ROW CARRYING THIS NAME IS ITS LATEST CONTRACT — the same by-name reading
     # every other reader in this file takes (e.g. the duration arm inside `tick`, below).
-    EXTEND_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+    # Any `roster-state/` row, the prefix `identity_args` reads, so the copy and the id stamp
+    # come from one row under a schema bump (wave-22 T13; critic-3598752 I4).
+    EXTEND_ROW="$(grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null \
       | grep -F "|name=${EXTEND_NAME}|" | tail -1)"
     if [ -z "$EXTEND_ROW" ]; then
       die "REFUSED — no row named $EXTEND_NAME on this session's roster ($ROSTER_FILE)."
@@ -3727,8 +3773,10 @@ EOF
     # launch, bumped to now (the whole point — the old deliverable then predates it), and
     # its reason, as data. `claims=` travels with the copy, untouched.
     row_copy_args "$EXTEND_ROW" "$SESSION_ID"
-    EXTEND_RR_ARGS=("${ROW_COPY_ARGS[@]}" "launched_at=$EXTEND_NOW"
-      "extended=$EXTEND_NOW $(clean "$EXTEND_REASON")")
+    identity_args "$ROSTER_FILE" "$EXTEND_NAME" "$EXTEND_ROW"
+    EXTEND_RR_ARGS=("${ROW_COPY_ARGS[@]}")
+    EXTEND_RR_ARGS+=(${POKER_ID_ARGS[@]+"${POKER_ID_ARGS[@]}"})
+    EXTEND_RR_ARGS+=("launched_at=$EXTEND_NOW" "extended=$EXTEND_NOW $(clean "$EXTEND_REASON")")
 
     EXTEND_NEW_ROW="$(roster_row "${EXTEND_RR_ARGS[@]}")" || EXTEND_NEW_ROW=""
     if [ -z "$EXTEND_NEW_ROW" ]; then
@@ -3748,10 +3796,12 @@ EOF
   # editing the plan row changes nothing — and until this verb the only way to widen one was
   # a re-dispatch. `amend` appends a SUCCESSOR row, copied from the name's latest
   # (`row_copy_args`, the copy `extend` takes), with each addition merged in: a union, old
-  # members first, never a narrowing. The identity is not touched — `status=`,
-  # `launched_at=`, `agent_id=`, `teammate_id=` and `tool_use_id=` are the copy's — so the
-  # verdict, the stop gate and the budget join see the same contract, wider, and the stop
-  # wall and the budget wall, which already read a name's latest row, need no change.
+  # members first, never a narrowing. `launched_at=` and `tool_use_id=` are the copy's; the
+  # identity — `status=`, `agent_id=`, `teammate_id=` — is the agent's latest identified
+  # self (`identity_args`, wave-22 T1, D1), because the budget wall keys on the id, NOT the
+  # name, and a teammate's latest row can carry none. The one rule is
+  # payload/scripts/lib/roster.sh's, above `roster_row_for_id`; the success line asks that
+  # function whether the wall will read the row just written (D3) before it says so.
   # `amended=<iso> <reason>` records when and why; `session=` who.
   #
   # THE MERGED FIELDS ARE JUDGED BY THE DISPATCH WALL'S GRAMMAR (Δ10). The verb builds the
@@ -3788,7 +3838,8 @@ EOF
       die "REFUSED — no row named $AMEND_NAME: this session has no roster at $ROSTER_FILE."
       exit 1
     fi
-    AM_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+    # Any `roster-state/` row, as `identity_args` reads (wave-22 T13; critic-3598752 I4).
+    AM_ROW="$(grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null \
       | grep -F "|name=${AMEND_NAME}|" | tail -1)"
     if [ -z "$AM_ROW" ]; then
       die "REFUSED — no row named $AMEND_NAME on this session's roster ($ROSTER_FILE)."
@@ -3868,7 +3919,9 @@ EOF
     fi
 
     row_copy_args "$AM_ROW" "$SESSION_ID"
+    identity_args "$ROSTER_FILE" "$AMEND_NAME" "$AM_ROW"
     AM_ARGS=("${ROW_COPY_ARGS[@]}")
+    AM_ARGS+=(${POKER_ID_ARGS[@]+"${POKER_ID_ARGS[@]}"})
     { [ -n "$AM_NEW_FILES" ] || row_has_key "$AM_ROW" files; } && AM_ARGS+=("files=$AM_NEW_FILES")
     if [ -n "$AM_SA" ] || row_has_key "$AM_ROW" suites_allowed; then
       AM_ARGS+=("suites_allowed=$AM_SA")
@@ -3885,7 +3938,38 @@ EOF
       die "REFUSED — could not write to $ROSTER_FILE."
       exit 2
     }
-    say "amended — $AMEND_NAME: files=${AM_NEW_FILES:-(none)} suites=${AM_SA:-(none)}${AM_NEW_RUNS:+ runs=$AM_NEW_RUNS}; the stop and budget walls read this row from now on."
+    # THE SUCCESS LINE CHECKS ITSELF (wave-22 T1; REQ-1 AC-1.6, D3). It used to print
+    # unconditionally, and the wall it promised went on reading the pre-amend row (wave-22
+    # seed). Now the verb asks `roster_row_for_id` — the budget wall's own pick, one function
+    # in payload/scripts/lib/roster.sh — whether the row it just wrote is the row the wall
+    # reads for this agent's id. No id yet: no wall keys on this agent before it is
+    # identified (the budget arm's actor is the transcript id), and the recorder's
+    # `identified` row inherits this successor whole, so the line says when, not now.
+    if [ -z "$POKER_ID" ]; then
+      say "amended — the walls read this row once $AMEND_NAME is identified"
+      exit 0
+    fi
+    AM_PICK="$(roster_row_for_id "$ROSTER_FILE" "$POKER_ID")" || AM_PICK=""
+    if [ "$AM_PICK" != "$AM_NEW_ROW" ]; then
+      AM_WROTE_ID="$(line_field "$AM_NEW_ROW" agent_id)"
+      if [ -z "$AM_PICK" ]; then
+        AM_WHY="no row carries that id"
+      elif [ "$AM_WROTE_ID" != "$POKER_ID" ]; then
+        AM_WHY="the row amend wrote carries agent_id=${AM_WROTE_ID:-(empty)}, so a wall keyed on $POKER_ID never reaches it"
+      else
+        AM_WHY="a later row carrying that id was written after it"
+      fi
+      die "amend written, but the budget wall reads $(line_field "$AM_PICK" status) row for $POKER_ID — $AM_WHY"
+      exit 1
+    fi
+    # The stop wall and observe pick an id's row from `confirmed|identified` rows only
+    # (stop-guard.sh), so a successor that copied a `duplicate-start` row is read by the budget
+    # wall alone — the line names only the walls that read it (wave-22 T10; review 4).
+    case "$(line_field "$AM_NEW_ROW" status)" in
+      confirmed|identified) AM_WALLS="the stop and budget walls read" ;;
+      *)                    AM_WALLS="the budget wall reads" ;;
+    esac
+    say "amended — $AMEND_NAME: files=${AM_NEW_FILES:-(none)} suites=${AM_SA:-(none)}${AM_NEW_RUNS:+ runs=$AM_NEW_RUNS}; $AM_WALLS this row from now on."
     exit 0
     ;;
 

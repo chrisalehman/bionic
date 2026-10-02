@@ -308,6 +308,69 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       for (j = 1; j <= nh; j++) if (HK[j] == kind && (best == 0 || HLS[j] < HLS[best])) best = j
       return best
     }
+    # EVERY hit of a label, in position order, as a space-joined list of hit numbers (wave-22
+    # T3, D5). The runs lift reads every `Re-executes:` span, not only the first.
+    #
+    # A HIT IN A CODE BLOCK IS AN EXAMPLE, NOT A DECLARATION (wave-22 T10; review 1, critic C2).
+    # At base only the first hit counted, so a quoted `Re-executes:` line after the real one was
+    # harmless; the union reads them all, so a line inside a ``` fence, or indented four spaces
+    # or a tab (a Markdown code block), would widen the run contract with a command the author
+    # only showed. The callers of firsthit are untouched.
+    # A FENCE IS ``` OR ~~~, AND ONLY ITS OWN CHARACTER CLOSES IT (wave-22 T13; critic-3598752
+    # I2b): a ``` line inside a ~~~ block is content of that block, as in CommonMark.
+    function in_code_block(p,   pre, n, i, ls, fence, k, w, ch, t) {
+      pre = substr(lc, 1, p - 1); n = split(pre, ls, "\n"); fence = ""
+      for (i = 1; i < n; i++) {
+        t = ls[i]; sub(/^[ \t]*/, "", t)
+        if (fence == "" && (t ~ /^```/ || t ~ /^~~~/)) fence = substr(t, 1, 3)
+        else if (fence != "" && index(t, fence) == 1) fence = ""
+      }
+      if (fence != "") return 1
+      w = 0
+      for (k = length(ls[n]); k >= 1; k--) {
+        ch = substr(ls[n], k, 1)
+        if (ch == "\t") w += 4; else if (ch == " ") w++; else return 0
+      }
+      return (w >= 4)
+    }
+    # A LABEL WHOSE EVERY HIT SITS IN A CODE BLOCK STILL DECLARES (wave-22 T13; critic-3598752 I2). A brief
+    # indented whole, tab-indented, or after one unbalanced ``` line has its only real line in
+    # what reads as a block; dropping it lifted no run while Files: and Suites: still lifted, and
+    # the budget wall refused the declared run later. Such a label falls back (see below).
+    # WHEN PARITY MEANS NOTHING, EVERY HIT COUNTS (wave-22 T15; critic-f9c2c8d N1, auditor finding,
+    # A-orch-13). One stray ``` before the real line flips every later line, so a brief whose
+    # fences end open cannot say which hits are examples; and a label whose every hit sits in a
+    # code block (an indented contract) has no hit left to trust. Both lift the UNION of ALL
+    # hits in position order, never the first alone: a first-hit fallback dropped every run
+    # after the first, the silent drop REQ-2 exists to remove. ACCEPTED TRADE: in those
+    # malformed shapes a fenced example lifts beside the real runs. An over-admitted run shows
+    # on the roster row; a dropped real run does not. Handled by parity: A-J, N, O. Union
+    # fallback: D, E, H, M, P1-P3, P5, K (a balanced fenced example as the only hit lifts, as at
+    # 12574e2) and L (a fenced example before a wholly indented contract lifts beside the real run).
+    function fences_unbalanced(   n, i, ls, fence, t) {
+      n = split(lc, ls, "\n"); fence = ""
+      for (i = 1; i <= n; i++) {
+        t = ls[i]; sub(/^[ \t]*/, "", t)
+        if (fence == "" && (t ~ /^```/ || t ~ /^~~~/)) fence = substr(t, 1, 3)
+        else if (fence != "" && index(t, fence) == 1) fence = ""
+      }
+      return (fence != "")
+    }
+    function allhits(kind,   j, k, n, idx, t, out) {
+      n = 0
+      if (!fences_unbalanced())
+        for (j = 1; j <= nh; j++) if (HK[j] == kind && !in_code_block(HLS[j])) idx[++n] = j
+      if (n == 0)
+        for (j = 1; j <= nh; j++) if (HK[j] == kind) idx[++n] = j
+      for (j = 2; j <= n; j++) {
+        t = idx[j]
+        for (k = j - 1; k >= 1 && HLS[idx[k]] > HLS[t]; k--) idx[k + 1] = idx[k]
+        idx[k + 1] = t
+      }
+      out = ""
+      for (j = 1; j <= n; j++) out = (out == "" ? idx[j] : out " " idx[j])
+      return out
+    }
     # The last character index of the span belonging to hit h. `skip` names one
     # hit to IGNORE when looking for the terminator, which the cadence rule in
     # END needs: it asks where the PROGRESS span would end if the cadence label
@@ -659,7 +722,10 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       return ""
     }
     function marked_runs(s,   i, j, tok, out, c, dropped, why) {
-      out = ""; c = 0; dropped = ""
+      # THE UNION OF SEVERAL SPANS (wave-22 T3, D5). The caller resets MRprev, MRc, MRout and
+      # MRdropped once per brief; a run an EARLIER span already carried is skipped, first-seen
+      # order kept, and the cap counts the union. One span behaves as it always did.
+      out = MRout; c = MRc; dropped = MRdropped
       i = 1
       for (;;) {
         j = index(substr(s, i), BT)
@@ -705,6 +771,8 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
         # pipe, and this is the identity today. It is here so the rule that builds the claim
         # is, by construction, the rule that built the declaration.
         tok = collapse(tok, 1)
+        if ((tok in MRprev) && MRprev[tok] != MRspan) continue
+        MRprev[tok] = MRspan
         if (c < RUNS_MAX) {
           out = (out == "" ? BT tok BT : out " " BT tok BT)
           c++
@@ -716,9 +784,7 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       # channel `suites_dropped=` does — read by the bash side below, which turns a non-empty
       # value into a `dp_finding` — never `warn()`, which is the several-fault ADMIT wire the
       # old `re_executes_capwarn=` field used.
-      if (dropped != "") {
-        print "re_executes_dropped=" dropped
-      }
+      MRout = out; MRc = c; MRdropped = dropped
       return out
     }
     function paths(s, maxn, warnlabel,   n, arr, i, t, out, seen, c, dropped) {
@@ -970,8 +1036,11 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       # a real command against an exact marked run. There is no `none` waiver here — the
       # absence of the label IS the absence of the declaration, and `Suites: none` remains the
       # one way a brief waives a budget outright.
-      h = firsthit("runs")
-      if (h > 0) { v = marked_runs(spanof(h)); if (v != "") print "re_executes=" v }
+      nr = split(allhits("runs"), RH, " ")
+      split("", MRprev); MRout = ""; MRc = 0; MRdropped = ""; v = ""
+      for (r = 1; r <= nr; r++) { MRspan = r; v = marked_runs(spanof(RH[r])) }
+      if (MRdropped != "") print "re_executes_dropped=" MRdropped
+      if (v != "") print "re_executes=" v
     }
   ' 2>/dev/null
 }
@@ -1077,7 +1146,7 @@ Then retry the dispatch."
   # never told at dispatch. `RUNS_MAX` (3) is unchanged; a brief within the cap never reaches
   # this arm.
   if [ -n "$runs_dropped" ]; then
-    detail="The Re-executes: span named more runs than the ${cap}-run cap admits for
+    detail="The Re-executes: lines name more runs than the ${cap}-run cap admits for
 this role (${role:-unnamed}), and this one was dropped:
     ${runs_dropped}
 
@@ -1088,7 +1157,7 @@ be refused there 40 minutes later, for running exactly what its own brief had na
 The cap of three is the auditor's, from its mandate's \"<=3 re-executions\"; every other
 role may declare as many runs as a Suites: line may name suites (${DP_SUITES_MAX}).
 
-Fix: mark at most ${capw} runs with backticks, one line —
+Fix: mark at most ${capw} runs with backticks, across all your Re-executes: lines —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`, \`go test ./...\`
 
 Then retry the dispatch."
@@ -1454,7 +1523,29 @@ Or configure the derivation once, in .bionic/config.yaml —
     impact-command: bash tests/lib/impact.sh
 
 Then retry the dispatch."
-    found=1; "$sink" finding "no impact command is configured here" "set impact-command in config.yaml" "$detail"
+    if [ -n "$re_executes" ]; then
+      detail="\`Files:\` states which paths the task will touch. Turning that into the set of
+suites the agent may run is the tree's job, and this repository has not named the
+command that asks it.
+
+Fix: your runs are declared under Re-executes:; waive the suite set with \`Suites: none\` beside it —
+    Suites: none
+
+Or name the closed set in the brief instead —
+    Suites: tests/one.test.sh, tests/two.test.sh
+
+Or configure the derivation once, in .bionic/config.yaml —
+    impact-command: bash tests/lib/impact.sh
+
+Then retry the dispatch."
+    fi
+    # THE SHORT FIX IS THE ONE THAT APPLIES (wave-22 T10; critic C3). On a several-fault brief the
+    # detail block above is dropped and only this line reaches the author.
+    local short_fix="set impact-command in config.yaml"
+    # THE CAPPED USER LINE (wave-22 T13; critic-3598752 I1): on a one-fault brief this short fix
+    # ends the 100-column line, so it stays at 98 columns or refuse.sh refuses its own call.
+    if [ -n "$re_executes" ]; then short_fix="Suites: none beside Re-executes:"; fi
+    found=1; "$sink" finding "no impact command is configured here" "$short_fix" "$detail"
   fi
 
   return "$found"

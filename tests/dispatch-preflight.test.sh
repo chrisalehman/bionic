@@ -370,6 +370,9 @@ run_gate() {  # <payload-json>
       return 0
     fi
     DP_E1_SEEN=$(( ${DP_E1_SEEN:-0} + 1 ))
+    # refuse.sh REFUSING ITS OWN CALL fits the shape, but the author never sees the real fault
+    # (wave-22 T13; critic-3598752 I1).
+    case "$_dp_line" in "bionic: refuse-call refused"*) DP_E1_BAD_SHAPE="${DP_E1_BAD_SHAPE:-}[$_dp_line] " ;; esac
     printf '%s' "$_dp_line" | /usr/bin/grep -qE '^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$' \
       || DP_E1_BAD_SHAPE="${DP_E1_BAD_SHAPE:-}[$_dp_line] "
     [ "$(printf '%s\n' "$_dp_line" | wc -l | tr -d ' ')" = "1" ] \
@@ -8221,6 +8224,278 @@ expect_contains "brief-lib a brief with no instrument is refused" \
 BV=$(brief_verdict implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
 expect_contains "brief-lib Files: where no impact command is configured is refused" \
   "finding: no impact command is configured here" "$BV"
+
+# wave-22 T3 (D5/D6): EVERY Re-executes: line counts, and the missing-impact refusal names the
+# fix that applies when runs are declared.
+# the sink's fourth argument is the refusal body, which brief_verdict does not print
+brief_detail() {
+  bash -c '
+    . "$1" || exit 9
+    sink() { case "$1" in finding) printf "finding: %s\nfix: %s\n%s\n" "$2" "$3" "$4" ;; esac; }
+    rc=0
+    brief_validate_fields "$(lift_contract_fields "$4" "$2")" "$2" "$3" sink || rc=$?
+    printf "rc=%s\n" "$rc"
+  ' _ "$BRIEF_LIB" "$1" "$2" "$3" 2>&1
+}
+BV_THREE="Re-executes: ${BT}go test ./a${BT}
+Re-executes: ${BT}go test ./b${BT}
+Re-executes: ${BT}go test ./c${BT}"
+expect_contains "brief-lib three one-command Re-executes: lines all lift (AC-2.1)" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT} ${BT}go test ./c${BT}" \
+  "$(bash -c '. "$1" || exit 9; lift_contract_fields "$3" "$2"' _ "$BRIEF_LIB" "$BRIEF_NOCONF" "$BV_THREE")"
+REPO=$(make_repo r22t3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: run three things.
+Expected artifact: .bionic/docs/record/w22t3.md
+${BV_THREE}" "w22t3-three")"
+expect_status "brief-lib …and a full dispatch admits the brief with three runs (AC-2.1)" "0" "$GATE_ST"
+expect_status "brief-lib …no refusal verdict on either channel" "allow" "$GATE_VERDICT"
+expect_eq "brief-lib …the roster row carries all three runs" \
+  "${BT}go test ./a${BT} ${BT}go test ./b${BT} ${BT}go test ./c${BT}" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" re_executes)"
+BV_FOURL="${BV_THREE}
+Re-executes: ${BT}go test ./d${BT}"
+BV=$(brief_verdict bionic:auditor "$BRIEF_NOCONF" "$BV_FOURL")
+expect_contains "brief-lib four one-command lines meet the cap over the union (AC-2.2)" \
+  "finding: Re-executes: line exceeds the 3-run cap" "$BV"
+expect_contains "brief-lib …naming the fourth run" "${BT}go test ./d${BT}" \
+  "$(brief_detail bionic:auditor "$BRIEF_NOCONF" "$BV_FOURL")"
+BV_CAPD="$(brief_detail bionic:auditor "$BRIEF_NOCONF" "$BV_FOURL")"
+expect_contains "brief-lib …the refusal speaks of the Re-executes: lines (the union), not a span" \
+  "The Re-executes: lines name more runs than the 3-run cap" "$BV_CAPD"
+expect_absent "brief-lib …never 'one line' (four one-run lines are the case it refuses)" "one line" "$BV_CAPD"
+expect_absent "brief-lib …nor the old singular 'span named'" "span named" "$BV_CAPD"
+BV=$(brief_verdict bionic:auditor "$BRIEF_NOCONF" "Re-executes: ${BT}go test ./a${BT}
+Re-executes: ${BT}go test ./a${BT}, ${BT}go test ./b${BT}")
+expect_absent "brief-lib …a run repeated across lines counts once" "finding:" "$BV"
+# wave-22 T10 (review 1 / critic C2): a `Re-executes:` line inside a ``` fence, or indented four
+# spaces (a Markdown code block), is an EXAMPLE, not a declaration — it never joins the union.
+lift_runs() { bash -c '. "$1" || exit 9; lift_contract_fields "$3" "$2" | grep "^re_executes="' _ "$BRIEF_LIB" "${2:-implementor}" "$1"; }
+FENCE3='```'
+expect_eq "brief-lib a fenced Re-executes: example after the real line lifts only the real run (C2 case A)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Re-executes: ${BT}npm test -- a${BT}
+
+For reference, a brief looks like:
+${FENCE3}
+Re-executes: ${BT}rm -rf build && npm run e2e${BT}
+${FENCE3}
+")"
+expect_eq "brief-lib …a fenced example BEFORE the real line is not the lift either" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "${FENCE3}
+Re-executes: ${BT}rm -rf build${BT}
+${FENCE3}
+Re-executes: ${BT}npm test -- a${BT}")"
+expect_eq "brief-lib …an indented (four-space) example lifts only the real run" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Re-executes: ${BT}npm test -- a${BT}
+
+An example:
+
+    Re-executes: ${BT}rm -rf build${BT}
+")"
+expect_eq "brief-lib …a mid-sentence quote stays un-lifted (C2 case B)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Re-executes: ${BT}npm test -- a${BT}
+Note: never write Re-executes: ${BT}npm test${BT} without a path.")"
+expect_eq "brief-lib …a real second line after a closed fence still unions" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT}" \
+  "$(lift_runs "Re-executes: ${BT}go test ./a${BT}
+${FENCE3}
+Re-executes: ${BT}rm -rf x${BT}
+${FENCE3}
+Re-executes: ${BT}go test ./b${BT}")"
+# wave-22 T13 (critic-3598752 I2, I2b): a `~~~` fence is a fence too, and a label whose EVERY hit
+# sits in a code block falls back to its first hit — an indented, tabbed or after-unbalanced-fence
+# real line is still the declaration, as it was before the union (cases D, E, H).
+FENCE4='~~~'
+expect_eq "brief-lib a ~~~-fenced Re-executes: example after the real line lifts only the real run (I2b case B)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Re-executes: ${BT}npm test -- a${BT}
+
+${FENCE4}
+Re-executes: ${BT}rm -rf build${BT}
+${FENCE4}")"
+expect_eq "brief-lib …a ${FENCE3} line inside a ~~~ fence does not close it" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Re-executes: ${BT}npm test -- a${BT}
+
+${FENCE4}
+${FENCE3}
+Re-executes: ${BT}rm -rf build${BT}
+${FENCE4}")"
+expect_eq "brief-lib an unbalanced ${FENCE3} line before the only real line still lifts it (I2 case D)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "${FENCE3}
+some example
+Re-executes: ${BT}npm test -- a${BT}")"
+expect_eq "brief-lib a contract indented four spaces still lifts its only Re-executes: line (I2 case E)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "Task:
+    Files: hooks/a.sh
+    Suites: a.test.sh
+    Re-executes: ${BT}npm test -- a${BT}")"
+expect_eq "brief-lib a tab-indented only Re-executes: line still lifts (I2 case H)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "	Re-executes: ${BT}npm test -- a${BT}")"
+# wave-22 T15 (critic-f9c2c8d N1; auditor finding; ruling A-orch-13): a label whose every hit sits
+# in a code block, or a brief whose fences end unbalanced, lifts the UNION of ALL its hits. A
+# first-hit fallback silently dropped every run after the first. Accepted: a fenced example lifts
+# beside the real runs in those malformed shapes (visible on the roster row; a dropped run is not).
+expect_eq "brief-lib N1 case M: unbalanced ${FENCE3}, real line, fenced example — the real run is never dropped" \
+  "re_executes=${BT}npm test -- a${BT} ${BT}npm test -- example${BT}" \
+  "$(lift_runs "${FENCE3}
+Re-executes: ${BT}npm test -- a${BT}
+
+${FENCE3}
+Re-executes: ${BT}npm test -- example${BT}
+${FENCE3}")"
+expect_eq "brief-lib P1: an indented two-run contract lifts both runs" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT}" \
+  "$(lift_runs "Task:
+    Re-executes: ${BT}go test ./a${BT}
+    Re-executes: ${BT}go test ./b${BT}")"
+expect_eq "brief-lib P2: an unclosed ${FENCE3} then two real lines lifts both runs" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT}" \
+  "$(lift_runs "${FENCE3}
+Re-executes: ${BT}go test ./a${BT}
+Re-executes: ${BT}go test ./b${BT}")"
+expect_eq "brief-lib P3: real line, an unclosed ${FENCE3}, real line lifts both runs" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT}" \
+  "$(lift_runs "Re-executes: ${BT}go test ./a${BT}
+${FENCE3}
+Re-executes: ${BT}go test ./b${BT}")"
+_p5=$(bash -c '. "$1" || exit 9; lift_contract_fields "$3" "$2"' _ "$BRIEF_LIB" auditor "Task:
+    Re-executes: ${BT}go test ./a${BT}
+    Re-executes: ${BT}go test ./b${BT}
+    Re-executes: ${BT}go test ./c${BT}
+    Re-executes: ${BT}go test ./d${BT}")
+expect_contains "brief-lib P5: a four-run indented auditor contract keeps three runs" \
+  "re_executes=${BT}go test ./a${BT} ${BT}go test ./b${BT} ${BT}go test ./c${BT}" "$_p5"
+expect_contains "brief-lib …and the cap finding fires, naming ./d as dropped" "go test ./d" "$(printf '%s\n' "$_p5" | grep '^re_executes_dropped=')"
+# PINS of the accepted trade (A-T15.2), not goals: both read as they did at 12574e2.
+expect_eq "brief-lib PIN (case K): a brief whose only Re-executes: line is a balanced fenced example lifts it" \
+  "re_executes=${BT}npm test -- example${BT}" \
+  "$(lift_runs "${FENCE3}
+Re-executes: ${BT}npm test -- example${BT}
+${FENCE3}")"
+expect_eq "brief-lib PIN (case L): a fenced example before a wholly indented real contract lifts both, the real run is not dropped" \
+  "re_executes=${BT}npm test -- example${BT} ${BT}npm test -- a${BT}" \
+  "$(lift_runs "${FENCE3}
+Re-executes: ${BT}npm test -- example${BT}
+${FENCE3}
+    Re-executes: ${BT}npm test -- a${BT}")"
+BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh
+Re-executes: ${BT}go test ./a${BT}")
+expect_contains "brief-lib Files: + Re-executes: with no impact command is still refused (AC-3.1)" "rc=1" "$BV"
+FIRSTFIX=$(printf '%s\n' "$BV" | awk '/^Fix:/{f=1} f{print} /^$/{if(f)exit}')
+expect_contains "brief-lib …the first Fix: block names Suites: none" "Suites: none" "$FIRSTFIX"
+expect_contains "brief-lib …beside the brief's Re-executes:" "Re-executes:" "$FIRSTFIX"
+expect_contains "brief-lib …the two existing remedies follow" "impact-command: bash tests/lib/impact.sh" "$BV"
+expect_contains "brief-lib …and the SHORT fix names Suites: none beside Re-executes: (C3)" \
+  "fix: Suites: none beside Re-executes:" "$BV"
+BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
+expect_contains "brief-lib …no runs declared: the short fix is still the impact-command one" \
+  "fix: set impact-command in config.yaml" "$BV"
+BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh")
+IFS= read -r -d '' BV_PIN <<'PIN_EOF' || true
+finding: no impact command is configured here
+fix: set impact-command in config.yaml
+`Files:` states which paths the task will touch. Turning that into the set of
+suites the agent may run is the tree's job, and this repository has not named the
+command that asks it.
+
+Fix: name the closed set in the brief instead —
+    Suites: tests/one.test.sh, tests/two.test.sh
+
+Or configure the derivation once, in .bionic/config.yaml —
+    impact-command: bash tests/lib/impact.sh
+
+Then retry the dispatch.
+rc=1
+PIN_EOF
+BV_PIN=${BV_PIN%$'\n'}
+expect_eq "brief-lib no Re-executes: leaves the refusal text unchanged, verbatim (AC-3.2)" "$BV_PIN" "$BV"
+# wave-22 T10 (critic C3): on a several-fault brief the detail block is dropped and only the
+# short fix reaches the author — so the short fix must be the one that applies.
+REPO=$(make_repo r22t10c3 yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$REPO/.bionic/config.yaml"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected duration: ~15 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${BT}npx jest --testPathPatterns alpha${BT}" "w22t10c3")"
+expect_eq "brief-lib a missing deliverable AND a missing impact command is refused (C3)" "deny" "$GATE_VERDICT"
+expect_contains "brief-lib …the impact finding's short fix names Suites: none beside Re-executes:" \
+  "no impact command is configured here (Suites: none beside Re-executes:)" "$GATE_REASON"
+expect_absent "brief-lib …and no longer points a Re-executes: brief at impact-command" \
+  "(set impact-command in config.yaml)" "$GATE_REASON"
+# wave-22 T13 (critic-3598752 I1): the ONE-FAULT path. With runs declared and nothing else wrong,
+# the impact finding is the capped user line itself, so its short fix must fit: at 3598752 the
+# line was 102 columns and refuse.sh refused its own call (exit 2) instead of the brief.
+REPO=$(make_repo r22t13one yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$REPO/.bionic/config.yaml"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: $REPO/out.md
+Expected duration: ~15 minutes.
+Progress artifact: .bionic/tmp/p.md
+Cadence: 15 min
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${BT}npx jest --testPathPatterns alpha${BT}" "w22t13one")"
+expect_eq "brief-lib a one-fault Re-executes: brief with no impact command is DENIED, not a self-refusal (I1)" \
+  "deny" "$GATE_VERDICT"
+expect_eq "brief-lib …its user line is the impact refusal, short fix and all" \
+  "bionic: dispatch refused — no impact command is configured here (Suites: none beside Re-executes:)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_true "brief-lib …within 100 columns" \
+  test "$(bionic_cols "bionic: dispatch refused — no impact command is configured here (Suites: none beside Re-executes:)")" -le 100
+# THE DRIVER SWEEP SEES IT TOO. The AC-E1.3 readout runs before this section, so the sweep's
+# self-refusal flag (run_gate) is read here for every drive up to this one.
+expect_absent "brief-lib …and the driver sweep flagged no refuse.sh self-refusal" \
+  "refuse-call refused" "${DP_E1_BAD_SHAPE:-}"
+# wave-22 T13 (critic-3598752 I2, dp3.sh/armind.sh): the REAL gate on a brief whose whole contract is
+# indented four spaces. The gate admits it, the row it journals carries the declared run, and the
+# budget arm admits that run once the recorder identifies the agent. At 3598752 the row carried
+# `re_executes=` empty and the arm refused the run the brief declared.
+REPO=$(make_repo r22t13ind yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$REPO/.bionic/config.yaml"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it. The contract:
+
+    Expected artifact: $REPO/out.md
+    Expected duration: ~15 minutes.
+    Progress artifact: .bionic/tmp/p.md
+    Cadence: 15 min
+    Files: payload/scripts/lib/widget.sh
+    Suites: none
+    Re-executes: ${BT}npx jest --testPathPatterns alpha${BT}" "w22t13ind")"
+expect_eq "brief-lib an indented contract with Suites: none is admitted (I2 real gate)" "allow" "$GATE_VERDICT"
+T13_ROW=$(grep -F '|name=w22t13ind|' "$(roster_path "$REPO" "$SID_A")" | tail -1)
+expect_eq "brief-lib …its roster row carries the declared run" \
+  "${BT}npx jest --testPathPatterns alpha${BT}" "$(roster_field "$T13_ROW" re_executes)"
+T13_ID="aw13-4000000000000001"
+printf '{}\n' > "$REPO/t13-transcript.jsonl"
+jq -n --arg s "$SID_A" --arg c "$REPO" --arg a "$T13_ID" \
+  '{session_id:$s, transcript_path:($c+"/t13-transcript.jsonl"), cwd:$c, agent_id:$a,
+    agent_type:"w22t13ind", hook_event_name:"SubagentStart"}' \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "${BIONIC_HOOKS_DIR}/execution-recorder.sh" >/dev/null 2>&1
+expect_contains "brief-lib …the recorder identifies it, carrying the run forward" \
+  "${BT}npx jest --testPathPatterns alpha${BT}" \
+  "$(roster_field "$(grep -F "|agent_id=$T13_ID|" "$(roster_path "$REPO" "$SID_A")" | tail -1)" re_executes)"
+t13_arm() {  # <command> -> the budget arm's exit status for the identified agent
+  jq -n --arg s "$SID_A" --arg c "$REPO" --arg m "$1" --arg a "$T13_ID" \
+    '{session_id:$s, transcript_path:($c+"/t13-transcript.jsonl"), cwd:$c,
+      permission_mode:"bypassPermissions", hook_event_name:"PreToolUse", tool_name:"Bash",
+      tool_input:{command:$m}, tool_use_id:"toolu_t13", agent_id:$a, agent_type:"bionic:implementor"}' \
+    | env -u CLAUDE_PROJECT_DIR HOME="$REPO" CLAUDE_CODE_SESSION_ID="$SID_A" \
+        bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" >/dev/null 2>&1
+  echo "$?"
+}
+expect_eq "brief-lib …and the budget arm ADMITS the declared run" "0" "$(t13_arm 'npx jest --testPathPatterns alpha')"
+expect_eq "brief-lib …while still refusing an undeclared one (the arm is live)" "2" \
+  "$(t13_arm 'npx jest --testPathPatterns undeclared')"
 
 printf '#!/bin/bash\nprintf "beta.test.sh\\tpath-ref\\nalpha.test.sh\\tself\\nalpha.test.sh\\tpath-ref\\n"\n' > "$BRIEF_CONF/stub-impact.sh"
 BV=$(brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")

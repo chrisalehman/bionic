@@ -3,6 +3,51 @@
 Earlier releases are recorded as git tags (`v1.4.3` … `v1.8.3`) rather than in this file,
 which starts at 1.8.4.
 
+## 1.8.9 — 2026-10-01
+
+A contract widened with `amend` or `extend` is now the contract every wall reads, on a
+teammate's roster as on an async one, and every `Re-executes:` line of a brief counts.
+
+- REQ-1: The row `amend` or `extend` writes now carries the agent's latest identified self:
+  its `status=`, `agent_id=` and `teammate_id=` come from the name's latest row that carries
+  an id within the same dispatch cycle, so a teammate whose latest row is the recorder's
+  id-less `confirmed` row is no longer widened invisibly. The suite-budget wall's pick for an
+  id is one function, `roster_row_for_id` in `payload/scripts/lib/roster.sh`, called by the
+  budget and commit-role arms in `walls.sh`, and `poker: amended` checks itself against it:
+  the success line prints only when the wall's pick is the new row, otherwise one line names
+  the row the wall reads and the verb exits 1; before the agent is identified it says the
+  walls read the row once the agent is. The six comments that stated the old premise cite
+  the one rule. Agreement tests: `tests/cross-gate-agreement.test.sh` §AM1–AM4 and AM6
+  (amend, then the budget arm, a restart, the stop wall, `observe` and the tick fed one roster),
+  `tests/roster.test.sh` R11–R12 and `tests/session-poker.test.sh` §29–§30.
+- REQ-1, restarts: A restart after the orchestrator has acked a landing now re-identifies
+  from the id's latest started row, so the amended run survives it, and keeps the teammate's
+  `teammate_id` when that row has none (`hooks/execution-recorder.sh`; §AM5 and AM5b and the
+  recorder suite's restart-after-ack cases). A plain restart's `duplicate-start` row copies
+  the amended row as before. This closes the carry-over for async agents too.
+- REQ-2: Dispatch lifts the union of every `Re-executes:` line's runs onto the roster row,
+  de-duplicated in order, and the three-run cap counts across lines. A line inside a ``` or
+  ~~~ fence (only its own character closes it) or an indented code block is an example and is
+  not lifted. In a brief whose fences do not balance, or whose every `Re-executes:` line sits
+  in a code block, every such line is read as a declaration, so a fenced example may lift
+  beside the real runs. That trade is accepted: an over-admitted run shows on the roster row
+  and can refuse the brief, while a dropped real run shows nowhere. A single multi-run line
+  reads as in 1.8.8 (`payload/scripts/lib/brief.sh` `allhits`; the brief-lib cases in
+  `tests/dispatch-preflight.test.sh`).
+- REQ-3: A brief with runs, no `Suites:` and no impact command configured is refused with
+  the fix `Suites: none beside Re-executes:`, 98 columns so the refusal fits its own cap, on the one-line refusal and first among the
+  Fix blocks; a brief with no runs is refused as in 1.8.8 (`brief.sh`; the one-fault and
+  two-fault gate cases in `tests/dispatch-preflight.test.sh`).
+- REQ-4: When a declared run is too long for the budget refusal's line, the count reads
+  `N declared run(s) (printed below)`, not `N run(s)`; the full command still prints after
+  `On the budget:`, and a refusal whose run fits is unchanged (`walls.sh` `_budget_wire_list`;
+  `tests/bash-walls.test.sh` §15).
+
+One rule for a successor row (ADR-039): the identity is cycle-scoped, so a re-dispatched
+name never inherits the previous agent's id (Δ1), and the recorder changes one line where
+the design had left it untouched (D4 Δ2), because the `identified` successor was skipped by
+the restart-after-ack name join.
+
 ## 1.8.8 — 2026-10-01
 
 - REQ-1: The cron-ritual stop gate now blocks once and is discharged by the next

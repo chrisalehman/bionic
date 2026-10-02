@@ -9622,11 +9622,11 @@ expect_eq "S13.4 mutation: …and stays green on the real tree" "0" \
 # every named suite in the fleet.
 expect_eq "S13.5 the guard reads the key the wall writes" "0" \
   "$(grep -qF 'suites_allowed=' "$S13_BG" && echo 0 || echo 1)"
-S13_BG_OFFSET=$(grep -oE 'substr\(\$i, 16\)' "$S13_BG" | head -1)
-expect_eq "S13.5 …substr past 'suites_allowed=' is 16, the character after the equals" \
-  "substr(\$i, 16)" "$S13_BG_OFFSET"
-expect_eq "S13.5 …which is what awk needs for a key of this length" \
-  "16" "$(( $(printf '%s' 'suites_allowed=' | wc -c | tr -d ' ') + 1 ))"
+# DROPPED (wave-22 T9, review fix candidate 7; critic Scope). A second row here counted the
+# source text of the arm's prefix strip (`${_bseg#suites_allowed=}`). It pinned how the arm
+# spells the read, not what the arm does: a rename of the strip's variable turned it red with
+# no change in behaviour. That the arm reads the key the wall writes is proven behaviourally,
+# by bash-walls §15 and by §AM2 here (an amended `suites_allowed=` is admitted by the arm).
 
 # ============================================================
 # --- S18 — landing-gate.sh reconciles the diff against Files:, once (spec AC-22) ---
@@ -12706,4 +12706,309 @@ cgl_case ""          8192 yes "evidence launch status " 3
 cgl_case "-hold"     512  yes "evidence launch status " 3
 cgl_case "-noroster" 8192 no  "evidence status " 2
 
+
+# ============================================================
+section "AM — an AMENDED contract on a TEAMMATE roster reaches every reader keyed on the agent id (epic-23 wave-22 T2; REQ-1 AC-1.1, AC-1.2, AC-1.4, AC-1.5; D1)"
+# ============================================================
+#
+# THE DEFECT (wave-22 seed). A teammate's roster ends `intended` (no id) -> `identified` (the
+# id, learned at SubagentStart) -> `confirmed` with `agent_id=` EMPTY (the recorder's copy of
+# the launch row, written after the spawn returns). `session-poker.sh amend` used to copy the
+# NAME's latest row, empty id and all, so the budget arm of hooks/bash-walls.sh, which keys
+# on the payload's `agent_id`, never saw the widened contract and refused the added run right
+# after `poker: amended` printed. T1 made the successor carry the identity triple of the
+# agent's latest id-bearing row (same dispatch cycle), and made the arm and the verb read ONE
+# pick, `roster_row_for_id`.
+#
+# THIS SECTION IS THE CHAIN, not the unit. tests/roster.test.sh R11 and tests/session-poker.test.sh
+# 30t pin the helper and the verb; what no per-script suite asserts is that the verb's ROW is
+# the one every OTHER reader of the id then reads. Each case below names the components it
+# chains, and builds ONE roster of its own:
+#   AM1  poker amend  ->  bash-walls budget arm (re_executes=)
+#   AM2  poker amend  ->  bash-walls budget arm (suites_allowed=)
+#   AM3  poker amend  ->  execution-recorder SubagentStart  ->  bash-walls budget arm
+#   AM4  poker amend  ->  stop-guard (TaskStop by id), stop-check observation (by id), poker tick
+#   AM5  poker amend  ->  sweeper ack  ->  execution-recorder SubagentStart (restart)  ->  bash-walls budget arm
+#   AM5b poker amend  ->  recorder start (open)  ->  ack  ->  recorder start (restart)  ->  budget arm
+#   AM6  async roster (confirmed WITH the id)  ->  poker amend  ->  bash-walls budget arm
+# The roster's shape is T1's §30 teammate fixture (tests/session-poker.test.sh `s30_teammate`:
+# the identified row, then a `confirmed` row with an empty id, one tool_use_id), preceded by
+# the launch's `intended` row. Rows are written by roster_row_fixture, the writer's own.
+#
+# THE REFUSAL HALF IS THE BASE PIN. Every case first drives the arm over the roster as the
+# recorder left it, BEFORE the amend: it must refuse the added run naming only the original.
+# That is the defect's own observable, and it is what makes each ALLOW below a change rather
+# than a wall that never refused anything.
+
+# ITS OWN SESSION ID. The tick finds the session transcript by scanning the config dir for
+# `<session>.jsonl` across every project, so under `$SID_A` it could land on the transcript a
+# much earlier section planted for the same id, and answer from THAT section's live set.
+AM_SID="3b9e5a71-6d20-4c48-9e1f-5a7c0d4b8e12"
+AM_ID="aw1-3000000000000001"
+AM_RUN_A="npx jest --testPathPatterns gadget"
+AM_RUN_B="npx jest --testPathPatterns widget"
+AM_RE_A='`'"$AM_RUN_A"'`'
+# A declared run is stored with its author marks, backticks kept (T1 A-T1.4): an unmarked run
+# is prose to the arm, not a declaration.
+
+am_world() {  # <label> -> repo path (a teammate roster for w1, session $AM_SID, engaged)
+  local r ro
+  r=$(new_repo "am-$1")
+  arm_patrol "$r" "$AM_SID"; engage_sids "$r" "$AM_SID"
+  ro="$r/.bionic/tmp/roster-$AM_SID.state"
+  roster_header > "$ro"
+  roster_row_fixture status=intended session="$AM_SID" name=w1 agent_id= \
+    launched_at=2026-09-01T00:00:00Z subagent_type=bionic:implementor source=declared \
+    deliverable="$r/never-yet.md" duration="2 hours" files=hooks/a.sh \
+    suites_allowed=a.test.sh suites_source=declared re_executes="$AM_RE_A" \
+    tool_use_id=toolu_am_w1 >> "$ro"
+  roster_row_fixture status=identified session="$AM_SID" name=w1 agent_id="$AM_ID" \
+    launched_at=2026-09-01T00:00:00Z subagent_type=bionic:implementor source=declared \
+    deliverable="$r/never-yet.md" duration="2 hours" files=hooks/a.sh \
+    suites_allowed=a.test.sh suites_source=declared re_executes="$AM_RE_A" \
+    teammate_id=w1@session-8a41c2e0 tool_use_id=toolu_am_w1 >> "$ro"
+  roster_row_fixture status=confirmed session="$AM_SID" name=w1 agent_id= \
+    launched_at=2026-09-01T00:00:00Z subagent_type=bionic:implementor source=declared \
+    deliverable="$r/never-yet.md" duration="2 hours" files=hooks/a.sh \
+    suites_allowed=a.test.sh suites_source=declared re_executes="$AM_RE_A" \
+    teammate_id=w1@session-8a41c2e0 tool_use_id=toolu_am_w1 >> "$ro"
+  printf '%s' "$r"
+}
+# The verb. Sets AM_OUT and AM_RC in this shell (never inside `$( )`, which would take both).
+am_amend() {  # <repo> <args…>
+  local r="$1"; shift
+  AM_OUT=$( cd "$r" && env CLAUDE_CODE_SESSION_ID="$AM_SID" CLAUDE_CONFIG_DIR="$r/no-such-config" \
+              "${CGC_ENV[@]}" bash "$PARTY_PK_S" amend "$@" 2>&1 )
+  AM_RC=$?
+}
+# THE BUDGET ARM: the PreToolUse Bash wall, payload carrying `agent_id`. Sets AM_ARM_ST and
+# AM_ARM_OUT (the wall's whole channel).
+am_arm() {  # <repo> <agent-id> <command>
+  AM_ARM_OUT=$(mk_bash_payload "$AM_SID" "$1/am-transcript.jsonl" "$1" "$3" \
+      | jq -c --arg a "$2" '. + {agent_id:$a, agent_type:"bionic:implementor"}' \
+      | env -u CLAUDE_PROJECT_DIR HOME="$1" CLAUDE_CODE_SESSION_ID="$AM_SID" \
+          bash "$PARTY_EG" 2>&1)
+  AM_ARM_ST=$?
+}
+am_last() { grep -F "|name=w1|" "$1/.bionic/tmp/roster-$AM_SID.state" | tail -1; }
+am_field() { printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-; }
+
+am_budget_line() { printf '%s\n' "$1" | grep '^On the budget:' | head -1; }
+# The row a reader keyed on the id reads: the id's LAST row (the budget arm's pick, no status
+# filter) and the id's last confirmed|identified row (stop-guard.sh's and stop-check.sh's by-id
+# pick, :507-510 / :301-305 at 12574e2).
+am_idpick()  { grep -F "|agent_id=$AM_ID|" "$1/.bionic/tmp/roster-$AM_SID.state" | tail -1; }
+am_idpick_ci() { grep -F "|agent_id=$AM_ID|" "$1/.bionic/tmp/roster-$AM_SID.state" | grep -E '\|status=(confirmed|identified)\|' | tail -1; }
+
+# ---- AM1: amend --reexec+ -> the budget arm admits the added run, and refused it before ----
+AM_R1=$(am_world 1)
+am_arm "$AM_R1" "$AM_ID" "$AM_RUN_B"
+expect_eq "AM1 [poker amend -> bash-walls budget arm] BEFORE the amend the arm refuses the added run (the base pin, RED half)" "2" "$AM_ARM_ST"
+expect_contains "AM1 …the refusal's budget names the original run" "$AM_RUN_A" "$(am_budget_line "$AM_ARM_OUT")"
+expect_absent "AM1 …and ONLY the original: the added run is not on the budget it names" "widget" "$(am_budget_line "$AM_ARM_OUT")"
+am_arm "$AM_R1" "$AM_ID" "$AM_RUN_A"
+expect_eq "AM1 …while the original run is admitted (the arm reads the declaration, it is not refusing everything)" "0" "$AM_ARM_ST"
+am_amend "$AM_R1" w1 --reexec+ "$AM_RUN_B" --reason x
+expect_eq "AM1 the amend exits 0" "0" "$AM_RC"
+expect_contains "AM1 …printing its success line" "poker: amended — w1:" "$AM_OUT"
+am_arm "$AM_R1" "$AM_ID" "$AM_RUN_B"
+expect_eq "AM1 AFTER the amend the arm ADMITS the added run (AC-1.1)" "0" "$AM_ARM_ST"
+am_arm "$AM_R1" "$AM_ID" "$AM_RUN_A"
+expect_eq "AM1 …and still admits the original run: an amend widens, it does not replace" "0" "$AM_ARM_ST"
+am_arm "$AM_R1" "$AM_ID" "npx jest --testPathPatterns undeclared"
+expect_eq "AM1 …and still refuses a run nobody declared: the arm was not switched off" "2" "$AM_ARM_ST"
+expect_eq "AM1 the name's latest row carries the agent's id (the successor is not an empty-id copy)" "$AM_ID" "$(am_field "$(am_last "$AM_R1")" agent_id)"
+expect_eq "AM1 …and the name's latest row IS the id's latest row: the verb and the wall read one row" \
+  "$(am_last "$AM_R1")" "$(am_idpick "$AM_R1")"
+
+# ---- AM2: amend --suites+ -> the budget arm admits the added suite (AC-1.2, suites half) ----
+AM_R2=$(am_world 2)
+am_arm "$AM_R2" "$AM_ID" "bash tests/s.test.sh"
+expect_eq "AM2 [poker amend -> bash-walls budget arm] BEFORE the amend the arm refuses the added suite" "2" "$AM_ARM_ST"
+expect_absent "AM2 …and the budget it names does not carry the added suite" "s.test.sh" "$(am_budget_line "$AM_ARM_OUT")"
+am_amend "$AM_R2" w1 --suites+ tests/s.test.sh --reason x
+expect_eq "AM2 the amend exits 0" "0" "$AM_RC"
+am_arm "$AM_R2" "$AM_ID" "bash tests/s.test.sh"
+expect_eq "AM2 AFTER the amend the arm ADMITS the added suite (AC-1.2)" "0" "$AM_ARM_ST"
+am_arm "$AM_R2" "$AM_ID" "bash tests/a.test.sh"
+expect_eq "AM2 …and still admits the suite the brief declared" "0" "$AM_ARM_ST"
+am_arm "$AM_R2" "$AM_ID" "bash tests/z.test.sh"
+expect_eq "AM2 …and still refuses a suite nobody declared" "2" "$AM_ARM_ST"
+expect_eq "AM2 …and the name's latest row IS the id's latest row" "$(am_last "$AM_R2")" "$(am_idpick "$AM_R2")"
+
+# ---- AM3: amend, then the recorder's SubagentStart for the same teammate -> the restart row
+# carries the amended contract, and the arm still admits the added run (AC-1.4) ----
+# `AM_R1` is AM1's world, amended with run B. The recorder takes its SubagentStart payload for
+# the same teammate (name in `agent_type`, the transcript-form id in `agent_id`, capture probe
+# §3-C) and, the id being identified already with an open contract, journals it a duplicate.
+AM_TR1="$AM_R1/am-transcript.jsonl"
+printf '{}\n' > "$AM_TR1"
+AM_N3=$(grep -c '|name=w1|' "$AM_R1/.bionic/tmp/roster-$AM_SID.state")
+mk_start_payload "$AM_SID" "$AM_TR1" "$AM_R1" w1 "$AM_ID" \
+  | env CLAUDE_CODE_SESSION_ID="$AM_SID" bash "$PARTY_ER" >/dev/null 2>&1
+expect_eq "AM3 [poker amend -> execution-recorder SubagentStart -> bash-walls budget arm] the restart wrote ONE row" \
+  "$((AM_N3 + 1))" "$(grep -c '|name=w1|' "$AM_R1/.bionic/tmp/roster-$AM_SID.state")"
+AM_L3=$(am_idpick "$AM_R1")
+expect_eq "AM3 …the id's last row is the duplicate-start" "duplicate-start" "$(am_field "$AM_L3" status)"
+expect_contains "AM3 …carrying the amended run, not only the original (AC-1.4)" "$AM_RUN_B" "$(am_field "$AM_L3" re_executes)"
+expect_contains "AM3 …and the original beside it" "$AM_RUN_A" "$(am_field "$AM_L3" re_executes)"
+expect_eq "AM3 …and it is the name's latest row too" "$(am_last "$AM_R1")" "$AM_L3"
+am_arm "$AM_R1" "$AM_ID" "$AM_RUN_B"
+expect_eq "AM3 the arm still ADMITS the added run after the restart" "0" "$AM_ARM_ST"
+am_arm "$AM_R1" "$AM_ID" "npx jest --testPathPatterns undeclared"
+expect_eq "AM3 …and still refuses an undeclared run" "2" "$AM_ARM_ST"
+
+# ---- AM4: amend -> the stop wall and the observation typed by the id; the tick (AC-1.5) ----
+#
+# WHAT THEY PRINT. Neither hooks/stop-guard.sh nor hooks/stop-check.sh prints an agent's
+# `re_executes=`: the contract they show is the deliverable, the progress artifact and the
+# cadence, none of which an amend changes. So what can disagree on a teammate roster, and
+# what this case pins, is WHICH AGENT and WHICH ROW each reader resolves when typed by the id
+# (a non-empty id, found in the roster, the contract read from the roster) and that the row
+# their by-id rule picks (the id's last confirmed|identified row) IS the amended one, which the
+# first pair of assertions states directly. The tick's reading is the liveness read off the
+# name's latest row: an empty id there reads no transcript at all and the row is never named
+# quiet, a non-empty one finds the agent's log and names it.
+AM_R4=$(am_world 4)
+AM_BEFORE4=$(am_idpick_ci "$AM_R4")
+am_amend "$AM_R4" w1 --reexec+ "$AM_RUN_B" --reason x
+expect_eq "AM4 [poker amend -> stop-guard, stop-check, tick] the amend exits 0" "0" "$AM_RC"
+expect_absent "AM4 the by-id pick BEFORE the amend carries only the original run" "widget" "$AM_BEFORE4"
+expect_contains "AM4 …and AFTER it the by-id pick (confirmed|identified) carries the added run" "$AM_RUN_B" "$(am_idpick_ci "$AM_R4")"
+expect_eq "AM4 …and that pick is the name's latest row" "$(am_last "$AM_R4")" "$(am_idpick_ci "$AM_R4")"
+AM_SLUG=$(printf '%s' "$AM_R4" | sed 's/[^a-zA-Z0-9]/-/g')
+AM_PROJ="$CLAUDE_CONFIG_DIR/projects/$AM_SLUG"
+AM_SUB="$AM_PROJ/$AM_SID/subagents"
+mkdir -p "$AM_SUB"
+AM_TR4="$AM_PROJ/$AM_SID.jsonl"
+printf '{"name":"w1","agentType":"implementor","description":"fixture","model":"opus"}' \
+  > "$AM_SUB/agent-$AM_ID.meta.json"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' \
+  > "$AM_SUB/agent-$AM_ID.jsonl"
+cg_live "$AM_TR4" w1
+# The log is FRESH here: the stop wall's answer is then a refusal that names the agent and
+# prints the contract it read, which is the channel this case reads.
+AM_OBS=$( cd "$AM_R4" && env CLAUDE_CODE_SESSION_ID="$AM_SID" bash "$OBSERVE" "$AM_ID" 2>&1 )
+expect_contains "AM4 the observation typed by the id resolves to that id" "Resolved:      $AM_ID" "$AM_OBS"
+expect_contains "AM4 …reads the contract from the roster, by the id" "Contract (roster):  deliverables=$AM_R4/never-yet.md" "$AM_OBS"
+expect_contains "AM4 …and publishes a non-empty target on its machine line" "|target=$AM_ID|" "$AM_OBS"
+expect_contains "AM4 …sourcing the deliverable from the roster" "|deliverable_source=roster|" "$AM_OBS"
+AM_SG=$(mk_stop_payload "$AM_SID" "$AM_TR4" "$AM_R4" "$AM_ID" | bash "$PARTY_SG" 2>&1); AM_SG_RC=$?
+expect_eq "AM4 the stop wall typed by the id refuses a stop of a working agent" "2" "$AM_SG_RC"
+expect_contains "AM4 …naming the agent by its non-empty id" "'$AM_ID' ($AM_ID) is ALIVE" "$AM_SG"
+expect_contains "AM4 …and printing the roster's contract for it" "deliverable:  pending — $AM_R4/never-yet.md" "$AM_SG"
+# THE TICK, over the same roster with the agent's log aged past its cadence. Its reading is
+# `row_quiet` on the name's latest row; the assertion is on what it READ (the transcript of
+# THAT id, named in the quiet line), not on the decision line.
+# The recorded ListAgents answer is taken OFF the session transcript first: with a fresh live
+# answer that does not list the agent as running, the tick files the row under GONE and never
+# reads its liveness, which is a different arm from the one this case is about (and which of
+# the two a run reaches depended on what earlier sections left in the environment).
+printf '{}\n' > "$AM_TR4"
+touch -t 202601010000 "$AM_SUB/agent-$AM_ID.jsonl"
+AM_TICK=$( cd "$AM_R4" && env CLAUDE_CODE_SESSION_ID="$AM_SID" CLAUDE_CONFIG_DIR="$AM_R4/no-such-config" \
+             CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" "${CGC_ENV[@]}" bash "$PARTY_PK_S" tick 2>&1 )
+expect_contains "AM4 the tick read the agent's transcript off the name's latest row (a non-empty id)" \
+  "w1: no line for " "$AM_TICK"
+expect_contains "AM4 …naming the log of THAT id" "agent-$AM_ID.jsonl" "$AM_TICK"
+
+# ---- AM5: amend, ACK, then the recorder's SubagentStart -> the RE-IDENTIFIED row carries the
+# amended contract and the arm admits the added run (epic-23 wave-22 T9; spec D4 Δ2; critic
+# C1; ADR-039 Δ2) ----
+#
+# THE CASE AM3 DOES NOT REACH. AM3's start lands while the name is OPEN, so the recorder
+# journals a `duplicate-start` copied verbatim from the id's last row. Here the orchestrator
+# acks the landing FIRST and then SendMessages the writer for a fix-up: the name reads CLOSED,
+# the recorder takes the restart-after-ack path and re-identifies the id. Its two joins accept
+# `intended|confirmed` only, and on a teammate roster neither of those rows is the amended one:
+# the id join finds no row (a teammate's intended and confirmed rows carry no id) and the name
+# join takes the recorder's ORIGINAL `confirmed` row. At b2f70c1 the re-identified row then
+# carried run A only, became the id's last row, and the budget arm refused run B again. The
+# restart now re-identifies from the id's latest STARTED row (`DUP_PRIOR_BEFORE`).
+am_ack() {  # <repo> <at> — the sweeper ledger's ack line for w1, in its writer's shape
+  local le="$1/.bionic/tmp/sweeper-$AM_SID.state"
+  [ -f "$le" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$le"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=w1|by=patrol|reason=landed\n' \
+    "$2" "$AM_SID" >> "$le"
+}
+am_start() {  # <repo> — the teammate's SubagentStart: the name in agent_type, the transcript id
+  printf '{}\n' > "$1/am-transcript.jsonl"
+  mk_start_payload "$AM_SID" "$1/am-transcript.jsonl" "$1" w1 "$AM_ID" \
+    | env CLAUDE_CODE_SESSION_ID="$AM_SID" bash "$PARTY_ER" >/dev/null 2>&1
+}
+am_open() {  # <repo> -> roster_open_names for $AM_SID, sourced in a private subshell
+  bash -c '. "$1"; shift; roster_open_names "$@"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" \
+    "$1/.bionic/tmp/roster-$AM_SID.state" "$1/.bionic/tmp/sweeper-$AM_SID.state" "$AM_SID" 2>/dev/null
+}
+AM_R5=$(am_world 5)
+am_amend "$AM_R5" w1 --reexec+ "$AM_RUN_B" --reason x
+expect_eq "AM5 [poker amend -> sweeper ack -> execution-recorder SubagentStart -> bash-walls budget arm] the amend exits 0" "0" "$AM_RC"
+am_arm "$AM_R5" "$AM_ID" "$AM_RUN_B"
+expect_eq "AM5 …the arm admits the added run before the ack (the amend reached it)" "0" "$AM_ARM_ST"
+am_ack "$AM_R5" 2026-09-01T01:00:00Z
+expect_absent "AM5 …the ack closes the name (the precondition of the restart path)" "w1" "$(am_open "$AM_R5")"
+AM_N5=$(grep -c '|name=w1|' "$AM_R5/.bionic/tmp/roster-$AM_SID.state")
+am_start "$AM_R5"
+expect_eq "AM5 the restart after the ack wrote ONE row" \
+  "$((AM_N5 + 1))" "$(grep -c '|name=w1|' "$AM_R5/.bionic/tmp/roster-$AM_SID.state")"
+AM_L5=$(am_idpick "$AM_R5")
+expect_eq "AM5 …the id's last row is a fresh identification, not a duplicate" "identified" "$(am_field "$AM_L5" status)"
+expect_contains "AM5 …stamped as a restart (restarted_at), so the name reads open again" "restarted_at=" "$AM_L5"
+expect_contains "AM5 …and open it reads" "w1" "$(am_open "$AM_R5")"
+expect_contains "AM5 …the re-identified row carries the AMENDED run (critic C1: it carried run A only)" "$AM_RUN_B" "$(am_field "$AM_L5" re_executes)"
+expect_contains "AM5 …and the original beside it" "$AM_RUN_A" "$(am_field "$AM_L5" re_executes)"
+am_arm "$AM_R5" "$AM_ID" "$AM_RUN_B"
+expect_eq "AM5 the arm ADMITS the added run after the ack and the restart" "0" "$AM_ARM_ST"
+am_arm "$AM_R5" "$AM_ID" "npx jest --testPathPatterns undeclared"
+expect_eq "AM5 …and still refuses an undeclared run" "2" "$AM_ARM_ST"
+
+# ---- AM5b: the critic's c2.sh order — amend, a restart while OPEN (duplicate-start), THEN the
+# ack, then a second restart. The id's latest started row is now the duplicate-start, and it is
+# the one the re-identification copies (its status rewritten to identified). ----
+AM_R5B=$(am_world 5b)
+am_amend "$AM_R5B" w1 --reexec+ "$AM_RUN_B" --reason x
+expect_eq "AM5b [poker amend -> recorder start (open) -> ack -> recorder start -> budget arm] the amend exits 0" "0" "$AM_RC"
+am_start "$AM_R5B"
+expect_eq "AM5b …the start while open is journalled a duplicate" "duplicate-start" "$(am_field "$(am_idpick "$AM_R5B")" status)"
+am_arm "$AM_R5B" "$AM_ID" "$AM_RUN_B"
+expect_eq "AM5b …and the arm admits the added run after it" "0" "$AM_ARM_ST"
+am_ack "$AM_R5B" 2026-09-01T01:00:00Z
+am_start "$AM_R5B"
+AM_L5B=$(am_idpick "$AM_R5B")
+expect_eq "AM5b the restart after the ack re-identifies the id" "identified" "$(am_field "$AM_L5B" status)"
+expect_contains "AM5b …stamped as a restart" "restarted_at=" "$AM_L5B"
+expect_contains "AM5b …carrying the AMENDED run" "$AM_RUN_B" "$(am_field "$AM_L5B" re_executes)"
+am_arm "$AM_R5B" "$AM_ID" "$AM_RUN_B"
+expect_eq "AM5b the arm ADMITS the added run after the second restart (critic c2.sh: refused at b2f70c1)" "0" "$AM_ARM_ST"
+
+# ---- AM6: the ASYNC shape — intended (no id), then ARM 2's `confirmed` WITH the id, no
+# identified row yet; amend --reexec+ -> the arm admits the added run (auditor C1, AC-1.3's
+# async half chained into the budget arm). A REGRESSION PIN: the name's latest row is the
+# id-bearing row, so the identity copy is that row itself, at 12574e2 as at b2f70c1. What it
+# guards is an identity source narrowed to `identified` rows, which would leave the async
+# successor without an id. ----
+AM_R6=$(new_repo "am-6")
+arm_patrol "$AM_R6" "$AM_SID"; engage_sids "$AM_R6" "$AM_SID"
+AM_RO6="$AM_R6/.bionic/tmp/roster-$AM_SID.state"
+roster_header > "$AM_RO6"
+roster_row_fixture status=intended session="$AM_SID" name=w1 agent_id= \
+  launched_at=2026-09-01T00:00:00Z subagent_type=bionic:implementor source=declared \
+  deliverable="$AM_R6/never-yet.md" duration="2 hours" files=hooks/a.sh \
+  suites_allowed=a.test.sh suites_source=declared re_executes="$AM_RE_A" \
+  tool_use_id=toolu_am_w1 >> "$AM_RO6"
+roster_row_fixture status=confirmed session="$AM_SID" name=w1 agent_id="$AM_ID" \
+  launched_at=2026-09-01T00:00:00Z subagent_type=bionic:implementor source=declared \
+  deliverable="$AM_R6/never-yet.md" duration="2 hours" files=hooks/a.sh \
+  suites_allowed=a.test.sh suites_source=declared re_executes="$AM_RE_A" \
+  tool_use_id=toolu_am_w1 >> "$AM_RO6"
+am_arm "$AM_R6" "$AM_ID" "$AM_RUN_B"
+expect_eq "AM6 [async: intended -> confirmed(id); poker amend -> bash-walls budget arm] BEFORE the amend the arm refuses the added run" "2" "$AM_ARM_ST"
+am_amend "$AM_R6" w1 --reexec+ "$AM_RUN_B" --reason x
+expect_eq "AM6 the amend exits 0" "0" "$AM_RC"
+expect_eq "AM6 …the successor carries the agent's id" "$AM_ID" "$(am_field "$(am_last "$AM_R6")" agent_id)"
+expect_eq "AM6 …and is the id's latest row" "$(am_last "$AM_R6")" "$(am_idpick "$AM_R6")"
+am_arm "$AM_R6" "$AM_ID" "$AM_RUN_B"
+expect_eq "AM6 AFTER the amend the arm ADMITS the added run (async shape)" "0" "$AM_ARM_ST"
+am_arm "$AM_R6" "$AM_ID" "npx jest --testPathPatterns undeclared"
+expect_eq "AM6 …and still refuses an undeclared run" "2" "$AM_ARM_ST"
 finish

@@ -958,6 +958,37 @@ expect_contains "15a12b: …with the reason placeholder quoted there too" \
 B15_LINE="$(printf '%s\n' "$ERR" | sed -n 's/.*widen it: \(.*\) (main runs it).*/\1/p' | head -1)"
 expect_true "15a12c: …and that line parses as bash too [$B15_LINE]" bash -n -c "$B15_LINE"
 
+# (a3) THE WIRE-LIST COUNT NAMES DECLARATIONS (wave-22 T4; REQ-4, D7, AC-4.1/4.2). When the one
+# declared run does not fit the verdict line's room, the line says what the count counts —
+# `1 declared run (printed below)` — and the full command still prints after `On the budget:`.
+# A fitting run is the command itself, unchanged (the short form, pinned below from a RED run).
+R15W="$(mk_repo budgetwirelongrun)"
+: > "$R15W/.bionic/tmp/roster-$SID.state"
+W15_RUN="pytest tests/unit/test_a_very_long_module_name_that_cannot_fit_on_any_line.py -k widget"
+roster_row_fixture "session=$SID" name=t15wide "agent_id=$ACTOR" \
+  "re_executes=\`$W15_RUN\`" suites_source=declared files= \
+  >> "$R15W/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15W" 'npx jest --testPathPatterns y' "$ACTOR" omit Bash test-runner)"
+expect_status "15a20: an undeclared run against one over-wide declared run is refused" 2 "$ST"
+W15_LINE="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "15a21: …and the allowed clause counts the declaration, naming where the run prints" \
+  "allowed: 1 declared run (printed below)" "$W15_LINE"
+W15_BLOCK="$(printf '%s\n' "$ERR" | sed -n '/On the budget:/,$p')"
+expect_contains "15a22: …and the full command still prints in the On the budget: block" \
+  "$W15_RUN" "$W15_BLOCK"
+expect_absent "15a23: …and the line no longer reads the bare count 'allowed: 1 run'" \
+  "allowed: 1 run" "$W15_LINE"
+# THE SHORT FORM, PINNED VERBATIM (AC-4.2): a declared run that FITS prints as itself; the verdict
+# line below was copied from a RED-time run at a220bd6 and must not change.
+R15S="$(mk_repo budgetwireshortrun)"
+: > "$R15S/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" name=t15short "agent_id=$ACTOR" \
+  "re_executes=\`npm test\`" suites_source=declared files= \
+  >> "$R15S/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15S" 'npx jest --testPathPatterns y' "$ACTOR" omit Bash test-runner)"
+expect_eq "15a24: a fitting declared run keeps the verdict line byte-for-byte" \
+  "bionic: suite-run refused — allowed: \`npm test\` (run only the budgeted suites)" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+
 # (a3) THE NAME AS THE ROSTER CARRIES IT. A row named `w budget;rm` was printed as
 # `amend wbudgetrm`, a name no row carries, so the pasted command addressed nobody. A name a
 # shell would split or act on is single-quoted instead, so the line is still pasteable and
@@ -1629,7 +1660,7 @@ t4_row "$R7X" t4wirewide suites_allowed=none suites_source=declared files= \
   "re_executes=${T4_BT}$T4_LONG one${T4_BT} ${T4_BT}$T4_LONG two${T4_BT} ${T4_BT}$T4_LONG three${T4_BT}"
 t4_refused "REQ7 remedy 3b: an undeclared run against three over-wide runs is refused" "$R7X" 'npx jest'
 T4_LINE=$(printf '%s\n' "$ERR" | grep -m1 '^bionic: ')
-expect_contains "REQ7 remedy 3b: …and the line counts them as runs" "3 runs" "$T4_LINE"
+expect_contains "REQ7 remedy 3b: …and the line counts them as declared runs, printed below (wave-22 T4)" "3 declared runs (printed below)" "$T4_LINE"
 expect_absent "REQ7 remedy 3b: …never a cut run" "pytest" "$T4_LINE"
 
 
@@ -1759,5 +1790,26 @@ expect_contains "20h: …naming the row's role" "bionic:test-runner: a read-only
 ro_rows "$R_NEST" w20-norole arownorole-0123456789abcdef ""
 run_hook "$(mk_payload "$R_NEST" 'git commit -m "x"' arownorole-0123456789abcdef omit Bash Explore)"
 expect_status "20h: a ROSTERED row with an empty role is ADMITTED whatever its agent_type (§17g's reading)" 0 "$ST"
+
+# 20i: ONE PICK, ONE SITE (wave-22 T10; review 2). The arm asks `roster_row_for_id` — the budget
+# arm's own pick — which takes a row's FIRST `agent_id=` as its id. A forged row that carries a
+# read-only role and a SECOND `agent_id=<id>` segment is not this agent's row (the old inline
+# awk matched the id in any segment and would have refused it); a row naming the id in any
+# other segment (`teammate_id=`) is not either. The payload's own agent_type then decides.
+R_FORGE="$(mk_repo forged-segment)"
+roster_header > "$R_FORGE/.bionic/tmp/roster-$SID.state"
+FORGE_ID="aforged-0123456789abcdef"
+printf '%s|agent_id=%s\n' "$(roster_row_fixture "session=$SID" status=identified name=w20-other \
+  "agent_id=aother-0123456789abcdef" subagent_type=bionic:test-runner)" "$FORGE_ID" >> "$R_FORGE/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" status=identified name=w20-tm "agent_id=atm-0123456789abcdef" "teammate_id=$FORGE_ID" \
+  subagent_type=bionic:test-runner >> "$R_FORGE/.bionic/tmp/roster-$SID.state"
+expect_eq "20i meta: the forged roster holds the id in a second agent_id= segment" "1" \
+  "$(grep -c "|agent_id=aother-0123456789abcdef|.*|agent_id=$FORGE_ID\$" "$R_FORGE/.bionic/tmp/roster-$SID.state")"
+run_hook "$(mk_payload "$R_FORGE" 'git commit -m "x"' "$FORGE_ID" omit Bash general-purpose)"
+expect_status "20i: an id found only in a SECOND agent_id= segment (or a teammate_id=) is no roster row — ADMITTED on its own type" 0 "$ST"
+expect_absent "20i: …the role arm says nothing" "read-only role" "$ERR"
+run_hook "$(mk_payload "$R_FORGE" 'git commit -m "x"' "$FORGE_ID" omit Bash bionic:test-runner)"
+expect_status "20i: …and with no row the payload's own read-only type still binds (the fallback)" 2 "$ST"
+expect_contains "20i: …saying no roster row names it" "no roster row names you" "$ERR"
 
 finish
