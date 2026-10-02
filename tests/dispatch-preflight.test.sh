@@ -8380,8 +8380,8 @@ expect_eq "brief-lib PIN (case K): a brief whose only Re-executes: line is a bal
   "$(lift_runs "${FENCE3}
 Re-executes: ${BT}npm test -- example${BT}
 ${FENCE3}")"
-expect_eq "brief-lib PIN (case L): a fenced example before a wholly indented real contract lifts the example" \
-  "re_executes=${BT}npm test -- example${BT}" \
+expect_eq "brief-lib PIN (case L): a fenced example before a wholly indented real contract lifts both, the real run is not dropped" \
+  "re_executes=${BT}npm test -- example${BT} ${BT}npm test -- a${BT}" \
   "$(lift_runs "${FENCE3}
 Re-executes: ${BT}npm test -- example${BT}
 ${FENCE3}
