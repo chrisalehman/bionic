@@ -8339,6 +8339,29 @@ expect_eq "brief-lib a contract indented four spaces still lifts its only Re-exe
 expect_eq "brief-lib a tab-indented only Re-executes: line still lifts (I2 case H)" \
   "re_executes=${BT}npm test -- a${BT}" \
   "$(lift_runs "	Re-executes: ${BT}npm test -- a${BT}")"
+# wave-22 T15 (critic-f9c2c8d N1): one unbalanced fence makes parity meaningless, so a brief whose
+# fences end open reads as before the union (first hit). Case M: unbalanced ``` line, the real
+# line, then a balanced block holding an example.
+expect_eq "brief-lib an unbalanced ${FENCE3} line, the real line, then a fenced example lifts only the real run (N1 case M)" \
+  "re_executes=${BT}npm test -- a${BT}" \
+  "$(lift_runs "${FENCE3}
+Re-executes: ${BT}npm test -- a${BT}
+
+${FENCE3}
+Re-executes: ${BT}npm test -- example${BT}
+${FENCE3}")"
+# PINS of the accepted trade (A-T15.2), not goals: both read as they did at 12574e2.
+expect_eq "brief-lib PIN (case K): a brief whose only Re-executes: line is a balanced fenced example lifts it" \
+  "re_executes=${BT}npm test -- example${BT}" \
+  "$(lift_runs "${FENCE3}
+Re-executes: ${BT}npm test -- example${BT}
+${FENCE3}")"
+expect_eq "brief-lib PIN (case L): a fenced example before a wholly indented real contract lifts the example" \
+  "re_executes=${BT}npm test -- example${BT}" \
+  "$(lift_runs "${FENCE3}
+Re-executes: ${BT}npm test -- example${BT}
+${FENCE3}
+    Re-executes: ${BT}npm test -- a${BT}")"
 BV=$(brief_detail implementor "$BRIEF_NOCONF" "Files: payload/scripts/lib/widget.sh
 Re-executes: ${BT}go test ./a${BT}")
 expect_contains "brief-lib Files: + Re-executes: with no impact command is still refused (AC-3.1)" "rc=1" "$BV"

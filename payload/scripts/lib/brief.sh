@@ -338,7 +338,23 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
     # what reads as a block; dropping it lifted no run while Files: and Suites: still lifted, and
     # the budget wall refused the declared run later. Such a label falls back to its first hit,
     # the reading before the union.
+    # WHEN THE FENCES END UNBALANCED, PARITY MEANS NOTHING (wave-22 T15; critic-f9c2c8d N1): one
+    # stray ``` before the real line flips every later line, so the real line reads as inside a
+    # block and a later example reads as outside. Such a brief takes the first-hit reading, as
+    # before the union. Handled: A-J, M (and N, O), including D, E, H and the ~~~ cases. ACCEPTED
+    # TRADE, reading as at 12574e2: K (the only hit is a balanced fenced example, which lifts) and
+    # L (a balanced fenced example before a wholly indented real contract lifts the example).
+    function fences_unbalanced(   n, i, ls, fence, t) {
+      n = split(lc, ls, "\n"); fence = ""
+      for (i = 1; i <= n; i++) {
+        t = ls[i]; sub(/^[ \t]*/, "", t)
+        if (fence == "" && (t ~ /^```/ || t ~ /^~~~/)) fence = substr(t, 1, 3)
+        else if (fence != "" && index(t, fence) == 1) fence = ""
+      }
+      return (fence != "")
+    }
     function allhits(kind,   j, k, n, idx, t, out) {
+      if (fences_unbalanced()) { j = firsthit(kind); return (j > 0 ? j "" : "") }
       n = 0
       for (j = 1; j <= nh; j++) if (HK[j] == kind && !in_code_block(HLS[j])) idx[++n] = j
       if (n == 0 && (j = firsthit(kind)) > 0) idx[++n] = j
