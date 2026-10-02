@@ -17,7 +17,7 @@
 # call, reads the operator's ~/.claude, or depends on a live wave. Repos are throwaway git
 # inits under a mktemp'd sandbox, HOME is redirected.
 #
-# FIXTURE FIDELITY (declared, per .claude memory fixtures-can-pin-away-the-test):
+# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * PreToolUse|Bash payload envelope — the shape tests/protect-main.test.sh already pipes
 #     into a live Bash hook, plus the two fields these arms turn on: a top-level `agent_id`
 #     (measured present in an agent context / absent on the main thread,
