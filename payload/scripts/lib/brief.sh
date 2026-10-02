@@ -336,12 +336,32 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
     # A LABEL WHOSE EVERY HIT SITS IN A CODE BLOCK STILL DECLARES (wave-22 T13; critic-3598752 I2). A brief
     # indented whole, tab-indented, or after one unbalanced ``` line has its only real line in
     # what reads as a block; dropping it lifted no run while Files: and Suites: still lifted, and
-    # the budget wall refused the declared run later. Such a label falls back to its first hit,
-    # the reading before the union.
+    # the budget wall refused the declared run later. Such a label falls back (see below).
+    # WHEN PARITY MEANS NOTHING, EVERY HIT COUNTS (wave-22 T15; critic-f9c2c8d N1, auditor finding,
+    # A-orch-13). One stray ``` before the real line flips every later line, so a brief whose
+    # fences end open cannot say which hits are examples; and a label whose every hit sits in a
+    # code block (an indented contract) has no hit left to trust. Both lift the UNION of ALL
+    # hits in position order, never the first alone: a first-hit fallback dropped every run
+    # after the first, the silent drop REQ-2 exists to remove. ACCEPTED TRADE: in those
+    # malformed shapes a fenced example lifts beside the real runs. An over-admitted run shows
+    # on the roster row; a dropped real run does not. Handled by parity: A-J, N, O. Union
+    # fallback: D, E, H, M, P1-P3, P5, K (a balanced fenced example as the only hit lifts, as at
+    # 12574e2) and L (a fenced example before a wholly indented contract lifts beside the real run).
+    function fences_unbalanced(   n, i, ls, fence, t) {
+      n = split(lc, ls, "\n"); fence = ""
+      for (i = 1; i <= n; i++) {
+        t = ls[i]; sub(/^[ \t]*/, "", t)
+        if (fence == "" && (t ~ /^```/ || t ~ /^~~~/)) fence = substr(t, 1, 3)
+        else if (fence != "" && index(t, fence) == 1) fence = ""
+      }
+      return (fence != "")
+    }
     function allhits(kind,   j, k, n, idx, t, out) {
       n = 0
-      for (j = 1; j <= nh; j++) if (HK[j] == kind && !in_code_block(HLS[j])) idx[++n] = j
-      if (n == 0 && (j = firsthit(kind)) > 0) idx[++n] = j
+      if (!fences_unbalanced())
+        for (j = 1; j <= nh; j++) if (HK[j] == kind && !in_code_block(HLS[j])) idx[++n] = j
+      if (n == 0)
+        for (j = 1; j <= nh; j++) if (HK[j] == kind) idx[++n] = j
       for (j = 2; j <= n; j++) {
         t = idx[j]
         for (k = j - 1; k >= 1 && HLS[idx[k]] > HLS[t]; k--) idx[k + 1] = idx[k]
