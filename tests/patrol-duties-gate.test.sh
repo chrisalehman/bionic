@@ -1958,6 +1958,45 @@ fire "$d"; expect_block "Q3: AC-4.13 a FILL tick turn with no TaskList is refuse
 fire "$d" Stop true; expect_allow "Q3b: …once — the re-entered Stop passes"
 rm -rf "$QT_CFG"
 
+# Q4 (wave-24 T27; critic I3, review 15): a digest older than this turn's tick is no digest. A
+# tick that exits on a refusal writes none, so the last tick's duty=none would otherwise excuse a
+# later turn. The collector reads the digest through the tick's own path and reader
+# (lib/patrol.sh `tick_digest_path`, `tick_digest_field`) and compares its `at=` with the
+# marker's timestamp, as the NOTICK arm compares the stamp. Same world, same digest, two markers.
+qt_marker_at() {  # <dir> <iso timestamp>
+  jq -nc --arg t "bionic-patrol session=$SID8 — Patrol tick. Run: bash /abs/hooks/session-poker.sh tick" --arg ts "$2" \
+    '{type:"user",isMeta:true,isSidechain:false,userType:"external",timestamp:$ts,message:{role:"user",content:$t}}' \
+    >> "$1/transcript.jsonl"
+}
+d=$(make_env); roster_header > "$d/.bionic/tmp/roster-$SID.state"; ( cd "$d" && git init -q . 2>/dev/null )
+QT_CFG="$(mktemp -d)"
+qt_tick "$d" "$QT_CFG" >/dev/null
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_eq "Q4 precondition: the quiet tick writes duty=none" "none" "$(qt_duty "$d")"
+expect_regex "Q4 precondition: …and the instant it wrote the digest" '^at=[0-9]{4}-[0-9]{2}-[0-9]{2}T' \
+  "$(grep '^at=' "$d/.bionic/tmp/tick-digest-$SID.state" 2>/dev/null)"
+qt_marker_at "$d" "2000-01-01T00:00:00.000Z"; u_tick_out "$d" "$QT_OUT"
+fire "$d"; expect_allow "Q4a: a digest written after the turn's marker excuses the refresh"
+: > "$d/transcript.jsonl"
+qt_marker_at "$d" "2999-01-01T00:00:00.000Z"; tick_stamp "$d" "2999-01-01T00:00:01Z"
+u_tick_out "$d" "poker: REFUSED — the tick could not decide"
+fire "$d"; expect_block "Q4b: critic I3 a digest older than the turn's marker is stale — the refresh is owed" "$TL_MISSING"
+# Q4c: an UNCHANGED tick rewrites `at=` and keeps `since=`, or every quiet tick after the first
+# would read as stale and owe the refresh again (AC-4.13). The digest is aged by hand to the
+# year 2000; the marker is from 2001; the real tick runs again over the same facts.
+QT_DIG="$d/.bionic/tmp/tick-digest-$SID.state"
+QT_SINCE="$(sed -n 's/^since=//p' "$QT_DIG" | head -1)"
+sed -i.bak 's/^at=.*/at=2000-01-01T00:00:00Z/' "$QT_DIG"
+expect_eq "Q4c precondition: the digest is aged to 2000" "at=2000-01-01T00:00:00Z" "$(grep '^at=' "$QT_DIG")"
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "Q4c precondition: the tick over the same facts prints unchanged" "poker: unchanged since" "$QT_OUT"
+expect_eq "Q4c the unchanged tick keeps since=" "$QT_SINCE" "$(sed -n 's/^since=//p' "$QT_DIG" | head -1)"
+expect_regex "Q4c2 …and rewrites at= to its own instant" '^at=(20[2-9][0-9])-' "$(grep '^at=' "$QT_DIG")"
+: > "$d/transcript.jsonl"
+qt_marker_at "$d" "2001-01-01T00:00:00.000Z"; u_tick_out "$d" "$QT_OUT"
+fire "$d"; expect_allow "Q4c3: the unchanged tick's turn reads duty=none — no refresh owed"
+rm -rf "$QT_CFG"
+
 # ============================================================
 section "Section 6: marker scope — a file the agent merely READ is not a decline (review F2)"
 #

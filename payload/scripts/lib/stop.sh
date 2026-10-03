@@ -1359,8 +1359,9 @@ LGDIFF
           # THE FIX IS A COMMAND, PRINTED WHOLE (wave-24 T13, D10, AC-6.5): the amend that
           # declares these paths on this row, with the real plugin root, the row name and
           # every path quoted as one shell word, ready to paste. Reverting them is the other
-          # way out, and has no single command to print.
-          LG_FIX="bash $(refuse_plugin_root)/hooks/session-poker.sh amend $(refuse_quote "$NAME")${LG_FIX_FILES} --reason $(refuse_quote "the landing diff touched files Files: did not declare")"
+          # way out, and has no single command to print. The script path is one word too: a
+          # plugin root with a space would otherwise paste as two (wave-24 T27; critic I2).
+          LG_FIX="bash $(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh") amend $(refuse_quote "$NAME")${LG_FIX_FILES} --reason $(refuse_quote "the landing diff touched files Files: did not declare")"
   REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE}${LG_SUITES:+ (suites: ${LG_SUITES})}${LG_SUITES_NOTE} — not declared. Declare them (main runs it), or revert them before landing:
     ${LG_FIX}
 "
@@ -1988,7 +1989,14 @@ if [ -n "$_SD_SET" ]; then
 fi
 
 if [ -n "$STANDDOWN_MISSING" ]; then
-  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped, held nor declined them. TaskStop each. To keep an idle agent up, run: bash ${HOOK_DIR}/session-poker.sh hold <name> <reason> — the tick then stops ordering it while nothing about it changes. Or write a line \"standdown-declined: <name> <reason>\" for this turn alone. Then stop again — this gate blocks once."
+  # ONE hold COMMAND PER NAME, each pasteable as printed (wave-24 T27; critic I4): the real
+  # name, and the reason as the tick's own quoted placeholder (`HOLD_REASON_SLOT` in
+  # hooks/session-poker.sh), never a bare `<reason>` a shell reads as a redirect.
+  STANDDOWN_HOLDS=""
+  for _sd_hold in $STANDDOWN_MISSING; do
+    STANDDOWN_HOLDS="${STANDDOWN_HOLDS}${STANDDOWN_HOLDS:+; }bash ${HOOK_DIR}/session-poker.sh hold ${_sd_hold} 'why it stays up'"
+  done
+  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped, held nor declined them. TaskStop each. To keep an idle agent up, run: ${STANDDOWN_HOLDS} — the tick then stops ordering it while nothing about it changes. Or write a line \"standdown-declined: <name> <reason>\" for this turn alone. Then stop again — this gate blocks once."
 else
   STANDDOWN_REASON=""
 fi
@@ -2162,7 +2170,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
   _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed
   local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
-  local digest duty led standing st_cur st_ready st_launched gap
+  local digest duty at led standing gap
 
   [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
   [ "${BIONIC_ENGAGED:-0}" = 1 ] || return 1
@@ -2274,13 +2282,23 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # digest when it printed `unchanged`, or decided QUIET with no open row
   # (hooks/session-poker.sh `tick_conclude`). Only that line excuses a tick turn from the
   # task-list refresh. No file, a symlink, or any other value leaves the duty owed, which is
-  # what every tick turn owed before the tick could say it was quiet. The path is the
-  # tick's `tick_digest_file`: beside its stamp, which NOTICK below reads at the same root.
+  # what every tick turn owed before the tick could say it was quiet. The path and the reader
+  # are the tick's own (lib/patrol.sh `tick_digest_path`, `tick_digest_field`), at the root
+  # NOTICK below reads the stamp from.
+  #
+  # A DIGEST OLDER THAN THIS TURN'S TICK IS NO DIGEST (wave-24 T27; critic I3). A tick that
+  # exits on a refusal writes none, so the last tick's `duty=none` would excuse a turn its own
+  # tick never judged. The digest's `at=` must not be earlier than the marker's timestamp, the
+  # comparison NOTICK makes against the stamp; a digest with no `at=` (written before it had
+  # one) is no digest.
   if [ "$_ST_TICK" = 1 ]; then
-    digest="$BIONIC_ROOT/.bionic/tmp/tick-digest-${BIONIC_SID}.state"
-    if [ -f "$digest" ] && [ ! -L "$digest" ]; then
-      duty="$(sed -n 's/^duty=//p' "$digest" 2>/dev/null | head -1)"
-      [ "$duty" = none ] && _ST_TICK_DUTY=none
+    digest="$(tick_digest_path "$BIONIC_ROOT" "$BIONIC_SID")"
+    duty="$(tick_digest_field "$digest" duty)"
+    at="$(tick_digest_field "$digest" at)"
+    if [ "$duty" = none ] && [ -n "$at" ]; then
+      if [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; then
+        _ST_TICK_DUTY=none
+      fi
     fi
   fi
 
@@ -2343,36 +2361,14 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # sent. So the ledger's ready set stays the plan's, and what the turn missed is that set less
   # the rows this turn launched, matched by the dispatch name `fill_name` hands out.
   #
-  # A DECLINE STANDS AGAINST THE READY SET IT ANSWERED (wave-24 T8; D2, AC-4.7). A reason that
-  # still holds next turn ("T7 waits on T6's merge") used to have to be written again on every
-  # turn end. The ledger already keeps each Stop's ready set, `current=` and decline, so the
-  # session's latest declined line is the standing answer: the ids it answered are its ready
-  # set less the rows that turn launched, and it stands while `current:` reads as it did then.
-  # A row it never saw, or a moved `current:`, is unanswered. It is read from the ledger's last
-  # SCAN_WINDOW_LINES lines; a decline older than that stands for nothing, which refuses more.
-  # Another session's line is not this conversation's answer.
+  # A DECLINE STANDS AGAINST THE READY SET IT ANSWERED (wave-24 T8; D2, AC-4.7). The session's
+  # latest declined ledger line answers the ready rows it saw while `current:` reads as it did
+  # then. `fill_standing_decline` (lib/fill.sh) is the one reader: the tick asks it too, prints
+  # the decline and leaves those rows out of its FILL (wave-24 T27; Step-6 review C2/U1).
   led="$(fill_ledger_path "$BIONIC_ROOT" "$_ST_PLAN" 2>/dev/null)" || led=""
-  if [ -n "$led" ] && [ -f "$led" ] && [ ! -L "$led" ]; then
-    standing="$(tail -n "$SCAN_WINDOW_LINES" "$led" 2>/dev/null | awk -v sid="$BIONIC_SID" '
-      function kv(line, key,   i, n, parts) {
-        n = split(line, parts, "|")
-        for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-        return ""
-      }
-      index($0, "fill-ledger/v1|") == 1 && kv($0, "session") == sid && kv($0, "declined") ~ /[^ \t]/ {
-        last = kv($0, "current") "\037" kv($0, "ready") "\037" kv($0, "launched") "\037" kv($0, "declined")
-      }
-      END { if (last != "") print last }')"
-    if [ -n "$standing" ]; then
-      IFS=$'\037' read -r st_cur st_ready st_launched _ST_STANDING <<< "$standing"
-      if [ "$st_cur" = "$_ST_CURRENT" ]; then
-        for rest in ${st_ready//,/ }; do
-          fill_row_launched "$rest" "$st_launched" && continue
-          _ST_STANDING_IDS="${_ST_STANDING_IDS}${_ST_STANDING_IDS:+ }${rest}"
-        done
-      fi
-      [ -n "$_ST_STANDING_IDS" ] || _ST_STANDING=""
-    fi
+  standing="$(fill_standing_decline "$led" "$BIONIC_SID" "$_ST_CURRENT")"
+  if [ -n "$standing" ]; then
+    IFS=$'\037' read -r _ _ST_STANDING _ST_STANDING_IDS <<< "$standing"
   fi
 
   ready="$(fill_ready_set "$_ST_PLAN" 99999 0 2>/dev/null)"
