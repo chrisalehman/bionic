@@ -2200,10 +2200,13 @@ roster_header > "$DROSTER"
 # the observation takes the agent id — and therefore the working log — off this row, and every
 # `d_row` below is a CONTRACT row named for its case rather than for the agent.
 roster_identify "$DREPO" "$SID_A" "deliv" "adeliv-2222222222222222"
+# Every contract row carries a Done marker written after its launch (wave-24 T9, D3): MET is the
+# deliverable AND a completion signal, and this section compares the deliverable half only.
 d_row() {  # <name> <deliverable value>
+  : > "$DREPO/.bionic/tmp/$1.done"
   roster_row_fixture status=confirmed session="$SID_A" name="$1" \
     agent_id=adeliv-2222222222222222 launched_at="$D_LAUNCHED" deliverable="$2" \
-    duration="1 minute" tool_use_id="toolu_01$1" >> "$DROSTER"
+    duration="1 minute" "done=$DREPO/.bionic/tmp/$1.done" tool_use_id="toolu_01$1" >> "$DROSTER"
 }
 
 # The stop gate's answer, read off the evidence it prints for a human rather than off a
@@ -2307,10 +2310,13 @@ J_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 # `agent_id=` is filled here because it is the SWEEP's join key (epic-16 wave-03, T4c): a
 # row whose id is absent from the Stop payload's `background_tasks[]` has landed and is
 # judged, and one still listed there is skipped. The rest of the row is the writer's own.
+# Each row's agent said it was done, by its Done marker (wave-24 T9, D3): this section asks the
+# deliverable half of MET, so the signal half is held true for every row.
 jrow() {  # <name> <deliverable> <progress> <cadence> <waiver> [tool_use_id]
+  : > "$JREPO/.bionic/tmp/$1.done"
   roster_row_fixture status=confirmed session="$SID_A" name="$1" agent_id="a-$1" \
     launched_at="$J_LAUNCHED" deliverable="$2" progress="$3" cadence="$4" waiver="$5" \
-    tool_use_id="${6:-toolu_01LANDING}" >> "$JROSTER"
+    "done=$JREPO/.bionic/tmp/$1.done" tool_use_id="${6:-toolu_01LANDING}" >> "$JROSTER"
 }
 
 roster_header > "$JROSTER"
@@ -2660,6 +2666,7 @@ K_BRIEF='Canonical-sdlc Step 4, task 6 of epic-16 wave-01; build · audited · w
 Expected artifact: .bionic/docs/record/w16-chain.md
 Expected duration: ~30 minutes. Progress artifact: .bionic/tmp/w16-chain.progress, cadence ~7m.
 Subprocess claim: `w16-chain-marker` → .bionic/tmp/w16-chain.log
+Done marker: .bionic/tmp/w16-chain.done
 Exit condition: the artifact exists.
 Suites: tests/widget.test.sh'
 
@@ -2737,6 +2744,11 @@ expect_eq "…and it reads the contract off the chain, not off nothing" "STILL-L
 sleep 1
 mkdir -p "$KREPO/.bionic/docs/record"
 echo "the task report" > "$KREPO/.bionic/docs/record/w16-chain.md"
+# …and the agent says it is done, through the Done marker its brief declared (wave-24 T9, D3):
+# the lift carried it to the launch row, and every row of the chain copied it forward.
+: > "$KREPO/.bionic/tmp/w16-chain.done"
+expect_contains "…the chain carries the brief's Done marker to its latest row (T9)" \
+  "|done=.bionic/tmp/w16-chain.done|" "$(grep '|name=w16-chain|' "$KROSTER" | tail -1)"
 K_VERDICT=$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict w16-chain 2>/dev/null )
 K_VLINE=$(printf '%s\n' "$K_VERDICT" | grep -F 'landing-verdict/v1|' | head -1)
 expect_eq "…and the same chain reads MET once the artifact lands" "MET" \
@@ -2759,8 +2771,8 @@ expect_contains "…from the same source" "progress_source=roster" "$K_MLINE"
 # both readers must also agree the artifact is not there.
 k_sw_path() {  # the path the VERB says the contract names, whatever state it reports
   j_field "$K_VLINE" detail \
-    | grep -oE '(missing|delivered|empty)=[^ ]+' | head -1 | cut -d= -f2-
-}
+    | grep -oE '(missing|delivered|empty)=[^ ;]+' | head -1 | cut -d= -f2-
+}   # `;` ends a conjunct: the detail joins them with "; " (a MET row adds `said=…`, T9)
 K_SC_DELIV=$(printf '%s' "$K_MLINE" | tr '|' '\n' | grep '^deliverables=' | head -1 | cut -d= -f2-)
 expect_eq "the verb and the observation name the same deliverable" \
   "$(k_sw_path)" "${K_SC_DELIV#*:}"
@@ -2933,6 +2945,10 @@ else
   else
     ok "a dropped forward-copy makes the chain invariant RED"
   fi
+  # The mutant agent says it is done too (wave-24 T9, D3): its Done marker is dated past its
+  # launch, so the one thing this verdict varies is the contract the mutation retracted.
+  touch -t "$(date -v+60S +%Y%m%d%H%M.%S 2>/dev/null || date -d '+60 seconds' +%Y%m%d%H%M.%S)" \
+    "$KREPO/.bionic/tmp/w16-chain.done"
   # …and the consequence the invariant is a proxy for: the contract is RETRACTED.
   # The verdict now calls a row MET for naming nothing, which is the false clean
   # answer the landing gate would pass a stopping agent on.
@@ -4503,7 +4519,7 @@ n_cycle() {  # <tool_use_id> — one full dispatch cycle through all three real 
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
       hook_event_name:"PreToolUse", tool_name:"Agent",
       tool_input:{description:"a dispatch", subagent_type:"implementor", name:"resumed",
-                  prompt:("Expected artifact: " + $d + "\nSuites: tests/widget.test.sh")},
+                  prompt:("Expected artifact: " + $d + "\nDone marker: " + $d + ".done\nSuites: tests/widget.test.sh")},
       tool_use_id:$u}' | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
   jq -n --arg s "$SID_A" --arg c "$NLR" --arg u "$1" --arg a "$NLR_ID" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
@@ -4549,6 +4565,7 @@ rm -f "$NLR/.bionic/tmp/roster-$SID_A.state.bak"
 # The takeover's delivery: written between the original launch and the resume, which is the
 # artifact the field case's landing gate called missing.
 echo "the takeover wrote this" > "$NLR_ART"
+: > "$NLR_ART.done"   # the agent says so, by the Done marker its brief declared (wave-24 T9, D3)
 touch -t "$(date -v-1800S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-1800 seconds" +%Y%m%d%H%M.%S)" "$NLR_ART"
 expect_eq "before the resume, the delivered contract reads MET" "MET" "$(n_state)"
 
@@ -11504,7 +11521,9 @@ section "SV — the shared brief-scaffold block is byte-identical across its two
 
 SV_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
 SV_DISPATCH="$BIONIC_SKILLS_DIR/canonical-sdlc/dispatch.md"
-SV_SUITES_LINE='Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:'
+# The column padding before the comment was cut to two spaces at wave-24 T9 (A-T9.9), the
+# bytes paying for the scaffold's Done marker: line; the words are unchanged.
+SV_SUITES_LINE='Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:'
 
 sv_suites_line() {  # <file> -> the scaffold's Suites: line, or empty
   awk '/^Suites: none/ { print; exit }' "$1" 2>/dev/null
@@ -12149,10 +12168,11 @@ _cgtc_del="$_cgtc_r/cgtc-report.md"
 echo delivered > "$_cgtc_del"
 touch -t 202609011200 "$_cgtc_del"      # after the launch below, in any zone within 12 h of UTC
 roster_header > "$_cgtc_roster"
+: > "$_cgtc_r/cgtc.done"                 # the agent said so (wave-24 T9, D3)
 roster_row_fixture status=confirmed session="$SID_A" name="$_cgtc_name" agent_id="$_cgtc_id" \
-  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtc_del" tool_use_id=toolu_01CGTC >> "$_cgtc_roster"
+  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtc_del" "done=$_cgtc_r/cgtc.done" tool_use_id=toolu_01CGTC >> "$_cgtc_roster"
 roster_row_fixture status=identified session="$SID_A" name="$_cgtc_name" agent_id="$_cgtc_id" \
-  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtc_del" tool_use_id=toolu_01CGTC >> "$_cgtc_roster"
+  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtc_del" "done=$_cgtc_r/cgtc.done" tool_use_id=toolu_01CGTC >> "$_cgtc_roster"
 cgc_ack "$_cgtc_ledger" 2026-09-02T00:00:00Z "$_cgtc_name"
 jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
          message:{role:"user",content:"carry on"}}' > "$_cgtc_r/cgc-transcript.jsonl"
@@ -12398,9 +12418,10 @@ CGSD_R=$(new_repo cgsd)
 CGSD_RO="$CGSD_R/.bionic/tmp/roster-$SID_A.state"
 roster_header > "$CGSD_RO"
 for _cgsd_n in sd-a sd-b sd-gone; do
-  echo done > "$CGSD_R/landed-$_cgsd_n.md"
+  echo done > "$CGSD_R/landed-$_cgsd_n.md"; : > "$CGSD_R/$_cgsd_n.done"   # landed and said (T9, D3)
   roster_row_fixture status=intended session="$SID_A" name="$_cgsd_n" agent_id= \
-    tool_use_id="toolu_01CGSD${_cgsd_n#sd-}" deliverable="$CGSD_R/landed-$_cgsd_n.md" >> "$CGSD_RO"
+    tool_use_id="toolu_01CGSD${_cgsd_n#sd-}" deliverable="$CGSD_R/landed-$_cgsd_n.md" \
+    "done=$CGSD_R/$_cgsd_n.done" >> "$CGSD_RO"
 done
 roster_row_fixture status=intended session="$SID_A" name=sd-open agent_id= \
   tool_use_id=toolu_01CGSDOPEN deliverable="$CGSD_R/never-written.md" >> "$CGSD_RO"
@@ -12467,9 +12488,10 @@ HD_R=$(new_repo hd)
 HD_RO="$HD_R/.bionic/tmp/roster-$SID_A.state"
 roster_header > "$HD_RO"
 for _hd_n in sd-a sd-b; do
-  echo done > "$HD_R/landed-$_hd_n.md"
+  echo done > "$HD_R/landed-$_hd_n.md"; : > "$HD_R/$_hd_n.done"   # landed and said (T9, D3)
   roster_row_fixture status=intended session="$SID_A" name="$_hd_n" agent_id= \
-    tool_use_id="toolu_01HD${_hd_n#sd-}" deliverable="$HD_R/landed-$_hd_n.md" >> "$HD_RO"
+    tool_use_id="toolu_01HD${_hd_n#sd-}" deliverable="$HD_R/landed-$_hd_n.md" \
+    "done=$HD_R/$_hd_n.done" >> "$HD_RO"
 done
 roster_row_fixture status=intended session="$SID_A" name=sd-open agent_id= \
   tool_use_id=toolu_01HDOPEN deliverable="$HD_R/never-written.md" >> "$HD_RO"
@@ -12736,6 +12758,8 @@ cgfu_world() {  # <case: closed|open|again> -> repo path
   cfg="$SANDBOX/cgfu-cfg-$1"; mkdir -p "$cfg/projects/-cgfu"
   {
     jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T00:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done\n</agent-message>")}}'
+    # The relaunched contract reports too, after its own launch (wave-24 T9, D3: MET needs it).
+    [ "$1" = again ] && jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T02:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done again\n</agent-message>")}}'
     jq -nc --arg n "$n" '{type:"assistant",isSidechain:false,timestamp:"2026-09-01T03:00:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01CGFUSEND",name:"SendMessage",input:{to:$n,summary:"s",message:"one more thing"}}]}}'
   } > "$cfg/projects/-cgfu/$SID_A.jsonl"
   printf '%s' "$r"
