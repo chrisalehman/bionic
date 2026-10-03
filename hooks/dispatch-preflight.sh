@@ -2213,6 +2213,25 @@ esac
 # exits 0, which is exactly the status the ledger below would otherwise read as a launch.
 dp_refuse_findings
 
+# ============================= THE BRIEF BODY ADVISORY (wave-24 T14; REQ-8, D13)
+#
+# A dispatch that reached this line is allowed, so what follows is only ever said, never decided.
+# `brief_body_advisories` (payload/scripts/lib/brief.sh) reads the PROSE the contract grammar
+# never sees for the two shapes that meet a wall minutes later — a `bash tests/x.test.sh` the
+# row does not budget, and an edit of a path outside `Files:` — and each finding goes out on
+# this file's `warn`, ending in the `amend` line that would declare it. Placed below the spend
+# so a refused dispatch carries only its refusal, and above the ledger so the advice precedes the
+# journalled launch; nothing it does can change the exit status (AC-8.4).
+#
+# THE CHANNEL IS THE ONE THIS PATH ALREADY USES for its advisories (the absent-field warning and
+# the waiver echo below): stderr, exit 0 untouched. `additionalContext` was the other candidate,
+# and refuse.sh's channel table records no measured delivery of it from PreToolUse.
+while IFS= read -r _dp_adv; do
+  [ -n "$_dp_adv" ] && warn "$_dp_adv"
+done <<ADV_EOF
+$(brief_body_advisories "$(_jq '.tool_input.prompt')" "$AGENT_NAME" "$C_FILES" "$SUITES_ALLOWED" "$C_RE_EXECUTES" "$HOOK_DIR/session-poker.sh")
+ADV_EOF
+
 # ---------- THE LEDGER STOPS AT DEPTH ONE ----------
 # (session-20260815-landing-supervision T6; design D1 "writers stay put".)
 #
