@@ -1192,7 +1192,7 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # it can speak to — an `idle` row still closes, an absent row still closes — and the
   # Patrol tick still consumes the same reader unchanged. Only the case where there is
   # nothing to read has stopped being an error.
-  budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
+  budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>", then the open names (exit 0)
     local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed="" notfresh=""
     local la_out la_rc row_dark dark="" closed still_open open_names="" holds
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
@@ -1305,7 +1305,27 @@ DARK
     fi
 
     open=$(printf '%s\n' "$open_names" | budget_open_writers "$f")
-    printf '%s %s' "$open" "$claimed"
+    # THE NAMES RIDE BELOW THE COUNTS (wave-24 T13, D10), one per line, so the writer-budget
+    # refusal can list the rows it counted without a second reading of the roster.
+    printf '%s %s\n%s' "$open" "$claimed" "$open_names"
+  }
+
+  # budget_writer_rows <roster file> <open names> -> one line per open WRITER row: its name and
+  # the command that closes it. The same `budget_open_writers` that produced the count asks each
+  # name alone, so the rows listed are the rows counted and a read-only row is never one of them.
+  # Run on the refusal path only. The ack command is PRINTED for the orchestrator and never run
+  # here: this gate executes the sweeper on no path, and the suite pins that.
+  DP_ACK_SCRIPT="${HOOK_DIR}/session-sweeper.sh"
+  budget_writer_rows() {
+    local f="$1" nm
+    while IFS= read -r nm; do
+      [ -n "$nm" ] || continue
+      [ "$(printf '%s\n' "$nm" | budget_open_writers "$f")" = "1" ] || continue
+      printf '    open: %s — once it has landed, close it: bash %s ack %s\n' \
+        "$nm" "$DP_ACK_SCRIPT" "$(refuse_quote "$nm")"
+    done <<WRITERNAMES
+$2
+WRITERNAMES
   }
 
   # LIVE LEASES ON DISK. A directory under `.worktrees` whose `.git` is a FILE is a
@@ -1328,13 +1348,15 @@ DARK
   # passed is the one named. What changed is that the wall records instead of exiting, so
   # the arms after it are read in the same pass.
   BUDGET_DENIED=""
-  budget_deny() {  # <fact> <the one line naming the resource, its ceiling and its count>
+  budget_deny() {  # <fact> <the one line naming the resource, its ceiling and its count> [rows]
     # ONE FIX FOR ALL THREE ARMS (rows 43-45): the fact names which ceiling was passed
-    # and the repair is the same act whichever it was.
+    # and the repair is the same act whichever it was. The writer arm adds the rows it counted,
+    # each with the command that closes it (wave-24 T13, D10, AC-6.7).
     [ -z "$BUDGET_DENIED" ] || return 0
     BUDGET_DENIED=1
     dp_finding "$1" "land or stand down a row" \
-      "    $2
+      "    $2${3:+
+$3}
 
 budget: ${PARALLEL_BUDGET}
   declared by ${PLAN}
@@ -1342,7 +1364,7 @@ budget: ${PARALLEL_BUDGET}
 That string is derived once, at Step 0, from this machine's own resources probe, and
 recorded verbatim — nothing re-derives it here, and raising it is a Step-0 act.
 
-Fix: land or stand down an open row first (\`bash <plugin-root>/hooks/stop-orders.sh
+Fix: land or stand down an open row first (\`bash ${HOOK_DIR}/stop-orders.sh
 standdown\` computes the batch), or re-run Step 0's probe and raise the line if the
 machine genuinely has the room."
   }
@@ -1361,6 +1383,9 @@ machine genuinely has the room."
   # no answer to read, so the three ceilings below are the only thing left between a
   # brief and its dispatch.
   BUDGET_COUNTS=$(budget_roster_counts "$ROSTER_FILE" "$BUDGET_TRANSCRIPT")
+  BUDGET_OPEN_NAMES=""
+  case "$BUDGET_COUNTS" in *$'\n'*) BUDGET_OPEN_NAMES="${BUDGET_COUNTS#*$'\n'}" ;; esac
+  BUDGET_COUNTS="${BUDGET_COUNTS%%$'\n'*}"
   BUDGET_OPEN="${BUDGET_COUNTS%% *}"
   BUDGET_CLAIMED="${BUDGET_COUNTS##* }"
   BUDGET_UNMEASURED=""
@@ -1372,7 +1397,8 @@ machine genuinely has the room."
     role_is_readonly "$DP_SUBAGENT" && BUDGET_ASK=0
     [ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && budget_deny \
       "this passes the run's writer budget" \
-      "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + BUDGET_ASK ))"
+      "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + BUDGET_ASK ))" \
+      "$(budget_writer_rows "$ROSTER_FILE" "$BUDGET_OPEN_NAMES")"
   elif [ -z "$DP_BUDGET_NAMED" ]; then
     BUDGET_UNMEASURED="${BUDGET_UNMEASURED} writers"
   fi
@@ -1795,19 +1821,31 @@ dp_scaffold_marked() {
 # The single-fault no-deliverable detail carries the same constant, and the shared
 # brief-scaffold block (agents-src/blocks/brief-scaffold.md) says the same in its header.
 DP_PROMPT_ONLY="The wall reads the prompt text only. A brief file the prompt points at is not read, so copy its scaffold lines into the prompt."
+#
+# A BRIEF THAT LACKS NO LINE IS SHOWN NO SCAFFOLD (wave-24 T13, D10, AC-6.7). The scaffold is
+# there to say which lines to add, and its `<ADD>` marks are that answer. When it carries no
+# mark the brief already has every line, the faults are state (a full budget, a name in flight),
+# and nine blank template lines under them sent the author looking for a brief fault that does
+# not exist. So the scaffold and the prompt-only line ride only beside a mark.
 dp_refuse_findings() {
   [ "$DP_FINDING_N" -gt 0 ] || return 0
   if [ "$DP_FINDING_N" -eq 1 ]; then
     refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
   fi
+  local _scaffold
+  _scaffold="$(dp_scaffold_marked)"
+  case "$_scaffold" in
+    *' <ADD>'*) _scaffold="${_scaffold}
+${DP_PROMPT_ONLY}
+
+" ;;
+    *) _scaffold="" ;;
+  esac
   # `DP_FAULT_LINES` and `DP_NOTCHECKED` each end in their own newline when non-empty and
   # are empty strings otherwise, so this interpolation adds no blank line when either is
   # absent — a two-fault brief with nothing unchecked renders exactly one extra line.
   refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
-    "${DP_FAULT_LINES}${DP_NOTCHECKED}$(dp_scaffold_marked)
-${DP_PROMPT_ONLY}
-
-See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required."
+    "${DP_FAULT_LINES}${DP_NOTCHECKED}${_scaffold}See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required."
 }
 
 # ======================================================= THE AMBIGUITY WALL
