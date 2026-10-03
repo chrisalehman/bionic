@@ -969,8 +969,11 @@ targets_in_are '$s.test.sh'      'bash "tests/$s.test.sh"'
 # --- (b) --dry-run runs nothing, so it spends nothing ---
 targets_in_are ''                'bash tests/run.sh --dry-run'
 targets_in_are ''                'bash tests/run.sh --dry-run 2>&1 | tee /tmp/d.log'
-expect_eq "C8 …and --dry-run is still suite-CLASS (the class arm is unchanged)" \
-  "suite" "$(class_of 'bash tests/run.sh --dry-run')"
+# THE CLASS FOLLOWS NOW (wave-24 T5, AC-7.5). This row used to pin `--dry-run` as still
+# suite-CLASS, and on the main thread that class drew the farm-out deny for a command that
+# runs nothing (research R4 §4). §CASE below owns the whole flag set.
+expect_eq "C8 …and --dry-run is not suite-class either" \
+  "none" "$(class_of 'bash tests/run.sh --dry-run')"
 # The exemption is the flag, not the runner: a real run beside it is still named.
 targets_in_are 'run.sh'          'bash tests/run.sh --serial'
 
@@ -1205,5 +1208,189 @@ expect_eq "C11 …and leaves a field with nothing to strip byte-identical" \
   "${T4_BT}npx jest --testPathPatterns 'x|y'${T4_BT}" \
   "$(runs_norm_of "${T4_BT}npx jest --testPathPatterns 'x|y'${T4_BT}")"
 expect_eq "C11 …and an empty field is empty" "" "$(runs_norm_of '')"
+
+
+section "§WAIT — REQ-7 AC-7.3 (D12): a fan-out that waits is not backgrounded"
+# THE FALSE REFUSAL (research R4 §2). `cmd_backgrounded` answered yes for any bare `&`, so
+# `a & b & wait` — two suites in parallel, the shell held until both finish — was refused as
+# if its result could never be read. The rule now: a `&` job is PENDING in its subshell
+# group until an unconditional bare `wait` in that same group, outside any branch the job
+# was not also in, and not a pipeline stage. A job still pending at the end backgrounds.
+# Driven through C9's `bg_of`, whose positive rows (C9) sit beside these.
+bg_is no  'bash tests/a.test.sh & bash tests/b.test.sh & wait'
+bg_is no  '(bash tests/a.test.sh & bash tests/b.test.sh & wait)'
+bg_is no  '( bash tests/a.test.sh & bash tests/b.test.sh & wait ) 2>&1 | tee /tmp/w.log'
+bg_is no  'bash tests/a.test.sh & bash tests/b.test.sh &
+wait'
+bg_is no  'for s in a b; do bash tests/$s.test.sh & done; wait'
+bg_is no  'for s in a b; do bash tests/$s.test.sh & wait; done'
+bg_is no  'bash tests/a.test.sh & bash tests/b.test.sh & wait; echo rc=$?'
+# STILL REFUSED — every shape the requirement names, and the branch shapes beside them.
+bg_is yes 'bash tests/a.test.sh &'
+bg_is yes 'bash tests/a.test.sh & bash tests/b.test.sh'
+bg_is yes '(bash tests/a.test.sh &); wait'
+bg_is yes 'bash tests/a.test.sh & false && wait'
+bg_is yes 'bash tests/a.test.sh & wait | cat'
+bg_is yes 'bash tests/a.test.sh & p=$!; wait $p'
+bg_is yes 'nohup bash tests/a.test.sh'
+bg_is yes 'setsid bash tests/a.test.sh'
+bg_is yes 'bash tests/a.test.sh & (wait)'
+bg_is yes 'bash tests/a.test.sh & wait %1; bash tests/b.test.sh &'
+bg_is yes 'bash tests/a.test.sh & wait &'
+bg_is yes 'bash tests/a.test.sh & if true; then wait; fi'
+bg_is yes 'bash tests/a.test.sh & if true; then
+wait
+fi'
+bg_is yes 'case $x in a) bash tests/a.test.sh & ;; b) wait;; esac'
+bg_is yes 'if c; then bash tests/a.test.sh & else wait; fi'
+bg_is yes 'nohup bash tests/a.test.sh & wait'
+# `wait $p` must be pinned against a positive on the same shape, or a wait-parser that
+# admitted nothing would pass it: `wait` with no operand is the admit, one word apart.
+bg_is no  'bash tests/a.test.sh & wait'
+
+
+section "§CASE — REQ-7 AC-7.5 (D12): a flag that runs nothing, and the words of a case"
+# TWO FALSE REFUSALS AND ONE BYPASS (research R4 §4). `tests/run.sh --dry-run`, `-h`,
+# `--help` and `--list` read as suite-class, so the main-thread farm-out wall denied a
+# command that runs nothing; a suite named only in a `case` PATTERN landed at argv[0] and
+# read as a run; and a suite run inside a case ARM read as `case` at argv[0], class none.
+for ro in 'bash tests/run.sh --dry-run' './tests/run.sh --list' 'bash tests/run.sh --help' \
+          'tests/run.sh -h' 'bash tests/run.sh --serial --dry-run'; do
+  expect_eq "§CASE [$ro] is not a suite run" "none" "$(class_of "$ro")"
+  expect_eq "§CASE …and claims nothing" "" "$(claims_of "$ro")"
+done
+expect_empty "§CASE farm-out is SILENT on bash tests/run.sh --dry-run" \
+  "$(farm_decision 'bash tests/run.sh --dry-run')"
+# POSITIVE, SAME EXTRACTORS: --serial alone is the full tree, and a suite file is not
+# exempted by a flag it does not take.
+expect_eq "§CASE --serial alone is still a full-tree run" "suite" "$(class_of 'bash tests/run.sh --serial')"
+expect_eq "§CASE …naming run.sh" "run.sh" "$(targets_of 'bash tests/run.sh --serial')"
+expect_eq "§CASE ./tests/run.sh is still a run" "run.sh" "$(targets_of './tests/run.sh')"
+expect_eq "§CASE a suite file given --help is still that suite's run" \
+  "a.test.sh" "$(targets_of 'bash tests/a.test.sh --help')"
+
+# THE PATTERN LIST IS NOT A COMMAND.
+expect_eq "§CASE a suite named only in a (pattern) is not a run" \
+  "none" "$(class_of 'case $x in (tests/b.test.sh) echo b;; esac')"
+expect_eq "§CASE …nor in an alternation" \
+  "none" "$(class_of 'case $f in a) :;; tests/run.sh|tests/b.test.sh) echo hit;; esac')"
+expect_eq "§CASE …and names nothing" "" \
+  "$(targets_of 'case $f in a) :;; tests/run.sh|tests/b.test.sh) echo hit;; esac')"
+# THE ARM BODY IS. Same extractor, same shape, the suite moved from pattern to body.
+expect_eq "§CASE a suite run inside a case arm is a run" \
+  "suite" "$(class_of 'case $x in a) bash tests/a.test.sh;; esac')"
+targets_are 'a.test.sh' 'case $x in a) bash tests/a.test.sh;; esac'
+targets_are 'b.test.sh' 'case $x in a) echo;; b) bash tests/b.test.sh;; esac'
+targets_are 'a.test.sh' 'case $x in a) bash tests/a.test.sh; esac'
+targets_are 'a.test.sh' 'case "$x" in
+  a|b) bash tests/a.test.sh ;;
+  *) echo no ;;
+esac'
+targets_are 'c.test.sh' 'case $x in a) :;; esac; bash tests/c.test.sh'
+targets_are 'a.test.sh
+b.test.sh' 'case $x in a) case $y in q) bash tests/a.test.sh;; esac;; b) bash tests/b.test.sh;; esac'
+targets_are 'a.test.sh' 'for x in 1; do case $x in 1) bash tests/a.test.sh;; esac; done'
+
+
+section "§REDIR — REQ-7 AC-7.6 (D12): a leading redirection is plumbing, never argv[0]"
+# THE FALSE REFUSAL AND THE BYPASS (research R4 §5). `strip_leading` had no rule for a
+# redirection, so a GLUED input redirect (`<tests/a.test.sh wc -l`) put the suite path at
+# argv[0] and read as a run of it, while a redirect IN FRONT of a real run
+# (`2>/dev/null bash tests/a.test.sh`) left `2>/dev/null` at argv[0] and read as none.
+for rd in '<tests/a.test.sh wc -l' '<$R/tests/a.test.sh wc -l' \
+          'while read l; do :; done <$R/tests/a.test.sh' '< tests/a.test.sh wc -l' \
+          '<"tests/a.test.sh" wc -l'; do
+  expect_eq "§REDIR [$rd] reads a suite file, it does not run it" "none" "$(class_of "$rd")"
+  expect_eq "§REDIR …and claims nothing" "" "$(claims_of "$rd")"
+done
+expect_empty "§REDIR farm-out is SILENT on <tests/a.test.sh wc -l" \
+  "$(farm_decision '<tests/a.test.sh wc -l')"
+for rr in '2>/dev/null bash tests/a.test.sh' '>log bash tests/a.test.sh' \
+          '< /dev/null bash tests/a.test.sh' '2> "a b.log" bash tests/a.test.sh' \
+          '>>log 2>&1 bash tests/a.test.sh' 'FOO=1 2>/dev/null bash tests/a.test.sh'; do
+  expect_eq "§REDIR [$rr] runs the suite behind the redirect" "suite" "$(class_of "$rr")"
+  expect_eq "§REDIR …and names it" "a.test.sh" "$(targets_of "$rr")"
+done
+expect_eq "§REDIR …and its run is the command, not the plumbing in front of it" \
+  "bash tests/a.test.sh" "$(claim_run_of '2>/dev/null bash tests/a.test.sh')"
+
+
+section "§LOOP — REQ-6 AC-6.3 (D9): a literal loop or assignment resolves before it refuses"
+# THE REFUSAL THAT CHECKED NOTHING (research R3 Q1). The budget arm reads the command text
+# before the shell expands it, so `for s in a b; do bash tests/$s.test.sh; done` reached it
+# as the one claim `$s.test.sh`, refused as unexpanded — about 100 refusals all-time, 57 of
+# them loops over a fully literal word list. A literal word list, or one literal assignment
+# separated by `;`, `&&` or a newline, is resolved here into the suites it names. A body
+# that reassigns the variable keeps the `$` claim, so the refusal still fires there.
+targets_are 'a.test.sh
+b.test.sh' 'for s in a b; do bash tests/$s.test.sh; done'
+targets_are 'a.test.sh
+b.test.sh' 'for s in a b; do bash "tests/$s.test.sh"; done'
+targets_are 'a.test.sh
+b.test.sh' 'for s in a b; do bash tests/${s}.test.sh; done'
+targets_are 'a.test.sh
+b.test.sh' 'for s in "a" '"'b'"'; do bash tests/$s.test.sh; done'
+targets_are 'a.test.sh
+b.test.sh' 'for s in a b
+do
+  bash tests/$s.test.sh 2>&1 | tee /tmp/$s.log
+done'
+targets_are 'x-p.test.sh
+y-p.test.sh' 'for a in x y; do for b in p; do bash tests/$a-$b.test.sh; done; done'
+targets_are 'a.test.sh' 's=a; bash tests/$s.test.sh'
+targets_are 'a.test.sh' 's=a && bash tests/$s.test.sh'
+targets_are 'a.test.sh' 's=a
+bash tests/$s.test.sh'
+expect_eq "§LOOP …the resolved claim carries the resolved run" \
+  "bash tests/a.test.sh" "$(claim_run_of 's=a; bash tests/$s.test.sh')"
+# SCOPED, as the budget arm calls it: each resolved path is this repo's tests/<basename>.
+expect_eq "§LOOP scoped to a repo root, each resolved suite is that repo's" "a.test.sh
+b.test.sh" "$(targets_of_in "$C8_ROOT" 'for s in a b; do bash tests/$s.test.sh; done')"
+
+# KEPT UNRESOLVED — the same extractor answering `$` beside the resolved rows above.
+targets_are '$s.test.sh' 'for s in a b; do s=run; bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in a b; do read s; bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in a b; do printf -v s x; bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in a b; do export s=c; bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in $(seq 3); do bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in $set; do bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in a*; do bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 's=a bash tests/$s.test.sh'
+targets_are '$s.test.sh' 's=a; s=b; bash tests/$s.test.sh'
+targets_are '$s.test.sh' 's=a | bash tests/$s.test.sh'
+targets_are '$s.test.sh' 's=a & bash tests/$s.test.sh'
+targets_are '$s.test.sh' 'false || s=a; bash tests/$s.test.sh'
+targets_are '$s.test.sh' '(s=a); bash tests/$s.test.sh'
+targets_are '$s.test.sh' 'if c; then s=a; fi; bash tests/$s.test.sh'
+targets_are '$s.test.sh' 'bash tests/$s.test.sh; s=a'
+targets_are '$s.test.sh' 's=$(pick); bash tests/$s.test.sh'
+targets_are '$s.test.sh' 'eval x; s=a; bash tests/$s.test.sh'
+targets_are '$s.test.sh' 'for s in a; do bash '"'"'tests/$s.test.sh'"'"'; done'
+targets_are 'a.test.sh
+b.test.sh
+$s.test.sh' 'for s in a b; do bash tests/$s.test.sh; done; bash tests/$s.test.sh'
+# THE SAME SHAPE WITH THE VARIABLE INSIDE ITS OWN GROUP resolves, beside `(s=a); …` above.
+targets_are 'a.test.sh' '(s=a; bash tests/$s.test.sh)'
+
+
+section "§VAR — REQ-6 AC-6.4 (D9): a variable holding a whole suite name is a suite run"
+# THE BYPASS (research R3 Q1, "guarantee gap"). `X=a.test.sh; bash tests/$X` and
+# `for f in tests/a.test.sh; do bash $f; done` read class NONE: the `.test.sh` the classifier
+# keys on was inside the variable, so neither the budget nor the farm-out wall saw a suite.
+expect_eq "§VAR X=a.test.sh; bash tests/\$X is a suite run" "suite" "$(class_of 'X=a.test.sh; bash tests/$X')"
+targets_are 'a.test.sh' 'X=a.test.sh; bash tests/$X'
+expect_eq "§VAR …as a FILE claim" "file" "$(claim_kinds_of 'X=a.test.sh; bash tests/$X')"
+expect_eq "§VAR a loop over whole suite paths is a suite run" "suite" \
+  "$(class_of 'for f in tests/a.test.sh tests/b.test.sh; do bash $f; done')"
+targets_are 'a.test.sh
+b.test.sh' 'for f in tests/a.test.sh tests/b.test.sh; do bash $f; done'
+expect_eq "§VAR …scoped to a repo root, as the budget arm asks" "a.test.sh" \
+  "$(targets_of_in "$C8_ROOT" 'X=a.test.sh; bash tests/$X')"
+# NEGATIVE CONTROLS on the same extractors: a variable holding something that is not a
+# suite stays what it was.
+expect_eq "§VAR X=notes.txt; cat \$X is not a suite run" "none" "$(class_of 'X=notes.txt; cat $X')"
+expect_eq "§VAR a loop over scripts that are not suites is not a suite run" "none" \
+  "$(class_of 'for f in a.sh b.sh; do bash $f; done')"
+targets_are '' 'for f in a.sh b.sh; do bash $f; done'
 
 finish
