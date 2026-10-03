@@ -257,8 +257,11 @@ fi
 # repository got one run identity, and a plan landing mid-session silently moved a live
 # session onto it. The rule now, in two lines:
 #
-#   the marker already names a plan  -> LEAVE IT. Re-engagement decides nothing.
-#   otherwise, EXACTLY ONE open run  -> bind to it; anything else -> bind to `none`
+#   a marker for this session exists -> LEAVE ITS BINDING. Re-engagement decides nothing.
+#   no marker yet (first engagement)  -> EXACTLY ONE live run: bind to it; else `none`
+#
+# (The first line read "the marker already names a plan" until wave-23-fixit-1810 T15; see
+# FIRST ENGAGEMENT ONLY below for why `plan=none` is now a binding this hook keeps too.)
 #
 # A BINDING SURVIVES RE-ENGAGEMENT WHETHER OR NOT ITS PLAN IS STILL OPEN (S10a, review C-1).
 # It used to survive only while `session_run` said `bound-open`; a `bound-closed` binding
@@ -289,6 +292,22 @@ BOUND=0
 ENGAGE_HELD_BY=""; ENGAGE_HELD_PLAN=""
 if PLAN=$(session_plan "$REPO" "$SID" 2>/dev/null); then
   BOUND=1
+elif [ -e "$MARKER" ]; then
+  # FIRST ENGAGEMENT ONLY (wave-23-fixit-1810 T15, critic N-1; spec D1 Δ5). A marker that
+  # exists but names no plan — `plan=none`, or an older writer's empty file — is a binding
+  # too: the answer this hook, or the operator, already gave. It is rewritten as `none`
+  # through the one writer and never re-derived, because RE-DERIVING IT IS HOW A RUN CHANGES
+  # HANDS. The held rule below leaves a bystander B at `none` beside A's live run. When A
+  # `/clear`s, the CLI rewrites A's pid file with A2's id, so A's marker belongs to no live
+  # session; had B's next skill invocation run the count rule again, it would find the run
+  # unheld and bind B to it, and A2 would then be told B holds its own wave (critic N-1,
+  # `clearrace.sh`): the seed's symptom by ownership transfer. Nothing that changes between
+  # B's engagements — a holder dying, a /clear, a run opening or closing — is a reason for B
+  # to own a run it never asked for, so the guess is made once, at the first engagement, and
+  # a later binding is made by hand (`session-poker.sh bind <plan>`) or by the governing
+  # skill's bind-on-first-write when B writes its own plan. A2 is a NEW session id with no
+  # marker, so it is a first engagement and binds the now-unheld run.
+  PLAN="none"
 else
   PLAN="none"
   # wave-roster-lifecycle S2 (spec AC-2; design §2 "engage.sh"): the count rule counts
