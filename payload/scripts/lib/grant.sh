@@ -7,10 +7,11 @@
 # link of that chain and the one rule every permission answer is read from:
 #
 #   grant_roots <class> [<key>=<value>]...
-#       Composes a class's roots from facts the caller hands it (D4). Sets two globals,
-#       GRANT_WRITE_ROOTS and GRANT_DELETE_ROOTS, newline-separated; prints nothing. rc 0;
-#       rc 2 on an unknown class, an unknown or repeated key, or a value carrying a newline
-#       or a tab (both globals are left empty). Keys, each optional:
+#       Composes a class's roots from facts the caller hands it (D4). Sets three globals,
+#       GRANT_WRITE_ROOTS and GRANT_DELETE_ROOTS, newline-separated, and GRANT_MAIN_ROOT;
+#       prints nothing. rc 0; rc 2 on an unknown class, an unknown or repeated key, a value
+#       carrying a newline or a tab, or a `main=` that cannot be a root (all three globals
+#       are left empty). Keys, each optional:
 #         scratch=<dir>    the session scratch          every class: write and delete
 #         checkout=<dir>   the wave checkout            lead: write and delete
 #         tree=<dir>       a tree this session recorded lead: write and delete (repeatable)
@@ -18,18 +19,23 @@
 #         record=<dir>     the run's record directory   lead: write and delete; writer: write
 #         plan=<file>      a plan file of the run       lead: write and delete (repeatable)
 #         report=<file>    the asker's declared report  reader: write
+#         main=<dir>       the project's main checkout  every class: no root; the carve-outs
 #       A fact a class does not take is ignored, so the caller may hand every fact it holds.
 #       A missing fact contributes no root. A value that is not an absolute path, that holds
 #       a `..` component, or that is `/` contributes no root either: a grant only narrows.
-#       Order is scratch first, so the first delete root is a place to put a script.
+#       `main=` is the exception: it only ever narrows, so an unusable one is rc 2 rather than
+#       dropped, and an empty one is no main root. Order is scratch first, so the first delete
+#       root is a place to put a script.
 #
-#   grant_decide <class> <write-roots> <delete-roots> <effects> [<category>]
+#   grant_decide <class> <write-roots> <delete-roots> <effects> [<category>] [<main-root>]
 #       THE DECISION (D2). Prints exactly one line: `allow`, `deny-fix<TAB><reason><TAB><fix>`
 #       or `deny-reserved<TAB><category><TAB><reason>`; rc 0. rc 2, and nothing on stdout,
-#       on malformed input: an unknown class, an unknown category, or an effect line that is
-#       not `W<TAB><path>`, `D<TAB><path>` or `?<TAB><reason><TAB><segment>`. The optional
-#       fifth argument is what grant_reserved printed for the same action; empty means none.
-#       The message an asker reads is the reason, a space, and the fix.
+#       on malformed input: an unknown class, an unknown category, a main root that cannot be
+#       a root, or an effect line that is not `W<TAB><path>`, `D<TAB><path>` or
+#       `?<TAB><reason><TAB><segment>`. The optional fifth argument is what grant_reserved
+#       printed for the same action; empty means none. The optional sixth is GRANT_MAIN_ROOT;
+#       empty means none, and the decision is then exactly what it was without it. The
+#       message an asker reads is the reason, a space, and the fix.
 #
 #   grant_reserved <tool> <command or path>
 #       THE RESERVED TABLE (D6). Prints the category — leaves-the-machine, credentials,
@@ -50,14 +56,33 @@
 # that order is the one the denial names:
 #   1. a reserved category              deny-reserved (it wins over every allow)
 #   2. a state file, for every class    deny-fix, before any root is consulted
+#      (then a W to a device sink is skipped: it is no effect, for every class)
 #   3. an effect the reader marked `?`  deny-fix
 #   4. a path that is not resolved      deny-fix (relative, a `..` component, the `?` mark)
-#   5. a W outside the write roots, or a D outside the delete roots   deny-fix
+#   5. a path the main root keeps from every run's checkout          deny-fix
+#   6. a W outside the write roots, or a D outside the delete roots   deny-fix
 # Containment is by path component: root `/x/25-T1` contains `/x/25-T1` and `/x/25-T1/a`,
 # never `/x/25-T10/f`. bionic's state files are a basename `roster-*`, `engaged-*`,
 # `patrol-*`, `workspaces-*` or `gate-*` anywhere under a `.bionic/tmp` directory, matched
 # without regard to case (a case-blind filesystem writes `Roster-x` into `roster-x`); a
 # delete of `.bionic` or `.bionic/tmp` itself takes them all and is one too.
+#
+# DEVICE SINKS. A W whose path is exactly /dev/null, /dev/stdout, /dev/stderr, /dev/tty or
+# /dev/fd/<digits> changes no file (the reader prints one for every `2>/dev/null`), so it is
+# no effect for any class. A D of a sink, and any other path under /dev, is judged as usual,
+# which puts it outside every root.
+#
+# THE MAIN ROOT'S CARVE-OUTS (rule 5; AC-2.2, AC-2.7). When a run works in the main checkout,
+# its checkout root physically holds three directories no run created: `.bionic` (every run's
+# docs, records and state), `.worktrees` (every run's trees) and `.git`. Given the main root:
+#   a. a path under <main>/.bionic is granted only by a root itself under <main>/.bionic (the
+#      record directory, a plan file, a declared report), never by a checkout, tree or own root;
+#   b. a path under <main>/.worktrees is granted only by a root itself under <main>/.worktrees
+#      (a recorded tree, the asker's own tree, a linked wave checkout);
+#   c. a path under <main>/.git is granted by no root;
+#   d. a delete of <main> itself, or of a directory above it, is denied for every class.
+# The three names are matched without regard to case, as the state files are. Under a or b, a
+# path that no root would have contained anyway is plain rule 6, so its denial reads as before.
 #
 # A RESERVED ACTION THE TABLE MISSES IS STILL DENIED. The table only changes the wording and
 # routes the request to the human. An action it does not recognise is unknown to the reader
@@ -93,6 +118,7 @@ GRANT_TAB=$'\t'
 GRANT_NL=$'\n'
 GRANT_WRITE_ROOTS=""
 GRANT_DELETE_ROOTS=""
+GRANT_MAIN_ROOT=""
 
 # ── roots ────────────────────────────────────────────────────────────────────────────────
 
@@ -125,9 +151,10 @@ _grant_add() {
 
 grant_roots() {
   local cls="${1-}" kv key val p
-  local scratch="" checkout="" own="" record="" report="" trees="" plans="" seen=" "
+  local scratch="" checkout="" own="" record="" report="" trees="" plans="" main="" seen=" "
   GRANT_WRITE_ROOTS=""
   GRANT_DELETE_ROOTS=""
+  GRANT_MAIN_ROOT=""
   case "$cls" in
     lead|writer|reader|unbound) ;;
     *) printf 'grant_roots: unknown class: %s\n' "$cls" >&2; return 2 ;;
@@ -145,7 +172,7 @@ grant_roots() {
         printf 'grant_roots: %s carries a newline or a tab\n' "$key" >&2; return 2 ;;
     esac
     case "$key" in
-      scratch|checkout|own|record|report)
+      scratch|checkout|own|record|report|main)
         case "$seen" in
           *" $key "*) printf 'grant_roots: %s given twice\n' "$key" >&2; return 2 ;;
         esac
@@ -158,11 +185,17 @@ grant_roots() {
       own) own="$val" ;;
       record) record="$val" ;;
       report) report="$val" ;;
+      main) main="$val" ;;
       tree) trees="$trees$GRANT_NL$val" ;;
       plan) plans="$plans$GRANT_NL$val" ;;
       *) printf 'grant_roots: unknown fact: %s\n' "$key" >&2; return 2 ;;
     esac
   done
+  if [ -n "$main" ]; then
+    main="$(_grant_clean_root "$main")" || {
+      printf 'grant_roots: main is not an absolute directory other than /\n' >&2; return 2; }
+  fi
+  GRANT_MAIN_ROOT="$main"
   _grant_add wd "$scratch"
   case "$cls" in
     lead)
@@ -229,6 +262,50 @@ _grant_is_state() {
   return 1
 }
 
+# _grant_is_sink <path> — rc 0 when the path is exactly one of the device sinks.
+_grant_is_sink() {
+  case "$1" in
+    /dev/null|/dev/stdout|/dev/stderr|/dev/tty) return 0 ;;
+    /dev/fd/*)
+      case "${1#/dev/fd/}" in
+        ""|*[!0-9]*) return 1 ;;
+      esac
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# _grant_shared <path> <main> <bionic|worktrees|git> — rc 0 when the path is <main>/.<name>
+# or under it, the name matched without regard to case.
+_grant_shared() {
+  local p="$1" seg
+  while [ "${#p}" -gt 1 ] && [ "${p%/}" != "$p" ]; do p="${p%/}"; done
+  case "$p" in
+    "$2"/*) ;;
+    *) return 1 ;;
+  esac
+  seg="${p#"$2"/}"
+  seg="${seg%%/*}"
+  case "$3:$seg" in
+    bionic:.[Bb][Ii][Oo][Nn][Ii][Cc]) return 0 ;;
+    worktrees:.[Ww][Oo][Rr][Kk][Tt][Rr][Ee][Ee][Ss]) return 0 ;;
+    git:.[Gg][Ii][Tt]) return 0 ;;
+  esac
+  return 1
+}
+
+# _grant_holds_main <path> <main> — rc 0 when the path is the main root or a directory above it.
+_grant_holds_main() {
+  local p="$1"
+  while [ "${#p}" -gt 1 ] && [ "${p%/}" != "$p" ]; do p="${p%/}"; done
+  [ "$p" = / ] && return 0
+  case "$2" in
+    "$p"|"$p"/*) return 0 ;;
+  esac
+  return 1
+}
+
 # _grant_list <roots> — the roots as prose: `a`, `a and b`, `a, b and c`.
 _grant_list() {
   local r out="" last="" n=0
@@ -281,8 +358,9 @@ _grant_category_words() {
 }
 
 grant_decide() {
-  local cls="${1-}" wr_in="${2-}" dr_in="${3-}" effects="${4-}" cat="${5-}"
-  local line rest reason r wr="" dr="" kind path seg
+  local cls="${1-}" wr_in="${2-}" dr_in="${3-}" effects="${4-}" cat="${5-}" main="${6-}"
+  local line rest reason r wr="" dr="" kind path seg how ewr edr
+  local wr_b="" dr_b="" wr_t="" dr_t=""
   local worst=9 rank n_fail=0 f_kind="" f_path="" f_seg="" f_how=""
   case "$cls" in
     lead|writer|reader|unbound) ;;
@@ -292,6 +370,10 @@ grant_decide() {
     ""|leaves-the-machine|credentials|production-infrastructure|billing) ;;
     *) printf 'grant_decide: unknown category: %s\n' "$cat" >&2; return 2 ;;
   esac
+  if [ -n "$main" ]; then
+    main="$(_grant_clean_root "$main")" || {
+      printf 'grant_decide: main root is not an absolute directory other than /\n' >&2; return 2; }
+  fi
 
   # Every line is checked for shape before any is judged: malformed anywhere is rc 2.
   while IFS= read -r line; do
@@ -323,12 +405,29 @@ grant_decide() {
     r="$(_grant_clean_root "$line")" && dr="${dr:+$dr$GRANT_NL}$r"
   done <<< "$dr_in"
 
-  # 2–5. Rank every effect; the denial names the first of the lowest rank.
+  # 5a, 5b. Inside a shared directory, only the roots that are themselves inside it count.
+  if [ -n "$main" ]; then
+    while IFS= read -r r; do
+      [ -n "$r" ] || continue
+      if _grant_shared "$r" "$main" bionic; then wr_b="${wr_b:+$wr_b$GRANT_NL}$r"
+      elif _grant_shared "$r" "$main" worktrees; then wr_t="${wr_t:+$wr_t$GRANT_NL}$r"
+      fi
+    done <<< "$wr"
+    while IFS= read -r r; do
+      [ -n "$r" ] || continue
+      if _grant_shared "$r" "$main" bionic; then dr_b="${dr_b:+$dr_b$GRANT_NL}$r"
+      elif _grant_shared "$r" "$main" worktrees; then dr_t="${dr_t:+$dr_t$GRANT_NL}$r"
+      fi
+    done <<< "$dr"
+  fi
+
+  # 2–6. Rank every effect; the denial names the first of the lowest rank.
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     kind="${line%%"$GRANT_TAB"*}"
     rest="${line#*"$GRANT_TAB"}"
     rank=0
+    how=""
     if [ "$kind" = "?" ]; then
       path="${rest%%"$GRANT_TAB"*}"
       seg="${rest#*"$GRANT_TAB"}"
@@ -336,20 +435,39 @@ grant_decide() {
     else
       path="$rest"
       seg=""
+      ewr="$wr"
+      edr="$dr"
+      if [ -n "$main" ]; then
+        if _grant_shared "$path" "$main" bionic; then ewr="$wr_b"; edr="$dr_b"; how=bionic
+        elif _grant_shared "$path" "$main" worktrees; then ewr="$wr_t"; edr="$dr_t"; how=worktrees
+        elif _grant_shared "$path" "$main" git; then how=git
+        elif [ "$kind" = D ] && _grant_holds_main "$path" "$main"; then how=holds
+        fi
+      fi
       if _grant_is_state "$kind" "$path"; then
         rank=2
+      elif [ "$kind" = W ] && _grant_is_sink "$path"; then
+        rank=0
       elif _grant_unresolved "$path"; then
         rank=4
+      elif [ "$how" = git ] || [ "$how" = holds ]; then
+        rank=5
       elif [ "$kind" = W ]; then
-        _grant_inside "$path" "$wr" || rank=5
-      else
-        _grant_inside "$path" "$dr" || rank=5
+        if ! _grant_inside "$path" "$ewr"; then
+          rank=6
+          _grant_inside "$path" "$wr" && rank=5
+        fi
+      elif ! _grant_inside "$path" "$edr"; then
+        rank=6
+        if _grant_inside "$path" "$ewr"; then how=add-only
+        elif _grant_inside "$path" "$dr"; then rank=5
+        fi
       fi
     fi
     [ "$rank" -gt 0 ] || continue
     n_fail=$((n_fail + 1))
     if [ "$rank" -lt "$worst" ]; then
-      worst=$rank; f_kind="$kind"; f_path="$path"; f_seg="$seg"
+      worst=$rank; f_kind="$kind"; f_path="$path"; f_seg="$seg"; f_how="$how"
     fi
   done <<< "$effects"
 
@@ -367,11 +485,23 @@ grant_decide() {
       ;;
     4) reason="Could not resolve $f_path to a real location, so it cannot be shown to be inside the workspace." ;;
     5)
+      case "$f_how" in
+        holds)
+          if _grant_holds_main "$main" "$f_path"; then
+            reason="$f_path is the project's main checkout, and the project's shared directories are not part of a run's checkout, so no one may delete it."
+          else
+            reason="$f_path holds the whole project at $main, and the project's shared directories are not part of a run's checkout, so no one may delete it."
+          fi
+          ;;
+        git) reason="$f_path is in $main/.git, and the project's shared directories are not part of a run's checkout: nothing in .git is in any workspace." ;;
+        *) reason="$f_path is in $main/.$f_how, and the project's shared directories are not part of a run's checkout: only what this run recorded inside them is in a workspace." ;;
+      esac
+      ;;
+    6)
       if [ "$f_kind" = W ]; then
         reason="$f_path is outside the workspace of $(_grant_who "$cls")."
-      elif _grant_inside "$f_path" "$wr"; then
+      elif [ "$f_how" = add-only ]; then
         reason="$f_path is in a place $(_grant_who "$cls") may add to but not delete from."
-        f_how=add-only
       else
         reason="$f_path is outside where $(_grant_who "$cls") may delete."
       fi
@@ -392,6 +522,15 @@ grant_decide() {
       3) fix="Put the commands in a script file under $dir and run it from there with bash." ;;
       4) fix="Name the target by its full real path under $dir." ;;
       5)
+        if [ "$f_kind" = W ]; then
+          fix="Write it under $dir instead."
+        elif [ "$cls" = lead ]; then
+          fix="Leave it in place, and report it to the human if it must go."
+        else
+          fix="Leave it in place and ask the lead to remove it if it must go."
+        fi
+        ;;
+      6)
         if [ "$f_kind" = W ]; then
           fix="Write it under $dir instead."
         elif [ "$f_how" = add-only ]; then
