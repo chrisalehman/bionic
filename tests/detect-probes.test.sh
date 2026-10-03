@@ -729,6 +729,28 @@ printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": 0}}\n' > "$AM_ROOT/.claude/s
 expect_eq "a local numeric 0 is an override, and the local file is the one named" \
   "env:auto-memory override=.claude/settings.local.json dir=none files=0" "$(am_probe)"
 
+# THE CLI'S OWN READING OF THE VALUE (wave-23 T14, critic C-6). The CLI lowercases and
+# trims the value; "1", "true", "yes", "on" mean disable (so no override), and every
+# other value, "0", "false", "no", "off", the empty string and any unknown word, turns
+# memory back on.
+am_value_case() {  # <label> <raw JSON value> <expected override field>
+  am_fixture "val-$1" no no
+  mkdir -p "$AM_ROOT/.claude"
+  printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": %s}}\n' "$2" > "$AM_ROOT/.claude/settings.json"
+  expect_eq "value $2: override=$3" \
+    "env:auto-memory override=$3 dir=none files=0" "$(am_probe)"
+}
+am_value_case true  '"true"'  none
+am_value_case TRUE  '"YES"'   none
+am_value_case on    '"on"'    none
+am_value_case pad   '" 1 "'   none
+am_value_case zero  '"0"'     .claude/settings.json
+am_value_case off   '"off"'   .claude/settings.json
+am_value_case no    '"no"'    .claude/settings.json
+am_value_case false '"false"' .claude/settings.json
+am_value_case empty '""'      .claude/settings.json
+am_value_case junk  '"maybe"' .claude/settings.json
+
 # AN EMPTY DIRECTORY IS NAMED BUT COUNTS NOTHING, and the row reads files, not the directory.
 am_fixture empty no no
 mkdir -p "$AM_HOME/projects/$(am_slug "$AM_ROOT")/memory"
