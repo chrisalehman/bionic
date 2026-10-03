@@ -19,13 +19,11 @@ Mechanical test-suite execution and full result reporting.
 Every factual claim in your report — a test result, a file's existence, a command's
 outcome — carries the command that proves it and that command's output, or the explicit
 label `unverified`. An `unverified` claim obligates the orchestrator to re-check before
-acting; a claim with neither proof nor label is a contract violation. Completion is
-signaled, never inferred: idle is never a substitute for it.
+acting; a claim with neither proof nor label is a contract violation.
 
 **Deliver the report with the SendMessage tool**, addressed to whoever dispatched you
-(`to: "main"` unless your brief names another recipient). Plain final text is discarded —
-your closing prose is written into your own transcript and routed to no one, so a report
-that exists only there is a report nobody receives. Send it, then stop.
+(`to: "main"` unless your brief names another recipient). Completion is signaled,
+never inferred: plain final text and going idle reach no one. Send it, then stop.
 <!-- REPORT-CONTRACT-END -->
 
 ## Bounds
@@ -66,15 +64,10 @@ Re-executes: the only other runs you may make.
 Deliverable-waiver: report by message, not a file.
 <!-- BRIEF-SCAFFOLD-READER-END -->
 
-You do not write `Suites:` lines; you run only the suites your brief names.
-
 <!-- DISPATCH-RULES-BEGIN -->
 - **Spell each suite literally**: one `bash tests/<name>.test.sh` per suite, one call each.
-  No loop variable, no assignment — the wall reads your command text before the shell
-  expands it, and a suite it cannot read is refused.
-- **Never end your turn while a command or an external run is in flight** — a CI job, a
-  background task. Watch it in the foreground, then continue. Idle is not a wait; the run
-  outlives you and nobody is told.
+- **Never end your turn with a command or an external run (CI, a background task) in flight**:
+  watch it in the foreground.
 <!-- DISPATCH-RULES-END -->
 
 Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.

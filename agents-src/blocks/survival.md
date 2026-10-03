@@ -29,9 +29,6 @@ about doing the job well; they are about still being alive to report it.
   sanctioned, audited `FARM_OUT_ALLOW=1` prefix. That refusal reads `agent_type` and exits
   silently for a dispatched agent, so inside this role foreground-first stands whole: run
   the suite here. Add the prefix only when your brief tells you to.
-- **Never end your turn while a command is running.** When a foreground agent gives its final
-  response the harness ENDS its running commands — stopping to wait kills the work and gets no
-  wake. Not to save tokens, not to be polite, not because the context is long.
 - **Suite output always goes to a file, with `set -o pipefail`.** `<command> 2>&1 | tee "$LOG"`;
   validate the FILE, name every log path in your report. **`run_in_background` and `Monitor` are
   forbidden for evidence-producing commands** — a suite, a build, a drill — even under the
