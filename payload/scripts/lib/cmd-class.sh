@@ -1218,7 +1218,7 @@ _CMD_WRITES_AWK='
           if (c == "<") {
             if (nx == ">") { W[++n] = "<>"; K[n] = "R"; i++; continue }
             if (nx == "&") { i++; while (substr(s, i + 1, 1) ~ /[0-9-]/) i++; W[++n] = "<&"; K[n] = "D"; continue }
-            if (nx == "<") { i++; if (substr(s, i + 1, 1) == "<" || substr(s, i + 1, 1) == "-") i++ }
+            if (nx == "<") { i++; if (substr(s, i + 1, 1) == "<" || substr(s, i + 1, 1) == "-") i++; W[++n] = "<<"; K[n] = "I"; continue }
             W[++n] = "<"; K[n] = "I"; continue
           }
           if (c == "&") i++
@@ -1377,9 +1377,9 @@ _CMD_WRITES_AWK='
       if (depth == 0) { compound_pass(k, sg); expand_all(k, sg, s) }
       j = 0
       for (i = 1; i <= k; i++) {
-        j++; WG[depth, j] = SEGGRP[i]; WSK[depth, j] = SEPKIND[i]
+        j++; WG[depth, j] = SEGGRP[i]; WSK[depth, j] = SEPKIND[i]; WRAW[depth, j] = sg[i]
         if (i < k && SEPKIND[i] == "|" && substr(sg[i], length(sg[i]), 1) == ">") {
-          WNX[depth, j] = 1; WX[depth, j, 1] = sg[i] sg[i + 1]; WSK[depth, j] = SEPKIND[i + 1]; i++; continue
+          WNX[depth, j] = 1; WX[depth, j, 1] = sg[i] sg[i + 1]; WSK[depth, j] = SEPKIND[i + 1]; WRAW[depth, j] = sg[i] sg[i + 1]; i++; continue
         }
         WNX[depth, j] = (depth == 0 ? NX[i] : 1)
         for (x = 1; x <= WNX[depth, j]; x++) WX[depth, j, x] = (depth == 0 ? XT[i, x] : sg[i])
@@ -1429,6 +1429,13 @@ cmd_write_targets() {  # <command> [<cwd>] -> one resolved write target per line
 # `popd` and a `cd` to a variable, after which relative paths are `?` too; `xargs`, `eval`,
 # `source`/`.`; a `git` subcommand that is not a known reader, `git -c`, `--output`; `find`
 # with `-exec` or a file-printing primary; a sed script that writes or runs (`w`, `e`, `-f`).
+#
+# READS (orchestrator additions 2026-10-03). A read prints no line, so a read whose file the
+# text does not name is `?`: an operand of cat, ls, head, tail, grep, wc, a git reader or find,
+# or an input redirect `<`, that still holds a variable, substitution, glob, brace or leading
+# `~` after expansion, or that came from a substituted literal (`d=.ssh; cat ~/$d/id`).
+# Options and grep s pattern are not operands. `find -L`, `-H` and `-follow` are `?`: they walk
+# through symlinks to places the roots do not name.
 #
 # WHERE A PATH IS READ AGAINST. A cd counts only where the text proves it ran (fx_step): a
 # relative path after a cd whose list ended on `;`, a newline or `||` is `?`, because a failed
@@ -1494,6 +1501,29 @@ _CMD_EFFECTS_AWK='
       if (r != "") fx_unk(r, s)
       return (r != "")
     }
+    # A READ OPERAND THE TEXT DOES NOT NAME (orchestrator addition 2026-10-03). A read prints
+    # no line, so `cat ~/.ss?/id_ed25519` would read as no effect at all, and the reserved table
+    # matches literal paths only. 1 when w, expanded, still holds a variable, substitution,
+    # glob, brace or leading ~.
+    function fx_rop(w,   p) { p = fx_expand(w); return (p ~ /[[$`*?{]/ || substr(p, 1, 1) == "~") }
+    # Any unresolved operand of a file reader from argv[from]. Options are not operands, and
+    # neither is grep s pattern (its first operand unless -e or -f gave one); the file an option
+    # names (-f, --file=, --exclude-from=, --files0-from=) is.
+    function fx_rargs(B, m, from,   j, w, pat, opt) {
+      pat = (B[1] == "grep"); opt = 1
+      for (j = from; j <= m; j++) {
+        w = B[j]
+        if (opt && w == "--") { opt = 0; continue }
+        if (opt && B[1] == "grep" && (w == "-e" || w == "--regexp")) { j++; pat = 0; continue }
+        if (opt && B[1] == "grep" && (w == "-f" || w == "--file")) { pat = 0; j++; if (j <= m && fx_rop(B[j])) return 1; continue }
+        if (opt && w ~ /^--(file|exclude-from|files0-from)=/) { if (B[1] == "grep" && w ~ /^--file=/) pat = 0; if (fx_rop(substr(w, index(w, "=") + 1))) return 1; continue }
+        if (opt && B[1] == "grep" && w ~ /^(-e.|--regexp=)/) { pat = 0; continue }
+        if (opt && w ~ /^-./) continue
+        if (pat) { pat = 0; continue }
+        if (fx_rop(w)) return 1
+      }
+      return 0
+    }
     function fx_flat(s) {
       if (length(s) > 300) s = substr(s, 1, 300) "..."
       gsub(/[\t\r\n]+/, " ", s)
@@ -1557,10 +1587,15 @@ _CMD_EFFECTS_AWK='
       }
       s = (j <= m ? B[j] : "")
       if (!(("git:" s) in FX_READ)) { fx_unk("git " s " is not a known reader", t); return }
+      if (FX_EXP || fx_rargs(B, m, 2)) FX_ROPA = 1
       for (j++; j <= m; j++) if (B[j] ~ /^--output(=|$)/) { fx_unk("git " s " --output writes a file", t); return }
     }
-    function fx_find(B, m, cwd, t,   j, nr, RT, del) {
-      for (j = 2; j <= m && B[j] ~ /^-[HLPEXdsx]+$/; j++) ;
+    # find: its roots are read operands, and -delete deletes each. -L, -H and -follow walk
+    # through symlinks to places the roots do not name (orchestrator addition 2026-10-03:
+    # every worktree holds a .bionic link into shared state), so they are unknown.
+    function fx_find(B, m, cwd, t,   j, nr, RT, del, fl) {
+      fl = 0
+      for (j = 2; j <= m && B[j] ~ /^-[HLPEXdsx]+$/; j++) if (B[j] ~ /[HL]/) fl = 1
       nr = 0
       for (; j <= m; j++) {
         if (B[j] == "-f" && j < m) { RT[++nr] = B[++j]; continue }
@@ -1572,7 +1607,11 @@ _CMD_EFFECTS_AWK='
         if (B[j] ~ /^-(exec|execdir|ok|okdir)$/) { fx_unk("find runs a command", t); return }
         if (B[j] ~ /^-(fprint|fprint0|fprintf|fls)$/) { fx_unk("find writes a file", t); return }
         if (B[j] == "-delete") del = 1
+        if (B[j] == "-follow") fl = 1
       }
+      if (fl) { fx_unk("find follows symlinks", t); return }
+      for (j = 1; j <= nr; j++) if (fx_rop(RT[j])) FX_ROPA = 1
+      if (FX_EXP) FX_ROPA = 1
       if (!del) return
       if (nr == 0) RT[++nr] = "."
       for (j = 1; j <= nr; j++) fx_emit("D", RT[j], cwd)
@@ -1604,6 +1643,7 @@ _CMD_EFFECTS_AWK='
     function fx_step(depth, i, k, g, before,   x, c, c1, s, pv, nx) {
       if (FXN[depth, g]) { FXS[depth, g] = before; FXC[depth, g] = 0; FXI[depth, g] = i; FXN[depth, g] = 0 }
       for (x = 1; x <= WNX[depth, i]; x++) {
+        FX_EXP = (WX[depth, i, x] != WRAW[depth, i])
         c1 = fx_seg(trim(WX[depth, i, x]), before, depth)
         if (x == 1) c = c1
         else if (c1 != c) c = FX_LOST
@@ -1643,9 +1683,10 @@ _CMD_EFFECTS_AWK='
       # segmenter may have carried the next line into it.
       if (substr(t, 1, 1) == "#" && t !~ /[\047"\\\n]/) return cwd
       if (index(t, "\n") && t ~ /(^|[ \t\n])#/) { fx_unk("a comment inside a segment that spans lines", t); return FX_LOST }
-      sv = FX_SEG; FX_SEG = t; neg = 0
+      sv = FX_SEG; FX_SEG = t; neg = 0; FX_ROPA = 0
       n = wt_tok(t, W, K); m = 0
       for (j = 1; j <= n; j++) {
+        if (K[j] == "I" && W[j] == "<" && j < n && K[j + 1] == "W" && fx_rop(W[j + 1])) FX_ROPA = 1
         if (K[j] == "R" || K[j] == "I") { if (K[j] == "R" && j < n && K[j + 1] == "W") fx_emit("W", W[j + 1], cwd); j++; continue }
         if (K[j] == "W") A[++m] = W[j]
       }
@@ -1677,6 +1718,8 @@ _CMD_EFFECTS_AWK='
       for (j = 1; j <= m; j++) B[j] = A[i + j - 1]
       if (neg && m > 0 && base(B[1]) ~ /^(cd|pushd|popd)$/) { fx_unk("a negated cd: what follows runs where it failed", t); FX_SEG = sv; return FX_LOST }
       if (m > 0) cwd = fx_argv(B, m, cwd, depth, t)
+      if (FX_ROPA) fx_unk("unresolved read operand", t)
+      FX_ROPA = 0
       FX_SEG = sv
       return cwd
     }
@@ -1694,6 +1737,7 @@ _CMD_EFFECTS_AWK='
       if (b == "git") { fx_git(B, m, t); return cwd }
       if (b == "find") { fx_find(B, m, cwd, t); return cwd }
       if (b in FX_READ) {
+        if (b ~ /^(cat|ls|head|tail|grep|wc)$/ && (FX_EXP || fx_rargs(B, m, 2))) FX_ROPA = 1
         if (b == "date") for (j = 2; j <= m; j++) if (B[j] ~ /^(-s|--set)/ || B[j] !~ /^[-+]/) fx_unk("date may set the clock", t)
         return cwd
       }

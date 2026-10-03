@@ -1774,6 +1774,32 @@ fx_are '?' 'cd /s || return; rm f' /w
 fx_are '?' 'date 0101000020'
 fx_are "D${T}/a/b" 'date -u +%FT%TZ; rm /a/b'
 
+# --- a read prints no line, so a read whose file the text does not name is unknown ---
+# (orchestrator addition 2026-10-03.) The reserved table matches literal paths only, so
+# `cat ~/.ss?/id_ed25519` would otherwise read as "no effects" and be allowed.
+fx_are '?' 'cat ~/.ss?/id_ed25519'
+fx_are '?' 'd=.ssh; cat ~/$d/id'
+fx_are '' 'cat /a/b'
+fx_are "D${T}/a/c" 'cat /a/b; rm /a/c'
+fx_are '?' 'ls *.md' /w
+fx_are '?' 'cat ~/.ssh/{id_rsa,id_ed25519}'
+fx_are '?' 'wc -l < ~/.ss?/id'
+fx_are '?' 'git diff --no-index ~/.ss?/a /a/b' /w
+fx_are '?' 'grep -rn x /a/*.md' /w
+# A grep pattern and an option are not files: they stay unread text.
+fx_are '' "grep -rn 'a*b' /a" /w
+fx_are '' "grep -e 'x?' --include='*.md' -r /a" /w
+fx_are '' 'head -n 5 /a/f' /w
+
+# --- find that follows symlinks reaches past the root it names (orchestrator addition) ---
+# Every worktree holds a `.bionic` link into shared state: `find -L <tree> -delete` deletes
+# through it while its D line names only the tree.
+fx_are '?' 'find -L /a -delete'
+fx_are '?' 'find -H /a -name x'
+fx_are '?' 'find /a -follow -type f'
+fx_are "D${T}/a" 'find /a -delete'
+fx_are '?' "find /a* -name x"
+
 # --- the wave's incident: the variable is set inside the inner shell, so its target is unread ---
 FX_INC='echo TR; bash -c '"'"'TR=./x.jsonl; touch $TR; rm -f $TR'"'"
 fx_are '?' "$FX_INC" /w
@@ -1801,5 +1827,19 @@ expect_eq "§FX mutant: a delete is still read (the mutant runs)" "D${T}/a/b" "$
 expect_eq "§FX mutant: the variable target is omitted — the defect" "" "$(FX_LIB="$FX_MUT" fx_shape 'rm -f $X')"
 expect_eq "§FX mutant: the incident reads as harmless — the defect" "" "$(FX_LIB="$FX_MUT" fx_shape "$FX_INC" /w)"
 expect_eq "§FX shipped: the same incident is unknown" "?" "$(fx_shape "$FX_INC" /w)"
+
+# --- mutation controls for the two orchestrator additions: the check taken out is the defect ---
+FX_MUT2="$SANDBOX/cmd-class.fx-mutant-rop.sh"
+anchor "$LIB" 'fx_unk("unresolved read operand", t)' 1
+grep -vF 'fx_unk("unresolved read operand", t)' "$LIB" > "$FX_MUT2"
+expect_true "§FX read-operand mutant parses" bash -n "$FX_MUT2"
+expect_eq "§FX read-operand mutant: a delete is still read (the mutant runs)" "D${T}/a/b" "$(FX_LIB="$FX_MUT2" fx_shape 'rm -f /a/b')"
+expect_eq "§FX read-operand mutant: the globbed key read is no effect — the defect" "" "$(FX_LIB="$FX_MUT2" fx_shape 'cat ~/.ss?/id_ed25519')"
+FX_MUT3="$SANDBOX/cmd-class.fx-mutant-follow.sh"
+anchor "$LIB" 'fx_unk("find follows symlinks", t)' 1
+grep -vF 'fx_unk("find follows symlinks", t)' "$LIB" > "$FX_MUT3"
+expect_true "§FX find-follow mutant parses" bash -n "$FX_MUT3"
+expect_eq "§FX find-follow mutant: plain -delete is still a D (the mutant runs)" "D${T}/a" "$(FX_LIB="$FX_MUT3" fx_shape 'find /a -delete')"
+expect_eq "§FX find-follow mutant: -L -delete names only the root — the defect" "D${T}/a" "$(FX_LIB="$FX_MUT3" fx_shape 'find -L /a -delete')"
 
 finish
