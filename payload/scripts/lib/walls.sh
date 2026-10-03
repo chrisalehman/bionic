@@ -5680,11 +5680,12 @@ budget_refuse() {  # <suite basename>
   # the problem. Two readers hit it before this branch existed.
   #
   # THE FIX IS THE LOOP'S OWN WORDS (wave-24 T13, D10, AC-6.3). A loop whose header is all
-  # literal words still names its suites, even when its body reassigns the variable and the
-  # classifier will not vouch for what runs: `cmd_suite_loop_lines` (lib/cmd-class.sh) puts
-  # each word into the path the body runs and hands back one `bash <path>` line each. The
-  # wall prints them and never parses the loop itself. A `$` the text gives no words for —
-  # `$(ls)`, a glob, a prefix assignment — has no line to print, and the detail says so.
+  # literal words still names its suites when the classifier will not expand the command:
+  # `cmd_suite_loop_lines` (lib/cmd-class.sh) puts each word into the path the body runs and
+  # hands back one `bash <path>` line each. The wall prints them and never parses the loop
+  # itself. A `$` the text gives no words for — `$(ls)`, a glob, a prefix assignment — has no
+  # line to print, and neither has a loop whose body reassigns its variable, since its header
+  # is not what runs (wave-24 T26); the detail says so and asks for the lines meant.
   case "$1" in
     *'$'*|*'`'*)
       local _loop_lines _spell
@@ -5693,8 +5694,10 @@ budget_refuse() {  # <suite basename>
         _spell="Spell each suite literally, one call each — the words of the loop header:
 ${_loop_lines}"
       else
-        _spell="The text gives no literal list to expand, so no line can be printed for it.
-Spell each suite literally, one call each: bash tests/<suite>.test.sh"
+        _spell="From this text no literal list can be derived: a command substitution, a glob or
+a prefix assignment names no words, and a loop whose body reassigns its variable runs something
+other than the words of its header, so no line is printed for it.
+Write the literal lines you mean, one call each: bash tests/<name>.test.sh"
       fi
       fold_block exit2 suite-run \
         "$(_budget_wire_fact "unexpanded name; allowed: " suite-run "spell each suite literally" "$2")" \
