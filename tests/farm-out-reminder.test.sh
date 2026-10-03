@@ -208,136 +208,126 @@ expect_contains "3k: …and redirects to the implementor" "subagent_type: implem
 
 # ---------------------------------------------------------------------------
 section "4 — tier 2: one additionalContext nudge per class per session"
+#
+# The CHAIN tier-2 arm is retired (wave-24 T11, D12, AC-7.7): a `&&` chain with no tier-1
+# segment is never nudged, whatever its heads. Its once-per-class mechanics are pinned here on
+# the two tier-2 singles that remain, `npx` (pkg-exec) and `git clone`; section 4b pins the
+# retirement itself.
 
-run_hook "$(mk_payload "$ENGAGED" 'cd /tmp && ./build.sh && ./deploy.sh')"
-expect_status "4a: a chain-class command exits 0" 0 "$ST"
+ctx_of() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null; }
+
+run_hook "$(mk_payload "$ENGAGED" 'npx create-thing')"
+expect_status "4a: a tier-2 single exits 0" 0 "$ST"
 expect_eq "4b: …nudging on the additionalContext channel" "PreToolUse" \
   "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null)"
-FO_CTX="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
-expect_contains "4c: …the nudge names the class" "chain-class command on the main thread" "$FO_CTX"
+FO_CTX="$(ctx_of)"
+expect_contains "4c: …the nudge names the class" "pkg-exec-class command on the main thread" "$FO_CTX"
 expect_contains "4d: …and says it is advisory" "Advisory only." "$FO_CTX"
 expect_empty "4e: …and it is NOT a deny" \
   "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null)"
-expect_contains "4f: …with the instrument line on stderr" "farm-out [nudge] class=chain" "$ERR"
+expect_contains "4f: …with the instrument line on stderr" "farm-out [nudge] class=pkg-exec" "$ERR"
 
 # THE SECOND ONE IS SILENT. Once per (session, class) — the state file is the memory.
-run_hook "$(mk_payload "$ENGAGED" 'cd /tmp && ./build.sh && ./deploy.sh')"
-expect_status "4g: the second chain-class command exits 0" 0 "$ST"
+run_hook "$(mk_payload "$ENGAGED" 'npx create-thing')"
+expect_status "4g: the second pkg-exec command exits 0" 0 "$ST"
 expect_empty "4h: …saying nothing on stdout" "$OUT"
-expect_contains "4i: …and recording the suppression" "farm-out [suppressed] class=chain" "$ERR"
+expect_contains "4i: …and recording the suppression" "farm-out [suppressed] class=pkg-exec" "$ERR"
 
 # A DIFFERENT CLASS STILL SPEAKS — the key is (session, class), not (session).
-run_hook "$(mk_payload "$ENGAGED" 'npx create-thing')"
-expect_contains "4j: a different tier-2 class still nudges" "pkg-exec-class command" \
-  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
-expect_contains "4k: …recorded under its own class" "farm-out [nudge] class=pkg-exec" "$ERR"
+run_hook "$(mk_payload "$ENGAGED" 'git clone https://example.invalid/r.git')"
+expect_contains "4j: a different tier-2 class still nudges" "clone-class command" "$(ctx_of)"
+expect_contains "4k: …recorded under its own class" "farm-out [nudge] class=clone" "$ERR"
 
 # A DIFFERENT SESSION STILL SPEAKS on a class this one has already spent.
 : > "$ENGAGED/.bionic/tmp/engaged-$SID2.state"
 run_hook "$(jq -n --arg s "$SID2" --arg c "$ENGAGED" \
   '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",
-    tool_input:{command:"cd /tmp && ./build.sh && ./deploy.sh"}}')" "$SID2"
-expect_contains "4l: a second session gets its own first nudge" "chain-class command" \
-  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
+    tool_input:{command:"npx create-thing"}}')" "$SID2"
+expect_contains "4l: a second session gets its own first nudge" "pkg-exec-class command" "$(ctx_of)"
 
 expect_eq "4m: the state file carries one row per (session, class)" "3" \
   "$(grep -c . "$ENGAGED/.bionic/tmp/farm-out.state" 2>/dev/null)"
 
-# THE CHAIN EXEMPT SET IS AN ALLOWLIST OF OBSERVATION (wave-21 T8). Every fixture below
-# runs on a FRESH farm-out.state: the nudge is once per (session, class), so a chain that
-# was silent only because an earlier chain spent the class would pass for the wrong reason.
-# The state is saved aside and restored so sections 5+ see what 4m left.
+# ---------------------------------------------------------------------------
+section "4b — the chain tier-2 arm is retired; tier 1 and the singles stay (wave-24 T11, AC-7.7)"
+#
+# WHAT WAS WRONG (research R4 §6). The arm nudged any chain of three or more `&&` segments
+# with a non-observing head, and the count was a quote-blind split: the notification
+# one-liner from the user's own CLAUDE.md plus `&& echo sent` was three segments, and
+# `git commit -m "a && b && c"` was three, one of them `git commit -m "a`. Eight of eight
+# recent firing transcripts were observation or notification one-liners.
+#
+# EVERY SILENCE BELOW SITS BESIDE A POSITIVE ON THE SAME EXTRACTOR AND THE SAME WALL, in this
+# section: the pkg-exec single nudges through `ctx_of`, and a tier-1 chain denies through the
+# same stdout. Each silent fixture runs on a FRESH farm-out.state, so a class spent earlier
+# cannot be what kept it quiet.
 FO_STATE="$ENGAGED/.bionic/tmp/farm-out.state"
 cp "$FO_STATE" "$SANDBOX/.state.keep"
 fresh_state() { rm -f "$FO_STATE"; }
 
-fresh_state
-run_hook "$(mk_payload "$ENGAGED" 'cd x && git fetch -q origin develop && git rev-parse HEAD && date')"
-expect_status "4n: the read-only chain ending in date exits 0" 0 "$ST"
-expect_empty "4o: …silent on stdout" "$OUT"
-expect_absent "4p: …and no [nudge] on stderr" "[nudge]" "$ERR"
+decision_of() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null; }
 
 fresh_state
-run_hook "$(mk_payload "$ENGAGED" 'cd x && git status && rm -rf build')"
-expect_contains "4q: a chain carrying rm is a production chain and nudges" "chain-class command on the main thread" \
-  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
-expect_contains "4r: …recorded once as class=chain" "farm-out [nudge] class=chain" "$ERR"
-run_hook "$(mk_payload "$ENGAGED" 'cd x && git status && rm -rf build')"
-expect_empty "4s: …and the second is suppressed" "$OUT"
+run_hook "$(mk_payload "$ENGAGED" 'npx create-thing')"
+expect_contains "4n: control — a tier-2 single still nudges on a fresh state" \
+  "pkg-exec-class command on the main thread" "$(ctx_of)"
 
+# THE NOTIFICATION ONE-LINER, as the user's CLAUDE.md spells it, and with `&& echo sent`.
+NTFY='source ~/.claude/cron.env && curl -s -H "Title: x — y" -H "Priority: high" -d "one line" "https://ntfy.sh/$T"'
+for c in "$NTFY" "$NTFY && echo sent" 'git commit -m "a && b"' 'git commit -m "a && b && c"' \
+         'git add -A && git commit -m "a && b"' 'git add -A && git commit -m "a && b && c"' \
+         "cd x && git commit -m 'a && b && c'" 'cd x && git fetch -q origin develop && git rev-parse HEAD && date'; do
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$c")"
+  expect_status "4o: a chain with no tier-1 segment exits 0 [$c]" 0 "$ST"
+  expect_empty "4p: …and draws no context [$c]" "$(ctx_of)"
+  expect_absent "4q: …and no [nudge] on stderr [$c]" "[nudge]" "$ERR"
+done
+
+# EVERY CHAIN THE ARM USED TO NUDGE FOR — a production head, a write behind an observer, a
+# gh mutation, the lot — is silent now. These are the old 4q/4w/4y/4z2 fixtures, kept so the
+# retirement is proved against the shapes the arm existed for.
+for c in 'cd /tmp && ./build.sh && ./deploy.sh' 'cd x && git status && rm -rf build' \
+         'cd x && gh api -X POST repos/o/r && git log -1' 'cd x && gh pr merge 5 && git log -1' \
+         'cd x && mv a b && git log -1' 'cd x && mkdir d && git log -1' \
+         'cd x && sort -o f f && git log -1' 'cd x && gh api -f k=v repos/x && git log -1' \
+         'cd x && git status && jq . a.json > b.json' 'cd x && git status && date > stamp' \
+         'cd x && git status && jq -n "{}" | tee out.json' 'cd x && git status; rm -rf build && date'; do
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$c")"
+  expect_empty "4r: a chain the retired arm nudged for is silent [$c]" "$(ctx_of)"
+  expect_empty "4s: …and is no deny [$c]" "$(decision_of)"
+done
+
+# TIER 1 STAYS, in a chain of any length, quoted `&&` and all. The class is read off the
+# decision and the instrument line, so a deny that arrived by the wrong route fails here.
+for c in 'cd x && make && echo ok' 'cd x && git status && bash tests/a.test.sh' \
+         'cd x && make' 'cd x && npm install && git status && date' \
+         'cd x && make && echo "a && b && c"' 'echo "a && b" && cd x && bash tests/run.sh'; do
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$c")"
+  expect_eq "4t: a chain carrying a tier-1 segment denies [$c]" "deny" "$(decision_of)"
+  expect_status "4u: …at exit 0, the way this wall denies [$c]" 0 "$ST"
+done
 fresh_state
-run_hook "$(mk_payload "$ENGAGED" 'cd x && gh pr view 611 --json state && git log -1')"
-expect_empty "4t: a chain with gh pr view is silent" "$OUT"
-expect_absent "4u: …no [nudge]" "[nudge]" "$ERR"
+run_hook "$(mk_payload "$ENGAGED" 'cd x && make && echo ok')"
+expect_contains "4v: a 3-segment chain with a build segment is labelled class=chain" \
+  "farm-out [deny] class=chain" "$ERR"
+expect_contains "4w: …and redirects to the implementor (the build segment's role)" \
+  "subagent_type: implementor" \
+  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null)"
+fresh_state
+run_hook "$(mk_payload "$ENGAGED" 'cd x && git status && bash tests/a.test.sh')"
+expect_contains "4x: …and one with a suite segment to the test-runner" "subagent_type: test-runner" \
+  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null)"
 
-for c in 'cd x && gh run watch 9 && git log -1' 'cd x && gh issue list && git log -1' \
-         'cd x && gh api repos/o/r/pulls && git log -1' 'cd x && gh api -X GET repos/o/r && git log -1' \
-         'cd x && pwd && true' 'cd x && git log | jq . && sort' 'cd x && uniq && basename y && date'; do
-  fresh_state
-  run_hook "$(mk_payload "$ENGAGED" "$c")"
-  expect_empty "4v: observation chain is silent [$c]" "$OUT"
-done
-for c in 'cd x && gh api -X POST repos/o/r && git log -1' 'cd x && gh api --method DELETE repos/o/r && git log -1' \
-         'cd x && gh pr merge 5 && git log -1' 'cd x && mv a b && git log -1' 'cd x && cp a b && git log -1' \
-         'cd x && mkdir d && git log -1' 'cd x && touch f && git log -1'; do
-  fresh_state
-  run_hook "$(mk_payload "$ENGAGED" "$c")"
-  expect_contains "4w: production chain nudges [$c]" "chain-class command" \
-    "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
-done
-
-# THE EXEMPT HEADS, TIGHTENED (wave-21 T13 item 8; review-summary-3b45d05 fix candidate 9). Three
-# heads T8 let through could write: `sort -o f f` (and `--output`) writes a file, `uniq in out`
-# writes its second operand, a `gh api` carrying a field or an input body is a POST unless GET is
-# named, and `gh <noun> view|list` matched a `view`/`list` ANYWHERE in the segment, so
-# `gh pr merge 5 --body view` passed as an observation. `sort`/`uniq` are exempt with no output
-# flag and at most one operand; the gh verb is the word after the noun.
-for c in 'cd x && sort f && git log -1' 'cd x && sort -u -k2 f && git log -1' 'cd x && uniq -c f && git log -1' \
-         'cd x && sort && git log -1' 'cd x && gh api repos/x && git log -1' \
-         'cd x && gh api -X GET search/issues -f q=x && git log -1' 'cd x && gh repo view o/r && git log -1'; do
-  fresh_state
-  run_hook "$(mk_payload "$ENGAGED" "$c")"
-  expect_empty "4x: observation chain is silent [$c]" "$OUT"
-done
-for c in 'cd x && sort -o f f && git log -1' 'cd x && sort --output=f f && git log -1' 'cd x && sort -uo f f && git log -1' \
-         'cd x && uniq a b && git log -1' 'cd x && sort a b && git log -1' \
-         'cd x && gh api -f k=v repos/x && git log -1' 'cd x && gh api repos/x -F n=1 && git log -1' \
-         'cd x && gh api repos/x --field k=v && git log -1' 'cd x && gh api repos/x --raw-field=k=v && git log -1' \
-         'cd x && gh api repos/x --input body.json && git log -1' 'cd x && gh api -X GET repos/x --input body.json && git log -1' \
-         'cd x && gh pr merge 5 --body view && git log -1' 'cd x && gh pr comment 5 --body list && git log -1'; do
-  fresh_state
-  run_hook "$(mk_payload "$ENGAGED" "$c")"
-  expect_contains "4y: production chain nudges [$c]" "chain-class command" \
-    "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
-done
-# A WRITE IS A WRITE WHATEVER THE HEAD (wave-21 T14; critic-4e6d4a9 I2). The exempt set judged
-# a segment by its first word, so an observation head that wrote through a redirect or a pipe
-# passed: `jq . a > b`, `date > f`, `sort f>out`, `uniq f>g`, `jq … | tee f` were silent at
-# 4e6d4a9 and nudged at 0b9935d. A segment that writes a file through an unquoted `>`, `>>`,
-# `&>` or `2>` is production; every command of a pipe or a `;` list is judged on its own, so a
-# pipe into `tee`, `sponge` or `xargs rm` nudges; and `gh api` takes its LAST method, as gh does.
-# The controls are the same heads observing: no redirect, a redirect to /dev/null or onto
-# another descriptor, a `>` inside quotes, and a pipe into another observer.
-for c in 'cd x && git status && date' 'cd x && git status && jq . a' 'cd x && git status && sort f | head' \
-         'cd x && git status && jq ".a > 1" f' 'cd x && git diff 2>/dev/null && git log 2>&1 | head -5' \
-         'cd x && git status; git log -1 && date' 'cd x && gh api -X POST -X GET repos/o/r && git log -1'; do
-  fresh_state
-  run_hook "$(mk_payload "$ENGAGED" "$c")"
-  expect_empty "4z: observation chain is silent [$c]" "$OUT"
-done
-for c in 'cd x && git status && jq . a.json > b.json' 'cd x && git status && date > stamp' \
-         'cd x && git status && sort f>out' 'cd x && git status && uniq f>g' \
-         'cd x && git status && jq -n "{}" | tee out.json' 'cd x && git status && cat f >> log' \
-         'cd x && git status && grep x f &> out' 'cd x && git status && grep x f 2> err' \
-         'cd x && git status && echo x > f' 'cd x && git status && jq . a | sponge a' \
-         'cd x && git status && find . -name y | xargs rm' 'cd x && git status; rm -rf build && date' \
-         'cd x && gh api -X GET -X POST repos/o/r && git log -1' \
-         'cd x && gh api --method GET repos/o/r --method PATCH && git log -1'; do
-  fresh_state
-  run_hook "$(mk_payload "$ENGAGED" "$c")"
-  expect_contains "4z2: a write behind an observation head nudges [$c]" "chain-class command" \
-    "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
-done
+# THE COUNT IS READ BY THE QUOTE-AWARE SEGMENTER. `make` behind two quoted `&&` is a
+# 2-segment command, not a chain: whole-command tier 1 labels it by its class. Before the
+# fix the quoted `&&`s made it a 4-segment chain and the label read class=chain.
+fresh_state
+run_hook "$(mk_payload "$ENGAGED" 'make "a && b && c"')"
+expect_contains "4y: quoted && do not make a chain — the whole command keeps its class" \
+  "farm-out [deny] class=build" "$ERR"
 cp "$SANDBOX/.state.keep" "$FO_STATE"
 
 # ---------------------------------------------------------------------------

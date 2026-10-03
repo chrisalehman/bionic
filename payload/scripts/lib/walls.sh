@@ -294,8 +294,8 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 #
 #   _WALL_SAFE_FLAT   the heredoc-free, whitespace-squeezed one-line command
 #   _WALL_HEAD        the tier-2 head reduction, or "" when tier 2 provably cannot fire
-#   _WALL_CHAIN_SEGS  the `&&` segments, newline-joined, untrimmed
-#   _WALL_CHAIN_COUNT how many of them carry a non-blank character
+#   _WALL_CHAIN_SEGS  the command's segments, newline-joined and trimmed, when its text holds `&&`
+#   _WALL_CHAIN_COUNT how many of them there are (see 3 below)
 #
 # WHAT IS SKIPPED, AND WHY EACH SKIP IS SOUND — none of them is a new reading, and
 # none of them narrows what the wall can see:
@@ -317,19 +317,23 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 #     then looking for the substring tests. A miss cannot be a tier-2 match, and the
 #     empty head it leaves takes `classify_tier2`'s own `*) return 1` arm.
 #
-#  3. THE `&&` SPLIT IS SHELL, NOT `awk` + `grep`. `_WALL_SAFE_FLAT` has been through
-#     `_wall_flatten`, whose IFS carries all six characters `[[:space:]]` names — so
-#     it holds no newline, tab, CR, VT or FF at all, and the newline-joined segment
-#     list is unambiguous by construction. The split is left-to-right and
-#     non-overlapping on the literal two characters `&&`, which is what
-#     `gsub(/&&/, "\n")` did, `&&&&` included; the count is of segments carrying a
-#     non-blank character, which is what `grep -cE '[^[:space:]]'` counted.
+#  3. THE CHAIN IS READ BY THE QUOTE-AWARE SEGMENTER, AND ONLY WHEN `&&` IS IN THE TEXT
+#     (wave-24 T11, D12, AC-7.7). The count used to be a quote-blind split on the two
+#     characters `&&`, so the `&&` inside `git commit -m "a && b"` or inside the notification
+#     one-liner's quoted title was a chain link of its own. It is now the segment list of
+#     `cmd_class_lines` — the same `segments()` the class reading uses, which reads quotes,
+#     `\&`, groups and `;`/`|` — so a chain is the shell's own list, never a count of a
+#     substring. The segments are that function's, trimmed, and the count is how many it
+#     returned; a blank one is skipped, as the old count skipped it. A flattened command with no `&&` anywhere in its
+#     text is not a chain and costs no segmenter: a `&&` the quotes hide still pays one
+#     `awk`, and every other command pays nothing. The count decides one thing now, the
+#     LABEL and ROLE of a tier-1 deny: the chain tier-2 nudge that also read it is retired.
 #
 # IT IS A FILL, NEVER A VERDICT. Every class this wall acts on still comes from
 # `cmd_class` — one reader, cmd-class.sh — over the same strings as before.
 _WALL_SAFE_FLAT=""; _WALL_HEAD=""; _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
 _wall_cmd_fill() {  # <raw command text> -> sets the four values above
-  local _rest _seg _segs=""
+  local _cls _seg _segs=""
 
   case "$1" in
     *'<<'*) _wall_flatten "$(cmd_strip_heredocs "$1")" ;;
@@ -352,17 +356,13 @@ _wall_cmd_fill() {  # <raw command text> -> sets the four values above
   _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
   case "$_WALL_SAFE_FLAT" in
     *"&&"*)
-      _rest="$_WALL_SAFE_FLAT"
-      while :; do
-        case "$_rest" in
-          *"&&"*) _seg="${_rest%%&&*}"; _rest="${_rest#*&&}" ;;
-          *)      _seg="$_rest"; _rest=""; _segs="$_segs$_seg"
-                  case "$_seg" in *[![:space:]]*) _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 )) ;; esac
-                  break ;;
-        esac
+      while IFS=$'\t' read -r _cls _seg; do
+        [ -n "$_seg" ] || continue
         _segs="$_segs$_seg"$'\n'
-        case "$_seg" in *[![:space:]]*) _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 )) ;; esac
-      done
+        _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 ))
+      done <<EOF
+$(cmd_class_lines "$_WALL_SAFE_FLAT")
+EOF
       _WALL_CHAIN_SEGS="$_segs"
       ;;
   esac
@@ -4966,7 +4966,7 @@ wall_farm_out_reminder() {  # <event> -> 0 nothing · 1 nudge · 2 deny
 
 
 local MODE FLAT SAFE_FLAT TARGET CLASS ROLE CHAIN_SEGS CHAIN_COUNT CHAIN_ROLE
-local _cfg _seg _has_nonexempt
+local _cfg _seg
 MODE="block"
 if [ -f "$BIONIC_ROOT/.bionic/config.yaml" ]; then
   _cfg=$(grep -E '^farm-out-mode:' "$BIONIC_ROOT/.bionic/config.yaml" 2>/dev/null | head -1 \
@@ -5108,7 +5108,7 @@ nudge_once() {  # $1=class $2=role — ONE nudge per (session, class); repeat = 
   log_event "nudge" "$1"; emit_nudge "$1" "$2"; return 1
 }
 
-# ── main flow: override → unwrap → tier-1 deny → tier-2 nudge (single + chain) ──
+# ── main flow: override → unwrap → tier-1 deny (single + chain) → tier-2 nudge (single) ──
 # Chain-aware: the override token is honored ANYWHERE in the invocation —
 # leading, after a separator (;/&/|), or as an env-prefix mid-chain
 # (`cd x && FARM_OUT_ALLOW=1 bash tests/run.sh`) — not only in leading
@@ -5177,48 +5177,13 @@ if classify_tier2 "$TARGET"; then
   nudge_once "$CLASS" "$ROLE"; return $?
 fi
 
-# Chain tier-2 arm: ≥3 segments, NO tier-1 segment (the tier-1 arm above would
-# have exited otherwise), ≥1 non-exempt segment → nudge as class=chain.
-if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
-  _has_nonexempt=""
-  local _xst
-  while IFS= read -r _seg; do
-    # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
-    # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
-    # either end is single spaces.
-    while :; do
-      case "$_seg" in
-        ' '*) _seg="${_seg# }" ;;
-        *' ') _seg="${_seg% }" ;;
-        *)    break ;;
-      esac
-    done
-    [ -n "$_seg" ] || continue
-    # A SEGMENT IS JUDGED AS THE SHELL RUNS IT (wave-21 T14; critic-4e6d4a9 I2): a write through
-    # an unquoted redirect makes it production whatever its head, and every command of a pipe or
-    # a `;` list is judged on its own — `_chain_seg_split` reads both, `_chain_stage_observes`
-    # is the exempt set.
-    _chain_seg_split "$_seg"
-    if [ -n "$_CHAIN_WRITES" ]; then _has_nonexempt=1; break; fi
-    while IFS= read -r _xst; do
-      while :; do
-        case "$_xst" in
-          ' '*) _xst="${_xst# }" ;;
-          *' ') _xst="${_xst% }" ;;
-          *)    break ;;
-        esac
-      done
-      [ -n "$_xst" ] || continue
-      _chain_stage_observes "$_xst" || { _has_nonexempt=1; break; }
-    done <<EOF
-$_CHAIN_STAGES
-EOF
-    [ -z "$_has_nonexempt" ] || break
-  done <<EOF
-$CHAIN_SEGS
-EOF
-  if [ -n "$_has_nonexempt" ]; then nudge_once "chain" "implementor"; return $?; fi
-fi
+# THE CHAIN TIER-2 ARM IS RETIRED (wave-24 T11, D12, AC-7.7). A chain of three or more
+# segments with no tier-1 segment used to be nudged as class=chain when a segment's head was
+# outside an allowlist of observers. Eight of eight recent firings were observation or
+# notification one-liners — one of them the notification command the user's own CLAUDE.md
+# prescribes — and the count it read was quote-blind (research R4 §6). Tier 1 above and the
+# tier-2 singles (`git clone`, `docker run|pull`, `npx`/`uvx`) are unchanged: a chain that runs
+# a suite, a build or an install still denies, and a chain that merely does work is silent.
 
 return 0
 }
