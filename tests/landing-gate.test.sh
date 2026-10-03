@@ -128,7 +128,8 @@ expect_lt() { if [ "$2" -lt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expe
 
 # ---------- fixtures ----------
 #
-# FIXTURE FIDELITY (declared per rule fixtures-can-pin-away-the-test).
+# FIXTURE FIDELITY (declared per rule
+# .claude/rules/test-harness.md, "Fixture fidelity").
 #
 #   * Stop payload ENVELOPE — VERBATIM key set from t4b-probe-report.md §2.1, a live Stop
 #     captured 2026-08-15 (CLI 2.1.233): background_tasks, cwd, effort, hook_event_name,

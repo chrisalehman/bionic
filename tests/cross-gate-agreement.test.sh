@@ -1035,7 +1035,7 @@ for m in $MUTATIONS; do
   cp "$LIB_DIR_SRC"/*.sh "$tree/scripts/lib/" 2>/dev/null
   if ! mutate_lib "$m" "$tree/scripts/lib/$(basename "$(mutate_lib_file "$m")")"; then
     # A mutation that matches nothing is not a passing test — it means the code moved
-    # and this proof has gone vacuous (fixtures-can-pin-away-the-test).
+    # and this proof has gone vacuous (.claude/rules/test-harness.md, "Fixture fidelity").
     no "mutation '$m' applies to $(basename "$(mutate_lib_file "$m")")" \
        "the awk target matched nothing — the library moved"
     continue
