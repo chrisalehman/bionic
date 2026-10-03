@@ -1255,20 +1255,27 @@ bionic_context 2>/dev/null || exit 0
 # characters this scan splits segments on, so no target it yields can contain one. A path
 # holding a space or a glob character is carried intact, and `_eg_path_fold`'s own `set -f`
 # guard is what keeps it intact downstream.
+#
+# ONE SPLIT, NOT ONE PASS PER SEGMENT (wave-24 T28). The segments come off in a single `read`
+# split on the four characters, and the first `git` is cut from the segment that holds it.
+# Taking them off the front one at a time cost a whole-remainder `${_rest#*[;&|…]}` per
+# segment, and cutting the remainder at `git` with `%%git*` one more: `cd <dir> && <64 KB
+# heredoc> … git commit` took 17.75 s under 3.2 and 7.02 s under 5.3, past the hook's 10 s.
+# The empty segments the split adds (a doubled separator, a trailing one) name no `cd`.
 _EG_CDS=""
 _eg_cd_targets() {
-  local _t="${1:-}" _rest _seg _p
+  local _t="${1:-}" _rest _seg _p _i=0 _n _last=0
+  local -a _segs=()
   _EG_CDS=""
   case "$_t" in
     *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
     *) return 0 ;;
   esac
-  case "$_rest" in *git*) _rest="${_rest%%git*}" ;; esac
-  while [ -n "$_rest" ]; do
-    case "$_rest" in
-      *[\;\&\|$'\n']*) _seg="${_rest%%[;&|$'\n']*}"; _rest="${_rest#*[;&|$'\n']}" ;;
-      *) _seg="$_rest"; _rest="" ;;
-    esac
+  IFS=$';&|\n' read -r -d '' -a _segs <<< "$_rest" || :
+  _n=${#_segs[@]}
+  while [ "$_i" -lt "$_n" ] && [ "$_last" = 0 ]; do
+    _seg="${_segs[_i]}"; _i=$((_i + 1))
+    case "$_seg" in *git*) _seg="${_seg%%git*}"; _last=1 ;; esac
     while [ -n "$_seg" ]; do
       case "$_seg" in
         ' '*|'	'*|'('*|'{'*) _seg="${_seg#?}" ;;
@@ -1278,9 +1285,9 @@ _eg_cd_targets() {
     case "$_seg" in
       'cd'|'cd '*|'cd	'*)
         _p="${_seg#cd}"
-        while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
-        while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
-        while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+        while :; do case "$_p" in ' '*) _p="${_p# }" ;; *) break ;; esac; done
+        while :; do case "$_p" in '	'*) _p="${_p#	}" ;; *) break ;; esac; done
+        while :; do case "$_p" in *' ') _p="${_p% }" ;; *) break ;; esac; done
         case "$_p" in
           '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
           "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
@@ -1454,13 +1461,18 @@ _eg_commit_cwd() {
   _c="$COMMAND"
   while :; do case "$_c" in ' '*) _c="${_c# }" ;; *) break ;; esac; done
   while :; do case "$_c" in '	'*) _c="${_c#	}" ;; *) break ;; esac; done
+  #
+  # THE SAME HOLDS FOR THE PATH AFTER `cd` (wave-24 T28). `_p` is cut at the first `;&|` or
+  # newline FIRST, so the blanks come off a few bytes rather than the whole command, and each
+  # comes off behind a `case`: the `[ "${_p# }" != "$_p" ]` loops that stood here failed once
+  # per loop on the whole command, 1.27 s under 3.2 and 5.3 on a 64 KB heredoc.
   case "$_c" in
     'cd '*|'cd	'*)
       _p="${_c#cd}"
-      while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
-      while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
       _p="${_p%%[;&|$'\n']*}"
-      while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+      while :; do case "$_p" in ' '*) _p="${_p# }" ;; *) break ;; esac; done
+      while :; do case "$_p" in '	'*) _p="${_p#	}" ;; *) break ;; esac; done
+      while :; do case "$_p" in *' ') _p="${_p% }" ;; *) break ;; esac; done
       case "$_p" in
         '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
         "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
@@ -5750,8 +5762,12 @@ _budget_remedy_line() {  # <the refused suite or run>
     *[[:space:]]*) : ;;
     *.test.sh) _widen="--suites+ $(refuse_shell_word "$1")" ;;
   esac
-  printf "widen it: bash %s/hooks/session-poker.sh amend %s %s --reason '<why>' (main runs it)" \
-    "$(refuse_plugin_root)" "$(refuse_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
+  # THE SCRIPT PATH IS ONE WORD (wave-24 T28; critic I2): a plugin root holding a space split
+  # into two arguments when the line was pasted, so the whole path goes through
+  # `refuse_shell_word`, the same quoting the row name gets.
+  printf "widen it: bash %s amend %s %s --reason '<why>' (main runs it)" \
+    "$(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh")" \
+    "$(refuse_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
 }
 
 # THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named
