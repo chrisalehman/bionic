@@ -11,6 +11,12 @@
 # machine-independent cost a shell hook can carry — jq, grep, awk, one more `git`
 # call — and unlike wall-clock ms it does not move between runs or machines.
 #
+# THE ONE EXCEPTION IS tests/hook-timeout.test.sh (wave-24-fixit-1811 T4, spec D7; Chris
+# 2026-10-03, design ledger Δ2). It gates wall-clock, 2 s per input, because the failure it
+# guards is a hook killed by its own `timeout:` in hooks.json — a cost that is quadratic in
+# the input, not a count of forks, and invisible here. Its margin is an order of magnitude
+# each way, so the noise argument above does not reach it. Every other number stays counts.
+#
 # THE COUNT, NOT THE NAME. `^\++ (cmd)( |$)` over the trace, summed across a fixed
 # roster of externals (jq grep awk sed cut tr git date stat find sort uniq head
 # tail wc python3 basename dirname readlink realpath) — one or more leading `+`

@@ -1830,4 +1830,37 @@ run_hook "$(mk_payload "$R_FORGE" 'git commit -m "x"' "$FORGE_ID" omit Bash bion
 expect_status "20i: …and with no row the payload's own read-only type still binds (the fallback)" 2 "$ST"
 expect_contains "20i: …saying no roster row names it" "no roster row names you" "$ERR"
 
+# ---------------------------------------------------------------------------
+section "21 — AC-5.3: the shared screen still says maybe for every spelling the parser reads (wave-24 T4, REQ-5, D6)"
+#
+# fails-when: `g\<newline>it`, `'g'it`, `"gi"t` or `\g\i\t` reads "provably not" through the new
+# screen, or the screen's cache answers one command with another command's strip.
+#
+# THE SCREEN CHANGED SHAPE, NOT MEANING (wave-24-fixit-1811 T4). `_wall_mentions_git` used to
+# strip the command itself with four `${v//…/}` passes, and so did three other screens in this
+# process; bash 3.2 pays matches × length for each, and a quote-dense command timed the hook
+# out. Now a literal `git` answers at once, and only a miss runs `_wall_screen` — one awk pass,
+# cached at file scope keyed on the text. The T24 spellings are exactly the ones the literal
+# check misses, so each of them is the awk path, read two ways: the function itself, and
+# protect-main's refusal through the one process.
+WALLS_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh"
+mg_answer() {  # <command text>... -> one 0/1 per argument, space-joined, all in ONE process
+  bash -c '. "$1" >/dev/null 2>&1; shift; o=""
+    for c in "$@"; do _wall_mentions_git "$c"; o="$o$? "; done; printf "%s" "${o% }"' _ "$WALLS_LIB" "$@"
+}
+BW21_NL="$(printf 'g\\\n''it push origin main')"
+expect_eq "21a: each obfuscated spelling is still 'maybe' (0), and a git-free quoted command is 'provably not' (1)" \
+  "0 0 0 0 1" "$(mg_answer "$BW21_NL" "'g'it push origin main" '"gi"t push origin main' '\g\i\t push origin main' "echo 'hi' \"there\"")"
+# THE CACHE IS KEYED ON THE TEXT: one process, three different commands asked in turn — a hit,
+# a miss, the hit again. A single-slot cache that forgot to compare its key would answer the
+# second with the first's strip, or the third with the second's.
+expect_eq "21b: …asked in one process in turn, the cache never answers one command with another's strip" \
+  "0 1 0" "$(mg_answer "'g'it push" "echo 'x'" "'g'it push")"
+
+for _bw21 in "$BW21_NL" "'g'it push origin main" '"gi"t push origin main' '\g\i\t push origin main'; do
+  run_hook "$(mk_payload "$R_QUIET" "$_bw21")"
+  expect_status "21c: [$(printf '%q' "$_bw21")] is still a push to main through the one process" 2 "$ST"
+  expect_contains "21c: …refused in protect-main's own words" "main is a protected branch here" "$ERR"
+done
+
 finish
