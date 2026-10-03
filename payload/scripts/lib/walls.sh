@@ -294,8 +294,8 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 #
 #   _WALL_SAFE_FLAT   the heredoc-free, whitespace-squeezed one-line command
 #   _WALL_HEAD        the tier-2 head reduction, or "" when tier 2 provably cannot fire
-#   _WALL_CHAIN_SEGS  the `&&` segments, newline-joined, untrimmed
-#   _WALL_CHAIN_COUNT how many of them carry a non-blank character
+#   _WALL_CHAIN_SEGS  the command's segments, newline-joined and trimmed, when its text holds `&&`
+#   _WALL_CHAIN_COUNT how many of them there are (see 3 below)
 #
 # WHAT IS SKIPPED, AND WHY EACH SKIP IS SOUND — none of them is a new reading, and
 # none of them narrows what the wall can see:
@@ -317,19 +317,23 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 #     then looking for the substring tests. A miss cannot be a tier-2 match, and the
 #     empty head it leaves takes `classify_tier2`'s own `*) return 1` arm.
 #
-#  3. THE `&&` SPLIT IS SHELL, NOT `awk` + `grep`. `_WALL_SAFE_FLAT` has been through
-#     `_wall_flatten`, whose IFS carries all six characters `[[:space:]]` names — so
-#     it holds no newline, tab, CR, VT or FF at all, and the newline-joined segment
-#     list is unambiguous by construction. The split is left-to-right and
-#     non-overlapping on the literal two characters `&&`, which is what
-#     `gsub(/&&/, "\n")` did, `&&&&` included; the count is of segments carrying a
-#     non-blank character, which is what `grep -cE '[^[:space:]]'` counted.
+#  3. THE CHAIN IS READ BY THE QUOTE-AWARE SEGMENTER, AND ONLY WHEN `&&` IS IN THE TEXT
+#     (wave-24 T11, D12, AC-7.7). The count used to be a quote-blind split on the two
+#     characters `&&`, so the `&&` inside `git commit -m "a && b"` or inside the notification
+#     one-liner's quoted title was a chain link of its own. It is now the segment list of
+#     `cmd_class_lines` — the same `segments()` the class reading uses, which reads quotes,
+#     `\&`, groups and `;`/`|` — so a chain is the shell's own list, never a count of a
+#     substring. The segments are that function's, trimmed, and the count is how many it
+#     returned; a blank one is skipped, as the old count skipped it. A flattened command with no `&&` anywhere in its
+#     text is not a chain and costs no segmenter: a `&&` the quotes hide still pays one
+#     `awk`, and every other command pays nothing. The count decides one thing now, the
+#     LABEL and ROLE of a tier-1 deny: the chain tier-2 nudge that also read it is retired.
 #
 # IT IS A FILL, NEVER A VERDICT. Every class this wall acts on still comes from
 # `cmd_class` — one reader, cmd-class.sh — over the same strings as before.
 _WALL_SAFE_FLAT=""; _WALL_HEAD=""; _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
 _wall_cmd_fill() {  # <raw command text> -> sets the four values above
-  local _rest _seg _segs=""
+  local _cls _seg _segs=""
 
   case "$1" in
     *'<<'*) _wall_flatten "$(cmd_strip_heredocs "$1")" ;;
@@ -352,17 +356,13 @@ _wall_cmd_fill() {  # <raw command text> -> sets the four values above
   _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
   case "$_WALL_SAFE_FLAT" in
     *"&&"*)
-      _rest="$_WALL_SAFE_FLAT"
-      while :; do
-        case "$_rest" in
-          *"&&"*) _seg="${_rest%%&&*}"; _rest="${_rest#*&&}" ;;
-          *)      _seg="$_rest"; _rest=""; _segs="$_segs$_seg"
-                  case "$_seg" in *[![:space:]]*) _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 )) ;; esac
-                  break ;;
-        esac
+      while IFS=$'\t' read -r _cls _seg; do
+        [ -n "$_seg" ] || continue
         _segs="$_segs$_seg"$'\n'
-        case "$_seg" in *[![:space:]]*) _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 )) ;; esac
-      done
+        _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 ))
+      done <<EOF
+$(cmd_class_lines "$_WALL_SAFE_FLAT")
+EOF
       _WALL_CHAIN_SEGS="$_segs"
       ;;
   esac
@@ -4715,182 +4715,6 @@ dispatch
 exit 0
 }
 
-# ─── the chain arm's exempt set — one `&&` segment, read as the shell runs it ──
-#
-# `_chain_seg_split <segment>` sets `_CHAIN_STAGES` (the segment's commands, newline-joined, split
-# at every unquoted `|`, `|&`, `;` and lone `&`) and `_CHAIN_WRITES` (1 when an unquoted redirect
-# writes a file: `>`, `>>`, `>|`, `&>`, `N>`, `>&word`, `>(…)`; never `>/dev/null`, `>&2`, `2>&1`,
-# `>&-`). Quotes are honoured — `jq ".a > 1" f` carries no redirect — and a backslash escapes the
-# next character. A `>` with no readable word after it fails closed, as a write.
-#
-# WHY A SEGMENT IS NOT ITS HEAD (wave-21 T14; critic-4e6d4a9 I2). The exempt set judged an `&&`
-# segment by its first word, so `date > stamp`, `jq . a > b`, `sort f>out`, `uniq f>g` and
-# `jq … | tee f` all passed as observation, and `git status; rm -rf build` hid a `rm` behind a
-# `git`. Spec D8 calls the set an allowlist of OBSERVATION, and none of those observes.
-#
-# A SCREEN FIRST: a segment holding none of `|`, `;`, `&`, `>` is one command that writes nothing
-# through a redirect, and pays for no character walk.
-# ONE awk PASS, NOT A CHARACTER LOOP IN THE SHELL (wave-24-fixit-1811 T4; REQ-5, D6). The walk
-# was `${s:i:1}` per character with `cur="$cur$c"`, and in a UTF-8 locale bash finds character
-# i by counting from the start, every time: an 8 K segment took 1.4 s under 3.2 and an 8 K run
-# of em dashes over 4 s under 5.3 (research-R2 §2.6; tests/hook-timeout.test.sh row d). The awk
-# below is the same walk, rule for rule, under `LC_ALL=C`: every character it tests is ASCII
-# and no UTF-8 continuation byte equals one, so walking bytes splits and keeps exactly what
-# walking characters did. It copies text by RUNS — `st` marks where the run that has not been
-# copied yet began, and `run()` appends it at each operator — so a long segment is copied once,
-# not once per character. The segment arrives through ENVIRON, never `-v` (which would read
-# its backslashes as escapes), and the write flag rides as the LAST byte of the output, so the
-# command substitution cannot eat a stage list that ends in a newline.
-_CHAIN_SEG_AWK='
-  function run() { if (i > st) cur = cur substr(s, st, i - st) }
-  BEGIN {
-    s = ENVIRON["_WALL_CHAIN_SEG"]; n = length(s); i = 1; st = 1; q = ""; cur = ""; w = 0
-    while (i <= n) {
-      c = substr(s, i, 1)
-      if (q != "") {
-        if (q == "\"" && c == "\\") i++
-        else if (c == q) q = ""
-        i++; continue
-      }
-      if (c == "\\") { i += 2; continue }
-      if (c == "\047" || c == "\"") { q = c; i++; continue }
-      if (c == "|" || c == ";") {
-        run(); print cur; cur = ""
-        if (c == "|" && substr(s, i + 1, 1) == "&") i++
-        i++; st = i; continue
-      }
-      if (c == "&") {
-        # `&>` is a redirect, read at its `>`; a lone `&` ends a command. Either way the
-        # `&` itself is not kept.
-        run()
-        if (substr(s, i + 1, 1) != ">") { print cur; cur = "" }
-        i++; st = i; continue
-      }
-      if (c == ">") {
-        run()
-        # A descriptor number written against the `>` (`2>`) belongs to the redirect, not
-        # to the command operands.
-        if (cur ~ /^[0-9][0-9]?$/) cur = ""
-        else if (cur ~ / [0-9][0-9]?$/) sub(/[0-9][0-9]?$/, "", cur)
-        i++
-        if (substr(s, i, 1) == ">") i++
-        if (substr(s, i, 1) == "|") i++
-        dup = 0
-        if (substr(s, i, 1) == "&") { dup = 1; i++ }
-        while (substr(s, i, 1) == " ") i++
-        ts = i
-        while (i <= n && index(" |;&<>()", substr(s, i, 1)) == 0) i++
-        t = substr(s, ts, i - ts)
-        gsub(/[\047"]/, "", t)
-        if (t == "") w = 1
-        else if (t == "/dev/null" || t == "/dev/stdout" || t == "/dev/stderr") { }
-        else if (!dup) w = 1
-        else if (t !~ /^(-|[0-9]|[0-9][0-9])$/) w = 1
-        st = i; continue
-      }
-      i++
-    }
-    run()
-    printf "%s%s", cur, (w ? "1" : "0")
-  }'
-_CHAIN_STAGES=""; _CHAIN_WRITES=""
-_chain_seg_split() {  # <segment> -> sets _CHAIN_STAGES, _CHAIN_WRITES
-  local _r
-  _CHAIN_WRITES=""
-  case "$1" in
-    *[\|\;\&\>]*) : ;;
-    *) _CHAIN_STAGES="$1"; return 0 ;;
-  esac
-  _r=$(_WALL_CHAIN_SEG="$1" LC_ALL=C awk "$_CHAIN_SEG_AWK" </dev/null)
-  case "$_r" in *1) _CHAIN_WRITES=1 ;; esac
-  _CHAIN_STAGES="${_r%?}"
-}
-
-# `_chain_stage_observes <command>` -> 0 when the one command only reads or reports, 1 otherwise.
-#
-# THE LINE THIS LIST DRAWS: observation is exempt, production is nudged. A command that only
-# reads or reports (git, read tools, date/pwd/jq/sort, gh view/list/watch, a GET gh api) never
-# makes a chain production-shaped; one that writes the tree (rm, mv, cp, mkdir, touch, tee) or
-# the remote (gh api -X POST, gh pr merge) does. Redirects never reach here: `_chain_seg_split`
-# has already answered them for the whole segment.
-# THE SAME EXEMPT SET, ASKED WITH A BUILTIN. The regex was anchored at `^` over literal words
-# each followed by a literal space, which is exactly what these patterns are — a bare `git` with
-# no argument stays non-exempt in both spellings. The read tools that take stdin are exempt bare
-# too (wave-21 T14): a pipe stage reads its input, so `sort f | head` observes.
-_chain_stage_observes() {  # <one trimmed command>
-  local _xo _xn _xdd _xw _xm _xf _xp
-  local -a _xws
-  case "$1" in
-    'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
-    'sed '*|'echo '*|'printf '*|'test '*|'cd '*|'which '*|'command '*|'false '*|\
-    'pwd'|'pwd '*|'true'|'true '*|'date'|'date '*|'jq'|'jq '*|\
-    'basename'|'basename '*|\
-    'ls'|'cat'|'head'|'tail'|'wc'|\
-    'gh run watch'|'gh run watch '*) return 0 ;;
-    'sort'|'sort '*|'uniq'|'uniq '*)
-      # `sort`/`uniq` observe only with NO OUTPUT FLAG and AT MOST ONE OPERAND (wave-21 T13
-      # item 8): `sort -o f f` / `--output` writes a file, and `uniq in out` writes its second
-      # operand. A short-option cluster carrying `o` counts as the output flag; a word after
-      # `--` is an operand; an option's separate argument (`-k 2`) counts as an operand,
-      # which can only ever turn an observation into a nudge.
-      _xo=0; _xn=0; _xdd=""
-      # SPLIT BY `read -a`, never by an unquoted expansion: a `*` in the segment is a word
-      # here, not a glob over the cwd.
-      read -r -a _xws <<< "$1"
-      for _xw in "${_xws[@]:1}"; do
-        if [ -z "$_xdd" ]; then
-          case "$_xw" in
-            --) _xdd=1; continue ;;
-            --output|--output=*) _xo=1; break ;;
-            --*) continue ;;
-            -) : ;;
-            -*o*) _xo=1; break ;;
-            -*) continue ;;
-          esac
-        fi
-        _xn=$((_xn + 1))
-      done
-      [ "$_xo" -eq 0 ] && [ "$_xn" -le 1 ] ;;
-    'gh api'|'gh api '*)
-      # `gh api` observes unless a method other than GET is named — and a field or an input
-      # body (`-f`, `-F`, `--field`, `--raw-field`, `--input`) makes it a POST unless GET is
-      # named (wave-21 T13 item 8). Under a named GET, gh sends fields as query parameters,
-      # so they still observe; `--input` is a request BODY and is never an observation.
-      # THE LAST METHOD WINS, as gh reads its flags (wave-21 T14; critic-4e6d4a9 I2): a GET
-      # matched anywhere let `gh api -X GET -X POST` pass as an observation.
-      _xm=""; _xf=""; _xp=""
-      read -r -a _xws <<< "$1"
-      for _xw in "${_xws[@]:2}"; do
-        if [ -n "$_xp" ]; then _xm="$_xw"; _xp=""; continue; fi
-        case "$_xw" in
-          --input|--input=*) return 1 ;;
-          -X|--method) _xp=1 ;;
-          --method=*) _xm="${_xw#--method=}" ;;
-          -X?*) _xm="${_xw#-X}" ;;
-          -f|-F|--field|--raw-field|-f?*|-F?*|--field=*|--raw-field=*) _xf=1 ;;
-        esac
-      done
-      # A method flag with no word after it names no method gh would send: fail closed.
-      [ -z "$_xp" ] || return 1
-      _xm="${_xm//\'/}"; _xm="${_xm//\"/}"
-      case "$_xm" in
-        [Gg][Ee][Tt]) return 0 ;;
-        '') [ -z "$_xf" ]; return ;;
-        *) return 1 ;;
-      esac ;;
-    'gh '*)
-      # `gh <noun> view` / `gh <noun> list` observe; every other verb is production. The verb
-      # is the word AFTER THE NOUN (wave-21 T13 item 8): matched anywhere, `gh pr merge 5
-      # --body view` passed as an observation.
-      _xw="${1#gh }"; _xw="${_xw#* }"; _xw="${_xw%% *}"
-      case "$_xw" in
-        view|list) return 0 ;;
-        *) return 1 ;;
-      esac ;;
-    *) return 1 ;;
-  esac
-}
-
 # ─── wall_farm_out_reminder — hooks/farm-out-reminder.sh ─────────────────────
 #
 # FARM-OUT: tiered enforcement — long-running main-thread commands DENY with a
@@ -4966,7 +4790,7 @@ wall_farm_out_reminder() {  # <event> -> 0 nothing · 1 nudge · 2 deny
 
 
 local MODE FLAT SAFE_FLAT TARGET CLASS ROLE CHAIN_SEGS CHAIN_COUNT CHAIN_ROLE
-local _cfg _seg _has_nonexempt
+local _cfg _seg
 MODE="block"
 if [ -f "$BIONIC_ROOT/.bionic/config.yaml" ]; then
   _cfg=$(grep -E '^farm-out-mode:' "$BIONIC_ROOT/.bionic/config.yaml" 2>/dev/null | head -1 \
@@ -5108,7 +4932,7 @@ nudge_once() {  # $1=class $2=role — ONE nudge per (session, class); repeat = 
   log_event "nudge" "$1"; emit_nudge "$1" "$2"; return 1
 }
 
-# ── main flow: override → unwrap → tier-1 deny → tier-2 nudge (single + chain) ──
+# ── main flow: override → unwrap → tier-1 deny (single + chain) → tier-2 nudge (single) ──
 # Chain-aware: the override token is honored ANYWHERE in the invocation —
 # leading, after a separator (;/&/|), or as an env-prefix mid-chain
 # (`cd x && FARM_OUT_ALLOW=1 bash tests/run.sh`) — not only in leading
@@ -5177,48 +5001,13 @@ if classify_tier2 "$TARGET"; then
   nudge_once "$CLASS" "$ROLE"; return $?
 fi
 
-# Chain tier-2 arm: ≥3 segments, NO tier-1 segment (the tier-1 arm above would
-# have exited otherwise), ≥1 non-exempt segment → nudge as class=chain.
-if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
-  _has_nonexempt=""
-  local _xst
-  while IFS= read -r _seg; do
-    # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
-    # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
-    # either end is single spaces.
-    while :; do
-      case "$_seg" in
-        ' '*) _seg="${_seg# }" ;;
-        *' ') _seg="${_seg% }" ;;
-        *)    break ;;
-      esac
-    done
-    [ -n "$_seg" ] || continue
-    # A SEGMENT IS JUDGED AS THE SHELL RUNS IT (wave-21 T14; critic-4e6d4a9 I2): a write through
-    # an unquoted redirect makes it production whatever its head, and every command of a pipe or
-    # a `;` list is judged on its own — `_chain_seg_split` reads both, `_chain_stage_observes`
-    # is the exempt set.
-    _chain_seg_split "$_seg"
-    if [ -n "$_CHAIN_WRITES" ]; then _has_nonexempt=1; break; fi
-    while IFS= read -r _xst; do
-      while :; do
-        case "$_xst" in
-          ' '*) _xst="${_xst# }" ;;
-          *' ') _xst="${_xst% }" ;;
-          *)    break ;;
-        esac
-      done
-      [ -n "$_xst" ] || continue
-      _chain_stage_observes "$_xst" || { _has_nonexempt=1; break; }
-    done <<EOF
-$_CHAIN_STAGES
-EOF
-    [ -z "$_has_nonexempt" ] || break
-  done <<EOF
-$CHAIN_SEGS
-EOF
-  if [ -n "$_has_nonexempt" ]; then nudge_once "chain" "implementor"; return $?; fi
-fi
+# THE CHAIN TIER-2 ARM IS RETIRED (wave-24 T11, D12, AC-7.7). A chain of three or more
+# segments with no tier-1 segment used to be nudged as class=chain when a segment's head was
+# outside an allowlist of observers. Eight of eight recent firings were observation or
+# notification one-liners — one of them the notification command the user's own CLAUDE.md
+# prescribes — and the count it read was quote-blind (research R4 §6). Tier 1 above and the
+# tier-2 singles (`git clone`, `docker run|pull`, `npx`/`uvx`) are unchanged: a chain that runs
+# a suite, a build or an install still denies, and a chain that merely does work is silent.
 
 return 0
 }
