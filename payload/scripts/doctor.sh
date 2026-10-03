@@ -1659,7 +1659,10 @@ if [ "$AUTO_MEMORY_FIRES" = "yes" ]; then
 elif [ "$AUTO_MEMORY_OVERRIDE" = "unknown" ]; then
   _run_add "$(_doctor_item "$DOCTOR_NIL" "$(bionic_check_label auto-memory)" "project settings unreadable (jq missing, or a file does not parse)")"
 else
-  _run_add "$(_doctor_item "$DOCTOR_OK" "$(bionic_check_label auto-memory)" "off for this project")"
+  # NOT `_doctor_item`: its label cell is 30 columns, which pushes this sentence past the
+  # page's 100-column bound (the ✗ row is the one exempt line), and its cut would end the
+  # claim at "under it…". Label, two spaces, sentence: 87 columns, whole.
+  _run_add "$(printf '  %s %s  %s' "$DOCTOR_OK" "$(bionic_check_label auto-memory)" "no override in this project's settings, no memory files under its slug")"
 fi
 
 # LEGACY `.bionic` SYMLINKS (AC-11, narrowed by AC-7.1/A-orch-24, wave-13-fixit-180).
@@ -2595,9 +2598,14 @@ if [ -n "$_drift_reg" ] && [ "$_drift_reg" != "$_drift_run" ]; then
     echo "  plugin-root drift: registry=${_drift_reg} running=${_drift_run} — the Patrol must be armed from the running root"
   fi
 fi
-# THE RUN, THE PREDECESSORS AND THE LEGACY LINKS — the three rows that are about
-# this PROJECT rather than about this machine, printed under the Patrol because
-# the Patrol is what acts on them.
+# THE RUN, THE PREDECESSORS, THE LEGACY LINKS AND AUTO MEMORY — the rows that are about
+# this PROJECT rather than about this machine. They used to print unheaded under PATROL,
+# so `auto-memory` read as a Patrol finding beside `none running` (wave-23 T10, walk
+# surprise 1). The header goes AFTER the Patrol's own rows and the drift line, so the
+# Patrol block — read from its header to end of output by more than one caller — still
+# contains every row it contained before; only the label above the project rows changed.
+echo ""
+echo "PROJECT"
 printf '%s' "$RUN_ROWS"
 
 # The version the dependency sweep already probed. Used only where a package
