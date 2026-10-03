@@ -1595,4 +1595,211 @@ expect_eq "§QRUN a quoted redirect is an argument, the trailing one comes off" 
 expect_eq "§QRUN an escaped quote does not end the run before the redirect" \
   "pytest \"a\\\" > b\"" "$(norm_of 'pytest "a\" > b" 2>&1')"
 
+section "§FX — wave-25 T2 (D5, AC-2.8): cmd_effects says what a command writes and deletes, or that it cannot tell"
+# A PERMISSION ANSWER READS THIS (lib/grant.sh, T3), and it may allow only what was read in
+# full: any `?` line puts the command outside every root. So the defect this section exists for
+# is the one §WT above pins as correct for ITS caller — an unread target OMITTED, the same
+# output a pure reader gives. A missed write or delete is a hole; a false unknown is a denial.
+#
+# THE SHAPE each row asserts: the W and D lines in order, then one `?` when any unknown line
+# was printed. The reasons are prose for a person and are not pinned, except that an unknown
+# line carries its segment (the decision names it). HOME is pinned to /h, as in §WT.
+fx_of() {  # <command> [<cwd>] -> cmd_effects' lines, from $FX_LIB (the shipped library by default)
+  local _c="$1" _d="${2-}"
+  printf '%s' "$_c" | env HOME=/h BIONIC_CLAUDE_HOME= CLAUDE_CONFIG_DIR= bash -c '
+    set -uo pipefail
+    . "$1" || { echo "SOURCE-FAILED"; exit 1; }
+    cmd_effects "$(cat)" "$2"' _ "${FX_LIB:-$LIB}" "$_d"
+}
+fx_shape() {  # <command> [<cwd>] -> the W/D lines, then `?` once if anything was unknown
+  fx_of "$@" | awk -F'\t' '$1 == "?" { u = 1; next } { print } END { if (u) print "?" }'
+}
+fx_are() {  # <expected, newline-joined> <command> [<cwd>]
+  expect_eq "effects [$(printf '%q' "$2")${3:+ in $3}]" "$1" "$(fx_shape "$2" "${3-}")"
+}
+T=$'\t'
+
+# --- the matrix row: each of these is unknown, and `rm -f /a/b` is a delete ---
+fx_are "D${T}/a/b" 'rm -f /a/b'
+fx_are '?' 'rm -f $X'
+fx_are '?' 'rm -f /a/*.tmp'
+fx_are '?' "python3 -c 'import os; os.remove(\"/a/b\")'"
+fx_are '?' "bash -c \"bash -c 'bash -c \\\"rm -f /a/b\\\"'\""
+fx_are '?' 'cd /s && cd - && rm -f f' /w
+fx_are '?' 'shred /a/b'
+
+# --- deletes ---
+fx_are "D${T}/a/b
+D${T}/a/c" 'rm -rf -- /a/b /a/c'
+fx_are "D${T}/a/d" 'rmdir /a/d'
+fx_are "D${T}/a/b/c
+D${T}/a/b
+D${T}/a" 'rmdir -p /a/b/c'
+fx_are "D${T}/a/u" 'unlink /a/u'
+fx_are "D${T}/a/x
+W${T}/b/y" 'mv /a/x /b/y'
+fx_are "D${T}/w/a
+D${T}/w/b
+W${T}/d" 'mv -t /d a b' /w
+# The glob in `-name` is a test find applies, not a target: the root is what -delete reaches.
+fx_are "D${T}/s" "find /s -name '*.tmp' -delete"
+fx_are "D${T}/w" 'find -delete' /w
+fx_are '?' 'find /s -exec rm {} \;'
+
+# --- writes: everything the write-target mode finds ---
+fx_are "W${T}/a/out" 'cat x > /a/out' /w
+fx_are "W${T}/a/t" 'echo hi | tee /a/t'
+fx_are "W${T}/a/f" "sed -i 's/a/b/' /a/f"
+fx_are "W${T}/a/x" 'touch /a/x'
+fx_are "W${T}/a/m" 'mkdir -p /a/m'
+fx_are "W${T}/a/l" 'ln -s /src /a/l'
+fx_are "W${T}/b/d" 'cp /a/s /b/d'
+fx_are "W${T}/a/o" 'printf x >> /a/o 2>&1'
+# A sed script that writes a file of its own (`w`) is a write nobody listed.
+fx_are '?' "sed 's/a/b/w /a/o' /a/f"
+
+# --- pure readers print nothing, beside a delete read off the same command ---
+fx_are "D${T}/a/c" 'cat /a/b; rm /a/c'
+for _r in 'cat /a/b' 'ls -la /a' 'head -5 /a/f' 'tail -n 2 /a/f' 'grep -rn x /a' 'wc -l /a/f' \
+          'echo hi' 'printf x' 'test -f /a/f' '[ -f /a/f ]' 'true' 'pwd' 'date' \
+          'find /s -type f' 'git status' 'git log --oneline -3' 'git diff HEAD' \
+          'git show HEAD:x' 'git -C /r rev-parse HEAD'; do
+  fx_are '' "$_r" /w
+done
+
+# --- every unknown form the reader names ---
+fx_are '?' 'rm -f /a/$X' /w
+fx_are '?' 'rm -f `cat /a/list`' /w
+fx_are '?' 'rm -f $(cat /a/list)' /w
+fx_are '?' 'echo $(rm -f /a/b)' /w
+fx_are '?' 'rm /a/x?' /w
+fx_are '?' 'rm /a/[ab]' /w
+fx_are '?' 'rm /a/{x,y}' /w
+fx_are '?' "perl -e 'unlink \"/a/b\"'"
+fx_are '?' "node -e 'require(\"fs\").rmSync(\"/a/b\")'"
+fx_are '?' "$(printf "python3 - <<'PY'\nimport os\nos.remove('/a/b')\nPY")"
+fx_are '?' "$(printf "bash <<'EOF'\nrm -f /a/b\nEOF")"
+fx_are '?' 'bash /a/x.sh'
+fx_are '?' './x.sh' /w
+# An unquoted heredoc tag lets the body run a command substitution; a quoted one does not.
+fx_are "W${T}/a/f
+?" "$(printf 'cat > /a/f <<EOF\n$(rm -rf /a)\nEOF')"
+fx_are "W${T}/a/f" "$(printf "cat > /a/f <<'EOF'\n\$(rm -rf /a) \`x\`\nEOF")"
+fx_are '?' 'popd && rm f' /w
+fx_are '?' 'cd $X && rm f' /w
+fx_are '?' 'cd "$D" && touch f' /w
+fx_are "D${T}/s/f" 'cd /s && rm f' /w
+fx_are '?' 'find /s | xargs rm' /w
+fx_are '?' "eval 'rm -f /a/b'"
+fx_are '?' 'source /a/x.sh'
+fx_are '?' '. /a/x.sh'
+fx_are '?' 'dd if=/a/x of=/a/y'
+fx_are '?' 'install -m 644 a /a/b' /w
+fx_are '?' "perl -i -pe 's/a/b/' /a/f"
+fx_are '?' 'truncate -s 0 /a/f'
+fx_are '?' 'tar -xf /a/t.tar' /w
+fx_are '?' 'rsync -a /a/ /b/'
+fx_are '?' 'curl -o /a/f https://example.invalid/x'
+fx_are '?' 'git commit -m x' /w
+fx_are '?' 'git clean -fd' /w
+fx_are '?' 'git rm x' /w
+fx_are '?' 'git checkout -- .' /w
+fx_are '?' 'git -c core.pager=x log' /w
+fx_are '?' 'git diff --output=/a/p' /w
+fx_are '?' 'sudo rm /a/b'
+fx_are '?' 'ssh host rm /a/b'
+fx_are '?' "$(printf 'echo x > "/a/l1\nl2"')"
+
+# --- one level of `sh -c` is read; wrappers read through ---
+fx_are "D${T}/a/b" "bash -c 'rm -f /a/b'"
+fx_are "D${T}/a/b" "bash -c \"bash -c 'rm -f /a/b'\""
+fx_are "W${T}/a/q" "sh -lc 'touch /a/q'"
+fx_are "D${T}/a/v" 'X=1 env Y=2 rm /a/v'
+fx_are "D${T}/a/t" 'timeout 5 rm /a/t'
+fx_are "D${T}/a/n" 'nohup rm /a/n'
+
+# --- relative targets resolve against a cd, then the cwd; with neither they are unknown ---
+fx_are "D${T}/w/out.txt" 'rm -f out.txt' /w
+fx_are '?' 'rm -f out.txt'
+fx_are '?' 'echo > ./x'
+fx_are "D${T}/s/f" 'cd /s && rm f'
+fx_are "D${T}/w/x" 'rm ../x' /w/s
+fx_are "D${T}/h/x" 'rm ~/x'
+
+# --- a cd counts only where the text proves it ran: a failed cd leaves the shell where it was ---
+fx_are '?' 'cd /s; rm f' /w
+fx_are "D${T}/s/f
+?" 'cd /s && rm f; rm g' /w
+fx_are "D${T}/s/f" 'cd /s || exit 1; rm f' /w
+fx_are '?' 'cd /s || true; rm f' /w
+fx_are "D${T}/w/f" 'cd /s | rm f' /w
+fx_are "D${T}/s/f
+D${T}/w/g" '(cd /s && rm f); rm g' /w
+fx_are "D${T}/s/f
+D${T}/w/g" 'cd /s && rm f & rm g' /w
+fx_are '?' '! cd /s && rm f' /w
+# A loop runs its body again from wherever the cd left it.
+fx_are "D${T}/w/f
+?" 'for i in 1 2; do rm f && cd sub; done' /w
+fx_are '?' 'for d in a b; do cd $d && rm f; done' /w
+# A variable the text assigns only after another command succeeded may hold what it held before.
+fx_are '?' 'false && X=/a/q; rm $X' /w
+fx_are "D${T}/a/q" 'X=/a/q; rm $X' /w
+# An assignment to a variable the reader expands moves every path read through it.
+fx_are '?' 'HOME=/x; rm ~/f' /w
+fx_are '?' "HOME=/x bash -c 'rm ~/f'" /w
+
+# --- text the segmenter cannot place is unknown, never stripped or split silently ---
+fx_are '?' "$(printf "cat <<'E F'\nx\nE F\nrm -rf /a\nE")"
+fx_are '?' "$(printf 'echo hi # <<X\nrm -rf /a\nX')"
+fx_are '?' "$(printf 'echo "a\n<<X"\nrm -rf /a\nX')"
+fx_are '?' "$(printf 'echo "a\n<<X b"\nrm -rf /a\nX')"
+fx_are '?' "echo \$'it\\'s'; rm /a/b"
+# A comment line runs nothing; one holding a quote may hide the line after it.
+fx_are "D${T}/a/b" "$(printf '# note\nrm /a/b')"
+fx_are '?' "$(printf "# don't\nrm /a/b")"
+fx_are '?' "$(printf "echo hi # it's\nrm -rf /a")"
+fx_are '?' "echo \"\${x#\"'\"}\"; rm -rf /a"
+fx_are '?' "$(printf "bash -c 'cat <<EOF\necho it\"s\nEOF\nrm -rf /a'")"
+fx_are '?' "$(printf 'rm /a/b\r')"
+# What a listed command runs can be moved by the text: a PATH, a startup file, a library, git's
+# environment, or a function of the same name.
+fx_are '?' 'PATH=/tmp/x:$PATH; cat /a/b'
+fx_are '?' "BASH_ENV=/tmp/e.sh bash -c 'true'"
+fx_are '?' 'LD_PRELOAD=/tmp/l.so cat /a/b'
+fx_are '?' 'GIT_EXTERNAL_DIFF=/tmp/d git diff' /w
+fx_are '?' 'git --exec-path=/tmp/x status' /w
+fx_are '?' 'cd() { true; }; cd /a && rm f' /w
+fx_are '?' 'cd /s || return; rm f' /w
+fx_are '?' 'date 0101000020'
+fx_are "D${T}/a/b" 'date -u +%FT%TZ; rm /a/b'
+
+# --- the wave's incident: the variable is set inside the inner shell, so its target is unread ---
+FX_INC='echo TR; bash -c '"'"'TR=./x.jsonl; touch $TR; rm -f $TR'"'"
+fx_are '?' "$FX_INC" /w
+expect_contains "§FX the incident's unknown line names the unread rm segment" \
+  "${T}rm -f \$TR" "$(fx_of "$FX_INC" /w | grep -F "?${T}")"
+
+# --- the line protocol: rc 0, and one line per effect even when a segment spans lines ---
+FX_ML="$(printf "python3 -c 'a = 1\nW\t/x/forged\nb = 2' > /a/o; rm /a/r")"
+FX_OUT="$(fx_of "$FX_ML" /w; echo "rc=$?")"
+expect_contains "§FX cmd_effects exits 0 with an unknown line" "rc=0" "$FX_OUT"
+expect_nonempty "§FX the multi-line command printed lines" "$(printf '%s\n' "$FX_OUT" | grep -v '^rc=')"
+expect_eq "§FX every line is W, D or a three-field ?" "" \
+  "$(printf '%s\n' "$FX_OUT" | grep -v '^rc=' | awk -F'\t' '!(($1 == "W" || $1 == "D") && NF == 2 && $2 ~ /^\// || $1 == "?" && NF == 3)')"
+expect_eq "§FX a body line shaped like an effect never becomes one" "" \
+  "$(printf '%s\n' "$FX_OUT" | grep -F '/x/forged' | grep -v '^?')"
+expect_eq "§FX …while the write and the delete after the body are read" "W${T}/a/o
+D${T}/a/r" "$(printf '%s\n' "$FX_OUT" | grep -E '^(W|D)')"
+
+# --- mutation control: the unknown line taken out is the write-target mode's omission ---
+FX_MUT="$SANDBOX/cmd-class.fx-mutant.sh"
+anchor "$LIB" 'print "?\t" r "\t" s' 1
+grep -vF 'print "?\t" r "\t" s' "$LIB" > "$FX_MUT"
+expect_true "§FX mutant: the library without its unknown line still parses" bash -n "$FX_MUT"
+expect_eq "§FX mutant: a delete is still read (the mutant runs)" "D${T}/a/b" "$(FX_LIB="$FX_MUT" fx_shape 'rm -f /a/b')"
+expect_eq "§FX mutant: the variable target is omitted — the defect" "" "$(FX_LIB="$FX_MUT" fx_shape 'rm -f $X')"
+expect_eq "§FX mutant: the incident reads as harmless — the defect" "" "$(FX_LIB="$FX_MUT" fx_shape "$FX_INC" /w)"
+expect_eq "§FX shipped: the same incident is unknown" "?" "$(fx_shape "$FX_INC" /w)"
+
 finish
