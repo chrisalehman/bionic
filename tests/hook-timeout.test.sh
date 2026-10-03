@@ -42,7 +42,9 @@
 # 3.2-only lines cannot be slow, and the check is printed as an ADVISORY rather than gated.
 #
 # Timed by python3 (`time.monotonic`, process group killed at the cap). HT_CAP raises the cap
-# to read a broken hook's real time for the record; it never changes the budget.
+# to read a broken hook's real time for the record; it never changes the budget. The same
+# clock also reads the child tree's CPU time (`RUSAGE_CHILDREN`, user+sys, before/after) into
+# HT_CPU; only §VERB gates on it — the hook rows gate on wall-clock alone.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * the engaged project, the payload envelopes and the placeholder-evidence plan — the
@@ -120,29 +122,40 @@ case "$(ht_version /bin/bash)" in 3.*) OLD_IS_32=1 ;; esac
 # process group, so a broken hook's forks do not keep burning the next row's budget.
 cat > "$SANDBOX/clock.py" <<'PY'
 import os, signal, subprocess, sys, time
+import resource
 shell, script, stdin_path, cwd, cap = sys.argv[1:6]
+def cpu():
+    r = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return r.ru_utime + r.ru_stime
+def put_cpu(c):
+    with open(os.environ["HT_CPU_FILE"], "w") as f:
+        f.write("%.3f" % c)
 out = open(sys.argv[6], "wb") if len(sys.argv) > 6 else subprocess.DEVNULL
 err = open(sys.argv[7], "wb") if len(sys.argv) > 7 else subprocess.DEVNULL
 with open(stdin_path, "rb") as fin:
+    c0 = cpu()
     t = time.monotonic()
     p = subprocess.Popen([shell, script], stdin=fin, stdout=out, stderr=err, cwd=cwd,
                          start_new_session=True)
     try:
         rc = p.wait(timeout=float(cap))
+        put_cpu(cpu() - c0)
         print("%.3f %d" % (time.monotonic() - t, rc))
     except subprocess.TimeoutExpired:
         os.killpg(p.pid, signal.SIGKILL)
         p.wait()
+        put_cpu(cpu() - c0)
         print("%.3f timeout" % (time.monotonic() - t))
 PY
 
-HT_SECS=""; HT_RC=""; HT_OUT=""; HT_ERR=""
+HT_SECS=""; HT_RC=""; HT_OUT=""; HT_ERR=""; HT_CPU=""
 ht_time() {  # <shell> <script> <stdin-file> <cwd> <cap>
   local r
   r=$(env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
-        BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" LANG=en_US.UTF-8 LC_ALL= LC_CTYPE= \
+        BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" HT_CPU_FILE="$SANDBOX/.cpu" LANG=en_US.UTF-8 LC_ALL= LC_CTYPE= \
         python3 "$SANDBOX/clock.py" "$1" "$2" "$3" "$4" "$5" "$SANDBOX/.out" "$SANDBOX/.err")
   HT_SECS="${r%% *}"; HT_RC="${r#* }"
+  HT_CPU=$(cat "$SANDBOX/.cpu" 2>/dev/null)
   HT_OUT=$(cat "$SANDBOX/.out" 2>/dev/null); HT_ERR=$(cat "$SANDBOX/.err" 2>/dev/null)
 }
 under_budget() { awk -v s="$1" -v b="$BUDGET" 'BEGIN { exit !(s + 0 < b + 0) }'; }
@@ -471,10 +484,15 @@ selfcheck e  hot-e.sh
 # ---------- the plan-row verbs ----------
 
 VERB_BUDGET=1
-section "4 — §VERB: each plan-row verb under ${VERB_BUDGET}s on a 66 KB plan (wave-24 T15; REQ-9 AC-9.7, D14)"
+VERB_HANG=2
+section "4 — §VERB: each plan-row verb under ${VERB_BUDGET}s CPU on a 66 KB plan (wave-24 T15; REQ-9 AC-9.7, D14)"
 #
 # The five verbs are typed by the orchestrator in its own turn, so their wall-clock is the
-# turn's. Each runs the whole task-add transaction — the projection through units.sh, a dry
+# turn's. AC-9.7's bound is the verb's own cost, so it is gated on CPU time (user+sys of the
+# verb's whole child tree), which machine load does not move: at load ~8.6 on 8 cores the same
+# verbs read 1.01–1.15 s of wall against 0.59–0.67 s unloaded. Wall is gated only at
+# ${VERB_HANG}s, a hang ceiling matching the hook rows' budget. Both numbers print on every row.
+# Each runs the whole task-add transaction — the projection through units.sh, a dry
 # commit through the real bash-walls.sh, the checksum and the swap — on a plan the size of
 # this wave's own (66 KB: 25 task rows, 40 matrix rows, a 30-row dispatch ledger, the rest task
 # detail). The witness is the verb's own success line beside exit 0, which it prints only after
@@ -544,9 +562,13 @@ verb_row() {  # <n> <verb> <args…> — times one verb under each shell already
   local n="$1" verb="$2"; shift 2
   { printf 'exec "$BASH" %q' "$POKER_SH"; printf ' %q' "$verb" "$@"; printf '\n'; } > "$SANDBOX/verb-$n.sh"
   ht_time "$VERB_SH" "$SANDBOX/verb-$n.sh" "$SANDBOX/in/empty" "$R_VERB" 30
-  echo "hook-timeout: §VERB $verb under $VERB_SH ($(ht_version "$VERB_SH")): ${HT_SECS}s rc=$HT_RC"
-  expect_true "§VERB $verb [$VERB_SH]: under ${VERB_BUDGET}s (took ${HT_SECS}s)" \
-    awk -v s="$HT_SECS" -v b="$VERB_BUDGET" 'BEGIN { exit !(s + 0 < b + 0) }'
+  echo "hook-timeout: §VERB $verb under $VERB_SH ($(ht_version "$VERB_SH")): cpu=${HT_CPU}s wall=${HT_SECS}s rc=$HT_RC"
+  expect_true "§VERB $verb [$VERB_SH]: CPU measured (got '${HT_CPU}')" \
+    awk -v s="$HT_CPU" 'BEGIN { exit !(s ~ /^[0-9.]+$/ && s + 0 > 0) }'
+  expect_true "§VERB $verb [$VERB_SH]: CPU under ${VERB_BUDGET}s (took ${HT_CPU}s cpu, ${HT_SECS}s wall)" \
+    awk -v s="$HT_CPU" -v b="$VERB_BUDGET" 'BEGIN { exit !(s ~ /^[0-9.]+$/ && s + 0 < b + 0) }'
+  expect_true "§VERB $verb [$VERB_SH]: wall under the ${VERB_HANG}s hang ceiling (took ${HT_SECS}s wall)" \
+    awk -v s="$HT_SECS" -v b="$VERB_HANG" 'BEGIN { exit !(s ~ /^[0-9.]+$/ && s + 0 < b + 0) }'
   expect_eq "§VERB $verb [$VERB_SH]: exit 0" "0" "$HT_RC"
   expect_contains "§VERB $verb [$VERB_SH]: the transaction ran to its swap — its success line" \
     "poker: $verb — " "$HT_OUT"
