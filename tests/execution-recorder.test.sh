@@ -2073,4 +2073,44 @@ IFS='|' read -r S15D_REPO S15D_TR S15D_SUB S15D_CFG <<< "$(make_world survivalth
 run_rec "$(mk_subagent_start "$SID_A" "$S15D_TR" "$S15D_REPO" "superpowers:something" "$START_ID")"
 expect_empty "15d: a third-party agent type receives nothing on stdout" "$REC_OUT"
 
+section "Section 16: §TM — a teammate's terms ride its roster row's subagent_type (wave-24 T6, D8, AC-6.1)"
+# For a teammate `agent_type` is the dispatch NAME (`w-1`), never a `bionic:*` type, so the
+# Section 15 gate read nothing and the teammate started with no dispatch terms. The row the
+# name join finds carries the TYPE (`subagent_type=bionic:researcher`); the gate decides on it
+# too and journals `terms-delivered=<iso>` on the identified row.
+#
+# fails-when: the gate reads only `agent_type` (16a/16b red), delivery fires for a non-bionic
+# row (16c/16d), or an `agent_type` that is also a bionic row prints the terms twice (16e).
+tm_seed() {  # <repo> <name> <subagent_type>
+  local f="$1/.bionic/tmp/roster-${SID_A}.state"
+  mkdir -p "$1/.bionic/tmp"; [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture status=intended session="$SID_A" name="$2" agent_id="" subagent_type="$3" \
+    launched_at=2026-08-08T09:00:00Z model=claude-opus-5 \
+    deliverable=.bionic/docs/record/w1-slice1-report.md duration='~25 minutes.' \
+    progress=.bionic/tmp/w1-s1-progress.md cadence='~8m.' tool_use_id=toolu_01TM >> "$f"
+}
+IFS='|' read -r S16A_REPO S16A_TR S16A_SUB S16A_CFG <<< "$(make_world tmbionic yes)"
+tm_seed "$S16A_REPO" "w-1" "bionic:researcher"
+run_rec "$(mk_subagent_start "$SID_A" "$S16A_TR" "$S16A_REPO" "w-1" "$START_ID")"
+S16A_CTX=$(printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)
+expect_eq "16a: agent_type=w-1 on a bionic:researcher row — additionalContext is survival.md byte for byte"   "$S15_WANT" "$S16A_CTX"
+S16A_ROW=$(grep 'status=identified' "$S16A_REPO/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)
+expect_contains "16b: …and the identified row gains terms-delivered=" "|terms-delivered=20" "$S16A_ROW"
+expect_eq "16b: …exactly once" "1" "$(printf '%s' "$S16A_ROW" | tr '|' '\n' | grep -c '^terms-delivered=')"
+
+IFS='|' read -r S16C_REPO S16C_TR S16C_SUB S16C_CFG <<< "$(make_world tmplain yes)"
+tm_seed "$S16C_REPO" "w-2" "implementor"
+run_rec "$(mk_subagent_start "$SID_A" "$S16C_TR" "$S16C_REPO" "w-2" "$START_ID")"
+expect_empty "16c: a teammate whose row is not a bionic type receives nothing" "$REC_OUT"
+S16C_ROW=$(grep 'status=identified' "$S16C_REPO/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)
+expect_contains "16d: …its row is still identified (the positive on the same extractor)" "status=identified" "$S16C_ROW"
+expect_absent "16d: …and carries no terms-delivered=" "terms-delivered=" "$S16C_ROW"
+
+IFS='|' read -r S16E_REPO S16E_TR S16E_SUB S16E_CFG <<< "$(make_world tmboth yes)"
+tm_seed "$S16E_REPO" "bionic:researcher" "bionic:researcher"
+run_rec "$(mk_subagent_start "$SID_A" "$S16E_TR" "$S16E_REPO" "bionic:researcher" "$START_ID")"
+expect_eq "16e: agent_type AND row both bionic — the terms print once" "1" "$(printf '%s\n' "$REC_OUT" | grep -c .)"
+expect_contains "16e: …and the row still gains terms-delivered=" "|terms-delivered=20" \
+  "$(grep 'status=identified' "$S16E_REPO/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)"
+
 finish
