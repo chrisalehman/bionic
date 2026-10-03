@@ -832,4 +832,57 @@ expect_match "the same tree lands once every refusal is lifted" \
   "spawn-worktree: LANDED branch=wt/refused onto=wave/fixture checkout=${F} *" "$OUTF"
 expect_eq   "it exits 0" "0" "$RCF"
 
+
+section "Group 11: the workspace readers — one file, read by key, refused through a link (wave-25 T1, D3)"
+#
+# `workspace_for_name <root> <sid> <name>` and `workspaces_of_session <root> <sid>` read
+# `<root>/.bionic/tmp/workspaces-<sid>.state`, the file `spawn-worktree.sh create --for`
+# appends to (tests/spawn-worktree.test.sh §WS drives that writer end to end). These rows
+# hand-build the file to reach the shapes a create never writes: another session's line, a
+# foreign line, a line with no path or a relative one, a CRLF ending. rc 1 is "nothing
+# recorded"; rc 2 is "refused", the file or a directory above it a symlink, or a session id
+# no file can be named for.
+
+expect_true "workspace_for_name is defined"    declare -f workspace_for_name
+expect_true "workspaces_of_session is defined" declare -f workspaces_of_session
+
+WK="$TMP/ws-reader"; mkdir -p "$WK/.bionic/tmp"
+WKSID="reader-session-01"
+WKF="$WK/.bionic/tmp/workspaces-${WKSID}.state"
+{
+  printf 'workspace/v1|session=%s|name=a|path=/t/a-1|branch=wt/a|base=0|plan=none|at=2026-10-03T00:00:00Z\n' "$WKSID"
+  printf 'workspace/v1|session=%s|name=b|path=/t/b-1|branch=wt/b|base=0|plan=none|at=2026-10-03T00:00:01Z\n' "$WKSID"
+  printf 'workspace/v1|session=%s|name=a|path=/t/a-2|branch=wt/a2|base=0|plan=none|at=2026-10-03T00:00:02Z\n' "$WKSID"
+  printf 'workspace/v1|session=someone-else|name=a|path=/t/a-foreign|branch=wt/x|base=0|plan=none|at=2026-10-03T00:00:03Z\n'
+  printf 'roster-state/v1|session=%s|name=a|path=/t/a-roster\n' "$WKSID"
+  printf 'workspace/v1|session=%s|name=e|branch=wt/e|base=0|plan=none|at=2026-10-03T00:00:04Z\n' "$WKSID"
+  printf 'workspace/v1|session=%s|name=d|path=relative/d|branch=wt/d|base=0|plan=none|at=2026-10-03T00:00:05Z\n' "$WKSID"
+  printf 'workspace/v1|session=%s|name=c|path=/t/c-1|branch=wt/c|base=0|plan=none|at=2026-10-03T00:00:06Z\r\n' "$WKSID"
+} > "$WKF"
+
+wk() { "$@"; echo "rc=$?"; }
+expect_eq "the last line for a name answers"               "$(printf '/t/a-2\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" a)"
+expect_eq "another name answers its own"                   "$(printf '/t/b-1\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" b)"
+expect_eq "a CRLF line answers without the CR"             "$(printf '/t/c-1\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" c)"
+expect_eq "a relative path is not a recorded tree"         "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" d)"
+expect_eq "a line with no path is not a recorded tree"     "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" e)"
+expect_eq "a name nobody recorded has none"                "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" z)"
+expect_eq "an empty name has none"                        "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" "")"
+expect_eq "workspaces_of_session: this session's valid paths, in order" \
+  "$(printf '/t/a-1\n/t/b-1\n/t/a-2\n/t/c-1\nrc=0')" "$(wk workspaces_of_session "$WK" "$WKSID")"
+expect_eq "no file: workspace_for_name has none"           "rc=1" "$(wk workspace_for_name "$WK" no-file-session a)"
+expect_eq "no file: workspaces_of_session has none"        "rc=1" "$(wk workspaces_of_session "$WK" no-file-session)"
+expect_eq "a session id no file can be named for is refused" "rc=2" "$(wk workspace_for_name "$WK" "../tmp/x" a)"
+
+# THE SYMLINK REFUSAL: the same bytes through a link are refused, not followed; the regular
+# file above is the positive on the same reader.
+WKL="$TMP/ws-reader-link"; mkdir -p "$WKL/.bionic/tmp"
+cp "$WKF" "$TMP/ws-reader-target.state"
+ln -s "$TMP/ws-reader-target.state" "$WKL/.bionic/tmp/workspaces-${WKSID}.state"
+expect_eq "a symlinked workspace file is refused by workspace_for_name" "rc=2" "$(wk workspace_for_name "$WKL" "$WKSID" a)"
+expect_eq "…and by workspaces_of_session" "rc=2" "$(wk workspaces_of_session "$WKL" "$WKSID")"
+WKT="$TMP/ws-reader-tmplink"; mkdir -p "$WKT/.bionic"
+ln -s "$WK/.bionic/tmp" "$WKT/.bionic/tmp"
+expect_eq "a symlinked .bionic/tmp is refused" "rc=2" "$(wk workspace_for_name "$WKT" "$WKSID" a)"
+
 finish

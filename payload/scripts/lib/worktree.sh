@@ -509,3 +509,133 @@ worktree_lease_overruns() {  # <main-root> <verdict-or-roster-file> -> <path>\t<
 worktree_for_row() {  # <main-root> <row name> -> path (whether or not it exists)
   printf '%s/.worktrees/%s' "${1%/}" "$(printf '%s' "${2#W-}" | tr '[:upper:]' '[:lower:]')"
 }
+
+# ---------------------------------------------------------------------------
+# Workspaces — the tree recorded for a name (wave-25 T1, REQ-2, D3).
+#
+# THE ACT THAT CREATES A TREE RECORDS WHOSE IT IS. `spawn-worktree.sh create --for <name>`
+# appends one line, after the tree is verified, to `<main-root>/.bionic/tmp/workspaces-<sid>.state`:
+#
+#   workspace/v1|session=<sid>|name=<agent name>|path=<absolute tree>|branch=<branch>|base=<sha>|plan=<absolute plan or none>|at=<ISO-UTC>
+#
+# and the two readers below answer from that file alone. That is the whole difference from
+# `worktree_for_row` above: the convention says which tree a name WOULD have, this record
+# says which tree was MADE for it. Nothing here falls back to the convention — a name nobody
+# recorded has no tree, whatever `.worktrees/` holds. Not a roster key: the tree exists
+# before the roster row does.
+#
+# APPEND-ONLY, THE LAST LINE WINS. A second create for one name appends a second line;
+# `workspace_for_name` returns the later tree, `workspaces_of_session` every tree in order.
+#
+# THE SYMLINK REFUSAL IS THE ROSTER'S (hooks/dispatch-preflight.sh `attested`): `.bionic`,
+# `.bionic/tmp` and the file itself are each refused when they are a symlink, by the writer
+# and by both readers, so a planted link can neither carry a record out of the tree nor hand
+# a session somebody else's.
+#
+# THE READERS' NAMES ARE THE PLAN'S INTERFACE, verbatim, which is why they carry no
+# `worktree_` prefix. Status: 0 an answer, 1 nothing recorded, 2 refused (a link on the
+# path, a file that cannot be read, or a session id no file can be named for).
+
+WORKSPACE_SCHEMA="workspace/v1"
+
+# The file for <root> <sid>, rc 1 when the session id cannot name one. The shape rule is
+# `engaged_marker_path`'s (lib/run.sh): a session that can have a marker can have this file.
+_wt_workspaces_file() {  # <root> <sid>
+  local root="${1:-}" sid="${2:-}"
+  [ -n "$root" ] && [ -n "$sid" ] || return 1
+  [ "$sid" = "unknown" ] && return 1
+  case "$sid" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  printf '%s/.bionic/tmp/workspaces-%s.state' "${root%/}" "$sid"
+}
+
+_wt_workspaces_unlinked() {  # <root> <file> -> 0 when no level of the path is a symlink
+  [ ! -L "${1%/}/.bionic" ] && [ ! -L "${1%/}/.bionic/tmp" ] && [ ! -L "$2" ]
+}
+
+# A value that would break the line: empty, or carrying the separator or a line break.
+_wt_workspace_value_bad() {  # <value>
+  case "${1:-}" in ''|*'|'*|*$'\n'*|*$'\r'*) return 0 ;; esac
+  return 1
+}
+
+# The session's bound plan as the engaged marker names it, or `none`. Never the root's
+# newest open run: that fallback is somebody else's run (lib/run.sh `session_run`).
+_wt_workspace_plan() {  # <root> <sid>
+  local lib p
+  if ! declare -f session_plan >/dev/null 2>&1; then
+    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/run.sh"
+    # shellcheck source=/dev/null
+    [ -r "$lib" ] && . "$lib" 2>/dev/null
+    declare -f session_plan >/dev/null 2>&1 || return 1
+  fi
+  p="$(session_plan "$1" "$2" 2>/dev/null)" || p=""
+  case "$p" in /*) printf '%s' "$p" ;; *) printf 'none' ;; esac
+}
+
+# Could <name> be recorded for <sid> under <root>? Silent rc 0, or the reason on stdout and
+# rc 1. `create` asks BEFORE it makes anything, so a create that could not record is refused
+# with nothing to undo; `worktree_record_workspace` asks again at the append.
+worktree_workspace_refusal() {  # <root> <sid> <name>
+  local f
+  _wt_workspace_value_bad "${3:-}" && { printf 'invalid-name'; return 1; }
+  f="$(_wt_workspaces_file "${1:-}" "${2:-}")" || { printf 'invalid-session'; return 1; }
+  _wt_workspaces_unlinked "$1" "$f" || { printf 'workspace-file-symlinked'; return 1; }
+  [ ! -e "$f" ] || [ -f "$f" ] || { printf 'workspace-file-unwritable'; return 1; }
+  return 0
+}
+
+# Append the one line. Silent rc 0, or the reason on stdout and rc 1.
+worktree_record_workspace() {  # <root> <sid> <name> <abs tree> <branch> <base sha>
+  local root="${1:-}" sid="${2:-}" name="${3:-}" path="${4:-}" branch="${5:-}" base="${6:-}" f plan v
+  worktree_workspace_refusal "$root" "$sid" "$name" || return 1
+  f="$(_wt_workspaces_file "$root" "$sid")"
+  case "$path" in /*) : ;; *) printf 'workspace-path-not-absolute'; return 1 ;; esac
+  plan="$(_wt_workspace_plan "$root" "$sid")" || { printf 'run-library-unloadable'; return 1; }
+  for v in "$path" "$branch" "$base" "$plan"; do
+    _wt_workspace_value_bad "$v" && { printf 'workspace-field-unrecordable'; return 1; }
+  done
+  mkdir -p "${f%/*}" 2>/dev/null || { printf 'workspace-file-unwritable'; return 1; }
+  _wt_workspaces_unlinked "$root" "$f" || { printf 'workspace-file-symlinked'; return 1; }
+  printf '%s|session=%s|name=%s|path=%s|branch=%s|base=%s|plan=%s|at=%s\n' \
+    "$WORKSPACE_SCHEMA" "$sid" "$name" "$path" "$branch" "$base" "$plan" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$f" 2>/dev/null \
+    || { printf 'workspace-file-unwritable'; return 1; }
+}
+
+# Both readers in one walk, read by key. A line counts when it is this schema, names THIS
+# session (the file name alone is not trusted for that) and carries an absolute path; a
+# CRLF ending is translated, never kept in the path.
+_wt_workspace_paths() {  # <root> <sid> <name> <all: 1 or 0>
+  local f out
+  f="$(_wt_workspaces_file "$1" "$2")" || return 2
+  _wt_workspaces_unlinked "$1" "$f" || return 2
+  [ -e "$f" ] || return 1
+  { [ -f "$f" ] && [ -r "$f" ]; } || return 2
+  out="$(WT_SID="$2" WT_NAME="$3" WT_ALL="$4" awk -F'|' -v schema="$WORKSPACE_SCHEMA" '
+    BEGIN { sid = ENVIRON["WT_SID"]; want = ENVIRON["WT_NAME"]; all = ENVIRON["WT_ALL"] }
+    { sub(/\r$/, "") }
+    $1 != schema { next }
+    {
+      s = ""; n = ""; p = ""; hn = 0
+      for (i = 2; i <= NF; i++) {
+        if (index($i, "session=") == 1) s = substr($i, 9)
+        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
+        else if (index($i, "path=") == 1) p = substr($i, 6)
+      }
+      if (s != sid || substr(p, 1, 1) != "/") next
+      if (all == "1") print p
+      else if (hn && n == want) last = p
+    }
+    END { if (all != "1" && last != "") print last }' "$f" 2>/dev/null)" || return 2
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+workspace_for_name() {  # <root> <sid> <name> -> the last tree recorded for <name>; 1 none, 2 refused
+  [ -n "${3:-}" ] || return 1
+  _wt_workspace_paths "${1:-}" "${2:-}" "$3" 0
+}
+
+workspaces_of_session() {  # <root> <sid> -> every tree recorded, one per line; 1 none, 2 refused
+  _wt_workspace_paths "${1:-}" "${2:-}" "" 1
+}

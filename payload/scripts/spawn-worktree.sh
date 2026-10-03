@@ -75,8 +75,18 @@
 # `worktree_land_for_session` is also what `hooks/stop-orders.sh standdown`
 # calls; this verb is a call site.
 #
+# THE TREE IS RECORDED BY THE ACT THAT MAKES IT (wave-25 T1, REQ-2, D3). `create --for
+# <name>` appends one `workspace/v1` line naming the session, the agent, the tree, its branch
+# and base, the session's bound plan and the time to
+# `<main-root>/.bionic/tmp/workspaces-<sid>.state`, after the tree is verified and before the
+# OK line; payload/scripts/lib/worktree.sh owns the line and its two readers. The session is
+# the one `land` reads (CLAUDE_CODE_SESSION_ID, lib/session.sh). A FLAG, not a fourth
+# positional, so the positional form is untouched and the flag may sit anywhere. Without it
+# `create` records nothing and behaves exactly as it always has; the attestation line is the
+# same either way. A named create that could not record is refused before anything is made.
+#
 # Usage:
-#   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir]
+#   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
 #   spawn-worktree.sh remove <worktree-path>
 #   spawn-worktree.sh land   <worktree-path>
 
@@ -121,7 +131,7 @@ contract() { printf '%s: %s\n' "$PROG" "$*"; }
 usage() {
   cat <<'USAGE'
 Usage:
-  spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir]
+  spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]
   spawn-worktree.sh remove <worktree-path>
   spawn-worktree.sh land   <worktree-path>
 
@@ -129,7 +139,11 @@ create  makes the branch AND the worktree at exactly <base-sha>, verifies
         both, plants <worktree>/.bionic -> <main-root>/.bionic (D7; unless the
         branch already tracks something at that path), and prints one OK
         attestation line. Default parent: <main-root>/.worktrees. A relative
-        parent resolves against the main root, never against pwd.
+        parent resolves against the main root, never against pwd. With
+        --for <name>, also appends one workspace/v1 line for that agent to
+        <main-root>/.bionic/tmp/workspaces-<session>.state (session from
+        CLAUDE_CODE_SESSION_ID); refused, before anything is made, with no
+        session or when the record could not be written.
 remove  removes the worktree and KEEPS the branch, deleting the
         <worktree>/.bionic link first (the one create planted, or a legacy
         one an older bionic left).
@@ -179,8 +193,17 @@ abort_created() {
 }
 
 cmd_create() {
-  local base="${1:-}" parent="${3:-}"
-  branch="${2:-}"
+  local base="" parent="" name="" named=0 n=0 sid="" why=""
+  branch=""
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--for" ]; then
+      [ $# -ge 2 ] || { usage >&2; _wt_refuse usage; }
+      name="$2"; named=1; shift 2; continue
+    fi
+    n=$((n + 1))
+    case "$n" in 1) base="$1" ;; 2) branch="$1" ;; 3) parent="$1" ;; esac
+    shift
+  done
 
   [ -n "$base" ] && [ -n "$branch" ] || { usage >&2; _wt_refuse usage; }
 
@@ -192,6 +215,20 @@ cmd_create() {
   # link to a directory that does not exist would produce an attestation whose
   # last field names nothing, which is worse than no worktree.
   [ -d "$(bionic_root "$main_root")" ] || _wt_refuse no-bionic-dir
+
+  # A NAMED CREATE THAT COULD NOT RECORD IS REFUSED HERE, before anything exists. The
+  # libraries are sourced in SUBSHELLS: lib/worktree.sh defines its own `_wt_refuse`
+  # (return 2, REFUSED), and loading it into this shell would replace the one above (exit 2,
+  # FAIL) for every refusal that follows.
+  if [ "$named" -eq 1 ]; then
+    [ -f "$LIB_WORKTREE" ] || _wt_refuse library-missing
+    # shellcheck source=/dev/null
+    sid="$( . "${LIB_WORKTREE%/*}/session.sh" 2>/dev/null && session_id 2>/dev/null )" || sid=""
+    [ -n "$sid" ] || _wt_refuse no-session
+    # shellcheck source=/dev/null
+    why="$( . "$LIB_WORKTREE" 2>/dev/null || { printf 'library-unloadable'; exit 1; }
+            worktree_workspace_refusal "$main_root" "$sid" "$name" )" || _wt_refuse "${why:-library-unloadable}"
+  fi
 
   local base_sha
   base_sha="$(git -C "$main_root" rev-parse --verify --quiet "${base}^{commit}" 2>/dev/null)"
@@ -254,6 +291,15 @@ cmd_create() {
     expected="$(cd "$bionic_state" 2>/dev/null && pwd -P)"
     [ -n "$resolved" ] && [ "$resolved" = "$expected" ] || abort_created alias-mismatch
     alias_field=" alias=${resolved}"
+  fi
+
+  # The record, after everything above was re-measured and before the line that attests it.
+  # A failure here undoes the tree: a named tree nobody can find by its name is the defect.
+  if [ "$named" -eq 1 ]; then
+    # shellcheck source=/dev/null
+    why="$( . "$LIB_WORKTREE" 2>/dev/null || { printf 'library-unloadable'; exit 1; }
+            worktree_record_workspace "$main_root" "$sid" "$name" "$wt" "$branch" "$base_sha" )" \
+      || abort_created "${why:-workspace-unrecorded}"
   fi
 
   contract "OK path=${wt} branch=${branch} head=${head} base=${base_sha}${alias_field}"
