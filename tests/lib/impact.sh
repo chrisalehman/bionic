@@ -458,7 +458,14 @@ _impact_answer() {
 # empty string to turn it off. Writes are `mktemp` + `mv` within the cache
 # directory, so a reader never sees a half-written graph and two writers racing
 # at one key both leave a whole one.
-LIBDIRS="$(find "$ROOT" \( -path "$ROOT/.git" -o -path "$ROOT/.worktrees" \) \
+#
+# THE LIBRARY DIRECTORIES prune `.bionic` as well (wave-24 T21). Its critic and
+# review beds hold whole copies of `tests/lib` and `payload/scripts/lib`; walked,
+# each copy multiplied every source line's candidates and became a `source` edge
+# of its own — 13 of 18 s at the main checkout. The prune also makes the graph a
+# function of the key's path listing, which has never included `.bionic`: before
+# it, a bed appearing changed the graph without changing the key.
+LIBDIRS="$(find "$ROOT" \( -path "$ROOT/.git" -o -path "$ROOT/.worktrees" -o -path "$ROOT/.bionic" \) \
   -prune -o -type d -name lib -print 2>/dev/null \
   | sed "s|^$ROOT/||" | sort -u | tr '\n' ' ')"
 
