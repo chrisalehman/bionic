@@ -66,7 +66,9 @@
 # fp=<launch>:<deliverable mtime>:<completion-message count>` is written by `session-poker.sh
 # hold`: the orchestrator's standing answer to a stand-down, honoured by the tick while the
 # fingerprint is unchanged. `done=<path>` is the brief's `Done marker:`, lifted at dispatch.
-# Neither is copied to a successor row: a new contract answers for itself.
+# `held=` is never copied to a successor row: a new contract answers for itself. `done=` is
+# copied by `hold` and `amend`, whose row is the same contract, and dropped by `extend`, whose
+# re-opened row is new work (`row_copy_args` in hooks/session-poker.sh, `drop-done`).
 #
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and

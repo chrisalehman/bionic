@@ -602,6 +602,26 @@ fire "$D"
 expect_status "8a: the control — a tree touching a file outside Files: refuses the stop" "2" "$STOP_RC"
 expect_contains "8b: …naming the file" "undeclared/two.sh" "$STOP_ERR$(reason_of)"
 
+# 8b2 (wave-24 T27; critic I2, AC-6.5): the printed amend is pasteable from a plugin root whose
+# path holds a space. The same refusal, from a copy of the hooks and library under `my plugin/`;
+# the fix line is parsed the way a pasting shell parses it, and the script must be one argument.
+S8_SP="$(cd "$(mktemp -d)" && pwd -P)/my plugin"
+mkdir -p "$S8_SP/hooks" "$S8_SP/scripts/lib"
+cp "$(dirname "$HOOK")"/*.sh "$S8_SP/hooks/"
+S8_LIB="$(dirname "$HOOK")/../payload/scripts/lib"
+[ -d "$S8_LIB" ] || S8_LIB="$(dirname "$HOOK")/../scripts/lib"
+cp "$S8_LIB"/*.sh "$S8_SP/scripts/lib/"
+S8_HOOK_SAVED="$HOOK"; HOOK="$S8_SP/hooks/stop.sh"
+D=$(s8_fixture)
+fire "$D"
+HOOK="$S8_HOOK_SAVED"
+S8_FIXLINE="$(printf '%s\n' "$STOP_ERR$(reason_of)" | /usr/bin/grep -m1 'session-poker.sh.* amend ' | sed 's/^[[:space:]]*//')"
+expect_contains "8b2 precondition: the refusal from the spaced root prints its amend line" "my plugin" "$S8_FIXLINE"
+eval "set -- $S8_FIXLINE"
+expect_eq "8b2: critic I2 the pasted line's script is one argument, under the spaced root" \
+  "bash|$S8_SP/hooks/session-poker.sh|amend" "$1|$2|$3"
+set --
+
 D=$(s8_fixture)
 S8_AMEND=$( cd "$D" && CLAUDE_CODE_SESSION_ID="$SID" bash "$S8_POKER" amend s8-writer \
   --files+ undeclared/two.sh --reason 'the fix needs two.sh' 2>&1 ); S8_RC=$?
@@ -884,6 +904,21 @@ expect_contains "SD6 precondition: the decline now belongs to another session" \
 sd_turn "$SD_TX" u-sd6-2
 s7_fire "$SD_D6" "$SD_TX"
 expect_eq "SD6: another session's decline does not stand in this one" "block" "$(sd_decision)"
+
+# SD7 (wave-24 T27; Step-6 review C4): a ledger line written before the reason rule (A-T8.7),
+# whose decline is only a dash, is not an answer either. The reader holds the line to the rule
+# the turn's own decline is held to: a letter or a digit.
+SD_D7="$(sd_fixture)"
+sd_turn "$SD_TX" u-sd7-1 "fill-declined: T7 waits on the T6 merge"
+s7_fire "$SD_D7" "$SD_TX"
+expect_eq "SD7 precondition: the declining turn ends" "" "$(sd_decision)"
+sed -i.bak 's/|declined=[^|]*|/|declined=—|/' "$SD_D7/.bionic/docs/record/wave-24-sd/fill-ledger.log"
+expect_eq "SD7 precondition: the ledger line now carries a dash for its decline" \
+  "—" "$(sd_field "$(sd_led "$SD_D7" | tail -1)" declined)"
+sd_turn "$SD_TX" u-sd7-2
+s7_fire "$SD_D7" "$SD_TX"
+expect_eq "SD7: C4 a pre-upgrade declined=— does not stand" "block" "$(sd_decision)"
+expect_contains "SD7b: …and the refusal names T7" "not launched: T7" "$STOP_ERR"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -925,7 +960,7 @@ sdr_turn "$SDR_TX"
 s7_fire "$SDR_D" "$SDR_TX"
 expect_contains "SDR1: the unanswered stand-down is refused" "stand-down unanswered" "$(reason_of)"
 expect_contains "SDR1b: AC-4.12 …and the refusal names hold as the way to keep the agent" \
-  "session-poker.sh hold <name> <reason>" "$(reason_of)"
+  "session-poker.sh hold W-SDR 'why it stays up'" "$(reason_of)"
 
 sdr_turn "$SDR_TX" "standdown-declined: W-SDR"
 s7_fire "$SDR_D" "$SDR_TX"

@@ -10167,7 +10167,11 @@ expect_eq "S19.3 …declared by 45 anchor calls (Section 8's doctoring rewrites 
 # doctor call site deleted from a copy of doctor.sh — anchors the three `_run_add` lines
 # before the awk that drops them, so a renamed call site cannot leave the mutant identical
 # to the shipped page. One anchor call, 32 -> 33, by direct grep.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 33 more" "33" \
+#
+# 37 at wave-24-fixit-1811 (T27): four agreement pins' mutation arms (§OCC7's collector, §SD5's
+# standing read, §RPL2's envelope scan, §MEMROOT's `${HOME}` arm) each anchor the line they
+# doctor. Four anchor calls, 33 -> 37, by direct grep.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 37 more" "37" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -10260,7 +10264,9 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # 82 at epic-23 wave-23-fixit-1810 (2026-10-02, T2): 45 + 33 + 1 + 3 — §DS DS.10b's anchor
 # in this file; the other three files are untouched by that task. MEASURE AGAIN AT THE
 # WAVE MERGE: T1 edits this file in parallel.
-expect_eq "S19.3 …82 anchor call sites across the four doctoring suites, all told" "82" \
+# 86 at wave-24-fixit-1811 (T27): 45 + 37 + 1 + 3 — the four agreement pins' anchors in this
+# file. MEASURE AGAIN AT THE WAVE MERGE if docs-pins gains an anchor in parallel.
+expect_eq "S19.3 …86 anchor call sites across the four doctoring suites, all told" "86" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
@@ -12582,6 +12588,33 @@ OCC_PF_RO=$( cd "$OCC_R" && mk_agent_payload "$SID_A" "$OCC_R" \
 expect_eq "OCC4 a read-only dispatch against the same full roster is admitted (rc 0)" "0" "$OCC_PF_RO_RC"
 expect_absent "OCC4b …with no writer-budget refusal" "writers: budget=" "$OCC_PF_RO"
 
+# THE THIRD READER, THE STOP WALL (wave-24 T27; Step-6 review U4). `stop.sh`'s fill collector
+# counts the same open set through the same `budget_open_writers`, and records the count as the
+# fill ledger's `open=`. Asked over the same roster and plan, its number must be the other two's.
+# The mutation arm drives a planted tree whose collector counts every open row, the shape a
+# caller that skipped the writer filter would take, and the pin must move.
+occ_stop() {  # <stop hook> -> the `open=` of the ledger line that Stop wrote
+  local tr="$OCC_R/occ-turn.jsonl"
+  jq -nc '{type:"user",uuid:"u-occ",isSidechain:false,timestamp:"2026-10-03T00:00:00Z",message:{role:"user",content:"carry on"}}' > "$tr"
+  cgc_ring
+  s4_stop_payload "$OCC_R" "$SID_A" "$tr" | occ_env BIONIC_NOW_EPOCH=1700000000 bash "$1" >/dev/null 2>&1
+  tail -1 "$OCC_R/.bionic/docs/record/occ/fill-ledger.log" 2>/dev/null | sed -n 's/.*|open=\([0-9]*\)|.*/\1/p'
+}
+OCC_STOP_N="$(occ_stop "$CGSD_STOP")"
+expect_eq "OCC5 the stop wall's open count is ONE" "1" "$OCC_STOP_N"
+expect_eq "OCC6 …and equal to preflight's and the tick's" "$OCC_PF_N/$OCC_TICK_N" "$OCC_STOP_N/$OCC_STOP_N"
+OCC_MUT_HOOK="$(plant_lg_tree "$SANDBOX/fx/occ-mut")"
+cp "$SWEEPER" "$(dirname "$OCC_MUT_HOOK")/session-sweeper.sh"
+anchor "$(dirname "$OCC_MUT_HOOK")/../scripts/lib/stop.sh" \
+  'FILL_OPEN="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | budget_open_writers "$FILL_ROSTER")"' 1
+sed 's/^\(  FILL_OPEN="\$(roster_open_names "\$FILL_ROSTER" "\$FILL_ACKS" "\$BIONIC_SID"\) | budget_open_writers "\$FILL_ROSTER")"$/\1 | grep -c .)"/' \
+  "$(dirname "$OCC_MUT_HOOK")/../scripts/lib/stop.sh" > "$SANDBOX/fx/occ-mut/stop.sh.mut"
+cp "$SANDBOX/fx/occ-mut/stop.sh.mut" "$(dirname "$OCC_MUT_HOOK")/../scripts/lib/stop.sh"
+OCC_MUT_N="$(occ_stop "$OCC_MUT_HOOK")"
+# FIVE: the fixture's four rows, and the researcher OCC4's admitted dispatch rostered.
+expect_eq "OCC7 mutation: a stop wall that counts every open row reads five (the mutant ran)" "5" "$OCC_MUT_N"
+expect_ne "OCC7b …and the agreement pin goes red on it" "$OCC_PF_N" "$OCC_MUT_N"
+
 # ============================================================
 section "CG-turn — the ledger writer and fill-report agree on what a turn is (epic-23 wave-20 T11b; Step-6 review R3, critic C1)"
 # ============================================================
@@ -13578,5 +13611,152 @@ expect_absent "UB.9 …nor T5 at all" "T5" "$UB_OUT$UB_ERR"
 ub_stop "$UB9" "$SID_A" "$UB9/turn.jsonl"
 expect_eq "UB.9 A's turn end on the same tree (control): refused" "block" "$(ub_decision)"
 expect_contains "UB.9 …naming T5 as not launched" "not launched: T5" "$UB_ERR$UB_OUT"
+
+# ============================================================
+section "SD — a standing fill decline: the tick's FILL and the stop wall's refusal name the same rows (wave-24 T27; REQ-4 AC-4.7; D2; Step-6 review C2/U1)"
+# ============================================================
+#
+# The stop wall reads the session's latest declined fill-ledger line as the standing answer for
+# the ready rows it saw, while `current:` is unchanged, and refuses a turn only for the rows it
+# did not answer. The tick asks the same reader (`fill_standing_decline`) and leaves those rows
+# out of its FILL. One fixture, both readers, the same question: which ready rows are owed? Two
+# ready rows, R1 and R2, a ledger line answering R1. The tick must print `FILL R2`, and the wall
+# must refuse a silent turn naming R2 alone. A second world whose line answers both: no FILL,
+# and the turn ends. The mutation arm is a planted poker that never asks the reader.
+sd_world() {  # <label> <ready ids the ledger line answered, comma-joined> -> repo
+  local r
+  r=$(new_repo "sd-$1")
+  roster_header > "$r/.bionic/tmp/roster-$SID_A.state"
+  cgc_plan "$r/.bionic/docs/plans/epic-99/sd.plan.md" \
+    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+  s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/sd.plan.md"
+  s4_attest "$r" "$SID_A"
+  mkdir -p "$r/.bionic/docs/record/sd"
+  printf 'fill-ledger/v1|at=2026-10-03T09:00:00Z|session=%s|turn=u-sd-0|current=4|state=ok|ceiling=8|width=8|open=0|free=8|ready=%s|launched=|declined=R1 waits on the base merge|missed=2\n' \
+    "$SID_A" "$2" > "$r/.bionic/docs/record/sd/fill-ledger.log"
+  jq -nc '{type:"user",uuid:"u-sd-1",isSidechain:false,timestamp:"2026-10-03T09:05:00Z",message:{role:"user",content:"carry on"}}' \
+    > "$r/sd-turn.jsonl"
+  printf '%s' "$r"
+}
+sd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$SANDBOX/sd-no-config" "${CGC_ENV[@]}" "$@"; }
+sd_tick() {  # <repo> <poker> -> the ids the tick's FILL line names, sorted, space-joined
+  cgc_ring
+  ( cd "$1" && sd_env bash "$2" tick 2>&1 ) > "$1/sd-tick.out"
+  sed -n 's/^poker: FILL \([A-Za-z0-9_. -]*\)$/\1/p' "$1/sd-tick.out" | head -1 | tr ' ' '\n' \
+    | LC_ALL=C sort | tr '\n' ' '
+}
+sd_wall() {  # <repo> -> the ids the stop wall refuses the turn for, sorted, space-joined
+  cgc_ring
+  s4_stop_payload "$1" "$SID_A" "$1/sd-turn.jsonl" | sd_env bash "$CGSD_STOP" 2>/dev/null \
+    | jq -r '.reason // ""' 2>/dev/null \
+    | sed -n 's/.*these rows are ready to dispatch — \(.*\) — and this turn.*/\1/p' | tr ' ' '\n' \
+    | LC_ALL=C sort | tr '\n' ' '
+}
+SD_R=$(sd_world some R1)
+SD_TICK=$(sd_tick "$SD_R" "$CGSD_POKER")
+expect_contains "SD precondition: the tick prints the standing decline" \
+  "poker: fill-declined standing since 2026-10-03T09:00:00Z — R1 waits on the base merge" "$(cat "$SD_R/sd-tick.out")"
+expect_eq "SD1 the tick fills the row the decline did not answer" "R2 " "$SD_TICK"
+expect_eq "SD2 …and the stop wall refuses the silent turn for exactly that row" "$SD_TICK" "$(sd_wall "$SD_R")"
+SD_RA=$(sd_world all R1,R2)
+expect_eq "SD3 a decline that answered both: the tick fills nothing" "" "$(sd_tick "$SD_RA" "$CGSD_POKER")"
+expect_contains "SD3b …while it prints the decline as standing" "poker: fill-declined standing since " \
+  "$(cat "$SD_RA/sd-tick.out")"
+expect_eq "SD4 …and the stop wall owes nothing either" "" "$(sd_wall "$SD_RA")"
+# THE MUTATION ARM. A planted poker whose standing read is gone: it prints `FILL R1 R2` over the
+# same fixture while the wall still refuses for R2 alone, and the pin must go red.
+SD_MUT="$SANDBOX/fx/sd-mut"
+mkdir -p "$SD_MUT/hooks" "$SD_MUT/scripts"
+ln -s "$CGC_LIBDIR" "$SD_MUT/scripts/lib"
+for _sd_sib in "$BIONIC_HOOKS_DIR"/*; do
+  [ "$(basename "$_sd_sib")" = session-poker.sh ] || ln -s "$_sd_sib" "$SD_MUT/hooks/$(basename "$_sd_sib")"
+done
+anchor "$CGSD_POKER" 'SCHED_SD="$(fill_standing_decline ' 1
+sed 's/^\( *\)SCHED_SD="\$(fill_standing_decline .*$/\1SCHED_SD=""/' "$CGSD_POKER" > "$SD_MUT/hooks/session-poker.sh"
+SD_RM=$(sd_world mut R1,R2)
+SD_MUT_TICK=$(sd_tick "$SD_RM" "$SD_MUT/hooks/session-poker.sh")
+expect_eq "SD5 mutation: the tick that never asks the reader fills both rows (it ran)" "R1 R2 " "$SD_MUT_TICK"
+expect_ne "SD5b …and the agreement pin goes red on it" "$(sd_wall "$SD_RM")" "$SD_MUT_TICK"
+
+# ============================================================
+section "RPL — the hold's reply count and the sweeper's reply reader are one envelope grammar (wave-24 T27; Step-6 review U2; D3)"
+# ============================================================
+#
+# Two hook processes read "the agent replied" off a transcript: `hold_reply_count` in
+# session-poker.sh (the hold's fingerprint) and `transcript_events` in session-sweeper.sh (MET's
+# completion signal). D3 says the first reuses the second's reply index; two processes share no
+# memory, so each carries `def replies:` and this pins the two copies' grammar equal: the
+# envelope scan and the idle-notice exclusion, the lines after `def replies:` up to the one that
+# shapes each file's own output. The mutation arm doctors one copy and the pin must move.
+rpl_grammar() {  # <file> -> the two grammar lines of its `def replies:`, trimmed
+  awk '{ t = $0; sub(/^[ \t]+/, "", t) }
+       t == "def replies:" { on = 1; n = 0; next }
+       on && n < 3 { n++; if (t != "| .[]") print t }
+       on && n == 3 { exit }' "$1"
+}
+RPL_PK="$(rpl_grammar "$CGSD_POKER")"
+RPL_SW="$(rpl_grammar "$SWEEPER")"
+expect_contains "RPL precondition: the poker's copy reads the envelope scan" "teammate-message teammate_id" "$RPL_PK"
+expect_contains "RPL precondition: …and the idle-notice exclusion" "idle_notification" "$RPL_PK"
+expect_eq "RPL the sweeper's reply grammar is the poker's, line for line" "$RPL_PK" "$RPL_SW"
+RPL_MUT="$SANDBOX/fx/rpl-mut.sh"
+anchor "$CGSD_POKER" 'teammate-message teammate_id|agent-message from' 1
+sed 's/teammate-message teammate_id|agent-message from/teammate-message teammate_id/' "$CGSD_POKER" > "$RPL_MUT"
+RPL_MUT_G="$(rpl_grammar "$RPL_MUT")"
+expect_contains "RPL2 mutation: the doctored copy still yields its grammar" "teammate-message teammate_id" "$RPL_MUT_G"
+expect_ne "RPL2b …and the pin goes red on it" "$RPL_SW" "$RPL_MUT_G"
+
+# ============================================================
+section "MEMROOT — the two memory walls resolve one store root (wave-24 T27; Step-6 review U3; D16)"
+# ============================================================
+#
+# The Bash half (bash-walls.sh, the collector for `wall_memory_store`) and the Write|Edit half
+# (canonical-sdlc-governing-skill.sh) each resolve `${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-
+# $HOME/.claude}}` and expand `~`, `$HOME` and `${HOME}` spelled into the variable. Each hook's
+# own §MEM drives it alone, so a change to one spelling in one hook went unseen. One engaged
+# repo, one HOME, the same absolute path asked of both hooks under each root spelling: both
+# refuse a store path, and both admit the default root's store while another root is named.
+MR_R=$(new_repo memroot)
+MR_H="$SANDBOX/memroot-home"; mkdir -p "$MR_H"
+mr_bw() {  # <hook> <path> [env…] -> exit status
+  local h="$1" p="$2"; shift 2
+  mk_bash_payload "$SID_A" /dev/null "$MR_R" "touch $p" \
+    | env -u CLAUDE_PROJECT_DIR HOME="$MR_H" CLAUDE_CODE_SESSION_ID="$SID_A" "$@" bash "$h" >/dev/null 2>&1
+  printf '%s' "$?"
+}
+mr_gs() {  # <hook> <path> [env…] -> exit status
+  local h="$1" p="$2"; shift 2
+  jq -n --arg s "$SID_A" --arg c "$MR_R" --arg p "$p" \
+    '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Write", tool_input:{file_path:$p, content:"x"}}' \
+    | env -u CLAUDE_PROJECT_DIR HOME="$MR_H" CLAUDE_CODE_SESSION_ID="$SID_A" "$@" bash "$h" >/dev/null 2>&1
+  printf '%s' "$?"
+}
+# label | path asked | want (2 refused, 0 admitted) | BIONIC_CLAUDE_HOME | CLAUDE_CONFIG_DIR
+MR_CASES="default|$MR_H/.claude/projects/-x/memory/a.md|2||
+tilde|$MR_H/ccd/projects/-x/memory/a.md|2||~/ccd
+dollar|$MR_H/ccd/projects/-x/memory/a.md|2||\$HOME/ccd
+brace|$MR_H/ccd/projects/-x/memory/a.md|2||\${HOME}/ccd
+slash|$MR_H/bch/projects/-x/memory/a.md|2|$MR_H/bch/|
+precedence|$MR_H/bch/projects/-x/memory/a.md|2|$MR_H/bch|$MR_H/ccd
+not-the-store|$MR_H/.claude/projects/-x/memory/a.md|0|$MR_H/bch|"
+while IFS='|' read -r _mr_l _mr_p _mr_w _mr_b _mr_c; do
+  [ -n "$_mr_l" ] || continue
+  _mr_bw="$(mr_bw "$PARTY_EG" "$_mr_p" BIONIC_CLAUDE_HOME="$_mr_b" CLAUDE_CONFIG_DIR="$_mr_c")"
+  _mr_gs="$(mr_gs "$PARTY_SG_W" "$_mr_p" BIONIC_CLAUDE_HOME="$_mr_b" CLAUDE_CONFIG_DIR="$_mr_c")"
+  expect_eq "MEMROOT $_mr_l: bash-walls answers $_mr_w" "$_mr_w" "$_mr_bw"
+  expect_eq "MEMROOT $_mr_l: …and governing-skill gives the same answer" "$_mr_bw" "$_mr_gs"
+done <<MR_EOF
+$MR_CASES
+MR_EOF
+# THE MUTATION ARM: a planted governing-skill whose `${HOME}` arm is gone. The two hooks must
+# then disagree on the `brace` spelling, and agree again on `dollar`, which the arm does not touch.
+MR_MUT_HOOKS="$(plant_hook_tree "$SANDBOX/fx/memroot-mut")"
+anchor "$PARTY_SG_W" "'\${HOME}'|'\${HOME}/'*) GS_MEM_ROOT=" 1
+grep -vF "'\${HOME}'|'\${HOME}/'*) GS_MEM_ROOT=" "$PARTY_SG_W" > "$MR_MUT_HOOKS/canonical-sdlc-governing-skill.sh"
+expect_eq "MEMROOT mutation: the doctored hook still refuses the dollar spelling (it runs)" "2" \
+  "$(mr_gs "$MR_MUT_HOOKS/canonical-sdlc-governing-skill.sh" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=$HOME/ccd')"
+expect_ne "MEMROOT mutation: …and on the brace spelling the agreement pin goes red" \
+  "$(mr_bw "$PARTY_EG" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')" \
+  "$(mr_gs "$MR_MUT_HOOKS/canonical-sdlc-governing-skill.sh" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')"
 
 finish

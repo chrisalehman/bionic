@@ -343,6 +343,12 @@ PATROL_ARMED_SUFFIX=".armed"
 # bumped whenever the prompt's wording changes what a tick turn is asked to do, so a Patrol armed
 # under an older one is told to re-arm.
 PATROL_DIGEST_SCHEMA="patrol-digest/v1"
+# THE HOLD'S REASON, AS EVERY FIX LINE PRINTS IT (wave-24 T27; critic I4): a quoted
+# placeholder, so a line pasted as printed is one argument and never a redirect from a file
+# named `reason`. The stop wall's stand-down refusal prints the same words
+# (payload/scripts/lib/stop.sh `STANDDOWN_HOLDS`); tests/session-poker.test.sh §HOLD-fix pins
+# the three sites.
+HOLD_REASON_SLOT="'why it stays up'"
 PATROL_PROMPT_VERSION=2
 
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
@@ -481,9 +487,10 @@ case "$VERB" in
     EXTEND_REASON="$2"
     ;;
   # THE THIRD, and for the same reason: a hold is an answer, and an answer with no reason is
-  # one the tick could not print back (wave-24 T7, D1).
+  # one the tick could not print back (wave-24 T7, D1). A reason of only blanks is no reason
+  # either: the tick would print the hold with nothing after its dash (T27, review C3).
   hold)
-    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
       usage "hold takes exactly two arguments: the name to keep up and the reason."
     fi
     HOLD_NAME="$1"
@@ -833,24 +840,20 @@ write_patrol_armed_marker() {  # <session-id> -> 0 written, 1 not
   return 0
 }
 
-# THE DIGEST FILE'S PATH, beside the stamp under the same resolved root. Not `patrol-digest-`:
-# `patrol-*.state` is the stamp glob (hooks/session-start.sh, scripts/lib/patrol.sh), and a
-# file under it reads as the stamp of a session named `digest-<sid>` (A-orch-9).
+# THE DIGEST FILE'S PATH, beside the stamp under the same resolved root. The path and its
+# reader, `tick_digest_field`, are lib/patrol.sh's (`tick_digest_path`), which the stop
+# collector calls too (wave-24 T27; critic I3).
 tick_digest_file() {  # <session-id> -> absolute path, or empty
   local f
   f="$(patrol_stamp_file "$1")" || return 1
   [ -n "$f" ] || return 1
-  printf '%s/tick-digest-%s.state' "${f%/*}" "$1"
-}
-
-# One `key=value` line of the digest file, or empty. A symlink is no file.
-tick_digest_field() {  # <digest file> <key>
-  [ -f "$1" ] && [ ! -L "$1" ] || return 0
-  sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
+  tick_digest_path "${f%/.bionic/tmp/*}" "$1"
 }
 
 # The digest file is rewritten whole, under the stamp's write guard. `arm` writes only the
-# version, so the first tick after an arm prints in full.
+# version, so the first tick after an arm prints in full. A tick's digest carries `at=`, the
+# instant it was written: `since=` is the instant the facts last changed and an unchanged tick
+# keeps it, so only `at=` tells the stop collector the digest is this turn's (critic I3).
 write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty>] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
@@ -863,7 +866,7 @@ write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <du
     printf '%s\n' "$PATROL_DIGEST_SCHEMA"
     [ -n "$2" ] && printf 'prompt_version=%s\n' "$2"
     if [ -n "${3:-}" ]; then
-      printf 'digest=%s\nsince=%s\ndecision=%s\nduty=%s\n' "$3" "$4" "$5" "$6"
+      printf 'digest=%s\nsince=%s\ndecision=%s\nduty=%s\nat=%s\n' "$3" "$4" "$5" "$6" "$(iso_now)"
     fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
@@ -2694,6 +2697,14 @@ plan_verb_value_ok() {
   return 0
 }
 
+# A row id the table can key on: one token, a letter or digit first, then letters, digits,
+# `.`, `_` or `-` (wave-24 T27, C1). 0 when it is one.
+plan_verb_id_ok() {
+  case "$1" in [A-Za-z0-9]*) : ;; *) return 1 ;; esac
+  case "$1" in *[!A-Za-z0-9._-]*) return 1 ;; esac
+  return 0
+}
+
 # ---------------------------------------------------------------- the sweep
 #
 # THE OTHER HALF OF `adopt` (fixit 1.5.1 T5; ideas/fixit-1.5.2-dead-session-sweep.md).
@@ -2843,8 +2854,8 @@ case "$VERB" in
       die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
       exit 3
     fi
-    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with bash %s hold <name> <reason>. Unless the tick printed only "unchanged" or a QUIET with no open row: TaskList and reconcile. Then continue the run toward its goal until a wall.\n' \
-      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "${HOOK_DIR}/session-poker.sh" "${HOOK_DIR}/session-poker.sh"
+    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. Unless the tick printed only "unchanged" or a QUIET with no open row: TaskList and reconcile. Then continue the run toward its goal until a wall.\n' \
+      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "${HOOK_DIR}/session-poker.sh" "${HOOK_DIR}/session-poker.sh" "$HOLD_REASON_SLOT"
     exit 0
     ;;
 
@@ -4460,8 +4471,20 @@ EOF
   # names `amend`, the verb that widens it. `task-set` is judged by `units_validate` before the
   # gate, as `task-add` is: a status, step or deps cell is a schedule change.
   task-set|ledger-add|ledger-set)
+    # THE ID AND THE COLUMN NAME ARE OPERANDS TOO (wave-24 T27; Step-6 review C1). `ledger-add`
+    # writes its id into the new row's first cell, and a line break there forged a plan line
+    # the commit gate admitted. The id is one token of the grammar every ledger row already
+    # carries (`T7`, `T22b`, `T17-critic`); a name is held to the values' own rule.
+    if ! plan_verb_id_ok "$PV_ID"; then
+      die "REFUSED — '$(clean "$PV_ID")' is not one row id: an id is one token of letters, digits, '.', '_' or '-', beginning with a letter or a digit. The plan is unchanged."
+      exit 1
+    fi
     for _pv_a in ${PV_PAIRS[@]+"${PV_PAIRS[@]}"}; do
       _pv_n="${_pv_a%%=*}"
+      if ! plan_verb_value_ok "$_pv_n"; then
+        die "REFUSED — the column name '$(clean "$_pv_n")' carries a |, a tab or a line break, which no table header can hold; the plan is unchanged."
+        exit 1
+      fi
       if ! plan_verb_value_ok "${_pv_a#*=}"; then
         die "REFUSED — the value for $_pv_n carries a |, a tab or a line break, which no table cell can hold; the plan is unchanged."
         exit 1
@@ -4704,7 +4727,7 @@ EOF
     # pressure band (its state and rung), `current:`, every row's verdict as `name|state|acked`
     # sorted, and the named lines the tick printed reduced to their kind and subject (a
     # STANDDOWN, a held row, a GONE report, a duplicate tell, an ext: hold, a ledger finding, a
-    # note). Never an instant, an age or a measurement: those move on every tick by themselves.
+    # standing fill decline, a note). Never an instant, an age or a measurement: those move on every tick by themselves.
     # DISARM is terminal and an EMERGENCY names a writer to stop, so both always print in full.
     #
     # THE DUTY (A-orch-4; D5, research-R7 item 5). The task-list refresh is owed on a tick turn
@@ -4735,7 +4758,7 @@ EOF
           awk '
             $1 != "poker:" { next }
             $2 == "note:" { print $3, $4, $5; next }
-            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER)$/ { print $2, $3, $4 }
+            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined)$/ { print $2, $3, $4 }
           ' "$TICK_BUF" | LC_ALL=C sort
         } | cksum | awk '{ print $1 "-" $2 }' )"
       fi
@@ -5312,7 +5335,7 @@ EOF
                 say "held ${SD_NAME} since ${SD_HELD%% *} — ${SD_HELD_REST% fp=*}"
                 continue
               fi
-              say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written), or keep it up with: bash ${HOOK_DIR}/session-poker.sh hold ${SD_NAME} <reason>"
+              say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written), or keep it up with: bash ${HOOK_DIR}/session-poker.sh hold ${SD_NAME} ${HOLD_REASON_SLOT}"
               SD_ORDER_NAMES="${SD_ORDER_NAMES}${SD_ORDER_NAMES:+ }${SD_NAME}"
               ;;
             *)
@@ -5793,6 +5816,17 @@ EOF
         # floor — the same direction `pressure_level` itself takes when the ring holds no
         # usable evidence, for the same reason: no reading is not a bad reading, and a wave
         # that stalled on a missing probe would be worse than one that filled its budget.
+        # THE STANDING FILL DECLINE (wave-24 T27; D2, AC-4.7; Step-6 review C2/U1). The stop wall
+        # treats the rows the session's latest `fill-declined:` answered as answered while
+        # `current:` is unchanged, so a FILL naming them asked again for an answer already given.
+        # One reader, `fill_standing_decline` (lib/fill.sh), the stop collector's own: the tick
+        # prints the decline while it stands and the ready set below leaves its rows out.
+        SCHED_SD="$(fill_standing_decline "$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"
+        SCHED_SD_AT=""; SCHED_SD_WHY=""; SCHED_SD_IDS=""
+        if [ -n "$SCHED_SD" ]; then
+          IFS=$'\037' read -r SCHED_SD_AT SCHED_SD_WHY SCHED_SD_IDS <<< "$SCHED_SD"
+          say "fill-declined standing since ${SCHED_SD_AT} — $(clean "$SCHED_SD_WHY")"
+        fi
         SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"
         SCHED_GAP=$(( SCHED_WIDTH - TICK_OCCUPIED ))
         [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
@@ -5818,7 +5852,7 @@ EOF
           # roster's unacked rows after this tick's own acks. The wall measures both the
           # same way (the rung from `pressure_level`, the occupancy by the same predicate:
           # wave-19 audit V-2, T2d), so what it names is what this prints.
-          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")"
+          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")"
           SCHED_IDS=""; SCHED_N=0
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
@@ -5848,7 +5882,13 @@ EOF
             # left out for their step and no others.
             # The ext-held rows were printed as HELD lines above and are not step holds.
             SCHED_HELD="$(printf '%s\n' "$SCHED_HOLDS" | awk 'NF && index($0, ": held by ext:") == 0 { printf "%s%s", (n++ ? "; " : ""), $0 }')"
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
+            # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
+            # which answer holds the rows, and the standing line above says why.
+            if [ -n "$SCHED_SD_IDS" ] && [ -n "$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")" ]; then
+              say "no FILL — every ready row is answered by the standing fill-declined (${SCHED_SD_IDS}); it stands until a row it did not see is ready or current: moves."
+            else
+              say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
+            fi
           fi
         fi
       fi
