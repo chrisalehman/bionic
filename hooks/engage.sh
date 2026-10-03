@@ -29,8 +29,10 @@
 # more invocation; the cost of engaging wrongly is every wall in the fleet binding a
 # session that never consented, which is the bug this exists to fix.
 #
-# IT NEVER BLOCKS AND NEVER SPEAKS ON SUCCESS. Exit is 0 on every path — a trigger that
-# could refuse the skill it exists to notice would be a wall in front of the front door.
+# IT NEVER BLOCKS, AND SPEAKS ONCE. Exit is 0 on every path — a trigger that could refuse
+# the skill it exists to notice would be a wall in front of the front door. The one thing it
+# says is said to the MODEL, on stdout as `hookSpecificOutput.additionalContext`: when the
+# count rule declined a run because another live session holds it (see THE HELD RUN below).
 # Registered twice in hooks/hooks.json.
 #
 # [WALL: tests/engage.test.sh]
@@ -78,7 +80,7 @@ fi
 # invocation it exists to record would be worse than one that misses it. A missed
 # engagement leaves the session unwalled, which is exactly the state it was in a moment
 # ago; a refused `/canonical-sdlc` is a broken front door.
-BIONIC_LIB_WANT="root.sh run.sh session.sh binding.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh binding.sh patrol.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -182,6 +184,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "engage"; fi
 . "$BIONIC_LIB/session.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/binding.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/patrol.sh"   # patrol_live_session_ids — the sweeper's liveness (T13)
 
 # ---------- ROOT, SESSION ID, MARKER PATH — the three facts, each from its one owner ----
 #
@@ -282,6 +286,7 @@ fi
 # with poker's `bind` verb and the governing skill's bind-on-first-write. This hook only
 # decides WHICH plan, and never blocks on the answer: every path below exits 0.
 BOUND=0
+ENGAGE_HELD_BY=""; ENGAGE_HELD_PLAN=""
 if PLAN=$(session_plan "$REPO" "$SID" 2>/dev/null); then
   BOUND=1
 else
@@ -294,6 +299,41 @@ else
   RUNS=$(live_runs "$REPO" 2>/dev/null) || RUNS=""
   if [ -n "$RUNS" ] && [ "$(printf '%s\n' "$RUNS" | wc -l | tr -d ' ')" = "1" ]; then
     PLAN="$RUNS"
+    # THE HELD RUN (wave-23-fixit-1810 T13, critic C-3; spec D1 Δ4, decided under autopilot,
+    # reversible). "Exactly one live run" said nothing about WHOSE run it is. In the seed's
+    # root shape — the only live run belongs to another session that is still running — the
+    # count rule bound this session to it, and from then on every gate correctly charged it
+    # for that session's ledger: `not launched: T13` at every turn end, the seed's symptom
+    # through the engagement door. So before the guess is written, the other sessions'
+    # markers are asked whether one names this plan (`bind_holders`, lib/binding.sh), and a
+    # holder that is LIVE keeps it: this session is written `none` and told, below, how to
+    # bind by hand if it really is joining that run.
+    #
+    # LIVE IS THE SWEEPER'S WORD, NOT A NEW ONE. `patrol_live_session_ids` (lib/patrol.sh) is
+    # the set `patrol_dead_sessions` subtracts and `session-poker.sh sweep` deletes by: a
+    # `sessions/<pid>.json` under the claude home whose pid answers `kill -0`. A `/clear`
+    # rewrites that same pid file with the new id, so a predecessor's marker belongs to no
+    # live session and a resume after `/clear` binds exactly as before. Asked only when a
+    # holder exists, so the common case pays one glob of `.bionic/tmp` and nothing more.
+    #
+    # A BIND BY HAND IS NOT THIS RULE'S BUSINESS. `session-poker.sh bind` and the governing
+    # skill's bind-on-first-write go straight to `bind_plan`, whose own refusals stand; this
+    # declines a GUESS, never a choice.
+    if bind_holders "$REPO" "$SID" "$PLAN"; then
+      ENGAGE_LIVE=$(patrol_live_session_ids 2>/dev/null) || ENGAGE_LIVE=""
+      while IFS= read -r _h; do
+        [ -n "$_h" ] || continue
+        # Newline-delimited containment — `patrol_dead_sessions`' own idiom, so an id that is
+        # a PREFIX of a live one is not mistaken for it.
+        case "
+$ENGAGE_LIVE
+" in
+          *"
+$_h
+"*) ENGAGE_HELD_BY="$_h"; ENGAGE_HELD_PLAN="$PLAN"; PLAN="none"; break ;;
+        esac
+      done <<< "$BIND_HOLDERS"
+    fi
   fi
 fi
 
@@ -365,6 +405,23 @@ if [ -f "$ENGAGE_POKER" ]; then
   fi
 else
   echo "engage: session-poker.sh not found beside this hook — Patrol stamp not armed for session $SID" >&2
+fi
+
+# ---------- TELL THE MODEL WHY IT IS UNBOUND ----------
+#
+# Only when THE HELD RUN above declined a binding, and only after the marker says so. The
+# channel is the event's own `hookSpecificOutput.additionalContext` on stdout — both events
+# this hook is registered on carry it (PreToolUse and UserPromptExpansion, read off the CLI
+# 2.1.288 bundle's hook-output schema) — because stderr on a zero exit reaches a debug log and
+# not the turn, and the reader this sentence is for is the model about to act. The second
+# line is `run_unbound_advisory`'s sentence, unchanged, so it reads as every gate's advisory
+# reads; the first says why the bind it offers is not the obvious move.
+if [ -n "$ENGAGE_HELD_BY" ] && [ "$(session_plan "$REPO" "$SID" 2>/dev/null || echo none)" = "none" ]; then
+  ENGAGE_EVENT=$(_jq '.hook_event_name')
+  ENGAGE_CTX="bionic: this session was left unbound — the root's one live run is bound to live session $ENGAGE_HELD_BY; bind to it only if this session is joining that run.
+$(run_unbound_advisory "$ENGAGE_HELD_PLAN")"
+  jq -nc --arg e "$ENGAGE_EVENT" --arg c "$ENGAGE_CTX" \
+    '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}' 2>/dev/null || :
 fi
 
 exit 0

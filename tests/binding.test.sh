@@ -29,6 +29,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/bound-marker.sh"   # unbound_marker — the three "no binding" shapes
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB_DIR="$REPO_ROOT/payload/scripts/lib"
@@ -202,5 +203,60 @@ section "4 — the reason never survives a later call (AC-2.2 fails-when)"
 
 call_bind "$R1" "$SID" "$P1"
 expect_eq "a success after a refusal leaves no reason behind" "" "$BIND_WHY"
+
+# ============================================================
+section "5 — bind_holders: which OTHER sessions' markers name a plan (wave-23 T13, critic C-3)"
+# ============================================================
+#
+# The reader engagement asks before it guesses a binding (hooks/engage.sh, THE HELD RUN).
+# Liveness is the caller's (the sweeper's predicate); this pins only the marker read: the
+# other session's binding is found, the caller's own is not, the four "no binding" shapes
+# name nothing, a symlinked marker is never followed, and two spellings of one plan agree.
+HOLD_ST=0; HOLD_IDS=""
+call_holders() {  # <root> <sid> <plan> -> sets HOLD_ST / HOLD_IDS
+  local out
+  out=$(bash -c '
+      set -u
+      . "$1" || exit 9
+      . "$2" || exit 9
+      rc=0
+      bind_holders "$3" "$4" "$5" || rc=$?
+      printf "%s|%s|" "$rc" "$(printf "%s" "${BIND_HOLDERS:-}" | tr "\n" ",")"
+    ' _ "$RUNLIB" "$BINDLIB" "$1" "$2" "$3" 2>/dev/null)
+  HOLD_ST="${out%%|*}"
+  HOLD_IDS="${out#*|}"; HOLD_IDS="${HOLD_IDS%|}"
+}
+OSID="0a1b2c3d-1111-4222-8333-444455556666"
+TSID="7f6e5d4c-1111-4222-8333-444455556666"
+R6="$(make_repo r6)"
+P6="$R6/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+call_holders "$R6" "$SID" "$P6"
+expect_eq "no other marker: no holder (exit 1)" "1" "$HOLD_ST"
+expect_eq "…and BIND_HOLDERS is empty" "" "$HOLD_IDS"
+call_bind "$R6" "$OSID" "$P6"
+call_holders "$R6" "$SID" "$P6"
+expect_eq "another session bound to the plan holds it (exit 0)" "0" "$HOLD_ST"
+expect_eq "…and is named" "$OSID" "$HOLD_IDS"
+call_holders "$R6" "$SID" "$R6/.bionic/docs/plans/epic-01-demo/../epic-01-demo/wave-01.plan.md"
+expect_eq "…and a second spelling of the same plan finds the same holder" "$OSID" "$HOLD_IDS"
+call_holders "$R6" "$OSID" "$P6"
+expect_eq "a session never holds a run against itself" "1" "$HOLD_ST"
+call_bind "$R6" "$SID" "$P6"
+call_holders "$R6" "$OSID" "$P6"
+expect_eq "…while the other direction names the other session" "$SID" "$HOLD_IDS"
+call_bind "$R6" "$SID" none
+for shape in none empty nofield; do
+  unbound_marker "$R6" "$OSID" "$shape"
+  call_holders "$R6" "$SID" "$P6"
+  expect_eq "an other marker of shape '$shape' holds nothing" "1" "$HOLD_ST"
+done
+printf 'plan=%s\nengaged_at=2026-10-02T00:00:00Z\n' "$P6" > "$SANDBOX/linked.state"
+ln -s "$SANDBOX/linked.state" "$R6/.bionic/tmp/engaged-$TSID.state"
+call_holders "$R6" "$SID" "$P6"
+expect_eq "a SYMLINKED marker naming the plan is never followed" "1" "$HOLD_ST"
+rm -f "$R6/.bionic/tmp/engaged-$TSID.state"
+call_bind "$R6" "$TSID" "$P6"
+call_holders "$R6" "$SID" "$P6"
+expect_eq "…paired: the same id as a real marker holds it" "$TSID" "$HOLD_IDS"
 
 finish

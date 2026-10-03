@@ -246,8 +246,9 @@ fi
 # engaged: the safe direction is the quieter one.
 #
 # THE OPEN-RUN SET, not the single newest file (wave-session-bound-run S7,
-# AC-5). `RUNS`/`N` decide the shape below: N=0/1 reproduce today's behaviour
-# exactly — a lone open run is unambiguous, bound or not. N>=2 means a scan
+# AC-5). `RUNS`/`N` decide the shape below: N=0 says nothing about runs; N=1
+# names the run to a bystander and, since wave-23 T13 (critic C-4), prints the bind
+# line to an engaged session that is not bound to it. N>=2 means a scan
 # can no longer guess which run a session means, so a bystander gets the set
 # (capped for display by `print_runs` below) plus the bind verb instead of one
 # path picked by mtime, and an engaged
@@ -356,6 +357,20 @@ if [ "$N" -eq 1 ]; then
   else
     case "$BIONIC_RUN_WORD" in
       bound-open) print_bound_line "$BIONIC_RUN_WORD $BIONIC_RUN_PLAN" ;;
+      # THE BIND LINE FOR ONE RUN TOO (wave-23-fixit-1810 T13, critic C-4). This arm printed
+      # nothing, on the S7 reasoning that "a lone open run is unambiguous, bound or not". D1
+      # ended that: an unbound session's gates are inert, and engagement now leaves a session
+      # unbound beside a run another live session holds (engage.sh, THE HELD RUN). So the
+      # engaged-but-not-bound session is told here exactly what the N>=2 arm tells it — a
+      # header line and one line per run — on stdout, the channel this hook's model reads.
+      # The one run is listed whether live or quiet (`$RUNS`, not `$LIVE`): with a single
+      # candidate there is no listing to keep short, and the bystander line above names it
+      # the same way.
+      *)
+        printf 'bionic: 1 open run exists here and this session is not bound to it — bind with: bash %s/hooks/session-poker.sh bind <plan>\n' \
+          "$HOOK_ROOT"
+        print_runs "$RUNS"
+        ;;
     esac
   fi
 elif [ "$N" -ge 2 ]; then
