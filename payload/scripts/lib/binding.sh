@@ -1,7 +1,7 @@
 # payload/scripts/lib/binding.sh — THE ONE WRITER OF THE SESSION MARKER.
 #
 # WHAT IT OWNS (wave-session-bound-run, 2026-09-04, spec §Design "Session binding";
-# AC-7/AC-8/AC-9). Exactly one function, and it is the only code in this tree permitted to
+# AC-7/AC-8/AC-9). Exactly one writer function, and it is the only code in this tree permitted to
 # create or rewrite `<root>/.bionic/tmp/engaged-<sid>.state`:
 #   bind_plan <root> <sid> <plan|none> -> 0 written · 1 refused-invalid · 2 write failure,
 #                                          and BIND_REFUSAL naming WHICH of the five
@@ -35,7 +35,16 @@
 # caller's fault and a broken tree is not.
 #
 # PRINTS NOTHING, EVER. Callers print; `bind_plan` reports by exit status and by
-# `BIND_REFUSAL` alone.
+# `BIND_REFUSAL` alone, and `bind_holders` (below) by exit status and `BIND_HOLDERS`.
+#
+# ONE READER BESIDE THE WRITER (wave-23-fixit-1810 T13, critic C-3; spec D1 Δ4).
+# `bind_holders` answers the one question engagement asks before it GUESSES a binding:
+# which other sessions' markers already name this plan. It lives here, not in run.sh,
+# because the answer is a plan compare and `_bind_resolve` is this file's: a marker stores
+# the canonical spelling `bind_plan` wrote, and the candidate comes off `open_runs`' walk,
+# so both sides go through the one resolver or a symlinked root reads as two plans.
+# Liveness is NOT asked here — that is the sweeper's predicate (lib/patrol.sh), and this
+# file depends on run.sh alone; the caller intersects.
 #
 # WHICH REFUSAL IS A VARIABLE, NOT A WIDER SET OF EXIT CODES (epic-23 wave-18-fixit-185,
 # REQ-2 AC-2.2; A-T3.1). Five causes shared one status, so every caller that wanted to say
@@ -179,4 +188,33 @@ bind_plan() {
     || { BIND_REFUSAL="write-failed"; return 2; }
   chmod 600 "$path" 2>/dev/null || :
   return 0
+}
+
+# bind_holders <root> <sid> <plan> -> 0 and BIND_HOLDERS = the OTHER sessions whose marker
+# names <plan>, one id per line; 1 and BIND_HOLDERS empty when none does.
+#
+# THE MARKERS ARE READ THROUGH `session_plan`, so every guard the readers apply applies
+# here too: the sid shape rule (a file whose id `engaged_marker_path` refuses is skipped,
+# never read), a symlinked marker skipped before it is followed, CRLF translated, and the
+# four "no binding" shapes — absent, empty, no `plan=`, `plan=none` — naming nothing.
+# The caller's own marker is skipped by id: a session never holds a run against itself.
+bind_holders() {  # <root> <sid> <plan>
+  local root="$1" self="$2" plan="$3"
+  local mine dir want f base osid op
+  BIND_HOLDERS=""
+  mine=$(engaged_marker_path "$root" "$self") || return 1
+  want=$(_bind_resolve "$plan") || return 1
+  dir=$(dirname "$mine")
+  for f in "$dir"/engaged-*.state; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    base="${f##*/}"; osid="${base#engaged-}"; osid="${osid%.state}"
+    [ "$osid" != "$self" ] || continue
+    [ "$(engaged_marker_path "$root" "$osid" 2>/dev/null)" = "$f" ] || continue
+    op=$(session_plan "$root" "$osid") || continue
+    op=$(_bind_resolve "$op") || continue
+    [ "$op" = "$want" ] || continue
+    BIND_HOLDERS="${BIND_HOLDERS}${BIND_HOLDERS:+
+}${osid}"
+  done
+  [ -n "$BIND_HOLDERS" ]
 }
