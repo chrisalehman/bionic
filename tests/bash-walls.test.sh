@@ -971,6 +971,26 @@ expect_contains "15a12b: …with the reason placeholder quoted there too" \
 B15_LINE="$(printf '%s\n' "$ERR" | sed -n 's/.*widen it: \(.*\) (main runs it).*/\1/p' | head -1)"
 expect_true "15a12c: …and that line parses as bash too [$B15_LINE]" bash -n -c "$B15_LINE"
 
+# (a2b) A PLUGIN ROOT WITH A SPACE (wave-24 T28; critic I2, AC-6.5). The remedy line printed
+# the root bare, so `<root with space>/hooks/session-poker.sh` pasted as two arguments. The
+# line is built by `_budget_remedy_line` from `refuse_plugin_root`, which reads `$BIONIC_LIB`;
+# no hook can be loaded from a root this test makes up, so the function is driven directly,
+# extracted the way 15g2 extracts `_budget_wire_list`, with the loader's variable pointed at a
+# root whose name holds a space. The printed line is then read back as the shell reads it.
+SP_ROOT="$SANDBOX/plugin root"
+mkdir -p "$SP_ROOT/scripts/lib"
+SP_LINE=$(BIONIC_LIB="$SP_ROOT/scripts/lib" _BUDGET_ROW_NAME=t15sp bash -c '. "$1/refuse.sh"
+  eval "$(awk "/^_budget_remedy_line\(\)/,/^}/" "$1/walls.sh")"; _budget_remedy_line alpha.test.sh' \
+  _ "$WALLS_LIB")
+SP_LINE="${SP_LINE#widen it: }"; SP_LINE="${SP_LINE% (main runs it)}"
+expect_contains "15a13 precondition: the remedy line was built, under the spaced root" \
+  "plugin root/hooks/session-poker.sh" "$SP_LINE"
+SP_ARG2=$(eval "set -- $SP_LINE"; printf '%s' "$2")
+expect_eq "15a13: …and pasted, the script path is ONE argument [$SP_LINE]" \
+  "$SP_ROOT/hooks/session-poker.sh" "$SP_ARG2"
+SP_ARG3=$(eval "set -- $SP_LINE"; printf '%s' "$3")
+expect_eq "15a14: …and the verb is the next one, not the tail of a split path" "amend" "$SP_ARG3"
+
 # (a3) THE WIRE-LIST COUNT NAMES DECLARATIONS (wave-22 T4; REQ-4, D7, AC-4.1/4.2). When the one
 # declared run does not fit the verdict line's room, the line says what the count counts —
 # `1 declared run (printed below)` — and the full command still prints after `On the budget:`.
@@ -2011,5 +2031,32 @@ for _mu in \
   expect_status "§MEM-unengaged [$(printf '%.60s' "$_mu")]: admitted" 0 "$ST"
   expect_empty "§MEM-unengaged …silently" "$OUT$ERR"
 done
+
+# ---------------------------------------------------------------------------
+section "§CDT — the later-cd scan reads every segment before the first git, in one split (T28)"
+#
+# `_eg_cd_targets` lists the `cd` targets after the command's first separator and before its
+# first `git`, for the evidence gate's ambiguity check. T28 replaced its one-pass-per-segment
+# loop with a single `read` split (the 64 KB timing is tests/hook-timeout.test.sh b4). These
+# rows pin what the split must still answer: the four separators, the empty segments a
+# doubled or trailing separator leaves, a `git` inside a segment ending the scan there, and
+# nothing read after it. Each row answers the same on the loop it replaced.
+# The function is defined past walls.sh's early `return`, so it is extracted the way 15g2
+# extracts `_budget_wire_list`: awk between its own `()` line and its closing `}`, then eval.
+cdt_of() {  # <command> -> the targets, `|`-terminated
+  bash -c 'eval "$(awk "/^_eg_cd_targets\(\)/,/^}/" "$1")"; _eg_cd_targets "$2"
+    printf "%s" "$_EG_CDS" | tr "\n" "|"' _ "$WALLS_LIB" "$1"
+}
+expect_contains "§CDT the extractor finds the function" "_eg_cd_targets()" \
+  "$(awk '/^_eg_cd_targets\(\)/,/^}/' "$WALLS_LIB")"
+expect_eq "§CDT the leading cd is not in the list; the second is" "/b|" "$(cdt_of 'cd /a && cd /b && git commit')"
+expect_eq "§CDT every separator splits, and a bare cd is home" "/b|/c d|/e|~|" \
+  "$(cdt_of "$(printf 'cd /a; cd /b|cd "/c d"&cd %s/e%s\ncd\ngit commit' "'" "'")")"
+expect_eq "§CDT doubled and trailing separators name nothing" "/b|" "$(cdt_of 'cd /a;; ;cd /b ;')"
+expect_eq "§CDT blank lines name nothing" "/b|" "$(cdt_of "$(printf 'cd /a\n\n\ncd /b\n\ngit commit')")"
+expect_eq "§CDT a subshell opener comes off the front" "/b|" "$(cdt_of 'cd /a && (cd /b && git commit)')"
+expect_eq "§CDT the first git ends the scan, inside a word too" "/b|" "$(cdt_of 'cd /a && cd /b && echo legit; cd /c')"
+expect_eq "§CDT a cd after the commit is never read" "" "$(cdt_of 'cd /a && git commit -m x && cd /z')"
+expect_eq "§CDT one segment has nothing after it to read" "" "$(cdt_of 'cd /a')"
 
 finish
