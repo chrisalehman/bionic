@@ -780,5 +780,183 @@ expect_contains "UB2b: …naming T5 as not launched" "not launched: T5" "$STOP_E
 expect_absent "UB2c: …and A hears no unbound advisory" "session unbound" "$STOP_ERR"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "SD: a fill decline stands against the ready set it answered (wave-24 T8, REQ-4, AC-4.7; D2)"
+
+# THE DEFECT. A `fill-declined: <reason>` answered the turn it was written in and no other, so
+# a decline with a reason that still held ("T7 waits on T6's merge") had to be written again on
+# every turn end until the reason went away. The fill ledger already records each Stop's ready
+# set, `current:` and decline. The collector now reads the session's latest declined line from
+# it, and the wall refuses only when a row is ready that the decline did not answer, or when
+# `current:` has moved. The predicate is "an unanswered row exists", not "a decline exists".
+# Each turn is its own transcript, keyed by its own prompt uuid; the ledger is what carries.
+sd_fixture() {  # -> project dir; T7 pending, writers=8, current: 4
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T7 | 4 | build | the row behind a merge | implementor | — | 15m | REQ-x | a.sh | pending | — |\n'
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+  roster_header > "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+sd_turn() {  # <file> <prompt uuid> [assistant text]
+  { jq -nc --arg u "$2" '{type:"user",uuid:$u,isSidechain:false,timestamp:"2026-10-03T00:00:00Z",message:{role:"user",content:"carry on"}}'
+    [ -z "${3:-}" ] || jq -nc --arg t "$3" '{type:"assistant",isSidechain:false,timestamp:"2026-10-03T00:00:01Z",
+                                          message:{role:"assistant",content:[{type:"text",text:$t}]}}'
+  } > "$1"
+}
+sd_led() { cat "$1/.bionic/docs/record/wave-24-sd/fill-ledger.log" 2>/dev/null; }
+sd_field() {  # <ledger line> <key>
+  printf '%s\n' "$1" | awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) print substr($i, length(k) + 2) }'
+}
+sd_decision() { printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+require_helpers sd_fixture sd_turn sd_led sd_field sd_decision
+
+SD_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$SD_RING"
+export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
+
+SD_D="$(sd_fixture)"
+SD_P="$SD_D/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+SD_TX="$(mktemp)"
+
+# SD1: the turn that declines is answered by its own line.
+sd_turn "$SD_TX" u-sd-1 "fill-declined: T7 waits on the T6 merge"
+s7_fire "$SD_D" "$SD_TX"
+expect_eq "SD1: the declining turn ends" "" "$(sd_decision)"
+expect_contains "SD1b: …and its ledger line carries the reason against ready {T7}" \
+  "|ready=T7|" "$(sd_led "$SD_D" | tail -1)"
+
+# SD2: the next turn, no text, the ready set unchanged. The decline stands.
+sd_turn "$SD_TX" u-sd-2
+s7_fire "$SD_D" "$SD_TX"
+expect_eq "SD2: AC-4.7 next turn, ready {T7}, no text — passes on the standing decline" "" "$(sd_decision)"
+expect_contains "SD2b: …and its ledger line carries the standing reason, so the report keeps the idle cost with it" \
+  "T7 waits on the T6 merge" "$(sd_field "$(sd_led "$SD_D" | tail -1)" declined)"
+
+# SD3: a row the decline never saw is ready. Refused, naming that row and not the declined one.
+printf '| T8 | 4 | build | a row nobody declined | implementor | — | 15m | REQ-x | b.sh | pending | — |\n' >> "$SD_P"
+sd_turn "$SD_TX" u-sd-3
+s7_fire "$SD_D" "$SD_TX"
+expect_eq "SD3: AC-4.7 ready {T7,T8}, no text — refused" "block" "$(sd_decision)"
+expect_contains "SD3b: …naming T8" "not launched: T8" "$STOP_ERR"
+expect_absent "SD3c: …and not T7, which the decline answered" "T7" "$(printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_eq "SD3d: …and the refused turn's line carries no decline, so the standing set does not grow" \
+  "" "$(sd_field "$(sd_led "$SD_D" | tail -1)" declined)"
+
+# SD4: `current:` moved. The decline answered a step that is over, so it no longer stands.
+SD_D4="$(sd_fixture)"
+SD_P4="$SD_D4/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+sd_turn "$SD_TX" u-sd4-1 "fill-declined: T7 waits on the T6 merge"
+s7_fire "$SD_D4" "$SD_TX"
+expect_eq "SD4 precondition: the declining turn ends" "" "$(sd_decision)"
+sed -i.bak 's/^current: 4$/current: 4b/' "$SD_P4"
+sd_turn "$SD_TX" u-sd4-2
+s7_fire "$SD_D4" "$SD_TX"
+expect_eq "SD4: AC-4.7 current: moved — the same ready set is refused" "block" "$(sd_decision)"
+expect_contains "SD4b: …naming T7" "not launched: T7" "$STOP_ERR"
+
+# SD5: an empty `fill-declined:` is not an answer, in its own turn or the next.
+SD_D5="$(sd_fixture)"
+sd_turn "$SD_TX" u-sd5-1 "fill-declined:   "
+s7_fire "$SD_D5" "$SD_TX"
+expect_eq "SD5: an empty fill-declined: does not answer the gap" "block" "$(sd_decision)"
+expect_eq "SD5b: …and records no decline" "" "$(sd_field "$(sd_led "$SD_D5" | tail -1)" declined)"
+sd_turn "$SD_TX" u-sd5-2
+s7_fire "$SD_D5" "$SD_TX"
+expect_eq "SD5c: …so nothing stands on the next turn" "block" "$(sd_decision)"
+
+# SD6: the decline is this session's. A line another session wrote into the same plan's ledger
+# was an answer the model in this conversation never gave.
+SD_D6="$(sd_fixture)"
+sd_turn "$SD_TX" u-sd6-1 "fill-declined: T7 waits on the T6 merge"
+s7_fire "$SD_D6" "$SD_TX"
+sed -i.bak "s/|session=$SID|/|session=ffffffff-0000-4000-8000-000000000000|/" \
+  "$SD_D6/.bionic/docs/record/wave-24-sd/fill-ledger.log"
+expect_contains "SD6 precondition: the decline now belongs to another session" \
+  "|session=ffffffff-" "$(sd_led "$SD_D6")"
+sd_turn "$SD_TX" u-sd6-2
+s7_fire "$SD_D6" "$SD_TX"
+expect_eq "SD6: another session's decline does not stand in this one" "block" "$(sd_decision)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "SDR: a stand-down decline carries a reason, and the refusal names hold (wave-24 T8, REQ-4, AC-4.10, AC-4.12)"
+
+# THE DEFECT. `standdown-declined:` captured the name and nothing after it, so
+# `standdown-declined: W-SDR` answered the stand-down with no reason in the record, which is the
+# one thing the decline exists to leave. And the refusal offered no way to keep a finished agent
+# up past the turn: `session-poker.sh hold` (T7) is that way, and the refusal now names it. A hold
+# written after this turn's tick answers the stand-down from the roster, never from the words.
+# The fixture is what a tick that stood W-SDR down leaves on disk: the tick's stamp, a MET row,
+# and the patrol's stop order. The transcript is the tick turn with its task-list refresh done.
+SDR_POKER="$(dirname "$HOOK")/session-poker.sh"
+sdr_fixture() {  # -> project dir with W-SDR stood down
+  local d
+  d=$(mkfix)
+  printf 'patrol-stamp/v1|at=2026-01-01T00:00:00Z|session=%s|verb=tick\n' "$SID" > "$d/.bionic/tmp/patrol-$SID.state"
+  echo done > "$d/landed-sdr.md"
+  { roster_header
+    roster_row_fixture status=intended session="$SID" name=W-SDR agent_id= deliverable="$d/landed-sdr.md"
+  } > "$d/.bionic/tmp/roster-$SID.state"
+  ( cd "$d" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$(dirname "$HOOK")/stop-orders.sh" order W-SDR --by patrol >/dev/null 2>&1 )
+  printf '%s' "$d"
+}
+sdr_turn() {  # <file> [assistant text]
+  { jq -nc --arg t "bionic-patrol session=${SID:0:8} v=2 — Patrol tick. Run: bash /abs/hooks/session-poker.sh tick" \
+      '{type:"user",isMeta:true,isSidechain:false,userType:"external",message:{role:"user",content:$t}}'
+    jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_tl",name:"TaskList",input:{}}]}}'
+    [ -z "${2:-}" ] || jq -nc --arg t "$2" '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"text",text:$t}]}}'
+  } > "$1"
+}
+require_helpers sdr_fixture sdr_turn
+
+SDR_TX="$(mktemp)"
+SDR_D="$(sdr_fixture)"
+expect_contains "SDR precondition: the patrol's stop order for W-SDR is on disk" \
+  "target=W-SDR" "$(cat "$SDR_D/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
+sdr_turn "$SDR_TX"
+s7_fire "$SDR_D" "$SDR_TX"
+expect_contains "SDR1: the unanswered stand-down is refused" "stand-down unanswered" "$(reason_of)"
+expect_contains "SDR1b: AC-4.12 …and the refusal names hold as the way to keep the agent" \
+  "session-poker.sh hold <name> <reason>" "$(reason_of)"
+
+sdr_turn "$SDR_TX" "standdown-declined: W-SDR"
+s7_fire "$SDR_D" "$SDR_TX"
+expect_contains "SDR2: AC-4.10 a name-only decline is refused" "stand-down unanswered" "$(reason_of)"
+
+sdr_turn "$SDR_TX" "standdown-declined: W-SDR —"
+s7_fire "$SDR_D" "$SDR_TX"
+expect_contains "SDR2b: …as is a name and a dash with no words" "stand-down unanswered" "$(reason_of)"
+
+sdr_turn "$SDR_TX" "standdown-declined: W-SDR is writing its record, one more cadence"
+s7_fire "$SDR_D" "$SDR_TX"
+expect_eq "SDR3: AC-4.10 the decline with a reason passes" "" "$(sd_decision)"
+expect_absent "SDR3b: …and says nothing about a stand-down" "stand-down" "$STOP_OUT$STOP_ERR"
+
+# SDR4: THE HOLD ANSWERS IT. The real verb, after the tick's order, with no decline in the text.
+SDR_D4="$(sdr_fixture)"
+SDR_CFG="$(mktemp -d)"
+SDR_HOLD=$( cd "$SDR_D4" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$SDR_CFG" \
+  bash "$SDR_POKER" hold W-SDR "kept for a second pass" 2>&1 ); SDR_HOLD_RC=$?
+expect_eq "SDR4 precondition: the hold verb took W-SDR (rc 0)" "0" "$SDR_HOLD_RC"
+sdr_turn "$SDR_TX"
+s7_fire "$SDR_D4" "$SDR_TX"
+expect_eq "SDR4: a hold written this turn answers the stand-down" "" "$(sd_decision)"
+# …and only one written after the tick: the same held row, the tick stamped after the hold.
+printf 'patrol-stamp/v1|at=2099-01-01T00:00:00Z|session=%s|verb=tick\n' "$SID" > "$SDR_D4/.bionic/tmp/patrol-$SID.state"
+( cd "$SDR_D4" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$(dirname "$HOOK")/stop-orders.sh" order W-SDR --by patrol >/dev/null 2>&1 )
+sed -i.bak 's/|at=[^|]*|/|at=2099-01-01T00:00:01Z|/' "$SDR_D4/.bionic/tmp/stop-orders-$SID.state"
+s7_fire "$SDR_D4" "$SDR_TX"
+expect_contains "SDR4b: …a hold older than this turn's tick does not answer that tick's order" \
+  "stand-down unanswered" "$(reason_of)"
+rm -rf "$SDR_CFG"
+
 
 finish
