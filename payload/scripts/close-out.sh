@@ -23,8 +23,11 @@
 # hook in this tree already reads — so there is no second notion of "closed" to drift.
 #
 # THE GATE IS THE ATTESTATION, AND IT IS NOT OPTIONAL (D5: "a script writes a lifecycle
-# artifact only where a gate validates what it wrote"). After the two blocks are written,
-# this script builds the payload a `git commit` would produce and pipes it into the REAL
+# artifact only where a gate validates what it wrote"). The order is Step-8 block, then
+# the dry-run, then the Step-9 flip (`current: 9`, `delivered:`, handoff): the gate must
+# judge the plan while it is still OPEN, because once it reads closed the gate exits 0
+# before it checks any step evidence (critic2 N-3). A refusal leaves the plan at current 8
+# and never flips it. This script builds the payload a `git commit` would produce and pipes it into the REAL
 # `hooks/bash-walls.sh`. rc 0 is reported as `gate: ok`; rc 2 prints the gate's own words
 # and exits 2 with the plan edits LEFT IN PLACE, because those edits are what the reader
 # has to fix. A script that wrote a Step-8 block the commit wall then refused would have
@@ -642,8 +645,13 @@ handoff_block() {
 HANDOFF
 }
 
-# write_plan_blocks -> replaces the Step-8 line and the Step-9 line (each with whatever
-# continuation lines it had), sets `current: 9`, and rewrites `## Handoff` whole.
+# write_plan_blocks <8|9> — the plan is written in TWO PHASES so the commit gate can judge
+# the Step-8 block while the plan is still open (critic2 N-3, wave-23 T16).
+#   8  replaces the Step-8 line with whatever continuation lines it had. `current:` stays
+#      at 8, so the plan still reads OPEN to `run_open` and the bound dry-run is judged by
+#      the gate's step-evidence checks, not short-circuited by `bound-closed`.
+#   9  replaces the Step-9 line, sets `current: 9`, and rewrites `## Handoff` whole. After
+#      this the plan reads closed and the gate exits 0 before it looks at evidence.
 #
 # A CONTINUATION LINE IS DROPPED BY THE SAME GRAMMAR THE GATE READS IT BY
 # (`extract_continuation`, walls.sh:1697): everything after a Step line up to the next
@@ -651,12 +659,12 @@ HANDOFF
 # close would leave the old block's keys underneath the new one, where `block_get`'s
 # first-match rule would quietly prefer them.
 write_plan_blocks() {
-  local tmp="$PLAN.close-out.$$"
-  CO_STEP8="$(step8_block)" CO_STEP9="$(step9_block)" CO_HANDOFF="$(handoff_block)" awk '
+  local tmp="$PLAN.close-out.$$" phase="$1"
+  CO_PHASE="$phase" CO_STEP8="$(step8_block)" CO_STEP9="$(step9_block)" CO_HANDOFF="$(handoff_block)" awk '
     /^## / {
       insdlc = ($0 ~ /^## SDLC State/)
       skip = 0
-      if ($0 ~ /^## Handoff/) { print ENVIRON["CO_HANDOFF"]; hskip = 1; next }
+      if ($0 ~ /^## Handoff/ && ENVIRON["CO_PHASE"] == "9") { print ENVIRON["CO_HANDOFF"]; hskip = 1; next }
       hskip = 0
       print; next
     }
@@ -667,11 +675,11 @@ write_plan_blocks() {
       else if ($0 ~ /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]/) { skip = 0 }
       else next
     }
-    insdlc && /^[[:space:]]*current[[:space:]]*:/ { print "current: 9"; next }
-    insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+8[[:space:]]*:/ {
+    insdlc && ENVIRON["CO_PHASE"] == "9" && /^[[:space:]]*current[[:space:]]*:/ { print "current: 9"; next }
+    insdlc && ENVIRON["CO_PHASE"] == "8" && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+8[[:space:]]*:/ {
       print ENVIRON["CO_STEP8"]; skip = 1; next
     }
-    insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:/ {
+    insdlc && ENVIRON["CO_PHASE"] == "9" && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:/ {
       print ENVIRON["CO_STEP9"]; skip = 1; next
     }
     { print }
@@ -683,16 +691,20 @@ write_plan_blocks() {
   fi
   mv "$tmp" "$PLAN"
 
+  if [ "$phase" = 8 ]; then
+    grep -qE '^- Step 8: CLOSED ' "$PLAN" || _co_refuse "the Step-8 line did not land in $PLAN"
+    grep -qE '^  attested-by: close-out.sh ' "$PLAN" || _co_refuse "the attestation did not land in $PLAN"
+    return 0
+  fi
+
   # A plan that carried no `## Handoff` section gets one rather than silently losing the
   # act: the section is the run's own resume point, and its absence is not consent.
   if ! grep -q 'resume point: NONE — DELIVERED at ' "$PLAN"; then
     printf '\n%s\n' "$(handoff_block)" >> "$PLAN"
   fi
 
-  # The readback, act by act: every line this function claims to have written, asked for
-  # back out of the file.
-  grep -qE '^- Step 8: CLOSED ' "$PLAN" || _co_refuse "the Step-8 line did not land in $PLAN"
-  grep -qE '^  attested-by: close-out.sh ' "$PLAN" || _co_refuse "the attestation did not land in $PLAN"
+  # The readback, act by act: every phase-9 line this function claims to have written,
+  # asked for back out of the file (phase 8 read its own back above).
   grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' "$PLAN" \
     || _co_refuse "the Step-9 delivered: line did not land in $PLAN"
   grep -qE '^current: 9$' "$PLAN" || _co_refuse "current: did not advance to 9 in $PLAN"
@@ -894,11 +906,16 @@ do_run() {
   act_continuation; say "continuation: $CONT_LINE"
   act_epic;         say "epic-row: $EPIC_LINE"
                     say "patrol: $PATROL_LINE"
-  write_plan_blocks
-                    say "handoff: rewritten to the closed form (resume point NONE)"
+  # ORDER (critic2 N-3): Step-8 block -> gate dry-run -> Step-9 flip. The dry-run judges
+  # the plan while it is still OPEN at current 8; flipping first made the bound marker
+  # resolve bound-closed, and the gate exits 0 before it checks step evidence. A refusal
+  # here leaves the plan at current 8 with the Step-8 block in place and no `delivered:`.
+  write_plan_blocks 8
                     say "step8: CLOSED $NOW, attested-by close-out.sh $VERSION"
-                    say "step9: delivered: $NOW $WAVE_SLUG $VERSION"
   gate_dry_run
+  write_plan_blocks 9
+                    say "handoff: rewritten to the closed form (resume point NONE)"
+                    say "step9: delivered: $NOW $WAVE_SLUG $VERSION"
   act_archive
   insert_archived
                     say "archived: $ARCHIVED_LINE"
