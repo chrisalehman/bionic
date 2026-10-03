@@ -1023,7 +1023,10 @@ row_said() {  # <roster row> <launched epoch|""> <launched ISO> -> 0 said, 1 not
 # fixed; making this verb UNMET such a row would block a stopping agent with a refusal that
 # names nothing to write, which is the fail-CLOSED direction on a judgment this machinery
 # does not own (R7).
-VERDICT_STATE=""; VERDICT_DETAIL=""
+# VERDICT_CAUSE says which conjunct an UNMET row failed — `unsaid` when every deliverable landed
+# and only the completion signal is missing, `missing` otherwise — so the summary names the fix
+# the detail names instead of one line for both.
+VERDICT_STATE=""; VERDICT_DETAIL=""; VERDICT_CAUSE=""
 verdict_row() {  # <roster row>
   local row="$1" launched deliv waiver source claims prog cadence le p n=0 fails="" oks="" old
   local note="" restarted rnote="" sig=""
@@ -1034,7 +1037,7 @@ verdict_row() {  # <roster row>
   claims="$(line_field "$row" claims)"
   prog="$(line_field "$row" progress)"
   cadence="$(line_field "$row" cadence)"
-  VERDICT_STATE=""; VERDICT_DETAIL=""
+  VERDICT_STATE=""; VERDICT_DETAIL=""; VERDICT_CAUSE="missing"
 
   if [ -n "$waiver" ]; then
     # `source=` is the writer's own word for where the path came from, so this asks no
@@ -1083,7 +1086,8 @@ verdict_row() {  # <roster row>
     row_said "$row" "$le" "$launched"
     case $? in
       0) sig="$SAID" ;;
-      1) fails="unsaid=$(line_field "$row" name) (no message, completed task-notification or Done marker after launched_at ${launched:-unreadable})${oks:+ — landed: $oks}" ;;
+      1) VERDICT_CAUSE="unsaid"
+         fails="unsaid=$(line_field "$row" name) (no message, completed task-notification or Done marker after launched_at ${launched:-unreadable})${oks:+ — landed: $oks}" ;;
       *) sig="completion signal not judged (no transcript to read, no Done marker declared)" ;;
     esac
   fi
@@ -1220,7 +1224,7 @@ case "$VERB" in
     # claim the stop-side consumers rest on.
     read_acked
     _rows="$(latest_rows)"
-    _n=0; _met=0; _unmet=0; _waived=0; _live=0; _ambig=0; _follow=0; _unmet_lines=""
+    _n=0; _met=0; _unmet=0; _waived=0; _live=0; _ambig=0; _follow=0; _unmet_lines=""; _unsaid=0
     # The fold hands over the name and the contract count it already parsed; re-deriving
     # them here with `line_field` is what made this loop 9.665 s at 1000 rows (see
     # latest_rows). IFS is scoped to the read, and spelled `$'\t'` rather than as a command
@@ -1258,6 +1262,7 @@ case "$VERB" in
         FOLLOW-UP)  _follow=$((_follow + 1)) ;;
         UNMET)
           _unmet=$((_unmet + 1))
+          [ "$VERDICT_CAUSE" = unsaid ] && _unsaid=$((_unsaid + 1))
           _unmet_lines="${_unmet_lines}UNMET — ${_rname}: $(clean "$VERDICT_DETAIL")
 "
           ;;
@@ -1284,7 +1289,8 @@ EOF
       printf '%s' "$_unmet_lines" | while IFS= read -r _l; do
         [ -n "$_l" ] && say "$_l"
       done
-      say "the named artifacts are not on disk as the brief declared them."
+      [ "$_unsaid" -lt "$_unmet" ] && say "the named artifacts are not on disk as the brief declared them."
+      [ "$_unsaid" -gt 0 ] && say "the artifacts landed, but no message, completed task-notification or Done marker followed the launch — the agent gives one by sending its report with SendMessage, or by writing the Done marker its brief names."
       say "Nothing was stopped, judged, or recorded — this verb only reads."
       exit 1
     fi
