@@ -8693,4 +8693,28 @@ expect_absent "ADV-files a fenced block is not advised" "fence.sh" "$ADV_CTX"
 expect_absent "ADV-files an edit with no path object is not advised" "failing assertion" "$ADV_CTX"
 
 
+# ============================================================================
+section "§DONE-lift — the brief's Done marker is lifted to the roster as done= (wave-24 T9; REQ-4 AC-4.8, D3)"
+# ============================================================================
+#
+# The landing verdict reads `done=` as one of the completion signals (hooks/session-sweeper.sh
+# `row_said`). The lift carries `Done marker:` at line start; a slot or a prose mention declares
+# nothing.
+# fails-when: the label does not lift, or a scaffold slot or a mid-line mention lifts as a marker.
+lift_done() { bash -c '. "$1" || exit 9; lift_contract_fields "$2" | grep "^done="' _ "$BRIEF_LIB" "$1"; }
+expect_eq "DL1 a Done marker line lifts as done=" "done=.bionic/docs/record/w99.done" \
+  "$(lift_done 'Expected artifact: .bionic/docs/record/w99.md
+Done marker: .bionic/docs/record/w99.done
+Files: payload/scripts/lib/widget.sh')"
+expect_eq "DL2 …the scaffold slot, pasted unfilled, lifts none" "" \
+  "$(lift_done 'Expected artifact: .bionic/docs/record/w99.md
+Done marker: <path>   # optional
+Files: payload/scripts/lib/widget.sh')"
+expect_eq "DL3 …nor does a mention that is not at the start of its line" "" \
+  "$(lift_done 'Expected artifact: .bionic/docs/record/w99.md
+
+Note: touch the done marker: .bionic/tmp/w99.done when finished.
+Files: payload/scripts/lib/widget.sh')"
+
+
 finish
