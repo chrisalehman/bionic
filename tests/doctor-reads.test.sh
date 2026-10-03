@@ -832,11 +832,32 @@ am_row() {  # <doctor report> -> the auto-memory row, or nothing
   printf '%s\n' "$1" | grep -E '^  . auto-memory ' | head -1
 }
 
+am_header() {  # <doctor report> <label> -> the header line the row <label> prints under
+  printf '%s\n' "$1" | awk -v l="$2" '
+    /^[A-Z][A-Z ]*$/ { h = $0 }
+    $0 ~ "^  . " l " " { print h; exit }'
+}
+
 # ---------- clean: no override, no memory directory ----------
 AM_CLEAN_P="$(ds_r2_repo)"; AM_CLEAN_H="$(am_home)"
 OUT20A="$(am_doctor "$AM_CLEAN_P" "$AM_CLEAN_H")"
 expect_match "20.1: a clean project renders the auto-memory row ✓" \
   "  ✓ auto-memory *" "$(am_row "$OUT20A")"
+# THE ✓ CLAIMS WHAT THE ROW CHECKED, NOT "OFF" (wave-23 T10, A-orch-16). The row reads two
+# facts; "off" is the ENVIRONMENT row's claim, and that row can say the switch is unset on
+# this same page.
+expect_contains "20.1b: …and says what it checked, not that auto memory is off" \
+  "no override in this project's settings, no memory files under its slug" "$(am_row "$OUT20A")"
+expect_absent "20.1c: …never the old \"off for this project\"" \
+  "off for this project" "$OUT20A"
+# THE ROW PRINTS UNDER THE PROJECT'S OWN HEADER, beside the run and its predecessors, not
+# under PATROL's `none running`. The ✗ states are asserted under it too (20.2b, 20.8b).
+expect_eq "20.1d: the row sits under the PROJECT header" \
+  "PROJECT" "$(am_header "$OUT20A" "auto-memory")"
+expect_eq "20.1e: …the same header the active-run row sits under" \
+  "PROJECT" "$(am_header "$OUT20A" "active run")"
+expect_eq "20.1f: …and ENVIRONMENT's switch row stays under ENVIRONMENT" \
+  "ENVIRONMENT" "$(am_header "$OUT20A" "CLAUDE_CODE_DISABLE_AUTO_MEMORY")"
 
 # ---------- the override: the project's own settings.json turns the switch back off ----------
 AM_OVR_P="$(ds_r2_repo)"; AM_OVR_H="$(am_home)"
@@ -846,6 +867,7 @@ OUT20B="$(am_doctor "$AM_OVR_P" "$AM_OVR_H")"
 AM_ROW_B="$(am_row "$OUT20B")"
 expect_match "20.2: a project settings.json carrying \"0\" renders ✗ auto-memory" \
   "  ✗ auto-memory *" "$AM_ROW_B"
+expect_eq "20.2b: …under the PROJECT header" "PROJECT" "$(am_header "$OUT20B" "auto-memory")"
 expect_contains "20.3: …the row names the file to edit" ".claude/settings.json" "$AM_ROW_B"
 expect_contains "20.4: …and the key" "CLAUDE_CODE_DISABLE_AUTO_MEMORY" "$AM_ROW_B"
 expect_absent "20.5: …and never sends the reader to setup, which cannot edit a project file" \
@@ -873,6 +895,7 @@ OUT20C="$(am_doctor "$AM_DIR_P" "$AM_DIR_H")"
 AM_ROW_C="$(am_row "$OUT20C")"
 expect_match "20.8: two files under the project's memory dir render ✗ auto-memory" \
   "  ✗ auto-memory *" "$AM_ROW_C"
+expect_eq "20.8b: …under the PROJECT header" "PROJECT" "$(am_header "$OUT20C" "auto-memory")"
 expect_contains "20.9: …the row names the directory" \
   "projects/$(am_slug "$AM_DIR_P")/memory" "$AM_ROW_C"
 expect_contains "20.10: …and how many files it holds" "(2 files)" "$AM_ROW_C"
