@@ -430,4 +430,21 @@ for _sc_f in skills/canonical-sdlc/SKILL.md skills/canonical-sdlc/dispatch.md; d
     bash -c 'case "$1" in *"Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watch — optional"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
 done
 
+section "Section 12: every role file carries the dispatch-rules block (wave-24 T6, D8, AC-6.2)"
+# The role file is the channel that provably reaches a teammate (P1 could only prove the push
+# reaches a classic subagent). A role file holding only the "Dispatch terms" pointer carries
+# no rule at all. fails-when: a role template stops injecting the block, or the block grows
+# past its 600-byte budget.
+_dr_src="$REPO/agents-src/blocks/dispatch-rules.md"
+expect_true "12a: the block source exists" test -f "$_dr_src"
+expect_true "12b: …and is at most 600 bytes" \
+  bash -c '[ "$(wc -c < "$1")" -gt 0 ] && [ "$(wc -c < "$1")" -le 600 ]' _ "$_dr_src"
+for _dr_role in auditor critic implementor researcher senior-implementor test-runner; do
+  _dr_body=$(cat "$REPO/agents/$_dr_role.md" 2>/dev/null)
+  expect_true "12c: agents/$_dr_role.md carries the DISPATCH-RULES markers" \
+    bash -c 'case "$1" in *"<!-- DISPATCH-RULES-BEGIN -->"*"<!-- DISPATCH-RULES-END -->"*) exit 0 ;; esac; exit 1' _ "$_dr_body"
+  expect_true "12d: …and the block's own words, so an empty injection cannot pass" \
+    bash -c 'case "$1" in *"one \`bash tests/<name>.test.sh\` per suite"*"ever end your turn"*) exit 0 ;; esac; exit 1' _ "$_dr_body"
+done
+
 finish
