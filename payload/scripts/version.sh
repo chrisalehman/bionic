@@ -6,24 +6,27 @@
 # every field on the line is read out of detect.sh, never re-derived here. This script
 # composes four already-owned facts into one line and nothing more —
 #
-#   bionic <version> (installed) · <sha or feed> · <install path> · <this checkout |
-#   OTHER checkout | unregistered>
+#   bionic <version> (installed) · <sha or unknown> · <install path> · <this checkout |
+#   OTHER checkout | github feed | unregistered>
 #
 # — where:
 #   <version>      plugin.json's `.version`, via `detect_plugin_integrity` — the same
 #                  reader doctor.sh's header uses, so the two can never disagree.
-#   <sha or feed>  the installed commit, 8 hex characters, when the registry can be
-#                  compared against a real git tree; the feed kind ("directory"/"git")
-#                  otherwise. Same match/lag/not-in-repo branching doctor.sh's header
-#                  uses for PAYLOAD_SHA (detect_registry_sha_lag +
-#                  detect_marketplace_feed_kind), composed fresh here rather than reread
+#   <sha or unknown>
+#                  the installed commit, 8 hex characters: the registry's own
+#                  `gitCommitSha` whether or not the plugin root is a git tree (a public
+#                  install's cache copy has no .git — `registry-only`), or the tree's HEAD
+#                  on a lagging directory feed. `unknown` when the registry records none,
+#                  never a sha from anywhere else. Same match/lag/not-in-repo/registry-only
+#                  branching doctor.sh's header uses for PAYLOAD_SHA
+#                  (detect_registry_sha_lag + detect_marketplace_feed_kind), composed fresh here rather than reread
 #                  from doctor's own variables — this script never sources doctor.sh, a
 #                  script sourcing another SCRIPT (not a library) is not this codebase's
 #                  shape.
 #   <install path> the marketplace's own source path when one is registered (the
 #                  directory a directory-feed install actually runs), else the resolved
 #                  plugin-install path.
-#   <this checkout | OTHER checkout | unregistered>
+#   <this checkout | OTHER checkout | github feed | unregistered>
 #                  `detect_checkout_verdict` — the ONE site for this comparison,
 #                  doctor.sh's own "plugin source:" row calls the same function, so this
 #                  line and that row can never disagree either.
@@ -93,10 +96,10 @@ case "$REG_SHA_STATE" in
     else
       SHA_OR_FEED="$(_version_sha8 "$REG_SHA_REG")"
     fi ;;
-  not-in-repo) SHA_OR_FEED="$(_version_sha8 "$REG_SHA_REG")" ;;
-  *)           SHA_OR_FEED="$FEED_KIND" ;;
+  not-in-repo|registry-only) SHA_OR_FEED="$(_version_sha8 "$REG_SHA_REG")" ;;
+  *)           SHA_OR_FEED="unknown" ;;
 esac
-[ -n "$SHA_OR_FEED" ] || SHA_OR_FEED="$FEED_KIND"
+[ -n "$SHA_OR_FEED" ] || SHA_OR_FEED="unknown"
 
 # ─── The install path ────────────────────────────────────────────────────────
 #

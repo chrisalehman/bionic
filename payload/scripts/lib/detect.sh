@@ -855,6 +855,20 @@ _detect_git_common_dir() {  # <dir> -> absolute path, or empty
   return 0
 }
 
+# IS THE REGISTERED SOURCE A GITHUB SOURCE — the one shape that names a repository slug
+# instead of a filesystem path. Read under the same marketplace name as the lookups above;
+# exit 0 when `source.source` is "github", 1 for every other answer, including no jq and no
+# file (the caller then falls through to the path comparison, which refuses honestly).
+_detect_marketplace_is_github() {
+  local mp name kind
+  mp="$(_detect_known_marketplaces_file)"
+  [ -f "$mp" ] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  name="$(_detect_marketplace_name)"
+  kind="$(jq -r --arg n "$name" '.[$n].source.source // empty' "$mp" 2>/dev/null)"
+  [ "$kind" = "github" ]
+}
+
 # THE "THIS CHECKOUT / OTHER checkout / unregistered" VERDICT — ONE SITE FOR THE RULE
 # (epic-22 wave-01 task 14, E2). `detect_marketplace_source_path`'s own header says that
 # comparison is the CALLER's to make; this function IS that caller, so that doctor.sh and
@@ -866,9 +880,15 @@ _detect_git_common_dir() {  # <dir> -> absolute path, or empty
 # resolves it from its own script location; version.sh does the same) — never derived
 # here, because "which tree is asking" is a fact only the caller has.
 #
-# FOUR ANSWERS, never a guess between them:
+# FIVE ANSWERS, never a guess between them:
 #   "unregistered"                        no marketplace registration names a source
 #                                          path at all
+#   "github feed"                         the registration is a GitHub source
+#                                          (`source.source` = "github", naming a
+#                                          `source.repo` slug) — the public install.
+#                                          It names no checkout at all, so neither
+#                                          "this" nor "OTHER" is a claim it can make
+#                                          (D15, wave-24)
 #   "this checkout"                       the registration's path resolves to the
 #                                          caller's own root
 #   "OTHER checkout (worktree of this repo)"
@@ -880,16 +900,18 @@ _detect_git_common_dir() {  # <dir> -> absolute path, or empty
 #                                          path-based: no SHA or commit is compared, so
 #                                          two worktrees on different commits still read
 #                                          this, and a same-commit fact never appears.
-#   "OTHER checkout"                      any other real, different directory — OR a
-#                                          git-feed registration naming no filesystem
-#                                          path (a `source.repo` string, which can never
-#                                          equal a realpath) — either way, an unrelated
-#                                          tree.
+#   "OTHER checkout"                      any other real, different directory, or a
+#                                          registration naming a path that does not
+#                                          exist — an unrelated tree.
 detect_checkout_verdict() {  # <realpath to compare against> -> one of the four answers
   local compare_root="${1:-}" mp_path st mp_real gc_mp gc_cmp
   mp_path="$(detect_marketplace_source_path)"; st=$?
   if [ "$st" -ne 0 ] || [ -z "$mp_path" ]; then
     printf 'unregistered\n'
+    return 0
+  fi
+  if _detect_marketplace_is_github; then
+    printf 'github feed\n'
     return 0
   fi
   if [ -d "$mp_path" ]; then
@@ -1126,6 +1148,10 @@ detect_plugin_root() {
 # question genuinely has no answer here. Every `unknown` carries its cause, like every
 # other one in this file.
 #
+# `registry-only` IS THE PUBLIC INSTALL: the plugin root is a cache copy with no .git, so there is
+# no tip to compare, but the registry's sha is still the fact the CLI recorded for what it
+# installed, and callers print it. The cause rides the line for a caller that needs it (D15).
+#
 # TWO STATES FOR "NOT THE TIP", because they take different actions. `lag` — the recorded
 # sha IS a commit in this repo — means reinstall and you are current. `not-in-repo` means
 # the installed build came from somewhere this checkout has never seen, and reinstalling
@@ -1165,7 +1191,7 @@ detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
   head="$( cd "$dir" 2>/dev/null && git rev-parse HEAD 2>/dev/null )"
   case "$head" in
     ''|*[!0-9a-f]*)
-      echo "plugin:registry-sha state=unknown registry=${sha} repo=- cause=not run inside a git repository, so there is no tip to compare against"
+      echo "plugin:registry-sha state=registry-only registry=${sha} repo=- cause=not run inside a git repository, so there is no tip to compare against"
       return 0 ;;
   esac
 
