@@ -823,8 +823,11 @@ case "$(cat "$M11" 2>/dev/null)" in
   *"$P11"*)  no "…and neither plan's path appears in the marker" "the older plan's path is in the marker" ;;
   *) ok "…and neither plan's path appears in the marker" ;;
 esac
-# the pair: drop back to one open run on the SAME root and the binding returns
-rm -f "$P11B"
+# the pair: drop back to one open run on the SAME root and the binding returns. The marker is
+# removed first so this is a FIRST engagement, like the two-run fire above: since T15 (D1 Δ5) a
+# re-engagement keeps `plan=none` and never re-runs the count rule (E13d pins that side), so
+# this pair now measures the count alone, which is all it ever meant to measure.
+rm -f "$P11B" "$M11"
 fire "$SID" "$(skill_payload "$SID" "$R11" "bionic:canonical-sdlc")"
 expect_eq "…paired: with one open run again the same root binds to it" "$P11" "$(plan_of "$M11")"
 
@@ -1238,6 +1241,105 @@ expect_eq "E12e …and the marker names it" "$P40" "$(plan_of "$M40")"
 e12_reset; e12_live "$OTHER_SID" "$$"
 e12_fire "$SID" "$R40"
 expect_eq "E12e …and re-engagement leaves the hand binding standing" "$P40" "$(plan_of "$M40")"
+
+# ============================================================
+section "E13 (wave-23-fixit-1810 T15, critic N-1; D1 Δ5) — only a FIRST engagement binds"
+# ============================================================
+#
+# THE DEFECT (record/wave-23-fixit-1810/critic-d067c07d.md N-1, the `clearrace.sh` drive). E12
+# leaves a bystander B at `plan=none` beside A's live run. A `/clear`s: the CLI rewrites A's pid
+# file with A2's id, so A's marker belongs to no live session. B re-invokes the skill; `plan=none`
+# read as "no binding", the count rule ran again, found no live holder and bound B to A's run.
+# A2 then engaged and was told B holds it. B was charged for A's ledger at every turn end and
+# the owner's continuation was steered off its own wave: the seed's symptom by ownership
+# transfer.
+#
+# THE RULE (Δ5). A session auto-binds only when NO marker for its id exists yet. A marker that
+# exists keeps its binding as it stands — `plan=none` stays `none`, a bound plan stays bound —
+# so a bystander's decline is sticky and the owner's `/clear` cannot hand its run on, while A2
+# (a new id, no marker) is a first engagement and binds the now-unheld run.
+
+E13_A2="a2c1ea20-0000-4000-8000-0000000000a2"
+PATROL_LIB="$REPO_ROOT/payload/scripts/lib/patrol.sh"
+ROOTS_LIB="$REPO_ROOT/payload/scripts/lib/roots.sh"
+e13_dead() {  # <root> -> the sweeper's dead set under the fixture claude home
+  BIONIC_CLAUDE_HOME="$E12_HOME" bash -c '. "$1" && . "$2" && . "$3" && patrol_dead_sessions "$4"' \
+    _ "$ROOTS_LIB" "$LIB" "$PATROL_LIB" "$1" 2>/dev/null
+}
+
+# (a) THE N-1 SEQUENCE, END TO END: A=OTHER_SID owns the run, B=SID is the bystander.
+R43="$(make_repo e13a)"
+P43="$R43/.bionic/docs/plans/wave-01.plan.md"
+M43B="$(marker_path "$R43" "$SID")"
+M43A="$(marker_path "$R43" "$OTHER_SID")"
+M43A2="$(marker_path "$R43" "$E13_A2")"
+call_bind "$R43" "$OTHER_SID" "$P43"
+# Both live, as in clearrace.sh: A at this shell's pid, B at its parent's (alive for the run).
+e12_reset; e12_live "$OTHER_SID" "$$"; e12_live "$SID" "$PPID"
+e12_fire "$SID" "$R43"
+expect_eq "E13a B engages beside A's live run: plan=none (E12's rule, non-vacuity)" "none" "$(plan_of "$M43B")"
+expect_contains "E13a …and is told A holds it" "$OTHER_SID" "$(e12_ctx)"
+# A /clears: the CLI rewrites A's pid file with A2's id, the same pid. B stays live.
+e12_reset; e12_live "$E13_A2" "$$"; e12_live "$SID" "$PPID"
+case "
+$(e13_dead "$R43")
+" in
+  *"
+$OTHER_SID
+"*) ok "E13a A's marker is now DEAD by the sweeper's own predicate (patrol_dead_sessions)" ;;
+  *) no "E13a A's marker is now DEAD by the sweeper's own predicate (patrol_dead_sessions)" "not in the dead set" ;;
+esac
+e12_fire "$SID" "$R43"
+expect_eq "E13a B re-engages after A's /clear: exits 0" "0" "$HOOK_RC"
+expect_eq "E13a …and B's marker is STILL plan=none — A's run is not handed to the bystander" \
+  "none" "$(plan_of "$M43B")"
+e12_fire "$E13_A2" "$R43"
+expect_eq "E13a A2 (a new id, no marker) engages: binds the now-unheld run" "$P43" "$(plan_of "$M43A2")"
+expect_eq "E13a …and is told nothing — nobody live holds it" "" "$HOOK_OUT"
+expect_eq "E13a …and B is still unbound after A2 binds" "none" "$(plan_of "$M43B")"
+
+# (b) A FRESH SESSION WITH NO OTHER MARKER BINDS (unchanged: no marker = first engagement).
+R44="$(make_repo e13b)"
+P44="$R44/.bionic/docs/plans/wave-01.plan.md"
+M44="$(marker_path "$R44" "$SID")"
+expect_eq "E13b no marker before the first engagement (non-vacuity)" "absent" \
+  "$([ -e "$M44" ] && echo present || echo absent)"
+e12_reset; e12_live "$SID" "$$"
+e12_fire "$SID" "$R44"
+expect_eq "E13b a first engagement beside no other marker binds the sole live run" "$P44" "$(plan_of "$M44")"
+expect_eq "E13b …and says nothing" "" "$HOOK_OUT"
+
+# (c) A BOUND SESSION RE-ENGAGING KEEPS ITS PLAN (unchanged), even beside a live holder of
+# the same plan — the held rule declines a guess, never an existing binding.
+e12_reset; e12_live "$SID" "$$"; e12_live "$OTHER_SID" "$PPID"
+call_bind "$R44" "$OTHER_SID" "$P44"
+e12_fire "$SID" "$R44"
+expect_eq "E13c re-engaging a bound session keeps its plan" "$P44" "$(plan_of "$M44")"
+expect_eq "E13c …and says nothing" "" "$HOOK_OUT"
+
+# (d) THE OTHER HALF OF Δ5: a `plan=none` written when the root had no live run stays `none`
+# when a run later becomes the sole live one. Re-engagement decides nothing; the session binds
+# by hand or by writing its own plan.
+R45="$(make_repo e13d)"
+P45="$R45/.bionic/docs/plans/wave-01.plan.md"
+M45="$(marker_path "$R45" "$SID")"
+call_bind "$R45" "$SID" none
+e12_reset; e12_live "$SID" "$$"
+e12_fire "$SID" "$R45"
+expect_eq "E13d a plan=none marker re-engaging beside a sole unheld live run stays plan=none" \
+  "none" "$(plan_of "$M45")"
+expect_eq "E13d …and says nothing" "" "$HOOK_OUT"
+call_bind "$R45" "$SID" "$P45"
+expect_eq "E13d …while a bind by hand is still written" "$P45" "$(plan_of "$M45")"
+
+# (e) A MARKER WITH NO `plan=` LINE (an older writer's empty marker) is present, so it is a
+# re-engagement: it is rewritten in the one shape, unbound, never guessed into a run.
+R46="$(make_repo e13e)"
+M46="$(marker_path "$R46" "$SID")"
+mkdir -p "$R46/.bionic/tmp"; : > "$M46"
+e12_reset; e12_live "$SID" "$$"
+e12_fire "$SID" "$R46"
+expect_eq "E13e an empty marker re-engaging stays unbound: plan=none" "none" "$(plan_of "$M46")"
 
 # ============================================================
 finish
