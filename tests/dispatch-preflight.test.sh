@@ -8555,7 +8555,7 @@ expect_absent "brief-lib …never a finding" "finding:" "$BV"
 
 printf '#!/bin/bash\nsleep 8\n' > "$BRIEF_CONF/stub-impact.sh"
 BV=$(IMPACT_BOUND_S=1 brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")
-expect_contains "brief-lib a derivation past its bound is a finding" "finding: the impact command did not answer" "$BV"
+expect_contains "brief-lib a derivation past its bound is a finding" "finding: the impact command timed out after 1 s" "$BV"
 expect_contains "brief-lib …answered rc=2, so the door knows the suite set was never built" "rc=2" "$BV"
 
 expect_eq "brief-lib brief_field hands back the Files: set as the row stores it" \
@@ -8811,6 +8811,69 @@ expect_eq "tr4 one open test-runner against suites=1 → REFUSED (the control)" 
 s22_ack "$REPO" "$SID_A" "T-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr4-w2" "claude-sonnet-5" "$RO_NONE" "implementor")"
 expect_eq "tr4b …and once acked its suite slot is free → ADMITTED" "allow" "$GATE_VERDICT"
+
+# ================================== §WHY: A REFUSAL SAYS HOW TO GET PAST IT
+# (wave-24 T13; REQ-6 AC-6.7; D10. Chris 2026-10-03: "Why can't it be obvious from the outset
+# how to invoke them properly?")
+#
+# fails-when: the writer-budget refusal names no open row, an impact timeout says "fix
+# impact-command", or a complete brief is shown the blank scaffold.
+section "§WHY — the writer budget names its rows, a timeout says so, a complete brief sees no scaffold (AC-6.7)"
+
+# why1 — the writer-budget refusal lists the open rows it COUNTED, each with the command that
+# closes it. The count is `budget_open_writers`, so a read-only row it did not count is not
+# listed: the positive and the negative read the same reason.
+REPO=$(ro_budget_repo why1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "why1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "why1 one writer and one researcher open against writers=1 → REFUSED" "deny" "$GATE_VERDICT"
+WHY1_LINE="$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -F 'W-ONE' | /usr/bin/grep -m1 -F 'session-sweeper.sh ack' || true)"
+expect_true "why1 …the reason lists the open writer row with the command that closes it" test -n "$WHY1_LINE"
+expect_contains "why1 …the command is the ack verb on that name" "session-sweeper.sh ack 'W-ONE'" "$WHY1_LINE"
+WHY1_ROOT="$(printf '%s\n' "$WHY1_LINE" | sed -n 's/.*bash \(.*\)\/session-sweeper\.sh ack .*/\1/p')"
+expect_true "why1 …rooted at the real hooks directory" test -f "$WHY1_ROOT/session-sweeper.sh"
+expect_absent "why1 …and never the read-only row it did not count" "R-ONE" "$GATE_REASON"
+expect_absent "why1 …and no placeholder root anywhere in the reason" "<plugin-root>" "$GATE_REASON"
+
+# why2 — the impact finding: a bound that expired says "timed out after N s", and its fix is
+# not "fix impact-command" — the command may be fine and the brief too wide. A command that
+# FAILED is a different sentence, naming its exit status, and never a timeout.
+why_brief() {  # <bound or ""> -> the sink's finding/warn lines, with the fix beside the fact
+  bash -c '
+    . "$1" || exit 9
+    sink() { case "$1" in finding) printf "finding: %s (%s)\n" "$2" "$3" ;; warn) printf "warn: %s\n" "$2" ;; esac; }
+    rc=0
+    brief_validate_fields "$(lift_contract_fields "Files: payload/scripts/lib/widget.sh" implementor)" implementor "$2" sink || rc=$?
+    printf "rc=%s\n" "$rc"
+  ' _ "$BRIEF_LIB" "$BRIEF_CONF" 2>&1
+}
+printf '#!/bin/bash\nsleep 8\n' > "$BRIEF_CONF/stub-impact.sh"
+WHY2="$(IMPACT_BOUND_S=1 why_brief)"
+expect_contains "why2 a derivation past its bound says it timed out, and after how long" \
+  "finding: the impact command timed out after 1 s" "$WHY2"
+expect_absent "why2 …never 'fix impact-command' for a command that may be fine" "fix impact-command" "$WHY2"
+expect_contains "why2 …still rc=2, so the door knows the suite set was never built" "rc=2" "$WHY2"
+printf '#!/bin/bash\nexit 3\n' > "$BRIEF_CONF/stub-impact.sh"
+WHY2F="$(why_brief)"
+expect_contains "why2f a command that FAILED names its exit status" "the impact command failed (exit 3)" "$WHY2F"
+expect_absent "why2f …and is never called a timeout" "timed out" "$WHY2F"
+
+# why3 — a several-fault refusal whose brief already carries every scaffold line shows no
+# scaffold: it would tell the author to add nothing. Two faults on a complete brief: the writer
+# budget and the name in flight. The control is the same two faults on a brief missing one
+# line, which still carries the marked scaffold.
+REPO=$(ro_budget_repo why3 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "W-ONE" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "why3 two faults on a complete brief → REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "why3 …the reason carries the second fault's line" "that name is in flight" "$GATE_REASON"
+expect_absent "why3 …and no blank scaffold line" "Expected duration: <N> minutes" "$GATE_REASON"
+expect_absent "why3 …and no <ADD> mark" "<ADD>" "$GATE_REASON"
+WHY3_PARTIAL="$(printf '%s\n' "$BRIEF_FULL" | /usr/bin/grep -v '^Expected duration:')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$WHY3_PARTIAL" "W-ONE" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "why3c the same faults on a brief missing a line → REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "why3c …and the scaffold marks the line it lacks" "Expected duration: <N> minutes <ADD>" "$GATE_REASON"
 
 
 finish

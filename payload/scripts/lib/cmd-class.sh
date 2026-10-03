@@ -77,6 +77,10 @@
 #                                suite naming no file this repo budgets by. The budget arm
 #                                reads this: `suites_allowed=` is compared to the first,
 #                                `re_executes=` to the second (REQ-1 AC-1.5).
+#   cmd_suite_loop_lines <cmd>
+#                             -> one `bash <path>` line per suite a literal `for` header names,
+#                                each word put into the path the loop body runs (wave-24 T13,
+#                                D10). The unexpanded-name refusal in lib/walls.sh prints it.
 #   cmd_class          <cmd>  -> the whole command's class, by PRIORITY not by position:
 #                                suite > bootstrap > install > build > none. Priority, so
 #                                that `make widget && bash tests/run.sh` still routes to
@@ -870,6 +874,41 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       }
     }
 
+    # ---------- 7. the loop header as the lines to run (wave-24 T13, D10, AC-6.3) ----------
+    # The unexpanded-name refusal prints what a loop WOULD have run, spelled literally, and
+    # this is the one reading of the header it prints from: each segment inside a `for V in
+    # w...` frame whose words are all literal is read once per word with V put in, and every
+    # reading that names a suite FILE gives one `bash <path>` line, the path as the body
+    # spelled it. Unlike section 6 this does NOT ask whether the body reassigns V: the lines
+    # are the words of the header, offered as the fix, never trusted as what ran. Called
+    # before expand_all, so FOK still means "every word is literal".
+    function loop_lines(k, sg,   i, f, V, W, nw, X, Y, nx, nn, x, y, hit, over, t, seen) {
+      for (i = 1; i <= k; i++) {
+        if (index(sg[i], "$") == 0) continue
+        nx = 1; X[1] = sg[i]; hit = 0; over = 0
+        for (f = 1; f <= NF; f++) {
+          if (!FOK[f] || FSTART[f] >= i || i >= FEND[f]) continue
+          V = FVAR[f]
+          if (!index(X[1], "$" V) && !index(X[1], "${" V "}")) continue
+          nw = split(FWORDS[f], W, " ")
+          if (nx * nw > 64) { over = 1; break }
+          nn = 0
+          for (x = 1; x <= nx; x++) for (y = 1; y <= nw; y++) Y[++nn] = subst(X[x], V, W[y])
+          nx = nn
+          for (x = 1; x <= nx; x++) X[x] = Y[x]
+          hit = 1
+        }
+        if (over || !hit) continue
+        for (x = 1; x <= nx; x++) {
+          LAST_TARGET = ""; LAST_KIND = ""; LAST_PATH = ""
+          if (class_seg(trim(X[x]), 0) != "suite" || LAST_KIND != "file") continue
+          if (LAST_PATH == "" || index(LAST_PATH, "$") || index(LAST_PATH, "`")) continue
+          t = "bash " LAST_PATH
+          if (!(t in seen)) { seen[t] = 1; print t }
+        }
+      }
+    }
+
     { line[++nl] = $0 }
     END {
       out = ""; intag = 0; tag = ""
@@ -939,6 +978,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       }
       k = segments(out, seg)
       compound_pass(k, seg)
+      # mode=looplines: cmd_suite_loop_lines (wave-24 T13) — section 7, ahead of expand_all.
+      if (mode == "looplines") { loop_lines(k, seg); exit }
       expand_all(k, seg, out)
       CD_SEEN = 0
       for (i = 1; i <= k; i++) {
@@ -1351,6 +1392,15 @@ cmd_suite_claims() {  # <command> [<repo root>] -> "<kind>\t<target>\t<run>" per
     if [ "$_abs" = "$_root/tests/$_b" ]; then printf 'file\t%s\t%s\n' "$_b" "$_r"; fi
   done
   return 0
+}
+
+cmd_suite_loop_lines() {  # <command> -> one `bash <path>` line per suite a literal loop header names
+  # THE FIX THE UNEXPANDED-NAME REFUSAL PRINTS (wave-24 T13, D10, AC-6.3). A loop the claims
+  # will not resolve (its body reassigns the variable) still has a header of literal words,
+  # and those words put into the path the body runs are the lines the reader meant: one
+  # `bash <path>` per distinct suite, in header order. Nothing for a `$` no literal loop
+  # pins. payload/scripts/lib/walls.sh prints this and never reads the loop itself.
+  printf '%s' "${1-}" | _cmd_class_awk looplines
 }
 
 cmd_suite_targets() {  # <command> [<repo root>] -> the suite BASENAME each suite-class segment runs

@@ -761,7 +761,7 @@ stop_landing_gate() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local LG_IMPACT_CLOCK LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY LG_WORKING_BRANCH
   local LG_ROW_RC LG_ROW_ID LG_ROW_BASE LG_FALLBACK_WHY LG_BASE_SRC LG_RUN_PLAN
   local _LG_ROW_ID _LG_ROW_BASE
-  local LG_OUTSIDE LG_DF LG_IMPACT_CMD LG_SUITES LG_SUITES_NOTE LG_IMPACT_TMP
+  local LG_OUTSIDE LG_DF LG_IMPACT_CMD LG_SUITES LG_SUITES_NOTE LG_IMPACT_TMP LG_FIX LG_FIX_FILES
   local LG_IMPACT_PID LG_OVERRAN
 
 # ---------- relevance first: the cheapest checks, before any git resolution ----------
@@ -1295,10 +1295,15 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
       fi
       if [ -n "$LG_BASE" ]; then
         LG_OUTSIDE=""
+        # THE AMEND ARGUMENTS ARE BUILT PER PATH, NEVER SPLIT BACK OUT OF `LG_OUTSIDE`
+        # (wave-24 T13, D10): that list is space-joined for reading, so a path holding a
+        # space would come back as two. Each path is one quoted `--files+` word here.
+        LG_FIX_FILES=""
         while IFS= read -r LG_DF; do
           [ -n "$LG_DF" ] || continue
           _lg_path_declared "$LG_DF" "$CFILES" && continue
           LG_OUTSIDE="${LG_OUTSIDE}${LG_OUTSIDE:+ }${LG_DF}"
+          LG_FIX_FILES="${LG_FIX_FILES} --files+ $(refuse_quote "$LG_DF")"
         done <<LGDIFF
 $(git -C "$LG_WT" diff --name-only "${LG_BASE}..HEAD" 2>/dev/null)
 LGDIFF
@@ -1351,7 +1356,13 @@ LGDIFF
             fi
           fi
           [ -n "$REFUSE_KIND" ] || REFUSE_KIND=undeclared
-  REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE}${LG_SUITES:+ (suites: ${LG_SUITES})}${LG_SUITES_NOTE} — not declared. Add the file(s) to Files: and re-derive, or revert them before landing.
+          # THE FIX IS A COMMAND, PRINTED WHOLE (wave-24 T13, D10, AC-6.5): the amend that
+          # declares these paths on this row, with the real plugin root, the row name and
+          # every path quoted as one shell word, ready to paste. Reverting them is the other
+          # way out, and has no single command to print.
+          LG_FIX="bash $(refuse_plugin_root)/hooks/session-poker.sh amend $(refuse_quote "$NAME")${LG_FIX_FILES} --reason $(refuse_quote "the landing diff touched files Files: did not declare")"
+  REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE}${LG_SUITES:+ (suites: ${LG_SUITES})}${LG_SUITES_NOTE} — not declared. Declare them (main runs it), or revert them before landing:
+    ${LG_FIX}
 "
         fi
       fi
@@ -2311,7 +2322,10 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   rung="$(pressure_level "$_ST_CEILING" 2>/dev/null)" || rung=""
   case "$rung" in ''|*[!0-9]*) rung="" ;; esac
   _ST_WIDTH="${rung:-$_ST_CEILING}"
-  FILL_OPEN="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | awk 'END { print NR + 0 }')"
+  # THE WRITERS AMONG THEM (wave-24 T13, D11): `budget_open_writers` (lib/roster.sh) leaves a
+  # read-only role out, as the dispatch wall and the tick's `TICK_OCCUPIED` do, so the three
+  # readers of the open set count the same slots.
+  FILL_OPEN="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | budget_open_writers "$FILL_ROSTER")"
   case "$FILL_OPEN" in ''|*[!0-9]*) FILL_OPEN=0 ;; esac
   _ST_OPEN="$FILL_OPEN"
   _ST_FREE=$(( _ST_WIDTH - _ST_OPEN ))

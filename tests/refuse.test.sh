@@ -708,4 +708,104 @@ expect_contains "6z with the knob set the thirtieth line prints too — the knob
 expect_absent "6z2 …and no count line, because nothing was held back" "+18 more" "$DRV_ERR"
 expect_eq "6z3 …so the whole thirty-two lines are on the stream" "32" "$DRV_ERR_LINES"
 
+section "§ROOT — the fix line's pieces live beside the renderer (wave-24 T13, D10)"
+# Moved from lib/walls.sh so the landing refusal in lib/stop.sh prints the same root and the
+# same quoting the budget arm does. Each answer is read through a fresh shell that sources
+# only this library.
+fixpiece() {  # <BIONIC_LIB or ""> <function> [args…]
+  local lib="$1"; shift
+  BIONIC_LIB="$lib" bash -c '. "$1" || exit 9; shift; "$@"' _ "$LIB" "$@" 2>&1
+}
+expect_eq "R1 the plugin root is the tree the library was loaded from" \
+  "$(cd "$LIB_DIR/../.." && pwd)" "$(fixpiece "$LIB_DIR" refuse_plugin_root)"
+expect_eq "R2 …and the placeholder only when the loader's variable is absent" \
+  "<plugin-root>" "$(fixpiece "" refuse_plugin_root)"
+expect_eq "R3 a word a shell would split is one single-quoted argument" "'a b.sh'" "$(fixpiece "" refuse_shell_word 'a b.sh')"
+expect_eq "R4 …a plain word stays bare" "w-1" "$(fixpiece "" refuse_shell_word w-1)"
+expect_eq "R5 …an empty word prints the placeholder" "<name>" "$(fixpiece "" refuse_shell_word '' '<name>')"
+expect_eq "R6 refuse_quote always quotes, and an embedded quote survives a shell's reading" \
+  "it's" "$(eval "printf '%s' $(fixpiece "" refuse_quote "it's")")"
+expect_eq "R7 …and quotes a plain word too" "'w-1'" "$(fixpiece "" refuse_quote w-1)"
+
+section "§INV — every refusal site prints its fix or says why it cannot (wave-24 T13, D10, AC-6.6)"
+# fails-when: a site in the four files has no bullet in the inventory carrying `— fix:` or
+# `— none:`. A SITE is a `fold_block`, `refuse`, `dp_finding`, `budget_deny` or `deny` call at
+# the start of a statement (or after `&&`, `||`, `;` or a case label), and its key is its first
+# source line, trimmed. A key shared by n sites needs n bullets.
+INV_FILE="${BIONIC_REFUSAL_INVENTORY:-$REPO_ROOT/.bionic/docs/record/wave-24-fixit-1811/refusal-inventory.md}"
+inv_sites() {  # <source file> -> each site's first line, trimmed, one per line
+  awk '
+    /^[[:space:]]*#/ { next }
+    match($0, /(^|[[:space:];&|)])(fold_block|refuse|dp_finding|budget_deny|deny)[[:space:]]+(exit2|deny|block|"|\\|\$)/) {
+      t = $0; sub(/^[[:space:]]+/, "", t); sub(/[[:space:]]+$/, "", t); print t
+    }' "$1"
+}
+inv_missing() {  # <inventory> <section label> <source file> -> each site key short of a fix/none bullet
+  # `FILENAME == ARGV[1]`, NEVER `FNR == NR`: an EMPTY inventory leaves NR at zero into the
+  # second file, so `FNR == NR` would read every site as inventory and report nothing missing.
+  awk -v lab="$2" '
+    FILENAME == ARGV[1] {
+      if (index($0, "## ") == 1) { sec = substr($0, 4); next }
+      if (sec == lab && index($0, "- `") == 1 && (index($0, " — fix:") || index($0, " — none:"))) b[++nb] = $0
+      next
+    }
+    { want[$0]++ }
+    END {
+      for (t in want) {
+        c = 0
+        for (i = 1; i <= nb; i++) if (index(b[i], "`" t "`")) c++
+        if (c < want[t]) print t
+      }
+    }' "$1" <(inv_sites "$3")
+}
+require_helpers inv_sites inv_missing
+
+# THE CHECKER CAN FAIL — a synthetic source and inventory, beside the real run. A site with no
+# bullet, a bullet that carries neither marker, and a key shared by two sites with one bullet
+# are each reported; the covered site is not. An EMPTY inventory reports every site.
+INV_SYN="$(mktemp -d)"
+cat > "$INV_SYN/src.sh" <<'SYN'
+# fold_block exit2 x "a comment is no site" "x" \
+  fold_block exit2 x "covered" "fix it" \
+  refuse exit2 x "uncovered" "fix it" "d"
+  dp_finding "unmarked" "fix it" "d"
+  [ -n "$a" ] || deny "twice" "fix it" "d"
+  [ -n "$a" ] || deny "twice" "fix it" "d"
+  echo "would otherwise refuse the next commit"
+SYN
+cat > "$INV_SYN/inv.md" <<'SYN'
+## src.sh
+
+- `fold_block exit2 x "covered" "fix it" \` — covered — fix: `x`
+- `dp_finding "unmarked" "fix it" "d"` — a bullet with no marker
+- `[ -n "$a" ] || deny "twice" "fix it" "d"` — none: one of two
+SYN
+INV_SYN_SITES="$(inv_sites "$INV_SYN/src.sh")"
+expect_eq "INV-c1 the extractor reads five sites, never a comment or prose" "5" \
+  "$(printf '%s\n' "$INV_SYN_SITES" | awk 'NF { c++ } END { print c + 0 }')"
+INV_SYN_MISS="$(inv_missing "$INV_SYN/inv.md" src.sh "$INV_SYN/src.sh")"
+expect_contains "INV-c2 a site with no bullet is reported" 'refuse exit2 x "uncovered"' "$INV_SYN_MISS"
+expect_contains "INV-c3 a bullet with neither marker does not cover its site" 'dp_finding "unmarked"' "$INV_SYN_MISS"
+expect_contains "INV-c4 one bullet does not cover two sites that share its key" '[ -n "$a" ] || deny "twice"' "$INV_SYN_MISS"
+expect_absent "INV-c5 …and the covered site is not reported" '"covered"' "$INV_SYN_MISS"
+: > "$INV_SYN/empty.md"
+expect_eq "INV-c6 an empty inventory reports every key (five sites, four distinct keys)" "4" \
+  "$(inv_missing "$INV_SYN/empty.md" src.sh "$INV_SYN/src.sh" | awk 'NF { c++ } END { print c + 0 }')"
+rm -rf "$INV_SYN"
+
+# THE INVENTORY IS A RECORD FILE, gitignored with the rest of `.bionic/` (A-T13.6). A clone that
+# carries no record has nothing to check this against, and says so as an advisory rather than
+# failing a suite on a file the clone was never given; the checker's own rows above still run.
+if [ -f "$INV_FILE" ]; then
+  for _inv_src in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh \
+                  hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
+    _inv_n="$(inv_sites "$REPO_ROOT/$_inv_src" | awk 'NF { c++ } END { print c + 0 }')"
+    expect_true "INV ${_inv_src}: the extractor finds its refusal sites (${_inv_n})" test "$_inv_n" -gt 0
+    expect_eq "INV ${_inv_src}: every site has a fix line or a reason in the inventory" "" \
+      "$(inv_missing "$INV_FILE" "$_inv_src" "$REPO_ROOT/$_inv_src")"
+  done
+else
+  ok "INV ADVISORY: no refusal inventory in this clone ($INV_FILE) — the four files were not checked"
+fi
+
 finish

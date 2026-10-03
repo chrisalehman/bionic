@@ -1219,7 +1219,7 @@ brief_validate_fields() {
   local lifted="${1-}" role="${2-}" root="${3-}" sink="${4-}"
   local files suites re_executes runs_bad suites_bad suites_dropped runs_dropped suites_commented
   local cap capw detail suites_comment impact_cmd found=0
-  local _impact_out _impact_tmp _impact_pid _impact_overran _old_ifs
+  local _impact_out _impact_tmp _impact_pid _impact_overran _impact_rc _old_ifs
   files=$(brief_field "$lifted" files)
   suites=$(brief_field "$lifted" suites)
   re_executes=$(brief_field "$lifted" re_executes)
@@ -1523,7 +1523,7 @@ Then retry the dispatch."
     # shellcheck disable=SC2086
     set -- $files
     set +f; IFS="$_old_ifs"
-    _impact_out=""
+    _impact_out=""; _impact_rc=0
     if [ "$#" -gt 0 ]; then
       # A BOUND THE HOOK BUILDS ITSELF (review-c C-16). The derivation is the whole of the
       # gate's cost: ~0.3 s without it, ~2.9-3.1 s with it on an idle tree, and 5.06-6.51 s
@@ -1611,6 +1611,7 @@ Then retry the dispatch."
         sleep 0.1
       done
       wait "$_impact_pid" 2>/dev/null
+      _impact_rc=$?
       if [ "$_impact_overran" -eq 1 ]; then
         rm -f "$_impact_tmp"
         detail="The command named by \`impact-command:\` in .bionic/config.yaml turns the paths this
@@ -1627,7 +1628,11 @@ strictly under that registration.
 Fix: narrow \`Files:\` to the paths this task really writes, or name the closed set
 directly with \`Suites:\` — a declared set needs no derivation at all. If the command
 itself has become slow, that is the thing to fix: it runs on every dispatch."
-        found=1; "$sink" finding "the impact command did not answer" "fix impact-command in config.yaml" "$detail"
+        # A TIMEOUT IS NOT A BROKEN COMMAND (wave-24 T13, D10, AC-6.7). The bound expired, so
+        # the fact says that and for how long, and the fix is the brief's: a narrower `Files:` or
+        # a declared `Suites:` needs less derivation or none. A command that FAILED is the warn
+        # below, which names its exit status; the two never share a sentence.
+        found=1; "$sink" finding "the impact command timed out after ${IMPACT_BOUND_S} s" "declare Suites:, narrow Files:" "$detail"
         # NOTHING DERIVED MEANS NOTHING TO JUDGE AGAINST (AC-8.2). The walls that read the suite
         # set (the dispatch wall's one-regression and floor-once arms) are the caller's, so the
         # caller is told the set was never built — rc 2 — and says `not checked` for them itself.
@@ -1643,7 +1648,11 @@ itself has become slow, that is the thing to fix: it runs on every dispatch."
     BRIEF_SUITES_ALLOWED="${BRIEF_SUITES_ALLOWED% }"
     BRIEF_SUITES_SOURCE="derived"
     if [ -z "$BRIEF_SUITES_ALLOWED" ]; then
-      "$sink" warn "the impact command derived no suites from the declared files; the row records an empty budget: $impact_cmd"
+      if [ "${_impact_rc:-0}" -ne 0 ]; then
+        "$sink" warn "the impact command failed (exit ${_impact_rc}) and derived no suites from the declared files; the row records an empty budget: $impact_cmd"
+      else
+        "$sink" warn "the impact command derived no suites from the declared files; the row records an empty budget: $impact_cmd"
+      fi
     fi
   else
     # `Files:` alone in a repository with no impact command states an intent nothing can turn
