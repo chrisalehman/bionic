@@ -1556,6 +1556,20 @@ expect_eq "12a: AC-4.8 — a landed deliverable with no completion signal is not
 expect_contains "12a2: …and the detail names the missing signal" "unsaid=" "$OUT"
 expect_contains "12a3: …beside the deliverable that did land" "delivered=$S12_DEL" "$OUT"
 expect_eq "12a4: …an UNMET row exits 1" "1" "$RC"
+# The closing line names the cause the detail names (wave-24 T26, walk-head-b surprise 5): the
+# artifact landed and only the signal is missing, so "not on disk" would send a reader to the
+# wrong fix. A row whose artifact really is absent keeps the not-on-disk line.
+# fails-when: an unsaid row's summary says the artifacts are not on disk.
+expect_contains "12a5: …its closing line names the missing completion signal and how to give one" \
+  "the artifacts landed, but no message, completed task-notification or Done marker followed the launch" "$OUT"
+expect_contains "12a6: …and says how the agent gives one" "SendMessage" "$OUT"
+expect_absent "12a7: …and does not say the artifacts are missing" "not on disk as the brief declared" "$OUT"
+s12_row "$R12" name=d-missing agent_id=a-missing "deliverable=$R12/never-written.md" tool_use_id=toolu_missing
+f9_state "$R12" d-missing
+expect_eq "12a8: a row whose deliverable never landed is UNMET" "UNMET" "$F9_STATE"
+expect_contains "12a9: …and its closing line still says the artifacts are not on disk" \
+  "the named artifacts are not on disk as the brief declared them." "$OUT"
+expect_absent "12a10: …not that only the completion signal is missing" "the artifacts landed, but" "$OUT"
 
 s12_msg "$S12_TR" d-said 30
 f9_state "$R12" d-said
