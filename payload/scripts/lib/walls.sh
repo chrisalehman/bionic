@@ -6109,3 +6109,41 @@ fi
 
 return 0
 }
+
+# ─── wall_memory_store — an engaged session never writes the auto-memory store ─
+#
+# (wave-24-fixit-1811 T12; REQ-3, D16.) The CLI's standing memory directive outranks nothing
+# in a plan, and an engaged orchestrator once obeyed it mid-run: `cd <store> && cat >>
+# <topic>.md <<'EOF' … EOF` then `sed -i` on MEMORY.md, one Bash call, the store's path only
+# in the `cd` (wave-23 A-orch-30). What a run learns belongs where the run can see it — the
+# plan, the reviewer and the next session's walls all read `record/<wave>/assumptions.md`,
+# and none of them reads the store.
+#
+# A PREDICATE OVER TWO FACTS IT IS HANDED (the freeze, .claude/rules/hook-authoring.md).
+# hooks/bash-walls.sh, the collector, resolves both before the fold:
+#   BIONIC_MEM_PROJECTS    `${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/projects`
+#   BIONIC_WRITE_TARGETS   the command's write targets, one per line (cmd-class.sh
+#                          `cmd_write_targets`): resolved, `~`/`$HOME` expanded, `.`/`..` folded
+# Either one empty is "nothing to judge". The store is any `<projects>/*/memory` directory and
+# everything under it; a READ of it never reaches this wall, because a read has no target.
+#
+# ENGAGED SESSIONS ONLY, by where it is called: bash-walls.sh exits before the fold for a
+# session that never invoked the skill. The Write/Edit half is in
+# hooks/canonical-sdlc-governing-skill.sh, on `tool_input.file_path`, with the same words.
+wall_memory_store() {  # <event> -> 0 nothing · 2 block
+  local _mp="${BIONIC_MEM_PROJECTS:-}" _t _hit=""
+  [ -n "$_mp" ] && [ -n "${BIONIC_WRITE_TARGETS:-}" ] || return 0
+  while IFS= read -r _t; do
+    case "$_t" in
+      "$_mp"/*/memory|"$_mp"/*/memory/*) _hit="$_t"; break ;;
+    esac
+  done <<< "$BIONIC_WRITE_TARGETS"
+  [ -n "$_hit" ] || return 0
+  fold_block exit2 write "this writes the memory store" "use record/<wave>/assumptions.md" \
+    "This command writes $_hit, inside the auto-memory store ($_mp/*/memory). An engaged run
+keeps what it learns where the run can see it: a judgment call goes in
+record/<wave>/assumptions.md, and a correction that should outlive the run goes to the user
+as a rule proposal (record/<wave>/user-rules-proposed.md), for the rules file that owns it.
+Nothing that gates or reviews this run reads the store. Reading it stays open."
+  return 2
+}

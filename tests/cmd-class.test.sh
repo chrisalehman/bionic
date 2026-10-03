@@ -1393,4 +1393,107 @@ expect_eq "§VAR a loop over scripts that are not suites is not a suite run" "no
   "$(class_of 'for f in a.sh b.sh; do bash $f; done')"
 targets_are '' 'for f in a.sh b.sh; do bash $f; done'
 
+
+section "§WT — REQ-3 (D16): cmd_write_targets names the paths a command writes"
+# THE MEMORY WALL READS THIS (walls.sh `wall_memory_store`, hooks/bash-walls.sh collects). The
+# store has to be told apart from its READERS: a wave's own readback names the store and
+# redirects (`{ find <store> -newer m; } > record/x.txt`), so "the text mentions the store"
+# refuses the audit. What a command WRITES is a property of argv positions and redirect
+# targets, read with the same segmentation this file uses for everything else.
+#
+# HOME IS PINNED to /h for every row, so `~` and `$HOME` expand to a known prefix. The
+# optional second argument is the payload cwd that a relative target with no `cd` before it
+# resolves against.
+wt_of() {  # <command> [<cwd>] [env assignments…] -> the library's write targets, one per line
+  local _c="$1" _d="${2-}"; shift; [ $# -gt 0 ] && shift
+  printf '%s' "$_c" | env HOME=/h BIONIC_CLAUDE_HOME= CLAUDE_CONFIG_DIR= "$@" bash -c '
+    set -uo pipefail
+    . "$1" || { echo "SOURCE-FAILED"; exit 1; }
+    cmd_write_targets "$(cat)" "$2"' _ "$LIB" "$_d"
+}
+wt_are() {  # <expected, newline-joined> <command> [<cwd>] [env…]
+  expect_eq "write targets [$(printf '%q' "$2")]" "$1" "$(wt_of "$2" "${3-}" "${@:4}")"
+}
+
+# --- redirects: every operator that opens a file for writing ---
+wt_are '/a/b.md' 'echo hi > /a/b.md'
+wt_are '/a/b.md' 'echo hi >> /a/b.md'
+wt_are '/a/c' 'echo hi >| /a/c'
+wt_are '/a/d' 'cmd &> /a/d'
+wt_are '/a/e' 'cmd 2>/a/e'
+wt_are '/a/f' '2>/a/f cmd'
+wt_are '/a/g' 'echo hi >/a/g'
+wt_are '/a/h b' 'echo hi > "/a/h b"'
+# A DUPLICATION IS NOT A FILE, and neither is an input redirect or a here-string.
+wt_are '/a/i' 'cmd > /a/i 2>&1'
+wt_are '' 'cmd 2>&1 >&2 <in.txt'
+wt_are '' 'grep x <<< "$v"'
+# A HEREDOC BODY IS TEXT, NEVER A COMMAND: its `>` writes nothing. The command that opened it
+# still writes its own redirect target.
+wt_are '/a/c.md' "$(printf 'cat > /a/c.md <<%sEOF%s\nbody > /x/y\ntouch /x/z\nEOF' "'" "'")"
+# QUOTED TEXT IS AN ARGUMENT, so a `>` inside quotes is prose.
+wt_are '' "echo '> /a/no'"
+wt_are '' 'git commit -m "x > /a/no"'
+
+# --- argv writers ---
+wt_are '/a/t1
+/a/t2' 'printf x | tee -a /a/t1 /a/t2'
+wt_are '/a/f.md' "sed -i '' 's/a/b/' /a/f.md"
+wt_are '/a/f.md' "sed -i 's/a/b/' /a/f.md"
+wt_are '/a/f.md
+/a/g.md' "sed -i.bak -e 's/a/b/' /a/f.md /a/g.md"
+wt_are '/a/f.md' "sed --in-place -E 's/a/b/' /a/f.md"
+# NEGATIVE beside the positives above on the same extractor: sed without -i writes stdout.
+wt_are '' "sed 's/a/b/' /a/f.md"
+wt_are '/b/dest' 'cp /a/src /b/dest'
+wt_are '/d' 'mv x y z /d/'
+wt_are '/d' 'cp -t /d a b'
+wt_are '/d' 'mv --target-directory=/d a'
+wt_are '/a/x
+/a/y' 'touch /a/x /a/y'
+wt_are '/a/x' 'touch -r /a/ref /a/x'
+wt_are '/a/m' 'mkdir -p /a/m'
+wt_are '/a/n' 'mkdir -m 700 /a/n'
+wt_are '/a/link' 'ln -s /src /a/link'
+# READERS WRITE NOTHING — the AC-3.3 set, each beside the writers above.
+wt_are '' 'cat /a/b'
+wt_are '' 'ls -la /a'
+wt_are '' 'find /s -newer m -type f'
+wt_are '' 'rm -f /s/f'
+wt_are '' 'tar -cf - /s'
+wt_are '/r/x.txt' '{ find /s -newer m; } > /r/x.txt'
+
+# --- one level of `sh -c` / `eval`, and command-taking prefixes ---
+wt_are '/a/q' "bash -c 'echo hi > /a/q'"
+wt_are '/a/s' 'sudo tee /a/s'
+wt_are '/a/v' 'X=1 env Y=2 touch /a/v'
+
+# --- `~`, `$HOME`, `${HOME}` and the store-root variables expand ---
+wt_are '/h/.claude/projects/p/memory/a' 'touch ~/.claude/projects/p/memory/a'
+wt_are '/h/x' 'echo > "$HOME/x"'
+wt_are '/h/y' 'echo > ${HOME}/y'
+wt_are '/h' 'mkdir ~'
+wt_are '/c/projects/p/memory/f' 'echo > $CLAUDE_CONFIG_DIR/projects/p/memory/f' '' CLAUDE_CONFIG_DIR=/c
+wt_are '/b/projects/p/memory/f' 'echo > "${BIONIC_CLAUDE_HOME}/projects/p/memory/f"' '' BIONIC_CLAUDE_HOME=/b
+# An unset store variable stays a literal: nothing here invents a value.
+wt_are '$CLAUDE_CONFIG_DIR/f' 'echo > $CLAUDE_CONFIG_DIR/f'
+
+# --- relative targets resolve against a preceding cd, then against the payload cwd ---
+# THE WAVE-23 SHAPE (A-orch-30): the store's path appears only in the `cd`, the heredoc body
+# is prose, and the writes that follow name bare basenames.
+wt_are '/s/x.md
+/s/MEMORY.md' "$(printf 'cd /s && cat >> x.md <<%sEOF%s\n- line > not a target\nEOF\nsed -i %s%s %ss|a|b|%s MEMORY.md' "'" "'" "'" "'" "'" "'")"
+wt_are '/h/.claude/projects/p/memory/a.md' 'cd ~/.claude/projects/p/memory && touch a.md'
+wt_are '/s/sub/f' 'cd /s; cd sub && echo > f'
+wt_are '/t/f' 'cd /s && echo > ../t/f'
+wt_are '/w/out.txt' 'echo > out.txt' /w
+wt_are 'out.txt' 'echo > out.txt'
+wt_are '/w/x' 'echo > ./x' /w
+# A cd INSIDE A SUBSHELL ends with it.
+wt_are '/w/out.txt' '(cd /s && ls) && echo > out.txt' /w
+wt_are '/s/in.txt' '(cd /s && echo > in.txt)' /w
+# `cd` alone is home; `cd -` is a directory the text cannot name, so the payload cwd stands.
+wt_are '/h/f' 'cd && touch f' /w
+wt_are '/w/f' 'cd /s && cd - && touch f' /w
+
 finish
