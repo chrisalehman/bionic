@@ -710,7 +710,11 @@ gate_dry_run() {
   marker="$(engaged_marker_path "$ROOT" "$sid")" \
     || _co_refuse "could not build an engagement marker path for the dry-run"
   mkdir -p "${marker%/*}" 2>/dev/null
-  : > "$marker"
+  # BOUND TO THE PLAN UNDER CHECK (wave-23-fixit-1810 T12). An empty marker is the unbound
+  # state, whose commit-gate verdict is an announcement and exit 0, so the dry-run would
+  # attest nothing. The two-line shape binding.sh's bind_plan writes, with the plan stored
+  # directly: bind_plan itself refuses a plan that is no longer an open run.
+  printf 'plan=%s\nengaged_at=%s\n' "$PLAN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
 
   input="$(jq -n --arg s "$sid" --arg cwd "$ROOT" \
     '{session_id: $s,
@@ -861,7 +865,11 @@ do_check() {
   sid="closeout-check-$$"
   marker="$(engaged_marker_path "$ROOT" "$sid")" || { say "gate: skipped — no marker path"; return 0; }
   mkdir -p "${marker%/*}" 2>/dev/null
-  : > "$marker"
+  # BOUND TO THE PLAN UNDER CHECK (wave-23-fixit-1810 T12). An empty marker is the unbound
+  # state, whose commit-gate verdict is an announcement and exit 0, so the dry-run would
+  # attest nothing. The two-line shape binding.sh's bind_plan writes, with the plan stored
+  # directly: bind_plan itself refuses a plan that is no longer an open run.
+  printf 'plan=%s\nengaged_at=%s\n' "$PLAN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
   input="$(jq -n --arg s "$sid" --arg cwd "$ROOT" \
     '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
       tool_input: {command: "git commit -m close-out"}, tool_use_id: "toolu_closeout"}')"
