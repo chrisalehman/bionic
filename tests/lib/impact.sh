@@ -169,8 +169,13 @@ _norm() {
 # ── the symlink alias map, read from the tree ────────────────────────────────
 # One `link<TAB>target` line per symlink under the checkout. Both sides are
 # repo-relative and normalised, so applying the map is a prefix substitution.
-find "$ROOT" -type l \
-  -not -path "$ROOT/.git/*" -not -path "$ROOT/.worktrees/*" 2>/dev/null \
+# PRUNED, NOT FILTERED. `-not -path` drops results but still descends; `-prune`
+# does not enter the directory. `.bionic` is pruned here too: it is gitignored
+# machine-local state, and a sandbox record's symlinks (hundreds at the main
+# checkout) are not root aliases — each one is another pass of _dealias for every
+# edge, which was the bulk of a >190 s call (wave-24 T19, tests/impact.test.sh §NEST).
+find "$ROOT" \( -path "$ROOT/.git" -o -path "$ROOT/.worktrees" -o -path "$ROOT/.bionic" \) \
+  -prune -o -type l -print 2>/dev/null \
 | while IFS= read -r lnk; do
     rel="${lnk#$ROOT/}"
     tgt="$(readlink "$lnk")" || continue
@@ -453,8 +458,8 @@ _impact_answer() {
 # empty string to turn it off. Writes are `mktemp` + `mv` within the cache
 # directory, so a reader never sees a half-written graph and two writers racing
 # at one key both leave a whole one.
-LIBDIRS="$(find "$ROOT" -type d -name lib \
-  -not -path "$ROOT/.git/*" -not -path "$ROOT/.worktrees/*" 2>/dev/null \
+LIBDIRS="$(find "$ROOT" \( -path "$ROOT/.git" -o -path "$ROOT/.worktrees" \) \
+  -prune -o -type d -name lib -print 2>/dev/null \
   | sed "s|^$ROOT/||" | sort -u | tr '\n' ' ')"
 
 # HOOKS ARE OWNERS TOO. A suite that runs `hooks/session-start.sh` reads every
@@ -485,10 +490,8 @@ if [ -n "$CACHE_DIR" ] && [ -n "$HASH_CMD" ]; then
   CACHE_KEY="$( {
       printf 'impact-graph/v1\n'
       printf 'head\t%s\n' "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)"
-      find "$ROOT" \
-        -not -path "$ROOT/.git" -not -path "$ROOT/.git/*" \
-        -not -path "$ROOT/.worktrees" -not -path "$ROOT/.worktrees/*" \
-        -not -path "$ROOT/.bionic" -not -path "$ROOT/.bionic/*" 2>/dev/null \
+      find "$ROOT" \( -path "$ROOT/.git" -o -path "$ROOT/.worktrees" -o -path "$ROOT/.bionic" \) \
+        -prune -o -print 2>/dev/null \
         | sed "s|^$ROOT/||" | sort
       cat "$WORK/aliases"
       printf '%s\n' $EXTRACT_FILES | sed "s|^$ROOT/||"
