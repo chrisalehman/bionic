@@ -7343,7 +7343,7 @@ expect_contains "41a2 …the fill answer is asked only when a FILL line printed"
 expect_contains "41a3 …the stand-down answer only when a STANDDOWN line printed" \
   'only if a "poker: STANDDOWN" line printed' "$S41_PROMPT"
 expect_contains "41a4 …and the fill answer is still named" 'fill-declined: <reason>' "$S41_PROMPT"
-expect_contains "41a5 AC-4.12 …the stand-down answer names hold" "session-poker.sh hold <name> <reason>" "$S41_PROMPT"
+expect_contains "41a5 AC-4.12 …the stand-down answer names hold, its reason a quoted placeholder" "session-poker.sh hold NAME 'why it stays up'" "$S41_PROMPT"
 expect_contains "41a6 AC-4.13 …ListAgents only when the roster has an open row" \
   "ListAgents only when the roster has an open row" "$S41_PROMPT"
 expect_regex "41a7 AC-4.11 …and it carries its version after the session token" \
@@ -7383,6 +7383,26 @@ s41_stop "$R41B" "$(s41_turn "$R41B" "$S41B_OUT")"
 expect_contains "41b5 the CONTROL: the real stop wall refuses an unanswered stand-down on this drive" \
   "stand-down unanswered" "$(printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null)"
 
+# ---------- §HOLD-fix (wave-24 T27; critic I4): one pasteable hold line at all three sites ----------
+# The tick's STANDDOWN line, the stop wall's stand-down refusal and the Patrol prompt each print
+# the hold command. A bare `<reason>` pasted as printed is a redirect from a file named `reason`;
+# each site now prints the reason as the one quoted placeholder. The tick's and the wall's lines
+# carry the real name and parse, as a pasting shell parses them, into exactly five arguments.
+s41_hold_argv() {  # <text> -> the first `bash …session-poker.sh hold …` command in it, as argc|name|reason
+  local l
+  l="$(printf '%s\n' "$1" | /usr/bin/grep -o "bash [^ ]*session-poker.sh hold [A-Za-z0-9_.-]* 'why it stays up'" | head -1)"
+  [ -n "$l" ] || return 0
+  eval "set -- $l"
+  printf '%s|%s|%s' "$#" "$4" "$5"
+}
+S41B_WALL="$(printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null)"
+expect_eq "41b6 critic I4 the tick's STANDDOWN line pastes as one hold of w-1 with a quoted reason" \
+  "5|w-1|why it stays up" "$(s41_hold_argv "$S41B_OUT")"
+expect_eq "41b7 …and the stop wall's refusal prints the same command for the same row" \
+  "5|w-1|why it stays up" "$(s41_hold_argv "$S41B_WALL")"
+expect_contains "41b8 …and the Patrol prompt carries the same reason placeholder" \
+  "hold NAME 'why it stays up'" "$S41_PROMPT"
+
 # ---------- §HOLD (AC-4.3; D1): a hold stands, prints once, and the turn ends ----------
 R41H="$(s41_world s41-hold)"
 s41_transcript 1 "w-1:idle"
@@ -7411,6 +7431,15 @@ expect_absent "41c8 the copy a successor row takes drops held=" "held=" \
 expect_contains "41c9 …while the row it copied from carried it" "held=" "$S41H_ROW"
 poke "$R41H" hold w-nobody "x"
 expect_eq "41c10 hold refuses a name with no row (exit 1)" "1" "$RC"
+# A REASON THAT IS ONLY BLANKS IS NO REASON (wave-24 T27; Step-6 review C3): the tick would
+# print a hold with nothing after its dash. The usage error, and no row is written.
+S41H_ROWS="$(grep -c '|name=w-1|' "$(roster_of "$R41H")")"
+poke "$R41H" hold w-1 "   "
+expect_eq "41c11 C3 hold with a blank reason is the usage error (exit 2)" "2" "$RC"
+poke "$R41H" hold w-1 "
+"
+expect_eq "41c12 C3 …and so is one of tabs and line breaks" "2" "$RC"
+expect_eq "41c13 …and neither wrote a row" "$S41H_ROWS" "$(grep -c '|name=w-1|' "$(roster_of "$R41H")")"
 
 # ---------- §HOLD-fp (AC-4.4; D1): each fingerprint component voids the hold ----------
 s41_fp_case() {  # <label> <change command, eval'd with R set> 
@@ -7488,6 +7517,54 @@ poke_pressure "$R41X" 100 1.0 tick
 expect_contains "41h2 the second EMERGENCY tick over the same facts still prints in full" "poker: EMERGENCY" "$OUT"
 expect_absent "41h3 …never as unchanged" "unchanged since" "$OUT"
 unset CLAUDE_CONFIG_DIR
+
+# ---------- §SD-tick (AC-4.7; D2): the tick prints the standing fill decline ----------
+#
+# THE DEFECT (wave-24 Step-6 review C2). The stop wall read the session's latest declined fill-
+# ledger line as the standing answer for the ready rows it saw, and the tick read nothing: it
+# still printed `FILL ONE` and `decision=FILL` for a row the wall treated as answered, so the
+# prompt asked for the answer again. The tick now asks the same reader the wall asks
+# (`fill_standing_decline`, lib/fill.sh), prints `fill-declined standing since <at> — <reason>`,
+# and names no standing row in its FILL. The ledger line is the recorder's shape
+# (stop.sh `stop_fill_ledger`); the plan is mk_rung_repo's, at `current: 4` with four ready rows.
+s41_sd_line() {  # <repo> <session> <current> <ready> <declined>
+  local d="$1/.bionic/docs/record/wave-01-fixture"
+  mkdir -p "$d"
+  printf 'fill-ledger/v1|at=2026-10-03T09:00:00Z|session=%s|turn=u-1|current=%s|state=ok|ceiling=8|width=8|open=0|free=8|ready=%s|launched=|declined=%s|missed=4\n' \
+    "$2" "$3" "$4" "$5" >> "$d/fill-ledger.log"
+}
+s41_fill_line() { printf '%s\n' "$1" | /usr/bin/grep '^poker: FILL ' | head -1; }
+R41S="$(mk_rung_repo s41-sd-some)"
+s41_sd_line "$R41S" "$SID" 4 ONE,TWO "ONE and TWO wait on the BASE merge"
+poke_rung "$R41S" 60 0 tick
+expect_contains "41i C2 AC-4.7 the tick prints the standing decline, its instant and its reason" \
+  "poker: fill-declined standing since 2026-10-03T09:00:00Z — ONE and TWO wait on the BASE merge" "$OUT"
+expect_eq "41i2 …and fills only the rows it did not answer" "poker: FILL THREE FOUR" "$(s41_fill_line "$OUT")"
+R41A="$(mk_rung_repo s41-sd-all)"
+s41_sd_line "$R41A" "$SID" 4 ONE,TWO,THREE,FOUR "the batch waits on the BASE merge"
+poke_rung "$R41A" 60 0 tick
+expect_contains "41i3 a decline that answered every ready row prints as standing" \
+  "poker: fill-declined standing since 2026-10-03T09:00:00Z — the batch waits on the BASE merge" "$OUT"
+expect_eq "41i4 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
+expect_absent "41i5 …nor decision=FILL" "decision=FILL" "$OUT"
+# The three ways a line stands for nothing, each beside the full FILL it then leaves standing.
+R41M="$(mk_rung_repo s41-sd-moved)"
+s41_sd_line "$R41M" "$SID" 3 ONE,TWO,THREE,FOUR "answered at an earlier step"
+poke_rung "$R41M" 60 0 tick
+expect_eq "41i6 a decline taken at another current: does not stand — the full FILL prints" \
+  "poker: FILL ONE TWO THREE FOUR" "$(s41_fill_line "$OUT")"
+expect_absent "41i7 …and no standing line" "fill-declined standing" "$OUT"
+R41O="$(mk_rung_repo s41-sd-other)"
+s41_sd_line "$R41O" "ffffffff-0000-4000-8000-000000000000" 4 ONE,TWO,THREE,FOUR "another session's answer"
+poke_rung "$R41O" 60 0 tick
+expect_eq "41i8 another session's decline does not stand here" \
+  "poker: FILL ONE TWO THREE FOUR" "$(s41_fill_line "$OUT")"
+R41D2="$(mk_rung_repo s41-sd-dash)"
+s41_sd_line "$R41D2" "$SID" 4 ONE,TWO,THREE,FOUR "—"
+poke_rung "$R41D2" 60 0 tick
+expect_eq "41i9 C4 a decline that is only a dash does not stand" \
+  "poker: FILL ONE TWO THREE FOUR" "$(s41_fill_line "$OUT")"
+expect_absent "41i10 …and no standing line" "fill-declined standing" "$OUT"
 
 # ============================================================
 section "Section 42: plan-row verbs — task-set, step-line, current, ledger-add, ledger-set (wave-24 T15; REQ-9 AC-9.1–9.3, 9.5, 9.6; D14)"
@@ -7570,6 +7647,26 @@ poke "$R42" ledger-set T1 colour=red
 s42_unchanged "42d14 §VERB-bad ledger-set of a column the ledger does not carry" 1 "$P42"
 poke "$R42" ledger-set T1 'notes=a|b'
 s42_unchanged "42d15 §VERB-bad a pipe in a ledger value" 1 "$P42"
+# THE ID IS AN OPERAND TOO (wave-24 T27; Step-6 review C1). `ledger-add` wrote its id into the
+# new row unchecked: a line break in it forged a plan line past the commit gate, and a pipe a
+# cell. Every row verb now judges the id by one grammar before any projection.
+poke "$R42" ledger-add "T8
+- Step 9: forged" agent=y
+s42_unchanged "42d15b §VERB-bad C1 ledger-add of an id carrying a line break" 1 "$P42"
+expect_contains "42d15c …naming the id grammar" "is not one row id" "$OUT"
+poke "$R42" ledger-add 'T9|x' agent=y
+s42_unchanged "42d15d §VERB-bad C1 ledger-add of an id carrying a pipe" 1 "$P42"
+poke "$R42" ledger-add 'T9 x' agent=y
+s42_unchanged "42d15e §VERB-bad C1 ledger-add of an id of two words" 1 "$P42"
+poke "$R42" ledger-set 'T1|x' notes=y
+s42_unchanged "42d15f §VERB-bad C1 ledger-set of an id carrying a pipe" 1 "$P42"
+poke "$R42" task-set "T5
+x" size=45
+s42_unchanged "42d15g §VERB-bad C1 task-set of an id carrying a line break" 1 "$P42"
+poke "$R42" ledger-set T1 "notes
+- Step 9: forged=y"
+s42_unchanged "42d15h §VERB-bad C1 a column name carrying a line break" 1 "$P42"
+expect_contains "42d15i …naming the column, not the value" "the column name" "$OUT"
 
 # THE DRY COMMIT IS REAL: a valid cell on a plan the gate refuses — its Step-4 block has lost
 # its base-sha, which no table check reads (§34e's fixture) — is refused in the gate's words.
@@ -7688,6 +7785,11 @@ expect_eq "42g13 §VERB-line ledger-set exits 0" "0" "$RC"
 expect_eq "42g14 AC-9.6 …one row replaced" "1 1;" "$(s42_numstat "$R42")"
 expect_eq "42g15 …the one cell set" "1" \
   "$(grep -cxF -- '| T2 | implementor (w-T2) | 2026-10-03T01:00Z | 30 min | — | landed 2026-10-03T02:00Z (merge abc1234) | — |' "$P42")"
+# THE ID GRAMMAR ADMITS THE LEDGER'S OWN SHAPES (T27, C1's positive): a suffixed id is one token.
+s42_snap "$R42" "$P42"
+poke "$R42" ledger-add T2-critic agent=critic
+expect_eq "42g15b §VERB-line ledger-add of a suffixed id (T2-critic) exits 0" "0" "$RC"
+expect_eq "42g15c …one row added" "1 0;" "$(s42_numstat "$R42")"
 s34_gate "$R42"
 expect_eq "42g16 …and after all five verbs the next commit is admitted" "0" "$GATE_RC"
 
