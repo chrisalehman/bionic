@@ -92,8 +92,8 @@ rows_line() {  # <label> -> the keys, comma-joined, or "(none)"
 
 # CAPTURE, THEN MATCH — never `registry_rows … | grep -q`. A producer piped into
 # a `grep -q` that exits on its first hit takes SIGPIPE, and under `pipefail` that
-# surfaces as rc 141 on a run that was in fact fine (memory: grep -q SIGPIPE under
-# pipefail). The lists here are three lines long, so the cost of holding them in a
+# surfaces as rc 141 on a run that was in fact fine (the reason is stated here; no rule
+# file carries it). The lists here are three lines long, so the cost of holding them in a
 # variable is nothing and the failure mode is gone.
 missing_dependents() {  # <before-label> <after-label> -> rows present before, absent after
   local before="$1" after="$2" d rb ra
@@ -414,8 +414,8 @@ esac
 
 # EVERY SNAPSHOT, IN FULL, INTO THE RUN'S OWN OUTPUT. The scratch HOME is deleted
 # when this script ends, so a snapshot that lived only there would be an evidence
-# artifact with the lifetime of a temp directory (memory: evidence artifacts are
-# not ephemera). Printed here, they land in whatever log the run was redirected
+# artifact with the lifetime of a temp directory (an evidence artifact
+# must outlive the run). Printed here, they land in whatever log the run was redirected
 # to, and the record quotes them from it.
 banner "SNAPSHOTS, verbatim"
 for f in "$FH_SNAPDIR"/*.json; do
