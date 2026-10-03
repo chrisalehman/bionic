@@ -167,6 +167,9 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 #   sweeper      hooks/session-sweeper.sh      the ack ledger
 #   patrol       hooks/session-poker.sh        the Patrol stamp, plus its `.armed` sibling
 #   stop-orders  hooks/stop-orders.sh          the per-session order queue (AC-6.2, wave-13)
+#   tick-digest  hooks/session-poker.sh        the tick's digest, duty and armed prompt version
+#                                              (wave-24 T7) — kept off the `patrol-` prefix,
+#                                              whose `patrol-*.state` glob reads stamps
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE UNREACHABLE THROUGH THESE FUNCTIONS,
 # and that is a property of the shape rather than a list anyone maintains:
@@ -174,7 +177,7 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 # so no id derived here can address one. A non-session file added later is safe on
 # arrival for the same reason. (`stop-check.state` was a third of these until
 # epic-23 wave-15 deleted the observation record itself — ADR-028.)
-PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders"
+PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest"
 PATROL_STATE_ARMED_SUFFIX=".armed"
 
 # EVERY SESSION ID WITH STATE HERE, each once, in class-then-name order. Symlinks

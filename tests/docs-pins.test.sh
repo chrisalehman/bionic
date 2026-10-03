@@ -911,7 +911,7 @@ section "Section 6: Step 8's tmp wipe spares session-keyed state"
 # THE FIELD NAME `tmp-wiped:` IS DELIBERATELY UNTOUCHED (§Evidence, step 8 row). It is an
 # evidence key the gate parses, not prose; renaming it would be an interface change and is
 # not what the finding asked for.
-PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the six \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
+PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the seven \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`/\`tick-digest\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
 PIN_TMP_BLANKET='wipe `.bionic/tmp/*`;'
 
 if has_pin "$STEP8_MD" "$PIN_TMP_SPARE"; then
@@ -4163,5 +4163,35 @@ while IFS=$'\t' read -r _d2_file _d2_phrase; do
   fi
 done < "$D2_ROWS_FILE"
 expect_true "D2-count: 34 landed rows plus the card-format rule were read (35)" test "$d2_i" -eq 35
+
+section "Section HOLD: wave-24 T7 — the stand-down's standing answer is named where the duty is (REQ-4, AC-4.12; D1, D5)"
+#
+# `hold` that only the usage text knew would be a verb nobody runs: the duty is met where it is
+# read — the dispatch doctrine (source and render) and the Patrol prompt the cron job carries.
+# The stand-down refusal's own text is the stop wall's (payload/scripts/lib/stop.sh), pinned with
+# that file's owner.
+PIN_HOLD_VERB='session-poker.sh hold <name> <reason>'
+PIN_HOLD_LIST='`ListAgents` only when the roster has an open row'
+HOLD_BLOCK="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
+for _hold_f in "$DISPATCH_MD" "$HOLD_BLOCK"; do
+  if has_pin "$_hold_f" "$PIN_HOLD_VERB"; then
+    ok "HOLD-a: ${_hold_f#"$REPO"/} names the hold verb beside the stand-down duty"
+  else
+    no "HOLD-a: ${_hold_f#"$REPO"/} names the hold verb beside the stand-down duty" "file: $_hold_f"
+  fi
+  if has_pin "$_hold_f" "$PIN_HOLD_LIST"; then
+    ok "HOLD-b: ${_hold_f#"$REPO"/} asks for ListAgents only with an open row"
+  else
+    no "HOLD-b: ${_hold_f#"$REPO"/} asks for ListAgents only with an open row" "file: $_hold_f"
+  fi
+done
+HOLD_PROMPT="$(CLAUDE_CODE_SESSION_ID=0123456789abcdef bash "$POKER_SH" prompt 2>/dev/null)"
+expect_nonempty "HOLD-c precondition: the poker printed its Patrol prompt" "$HOLD_PROMPT"
+expect_contains "HOLD-c: the Patrol prompt names the hold verb" "$PIN_HOLD_VERB" "$HOLD_PROMPT"
+# The retired ask must be gone from the doctrine too: "ListAgents, before the tick" every tick.
+expect_eq "HOLD-d: the unconditional 'before the tick' ListAgents line is gone from dispatch.md" "0" \
+  "$(grep -c 'ListAgents`, before the tick, for a fresh answer' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+expect_eq "HOLD-d2: …and the pattern finds the shape it targets" "1" \
+  "$(printf -- '- **List the panel.** `ListAgents`, before the tick, for a fresh answer.\n' | grep -c 'ListAgents`, before the tick, for a fresh answer' | tr -cd '0-9')"
 
 finish

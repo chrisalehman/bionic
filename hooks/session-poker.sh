@@ -333,6 +333,16 @@ PATROL_STAMP_SUFFIX=".state"
 PATROL_ARMED_SCHEMA="patrol-armed/v1"
 PATROL_ARMED_SUFFIX=".armed"
 
+# THE TICK DIGEST AND THE PROMPT VERSION (wave-24 T7, REQ-4; D4, D5; ADR-041). The digest file
+# holds what one tick carries to the next: a hash of what the tick decided (no timestamp enters
+# it), when that answer was first given, the decision band, whether the turn owes the task-list
+# duty (`duty=owed|none`, read by the stop wall's collector), and the Patrol prompt version
+# `arm` recorded. A tick whose hash matches the file's prints one line. The prompt version is
+# bumped whenever the prompt's wording changes what a tick turn is asked to do, so a Patrol armed
+# under an older one is told to re-arm.
+PATROL_DIGEST_SCHEMA="patrol-digest/v1"
+PATROL_PROMPT_VERSION=2
+
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
 # stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
 # one firing to the next, and the input to a halve-the-width recommendation that fired on
@@ -378,6 +388,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --window   defer a dead session whose own newest file is younger than the poker interval"
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
+  die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
@@ -461,6 +472,15 @@ case "$VERB" in
     fi
     EXTEND_NAME="$1"
     EXTEND_REASON="$2"
+    ;;
+  # THE THIRD, and for the same reason: a hold is an answer, and an answer with no reason is
+  # one the tick could not print back (wave-24 T7, D1).
+  hold)
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
+      usage "hold takes exactly two arguments: the name to keep up and the reason."
+    fi
+    HOLD_NAME="$1"
+    HOLD_REASON="$2"
     ;;
   # THE NINE CELLS AN AUTHOR WRITES, IN THE TABLE'S OWN COLUMN ORDER (wave-20 REQ-5, AC-5.3;
   # Δ5). `status`, `worktree` and `base` are the dispatcher's cells and are not operands:
@@ -761,6 +781,43 @@ write_patrol_armed_marker() {  # <session-id> -> 0 written, 1 not
   [ -L "$f" ] && return 1
   printf '%s|at=%s|session=%s\n' "$PATROL_ARMED_SCHEMA" "$(iso_now)" "$sid" \
     > "$f" 2>/dev/null || return 1
+  chmod 600 "$f" 2>/dev/null
+  return 0
+}
+
+# THE DIGEST FILE'S PATH, beside the stamp under the same resolved root. Not `patrol-digest-`:
+# `patrol-*.state` is the stamp glob (hooks/session-start.sh, scripts/lib/patrol.sh), and a
+# file under it reads as the stamp of a session named `digest-<sid>` (A-orch-9).
+tick_digest_file() {  # <session-id> -> absolute path, or empty
+  local f
+  f="$(patrol_stamp_file "$1")" || return 1
+  [ -n "$f" ] || return 1
+  printf '%s/tick-digest-%s.state' "${f%/*}" "$1"
+}
+
+# One `key=value` line of the digest file, or empty. A symlink is no file.
+tick_digest_field() {  # <digest file> <key>
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
+}
+
+# The digest file is rewritten whole, under the stamp's write guard. `arm` writes only the
+# version, so the first tick after an arm prints in full.
+write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty>] -> 0 written, 1 not
+  local f d
+  f="$(tick_digest_file "$1")" || return 1
+  [ -n "$f" ] || return 1
+  d="${f%/*}"
+  tmp_dir_ok "$d" || return 1
+  mkdir -p "$d" 2>/dev/null || return 1
+  [ -L "$f" ] && return 1
+  {
+    printf '%s\n' "$PATROL_DIGEST_SCHEMA"
+    [ -n "$2" ] && printf 'prompt_version=%s\n' "$2"
+    if [ -n "${3:-}" ]; then
+      printf 'digest=%s\nsince=%s\ndecision=%s\nduty=%s\n' "$3" "$4" "$5" "$6"
+    fi
+  } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
   return 0
 }
@@ -2287,6 +2344,70 @@ row_copy_args() {  # <row> <session id> -> sets ROW_COPY_ARGS
   return 0
 }
 
+# ---------------------------------------------------------------- the hold's fingerprint
+#
+# A HOLD STANDS WHILE ITS FACTS DO (wave-24 T7, REQ-4; D1, ADR-041 d1). The fingerprint is the
+# three facts a stand-down answer rests on: the row's launch (a re-dispatch is a new contract),
+# its deliverable's mtime (a rewrite is new work), and how many completion messages the agent
+# has sent (a new report is a new answer to read). It holds no instant of the tick that computed
+# it, so two ticks over the same facts compute the same string. A deliverable list takes the
+# newest mtime across its paths; a missing path reads 0.
+#
+# THE MESSAGE COUNT IS READ AS THE SWEEPER READS A REPLY (hooks/session-sweeper.sh
+# `read_followups`): a `<teammate-message teammate_id="<name>">` or `<agent-message
+# from="<name>">` envelope in a user record or a queued-command attachment of this session's own
+# transcript, an idle notice excluded — an idle notice says a turn ended, and one arrives after
+# every report, so counting it would void every hold on the agent's next idle. No transcript or
+# no jq counts 0, the same on every tick, so the fingerprint stays comparable.
+hold_reply_count() {  # <transcript> <name> [<teammate address>] -> the count on stdout
+  local tr="$1" name="$2" tid="${3:-}"
+  tid="${tid%%@*}"
+  if [ -z "$tr" ] || [ ! -f "$tr" ] || ! command -v jq >/dev/null 2>&1; then
+    printf '0'; return 0
+  fi
+  grep -F -e '<teammate-message' -e '<agent-message' "$tr" 2>/dev/null \
+    | jq -R -r --arg n "$name" --arg t "$tid" '
+        def replies:
+          [scan("<(?:teammate-message teammate_id|agent-message from)=\"([^\"]+)\"[^>]*>((?:(?!</(?:teammate-message|agent-message)>)[\\s\\S])*)")]
+          | .[]
+          | select((.[1] | (fromjson? // null) | type == "object" and .type == "idle_notification") | not)
+          | .[0];
+        (fromjson? // empty)
+        | select(type == "object" and .isSidechain != true)
+        | if .type == "user" then
+            (.message.content
+             | if type == "string" then .
+               elif type == "array" then ([.[] | select(type == "object" and .type == "text") | .text] | join("\n"))
+               else "" end | replies)
+          elif .type == "attachment" then
+            (.attachment | select(type == "object" and .type == "queued_command")
+             | .prompt | select(type == "string") | replies)
+          else empty end
+        | sub(" \\[[^]]*\\]$"; "") | sub("@.*$"; "")
+        | select(. == $n or ($t != "" and . == $t))' 2>/dev/null \
+    | awk 'END { printf "%d", NR }'
+}
+
+hold_fingerprint() {  # <roster row> <repo root> <transcript> -> <launched_at>:<mtime>:<count>
+  local row="$1" repo="$2" tr="$3" deliv p m newest=0 old
+  deliv="$(line_field "$row" deliverable)"
+  old="$IFS"; IFS=','; set -f
+  # shellcheck disable=SC2086
+  set -- $deliv
+  set +f; IFS="$old"
+  for p in "$@"; do
+    p="$(printf '%s' "$p" | sed -e 's/^ *//' -e 's/ *$//')"
+    [ -n "$p" ] || continue
+    case "$p" in /*) : ;; *) p="$repo/$p" ;; esac
+    m=0
+    [ -e "$p" ] && m="$(file_mtime "$p")"
+    case "$m" in ''|*[!0-9]*) m=0 ;; esac
+    [ "$m" -gt "$newest" ] && newest="$m"
+  done
+  printf '%s:%s:%s' "$(line_field "$row" launched_at)" "$newest" \
+    "$(hold_reply_count "$tr" "$(line_field "$row" name)" "$(line_field "$row" teammate_id)")"
+}
+
 # THE IDENTITY OF A SUCCESSOR ROW (epic-23 wave-22 T1; REQ-1 AC-1.1/AC-1.2, D1; ADR-039). The
 # rule is payload/scripts/lib/roster.sh's, stated once above `roster_row_for_id`: every row
 # written after an agent's id is known carries that id, and the status the id was learned
@@ -2412,14 +2533,17 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 # rejected on the record (D-5): the residue is exactly what `adopt` reads, so a hook that
 # cleared it at engagement would delete the evidence of the thing it was helping with.
 #
-# THE FIVE SESSION-KEYED CLASSES, and no sixth. Each is `<class>-<session id>.state` under
-# `<root>/.bionic/tmp`, plus the Patrol stamp's `.armed` sibling:
+# THE SESSION-KEYED CLASSES, and no others — scripts/lib/patrol.sh's PATROL_STATE_CLASSES.
+# Each is `<class>-<session id>.state` under `<root>/.bionic/tmp`, plus the Patrol stamp's
+# `.armed` sibling:
 #
 #   roster-<sid>.state         hooks/dispatch-preflight.sh   the dispatch ledger
 #   preflight-<sid>.state      hooks/preflight-probe.sh      the budget attestation
 #   engaged-<sid>.state        scripts/lib/binding.sh        the engagement marker
 #   sweeper-<sid>.state        hooks/session-sweeper.sh      the ack ledger
 #   patrol-<sid>.state[.armed] this file                     the Patrol stamp and its marker
+#   stop-orders-<sid>.state    hooks/stop-orders.sh          the order queue
+#   tick-digest-<sid>.state    this file                     the tick's digest and duty
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE THEREFORE UNREACHABLE FROM HERE, and that
 # is a property of the enumeration rather than a list to maintain: `context-spend.state` and
@@ -2527,6 +2651,13 @@ case "$VERB" in
   # the resume ritual deletes stray jobs by), then the tick by this script's absolute path.
   # One line, because it is a CronCreate prompt. READ-ONLY and outside the engagement gate,
   # like `interval`: it decides nothing.
+  #
+  # IT ASKS ONLY FOR WHAT THE TICK PRINTED (wave-24 T7, REQ-4; D5). Through 1.8.10 it asked for a
+  # `fill-declined:` line on every tick, and all 29 declines of that run answered nothing a wall
+  # had asked. Each answer is now conditional on the line that owes it, ListAgents on an open
+  # row, the task-list refresh on a tick that said more than `unchanged`, and `v=` after the
+  # marker names the prompt's version so `arm` can record it and a later tick can ask for a
+  # re-arm when the poker has moved on.
   prompt)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -2534,8 +2665,8 @@ case "$VERB" in
       die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
       exit 3
     fi
-    printf 'bionic-patrol session=%s — Patrol tick. ListAgents, then run: bash %s tick — the tick decides per row. Then: TaskList and reconcile; dispatch every ready row the wall names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>"; TaskStop each STANDDOWN or write "standdown-declined: <name> <reason>"; then continue the run toward its goal until a wall.\n' \
-      "${SESSION_ID:0:8}" "${HOOK_DIR}/session-poker.sh"
+    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with bash %s hold <name> <reason>. Unless the tick printed only "unchanged" or a QUIET with no open row: TaskList and reconcile. Then continue the run toward its goal until a wall.\n' \
+      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "${HOOK_DIR}/session-poker.sh" "${HOOK_DIR}/session-poker.sh"
     exit 0
     ;;
 
@@ -2615,6 +2746,11 @@ case "$VERB" in
     # still stands.
     write_patrol_armed_marker "$SESSION_ID" \
       || die "WARN — the arming instant could not be recorded; this Patrol will not auto-DISARM (run \`disarm\` to stop it)."
+    # THE PROMPT VERSION THIS ARM PAIRS WITH (wave-24 T7; D5). An arm follows the CronCreate of
+    # `prompt`'s output, so the version this poker prints is the one the job now carries. The
+    # digest it replaces is dropped with it: the first tick after an arm prints in full.
+    write_tick_digest "$SESSION_ID" "$PATROL_PROMPT_VERSION" \
+      || die "WARN — the prompt version could not be recorded; the tick will ask for a re-arm."
     say "armed — the Patrol stamp is fresh for this session: $(patrol_stamp_file "$SESSION_ID")"
     exit 0
     ;;
@@ -3797,6 +3933,79 @@ EOF
     exit 0
     ;;
 
+  # THE STANDING ANSWER TO A STAND-DOWN (wave-24 T7; REQ-4, AC-4.3; spec D1, ADR-041 d1). A
+  # finished agent kept up on purpose — an auditor held for a second pass — was ordered down
+  # on every tick, because the only answer the stop wall read was a `standdown-declined:` line
+  # in that one turn's text. `hold` writes the answer where the tick reads its facts: a
+  # successor row of the name, copied as `extend` and `amend` copy it, carrying `held=<at>
+  # <reason> fp=<fingerprint>`. While the fingerprint is unchanged the tick prints `held <name>`
+  # and writes no stop order, so the stop wall's stand-down set — computed from orders — has
+  # nothing to ask. Any change voids it without a write: a new launch, a rewritten deliverable,
+  # a new completion message. The row's launch is the copy's, so the row stays MET; unlike
+  # `extend`, nothing re-opens.
+  #
+  # REFUSED: no session key (3), an unengaged session (decides nothing, 0), no row of the name,
+  # a row that is not MET or is already closed (1). A subagent cannot reach this verb: the Bash
+  # wall refuses it with `amend`, `extend` and `task-add` (payload/scripts/lib/walls.sh).
+  hold)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "A hold answers for ONE session's roster, so without the key there is nothing to write."
+      exit 3
+    fi
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
+      die "REFUSED — no row named $HOLD_NAME: this session has no roster at $ROSTER_FILE."
+      exit 1
+    fi
+    HOLD_ROW="$(grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null \
+      | grep -F "|name=${HOLD_NAME}|" | tail -1)"
+    if [ -z "$HOLD_ROW" ]; then
+      die "REFUSED — no row named $HOLD_NAME on this session's roster ($ROSTER_FILE)."
+      exit 1
+    fi
+    # THE VERDICT IS THE SWEEPER'S, read as the tick reads it. A hold answers a stand-down, and
+    # only a MET, unacked row is ever stood down.
+    SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
+    HOLD_VERDICT="$( cd "$REPO_REAL" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+      bash "$SWEEPER" verdict "$HOLD_NAME" 2>/dev/null | grep -F "landing-verdict/v1|" | tail -1 )"
+    HOLD_STATE="$(line_field "$HOLD_VERDICT" state)"
+    if [ "$HOLD_STATE" != MET ] || [ "$(line_field "$HOLD_VERDICT" acked)" = yes ]; then
+      die "REFUSED — $HOLD_NAME reads ${HOLD_STATE:-no verdict}$( [ "$(line_field "$HOLD_VERDICT" acked)" = yes ] && printf ', closed'); a hold answers a stand-down, and only a MET, open row is stood down."
+      exit 1
+    fi
+    HOLD_TR="$(session_transcript "$SESSION_ID")" || HOLD_TR=""
+    HOLD_FP="$(hold_fingerprint "$HOLD_ROW" "$REPO_REAL" "$HOLD_TR")"
+    HOLD_NOW="$(iso_now)"
+    row_copy_args "$HOLD_ROW" "$SESSION_ID"
+    identity_args "$ROSTER_FILE" "$HOLD_NAME" "$HOLD_ROW"
+    HOLD_RR_ARGS=("${ROW_COPY_ARGS[@]}")
+    HOLD_RR_ARGS+=(${POKER_ID_ARGS[@]+"${POKER_ID_ARGS[@]}"})
+    HOLD_RR_ARGS+=("held=$HOLD_NOW $(clean "$HOLD_REASON") fp=$HOLD_FP")
+    HOLD_NEW_ROW="$(roster_row "${HOLD_RR_ARGS[@]}")" || HOLD_NEW_ROW=""
+    if [ -z "$HOLD_NEW_ROW" ]; then
+      die "REFUSED — could not build the held row for $HOLD_NAME."
+      exit 2
+    fi
+    printf '%s\n' "$HOLD_NEW_ROW" >> "$ROSTER_FILE" 2>/dev/null || {
+      die "REFUSED — could not write to $ROSTER_FILE."
+      exit 2
+    }
+    say "held — $HOLD_NAME stays up while its launch, deliverable and messages are unchanged (fp=$HOLD_FP); the tick prints it held and orders no stop: $ROSTER_FILE"
+    exit 0
+    ;;
+
   # THE CONTRACT CHANGE (wave-20 T9; REQ-4, AC-4.1/4.2; spec D4, ledger Δ10). A writer's
   # Files:, Suites: and Re-executes: are read from its roster row, captured at dispatch —
   # editing the plan row changes nothing — and until this verb the only way to widen one was
@@ -4188,6 +4397,132 @@ EOF
     # first thing after the session key exists to name the file with.
     write_patrol_stamp "$SESSION_ID" tick \
       || die "WARN — the Patrol stamp could not be written; the tick itself is unaffected."
+
+    # ---------- THE TICK SAYS WHAT CHANGED, OR "unchanged" (wave-24 T7, REQ-4; D4, D5) ----------
+    #
+    # THE DEFECT (research-R1). Every tick printed its whole reading — the rung, the holds, the
+    # stand-downs, the fill — whether or not anything had moved since the last one, and the
+    # Patrol prompt asked the model to answer each of them every time. A tick over the same
+    # facts now prints one line: `poker: unchanged since <at> — decision=<band>`.
+    #
+    # THE OUTPUT IS HELD UNTIL THE DECISION. Every line the tick prints below goes to a buffer;
+    # `tick_conclude` hashes what was decided (the band, the sorted per-row verdicts, the named
+    # lines, the fill, `current:`, the pressure band — never an instant) and compares it with the
+    # hash `tick_digest_file` kept from the last tick. The exit trap then prints the buffer, or
+    # the one line, and writes the file. A tick that exits on a refusal prints its buffer as it
+    # always did and writes no digest. stderr is not held: a warning is a warning on every tick.
+    #
+    # THE PROMPT VERSION rides the same file: `arm` records the version its prompt carried, and a
+    # tick that finds none, or an older one, prints one re-arm line above everything else.
+    TICK_BUF="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-tick.XXXXXX" 2>/dev/null)" || TICK_BUF=""
+    TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed
+    TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
+    TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
+    TICK_REARM=""
+    case "$TICK_PVER" in ''|*[!0-9]*) TICK_PVER_N=0 ;; *) TICK_PVER_N="$TICK_PVER" ;; esac
+    if [ "$TICK_PVER_N" -lt "$PATROL_PROMPT_VERSION" ]; then
+      TICK_REARM="poker: note: re-arm the Patrol — its prompt is v=${TICK_PVER:-unrecorded} and this poker prints v=${PATROL_PROMPT_VERSION}: replace the bionic-patrol job with one carrying the output of \`bash ${HOOK_DIR}/session-poker.sh prompt\`, then run \`bash ${HOOK_DIR}/session-poker.sh arm\`"
+    fi
+    tick_emit() {
+      local rc=$?
+      [ -n "$TICK_BUF" ] || exit "$rc"
+      exec 1>&3 3>&-
+      if [ -n "$TICK_DIGEST" ] && [ -n "$TICK_REARM" ]; then
+        printf '%s\n' "$TICK_REARM"
+      fi
+      if [ "$TICK_UNCHANGED" = yes ]; then
+        say "unchanged since ${TICK_SINCE} — decision=${TICK_DECIDED}"
+      else
+        cat "$TICK_BUF" 2>/dev/null
+      fi
+      rm -f "$TICK_BUF" 2>/dev/null
+      if [ -n "$TICK_DIGEST" ]; then
+        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" \
+          || die "WARN — the tick digest could not be written; the next tick prints in full."
+      fi
+      exit "$rc"
+    }
+    if [ -n "$TICK_BUF" ]; then
+      exec 3>&1 1>"$TICK_BUF"
+      trap tick_emit EXIT
+    fi
+
+    # THE DECISION, HASHED (D4). Called once, by whichever arm decides, BEFORE that arm prints
+    # its sentence and its decision line — so the buffer holds exactly the lines the decision
+    # was reached on. What enters the hash: the band, the decision line's counts and lists, the
+    # pressure band (its state and rung), `current:`, every row's verdict as `name|state|acked`
+    # sorted, and the named lines the tick printed reduced to their kind and subject (a
+    # STANDDOWN, a held row, a GONE report, a duplicate tell, an ext: hold, a ledger finding, a
+    # note). Never an instant, an age or a measurement: those move on every tick by themselves.
+    # DISARM is terminal and an EMERGENCY names a writer to stop, so both always print in full.
+    #
+    # THE DUTY (A-orch-4; D5, research-R7 item 5). The task-list refresh is owed on a tick turn
+    # unless the tick said `unchanged`, or decided QUIET with no open row on the roster; the stop
+    # wall's collector reads this line, so a quiet turn is not refused for a chore with nothing
+    # behind it.
+    tick_conclude() {  # <decision>
+      local cur="" prev=""
+      TICK_DECIDED="$1"
+      if [ -n "${SCHED_PLAN:-}" ] && [ -f "${SCHED_PLAN:-}" ]; then
+        cur="$(_sched_plan_current_field "$SCHED_PLAN")"
+      fi
+      if [ -n "$TICK_BUF" ]; then
+        TICK_DIGEST="$( {
+          printf 'decision=%s|total=%s|open=%s|notify=%s|fill=%s|trees=%s\n' "$1" "$TOTAL" "$OPEN" \
+            "${NOTIFY_ROWS:-}" "${SCHED_FILL:-}" "${LEASE_TREES:-}"
+          printf 'pressure=%s|rung=%s|current=%s\n' "${SCHED_STATE:-}" "${SCHED_RUNG:-}" "$cur"
+          printf '%s\n' "$VERDICT_OUT" | awk -F'|' '
+            $1 == "landing-verdict/v1" {
+              n = ""; st = ""; ak = ""
+              for (i = 2; i <= NF; i++) {
+                if (index($i, "name=") == 1) n = substr($i, 6)
+                else if (index($i, "state=") == 1) st = substr($i, 7)
+                else if (index($i, "acked=") == 1) ak = substr($i, 7)
+              }
+              print n "|" st "|" ak
+            }' | LC_ALL=C sort
+          awk '
+            $1 != "poker:" { next }
+            $2 == "note:" { print $3, $4, $5; next }
+            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER)$/ { print $2, $3, $4 }
+          ' "$TICK_BUF" | LC_ALL=C sort
+        } | cksum | awk '{ print $1 "-" $2 }' )"
+      fi
+      prev="$(tick_digest_field "$TICK_DIGEST_FILE" digest)"
+      if [ -n "$TICK_DIGEST" ] && [ "$1" != DISARM ] && [ "${SCHED_STATE:-}" != emergency ] \
+         && [ "$TICK_DIGEST" = "$prev" ]; then
+        TICK_UNCHANGED=yes
+        TICK_SINCE="$(tick_digest_field "$TICK_DIGEST_FILE" since)"
+        [ -n "$TICK_SINCE" ] || TICK_SINCE="$(iso_now)"
+        TICK_DUTY=none
+        return 0
+      fi
+      TICK_SINCE="$(iso_now)"
+      TICK_DUTY=owed
+      [ "$1" = QUIET ] && [ "${OPEN_ROSTER:-0}" -eq 0 ] && TICK_DUTY=none
+      tick_write_orders
+      return 0
+    }
+
+    # THE STOP ORDERS THIS TICK OWES, written once the decision is known (wave-24 T7; D1, D4). An
+    # unchanged tick writes none: the stop wall reads its stand-down set off this tick's orders,
+    # and a turn told only "unchanged" must not be refused for a STANDDOWN it was never shown.
+    # The answer the last turn gave stands until a fact moves.
+    SD_ORDER_NAMES=""
+    tick_write_orders() {
+      local n out
+      for n in $SD_ORDER_NAMES; do
+        if [ -f "$ORDERS" ]; then
+          out=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                 CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                 bash "$ORDERS" order "$n" --by patrol 2>&1 ) \
+            || say "STANDDOWN ${n} — the order could NOT be written, so the stop gate will still ask: $(clean "$(printf '%s' "$out" | head -1)")"
+        else
+          say "STANDDOWN ${n} — sibling hooks/stop-orders.sh not found, so no order was written; order it yourself before stopping."
+        fi
+      done
+      return 0
+    }
 
     # The sweeper is this script's sibling — same resolution as hooks/landing-gate.sh's.
     SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
@@ -4712,15 +5047,22 @@ EOF
         for SD_NAME in $STANDDOWN_NAMES; do
           case "$SD_PANEL" in
             *"|${SD_NAME}|"*)
-              say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written)"
-              if [ -f "$ORDERS" ]; then
-                SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
-                          CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
-                          bash "$ORDERS" order "$SD_NAME" --by patrol 2>&1 ) \
-                  || say "STANDDOWN ${SD_NAME} — the order could NOT be written, so the stop gate will still ask: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
-              else
-                say "STANDDOWN ${SD_NAME} — sibling hooks/stop-orders.sh not found, so no order was written; order it yourself before stopping."
+              # A HELD ROW IS ANSWERED ALREADY (wave-24 T7; D1, ADR-041 d1). Its latest row
+              # carries the orchestrator's `held=<at> <reason> fp=<fingerprint>`; while the
+              # fingerprint computed now is the one recorded, the tick prints the hold and writes
+              # no order. A changed fingerprint falls through to the stand-down, writing nothing
+              # to void it: the next `hold` is a new answer to new facts.
+              SD_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+                | grep -F "|name=${SD_NAME}|" | tail -1)"
+              SD_HELD="$(line_field "$SD_ROW" held)"
+              if [ -n "$SD_HELD" ] && [ "${SD_HELD##* fp=}" != "$SD_HELD" ] \
+                 && [ "${SD_HELD##* fp=}" = "$(hold_fingerprint "$SD_ROW" "$REPO_REAL" "$TICK_TR")" ]; then
+                SD_HELD_REST="${SD_HELD#* }"
+                say "held ${SD_NAME} since ${SD_HELD%% *} — ${SD_HELD_REST% fp=*}"
+                continue
               fi
+              say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written), or keep it up with: bash ${HOOK_DIR}/session-poker.sh hold ${SD_NAME} <reason>"
+              SD_ORDER_NAMES="${SD_ORDER_NAMES}${SD_ORDER_NAMES:+ }${SD_NAME}"
               ;;
             *)
               case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
@@ -4900,6 +5242,7 @@ EOF
         # THE SENTENCE FIRST, THE DECISION LINE LAST (REQ-10 AC-10.4). Every band in this
         # verb prints its explanation above its machine line, so the last line a tick prints
         # is always the answer — whichever arm answered.
+        tick_conclude QUIET
         say "QUIET — armed, nothing dispatched yet on this session"
         tick_decision_line QUIET "$TOTAL" "$OPEN"
         exit 0
@@ -4967,6 +5310,7 @@ EOF
       # …AND THE PLAN REPORT, for the same reason (wave-21 T13): a delivered run whose ledger
       # still carries a finding is one the gate would refuse, and this is the last tick to say so.
       tick_plan_memoised tick_plan_report
+      tick_conclude DISARM
       say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
       tick_decision_line DISARM "$TOTAL" "$OPEN"
       # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
@@ -5261,13 +5605,18 @@ EOF
     # carried in `trees=` below (AC-10.3). The rows and details are concatenated rather than
     # given a field each, so no consumer of this schema has to learn a new key to see them.
     #
-    # THE BAND IS THE RANKED MAXIMUM, ascending: QUIET is the floor, a fill raises it to
-    # FILL, a row needing surfacing raises it to NOTIFY. DISARM is terminal and has already
-    # exited. Every lower band keeps its own field, so nothing this tick learned is lost to
-    # the band that won — a NOTIFY tick still reports the fill it ordered.
+    # THE BAND IS THE RANKED MAXIMUM, ascending: QUIET is the floor, a stand-down raises it to
+    # STANDDOWN, a fill to FILL, a row needing surfacing to NOTIFY. DISARM is terminal and has
+    # already exited. Every lower band keeps its own field, so nothing this tick learned is lost
+    # to the band that won — a NOTIFY tick still reports the fill it ordered.
+    #
+    # STANDDOWN JOINS THE BAND (wave-24 T7, REQ-4 AC-4.2; D4). It fed none, so a tick that had
+    # just named an agent to stop printed `decision=QUIET` under the line that named it.
     TICK_DECISION=QUIET
+    [ -n "$SD_ORDER_NAMES" ] && TICK_DECISION=STANDDOWN
     [ -n "$SCHED_FILL" ] && TICK_DECISION=FILL
     [ -n "$NOTIFY_ROWS" ] && TICK_DECISION=NOTIFY
+    tick_conclude "$TICK_DECISION"
 
     if [ "$TICK_DECISION" = NOTIFY ]; then
       # THE SENTENCES FIRST, ONE PER ARM THAT HAS SOMETHING — a tick holding only the other
@@ -5295,6 +5644,8 @@ EOF
       # printed by the scheduler where it was decided; this says what the decision line then
       # says, so the two channels agree on one tick (D5).
       say "FILL — ${SCHED_FILL} named for dispatch; the decision line carries them."
+    elif [ "$TICK_DECISION" = STANDDOWN ]; then
+      say "STANDDOWN — ${SD_ORDER_NAMES} met and still on the panel; TaskStop each, or hold it."
     elif [ "$OPEN_ROSTER" -eq 0 ]; then
       say "QUIET — no open row on this roster, but the run is not delivered (${RUN_STATE_WHY}); the Patrol keeps its stamp and its clock."
     else

@@ -62,6 +62,12 @@
 # pattern — a reason carrying `.*` then matched half the machine and held the row live. A row
 # that names neither is byte-identical to the rows written before them.
 #
+# TWO ANSWER KEYS ride on the same terms (wave-24, REQ-4; ADR-041). `held=<iso> <reason>
+# fp=<launch>:<deliverable mtime>:<completion-message count>` is written by `session-poker.sh
+# hold`: the orchestrator's standing answer to a stand-down, honoured by the tick while the
+# fingerprint is unchanged. `done=<path>` is the brief's `Done marker:`, lifted at dispatch.
+# Neither is copied to a successor row: a new contract answers for itself.
+#
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
 # `re_executes=` say how wide the dispatched agent's instrument may be: the files its brief
@@ -184,7 +190,9 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
   local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
+  local held="" done_marker=""
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
+  local has_held=0 has_done=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
@@ -228,6 +236,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       adopted_from)  adopted_from="$val"; has_adopted_from=1 ;;
       amended)       amended="$val";      has_amended=1 ;;
       extended)      extended="$val";     has_extended=1 ;;
+      held)          held="$val";         has_held=1 ;;
+      done)          done_marker="$val";  has_done=1 ;;
       files)          files="$val";          has_files=1 ;;
       suites_allowed) suites_allowed="$val"; has_suites_allowed=1 ;;
       suites_source)  suites_source="$val";  has_suites_source=1 ;;
@@ -250,6 +260,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_adopted_from" -eq 1 ]; then out="$out|adopted_from=$adopted_from"; fi
   if [ "$has_amended" -eq 1 ]; then  out="$out|amended=$amended"; fi
   if [ "$has_extended" -eq 1 ]; then out="$out|extended=$extended"; fi
+  if [ "$has_held" -eq 1 ]; then     out="$out|held=$held"; fi
+  if [ "$has_done" -eq 1 ]; then     out="$out|done=$done_marker"; fi
   out="$out|tool_use_id=$tool_use_id|plan=$plan"
   printf '%s\n' "$out"
   return 0
