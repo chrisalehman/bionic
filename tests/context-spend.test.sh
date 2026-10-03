@@ -62,7 +62,7 @@ command -v jq >/dev/null 2>&1 || { echo "context-spend: jq absent — suite cann
 
 # THE SUITE IS NOT ALLOWED TO BE VACUOUS. Nine of the assertions below read "rc 0 and
 # nothing appended", which is exactly what a MISSING hook produces. Prove the subject
-# exists and parses before any of it runs (memory/no-vacuous-tests-at-authoring).
+# exists and parses before any of it runs (.claude/rules/test-harness.md, "Anti-vacuity").
 [ -f "$HOOK" ] || { echo "context-spend: no hook at $HOOK — suite refuses to run"; exit 1; }
 bash -n "$HOOK" || { echo "context-spend: $HOOK does not parse — suite refuses to run"; exit 1; }
 

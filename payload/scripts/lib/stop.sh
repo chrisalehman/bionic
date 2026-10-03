@@ -1416,8 +1416,9 @@ return 2
 # passes untouched, as does any ambiguity along the way.
 #
 # WHY A WALL AND NOT BETTER WORDING. The duties live in the Patrol prompt today,
-# and a prompt is text: it asks. Every rule in this repo that actually binds is a
-# wall (memory/rules-are-walls-not-wishes), and the only event that can express
+# and a prompt is text: it asks. Prose rules and reminder hooks were measured not to
+# bind a model that had already decided; the walls were what did, so every rule here
+# that actually binds is a wall, and the only event that can express
 # "this must have happened before the turn ends" is the turn's END. A PreToolUse
 # arm cannot say it — at the moment any single tool runs, the turn is not over
 # and nothing has been skipped yet. So the predicate is retrospective by
@@ -1453,8 +1454,8 @@ return 2
 # hooks/session-poker.sh:399-406 makes for the same reason.
 #
 # THE TASK-LIST FALLBACK IS NOT A CONVENIENCE. The task tools are absent from
-# some model/CLI combinations (memory/task-tools-tengu-gate: removed for fable-5
-# in CLI 2.1.228–2.1.233), and in those sessions the plan's own ledger IS the
+# some model/CLI combinations (removed for fable-5 in CLI 2.1.228–2.1.233; the census
+# is the rationale block in payload/scripts/lib/env.sh), and in those sessions the plan's own ledger IS the
 # task list. A wall that demanded `TaskList` there would be unsatisfiable, which
 # is the one failure mode a blocking gate must not have. So an Edit/Write/
 # NotebookEdit/Bash tool_use whose input names the active plan file discharges

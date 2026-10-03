@@ -10,7 +10,7 @@
 # until the transcript shows, AFTER that prompt, a main-thread `ListAgents` AND
 # either a `TaskList` or a write naming the active plan file (the version-gated
 # fallback for sessions where the task tools are absent — see
-# memory/task-tools-tengu-gate).
+# the task-tools census in payload/scripts/lib/env.sh).
 #
 # HARNESS IDIOM mirrored tests/context-spend.test.sh (deleted at 8582861, epic-18
 # wave-03): PASS/FAIL counters, mktemp
@@ -295,7 +295,7 @@ fire "$d"; expect_allow "3: tick + TaskList alone now passes — the panel duty 
 
 # 4: the version-gated fallback — a write naming the active plan file stands in
 # for TaskList, because in a session without the task tools the plan ledger IS
-# the task list (memory/task-tools-tengu-gate).
+# the task list (the task-tools census in payload/scripts/lib/env.sh).
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_REL"
 fire "$d"; expect_allow "4: tick + ListAgents + an Edit naming the plan passes"
 
