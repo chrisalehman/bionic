@@ -1033,10 +1033,27 @@ fi
 
 # (b) the shell-variable-name case — an unexpanded `$s.test.sh` cannot be checked against
 # the budget, but the budget it WOULD have checked against still belongs on the wire.
-run_hook "$(mk_payload "$R15" 'for s in a b; do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+# THE BODY REASSIGNS THE VARIABLE (wave-24 T13, A-orch-15). Since T5 a loop over a literal
+# word list resolves to its suites and meets the ORDINARY refusal, so the fixture that drives
+# THIS arm is the one the classifier still cannot resolve: `s=c` in the body.
+run_hook "$(mk_payload "$R15" 'for s in a b; do s=c; bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
 expect_status "15b: an unexpanded suite name is still refused" 2 "$ST"
 expect_contains "15b2: …and the recorded budget is on the DEFAULT stderr too" \
   "archive.test.sh" "$ERR"
+expect_contains "15b3: …by the unexpanded-name arm, not the ordinary one" \
+  "unexpanded name" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+# THE FIX IS THE LOOP'S OWN WORDS (wave-24 T13, D10, AC-6.3): the lines it would have run,
+# spelled literally, read off the classifier's `cmd_suite_loop_lines` — never a canned example.
+expect_contains "15b4: …printing the loop's first word as the literal line to run" \
+  "    bash tests/a.test.sh" "$ERR"
+expect_contains "15b5: …and its second" "    bash tests/b.test.sh" "$ERR"
+expect_absent "15b6: …never the canned alpha example the arm used to print" "alpha.test.sh" "$ERR"
+# A `$` THE TEXT GIVES NO WORDS FOR still refuses, and says why it has no line to print.
+run_hook "$(mk_payload "$R15" 'for s in $(ls tests); do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+expect_status "15b7: a loop over a command substitution is refused as unexpanded" 2 "$ST"
+expect_contains "15b8: …and says the text gives no literal list to print" \
+  "no literal list" "$ERR"
+expect_absent "15b9: …printing no line it cannot know" "bash tests/a.test.sh" "$ERR"
 
 # (c) the full-tree case (`tests/run.sh`, not on this row's budget). A FRESH row: R15's
 # own set literally contains the token "run.sh" as one of its two allowed SUITE NAMES,
@@ -1121,8 +1138,10 @@ LONG_SUITE="tests/a-suite-name-far-too-long-to-fit-even-bare-on-one-refusal-line
 roster_row_fixture "session=$SID" name=t15long "agent_id=$ACTOR" \
   "suites_allowed=$LONG_SUITE" suites_source=derived files= \
   >> "$R15L/.bionic/tmp/roster-$SID.state"
-run_hook "$(mk_payload "$R15L" 'for s in a b; do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+run_hook "$(mk_payload "$R15L" 'for s in a b; do s=c; bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
 expect_status "15g1: an unexpanded name against a too-long single suite is still refused" 2 "$ST"
+expect_contains "15g1: …through the unexpanded-name arm this fallback is named for" \
+  "unexpanded name" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "15g1: …and the line falls back to an honest count, never a cut name" \
   "1 suite" "$ERR"
 expect_absent "15g1: …never a mid-name character cut (the ellipsis glyph)" "…" "$ERR"
