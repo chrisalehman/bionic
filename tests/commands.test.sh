@@ -89,7 +89,7 @@ run_version_cmd() {
       bash -c "$VERSION_CMD" < /dev/null 2>&1 )
 }
 
-FORMAT_RE='^bionic [0-9][0-9.]* \(installed\) · .+ · .+ · (this checkout|OTHER checkout|unregistered)$'
+FORMAT_RE='^bionic [0-9][0-9.]* \(installed\) · .+ · .+ · (this checkout|OTHER checkout|github feed|unregistered)$'
 
 # One-line-and-nothing-else, measured the same way every arm below measures it: the output
 # has exactly one line, and that line matches FORMAT_RE end to end.
@@ -139,6 +139,68 @@ OUT_UNREG="$(run_version_cmd "$HOME_UNREG")"
 assert_one_line_matching "7: prints exactly one line matching the format" "$OUT_UNREG"
 expect_match "8: says 'unregistered' when no registration names a source" \
   "*unregistered" "$OUT_UNREG"
+
+section "Section GH: a GitHub-feed install — the plugin root is a cache copy with no .git (D15, AC-10.1/10.3)"
+
+# THE CASE THE FIXTURES ABOVE CANNOT REACH. Every arm above runs with CLAUDE_PLUGIN_ROOT inside
+# a git tree, so the sha always came from a real HEAD. On a public install the CLI loads the
+# plugin from a cache directory with no .git, the registry records `gitCommitSha`, and
+# `known_marketplaces.json` names a GitHub `source.repo` — which can never equal a realpath.
+# The copy below is laid out like that cache (scripts/ and the rest directly under the root,
+# no payload/), outside any repository.
+GH_SHA="0123456789abcdef0123456789abcdef01234567"
+GH_CACHE="$(mktemp -d -p "$TMP")/cache/bionic/bionic/1.8.10"
+mkdir -p "$GH_CACHE"
+cp -R "$PAYLOAD"/. "$GH_CACHE"/
+expect_false "GH0: the cache copy is not inside a git tree" \
+  bash -c 'cd "$1" && git rev-parse --git-dir' _ "$GH_CACHE"
+
+write_known_marketplaces_github() {  # <claude-home> <repo-slug>
+  jq -nc --arg repo "$2" \
+    '{bionic:{source:{source:"github", repo:$repo}, installLocation:"/nonexistent-cache", lastUpdated:"2026-08-27T00:00:00Z"}}' \
+    > "$1/plugins/known_marketplaces.json"
+}
+
+write_installed_plugins_gh() {  # <claude-home> <installPath> [<gitCommitSha>]
+  if [ $# -ge 3 ]; then
+    jq -nc --arg path "$2" --arg sha "$3" \
+      '{plugins:{"bionic@bionic":[{installPath:$path, gitCommitSha:$sha}]}}' \
+      > "$1/plugins/installed_plugins.json"
+  else
+    jq -nc --arg path "$2" \
+      '{plugins:{"bionic@bionic":[{installPath:$path}]}}' \
+      > "$1/plugins/installed_plugins.json"
+  fi
+}
+
+run_version_cmd_at() {  # <claude-home> <plugin-root> -> the extracted command, rooted at a copy
+  ( cd "$TMP" && HOME="$TMP" BIONIC_CLAUDE_HOME="$1" CLAUDE_PLUGIN_ROOT="$2" \
+      bash -c "$VERSION_CMD" < /dev/null 2>&1 )
+}
+
+HOME_GH="$(make_registry_home)"
+write_known_marketplaces_github "$HOME_GH" "example/bionic"
+write_installed_plugins_gh "$HOME_GH" "$GH_CACHE" "$GH_SHA"
+OUT_GH="$(run_version_cmd_at "$HOME_GH" "$GH_CACHE")"
+
+assert_one_line_matching "GH1: prints exactly one line matching the format" "$OUT_GH"
+expect_match "GH2: the sha field carries the registry sha's first eight characters" \
+  "* · 01234567 · *" "$OUT_GH"
+expect_no_match "GH3: …not the bare feed kind" "* · git · *" "$OUT_GH"
+expect_match "GH4: the checkout word names the feed" "*· github feed" "$OUT_GH"
+expect_no_match "GH5: …and a GitHub source is never an OTHER checkout" "*OTHER checkout*" "$OUT_GH"
+
+section "Section GH-none: a GitHub feed whose registry records no gitCommitSha — honest unknown (AC-10.4)"
+
+HOME_GHN="$(make_registry_home)"
+write_known_marketplaces_github "$HOME_GHN" "example/bionic"
+write_installed_plugins_gh "$HOME_GHN" "$GH_CACHE"
+OUT_GHN="$(run_version_cmd_at "$HOME_GHN" "$GH_CACHE")"
+
+assert_one_line_matching "GHN1: prints exactly one line matching the format" "$OUT_GHN"
+expect_match "GHN2: the sha field reads unknown" "* · unknown · *" "$OUT_GHN"
+expect_no_match "GHN3: no sha is invented" "* · 01234567 · *" "$OUT_GHN"
+expect_match "GHN4: the checkout word still names the feed" "*· github feed" "$OUT_GHN"
 
 section "Section 4: the voice contract — same presentation demand as the other commands"
 
