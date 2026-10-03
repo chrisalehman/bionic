@@ -639,6 +639,22 @@ selfcheck e  hot-e.sh
 selfcheck b4 hot-b4.sh ac258929
 selfcheck g  hot-g.sh  ac258929
 
+section "3b — §FX: cmd_effects reads g's 200 KB command under ${BUDGET}s (wave-25 T2, D5)"
+# The permission answer reads every command the CLI asks about through cmd_effects, so it carries
+# the hook budget too. g is the largest input this suite builds: the effects walk tokenises it
+# once more than the write-target walk does. The witness is the W line for the redirect AFTER
+# the body, which only a walk that reached the end can print, beside the body's own unknown line.
+cat > "$SANDBOX/fx-g.sh" <<'SH'
+. "$HT_CMD_CLASS_LIB" || exit 1
+cmd_effects "$(jq -r '.tool_input.command')" "$PWD"
+SH
+ht_time /bin/bash "$SANDBOX/fx-g.sh" "$SANDBOX/in/g.json" "$R_MEM" "$CAP"
+echo "hook-timeout: §FX cmd_effects on g under /bin/bash ($(ht_version /bin/bash)): ${HT_SECS}s rc=$HT_RC"
+expect_true "§FX g [/bin/bash]: under ${BUDGET}s (took ${HT_SECS}s)" under_budget "$HT_SECS"
+expect_eq "§FX g [/bin/bash]: exit 0" "0" "$HT_RC"
+expect_contains "§FX g: the walk reached the redirect after the body" "W	$R_MEM/out.md" "$HT_OUT"
+expect_contains "§FX g: …and read the body itself as unknown" "?	" "$HT_OUT"
+
 # ---------- the plan-row verbs ----------
 
 VERB_BUDGET=1

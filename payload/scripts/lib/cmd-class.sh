@@ -108,6 +108,12 @@
 #                                targets and the files of tee, sed -i, touch, mkdir, ln, and
 #                                the cp/mv destination (wave-24 T12, D16). The memory wall's
 #                                collector, hooks/bash-walls.sh, reads it.
+#   cmd_effects        <cmd> [<cwd>]
+#                             -> what the command writes (`W<TAB>path`) and deletes
+#                                (`D<TAB>path`), absolute, or `?<TAB>reason<TAB>segment` for
+#                                anything it cannot read in full (wave-25 T2, D5). The
+#                                permission answer reads it and allows only a command with no
+#                                `?` line. See _CMD_EFFECTS_AWK for the reading.
 #
 # [WALL: tests/cmd-class.test.sh]
 
@@ -224,7 +230,13 @@ CMD_RUN_NORM_AWK='
 
 # The awk program. `mode=heredoc` stops after step 1; `mode=lines` runs the whole reading.
 _cmd_class_awk() {  # <mode> ; command on stdin
-  awk -v mode="$1" "$CMD_RUN_NORM_AWK$_CMD_WRITES_AWK"'
+  # ONLY mode=effects PARSES _CMD_EFFECTS_AWK (wave-25 T2). awk compiles the whole program on
+  # every call, and the effects reader is a fifth of this file: pasted into every mode it cost
+  # each classifier call 1.7 ms (7.3 -> 9.0 ms, measured). The other modes get one-line stubs
+  # of the six names the shared code calls, so each program defines every function once.
+  local _fx="$_CMD_EFFECTS_STUBS"
+  [ "$1" = effects ] && _fx="$_CMD_EFFECTS_AWK"
+  awk -v mode="$1" "$CMD_RUN_NORM_AWK$_CMD_WRITES_AWK$_fx"'
     function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     function base(p) { sub(/.*\//, "", p); return p }
     # ONE RUN, ONE SPELLING (REQ-1 AC-1.5). The same collapse
@@ -839,6 +851,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         if (SEPKIND[j] != ";" && SEPKIND[j] != "\n" && SEPKIND[j] != "&&") continue
         pv = (j > 1 ? SEPKIND[j - 1] : "")
         if (pv == "||" || pv == "|" || pv == "|&" || pv == ")") continue
+        # mode=effects: after `cmd &&` the variable may keep a value from the environment.
+        if (FX && pv == "&&") continue
         na++; AV[na] = V; AJ[na] = j; AL[na] = val
       }
       if (NF == 0 && na == 0) return
@@ -924,10 +938,26 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     END {
       out = ""; intag = 0; tag = ""
       for (i = 1; i <= nl; i++) {
-        if (intag) { if (trim(line[i]) == tag) intag = 0; continue }
+        if (intag) {
+          if (trim(line[i]) == tag) intag = 0
+          # mode=effects: a body under an UNQUOTED tag runs its command substitutions.
+          else if (hdx && FX_HDSEG == "" && (index(line[i], "$(") || index(line[i], "`"))) FX_HDSEG = hdl
+          continue
+        }
         out = out line[i] "\n"
         tag = heredoc_tag(line[i])
-        if (tag != "") intag = 1
+        if (tag != "") {
+          intag = 1; hdx = 0; hdl = line[i]
+          # mode=effects: a delimiter that is more than the word read here (`<<"E F"`, `<<E-X`)
+          # ends its body somewhere else, so the lines stripped below may be commands.
+          # So does an opener a comment or an open quote holds, which the shell never opens.
+          if (mode == "effects") {
+            hdx = !match(line[i], "<<-?[ \t]*[\047\"\\\\]" tag)
+            if (FX_HDODD == "" && (!match(line[i], "<<-?[ \t]*(" tag "|\047" tag "\047|\"" tag "\"|\\\\" tag ")([ \t;&|<>)]|$)") \
+                || index(substr(line[i], 1, index(line[i], "<<")), "#") \
+                || fx_open_quote(substr(out, 1, length(out) - length(line[i]) - 1)))) FX_HDODD = line[i]
+          }
+        }
       }
       if (mode == "heredoc") { printf "%s", out; exit }
       # mode=head: the WHOLE command reduced to the text classify_argv would
@@ -984,6 +1014,16 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # one per line, read by the functions in _CMD_WRITES_AWK above.
       if (mode == "writes") {
         WT_BASE = ENVIRON["_CMD_WT_CWD"]; split("", WT_SEEN)
+        wt_run(out, "", 0)
+        exit
+      }
+      # mode=effects: cmd_effects (wave-25 T2, D5) — the W, D and ? lines of _CMD_EFFECTS_AWK,
+      # read by the writes walk with FX set, which routes each segment to fx_seg.
+      if (mode == "effects") {
+        FX = 1; fx_init()
+        WT_BASE = ENVIRON["_CMD_WT_CWD"]; split("", WT_SEEN); split("", FX_SEEN)
+        if (FX_HDSEG != "") fx_unk("a heredoc body runs a command substitution", FX_HDSEG)
+        if (FX_HDODD != "") fx_unk("a heredoc the reader does not place", FX_HDODD)
         wt_run(out, "", 0)
         exit
       }
@@ -1178,7 +1218,7 @@ _CMD_WRITES_AWK='
           if (c == "<") {
             if (nx == ">") { W[++n] = "<>"; K[n] = "R"; i++; continue }
             if (nx == "&") { i++; while (substr(s, i + 1, 1) ~ /[0-9-]/) i++; W[++n] = "<&"; K[n] = "D"; continue }
-            if (nx == "<") { i++; if (substr(s, i + 1, 1) == "<" || substr(s, i + 1, 1) == "-") i++ }
+            if (nx == "<") { i++; if (substr(s, i + 1, 1) == "<" || substr(s, i + 1, 1) == "-") i++; W[++n] = "<<"; K[n] = "I"; continue }
             W[++n] = "<"; K[n] = "I"; continue
           }
           if (c == "&") i++
@@ -1229,6 +1269,8 @@ _CMD_WRITES_AWK='
     function wt_rooted(p,   c) { c = substr(p, 1, 1); return (c == "/" || c == "~" || c == "$") }
     function wt_emit(w, cwd,   p, c) {
       if (w == "") return
+      # mode=effects reads the same writer table and prints through its own resolver.
+      if (FX) { fx_emit("W", w, cwd); return }
       p = wt_expand(w)
       if (!wt_rooted(p)) {
         c = wt_expand(cwd)
@@ -1335,18 +1377,20 @@ _CMD_WRITES_AWK='
       if (depth == 0) { compound_pass(k, sg); expand_all(k, sg, s) }
       j = 0
       for (i = 1; i <= k; i++) {
-        j++; WG[depth, j] = SEGGRP[i]
+        j++; WG[depth, j] = SEGGRP[i]; WSK[depth, j] = SEPKIND[i]; WRAW[depth, j] = sg[i]
         if (i < k && SEPKIND[i] == "|" && substr(sg[i], length(sg[i]), 1) == ">") {
-          WNX[depth, j] = 1; WX[depth, j, 1] = sg[i] sg[i + 1]; i++; continue
+          WNX[depth, j] = 1; WX[depth, j, 1] = sg[i] sg[i + 1]; WSK[depth, j] = SEPKIND[i + 1]; WRAW[depth, j] = sg[i] sg[i + 1]; i++; continue
         }
         WNX[depth, j] = (depth == 0 ? NX[i] : 1)
         for (x = 1; x <= WNX[depth, j]; x++) WX[depth, j, x] = (depth == 0 ? XT[i, x] : sg[i])
       }
       k = j
-      for (g = 0; g <= ng; g++) { delete WGS[depth, g]; WGP[depth, g] = GPAR[g] }
+      for (g = 0; g <= ng; g++) { delete WGS[depth, g]; WGP[depth, g] = GPAR[g]; FXN[depth, g] = 1; FXX[depth, g] = "" }
       WGS[depth, 0] = 1; WGC[depth, 0] = cwd
+      if (FX) { if (fx_text(s, depth, k)) return; FXLP[depth] = (s ~ /(^|[^A-Za-z0-9_])(for|while|until|select)[ \t]/) }
       for (i = 1; i <= k; i++) {
         g = WG[depth, i]; cwd = wt_gcwd(depth, g)
+        if (FX) { WGC[depth, g] = fx_step(depth, i, k, g, cwd); continue }
         for (x = 1; x <= WNX[depth, i]; x++) c = wt_seg(trim(WX[depth, i, x]), cwd, depth)
         WGC[depth, g] = c
       }
@@ -1357,6 +1401,380 @@ cmd_write_targets() {  # <command> [<cwd>] -> one resolved write target per line
   # The cwd rides the environment rather than `-v`, so `_cmd_class_awk` keeps its one
   # parameter: `-v` would also turn every backslash in a path into an escape.
   printf '%s' "${1-}" | _CMD_WT_CWD="${2-}" _cmd_class_awk writes
+}
+
+# ---------- WHAT A COMMAND WRITES AND DELETES, OR THAT IT CANNOT TELL (wave-25 T2; REQ-2, D5) ----------
+#
+# WHY A SECOND MODE AND NOT A CHANGE TO THE FIRST. `cmd_write_targets` answers the memory wall,
+# for which an unread target is acceptable: it lists what it saw and is silent on the rest. A
+# permission answer may allow only what was read in full, so silence there is a hole. This mode
+# reads with the same segmentation, heredoc removal, literal expansion, tokeniser, writer table
+# and resolution, and adds what the other cannot say: deletes, and `?` for everything it did
+# not read. When in doubt it prints `?`. A false `?` costs a denial; a missed effect is a hole.
+#
+# OUTPUT, one line per effect, deduplicated, rc 0:
+#   W<TAB><absolute path>   a write: everything mode=writes finds
+#   D<TAB><absolute path>   a delete: the operands of rm, rmdir (and its parents under -p) and
+#                           unlink, the sources of mv, the roots of `find ... -delete`
+#   ?<TAB><reason><TAB><segment>   anything else that may act; the segment is flattened to one
+#                           line and cut at 300 characters
+#
+# READ, NOT GUESSED. Argv[0] after the transparent prefixes (assignments, openers, `env`,
+# `command`, `exec`, `nohup`, `setsid`, `time`, `nice`, `timeout`) must be in the writer
+# table, the delete table or THE PURE-READER TABLE (fx_init); a pure reader with a write
+# redirect still gives the redirect W line. Anything else is `?`, and so is: a `$`, backtick,
+# glob, brace or leading `~` left in a path after expansion; a relative path with no cwd; a
+# command substitution or process substitution anywhere in a segment; a heredoc body that runs
+# one; an interpreter; a shell that reads a script or stdin; a third nested `sh -c`; `cd -`,
+# `popd` and a `cd` to a variable, after which relative paths are `?` too; `xargs`, `eval`,
+# `source`/`.`; a `git` subcommand that is not a known reader, `git -c`, `--output`; `find`
+# with `-exec` or a file-printing primary; a sed script that writes or runs (`w`, `e`, `-f`).
+#
+# READS (orchestrator additions 2026-10-03). A read prints no line, so a read whose file the
+# text does not name is `?`: an operand of cat, ls, head, tail, grep, wc, a git reader or find,
+# or an input redirect `<`, that still holds a variable, substitution, glob, brace or leading
+# `~` after expansion, or that came from a substituted literal (`d=.ssh; cat ~/$d/id`).
+# Options and grep s pattern are not operands. `find -L`, `-H` and `-follow` are `?`: they walk
+# through symlinks to places the roots do not name.
+#
+# WHERE A PATH IS READ AGAINST. A cd counts only where the text proves it ran (fx_step): a
+# relative path after a cd whose list ended on `;`, a newline or `||` is `?`, because a failed
+# cd leaves the shell where it was. The same holds for a cd in a loop, `! cd`, and readings of a
+# loop variable that end in different directories.
+#
+# TEXT THE SEGMENTER MAY MISPLACE, read before any segment (fx_text and the heredoc pass): a
+# heredoc whose delimiter, comment or open quote the reader does not place, `$'...'`, a quote
+# inside `${...}`, a carriage return, a `#` comment in a segment that spans lines, a heredoc
+# inside `sh -c`, a function definition (it may shadow any command here, cd included), and an
+# assignment to PATH, CDPATH, IFS, ENV, BASH_ENV, SHELLOPTS, BASHOPTS, LD_*, DYLD_*, GIT_* or a
+# variable the resolver expands. Each is `?`. A function definition, `$'...'`, a quote inside
+# `${...}`, a carriage return and a heredoc inside `sh -c` also stop the walk at that depth.
+#
+# NO APOSTROPHE MAY APPEAR IN THIS TEXT, for the reason CMD_RUN_NORM_AWK gives.
+_CMD_EFFECTS_AWK='
+    # THE PURE-READER TABLE, the one list of commands whose argv writes and deletes nothing.
+    # Short on purpose: a reader missing from it costs a denial, a writer in it is a hole.
+    # A git subcommand is listed as git:<sub>.
+    function fx_init(   R, n, x) {
+      n = split("cat ls head tail grep wc echo printf test [ true pwd date find git:status git:log git:diff git:show git:rev-parse", R, " ")
+      for (x = 1; x <= n; x++) FX_READ[R[x]] = 1
+      FX_LOST = "\001"
+    }
+    # wt_expand, until the text assigns a variable it reads from the environment; after that a
+    # `~` or `$` word stays as typed, and fx_emit reads it as unknown.
+    function fx_expand(w) { return (FX_NOEXP ? w : wt_expand(w)) }
+    # 1 when s ends inside a quote. Jumps from one quote or backslash to the next by index(),
+    # and across each quoted run by cmdnorm_qend, the way segments() reads it.
+    function fx_open_quote(s,   L, i, t, a, b, d, j, c) {
+      L = length(s); i = 1
+      while (i <= L) {
+        t = substr(s, i); a = index(t, "\047"); b = index(t, "\""); d = index(t, "\\")
+        j = 0
+        if (a && (!j || a < j)) j = a
+        if (b && (!j || b < j)) j = b
+        if (d && (!j || d < j)) j = d
+        if (!j) return 0
+        i += j - 1; c = substr(s, i, 1)
+        if (c == "\\") { i += 2; continue }
+        i = cmdnorm_qend(s, i, c, 1)
+        if (i > L) return 1
+        i++
+      }
+      return 0
+    }
+    # Text the segmenter may split where the shell does not, which can carry a command into a
+    # quote or a comment, or text that makes a listed command something else. Read once per
+    # walk, at every depth; when it answers, nothing at that depth is read, because no path
+    # read from it could be trusted.
+    function fx_text(s, depth, k,   r, j) {
+      r = ""
+      # `name()` or `function name`: segments() leaves the bare name closed by `(`, then an
+      # empty segment closed by `)`.
+      for (j = 1; j <= k && r == ""; j++)
+        if (trim(WX[depth, j, 1]) ~ /^function[ \t]/ \
+            || (j < k && WSK[depth, j] == "(" && trim(WX[depth, j, 1]) ~ /^[A-Za-z_][A-Za-z0-9_]*$/ && trim(WX[depth, j + 1, 1]) == "" && WSK[depth, j + 1] == ")"))
+          r = "defines a function, which may shadow a command"
+      if (r == "" && index(s, "$\047")) r = "ANSI-C quoting the segmenter does not read"
+      if (r == "" && s ~ /\$\{[^}]*[\047"]/) r = "a quote inside a parameter expansion the segmenter does not read"
+      if (r == "" && index(s, "\r")) r = "a carriage return, which the shell keeps inside a word"
+      if (r == "" && depth > 0 && index(s, "<<")) r = "a heredoc inside sh -c, whose body the reader does not strip"
+      if (r != "") fx_unk(r, s)
+      return (r != "")
+    }
+    # A READ OPERAND THE TEXT DOES NOT NAME (orchestrator addition 2026-10-03). A read prints
+    # no line, so `cat ~/.ss?/id_ed25519` would read as no effect at all, and the reserved table
+    # matches literal paths only. 1 when w, expanded, still holds a variable, substitution,
+    # glob, brace or leading ~.
+    function fx_rop(w,   p) { p = fx_expand(w); return (p ~ /[[$`*?{]/ || substr(p, 1, 1) == "~") }
+    # Any unresolved operand of a file reader from argv[from]. Options are not operands, and
+    # neither is grep s pattern (its first operand unless -e or -f gave one); the file an option
+    # names (-f, --file=, --exclude-from=, --files0-from=) is.
+    function fx_rargs(B, m, from,   j, w, pat, opt) {
+      pat = (B[1] == "grep"); opt = 1
+      for (j = from; j <= m; j++) {
+        w = B[j]
+        if (opt && w == "--") { opt = 0; continue }
+        if (opt && B[1] == "grep" && (w == "-e" || w == "--regexp")) { j++; pat = 0; continue }
+        if (opt && B[1] == "grep" && (w == "-f" || w == "--file")) { pat = 0; j++; if (j <= m && fx_rop(B[j])) return 1; continue }
+        if (opt && w ~ /^--(file|exclude-from|files0-from)=/) { if (B[1] == "grep" && w ~ /^--file=/) pat = 0; if (fx_rop(substr(w, index(w, "=") + 1))) return 1; continue }
+        if (opt && B[1] == "grep" && w ~ /^(-e.|--regexp=)/) { pat = 0; continue }
+        if (opt && w ~ /^-./) continue
+        if (pat) { pat = 0; continue }
+        if (fx_rop(w)) return 1
+      }
+      return 0
+    }
+    function fx_flat(s) {
+      if (length(s) > 300) s = substr(s, 1, 300) "..."
+      gsub(/[\t\r\n]+/, " ", s)
+      return trim(s)
+    }
+    function fx_unk(r, s,   k) {
+      r = fx_flat(r); s = fx_flat(s); k = r "\t" s
+      if (k in FX_SEEN) return
+      FX_SEEN[k] = 1
+      print "?\t" r "\t" s
+    }
+    # A W or D line for w, resolved as wt_emit resolves it, or a ? when the shell still has
+    # something to decide about the path.
+    function fx_emit(tag, w, cwd,   p, c) {
+      if (w == "") return
+      p = fx_expand(w)
+      if (substr(p, 1, 1) != "/" && !wt_rooted(p)) {
+        if (cwd == FX_LOST) { fx_unk("a relative target after a directory the text cannot name: " w, FX_SEG); return }
+        c = fx_expand(cwd)
+        if (c != "") p = c "/" p
+        if (!wt_rooted(p) && WT_BASE != "") p = WT_BASE "/" p
+      }
+      if (p ~ /[[$`*?{]/ || substr(p, 1, 1) == "~") { fx_unk("a variable, substitution or pattern in the target: " w, FX_SEG); return }
+      if (p ~ /[\001-\037]/) { fx_unk("a control character in the target", FX_SEG); return }
+      if (substr(p, 1, 1) != "/") { fx_unk("a relative target and no cwd: " w, FX_SEG); return }
+      p = tag "\t" wt_norm(p)
+      if (!(p in FX_SEEN)) { FX_SEEN[p] = 1; print p }
+    }
+    # The directory a cd, pushd or popd moves to. One the text cannot name is FX_LOST, and
+    # every relative path after it is unknown rather than read against the wrong directory.
+    function fx_cd(B, m, cwd, t,   j, d) {
+      if (B[1] == "popd") { fx_unk("popd: a directory the text cannot name", t); return FX_LOST }
+      for (j = 2; j <= m && B[j] ~ /^-[LPe@]+$/; j++) ;
+      if (j <= m && B[j] == "--") j++
+      if (j > m && B[1] == "pushd") { fx_unk("pushd: a directory the text cannot name", t); return FX_LOST }
+      d = (j <= m ? B[j] : "~")
+      if (d == "-" || d ~ /^[+-][0-9]+$/) { fx_unk(B[1] " " d ": a directory the text cannot name", t); return FX_LOST }
+      d = fx_expand(d)
+      if (d ~ /[[$`*?{]/ || substr(d, 1, 1) == "~") { fx_unk("a cd to a variable or pattern: " d, t); return FX_LOST }
+      if (substr(d, 1, 1) == "/") return d
+      if (cwd == FX_LOST) return FX_LOST
+      return (cwd == "" ? d : cwd "/" d)
+    }
+    function fx_shell(B, m, cwd, depth, t,   j, c) {
+      c = 0
+      for (j = 2; j <= m && B[j] ~ /^[-+]./ && B[j] != "--"; j++) {
+        if (B[j] ~ /^-[A-Za-z]*c[A-Za-z]*$/) c = 1
+        else if (B[j] ~ /^[-+][oO]$/ || B[j] == "--rcfile" || B[j] == "--init-file") j++
+      }
+      if (j <= m && B[j] == "--") j++
+      if (!c) { fx_unk("a shell reading a script, stdin or a heredoc: " B[1], t); return }
+      if (j > m) return
+      if (depth >= 2) { fx_unk("a third nested shell: the reader stops at two", t); return }
+      wt_run(B[j], cwd, depth + 1)
+    }
+    function fx_git(B, m, t,   j, s) {
+      for (j = 2; j <= m && B[j] ~ /^-/; j++) {
+        if (B[j] == "-c" || B[j] ~ /^--config-env/) { fx_unk("git -c sets config that can run a command", t); return }
+        if (B[j] ~ /^--exec-path=/) { fx_unk("git --exec-path runs git programs from elsewhere", t); return }
+        if (B[j] == "-C" || B[j] == "--git-dir" || B[j] == "--work-tree" || B[j] == "--namespace") j++
+      }
+      s = (j <= m ? B[j] : "")
+      if (!(("git:" s) in FX_READ)) { fx_unk("git " s " is not a known reader", t); return }
+      if (FX_EXP || fx_rargs(B, m, 2)) FX_ROPA = 1
+      for (j++; j <= m; j++) if (B[j] ~ /^--output(=|$)/) { fx_unk("git " s " --output writes a file", t); return }
+    }
+    # find: its roots are read operands, and -delete deletes each. -L, -H and -follow walk
+    # through symlinks to places the roots do not name (orchestrator addition 2026-10-03:
+    # every worktree holds a .bionic link into shared state), so they are unknown.
+    function fx_find(B, m, cwd, t,   j, nr, RT, del, fl) {
+      fl = 0
+      for (j = 2; j <= m && B[j] ~ /^-[HLPEXdsx]+$/; j++) if (B[j] ~ /[HL]/) fl = 1
+      nr = 0
+      for (; j <= m; j++) {
+        if (B[j] == "-f" && j < m) { RT[++nr] = B[++j]; continue }
+        if (B[j] ~ /^-/ || B[j] == "(" || B[j] == "!" || B[j] == ")") break
+        RT[++nr] = B[j]
+      }
+      del = 0
+      for (; j <= m; j++) {
+        if (B[j] ~ /^-(exec|execdir|ok|okdir)$/) { fx_unk("find runs a command", t); return }
+        if (B[j] ~ /^-(fprint|fprint0|fprintf|fls)$/) { fx_unk("find writes a file", t); return }
+        if (B[j] == "-delete") del = 1
+        if (B[j] == "-follow") fl = 1
+      }
+      if (fl) { fx_unk("find follows symlinks", t); return }
+      for (j = 1; j <= nr; j++) if (fx_rop(RT[j])) FX_ROPA = 1
+      if (FX_EXP) FX_ROPA = 1
+      if (!del) return
+      if (nr == 0) RT[++nr] = "."
+      for (j = 1; j <= nr; j++) fx_emit("D", RT[j], cwd)
+    }
+    # rm, rmdir, unlink and the mv sources; rmdir -p removes each parent the operand names.
+    function fx_del(B, m, cwd,   j, w, opt, par, np, P, tdir) {
+      opt = 1; par = 0; np = 0; tdir = ""
+      for (j = 2; j <= m; j++) {
+        w = B[j]
+        if (opt && w == "--") { opt = 0; continue }
+        if (opt && B[1] == "mv" && (w == "-t" || w == "--target-directory" || w == "-S" || w == "--suffix")) { j++; if (w == "-t" || w == "--target-directory") tdir = B[j]; continue }
+        if (opt && B[1] == "mv" && w ~ /^(--target-directory=|-t.)/) { tdir = w; continue }
+        if (opt && w ~ /^-./) { if (B[1] == "rmdir" && (w ~ /^-[a-z]*p/ || w == "--parents")) par = 1; continue }
+        P[++np] = w
+      }
+      if (B[1] == "mv" && tdir == "") np--
+      for (j = 1; j <= np; j++) {
+        w = P[j]; fx_emit("D", w, cwd)
+        if (par) while (sub(/\/+[^\/]*\/*$/, "", w) && w != "") fx_emit("D", w, cwd)
+      }
+    }
+    # SEGMENT i OF GROUP g AT depth, and the cwd the next segment of g inherits. A cd moves the
+    # shell only where the text proves it ran: for the rest of its `&&` chain, and after the
+    # list `cd X || exit`. A list it ends any other way leaves the shell in one of
+    # two directories, which is FX_LOST. A cd in a pipeline stage moves only that stage; a
+    # list sent to the background with `&` runs in a subshell and moves nothing; a cd in a
+    # loop moves the segments before it on the next pass, which is unknown; and readings of
+    # one segment through different literal values that end in different directories are lost.
+    function fx_step(depth, i, k, g, before,   x, c, c1, s, pv, nx) {
+      if (FXN[depth, g]) { FXS[depth, g] = before; FXC[depth, g] = 0; FXI[depth, g] = i; FXN[depth, g] = 0 }
+      for (x = 1; x <= WNX[depth, i]; x++) {
+        FX_EXP = (WX[depth, i, x] != WRAW[depth, i])
+        c1 = fx_seg(trim(WX[depth, i, x]), before, depth)
+        if (x == 1) c = c1
+        else if (c1 != c) c = FX_LOST
+      }
+      s = WSK[depth, i]; pv = (i > 1 ? WSK[depth, i - 1] : "")
+      if (c != before) {
+        if (s == "|" || s == "|&" || pv == "|" || pv == "|&") c = before
+        else {
+          FXC[depth, g] = 1
+          if (FXLP[depth]) { fx_unk("a cd inside a loop moves the segments before it on the next pass", WX[depth, i, 1]); c = FX_LOST }
+        }
+      }
+      if (FXX[depth, g] != "") { c = FXX[depth, g]; FXX[depth, g] = ""; FXC[depth, g] = 0; FXN[depth, g] = 1; return c }
+      if (s == "&&" || s == "(" || s == "|" || s == "|&") return c
+      if (s == "||") {
+        if (!FXC[depth, g]) return c
+        nx = (i < k && WG[depth, i + 1] == g ? WSK[depth, i + 1] : "-")
+        if (c != before && FXI[depth, g] == i && trim(WX[depth, i + 1, 1]) ~ /^exit([ \t]|$)/ && (nx == ";" || nx == "\n" || nx == "")) {
+          FXX[depth, g] = c; return before
+        }
+        return FX_LOST
+      }
+      FXN[depth, g] = 1
+      if (s == "&") return FXS[depth, g]
+      return (FXC[depth, g] ? FX_LOST : c)
+    }
+    # One segment: its write redirects, then its argv after the transparent prefixes. Returns
+    # the cwd the segments after it inherit. A segment holding a command or process
+    # substitution is not read further: its words are not the words the shell will see, so
+    # neither is any path in it, nor the directory a cd in it names.
+    function fx_seg(t, cwd, depth,   W, K, n, j, A, m, i, w, B, sv, neg) {
+      if (index(t, "$(") || index(t, "`") || index(t, "<(") || index(t, ">(")) {
+        fx_unk("a command substitution runs a command the reader does not read", t)
+        return FX_LOST
+      }
+      # A comment line runs nothing. One holding a quote or an escape is not read as one: the
+      # segmenter may have carried the next line into it.
+      if (substr(t, 1, 1) == "#" && t !~ /[\047"\\\n]/) return cwd
+      if (index(t, "\n") && t ~ /(^|[ \t\n])#/) { fx_unk("a comment inside a segment that spans lines", t); return FX_LOST }
+      sv = FX_SEG; FX_SEG = t; neg = 0; FX_ROPA = 0
+      n = wt_tok(t, W, K); m = 0
+      for (j = 1; j <= n; j++) {
+        if (K[j] == "I" && W[j] == "<" && j < n && K[j + 1] == "W" && fx_rop(W[j + 1])) FX_ROPA = 1
+        if (K[j] == "R" || K[j] == "I") { if (K[j] == "R" && j < n && K[j + 1] == "W") fx_emit("W", W[j + 1], cwd); j++; continue }
+        if (K[j] == "W") A[++m] = W[j]
+      }
+      for (i = 1; i <= m; i++) {
+        w = A[i]
+        if (w ~ /^(HOME|BIONIC_CLAUDE_HOME|CLAUDE_CONFIG_DIR)[+]?=/) FX_NOEXP = 1
+        if (w ~ /^(HOME|BIONIC_CLAUDE_HOME|CLAUDE_CONFIG_DIR|PATH|CDPATH|IFS|ENV|BASH_ENV|SHELLOPTS|BASHOPTS|LD_[A-Z0-9_]*|DYLD_[A-Z0-9_]*|GIT_[A-Z0-9_]*)[+]?=/)
+          fx_unk("assigns a variable that moves what runs or where: " w, t)
+        if (w == "!") neg = 1
+        if (w ~ /^[A-Za-z_][A-Za-z0-9_]*[+]?=/ || w ~ /^([{}()!]|then|else|elif|do|done|fi|if|while|until|esac)$/) continue
+        if (w ~ /^(env|command|exec|nohup|setsid)$/) {
+          if (i < m && A[i + 1] ~ /^-/) { fx_unk("an option of " w " the reader does not parse", t); FX_SEG = sv; return cwd }
+          continue
+        }
+        if (w == "time") { if (A[i + 1] == "-p") i++; continue }
+        if (w == "nice") {
+          if (A[i + 1] == "-n" || A[i + 1] == "--adjustment") i += 2
+          else if (A[i + 1] ~ /^(-n?-?[0-9]+|--adjustment=.*)$/) i++
+          continue
+        }
+        if (w == "timeout" || w == "gtimeout") {
+          for (i++; i <= m && A[i] ~ /^-/; i++) if (A[i] ~ /^(-s|-k|--signal|--kill-after)$/) i++
+          if (A[i] ~ /^[0-9.]+[smhd]?$/) continue
+          fx_unk("a timeout the reader does not parse", t); FX_SEG = sv; return cwd
+        }
+        break
+      }
+      m = m - i + 1
+      for (j = 1; j <= m; j++) B[j] = A[i + j - 1]
+      if (neg && m > 0 && base(B[1]) ~ /^(cd|pushd|popd)$/) { fx_unk("a negated cd: what follows runs where it failed", t); FX_SEG = sv; return FX_LOST }
+      if (m > 0) cwd = fx_argv(B, m, cwd, depth, t)
+      if (FX_ROPA) fx_unk("unresolved read operand", t)
+      FX_ROPA = 0
+      FX_SEG = sv
+      return cwd
+    }
+    function fx_argv(B, m, cwd, depth, t,   b, d, j) {
+      b = B[1]
+      if (index(b, "/")) {
+        d = b; sub(/\/[^\/]*$/, "", d)
+        if (d !~ /^(\/usr(\/local)?|\/opt\/homebrew)?\/s?bin$/) { fx_unk("runs a script: " b, t); return cwd }
+        b = base(b); B[1] = b
+      }
+      if (b == "cd" || b == "pushd" || b == "popd") return fx_cd(B, m, cwd, t)
+      # A loop or case header names words, and exit or return ends the shell: none acts on a file.
+      if (b == "for" || b == "select" || b == "case" || b == "exit" || b == "return") return cwd
+      if (b ~ /^(ba|z|k|da)?sh$/) { fx_shell(B, m, cwd, depth, t); return cwd }
+      if (b == "git") { fx_git(B, m, t); return cwd }
+      if (b == "find") { fx_find(B, m, cwd, t); return cwd }
+      if (b in FX_READ) {
+        if (b ~ /^(cat|ls|head|tail|grep|wc)$/ && (FX_EXP || fx_rargs(B, m, 2))) FX_ROPA = 1
+        if (b == "date") for (j = 2; j <= m; j++) if (B[j] ~ /^(-s|--set)/ || B[j] !~ /^[-+]/) fx_unk("date may set the clock", t)
+        return cwd
+      }
+      if (b == "rm" || b == "rmdir" || b == "unlink") { fx_del(B, m, cwd); return cwd }
+      if (b == "mv") { fx_del(B, m, cwd); wt_argv(B, m, cwd); return cwd }
+      if (b == "sed") {
+        for (j = 2; j <= m; j++) {
+          if (B[j] == "-f" || B[j] ~ /^--file/ || B[j] ~ /^-[nrsuzE]*f/) { fx_unk("sed reads its script from a file", t); return cwd }
+          if (B[j] ~ /(^|[^A-Za-z])[wW][ \t]+[^ \t]/ || B[j] ~ /(^|[^A-Za-z])e([ \t;}]|$)/) { fx_unk("a sed script that writes or runs", t); return cwd }
+        }
+        wt_argv(B, m, cwd); return cwd
+      }
+      if (b == "tee" || b == "touch" || b == "mkdir" || b == "cp" || b == "ln") { wt_argv(B, m, cwd); return cwd }
+      if (b == "eval") { fx_unk("eval runs text the reader does not read", t); return cwd }
+      if (b == "source" || b == ".") { fx_unk("source runs a file the reader does not read", t); return cwd }
+      if (b == "xargs") { fx_unk("xargs takes its targets from stdin", t); return cwd }
+      if (b ~ /^(python[0-9.]*|perl[0-9.]*|ruby|node|nodejs|deno|bun|php|lua|Rscript|osascript|tclsh|pwsh|awk|gawk|mawk|nawk)$/) {
+        fx_unk("an interpreter body or a heredoc fed to one: " b, t); return cwd
+      }
+      fx_unk("not a known reader or writer: " b, t)
+      return cwd
+    }
+'
+
+# The names the shared walk calls when FX is set, for every mode that never sets it.
+_CMD_EFFECTS_STUBS='
+    function fx_init() { }
+    function fx_open_quote(s) { return 0 }
+    function fx_unk(r, s) { }
+    function fx_emit(tag, w, cwd) { }
+    function fx_text(s, depth, k) { return 0 }
+    function fx_step(depth, i, k, g, before) { return before }
+'
+
+cmd_effects() {  # <command> [<cwd>] -> W/D<TAB><absolute path> or ?<TAB><reason><TAB><segment> per line (D5, REQ-2)
+  printf '%s' "${1-}" | _CMD_WT_CWD="${2-}" _cmd_class_awk effects
+  return 0
 }
 
 cmd_backgrounded() {  # <command> -> 0 when the TEXT backgrounds it, 1 otherwise (D8, REQ-6)
