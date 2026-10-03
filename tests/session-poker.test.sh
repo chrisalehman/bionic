@@ -293,8 +293,22 @@ armed_ago() {  # <repo> [seconds ago, default 3600]
 # ---------- running the poker (same watchdog shape as tests/session-sweeper.test.sh) ----------
 
 POKE_BOUND=20
+# A TICK RUNS ON A SESSION'S OWN RUN (wave-23-fixit-1810, REQ-1, D1; T11). An UNBOUND session
+# gets the advisory and no run, so a fixture that engages with an empty marker and then asks
+# the tick about the plan beside it would be asking an unbound session about someone else's
+# run. `poke_bind` binds the empty marker to the library's open run for the drive, as
+# cross-gate-agreement's `cg_eg_bind` does for the gate; a case that WANTS the unbound
+# session sets POKE_UNBOUND=1 (§18c).
+poke_bind() {  # <repo> -> binds an empty engaged marker to the root's open run, if there is one
+  local m p; m="$(marker_of "$1")"
+  [ -f "$m" ] && [ ! -L "$m" ] && [ ! -s "$m" ] || return 0
+  p="$(bash -c '. "$1/run.sh" 2>/dev/null && active_run "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$1" 2>/dev/null)" || p=""
+  [ -n "$p" ] && bound_marker "$1" "$SID" "$p"
+  return 0
+}
 poke() {  # <repo> <args...> -> sets OUT, RC
   local repo="$1"; shift
+  case "${1:-}" in tick|fill-report) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
   ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "$@" ) \
     > "$TMPROOT/poke.out" 2>&1 &
   local p=$! i=0
@@ -3941,10 +3955,13 @@ expect_absent   "…a bound session never falls through to a fallback (AC-6)" \
 R18C="$(make_repo s18-unbound)"; new_roster "$R18C"
 armed_ago "$R18C"
 P18C="$(plan_at "$R18C" 'epic-18/run-only.plan.md' "$(plan_body 4)")"
-poke "$R18C" tick
+POKE_UNBOUND=1 poke "$R18C" tick
 expect_contains "an unbound session says which resolution it used" \
   "poker: run resolved by newest-plan fallback (session unbound) — $(real_path_of "$P18C")" "$OUT"
-expect_contains "…and decides exactly what it decided before this wave" "decision=QUIET" "$OUT"
+expect_contains "…and says how to bind (wave-23 D1: announced, never acted on)" \
+  "bind with session-poker.sh bind $(real_path_of "$P18C")" "$OUT"
+expect_contains "…and decides QUIET: no run, so the Patrol keeps its stamp" "decision=QUIET" "$OUT"
+expect_absent   "…never over <p>'s step: no run is read for it" "is at current:" "$OUT"
 expect_absent   "…never DISARM on an open run" "decision=DISARM" "$OUT"
 expect_absent   "…and it is not confused with a closed binding" "bound plan closed" "$OUT"
 
@@ -3963,6 +3980,32 @@ expect_eq       "…and still removes the stamp" "no" \
   "$([ -e "$(stamp_of "$R18D")" ] && echo yes || echo no)"
 expect_absent   "…and announces no fallback: there was no open run to fall back to" \
   "newest-plan fallback" "$OUT"
+
+# ---------- 18e: resolve_run under `fallback` resolves NO run (wave-23-fixit-1810, T11) ----------
+# The unit read of what 18c reads through the tick. `fallback <p>` is announced and never
+# acted on, so the two output variables are the ones a session with no run gets: no plan, not
+# open. The function is extracted as text and driven with `session_run` stubbed, so the
+# assertion is on the variables themselves rather than on a decision line downstream.
+R18E_FN="$(sed -n '/^resolve_run() {/,/^}/p' "$POKER")"
+r18e() {  # <session_run answer> -> "<plan>|<open>|<stderr>" after resolve_run
+  bash -c '
+    die() { printf "poker: %s\n" "$1" >&2; }
+    run_unbound_advisory() { printf "ADVISORY %s" "$1"; }
+    session_run() { printf "%s" "$SR_ANSWER"; }
+    active_plan() { printf "/must/not/be/read"; }
+    POKER_RUN_PLAN=""; POKER_RUN_OPEN=no; POKER_RUN_RESOLVED=no
+    eval "$FN"
+    resolve_run /r sid 2>"$ERRF"
+    printf "%s|%s|%s" "$POKER_RUN_PLAN" "$POKER_RUN_OPEN" "$(cat "$ERRF")"
+  ' _ 2>&1
+}
+export FN="$R18E_FN" ERRF="$TMPROOT/r18e.err"
+R18E_OUT="$(SR_ANSWER='fallback /x/other.plan.md' r18e)"
+expect_eq "resolve_run under fallback: no plan, not open, advisory on stderr" \
+  "|no|poker: ADVISORY /x/other.plan.md" "$R18E_OUT"
+R18E_OUT="$(SR_ANSWER='bound-open /x/mine.plan.md' r18e)"
+expect_eq "resolve_run under bound-open (control): the plan, open, silent" \
+  "/x/mine.plan.md|yes|" "$R18E_OUT"
 
 # ---------- 18e: the scheduler reads the same run ----------
 # The tick has two plan readers — the run-state read above and the FILL scheduler's budget
@@ -5143,6 +5186,7 @@ section "Section 27: the tick's VERDICT — cadence liveness, the FILL band, not
 S27_OUT=""; S27_ERR=""
 poke_split() {  # <repo> <args...> -> sets S27_OUT (stdout), S27_ERR (stderr), RC
   local repo="$1"; shift
+  case "${1:-}" in tick|fill-report) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
   ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "$@" ) \
     > "$TMPROOT/s27.out" 2> "$TMPROOT/s27.err"
   RC=$?

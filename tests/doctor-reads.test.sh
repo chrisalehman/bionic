@@ -847,7 +847,21 @@ expect_match "20.1: a clean project renders the auto-memory row ✓" \
 # facts; "off" is the ENVIRONMENT row's claim, and that row can say the switch is unset on
 # this same page.
 expect_contains "20.1b: …and says what it checked, not that auto memory is off" \
-  "no override in this project's settings, no memory files under its slug" "$(am_row "$OUT20A")"
+  "no override in project settings, no memory files under its slug" "$(am_row "$OUT20A")"
+# ALIGNED WITH THE ROWS BESIDE IT (wave-23 T11, review). The value starts in the same
+# column as the active-run row's, which is the column of every `_doctor_item` row and of the
+# ✗ auto-memory row, and the row stays inside the page's 100-column bound.
+am_col() {  # <report> <label> -> width of the row's text up to where its value starts
+  # The glyph is 3 bytes for ✓ and – alike, so the count is the same under any locale.
+  local row prefix
+  row="$(printf '%s\n' "$1" | grep -E "^  . $2 " | head -1)"
+  prefix="$(printf '%s' "$row" | sed -E "s/^(  . $2 +).*/\\1/")"
+  printf '%s' "${#prefix}"
+}
+expect_eq "20.1b2: …its value starts in the column the active-run row's does" \
+  "$(am_col "$OUT20A" "active run")" "$(am_col "$OUT20A" "auto-memory")"
+expect_eq "20.1b3: …and the row fits the 100-column bound" "yes" \
+  "$([ "$(am_row "$OUT20A" | awk '{ print length($0) }')" -le 100 ] && echo yes || echo no)"
 expect_absent "20.1c: …never the old \"off for this project\"" \
   "off for this project" "$OUT20A"
 # THE ROW PRINTS UNDER THE PROJECT'S OWN HEADER, beside the run and its predecessors, not

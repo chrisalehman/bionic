@@ -1659,10 +1659,10 @@ if [ "$AUTO_MEMORY_FIRES" = "yes" ]; then
 elif [ "$AUTO_MEMORY_OVERRIDE" = "unknown" ]; then
   _run_add "$(_doctor_item "$DOCTOR_NIL" "$(bionic_check_label auto-memory)" "project settings unreadable (jq missing, or a file does not parse)")"
 else
-  # NOT `_doctor_item`: its label cell is 30 columns, which pushes this sentence past the
-  # page's 100-column bound (the ✗ row is the one exempt line), and its cut would end the
-  # claim at "under it…". Label, two spaces, sentence: 87 columns, whole.
-  _run_add "$(printf '  %s %s  %s' "$DOCTOR_OK" "$(bionic_check_label auto-memory)" "no override in this project's settings, no memory files under its slug")"
+  # NOT `_doctor_item`: its cut would end the claim at "under it…". The same 30-column label
+  # cell as every row beside it and the ✗ row above, so the value starts in the column
+  # theirs do, and the sentence is worded to fit the page's 100-column bound whole: 98.
+  _run_add "$(_doctor_rtrim "$(printf '  %s %-30s %s' "$DOCTOR_OK" "$(bionic_check_label auto-memory)" "no override in project settings, no memory files under its slug")")"
 fi
 
 # LEGACY `.bionic` SYMLINKS (AC-11, narrowed by AC-7.1/A-orch-24, wave-13-fixit-180).
