@@ -3624,4 +3624,78 @@ expect_eq "R4c …exercised: it reads a mid-record pointer by key, real call, re
 # A rename that broke the caller rather than only the name would already have reddened R3;
 # nothing further needs to run here.
 
+# ============================================================
+section "§SPLICE — the Edit projection is byte-exact against python str.replace (wave-24 T4, AC-5.2)"
+# ============================================================
+#
+# fails-when: a byte of the projected body differs from python's `str.replace` on the same
+# file and strings, or the applied flag disagrees with python's occurrence count.
+#
+# THE FUNCTION ITSELF, EXTRACTED FROM THE HOOK (the tests/refuse.test.sh :532 idiom), because
+# the hook prints a verdict, never the body it judged — and a verdict-level test can only see
+# a byte that happens to change a verdict. `_gs_edit_project` is the whole splice
+# (canonical-sdlc-governing-skill.sh; REQ-5, D6): one `jq --rawfile` split/join. It runs under
+# /bin/bash and under every bash >= 5.2 this machine has, because the shell form it replaced
+# read `&` differently on the two (8.1g/8.1h above).
+#
+# THE REFERENCE IS PYTHON, reading and writing bytes, so neither side is a shell. Each case is
+# a file, an Edit payload and the body python would leave: `replace(o, n)` under replace_all,
+# `replace(o, n, 1)` when `o` occurs once, and the file unchanged otherwise.
+SPLICE_FN="$(sed -n '/^_gs_edit_project() {/,/^}/p' "$HOOK")"
+expect_nonempty "SPLICE.0 the splice function is extractable from the hook" "$SPLICE_FN"
+SPLICE_DIR=$(mktemp -d); cleanup_dirs+=("$SPLICE_DIR")
+python3 - "$SPLICE_DIR" <<'PY_SPLICE'
+import json, os, sys
+d = sys.argv[1]
+cases = {
+    "amp":      (b"| T1 | a raw | pipe | pending |\nrest\n", "a raw | pipe", "x & y && z", False),
+    "bslash":   (b"path a\\b and \\| here\n", "a\\b and \\|", "c\\\\d \\| \\n", False),
+    "trailnl":  (b"first\nlast line\n\n\n", "last line\n\n\n", "last line\nadded\n\n", False),
+    "crlf":     (b"one\r\ntwo\r\nthree\r\n", "two\r\n", "TWO\nand\r\n", False),
+    "all":      (b"x & x \\ x\nx\n", "x", "&\\", True),
+    "notuniq":  (b"dup dup\n", "dup", "one", False),
+    "absent":   (b"nothing here\n", "missing", "x", False),
+    "utf8":     (b"\xe2\x80\x94 em \xe2\x80\x94 dash\n", "em —", "EM—", False),
+}
+for name, (body, o, n, a) in cases.items():
+    c = os.path.join(d, name)
+    os.mkdir(c)
+    open(os.path.join(c, "file"), "wb").write(body)
+    json.dump({"tool_name": "Edit", "tool_input": {"file_path": os.path.join(c, "file"),
+               "old_string": o, "new_string": n, "replace_all": a}},
+              open(os.path.join(c, "payload.json"), "w"))
+    text = body.decode("utf-8")
+    k = text.count(o)
+    if k >= 1 and (a or k == 1):
+        out, flag = (text.replace(o, n) if a else text.replace(o, n, 1)), "1"
+    else:
+        out, flag = text, "0"
+    open(os.path.join(c, "ref"), "wb").write(out.encode("utf-8"))
+    open(os.path.join(c, "ref_flag"), "w").write(flag)
+PY_SPLICE
+
+SPLICE_SHELLS="/bin/bash"
+if GS_BASH52=$(gs_find_bash52); then SPLICE_SHELLS="/bin/bash $GS_BASH52"; fi
+for _sp_sh in $SPLICE_SHELLS; do
+  for _sp_case in amp bslash trailnl crlf all notuniq absent utf8; do
+    _sp_c="$SPLICE_DIR/$_sp_case"
+    "$_sp_sh" -c 'BIONIC_INPUT=$(cat "$1/payload.json"); eval "$2"
+      _gs_edit_project "$1/file"
+      printf "%s" "$CONTENT" > "$1/got"; printf "%s" "$EDIT_APPLIED" > "$1/got_flag"' \
+      _ "$_sp_c" "$SPLICE_FN" || true
+    expect_true "SPLICE $_sp_case [$_sp_sh]: the projected body equals python's, byte for byte" \
+      cmp -s "$_sp_c/ref" "$_sp_c/got"
+    expect_eq "SPLICE $_sp_case [$_sp_sh]: the applied flag agrees" \
+      "$(cat "$_sp_c/ref_flag")" "$(cat "$_sp_c/got_flag" 2>/dev/null || true)"
+    rm -f "$_sp_c/got" "$_sp_c/got_flag"
+  done
+done
+# THE COMPARISON CAN FAIL: a body one byte off is not equal. Without this row a `cmp` that
+# answered 0 for anything would carry every case above.
+printf 'x' >> "$SPLICE_DIR/amp/ref"
+"$(printf '%s' "$SPLICE_SHELLS" | cut -d' ' -f1)" -c 'BIONIC_INPUT=$(cat "$1/payload.json"); eval "$2"
+  _gs_edit_project "$1/file"; printf "%s" "$CONTENT" > "$1/got"' _ "$SPLICE_DIR/amp" "$SPLICE_FN" || true
+expect_false "SPLICE.ctl a reference one byte longer does not compare equal" \
+  cmp -s "$SPLICE_DIR/amp/ref" "$SPLICE_DIR/amp/got"
+
 finish

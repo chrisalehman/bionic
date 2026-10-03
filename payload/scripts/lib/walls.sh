@@ -174,16 +174,67 @@ wall_libs() {  # <wall name> <basename>… -> 0 all sourced · 1 one named, call
 #
 # IT ASSIGNS RATHER THAN PRINTS, so no caller needs a command substitution: the
 # pipeline it replaces cost three forks and the `$( )` around it a fourth.
+#
+# THE WORDS GO INTO AN ARRAY AND COME OUT JOINED ONCE (wave-24-fixit-1811 T4; REQ-5,
+# D6). The loop this replaces appended each word to a growing string, which copies the
+# whole string per word: a 64 KB command took seconds under bash 3.2 AND under 5.3
+# (research-R2 addendum; tests/hook-timeout.test.sh row b). `"${_ws[*]}"` joins with
+# the first character of IFS, so IFS narrows to one space for the join and only then.
+# `-` keeps an empty array from tripping `set -u` on bash 3.2.
+#
+# A LEADING CR, VT OR FF IS AN EMPTY FIRST WORD. Those three are IFS characters but not
+# IFS whitespace, so the shell splits an empty field in front of them; the loop never
+# printed a separator while its output was still empty, and the join does. A word never
+# holds a space, so every leading space of the join is one of those empty words, and
+# removing that run gives the loop's output byte for byte. It is removed by `sed`, one
+# fork on a command that starts with one of those three characters and on no other: the
+# shell's own `${v#"${v%%[! ]*}"}` is quadratic in the run on bash 3.2 (30 000 of them
+# took 2 s).
 _WALL_FLAT=""
 _wall_flatten() {  # <text> -> sets _WALL_FLAT
-  local _w _out="" _glob=0 IFS=$' \t\n\r\v\f'
+  local _glob=0 IFS=$' \t\n\r\v\f'
+  local -a _ws
   case $- in *f*) _glob=1 ;; esac
   set -f
-  for _w in $1; do
-    if [ -z "$_out" ]; then _out="$_w"; else _out="$_out $_w"; fi
-  done
+  _ws=($1)
   [ "$_glob" = 1 ] || set +f
-  _WALL_FLAT="$_out"
+  IFS=' '
+  _WALL_FLAT="${_ws[*]-}"
+  case "$_WALL_FLAT" in ' '*) _WALL_FLAT=$(printf '%s' "$_WALL_FLAT" | LC_ALL=C sed 's/^ *//') ;; esac
+}
+
+# ─── _wall_screen — the command with quotes and backslashes gone, once ─────
+#
+# Sets `_WALL_STRIPPED` to `$1` with every backslash-NEWLINE pair removed, then every
+# remaining `\`, `'` and `"`. That is the text the screens below look for a word in —
+# `_wall_mentions_git` (three callers), `_wall_cmd_fill`'s tier-2 screen, `_eg_placed`'s
+# disqualifier and the poker-verb screen — and each of them used to strip it again for
+# itself with three or four `${v//…/}` passes (wave-24-fixit-1811 T4; REQ-5, D6).
+#
+# WHY ONE awk PASS AND NOT `${v//…/}`. bash 3.2 pays matches × length for `${v//x/}`:
+# a 7.7 K command holding 1,618 single quotes took 5 s for ONE such pass, a 64 KB heredoc
+# over two minutes, and every hook runs under a 10 s timeout that fails open (research-R2
+# §1, §4). awk deletes the same bytes in one pass. It runs under `LC_ALL=C` because all
+# three characters are ASCII and no UTF-8 continuation byte can equal one of them. A line
+# that ends in a backslash loses its newline with it, which is the continuation rule the
+# old first pass spelled `${_p//\\$'\n'/}` (wave-14 T24, security 1b).
+#
+# THE CACHE IS KEYED ON THE TEXT, at file scope, because bash-walls.sh runs every wall
+# in one process (`bionic_fold`) and each of them asks about the same `$COMMAND`. A
+# different text recomputes; it never reads another command's strip. A text with none of
+# the three characters is its own strip, and costs no fork.
+_WALL_SCREEN_SET=0; _WALL_SCREEN_KEY=""; _WALL_STRIPPED=""
+_wall_screen() {  # <command text> -> sets _WALL_STRIPPED
+  if [ "$_WALL_SCREEN_SET" = 1 ] && [ "$1" = "$_WALL_SCREEN_KEY" ]; then return 0; fi
+  case "$1" in
+    *[\\\'\"]*)
+      _WALL_STRIPPED=$(printf '%s' "$1" | LC_ALL=C awk '
+        { e = (substr($0, length($0)) == "\\")
+          gsub(/[\\\047"]/, "")
+          printf "%s%s", $0, (e ? "" : "\n") }') ;;
+    *) _WALL_STRIPPED="$1" ;;
+  esac
+  _WALL_SCREEN_KEY="$1"; _WALL_SCREEN_SET=1
 }
 
 # ─── _wall_mentions_git — the cheap superset of "this could be a git command" ─
@@ -215,11 +266,14 @@ _wall_flatten() {  # <text> -> sets _WALL_FLAT
 # IT IS A SCREEN, NEVER A VERDICT. A hit runs the real parser and the parser
 # decides; only a miss short-circuits, and a miss is the case the parser was
 # always going to answer "no push, no commit" to.
+#
+# THE LITERAL FIRST (wave-24-fixit-1811 T4; REQ-5, D6). Removing characters other than
+# g, i and t cannot separate a `git` that is already there, so a literal hit is the
+# same answer the strip would give, for no work. Only a miss pays for `_wall_screen`.
 _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
-  local _p="$1"
-  _p="${_p//\\$'\n'/}"
-  _p="${_p//\\/}"; _p="${_p//\'/}"; _p="${_p//\"/}"
-  case "$_p" in *git*) return 0 ;; esac
+  case "$1" in *git*) return 0 ;; esac
+  _wall_screen "$1"
+  case "$_WALL_STRIPPED" in *git*) return 0 ;; esac
   return 1
 }
 
@@ -275,7 +329,7 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 # `cmd_class` — one reader, cmd-class.sh — over the same strings as before.
 _WALL_SAFE_FLAT=""; _WALL_HEAD=""; _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
 _wall_cmd_fill() {  # <raw command text> -> sets the four values above
-  local _p _rest _seg _segs=""
+  local _rest _seg _segs=""
 
   case "$1" in
     *'<<'*) _wall_flatten "$(cmd_strip_heredocs "$1")" ;;
@@ -283,9 +337,14 @@ _wall_cmd_fill() {  # <raw command text> -> sets the four values above
   esac
   _WALL_SAFE_FLAT="$_WALL_FLAT"
 
-  _p="$_WALL_SAFE_FLAT"
-  _p="${_p//\\/}"; _p="${_p//\'/}"; _p="${_p//\"/}"
-  case "$_p" in
+  # THE SCREEN READS THE RAW COMMAND'S STRIP (`_wall_screen`, shared with every other
+  # screen in this process; wave-24-fixit-1811 T4), not a strip of its own over
+  # `_WALL_SAFE_FLAT`. That is a superset: the flat form only deletes heredoc bodies and
+  # squeezes whitespace, which can remove a word but never join one. A word found only
+  # in a heredoc body costs one head reduction, and the head — read from the flat form —
+  # still cannot start with it.
+  _wall_screen "$1"
+  case "$_WALL_STRIPPED" in
     *git*|*docker*|*npx*|*uvx*) _WALL_HEAD=$(cmd_unwrap_head "$_WALL_SAFE_FLAT") ;;
     *)                          _WALL_HEAD="" ;;
   esac
@@ -1386,9 +1445,15 @@ _eg_commit_cwd() {
       ;;
   esac
   # (2) — the leading `cd`, read off the front of the command and nowhere else.
+  #
+  # THE LEADING BLANKS COME OFF BEHIND A `case` (wave-24-fixit-1811 T4). `[ "${_c# }" != "$_c" ]`
+  # asked bash to try every prefix of the command against one space before it could answer no,
+  # and on a 64 KB command holding any multibyte character that one test cost 0.7 s under 3.2
+  # and 5.3 alike (tests/hook-timeout.test.sh row b'). A `case` on the first character answers
+  # at once, and the removal then runs only when it matches.
   _c="$COMMAND"
-  while [ "${_c# }" != "$_c" ]; do _c="${_c# }"; done
-  while [ "${_c#	}" != "$_c" ]; do _c="${_c#	}"; done
+  while :; do case "$_c" in ' '*) _c="${_c# }" ;; *) break ;; esac; done
+  while :; do case "$_c" in '	'*) _c="${_c#	}" ;; *) break ;; esac; done
   case "$_c" in
     'cd '*|'cd	'*)
       _p="${_c#cd}"
@@ -1505,28 +1570,33 @@ _eg_commit_count() {
 # it too, even inside a `git -c` value. The WHOLE text is scanned, before and after the
 # commit. Words inside a quoted commit message are read as words, which is the fail-closed
 # direction; a writer commits with `-F`.
+#
+# THE SCAN IS ONE awk PASS (wave-24-fixit-1811 T4; REQ-5, D6). In the shell it cut each
+# segment off with `${_t#*[;&|\n]}`, which bash 3.2 pays for quadratically in the distance to
+# the separator: a 7.7 K commit command spent 4.7 s here alone (tests/hook-timeout.test.sh row
+# c). The awk is the same three folds in the same order, the same cut — every empty piece it
+# adds, at a trailing separator, has the empty first word the shell loop also passed — and the
+# same leading-blank strip and first word. `LC_ALL=C` reads bytes; every character it tests is
+# ASCII. The text arrives through ENVIRON, never `-v`, which would read its backslashes.
 _eg_git_only() {
-  local _t="${1:-}" _seg _w
+  local _t="${1:-}"
   case "$_t" in
     *'sh -c'*|*'sh	-c'*) return 1 ;;
     *[\(\)\{\}\`]*) return 1 ;;
   esac
-  _t="${_t//">&"/>}"; _t="${_t//"<&"/<}"; _t="${_t//"&>"/>}"
-  while [ -n "$_t" ]; do
-    case "$_t" in
-      *[\;\&\|$'\n']*) _seg="${_t%%[;&|$'\n']*}"; _t="${_t#*[;&|$'\n']}" ;;
-      *) _seg="$_t"; _t="" ;;
-    esac
-    while [ "${_seg# }" != "$_seg" ] || [ "${_seg#	}" != "$_seg" ]; do
-      _seg="${_seg# }"; _seg="${_seg#	}"
-    done
-    _w="${_seg%%[ 	]*}"
-    case "$_w" in
-      ''|git|true|:|exit) : ;;
-      *) return 1 ;;
-    esac
-  done
-  return 0
+  _EG_GO_TEXT="$_t" LC_ALL=C awk '
+    BEGIN {
+      t = ENVIRON["_EG_GO_TEXT"]
+      gsub(/>&/, ">", t); gsub(/<&/, "<", t); gsub(/&>/, ">", t)
+      n = split(t, seg, /[;&|\n]/)
+      for (i = 1; i <= n; i++) {
+        w = seg[i]
+        sub(/^[ \t]+/, "", w)
+        sub(/[ \t].*$/, "", w)
+        if (w != "" && w != "git" && w != "true" && w != ":" && w != "exit") exit 1
+      }
+      exit 0
+    }' </dev/null
 }
 
 # _eg_placed -> 0 when the ONE commit's directory was read in a shape git obeys exactly as the
@@ -1559,9 +1629,10 @@ _eg_git_only() {
 # already judged rather than exempted (A-T6.13).
 _eg_placed() {
   local _c _sep _dq
-  _dq="${COMMAND//\"/}"
-  _dq="${_dq//\'/}"
-  _dq="${_dq//\\/}"
+  # THE SHARED STRIP (`_wall_screen`; wave-24-fixit-1811 T4). It also joins a
+  # backslash-newline, which the shell does too, so `--git-\<newline>dir` now costs
+  # the exemption as well — the fail-closed direction this copy exists for.
+  _wall_screen "$COMMAND"; _dq="$_WALL_STRIPPED"
   case "$COMMAND" in
     *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
   esac
@@ -1573,7 +1644,8 @@ _eg_placed() {
     cd)
       [ "$_EG_COMMIT_NC" -eq 0 ] || return 1
       _c="$COMMAND"
-      while [ "${_c# }" != "$_c" ] || [ "${_c#	}" != "$_c" ]; do _c="${_c# }"; _c="${_c#	}"; done
+      # Behind a `case`, as in `_eg_commit_cwd` (wave-24-fixit-1811 T4).
+      while :; do case "$_c" in ' '*) _c="${_c# }" ;; '	'*) _c="${_c#	}" ;; *) break ;; esac; done
       _sep="${_c#"${_c%%[;&|$'\n']*}"}"
       case "$_sep" in
         '&&'*) _sep="${_sep#&&}" ;;
@@ -4658,71 +4730,80 @@ exit 0
 #
 # A SCREEN FIRST: a segment holding none of `|`, `;`, `&`, `>` is one command that writes nothing
 # through a redirect, and pays for no character walk.
+# ONE awk PASS, NOT A CHARACTER LOOP IN THE SHELL (wave-24-fixit-1811 T4; REQ-5, D6). The walk
+# was `${s:i:1}` per character with `cur="$cur$c"`, and in a UTF-8 locale bash finds character
+# i by counting from the start, every time: an 8 K segment took 1.4 s under 3.2 and an 8 K run
+# of em dashes over 4 s under 5.3 (research-R2 §2.6; tests/hook-timeout.test.sh row d). The awk
+# below is the same walk, rule for rule, under `LC_ALL=C`: every character it tests is ASCII
+# and no UTF-8 continuation byte equals one, so walking bytes splits and keeps exactly what
+# walking characters did. It copies text by RUNS — `st` marks where the run that has not been
+# copied yet began, and `run()` appends it at each operator — so a long segment is copied once,
+# not once per character. The segment arrives through ENVIRON, never `-v` (which would read
+# its backslashes as escapes), and the write flag rides as the LAST byte of the output, so the
+# command substitution cannot eat a stage list that ends in a newline.
+_CHAIN_SEG_AWK='
+  function run() { if (i > st) cur = cur substr(s, st, i - st) }
+  BEGIN {
+    s = ENVIRON["_WALL_CHAIN_SEG"]; n = length(s); i = 1; st = 1; q = ""; cur = ""; w = 0
+    while (i <= n) {
+      c = substr(s, i, 1)
+      if (q != "") {
+        if (q == "\"" && c == "\\") i++
+        else if (c == q) q = ""
+        i++; continue
+      }
+      if (c == "\\") { i += 2; continue }
+      if (c == "\047" || c == "\"") { q = c; i++; continue }
+      if (c == "|" || c == ";") {
+        run(); print cur; cur = ""
+        if (c == "|" && substr(s, i + 1, 1) == "&") i++
+        i++; st = i; continue
+      }
+      if (c == "&") {
+        # `&>` is a redirect, read at its `>`; a lone `&` ends a command. Either way the
+        # `&` itself is not kept.
+        run()
+        if (substr(s, i + 1, 1) != ">") { print cur; cur = "" }
+        i++; st = i; continue
+      }
+      if (c == ">") {
+        run()
+        # A descriptor number written against the `>` (`2>`) belongs to the redirect, not
+        # to the command operands.
+        if (cur ~ /^[0-9][0-9]?$/) cur = ""
+        else if (cur ~ / [0-9][0-9]?$/) sub(/[0-9][0-9]?$/, "", cur)
+        i++
+        if (substr(s, i, 1) == ">") i++
+        if (substr(s, i, 1) == "|") i++
+        dup = 0
+        if (substr(s, i, 1) == "&") { dup = 1; i++ }
+        while (substr(s, i, 1) == " ") i++
+        ts = i
+        while (i <= n && index(" |;&<>()", substr(s, i, 1)) == 0) i++
+        t = substr(s, ts, i - ts)
+        gsub(/[\047"]/, "", t)
+        if (t == "") w = 1
+        else if (t == "/dev/null" || t == "/dev/stdout" || t == "/dev/stderr") { }
+        else if (!dup) w = 1
+        else if (t !~ /^(-|[0-9]|[0-9][0-9])$/) w = 1
+        st = i; continue
+      }
+      i++
+    }
+    run()
+    printf "%s%s", cur, (w ? "1" : "0")
+  }'
 _CHAIN_STAGES=""; _CHAIN_WRITES=""
 _chain_seg_split() {  # <segment> -> sets _CHAIN_STAGES, _CHAIN_WRITES
-  local s="$1" n i=0 c q="" cur="" out="" t dup
+  local _r
   _CHAIN_WRITES=""
-  case "$s" in
+  case "$1" in
     *[\|\;\&\>]*) : ;;
-    *) _CHAIN_STAGES="$s"; return 0 ;;
+    *) _CHAIN_STAGES="$1"; return 0 ;;
   esac
-  n=${#s}
-  while [ "$i" -lt "$n" ]; do
-    c="${s:i:1}"
-    if [ -n "$q" ]; then
-      cur="$cur$c"
-      if [ "$q" = '"' ] && [ "$c" = '\' ]; then
-        i=$((i + 1)); cur="$cur${s:i:1}"
-      elif [ "$c" = "$q" ]; then
-        q=""
-      fi
-      i=$((i + 1)); continue
-    fi
-    case "$c" in
-      \\) cur="$cur$c${s:i+1:1}"; i=$((i + 2)); continue ;;
-      \'|\") q="$c"; cur="$cur$c" ;;
-      \||\;)
-        out="$out$cur"$'\n'; cur=""
-        if [ "$c" = '|' ] && [ "${s:i+1:1}" = '&' ]; then i=$((i + 1)); fi ;;
-      \&)
-        # `&>` is a redirect, read at its `>`; a lone `&` ends a command.
-        if [ "${s:i+1:1}" != '>' ]; then out="$out$cur"$'\n'; cur=""; fi ;;
-      \>)
-        # A descriptor number written against the `>` (`2>`) belongs to the redirect, not to the
-        # command's operands.
-        case "$cur" in
-          [0-9]|[0-9][0-9]) cur="" ;;
-          *' '[0-9]|*' '[0-9][0-9]) cur="${cur% *} " ;;
-        esac
-        i=$((i + 1))
-        if [ "${s:i:1}" = '>' ]; then i=$((i + 1)); fi
-        if [ "${s:i:1}" = '|' ]; then i=$((i + 1)); fi
-        dup=""
-        if [ "${s:i:1}" = '&' ]; then dup=1; i=$((i + 1)); fi
-        while [ "${s:i:1}" = ' ' ]; do i=$((i + 1)); done
-        t=""
-        while [ "$i" -lt "$n" ]; do
-          c="${s:i:1}"
-          case "$c" in ' '|\||\;|\&|\<|\>|\(|\)) break ;; esac
-          t="$t$c"; i=$((i + 1))
-        done
-        t="${t//\'/}"; t="${t//\"/}"
-        case "$t" in
-          '') _CHAIN_WRITES=1 ;;
-          /dev/null|/dev/stdout|/dev/stderr) : ;;
-          *)
-            if [ -z "$dup" ]; then
-              _CHAIN_WRITES=1
-            else
-              case "$t" in -|[0-9]|[0-9][0-9]) : ;; *) _CHAIN_WRITES=1 ;; esac
-            fi ;;
-        esac
-        continue ;;
-      *) cur="$cur$c" ;;
-    esac
-    i=$((i + 1))
-  done
-  _CHAIN_STAGES="$out$cur"
+  _r=$(_WALL_CHAIN_SEG="$1" LC_ALL=C awk "$_CHAIN_SEG_AWK" </dev/null)
+  case "$_r" in *1) _CHAIN_WRITES=1 ;; esac
+  _CHAIN_STAGES="${_r%?}"
 }
 
 # `_chain_stage_observes <command>` -> 0 when the one command only reads or reports, 1 otherwise.
@@ -5344,9 +5425,8 @@ the tree as it is and send the report; the orchestrator lands the work."
   #
   # THE SCREEN is the literal name with quotes and backslashes removed, as `_wall_mentions_git`
   # screens git; a hit runs the argv reader (`_wall_poker_contract_verb`, above), which decides.
-  local _bsg_p="${COMMAND//\\$'\n'/}"
-  _bsg_p="${_bsg_p//\\/}"; _bsg_p="${_bsg_p//\'/}"; _bsg_p="${_bsg_p//\"/}"
-  case "$_bsg_p" in
+  _wall_screen "$COMMAND"
+  case "$_WALL_STRIPPED" in
     *session-poker*)
       if _wall_poker_contract_verb "$COMMAND"; then
         fold_block exit2 "$_WALL_POKER_VERB" \

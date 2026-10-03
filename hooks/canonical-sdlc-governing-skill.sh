@@ -778,16 +778,46 @@ fi
 #   (ADR-028), and its refusal would name a fault the writer did not commit.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
-# THE SUBSTITUTION IS LITERAL AND IN-PROCESS. `${v//"$old"/"$new"}` quotes
-# BOTH the pattern (what turns off globbing) and the replacement. Bash 5.2
-# turned `patsub_replacement` on by default: in an UNQUOTED replacement word,
-# an unescaped `&` expands to the whole matched text, and 3.2 has no such
-# expansion — so the two shells would read the identical unquoted line two
-# different ways. Quoting the replacement turns that expansion off on every
-# bash this hook runs under, so a `\|`, a `&` or a newline in `new_string`
-# survives byte for byte (measured: byte-exact on 3.2.57 and 5.3.15; the
-# unquoted form instead splices the match in for `&` on 5.3.15 — review R1,
-# wave-15-fixit-182).
+# THE SPLICE IS ONE jq PASS, LITERAL, OVER THE FILE AS IT IS ON DISK
+# (wave-24-fixit-1811 T4; REQ-5, D6). `_gs_edit_project` below. It used to be
+# `${CONTENT/"$old"/"$new"}` in the shell, and bash 3.2 pays offset × length
+# for that line: a 64 KB plan edited near its end ran past this hook's own
+# 10 s timeout, and a timed-out hook fails open (research-R2 §1, §3). jq
+# splits the body on `old_string` as a literal string and joins it with
+# `new_string`, so there is no pattern and no replacement syntax to quote —
+# `&`, `\` and newlines in either string survive byte for byte on every bash
+# (bash 5.2's `patsub_replacement` reads an unquoted `&` as the match, which
+# is the trap the shell form had to quote its way around; review R1,
+# wave-15-fixit-182). The split's length IS the occurrence count: 1 means
+# absent, 2 means unique, more needs `replace_all`.
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh §SPLICE]
+# [WALL: tests/hook-timeout.test.sh]
+#
+# `--rawfile` READS THE FILE WHOLE, trailing newlines included, where
+# `$(cat)` dropped them — so an `old_string` that ends at the file's final
+# newline is now found, as the tool finds it. Nothing downstream can tell
+# otherwise: the normalization below passes CONTENT through `$( )`, which
+# drops them again. The applied flag rides as the LAST byte of the one
+# output, so no second jq and no command substitution eats a body that
+# legitimately ends in newlines.
+_gs_edit_project() {  # <file> -> sets CONTENT and EDIT_APPLIED
+  local _gs_out
+  _gs_out=$(printf '%s' "$BIONIC_INPUT" | jq -j --rawfile c "$1" '
+    (.tool_input.old_string // "") as $o
+    | (.tool_input.new_string // "") as $n
+    | ((.tool_input.replace_all // false) | tostring) as $all
+    | (if $o == "" then [$c] else ($c | split($o)) end) as $p
+    | if ($p | length) > 1 and ($all == "true" or ($p | length) == 2)
+      then ($p | join($n)) + "1"
+      else $c + "0"
+      end' 2>/dev/null) || _gs_out=""
+  case "$_gs_out" in
+    *1) EDIT_APPLIED=1 ;;
+    *)  EDIT_APPLIED=0 ;;
+  esac
+  CONTENT="${_gs_out%?}"
+}
+
 CONTENT=""
 EDIT_APPLIED=0
 if [ "$TOOL" = "Write" ]; then
@@ -795,33 +825,10 @@ if [ "$TOOL" = "Write" ]; then
 else
   if [ -f "$FILE_PATH" ]; then
     if [ "$IN_SCOPE" -eq 1 ]; then
-      CONTENT=$(cat "$FILE_PATH")
       if [ "$TOOL" = "Edit" ]; then
-        # `jq -j` prints the raw value with NO trailing newline of its own, and the
-        # `printf X` guard keeps a value that legitimately ends in newlines from being
-        # eaten by command substitution.
-        _gs_old=$(printf '%s' "$BIONIC_INPUT" | jq -j '.tool_input.old_string // ""'; printf X)
-        _gs_old=${_gs_old%X}
-        _gs_new=$(printf '%s' "$BIONIC_INPUT" | jq -j '.tool_input.new_string // ""'; printf X)
-        _gs_new=${_gs_new%X}
-        _gs_all=$(printf '%s' "$BIONIC_INPUT" | jq -r '.tool_input.replace_all // false')
-        if [ -n "$_gs_old" ]; then
-          case "$CONTENT" in
-            *"$_gs_old"*)
-              if [ "$_gs_all" = "true" ]; then
-                CONTENT=${CONTENT//"$_gs_old"/"$_gs_new"}
-                EDIT_APPLIED=1
-              else
-                _gs_rest=${CONTENT#*"$_gs_old"}
-                case "$_gs_rest" in
-                  *"$_gs_old"*) : ;;   # not unique: the tool will fail, so judge nothing
-                  *) CONTENT=${CONTENT/"$_gs_old"/"$_gs_new"}; EDIT_APPLIED=1 ;;
-                esac
-              fi
-              ;;
-          esac
-        fi
-        unset _gs_old _gs_new _gs_all _gs_rest
+        _gs_edit_project "$FILE_PATH"
+      else
+        CONTENT=$(cat "$FILE_PATH")
       fi
     else
       # Misplacement probe only. This path is reached on EVERY Edit anywhere
