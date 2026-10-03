@@ -8716,5 +8716,20 @@ expect_eq "DL3 …nor does a mention that is not at the start of its line" "" \
 Note: touch the done marker: .bionic/tmp/w99.done when finished.
 Files: payload/scripts/lib/widget.sh')"
 
+# THROUGH THE WALL: the lifted marker is on the launch row the verdict reads, and a brief that
+# names none writes a row with no `done=` key at all (byte-identical to the rows before T9).
+REPO=$(make_repo dldone yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Done marker: .bionic/tmp/w99-widget.done')" "w99-done")"
+DL_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "DL4 a brief naming a Done marker is admitted" "allow" "$GATE_VERDICT"
+expect_eq "DL4b …and its launch row carries it as done=" ".bionic/tmp/w99-widget.done" "$(roster_field "$DL_ROW" done)"
+REPO=$(make_repo dlnodone yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Scope constraint: touch only payload/scripts/lib/widget.sh.')" "w99-nodone")"
+DL_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_contains "DL5 a brief naming no Done marker writes its launch row" "status=intended" "$DL_ROW"
+expect_absent "DL5b …with no done= key on it" "|done=" "$DL_ROW"
+
 
 finish

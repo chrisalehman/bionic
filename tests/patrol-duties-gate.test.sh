@@ -1214,8 +1214,9 @@ POKER_64M="${BIONIC_HOOKS_DIR}/session-poker.sh"
 d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe' \
       make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 echo "done" > "$d/landed-64m.md"
+: > "$d/W-MET.done"   # the agent said so, by its Done marker: MET needs it (wave-24 T9, D3)
 roster_row_fixture status=intended session="$SID" name=W-MET agent_id= \
-  deliverable="$d/landed-64m.md" >> "$d/.bionic/tmp/roster-$SID.state"
+  deliverable="$d/landed-64m.md" "done=$d/W-MET.done" >> "$d/.bionic/tmp/roster-$SID.state"
 CFG_64M="$(mktemp -d)"; mkdir -p "$CFG_64M/projects/-fixture-project"
 {
   jq -nc '{type:"user",timestamp:"2026-09-05T00:50:00.000Z",message:{role:"user",content:"go"}}'
