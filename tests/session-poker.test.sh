@@ -7472,4 +7472,219 @@ expect_contains "41h2 the second EMERGENCY tick over the same facts still prints
 expect_absent "41h3 …never as unchanged" "unchanged since" "$OUT"
 unset CLAUDE_CONFIG_DIR
 
+# ============================================================
+section "Section 42: plan-row verbs — task-set, step-line, current, ledger-add, ledger-set (wave-24 T15; REQ-9 AC-9.1–9.3, 9.5, 9.6; D14)"
+# ============================================================
+#
+# Five verbs replace the hand edits a run makes to its own plan: a `## Tasks` cell, a
+# `- Step N:` or `- T<n>:` line, `current:`, and a `## Dispatch ledger` row. Each one is the
+# task-add transaction (§34): projected onto a copy through units.sh, the copy judged by a dry
+# commit through the REAL hooks/bash-walls.sh, the plan's checksum compared, and only then the
+# swap. The fixture is §34's plan, which the real gate admits, plus a dispatch ledger, and it is
+# committed so `git diff --numstat` can say exactly which lines a verb moved.
+s42_plan() {  # <repo> <current> [step-4 block body] -> the plan path; bound, committed
+  local p; p="$(s34_plan "$1" "$2" "${3:-}")"
+  printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n' >> "$p"
+  printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n' >> "$p"
+  ( cd "$1" && git add -f "$p" && git commit -qm plan ) >/dev/null 2>&1
+  printf '%s' "$p"
+}
+s42_numstat() { git -C "$1" diff --numstat | awk '{ printf "%s %s;", $1, $2 }'; }
+s42_snap() {  # <repo> <plan> -> commit the plan and keep a byte copy for the cmp rows
+  ( cd "$1" && git add -f "$2" && git commit -qm snap ) >/dev/null 2>&1
+  cp "$2" "$TMPROOT/s42-before"
+}
+s42_unchanged() {  # <label> <want rc> <plan>
+  expect_eq "$1 — refused (exit $2)" "$2" "$RC"
+  expect_true "$1 — …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$3"
+}
+S42_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+
+R42="$(make_repo s42-verbs)"; ( cd "$R42" && git commit -q --allow-empty -m init )
+P42="$(s42_plan "$R42" 4)"
+s34_gate "$R42"
+expect_eq "42a precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "42a2 precondition: the fixture is committed, so a diff starts empty" "" "$(s42_numstat "$R42")"
+
+# ---------- §VERB (AC-9.1): exactly those cells change; Files names amend ----------
+poke "$R42" task-set T2 status=landed worktree=— base=def5678
+expect_eq "42b §VERB AC-9.1 task-set of three cells exits 0" "0" "$RC"
+expect_contains "42b2 …and says what it did" "task-set — T2" "$OUT"
+expect_eq "42b3 …git diff --numstat shows one line" "1 1;" "$(s42_numstat "$R42")"
+expect_contains "42b4 …and that line is the row with exactly those cells" \
+  "| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | — | def5678 | landed |" "$(cat "$P42")"
+s34_gate "$R42"
+expect_eq "42b5 …and the next commit is admitted" "0" "$GATE_RC"
+s42_snap "$R42" "$P42"
+poke "$R42" task-set T5 Files=c.sh
+s42_unchanged "42c §VERB Files= is refused" 1 "$P42"
+expect_contains "42c2 …naming amend" "task-set does not write Files — widen a dispatched contract with amend" "$OUT"
+poke "$R42" task-set T5 files=c.sh
+s42_unchanged "42c3 §VERB …and so is files=, in any case" 1 "$P42"
+
+# ---------- §VERB-bad (AC-9.2): refused, byte-identical ----------
+poke "$R42" task-set T5 colour=red
+s42_unchanged "42d §VERB-bad a column the header does not carry" 1 "$P42"
+expect_contains "42d2 …naming it" "colour" "$OUT"
+poke "$R42" task-set T99 status=landed
+s42_unchanged "42d3 §VERB-bad an id the table does not carry" 1 "$P42"
+poke "$R42" task-set T5 'task=a|b'
+s42_unchanged "42d4 §VERB-bad a pipe in a value" 1 "$P42"
+poke "$R42" task-set T5 "task=a
+b"
+s42_unchanged "42d5 §VERB-bad a newline in a value" 1 "$P42"
+poke "$R42" task-set T5 status
+s42_unchanged "42d6 §VERB-bad an operand with no =" 2 "$P42"
+poke "$R42" task-set T5 id=T9
+s42_unchanged "42d7 §VERB-bad the id is the row's key, not a cell to set" 1 "$P42"
+poke "$R42" task-set T5 status=bogus
+s42_unchanged "42d8 §VERB-bad a status the Task invariants refuse" 1 "$P42"
+expect_contains "42d9 …in the validator's own words" "T5: status bogus is not one of" "$OUT"
+poke "$R42" step-line T5 "a
+b"
+s42_unchanged "42d10 §VERB-bad a newline in a step line" 1 "$P42"
+poke "$R42" step-line Q5 text
+s42_unchanged "42d11 §VERB-bad a key that is neither a step number nor T<n>" 2 "$P42"
+poke "$R42" ledger-add T1 agent=x
+s42_unchanged "42d12 §VERB-bad ledger-add of an id the ledger already carries" 1 "$P42"
+poke "$R42" ledger-set T7 landed=yes
+s42_unchanged "42d13 §VERB-bad ledger-set of an id the ledger does not carry" 1 "$P42"
+poke "$R42" ledger-set T1 colour=red
+s42_unchanged "42d14 §VERB-bad ledger-set of a column the ledger does not carry" 1 "$P42"
+poke "$R42" ledger-set T1 'notes=a|b'
+s42_unchanged "42d15 §VERB-bad a pipe in a ledger value" 1 "$P42"
+
+# THE DRY COMMIT IS REAL: a valid cell on a plan the gate refuses — its Step-4 block has lost
+# its base-sha, which no table check reads (§34e's fixture) — is refused in the gate's words.
+R42E="$(make_repo s42-gate)"; ( cd "$R42E" && git commit -q --allow-empty -m init )
+P42E="$(s42_plan "$R42E" 4 '  worktree: .worktrees/01-fixture
+  branch: wave/01-fixture')"
+s42_snap "$R42E" "$P42E"
+poke "$R42E" task-set T5 size=45
+s42_unchanged "42d16 §VERB-bad a valid cell on a plan the commit gate refuses" 1 "$P42E"
+expect_contains "42d17 …in the gate's own words" "bionic: commit refused" "$OUT"
+expect_contains "42d18 …naming the field it wants" "base-sha" "$OUT"
+# …and the gate's placeholder arm, which the dry commit reaches only past the matrix: a row
+# whose `- T<n>:` line is a placeholder refuses any write, naming the line.
+R42P="$(make_repo s42-placeholder)"; ( cd "$R42P" && git commit -q --allow-empty -m init )
+P42P="$(s42_plan "$R42P" 4)"
+sed 's/^- T5: pending dispatch — .*$/- T5: TBD/' "$P42P" > "$P42P.tmp" && mv "$P42P.tmp" "$P42P"
+s42_snap "$R42P" "$P42P"
+expect_eq "42d19 precondition: the fixture's T5 line is a placeholder" "1" "$(grep -cx -- '- T5: TBD' "$P42P")"
+poke "$R42P" task-set T5 size=45
+s42_unchanged "42d20 §VERB-bad a write to a plan with a placeholder task line" 1 "$P42P"
+expect_contains "42d21 …in the gate's own words" "dispatched task T5 evidence line is a placeholder ('TBD')" "$OUT"
+s42_snap "$R42" "$P42"
+
+# ---------- §VERB-race (AC-9.3): the plan touched between projection and swap ----------
+# A `jq` on PATH that, the first time a process OTHER than this session's own poker calls it,
+# appends a line to the plan before handing over to the real jq. The only such process is the
+# dry commit's gate, which runs after the projection and before the swap — so the line lands
+# in exactly the window the checksum guards.
+mkdir -p "$TMPROOT/s42-shim"
+cat > "$TMPROOT/s42-shim/jq" <<'SH'
+#!/bin/bash
+if [ "${CLAUDE_CODE_SESSION_ID:-}" != "$S42_SID" ] && [ ! -e "$S42_RACE_DONE" ]; then
+  : > "$S42_RACE_DONE"
+  printf '%s\n' '<!-- a concurrent edit -->' >> "$S42_RACE_PLAN"
+fi
+exec "$S42_REAL_JQ" "$@"
+SH
+chmod +x "$TMPROOT/s42-shim/jq"
+export S42_SID="$SID" S42_REAL_JQ="$(command -v jq)" S42_RACE_DONE="$TMPROOT/s42-race-done" S42_RACE_PLAN="$P42"
+S42_PATH_WAS="$PATH"; PATH="$TMPROOT/s42-shim:$PATH"
+poke "$R42" task-set T5 size=45
+PATH="$S42_PATH_WAS"
+expect_eq "42e precondition: the concurrent edit landed during the dry commit" "yes" \
+  "$([ -e "$S42_RACE_DONE" ] && echo yes)"
+expect_eq "42e2 §VERB-race AC-9.3 the verb is refused (exit 1)" "1" "$RC"
+expect_contains "42e3 …saying the plan changed" "changed while" "$OUT"
+expect_contains "42e4 …the concurrent edit is intact" "<!-- a concurrent edit -->" "$(cat "$P42")"
+expect_contains "42e5 …and the verb wrote nothing: T5 keeps its size" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2 | 30 |" "$(cat "$P42")"
+poke "$R42" task-set T5 size=45
+expect_eq "42e6 run again, it lands (exit 0)" "0" "$RC"
+expect_contains "42e7 …the new cell is in" "| T5 | 5 | verify | the floor | test-runner | T1, T2 | 45 |" "$(cat "$P42")"
+expect_contains "42e8 …beside the concurrent edit: nothing was lost" "<!-- a concurrent edit -->" "$(cat "$P42")"
+s42_snap "$R42" "$P42"
+
+# ---------- §VERB-cur (AC-9.5): current moves, 9 is close-out's ----------
+poke "$R42" current 9
+s42_unchanged "42f §VERB-cur AC-9.5 current 9 is refused" 1 "$P42"
+expect_contains "42f2 …naming close-out" "close-out" "$OUT"
+poke "$R42" current 5
+s42_unchanged "42f3 §VERB-cur a move the gate refuses (no Step 5 block) is refused" 1 "$P42"
+expect_contains "42f4 …in the gate's own words" "Step 5" "$OUT"
+poke "$R42" current 4x
+s42_unchanged "42f5 §VERB-cur a step that is neither N nor T<n>" 2 "$P42"
+
+# The Step-4 block (A-orch-8): advancing to 4 writes the worktree/base-sha/branch fields the
+# first writer's commit is refused without, from the run's own `working-branch:` — and only
+# the fields the block lacks. The control is the same plan with no working-branch: line.
+R42C="$(make_repo s42-cur)"
+( cd "$R42C" && git commit -q --allow-empty -m init && git checkout -q -b wave/01-fixture )
+P42C="$(s42_plan "$R42C" 3 '  note: the block owes its three fields')"
+s42_snap "$R42C" "$P42C"
+poke "$R42C" current 4
+s42_unchanged "42f6 control: with no working-branch: line the block cannot be written, and current 4 is refused" 1 "$P42C"
+expect_contains "42f7 …in the gate's own words, naming the missing fields" "base-sha" "$OUT"
+awk '{ print } /^current: 3$/ { print "working-branch: wave/01-fixture" }' "$P42C" > "$P42C.tmp" && mv "$P42C.tmp" "$P42C"
+s42_snap "$R42C" "$P42C"
+poke "$R42C" current 4
+expect_eq "42f8 §VERB-cur AC-9.5 current 4 from 3 exits 0" "0" "$RC"
+expect_contains "42f9 …current: is 4" "current: 4" "$(cat "$P42C")"
+expect_contains "42f10 …the Step-4 block carries its branch" "  branch: wave/01-fixture" "$(cat "$P42C")"
+expect_contains "42f11 …its base-sha, the branch head at the advance" \
+  "  base-sha: $(git -C "$R42C" rev-parse --short wave/01-fixture)" "$(cat "$P42C")"
+expect_contains "42f12 …and its worktree, the checkout holding the branch" "  worktree: ." "$(cat "$P42C")"
+expect_eq "42f13 …and nothing else moved: current: plus three added lines" "4 1;" "$(s42_numstat "$R42C")"
+s34_gate "$R42C"
+expect_eq "42f14 …and the first Step-4 commit is admitted" "0" "$GATE_RC"
+
+# ---------- §VERB-line (AC-9.6): step-line and the ledger verbs write only their line or row ----------
+poke "$R42" step-line T2 'landed — def5678 on wt/01-T2'
+expect_eq "42g §VERB-line step-line T2 exits 0" "0" "$RC"
+expect_eq "42g2 AC-9.6 …one line replaced" "1 1;" "$(s42_numstat "$R42")"
+expect_eq "42g3 …and it reads as written" "1" "$(grep -cx -- '- T2: landed — def5678 on wt/01-T2' "$P42")"
+s42_snap "$R42" "$P42"
+poke "$R42" step-line T2 'merge abc1234' --append
+expect_eq "42g4 §VERB-line --append exits 0" "0" "$RC"
+expect_eq "42g5 AC-9.6 …one line replaced" "1 1;" "$(s42_numstat "$R42")"
+expect_eq "42g6 …the text appended to the line" "1" \
+  "$(grep -cx -- '- T2: landed — def5678 on wt/01-T2; merge abc1234' "$P42")"
+s42_snap "$R42" "$P42"
+poke "$R42" step-line 5 opened
+expect_eq "42g7 §VERB-line step-line of a step with no line exits 0" "0" "$RC"
+expect_eq "42g8 AC-9.6 …one line added" "1 0;" "$(s42_numstat "$R42")"
+expect_eq "42g9 …after the Step-4 block, not inside it" "- Step 5: opened" \
+  "$(awk 'prev ~ /^  branch: / { print; exit } { prev = $0 }' "$P42")"
+s42_snap "$R42" "$P42"
+poke "$R42" ledger-add T2 'agent=implementor (w-T2)' dispatched=2026-10-03T01:00Z 'expected=30 min'
+expect_eq "42g10 §VERB-line ledger-add exits 0" "0" "$RC"
+expect_eq "42g11 AC-9.6 …one row added" "1 0;" "$(s42_numstat "$R42")"
+expect_eq "42g12 …after the last row, the cells it was not given spelled —" \
+  "| T2 | implementor (w-T2) | 2026-10-03T01:00Z | 30 min | — | — | — |" \
+  "$(awk 'prev ~ /^\| T1 \| implementor \(w-T1\)/ { print; exit } { prev = $0 }' "$P42")"
+s42_snap "$R42" "$P42"
+poke "$R42" ledger-set T2 'landed=landed 2026-10-03T02:00Z (merge abc1234)'
+expect_eq "42g13 §VERB-line ledger-set exits 0" "0" "$RC"
+expect_eq "42g14 AC-9.6 …one row replaced" "1 1;" "$(s42_numstat "$R42")"
+expect_eq "42g15 …the one cell set" "1" \
+  "$(grep -cxF -- '| T2 | implementor (w-T2) | 2026-10-03T01:00Z | 30 min | — | landed 2026-10-03T02:00Z (merge abc1234) | — |' "$P42")"
+s34_gate "$R42"
+expect_eq "42g16 …and after all five verbs the next commit is admitted" "0" "$GATE_RC"
+
+# ---------- the refusals that precede any projection, and nothing left behind ----------
+R42G="$(make_repo s42-unbound)"; ( cd "$R42G" && git commit -q --allow-empty -m init )
+P42G="$(s42_plan "$R42G" 4)"; engage "$R42G"
+s42_snap "$R42G" "$P42G"
+poke "$R42G" task-set T5 size=45
+s42_unchanged "42h an unbound session is refused and the newest plan is not written" 1 "$P42G"
+expect_contains "42h2 …saying why" "bound" "$OUT"
+expect_eq "42h3 no projection copy is left beside any plan" "" \
+  "$(find "$R42" "$R42C" "$R42E" "$R42P" -name '*.plan.md.*' 2>/dev/null)"
+expect_eq "42h4 …and no dry-run engagement marker is left in .bionic/tmp" "" \
+  "$(find "$R42/.bionic/tmp" "$R42C/.bionic/tmp" -name 'engaged-*' ! -name "engaged-$SID.state" 2>/dev/null)"
+POKE_BOUND="$S42_BOUND_WAS"
+
 finish
