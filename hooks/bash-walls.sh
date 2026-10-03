@@ -22,7 +22,7 @@
 # it is given, in the order it is given. The five are independent — none reads state
 # another writes during one event — so the argument order below is about how a composed
 # refusal READS, not about correctness. Every one of them always runs: a push that is
-# also a chain-class command gets both answers.
+# also draws a farm-out nudge gets both answers.
 #
 # THE PAYLOAD AND THE COMMAND ARE READ BEFORE THE LIBRARY IS. Not for convenience: the
 # repair allowlist in `loader_fail_closed` needs the command text, and it has to be
