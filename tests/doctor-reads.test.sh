@@ -714,16 +714,40 @@ ds_r2_repo() {  # -> a fresh, hermetic project dir with .bionic/tmp
   printf '%s' "$r"
 }
 
+# ONE ENVIRONMENT FOR EVERY DELTA READ (wave-24 D18). `run_doctor`'s own — the fixture's tool
+# directory as the whole PATH, HOME under $TMP, the fixture shell rc — with the project cwd and the
+# claude-home as the two arguments. The sections that compare a page's problem count against a
+# sibling baseline (19.6, 19.13, 20.6) run doctor through this and nothing else, so no runner-side
+# `claude`, `npm` or HOME reaches either page (diag-doctor-reads-19-2e546127).
+doctor_in() {  # <cwd> <claude-home> -> doctor's whole report
+  ( cd "$1" && PATH="$BIN" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      BIONIC_CLAUDE_HOME="$2" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )
+}
+
 ds_r2_doctor() {  # <project-cwd> -> doctor's whole report, against a fresh empty claude-home
   local proj="$1" home; home="$(mktemp -d "${TMP}/dsr2-home.XXXXXX")"; mkdir -p "$home/sessions"
-  ( cd "$proj" && BIONIC_CLAUDE_HOME="$home" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )
+  doctor_in "$proj" "$home"
 }
 
 ds_r2_problems() {  # <doctor output> -> the header's problem count, or "0" on "Nothing to do"
   local n
   n="$(printf '%s\n' "$1" | sed -n 's/^→ \([0-9][0-9]*\) problems*\..*$/\1/p' | head -1)"
   printf '%s' "${n:-0}"
+}
+
+# <label> <want> <baseline page> <fixture page> — the fixture's problem count minus the baseline's
+# must equal <want>. A mismatch prints BOTH pages' ✗ rows: the delta alone names no row, and the
+# row that moved is the only thing a reader can act on (wave-24 AC-2.2).
+ds_delta_eq() {
+  local label="$1" want="$2" a="$3" b="$4" got
+  got="$(( $(ds_r2_problems "$b") - $(ds_r2_problems "$a") ))"
+  if [ "$got" = "$want" ]; then ok "$label"; return 0; fi
+  no "$label" "expected a delta of '${want}', got '${got}'
+      baseline ✗ rows:
+$(printf '%s\n' "$a" | grep '^  ✗' | sed 's/^/        /')
+      fixture ✗ rows:
+$(printf '%s\n' "$b" | grep '^  ✗' | sed 's/^/        /')"
 }
 
 # ---------- clean tree: no marker, no row (fails-when: the row prints on success) ----------
@@ -773,8 +797,8 @@ expect_match "19.12: the residue row carries the informational glyph" \
 # THE DELTA AGAIN, against the same sibling baseline 19.6 uses: this machine's own toolchain
 # gaps are ✗ rows on every fixture here, so "unchanged" is a difference of zero and never an
 # absolute of zero.
-expect_eq "19.13: …and residue alone changes the page's problem count by nothing" \
-  "0" "$(( $(ds_r2_problems "$OUT19D") - $(ds_r2_problems "$OUT19A") ))"
+ds_delta_eq "19.13: …and residue alone changes the page's problem count by nothing" \
+  "0" "$OUT19A" "$OUT19D"
 
 # ---------- the marker present: exactly one line, naming the rc ----------
 DS_R2_B="$(ds_r2_repo)"
@@ -792,8 +816,8 @@ expect_eq "19.5: …and only once on the page" "1" "$DS_R2_B_HITS"
 # an empty claude-home is not a clean page — so the baseline is read off a
 # sibling fixture built the identical way (19A, no marker) rather than assumed
 # to be zero. One row, one fix() call, so the delta must be exactly 1.
-expect_eq "19.6: …and it raises the problem count by exactly one over the same baseline" \
-  "1" "$(( $(ds_r2_problems "$OUT19B") - $(ds_r2_problems "$OUT19A") ))"
+ds_delta_eq "19.6: …and it raises the problem count by exactly one over the same baseline" \
+  "1" "$OUT19A" "$OUT19B"
 
 # ---------- a symlinked marker is refused, not read (hostile-repo posture, S15-style) ----------
 DS_R2_C="$(ds_r2_repo)"
@@ -819,8 +843,7 @@ am_slug() {  # <project dir> -> the CLI's projects/ directory name for it
 }
 
 am_doctor() {  # <project-cwd> <claude-home> -> doctor's whole report
-  ( cd "$1" && BIONIC_CLAUDE_HOME="$2" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )
+  doctor_in "$1" "$2"
 }
 
 am_home() {  # -> a fresh, empty claude-home
@@ -886,8 +909,8 @@ expect_contains "20.3: …the row names the file to edit" ".claude/settings.json
 expect_contains "20.4: …and the key" "CLAUDE_CODE_DISABLE_AUTO_MEMORY" "$AM_ROW_B"
 expect_absent "20.5: …and never sends the reader to setup, which cannot edit a project file" \
   "/bionic:setup" "$AM_ROW_B"
-expect_eq "20.6: …and it raises the problem count by exactly one over the clean baseline" \
-  "1" "$(( $(ds_r2_problems "$OUT20B") - $(ds_r2_problems "$OUT20A") ))"
+ds_delta_eq "20.6: …and it raises the problem count by exactly one over the clean baseline" \
+  "1" "$OUT20A" "$OUT20B"
 
 # THE LOCAL FILE OUTRANKS THE SHARED ONE (settings precedence: local > project).
 # A local "1" over a shared "0" leaves the switch where bionic put it, so nothing
@@ -920,5 +943,66 @@ AM_EMP_P="$(ds_r2_repo)"; AM_EMP_H="$(am_home)"
 mkdir -p "${AM_EMP_H}/projects/$(am_slug "$AM_EMP_P")/memory"
 expect_match "20.12: an empty memory directory reads ✓" \
   "  ✓ auto-memory *" "$(am_row "$(am_doctor "$AM_EMP_P" "$AM_EMP_H")")"
+
+section "Section 80: the §19/§20 reads do not depend on the runner's PATH (wave-24 D18, AC-2.1)"
+
+# A RUNNER-SIDE FAULT MUST NOT MOVE A PAGE'S DELTA. Sections 19 and 20 read doctor's problem count as
+# a DELTA against a sibling baseline; a helper that lets doctor inherit the runner's PATH reaches
+# whatever `claude` and `npm` this machine has, and one that answers differently for one page than
+# for the other (a CLI mid-reinstall, a registry that times out once) moves 19.6, 19.13 or 20.6
+# (diag-doctor-reads-19-2e546127). The shims below stand in for that fault: `claude` and `npm`
+# first on the runner's PATH, both exiting 2. The same fixtures §19 and §20 build are read again
+# through the same helpers, and the same three deltas must come out.
+#
+# THE DELTAS ALONE CANNOT GO RED: a shim every page meets alike shifts both sides of a delta by the
+# same amount. So each shim also LOGS its call, and 80.0 asserts the helpers never reached one —
+# which is the AC's own failure condition ("a helper inherits the runner's PATH") read directly.
+SHIM_BIN="${TMP}/shim-bin"
+SHIM_LOG="${TMP}/shim-calls.log"
+mkdir -p "$SHIM_BIN"
+: > "$SHIM_LOG"
+for _t in claude npm; do
+  printf '#!/bin/sh\nprintf "%%s\\n" "%s $*" >> "%s"\nexit 2\n' "$_t" "$SHIM_LOG" > "${SHIM_BIN}/${_t}"
+  chmod +x "${SHIM_BIN}/${_t}"
+done
+shimmed() { ( PATH="${SHIM_BIN}:${PATH}"; "$@" ); }
+
+# THE PROBE IS LIVE before it is read for absence: one direct call through the shimmed PATH must
+# leave a line, or an empty log below proves nothing.
+shimmed claude --probe
+expect_eq "80.0a: a shim called through the shimmed PATH leaves a line in the log" \
+  "claude --probe" "$(head -1 "$SHIM_LOG")"
+: > "$SHIM_LOG"
+
+S80_BASE="$(shimmed ds_r2_doctor "$DS_R2_A")"
+S80_MARK="$(shimmed ds_r2_doctor "$DS_R2_B")"
+S80_RES="$(shimmed ds_r2_doctor "$DS_R2_D")"
+S80_AMBASE="$(shimmed am_doctor "$AM_CLEAN_P" "$AM_CLEAN_H")"
+S80_AMOVR="$(shimmed am_doctor "$AM_OVR_P" "$AM_OVR_H")"
+expect_eq "80.0b: …and doctor, run through the helpers, never reached a shim" \
+  "0" "$(wc -l < "$SHIM_LOG" | tr -d ' ')"
+ds_delta_eq "80.1: 19.6 again under the shims — a failure marker raises the count by one" \
+  "1" "$S80_BASE" "$S80_MARK"
+ds_delta_eq "80.2: 19.13 again — residue alone changes the count by nothing" \
+  "0" "$S80_BASE" "$S80_RES"
+ds_delta_eq "80.3: 20.6 again — the override raises the count by one" \
+  "1" "$S80_AMBASE" "$S80_AMOVR"
+
+section "Section 80b: a delta mismatch names the ✗ rows that differ (wave-24 AC-2.2)"
+
+# Two synthetic pages whose headline counts differ by one ✗ row. Run in a subshell so the FAIL the
+# helper is MEANT to print lands in captured text and never in this suite's own tally.
+S80B_A="$(printf '→ 2 problems. Run /bionic:setup\n\nDEPENDENCIES\n  ✗ alpha-row    — absent\n  ✗ beta-row     — absent\n')"
+S80B_B="$(printf '→ 3 problems. Run /bionic:setup\n\nDEPENDENCIES\n  ✗ alpha-row    — absent\n  ✗ beta-row     — absent\n  ✗ gamma-row    — absent\n')"
+S80B_BAD="$( ds_delta_eq "forced" "0" "$S80B_A" "$S80B_B" )"
+S80B_GOOD="$( ds_delta_eq "forced" "1" "$S80B_A" "$S80B_B" )"
+expect_contains "80b.1: the matching delta prints PASS (the extractor reads the headline)" \
+  "PASS: forced" "$S80B_GOOD"
+expect_contains "80b.2: a mismatch prints FAIL" "FAIL: forced" "$S80B_BAD"
+expect_contains "80b.3: …names the ✗ row both pages carry" "✗ alpha-row" "$S80B_BAD"
+expect_contains "80b.4: …and the ✗ row only the fixture page carries" "✗ gamma-row" "$S80B_BAD"
+expect_contains "80b.5: …under both pages' headings" "baseline ✗ rows:" "$S80B_BAD"
+expect_eq "80b.6: …the shared row printed once per page, so twice" "2" \
+  "$(printf '%s\n' "$S80B_BAD" | grep -c '✗ alpha-row')"
 
 finish
