@@ -21,10 +21,24 @@ Non-trivial engineering goes through the `canonical-sdlc` skill
 (`skills/canonical-sdlc/SKILL.md`) — declare `intent · rigor · scale` before starting.
 Docs and chores stay out.
 
+- **Deletion is not a task.** Deleting dead code the user has ruled on is a few-line commit by the
+  orchestrator, not a dispatched task. Size the work before you pick the ceremony.
+- **Approval steps are gate acts.** Ready tasks dispatch up to capacity without asking. A step
+  that needs the user's explicit approval, a release among them, waits for the user, and it is never
+  put to the user without the test results.
+- **Late fixes get a fresh run.** A fix found after a run has closed becomes a fixit in a fresh
+  canonical-sdlc run. It is never bolted onto the closed run, and a known defect blocks the
+  push.
+
+## Content
+
+bionic is open source for a general audience. No consumer-project names, tools or incidents
+appear in anything it ships.
+
 ## Path-scoped rules
 
 See `.claude/rules/` for guidance scoped by path — hook authoring, test-harness traps,
-doc-path and worktree discipline, and agent/dispatch discipline. Each file declares its own
+doc-path and worktree discipline, plan authoring, and agent/dispatch discipline. Each file declares its own
 `paths:` globs and loads only when a matching file is read.
 
 `.claude/rules/` is **committed** (epic-17 W4, 2026-08-18) via a `.gitignore` negation pair —

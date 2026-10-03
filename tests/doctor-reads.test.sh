@@ -639,19 +639,20 @@ section "Section 10: the headline moves by the rows a collapse stands for (Walk-
 _env_settings="${CHOME}/settings.json"
 D10_BEFORE="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
 
-# The three names written with bionic's OWN values — `env_default`'s, which is
+# The four names written with bionic's OWN values — `env_default`'s, which is
 # what `bionic_check_env_unwritten` compares against — merged into whatever
 # settings.json already holds, so the statusLine row above is untouched and the
 # environment block is the only difference between the two machines.
 jq '.env = ((.env // {}) + {
       "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
       "BASH_MAX_TIMEOUT_MS": "1800000",
-      "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+      "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+      "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"
     })' "$_env_settings" > "${TMP}/settings-env.json" && mv "${TMP}/settings-env.json" "$_env_settings"
 D10_AFTER="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
 
-d10_env_rows() {  # <doctor report> -> the count of ✗ rows for the three env names
-  grep -cE '^  ✗ (CLAUDE_CODE_ENABLE_TODO_TOOLS|BASH_MAX_TIMEOUT_MS|CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) ' <<<"$1" || true
+d10_env_rows() {  # <doctor report> -> the count of ✗ rows for the four env names
+  grep -cE '^  ✗ (CLAUDE_CODE_ENABLE_TODO_TOOLS|BASH_MAX_TIMEOUT_MS|CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS|CLAUDE_CODE_DISABLE_AUTO_MEMORY) ' <<<"$1" || true
 }
 
 D10_ENV_BEFORE="$(d10_env_rows "$D10_BEFORE")"
@@ -662,13 +663,13 @@ D10_N_BEFORE="$(d6f_problems "$D10_BEFORE")"
 D10_N_AFTER="$(d6f_problems "$D10_AFTER")"
 
 # ANTI-VACUITY, THREE WAYS: the environment rows really were ✗ before, really are
-# not after, and the whole-page ✗ count moved by exactly those three. Without
+# not after, and the whole-page ✗ count moved by exactly those four. Without
 # these the delta assertion below could be 0 = 0 over two identical pages.
-expect_eq "18.1: the three environment names render ✗ before they are written" \
-  "3" "$D10_ENV_BEFORE"
+expect_eq "18.1: the four environment names render ✗ before they are written" \
+  "4" "$D10_ENV_BEFORE"
 expect_eq "18.2: …and none of them after" "0" "$D10_ENV_AFTER"
-expect_eq "18.3: …so the page carries exactly three fewer ✗ rows" \
-  "3" "$(( D10_ROWS_BEFORE - D10_ROWS_AFTER ))"
+expect_eq "18.3: …so the page carries exactly four fewer ✗ rows" \
+  "4" "$(( D10_ROWS_BEFORE - D10_ROWS_AFTER ))"
 expect_match "18.4: both renders report a problem count" \
   "[0-9]*|[0-9]*" "${D10_N_BEFORE}|${D10_N_AFTER}"
 
@@ -801,5 +802,123 @@ ln -sf "${TMP}/dsr2-decoy.state" "$DS_R2_C/.bionic/tmp/sweep-failed.state"
 OUT19C="$(ds_r2_doctor "$DS_R2_C")"
 expect_no_match "19.7: a symlinked marker is refused, not followed into a row" \
   "*automatic dead-session sweep failed*" "$OUT19C"
+
+section "Section 20: auto-memory — the two things the switch cannot prevent (wave-23 D5, AC-3.2, AC-3.3)"
+
+# THE ROW IS PROJECT-SCOPED, LIKE SECTION 19's, so it is driven from a private
+# project root for the same reason: a settings override has to be PLANTED in the
+# project's own `.claude/settings.json`, and planting it in $REPO would change
+# every other section's page. The claude-home is a fresh one per fixture, so the
+# memory directory under `<home>/projects/<slug>/memory/` is this section's alone.
+#
+# THE SLUG IS THE PHYSICAL ROOT, every non-alphanumeric replaced by `-`, which is
+# how the CLI names the directory (`/tmp` files under `-private-tmp-…` on macOS).
+# Taken here with `pwd -P` so the test plants where the CLI itself would write.
+am_slug() {  # <project dir> -> the CLI's projects/ directory name for it
+  (cd "$1" && pwd -P) | sed 's/[^a-zA-Z0-9]/-/g'
+}
+
+am_doctor() {  # <project-cwd> <claude-home> -> doctor's whole report
+  ( cd "$1" && BIONIC_CLAUDE_HOME="$2" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )
+}
+
+am_home() {  # -> a fresh, empty claude-home
+  local h; h="$(mktemp -d "${TMP}/am-home.XXXXXX")"; mkdir -p "$h/sessions"
+  printf '%s' "$h"
+}
+
+am_row() {  # <doctor report> -> the auto-memory row, or nothing
+  printf '%s\n' "$1" | grep -E '^  . auto-memory ' | head -1
+}
+
+am_header() {  # <doctor report> <label> -> the header line the row <label> prints under
+  printf '%s\n' "$1" | awk -v l="$2" '
+    /^[A-Z][A-Z ]*$/ { h = $0 }
+    $0 ~ "^  . " l " " { print h; exit }'
+}
+
+# ---------- clean: no override, no memory directory ----------
+AM_CLEAN_P="$(ds_r2_repo)"; AM_CLEAN_H="$(am_home)"
+OUT20A="$(am_doctor "$AM_CLEAN_P" "$AM_CLEAN_H")"
+expect_match "20.1: a clean project renders the auto-memory row ✓" \
+  "  ✓ auto-memory *" "$(am_row "$OUT20A")"
+# THE ✓ CLAIMS WHAT THE ROW CHECKED, NOT "OFF" (wave-23 T10, A-orch-16). The row reads two
+# facts; "off" is the ENVIRONMENT row's claim, and that row can say the switch is unset on
+# this same page.
+expect_contains "20.1b: …and says what it checked, not that auto memory is off" \
+  "no override in project settings, no memory files under its slug" "$(am_row "$OUT20A")"
+# ALIGNED WITH THE ROWS BESIDE IT (wave-23 T11, review). The value starts in the same
+# column as the active-run row's, which is the column of every `_doctor_item` row and of the
+# ✗ auto-memory row, and the row stays inside the page's 100-column bound.
+am_col() {  # <report> <label> -> width of the row's text up to where its value starts
+  # The glyph is 3 bytes for ✓ and – alike, so the count is the same under any locale.
+  local row prefix
+  row="$(printf '%s\n' "$1" | grep -E "^  . $2 " | head -1)"
+  prefix="$(printf '%s' "$row" | sed -E "s/^(  . $2 +).*/\\1/")"
+  printf '%s' "${#prefix}"
+}
+expect_eq "20.1b2: …its value starts in the column the active-run row's does" \
+  "$(am_col "$OUT20A" "active run")" "$(am_col "$OUT20A" "auto-memory")"
+expect_eq "20.1b3: …and the row fits the 100-column bound" "yes" \
+  "$([ "$(am_row "$OUT20A" | awk '{ print length($0) }')" -le 100 ] && echo yes || echo no)"
+expect_absent "20.1c: …never the old \"off for this project\"" \
+  "off for this project" "$OUT20A"
+# THE ROW PRINTS UNDER THE PROJECT'S OWN HEADER, beside the run and its predecessors, not
+# under PATROL's `none running`. The ✗ states are asserted under it too (20.2b, 20.8b).
+expect_eq "20.1d: the row sits under the PROJECT header" \
+  "PROJECT" "$(am_header "$OUT20A" "auto-memory")"
+expect_eq "20.1e: …the same header the active-run row sits under" \
+  "PROJECT" "$(am_header "$OUT20A" "active run")"
+expect_eq "20.1f: …and ENVIRONMENT's switch row stays under ENVIRONMENT" \
+  "ENVIRONMENT" "$(am_header "$OUT20A" "CLAUDE_CODE_DISABLE_AUTO_MEMORY")"
+
+# ---------- the override: the project's own settings.json turns the switch back off ----------
+AM_OVR_P="$(ds_r2_repo)"; AM_OVR_H="$(am_home)"
+mkdir -p "$AM_OVR_P/.claude"
+printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}}\n' > "$AM_OVR_P/.claude/settings.json"
+OUT20B="$(am_doctor "$AM_OVR_P" "$AM_OVR_H")"
+AM_ROW_B="$(am_row "$OUT20B")"
+expect_match "20.2: a project settings.json carrying \"0\" renders ✗ auto-memory" \
+  "  ✗ auto-memory *" "$AM_ROW_B"
+expect_eq "20.2b: …under the PROJECT header" "PROJECT" "$(am_header "$OUT20B" "auto-memory")"
+expect_contains "20.3: …the row names the file to edit" ".claude/settings.json" "$AM_ROW_B"
+expect_contains "20.4: …and the key" "CLAUDE_CODE_DISABLE_AUTO_MEMORY" "$AM_ROW_B"
+expect_absent "20.5: …and never sends the reader to setup, which cannot edit a project file" \
+  "/bionic:setup" "$AM_ROW_B"
+expect_eq "20.6: …and it raises the problem count by exactly one over the clean baseline" \
+  "1" "$(( $(ds_r2_problems "$OUT20B") - $(ds_r2_problems "$OUT20A") ))"
+
+# THE LOCAL FILE OUTRANKS THE SHARED ONE (settings precedence: local > project).
+# A local "1" over a shared "0" leaves the switch where bionic put it, so nothing
+# fires; reading either file alone would get one of these two cases wrong.
+AM_LOC_P="$(ds_r2_repo)"; AM_LOC_H="$(am_home)"
+mkdir -p "$AM_LOC_P/.claude"
+printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}}\n' > "$AM_LOC_P/.claude/settings.json"
+printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}}\n' > "$AM_LOC_P/.claude/settings.local.json"
+expect_match "20.7: a local \"1\" over a shared \"0\" reads ✓ — the higher file decides" \
+  "  ✓ auto-memory *" "$(am_row "$(am_doctor "$AM_LOC_P" "$AM_LOC_H")")"
+
+# ---------- the directory: files the CLI already wrote, which the switch does not delete ----------
+AM_DIR_P="$(ds_r2_repo)"; AM_DIR_H="$(am_home)"
+AM_DIR="${AM_DIR_H}/projects/$(am_slug "$AM_DIR_P")/memory"
+mkdir -p "$AM_DIR"
+printf 'index\n' > "$AM_DIR/MEMORY.md"
+printf 'a fact\n' > "$AM_DIR/some-fact.md"
+OUT20C="$(am_doctor "$AM_DIR_P" "$AM_DIR_H")"
+AM_ROW_C="$(am_row "$OUT20C")"
+expect_match "20.8: two files under the project's memory dir render ✗ auto-memory" \
+  "  ✗ auto-memory *" "$AM_ROW_C"
+expect_eq "20.8b: …under the PROJECT header" "PROJECT" "$(am_header "$OUT20C" "auto-memory")"
+expect_contains "20.9: …the row names the directory" \
+  "projects/$(am_slug "$AM_DIR_P")/memory" "$AM_ROW_C"
+expect_contains "20.10: …and how many files it holds" "(2 files)" "$AM_ROW_C"
+expect_absent "20.11: …and never names setup" "/bionic:setup" "$AM_ROW_C"
+
+# AN EMPTY DIRECTORY IS NOT A FINDING: the CLI may leave one, and nothing loads from it.
+AM_EMP_P="$(ds_r2_repo)"; AM_EMP_H="$(am_home)"
+mkdir -p "${AM_EMP_H}/projects/$(am_slug "$AM_EMP_P")/memory"
+expect_match "20.12: an empty memory directory reads ✓" \
+  "  ✓ auto-memory *" "$(am_row "$(am_doctor "$AM_EMP_P" "$AM_EMP_H")")"
 
 finish

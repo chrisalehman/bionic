@@ -61,7 +61,7 @@
 
 set -u
 
-BIONIC_LIB_WANT="context.sh root.sh session.sh patrol.sh run.sh roster.sh"
+BIONIC_LIB_WANT="context.sh root.sh session.sh patrol.sh run.sh roster.sh binding.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -166,6 +166,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/patrol.sh"   || exit 0   # patrol_fire_window, patrol_verdict, patrol_dead_sessions
 . "$BIONIC_LIB/run.sh"      || exit 0   # active_run, engaged_session
 . "$BIONIC_LIB/roster.sh"   || exit 0   # roster_open_counts — the one close predicate (T17, D10)
+. "$BIONIC_LIB/binding.sh"  || exit 0   # bind_holders — who else's marker names the one run (T15)
 . "$BIONIC_LIB/worktree.sh" || exit 0   # worktree_legacy_links (AC-11/AC-7.1, A-orch-24)
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
@@ -246,8 +247,9 @@ fi
 # engaged: the safe direction is the quieter one.
 #
 # THE OPEN-RUN SET, not the single newest file (wave-session-bound-run S7,
-# AC-5). `RUNS`/`N` decide the shape below: N=0/1 reproduce today's behaviour
-# exactly — a lone open run is unambiguous, bound or not. N>=2 means a scan
+# AC-5). `RUNS`/`N` decide the shape below: N=0 says nothing about runs; N=1
+# names the run to a bystander and, since wave-23 T13 (critic C-4), prints the bind
+# line to an engaged session that is not bound to it. N>=2 means a scan
 # can no longer guess which run a session means, so a bystander gets the set
 # (capped for display by `print_runs` below) plus the bind verb instead of one
 # path picked by mtime, and an engaged
@@ -356,6 +358,51 @@ if [ "$N" -eq 1 ]; then
   else
     case "$BIONIC_RUN_WORD" in
       bound-open) print_bound_line "$BIONIC_RUN_WORD $BIONIC_RUN_PLAN" ;;
+      # THE BIND LINE FOR ONE RUN TOO (wave-23-fixit-1810 T13, critic C-4). This arm printed
+      # nothing, on the S7 reasoning that "a lone open run is unambiguous, bound or not". D1
+      # ended that: an unbound session's gates are inert, and engagement now leaves a session
+      # unbound beside a run another live session holds (engage.sh, THE HELD RUN). So the
+      # engaged-but-not-bound session is told here exactly what the N>=2 arm tells it — a
+      # header line and one line per run — on stdout, the channel this hook's model reads.
+      # The one run is listed whether live or quiet (`$RUNS`, not `$LIVE`): with a single
+      # candidate there is no listing to keep short, and the bystander line above names it
+      # the same way.
+      #
+      # THE HOLDER IS NAMED WHEN THERE IS ONE (wave-23-fixit-1810 T15, critic N-2). engage.sh
+      # leaves a session unbound BECAUSE another live session holds the sole run, and tells it
+      # so with a line naming the holder (A-T13.4) — that line is what keeps the offered bind
+      # from being taken by reflex. On a resume or compaction the engagement-time context has
+      # been summarized away and this line is all the model sees, so the bare verb here would
+      # reproduce C-3 by hand. So the same question engage.sh asks is asked here, the same way:
+      # `bind_holders` for the other markers naming this plan, intersected with the sweeper's
+      # live set (`patrol_live_session_ids`, newline containment so a prefix id is not taken for
+      # a live one). Asked only in this arm, and the live set only when a holder exists. Held:
+      # one header line naming the holder's id prefix and binding only on resume of that run.
+      # Unheld (no holder, or every holder dead): T13's line, unchanged.
+      *)
+        SS_HELD_BY=""
+        if [ -n "$BIONIC_SID" ] && bind_holders "$BIONIC_ROOT" "$BIONIC_SID" "$PLAN" 2>/dev/null; then
+          SS_LIVE=$(patrol_live_session_ids 2>/dev/null) || SS_LIVE=""
+          while IFS= read -r _h; do
+            [ -n "$_h" ] || continue
+            case "
+$SS_LIVE
+" in
+              *"
+$_h
+"*) SS_HELD_BY="$_h"; break ;;
+            esac
+          done <<< "$BIND_HOLDERS"
+        fi
+        if [ -n "$SS_HELD_BY" ]; then
+          printf 'bionic: 1 open run exists here and live session %s holds it; this session is not bound to it — bind with: bash %s/hooks/session-poker.sh bind <plan> only if this session is resuming that run\n' \
+            "${SS_HELD_BY:0:8}" "$HOOK_ROOT"
+        else
+          printf 'bionic: 1 open run exists here and this session is not bound to it — bind with: bash %s/hooks/session-poker.sh bind <plan>\n' \
+            "$HOOK_ROOT"
+        fi
+        print_runs "$RUNS"
+        ;;
     esac
   fi
 elif [ "$N" -ge 2 ]; then

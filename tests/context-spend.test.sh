@@ -50,6 +50,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# The one bound-marker builder (wave-23-fixit-1810 T1): make_env binds its session.
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 # THE SEAM (S18 precedent, tests/patrol-revive.test.sh:42). Named so that T12's merge
 # re-points this whole suite at hooks/stop.sh by setting one variable, and so that the
@@ -60,7 +62,7 @@ command -v jq >/dev/null 2>&1 || { echo "context-spend: jq absent — suite cann
 
 # THE SUITE IS NOT ALLOWED TO BE VACUOUS. Nine of the assertions below read "rc 0 and
 # nothing appended", which is exactly what a MISSING hook produces. Prove the subject
-# exists and parses before any of it runs (memory/no-vacuous-tests-at-authoring).
+# exists and parses before any of it runs (.claude/rules/test-harness.md, "Anti-vacuity").
 [ -f "$HOOK" ] || { echo "context-spend: no hook at $HOOK — suite refuses to run"; exit 1; }
 bash -n "$HOOK" || { echo "context-spend: $HOOK does not parse — suite refuses to run"; exit 1; }
 
@@ -89,9 +91,10 @@ audit_file_for() {  # <fake home> <project root> -> the path the hook will appen
 # State` names a step. No git repository — `project_root` answers at the nearest
 # ancestor carrying `.bionic/`, which is this directory itself.
 #
-# The engagement marker is EMPTY, which is the unbound shape: `session_run` then
-# falls back to the newest plan and the hook says so once on stderr. §6 reads that
-# line, so the fixture's binding state is deliberate and not incidental.
+# The engagement marker BINDS the session to that plan (wave-23-fixit-1810, REQ-1, D1).
+# An empty marker is the unbound shape, and an unbound session's newest-plan fallback is
+# announced and never acted on: the instrument records nothing for it. §6 drives that
+# state on purpose, so the fixture's binding state is deliberate and not incidental.
 make_env() {  # [step] -> project dir on stdout
   local dir step
   # RESOLVED (`pwd -P`), because `mktemp -d` hands back a path under /var, which is a
@@ -102,7 +105,6 @@ make_env() {  # [step] -> project dir on stdout
   dir=$(cd "$(mktemp -d)" && pwd -P)
   step="${1:-4}"
   mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
-  : > "$dir/.bionic/tmp/engaged-$SID.state"
   cat > "$dir/.bionic/docs/plans/wave-01.plan.md" <<CSPLAN
 ---
 canonical_sdlc_version: 14
@@ -114,6 +116,7 @@ current: $step
 
 - Step $step: tasks in flight
 CSPLAN
+  bound_marker "$dir" "$SID" "$dir/.bionic/docs/plans/wave-01.plan.md"
   printf '%s' "$dir"
 }
 
@@ -379,15 +382,28 @@ expect_silent "12: an engaged session with no open run is silent, exit 0" "$CS_H
 # ─────────────────────────────────────────────────────────────────────────────
 section "Group 6: the advisory channel"
 
-# 13: THE FALLBACK LINE. An engaged-but-UNBOUND session resolves its run by the
-# newest-plan fallback, and this hook says so ONCE — on stderr, never on stdout, for
-# the header's reason. This is the hook's only non-audit output, and it is the arm the
-# fold reads as an advisory.
+# 13: THE UNBOUND ADVISORY. An engaged-but-UNBOUND session still resolves the root's newest
+# plan, and since wave-23-fixit-1810 (REQ-1, D1) that plan is announced and never acted on:
+# lib/run.sh's one sentence goes out ONCE on stderr — never on stdout, for the header's
+# reason — and the instrument records nothing, across a real step boundary. The bound
+# control on the same boundary records its line, so the silence is the binding's doing.
 CS_D=$(make_env 4); CS_H=$(make_home); CS_T=$(mktemp)
+unbound_marker "$CS_D" "$SID" empty
 write_transcript "$CS_T" 1000 200 300
 fire "$CS_D" "$CS_H" "$CS_T"
-expect_contains "13: an unbound session gets the newest-plan fallback advisory on stderr" \
-  "context-spend: run resolved by newest-plan fallback" "$HOOK_ERR"
-expect_empty "13: …and nothing at all on stdout" "$HOOK_OUT"
+set_step "$CS_D" 5
+fire "$CS_D" "$CS_H" "$CS_T"
+CS_UB="run resolved by newest-plan fallback (session unbound) — $CS_D/.bionic/docs/plans/wave-01.plan.md; bind with session-poker.sh bind $CS_D/.bionic/docs/plans/wave-01.plan.md, or write this session's plan"
+expect_eq "13: an unbound session gets lib/run.sh's one advisory on stderr, once" \
+  "1" "$(printf '%s\n' "$HOOK_ERR" | grep -cxF "$CS_UB")"
+expect_silent "13b: …records no spend across the step boundary, and nothing on stdout" "$CS_H" "$CS_D"
+expect_empty "13c: …and writes no state against the fallback plan" \
+  "$(find "$CS_D/.bionic/tmp" -name 'context-spend.state' 2>/dev/null)"
+bound_marker "$CS_D" "$SID" "$CS_D/.bionic/docs/plans/wave-01.plan.md"
+fire "$CS_D" "$CS_H" "$CS_T"
+set_step "$CS_D" 6
+fire "$CS_D" "$CS_H" "$CS_T"
+expect_eq "13d: the control — bound, the same tree records the boundary" "1" "$(audit_lines "$CS_H" "$CS_D")"
+expect_absent "13e: …and a bound session hears no unbound advisory" "session unbound" "$HOOK_ERR"
 
 finish

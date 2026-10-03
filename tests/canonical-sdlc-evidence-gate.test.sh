@@ -108,6 +108,36 @@ EG_SID="4c3b2a19-8e7d-4f65-9a0b-1c2d3e4f5061"
 engage()   { mkdir -p "$1/.bionic/tmp" && : > "$1/.bionic/tmp/engaged-$EG_SID.state"; }
 unengage() { rm -f "$1/.bionic/tmp/engaged-$EG_SID.state"; }
 
+# THE ENGAGED SESSION IS BOUND TO THE RUN IT IS IN (wave-23-fixit-1810, REQ-1, D1; spec Δ1).
+# `engage` plants an EMPTY marker — engaged and unbound — and since this wave an unbound
+# session's newest-plan fallback is announced and never acted on: the gate judges no commit
+# for it at all. Every case in this file is a commit inside a run, so the three runners
+# below bind this suite's session to the root's newest OPEN run right before each drive —
+# the run `fallback` used to hand it — and re-take that answer on every drive, because cases
+# rewrite and add plans between drives. A root with no open run gets its empty marker back,
+# which is the `none` path, unchanged. A marker a case wrote itself is left alone, and so is
+# a root a case unengaged or planted a symlink in. §35 drives the unbound session on purpose,
+# under its own session ids and its own runner, which this never touches.
+EG_AUTOBOUND=""
+eg_autobind() {  # <dir> — a project dir, or a linked worktree of one
+  local r m p
+  # THE ROOT THE GATE RESOLVES: a linked worktree maps back onto its main repository, where
+  # the marker lives (`project_root`, the library's own answer).
+  r=$(project_root "$1" 2>/dev/null); [ -n "$r" ] || r="$1"
+  set -- "$r"
+  m="$1/.bionic/tmp/engaged-$EG_SID.state"
+  [ -f "$m" ] && [ ! -L "$m" ] || return 0
+  if [ -s "$m" ] && ! printf '%s\n' "$EG_AUTOBOUND" | grep -qxF "$1"; then return 0; fi
+  p=$(active_run "$1" 2>/dev/null) || p=""
+  if [ -n "$p" ]; then
+    bound_marker "$1" "$EG_SID" "$p"
+    printf '%s\n' "$EG_AUTOBOUND" | grep -qxF "$1" || EG_AUTOBOUND="${EG_AUTOBOUND}
+$1"
+  else
+    : > "$m"
+  fi
+}
+
 # Creates an isolated project dir with .bionic/docs/plans/ ready to receive
 # plan files. Returned path plays the CLAUDE_PROJECT_DIR role.
 make_project() {
@@ -172,7 +202,8 @@ write_global_note() {
 # so nothing here can hide a line that was never printed: the pairing is a positive
 # assertion that the line IS there for an unbound session and a negative that it is NOT
 # for a bound one.
-EG_RESOLUTION_RE='^evidence-gate: (run resolved by newest-plan fallback|bound plan closed)'
+# The unbound advisory is lib/run.sh's one sentence, unprefixed since wave-23-fixit-1810 (D1).
+EG_RESOLUTION_RE='^(evidence-gate: bound plan closed|run resolved by newest-plan fallback)'
 split_stderr() {  # <file> -> HOOK_RESOLUTION + HOOK_STDERR
   local raw
   raw=$(cat "$1")
@@ -206,6 +237,7 @@ run_hook() {
             '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   local tmp_err
   tmp_err=$(mktemp)
+  eg_autobind "$home_dir"
   # Capture exit code without letting errexit kill the test runner, and
   # without the `|| true` trick (which replaces $? with 0).
   if HOME="$home_dir" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
@@ -236,6 +268,7 @@ run_hook_with_project() {
             '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   local tmp_err
   tmp_err=$(mktemp)
+  eg_autobind "$project_dir"
   if HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
@@ -263,6 +296,7 @@ run_hook_cwd() {  # <home> <project_dir> <payload cwd> <command>
   input=$(jq -n --arg c "$command" --arg cwd "$payload_cwd" --arg s "$EG_SID" \
             '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   tmp_err=$(mktemp)
+  eg_autobind "$project_dir"
   if HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
@@ -2329,6 +2363,7 @@ run_hook_project_elsewhere_cwd() {
             '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   local tmp_err
   tmp_err=$(mktemp)
+  eg_autobind "$project_dir"
   if (cd "$elsewhere_dir" && HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"); then
     HOOK_EXIT=0
   else
@@ -5096,8 +5131,8 @@ fi
 # standing. A foreign tree is not a corner of the machine where a suite runs on the
 # orchestrator thread.
 #
-# ITS OWN RUNNER, AND THE REASON (fixture fidelity, per .claude memory
-# fixtures-can-pin-away-the-test). Every runner above posts `{session_id, tool_input, cwd}`,
+# ITS OWN RUNNER, AND THE REASON (fixture fidelity, per .claude/rules/test-harness.md,
+# "Fixture fidelity"). Every runner above posts `{session_id, tool_input, cwd}`,
 # because the evidence gate reads no more than that — but `wall_farm_out_reminder` screens on
 # `.tool_name` (walls.sh) and a payload without it returns before classifying anything. The
 # real PreToolUse envelope always carries it, so the omission is the fixtures' and not the
@@ -5111,6 +5146,7 @@ s25x_run_bash() {  # <project_dir> <payload cwd> <command> -> S25X_OUT, S25X_ERR
             '{session_id: $s, hook_event_name: "PreToolUse", tool_name: "Bash",
               tool_input: {command: $c}, cwd: $cwd}')
   tmp_err=$(mktemp)
+  eg_autobind "$project_dir"
   S25X_OUT=$(HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" \
     bash "$HOOK" <<< "$input" 2>"$tmp_err") && S25X_RC=0 || S25X_RC=$?
   S25X_ERR=$(cat "$tmp_err"); rm -f "$tmp_err"
@@ -6525,6 +6561,7 @@ run_hook_full() {  # <home> <command> -> S34_EXIT / S34_OUT / S34_ERR
   input=$(jq -n --arg c "$command" --arg cwd "$home_dir" --arg s "$EG_SID" \
             '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   tmp_err=$(mktemp); tmp_out=$(mktemp)
+  eg_autobind "$home_dir"
   if HOME="$home_dir" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$EG_SID" \
        bash "$HOOK" <<< "$input" >"$tmp_out" 2>"$tmp_err"; then
     S34_EXIT=0
@@ -6766,17 +6803,26 @@ s35_run "$r35b" "$S35_SID_B" 'git commit -m "x"'
 s35_assert "35b inverse: session B, bound to the newest plan that carries its evidence → allow" \
   0 - "BLOCKED"
 
-# --- 35c AC-3: no binding → newest-plan exactly as today, and the hook says so ---
+# --- 35c AC-3, as amended by wave-23-fixit-1810 (REQ-1, D1): no binding → the newest
+# plan is announced and never acted on. The commit is NOT gated on B (which carries no
+# evidence and used to refuse it), A is never read, and the hook says which plan it would
+# have been, in lib/run.sh's one sentence. 35c3 below is the same tree bound to B: refused,
+# so the allow here is the binding's doing and not a gate gone quiet.
 for s35_shape in empty none nofield; do
   r35c=$(s35_root)
   s35_two_plans "$r35c" a          # the evidence is on A, so the NEWEST plan has none
   s35_unbind "$r35c" "$S35_SID_A" "$s35_shape"
   s35_run "$r35c" "$S35_SID_A" 'git commit -m "x"'
-  s35_assert "35c unbound ($s35_shape) → gated on the NEWEST plan, exactly as today" \
-    2 "$S35_B" "$S35_A"
-  s35_assert "35c unbound ($s35_shape) → and the fallback resolution is announced" \
-    2 "evidence-gate: run resolved by newest-plan fallback (session unbound) — $S35_B" -
+  s35_assert "35c unbound ($s35_shape) → the newest plan is announced and never acted on: allowed" \
+    0 - "BLOCKED"
+  s35_assert "35c unbound ($s35_shape) → and lib/run.sh's one advisory names B" \
+    0 "run resolved by newest-plan fallback (session unbound) — $S35_B; bind with session-poker.sh bind $S35_B, or write this session's plan" "$S35_A"
 done
+r35c3=$(s35_root)
+s35_two_plans "$r35c3" a
+s35_bind "$r35c3" "$S35_SID_A" "$S35_B"
+s35_run "$r35c3" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35c3 control: the same tree BOUND to B is gated on B and refused" 2 "$S35_B" -
 
 # THE NEGATIVE BESIDE THE POSITIVE: a BOUND session announces no fallback, because it
 # did not use one. Without this row the announcement could be unconditional and every
@@ -6801,11 +6847,13 @@ s35_assert "35d …and the reason is named, with the closed plan's own path" \
   0 "evidence-gate: bound plan closed — $S35_D; this session has no open run" -
 s35_assert "35d …and the OPEN plan beside it is never read" 0 - "$S35_B"
 
-# The control: the same tree and the same commit from an UNBOUND session IS gated on the
-# newest open plan. Without it 35d's silence could be a gate that had simply stopped.
-s35_unbind "$r35d" "$S35_SID_B" empty
+# The control: the same tree and the same commit from a session BOUND to the open plan IS
+# gated on it. Without it 35d's silence could be a gate that had simply stopped. (It was an
+# UNBOUND session until wave-23-fixit-1810; an unbound session's fallback plan is announced
+# and never acted on now, 35c.)
+s35_bind "$r35d" "$S35_SID_B" "$S35_B"
 s35_run "$r35d" "$S35_SID_B" 'git commit -m "x"'
-s35_assert "35d control: the same tree, an UNBOUND session, is gated on the newest open plan" \
+s35_assert "35d control: the same tree, a session bound to the open plan, is gated on it" \
   2 "$S35_B" -
 
 # --- 35f AC-1 at the OTHER site: the run predicate is the session's too ---
@@ -6895,8 +6943,9 @@ s35_assert "35g1 …and the operator is told the bound plan is not on disk" \
 s35_assert "35g1 …and told how to get back to a live run" \
   0 "session-poker.sh bind" -
 
-# 35g2 UNBOUND over the identical tree: today's behaviour, and it is the AC-3 baseline the
-# bound answer regressed against. `active_plan` finds the live plan, so no sweep.
+# 35g2 UNBOUND over the identical tree: the live plan is announced and never acted on
+# (wave-23-fixit-1810, D1), and the gate stops there — the root has a live run, so nothing
+# is misplaced and the sweep that named the stray never runs.
 s35_unbind "$r35g" "$S35_SID_B" empty
 s35_run "$r35g" "$S35_SID_B" 'git commit -m "x"'
 s35_assert "35g2 unbound over the same tree resolves by fallback and is not blocked" \
@@ -7880,6 +7929,7 @@ r2_commit_knob_unset() {  # <home> <command> -> EG_R2_EXIT + EG_R2_ERR (announce
   input=$(jq -n --arg c "$command" --arg cwd "$home_dir" --arg s "$EG_SID" \
             '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   tmp_err=$(mktemp)
+  eg_autobind "$home_dir"
   if env -u BIONIC_WALL_VERBOSE HOME="$home_dir" CLAUDE_PROJECT_DIR="" \
        CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     EG_R2_EXIT=0
@@ -7962,6 +8012,7 @@ r3_commit_knob_unset() {  # <home> <project> <payload cwd> <command> -> R3_EXIT 
   input=$(jq -n --arg c "$command" --arg cwd "$payload_cwd" --arg s "$EG_SID" \
             '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   tmp_err=$(mktemp)
+  eg_autobind "$project_dir"
   if env -u BIONIC_WALL_VERBOSE HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" \
        CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     R3_EXIT=0

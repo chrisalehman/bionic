@@ -293,8 +293,22 @@ armed_ago() {  # <repo> [seconds ago, default 3600]
 # ---------- running the poker (same watchdog shape as tests/session-sweeper.test.sh) ----------
 
 POKE_BOUND=20
+# A TICK RUNS ON A SESSION'S OWN RUN (wave-23-fixit-1810, REQ-1, D1; T11). An UNBOUND session
+# gets the advisory and no run, so a fixture that engages with an empty marker and then asks
+# the tick about the plan beside it would be asking an unbound session about someone else's
+# run. `poke_bind` binds the empty marker to the library's open run for the drive, as
+# cross-gate-agreement's `cg_eg_bind` does for the gate; a case that WANTS the unbound
+# session sets POKE_UNBOUND=1 (§18c).
+poke_bind() {  # <repo> -> binds an empty engaged marker to the root's open run, if there is one
+  local m p; m="$(marker_of "$1")"
+  [ -f "$m" ] && [ ! -L "$m" ] && [ ! -s "$m" ] || return 0
+  p="$(bash -c '. "$1/run.sh" 2>/dev/null && active_run "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$1" 2>/dev/null)" || p=""
+  [ -n "$p" ] && bound_marker "$1" "$SID" "$p"
+  return 0
+}
 poke() {  # <repo> <args...> -> sets OUT, RC
   local repo="$1"; shift
+  case "${1:-}" in tick|fill-report) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
   ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "$@" ) \
     > "$TMPROOT/poke.out" 2>&1 &
   local p=$! i=0
@@ -1072,7 +1086,7 @@ add_row_to "$R8" "$ADOPT_A" name=closed-one status=identified agent_id="$ID_CLOS
 # D10 the ONE close is an ack taken after the row's launch (`roster_open_names`,
 # payload/scripts/lib/roster.sh; ADR-034 d1), so a MET-marked row nobody acked is ADOPTED —
 # its agent may still be on the panel, and an unadopted live agent is one no stop can reach
-# (memory adopt-skips-swept-rows). The marker stays, to show it closes nothing on its own; the
+# (the code in `roster_open_names` is the rule). The marker stays, to show it closes nothing on its own; the
 # ack is written by the real verb, in the PREDECESSOR's own ledger, where adopt reads it.
 swept_marker_write "$(roster_of "$R8" "$ADOPT_A")" "$(iso_ago 300)" "$ADOPT_A" closed-one "$ID_CLOSED" MET
 ( cd "$R8" && env CLAUDE_CODE_SESSION_ID="$ADOPT_A" bash "$SWEEPER_FOR_ACK" ack closed-one ) >/dev/null 2>&1
@@ -2945,6 +2959,8 @@ S12L_TICK="$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL [A-Za-z0-9]' | h
 # The wall, on the same repo: an ordinary (non-tick) turn that dispatched nothing.
 S12L_TR="$R12L/transcript-12l.jsonl"
 jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"where are we?"}}' > "$S12L_TR"
+# BOUND before the wall reads it — see s12l_wall_ids (wave-23-fixit-1810 T1).
+bind_marker "$R12L" "$R12L/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 S12L_OUT="$(cd "$R12L" && jq -nc --arg t "$S12L_TR" --arg c "$R12L" --arg s "$SID" \
   '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
   | env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PRESSURE_RING="$TMPROOT/ring-12l" BIONIC_PROBE_FREE_PCT=80 \
@@ -2970,6 +2986,9 @@ expect_eq "12l2 AC-5.2 the stop wall names exactly the ids the tick filled" "$S1
 # acked by that step and frees its slot in the same tick.
 s12l_wall_ids() {  # <repo> -> the ids among BASE ONE TWO that the stop wall names, sorted
   local repo="$1" tr="$1/transcript-wall.jsonl" out reason ids="" id
+  # THE WALL CHARGES ONLY A BOUND SESSION'S OWN LEDGER (wave-23-fixit-1810, REQ-1, D1): the
+  # session the tick filled for is bound to the plan it filled from before the wall reads it.
+  bind_marker "$repo" "$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
   jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"where are we?"}}' > "$tr"
   out="$(cd "$repo" && jq -nc --arg t "$tr" --arg c "$repo" --arg s "$SID" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
@@ -3936,10 +3955,13 @@ expect_absent   "…a bound session never falls through to a fallback (AC-6)" \
 R18C="$(make_repo s18-unbound)"; new_roster "$R18C"
 armed_ago "$R18C"
 P18C="$(plan_at "$R18C" 'epic-18/run-only.plan.md' "$(plan_body 4)")"
-poke "$R18C" tick
+POKE_UNBOUND=1 poke "$R18C" tick
 expect_contains "an unbound session says which resolution it used" \
   "poker: run resolved by newest-plan fallback (session unbound) — $(real_path_of "$P18C")" "$OUT"
-expect_contains "…and decides exactly what it decided before this wave" "decision=QUIET" "$OUT"
+expect_contains "…and says how to bind (wave-23 D1: announced, never acted on)" \
+  "bind with session-poker.sh bind $(real_path_of "$P18C")" "$OUT"
+expect_contains "…and decides QUIET: no run, so the Patrol keeps its stamp" "decision=QUIET" "$OUT"
+expect_absent   "…never over <p>'s step: no run is read for it" "is at current:" "$OUT"
 expect_absent   "…never DISARM on an open run" "decision=DISARM" "$OUT"
 expect_absent   "…and it is not confused with a closed binding" "bound plan closed" "$OUT"
 
@@ -3958,6 +3980,32 @@ expect_eq       "…and still removes the stamp" "no" \
   "$([ -e "$(stamp_of "$R18D")" ] && echo yes || echo no)"
 expect_absent   "…and announces no fallback: there was no open run to fall back to" \
   "newest-plan fallback" "$OUT"
+
+# ---------- 18e: resolve_run under `fallback` resolves NO run (wave-23-fixit-1810, T11) ----------
+# The unit read of what 18c reads through the tick. `fallback <p>` is announced and never
+# acted on, so the two output variables are the ones a session with no run gets: no plan, not
+# open. The function is extracted as text and driven with `session_run` stubbed, so the
+# assertion is on the variables themselves rather than on a decision line downstream.
+R18E_FN="$(sed -n '/^resolve_run() {/,/^}/p' "$POKER")"
+r18e() {  # <session_run answer> -> "<plan>|<open>|<stderr>" after resolve_run
+  bash -c '
+    die() { printf "poker: %s\n" "$1" >&2; }
+    run_unbound_advisory() { printf "ADVISORY %s" "$1"; }
+    session_run() { printf "%s" "$SR_ANSWER"; }
+    active_plan() { printf "/must/not/be/read"; }
+    POKER_RUN_PLAN=""; POKER_RUN_OPEN=no; POKER_RUN_RESOLVED=no
+    eval "$FN"
+    resolve_run /r sid 2>"$ERRF"
+    printf "%s|%s|%s" "$POKER_RUN_PLAN" "$POKER_RUN_OPEN" "$(cat "$ERRF")"
+  ' _ 2>&1
+}
+export FN="$R18E_FN" ERRF="$TMPROOT/r18e.err"
+R18E_OUT="$(SR_ANSWER='fallback /x/other.plan.md' r18e)"
+expect_eq "resolve_run under fallback: no plan, not open, advisory on stderr" \
+  "|no|poker: ADVISORY /x/other.plan.md" "$R18E_OUT"
+R18E_OUT="$(SR_ANSWER='bound-open /x/mine.plan.md' r18e)"
+expect_eq "resolve_run under bound-open (control): the plan, open, silent" \
+  "/x/mine.plan.md|yes|" "$R18E_OUT"
 
 # ---------- 18e: the scheduler reads the same run ----------
 # The tick has two plan readers — the run-state read above and the FILL scheduler's budget
@@ -5138,6 +5186,7 @@ section "Section 27: the tick's VERDICT — cadence liveness, the FILL band, not
 S27_OUT=""; S27_ERR=""
 poke_split() {  # <repo> <args...> -> sets S27_OUT (stdout), S27_ERR (stderr), RC
   local repo="$1"; shift
+  case "${1:-}" in tick|fill-report) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
   ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "$@" ) \
     > "$TMPROOT/s27.out" 2> "$TMPROOT/s27.err"
   RC=$?
@@ -6214,7 +6263,7 @@ s31_task_plan() {  # <repo> <current> -> the path; six columns, T1 in flight, T2
 
 # ---------- 31a: the tick fills a task-scale ledger, in table order ----------
 R31A="$(make_repo s29-task-fill)"; new_roster "$R31A"
-s31_task_plan "$R31A" T1 >/dev/null
+P31A="$(s31_task_plan "$R31A" T1)"
 add_row "$R31A" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R31A" 8192 1.0 tick
 expect_eq "31a a task-scale plan ticks cleanly (exit 0)" "0" "$RC"
@@ -6255,6 +6304,9 @@ s31_reason() { printf '%s' "$S31_OUT" | jq -r '.reason // ""' 2>/dev/null; }
 s31_decision() { printf '%s' "$S31_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 
 S31_TR="$(s31_transcript "$R31A" "have a look at the next two units")"
+# BOUND to the plan the tick filled from: the wall charges only a bound session's own ledger
+# (wave-23-fixit-1810, REQ-1, D1).
+bind_marker "$R31A" "$P31A"
 s31_stop "$R31A" "$S31_TR"
 expect_eq "31b the turn is refused — the ledger is live and two rows are ready" \
   "block" "$(s31_decision)"

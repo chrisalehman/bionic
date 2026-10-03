@@ -24,6 +24,7 @@
 #   env:zshrc-legacy present=<yes|no>
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
+#   env:auto-memory override=<file|none|unknown> dir=<path|none> files=<n>
 #   state:half-uninstalled=<yes|no>
 #   load-state=<loaded|failed|absent|unknown> error=<CLI error text|-> [cause=<text>]
 #   dup=<bare-name> ids=<a@x>,<b@y> fix=<consolidation command>
@@ -472,6 +473,89 @@ detect_legacy_skill_copy() {
     present=yes
   fi
   echo "env:legacy-skill-copy present=${present} path=${dir}"
+  return 0
+}
+
+# ─── Auto memory, for one project ────────────────────────────────────────────
+#
+# THE TWO THINGS THE SWITCH CANNOT PREVENT (wave-23 D5). setup writes
+# CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 into the user settings' `env` object, and that
+# turns the CLI's auto memory off everywhere a lower scope does not turn it back
+# on. Two facts survive it, and both are about a PROJECT rather than the machine:
+#
+#   override  the project's own `.claude/settings.local.json` or
+#             `.claude/settings.json` carries an `env` value for the same name.
+#             A settings file outranks the user file it sits beside, so any value
+#             there other than "1" switches auto memory back on for this project.
+#             PRECEDENCE IS READ, NOT EITHER FILE ALONE: local outranks shared, so
+#             the first of the two that sets the name decides, and a local "1"
+#             over a shared "0" is no override at all. The file named is the one
+#             that decided, relative to the root, because that is the file a
+#             person opens.
+#   dir       memory files the CLI wrote before the switch was set. Turning it off
+#             stops new writes and stops the load; it deletes nothing. The
+#             directory is `<claude-home>/projects/<slug>/memory/`, where the slug
+#             is the PHYSICAL project root with every non-alphanumeric character
+#             replaced by `-` — the CLI's own naming, and the slugging
+#             hooks/stop-orders.sh uses to find a transcript. Physical because the
+#             CLI resolves the path: a project under `/tmp` lives in
+#             `-private-tmp-…` on macOS. An empty directory is named and counts 0.
+#
+# `unknown` WHEN THE OVERRIDE CANNOT BE READ: a settings file is there and jq is
+# missing, or the file does not parse. Never `none` in that case, because `none`
+# would tell a reader the project is clean when nobody looked.
+#
+# The root is `BIONIC_ROOT` when a caller names one, else the working directory;
+# lib/checks.sh resolves a working directory to its project root first. The home
+# is the same `BIONIC_CLAUDE_HOME` seam every claude-home reader here uses.
+DETECT_AUTO_MEMORY_KEY='CLAUDE_CODE_DISABLE_AUTO_MEMORY'
+
+detect_auto_memory() {
+  local home root phys slug rel f v override=none dir=none n=0 m val
+  home="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
+  root="${BIONIC_ROOT:-$PWD}"
+  phys="$(cd "$root" 2>/dev/null && pwd -P)" || phys=""
+  [ -n "$phys" ] || phys="$root"
+
+  for rel in .claude/settings.local.json .claude/settings.json; do
+    f="${root}/${rel}"
+    [ -f "$f" ] || continue
+    if ! command -v jq >/dev/null 2>&1; then override=unknown; break; fi
+    # `set:<value>` or `unset`: the prefix keeps a value that happens to read
+    # "unset" from passing for an absent key.
+    v="$(jq -r --arg k "$DETECT_AUTO_MEMORY_KEY" \
+      '.env | if type == "object" and has($k) then "set:" + (.[$k] | tostring) else "unset" end' \
+      "$f" 2>/dev/null)" || { override=unknown; break; }
+    # THE CLI'S READING OF THE VALUE, IN ONE PLACE (wave-23 T14, critic C-6). The CLI
+    # lowercases and trims the value, then reads "1", "true", "yes" and "on" as
+    # "disable auto memory" (its truthy helper) and "0", "false", "no" and "off" as
+    # "enable" (its falsy helper); anything else, the empty string included, falls
+    # through to the default, which is on. So only the truthy set is not an override.
+    # Source: the critic's reading of the shipped CLI bundle, record/wave-23-fixit-1810/
+    # critic-43e45387.md C-6.
+    case "$v" in
+      set:*) val="$(printf '%s' "${v#set:}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" ;;
+    esac
+    case "$v" in
+      unset) continue ;;
+      set:*)
+        case "$val" in
+          1|true|yes|on) ;;
+          *) override="$rel" ;;
+        esac ;;
+      *)     override=unknown ;;
+    esac
+    break
+  done
+
+  slug="$(printf '%s' "$phys" | sed 's/[^a-zA-Z0-9]/-/g')"
+  if [ -d "${home}/projects/${slug}/memory" ]; then
+    dir="${home}/projects/${slug}/memory"
+    for m in "$dir"/*; do
+      [ -f "$m" ] && n=$((n + 1))
+    done
+  fi
+  echo "env:auto-memory override=${override} dir=${dir} files=${n}"
   return 0
 }
 

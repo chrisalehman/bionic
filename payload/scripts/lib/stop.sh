@@ -105,6 +105,32 @@ if ! declare -F audit_path >/dev/null 2>&1; then
   . "$_STOP_LIB_DIR/root.sh"
 fi
 
+# ─── FILE SCOPE: the unbound advisory, said once per process ─────────────────
+#
+# UNBOUND MEANS NO RUN (wave-23-fixit-1810, REQ-1, D1). When `session_run` answers
+# `fallback <plan>`, every arm below that would have acted on the plan announces it and
+# then takes its `none` path: the plan is announced and never acted on. The words are
+# lib/run.sh's `run_unbound_advisory`, never a copy, so the five arms here and the dispatch
+# wall say one byte-identical thing (tests/cross-gate-agreement.test.sh §UB).
+#
+# ONCE PER PROCESS, because the four verdicts share one shell and one turn end. Three of
+# them meet the same `fallback` on the same Stop; a reader shown the same sentence three
+# times learns nothing the first did not say (tests/stop.test.sh §UB3 pins once). The first
+# arm to meet it speaks and returns 0, and the caller marks its verdict advisory; every
+# later arm returns 1 and stays quiet. Sourced again in a fresh process, it speaks again.
+#
+# run.sh IS SOURCED HERE for the suites that drive this file directly, the way root.sh is
+# above; hooks/stop.sh sources it first, so in the shipped process the guard never fires.
+if ! declare -F run_unbound_advisory >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/run.sh"
+fi
+stop_unbound_advise() {  # <plan> -> 0 staged · 1 already said in this process
+  [ -z "${_STOP_UNBOUND_SAID:-}" ] || return 1
+  _STOP_UNBOUND_SAID=1
+  fold_advise "$(run_unbound_advisory "${1:-}")"
+}
+
 # ─── FILE SCOPE: the derivation bound, which this file does not own ──────────
 #
 # `LG_IMPACT_BOUND_S` is defined once, in lib/bounds.sh, beside the dispatch
@@ -442,16 +468,18 @@ stop_context_spend() {  # <event> -> 0 nothing · 1 advisory · 2 block
 #
 # wave-session-bound-run S5: `active_run` (no session input) is now `session_run`
 # (lib/run.sh) — a session BOUND to a plan is attributed against THAT plan alone,
-# whatever else is open in the root (AC-1); UNBOUND falls back to the newest plan
-# exactly as before, and this hook says so once on its advisory channel (stderr —
-# this hook NEVER writes stdout, see the header) (AC-3); bound to a plan that has
-# since closed takes exactly this line's existing branch — the hard exit — after
-# announcing the closure (AC-6).
+# whatever else is open in the root (AC-1); bound to a plan that has since closed takes
+# exactly this line's existing branch — the hard exit — after announcing the closure (AC-6).
+# UNBOUND, the newest plan is announced and never acted on (wave-23-fixit-1810, REQ-1, D1):
+# the advisory goes out on this hook's advisory channel (stderr — this hook NEVER writes
+# stdout, see the header) and the arm takes `none`'s exit, so no spend is recorded against
+# a run that is somebody else's.
 PLAN="$BIONIC_RUN_PLAN"
 case "$BIONIC_RUN_WORD" in
   bound-open) : ;;
   fallback)
-    fold_advise "context-spend: run resolved by newest-plan fallback (session unbound) — $PLAN"; _adv=1
+    stop_unbound_advise "$PLAN" && _adv=1
+    return "$_adv"
     ;;
   bound-closed)
     fold_advise "context-spend: bound plan closed — $PLAN; this session has no open run"; _adv=1
@@ -731,7 +759,7 @@ stop_landing_gate() {  # <event> -> 0 nothing · 1 advisory · 2 block
   # The derivation window below zeroes it; nothing else in this file or in hooks/stop.sh
   # reads it.
   local LG_IMPACT_CLOCK LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY LG_WORKING_BRANCH
-  local LG_ROW_RC LG_ROW_ID LG_ROW_BASE LG_FALLBACK_WHY LG_BASE_SRC
+  local LG_ROW_RC LG_ROW_ID LG_ROW_BASE LG_FALLBACK_WHY LG_BASE_SRC LG_RUN_PLAN
   local _LG_ROW_ID _LG_ROW_BASE
   local LG_OUTSIDE LG_DF LG_IMPACT_CMD LG_SUITES LG_SUITES_NOTE LG_IMPACT_TMP
   local LG_IMPACT_PID LG_OVERRAN
@@ -1171,9 +1199,22 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
       # the case after a writer merges the wave tip in), and it answers NOTHING when the cell
       # names a commit this tree does not hold — which is how a wrong record is caught here
       # instead of charging a writer against a base that means nothing to its history.
-      LG_ROW_ID=""; LG_ROW_BASE=""; LG_FALLBACK_WHY=""; LG_ROW_RC=0
-      if [ -n "$BIONIC_RUN_PLAN" ]; then
-        _lg_row_for_tree "$BIONIC_RUN_PLAN" "${LG_WT##*/}" || LG_ROW_RC=$?
+      #
+      # THE PLAN IS READ ONLY WHEN THIS SESSION IS BOUND TO IT AND IT IS OPEN
+      # (wave-23-fixit-1810, REQ-1, D1). An unbound session's `fallback` plan is somebody
+      # else's run: it is announced and never acted on, so no row of it is looked up and its
+      # `working-branch:` is not read — the reconciliation takes the checkout fallback below,
+      # and says why ("session unbound"). A closed or unreadable binding reads nothing either.
+      LG_ROW_ID=""; LG_ROW_BASE=""; LG_FALLBACK_WHY=""; LG_ROW_RC=0; LG_RUN_PLAN=""
+      case "$BIONIC_RUN_WORD" in
+        bound-open) LG_RUN_PLAN="$BIONIC_RUN_PLAN" ;;
+        fallback)
+          stop_unbound_advise "$BIONIC_RUN_PLAN" && _adv=1
+          LG_FALLBACK_WHY="session unbound"
+          ;;
+      esac
+      if [ -n "$LG_RUN_PLAN" ]; then
+        _lg_row_for_tree "$LG_RUN_PLAN" "${LG_WT##*/}" || LG_ROW_RC=$?
         LG_ROW_ID="$_LG_ROW_ID"; LG_ROW_BASE="$_LG_ROW_BASE"
       fi
       LG_BASE=""
@@ -1191,7 +1232,7 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
       fi
 
       LG_WORKING_BRANCH=""
-      [ -n "$BIONIC_RUN_PLAN" ] && LG_WORKING_BRANCH=$(plan_frontmatter_get "$BIONIC_RUN_PLAN" "working-branch")
+      [ -n "$LG_RUN_PLAN" ] && LG_WORKING_BRANCH=$(plan_frontmatter_get "$LG_RUN_PLAN" "working-branch")
       LG_MAIN_BRANCH=""
       LG_BASE_SRC=""
       if [ -n "$LG_WORKING_BRANCH" ] \
@@ -1375,8 +1416,9 @@ return 2
 # passes untouched, as does any ambiguity along the way.
 #
 # WHY A WALL AND NOT BETTER WORDING. The duties live in the Patrol prompt today,
-# and a prompt is text: it asks. Every rule in this repo that actually binds is a
-# wall (memory/rules-are-walls-not-wishes), and the only event that can express
+# and a prompt is text: it asks. Prose rules and reminder hooks were measured not to
+# bind a model that had already decided; the walls were what did, so every rule here
+# that actually binds is a wall, and the only event that can express
 # "this must have happened before the turn ends" is the turn's END. A PreToolUse
 # arm cannot say it — at the moment any single tool runs, the turn is not over
 # and nothing has been skipped yet. So the predicate is retrospective by
@@ -1412,8 +1454,8 @@ return 2
 # hooks/session-poker.sh:399-406 makes for the same reason.
 #
 # THE TASK-LIST FALLBACK IS NOT A CONVENIENCE. The task tools are absent from
-# some model/CLI combinations (memory/task-tools-tengu-gate: removed for fable-5
-# in CLI 2.1.228–2.1.233), and in those sessions the plan's own ledger IS the
+# some model/CLI combinations (removed for fable-5 in CLI 2.1.228–2.1.233; the census
+# is the rationale block in payload/scripts/lib/env.sh), and in those sessions the plan's own ledger IS the
 # task list. A wall that demanded `TaskList` there would be unsatisfiable, which
 # is the one failure mode a blocking gate must not have. So an Edit/Write/
 # NotebookEdit/Bash tool_use whose input names the active plan file discharges
@@ -1553,15 +1595,18 @@ HOOK_DIR="$_STOP_HOOK_DIR_ABS"
 #
 # wave-session-bound-run S5: `active_run` (no session input) is now `session_run`
 # (lib/run.sh) — a session BOUND to a plan is policed against THAT plan's basename
-# alone, whatever else is open in the root (AC-1); UNBOUND falls back to the
-# newest plan exactly as before, and this gate says so once on stderr (AC-3);
-# bound to a plan that has since closed is policed exactly as engaged-with-no-plan
-# (AC-6) — the basename discharge is the only thing a missing plan costs.
+# alone, whatever else is open in the root (AC-1); bound to a plan that has since closed
+# is policed exactly as engaged-with-no-plan (AC-6) — the basename discharge is the only
+# thing a missing plan costs. UNBOUND, the newest plan is announced and never acted on
+# (wave-23-fixit-1810, REQ-1, D1): the advisory goes out once on stderr and the turn is
+# policed as engaged-with-no-plan too, so a write naming somebody else's plan discharges
+# nothing, and the fill duty below has no ledger to charge (`stop_turn_facts`).
 PLAN="$BIONIC_RUN_PLAN"
 case "$BIONIC_RUN_WORD" in
   bound-open) : ;;
   fallback)
-    fold_advise "patrol-duties-gate: run resolved by newest-plan fallback (session unbound) — $PLAN"; _adv=1
+    stop_unbound_advise "$PLAN" && _adv=1
+    PLAN=""
     ;;
   bound-closed)
     fold_advise "patrol-duties-gate: bound plan closed — $PLAN; this session has no open run"; _adv=1
@@ -2004,7 +2049,10 @@ return 2
 #
 # WHAT IT SETS, and nothing else:
 #   _ST_STREAM      the transcript records below, one per line, tab-separated
-#   _ST_PLAN        the run's plan (bound-open or fallback), or empty
+#   _ST_PLAN        the run's plan — bound-open alone — or empty. A `fallback` plan is
+#                   announced and never acted on (wave-23-fixit-1810, REQ-1, D1): it is
+#                   somebody else's run, so an unbound session has no ledger to fill from,
+#                   records no fill-ledger line, and is never refused for its ready rows
 #   _ST_LIVE        1 when that plan's ledger is live (past Step 3), else 0
 #   _ST_TICK        1 when the turn's prompt leads with THIS session's Patrol marker
 #   _ST_TURN        the turn key: the prompt record's uuid, else its timestamp, else empty
@@ -2084,7 +2132,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   [ -n "$tr" ] && [ -f "$tr" ] && [ ! -L "$tr" ] || return 1
 
   case "$BIONIC_RUN_WORD" in
-    bound-open|fallback) _ST_PLAN="$BIONIC_RUN_PLAN" ;;
+    bound-open) _ST_PLAN="$BIONIC_RUN_PLAN" ;;
   esac
   [ -n "$_ST_PLAN" ] && [ -f "$_ST_PLAN" ] || _ST_PLAN=""
 
@@ -2554,15 +2602,17 @@ HOOK_DIR="$_STOP_HOOK_DIR_ABS"
 #
 # wave-session-bound-run S5: `active_run` (no session input) is now `session_run`
 # (lib/run.sh) — a session BOUND to a plan proceeds on THAT plan alone, whatever
-# else is open in the root (AC-1); UNBOUND falls back to the newest plan exactly
-# as before, and this hook says so once on stderr (AC-3); bound to a plan that
-# has since closed takes exactly this line's existing branch — return "$_adv" — after
-# announcing the closure (AC-6).
+# else is open in the root (AC-1); bound to a plan that has since closed takes exactly
+# this line's existing branch — return "$_adv" — after announcing the closure (AC-6).
+# UNBOUND, the newest plan is announced and never acted on (wave-23-fixit-1810, REQ-1,
+# D1): the advisory goes out once on stderr and this hook returns as under `none` — a
+# Patrol serving somebody else's run is not this session's to revive.
 _RUN_PLAN="$BIONIC_RUN_PLAN"
 case "$BIONIC_RUN_WORD" in
   bound-open) : ;;
   fallback)
-    fold_advise "patrol-revive: run resolved by newest-plan fallback (session unbound) — $_RUN_PLAN"; _adv=1
+    stop_unbound_advise "$_RUN_PLAN" && _adv=1
+    return "$_adv"
     ;;
   bound-closed)
     fold_advise "patrol-revive: bound plan closed — $_RUN_PLAN; this session has no open run"; _adv=1
