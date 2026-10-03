@@ -22,8 +22,14 @@
 # closed` and touches nothing (AC-4.4). That marker is `lib/run.sh`'s own — the one every
 # hook in this tree already reads — so there is no second notion of "closed" to drift.
 #
+# THE GATE IS ASKED FIRST, AND ASKED AGAIN AS THE ATTESTATION (critic3 P-1, wave-23 T17).
+# Before the first act, `run` refuses unless `current:` reads 8 and then writes phase 8's
+# block into a scratch copy of the plan and asks the real gate about the copy; a refusal
+# there ends the run with nothing touched, and `check` asks the same question, so the two
+# verbs agree on every plan.
+#
 # THE GATE IS THE ATTESTATION, AND IT IS NOT OPTIONAL (D5: "a script writes a lifecycle
-# artifact only where a gate validates what it wrote"). The order is Step-8 block, then
+# artifact only where a gate validates what it wrote"). After the acts, the order is Step-8 block, then
 # the dry-run, then the Step-9 flip (`current: 9`, `delivered:`, handoff): the gate must
 # judge the plan while it is still OPEN, because once it reads closed the gate exits 0
 # before it checks any step evidence (critic2 N-3). A refusal leaves the plan at current 8
@@ -102,9 +108,9 @@ done
 . "${CO_LIB}/units.sh"
 
 # CO_SID -> this script's own identity, read from the ambient environment BEFORE
-# anything below ever touches CLAUDE_CODE_SESSION_ID (the gate dry-run's two
-# `CLAUDE_CODE_SESSION_ID=` overrides, at :661 and :788, exist for its own
-# purposes and must never be allowed to
+# anything below ever touches CLAUDE_CODE_SESSION_ID (`gate_ask`'s one
+# `CLAUDE_CODE_SESSION_ID=` override, shared by the pre-flight, the attestation and
+# `check`, exists for its own purposes and must never be allowed to
 # shadow the real one first). REQ-1's tmp-spare rule (act_tmp, D2) keys on this: an
 # entry under `.bionic/tmp` belonging to a DIFFERENT, still-live session is a running
 # run's state and is spared; this session's own keyed state is removed like any other
@@ -220,6 +226,11 @@ SECTION="$(sdlc_section)"
 [ -n "$SECTION" ] || _co_refuse "$PLAN carries no ## SDLC State section"
 INTEGRATION="$(sdlc_header integration-branch "$SECTION")"
 WORKING="$(sdlc_header working-branch "$SECTION")"
+# `run` closes a plan at Step 8 and nowhere else (critic3 P-3, wave-23 T17): the gate judges
+# whatever step `current:` names, so below 8 its refusal would be about a step this script
+# never writes, and above 8 there is nothing left for it to close.
+CURRENT="$(sdlc_header current "$SECTION")"
+STEP_REFUSAL="the plan reads current: ${CURRENT:-<none>} — advance the plan to Step 8 first"
 
 # ─── Preflight ───────────────────────────────────────────────────────────────
 #
@@ -363,12 +374,21 @@ wt_unreached() {
   return 0
 }
 
-act_worktrees() {
-  local unreached b removed="" wt_dir
+# refuse_unreached -> the census half of act 2, alone: read-only, so `run` asks it before
+# the pre-flight as well as here (T17 — every refusal that can be known before the first
+# act is given before it).
+refuse_unreached() {
+  local unreached
   unreached="$(wt_unreached)"
   if [ -n "$unreached" ]; then
     _co_refuse "$(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took (git cherry) — nothing was deleted, and nothing else was done"
   fi
+  return 0
+}
+
+act_worktrees() {
+  local b removed="" wt_dir
+  refuse_unreached
 
   while IFS= read -r b; do
     [ -n "$b" ] || continue
@@ -645,13 +665,14 @@ handoff_block() {
 HANDOFF
 }
 
-# write_plan_blocks <8|9> — the plan is written in TWO PHASES so the commit gate can judge
+# write_plan_blocks <8|9> [target] — the plan is written in TWO PHASES so the commit gate can judge
 # the Step-8 block while the plan is still open (critic2 N-3, wave-23 T16).
 #   8  replaces the Step-8 line with whatever continuation lines it had. `current:` stays
 #      at 8, so the plan still reads OPEN to `run_open` and the bound dry-run is judged by
 #      the gate's step-evidence checks, not short-circuited by `bound-closed`.
 #   9  replaces the Step-9 line, sets `current: 9`, and rewrites `## Handoff` whole. After
 #      this the plan reads closed and the gate exits 0 before it looks at evidence.
+# [target] defaults to the plan; the pre-flight (below) passes a scratch copy of it instead.
 #
 # A CONTINUATION LINE IS DROPPED BY THE SAME GRAMMAR THE GATE READS IT BY
 # (`extract_continuation`, walls.sh:1697): everything after a Step line up to the next
@@ -659,7 +680,8 @@ HANDOFF
 # close would leave the old block's keys underneath the new one, where `block_get`'s
 # first-match rule would quietly prefer them.
 write_plan_blocks() {
-  local tmp="$PLAN.close-out.$$" phase="$1"
+  local phase="$1" target="${2:-$PLAN}"
+  local tmp="$target.close-out.$$"
   CO_PHASE="$phase" CO_STEP8="$(step8_block)" CO_STEP9="$(step9_block)" CO_HANDOFF="$(handoff_block)" awk '
     /^## / {
       insdlc = ($0 ~ /^## SDLC State/)
@@ -683,17 +705,17 @@ write_plan_blocks() {
       print ENVIRON["CO_STEP9"]; skip = 1; next
     }
     { print }
-  ' "$PLAN" > "$tmp" 2>/dev/null
+  ' "$target" > "$tmp" 2>/dev/null
 
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp"
-    _co_refuse "could not rewrite $PLAN"
+    _co_refuse "could not rewrite $target"
   fi
-  mv "$tmp" "$PLAN"
+  mv "$tmp" "$target"
 
   if [ "$phase" = 8 ]; then
-    grep -qE '^- Step 8: CLOSED ' "$PLAN" || _co_refuse "the Step-8 line did not land in $PLAN"
-    grep -qE '^  attested-by: close-out.sh ' "$PLAN" || _co_refuse "the attestation did not land in $PLAN"
+    grep -qE '^- Step 8: CLOSED ' "$target" || _co_refuse "the Step-8 line did not land in $target"
+    grep -qE '^  attested-by: close-out.sh ' "$target" || _co_refuse "the attestation did not land in $target"
     return 0
   fi
 
@@ -711,23 +733,34 @@ write_plan_blocks() {
   grep -q 'resume point: NONE — DELIVERED at ' "$PLAN" || _co_refuse "the handoff was not rewritten in $PLAN"
 }
 
-# ─── The gate dry-run ────────────────────────────────────────────────────────
+# ─── The gate ────────────────────────────────────────────────────────────────
 
-gate_dry_run() {
-  local hook sid marker input err rc
+# gate_ask <plan-file> <sid> -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
+# (its one refusal line) for a `git commit` judged against <plan-file>. Status 9, with
+# GATE_LINE saying why, when there is no gate to ask; 0 otherwise, whatever the verdict.
+#
+# THE MARKER IS BOUND TO THE FILE UNDER CHECK (wave-23-fixit-1810 T12). An empty marker is
+# the unbound state, whose commit-gate verdict is an announcement and exit 0, so the
+# dry-run would attest nothing. The two-line shape binding.sh's bind_plan writes, with the
+# plan stored directly: bind_plan refuses any file that `open_runs` does not list, and the
+# pre-flight's scratch copy is deliberately not one (its name does not end `.plan.md`, so
+# no other session's walk can ever pick it up).
+#
+# The environment agrees with the payload because on a real call it does: lib/session.sh
+# takes the env value as primary and the payload as a witness, and a dry-run whose two
+# disagreed would be answered for a session that does not exist.
+GATE_RC=0
+GATE_ERR=""
+GATE_LINE=""
+gate_ask() {
+  local plan="$1" sid="$2" hook marker input
+  GATE_RC=9; GATE_ERR=""; GATE_LINE=""
   hook="$(plugin_root)/hooks/bash-walls.sh"
-  [ -f "$hook" ] || _co_refuse "no bash-walls.sh at $hook — the blocks cannot be attested"
-
-  sid="closeout-$$"
+  [ -f "$hook" ] || { GATE_LINE="no bash-walls.sh at $hook"; return 9; }
   marker="$(engaged_marker_path "$ROOT" "$sid")" \
-    || _co_refuse "could not build an engagement marker path for the dry-run"
+    || { GATE_LINE="could not build an engagement marker path for the dry-run"; return 9; }
   mkdir -p "${marker%/*}" 2>/dev/null
-  # BOUND TO THE PLAN UNDER CHECK (wave-23-fixit-1810 T12). An empty marker is the unbound
-  # state, whose commit-gate verdict is an announcement and exit 0, so the dry-run would
-  # attest nothing. The two-line shape binding.sh's bind_plan writes, with the plan stored
-  # directly: bind_plan itself refuses a plan that is no longer an open run.
-  printf 'plan=%s\nengaged_at=%s\n' "$PLAN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
-
+  printf 'plan=%s\nengaged_at=%s\n' "$plan" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
   input="$(jq -n --arg s "$sid" --arg cwd "$ROOT" \
     '{session_id: $s,
       cwd: $cwd,
@@ -735,20 +768,90 @@ gate_dry_run() {
       tool_name: "Bash",
       tool_input: {command: "git commit -m close-out"},
       tool_use_id: "toolu_closeout"}')"
-
-  # The environment agrees with the payload because on a real call it does: lib/session.sh
-  # takes the env value as primary and the payload as a witness, and a dry-run whose two
-  # disagreed would be answered for a session that does not exist.
-  err="$(CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" bash "$hook" <<< "$input" 2>&1 >/dev/null)"
-  rc=$?
+  GATE_ERR="$(CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" bash "$hook" <<< "$input" 2>&1 >/dev/null)"
+  GATE_RC=$?
   rm -f "$marker"
+  GATE_LINE="$(grep -m1 '^bionic: ' <<< "$GATE_ERR")"
+  [ -n "$GATE_LINE" ] || GATE_LINE="$(grep -m1 '[^[:space:]]' <<< "$GATE_ERR")"
+  return 0
+}
 
-  if [ "$rc" -eq 0 ]; then
+# gate_dry_run -> the ATTESTATION: the gate asked about the plan as this run wrote it, Step-8
+# block in place and still open at current 8. A refusal here is rare now that the pre-flight
+# asked the same question first; it is kept because the pre-flight judged a copy and this
+# judges the file the commit will carry.
+gate_dry_run() {
+  gate_ask "$PLAN" "closeout-$$" || _co_refuse "$GATE_LINE — the blocks cannot be attested"
+  if [ "$GATE_RC" -eq 0 ]; then
     say "gate: ok"
     return 0
   fi
-  [ -n "$err" ] && printf '%s\n' "$err"
-  _co_refuse "the commit gate refused the blocks this run wrote (rc=$rc) — the plan edits are left in place, because they are what to fix"
+  [ -n "$GATE_ERR" ] && printf '%s\n' "$GATE_ERR"
+  _co_refuse "the commit gate refused the blocks this run wrote (rc=$GATE_RC) — the plan edits are left in place, because they are what to fix"
+}
+
+# ─── The pre-flight: the gate's question, asked before the first act ─────────
+#
+# ASKED OF A COPY, BEFORE ANYTHING IS TOUCHED (critic3 P-1, wave-23 T17). The attestation
+# above judges the plan after acts 1–6, and by then the `wt/*` branches are deleted, this
+# session's tmp state is wiped and the continuation and epic row are written. A refusal the
+# Step-8 block cannot clear (a matrix, evidence or ledger fault) used to land there, on a
+# half-closed run. So the same question is asked first: the plan is copied to a hidden
+# scratch file beside it (same directory, so every path the gate resolves from the plan
+# resolves the same), phase 8's block is written into the copy, a synthetic marker is bound
+# to the copy, and the real gate judges it. The copy is removed whatever the answer, and by
+# the EXIT trap if the script dies in between.
+#
+# THE BLOCK CARRIES PREDICTIONS, NOT RESULTS. The merge, census and wipe have not run yet,
+# so their lines are what they will say. The gate's Step-8 check is presence-only
+# (walls.sh `validate_integrate_step` -> `shape_block`); a gate that ever reads those
+# values is caught by the attestation, which judges the real ones.
+#
+# PREFLIGHT_RC is GATE_RC, or 9 when the block could not be written or there is no gate;
+# PREFLIGHT_LINE is the one line to show, PREFLIGHT_ERR the gate's whole answer. Every
+# mention of the scratch path is put back to the plan's, because the copy is gone by the
+# time anyone reads it.
+CO_SCRATCH=""
+trap '[ -n "$CO_SCRATCH" ] && rm -f "$CO_SCRATCH"' EXIT
+PREFLIGHT_RC=0
+PREFLIGHT_LINE=""
+PREFLIGHT_ERR=""
+preview_block_lines() {
+  local ws is wt
+  ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
+  is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  MERGE_LINE="$WORKING @ ${ws:-?} reachable from $INTEGRATION @ ${is:-?}"
+  wt="$(wt_branches | tr '\n' ',' | sed -E 's/,$//; s/,/, /g')"
+  WT_LINE="${wt:-none}"
+  TMP_LINE="$(tmp_count) entries under $TMP_DIR (not yet wiped)"
+}
+
+gate_preflight() {
+  local copy out
+  copy="$PLANS_DIR/.${PLAN##*/}.preflight.$$"
+  CO_SCRATCH="$copy"
+  PREFLIGHT_RC=9; PREFLIGHT_LINE=""; PREFLIGHT_ERR=""
+  preview_block_lines
+  if ! cp "$PLAN" "$copy" 2>/dev/null; then
+    rm -f "$copy"; CO_SCRATCH=""
+    PREFLIGHT_LINE="could not copy the plan to $copy"
+    return 0
+  fi
+  # A SUBSHELL, so write_plan_blocks' own refusal ends it and not this script: `check`
+  # must still report, and `run` refuses below with the reason in hand.
+  if ! out="$(write_plan_blocks 8 "$copy")"; then
+    rm -f "$copy"; CO_SCRATCH=""
+    out="${out//"$copy"/$PLAN}"
+    PREFLIGHT_LINE="${out#bionic: close-out refused — }"
+    return 0
+  fi
+  gate_ask "$copy" "closeout-preflight-$$"
+  rm -f "$copy"; CO_SCRATCH=""
+  [ "$GATE_RC" -eq 9 ] && { PREFLIGHT_LINE="$GATE_LINE"; return 0; }
+  PREFLIGHT_RC="$GATE_RC"
+  PREFLIGHT_LINE="${GATE_LINE//"$copy"/$PLAN}"
+  PREFLIGHT_ERR="${GATE_ERR//"$copy"/$PLAN}"
+  return 0
 }
 
 # ─── Act 7: the archive ──────────────────────────────────────────────────────
@@ -805,7 +908,12 @@ insert_archived() {
 # usually a refusal, because the block `run` is about to write is not written yet. That is
 # the answer, not an error, so this verb exits 0 either way.
 do_check() {
-  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count hook sid marker input rc
+  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count
+  if [ "$CURRENT" = 8 ]; then
+    say "step: current: 8"
+  else
+    say "step: WOULD REFUSE — $STEP_REFUSAL"
+  fi
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
@@ -866,32 +974,33 @@ do_check() {
   # leaves the verdict to `run`, which asks once the plan reads closed.
   say "archived: archive_run would be asked for $PLANS_DIR into $(archive_root "$ROOT") once the plan reads closed"
 
-  # THE GATE, ASKED WITHOUT WRITING ANYTHING — including the engagement marker, which is
-  # removed again whether or not it was this call that put it there being irrelevant: the
-  # id is synthetic and nothing else can be looking for it.
-  hook="$(plugin_root)/hooks/bash-walls.sh"
-  if [ ! -f "$hook" ]; then
-    say "gate: skipped — no bash-walls.sh at $hook"
-    return 0
-  fi
-  sid="closeout-check-$$"
-  marker="$(engaged_marker_path "$ROOT" "$sid")" || { say "gate: skipped — no marker path"; return 0; }
-  mkdir -p "${marker%/*}" 2>/dev/null
-  # BOUND TO THE PLAN UNDER CHECK (wave-23-fixit-1810 T12). An empty marker is the unbound
-  # state, whose commit-gate verdict is an announcement and exit 0, so the dry-run would
-  # attest nothing. The two-line shape binding.sh's bind_plan writes, with the plan stored
-  # directly: bind_plan itself refuses a plan that is no longer an open run.
-  printf 'plan=%s\nengaged_at=%s\n' "$PLAN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
-  input="$(jq -n --arg s "$sid" --arg cwd "$ROOT" \
-    '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
-      tool_input: {command: "git commit -m close-out"}, tool_use_id: "toolu_closeout"}')"
-  CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" bash "$hook" <<< "$input" >/dev/null 2>&1
-  rc=$?
-  rm -f "$marker"
-  if [ "$rc" -eq 0 ]; then
+  # THE GATE, ASKED TWICE, WRITING NOTHING BUT A SCRATCH COPY AND A SYNTHETIC MARKER, both
+  # removed again.
+  #
+  # AS IT STANDS: at Step 8 this is usually a refusal, because the block `run` writes is
+  # not written yet. It is the witness that the gate reads this plan and discriminates on
+  # what the script writes into it (§4's 4e beside §1's 1af/1ag).
+  #
+  # AS RUN WOULD WRITE IT: the pre-flight `run` itself asks before its first act, so this
+  # line and `run`'s outcome cannot disagree (critic3 P-1). Its refusal is the gate's own
+  # line, never a sentence of this script's about what would clear it.
+  gate_ask "$PLAN" "closeout-check-$$" || { say "gate: skipped — $GATE_LINE"; return 0; }
+  if [ "$GATE_RC" -eq 0 ]; then
     say "gate: ok against the plan as it stands"
   else
-    say "gate: would refuse the plan as it stands (rc=$rc) — the Step-8 block run writes is what clears it"
+    say "gate: would refuse the plan as it stands (rc=$GATE_RC): $GATE_LINE"
+  fi
+  if [ "$CURRENT" != 8 ]; then
+    say "gate: not asked for the plan run would write — run stops at the step line above first"
+    return 0
+  fi
+  gate_preflight
+  if [ "$PREFLIGHT_RC" -eq 0 ]; then
+    say "gate: ok against the plan run would write"
+  elif [ "$PREFLIGHT_RC" -eq 9 ]; then
+    say "gate: WOULD REFUSE before the gate is asked — $PREFLIGHT_LINE"
+  else
+    say "gate: WOULD REFUSE the plan run would write (rc=$PREFLIGHT_RC): $PREFLIGHT_LINE"
   fi
   return 0
 }
@@ -899,6 +1008,20 @@ do_check() {
 # ─── run ─────────────────────────────────────────────────────────────────────
 
 do_run() {
+  # NOTHING IS TOUCHED UNTIL ALL FOUR OF THESE PASS (critic3 P-1, P-3), in this order: the
+  # step `run` closes, the merge verdict (act 1 is a readback and touches nothing), the
+  # branch census, and the gate's answer about the plan `run` will write. Any refusal leaves
+  # every branch, every tmp entry, the plan and the epic plan exactly as they were.
+  [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
+  act_merge
+  refuse_unreached
+  gate_preflight
+  [ "$PREFLIGHT_RC" -eq 9 ] && _co_refuse "$PREFLIGHT_LINE — nothing was done"
+  if [ "$PREFLIGHT_RC" -ne 0 ]; then
+    [ -n "$PREFLIGHT_ERR" ] && printf '%s\n' "$PREFLIGHT_ERR"
+    _co_refuse "the commit gate would refuse the plan this run would write (rc=$PREFLIGHT_RC) — nothing was done: no branch deleted, no tmp wiped, no continuation or epic row written"
+  fi
+                    say "preflight: the commit gate allows the plan this run will write"
   act_merge;        say "merge: $MERGE_LINE"
   act_worktrees;    say "worktree-removed: $WT_LINE"
   act_tmp;          say "tmp-wiped: $TMP_LINE"
