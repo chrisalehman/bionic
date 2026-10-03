@@ -4002,4 +4002,97 @@ if ub_carrier_ok "$TMP/ub-doctored-run.txt"; then
   no "UB6: a span that cannot be found is red, never green on nothing" "an empty span passed"
 else ok "UB6: a span that cannot be found is red, never green on nothing"; fi
 
+section "Section RH: wave-23 T3 — the reasons live beside the code, and no citation names a memory file (REQ-4, AC-4.1 to AC-4.4; D3)"
+#
+# WHAT THIS OWNS. The memory tier is retired, so a rule's reason has to sit in the file that
+# enforces it: the two named test-harness rules, the env.sh census, the stop.sh and units.sh
+# comments that used to cite a slug, the operational-rules and agent-discipline doctrine lines,
+# and the four provenance lines. Each pin says what the file CARRIES and what it must no longer
+# say, and each is proven against two doctored copies: the carried phrase removed (the pin must
+# go red) and the retired phrase planted (the pin must go red). A pin that only reads files
+# already in agreement could be an extractor bug, so the doctored arms run on every run.
+#
+# Text is flattened first (comment markers dropped, newlines to spaces) because a phrase wraps
+# across lines in prose and in comments. Spans are cut by their own opening and closing lines, as
+# in §UB, and the first assertion of each span proves it is non-empty.
+RH_STOP_LIB="${REPO}/payload/scripts/lib/stop.sh"
+RH_UNITS_LIB="${REPO}/payload/scripts/lib/units.sh"
+RH_ENV_LIB="${REPO}/payload/scripts/lib/env.sh"
+RH_RULES="${REPO}/.claude/rules"
+RH_OPS="${REPO}/skills/canonical-sdlc/operational-rules.md"
+# The retired phrases are spelled in two halves so this file does not itself match AC-4.1's grep.
+RH_N=n; RH_B=b; RH_M=m
+
+rh_flat() {  # <file> -> the text on stdout, shell comment markers dropped, one line
+  case "$1" in
+    *.md) tr '\n' ' ' < "$1" | tr -s ' ' ;;  # markdown keeps its own # headings
+    *) sed -e 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$1" | tr '\n' ' ' | tr -s ' ' ;;
+  esac
+}
+rh_verdict() {  # <flat-file> <must carry> <must not carry, may be empty> -> 0 when the pin is satisfied
+  [ -s "$1" ] || return 1
+  grep -qF -- "$2" "$1" || return 1
+  if [ -n "$3" ] && grep -qF -- "$3" "$1"; then return 1; fi
+  return 0
+}
+rh_remove() {  # <flat-file> <phrase> -> the file with every copy of the phrase cut out, on stdout
+  awk -v p="$2" '{ while ((i = index($0, p)) > 0) $0 = substr($0, 1, i - 1) substr($0, i + length(p)) } 1' "$1"
+}
+rh_pin() {  # <label> <flat-file> <must carry> <must not carry, may be empty>
+  local label="$1" flat="$2" has="$3" hasnot="$4" n
+  n="${label//[^A-Za-z0-9]/_}"
+  if rh_verdict "$flat" "$has" "$hasnot"; then ok "$label"; else
+    no "$label" "carries=$(grep -cF -- "$has" "$flat" 2>/dev/null) retired=$([ -n "$hasnot" ] && grep -cF -- "$hasnot" "$flat" 2>/dev/null) bytes=$(wc -c < "$flat" 2>/dev/null)"
+  fi
+  rh_remove "$flat" "$has" > "$TMP/rh-doc-a-$n.txt"
+  if rh_verdict "$TMP/rh-doc-a-$n.txt" "$has" "$hasnot"; then
+    no "$label — doctored: carried phrase removed goes red" "the doctored copy still passed — the pin is vacuous"
+  else ok "$label — doctored: carried phrase removed goes red"; fi
+  if [ -n "$hasnot" ]; then
+    { cat "$flat"; printf ' %s\n' "$hasnot"; } > "$TMP/rh-doc-b-$n.txt"
+    if rh_verdict "$TMP/rh-doc-b-$n.txt" "$has" "$hasnot"; then
+      no "$label — doctored: retired phrase planted goes red" "the doctored copy still passed — the pin is vacuous"
+    else ok "$label — doctored: retired phrase planted goes red"; fi
+  fi
+}
+
+# RH1/RH2 — the shared rules and the census.
+rh_flat "$RH_RULES/test-harness.md" > "$TMP/rh-harness.txt"
+rh_pin "RH1a: test-harness.md carries the named rule \"Fixture fidelity\"" "$TMP/rh-harness.txt" "## Fixture fidelity" ""
+rh_pin "RH1b: test-harness.md carries the named rule \"Anti-vacuity\"" "$TMP/rh-harness.txt" "## Anti-vacuity" ""
+rh_flat "$RH_ENV_LIB" > "$TMP/rh-env.txt"
+rh_pin "RH2: env.sh carries the task-tools census" "$TMP/rh-env.txt" "a census of session transcripts" ""
+
+# RH3 — stop.sh's walls comment states its measurement; its task-list comment points at the census.
+ub_span "$RH_STOP_LIB" 'WHY A WALL AND NOT BETTER WORDING' 'is the one channel that can ask it' > "$TMP/rh-stop-walls-raw.txt"
+expect_true "RH3-0: stop.sh's walls span was found (non-empty)" test -s "$TMP/rh-stop-walls-raw.txt"
+rh_flat "$TMP/rh-stop-walls-raw.txt" > "$TMP/rh-stop-walls.txt"
+rh_pin "RH3a: stop.sh's walls comment carries its measurement, with no memory/ citation" "$TMP/rh-stop-walls.txt" "were measured not to bind" "memory/"
+ub_span "$RH_STOP_LIB" 'THE TASK-LIST FALLBACK IS NOT A CONVENIENCE' 'discharges' > "$TMP/rh-stop-fallback-raw.txt"
+expect_true "RH3-1: stop.sh's task-list fallback span was found (non-empty)" test -s "$TMP/rh-stop-fallback-raw.txt"
+rh_flat "$TMP/rh-stop-fallback-raw.txt" > "$TMP/rh-stop-fallback.txt"
+rh_pin "RH3b: stop.sh's task-list comment points at env.sh, with no memory/ citation" "$TMP/rh-stop-fallback.txt" "payload/scripts/lib/env.sh" "memory/"
+
+# RH4 — units.sh's projector comment states its reason.
+ub_span "$RH_UNITS_LIB" 'THE PROJECTOR UNDER `task-add`' '1\. THE ROW' > "$TMP/rh-units-raw.txt"
+expect_true "RH4-0: units.sh's projector span was found (non-empty)" test -s "$TMP/rh-units-raw.txt"
+rh_flat "$TMP/rh-units-raw.txt" > "$TMP/rh-units.txt"
+rh_pin "RH4: units.sh's projector comment carries its reason, with no retired note citation" "$TMP/rh-units.txt" "Both refuse the WRITER" "memory ${RH_N}ote"
+
+# RH5 — operational-rules.md doctrine lines.
+rh_flat "$RH_OPS" > "$TMP/rh-ops.txt"
+rh_pin "RH5a: operational-rules.md names CLAUDE.md and .claude/rules/, not the retired always-loaded store" "$TMP/rh-ops.txt" 'CLAUDE.md and `.claude/rules/`' "fact ${RH_B}ank"
+rh_pin "RH5b: operational-rules.md says the rationale stays in this file, not in the retired tier" "$TMP/rh-ops.txt" "stays in this file" "stays here in ${RH_M}emory"
+
+# RH6 — agent-discipline.md: auto-memory is off, and no subagent receives MEMORY.md.
+rh_flat "$RH_RULES/agent-discipline.md" > "$TMP/rh-discipline.txt"
+rh_pin "RH6a: agent-discipline.md says auto-memory is off by bionic's setup, with no \"legitimate destination\"" "$TMP/rh-discipline.txt" "off by bionic's setup" "legitimate destination"
+rh_pin "RH6b: agent-discipline.md says a dispatched subagent never receives MEMORY.md" "$TMP/rh-discipline.txt" "never receives MEMORY.md" ""
+
+# RH7 — the four provenance lines name the retired tier and no path.
+for _rh_rule in agent-discipline git-worktree-docs hook-authoring test-harness; do
+  rh_flat "$RH_RULES/${_rh_rule}.md" > "$TMP/rh-prov-${_rh_rule}.txt"
+  rh_pin "RH7: ${_rh_rule}.md's provenance line names the retired memory tier, not .bionic/memory/" "$TMP/rh-prov-${_rh_rule}.txt" "retired memory tier" ".bionic/memory/"
+done
+
 finish

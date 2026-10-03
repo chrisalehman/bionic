@@ -1072,7 +1072,7 @@ add_row_to "$R8" "$ADOPT_A" name=closed-one status=identified agent_id="$ID_CLOS
 # D10 the ONE close is an ack taken after the row's launch (`roster_open_names`,
 # payload/scripts/lib/roster.sh; ADR-034 d1), so a MET-marked row nobody acked is ADOPTED —
 # its agent may still be on the panel, and an unadopted live agent is one no stop can reach
-# (memory adopt-skips-swept-rows). The marker stays, to show it closes nothing on its own; the
+# (the code in `roster_open_names` is the rule). The marker stays, to show it closes nothing on its own; the
 # ack is written by the real verb, in the PREDECESSOR's own ledger, where adopt reads it.
 swept_marker_write "$(roster_of "$R8" "$ADOPT_A")" "$(iso_ago 300)" "$ADOPT_A" closed-one "$ID_CLOSED" MET
 ( cd "$R8" && env CLAUDE_CODE_SESSION_ID="$ADOPT_A" bash "$SWEEPER_FOR_ACK" ack closed-one ) >/dev/null 2>&1

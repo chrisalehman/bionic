@@ -65,7 +65,7 @@ command -v jq >/dev/null 2>&1 || { echo "patrol-revive: jq absent — suite cann
 # "rc 0 and no stdout", which is exactly what a MISSING hook produces once the
 # shell's own 127 is discarded — so an absent or unparsable hook would turn most
 # of this file green over nothing. Prove the subject exists and parses before any
-# of it runs (memory/no-vacuous-tests-at-authoring).
+# of it runs (.claude/rules/test-harness.md, "Anti-vacuity").
 [ -f "$HOOK" ] || { echo "patrol-revive: no hook at $HOOK — suite refuses to run"; exit 1; }
 bash -n "$HOOK" || { echo "patrol-revive: $HOOK does not parse — suite refuses to run"; exit 1; }
 

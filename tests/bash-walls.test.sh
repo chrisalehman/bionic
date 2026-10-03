@@ -31,7 +31,7 @@
 # the loader cannot reach this machine's installed plugin and the audit stream cannot reach
 # this machine's real one.
 #
-# FIXTURE FIDELITY (declared, per .claude memory fixtures-can-pin-away-the-test):
+# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * PreToolUse|Bash payload envelope — the shape tests/cmd-class.test.sh pins, plus the
 #     top-level `agent_id` measured for an agent context in
 #     record/session-20260815-landing-supervision/t1-probe-report.md §3 (CLI 2.1.233).
