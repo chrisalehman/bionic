@@ -2945,6 +2945,8 @@ S12L_TICK="$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL [A-Za-z0-9]' | h
 # The wall, on the same repo: an ordinary (non-tick) turn that dispatched nothing.
 S12L_TR="$R12L/transcript-12l.jsonl"
 jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"where are we?"}}' > "$S12L_TR"
+# BOUND before the wall reads it — see s12l_wall_ids (wave-23-fixit-1810 T1).
+bind_marker "$R12L" "$R12L/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 S12L_OUT="$(cd "$R12L" && jq -nc --arg t "$S12L_TR" --arg c "$R12L" --arg s "$SID" \
   '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
   | env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PRESSURE_RING="$TMPROOT/ring-12l" BIONIC_PROBE_FREE_PCT=80 \
@@ -2970,6 +2972,9 @@ expect_eq "12l2 AC-5.2 the stop wall names exactly the ids the tick filled" "$S1
 # acked by that step and frees its slot in the same tick.
 s12l_wall_ids() {  # <repo> -> the ids among BASE ONE TWO that the stop wall names, sorted
   local repo="$1" tr="$1/transcript-wall.jsonl" out reason ids="" id
+  # THE WALL CHARGES ONLY A BOUND SESSION'S OWN LEDGER (wave-23-fixit-1810, REQ-1, D1): the
+  # session the tick filled for is bound to the plan it filled from before the wall reads it.
+  bind_marker "$repo" "$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
   jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"where are we?"}}' > "$tr"
   out="$(cd "$repo" && jq -nc --arg t "$tr" --arg c "$repo" --arg s "$SID" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
@@ -6214,7 +6219,7 @@ s31_task_plan() {  # <repo> <current> -> the path; six columns, T1 in flight, T2
 
 # ---------- 31a: the tick fills a task-scale ledger, in table order ----------
 R31A="$(make_repo s29-task-fill)"; new_roster "$R31A"
-s31_task_plan "$R31A" T1 >/dev/null
+P31A="$(s31_task_plan "$R31A" T1)"
 add_row "$R31A" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R31A" 8192 1.0 tick
 expect_eq "31a a task-scale plan ticks cleanly (exit 0)" "0" "$RC"
@@ -6255,6 +6260,9 @@ s31_reason() { printf '%s' "$S31_OUT" | jq -r '.reason // ""' 2>/dev/null; }
 s31_decision() { printf '%s' "$S31_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 
 S31_TR="$(s31_transcript "$R31A" "have a look at the next two units")"
+# BOUND to the plan the tick filled from: the wall charges only a bound session's own ledger
+# (wave-23-fixit-1810, REQ-1, D1).
+bind_marker "$R31A" "$P31A"
 s31_stop "$R31A" "$S31_TR"
 expect_eq "31b the turn is refused — the ledger is live and two rows are ready" \
   "block" "$(s31_decision)"
