@@ -1129,19 +1129,42 @@ cmd_runs_norm() {  # <re_executes field, decoded> -> the same field, each marked
 #
 # NO APOSTROPHE MAY APPEAR IN THIS TEXT, for the reason CMD_RUN_NORM_AWK gives.
 _CMD_WRITES_AWK='
+    # A double-quoted run without its escapes: a backslash hides the character after it and
+    # is dropped, and one with nothing after it (the command ended inside the quote) stays.
+    # One split, and the pieces joined in halves: appending them in turn would copy the
+    # growing word once per backslash. The separator is a REGEX on purpose: macOS awk splits
+    # on newline as well as on a one-character string separator, which loses every line
+    # break of a multi-line body.
+    function wt_unesc(r,   P, np, x, Q, m) {
+      np = split(r, P, /\\/); m = 1; Q[1] = P[1]
+      for (x = 2; x <= np; x++) {
+        if (P[x] == "" && x < np) { Q[++m] = "\\"; x++; Q[++m] = P[x] }
+        else if (P[x] == "") Q[++m] = "\\"
+        else Q[++m] = P[x]
+      }
+      return wt_join(Q, 1, m)
+    }
+    function wt_join(Q, lo, hi,   h) {
+      if (lo == hi) return Q[lo]
+      h = int((lo + hi) / 2)
+      return wt_join(Q, lo, h) wt_join(Q, h + 1, hi)
+    }
     # Words of one segment, dequoted, beside a kind: W a word, R a write redirect (the next
     # word is its file), I an input redirect (the next word is consumed), D a duplication.
-    function wt_tok(s, W, K,   L, i, c, q, cur, n, st, nx, j, w) {
-      L = length(s); q = ""; cur = ""; n = 0; st = 0
+    #
+    # A QUOTED RUN IS FOUND, NEVER WALKED (wave-24 T28), as T22 made it in segments() and
+    # cmdnorm_run: cmdnorm_qend finds the close and one substr copies the run. Walking it a
+    # character at a time cost a whole-string substr per character and a whole-word copy per
+    # append, so a 207 KB quoted command took 12.5 s here, past the hook timeout of 10 s.
+    function wt_tok(s, W, K,   L, i, c, cur, n, st, nx, j, w, e, r) {
+      L = length(s); cur = ""; n = 0; st = 0
       for (i = 1; i <= L; i++) {
         c = substr(s, i, 1)
-        if (q != "") {
-          if (c == q) q = ""
-          else if (c == "\\" && q == "\"" && i < L) { i++; cur = cur substr(s, i, 1) }
-          else cur = cur c
-          continue
+        if (c == "\047" || c == "\"") {
+          e = cmdnorm_qend(s, i, c, 1); r = substr(s, i + 1, e - i - 1)
+          if (c == "\"" && index(r, "\\") > 0) r = wt_unesc(r)
+          cur = cur r; st = 1; i = e; continue
         }
-        if (c == "\047" || c == "\"") { q = c; st = 1; continue }
         if (c == "\\") { i++; cur = cur substr(s, i, 1); continue }
         if (c == " " || c == "\t" || c == "\r" || c == "\n") {
           if (cur != "" || st) { W[++n] = cur; K[n] = "W" }

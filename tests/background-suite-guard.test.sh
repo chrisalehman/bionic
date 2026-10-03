@@ -491,8 +491,10 @@ guarded "$R1" 'for s in alpha beta; do s=gamma; bash "tests/$s.test.sh"; done'
 expect_eq "B9a a variable-named suite is still REFUSED" "2" "$ST"
 expect_contains "B9a …saying the name could not be resolved at hook time" \
   "unexpanded name; allowed: alpha.test.sh" "$ERR"
-expect_contains "B9a …and telling the reader what to type instead" \
-  "Spell the suite literally, one per call" "$VERR"
+# The sentence and its line shape are the ones tests/bash-walls.test.sh 15b5b pins on the same
+# reassigning fixture (wave-24 T28, A-T28.7): one wording, owned by walls.sh's unexpanded arm.
+expect_contains "B9a …and telling the reader what to type instead: literal lines, one call each" \
+  "Write the literal lines you mean, one call each: bash tests/<name>.test.sh" "$VERR"
 # THE HEADLINE THE READER ACTS ON must not claim the suite is off a budget the hook never
 # managed to check it against.
 expect_absent "B9a …never claiming it is off the budget" "is not on this agent's suite budget" "$ERR"
