@@ -80,7 +80,8 @@
 #   cmd_suite_loop_lines <cmd>
 #                             -> one `bash <path>` line per suite a literal `for` header names,
 #                                each word put into the path the loop body runs (wave-24 T13,
-#                                D10). The unexpanded-name refusal in lib/walls.sh prints it.
+#                                D10); none when the body reassigns the variable (T26). The
+#                                unexpanded-name refusal in lib/walls.sh prints it.
 #   cmd_class          <cmd>  -> the whole command's class, by PRIORITY not by position:
 #                                suite > bootstrap > install > build > none. Priority, so
 #                                that `make widget && bash tests/run.sh` still routes to
@@ -885,10 +886,13 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # this is the one reading of the header it prints from: each segment inside a `for V in
     # w...` frame whose words are all literal is read once per word with V put in, and every
     # reading that names a suite FILE gives one `bash <path>` line, the path as the body
-    # spelled it. Unlike section 6 this does NOT ask whether the body reassigns V: the lines
-    # are the words of the header, offered as the fix, never trusted as what ran. Called
-    # before expand_all, so FOK still means "every word is literal".
-    function loop_lines(k, sg,   i, f, V, W, nw, X, Y, nx, nn, x, y, hit, over, t, seen) {
+    # spelled it. A BODY THAT ASSIGNS V (`assigns`, section 6) runs something other than the
+    # words of the header, so a segment naming V inside that frame gives no line at all (wave-24
+    # T26): printing the words would hand the reader a fix the loop never ran. Called before
+    # expand_all, so FOK still means "every word is literal".
+    function loop_lines(k, sg,   i, j, f, V, W, nw, X, Y, nx, nn, x, y, hit, over, t, seen, RE) {
+      for (f = 1; f <= NF; f++)
+        for (j = FSTART[f] + 1; j < FEND[f] && j <= k; j++) if (assigns(sg[j], FVAR[f])) { RE[f] = 1; break }
       for (i = 1; i <= k; i++) {
         if (index(sg[i], "$") == 0) continue
         nx = 1; X[1] = sg[i]; hit = 0; over = 0
@@ -896,6 +900,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
           if (!FOK[f] || FSTART[f] >= i || i >= FEND[f]) continue
           V = FVAR[f]
           if (!index(X[1], "$" V) && !index(X[1], "${" V "}")) continue
+          if (f in RE) { over = 1; break }
           nw = split(FWORDS[f], W, " ")
           if (nx * nw > 64) { over = 1; break }
           nn = 0
@@ -1402,10 +1407,11 @@ cmd_suite_claims() {  # <command> [<repo root>] -> "<kind>\t<target>\t<run>" per
 
 cmd_suite_loop_lines() {  # <command> -> one `bash <path>` line per suite a literal loop header names
   # THE FIX THE UNEXPANDED-NAME REFUSAL PRINTS (wave-24 T13, D10, AC-6.3). A loop the claims
-  # will not resolve (its body reassigns the variable) still has a header of literal words,
-  # and those words put into the path the body runs are the lines the reader meant: one
-  # `bash <path>` per distinct suite, in header order. Nothing for a `$` no literal loop
-  # pins. payload/scripts/lib/walls.sh prints this and never reads the loop itself.
+  # will not resolve (an `eval` or a function elsewhere in the command) still has a header of
+  # literal words, and those words put into the path the body runs are the lines the reader
+  # meant: one `bash <path>` per distinct suite, in header order. Nothing for a `$` no literal
+  # loop pins, nor for a body that reassigns the variable, whose header is not what runs
+  # (wave-24 T26). payload/scripts/lib/walls.sh prints this and never reads the loop itself.
   printf '%s' "${1-}" | _cmd_class_awk looplines
 }
 

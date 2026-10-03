@@ -1042,12 +1042,27 @@ expect_contains "15b2: …and the recorded budget is on the DEFAULT stderr too" 
   "archive.test.sh" "$ERR"
 expect_contains "15b3: …by the unexpanded-name arm, not the ordinary one" \
   "unexpanded name" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
-# THE FIX IS THE LOOP'S OWN WORDS (wave-24 T13, D10, AC-6.3): the lines it would have run,
-# spelled literally, read off the classifier's `cmd_suite_loop_lines` — never a canned example.
-expect_contains "15b4: …printing the loop's first word as the literal line to run" \
+# THE HEADER'S WORDS ARE NOT WHAT RUNS (wave-24 T26, walk-head-b surprise 3): `s=c` makes this
+# loop run c twice, so printing `bash tests/a.test.sh` would be a false fix — the same wall
+# refuses it. The refusal says no list can be derived and asks for the literal lines meant.
+# fails-when: the reassigning loop's refusal prints its header words.
+expect_contains "15b4: …saying no literal list can be derived from a body that reassigns" \
+  "no literal list can be derived" "$ERR"
+expect_contains "15b5: …naming the reassignment as the reason" "reassigns its variable" "$ERR"
+expect_contains "15b5b: …and asking for the literal lines the agent means" \
+  "Write the literal lines you mean, one call each: bash tests/<name>.test.sh" "$ERR"
+expect_absent "15b6: …never the header's words as a line to run" "bash tests/a.test.sh" "$ERR"
+expect_absent "15b6b: …never the canned alpha example the arm used to print" "alpha.test.sh" "$ERR"
+# THE FIX IS THE LOOP'S OWN WORDS when the body leaves the variable alone (wave-24 T13, D10,
+# AC-6.3): an `eval` keeps the classifier from expanding the command, and the lines the loop
+# would have run are read off `cmd_suite_loop_lines` — never a canned example.
+run_hook "$(mk_payload "$R15" 'for s in a b; do bash "tests/$s.test.sh"; done; eval :' "$ACTOR" omit Bash test-runner)"
+expect_status "15b10: a loop the classifier will not expand is refused as unexpanded" 2 "$ST"
+expect_contains "15b11: …by the unexpanded-name arm" \
+  "unexpanded name" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "15b12: …printing the loop's first word as the literal line to run" \
   "    bash tests/a.test.sh" "$ERR"
-expect_contains "15b5: …and its second" "    bash tests/b.test.sh" "$ERR"
-expect_absent "15b6: …never the canned alpha example the arm used to print" "alpha.test.sh" "$ERR"
+expect_contains "15b13: …and its second" "    bash tests/b.test.sh" "$ERR"
 # A `$` THE TEXT GIVES NO WORDS FOR still refuses, and says why it has no line to print.
 run_hook "$(mk_payload "$R15" 'for s in $(ls tests); do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
 expect_status "15b7: a loop over a command substitution is refused as unexpanded" 2 "$ST"
