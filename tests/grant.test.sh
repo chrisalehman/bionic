@@ -6,13 +6,16 @@
 # functions, one question each:
 #
 #   grant_roots <class> <key=value>...   which roots a class gets from the facts it is handed
-#   grant_decide <class> <w> <d> <fx> [<category>]
+#   grant_decide <class> <w> <d> <fx> [<category>] [<main root>]
 #                                        allow, deny-fix or deny-reserved, and why
 #   grant_reserved <tool> <command|path> which reserved category an action falls in, if any
 #   grant_resolve <path>                 the real location of a path, or a mark that it has none
 #
 # One section per Eval-design row of the spec that names this suite, §G1 to §G10, each built
-# to go red on the planted defect its matrix block names under `fails-when:`. §G0 is the
+# to go red on the planted defect its matrix block names under `fails-when:`. §G11 holds AC-2.2
+# and AC-2.7 where the run works in the main checkout itself: the project's shared directories
+# under the main root are no checkout's, and the main root is no one's to delete. §G12 holds
+# the device sinks: a write to /dev/null and its kin is no effect, a delete of one is judged. §G0 is the
 # purity rule the decision rests on (the freeze): the decision and the reserved table read no
 # file, no environment and run no git, so the same facts give the same verdict anywhere.
 #
@@ -87,7 +90,7 @@ done <<GRANT_FACTS
 $facts
 GRANT_FACTS
 grant_roots "$cls" "$@" || exit $?
-grant_decide "$cls" "$GRANT_WRITE_ROOTS" "$GRANT_DELETE_ROOTS" "$eff" "$res"'
+grant_decide "$cls" "$GRANT_WRITE_ROOTS" "$GRANT_DELETE_ROOTS" "$eff" "$res" "${GRANT_MAIN_ROOT-}"'
 
 # dec <class> <facts> <effects> [<category>] — the verdict line.
 dec() {
@@ -506,5 +509,155 @@ done
 # Where the main checkout is the lead's checkout, a log under .bionic/ would sit inside it.
 expect_eq "G10.main the lead whose checkout is the main checkout still cannot write the log" "deny-fix" \
   "$(kind "$(dec lead "checkout=$P${NL}scratch=$S" "$(W "$G10_LOG")")")"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G11 the project's shared directories are no checkout's, and the main root is no one's to delete"
+
+# A run that works in the main checkout itself hands the lead `checkout=<main>`, and that root
+# physically holds .bionic (every run's docs and state), .worktrees (every run's trees) and
+# .git. The main root arrives as a fact (`main=`), so the decision still looks nothing up.
+# Every deny row here sits beside an allow row on the same facts.
+G11_T9=$P/.worktrees/25-T9
+G11_LEAD="checkout=$P${NL}main=$P${NL}scratch=$S${NL}record=$REC${NL}plan=$PLAN${NL}tree=$G11_T9"
+expect_eq "G11.1 lead in the main checkout: a write under src allows" "allow" "$(dec lead "$G11_LEAD" "$(W "$P/src/app.ts")")"
+expect_eq "G11.2 …and a delete under src allows" "allow" "$(dec lead "$G11_LEAD" "$(D "$P/src/old.ts")")"
+expect_eq "G11.3 a delete of .bionic/docs/x is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "$P/.bionic/docs/x")")")"
+expect_eq "G11.4 a delete of .bionic itself is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "$P/.bionic")")")"
+expect_eq "G11.5 a delete of another run's tree under .worktrees is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "$P/.worktrees/other")")")"
+expect_eq "G11.6 a delete under .git is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "$P/.git/config")")")"
+expect_eq "G11.7 a delete of the main root itself is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "$P")")")"
+expect_eq "G11.8 a delete of the main root's parent is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "${P%/*}")")")"
+expect_eq "G11.9 a write under .bionic outside the run's record and plan is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(W "$P/.bionic/docs/specs/other.md")")")"
+expect_eq "G11.10 a write into another run's tree is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(W "$P/.worktrees/other/f")")")"
+expect_eq "G11.11 a write under .git is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(W "$P/.git/HEAD")")")"
+expect_eq "G11.12 a write under the lead's own record root (inside .bionic) allows" "allow" "$(dec lead "$G11_LEAD" "$(W "$REC/T11-carve-outs.md")")"
+expect_eq "G11.13 …and the lead's delete there allows" "allow" "$(dec lead "$G11_LEAD" "$(D "$REC/T11-carve-outs.md")")"
+expect_eq "G11.14 a write to the run's plan file allows" "allow" "$(dec lead "$G11_LEAD" "$(W "$PLAN")")"
+expect_eq "G11.15 a delete inside a recorded tree under .worktrees allows" "allow" "$(dec lead "$G11_LEAD" "$(D "$G11_T9/build")")"
+expect_eq "G11.16 …and a delete of that recorded tree itself allows" "allow" "$(dec lead "$G11_LEAD" "$(D "$G11_T9")")"
+expect_eq "G11.17 .bionic spelled in another case is still shared (case-blind filesystems)" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "$P/.Bionic/docs")")")"
+expect_eq "G11.18 .git spelled in another case is still shared" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(W "$P/.GIT/config")")")"
+expect_eq "G11.19 the main root written with a trailing slash is still the main root" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "$P/")")")"
+expect_eq "G11.20 a delete of / is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D /)")")"
+expect_eq "G11.21 one effect allowed and one shared is deny-fix" "deny-fix" \
+  "$(kind "$(dec lead "$G11_LEAD" "$(W "$P/src/a")${NL}$(D "$P/.bionic/docs")")")"
+expect_eq "G11.22 a state file under .bionic/tmp is still named as state first" "deny-fix|state" \
+  "$(v="$(dec lead "$G11_LEAD" "$(W "$P/.bionic/tmp/roster-sid-1.state")")"; printf '%s|' "$(kind "$v")"; case "$v" in (*"bionic's own state"*) printf state ;; esac)"
+
+# The writer: its own tree under .worktrees grants inside it; a sibling under .worktrees does not.
+G11_WRITER="own=$G11_T9${NL}main=$P${NL}scratch=$S${NL}record=$REC"
+expect_eq "G11.w1 a writer's write in its own tree under .worktrees allows" "allow" "$(dec writer "$G11_WRITER" "$(W "$G11_T9/payload/x.sh")")"
+expect_eq "G11.w2 …and its delete there allows" "allow" "$(dec writer "$G11_WRITER" "$(D "$G11_T9/payload/x.sh")")"
+expect_eq "G11.w3 a write in a sibling tree is deny-fix" "deny-fix" "$(kind "$(dec writer "$G11_WRITER" "$(W "$P/.worktrees/25-T10/f")")")"
+expect_eq "G11.w4 a delete in a sibling tree is deny-fix" "deny-fix" "$(kind "$(dec writer "$G11_WRITER" "$(D "$P/.worktrees/25-T10/f")")")"
+expect_eq "G11.w5 a writer's write under the record dir (inside .bionic) allows" "allow" "$(dec writer "$G11_WRITER" "$(W "$REC/T9.md")")"
+G11_WREC="$(dec writer "$G11_WRITER" "$(D "$REC/T9.md")")"
+expect_eq "G11.w6 …its delete there is still the add-only deny-fix" "deny-fix|not delete" \
+  "$(kind "$G11_WREC")|$(case "$G11_WREC" in (*"not delete"*) printf 'not delete' ;; esac)"
+
+# A writer whose own tree IS the main root, as §G6 hands it: the shared directories stay out.
+G11_WMAIN="own=$P${NL}main=$P${NL}scratch=$S"
+expect_eq "G11.w7 own=<main>: a write under src allows" "allow" "$(dec writer "$G11_WMAIN" "$(W "$P/src/x")")"
+expect_eq "G11.w8 own=<main>: a write under .bionic is deny-fix" "deny-fix" "$(kind "$(dec writer "$G11_WMAIN" "$(W "$P/.bionic/docs/x")")")"
+expect_eq "G11.w9 own=<main>: a delete under .worktrees is deny-fix" "deny-fix" "$(kind "$(dec writer "$G11_WMAIN" "$(D "$P/.worktrees/25-T1/x")")")"
+
+# A linked-worktree checkout: the wave checkout is under .worktrees, so it grants inside itself.
+G11_LINKED="checkout=$P/.worktrees/25-wave${NL}main=$P${NL}scratch=$S"
+expect_eq "G11.l1 linked checkout: a write inside it allows" "allow" "$(dec lead "$G11_LINKED" "$(W "$P/.worktrees/25-wave/src/x")")"
+expect_eq "G11.l2 linked checkout: a delete inside it allows" "allow" "$(dec lead "$G11_LINKED" "$(D "$P/.worktrees/25-wave/src/x")")"
+expect_eq "G11.l3 linked checkout: the main checkout's src is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LINKED" "$(W "$P/src/x")")")"
+expect_eq "G11.l4 linked checkout: a sibling tree is deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_LINKED" "$(D "$P/.worktrees/25-T1/x")")")"
+
+# Every class handed a root that IS the main root: the root is live, and rule 4 and the shared
+# directories hold for each.
+G11_CLASSES="lead|checkout=$P
+writer|own=$P
+reader|scratch=$P
+unbound|scratch=$P"
+while IFS='|' read -r cls fact; do
+  f="$fact${NL}main=$P"
+  expect_eq "G11.$cls.0 $cls: a write under src allows (the root is live)" "allow" "$(dec "$cls" "$f" "$(W "$P/src/x")")"
+  expect_eq "G11.$cls.1 $cls: a delete of the main root is deny-fix" "deny-fix" "$(kind "$(dec "$cls" "$f" "$(D "$P")")")"
+  expect_eq "G11.$cls.2 $cls: a delete under .bionic is deny-fix" "deny-fix" "$(kind "$(dec "$cls" "$f" "$(D "$P/.bionic/docs")")")"
+  expect_eq "G11.$cls.3 $cls: a delete under .worktrees is deny-fix" "deny-fix" "$(kind "$(dec "$cls" "$f" "$(D "$P/.worktrees/x")")")"
+  expect_eq "G11.$cls.4 $cls: a write under .git is deny-fix" "deny-fix" "$(kind "$(dec "$cls" "$f" "$(W "$P/.git/HEAD")")")"
+done <<< "$G11_CLASSES"
+# A root ABOVE the main root does not reach a delete of it either.
+expect_eq "G11.above a root above the main root: a write beside the project allows" "allow" "$(dec lead "checkout=${P%/*}${NL}main=$P" "$(W "${P%/*}/notes")")"
+expect_eq "G11.above2 …and a delete of the main root is deny-fix" "deny-fix" "$(kind "$(dec lead "checkout=${P%/*}${NL}main=$P" "$(D "$P")")")"
+
+# The differential: the same facts with no main root decide exactly as before (rule 5).
+G11_NOMAIN="checkout=$P${NL}scratch=$S${NL}record=$REC"
+expect_eq "G11.diff1 no main root: a delete of .bionic/docs/x allows, as before" "allow" "$(dec lead "$G11_NOMAIN" "$(D "$P/.bionic/docs/x")")"
+expect_eq "G11.diff2 …with the main root: deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_NOMAIN${NL}main=$P" "$(D "$P/.bionic/docs/x")")")"
+expect_eq "G11.diff3 no main root: a delete of the main root allows, as before" "allow" "$(dec lead "$G11_NOMAIN" "$(D "$P")")"
+expect_eq "G11.diff4 an empty main= is no main root" "allow" "$(dec lead "$G11_NOMAIN${NL}main=" "$(D "$P/.git/x")")"
+expect_eq "G11.diff5 grant_decide with five arguments decides as before" "allow" "$(call grant_decide lead "$P" "$P" "$(D "$P/.git/x")" "")"
+expect_eq "G11.diff6 …and with the main root as the sixth argument, deny-fix" "deny-fix" "$(kind "$(call grant_decide lead "$P" "$P" "$(D "$P/.git/x")" "" "$P")")"
+expect_eq "G11.diff7 grant_roots hands the main root back in GRANT_MAIN_ROOT, trailing slash removed" "$P" \
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; grant_roots lead "main=$2/" && printf "%s" "$GRANT_MAIN_ROOT"' _ "$LIB" "$P")"
+
+# Malformed: a main root that cannot be one, or given twice, is rc 2 rather than ignored.
+expect_eq "G11.bad1 a relative main root is malformed input, rc 2" "2" "$(dec lead "checkout=$P${NL}main=w/proj" "$(W "$P/x")" >/dev/null; printf '%s' "$CALL_RC")"
+expect_eq "G11.bad2 main given twice is malformed input, rc 2" "2" "$(dec lead "checkout=$P${NL}main=$P${NL}main=/w" "$(W "$P/x")" >/dev/null; printf '%s' "$CALL_RC")"
+expect_eq "G11.bad3 a sixth argument that is not an absolute root is malformed input, rc 2" "2" \
+  "$(call grant_decide lead "$P" "$P" "$(W "$P/x")" "" "w/proj" >/dev/null; printf '%s' "$CALL_RC")"
+expect_eq "G11.bad4 a main root of / is malformed input, rc 2" "2" "$(call grant_decide lead "$P" "$P" "$(W "$P/x")" "" "/" >/dev/null; printf '%s' "$CALL_RC")"
+
+# The message keeps its three parts and says the shared directories are not a run's checkout.
+G11_MSG="$(dec lead "$G11_LEAD" "$(D "$P/.bionic/docs/x")")"
+G11_R="$(fld 2 "$G11_MSG")"; G11_F="$(fld 3 "$G11_MSG")"
+expect_contains "G11.msg1 the reason names the path" "$P/.bionic/docs/x" "$G11_R"
+expect_contains "G11.msg2 …says the shared directories are not part of a run's checkout" "shared directories are not part of a run's checkout" "$G11_R"
+for r in "$S" "$P" "$REC"; do
+  expect_contains "G11.msg3 …and names the root $r" "$r" "$G11_R"
+done
+expect_nonempty "G11.msg4 there is a next step" "$G11_F"
+expect_eq "G11.msg5 the next step is one sentence" "1" "$(printf '%s' "$G11_F" | grep -o '\. ' | wc -l | awk '{print $1 + 1}')"
+G11_UP="$(fld 2 "$(dec lead "$G11_LEAD" "$(D "${P%/*}")")")"
+expect_contains "G11.msg6 an ancestor delete's reason names the target" "${P%/*}" "$G11_UP"
+expect_contains "G11.msg7 …and says it holds the project" "project" "$G11_UP"
+expect_ne "G11.msg8 a shared-directory denial does not read as a plain outside-the-workspace one" \
+  "$(fld 2 "$(dec lead "$G11_LEAD" "$(W "/elsewhere/x")")" | sed 's#/elsewhere/x#X#')" "$(printf '%s' "$G11_R" | sed "s#$P/.bionic/docs/x#X#")"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G12 a write to a device sink is no effect; a delete of one, or any other device, is judged"
+
+# The reader prints `W<TAB>/dev/null` for every `2>/dev/null`. A write to /dev/null, /dev/stdout,
+# /dev/stderr, /dev/tty or /dev/fd/<digits> changes no file, so it is skipped for every class.
+# Every class is handed its usual facts: its scratch is a delete root, /dev is in none.
+G12_CLASSES="lead|$LEAD_FACTS
+writer|$WRITER_FACTS
+reader|$READER_FACTS
+unbound|$UNBOUND_FACTS"
+G12_ROWS="$(printf '%s\n' "$G12_CLASSES" | sed -n 's/^\([a-z]*\)|.*/\1/p')"
+expect_eq "G12.0 the class list reads four classes (non-empty readback)" "lead writer reader unbound" "$(printf '%s' "$G12_ROWS" | tr '\n' ' ' | sed 's/ $//')"
+for cls in $G12_ROWS; do
+  case "$cls" in
+    lead) f="$LEAD_FACTS" ;; writer) f="$WRITER_FACTS" ;; reader) f="$READER_FACTS" ;; unbound) f="$UNBOUND_FACTS" ;;
+  esac
+  expect_eq "G12.$cls.1 $cls: W /dev/null alone allows" "allow" "$(dec "$cls" "$f" "$(W /dev/null)")"
+  expect_eq "G12.$cls.2 $cls: W /dev/null plus a delete inside its delete roots allows" "allow" "$(dec "$cls" "$f" "$(W /dev/null)${NL}$(D "$S/tmp.txt")")"
+  expect_eq "G12.$cls.3 $cls: W /dev/null plus a write outside is deny-fix" "deny-fix" "$(kind "$(dec "$cls" "$f" "$(W /dev/null)${NL}$(W /elsewhere/x)")")"
+  expect_eq "G12.$cls.4 $cls: D /dev/null is deny-fix" "deny-fix" "$(kind "$(dec "$cls" "$f" "$(D /dev/null)")")"
+  expect_eq "G12.$cls.5 $cls: W /dev/sda is deny-fix" "deny-fix" "$(kind "$(dec "$cls" "$f" "$(W /dev/sda)")")"
+  expect_eq "G12.$cls.6 $cls: W /dev/fd/3 allows" "allow" "$(dec "$cls" "$f" "$(W /dev/fd/3)")"
+  expect_eq "G12.$cls.7 $cls: W /dev/fd/x is deny-fix" "deny-fix" "$(kind "$(dec "$cls" "$f" "$(W /dev/fd/x)")")"
+done
+expect_eq "G12.8 W /dev/stdout allows" "allow" "$(dec writer "$WRITER_FACTS" "$(W /dev/stdout)")"
+expect_eq "G12.9 W /dev/stderr allows" "allow" "$(dec writer "$WRITER_FACTS" "$(W /dev/stderr)")"
+expect_eq "G12.10 W /dev/tty allows" "allow" "$(dec writer "$WRITER_FACTS" "$(W /dev/tty)")"
+expect_eq "G12.11 W /dev/fd/12 allows" "allow" "$(dec writer "$WRITER_FACTS" "$(W /dev/fd/12)")"
+expect_eq "G12.12 W /dev/fd/ (no digits) is deny-fix" "deny-fix" "$(kind "$(dec writer "$WRITER_FACTS" "$(W /dev/fd/)")")"
+expect_eq "G12.13 W /dev/fd/3x is deny-fix" "deny-fix" "$(kind "$(dec writer "$WRITER_FACTS" "$(W /dev/fd/3x)")")"
+expect_eq "G12.14 W /dev/nullx is deny-fix (exact names only)" "deny-fix" "$(kind "$(dec writer "$WRITER_FACTS" "$(W /dev/nullx)")")"
+expect_eq "G12.15 W /dev/null/x is deny-fix" "deny-fix" "$(kind "$(dec writer "$WRITER_FACTS" "$(W /dev/null/x)")")"
+expect_eq "G12.16 D /dev/fd/3 is deny-fix" "deny-fix" "$(kind "$(dec writer "$WRITER_FACTS" "$(D /dev/fd/3)")")"
+expect_eq "G12.17 a reserved action with only a sink write is still deny-reserved" "deny-reserved" \
+  "$(kind "$(dec writer "$WRITER_FACTS" "$(W /dev/null)" leaves-the-machine)")"
+expect_eq "G12.18 with a main root, W /dev/null still allows" "allow" "$(dec lead "checkout=$P${NL}main=$P${NL}scratch=$S" "$(W /dev/null)")"
+G12_MSG="$(dec writer "$WRITER_FACTS" "$(W /dev/null)${NL}$(W /elsewhere/x)${NL}$(W /dev/stderr)")"
+expect_contains "G12.19 a denial beside sink writes names the real target" "/elsewhere/x" "$(fld 2 "$G12_MSG")"
+expect_no_regex "G12.20 …and counts no sink among the failing effects" 'more of its effects|/dev/' "$(fld 2 "$G12_MSG")"
 
 finish
