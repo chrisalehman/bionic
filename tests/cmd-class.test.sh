@@ -1496,4 +1496,25 @@ wt_are '/s/in.txt' '(cd /s && echo > in.txt)' /w
 wt_are '/h/f' 'cd && touch f' /w
 wt_are '/w/f' 'cd /s && cd - && touch f' /w
 
+section "§QRUN — wave-24 T22: a quoted run is found whole, never walked"
+# `cmdnorm_qend` finds where a quote closes and the three readers copy the run in one piece
+# (segments, argv_tok, cmdnorm_run). Each pair below differs only in whether the quote closes
+# before the `;`, so a reader that closes it early or late turns one answer into the other.
+case_is none  'echo "a\" ; make ; b"' 'a \" inside double quotes does not close them'
+case_is build 'echo "a\\"; make'     'a \\ inside double quotes is one backslash, and the quote closes'
+case_is build "echo 'a\\'; make"     'a backslash inside single quotes hides nothing'
+case_is none  'echo "a; make'        'a quote that never closes runs to the end'
+case_is none  'echo "a\'             'a backslash at the very end of an unclosed quote'
+# An unclosed quote in argv[0] or argv[1] is no word at all, to its last character.
+case_is none  '"make'                'argv[0] in a quote that never closes is not make'
+case_is none  'npm "install'         'argv[1] in a quote that never closes is not install'
+case_is build 'echo "\é"; make'      'a backslash before a multibyte character'
+case_is build "'make' -j4"           'argv[0] spelled inside quotes is still argv[0]'
+case_is install '"npm" install'      'a quoted word joins its unquoted neighbour'
+case_is none  '"npm install"'        'a quoted run holding a space is prose'
+expect_eq "§QRUN a quoted redirect is an argument, the trailing one comes off" \
+  "bash tests/x.test.sh \"a > b\"" "$(norm_of 'bash tests/x.test.sh "a > b" > log')"
+expect_eq "§QRUN an escaped quote does not end the run before the redirect" \
+  "pytest \"a\\\" > b\"" "$(norm_of 'pytest "a\" > b" 2>&1')"
+
 finish

@@ -138,17 +138,30 @@
 # shell word. The quote characters are written as awk escapes for that reason.
 CMD_RUN_NORM_AWK='
     function cmdnorm_ws(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
-    function cmdnorm_run(s,   L, i, c, q, n, T, K, P, cur, cs, st, op, nx, j, w, k, cut, hit) {
-      L = length(s); q = ""; n = 0; cur = ""; cs = 0
+    # Where the quote q opened at i closes: the index of its closing quote, or length + 1 when
+    # it never closes. With esc, a backslash inside double quotes hides the character after
+    # it. A QUOTED RUN IS FOUND, NEVER WALKED (wave-24 T22): the readers below used to copy a
+    # quoted run into their word one character at a time, and awk copies the whole word on
+    # every append, so a 52 KB `python3 -c` body cost 0.2 s per reader. index(), never a
+    # regex: substr counts bytes, so the byte after a backslash can be half a character, and
+    # macOS awk aborts a match() on text that starts there.
+    function cmdnorm_qend(s, i, q, esc,   t, j, k, b) {
+      j = i + 1
+      for (;;) {
+        t = substr(s, j)
+        k = index(t, q)
+        if (esc && q == "\"") { b = index(t, "\\"); if (b > 0 && (k == 0 || b < k)) { j += b + 1; continue } }
+        return (k == 0 ? length(s) + 1 : j + k - 1)
+      }
+    }
+    function cmdnorm_run(s,   L, i, c, e, n, T, K, P, cur, cs, st, op, nx, j, w, k, cut, hit) {
+      L = length(s); n = 0; cur = ""; cs = 0
       for (i = 1; i <= L; i++) {
         c = substr(s, i, 1)
-        if (q != "") {
-          cur = cur c
-          if (c == q) q = ""
-          else if (c == "\\" && q == "\"") { i++; cur = cur substr(s, i, 1) }
-          continue
+        if (c == "\047" || c == "\"") {
+          if (cur == "") cs = i
+          e = cmdnorm_qend(s, i, c, 1); cur = cur substr(s, i, e - i + 1); i = e; continue
         }
-        if (c == "\047" || c == "\"") { if (cur == "") cs = i; q = c; cur = cur c; continue }
         if (c == "\\") { if (cur == "") cs = i; cur = cur c; i++; cur = cur substr(s, i, 1); continue }
         if (c == " " || c == "\t" || c == "\r" || c == "\n") {
           if (cur != "") { n++; T[n] = cur; K[n] = "W"; P[n] = cs; cur = "" }
@@ -327,18 +340,12 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       }
       return L + 1
     }
-    function segments(s, arr,   i, j, c, L, q, cur, nx, pv, hdr) {
-      L = length(s); q = ""; cur = ""
+    function segments(s, arr,   i, j, c, L, e, cur, nx, pv, hdr) {
+      L = length(s); cur = ""
       SEG_K = 0; SEG_GD = 0; GSTK[0] = 0; GID_N = 0; SEG_ARM = 0; SEG_CASE = 0; SEG_ESAC = 0
       for (i = 1; i <= L; i++) {
         c = substr(s, i, 1)
-        if (q != "") {
-          cur = cur c
-          if (c == q) q = ""
-          else if (c == "\\" && q == "\"") { i++; cur = cur substr(s, i, 1) }
-          continue
-        }
-        if (c == "'"'"'" || c == "\"") { q = c; cur = cur c; continue }
+        if (c == "'"'"'" || c == "\"") { e = cmdnorm_qend(s, i, c, 1); cur = cur substr(s, i, e - i + 1); i = e; continue }
         if (c == "\\") { cur = cur c; i++; cur = cur substr(s, i, 1); continue }
         if (c == "c" && cmdpos(cur) && match(substr(s, i), /^case[ \t]+[^ \t\r\n;&|()<>]+[ \t\r\n]+in([ \t\r\n]|$)/)) {
           hdr = cur substr(s, i, RLENGTH); sub(/[ \t\r\n]+$/, "", hdr)
@@ -516,16 +523,16 @@ _cmd_class_awk() {  # <mode> ; command on stdin
 
     # ---------- 4. argv ----------
     # A token quoted around whitespace is prose: it becomes \001, which matches nothing.
-    function argv_tok(s, a,   i, L, c, q, cur, k, spaced, started) {
-      L = length(s); q = ""; cur = ""; k = 0; spaced = 0; started = 0
+    function argv_tok(s, a,   i, L, c, e, t, cur, k, spaced, started) {
+      L = length(s); cur = ""; k = 0; spaced = 0; started = 0
       for (i = 1; i <= L; i++) {
         c = substr(s, i, 1)
-        if (q != "") {
-          if (c == q) q = ""
-          else { if (c == " " || c == "\t") spaced = 1; cur = cur c }
-          continue
+        # No escape inside quotes here: this reader never honoured one, and still does not.
+        if (c == "'"'"'" || c == "\"") {
+          e = cmdnorm_qend(s, i, c, 0); t = substr(s, i + 1, e - i - 1)
+          if (t ~ /[ \t]/) spaced = 1
+          cur = cur t; started = 1; i = e; continue
         }
-        if (c == "'"'"'" || c == "\"") { q = c; started = 1; continue }
         if (c == " " || c == "\t") {
           if (cur != "" || started) { a[++k] = (spaced ? "\001" : cur); cur = ""; spaced = 0; started = 0 }
           continue
@@ -1364,38 +1371,33 @@ cmd_class() {  # <command> -> suite|bootstrap|install|build|none, by priority
   # FIVE FORKS LESS THAN IT USED TO COST (epic-23 wave-14 REQ-4; research R3 §3
   # measured 6.4 ms of `classify_tier1`'s 13.1 on this function alone). The reading
   # is unchanged — the SAME lines from the SAME awk, still by priority and not by
-  # position — but the class column is now split by parameter expansion and matched
-  # by `case`, where it was one `awk -F'\t'` plus one `grep -qx` PER CLASS NAME over
-  # a handful of lines. Four greps to ask four questions of one small string is four
-  # process spawns on the hottest path in the tree.
+  # position — but the class column is now matched by `case`, where it was one
+  # `awk -F'\t'` plus one `grep -qx` PER CLASS NAME over a handful of lines. Four greps
+  # to ask four questions of one small string is four process spawns on the hottest
+  # path in the tree.
   #
-  # EXACT-LINE SEMANTICS, WHICH IS WHAT `grep -qx` GAVE. The set is assembled with a
-  # newline on BOTH sides of every class word, and each pattern carries a newline on
-  # both sides of the word it looks for, so `suite` matches the whole field `suite`
+  # EXACT-FIELD SEMANTICS, WHICH IS WHAT `grep -qx` GAVE. The lines are wrapped in a
+  # newline on both ends, and each pattern carries a newline before the word it looks
+  # for and a tab or a newline after it, so `suite` matches the whole field `suite`
   # and never a field that merely contains it. A `case` pattern would otherwise be a
   # substring test, which is exactly the direction `-x` existed to refuse: without
   # the anchors a class column reading `not-suite` would answer `suite`, and the
   # farm-out wall would deny a command it has no business denying.
   #
-  # THE FIELD SPLIT MATCHES awk's. `${line%%<tab>*}` on a line carrying no tab yields
-  # the whole line, which is what `awk -F'\t' '{print $1}'` printed for such a line.
-  local lines rest line cls seen c
-  lines=$(cmd_class_lines "${1-}")
-  seen=$'\n'
-  rest="$lines"
-  while [ -n "$rest" ]; do
-    line="${rest%%$'\n'*}"
-    case "$rest" in
-      *$'\n'*) rest="${rest#*$'\n'}" ;;
-      *)        rest="" ;;
-    esac
-    cls="${line%%$'\t'*}"
-    [ -n "$cls" ] || continue
-    seen="$seen$cls"$'\n'
-  done
+  # THE FIELD SPLIT MATCHES awk's. A line's first field is the class word exactly when the
+  # line is the word followed by a tab, or the word alone — what `awk -F'\t' '{print $1}'`
+  # printed for a line carrying no tab.
+  #
+  # NO WALK OVER THE LINES (wave-24 T22). Each line echoes its segment whole, so a quoted
+  # body of N lines is N lines here, and the walk that peeled them off one at a time with
+  # `${rest%%…}`/`${rest#*…}` cost N passes over the whole text: 4.9 s under 3.2 on a 52 KB
+  # `python3 -c` body of 1 350 lines. Two anchored `case` tests per class word read the
+  # same lines in a fixed number of passes.
+  local lines c
+  lines=$'\n'"$(cmd_class_lines "${1-}")"$'\n'
   for c in suite bootstrap install build; do
-    case "$seen" in
-      *$'\n'"$c"$'\n'*) printf '%s' "$c"; return 0 ;;
+    case "$lines" in
+      *$'\n'"$c"$'\t'*|*$'\n'"$c"$'\n'*) printf '%s' "$c"; return 0 ;;
     esac
   done
   printf 'none'
