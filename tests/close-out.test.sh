@@ -1112,6 +1112,184 @@ run_close "$TC" run
 expect_eq "q1.14: run on the valid fixture still succeeds" "0" "$CO_RC"
 
 # ============================================================
+section "4f — REQ-1 (AC-1.1–1.4): the shipped table is found once; the ADR cell is read, not marked"
+# ============================================================
+# D17 (wave-24 T1). `epic_has_row`, `act_epic` and `presence_missing` each used their own idea
+# of "the wave table": a file-wide grep, the FIRST `| wave |` header, any `| wave |` header. A
+# planned table (`| wave | … | status |`) above or beside the shipped one made all three disagree.
+# One locator now picks the table whose header's first cell is `wave` AND which has a `shipped`
+# cell. The helpers below read the fixture with their OWN awk, not the script's.
+
+# table_rows <file> <kind> -> the data rows (not header, not rule) of the table whose header
+# is `| wave |` AND carries (kind=shipped) or lacks (kind=planned) a `shipped` cell.
+table_rows() {
+  awk -v kind="$2" '
+    function has_shipped(line,   n, i, c, a) {
+      n = split(line, a, "|")
+      for (i = 2; i < n; i++) { c = a[i]; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == "shipped") return 1 }
+      return 0
+    }
+    /^\|[ \t]*wave[ \t]*\|/ && !intable {
+      if ((kind == "shipped") == has_shipped($0)) { intable = 1; hdr = 1; next }
+    }
+    intable && !/^\|/ { intable = 0 }
+    intable { if (hdr) { hdr = 0; next } print }
+  ' "$1"
+}
+# rows_with_wave <file> <kind> <num> -> how many data rows of that table lead with <num>.
+rows_with_wave() {
+  table_rows "$1" "$2" | grep -cE "^\|[[:space:]]*$3[[:space:]]*\|" | tr -d ' '
+}
+
+# epic_planned_first -> an epic with a planned table ABOVE the shipped one. The planned table
+# carries a `| 01 |` row (this fixture's own wave number), and a headerless `## Ladder`
+# table carries another; neither is the shipped table.
+epic_planned_first() {
+  cat <<'EPIC78'
+---
+canonical_sdlc_version: 14
+---
+
+# epic-fx
+
+## SDLC State
+
+current: 4
+
+## Waves — planned
+
+| wave | version | slug | brief | status |
+|---|---|---|---|---|
+| 01 | 0.0.2 | fixture | a planned wave | planned |
+| 09 | 0.0.9 | other | another | planned |
+
+## Ladder
+
+| 01 | step | one |
+|---|---|---|
+| 01 | step | two |
+
+## Waves — shipped
+
+| wave | version | plan | spec / requirements | ADRs | shipped |
+|---|---|---|---|---|---|
+| 00 | 0.0.1 | `wave-00-seed.plan.md` | — | — | 2026-01-01 |
+
+## Notes
+
+Nothing here.
+EPIC78
+}
+
+# §78.1 — a `| 01 |` row that is not in the shipped table is not "already listed".
+T78="$(mk_fixture t78a)"
+epic_planned_first > "$T78/$EPIC_REL"
+expect_eq "78.0: the extractor reads the shipped table (wave 00 is one row there)" "1" \
+  "$(rows_with_wave "$T78/$EPIC_REL" shipped 00)"
+expect_eq "78.0b: …and the planned table (wave 01 is one row there; wave 00 none)" "1/0" \
+  "$(rows_with_wave "$T78/$EPIC_REL" planned 01)/$(rows_with_wave "$T78/$EPIC_REL" planned 00)"
+expect_eq "78.0c: …and wave 01 is in the shipped table zero times before the run" "0" \
+  "$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
+run_close "$T78" check
+expect_eq "78.1a: check names an epic-row line" "yes" "$(contains "$CO_OUT" "epic-row: ")"
+expect_eq "78.1b: …and does not call wave 01 already listed" "no" "$(contains "$CO_OUT" "already listed")"
+run_close "$T78" run
+expect_eq "78.1c: run exits 0" "0" "$CO_RC"
+expect_eq "78.1d: …the shipped table holds the wave-01 row" "1" "$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
+expect_eq "78.1e: …the epic-row line says appended, not already listed" "yes" \
+  "$(contains "$CO_OUT" "epic-row: wave 01 appended to epic.plan.md")"
+
+# §78.2 — the planned table sits first; the row still lands in the shipped one.
+T78B="$(mk_fixture t78b)"
+epic_planned_first > "$T78B/$EPIC_REL"
+PLANNED_BEFORE="$(table_rows "$T78B/$EPIC_REL" planned)"
+SHIPPED_BEFORE="$(table_rows "$T78B/$EPIC_REL" shipped | wc -l | tr -d ' ')"
+expect_eq "78.2.0: the planned table has two rows and the shipped one (before) has one" "2/1" \
+  "$(printf '%s\n' "$PLANNED_BEFORE" | wc -l | tr -d ' ')/$SHIPPED_BEFORE"
+run_close "$T78B" run
+expect_eq "78.2a: run exits 0" "0" "$CO_RC"
+expect_eq "78.2b: the shipped table's row count rose by exactly one" "$((SHIPPED_BEFORE + 1))" \
+  "$(table_rows "$T78B/$EPIC_REL" shipped | wc -l | tr -d ' ')"
+expect_eq "78.2c: …the planned table is unchanged" "$PLANNED_BEFORE" "$(table_rows "$T78B/$EPIC_REL" planned)"
+expect_eq "78.2d: …and the row sits after the existing shipped row (appended, not inserted above it)" "00 01" \
+  "$(table_rows "$T78B/$EPIC_REL" shipped | sed -E 's/^\|[[:space:]]*([0-9]+)[[:space:]]*\|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
+run_close "$T78B" run
+expect_eq "78.2e: a second run adds no second row (reader and writer agree on the table)" "1" \
+  "$(rows_with_wave "$T78B/$EPIC_REL" shipped 01)"
+
+# §78.3 — an epic whose only `| wave |` table is the planned one has nowhere to put the row.
+T78C="$(mk_fixture t78c)"
+epic_planned_first | awk '
+  /^## Waves — shipped/ { skip = 1 }
+  /^## Notes/ { skip = 0 }
+  !skip { print }
+' > "$T78C/epic.tmp" && mv "$T78C/epic.tmp" "$T78C/$EPIC_REL"
+expect_eq "78.3.0: the fixture has a planned table and no shipped one" "1/0" \
+  "$(rows_with_wave "$T78C/$EPIC_REL" planned 09)/$(table_rows "$T78C/$EPIC_REL" shipped | wc -l | tr -d ' ')"
+PRE_C="$(presence_state "$T78C")"; PLAN_C_SHA="$(sha_of "$T78C/$PLAN_REL")"; EPIC_C_SHA="$(sha_of "$T78C/$EPIC_REL")"
+run_close "$T78C" check
+expect_eq "78.3a: check says it would refuse, naming the shipped table" "yes" \
+  "$(contains "$CO_OUT" "presence: WOULD REFUSE — no | wave | table with a shipped column")"
+run_close "$T78C" run
+expect_eq "78.3b: run refuses rc 2" "2" "$CO_RC"
+expect_eq "78.3c: …naming the missing shipped table" "yes" "$(contains "$CO_OUT" "table with a shipped column")"
+expect_eq "78.3d: …before any act" "no" "$(contains "$CO_OUT" "worktree-removed:")"
+expect_eq "78.3e: …branch, tmp, continuation and plans untouched" \
+  "$PRE_C/$PLAN_C_SHA/$EPIC_C_SHA" \
+  "$(presence_state "$T78C")/$(sha_of "$T78C/$PLAN_REL")/$(sha_of "$T78C/$EPIC_REL")"
+
+# ---------- §86: the ADR cell reads the spec's `adrs:` line ----------
+
+# adr_cell <project> -> the trimmed ADRs cell (column 5) of the wave-01 row in the shipped table.
+adr_cell() {
+  table_rows "$1/$EPIC_REL" shipped | grep -E '^\|[[:space:]]*01[[:space:]]*\|' | awk -F'|' '
+    { c = $6; gsub(/^[ \t]+|[ \t]+$/, "", c); print c }'
+}
+# set_plan_keys <project> <spec-line|-> <adrs-line|-> -> inserts the given frontmatter lines
+# after `walk:` ("-" inserts nothing).
+set_plan_keys() {
+  local p="$1/$PLAN_REL" extra=""
+  [ "$2" = "-" ] || extra="${extra}$2"$'\n'
+  [ "$3" = "-" ] || extra="${extra}$3"$'\n'
+  EXTRA="$extra" awk '{ print } /^walk:/ { printf "%s", ENVIRON["EXTRA"] }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+}
+# mk_spec <project> <adrs-line|-> -> writes the spec the plan names, with or without `adrs:`.
+mk_spec() {
+  mkdir -p "$1/.bionic/docs/specs/epic-fx"
+  {
+    printf -- '---\nsdlc-step: 2\n'
+    [ "$2" = "-" ] || printf '%s\n' "$2"
+    printf -- '---\n\n# fixture spec\n'
+  } > "$1/.bionic/docs/specs/epic-fx/wave-01-fixture.spec.md"
+}
+SPEC_KEY="spec: specs/epic-fx/wave-01-fixture.spec.md"
+
+T86="$(mk_fixture t86a)"
+set_plan_keys "$T86" "$SPEC_KEY" "-"
+mk_spec "$T86" "adrs: adrs/epic-fx/adr-040-first-thing.md · adrs/epic-fx/adr-041-second-thing.md"
+run_close "$T86" run
+expect_eq "86.0: run exits 0" "0" "$CO_RC"
+expect_eq "86.1: the ADRs cell reads the spec's two ADRs, numbers joined by a comma" "040, 041" "$(adr_cell "$T86")"
+
+T86B="$(mk_fixture t86b)"
+set_plan_keys "$T86B" "$SPEC_KEY" "-"
+mk_spec "$T86B" "-"
+run_close "$T86B" run
+expect_eq "86.2a: a wave with no adrs: in spec or plan keeps the marker (run exits 0)" "0" "$CO_RC"
+expect_eq "86.2b: …the cell is exactly the marker" "<fill: ADRs>" "$(adr_cell "$T86B")"
+
+T86C="$(mk_fixture t86c)"
+set_plan_keys "$T86C" "$SPEC_KEY" "adrs: adrs/epic-fx/adr-039-from-the-plan.md"
+mk_spec "$T86C" "-"
+run_close "$T86C" run
+expect_eq "86.3: a spec without adrs: falls back to the plan's adrs:" "039" "$(adr_cell "$T86C")"
+
+T86D="$(mk_fixture t86d)"
+set_plan_keys "$T86D" "-" "adrs: adrs/epic-fx/adr-038-from-the-plan.md"
+run_close "$T86D" run
+expect_eq "86.4: a plan whose spec file is not on disk falls back to the plan's adrs:" "038" "$(adr_cell "$T86D")"
+
+# ============================================================
 section "5 — REQ-1 (AC-1.1–1.3): a close-out spares a live neighbour's session state"
 # ============================================================
 #
