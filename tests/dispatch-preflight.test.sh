@@ -72,7 +72,7 @@ require_helpers ok no expect_status expect_contains expect_absent expect_empty e
 # ---------- fixtures ----------
 #
 # FIXTURE FIDELITY (declared per checklist §A / spec §Design / rule
-# fixtures-can-pin-away-the-test).
+# .claude/rules/test-harness.md, "Fixture fidelity").
 #
 # Source: .bionic/docs/record/epic-15-kill-interception-experiment.md, CLI
 # 2.1.220 verbatim captures.

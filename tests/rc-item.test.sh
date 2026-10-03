@@ -18,8 +18,8 @@
 # only be made if it is permanently added").
 #
 # EVERY NEGATIVE HERE HAS A POSITIVE BESIDE IT, ON THE SAME EXTRACTOR AND THE
-# SAME FIXTURE (.claude/rules test-authoring rule; memory
-# `no-vacuous-tests-at-authoring`). `rc_block_lines` is asserted non-empty after
+# SAME FIXTURE (.claude/rules/test-harness.md,
+# "Anti-vacuity"). `rc_block_lines` is asserted non-empty after
 # a consented setup before it is asserted empty before one; the `type claude`
 # readback is asserted to name a shell function after setup before it is
 # asserted not to before setup. An extractor that returned the empty string for
