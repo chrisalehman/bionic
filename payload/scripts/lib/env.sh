@@ -147,7 +147,12 @@ ENV_KEYS="CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIME
 #                                      still set it back to "0" for one project,
 #                                      and the switch cannot delete files the
 #                                      CLI wrote before it was set. doctor's
-#                                      `auto-memory` row reports both
+#                                      `auto-memory` row reports both, reading
+#                                      the project and local settings only: a
+#                                      managed settings file, a `--settings`
+#                                      argument and the Desktop app's launch
+#                                      environment can also set the name and are
+#                                      outside what doctor reads
 #                                      (lib/checks.sh, detect_auto_memory in
 #                                      lib/detect.sh).
 env_default() {  # <key> — prints the value, exit 1 if the key is not bionic's
