@@ -5815,8 +5815,14 @@ s_pk_read() {  # <repo> [sid] -> "<plan path>|<current>", or "none"
   # fixture would meet a different world than the first. Every §S read is meant to be the
   # first one.
   rm -f "$1/.bionic/tmp/patrol-$sid.state.holds"
+  # AN UNBOUND SESSION IS BOUND FOR THE DRIVE, as `s_eg_read` does for the gate (T11, after
+  # the Step-6 review): the tick acts as under `none` for `fallback <p>`, so what this reader
+  # compares, which plan the library selects, is read through a binding to that plan.
+  local _b=0
+  cg_eg_bind "$1" "$sid" && _b=1
   out=$( cd "$1" && env CLAUDE_CODE_SESSION_ID="$sid" CLAUDE_CONFIG_DIR="$1/no-such-config" \
            bash "$PARTY_PK_S" tick 2>&1 )
+  [ "$_b" = 1 ] && cg_eg_unbind "$1" "$sid"
   case "$out" in *'no plan carrying an unfenced'*) echo none; return ;; esac
   plan=$(printf '%s\n' "$out" | sed -n 's/.*(\(\/[^ ]*\.md\) is at current: .*/\1/p' | head -1)
   cur=$(printf '%s\n' "$out" | sed -n 's/.* is at current: \([^ )]*\).*/\1/p' | head -1)
@@ -13342,6 +13348,46 @@ ub_mode "$UB7" "$SID_A" "$UB7_P" bound
 ub_eg
 expect_eq "UB.7 commit gate, bound-open (control): refused, <p>'s step has no evidence" "2" "$UB7_RC"
 expect_absent "UB.7 …and never told it is unbound" "session unbound" "$UB7_OUT"
+
+# ---- UB.8 the Patrol tick (T11, review RC-1) ----------------------------------
+# THE EIGHTH ARM, found by the Step-6 review: the poker's tick took `fallback <p>` as an open
+# run and filled from <p>'s task table, naming another session's ready row for dispatch
+# (`FILL T5`). AC-1.3 lists "prescribes a dispatch" as an acting arm. The tick under
+# `fallback` decides as it does with no run: it prints the advisory once and fills nothing.
+UB8=$(new_repo "ub-tick"); UB8_P="$UB8/.bionic/docs/plans/epic-99/run.md"
+mkdir -p "$(dirname "$UB8_P")"
+{ printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf -- '---\n\n## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T4 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed | — |\n'
+  printf '| T5 | 4 | build | ready | implementor | T4 | 15m | REQ-x | b.sh | pending | — |\n'
+} > "$UB8_P"
+roster_header > "$UB8/.bionic/tmp/roster-$SID_A.state"
+ub_tick() {  # <repo> <sid> -> merged output of the real tick
+  ( cd "$1" && env -u CLAUDE_PROJECT_DIR HOME="$1" CLAUDE_CODE_SESSION_ID="$2" \
+      BIONIC_PRESSURE_RING="$UB_RING" BIONIC_NOW_EPOCH=1700000000 \
+      BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      bash "$BIONIC_HOOKS_DIR/session-poker.sh" tick 2>&1 )
+}
+ub_mode "$UB8" "$SID_A" "$UB8_P" fallback
+UB8_OUT=$(ub_tick "$UB8" "$SID_A")
+# `no FILL — …` is the tick's own no-run sentence, so the absence is read on the two places a
+# FILL is PRESCRIBED: the `poker: FILL <ids>` line and the decision line.
+expect_absent "UB.8 tick, fallback: no FILL line is prescribed from <p>" "poker: FILL " "$UB8_OUT"
+expect_absent "UB.8 …and the decision is not FILL" "decision=FILL" "$UB8_OUT"
+expect_contains "UB.8 …it says it fills nothing, as a session with no run does" "no FILL — " "$UB8_OUT"
+expect_absent "UB.8 …and <p>'s ready row T5 is named nowhere" "T5" "$UB8_OUT"
+UB8_ADV=$(printf '%s\n' "$UB8_OUT" | sed 's/^poker: //' | grep '^run resolved by newest-plan fallback' \
+  | awk -v p="$UB8_P" '{ while ((i = index($0, p)) > 0) $0 = substr($0, 1, i-1) "<p>" substr($0, i+length(p)); print }')
+expect_eq "UB.8 …and the advisory is printed exactly once" "1" "$(printf '%s' "$UB8_ADV" | grep -c . || true)"
+expect_eq "UB.8 …and it is run_unbound_advisory's, byte for byte" "$UB_TEMPLATE" "$UB8_ADV"
+ub_mode "$UB8" "$SID_A" "$UB8_P" bound
+UB8_OUT=$(ub_tick "$UB8" "$SID_A")
+expect_contains "UB.8 tick, bound-open (control): the same tick prescribes FILL" "FILL T5" "$UB8_OUT"
+expect_absent "UB.8 …and never says the session is unbound" "session unbound" "$UB8_OUT"
 
 # ---- THE SEVEN SAY ONE THING -------------------------------------------------
 # Byte-identical after the plan is folded to <p>, and equal to the template lib/run.sh builds
