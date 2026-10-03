@@ -1187,6 +1187,10 @@ export CLAUDE_CONFIG_DIR="$F9_CFG"
 # is not before the row's launch, and every row below launched minutes ago. Record ORDER is
 # still what decides a follow-up; the date only has to sit after the launch.
 export F9_TS="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+# THE REPORTS NAME THE DELIVERABLE (wave-24 T29, critic I1, A-orch-46): a message is a
+# completion signal only when it names the row's deliverable, by path or basename. F9_ART is
+# the basename every report below names; each section that declares another file resets it.
+F9_ART="fw.md"
 
 tx_send() {  # <to> [sidechain true|false] — the orchestrator's SendMessage
   jq -nc --arg to "$1" --argjson sc "${2:-false}" \
@@ -1195,7 +1199,7 @@ tx_send() {  # <to> [sidechain true|false] — the orchestrator's SendMessage
 }
 tx_msg() {  # <teammate_id> [idle] — a message from the agent, as the orchestrator receives it
   local body="<teammate-message teammate_id=\"$1\" color=\"blue\" summary=\"r\">
-report text
+report text — wrote $F9_ART
 </teammate-message>"
   [ "${2:-}" = idle ] && body="<teammate-message teammate_id=\"$1\" color=\"blue\">
 {\"type\":\"idle_notification\",\"from\":\"$1\"}
@@ -1230,7 +1234,9 @@ tx_msg fw; tx_send fw
 f9_state "$R9" fw; expect_eq "9b: a SendMessage after the agent's last message reads FOLLOW-UP" "FOLLOW-UP" "$F9_STATE"
 expect_contains "9b2: …and the detail says a follow-up is in flight" "follow-up" "$OUT"
 expect_eq "9b3: …a FOLLOW-UP is no failure: exit 0" "0" "$RC"
-f9_state "$R9" fw2; expect_eq "9b4: …and a name that merely starts with it is untouched" "MET" "$F9_STATE"
+# RE-AUTHORED (wave-24 T29, critic I1): fw2's report used to be "report text", naming nothing,
+# and read MET — the defect, since any message was a completion signal. It now names fw.md.
+f9_state "$R9" fw2; expect_eq "9b4: …and a name that merely starts with it is untouched (T29: its report names fw.md)" "MET" "$F9_STATE"
 
 tx_quote fw
 f9_state "$R9" fw; expect_eq "9c: a tool result quoting the agent's message closes nothing" "FOLLOW-UP" "$F9_STATE"
@@ -1261,6 +1267,7 @@ F9T_DEL="$R9T/t.md"; echo done > "$F9T_DEL"
 roster_row_fixture status=identified "session=$SID" name=w20-mate agent_id=amate-01 \
   "launched_at=$(iso_ago 600)" "deliverable=$F9T_DEL" source=declared \
   teammate_id=w20-mate@session-4b2f7a10 tool_use_id=toolu_mate >> "$(roster_of "$R9T")"
+F9_ART="t.md"
 : > "$F9_TR"
 tx_msg w20-mate; tx_send w20-mate
 f9_state "$R9T" w20-mate; expect_eq "9i: a teammate row reads FOLLOW-UP by its bare name" "FOLLOW-UP" "$F9_STATE"
@@ -1288,7 +1295,7 @@ section "Section 10: FOLLOW-UP closes on the reply shapes the CLI writes, never 
 # R2. A follow-up to a row the one close predicate already closed (acked after its latest
 # launch) cannot reopen it: the row keeps its close and the detail says the send was ignored.
 tx_hand_back() {  # <name> [idle] — the isMeta hand-back record, as CLI 2.1.281 writes it
-  local body="[Subagent hand-back] $1 is done. Artifact: .bionic/docs/record/x.md"
+  local body="[Subagent hand-back] $1 is done. Artifact: .bionic/docs/record/$F9_ART"
   [ "${2:-}" = idle ] && body="{\"type\":\"idle_notification\",\"from\":\"$1\",\"timestamp\":\"2026-09-24T04:25:35.289Z\"}"
   jq -nc --arg n "$1" --arg b "$body" \
     '{type:"user",isMeta:true,isSidechain:false,timestamp:$ENV.F9_TS,
@@ -1297,9 +1304,9 @@ tx_hand_back() {  # <name> [idle] — the isMeta hand-back record, as CLI 2.1.28
     >> "$F9_TR"
 }
 tx_queued() {  # <name> — the same envelope delivered mid-turn, as a queued_command attachment
-  jq -nc --arg n "$1" \
+  jq -nc --arg n "$1" --arg a "$F9_ART" \
     '{type:"attachment",isSidechain:false,timestamp:$ENV.F9_TS,
-      attachment:{type:"queued_command",prompt:("<agent-message from=\"" + $n + "\">\nTask 67 was already finished when this assignment reached me.\n</agent-message>"),
+      attachment:{type:"queued_command",prompt:("<agent-message from=\"" + $n + "\">\nTask 67 was already finished when this assignment reached me: " + $a + ".\n</agent-message>"),
         source_uuid:"083d4d92-a74c-4596-9471-967122e80371",commandMode:"prompt",
         origin:{kind:"peer",from:$n,senderTaskId:("a" + $n + "-6bf3f46a"),name:$n,body:"Task 67 was already finished."}}}' \
     >> "$F9_TR"
@@ -1312,7 +1319,7 @@ tx_idle_real() {  # <name> — a teammate idle notice, the shape measured at 04:
 }
 tx_batched() {  # <name> — one record carrying a report AND an idle notice (measured at 03:41:30Z)
   jq -nc --arg b "<teammate-message teammate_id=\"$1\" color=\"purple\" summary=\"done\">
-$1 is done. Artifact: x.md
+$1 is done. Artifact: $F9_ART
 </teammate-message>
 
 <teammate-message teammate_id=\"$1\" color=\"purple\">
@@ -1325,6 +1332,7 @@ R10="$(make_repo s10replies)"; new_roster "$R10"
 F10_DEL="$R10/hb.md"; echo done > "$F10_DEL"
 add_row "$R10" name=hb deliverable="$F10_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_hb
 add_row "$R10" name=hb-2 deliverable="$F10_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_hb2
+F9_ART="hb.md"
 
 # (1) THE REPLY IN BOTH ENVELOPES, by the exact name.
 : > "$F9_TR"; tx_msg hb; tx_send hb
@@ -1358,6 +1366,7 @@ F10A_DEL="$R10A/done.md"; echo done > "$F10A_DEL"
 add_row "$R10A" name=done-row deliverable="$F10A_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_done
 add_row "$R10A" name=open-row deliverable="$F10A_DEL" launched_at="$(iso_ago 600)" tool_use_id=toolu_open
 sweep "$R10A" ack done-row --by human --reason landed
+F9_ART="done.md"
 F10A_AT="$(grep -F '|event=ack|' "$(ledger_of "$R10A")" | grep -F '|name=done-row|' | tail -1 | tr '|' '\n' | sed -n 's/^at=//p')"
 : > "$F9_TR"; tx_msg done-row; tx_msg open-row; tx_send done-row; tx_send open-row
 f9_state "$R10A" done-row
@@ -1406,6 +1415,7 @@ S11_ORDERS="${BIONIC_HOOKS_DIR}/stop-orders.sh"
 R11="$(make_repo s11restart)"; new_roster "$R11"
 : > "$(state_dir_of "$R11")/engaged-$SID.state"
 S11_DEL="$R11/w-t1-report.md"; echo delivered > "$S11_DEL"; backdate "$S11_DEL" 400
+F9_ART="w-t1-report.md"
 S11_LAUNCH="$(iso_ago 900)"
 roster_row_fixture status=confirmed "session=$SID" name=w-T1 agent_id=a-w-t1-01 \
   "launched_at=$S11_LAUNCH" subagent_type=bionic:implementor model=opus "deliverable=$S11_DEL" \
@@ -1505,9 +1515,9 @@ s12_ts() {  # <seconds ago> -> a transcript timestamp, millisecond form as the C
   date -u -v-"$1"S +%Y-%m-%dT%H:%M:%S.123Z 2>/dev/null \
     || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%S.123Z
 }
-s12_msg() {  # <transcript> <teammate_id> <seconds ago> — the agent's report, as delivered
+s12_msg() {  # <transcript> <teammate_id> <seconds ago> [text] — the agent's message, as delivered
   jq -nc --arg b "<teammate-message teammate_id=\"$2\" color=\"blue\" summary=\"done\">
-$2 is done. Artifact: x.md
+${4:-$2 is done. Artifact: report.md}
 </teammate-message>" --arg ts "$(s12_ts "$3")" \
     '{type:"user",isSidechain:false,timestamp:$ts,message:{role:"user",content:$b}}' >> "$1"
 }
@@ -1560,9 +1570,12 @@ expect_eq "12a4: …an UNMET row exits 1" "1" "$RC"
 # artifact landed and only the signal is missing, so "not on disk" would send a reader to the
 # wrong fix. A row whose artifact really is absent keeps the not-on-disk line.
 # fails-when: an unsaid row's summary says the artifacts are not on disk.
+# RE-AUTHORED (wave-24 T29, critic I1): the line said "no message", and a message that names no
+# deliverable is no signal now, so it says "no message naming them" and how a report gives one.
 expect_contains "12a5: …its closing line names the missing completion signal and how to give one" \
-  "the artifacts landed, but no message, completed task-notification or Done marker followed the launch" "$OUT"
+  "the artifacts landed, but no message naming them, completed task-notification or Done marker followed the launch" "$OUT"
 expect_contains "12a6: …and says how the agent gives one" "SendMessage" "$OUT"
+expect_contains "12a6b: …a report that names its artifact (T29)" "its report, naming its artifact, with SendMessage" "$OUT"
 expect_absent "12a7: …and does not say the artifacts are missing" "not on disk as the brief declared" "$OUT"
 s12_row "$R12" name=d-missing agent_id=a-missing "deliverable=$R12/never-written.md" tool_use_id=toolu_missing
 f9_state "$R12" d-missing
@@ -1575,6 +1588,43 @@ s12_msg "$S12_TR" d-said 30
 f9_state "$R12" d-said
 expect_eq "12b: …the same row plus the agent's own message after its launch is MET" "MET" "$F9_STATE"
 expect_contains "12b2: …and the detail says how it was said" "said=" "$OUT"
+
+# A MESSAGE IS A SIGNAL ONLY WHEN IT NAMES THE DELIVERABLE (wave-24 T29; critic I1; A-orch-46).
+# Any message used to count, so an agent's mid-task question over a deliverable it had already
+# written (a progress artifact that IS the deliverable) read MET, and the next tick stood it
+# down. The message now has to name the row's deliverable, by its declared path or its basename.
+# fails-when: a question that names no deliverable makes a landed row MET.
+s12_row "$R12" name=d-ask agent_id=a-ask "deliverable=$S12_DEL" tool_use_id=toolu_ask
+s12_msg "$S12_TR" d-ask 30 "Question before I go on: should the parity run be re-done? Still working."
+f9_state "$R12" d-ask
+expect_eq "12i: a mid-task question with the deliverable landed is no completion signal — UNMET" "UNMET" "$F9_STATE"
+expect_contains "12i2: …and the detail names the missing signal for that row" "unsaid=d-ask" "$OUT"
+s12_msg "$S12_TR" d-ask 10 "d-ask is done. Artifact: report.md"
+f9_state "$R12" d-ask
+expect_eq "12i3: …the report after it, naming the artifact, is the signal — MET" "MET" "$F9_STATE"
+s12_row "$R12" name=d-path agent_id=a-path "deliverable=$S12_DEL" tool_use_id=toolu_path
+s12_msg "$S12_TR" d-path 30 "Finished; the record is at $S12_DEL and every suite is green."
+f9_state "$R12" d-path
+expect_eq "12j: a report naming the deliverable's declared path is the signal — MET" "MET" "$F9_STATE"
+s12_row "$R12" name=d-base agent_id=a-base "deliverable=$S12_DEL" tool_use_id=toolu_base
+s12_msg "$S12_TR" d-base 30 "Finished; see report.md for the counts."
+f9_state "$R12" d-base
+expect_eq "12k: a report naming only the deliverable's basename is the signal — MET" "MET" "$F9_STATE"
+echo second > "$R12/second.md"
+s12_row "$R12" name=d-multi agent_id=a-multi "deliverable=$S12_DEL,$R12/second.md" tool_use_id=toolu_multi
+s12_msg "$S12_TR" d-multi 30 "Finished; second.md holds the table."
+f9_state "$R12" d-multi
+expect_eq "12l: with several deliverables, a report naming any one of them is the signal — MET" "MET" "$F9_STATE"
+s12_row "$R12" name=d-other agent_id=a-other "deliverable=$S12_DEL" tool_use_id=toolu_other
+s12_msg "$S12_TR" d-other 30 "Finished; see notes.md for the counts."
+f9_state "$R12" d-other
+expect_eq "12l2: …and a report naming some other file is not — UNMET" "UNMET" "$F9_STATE"
+# A row that declares no deliverable has nothing a message could name, so any message after
+# the launch still counts there (A-T29.1). Its contract was already vacuous.
+s12_row "$R12" name=d-none agent_id=a-none "deliverable=" tool_use_id=toolu_none
+s12_msg "$S12_TR" d-none 30 "All done, nothing to write."
+f9_state "$R12" d-none
+expect_eq "12m: a row declaring no deliverable is still said by any message — MET" "MET" "$F9_STATE"
 
 f9_state "$R12" d-early
 expect_eq "12c: a message from BEFORE the launch is no signal for this contract" "UNMET" "$F9_STATE"
