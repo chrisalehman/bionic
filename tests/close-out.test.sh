@@ -297,8 +297,11 @@ mk_census_fixture() {
   local name="$1" working="$2" rows="$3"
   local p="$SANDBOX/$name"
   local aroot="$SANDBOX/$name-archive"
-  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/tmp" "$aroot"
+  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/docs/record" "$p/.bionic/tmp" "$aroot"
   printf 'archive-root: %s\n' "$aroot" > "$p/.bionic/config.yaml"
+  # The dry-run now judges the OPEN plan (T16), so the matrix evidence file must exist.
+  printf 'generic fixture proof — this suite tests the tail, not the artifact.\n' \
+    > "$p/.bionic/docs/record/generic-evidence.md"
   cat > "$p/.bionic/docs/plans/epic-fx/wave-01-fixture.plan.md" <<PLAN_CENSUS
 ---
 governing-skill: canonical-sdlc
@@ -369,8 +372,11 @@ mk_census_fixture_nowt() {
   local name="$1" working="$2" rows="$3"
   local p="$SANDBOX/$name"
   local aroot="$SANDBOX/$name-archive"
-  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/tmp" "$aroot"
+  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/docs/record" "$p/.bionic/tmp" "$aroot"
   printf 'archive-root: %s\n' "$aroot" > "$p/.bionic/config.yaml"
+  # The dry-run now judges the OPEN plan (T16), so the matrix evidence file must exist.
+  printf 'generic fixture proof — this suite tests the tail, not the artifact.\n' \
+    > "$p/.bionic/docs/record/generic-evidence.md"
   cat > "$p/.bionic/docs/plans/epic-fx/wave-01-fixture.plan.md" <<PLAN_CENSUS
 ---
 governing-skill: canonical-sdlc
@@ -408,6 +414,20 @@ approved-by: fixture 2026-09-14T00:00Z "approved"
 | id | step | kind | task | agent | deps | size | serves | Files | status |
 |---|---|---|---|---|---|---|---|---|---|
 ${rows}
+
+## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
+  tier-run: bash tests/close-out.test.sh
+  readback: the two lifecycle blocks the script wrote
 
 ## Handoff
 
@@ -938,6 +958,34 @@ expect_eq "4h: no continuation was written" "no" \
   "$([ -f "$P4/$CONT_REL" ] && echo yes || echo no)"
 expect_eq "4i: .bionic/tmp/ still holds its three entries" "3" "$(tmp_entries "$P4")"
 expect_eq "4j: wt/01-x still exists" "yes" "$(branch_exists "$P4" "wt/01-x")"
+
+# ============================================================
+section "4b — critic2 N-3 (T16): run's dry-run judges the plan while it is still OPEN"
+# ============================================================
+# The dry-run used to run AFTER current: 9 and delivered: were written, so the bound marker
+# resolved bound-closed and the commit gate exited 0 before it read any step evidence. Here
+# `run` is given a plan with NO Step-8 line. It must refuse (rc 2) and must not flip the
+# plan to delivered; at d067c07d it flipped current to 9 and wrote delivered: first.
+P16="$(mk_fixture p16)"
+grep -v '^- Step 8:' "$P16/$PLAN_REL" > "$P16/plan.tmp" && mv "$P16/plan.tmp" "$P16/$PLAN_REL"
+run_close "$P16" run
+expect_eq "4k: run on a plan with no Step-8 line refuses rc 2" "2" "$CO_RC"
+expect_eq "4l: …and the plan was not flipped to delivered" "no" \
+  "$(grep -qE 'Step 9:.*delivered:' "$P16/$PLAN_REL" && echo yes || echo no)"
+expect_eq "4m: …and current: is still 8" "yes" \
+  "$(grep -qE '^current: 8$' "$P16/$PLAN_REL" && echo yes || echo no)"
+expect_eq "4n: …and no gate: ok was reported" "no" "$(contains "$CO_OUT" "gate: ok")"
+
+# A refusal that only the GATE can make (the matrix evidence file is gone), with the Step-8 block present: the dry-run sees
+# the open plan at current 8 and refuses before the Step-9 flip.
+P17="$(mk_fixture p17)"
+rm -f "$P17/.bionic/docs/record/generic-evidence.md"
+run_close "$P17" run
+expect_eq "4o: run refuses when the gate refuses the open plan (rc 2)" "2" "$CO_RC"
+expect_eq "4p: …the Step-8 block is in place and the plan is not flipped" "no" \
+  "$(grep -qE 'Step 9:.*delivered:' "$P17/$PLAN_REL" && echo yes || echo no)"
+expect_eq "4q: …current: is still 8" "yes" \
+  "$(grep -qE '^current: 8$' "$P17/$PLAN_REL" && echo yes || echo no)"
 
 # ============================================================
 section "5 — REQ-1 (AC-1.1–1.3): a close-out spares a live neighbour's session state"
