@@ -4173,9 +4173,9 @@ section "Section HOLD: wave-24 T7 — the stand-down's standing answer is named 
 PIN_HOLD_VERB='session-poker.sh hold <name> <reason>'
 PIN_HOLD_LIST='`ListAgents` only when the roster has an open row'
 HOLD_BLOCK="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
-# The doctrine's own copy (wave-24 T29, critic I4): the reason is a quoted placeholder, the
-# words the code prints, because a bare `<reason>` pastes as a redirect from a file of that name.
-PIN_HOLD_DOC="session-poker.sh hold <name> 'why it stays up'"
+# The doctrine's own copy (wave-24 T29, critic I4): the words the code prints, NAME and a quoted
+# reason, because a bare `<name>` or `<reason>` pastes as a redirect from a file of that name.
+PIN_HOLD_DOC="session-poker.sh hold NAME 'why it stays up'"
 for _hold_f in "$DISPATCH_MD" "$HOLD_BLOCK"; do
   if has_pin "$_hold_f" "$PIN_HOLD_DOC"; then
     ok "HOLD-a: ${_hold_f#"$REPO"/} names the hold verb beside the stand-down duty"
