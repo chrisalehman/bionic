@@ -30,8 +30,12 @@
 #      shell; nothing in it is a command. `<<<` is a here-string and opens nothing.
 #   2. THE REST IS SPLIT on `;`, `&&`, `||`, `|`, a bare `&`, newline and a GROUPING
 #      PARENTHESIS — outside quotes. A `&` that is part of a redirection (`2>&1`, `&>log`)
-#      is not a separator, and neither is the `(` of `$(…)` or `<(…)`.
+#      is not a separator, and neither is the `(` of `$(…)` or `<(…)`. A `case … in`
+#      pattern list is consumed as patterns, so only arm bodies become segments; a
+#      variable a literal `for` list or one literal assignment pins is then resolved, one
+#      reading per value (sections 5-6 of the awk program, wave-24 D9/D12).
 #   3. EACH SEGMENT IS UNWRAPPED: leading `VAR=value` assignments (quoted values included),
+#      leading redirections (`2>/dev/null`, `<file`, glued or detached),
 #      shell openers (`{`, `}`, `!`, `then`, `else`, `elif`, `do`, `if`, `while`, `until`),
 #      command-taking prefixes with their own options (`sudo [-u u] [--]`, `time [-p]`,
 #      `nice [-n N]`, `env`, `nohup`, `command`, `exec`, `xargs [-I{} -n N …]`,
@@ -88,7 +92,9 @@
 #                                pasted into each awk program that needs it, never re-typed.
 #   cmd_backgrounded   <cmd>  -> exit 0 when the TEXT backgrounds it (D8, REQ-6): a bare
 #                                `&` control operator outside quotes, never one folded
-#                                into `&&` or a redirect, or a `nohup`/`setsid` wrapper.
+#                                into `&&` or a redirect, whose job no bare `wait` in its
+#                                own group and branch collects (wave-24 D12), or a
+#                                `nohup`/`setsid` wrapper.
 #                                The `run_in_background` TOOL FLAG is a different fact,
 #                                read by the caller (lib/walls.sh ARM 1) and OR'd with
 #                                this one — a command can background itself either way.
@@ -219,6 +225,16 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       if (w ~ /^-[A-Za-z]+$/ && index(w, "n") > 0) return 1
       return 0
     }
+    # THE RUNNER S OWN RUN-NOTHING MODES (wave-24 T5, D12, AC-7.5). `tests/run.sh` with
+    # `--dry-run`, `-h`, `--help` or `--list` prints and exits; it is not a suite run, so it
+    # is class none and names nothing. Read anywhere after the script, the way LAST_DRY reads
+    # `--dry-run`, because the runner takes its flags in any order. `--serial` is not here:
+    # alone it is the full tree.
+    function runsh_noop(a, from, n,   j) {
+      for (j = from; j <= n; j++)
+        if (a[j] == "--dry-run" || a[j] == "-h" || a[j] == "--help" || a[j] == "--list") return 1
+      return 0
+    }
 
     # ---------- 1. heredocs ----------
     # The tag opened by this line, or "" — quote-aware, so a `<<` inside a string is text.
@@ -259,8 +275,56 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # command substitution or a process substitution instead: those are NOT
     # boundaries, so bash <(cat FILE) still reaches unwrap_runner intact, and
     # the matching ) at depth 0 stays an ordinary character.
-    function segments(s, arr,   i, c, L, q, cur, k, nx, pv, gd) {
-      L = length(s); q = ""; cur = ""; k = 0; gd = 0
+    #
+    # EACH SEGMENT CARRIES THREE FACTS BESIDE ITS TEXT, in GLOBALS indexed like arr (wave-24
+    # T5, D9/D12): SEPKIND, the control operator that CLOSED it (`;` `\n` `&&` `||` `|` `|&`
+    # `&` `(` `)` `;;` `case`, or "" for the last); SEGGRP, the subshell group it sits in (0
+    # outside any, GPAR the parent of each); ARMSTART, 1 on the first segment of a case arm.
+    # Globals because only the END block reads them, once, right after its own top-level
+    # call — before class_seg recurses into segments() and overwrites them.
+    #
+    # A CASE PATTERN LIST IS NOT A COMMAND (D12, REQ-7 AC-7.5). `case WORD in` at command
+    # position switches to reading patterns: `(pat|pat)` up to its closing paren is consumed
+    # as nothing, then the arm body segments as ordinary commands until `;;` (or `;&`,
+    # `;;&`), and `esac` ends it. Before this, `pat)` stayed glued to the arm body, so a
+    # suite named in a pattern sat at argv[0] and read as a run, while a suite run in a
+    # body sat behind `case` and read as none.
+    function seg_put(arr, text, sep) {
+      arr[++SEG_K] = text
+      SEPKIND[SEG_K] = sep
+      SEGGRP[SEG_K] = GSTK[SEG_GD]
+      ARMSTART[SEG_K] = SEG_ARM; SEG_ARM = 0
+    }
+    # Is cur (the text so far of the segment being built) still at COMMAND POSITION — empty,
+    # or only the openers that precede a command? Only there is `case`/`esac` a keyword.
+    function cmdpos(x) {
+      sub(/^[ \t\r]+/, "", x)
+      while (match(x, /^(do|then|else|elif|if|while|until|!|[{])[ \t\r]+/)) x = substr(x, RLENGTH + 1)
+      return x == ""
+    }
+    # Reads one case pattern starting at j: returns the index just past its closing paren, or
+    # sets SEG_ESAC and returns the index of the `esac` that ends the case instead.
+    function case_pattern(s, j,   L, c, q, d) {
+      L = length(s)
+      while (j <= L && substr(s, j, 1) ~ /[ \t\r\n]/) j++
+      if (substr(s, j, 4) == "esac" && (j + 4 > L || substr(s, j + 4, 1) ~ /[ \t\r\n;&|)<>]/)) {
+        SEG_CASE--; SEG_ESAC = 1; return j
+      }
+      if (substr(s, j, 1) == "(") j++
+      q = ""; d = 0
+      for (; j <= L; j++) {
+        c = substr(s, j, 1)
+        if (q != "") { if (c == q) q = ""; else if (c == "\\" && q == "\"") j++; continue }
+        if (c == "\047" || c == "\"") { q = c; continue }
+        if (c == "\\") { j++; continue }
+        if (c == "(") { d++; continue }
+        if (c == ")") { if (d == 0) { SEG_ARM = 1; return j + 1 }; d--; continue }
+      }
+      return L + 1
+    }
+    function segments(s, arr,   i, j, c, L, q, cur, nx, pv, hdr) {
+      L = length(s); q = ""; cur = ""
+      SEG_K = 0; SEG_GD = 0; GSTK[0] = 0; GID_N = 0; SEG_ARM = 0; SEG_CASE = 0; SEG_ESAC = 0
       for (i = 1; i <= L; i++) {
         c = substr(s, i, 1)
         if (q != "") {
@@ -271,37 +335,54 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         }
         if (c == "'"'"'" || c == "\"") { q = c; cur = cur c; continue }
         if (c == "\\") { cur = cur c; i++; cur = cur substr(s, i, 1); continue }
+        if (c == "c" && cmdpos(cur) && match(substr(s, i), /^case[ \t]+[^ \t\r\n;&|()<>]+[ \t\r\n]+in([ \t\r\n]|$)/)) {
+          hdr = cur substr(s, i, RLENGTH); sub(/[ \t\r\n]+$/, "", hdr)
+          j = i + RLENGTH
+          seg_put(arr, hdr, "case"); cur = ""
+          SEG_CASE++
+          j = case_pattern(s, j)
+          if (SEG_ESAC) { SEG_ESAC = 0; cur = "esac"; i = j + 3; continue }
+          i = j - 1; continue
+        }
+        if (c == "e" && SEG_CASE > 0 && cmdpos(cur) && match(substr(s, i), /^esac([ \t\r\n;&|)<>]|$)/)) {
+          SEG_CASE--; cur = cur "esac"; i += 3; continue
+        }
+        if (c == ";" && SEG_CASE > 0 && (substr(s, i + 1, 1) == ";" || substr(s, i + 1, 1) == "&")) {
+          seg_put(arr, cur, ";;"); cur = ""
+          i++; if (substr(s, i + 1, 1) == "&") i++
+          j = case_pattern(s, i + 1)
+          if (SEG_ESAC) { SEG_ESAC = 0; cur = "esac"; i = j + 3; continue }
+          i = j - 1; continue
+        }
         if (c == "(") {
           pv = (i > 1 ? substr(s, i - 1, 1) : "")
           if (pv != "$" && pv != "<" && pv != ">") {
-            arr[++k] = cur; cur = ""; gd++; continue
+            seg_put(arr, cur, "("); cur = ""
+            SEG_GD++; GID_N++; GPAR[GID_N] = GSTK[SEG_GD - 1]; GSTK[SEG_GD] = GID_N
+            continue
           }
           cur = cur c; continue
         }
-        if (c == ")" && gd > 0) { arr[++k] = cur; cur = ""; gd--; continue }
-        if (c == "\n" || c == ";") { arr[++k] = cur; cur = ""; continue }
+        if (c == ")" && SEG_GD > 0) { seg_put(arr, cur, ")"); cur = ""; SEG_GD--; continue }
+        if (c == "\n" || c == ";") { seg_put(arr, cur, c); cur = ""; continue }
         if (c == "&") {
           nx = substr(s, i + 1, 1); pv = (i > 1 ? substr(s, i - 1, 1) : "")
-          if (nx == "&") { arr[++k] = cur; cur = ""; i++; continue }
+          if (nx == "&") { seg_put(arr, cur, "&&"); cur = ""; i++; continue }
           # a redirection, not a separator: 2>&1, >&2, &>log
           if (nx == ">" || pv == ">" || pv == "<") { cur = cur c; continue }
           # A BARE & IS THE ONLY ONE THAT BACKGROUNDS (D8, REQ-6). `&&` above closes a
-          # segment too, but synchronously — nothing after it is detached. SEPKIND is a
-          # GLOBAL, deliberately not a local: cmd_backgrounded (mode="bg", below) is the
-          # only reader, and it wants to know, for the segment just closed, which control
-          # operator closed it — a question no caller of class_seg ever asks, so it costs
-          # them nothing.
-          arr[++k] = cur; cur = ""; SEPKIND[k] = "&"; continue
+          # segment too, but synchronously — nothing after it is detached.
+          seg_put(arr, cur, "&"); cur = ""; continue
         }
         if (c == "|") {
           nx = substr(s, i + 1, 1)
-          if (nx == "|" || nx == "&") { arr[++k] = cur; cur = ""; i++; continue }
-          arr[++k] = cur; cur = ""; continue
+          if (nx == "|" || nx == "&") { seg_put(arr, cur, "|" nx); cur = ""; i++; continue }
+          seg_put(arr, cur, "|"); cur = ""; continue
         }
         cur = cur c
       }
-      arr[++k] = cur
-      return k
+      seg_put(arr, cur, "")
+      return SEG_K
     }
 
     # ---------- 3. unwrapping ----------
@@ -386,6 +467,14 @@ _cmd_class_awk() {  # <mode> ; command on stdin
           s = after_exec(s)
         } else if (match(s, /^g?timeout[ \t]+(-[^ \t]+[ \t]+)*[0-9]+[smhd]?[ \t]+/)) {
           s = trim(substr(s, RLENGTH + 1))
+        } else if (match(s, /^[0-9]*(&>>|&>|>>|>[|]|>&|<&|<>|<|>)/)) {
+          # A LEADING REDIRECTION IS PLUMBING, glued (`<tests/a.test.sh wc -l`) or detached
+          # (`2> log bash tests/a.test.sh`): the operator and its one target word come off,
+          # quoted target included, so argv[0] never begins with `<` or `>` (wave-24 T5,
+          # D12, AC-7.6). Without it the glued READ put a suite path at argv[0] and read as
+          # a run of it, and a redirect in FRONT of a real run hid the run behind argv[0].
+          s = trim(substr(s, RLENGTH + 1))
+          if (s != "") s = trim(consume_value(s, 1))
         }
         if (s == t) break
       }
@@ -498,7 +587,10 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         # directory — which is exactly the shape `cd <worktree>/tests && bash
         # run.sh` takes, and the shape the path-component requirement missed
         # (critic C-2). On its own the word says nothing, so it stays none.
-        if (b1 == "run.sh" && (index(a1, "/") > 0 || CD_SEEN)) { LAST_TARGET = b1; LAST_PATH = a1; return "suite" }
+        if (b1 == "run.sh" && (index(a1, "/") > 0 || CD_SEEN)) {
+          if (runsh_noop(a, i + 1, n)) return "none"
+          LAST_TARGET = b1; LAST_PATH = a1; return "suite"
+        }
         return "none"
       }
       a1 = (n >= 2 ? a[2] : ""); a2 = (n >= 3 ? a[3] : "")
@@ -510,6 +602,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # it from naming it: `ls tests/run.sh` is argv[0] ls and stays none, and a
       # bare `run.sh` word is not something the shell would run either.
       if (index(a[1], "/") > 0 && (b0 == "run.sh" || b0 == "test.sh" || b0 ~ /\.test\.sh$/)) {
+        if (b0 == "run.sh" && runsh_noop(a, 2, n)) return "none"
         LAST_TARGET = b0
         LAST_PATH = a[1]
         return "suite"
@@ -585,6 +678,186 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       return classify_argv(strip_leading(u))
     }
 
+    # ---------- 5. compound structure (wave-24 T5, D9/D12) ----------
+    # One pass over the top-level segments that gives each one an INSTANCE: the branch of
+    # the compound commands it sits in. `if`/`while`/`until`/`for`/`select`/`case` open a
+    # child instance; `then`/`else`/`elif`/`do` and each case arm start a SIBLING of the
+    # current one; `fi`/`done`/`esac` close it. Instance A is an ancestor of B exactly when
+    # every run of B also ran A first — which is the one question both readers below ask:
+    # does this `wait` cover that job, does this assignment reach that use. CI[i] is the
+    # instance, HEAD[i] the segment with its branch keywords taken off. A `for V in w…`
+    # header also opens a FRAME (FVAR, FWORDS, FOK, FSTART, FEND) for the expansion pass.
+    function kw_branch() {
+      INST_N++; IPAR[INST_N] = IPAR[ISTK[ISP]]; ISTK[ISP] = INST_N
+    }
+    function inst_anc(a, b) {
+      while (b != 0) { if (b == a) return 1; b = IPAR[b] }
+      return 0
+    }
+    function grp_anc(a, b) {
+      for (;;) { if (b == a) return 1; if (b == 0) return 0; b = GPAR[b] }
+    }
+    # A literal word, or "" — dequoted when wholly quoted. Only these characters, so a
+    # value can never carry a glob, an expansion or a separator into the text it replaces.
+    function litword(w) {
+      w = dequote_whole(w)
+      return (w ~ /^[A-Za-z0-9._\/-]+$/ ? w : "")
+    }
+    function compound_pass(k, sg,   i, t, h, hv, rest, nw, W, x, lw) {
+      INST_N = 1; IPAR[1] = 0; ISP = 0; ISTK[0] = 1; NF = 0
+      for (i = 1; i <= k; i++) {
+        t = trim(sg[i])
+        if (ARMSTART[i] && ISP > 0) kw_branch()
+        if (match(t, /^(done|fi|esac)([ \t;&|<>)]|$)/) && ISP > 0) {
+          if (ICK[ISP] > 0) FEND[ICK[ISP]] = i
+          ISP--
+        }
+        h = t
+        for (;;) {
+          if (match(h, /^(then|else|elif|do)([ \t]+|$)/)) {
+            if (ISP > 0) kw_branch()
+            h = trim(substr(h, RLENGTH + 1))
+          } else if (match(h, /^[{][ \t]*/)) {
+            h = trim(substr(h, RLENGTH + 1))
+          } else break
+        }
+        if (match(h, /^(if|while|until|for|select|case)([ \t]+|$)/)) {
+          INST_N++; IPAR[INST_N] = ISTK[ISP]; ISP++; ISTK[ISP] = INST_N; ICK[ISP] = 0
+          if (h ~ /^for[ \t]/) {
+            NF++; ICK[ISP] = NF; FSTART[NF] = i; FEND[NF] = k + 1; FOK[NF] = 0; FWORDS[NF] = ""
+            if (match(h, /^for[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+in([ \t]|$)/)) {
+              rest = substr(h, RLENGTH + 1)
+              hv = h; sub(/^for[ \t]+/, "", hv); match(hv, /^[A-Za-z_][A-Za-z0-9_]*/)
+              FVAR[NF] = substr(hv, 1, RLENGTH)
+              nw = split(trim(rest), W, /[ \t]+/)
+              FOK[NF] = (nw >= 1)
+              for (x = 1; x <= nw; x++) {
+                lw = litword(W[x])
+                if (lw == "") FOK[NF] = 0
+                FWORDS[NF] = FWORDS[NF] (x > 1 ? " " : "") lw
+              }
+            }
+          }
+        }
+        CI[i] = ISTK[ISP]; HEAD[i] = h
+      }
+    }
+
+    # ---------- 6. literal expansion (wave-24 T5, D9, REQ-6 AC-6.3/6.4) ----------
+    # The budget arm reads the command TEXT, so `for s in a b; do bash tests/$s.test.sh;
+    # done` reached it as one unresolvable `$s.test.sh` and was refused — and
+    # `X=a.test.sh; bash tests/$X` reached it as class none and was never budgeted at all.
+    # A variable whose every value is visible in the text is resolved here, each segment
+    # that names it read once per value, and anything less certain is left as `$` text for
+    # the unexpanded-name refusal to speak about. RESOLVED, exactly when:
+    #   * a `for V in w…` loop whose every word is literal, for the segments of its body,
+    #     when no body segment ASSIGNS V (below);
+    #   * one standalone `V=<literal>` segment closed by `;`, `&&` or a newline and not
+    #     opened by `||` or a pipe, which is the ONLY assignment of V anywhere in the
+    #     command, for the segments after it that it reaches (same subshell group or a
+    #     child of it, same branch or a child of it). A prefix `V=x cmd $V` is never one:
+    #     the shell expands `$V` before the prefix takes effect.
+    # NEVER RESOLVED in a command that defines a function, runs eval/source/`.`, assigns
+    # IFS, or declares a nameref — each can assign a variable no text here names.
+    # Checking the resolved set is a SUPERSET of what runs (break/continue only shrink it),
+    # so the budget guarantee holds (research R3 Q1).
+    function assigns(t, V,   h, u, A, n, x, a0) {
+      if (match(t, "(^|[ \t;&|(){}!])" V "[=+[]")) return 1
+      if (index(t, "${" V "=") || index(t, "${" V ":=")) return 1
+      h = trim(t)
+      while (match(h, /^(then|else|elif|do|[{])([ \t]+|$)/)) h = trim(substr(h, RLENGTH + 1))
+      if (match(h, "^(for|select)[ \t]+" V "([ \t;]|$)")) return 1
+      u = strip_leading(h)
+      n = argv_tok(u, A); a0 = A[1]
+      if (a0 ~ /^(read|mapfile|readarray|unset|declare|typeset|local|export|readonly|printf|getopts)$/)
+        for (x = 2; x <= n; x++) if (A[x] == V || A[x] == "-v" V) return 1
+      return 0
+    }
+    function expand_unsafe(k, sg, all,   j, u, A, n, x) {
+      if (all ~ /(^|[^A-Za-z0-9_])IFS=/) return 1
+      if (all ~ /[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)/ || all ~ /(^|[ \t;&|])function[ \t]/) return 1
+      for (j = 1; j <= k; j++) {
+        u = strip_leading(HEAD[j])
+        n = argv_tok(u, A)
+        if (A[1] == "eval" || A[1] == "source" || A[1] == ".") return 1
+        if (A[1] ~ /^(declare|typeset|local)$/)
+          for (x = 2; x <= n; x++) if (A[x] ~ /^-[A-Za-z]*n/) return 1
+      }
+      return 0
+    }
+    # s with every unquoted-or-double-quoted `$V` / `${V}` replaced by w. Single quotes
+    # and a backslash keep the shell from expanding, so they keep this from it too.
+    function subst(s, V, w,   L, lv, i, c, q, out) {
+      L = length(s); lv = length(V); q = ""; out = ""
+      for (i = 1; i <= L; i++) {
+        c = substr(s, i, 1)
+        if (q == "\047") { out = out c; if (c == q) q = ""; continue }
+        if (c == "\\") { out = out c substr(s, i + 1, 1); i++; continue }
+        if (c == "\"") { q = (q == "" ? c : ""); out = out c; continue }
+        if (c == "\047" && q == "") { q = c; out = out c; continue }
+        if (c == "$") {
+          if (substr(s, i + 1, lv + 2) == "{" V "}") { out = out w; i += lv + 2; continue }
+          if (substr(s, i + 1, lv) == V && substr(s, i + 1 + lv, 1) !~ /[A-Za-z0-9_]/) { out = out w; i += lv; continue }
+        }
+        out = out c
+      }
+      return out
+    }
+    # NX[i] texts XT[i, 1..NX[i]] per segment: the segment itself, or one per value.
+    function expand_all(k, sg, all,   i, j, f, h, V, val, pv, nc, AV, AJ, AL, na, x, y, nx, nn, X, Y, W, nw, BV, BL, nb, over, b) {
+      for (i = 1; i <= k; i++) { NX[i] = 1; XT[i, 1] = sg[i] }
+      if (index(all, "$") == 0) return
+      na = 0
+      for (j = 1; j <= k; j++) {
+        h = HEAD[j]
+        if (!match(h, /^[A-Za-z_][A-Za-z0-9_]*=/)) continue
+        V = substr(h, 1, RLENGTH - 1); val = litword(substr(h, RLENGTH + 1))
+        if (val == "") continue
+        if (SEPKIND[j] != ";" && SEPKIND[j] != "\n" && SEPKIND[j] != "&&") continue
+        pv = (j > 1 ? SEPKIND[j - 1] : "")
+        if (pv == "||" || pv == "|" || pv == "|&" || pv == ")") continue
+        na++; AV[na] = V; AJ[na] = j; AL[na] = val
+      }
+      if (NF == 0 && na == 0) return
+      if (expand_unsafe(k, sg, all)) return
+      for (f = 1; f <= NF; f++)
+        if (FOK[f]) for (j = FSTART[f] + 1; j < FEND[f] && j <= k; j++) if (assigns(sg[j], FVAR[f])) { FOK[f] = 0; break }
+      for (x = 1; x <= na; x++) {
+        nc = 0
+        for (j = 1; j <= k; j++) if (assigns(sg[j], AV[x])) nc++
+        if (nc != 1) AJ[x] = 0
+      }
+      for (i = 1; i <= k; i++) {
+        split("", BV); nb = 0
+        for (f = 1; f <= NF; f++)
+          if (FOK[f] && FSTART[f] < i && i < FEND[f]) {
+            if (!(FVAR[f] in BV)) BL[++nb] = FVAR[f]
+            BV[FVAR[f]] = FWORDS[f]
+          }
+        for (x = 1; x <= na; x++) {
+          j = AJ[x]; V = AV[x]
+          if (j == 0 || j >= i || (V in BV)) continue
+          if (!grp_anc(SEGGRP[j], SEGGRP[i]) || !inst_anc(CI[j], CI[i])) continue
+          BL[++nb] = V; BV[V] = AL[x]
+        }
+        if (nb == 0) continue
+        nx = 1; X[1] = sg[i]; over = 0
+        for (b = 1; b <= nb; b++) {
+          V = BL[b]
+          if (!index(sg[i], "$" V) && !index(sg[i], "${" V "}")) continue
+          nw = split(BV[V], W, " ")
+          if (nx * nw > 64) { over = 1; break }
+          nn = 0
+          for (x = 1; x <= nx; x++) for (y = 1; y <= nw; y++) Y[++nn] = subst(X[x], V, W[y])
+          nx = nn
+          for (x = 1; x <= nx; x++) X[x] = Y[x]
+        }
+        if (over) continue
+        NX[i] = nx
+        for (x = 1; x <= nx; x++) XT[i, x] = X[x]
+      }
+    }
+
     { line[++nl] = $0 }
     END {
       out = ""; intag = 0; tag = ""
@@ -613,51 +886,76 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # sees it, and going deeper (through an sh -c layer, say) would answer a question
       # nobody asked yet — this predicate reads backgrounding, not suite-ness, and
       # `cmd_class` already owns the "is this a suite at all" half.
+      #
+      # A JOB THAT IS WAITED FOR IS NOT BACKGROUNDED (wave-24 T5, D12, AC-7.3). A bare `&`
+      # starts a job PENDING in its subshell group and branch; it stops pending at a bare
+      # `wait` (no operand) in the SAME group whose branch is the job`s or an ancestor of
+      # it, reached unconditionally (not after `&&`/`||`/a pipe) and not itself a pipeline
+      # stage or `&`-closed. A job still pending when the command ends backgrounds it. So
+      # `a & b & wait` and `(a & b & wait)` are foreground, while `(a &); wait`,
+      # `a & false && wait`, `a & wait | cat`, `a & p=$!; wait $p` and a wait inside an
+      # `if` the job is not in all still read backgrounded. `wait $p` is not trusted to
+      # clear: the text cannot prove `$p` names every job (research R4 §2, Q2).
       if (mode == "bg") {
         k = segments(out, bgseg)
-        bg = 0
+        compound_pass(k, bgseg)
+        bg = 0; np = 0
         for (i = 1; i <= k; i++) {
-          if (SEPKIND[i] == "&") bg = 1
           t = trim(bgseg[i])
-          if (t == "") continue
-          SAW_WRAPPER = 0
-          strip_leading(t)
-          if (SAW_WRAPPER) bg = 1
+          if (t != "") {
+            SAW_WRAPPER = 0
+            strip_leading(t)
+            if (SAW_WRAPPER) bg = 1
+          }
+          if (SEPKIND[i] == "&") { np++; PG[np] = SEGGRP[i]; PI[np] = CI[i]; PL[np] = 1; continue }
+          if (HEAD[i] != "wait" || SEPKIND[i] == "|" || SEPKIND[i] == "|&") continue
+          pv = (i > 1 ? SEPKIND[i - 1] : "")
+          if (pv == "&&" || pv == "||" || pv == "|" || pv == "|&") continue
+          for (p = 1; p <= np; p++)
+            if (PL[p] && PG[p] == SEGGRP[i] && inst_anc(CI[i], PI[p])) PL[p] = 0
         }
+        for (p = 1; p <= np; p++) if (PL[p]) bg = 1
         printf "%s", (bg ? "1" : "0")
         exit
       }
       k = segments(out, seg)
+      compound_pass(k, seg)
+      expand_all(k, seg, out)
       CD_SEEN = 0
       for (i = 1; i <= k; i++) {
-        t = trim(seg[i])
-        if (t == "") continue
-        LAST_TARGET = ""; LAST_KIND = ""; LAST_RUN = ""
-        cls = class_seg(t, 0)
-        if (mode == "targets") {
-          # ONE LINE PER DISTINCT CLAIM, in position order. A command naming the same
-          # suite twice states one budget claim, and the caller compares a set.
-          if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && !(LAST_TARGET in tgt_seen)) {
-            tgt_seen[LAST_TARGET] = 1
-            # KIND, TARGET, RUN AND PATH, tab-separated. The shell wrappers are the only
-            # callers: `cmd_suite_claims` scopes the path to a repository and drops it,
-            # `cmd_suite_targets` keeps the basename of the file claims. The path answers
-            # "whose suite is this?", which a basename cannot (critic K-2); the run answers
-            # "which run is this?", which a basename cannot either.
-            #
-            # THE PATH IS LAST BECAUSE IT IS THE ONLY ONE THAT CAN BE EMPTY, and a tab is an
-            # IFS WHITESPACE character: bash `read` folds a run of them into one delimiter,
-            # so an empty column anywhere but the end shifts every column after it by one.
-            # Measured here, not reasoned about — a run claim (no path) handed its run to
-            # the path variable and left the run empty.
-            printf "%s\t%s\t%s\t%s\n", LAST_KIND, LAST_TARGET, LAST_RUN, LAST_PATH
+        t0 = trim(seg[i])
+        if (t0 == "") continue
+        # ONE READING PER RESOLVED VALUE (section 6): the segment itself when it names no
+        # variable this command pins, else once for each value it can take.
+        for (x = 1; x <= NX[i]; x++) {
+          t = trim(XT[i, x])
+          LAST_TARGET = ""; LAST_KIND = ""; LAST_RUN = ""
+          cls = class_seg(t, 0)
+          if (mode == "targets") {
+            # ONE LINE PER DISTINCT CLAIM, in position order. A command naming the same
+            # suite twice states one budget claim, and the caller compares a set.
+            if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && !(LAST_TARGET in tgt_seen)) {
+              tgt_seen[LAST_TARGET] = 1
+              # KIND, TARGET, RUN AND PATH, tab-separated. The shell wrappers are the only
+              # callers: `cmd_suite_claims` scopes the path to a repository and drops it,
+              # `cmd_suite_targets` keeps the basename of the file claims. The path answers
+              # "whose suite is this?", which a basename cannot (critic K-2); the run answers
+              # "which run is this?", which a basename cannot either.
+              #
+              # THE PATH IS LAST BECAUSE IT IS THE ONLY ONE THAT CAN BE EMPTY, and a tab is an
+              # IFS WHITESPACE character: bash `read` folds a run of them into one delimiter,
+              # so an empty column anywhere but the end shifts every column after it by one.
+              # Measured here, not reasoned about — a run claim (no path) handed its run to
+              # the path variable and left the run empty.
+              printf "%s\t%s\t%s\t%s\n", LAST_KIND, LAST_TARGET, LAST_RUN, LAST_PATH
+            }
+          } else {
+            printf "%s\t%s\n", cls, t
           }
-        } else {
-          printf "%s\t%s\n", cls, t
         }
         # Left-to-right, so a cd only licenses the basename form in the
         # segments that FOLLOW it.
-        if (is_cd(t)) CD_SEEN = 1
+        if (is_cd(t0)) CD_SEEN = 1
       }
     }
   '
@@ -732,7 +1030,8 @@ cmd_runs_norm() {  # <re_executes field, decoded> -> the same field, each marked
 
 cmd_backgrounded() {  # <command> -> 0 when the TEXT backgrounds it, 1 otherwise (D8, REQ-6)
   # A BARE `&` control operator outside quotes and not folded into `&&` or a redirect
-  # (`2>&1`, `&>log`), OR a `nohup`/`setsid` wrapper — READ, never string-matched, by the
+  # (`2>&1`, `&>log`) that no bare `wait` collects (see mode=bg for the rule), OR a
+  # `nohup`/`setsid` wrapper — READ, never string-matched, by the
   # same segmentation and strip_leading this file uses for everything else. This is the
   # half `.tool_input.run_in_background` cannot see: the CLI only sets that flag for its
   # own `run_in_background: true` parameter, never for a command that backgrounds itself
@@ -774,7 +1073,10 @@ cmd_suite_claims() {  # <command> [<repo root>] -> "<kind>\t<target>\t<run>" per
   #   * the cd-licensed basename form (`cd tests && bash run.sh`) records no directory to
   #     resolve against, and the full tree is the one act this budget fails CLOSED on;
   #   * a token carrying `$` or a backtick cannot be resolved at hook time at all — the
-  #     guard has a refusal written for exactly that state.
+  #     guard has a refusal written for exactly that state. A variable whose values the
+  #     text states (a literal `for` list, one literal assignment) is resolved BEFORE this
+  #     point by the awk reading (section 6, wave-24 D9), so what still arrives with a `$`
+  #     is a name nothing here can vouch for.
   local _root="${2-}" _k _b _r _p _abs
   printf '%s' "${1-}" | _cmd_class_awk targets | while IFS=$'\t' read -r _k _b _r _p; do
     [ -n "$_k" ] || continue
