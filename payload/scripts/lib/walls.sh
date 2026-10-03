@@ -5192,7 +5192,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
     shift
     _next="${1:-}"
     case "$_next" in
-      amend|extend|task-add) _WALL_POKER_VERB="$_next"; return 0 ;;
+      amend|extend|task-add|hold) _WALL_POKER_VERB="$_next"; return 0 ;;
     esac
   done <<< "$(git_argv_expand "$1")"
   return 1
