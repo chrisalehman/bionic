@@ -412,6 +412,22 @@ expect_false "5.12 a dead session's stop-orders state is swept" \
 expect_true "5.13 …and a live session's stop-orders state is kept" \
   test -f "$(f_of "$R5D" stop-orders "$SID_LIVE")"
 
+# THE tick-digest CLASS (wave-24 T7, A-orch-9; D4). The tick carries its digest, its duty and
+# the armed prompt version in `tick-digest-<sid>.state`, and a dead session's copy is residue
+# like every other class. Named off the `patrol-` prefix on purpose: `patrol-*.state` is the
+# stamp glob, and a `patrol-digest-<sid>` file would read there as a stamp of a session named
+# `digest-<sid>`.
+R5E="$(make_repo r5e)"
+live_home 5e "$SID_LIVE"; H5E="$CLAUDE_HOME"
+plant_session "$R5E" "$SID_LIVE" tick-digest
+plant_session "$R5E" "$SID_DEAD" tick-digest
+poke "$R5E" "$H5E" "$SID_SELF" sweep
+expect_eq "5.14 a sweep over a tick-digest-only session completes (exit 0)" "0" "$RC"
+expect_false "5.15 a dead session's tick digest is swept" \
+  test -e "$(f_of "$R5E" tick-digest "$SID_DEAD")"
+expect_true "5.16 …and a live session's tick digest is kept" \
+  test -f "$(f_of "$R5E" tick-digest "$SID_LIVE")"
+
 # =============================================================================
 section "6. the surface: one verb, one flag, no operand, no engagement gate"
 # =============================================================================
