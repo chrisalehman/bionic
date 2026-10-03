@@ -716,7 +716,7 @@ case "$REG_SHA_STATE" in
     else
       PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REG")"
     fi ;;
-  not-in-repo) PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REG")" ;;
+  not-in-repo|registry-only) PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REG")" ;;
   *)           PAYLOAD_SHA="unknown" ;;
 esac
 [ -n "$PAYLOAD_SHA" ] || PAYLOAD_SHA="unknown"
@@ -2142,8 +2142,8 @@ echo "Bionic Doctor — payload ${PLUGIN_VERSION} @ ${PAYLOAD_SHA}"
 # to a real path on this disk; comparing its realpath against `DOCTOR_REPO_ROOT`
 # (also resolved to a realpath, so a relative registration or a symlinked checkout
 # reads the same as an absolute one) answers "this checkout" or "OTHER checkout" —
-# a git-feed registration names no filesystem path at all and prints as-is,
-# never matching either verdict.
+# a GitHub-feed registration names no filesystem path at all, so it prints its repo
+# slug as-is with the bracket `[github feed]`, never matching either checkout verdict.
 #
 # THE BRACKET VERDICT MUST SURVIVE TRUNCATION, NOT THE PATH — the opposite of
 # every other row on this page. A long path is merely informational; the verdict
@@ -2166,6 +2166,8 @@ if [ "$MP_SOURCE_STATE" -eq 0 ] && [ -n "$MP_SOURCE_PATH" ]; then
   _doctor_checkout_verdict="$(detect_checkout_verdict "$DOCTOR_REPO_ROOT")"
   if [ "$_doctor_checkout_verdict" = "this checkout" ]; then
     printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" " [this checkout]")")"
+  elif [ "$_doctor_checkout_verdict" = "github feed" ]; then
+    printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" " [github feed]")")"
   else
     printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" \
       " [${_doctor_checkout_verdict} — the CLI loads the plugin from THERE]")")"
