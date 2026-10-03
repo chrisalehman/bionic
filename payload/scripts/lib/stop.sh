@@ -1732,7 +1732,12 @@ TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 # down where the run has got to, and a turn that ends without it leaves the ledger behind the
 # work. `both` and `listagents` go with the limb; `tasklist` is now the only verdict that
 # refuses.
-VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TICK_MARK" '
+#
+# AND ONLY WHEN THE TICK SAID SOMETHING (wave-24 T8; D5, AC-4.13). A tick that printed
+# `unchanged`, or decided QUIET with no open row, left nothing for the ledger to catch up on,
+# and a refusal there asked the model for a chore with nothing behind it. The tick writes that
+# fact as `duty=none` beside its digest, and `stop_turn_facts` hands it here as `_ST_TICK_DUTY`.
+VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TICK_MARK" -v duty="$_ST_TICK_DUTY" '
   $1 == "USER" {
     t = $2; sub(/^[ \t]+/, "", t)
     tick = (index(t, mark) == 1)
@@ -1748,7 +1753,7 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
   }
   END {
     if (!tick) { print "quiet"; exit }
-    if (tl) { print "quiet"; exit }
+    if (tl || duty == "none") { print "quiet"; exit }
     print "tasklist"
   }
 ')
@@ -1787,6 +1792,11 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 # dependency landing this minute, a merge in flight), and every one of them is worth one line
 # in the record; the fill ledger keeps it with its idle cost. What is refused is SILENCE.
 #
+# AND IT STANDS UNTIL A FACT MOVES (wave-24 T8; D2, AC-4.7). A decline answers the ready set it
+# was written against, on later turns too, while `current:` is unchanged. So the count judged is
+# `_ST_GAP`, the rows neither launched nor answered by the standing decline, and the refusal
+# names only those. The predicate is "a row is unanswered", never "a decline exists".
+#
 # THE BUDGET IS A MEASUREMENT THE PLAN CARRIES (wave-19 REQ-3, D5; ADR-035). Step 0 writes
 # `parallel-budget: writers=N …` and the governing-skill hook refuses a plan Write without it,
 # so a live ledger reaching this wall without a readable `writers=` is a plan that slipped past
@@ -1797,7 +1807,7 @@ FILL_SRC=""
 FILL_MISSING=""
 if [ "$_ST_NO_BUDGET" = 1 ]; then
   FILL_SRC="BUDGET"
-elif [ "${_ST_MISSED:-0}" -gt 0 ] 2>/dev/null && [ "$_ST_STATE" = ok ] && [ -z "$_ST_DECLINED" ]; then
+elif [ "${_ST_GAP:-0}" -gt 0 ] 2>/dev/null && [ "$_ST_STATE" = ok ] && [ -z "$_ST_DECLINED" ]; then
   FILL_SRC="GAP"
   FILL_MISSING="$_ST_NAMED"
 fi
@@ -1811,6 +1821,7 @@ elif [ "$FILL_SRC" = "GAP" ]; then
   # the state — the ledger is live, these rows are ready, slots are free after this turn's
   # launches — whether or not a tick fired in it.
   FILL_REASON="Fillable gap at turn end: the run's ledger is live, ${_ST_FREE} slot(s) are free after this turn's launches, and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row and ledger it active in ## Tasks (the wall reads the plan and the roster, never the Agent call's words), or write \"fill-declined: <reason>\" at the start of a line of your own reply, then stop again — this gate blocks once."
+  [ -n "$_ST_STANDING" ] && FILL_REASON="${FILL_REASON} The fill-declined from an earlier turn still stands for the rows it answered; these were not among them."
   # THE HEADLINE COUNTS AND NAMES (wave-20 T11b; Step-6 review R4). "dispatched none" was false
   # beside a ledger line that named the turn's launches. It now says how many of the plan's
   # ready rows the turn launched and names the ones it did not — never a row it launched. The
@@ -1902,6 +1913,11 @@ fi
 #     computed set leaves out an acked row, so it is never asked about;
 #   - a `standdown-declined: <name> <reason>` line at the start of a line of the model's own
 #     reply — the fill-declined rule (AC-5.4): never thinking, a tool input or a tool result.
+#     The reason is required (wave-24 T8, AC-4.10): a name alone is not an answer;
+#   - a HOLD written since this turn's tick (wave-24 T8; D1, AC-4.12): `session-poker.sh hold
+#     <name> <reason>` appends the row with `held=<iso> …`, and `stop_standdown_set` leaves out
+#     a row held at or after the bound. Read off the roster, never the command's words. The
+#     refusal names `hold` because it is the answer that lasts past this turn.
 # The decline is not a loophole, it is the point: an agent still writing its record is a good
 # reason not to stop it, and that reason is worth one line in the record. What is refused is
 # SILENCE.
@@ -1961,7 +1977,7 @@ if [ -n "$_SD_SET" ]; then
 fi
 
 if [ -n "$STANDDOWN_MISSING" ]; then
-  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped nor declined them. TaskStop each, or write a line \"standdown-declined: <name> <reason>\", then stop again — this gate blocks once."
+  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped, held nor declined them. TaskStop each. To keep an idle agent up, run: bash ${HOOK_DIR}/session-poker.sh hold <name> <reason> — the tick then stops ordering it while nothing about it changes. Or write a line \"standdown-declined: <name> <reason>\" for this turn alone. Then stop again — this gate blocks once."
 else
   STANDDOWN_REASON=""
 fi
@@ -2065,10 +2081,16 @@ return 2
 #   _ST_READY_N     how many ids _ST_READY holds
 #   _ST_SENT        how many of them this turn launched (`fill_row_launched`, by dispatch name)
 #   _ST_MISSED      min(free, |ready not launched this turn|) — after this turn's launches, since
-#                   the roster holds them
-#   _ST_NAMED       the first _ST_MISSED ready ids this turn did NOT launch, the ones a refusal
-#                   names
+#                   the roster holds them. The ledger records it raw
+#   _ST_STANDING    the reason of this session's latest fill decline while it stands — written
+#                   in an earlier turn, its `current=` still the plan's — else empty
+#   _ST_STANDING_IDS  the ids that decline answered: its line's ready set less its launches
+#   _ST_GAP         min(free, |ready not launched and not answered by the standing decline|) —
+#                   what the wall refuses on; _ST_MISSED when nothing stands
+#   _ST_NAMED       the first _ST_GAP of those ids, the ones a refusal names
 #   _ST_NO_BUDGET   1 when a live ledger has no readable writers= and a row is ready
+#   _ST_TICK_DUTY   on a tick turn, `none` when the tick's digest file says `duty=none`, else
+#                   `owed` — the task-list duty's one input from the tick (wave-24 T8, D5)
 # Return 0 when the turn could be read at all (a Stop, an engaged session, a transcript), 1
 # otherwise — and the caller then has nothing to judge and nothing to record.
 #
@@ -2099,13 +2121,16 @@ return 2
 #   DECLINE <reason>                 `fill-declined: <reason>` at a LINE START of a main-thread
 #                                    assistant TEXT block — never thinking, never a tool_use
 #                                    input, never a tool result (AC-5.4: prose quoting, a file
-#                                    read and a grep plant nothing)
+#                                    read and a grep plant nothing). A reason with no letter or
+#                                    digit in it is no reason (wave-24 T8, D2)
 #   MARK clear|resume                the ritual arm, scoped as before (review F2): a marker is
 #                                    read only off rows the orchestrator authored, never a tool
 #                                    result
-#   SD-DECLINE <name>                `standdown-declined: <name>` at a LINE START of a main-thread
-#                                    assistant TEXT block — the DECLINE rule, for the stand-down
-#                                    (wave-20 T19). The tick's printed `poker: STANDDOWN` line is
+#   SD-DECLINE <name>                `standdown-declined: <name> <reason>` at a LINE START of a
+#                                    main-thread assistant TEXT block — the DECLINE rule, for the
+#                                    stand-down (wave-20 T19). The name alone is not an answer:
+#                                    the reason must carry a letter or digit (wave-24 T8, D2,
+#                                    AC-4.10). The tick's printed `poker: STANDDOWN` line is
 #                                    no longer a record at all: the set is computed from disk
 #                                    (`stop_standdown_set`), never read out of the transcript
 # Newlines and tabs are squashed inside values because the stream is line-and-tab delimited.
@@ -2124,7 +2149,9 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_LAUNCHED=""; _ST_DECLINED=""; _ST_CURRENT=""; _ST_STATE=""; _ST_CEILING=""
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
   _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
+  _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed
   local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
+  local digest duty led standing st_cur st_ready st_launched gap
 
   [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
   [ "${BIONIC_ENGAGED:-0}" = 1 ] || return 1
@@ -2160,7 +2187,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
       ( if ($main and $r.type == "assistant" and (($r.message.content // []) | type) == "array") then
           ([$r.message.content[]? | select(.type == "text") | .text] | join("\n"))
           | [scan("(?:^|\n)fill-declined:[ \t]*([^\n]*)")] | .[]
-          | select(.[0] | test("[^ \t\r]"))
+          | select(.[0] | test("[[:alnum:]]"))
           | "DECLINE\t" + (.[0] | gsub("[\t\r]"; " "))
         else empty end ),
       ( if ($main and $r.type == "user" and (($r.message.content // []) | type) == "array") then
@@ -2170,7 +2197,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
         else empty end ),
       ( if ($main and $r.type == "assistant" and (($r.message.content // []) | type) == "array") then
           ([$r.message.content[]? | select(.type == "text") | .text] | join("\n"))
-          | [scan("(?:^|\n)standdown-declined:[ \t]*([A-Za-z0-9_.-]+)")] | .[]
+          | [scan("(?:^|\n)standdown-declined:[ \t]*([A-Za-z0-9_.-]+)[^A-Za-z0-9_.\n-][^\n]*[[:alnum:]]")] | .[]
           | "SD-DECLINE\t" + .[0]
         else empty end ),
       (
@@ -2232,6 +2259,20 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   IFS=$'\037' read -r _ST_TICK _ST_TURN _ST_MARK_TS _ST_LAUNCHED _ST_DECLINED <<< "$fold"
   case "$_ST_TICK" in 1) : ;; *) _ST_TICK=0 ;; esac
 
+  # THE TICK'S DUTY LINE (wave-24 T8; D5, AC-4.13). The tick writes `duty=none` beside its
+  # digest when it printed `unchanged`, or decided QUIET with no open row
+  # (hooks/session-poker.sh `tick_conclude`). Only that line excuses a tick turn from the
+  # task-list refresh. No file, a symlink, or any other value leaves the duty owed, which is
+  # what every tick turn owed before the tick could say it was quiet. The path is the
+  # tick's `tick_digest_file`: beside its stamp, which NOTICK below reads at the same root.
+  if [ "$_ST_TICK" = 1 ]; then
+    digest="$BIONIC_ROOT/.bionic/tmp/tick-digest-${BIONIC_SID}.state"
+    if [ -f "$digest" ] && [ ! -L "$digest" ]; then
+      duty="$(sed -n 's/^duty=//p' "$digest" 2>/dev/null | head -1)"
+      [ "$duty" = none ] && _ST_TICK_DUTY=none
+    fi
+  fi
+
   # THE FILL'S NUMBERS — only on a live ledger (past Step 3), exactly as before: a run at
   # Steps 0-3, a run with no plan, or a `current:` that will not parse stops here without
   # touching the table, and records no ledger line.
@@ -2287,8 +2328,41 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # ready as well charged one launch twice, and the refusal named the rows the turn had just
   # sent. So the ledger's ready set stays the plan's, and what the turn missed is that set less
   # the rows this turn launched, matched by the dispatch name `fill_name` hands out.
+  #
+  # A DECLINE STANDS AGAINST THE READY SET IT ANSWERED (wave-24 T8; D2, AC-4.7). A reason that
+  # still holds next turn ("T7 waits on T6's merge") used to have to be written again on every
+  # turn end. The ledger already keeps each Stop's ready set, `current=` and decline, so the
+  # session's latest declined line is the standing answer: the ids it answered are its ready
+  # set less the rows that turn launched, and it stands while `current:` reads as it did then.
+  # A row it never saw, or a moved `current:`, is unanswered. It is read from the ledger's last
+  # SCAN_WINDOW_LINES lines; a decline older than that stands for nothing, which refuses more.
+  # Another session's line is not this conversation's answer.
+  led="$(fill_ledger_path "$BIONIC_ROOT" "$_ST_PLAN" 2>/dev/null)" || led=""
+  if [ -n "$led" ] && [ -f "$led" ] && [ ! -L "$led" ]; then
+    standing="$(tail -n "$SCAN_WINDOW_LINES" "$led" 2>/dev/null | awk -v sid="$BIONIC_SID" '
+      function kv(line, key,   i, n, parts) {
+        n = split(line, parts, "|")
+        for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+        return ""
+      }
+      index($0, "fill-ledger/v1|") == 1 && kv($0, "session") == sid && kv($0, "declined") ~ /[^ \t]/ {
+        last = kv($0, "current") "\037" kv($0, "ready") "\037" kv($0, "launched") "\037" kv($0, "declined")
+      }
+      END { if (last != "") print last }')"
+    if [ -n "$standing" ]; then
+      IFS=$'\037' read -r st_cur st_ready st_launched _ST_STANDING <<< "$standing"
+      if [ "$st_cur" = "$_ST_CURRENT" ]; then
+        for rest in ${st_ready//,/ }; do
+          fill_row_launched "$rest" "$st_launched" && continue
+          _ST_STANDING_IDS="${_ST_STANDING_IDS}${_ST_STANDING_IDS:+ }${rest}"
+        done
+      fi
+      [ -n "$_ST_STANDING_IDS" ] || _ST_STANDING=""
+    fi
+  fi
+
   ready="$(fill_ready_set "$_ST_PLAN" 99999 0 2>/dev/null)"
-  count=0; _ST_READY=""; _ST_NAMED=""
+  count=0; gap=0; _ST_READY=""; _ST_NAMED=""
   while IFS= read -r rest; do
     [ -n "$rest" ] || continue
     _ST_READY_N=$((_ST_READY_N + 1))
@@ -2298,11 +2372,14 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
       continue
     fi
     count=$((count + 1))
-    [ "$count" -le "$_ST_FREE" ] && _ST_NAMED="${_ST_NAMED}${_ST_NAMED:+ }${rest}"
+    case " $_ST_STANDING_IDS " in *" $rest "*) continue ;; esac
+    gap=$((gap + 1))
+    [ "$gap" -le "$_ST_FREE" ] && _ST_NAMED="${_ST_NAMED}${_ST_NAMED:+ }${rest}"
   done <<ST_READY
 $ready
 ST_READY
   _ST_MISSED=$(( count < _ST_FREE ? count : _ST_FREE ))
+  _ST_GAP=$(( gap < _ST_FREE ? gap : _ST_FREE ))
   return 0
 }
 
@@ -2333,7 +2410,16 @@ stop_fill_ledger() {  # <event> -> always 0
   mkdir -p "$d" 2>/dev/null || return 0
   ready="${_ST_READY// /,}"
   launched="$_ST_LAUNCHED"
-  declined="$(printf '%s' "$_ST_DECLINED" | tr '|\n\r\t' '    ')"
+  # A TURN THE STANDING DECLINE ANSWERED IS RECORDED AS DECLINED, with that reason (wave-24 T8,
+  # D2): the report then charges its idle time to the decline, as it would have charged the
+  # same line written again. Only a turn it answered WHOLE carries it — a turn with a row the
+  # decline never saw is refused, and its line must not widen the standing set to that row.
+  declined="$_ST_DECLINED"
+  if [ -z "$declined" ] && [ -n "$_ST_STANDING" ] && [ "$_ST_STATE" = ok ] \
+     && [ "${_ST_MISSED:-0}" -gt 0 ] 2>/dev/null && [ "${_ST_GAP:-0}" = 0 ]; then
+    declined="$_ST_STANDING"
+  fi
+  declined="$(printf '%s' "$declined" | tr '|\n\r\t' '    ')"
   declined="${declined:0:200}"
   # ONE STRING, BUILT BY EXPANSION, then one write. Every value is either a number this
   # function computed or has had its `|` squashed above, so no field can forge another.
@@ -2364,7 +2450,7 @@ stop_fill_ledger() {  # <event> -> always 0
 # verdict the sweeper refused: nothing is named. A wall that cannot read what the tick wrote
 # does not invent a duty from it.
 stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
-  local lb="${1:-}" orders targets vout
+  local lb="${1:-}" orders targets vout roster held t
   [ -n "$lb" ] || return 0
   orders="$BIONIC_ROOT/.bionic/tmp/stop-orders-${BIONIC_SID}.state"
   [ -f "$orders" ] && [ ! -L "$orders" ] && [ -r "$orders" ] || return 0
@@ -2382,6 +2468,28 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
       if (!(t in seen)) { seen[t] = 1; printf "%s ", t }
     }' "$orders" 2>/dev/null)"
   [ -n "$targets" ] || return 0
+  # A HOLD WRITTEN SINCE THE BOUND ANSWERS ITS NAME (wave-24 T8; D1, AC-4.12). `hold` appends
+  # the name's row with `held=<iso> <reason> fp=…`, and the latest row of a name is its row. A
+  # hold older than the bound was in place when this turn's tick ordered the name anyway, so
+  # something about the agent has changed since and the order stands.
+  roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  if [ -f "$roster" ] && [ ! -L "$roster" ] && [ -r "$roster" ]; then
+    held="$(awk -v lb="${lb:0:19}" '
+      function kv(line, key,   i, n, parts) {
+        n = split(line, parts, "|")
+        for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+        return ""
+      }
+      index($0, "roster-state/") == 1 { nm = kv($0, "name"); if (nm != "") h[nm] = kv($0, "held") }
+      END { for (nm in h) { at = substr(h[nm], 1, 19); if (at != "" && at >= lb) printf " %s", nm } }' "$roster" 2>/dev/null)"
+    vout=""
+    for t in $targets; do
+      case "$held " in *" $t "*) continue ;; esac
+      vout="${vout}${t} "
+    done
+    targets="$vout"
+    [ -n "$targets" ] || return 0
+  fi
   [ -f "${_STOP_HOOK_DIR_ABS}/session-sweeper.sh" ] || return 0
   # Run from the root with the session key, exactly as the landing sweep above asks it;
   # `|| exit 9` keeps a failed `cd` out of the verb's exit-1 band.
