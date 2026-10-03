@@ -951,4 +951,66 @@ expect_contains "planted: a sandbox x.tmpl -> skills/x.md pair is followed (AC-1
 expect_eq "planted: …while the base fixture (no render.sh) resolves nothing for the same shape" \
   "" "$(suites "$FX" agents-src/templates/x.md.tmpl)"
 
+# ── §NEST a root that holds nested worktrees and sandbox records ────────────
+# WHY (wave-24 T19, AC-5.5). At the main checkout, which holds ten nested
+# worktrees under `.worktrees/` and a `.bionic/docs/record` tree of sandbox
+# copies, one call ran past 190 s; inside a worktree with none it took 5 s. Two
+# walks were to blame, and only one of them was the one the first reading named:
+#   - the `.git` / `.worktrees` exclusions were `-not -path`, which filters the
+#     RESULTS and still descends; `-prune` does not descend at all.
+#   - the symlink walk never excluded `.bionic` at all, so every symlink in a
+#     sandbox record became a root alias, and each alias is another pass of the
+#     de-aliasing loop for every edge the derivation resolves. That one is the
+#     bulk of the minutes: `find` over all of `.worktrees` costs ~10 ms.
+# The fixture reproduces both at a scale where the unfixed program is slow
+# enough to measure and the fixed one is not: sixty suites (edges to resolve),
+# ten nested worktree copies, and 400 symlinks under `.bionic`.
+NEST_BUDGET_MS=10000
+
+# mk_nest_root <dir> <1|0> — sixty suites each pinning one hook and one library;
+# with <1>, ten nested worktree copies and 400 sandbox-record symlinks beside them.
+mk_nest_root() {
+  local r="$1" noise="$2" i k w
+  mkdir -p "$r/tests/lib" "$r/hooks" "$r/payload/scripts/lib"
+  ln -s ../hooks "$r/payload/hooks"
+  printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\n' >"$r/tests/lib/resolve-roots.sh"
+  : >"$r/tests/run.sh"
+  for i in $(seq 1 60); do
+    printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\ngrep -q x "${BIONIC_SCRIPTS_DIR}/hooks/h%s.sh"\ngrep -q x "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/l%s.sh"\n' \
+      "$i" "$i" >"$r/tests/s$i.test.sh"
+    printf '#!/bin/bash\necho h%s\n' "$i" >"$r/hooks/h$i.sh"
+    printf '#!/bin/bash\necho l%s\n' "$i" >"$r/payload/scripts/lib/l$i.sh"
+    printf 'run "s%s.test.sh" bash tests/s%s.test.sh\n' "$i" "$i" >>"$r/tests/run.sh"
+  done
+  [ "$noise" = 1 ] || return 0
+  mkdir -p "$r/.bionic/docs/record/x"
+  for k in $(seq 1 400); do ln -s ../../../../hooks "$r/.bionic/docs/record/x/lnk$k"; done
+  for w in 1 2 3 4 5 6 7 8 9 10; do
+    mkdir -p "$r/.worktrees/w$w"
+    cp -R "$r/tests" "$r/hooks" "$r/payload" "$r/.worktrees/w$w/"
+  done
+}
+
+NEST_QUIET="$TMP/nest-quiet"
+NEST_NOISY="$TMP/nest-noisy"
+mk_nest_root "$NEST_QUIET" 0
+mk_nest_root "$NEST_NOISY" 1
+
+NEST_QUIET_MS="$(timed_ms "$TMP/nest.quiet" env BIONIC_IMPACT_CACHE_DIR="" \
+  BIONIC_IMPACT_ROOT="$NEST_QUIET" bash "$IMPACT" hooks/h7.sh payload/scripts/lib/l9.sh)"
+NEST_NOISY_MS="$(timed_ms "$TMP/nest.noisy" env BIONIC_IMPACT_CACHE_DIR="" \
+  BIONIC_IMPACT_ROOT="$NEST_NOISY" bash "$IMPACT" hooks/h7.sh payload/scripts/lib/l9.sh)"
+
+# NOT VACUOUS: an empty answer would be "identical" to an empty answer, and a
+# failed timing instrument reads as the slowest possible time below.
+expect_nonempty "nest: the quiet root answers at all" "$(cat "$TMP/nest.quiet")"
+expect_contains "nest: …and names the suite that pins hooks/h7.sh" "s7.test.sh" "$(cat "$TMP/nest.quiet")"
+expect_eq "nest: nested worktrees and sandbox-record symlinks change no line of the answer"   "$(cat "$TMP/nest.quiet")" "$(cat "$TMP/nest.noisy")"
+if [ "${NEST_NOISY_MS:-999999}" -lt "$NEST_BUDGET_MS" ]; then
+  ok "nest: a root with ten nested worktrees answers in < ${NEST_BUDGET_MS} ms (${NEST_NOISY_MS} ms; quiet ${NEST_QUIET_MS} ms)"
+else
+  no "nest: a root with ten nested worktrees answers in < ${NEST_BUDGET_MS} ms" \
+     "${NEST_NOISY_MS:-no timing} ms (quiet root ${NEST_QUIET_MS:-no timing} ms) — the walks still pay for what they exclude"
+fi
+
 finish
