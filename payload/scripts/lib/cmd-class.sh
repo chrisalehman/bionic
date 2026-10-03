@@ -98,6 +98,11 @@
 #                                The `run_in_background` TOOL FLAG is a different fact,
 #                                read by the caller (lib/walls.sh ARM 1) and OR'd with
 #                                this one — a command can background itself either way.
+#   cmd_write_targets  <cmd> [<cwd>]
+#                             -> every path the command WRITES, resolved, one per line: redirect
+#                                targets and the files of tee, sed -i, touch, mkdir, ln, and
+#                                the cp/mv destination (wave-24 T12, D16). The memory wall's
+#                                collector, hooks/bash-walls.sh, reads it.
 #
 # [WALL: tests/cmd-class.test.sh]
 
@@ -201,7 +206,7 @@ CMD_RUN_NORM_AWK='
 
 # The awk program. `mode=heredoc` stops after step 1; `mode=lines` runs the whole reading.
 _cmd_class_awk() {  # <mode> ; command on stdin
-  awk -v mode="$1" "$CMD_RUN_NORM_AWK"'
+  awk -v mode="$1" "$CMD_RUN_NORM_AWK$_CMD_WRITES_AWK"'
     function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     function base(p) { sub(/.*\//, "", p); return p }
     # ONE RUN, ONE SPELLING (REQ-1 AC-1.5). The same collapse
@@ -918,6 +923,13 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         printf "%s", (bg ? "1" : "0")
         exit
       }
+      # mode=writes: cmd_write_targets (wave-24 T12, D16) — the paths the command writes,
+      # one per line, read by the functions in _CMD_WRITES_AWK above.
+      if (mode == "writes") {
+        WT_BASE = ENVIRON["_CMD_WT_CWD"]; split("", WT_SEEN)
+        wt_run(out, "", 0)
+        exit
+      }
       k = segments(out, seg)
       compound_pass(k, seg)
       expand_all(k, seg, out)
@@ -1026,6 +1038,243 @@ cmd_runs_norm() {  # <re_executes field, decoded> -> the same field, each marked
       }
       printf "%s", out
     }'
+}
+
+# ---------- WHAT A COMMAND WRITES (wave-24 T12; REQ-3, D16) ----------
+#
+# WHY A READING AND NOT A MATCH. The memory wall (payload/scripts/lib/walls.sh
+# `wall_memory_store`) must refuse a write into the auto-memory store and admit every READ of
+# it — and the run's own audit reads it with a redirect: `{ find <store> -newer m; } >
+# record/x.txt` names the store and writes, but writes elsewhere. The incident it exists for
+# named the store only in a `cd` and wrote bare basenames after it. So the answer is the
+# PATHS a command writes, resolved, read with this file's own segmentation, heredoc removal,
+# unwrapping and literal expansion.
+#
+# WHAT COUNTS AS A WRITE: the target of every redirect that opens a file for writing (`>`,
+# `>>`, `>|`, `&>`, `&>>`, `<>`, `>&word`, a numbered stream); and the file arguments of
+# `tee`, `sed -i`/`--in-place`, `touch`, `mkdir`, `ln` (the link), and the destination of `cp`
+# and `mv` (the last operand, or `-t`/`--target-directory`). `rm` is not a write: removing a
+# file stores nothing. A duplication (`2>&1`, `>&-`) names no file.
+#
+# RESOLUTION. `~`, `$HOME`, `${HOME}`, `$BIONIC_CLAUDE_HOME` and `$CLAUDE_CONFIG_DIR` (bare or
+# braced) at the front of a word expand from the environment; one that is unset stays literal.
+# A relative target joins the directory the last `cd`/`pushd` in its own subshell group named
+# (`cd` alone is `~`; `cd -` and `popd` are a directory the text cannot name), and failing
+# that the payload cwd the caller passes. `.` and `..` fold lexically, as
+# hooks/canonical-sdlc-governing-skill.sh `fold_dots` folds them.
+#
+# DECLARED LIMITS. A target reached through a glob, a variable the text does not pin, `$'…'`,
+# an interpreter (`python3 -c`, a heredoc fed to one) or a symlink is not seen; neither are
+# `dd of=`, `install` or `perl -i`. Over-inclusion is the safe side of every guess here: a
+# BSD `sed -i <suffix>` reads its suffix as the script and the script as a file.
+#
+# NO APOSTROPHE MAY APPEAR IN THIS TEXT, for the reason CMD_RUN_NORM_AWK gives.
+_CMD_WRITES_AWK='
+    # Words of one segment, dequoted, beside a kind: W a word, R a write redirect (the next
+    # word is its file), I an input redirect (the next word is consumed), D a duplication.
+    function wt_tok(s, W, K,   L, i, c, q, cur, n, st, nx, j, w) {
+      L = length(s); q = ""; cur = ""; n = 0; st = 0
+      for (i = 1; i <= L; i++) {
+        c = substr(s, i, 1)
+        if (q != "") {
+          if (c == q) q = ""
+          else if (c == "\\" && q == "\"" && i < L) { i++; cur = cur substr(s, i, 1) }
+          else cur = cur c
+          continue
+        }
+        if (c == "\047" || c == "\"") { q = c; st = 1; continue }
+        if (c == "\\") { i++; cur = cur substr(s, i, 1); continue }
+        if (c == " " || c == "\t" || c == "\r" || c == "\n") {
+          if (cur != "" || st) { W[++n] = cur; K[n] = "W" }
+          cur = ""; st = 0; continue
+        }
+        if (c == ">" || (c == "&" && substr(s, i + 1, 1) == ">") || c == "<") {
+          if (c != "&" && cur ~ /^[0-9]+$/ && !st) cur = ""
+          if (cur != "" || st) { W[++n] = cur; K[n] = "W" }
+          cur = ""; st = 0
+          nx = substr(s, i + 1, 1)
+          if (c == "<") {
+            if (nx == ">") { W[++n] = "<>"; K[n] = "R"; i++; continue }
+            if (nx == "&") { i++; while (substr(s, i + 1, 1) ~ /[0-9-]/) i++; W[++n] = "<&"; K[n] = "D"; continue }
+            if (nx == "<") { i++; if (substr(s, i + 1, 1) == "<" || substr(s, i + 1, 1) == "-") i++ }
+            W[++n] = "<"; K[n] = "I"; continue
+          }
+          if (c == "&") i++
+          nx = substr(s, i + 1, 1)
+          if (nx == ">" || nx == "|") { i++; nx = substr(s, i + 1, 1) }
+          if (nx == "(") { W[++n] = ">("; K[n] = "I"; continue }
+          if (nx == "&" && c != "&") {
+            j = i + 2; w = ""
+            while (j <= L && substr(s, j, 1) ~ /[0-9]/) { w = w substr(s, j, 1); j++ }
+            if (w == "" && substr(s, j, 1) == "-") { w = "-"; j++ }
+            if (w != "") { i = j - 1; W[++n] = ">&"; K[n] = "D"; continue }
+            i++
+          }
+          W[++n] = ">"; K[n] = "R"; continue
+        }
+        cur = cur c
+      }
+      if (cur != "" || st) { W[++n] = cur; K[n] = "W" }
+      return n
+    }
+    # The front of a word expanded the way the shell would expand it, from the environment.
+    function wt_expand(w,   h, x, V, v, lv) {
+      h = ENVIRON["HOME"]
+      if (h != "" && (w == "~" || substr(w, 1, 2) == "~/")) return h substr(w, 2)
+      split("HOME BIONIC_CLAUDE_HOME CLAUDE_CONFIG_DIR", WT_VARS, " ")
+      for (x = 1; x <= 3; x++) {
+        V = WT_VARS[x]; v = ENVIRON[V]; lv = length(V)
+        if (v == "") continue
+        if (w == "$" V || substr(w, 1, lv + 2) == "$" V "/") return v substr(w, lv + 2)
+        if (w == "${" V "}" || substr(w, 1, lv + 4) == "${" V "}/") return v substr(w, lv + 4)
+      }
+      return w
+    }
+    function wt_norm(p,   abs, n, P, i, m, O, out) {
+      abs = (substr(p, 1, 1) == "/"); n = split(p, P, "/"); m = 0
+      for (i = 1; i <= n; i++) {
+        if (P[i] == "" || P[i] == ".") continue
+        if (P[i] == ".." && m > 0 && O[m] != "..") { m--; continue }
+        if (P[i] == ".." && abs) continue
+        O[++m] = P[i]
+      }
+      out = ""
+      for (i = 1; i <= m; i++) out = out (i > 1 ? "/" : "") O[i]
+      return (abs ? "/" out : (out == "" ? "." : out))
+    }
+    # A word is rooted when the shell would not join it to the cwd, or when its front is a
+    # variable nothing here could expand.
+    function wt_rooted(p,   c) { c = substr(p, 1, 1); return (c == "/" || c == "~" || c == "$") }
+    function wt_emit(w, cwd,   p, c) {
+      if (w == "") return
+      p = wt_expand(w)
+      if (!wt_rooted(p)) {
+        c = wt_expand(cwd)
+        if (c != "") p = c "/" p
+        if (!wt_rooted(p) && WT_BASE != "") p = WT_BASE "/" p
+      }
+      if (substr(p, 1, 1) == "/") p = wt_norm(p)
+      else if (substr(p, 1, 1) != "$" && substr(p, 1, 1) != "~") p = wt_norm(p)
+      if (!(p in WT_SEEN)) { WT_SEEN[p] = 1; print p }
+    }
+    # The directory a cd segment moves to, or cwd unchanged for any other segment.
+    function wt_cd(A, m, cwd,   j, d) {
+      if (m == 0 || (A[1] != "cd" && A[1] != "pushd" && A[1] != "popd")) return cwd
+      if (A[1] == "popd") return ""
+      for (j = 2; j <= m && A[j] ~ /^-[LPe@]+$/; j++) ;
+      if (j <= m && A[j] == "--") j++
+      d = (j <= m ? A[j] : "~")
+      if (d == "-") return ""
+      if (wt_rooted(d) || cwd == "") return d
+      return cwd "/" d
+    }
+    function wt_argv(A, m, cwd,   b, j, w, opt, inp, hasE, np, P, tdir) {
+      b = base(A[1]); opt = 1; np = 0
+      if (b == "tee" || b == "touch" || b == "mkdir") {
+        for (j = 2; j <= m; j++) {
+          w = A[j]
+          if (opt && w == "--") { opt = 0; continue }
+          if (opt && w ~ /^-./) {
+            if ((b == "touch" && (w == "-d" || w == "-t" || w == "-r" || w == "-A" || w == "--date" || w == "--reference")) \
+                || (b == "mkdir" && (w == "-m" || w == "--mode")))
+              j++
+            continue
+          }
+          wt_emit(w, cwd)
+        }
+        return
+      }
+      if (b == "sed") {
+        inp = 0; hasE = 0
+        for (j = 2; j <= m; j++) {
+          w = A[j]
+          if (opt && w == "--") { opt = 0; continue }
+          if (opt && (w == "-e" || w == "-f" || w == "--expression" || w == "--file")) { j++; hasE = 1; continue }
+          if (opt && w ~ /^--in-place/) { inp = 1; continue }
+          if (opt && w ~ /^--(expression|file)=/) { hasE = 1; continue }
+          if (opt && w == "-i") { inp = 1; if (j < m && A[j + 1] == "") j++; continue }
+          if (opt && w ~ /^-[nrsuzE]*i/) { inp = 1; continue }
+          if (opt && w ~ /^-[ef]/) { hasE = 1; continue }
+          if (opt && w ~ /^-./) continue
+          P[++np] = w
+        }
+        if (!inp) return
+        for (j = (hasE ? 1 : 2); j <= np; j++) wt_emit(P[j], cwd)
+        return
+      }
+      if (b == "cp" || b == "mv" || b == "ln") {
+        tdir = ""
+        for (j = 2; j <= m; j++) {
+          w = A[j]
+          if (opt && w == "--") { opt = 0; continue }
+          if (opt && (w == "-t" || w == "--target-directory")) { j++; if (j <= m) tdir = A[j]; continue }
+          if (opt && w ~ /^--target-directory=/) { tdir = substr(w, 20); continue }
+          if (opt && w ~ /^-t./) { tdir = substr(w, 3); continue }
+          if (opt && (w == "-S" || w == "--suffix")) { j++; continue }
+          if (opt && w ~ /^-./) continue
+          P[++np] = w
+        }
+        if (tdir != "") wt_emit(tdir, cwd)
+        else if (np >= 2) wt_emit(P[np], cwd)
+        else if (np == 1 && b == "ln") wt_emit(base(P[1]), cwd)
+      }
+    }
+    # One segment: its redirect targets read off the whole text, then its argv after the
+    # leading strip, or the command an `sh -c`/`eval` layer runs.
+    function wt_seg(t, cwd, depth,   W, K, n, j, u0, u, A, m) {
+      n = wt_tok(t, W, K)
+      for (j = 1; j < n; j++) if (K[j] == "R" && K[j + 1] == "W") wt_emit(W[j + 1], cwd)
+      u0 = strip_leading(t)
+      u = unwrap_runner(u0)
+      if (u != u0 && depth < 2) { wt_run(u, cwd, depth + 1); return cwd }
+      split("", W); split("", K)
+      n = wt_tok(u, W, K); m = 0
+      for (j = 1; j <= n; j++) {
+        if (K[j] == "R" || K[j] == "I") { j++; continue }
+        if (K[j] == "W") A[++m] = W[j]
+      }
+      if (m > 0) wt_argv(A, m, cwd)
+      return wt_cd(A, m, cwd)
+    }
+    # The cwd of subshell group g at depth d: its own once a cd set it, else its parent s.
+    function wt_gcwd(d, g) {
+      if ((d, g) in WGS) return WGC[d, g]
+      WGS[d, g] = 1; WGC[d, g] = wt_gcwd(d, WGP[d, g])
+      return WGC[d, g]
+    }
+    # Every segment of s. The segmentation globals are copied first, because an `sh -c` layer
+    # re-enters segments() and overwrites them.
+    #
+    # `>|` IS ONE OPERATOR that segments() reads as `>` closed by a pipe. A segment ending in
+    # `>` that a `|` closed can only be that (`> |` does not parse), so it is read joined to
+    # the next one, whose first word is the file.
+    function wt_run(s, cwd, depth,   k, sg, i, j, x, g, ng, c) {
+      k = segments(s, sg); ng = GID_N
+      if (depth == 0) { compound_pass(k, sg); expand_all(k, sg, s) }
+      j = 0
+      for (i = 1; i <= k; i++) {
+        j++; WG[depth, j] = SEGGRP[i]
+        if (i < k && SEPKIND[i] == "|" && substr(sg[i], length(sg[i]), 1) == ">") {
+          WNX[depth, j] = 1; WX[depth, j, 1] = sg[i] sg[i + 1]; i++; continue
+        }
+        WNX[depth, j] = (depth == 0 ? NX[i] : 1)
+        for (x = 1; x <= WNX[depth, j]; x++) WX[depth, j, x] = (depth == 0 ? XT[i, x] : sg[i])
+      }
+      k = j
+      for (g = 0; g <= ng; g++) { delete WGS[depth, g]; WGP[depth, g] = GPAR[g] }
+      WGS[depth, 0] = 1; WGC[depth, 0] = cwd
+      for (i = 1; i <= k; i++) {
+        g = WG[depth, i]; cwd = wt_gcwd(depth, g)
+        for (x = 1; x <= WNX[depth, i]; x++) c = wt_seg(trim(WX[depth, i, x]), cwd, depth)
+        WGC[depth, g] = c
+      }
+    }
+'
+
+cmd_write_targets() {  # <command> [<cwd>] -> one resolved write target per line (D16, REQ-3)
+  # The cwd rides the environment rather than `-v`, so `_cmd_class_awk` keeps its one
+  # parameter: `-v` would also turn every backslash in a path into an escape.
+  printf '%s' "${1-}" | _CMD_WT_CWD="${2-}" _cmd_class_awk writes
 }
 
 cmd_backgrounded() {  # <command> -> 0 when the TEXT backgrounds it, 1 otherwise (D8, REQ-6)

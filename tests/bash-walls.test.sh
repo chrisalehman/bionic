@@ -1863,4 +1863,105 @@ for _bw21 in "$BW21_NL" "'g'it push origin main" '"gi"t push origin main' '\g\i\
   expect_contains "21c: …refused in protect-main's own words" "main is a protected branch here" "$ERR"
 done
 
+# ---------------------------------------------------------------------------
+section "§MEM — an engaged session never writes the auto-memory store (REQ-3, D16; AC-3.2)"
+#
+# THE INCIDENT (wave-23 A-orch-30). An engaged orchestrator obeyed the harness's standing
+# memory directive in ONE Bash call: `cd <store> && cat >> <topic>.md <<'EOF' … EOF` then
+# `sed -i '' …` on MEMORY.md. The store's path appeared only in the `cd`. The wall is
+# `wall_memory_store` in payload/scripts/lib/walls.sh; this hook is its collector, handing it
+# the store root and the command's write targets (`cmd_write_targets`, cmd-class.sh).
+#
+# THE STORE ROOT IS `${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/projects/*/memory`.
+# run_hook pins HOME inside the sandbox; the two variables are emptied on every row that does
+# not set them, so the machine's own values cannot leak in.
+R_MEM="$(mk_repo memwall)"
+MEM_STORE="$FAKE_HOME/.claude/projects/-x/memory"
+mkdir -p "$MEM_STORE"
+MEM_NOENV=(BIONIC_CLAUDE_HOME= CLAUDE_CONFIG_DIR=)
+MEM_REPLAY="$(printf 'cd %s && cat >> decision-reframe.md <<%sEOF%s\n- refined: goal, options, recommendation\nEOF\nsed -i %s%s %ss|^- \\[Decision reframe|- [Decision reframe|%s MEMORY.md' \
+  "$MEM_STORE" "'" "'" "'" "'" "'" "'")"
+
+mem_refused() {  # <label> <cwd> <command> [env…]
+  local _l="$1" _d="$2" _c="$3"; shift 3
+  run_hook "$(mk_payload "$_d" "$_c")" "$@"
+  expect_status "§MEM $_l: refused" 2 "$ST"
+  expect_contains "§MEM $_l: …naming the run's own record" "record/<wave>/assumptions.md" "$ERR"
+  expect_contains "§MEM $_l: …and a rule proposal" "rule proposal" "$ERR"
+}
+
+mem_refused "replay of A-orch-30 (cd + heredoc append + sed -i)" "$R_MEM" "$MEM_REPLAY" "${MEM_NOENV[@]}"
+mem_refused "redirect under ~" "$R_MEM" 'echo x > ~/.claude/projects/-x/memory/a.md' "${MEM_NOENV[@]}"
+mem_refused "append under \$HOME" "$R_MEM" 'echo x >> $HOME/.claude/projects/-x/memory/a.md' "${MEM_NOENV[@]}"
+mem_refused "redirect under \"\${HOME}\"" "$R_MEM" 'printf x > "${HOME}/.claude/projects/-x/memory/a.md"' "${MEM_NOENV[@]}"
+mem_refused "tee" "$R_MEM" 'printf x | tee ~/.claude/projects/-x/memory/a.md' "${MEM_NOENV[@]}"
+mem_refused "sed -i" "$R_MEM" "sed -i '' 's/a/b/' ~/.claude/projects/-x/memory/MEMORY.md" "${MEM_NOENV[@]}"
+mem_refused "cp destination" "$R_MEM" 'cp /tmp/x ~/.claude/projects/-x/memory/' "${MEM_NOENV[@]}"
+mem_refused "mv destination" "$R_MEM" 'mv /tmp/x ~/.claude/projects/-x/memory/b.md' "${MEM_NOENV[@]}"
+mem_refused "touch" "$R_MEM" 'touch ~/.claude/projects/-x/memory/c.md' "${MEM_NOENV[@]}"
+mem_refused "mkdir of the store itself" "$R_MEM" 'mkdir -p ~/.claude/projects/-x/memory' "${MEM_NOENV[@]}"
+mem_refused "ln" "$R_MEM" 'ln -s /tmp/x ~/.claude/projects/-x/memory/d.md' "${MEM_NOENV[@]}"
+mem_refused "cd into the store, relative sed -i" "$R_MEM" \
+  "cd ~/.claude/projects/-x && cd memory && sed -i '' 's/a/b/' MEMORY.md" "${MEM_NOENV[@]}"
+mem_refused "a dot-dot spelling" "$R_MEM" 'touch ~/.claude/projects/-x/notes/../memory/e.md' "${MEM_NOENV[@]}"
+# THE ROOT MOVES WITH ITS VARIABLES, each spelled out in the command and as a literal path.
+MEM_BCH="$SANDBOX/bch"; MEM_CCD="$SANDBOX/ccd"
+mem_refused "BIONIC_CLAUDE_HOME, literal path" "$R_MEM" "touch $MEM_BCH/projects/-y/memory/a.md" \
+  BIONIC_CLAUDE_HOME="$MEM_BCH" CLAUDE_CONFIG_DIR=
+mem_refused "BIONIC_CLAUDE_HOME, spelled" "$R_MEM" 'echo x > "$BIONIC_CLAUDE_HOME/projects/-y/memory/a.md"' \
+  BIONIC_CLAUDE_HOME="$MEM_BCH" CLAUDE_CONFIG_DIR=
+mem_refused "CLAUDE_CONFIG_DIR, literal path" "$R_MEM" "touch $MEM_CCD/projects/-y/memory/a.md" \
+  BIONIC_CLAUDE_HOME= CLAUDE_CONFIG_DIR="$MEM_CCD"
+mem_refused "CLAUDE_CONFIG_DIR, spelled" "$R_MEM" 'echo x >> $CLAUDE_CONFIG_DIR/projects/-y/memory/a.md' \
+  BIONIC_CLAUDE_HOME= CLAUDE_CONFIG_DIR="$MEM_CCD"
+mem_refused "CLAUDE_CONFIG_DIR given as ~/…" "$R_MEM" 'touch ~/ccd/projects/-y/memory/a.md' \
+  BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=~/ccd'
+# THE STORE IS THE ROOT'S, NOT EVERY `memory` DIRECTORY: with BIONIC_CLAUDE_HOME set, the
+# default root is not the store — the precedence the collector resolves.
+run_hook "$(mk_payload "$R_MEM" "touch $MEM_BCH/projects/-y/memory/a.md")" BIONIC_CLAUDE_HOME="$MEM_BCH" CLAUDE_CONFIG_DIR=
+expect_status "§MEM precedence: BIONIC_CLAUDE_HOME's store is refused…" 2 "$ST"
+run_hook "$(mk_payload "$R_MEM" 'touch ~/.claude/projects/-x/memory/a.md')" BIONIC_CLAUDE_HOME="$MEM_BCH" CLAUDE_CONFIG_DIR=
+expect_status "§MEM precedence: …and ~/.claude's is not the store while BIONIC_CLAUDE_HOME names another" 0 "$ST"
+# A RELATIVE TARGET WITH NO cd RESOLVES AGAINST THE PAYLOAD'S cwd. The cwd is the engaged
+# repo, because engagement is the cwd's project's: a payload whose cwd IS the store resolves
+# no engaged root, and every wall in this process stands down for it (A-T12.6).
+mem_refused "relative target joined to the payload cwd" "$R_MEM" \
+  'echo x > ../home/.claude/projects/-x/memory/a.md' "${MEM_NOENV[@]}"
+
+# ---------------------------------------------------------------------------
+section "§MEM-ok — reading the store, and writing elsewhere, stay open (AC-3.3)"
+#
+# THE SAME ENGAGED REPO, THE SAME EXTRACTOR (the hook's exit status) as §MEM above, so each
+# admission here is read beside a refusal of the same shape. The fourth row is the wave's own
+# AC-5.4 readback: it names the store AND redirects, to a path outside it.
+for _mo in \
+  'cat ~/.claude/projects/-x/memory/MEMORY.md' \
+  'ls -la ~/.claude/projects/-x/memory' \
+  'find ~/.claude/projects/-x/memory -newer .bionic/tmp/m -type f' \
+  '{ find ~/.claude/projects/-x/memory -newer .bionic/tmp/m -type f; } > .bionic/docs/record/x.txt' \
+  'rm -f ~/.claude/projects/-x/memory/old.md' \
+  'tar -cf /tmp/mem.tar ~/.claude/projects/-x/memory' \
+  'cp ~/.claude/projects/-x/memory/MEMORY.md .bionic/docs/record/memory-copy.md' \
+  "$(printf 'cat > .bionic/docs/record/n.md <<%sEOF%s\necho x > ~/.claude/projects/-x/memory/a.md\nEOF' "'" "'")" \
+  'touch ~/.claude/projects/-x/notes.md'; do
+  run_hook "$(mk_payload "$R_MEM" "$_mo")" "${MEM_NOENV[@]}"
+  expect_status "§MEM-ok [$(printf '%.60s' "$_mo")]: admitted" 0 "$ST"
+  expect_absent "§MEM-ok …and no memory refusal on the wire" "assumptions.md" "$ERR"
+done
+
+# ---------------------------------------------------------------------------
+section "§MEM-unengaged — a session that never invoked bionic writes its store freely (AC-3.4)"
+#
+# R_PLAIN carries no engagement marker. The same writes §MEM refuses, with the same env.
+for _mu in \
+  "$(printf '%s' "$MEM_REPLAY")" \
+  'echo x > ~/.claude/projects/-x/memory/a.md' \
+  'printf x | tee ~/.claude/projects/-x/memory/a.md' \
+  "sed -i '' 's/a/b/' ~/.claude/projects/-x/memory/MEMORY.md" \
+  'touch ~/.claude/projects/-x/memory/c.md'; do
+  run_hook "$(mk_payload "$R_PLAIN" "$_mu")" "${MEM_NOENV[@]}"
+  expect_status "§MEM-unengaged [$(printf '%.60s' "$_mu")]: admitted" 0 "$ST"
+  expect_empty "§MEM-unengaged …silently" "$OUT$ERR"
+done
+
 finish

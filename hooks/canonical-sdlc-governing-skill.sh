@@ -309,6 +309,47 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "canonical-sdlc-governing
 # root would go quiet exactly where it was added to bind. So the engagement predicate is
 # re-asked against this root rather than read off `BIONIC_ENGAGED`.
 bionic_context 2>/dev/null || exit 0
+
+# ---------- THE MEMORY-STORE ARM (wave-24-fixit-1811 T12; REQ-3, D16) ----------
+#
+# The Write/Edit half of `wall_memory_store` (payload/scripts/lib/walls.sh, behind
+# hooks/bash-walls.sh), in the same words: an engaged session never writes the auto-memory
+# store, `${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/projects/*/memory`.
+#
+# ABOVE THE ARTIFACT-ROOT GUARD, AND ON THE SESSION'S ENGAGEMENT. The store sits in no
+# project, so the root walked up from it has no marker and the guard below would wave every
+# store write through. The question here is whether the SESSION is engaged, which
+# `bionic_context` answered from the payload cwd. PreToolUse only: the bind arm is a
+# PostToolUse event and cannot refuse.
+#
+# The path is screened on `memory` before the fold costs a fork, then folded lexically
+# (`fold_dots`, above) so a `..` spelling cannot walk around the comparison.
+if [ "$EVENT" != "PostToolUse" ] && [ "$BIONIC_ENGAGED" = 1 ]; then
+  case "$FILE_PATH" in
+    *memory*)
+      GS_MEM_ROOT="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}}"
+      case "$GS_MEM_ROOT" in
+        '~'|'~/'*)             GS_MEM_ROOT="${HOME:-}${GS_MEM_ROOT#\~}" ;;
+        '$HOME'|'$HOME/'*)     GS_MEM_ROOT="${HOME:-}${GS_MEM_ROOT#\$HOME}" ;;
+        '${HOME}'|'${HOME}/'*) GS_MEM_ROOT="${HOME:-}${GS_MEM_ROOT#\$\{HOME\}}" ;;
+      esac
+      GS_MEM_PATH="$FILE_PATH"
+      case "$GS_MEM_PATH" in '~/'*) GS_MEM_PATH="${HOME:-}${GS_MEM_PATH#\~}" ;; esac
+      GS_MEM_PATH=$(fold_dots "$GS_MEM_PATH")
+      GS_MEM_PROJECTS="${GS_MEM_ROOT%/}/projects"
+      case "$GS_MEM_PATH" in
+        "$GS_MEM_PROJECTS"/*/memory|"$GS_MEM_PROJECTS"/*/memory/*)
+          refuse exit2 write "this writes the memory store" "use record/<wave>/assumptions.md" \
+            "This $TOOL writes $GS_MEM_PATH, inside the auto-memory store ($GS_MEM_PROJECTS/*/memory).
+An engaged run keeps what it learns where the run can see it: a judgment call goes in
+record/<wave>/assumptions.md, and a correction that should outlive the run goes to the user
+as a rule proposal (record/<wave>/user-rules-proposed.md), for the rules file that owns it.
+Nothing that gates or reviews this run reads the store. Reading it stays open." ;;
+      esac
+      ;;
+  esac
+fi
+
 PROJECT_ROOT_FROM_PATH=$(project_root "$(dirname "$FILE_PATH")")
 if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
   # project_root always answers, so this is unreachable in practice. Kept as a
