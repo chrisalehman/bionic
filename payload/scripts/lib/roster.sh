@@ -126,6 +126,72 @@ role_is_readonly() {  # <subagent_type> -> 0 a read-only role · 1 anything else
   return 1
 }
 
+# ---------- WHAT A ROW COSTS (wave-24 T10, REQ-7 AC-7.1/7.2, D11; research R4 §1) -----------
+#
+# TWO CEILINGS, TWO RULES, ONE ROLE FIELD. A writer slot is held by a role that can write the
+# tree; a read-only role holds none, so the dispatch wall must neither count its open row nor
+# ask a slot for its incoming dispatch, and the Patrol's fill must not read it as occupancy
+# either. A suite slot is held by a row that runs a suite — one whose brief declared a
+# `Subprocess claim:` (`claims=`), or a `bionic:test-runner`, the one read-only role whose whole
+# job is to run suites and the one that used to hold nothing because its brief rarely said so.
+# The row carries its role as `subagent_type=` (no schema change), and this file owns
+# `role_is_readonly`, so the two questions are answered here and nowhere else:
+# `hooks/dispatch-preflight.sh` and `hooks/session-poker.sh`'s tick both call
+# `budget_open_writers`, which is what keeps the open count the one refuses on and the
+# occupancy the other fills against the SAME number.
+#
+# FAIL-CLOSED ON WHAT IT CANNOT READ. A name with no roster row, an empty `subagent_type=` and
+# a type outside the allow-list all count as a writer (`role_is_readonly` answers "writer" for
+# the unknown), and a roster that cannot be read counts every name — spending a slot on a row
+# that might be a writer is the direction that refuses more, never less.
+budget_open_writers() {  # <roster file>; stdin: the open names, one per line -> the writers among them
+  local f="${1:-}" names types type nn n=0 ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}"
+  names="$(cat)"
+  [ -n "$names" ] || { printf '0'; return 0; }
+  nn="$(printf '%s\n' "$names" | awk 'NF { c++ } END { printf "%d", c + 0 }')"
+  if [ -z "$f" ] || [ ! -f "$f" ] || [ -L "$f" ] || [ ! -r "$f" ]; then
+    printf '%s' "$nn"
+    return 0
+  fi
+  # THE LATEST ROW OF EACH NAME carries the role the name runs as. One pass over the file; one
+  # `T:<type>` line comes back per name asked for, in the order asked, the type empty when no
+  # row names it. A reply that is not one line per name is not read: every name is a writer.
+  types="$(ROSTER_BOW_NAMES="$names" ROSTER_BOW_F="$f" awk -v rpfx="roster-state/${ver}|" '
+    BEGIN {
+      nn = split(ENVIRON["ROSTER_BOW_NAMES"], ask, "\n")
+      for (i = 1; i <= nn; i++) want[ask[i]] = 1
+      f = ENVIRON["ROSTER_BOW_F"]
+      while ((getline line < f) > 0) {
+        if (index(line, rpfx) != 1) continue
+        np = split(line, p, "|"); nm = ""; st = ""
+        for (i = 1; i <= np; i++) {
+          if (substr(p[i], 1, 5) == "name=") nm = substr(p[i], 6)
+          else if (substr(p[i], 1, 14) == "subagent_type=") st = substr(p[i], 15)
+        }
+        if (nm in want) last[nm] = st
+      }
+      close(f)
+      for (i = 1; i <= nn; i++) if (ask[i] != "") print "T:" ((ask[i] in last) ? last[ask[i]] : "")
+    }' </dev/null 2>/dev/null)"
+  if [ "$(printf '%s\n' "$types" | awk 'NF { c++ } END { printf "%d", c + 0 }')" != "$nn" ]; then
+    printf '%s' "$nn"
+    return 0
+  fi
+  while IFS= read -r type; do
+    [ -n "$type" ] || continue
+    role_is_readonly "${type#T:}" || n=$(( n + 1 ))
+  done <<< "$types"
+  printf '%s' "$n"
+}
+
+roster_row_holds_suite() {  # <roster row line> -> 0 it holds a suite slot (a claim, or a test-runner) · 1 not
+  local line="$1" type claims
+  claims="$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)"
+  [ -n "$claims" ] && return 0
+  type="$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^subagent_type=//p' | head -1)"
+  [ "$type" = "bionic:test-runner" ]
+}
+
 # The header comment line every roster file opens with. Both writers emit it when the file
 # is absent; it carries the schema version, so it belongs beside the row that carries the
 # same one rather than in two format strings that can disagree about which version this is.
