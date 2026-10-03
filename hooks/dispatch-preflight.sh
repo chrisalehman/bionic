@@ -1278,8 +1278,8 @@ DARKNAMES
       if [ -n "$closed" ]; then
         while IFS='|' read -r nm claims; do
           [ -n "$nm" ] || continue
-          # A HERE-STRING, NOT A PIPE (correctness review F8; memory
-          # grep-q-sigpipe-under-pipefail). `grep -q` exits at its first match; under this
+          # A HERE-STRING, NOT A PIPE (correctness review F8; the reason
+          # is stated in this comment, no rule file carries it). `grep -q` exits at its first match; under this
           # file's `set -uo pipefail` (:67), a `printf | grep -qxF` pipeline SIGPIPEs the
           # producer whenever the match sits ahead of enough trailing data to still be
           # queued when `grep` closes its read end, and `pipefail` promotes that 141 over
