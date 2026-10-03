@@ -13357,4 +13357,51 @@ UBEOF
 expect_eq "UB.all …so the seven are one string" "1" \
   "$(printf '%s\n' "$UB_ADVS" | cut -d'|' -f2- | sort -u | grep -c .)"
 
+
+# ---- UB.8 the engagement door (wave-23 T13, critic C-3; D1 Δ4) -----------------
+# The seed's own root shape, driven end to end: ONE open run, session A bound to it and LIVE
+# (its pid file under the fixture claude home names A at this shell's pid, which `kill -0`
+# answers for the whole run — `patrol_live_session_ids`, the sweeper's liveness). Session C
+# invokes the skill through the real engage.sh and then stops through the real stop.sh.
+# Before T13 the count rule bound C to A's run and C's Stop was refused `not launched: T5`
+# at every turn end — the critic's reproduction, byte for byte. After it, C is written
+# `plan=none`, told how to bind on the model's channel, and its Stop charges it nothing; A,
+# on the same tree, is still refused (the control without which "no refusal" would pass on a
+# fill gate that had simply gone dead).
+SID_C="c3c3c3c3-0000-4000-8000-00000000000c"
+UB8=$(new_repo "ub-engage"); UB8_P="$UB8/.bionic/docs/plans/epic-99/run.md"
+mkdir -p "$(dirname "$UB8_P")"
+{ printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf -- '---\n\n## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T4 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed | — |\n'
+  printf '| T5 | 4 | build | ready | implementor | T4 | 15m | REQ-x | b.sh | pending | — |\n'
+} > "$UB8_P"
+bound_marker "$UB8" "$SID_A" "$UB8_P"
+roster_header > "$UB8/.bionic/tmp/roster-$SID_A.state"
+roster_header > "$UB8/.bionic/tmp/roster-$SID_C.state"
+UB8_HOME="$SANDBOX/ub8-claude-home"; mkdir -p "$UB8_HOME/sessions"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s"}\n' "$$" "$SID_A" "$UB8" > "$UB8_HOME/sessions/$$.json"
+jq -nc '{type:"user",uuid:"u-ub8",isSidechain:false,timestamp:"2026-10-02T19:40:00Z",message:{role:"user",content:"scope the next wave"}}' > "$UB8/turn.jsonl"
+UB8_ENG_OUT=$(jq -nc --arg s "$SID_C" --arg c "$UB8" \
+    '{session_id:$s,transcript_path:"/dev/null",cwd:$c,hook_event_name:"PreToolUse",tool_name:"Skill",tool_input:{skill:"bionic:canonical-sdlc"},tool_use_id:"toolu_ub8"}' \
+  | env -u CLAUDE_PROJECT_DIR HOME="$UB8" BIONIC_CLAUDE_HOME="$UB8_HOME" CLAUDE_CODE_SESSION_ID="$SID_C" \
+      bash "$BIONIC_HOOKS_DIR/engage.sh" 2>/dev/null)
+expect_eq "UB.8 engagement beside a LIVE session bound to the root's one run: C is written plan=none" \
+  "plan=none" "$(grep -m1 '^plan=' "$UB8/.bionic/tmp/engaged-$SID_C.state" 2>/dev/null)"
+expect_contains "UB.8 …and told on the model's channel, in run_unbound_advisory's words" \
+  "$(printf '%s' "$UB_TEMPLATE" | sed "s|<p>|$UB8_P|g")" \
+  "$(printf '%s' "$UB8_ENG_OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
+expect_eq "UB.8 …and A's binding is untouched" "plan=$UB8_P" \
+  "$(grep -m1 '^plan=' "$UB8/.bionic/tmp/engaged-$SID_A.state" 2>/dev/null)"
+ub_stop "$UB8" "$SID_C" "$UB8/turn.jsonl"
+expect_eq "UB.8 C's turn end: no refusal" "" "$(ub_decision)"
+expect_absent "UB.8 …and A's ready row is named nowhere" "not launched: T5" "$UB_OUT$UB_ERR"
+expect_absent "UB.8 …nor T5 at all" "T5" "$UB_OUT$UB_ERR"
+ub_stop "$UB8" "$SID_A" "$UB8/turn.jsonl"
+expect_eq "UB.8 A's turn end on the same tree (control): refused" "block" "$(ub_decision)"
+expect_contains "UB.8 …naming T5 as not launched" "not launched: T5" "$UB_ERR$UB_OUT"
+
 finish
