@@ -160,7 +160,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh fill.sh observe.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh fill.sh observe.sh refuse.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -292,6 +292,12 @@ BIONIC_LOADER_REFUSE
 # reads.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/observe.sh"
+# THE PASTED POKER PATH (wave-24 T29; critic I2, A-T27.8). The Patrol prompt, the STANDDOWN
+# line and the re-arm note print this script's path for a reader to paste; it is ONE shell
+# word, so a plugin root with a space pastes whole. refuse.sh's `refuse_shell_word` owns the rule.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/refuse.sh"
+POKER_WORD="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="20m"
@@ -2855,7 +2861,7 @@ case "$VERB" in
       exit 3
     fi
     printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. Unless the tick printed only "unchanged" or a QUIET with no open row: TaskList and reconcile. Then continue the run toward its goal until a wall.\n' \
-      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "${HOOK_DIR}/session-poker.sh" "${HOOK_DIR}/session-poker.sh" "$HOLD_REASON_SLOT"
+      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$HOLD_REASON_SLOT"
     exit 0
     ;;
 
@@ -4695,7 +4701,7 @@ EOF
     TICK_REARM=""
     case "$TICK_PVER" in ''|*[!0-9]*) TICK_PVER_N=0 ;; *) TICK_PVER_N="$TICK_PVER" ;; esac
     if [ "$TICK_PVER_N" -lt "$PATROL_PROMPT_VERSION" ]; then
-      TICK_REARM="poker: note: re-arm the Patrol — its prompt is v=${TICK_PVER:-unrecorded} and this poker prints v=${PATROL_PROMPT_VERSION}: replace the bionic-patrol job with one carrying the output of \`bash ${HOOK_DIR}/session-poker.sh prompt\`, then run \`bash ${HOOK_DIR}/session-poker.sh arm\`"
+      TICK_REARM="poker: note: re-arm the Patrol — its prompt is v=${TICK_PVER:-unrecorded} and this poker prints v=${PATROL_PROMPT_VERSION}: replace the bionic-patrol job with one carrying the output of \`bash ${POKER_WORD} prompt\`, then run \`bash ${POKER_WORD} arm\`"
     fi
     tick_emit() {
       local rc=$?
@@ -5335,7 +5341,7 @@ EOF
                 say "held ${SD_NAME} since ${SD_HELD%% *} — ${SD_HELD_REST% fp=*}"
                 continue
               fi
-              say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written), or keep it up with: bash ${HOOK_DIR}/session-poker.sh hold ${SD_NAME} ${HOLD_REASON_SLOT}"
+              say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written), or keep it up with: bash ${POKER_WORD} hold ${SD_NAME} ${HOLD_REASON_SLOT}"
               SD_ORDER_NAMES="${SD_ORDER_NAMES}${SD_ORDER_NAMES:+ }${SD_NAME}"
               ;;
             *)
