@@ -41,6 +41,10 @@
 #       two values the roster row records
 #       calls `<sink> finding <fact> <fix> <detail>` once per fault, in the order the dispatch
 #       wall reports them, and `<sink> warn <line>` for a loud pass
+#   brief_body_advisories <brief text> <name> <files> <suites-allowed> <re-executes> <poker>
+#       -> one line per ADVISORY on stdout (an undeclared `bash tests/x.test.sh` in the body, an
+#          edit of a path outside `Files:`), each ending in the `amend` line that declares it;
+#          never a finding, always rc 0 (wave-24 T14, D13)
 #
 # A door with no brief builds one: `amend` hands `lift_contract_fields` a span of its own
 # (`Files: …`, `Suites: …`, `Re-executes: …`), so what it validates is exactly what a
@@ -1073,6 +1077,140 @@ brief_field() {
     suites_commented) sanitize "$v" 8 ;;
     *)                printf '%s' "$v" ;;
   esac
+}
+
+# brief_body_advisories <brief text> <name> <files> <suites-allowed> <re-executes> <poker>
+#   -> zero or more one-line advisories on stdout; always rc 0
+# (wave-24 T14; REQ-8, D13.)
+#
+# THE BODY IS READ HERE AND NOWHERE ELSE. `lift_contract_fields` takes labelled lines, so a brief
+# that says "run bash tests/foo.test.sh" under `Suites: tests/widget.test.sh` was admitted, and
+# the agent met the budget wall at its first command. This reads the prose for the two shapes
+# that meet a wall later — a RUN the contract never declared and a WRITE outside `Files:` — and
+# says so at dispatch, with the `amend` line that would declare it.
+#
+# STRICT, BECAUSE IT IS ONLY AN ADVISORY. Over 202 real briefs the loose readings fired on
+# 36 and 70 of them and every strict-predicate hit was an example or a negation (research R5
+# item 5: 0 true positives), so each predicate below errs toward silence. A line is NOT read
+# when it sits in a `Read first:` span (the label line and what follows it up to a blank line
+# or the next label), inside a ``` / ~~~ fence, in a 4-space or tab indented block (Markdown
+# code), under a contract label that already declares it, on a never / do-not / must-not line,
+# or on an e.g. / for example / such as line (an example is not an instruction).
+#   (a) RUN: `bash …tests/<x>.test.sh|run.sh` where the `bash` opens the line (after a bullet
+#       and an optional `cd <dir> &&`) or follows a backtick, and <x> is in neither the suite set
+#       (declared or derived) nor the declared runs.
+#   (b) WRITE: a sentence opening with Edit / Change / Fix / Update / Patch / Rewrite / Modify
+#       whose object — the first word after any of the, a, an, file, script, hook, test, suite —
+#       is a path (has a `/`), is not under a `record/` directory, and is not in `Files:`
+#       (an entry that equals it, prefixes it as a directory, or matches it as a glob).
+# Each finding is ONE line (the declaring line is cut at 100 columns, control and non-ASCII
+# bytes dropped) so the caller can hand it to its `warn` verbatim. <poker> is the command that
+# prefixes `amend`; <name> the dispatched name (empty reads as `<name>`).
+brief_body_advisories() {
+  printf '%s\n' "${1-}" | awk -v NAME="${2-}" -v FILES="${3-}" -v SUITES="${4-}" -v RUNS="${5-}" -v POKER="${6-}" '
+    BEGIN { Q = "\047" }
+    function trim(t) { sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); return t }
+    function show(t) { gsub(/[^ -~]/, "", t); gsub(/"/, Q, t); if (length(t) > 100) t = substr(t, 1, 97) "..."; return t }
+    function cleantok(t) {
+      gsub(/[`"]/, "", t); gsub(Q, "", t); sub(/[,.;:)]+$/, "", t); sub(/^[(]+/, "", t)
+      return t
+    }
+    function suite_declared(b,   n, parts, i) {
+      n = split(SUITES, parts, /[ \t,]+/)
+      for (i = 1; i <= n; i++) if (parts[i] == b) return 1
+      return (index(RUNS, b) > 0)
+    }
+    function glob_re(g) {
+      gsub(/[.+^$(){}|\\]/, "\\\\&", g); gsub(/\*/, ".*", g); gsub(/\?/, ".", g)
+      return "^" g "$"
+    }
+    function in_files(p,   n, parts, i, e, ls, lp) {
+      n = split(FILES, parts, /[ \t]*,[ \t]*/)
+      sub(/^\.\//, "", p)
+      for (i = 1; i <= n; i++) {
+        e = parts[i]; sub(/^\.\//, "", e); if (e == "") continue
+        if (e == p) return 1
+        if (index(e, "*") > 0 || index(e, "?") > 0) { if (p ~ glob_re(e)) return 1; continue }
+        if (substr(e, length(e)) == "/" && index(p, e) == 1) return 1
+        if (index(p, e "/") == 1) return 1
+        ls = length(e); lp = length(p)
+        if (ls > lp && substr(e, ls - lp) == "/" p) return 1
+        if (lp > ls && substr(p, lp - ls) == "/" e) return 1
+      }
+      return 0
+    }
+    function emit(key, msg) { if (key in SEEN) return; SEEN[key] = 1; print msg }
+    function amend(flag, val) {
+      return "bash " (POKER == "" ? "session-poker.sh" : POKER) " amend " (NAME == "" ? "<name>" : NAME) " " flag " " val " --reason \"<why>\""
+    }
+    # (a) every `bash …` that is command-shaped: at the line start, or right after a backtick.
+    function scan_runs(s, ln,   rest, p, pre, cmd, n, tk, i, b, e) {
+      rest = s
+      while ((p = index(rest, "bash ")) > 0) {
+        pre = substr(rest, 1, p - 1)
+        if (pre == "" || substr(pre, length(pre), 1) == "`" || pre ~ /^cd [^;&|`]*(&&|;)[ \t]*$/) {
+          cmd = substr(rest, p + 5)
+          e = match(cmd, /[`;|&]/); if (e > 0) cmd = substr(cmd, 1, e - 1)
+          n = split(cmd, tk, /[ \t]+/)
+          for (i = 1; i <= n; i++) {
+            b = cleantok(tk[i])
+            if (b ~ /(^|\/)tests\/([A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.sh$/) {
+              sub(/^.*\//, "", b)
+              if (b ~ /\.test\.sh$/ || b == "run.sh") {
+                if (!suite_declared(b))
+                  emit("S:" b, "the brief body runs " b " (\"" show(ln) "\") but Suites:, Re-executes: and the derived suite set do not name it; to declare it: " amend("--suites+", b))
+              }
+              break
+            }
+          }
+        }
+        rest = substr(rest, p + 5)
+      }
+    }
+    # (b) a sentence opening with an edit verb whose object is a non-record path outside Files:.
+    function scan_edits(s, ln,   n, sent, i, w, nw, j, v, o) {
+      n = split(s, sent, /(\. +|; +)/)
+      for (i = 1; i <= n; i++) {
+        nw = split(trim(sent[i]), w, /[ \t]+/)
+        v = tolower(w[1])
+        if (v !~ /^(edit|change|fix|update|patch|rewrite|modify)$/) continue
+        for (j = 2; j <= nw; j++) {
+          o = tolower(w[j])
+          if (o ~ /^(the|a|an|file|files|script|hook|test|suite)$/) continue
+          break
+        }
+        if (j > nw) continue
+        o = cleantok(w[j])
+        if (o !~ /^[A-Za-z0-9_.\/-]+$/ || index(o, "/") == 0 || o !~ /[A-Za-z]/) continue
+        if (substr(o, 1, 1) == "-" || o ~ /^https?:/ || o ~ /(^|\/)record\//) continue
+        if (in_files(o)) continue
+        emit("F:" o, "the brief body asks the agent to " v " " o " (\"" show(ln) "\") but Files: does not list it; to declare it: " amend("--files+", o))
+      }
+    }
+    {
+      line = $0; sub(/\r$/, "", line)
+      t = trim(line)
+      if (t ~ /^```/ || t ~ /^~~~/) {
+        f = substr(t, 1, 3)
+        if (fence == "") fence = f; else if (fence == f) fence = ""
+        next
+      }
+      if (fence != "") next
+      if (line ~ /^(    |\t)/) next
+      lt = tolower(t)
+      if (inrf) {
+        if (t == "") { inrf = 0; next }
+        if (t ~ /^[A-Z][A-Za-z -]{0,30}:/) inrf = 0; else next
+      }
+      if (lt ~ /^read first:/) { inrf = 1; next }
+      if (lt ~ /^(files|suites|re-executes|subprocess claim):/) next
+      if (lt ~ /(^|[^a-z])(never|do not|don.t|must not|mustn.t)([^a-z]|$)/) next
+      if (lt ~ /(e\.g\.|for example|such as)/) next
+      sub(/^([-*+]|[0-9]+[.)])[ \t]+/, "", t)
+      scan_runs(t, t)
+      scan_edits(t, t)
+    }
+  '
 }
 
 # brief_validate_fields <lifted> <subagent_type> <root> <sink> — every check the contract
