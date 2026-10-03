@@ -785,12 +785,14 @@ write_patrol_armed_marker() {  # <session-id> -> 0 written, 1 not
   return 0
 }
 
-# THE DIGEST FILE'S PATH, beside the stamp under the same resolved root.
+# THE DIGEST FILE'S PATH, beside the stamp under the same resolved root. Not `patrol-digest-`:
+# `patrol-*.state` is the stamp glob (hooks/session-start.sh, scripts/lib/patrol.sh), and a
+# file under it reads as the stamp of a session named `digest-<sid>` (A-orch-9).
 tick_digest_file() {  # <session-id> -> absolute path, or empty
   local f
   f="$(patrol_stamp_file "$1")" || return 1
   [ -n "$f" ] || return 1
-  printf '%s/patrol-digest-%s.state' "${f%/*}" "$1"
+  printf '%s/tick-digest-%s.state' "${f%/*}" "$1"
 }
 
 # One `key=value` line of the digest file, or empty. A symlink is no file.
@@ -2531,14 +2533,17 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 # rejected on the record (D-5): the residue is exactly what `adopt` reads, so a hook that
 # cleared it at engagement would delete the evidence of the thing it was helping with.
 #
-# THE FIVE SESSION-KEYED CLASSES, and no sixth. Each is `<class>-<session id>.state` under
-# `<root>/.bionic/tmp`, plus the Patrol stamp's `.armed` sibling:
+# THE SESSION-KEYED CLASSES, and no others — scripts/lib/patrol.sh's PATROL_STATE_CLASSES.
+# Each is `<class>-<session id>.state` under `<root>/.bionic/tmp`, plus the Patrol stamp's
+# `.armed` sibling:
 #
 #   roster-<sid>.state         hooks/dispatch-preflight.sh   the dispatch ledger
 #   preflight-<sid>.state      hooks/preflight-probe.sh      the budget attestation
 #   engaged-<sid>.state        scripts/lib/binding.sh        the engagement marker
 #   sweeper-<sid>.state        hooks/session-sweeper.sh      the ack ledger
 #   patrol-<sid>.state[.armed] this file                     the Patrol stamp and its marker
+#   stop-orders-<sid>.state    hooks/stop-orders.sh          the order queue
+#   tick-digest-<sid>.state    this file                     the tick's digest and duty
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE THEREFORE UNREACHABLE FROM HERE, and that
 # is a property of the enumeration rather than a list to maintain: `context-spend.state` and

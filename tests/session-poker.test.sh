@@ -278,7 +278,7 @@ stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
 # `unchanged` line, so a case that ticks the SAME world twice to read the second tick's full
 # output — a doctored copy, a second cwd, a third reading of one pressure — forgets the digest
 # first. Forgetting it is what an `arm` does to the next tick.
-digest_of() { printf '%s/.bionic/tmp/patrol-digest-%s.state' "$1" "${2:-$SID}"; }
+digest_of() { printf '%s/.bionic/tmp/tick-digest-%s.state' "$1" "${2:-$SID}"; }
 forget_digest() { rm -f "$(digest_of "$1")"; }
 
 # THE ARMING RECORD — the sibling of the stamp whose mtime `arm` sets and the tick compares a
