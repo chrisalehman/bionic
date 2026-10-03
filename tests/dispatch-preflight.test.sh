@@ -3132,7 +3132,8 @@ s22_set_budget() {
     "$plan" > "$plan.tmp" && mv "$plan.tmp" "$plan"
 }
 
-# s22_roster_row <repo> <sid> <name> [claims] — one launch row in the shipped schema.
+# s22_roster_row <repo> <sid> <name> [claims] [subagent_type] — one launch row in the shipped
+# schema; the type defaults to `implementor`, the writer every earlier section planted.
 s22_roster_row() {
   local f; f="$(roster_path "$1" "$2")"
   mkdir -p "$(dirname "$f")"
@@ -3140,7 +3141,7 @@ s22_roster_row() {
   # `claims=` and nothing else, and `roster_row_no_plan` is the shape this fixture has
   # always had (tests/lib/roster-row.sh, S14).
   roster_row_no_plan status=intended "session=$2" "name=$3" agent_id= \
-    launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
+    launched_at=2026-09-02T00:00:00Z "subagent_type=${5:-implementor}" model= \
     "deliverable=/tmp/d-$3" source=declared "duration=~10 minutes" progress= \
     "claims=${4:-}" cadence= absent= waiver= "tool_use_id=t-$3" >> "$f"
 }
@@ -8691,6 +8692,125 @@ expect_absent "ADV-files a never-line is not advised" "nev.sh" "$ADV_CTX"
 expect_absent "ADV-files a plain mention is not advised" "mention.sh" "$ADV_CTX"
 expect_absent "ADV-files a fenced block is not advised" "fence.sh" "$ADV_CTX"
 expect_absent "ADV-files an edit with no path object is not advised" "failing assertion" "$ADV_CTX"
+
+# ================================== §RO / §TR: THE ROLE DECIDES WHAT A ROW COSTS
+# (wave-24 T10; REQ-7 AC-7.1, AC-7.2; D11, research R4 §1)
+#
+# A read-only role writes nothing, so it holds no WRITER slot, and an incoming read-only
+# dispatch asks for none (no +1). A `bionic:test-runner` is the one read-only role that runs a
+# suite, so it holds a SUITE slot whether or not its brief declared a `Subprocess claim:`.
+
+section "§RO — a read-only role leaves the writer count and asks for no slot (AC-7.1)"
+
+ro_budget_repo() {  # <name> <budget line> -> repo with a plan, an attestation and that budget
+  local r; r=$(make_repo "$1" yes)
+  write_attestation "$r" "$SID_A"
+  s22_set_budget "$r" "$2"
+  printf '%s' "$r"
+}
+RO_NONE="$SANDBOX/.ro-none.jsonl"
+mk_transcript "$RO_NONE" none
+
+# ro1 — a read-only dispatch at open == writers is ADMITTED; the paired control is a writer.
+REPO=$(ro_budget_repo ro1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro1-r" "claude-sonnet-5" "$RO_NONE" "bionic:researcher")"
+expect_eq "ro1 one writer open against writers=1 → a researcher dispatch is ADMITTED (no +1)" "allow" "$GATE_VERDICT"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "ro1c …and the same roster REFUSES a writer (the control)" "deny" "$GATE_VERDICT"
+expect_contains "ro1c …at the writer count" "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
+
+# ro2 — a read-only ROW holds no writer slot: a writer is admitted past it, on a dark panel and
+# on a fresh one that lists it.
+REPO=$(ro_budget_repo ro2 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro2-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "ro2 one researcher open against writers=1, dark panel → a writer is ADMITTED" "allow" "$GATE_VERDICT"
+RO_LIVE="$SANDBOX/.ro-live.jsonl"
+mk_transcript "$RO_LIVE" fresh R-ONE
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro2-w2" "claude-sonnet-5" "$RO_LIVE" "implementor")"
+expect_eq "ro2b …and with the researcher LISTED on a fresh panel" "allow" "$GATE_VERDICT"
+
+# ro3 — the exclusion is per row: a researcher and a writer open, writers=1, a writer is
+# refused and the count it names is the writer's alone.
+REPO=$(ro_budget_repo ro3 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro3-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "ro3 researcher + writer open against writers=1 → a writer is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "ro3 …open counts the writer and not the researcher" \
+  "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
+
+# ro4 — the exclusion does not leak: a bare `researcher`, an unknown type and an empty type are
+# writers (role_is_readonly is an allow-list), so each holds the slot.
+_ro=0
+for _t in researcher acme:helper general-purpose ""; do
+  _ro=$((_ro + 1))
+  REPO=$(ro_budget_repo "ro4-$_ro" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+  s22_roster_row "$REPO" "$SID_A" "X-ONE" "" "$_t"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro4-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+  expect_eq "ro4 an open row of type '${_t:-<empty>}' still holds a writer slot → a writer is REFUSED" "deny" "$GATE_VERDICT"
+  expect_contains "ro4 …counted open=1" "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
+done
+
+# ro5 — a read-only row that declared a claim still holds its SUITE slot (the claim is a fact
+# about what it runs, not about what it writes).
+REPO=$(ro_budget_repo ro5 "writers=9 suites=1 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "bash tests/run.sh" "bionic:researcher"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro5-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "ro5 a claim-declaring researcher against suites=1 → REFUSED on the suite count" "deny" "$GATE_VERDICT"
+expect_contains "ro5 …claimed=1" "suites: budget=1 claimed=1 with-this-dispatch=2" "$GATE_VERR"
+
+# ro6 — a read-only row CLOSED by an ack on a dark panel gives nothing back it never held:
+# the writer count stays what the open writers say.
+REPO=$(ro_budget_repo ro6 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+s22_ack "$REPO" "$SID_A" "R-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro6-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "ro6 an acked researcher and an open writer against writers=1 → a writer is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "ro6 …open=1, not 0 (the ack did not subtract a slot the researcher never held)" \
+  "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
+
+section "§TR — a test-runner row holds a suite slot, claim or no claim (AC-7.2)"
+
+# tr1 — suites=2, two claim-less test-runner rows, a third dispatch is REFUSED.
+REPO=$(ro_budget_repo tr1 "writers=9 suites=2 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "T-ONE" "" "bionic:test-runner"
+s22_roster_row "$REPO" "$SID_A" "T-TWO" "" "bionic:test-runner"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr1 two claim-less test-runners against suites=2 → the third dispatch is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "tr1 …naming the suite count" "suites: budget=2 claimed=2 with-this-dispatch=3" "$GATE_VERR"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr1-t" "claude-sonnet-5" "$RO_NONE" "bionic:test-runner")"
+expect_eq "tr1b …a third TEST-RUNNER is refused the same way (the incoming +1 is the suite's)" "deny" "$GATE_VERDICT"
+
+# tr2 — the paired controls: one test-runner is under the ceiling; and two claim-less rows of
+# any OTHER role hold no suite slot.
+REPO=$(ro_budget_repo tr2 "writers=9 suites=2 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "T-ONE" "" "bionic:test-runner"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr2-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr2 one test-runner against suites=2 → ADMITTED" "allow" "$GATE_VERDICT"
+REPO=$(ro_budget_repo tr2b "writers=9 suites=2 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
+s22_roster_row "$REPO" "$SID_A" "R-TWO" "" "bionic:auditor"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr2b-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr2b …and claim-less researcher, auditor and writer rows hold no suite slot → ADMITTED" "allow" "$GATE_VERDICT"
+
+# tr3 — a test-runner that ALSO declared a claim is one slot, not two.
+REPO=$(ro_budget_repo tr3 "writers=9 suites=2 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "T-ONE" "bash tests/run.sh" "bionic:test-runner"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr3-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr3 one claim-declaring test-runner against suites=2 → ADMITTED (one slot)" "allow" "$GATE_VERDICT"
+
+# tr4 — a test-runner CLOSED by an ack on a dark panel gives its suite slot back.
+REPO=$(ro_budget_repo tr4 "writers=9 suites=1 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "T-ONE" "" "bionic:test-runner"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr4-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr4 one open test-runner against suites=1 → REFUSED (the control)" "deny" "$GATE_VERDICT"
+s22_ack "$REPO" "$SID_A" "T-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr4-w2" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr4b …and once acked its suite slot is free → ADMITTED" "allow" "$GATE_VERDICT"
 
 
 # ============================================================================

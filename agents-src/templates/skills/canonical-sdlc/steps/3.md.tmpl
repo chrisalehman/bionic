@@ -4,7 +4,7 @@
 
 Two sections are required in every plan file.
 
-`## SDLC State` opens with `integration-branch:`, the triple, and `current: <N>` — the hook greps `^current:` and blocks every commit if it is missing or malformed. Write `current:`, never `current-step:`. Then one `Step N: <evidence>` line per step; bump `current:` and replace the line in place when advancing. Each `## Tasks` row's `- T<n>:` stub is authored with the table.
+`## SDLC State` opens with `integration-branch:`, the triple, and `current: <N>` — the hook greps `^current:` and blocks every commit if it is missing or malformed. Write `current:`, never `current-step:`. Then one `Step N: <evidence>` line per step; advance with `session-poker.sh current <N>` and `step-line <N> <text>`. Each `## Tasks` row's `- T<n>:` stub is authored with the table.
 
 ```
 ## SDLC State
@@ -24,7 +24,7 @@ current: <N>
 
 **Wave-scale variant.** The `## Tasks` table's twelve columns, `deps`, status vocabulary and `working-branch:` are documented in `operational-rules.md`.
 
-**`## Tasks` is the register of in-flight units.** Write the tree's name into the row's `worktree` cell as you create the tree. A commit from it is judged by that row — its step at wave scale, its task arms at task scale — never by `current:`, and a row ahead of the run is refused. Optional: `—` while no tree exists.
+**`## Tasks` is the register of in-flight units.** Run `task-set <id> worktree=<tree>` as you create the tree. A commit from it is judged by that row — its step at wave scale, its task arms at task scale — never by `current:`, and a row ahead of the run is refused. Optional: `—` while no tree exists.
 
 `## Assumptions` points to `record/<wave>/assumptions.md` — seeded from Step 1's "Not Doing" plus spec ambiguities; Step 4 appends there before each commit.
 

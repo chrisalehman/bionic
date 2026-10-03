@@ -1729,6 +1729,13 @@ am_refused "19h: inside bash -c" "bash -c 'bash $AM_POKER amend w20-sub --reason
 # §ARM-A (hold) — wave-24 T7, REQ-4 AC-4.6, D1: a hold is the orchestrator's standing answer to a
 # stand-down, so an agent that could run it would keep itself up.
 am_refused "19o: bash session-poker.sh hold" "bash $AM_POKER hold w20-sub 'idle on purpose'"
+# §ARM-A (plan-row verbs) — wave-24 T15, REQ-9 AC-9.4, D14: the five verbs write the bound plan,
+# and an agent that could run them could move `current:` or mark its own row landed.
+am_refused "19p: bash session-poker.sh task-set" "bash $AM_POKER task-set T2 status=landed"
+am_refused "19q: bash session-poker.sh step-line" "bash $AM_POKER step-line T2 'landed at abc1234'"
+am_refused "19r: bash session-poker.sh current" "bash $AM_POKER current 5"
+am_refused "19s: bash session-poker.sh ledger-add" "bash $AM_POKER ledger-add T2 agent=w20-sub"
+am_refused "19t: bash session-poker.sh ledger-set" "bash $AM_POKER ledger-set T2 landed=yes"
 
 # THE PAIRED POSITIVES. The same verbs from the main thread (no agent_id) are the
 # orchestrator's and pass this arm; a subagent's own read-only poker verbs pass; and a quoted
@@ -1736,6 +1743,8 @@ am_refused "19o: bash session-poker.sh hold" "bash $AM_POKER hold w20-sub 'idle 
 am_admitted "19i: amend from the main thread" "bash $AM_POKER amend w20-sub --reason r --files+ a/b.sh" ""
 am_admitted "19j: task-add from the main thread" "bash $AM_POKER task-add a b c d e f g h i" ""
 am_admitted "19j2: hold from the main thread" "bash $AM_POKER hold w20-sub 'idle on purpose'" ""
+am_admitted "19j3: current from the main thread" "bash $AM_POKER current 5" ""
+am_admitted "19j4: task-set from the main thread" "bash $AM_POKER task-set T2 status=landed" ""
 am_admitted "19k: a subagent's tick" "bash $AM_POKER tick"
 am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
 am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"

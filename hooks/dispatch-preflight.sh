@@ -1194,7 +1194,7 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # nothing to read has stopped being an error.
   budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
     local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed="" notfresh=""
-    local la_out la_rc row_dark dark="" closed still_open
+    local la_out la_rc row_dark dark="" closed still_open open_names="" holds
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
@@ -1252,14 +1252,20 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       fi
       case "$la_rc" in
         0)
-          open=$(( open + 1 ))
-          claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
-          [ -n "$claims" ] && claimed=$(( claimed + 1 ))
+          # THE ROW'S ROLE DECIDES WHAT IT COSTS (wave-24 T10, D11). Its NAME joins the open
+          # list, and `budget_open_writers` (payload/scripts/lib/roster.sh) turns that list into
+          # the writer count after the dark rows are settled, so a read-only row holds no
+          # writer slot and the Patrol's tick, which calls the same function, reads the same
+          # number. The SUITE slot is the row's own: a declared claim, or a test-runner.
+          open_names="${open_names}${nm}
+"
+          holds=""
+          roster_row_holds_suite "$line" && { holds=1; claimed=$(( claimed + 1 )); }
           # COUNTED BY THE FALLBACK, NOT BY A READING. The row goes on the dark list with
-          # its claim, and the block below asks the roster whether it has since closed. A
-          # row the panel spoke for never lands here, which is what makes that question
-          # unreachable on the fresh path.
-          [ -n "$row_dark" ] && dark="${dark}${nm}|${claims}
+          # whether it holds a suite slot, and the block below asks the roster whether it has
+          # since closed. A row the panel spoke for never lands here, which is what makes that
+          # question unreachable on the fresh path.
+          [ -n "$row_dark" ] && dark="${dark}${nm}|${holds}
 "
           ;;
         1) : ;;
@@ -1290,7 +1296,7 @@ DARKNAMES
           # grep's own 0 — a closed row reads as still open. A here-string has no second
           # process to lose.
           /usr/bin/grep -qxF -- "$nm" <<< "$closed" || continue
-          open=$(( open - 1 ))
+          open_names=$(printf '%s' "$open_names" | /usr/bin/grep -vxF -- "$nm")
           [ -n "$claims" ] && claimed=$(( claimed - 1 ))
         done <<DARK
 $dark
@@ -1298,6 +1304,7 @@ DARK
       fi
     fi
 
+    open=$(printf '%s\n' "$open_names" | budget_open_writers "$f")
     printf '%s %s' "$open" "$claimed"
   }
 
@@ -1360,9 +1367,12 @@ machine genuinely has the room."
 
   B_WRITERS="$DP_BUDGET_WRITERS"
   if [ -n "$B_WRITERS" ]; then
-    [ $(( BUDGET_OPEN + 1 )) -gt "$B_WRITERS" ] && budget_deny \
+    # A READ-ONLY DISPATCH ASKS FOR NO WRITER SLOT (wave-24 T10, D11): the +1 is a writer's.
+    BUDGET_ASK=1
+    role_is_readonly "$DP_SUBAGENT" && BUDGET_ASK=0
+    [ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && budget_deny \
       "this passes the run's writer budget" \
-      "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + 1 ))"
+      "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + BUDGET_ASK ))"
   elif [ -z "$DP_BUDGET_NAMED" ]; then
     BUDGET_UNMEASURED="${BUDGET_UNMEASURED} writers"
   fi

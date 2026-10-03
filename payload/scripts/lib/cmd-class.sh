@@ -253,6 +253,12 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         if (a[j] == "--dry-run" || a[j] == "-h" || a[j] == "--help" || a[j] == "--list") return 1
       return 0
     }
+    # WHICH `run.sh` IS THE RUNNER (wave-24 T24, REQ-7). Only the project s own: `tests/run.sh`,
+    # `./tests/run.sh`, or a path ending `/tests/run.sh`. The basename alone said nothing, so a
+    # scratch `<dir>/run.sh` or `scripts/run.sh` was refused as the full tree.
+    function is_runner(p) {
+      return (p == "tests/run.sh" || p ~ /\/tests\/run\.sh$/)
+    }
 
     # ---------- 1. heredocs ----------
     # The tag opened by this line, or "" — quote-aware, so a `<<` inside a string is text.
@@ -599,7 +605,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         # directory — which is exactly the shape `cd <worktree>/tests && bash
         # run.sh` takes, and the shape the path-component requirement missed
         # (critic C-2). On its own the word says nothing, so it stays none.
-        if (b1 == "run.sh" && (index(a1, "/") > 0 || CD_SEEN)) {
+        if (b1 == "run.sh" && (is_runner(a1) || (a1 == "run.sh" && CD_SEEN))) {
           if (runsh_noop(a, i + 1, n)) return "none"
           LAST_TARGET = b1; LAST_PATH = a1; return "suite"
         }
@@ -613,7 +619,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # through every arm to none. The path component is what separates running
       # it from naming it: `ls tests/run.sh` is argv[0] ls and stays none, and a
       # bare `run.sh` word is not something the shell would run either.
-      if (index(a[1], "/") > 0 && (b0 == "run.sh" || b0 == "test.sh" || b0 ~ /\.test\.sh$/)) {
+      if (index(a[1], "/") > 0 && ((b0 == "run.sh" && is_runner(a[1])) || b0 == "test.sh" || b0 ~ /\.test\.sh$/)) {
         if (b0 == "run.sh" && runsh_noop(a, 2, n)) return "none"
         LAST_TARGET = b0
         LAST_PATH = a[1]
