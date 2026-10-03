@@ -958,5 +958,61 @@ expect_contains "SDR4b: …a hold older than this turn's tick does not answer th
   "stand-down unanswered" "$(reason_of)"
 rm -rf "$SDR_CFG"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "FO: the stop wall's occupancy is the tick's — a read-only row holds no writer slot (wave-24 T13, D11)"
+
+# THE THIRD READER ON THE OLD NUMBER (A-T10.3, A-orch-32). The dispatch wall and the tick count
+# open rows through `budget_open_writers` (payload/scripts/lib/roster.sh), which leaves a
+# read-only role out. The stop wall's `FILL_OPEN` counted every open row, so with writers=1 and
+# a researcher open it saw no free slot, while the tick printed FILL for the same ready row.
+# One fixture, two rosters: a researcher open (a free writer slot) and a writer open (none).
+fo_fixture() {  # <subagent_type of the one open row> -> project dir; writers=1, T7 pending
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T7 | 4 | build | the ready row | implementor | — | 15m | REQ-x | a.sh | pending | — |\n'
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-24-fo.plan.md"
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-24-fo.plan.md"
+  roster_header > "$d/.bionic/tmp/roster-$SID.state"
+  roster_row_fixture status=intended session="$SID" name=FO-ONE agent_id=aFO00000000000001 \
+    deliverable= "subagent_type=$1" >> "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+fo_tick() {  # <project> -> the real tick's output
+  ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PROBE_FREE_MB=8192 \
+      BIONIC_PROBE_LOAD_1M=1.0 bash "${BIONIC_HOOKS_DIR}/session-poker.sh" tick 2>/dev/null )
+}
+require_helpers fo_fixture fo_tick
+
+FO_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$FO_RING"
+export BIONIC_PRESSURE_RING="$FO_RING" BIONIC_NOW_EPOCH=1700000000
+FO_TX="$(mktemp)"
+
+# FO1: a researcher open, T7 ready, writers=1 — the tick fills, and the stop wall demands it.
+FO_D="$(fo_fixture bionic:researcher)"
+expect_contains "FO1a: the tick, counting writers only, fills T7 past the open researcher" \
+  "poker: FILL T7" "$(fo_tick "$FO_D")"
+sd_turn "$FO_TX" u-fo-1
+s7_fire "$FO_D" "$FO_TX"
+expect_contains "FO1b: …and the stop wall agrees: the free writer slot is a fillable gap" \
+  "Fillable gap at turn end" "$(reason_of)"
+expect_contains "FO1c: …naming the ready row" "T7" "$(reason_of)"
+
+# FO2: the same fixture with a WRITER open — no slot is free, so neither the tick nor the wall
+# asks for a fill. The control that FO1 cannot pass on a wall that refuses every turn.
+FO_DW="$(fo_fixture implementor)"
+expect_contains "FO2a: with a writer open the tick reports the budget full" \
+  "the budget is full" "$(fo_tick "$FO_DW")"
+sd_turn "$FO_TX" u-fo-2
+s7_fire "$FO_DW" "$FO_TX"
+expect_absent "FO2b: …and the stop wall asks for no fill" "Fillable gap" "$(reason_of)$STOP_ERR"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
 
 finish

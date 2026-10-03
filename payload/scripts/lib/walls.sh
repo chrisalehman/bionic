@@ -5633,22 +5633,35 @@ budget_refuse() {  # <suite basename>
   # cannot read — but the ordinary headline is false in exactly this case: every one of
   # those suites may be on the budget, and it sends the reader to audit a set that is not
   # the problem. Two readers hit it before this branch existed.
+  #
+  # THE FIX IS THE LOOP'S OWN WORDS (wave-24 T13, D10, AC-6.3). A loop whose header is all
+  # literal words still names its suites, even when its body reassigns the variable and the
+  # classifier will not vouch for what runs: `cmd_suite_loop_lines` (lib/cmd-class.sh) puts
+  # each word into the path the body runs and hands back one `bash <path>` line each. The
+  # wall prints them and never parses the loop itself. A `$` the text gives no words for —
+  # `$(ls)`, a glob, a prefix assignment — has no line to print, and the detail says so.
   case "$1" in
     *'$'*|*'`'*)
+      local _loop_lines _spell
+      _loop_lines="$(cmd_suite_loop_lines "$COMMAND" 2>/dev/null | sed 's/^/    /')"
+      if [ -n "$_loop_lines" ]; then
+        _spell="Spell each suite literally, one call each — the words of the loop header:
+${_loop_lines}"
+      else
+        _spell="The text gives no literal list to expand, so no line can be printed for it.
+Spell each suite literally, one call each: bash tests/<suite>.test.sh"
+      fi
       fold_block exit2 suite-run \
         "$(_budget_wire_fact "unexpanded name; allowed: " suite-run "spell each suite literally" "$2")" \
         "spell each suite literally" \
         "The name as read: $1
 
-This command names its suite with a shell variable, and this wall reads your command
-text BEFORE the shell expands it — so the name never resolves to a suite it can check
-against your budget. It may well be on it; nothing here can tell.
+This wall reads your command text BEFORE the shell expands it, so a suite named by a
+variable never resolves to a name it can check against your budget.
 
-Spell the suite literally, one per call:
-    bash tests/alpha.test.sh
-    bash tests/beta.test.sh
+On the budget: ${2:-(nothing — this brief declared Suites: none)}
 
-On the budget: ${2:-(nothing — this brief declared Suites: none)}"
+${_spell}"
       return 2 ;;
   esac
   fold_block exit2 suite-run \
@@ -5669,13 +5682,11 @@ $(_budget_remedy_line "$1")"
 }
 
 # THE REMEDY LINE (T6, REQ-5, AC-5.2). A refusal that names the budget and not the verb that
-# widens it sent two readers to hunt for it. The plugin root is the tree this library was
-# loaded from — `$BIONIC_LIB` is `<root>/scripts/lib`, and `hooks/session-poker.sh` sits
-# beside `scripts/` in every layout the loader accepts — so the line carries a path the
-# orchestrator can paste, never the `<plugin-root>` placeholder. When the loader's variable
-# is absent the placeholder is the honest fallback. `<name>` is the row's own name, read off
-# the roster by the arm that refuses, when that arm has it — printed as the roster carries it,
-# single-quoted when a shell would split it or act on it (wave-21 T13).
+# widens it sent two readers to hunt for it. The root is `refuse_plugin_root` and each word is
+# `refuse_shell_word`, both in lib/refuse.sh since wave-24 T13 (D10), where the landing
+# refusal reads them too. `<name>` is the row's own name, read off the roster by the arm that
+# refuses, when that arm has it — printed as the roster carries it, single-quoted when a shell
+# would split it or act on it (wave-21 T13).
 #
 # THE FLAG FITS WHAT WAS REFUSED (wave-21 T13; walk-3b45d05 item 4). `amend` widens a suite with
 # `--suites+ <suite>` and a run with `--reexec+ '<cmd>'`. A refused suite FILE — one word, a
@@ -5686,27 +5697,13 @@ $(_budget_remedy_line "$1")"
 # a file named `why` followed by a `>` with no word, so the pasted line was a parse error before
 # `amend` ever read its arguments. `'<why>'` is one word, like `'<cmd>'`.
 _budget_remedy_line() {  # <the refused suite or run>
-  local _root="<plugin-root>" _widen="--reexec+ '<cmd>'"
-  if [ -n "${BIONIC_LIB:-}" ] && [ -d "$BIONIC_LIB/../.." ]; then
-    _root="$(cd "$BIONIC_LIB/../.." 2>/dev/null && pwd)" || _root="<plugin-root>"
-  fi
+  local _widen="--reexec+ '<cmd>'"
   case "${1:-}" in
     *[[:space:]]*) : ;;
-    *.test.sh) _widen="--suites+ $(_budget_shell_word "$1")" ;;
+    *.test.sh) _widen="--suites+ $(refuse_shell_word "$1")" ;;
   esac
   printf "widen it: bash %s/hooks/session-poker.sh amend %s %s --reason '<why>' (main runs it)" \
-    "$_root" "$(_budget_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
-}
-
-# _budget_shell_word <word> [placeholder] -> <word> as one shell argument: bare when it is made
-# only of characters no shell treats specially, single-quoted otherwise (an embedded `'` closed,
-# escaped and reopened). An empty word prints the placeholder, unquoted.
-_budget_shell_word() {
-  case "${1:-}" in
-    '') printf '%s' "${2:-}" ;;
-    *[!A-Za-z0-9._/@:+=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
-    *) printf '%s' "$1" ;;
-  esac
+    "$(refuse_plugin_root)" "$(refuse_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
 }
 
 # THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named
