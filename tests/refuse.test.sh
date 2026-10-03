@@ -732,7 +732,7 @@ section "§INV — every refusal site prints its fix or says why it cannot (wave
 # `— none:`. A SITE is a `fold_block`, `refuse`, `dp_finding`, `budget_deny` or `deny` call at
 # the start of a statement (or after `&&`, `||`, `;` or a case label), and its key is its first
 # source line, trimmed. A key shared by n sites needs n bullets.
-INV_FILE="${BIONIC_REFUSAL_INVENTORY:-$REPO_ROOT/.bionic/docs/record/wave-24-fixit-1811/refusal-inventory.md}"
+INV_FILE="$REPO_ROOT/tests/fixtures/refusal-inventory.md"
 inv_sites() {  # <source file> -> each site's first line, trimmed, one per line
   awk '
     /^[[:space:]]*#/ { next }
@@ -793,19 +793,26 @@ expect_eq "INV-c6 an empty inventory reports every key (five sites, four distinc
   "$(inv_missing "$INV_SYN/empty.md" src.sh "$INV_SYN/src.sh" | awk 'NF { c++ } END { print c + 0 }')"
 rm -rf "$INV_SYN"
 
-# THE INVENTORY IS A RECORD FILE, gitignored with the rest of `.bionic/` (A-T13.6). A clone that
-# carries no record has nothing to check this against, and says so as an advisory rather than
-# failing a suite on a file the clone was never given; the checker's own rows above still run.
-if [ -f "$INV_FILE" ]; then
-  for _inv_src in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh \
-                  hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
-    _inv_n="$(inv_sites "$REPO_ROOT/$_inv_src" | awk 'NF { c++ } END { print c + 0 }')"
-    expect_true "INV ${_inv_src}: the extractor finds its refusal sites (${_inv_n})" test "$_inv_n" -gt 0
-    expect_eq "INV ${_inv_src}: every site has a fix line or a reason in the inventory" "" \
-      "$(inv_missing "$INV_FILE" "$_inv_src" "$REPO_ROOT/$_inv_src")"
+# THE INVENTORY IS TRACKED (A-orch-40, A-T13.10): `tests/fixtures/refusal-inventory.md`, read from
+# this suite's own repo root. An ABSENT inventory is a failure, never an advisory: a clone that
+# lost the file has lost the check, and a green suite would say otherwise.
+inv_check() {  # <inventory> -> one line per problem: the file absent, or a site short of a bullet
+  local inv="$1" src
+  [ -f "$inv" ] || { printf 'absent: %s\n' "$inv"; return 0; }
+  for src in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh \
+             hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
+    inv_missing "$inv" "$src" "$REPO_ROOT/$src" | sed "s|^|$src: |"
   done
-else
-  ok "INV ADVISORY: no refusal inventory in this clone ($INV_FILE) — the four files were not checked"
-fi
+}
+expect_contains "INV-c7 an absent inventory is reported, so the check goes red" \
+  "absent: $REPO_ROOT/tests/fixtures/no-such-inventory.md" \
+  "$(inv_check "$REPO_ROOT/tests/fixtures/no-such-inventory.md")"
+for _inv_src in payload/scripts/lib/walls.sh payload/scripts/lib/stop.sh \
+                hooks/dispatch-preflight.sh hooks/stop-guard.sh; do
+  _inv_n="$(inv_sites "$REPO_ROOT/$_inv_src" | awk 'NF { c++ } END { print c + 0 }')"
+  expect_true "INV ${_inv_src}: the extractor finds its refusal sites (${_inv_n})" test "$_inv_n" -gt 0
+done
+expect_eq "INV the tracked inventory exists and every site has a fix line or a reason" "" \
+  "$(inv_check "$INV_FILE")"
 
 finish
