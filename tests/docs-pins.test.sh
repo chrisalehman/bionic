@@ -4095,4 +4095,73 @@ for _rh_rule in agent-discipline git-worktree-docs hook-authoring test-harness; 
   rh_pin "RH7: ${_rh_rule}.md's provenance line names the retired memory tier, not .bionic/memory/" "$TMP/rh-prov-${_rh_rule}.txt" "retired memory tier" ".bionic/memory/"
 done
 
+section "Section D2: wave-23 T18 — every landed candidate rule is in its owner file and pinned (REQ-5, AC-5.2; D2)"
+#
+# WHAT THIS OWNS. T8 landed the D2 candidate rules in their owner files: the repo CLAUDE.md, the
+# four path-scoped rule files, the orchestrator-dispatch block and the test-runner template. T3's
+# section RH pins the re-homed reasons; nothing pinned the landings themselves, so an edit that
+# dropped a rule would pass. One pin per landed row (34) plus the card-format rule in
+# plan-authoring.md. The report-contract row was declined (A-T3.1) and has no pin.
+#
+# Each pin asserts the row's key phrase is in its owner file, and for the block and the template
+# also in the rendered surface a session loads (dispatch.md; agents/test-runner.md). Each is proven
+# against a doctored copy with the phrase cut out, which must go red (the section RH helpers).
+# Phrases carry no retired-store wording, so this file cannot match AC-4.1's grep. The table goes
+# to a file, not a command substitution: bash 3.2 mis-parses apostrophes in a heredoc inside one.
+D2_ROWS_FILE="$TMP/d2-rows.tsv"
+cat > "$D2_ROWS_FILE" <<'D2P'
+CLAUDE.md	No consumer-project names, tools or incidents appear in anything it ships
+CLAUDE.md	Ready tasks dispatch up to capacity without asking
+CLAUDE.md	Deleting dead code the user has ruled on is a few-line commit by the orchestrator
+CLAUDE.md	becomes a fixit in a fresh canonical-sdlc run
+.claude/rules/test-harness.md	Scripted deletion of assertions leaves scars
+.claude/rules/test-harness.md	tests that check behavior are good
+.claude/rules/test-harness.md	Pin the obligation span or the normative literal
+.claude/rules/test-harness.md	A seam that substitutes the very value under test
+.claude/rules/test-harness.md	Sourced into zsh, `git cat-file -e` can spuriously return nonzero
+.claude/rules/test-harness.md	Verify time-driven machinery at an accelerated cadence
+.claude/rules/test-harness.md	`tests/run.sh` prints nothing until its queue drains
+.claude/rules/test-harness.md	a plugin dependency is keyed by `name@marketplace`
+.claude/rules/hook-authoring.md	A rule binds only as a wall
+.claude/rules/hook-authoring.md	A bad escalation is a generation-time failure
+.claude/rules/hook-authoring.md	A threshold is the smallest value consistent with telemetry
+.claude/rules/agent-discipline.md	An absence claim needs `/usr/bin/grep`
+.claude/rules/agent-discipline.md	Removing a file is the easy half
+.claude/rules/agent-discipline.md	snapshotted once at session start
+.claude/rules/agent-discipline.md	prefix-match the literal command string
+.claude/rules/agent-discipline.md	A skill is routed only when something loads it
+.claude/rules/agent-discipline.md	Steps 0-3 need a human present
+.claude/rules/agent-discipline.md	Run `git log -1` before every `git commit --amend`
+.claude/rules/plan-authoring.md	Provenance is one short clause
+.claude/rules/plan-authoring.md	pipe a synthetic commit payload through `bash-walls.sh`
+.claude/rules/plan-authoring.md	A tune row's numeric target is a round number, not a gate
+.claude/rules/plan-authoring.md	the named size reduction is the acceptance criterion
+.claude/rules/plan-authoring.md	check what it actually carries
+agents-src/blocks/orchestrator-dispatch.md	stop-orders.sh stopped <name>` closes the row of an agent already stopped with TaskStop
+agents-src/blocks/orchestrator-dispatch.md	Any TaskUpdate on a task a named agent owns resumes that agent
+agents-src/blocks/orchestrator-dispatch.md	read only when that call returns
+agents-src/blocks/orchestrator-dispatch.md	Split a task that spans many files across writers at dispatch time
+agents-src/blocks/orchestrator-dispatch.md	The six-axis review can run during Step 5 on the fixed diff
+agents-src/blocks/orchestrator-dispatch.md	On a model-tier outage, hold
+agents-src/templates/test-runner.md.tmpl	A revert-and-watch stubs the production file only
+.claude/rules/plan-authoring.md	The Step-2 card parses decisions only as
+D2P
+d2_i=0
+while IFS=$'\t' read -r _d2_file _d2_phrase; do
+  [ -n "$_d2_file" ] || continue
+  d2_i=$((d2_i + 1))
+  rh_flat "${REPO}/${_d2_file}" > "$TMP/d2-own-${d2_i}.txt"
+  rh_pin "D2.${d2_i}: ${_d2_file} carries \"${_d2_phrase}\"" "$TMP/d2-own-${d2_i}.txt" "$_d2_phrase" ""
+  _d2_rend=""
+  case "$_d2_file" in
+    agents-src/blocks/orchestrator-dispatch.md) _d2_rend="skills/canonical-sdlc/dispatch.md" ;;
+    agents-src/templates/test-runner.md.tmpl) _d2_rend="agents/test-runner.md" ;;
+  esac
+  if [ -n "$_d2_rend" ]; then
+    rh_flat "${REPO}/${_d2_rend}" > "$TMP/d2-rend-${d2_i}.txt"
+    rh_pin "D2.${d2_i}r: rendered ${_d2_rend} carries \"${_d2_phrase}\"" "$TMP/d2-rend-${d2_i}.txt" "$_d2_phrase" ""
+  fi
+done < "$D2_ROWS_FILE"
+expect_true "D2-count: 34 landed rows plus the card-format rule were read (35)" test "$d2_i" -eq 35
+
 finish
