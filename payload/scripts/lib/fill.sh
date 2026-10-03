@@ -265,14 +265,19 @@ fill_step_token() {  # <plan> -> a numeric step, a `T<n>`, or ""
 # IT PRINTS IDS, NOT NAMES. `fill_name` is the id -> agent-name map and it needs a roster,
 # which is a session's fact rather than a plan's; the tick maps what it prints, the wall
 # names the rows.
-fill_ready_set() {  # <plan> <rung> <open> -> ready ids, one per line
+#
+# A ROW ALREADY ANSWERED IS LEFT OUT BEFORE THE TRIM (wave-24 T27; D2, AC-4.7). The optional
+# fourth operand is the standing decline's ids (`fill_standing_decline`, below): those rows are
+# skipped and do not take a slot, so the gap goes to the next ready row in table order — the
+# rows the stop wall names when it refuses a turn for the rows the decline did not answer.
+fill_ready_set() {  # <plan> <rung> <open> [<answered ids, space-joined>] -> ready ids, one per line
   local plan="${1:-}" rung="${2:-}" open="${3:-}" gap
   fill_ledger_live "$plan" || return 0
   case "$rung" in ''|*[!0-9]*) return 0 ;; esac
   case "$open" in ''|*[!0-9]*) open=0 ;; esac
   gap=$(( rung - open ))
   [ "$gap" -gt 0 ] || return 0
-  units_memoised "$plan" _fill_ready_rows "$plan" "$gap"
+  units_memoised "$plan" _fill_ready_rows "$plan" "$gap" "${4:-}"
 }
 
 # _fill_ready_rows <plan> <gap> -> the step token's ready ids, trimmed to <gap>. The body of
@@ -281,14 +286,15 @@ fill_ready_set() {  # <plan> <rung> <open> -> ready ids, one per line
 # table (wave-19 REQ-6, D7; AC-6.2). The gates above ask only `current:` (already read once
 # per process) and arithmetic, so a closed gap or a ledger that is not live still reads no
 # table at all; which gate refuses first changes nothing, since each of them prints nothing.
-_fill_ready_rows() {  # <plan> <gap>
-  local plan="${1:-}" gap="${2:-0}" step ready id n=0
+_fill_ready_rows() {  # <plan> <gap> [<answered ids>]
+  local plan="${1:-}" gap="${2:-0}" skip=" ${3:-} " step ready id n=0
   step="$(fill_step_token "$plan")"
   [ -n "$step" ] || return 0
   ready="$(units_ready "$plan" "$step")" || return 0
   [ -n "$ready" ] || return 0
   while IFS= read -r id; do
     [ -n "$id" ] || continue
+    case "$skip" in *" $id "*) continue ;; esac
     [ "$n" -lt "$gap" ] || break
     printf '%s\n' "$id"
     n=$((n + 1))
@@ -360,4 +366,50 @@ fill_row_launched() {  # <task id> <names, comma-joined> -> 0 launched · 1 not
     case "$base" in *"-$id") return 0 ;; esac
   done
   return 1
+}
+
+# ── THE STANDING FILL DECLINE (wave-24 T8, T27; D2, AC-4.7) ──────────────────
+#
+# A DECLINE STANDS AGAINST THE READY SET IT ANSWERED. A `fill-declined: <reason>` whose reason
+# still holds next turn ("T7 waits on T6's merge") used to have to be written again on every
+# turn end. The fill ledger keeps each Stop's ready set, `current:` and decline, so the
+# session's latest declined line is the standing answer: the ids it answered are its ready set
+# less the rows that turn launched, and it stands while `current:` reads as it did then. A row
+# it never saw, or a moved `current:`, is unanswered. Another session's line is not this
+# conversation's answer.
+#
+# ONE READER, TWO PROCESSES (Step-6 review C2/U1). The stop wall's collector refuses a turn
+# only for the rows this does not answer, and the tick prints it and leaves those rows out of
+# its FILL; both call this, so the row the wall treats as answered is never the row the tick
+# asks for. `tests/cross-gate-agreement.test.sh` §SD asks both over one fixture.
+#
+# A DECLINE IS A REASON (A-T8.7): the line's `declined=` must carry a letter or a digit, the
+# rule the turn's own decline is held to, so a line written before that rule with `declined=—`
+# answers nothing (review C4). Read from the ledger's last FILL_STANDING_WINDOW lines; a decline
+# older than that stands for nothing, which refuses more. A ledger that is a symlink is not read.
+#
+# Prints `<at>US<reason>US<ids, space-joined>` (US = \037), or nothing when no decline stands.
+FILL_STANDING_WINDOW=2000
+fill_standing_decline() {  # <ledger path> <session id> <current: as read now>
+  local led="${1:-}" sid="${2:-}" cur="${3:-}" line at st_cur ready launched reason id ids=""
+  [ -n "$led" ] && [ -n "$sid" ] && [ -f "$led" ] && [ ! -L "$led" ] || return 0
+  line="$(tail -n "$FILL_STANDING_WINDOW" "$led" 2>/dev/null | awk -v sid="$sid" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    index($0, "fill-ledger/v1|") == 1 && kv($0, "session") == sid && kv($0, "declined") ~ /[[:alnum:]]/ {
+      last = kv($0, "at") "\037" kv($0, "current") "\037" kv($0, "ready") "\037" kv($0, "launched") "\037" kv($0, "declined")
+    }
+    END { if (last != "") print last }')"
+  [ -n "$line" ] || return 0
+  IFS=$'\037' read -r at st_cur ready launched reason <<< "$line"
+  [ "$st_cur" = "$cur" ] || return 0
+  for id in ${ready//,/ }; do
+    fill_row_launched "$id" "$launched" && continue
+    ids="${ids}${ids:+ }${id}"
+  done
+  [ -n "$ids" ] || return 0
+  printf '%s\037%s\037%s\n' "$at" "$reason" "$ids"
 }

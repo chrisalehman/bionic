@@ -895,6 +895,26 @@ $(patrol_live_sessions)
 EOF
 }
 
+# ─── THE TICK'S DIGEST FILE: ITS PATH AND ITS READER (wave-24 T7, T27; D4, D5) ──────────────
+#
+# TWO PROCESSES, ONE FILE. `session-poker.sh tick` writes the digest beside its stamp (its
+# `tick_digest_file` passes the root it resolved), and the stop library's collector reads its
+# `duty=` and `at=` to judge whether a tick turn owes the task-list refresh. The path and the
+# reader live here, which both already source, so a renamed file cannot leave the stop wall
+# reading a path the tick no longer writes (Step-6 review finding 15; critic I3). Not
+# `patrol-digest-`: `patrol-*.state` is the stamp glob, and a file under it reads as the stamp
+# of a session named `digest-<sid>` (A-orch-9).
+tick_digest_path() {  # <project root> <session-id> -> absolute path, or nothing
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  printf '%s/.bionic/tmp/tick-digest-%s.state' "$1" "$2"
+}
+
+# One `key=value` line of the digest file, or empty. A symlink is no file.
+tick_digest_field() {  # <digest file> <key>
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
+}
+
 # ─── THE FILL LEDGER'S PATH AND ITS REPORT (epic-23 wave-20 REQ-5, AC-5.5/AC-5.6; Δ2; ADR-036) ──
 #
 # TWO PROCESSES READ ONE FILE, so its path and its fold are written once, here: the stop
