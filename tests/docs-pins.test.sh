@@ -4194,4 +4194,51 @@ expect_eq "HOLD-d: the unconditional 'before the tick' ListAgents line is gone f
 expect_eq "HOLD-d2: …and the pattern finds the shape it targets" "1" \
   "$(printf -- '- **List the panel.** `ListAgents`, before the tick, for a fresh answer.\n' | grep -c 'ListAgents`, before the tick, for a fresh answer' | tr -cd '0-9')"
 
+section "Section VERB: wave-24 T15 — the steps name the plan-row verbs where they told a hand edit (REQ-9, AC-9.8; D14)"
+#
+# A verb only the usage text knew would be a verb nobody types: the step that tells the run to
+# move `current:`, write a step line, set a row's cells or ledger a dispatch names the verb that
+# does it, in the template and in its render. Each retired hand-edit sentence is gone, with a
+# control that its pattern finds the shape it targets, and each verb the doctrine names is one
+# the poker accepts — a renamed verb fails here rather than in a run.
+VERB_BLOCK="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
+VERB_S3_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/steps/3.md.tmpl"
+VERB_S5_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl"
+verb_pin() {  # <id> <needle> <file>…
+  local id="$1" needle="$2" f; shift 2
+  for f in "$@"; do
+    if has_pin "$f" "$needle"; then ok "$id: ${f#"$REPO"/} names $needle"
+    else no "$id: ${f#"$REPO"/} names $needle" "file: $f"; fi
+  done
+}
+verb_pin VERB-a '`task-set <id> status=active`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-b '`step-line`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-c '`current <N>`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-d '`ledger-add`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-e '`ledger-set`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-f '`session-poker.sh current <N>`' "$STEP3_MD" "$VERB_S3_TMPL"
+verb_pin VERB-g '`task-set <id> worktree=<tree>`' "$STEP3_MD" "$VERB_S3_TMPL"
+verb_pin VERB-g2 '`step-line <N> <text>`' "$STEP3_MD" "$VERB_S3_TMPL"
+verb_pin VERB-h '`session-poker.sh current 6`' "$STEP5_MD" "$VERB_S5_TMPL"
+# The retired sentences, each beside a control that its pattern matches the sentence it was.
+verb_gone() {  # <id> <needle> <the old sentence> <file>
+  expect_eq "$1: ${4#"$REPO"/} no longer tells the hand edit" "0" \
+    "$(_flatten "$4" | grep -cF -- "$2" | tr -cd '0-9')"
+  expect_eq "$1c: …and the pattern finds the shape it targets" "1" \
+    "$(printf '%s\n' "$3" | grep -cF -- "$2" | tr -cd '0-9')"
+}
+verb_gone VERB-i 'bump `current:` and replace the line in place' \
+  'one `Step N: <evidence>` line per step; bump `current:` and replace the line in place when advancing.' "$STEP3_MD"
+verb_gone VERB-j "Write the tree's name into the row's" \
+  "Write the tree's name into the row's \`worktree\` cell as you create the tree." "$STEP3_MD"
+verb_gone VERB-k "Write the unit's row the moment you dispatch it" \
+  "Write the unit's row the moment you dispatch it, status \`active\`." "$DISPATCH_MD"
+verb_gone VERB-l 'Probe it before advancing with' \
+  'Probe it before advancing with `git commit --dry-run --allow-empty`: every wall runs, nothing is written.' "$STEP5_MD"
+for _vv in task-set step-line current ledger-add ledger-set; do
+  _vout="$(CLAUDE_CODE_SESSION_ID=0123456789abcdef bash "$POKER_SH" "$_vv" 2>&1)"
+  expect_nonempty "VERB-m precondition: the poker answered $_vv" "$_vout"
+  expect_absent "VERB-m: the poker accepts the documented verb $_vv" "unknown verb" "$_vout"
+done
+
 finish

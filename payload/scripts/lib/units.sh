@@ -1096,3 +1096,261 @@ units_add_row() {
       }
     }' "$plan"
 }
+
+# ── THE PLAN-ROW PROJECTORS (wave-24 T15; REQ-9, D14) ─────────────────────────
+#
+# Four more projectors in `units_add_row`'s mould, one per hand edit a run used to make to its
+# own plan: a cell of a table row, a `- Step N:` or `- T<n>:` line, `current:`, and the
+# fields of a step's evidence block. The poker's plan-row verbs (`task-set`, `ledger-add`,
+# `ledger-set`, `step-line`, `current`) each run one of them onto a COPY and judge the copy
+# before anything is swapped in — the task-add transaction, unchanged.
+#
+# PURE, AS EVERY VERB HERE IS: each prints the WHOLE plan and writes nothing. Fence-aware like
+# `_units_read`: a table or a state line inside a ``` example is documentation and is never
+# edited. Every operand reaches awk through ENVIRON, never -v (T10b: -v interprets
+# backslashes). Every line a projector does not own is printed as it was read, byte for byte,
+# so `git diff` of a projection shows the target line and nothing else.
+#
+# A VALUE MAY CARRY NO `|`, TAB OR LINE BREAK (AC-9.2). `units_add_row` escapes a pipe because
+# its operands are an author's prose; these operands are cell values typed at a prompt, and a
+# pipe there is far likelier a slip than a cell meant to hold one. The caller refuses first,
+# and each projector refuses again (exit 4) rather than trust it.
+
+# units_table_cells <plan> <set|add> <section> <id> <name=value>… -> the whole plan with the
+#   row whose id cell is <id> given those cells (`set`), or a new row with that id appended
+#   after the table's last row (`add`; unnamed cells `—`). <section> is `tasks` (the first
+#   `## Tasks` table, the one `_units_read` parses) or `ledger` (the first `## Dispatch ledger`
+#   table). Names are the header's own cells, matched case-insensitively; `kind` and `rigor`
+#   name slot 3 at either scale, as `_units_read` takes them.
+#   Exit 1 no such table · 2 `set`: no row with that id, `add`: the id is taken · 3 a name the
+#   header does not carry · 4 a value with a forbidden byte · 5 `set`: more than one row with
+#   that id. Silent on every refusal.
+#
+# THE ROW IS RE-JOINED CELL FOR CELL. A set cell is written ` <value> `; every other cell keeps
+# its bytes, `\|` escapes included — they are folded to SUBSEP before the split and restored
+# after, the rule `units_add_row` states.
+units_table_cells() {
+  local plan="${1:-}" mode="${2:-}" sect="${3:-}" id="${4:-}" pairs="" kv
+  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$id" ] || return 1
+  case "$mode" in set|add) : ;; *) return 1 ;; esac
+  case "$sect" in tasks|ledger) : ;; *) return 1 ;; esac
+  shift 4
+  for kv in "$@"; do
+    case "$kv" in *=*) : ;; *) return 3 ;; esac
+    case "$kv" in *'|'*|*$'\t'*|*$'\n'*|*$'\r'*) return 4 ;; esac
+    pairs="${pairs}${kv%%=*}"$'\t'"${kv#*=}"$'\n'
+  done
+  UT_MODE="$mode" UT_SECT="$sect" UT_ID="$id" UT_PAIRS="$pairs" awk '
+    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+    function esc(v)  { gsub(/\\[|]/, SUBSEP, v); return v }
+    function unesc(v,   parts, m, i, out) {
+      m = split(v, parts, SUBSEP); out = parts[1]
+      for (i = 2; i <= m; i++) out = out "\\" "|" parts[i]
+      return out
+    }
+    BEGIN {
+      mode = ENVIRON["UT_MODE"]; sect = ENVIRON["UT_SECT"]; want = ENVIRON["UT_ID"]
+      np = split(ENVIRON["UT_PAIRS"], pl, "\n")
+      for (p = 1; p <= np; p++) {
+        if (pl[p] == "") continue
+        t = index(pl[p], "\t")
+        k = tolower(substr(pl[p], 1, t - 1)); v = substr(pl[p], t + 1)
+        if (sect == "tasks" && k == "rigor") k = "kind"
+        nk++; key[nk] = k; val[k] = (trim(v) == "" ? "—" : trim(v))
+      }
+    }
+    { L[++nl] = $0 }
+    END {
+      state = 0
+      for (i = 1; i <= nl; i++) {
+        line = L[i]
+        if (line ~ /^[ \t]*```/) { fence = !fence; continue }
+        if (fence) continue
+        if (line ~ /^[ \t]*#/) {
+          if (state == 1 || state == 2) { state = 3; continue }
+          if (state == 0 && sect == "tasks" && line ~ /^##[ \t]+[Tt]asks([ \t].*)?$/) state = 1
+          if (state == 0 && sect == "ledger" && line ~ /^##[ \t]+[Dd]ispatch[ \t]+[Ll]edger([ \t].*)?$/) state = 1
+          continue
+        }
+        if (state == 1) {
+          if (line !~ /^[ \t]*\|/) continue
+          nh = split(esc(line), hc, "|")
+          for (c = 1; c <= nh; c++) {
+            t = tolower(trim(hc[c]))
+            if (sect == "tasks" && t == "rigor") t = "kind"
+            if (t != "" && !(t in col)) { col[t] = c; name[c] = t }
+          }
+          if (!("id" in col)) { split("", col); split("", name); continue }
+          state = 2; continue
+        }
+        if (state == 2) {
+          if (line !~ /^[ \t]*\|/) { state = 3; continue }
+          lastrow = i
+          m = split(esc(line), f, "|")
+          if (trim(f[col["id"]]) == want) { hits++; at = i }
+        }
+      }
+      if (!lastrow) exit 1
+      for (p = 1; p <= nk; p++) if (!(key[p] in col)) exit 3
+      if (mode == "set" && hits == 0) exit 2
+      if (mode == "set" && hits > 1) exit 5
+      if (mode == "add" && hits > 0) exit 2
+      if (mode == "set") {
+        m = split(esc(L[at]), f, "|")
+        for (p = 1; p <= nk; p++) f[col[key[p]]] = " " val[key[p]] " "
+        out = f[1]; for (c = 2; c <= m; c++) out = out "|" f[c]
+        L[at] = unesc(out)
+      } else {
+        val["id"] = want
+        row = "|"
+        for (c = 2; c < nh; c++) row = row " " ((name[c] in val) ? val[name[c]] : "—") " |"
+      }
+      for (i = 1; i <= nl; i++) {
+        print L[i]
+        if (mode == "add" && i == lastrow) print row
+      }
+    }' "$plan"
+}
+
+# units_step_line <plan> <N|T<n>> <text> [append] -> the whole plan with that line of
+#   `## SDLC State` reading `- Step N: <text>` (or `- T<n>: <text>`); with `append`, <text>
+#   follows the line's own text after `; `. A line that is not there is added: a step line
+#   after the last `Step M:` line and its indented block, a task line after the last `- T<n>:`
+#   line (or, with none, at the end of the section). Exit 1 no `## SDLC State` · 4 a text with
+#   a line break.
+#
+# THE LINE IS FOUND AS THE GATE FINDS IT: `^[ \t]*-?[ \t]*Step[ \t]+N[ \t]*:` (walls.sh's own
+# pattern), the first one in the section. Its prefix — indent, marker, key, colon — is kept;
+# only the text after it is replaced, and the block lines under it are not touched.
+units_step_line() {
+  local plan="${1:-}" key="${2:-}" text="${3:-}" app="${4:-}"
+  [ -n "$plan" ] && [ -f "$plan" ] || return 1
+  case "$text" in *$'\n'*|*$'\r'*) return 4 ;; esac
+  US_KEY="$key" US_TEXT="$text" US_APP="$app" awk '
+    BEGIN {
+      key = ENVIRON["US_KEY"]; text = ENVIRON["US_TEXT"]; app = (ENVIRON["US_APP"] == "append")
+      isstep = (key !~ /^T/)
+      kq = key; gsub(/[.]/, "[.]", kq)
+      pat = isstep ? ("^[ \t]*-?[ \t]*Step[ \t]+" kq "[ \t]*:") : ("^[ \t]*-?[ \t]*" kq "[ \t]*:")
+    }
+    { L[++nl] = $0 }
+    END {
+      for (i = 1; i <= nl; i++) {
+        line = L[i]
+        if (line ~ /^[ \t]*```/) { fence = !fence; continue }
+        if (fence) continue
+        if (line ~ /^##[ \t]/) {
+          if (sdlc == 1) sdlc = 2
+          if (!seen && line ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seen = 1; last = i }
+          continue
+        }
+        if (sdlc != 1) continue
+        if (line ~ /[^ \t]/) last = i
+        if (!at && match(line, pat)) at = i
+        if (line ~ /^[ \t]*-?[ \t]*Step[ \t]+[0-9]+[ab]?[ \t]*:/) { sline = i; inst = 1; intl = 0; continue }
+        if (line ~ /^[ \t]*-?[ \t]*T[0-9]+[ \t]*:/) { if (!tfirst) tfirst = i; tline = i; intl = 1; inst = 0; continue }
+        if ((inst || intl) && line ~ /^[ \t]+[^ \t]/ && line !~ /^[ \t]*-/) {
+          if (inst) sline = i; else tline = i
+          continue
+        }
+        inst = 0; intl = 0
+      }
+      if (!seen) exit 1
+      if (at) {
+        line = L[at]; match(line, pat)
+        pre = substr(line, 1, RLENGTH); rest = substr(line, RLENGTH + 1)
+        sub(/^[ \t]+/, "", rest); sub(/[ \t]+$/, "", rest)
+        L[at] = pre " " ((app && rest != "") ? rest "; " text : text)
+      } else {
+        # AFTER a line, or BEFORE the first task line when a step line has no step to follow.
+        newl = (isstep ? "- Step " key ": " : "- " key ": ") text
+        if (isstep && !sline && tfirst) before = tfirst
+        else after = isstep ? (sline ? sline : last) : (tline ? tline : last)
+      }
+      for (i = 1; i <= nl; i++) {
+        if (i == before) print newl
+        print L[i]
+        if (i == after) print newl
+      }
+    }' "$plan"
+}
+
+# units_set_current <plan> <value> -> the whole plan with the first `current:` line of
+#   `## SDLC State` reading `current: <value>`. Exit 1 when the section or the line is absent.
+#   Which values are legal is the caller's (the poker refuses 9, close-out's alone); this only
+#   moves the line, which is all a hand edit of it ever did.
+units_set_current() {
+  local plan="${1:-}" v="${2:-}"
+  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$v" ] || return 1
+  case "$v" in *[!A-Za-z0-9]*) return 4 ;; esac
+  UC_V="$v" awk '
+    BEGIN { v = ENVIRON["UC_V"] }
+    /^[ \t]*```/ { fence = !fence; print; next }
+    fence { print; next }
+    /^##[ \t]/ { insdlc = ($0 ~ /^##[ \t]+SDLC State([ \t].*)?$/) && !seen; if (insdlc) seen = 1; print; next }
+    insdlc && !done && /^current[ \t]*:/ { print "current: " v; done = 1; next }
+    { print }
+    END { if (!done) exit 1 }' "$plan"
+}
+
+# units_step_fields <plan> <N> <key=value>… -> the whole plan with each named field written as
+#   an indented `  key: value` line under `- Step N:` — after the block's last line — when the
+#   block does not carry that key already. A key the block has is left as written: this fills
+#   what is missing and never rewrites what is there. Exit 1 no `Step N:` line in
+#   `## SDLC State` · 4 a value with a line break.
+#
+# THE BLOCK IS THE GATE'S: the indented lines under the step line, up to the next line that is
+# not indented (walls.sh `extract_continuation`), blank lines skipped; a key is present when a
+# line of it starts `key:` (walls.sh `block_has`).
+units_step_fields() {
+  local plan="${1:-}" n="${2:-}" pairs="" kv
+  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$n" ] || return 1
+  shift 2
+  for kv in "$@"; do
+    case "$kv" in *=*) : ;; *) return 3 ;; esac
+    case "$kv" in *$'\n'*|*$'\r'*) return 4 ;; esac
+    pairs="${pairs}${kv%%=*}"$'\t'"${kv#*=}"$'\n'
+  done
+  UF_N="$n" UF_PAIRS="$pairs" awk '
+    BEGIN {
+      pat = "^[ \t]*-?[ \t]*Step[ \t]+" ENVIRON["UF_N"] "[ \t]*:"
+      np = split(ENVIRON["UF_PAIRS"], pl, "\n")
+      for (p = 1; p <= np; p++) {
+        if (pl[p] == "") continue
+        t = index(pl[p], "\t"); nk++
+        key[nk] = substr(pl[p], 1, t - 1); val[nk] = substr(pl[p], t + 1)
+      }
+    }
+    { L[++nl] = $0 }
+    END {
+      for (i = 1; i <= nl; i++) {
+        line = L[i]
+        if (line ~ /^[ \t]*```/) { fence = !fence; continue }
+        if (fence) continue
+        if (line ~ /^##[ \t]/) {
+          if (sdlc == 1) sdlc = 2
+          if (!seen && line ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seen = 1 }
+          continue
+        }
+        if (sdlc != 1) continue
+        if (!at) {
+          if (match(line, pat)) {
+            at = i; endb = i; inb = 1
+            rest = substr(line, RLENGTH + 1); sub(/^[ \t]+/, "", rest)
+            for (p = 1; p <= nk; p++) if (rest ~ ("^" key[p] "[ \t]*:")) has[p] = 1
+          }
+          continue
+        }
+        if (!inb) continue
+        if (line ~ /^[ \t]*$/) continue
+        if (line ~ /^[^ \t]/ || line ~ /^[ \t]*-?[ \t]*Step[ \t]+[0-9]+[ab]?[ \t]*:/) { inb = 0; continue }
+        endb = i
+        for (p = 1; p <= nk; p++) if (index(line, key[p]) && line ~ ("^[ \t]*" key[p] "[ \t]*:")) has[p] = 1
+      }
+      if (!at) exit 1
+      for (i = 1; i <= nl; i++) {
+        print L[i]
+        if (i == endb) for (p = 1; p <= nk; p++) if (!has[p]) print "  " key[p] ": " val[p]
+      }
+    }' "$plan"
+}

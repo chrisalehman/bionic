@@ -2676,7 +2676,7 @@ Fix: on the user's literal 'approved', record 'approved-by: <user> <ISO-UTC> \"<
 # demanding it here would be the Verify gate's demand moved four steps early.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_fails_when() {
-  local step rows line ac block_txt fw
+  local step rows ac
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
@@ -2686,22 +2686,46 @@ validate_fails_when() {
   rows=$(echo "$MATRIX" | grep -E '^[[:space:]]*\|')
   [ -n "$rows" ] || return 0
 
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
-    ac=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    [ "$ac" = "AC" ] && continue
-    [ -n "$ac" ] || continue
-    block_txt=$(matrix_block "$ac")
-    [ -n "$block_txt" ] || continue
-    fw=$(echo "$block_txt" | grep -E '^[[:space:]]*fails-when[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*fails-when[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-    [ -n "$fw" ] && continue
-    _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
+  # ONE PASS, NOT SIX PROCESSES A ROW (wave-24 T15; REQ-9 AC-9.7). The walk used to fork an
+  # awk for the row's AC, `matrix_block` for its block, and grep|head|sed|sed for the key — 240
+  # processes and half a second on a 40-row matrix, paid by every commit from Step 4 on and by
+  # every plan-row verb's dry commit. The awk below is the same walk, rule for rule: the table
+  # rows in order, the separator and the `AC` header skipped, the AC as the cell between the
+  # first two pipes; its block as `matrix_block` reads it (every header line whose bullet-
+  # stripped text begins `<AC>:`, then the lines under it until a line that is not indented);
+  # a block with no non-empty line is no block; and the FIRST `fails-when:` line of the block
+  # is the one judged, empty after its key or not. It prints the first AC that fails.
+  ac=$(printf '%s\n' "$MATRIX" | awk '
+    { L[++n] = $0 }
+    END {
+      for (i = 1; i <= n; i++) {
+        line = L[i]
+        if (line !~ /^[[:space:]]*\|/) continue
+        if (line ~ /^[[:space:]]*\|[-|:[:space:]]*$/) continue
+        split(line, c, "|"); ac = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", ac)
+        if (ac == "AC" || ac == "") continue
+        if (ac in ok) continue
+        key = ac ":"; f = 0; body = 0; seen = 0; fw = ""
+        for (j = 1; j <= n; j++) {
+          hdr = L[j]; sub(/^[-*+][[:space:]]+/, "", hdr)
+          if (index(hdr, key) == 1) { f = 1; continue }
+          if (L[j] ~ /^[^[:space:]]/) f = 0
+          if (!f) continue
+          if (L[j] != "") body = 1
+          if (!seen && L[j] ~ /^[[:space:]]*fails-when[[:space:]]*:/) {
+            seen = 1; fw = L[j]
+            sub(/^[[:space:]]*fails-when[[:space:]]*:[[:space:]]*/, "", fw); sub(/[[:space:]]+$/, "", fw)
+          }
+        }
+        if (!body || fw != "") { ok[ac] = 1; continue }
+        print ac; exit
+      }
+    }')
+  [ -n "$ac" ] || return 0
+  _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
 Plan: $PLAN
 Fix: add 'fails-when: <the planted defect this eval must go red on>' to the '${ac}:' block — it is authored in the spec's '## Eval design' and rendered here."
-    refuse exit2 commit "that matrix row names no 'fails-when:'" "add a 'fails-when:' line" "$_eg_detail"
-  done <<< "$rows"
+  refuse exit2 commit "that matrix row names no 'fails-when:'" "add a 'fails-when:' line" "$_eg_detail"
   return 0
 }
 
@@ -4584,7 +4608,7 @@ validate_dispatch_ledger() {
   [ "$RIGOR" = "audited" ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
-  local tasks rows line id ev violations findings
+  local tasks rows id ev violations findings _eg_ph
   # THE ROWS AND THE INVARIANTS BOTH COME FROM lib/units.sh (REQ-1e, spec §2 D3).
   # This is the check the widened table breaks hardest: `| id | step | kind | task |
   # agent | deps | size | serves | Files | status |` puts `agent` at the `$6` this
@@ -4654,21 +4678,39 @@ Fix: repair each row named above; the columns are id | step | kind | task | agen
   refuse_missing_evidence_lines "$(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }')"
   refuse_unlaunched_rows "$(printf '%s\n' "$findings" \
     | awk '$1 == "launch" { v = $0; sub(/^launch [^ ]+ /, "", v); print $2 ": " v }')"
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    id=$(units_field "$line" id)
-    case "$id" in T[0-9]*) : ;; *) continue ;; esac
-    # Evidence line in ## SDLC State (anchored, same lookup as task scale).
-    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
-         | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-    if is_placeholder_value "$ev"; then
-      _eg_detail="canonical-sdlc dispatched task ${id} evidence line is a placeholder ('${ev}').
+  # Evidence line in ## SDLC State (anchored, same lookup as task scale), judged for a
+  # placeholder. ONE PASS (wave-24 T15; REQ-9 AC-9.7): this walk forked grep|head|sed|sed for
+  # the line and sed|tr for the test, six processes a row; the awk is the same lookup — the
+  # first section line matching `^[[:space:]]*-?[[:space:]]*<id>[[:space:]]*:`, its text after
+  # that prefix with trailing space trimmed — and `is_placeholder_value`'s whole-value test
+  # (trimmed, lower-cased, one of its seven tokens). It prints the first `<id><TAB><ev>` that is
+  # a placeholder, rows in table order.
+  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  _eg_ph=$(printf '%s\n' "$SECTION" | EG_IDS="$(printf '%s\n' "$rows" | awk -F'\t' '$1 ~ /^T[0-9]/ { print $1 }')" awk '
+    { L[++n] = $0 }
+    END {
+      m = split(ENVIRON["EG_IDS"], ids, "\n")
+      for (k = 1; k <= m; k++) {
+        id = ids[k]; if (id == "") continue
+        pat = "^[[:space:]]*-?[[:space:]]*" id "[[:space:]]*:"
+        for (i = 1; i <= n; i++) {
+          if (L[i] !~ pat) continue
+          ev = L[i]; sub(pat "[[:space:]]*", "", ev); sub(/[[:space:]]+$/, "", ev)
+          v = ev; sub(/^[[:space:]]+/, "", v); v = tolower(v)
+          if (v == "todo" || v == "pending" || v == "in progress" || v == "inprogress" || v == "xxx" || v == "tbd" || v == "placeholder") {
+            printf "%s\t%s\n", id, ev; exit
+          }
+          break
+        }
+      }
+    }')
+  if [ -n "$_eg_ph" ]; then
+    id="${_eg_ph%%$'\t'*}"; ev="${_eg_ph#*$'\t'}"
+    _eg_detail="canonical-sdlc dispatched task ${id} evidence line is a placeholder ('${ev}').
 Plan: $PLAN
 Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing."
-      refuse exit2 commit "the dispatched task's evidence is a placeholder" "replace it with evidence" "$_eg_detail"
-    fi
-  done <<< "$rows"
+    refuse exit2 commit "the dispatched task's evidence is a placeholder" "replace it with evidence" "$_eg_detail"
+  fi
   return 0
 }
 
@@ -5015,7 +5057,9 @@ return 0
 # ─── _wall_poker_contract_verb — is this a call of a contract-changing poker verb ─
 #
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
-# `session-poker.sh amend|extend|task-add`; 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
+# `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14); 1 otherwise (wave-20
+# T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5062,7 +5106,8 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
     shift
     _next="${1:-}"
     case "$_next" in
-      amend|extend|task-add|hold) _WALL_POKER_VERB="$_next"; return 0 ;;
+      amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set)
+        _WALL_POKER_VERB="$_next"; return 0 ;;
     esac
   done <<< "$(git_argv_expand "$1")"
   return 1
