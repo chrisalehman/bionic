@@ -468,4 +468,98 @@ selfcheck c  hot-b.sh
 selfcheck d  hot-d.sh
 selfcheck e  hot-e.sh
 
+# ---------- the plan-row verbs ----------
+
+VERB_BUDGET=1
+section "4 — §VERB: each plan-row verb under ${VERB_BUDGET}s on a 66 KB plan (wave-24 T15; REQ-9 AC-9.7, D14)"
+#
+# The five verbs are typed by the orchestrator in its own turn, so their wall-clock is the
+# turn's. Each runs the whole task-add transaction — the projection through units.sh, a dry
+# commit through the real bash-walls.sh, the checksum and the swap — on a plan the size of
+# this wave's own (66 KB: 25 task rows, 40 matrix rows, a 30-row dispatch ledger, the rest task
+# detail). The witness is the verb's own success line beside exit 0, which it prints only after
+# the dry commit admitted the copy and the copy was swapped in. The plan is restored from its
+# pristine copy before each shell's run, so `current 4` moves under both shells.
+POKER_SH="${BIONIC_HOOKS_DIR}/session-poker.sh"
+/bin/bash -n "$POKER_SH" || { echo "hook-timeout: $POKER_SH does not parse — suite refuses to run"; exit 1; }
+R_VERB="$(mk_repo verb)"
+VERB_PLAN="$R_VERB/.bionic/docs/plans/epic-01-demo/wave-01-verb.plan.md"
+mkdir -p "$R_VERB/.bionic/docs/specs/epic-01-demo"
+printf '# requirements\n' > "$R_VERB/.bionic/docs/specs/epic-01-demo/wave-01-verb.requirements.md"
+printf '# spec\n' > "$R_VERB/.bionic/docs/specs/epic-01-demo/wave-01-verb.spec.md"
+python3 - "$VERB_PLAN" <<'PY'
+import sys
+plan = sys.argv[1]
+out = ["---", "governing-skill: canonical-sdlc", "canonical_sdlc_version: 14", "intent: bugfix",
+       "rigor: audited", "scale: wave", "multi_agent: true", "use_worktree: true", "has_ui: false",
+       "walk: exempt", "deploy_target: n/a",
+       "parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe", "---", "",
+       "# fixture wave", "", "## SDLC State", "", "current: 3", "working-branch: feature/t4",
+       'approved-by: fixture 2026-09-23T00:00Z "approved"', "",
+       "- Step 1: requirements: specs/epic-01-demo/wave-01-verb.requirements.md",
+       "- Step 2: spec: specs/epic-01-demo/wave-01-verb.spec.md",
+       "- Step 3: plan: plans/epic-01-demo/wave-01-verb.plan.md",
+       "- Step 4: opened", "  worktree: .worktrees/01-verb", "  base-sha: abc1234",
+       "  branch: wave/01-verb"]
+for i in range(1, 25):
+    out.append("- T%d: landed — merge %07x into wave/01-verb; evidence record/T%d.md" % (i, i * 4099, i))
+out.append("- T25: pending dispatch — the floor after every build row")
+out += ["", "## Tasks", "", "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+for i in range(1, 25):
+    out.append("| T%d | 4 | build | rewrite reader %d so it walks the table once | w-T%d | — | 30 | REQ-%d | lib/r%d.sh | — | — | landed |" % (i, i, i, i % 9 + 1, i))
+out.append("| T25 | 5 | verify | the floor | test-runner | %s | 30 | REQ-1 | — | — | — | pending |"
+           % ", ".join("T%d" % i for i in range(1, 25)))
+out += ["", "## Verification Matrix", "", "| AC | tier | status | evidence | auditor |", "|---|---|---|---|---|"]
+for i in range(1, 41):
+    out.append("| AC-%d.1 | T2 | pending | — | — |" % i)
+out.append("")
+for i in range(1, 41):
+    out += ["AC-%d.1:" % i, "  provenance: fixture row %d" % i, "  fails-when: reader %d walks twice" % i,
+            "  eval: T2 — bash tests/reader-%d.test.sh" % i]
+out += ["", "## Dispatch ledger", "", "| id | agent | dispatched | expected | artifact | landed | notes |",
+        "|---|---|---|---|---|---|---|"]
+for i in range(1, 31):
+    out.append("| T%d | implementor (w-T%d) | 2026-10-03T%02d:00Z | 30 min | record/T%d.md | landed | batch %d |" % (i, i, i % 24, i, i % 4 + 1))
+body = "\n".join(out) + "\n"
+detail = ["", "## Task detail", ""]
+k = 0
+while len((body + "\n".join(detail)).encode()) < 66000:
+    k += 1
+    detail.append("### T%d — detail" % (k % 24 + 1))
+    detail.append("The reader walks the table once and answers every question from that walk; "
+                  "the walk is fence-aware and keyed on the header, so a renamed column is a fault "
+                  "rather than a silent shift — paragraph %d." % k)
+    detail.append("")
+# The detail sits between the table and the matrix, as a real plan carries it.
+cut = body.index("\n## Verification Matrix")
+open(plan, "w").write(body[:cut] + "\n".join(detail) + body[cut:])
+PY
+cp "$VERB_PLAN" "$SANDBOX/verb-plan.pristine"
+bound_marker "$R_VERB" "$SID" "$VERB_PLAN"
+: > "$SANDBOX/in/empty"
+expect_true "fixture: the verb plan is at least 66 000 bytes" test "$(wc -c < "$VERB_PLAN")" -ge 66000
+
+verb_row() {  # <n> <verb> <args…> — times one verb under each shell already set in VERB_SH
+  local n="$1" verb="$2"; shift 2
+  { printf 'exec "$BASH" %q' "$POKER_SH"; printf ' %q' "$verb" "$@"; printf '\n'; } > "$SANDBOX/verb-$n.sh"
+  ht_time "$VERB_SH" "$SANDBOX/verb-$n.sh" "$SANDBOX/in/empty" "$R_VERB" 30
+  echo "hook-timeout: §VERB $verb under $VERB_SH ($(ht_version "$VERB_SH")): ${HT_SECS}s rc=$HT_RC"
+  expect_true "§VERB $verb [$VERB_SH]: under ${VERB_BUDGET}s (took ${HT_SECS}s)" \
+    awk -v s="$HT_SECS" -v b="$VERB_BUDGET" 'BEGIN { exit !(s + 0 < b + 0) }'
+  expect_eq "§VERB $verb [$VERB_SH]: exit 0" "0" "$HT_RC"
+  expect_contains "§VERB $verb [$VERB_SH]: the transaction ran to its swap — its success line" \
+    "poker: $verb — " "$HT_OUT"
+}
+for VERB_SH in $SHELLS; do
+  cp "$SANDBOX/verb-plan.pristine" "$VERB_PLAN"
+  verb_row 1 current 4
+  verb_row 2 task-set T25 size=45
+  verb_row 3 step-line T24 'merge checked' --append
+  verb_row 4 ledger-add T31 'agent=implementor (w-T31)' dispatched=2026-10-03T12:00Z
+  verb_row 5 ledger-set T1 'notes=batch 1, re-run'
+  expect_contains "§VERB [$VERB_SH]: the plan carries task-set's cell" "| 45 | REQ-1 |" "$(grep -F '| T25 |' "$VERB_PLAN")"
+  expect_contains "§VERB [$VERB_SH]: …and current's move" "current: 4" "$(grep -x 'current: 4' "$VERB_PLAN")"
+done
+
 finish

@@ -19,6 +19,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
 #     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
+#     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | current | ledger-add | ledger-set …
+#                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -391,6 +393,11 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id> <col>=<val>...   set cells of a ## Tasks row (any header column but Files, which amend widens)"
+  die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh current <N|T<n>>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
+  die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
+  die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   exit 2
@@ -524,6 +531,47 @@ case "$VERB" in
     [ -n "$AMEND_REASON" ] || usage "amend takes --reason <why>: the roster says why a contract changed."
     [ -n "$AMEND_FILES$AMEND_SUITES$AMEND_RUNS" ] \
       || usage "amend changes nothing without --files+, --suites+ or --reexec+."
+    ;;
+  # THE PLAN-ROW VERBS (wave-24 T15; REQ-9, D14). A row verb takes an id and one or more
+  # `<column>=<value>` operands; the shape is checked here and the content in the verb, so a
+  # malformed call is the usage error (2) and a value the plan cannot hold is the verb's own
+  # refusal (1), with the plan untouched either way. Operands are kept in an array, not
+  # newline-joined as amend's are: a value with a line break must reach the verb to be refused
+  # by name, not split into two operands here.
+  task-set|ledger-add|ledger-set)
+    if [ $# -lt 2 ] || [ -z "$1" ]; then
+      usage "$VERB takes an id and at least one <column>=<value>."
+    fi
+    PV_ID="$1"; shift
+    for _pv_a in "$@"; do
+      case "$_pv_a" in
+        [!=]*=*) : ;;
+        *) usage "$VERB: '$_pv_a' is not <column>=<value>." ;;
+      esac
+    done
+    PV_PAIRS=("$@")
+    ;;
+  step-line)
+    PV_APPEND=""
+    if [ $# -eq 3 ] && [ "$3" = "--append" ]; then PV_APPEND=append; set -- "$1" "$2"; fi
+    if [ $# -ne 2 ] || [ -z "$2" ]; then
+      usage "step-line takes <N|T<n>> <text> [--append]."
+    fi
+    case "$1" in
+      [0-9]|[0-9][ab]) : ;;
+      T[0-9]*) case "${1#T}" in *[!0-9]*) usage "step-line: '$1' is not a task id (T<n>)." ;; esac ;;
+      *) usage "step-line: '$1' is neither a step number (0-9, 4a) nor a task id (T<n>)." ;;
+    esac
+    PV_KEY="$1"; PV_TEXT="$2"
+    ;;
+  current)
+    [ $# -eq 1 ] && [ -n "$1" ] || usage "current takes one argument: the step number (0-8) or the task id (T<n>) to move to."
+    case "$1" in
+      9|9a|9b|[0-8]|[0-8][ab]) : ;;
+      T[0-9]*) case "${1#T}" in *[!0-9]*) usage "current: '$1' is not a task id (T<n>)." ;; esac ;;
+      *) usage "current: '$1' is neither a step number (0-8) nor a task id (T<n>)." ;;
+    esac
+    PV_KEY="$1"
     ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
@@ -2516,6 +2564,127 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
   printf '%s' "$1" | awk -F'`' '{ for (i = 2; i <= NF; i += 2) if ($i != "") print $i }'
 }
 
+# ---------------------------------------------------------------- the plan transaction
+#
+# ONE TRANSACTION, SIX DOORS (wave-24 T15; REQ-9, D14). `task-add` (wave-20 Δ5) was the one
+# verb that wrote the plan, and everything a run did to its plan besides — a status cell, a
+# `- T<n>:` line, `current:`, a dispatch-ledger row — was a hand edit (research-R5 item 6: 339
+# plan-writing commands across nine sessions). The five plan-row verbs take task-add's
+# transaction whole, and task-add now takes it from here too: the change is projected onto a
+# COPY through units.sh, the copy is judged by a dry `git commit` through the REAL
+# hooks/bash-walls.sh, the plan's checksum is compared with the one taken BEFORE the
+# projection read it, and only then is the copy moved over the plan. On any refusal the plan
+# is byte-identical and the words that refused it print.
+#
+# THE DRY RUN IS BOUND TO THE COPY, NEVER TO THE PLAN: its own engagement marker for a
+# synthetic session whose `plan=` names the dry copy, removed after (close-out.sh's pattern).
+# Both copies sit beside the plan under names that do not end in `.md`, so no plan walk can
+# read one as a run. The judged copy is a WRITER's commit (task-add's rule): past Step 4 the
+# dry copy carries `current: 4`, because a main-root commit during Verify is held to the
+# Step-5 block the run is still writing. `current` is the one exception — what it asks is
+# whether the run can commit at the step it moves to, so its copy is judged as it stands.
+#
+# MAIN THREAD ONLY is the Bash wall's to enforce (payload/scripts/lib/walls.sh, the
+# `agent_id` verb list); these refuse what the script can see: no session key (3), an
+# unengaged session (decides nothing, 0), and a session with no BOUND open plan (1) — a
+# writing verb never writes the newest-plan fallback.
+
+# plan_verb_open <verb> -> sets PV_REPO, PV_PLAN, PV_CUR, PV_SUM, PV_NEW, PV_DRY, PV_MARK, PV_SID
+# and arms the cleanup; exits on every refusal above.
+plan_verb_open() {
+  local verb="$1" sid run
+  sid="$(session_id)" || sid=""
+  if [ -z "$sid" ]; then
+    die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+    die "$verb writes ONE session's bound plan, so without the key there is nothing to write."
+    exit 3
+  fi
+  if ! engaged_session "$(project_root "$PWD")" "$sid"; then
+    say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+    exit 0
+  fi
+  PV_REPO="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+  if [ -z "$PV_REPO" ]; then
+    die "REFUSED — cannot resolve the working directory."
+    exit 2
+  fi
+  run="$(session_run "$PV_REPO" "$sid")"
+  case "$run" in
+    'bound-open '*) PV_PLAN="${run#bound-open }" ;;
+    *)
+      die "REFUSED — $verb writes the plan this session is bound to, and it has no bound open run (${run:-none})."
+      die "Bind this session to its run first (this script's bind verb), then run $verb again."
+      exit 1 ;;
+  esac
+  PV_CUR="$(_fill_current_field "$PV_PLAN")"
+  # THE CHECKSUM IS TAKEN HERE, BEFORE ANY PROJECTION READS THE PLAN, so an edit that lands
+  # between the read and the swap is an edit the comparison sees.
+  PV_SUM="$(cksum < "$PV_PLAN" 2>/dev/null)"
+  PV_NEW="${PV_PLAN}.${verb}.$$"
+  PV_DRY="${PV_PLAN}.${verb}-dry.$$"
+  PV_SID="planverb-$$"
+  PV_MARK="$(engaged_marker_path "$PV_REPO" "$PV_SID")" || PV_MARK=""
+  trap 'rm -f "$PV_NEW" "$PV_NEW.2" "$PV_DRY" ${PV_MARK:+"$PV_MARK"}' EXIT
+}
+
+# plan_verb_swap <verb> <what changed> <dry: writer|as-is> -> judges $PV_NEW and moves it over
+# $PV_PLAN; exits 1 on a refusal, 2 when the dry commit cannot run. Returns 0 once swapped,
+# and exits 0 with nothing written when the projection IS the plan.
+plan_verb_swap() {
+  local verb="$1" what="$2" dry="$3" cur err rc
+  if cmp -s "$PV_NEW" "$PV_PLAN"; then
+    say "$verb — $what: the plan already reads so; nothing was written."
+    exit 0
+  fi
+  cur="${PV_CUR%[ab]}"
+  case "$cur" in
+    ''|*[!0-9]*) dry=as-is ;;
+  esac
+  if [ "$dry" = writer ] && [ "$cur" -gt 4 ]; then
+    awk '
+      /^[[:space:]]*```/ { fence = !fence; print; next }
+      fence { print; next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
+      insdlc && !done && /^[[:space:]]*current[[:space:]]*:/ { print "current: 4"; done = 1; next }
+      { print }' "$PV_NEW" > "$PV_DRY"
+  else
+    cp "$PV_NEW" "$PV_DRY"
+  fi
+  if [ ! -f "$HOOK_DIR/bash-walls.sh" ] || [ -z "$PV_MARK" ] || ! command -v jq >/dev/null 2>&1; then
+    die "REFUSED — the dry commit cannot be run (no bash-walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
+    exit 2
+  fi
+  mkdir -p "${PV_MARK%/*}" 2>/dev/null
+  printf 'plan=%s\nengaged_at=%s\n' "$PV_DRY" "$(iso_now)" > "$PV_MARK"
+  err="$(cd "$PV_REPO" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$PV_SID" BIONIC_WALL_VERBOSE=1 \
+    bash "$HOOK_DIR/bash-walls.sh" 2>&1 >/dev/null <<< "$(jq -n --arg s "$PV_SID" --arg cwd "$PV_REPO" --arg v "$verb" \
+      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+        tool_input: {command: ("git commit -m " + $v)}, tool_use_id: "toolu_planverb"}')")"
+  rc=$?
+  rm -f "$PV_MARK"
+  if [ "$rc" -ne 0 ]; then
+    [ -n "$err" ] && printf '%s\n' "$err" >&2
+    die "REFUSED — the commit gate refused the plan with $what (rc=$rc); the plan is unchanged."
+    [ "$verb" = current ] && die "Write what that step owes first (step-line <N> <text>, and its block), then move current: again."
+    exit 1
+  fi
+  if [ "$(cksum < "$PV_PLAN" 2>/dev/null)" != "$PV_SUM" ]; then
+    die "REFUSED — $PV_PLAN changed while the plan with $what was being judged; nothing was written. Run $verb again."
+    exit 1
+  fi
+  if ! mv -f "$PV_NEW" "$PV_PLAN"; then
+    die "REFUSED — could not move the judged copy over $PV_PLAN; the plan is unchanged."
+    exit 2
+  fi
+  return 0
+}
+
+# A cell value the plan can hold: no pipe, tab or line break (AC-9.2). 0 when it can.
+plan_verb_value_ok() {
+  case "$1" in *'|'*|*$'\t'*|*$'\n'*|*$'\r'*) return 1 ;; esac
+  return 0
+}
+
 # ---------------------------------------------------------------- the sweep
 #
 # THE OTHER HALF OF `adopt` (fixit 1.5.1 T5; ideas/fixit-1.5.2-dead-session-sweep.md).
@@ -4198,51 +4367,16 @@ EOF
   # it wrote. Nothing else judges a Bash write of the plan: the governing-skill hook sees
   # Write and Edit only.
   #
-  # THE DRY COMMIT IS A WRITER'S, JUDGED BY THE TASK ARMS. The commit AC-5.3 names is the next
-  # writer's, from a row's tree, and the gate judges that commit at Step 4 whatever the run's
-  # step (`CURRENT=4`, walls.sh's row fork). A main-root commit during Verify would instead be
-  # held to the Step-5 block the run is still writing, and no row could ever be added during
-  # Verify — which is when fixups are found. So the dry copy carries `current: 4` when the run
-  # is past it; the copy that is swapped in keeps the run's own `current:`.
-  #
-  # THE DRY RUN IS BOUND TO THE COPY, NEVER TO THE PLAN. It arms its own engagement marker for
-  # a synthetic session whose `plan=` names the dry copy — close-out.sh's pattern, with a
-  # binding instead of the newest-plan fallback — and removes it after. Both copies sit
-  # beside the plan under names that do not end in `.md`, so no plan walk (`_run_candidates`,
-  # the misplaced-plan sweep) can ever read one as a run.
-  #
-  # MAIN THREAD ONLY is the Bash wall's to enforce (wave-20 T9); this verb refuses what it can
-  # see: no session key, an unengaged session, a session with no BOUND open plan (a writing
-  # verb never writes the newest-plan fallback), and a run below Step 4.
+  # THE TRANSACTION IS SHARED (wave-24 T15): `plan_verb_open` and `plan_verb_swap`, above the
+  # verbs, carry the dry commit — a writer's, judged by the task arms, so the dry copy carries
+  # `current: 4` when the run is past it and the copy swapped in keeps the run's own
+  # `current:` — the copy's own engagement marker, the checksum and the swap. What is task-add's
+  # alone is below: a run below Step 4 is refused, the Files cell is judged by the dispatch
+  # grammar, and the projection is `units_add_row`, judged by `units_validate` before the gate.
   task-add)
-    SESSION_ID="$(session_id)" || SESSION_ID=""
-    if [ -z "$SESSION_ID" ]; then
-      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
-      die "A row is added to ONE session's bound plan, so without the key there is nothing to write."
-      exit 3
-    fi
-    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
-      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
-      exit 0
-    fi
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-
-    TA_RUN="$(session_run "$REPO_REAL" "$SESSION_ID")"
-    case "$TA_RUN" in
-      'bound-open '*) TA_PLAN="${TA_RUN#bound-open }" ;;
-      *)
-        die "REFUSED — task-add writes the plan this session is bound to, and it has no bound open run (${TA_RUN:-none})."
-        die "Bind this session to its run first (this script's bind verb), then add the row."
-        exit 1 ;;
-    esac
-
-    TA_CUR="$(_fill_current_field "$TA_PLAN")"
-    TA_CUR="${TA_CUR%[ab]}"
+    plan_verb_open task-add
+    TA_PLAN="$PV_PLAN"; REPO_REAL="$PV_REPO"
+    TA_CUR="${PV_CUR%[ab]}"
     case "$TA_CUR" in
       ''|*[!0-9]*)
         die "REFUSED — $TA_PLAN has current: ${TA_CUR:-(none)}; task-add changes a wave plan past Step-3 approval, whose current: is a step number."
@@ -4290,66 +4424,174 @@ EOF
         ;;
     esac
 
-    TA_SUM="$(cksum < "$TA_PLAN" 2>/dev/null)"
-    TA_NEW="${TA_PLAN}.task-add.$$"
-    TA_DRY="${TA_PLAN}.task-add-dry.$$"
-    TA_SID="taskadd-$$"
-    TA_MARK="$(engaged_marker_path "$REPO_REAL" "$TA_SID")" || TA_MARK=""
-    trap 'rm -f "$TA_NEW" "$TA_DRY" ${TA_MARK:+"$TA_MARK"}' EXIT
-
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" > "$TA_NEW" 2>/dev/null || [ ! -s "$TA_NEW" ]; then
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
 
-    TA_VIOL="$(units_validate "$TA_NEW" 2>&1)"
+    TA_VIOL="$(units_validate "$PV_NEW" 2>&1)"
     if [ -n "$TA_VIOL" ]; then
       die "REFUSED — with $TA_ID added, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
       printf '%s\n' "$TA_VIOL" >&2
       exit 1
     fi
 
-    if [ "$TA_CUR" -gt 4 ]; then
-      awk '
-        /^[[:space:]]*```/ { fence = !fence; print; next }
-        fence { print; next }
-        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
-        insdlc && !done && /^[[:space:]]*current[[:space:]]*:/ { print "current: 4"; done = 1; next }
-        { print }' "$TA_NEW" > "$TA_DRY"
-    else
-      cp "$TA_NEW" "$TA_DRY"
-    fi
-
-    TA_HOOK="$HOOK_DIR/bash-walls.sh"
-    if [ ! -f "$TA_HOOK" ] || [ -z "$TA_MARK" ] || ! command -v jq >/dev/null 2>&1; then
-      die "REFUSED — the dry commit cannot be run (no bash-walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
-      exit 2
-    fi
-    mkdir -p "${TA_MARK%/*}" 2>/dev/null
-    printf 'plan=%s\nengaged_at=%s\n' "$TA_DRY" "$(iso_now)" > "$TA_MARK"
-    TA_INPUT="$(jq -n --arg s "$TA_SID" --arg cwd "$REPO_REAL" \
-      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
-        tool_input: {command: "git commit -m task-add"}, tool_use_id: "toolu_taskadd"}')"
-    TA_ERR="$(cd "$REPO_REAL" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$TA_SID" BIONIC_WALL_VERBOSE=1 \
-      bash "$TA_HOOK" <<< "$TA_INPUT" 2>&1 >/dev/null)"
-    TA_GATE=$?
-    rm -f "$TA_MARK"
-    if [ "$TA_GATE" -ne 0 ]; then
-      [ -n "$TA_ERR" ] && printf '%s\n' "$TA_ERR" >&2
-      die "REFUSED — the commit gate refused the plan with $TA_ID added (rc=$TA_GATE); the plan is unchanged."
-      exit 1
-    fi
-
-    if [ "$(cksum < "$TA_PLAN" 2>/dev/null)" != "$TA_SUM" ]; then
-      die "REFUSED — $TA_PLAN changed while $TA_ID was being judged; nothing was written. Run task-add again."
-      exit 1
-    fi
-    if ! mv -f "$TA_NEW" "$TA_PLAN"; then
-      die "REFUSED — could not move the judged copy over $TA_PLAN; the plan is unchanged."
-      exit 2
-    fi
+    plan_verb_swap task-add "$TA_ID added" writer
     say "task-add — $TA_ID added to $TA_PLAN: the row, its - $TA_ID: line, and the deps it owes; validated and dry-committed first."
+    exit 0
+    ;;
+
+  # THE ROW-CELL VERBS (wave-24 T15; REQ-9 AC-9.1/9.2, D14). `task-set` sets cells of a
+  # `## Tasks` row, `ledger-set` of a `## Dispatch ledger` row, and `ledger-add` appends a ledger
+  # row; each through `units_table_cells`, on the shared transaction. A `## Tasks` column is any
+  # the header carries by `units_has_column` — `rigor` is slot 3's task-scale name — except two:
+  # `id`, the key the row is found by, and `Files`, which is a dispatched agent's CONTRACT once
+  # it is on the roster (editing the plan row changes nothing a wall reads), so the refusal
+  # names `amend`, the verb that widens it. `task-set` is judged by `units_validate` before the
+  # gate, as `task-add` is: a status, step or deps cell is a schedule change.
+  task-set|ledger-add|ledger-set)
+    for _pv_a in ${PV_PAIRS[@]+"${PV_PAIRS[@]}"}; do
+      _pv_n="${_pv_a%%=*}"
+      if ! plan_verb_value_ok "${_pv_a#*=}"; then
+        die "REFUSED — the value for $_pv_n carries a |, a tab or a line break, which no table cell can hold; the plan is unchanged."
+        exit 1
+      fi
+      [ "$VERB" = task-set ] || continue
+      _pv_l="$(printf '%s' "$_pv_n" | tr '[:upper:]' '[:lower:]')"
+      case "$_pv_l" in
+        files)
+          die "REFUSED — task-set does not write Files — widen a dispatched contract with amend: bash ${HOOK_DIR}/session-poker.sh amend <name> --files+ <path> --reason <why>. The plan is unchanged."
+          exit 1 ;;
+        id)
+          die "REFUSED — id is the key task-set finds $PV_ID by, not a cell to set; the plan is unchanged."
+          exit 1 ;;
+        rigor) _pv_l=kind ;;
+      esac
+      PV_COLS="${PV_COLS:-} $_pv_l"
+    done
+    plan_verb_open "$VERB"
+    if [ "$VERB" = task-set ]; then
+      for _pv_l in ${PV_COLS:-}; do
+        if ! units_has_column "$PV_PLAN" "$_pv_l"; then
+          die "REFUSED — the ## Tasks header of $PV_PLAN carries no column $_pv_l; the plan is unchanged."
+          exit 1
+        fi
+      done
+    fi
+    case "$VERB" in
+      task-set)   PV_MODE=set; PV_SECT=tasks ;;
+      ledger-set) PV_MODE=set; PV_SECT=ledger ;;
+      ledger-add) PV_MODE=add; PV_SECT=ledger ;;
+    esac
+    PV_RC=0
+    units_table_cells "$PV_PLAN" "$PV_MODE" "$PV_SECT" "$PV_ID" "${PV_PAIRS[@]}" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    PV_TABLE="## Tasks"; [ "$PV_SECT" = ledger ] && PV_TABLE="## Dispatch ledger"
+    case "$PV_RC" in
+      0) : ;;
+      1) die "REFUSED — $PV_PLAN carries no $PV_TABLE table; the plan is unchanged."; exit 1 ;;
+      2) if [ "$PV_MODE" = add ]; then die "REFUSED — the $PV_TABLE table already carries a row $PV_ID; set its cells with ledger-set. The plan is unchanged."
+         else die "REFUSED — the $PV_TABLE table carries no row $PV_ID; the plan is unchanged."; fi
+         exit 1 ;;
+      3) die "REFUSED — the $PV_TABLE header carries no column named in: ${PV_PAIRS[*]%%=*}; the plan is unchanged."; exit 1 ;;
+      5) die "REFUSED — the $PV_TABLE table carries more than one row $PV_ID; which one is meant is not the verb's to guess. The plan is unchanged."; exit 1 ;;
+      *) die "REFUSED — the value cannot be written as a table cell; the plan is unchanged."; exit 1 ;;
+    esac
+    if [ "$VERB" = task-set ]; then
+      PV_VIOL="$(units_validate "$PV_NEW" 2>&1)"
+      if [ -n "$PV_VIOL" ]; then
+        die "REFUSED — with that change, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
+        printf '%s\n' "$PV_VIOL" >&2
+        exit 1
+      fi
+    fi
+    PV_WHAT="$PV_ID ${PV_PAIRS[*]}"
+    [ "$PV_MODE" = add ] && PV_WHAT="$PV_ID added to the dispatch ledger"
+    plan_verb_swap "$VERB" "$PV_WHAT" writer
+    say "$VERB — $PV_WHAT: written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
+  # THE STEP-LINE VERB (wave-24 T15; REQ-9 AC-9.6, D14). The `- Step N:` and `- T<n>:` lines
+  # under `## SDLC State` are the run's evidence, and the gate reads them; `units_step_line`
+  # rewrites one line's text (or adds the line, after its kind's last), and never the block
+  # under it. Step 9 is close-out's, as `current: 9` is (payload/scripts/close-out.sh).
+  step-line)
+    case "$PV_KEY" in
+      9|9a|9b)
+        die "REFUSED — the Step 9 line is close-out's to write, with current: 9 (bash <plugin-root>/scripts/close-out.sh); the plan is unchanged."
+        exit 1 ;;
+    esac
+    case "$PV_TEXT" in
+      *$'\n'*|*$'\r'*)
+        die "REFUSED — a step line is one line, and the text carries a line break; the plan is unchanged."
+        exit 1 ;;
+    esac
+    plan_verb_open step-line
+    if ! units_step_line "$PV_PLAN" "$PV_KEY" "$PV_TEXT" "$PV_APPEND" > "$PV_NEW" 2>/dev/null; then
+      die "REFUSED — $PV_PLAN carries no ## SDLC State section; the plan is unchanged."
+      exit 1
+    fi
+    PV_LABEL="$PV_KEY"; case "$PV_KEY" in T*) : ;; *) PV_LABEL="Step $PV_KEY" ;; esac
+    plan_verb_swap step-line "the $PV_LABEL line written" writer
+    say "step-line — $PV_LABEL: written to $PV_PLAN${PV_APPEND:+ (appended)}; dry-committed first."
+    exit 0
+    ;;
+
+  # THE STEP MOVE (wave-24 T15; REQ-9 AC-9.5, D14; A-orch-8). `current:` moves through
+  # `units_set_current`, and the copy is judged AT the step it moves to — the advance is the
+  # commit the gate is asked about, so a step whose block is not written yet is refused here,
+  # in the gate's words, and not at the first commit after it. `current: 9` is close-out's.
+  #
+  # ADVANCING TO 4 WRITES WHAT THE FIRST WRITER'S COMMIT IS REFUSED WITHOUT. The Step-4 block's
+  # `worktree:`, `base-sha:` and `branch:` (walls.sh `shape_block`) are facts of the moment of
+  # the advance: the branch is the plan's own `working-branch:`, its head is the base every
+  # writer starts from, and the checkout holding it is the worktree. Each field the block lacks
+  # is filled from those (`units_step_fields`); a field already written is never rewritten, and
+  # a fact that cannot be read is not guessed — the field stays absent and the gate says so.
+  current)
+    case "$PV_KEY" in
+      9|9a|9b)
+        die "REFUSED — current: 9 is close-out's to write, with the Step 9 line (bash <plugin-root>/scripts/close-out.sh); the plan is unchanged."
+        exit 1 ;;
+    esac
+    plan_verb_open current
+    if ! units_set_current "$PV_PLAN" "$PV_KEY" > "$PV_NEW" 2>/dev/null; then
+      die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State; the plan is unchanged."
+      exit 1
+    fi
+    PV_FILLED=""
+    if [ "$PV_KEY" = 4 ]; then
+      PV_WB="$(awk '
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+        insdlc && /^[[:space:]]*working-branch[[:space:]]*:/ {
+          v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
+          print v; exit }' "$PV_PLAN")"
+      if [ -n "$PV_WB" ]; then
+        PV_FIELDS=()
+        PV_WT="$(git -C "$PV_REPO" worktree list --porcelain 2>/dev/null \
+          | awk -v b="branch refs/heads/$PV_WB" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }')"
+        if [ -n "$PV_WT" ]; then
+          PV_WT="$(cd "$PV_WT" 2>/dev/null && pwd -P)"
+          case "$PV_WT" in
+            "$PV_REPO") PV_FIELDS+=("worktree=.") ;;
+            "$PV_REPO"/*) PV_FIELDS+=("worktree=${PV_WT#"$PV_REPO"/}") ;;
+            ?*) PV_FIELDS+=("worktree=$PV_WT") ;;
+          esac
+        fi
+        PV_SHA="$(git -C "$PV_REPO" rev-parse --short --verify -q "refs/heads/$PV_WB" 2>/dev/null)"
+        [ -n "$PV_SHA" ] && PV_FIELDS+=("base-sha=$PV_SHA")
+        PV_FIELDS+=("branch=$PV_WB")
+        if units_step_fields "$PV_NEW" 4 "${PV_FIELDS[@]}" > "$PV_NEW.2" 2>/dev/null; then
+          cmp -s "$PV_NEW.2" "$PV_NEW" || PV_FILLED="; the Step-4 block gained what it lacked of: ${PV_FIELDS[*]}"
+          mv -f "$PV_NEW.2" "$PV_NEW"
+        fi
+      fi
+    fi
+    plan_verb_swap current "current: $PV_KEY" as-is
+    say "current — current: $PV_KEY in $PV_PLAN (was ${PV_CUR:-none})$PV_FILLED; dry-committed at that step first."
     exit 0
     ;;
 
