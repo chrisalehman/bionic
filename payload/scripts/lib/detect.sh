@@ -511,7 +511,7 @@ detect_legacy_skill_copy() {
 DETECT_AUTO_MEMORY_KEY='CLAUDE_CODE_DISABLE_AUTO_MEMORY'
 
 detect_auto_memory() {
-  local home root phys slug rel f v override=none dir=none n=0 m
+  local home root phys slug rel f v override=none dir=none n=0 m val
   home="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
   root="${BIONIC_ROOT:-$PWD}"
   phys="$(cd "$root" 2>/dev/null && pwd -P)" || phys=""
@@ -526,10 +526,23 @@ detect_auto_memory() {
     v="$(jq -r --arg k "$DETECT_AUTO_MEMORY_KEY" \
       '.env | if type == "object" and has($k) then "set:" + (.[$k] | tostring) else "unset" end' \
       "$f" 2>/dev/null)" || { override=unknown; break; }
+    # THE CLI'S READING OF THE VALUE, IN ONE PLACE (wave-23 T14, critic C-6). The CLI
+    # lowercases and trims the value, then reads "1", "true", "yes" and "on" as
+    # "disable auto memory" (its truthy helper) and "0", "false", "no" and "off" as
+    # "enable" (its falsy helper); anything else, the empty string included, falls
+    # through to the default, which is on. So only the truthy set is not an override.
+    # Source: the critic's reading of the shipped CLI bundle, record/wave-23-fixit-1810/
+    # critic-43e45387.md C-6.
+    case "$v" in
+      set:*) val="$(printf '%s' "${v#set:}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" ;;
+    esac
     case "$v" in
       unset) continue ;;
-      set:1) ;;
-      set:*) override="$rel" ;;
+      set:*)
+        case "$val" in
+          1|true|yes|on) ;;
+          *) override="$rel" ;;
+        esac ;;
       *)     override=unknown ;;
     esac
     break
