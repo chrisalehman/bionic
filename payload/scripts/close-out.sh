@@ -826,6 +826,27 @@ preview_block_lines() {
   TMP_LINE="$(tmp_count) entries under $TMP_DIR (not yet wiped)"
 }
 
+# presence_missing -> the first thing a later act needs and the files do not carry, or
+# nothing. Both used to be readbacks that fired AFTER the destructive acts (critic4 Q-1):
+# phase 9 replaces a `- Step 9:` line it never finds and then refuses because none landed,
+# and act 6 appends to a `| wave |` table it never finds and then refuses because no row
+# landed. Each is known before the first act, so each is asked here, by presence alone.
+presence_missing() {
+  if ! awk '
+    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
+    insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:/ { found = 1 }
+    END { exit !found }
+  ' "$PLAN" 2>/dev/null; then
+    printf 'no Step 9 line in ## SDLC State of %s (add `- Step 9: (pending)`)' "$PLAN"
+    return 0
+  fi
+  if [ -f "$EPIC_PLAN" ] && ! epic_has_row \
+     && ! grep -qE '^\|[[:space:]]*wave[[:space:]]*\|' "$EPIC_PLAN"; then
+    printf 'no | wave | table in %s for the wave %s row to be written into' "${EPIC_PLAN##*/}" "$WAVE_NUM"
+  fi
+  return 0
+}
+
 gate_preflight() {
   local copy out
   copy="$PLANS_DIR/.${PLAN##*/}.preflight.$$"
@@ -914,6 +935,8 @@ do_check() {
   else
     say "step: WOULD REFUSE — $STEP_REFUSAL"
   fi
+  MISSING="$(presence_missing)"
+  [ -z "$MISSING" ] || say "presence: WOULD REFUSE — $MISSING"
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
@@ -1008,11 +1031,13 @@ do_check() {
 # ─── run ─────────────────────────────────────────────────────────────────────
 
 do_run() {
-  # NOTHING IS TOUCHED UNTIL ALL FOUR OF THESE PASS (critic3 P-1, P-3), in this order: the
-  # step `run` closes, the merge verdict (act 1 is a readback and touches nothing), the
+  # NOTHING IS TOUCHED UNTIL ALL FIVE OF THESE PASS (critic3 P-1, P-3), in this order: the
+  # step `run` closes, the two presence checks (a Step-9 line, a `| wave |` table), the merge verdict (act 1 is a readback and touches nothing), the
   # branch census, and the gate's answer about the plan `run` will write. Any refusal leaves
   # every branch, every tmp entry, the plan and the epic plan exactly as they were.
   [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
+  MISSING="$(presence_missing)"
+  [ -z "$MISSING" ] || _co_refuse "$MISSING — nothing was done"
   act_merge
   refuse_unreached
   gate_preflight

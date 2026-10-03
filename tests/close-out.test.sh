@@ -1068,6 +1068,50 @@ for _co_cur in 7 4; do
 done
 
 # ============================================================
+section "4e — critic4 Q-1 (T19): the two readbacks that used to fire after the acts are presence checks before them"
+# ============================================================
+# `run` used to delete branches, wipe tmp and write the continuation and epic row, and only
+# then refuse for a plan with no `- Step 9:` line or an epic plan with no `| wave |` table.
+# Both are known before the first act. `run` now refuses rc 2 naming what is missing and
+# touches nothing; `check` reports the same two checks.
+presence_state() {
+  printf 'br=%s tmp=%s cont=%s cur8=%s epicrow=%s' \
+    "$(branch_exists "$1" "wt/01-x")" "$(tmp_entries "$1")" \
+    "$([ -f "$1/$CONT_REL" ] && echo yes || echo no)" \
+    "$(grep -qE '^current: 8$' "$1/$PLAN_REL" && echo yes || echo no)" \
+    "$(grep -c '^| 01 ' "$1/$EPIC_REL")"
+}
+TA="$(mk_fixture t19a)"
+grep -v '^- Step 9:' "$TA/$PLAN_REL" > "$TA/plan.tmp" && mv "$TA/plan.tmp" "$TA/$PLAN_REL"
+PRE_A="$(presence_state "$TA")"; PLAN_A_SHA="$(sha_of "$TA/$PLAN_REL")"; EPIC_A_SHA="$(sha_of "$TA/$EPIC_REL")"
+run_close "$TA" check
+expect_eq "q1.1: check names the missing Step-9 line" "yes" "$(contains "$CO_OUT" "no Step 9 line in ## SDLC State")"
+run_close "$TA" run
+expect_eq "q1.2: run on a plan with no Step-9 line refuses rc 2" "2" "$CO_RC"
+expect_eq "q1.3: …naming the missing line" "yes" "$(contains "$CO_OUT" "no Step 9 line in ## SDLC State")"
+expect_eq "q1.4: …before any act (no worktree-removed line)" "no" "$(contains "$CO_OUT" "worktree-removed:")"
+expect_eq "q1.5: …branch, tmp, continuation, current: and epic row untouched" "$PRE_A" "$(presence_state "$TA")"
+expect_eq "q1.6: …plan and epic plan byte-identical" "$PLAN_A_SHA/$EPIC_A_SHA" "$(sha_of "$TA/$PLAN_REL")/$(sha_of "$TA/$EPIC_REL")"
+
+TB="$(mk_fixture t19b)"
+printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# epic-fx\n\n## SDLC State\n\ncurrent: 4\n\n## Notes\n\nNo waves table yet.\n' > "$TB/$EPIC_REL"
+PRE_B="$(presence_state "$TB")"; PLAN_B_SHA="$(sha_of "$TB/$PLAN_REL")"; EPIC_B_SHA="$(sha_of "$TB/$EPIC_REL")"
+run_close "$TB" check
+expect_eq "q1.7: check names the missing wave table" "yes" "$(contains "$CO_OUT" "no | wave | table")"
+run_close "$TB" run
+expect_eq "q1.8: run on an epic plan with no wave table refuses rc 2" "2" "$CO_RC"
+expect_eq "q1.9: …naming the missing table" "yes" "$(contains "$CO_OUT" "no | wave | table")"
+expect_eq "q1.10: …before any act" "no" "$(contains "$CO_OUT" "worktree-removed:")"
+expect_eq "q1.11: …branch, tmp, continuation, current: and epic row untouched" "$PRE_B" "$(presence_state "$TB")"
+expect_eq "q1.12: …plan and epic plan byte-identical" "$PLAN_B_SHA/$EPIC_B_SHA" "$(sha_of "$TB/$PLAN_REL")/$(sha_of "$TB/$EPIC_REL")"
+
+TC="$(mk_fixture t19c)"
+run_close "$TC" check
+expect_eq "q1.13: check on the valid fixture names no missing line" "no" "$(contains "$CO_OUT" "WOULD REFUSE — no ")"
+run_close "$TC" run
+expect_eq "q1.14: run on the valid fixture still succeeds" "0" "$CO_RC"
+
+# ============================================================
 section "5 — REQ-1 (AC-1.1–1.3): a close-out spares a live neighbour's session state"
 # ============================================================
 #
