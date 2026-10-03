@@ -12456,6 +12456,68 @@ expect_eq "CG-standdown the wall's computed set is the tick's printed set, with 
 
 
 # ============================================================
+section "HD — a HELD row: the tick and the stop wall agree it owes nothing (wave-24 T7; REQ-4 AC-4.3; D1, ADR-041 d1/d3)"
+# ============================================================
+#
+# The hold lives on the roster, the tick reads it and writes no order, and the stop wall computes
+# its stand-down set from orders alone — so the wall needs no reading of the hold to agree. One
+# fixture, both readers: CG-standdown's world with sd-a held through the REAL verb. The tick must
+# print `held sd-a` and stand down sd-b alone, and the wall's computed set must be {sd-b}.
+HD_R=$(new_repo hd)
+HD_RO="$HD_R/.bionic/tmp/roster-$SID_A.state"
+roster_header > "$HD_RO"
+for _hd_n in sd-a sd-b; do
+  echo done > "$HD_R/landed-$_hd_n.md"
+  roster_row_fixture status=intended session="$SID_A" name="$_hd_n" agent_id= \
+    tool_use_id="toolu_01HD${_hd_n#sd-}" deliverable="$HD_R/landed-$_hd_n.md" >> "$HD_RO"
+done
+roster_row_fixture status=intended session="$SID_A" name=sd-open agent_id= \
+  tool_use_id=toolu_01HDOPEN deliverable="$HD_R/never-written.md" >> "$HD_RO"
+cgc_plan "$HD_R/.bionic/docs/plans/epic-99/hd.plan.md" \
+  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+s4_bind "$HD_R" "$SID_A" "$HD_R/.bionic/docs/plans/epic-99/hd.plan.md"
+s4_attest "$HD_R" "$SID_A"
+HD_CFG="$SANDBOX/hd-config"; mkdir -p "$HD_CFG/projects/-hd"
+{
+  jq -nc '{type:"user",timestamp:"2026-09-05T00:50:00.000Z",message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:"2026-09-05T00:51:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01HDLIST",name:"ListAgents",input:{}}]}}'
+  jq -nc --arg b "$(live_answer_body "sd-a:idle" "sd-b:idle" "sd-open:running")" \
+    '{type:"user",timestamp:"2026-09-05T00:52:23.349Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01HDLIST",content:$b}]}}'
+} > "$HD_CFG/projects/-hd/$SID_A.jsonl"
+hd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$HD_CFG" \
+  BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+  BIONIC_PROBE_LOAD_1M=0.1 "$@"; }
+HD_HOLD=$( cd "$HD_R" && hd_env bash "$CGSD_POKER" hold sd-a "kept for a second pass" 2>&1 ); HD_HOLD_RC=$?
+expect_eq "HD precondition: the hold verb took sd-a (rc 0)" "0" "$HD_HOLD_RC"
+cgc_ring
+HD_TICK=$( cd "$HD_R" && hd_env bash "$CGSD_POKER" tick 2>&1 )
+HD_PRINTED=$(printf '%s\n' "$HD_TICK" | sed -n 's/^poker: STANDDOWN \([A-Za-z0-9_.-]*\) .*/\1/p' | LC_ALL=C sort -u | tr '\n' ' ')
+expect_eq "HD the tick stands down the unheld MET row alone" "sd-b " "$HD_PRINTED"
+expect_contains "HD2 …and prints the held one as held" "poker: held sd-a since " "$HD_TICK"
+HD_TR="$HD_R/hd-transcript.jsonl"
+{
+  jq -nc --arg t "bionic-patrol session=${SID_A:0:8} — Patrol tick. Run: bash $CGSD_POKER tick" \
+    '{type:"user",isMeta:true,isSidechain:false,userType:"external",message:{role:"user",content:$t}}'
+  jq -nc --arg c "bash $CGSD_POKER tick" \
+    '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01HDTICK",name:"Bash",input:{command:$c}}]}}'
+  jq -nc --arg o "$HD_TICK" \
+    '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01HDTICK",content:$o}]}}'
+  jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01HDTL",name:"TaskList",input:{}}]}}'
+} > "$HD_TR"
+cgc_ring
+HD_OUT=$(s4_stop_payload "$HD_R" "$SID_A" "$HD_TR" | hd_env bash "$CGSD_STOP" 2>/dev/null)
+HD_REASON=$(printf '%s' "$HD_OUT" | jq -r '.reason // ""' 2>/dev/null)
+HD_WALL=""
+for _hd_n in sd-a sd-b sd-open; do
+  case " $(printf '%s' "$HD_REASON" | tr -c 'A-Za-z0-9_.-' ' ') " in
+    *" $_hd_n "*) HD_WALL="${HD_WALL}${_hd_n} " ;;
+  esac
+done
+expect_contains "HD3 the wall refuses the turn for the one row the tick stood down" \
+  "stand-down unanswered" "$HD_REASON"
+expect_eq "HD4 the wall's computed set is the tick's: the held row is in neither" "$HD_PRINTED" "$HD_WALL"
+
+# ============================================================
 section "CG-turn — the ledger writer and fill-report agree on what a turn is (epic-23 wave-20 T11b; Step-6 review R3, critic C1)"
 # ============================================================
 #

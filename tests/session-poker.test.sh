@@ -274,6 +274,13 @@ file_mode() {  # <file> -> the three-digit mode, on either stat
 
 stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
 
+# THE TICK DIGEST (wave-24 T7, REQ-4; D4). A tick over the same facts as the last one prints one
+# `unchanged` line, so a case that ticks the SAME world twice to read the second tick's full
+# output — a doctored copy, a second cwd, a third reading of one pressure — forgets the digest
+# first. Forgetting it is what an `arm` does to the next tick.
+digest_of() { printf '%s/.bionic/tmp/tick-digest-%s.state' "$1" "${2:-$SID}"; }
+forget_digest() { rm -f "$(digest_of "$1")"; }
+
 # THE ARMING RECORD — the sibling of the stamp whose mtime `arm` sets and the tick compares a
 # delivery against (R-13). Spelled out here the way stamp_of spells the stamp: one place in
 # this suite knows the layout, and a rename on the writer's side shows up as a failure rather
@@ -690,6 +697,7 @@ poke "$R5" tick
 expect_eq "from the main repo root, tick sees the open overdue row (NOTIFY, exit 1)" "1" "$RC"
 expect_contains "…and names it" "rows=live-worker" "$OUT"
 
+forget_digest "$R5"
 poke "$R5WT" tick
 expect_eq "from the WORKTREE cwd, the SAME session's tick still reads the true roster (NOTIFY, exit 1)" \
   "1" "$RC"
@@ -2291,6 +2299,7 @@ expect_eq "planedit meta: the sed anchor landed exactly once (the doctor took)" 
   "$(diff "$POKER" "$POKER_MUT_PLANEDIT" | /usr/bin/grep -c '^>')"
 CKSUM_11B3_MUT_BEFORE="$(cksum < "$PLAN_R11B2")"
 POKER_REAL_11B3="$POKER"; POKER="$POKER_MUT_PLANEDIT"
+forget_digest "$R11B2"
 poke_rung "$R11B2" 60 0 tick
 POKER="$POKER_REAL_11B3"
 expect_contains "the doctored tick still fills (the mutation is only in the plan-touch path)" \
@@ -2383,7 +2392,9 @@ expect_contains "…and says why it is not filling, naming the key (wave-19 REQ-
 # make the counter reach 2 and fire.
 R11C7="$(mk_rung_repo s11-no-holds)"
 BIONIC_PROBE_FREE_MB=512 poke_rung "$R11C7" 60 0 tick
+forget_digest "$R11C7"
 BIONIC_PROBE_FREE_MB=512 poke_rung "$R11C7" 60 0 tick
+forget_digest "$R11C7"
 BIONIC_PROBE_FREE_MB=512 poke_rung "$R11C7" 60 0 tick
 expect_contains "the third consecutive hold is still just a HOLD" "poker: HOLD" "$OUT"
 expect_absent   "…and never recommends a width" "NARROW" "$OUT"
@@ -4305,6 +4316,7 @@ expect_eq "19i meta: the sed anchor landed exactly once (the doctor took)" "1" \
   "$(diff "$POKER" "$S19I_MUT" | /usr/bin/grep -c '^>')"
 : > "$S19I_COUNT"
 S19I_POKER_REAL="$POKER"; POKER="$S19I_MUT"
+forget_digest "$R19I"
 poke_counted "$R19I" tick
 POKER="$S19I_POKER_REAL"
 expect_eq "…the doctored tick still counts the same six rows" "6" "$(s19_open "$OUT")"
@@ -6083,14 +6095,14 @@ expect_eq "30t2d …the successor is written" "$((S30T2_N0 + 1))" "$(grep -c '|n
 expect_eq "30t2e …unidentified, as the row it copied" "intended:" \
   "$(s30_field "$(s30_last "$R30T2")" status):$(s30_field "$(s30_last "$R30T2")" agent_id)"
 
-# 30t3: THE SELF-CHECK CAN FAIL. A scratch copy of the verb with the two identity appends
-# (D1) deleted writes the 12574e2 successor — no id — and must name the row the wall reads
+# 30t3: THE SELF-CHECK CAN FAIL. A scratch copy of the verb with the identity appends
+# (D1) deleted — `extend`'s, `amend`'s, and `hold`'s since wave-24 T7 — writes the 12574e2 successor — no id — and must name the row the wall reads
 # instead of printing the success line.
 S30T3_ROOT="$TMPROOT/poker-no-identity"
 mkdir -p "$S30T3_ROOT/hooks" "$S30T3_ROOT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$S30T3_ROOT/scripts/lib"
 sed '/+=(${POKER_ID_ARGS\[@\]+/d' "$POKER" > "$S30T3_ROOT/hooks/session-poker.sh"
-expect_eq "30t3 meta: the scratch copy lost exactly the two identity appends" "2" \
+expect_eq "30t3 meta: the scratch copy lost exactly the three identity appends (extend, amend, hold)" "3" \
   "$(diff "$POKER" "$S30T3_ROOT/hooks/session-poker.sh" | /usr/bin/grep -c '^<')"
 R30T3="$(make_repo s30-selfcheck)"; new_roster "$R30T3"; s30_teammate "$R30T3"
 S30T3_POKER="$POKER"; POKER="$S30T3_ROOT/hooks/session-poker.sh"
@@ -7250,4 +7262,214 @@ S40_RUNG="$(s38_line_no 'poker: rung=')"; S40_HELD="$(s38_line_no 'poker: HELD '
 S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_DISARM="$(s38_line_no 'poker: DISARM')"
 expect_true "40e5 …after the rung line and before the DISARM line (rung=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER disarm=$S40_DISARM)" \
   test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_LEDGER" -gt "$S40_HELD" -a "$S40_DISARM" -gt "$S40_LEDGER"
+# ============================================================
+section "Section 41: the quiet Patrol, tick side — prompt, band, hold, digest, version (wave-24 T7; REQ-4 AC-4.1–4.6, 4.9, 4.11; D1, D4, D5; ADR-041)"
+# ============================================================
+#
+# THE DEFECT (research-R1). The prompt asked for a `fill-declined:` line on every tick, so all 29
+# declines of the 1.8.10 run answered nothing the wall asked; the band ignored STANDDOWN, so
+# `decision=QUIET` printed under a stand-down; and the tick wrote a fresh stop order for the
+# same finished agent every tick, with no answer that lasted past one turn. The fix: a hold on
+# the roster row that stands while its fingerprint does, a digest that makes an unchanged tick
+# one line, and a prompt that asks only for what the tick printed.
+#
+# FIXTURE FIDELITY. Every fixture is SYNTHESIZED in this suite's own sandbox: the roster rows
+# through `roster_row` (tests/lib/roster-row.sh), the panel through tests/lib/live-answer.sh's
+# committed corpus, the completion message in the `<teammate-message>` envelope §30b plants (the
+# shape the CLI writes, measured wave-20 T9b). The hold and the stand-down are written by the
+# REAL verbs. §41c's Stop drive is the shipped hooks/stop.sh on a tick turn built the way
+# tests/cross-gate-agreement.test.sh's CG-standdown builds one.
+#
+# ANTI-VACUITY. Every absence beside a positive on the same output: §41c's "no STANDDOWN" sits
+# beside its `held w-1` count, and its Stop pass beside §41b's Stop refusal on the same drive.
+
+S41_CFG="$(fake_config_dir s41-quiet)"
+export CLAUDE_CONFIG_DIR="$S41_CFG"
+S41_TR="$S41_CFG/projects/-fixture-project/$SID.jsonl"
+orders_of() { printf '%s/.bionic/tmp/stop-orders-%s.state' "$1" "${2:-$SID}"; }
+s41_msg() {  # <name> -> one completion message from <name>, in the envelope the CLI writes
+  jq -nc --arg b "<teammate-message teammate_id=\"$1\" color=\"blue\" summary=\"r\">
+report
+</teammate-message>" '{type:"user",timestamp:"2026-09-05T00:50:10.000Z",message:{role:"user",content:$b}}'
+}
+s41_transcript() {  # <messages from w-1> <name:status>... -> this session's transcript, panel fresh
+  local n="$1" i tmp="$TMPROOT/s41.panel"; shift
+  plant_answer "$tmp" fresh "$@"
+  { head -1 "$tmp"; i=0; while [ "$i" -lt "$n" ]; do s41_msg w-1; i=$((i + 1)); done; tail -n +2 "$tmp"; } > "$S41_TR"
+}
+# A LIVE LEDGER WITH NO GAP: writers=1, one ready row, and the MET row still unacked holds the
+# slot — so the tick names no FILL and the stop wall's fill duty owes nothing.
+s41_world() {  # <label> -> a repo: armed, bound, w-1 MET with a landed deliverable
+  local r; r="$(make_repo "$1")"; new_roster "$r"; armed_ago "$r"
+  local p; p="$(wave_plan_at "$r" "epic-99-fixture/wave-41.plan.md" \
+    "writers=1 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "| R1 | 4 | build | ready row | implementor | — | 15m | REQ-x | r1.sh | pending |")"
+  bind_marker "$r" "$p"
+  echo "done" > "$r/w1-report.md"; backdate "$r/w1-report.md" 300
+  add_row "$r" name=w-1 agent_id=aw1-41414141414141 deliverable="$r/w1-report.md" \
+    duration="4 hours" launched_at="$(iso_ago 600)"
+  printf '%s' "$r"
+}
+s41_count() {  # <text> <fixed string> -> lines carrying it
+  printf '%s\n' "$1" | grep -cF -- "$2" | tr -d ' '
+}
+
+# ---------- §PROMPT (AC-4.1; D5): the prompt asks only for what the tick printed ----------
+R41P="$(make_repo s41-prompt)"
+poke "$R41P" prompt
+S41_PROMPT="$OUT"
+expect_nonempty "41a precondition: the prompt printed" "$S41_PROMPT"
+expect_absent "41a AC-4.1 the unconditional fill-declined sentence is gone" \
+  'or write a line "fill-declined: <reason>"; TaskStop' "$S41_PROMPT"
+expect_contains "41a2 …the fill answer is asked only when a FILL line printed" \
+  'only if a "poker: FILL" line printed' "$S41_PROMPT"
+expect_contains "41a3 …the stand-down answer only when a STANDDOWN line printed" \
+  'only if a "poker: STANDDOWN" line printed' "$S41_PROMPT"
+expect_contains "41a4 …and the fill answer is still named" 'fill-declined: <reason>' "$S41_PROMPT"
+expect_contains "41a5 AC-4.12 …the stand-down answer names hold" "session-poker.sh hold <name> <reason>" "$S41_PROMPT"
+expect_contains "41a6 AC-4.13 …ListAgents only when the roster has an open row" \
+  "ListAgents only when the roster has an open row" "$S41_PROMPT"
+expect_regex "41a7 AC-4.11 …and it carries its version after the session token" \
+  "^bionic-patrol session=${SID:0:8} v=[0-9]+ — " "$S41_PROMPT"
+
+# ---------- §BAND (AC-4.2; D4): a stand-down raises the band ----------
+R41B="$(s41_world s41-band)"
+s41_transcript 1 "w-1:idle"
+poke "$R41B" tick
+S41B_OUT="$OUT"
+expect_contains "41b precondition: the MET row on the panel is stood down" "poker: STANDDOWN w-1" "$S41B_OUT"
+expect_contains "41b AC-4.2 …and the decision says so" "decision=STANDDOWN" "$S41B_OUT"
+expect_absent "41b2 …never QUIET beside a STANDDOWN line" "decision=QUIET" "$S41B_OUT"
+expect_contains "41b3 …and the order is written" "target=w-1" "$(cat "$(orders_of "$R41B")" 2>/dev/null)"
+expect_contains "41b4 AC-4.12 …and the STANDDOWN line names the standing answer" "hold w-1" "$S41B_OUT"
+
+# The tick turn the stop wall judges: the Patrol prompt, the tick's Bash call and its output,
+# and the task-list refresh — no decline text anywhere.
+S41_STOP="${BIONIC_HOOKS_DIR}/stop.sh"
+s41_turn() {  # <repo> <tick output> -> the transcript path
+  local tr="$1/s41-turn.jsonl"
+  {
+    jq -nc --arg t "$S41_PROMPT" '{type:"user",isMeta:true,isSidechain:false,userType:"external",message:{role:"user",content:$t}}'
+    jq -nc --arg c "bash $POKER tick" '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S41TICK",name:"Bash",input:{command:$c}}]}}'
+    jq -nc --arg o "$2" '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01S41TICK",content:$o}]}}'
+    jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S41TL",name:"TaskList",input:{}}]}}'
+    jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"text",text:"Continuing."}]}}'
+  } > "$tr"
+  printf '%s' "$tr"
+}
+s41_stop() {  # <repo> <transcript> -> sets S41_STOP_OUT
+  S41_STOP_OUT="$(jq -nc --arg t "$2" --arg c "$1" --arg s "$SID" \
+      '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
+    | env CLAUDE_CODE_SESSION_ID="$SID" bash "$S41_STOP" 2>/dev/null)"
+}
+s41_stop "$R41B" "$(s41_turn "$R41B" "$S41B_OUT")"
+expect_contains "41b5 the CONTROL: the real stop wall refuses an unanswered stand-down on this drive" \
+  "stand-down unanswered" "$(printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null)"
+
+# ---------- §HOLD (AC-4.3; D1): a hold stands, prints once, and the turn ends ----------
+R41H="$(s41_world s41-hold)"
+s41_transcript 1 "w-1:idle"
+poke "$R41H" hold w-1 "addendum"
+expect_eq "41c the hold verb exits 0" "0" "$RC"
+S41H_ROW="$(grep -F '|name=w-1|' "$(roster_of "$R41H")" | tail -1)"
+expect_regex "41c2 …and appends the row with held=<at> <reason> fp=<launch>:<mtime>:<count>" \
+  '\|held=[0-9TZ:-]+ addendum fp=[0-9TZ:-]+:[0-9]+:1\|' "$S41H_ROW"
+poke "$R41H" tick
+S41H_T1="$OUT"
+poke "$R41H" tick
+S41H_T2="$OUT"
+expect_eq "41c3 two ticks print exactly one held note" "1" \
+  "$(s41_count "$S41H_T1
+$S41H_T2" "poker: held w-1 since ")"
+expect_contains "41c4 …which carries the reason" "— addendum" "$S41H_T1"
+expect_absent "41c5 …and neither tick stands it down" "poker: STANDDOWN" "$S41H_T1$S41H_T2"
+expect_absent "41c6 …nor writes it an order" "target=w-1" "$(cat "$(orders_of "$R41H")" 2>/dev/null)"
+s41_stop "$R41H" "$(s41_turn "$R41H" "$S41H_T1")"
+expect_eq "41c7 AC-4.3 the real stop wall ends the held tick's turn with no decline text" "" \
+  "$(printf '%s' "$S41_STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+# A successor row (a re-dispatch's, or `extend`'s) is a new contract and carries no hold (D1).
+poke "$R41H" extend w-1 "more work"
+expect_absent "41c8 the copy a successor row takes drops held=" "held=" \
+  "$(grep -F '|name=w-1|' "$(roster_of "$R41H")" | tail -1)"
+expect_contains "41c9 …while the row it copied from carried it" "held=" "$S41H_ROW"
+poke "$R41H" hold w-nobody "x"
+expect_eq "41c10 hold refuses a name with no row (exit 1)" "1" "$RC"
+
+# ---------- §HOLD-fp (AC-4.4; D1): each fingerprint component voids the hold ----------
+s41_fp_case() {  # <label> <change command, eval'd with R set> 
+  local R; R="$(s41_world "s41-fp-$1")"
+  s41_transcript 1 "w-1:idle"
+  poke "$R" hold w-1 "idle on purpose"
+  poke "$R" tick
+  expect_contains "41d-$1 precondition: held before the change" "poker: held w-1 since " "$OUT"
+  eval "$2"
+  poke "$R" tick
+  expect_contains "41d-$1 AC-4.4 after the change the row is stood down again" "poker: STANDDOWN w-1" "$OUT"
+  expect_contains "41d-$1 …and the order returns" "target=w-1" "$(cat "$(orders_of "$R")" 2>/dev/null)"
+}
+# The launch moves while the held= string is carried verbatim, so only the comparison can see it.
+s41_fp_case launch 'grep -F "|name=w-1|" "$(roster_of "$R")" | tail -1 | sed "s/|launched_at=[^|]*|/|launched_at=$(iso_ago 500)|/" >> "$(roster_of "$R")"'
+s41_fp_case mtime 'backdate "$R/w1-report.md" 200'
+s41_fp_case message 's41_transcript 2 "w-1:idle"'
+
+# ---------- §HOLD-idle (AC-4.5; D1): a held idle row is not re-opened ----------
+R41I="$(s41_world s41-hold-idle)"
+s41_transcript 1 "w-1:idle"
+poke "$R41I" hold w-1 "auditor kept for a second pass"
+poke "$R41I" tick
+S41I_T1="$OUT"
+rm -f "$(digest_of "$R41I")"
+poke "$R41I" tick
+expect_contains "41e precondition: the held row prints its note" "poker: held w-1 since " "$S41I_T1$OUT"
+expect_absent "41e AC-4.5 two ticks over a held idle row draw no NOTIFY" "NOTIFY" "$S41I_T1$OUT"
+
+# ---------- §DIGEST (AC-4.9; D4): an unchanged tick is one line ----------
+R41D="$(make_repo s41-digest)"; new_roster "$R41D"; armed_ago "$R41D"
+add_row "$R41D" name=busy deliverable="$R41D/never-written.md" duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+plant_answer "$S41_TR" fresh "busy:running"
+expect_contains "41f precondition: arm recorded the prompt version" "prompt_version=" \
+  "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
+poke "$R41D" tick
+S41D_T1="$OUT"
+expect_contains "41f2 the first tick prints its decision" "decision=QUIET" "$S41D_T1"
+expect_contains "41f3 …and owes the task-list duty (an open row)" "duty=owed" "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
+poke "$R41D" tick
+expect_eq "41f4 AC-4.9 the second tick's stdout is exactly one line" "1" \
+  "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+expect_regex "41f5 …and that line is the unchanged line" \
+  "^poker: unchanged since [0-9TZ:-]+ — decision=QUIET$" "$OUT"
+expect_contains "41f6 …and the duty is none" "duty=none" "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
+add_row "$R41D" name=busy2 deliverable="$R41D/never-written-2.md" duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+poke "$R41D" tick
+expect_absent "41f7 a new row is a change: the full tick prints" "unchanged since" "$OUT"
+expect_contains "41f8 …with its decision line" "decision=" "$OUT"
+
+# ---------- §PVER (AC-4.11; D5): a stale or missing prompt version asks for a re-arm ----------
+R41V="$(make_repo s41-pver)"; new_roster "$R41V"
+add_row "$R41V" name=busy deliverable="$R41V/never-written.md" duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+poke "$R41V" tick
+expect_eq "41g AC-4.11 a tick with no recorded version prints one re-arm line" "1" \
+  "$(s41_count "$OUT" "re-arm the Patrol")"
+printf 'patrol-digest/v1\nprompt_version=1\n' > "$(digest_of "$R41V")"
+poke "$R41V" tick
+expect_eq "41g2 …and so does a tick under an older version" "1" "$(s41_count "$OUT" "re-arm the Patrol")"
+poke "$R41V" arm
+poke "$R41V" tick
+expect_eq "41g3 …and an armed one prints none" "0" "$(s41_count "$OUT" "re-arm the Patrol")"
+expect_contains "41g4 …while still printing its decision" "decision=" "$OUT"
+# ---------- §DIGEST-emergency (D4): an EMERGENCY names a writer to stop on every tick ----------
+R41X="$(make_repo s41-emergency)"; new_roster "$R41X"; armed_ago "$R41X"
+add_row "$R41X" name=suite-writer deliverable="$R41X/never-written.md" duration="4 hours" \
+  claims="bash tests/run.sh" launched_at="$(iso_ago 60)"
+plant_answer "$S41_TR" fresh "suite-writer:running"
+poke_pressure "$R41X" 100 1.0 tick
+expect_contains "41h precondition: the first EMERGENCY tick names the writer" "poker: EMERGENCY" "$OUT"
+poke_pressure "$R41X" 100 1.0 tick
+expect_contains "41h2 the second EMERGENCY tick over the same facts still prints in full" "poker: EMERGENCY" "$OUT"
+expect_absent "41h3 …never as unchanged" "unchanged since" "$OUT"
+unset CLAUDE_CONFIG_DIR
+
 finish
