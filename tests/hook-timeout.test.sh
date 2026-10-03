@@ -23,6 +23,8 @@
 #   b'  bash-walls       the same command ending in `git commit`, from a read-only agent
 #   c   bash-walls       a 7.7 K quote-dense command ending in `g'i't commit`
 #   d   bash-walls       a 3-segment `&&` chain whose first segment is ~8 K em dashes
+#   e   bash-walls       a 52 KB single-quoted `python3 -c` body of 1 350 short lines (T22)
+#   f   bash-walls       the same body double-quoted, then a newline and `make`
 # Every row runs under `/bin/bash` (3.2 on macOS, the interpreter ADR-001 pins) AND under
 # the newest bash on PATH: the 64 KB command also took 3.9 s under bash 5.3, so moving off
 # 3.2 was never the fix.
@@ -301,6 +303,26 @@ meta["d_seg_chars"] = len(seg)
 #    hook finishing its walk rather than leaving early (see row d2 below) --
 json.dump(bash_payload(r_chain, seg + " && make && echo three"), open(d + "/d2.json", "w"))
 
+# -- e, f: a python3 -c body, never a heredoc, so nothing strips it before the classifier (T22) --
+# Many short lines, not a few long ones: cmd_class's line loop cost lines × length under 3.2.
+body = ["import re", "p = \".bionic/docs/plans/active.md\"", "s = open(p).read()"]
+n = 0
+while len("\n".join(body)) < 51700:
+    n += 1
+    body.append("s = s.replace(\"T%d — a\", \"T%d — b\")" % (n, n))
+body.append("open(p, \"w\").write(s)")
+body = "\n".join(body)
+sq = "python3 -c '" + body + "'"
+dq = "python3 -c \"" + body.replace("\"", "'") + "\""
+json.dump(bash_payload(r_chain, sq), open(d + "/e.json", "w"))
+# -- e2, f: the same bodies with `make` on the next line — the witness that the reading walked
+#    past the body (a build deny can only come from the segment after it) --
+json.dump(bash_payload(r_chain, sq + "\nmake"), open(d + "/e2.json", "w"))
+json.dump(bash_payload(r_chain, dq + "\nmake"), open(d + "/f.json", "w"))
+meta["e_bytes"] = len(sq.encode())
+meta["e_lines"] = body.count("\n") + 1
+meta["e_inner_quotes"] = body.count("'")
+
 json.dump(meta, open(d + "/meta.json", "w"))
 PY
 
@@ -314,6 +336,9 @@ expect_true "fixture: b's command is at least 64 000 characters" test "$(meta b)
 expect_true "fixture: c's command is ~7.7 K with over 1 500 single quotes" \
   awk -v n="$(meta c)" -v q="$(meta c_quotes)" 'BEGIN { exit !(n >= 7600 && n <= 7900 && q >= 1500) }'
 expect_true "fixture: d's long segment is at least 8 000 characters" test "$(meta d_seg_chars)" -ge 8000
+expect_true "fixture: e's command is at least 50 000 bytes" test "$(meta e_bytes)" -ge 50000
+expect_true "fixture: e's body is at least 1 000 lines" test "$(meta e_lines)" -ge 1000
+expect_eq "fixture: e's body holds no single quote, so it is one quoted word" "0" "$(meta e_inner_quotes)"
 
 # ---------- the rows ----------
 
@@ -352,6 +377,13 @@ row c  "$WALLS_HOOK" "$R_COMMIT" 2 "evidence line is a placeholder" err
 # segments after it. d is the input being timed; d2 is the proof the timing covers the walk.
 row d  "$WALLS_HOOK" "$R_CHAIN"  0 SILENT out
 row d2 "$WALLS_HOOK" "$R_CHAIN"  0 "chain-class command" out
+
+section "2b — bash-walls: a 52 KB quoted python3 -c body the classifier reads whole (T22)"
+# e is the input being timed: class none, so silence. e2 and f put `make` on the line after
+# the body, and their build deny can only come from a reading that walked past it.
+row e  "$WALLS_HOOK" "$R_CHAIN"  0 SILENT out
+row e2 "$WALLS_HOOK" "$R_CHAIN"  0 "farm-out [deny] class=build" err
+row f  "$WALLS_HOOK" "$R_CHAIN"  0 "farm-out [deny] class=build" err
 
 # ---------- the self-check ----------
 
@@ -394,6 +426,29 @@ while [ "$i" -lt "$n" ]; do
 done
 SH
 
+# e: cmd-class.sh:833-844 at 7223b594 (1386-1395 at 19d708d1, unchanged) — cmd_class's walk over cmd_class_lines' output, which
+# echoes each segment whole, so a quoted body's every line is one more pass over all of it.
+cat > "$SANDBOX/hot-e.sh" <<'SH'
+. "$HT_CMD_CLASS_LIB"
+COMMAND=$(jq -r '.tool_input.command')
+lines=$(cmd_class_lines "$COMMAND")
+seen=$'\n'
+rest="$lines"
+while [ -n "$rest" ]; do
+  line="${rest%%$'\n'*}"
+  case "$rest" in
+    *$'\n'*) rest="${rest#*$'\n'}" ;;
+    *)        rest="" ;;
+  esac
+  cls="${line%%$'\t'*}"
+  [ -n "$cls" ] || continue
+  seen="$seen$cls"$'\n'
+done
+SH
+HT_CMD_CLASS_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/cmd-class.sh"
+export HT_CMD_CLASS_LIB
+expect_true "fixture: the cmd-class library the e self-check sources is on disk" test -f "$HT_CMD_CLASS_LIB"
+
 selfcheck() {  # <id> <snippet>
   ht_time /bin/bash "$SANDBOX/$2" "$SANDBOX/in/$1.json" "$SANDBOX" "$CAP"
   echo "hook-timeout: self-check $1 (7223b594 hot line, /bin/bash): ${HT_SECS}s rc=$HT_RC"
@@ -411,5 +466,6 @@ selfcheck a2 hot-a.sh
 selfcheck b  hot-b.sh
 selfcheck c  hot-b.sh
 selfcheck d  hot-d.sh
+selfcheck e  hot-e.sh
 
 finish
