@@ -8561,4 +8561,136 @@ expect_eq "brief-lib brief_field hands back the Files: set as the row stores it"
   "payload/a.sh,payload/b.sh" \
   "$(bash -c '. "$1" || exit 9; brief_field "$(lift_contract_fields "Files: payload/a.sh, payload/b.sh")" files' _ "$BRIEF_LIB" 2>&1)"
 
+# ============================================================================
+section "§ADV — the brief body is read for a run or a write the contract never declared (wave-24 T14; REQ-8, D13)"
+# ============================================================================
+#
+# Nothing used to read the body: `lift_contract_fields` takes labelled lines only, so a brief
+# that says "run bash tests/foo.test.sh" under `Suites: tests/widget.test.sh` was admitted and
+# the agent was refused at its first command, minutes later. D13 makes the dispatch say so
+# while the author is still holding the brief — an ADVISORY (a WARN on the pass path, with the
+# `amend` line that would declare the run), never a refusal: the research corpus had 0 true
+# positives in 202 briefs, so the exit code is not the advisory's to change (AC-8.4).
+#
+# fails-when: the undeclared run is not named with its declaring line, or the advisory changes
+# the verdict, or the declared suite beside it is advised about as well.
+
+adv_brief() {  # <body lines> -> BRIEF_FULL's contract with the given body lines before Suites:
+  printf 'Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · audited · wave.
+Your task: implement the widget behind the existing seam.
+%s
+Expected artifact: .bionic/docs/record/w99-widget.txt
+Exit condition: the artifact exists and the paired suite is green.
+Expected duration: ~25 minutes.
+Progress artifact: .bionic/tmp/w99-widget.progress
+Files: payload/scripts/lib/widget.sh
+Suites: tests/widget.test.sh' "$1"
+}
+
+# adv_ctx -> the model-facing advisory text of the last gate run, `` when stdout carries none.
+# THE ADVISORY RIDES `hookSpecificOutput.additionalContext` on stdout (A-orch-20), so it is read
+# through `jq` like the harness reads it; a stdout that is not one parseable object reads as empty.
+adv_ctx() { printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+adv_objects() { printf '%s' "$GATE_OUT" | jq -s 'length' 2>/dev/null; }
+
+REPO=$(make_repo advbase yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Scope constraint: touch only payload/scripts/lib/widget.sh.')" "w99-adv")"
+ADV_BASE_VERDICT="$GATE_VERDICT"; ADV_BASE_ST="$GATE_ST"; ADV_BASE_OUT="$GATE_OUT"
+expect_eq "ADV the brief with no body run is admitted" "allow" "$ADV_BASE_VERDICT"
+expect_empty "ADV …and prints nothing on stdout" "$GATE_OUT"
+expect_absent "ADV …nor on stderr" "the brief body" "$GATE_ERR"
+
+REPO=$(make_repo advrun yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'When the seam is in, run `bash tests/foo.test.sh` and report the count.
+Then `bash tests/widget.test.sh` for the paired suite.
+bash tests/bar.test.sh
+cd /x/tree && bash tests/baz.test.sh')" "w99-adv")"
+expect_eq "ADV an undeclared body run is still ADMITTED (AC-8.4)" "$ADV_BASE_VERDICT" "$GATE_VERDICT"
+expect_eq "ADV …with the exit status the no-advisory brief had (AC-8.4)" "$ADV_BASE_ST" "$GATE_ST"
+expect_eq "ADV …stdout is ONE parseable JSON object" "1" "$(adv_objects)"
+expect_eq "ADV …on the model's channel, a PreToolUse additionalContext" "PreToolUse" \
+  "$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.hookEventName // ""' 2>/dev/null)"
+expect_eq "ADV …that carries no verdict (no permissionDecision)" "" \
+  "$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.permissionDecision // ""' 2>/dev/null)"
+expect_absent "ADV …and the advisory is not also on stderr" "the brief body" "$GATE_ERR"
+ADV_CTX=$(adv_ctx)
+expect_contains "ADV the advisory names the undeclared suite (AC-8.1)" "foo.test.sh" "$ADV_CTX"
+expect_contains "ADV …and the declaring line" 'run `bash tests/foo.test.sh` and report the count' "$ADV_CTX"
+expect_contains "ADV …as the amend line that declares it" "amend w99-adv --suites+ foo.test.sh" "$ADV_CTX"
+expect_contains "ADV …a bare command line is read the same way" "amend w99-adv --suites+ bar.test.sh" "$ADV_CTX"
+expect_contains "ADV …and one behind a cd prefix" "amend w99-adv --suites+ baz.test.sh" "$ADV_CTX"
+expect_absent "ADV …while the declared suite is not advised about" "--suites+ widget.test.sh" "$ADV_CTX"
+expect_status "ADV …and the launch was journalled as usual" \
+  "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ============================================================================
+section "§ADV-quiet — the same text in an excluded region is not an advisory (AC-8.2)"
+# ============================================================================
+# One brief, one positive control: `pos.test.sh` sits on a plain line and MUST be advised, so an
+# empty stderr cannot be a dead reader; every other name sits in a region the predicate skips.
+REPO=$(make_repo advquiet yes)
+write_attestation "$REPO" "$SID_A"
+ADVQ_BODY='Read first: run `bash tests/rf.test.sh` to see the baseline
+  and `bash tests/rf2.test.sh` on the line after it.
+Never run `bash tests/nev.test.sh` here.
+Please do not run bash tests/dn.test.sh either.
+Example only, e.g. `bash tests/eg.test.sh`.
+
+```
+bash tests/fence.test.sh
+```
+
+    bash tests/ind.test.sh
+
+Run `bash tests/pos.test.sh` last.'
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief "$ADVQ_BODY")" "w99-advq")"
+ADV_CTX=$(adv_ctx)
+expect_eq "ADV-quiet the brief is admitted" "allow" "$GATE_VERDICT"
+expect_eq "ADV-quiet …with one parseable object on stdout" "1" "$(adv_objects)"
+expect_contains "ADV-quiet the control line IS advised (the reader works)" "--suites+ pos.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet Read first: is not advised" "rf.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet …nor its continuation line" "rf2.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet a never-line is not advised" "nev.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet a do-not line is not advised" "dn.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet an e.g. line is not advised" "eg.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet a fenced block is not advised" "fence.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet a 4-space-indented block is not advised" "ind.test.sh" "$ADV_CTX"
+
+# ============================================================================
+section "§ADV-files — an imperative edit of a path outside Files: is advised (AC-8.3)"
+# ============================================================================
+# Same shape: `other.sh` is the positive control, everything else is a shape the strict
+# predicate leaves alone (declared, record file, no path object, a never-line, a mention).
+REPO=$(make_repo advfiles yes)
+write_attestation "$REPO" "$SID_A"
+ADVF_BODY='Edit payload/scripts/lib/other.sh to add the seam.
+Update payload/scripts/lib/widget.sh with the new field.
+Update .bionic/docs/record/w99/notes.md when you finish.
+Fix the failing assertion in the paired suite.
+Never edit payload/scripts/lib/nev.sh from here.
+The old shape lives in payload/scripts/lib/mention.sh and stays as it is.
+Rewrite the `payload/scripts/lib/quoted.sh` helper if it blocks you.
+
+```
+Modify payload/scripts/lib/fence.sh
+```'
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief "$ADVF_BODY")" "w99-advf")"
+ADV_CTX=$(adv_ctx)
+expect_eq "ADV-files the brief is admitted" "allow" "$GATE_VERDICT"
+expect_eq "ADV-files …with ONE parseable object on stdout, the advisory inside its additionalContext" "1" "$(adv_objects)"
+expect_eq "ADV-files …with exit 0 (AC-8.4)" "0" "$GATE_ST"
+expect_contains "ADV-files an edit outside Files: is advised, with its amend line" \
+  "amend w99-advf --files+ payload/scripts/lib/other.sh" "$ADV_CTX"
+expect_contains "ADV-files …naming the declaring line" "Edit payload/scripts/lib/other.sh to add the seam" "$ADV_CTX"
+expect_contains "ADV-files a backticked object is read" "--files+ payload/scripts/lib/quoted.sh" "$ADV_CTX"
+expect_absent "ADV-files a path inside Files: is not advised" "--files+ payload/scripts/lib/widget.sh" "$ADV_CTX"
+expect_absent "ADV-files a record path is not advised" "notes.md" "$ADV_CTX"
+expect_absent "ADV-files a never-line is not advised" "nev.sh" "$ADV_CTX"
+expect_absent "ADV-files a plain mention is not advised" "mention.sh" "$ADV_CTX"
+expect_absent "ADV-files a fenced block is not advised" "fence.sh" "$ADV_CTX"
+expect_absent "ADV-files an edit with no path object is not advised" "failing assertion" "$ADV_CTX"
+
+
 finish
