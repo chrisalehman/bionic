@@ -5131,8 +5131,8 @@ fi
 # standing. A foreign tree is not a corner of the machine where a suite runs on the
 # orchestrator thread.
 #
-# ITS OWN RUNNER, AND THE REASON (fixture fidelity, per .claude memory
-# fixtures-can-pin-away-the-test). Every runner above posts `{session_id, tool_input, cwd}`,
+# ITS OWN RUNNER, AND THE REASON (fixture fidelity, per .claude/rules/test-harness.md,
+# "Fixture fidelity"). Every runner above posts `{session_id, tool_input, cwd}`,
 # because the evidence gate reads no more than that — but `wall_farm_out_reminder` screens on
 # `.tool_name` (walls.sh) and a payload without it returns before classifying anything. The
 # real PreToolUse envelope always carries it, so the omission is the fixtures' and not the

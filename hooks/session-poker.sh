@@ -1690,7 +1690,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 #   has since died is still in force in its successor"). A `landing-swept/v1` marker closes
 #   NOTHING here, MET or not: until wave-20 a MET marker did, so an agent swept MET and never
 #   acked — still alive on the panel — came out of a `/clear` with no row on the new roster,
-#   and no stop could reach it (memory adopt-skips-swept-rows). An ack older than a
+#   and no stop could reach it (the code in `roster_open_names` is the rule). An ack older than a
 #   relaunch closes nothing either: the relaunched agent is the one to adopt.
 #
 # THE ORIGIN IS CARRIED OUT WITH THE ROW, and it is what the stop address is built from

@@ -761,7 +761,7 @@ expect_contains "P2: after the process exits, live: no" "live:     no" "$OUT8G"
 # `claims=<pattern>` — a field NO writer could produce, since
 # hooks/dispatch-preflight.sh's label table had no `claims` and no `cadence`
 # entry. The suite was green about a field that could not exist: a fixture
-# pinning away its own test (.claude memory: fixtures-can-pin-away-the-test),
+# pinning away its own test (.claude/rules/test-harness.md, "Fixture fidelity"),
 # and the reader it was pinning was dead substrate. So the row below is produced
 # by running the real start gate over a real dispatch brief, and the reader is
 # then driven over whatever that writer actually wrote. If the label grammar
