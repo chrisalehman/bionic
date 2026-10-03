@@ -12518,6 +12518,49 @@ expect_contains "HD3 the wall refuses the turn for the one row the tick stood do
 expect_eq "HD4 the wall's computed set is the tick's: the held row is in neither" "$HD_PRINTED" "$HD_WALL"
 
 # ============================================================
+section "OCC — preflight's open count and the tick's occupancy agree on a mixed roster (wave-24 T10; REQ-7 AC-7.1; D11)"
+# ============================================================
+#
+# One roster: a writer, two researchers and a test-runner, all unacked. A read-only role holds no
+# WRITER slot, so the one writer is the whole occupancy at both readers. Preflight reads it as the
+# `open=` of its writer refusal, the tick as the occupancy of its fill line, and the two numbers
+# are asserted EQUAL and asserted ONE: equal alone is also what the unfixed code gives (it counts
+# four at both), so the absolute figure is what makes this test fail on that code.
+OCC_R=$(new_repo occ)
+OCC_RO="$OCC_R/.bionic/tmp/roster-$SID_A.state"
+roster_header > "$OCC_RO"
+roster_row_fixture status=intended session="$SID_A" name=oc-w agent_id= \
+  tool_use_id=toolu_01OCW deliverable="$OCC_R/never-oc-w.md" >> "$OCC_RO"
+for _oc in oc-r1:bionic:researcher oc-r2:bionic:researcher oc-t:bionic:test-runner; do
+  roster_row_fixture status=intended session="$SID_A" name="${_oc%%:*}" agent_id= \
+    subagent_type="${_oc#*:}" tool_use_id="toolu_01OC${_oc%%:*}" \
+    deliverable="$OCC_R/never-${_oc%%:*}.md" >> "$OCC_RO"
+done
+expect_eq "OCC precondition: the fixture roster holds four rows, three of them read-only" "4/3" \
+  "$(grep -c '^roster-state/' "$OCC_RO")/$(grep -c 'subagent_type=bionic:' "$OCC_RO")"
+cgc_plan "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md" \
+  'parallel-budget: writers=1 suites=9 worktrees=32 test_jobs=8 source=probe' 1
+s4_bind "$OCC_R" "$SID_A" "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md"
+s4_attest "$OCC_R" "$SID_A"
+occ_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
+  BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+  BIONIC_PROBE_LOAD_1M=0.1 "$@"; }
+OCC_PF=$( cd "$OCC_R" && mk_agent_payload "$SID_A" "$OCC_R" | occ_env bash "$PARTY_DP" 2>&1 )
+OCC_PF_N=$(printf '%s\n' "$OCC_PF" | sed -n 's/.*writers: budget=1 open=\([0-9][0-9]*\) with-this-dispatch=.*/\1/p' | head -1)
+cgc_ring
+OCC_TICK=$( cd "$OCC_R" && occ_env bash "$CGSD_POKER" tick 2>&1 )
+OCC_TICK_N=$(printf '%s\n' "$OCC_TICK" | sed -n -e 's/.* occupied=\([0-9][0-9]*\) gap=.*/\1/p' \
+  -e 's/.* and \([0-9][0-9]*\) unacked roster row(s).*/\1/p' | head -1)
+expect_eq "OCC1 preflight refuses a writer, counting ONE open writer" "1" "$OCC_PF_N"
+expect_eq "OCC2 the tick's occupancy is ONE" "1" "$OCC_TICK_N"
+expect_eq "OCC3 …and the two readers' numbers are equal" "$OCC_PF_N" "$OCC_TICK_N"
+OCC_PF_RO=$( cd "$OCC_R" && mk_agent_payload "$SID_A" "$OCC_R" \
+  | jq -c '.tool_input.subagent_type="bionic:researcher" | .tool_input.name="oc-r3"' \
+  | occ_env bash "$PARTY_DP" 2>&1 ); OCC_PF_RO_RC=$?
+expect_eq "OCC4 a read-only dispatch against the same full roster is admitted (rc 0)" "0" "$OCC_PF_RO_RC"
+expect_absent "OCC4b …with no writer-budget refusal" "writers: budget=" "$OCC_PF_RO"
+
+# ============================================================
 section "CG-turn — the ledger writer and fill-report agree on what a turn is (epic-23 wave-20 T11b; Step-6 review R3, critic C1)"
 # ============================================================
 #

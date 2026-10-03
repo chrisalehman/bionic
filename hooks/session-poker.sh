@@ -5189,14 +5189,23 @@ EOF
     # Every unacked name the walk saw, minus every name the arm above has just acked. Only an
     # ack that WROTE counts as a close: a refused `ack` left the row open, and the wall will
     # count it too.
-    TICK_OCCUPIED=0
+    #
+    # THE WRITERS AMONG THEM (wave-24 T10, REQ-7 AC-7.1, D11). A read-only role holds no writer
+    # slot, so it is not occupancy: the names go through `budget_open_writers`
+    # (payload/scripts/lib/roster.sh), the same function the dispatch wall counts its `open=`
+    # with, and a Patrol that read a researcher as a full seat would hold a FILL the wall
+    # would have admitted.
+    TICK_OCC_NAMES=""
     while IFS= read -r OCC_NAME; do
       [ -n "$OCC_NAME" ] || continue
       case "$TICK_ACKED_NOW" in *"|${OCC_NAME}|"*) continue ;; esac
-      TICK_OCCUPIED=$((TICK_OCCUPIED + 1))
+      TICK_OCC_NAMES="${TICK_OCC_NAMES}${OCC_NAME}
+"
     done <<EOF
 $TICK_UNACKED_NAMES
 EOF
+    TICK_OCCUPIED="$(printf '%s' "$TICK_OCC_NAMES" | budget_open_writers "$ROSTER_FILE")"
+    case "$TICK_OCCUPIED" in ''|*[!0-9]*) TICK_OCCUPIED=0 ;; esac
 
     # "No roster" and "empty roster" are different facts, and only the latter may DISARM
     # (ap review A-1, item 2). A roster with zero verdict lines because the file plain does
