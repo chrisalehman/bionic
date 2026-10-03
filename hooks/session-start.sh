@@ -61,7 +61,7 @@
 
 set -u
 
-BIONIC_LIB_WANT="context.sh root.sh session.sh patrol.sh run.sh roster.sh"
+BIONIC_LIB_WANT="context.sh root.sh session.sh patrol.sh run.sh roster.sh binding.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -166,6 +166,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/patrol.sh"   || exit 0   # patrol_fire_window, patrol_verdict, patrol_dead_sessions
 . "$BIONIC_LIB/run.sh"      || exit 0   # active_run, engaged_session
 . "$BIONIC_LIB/roster.sh"   || exit 0   # roster_open_counts — the one close predicate (T17, D10)
+. "$BIONIC_LIB/binding.sh"  || exit 0   # bind_holders — who else's marker names the one run (T15)
 . "$BIONIC_LIB/worktree.sh" || exit 0   # worktree_legacy_links (AC-11/AC-7.1, A-orch-24)
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
@@ -366,9 +367,40 @@ if [ "$N" -eq 1 ]; then
       # The one run is listed whether live or quiet (`$RUNS`, not `$LIVE`): with a single
       # candidate there is no listing to keep short, and the bystander line above names it
       # the same way.
+      #
+      # THE HOLDER IS NAMED WHEN THERE IS ONE (wave-23-fixit-1810 T15, critic N-2). engage.sh
+      # leaves a session unbound BECAUSE another live session holds the sole run, and tells it
+      # so with a line naming the holder (A-T13.4) — that line is what keeps the offered bind
+      # from being taken by reflex. On a resume or compaction the engagement-time context has
+      # been summarized away and this line is all the model sees, so the bare verb here would
+      # reproduce C-3 by hand. So the same question engage.sh asks is asked here, the same way:
+      # `bind_holders` for the other markers naming this plan, intersected with the sweeper's
+      # live set (`patrol_live_session_ids`, newline containment so a prefix id is not taken for
+      # a live one). Asked only in this arm, and the live set only when a holder exists. Held:
+      # one header line naming the holder's id prefix and binding only on resume of that run.
+      # Unheld (no holder, or every holder dead): T13's line, unchanged.
       *)
-        printf 'bionic: 1 open run exists here and this session is not bound to it — bind with: bash %s/hooks/session-poker.sh bind <plan>\n' \
-          "$HOOK_ROOT"
+        SS_HELD_BY=""
+        if [ -n "$BIONIC_SID" ] && bind_holders "$BIONIC_ROOT" "$BIONIC_SID" "$PLAN" 2>/dev/null; then
+          SS_LIVE=$(patrol_live_session_ids 2>/dev/null) || SS_LIVE=""
+          while IFS= read -r _h; do
+            [ -n "$_h" ] || continue
+            case "
+$SS_LIVE
+" in
+              *"
+$_h
+"*) SS_HELD_BY="$_h"; break ;;
+            esac
+          done <<< "$BIND_HOLDERS"
+        fi
+        if [ -n "$SS_HELD_BY" ]; then
+          printf 'bionic: 1 open run exists here and live session %s holds it; this session is not bound to it — bind with: bash %s/hooks/session-poker.sh bind <plan> only if this session is resuming that run\n' \
+            "${SS_HELD_BY:0:8}" "$HOOK_ROOT"
+        else
+          printf 'bionic: 1 open run exists here and this session is not bound to it — bind with: bash %s/hooks/session-poker.sh bind <plan>\n' \
+            "$HOOK_ROOT"
+        fi
         print_runs "$RUNS"
         ;;
     esac

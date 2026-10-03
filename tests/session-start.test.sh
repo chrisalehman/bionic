@@ -226,6 +226,12 @@ drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdou
   local proj="$1" src="$2" esid="$3" psid="$4" fsid="$5" home
   home="$WORK/home.$RANDOM.$RANDOM"; mkdir -p "$home"
   OUTF="$WORK/last.out"; ERRF="$WORK/last.err"; RCF="$WORK/last.rc"
+  # DRIVE_LIVE=<sid>: one more LIVE session in the fixture home (T15), at this suite's own pid,
+  # which is alive for the whole run — the CLI's pid-file shape the wrapper writes for the hook.
+  if [ -n "${DRIVE_LIVE:-}" ]; then
+    mkdir -p "$home/sessions"
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s"}\n' "$$" "$DRIVE_LIVE" "$proj" > "$home/sessions/$$.json"
+  fi
   (
     cd "$proj" || exit 1
     printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"%s"}' \
@@ -776,6 +782,38 @@ plant_bound "$P15" "$CUR_SID" "$PLAN15"
 OUT=$(drive "$P15" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 has   "15.11 paired: bound on the same root, the bound line prints" "bionic: bound to" "$OUT"
 hasnt "15.12 …and no bind line" "not bound to it" "$OUT"
+
+section "15h — engaged, unbound, the one run HELD by a live session: the line names the holder (wave-23 T15, critic N-2)"
+# N-2 (record/wave-23-fixit-1810/critic-d067c07d.md, the `held.sh` drive). §15's line offers the
+# bare bind verb to every engaged unbound session — including the one engage.sh left unbound
+# BECAUSE another live session holds the run (A-T13.4). On a resume or compaction that bare verb
+# is the reflex bind A-T13.4 exists to prevent. So when the sole run is held by a LIVE session
+# (the sweeper's predicate, as engage.sh asks it), the header names that holder's id prefix and
+# says to bind only when resuming that run. Unheld, it is §15's line, unchanged.
+HOLD_SID="40ld0000-aaaa-4bbb-8ccc-dddddddddddd"
+P15h=$(make_env 3600s)
+PLAN15h="$(write_open_plan "$P15h")"
+plant_engaged "$P15h" "$CUR_SID"
+plant_bound "$P15h" "$HOLD_SID" "$PLAN15h"
+OUT=$(DRIVE_LIVE="$HOLD_SID" drive "$P15h" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "15h.1 exit 0" "0" "$(rc)"
+has   "15h.2 held: the header names the live holder by its id prefix" \
+  "bionic: 1 open run exists here and live session ${HOLD_SID:0:8} holds it; this session is not bound to it" "$OUT"
+has   "15h.3 …and says to bind only when resuming that run" \
+  "/hooks/session-poker.sh bind <plan> only if this session is resuming that run" "$OUT"
+hasnt "15h.4 …and the bare bind line (§15's) is not printed" \
+  "bionic: 1 open run exists here and this session is not bound to it — bind with: bash" "$OUT"
+has   "15h.5 …the run still listed on its own line" "  ${PLAN15h#$P15h/.bionic/docs/}" "$OUT"
+eq    "15h.6 …exactly one header line and one run line, on stdout" "2" \
+  "$(printf '%s\n' "$OUT" | grep -c -e 'not bound to it' -e "^  ${PLAN15h#$P15h/.bionic/docs/}\$")"
+eq    "15h.7 …nothing of it on stderr" "0" "$(errtext | grep -c 'not bound to it')"
+# the pair, one fact apart: the SAME root with the holder's pid file gone (dead) prints §15's
+# line exactly, and no holder.
+OUT=$(drive "$P15h" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "15h.8 unheld (the holder is dead): §15's line, unchanged" \
+  "bionic: 1 open run exists here and this session is not bound to it — bind with: bash" "$OUT"
+hasnt "15h.9 …and no holder named" "holds it" "$OUT"
+has   "15h.10 …and the run on its own line" "  ${PLAN15h#$P15h/.bionic/docs/}" "$OUT"
 
 section "16 — 400 aged predecessor files: bounded, not a linear scan (AC-6.1, AC-6.2)"
 # THE FIELD DEFECT (carry-over P9, REQ-6): both the roster loop (:427) and the
