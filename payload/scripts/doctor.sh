@@ -637,6 +637,12 @@ RC_PROXY_FACT="$(detect_rc_claude_proxy)";   RC_PROXY_STATE="${RC_PROXY_FACT##*p
 LEGACY_HOOK_FACT="$(detect_legacy_channel_hooks)"; LEGACY_HOOK_COUNT="${LEGACY_HOOK_FACT##*count=}"
 SKILL_COPY_FACT="$(detect_legacy_skill_copy)"
 SKILL_COPY_PATH="${SKILL_COPY_FACT##*path=}"
+# AUTO MEMORY FOR THIS PROJECT (wave-23 D5), through checks.sh's own reader so the
+# page and the row resolve the same project root. Whether it FIRES is the row's
+# question, asked in the project section; the raw override is kept here for the
+# one answer the row cannot give, "the settings could not be read".
+AUTO_MEMORY_FACT="$(bionic_check_auto_memory_fact)"
+AUTO_MEMORY_OVERRIDE="${AUTO_MEMORY_FACT#*override=}"; AUTO_MEMORY_OVERRIDE="${AUTO_MEMORY_OVERRIDE%% dir=*}"
 HOOK_FILES_FACT="$(detect_legacy_hook_files)"
 HOOK_FILES_COUNT="${HOOK_FILES_FACT#*count=}"; HOOK_FILES_COUNT="${HOOK_FILES_COUNT%% *}"
 HOOK_FILES_PATH="${HOOK_FILES_FACT#*path=}";   HOOK_FILES_PATH="${HOOK_FILES_PATH%% *}"
@@ -1633,6 +1639,32 @@ if bionic_check_fires dead-session-state; then
   fix "the automatic dead-session sweep failed (rc=${_doctor_sweep_rc:-?}) → $(bionic_check_hint dead-session-state)"
 fi
 
+# AUTO MEMORY, THE SECOND PROJECT ROW (wave-23 D5). setup's environment step writes
+# the user-scope switch, and the `env:CLAUDE_CODE_DISABLE_AUTO_MEMORY` row in
+# ENVIRONMENT reports it unwritten. This row reports what the switch cannot reach
+# from there: this project's own settings turning it back on, and memory files the
+# CLI wrote before it was set. Party `user`, so the hint is the instruction and it
+# never names setup.
+#
+# THE ✗ ROW IS PRINTED WHOLE, NOT CUT AT 100 COLUMNS. Every other row protects its
+# instruction and cuts the path in front of it; here the path and the key ARE the
+# instruction (`edit .claude/settings.local.json: env.CLAUDE_CODE_DISABLE_AUTO_MEMORY
+# must be "1"` is 72 columns before the 35-column label), so a cut leaves a reader
+# nothing to type. A row that wraps in a narrow terminal still reads right; a row
+# missing half its path does not. The FIX line keeps the loop's ordinary bound.
+AUTO_MEMORY_FIRES=no; bionic_check_fires auto-memory && AUTO_MEMORY_FIRES=yes
+if [ "$AUTO_MEMORY_FIRES" = "yes" ]; then
+  _run_add "$(_doctor_rtrim "$(printf '  %s %-30s %s' "$DOCTOR_BAD" "$(bionic_check_label auto-memory)" "$(bionic_check_hint auto-memory)")")"
+  fix "auto memory is on for this project → $(bionic_check_hint auto-memory)"
+elif [ "$AUTO_MEMORY_OVERRIDE" = "unknown" ]; then
+  _run_add "$(_doctor_item "$DOCTOR_NIL" "$(bionic_check_label auto-memory)" "project settings unreadable (jq missing, or a file does not parse)")"
+else
+  # NOT `_doctor_item`: its cut would end the claim at "under it…". The same 30-column label
+  # cell as every row beside it and the ✗ row above, so the value starts in the column
+  # theirs do, and the sentence is worded to fit the page's 100-column bound whole: 98.
+  _run_add "$(_doctor_rtrim "$(printf '  %s %-30s %s' "$DOCTOR_OK" "$(bionic_check_label auto-memory)" "no override in project settings, no memory files under its slug")")"
+fi
+
 # LEGACY `.bionic` SYMLINKS (AC-11, narrowed by AC-7.1/A-orch-24, wave-13-fixit-180).
 # spawn-worktree.sh USED TO plant `<wt>/.bionic -> <main>/.bionic` as a mistake
 # lib/root.sh stepped over (design-ledger C2); D7 (wave-13) brought the same link
@@ -2566,9 +2598,14 @@ if [ -n "$_drift_reg" ] && [ "$_drift_reg" != "$_drift_run" ]; then
     echo "  plugin-root drift: registry=${_drift_reg} running=${_drift_run} — the Patrol must be armed from the running root"
   fi
 fi
-# THE RUN, THE PREDECESSORS AND THE LEGACY LINKS — the three rows that are about
-# this PROJECT rather than about this machine, printed under the Patrol because
-# the Patrol is what acts on them.
+# THE RUN, THE PREDECESSORS, THE LEGACY LINKS AND AUTO MEMORY — the rows that are about
+# this PROJECT rather than about this machine. They used to print unheaded under PATROL,
+# so `auto-memory` read as a Patrol finding beside `none running` (wave-23 T10, walk
+# surprise 1). The header goes AFTER the Patrol's own rows and the drift line, so the
+# Patrol block — read from its header to end of output by more than one caller — still
+# contains every row it contained before; only the label above the project rows changed.
+echo ""
+echo "PROJECT"
 printf '%s' "$RUN_ROWS"
 
 # The version the dependency sweep already probed. Used only where a package

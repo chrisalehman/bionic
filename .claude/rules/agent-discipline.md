@@ -7,8 +7,8 @@ paths:
 # Agent-behavior discipline
 
 How Claude should operate in this codebase — authoring instruction files, dispatching
-subagents, and choosing between overlapping skills. Migrated from
-`.bionic/memory/agent-rules.md` (epic-12 wave-01 slice 6) with the correction ledger applied.
+subagents, and choosing between overlapping skills. Its text was migrated from bionic's retired
+memory tier (ADR-002) at epic-12 wave-01 slice 6, with the correction ledger applied.
 
 **Routing note (slice 6 judgment call).** This is the weakest path-glob *fit* of the rules
 files — most of it fires regardless of which file is being touched — and it is here because
@@ -18,9 +18,9 @@ reaches a dispatched agent too — measured by live readback — but it is snaps
 start, so an edit lands on the NEXT session while this file lands on the next read. That
 timing difference, not reach, is now what decides which channel a rule belongs in.)* Project
 `CLAUDE.md` was measured **absent** from a fresh subagent this session despite being committed
-before dispatch; auto-memory measures present but contradicts its own documentation, so the
-wave forbids depending on it (assumption 3). Auto-memory is a legitimate destination for the
-main thread's own recall — it is not a delivery guarantee, and nothing here is justified by it.
+before dispatch. Auto-memory is off by bionic's setup (`CLAUDE_CODE_DISABLE_AUTO_MEMORY`): a
+correction becomes a rule in the file that owns it, and a dispatched subagent never receives
+MEMORY.md (forks do), so nothing here is justified by it.
 
 The globs are deliberately broad. Bionic is a shell-and-markdown repo, so `**/*.sh` +
 `**/*.md` is close to "any work in this tree" — an imperfect glob on a proven channel beats a
@@ -47,6 +47,29 @@ at session start, so AC-2 is unaffected. The cost is ~8 KB whenever a matching f
 > rendered into all seven surfaces). What stays below is the guidance those seven surfaces
 > cannot carry — brief-authoring judgment addressed to whoever writes the dispatch, not the
 > scaffold's own shape.
+
+## Search, edit and session facts
+
+- **Absence claims use `/usr/bin/grep`.** An absence claim needs `/usr/bin/grep`. The shell
+  `grep` is ugrep and skips gitignored trees like `.bionic`. `grep -r payload/` never enters
+  `hooks/` or `agents/` because they are symlinks, so search the real paths.
+- **Deletion cost is in the references.** Removing a file is the easy half. Grep every
+  manifest, fixture, README and cross-reference that names it, including `.txt` and config
+  files.
+- **CLAUDE.md resolves at session start.** The CLAUDE.md hierarchy is snapshotted once at
+  session start and inherited by subagents. No agent can verify a CLAUDE.md edit inside the
+  session that made it.
+- **Permission rules prefix-match the literal command.** Bash permission rules prefix-match the
+  literal command string, so a quoted path never matches an unquoted rule.
+  `${CLAUDE_PLUGIN_ROOT}` does substitute in command-file `allowed-tools`.
+- **Routing means invocation, not citation.** A skill is routed only when something loads it.
+  A table that cites it is not a route. The mechanism is a doer at the step boundary, never a
+  wall on the normal path.
+- **Attended steps need attended test beds.** Steps 0-3 need a human present. Never judge a
+  skill for an attended slot inside an unattended subagent, and never count 'needs a user'
+  against it.
+- **Amend safety.** Run `git log -1` before every `git commit --amend`. Parallel work can land
+  a commit between two tool calls.
 
 ## Skill-creator pitfalls
 

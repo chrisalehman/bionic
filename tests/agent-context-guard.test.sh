@@ -15,7 +15,7 @@
 # dispatches a real Agent tool call, reads ~/.claude, or depends on a live wave.
 # Repos are throwaway git inits under a mktemp'd sandbox.
 #
-# FIXTURE FIDELITY (declared, per .claude memory fixtures-can-pin-away-the-test):
+# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * PreToolUse payload envelope — the shape tests/dispatch-preflight.test.sh
 #     already pins from the CLI 2.1.220 verbatim captures, plus the ONE field
 #     this guard turns on: a top-level `agent_id`. That field's presence in an
@@ -39,6 +39,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# The one bound-marker builder (wave-23-fixit-1810 T1).
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 GUARD="$HOOKS_DIR/agent-context-guard.sh"
@@ -107,8 +109,11 @@ PLAN
   # marker is what the skill writes at that instant, so a fixture describing a session
   # mid-wave carries one; without it the cells below would all be silent for a reason
   # that has nothing to do with what they measure. §G8 is the paired world with no marker.
-  : > "$repo/.bionic/tmp/engaged-$SID.state"
-  chmod 600 "$repo/.bionic/tmp/engaged-$SID.state"
+  #
+  # BOUND TO THE WAVE'S PLAN (wave-23-fixit-1810, REQ-1, D1): an empty marker beside an open
+  # plan is the unbound state, whose newest-plan fallback is announced and never acted on —
+  # the dispatch wall refuses an unbound session's writer with the bind instruction.
+  bound_marker "$repo" "$SID" "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
   printf '%s' "$repo"
 }
 

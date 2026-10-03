@@ -449,7 +449,8 @@ section "Section 7: T11 — REQ-10, a whole approval card rendered from the step
 # shortened in the retelling, an AC count off by one, a provenance dropped. The
 # card is what an approval binds, so the card being a retelling of the artifact
 # rather than a rendering of it is a correctness problem, not a tidiness one
-# (memory routing-means-invocation-not-citation: the steps files CITED the
+# (.claude/rules/agent-discipline.md, "Routing means invocation, not citation": the
+# steps files CITED the
 # renderer, and a citation is not an invocation).
 #
 # So the artifact is now the SSoT for card content (spec §3 "Card content") and

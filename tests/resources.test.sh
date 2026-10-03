@@ -27,7 +27,7 @@
 # asserts SHAPE and plausibility, never specific numbers. The attestation arms run the probe
 # script inside a throwaway sandbox repo with HOME and CLAUDE_CONFIG_DIR redirected.
 #
-# FIXTURE FIDELITY (declared, per .claude memory fixtures-can-pin-away-the-test):
+# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * The four budget fixtures are the plan's, and the fourth (18c / 128 GB / 1700 GB) is
 #     THIS machine, measured 2026-09-02: `sysctl -n hw.ncpu` = 18, `hw.memsize` =
 #     137438953472 (128 GiB), `df -Pg .` Available = 1710 GB, `sysctl -n vm.loadavg` =

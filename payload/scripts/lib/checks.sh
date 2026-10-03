@@ -508,6 +508,88 @@ _bionic_check_sweep_failed_marker() {  # -> the marker path for the project at $
   printf '%s/.bionic/tmp/sweep-failed.state' "$root"
 }
 
+# AUTO MEMORY STILL ON FOR THIS PROJECT — the second PROJECT-scoped row, and the
+# second whose party is `user` (wave-23 D5, REQ-3). setup writes
+# CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 as one of the environment names, and the
+# ordinary `env:` row below covers the state where that name is unwritten. This
+# row covers the two states the switch cannot reach: the project's own or local
+# settings set the name to a value the CLI reads as "on" (anything but 1, true, yes
+# or on; detect_auto_memory holds the reading), or the CLI's memory directory
+# for this project still holds files written before the switch was set. Both are
+# cleared only by a person editing or deleting something in a place setup does
+# not own, so there is no item and the hint is the instruction, built from the
+# facts so it names the file, the key and the directory.
+#
+# ONE ROW FOR BOTH FACTS. They are one finding ("auto memory is not off here")
+# with two cures, and two rows would fire together on the commonest machine.
+#
+# THE ROOT IS THE PROJECT'S, not the working directory's: a worktree shares its
+# repository's memory directory, so the working directory is resolved the way the
+# dead-session marker above resolves it. A caller that names `BIONIC_ROOT` is
+# taken at its word, which is how a suite points the row at a fixture project.
+_bionic_check_am_root() {  # -> the project root this row reads
+  local root
+  if [ -n "${BIONIC_ROOT:-}" ]; then printf '%s' "$BIONIC_ROOT"; return 0; fi
+  root="$(project_root "$PWD" 2>/dev/null)" || root=""
+  [ -n "$root" ] || root="$PWD"
+  printf '%s' "$root"
+}
+
+# The detector's one line for this project. Doctor gathers it through here too,
+# so the row and the page read the same root.
+bionic_check_auto_memory_fact() {  # -> env:auto-memory override=… dir=… files=…
+  BIONIC_ROOT="$(_bionic_check_am_root)" detect_auto_memory
+}
+
+# Fields of that line, by key. `dir` is read between its key and ` files=` so a
+# path with a space in it survives.
+_bionic_check_am_field() {  # <fact> <override|dir|files>
+  local v
+  case "${2:-}" in
+    override) v="${1#*override=}"; v="${v%% dir=*}" ;;
+    dir)      v="${1#* dir=}"; v="${v% files=*}" ;;
+    files)    v="${1##* files=}" ;;
+    *)        return 1 ;;
+  esac
+  printf '%s' "$v"
+}
+
+bionic_check_auto_memory() {  # <row id>
+  local fact o n
+  fact="$(bionic_check_auto_memory_fact)"
+  o="$(_bionic_check_am_field "$fact" override)"
+  n="$(_bionic_check_am_field "$fact" files)"
+  case "$o" in none|unknown|'') ;; *) return 0 ;; esac
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$n" -gt 0 ]
+}
+
+# THE HINT IS BUILT FROM THE FACTS, at the moment the table is built: the file
+# and key to edit when an override fires, the directory and its count when files
+# are there, both joined when both are true. The directory is home-relative, the
+# spelling a person would type. When nothing fires the hint is the standing rule,
+# so the row never carries an empty hint (§DS DS.2a refuses one). The row reads the
+# project and local settings only; a managed settings file, a `--settings` argument
+# and the Desktop app's launch environment can also set the name and are not read.
+bionic_check_auto_memory_hint() {  # -> the instruction for this project
+  local fact o d n out=""
+  fact="$(bionic_check_auto_memory_fact)"
+  o="$(_bionic_check_am_field "$fact" override)"
+  d="$(_bionic_check_am_field "$fact" dir)"
+  n="$(_bionic_check_am_field "$fact" files)"
+  case "$o" in
+    none|unknown|'') ;;
+    *) out="edit ${o} (project or local settings): env.${DETECT_AUTO_MEMORY_KEY} must be \"1\"" ;;
+  esac
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  if [ "$n" -gt 0 ] && [ "$d" != "none" ]; then
+    case "$d" in "${HOME:-/nonexistent}"/*) d="~${d#"${HOME}"}" ;; esac
+    out="${out}${out:+; }archive or delete ${d} ($n $( [ "$n" -eq 1 ] && echo file || echo files))"
+  fi
+  [ -n "$out" ] || out="keep env.${DETECT_AUTO_MEMORY_KEY} \"1\" in project settings and the memory directory empty"
+  printf '%s' "$out"
+}
+
 # THE RC A READER PUTS IN WORDS (scope constraint: "naming that the automatic
 # sweep failed and the rc"). Read here, once, rather than doctor re-parsing the
 # marker's own line — the same "one reader" rule every fielded value in this file
@@ -661,6 +743,13 @@ _bionic_checks_build() {
   # mechanism instead of a command line.
   _bionic_checks_emit "dead-session-state" "" "bionic_check_dead_session_state" "user" "" "start a new session — its auto-sweep retries this"
 
+  # THE SECOND PROJECT-STATE ROW (wave-23 D5), the same shape as the one above —
+  # party `user`, no item, the hint is the instruction — except that it carries a
+  # LABEL: doctor renders it as a row of its own in the project section, ✓ when
+  # auto memory is off here and ✗ with the instruction when it is not, so §DS's
+  # fired-row walk can hold it to its call site.
+  _bionic_checks_emit "auto-memory" "auto-memory" "bionic_check_auto_memory" "user" "" "$(bionic_check_auto_memory_hint)"
+
   # THE WALLS ARE THE CLI'S TO REPAIR, not setup's. A wall missing from the
   # payload, or one that cannot reach its library, is a broken install — the same
   # reinstall route a missing core dependency takes (1.4.4 fixit). Until 1.5.1
@@ -750,7 +839,7 @@ bionic_check_dep_hint() {  # <dependency name>
 #
 # THE ROSTER IS THE `item` COLUMN. Blanks dropped — a row the CLI or the reader
 # repairs is not something to ask setup for — and repeats collapsed, because the
-# three environment rows are one step and the status-line row is cleared by the
+# environment rows are one step and the status-line row is cleared by the
 # dependency item that already appears above it. First appearance wins, so the
 # order a user reads is the order the table is written in.
 bionic_check_items() {  # -> every setup item, once, in table order
@@ -766,7 +855,7 @@ bionic_check_items() {  # -> every setup item, once, in table order
 }
 
 # WOULD SETUP OFFER THIS ITEM ON THIS MACHINE. An item is outstanding when ANY of
-# its rows fires: the environment step has three rows and one unwritten name is
+# its rows fires: the environment step has a row per name and one unwritten name is
 # enough to make the step worth running, which is the sense setup's own predicate
 # always had.
 bionic_check_item_pending() {  # <setup item>

@@ -127,9 +127,51 @@ section "Group 1: the roster and the defaults"
 # ONE LIST, THREE READERS. setup writes it, remove deletes it, doctor reports
 # it, and all three walk this string. A name that lives in one of them and not
 # here is a name the other two cannot see.
-expect_eq "ENV_KEYS is exactly the three names bionic owns" \
-  "CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS" \
+expect_eq "ENV_KEYS is exactly the four names bionic owns" \
+  "CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS CLAUDE_CODE_DISABLE_AUTO_MEMORY" \
   "$(env_run "$TMP/nonexistent.json" -- eval 'echo "$ENV_KEYS"')"
+
+# The fourth name (wave-23 D4, REQ-2): the CLI's auto-memory store is a channel
+# that loads text into every session with no review and no owner, so bionic owns
+# the off switch the same way it owns the other three names.
+expect_eq "the auto-memory name defaults to 1, which is off" "1" \
+  "$(env_run "$TMP/nonexistent.json" -- env_default CLAUDE_CODE_DISABLE_AUTO_MEMORY)"
+
+# AND SETUP SAYS WHY. The reason is setup's prose, not env.sh's, so it is read out
+# of setup.sh by function rather than by running setup. A name with no arm falls
+# back to "a setting bionic needs", which tells a person consenting nothing.
+_ENV_WHY_FN="$(sed -n '/^_setup_env_why() {/,/^}/p' "$SETUP_SH")"
+ENV_WHY_MEM="$(bash -c "$_ENV_WHY_FN"'
+_setup_env_why CLAUDE_CODE_DISABLE_AUTO_MEMORY' 2>&1)"
+expect_match "setup gives the auto-memory name a reason that names memory" \
+  "*memory*" "$ENV_WHY_MEM"
+expect_absent "…and not the fallback every unlisted name gets" \
+  "a setting bionic needs" "$ENV_WHY_MEM"
+
+# THE COPY IS PINNED TO THE ORIGINAL, BYTE FOR BYTE (wave-23 D4, AC-2.3). remove.sh's
+# standalone door cannot source env.sh, so `RM_ENV_KEYS` is a literal copy of
+# `ENV_KEYS`, and a name added to env.sh and not there is a name bionic sets and
+# never removes. Both literals are read straight out of the two files by `sed`,
+# the way a person would compare them, and the comparison is proved able to fail
+# on a doctored copy of remove.sh that has lost the newest name.
+env_keys_literal() {  # <env.sh> -> the ENV_KEYS literal, unquoted
+  sed -n 's/^ENV_KEYS="\(.*\)"$/\1/p' "$1"
+}
+rm_env_keys_literal() {  # <remove.sh> -> the RM_ENV_KEYS literal, unquoted
+  sed -n "s/^RM_ENV_KEYS='\(.*\)'$/\1/p" "$1"
+}
+roster_copy_agrees() {  # <env.sh> <remove.sh> -> 0 when the two literals are byte-equal
+  local a b
+  a="$(env_keys_literal "$1")"; b="$(rm_env_keys_literal "$2")"
+  [ -n "$a" ] && [ "$a" = "$b" ]
+}
+expect_true "remove.sh's RM_ENV_KEYS is byte-equal to env.sh's ENV_KEYS" \
+  roster_copy_agrees "$ENV_SH" "$REMOVE_SH"
+DOCTORED_RM="$TMP/remove-three-names.sh"
+anchor -E "$REMOVE_SH" "^RM_ENV_KEYS='.* CLAUDE_CODE_DISABLE_AUTO_MEMORY" 1
+sed "/^RM_ENV_KEYS=/s/ CLAUDE_CODE_DISABLE_AUTO_MEMORY//" "$REMOVE_SH" > "$DOCTORED_RM"
+expect_false "…and the comparison goes red on it" \
+  roster_copy_agrees "$ENV_SH" "$DOCTORED_RM"
 
 expect_eq "the task-list name defaults to 1" "1" \
   "$(env_run "$TMP/nonexistent.json" -- env_default CLAUDE_CODE_ENABLE_TODO_TOOLS)"

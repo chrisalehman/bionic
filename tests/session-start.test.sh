@@ -226,6 +226,12 @@ drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdou
   local proj="$1" src="$2" esid="$3" psid="$4" fsid="$5" home
   home="$WORK/home.$RANDOM.$RANDOM"; mkdir -p "$home"
   OUTF="$WORK/last.out"; ERRF="$WORK/last.err"; RCF="$WORK/last.rc"
+  # DRIVE_LIVE=<sid>: one more LIVE session in the fixture home (T15), at this suite's own pid,
+  # which is alive for the whole run — the CLI's pid-file shape the wrapper writes for the hook.
+  if [ -n "${DRIVE_LIVE:-}" ]; then
+    mkdir -p "$home/sessions"
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s"}\n' "$$" "$DRIVE_LIVE" "$proj" > "$home/sessions/$$.json"
+  fi
   (
     cd "$proj" || exit 1
     printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"%s"}' \
@@ -740,10 +746,18 @@ hasnt "14c.3 the sibling (unbound) plan is not named" "$(basename "$PLAN14cB")" 
 hasnt "14c.4 no count-style listing" "open runs exist here" "$OUT"
 has   "14c.5 the predecessor roster still prints alongside it" "roster-$OLD_SID.state" "$OUT"
 
-section "15 — engaged, one live run, unbound: unchanged (regression control, S3 scope (c))"
+section "15 — engaged, one live run, unbound: the bind line, and otherwise unchanged (S3 scope (c); wave-23 T13, critic C-4)"
 # 3600s: see §1's comment — engaged, N==1, unbound also reaches the sweep below.
+#
+# C-4 (record/wave-23-fixit-1810/critic-43e45387.md). This branch printed NOTHING about the
+# binding for an engaged session with `plan=none` and one open run, while the N>=2 branch
+# listed the runs and the bind verb. Since D1 an unbound session's gates are inert and T13's
+# engagement leaves a session unbound beside another live session's run, so the one-run root
+# is exactly where an engaged session most needs to be told it is unbound. The line rides
+# STDOUT, which is SessionStart's model-facing channel (this hook's own header), one header
+# line plus one line per run, the shape §12 pins for two runs.
 P15=$(make_env 3600s)
-write_open_plan "$P15" >/dev/null
+PLAN15="$(write_open_plan "$P15")"
 roster_rows "$P15/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-IOTA"
 plant_engaged "$P15" "$CUR_SID"
 S15_BEFORE=$(snap "$P15")
@@ -753,6 +767,53 @@ hasnt "15.2 no bound line — this session never bound" "bionic: bound to" "$OUT
 hasnt "15.3 no quiet-count line — nothing is quiet" "quiet open run(s)" "$OUT"
 has   "15.4 the predecessor roster still prints, exactly as today" "roster-$OLD_SID.state" "$OUT"
 eq    "15.5 wrote nothing" "$S15_BEFORE" "$(snap "$P15")"
+has   "15.6 the bind line prints for the engaged unbound session (C-4)" \
+  "bionic: 1 open run exists here and this session is not bound to it — bind with: bash" "$OUT"
+has   "15.7 …naming the poker's bind verb" "/hooks/session-poker.sh bind <plan>" "$OUT"
+has   "15.8 …and then the one run, docs-root-relative, on its own line" \
+  "  ${PLAN15#$P15/.bionic/docs/}" "$OUT"
+eq    "15.9 …on stdout, the model's channel: nothing of it on stderr" "0" \
+  "$(errtext | grep -c 'not bound to it')"
+eq    "15.10 …exactly one header line and one run line" "2" \
+  "$(printf '%s\n' "$OUT" | grep -c -e 'not bound to it' -e "^  ${PLAN15#$P15/.bionic/docs/}\$")"
+# the pair, one field apart: the SAME root with the session BOUND prints the bound line and
+# no bind line (§14a's shape), so 15.6 measured the binding and not the root.
+plant_bound "$P15" "$CUR_SID" "$PLAN15"
+OUT=$(drive "$P15" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "15.11 paired: bound on the same root, the bound line prints" "bionic: bound to" "$OUT"
+hasnt "15.12 …and no bind line" "not bound to it" "$OUT"
+
+section "15h — engaged, unbound, the one run HELD by a live session: the line names the holder (wave-23 T15, critic N-2)"
+# N-2 (record/wave-23-fixit-1810/critic-d067c07d.md, the `held.sh` drive). §15's line offers the
+# bare bind verb to every engaged unbound session — including the one engage.sh left unbound
+# BECAUSE another live session holds the run (A-T13.4). On a resume or compaction that bare verb
+# is the reflex bind A-T13.4 exists to prevent. So when the sole run is held by a LIVE session
+# (the sweeper's predicate, as engage.sh asks it), the header names that holder's id prefix and
+# says to bind only when resuming that run. Unheld, it is §15's line, unchanged.
+HOLD_SID="40ld0000-aaaa-4bbb-8ccc-dddddddddddd"
+P15h=$(make_env 3600s)
+PLAN15h="$(write_open_plan "$P15h")"
+plant_engaged "$P15h" "$CUR_SID"
+plant_bound "$P15h" "$HOLD_SID" "$PLAN15h"
+OUT=$(DRIVE_LIVE="$HOLD_SID" drive "$P15h" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "15h.1 exit 0" "0" "$(rc)"
+has   "15h.2 held: the header names the live holder by its id prefix" \
+  "bionic: 1 open run exists here and live session ${HOLD_SID:0:8} holds it; this session is not bound to it" "$OUT"
+has   "15h.3 …and says to bind only when resuming that run" \
+  "/hooks/session-poker.sh bind <plan> only if this session is resuming that run" "$OUT"
+hasnt "15h.4 …and the bare bind line (§15's) is not printed" \
+  "bionic: 1 open run exists here and this session is not bound to it — bind with: bash" "$OUT"
+has   "15h.5 …the run still listed on its own line" "  ${PLAN15h#$P15h/.bionic/docs/}" "$OUT"
+eq    "15h.6 …exactly one header line and one run line, on stdout" "2" \
+  "$(printf '%s\n' "$OUT" | grep -c -e 'not bound to it' -e "^  ${PLAN15h#$P15h/.bionic/docs/}\$")"
+eq    "15h.7 …nothing of it on stderr" "0" "$(errtext | grep -c 'not bound to it')"
+# the pair, one fact apart: the SAME root with the holder's pid file gone (dead) prints §15's
+# line exactly, and no holder.
+OUT=$(drive "$P15h" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "15h.8 unheld (the holder is dead): §15's line, unchanged" \
+  "bionic: 1 open run exists here and this session is not bound to it — bind with: bash" "$OUT"
+hasnt "15h.9 …and no holder named" "holds it" "$OUT"
+has   "15h.10 …and the run on its own line" "  ${PLAN15h#$P15h/.bionic/docs/}" "$OUT"
 
 section "16 — 400 aged predecessor files: bounded, not a linear scan (AC-6.1, AC-6.2)"
 # THE FIELD DEFECT (carry-over P9, REQ-6): both the roster loop (:427) and the

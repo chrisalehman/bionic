@@ -71,8 +71,8 @@
 # deleted where the claim was already carried by a claim about bytes. Every
 # negative now has a positive on the same extractor and the same fixture, and no
 # extractor's empty return is read as an answer before that extractor has been
-# seen to return something (.claude/rules test-authoring rule; memory
-# `no-vacuous-tests-at-authoring`). And the manifest grew the rc item — the
+# seen to return something (.claude/rules/test-harness.md,
+# "Anti-vacuity"). And the manifest grew the rc item — the
 # `claude()` shell function wave-03 added to setup's roster — because a
 # pristine-install manifest that does not carry setup's newest write target is
 # describing last month's product.
@@ -657,7 +657,7 @@ dep_present() {  # <report-file> <name>
 # Does a path exist, as a word rather than as an exit status. Every "bionic did
 # not write this" claim below goes through it, and so does at least one "bionic
 # did write this" claim in the same group — which is the only thing that makes
-# the first kind of claim mean anything (memory `no-vacuous-tests-at-authoring`).
+# the first kind of claim mean anything (.claude/rules/test-harness.md, "Anti-vacuity").
 path_exists() {  # <path> -> yes|no
   if [ -e "$1" ]; then printf 'yes'; else printf 'no'; fi
 }

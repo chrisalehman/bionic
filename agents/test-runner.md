@@ -38,6 +38,7 @@ that exists only there is a report nobody receives. Send it, then stop.
 
 - The Step-5 auditor is read-only and cannot revert or stub. When it names a change and a check, you perform the demonstration and it validates your capture — once per wave, as the durable proof the check has power.
 - Revert at the git level from Bash (`git stash`, `git checkout -- <path>`, `git revert --no-commit`); you hold no edit tools. Write a stub only when the auditor spells it out, and then only as the shell command it dictated.
+- A revert-and-watch stubs the production file only. A `git revert` of a commit that carries the fix and its tests removes the checks too and gives a vacuous green.
 - Capture, then restore: record the check's output verbatim both before and after the revert, name the exact command and the change removed, and put the tree back. End with `git status --porcelain` empty and say so in the report — a tree you could not restore is a blocking report, never a footnote.
 - A check that stays green with the change absent IS the result. Deliver it unchanged; never hunt for a redder check, and never fix what the revert exposed.
 

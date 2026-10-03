@@ -297,8 +297,11 @@ mk_census_fixture() {
   local name="$1" working="$2" rows="$3"
   local p="$SANDBOX/$name"
   local aroot="$SANDBOX/$name-archive"
-  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/tmp" "$aroot"
+  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/docs/record" "$p/.bionic/tmp" "$aroot"
   printf 'archive-root: %s\n' "$aroot" > "$p/.bionic/config.yaml"
+  # The dry-run now judges the OPEN plan (T16), so the matrix evidence file must exist.
+  printf 'generic fixture proof — this suite tests the tail, not the artifact.\n' \
+    > "$p/.bionic/docs/record/generic-evidence.md"
   cat > "$p/.bionic/docs/plans/epic-fx/wave-01-fixture.plan.md" <<PLAN_CENSUS
 ---
 governing-skill: canonical-sdlc
@@ -369,8 +372,11 @@ mk_census_fixture_nowt() {
   local name="$1" working="$2" rows="$3"
   local p="$SANDBOX/$name"
   local aroot="$SANDBOX/$name-archive"
-  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/tmp" "$aroot"
+  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/docs/record" "$p/.bionic/tmp" "$aroot"
   printf 'archive-root: %s\n' "$aroot" > "$p/.bionic/config.yaml"
+  # The dry-run now judges the OPEN plan (T16), so the matrix evidence file must exist.
+  printf 'generic fixture proof — this suite tests the tail, not the artifact.\n' \
+    > "$p/.bionic/docs/record/generic-evidence.md"
   cat > "$p/.bionic/docs/plans/epic-fx/wave-01-fixture.plan.md" <<PLAN_CENSUS
 ---
 governing-skill: canonical-sdlc
@@ -408,6 +414,20 @@ approved-by: fixture 2026-09-14T00:00Z "approved"
 | id | step | kind | task | agent | deps | size | serves | Files | status |
 |---|---|---|---|---|---|---|---|---|---|
 ${rows}
+
+## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
+  tier-run: bash tests/close-out.test.sh
+  readback: the two lifecycle blocks the script wrote
 
 ## Handoff
 
@@ -938,6 +958,158 @@ expect_eq "4h: no continuation was written" "no" \
   "$([ -f "$P4/$CONT_REL" ] && echo yes || echo no)"
 expect_eq "4i: .bionic/tmp/ still holds its three entries" "3" "$(tmp_entries "$P4")"
 expect_eq "4j: wt/01-x still exists" "yes" "$(branch_exists "$P4" "wt/01-x")"
+
+# ============================================================
+section "4b — critic2 N-3 (T16): run's dry-run judges the plan while it is still OPEN"
+# ============================================================
+# The dry-run used to run AFTER current: 9 and delivered: were written, so the bound marker
+# resolved bound-closed and the commit gate exited 0 before it read any step evidence. Here
+# `run` is given a plan with NO Step-8 line. It must refuse (rc 2) and must not flip the
+# plan to delivered; at d067c07d it flipped current to 9 and wrote delivered: first.
+P16="$(mk_fixture p16)"
+grep -v '^- Step 8:' "$P16/$PLAN_REL" > "$P16/plan.tmp" && mv "$P16/plan.tmp" "$P16/$PLAN_REL"
+run_close "$P16" run
+expect_eq "4k: run on a plan with no Step-8 line refuses rc 2" "2" "$CO_RC"
+expect_eq "4l: …and the plan was not flipped to delivered" "no" \
+  "$(grep -qE 'Step 9:.*delivered:' "$P16/$PLAN_REL" && echo yes || echo no)"
+expect_eq "4m: …and current: is still 8" "yes" \
+  "$(grep -qE '^current: 8$' "$P16/$PLAN_REL" && echo yes || echo no)"
+expect_eq "4n: …and no gate: ok was reported" "no" "$(contains "$CO_OUT" "gate: ok")"
+
+# A refusal that only the GATE can make (the matrix evidence file is gone): the gate judges
+# the open plan at current 8 and refuses before the Step-9 flip. Since T17 that refusal comes
+# from the pre-flight, before the Step-8 block is written into the plan at all (§4c).
+P17="$(mk_fixture p17)"
+rm -f "$P17/.bionic/docs/record/generic-evidence.md"
+run_close "$P17" run
+expect_eq "4o: run refuses when the gate refuses the open plan (rc 2)" "2" "$CO_RC"
+expect_eq "4p: …and the plan is not flipped to delivered" "no" \
+  "$(grep -qE 'Step 9:.*delivered:' "$P17/$PLAN_REL" && echo yes || echo no)"
+expect_eq "4q: …current: is still 8" "yes" \
+  "$(grep -qE '^current: 8$' "$P17/$PLAN_REL" && echo yes || echo no)"
+
+# ============================================================
+section "4c — critic3 P-1 (T17): run asks the gate first; check and run agree"
+# ============================================================
+# `run` used to perform acts 1–6 (branch sweep, tmp wipe, continuation, epic row) and only
+# then ask the gate, so a refusal the Step-8 block cannot clear left a half-closed run: the
+# branches and this session's tmp state gone, the continuation and epic row written. And
+# `check` printed one sentence for every refusal ("the Step-8 block run writes is what
+# clears it"), so it could not say which outcome `run` would reach. Now both verbs write
+# phase 8's block into a scratch copy of the plan, bind a synthetic marker to the copy,
+# and ask the real gate; `run` touches nothing until that pre-flight passes.
+P18="$(mk_fixture p18)"
+rm -f "$P18/.bionic/docs/record/generic-evidence.md"
+PLAN18_SHA="$(sha_of "$P18/$PLAN_REL")"
+EPIC18_SHA="$(sha_of "$P18/$EPIC_REL")"
+run_close "$P18" check
+expect_eq "4r: check on the evidence-missing plan exits 0" "0" "$CO_RC"
+expect_eq "4s: …and prints the gate's own refusal for the plan run would write, naming the evidence" "yes" \
+  "$(contains "$CO_OUT" "gate: WOULD REFUSE the plan run would write (rc=2): bionic: commit refused — AC-1's evidence names no real file")"
+expect_eq "4t: …never the old sentence that promised the Step-8 block would clear it" "no" \
+  "$(contains "$CO_OUT" "is what clears it")"
+expect_eq "4u: …and leaves no scratch copy beside the plan" "0" \
+  "$(find "$P18/.bionic/docs/plans" -name '*preflight*' | wc -l | tr -d ' ')"
+
+run_close "$P18" run
+expect_eq "4v: run on the same plan refuses rc 2" "2" "$CO_RC"
+expect_eq "4w: …with the gate's own refusal line" "yes" \
+  "$(contains "$CO_OUT" "bionic: commit refused — AC-1's evidence names no real file")"
+expect_eq "4x: …before the first act: no merge: line was reported" "no" "$(contains "$CO_OUT" "merge: ")"
+expect_eq "4y: …wt/01-x is still there" "yes" "$(branch_exists "$P18" "wt/01-x")"
+expect_eq "4z: ….bionic/tmp/ still holds its three entries" "3" "$(tmp_entries "$P18")"
+expect_eq "4aa: …no continuation was written" "no" \
+  "$([ -f "$P18/$CONT_REL" ] && echo yes || echo no)"
+expect_eq "4ab: …the epic plan is byte-for-byte what it was (no row for wave 01)" "$EPIC18_SHA" \
+  "$(sha_of "$P18/$EPIC_REL")"
+expect_eq "4ac: …the plan is byte-for-byte what it was (the block went into the copy only)" "$PLAN18_SHA" \
+  "$(sha_of "$P18/$PLAN_REL")"
+expect_eq "4ad: …and no scratch copy is left beside the plan" "0" \
+  "$(find "$P18/.bionic/docs/plans" -name '*preflight*' | wc -l | tr -d ' ')"
+
+# The control: the same fixture with its evidence. check says the gate allows the plan run
+# would write, and run then performs the tail as §1 does.
+P19="$(mk_fixture p19)"
+run_close "$P19" check
+expect_eq "4ae: check on the valid plan says the gate allows the plan run would write" "yes" \
+  "$(contains "$CO_OUT" "gate: ok against the plan run would write")"
+run_close "$P19" run
+expect_eq "4af: …and run on it exits 0" "0" "$CO_RC"
+expect_eq "4ag: …reporting the pre-flight before the first act" "yes" \
+  "$(contains "$CO_OUT" "preflight: the commit gate allows the plan this run will write")"
+expect_eq "4ah: …and the attestation after the Step-8 block, as before" "yes" "$(contains "$CO_OUT" "gate: ok")"
+
+# ============================================================
+section "4d — critic3 P-3 (T17): run refuses unless the plan reads current: 8"
+# ============================================================
+# Nothing read `current:` before phase 9 wrote `current: 9`, so the dry-run judged whatever
+# step the plan named and the refusal blamed the blocks run wrote. A plan below Step 8 is
+# refused by name, before anything is touched; check reports the same verdict.
+for _co_cur in 7 4; do
+  P20="$(mk_fixture "p20-$_co_cur")"
+  sed "s/^current: 8\$/current: $_co_cur/" "$P20/$PLAN_REL" > "$P20/plan.tmp" \
+    && mv "$P20/plan.tmp" "$P20/$PLAN_REL"
+  PLAN20_SHA="$(sha_of "$P20/$PLAN_REL")"
+  EPIC20_SHA="$(sha_of "$P20/$EPIC_REL")"
+  run_close "$P20" check
+  expect_eq "4ai.$_co_cur: check at current $_co_cur names the step refusal run will make" "yes" \
+    "$(contains "$CO_OUT" "advance the plan to Step 8 first")"
+  run_close "$P20" run
+  expect_eq "4aj.$_co_cur: run at current $_co_cur refuses rc 2" "2" "$CO_RC"
+  expect_eq "4ak.$_co_cur: …with the line advance the plan to Step 8 first" "yes" \
+    "$(contains "$CO_OUT" "advance the plan to Step 8 first")"
+  expect_eq "4al.$_co_cur: …wt/01-x is still there" "yes" "$(branch_exists "$P20" "wt/01-x")"
+  expect_eq "4am.$_co_cur: ….bionic/tmp/ still holds its three entries" "3" "$(tmp_entries "$P20")"
+  expect_eq "4an.$_co_cur: …no continuation was written" "no" \
+    "$([ -f "$P20/$CONT_REL" ] && echo yes || echo no)"
+  expect_eq "4ao.$_co_cur: …the epic plan is unchanged" "$EPIC20_SHA" "$(sha_of "$P20/$EPIC_REL")"
+  expect_eq "4ap.$_co_cur: …and the plan is unchanged (no Step-8 block written)" "$PLAN20_SHA" \
+    "$(sha_of "$P20/$PLAN_REL")"
+done
+
+# ============================================================
+section "4e — critic4 Q-1 (T19): the two readbacks that used to fire after the acts are presence checks before them"
+# ============================================================
+# `run` used to delete branches, wipe tmp and write the continuation and epic row, and only
+# then refuse for a plan with no `- Step 9:` line or an epic plan with no `| wave |` table.
+# Both are known before the first act. `run` now refuses rc 2 naming what is missing and
+# touches nothing; `check` reports the same two checks.
+presence_state() {
+  printf 'br=%s tmp=%s cont=%s cur8=%s epicrow=%s' \
+    "$(branch_exists "$1" "wt/01-x")" "$(tmp_entries "$1")" \
+    "$([ -f "$1/$CONT_REL" ] && echo yes || echo no)" \
+    "$(grep -qE '^current: 8$' "$1/$PLAN_REL" && echo yes || echo no)" \
+    "$(grep -c '^| 01 ' "$1/$EPIC_REL")"
+}
+TA="$(mk_fixture t19a)"
+grep -v '^- Step 9:' "$TA/$PLAN_REL" > "$TA/plan.tmp" && mv "$TA/plan.tmp" "$TA/$PLAN_REL"
+PRE_A="$(presence_state "$TA")"; PLAN_A_SHA="$(sha_of "$TA/$PLAN_REL")"; EPIC_A_SHA="$(sha_of "$TA/$EPIC_REL")"
+run_close "$TA" check
+expect_eq "q1.1: check names the missing Step-9 line" "yes" "$(contains "$CO_OUT" "no Step 9 line in ## SDLC State")"
+run_close "$TA" run
+expect_eq "q1.2: run on a plan with no Step-9 line refuses rc 2" "2" "$CO_RC"
+expect_eq "q1.3: …naming the missing line" "yes" "$(contains "$CO_OUT" "no Step 9 line in ## SDLC State")"
+expect_eq "q1.4: …before any act (no worktree-removed line)" "no" "$(contains "$CO_OUT" "worktree-removed:")"
+expect_eq "q1.5: …branch, tmp, continuation, current: and epic row untouched" "$PRE_A" "$(presence_state "$TA")"
+expect_eq "q1.6: …plan and epic plan byte-identical" "$PLAN_A_SHA/$EPIC_A_SHA" "$(sha_of "$TA/$PLAN_REL")/$(sha_of "$TA/$EPIC_REL")"
+
+TB="$(mk_fixture t19b)"
+printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# epic-fx\n\n## SDLC State\n\ncurrent: 4\n\n## Notes\n\nNo waves table yet.\n' > "$TB/$EPIC_REL"
+PRE_B="$(presence_state "$TB")"; PLAN_B_SHA="$(sha_of "$TB/$PLAN_REL")"; EPIC_B_SHA="$(sha_of "$TB/$EPIC_REL")"
+run_close "$TB" check
+expect_eq "q1.7: check names the missing wave table" "yes" "$(contains "$CO_OUT" "no | wave | table")"
+run_close "$TB" run
+expect_eq "q1.8: run on an epic plan with no wave table refuses rc 2" "2" "$CO_RC"
+expect_eq "q1.9: …naming the missing table" "yes" "$(contains "$CO_OUT" "no | wave | table")"
+expect_eq "q1.10: …before any act" "no" "$(contains "$CO_OUT" "worktree-removed:")"
+expect_eq "q1.11: …branch, tmp, continuation, current: and epic row untouched" "$PRE_B" "$(presence_state "$TB")"
+expect_eq "q1.12: …plan and epic plan byte-identical" "$PLAN_B_SHA/$EPIC_B_SHA" "$(sha_of "$TB/$PLAN_REL")/$(sha_of "$TB/$EPIC_REL")"
+
+TC="$(mk_fixture t19c)"
+run_close "$TC" check
+expect_eq "q1.13: check on the valid fixture names no missing line" "no" "$(contains "$CO_OUT" "WOULD REFUSE — no ")"
+run_close "$TC" run
+expect_eq "q1.14: run on the valid fixture still succeeds" "0" "$CO_RC"
 
 # ============================================================
 section "5 — REQ-1 (AC-1.1–1.3): a close-out spares a live neighbour's session state"

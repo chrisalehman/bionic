@@ -21,6 +21,8 @@ set -uo pipefail
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
+# The one bound-marker builder (wave-23-fixit-1810 T1).
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 CHECK="${BIONIC_HOOKS_DIR}/stop-check.sh"
 # The roster's WRITER. Section 8 reads rows; §8(g) drives this script to produce
@@ -759,7 +761,7 @@ expect_contains "P2: after the process exits, live: no" "live:     no" "$OUT8G"
 # `claims=<pattern>` — a field NO writer could produce, since
 # hooks/dispatch-preflight.sh's label table had no `claims` and no `cadence`
 # entry. The suite was green about a field that could not exist: a fixture
-# pinning away its own test (.claude memory: fixtures-can-pin-away-the-test),
+# pinning away its own test (.claude/rules/test-harness.md, "Fixture fidelity"),
 # and the reader it was pinning was dead substrate. So the row below is produced
 # by running the real start gate over a real dispatch brief, and the reader is
 # then driven over whatever that writer actually wrote. If the label grammar
@@ -799,8 +801,9 @@ chmod 600 "$R8/.bionic/tmp/patrol-${OWN8}.state"
 # …and this session's engagement marker, the fourth writer precondition (task-engaged-session):
 # the start gate asks `engaged_session` before it asks anything else, and this case needs it
 # to actually JOURNAL a row. A fixture of the writer's preconditions, never of the value
-# under test.
-: > "$R8/.bionic/tmp/engaged-${OWN8}.state"
+# under test. BOUND to the fixture plan (wave-23-fixit-1810, REQ-1, D1): an unbound
+# session's writer is refused with the bind instruction and journals nothing.
+bound_marker "$R8" "$OWN8" "$R8/.bionic/docs/plans/epic-99/wave-01.md"
 
 echo "progress line" > "$R8/prog-g.progress"
 # THE `Suites:` LINE IS A WRITER PRECONDITION, not part of the value under test (S13,

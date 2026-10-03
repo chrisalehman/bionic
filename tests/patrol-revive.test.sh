@@ -38,6 +38,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# The one bound-marker builder (wave-23-fixit-1810 T1), for engage_marker below.
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 # THE MERGED ENTRY POINT (epic-23 wave-11, T12). This monitor is a FUNCTION now —
 # `stop_patrol_revive` in payload/scripts/lib/stop.sh — and the process that runs it is
@@ -63,7 +65,7 @@ command -v jq >/dev/null 2>&1 || { echo "patrol-revive: jq absent — suite cann
 # "rc 0 and no stdout", which is exactly what a MISSING hook produces once the
 # shell's own 127 is discarded — so an absent or unparsable hook would turn most
 # of this file green over nothing. Prove the subject exists and parses before any
-# of it runs (memory/no-vacuous-tests-at-authoring).
+# of it runs (.claude/rules/test-harness.md, "Anti-vacuity").
 [ -f "$HOOK" ] || { echo "patrol-revive: no hook at $HOOK — suite refuses to run"; exit 1; }
 bash -n "$HOOK" || { echo "patrol-revive: $HOOK does not parse — suite refuses to run"; exit 1; }
 
@@ -82,6 +84,21 @@ OTHER_SID="99999999-8888-7777-6666-555555555555"
 # condition is `active_run` — there is no Patrol to be dead where there is no run. Every
 # fixture that expects this monitor to SPEAK therefore needs a plan; §11 below drives the
 # paired negative, where the plan is the only thing missing.
+# engage_marker <project> <session> — the engagement marker, BOUND to the fixture's own plan
+# when it has one (wave-23-fixit-1810, REQ-1, D1). An empty marker beside an open plan is the
+# unbound state, whose newest-plan fallback is announced and never acted on: this monitor
+# returns there without reading the stamp, so every fixture that means "this session is
+# running this wave" binds. A project with no wave-01 plan gets the empty (unbound) marker,
+# and Group 9 binds or leaves it unbound on purpose.
+engage_marker() {
+  local plan="$1/.bionic/docs/plans/wave-01.plan.md"
+  if [ -f "$plan" ]; then
+    bound_marker "$1" "$2" "$plan"
+  else
+    : > "$1/.bionic/tmp/engaged-$2.state"
+  fi
+}
+
 make_env() {  # [interval] -> project dir on stdout
   local dir; dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
@@ -90,7 +107,6 @@ make_env() {  # [interval] -> project dir on stdout
   # to do with the stamp under test. An armed Patrol implies an engaged session anyway —
   # SKILL.md arms the Patrol AT engagement — so the marker travels with the stamp in
   # write_stamp below as well. §12 drives the unengaged direction deliberately.
-  : > "$dir/.bionic/tmp/engaged-$SID.state"
   printf 'poker-interval: %s\n' "${1:-1s}" > "$dir/.bionic/config.yaml"
   cat > "$dir/.bionic/docs/plans/wave-01.plan.md" <<'PRPLAN'
 ---
@@ -103,6 +119,7 @@ current: 4
 
 - Step 4: tasks in flight
 PRPLAN
+  engage_marker "$dir" "$SID"
   printf '%s' "$dir"
 }
 
@@ -119,7 +136,7 @@ write_stamp() {  # <project> <session>
     > "$(stamp_path "$1" "$2")"
   # The engagement marker for the SAME session: a Patrol is armed at engagement, so a
   # stamp without a marker is a state the machine does not produce (task-engaged-session).
-  : > "$1/.bionic/tmp/engaged-$2.state"
+  engage_marker "$1" "$2"
 }
 
 # THE STAMP A TICK WRITES (wave-20 REQ-6, D6): `verb=tick`, dated when it ran, and its mtime
@@ -128,7 +145,7 @@ write_stamp() {  # <project> <session>
 # rather than `write_stamp`'s arm stamp.
 write_tick_stamp() {  # <project> <session> <seconds ago>
   printf 'patrol-stamp/v1|at=%s|session=%s|verb=tick\n' "$(pr_iso "$3")" "$2" > "$(stamp_path "$1" "$2")"
-  : > "$1/.bionic/tmp/engaged-$2.state"
+  engage_marker "$1" "$2"
   backdate "$(stamp_path "$1" "$2")" "$3"
 }
 
@@ -919,7 +936,7 @@ rm -f "$E/.bionic/tmp/engaged-$SID.state" "$E_DECOY"
 # CLOCK normalised out of both sides. The notice quotes the stamp's age in seconds, so two
 # drives a second apart differ by a digit for a reason that has nothing to do with the
 # switch, and pinning it would make this assertion fail on a slow machine and nowhere else.
-: > "$E/.bionic/tmp/engaged-$SID.state"
+engage_marker "$E" "$SID"
 fire "$E"
 # TWO CLOCKS NOW, NOT ONE (amended at REQ-1, T1). The notice quotes the idle gap it
 # measured as well as the stamp's age, and the gap moves with the same second the age does
@@ -943,10 +960,12 @@ setup_section "Group 9: active_run -> session_run (wave-session-bound-run S5)"
 # `:361` used to be `active_run "$REPO" >/dev/null || exit 0` — the newest open
 # plan in the root, with no session input. It is now `session_run "$REPO" "$SID"`:
 # a session BOUND to a plan proceeds (to the stamp check) on THAT plan alone,
-# whatever else is open in the root; UNBOUND it falls back to the newest plan
-# exactly as before, and says so on stderr; bound to a plan that has since
-# closed, the hook takes exactly the branch it takes today when there is no open
-# run at all — silent, exit 0 — and announces the closure first.
+# whatever else is open in the root; bound to a plan that has since closed, the
+# hook takes exactly the branch it takes today when there is no open run at all —
+# silent, exit 0 — and announces the closure first. UNBOUND, the newest plan is
+# announced and never acted on (wave-23-fixit-1810, REQ-1, D1): lib/run.sh's one
+# advisory goes out on stderr and the hook returns as under `none`, so a stale
+# stamp revives nothing for a run that is somebody else's (group 49).
 
 PLAN_A_REL="plan-a.plan.md"
 PLAN_B_REL="plan-b.plan.md"
@@ -1021,7 +1040,7 @@ case "$HOOK_ERR" in
   *) ok "48b: bound to A prints no fallback line" ;;
 esac
 
-section "49: fallback — unbound resolves to the newest plan (B), and says so"
+section "49: fallback — unbound, the newest plan (B) is announced and never acted on"
 
 D=$(make_env_two_plans); write_stamp "$D" "$SID"
 backdate "$(stamp_path "$D" "$SID")" 600
@@ -1029,13 +1048,19 @@ backdate "$(stamp_path "$D" "$SID")" 600
 # `project_root` calls `pwd -P` internally — while `$D` is `mktemp -d`'s raw
 # (logical) answer; see patrol-duties-gate.test.sh's own note on this (S5).
 D_PHYS=$(cd "$D" && pwd -P)
-fire "$D"; expect_block "49a: unbound, a stale stamp still blocks (the predicate did not exit early)"
+fire "$D"
+if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
+  ok "49a: unbound, the same stale stamp revives nothing — the hook returns as under none"
+else
+  no "49a: unbound, the same stale stamp revives nothing — the hook returns as under none" \
+    "rc=$HOOK_RC out=<$HOOK_OUT>"
+fi
 fire_stderr "$D"
-case "$HOOK_ERR" in
-  *"patrol-revive: run resolved by newest-plan fallback (session unbound) — $D_PHYS/.bionic/docs/plans/$PLAN_B_REL"*)
-    ok "49b: unbound prints the fallback line, naming B (the newest) verbatim" ;;
-  *) no "49b: unbound prints the fallback line, naming B (the newest) verbatim" "$HOOK_ERR" ;;
-esac
+expect_eq "49b: unbound prints lib/run.sh's one advisory, naming B (the newest) verbatim, once" "1" \
+  "$(printf '%s\n' "$HOOK_ERR" | grep -cxF "run resolved by newest-plan fallback (session unbound) — $D_PHYS/.bionic/docs/plans/$PLAN_B_REL; bind with session-poker.sh bind $D_PHYS/.bionic/docs/plans/$PLAN_B_REL, or write this session's plan")"
+# THE PAIRED POSITIVE, same tree: bound to B, the stale stamp blocks (48a's verdict on B).
+s5_bind "$D" "$PLAN_B_REL"
+fire "$D"; expect_block "49c: the SAME tree, bound to B, blocks on the stale stamp (the control)"
 
 section "50: bound-closed — a plan that closed is no open run at all"
 

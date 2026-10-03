@@ -30,6 +30,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# The one bound-marker builder (wave-23-fixit-1810 T12): the evidence-gate fixture binds.
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 US=$'\037'
 
@@ -625,11 +627,15 @@ mkdir -p "$EG_HOME/.claude/plans" "$EG_HOME/.bionic/docs/plans" "$EG_HOME/.bioni
 # without the marker every row below would be silent for a reason that has nothing to do
 # with how a git command line is parsed — which is the whole subject of this section.
 EG_SID="2b7c9d10-4e5f-4a6b-8c9d-0e1f2a3b4c5d"
-: > "$EG_HOME/.bionic/tmp/engaged-$EG_SID.state"
 printf '%s\n' "$FM
 ## SDLC State
 current: 5
 Step 5: TODO" > "$EG_HOME/.bionic/docs/plans/active.md"
+# BOUND TO ITS ONE OPEN PLAN (wave-23-fixit-1810 T12). An empty marker beside an open plan
+# is the unbound state, whose newest-plan fallback is announced and never acted on, so every
+# `git commit` row below would exit 0. `bind_plan` (the real writer) names the plan the
+# gate judges. No case in this section drives an unbound session on purpose.
+bound_marker "$EG_HOME" "$EG_SID" "$EG_HOME/.bionic/docs/plans/active.md"
 
 run_gate() {  # <command>
   local input tmp_err

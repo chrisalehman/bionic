@@ -67,7 +67,12 @@ fi
 # one of them and not here is a name nothing else can see. Space-separated rather
 # than an array because bash 3.2 is the floor and a word-split loop is the one
 # form every caller can write identically.
-ENV_KEYS="CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+#
+# remove.sh carries a byte copy of this literal as `RM_ENV_KEYS`, because its
+# standalone door cannot source this file. tests/env.test.sh Group 1 reads both
+# literals with `sed` and fails when they differ, so a name added here has to be
+# added there in the same change.
+ENV_KEYS="CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS CLAUDE_CODE_DISABLE_AUTO_MEMORY"
 
 # The value each name carries, and why:
 #
@@ -75,6 +80,29 @@ ENV_KEYS="CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIME
 #                                      tools behind it, and a plan ledger with
 #                                      no task list behind it is a plan nobody
 #                                      can see the state of.
+#                                      HOW THE GATE WAS FOUND (2026-08-15, two
+#                                      axes). Version: a census of session
+#                                      transcripts, `grep -rl
+#                                      '"name":"TaskCreate"' ~/.claude/projects/`,
+#                                      showed fable-tier sessions calling
+#                                      TaskCreate on every CLI from 2.1.211
+#                                      through 2.1.227 and on none from 2.1.228,
+#                                      so the removal shipped somewhere in
+#                                      2.1.228-2.1.233. Model: on CLI 2.1.233 the
+#                                      same `claude -p` tool-enumeration probe
+#                                      listed TaskCreate/TaskGet/TaskList/
+#                                      TaskUpdate under haiku and none under the
+#                                      fable tier, so haiku is unaffected and the
+#                                      gate is model-scoped. The fix was measured
+#                                      by the same probe: with this name set to
+#                                      1 the four tools come back. Re-confirmed
+#                                      2026-08-21 on 2.1.238 with the name unset:
+#                                      still gated. Two consequences a reader
+#                                      meets elsewhere: a process started on an
+#                                      older binary keeps its task list, so two
+#                                      sessions side by side can disagree; and
+#                                      TaskOutput/TaskStop were never gated, so
+#                                      stopping an agent works either way.
 #   BASH_MAX_TIMEOUT_MS=1800000      — the ceiling on how long a command may be
 #                                      asked to run in the foreground. bionic's
 #                                      own test suite takes about fifteen
@@ -95,11 +123,46 @@ ENV_KEYS="CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIME
 #                                      retired installer's roster, where it was
 #                                      an `env-var` line the port dropped in
 #                                      silence (AC-8).
+#   CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+#                                    — turns off the CLI's auto memory: the
+#                                      per-project directory under
+#                                      <claude-home>/projects/<slug>/memory/
+#                                      whose MEMORY.md index the CLI loads into
+#                                      every session and which the model writes
+#                                      to on its own. Text that reaches every
+#                                      session with no review and no owner is a
+#                                      fifth channel, and bionic keeps its
+#                                      standing guidance in ADR-040's four: the
+#                                      user's global CLAUDE.md; the repo's
+#                                      CLAUDE.md and .claude/rules/; the
+#                                      doctrine the plugin ships; the wave
+#                                      record (wave-23). The CLI's docs give this name
+#                                      precedence over `autoMemoryEnabled` in
+#                                      either direction, and a settings `env`
+#                                      value overwrites a shell export, so the
+#                                      user-scope `env` entry setup writes is
+#                                      the strongest switch bionic can own; only
+#                                      a managed-settings entry outranks it, and
+#                                      that is not bionic's to write. A project
+#                                      or local `env` block (`.claude/settings
+#                                      .json`, `.claude/settings.local.json`) can
+#                                      still set it back to "0" for one project,
+#                                      and the switch cannot delete files the
+#                                      CLI wrote before it was set. doctor's
+#                                      `auto-memory` row reports both, reading
+#                                      the project and local settings only: a
+#                                      managed settings file, a `--settings`
+#                                      argument and the Desktop app's launch
+#                                      environment can also set the name and are
+#                                      outside what doctor reads
+#                                      (lib/checks.sh, detect_auto_memory in
+#                                      lib/detect.sh).
 env_default() {  # <key> — prints the value, exit 1 if the key is not bionic's
   case "${1:-}" in
     CLAUDE_CODE_ENABLE_TODO_TOOLS)        echo "1" ;;
     BASH_MAX_TIMEOUT_MS)                  echo "1800000" ;;
     CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) echo "1" ;;
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY)      echo "1" ;;
     *)                                    return 1 ;;
   esac
   return 0
