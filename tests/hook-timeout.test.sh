@@ -31,8 +31,8 @@
 # assertion for the wrong reason, so every row asserts the verdict that can only come from
 # the far side of its hot path: the post-edit Tasks fault for a1/a2, protect-main's refusal
 # for b, the read-only arm for b', the evidence gate for c (which the screen reaches only
-# through its strip — `git` is not in c's text), and the chain nudge for d (which needs the
-# redirect at the END of the 8 K segment).
+# through its strip — `git` is not in c's text), and the chain deny for d2 and silence for d (the
+# 8 K segment ends in a redirect).
 #
 # THE SELF-CHECK (§3) proves each input is heavy: the 7223b594 hot line, copied here verbatim
 # and run on the same bytes under bash 3.2, must exceed the budget. An input that never
@@ -297,6 +297,9 @@ seg = 'printf %s "' + ("—" * 8000) + '" > out.txt'
 chain = seg + " && echo two && echo three"
 json.dump(bash_payload(r_chain, chain), open(d + "/d.json", "w"))
 meta["d_seg_chars"] = len(seg)
+# -- d2: the same long segment, then a build segment — the witness that d's silence is the
+#    hook finishing its walk rather than leaving early (see row d2 below) --
+json.dump(bash_payload(r_chain, seg + " && make && echo three"), open(d + "/d2.json", "w"))
 
 json.dump(meta, open(d + "/meta.json", "w"))
 PY
@@ -315,6 +318,7 @@ expect_true "fixture: d's long segment is at least 8 000 characters" test "$(met
 # ---------- the rows ----------
 
 # row <id> <hook> <repo> <expected exit> <witness substring> <channel: out|err>
+# A witness of SILENT asserts an empty stdout instead: the verdict is "nothing to say".
 row() {
   local id="$1" hook="$2" repo="$3" want_rc="$4" witness="$5" chan="$6" sh got
   for sh in $SHELLS; do
@@ -324,7 +328,11 @@ row() {
     expect_true "$id [$sh]: under ${BUDGET}s (took ${HT_SECS}s)" under_budget "$HT_SECS"
     expect_eq "$id [$sh]: exit $want_rc" "$want_rc" "$HT_RC"
     if [ "$chan" = out ]; then got="$HT_OUT"; else got="$HT_ERR"; fi
-    expect_contains "$id [$sh]: the hot path was reached — $witness" "$witness" "$got"
+    if [ "$witness" = SILENT ]; then
+      expect_eq "$id [$sh]: the hot path was reached and answered — silence, with d2 beside it" "" "$got"
+    else
+      expect_contains "$id [$sh]: the hot path was reached — $witness" "$witness" "$got"
+    fi
   done
 }
 
@@ -337,7 +345,13 @@ section "2 — bash-walls: the 64 KB heredoc, the quote-dense command, the 8 K c
 row b  "$WALLS_HOOK" "$R_PUSH"   2 "main is a protected branch here" err
 row b2 "$WALLS_HOOK" "$R_AGENT"  2 "a read-only role never commits" err
 row c  "$WALLS_HOOK" "$R_COMMIT" 2 "evidence line is a placeholder" err
-row d  "$WALLS_HOOK" "$R_CHAIN"  0 "chain-class command" out
+# d: the chain tier-2 nudge that used to witness this row is retired (wave-24 T11, AC-7.7), so a
+# chain with no tier-1 segment answers with silence. Silence alone would read the same if the
+# hook had left early, so d2 runs the same long first segment with a build segment behind it:
+# its deny (class=chain) can only come from a walk that got past the 8 K segment and read the
+# segments after it. d is the input being timed; d2 is the proof the timing covers the walk.
+row d  "$WALLS_HOOK" "$R_CHAIN"  0 SILENT out
+row d2 "$WALLS_HOOK" "$R_CHAIN"  0 "chain-class command" out
 
 # ---------- the self-check ----------
 
@@ -367,7 +381,8 @@ _p="${_p//\\$'\n'/}"
 _p="${_p//\\/}"; _p="${_p//\'/}"; _p="${_p//\"/}"
 SH
 
-# d: walls.sh:4662-4710 — `_chain_seg_split`'s character walk over the first segment.
+# d: walls.sh:4662-4710 — `_chain_seg_split`'s character walk over the first segment. (That
+# function is deleted at T11; the line is what the self-check times, as it stood at 7223b594.)
 cat > "$SANDBOX/hot-d.sh" <<'SH'
 COMMAND=$(jq -r '.tool_input.command')
 s="${COMMAND%% && *}"
