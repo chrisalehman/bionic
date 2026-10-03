@@ -297,16 +297,17 @@ expect_absent "3f3: …and none of it on stdout, which is the JSON modes' wire" 
 # ---------------------------------------------------------------------------
 section "4 — a block and a model-facing nudge on one payload (R7)"
 #
-# A push to main that is ALSO a chain-class command. protect-main refuses on stderr at
+# A push to main that ALSO draws a farm-out nudge (a `git clone` head — the chain tier-2 nudge
+# this fixture used to ride is retired, wave-24 T11). protect-main refuses on stderr at
 # exit 2; farm-out-reminder nudges on stdout as JSON. Two channels, one process, and
 # neither may eat the other.
 
-run_hook "$(mk_payload "$R_PUSH" 'git push origin main && ./build.sh && ./deploy.sh')"
+run_hook "$(mk_payload "$R_PUSH" 'git clone u d && git push origin main')"
 expect_status "4a: the refusal decides the status" 2 "$ST"
 expect_contains "4b: …and the user stream carries the push refusal" \
   "bionic: push refused — main is a protected branch here" "$ERR"
 expect_eq "4c: stdout carries exactly one JSON document" "1" "$(json_docs)"
-expect_contains "4d: …the nudge, on its own channel" "chain-class command on the main thread" \
+expect_contains "4d: …the nudge, on its own channel" "clone-class command on the main thread" \
   "$(context_of)"
 expect_absent "4e: the nudge never leaks onto the user's stream" \
   "production-shaped work belongs in a subagent" "$ERR"
@@ -314,12 +315,12 @@ expect_absent "4e: the nudge never leaks onto the user's stream" \
 # ---------------------------------------------------------------------------
 section "5 — a refused commit and a nudge: the same shape from the other gate"
 
-run_hook "$(mk_payload "$R_COMMIT" 'git commit -m "step 5" && ./build.sh && ./deploy.sh')"
+run_hook "$(mk_payload "$R_COMMIT" 'git clone u d && git commit -m "step 5"')"
 expect_status "5a: the gate's refusal decides the status" 2 "$ST"
 expect_contains "5b: …with the gate's own words on the user stream" \
   "bionic: commit refused" "$ERR"
 expect_eq "5c: stdout still carries exactly one JSON document" "1" "$(json_docs)"
-expect_contains "5d: …and it is the nudge" "chain-class command" "$(context_of)"
+expect_contains "5d: …and it is the nudge" "clone-class command" "$(context_of)"
 
 # ---------------------------------------------------------------------------
 section "6 — two channels blocking at once: the JSON wire wins, and keeps both reasons"
