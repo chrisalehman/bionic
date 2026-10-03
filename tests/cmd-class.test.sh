@@ -193,6 +193,27 @@ case_is none 'bash run.sh'
 case_is none 'run.sh'
 case_is none 'sudo git status'
 
+# --- T24: only the PROJECT'S runner is the full-suite runner ---
+# The arms read the basename `run.sh` alone, so any script of that name — a scratch replay
+# harness, `scripts/run.sh` — was classed `suite` and refused as the full tree. The runner
+# is `tests/run.sh`, `./tests/run.sh`, or a path ending `/tests/run.sh`.
+case_is none '/bin/bash /private/tmp/x/run.sh'
+case_is none 'bash scripts/run.sh'
+case_is none './run.sh'
+case_is none 'sh run.sh'
+case_is none 'scripts/run.sh'
+case_is none './scripts/run.sh --serial'
+case_is none 'sudo bash /tmp/scratch/replay/run.sh'
+# CONTROLS — the project's runner, in every spelling, stays the suite.
+case_is suite 'bash tests/run.sh'
+case_is suite './tests/run.sh'
+case_is suite 'bash /abs/repo/tests/run.sh'
+case_is suite 'tests/run.sh --serial'
+case_is suite '/abs/repo/tests/run.sh'
+case_is suite '/bin/bash /abs/repo/tests/run.sh --serial'
+case_is none 'bash tests/run.sh --dry-run'
+case_is none '/abs/repo/tests/run.sh --help'
+
 # --- cmd_unwrap_head: the reduction farm-out's tier-2 matcher reads (B-4a) ---
 # It replaced two sed twins in farm-out-reminder.sh whose rule set was smaller
 # than the library's, so `sudo npx x` and `FOO=1 npx x` never reached tier-2.

@@ -667,10 +667,23 @@ is_address_shaped() {  # <typed> -> 0 if it wears an agent-address shape
 # A BACKGROUND BASH TASK ID (D8, T5; A-D4 probe evidence: t1o3yxz7p, tvivnv41s, tlfh9woyt,
 # t5triyxvo). It never gets an agent-*.meta.json and never opens a roster row — it names no
 # Agent-tool dispatch at all, so it is the one shape that still gets out of this gate's way
-# with no row of any kind (REQ-5). The leading `t` is load-bearing: it is what keeps this
+# with no row of any kind (REQ-5). The leading letter is load-bearing: it is what keeps this
 # carve from ever widening to a bare name that merely happens to be short and lowercase.
-is_bash_task_shaped() {  # <typed> -> 0 if it wears a background-bash-task-id shape
-  grep -qE '^t[a-z0-9]{8,}$' <<< "$1"
+#
+# TWO WAYS IN (wave-24 T10, REQ-7 AC-7.4, D12). The harness records the id it hands a background
+# shell as `"backgroundTaskId":"<id>"` in the transcript, so an id the payload's own transcript
+# names is one the harness issued, whatever it is spelled like. The shape is the fallback for a
+# transcript that cannot say: `[bt]` and eight lowercase-alphanumerics, the one spelling the
+# harness has used (`t` before 2026-09-03, `b` since — the carve here wore only the `t`, so every
+# live id was refused as "on no roster row"). Standing is asked BEFORE either: a name this
+# session's roster carries is guarded however it is spelled, and `backlog-census` (a hyphen, and
+# no record) is not an id at all.
+is_bash_task_shaped() {  # <typed> -> 0 if it is a recorded background-shell id or wears the shape
+  if [ -n "${TRANSCRIPT:-}" ] && [ -f "$TRANSCRIPT" ] && [ ! -L "$TRANSCRIPT" ] \
+     && grep -qF -- "\"backgroundTaskId\":\"$1\"" "$TRANSCRIPT" 2>/dev/null; then
+    return 0
+  fi
+  grep -qE '^[bt][a-z0-9]{8}$' <<< "$1"
 }
 
 # EVERY ROSTER IN THIS BIONIC_ROOT THAT CARRIES THIS NAME, as the addresses the platform's stop
