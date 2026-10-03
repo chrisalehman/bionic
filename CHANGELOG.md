@@ -3,6 +3,91 @@
 Earlier releases are recorded as git tags (`v1.4.3` … `v1.8.3`) rather than in this file,
 which starts at 1.8.4.
 
+## 1.8.10 — 2026-10-03
+
+A session bound to no plan is now told so and left alone by every gate that acts on a plan,
+engagement never hands a session a run another live session holds, and bionic owns the switch
+that keeps Claude Code's auto-memory off: nothing bionic ships or commits cites a memory note
+as the reason for a rule.
+
+- REQ-1: An unbound session's `fallback <plan>` is announced and never acted on. Eight
+  consumers print the one advisory `run_unbound_advisory` builds in `payload/scripts/lib/run.sh`,
+  once per process, and take their `none` path: context-spend, the landing guard, the
+  patrol-duties gate, the fill gate and patrol-revive in `payload/scripts/lib/stop.sh`, the
+  dispatch wall in `hooks/dispatch-preflight.sh`, the commit gate in `walls.sh`, and the Patrol
+  tick, which now names no FILL row from another session's plan. A writer dispatched from an
+  unbound session is refused with `this session is bound to no run`; read-only roles pass, and
+  a root with no open run is judged as in 1.8.9. The poker's other verbs and the
+  governing-skill hook are unchanged. Tests: `tests/stop.test.sh` §UB (two plans, two sessions:
+  the unbound one exits clean, the bound one is still refused `not launched: T5`),
+  `tests/cross-gate-agreement.test.sh` §UB (seven gate arms, advisories byte-equal, and UB.8
+  for the tick against its bound control), `tests/docs-pins.test.sh` §UB; the suites whose
+  fixtures leaned on `fallback` now bind through `tests/lib/bound-marker.sh`.
+- REQ-1, engagement: A session auto-binds only at its first engagement, and never to a run
+  another live session is bound to. Such a session is written unbound and told why on the
+  model's channel (`hookSpecificOutput.additionalContext`), naming the holder; a re-engagement
+  keeps whatever binding the marker has, so a session left unbound binds by hand
+  (`session-poker.sh bind`) or by writing its own plan. One behaviour changes for every session:
+  one whose first engagement found zero or several live runs stays unbound when the root later
+  drops to one. On resume and compaction, session-start's one-run line for an engaged unbound
+  session gives the bind command and, when a live session holds the run, names it first
+  (`hooks/engage.sh`, `bind_holders` in `payload/scripts/lib/binding.sh`,
+  `hooks/session-start.sh`; `tests/engage.test.sh` E12–E13, `tests/session-start.test.sh`
+  §15.6–15.12).
+- REQ-1, close-out: `close-out.sh` binds its synthetic session to the plan being closed, so its
+  gate dry-run judges that plan instead of passing an unbound commit, and `run` dry-runs after
+  the Step-8 block is written and before `current: 9` and `delivered:`, so the gate reads an
+  open plan's evidence. `run` now asks that gate, the census and the merge check BEFORE its first
+  destructive act, and refuses before touching anything when the plan has no `Step 9:` line in
+  `## SDLC State` or the epic plan has no `| wave |` table; `check` prints each as a `presence:`
+  line beside the gate's own. A refusal exits 2 with branch, tmp, continuation and `current:`
+  unchanged (`tests/close-out.test.sh` 4e, 4k–4q, 4u–4x and 4e q1.1–q1.14). Known, carried to
+  the next wave's first row: the "epic already lists this wave" exemption matches a `| NN |` row
+  in any table of `epic.plan.md`, so a wave listed only in the planned table closes without its
+  shipped row being written (quiet omission, nothing destroyed; present since before 1.8.9).
+- REQ-2: `CLAUDE_CODE_DISABLE_AUTO_MEMORY` joins `ENV_KEYS` in `payload/scripts/lib/env.sh`
+  with default `1`, so setup writes it into the user `settings.json` `env` object and remove
+  deletes it. A lower settings scope can still set it back; doctor says so. `remove.sh`'s
+  `RM_ENV_KEYS` is pinned byte-equal to `ENV_KEYS` (`tests/env.test.sh` Group 1), and `env`,
+  `fresh-home`, `doctor-reads` §18 and `command-relay` now encode four keys.
+- REQ-3: Doctor's rows about this project now print under a `PROJECT` header, and among them is
+  the new `auto-memory` row (`detect_auto_memory` in `detect.sh`, the row in `checks.sh`). It
+  reads ✗ when the project's `.claude/settings.local.json` or `.claude/settings.json` sets the
+  key to a value the CLI reads as memory on (anything but `1`, `true`, `yes` or `on`, case and
+  surrounding spaces ignored), or when `~/.claude/projects/<slug>/memory/` holds files. Its hint
+  names the file and key or the directory to clear by hand, never `→ /bionic:setup`. Its ✓ says
+  what it checked: no override in project settings, no memory files under the slug. Managed
+  settings, `--settings` and the launch environment are outside what it reads. The key unwritten
+  shows on the ordinary `env:CLAUDE_CODE_DISABLE_AUTO_MEMORY` row (`tests/detect-probes.test.sh`
+  Group 6e and its value cases, `tests/doctor-reads.test.sh` §20, and §DS DS.2a and DS.10b in
+  the agreement suite).
+- REQ-4: A reason cited from one site is written at that site (`units.sh`, `stop.sh`,
+  `session-poker.sh`); a reason cited from many lives in one file, the new "Fixture fidelity"
+  and "Anti-vacuity" rules in `.claude/rules/test-harness.md`, and the task-tools census in
+  `env.sh`. `operational-rules.md` and `agent-discipline.md` read as decided, the four rules
+  files' provenance lines cite ADR-002 rather than `.bionic/memory/`, and `remove.sh` no longer
+  says `.bionic/` holds memory. `tests/docs-pins.test.sh` §RH pins each landing three ways (live,
+  carried phrase removed, retired phrase planted), and a grep for a memory citation over
+  everything bionic ships or commits prints nothing. The landed rules themselves are pinned:
+  `tests/docs-pins.test.sh` §D2 reads each 1.8.10 landing in the repo `CLAUDE.md`, the
+  `.claude/rules/` files, the orchestrator-dispatch block and the test-runner template, and goes
+  red when one is removed.
+- REQ-5: The store's 215 notes were triaged, and the 49 owned by a repo file met a wall-first
+  bar: 34 landed as text plus the card's decision-format rule (repo `CLAUDE.md`, three
+  `.claude/rules/` files, the new `.claude/rules/plan-authoring.md`, the orchestrator-dispatch
+  block, the test-runner template), 5 were already said, 2 were declined (one because the role
+  files' byte cap left no room), and the 8 a hook can enforce are carried over as six walls to
+  build. Always-loaded bytes read 61,089 against 59,984 at 1.8.9, with the six role files at
+  26,205 of 26,400 (61,087 at the final head). The 33 notes owned by the user's global CLAUDE.md
+  are proposed text, applied only by the user.
+
+One rule for what a session knows (ADR-040): four channels, each reviewed before it loads, and
+no fifth; a lesson becomes a hook when one can enforce it, committed text when only a person
+can, or nothing. The design named six acting gates; the build found the commit gate as the
+seventh (Δ1), review found the Patrol tick as the eighth (Δ2), and the critic found close-out's
+dry-run (Δ3) and engagement's sole-run bind (Δ4, Δ5); doctrine now says a first engagement
+binds a sole live run no live session holds (Δ6).
+
 ## 1.8.9 — 2026-10-01
 
 A contract widened with `amend` or `extend` is now the contract every wall reads, on a
