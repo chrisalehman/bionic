@@ -107,7 +107,7 @@ TOOL_NAME=$(_jq '.tool_name')
 # brings `cmd-class.sh` (wave-20 T4; REQ-7, D7) in itself for CMD_RUN_NORM_AWK, the one run
 # normaliser its lift pastes in, so this hook names only brief.sh and lets that source do
 # the pulling.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh"
+BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -234,6 +234,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # variables, so sourcing them costs a parse and nothing else.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/brief.sh"
+# THE MODEL-FACING ADVISORY'S EMITTER (wave-24 T14, A-orch-20): `_fold_emit_context` is the one
+# builder of `hookSpecificOutput.additionalContext`, the farm-out nudge's. Functions only.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/fold.sh"
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
@@ -2212,6 +2216,44 @@ esac
 # dispatch the gate is about to refuse must never be journalled as a launch — and `deny`
 # exits 0, which is exactly the status the ledger below would otherwise read as a launch.
 dp_refuse_findings
+
+# ============================= THE BRIEF BODY ADVISORY (wave-24 T14; REQ-8, D13)
+#
+# A dispatch that reached this line is allowed, so what follows is only ever said, never decided.
+# `brief_body_advisories` (payload/scripts/lib/brief.sh) reads the PROSE the contract grammar
+# never sees for the two shapes that meet a wall minutes later — a `bash tests/x.test.sh` the
+# row does not budget, and an edit of a path outside `Files:` — and each finding goes out on
+# the model's channel, ending in the `amend` line that would declare it. Placed below the spend
+# so a refused dispatch carries only its refusal, and above the ledger so the advice precedes the
+# journalled launch; nothing it does can change the exit status (AC-8.4).
+#
+# THE CHANNEL IS THE MODEL'S (A-orch-20): `hookSpecificOutput.additionalContext` on stdout, exit 0.
+# An advisory the model never reads is silence, and AC-8.1/8.3 fail on silence; stderr from a
+# passing PreToolUse reaches nobody the author is, and is not on refuse.sh's measured channel
+# table at all. That table scores `additionalContext` model:no, but it was a headless stream-json
+# measurement. Observed live in the interactive orchestrator session (2026-10-03): walls.sh's
+# farm-out tier-1 nudge, which rides this same field, arrived as "PreToolUse:Bash hook additional
+# context: farm-out checkpoint ...", so the channel does reach the model there.
+#
+# THE EMITTER IS THE FARM-OUT NUDGE'S, NOT A SECOND ONE: `_fold_emit_context` (lib/fold.sh) builds
+# the object through `jq`, so no JSON is escaped by hand here. This is the only stdout this path
+# prints (a refusal exited above, and nothing below writes to it), so it is one object by
+# construction. With no `jq` the lines fall back to `warn`, as fold.sh does for its own nudge.
+_dp_adv_all=$(brief_body_advisories "$(_jq '.tool_input.prompt')" "$AGENT_NAME" "$C_FILES" "$SUITES_ALLOWED" "$C_RE_EXECUTES" "$HOOK_DIR/session-poker.sh")
+if [ -n "$_dp_adv_all" ]; then
+  _dp_adv_ctx="brief advisory (the dispatch is allowed; nothing was refused):
+$_dp_adv_all"
+  _dp_adv_json=$(_fold_emit_context PreToolUse "$_dp_adv_ctx")
+  if [ -n "$_dp_adv_json" ]; then
+    printf '%s\n' "$_dp_adv_json"
+  else
+    while IFS= read -r _dp_adv; do
+      [ -n "$_dp_adv" ] && warn "$_dp_adv"
+    done <<ADV_EOF
+$_dp_adv_all
+ADV_EOF
+  fi
+fi
 
 # ---------- THE LEDGER STOPS AT DEPTH ONE ----------
 # (session-20260815-landing-supervision T6; design D1 "writers stay put".)
