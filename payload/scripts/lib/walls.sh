@@ -1637,7 +1637,8 @@ DOCS_ROOT=$(docs_root "$BIONIC_ROOT")
 #   bound-open <p>        this session's own plan, open  -> <p> is THE plan; enforce
 #   bound-closed <p>      its own plan, delivered/gone   -> <p> is THE plan; do not enforce
 #   bound-unreadable <p>  its own plan, there, unreadable -> REFUSED, naming <p> (below)
-#   fallback <p>          no binding: today's newest-plan -> announced, then today's path
+#   fallback <p>          no binding: the newest open run -> announced and never acted on:
+#                                                            no plan, and judged as `none`
 #   none                  no binding and no open run      -> today's path, unchanged
 #   anything else         a word this gate does not know  -> no plan is resolved in its place
 #
@@ -1656,11 +1657,17 @@ case "$EG_VERDICT" in
   bound-open|bound-closed|bound-unreadable)
     PLAN="$EG_VPATH"
     ;;
-  fallback|none)
-    # UNBOUND: today's line, untouched, and reached by exactly the same code that
-    # reached it before this wave. `fallback` and `none` both mean "no binding", and
-    # AC-3's promise is that such a session behaves EXACTLY as it did — so the promise is
-    # kept by running the old path rather than by a new one that agrees with it.
+  fallback)
+    # UNBOUND IN A ROOT WITH AN OPEN RUN (wave-23-fixit-1810, REQ-1, D1; spec Δ1). The open
+    # run is somebody else's, so its plan is announced below and never acted on: no plan is
+    # resolved for this commit, its hygiene is not judged here, and the run predicate below
+    # exits as it does under `none`. Judging this session's commit against another
+    # session's step was the defect.
+    PLAN=""
+    ;;
+  none)
+    # UNBOUND, NO OPEN RUN: today's line, untouched. `active_plan` may still name a closed
+    # plan, whose hygiene refusals are owed in every state.
     PLAN=$(active_plan "$BIONIC_ROOT") || PLAN=""
     ;;
   *)
@@ -1697,7 +1704,14 @@ Fix: restore read access (for example: chmod u+r on the plan, u+rx on its folder
 # hook's only channel — never a refusal, and never an exit.
 case "$EG_VERDICT" in
   fallback)
-    echo "evidence-gate: run resolved by newest-plan fallback (session unbound) — $PLAN" >&2
+    # lib/run.sh's one sentence, the words every other consumer prints (cross-gate §UB) —
+    # and then the gate is done (wave-23-fixit-1810, REQ-1, D1). The root HAS an open run,
+    # so nothing is misplaced and nothing is absent: the misplacement sweep below is for a
+    # root where no plan was found at all, and run here it would refuse this session's
+    # commit over a stray file in a root whose live run is somebody else's. No plan is this
+    # session's, so no hygiene and no step is judged.
+    run_unbound_advisory "$EG_VPATH" >&2
+    exit 0
     ;;
   bound-closed)
     echo "evidence-gate: bound plan closed — $PLAN; this session has no open run" >&2
@@ -2749,19 +2763,21 @@ fi
 # (wave-session-bound-run, AC-1/AC-3/AC-6): a bound session enforces against its OWN open
 # run and against nothing else, and `bound-closed` — its plan delivered, abandoned or gone
 # — takes this same exit, the engaged-with-no-run branch, rather than resolving a second
-# time and landing on somebody else's wave. The unbound arm still asks `active_run` here,
-# in this position, exactly as it did before the wave: that is AC-3's "behaves exactly as
-# today", kept by running the old predicate rather than by trusting a new one to agree.
+# time and landing on somebody else's wave. `fallback` exits here too: its open run is
+# somebody else's, announced at the top and never acted on (wave-23-fixit-1810, REQ-1, D1),
+# so there is no step this session's commit is owed. `none` still asks `active_run` here, in
+# this position, by the old predicate rather than a new one trusted to agree.
 #
 # `bound-unreadable` was refused at the resolution above and cannot arrive here; it is named
 # so that no reordering can let it fall to an arm that resolves another plan. The unbound
-# arm is `fallback|none` by name, and a word this gate does not know exits: it is never
-# handed to `active_run` (wave-20 T1, REQ-2).
+# arms are `fallback` and `none` by name, and a word this gate does not know exits: it is
+# never handed to `active_run` (wave-20 T1, REQ-2).
 case "$EG_VERDICT" in
   bound-open)       : ;;
   bound-closed)     exit 0 ;;
   bound-unreadable) _eg_refuse_unreadable ;;
-  fallback|none)    active_run "$BIONIC_ROOT" >/dev/null || exit 0 ;;
+  fallback)         exit 0 ;;   # unreachable: the announcement above exits; named so no reorder can resolve it
+  none)             active_run "$BIONIC_ROOT" >/dev/null || exit 0 ;;
   *)                exit 0 ;;
 esac
 

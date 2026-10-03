@@ -492,14 +492,40 @@ verdict_er() {  # <repo> -> yes|no|other:<detail>
 
 # The evidence gate is the only party that reports the DERIVED VALUE, so its
 # answer is `yes:<value>` where the others answer `yes`. Callers split on `:`.
+# THE EVIDENCE GATE JUDGES ONLY A BOUND SESSION'S RUN (wave-23-fixit-1810, REQ-1, D1; spec
+# Δ1). These parties drive an engaged, UNBOUND session — the empty marker new_repo plants —
+# and since that wave the gate announces an unbound session's newest-plan fallback and acts
+# on nothing, so it would answer "no" on every fixture and this battery would lose its
+# fifth voice. So for the drive alone the session is bound to the plan the PARTY'S OWN
+# library resolves as the newest open run — the shipped one here, the mutant under §A2 —
+# and the empty marker is put back after. The gate then derives `current:` from exactly the
+# plan the library found, which is what this battery has always compared; a library that
+# finds no open run leaves the marker empty, and the gate answers "no" as the others do.
+cg_eg_libdir() {
+  local h; h="$(dirname "$PARTY_EG")"
+  if [ -r "$h/../scripts/lib/run.sh" ]; then printf '%s' "$h/../scripts/lib"
+  else printf '%s' "$h/../payload/scripts/lib"; fi
+}
+cg_eg_bind() {  # <repo> <sid> -> 0 when an EMPTY marker was bound for this drive
+  local m="$1/.bionic/tmp/engaged-$2.state" p
+  [ -f "$m" ] && [ ! -L "$m" ] && [ ! -s "$m" ] || return 1
+  p=$(bash -c '. "$1/run.sh" 2>/dev/null && active_run "$2"' _ "$(cg_eg_libdir)" "$1" 2>/dev/null) || p=""
+  [ -n "$p" ] || return 1
+  printf 'plan=%s\nengaged_at=2026-09-04T00:00:00Z\n' "$p" > "$m"; chmod 600 "$m"
+  return 0
+}
+cg_eg_unbind() { : > "$1/.bionic/tmp/engaged-$2.state"; }
+
 verdict_eg() {  # <repo> -> yes:<current>|no|other:<detail>
-  local out st
+  local out st _b=0
   # BIONIC_WALL_VERBOSE=1 (task 13, ruling D-1). The gate's user line is one sentence
   # now and the DERIVED VALUE this party reports — the step number the plan has no line
   # for — lives in `detail`. Reading the line alone would make every row here
   # `other:<prefix>`; the knob is how the party keeps reporting a value at all.
+  cg_eg_bind "$1" "$SID_A" && _b=1
   out=$(mk_bash_payload "$SID_A" "$SANDBOX/t.jsonl" "$1" "git commit -m x" \
         | env -u CLAUDE_PROJECT_DIR BIONIC_WALL_VERBOSE=1 bash "$PARTY_EG" 2>&1); st=$?
+  [ "$_b" = 1 ] && cg_eg_unbind "$1" "$SID_A"
   if [ "$st" -eq 0 ]; then echo no; return; fi
   case "$out" in
     *"has no 'Step "*)
@@ -586,8 +612,10 @@ arm_patrol() {  # <repo> <session-id>...
     # marker answers every question in this file the same way — silence — and the whole
     # suite would be green over nothing. The marker travels with the stamp for the same
     # reason the stamp travels with the plan: SKILL.md arms the Patrol AT engagement, so a
-    # world that has one has both.
-    : > "$repo/.bionic/tmp/engaged-$sid.state"
+    # world that has one has both. A marker already there is KEPT: a binding written before
+    # the Patrol was armed is the session's, and re-arming must not unbind it
+    # (wave-23-fixit-1810 T1 — an unbound session's fallback plan is never acted on).
+    [ -f "$repo/.bionic/tmp/engaged-$sid.state" ] || : > "$repo/.bionic/tmp/engaged-$sid.state"
   done
 }
 
@@ -602,6 +630,19 @@ engage_sids() {  # <repo> <sid>...
   mkdir -p "$r/.bionic/tmp"
   local s
   for s in "$@"; do : > "$r/.bionic/tmp/engaged-$s.state"; done
+}
+
+# write_live_plan <plan path> <state-body> — write_plan, then BIND the repo's three fixture
+# sessions to that plan (wave-23-fixit-1810, REQ-1, D1). new_repo engages them with an EMPTY
+# marker — engaged and unbound — and an unbound session's newest-plan fallback is announced
+# and never acted on: the dispatch wall refuses its writers with the bind instruction. A
+# section whose subject is a wave in flight (a writer journalled, a chain advanced) means a
+# session running that wave, so it writes its plan through here. The repo is the path up to
+# its `.bionic/`.
+write_live_plan() {
+  write_plan "$1" "$2"
+  local _r="${1%%/.bionic/*}" _s
+  for _s in "$SID_A" "$SID_B" "$SID_LG"; do bound_marker "$_r" "$_s" "$1"; done
 }
 
 new_repo() {  # <name> -> path
@@ -1092,7 +1133,7 @@ printf '{}\n' > "$ISUB/agent-aworker-1111111111111111.jsonl"
 # set, and a roster row carrying the agent id the working log is filed under.
 cg_live "$ITR" "worker"
 cg_roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111" "" "identified"
-write_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 
 # The producer, run for real, with the session key on the channel it actually
 # reads (CLAUDE_CODE_SESSION_ID — task 4/1's resolution) and a credential
@@ -1119,25 +1160,22 @@ expect_contains "the producer spells the identity key 'session_id='" "session_id
 OUT=$(mk_agent_payload "$SID_A" "$IREPO" | bash "$PARTY_DP" 2>&1); ST=$?
 expect_eq "start gate: the producer's own session passes" "0" "$ST"
 # "IN SILENCE" IS NOW "SILENT ABOUT THE ATTESTATION", and the change is a change of
-# CHANNEL, not of strength (wave-session-bound-run). Every fixture in this file engages its
-# sessions with an EMPTY marker — that is, engaged and UNBOUND — so since S5 the gate
-# announces the resolution it used on stderr before it looks at anything else:
-# `dispatch-preflight: run resolved by newest-plan fallback (session unbound) — <plan>`.
-# That line is a report about which run answered, not a complaint about the attestation,
-# and asserting an empty buffer would now make this section fail for a reason it is not
-# about. So the resolution line is lifted out and asserted POSITIVELY — a filter that could
-# hide a hook gone silent altogether is not a filter, it is a hole — and the remainder is
-# held to the emptiness this section has always claimed.
-DP_RESOLUTION=$(printf '%s\n' "$OUT" | grep -c '^dispatch-preflight: run resolved by newest-plan fallback (session unbound) — /')
+# CHANNEL, not of strength (wave-session-bound-run). This fixture's sessions are BOUND to
+# the plan written above (write_live_plan, wave-23-fixit-1810 T1): an unbound session's
+# newest-plan fallback is announced and never acted on, and the gate would refuse this
+# writer with the bind instruction. So no resolution line is expected — that is asserted
+# POSITIVELY as a count of zero, never filtered — and the budget backstop below is lifted
+# out and asserted, so the remainder is held to the emptiness this section has always
+# claimed.
+DP_RESOLUTION=$(printf '%s\n' "$OUT" | grep -c 'run resolved by newest-plan fallback (session unbound) — /')
 # …AND THE BUDGET BACKSTOP, lifted the same way and for the same reason (epic-23 wave-20 T2,
 # REQ-10 AC-10.2): this fixture's plan is live and carries no `parallel-budget:` line, so the
 # gate names the missing key (ADR-035). A line about the budget, not the attestation —
 # asserted positively, then held out of the remainder.
 DP_BACKSTOP=$(printf '%s\n' "$OUT" | grep -c '^dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field')
-DP_REST=$(printf '%s\n' "$OUT" | grep -v '^dispatch-preflight: run resolved by newest-plan fallback (session unbound) — /' \
-  | grep -v '^dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field')
-expect_eq "start gate: it announces the resolution it used, once (AC-3 — the fixture is unbound)" \
-  "1" "$DP_RESOLUTION"
+DP_REST=$(printf '%s\n' "$OUT" | grep -v '^dispatch-preflight: WARN the plan carries no parallel-budget: line with a writers= field')
+expect_eq "start gate: a bound session hears no fallback announcement (the fixture is bound)" \
+  "0" "$DP_RESOLUTION"
 expect_eq "start gate: …and names the keyless live plan's missing budget key, once" "1" "$DP_BACKSTOP"
 expect_eq "start gate: and passes in silence about the attestation" "" "$DP_REST"
 # THE NEAR-MISS SESSION IS ENGAGED TOO (task-engaged-session). Both gates ask
@@ -1502,7 +1540,7 @@ printf '{"name":"worker"}' > "$SSUB/agent-aworker-2222222222222222.meta.json"
 printf '{}\n' > "$SSUB/agent-aworker-2222222222222222.jsonl"
 cg_live "$STR" "worker"
 cg_roster_row "$SREPO" "$SID_A" "worker" "aworker-2222222222222222" "" "identified"
-write_plan "$SREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$SREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 
 # 1. the recorder, with the secret in the command line beside a real run
 SOUT=$( cd "$SREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" worker 2>/dev/null )
@@ -1589,7 +1627,7 @@ fi
 # actually creates the artefacts this assertion is here to bound. The value is a
 # syntactic placeholder; the probe tests PRESENCE, never validity.
 QREPO=$(new_repo "quiet")
-write_plan "$QREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$QREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 before=$(find "$QREPO" | sort)
 # `.bionic/tmp` is no longer among the gate's creations: the fixture arms the Patrol, which
 # makes the directory before the gate runs (arm_patrol). What the gate adds is still exactly
@@ -2606,7 +2644,7 @@ KSUB_B="$KPROJ/$SID_B/subagents"
 mkdir -p "$KSUB" "$KSUB_B" "$KREPO/.bionic/tmp"
 KTR="$KPROJ/$SID_A.jsonl"; printf '{}\n' > "$KTR"
 KTR_B="$KPROJ/$SID_B.jsonl"; printf '{}\n' > "$KTR_B"
-write_plan "$KREPO/.bionic/docs/plans/epic-16/wave-01.md" "current: 4"
+write_live_plan "$KREPO/.bionic/docs/plans/epic-16/wave-01.md" "current: 4"
 KROSTER="$KREPO/.bionic/tmp/roster-$SID_A.state"
 KID="aw16chain-1234567890abcdef"
 
@@ -4052,7 +4090,7 @@ P2_REPO=$(new_repo "sid-divergence")
 rm -f "$P2_REPO/.bionic/tmp/patrol-$SID_A.state" "$P2_REPO/.bionic/tmp/patrol-$SID_B.state" \
       "$P2_REPO/.bionic/tmp/patrol-$SID_LG.state"
 arm_patrol "$P2_REPO" "$SID_A"
-write_plan "$P2_REPO/.bionic/docs/plans/epic-p2/wave-01.md" "current: 4"
+write_live_plan "$P2_REPO/.bionic/docs/plans/epic-p2/wave-01.md" "current: 4"
 {
   printf '# bionic environment attestation — machine-local, safe to delete\n'
   printf 'version=1\nkind=preflight-attestation\n'
@@ -4100,7 +4138,7 @@ P2C_REPO=$(new_repo "sid-divergence-ctrl")
 rm -f "$P2C_REPO/.bionic/tmp/patrol-$SID_A.state" "$P2C_REPO/.bionic/tmp/patrol-$SID_B.state" \
       "$P2C_REPO/.bionic/tmp/patrol-$SID_LG.state"
 arm_patrol "$P2C_REPO" "$SID_B"
-write_plan "$P2C_REPO/.bionic/docs/plans/epic-p2c/wave-01.md" "current: 4"
+write_live_plan "$P2C_REPO/.bionic/docs/plans/epic-p2c/wave-01.md" "current: 4"
 {
   printf '# bionic environment attestation — machine-local, safe to delete\n'
   printf 'version=1\nkind=preflight-attestation\n'
@@ -4205,7 +4243,7 @@ expect_ne "…and the mutated library no longer answers the main repository" "$N
 # validity) for the reason §D records: unpinned, the probe consults the machine login keychain
 # and the drive lands on the refused path or the accepted one depending on whose machine runs
 # the suite. Only the accepted path writes anything, which is the path under test here.
-write_plan "$NREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$NREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 # Hand-built fixture, so it arms explicitly — under the MAIN repository, which is also the
 # only place the arming wall reads from a worktree cwd (the property N.1/N.2 measure).
 arm_patrol "$NREPO" "$SID_A"
@@ -4310,7 +4348,7 @@ N_SRC_VALUES=$(grep -oE '^[[:space:]]*C_SOURCE="[a-z]*"' "$DP_N" \
 # a multi-fault brief as ONE PreToolUse deny on stdout, exit 0, so the model reads every fault
 # rather than the first. A row reading the status alone would call that an ALLOW.
 NSRC=$(new_repo "source-vocab")
-write_plan "$NSRC/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$NSRC/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 # Run in the CURRENT shell (never a command-substitution subshell) so the wall's own exit
 # code survives to the assertion; read the roster row in a separate step.
 n_dispatch() {  # <name> <prompt> — runs the wall in this shell; its exit is the function's exit
@@ -4356,7 +4394,7 @@ expect_eq "a TEMPLATED <slot> path is REFUSED at dispatch (no fill)" "deny" \
 # the tool call never runs at all (the wall exits 2), which is exactly why the defensive
 # question is worth asking here rather than assuming the ordering holds.
 NGH=$(new_repo "ghost-row")
-write_plan "$NGH/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$NGH/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 mkdir -p "$NGH/.bionic/tmp"
 # A brief naming NO inferable deliverable: the one shape R4 still refuses (AC-3's planted
 # failure), and therefore the one that reaches this section with a refusal to leave no trace.
@@ -4455,7 +4493,7 @@ expect_eq "…while the shipped writer's row carries it exactly once" "1" \
 # VERDICT rather than the roster row — which is the gap S6's own suite could not close, since
 # it owns the recorder and not the thing that reads it.
 NLR=$(new_repo "launch-ref")
-write_plan "$NLR/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$NLR/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 NLR_ART="$NLR/.bionic/docs/record/resumed.md"
 mkdir -p "$NLR/.bionic/docs/record"
 NLR_ID="aresumed-3333333333333333"
@@ -5206,7 +5244,7 @@ section "Section P — the Patrol stamp: the poker WRITES exactly the path the g
 PARTY_PK="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
 P_SID="$SID_A"
 P_REPO=$(new_repo "patrol-stamp-pair")
-write_plan "$P_REPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$P_REPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 mkdir -p "$P_REPO/.bionic/tmp"
 # new_repo arms every fixture; this is the one section whose subject is an UNARMED session.
 rm -f "$P_REPO"/.bionic/tmp/patrol-*.state
@@ -5754,9 +5792,13 @@ s_backdate() {  # <file> — an hour older than everything else in the fixture
 # a property of the SESSION, and a helper that hard-coded one sid could only ever ask half
 # the question. Both default to $SID_A so every case below §S.3 reads exactly as it did.
 s_eg_read() {  # <repo> [sid] -> "<plan path>|<current>", or "none"
-  local out st plan cur sid="${2:-$SID_A}"
+  local out st plan cur sid="${2:-$SID_A}" _b=0
+  # An UNBOUND session is bound for the drive to its library's newest open run (cg_eg_bind,
+  # wave-23-fixit-1810 D1); a session a case bound itself is read as it stands.
+  cg_eg_bind "$1" "$sid" && _b=1
   out=$(mk_bash_payload "$sid" "$SANDBOX/t.jsonl" "$1" "git commit -m x" \
         | env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$sid" bash "$PARTY_EG" 2>&1); st=$?
+  [ "$_b" = 1 ] && cg_eg_unbind "$1" "$sid"
   [ "$st" -eq 0 ] && { echo none; return; }
   plan=$(printf '%s\n' "$out" | sed -n 's/^Plan: //p' | head -1)
   cur=$(printf '%s\n' "$out" | sed -n "s/.*has no 'Step \([^']*\):' line.*/\1/p" | head -1)
@@ -6151,10 +6193,12 @@ S4EOF
 
 # ---- S.4c — FALLBACK: unbound, every announcer names the SAME newest plan --------
 #
-# AC-3 in one fixture: an unbound session behaves exactly as it did before this wave, and
-# says so. The agreement here is between the seven, not between two sessions — they must all
-# name the one plan `active_run` would have named, which is the newest OPEN one. A consumer
-# that fell back to something else, or fell back silently, splits from the other six here.
+# AC-3 in one fixture: an unbound session is told which plan the root would have handed it.
+# Since wave-23-fixit-1810 (REQ-1, D1) that plan is announced and never acted on — §UB pins
+# the acting half, arm by arm. The agreement here is between the seven, not between two
+# sessions — they must all name the one plan `active_run` would have named, which is the
+# newest OPEN one. A consumer that announced something else, or went silent, splits from
+# the other six here.
 S4_R3=$(s4_world "s4-fallback")
 S4_R3B="$S4_R3/.bionic/docs/plans/epic-99/run-b.md"
 s4_unbind "$S4_R3" "$SID_A"
@@ -6685,7 +6729,10 @@ RA_REPO_U=$(new_repo "ra-unbound")
 RA_PLAN_U="$RA_REPO_U/.bionic/docs/plans/epic-99/ra-run.md"
 write_plan "$RA_PLAN_U" "current: 4"
 s4_attest "$RA_REPO_U" "$SID_A"
-mk_agent_payload "$SID_A" "$RA_REPO_U" | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" >/dev/null 2>&1
+# A READ-ONLY ROLE: an unbound session's writer is refused with the bind instruction and
+# writes no row (wave-23-fixit-1810, REQ-1, D1); a researcher is admitted and rostered.
+mk_agent_payload "$SID_A" "$RA_REPO_U" | jq -c '.tool_input.subagent_type = "bionic:researcher"' \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" >/dev/null 2>&1
 RA_DISPATCH_U=$(grep '^roster-state/' "$RA_REPO_U/.bionic/tmp/roster-$SID_A.state" 2>/dev/null | tail -1)
 roster_row_fixture status=identified session="$RA_PRED" name=ra-writer \
   agent_id="$RA_PRED_ID" launched_at=2026-08-05T00:00:00Z tool_use_id=toolu_01RAFIX \
@@ -13058,4 +13105,256 @@ am_arm "$AM_R6" "$AM_ID" "$AM_RUN_B"
 expect_eq "AM6 AFTER the amend the arm ADMITS the added run (async shape)" "0" "$AM_ARM_ST"
 am_arm "$AM_R6" "$AM_ID" "npx jest --testPathPatterns undeclared"
 expect_eq "AM6 …and still refuses an undeclared run" "2" "$AM_ARM_ST"
+# ============================================================
+section "UB — UNBOUND MEANS NO RUN: every acting arm announces the fallback and acts as under none (wave-23-fixit-1810, REQ-1, AC-1.3; D1)"
+# ============================================================
+#
+# THE CONTRACT (spec D1, Chris 2026-10-02). `session_run` still answers `fallback <plan>` for
+# an unbound session in a root with an open run, so every consumer can say which plan the root
+# would have handed it. The plan is announced and never acted on: each of the six acting arms
+# below prints lib/run.sh's ONE advisory and then takes its `none` path. §S.4c pins that the
+# seven announcers still SAY it; this section pins that the six that used to ACT on it no
+# longer do, and that the six say one byte-identical thing.
+#
+# THE SEVENTH, THE COMMIT GATE (spec Δ1, A-orch-8): found by this row's own prototype run,
+# it judged an unbound session's commit against the newest open run's step. It is driven
+# here beside the six, under the same contract and the same advisory.
+#
+# EVERY ARM IS DRIVEN TWICE ON ONE WORLD, the binding the only difference: `fallback <p>` must
+# not act, and `bound-open <p>` on the same tree MUST act — the anti-vacuity half, without
+# which "no spend line, no hold, no refusal" would pass on an arm that had simply gone dead.
+#
+#   arm               fallback <p>                                  bound-open <p> (control)
+#   context-spend     no spend state written                         state names <p>
+#   landing guard     no row lookup: "session unbound", checkout     the row's declared base, silent
+#   duties gate       a write naming <p> discharges nothing          that write discharges the refresh
+#   fill gate         no refusal for <p>'s ready row                 refused: not launched: T5
+#   patrol-revive     a stale stamp revives nothing                  the stale stamp blocks
+#   dispatch wall     judged with no plan: writer refused to bind    refused by <p>'s writers=1 budget
+#   commit gate       the commit is not judged against <p>           refused: <p>'s step has no evidence
+
+UB_RUN_LIB="$RUN_LIB"
+UB_TEMPLATE="$(bash -c '. "$1" && run_unbound_advisory "<p>"' _ "$UB_RUN_LIB")"
+UB_STOP_HOOK="$BIONIC_HOOKS_DIR/stop.sh"
+UB_RING="$SANDBOX/ub-clear.ring"; printf '1700000000|80|0|1.0|8\n' > "$UB_RING"
+
+ub_mode() {  # <repo> <sid> <plan> <fallback|bound>
+  case "$4" in
+    bound) bound_marker "$1" "$2" "$3" ;;
+    *)     unbound_marker "$1" "$2" empty ;;
+  esac
+}
+# ub_adv <output> <plan> -> the advisory LINES (a line that is the advisory, not a refusal's
+# detail quoting it), the plan path folded to <p>
+ub_adv() {
+  printf '%s\n' "$1" | grep '^run resolved by newest-plan fallback' \
+    | awk -v p="$2" '{ while ((i = index($0, p)) > 0) $0 = substr($0, 1, i-1) "<p>" substr($0, i+length(p)); print }'
+}
+# ub_stop <repo> <sid> <transcript> — the real Stop; sets UB_OUT (stdout) UB_ERR (stderr)
+ub_stop() {
+  local payload
+  payload=$(jq -nc --arg c "$1" --arg s "$2" --arg t "$3" \
+    '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"Stop", stop_hook_active:false, background_tasks:[]}')
+  UB_OUT=$(env -u CLAUDE_PROJECT_DIR HOME="$1" CLAUDE_CODE_SESSION_ID="$2" \
+    BIONIC_PRESSURE_RING="$UB_RING" BIONIC_NOW_EPOCH=1700000000 \
+    BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+    bash "$UB_STOP_HOOK" <<< "$payload" 2>"$SANDBOX/ub.err")
+  UB_ERR=$(cat "$SANDBOX/ub.err")
+}
+ub_decision() { printf '%s' "$UB_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+ub_iso() { date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ; }
+require_helpers ub_mode ub_adv ub_stop ub_decision ub_iso
+
+UB_ADVS=""   # one normalized advisory per fallback drive, newline-joined, in arm order
+ub_collect() {  # <arm> <output> <plan>
+  local a n
+  a="$(ub_adv "$2" "$3")"
+  n=$(printf '%s' "$a" | grep -c . || true)
+  expect_eq "UB.$1 fallback: the advisory is printed exactly once" "1" "$n"
+  UB_ADVS="${UB_ADVS}${UB_ADVS:+
+}$1|$a"
+}
+
+# ---- UB.1 context-spend ------------------------------------------------------
+UB1=$(new_repo "ub-spend"); UB1_P="$UB1/.bionic/docs/plans/epic-99/run.md"
+s4_plan "$UB1_P" 4
+jq -nc '{type:"assistant",message:{model:"claude-opus-5",usage:{input_tokens:1000,cache_creation_input_tokens:0,cache_read_input_tokens:2000}}}' > "$UB1/u.jsonl"
+ub_mode "$UB1" "$SID_A" "$UB1_P" fallback
+rm -f "$UB1/.bionic/tmp/context-spend.state"; ub_stop "$UB1" "$SID_A" "$UB1/u.jsonl"
+expect_eq "UB.1 context-spend, fallback: no spend line — no state is written against <p>" "no" \
+  "$([ -f "$UB1/.bionic/tmp/context-spend.state" ] && echo yes || echo no)"
+ub_collect context-spend "$UB_ERR" "$UB1_P"
+ub_mode "$UB1" "$SID_A" "$UB1_P" bound
+rm -f "$UB1/.bionic/tmp/context-spend.state"; ub_stop "$UB1" "$SID_A" "$UB1/u.jsonl"
+expect_eq "UB.1 context-spend, bound-open (control): the state names <p>" "$UB1_P" \
+  "$(cut -f1 < "$UB1/.bionic/tmp/context-spend.state" 2>/dev/null)"
+
+# ---- UB.2 landing guard ------------------------------------------------------
+# tests/landing-gate.test.sh §18d's world: the tree is cut from wave/x at BASE, the main
+# checkout sits on `develop`, and the plan's row declares BASE. Bound, the declared base is the
+# diff base and the landing is silent; unbound, no row is looked up, so the guard takes the
+# checkout's branch and says why — exactly what it does with no plan at all.
+UB2="$SANDBOX/fx/ub-landing/repo"; mkdir -p "$UB2/.bionic/tmp"
+ub_git() { env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git "$@"; }
+ub_git -C "$UB2" init -q . && ub_git -C "$UB2" symbolic-ref HEAD refs/heads/main
+ub_git -C "$UB2" config user.email t@example.invalid; ub_git -C "$UB2" config user.name T
+printf '.bionic\n.bionic/\n.worktrees/\n' > "$UB2/.gitignore"; echo base > "$UB2/base.txt"
+ub_git -C "$UB2" add .gitignore base.txt && ub_git -C "$UB2" commit -q -m base
+ub_git -C "$UB2" checkout -q -b wave/x
+echo w >> "$UB2/a.sh"; ub_git -C "$UB2" add a.sh; ub_git -C "$UB2" commit -q -m "wave a.sh"
+UB2_BASE=$(ub_git -C "$UB2" rev-parse HEAD)
+echo m >> "$UB2/mid.sh"; ub_git -C "$UB2" add mid.sh; ub_git -C "$UB2" commit -q -m "wave mid.sh"
+ub_git -C "$UB2" worktree add -q "$UB2/.worktrees/ubtree" -b wt/ubtree "$UB2_BASE" >/dev/null 2>&1
+ub_git -C "$UB2/.worktrees/ubtree" config user.email t@example.invalid
+ub_git -C "$UB2/.worktrees/ubtree" config user.name T
+ub_git -C "$UB2" checkout -q -b develop main
+echo t >> "$UB2/.worktrees/ubtree/b.sh"; ub_git -C "$UB2/.worktrees/ubtree" add b.sh
+ub_git -C "$UB2/.worktrees/ubtree" commit -q -m "the task's own edit"
+UB2_P="$UB2/.bionic/docs/plans/epic-99/run.md"
+mkdir -p "$(dirname "$UB2_P")"
+{ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n'
+  printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the task | implementor | — | 30m | REQ-2 | b.sh | ubtree | %s | active |\n' "$UB2_BASE"
+} > "$UB2_P"
+ub_landing_world() {  # a fresh roster and an undelivered-then-delivered landing, per drive
+  roster_header > "$UB2/.bionic/tmp/roster-$SID_A.state"
+  rm -f "$UB2/.bionic/tmp/roster-$SID_A.state.swept" 2>/dev/null
+  roster_row_fixture status=confirmed session="$SID_A" name=ubtree agent_id=aubtree-1111111111111111 \
+    launched_at="$(ub_iso 600)" subagent_type=implementor model=opus deliverable=.bionic/docs/record/ub.md \
+    source=declared tool_use_id=toolu_ub files=b.sh >> "$UB2/.bionic/tmp/roster-$SID_A.state"
+  mkdir -p "$UB2/.bionic/docs/record"; printf 'the report\n' > "$UB2/.bionic/docs/record/ub.md"
+}
+ub_landing_world; ub_mode "$UB2" "$SID_A" "$UB2_P" fallback
+ub_stop "$UB2" "$SID_A" "$UB2/no-transcript.jsonl"
+expect_contains "UB.2 landing guard, fallback: no row lookup — it diffs against the checkout, saying the session is unbound" \
+  "landing gate: session unbound and no working-branch resolves; diffing against develop" "$UB_ERR"
+expect_absent "UB.2 …and never names <p>'s row" "row T1" "$UB_ERR"
+ub_collect landing-guard "$UB_ERR" "$UB2_P"
+ub_landing_world; ub_mode "$UB2" "$SID_A" "$UB2_P" bound
+ub_stop "$UB2" "$SID_A" "$UB2/no-transcript.jsonl"
+expect_absent "UB.2 landing guard, bound-open (control): the row's declared base is used, silently" \
+  "landing gate:" "$UB_ERR"
+expect_absent "UB.2 …and a.sh, which only the checkout fallback charges, is not named" "a.sh" "$UB_ERR$UB_OUT"
+
+# ---- UB.3 patrol-duties gate -------------------------------------------------
+UB3=$(new_repo "ub-duties"); UB3_P="$UB3/.bionic/docs/plans/epic-99/run.md"
+s4_plan "$UB3_P" 4
+printf 'patrol-stamp/v1|at=%s|session=%s|verb=tick\n' "$(ub_iso 1)" "$SID_A" > "$UB3/.bionic/tmp/patrol-$SID_A.state"
+{ jq -nc --arg t "bionic-patrol session=${SID_A:0:8} — Patrol tick. Run: bash /abs/hooks/session-poker.sh tick" \
+    '{type:"user",isMeta:true,isSidechain:false,message:{role:"user",content:$t}}'
+  jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_la",name:"ListAgents",input:{}}]}}'
+  jq -nc --arg p "$UB3_P" '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_ed",name:"Edit",input:{file_path:$p}}]}}'
+} > "$UB3/tick.jsonl"
+ub_mode "$UB3" "$SID_A" "$UB3_P" fallback
+ub_stop "$UB3" "$SID_A" "$UB3/tick.jsonl"
+expect_eq "UB.3 duties gate, fallback: a write naming <p> discharges nothing — held as under none" \
+  "block" "$(ub_decision)"
+expect_contains "UB.3 …for the task-list refresh" "task-list refresh" "$UB_OUT"
+ub_collect duties-gate "$UB_ERR" "$UB3_P"
+ub_mode "$UB3" "$SID_A" "$UB3_P" bound
+ub_stop "$UB3" "$SID_A" "$UB3/tick.jsonl"
+expect_eq "UB.3 duties gate, bound-open (control): the same write discharges the refresh" "" "$(ub_decision)"
+
+# ---- UB.4 fill gate ----------------------------------------------------------
+UB4=$(new_repo "ub-fill"); UB4_P="$UB4/.bionic/docs/plans/epic-99/run.md"
+mkdir -p "$(dirname "$UB4_P")"
+{ printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf -- '---\n\n## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T4 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed | — |\n'
+  printf '| T5 | 4 | build | ready | implementor | T4 | 15m | REQ-x | b.sh | pending | — |\n'
+} > "$UB4_P"
+rm -f "$UB4/.bionic/tmp/patrol-$SID_A.state"
+roster_header > "$UB4/.bionic/tmp/roster-$SID_A.state"
+jq -nc '{type:"user",uuid:"u-ub4",isSidechain:false,timestamp:"2026-10-02T19:40:00Z",message:{role:"user",content:"scope the next wave"}}' > "$UB4/turn.jsonl"
+ub_mode "$UB4" "$SID_A" "$UB4_P" fallback
+ub_stop "$UB4" "$SID_A" "$UB4/turn.jsonl"
+expect_eq "UB.4 fill gate, fallback: no refusal for <p>'s ready row" "" "$(ub_decision)"
+expect_absent "UB.4 …and T5 is named nowhere" "T5" "$UB_OUT$UB_ERR"
+ub_collect fill-gate "$UB_ERR" "$UB4_P"
+ub_mode "$UB4" "$SID_A" "$UB4_P" bound
+ub_stop "$UB4" "$SID_A" "$UB4/turn.jsonl"
+expect_eq "UB.4 fill gate, bound-open (control): the same turn is refused" "block" "$(ub_decision)"
+expect_contains "UB.4 …naming T5 as not launched" "not launched: T5" "$UB_ERR"
+
+# ---- UB.5 patrol-revive ------------------------------------------------------
+UB5=$(new_repo "ub-revive"); UB5_P="$UB5/.bionic/docs/plans/epic-99/run.md"
+s4_plan "$UB5_P" 4
+printf 'poker-interval: 1s\n' > "$UB5/.bionic/config.yaml"
+printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$SID_A" > "$UB5/.bionic/tmp/patrol-$SID_A.state"
+touch -t "$(date -v-600S +%Y%m%d%H%M.%S 2>/dev/null || date -d '-600 seconds' +%Y%m%d%H%M.%S)" "$UB5/.bionic/tmp/patrol-$SID_A.state"
+{ jq -nc --arg t "$(ub_iso 10000)" '{type:"assistant",timestamp:$t,message:{role:"assistant",content:[{type:"text",text:"working"}]}}'
+  jq -nc --arg t "$(ub_iso 1)" '{type:"user",timestamp:$t,message:{role:"user",content:"carry on"}}'
+} > "$UB5/idle.jsonl"
+ub_mode "$UB5" "$SID_A" "$UB5_P" fallback
+ub_stop "$UB5" "$SID_A" "$UB5/idle.jsonl"
+expect_absent "UB.5 revive, fallback: a stale stamp revives nothing" "Patrol died" "$UB_OUT$UB_ERR"
+expect_eq "UB.5 …no block at all" "" "$(ub_decision)"
+ub_collect revive "$UB_ERR" "$UB5_P"
+ub_mode "$UB5" "$SID_A" "$UB5_P" bound
+ub_stop "$UB5" "$SID_A" "$UB5/idle.jsonl"
+expect_contains "UB.5 revive, bound-open (control): the same stale stamp blocks" "Patrol died" "$UB_OUT"
+
+# ---- UB.6 dispatch wall ------------------------------------------------------
+UB6=$(new_repo "ub-dispatch"); UB6_P="$UB6/.bionic/docs/plans/epic-99/run.md"
+s4_plan "$UB6_P" 4 1
+s4_attest "$UB6" "$SID_A"
+cg_live "$UB6/live.jsonl" "ub6a"
+cg_roster_row "$UB6" "$SID_A" "ub6a" "aub6a-1111111111111111" "" "intended"
+ub_dp() {  # <subagent_type> -> merged output
+  mk_agent_payload "$SID_A" "$UB6" \
+    | jq -c --arg t "$UB6/live.jsonl" --arg y "$1" '.transcript_path = $t | .tool_input.subagent_type = $y' \
+    | env -u BIONIC_WALL_VERBOSE CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" 2>&1
+  return 0
+}
+ub_mode "$UB6" "$SID_A" "$UB6_P" fallback
+UB6_OUT=$(ub_dp implementor)
+expect_contains "UB.6 dispatch wall, fallback: judged with no plan — the writer is refused with the bind instruction" \
+  "dispatch refused — this session is bound to no run (bind it, or write its plan)" "$UB6_OUT"
+expect_absent "UB.6 …and <p>'s budget is never read" "writers=1" "$UB6_OUT"
+ub_collect dispatch-wall "$UB6_OUT" "$UB6_P"
+expect_absent "UB.6 …while a read-only role is admitted, as before approval" "refused" "$(ub_dp bionic:researcher)"
+ub_mode "$UB6" "$SID_A" "$UB6_P" bound
+UB6_OUT=$(ub_dp implementor)
+expect_contains "UB.6 dispatch wall, bound-open (control): refused by the run's writer budget" \
+  "this passes the run's writer budget" "$UB6_OUT"
+expect_absent "UB.6 …and never told to bind" "bound to no run" "$UB6_OUT"
+
+# ---- UB.7 commit gate (Δ1) ---------------------------------------------------
+UB7=$(new_repo "ub-commit"); UB7_P="$UB7/.bionic/docs/plans/epic-99/run.md"
+write_plan "$UB7_P" "current: 5
+Step 5: TODO"
+ub_eg() {  # -> sets UB7_RC, UB7_OUT (merged)
+  UB7_OUT=$(mk_bash_payload "$SID_A" "$SANDBOX/t.jsonl" "$UB7" 'git commit -m "x"' \
+    | env -u CLAUDE_PROJECT_DIR -u BIONIC_WALL_VERBOSE HOME="$UB7" CLAUDE_CODE_SESSION_ID="$SID_A" \
+        bash "$PARTY_EG" 2>&1); UB7_RC=$?
+}
+ub_mode "$UB7" "$SID_A" "$UB7_P" fallback
+ub_eg
+expect_eq "UB.7 commit gate, fallback: the commit is not judged against <p> — allowed" "0" "$UB7_RC"
+expect_absent "UB.7 …and no refusal is rendered" "commit refused" "$UB7_OUT"
+ub_collect commit-gate "$UB7_OUT" "$UB7_P"
+ub_mode "$UB7" "$SID_A" "$UB7_P" bound
+ub_eg
+expect_eq "UB.7 commit gate, bound-open (control): refused, <p>'s step has no evidence" "2" "$UB7_RC"
+expect_absent "UB.7 …and never told it is unbound" "session unbound" "$UB7_OUT"
+
+# ---- THE SEVEN SAY ONE THING -------------------------------------------------
+# Byte-identical after the plan is folded to <p>, and equal to the template lib/run.sh builds
+# — so an eighth hand-typed copy, or one arm's prefix, splits from the rest here.
+expect_eq "UB.all seven arms announced (one advisory collected per arm)" "7" \
+  "$(printf '%s\n' "$UB_ADVS" | grep -c '|')"
+while IFS='|' read -r _ub_arm _ub_line; do
+  [ -n "$_ub_arm" ] || continue
+  expect_eq "UB.all $_ub_arm's advisory is run_unbound_advisory's, byte for byte" "$UB_TEMPLATE" "$_ub_line"
+done <<UBEOF
+$UB_ADVS
+UBEOF
+expect_eq "UB.all …so the seven are one string" "1" \
+  "$(printf '%s\n' "$UB_ADVS" | cut -d'|' -f2- | sort -u | grep -c .)"
+
 finish
