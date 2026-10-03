@@ -31,6 +31,9 @@
 #   d   bash-walls       a 3-segment `&&` chain whose first segment is ~8 K em dashes
 #   e   bash-walls       a 52 KB single-quoted `python3 -c` body of 1 350 short lines (T22)
 #   f   bash-walls       the same body double-quoted, then a newline and `make`
+#   g   bash-walls       a 200 KB single-quoted `python3 -c` body, engaged, `memory` in the cwd (T28)
+#   b3  bash-walls       b's heredoc behind `cd sub && `, committing (T28)
+#   b4  bash-walls       b's heredoc behind `cd <absolute repo> && `, committing (T28)
 # Every row runs under `/bin/bash` (3.2 on macOS, the interpreter ADR-001 pins) AND under
 # the newest bash on PATH: the 64 KB command also took 3.9 s under bash 5.3, so moving off
 # 3.2 was never the fix.
@@ -190,6 +193,12 @@ R_PUSH="$(mk_repo push)"
 R_AGENT="$(mk_repo agent)"; : > "$R_AGENT/.bionic/tmp/roster-$SID.state"
 R_COMMIT="$(mk_repo commit)"
 R_CHAIN="$(mk_repo chain)"
+# g's repo: its path holds `memory`, which is what sends every command in it through
+# cmd_write_targets (hooks/bash-walls.sh, the memory-store screen). The store is under the fake
+# home, and BIONIC_CLAUDE_HOME names it for g's rows only, so the runner's own config dir
+# cannot move the root.
+R_MEM="$(mk_repo memory)"
+mkdir -p "$FAKE_HOME/.claude/projects/-x/memory"
 
 # The evidence gate refuses any commit under a bound plan whose step evidence is a
 # placeholder — c's witness.
@@ -215,9 +224,9 @@ GS_PLAN="$R_GS/.bionic/docs/plans/epic-01-demo/big.plan.md"
 
 # Every input is generated here, byte for byte, so the sizes and offsets below are facts of
 # this run rather than claims about a file somewhere else.
-python3 - "$SANDBOX/in" "$GS_PLAN" "$SID" "$ACTOR" "$R_GS" "$R_PUSH" "$R_AGENT" "$R_COMMIT" "$R_CHAIN" <<'PY'
+python3 - "$SANDBOX/in" "$GS_PLAN" "$SID" "$ACTOR" "$R_GS" "$R_PUSH" "$R_AGENT" "$R_COMMIT" "$R_CHAIN" "$R_MEM" <<'PY'
 import json, sys
-d, plan, sid, actor, r_gs, r_push, r_agent, r_commit, r_chain = sys.argv[1:10]
+d, plan, sid, actor, r_gs, r_push, r_agent, r_commit, r_chain, r_mem = sys.argv[1:11]
 
 # -- a: a version-14 plan at step 3 whose Tasks table runs to 64 KB --
 head = """---
@@ -342,6 +351,30 @@ meta["e_bytes"] = len(sq.encode())
 meta["e_lines"] = body.count("\n") + 1
 meta["e_inner_quotes"] = body.count("'")
 
+# -- b3, b4: b's heredoc behind a leading cd, then a commit. b3's cd is relative, so only the
+#    leading-cd read runs; b4's names an absolute directory, so the scan for later cds runs
+#    too. The evidence gate's placeholder refusal can only come after both (T28) --
+json.dump(bash_payload(r_commit, "cd sub && " + heredoc + "\ngit commit -m x"), open(d + "/b3.json", "w"))
+json.dump(bash_payload(r_commit, "cd " + r_commit + " && " + heredoc + "\ngit commit -m x"),
+          open(d + "/b4.json", "w"))
+meta["b3"] = len("cd sub && " + heredoc + "\ngit commit -m x")
+
+# -- g, g2: e's body grown to 200 KB, run where the cwd holds `memory` and the command does not.
+#    g writes inside the repo, so silence; g2 writes the store after the body, and the memory
+#    wall's refusal can only come from a tokenizer that walked past it (T28) --
+gb = ["import re", "p = \".bionic/docs/plans/active.md\"", "s = open(p).read()"]
+n = 0
+while len("\n".join(gb).encode()) < 200000:
+    n += 1
+    gb.append("s = s.replace(\"T%d — a\", \"T%d — b\")" % (n, n))
+gb.append("open(p, \"w\").write(s)")
+gq = "python3 -c '" + "\n".join(gb) + "'"
+json.dump(bash_payload(r_mem, gq + " > out.md"), open(d + "/g.json", "w"))
+json.dump(bash_payload(r_mem, gq + " > ~/.claude/projects/-x/memory/n.md"), open(d + "/g2.json", "w"))
+meta["g_bytes"] = len(gq.encode())
+meta["g_memory"] = (gq + " > out.md").count("memory")
+meta["g_inner_quotes"] = "\n".join(gb).count("'")
+
 json.dump(meta, open(d + "/meta.json", "w"))
 PY
 
@@ -358,6 +391,11 @@ expect_true "fixture: d's long segment is at least 8 000 characters" test "$(met
 expect_true "fixture: e's command is at least 50 000 bytes" test "$(meta e_bytes)" -ge 50000
 expect_true "fixture: e's body is at least 1 000 lines" test "$(meta e_lines)" -ge 1000
 expect_eq "fixture: e's body holds no single quote, so it is one quoted word" "0" "$(meta e_inner_quotes)"
+expect_true "fixture: b3's command is at least 64 000 characters" test "$(meta b3)" -ge 64000
+expect_true "fixture: g's command is at least 200 000 bytes" test "$(meta g_bytes)" -ge 200000
+expect_eq "fixture: g's body holds no single quote, so it is one quoted word" "0" "$(meta g_inner_quotes)"
+expect_eq "fixture: g's command never says memory — the cwd is what screens it in" "0" "$(meta g_memory)"
+expect_contains "fixture: …and g's cwd does" "memory" "$(jq -r .cwd "$SANDBOX/in/g.json")"
 
 # ---------- the rows ----------
 
@@ -404,9 +442,23 @@ row e  "$WALLS_HOOK" "$R_CHAIN"  0 SILENT out
 row e2 "$WALLS_HOOK" "$R_CHAIN"  0 "farm-out [deny] class=build" err
 row f  "$WALLS_HOOK" "$R_CHAIN"  0 "farm-out [deny] class=build" err
 
+section "2c — bash-walls: a leading cd before the 64 KB heredoc, and 200 KB read for its writes (T28)"
+# b3 and b4 are b behind a `cd`. Their placeholder refusal is the evidence gate judging the
+# commit, which it does only after reading where the `cd` went. At 64 KB the leading-cd loops
+# alone cost 1.3-1.9 s under 3.2, so b3 sits near the budget on the ac258929 lines rather than
+# past it; b4 runs those lines and the later-cd scan, which took 19 s.
+row b3 "$WALLS_HOOK" "$R_COMMIT" 2 "evidence line is a placeholder" err
+row b4 "$WALLS_HOOK" "$R_COMMIT" 2 "evidence line is a placeholder" err
+# g is the input being timed: it writes out.md in the repo, so silence. g2 writes the store
+# after the same body, and its refusal is the proof that g's timing covers the whole read.
+export BIONIC_CLAUDE_HOME="$FAKE_HOME/.claude"
+row g  "$WALLS_HOOK" "$R_MEM"    0 SILENT out
+row g2 "$WALLS_HOOK" "$R_MEM"    2 "this writes the memory store" err
+unset BIONIC_CLAUDE_HOME
+
 # ---------- the self-check ----------
 
-section "3 — self-check: the 7223b594 hot line on the same input exceeds ${BUDGET}s"
+section "3 — self-check: the base hot line on the same input exceeds ${BUDGET}s"
 #
 # Each snippet is the hot line as it stood at 7223b594, copied verbatim, fed the same bytes
 # the row above fed the hook. It is the line, not the hook: a hook-level rerun would need
@@ -468,14 +520,112 @@ HT_CMD_CLASS_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/cmd-class.sh"
 export HT_CMD_CLASS_LIB
 expect_true "fixture: the cmd-class library the e self-check sources is on disk" test -f "$HT_CMD_CLASS_LIB"
 
-selfcheck() {  # <id> <snippet>
+# b4: walls.sh:1259-1294 at ac258929 — `_eg_cd_targets`, which took the segments off the front
+# of the remainder one at a time, each a pass over all of it. b3 has no line here: its loops
+# cost under the budget on this input (see §2c).
+cat > "$SANDBOX/hot-b4.sh" <<'SH'
+COMMAND=$(jq -r '.tool_input.command')
+_eg_cd_targets() {
+  local _t="${1:-}" _rest _seg _p
+  _EG_CDS=""
+  case "$_t" in
+    *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
+    *) return 0 ;;
+  esac
+  case "$_rest" in *git*) _rest="${_rest%%git*}" ;; esac
+  while [ -n "$_rest" ]; do
+    case "$_rest" in
+      *[\;\&\|$'\n']*) _seg="${_rest%%[;&|$'\n']*}"; _rest="${_rest#*[;&|$'\n']}" ;;
+      *) _seg="$_rest"; _rest="" ;;
+    esac
+    while [ -n "$_seg" ]; do
+      case "$_seg" in
+        ' '*|'	'*|'('*|'{'*) _seg="${_seg#?}" ;;
+        *) break ;;
+      esac
+    done
+    case "$_seg" in
+      'cd'|'cd '*|'cd	'*)
+        _p="${_seg#cd}"
+        while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
+        while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
+        while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+        case "$_p" in
+          '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
+          "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
+        esac
+        [ -n "$_p" ] || _p='~'
+        _EG_CDS="${_EG_CDS}${_p}"$'\n'
+        ;;
+    esac
+  done
+  return 0
+}
+_eg_cd_targets "$COMMAND"
+SH
+
+# g: cmd-class.sh:1134-1178 at ac258929 — `wt_tok`, which copied every character of a quoted
+# run into its word one at a time, run once over the command as cmd_write_targets runs it twice.
+cat > "$SANDBOX/hot-g.sh" <<'SH'
+jq -r '.tool_input.command' | awk '
+    function wt_tok(s, W, K,   L, i, c, q, cur, n, st, nx, j, w) {
+      L = length(s); q = ""; cur = ""; n = 0; st = 0
+      for (i = 1; i <= L; i++) {
+        c = substr(s, i, 1)
+        if (q != "") {
+          if (c == q) q = ""
+          else if (c == "\\" && q == "\"" && i < L) { i++; cur = cur substr(s, i, 1) }
+          else cur = cur c
+          continue
+        }
+        if (c == "\047" || c == "\"") { q = c; st = 1; continue }
+        if (c == "\\") { i++; cur = cur substr(s, i, 1); continue }
+        if (c == " " || c == "\t" || c == "\r" || c == "\n") {
+          if (cur != "" || st) { W[++n] = cur; K[n] = "W" }
+          cur = ""; st = 0; continue
+        }
+        if (c == ">" || (c == "&" && substr(s, i + 1, 1) == ">") || c == "<") {
+          if (c != "&" && cur ~ /^[0-9]+$/ && !st) cur = ""
+          if (cur != "" || st) { W[++n] = cur; K[n] = "W" }
+          cur = ""; st = 0
+          nx = substr(s, i + 1, 1)
+          if (c == "<") {
+            if (nx == ">") { W[++n] = "<>"; K[n] = "R"; i++; continue }
+            if (nx == "&") { i++; while (substr(s, i + 1, 1) ~ /[0-9-]/) i++; W[++n] = "<&"; K[n] = "D"; continue }
+            if (nx == "<") { i++; if (substr(s, i + 1, 1) == "<" || substr(s, i + 1, 1) == "-") i++ }
+            W[++n] = "<"; K[n] = "I"; continue
+          }
+          if (c == "&") i++
+          nx = substr(s, i + 1, 1)
+          if (nx == ">" || nx == "|") { i++; nx = substr(s, i + 1, 1) }
+          if (nx == "(") { W[++n] = ">("; K[n] = "I"; continue }
+          if (nx == "&" && c != "&") {
+            j = i + 2; w = ""
+            while (j <= L && substr(s, j, 1) ~ /[0-9]/) { w = w substr(s, j, 1); j++ }
+            if (w == "" && substr(s, j, 1) == "-") { w = "-"; j++ }
+            if (w != "") { i = j - 1; W[++n] = ">&"; K[n] = "D"; continue }
+            i++
+          }
+          W[++n] = ">"; K[n] = "R"; continue
+        }
+        cur = cur c
+      }
+      if (cur != "" || st) { W[++n] = cur; K[n] = "W" }
+      return n
+    }
+    { a[++m] = $0 }
+    END { s = a[1]; for (i = 2; i <= m; i++) s = s "\n" a[i]; wt_tok(s, W, K) }'
+SH
+
+selfcheck() {  # <id> <snippet> [base the hot line is copied from]
+  local base="${3:-7223b594}"
   ht_time /bin/bash "$SANDBOX/$2" "$SANDBOX/in/$1.json" "$SANDBOX" "$CAP"
-  echo "hook-timeout: self-check $1 (7223b594 hot line, /bin/bash): ${HT_SECS}s rc=$HT_RC"
+  echo "hook-timeout: self-check $1 ($base hot line, /bin/bash): ${HT_SECS}s rc=$HT_RC"
   if [ "$OLD_IS_32" = 1 ]; then
-    expect_true "$1: the 7223b594 hot line exceeds ${BUDGET}s on this input (took ${HT_SECS}s)" \
+    expect_true "$1: the $base hot line exceeds ${BUDGET}s on this input (took ${HT_SECS}s)" \
       over_budget "$HT_SECS"
   else
-    advise "$1: the 7223b594 hot line on this input" \
+    advise "$1: the $base hot line on this input" \
       "/bin/bash is $(ht_version /bin/bash), not 3.2, so the 3.2-only cost cannot show" \
       over_budget "$HT_SECS"
   fi
@@ -486,6 +636,8 @@ selfcheck b  hot-b.sh
 selfcheck c  hot-b.sh
 selfcheck d  hot-d.sh
 selfcheck e  hot-e.sh
+selfcheck b4 hot-b4.sh ac258929
+selfcheck g  hot-g.sh  ac258929
 
 # ---------- the plan-row verbs ----------
 
