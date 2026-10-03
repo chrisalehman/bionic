@@ -5933,10 +5933,14 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # prompt-only line, a blank, the pointer — and the variable part is unmoved. The meta row
 # below holds the scaffold at nine lines, so the next line added to it moves this cap on
 # purpose rather than by surprise.
-expect_eq "§combined meta: the shipped scaffold is nine lines, the count both caps are built on" \
-  "9" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
-expect_status "§combined …the wire is at most 17 lines (13 + 1 extra fault + 3 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 17 ] && echo 0 || echo 1)"
+#
+# RAISED 17 -> 18 (wave-24 T9, REQ-4 AC-4.8, A-T9.12), by that clause: the scaffold gained the
+# optional `Done marker:` line. The FIXED part is fourteen — one refusal line, a blank, TEN
+# scaffold lines, the prompt-only line, a blank, the pointer — and the variable part is unmoved.
+expect_eq "§combined meta: the shipped scaffold is ten lines, the count both caps are built on" \
+  "10" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
+expect_status "§combined …the wire is at most 18 lines (14 + 1 extra fault + 3 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 18 ] && echo 0 || echo 1)"
 expect_contains "§combined …and the fixed line that grew it is the prompt-only sentence" \
   "The wall reads the prompt text only." "$GATE_REASON"
 # AND THE THIRD LINE IS THE NEW WALL'S, NAMED — a cap raised without saying which line
@@ -6918,14 +6922,16 @@ expect_contains "§three-arms …and the brief-shape fault" \
 # scaffold. Three faults, no not-checked line: twelve plus two.
 # The fixed part is THIRTEEN since wave-21 T7 (AC-7.2): the scaffold's ninth line is the
 # optional `Subprocess claim:` (§combined holds the nine). Three faults: thirteen plus two.
-expect_status "§three-arms …and the wire is at most 15 lines (13 + one per additional fault)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 15 ] && echo 0 || echo 1)"
+# The fixed part is FOURTEEN since wave-24 T9 (AC-4.8): the scaffold's tenth line is the
+# optional `Done marker:` (§combined holds the ten). Three faults: fourteen plus two.
+expect_status "§three-arms …and the wire is at most 16 lines (14 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 16 ] && echo 0 || echo 1)"
 # NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
-# MOVED WITH THE FIXED PART (wave-21 T7): a wire that grew by nothing is thirteen lines now,
-# so the floor that proves growth is fourteen.
-expect_status "§three-arms …and it really grew: more than the thirteen-line fixed part" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 14 ] && echo 0 || echo 1)"
+# MOVED WITH THE FIXED PART (wave-21 T7; again at wave-24 T9): a wire that grew by nothing is
+# fourteen lines now, so the floor that proves growth is fifteen.
+expect_status "§three-arms …and it really grew: more than the fourteen-line fixed part" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 15 ] && echo 0 || echo 1)"
 # THE SHAPE BANS OF WAVE-13 STAND: no per-fault heading, no fault-count sentence, no
 # stacked `Fix:` paragraphs. One line per fault is a LINE, not a section.
 expect_absent "§three-arms …no fault-count header sentence" "SHAPE FAULTS" "$GATE_REASON"
@@ -8811,6 +8817,45 @@ expect_eq "tr4 one open test-runner against suites=1 → REFUSED (the control)" 
 s22_ack "$REPO" "$SID_A" "T-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr4-w2" "claude-sonnet-5" "$RO_NONE" "implementor")"
 expect_eq "tr4b …and once acked its suite slot is free → ADMITTED" "allow" "$GATE_VERDICT"
+
+
+# ============================================================================
+section "§DONE-lift — the brief's Done marker is lifted to the roster as done= (wave-24 T9; REQ-4 AC-4.8, D3)"
+# ============================================================================
+#
+# The landing verdict reads `done=` as one of the completion signals (hooks/session-sweeper.sh
+# `row_said`). The lift carries `Done marker:` at line start; a slot or a prose mention declares
+# nothing.
+# fails-when: the label does not lift, or a scaffold slot or a mid-line mention lifts as a marker.
+lift_done() { bash -c '. "$1" || exit 9; lift_contract_fields "$2" | grep "^done="' _ "$BRIEF_LIB" "$1"; }
+expect_eq "DL1 a Done marker line lifts as done=" "done=.bionic/docs/record/w99.done" \
+  "$(lift_done 'Expected artifact: .bionic/docs/record/w99.md
+Done marker: .bionic/docs/record/w99.done
+Files: payload/scripts/lib/widget.sh')"
+expect_eq "DL2 …the scaffold slot, pasted unfilled, lifts none" "" \
+  "$(lift_done 'Expected artifact: .bionic/docs/record/w99.md
+Done marker: <path>   # optional
+Files: payload/scripts/lib/widget.sh')"
+expect_eq "DL3 …nor does a mention that is not at the start of its line" "" \
+  "$(lift_done 'Expected artifact: .bionic/docs/record/w99.md
+
+Note: touch the done marker: .bionic/tmp/w99.done when finished.
+Files: payload/scripts/lib/widget.sh')"
+
+# THROUGH THE WALL: the lifted marker is on the launch row the verdict reads, and a brief that
+# names none writes a row with no `done=` key at all (byte-identical to the rows before T9).
+REPO=$(make_repo dldone yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Done marker: .bionic/tmp/w99-widget.done')" "w99-done")"
+DL_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "DL4 a brief naming a Done marker is admitted" "allow" "$GATE_VERDICT"
+expect_eq "DL4b …and its launch row carries it as done=" ".bionic/tmp/w99-widget.done" "$(roster_field "$DL_ROW" done)"
+REPO=$(make_repo dlnodone yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Scope constraint: touch only payload/scripts/lib/widget.sh.')" "w99-nodone")"
+DL_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_contains "DL5 a brief naming no Done marker writes its launch row" "status=intended" "$DL_ROW"
+expect_absent "DL5b …with no done= key on it" "|done=" "$DL_ROW"
 
 
 finish

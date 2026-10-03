@@ -905,6 +905,11 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       addlabel("expected artifacts", "deliverable", "", 1)
       addlabel("expected artifact",  "deliverable", "", 1)
       addlabel("progress artifact",  "progress")
+      # THE DONE MARKER (wave-24 T9, D3): an optional path the agent writes when it is done,
+      # one of the completion signals the landing verdict reads. Pinned to line start like the
+      # deliverable labels: a marker is a path the verdict judges, so a prose mention of one
+      # must not declare it.
+      addlabel("done marker",        "done", "", 1)
       addlabel("expected duration",  "duration")
       addlabel("scope constraint",   "input")
       addlabel("exit condition",     "-")
@@ -991,6 +996,10 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       # warned, never filled (the deliverable rule applied to the field with no wall).
       h = firsthit("progress")
       if (h > 0) { v = paths(spanof(h), 1, ""); if (v != "") print "progress=" v }
+      # The Done marker is the first path in its span, as the progress path is; a slot lifts
+      # nothing (ispath), so the scaffold line pasted unfilled declares no marker.
+      h = firsthit("done")
+      if (h > 0) { v = paths(spanof(h), 1, ""); if (v != "") print "done=" v }
       # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the one
       # label with a relaxed separator — whitespace will do, because the contract writes
       # it inside the progress sentence rather than on a line of its own — and that

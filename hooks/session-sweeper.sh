@@ -815,20 +815,30 @@ row_still_live() {  # <claims> <progress> <cadence> <launched_at>
 # follow-up holds the row until the agent answers it (Δ8, "conservative cost accepted").
 #
 # READ ONCE PER PROCESS, and only when a row reads MET — a verdict over rows none of which
-# landed never opens the transcript. `grep -F` on the two literals first: a session's
+# landed never opens the transcript. `grep -F` on the envelope literals first: a session's
 # transcript is tens of megabytes and the records this asks about are a handful of lines.
 FOLLOWUP_READ=0; FOLLOWUP_OPEN=""; FOLLOWUP_AT=""
-read_followups() {
-  local d tr=""
-  FOLLOWUP_READ=1; FOLLOWUP_OPEN=""
-  command -v jq >/dev/null 2>&1 || return 0
+
+# The transcript of one session id, or nothing. The slug directory is the CLI's, so it is
+# scanned for, never derived (roots.sh `transcripts_dir`); a symlinked transcript is not read.
+transcript_of() {  # <session id> -> path on stdout, empty when there is none
+  local d
+  [ -n "$1" ] || return 0
   for d in "$(transcripts_dir)"/*/; do
-    if [ -f "${d}${SESSION_ID}.jsonl" ] && [ ! -L "${d}${SESSION_ID}.jsonl" ]; then
-      tr="${d}${SESSION_ID}.jsonl"; break
+    if [ -f "${d}$1.jsonl" ] && [ ! -L "${d}$1.jsonl" ]; then
+      printf '%s' "${d}$1.jsonl"; return 0
     fi
   done
-  [ -n "$tr" ] || return 0
-  FOLLOWUP_OPEN="$(grep -F -e '"name":"SendMessage"' -e '<teammate-message' -e '<agent-message' "$tr" 2>/dev/null \
+}
+
+# Every record of a transcript this file reads, one TAB-separated line each, in record order:
+#   S <to> <ts>        an orchestrator SendMessage
+#   R <name> <ts>      a reply envelope carrying the agent's own words (never an idle notice)
+#   N <id> <ts>        a COMPLETED task-notification, once under its task-id and once under its
+#                      tool-use-id (wave-24 T9, D3): the harness's word that a background agent
+#                      finished, in the carriers a reply uses
+transcript_events() {  # <transcript>
+  grep -F -e '"name":"SendMessage"' -e '<teammate-message' -e '<agent-message' -e '<task-notification' "$1" 2>/dev/null \
     | jq -R -r '
         # Every envelope in a text, as [name, body]; the body runs to its closing tag, or to
         # the end of the text when a truncated record has none.
@@ -836,7 +846,13 @@ read_followups() {
           [scan("<(?:teammate-message teammate_id|agent-message from)=\"([^\"]+)\"[^>]*>((?:(?!</(?:teammate-message|agent-message)>)[\\s\\S])*)")]
           | .[]
           | select((.[1] | (fromjson? // null) | type == "object" and .type == "idle_notification") | not)
-          | .[0];
+          | "R\t\(.[0])";
+        def notes:
+          [scan("<task-notification>((?:(?!</task-notification>)[\\s\\S])*)")]
+          | .[] | .[0]
+          | select(test("<status>completed</status>"))
+          | ([scan("<(?:task-id|tool-use-id)>([^<]+)</")] | .[] | "N\t\(.[0])");
+        def said: (replies, notes);
         (fromjson? // empty)
         | select(type == "object" and .isSidechain != true)
         | (.timestamp // "") as $ts
@@ -849,13 +865,33 @@ read_followups() {
              | if type == "string" then .
                elif type == "array" then ([.[] | select(type == "object" and .type == "text") | .text] | join("\n"))
                else "" end
-             | replies | "R\t\(.)\t\($ts)")
+             | said | "\(.)\t\($ts)")
           elif .type == "attachment" then
             (.attachment
              | select(type == "object" and .type == "queued_command")
              | .prompt | select(type == "string")
-             | replies | "R\t\(.)\t\($ts)")
-          else empty end' 2>/dev/null \
+             | said | "\(.)\t\($ts)")
+          else empty end' 2>/dev/null
+}
+
+# This session's events, read once per process and shared by the follow-up and the
+# completion signal below. EVENTS_OWN_FOUND says whether a transcript was there to read.
+EVENTS_OWN_READ=0; EVENTS_OWN=""; EVENTS_OWN_FOUND=0
+read_own_events() {
+  local tr
+  EVENTS_OWN_READ=1; EVENTS_OWN=""; EVENTS_OWN_FOUND=0
+  command -v jq >/dev/null 2>&1 || return 0
+  tr="$(transcript_of "$SESSION_ID")"
+  [ -n "$tr" ] || return 0
+  EVENTS_OWN_FOUND=1
+  EVENTS_OWN="$(transcript_events "$tr")"
+}
+
+read_followups() {
+  FOLLOWUP_READ=1; FOLLOWUP_OPEN=""
+  [ "$EVENTS_OWN_READ" = 1 ] || read_own_events
+  [ -n "$EVENTS_OWN" ] || return 0
+  FOLLOWUP_OPEN="$(printf '%s\n' "$EVENTS_OWN" \
     | awk -F'\t' '
         { n = $2; sub(/ \[[^]]*\]$/, "", n); sub(/@.*$/, "", n); if (n == "") next
           if ($1 == "S") { sent[n] = NR; at[n] = $3 } else if ($1 == "R") { rep[n] = NR } }
@@ -901,6 +937,68 @@ EOF
   return 0
 }
 
+# ---------------------------------------------------------------- the completion signal
+#
+# DONE MEANS THE AGENT SAID SO (wave-24 T9; REQ-4, AC-4.8; spec D3). A landed deliverable is
+# half of MET. An agent still writing its report has already written a non-empty file newer
+# than its launch, and reading that as done is how a working agent was ordered to stand down
+# (w23-floor6, research R1 §4). The other half is a signal AFTER `launched_at`, any one of:
+#   a message    the agent's own reply envelope, by name or bare teammate address — the
+#                `R` records `read_followups` already reads, idle notices excluded
+#   a task-notification  a COMPLETED one whose task-id is the row's `agent_id=` or whose
+#                tool-use-id is its `tool_use_id=`
+#   the Done marker      the brief's `Done marker:`, lifted to `done=`: a real file, not a
+#                symlink, newer than the launch (empty is fine — it is a marker)
+# An ADOPTED row's agent was launched by another session, and its report may sit there: the
+# transcript of `adopted_from=` is read beside this session's own.
+#
+# A message is dated by its record's `timestamp`, cut to the second `launched_at` carries, and
+# counts when it is not before the launch: the clocks are one machine's, and a reply inside the
+# launch's own second is not an earlier contract's.
+#
+# FAIL DIRECTION, the rule an unreadable `launched_at` already follows: with no transcript to
+# read (or no jq) and no Done marker declared, the signal cannot be read, so it is NOT judged
+# and the detail says so. A declared Done marker is always judged — the brief chose it.
+SAID=""
+row_said() {  # <roster row> <launched epoch|""> <launched ISO> -> 0 said, 1 not, 2 not judged
+  local row="$1" le="$2" liso="$3" dm p mtime afrom tr ev="" have=0 hit
+  SAID=""
+  dm="$(line_field "$row" done)"
+  if [ -n "$dm" ]; then
+    have=1
+    p="$(abs_path "$dm")"
+    if [ -f "$p" ] && [ ! -L "$p" ]; then
+      mtime="$(file_mtime "$p")"
+      case "$mtime" in ''|*[!0-9]*) mtime=0 ;; esac
+      if [ -z "$le" ] || [ "$mtime" -gt "$le" ]; then
+        SAID="said=done marker $dm"; return 0
+      fi
+    fi
+  fi
+  [ "$EVENTS_OWN_READ" = 1 ] || read_own_events
+  if [ "$EVENTS_OWN_FOUND" = 1 ]; then have=1; ev="$EVENTS_OWN"; fi
+  afrom="$(line_field "$row" adopted_from)"
+  if [ -n "$afrom" ] && [ "$afrom" != "$SESSION_ID" ] && command -v jq >/dev/null 2>&1; then
+    tr="$(transcript_of "$afrom")"
+    if [ -n "$tr" ]; then have=1; ev="${ev}${ev:+$'\n'}$(transcript_events "$tr")"; fi
+  fi
+  [ "$have" = 1 ] || return 2
+  hit="$(printf '%s\n' "$ev" | SAID_NAME="$(line_field "$row" name)" \
+      SAID_TID="$(line_field "$row" teammate_id)" SAID_AID="$(line_field "$row" agent_id)" \
+      SAID_TUID="$(line_field "$row" tool_use_id)" SAID_AT="${le:+${liso:0:19}}" awk -F'\t' '
+    BEGIN { n = ENVIRON["SAID_NAME"]; t = ENVIRON["SAID_TID"]; sub(/@.*$/, "", t)
+            a = ENVIRON["SAID_AID"]; u = ENVIRON["SAID_TUID"]; l = ENVIRON["SAID_AT"] }
+    {
+      k = ""
+      if ($1 == "R") { r = $2; sub(/@.*$/, "", r)
+                       if (r != "" && (r == n || (t != "" && r == t))) k = "message" }
+      else if ($1 == "N" && $2 != "" && ($2 == a || $2 == u)) k = "task-notification"
+      if (k != "" && (l == "" || substr($3, 1, 19) >= l)) { print k " at " $3; exit }
+    }')"
+  if [ -n "$hit" ]; then SAID="said=$hit"; return 0; fi
+  return 1
+}
+
 # One row in, one state out. PRECEDENCE, and each step is a decision:
 #   WAIVED      first — but NOT unconditionally, and that is the Step-6 review's S-1. A
 #               waiver is an explicit designation that this row's contract is not held, and
@@ -912,15 +1010,15 @@ EOF
 #               quoted documentation in a brief used to silence the whole contract, and the
 #               briefs in this repo quote the wall's own help text constantly. A waiver over
 #               an INFERRED path still wins: there only the waiver was declared.
-#   MET         a landed contract is MET whatever else is true of the row, including a
-#               still-running process: the artifacts are on disk and that is the question.
+#   MET         a landed contract the agent SAID it finished (`row_said`, above) is MET
+#               whatever else is true of the row, including a still-running process.
 #   FOLLOW-UP   a MET row the orchestrator has since messaged, until the agent answers
 #               (`verdict_followup`, above): the only state MET yields to.
 #   STILL-LIVE  only for a row that has NOT landed. Visible work in flight is not a failure.
 #   UNMET       what is left: declared, not delivered, nothing running.
 # AMBIGUOUS is decided one level up, in the verdict loop, because it is a fact about the
 # NAME across rows rather than about any one row.
-# A row that declares NO deliverable is MET, vacuously and by design. The wall that refuses
+# A row that declares NO deliverable lands vacuously, by design, and still needs its signal. The wall that refuses
 # an undeclared contract is hooks/dispatch-preflight.sh's, at dispatch, where it can still be
 # fixed; making this verb UNMET such a row would block a stopping agent with a refusal that
 # names nothing to write, which is the fail-CLOSED direction on a judgment this machinery
@@ -928,7 +1026,7 @@ EOF
 VERDICT_STATE=""; VERDICT_DETAIL=""
 verdict_row() {  # <roster row>
   local row="$1" launched deliv waiver source claims prog cadence le p n=0 fails="" oks="" old
-  local note="" restarted rnote=""
+  local note="" restarted rnote="" sig=""
   waiver="$(line_field "$row" waiver)"
   source="$(line_field "$row" source)"
   launched="$(line_field "$row" launched_at)"
@@ -979,13 +1077,25 @@ verdict_row() {  # <roster row>
     fi
   done
 
-  if [ "$n" -eq 0 ]; then
+  # THE SECOND CONJUNCT is asked only of a row whose deliverables all landed (vacuously too),
+  # so a verdict over rows none of which landed still never opens a transcript.
+  if [ -z "$fails" ]; then
+    row_said "$row" "$le" "$launched"
+    case $? in
+      0) sig="$SAID" ;;
+      1) fails="unsaid=$(line_field "$row" name) (no message, completed task-notification or Done marker after launched_at ${launched:-unreadable})${oks:+ — landed: $oks}" ;;
+      *) sig="completion signal not judged (no transcript to read, no Done marker declared)" ;;
+    esac
+  fi
+
+  if [ "$n" -eq 0 ] && [ -z "$fails" ]; then
     VERDICT_STATE="MET"
-    VERDICT_DETAIL="${note:+$note; }no deliverable declared — this row names nothing to hold it to${rnote:+; $rnote}"
+    VERDICT_DETAIL="${note:+$note; }no deliverable declared — this row names nothing to hold it to; $sig${rnote:+; $rnote}"
     verdict_followup "$row"
     return 0
   fi
   if [ -z "$fails" ]; then
+    oks="$oks; $sig"
     VERDICT_STATE="MET"; VERDICT_DETAIL="${note:+$note; }$oks"
     [ -n "$le" ] || VERDICT_DETAIL="${note:+$note; }$oks (launched_at \"$launched\" unreadable: not judged for staleness)"
     VERDICT_DETAIL="$VERDICT_DETAIL${rnote:+; $rnote}"

@@ -1183,10 +1183,14 @@ F9_CFG="$TMPROOT/s9-config"
 mkdir -p "$F9_CFG/projects/-fixture-project"
 F9_TR="$F9_CFG/projects/-fixture-project/$SID.jsonl"
 export CLAUDE_CONFIG_DIR="$F9_CFG"
+# THE RECORDS ARE DATED NOW (wave-24 T9, D3): a reply counts as a completion signal only when it
+# is not before the row's launch, and every row below launched minutes ago. Record ORDER is
+# still what decides a follow-up; the date only has to sit after the launch.
+export F9_TS="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 
 tx_send() {  # <to> [sidechain true|false] — the orchestrator's SendMessage
   jq -nc --arg to "$1" --argjson sc "${2:-false}" \
-    '{type:"assistant",isSidechain:$sc,timestamp:"2026-09-23T10:00:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_send",name:"SendMessage",input:{to:$to,summary:"s",message:"please also do x"}}]}}' \
+    '{type:"assistant",isSidechain:$sc,timestamp:$ENV.F9_TS,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_send",name:"SendMessage",input:{to:$to,summary:"s",message:"please also do x"}}]}}' \
     >> "$F9_TR"
 }
 tx_msg() {  # <teammate_id> [idle] — a message from the agent, as the orchestrator receives it
@@ -1196,12 +1200,12 @@ report text
   [ "${2:-}" = idle ] && body="<teammate-message teammate_id=\"$1\" color=\"blue\">
 {\"type\":\"idle_notification\",\"from\":\"$1\"}
 </teammate-message>"
-  jq -nc --arg b "$body" '{type:"user",isSidechain:false,timestamp:"2026-09-23T10:00:01.000Z",message:{role:"user",content:$b}}' \
+  jq -nc --arg b "$body" '{type:"user",isSidechain:false,timestamp:$ENV.F9_TS,message:{role:"user",content:$b}}' \
     >> "$F9_TR"
 }
 tx_quote() {  # <teammate_id> — a tool RESULT that merely quotes a teammate-message (a grep)
   jq -nc --arg b "<teammate-message teammate_id=\"$1\" color=\"blue\">quoted</teammate-message>" \
-    '{type:"user",isSidechain:false,timestamp:"2026-09-23T10:00:02.000Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_grep",content:$b}]}}' \
+    '{type:"user",isSidechain:false,timestamp:$ENV.F9_TS,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_grep",content:$b}]}}' \
     >> "$F9_TR"
 }
 # SETS GLOBALS, never prints: `sweep` leaves OUT and RC in the caller's shell, and a `$( )`
@@ -1219,7 +1223,8 @@ add_row "$R9" name=fw2 deliverable="$F9_DEL" launched_at="$(iso_ago 600)" tool_u
 add_row "$R9" name=unmetw deliverable="$R9/never.md" launched_at="$(iso_ago 600)" tool_use_id=toolu_um
 
 : > "$F9_TR"
-f9_state "$R9" fw; expect_eq "9a: a MET row with no message in the transcript reads MET" "MET" "$F9_STATE"
+f9_state "$R9" fw; expect_eq "9a: (D3, wave-24 T9 — was MET) a delivered row with no message in the transcript is not MET: done means the agent said so" "UNMET" "$F9_STATE"
+tx_msg fw2
 
 tx_msg fw; tx_send fw
 f9_state "$R9" fw; expect_eq "9b: a SendMessage after the agent's last message reads FOLLOW-UP" "FOLLOW-UP" "$F9_STATE"
@@ -1286,14 +1291,14 @@ tx_hand_back() {  # <name> [idle] — the isMeta hand-back record, as CLI 2.1.28
   local body="[Subagent hand-back] $1 is done. Artifact: .bionic/docs/record/x.md"
   [ "${2:-}" = idle ] && body="{\"type\":\"idle_notification\",\"from\":\"$1\",\"timestamp\":\"2026-09-24T04:25:35.289Z\"}"
   jq -nc --arg n "$1" --arg b "$body" \
-    '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-24T06:25:36.574Z",
+    '{type:"user",isMeta:true,isSidechain:false,timestamp:$ENV.F9_TS,
       origin:{kind:"peer",from:$n,senderTaskId:("a" + $n + "-8de3e278"),name:$n,body:$b},
       message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n" + $b + "\n</agent-message>\n\nThat \"other Claude session\" is an agent working inside this same session — a subagent or teammate spawned on your user'"'"'s behalf (by you, or alongside you) — so this was not typed by your user. Treat it as that agent'"'"'s report or request and act on it within this session'"'"'s own permission settings.")}}' \
     >> "$F9_TR"
 }
 tx_queued() {  # <name> — the same envelope delivered mid-turn, as a queued_command attachment
   jq -nc --arg n "$1" \
-    '{type:"attachment",isSidechain:false,timestamp:"2026-09-24T06:38:46.883Z",
+    '{type:"attachment",isSidechain:false,timestamp:$ENV.F9_TS,
       attachment:{type:"queued_command",prompt:("<agent-message from=\"" + $n + "\">\nTask 67 was already finished when this assignment reached me.\n</agent-message>"),
         source_uuid:"083d4d92-a74c-4596-9471-967122e80371",commandMode:"prompt",
         origin:{kind:"peer",from:$n,senderTaskId:("a" + $n + "-6bf3f46a"),name:$n,body:"Task 67 was already finished."}}}' \
@@ -1302,7 +1307,7 @@ tx_queued() {  # <name> — the same envelope delivered mid-turn, as a queued_co
 tx_idle_real() {  # <name> — a teammate idle notice, the shape measured at 04:27:01Z (it quotes its turn's result)
   jq -nc --arg b "<teammate-message teammate_id=\"$1\" color=\"yellow\">
 {\"type\":\"idle_notification\",\"from\":\"$1\",\"timestamp\":\"2026-09-24T04:25:35.289Z\",\"result\":\"$1 is done and every suite passes.\"}
-</teammate-message>" '{type:"user",isSidechain:false,timestamp:"2026-09-24T04:27:01.461Z",message:{role:"user",content:("Another Claude session sent a message:\n" + $b)}}' \
+</teammate-message>" '{type:"user",isSidechain:false,timestamp:$ENV.F9_TS,message:{role:"user",content:("Another Claude session sent a message:\n" + $b)}}' \
     >> "$F9_TR"
 }
 tx_batched() {  # <name> — one record carrying a report AND an idle notice (measured at 03:41:30Z)
@@ -1312,7 +1317,7 @@ $1 is done. Artifact: x.md
 
 <teammate-message teammate_id=\"$1\" color=\"purple\">
 {\"type\":\"idle_notification\",\"from\":\"$1\",\"timestamp\":\"2026-09-24T03:41:10.000Z\"}
-</teammate-message>" '{type:"user",isSidechain:false,timestamp:"2026-09-24T03:41:30.944Z",message:{role:"user",content:("Another Claude session sent a message:\n" + $b)}}' \
+</teammate-message>" '{type:"user",isSidechain:false,timestamp:$ENV.F9_TS,message:{role:"user",content:("Another Claude session sent a message:\n" + $b)}}' \
     >> "$F9_TR"
 }
 
@@ -1328,17 +1333,17 @@ tx_hand_back hb
 f9_state "$R10" hb; expect_eq "10a: an isMeta <agent-message from=…> hand-back answers the follow-up — MET again" "MET" "$F9_STATE"
 : > "$F9_TR"; tx_send hb; tx_queued hb
 f9_state "$R10" hb; expect_eq "10b: the same envelope delivered mid-turn (a queued_command attachment) answers it too" "MET" "$F9_STATE"
-: > "$F9_TR"; tx_send hb; tx_hand_back hb-2
+: > "$F9_TR"; tx_msg hb; tx_send hb; tx_hand_back hb-2
 f9_state "$R10" hb; expect_eq "10c: a hand-back from a name that merely starts with it answers nothing" "FOLLOW-UP" "$F9_STATE"
-: > "$F9_TR"; tx_send hb-2; tx_hand_back hb
+: > "$F9_TR"; tx_msg hb-2; tx_send hb-2; tx_hand_back hb
 f9_state "$R10" hb-2; expect_eq "10c2: …nor does one from the shorter name answer the longer one" "FOLLOW-UP" "$F9_STATE"
 : > "$F9_TR"; tx_send hb; tx_batched hb
 f9_state "$R10" hb; expect_eq "10d: a record carrying a report beside an idle notice answers it (the report is the agent's text)" "MET" "$F9_STATE"
 
 # (2) AN IDLE NOTICE IS NO REPLY, in either envelope.
-: > "$F9_TR"; tx_send hb; tx_idle_real hb
+: > "$F9_TR"; tx_msg hb; tx_send hb; tx_idle_real hb
 f9_state "$R10" hb; expect_eq "10e: a teammate idle notice after the send is no reply — FOLLOW-UP stays" "FOLLOW-UP" "$F9_STATE"
-: > "$F9_TR"; tx_send hb; tx_hand_back hb idle
+: > "$F9_TR"; tx_msg hb; tx_send hb; tx_hand_back hb idle
 f9_state "$R10" hb; expect_eq "10f: an idle notice inside <agent-message> is no reply either" "FOLLOW-UP" "$F9_STATE"
 : > "$F9_TR"; tx_msg hb; tx_send hb; tx_idle_real hb
 f9_state "$R10" hb; expect_eq "10g: C5 — the report turn's idle notice delivered after the send leaves the row held" "FOLLOW-UP" "$F9_STATE"
@@ -1393,6 +1398,7 @@ S11_CFG="$TMPROOT/s11-config"
 mkdir -p "$S11_CFG/projects/-fixture-s11"
 F9_TR="$S11_CFG/projects/-fixture-s11/$SID.jsonl"; : > "$F9_TR"
 export CLAUDE_CONFIG_DIR="$S11_CFG"
+export F9_TS="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"   # this section's replies sit after its launch
 . "$(dirname "$0")/lib/live-answer.sh"
 S11_REC="${BIONIC_HOOKS_DIR}/execution-recorder.sh"
 S11_ORDERS="${BIONIC_HOOKS_DIR}/stop-orders.sh"
@@ -1418,8 +1424,10 @@ s11_verdict() {  # sets S11_LINE (the verdict line) and F9_STATE
   f9_state "$R11" w-T1
   S11_LINE="$(printf '%s\n' "$OUT" | grep -F 'landing-verdict/v1|')"
 }
+# The agent's report, as it landed (D3, wave-24 T9: MET needs the agent to have said so).
+tx_msg w-T1
 s11_verdict
-expect_contains "11a: delivered, then acked — MET, acked=yes (the landed row)" "|state=MET|acked=yes|" "$S11_LINE"
+expect_contains "11a: delivered, reported, then acked — MET, acked=yes (the landed row)" "|state=MET|acked=yes|" "$S11_LINE"
 
 tx_send w-T1
 s11_verdict
@@ -1457,12 +1465,14 @@ expect_contains "11e2: …the detail still naming the restart and the launch it 
 sweep "$R11" verdict
 expect_contains "11e3: the summary counts no UNMET row" " 0 UNMET," "$OUT"
 
-# THE AGENT GOES: a fresh panel that lists nobody, then the stop order's close.
+# THE AGENT GOES: a fresh panel that lists nobody, then the stop order's close. Dated now,
+# after the replies above (wave-24 T9 re-dated those to sit after the launch).
+export S11_PANEL_TS="$(date -u +%Y-%m-%dT%H:%M:%S)"
 {
-  jq -nc '{type:"user",timestamp:"2026-09-30T00:00:00.000Z",message:{role:"user",content:"go"}}'
-  jq -nc '{type:"assistant",timestamp:"2026-09-30T00:00:01.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S11LISTAGENTS",name:"ListAgents",input:{}}]}}'
+  jq -nc '{type:"user",timestamp:($ENV.S11_PANEL_TS + ".100Z"),message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:($ENV.S11_PANEL_TS + ".200Z"),message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S11LISTAGENTS",name:"ListAgents",input:{}}]}}'
   jq -nc --arg b "$(live_answer_body)" \
-    '{type:"user",timestamp:"2026-09-30T00:00:02.000Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01S11LISTAGENTS",content:$b}]}}'
+    '{type:"user",timestamp:($ENV.S11_PANEL_TS + ".300Z"),message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01S11LISTAGENTS",content:$b}]}}'
 } >> "$F9_TR"
 S11_OUT="$( cd "$R11" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$S11_CFG" bash "$S11_ORDERS" stopped w-T1 2>&1 )"; S11_RC=$?
 expect_eq "11f: stopped on the restarted-and-answered row, agent gone, acks it — exit 0" "0" "$S11_RC"
@@ -1470,6 +1480,125 @@ S11_LAST_ACK="$(grep -F '|event=ack|' "$(ledger_of "$R11")" | grep -F '|name=w-T
 expect_contains "11g: …reason landed: the contract was met" "|reason=landed" "$S11_LAST_ACK"
 expect_absent "11h: …and never abandoned — a landed row is not recorded as abandoned (C2-2)" \
   "reason=abandoned" "$(cat "$(ledger_of "$R11")")"
+
+unset CLAUDE_CONFIG_DIR
+
+# ============================================================
+section "Section 12 (§DONE): done means the agent said so — MET needs a completion signal after the launch (wave-24 T9, REQ-4, AC-4.8; D3)"
+# ============================================================
+#
+# THE DEFECT (w23-floor6, research R1 §4). A non-empty deliverable newer than the launch was
+# the whole of MET, so a row read MET while its agent was still writing, and the tick ordered
+# it stood down. D3 adds a second conjunct: a completion signal after `launched_at` — the
+# agent's own message (teammate-message or agent-message), a completed task-notification for
+# its id, or the brief's `Done marker:` (`done=` on the row) written after the launch. An
+# adopted row's message is read from the LAUNCHING session's transcript too
+# (`adopted_from=` → `projects/<slug>/<sid>.jsonl`).
+# fails-when: file existence alone yields MET.
+S12_CFG="$TMPROOT/s12-config"
+mkdir -p "$S12_CFG/projects/-fixture-s12" "$S12_CFG/projects/-fixture-s12-origin"
+S12_TR="$S12_CFG/projects/-fixture-s12/$SID.jsonl"
+S12_OTR="$S12_CFG/projects/-fixture-s12-origin/$SID_FOREIGN.jsonl"
+export CLAUDE_CONFIG_DIR="$S12_CFG"
+
+s12_ts() {  # <seconds ago> -> a transcript timestamp, millisecond form as the CLI writes it
+  date -u -v-"$1"S +%Y-%m-%dT%H:%M:%S.123Z 2>/dev/null \
+    || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%S.123Z
+}
+s12_msg() {  # <transcript> <teammate_id> <seconds ago> — the agent's report, as delivered
+  jq -nc --arg b "<teammate-message teammate_id=\"$2\" color=\"blue\" summary=\"done\">
+$2 is done. Artifact: x.md
+</teammate-message>" --arg ts "$(s12_ts "$3")" \
+    '{type:"user",isSidechain:false,timestamp:$ts,message:{role:"user",content:$b}}' >> "$1"
+}
+s12_note() {  # <transcript> <task-id> <tool-use-id> <status> <seconds ago> — a task-notification
+  jq -nc --arg b "<task-notification>
+<task-id>$2</task-id>
+<tool-use-id>$3</tool-use-id>
+<output-file>/tmp/x/tasks/$2.output</output-file>
+<status>$4</status>
+<summary>Agent \"x\" finished</summary>
+</task-notification>" --arg ts "$(s12_ts "$5")" \
+    '{type:"user",isSidechain:false,timestamp:$ts,message:{role:"user",content:$b}}' >> "$1"
+}
+s12_row() {  # <repo> <key=value>... — a confirmed row, launched 600 s ago, delivered
+  local repo="$1"; shift
+  roster_row_fixture status=confirmed "session=$SID" "launched_at=$S12_LAUNCH" \
+    subagent_type=bionic:implementor model=opus source=declared "$@" >> "$(roster_of "$repo")"
+}
+S12_LAUNCH="$(iso_ago 600)"
+R12="$(make_repo s12done)"; new_roster "$R12"
+S12_DEL="$R12/report.md"; echo report > "$S12_DEL"
+s12_row "$R12" name=d-quiet agent_id=a-quiet "deliverable=$S12_DEL" tool_use_id=toolu_quiet
+s12_row "$R12" name=d-said agent_id=a-said "deliverable=$S12_DEL" tool_use_id=toolu_said
+s12_row "$R12" name=d-early agent_id=a-early "deliverable=$S12_DEL" tool_use_id=toolu_early
+s12_row "$R12" name=d-marker agent_id=a-marker "deliverable=$S12_DEL" "done=$R12/marker.done" tool_use_id=toolu_marker
+s12_row "$R12" name=d-oldmark agent_id=a-oldmark "deliverable=$S12_DEL" "done=$R12/old.done" tool_use_id=toolu_oldmark
+s12_row "$R12" name=d-note agent_id=a5f00ba1c2d3e4f56 "deliverable=$S12_DEL" tool_use_id=toolu_note
+s12_row "$R12" name=d-run agent_id=a6e00ba1c2d3e4f57 "deliverable=$S12_DEL" tool_use_id=toolu_run
+s12_row "$R12" name=d-live agent_id=a-live "deliverable=$S12_DEL" "progress=$R12/live.progress" \
+  cadence=10m tool_use_id=toolu_live
+s12_row "$R12" name=d-adopted agent_id=a-adopted "deliverable=$S12_DEL" teammate_id= \
+  "adopted_from=$SID_FOREIGN" tool_use_id=toolu_adopted
+s12_row "$R12" name=d-orphan agent_id=a-orphan "deliverable=$S12_DEL" teammate_id= \
+  "adopted_from=$SID_FOREIGN" tool_use_id=toolu_orphan
+echo old > "$R12/old.done"; backdate "$R12/old.done" 1200
+echo live > "$R12/live.progress"
+
+# The session transcript exists and holds traffic for OTHER agents only.
+: > "$S12_TR"; : > "$S12_OTR"
+s12_msg "$S12_TR" someone-else 60
+s12_msg "$S12_TR" d-early 1200
+s12_note "$S12_TR" a6e00ba1c2d3e4f57 toolu_run running 60
+
+f9_state "$R12" d-quiet
+expect_eq "12a: AC-4.8 — a landed deliverable with no completion signal is not MET" "UNMET" "$F9_STATE"
+expect_contains "12a2: …and the detail names the missing signal" "unsaid=" "$OUT"
+expect_contains "12a3: …beside the deliverable that did land" "delivered=$S12_DEL" "$OUT"
+expect_eq "12a4: …an UNMET row exits 1" "1" "$RC"
+
+s12_msg "$S12_TR" d-said 30
+f9_state "$R12" d-said
+expect_eq "12b: …the same row plus the agent's own message after its launch is MET" "MET" "$F9_STATE"
+expect_contains "12b2: …and the detail says how it was said" "said=" "$OUT"
+
+f9_state "$R12" d-early
+expect_eq "12c: a message from BEFORE the launch is no signal for this contract" "UNMET" "$F9_STATE"
+
+echo done > "$R12/marker.done"
+f9_state "$R12" d-marker
+expect_eq "12d: the brief's Done marker, written after the launch, is the signal — MET" "MET" "$F9_STATE"
+f9_state "$R12" d-oldmark
+expect_eq "12d2: …a Done marker older than the launch is not" "UNMET" "$F9_STATE"
+ln -s "$R12/marker.done" "$R12/link.done"
+s12_row "$R12" name=d-linkmark agent_id=a-linkmark "deliverable=$S12_DEL" "done=$R12/link.done" tool_use_id=toolu_linkmark
+f9_state "$R12" d-linkmark
+expect_eq "12d3: …nor is a symbolic link standing in for one" "UNMET" "$F9_STATE"
+
+s12_note "$S12_TR" a5f00ba1c2d3e4f56 toolu_note completed 20
+f9_state "$R12" d-note
+expect_eq "12e: a completed task-notification for the agent's id is the signal — MET" "MET" "$F9_STATE"
+f9_state "$R12" d-run
+expect_eq "12e2: …a task-notification that is not completed is not" "UNMET" "$F9_STATE"
+
+f9_state "$R12" d-live
+expect_eq "12f: unsaid with its progress artifact inside the cadence reads STILL-LIVE, not UNMET" "STILL-LIVE" "$F9_STATE"
+
+s12_msg "$S12_OTR" d-adopted 40
+f9_state "$R12" d-adopted
+expect_eq "12g: an adopted row whose message is in the LAUNCHING session's transcript is MET" "MET" "$F9_STATE"
+f9_state "$R12" d-orphan
+expect_eq "12g2: …and one whose launching transcript holds no message of its own is not" "UNMET" "$F9_STATE"
+
+# FAIL DIRECTION: no transcript anywhere and no Done marker — the signal cannot be read, so it
+# is not judged and the detail says so, the rule an unreadable launched_at already follows.
+export CLAUDE_CONFIG_DIR="$TMPROOT/s12-empty-config"
+mkdir -p "$CLAUDE_CONFIG_DIR/projects"
+f9_state "$R12" d-quiet
+expect_eq "12h: no transcript to read and no Done marker — the signal is not judged, MET as before" "MET" "$F9_STATE"
+expect_contains "12h2: …and the detail says it was not judged" "completion signal not judged" "$OUT"
+f9_state "$R12" d-oldmark
+expect_eq "12h3: …a declared Done marker is still judged without a transcript" "UNMET" "$F9_STATE"
 
 unset CLAUDE_CONFIG_DIR
 

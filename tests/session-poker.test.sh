@@ -132,9 +132,12 @@ mkrow() {  # <key=value>...
   # and empty — is the one the writer-side budget guard partitions on.
   local files="" sallow="" ssrc="" instrument_set=no
   local rexec="" rexec_set=no
+  # THE DONE MARKER IS OPT-IN too (wave-24 T9, D3): a row that names none carries no key.
+  local dmark="" dmark_set=no
   for kv in "$@"; do
     case "$kv" in
       re_executes=*) rexec="${kv#*=}"; rexec_set=yes ;;
+      done=*)        dmark="${kv#*=}"; dmark_set=yes ;;
       plan=*)        plan="${kv#*=}"; plan_set=yes ;;
       status=*)      status="${kv#*=}" ;;
       session=*)     session="${kv#*=}" ;;
@@ -167,6 +170,7 @@ mkrow() {  # <key=value>...
     instrument=("files=$files" "suites_allowed=$sallow" "suites_source=$ssrc")
   fi
   [ "$rexec_set" = yes ] && instrument+=("re_executes=$rexec")
+  [ "$dmark_set" = yes ] && instrument+=("done=$dmark")
   "$emit" \
     "status=$status" "session=$session" "name=$name" "agent_id=$agent_id" \
     "launched_at=$launched_at" "subagent_type=$subagent_type" model=opus \
@@ -179,6 +183,15 @@ mkrow() {  # <key=value>...
 add_row() {  # <repo> <key=value>...
   local repo="$1"; shift
   mkrow "$@" >> "$(roster_of "$repo")"
+}
+
+# THE AGENT SAID SO (wave-24 T9, REQ-4 AC-4.8; D3). MET is a landed deliverable AND a completion
+# signal after the launch, and a fixture whose session transcript holds a panel but no report
+# from the agent reads UNMET without one. A row meant to read MET gets its Done marker, written
+# now, beside the deliverable: the row says nothing else, and nothing in the transcript moves.
+said() {  # <dir> <name> -> the `done=<path>` argument, the marker written
+  : > "$1/$2.done"
+  printf 'done=%s/%s.done' "$1" "$2"
 }
 
 # The same, onto ANOTHER session's roster file in the same .bionic/tmp — the shape §8's
@@ -2615,7 +2628,7 @@ s12_answer() {  # <state> <name[:status]>...
 R12ET="$(make_repo s12-taskstop-met)"; new_roster "$R12ET"; armed_ago "$R12ET"; delivered_plan "$R12ET"
 DEL_E="$R12ET/delivered.md"; echo "done" > "$DEL_E"
 add_row "$R12ET" name=done-writer deliverable="$DEL_E" duration="1 minute" \
-  launched_at="$(iso_ago 600)"
+  launched_at="$(iso_ago 600)" "$(said "$R12ET" done-writer)"
 s12_answer fresh "done-writer:running"
 poke "$R12ET" tick
 OUT_12E="$OUT"
@@ -2635,7 +2648,7 @@ expect_contains "12a-T22-e3 …and the order is on disk, attributed to the Patro
 R12FT="$(make_repo s12-taskstop-swept)"; new_roster "$R12FT"; armed_ago "$R12FT"; delivered_plan "$R12FT"
 DEL_F="$R12FT/delivered.md"; echo "done" > "$DEL_F"
 add_row "$R12FT" name=done-writer deliverable="$DEL_F" duration="1 minute" \
-  launched_at="$(iso_ago 600)"
+  launched_at="$(iso_ago 600)" "$(said "$R12FT" done-writer)"
 swept_marker_write "$(roster_of "$R12FT")" "$(iso_ago 30)" "$SID" done-writer a000 MET
 s12_answer fresh "done-writer:running"
 poke "$R12FT" tick
@@ -2652,7 +2665,7 @@ expect_contains "12a-T22-f2 …and the order is written, same as the unswept cas
 R12FG="$(make_repo s12-taskstop-swept-gone)"; new_roster "$R12FG"; armed_ago "$R12FG"; delivered_plan "$R12FG"
 DEL_FG="$R12FG/delivered.md"; echo "done" > "$DEL_FG"
 add_row "$R12FG" name=done-writer deliverable="$DEL_FG" duration="1 minute" \
-  launched_at="$(iso_ago 600)"
+  launched_at="$(iso_ago 600)" "$(said "$R12FG" done-writer)"
 swept_marker_write "$(roster_of "$R12FG")" "$(iso_ago 30)" "$SID" done-writer a000 MET
 s12_answer fresh "some-other-agent:running"
 poke "$R12FG" tick
@@ -3024,7 +3037,7 @@ s12l_met_repo() {  # <label> -> a repo: writers=2, BASE landed, ONE/TWO ready, o
     "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
   echo "done" > "$r/landed-12l3.md"
   add_row "$r" name=done-writer agent_id= deliverable="$r/landed-12l3.md" duration="4 hours" \
-    launched_at="$(iso_ago 600)"
+    launched_at="$(iso_ago 600)" "$(said "$r" done-writer)"
   printf '%s' "$r"
 }
 
@@ -4208,7 +4221,7 @@ expect_absent "an empty roster consults no live set and says nothing about one" 
 R19H="$(make_repo s19-disarm)"; new_roster "$R19H"; armed_ago "$R19H"; delivered_plan "$R19H"
 R19H_DEL="$R19H/delivered.md"
 add_row "$R19H" name=live-writer deliverable="$R19H_DEL" duration="4 hours" \
-  launched_at="$(iso_ago 60)"
+  launched_at="$(iso_ago 60)" "$(said "$R19H" live-writer)"
 s19_answer fresh "live-writer:idle"
 poke_pressure "$R19H" 8192 1.0 tick
 expect_absent "an idle agent on an UNMET roster row does NOT unlock DISARM" "decision=DISARM" "$OUT"
@@ -5089,7 +5102,7 @@ R26A="$(make_repo s26-adopted-met)"; new_roster "$R26A"
 DEL_26A="$R26A/delivered-26a.md"; echo "done" > "$DEL_26A"
 add_row_to "$R26A" "$PRED_26" name=gone-writer status=identified agent_id="$ID_26" \
   subagent_type=bionic:implementor deliverable="$DEL_26A" duration="45 minutes" \
-  cadence="10 minutes"
+  cadence="10 minutes" "$(said "$R26A" gone-writer)"
 poke "$R26A" adopt
 expect_contains "26a meta: the fixture row really was adopted onto this session's roster" \
   "adopted_from=" "$(grep -F "|name=gone-writer|" "$(roster_of "$R26A")" | tail -1)"
@@ -5164,7 +5177,7 @@ expect_eq "26d2 …and nothing acks it while its agent is still on the panel" "n
 R26E="$(make_repo s26-no-answer)"; new_roster "$R26E"; armed_ago "$R26E"; delivered_plan "$R26E"
 DEL_26E="$R26E/delivered-26e.md"; echo "done" > "$DEL_26E"
 add_row "$R26E" name=done-writer deliverable="$DEL_26E" duration="1 minute" \
-  launched_at="$(iso_ago 600)"
+  launched_at="$(iso_ago 600)" "$(said "$R26E" done-writer)"
 s19_answer none
 poke "$R26E" tick
 expect_eq "26e a tick with no panel answer still exits 0" "0" "$RC"
@@ -5754,7 +5767,7 @@ section "Section 29: extend — re-opening a MET row (REQ-10; D11, T-h)"
 R29A="$(make_repo s29-extend-met)"; new_roster "$R29A"; armed_ago "$R29A"; delivered_plan "$R29A"
 DEL_29A="$R29A/delivered.md"; echo "done" > "$DEL_29A"
 add_row "$R29A" name=t1 deliverable="$DEL_29A" duration="1 minute" \
-  launched_at="$(iso_ago 600)"
+  launched_at="$(iso_ago 600)" "$(said "$R29A" t1)"
 S29_CFG="$(fake_config_dir s29-extend)"
 export CLAUDE_CONFIG_DIR="$S29_CFG"
 plant_answer "$S29_CFG/projects/-fixture-project/$SID.jsonl" fresh "t1:running"
@@ -6218,7 +6231,8 @@ s30b_transcript() {  # <fw status> <record-producing commands…> — spliced be
 }
 R30B="$(make_repo s30b-followup)"; new_roster "$R30B"; armed_ago "$R30B"; delivered_plan "$R30B"
 DEL_30B="$R30B/delivered.md"; echo "done" > "$DEL_30B"
-add_row "$R30B" name=fw deliverable="$DEL_30B" duration="1 minute" launched_at="$(iso_ago 600)"
+add_row "$R30B" name=fw deliverable="$DEL_30B" duration="1 minute" launched_at="$(iso_ago 600)" \
+  "$(said "$R30B" fw)"
 
 s30b_transcript running "s30b_msg fw" "s30b_send fw"
 poke "$R30B" tick
@@ -6525,9 +6539,11 @@ mkdir -p "$R33A/.bionic/docs/record"
 echo done > "$R33A/.bionic/docs/record/swept.md"
 echo done > "$R33A/.bionic/docs/record/plain.md"
 add_row "$R33A" name=swept-row status=identified agent_id=aswept00000000000000000 \
-  deliverable="$R33A/.bionic/docs/record/swept.md" duration="1 hour" launched_at="$(iso_ago 600)"
+  deliverable="$R33A/.bionic/docs/record/swept.md" duration="1 hour" launched_at="$(iso_ago 600)" \
+  "$(said "$R33A" swept-row)"
 add_row "$R33A" name=plain-row status=identified agent_id=aplain00000000000000000 \
-  deliverable="$R33A/.bionic/docs/record/plain.md" duration="1 hour" launched_at="$(iso_ago 600)"
+  deliverable="$R33A/.bionic/docs/record/plain.md" duration="1 hour" launched_at="$(iso_ago 600)" \
+  "$(said "$R33A" plain-row)"
 swept_marker_write "$(roster_of "$R33A")" "$(iso_ago 30)" "$SID" swept-row aswept00000000000000000 MET
 s33_answer fresh "some-other-agent:running"
 poke "$R33A" tick
@@ -6547,7 +6563,8 @@ R33B="$(make_repo s33-swept-live)"; new_roster "$R33B"
 mkdir -p "$R33B/.bionic/docs/record"
 echo done > "$R33B/.bionic/docs/record/swept.md"
 add_row "$R33B" name=swept-row status=identified agent_id=aswept00000000000000001 \
-  deliverable="$R33B/.bionic/docs/record/swept.md" duration="1 hour" launched_at="$(iso_ago 600)"
+  deliverable="$R33B/.bionic/docs/record/swept.md" duration="1 hour" launched_at="$(iso_ago 600)" \
+  "$(said "$R33B" swept-row)"
 swept_marker_write "$(roster_of "$R33B")" "$(iso_ago 30)" "$SID" swept-row aswept00000000000000001 MET
 s33_answer fresh "swept-row:idle"
 poke "$R33B" tick
@@ -6560,7 +6577,7 @@ expect_eq "33b3 …and it is NOT acked while its agent is on the panel" "no" \
 # ---------- 33c: a row that declared NOTHING keeps moot-and-gone ----------
 R33C="$(make_repo s33-declared-nothing)"; new_roster "$R33C"
 add_row "$R33C" name=bare-row status=identified agent_id=abare000000000000000000 \
-  duration="1 hour" launched_at="$(iso_ago 600)"
+  duration="1 hour" launched_at="$(iso_ago 600)" "$(said "$R33C" bare-row)"
 s33_answer fresh "some-other-agent:running"
 poke "$R33C" tick
 expect_contains "33c a MET row that declared no deliverable is closed moot-and-gone" \
@@ -7307,7 +7324,7 @@ s41_world() {  # <label> -> a repo: armed, bound, w-1 MET with a landed delivera
   bind_marker "$r" "$p"
   echo "done" > "$r/w1-report.md"; backdate "$r/w1-report.md" 300
   add_row "$r" name=w-1 agent_id=aw1-41414141414141 deliverable="$r/w1-report.md" \
-    duration="4 hours" launched_at="$(iso_ago 600)"
+    duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$r" w-1)"
   printf '%s' "$r"
 }
 s41_count() {  # <text> <fixed string> -> lines carrying it
@@ -7686,5 +7703,53 @@ expect_eq "42h3 no projection copy is left beside any plan" "" \
 expect_eq "42h4 …and no dry-run engagement marker is left in .bionic/tmp" "" \
   "$(find "$R42/.bionic/tmp" "$R42C/.bionic/tmp" -name 'engaged-*' ! -name "engaged-$SID.state" 2>/dev/null)"
 POKE_BOUND="$S42_BOUND_WAS"
+
+# ============================================================
+section "Section 43: the Done marker travels with the contract — hold and amend keep it, extend drops it, adopt carries it (wave-24 T9, REQ-4 AC-4.8; D3; A-orch-31)"
+# ============================================================
+#
+# The verdict reads the LATEST row for a name, so a successor row that dropped `done=` would
+# un-say an agent that had said it was done: a held row would leave MET and never print held.
+# `hold` and `amend` continue the contract and keep the marker; `extend` re-opens it for new
+# work, launched now, which is signalled afresh; `adopt` files the same contract under a new
+# session and carries it.
+# fails-when: a successor row of hold/amend/adopt lacks done=, or extend keeps it.
+S43_CFG="$(fake_config_dir s43-done)"
+export CLAUDE_CONFIG_DIR="$S43_CFG"
+s43_last() { grep -F "|name=${2:-w-1}|" "$(roster_of "$1")" | tail -1; }
+s43_done() { printf '%s' "$1" | tr '|' '\n' | grep '^done=' | head -1 | cut -d= -f2-; }
+R43="$(s41_world s43-hold)"
+S41_TR="$S43_CFG/projects/-fixture-project/$SID.jsonl"; s41_transcript 1 "w-1:idle"
+S43_MARK="$R43/w-1.done"
+expect_eq "43a precondition: the launch row names its Done marker" "$S43_MARK" "$(s43_done "$(s43_last "$R43")")"
+poke "$R43" hold w-1 "second pass"
+expect_eq "43a2 precondition: the hold took (exit 0)" "0" "$RC"
+expect_contains "43a3 …its row is the hold's" "held=" "$(s43_last "$R43")"
+expect_eq "43a4 hold keeps the Done marker on its successor row" "$S43_MARK" "$(s43_done "$(s43_last "$R43")")"
+poke "$R43" tick
+expect_contains "43a5 …so the held row still reads MET and prints held" "poker: held w-1 since " "$OUT"
+poke "$R43" extend w-1 "more work"
+expect_contains "43b precondition: the extend took — its row is the latest" "extended=" "$(s43_last "$R43")"
+expect_eq "43b2 extend drops the Done marker: new work is signalled afresh" "" "$(s43_done "$(s43_last "$R43")")"
+
+R43M="$(make_repo s43-amend)"; new_roster "$R43M"
+s30_row "$R43M" "$(said "$R43M" w1)"
+poke "$R43M" amend w1 --files+ hooks/b.sh --reason 'the fix touches b'
+expect_eq "43c precondition: the amend took (exit 0)" "0" "$RC"
+expect_contains "43c2 …its row is the amend's" "amended=" "$(s43_last "$R43M" w1)"
+expect_eq "43c3 amend keeps the Done marker on its successor row" "$R43M/w1.done" "$(s43_done "$(s43_last "$R43M" w1)")"
+
+PRED_43="d6d6d6d6-1111-4bbb-8ccc-000000000043"
+R43A="$(make_repo s43-adopt)"; new_roster "$R43A"
+echo done > "$R43A/adopted.md"
+add_row_to "$R43A" "$PRED_43" name=adopted-writer status=identified agent_id=aadopted-434343434343434 \
+  subagent_type=bionic:implementor deliverable="$R43A/adopted.md" duration="45 minutes" \
+  cadence="10 minutes" "$(said "$R43A" adopted-writer)"
+poke "$R43A" adopt
+expect_contains "43d precondition: the row was adopted onto this session's roster" "adopted_from=$PRED_43" \
+  "$(s43_last "$R43A" adopted-writer)"
+expect_eq "43d2 adopt carries the Done marker onto the adopted row" "$R43A/adopted-writer.done" \
+  "$(s43_done "$(s43_last "$R43A" adopted-writer)")"
+unset CLAUDE_CONFIG_DIR
 
 finish
