@@ -127,7 +127,7 @@ SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
 # warning must not fire on it (that is what keeps the §7 "positive pair: pass in
 # silence" row true), and a fixture that omitted them would have made every
 # pre-task-4/3 pass case silently exercise the absence path instead
-# (.claude memory: fixtures-can-pin-away-the-test). The absence path gets its
+# (.claude/rules/test-harness.md, "Fixture fidelity"). The absence path gets its
 # own bare-brief fixture in S10c, and both directions are asserted.
 BRIEF_FULL='Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · audited · wave.
 Your task: implement the widget behind the existing seam.
@@ -868,8 +868,8 @@ chmod 700 "$REPO/.bionic/tmp"
 # yield the exact absolute command or nothing at all — so the one defect A1 exists to
 # catch, a repo-relative spelling, made FIXLINE EMPTY, `bash -c ""` exited 0 with no
 # stderr, and all three assertions below passed over a run that never happened. The
-# extractor pinned away the property under test (.claude memory:
-# fixtures-can-pin-away-the-test); proven vacuous by mutation in epic-18 W3 4/2, where
+# extractor pinned away the property under test (.claude/rules/test-harness.md,
+# "Fixture fidelity"); proven vacuous by mutation in epic-18 W3 4/2, where
 # rewriting PREFLIGHT_CMD to `bash preflight-probe.sh` flipped nothing.
 # Lifting the gate's own text lets a relative spelling reach the execution below.
 # THE FIX TEXT IS IN THE DETAIL NOW (task 13, D-1): the user line carries the repair in
@@ -3742,7 +3742,7 @@ expect_status "r22mki3 six rows ACKED at ceiling 8 -> ALLOWED" "0" "$GATE_ST"
 expect_absent "r22mki3 …and no writers count is printed" "writers:" "$GATE_ERR"
 
 # (h) THE CLOSED-SET LOOKUP DOES NOT LOSE A ROW TO ITS OWN PIPE (correctness review F8,
-# wave-14 T26; memory grep-q-sigpipe-under-pipefail). `budget_roster_counts`'s dark-rows
+# wave-14 T26; `producer | grep -q` under pipefail exits 141 when grep quits early). `budget_roster_counts`'s dark-rows
 # settlement asked `printf '%s\n' "$closed" | grep -qxF -- "$nm"` under this file's own
 # `set -uo pipefail` (:67). `grep -q` exits at its first match; when `$closed` is large
 # enough that the match leaves more queued than the pipe buffer holds, `printf` takes

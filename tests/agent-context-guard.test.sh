@@ -15,7 +15,7 @@
 # dispatches a real Agent tool call, reads ~/.claude, or depends on a live wave.
 # Repos are throwaway git inits under a mktemp'd sandbox.
 #
-# FIXTURE FIDELITY (declared, per .claude memory fixtures-can-pin-away-the-test):
+# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * PreToolUse payload envelope — the shape tests/dispatch-preflight.test.sh
 #     already pins from the CLI 2.1.220 verbatim captures, plus the ONE field
 #     this guard turns on: a top-level `agent_id`. That field's presence in an
