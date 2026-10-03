@@ -1118,4 +1118,126 @@ fi
 # edit it, and CI/the wave floor re-runs it verbatim alongside this one.
 
 # ============================================================
+section "E12 (wave-23-fixit-1810 T13, critic C-3; D1 Δ4) — never auto-bind to a run another LIVE session holds"
+# ============================================================
+#
+# THE DEFECT (record/wave-23-fixit-1810/critic-43e45387.md C-3). The seed's symptom through
+# the engagement door: a fresh session engaging in a root whose ONLY live run is another live
+# session's was bound to it by the count rule, and from then on every gate charged it for
+# that session's ledger (`not launched: T13` at every turn end). D1 made the gates act on
+# bound plans only; this closes the arm that bound a session to someone else's plan.
+#
+# THE RULE. Before the count rule binds, the other sessions' markers are read; one that names
+# the same plan AND belongs to a live session (the sweeper's own liveness: a
+# `sessions/<pid>.json` under the claude home whose pid answers `kill -0` —
+# `patrol_live_session_ids`, the set `patrol_dead_sessions` subtracts) holds the run, and
+# this session is written `plan=none` and told how to bind by hand. A predecessor left by a
+# `/clear` is NOT live — the CLI rewrites the same pid file with the new id — so a resume
+# after `/clear` binds exactly as before.
+#
+# THE CLAUDE HOME IS A FIXTURE (BIONIC_CLAUDE_HOME, roots.sh `claude_home`): exported around
+# `fire`, same idiom as E10's clock pin, so liveness is decided by files this suite wrote and
+# never by the sessions running on the machine. A live session's pid is this shell's `$$`,
+# which is alive for the whole run; a dead one is a reaped child's pid.
+
+E12_HOME="$SANDBOX/e12-claude-home"
+mkdir -p "$E12_HOME/sessions"
+e12_live() {  # <sid> <pid> — the CLI's own pid file, the shape session-start.test.sh plants
+  printf '{"pid":%s,"sessionId":"%s","cwd":"%s"}\n' "$2" "$1" "$SANDBOX" > "$E12_HOME/sessions/$2.json"
+}
+e12_reset() { rm -f "$E12_HOME"/sessions/*.json; }
+E12_DEAD_PID=$( (sleep 0 & echo $!; wait) )
+wait 2>/dev/null
+if kill -0 "$E12_DEAD_PID" 2>/dev/null; then E12_DEAD_PID=999999; fi
+e12_fire() {  # <sid> <root> [event] — engage under the fixture claude home
+  local pay
+  case "${3:-skill}" in
+    expansion) pay="$(expansion_payload "$1" "$2" "/bionic:canonical-sdlc")" ;;
+    *)         pay="$(skill_payload "$1" "$2" "bionic:canonical-sdlc")" ;;
+  esac
+  export BIONIC_CLAUDE_HOME="$E12_HOME"
+  fire "$1" "$pay"
+  unset BIONIC_CLAUDE_HOME
+}
+e12_ctx() { printf '%s' "$HOOK_OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null; }
+e12_evt() { printf '%s' "$HOOK_OUT" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null; }
+E12_ADV() {  # <plan> -> the one advisory, from the library that owns it
+  bash -c '. "$1" && run_unbound_advisory "$2"' _ "$LIB" "$1"
+}
+expect_contains "E12 the advisory template is a real sentence (non-vacuity for every row below)" \
+  "run resolved by newest-plan fallback (session unbound) — /x; bind with" "$(E12_ADV /x)"
+
+# (a) ANOTHER LIVE SESSION IS BOUND TO THE SOLE LIVE RUN: plan=none, and the advisory on the
+# channel the model reads (PreToolUse `hookSpecificOutput.additionalContext`).
+R40="$(make_repo e12a)"
+P40="$R40/.bionic/docs/plans/wave-01.plan.md"
+M40="$(marker_path "$R40" "$SID")"
+M40O="$(marker_path "$R40" "$OTHER_SID")"
+call_bind "$R40" "$OTHER_SID" "$P40"
+expect_eq "E12a the other session is bound to the root's one plan (non-vacuity)" "$P40" "$(plan_of "$M40O")"
+e12_reset; e12_live "$OTHER_SID" "$$"
+e12_fire "$SID" "$R40"
+expect_eq "E12a engaging beside a LIVE holder exits 0" "0" "$HOOK_RC"
+expect_eq "E12a …and binds NOTHING: plan=none" "none" "$(plan_of "$M40")"
+case "$(cat "$M40" 2>/dev/null)" in
+  *"$P40"*) no "E12a …and the held plan's path appears nowhere in the marker" "it does" ;;
+  *) ok "E12a …and the held plan's path appears nowhere in the marker" ;;
+esac
+expect_eq "E12a …and the advisory rides PreToolUse additionalContext" "PreToolUse" "$(e12_evt)"
+expect_contains "E12a …carrying run_unbound_advisory's sentence, byte for byte" "$(E12_ADV "$P40")" "$(e12_ctx)"
+expect_contains "E12a …and naming the live holder, so the bind line is not taken by reflex" \
+  "$OTHER_SID" "$(e12_ctx)"
+expect_eq "E12a …and the holder's own binding is untouched" "$P40" "$(plan_of "$M40O")"
+
+# (a2) the TYPED path answers on its own event's channel.
+rm -f "$M40"
+e12_fire "$SID" "$R40" expansion
+expect_eq "E12a2 the typed path beside a live holder: plan=none" "none" "$(plan_of "$M40")"
+expect_eq "E12a2 …and the advisory rides UserPromptExpansion additionalContext" \
+  "UserPromptExpansion" "$(e12_evt)"
+expect_contains "E12a2 …carrying the same sentence" "$(E12_ADV "$P40")" "$(e12_ctx)"
+
+# (b) THE HOLDER IS DEAD — a /clear predecessor: the CLI rewrote the same pid file with the
+# NEW session's id, so the predecessor's id is in no live pid file. Binds as before.
+rm -f "$M40"
+e12_reset; e12_live "$SID" "$$"
+e12_fire "$SID" "$R40"
+expect_eq "E12b a /clear predecessor holds the run: the resume binds it as before" "$P40" "$(plan_of "$M40")"
+expect_eq "E12b …and says nothing on stdout" "" "$HOOK_OUT"
+
+# (b2) THE HOLDER IS DEAD — its pid file names a process that has exited.
+rm -f "$M40"
+e12_reset; e12_live "$OTHER_SID" "$E12_DEAD_PID"
+e12_fire "$SID" "$R40"
+expect_eq "E12b2 a holder whose pid has exited: binds as before" "$P40" "$(plan_of "$M40")"
+expect_eq "E12b2 …and says nothing on stdout" "" "$HOOK_OUT"
+
+# (c) NO OTHER MARKER AT ALL: binds as before, silently (E9(a)'s rule under the fixture home).
+R41="$(make_repo e12c)"
+P41="$R41/.bionic/docs/plans/wave-01.plan.md"
+M41="$(marker_path "$R41" "$SID")"
+e12_reset; e12_live "$OTHER_SID" "$$"
+e12_fire "$SID" "$R41"
+expect_eq "E12c no other marker: binds the sole live run as before" "$P41" "$(plan_of "$M41")"
+expect_eq "E12c …and says nothing on stdout" "" "$HOOK_OUT"
+
+# (d) A LIVE OTHER SESSION THAT IS UNBOUND holds nothing: its marker says plan=none.
+R42="$(make_repo e12d)"
+P42="$R42/.bionic/docs/plans/wave-01.plan.md"
+M42="$(marker_path "$R42" "$SID")"
+call_bind "$R42" "$OTHER_SID" none
+e12_reset; e12_live "$OTHER_SID" "$$"
+e12_fire "$SID" "$R42"
+expect_eq "E12d a live but UNBOUND other session: binds the sole live run as before" "$P42" "$(plan_of "$M42")"
+
+# (e) A BINDING BY HAND IS NEVER REFUSED BY THIS RULE: `bind_plan` (poker's `bind`, the
+# governing skill's bind-on-first-write) writes the held plan; only engagement's guess yields.
+call_bind "$R40" "$SID" "$P40"
+expect_eq "E12e a hand bind to the held run is written (bind_plan's own refusals only)" "0" "$BIND_ST"
+expect_eq "E12e …and the marker names it" "$P40" "$(plan_of "$M40")"
+e12_reset; e12_live "$OTHER_SID" "$$"
+e12_fire "$SID" "$R40"
+expect_eq "E12e …and re-engagement leaves the hand binding standing" "$P40" "$(plan_of "$M40")"
+
+# ============================================================
 finish
