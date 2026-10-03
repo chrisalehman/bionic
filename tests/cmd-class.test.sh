@@ -1561,6 +1561,19 @@ wt_are '/s/in.txt' '(cd /s && echo > in.txt)' /w
 wt_are '/h/f' 'cd && touch f' /w
 wt_are '/w/f' 'cd /s && cd - && touch f' /w
 
+# --- a double-quoted target is read whole and unescaped in one split (T28) ---
+# wt_tok copies a quoted run in one piece and drops its escapes with one split on the
+# backslash. Each row answers the same as the character walk it replaced. The last two rows
+# hold a newline inside the quote (the unclosed one reaches the reader with its line end), and
+# they are the ones a split on the one-character string "\\" got wrong: macOS awk also splits
+# such a string on newline. (A newline inside a target reads as `/`, because the path fold
+# splits the same way.)
+wt_are '/a/b\c' 'echo x > "/a/b\\c"'
+wt_are '/a/b"c' 'echo x > "/a/b\"c"'
+wt_are '/a/\\' 'echo x > "/a/\\\\"'
+wt_are '/a/l1/l2\x' "$(printf 'echo x > "/a/l1\nl2\\\\x"')"
+wt_are '/a/x' 'tee "/a/x\'
+
 section "§QRUN — wave-24 T22: a quoted run is found whole, never walked"
 # `cmdnorm_qend` finds where a quote closes and the three readers copy the run in one piece
 # (segments, argv_tok, cmdnorm_run). Each pair below differs only in whether the quote closes
