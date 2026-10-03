@@ -425,6 +425,9 @@ expect_eq "B8c an off-budget basename OUTSIDE the repo is allowed" "0" "$ST"
 expect_empty "B8c …silently" "$OUT$ERR"
 guarded "$R1" 'bash /some/other/tree/tests/run.sh'
 expect_eq "B8d …and so is a full tree that is not this one" "0" "$ST"
+guarded "$R1" '/bin/bash /private/tmp/scratch/replay/run.sh'
+expect_eq "B8d2 a script merely NAMED run.sh is not the full tree, and is allowed (T24)" "0" "$ST"
+expect_empty "B8d2 …silently" "$OUT$ERR"
 
 # CONTROL: the same basename inside the repo is refused, so B8c is scoping and not silence.
 guarded "$R1" 'bash tests/probe2.test.sh'
