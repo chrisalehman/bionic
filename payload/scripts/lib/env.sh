@@ -131,10 +131,12 @@ ENV_KEYS="CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIME
 #                                      every session and which the model writes
 #                                      to on its own. Text that reaches every
 #                                      session with no review and no owner is a
-#                                      fifth channel beside CLAUDE.md, rules,
-#                                      skills and hooks, and bionic keeps its
-#                                      standing guidance in those four (wave-23,
-#                                      ADR-040). The CLI's docs give this name
+#                                      fifth channel, and bionic keeps its
+#                                      standing guidance in ADR-040's four: the
+#                                      user's global CLAUDE.md; the repo's
+#                                      CLAUDE.md and .claude/rules/; the
+#                                      doctrine the plugin ships; the wave
+#                                      record (wave-23). The CLI's docs give this name
 #                                      precedence over `autoMemoryEnabled` in
 #                                      either direction, and a settings `env`
 #                                      value overwrites a shell export, so the

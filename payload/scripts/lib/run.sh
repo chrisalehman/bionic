@@ -790,8 +790,8 @@ session_plan() {
 # the dispatch wall judges the dispatch with no plan and refuses a writer with the bind
 # instruction. The word stays in the vocabulary because the advisory needs the plan it
 # names: the bind verb takes exactly that path. The defect it closed: the fill gate charged
-# an unbound session for another live session's ready rows on every turn end
-# (record/wave-23-fixit-1810/seed-bug-fill-gate-acts-on-fallback-plan-2026-10-02.md).
+# an unbound session for another live session's ready rows on every turn end,
+# naming a row it had no standing to launch.
 #
 # BOUND-UNREADABLE IS NOT CLOSED (wave-20 T1, REQ-2, D2). A plan at mode 000, or inside a
 # folder that cannot be opened (`plan_unreadable`), may be a run mid-flight; nothing can be

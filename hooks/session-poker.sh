@@ -1045,7 +1045,8 @@ count_refused_dispatches() {  # <transcript> [<since ISO>] -> count on stdout
 #
 # WHAT EACH VERDICT MEANS HERE (payload/scripts/lib/run.sh:414):
 #   bound-open <p>    this session's own run, and it is open        -> p, open
-#   fallback <p>      no binding; today's root-keyed answer, said out loud (AC-3) -> p, open
+#   fallback <p>      no binding, and the root has an open run that is somebody's: said out
+#                     loud with how to bind, and acted on by nothing -> no plan, NOT open
 #   bound-closed <p>  this session's own run, and it has closed     -> p, NOT open
 #   bound-unreadable <p>  its own run's plan is there, unreadable   -> p, OPEN=unreadable:
 #                     named, never "no open run"; run_state keeps the Patrol (doubt is open)
@@ -1082,8 +1083,13 @@ resolve_run() {  # <project root> <session id> -> sets POKER_RUN_PLAN / POKER_RU
     bound-open)
       POKER_RUN_PLAN="$path"; POKER_RUN_OPEN=yes ;;
     fallback)
-      POKER_RUN_PLAN="$path"; POKER_RUN_OPEN=yes
-      die "run resolved by newest-plan fallback (session unbound) — $path" ;;
+      # UNBOUND MEANS NO RUN (wave-23-fixit-1810, REQ-1, D1; T11 after the Step-6 review).
+      # The plan is ANNOUNCED — lib/run.sh's one advisory, never a copy — and never acted
+      # on: the variables are the ones a session with no run gets, so the tick prints its
+      # no-run line and the scheduler fills nothing from another session's task table. `die`
+      # prints and does not exit; the verb carries on, which is the point.
+      POKER_RUN_PLAN=""; POKER_RUN_OPEN=no
+      die "$(run_unbound_advisory "$path")" ;;
     bound-closed)
       # A BINDING IS A COMMITMENT (design ledger D2). The plan is carried through rather
       # than dropped, because the 1.3.2 read below is what turns "closed" into a DISARM the
@@ -4930,6 +4936,10 @@ EOF
     # contract is UNMET and whose agent has finished without delivering. `open=` and the
     # fill are advisory arithmetic and may be trimmed; this may not.
     if [ "$OPEN_ROSTER" -eq 0 ]; then
+      # RESOLVED HERE, IN THIS SHELL, FIRST: `run_state` below runs in a command substitution,
+      # so a latch it sets dies with the subshell and `sched_budget_read` would resolve and
+      # announce a second time. One resolution in the parent, one announcement.
+      resolve_run "$REPO_REAL" "$SESSION_ID"
       RUN_STATE_RAW="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")" "$SESSION_ID")"
       RUN_STATE="${RUN_STATE_RAW%%|*}"
       RUN_STATE_WHY="${RUN_STATE_RAW#*|}"
