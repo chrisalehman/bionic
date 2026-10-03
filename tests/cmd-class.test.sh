@@ -1394,11 +1394,11 @@ $s.test.sh' 'for s in a b; do bash tests/$s.test.sh; done; bash tests/$s.test.sh
 targets_are 'a.test.sh' '(s=a; bash tests/$s.test.sh)'
 
 section "§LOOPLINES — wave-24 T13 (D10, AC-6.3): the loop's own words, as the lines to run"
-# THE REFUSAL THAT HAD NOTHING TO PRINT. A body that reassigns the loop variable keeps the `$`
-# claim above, and the unexpanded-name refusal used to answer it with a canned `alpha`/`beta`
-# example. `cmd_suite_loop_lines` is the one reading of the loop header that refusal prints:
-# each literal word of the `for` list put into the suite path the body runs, one `bash <path>`
-# line each, read by the same awk as the claims — never a second parse in the wall.
+# THE REFUSAL THAT HAD NOTHING TO PRINT. A `$` claim the classifier will not resolve used to
+# be answered with a canned `alpha`/`beta` example. `cmd_suite_loop_lines` is the one reading
+# of the loop header that refusal prints: each literal word of the `for` list put into the
+# suite path the body runs, one `bash <path>` line each, read by the same awk as the claims —
+# never a second parse in the wall.
 loop_lines_of() {  # <command> -> cmd_suite_loop_lines' answer
   bash -c '. "$1" || { echo "SOURCE-FAILED"; exit 1; }; cmd_suite_loop_lines "$2"' _ "$LIB" "$1" 2>&1
 }
@@ -1406,20 +1406,29 @@ loop_lines_are() {  # <expected, newline-joined> <command>
   expect_eq "loop lines [$2]" "$1" "$(loop_lines_of "$2")"
 }
 loop_lines_are 'bash tests/a.test.sh
-bash tests/b.test.sh' 'for s in a b; do s=c; bash "tests/$s.test.sh"; done'
+bash tests/b.test.sh' 'for s in a b; do bash "tests/$s.test.sh"; done'
+# A command the claims will not expand at all (an `eval`) still has a body that leaves V alone,
+# so its header words are what the loop runs.
 loop_lines_are 'bash tests/a.test.sh
-bash tests/b.test.sh' 'for s in a b; do read s; bash tests/${s}.test.sh; done'
+bash tests/b.test.sh' 'for s in a b; do bash "tests/$s.test.sh"; done; eval :'
 # The path is the one the body names, so a `./` spelling and a trailing tee stay the body's own.
 loop_lines_are 'bash ./tests/a.test.sh
-bash ./tests/b.test.sh' 'for s in a b; do s=run; bash ./tests/$s.test.sh 2>&1 | tee log; done'
+bash ./tests/b.test.sh' 'for s in a b; do bash ./tests/$s.test.sh 2>&1 | tee log; done'
 # Nested literal loops: every pair, in header order.
 loop_lines_are 'bash tests/x-p.test.sh
-bash tests/y-p.test.sh' 'for a in x y; do for b in p; do a=z; bash tests/$a-$b.test.sh; done; done'
+bash tests/y-p.test.sh' 'for a in x y; do for b in p; do bash tests/$a-$b.test.sh; done; done'
 # A word repeated in the header is one line.
-loop_lines_are 'bash tests/a.test.sh' 'for s in a a; do s=c; bash tests/$s.test.sh; done'
-# A loop the claims already resolve has the same lines: the export reads the header, not the body.
-loop_lines_are 'bash tests/a.test.sh
-bash tests/b.test.sh' 'for s in a b; do bash tests/$s.test.sh; done'
+loop_lines_are 'bash tests/a.test.sh' 'for s in a a; do bash tests/$s.test.sh; done'
+# A BODY THAT REASSIGNS THE VARIABLE runs something other than the header's words (wave-24
+# T26, walk-head-b surprise 3): `s=c` runs c twice, so printing a and b would hand the reader
+# a false fix. Nothing is derived, by any of the forms that assign — beside the rows above on
+# the same extractor, and for the nested frame whose OUTER variable is the one reassigned.
+# fails-when: a reassigning body still prints the header words.
+loop_lines_are '' 'for s in a b; do s=c; bash "tests/$s.test.sh"; done'
+loop_lines_are '' 'for s in a b; do read s; bash tests/${s}.test.sh; done'
+loop_lines_are '' 'for s in a b; do s=run; bash ./tests/$s.test.sh 2>&1 | tee log; done'
+loop_lines_are '' 'for a in x y; do for b in p; do a=z; bash tests/$a-$b.test.sh; done; done'
+loop_lines_are '' 'for s in a a; do s=c; bash tests/$s.test.sh; done'
 # NOTHING TO PRINT — the same extractor, beside the rows above: a header that is not all literal,
 # a `$` with no loop around it, and a suite segment outside the loop.
 loop_lines_are '' 'for s in $(seq 3); do bash tests/$s.test.sh; done'
