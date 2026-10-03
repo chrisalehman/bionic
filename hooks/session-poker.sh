@@ -1766,7 +1766,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes
+adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes|done
   # THE OPEN SET IS ASKED ONCE, of the one predicate, over the predecessor's roster as it
   # stands — no session filter, because every row on it carries the predecessor's own id.
   # Handed to awk through the environment rather than `-v`, which would read a backslash in
@@ -1820,6 +1820,8 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       # no budget on it. An apostrophe cannot appear in this comment: the awk program is one
       # single-quoted argument.
       v = kv($0, "re_executes");    if (v != "") rex[n]    = v
+      # THE DONE MARKER (wave-24 T9, D3): the same contract, so its completion signal too.
+      v = kv($0, "done");           if (v != "") dmark[n]  = v
       # THE ATTRIBUTION, carried forward exactly as the contract fields are. It is the bound
       # plan of the session that dispatched the row, stamped at the instant the row was
       # written (hooks/dispatch-preflight.sh). Rows written before this wave carry no such
@@ -1837,10 +1839,10 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       for (i = 1; i <= cnt; i++) {
         n = order[i]
         if (!(n in isopen)) continue
-        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
                launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
                ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n], \
-               files[n], sallow[n], ssrc[n], rex[n]
+               files[n], sallow[n], ssrc[n], rex[n], dmark[n]
       }
     }
   ' "$1" 2>/dev/null
@@ -1900,10 +1902,10 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
 # where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
 # the adopter is now the session that owns the row — the launching session is already
 # recorded, separately, in `adopted_from=`.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites_source> <re_executes> -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites_source> <re_executes> [<done>] -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
   local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" waiver="${13:-}" d
-  local files="${14:-}" sallow="${15:-}" ssrc="${16:-}" rex="${17:-}"
+  local files="${14:-}" sallow="${15:-}" ssrc="${16:-}" rex="${17:-}" dmark="${18:-}"
   local -a RR_ARGS
   local ROW=""
   local -a INSTRUMENT_FIELDS
@@ -1987,6 +1989,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     absent=
     "waiver=$(clean "$waiver")"
     ${INSTRUMENT_FIELDS[@]+"${INSTRUMENT_FIELDS[@]}"}
+    ${dmark:+"done=$(clean "$dmark")"}
     "teammate_id=$(clean "$addr")"
     "adopted_from=$(clean "$osid")"
     tool_use_id=
@@ -2327,8 +2330,11 @@ note() { printf 'poker: note: %s\n' "$1"; }
 # key and a present-but-empty one are different rows to a by-key reader. The two audit keys
 # (`amended=`, `extended=`) are NOT copied — each belongs to the row that did the act, and
 # the history is the row sequence.
+# THE DONE MARKER TRAVELS with `hold` and `amend`, which continue the contract, and not with
+# `extend`, which re-opens it for new work signalled afresh (wave-24 T9, D3; A-orch-31): the
+# verdict reads the latest row, so a copy that dropped `done=` would un-say a finished agent.
 ROW_COPY_ARGS=()
-row_copy_args() {  # <row> <session id> -> sets ROW_COPY_ARGS
+row_copy_args() {  # <row> <session id> [drop-done] -> sets ROW_COPY_ARGS
   local row="$1" k
   ROW_COPY_ARGS=("session=$2")
   for k in status name agent_id launched_at subagent_type model deliverable source duration \
@@ -2338,6 +2344,9 @@ row_copy_args() {  # <row> <session id> -> sets ROW_COPY_ARGS
   for k in files suites_allowed suites_source teammate_id adopted_from; do
     row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
   done
+  if [ "${3-}" != drop-done ] && row_has_key "$row" done; then
+    ROW_COPY_ARGS+=("done=$(line_field "$row" done)")
+  fi
   if row_has_key "$row" re_executes; then
     ROW_COPY_ARGS+=("re_executes=$(clean "$(line_field "$row" re_executes)" re_executes)")
   fi
@@ -2909,7 +2918,7 @@ case "$VERB" in
       OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
 
       while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN RWAIVER \
-                            RFILES RSALLOW RSSRC RREX; do
+                            RFILES RSALLOW RSSRC RREX RDONE; do
         [ -n "$RNAME" ] || continue
 
         # ---- IS THIS ROW STILL SOMEBODY'S WORK? (REQ-9 AC-9.1/9.2; D10)
@@ -3201,7 +3210,7 @@ case "$VERB" in
               if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
                    "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR" \
                    "${ADOPT_OWN_PLAN:-none}" "$RWAIVER" \
-                   "$RFILES" "$RSALLOW" "$RSSRC" "$RREX"; then
+                   "$RFILES" "$RSALLOW" "$RSSRC" "$RREX" "$RDONE"; then
                 ROW_JOURNALLED=yes
                 # THE MARKER COPY (S17, AC-12 attempt 2). `payload/scripts/lib/stop.sh`
                 # (`stop_landing_gate`, reached from hooks/stop.sh) is this schema's one
@@ -3914,7 +3923,7 @@ EOF
     # THE COPY IS `row_copy_args`'s, shared with `amend`; this verb overrides two fields: the
     # launch, bumped to now (the whole point — the old deliverable then predates it), and
     # its reason, as data. `claims=` travels with the copy, untouched.
-    row_copy_args "$EXTEND_ROW" "$SESSION_ID"
+    row_copy_args "$EXTEND_ROW" "$SESSION_ID" drop-done
     identity_args "$ROSTER_FILE" "$EXTEND_NAME" "$EXTEND_ROW"
     EXTEND_RR_ARGS=("${ROW_COPY_ARGS[@]}")
     EXTEND_RR_ARGS+=(${POKER_ID_ARGS[@]+"${POKER_ID_ARGS[@]}"})

@@ -2666,6 +2666,7 @@ K_BRIEF='Canonical-sdlc Step 4, task 6 of epic-16 wave-01; build · audited · w
 Expected artifact: .bionic/docs/record/w16-chain.md
 Expected duration: ~30 minutes. Progress artifact: .bionic/tmp/w16-chain.progress, cadence ~7m.
 Subprocess claim: `w16-chain-marker` → .bionic/tmp/w16-chain.log
+Done marker: .bionic/tmp/w16-chain.done
 Exit condition: the artifact exists.
 Suites: tests/widget.test.sh'
 
@@ -2743,6 +2744,11 @@ expect_eq "…and it reads the contract off the chain, not off nothing" "STILL-L
 sleep 1
 mkdir -p "$KREPO/.bionic/docs/record"
 echo "the task report" > "$KREPO/.bionic/docs/record/w16-chain.md"
+# …and the agent says it is done, through the Done marker its brief declared (wave-24 T9, D3):
+# the lift carried it to the launch row, and every row of the chain copied it forward.
+: > "$KREPO/.bionic/tmp/w16-chain.done"
+expect_contains "…the chain carries the brief's Done marker to its latest row (T9)" \
+  "|done=.bionic/tmp/w16-chain.done|" "$(grep '|name=w16-chain|' "$KROSTER" | tail -1)"
 K_VERDICT=$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict w16-chain 2>/dev/null )
 K_VLINE=$(printf '%s\n' "$K_VERDICT" | grep -F 'landing-verdict/v1|' | head -1)
 expect_eq "…and the same chain reads MET once the artifact lands" "MET" \
@@ -2765,8 +2771,8 @@ expect_contains "…from the same source" "progress_source=roster" "$K_MLINE"
 # both readers must also agree the artifact is not there.
 k_sw_path() {  # the path the VERB says the contract names, whatever state it reports
   j_field "$K_VLINE" detail \
-    | grep -oE '(missing|delivered|empty)=[^ ]+' | head -1 | cut -d= -f2-
-}
+    | grep -oE '(missing|delivered|empty)=[^ ;]+' | head -1 | cut -d= -f2-
+}   # `;` ends a conjunct: the detail joins them with "; " (a MET row adds `said=…`, T9)
 K_SC_DELIV=$(printf '%s' "$K_MLINE" | tr '|' '\n' | grep '^deliverables=' | head -1 | cut -d= -f2-)
 expect_eq "the verb and the observation name the same deliverable" \
   "$(k_sw_path)" "${K_SC_DELIV#*:}"
@@ -2939,6 +2945,10 @@ else
   else
     ok "a dropped forward-copy makes the chain invariant RED"
   fi
+  # The mutant agent says it is done too (wave-24 T9, D3): its Done marker is dated past its
+  # launch, so the one thing this verdict varies is the contract the mutation retracted.
+  touch -t "$(date -v+60S +%Y%m%d%H%M.%S 2>/dev/null || date -d '+60 seconds' +%Y%m%d%H%M.%S)" \
+    "$KREPO/.bionic/tmp/w16-chain.done"
   # …and the consequence the invariant is a proxy for: the contract is RETRACTED.
   # The verdict now calls a row MET for naming nothing, which is the false clean
   # answer the landing gate would pass a stopping agent on.
@@ -4509,7 +4519,7 @@ n_cycle() {  # <tool_use_id> — one full dispatch cycle through all three real 
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
       hook_event_name:"PreToolUse", tool_name:"Agent",
       tool_input:{description:"a dispatch", subagent_type:"implementor", name:"resumed",
-                  prompt:("Expected artifact: " + $d + "\nSuites: tests/widget.test.sh")},
+                  prompt:("Expected artifact: " + $d + "\nDone marker: " + $d + ".done\nSuites: tests/widget.test.sh")},
       tool_use_id:$u}' | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
   jq -n --arg s "$SID_A" --arg c "$NLR" --arg u "$1" --arg a "$NLR_ID" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
@@ -4555,6 +4565,7 @@ rm -f "$NLR/.bionic/tmp/roster-$SID_A.state.bak"
 # The takeover's delivery: written between the original launch and the resume, which is the
 # artifact the field case's landing gate called missing.
 echo "the takeover wrote this" > "$NLR_ART"
+: > "$NLR_ART.done"   # the agent says so, by the Done marker its brief declared (wave-24 T9, D3)
 touch -t "$(date -v-1800S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-1800 seconds" +%Y%m%d%H%M.%S)" "$NLR_ART"
 expect_eq "before the resume, the delivered contract reads MET" "MET" "$(n_state)"
 

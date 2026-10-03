@@ -1556,6 +1556,7 @@ C_PROGRESS=$(sanitize "$(field_of progress)" 300)
 C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 C_WAIVER=$(sanitize "$(field_of waiver)" 300)
+C_DONE=$(sanitize "$(field_of done)" 300)   # the Done marker (wave-24 T9, D3); on the row only when declared
 # THE THREE INSTRUMENT FIELDS, READ THROUGH THE GRAMMAR (wave-20 T6; REQ-4, D4, Δ10).
 # `brief_field` (payload/scripts/lib/brief.sh) bounds each kind as the roster row stores it —
 # the three are list-valued and never cut — so the scaffold marks and the row below hold
@@ -2388,6 +2389,7 @@ ROW=$(roster_row \
   "suites_allowed=${SUITES_ALLOWED}" \
   "suites_source=${SUITES_SOURCE}" \
   "re_executes=${C_RE_EXECUTES}" \
+  ${C_DONE:+"done=${C_DONE}"} \
   "tool_use_id=${TOOL_USE_ID}" \
   "plan=${ROSTER_PLAN}") || ROW=""
 
