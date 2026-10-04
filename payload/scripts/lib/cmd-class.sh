@@ -77,6 +77,10 @@
 #                                suite naming no file this repo budgets by. The budget arm
 #                                reads this: `suites_allowed=` is compared to the first,
 #                                `re_executes=` to the second (REQ-1 AC-1.5).
+#   cmd_claim_scope    <root> <basename> <path>
+#                             -> rc 0 when a file claim is <root>'s own tests/<basename>,
+#                                1 when its path leads elsewhere, 2 when it cannot be placed:
+#                                the one scoping rule the budget and the stamp both read.
 #   cmd_suite_loop_lines <cmd>
 #                             -> one `bash <path>` line per suite a literal `for` header names,
 #                                each word put into the path the loop body runs (wave-24 T13,
@@ -1102,6 +1106,9 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         exit
       }
       k = segments(out, seg)
+      # The top-level operators, kept for the `split` line below before class_seg recurses
+      # into segments() and overwrites SEPKIND.
+      if (mode == "targets") for (tj = 1; tj <= k; tj++) TSK[tj] = SEPKIND[tj]
       compound_pass(k, seg)
       # mode=looplines: cmd_suite_loop_lines (wave-24 T13) — section 7, ahead of expand_all.
       if (mode == "looplines") { loop_lines(k, seg); exit }
@@ -1117,6 +1124,19 @@ _cmd_class_awk() {  # <mode> ; command on stdin
           LAST_TARGET = ""; LAST_KIND = ""; LAST_RUN = ""
           cls = class_seg(t, 0)
           if (mode == "targets") {
+            # TWO SUITE RUNS SHARE ONE EXIT CODE ONLY ACROSS `&&` (wave-26 T63, critic K4-N1).
+            # Each suite-class run after the first is checked against the one before it: the
+            # same segment again (the second value of a loop) or any operator between the two
+            # but `&&` and the parentheses of a subshell (`;`, a newline, `||`, a pipe) means
+            # the exit code of the command may not speak for both. One `split` line then
+            # closes the reading, and payload/scripts/lib/walls.sh names that run `?`.
+            if (cls == "suite" && !LAST_DRY) {
+              if (SUITE_AT) {
+                if (SUITE_AT == i) SPLIT = 1
+                for (tj = SUITE_AT; tj < i; tj++) if (TSK[tj] != "&&" && TSK[tj] != "(" && TSK[tj] != ")") SPLIT = 1
+              }
+              SUITE_AT = i
+            }
             # ONE LINE PER DISTINCT CLAIM, in position order. A command naming the same
             # suite twice states one budget claim, and the caller compares a set.
             if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && !(LAST_TARGET in tgt_seen)) {
@@ -1142,6 +1162,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         # segments that FOLLOW it.
         if (is_cd(t0)) CD_SEEN = 1
       }
+      if (mode == "targets" && SPLIT) print "split"
     }
   '
 }
@@ -2086,24 +2107,36 @@ cmd_suite_claims() {  # <command> [<repo root>] -> "<kind>\t<target>\t<run>" per
   #     text states (a literal `for` list, one literal assignment) is resolved BEFORE this
   #     point by the awk reading (section 6, wave-24 D9), so what still arrives with a `$`
   #     is a name nothing here can vouch for.
-  local _root="${2-}" _k _b _r _p _abs
+  #
+  # The reading's closing `split` line (wave-26 T63) is the stamp's business, not a claim.
+  local _root="${2-}" _k _b _r _p _s
   printf '%s' "${1-}" | _cmd_class_awk targets | while IFS=$'\t' read -r _k _b _r _p; do
-    [ -n "$_k" ] || continue
+    [ -n "$_k" ] && [ "$_k" != split ] || continue
     if [ "$_k" != "file" ]; then printf '%s\t%s\t%s\n' "$_k" "$_b" "$_r"; continue; fi
     [ -n "$_b" ] || continue
-    if [ -z "$_root" ]; then printf 'file\t%s\t%s\n' "$_b" "$_r"; continue; fi
-    case "$_p" in
-      *'$'*|*'`'*) printf 'file\t%s\t%s\n' "$_b" "$_r"; continue ;;
-      */*) : ;;
-      *) printf 'file\t%s\t%s\n' "$_b" "$_r"; continue ;;
-    esac
-    case "$_p" in
-      /*) _abs="$_p" ;;
-      *)  _abs="$_root/${_p#./}" ;;
-    esac
-    if [ "$_abs" = "$_root/tests/$_b" ]; then printf 'file\t%s\t%s\n' "$_b" "$_r"; fi
+    _s=0
+    [ -z "$_root" ] || cmd_claim_scope "$_root" "$_b" "$_p" || _s=$?
+    [ "$_s" = 1 ] || printf 'file\t%s\t%s\n' "$_b" "$_r"
   done
   return 0
+}
+
+cmd_claim_scope() {  # <repo root> <basename> <path> -> rc 0 its tests/<basename>; 1 a path elsewhere; 2 no path to place
+  # THE SCOPING RULE ABOVE, SPELLED ONCE (wave-26 T63, critic K4-N2). Two readers ask it, and
+  # each fails closed its own way on the answer neither can resolve (rc 2: a `$` or a backtick,
+  # or the bare basename a `cd` licensed). The budget, `cmd_suite_claims`, keeps such a claim
+  # named, so the budget still holds it. The stamp, `_bsg_suites` in payload/scripts/lib/walls.sh,
+  # names only an rc-0 claim by its basename, so a run it cannot place never clears that suite's
+  # red. Pure parameter expansion: the wall calls it on the hottest path in the tree.
+  case "${3-}" in
+    *'$'*|*'`'*) return 2 ;;
+    */*) : ;;
+    *) return 2 ;;
+  esac
+  case "$3" in
+    /*) [ "$3" = "$1/tests/$2" ] ;;
+    *)  [ "$1/${3#./}" = "$1/tests/$2" ] ;;
+  esac
 }
 
 cmd_suite_loop_lines() {  # <command> -> one `bash <path>` line per suite a literal loop header names

@@ -13936,4 +13936,93 @@ expect_ne "PRF mutation: …which answers another line's time, so the agreement 
   "$PRF_AT" "$(prf_at "$PRF_MUT")"
 PRF_NEEDLE="$PRF_NEEDLE_SAVED"
 
+# ============================================================
+section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"
+# ============================================================
+#
+# TWO READERS OF ONE CLAIM. The dispatch budget counts a suite file by `cmd_suite_claims` (its
+# file half, `cmd_suite_targets`), scoped to a repository root: a claim counts only when its path
+# is that root's own `tests/<basename>`. The Bash wall names the suites a run stamps
+# (`_bsg_suites`, payload/scripts/lib/walls.sh) from the same reading. Before T63 the wall named
+# every file claim by its basename, so `bash other/a.test.sh` stamped `a.test.sh` while the
+# budget would not count it at all, and its green cleared tests/a.test.sh's red. Both readers
+# now ask cmd_claim_scope. Pinned here, for each command: a claim's basename is among the
+# stamp's names exactly when the budget, rooted where the stamp goes, counts that file; and a
+# runner the budget keys by its run is stamped under that run's text, each character outside
+# the name set turned into `_`. The stamp side is the real hook's wrap; the budget side is the
+# library. A doctored copy of the wall that names every file by its basename again must split
+# the two.
+NM_D="$SANDBOX/fx/nm"; NM_R="$NM_D/repo"; NM_SID="nmsuite0-0000-0000-0000-000000000000"
+mkdir -p "$NM_R/.bionic/tmp" "$NM_R/tests" "$NM_R/other" "$NM_D/home"
+git -C "$NM_R" init -q 2>/dev/null
+: > "$NM_R/.bionic/tmp/engaged-${NM_SID}.state"
+NM_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+[ -r "$NM_LIB/cmd-class.sh" ] || NM_LIB="$BIONIC_HOOKS_DIR/../scripts/lib"
+nm_names() {  # <hook> <command> -> the --suites value the wall hands the shim, unquoted; "" when not wrapped
+  local w
+  w="$(jq -nc --arg s "$NM_SID" --arg c "$NM_R" --arg cmd "$2" \
+    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c, permission_mode:"bypassPermissions",
+      hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:$cmd, timeout:600000},
+      tool_use_id:"toolu_nm", agent_id:"anmsuite-0123456789abcdef", agent_type:"test-runner"}' |
+    env HOME="$NM_D/home" CLAUDE_CONFIG_DIR="$NM_D/home/.claude" CLAUDE_CODE_SESSION_ID="$NM_SID" \
+      CLAUDE_PROJECT_DIR= BIONIC_PLUGINS_DIR="$NM_D/no-plugins" SHELL=/bin/bash CLAUDE_CODE_SHELL= \
+      bash "$1" 2>/dev/null | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
+  case "$w" in *' --suites '*) : ;; *) return 0 ;; esac
+  w="${w#* --suites }"; w="${w%% -- *}"; w="${w#\'}"; w="${w%\'}"
+  printf '%s' "$w"
+}
+nm_agree() {  # <hook> <command> -> `agree`, or `split <claim>` naming the first claim the two readers part on
+  local n f k b r p
+  n=",$(nm_names "$1" "$2"),"
+  f="$(bash -c '. "$1" || exit 9; cmd_suite_targets "$2" "$3"' _ "$NM_LIB/cmd-class.sh" "$2" "$NM_R" 2>/dev/null)"
+  while IFS=$'\t' read -r k b r; do
+    [ -n "$k" ] || continue
+    if [ "$k" = file ]; then
+      case "$n" in *",$b,"*) p=1 ;; *) p=0 ;; esac
+      if printf '%s\n' "$f" | grep -qxF -- "$b"; then
+        [ "$p" = 1 ] || { printf 'split %s' "$b"; return 0; }
+      else
+        [ "$p" = 0 ] || { printf 'split %s' "$b"; return 0; }
+      fi
+    else
+      case "$n" in *",${r//[!A-Za-z0-9._+-]/_},"*) : ;; *) printf 'split %s' "$r"; return 0 ;; esac
+    fi
+  done <<< "$(bash -c '. "$1" || exit 9; cmd_suite_claims "$2"' _ "$NM_LIB/cmd-class.sh" "$2" 2>/dev/null)"
+  printf 'agree'
+}
+NM_HOOK="$BIONIC_HOOKS_DIR/bash-walls.sh"
+NM_OTHER='bash other/a.test.sh'
+expect_eq "NM fixture: the real wall wraps a suite and names it (the extractor reads a name)" \
+  "a.test.sh" "$(nm_names "$NM_HOOK" 'bash tests/a.test.sh')"
+expect_eq "NM fixture: the budget does not count other/a.test.sh as this tree's suite" "" \
+  "$(bash -c '. "$1" || exit 9; cmd_suite_targets "$2" "$3"' _ "$NM_LIB/cmd-class.sh" "$NM_OTHER" "$NM_R" 2>&1)"
+expect_eq "NM fixture: …while it counts tests/a.test.sh" "a.test.sh" \
+  "$(bash -c '. "$1" || exit 9; cmd_suite_targets "$2" "$3"' _ "$NM_LIB/cmd-class.sh" 'bash tests/a.test.sh' "$NM_R" 2>&1)"
+for _c in 'bash tests/a.test.sh' 'bash ./tests/a.test.sh' "bash $NM_R/tests/a.test.sh" \
+          "$NM_OTHER" 'bash ../x/tests/a.test.sh' 'bash /elsewhere/tests/a.test.sh' \
+          'bash tests/a.test.sh && bash other/b.test.sh' 'npm test && bash tests/a.test.sh' \
+          'pytest -q' 'set -o pipefail; bash tests/a.test.sh 2>&1 | tee "$L"; rc=$?; exit $rc'; do
+  expect_eq "NM [$_c] the stamp's names and the budget agree" "agree" "$(nm_agree "$NM_HOOK" "$_c")"
+done
+# THE DOCTORED SITE: a copy of the wall whose naming skips the scoping rule, naming every file
+# claim by its basename (the projection before T63). It must still wrap, and it must part from
+# the budget on the file the budget does not count.
+NM_MUT="$NM_D/mut"
+mkdir -p "$NM_MUT/hooks" "$NM_MUT/scripts/lib"
+cp "$BIONIC_HOOKS_DIR"/*.sh "$NM_MUT/hooks/" 2>/dev/null
+cp "$NM_LIB"/*.sh "$NM_MUT/scripts/lib/" 2>/dev/null
+cp "$NM_LIB/../booked.sh" "$NM_MUT/scripts/booked.sh" 2>/dev/null
+NM_NEEDLE='if [ "$_k" != file ] || ! cmd_claim_scope "$_root" "$_b" "$_p"; then'
+anchor "$NM_LIB/walls.sh" "$NM_NEEDLE" 1
+NM_N="$NM_NEEDLE" awk '
+  BEGIN { n = ENVIRON["NM_N"]; r = "if [ \"$_k\" != file ]; then" }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' \
+  "$NM_LIB/walls.sh" > "$NM_MUT/scripts/lib/walls.sh"
+expect_eq "NM mutation: the doctored copy lost exactly the scoping call" "0 1" \
+  "$(grep -cF -- "$NM_NEEDLE" "$NM_MUT/scripts/lib/walls.sh") $(grep -cF -- 'if [ "$_k" != file ]; then' "$NM_MUT/scripts/lib/walls.sh")"
+expect_eq "NM mutation: …and its wall still wraps and names a suite" "a.test.sh" \
+  "$(nm_names "$NM_MUT/hooks/bash-walls.sh" 'bash tests/a.test.sh')"
+expect_eq "NM mutation: …which names other/a.test.sh by its basename, so the agreement goes red" \
+  "split a.test.sh" "$(nm_agree "$NM_MUT/hooks/bash-walls.sh" "$NM_OTHER")"
+
 finish
