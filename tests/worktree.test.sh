@@ -561,6 +561,94 @@ stop_runner
 
 rm -f "$CLAUDE_HOME/sessions/$$.json"
 
+# Arm 10 — A COMMAND THAT ONLY MENTIONS THE RUNNER IS NOT THE RUNNER (T31, found live in
+# wave 26). The harness runs every Bash call as `zsh -c '… <the whole command text>'`, so a
+# wait loop or a progress note naming `tests/run.sh` is a process in the project whose command
+# line holds that text. Only a process that RUNS the script counts: its interpreter's script
+# word, or its argv[0], ends in `tests/run.sh`, and that path resolves to a file.
+MENTION_PID=""
+start_mention() {  # <cwd> <shell> <-c text> -> MENTION_PID, once ps shows the text
+  ( cd "$1" && exec "$2" -c "$3" ) >/dev/null 2>&1 &
+  MENTION_PID=$!
+  local i=0
+  while [ $i -lt 100 ]; do
+    case "$(ps -o command= -p "$MENTION_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
+    i=$((i+1)); sleep 0.05
+  done
+  return 1
+}
+stop_mention() {
+  [ -n "$MENTION_PID" ] || return 0
+  kill "$MENTION_PID" 2>/dev/null; wait "$MENTION_PID" 2>/dev/null
+  MENTION_PID=""
+}
+trap 'stop_runner; stop_mention; rm -rf "$TMP"' EXIT
+BT10="$(new_tree "$S" mention-arm)"
+expect_true "a shell started in the root whose -c text names the runner bare" \
+  start_mention "$S" bash 'while :; do sleep 1; done # bash tests/run.sh'
+expect_match "a shell whose -c text names tests/run.sh does not refuse the land" \
+  "spawn-worktree: LANDED branch=mention-arm *" "$(worktree_land "$BT10" wave/fixture)"
+stop_mention
+BT11="$(new_tree "$S" quoted-mention-arm)"
+expect_true "a shell started in the root whose -c text quotes the runner, as the harness's wait loops do" \
+  start_mention "$S" bash "while :; do sleep 1; done; until ! pgrep -f 'tests/run.sh'; do sleep 30; done"
+expect_match "a quoted mention does not refuse either (it once printed script=unreadable)" \
+  "spawn-worktree: LANDED branch=quoted-mention-arm *" "$(worktree_land "$BT11" wave/fixture)"
+# The same world with the real runner started beside the mention: the runner refuses, and the
+# refusal names the runner, not the mention.
+BT12="$(new_tree "$S" mention-and-runner-arm)"
+expect_true "the mention is still running" kill -0 "$MENTION_PID"
+expect_true "a stand-in runner started beside it (relative, cwd the root)" start_runner "$S" "tests/run.sh"
+OUTB12="$(worktree_land "$BT12" wave/fixture)"; RCB12=$?
+expect_match "a real bash tests/run.sh in the root still refuses, naming the runner" \
+  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} cwd=${S} script=${S}/tests/run.sh" "$OUTB12"
+expect_eq    "that refusal exits 2" "2" "$RCB12"
+stop_runner
+stop_mention
+# A -c string whose FIRST word is a runner path is still a command string: here bash tries a
+# non-executable `tests/run.sh` in a directory of the root, fails, and loops.
+mkdir -p "$S/sub/tests"; printf 'not a runner\n' > "$S/sub/tests/run.sh"
+expect_true "a shell started whose -c string opens with a tests/run.sh that resolves in the root" \
+  start_mention "$S/sub" bash 'tests/run.sh 2>/dev/null; while :; do sleep 1; done'
+expect_match "a -c string is never a script, whatever its first word" \
+  "spawn-worktree: LANDED branch=mention-and-runner-arm *" "$(worktree_land "$BT12" wave/fixture)"
+stop_mention
+rm -rf "$S/sub"
+BT12="$(new_tree "$S" runner-shapes-arm)"
+# An interpreter option before the script, and the script as argv[0], are runners too.
+start_runner_argv() {  # <cwd> <glob> <argv>... -> RUNNER_PID, once ps shows a command matching <glob>
+  local d="$1" g="$2"; shift 2
+  ( cd "$d" && exec "$@" ) >/dev/null 2>&1 &
+  RUNNER_PID=$!
+  local i=0
+  while [ $i -lt 100 ]; do
+    [[ "$(ps -o command= -p "$RUNNER_PID" 2>/dev/null)" == $g ]] && return 0
+    i=$((i+1)); sleep 0.05
+  done
+  return 1
+}
+expect_true "a stand-in runner started as bash -o pipefail tests/run.sh" \
+  start_runner_argv "$S" "*bash -o pipefail tests/run.sh" bash -o pipefail tests/run.sh
+expect_match "a runner behind an interpreter option refuses" \
+  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} *script=${S}/tests/run.sh" \
+  "$(worktree_land "$BT12" wave/fixture)"
+stop_runner
+expect_true "a process started with the root's tests/run.sh as its argv[0]" \
+  start_runner_argv "$ELSE" "$S/tests/run.sh 30" bash -c "exec -a '$S/tests/run.sh' sleep 30"
+expect_match "a process whose argv[0] is the runner's script refuses" \
+  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} *script=${S}/tests/run.sh" \
+  "$(worktree_land "$BT12" wave/fixture)"
+stop_runner
+# A runner path that resolves to no file is not a runner: the directory is the root's, the
+# script is not there.
+mkdir -p "$S/empty/tests"
+expect_true "a process started with a missing tests/run.sh in the root as its argv[0]" \
+  start_runner_argv "$ELSE" "$S/empty/tests/run.sh 30" bash -c "exec -a '$S/empty/tests/run.sh' sleep 30"
+expect_match "a runner path that resolves to no file does not refuse" \
+  "spawn-worktree: LANDED branch=runner-shapes-arm *" "$(worktree_land "$BT12" wave/fixture)"
+stop_runner
+rmdir "$S/empty/tests" "$S/empty"
+
 section "Group 6: worktree_land — the legacy link, and the branch, and prune"
 
 G="$(new_repo "$TMP/land-legacy")"
