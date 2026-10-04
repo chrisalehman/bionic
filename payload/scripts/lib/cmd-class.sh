@@ -2156,12 +2156,23 @@ cmd_class() {  # <command> -> suite|bootstrap|install|build|none, by priority
   # `${rest%%…}`/`${rest#*…}` cost N passes over the whole text: 4.9 s under 3.2 on a 52 KB
   # `python3 -c` body of 1 350 lines. Two anchored `case` tests per class word read the
   # same lines in a fixed number of passes.
-  local lines c
-  lines=$'\n'"$(cmd_class_lines "${1-}")"$'\n'
+  #
+  # THE PICK IS `cmd_class_pick`, below, and walls.sh's `_wall_class_read` calls it too (wave-26
+  # T40), so the priority order is written once.
+  cmd_class_pick "$(cmd_class_lines "${1-}")"
+  printf '%s' "$CMD_CLASS_PICKED"
+}
+
+# The class of the whole command from its `cmd_class_lines` output, by priority, into
+# CMD_CLASS_PICKED. It assigns rather than prints, so a caller holding the lines already
+# pays no fork for the pick (walls.sh `_wall_class_read`, wave-26 T39/T40).
+CMD_CLASS_PICKED=""
+cmd_class_pick() {  # <class lines> -> sets CMD_CLASS_PICKED to suite|bootstrap|install|build|none
+  local lines=$'\n'"${1-}"$'\n' c
   for c in suite bootstrap install build; do
     case "$lines" in
-      *$'\n'"$c"$'\t'*|*$'\n'"$c"$'\n'*) printf '%s' "$c"; return 0 ;;
+      *$'\n'"$c"$'\t'*|*$'\n'"$c"$'\n'*) CMD_CLASS_PICKED="$c"; return 0 ;;
     esac
   done
-  printf 'none'
+  CMD_CLASS_PICKED=none
 }

@@ -320,22 +320,15 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 # that the cached answer is the one a fork would give. A raw command that is already flat (one
 # line, single spaces, no heredoc) is one text to both askers and pays one reading.
 #
-# THE CLASS IS `cmd_class`'s OWN PRIORITY READ (cmd-class.sh), the same two anchored `case`
-# tests per class word over the same lines. A SEGMENT IS NEVER ASKED HERE: the chain arm's
+# THE CLASS IS `cmd_class`'s OWN PRIORITY READ: both call `cmd_class_pick` (cmd-class.sh,
+# wave-26 T40), which assigns, so the pick costs no fork. A SEGMENT IS NEVER ASKED HERE: the chain arm's
 # per-segment reads would evict the whole command's reading, which the wrap still wants.
 _WALL_CLASS_READ=0; _WALL_CLASS_TEXT=""; _WALL_CLASS_LINES=""; _WALL_CLASS=""
 _wall_class_read() {  # <whole command text> -> sets _WALL_CLASS_LINES and _WALL_CLASS
-  local _l _c
   [ "$_WALL_CLASS_READ" = 1 ] && [ "$_WALL_CLASS_TEXT" = "$1" ] && return 0
   _WALL_CLASS_LINES="$(cmd_class_lines "$1")"
   _WALL_CLASS_TEXT="$1"; _WALL_CLASS_READ=1
-  _l=$'\n'"$_WALL_CLASS_LINES"$'\n'
-  for _c in suite bootstrap install build; do
-    case "$_l" in
-      *$'\n'"$_c"$'\t'*|*$'\n'"$_c"$'\n'*) _WALL_CLASS="$_c"; return 0 ;;
-    esac
-  done
-  _WALL_CLASS=none
+  cmd_class_pick "$_WALL_CLASS_LINES"; _WALL_CLASS="$CMD_CLASS_PICKED"
 }
 
 # ─── _wall_cmd_fill — ONE fill for the farm-out wall's three classifier readings ─
