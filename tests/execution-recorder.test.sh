@@ -2984,7 +2984,7 @@ expect_eq "SJ-a5 …and the launch's correlation key" "toolu_01SJA" "$(sj_field 
 sj_walls "$SJA_REPO" 'bash tests/run.sh' "$SJ_AID"
 expect_eq "SJ-a6 after the start, bash-walls admits the runner's full run" "0" "$SJ_ST"
 expect_regex "SJ-a7 …wrapped in the booking shim and stamped run.sh" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --suites run\\.sh -- 'bash tests/run\\.sh'\$" "$(sj_wrap)"
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?( --max-wait [0-9]+)? --suites run\\.sh -- 'bash tests/run\\.sh'\$" "$(sj_wrap)"
 
 # THE LAUNCH CALL'S RETURN STAYS THE SECOND WRITER OF THE SAME VALUE (the sync shape, capture D).
 run_rec "$(jq -n --arg s "$SID_A" --arg t "$SJA_TR" --arg c "$SJA_REPO" --arg a "$SJ_AID" \
