@@ -501,6 +501,23 @@ _git_argv_skip() {
   return 0
 }
 
+# git_argv_is_git <word>
+#
+# THE ONE ANSWER to "does this argv[0] run git" (wave-24 T31). Returns 0 for `git` or a path
+# ending `/git` in ANY letter case, 1 otherwise. The default macOS filesystem is case-blind:
+# `command -v GIT` finds /usr/bin/GIT, so `GIT push origin main` runs a push, and a reader that
+# matched the literal word let it past every wall. Folding always, whatever the filesystem,
+# is the fail-closed direction: where `GIT` does not resolve, the command it would refuse
+# fails anyway. Only the program word folds. git itself refuses `git PUSH` ("cannot handle
+# PUSH as a builtin"), so the subcommand stays case-exact. A glob, not `tr`, so the hot path
+# pays no fork; bash 3.2 has no `${x,,}`.
+git_argv_is_git() {
+  case "$1" in
+    [Gg][Ii][Tt]|*/[Gg][Ii][Tt]) return 0 ;;
+  esac
+  return 1
+}
+
 # git_argv_parse <segment-line>
 #
 # Reads ONE segment (a line from git_argv_segments / git_argv_expand). Returns
@@ -531,10 +548,8 @@ git_argv_parse() {
   [ "$_hadf" -eq 1 ] || set +f
 
   [ $# -gt 0 ] || return 1
-  case "$1" in
-    git|*/git) shift ;;
-    *) return 1 ;;
-  esac
+  git_argv_is_git "$1" || return 1
+  shift
 
   while [ $# -gt 0 ]; do
     case "$1" in
