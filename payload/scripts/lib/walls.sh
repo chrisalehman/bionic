@@ -6232,10 +6232,10 @@ while IFS=$'\t' read -r _kind _target _run; do
     fold_block exit2 suite-run \
       "$(_budget_wire_fact "full tree refused; allowed: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
       "run your brief's suites" \
-      "This is a BUDGET arm, not a safety wall. The full suite runs once, on the head being
-released, by one dispatched runner whose row carries tests/run.sh; after that pass a later
-change is proved by its affected suites. A full run from a writer row costs forty minutes
-and proves a head nobody is releasing.
+      "This is a BUDGET arm, not a safety wall.
+The full suite runs once, on the head being released, by one dispatched runner whose row
+carries tests/run.sh; after that pass a later change is proved by its affected suites. A
+full run from a writer row costs forty minutes and proves a head nobody is releasing.
 
 On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
 
