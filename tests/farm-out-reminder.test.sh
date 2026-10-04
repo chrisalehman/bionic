@@ -474,9 +474,18 @@ expect_empty "S4f: …and not wrapped (beside S4b's wrap)" "$(wrapped_cmd)"
 expect_contains "S4g: …the user line asks for at least the floor" \
   "bionic: run refused — this command belongs in a subagent (timeout ≥6000 ms, or dispatch it)" "$ERR"
 expect_contains "S4h: …and the reason's first fix names the whole band" "timeout of 6000 to 120000 ms" "$(first_fix)"
-run_hook "$(with_timeout "$(mk_payload "$SHORTR" 'make')" 1000)"
-expect_eq "S4i: a 1000 ms build is refused the same way" "deny" "$(decision_of)"
-expect_contains "S4j: …with the same user line" "(timeout ≥6000 ms, or dispatch it)" "$ERR"
+# THE FLOOR IS ROOM FOR THE SHIM'S KILL, so it binds only a command the shim will wrap (review 12
+# F5, A-T50.4). A build passes as typed whatever its timeout; a suite under the floor, alone or
+# in a chain, is still refused with the floor as its fix.
+for _t in 5999 1000; do
+  run_hook "$(with_timeout "$(mk_payload "$SHORTR" 'make')" "$_t")"
+  expect_status "S4i: a $_t ms build exits 0" 0 "$ST"
+  expect_empty "S4j: …prints nothing on stdout: no wrap, no decision (beside S4e's deny) [$_t]" "$OUT"
+  expect_empty "S4k: …and nothing on stderr (beside S4g's line) [$_t]" "$ERR"
+done
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "make && $ONE")" 5999)"
+expect_eq "S4l: a 5999 ms chain that holds a suite is refused" "deny" "$(decision_of)"
+expect_contains "S4m: …with the floor as its fix" "(timeout ≥6000 ms, or dispatch it)" "$ERR"
 for _t in 120001 0 -5 60000.5 '"soon"' null 99999999999; do
   run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" "$_t")"
   expect_eq "S4c: timeout $_t is not short — refused" "deny" "$(decision_of)"
