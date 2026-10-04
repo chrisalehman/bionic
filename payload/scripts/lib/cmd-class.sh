@@ -1606,22 +1606,69 @@ _CMD_EFFECTS_AWK='
       FX_SEEN[k] = 1
       print "?\t" r "\t" s
     }
-    # A W or D line for w, resolved as wt_emit resolves it, or a ? when the shell still has
-    # something to decide about the path.
-    function fx_emit(tag, w, cwd,   p, c) {
+    # AN EFFECT PATH KEEPS ITS `..` (T16, review B1). The kernel resolves `a/link/..` AFTER it
+    # follows the link, so a `..` folded as text names a place the command never touches, and
+    # the hook, which resolves each path physically (grant_resolve), never saw the link. Only `.`
+    # and empty components come out, each naming the directory it stands in. p is absolute.
+    function fx_abs(p,   n, P, i, out) {
+      n = split(p, P, "/"); out = ""
+      for (i = 1; i <= n; i++) if (P[i] != "" && P[i] != ".") out = out "/" P[i]
+      return (out == "" ? "/" : out)
+    }
+    function fx_under(p, d) { return (d == "/" || index(p, d "/") == 1) }
+    # A PATH THROUGH WHAT THIS COMMAND COPIED OR MOVED (T16, review B2). The hook resolves every
+    # path at question time, before a cp or mv destination holds what the command puts there, and
+    # that may be a link. So a path strictly beneath a destination written earlier is unknown; so
+    # is a write or read AT it, which goes through such a link, and a delete at it spelled with a
+    # trailing slash, which follows one. A plain delete at it removes the link itself. Each path
+    # is compared both as printed and folded, so a `c/../b/x` spelling is beneath b too.
+    # Returns 1 when the line was printed (or already had been).
+    function fx_put(tag, p, w,   x, d, q) {
+      if (FX_ND) {
+        q = wt_norm(p)
+        for (x = 1; x <= FX_ND; x++) {
+          d = FX_DEST[x]
+          if (fx_under(p, d) || fx_under(q, d) || ((p == d || q == d) && (tag != "D" || w ~ /\/\.?$/))) {
+            fx_unk("a path through " d ", which cp or mv wrote earlier in this command and may now be a link: " w, FX_SEG)
+            return 0
+          }
+        }
+      }
+      p = tag "\t" p
+      if (!(p in FX_SEEN)) { FX_SEEN[p] = 1; print p }
+      return 1
+    }
+    function fx_dest(p) { FX_DEST[++FX_ND] = p; FX_DEST[++FX_ND] = wt_norm(p) }
+    # A W or D line for w, joined to the directory it is read against, or a ? when the shell
+    # still has something to decide about the path. With FX_REG set (a cp or mv destination),
+    # each path printed is remembered for fx_put.
+    #
+    # THE ONE PLACE `..` IS FOLDED AS TEXT IS A CD TARGET, because there the shell folds it too:
+    # bash and zsh `cd a/link/..` move to a, not to the parent of the link. But bash falls back to
+    # the unfolded path when the folded one does not exist, so when the directory came from a cd
+    # through `..`, the path is printed twice, against the folded directory and against the
+    # unfolded one. Either can be the place, and the hook requires both inside: printing both can
+    # only refuse. A second cd through `..` multiplies the places, and fx_cd calls it unknown.
+    function fx_emit(tag, w, cwd,   p, o, c, b, k) {
       if (w == "") return
-      p = fx_expand(w)
+      p = fx_expand(w); o = p; b = ""
       if (substr(p, 1, 1) != "/" && !wt_rooted(p)) {
         if (cwd == FX_LOST) { fx_unk("a relative target after a directory the text cannot name: " w, FX_SEG); return }
         c = fx_expand(cwd)
-        if (c != "") p = c "/" p
-        if (!wt_rooted(p) && WT_BASE != "") p = WT_BASE "/" p
+        b = c
+        if (!wt_rooted(b) && WT_BASE != "") b = (b == "" ? WT_BASE : WT_BASE "/" b)
+        if (b != "") p = b "/" p
       }
       if (p ~ /[[$`*?{]/ || substr(p, 1, 1) == "~") { fx_unk("a variable, substitution or pattern in the target: " w, FX_SEG); return }
       if (p ~ /[\001-\037]/) { fx_unk("a control character in the target", FX_SEG); return }
       if (substr(p, 1, 1) != "/") { fx_unk("a relative target and no cwd: " w, FX_SEG); return }
-      p = tag "\t" wt_norm(p)
-      if (!(p in FX_SEEN)) { FX_SEEN[p] = 1; print p }
+      p = fx_abs(p)
+      k = fx_put(tag, p, w)
+      if (k && FX_REG) fx_dest(p)
+      if (b == "" || !index("/" b "/", "/../")) return
+      p = fx_abs(wt_norm(b) "/" o)
+      k = fx_put(tag, p, w)
+      if (k && FX_REG) fx_dest(p)
     }
     # The directory a cd, pushd or popd moves to. One the text cannot name is FX_LOST, and
     # every relative path after it is unknown rather than read against the wrong directory.
@@ -1636,6 +1683,8 @@ _CMD_EFFECTS_AWK='
       if (d ~ /[[$`*?{]/ || substr(d, 1, 1) == "~") { fx_unk("a cd to a variable or pattern: " d, t); return FX_LOST }
       if (substr(d, 1, 1) == "/") return d
       if (cwd == FX_LOST) return FX_LOST
+      # Each cd through `..` may be folded or not (fx_emit), so two of them name four places.
+      if (index("/" d "/", "/../") && index("/" cwd "/", "/../")) { fx_unk("a second cd through ..: the shell may fold each one either way", t); return FX_LOST }
       return (cwd == "" ? d : cwd "/" d)
     }
     function fx_shell(B, m, cwd, depth, t,   j, c) {
@@ -1821,7 +1870,11 @@ _CMD_EFFECTS_AWK='
         return cwd
       }
       if (b == "rm" || b == "rmdir" || b == "unlink") { fx_del(B, m, cwd); return cwd }
-      if (b == "mv") { fx_del(B, m, cwd); wt_argv(B, m, cwd); return cwd }
+      if (b == "mv") { fx_del(B, m, cwd); FX_REG = 1; wt_argv(B, m, cwd); FX_REG = 0; return cwd }
+      if (b == "cp") { FX_REG = 1; wt_argv(B, m, cwd); FX_REG = 0; return cwd }
+      # A link, symbolic or hard, redirects every later path through it, and the hook resolves
+      # each path at question time, before the link exists (T16, review B2).
+      if (b == "ln") { fx_unk("a link redirects every later path, and it does not exist yet when they are resolved", t); return cwd }
       if (b == "sed") {
         for (j = 2; j <= m; j++) {
           if (B[j] == "-f" || B[j] ~ /^--file/ || B[j] ~ /^-[nrsuzE]*f/) { fx_unk("sed reads its script from a file", t); return cwd }
@@ -1829,7 +1882,7 @@ _CMD_EFFECTS_AWK='
         }
         wt_argv(B, m, cwd); return cwd
       }
-      if (b == "tee" || b == "touch" || b == "mkdir" || b == "cp" || b == "ln") { wt_argv(B, m, cwd); return cwd }
+      if (b == "tee" || b == "touch" || b == "mkdir") { wt_argv(B, m, cwd); return cwd }
       if (b == "eval") { fx_unk("eval runs text the reader does not read", t); return cwd }
       if (b == "source" || b == ".") { fx_unk("source runs a file the reader does not read", t); return cwd }
       if (b == "xargs") { fx_unk("xargs takes its targets from stdin", t); return cwd }
