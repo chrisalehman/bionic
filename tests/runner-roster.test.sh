@@ -57,6 +57,17 @@ trap 'rm -rf "$TMPROOT"' EXIT
 
 RR_NOW=1700000000
 
+# THE SLOT STORE IS THIS SUITE'S OWN (wave-26 T8). A solo suite makes the runner take the
+# whole machine through payload/scripts/lib/slots.sh, so every drive below names a store
+# under this suite's mktemp root, a count, and short poll and wait settings; none reads or
+# writes the machine's real store under the home directory. The booking marks a caller may
+# have inherited (a booked command around this suite sets BIONIC_SLOT_HELD and
+# BIONIC_SLOT_PLACE) are cleared, so each drive starts from no booking at all — §10 sets
+# them itself where nesting is the question.
+RR_SLOTS_ENV=(-u BIONIC_SLOT_HELD -u BIONIC_SLOT_PLACE -u BIONIC_SLOT_QUIET -u BIONIC_QUIET
+  -u BIONIC_LOAD_NOW_FILE "BIONIC_SLOTS_DIR=$TMPROOT/slots" BIONIC_SLOTS_N=2
+  BIONIC_SLOTS_POLL=0.1 BIONIC_SLOTS_MAX_WAIT=20 BIONIC_SLOTS_NOTE_S=5)
+
 # rr_tree <dir> — a scratch tree the shipped runner resolves against: the runner
 # itself byte for byte, the seam every suite sources, the real framework (so the
 # shape wall has a framework to ask about), and the payload libraries the runner
@@ -96,7 +107,7 @@ rr_drive() {
     BIONIC_PROBE_FREE_PCT="44" \
     BIONIC_PROBE_SWAP_PCT="0" \
     BIONIC_PROBE_LOAD_1M="0.1" \
-    bash tests/run.sh ${mode:+"$mode"} 2>&1 )"
+    env "${RR_SLOTS_ENV[@]}" bash tests/run.sh ${mode:+"$mode"} 2>&1 )"
   RR_RC=$?
 }
 
@@ -554,7 +565,7 @@ RR8_OUT="$( cd "$T8" && \
   BIONIC_PROBE_FREE_PCT="44" \
   BIONIC_PROBE_SWAP_PCT="0" \
   BIONIC_PROBE_LOAD_1M="0.1" \
-  bash tests/run.sh 2>&1 )"
+  env "${RR_SLOTS_ENV[@]}" bash tests/run.sh 2>&1 )"
 RR8_RC=$?
 
 expect_eq "8.2 the solo suite really ran (its own marker exists)" "yes" \
@@ -580,7 +591,7 @@ RR8_SERIAL_OUT="$( cd "$T8" && \
   BIONIC_PROBE_FREE_PCT="44" \
   BIONIC_PROBE_SWAP_PCT="0" \
   BIONIC_PROBE_LOAD_1M="0.1" \
-  bash tests/run.sh --serial 2>&1 )"
+  env "${RR_SLOTS_ENV[@]}" bash tests/run.sh --serial 2>&1 )"
 RR8_SERIAL_RC=$?
 expect_eq "8.7 --serial is unaffected by the marker: still green" "0" "$RR8_SERIAL_RC"
 expect_eq "8.8 …and the solo suite still ran under --serial" "yes" \
@@ -595,7 +606,7 @@ RR8_DRY_OUT="$( cd "$T8" && \
   BIONIC_PROBE_FREE_PCT="44" \
   BIONIC_PROBE_SWAP_PCT="0" \
   BIONIC_PROBE_LOAD_1M="0.1" \
-  bash tests/run.sh --dry-run 2>&1 )"
+  env "${RR_SLOTS_ENV[@]}" bash tests/run.sh --dry-run 2>&1 )"
 expect_contains "8.9 --dry-run still prints the width" "JOBS=2" "$RR8_DRY_OUT"
 expect_contains "8.10 …and lists the solo suite by name" "aaa-solo.test.sh" "$RR8_DRY_OUT"
 expect_contains "8.11 …labelled solo, not folded silently into the width" "solo" "$RR8_DRY_OUT"
@@ -649,7 +660,7 @@ rr9_drive() {
       BIONIC_PROBE_SWAP_PCT="0" \
       BIONIC_PROBE_LOAD_1M="0.1" \
       BIONIC_TEST_PROGRESS="$prog" \
-      bash tests/run.sh 2>&1 )"
+      env "${RR_SLOTS_ENV[@]}" bash tests/run.sh 2>&1 )"
   else
     RR9_OUT="$( cd "$dir" && \
       RR_MARKS="$RR_MARKS" \
@@ -659,7 +670,7 @@ rr9_drive() {
       BIONIC_PROBE_FREE_PCT="44" \
       BIONIC_PROBE_SWAP_PCT="0" \
       BIONIC_PROBE_LOAD_1M="0.1" \
-      bash tests/run.sh 2>&1 )"
+      env "${RR_SLOTS_ENV[@]}" bash tests/run.sh 2>&1 )"
   fi
   RR9_RC=$?
 }
@@ -873,5 +884,261 @@ rr_stub "$T10N" "h-two"
 rr_drive "$T10N"
 expect_eq "10.4 a tree that is no repository names no head" "head=none dirty=none" \
   "$(printf '%s\n' "$RR_OUT" | /usr/bin/grep '^head=')"
+
+# ============================================================
+section "§11 NESTED — a solo suite takes the whole machine; a nested run never waits on its parent (wave-26 T8, AC-6.4)"
+# ============================================================
+#
+# WHAT IT COVERS. A `# runner: solo` suite used to be held out of the run's own batch and
+# nothing more: any other run on the machine could share its drive. The runner now takes
+# the whole machine through payload/scripts/lib/slots.sh before each solo suite — the
+# marker, then every place, waiting for the held ones to drain and for a settled load — and
+# gives it back after. Four claims, each against this suite's own store:
+#
+#   (a) NESTED. An outer run inside a booked command (payload/scripts/booked.sh, which
+#       exports BIONIC_SLOT_HELD and BIONIC_SLOT_PLACE) completes, and so do the two nested
+#       runs it drives: one from inside its solo suite, which must take nothing (the outer
+#       holds the machine and marks the suite BIONIC_SLOT_QUIET), and one from its batch,
+#       which takes the machine under the lending rule. A deadlock is a red row, not a
+#       hang: the maximum wait is a few seconds, and a take that gives up says so.
+#   (b) the mutation control: the same fixture with the quiet mark removed from the solo
+#       launch makes the inner run wait on its own parent's hold until it gives up.
+#   (c) the take really waits: a foreign holder of another place delays the solo suite
+#       until that holder is gone.
+#   (d) VOID: a run during which the load rose is re-run; still disturbed after two
+#       retries, the suite is reported void, never failed. One disturbed run followed by a
+#       clean one is an ordinary pass.
+#   (e) HELD TRAVELS WITH ITS PLACE: a solo suite is handed BIONIC_SLOT_PLACE naming a
+#       place its hold covers, whether the run was booked or took the machine itself; and
+#       two booked runs that each reach their solo drain together both complete, the second
+#       waiting for the first rather than each waiting on the other's place.
+
+RRN_BOOKED="$REPO/payload/scripts/booked.sh"
+expect_true "11.0 the shim the outer run is booked through exists" test -f "$RRN_BOOKED"
+
+RRN="$TMPROOT/n"
+RRN_MARKS="$RRN/marks"; RRN_SLOTS="$RRN/slots"; RRN_LOAD="$RRN/load"
+mkdir -p "$RRN_MARKS"
+printf '0\n' > "$RRN_LOAD"
+
+# rrn_suite — a suite file: the solo marker verbatim when asked for, the framework, the
+# body given, one trivial row.
+rrn_suite() {  # <file> <solo yes|no> <name> <body>
+  { printf '#!/bin/bash\n'
+    [ "$2" = yes ] && printf '# runner: solo\n'
+    printf 'set -uo pipefail\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
+    printf '%s\n' "$4"
+    printf 'section "%s"\n' "$3"
+    printf 'expect_eq "%s ran" "x" "x"\n' "$3"
+    printf 'finish\n'
+  } > "$1"
+}
+
+# What a suite records about the hold it runs inside: the whole-machine marker's label
+# (`none` when nobody holds it) and the two booking marks it inherited.
+RRN_RECORD='w=none; [ -r "$RRN_SLOTS/quiet/what" ] && w="$(cat "$RRN_SLOTS/quiet/what")"
+printf "%s\n" "$w" > "$RRN_MARKS/$RRN_WHO.what"
+printf "%s/%s\n" "${BIONIC_SLOT_HELD:-}" "${BIONIC_SLOT_QUIET:-}" > "$RRN_MARKS/$RRN_WHO.env"
+p="${BIONIC_SLOT_PLACE:-}"; h=gone; [ -n "$p" ] && [ -d "$p" ] && h=held
+printf "%s %s\n" "$p" "$h" > "$RRN_MARKS/$RRN_WHO.place"'
+
+# The inner tree: one solo suite, recording under the name its caller hands down.
+TNI="$RRN/inner"
+rr_tree "$TNI"
+rrn_suite "$TNI/tests/aaa-inner.test.sh" yes aaa-inner "RRN_WHO=\"inner-\$RRN_TAG\"
+$RRN_RECORD"
+
+# The outer tree: a solo suite that records its hold and drives the inner run, and a batch
+# suite that drives the inner run too.
+rrn_outer_tree() {  # <dir>
+  rr_tree "$1"
+  rrn_suite "$1/tests/aaa-nest.test.sh" yes aaa-nest "RRN_WHO=outer
+$RRN_RECORD
+( cd \"\$RRN_INNER\" && RRN_TAG=solo bash tests/run.sh ) > \"\$RRN_MARKS/inner-solo.out\" 2>&1
+printf '%s\n' \"\$?\" > \"\$RRN_MARKS/inner-solo.rc\""
+  rrn_suite "$1/tests/n-batch.test.sh" no n-batch \
+"( cd \"\$RRN_INNER\" && RRN_TAG=batch bash tests/run.sh ) > \"\$RRN_MARKS/inner-batch.out\" 2>&1
+printf '%s\n' \"\$?\" > \"\$RRN_MARKS/inner-batch.rc\""
+}
+TNO="$RRN/outer"
+rrn_outer_tree "$TNO"
+
+# rrn_drive <dir> <slots-N> <max-wait> <command...> — the drive, with this section's store,
+# a short poll, the load reading this section controls, and no inherited booking.
+RRN_OUT=""; RRN_RC=0
+rrn_drive() {
+  local dir="$1" n="$2" max="$3"; shift 3
+  RRN_OUT="$( cd "$dir" && \
+    RR_MARKS="$RR_MARKS" RRN_MARKS="$RRN_MARKS" RRN_SLOTS="$RRN_SLOTS" RRN_INNER="$TNI" \
+    RRN_LOAD="$RRN_LOAD" RRN_FOREIGN="${RRN_FOREIGN:-}" RRN_VOID="${RRN_VOID:-}" \
+    BIONIC_PRESSURE_RING="$TMPROOT/n-ring" \
+    BIONIC_NOW_EPOCH="$RR_NOW" \
+    BIONIC_TEST_JOBS_CEILING="2" \
+    BIONIC_PROBE_FREE_PCT="44" \
+    BIONIC_PROBE_SWAP_PCT="0" \
+    BIONIC_PROBE_LOAD_1M="0.1" \
+    env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_PLACE -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
+      BIONIC_SLOTS_DIR="$RRN_SLOTS" BIONIC_SLOTS_N="$n" BIONIC_SLOTS_POLL=0.1 \
+      BIONIC_SLOTS_MAX_WAIT="$max" BIONIC_SLOTS_NOTE_S=1 BIONIC_LOAD_NOW_FILE="$RRN_LOAD" \
+      "$@" 2>&1 )"
+  RRN_RC=$?
+}
+rrn_read() { cat "$RRN_MARKS/$1" 2>/dev/null; }
+
+# ---- (a) the outer run inside a booked command -----------------------------
+rm -f "$RRN_MARKS"/*
+rrn_drive "$TNO" 1 4 bash "$RRN_BOOKED" -- bash tests/run.sh
+expect_eq "11.1 the booked outer run completes green" "0" "$RRN_RC"
+expect_contains "11.2 its solo suite ran holding the whole machine, taken for that suite" \
+  "aaa-nest.test.sh" "$(rrn_read outer.what)"
+expect_eq "11.3 the run nested in the solo suite completes green" "0" "$(rrn_read inner-solo.rc)"
+expect_contains "11.4 …with a real tally (the nested run happened)" "Gating:" "$(rrn_read inner-solo.out)"
+expect_absent "11.5 …and it never gave up waiting" "gave up" "$(rrn_read inner-solo.out)"
+expect_absent "11.6 …nor reported a void" "VOID" "$(rrn_read inner-solo.out)"
+expect_eq "11.7 the nested run inside the hold is marked held and quiet" "1/1" "$(rrn_read inner-solo.env)"
+expect_contains "11.8 …and took nothing of its own: the hold it ran in is still the outer suite's" \
+  "aaa-nest.test.sh" "$(rrn_read inner-solo.what)"
+expect_eq "11.9 the run nested in the batch completes green" "0" "$(rrn_read inner-batch.rc)"
+expect_contains "11.10 …with a real tally" "Gating:" "$(rrn_read inner-batch.out)"
+expect_absent "11.11 …and it never gave up waiting" "gave up" "$(rrn_read inner-batch.out)"
+expect_contains "11.12 …and took the whole machine itself, beside the parent's lent place" \
+  "aaa-inner.test.sh" "$(rrn_read inner-batch.what)"
+expect_true "11.13 the store was used" test -d "$RRN_SLOTS"
+expect_eq "11.14 …and everything in it was given back: no marker, no place" "" \
+  "$(ls -d "$RRN_SLOTS"/quiet "$RRN_SLOTS"/place.* 2>/dev/null)"
+
+# ---- (b) the mutation control: no quiet mark on the solo launch ------------
+TNM="$RRN/outer-mut"
+rrn_outer_tree "$TNM"
+sed 's/BIONIC_SLOT_QUIET=1 //g' "$RUNNER" > "$TNM/tests/run.sh"
+expect_true "11.15 meta: the shipped runner carries the quiet mark on its solo launch" \
+  grep -q 'BIONIC_SLOT_QUIET=1 ' "$RUNNER"
+expect_eq "11.16 meta: …and the doctored copy does not" "0" \
+  "$(grep -c 'BIONIC_SLOT_QUIET=1 ' "$TNM/tests/run.sh")"
+expect_true "11.17 meta: the doctored copy still parses" bash -n "$TNM/tests/run.sh"
+rm -f "$RRN_MARKS"/*
+rrn_drive "$TNM" 1 2 bash "$RRN_BOOKED" -- bash tests/run.sh
+expect_contains "11.18 without the mark the nested run waits on its own parent's hold and gives up" \
+  "gave up" "$(rrn_read inner-solo.out)"
+expect_contains "11.19 …which is the parent's whole-machine marker it was waiting on" \
+  "the whole machine" "$(rrn_read inner-solo.out)"
+
+# ---- (c) a foreign holder of another place delays the solo suite -----------
+TNF="$RRN/foreign"
+rr_tree "$TNF"
+rr_stub "$TNF" "f-plain"
+rrn_suite "$TNF/tests/aaa-timed.test.sh" yes aaa-timed \
+'if kill -0 "$RRN_FOREIGN" 2>/dev/null; then s=alive; else s=gone; fi
+printf "%s\n" "$s" > "$RRN_MARKS/foreign.state"'
+rm -f "$RRN_MARKS"/*
+rm -rf "$RRN_SLOTS"; mkdir -p "$RRN_SLOTS/place.2"
+# THE HOLDER IS NOT THIS SHELL'S CHILD: a killed child stays a zombie until it is reaped, and
+# `kill -0` reads a zombie as alive. Started from a subshell that exits at once, it is
+# reparented and reaped by the system the moment it dies.
+( sleep 30 >/dev/null 2>&1 & printf '%s\n' "$!" > "$RRN_SLOTS/place.2/pid" )
+RRN_FPID="$(cat "$RRN_SLOTS/place.2/pid")"
+printf 'a foreign run\n' > "$RRN_SLOTS/place.2/what"
+( sleep 4; kill "$RRN_FPID" 2>/dev/null ) &
+RRN_KILLER=$!
+RRN_FOREIGN="$RRN_FPID"
+rrn_drive "$TNF" 2 15 bash tests/run.sh
+RRN_FOREIGN=""
+kill "$RRN_FPID" "$RRN_KILLER" 2>/dev/null; wait "$RRN_KILLER" 2>/dev/null
+expect_eq "11.20 the run with a foreign holder completes green" "0" "$RRN_RC"
+expect_eq "11.21 the solo suite started only once the foreign holder was gone" "gone" \
+  "$(rrn_read foreign.state)"
+expect_contains "11.22 …and the runner said what it was waiting for, naming the holder" \
+  "a foreign run" "$RRN_OUT"
+
+# ---- (d) VOID: the load rose during the timing run -------------------------
+# The suite raises the load reading during its run and a background line lowers it three
+# seconds later, so the check after the run sees the rise and the next try settles within
+# the ten-second wait. One second was too short on a loaded machine: the reading was back
+# down before the check, and the retry never happened.
+TNV="$RRN/void"
+rr_tree "$TNV"
+rr_stub "$TNV" "v-plain"
+rrn_suite "$TNV/tests/aaa-void.test.sh" yes aaa-void \
+'printf "run\n" >> "$RRN_MARKS/void.runs"
+n="$(awk "END { print NR + 0 }" "$RRN_MARKS/void.runs")"
+if [ "$RRN_VOID" = always ] || [ "$n" -eq 1 ]; then
+  printf "99\n" > "$RRN_LOAD"
+  ( sleep 3; printf "0\n" > "$RRN_LOAD" ) >/dev/null 2>&1 &
+fi'
+rrn_void_runs() { awk 'END { print NR + 0 }' "$RRN_MARKS/void.runs" 2>/dev/null || echo 0; }
+rrn_line() { printf '%s\n' "$RRN_OUT" | grep -F "  $1 "; }
+
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"; printf '0\n' > "$RRN_LOAD"
+RRN_VOID=always; rrn_drive "$TNV" 2 10 bash tests/run.sh
+RRN_VOID_ALWAYS_OUT="$RRN_OUT"
+expect_eq "11.23 a suite disturbed on every try does not fail the run" "0" "$RRN_RC"
+expect_true "11.24 …it was re-run" test "$(rrn_void_runs)" -ge 2
+expect_true "11.25 …and the retries stop (at most the first run and two more)" test "$(rrn_void_runs)" -le 3
+expect_contains "11.26 its verdict line reads VOID" "VOID" "$(rrn_line aaa-void.test.sh)"
+expect_absent "11.27 …not FAIL" "FAIL" "$(rrn_line aaa-void.test.sh)"
+expect_contains "11.28 the summary names it under Void:" "aaa-void.test.sh" \
+  "$(printf '%s\n' "$RRN_OUT" | sed -n '/^Void:/,$p')"
+expect_absent "11.29 …and nothing is listed under Failed:" "Failed:" "$RRN_OUT"
+expect_absent "11.30 …and the run does not call itself all green" "All gating suites green" "$RRN_OUT"
+
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"; printf '0\n' > "$RRN_LOAD"
+RRN_VOID=once; rrn_drive "$TNV" 2 10 bash tests/run.sh
+expect_eq "11.31 a suite disturbed once and clean on the retry: the run is green" "0" "$RRN_RC"
+expect_true "11.32 …it was re-run" test "$(rrn_void_runs)" -ge 2
+expect_contains "11.33 …and its verdict line reads PASS" "PASS" "$(rrn_line aaa-void.test.sh)"
+expect_absent "11.34 …with no Void: summary" "Void:" "$RRN_OUT"
+expect_contains "11.35 …and the retry was said on the way" "aaa-void.test.sh: the load rose" "$RRN_OUT"
+expect_contains "11.35b …as a retry, not a give-up" "retrying (1 of 2)" "$RRN_OUT"
+expect_contains "11.36 the always-disturbed run printed a Void: summary (11.34 is not vacuous)" \
+  "Void:" "$RRN_VOID_ALWAYS_OUT"
+
+# ---- (e) HELD travels with its place ---------------------------------------
+# The solo launch marks its suite BIONIC_SLOT_HELD=1, and the lending rule reads
+# BIONIC_SLOT_PLACE to tell the caller's own place from the others; so the mark is never
+# handed down without a place the hold really covers. Unbooked, that is a place the runner
+# took itself (N=1, so place.1); booked, it is the shim's own place, again place.1.
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"
+rrn_drive "$TNO" 1 4 bash tests/run.sh
+expect_eq "11.37 an unbooked run completes green" "0" "$RRN_RC"
+expect_eq "11.38 …its solo suite was marked held" "1/1" "$(rrn_read outer.env)"
+expect_eq "11.39 …and handed the place its hold covers, held while the suite ran" \
+  "$RRN_SLOTS/place.1 held" "$(rrn_read outer.place)"
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"
+rrn_drive "$TNO" 1 4 bash "$RRN_BOOKED" -- bash tests/run.sh
+expect_eq "11.40 a booked run completes green" "0" "$RRN_RC"
+expect_eq "11.41 …and its solo suite is handed the shim's place, held while the suite ran" \
+  "$RRN_SLOTS/place.1 held" "$(rrn_read outer.place)"
+
+# Two booked runs, two places, each with a solo suite that holds the machine for three
+# seconds: both reach their nested whole-machine take while the other's shim holds a place.
+# Each lends its own place while it queues for the marker, so the first to take it drains
+# at once, and the second waits for the first to give it back.
+rrn_pair_tree() {  # <dir> <who>
+  rr_tree "$1"
+  rrn_suite "$1/tests/aaa-pair.test.sh" yes aaa-pair "RRN_WHO=$2
+$RRN_RECORD
+sleep 3"
+}
+rrn_pair_tree "$RRN/pair-a" pair-a
+rrn_pair_tree "$RRN/pair-b" pair-b
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"
+for _w in a b; do
+  ( rrn_drive "$RRN/pair-$_w" 2 20 bash "$RRN_BOOKED" -- bash tests/run.sh
+    printf '%s\n' "$RRN_OUT" > "$RRN_MARKS/pair-$_w.out"
+    printf '%s\n' "$RRN_RC" > "$RRN_MARKS/pair-$_w.rc" ) &
+done
+wait
+expect_eq "11.42 two booked runs making nested whole-machine takes: the first completes green" \
+  "0" "$(rrn_read pair-a.rc)"
+expect_eq "11.43 …and so does the second" "0" "$(rrn_read pair-b.rc)"
+expect_absent "11.44 …neither gave up waiting" "gave up" "$(rrn_read pair-a.out; rrn_read pair-b.out)"
+expect_contains "11.45 …and they really met: one waited for the whole machine the other held" \
+  "waiting for the whole machine" "$(rrn_read pair-a.out; rrn_read pair-b.out)"
+expect_contains "11.46 each solo suite ran under its own shim's place (a)" \
+  "$RRN_SLOTS/place." "$(rrn_read pair-a.place)"
+expect_contains "11.47 …(b)" "$RRN_SLOTS/place." "$(rrn_read pair-b.place)"
+expect_eq "11.48 …and everything was given back" "" \
+  "$(ls -d "$RRN_SLOTS"/quiet "$RRN_SLOTS"/place.* 2>/dev/null)"
 
 finish
