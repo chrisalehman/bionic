@@ -85,6 +85,8 @@ make_env() {  # -> project dir on stdout
   local dir; dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/docs/plans" "$dir/.bionic/tmp"
   : > "$dir/.bionic/tmp/engaged-$SID.state"
+  # APPROVED (wave-26 T13; D3): the run's ledger is live on its `approved-by:` line, and 23b
+  # reads the fill ledger's line a live Stop writes.
   cat > "$dir/.bionic/docs/plans/$PLAN_REL" <<'EOF'
 ---
 governing-skill: canonical-sdlc
@@ -92,6 +94,7 @@ governing-skill: canonical-sdlc
 ## SDLC State
 
 current: T5
+approved-by: fixture 2026-10-04T00:00Z "approved"
 EOF
   # BOUND TO ITS PLAN (wave-23-fixit-1810, REQ-1, D1). An empty marker beside an open plan is
   # the unbound state, whose `fallback` plan is announced and never acted on — the basename
@@ -932,7 +935,12 @@ make_env_ledger() {  # <current> <row>... -> project dir on stdout
     printf 'governing-skill: superpowers:writing-plans\n'
     [ -z "$LEDGER_BUDGET" ] || printf '%s\n' "$LEDGER_BUDGET"
     printf -- '---\n\n# fixture plan\n\n'
-    printf '## SDLC State\n\ncurrent: %s\n\n- Step %s: in progress\n\n' "$cur" "$cur"
+    printf '## SDLC State\n\ncurrent: %s\n' "$cur"
+    # PAST STEP 3 THE PLAN CARRIES ITS APPROVAL (wave-26 T13; D3): the fill and this wall key on
+    # the `approved-by:` line, not on `current:`, so a ledger meant to be live writes it — at a
+    # numbered step from 4 on, and at task scale. `current: 3` (rows 61, 63c) stays unapproved.
+    case "${cur%[ab]}" in [4-9]|T[0-9]*) printf '%s\n' 'approved-by: fixture 2026-10-04T00:00Z "approved"' ;; esac
+    printf '\n- Step %s: in progress\n\n' "$cur"
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -1450,7 +1458,7 @@ expect_eq "70c: …and ONE parse of the table" "1" "$(pdg_count "$PDG_TBL_SIG")"
 d=$(make_env_ledger T2)
 {
   printf -- '---\ngoverning-skill: canonical-sdlc\n%s\n---\n\n# fixture task plan\n\n' "$LEDGER_BUDGET"
-  printf '## SDLC State\n\ncurrent: T2\n\n## Tasks\n\n'
+  printf '## SDLC State\n\ncurrent: T2\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
   printf '| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n'
   printf '| T1 | bugfix | standard | the done unit | done | — |\n'
   printf '| T2 | bugfix | standard | the unit the run is on | pending | — |\n'
@@ -2041,8 +2049,17 @@ require_helpers qt_now qt_backdate
 expect_contains "C0: AC-4.5 the Patrol prompt ends the turn at a WAITING line" \
   'a "poker: WAITING" line' "$QT_PROMPT"
 expect_contains "C0b: …and says that turn owes nothing more" "owes nothing more" "$QT_PROMPT"
-expect_contains "C0c: …and asks for the refresh only on a change" \
+# Keyed to the line the tick prints (wave-26 T32; review-6 F2), never to a change the model
+# cannot see.
+expect_contains "C0c: …and asks for the refresh only when the tick printed its RECONCILE line" \
+  'TaskList and reconcile only if a "poker: RECONCILE" line printed' "$QT_PROMPT"
+expect_absent "C0e: …the sentence keyed to an unprinted change is gone" \
   "TaskList and reconcile only when a row's status or the ready set changed" "$QT_PROMPT"
+# A FILL leaves the dispatch to the orchestrator and nothing else: the launch records its row
+# and its ledger line (wave-26 T32; D4).
+expect_contains "C0f: …a FILL asks for the dispatch, and says the launch records the row" \
+  "its launch records the row active and its ledger line" "$QT_PROMPT"
+expect_absent "C0g: …and no longer asks the orchestrator to ledger it by hand" "(and ledger it active in ## Tasks)" "$QT_PROMPT"
 expect_absent "C0d: …and the unconditional continue is gone" "Then continue the run toward its goal until a wall." "$QT_PROMPT"
 
 # C1: one open row whose progress file goes quiet between two ticks. The second tick prints in
@@ -2088,7 +2105,9 @@ fire "$d"; expect_block "C2b: …and its turn with no TaskList is refused" "$TL_
 rm -rf "$QT_CFG"
 
 # C3: every writer slot busy. One writer slot, one open row, a ready row it cannot take: the
-# tick prints WAITING with the count of running rows, and owes nothing even on its first tick.
+# tick owes nothing even on its first tick. It does NOT print WAITING's "nothing ready" — a row
+# IS ready — but names the row on its WAIT line with the reason it waits (wave-26 T13; review-6
+# F3). C3d is the control: the same world with the row's read unlanded prints WAITING.
 d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
   make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2"); ( cd "$d" && git init -q . 2>/dev/null )
 { roster_header
@@ -2098,11 +2117,26 @@ d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 s
 QT_CFG="$(mktemp -d)"
 QT_OUT="$(qt_tick "$d" "$QT_CFG")"
 expect_contains "C3 precondition: the budget is full, so nothing fills" "the budget is full" "$QT_OUT"
-expect_regex "C3: AC-4.5 a tick with every slot busy prints WAITING" \
-  'poker: WAITING — [1-9][0-9]* running, nothing ready' "$QT_OUT"
+expect_contains "C3: F3 a tick with every slot busy names the ready row it cannot take, and why" \
+  "poker: WAIT T2 — ready; no writer slot free" "$QT_OUT"
+expect_absent "C3a: …and never says nothing is ready" "poker: WAITING" "$QT_OUT"
 expect_eq "C3b: …and writes duty=none" "none" "$(qt_duty "$d")"
 u_marker "$d"; u_tick_out "$d" "$QT_OUT"
 fire "$d"; expect_allow "C3c: …so its turn ends with no TaskList"
+rm -rf "$QT_CFG"
+LEDGER_WAITS_2='| T2 | 4 | build | waits on an unlanded row | implementor | T9 | 30m | REQ-x | b.sh | pending | — |'
+LEDGER_ACTIVE_9='| T9 | 4 | build | the row in flight | implementor | — | 30m | REQ-x | c.sh | active | .worktrees/T9 |'
+d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
+  make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_ACTIVE_9" "$LEDGER_WAITS_2"); ( cd "$d" && git init -q . 2>/dev/null )
+{ roster_header
+  roster_row_fixture status=intended session="$SID" name=W-BUSY agent_id= deliverable="$d/never-written-c3d.md" \
+    duration="4 hours" launched_at="$(qt_now)"
+} > "$d/.bionic/tmp/roster-$SID.state"
+QT_CFG="$(mktemp -d)"
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_regex "C3d: AC-4.5 the control: nothing ready and a row running prints WAITING" \
+  'poker: WAITING — [1-9][0-9]* running, nothing ready' "$QT_OUT"
+expect_contains "C3e: …beside the waiting row's own WAIT line" "poker: WAIT T2 — waits for T9 (active)" "$QT_OUT"
 rm -rf "$QT_CFG"
 
 # C4: WAITING needs a running row. The same quiet world with an empty roster prints the QUIET
@@ -2112,6 +2146,58 @@ QT_CFG="$(mktemp -d)"
 QT_OUT="$(qt_tick "$d" "$QT_CFG")"
 expect_contains "C4 precondition: the empty roster's tick prints QUIET" "poker: QUIET — no open row" "$QT_OUT"
 expect_absent "C4: …and no WAITING, with nothing running" "poker: WAITING" "$QT_OUT"
+rm -rf "$QT_CFG"
+
+# C5 (wave-26 T32; review-6 F1): a QUIET tick does not use up a change. A FILL tick sets the
+# baseline; a writer takes the one slot, so the next ticks are QUIET; T5's status
+# moves while they wait; the writer goes, and the FILL tick after owes the refresh, once. Through
+# T15 every tick wrote its fingerprint, the QUIET one included, so this FILL tick owed nothing.
+# The control is the same sequence with no status move: its FILL tick owes nothing.
+c5_world() {  # -> project dir; writers=1, T2 ready, T5 behind it
+  local d
+  d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
+    make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_BLOCKED"); ( cd "$d" && git init -q . 2>/dev/null )
+  printf '%s' "$d"
+}
+c5_busy() {  # <dir> -> one writer on the roster, holding the one slot
+  { roster_header
+    roster_row_fixture status=intended session="$SID" name=W-BUSY agent_id= deliverable="$1/never-written-c5.md" \
+      duration="4 hours" launched_at="$(qt_now)"
+  } > "$1/.bionic/tmp/roster-$SID.state"
+}
+c5_run() {  # <dir> <config> <move: yes|no> -> C5_OUT, the FILL tick after the wait
+  roster_header > "$1/.bionic/tmp/roster-$SID.state"
+  C5_OUT0="$(qt_tick "$1" "$2")"
+  c5_busy "$1"
+  C5_OUT1="$(qt_tick "$1" "$2")"
+  [ "$3" = yes ] && sed -i.bak '/^| T5 |/s/| pending |/| dropped |/' "$1/.bionic/docs/plans/$PLAN_REL"
+  C5_OUT2="$(qt_tick "$1" "$2")"
+  roster_header > "$1/.bionic/tmp/roster-$SID.state"
+  C5_OUT="$(qt_tick "$1" "$2")"
+}
+require_helpers c5_world c5_busy c5_run
+d=$(c5_world); QT_CFG="$(mktemp -d)"
+c5_run "$d" "$QT_CFG" yes
+expect_contains "C5 precondition: the baseline tick fills" "poker: FILL T2" "$C5_OUT0"
+expect_contains "C5 precondition: …the writer's tick is QUIET" "decision=QUIET" "$C5_OUT1"
+expect_contains "C5 precondition: …the tick over the status move is QUIET too" "decision=QUIET" "$C5_OUT2"
+expect_contains "C5 precondition: T5 was dropped while they waited" "| dropped |" "$(grep '^| T5 |' "$d/.bionic/docs/plans/$PLAN_REL")"
+expect_contains "C5 precondition: …and the slot frees: the tick fills again" "poker: FILL T2" "$C5_OUT"
+expect_eq "C5: F1 a change first seen on a QUIET tick is owed by the next FILL tick" "owed" "$(qt_duty "$d")"
+expect_contains "C6: F2 …and that tick prints the duty as its own line" "poker: RECONCILE" "$C5_OUT"
+u_marker "$d"; u_tick_out "$d" "$C5_OUT"
+fire "$d"; expect_block "C7: F2 …its turn with no refresh is refused" "$TL_MISSING"
+expect_contains "C7b: …and the refusal names the line it answers" "poker: RECONCILE" "$(reason_of)"
+C5_OUT3="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "C5b precondition: the same facts ticked again are unchanged" "poker: unchanged since" "$C5_OUT3"
+expect_eq "C5b: …so the refresh is owed once" "none" "$(qt_duty "$d")"
+expect_absent "C6b: …and the RECONCILE line is not printed again" "poker: RECONCILE" "$C5_OUT3"
+rm -rf "$QT_CFG"
+d=$(c5_world); QT_CFG="$(mktemp -d)"
+c5_run "$d" "$QT_CFG" no
+expect_contains "C5c precondition: the control's slot frees and the tick decides FILL" "decision=FILL" "$C5_OUT"
+expect_eq "C5c: with no status move the FILL tick after the wait owes nothing" "none" "$(qt_duty "$d")"
+expect_absent "C6c: …and prints no RECONCILE line" "poker: RECONCILE" "$C5_OUT"
 rm -rf "$QT_CFG"
 
 # ============================================================

@@ -117,6 +117,24 @@ _TOOLS_MISSING="$(make_tool_dir "$BIN" yes)$(make_tool_dir "$BIN_NO_CLAUDE" no)"
 if [ -z "$_TOOLS_MISSING" ]; then ok "T0: the fixture's tool directory carries every program doctor runs"
 else no "T0: a program doctor runs is missing from the fixture's tool directory" "$_TOOLS_MISSING"; fi
 
+# NO REAL HOST CLI IS REACHABLE FROM ANY LAUNCH IN THIS FILE (wave-26 T25, AC-10.1). Every launch below sets PATH
+# to one of the two toolbox directories and nothing else, so `claude`, `npm`, `brew`, `notebooklm`, `pnpm` and
+# `uv` resolve to the fixture's own answer: absent (`brew`, `npm`, `notebooklm` are not in either directory),
+# an inert stub (`pnpm`, `uv`, and `claude` in the first directory, which exits 1) or absent again (`claude` in
+# the second). The positive half is that each stub is a regular file the fixture wrote, never a symlink out to an
+# installed tool; the negative half is the three that are not there at all.
+_host_leaks=""
+for _t in claude pnpm uv; do
+  { [ -f "${BIN}/${_t}" ] && [ ! -L "${BIN}/${_t}" ]; } || _host_leaks="${_host_leaks} ${_t}"
+done
+for _t in brew npm notebooklm; do
+  [ -e "${BIN}/${_t}" ] && _host_leaks="${_host_leaks} ${_t}"
+  [ -e "${BIN_NO_CLAUDE}/${_t}" ] && _host_leaks="${_host_leaks} ${_t}"
+done
+[ -e "${BIN_NO_CLAUDE}/claude" ] && _host_leaks="${_host_leaks} claude(no-claude)"
+if [ -z "$_host_leaks" ]; then ok "T0b: no launch in this file can reach a real claude, npm, brew, notebooklm, pnpm or uv"
+else no "T0b: a host CLI is reachable from the fixture's PATH" "$_host_leaks"; fi
+
 run_doctor() {  # [extra env assignments as NAME=VALUE ...]
   ( cd "$REPO" && env "$@" \
       PATH="$BIN" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
@@ -592,6 +610,10 @@ fi
 
 section "Section 8: the column budget"
 
+# THE POSITIVE BESIDE THE NEGATIVE (wave-26 T25). `too_wide` of an EMPTY page is empty, so with a defect planted
+# at the doctor's entry point, where the run prints nothing, row 15 alone still passed.
+expect_match "15a: the page measured is the fullest run's, not an empty one (it prints the THIRD PARTY table)" \
+  "*THIRD PARTY*" "$OUT6"
 _over="$(too_wide "$OUT6")"
 if [ -z "$_over" ]; then ok "15: every line of the fullest run fits 100 columns"
 else no "15: a line exceeds 100 columns" "$_over"; fi
@@ -725,9 +747,26 @@ doctor_in() {  # <cwd> <claude-home> -> doctor's whole report
       BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
+# THE FILTERED LAUNCH (wave-26 T25). Same environment as `doctor_in`, plus BIONIC_DOCTOR_ONLY, the test seam
+# doctor.sh describes at its definition: the named sections only, and none of the dependency sweep, the CLI's
+# plugin listing or the tables. A row uses it only when every line it reads is printed by a section in the
+# filter, when an absence it asserts has ONE producer in doctor.sh (so absence on the subset is absence on the
+# page), when it reads no header, no problem count, no table and no RESOURCES, and when its section keeps a
+# whole-doctor row of its own. The pin rows in Sections 19 and 20 compare one filtered page to the whole page's.
+doctor_only_in() {  # <sections> <cwd> <claude-home> -> the filtered report
+  ( cd "$2" && BIONIC_DOCTOR_ONLY="$1" PATH="$BIN" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      BIONIC_CLAUDE_HOME="$3" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )
+}
+
 ds_r2_doctor() {  # <project-cwd> -> doctor's whole report, against a fresh empty claude-home
   local proj="$1" home; home="$(mktemp -d "${TMP}/dsr2-home.XXXXXX")"; mkdir -p "$home/sessions"
   doctor_in "$proj" "$home"
+}
+
+ds_r2_only() {  # <project-cwd> -> the filtered report (PATROL, PROJECT, FIXES), against a fresh empty claude-home
+  local proj="$1" home; home="$(mktemp -d "${TMP}/dsr2-home.XXXXXX")"; mkdir -p "$home/sessions"
+  doctor_only_in "PATROL,PROJECT,FIXES" "$proj" "$home"
 }
 
 ds_r2_problems() {  # <doctor output> -> the header's problem count, or "0" on "Nothing to do"
@@ -823,9 +862,30 @@ ds_delta_eq "19.6: …and it raises the problem count by exactly one over the sa
 DS_R2_C="$(ds_r2_repo)"
 printf 'not a real marker\n' > "${TMP}/dsr2-decoy.state"
 ln -sf "${TMP}/dsr2-decoy.state" "$DS_R2_C/.bionic/tmp/sweep-failed.state"
-OUT19C="$(ds_r2_doctor "$DS_R2_C")"
+# FILTERED, NOT WHOLE (wave-26 T25): the line it reads is printed by one `fix` call in doctor.sh's PROJECT gather
+# (grep -c of the sentence in payload/scripts/doctor.sh is 1), so its absence from the subset is its absence from
+# the page, and 19.7a is the positive beside it on the same page text. Section 19 keeps whole runs on A, B and D.
+OUT19C="$(ds_r2_only "$DS_R2_C")"
+expect_eq "19.7a: …the filtered page for that fixture is live (it prints the PROJECT section)" \
+  "PROJECT" "$(printf '%s\n' "$OUT19C" | grep -x 'PROJECT')"
 expect_no_match "19.7: a symlinked marker is refused, not followed into a row" \
   "*automatic dead-session sweep failed*" "$OUT19C"
+
+# THE FILTER AGAINST THE WHOLE PAGE, on fixture B (the one that raises the fix line). 19.14 is the producer
+# reached: the subset prints the line 19.7 reads the absence of. 19.15 is the block equal to the whole page's, from
+# the PATROL header to the end (non-empty first, so the equality cannot pass over two empty strings). 19.16 is
+# what a filtered page leaves out: the header and the verdict line, with 19.14 the positive on the same page.
+OUT19B_ONLY="$(ds_r2_only "$DS_R2_B")"
+expect_match "19.14: the filtered page prints the failure marker's fix line the whole page prints" \
+  "*the automatic dead-session sweep failed (rc=2) → start a new session*" "$OUT19B_ONLY"
+D19_BLOCK_WHOLE="$(printf '%s\n' "$OUT19B" | awk '/^PATROL$/{p=1} p')"
+D19_BLOCK_ONLY="$(printf '%s\n' "$OUT19B_ONLY" | awk '/^PATROL$/{p=1} p')"
+expect_true "19.15a: the whole page's PATROL-to-end block is not empty (the extractor reads the page)" \
+  test -n "$D19_BLOCK_WHOLE"
+expect_eq "19.15: the filtered page's PATROL-to-end block is the whole page's, line for line" \
+  "$D19_BLOCK_WHOLE" "$D19_BLOCK_ONLY"
+expect_no_match "19.16: a filtered page carries no header line" "*Bionic Doctor*" "$OUT19B_ONLY"
+expect_no_match "19.17: …and no verdict line" "*→ [0-9]* problem*" "$OUT19B_ONLY"
 
 section "Section 20: auto-memory — the two things the switch cannot prevent (wave-23 D5, AC-3.2, AC-3.3)"
 
@@ -844,6 +904,10 @@ am_slug() {  # <project dir> -> the CLI's projects/ directory name for it
 
 am_doctor() {  # <project-cwd> <claude-home> -> doctor's whole report
   doctor_in "$1" "$2"
+}
+
+am_doctor_only() {  # <project-cwd> <claude-home> -> the PROJECT section alone (BIONIC_DOCTOR_ONLY, see doctor_only_in)
+  doctor_only_in "PROJECT" "$1" "$2"
 }
 
 am_home() {  # -> a fresh, empty claude-home
@@ -919,8 +983,10 @@ AM_LOC_P="$(ds_r2_repo)"; AM_LOC_H="$(am_home)"
 mkdir -p "$AM_LOC_P/.claude"
 printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}}\n' > "$AM_LOC_P/.claude/settings.json"
 printf '{"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}}\n' > "$AM_LOC_P/.claude/settings.local.json"
+# FILTERED (wave-26 T25): the row is printed by the PROJECT section, 20.7 asserts the ✓ row itself and no header,
+# count or table, and Section 20 keeps whole runs on its clean and override fixtures (20.1-20.6).
 expect_match "20.7: a local \"1\" over a shared \"0\" reads ✓ — the higher file decides" \
-  "  ✓ auto-memory *" "$(am_row "$(am_doctor "$AM_LOC_P" "$AM_LOC_H")")"
+  "  ✓ auto-memory *" "$(am_row "$(am_doctor_only "$AM_LOC_P" "$AM_LOC_H")")"
 
 # ---------- the directory: files the CLI already wrote, which the switch does not delete ----------
 AM_DIR_P="$(ds_r2_repo)"; AM_DIR_H="$(am_home)"
@@ -928,7 +994,7 @@ AM_DIR="${AM_DIR_H}/projects/$(am_slug "$AM_DIR_P")/memory"
 mkdir -p "$AM_DIR"
 printf 'index\n' > "$AM_DIR/MEMORY.md"
 printf 'a fact\n' > "$AM_DIR/some-fact.md"
-OUT20C="$(am_doctor "$AM_DIR_P" "$AM_DIR_H")"
+OUT20C="$(am_doctor_only "$AM_DIR_P" "$AM_DIR_H")"
 AM_ROW_C="$(am_row "$OUT20C")"
 expect_match "20.8: two files under the project's memory dir render ✗ auto-memory" \
   "  ✗ auto-memory *" "$AM_ROW_C"
@@ -942,7 +1008,24 @@ expect_absent "20.11: …and never names setup" "/bionic:setup" "$AM_ROW_C"
 AM_EMP_P="$(ds_r2_repo)"; AM_EMP_H="$(am_home)"
 mkdir -p "${AM_EMP_H}/projects/$(am_slug "$AM_EMP_P")/memory"
 expect_match "20.12: an empty memory directory reads ✓" \
-  "  ✓ auto-memory *" "$(am_row "$(am_doctor "$AM_EMP_P" "$AM_EMP_H")")"
+  "  ✓ auto-memory *" "$(am_row "$(am_doctor_only "$AM_EMP_P" "$AM_EMP_H")")"
+
+# THE FILTER AGAINST THE WHOLE PAGE, on the override fixture (20.2-20.6's, whose whole page is OUT20B). The PROJECT
+# block of the filtered page is the whole page's from the PROJECT header to the end (non-empty first), and the
+# filtered page leaves out what 20.1f reads: the ENVIRONMENT header and the THIRD PARTY table, which the whole
+# page does print (the positive beside the absence, on the same fixture).
+OUT20B_ONLY="$(am_doctor_only "$AM_OVR_P" "$AM_OVR_H")"
+AM_BLOCK_WHOLE="$(printf '%s\n' "$OUT20B" | awk '/^PROJECT$/{p=1} p')"
+AM_BLOCK_ONLY="$(printf '%s\n' "$OUT20B_ONLY" | awk '/^PROJECT$/{p=1} p')"
+expect_true "20.13a: the whole page's PROJECT-to-end block is not empty (the extractor reads the page)" \
+  test -n "$AM_BLOCK_WHOLE"
+expect_eq "20.13: the filtered page's PROJECT block is the whole page's, line for line" \
+  "$AM_BLOCK_WHOLE" "$AM_BLOCK_ONLY"
+expect_match "20.14a: the whole page prints the THIRD PARTY table" "*THIRD PARTY*" "$OUT20B"
+expect_eq "20.14a2: …and the ENVIRONMENT header" "ENVIRONMENT" "$(printf '%s\n' "$OUT20B" | grep -x 'ENVIRONMENT')"
+expect_no_match "20.14: …and the filtered page prints no THIRD PARTY table" \
+  "*THIRD PARTY*" "$OUT20B_ONLY"
+expect_eq "20.14b: …and no ENVIRONMENT header" "" "$(printf '%s\n' "$OUT20B_ONLY" | grep -x 'ENVIRONMENT')"
 
 section "Section 80: the §19/§20 reads do not depend on the runner's PATH (wave-24 D18, AC-2.1)"
 

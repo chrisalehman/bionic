@@ -424,8 +424,9 @@ units_rows() {
 # other for ever, and the first goes first.
 #
 # <step> STILL DECIDES THE GATE ACTS (wave-20 Δ6, T10b). A row of kind `integrate` or `close`,
-# or a `doc` row at Step 7 or later (the release), is ready only once <step> has reached its
-# own step. TWO TABLE SHAPES, ONE ANSWER (wave-18 REQ-3, AC-3.3; ADR-033): passed `T<n>`, only
+# or — in a table WITHOUT the `reads` column — a `doc` row at Step 7 or later (the release), is
+# ready only once <step> has reached its own step. In a table with the column a doc row waits for
+# its reads like any row, the release for `approval:release` (wave-26 T13; D3, A-T13.1). TWO TABLE SHAPES, ONE ANSWER (wave-18 REQ-3, AC-3.3; ADR-033): passed `T<n>`, only
 # task-scale rows (no step cell) are judged and a task dependency is satisfied by `done`. Any
 # other <step> is a caller fault and exits 2; no table exits 1.
 #
@@ -537,7 +538,33 @@ _units_sched() {
     printf '\034rows\n'; printf '%s\n' "$rows"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
   } | awk -F'\t' -v mode="$mode" -v want="$step" -v scale="$scale" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" "$(_units_sched_awk)"
+      -v extre="$(_units_ext_re)" "$(_units_files_awk)$(_units_sched_awk)"
+}
+
+# _units_files_awk -> the awk function `writes_head(cell)`: 1 when a `Files` cell names a path
+# outside `.bionic/`, the tracked tree a writer commits to the head; 0 when every path entry is
+# under the docs root, or the cell names no path at all (a bare word or a dash declares nothing).
+# ONE PREDICATE, TWO READERS (wave-26 T32): the scheduler asks it which rows write the head a
+# floor proves, and `units_validate` asks it which active rows owe a tree of their own. Prepended
+# to each program; NO APOSTROPHE inside it (it is single-quoted).
+_units_files_awk() {
+  printf '%s' '
+    function writes_head(cell,   a, m, k, e) {
+      m = split(cell, a, ",")
+      for (k = 1; k <= m; k++) {
+        e = a[k]; sub(/^[ \t]+/, "", e); sub(/[ \t]+$/, "", e); sub(/^\.\//, "", e)
+        if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
+        if (index(e, ".bionic/") != 1) return 1
+      }
+      return 0
+    }
+'
+}
+
+# units_writes_head <Files cell> -> 0 when the cell names a path outside `.bionic/`, 1 when not:
+# the same predicate, for a shell caller (session-poker.sh launch-sync).
+units_writes_head() {
+  printf '%s\n' "${1:-}" | awk "$(_units_files_awk)"'{ exit !writes_head($0) }'
 }
 
 # _units_sched_awk -> the awk program `_units_sched` runs. Printed by a function so the comments
@@ -797,9 +824,10 @@ _units_sched_awk() {
           mark = (substr(e, length(e)) == "!")
           if (mark) e = substr(e, 1, length(e) - 1)
           nfe[i]++; fe[i, nfe[i]] = e; bg[i, nfe[i]] = mark; nbg += mark
-          if (index(e, ".bionic/") == 1) docs[i] = 1; else code[i] = 1
+          if (index(e, ".bionic/") == 1) docs[i] = 1
           if (isopen(i)) ixadd(i, nfe[i])
         }
+        code[i] = writes_head(fil[i])
         r = rd[i]
         if (hasreads && r !~ /[A-Za-z0-9]/) r = kdef(knd[i])
         if (hasreads) { m = split(r, a, ","); for (k = 1; k <= m; k++) addtok(i, a[k]) }
@@ -823,9 +851,12 @@ _units_sched_awk() {
         } else {
           # A WAVE ROW CARRIES A NUMERIC STEP, and that is all the step still decides for a work
           # row (wave-20 Δ1). A GATE ACT WAITS FOR ITS STEP (Δ6; T10b): ready only once the run
-          # has REACHED its step — reached, not equalled.
+          # has REACHED its step — reached, not equalled. A DOC ROW WAITS FOR ITS READS (wave-26
+          # T13; D3): in a table with the reads column the release reads approval:release and
+          # nothing about it is a step. A table without the column has no approval to read, so
+          # its Step-7 doc row keeps the hold (A-T13.1).
           if (stp[i] !~ /^[0-9]+$/) continue
-          gate = (knd[i] == "integrate" || knd[i] == "close" || (knd[i] == "doc" && stp[i] + 0 >= 7))
+          gate = (knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7))
           if (gate && stp[i] + 0 > want + 0) held = 1
         }
         if (mode == "waiting" && held) printf "%s\tstep:%s\t-\t-\n", id[i], stp[i]
@@ -933,7 +964,7 @@ units_validate() {
   rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" '
+      -v extre="$(_units_ext_re)" "$(_units_files_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: none of its cells can be trusted to name what it breaks.
@@ -988,7 +1019,12 @@ units_validate() {
           # would refuse the ordinary end state of every wave.
           # NO APOSTROPHE ANYWHERE ABOVE: this comment is inside the single-quoted awk
           # program, and one would close the quote (the header note says so).
-          if (haswt == 1 && sta[i] == "active" && wtc[i] !~ /[A-Za-z0-9]/)
+          #
+          # ONLY A ROW THAT WRITES THE HEAD (wave-26 T32). A row whose Files cell names no
+          # tracked path (a verify, a review, a doc record under the docs root) commits nothing
+          # a gate must attribute, so it runs active with no tree of its own; writes_head is
+          # the predicate the scheduler asks of the same cell.
+          if (haswt == 1 && sta[i] == "active" && wtc[i] !~ /[A-Za-z0-9]/ && writes_head(fil[i]))
             printf "%s: active row names no worktree\n", id[i]
 
           # THE ORIGIN IS DECLARED BESIDE THE IDENTITY (wave-17 REQ-2, AC-2.1, D3, ADR-032).
@@ -1119,7 +1155,9 @@ units_validate() {
           } while (more)
           s = ""; c = 0
           for (a = 1; a <= n; a++) if (fw[a] && bw[a]) { grp[a] = 1; s = s (c++ ? ", " : "") id[a] }
-          if (c > 1) printf "%s: read cycle through %s; each waits on the next, so none can ever be ready\n", id[i], s
+          # A ROW THAT WAITS ON ITSELF is a cycle of one (wave-26 T32; review 7 F5): its group
+          # holds only itself, so the count alone never named it, and it was never ready.
+          if (c > 1 || ((i, i) in e)) printf "%s: read cycle through %s; each waits on the next, so none can ever be ready\n", id[i], s
         }
       }')"
     if [ -n "$cycles" ]; then
