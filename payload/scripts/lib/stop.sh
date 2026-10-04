@@ -2223,7 +2223,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_LAUNCHED=""; _ST_DECLINED=""; _ST_CURRENT=""; _ST_STATE=""; _ST_CEILING=""
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
   _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
-  _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed
+  _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""
   local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
   local digest duty at led standing gap rcount rgap slot
 
@@ -2355,6 +2355,13 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
         _ST_TICK_DUTY=none
       fi
     fi
+    # THE HEAD THE TICK JUDGED `live:head` AGAINST (wave-26 T32; A-T14.2), from the same fresh
+    # digest: the wall reads no git, so on a tick's turn it hands the tick's head to the ready set
+    # below, and a follow-up review the tick offered is a review the wall owes. Off a tick turn,
+    # or with a stale digest, there is no head, and a live review waits here as before.
+    if [ -n "$at" ] && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
+      _ST_LIVE_HEAD="$(tick_digest_field "$digest" head)"
+    fi
   fi
 
   # THE FILL'S NUMBERS — only on a live ledger (past Step 3), exactly as before: a run at
@@ -2432,7 +2439,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # wall owes it the same way: the writers are trimmed to the free slots, the read-only rows are
   # counted and named in full. A row that waits for a read is not in this set at all, so it is
   # never demanded.
-  ready="$(fill_ready_tagged "$_ST_PLAN" 2>/dev/null)"
+  ready="$(UNITS_LIVE_HEAD="$_ST_LIVE_HEAD" fill_ready_tagged "$_ST_PLAN" 2>/dev/null)"
   count=0; gap=0; rcount=0; rgap=0; _ST_READY=""; _ST_NAMED=""
   while IFS=$'\t' read -r rest slot; do
     [ -n "$rest" ] || continue
