@@ -1595,4 +1595,64 @@ expect_eq "§QRUN a quoted redirect is an argument, the trailing one comes off" 
 expect_eq "§QRUN an escaped quote does not end the run before the redirect" \
   "pytest \"a\\\" > b\"" "$(norm_of 'pytest "a\" > b" 2>&1')"
 
+section "§QESC — wave-24 T30: a backslash before the close is read from one map, a word from one split"
+# `cmdnorm_qend` answers a double quote with a backslash before its close from a map of every
+# quote no backslash hides, built once per text, and `argv_tok` reads its characters from one
+# split. Each pair differs only in whether the quote before the `;` is hidden, so a map that
+# miscounts a backslash run turns one answer into the other.
+case_is none  'echo "x\\\"; make"'        'three backslashes: the third hides the quote'
+case_is build 'echo "x\\\\"; make'        'four backslashes are two, and the quote closes'
+case_is build 'echo "\"\"\"x"; make'      'escaped quotes before the close'
+case_is none  'echo "a\"b" "c\"d; make"'  'a second quoted run on the same text finds its own close'
+case_is build 'echo "a\"b" "c\"d"; make'  '…and closes when its quote stands'
+case_is none  "$(printf 'printf "a\\"b" <<EOF\nmake\nEOF')" 'a heredoc opened after an escaped quote: its body is text'
+# A word longer than argv_tok's 64-character pieces, escaped and quoted across the seams.
+QESC_A70=$(printf 'a%.0s' $(seq 70))
+targets_are "${QESC_A70}${QESC_A70}b.test.sh" "bash tests/${QESC_A70}${QESC_A70}\\b.test.sh"
+targets_are "${QESC_A70}qz.test.sh" "bash tests/${QESC_A70}\"q\"z.test.sh"
+
+# THE MAP AGAINST THE WALK IT REPLACED. Every string of one to six characters over
+# { " \ ' a }, every quote in it, both escape modes: `cmdnorm_qend` must answer what the
+# c0d6ab04 walk (copied below) answers. Then every prefix of each string is asked the same
+# questions right after the whole string was, which is the path where the map built on the
+# longer text answers for the shorter one.
+bash -c '. "$1" || exit 1; printf "%s" "$CMD_RUN_NORM_AWK"' _ "$LIB" > "$SANDBOX/qesc-lib.awk"
+cat > "$SANDBOX/qesc.awk" <<'AWK'
+function ref_qend(s, i, q, esc,   t, j, k, b) {
+  j = i + 1
+  for (;;) {
+    t = substr(s, j)
+    k = index(t, q)
+    if (esc && q == "\"") { b = index(t, "\\"); if (b > 0 && (k == 0 || b < k)) { j += b + 1; continue } }
+    return (k == 0 ? length(s) + 1 : j + k - 1)
+  }
+}
+function ask(s,   i, c, e, k, want, got) {
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (c != "\"" && c != "\047") continue
+    for (e = 0; e <= 1; e++) {
+      want = ref_qend(s, i, c, e); got = cmdnorm_qend(s, i, c, e); N++
+      k = index(substr(s, i + 1), c); if (k > 0 && want > k + i) HID++
+      if (want != got) { BAD++; if (BAD <= 5) printf "DIFF s=[%s] i=%d esc=%d want=%d got=%d\n", s, i, e, want, got }
+    }
+  }
+}
+function gen(p, n,   x, k) {
+  if (length(p) > 0) { ask(p); for (k = 1; k < length(p); k++) ask(substr(p, 1, k)) }
+  if (n == 0) return
+  for (x = 1; x <= 4; x++) gen(p A[x], n - 1)
+}
+BEGIN { A[1] = "\""; A[2] = "\\"; A[3] = "\047"; A[4] = "a"; gen("", 6)
+        printf "asked=%d hidden=%d diffs=%d\n", N, HID, BAD }
+AWK
+QESC_OUT=$(awk -f "$SANDBOX/qesc-lib.awk" -f "$SANDBOX/qesc.awk" 2>&1)
+QESC_SUM=$(printf '%s\n' "$QESC_OUT" | grep '^asked=')
+expect_true "§QESC the oracle ran and asked over 10 000 questions [$QESC_SUM]" \
+  awk -v l="$QESC_SUM" 'BEGIN { split(l, f, /[= ]/); exit !(f[2] + 0 > 10000) }'
+expect_true "§QESC …and in over 1 000 of them a backslash hid the first quote [$QESC_SUM]" \
+  awk -v l="$QESC_SUM" 'BEGIN { split(l, f, /[= ]/); exit !(f[4] + 0 > 1000) }'
+expect_eq "§QESC cmdnorm_qend answers every one as the c0d6ab04 walk does" \
+  "diffs=0" "$(printf '%s\n' "$QESC_SUM" | grep -o 'diffs=[0-9]*')$(printf '%s\n' "$QESC_OUT" | grep '^DIFF' | head -3)"
+
 finish
