@@ -8691,8 +8691,12 @@ expect_contains "DS.1 …and it counts the payload-named files, not the whole di
   "$DS_PLANTED_HOOKS in ~/.claude/hooks" "$DS_REPORT"
 expect_true "DS.1 …over a non-empty plant (the count is not zero over zero)" \
   test "${DS_PLANTED_HOOKS:-0}" -ge 10
-expect_contains "DS.1 …and all six role files as drifted" \
-  "6/6 differ" "$DS_REPORT"
+# RE-POINTED (wave-27 T11): was a literal "6/6", which a seventh role turned red for no defect.
+# The fixture plants one stale copy per payload role file, so the expected figure is that plant.
+DS_ROLE_N="$(for ds_f in "$DS_PAYLOAD"/agents/*.md; do [ -f "$ds_f" ] && echo x; done | grep -c x)"
+expect_true "DS.1 …over a non-empty role plant" test "${DS_ROLE_N:-0}" -ge 1
+expect_contains "DS.1 …and every planted role file as drifted" \
+  "${DS_ROLE_N}/${DS_ROLE_N} differ" "$DS_REPORT"
 
 # ── DS.2a THE FIRST WAY: every row that fires renders, with its hint ─────────
 #
@@ -11527,15 +11531,20 @@ done
 expect_eq "SV both author surfaces (SKILL.md, dispatch.md) carry the shared scaffold's new Suites: line" \
   "2 " "$SV_COUNT $SV_DISAGREE"
 
+# RE-POINTED (wave-27 T11): was `"6 "`, a count a seventh role turned red. A relation now:
+# every role file read carries the reader view, over a set that is not empty.
 SV_ROLES=0
+SV_READER=0
 SV_NOREADER=""
 for _sv_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
   [ -f "$_sv_f" ] || continue
   SV_ROLES=$((SV_ROLES + 1))
-  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_sv_f" || SV_NOREADER="${SV_NOREADER} ${_sv_f##*/}"
+  if /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_sv_f"; then SV_READER=$((SV_READER + 1))
+  else SV_NOREADER="${SV_NOREADER} ${_sv_f##*/}"; fi
 done
-expect_eq "SV …and all six role files carry the reader view of the scaffold" \
-  "6 " "$SV_ROLES $SV_NOREADER"
+expect_true "SV …the role files were read (the relation below is not vacuous)" test "$SV_ROLES" -ge 1
+expect_eq "SV …and every role file carries the reader view of the scaffold" \
+  "$SV_ROLES " "$SV_READER $SV_NOREADER"
 
 # THE OLD LINE IS GONE, EVERYWHERE, NOT JUST REPLACED SOMEWHERE. A partial render (the
 # block updated in the source but only some templates re-rendered) would leave some copies
