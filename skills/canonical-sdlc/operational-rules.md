@@ -131,7 +131,7 @@ A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale
 | approval line | `approved: <name> by <who> <ISO-UTC> "<reply>"` inside `## SDLC State`; `approval:plan` is the existing `approved-by:` line |
 | approval verb | `session-poker.sh approve <name> '<reply>'` |
 | proof line | `proved: kind=<floor\|review\|task> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>` inside `## SDLC State` |
-| proof verb | `session-poker.sh proof-add <kind> <evidence path>`; the head is `git rev-parse HEAD` of the working branch's checkout, never an operand |
+| proof verb | `session-poker.sh proof-add <kind> <evidence path>`; the head the evidence names: a run log's `head=` header, a review's `reviewed: a..b` end; never an operand |
 
 `approve` is run on the user's own reply, quoted verbatim, the same rule as the `approved` word at Step 3.
 
