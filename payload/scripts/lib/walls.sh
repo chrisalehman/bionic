@@ -5409,7 +5409,8 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # WHAT IT DOES. A suite-class Bash call that every wall allows comes back with its command
 # rewritten through `fold_update_input` into the shim the plugin ships:
 #
-#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--stamp-dir <dir>] -- '<the command>'
+#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--kill-after <s> | --max-wait <s>]
+#                                          [--stamp-dir <dir>] [--suites <names>] -- '<the command>'
 #
 # The shim books one of the machine's places, stamps the run and runs the command
 # (payload/scripts/booked.sh). This is the one site that sees every runner in every project
@@ -5445,6 +5446,13 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # --suites: WHICH SUITES THE COMMAND RUNS (wave-26 T61, critic F1), so the land can keep the newest
 # stamp of each suite apart. `_bsg_suites` names them from the claim's own `targets` reading,
 # the one the solo check reads too.
+#
+# --max-wait: THE CALL'S OWN BOUND ON THE WAIT (wave-27 T6, critic 3 S2). The staged timeout in
+# seconds, less a ten-second margin, so a wait for a place gives up inside the call rather than
+# outliving it into the background: ARM R's raised value when it repairs the call, else the
+# call's own `timeout`, else the harness default (BASH_DEFAULT_TIMEOUT_MS, two minutes unset).
+# The shim takes the smaller of it and its own default. A short call carries --kill-after
+# instead, whose limit already bounds the wait, so it gets none.
 #
 # THE SEAM FOR T9 is `wall_booked_argv`: the one function that builds the shim's argument
 # list. An option such as `--kill-after <s>` goes in as an extra argument there.
@@ -5657,6 +5665,22 @@ wall_booked_argv() {
 # pass as typed.
 _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
 WALL_SHORT_KILL_AFTER=""
+_BSG_STAGED_MS=""
+# _bsg_wait_s — sets _BSG_WAIT_S to the shim's --max-wait for this call: the staged timeout
+# (_BSG_STAGED_MS, set by _bsg_stage_input when ARM R raises it), else the call's own, else the
+# harness default; in seconds, less ten, never under 1. A variable, not a `$( )`, so the wrap
+# forks nothing more than the timeout read. The number reading is _fo_short_pass's.
+_BSG_WAIT_S=""
+_bsg_wait_s() {
+  local _t="${_BSG_STAGED_MS:-}"
+  [ -n "$_t" ] || _t="$(bionic_jq .tool_input.timeout)"
+  [ -n "$_t" ] || _t="${BASH_DEFAULT_TIMEOUT_MS:-120000}"
+  case "$_t" in ''|*[!0-9]*) _t=120000 ;; esac
+  [ "${#_t}" -le 9 ] || _t=999999999
+  _t=$((10#$_t / 1000 - 10))
+  [ "$_t" -ge 1 ] || _t=1
+  _BSG_WAIT_S="$_t"
+}
 _bsg_wrap_text() {
   local _c _w _lines _cls _seg _quiet=0 _k="${WALL_SHORT_KILL_AFTER:-}"
   _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
@@ -5694,7 +5718,7 @@ _bsg_wrap_text() {
   _bsg_suites
   [ "$_quiet" = 1 ] || ! _bsg_solo_target || _quiet=1
   set --
-  [ -z "$_k" ] || set -- --kill-after "$_k"
+  if [ -n "$_k" ]; then set -- --kill-after "$_k"; else _bsg_wait_s; set -- --max-wait "$_BSG_WAIT_S"; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
   set -- "$@" --suites "$_BSG_SUITES"
   wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
@@ -5711,7 +5735,9 @@ _bsg_wrap_text() {
 # rc 0 when something was staged, 1 when there was nothing to stage.
 _bsg_stage_input() {
   local _t="${2:-}" _upd
+  _BSG_STAGED_MS="$_t"
   _bsg_wrap_text "$1" || _BSG_WRAP_TEXT=""
+  _BSG_STAGED_MS=""
   [ -n "$_t" ] || [ -n "$_BSG_WRAP_TEXT" ] || return 1
   _upd=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --arg t "$_t" --arg c "$_BSG_WRAP_TEXT" \
     '.tool_input + (if $t == "" then {} else {timeout: ($t | tonumber)} end)
