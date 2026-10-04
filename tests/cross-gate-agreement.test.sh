@@ -13826,7 +13826,7 @@ expect_ne "MEMROOT mutation: …and on the brace spelling the agreement pin goes
   "$(mr_bw "$PARTY_EG" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')" \
   "$(mr_gs "$MR_MUT_HOOKS/canonical-sdlc-governing-skill.sh" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')"
 
-section "PRF — the proof line: one writer, every reader gives its kind, head and time back (wave-26 T56; final review S3 row 4)"
+section "FACT — the proof line: one writer, every reader gives its kind, head and time back, and a reading its question (wave-26 T56 as §PRF; widened by wave-27 T2, REQ-2 AC-2.5)"
 # THE ROW THE OWNERSHIP TABLE NAMED AND NOBODY WROTE. A proof line is written by one writer,
 # proof.sh `proof_line` placed by `proof_add_line` (what `session-poker.sh proof-add` runs), and
 # read by four readers: `proof_last` / `proof_last_line` (proof.sh), the readiness program's
@@ -13836,8 +13836,9 @@ section "PRF — the proof line: one writer, every reader gives its kind, head a
 # functions, so they are run here as the files carry them: each is cut out of its file by its
 # own text (the needle below, anchored once in each), never by a line number.
 #
-# The fixture is written ONLY through the writer, then doctored around: two review proofs, then
-# a floor proof with the NEWEST time, so a reader blind to the kind answers the floor's time; a
+# The fixture is written ONLY through the writer, then doctored around: three review proofs (a
+# 1.11.0 line, then two readings, each carrying question, reader, result and scope), then a floor
+# proof with the NEWEST time, so a reader blind to the kind answers the floor's time; a
 # fenced proof line and one under another heading, each newer still, so a reader blind to the
 # fence or the section answers theirs. Every reader must answer the last review line the writer
 # wrote: kind review, its head, its time.
@@ -13851,6 +13852,7 @@ PRF_A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 PRF_B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 PRF_C=cccccccccccccccccccccccccccccccccccccccc
 PRF_LIVE=dddddddddddddddddddddddddddddddddddddddd
+PRF_E=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 # prf_cut <file> — the single-quoted awk program whose text holds PRF_NEEDLE: from the `awk '`
 # that opens it to the `' "$` that closes it. Nothing when either end is missing.
 prf_cut() {
@@ -13890,23 +13892,24 @@ prf_at() {
   # shellcheck source=/dev/null
   . "$PRF_LIB/proof.sh" || exit 1
   for _l in "$(proof_line review "$PRF_A" 2026-10-04T10:00:00Z record/w/r1.md)" \
-            "$(proof_line review "$PRF_B" 2026-10-04T11:00:00Z record/w/r2.md)" \
+            "$(proof_line review "$PRF_E" 2026-10-04T10:30:00Z record/w/adv.md adversarial w-crit flag whole)" \
+            "$(proof_line review "$PRF_B" 2026-10-04T11:00:00Z record/w/r2.md evidence w-aud pass piece)" \
             "$(proof_line floor "$PRF_C" 2026-10-04T12:00:00Z record/w/floor.txt)"; do
     proof_add_line "$PRF_PLAN" "$_l" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN" || exit 1
   done
 )
-expect_eq "PRF fixture: the writer placed three proof lines inside ## SDLC State" "3" \
+expect_eq "PRF fixture: the writer placed four proof lines inside ## SDLC State" "4" \
   "$(awk '/^## /{s=($0 ~ /SDLC State/)} s && /^proved: /' "$PRF_PLAN" | grep -c .)"
 # The decoys, each newer than every real line: a fenced proof inside the section, and one under
 # another heading. No reader may answer either.
-awk '{ print } /^current: 4$/ { print "```"; print "proved: kind=review head=" h " at=2026-10-04T13:00:00Z evidence=record/w/fenced.md"; print "```" }' \
+awk '{ print } /^current: 4$/ { print "```"; print "proved: kind=review head=" h " at=2026-10-04T13:00:00Z evidence=record/w/fenced.md question=adversarial reader=w-crit result=pass scope=piece"; print "```" }' \
   h="$PRF_C" "$PRF_PLAN" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN"
-printf '\n## Notes\n\nproved: kind=review head=%s at=2026-10-04T14:00:00Z evidence=record/w/elsewhere.md\n' "$PRF_C" >> "$PRF_PLAN"
+printf '\n## Notes\n\nproved: kind=review head=%s at=2026-10-04T14:00:00Z evidence=record/w/elsewhere.md question=adversarial reader=w-crit result=pass scope=piece\n' "$PRF_C" >> "$PRF_PLAN"
 expect_eq "PRF fixture: the two decoys are in (one fenced, one under ## Notes)" "2" \
   "$(grep -c 'evidence=record/w/\(fenced\|elsewhere\)\.md' "$PRF_PLAN")"
 PRF_LINE="$(. "$PRF_LIB/proof.sh" && proof_last_line "$PRF_PLAN" review)"
-expect_eq "PRF proof_last_line: the last review line, as the writer wrote it" \
-  "proved: kind=review head=$PRF_B at=2026-10-04T11:00:00Z evidence=record/w/r2.md" "$PRF_LINE"
+expect_eq "PRF proof_last_line: the last review line, as the writer wrote it, its reading fields last" \
+  "proved: kind=review head=$PRF_B at=2026-10-04T11:00:00Z evidence=record/w/r2.md question=evidence reader=w-aud result=pass scope=piece" "$PRF_LINE"
 expect_eq "PRF proof_last (review): its head" "$PRF_B" \
   "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review)"
 expect_eq "PRF proof_last (floor): the floor line is a different kind, with its own head" "$PRF_C" \
@@ -13935,6 +13938,46 @@ expect_nonempty "PRF mutation: …and still yields a reader that runs" "$(prf_at
 expect_ne "PRF mutation: …which answers another line's time, so the agreement row goes red" \
   "$PRF_AT" "$(prf_at "$PRF_MUT")"
 PRF_NEEDLE="$PRF_NEEDLE_SAVED"
+
+# §FACT (wave-27 T2; REQ-2 AC-2.5 verb half, D1). THE READING FIELDS RIDE THE SAME LINE. The
+# writer above put an adversarial reading (head E) before the evidence reading (head B), so a
+# reader keyed by kind alone answers B for every question. The one reading of a line,
+# `proof_fields`, gives the four fields back as the writer wrote them; `proof_last` and
+# `proof_last_line` keyed by a question answer that question's last line and nothing for a
+# question never read; the decoys (fenced, under ## Notes, both adversarial and newer) stay unread.
+expect_eq "FACT proof_fields: the evidence line's kind, head and four reading fields" \
+  "review $PRF_B evidence w-aud pass piece" \
+  "$(awk "$(. "$PRF_LIB/proof.sh" && proof_awk)"'
+    proof_fields($0) && PROOF_HEAD == h { print PROOF_KIND, PROOF_HEAD, PROOF_QUESTION, PROOF_READER, PROOF_RESULT, PROOF_SCOPE }' \
+    h="$PRF_B" "$PRF_PLAN")"
+expect_eq "FACT proof_fields: …and a 1.11.0 line reads with its reading fields empty" "review|$PRF_A||||" \
+  "$(awk "$(. "$PRF_LIB/proof.sh" && proof_awk)"'
+    proof_fields($0) && PROOF_HEAD == h { print PROOF_KIND "|" PROOF_HEAD "|" PROOF_QUESTION "|" PROOF_READER "|" PROOF_RESULT "|" PROOF_SCOPE }' \
+    h="$PRF_A" "$PRF_PLAN")"
+expect_eq "FACT proof_last (review evidence): that question's head" "$PRF_B" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review evidence)"
+expect_eq "FACT proof_last (review adversarial): its own head, not the newer evidence line's, nor a decoy's" "$PRF_E" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review adversarial)"
+expect_eq "FACT proof_last_line (review adversarial): the line as the writer wrote it" \
+  "proved: kind=review head=$PRF_E at=2026-10-04T10:30:00Z evidence=record/w/adv.md question=adversarial reader=w-crit result=flag scope=whole" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last_line "$PRF_PLAN" review adversarial)"
+expect_eq "FACT proof_last (review structure): a question never read answers nothing" "" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review structure)"
+# THE DOCTORED SITE. A copy of proof.sh whose last-proof reader has lost its question test (a
+# reader keyed by kind alone, 1.11.0's) must answer the evidence head for the adversarial question.
+FACT_NEEDLE='PROOF_KIND == k && (q == "" || PROOF_QUESTION == q)'
+FACT_MUT_TEXT='PROOF_KIND == k'
+FACT_MUT="$PRF_D/proof.sh.mut"
+anchor "$PRF_LIB/proof.sh" "$FACT_NEEDLE" 1
+FACT_N="$FACT_NEEDLE" FACT_R="$FACT_MUT_TEXT" awk '
+  BEGIN { n = ENVIRON["FACT_N"]; r = ENVIRON["FACT_R"] }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$PRF_LIB/proof.sh" > "$FACT_MUT"
+expect_eq "FACT mutation: the doctored copy lost exactly the question test" "0" \
+  "$(grep -cF -- "$FACT_NEEDLE" "$FACT_MUT")"
+expect_eq "FACT mutation: …and still reads the evidence question's head (it runs)" "$PRF_B" \
+  "$(. "$FACT_MUT" && proof_last "$PRF_PLAN" review evidence)"
+expect_ne "FACT mutation: …which answers the adversarial question with another line's head, so the agreement row goes red" \
+  "$PRF_E" "$(. "$FACT_MUT" && proof_last "$PRF_PLAN" review adversarial)"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"
