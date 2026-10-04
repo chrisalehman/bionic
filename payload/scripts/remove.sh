@@ -210,6 +210,12 @@ RM_ALIAS_END='# ─── bionic:end ───'
 # env.sh's RC_START / RC_END. Verbatim, box-drawing dashes included.
 RM_RC_START='# ─── bionic:rc:start ───'
 RM_RC_END='# ─── bionic:rc:end ───'
+# from env.sh: the working-principles item's markers — the block setup writes
+# into the user's own CLAUDE.md. Copies, for the same reason as the pair above;
+# tests/principles-item.test.sh §REMOVE pins them byte-equal to env.sh's
+# PRINCIPLES_START / PRINCIPLES_END.
+RM_PRINCIPLES_START='<!-- bionic:principles:start -->'
+RM_PRINCIPLES_END='<!-- bionic:principles:end -->'
 RM_TODO_EXPORT_RE='^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
 # The retired env block's markers. NOT a copy of a live constant — setup.sh
 # stopped writing this block at W7 (the names live in settings.json now), so
@@ -269,6 +275,10 @@ fi
 if [ "$RM_MODE" = "payload" ] && [ -f "${RM_LIB_DIR}/env.sh" ]; then
   # shellcheck source=/dev/null
   . "${RM_LIB_DIR}/env.sh"
+  # markers.sh, which env.sh already soft-sourced: the walk `rc_unset` and
+  # `principles_unset` strip through. Named so the file-to-suite map sees it.
+  # shellcheck source=/dev/null
+  . "${RM_LIB_DIR}/markers.sh"
 fi
 # detect.sh, when it is there. THE ONLY LIBRARY THIS SCRIPT HAS NO STANDALONE
 # ANSWER FOR (1.4.4 T5, plan A-8). Every other predicate here is a literal this
@@ -579,14 +589,22 @@ _rm_filter_out_lines() {  # <file> <ere>
 # The pending-line shape is what makes that possible in one pass: a blank line is
 # held rather than written, and either flushed when the next real line arrives or
 # discarded when the next line turns out to be the start marker.
-_rm_strip_marker_block() {  # <file> <start-line> <end-line>
-  local file="$1" start="$2" end="$3" target
+#
+# `keep` as a fourth argument holds that blank line instead: a block written with
+# no separator above it (the working principles, lib/markers.sh's `markers_set`)
+# took nothing, so the strip gives nothing back but the block.
+_rm_strip_marker_block() {  # <file> <start-line> <end-line> [keep]
+  local file="$1" start="$2" end="$3" keep="${4:-}" target
   target="$(bionic_link_target "$file")"
   local tmp="${target}.bionic.tmp"
   local line skip=0 pending=0
   _rm_stage_tmp "$tmp" || return 1
   while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$line" = "$start" ]; then skip=1; pending=0; continue; fi
+    if [ "$line" = "$start" ]; then
+      skip=1
+      if [ "$pending" = "1" ] && [ "$keep" = "keep" ]; then printf '\n' >> "$tmp"; fi
+      pending=0; continue
+    fi
     if [ "$line" = "$end" ];   then skip=0; continue; fi
     [ "$skip" = "1" ] && continue
     if [ "$pending" = "1" ]; then printf '\n' >> "$tmp"; pending=0; fi
@@ -635,6 +653,7 @@ _rm_dir_is_empty() {  # <dir> — true when nothing is inside
 # would be invisible to the next.
 
 RC_FILE="$(_rm_shell_rc)"
+RM_PRINCIPLES_FILE="$(_rm_claude_home)/CLAUDE.md"
 RM_SETTINGS="$(_rm_settings_file)"
 RM_LEGACY_SKILL_DIR="$(_rm_claude_home)/skills/${RM_LEGACY_SKILL_NAME}"
 RM_DATA_ROOT="$(_rm_plugin_data_dir)"
@@ -686,6 +705,7 @@ _rm_item_ids() {
   fi
   echo "legacy-permission-block"
   echo "permission-mode"
+  echo "working-principles"
   if [ "$RM_MODE" = "payload" ]; then
     # fd 3: the standard input belongs to the questions, never to a list.
     while IFS= read -r n <&3; do
@@ -748,6 +768,7 @@ _rm_item_verb() {  # <id>
     legacy-permission-block) echo "remove bionic's retired permission block from ${RM_SETTINGS}" ;;
     permission-mode)       echo "reset Claude Code's default permission mode" ;;
     claude-proxy)          echo "remove bionic's claude() shell function from ${RC_FILE}" ;;
+    working-principles)    echo "remove bionic's working principles from ${RM_PRINCIPLES_FILE}" ;;
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
     orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
@@ -786,6 +807,8 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       return 1 ;;
     claude-proxy)
       _rm_file_has_literal "$RC_FILE" "$RM_RC_START" ;;
+    working-principles)
+      _rm_file_has_literal "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" ;;
     legacy-hooks)
       [ -f "$RM_SETTINGS" ] || return 1
       _rm_have jq || return 1
@@ -1548,6 +1571,60 @@ _rm_item_permission_mode() {
   echo ""
 }
 
+# ─── Item: the working principles in the user's CLAUDE.md ────────────────────
+#
+# THE USER'S OWN FILE, AND ONLY BIONIC'S BLOCK COMES OUT OF IT (wave-27 D16).
+# Setup wrote the block between its markers on a yes; this takes the block out
+# by those markers and leaves every other byte as it was. A CLAUDE.md the strip
+# leaves EMPTY held nothing but bionic's block — setup created it — so it goes
+# too, and the machine is back to having no such file. A symlinked file is never
+# deleted: its target belongs to whatever manages the link.
+#
+# TWO DOORS, ONE RESULT, as for the rc item. Payload mode calls the owner,
+# env.sh's `principles_unset`; standalone strips with the copied markers and the
+# same empty-file rule. The standalone strip KEEPS the blank line above the block
+# (`keep` below), because setup writes no separator line before this block and a
+# user's file that ends in a blank line must come back ending in one.
+
+_rm_principles_unset() {
+  if [ "$RM_MODE" = "payload" ] && declare -F principles_unset >/dev/null 2>&1; then
+    principles_unset
+    return $?
+  fi
+  _rm_strip_marker_block "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" keep || return 1
+  if [ -f "$RM_PRINCIPLES_FILE" ] && [ ! -L "$RM_PRINCIPLES_FILE" ] && [ ! -s "$RM_PRINCIPLES_FILE" ]; then
+    rm -f "$RM_PRINCIPLES_FILE"
+  fi
+  return 0
+}
+
+_rm_item_working_principles() {
+  _rm_wants working-principles || return 0
+  echo "bionic's working principles:"
+
+  if ! _rm_file_has_literal "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START"; then
+    _rm_clean "bionic's working principles in ${RM_PRINCIPLES_FILE}"
+    echo ""
+    return 0
+  fi
+
+  echo "  ${RM_PRINCIPLES_FILE} carries bionic's working principles; bionic would delete that block and leave the rest of the file as it is."
+  _rm_consent "Remove bionic's working principles from ${RM_PRINCIPLES_FILE}?"; rm_wp_consent_rc=$?
+  if [ "$rm_wp_consent_rc" -ne 0 ]; then
+    _rm_skipped "$rm_wp_consent_rc" working-principles "bionic's working principles in ${RM_PRINCIPLES_FILE}"
+    echo ""
+    return 0
+  fi
+
+  if _rm_principles_unset; then
+    _rm_removed "bionic's working principles in ${RM_PRINCIPLES_FILE}"
+  else
+    rm -f "$(bionic_link_target "$RM_PRINCIPLES_FILE").bionic.tmp"
+    _rm_leftover "could not rewrite ${RM_PRINCIPLES_FILE} — bionic's working principles are still there"
+  fi
+  echo ""
+}
+
 # ─── Item: the tools bionic installed ────────────────────────────────────────
 #
 # The table is the payload's, and there is no second copy of it — so this item
@@ -1956,6 +2033,7 @@ _rm_item_legacy_hook_files
 _rm_item_legacy_agent_copies
 _rm_item_permission_block
 _rm_item_permission_mode
+_rm_item_working_principles
 _rm_item_tools
 _rm_item_plugin_data
 _rm_item_plugin
