@@ -10112,6 +10112,63 @@ S19_ACG_NONE="$(s19_block_sites "$S19_SB/acg-nosite.test.sh" "$S19_ACG_SITE")"
 expect_eq "S19.4 …and on it the site pattern finds no site, so the at-least-one row goes RED" "0" \
   "${S19_ACG_NONE%% *}"
 
+# --- §S19.4 landing-gate: every doctored copy of the gate is anchored ---
+# landing-gate doctors one source, the gate it loads, so a site is any line writing a
+# copy of "$GATE_SRC" to a file. Same helper, same planted defects as above.
+S19_LG="$S19_TESTS_DIR/landing-gate.test.sh"
+S19_LG_SITE='"\$GATE_SRC" > "'
+S19_LG_REAL="$(s19_block_sites "$S19_LG" "$S19_LG_SITE")"
+S19_LG_REAL_SITES="${S19_LG_REAL%% *}"
+expect_eq "S19.4 the landing-gate site pattern finds at least one doctored site" "yes" \
+  "$([ "${S19_LG_REAL_SITES:-0}" -ge 1 ] 2>/dev/null && echo yes || echo no)"
+expect_eq "S19.4 every landing-gate doctoring site is anchored" "0" \
+  "${S19_LG_REAL#* }"
+cp "$S19_LG" "$S19_SB/lg-bare.test.sh"
+# built with %s so this file does not itself carry the site it plants
+printf '\nsed %s "$GATE_SRC" %s "$SUPDIR/scripts/lib/bare.sh"\n' "'s/x/y/'" '>' >> "$S19_SB/lg-bare.test.sh"
+S19_LG_BARE="$(s19_block_sites "$S19_SB/lg-bare.test.sh" "$S19_LG_SITE")"
+expect_eq "S19.4 …and the derivation names a planted bare landing-gate site" "$(( ${S19_LG_REAL#* } + 1 ))" \
+  "${S19_LG_BARE#* }"
+S19_LG_BARE_SITES="${S19_LG_BARE%% *}"
+expect_eq "S19.4 …which the landing-gate pattern counted as one more site (not vacuous)" "1" \
+  "$(( ${S19_LG_BARE_SITES:-0} - ${S19_LG_REAL_SITES:-0} ))"
+sed 's/"\$GATE_SRC" > "/"$GATE_SRC_GONE" > "/' "$S19_LG" > "$S19_SB/lg-nosite.test.sh"
+expect_eq "S19.4 …and a landing-gate copy with the target renamed really changed (not vacuous)" "yes" \
+  "$([ "$(/usr/bin/grep -c 'GATE_SRC_GONE' "$S19_SB/lg-nosite.test.sh")" -ge 1 ] && echo yes || echo no)"
+S19_LG_NONE="$(s19_block_sites "$S19_SB/lg-nosite.test.sh" "$S19_LG_SITE")"
+expect_eq "S19.4 …and on it the landing-gate pattern finds no site, so its at-least-one row goes RED" "0" \
+  "${S19_LG_NONE%% *}"
+
+# --- §S19.4 cross-gate (this suite): every doctored copy is anchored ---
+# This suite doctors many sources, so a site is keyed on the mutant it writes: a quoted
+# source redirected into a variable whose name says mutant, doctored or lib (`> "$…MUT…"`,
+# `> "$…lib"`). The suite reads ITSELF here, so no line in this section may carry that
+# shape: the planted line spells `>` through %s, the sandbox paths go to "$S19_SB/…",
+# and the no-site copy rewrites the redirect rather than any one name.
+S19_CG="$S19_TESTS_DIR/cross-gate-agreement.test.sh"
+S19_CG_SITE='"[^"]*" > "\$[A-Za-z0-9_]*(MUT|mut|DOCTOR|lib")'
+S19_CG_REAL="$(s19_block_sites "$S19_CG" "$S19_CG_SITE")"
+S19_CG_REAL_SITES="${S19_CG_REAL%% *}"
+expect_eq "S19.4 the cross-gate site pattern finds at least one doctored site" "yes" \
+  "$([ "${S19_CG_REAL_SITES:-0}" -ge 1 ] 2>/dev/null && echo yes || echo no)"
+expect_eq "S19.4 every cross-gate doctoring site is anchored" "0" \
+  "${S19_CG_REAL#* }"
+cp "$S19_CG" "$S19_SB/cg-bare.test.sh"
+# built with %s so this file does not itself carry the site it plants
+printf '\nsed %s "$PARTY_ER" %s "$S19_PLANT_MUT"\n' "'s/x/y/'" '>' >> "$S19_SB/cg-bare.test.sh"
+S19_CG_BARE="$(s19_block_sites "$S19_SB/cg-bare.test.sh" "$S19_CG_SITE")"
+expect_eq "S19.4 …and the derivation names a planted bare cross-gate site" "$(( ${S19_CG_REAL#* } + 1 ))" \
+  "${S19_CG_BARE#* }"
+S19_CG_BARE_SITES="${S19_CG_BARE%% *}"
+expect_eq "S19.4 …which the cross-gate pattern counted as one more site (not vacuous)" "1" \
+  "$(( ${S19_CG_BARE_SITES:-0} - ${S19_CG_REAL_SITES:-0} ))"
+sed 's/" > "/" >> "/g' "$S19_CG" > "$S19_SB/cg-nosite.test.sh"
+expect_eq "S19.4 …and a cross-gate copy with its redirects rewritten really changed (not vacuous)" "yes" \
+  "$([ "$(/usr/bin/grep -c '" >> "' "$S19_SB/cg-nosite.test.sh")" -gt "$(/usr/bin/grep -c '" >> "' "$S19_CG")" ] && echo yes || echo no)"
+S19_CG_NONE="$(s19_block_sites "$S19_SB/cg-nosite.test.sh" "$S19_CG_SITE")"
+expect_eq "S19.4 …and on it the cross-gate pattern finds no site, so its at-least-one row goes RED" "0" \
+  "${S19_CG_NONE%% *}"
+
 # ============================================================
 section "S17 — no private builder of a shared shape remains (AC-28)"
 # ============================================================
