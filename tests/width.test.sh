@@ -108,6 +108,20 @@ else
   done
   if [ -z "$_bad" ]; then ok "5: every glyph a row can carry measures one column"
   else no "5: a glyph a row can carry is not in width.sh's closed set" "$_bad"; fi
+  # THE CARDS ARE A BOUNDED SURFACE TOO (wave-26 D12): the Step-3 card's chain line joins its
+  # ids with an arrow, and card.sh pads and folds every row in columns, so each glyph it prints
+  # is held to the same closed set.
+  CARD_PRINTED="$(row_glyphs "${REPO}/payload/scripts/card.sh")"
+  expect_contains "5a: the sweep reads card.sh, and finds the chain line's arrow" "→" "$CARD_PRINTED"
+  _bad=""
+  while [ -n "$CARD_PRINTED" ]; do
+    _g="${CARD_PRINTED%"${CARD_PRINTED#?}"}"
+    CARD_PRINTED="${CARD_PRINTED#?}"
+    _w="$(cols_c "$_g")"
+    [ "$_w" = "1" ] || _bad="${_bad}${_bad:+ }${_g}(${_w})"
+  done
+  if [ -z "$_bad" ]; then ok "5b: every glyph a card row can carry measures one column"
+  else no "5b: a glyph a card row can carry is not in width.sh's closed set" "$_bad"; fi
 fi
 
 section "Section 3: the truncator cuts characters, never bytes"

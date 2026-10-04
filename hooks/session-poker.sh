@@ -21,6 +21,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | current | ledger-add | ledger-set …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the working branch's head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -414,6 +415,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh current <N|T<n>>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
+  die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the working branch's head"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   exit 2
@@ -589,6 +591,14 @@ case "$VERB" in
       *) usage "current: '$1' is neither a step number (0-8) nor a task id (T<n>)." ;;
     esac
     PV_KEY="$1"
+    ;;
+  # TWO OPERANDS AND NO THIRD (wave-26 T4; REQ-3, D5): the kind and the evidence. The head is
+  # read from git, never typed, so a head on the command line is the usage error, not a value.
+  proof-add)
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
+      usage "proof-add takes exactly two arguments: <floor|review|task> <evidence path under record/> (the head is read from the working branch's checkout)."
+    fi
+    PF_KIND="$1"; PF_EVID="$2"
     ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
@@ -4787,6 +4797,72 @@ EOF
     fi
     plan_verb_swap current "current: $PV_KEY" as-is
     say "current — current: $PV_KEY in $PV_PLAN (was ${PV_CUR:-none})$PV_FILLED; dry-committed at that step first."
+    exit 0
+    ;;
+
+  # THE PROOF VERB (wave-26 T4; REQ-3 AC-3.2, D5). Nothing recorded which code state a test pass
+  # or a review read, so the same code was proved again and again. A proof is one line under
+  # `## SDLC State` — `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<record/ path>`
+  # (payload/scripts/lib/proof.sh owns its shape and its reader, `proof_last`) — and what is
+  # unproved is the difference since the head it names. The head is `git rev-parse HEAD` of the
+  # checkout holding the plan's `working-branch:`, never an operand. The line goes in through
+  # the shared transaction; every refusal below leaves the plan byte-identical and names its
+  # fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
+  # the tick never reads it, so it is not one of the libraries every verb needs.
+  proof-add)
+    if ! { declare -F proof_last >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_add_line >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    if ! proof_kind_ok "$PF_KIND"; then
+      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name floor, review or task. The plan is unchanged."
+      exit 1
+    fi
+    plan_verb_open proof-add
+    PF_DOCS="$(docs_root "$PV_REPO")"
+    PF_DOCS="$(cd "$PF_DOCS" 2>/dev/null && pwd -P)"
+    case "$PF_EVID" in
+      *[[:space:]]*|*'|'*)
+        die "REFUSED — the evidence path '$(clean "$PF_EVID")' carries a space, a tab, a line break or a |, which the space-separated proof line cannot hold; rename the file. The plan is unchanged."
+        exit 1 ;;
+    esac
+    case "$PF_EVID" in
+      /*) PF_ABS="$PF_EVID" ;;
+      *)  PF_ABS="$PF_DOCS/$PF_EVID" ;;
+    esac
+    PF_REAL=""
+    [ -n "$PF_DOCS" ] && [ -f "$PF_ABS" ] \
+      && PF_REAL="$(cd "$(dirname "$PF_ABS")" 2>/dev/null && pwd -P)/$(basename "$PF_ABS")"
+    if [ -z "$PF_REAL" ]; then
+      die "REFUSED — the evidence file $(clean "$PF_EVID") does not exist (read as $(clean "$PF_ABS")); write the record first, then add its proof. The plan is unchanged."
+      exit 1
+    fi
+    case "$PF_REAL" in
+      "$PF_DOCS"/record/*) PF_REL="${PF_REAL#"$PF_DOCS"/}" ;;
+      *)
+        die "REFUSED — the evidence $(clean "$PF_EVID") is not under record/ of the docs root ($PF_DOCS/record/); a proof cites a record. The plan is unchanged."
+        exit 1 ;;
+    esac
+    PF_WB="$(proof_working_branch "$PV_PLAN")"
+    if [ -z "$PF_WB" ]; then
+      die "REFUSED — $PV_PLAN names no working-branch:, so there is no checkout to read the head from; add 'working-branch: <branch>' under ## SDLC State. The plan is unchanged."
+      exit 1
+    fi
+    PF_HEAD="$(proof_head "$PV_REPO" "$PF_WB")" || PF_HEAD=""
+    case "$PF_HEAD" in
+      [0-9a-f]*) : ;;
+      *)
+        die "REFUSED — no checkout of $PV_REPO has working-branch $(clean "$PF_WB") checked out, so its head cannot be read; check the branch out (its worktree) and run proof-add again. The plan is unchanged."
+        exit 1 ;;
+    esac
+    PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL")"
+    if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+      die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the proof; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
+    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL: written to $PV_PLAN; dry-committed first."
     exit 0
     ;;
 
