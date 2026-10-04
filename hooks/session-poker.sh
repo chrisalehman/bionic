@@ -1685,7 +1685,7 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
   rows="$(units_rows "$SCHED_PLAN" 2>/dev/null)" || return 0
   [ -n "$rows" ] || return 0
   waiting="$(units_waiting "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null)"
-  all="$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
+  all="${SCHED_READY_ALL:-}"
   offered="$(printf '%s' "${SCHED_READY:-}" | tr '\n' ' ')"
   while IFS= read -r line; do
     [ -n "$line" ] && say "WAIT $(clean "$line")"
@@ -6222,6 +6222,15 @@ EOF
     # budget, a fill — gets them once, here, and none prints them again.
     tick_plan_report
 
+    # THE UNTRIMMED READY SET, ASKED ONCE FOR EVERY ARM (wave-26 T13; review-6 F3). The WAIT
+    # lines read it, and so does the WAITING line below the decision: "nothing ready" is said
+    # only when this is empty. A row that is ready and not offered — a full writer budget, a
+    # standing decline, a machine HOLD — is not "nothing ready".
+    SCHED_READY_ALL=""
+    if [ -n "${SCHED_PLAN:-}" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
+      SCHED_READY_ALL="$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
+    fi
+
     if [ "$SCHED_STATE" = hold ] || [ "$SCHED_STATE" = emergency ]; then
       # HOLD AND EMERGENCY ARE ADVICE TO THE MODEL, and that is all they have ever been.
       # They keep their meaning here: a measurement, a verdict, and no fills this tick.
@@ -6459,7 +6468,15 @@ EOF
       # Nothing filled, nothing stands down, nothing needs surfacing, and a row is open: every
       # writer slot is taken or no row is ready. The Patrol prompt asks for nothing after this
       # line, and the duty above is none, so the turn ends here.
-      say "WAITING — ${OPEN_ROSTER} running, nothing ready"
+      #
+      # ONLY WHEN NOTHING IS READY (wave-26 T13; review-6 F3). A QUIET tick can also be one
+      # where a row IS ready and not offered: the writer budget is full, or the standing
+      # fill-declined answered it. "nothing ready" is false there, and each such row already
+      # has its WAIT line saying why, so the line is left out.
+      case "${SCHED_READY_ALL:-}" in
+        *[!\ ]*) : ;;
+        *) say "WAITING — ${OPEN_ROSTER} running, nothing ready" ;;
+      esac
     fi
     tick_decision_line "$TICK_DECISION" "$TOTAL" "$OPEN" "" "" "$SCHED_FILL" "$LEASE_TREES"
     exit 0

@@ -13309,7 +13309,7 @@ UB4=$(new_repo "ub-fill"); UB4_P="$UB4/.bionic/docs/plans/epic-99/run.md"
 mkdir -p "$(dirname "$UB4_P")"
 { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
   printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-  printf -- '---\n\n## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n'
+  printf -- '---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
   printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
   printf '| T4 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed | — |\n'
@@ -13399,7 +13399,7 @@ UB8=$(new_repo "ub-tick"); UB8_P="$UB8/.bionic/docs/plans/epic-99/run.md"
 mkdir -p "$(dirname "$UB8_P")"
 { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
   printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-  printf -- '---\n\n## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n'
+  printf -- '---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
   printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
   printf '| T4 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed | — |\n'
@@ -13460,7 +13460,7 @@ UB9=$(new_repo "ub-engage"); UB9_P="$UB9/.bionic/docs/plans/epic-99/run.md"
 mkdir -p "$(dirname "$UB9_P")"
 { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
   printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-  printf -- '---\n\n## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n'
+  printf -- '---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
   printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
   printf '| T4 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed | — |\n'
