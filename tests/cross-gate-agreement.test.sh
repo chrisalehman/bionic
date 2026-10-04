@@ -10106,7 +10106,7 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 #   grep -cE '^[[:space:]]*anchor[[:space:]]' tests/docs-pins.test.sh     -> 45
 expect_eq "S19.3 docs-pins holds 44 doctoring sites" "44" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 45 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change; wave-14 T33 adds one, DOCTORED_PATROL_T28's own anchor; wave-14 T36 adds one, the nudged-card-row discriminator; wave-18 T8's Section-15 107g gap and wave-19 T11/Tdoc's Section-12 92a3 gap each add one, both closed by wave-19 T9c)" "45" \
+expect_eq "S19.3 …declared by 46 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change; wave-14 T33 adds one, DOCTORED_PATROL_T28's own anchor; wave-14 T36 adds one, the nudged-card-row discriminator; wave-18 T8's Section-15 107g gap and wave-19 T11/Tdoc's Section-12 92a3 gap each add one, both closed by wave-19 T9c; wave-24 T18's §SEMVER doctored control adds one)" "46" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
@@ -10264,9 +10264,9 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # 82 at epic-23 wave-23-fixit-1810 (2026-10-02, T2): 45 + 33 + 1 + 3 — §DS DS.10b's anchor
 # in this file; the other three files are untouched by that task. MEASURE AGAIN AT THE
 # WAVE MERGE: T1 edits this file in parallel.
-# 86 at wave-24-fixit-1811 (T27): 45 + 37 + 1 + 3 — the four agreement pins' anchors in this
+# 87 at wave-24-fixit-1811 (T27, then T18's §SEMVER anchor): 46 + 37 + 1 + 3 — the four agreement pins' anchors in this
 # file. MEASURE AGAIN AT THE WAVE MERGE if docs-pins gains an anchor in parallel.
-expect_eq "S19.3 …86 anchor call sites across the four doctoring suites, all told" "86" \
+expect_eq "S19.3 …87 anchor call sites across the four doctoring suites, all told" "87" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
