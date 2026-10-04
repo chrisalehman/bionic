@@ -884,8 +884,9 @@ echo "Gating: ${pass} passed, ${fail} failed"
 [ -n "$_advisory" ] && echo "$_advisory"
 # VOID IS SAID, AND IT IS NOT A FAILURE (wave-26 T8). Its own line, like `Advisory:`, so the
 # `Gating:` line above keeps its shape; and the run exits on its failures alone. What it does
-# not do is call itself all green: a void suite's timing was never measured.
-[ "$void" -ne 0 ] && echo -e "Void: ${void} — disturbed on every try, so not timed; advisory, not a failure:${voided}"
+# not do is call itself all green: a void suite's timing was never measured. Each entry says
+# why, since a disturbance is only one of the causes (wave-26 T26).
+[ "$void" -ne 0 ] && echo -e "Void: ${void} — not timed, each for the reason given; advisory, not a failure:${voided}"
 echo "$ENV_STAMP"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
