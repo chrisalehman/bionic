@@ -2399,7 +2399,10 @@ ST_READY
 # THE FILL LEDGER'S RECORDER (wave-20 REQ-5, AC-5.5; Δ2; ADR-036 decision 4). One line per Stop
 # of an engaged run whose ledger is live, appended to `fill_ledger_path` for the run's plan:
 #
-#   fill-ledger/v1|at|session|turn|current|state|ceiling|width|open|free|ready|launched|declined|missed
+#   fill-ledger/v1|at|session|turn|current|state|ceiling|width|open|free|ready|launched|declined|missed|idle|room
+#
+# `idle` and `room` close the line (wave-26 T16): the ready rows nothing launched or declined while a
+# slot was free, and the free slots; a reader of the older shape stops at `missed` and still parses.
 #
 # A RECORDER, NOT A WALL. It never refuses and is silent on every failure: the stop it rides
 # on is a turn somebody has to be able to end. It runs BEFORE `hooks/stop.sh`'s re-entry guard,
@@ -2415,7 +2418,7 @@ stop_fill_ledger() {  # <event> -> always 0
   [ "${1:-}" = Stop ] || return 0
   stop_turn_facts || return 0
   [ "$_ST_LIVE" = 1 ] || return 0
-  local f d ready launched declined line
+  local f d ready launched declined line idle
   f="$(fill_ledger_path "$BIONIC_ROOT" "$_ST_PLAN" 2>/dev/null)" || return 0
   [ -n "$f" ] || return 0
   d="${f%/*}"
@@ -2434,12 +2437,27 @@ stop_fill_ledger() {  # <event> -> always 0
   fi
   declined="$(printf '%s' "$declined" | tr '|\n\r\t' '    ')"
   declined="${declined:0:200}"
+  # THE ROWS THAT SAT IDLE (wave-26 T16, D17): ready, not launched this turn, not answered by a
+  # decline, while a writer slot was free. `fill-report` charges the interval to the next line.
+  # The ids are the plan's own, space-split here exactly as `stop_turn_facts` matched them.
+  idle=""
+  if [ -z "$declined" ] && [ "${_ST_FREE:-0}" -gt 0 ] 2>/dev/null; then
+    local -a idle_ids
+    local id
+    read -r -a idle_ids <<< "$_ST_READY"
+    for id in ${idle_ids[@]+"${idle_ids[@]}"}; do
+      fill_row_launched "$id" "$_ST_LAUNCHED" && continue
+      case " $_ST_STANDING_IDS " in *" $id "*) continue ;; esac
+      idle="${idle}${idle:+,}${id}"
+    done
+  fi
   # ONE STRING, BUILT BY EXPANSION, then one write. Every value is either a number this
   # function computed or has had its `|` squashed above, so no field can forge another.
   line="fill-ledger/v1|at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|session=${BIONIC_SID}|turn=${_ST_TURN//|/ }"
   line="${line}|current=${_ST_CURRENT//|/ }|state=${_ST_STATE}|ceiling=${_ST_CEILING}|width=${_ST_WIDTH}"
   line="${line}|open=${_ST_OPEN}|free=${_ST_FREE}|ready=${ready}|launched=${launched//|/_}"
   line="${line}|declined=${declined}|missed=${_ST_MISSED}"
+  line="${line}|idle=${idle//|/_}|room=${_ST_FREE}"
   printf '%s\n' "$line" >> "$f" 2>/dev/null
   return 0
 }
