@@ -8552,9 +8552,10 @@ new_roster "$R47"
 add_row "$R47" name=w-T2 agent_id=a-w-T2 launched_at="$(iso_ago 600)"
 add_row "$R47" name=w-T6 agent_id=a-w-T6 launched_at="$(iso_ago 60)" deliverable=t6.md duration="45 minutes" \
   subagent_type=bionic:implementor
-mkdir -p "$R47/.worktrees/01-T6"
+# A real linked worktree, its path as git lists it: the record counts nothing else (wave-26 T40).
+T47_TREE="$(cd "$R47" && pwd -P)/.worktrees/01-T6"; git -C "$R47" worktree add -q -b wt/01-T6 "$T47_TREE" >/dev/null 2>&1
 printf 'workspace/v1|session=%s|name=w-T6|path=%s|branch=wt/01-T6|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
-  "$SID" "$R47/.worktrees/01-T6" "$P47" >> "$R47/.bionic/tmp/workspaces-$SID.state"
+  "$SID" "$T47_TREE" "$P47" >> "$R47/.bionic/tmp/workspaces-$SID.state"
 expect_contains "47 precondition: T6 is in the table, pending" "| f.sh | — | — | pending |" "$(grep '^| T6 |' "$P47")"
 s34_gate "$R47"
 expect_eq "47 precondition: the fixture is admitted by the real commit gate" "0" "$GATE_RC"

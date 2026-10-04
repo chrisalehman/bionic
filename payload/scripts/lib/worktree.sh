@@ -859,3 +859,28 @@ workspace_for_name() {  # <root> <sid> <name> -> the last tree recorded for <nam
 workspaces_of_session() {  # <root> <sid> -> every tree recorded, one per line; 1 none, 2 refused
   _wt_workspace_paths "${1:-}" "${2:-}" "" 1
 }
+
+# The tree and base recorded for <name>, `<tree><TAB><base>`, by the rule above (wave-26 T40).
+# The launch recorder fills a plan row's worktree and base cells from this record, so it asks
+# the same witness: the tree is the one `workspace_for_name` answers, and the base is the one on
+# the last line naming that tree. 1 none, 2 refused.
+workspace_record_for_name() {  # <root> <sid> <name> -> tree TAB base
+  local tree f rc
+  tree="$(workspace_for_name "${1:-}" "${2:-}" "${3:-}")" || { rc=$?; return "$rc"; }
+  f="$(_wt_workspaces_file "$1" "$2")" || return 2
+  WT_SID="$2" WT_NAME="$3" WT_TREE="$tree" awk -F'|' -v schema="$WORKSPACE_SCHEMA" '
+    BEGIN { sid = ENVIRON["WT_SID"]; want = ENVIRON["WT_NAME"]; tree = ENVIRON["WT_TREE"]; b = "" }
+    { sub(/\r$/, "") }
+    $1 != schema { next }
+    {
+      s = ""; n = ""; p = ""; v = ""; hn = 0
+      for (i = 2; i <= NF; i++) {
+        if (index($i, "session=") == 1) s = substr($i, 9)
+        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
+        else if (index($i, "path=") == 1) p = substr($i, 6)
+        else if (index($i, "base=") == 1) v = substr($i, 6)
+      }
+      if (s == sid && hn && n == want && p == tree) b = v
+    }
+    END { printf "%s\t%s\n", tree, b }' "$f" 2>/dev/null || return 2
+}
