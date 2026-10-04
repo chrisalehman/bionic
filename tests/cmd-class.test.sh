@@ -440,10 +440,22 @@ for sc in "${SUPERSET_SUITES[@]}"; do
 done
 
 # --- behaviour the library must not have changed ---
-expect_empty "the sanctioned override still silences the wall" \
-  "$(farm_decision 'FARM_OUT_ALLOW=1 bash tests/run.sh')"
-expect_empty "…including as an env prefix mid-chain" \
-  "$(farm_decision 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh')"
+# THE OVERRIDE SILENCES FARM-OUT'S DENY, NOT THE BOOKING (wave-26 T7, D8): the allowed call
+# comes back as the booking wrap alone — no deny, no advisory — around the original command.
+expect_wrap_only() {  # <label> <original command> — reads $OUT
+  local _cmd _s _r="'\\''"
+  expect_eq "$1 (no deny and no advisory beside the booking wrap)" '["hookEventName","updatedInput"]' \
+    "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
+  _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
+  expect_regex "$1 (the updated command runs the booking shim)" \
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? -- " "$_cmd"
+  _s=${2//\'/$_r}
+  expect_eq "$1 (around the original command, byte for byte)" "'$_s'" "${_cmd#* -- }"
+}
+run_hook "$(mk_bash_payload "$FARM_REPO" 'FARM_OUT_ALLOW=1 bash tests/run.sh')" "$FARM_OUT"
+expect_wrap_only "the sanctioned override still silences the wall" 'FARM_OUT_ALLOW=1 bash tests/run.sh'
+run_hook "$(mk_bash_payload "$FARM_REPO" 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh')" "$FARM_OUT"
+expect_wrap_only "…including as an env prefix mid-chain" 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh'
 expect_empty "a subagent payload leaves farm-out silent (agent_type non-empty)" \
   "$(printf '%s' "$(mk_bash_payload "$FARM_REPO" 'bash tests/run.sh')" \
      | jq '. + {agent_type:"general-purpose"}' \

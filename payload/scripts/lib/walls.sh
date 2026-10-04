@@ -5249,6 +5249,195 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
   return 1
 }
 
+# ─── the booking wrap — every allowed suite run books a place (wave-26 T7; REQ-6, D8) ─
+#
+# WHAT IT DOES. A suite-class Bash call that every wall allows comes back with its command
+# rewritten through `fold_update_input` into the shim the plugin ships:
+#
+#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] -- '<the command>'
+#
+# The shim books one of the machine's places, stamps the run and runs the command
+# (payload/scripts/booked.sh). This is the one site that sees every runner in every project
+# (research R6 §1), so the booking happens without anyone remembering to ask for it. It is
+# asked from `wall_background_suite_guard` at each of its allow exits, on every thread; a
+# refusal by any wall wins, because the fold drops a staged updatedInput whenever anything
+# blocked.
+#
+# THE COMMAND GOES IN AS ONE SINGLE-QUOTED WORD, a `'` written `'\''`, which every POSIX shell
+# reads back byte for byte, so the shim's `--` sees exactly the text the caller typed.
+#
+# --shell IS THE HARNESS'S SHELL (A-T7.1). The harness runs a call as `<its shell> -c '…
+# eval <command> < /dev/null'`, so the shim evals the command under that shell rather than
+# bash: CLAUDE_CODE_SHELL, else SHELL, each only as an absolute path to bash or zsh (the two
+# shells the harness runs); otherwise no --shell, which is the shim's own `bash -c`.
+#
+# LEFT ALONE: a command that is already the shim; a suite segment carrying
+# `BIONIC_SLOT_HELD=1` in its own prefix — the opt-out for a command that needs a snapshot
+# alias or function, or a `cd` that outlives the call; a command the shell itself
+# backgrounds (the shim would stamp rc=0 the instant the job detached); a plugin with no
+# shim on disk.
+#
+# --quiet: a suite segment carrying `BIONIC_QUIET=1` in its prefix, or a suite file whose
+# first 30 lines hold `# runner: solo` (tests/run.sh's `_is_solo_suite` rule, read the same
+# way), takes the whole machine for a timing check.
+#
+# THE SEAM FOR T9 is `wall_booked_argv`: the one function that builds the shim's argument
+# list. An option such as `--kill-after <s>` goes in as an extra argument there.
+_WALL_WORD=""
+_wall_sh_word() {  # <text> -> sets _WALL_WORD: the text as one shell word, bare when plain
+  case "$1" in
+    ''|*[!A-Za-z0-9_./:=@%+,-]*)
+      local _r="'\\''" _s
+      # Unquoted on purpose: bash 3.2 reads `\'` inside a double-quoted ${//} differently.
+      _s=${1//\'/$_r}
+      _WALL_WORD="'$_s'" ;;
+    *) _WALL_WORD="$1" ;;
+  esac
+}
+
+_WALL_HSHELL=""
+_wall_harness_shell() {  # -> sets _WALL_HSHELL to the harness's bash or zsh; rc 1 when none is named
+  local _s
+  for _s in "${CLAUDE_CODE_SHELL:-}" "${SHELL:-}"; do
+    case "$_s" in
+      /*/bash|/*/zsh) if [ -x "$_s" ]; then _WALL_HSHELL="$_s"; return 0; fi ;;
+    esac
+  done
+  _WALL_HSHELL=""
+  return 1
+}
+
+_wall_prefix_sets() {  # <segment> <NAME> <value> -> 0 when the segment's leading assignments set NAME=value
+  local _s="$1" _re='^[A-Za-z_][A-Za-z0-9_]*='
+  _s="${_s#"${_s%%[![:space:]]*}"}"
+  case "$_s" in env[[:space:]]*) _s="${_s#env}"; _s="${_s#"${_s%%[![:space:]]*}"}" ;; esac
+  while [[ $_s =~ $_re ]]; do
+    case "$_s" in
+      "$2=$3"|"$2=$3"[[:space:]]*|"$2='$3'"|"$2='$3'"[[:space:]]*|"$2=\"$3\""|"$2=\"$3\""[[:space:]]*)
+        return 0 ;;
+    esac
+    _s="${_s#*=}"
+    case "$_s" in
+      \'*) _s="${_s#\'}"; _s="${_s#*\'}" ;;
+      \"*) _s="${_s#\"}"; _s="${_s#*\"}" ;;
+    esac
+    _s="${_s#"${_s%%[[:space:]]*}"}"
+    _s="${_s#"${_s%%[![:space:]]*}"}"
+  done
+  return 1
+}
+
+# _bsg_solo_target <class lines> — 0 when a suite file the command runs declares
+# `# runner: solo` in its first 30 lines. The path is the claim's own (cmd-class.sh's
+# `targets` reading), resolved against the payload cwd moved by each literal `cd` segment
+# before the first suite segment. Only a regular file is read, so a FIFO cannot hang the hook.
+_bsg_solo_target() {
+  local _dir _cls _seg _p _k _b _r _f _n _l _rest
+  _dir="$(bionic_jq .cwd)"; [ -n "$_dir" ] || _dir="${BIONIC_CWD:-}"
+  while IFS=$'\t' read -r _cls _seg; do
+    [ "$_cls" = suite ] && break
+    case "$_seg" in
+      cd[[:space:]]*)
+        _p="${_seg#cd}"; _p="${_p#"${_p%%[![:space:]]*}"}"; _p="${_p%"${_p##*[![:space:]]}"}"
+        case "$_p" in \'*\') _p="${_p#\'}"; _p="${_p%\'}" ;; \"*\") _p="${_p#\"}"; _p="${_p%\"}" ;; esac
+        case "$_p" in ''|-*|*'$'*|*'`'*|*[[:space:]]*) continue ;; '~'|'~/'*) _p="${HOME:-}${_p#\~}" ;; esac
+        case "$_p" in /*) _dir="$_p" ;; *) _dir="$_dir/$_p" ;; esac ;;
+    esac
+  done <<< "$1"
+  while IFS=$'\t' read -r _k _b _r _p; do
+    [ "$_k" = file ] && [ -n "$_p" ] || continue
+    case "$_p" in *'$'*|*'`'*) continue ;; /*) _f="$_p" ;; *) _f="$_dir/$_p" ;; esac
+    [ -f "$_f" ] && [ -r "$_f" ] || continue
+    _n=0
+    while [ "$_n" -lt 30 ] && IFS= read -r _l; do
+      _n=$((_n + 1))
+      case "$_l" in
+        '# runner: solo'*)
+          _rest="${_l#'# runner: solo'}"
+          [ -z "${_rest//[[:space:]]/}" ] && return 0 ;;
+      esac
+    done < "$_f"
+  done <<< "$(printf '%s' "$COMMAND" | _cmd_class_awk targets)"
+  return 1
+}
+
+# wall_booked_argv <command> <quiet: 0|1> [<shim option>...] — sets WALL_BOOKED_ARGV to the
+# wrapped call, word by word; rc 1 when this plugin carries no shim. THE ONE BUILDER of the
+# shim's argument list (T9 adds `--kill-after <s>` through the extra options). The plugin
+# root is the one whose library this hook loaded: `$BIONIC_LIB` is `<root>/scripts/lib`.
+WALL_BOOKED_ARGV=()
+wall_booked_argv() {
+  local _cmd="$1" _quiet="$2" _root
+  shift 2
+  _root="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)" || return 1
+  [ -f "$_root/booked.sh" ] || return 1
+  WALL_BOOKED_ARGV=(bash "$_root/booked.sh")
+  if _wall_harness_shell; then WALL_BOOKED_ARGV+=(--shell "$_WALL_HSHELL"); fi
+  [ "$_quiet" != 1 ] || WALL_BOOKED_ARGV+=(--quiet)
+  [ "$#" -eq 0 ] || WALL_BOOKED_ARGV+=("$@")
+  WALL_BOOKED_ARGV+=(-- "$_cmd")
+  return 0
+}
+
+# _bsg_wrap_text <suite already established: yes|no> — sets _BSG_WRAP_TEXT to the wrapped
+# command; rc 1 when this command is left alone (see the header above for which).
+_BSG_WRAP_TEXT=""
+_bsg_wrap_text() {
+  local _c _w _lines _cls _seg _quiet=0
+  _BSG_WRAP_TEXT=""
+  _c="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
+  case "$_c" in
+    bash[[:space:]]*)
+      _w="${_c#bash}"; _w="${_w#"${_w%%[![:space:]]*}"}"; _w="${_w%%[[:space:]]*}"
+      case "$_w" in */booked.sh|*/booked.sh\'|*/booked.sh\") return 1 ;; esac ;;
+  esac
+  if [ "$1" != yes ]; then
+    # SILENT WHEN THE CLASSIFIER IS MISSING: the walls that need it already say so, and the
+    # wrap is no wall — on the main thread it would add a line to every Bash call.
+    [ -r "$BIONIC_LIB/cmd-class.sh" ] || return 1
+    wall_libs background-suite-guard cmd-class.sh || return 1
+    [ "$(cmd_class "$COMMAND")" = "suite" ] || return 1
+    ! cmd_backgrounded "$COMMAND" || return 1
+  fi
+  _lines="$(cmd_class_lines "$COMMAND")"
+  while IFS=$'\t' read -r _cls _seg; do
+    [ "$_cls" = suite ] || continue
+    ! _wall_prefix_sets "$_seg" BIONIC_SLOT_HELD 1 || return 1
+    ! _wall_prefix_sets "$_seg" BIONIC_QUIET 1 || _quiet=1
+  done <<< "$_lines"
+  [ "$_quiet" = 1 ] || ! _bsg_solo_target "$_lines" || _quiet=1
+  wall_booked_argv "$COMMAND" "$_quiet" || return 1
+  for _w in "${WALL_BOOKED_ARGV[@]}"; do
+    _wall_sh_word "$_w"
+    _BSG_WRAP_TEXT="${_BSG_WRAP_TEXT:+$_BSG_WRAP_TEXT }$_WALL_WORD"
+  done
+  return 0
+}
+
+# _bsg_stage_input <suite already established: yes|no> [<timeout>] — stage ONE rewritten
+# tool_input: the original, then ARM R's timeout when one is given, then the booking wrap's
+# command when the command is wrapped, in that order, so neither overwrites the other.
+# rc 0 when something was staged, 1 when there was nothing to stage.
+_bsg_stage_input() {
+  local _t="${2:-}" _upd
+  _bsg_wrap_text "$1" || _BSG_WRAP_TEXT=""
+  [ -n "$_t" ] || [ -n "$_BSG_WRAP_TEXT" ] || return 1
+  _upd=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --arg t "$_t" --arg c "$_BSG_WRAP_TEXT" \
+    '.tool_input + (if $t == "" then {} else {timeout: ($t | tonumber)} end)
+                 + (if $c == "" then {} else {command: $c} end)' 2>/dev/null)
+  [ -n "$_upd" ] || return 1
+  fold_update_input "$_upd"
+  return 0
+}
+
+# _bsg_wrap_only — the allow exit of a call no refusing arm judges (the main thread, an
+# unarmed agent): 1 with the wrap staged, 0 with nothing to say. `return 1`, as ARM R's,
+# because the fold discards what a silent `return 0` staged.
+_bsg_wrap_only() {
+  _bsg_stage_input no && return 1
+  return 0
+}
+
 # ─── wall_background_suite_guard — hooks/background-suite-guard.sh ───────────
 #
 # A subagent may not run a suite where nobody reads the output (B-9,
@@ -5296,7 +5485,11 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # `agent_id`, a main-thread one does not. hooks/stop-guard.sh reads the same field the
   # same way.
   ACTOR=$(bionic_jq .agent_id)
-  [ "$IS_BACKGROUND" = yes ] || [ -n "$ACTOR" ] || return 0
+  # NO PRE-FILTER ANY MORE (wave-26 T7, D8). A main-thread foreground call used to return
+  # here unread; now every allowed suite call is wrapped in the booking shim, so a call no
+  # refusing arm judges leaves through `_bsg_wrap_only` instead (above this function). A
+  # non-suite main-thread command pays one `cmd_class`, the same reading farm-out-reminder
+  # gives it on that thread.
 
   # ── THE PARTITION, verbatim from hooks/agent-context-guard.sh's predicate ──
   #
@@ -5310,13 +5503,14 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   #    session fails on one stat and pays nothing else, which is what kept an
   #    always-on registration from re-globalising a deliberately scoped wall.
   #
-  # Anything else — ambiguity included — returns 0 in silence. This gate never
-  # refuses on its own account and never prints.
-  [ -n "$ACTOR" ] || return 0
-  [ -d "$BIONIC_ROOT" ] || return 0
-  [ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] || return 0
+  # Anything else — ambiguity included — never refuses here and never prints. This gate
+  # never refuses on its own account; what leaves through it is only the booking wrap of an
+  # allowed suite call (wave-26 T7), which no refusing arm below has a say in.
+  [ -n "$ACTOR" ] || { _bsg_wrap_only; return $?; }
+  [ -d "$BIONIC_ROOT" ] || { _bsg_wrap_only; return $?; }
+  [ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] || { _bsg_wrap_only; return $?; }
   _bsg_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
-  [ ! -L "$_bsg_roster" ] && [ -f "$_bsg_roster" ] || return 0
+  [ ! -L "$_bsg_roster" ] && [ -f "$_bsg_roster" ] || { _bsg_wrap_only; return $?; }
 
   # ---------- ARM C (wave-19 REQ-8, D9): a read-only role never commits ----------
   #
@@ -6031,7 +6225,7 @@ done <<< "$_CLAIMS"
 # not-yet-cached field. ABSENT, NON-NUMERIC AND UNDER THE MAX ALL REPAIR THE SAME WAY: a
 # caller that named no ceiling and one that named a low one are both a worker about to be
 # killed before its suite finishes, and the fix is identical either way.
-local _BSG_MAX _BSG_TIMEOUT _BSG_UPDATED
+local _BSG_MAX _BSG_TIMEOUT
 _BSG_MAX="${BASH_MAX_TIMEOUT_MS:-600000}"
 _BSG_TIMEOUT=$(bionic_jq '.tool_input.timeout')
 case "$_BSG_TIMEOUT" in
@@ -6045,9 +6239,11 @@ if [ -z "$_BSG_TIMEOUT" ] || [ "$_BSG_TIMEOUT" -lt "$_BSG_MAX" ]; then
   # is read directly, not through `bionic_jq`: that helper appends `// empty` to whatever
   # filter it is given and returns text through `-r`, neither of which this arm wants for
   # building an object.
-  _BSG_UPDATED=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --argjson t "$_BSG_MAX" \
-    '.tool_input + {timeout: $t}' 2>/dev/null)
-  if [ -n "$_BSG_UPDATED" ]; then
+  #
+  # ONE OBJECT, TWO REWRITES, THIS ORDER (wave-26 T7, D8): `_bsg_stage_input` builds the
+  # original tool_input, then this timeout, then the booking wrap's command, in one `jq`.
+  # `fold_update_input` is last-write-wins, so two separate stagings would lose one.
+  if _bsg_stage_input yes "$_BSG_MAX"; then
     # STAGED, NEVER PRINTED DIRECTLY (fold.sh's contract, header comment above `wall_libs`
     # earlier in this file). This function shares one shell and one stdout with four other
     # walls; `fold_update_input` is the seam fold.sh gained (T3, D4) so this object and
@@ -6055,7 +6251,6 @@ if [ -z "$_BSG_TIMEOUT" ] || [ "$_BSG_TIMEOUT" -lt "$_BSG_MAX" ]; then
     # overwriting the other — see fold.sh `_fold_emit_context`. `return 1`, not `return 0`:
     # the fold discards a function's staged text on a silent `return 0`, so a repair must
     # answer as an advisory to survive the fold at all, even though nothing here is refused.
-    fold_update_input "$_BSG_UPDATED"
     # `log_finding`'s CHANNEL, SUBJECT AND ROOT (root.sh:251-267) ARE NOT GLOBAL DEFAULTS —
     # they are DECLARED LAZILY, as a side effect of `_eg_body` (this file's evidence-gate
     # body, above) reaching its own commit-class validation far enough to need them. A
@@ -6081,6 +6276,8 @@ if [ -z "$_BSG_TIMEOUT" ] || [ "$_BSG_TIMEOUT" -lt "$_BSG_MAX" ]; then
   # budget arm above, and a repair this arm could not build is not a reason to block.
 fi
 
+# NOTHING TO REPAIR: THE CALL IS ALLOWED, AND IT IS BOOKED (wave-26 T7, D8).
+_bsg_stage_input yes && return 1
 return 0
 }
 
