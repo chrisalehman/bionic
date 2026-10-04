@@ -9443,7 +9443,8 @@ section "Section 55 §FACT: a reading is a review proof with a question, a reade
 # key appended by hand, `questions=<q>[,<q>]`: SYNTHESIZED until row T15 teaches the dispatch wall
 # to write it (the Interfaces table's roster key); the verb reads it by key, as every roster reader
 # does. The checks file is planted in a copy of the hook tree, where the verb resolves it through
-# its own lib root (row T8 writes the shipped one).
+# its own lib root, so a case can remove it or empty it; 55g11 holds the shipped one (row T8's) to
+# the same reading.
 S55_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 s55_last() {  # <plan> <kind> [<question>] -> proof_last's answer, from the library itself
   bash -c '. "$1" && proof_last "$2" "$3" "$4"' _ "$S46_LIB" "$1" "$2" "${3:-}" 2>/dev/null
@@ -9669,6 +9670,14 @@ s55_rec st-crit.md "$S55_C4" "$S55_C4" structure flag piece "$S55_ALL"
 poke "$R55" proof-add review record/wave-01-fixture/st-crit.md --question structure --reader w-crit
 expect_eq "55g10 …and by a critic whose row lists it among two questions" "0" "$RC"
 POKER="$S55_POKER_REAL"
+# THE SHIPPED CHECKS FILE AND THE VERB AGREE: read through the same function the verb runs, the
+# file the plugin ships accepts a record answering the Interfaces table's seven ids and refuses
+# one that leaves single-job out.
+S55_SHIPPED="${BIONIC_HOOKS_DIR}/../payload/context/checks-structure.md"
+s55_read() { bash -c '. "$1" && proof_reading "$2" structure "$3"' _ "$S46_LIB" "$1" "$S55_SHIPPED" 2>/dev/null; }
+expect_eq "55g11 the shipped checks file accepts a record answering the seven ids" "pass whole" "$(s55_read "$S55_REC/st-all.md")"
+expect_contains "55g12 …and refuses one that leaves single-job unanswered" "leaves single-job unanswered" \
+  "$(s55_read "$S55_REC/st-no-single.md")"
 expect_eq "55h no projection copy is left beside the plan" "" \
   "$(find "$R55/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
 POKE_BOUND="$S55_BOUND_WAS"
