@@ -6027,11 +6027,11 @@ fi
 # a wrong answer costs rather than uniformly:
 #
 #   no row for this agent, or a row with no `suites_allowed` key at all
-#       A row is written for every dispatch that passes the wall, so its absence means the
-#       journal failed or the row predates the wall. Refusing every suite would punish an
-#       agent for a bookkeeping failure it did not cause, so a NAMED suite passes in
-#       silence. `tests/run.sh` still does not: a full-tree run is the one act the standing
-#       ruling caps at one per run, and no row is not a licence to spend it.
+#       A row is written for every dispatch that passes the wall, and it gains the agent's
+#       id when the agent starts (hooks/execution-recorder.sh, wave-27 T5), so its absence
+#       is a fault. A named suite or run is REFUSED, naming which of the two it is
+#       (`budget_unrecorded`); it used to pass in silence, unbudgeted and unstamped
+#       (walk-triage-3). A row that declares runs only still holds a runner form to them.
 #
 #   `suites_allowed=` present but EMPTY
 #       A budget was stated and came out empty — the impact command failed or derived
@@ -6065,7 +6065,7 @@ fi
 # protect.
 local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _bseen _bseg _bkey
 local -a _bsegs
-local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME=""
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
@@ -6143,6 +6143,10 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   RE_EXECUTES=$(cmd_runs_norm "$RE_EXECUTES")
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
+# WHY NO SET, when there is none (wave-27 T5, D15): a row that states none, or no row carrying
+# this id at all. `budget_unrecorded` below prints it.
+_BUDGET_UNSET_WHY="your roster row records no suite set"
+[ -n "${_BUDGET_ROW:-}" ] || _BUDGET_UNSET_WHY="no roster row carries your agent id $ACTOR"
 
 # `none` is a STATED empty set and reads as one: nothing is on the budget, so the loop
 # below refuses every target it is handed.
@@ -6377,6 +6381,27 @@ $(_budget_remedy_line "$1")"
   return 2
 }
 
+# budget_unrecorded <the refused suite or run> — NO SET IS RECORDED FOR THIS AGENT (wave-27 T5,
+# D15). A row with no set, or no row at all, used to let a named suite through in silence, on
+# the reading that an agent should not pay for a bookkeeping failure it did not cause. The walk
+# showed the cost (walk-triage-3 §1): a foreground runner had no row, was refused its full run,
+# and any suite it named would have run unbudgeted. The id now reaches the row at agent start
+# (hooks/execution-recorder.sh, the type join), so a missing set is a fault to name, never a run
+# to spend. The remedy names the row when there is one to widen.
+budget_unrecorded() {  # <the refused suite or run>
+  local _how="With no row there is nothing to widen until the orchestrator records one."
+  [ -z "${_BUDGET_ROW:-}" ] || _how="$(_budget_remedy_line "$1")"
+  fold_block exit2 suite-run "no suite set is recorded for this agent" "send main the suites you need" \
+    "${_BUDGET_UNSET_WHY}, so this BUDGET arm cannot tell a budgeted run
+from an extra one, and it refuses rather than run the suite unbudgeted and unstamped.
+
+You asked for: $1
+
+Send the orchestrator the suites you need and why; it records them.
+$_how"
+  return 2
+}
+
 # THE REMEDY LINE (T6, REQ-5, AC-5.2). A refusal that names the budget and not the verb that
 # widens it sent two readers to hunt for it. The root is `refuse_plugin_root` and each word is
 # `refuse_shell_word`, both in lib/refuse.sh since wave-24 T13 (D10), where the landing
@@ -6483,11 +6508,11 @@ dispatches the runner, and the dispatch wall admits it only then."
   # The row's declared runs are the whole set for this spelling: `suites_allowed=` holds
   # shell-suite basenames and a run can never be on it, so there is no second set to ask.
   #
-  # THE FAIL DIRECTION IS UNCHANGED. A row with NEITHER statement — no `suites_allowed=`
-  # key and no declared runs — is a bookkeeping failure the agent did not cause, and a
-  # named run passes in silence exactly as a named suite does.
+  # NO STATEMENT IS REFUSED, NAMING WHY (wave-27 T5, D15). A row with NEITHER statement — no
+  # `suites_allowed=` key and no declared runs — or no row at all used to pass a named run in
+  # silence; see `budget_unrecorded`.
   if [ "$_kind" != "file" ]; then
-    [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || continue
+    [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || { budget_unrecorded "$_run"; return 2; }
     # BOTH STATEMENTS ON THE WIRE, runs first: the reader ran a runner form, so the runs
     # are the half of the budget that can answer it.
     _shown="$RE_EXECUTES"
@@ -6496,6 +6521,7 @@ dispatches the runner, and the dispatch wall admits it only then."
     return 2
   fi
 
+  [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || { budget_unrecorded "$_target"; return 2; }
   [ "$BUDGET_STATED" = yes ] || continue
   case " $SUITES_ALLOWED " in
     *" $_target "*) : ;;
