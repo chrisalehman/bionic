@@ -771,6 +771,8 @@ fm == 1 {
   else if (k == "adrs") ADRS = v
   else if (k == "design-ledger") LEDGER = v
   else if (k == "requirements") REQSF = v
+  else if (k == "spec") SPECF = v
+  else if (k == "design") DPTR = v
   else if (k == "parallel-budget") {
     if (match(v, /writers=[0-9]+/)) WRITERS = substr(v, RSTART + 8, RLENGTH - 8)
   }
@@ -819,8 +821,10 @@ sub2 == "approach" {
   next
 }
 sub2 == "worth" {
+  # ANY NON-BLANK LINE CONTINUES THE OPEN BULLET, indented or not: Markdown reads an
+  # unindented line under a list item as part of it, and the card must not drop it (review-3 F3).
   if (/^- /) { flush_worth(); wbuf = substr($0, 3) }
-  else if (/^[ \t]+[^ \t]/ && wbuf != "") wbuf = wbuf " " trim($0)
+  else if (trim($0) != "" && wbuf != "") wbuf = wbuf " " trim($0)
   else if (trim($0) == "") flush_worth()
   next
 }
@@ -850,6 +854,9 @@ sec == "reqs" && rid != "" {
 }
 sec == "tasks" && /^[ \t]*\|/ {
   trow++
+  # THE SERVES COLUMN IS FOUND BY ITS HEADER, because a `reads` or `base` column may sit before
+  # it; the eighth cell is the fallback for a header that does not name it.
+  if (trow == 1) { n = cells($0, c); servc = 8; for (i = 1; i <= n; i++) if (tolower(c[i]) == "serves") servc = i }
   if (trow <= 2) next
   n = cells($0, c)
   if (n < 6) next
@@ -862,7 +869,15 @@ sec == "tasks" && /^[ \t]*\|/ {
   # correctness defect and not a cosmetic one, because `.worktrees/18-T2` under a column
   # headed `depends` reads as a dependency that exists.
   if (SCALE == "task") print "TROW" OFS c[1] OFS clean(firstsent(c[4])) OFS c[3] OFS c[5] OFS c[6]
-  else                 print "TROW" OFS c[1] OFS clean(firstsent(c[4])) OFS c[3] OFS c[6] OFS c[5]
+  else {
+    # EACH TASK WITH THE CRITERIA IT SERVES (wave-26 D12). The serves cell joins the first
+    # sentence as one folding stream, the way the requirement row joins its provenance, so the
+    # row kind and its widths are unchanged and a hand-fed row builds the same string.
+    t = clean(firstsent(c[4]))
+    sv = (servc <= n) ? c[servc] : ""
+    if (sv ~ /[A-Za-z0-9]/) t = t " · serves " sv
+    print "TROW" OFS c[1] OFS t OFS c[3] OFS c[6] OFS c[5]
+  }
   # THE FIRST BATCH, ASKED OF EACH TABLE IN ITS OWN TERMS. A wave row is in the first
   # batch when it is a Step-4 row depending on nothing; a task row has no step cell and
   # no deps cell to ask about — the task arm of `units_ready` says so, "READY is `pending`
@@ -894,7 +909,6 @@ sec == "matrix" && /^[ \t]*\|/ {
   n = cells($0, c)
   if (n < 2 || c[1] !~ /^AC-/) next
   mrows++
-  tier[c[2]]++
   next
 }
 sub2 == "dec" {
@@ -941,11 +955,8 @@ END {
   print "META" OFS "writers" OFS WRITERS
   print "META" OFS "firstb" OFS FIRSTB
   print "META" OFS "mrows" OFS mrows
-  print "META" OFS "t0" OFS (tier["T0"] + 0)
-  print "META" OFS "t1" OFS (tier["T1"] + 0)
-  print "META" OFS "t2" OFS (tier["T2"] + 0)
-  print "META" OFS "t3" OFS (tier["T3"] + 0)
-  print "META" OFS "t4" OFS (tier["T4"] + 0)
+  print "META" OFS "spec" OFS SPECF
+  print "META" OFS "dptr" OFS DPTR
   for (i = 1; i <= ncrit; i++) print "CROW" OFS crow[i]
   for (i = 1; i <= enum; i++) {
     r = eord[i]
@@ -964,7 +975,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_WB=""; WCARD_IB=""; WCARD_BASE=""; WCARD_RIGOR=""; WCARD_WALK=""; WCARD_ADRS=""
   WCARD_WRITERS=""; WCARD_FIRSTB=""; WCARD_MROWS="0"
   WCARD_LEDGER=""; WCARD_REQS=""; WCARD_APPROACH=""; WCARD_WORTH=(); WCARD_CROW=()
-  WCARD_T0="0"; WCARD_T1="0"; WCARD_T2="0"; WCARD_T3="0"; WCARD_T4="0"
+  WCARD_SPEC=""; WCARD_DPTR=""
   WCARD_ND=(); WCARD_RROW=(); WCARD_DROW=(); WCARD_OROW=(); WCARD_EROW=(); WCARD_TROW=()
   WCARD_ADRK=(); WCARD_ADRV=()
   local out line key rest k v
@@ -988,8 +999,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
           scale) WCARD_SCALE="$v" ;;     design) WCARD_DESIGN="$v" ;;
           writers) WCARD_WRITERS="$v" ;; firstb) WCARD_FIRSTB="$v" ;;
           mrows) WCARD_MROWS="$v" ;;
-          t0) WCARD_T0="$v" ;; t1) WCARD_T1="$v" ;; t2) WCARD_T2="$v" ;;
-          t3) WCARD_T3="$v" ;; t4) WCARD_T4="$v" ;;
+          spec) WCARD_SPEC="$v" ;;       dptr) WCARD_DPTR="$v" ;;
         esac ;;
       ND)   WCARD_ND[${#WCARD_ND[@]}]="$rest" ;;
       WORTH) WCARD_WORTH[${#WCARD_WORTH[@]}]="$rest" ;;
@@ -1155,33 +1165,32 @@ _card_floor() {  # <plan path> -> the configured impact command, or an em dash
 # renders the widths that are LEFT, which is what a reader of a live plan wants, and a
 # plan at its Step-3 gate — every row pending — renders the widths it was planned at.
 #
-# NO TABLE, NO RUNG, OR NO BATCH: nothing is printed and the writer-budget line stands
-# alone, exactly as before this task. A width this file could not compute is not a width
-# it may guess.
+# NO TABLE, NO RUNG, OR NO BATCH: no batch line is printed and the lines above it stand
+# alone. A width this file could not compute is not a width it may guess.
+#
+# THE DEPTH IS READ OFF THE DERIVED GRAPH (wave-26 D12): `units_edges`, the edges the tick
+# itself waits on — a read of what another row writes as much as a deps id — so the batches
+# and the chain below are one graph, not a second walk over the deps cell.
 _card_batch_rows() {  # <plan> -> `<batch>\t<step>\t<id>` per row, in table order
-  local rows
+  local rows edges
   rows="$(units_rows "${1:-}" 2>/dev/null)" || return 1
   [ -n "$rows" ] || return 1
-  printf '%s\n' "$rows" | awk -F'\t' '
-    $1 == "" { next }
-    { n++; id[n] = $1; stp[n] = $2; dep[n] = $6; idx[$1] = n; d[n] = 0 }
+  edges="$(units_edges "${1:-}" 2>/dev/null)" || edges=""
+  { printf '%s\n' "$rows" | awk -F'\t' '$1 != "" { print "N\t" $1 "\t" $2 }'
+    printf '%s\n' "$edges" | awk -F'\t' 'NF >= 2 && $1 != "" { print "E\t" $1 "\t" $2 }'
+  } | awk -F'\t' '
+    $1 == "N" { n++; id[n] = $2; stp[n] = $3; idx[$2] = n; d[n] = 0; next }
+    $1 == "E" { ne++; ef[ne] = $2; et[ne] = $3; next }
     END {
       if (n == 0) exit 1
-      # RELAXATION, BOUNDED BY THE ROW COUNT, so a cyclic `deps` cell — which
-      # units_validate refuses but this file may still be handed — terminates instead
-      # of spinning. A dependency this table does not carry is not a depth either.
+      # RELAXATION, BOUNDED BY THE ROW COUNT, so a cycle — which units_validate refuses but
+      # this file may still be handed — terminates instead of spinning.
       for (pass = 1; pass <= n; pass++) {
         changed = 0
-        for (i = 1; i <= n; i++) {
-          s = dep[i]; gsub(/[ \t]/, "", s)
-          if (s !~ /[A-Za-z0-9]/) continue
-          m = split(s, a, ",")
-          for (j = 1; j <= m; j++) {
-            if (a[j] == "" || !(a[j] in idx)) continue
-            k = idx[a[j]]
-            if (k == i) continue
-            if (d[k] + 1 > d[i]) { d[i] = d[k] + 1; changed = 1 }
-          }
+        for (e = 1; e <= ne; e++) {
+          if (!(ef[e] in idx) || !(et[e] in idx)) continue
+          k = idx[ef[e]]; i = idx[et[e]]
+          if (k != i && d[k] + 1 > d[i]) { d[i] = d[k] + 1; changed = 1 }
         }
         if (!changed) break
       }
@@ -1219,7 +1228,12 @@ _card_project() {
       intasks = ($0 ~ /^##[ \t]+[Tt]asks([ \t].*)?$/)
       print; next
     }
-    insdlc && /^[ \t]*current[ \t]*:/ && !seen { print "current: " cur; seen = 1; next }
+    # THE PROJECTION IS OF AN APPROVED PLAN. The card is shown at the approval gate, and a
+    # table with a `reads` column reads `approval:plan` by default, so an unapproved copy would
+    # answer every batch with nothing. A second `approved-by:` beside a real one changes nothing.
+    insdlc && /^[ \t]*current[ \t]*:/ && !seen {
+      print "current: " cur; print "approved-by: projection"; seen = 1; next
+    }
     intasks && /^[ \t]*\|/ {
       n = split(esc($0), f, "|")
       if (!hdr) {
@@ -1244,7 +1258,7 @@ _card_project() {
       # A plan with no `## SDLC State` section has no `current:` to project onto, and a
       # ledger with no current is not live — so the section is appended rather than the
       # batch silently reading zero.
-      if (!seen) { print ""; print "## SDLC State"; print ""; print "current: " cur }
+      if (!seen) { print ""; print "## SDLC State"; print ""; print "current: " cur; print "approved-by: projection" }
     }' "${1:-}" > "${5:-/dev/null}"
   # THE PROJECTION PATH IS REWRITTEN PER BATCH with a different `current:`, and fill.sh
   # memoises that field per process by path — so the writer forgets it (wave-19 critic C2).
@@ -1310,6 +1324,64 @@ _card_batch_widths() {  # <plan> <rung> <scale> -> one `batch <k> · <n> of <run
   return 0
 }
 
+# ── THE LONGEST CHAIN AND THE PEAK WIDTH (wave-26 D12, AC-7.1) ───────────────
+#
+# Both are `units_chain`'s answer over the plan's derived graph: the open rows (pending or
+# active) are the nodes, weighted by their `size` minutes, and `units_edges` is the edges — the
+# same graph the tick schedules from. A size cell that is not a number of minutes counts 0
+# (`30m` counts 30), because a row the planner did not size still sits on the graph.
+#
+# Sets CARD_CHAIN (ids joined by commas), CARD_CHAIN_MIN and CARD_PEAK; returns 1 with the
+# library's own message in CARD_CHAIN_ERR when it refuses (a cycle, say).
+_card_chain() {  # <plan> <writer ceiling>
+  local rows edges out k a b
+  CARD_CHAIN=""; CARD_CHAIN_MIN=0; CARD_PEAK=0; CARD_CHAIN_ERR=""
+  rows="$(units_rows "${1:-}" 2>/dev/null)" || rows=""
+  edges="$(units_edges "${1:-}" 2>/dev/null)" || edges=""
+  out="$( { printf '%s\n' "$rows" | awk -F'\t' '
+              $1 != "" && ($10 == "pending" || $10 == "active") {
+                m = 0; if (match($7, /^[0-9]+/)) m = substr($7, 1, RLENGTH) + 0
+                print "N\t" $1 "\t" m
+              }'
+            printf '%s\n' "$edges" | awk -F'\t' 'NF >= 2 && $1 != "" && !(($1, $2) in seen) {
+                seen[$1, $2] = 1; print "E\t" $1 "\t" $2 }'
+          } | units_chain "${2:-1}" 2>&1 )" || { CARD_CHAIN_ERR="${out#units_chain: }"; return 1; }
+  while IFS="$CARD_TAB" read -r k a b; do
+    case "$k" in
+      chain) CARD_CHAIN="$a"; CARD_CHAIN_MIN="${b:-0}" ;;
+      width) CARD_PEAK="${a:-0}" ;;
+    esac
+  done < <(printf '%s\n' "$out")
+  return 0
+}
+
+# The wave card's width block: the chain, its minutes, the peak width against the writer
+# budget, and the per-batch widths, all from the one derived graph. With no writer budget the
+# schedule is not capped (the ceiling is the row count) and the line says the budget is absent.
+_card_chain_block() {  # <plan>
+  local plan="$1" w="$WCARD_WRITERS" ceil chain peak
+  ceil="$w"
+  case "$ceil" in ''|*[!0-9]*|0) ceil="$(units_rows "$plan" 2>/dev/null | grep -c .)" ;; esac
+  [ "${ceil:-0}" -gt 0 ] 2>/dev/null || ceil=1
+  printf '  Chain and width\n'
+  if _card_chain "$plan" "$ceil"; then
+    if [ -n "$CARD_CHAIN" ]; then
+      chain="${CARD_CHAIN//,/ → } · ${CARD_CHAIN_MIN} min"
+    else
+      chain="no open task"
+    fi
+    case "$w" in
+      ''|*[!0-9]*|0) peak="${CARD_PEAK} · writers not declared" ;;
+      *)             peak="${CARD_PEAK} of ${w} writers" ;;
+    esac
+  else
+    chain="not computed: ${CARD_CHAIN_ERR}"; peak="not computed"
+  fi
+  _card_labelled 4 "longest chain" "$chain" 15
+  _card_labelled 4 "peak width" "$peak" 15
+  _card_batch_widths "$plan" "$WCARD_WRITERS" "$CARD_SCALE" || :
+}
+
 _card_step1() {  # <artifact path>
   printf 'Step 1 · Requirements\n\n  Purpose\n'
   _card_fold_at 4 "$WCARD_GOAL"
@@ -1373,15 +1445,45 @@ _card_full_path() {  # <value> <docs prefix>
 }
 
 # A frontmatter value that names several paths joins them with " · "; each prints on a line of
-# its own under the label. Nothing is folded — a path is for opening, not reading.
+# its own under the label.
 _card_artifact_lines() {  # <label> <value> <docs prefix>
   local label="$1" v="$2" p
   [ -n "$v" ] || return 0
   while IFS= read -r p; do
     p="${p#"${p%%[![:space:]]*}"}"; p="${p%"${p##*[![:space:]]}"}"
     [ -n "$p" ] || continue
-    printf '    %s  %s\n' "$label" "$(_card_full_path "$p" "$3")"
+    _card_path_line "$label" "$(_card_full_path "$p" "$3")"
   done < <(printf '%s\n' "${v// · /$'\n'}")
+}
+
+# ONE ARTIFACT LINE, HELD TO THE BUDGET (review-3 F5). A path that fits prints whole after its
+# label. One that does not is cut after a `/` — the last one that still fits — and goes on under
+# the path's first column, so every piece is a whole directory name and the path reads off
+# top to bottom; a single name longer than the column is cut where the column ends. Paths are
+# measured in bytes, which is never less than their columns.
+_card_path_line() {  # <label> <path>
+  local label="$1" rest="$2" ind avail head cut first=1
+  ind=$(( 4 + ${#label} + 2 ))
+  avail=$(( BIONIC_LINE_WIDTH - ind ))
+  [ "$avail" -ge 8 ] || avail=8
+  while :; do
+    if [ "${#rest}" -le "$avail" ]; then
+      head="$rest"; rest=""
+    else
+      head="${rest:0:$avail}"
+      case "$head" in
+        */*) cut="${head%/*}/" ;;
+        *)   cut="$head" ;;
+      esac
+      head="$cut"; rest="${rest:${#cut}}"
+    fi
+    if [ "$first" -eq 1 ]; then
+      printf '    %s  %s\n' "$label" "$head"; first=0
+    else
+      printf '%s%s\n' "$(_card_spaces "$ind")" "$head"
+    fi
+    [ -n "$rest" ] || break
+  done
 }
 
 # ONE CARD THE DESIGN IS APPROVED ON (wave-26 D13). The head says what is being built and why
@@ -1418,6 +1520,7 @@ _card_step2() {  # <artifact path>
   _card_render_batch eval-design
   dp="$(_card_docs_prefix)"
   printf '\n  Artifacts\n    spec  %s\n' "$1"
+  _card_artifact_lines design "$WCARD_DPTR" "$dp"
   _card_artifact_lines adr "$WCARD_ADRS" "$dp"
   _card_artifact_lines ledger "$WCARD_LEDGER" "$dp"
   _card_artifact_lines reqs "$WCARD_REQS" "$dp"
@@ -1451,8 +1554,8 @@ _card_step2_ownership() {
 
 # A labelled line at an indent: the label once, padded, then the text folded in the column
 # that is left, continuation lines under the text.
-_card_labelled() {  # <indent> <label> <text>
-  local ind="$1" label="$2" text="$3" line first=1 lw=12
+_card_labelled() {  # <indent> <label> <text> [<label width, 12 by default>]
+  local ind="$1" label="$2" text="$3" line first=1 lw="${4:-12}"
   while IFS= read -r line; do
     if [ "$first" -eq 1 ]; then
       _card_rstrip "$(_card_spaces "$ind")$(_card_pad "$label" "$lw")${line}"; first=0
@@ -1517,25 +1620,33 @@ _card_step2_view() {  # <artifact path as given> <args...>
 # the caller gave it, which is what the floor and the batch widths must be read from:
 # a citation is for a reader to open, and `.bionic/docs/plans/…` resolves against the
 # renderer's own cwd rather than against the plan.
+#
+# STEP 3 APPROVES THE PLAN AND THE MATRIX ONLY (wave-26 D12, D13). The design was approved on the
+# Step-2 card, so this card cites it by path and repeats neither its purpose (the Goal paragraph)
+# nor its eval counts. What it adds is the plan's own shape: each task with the criteria it
+# serves, and the longest chain and the peak width the derived graph gives. A task-scale table
+# carries no sizes, so its width block stays the writer budget and the first batch.
 _card_step3() {  # <citation path> <artifact path as given>
-  printf 'Step 3 · Plan\n\n  Problem\n'
-  _card_fold_at 4 "$WCARD_GOAL"
-  printf '\n'
+  printf 'Step 3 · Plan\n\n'
   _card_branches
   printf '\n'
   CARD_ROWS=( ${WCARD_TROW[@]+"${WCARD_TROW[@]}"} )
   _card_render_batch task
-  local w="$WCARD_WRITERS" fb="$WCARD_FIRSTB"
-  [ -n "$w" ] || w="not declared"
-  [ -n "$fb" ] || fb="not declared"
-  printf '\n  Parallel width\n    %s writers · first batch %s\n' "$w" "$fb"
-  _card_batch_widths "$2" "$WCARD_WRITERS" "$CARD_SCALE" || :
-  printf '\n  Eval design\n    %s criteria · %s static · %s unit · %s hermetic · %s live · %s human\n' \
-    "$WCARD_MROWS" "$WCARD_T0" "$WCARD_T1" "$WCARD_T2" "$WCARD_T3" "$WCARD_T4"
+  printf '\n'
+  if [ "$CARD_SCALE" = "task" ]; then
+    local w="$WCARD_WRITERS" fb="$WCARD_FIRSTB"
+    [ -n "$w" ] || w="not declared"
+    [ -n "$fb" ] || fb="not declared"
+    printf '  Parallel width\n    %s writers · first batch %s\n' "$w" "$fb"
+    _card_batch_widths "$2" "$WCARD_WRITERS" "$CARD_SCALE" || :
+  else
+    _card_chain_block "$2"
+  fi
   printf '\n  Verification\n    %s matrix rows · floor %s · walk %s · auditor %s\n' \
     "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "${WCARD_RIGOR:-not declared}"
-  printf '\n  Artifacts\n    plan  %s\n\n' "$1"
-  printf 'Do you approve this plan? Reply "approved" to approve it.\n'
+  printf '\n  Artifacts\n    plan  %s\n' "$1"
+  _card_artifact_lines spec "$WCARD_SPEC" "$(_card_docs_prefix)"
+  printf '\nDo you approve this plan? Reply "approved" to approve it.\n'
   printf 'show evals <req> · show task <n> · explain <decision>\n'
 }
 
