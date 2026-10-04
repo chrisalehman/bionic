@@ -8946,5 +8946,96 @@ expect_contains "root2 …its script path is one argument, space and all" "my pl
 expect_true "root2 …naming the real file" test -f "$(printf '%s\n' "$ROOT2_ARGS" | sed -n 2p)"
 GATE="$ROOT_GATE_SAVED"
 
+# ===========================================================================
+section "§GATES — only human gates hold: nothing writes before approved-by:, a release waits for approved: release, a doc row is not held by its step (wave-26 T13; REQ-6 AC-6.2; D3)"
+# ===========================================================================
+#
+# AN APPROVAL IS AN INPUT ONLY THE USER'S ACT WRITES (D3). `approval:plan` is the `approved-by:`
+# line; any other name is an `approved: <name> …` line, written by `session-poker.sh approve`.
+# Two readers must agree on both: the dispatch wall, which refuses the dispatch, and the ready
+# set (lib/fill.sh), which never offers the row. Each row below asks both over one plan.
+#
+# The plan is a reads table (D1) bound to the session: T1 a build, T8 a Step-7 doc row reading
+# only the plan approval, T9 the release reading `approval:release`. current: 4 throughout.
+GATES_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/fill.sh"
+expect_true "GATES0 the ready-set library is where this section expects it" test -f "$GATES_LIB"
+gates_plan() {  # <repo> <SDLC lines, newline-joined, may be empty>
+  local f="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
+    printf -- 'intent: build\nrigor: audited\nscale: wave\n---\n\n'
+    printf -- '# Test wave plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
+    [ -n "$2" ] && printf -- '%s\n' "$2"
+    printf -- '\n- Step 4: tasks in flight\n\n## Tasks\n\n'
+    printf -- '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
+    printf -- '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf -- '| T1 | 4 | build | a build | implementor | — | 30 | REQ-x | a.sh | pending | |\n'
+    printf -- '| T8 | 7 | doc | the notes | implementor | — | 20 | REQ-x | .bionic/docs/record/notes.md | pending | approval:plan |\n'
+    printf -- '| T9 | 7 | doc | the release | implementor | — | 20 | REQ-x | CHANGELOG.md | pending | approval:release |\n'
+  } > "$f"
+  printf '%s' "$f"
+}
+gates_ready() {  # <plan> -> the ready set, space-joined, as the tick and the wall ask it
+  ( . "$GATES_LIB" >/dev/null 2>&1; fill_ready_set "$1" 8 0 | tr '\n' ' ' )
+}
+GATES_APPROVED='approved-by: dana 2026-10-04T03:33:32Z "Approved"'
+GATES_RELEASE='approved: release by dana 2026-10-04T05:00:00Z "Ship it."'
+
+# --- GATES1: before approved-by: nothing writes, on either reader ---
+REPO=$(make_repo rgates1 yes)
+write_attestation "$REPO" "$SID_A"
+GATES_P="$(gates_plan "$REPO" "")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
+expect_eq "GATES1 AC-6.2 a writer for T1 before approved-by: is refused" "deny" "$GATE_VERDICT"
+expect_eq "GATES1b …and the ready set offers nothing before approved-by:" "" "$(gates_ready "$GATES_P")"
+GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
+expect_contains "GATES1c the control: with approved-by: written, the ready set offers T1" "T1 " "$(gates_ready "$GATES_P")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
+expect_status "GATES1d …and the dispatch wall admits the writer for T1" "0" "$GATE_ST"
+# A TABLE WITHOUT `reads` applies no kind default, so nothing in the table itself waits for the
+# approval: the ready set's own gate is all that holds it. Keyed on `current: >= 4`, it would
+# offer T1 here.
+gates_legacy() {  # <repo> <SDLC lines> -> the plan; no reads column, current: 4
+  local f="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n---\n\n'
+    printf -- '# Test wave plan\n\n## SDLC State\n\ncurrent: 4\n'
+    [ -n "$2" ] && printf -- '%s\n' "$2"
+    printf -- '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
+    printf -- '|---|---|---|---|---|---|---|---|---|---|\n'
+    printf -- '| T1 | 4 | build | a build | implementor | — | 30 | REQ-x | a.sh | pending |\n'
+  } > "$f"
+  printf '%s' "$f"
+}
+expect_eq "GATES1e a table without reads at current: 4 and no approved-by: offers nothing" \
+  "" "$(gates_ready "$(gates_legacy "$REPO" "")")"
+expect_contains "GATES1f …and offers T1 once approved-by: is written" \
+  "T1 " "$(gates_ready "$(gates_legacy "$REPO" "$GATES_APPROVED")")"
+
+# --- GATES2: the release waits for approved: release, on either reader ---
+REPO=$(make_repo rgates2 yes)
+write_attestation "$REPO" "$SID_A"
+GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
+expect_eq "GATES2 AC-6.2 a dispatch for the release row before approved: release is refused" "deny" "$GATE_VERDICT"
+expect_contains "GATES2b …naming the approval it waits for" "approval:release" "$GATE_VERR"
+expect_contains "GATES2c …and the verb that records it" "session-poker.sh approve release" "$GATE_VERR"
+GATES_READY="$(gates_ready "$GATES_P")"
+expect_contains "GATES2d the ready set on the same plan offers T1 (the extractor reads a real set)" "T1 " "$GATES_READY"
+expect_absent "GATES2e …and not the release" "T9" "$GATES_READY"
+GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED
+$GATES_RELEASE")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
+expect_status "GATES2f with approved: release written, the release dispatch is admitted" "0" "$GATE_ST"
+expect_contains "GATES2g …and the ready set offers it" "T9" "$(gates_ready "$GATES_P")"
+
+# --- GATES3: a doc row is not held by its step ---
+expect_contains "GATES3 AC-6.2 at current: 4 the Step-7 doc row whose reads exist is ready" \
+  "T8" "$(gates_ready "$GATES_P")"
+
 
 finish

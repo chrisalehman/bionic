@@ -96,6 +96,7 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `dp_finding "the Patrol fires but never ticks" "run the tick; replace the job" \` — Patrol fires but never ticks — fix: `bash ${POKER_SCRIPT} tick`, then the job replaced
 - `dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \` — unapproved plan — none: approval is the user's literal word, which no command supplies
 - `dp_finding "this session is bound to no run" "bind it, or write its plan" \` — session bound to no run — none: the run to bind is the reader's choice among open runs; `session-poker.sh bind <plan>` needs that plan
+- `dp_finding "row ${DP_AW_ID} waits for approval:${DP_AW_NAME}" \` — row reads an approval nobody gave — none: the approval is the user's reply, which no command supplies; once given, `session-poker.sh approve <name> '<reply>'` records it
 - `dp_finding "a subagent may launch only read-only roles" "ask the orchestrator" \` — subagent dispatching a writer — none: only the orchestrator dispatches writers, so the fix is a message to it
 - `dp_finding "this dispatch came from a worktree" "dispatch from the main checkout" \` — dispatch from a worktree — none: the fix is to dispatch from the main checkout, a change of where, not a command
 - `dp_finding "$1" "land or stand down a row" \` — budget_deny forwarder — fix: `bash ${HOOK_DIR}/stop-orders.sh standdown`, rooted at the real hooks directory

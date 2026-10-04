@@ -1848,6 +1848,9 @@ am_refused "19t: bash session-poker.sh ledger-set" "bash $AM_POKER ledger-set T2
 # admitted, so an agent that could write one could prove its own head.
 am_refused "19u: bash session-poker.sh proof-add" \
   "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt"
+# §ARM-A (approve) — wave-26 T5 after T13: an approval line is what releases a gate act, so an
+# agent that could write one would approve its own step.
+am_refused "19v: bash session-poker.sh approve" "bash $AM_POKER approve release 'approved'"
 
 # THE PAIRED POSITIVES. The same verbs from the main thread (no agent_id) are the
 # orchestrator's and pass this arm; a subagent's own read-only poker verbs pass; and a quoted
@@ -1859,6 +1862,7 @@ am_admitted "19j3: current from the main thread" "bash $AM_POKER current 5" ""
 am_admitted "19j4: task-set from the main thread" "bash $AM_POKER task-set T2 status=landed" ""
 am_admitted "19j5: proof-add from the main thread" \
   "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt" ""
+am_admitted "19j6: approve from the main thread" "bash $AM_POKER approve release 'approved'" ""
 am_admitted "19k: a subagent's tick" "bash $AM_POKER tick"
 am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
 am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"
