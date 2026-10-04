@@ -20,7 +20,8 @@
 # §A13–§A16, the brief's additions (main= for every class, allow paths end to end, the gate
 # line, the size bound); §A17–§A22, T17's (a credential store refused by the place a path
 # reaches, a reader's report bounded by what the lead holds, no delete of a workspace root, the
-# bound on targets, on and off read alike by the hook and the doctor, and reads end to end).
+# bound on targets, on and off read alike by the hook and the doctor, and reads end to end);
+# §A23, T20's (an answer only in bypass and auto mode, silence in every other).
 # §A8 and §A9 read EVERY decision the suite collected, so they run last but one.
 #
 # HERMETIC. Every project is a fixture under one mktemp sandbox: a git repository on the
@@ -39,7 +40,7 @@
 # T1 interface shape, written by hand, and the trees they name are real linked worktrees of
 # the fixture project (the reader counts nothing else, T18).
 #
-# ANTI-VACUITY (per .claude/rules/test-harness.md). Every silence (§A4, §A10, §A11, §A5.h) sits
+# ANTI-VACUITY (per .claude/rules/test-harness.md). Every silence (§A4, §A10, §A11, §A5.h, §A23) sits
 # beside an answer on the same fixture; every deny section carries an allow on the same facts;
 # §A8 and §A9 prove their key extractor on a planted object before reading an absence; the
 # trap rows (§A5.g) anchor the plant and run the unmutated copy as their control.
@@ -949,6 +950,93 @@ a22 "cp $A22T/src/a.txt $A22T/b.txt"
 expect_eq "A22.c3 control: a copy of an ordinary file within the tree: allow" "allow" "$(behavior "$OUT")"
 a22 "find $A22T/src -name '*.txt'"
 expect_eq "A22.c4 control: a find rooted in the tree: allow" "allow" "$(behavior "$OUT")"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§A23 bionic answers in bypass and auto mode only; in any other mode the dialog reaches the human (wave-25 T20)"
+#
+# The two modes in which the user has told the platform not to ask are the only ones bionic
+# answers in. In default, acceptEdits, plan, a mode it has never seen, or with the field
+# missing, empty or not a string, the hook does what it does for an unengaged session: rc 0,
+# nothing printed, no answer line, no gate line. The comparison is exact (a yes-guard,
+# A-orch-29), so a wrong case is a mode it does not know. The mode values are the ones the
+# live walk's probe log recorded (`"permission_mode":"default"`, `"auto"`,
+# `"bypassPermissions"`, top level, for the lead and for a teammate alike).
+#
+# Three questions whose answers today differ, so a silence cannot be one answer's accident:
+# an in-workspace write (allow), a write outside (deny-fix) and a push (deny-reserved, which
+# writes a gate line). The silences come first, on a fixture with no log and no gate file; the
+# same three questions in bypass and in auto are answered as before, on the same fixture.
+A23P="$(make_project a23 bound)"
+A23T="$A23P/.worktrees/25-T1"
+add_roster_row "$A23P" w99-T1 aw99-T1-0974313b7a6b74f2 bionic:senior-implementor "$(record_of "$A23P")/T1.md"
+add_workspace "$A23P" w99-T1 "$A23T"
+A23G="$(gate_of "$A23P")"
+a23_gate_lines() { if [ -f "$A23G" ]; then wc -l < "$A23G" | tr -d ' '; else printf 0; fi; }
+# with_mode <payload> <mode>: `-` deletes the field; `#<json>` sets a non-string value.
+with_mode() {
+  case "$2" in
+    -) printf '%s' "$1" | jq -c 'del(.permission_mode)' ;;
+    '#'*) printf '%s' "$1" | jq -c --argjson m "${2#\#}" '.permission_mode = $m' ;;
+    *) printf '%s' "$1" | jq -c --arg m "$2" '.permission_mode = $m' ;;
+  esac
+}
+A23_Q_IN="$(payload "$A23P" Bash "$(bash_ti "touch $A23P/src/a.txt")")"
+A23_Q_OUT="$(payload "$A23P" Bash "$(bash_ti "touch $SANDBOX/a23-elsewhere.txt")")"
+A23_Q_RES="$(payload "$A23P" Bash "$(bash_ti "git push origin $BRANCH")")"
+A23_Q_MATE="$(payload "$A23P" Bash "$(bash_ti "touch $A23T/a.txt")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A23T")"
+expect_eq "A23.0 the fixture's payloads carry the walk's spelling of the mode" "bypassPermissions" \
+  "$(printf '%s' "$A23_Q_IN" | jq -r '.permission_mode')"
+
+# a23_silent <label> <payload>: rc 0, nothing on either stream, no answer line, no gate line.
+a23_silent() {
+  local l0 g0
+  l0="$(log_lines "$A23P")"; g0="$(a23_gate_lines)"
+  drive "$A23P" "$2"
+  expect_eq "$1: rc 0" "0" "$RC"
+  expect_empty "$1: empty stdout" "$OUT"
+  expect_empty "$1: empty stderr" "$ERR"
+  expect_eq "$1: the answer log unchanged" "$l0" "$(log_lines "$A23P")"
+  expect_eq "$1: no gate line" "$g0" "$(a23_gate_lines)"
+}
+for m in default acceptEdits plan dontAsk neverHeardOf '' - '#1' '#null' '#["bypassPermissions"]' \
+         BypassPermissions bypasspermissions Auto AUTO 'bypassPermissions ' ' auto'; do
+  a23_silent "A23.in [$m] an in-workspace write" "$(with_mode "$A23_Q_IN" "$m")"
+  a23_silent "A23.out [$m] a write outside" "$(with_mode "$A23_Q_OUT" "$m")"
+  a23_silent "A23.res [$m] a push" "$(with_mode "$A23_Q_RES" "$m")"
+done
+a23_silent "A23.mate [default] a teammate's write in its own tree" "$(with_mode "$A23_Q_MATE" default)"
+expect_eq "A23.s1 after every silence the log holds no line" "0" "$(log_lines "$A23P")"
+expect_true "A23.s2 …and no gate file was written" test ! -e "$A23G"
+
+# The guard reads the mode of a question that parsed; it never turns a fault into a silence
+# (A-orch-41). A payload that is not a JSON object says nothing about its mode, so it keeps the
+# fault's answer whatever text it carries: a deny naming it, on the record.
+for bad in '{"permission_mode":"default","tool_name":"Bash","tool_input":{"command":"ls"' '"default"'; do
+  l0="$(log_lines "$A23P")"
+  drive "$A23P" "$bad"
+  expect_eq "A23.f [$bad] a payload that is not an object: one decision" "1" "$(n_obj "$OUT")"
+  expect_eq "A23.f [$bad] …deny" "deny" "$(behavior "$OUT")"
+  expect_contains "A23.f [$bad] …naming the fault" "could not read the question" "$(message "$OUT")"
+  expect_eq "A23.f [$bad] …on the record" "$((l0 + 1))" "$(log_lines "$A23P")"
+done
+
+# The paired positives: the same questions in the two modes the user has told the platform not
+# to ask in are answered, and leave their lines.
+for m in bypassPermissions auto; do
+  l0="$(log_lines "$A23P")"
+  drive "$A23P" "$(with_mode "$A23_Q_IN" "$m")"
+  expect_eq "A23.p [$m] an in-workspace write: allow" "allow" "$(behavior "$OUT")"
+  drive "$A23P" "$(with_mode "$A23_Q_OUT" "$m")"
+  expect_eq "A23.p [$m] a write outside: deny" "deny" "$(behavior "$OUT")"
+  expect_contains "A23.p [$m] …as deny-fix" "|deny-fix|" "$(tail -1 "$(log_of "$A23P")" 2>/dev/null)"
+  drive "$A23P" "$(with_mode "$A23_Q_RES" "$m")"
+  expect_eq "A23.p [$m] a push: deny" "deny" "$(behavior "$OUT")"
+  expect_contains "A23.p [$m] …as deny-reserved" "|deny-reserved|" "$(tail -1 "$(log_of "$A23P")" 2>/dev/null)"
+  drive "$A23P" "$(with_mode "$A23_Q_MATE" "$m")"
+  expect_eq "A23.p [$m] the teammate's write in its own tree: allow" "allow" "$(behavior "$OUT")"
+  expect_eq "A23.p [$m] four answers, four lines" "$((l0 + 4))" "$(log_lines "$A23P")"
+done
+expect_eq "A23.p the push wrote its gate line" "1" "$(a23_gate_lines)"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
 section "§A8 no decision object anywhere in the suite carries interrupt"

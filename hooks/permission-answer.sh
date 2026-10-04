@@ -14,7 +14,8 @@
 #      exit 0: the stock dialog shows. `permission-answers: false` in .bionic/config.yaml ->
 #      the same, with no log line (only the literal `false` turns it off). A tool that exists
 #      to collect human input (AskUserQuestion, ExitPlanMode) -> the same: a question for the
-#      human is never answered by bionic.
+#      human is never answered by bionic. A parsed question whose `permission_mode` is not
+#      exactly `bypassPermissions` or `auto` -> the same: the user's dialog shows (A-orch-40).
 #   2. From here the session is known to be engaged and the boundary on, and a trap is armed:
 #      any exit that has not printed a decision prints a DENY naming the failure.
 #   3. Facts: who asked (the payload's agent_id through this session's roster; none means
@@ -191,17 +192,38 @@ _pa_field() {
   printf '%s' "$BIONIC_INPUT" | jq -r "$1 | if type == \"string\" then . else empty end" 2>/dev/null
 }
 
+# The question's head in ONE read: whether its mode is one bionic answers in, and its tool. A
+# payload that is not a JSON object yields nothing and stays unparsed (a fault, answered below).
 PA_PARSED=0
 PA_TOOL=""
-if printf '%s' "$BIONIC_INPUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+PA_MODE_OURS=""
+PA_Q0="$(printf '%s' "$BIONIC_INPUT" | jq -r 'if type == "object" then
+  "\(.permission_mode == "bypassPermissions" or .permission_mode == "auto")\t\(.tool_name | if type == "string" then . else "" end)"
+  else empty end' 2>/dev/null)" || PA_Q0=""
+if [ -n "$PA_Q0" ]; then
   PA_PARSED=1
-  PA_TOOL="$(_pa_field .tool_name)"
+  PA_MODE_OURS="${PA_Q0%%"$PA_TAB"*}"
+  PA_TOOL="${PA_Q0#*"$PA_TAB"}"
 fi
 
 # A question for the human is never answered by bionic (AC-1.4).
 case "$PA_TOOL" in
   AskUserQuestion|ExitPlanMode) exit 0 ;;
 esac
+
+# THE MODE (A-orch-40). bionic answers only where the user has told the platform not to ask: a
+# `permission_mode` of exactly `bypassPermissions` or exactly `auto`, compared case-exact in the
+# read above (a guard that says yes takes the value exactly as sent, A-orch-29). In default,
+# acceptEdits or plan mode, in a mode never seen, and with the field missing, empty or not a
+# string, it is silent, as for an unengaged session. Silence is the safe direction HERE, unlike
+# after the trap below: it hands the question back to the user's own dialog, in a mode where the
+# user chose to be asked, so no one waits on an answer bionic withheld. It reads the mode of a
+# question that PARSED: a payload that is not a JSON object tells it no mode, so it is not
+# silenced here and keeps the fault's denial below (A-orch-41). Before the trap: silence stays
+# silence.
+if [ "$PA_PARSED" = 1 ] && [ "$PA_MODE_OURS" != true ]; then
+  exit 0
+fi
 
 # _pa_clean <text> [<max chars>] -> the text cut to <max> (default 2000), then on one line
 # with no field separator: `|`, CR and LF become spaces. Used for every log and gate field.

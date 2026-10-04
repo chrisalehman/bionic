@@ -450,19 +450,21 @@ definition in `payload/scripts/lib/archive.sh`; SKILL.md §Step 9 names the call
 
 An unattended run should not stop on a permission dialog that nobody is there to answer. From
 1.10.0, a session that has engaged a canonical-sdlc run answers the platform's permission
-questions itself. The Step-0 card says so on its `permissions` line, and approving the card is
-your consent.
+questions itself in bypass and auto mode, the two modes in which you have told the platform not
+to ask. In any other mode (default, accept-edits, plan) the platform's dialog reaches you as
+before: the mode is your answer to how much you want to be asked. The Step-0 card says so on
+its `permissions` line, and approving the card is your consent.
 
 **Three tiers.**
 
 1. **The platform decides what it decides.** Your permission mode, your own allow, ask and deny
    rules, and every call the platform settles without asking are untouched. Where the platform
    refuses a call outright, the refusal stands.
-2. **An engaged run answers what the platform asks.** It allows the call when every file the
-   call would write or delete is inside the asker's workspace. Otherwise it denies, and the
-   denial names what it could not place, names the workspace, and gives one next step, usually:
-   put the script in a file inside the workspace and run it with `bash <file>`. A denial does
-   not stop the agent; it carries on with the fix.
+2. **An engaged run answers what the platform asks.** In bypass and auto mode only, it allows
+   the call when every file the call would write or delete is inside the asker's workspace.
+   Otherwise it denies, and the denial names what it could not place, names the workspace, and
+   gives one next step, usually: put the script in a file inside the workspace and run it with
+   `bash <file>`. A denial does not stop the agent; it carries on with the fix.
 3. **Reserved categories go to the human.** An action in a reserved category is never allowed.
    The denial names the category and offers no workaround. The asker reports it to the lead,
    which raises it with you once, as a gate act.
@@ -496,9 +498,11 @@ it does, so it is denied with a fix.
 
 **What it leaves alone.** bionic changes no permission mode and writes no settings; an answer
 covers that one question and persists nothing. It never answers in a session that has not
-engaged a run, where you get the stock dialog, and never answers a tool whose job is to ask you
-something (a question, a plan approval). Once a session is engaged, a failure to decide is a
-denial that says why, never an allow.
+engaged a run, or in any mode but bypass and auto, or when the question does not say its mode;
+there you get the stock dialog. It never answers a tool whose job is to ask you something (a
+question, a plan approval). Once a session is engaged, a failure to decide is a denial that
+says why, never an allow: a question that cannot be read at all is denied in any mode, while
+one that reads but names no mode, or another mode, gets the stock dialog.
 
 **Turning it off.** Set `permission-answers: false` in `.bionic/config.yaml`. Any other value,
 or no key, leaves it on. With it off, every question comes to you as before.
