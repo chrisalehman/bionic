@@ -1354,3 +1354,98 @@ units_step_fields() {
       }
     }' "$plan"
 }
+
+# units_chain <writer ceiling> — the longest chain of dependent work and the widest the plan can
+# run (wave-26 T3, REQ-7). Pure over stdin; it reads no plan, so the card hands it the nodes and
+# the edges it already holds:
+#
+#   N<TAB><id><TAB><minutes>     a unit of work
+#   E<TAB><from><TAB><to>        `to` cannot start before `from` ends
+#
+# Prints `chain<TAB><id>,<id>…<TAB><minutes>` — the path with the largest sum of minutes, every
+# node on it counted, a tie going to the path whose ids come first in input order — and
+# `width<TAB><n>`: every node scheduled at its earliest start (the latest end among the nodes it
+# waits for, 0 with none), at most <writer ceiling> running at once, ready nodes taken in input
+# order when more are ready than there is room; the width is the largest number running at one
+# instant. A cycle, an edge naming an unknown id or a minutes value that is not a whole number
+# prints one line on stderr and returns 2 with nothing on stdout.
+units_chain() {
+  awk -F'\t' -v ceil="${1-}" '
+    function die(msg) { print "units_chain: " msg > "/dev/stderr"; bad = 1; exit 2 }
+    BEGIN {
+      if (ceil !~ /^[0-9]+$/ || ceil + 0 < 1) die("writer ceiling is not a whole number of at least 1: \"" ceil "\"")
+    }
+    { sub(/\r$/, "") }
+    $0 ~ /^[ \t]*$/ { next }
+    $1 == "N" {
+      if (NF != 3) die("malformed node line: " $0)
+      if ($3 !~ /^[0-9]+$/) die("minutes of " $2 " is not a whole number: \"" $3 "\"")
+      if ($2 in at) die("node " $2 " is declared twice")
+      n++; id[n] = $2; at[$2] = n; mins[n] = $3 + 0
+      next
+    }
+    $1 == "E" {
+      if (NF != 3) die("malformed edge line: " $0)
+      ne++; ef[ne] = $2; et[ne] = $3
+      next
+    }
+    { die("unknown line kind \"" $1 "\": " $0) }
+    END {
+      if (bad) exit 2
+      for (k = 1; k <= ne; k++) {
+        if (!(ef[k] in at)) die("edge " ef[k] " -> " et[k] " names unknown id " ef[k])
+        if (!(et[k] in at)) die("edge " ef[k] " -> " et[k] " names unknown id " et[k])
+        a = at[ef[k]]; b = at[et[k]]
+        out[a] = out[a] " " b; indeg[b]++
+      }
+      # Kahn: a topological order, or the nodes a cycle keeps from one.
+      for (i = 1; i <= n; i++) { rem[i] = indeg[i] + 0; if (rem[i] == 0) q[++qt] = i }
+      for (qh = 1; qh <= qt; qh++) {
+        m = split(out[q[qh]], s, " ")
+        for (j = 1; j <= m; j++) if (--rem[s[j]] == 0) q[++qt] = s[j]
+      }
+      if (qt < n) {
+        for (i = 1; i <= n; i++) if (rem[i] > 0) members = members (members == "" ? "" : " ") id[i]
+        die("cycle among: " members)
+      }
+      # Longest chain: f[i] is the heaviest path that starts at i; the best successor is the
+      # heaviest, the lowest input position on a tie, which makes the whole path the one whose
+      # ids come first. Sources only start a chain.
+      for (qh = n; qh >= 1; qh--) {
+        i = q[qh]; best = 0; nx[i] = 0
+        m = split(out[i], s, " ")
+        for (j = 1; j <= m; j++) {
+          c = s[j]
+          if (nx[i] == 0 || f[c] > best || (f[c] == best && c < nx[i])) { best = f[c]; nx[i] = c }
+        }
+        f[i] = mins[i] + best
+      }
+      start = 0
+      for (i = 1; i <= n; i++) if (indeg[i] + 0 == 0 && (start == 0 || f[i] > f[start])) start = i
+      path = ""
+      for (i = start; i != 0; i = nx[i]) path = path (path == "" ? "" : ",") id[i]
+      # Width: an earliest-start schedule under the ceiling. Waiting is the count of a node'"'"'s
+      # unfinished predecessor edges; time moves to the next end once nothing more can start.
+      for (i = 1; i <= n; i++) wait[i] = indeg[i] + 0
+      t = 0; done = 0; run = 0; peak = 0
+      while (done < n) {
+        do {
+          moved = 0
+          for (i = 1; i <= n; i++) if (running[i] && fin[i] <= t) {
+            running[i] = 0; run--; done++; moved = 1
+            m = split(out[i], s, " ")
+            for (j = 1; j <= m; j++) wait[s[j]]--
+          }
+          for (i = 1; i <= n && run < ceil; i++) if (!began[i] && wait[i] == 0) {
+            began[i] = 1; running[i] = 1; run++; fin[i] = t + mins[i]; moved = 1
+          }
+          if (run > peak) peak = run
+        } while (moved)
+        nextt = -1
+        for (i = 1; i <= n; i++) if (running[i] && (nextt < 0 || fin[i] < nextt)) nextt = fin[i]
+        if (nextt < 0) break
+        t = nextt
+      }
+      printf "chain\t%s\t%d\nwidth\t%d\n", path, f[start], peak
+    }'
+}
