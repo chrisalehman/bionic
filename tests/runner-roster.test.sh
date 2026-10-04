@@ -908,6 +908,10 @@ section "§11 NESTED — a solo suite takes the whole machine; a nested run neve
 #   (d) VOID: a run during which the load rose is re-run; still disturbed after two
 #       retries, the suite is reported void, never failed. One disturbed run followed by a
 #       clean one is an ordinary pass.
+#   (e) HELD TRAVELS WITH ITS PLACE: a solo suite is handed BIONIC_SLOT_PLACE naming a
+#       place its hold covers, whether the run was booked or took the machine itself; and
+#       two booked runs that each reach their solo drain together both complete, the second
+#       waiting for the first rather than each waiting on the other's place.
 
 RRN_BOOKED="$REPO/payload/scripts/booked.sh"
 expect_true "11.0 the shim the outer run is booked through exists" test -f "$RRN_BOOKED"
@@ -935,7 +939,9 @@ rrn_suite() {  # <file> <solo yes|no> <name> <body>
 # (`none` when nobody holds it) and the two booking marks it inherited.
 RRN_RECORD='w=none; [ -r "$RRN_SLOTS/quiet/what" ] && w="$(cat "$RRN_SLOTS/quiet/what")"
 printf "%s\n" "$w" > "$RRN_MARKS/$RRN_WHO.what"
-printf "%s/%s\n" "${BIONIC_SLOT_HELD:-}" "${BIONIC_SLOT_QUIET:-}" > "$RRN_MARKS/$RRN_WHO.env"'
+printf "%s/%s\n" "${BIONIC_SLOT_HELD:-}" "${BIONIC_SLOT_QUIET:-}" > "$RRN_MARKS/$RRN_WHO.env"
+p="${BIONIC_SLOT_PLACE:-}"; h=gone; [ -n "$p" ] && [ -d "$p" ] && h=held
+printf "%s %s\n" "$p" "$h" > "$RRN_MARKS/$RRN_WHO.place"'
 
 # The inner tree: one solo suite, recording under the name its caller hands down.
 TNI="$RRN/inner"
@@ -1046,8 +1052,10 @@ expect_contains "11.22 …and the runner said what it was waiting for, naming th
   "a foreign run" "$RRN_OUT"
 
 # ---- (d) VOID: the load rose during the timing run -------------------------
-# The suite raises the load reading during its run and a background line lowers it a second
-# later, so the check after the run sees the rise and the next try starts settled.
+# The suite raises the load reading during its run and a background line lowers it three
+# seconds later, so the check after the run sees the rise and the next try settles within
+# the ten-second wait. One second was too short on a loaded machine: the reading was back
+# down before the check, and the retry never happened.
 TNV="$RRN/void"
 rr_tree "$TNV"
 rr_stub "$TNV" "v-plain"
@@ -1056,7 +1064,7 @@ rrn_suite "$TNV/tests/aaa-void.test.sh" yes aaa-void \
 n="$(awk "END { print NR + 0 }" "$RRN_MARKS/void.runs")"
 if [ "$RRN_VOID" = always ] || [ "$n" -eq 1 ]; then
   printf "99\n" > "$RRN_LOAD"
-  ( sleep 1; printf "0\n" > "$RRN_LOAD" ) >/dev/null 2>&1 &
+  ( sleep 3; printf "0\n" > "$RRN_LOAD" ) >/dev/null 2>&1 &
 fi'
 rrn_void_runs() { awk 'END { print NR + 0 }' "$RRN_MARKS/void.runs" 2>/dev/null || echo 0; }
 rrn_line() { printf '%s\n' "$RRN_OUT" | grep -F "  $1 "; }
@@ -1080,8 +1088,57 @@ expect_eq "11.31 a suite disturbed once and clean on the retry: the run is green
 expect_true "11.32 …it was re-run" test "$(rrn_void_runs)" -ge 2
 expect_contains "11.33 …and its verdict line reads PASS" "PASS" "$(rrn_line aaa-void.test.sh)"
 expect_absent "11.34 …with no Void: summary" "Void:" "$RRN_OUT"
-expect_contains "11.35 …and the retry was said on the way" "void" "$RRN_OUT"
+expect_contains "11.35 …and the retry was said on the way" "aaa-void.test.sh: the load rose" "$RRN_OUT"
+expect_contains "11.35b …as a retry, not a give-up" "retrying (1 of 2)" "$RRN_OUT"
 expect_contains "11.36 the always-disturbed run printed a Void: summary (11.34 is not vacuous)" \
   "Void:" "$RRN_VOID_ALWAYS_OUT"
+
+# ---- (e) HELD travels with its place ---------------------------------------
+# The solo launch marks its suite BIONIC_SLOT_HELD=1, and the lending rule reads
+# BIONIC_SLOT_PLACE to tell the caller's own place from the others; so the mark is never
+# handed down without a place the hold really covers. Unbooked, that is a place the runner
+# took itself (N=1, so place.1); booked, it is the shim's own place, again place.1.
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"
+rrn_drive "$TNO" 1 4 bash tests/run.sh
+expect_eq "11.37 an unbooked run completes green" "0" "$RRN_RC"
+expect_eq "11.38 …its solo suite was marked held" "1/1" "$(rrn_read outer.env)"
+expect_eq "11.39 …and handed the place its hold covers, held while the suite ran" \
+  "$RRN_SLOTS/place.1 held" "$(rrn_read outer.place)"
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"
+rrn_drive "$TNO" 1 4 bash "$RRN_BOOKED" -- bash tests/run.sh
+expect_eq "11.40 a booked run completes green" "0" "$RRN_RC"
+expect_eq "11.41 …and its solo suite is handed the shim's place, held while the suite ran" \
+  "$RRN_SLOTS/place.1 held" "$(rrn_read outer.place)"
+
+# Two booked runs, two places, each with a solo suite that holds the machine for three
+# seconds: both reach their nested whole-machine take while the other's shim holds a place.
+# Each lends its own place while it queues for the marker, so the first to take it drains
+# at once, and the second waits for the first to give it back.
+rrn_pair_tree() {  # <dir> <who>
+  rr_tree "$1"
+  rrn_suite "$1/tests/aaa-pair.test.sh" yes aaa-pair "RRN_WHO=$2
+$RRN_RECORD
+sleep 3"
+}
+rrn_pair_tree "$RRN/pair-a" pair-a
+rrn_pair_tree "$RRN/pair-b" pair-b
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"
+for _w in a b; do
+  ( rrn_drive "$RRN/pair-$_w" 2 20 bash "$RRN_BOOKED" -- bash tests/run.sh
+    printf '%s\n' "$RRN_OUT" > "$RRN_MARKS/pair-$_w.out"
+    printf '%s\n' "$RRN_RC" > "$RRN_MARKS/pair-$_w.rc" ) &
+done
+wait
+expect_eq "11.42 two booked runs making nested whole-machine takes: the first completes green" \
+  "0" "$(rrn_read pair-a.rc)"
+expect_eq "11.43 …and so does the second" "0" "$(rrn_read pair-b.rc)"
+expect_absent "11.44 …neither gave up waiting" "gave up" "$(rrn_read pair-a.out; rrn_read pair-b.out)"
+expect_contains "11.45 …and they really met: one waited for the whole machine the other held" \
+  "waiting for the whole machine" "$(rrn_read pair-a.out; rrn_read pair-b.out)"
+expect_contains "11.46 each solo suite ran under its own shim's place (a)" \
+  "$RRN_SLOTS/place." "$(rrn_read pair-a.place)"
+expect_contains "11.47 …(b)" "$RRN_SLOTS/place." "$(rrn_read pair-b.place)"
+expect_eq "11.48 …and everything was given back" "" \
+  "$(ls -d "$RRN_SLOTS"/quiet "$RRN_SLOTS"/place.* 2>/dev/null)"
 
 finish
