@@ -91,6 +91,22 @@ run_hook() {
   return 0
 }
 
+# expect_wrap_only <label> <original command> — stdout is the booking wrap ALONE (wave-26 T7,
+# D8). An allowed suite command now comes back rewritten into payload/scripts/booked.sh, so a
+# row that read "silent" for this wall reads exactly this instead: no deny and no advisory on
+# stdout (the object holds nothing but the event name and updatedInput), and the updated
+# command is the shim around the ORIGINAL command, byte for byte.
+expect_wrap_only() {
+  local _cmd _s _r="'\\''"
+  expect_eq "$1: …no deny and no advisory beside the booking wrap" '["hookEventName","updatedInput"]' \
+    "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
+  _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
+  expect_regex "$1: …the updated command runs the booking shim" \
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? -- " "$_cmd"
+  _s=${2//\'/$_r}
+  expect_eq "$1: …around the original command, byte for byte" "'$_s'" "${_cmd#* -- }"
+}
+
 # audit_file <project root> — the $HOME-rooted audit path the wall computes (incident
 # 0001: the stream must live where a consuming project cannot commit it). Derived by the
 # hook's own rule rather than hard-coded, so a change to the slug fails loudly here.
@@ -133,7 +149,8 @@ expect_empty "1a: …and nothing to stderr" "$ERR"
 # it moved the work to must not be nudged to move it again.
 run_hook "$(mk_payload "$ENGAGED" 'bash tests/run.sh' Bash implementor)"
 expect_status "1b: a subagent payload exits 0" 0 "$ST"
-expect_empty "1b: …writing nothing to stdout" "$OUT"
+# THIS WALL STAYS SILENT; the only stdout is the booking wrap every allowed suite carries.
+expect_wrap_only "1b" 'bash tests/run.sh'
 expect_empty "1b: …and nothing to stderr" "$ERR"
 
 # AN EMPTY COMMAND.
@@ -165,7 +182,7 @@ expect_status "2a: an unengaged session's tier-1 command exits 0" 0 "$ST"
 expect_empty "2a: …with no deny on stdout" "$OUT"
 expect_empty "2a: …and no audit line on stderr" "$ERR"
 
-run_hook "$(mk_payload "$PLAIN" 'npx create-thing')"
+run_hook "$(mk_payload "$PLAIN" 'docker run x')"
 expect_status "2b: an unengaged session's tier-2 command exits 0" 0 "$ST"
 expect_empty "2b: …with no nudge on stdout" "$OUT"
 expect_empty "2b: …and nothing on stderr" "$ERR"
@@ -190,7 +207,7 @@ expect_eq "3d: …on the PreToolUse event" "PreToolUse" \
 
 FO_REASON="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null)"
 expect_contains "3e: …the reason opens with the one ruled user line" \
-  "bionic: run refused — this command belongs in a subagent (dispatch it with the Agent tool)" \
+  "bionic: run refused — this command belongs in a subagent (timeout ≤120000 ms, or dispatch it)" \
   "$FO_REASON"
 expect_contains "3f: …names the role a suite redirects to" "subagent_type: test-runner" "$FO_REASON"
 expect_contains "3g: …and names the sanctioned override" "FARM_OUT_ALLOW=1" "$FO_REASON"
@@ -211,27 +228,27 @@ section "4 — tier 2: one additionalContext nudge per class per session"
 #
 # The CHAIN tier-2 arm is retired (wave-24 T11, D12, AC-7.7): a `&&` chain with no tier-1
 # segment is never nudged, whatever its heads. Its once-per-class mechanics are pinned here on
-# the two tier-2 singles that remain, `npx` (pkg-exec) and `git clone`; section 4b pins the
+# the two tier-2 singles that remain, `docker run` (docker-run) and `git clone`; section 4b pins the
 # retirement itself.
 
 ctx_of() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null; }
 
-run_hook "$(mk_payload "$ENGAGED" 'npx create-thing')"
+run_hook "$(mk_payload "$ENGAGED" 'docker run x')"
 expect_status "4a: a tier-2 single exits 0" 0 "$ST"
 expect_eq "4b: …nudging on the additionalContext channel" "PreToolUse" \
   "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null)"
 FO_CTX="$(ctx_of)"
-expect_contains "4c: …the nudge names the class" "pkg-exec-class command on the main thread" "$FO_CTX"
+expect_contains "4c: …the nudge names the class" "docker-run-class command on the main thread" "$FO_CTX"
 expect_contains "4d: …and says it is advisory" "Advisory only." "$FO_CTX"
 expect_empty "4e: …and it is NOT a deny" \
   "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null)"
-expect_contains "4f: …with the instrument line on stderr" "farm-out [nudge] class=pkg-exec" "$ERR"
+expect_contains "4f: …with the instrument line on stderr" "farm-out [nudge] class=docker-run" "$ERR"
 
 # THE SECOND ONE IS SILENT. Once per (session, class) — the state file is the memory.
-run_hook "$(mk_payload "$ENGAGED" 'npx create-thing')"
-expect_status "4g: the second pkg-exec command exits 0" 0 "$ST"
+run_hook "$(mk_payload "$ENGAGED" 'docker run x')"
+expect_status "4g: the second docker-run command exits 0" 0 "$ST"
 expect_empty "4h: …saying nothing on stdout" "$OUT"
-expect_contains "4i: …and recording the suppression" "farm-out [suppressed] class=pkg-exec" "$ERR"
+expect_contains "4i: …and recording the suppression" "farm-out [suppressed] class=docker-run" "$ERR"
 
 # A DIFFERENT CLASS STILL SPEAKS — the key is (session, class), not (session).
 run_hook "$(mk_payload "$ENGAGED" 'git clone https://example.invalid/r.git')"
@@ -242,8 +259,8 @@ expect_contains "4k: …recorded under its own class" "farm-out [nudge] class=cl
 : > "$ENGAGED/.bionic/tmp/engaged-$SID2.state"
 run_hook "$(jq -n --arg s "$SID2" --arg c "$ENGAGED" \
   '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",
-    tool_input:{command:"npx create-thing"}}')" "$SID2"
-expect_contains "4l: a second session gets its own first nudge" "pkg-exec-class command" "$(ctx_of)"
+    tool_input:{command:"docker run x"}}')" "$SID2"
+expect_contains "4l: a second session gets its own first nudge" "docker-run-class command" "$(ctx_of)"
 
 expect_eq "4m: the state file carries one row per (session, class)" "3" \
   "$(grep -c . "$ENGAGED/.bionic/tmp/farm-out.state" 2>/dev/null)"
@@ -258,7 +275,7 @@ section "4b — the chain tier-2 arm is retired; tier 1 and the singles stay (wa
 # recent firing transcripts were observation or notification one-liners.
 #
 # EVERY SILENCE BELOW SITS BESIDE A POSITIVE ON THE SAME EXTRACTOR AND THE SAME WALL, in this
-# section: the pkg-exec single nudges through `ctx_of`, and a tier-1 chain denies through the
+# section: the docker-run single nudges through `ctx_of`, and a tier-1 chain denies through the
 # same stdout. Each silent fixture runs on a FRESH farm-out.state, so a class spent earlier
 # cannot be what kept it quiet.
 FO_STATE="$ENGAGED/.bionic/tmp/farm-out.state"
@@ -268,9 +285,9 @@ fresh_state() { rm -f "$FO_STATE"; }
 decision_of() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null; }
 
 fresh_state
-run_hook "$(mk_payload "$ENGAGED" 'npx create-thing')"
+run_hook "$(mk_payload "$ENGAGED" 'docker run x')"
 expect_contains "4n: control — a tier-2 single still nudges on a fresh state" \
-  "pkg-exec-class command on the main thread" "$(ctx_of)"
+  "docker-run-class command on the main thread" "$(ctx_of)"
 
 # THE NOTIFICATION ONE-LINER, as the user's CLAUDE.md spells it, and with `&& echo sent`.
 NTFY='source ~/.claude/cron.env && curl -s -H "Title: x — y" -H "Priority: high" -d "one line" "https://ntfy.sh/$T"'
@@ -335,9 +352,8 @@ expect_contains "4y: quoted && do not make a chain — the whole command keeps i
 # Each pair runs on a fresh state, the lower-case control first.
 for _fo12 in 'clone|git clone https://x/r.git|GIT clone https://x/r.git' \
              'docker-run|docker run x|DOCKER run x' 'docker-run|docker pull x|Docker pull x' \
-             'pkg-exec|npx create-thing|NPX create-thing' 'pkg-exec|uvx tool|UVX tool' \
-             'pkg-exec|sudo npx create-thing|SUDO Npx create-thing' \
-             'pkg-exec|npx create-thing "a b"|NPX create-thing "a b"'; do
+             'docker-run|sudo docker run x|SUDO Docker run x' \
+             'docker-run|docker run "a b"|DOCKER run "a b"'; do
   IFS='|' read -r _cls _lo _up <<< "$_fo12"
   fresh_state
   run_hook "$(mk_payload "$ENGAGED" "$_lo")"
@@ -370,13 +386,15 @@ section "5 — the sanctioned override, and the config modes"
 EXTRA_ENV=""
 run_hook "$(mk_payload "$ENGAGED" 'FARM_OUT_ALLOW=1 bash tests/run.sh')"
 expect_status "5a: the override exits 0" 0 "$ST"
-expect_empty "5a: …with no deny on stdout" "$OUT"
+# THE OVERRIDE LIFTS THIS WALL'S DENY, NOT THE BOOKING (wave-26 T7): it sanctions running a
+# suite on the orchestrator thread, and that run still takes a place like any other.
+expect_wrap_only "5a" 'FARM_OUT_ALLOW=1 bash tests/run.sh'
 expect_contains "5b: …and is audited by name" "farm-out [override] class=user-sanctioned" "$ERR"
 
 # CHAIN-AWARE (W4's false fire): the token is honoured after a separator too, not only
 # in leading position.
 run_hook "$(mk_payload "$ENGAGED" 'cd /x && FARM_OUT_ALLOW=1 bash tests/run.sh')"
-expect_empty "5c: …honoured mid-chain as well" "$OUT"
+expect_wrap_only "5c honoured mid-chain as well" 'cd /x && FARM_OUT_ALLOW=1 bash tests/run.sh'
 
 # `farm-out-mode: advisory` DOWNGRADES a deny to a nudge.
 ADV="$(mk_repo advisory yes)"
@@ -393,7 +411,155 @@ OFFREPO="$(mk_repo off yes)"
 printf 'farm-out-mode: off\n' > "$OFFREPO/.bionic/config.yaml"
 run_hook "$(mk_payload "$OFFREPO" 'bash tests/run.sh')"
 expect_status "5g: under off mode the wall exits 0" 0 "$ST"
-expect_empty "5h: …saying nothing at all" "$OUT$ERR"
+# `off` silences THIS wall; the booking wrap is not farm-out's and rides the allowed call.
+expect_wrap_only "5h saying nothing at all" 'bash tests/run.sh'
+expect_empty "5h: …and nothing on stderr" "$ERR"
+
+# ---------------------------------------------------------------------------
+section "SHORT — a short command stays on the thread, known by the call's own timeout (wave-26 T9, D14, AC-4.1)"
+#
+# THE PASS READS THE TIMEOUT, NEVER THE NAME. A tier-1 command whose Bash call declares a
+# `timeout` of at most the short limit (`farm-out-short-ms:`, default 120000) passes, and the
+# booking wrap carries `--kill-after <s>` so the shim stops it before the harness's own timeout
+# would move it to the background (s = the timeout in whole seconds less 5, at least 1). The
+# same command with no timeout is refused, and the refusal's first fix names the limit. Every
+# row here pairs a pass with a refusal of the SAME command, so a pass keyed on the command's
+# name cannot satisfy both.
+#
+# FIXTURE FIDELITY: `tool_input.timeout` is the Bash tool's own millisecond field, the one
+# background-suite-guard's ARM R already reads (tests/background-suite-guard.test.sh builds it
+# the same way); values are SYNTHESIZED.
+SHORTR="$(mk_repo short yes)"
+ONE='bash tests/one.test.sh'
+# with_timeout <payload> <json value> — the payload with `tool_input.timeout` set to the value.
+with_timeout() { printf '%s' "$1" | jq -c --argjson t "$2" '.tool_input.timeout = $t'; }
+wrapped_cmd() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null; }
+reason_of() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null; }
+# first_fix — the reason's text from its FIRST "Fix: " to the end of that sentence's clause.
+first_fix() { local r; r="$(reason_of)"; case "$r" in *'Fix: '*) r="${r#*Fix: }"; printf '%s' "${r%% — *}" ;; esac; }
+kill_re() {  # <seconds> <command regex> — the wrap, carrying --kill-after <seconds>
+  printf '%s' "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --kill-after $1 -- $2\$"
+}
+unbooked_re() {  # <seconds> <command regex> — the kill-only wrap: --unbooked, no place, no stamp
+  printf '%s' "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --unbooked --kill-after $1 -- $2\$"
+}
+
+# S1 (the eval): a one-file suite command with timeout 60000 is allowed and wrapped with a kill limit.
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" 60000)"
+expect_status "S1a: a one-file suite call with timeout 60000 exits 0" 0 "$ST"
+expect_empty "S1b: …and is not refused (beside S3's deny on the same extractor)" "$(decision_of)"
+expect_regex "S1c: …it is wrapped with a kill limit of 55 s" "$(kill_re 55 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+expect_absent "S1d: …and no [deny] instrument line" "[deny]" "$ERR"
+
+# S3 (the eval): the same command with no timeout is refused, the limit as its first fix.
+run_hook "$(mk_payload "$SHORTR" "$ONE")"
+expect_eq "S3a: the same command with no timeout is refused" "deny" "$(decision_of)"
+expect_contains "S3b: …the user line's fix names the limit first" \
+  "bionic: run refused — this command belongs in a subagent (timeout ≤120000 ms, or dispatch it)" "$ERR"
+expect_nonempty "S3c: the reason carries a Fix" "$(first_fix)"
+expect_contains "S3d: …and its FIRST fix is the limit" "timeout of at most 120000 ms" "$(first_fix)"
+expect_contains "S3e: …dispatch is still offered after it" "Agent(subagent_type: test-runner" "$(reason_of)"
+expect_empty "S3f: …and nothing is wrapped (beside S1's wrap on the same extractor)" "$(wrapped_cmd)"
+
+# THE BOUNDARY AND THE MALFORMED. At the limit is short; one past it, zero, negative, a fraction,
+# a word and null are not.
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" 120000)"
+expect_regex "S4a: timeout 120000 (at the limit) passes, killed at 115 s" "$(kill_re 115 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" 3000)"
+expect_regex "S4b: timeout 3000 passes, killed at the 1 s floor" "$(kill_re 1 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+for _t in 120001 0 -5 60000.5 '"soon"' null 99999999999; do
+  run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" "$_t")"
+  expect_eq "S4c: timeout $_t is not short — refused" "deny" "$(decision_of)"
+  expect_empty "S4d: …and not wrapped [$_t]" "$(wrapped_cmd)"
+done
+
+# EVERY CLASS THE WALL REFUSES IS SHORT BY THE SAME TEST, and each is wrapped so the kill holds.
+# A command with no suite segment goes through the shim `--unbooked`: the kill only, no place
+# and no stamp (the lead's ruling, A-T9.1; slots §KILL U1 proves the shim side). A chain with a
+# suite segment is booked and stamped like any suite.
+# (The wrap writes a plain word bare and anything else single-quoted, A-T7.7.)
+for _c in 'make' 'npm install' 'cd x && make && echo ok'; do
+  _q=$(printf '%s' "$_c" | sed 's/[.]/\\./g')
+  run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$_c")" 30000)"
+  expect_empty "S5a: a short [$_c] is not refused" "$(decision_of)"
+  expect_regex "S5b: …and is wrapped --unbooked with a kill limit of 25 s [$_c]" "$(unbooked_re 25 "'?$_q'?")" "$(wrapped_cmd)"
+  run_hook "$(mk_payload "$SHORTR" "$_c")"
+  expect_eq "S5c: …while [$_c] with no timeout is refused" "deny" "$(decision_of)"
+done
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "cd x && make && $ONE")" 30000)"
+expect_regex "S5e: a short chain with a suite segment is booked, not --unbooked" \
+  "$(kill_re 25 "'cd x && make && bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "BIONIC_QUIET=1 $ONE")" 60000)"
+expect_regex "S5d: a short whole-machine suite carries --quiet and the kill limit" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --quiet --kill-after 55 -- " "$(wrapped_cmd)"
+
+# A SHORT CALL THAT IS NOT TIER-1 IS LEFT ALONE: nothing to pass, so nothing to wrap or kill.
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" 'ls -la')" 5000)"
+expect_status "S6a: a short ls exits 0" 0 "$ST"
+expect_empty "S6b: …and is neither wrapped nor answered (beside S1's wrap)" "$OUT"
+
+# A SHORT TIMEOUT THE SHIM CANNOT ENFORCE IS NOT SHORT. The opt-out keeps the command out of the
+# shim, and a shell-backgrounded command detaches from it; neither can be stopped at the limit.
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "BIONIC_SLOT_HELD=1 $ONE")" 60000)"
+expect_eq "S7a: a short call carrying BIONIC_SLOT_HELD=1 is refused" "deny" "$(decision_of)"
+expect_contains "S7b: …its first fix names the prefix that kept it from the kill" "BIONIC_SLOT_HELD=1" "$(first_fix)"
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE &")" 60000)"
+expect_eq "S7c: a short call the shell backgrounds is refused" "deny" "$(decision_of)"
+expect_contains "S7d: …its first fix says to run it in the foreground" "foreground" "$(first_fix)"
+
+# THE LIMIT IS THE PROJECT'S: `farm-out-short-ms:` in .bionic/config.yaml. A malformed value is
+# the default; 0 means no call is short, and the fix is dispatch alone.
+SHORTC="$(mk_repo shortcfg yes)"
+printf 'farm-out-short-ms: 30000\n' > "$SHORTC/.bionic/config.yaml"
+run_hook "$(with_timeout "$(mk_payload "$SHORTC" "$ONE")" 60000)"
+expect_eq "S8a: under farm-out-short-ms: 30000 a 60000 call is refused" "deny" "$(decision_of)"
+expect_contains "S8b: …the fix names the project's limit" "(timeout ≤30000 ms, or dispatch it)" "$ERR"
+run_hook "$(with_timeout "$(mk_payload "$SHORTC" "$ONE")" 30000)"
+expect_regex "S8c: …and a 30000 call passes" "$(kill_re 25 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+printf 'farm-out-short-ms: 90000 \r\n' > "$SHORTC/.bionic/config.yaml"
+run_hook "$(with_timeout "$(mk_payload "$SHORTC" "$ONE")" 90000)"
+expect_regex "S8d: a CRLF line with trailing space still reads 90000" "$(kill_re 85 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+for _v in soon '' -1 '12 ms' 9999999999; do
+  printf 'farm-out-short-ms: %s\n' "$_v" > "$SHORTC/.bionic/config.yaml"
+  run_hook "$(with_timeout "$(mk_payload "$SHORTC" "$ONE")" 120000)"
+  expect_regex "S8e: a malformed limit [$_v] is the default 120000" "$(kill_re 115 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+  run_hook "$(mk_payload "$SHORTC" "$ONE")"
+  expect_contains "S8f: …and the refusal names it [$_v]" "(timeout ≤120000 ms, or dispatch it)" "$ERR"
+done
+printf 'farm-out-short-ms: 0\n' > "$SHORTC/.bionic/config.yaml"
+run_hook "$(with_timeout "$(mk_payload "$SHORTC" "$ONE")" 1000)"
+expect_eq "S8g: under farm-out-short-ms: 0 no call is short" "deny" "$(decision_of)"
+expect_contains "S8h: …and the fix is dispatch alone" "(dispatch it with the Agent tool)" "$ERR"
+
+# THE PASS SITS AFTER THE MODE AND THE OVERRIDE. Advisory: short passes with its kill, no nudge.
+# Off: farm-out says nothing, so the booking wrap carries no kill. The override: lifted and
+# audited as before, no kill. A subagent: farm-out never speaks, so no kill.
+run_hook "$(with_timeout "$(mk_payload "$ADV" "$ONE")" 60000)"
+expect_regex "S9a: under advisory a short call passes with its kill limit" "$(kill_re 55 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+expect_empty "S9b: …and draws no nudge" "$(ctx_of)"
+run_hook "$(with_timeout "$(mk_payload "$OFFREPO" "$ONE")" 60000)"
+expect_wrap_only "S9c: under off the wrap carries no kill" "$ONE"
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "FARM_OUT_ALLOW=1 $ONE")" 60000)"
+expect_wrap_only "S9d: the override wins, no kill" "FARM_OUT_ALLOW=1 $ONE"
+expect_contains "S9e: …and is audited" "farm-out [override] class=user-sanctioned" "$ERR"
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE" Bash implementor)" 60000)"
+expect_wrap_only "S9f: a subagent's short call carries no kill" "$ONE"
+run_hook "$(with_timeout "$(mk_payload "$PLAIN" "$ONE")" 60000)"
+expect_empty "S9g: an unengaged session's short call is untouched (beside S1)" "$OUT$ERR"
+
+# THE PKG-EXEC ADVISORY IS RETIRED (D14). A control first: the surviving tier-2 nudge speaks
+# on this extractor and this state.
+FO_STATE_S="$SHORTR/.bionic/tmp/farm-out.state"
+rm -f "$FO_STATE_S"
+run_hook "$(mk_payload "$SHORTR" 'docker run x')"
+expect_contains "S2.0: control — docker run still nudges here" "docker-run-class command" "$(ctx_of)"
+for _c in 'npx tsc --noEmit' 'uvx ruff check .' 'NPX create-thing' 'sudo npx create-thing' 'npx create-thing "a b"'; do
+  rm -f "$FO_STATE_S"
+  run_hook "$(mk_payload "$SHORTR" "$_c")"
+  expect_status "S2a: [$_c] exits 0" 0 "$ST"
+  expect_empty "S2b: …prints nothing on stdout [$_c]" "$OUT"
+  expect_empty "S2c: …and nothing on stderr [$_c]" "$ERR"
+done
 
 # ---------------------------------------------------------------------------
 section "6 — the audit stream: outside the project, and carrying no command text"

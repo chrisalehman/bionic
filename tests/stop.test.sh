@@ -477,7 +477,7 @@ s7_fixture() {  # -> project dir on stdout
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|\n'
@@ -646,7 +646,7 @@ s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -748,7 +748,7 @@ ub_world() {  # -> the root on stdout; p1 newest, p2 older
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-ub"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# p1\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf -- '---\n\n# p1\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -827,7 +827,7 @@ sd_fixture() {  # -> project dir; T7 pending, writers=8, current: 4
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -1063,7 +1063,7 @@ fo_fixture() {  # <subagent_type of the one open row> -> project dir; writers=1,
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -1103,6 +1103,66 @@ expect_contains "FO2a: with a writer open the tick reports the budget full" \
 sd_turn "$FO_TX" u-fo-2
 s7_fire "$FO_DW" "$FO_TX"
 expect_absent "FO2b: …and the stop wall asks for no fill" "Fillable gap" "$(reason_of)$STOP_ERR"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# ============================================================
+section "FILL-WALL: the wall's set is the tick's — a ready read-only row refuses the turn once, a waiting row is never demanded (wave-26 T13; REQ-6 AC-6.7; D9)"
+# ============================================================
+#
+# ONE READY SET, READ-ONLY ROWS INCLUDED. writers=1 and a writer open, so no writer slot is free.
+# T1 is a ready build row the closed gap holds back; T5 is a ready verify row, which takes no
+# writer slot and is therefore owed whatever the gap; T6 waits on T1, which has not landed. The
+# tick offers T5 alone, and the wall refuses a turn that left it undispatched — naming T5, and
+# never T6. The differential lands T5: nothing ready is left that a slot could take, so the same
+# wall asks for nothing.
+fw_fixture() {  # <status of T5> -> project dir
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n'
+    printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a ready writer, no slot free | implementor | — | 15m | REQ-x | a.sh | pending | — |\n'
+    printf '| T5 | 5 | verify | the ready read-only row | auditor | — | 15m | REQ-x | — | %s | — |\n' "$1"
+    printf '| T6 | 5 | verify | waits on T1 | auditor | T1 | 15m | REQ-x | — | pending | — |\n'
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-26-fw.plan.md"
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-26-fw.plan.md"
+  roster_header > "$d/.bionic/tmp/roster-$SID.state"
+  roster_row_fixture status=intended session="$SID" name=FW-ONE agent_id=aFW00000000000001 \
+    deliverable= "subagent_type=implementor" >> "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+require_helpers fw_fixture
+
+FW_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$FW_RING"
+export BIONIC_PRESSURE_RING="$FW_RING" BIONIC_NOW_EPOCH=1700000000
+FW_TX="$(mktemp)"
+
+FW_D="$(fw_fixture pending)"
+FW_TICK="$(fo_tick "$FW_D")"
+expect_contains "FW0: the tick offers the read-only row with no writer slot free" "poker: FILL T5" "$FW_TICK"
+sd_turn "$FW_TX" u-fw-1
+s7_fire "$FW_D" "$FW_TX"
+expect_contains "FW1: AC-6.7 a ready read-only row left undispatched refuses the turn end" \
+  "Fillable gap at turn end" "$(reason_of)"
+expect_contains "FW1b: …naming it" "T5" "$(reason_of)"
+expect_absent "FW1c: …and never the row that waits on an unlanded read" "T6" "$(reason_of)"
+expect_absent "FW1d: …nor the writer the closed gap holds back" "T1" "$(reason_of)"
+expect_contains "FW1e: the refusal asks for the dispatch" "Dispatch each named row" "$(reason_of)"
+expect_absent "FW1f: …and no longer for a hand edit of the row: the launch recorder ledgers it" \
+  "ledger it active" "$(reason_of)"
+
+FW_DL="$(fw_fixture landed)"
+sd_turn "$FW_TX" u-fw-2
+s7_fire "$FW_DL" "$FW_TX"
+expect_absent "FW2: the differential — with T5 landed, only a waiting row and a slotless writer remain, and nothing is demanded" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+expect_contains "FW2b: …while the tick on that fixture still names the waiting row" \
+  "poker: WAIT T6 — waits for T1 (pending)" "$(fo_tick "$FW_DL")"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 

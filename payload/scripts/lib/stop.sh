@@ -1806,12 +1806,13 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 #     come from, taken here rather than read back out of the tick's words;
 #   - the only transcript fact is a DECLINE, and only the model's own: a main-thread assistant
 #     `text` block, `fill-declined: <reason>` at the start of a line.
-# JUDGED BY COUNT: after the turn's launches, `missed = min(free slots, ready rows this turn did
-# not launch)`, and a turn with `missed > 0` on a machine that reads `ok` and no decline is
-# refused once, naming the first `missed` of those rows. No id is ever matched against a
-# dispatch's PROMPT words. A dispatched row leaves the plan's ready set when the orchestrator
-# ledgers it `active` — "Ledger the dispatch, not the return" (dispatch.md; A-T11.1) — and until
-# then the turn that launched it is not charged for it: its dispatch NAME (`fill_row_launched`,
+# JUDGED BY COUNT: after the turn's launches, `missed = min(free writer slots, ready writer rows
+# this turn did not launch) + the ready read-only rows it did not launch` (a verify or review row
+# takes no writer slot; wave-26 T13, D9), and a turn with `missed > 0` on a machine that reads
+# `ok` and no decline is refused once, naming those rows. No id is ever matched against a
+# dispatch's PROMPT words. A dispatched row leaves the plan's ready set when the launch recorder
+# (hooks/execution-recorder.sh, wave-26 T12) sets it `active`, and until then the turn that
+# launched it is not charged for it: its dispatch NAME (`fill_row_launched`,
 # the inverse of `fill_name`) takes it out of what the turn missed (wave-20 T11b, A-T11b.2).
 # The headline says how many of the ready rows the turn launched and names the ones it did not.
 #
@@ -1847,7 +1848,7 @@ elif [ "$FILL_SRC" = "GAP" ]; then
   # THE INVARIANT'S OWN WORDING, and the only one left: what is true of every refused turn is
   # the state — the ledger is live, these rows are ready, slots are free after this turn's
   # launches — whether or not a tick fired in it.
-  FILL_REASON="Fillable gap at turn end: the run's ledger is live, ${_ST_FREE} slot(s) are free after this turn's launches, and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row and ledger it active in ## Tasks (the wall reads the plan and the roster, never the Agent call's words), or write \"fill-declined: <reason>\" at the start of a line of your own reply, then stop again — this gate blocks once."
+  FILL_REASON="Fillable gap at turn end: the run's ledger is live, ${_ST_FREE} writer slot(s) are free after this turn's launches (a verify or review row takes none), and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row (the launch recorder sets it active; the wall reads the plan and the roster, never the Agent call's words), or write \"fill-declined: <reason>\" at the start of a line of your own reply, then stop again — this gate blocks once."
   [ -n "$_ST_STANDING" ] && FILL_REASON="${FILL_REASON} The fill-declined from an earlier turn still stands for the rows it answered; these were not among them."
   # THE HEADLINE COUNTS AND NAMES (wave-20 T11b; Step-6 review R4). "dispatched none" was false
   # beside a ledger line that named the turn's launches. It now says how many of the plan's
@@ -2224,7 +2225,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
   _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed
   local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
-  local digest duty at led standing gap
+  local digest duty at led standing gap rcount rgap slot
 
   [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
   [ "${BIONIC_ENGAGED:-0}" = 1 ] || return 1
@@ -2410,7 +2411,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   #
   # A ROW THIS TURN LAUNCHED IS NEVER MISSED (wave-20 T11b; Step-6 review R4, T12 F7). A launch
   # joins the roster at PreToolUse, so it is already in `open` and has already taken its slot;
-  # its plan row stays ready until the orchestrator ledgers it `active` (A-T11.1). Counting it
+  # its plan row stays ready until the launch recorder sets it `active` (A-T11.1). Counting it
   # ready as well charged one launch twice, and the refusal named the rows the turn had just
   # sent. So the ledger's ready set stays the plan's, and what the turn missed is that set less
   # the rows this turn launched, matched by the dispatch name `fill_name` hands out.
@@ -2425,14 +2426,27 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     IFS=$'\037' read -r _ _ST_STANDING _ST_STANDING_IDS <<< "$standing"
   fi
 
-  ready="$(fill_ready_set "$_ST_PLAN" 99999 0 2>/dev/null)"
-  count=0; gap=0; _ST_READY=""; _ST_NAMED=""
-  while IFS= read -r rest; do
+  #
+  # THE TICK'S SET, READ-ONLY ROWS INCLUDED (wave-26 T13; D9, AC-6.7). A verify or review row
+  # takes no writer slot (`fill_readonly_ids`), so the tick offers it whatever the gap, and the
+  # wall owes it the same way: the writers are trimmed to the free slots, the read-only rows are
+  # counted and named in full. A row that waits for a read is not in this set at all, so it is
+  # never demanded.
+  ready="$(fill_ready_tagged "$_ST_PLAN" 2>/dev/null)"
+  count=0; gap=0; rcount=0; rgap=0; _ST_READY=""; _ST_NAMED=""
+  while IFS=$'\t' read -r rest slot; do
     [ -n "$rest" ] || continue
     _ST_READY_N=$((_ST_READY_N + 1))
     _ST_READY="${_ST_READY}${_ST_READY:+ }${rest}"
     if fill_row_launched "$rest" "$_ST_LAUNCHED"; then
       _ST_SENT=$((_ST_SENT + 1))
+      continue
+    fi
+    if [ "$slot" = r ]; then
+      rcount=$((rcount + 1))
+      case " $_ST_STANDING_IDS " in *" $rest "*) continue ;; esac
+      rgap=$((rgap + 1))
+      _ST_NAMED="${_ST_NAMED}${_ST_NAMED:+ }${rest}"
       continue
     fi
     count=$((count + 1))
@@ -2442,8 +2456,8 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   done <<ST_READY
 $ready
 ST_READY
-  _ST_MISSED=$(( count < _ST_FREE ? count : _ST_FREE ))
-  _ST_GAP=$(( gap < _ST_FREE ? gap : _ST_FREE ))
+  _ST_MISSED=$(( (count < _ST_FREE ? count : _ST_FREE) + rcount ))
+  _ST_GAP=$(( (gap < _ST_FREE ? gap : _ST_FREE) + rgap ))
   return 0
 }
 

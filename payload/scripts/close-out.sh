@@ -354,7 +354,8 @@ wt_branches() {
 # all") tells the two shapes apart; a column-less table falls back to the pre-register
 # glob census — `wt/<NN>-*`, scoped to `$WT_NUM` exactly as 1.8.3 scoped it (derived and
 # validated once, above, before act 1 — a working-branch that could not supply a wave
-# number already refused there and never reaches this function at all) — and announces
+# number is refused there, except for a task-scale plan, which reaches this function with
+# an empty `$WT_NUM` and gets an empty census, the `elif` below) — and announces
 # the fallback once on stderr so it is never silent either way. Critic C7: the unscoped
 # `wt/*` this arm shipped with between the register's introduction and this fix could
 # trip on a DIFFERENT wave's leftover branch; `wt/<NN>-*` cannot.

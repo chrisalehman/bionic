@@ -1560,7 +1560,7 @@ _detect_bound_kill() {  # <pid> — stop the bounded job and its children, group
 
 detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on timeout
   local limit="${1:-15}"; shift
-  local pid waited=0 rc out_file had_monitor
+  local pid waited=0 tenths=0 rc out_file had_monitor
 
   _DETECT_BOUND_SEQ=$((_DETECT_BOUND_SEQ + 1))
   out_file="${TMPDIR:-/tmp}/bionic-probe.$$.${_DETECT_BOUND_SEQ}"
@@ -1596,6 +1596,22 @@ detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on t
     _detect_bound_read "$out_file"
     return $rc
   fi
+  # THE FIRST SECOND IS POLLED IN TENTHS, THE REST IN WHOLE SECONDS (T38). A once-a-second
+  # poll slept a full second before its first look, so a probe that answered in milliseconds
+  # still held its caller for one: about four seconds of every doctor run, spent waiting for
+  # nothing. Most probes answer inside that first second or not for many, so the first second
+  # is where the short looks pay; past it they would only multiply the forks of a probe that
+  # is hanging. A hung 15-second probe costs 24 `sleep` forks (ten tenths, then fourteen
+  # seconds) where it cost 15; a probe that answers at once costs one, as before.
+  #
+  # THE LIMIT IS STILL COUNTED IN WHOLE SECONDS, and `waited` still counts them: ten tenths
+  # make the first one, so the kill lands where it always did.
+  #
+  # A `sleep` THAT REFUSES A FRACTION fails rather than sleeping; macOS and GNU both take
+  # one, a bare POSIX `sleep` need not. The first refusal ends the fine phase and that pass
+  # sleeps a whole second instead, so such a machine gets the old poll, never a hot loop. One
+  # that reads the fraction as zero returns at once instead: ten quick looks, then the old
+  # poll, and a limit that runs short by under a second.
   while kill -0 "$pid" 2>/dev/null; do
     if [ "$waited" -ge "$limit" ]; then
       _detect_bound_kill "$pid"
@@ -1603,8 +1619,14 @@ detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on t
       _detect_bound_read "$out_file"
       return 124
     fi
-    sleep 1
-    waited=$((waited + 1))
+    if [ "$tenths" -lt 10 ] && sleep 0.1 2>/dev/null; then
+      tenths=$((tenths + 1))
+      [ "$tenths" -lt 10 ] || waited=$((waited + 1))
+    else
+      tenths=10
+      sleep 1
+      waited=$((waited + 1))
+    fi
   done
   wait "$pid"; rc=$?
   _detect_bound_read "$out_file"
