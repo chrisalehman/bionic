@@ -3088,7 +3088,7 @@ L2EOF
 # THE CARRIER IS ON PermissionRequest AND NOWHERE ELSE (wave-25 T4; AC-5.2, spec D1). The
 # question it answers is asked only when the platform would show a dialog; registered on
 # PreToolUse too it would judge calls that run with no dialog, and a call that would have run
-# unasked must run exactly as before. Every row naming the file is read, so a second
+# unasked must run unchanged. Every row naming the file is read, so a second
 # registration on any event fails here, not only a PreToolUse one.
 expect_eq "the permission carrier is registered exactly once, on PermissionRequest only, timeout 10" \
   'PermissionRequest||${CLAUDE_PLUGIN_ROOT}/hooks/permission-answer.sh|10' \
