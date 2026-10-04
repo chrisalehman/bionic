@@ -40,8 +40,13 @@
 #   grant_reserved <tool> <command or path>
 #       THE RESERVED TABLE (D6). Prints the category — leaves-the-machine, credentials,
 #       production-infrastructure or billing — or nothing. For Bash the second argument is
-#       the command; for any other tool it is the path the tool names. Words are read in
-#       lower case: a case-blind filesystem runs `GH` as `gh` and opens `~/.SSH`.
+#       the command; for any other tool it is the path the tool names. Two questions, two
+#       rules (wave-25 T13). WHICH PROGRAM a word runs is the shared reader's answer,
+#       git-argv.sh's `cmd_word_fold`, and the table keeps no rule of its own: `GH` runs
+#       gh, and `EXEC gh …` runs nothing. A path, subcommand or option the table matches
+#       in order to REFUSE is matched without regard to case (`~/.SSH`, `gh PR`): a guard
+#       that says no matches every spelling that could reach the protected place, and its
+#       only allowed error is refusing something harmless (A-orch-29).
 #
 #   grant_resolve <path>
 #       THE ONE FUNCTION HERE THAT TOUCHES THE FILESYSTEM. Prints the real location of an
@@ -512,19 +517,22 @@ grant_decide() {
   fi
   reason="$reason $(_grant_roots_text "$cls" "$wr" "$dr")"
 
-  # The fix: one step, toward the first place the asker may both write and delete.
-  local dir="${dr%%"$GRANT_NL"*}" fix
+  # The fix: one step, toward the first place the asker may both write and delete. A fix
+  # never tells an asker to ask itself: a writer or a read-only agent is sent to the lead,
+  # and the lead and an unbound session, which have no lead above them, to the human.
+  local dir="${dr%%"$GRANT_NL"*}" fix up="the lead"
+  case "$cls" in lead|unbound) up="the human" ;; esac
   if [ -z "$dir" ]; then
-    fix="Report to the lead that this asker has no workspace to work in, and wait for one."
+    fix="Report to $up that this asker has no workspace to work in, and wait for one."
   else
     case "$worst" in
-      2) fix="Leave the file untouched, and ask the lead if the task needs that state changed." ;;
+      2) fix="Leave the file untouched, and ask $up if the task needs that state changed." ;;
       3) fix="Put the commands in a script file under $dir and run it from there with bash." ;;
       4) fix="Name the target by its full real path under $dir." ;;
       5)
         if [ "$f_kind" = W ]; then
           fix="Write it under $dir instead."
-        elif [ "$cls" = lead ]; then
+        elif [ "$up" = "the human" ]; then
           fix="Leave it in place, and report it to the human if it must go."
         else
           fix="Leave it in place and ask the lead to remove it if it must go."
@@ -535,8 +543,7 @@ grant_decide() {
           fix="Write it under $dir instead."
         elif [ "$f_how" = add-only ]; then
           fix="Leave it in place and write a new file beside it instead."
-        elif [ "$cls" = lead ] || [ "$cls" = unbound ]; then
-          # The lead session has no lead above it to ask: its next step is the human.
+        elif [ "$up" = "the human" ]; then
           fix="Leave it in place, and report it to the human if it must go."
         else
           fix="Leave it in place and ask the lead to remove it if it must go."
@@ -551,7 +558,8 @@ grant_decide() {
 # ── the reserved table ───────────────────────────────────────────────────────────────────
 
 # _grant_is_credential <word> — rc 0 when the word names a credential store by its shape.
-# An option's value (`--key=~/.ssh/id`) is read past its `=`.
+# An option's value (`--key=~/.ssh/id`) is read past its `=`. A refusing match: the caller
+# holds nocasematch on, so `~/.SSH` is `~/.ssh` (grant_reserved).
 _grant_is_credential() {
   local w="${1-}"
   case "$w" in
@@ -570,8 +578,8 @@ _grant_is_credential() {
 }
 
 # _grant_verb <word>... — prints the first word that is not an option, stepping over the
-# value of the options that take one in the package tools this table reads. The words
-# arrive in lower case, so `-C` is spelled `-c` here.
+# value of the options that take one in the package tools this table reads. It runs under
+# the caller's nocasematch, so `-c` here is `-C` too.
 _grant_verb() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -587,14 +595,28 @@ _grant_verb() {
 
 # _grant_reserved_segment <segment-line> — sets _GRANT_CAT to the category of one segment,
 # or to empty. It sets a global rather than printing, so a long script costs no subshell
-# per segment.
+# per segment. Called with nocasematch off, and returns with it off.
+#
+# IDENTITY FIRST, THEN THE REFUSAL. Everything the shared reader answers (is this git, and
+# which subcommand; which words are prefixes; which program the first word runs) is asked
+# with nocasematch off, so the reader's rule is the only one: it folds `GH` and `SUDO`, and
+# leaves `EXEC` and `THEN` as typed, because the shell matches those case-exactly and runs
+# nothing for them. Only then is nocasematch turned on, for the matches made to refuse: the
+# push, every credential path, and the subcommands and options of the program found. No
+# shared-reader call is made inside that block.
 _GRANT_CAT=""
 _grant_reserved_segment() {
-  local line="$1" oldifs="$IFS" hadf=0 w tool verb
+  local line="$1" oldifs="$IFS" hadf=0 w tool="" verb sub=""
   _GRANT_CAT=""
-  if git_argv_parse "$line" && [ "$GIT_SUB" = push ]; then
-    _GRANT_CAT=leaves-the-machine
-    return 0
+  git_argv_parse "$line" && sub="$GIT_SUB"
+  _git_argv_skip "$line"
+  if [ -n "$GIT_ARGV_REST" ]; then
+    w="${GIT_ARGV_REST%%"$GIT_ARGV_US"*}"
+    cmd_word_fold "${w##*/}"
+    case "$CMD_WORD_FOLDED" in
+      gh|npm|pnpm|yarn|cargo|gem|twine|security) tool="$CMD_WORD_FOLDED" ;;
+      terraform|kubectl|vercel|aws|gcloud|az) tool=infra ;;
+    esac
   fi
   case "$-" in *f*) hadf=1 ;; esac
   set -f
@@ -602,75 +624,84 @@ _grant_reserved_segment() {
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $line
   IFS="$oldifs"
-  for w in "$@"; do
-    if _grant_is_credential "$w"; then
-      [ "$hadf" -eq 1 ] || set +f
-      _GRANT_CAT=credentials
-      return 0
-    fi
-  done
-  _git_argv_skip "$line"
-  IFS="$GIT_ARGV_US"
-  # shellcheck disable=SC2086
-  set -- $GIT_ARGV_REST
-  IFS="$oldifs"
   [ "$hadf" -eq 1 ] || set +f
-  [ $# -gt 0 ] || return 0
-  tool="${1##*/}"
-  shift
-  case "$tool" in
-    gh)
-      while [ $# -gt 0 ]; do
-        case "$1" in
-          -r|--repo) shift; [ $# -gt 0 ] && shift ;;
-          -*) shift ;;
-          *) break ;;
-        esac
-      done
-      case "${1-}" in
-        pr|issue|release|repo|api) _GRANT_CAT=leaves-the-machine ;;
-        auth) _GRANT_CAT=credentials ;;
-      esac
-      ;;
-    npm|pnpm|yarn)
-      verb="$(_grant_verb "$@")"
-      if [ "$tool" = yarn ] && [ "$verb" = npm ]; then
-        while [ $# -gt 0 ] && [ "$1" != npm ]; do shift; done
-        shift
-        verb="$(_grant_verb "$@")"
-      fi
-      case "$verb" in
-        publish|unpublish) _GRANT_CAT=leaves-the-machine ;;
-        login|logout|adduser|token) _GRANT_CAT=credentials ;;
-      esac
-      ;;
-    cargo)
-      case "$(_grant_verb "$@")" in
-        publish|yank|owner) _GRANT_CAT=leaves-the-machine ;;
-        login|logout) _GRANT_CAT=credentials ;;
-      esac
-      ;;
-    gem)
-      case "$(_grant_verb "$@")" in
-        push|yank|owner) _GRANT_CAT=leaves-the-machine ;;
-        signin) _GRANT_CAT=credentials ;;
-      esac
-      ;;
-    twine)
-      case "$(_grant_verb "$@")" in
-        upload|register) _GRANT_CAT=leaves-the-machine ;;
-      esac
-      ;;
-    security) _GRANT_CAT=credentials ;;
-    terraform|kubectl|vercel|aws|gcloud|az)
-      _GRANT_CAT=production-infrastructure
-      for w in "$@"; do
-        case "$w" in
-          billing|ce|budgets|consumption) _GRANT_CAT=billing; return 0 ;;
-        esac
-      done
-      ;;
+
+  shopt -s nocasematch
+  case "$sub" in
+    push) _GRANT_CAT=leaves-the-machine ;;
   esac
+  if [ -z "$_GRANT_CAT" ]; then
+    # Every credential shape holds a dot, so a word without one is passed over unread.
+    for w in "$@"; do
+      case "$w" in
+        *.*) if _grant_is_credential "$w"; then _GRANT_CAT=credentials; break; fi ;;
+      esac
+    done
+  fi
+  if [ -z "$_GRANT_CAT" ] && [ -n "$tool" ]; then
+    # The program's own words, as the reader left them; splitting asks the reader nothing.
+    set -f
+    IFS="$GIT_ARGV_US"
+    # shellcheck disable=SC2086
+    set -- $GIT_ARGV_REST
+    IFS="$oldifs"
+    [ "$hadf" -eq 1 ] || set +f
+    shift
+    case "$tool" in
+      gh)
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            -r|--repo) shift; [ $# -gt 0 ] && shift ;;
+            -*) shift ;;
+            *) break ;;
+          esac
+        done
+        case "${1-}" in
+          pr|issue|release|repo|api) _GRANT_CAT=leaves-the-machine ;;
+          auth) _GRANT_CAT=credentials ;;
+        esac
+        ;;
+      npm|pnpm|yarn)
+        verb="$(_grant_verb "$@")"
+        if [ "$tool" = yarn ] && [[ "$verb" == npm ]]; then
+          while [ $# -gt 0 ] && [[ "$1" != npm ]]; do shift; done
+          shift
+          verb="$(_grant_verb "$@")"
+        fi
+        case "$verb" in
+          publish|unpublish) _GRANT_CAT=leaves-the-machine ;;
+          login|logout|adduser|token) _GRANT_CAT=credentials ;;
+        esac
+        ;;
+      cargo)
+        case "$(_grant_verb "$@")" in
+          publish|yank|owner) _GRANT_CAT=leaves-the-machine ;;
+          login|logout) _GRANT_CAT=credentials ;;
+        esac
+        ;;
+      gem)
+        case "$(_grant_verb "$@")" in
+          push|yank|owner) _GRANT_CAT=leaves-the-machine ;;
+          signin) _GRANT_CAT=credentials ;;
+        esac
+        ;;
+      twine)
+        case "$(_grant_verb "$@")" in
+          upload|register) _GRANT_CAT=leaves-the-machine ;;
+        esac
+        ;;
+      security) _GRANT_CAT=credentials ;;
+      infra)
+        _GRANT_CAT=production-infrastructure
+        for w in "$@"; do
+          case "$w" in
+            billing|ce|budgets|consumption) _GRANT_CAT=billing; break ;;
+          esac
+        done
+        ;;
+    esac
+  fi
+  shopt -u nocasematch
   return 0
 }
 
@@ -678,32 +709,53 @@ _grant_reserved_segment() {
 # quotes, backslashes and line continuations are taken out: the reader builds each argv
 # word from those characters and no others, so a command whose text holds none of these
 # can match no row, and is answered without reading a segment. Its word edges are loose on
-# purpose (a word is only ever over-matched, which costs a full read and nothing else).
+# purpose, and it is matched without regard to case (a word is only ever over-matched, which
+# costs a full read and nothing else).
 _GRANT_SCREEN_RE='push|\.(ssh|aws|netrc|env)|\.config/gh|(^|[^[:alnum:]_.-])(gh|npm|pnpm|yarn|cargo|gem|twine|security|terraform|kubectl|vercel|aws|gcloud|az)([^[:alnum:]_.-]|$)'
 # A runner (`sh -c`, `eval`, `env -S`) is the one segment whose string the reader re-reads;
 # only a command that holds one pays for git_argv_expand's re-reading.
 _GRANT_RUNNER_RE='(^|[^[:alnum:]_.-])(sh|bash|zsh|dash|ksh|ash|eval|env)([^[:alnum:]_.-]|$)'
 
+# nocasematch is process state: grant_reserved saves the caller's, reads with it off (so the
+# shared reader answers by its own rule alone), and puts the caller's back on every return,
+# whatever path _grant_reserved left by.
 grant_reserved() {
-  local tool="${1-}" what="${2-}" text segs line
+  local nc=0
+  shopt -q nocasematch && nc=1
+  shopt -u nocasematch
+  _grant_reserved "$@"
+  shopt -u nocasematch
+  [ "$nc" -eq 0 ] || shopt -s nocasematch
+  return 0
+}
+
+_grant_reserved() {
+  local tool="${1-}" what="${2-}" text segs line runner=0
   [ -n "$what" ] || return 0
   if [ "$tool" != Bash ]; then
-    _grant_is_credential "$(printf '%s' "$what" | tr '[:upper:]' '[:lower:]')" && printf 'credentials\n'
+    shopt -s nocasematch
+    _grant_is_credential "$what" && printf 'credentials\n'
+    shopt -u nocasematch
     return 0
   fi
   text="$what"
   case "$text" in
     *\\"$GRANT_NL"*) text="${text//\\$GRANT_NL/}" ;;
   esac
-  text="$(printf '%s' "$text" | tr -d "'\"\\\\\r" | tr '[:upper:]' '[:lower:]')"
-  [[ "$text" =~ $_GRANT_SCREEN_RE ]] || return 0
+  text="$(printf '%s' "$text" | tr -d "'\"\\\\\r")"
+  shopt -s nocasematch
+  if ! [[ "$text" =~ $_GRANT_SCREEN_RE ]]; then
+    shopt -u nocasematch
+    return 0
+  fi
+  [[ "$text" =~ $_GRANT_RUNNER_RE ]] && runner=1
+  shopt -u nocasematch
   # The same screen per segment keeps only the segments worth reading: their words are
-  # already unquoted, so it is exact there. Every word is read in lower case, because a
-  # case-blind filesystem runs `GH` as `gh` and opens `~/.SSH` as `~/.ssh`.
-  if [[ "$text" =~ $_GRANT_RUNNER_RE ]]; then
-    segs="$(git_argv_expand "$what" | tr '[:upper:]' '[:lower:]' | grep -E "$_GRANT_SCREEN_RE" || true)"
+  # already unquoted, so it is exact there.
+  if [ "$runner" -eq 1 ]; then
+    segs="$(git_argv_expand "$what" | grep -iE "$_GRANT_SCREEN_RE" || true)"
   else
-    segs="$(git_argv_segments "$what" | tr '[:upper:]' '[:lower:]' | grep -E "$_GRANT_SCREEN_RE" || true)"
+    segs="$(git_argv_segments "$what" | grep -iE "$_GRANT_SCREEN_RE" || true)"
   fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
