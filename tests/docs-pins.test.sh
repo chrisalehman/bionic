@@ -1450,18 +1450,10 @@ expect_absent "75b: …and names the deleted manifest nowhere" \
 # byte-for-byte, the same `has_pin` idiom §1-§5 use.
 section "Section 6: K3 — premise text (Context/Problem first, Mechanisms inherited)"
 
-# AC-K3.1: Context and Problem is the FIRST thing the frame approves — ahead of
-# the orchestrator's own design intuition and every decision below it. Pinned as
-# one substring spanning the frame's opening clause straight into the
-# Context-and-Problem sentence, so the pin itself IS an adjacency (hence order)
-# check: it can only match a copy where nothing has been inserted, or swapped
-# in, between "before any question." and "Its first approval is
-# **Context and Problem". RE-ANCHORED (epic-23 wave-13 T2, AC-8.1/AC-8.2): the
-# heading lost its ", for a stranger" clause — the explanation itself
-# ("written as if for a reader who has never opened this repo") stays, just not
-# folded into the bold span — and "ratification" became "approval" (the T2
-# ratif→approv sweep).
-PIN_K3_FIRST='**Open with the frame**, before any question. Its first approval is **Context and Problem**'
+# AC-K3.1, REWRITTEN (wave-26 T19, AC-2.1): the frame used to open by approving Context and
+# Problem first. Step 1 already approves the problem and its context, so the frame now opens by
+# saying so and asks nothing again; §W26-7e pins the old approval's absence beside a mutation.
+PIN_K3_FIRST='**Open with the frame**, before any question. Step 1 approved the problem and its context; the frame does not ask again.'
 
 # AC-K3.2, half 1: the frame carries a "Mechanisms inherited" item, each line
 # marked kept or questioned.
@@ -1472,9 +1464,9 @@ PIN_K3_MECH='**Mechanisms inherited**, one line per substrate or mechanism the d
 PIN_K3_STRATEGIC='placing a test cohort in a tier, a job on a runtime surface, or a workload on hardware is **strategic by rule**'
 
 if has_pin "$STEP2_MD" "$PIN_K3_FIRST"; then
-  ok "76: SKILL.md's Step-2 frame approves Context and Problem first"
+  ok "76: steps/2.md's frame opens without re-approving the problem Step 1 approved"
 else
-  no "76: SKILL.md's Step-2 frame approves Context and Problem first" "file: $STEP2_MD"
+  no "76: steps/2.md's frame opens without re-approving the problem Step 1 approved" "file: $STEP2_MD"
 fi
 
 if has_pin "$STEP2_MD" "$PIN_K3_MECH"; then
@@ -1491,27 +1483,8 @@ fi
 
 # --- Anti-vacuity: the same pins must discriminate a mutated copy ---
 
-# 79: ORDER REVERSED (AC-K3.1's own fails-when). The doctored copy swaps the
-# Context-and-Problem sentence and the Design-intuition sentence in place — the
-# literal shape of "the order is reversed" — rather than deleting anything, so a
-# pin that merely checked PRESENCE of both phrases would stay green through it.
-anchor -E "$STEP2_MD" 'Its first approval is \*\*Context and Problem\*\*' 1
-DOCTORED_K3_ORDER="$TMP/skill-k3-order-reversed.md"
-sed -E '
-s/(\*\*Open with the frame\*\*, before any question\. )(Its first approval is \*\*Context and Problem\*\*: the problem and the goal, written as if for a reader who has never opened this repo; this comes before your own design intuition and before every decision in the frame below it — a change not yet explainable to someone who was not there is not yet understood\. )(Then your own \*\*Design intuition\*\*, the shape you expect to be right, stated so the user can push on it; )/\1\3\2/
-' "$STEP2_MD" > "$DOCTORED_K3_ORDER"
-if has_pin "$DOCTORED_K3_ORDER" "$PIN_K3_FIRST"; then
-  no "79: order-reversed SKILL.md fails the first-approval pin (pin discriminates)" \
-     "the mutated copy still matched — the pin does not see the reorder"
-else
-  ok "79: order-reversed SKILL.md fails the first-approval pin (pin discriminates)"
-fi
-# Control: prove the doctored copy really moved Design intuition ahead of
-# Context and Problem, rather than merely mangling the text into something that
-# happens to fail the pin for an unrelated reason.
-expect_contains "79b: …and the doctored copy really does read Design intuition, then Context and Problem" \
-  'Then your own **Design intuition**, the shape you expect to be right, stated so the user can push on it; Its first approval is **Context and Problem' \
-  "$(cat "$DOCTORED_K3_ORDER")"
+# 79 and 79b (the Context-and-Problem order reversal) were deleted with the text they
+# mutated (wave-26 T19); W26-7em is the mutation arm for its return.
 
 # 80: Mechanisms inherited ABSENT (AC-K3.2's fails-when). The strategic-by-rule
 # clause stays untouched in this copy — proof the mutation removed only the
@@ -1725,12 +1698,22 @@ else
   no "91b: …and a requirement row names its provenance and its criteria count" "card body: $CARD1"
 fi
 
-if has_all "$CARD2" "Decisions" "serves" "ADR" "Ownership" "Eval design" "Artifacts"; then
-  ok "92a: the Step-2 card carries Decisions (serves/ADR), Ownership, Eval design, Artifacts"
+# 92a REWRITTEN (wave-26 T19, D13): the card the design is approved on carries a prose head
+# and names every artifact by path; Ownership left the card for the `show ownership` sub-view.
+if has_all "$CARD2" "Goal" "Approach" "Worth your eye" "Decisions" "serves" "ADR" "Eval design" \
+                    "Artifacts" "ledger" "reqs" "show ownership"; then
+  ok "92a: the Step-2 card carries Goal, Approach, Worth your eye, Decisions (serves/ADR), Eval design, Artifacts (with the ledger and requirements) and the ownership sub-view"
 else
-  no "92a: the Step-2 card carries Decisions (serves/ADR), Ownership, Eval design, Artifacts" \
+  no "92a: the Step-2 card carries Goal, Approach, Worth your eye, Decisions (serves/ADR), Eval design, Artifacts (with the ledger and requirements) and the ownership sub-view" \
      "card body: $CARD2"
 fi
+expect_absent "92a1: …and no Ownership block of its own (it is the sub-view)" \
+  "$(printf '\n  Ownership\n')" "$(printf '\n%s\n' "$CARD2")"
+DOCTORED_STEP2_OWN="$TMP/step2-ownership-back.md"
+awk '/^  Eval design/ { print "  Ownership"; print "    <concept>    owner <module>"; print "" } { print }' \
+  "$STEP2_MD" > "$DOCTORED_STEP2_OWN"
+expect_contains "92a1m: a Step-2 card with its Ownership block put back is caught by 92a1's extractor" \
+  "$(printf '\n  Ownership\n')" "$(printf '\n%s\n' "$(card_span "$DOCTORED_STEP2_OWN" 'Step 2 · Design')")"
 
 # 92a2: AC-11.2's sibling for Step 2 (T8's carry-over, wave-19 REQ-11). `_card_step2`
 # (payload/scripts/card.sh) never prints an `Open at approval` section — the scaffold
@@ -3298,18 +3281,8 @@ else
   no "149b: AC-9.1 — steps/2.md's decision row fits within 100 columns with the sample values" "width=$(card_cols "$DEC_ROW_LINE")"
 fi
 
-# 150: Step-2 Ownership row — its labels are literals inside the format, so the header is
-# the bare section name and the row is the whole check.
-OWN_ROW_LINE="$(grep -m1 '^    <concept>' "$STEP2_MD" 2>/dev/null)"
-OWN_RENDERED="$(printf '%s\t%s\t%s\t%s\n' '<concept>' '<module>' '<where it renders>' '<suite>' \
-  | card_rows ownership)"
-expect_eq "150: AC-9.1 — steps/2.md's Ownership header and row are exactly what card.sh renders" \
-  "$(printf '%s\n' '  Ownership' "$OWN_ROW_LINE")" "$OWN_RENDERED"
-if [ "$(card_cols "$OWN_ROW_LINE")" -le 100 ]; then
-  ok "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values ($(card_cols "$OWN_ROW_LINE"))"
-else
-  no "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values" "width=$(card_cols "$OWN_ROW_LINE")"
-fi
+# 150 and 150b (the Step-2 Ownership row against card.sh) were deleted with the row (wave-26
+# T19): Ownership is the `show ownership` sub-view, and tests/card.test.sh holds its format.
 
 # 151: Step-2 Eval-design header, both REQ rows and the total row — five RIGHT-aligned
 # count columns, which is the one kind whose fields are not all left-padded.
@@ -4530,5 +4503,95 @@ expect_eq "W26-6g: AC-1.4 doctrine half — no hand task-set/ledger-add at dispa
   "$(w26_hits '`ledger-add` as you dispatch it' "$DISPATCH_MD")"
 expect_eq "W26-6h: …and no manual check of a deliverable the landing verdict found" "" \
   "$(w26_hits 'verify that the named artifact exists before believing the report' "$DISPATCH_MD")"
+
+# ── §W26-7, W26-13, W26-14 (wave-26 T19; REQ-2 AC-2.1, REQ-7 AC-7.2/7.3, REQ-5's doc; D12, D13)
+#
+# WHAT THIS OWNS. The design is approved once, on the Step-2 card that closes the interview;
+# Step 3 approves the plan and the matrix only; the planner cuts the plan for width; a run
+# re-plans by verb on five named triggers; operational-rules.md documents the `reads` column
+# and the `approve` and `proof-add` verbs. Every absence sits beside a positive through the
+# same extractor on the same file, and a doctored copy proves each arm goes red when the old
+# text is back or a needed clause is gone. HERMETIC: committed finals by path; copies in $TMP.
+
+# W26-7 (AC-2.1): steps/2.md closes the interview on the card; no text approves the design at Step 3.
+expect_nonempty "W26-7 precondition: steps/2.md carries the Step-2 card's question" \
+  "$(w26_hits 'Do you approve this design?' "$STEP2_MD")"
+expect_nonempty "W26-7: AC-2.1 — steps/2.md closes the interview by presenting the Step-2 card" \
+  "$(w26_hits 'then present the Step-2 card below' "$STEP2_MD")"
+expect_nonempty "W26-7b: …and names that card's approval the one approval of the design" \
+  "$(w26_hits 'the one approval of the design' "$STEP2_MD")"
+W26_T19_STEP3_DESIGN="approves design, plan, and matrix together
+fails the Step-3 approval
+approved at the Step-3 approval alongside everything else
+the path the Step-3 approval display prints
+the pointer is what the Step-3 approval display prints"
+w26_t19_step3_design() {  # <file>… -> each file carrying any retired Step-3 design approval
+  local n
+  while IFS= read -r n; do
+    # shellcheck disable=SC2068
+    w26_hits "$n" $@
+  done <<< "$W26_T19_STEP3_DESIGN"
+}
+# shellcheck disable=SC2086
+expect_eq "W26-7c: …and no shipped doctrine approves the design at Step 3" "" \
+  "$(w26_t19_step3_design $W26_DOCTRINE)"
+W26_D7="$(w26_doctor "$STEP3_MD" 'The binding approval approves design, plan, and matrix together.')"
+expect_nonempty "W26-7cm: a steps/3.md that approves the design again is caught" \
+  "$(w26_t19_step3_design "$W26_D7")"
+expect_eq "W26-7d: …and the design no longer goes back whole before the spec is written" "" \
+  "$(w26_hits 'goes back whole' "$STEP2_MD")"
+expect_nonempty "W26-7e precondition: Question 1 still approves the frame" \
+  "$(w26_hits '**Question 1 approves the frame**' "$STEP2_MD")"
+expect_eq "W26-7e: …and does not re-approve the problem and context Step 1 approved" "" \
+  "$(w26_hits 'Context and Problem' "$STEP2_MD")"
+W26_D7E="$(w26_doctor "$STEP2_MD" '**Question 1 approves the frame, Context and Problem first**; nothing is walked until it holds.')"
+expect_nonempty "W26-7em: a steps/2.md whose Question 1 re-approves Context and Problem is caught" \
+  "$(w26_hits 'Context and Problem' "$W26_D7E")"
+expect_nonempty "W26-7f: steps/3.md says Step 3 approves the plan and the matrix only" \
+  "$(w26_hits 'Step 3 approves the plan and the matrix only' "$STEP3_MD")"
+
+# W26-13 (AC-7.2): steps/3.md carries both width instructions, not only the split.
+W26_SPLIT='Split a task on the longest chain wherever it can be split'
+W26_SHORT='gets one short first task'
+expect_nonempty "W26-13: AC-7.2 — steps/3.md tells the planner to split the longest chain" \
+  "$(w26_hits "$W26_SPLIT" "$STEP3_MD")"
+expect_nonempty "W26-13b: …and gives a file two tasks write, when it cannot be merged, one short first task" \
+  "$(w26_hits "$W26_SHORT" "$STEP3_MD")"
+expect_nonempty "W26-13c: …and otherwise lets the two run side by side and reconcile on landing" \
+  "$(w26_hits 'run side by side and reconcile on landing' "$STEP3_MD")"
+expect_nonempty "W26-13d: …and a row declares a read only where another row writes it" \
+  "$(w26_hits 'A row declares what it reads only where it reads what another row writes' "$STEP3_MD")"
+W26_D13="$TMP/w26-step3-split-only.md"
+sed "s/${W26_SHORT}//" "$STEP3_MD" > "$W26_D13" 2>/dev/null
+expect_nonempty "W26-13m precondition: the split-only copy keeps the split instruction" \
+  "$(w26_hits "$W26_SPLIT" "$W26_D13")"
+expect_eq "W26-13m: …and a steps/3.md carrying only the split instruction is caught" "" \
+  "$(w26_hits "$W26_SHORT" "$W26_D13")"
+
+# W26-14 (AC-7.3): the five re-plan triggers and the verbs, in steps/3.md; the schema's doc in
+# operational-rules.md.
+W26_TRIGGERS='a finding, a red test, an approved scope change, a task overrunning its size, a report naming follow-up work'
+expect_nonempty "W26-14: AC-7.3 — steps/3.md names the five re-plan triggers" \
+  "$(w26_hits "$W26_TRIGGERS" "$STEP3_MD")"
+expect_nonempty "W26-14b: …and re-plans by the verbs, never by editing the table by hand" \
+  "$(w26_hits '`task-add` and `task-set`, never by editing the table by hand' "$STEP3_MD")"
+W26_D14="$TMP/w26-step3-four-triggers.md"
+sed 's/a red test, //' "$STEP3_MD" > "$W26_D14" 2>/dev/null
+expect_nonempty "W26-14m precondition: the four-trigger copy keeps the verbs" \
+  "$(w26_hits '`task-add` and `task-set`' "$W26_D14")"
+expect_eq "W26-14m: …and a steps/3.md missing one trigger is caught" "" \
+  "$(w26_hits "$W26_TRIGGERS" "$W26_D14")"
+for _w26_iface in \
+  'comma-separated: a path in the `Files` grammar · `head` · `record` · `proof:<kind>` · `approval:<name>` · `ext:<slug>`; a live read is `live:<artifact>`; empty takes the kind default' \
+  'build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:floor, proof:review` · close the integrate row'"'"'s merge' \
+  'a table without it reads each id as "wait for that task to land"' \
+  'a `Files` entry ending in `!`' \
+  'session-poker.sh approve <name> '"'"'<reply>'"'"'' \
+  'approved: <name> by <who> <ISO-UTC> "<reply>"' \
+  'session-poker.sh proof-add <kind> <evidence path>' \
+  'proved: kind=<floor\|review\|task> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>'; do
+  expect_nonempty "W26-14c: REQ-5 — operational-rules.md documents: ${_w26_iface%%;*}" \
+    "$(w26_hits "$_w26_iface" "$OPRULES")"
+done
 
 finish
