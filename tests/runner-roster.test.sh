@@ -922,6 +922,9 @@ section "§11 NESTED — a solo suite takes the whole machine; a nested run neve
 #   (i) A VOID SUITE THAT FAILED IS A FAILURE (wave-26 T43; review 8 F1): on every path that
 #       can void a suite, a suite whose last run failed fails the run, is counted once in the
 #       fail tally, and carries its void reason on its failure line.
+#   (j) A VOID SUITE LEAVES NO TIMING ROW (wave-26 T48; review 11 N1): the file the timing knob
+#       names holds measurements only, so a suite whose timing was not measured, passed or
+#       failed, has no row in it, and a suite timed in the same run still does.
 
 RRN_BOOKED="$REPO/payload/scripts/booked.sh"
 expect_true "11.0 the shim the outer run is booked through exists" test -f "$RRN_BOOKED"
@@ -1413,6 +1416,57 @@ expect_contains "11.120 --serial: …its verdict line reads FAIL" "✗ FAIL" "$(
 expect_absent "11.121 --serial: …with no void reason, since nothing was checked" "VOID" \
   "$(rrn_line aaa-vfail.test.sh)"
 expect_eq "11.122 --serial: …and the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
+
+# THE TIMING FILE HOLDS MEASUREMENTS ONLY (wave-26 T48; review 11 N1): the file the timing knob
+# names gets one `<label>TAB<seconds>` row per suite that was timed. A suite reported VOID has
+# its seconds disturbed, so it gets no row; a reader of the file then cannot take them for a
+# measurement. The companion rows keep the fix honest: the suite that was not void in the same
+# run still has its row, so writing nothing at all would fail them.
+rrx_trows() {  # <file> <label> — how many rows the file holds for the label
+  LC_ALL=C awk -F'\t' -v l="$2" '$1 == l { n++ } END { print n + 0 }' "$1" 2>/dev/null
+}
+rrx_tshaped() {  # <file> <label> — how many of them are `<label>TAB<whole seconds>`
+  LC_ALL=C awk -F'\t' -v l="$2" 'NF == 2 && $1 == l && $2 ~ /^[0-9]+$/ { n++ } END { print n + 0 }' "$1" 2>/dev/null
+}
+RRX_TF="$TMPROOT/void-timing.tsv"
+
+# CONTROL: nothing void. Both suites are timed, the solo one included.
+rrx_prep "pass:clean" 0
+rm -f "$RRX_TF"
+rrn_drive "$TNX" 2 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
+expect_eq "11.123 a solo suite that passed undisturbed: the run is green" "0" "$RRN_RC"
+expect_contains "11.124 …its verdict line reads PASS, so it was timed" "✓ PASS" "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.125 …and the timing file holds one shaped row for it" "1" "$(rrx_tshaped "$RRX_TF" aaa-vfail.test.sh)"
+expect_eq "11.126 …and one for the plain suite" "1" "$(rrx_tshaped "$RRX_TF" x-plain.test.sh)"
+
+# VOID AND PASSED, every try disturbed.
+rrx_prep "pass:void" 0
+rm -f "$RRX_TF"
+rrn_drive "$TNX" 2 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
+expect_contains "11.127 a solo suite that passed and was void: its line says its timing was not measured" \
+  "~ VOID (timing not measured" "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.128 …the timing file holds no row for it" "0" "$(rrx_trows "$RRX_TF" aaa-vfail.test.sh)"
+expect_eq "11.129 …while the plain suite of the same run has its shaped row" "1" \
+  "$(rrx_tshaped "$RRX_TF" x-plain.test.sh)"
+
+# VOID AND FAILED, every try disturbed: counted a failure, and still not a measurement.
+rrx_prep "fail:void" 0
+rm -f "$RRX_TF"
+rrn_drive "$TNX" 2 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
+expect_contains "11.130 a solo suite that failed and was void: its line carries the void reason" \
+  "also VOID (timing not measured" "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.131 …the timing file holds no row for it" "0" "$(rrx_trows "$RRX_TF" aaa-vfail.test.sh)"
+expect_eq "11.132 …while the plain suite of the same run has its shaped row" "1" \
+  "$(rrx_tshaped "$RRX_TF" x-plain.test.sh)"
+
+# VOID ON THE FIRST TRY, MEASURED ON THE RETRY: the suite was timed, so the row stays.
+rrx_prep "pass:void pass:clean" 0
+rm -f "$RRX_TF"
+rrn_drive "$TNX" 2 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
+expect_contains "11.133 a solo suite disturbed once and clean on the retry: it passed" "✓ PASS" \
+  "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.134 …its undisturbed try is a measurement, so the file holds its one shaped row" "1" \
+  "$(rrx_tshaped "$RRX_TF" aaa-vfail.test.sh)"
 
 # ============================================================
 section "§TIMING a nested run writes no rows into the outer run's timing file (wave-26 T26; D20, AC-10.2)"
