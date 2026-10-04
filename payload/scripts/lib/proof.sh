@@ -472,8 +472,12 @@ _proof_named() {
 # ran out. THE BOUND KILLS THE MAP ITSELF (T52; review 14 N5): the subshell execs the command,
 # so the pid the clock watches is the map's own, not a shell that would leave it running. TERM
 # first, then KILL after a second for a map that ignores TERM, so the wall never waits on it.
+#
+# THE FIRST TENTH OF A SECOND IS POLLED FINELY (wave-26 T64). The ready set now asks this on the
+# tick and at the turn end, and a map that answers in a few milliseconds waited out a whole 0.1 s
+# sleep per call; ten 0.01 s polls come first, then the 0.1 s cadence.
 _proof_map() {
-  local wt="$1" cmd="$2" out="$3" pid i
+  local wt="$1" cmd="$2" out="$3" pid i n=0
   shift 3
   _PROOF_MAP_OVER=0
   (
@@ -483,6 +487,7 @@ _proof_map() {
     exec $cmd "$@" > "$out" 2>/dev/null
   ) &
   pid=$!
+  while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do sleep 0.01; n=$((n + 1)); done
   while kill -0 "$pid" 2>/dev/null; do
     if [ "$SECONDS" -ge "${IMPACT_BOUND_S:-10}" ]; then
       _PROOF_MAP_OVER=1

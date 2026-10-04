@@ -5797,6 +5797,10 @@ EOF
     # THE PROMPT VERSION rides the same file: `arm` records the version its prompt carried, and a
     # tick that finds none, or an older one, prints one re-arm line above everything else.
     TICK_BUF="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-tick.XXXXXX" 2>/dev/null)" || TICK_BUF=""
+    # ONE FLOOR STATE PER TICK (wave-26 T64). The schedule and the change fingerprint below each
+    # parse the table under their own `units_memoised`; this names the one file both keep the
+    # floor state in (lib/units.sh `_units_floor_state`), so a tick runs `proof_state` once.
+    [ -z "$TICK_BUF" ] || _UNITS_MEMO_FLOOR="$TICK_BUF.floor"
     TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed; TICK_CHANGE=""; TICK_CHANGE_STORE=""
     TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
@@ -5818,7 +5822,7 @@ EOF
       else
         cat "$TICK_BUF" 2>/dev/null
       fi
-      rm -f "$TICK_BUF" 2>/dev/null
+      rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
         write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
