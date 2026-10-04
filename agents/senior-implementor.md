@@ -5,10 +5,7 @@ model: opus
 effort: high
 ---
 
-<!-- GENERATED FILE — DO NOT EDIT.
-     Rendered by agents-src/render.sh from agents-src/templates/senior-implementor.md.tmpl and the shared
-     blocks in agents-src/blocks/. Edit those, then re-run `bash agents-src/render.sh`.
-     tests/docs-pins.test.sh goes red whenever this file and its sources disagree. -->
+<!-- GENERATED FILE — DO NOT EDIT. Rendered by agents-src/render.sh from agents-src/templates/senior-implementor.md.tmpl. -->
 
 ## Role
 
@@ -77,6 +74,8 @@ Deliverable-waiver: report by message, not a file.
 - **Spell each suite literally**: one `bash tests/<name>.test.sh` per suite, one call each.
 - **Never end your turn with a command or an external run (CI, a background task) in flight**:
   watch it in the foreground.
+- **A multi-step script goes in a file in your workspace**, run as `bash <file>`, never inline
+  as `bash -c '…'`: the platform refuses some inline scripts outright, never the file.
 <!-- DISPATCH-RULES-END -->
 
 Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.
