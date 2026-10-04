@@ -1855,9 +1855,11 @@ section "§FXP — wave-25 T16: the reader never decides a place it cannot see"
 # are both printed, because bash falls back to the unfolded one when the folded one is missing.
 #
 # B2. The hook resolves every path at question time, before a link the command makes exists.
-# So `ln` is unknown, and a path at or beneath a cp or mv destination written earlier in the same
-# command is unknown (the copied or moved item may be a link). A write AT the destination writes
-# through such a link; a delete at it removes only the link, unless it ends in a slash.
+# So `ln` is unknown, and so is every write, delete and read after a cp or mv in the same command
+# (T19, A-orch-37): what was copied or moved may be a link, and a link already on disk can reach
+# the destination by a spelling the text does not show (tree/l -> tree/b, then tree/l/...). The
+# cp or mv's own lines stay. Where the order cannot be told (a pipeline, a list sent to the
+# background, a loop), an effect written before the cp is later too.
 
 # --- B1: `..` stays in every effect path ---
 fx_are "W${T}/w/tree/link/../escape" 'echo x > tree/link/../escape' /w
@@ -1905,15 +1907,61 @@ fx_are "W${T}/w/d
 fx_are "D${T}/w/a
 W${T}/w/b
 ?" 'mv a b && rm -rf b/' /w
-expect_contains "§FXP the beneath line names the destination" "/w/b" "$(fx_of 'cp -R a b && rm -rf b/sub' /w | grep -F "?${T}")"
-# The paired positives on the same reader: a delete of the destination itself removes only what
-# is there, a sibling that shares a prefix is not beneath, a path read before the copy is read,
-# and a directory mkdir made holds no link.
+# T19: after a cp or mv, EVERY later effect is unknown, not only one at or beneath the
+# destination. The residual T16 left: with tree/l -> tree/b already on disk, tree/l/evil/... is
+# tree/b/evil/... once the copy lands, and no text comparison can see that.
+fx_are "W${T}/w/tree/b
+?" 'cp -R tree/evil tree/b && rm -rf tree/l/evil/sub/victim' /w
+fx_are "D${T}/w/tree/evil
+W${T}/w/tree/b
+?" 'mv tree/evil tree/b && rm -rf tree/l/evil/sub/victim' /w
+fx_are "W${T}/w/tree/b
+?" 'cp -R tree/evil tree/b && echo x > tree/l/evil/sub/f' /w
+expect_contains "§FXP the later line says why and names its path" \
+  "a copy or move earlier in this command may have placed a link: /w/tree/l/evil/sub/victim" \
+  "$(fx_of 'cp -R tree/evil tree/b && rm -rf tree/l/evil/sub/victim' /w | grep -F "?${T}")"
+# The rows T16's at-or-beneath rule let through, now unknown: a delete AT the destination and a
+# sibling that shares its prefix are after the copy too.
 fx_are "D${T}/w/a
 W${T}/w/b
-D${T}/w/b" 'mv a b && rm -rf b' /w
+?" 'mv a b && rm -rf b' /w
 fx_are "W${T}/w/b
-D${T}/w/bc" 'cp a /w/b && rm -rf /w/bc' /w
+?" 'cp a /w/b && rm -rf /w/bc' /w
+# Later, by every separator and nesting the reader walks.
+fx_are "W${T}/w/b
+?" 'cp a b; rm -rf l/x' /w
+fx_are "W${T}/w/b
+?" 'cp a b || rm -rf l/x' /w
+fx_are "W${T}/w/b
+?" 'cp a b && (rm -rf l/x)' /w
+fx_are "W${T}/w/b
+?" '(cp a b) && rm -rf l/x' /w
+fx_are "W${T}/w/b
+?" "cp a b && bash -c 'rm -rf l/x'" /w
+fx_are "W${T}/w/b
+?" "bash -c 'cp a b' && rm -rf l/x" /w
+fx_are "W${T}/w/b
+?" 'cp a b | tee l/x' /w
+fx_are "W${T}/w/b
+?" 'cp a b && cp c l/x' /w
+# A write the reader already printed before the copy is printed again as unknown after it.
+fx_are "W${T}/w/f
+W${T}/w/b
+?" 'echo x > f && cp a b && echo y > f' /w
+# Where the order cannot be told, an effect written before the cp is later too.
+fx_are '?' 'rm -rf l/x | cp a b' /w
+fx_are '?' 'rm -rf l/x & cp a b' /w
+fx_are '?' 'for i in 1 2; do rm -rf l/x; cp -R a b; done' /w
+# The paired positives on the same reader: a cp or mv with nothing after it reads as before, so
+# does an effect before it in an ordered list, and a directory mkdir made holds no link.
+fx_are "W${T}/w/b" 'cp a b' /w
+fx_are "D${T}/w/a
+W${T}/w/b" 'mv a b' /w
+fx_are "D${T}/w/l/x
+W${T}/w/b" 'rm -rf l/x && cp -R a b' /w
+fx_are "W${T}/w/f
+D${T}/w/a
+W${T}/w/b" 'echo x > f; mv a b' /w
 fx_are "D${T}/w/b/sub
 W${T}/w/b" 'rm -rf b/sub && cp -R a b' /w
 fx_are "W${T}/w/d
@@ -1990,6 +2038,13 @@ fx_are "W${T}/w/k" 'cp ~/.ss?/id /w/k' /w
 fxr_are "RR${T}/w/a
 W${T}/w/b
 ?" 'cp -R a b && cat b/k' /w
+# T19: so does any read after it, by a spelling that does not show the destination.
+fxr_are "RR${T}/w/a
+W${T}/w/b
+?" 'cp -R a b && cat l/k' /w
+fxr_are "D${T}/w/a
+W${T}/w/b
+?" 'mv a b && grep -r x l' /w
 fxr_are "R${T}/w/k
 RR${T}/w/a
 W${T}/w/k" 'cat k && cp -R a k' /w
