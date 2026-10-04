@@ -5593,7 +5593,8 @@ EOF
     # bounds it: a run's log must have read exactly that head on a clean tree, a review a commit
     # on its history, and the proof names what the evidence attests (lib/proof.sh
     # `proof_attested`). A task landed between the run and this verb is not proved by it.
-    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$(proof_checkout "$PV_REPO" "$PF_WB")")"; then
+    # The plan goes too: a review's range must start at or before its last review proof (T62).
+    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$(proof_checkout "$PV_REPO" "$PF_WB")" "$PV_PLAN")"; then
       die "REFUSED — $(clean "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
