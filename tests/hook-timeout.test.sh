@@ -34,6 +34,7 @@
 #   g   bash-walls       a 200 KB single-quoted `python3 -c` body, engaged, `memory` in the cwd (T28)
 #   b3  bash-walls       b's heredoc behind `cd sub && `, committing (T28)
 #   b4  bash-walls       b's heredoc behind `cd <absolute repo> && `, committing (T28)
+#   k   bash-walls       52 KB of short `"\""` runs, then make (wave-24 critic B1)
 # Every row runs under `/bin/bash` (3.2 on macOS, the interpreter ADR-001 pins) AND under
 # the newest bash on PATH: the 64 KB command also took 3.9 s under bash 5.3, so moving off
 # 3.2 was never the fix.
@@ -347,6 +348,13 @@ json.dump(bash_payload(r_chain, sq), open(d + "/e.json", "w"))
 #    past the body (a build deny can only come from the segment after it) --
 json.dump(bash_payload(r_chain, sq + "\nmake"), open(d + "/e2.json", "w"))
 json.dump(bash_payload(r_chain, dq + "\nmake"), open(d + "/f.json", "w"))
+# -- k: many SHORT double-quoted runs, each holding a backslash, 52 KB in all, then `make`
+#    (wave-24 critic Addendum 2 B1). The quote-end scan pays per run on this shape: 1.08 s
+#    through the hook on the c0d6ab04 scan, 4.25 s on the T30 scan this row was added to
+#    refuse. e/f are ONE long quoted run and cannot see it. --
+kq = "echo " + " ".join(['"\\""'] * 10400)
+json.dump(bash_payload(r_chain, kq + "\nmake"), open(d + "/k.json", "w"))
+meta["k"] = len(kq)
 meta["e_bytes"] = len(sq.encode())
 meta["e_lines"] = body.count("\n") + 1
 meta["e_inner_quotes"] = body.count("'")
@@ -392,6 +400,7 @@ expect_true "fixture: e's command is at least 50 000 bytes" test "$(meta e_bytes
 expect_true "fixture: e's body is at least 1 000 lines" test "$(meta e_lines)" -ge 1000
 expect_eq "fixture: e's body holds no single quote, so it is one quoted word" "0" "$(meta e_inner_quotes)"
 expect_true "fixture: b3's command is at least 64 000 characters" test "$(meta b3)" -ge 64000
+expect_true "fixture: k's command is at least 52 000 characters" test "$(meta k)" -ge 52000
 expect_true "fixture: g's command is at least 200 000 bytes" test "$(meta g_bytes)" -ge 200000
 expect_eq "fixture: g's body holds no single quote, so it is one quoted word" "0" "$(meta g_inner_quotes)"
 expect_eq "fixture: g's command never says memory — the cwd is what screens it in" "0" "$(meta g_memory)"
@@ -441,6 +450,7 @@ section "2b — bash-walls: a 52 KB quoted python3 -c body the classifier reads 
 row e  "$WALLS_HOOK" "$R_CHAIN"  0 SILENT out
 row e2 "$WALLS_HOOK" "$R_CHAIN"  0 "farm-out [deny] class=build" err
 row f  "$WALLS_HOOK" "$R_CHAIN"  0 "farm-out [deny] class=build" err
+row k  "$WALLS_HOOK" "$R_CHAIN"  0 "farm-out [deny] class=build" err
 
 section "2c — bash-walls: a leading cd before the 64 KB heredoc, and 200 KB read for its writes (T28)"
 # b3 and b4 are b behind a `cd`. Their placeholder refusal is the evidence gate judging the
