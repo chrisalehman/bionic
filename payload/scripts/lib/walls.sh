@@ -243,8 +243,8 @@ _wall_screen() {  # <command text> -> sets _WALL_STRIPPED
 # in payload/scripts/lib/git-argv.sh provably cannot find one (REQ-10, T11).
 #
 # WHY A SUPERSET IS SOUND HERE, AND WHY IT IS SPELLED LIKE THIS. `git_argv_parse`
-# accepts argv[0] only as the literal `git` or a path ending `/git`
-# (git-argv.sh's `git|*/git) shift`), and the only transformation between the
+# accepts argv[0] only as `git` or a path ending `/git`, in any letter case
+# (git-argv.sh's `git_argv_is_git`), and the only transformation between the
 # command TEXT and that token is unquoting: the parser strips backslashes and
 # quote characters and does not expand variables, globs or `$'…'`. So the three
 # characters `git` must survive in the text with nothing but backslashes and
@@ -270,10 +270,20 @@ _wall_screen() {  # <command text> -> sets _WALL_STRIPPED
 # THE LITERAL FIRST (wave-24-fixit-1811 T4; REQ-5, D6). Removing characters other than
 # g, i and t cannot separate a `git` that is already there, so a literal hit is the
 # same answer the strip would give, for no work. Only a miss pays for `_wall_screen`.
+#
+# ANY LETTER CASE (wave-24 T31). The reader folds the program word's case, because a
+# case-blind filesystem runs `GIT push` as git, so the screen must answer "maybe" for every
+# casing it folds, or `GIT push origin main` is screened out before the reader is asked. The
+# lower-case literal stays first: it is the common hit. A miss asks the any-case glob of the
+# strip only, never of the raw text too, since removing `\`, `'` and `"` cannot split a `GIT`
+# that is already there. The glob runs under `LC_ALL=C`: in a UTF-8 locale bash 3.2 matches a
+# bracket glob through its wide-character path, measured 2-4x the literal on a 180 KB command,
+# and all six letters are ASCII. `local` restores the caller's locale. No fork either way.
 _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
   case "$1" in *git*) return 0 ;; esac
+  local LC_ALL=C
   _wall_screen "$1"
-  case "$_WALL_STRIPPED" in *git*) return 0 ;; esac
+  case "$_WALL_STRIPPED" in *[Gg][Ii][Tt]*) return 0 ;; esac
   return 1
 }
 
