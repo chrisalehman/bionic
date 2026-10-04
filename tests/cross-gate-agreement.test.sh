@@ -12789,10 +12789,12 @@ cgfu_world() {  # <case: closed|open|again> -> repo path
       ;;
   esac
   cfg="$SANDBOX/cgfu-cfg-$1"; mkdir -p "$cfg/projects/-cgfu"
+  # Each hand-back names landed.md (wave-24 T29: a message that names no deliverable is no
+  # completion signal).
   {
-    jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T00:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done\n</agent-message>")}}'
+    jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T00:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done: landed.md\n</agent-message>")}}'
     # The relaunched contract reports too, after its own launch (wave-24 T9, D3: MET needs it).
-    [ "$1" = again ] && jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T02:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done again\n</agent-message>")}}'
+    [ "$1" = again ] && jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T02:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done again: landed.md\n</agent-message>")}}'
     jq -nc --arg n "$n" '{type:"assistant",isSidechain:false,timestamp:"2026-09-01T03:00:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01CGFUSEND",name:"SendMessage",input:{to:$n,summary:"s",message:"one more thing"}}]}}'
   } > "$cfg/projects/-cgfu/$SID_A.jsonl"
   printf '%s' "$r"
