@@ -2906,4 +2906,151 @@ for ACT_W in 1 2; do
   fi
 done
 
+# ============================================================
+section "Section 18: §START-JOIN — the row gains its id at agent start, joined by type (wave-27 T5, D15, AC-8.1)"
+# ============================================================
+#
+# THE DEFECT (wave-26 walk-triage-3). The dispatch wall writes the launch row with `agent_id=`
+# EMPTY; the only writer of the id was ARM 2, on the launch call's RETURN. A foreground dispatch
+# returns when the agent has finished, so a full-suite runner dispatched that way was refused its
+# own run ("no set was recorded for this agent") and, with no row, any named suite it typed ran
+# unbudgeted. The start event carries the id and, for a plain dispatch, the TYPE in
+# `agent_type`; the row carries `subagent_type=`. Joined there, the runner has its set however
+# it was launched, and ARM 2 stays the second writer of the same id.
+#
+# FIXTURE FIDELITY: every row here is the dispatch wall's own shape — built through the one
+# production writer (`roster_row_fixture` → `roster_row`), `status=intended`, `agent_id=` empty,
+# `subagent_type=` and `suites_allowed=` as hooks/dispatch-preflight.sh writes them. No row
+# carries an id until a hook writes it. The start payload is `mk_subagent_start` (capture §3-C);
+# the Bash payload is the agent-context shape tests/background-suite-guard.test.sh pins, with
+# `agent_type` the plain dispatch's TYPE (walk-triage-3 §1, "Hook SubagentStart:bionic:test-runner").
+#
+# fails-when: the start leaves the row without the id, so bash-walls refuses the runner's full run.
+
+SJ_WALLS="$HERE/bash-walls.sh"
+SJ_TYPE="bionic:test-runner"
+SJ_AID="ad19bee2f6be298d1"
+SJ_HOME="$SANDBOX/sj-home"
+mkdir -p "$SJ_HOME"
+
+sj_intended() {  # <repo> <name> <tool_use_id> <subagent_type> [key=value...] — the dispatch wall's launch row
+  local repo="$1" name="$2" tuid="$3" type="$4"; shift 4
+  local f="$repo/.bionic/tmp/roster-${SID_A}.state"
+  [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture status=intended session="$SID_A" "name=$name" agent_id= \
+    launched_at=2026-10-04T12:00:00Z "subagent_type=$type" tool_use_id="$tuid" \
+    files= suites_source=declared "$@" >> "$f"
+}
+SJ_ST=0; SJ_OUT=""; SJ_ERR=""
+sj_walls() {  # <repo> <command> <agent-id> — the agent's own Bash call through the shipped walls
+  local p
+  p=$(jq -n --arg s "$SID_A" --arg c "$1" --arg cmd "$2" --arg a "$3" --arg at "$SJ_TYPE" \
+    '{session_id:$s, cwd:$c, permission_mode:"bypassPermissions",
+      hook_event_name:"PreToolUse", tool_name:"Bash",
+      tool_input:{command:$cmd, timeout:600000}, tool_use_id:"toolu_01SJBASH",
+      agent_id:$a, agent_type:$at}')
+  SJ_OUT=$(printf '%s' "$p" | env HOME="$SJ_HOME" CLAUDE_CONFIG_DIR="$SJ_HOME/.claude" \
+    BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_PROJECT_DIR= \
+    BASH_MAX_TIMEOUT_MS=600000 bash "$SJ_WALLS" 2>"$SANDBOX/.sjerr"); SJ_ST=$?
+  SJ_ERR=$(cat "$SANDBOX/.sjerr")
+}
+sj_wrap() { printf '%s' "$SJ_OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null; }
+sj_field() { printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-; }
+
+# ---------- SJ-a: one id-less row of the starting type gains the id at start ----------
+IFS='|' read -r SJA_REPO SJA_TR SJA_SUB SJA_CFG <<< "$(make_world startjoin yes)"
+SJA_ROSTER="$SJA_REPO/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$SJA_REPO" T8 toolu_01SJA "$SJ_TYPE" suites_allowed=run.sh
+SJA_LAUNCH=$(grep 'status=intended' "$SJA_ROSTER")
+expect_eq "SJ-a precondition: the launch row states the runner's set" "run.sh" "$(sj_field "$SJA_LAUNCH" suites_allowed)"
+expect_contains "SJ-a precondition: …and carries no id, as the dispatch wall writes it" "|agent_id=|" "$SJA_LAUNCH"
+
+# BEFORE THE START no row carries the id, and the run is refused fail-closed — never admitted.
+sj_walls "$SJA_REPO" 'bash tests/run.sh' "$SJ_AID"
+expect_eq "SJ-a0 before the start, the full run is refused" "2" "$SJ_ST"
+expect_empty "SJ-a0 …and nothing is staged to run it" "$(sj_wrap)"
+
+# THE START, and no launch-call return after it (the foreground order).
+run_rec "$(mk_subagent_start "$SID_A" "$SJA_TR" "$SJA_REPO" "$SJ_TYPE" "$SJ_AID")"
+SJA_ROW=$(grep 'status=identified' "$SJA_ROSTER")
+expect_eq "SJ-a1 the start appends exactly one identified row" "1" "$(grep -c 'status=identified' "$SJA_ROSTER")"
+expect_eq "SJ-a2 …carrying the agent's id" "$SJ_AID" "$(sj_field "$SJA_ROW" agent_id)"
+expect_eq "SJ-a3 …on the row the dispatch named" "T8" "$(sj_field "$SJA_ROW" name)"
+expect_eq "SJ-a4 …with the set the dispatch recorded" "run.sh" "$(sj_field "$SJA_ROW" suites_allowed)"
+expect_eq "SJ-a5 …and the launch's correlation key" "toolu_01SJA" "$(sj_field "$SJA_ROW" tool_use_id)"
+
+# THE RUNNER'S FULL RUN, admitted wrapped and stamped: the booking shim names `run.sh`, which is
+# the stamp the land reads (a `?` would be a run the land cannot keep apart from any suite).
+sj_walls "$SJA_REPO" 'bash tests/run.sh' "$SJ_AID"
+expect_eq "SJ-a6 after the start, bash-walls admits the runner's full run" "0" "$SJ_ST"
+expect_regex "SJ-a7 …wrapped in the booking shim and stamped run.sh" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --suites run\\.sh -- 'bash tests/run\\.sh'\$" "$(sj_wrap)"
+
+# THE LAUNCH CALL'S RETURN STAYS THE SECOND WRITER OF THE SAME VALUE (the sync shape, capture D).
+run_rec "$(jq -n --arg s "$SID_A" --arg t "$SJA_TR" --arg c "$SJA_REPO" --arg a "$SJ_AID" \
+  '{session_id:$s, transcript_path:$t, cwd:$c, permission_mode:"bypassPermissions",
+    effort:{level:"high"}, hook_event_name:"PostToolUse", tool_name:"Agent",
+    tool_input:{description:"the floor", prompt:"go", subagent_type:"bionic:test-runner",
+                run_in_background:false, name:"T8"},
+    tool_response:{status:"completed", prompt:"go", agentId:$a, agentType:"bionic:test-runner",
+                   content:[{type:"text",text:"DONE"}], resolvedModel:"claude-sonnet-5", totalDurationMs:4791},
+    tool_use_id:"toolu_01SJA", duration_ms:4795}')"
+SJA_CONF=$(grep 'status=confirmed' "$SJA_ROSTER")
+expect_eq "SJ-a8 the launch call's return confirms the same id" "$SJ_AID" "$(sj_field "$SJA_CONF" agent_id)"
+expect_eq "SJ-a9 …with the same set" "run.sh" "$(sj_field "$SJA_CONF" suites_allowed)"
+sj_walls "$SJA_REPO" 'bash tests/run.sh' "$SJ_AID"
+expect_eq "SJ-a10 …and the run is still admitted after it" "0" "$SJ_ST"
+
+# ---------- SJ-b: the type is a bionic role's, or nothing joins on it ----------
+# A non-bionic start against a lone id-less row of its own type joins nothing (I2F above is the
+# same rule against a named row); a bionic start in the SAME fixture joins its own row.
+IFS='|' read -r SJB_REPO SJB_TR SJB_SUB SJB_CFG <<< "$(make_world startjointype yes)"
+SJB_ROSTER="$SJB_REPO/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$SJB_REPO" gp-1 toolu_01SJBGP general-purpose suites_allowed=alpha.test.sh
+sj_intended "$SJB_REPO" T9 toolu_01SJBT9 "$SJ_TYPE" suites_allowed=beta.test.sh
+run_rec "$(mk_subagent_start "$SID_A" "$SJB_TR" "$SJB_REPO" general-purpose "a0000000000sjbgp")"
+expect_eq "SJ-b1 a general-purpose start joins nothing by type" "0" "$(grep -c 'status=identified' "$SJB_ROSTER")"
+run_rec "$(mk_subagent_start "$SID_A" "$SJB_TR" "$SJB_REPO" "$SJ_TYPE" "a0000000000sjbt9")"
+expect_eq "SJ-b2 …while a bionic start in the same roster joins its own row" "T9" \
+  "$(sj_field "$(grep 'status=identified' "$SJB_ROSTER")" name)"
+
+# ---------- SJ-c: a row already identified, or a teammate's, is not a candidate ----------
+# A: another agent of the same type, already confirmed with its id. M: a teammate of the same
+# type (ARM 2 left its id empty and wrote `teammate_id=`; the name join identifies it). B: the
+# fresh launch. Only B is id-less AND unclaimed, so the start joins B.
+IFS='|' read -r SJC_REPO SJC_TR SJC_SUB SJC_CFG <<< "$(make_world startjoinclaimed yes)"
+SJC_ROSTER="$SJC_REPO/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$SJC_REPO" A toolu_01SJCA "$SJ_TYPE" suites_allowed=alpha.test.sh
+roster_row_fixture status=confirmed session="$SID_A" name=A agent_id=a0000000000sjcaa \
+  launched_at=2026-10-04T12:00:00Z "subagent_type=$SJ_TYPE" tool_use_id=toolu_01SJCA \
+  files= suites_source=declared suites_allowed=alpha.test.sh >> "$SJC_ROSTER"
+sj_intended "$SJC_REPO" M toolu_01SJCM "$SJ_TYPE" suites_allowed=gamma.test.sh
+roster_row_fixture status=confirmed session="$SID_A" name=M agent_id= teammate_id=M@session-sjc \
+  launched_at=2026-10-04T12:00:00Z "subagent_type=$SJ_TYPE" tool_use_id=toolu_01SJCM \
+  files= suites_source=declared suites_allowed=gamma.test.sh >> "$SJC_ROSTER"
+sj_intended "$SJC_REPO" B toolu_01SJCB "$SJ_TYPE" suites_allowed=beta.test.sh
+run_rec "$(mk_subagent_start "$SID_A" "$SJC_TR" "$SJC_REPO" "$SJ_TYPE" "a0000000000sjcbb")"
+SJC_ROW=$(grep 'status=identified' "$SJC_ROSTER")
+expect_eq "SJ-c1 the start joins the one unclaimed id-less row" "B" "$(sj_field "$SJC_ROW" name)"
+expect_eq "SJ-c2 …and only it" "1" "$(grep -c 'status=identified' "$SJC_ROSTER")"
+
+# ---------- SJ-d: two id-less rows share the type ----------
+# The start names one of them (the teammate shape: `agent_type` carries the name) → the name join
+# takes it. It names neither (a plain dispatch) → both are left and one line is logged; the
+# launch call's return still joins each by its tool_use_id.
+IFS='|' read -r SJD_REPO SJD_TR SJD_SUB SJD_CFG <<< "$(make_world startjointwo yes)"
+SJD_ROSTER="$SJD_REPO/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$SJD_REPO" D1 toolu_01SJD1 "$SJ_TYPE" suites_allowed=alpha.test.sh
+sj_intended "$SJD_REPO" D2 toolu_01SJD2 "$SJ_TYPE" suites_allowed=beta.test.sh
+run_rec "$(mk_subagent_start "$SID_A" "$SJD_TR" "$SJD_REPO" "$SJ_TYPE" "a0000000000sjdxx")"
+expect_eq "SJ-d1 a plain start against two id-less rows of its type joins neither" "0" \
+  "$(grep -c 'status=identified' "$SJD_ROSTER")"
+expect_eq "SJ-d2 …and logs exactly one line" "1" "$(printf '%s\n' "$REC_ERR" | grep -c 'execution-recorder:')"
+expect_contains "SJ-d3 …naming the agent it could not place" "a0000000000sjdxx" "$REC_ERR"
+expect_eq "SJ-d4 …both launch rows are still there, unjoined" "2" "$(grep -c 'status=intended' "$SJD_ROSTER")"
+run_rec "$(mk_subagent_start "$SID_A" "$SJD_TR" "$SJD_REPO" D2 "aD2-0000000000sjd2")"
+expect_eq "SJ-d5 a start that carries a name takes the row of that name" "D2" \
+  "$(sj_field "$(grep 'status=identified' "$SJD_ROSTER")" name)"
+expect_eq "SJ-d6 …with its id" "aD2-0000000000sjd2" "$(sj_field "$(grep 'status=identified' "$SJD_ROSTER")" agent_id)"
+
 finish
