@@ -4866,4 +4866,34 @@ W26_T57_D4="$(w26_doctor "$DISPATCH_MD" 'It reports `void`, not a failure, when 
 expect_nonempty "W26-T57em: a dispatch.md that keeps the old void sentence is caught" \
   "$(w26_hits 'not a failure, when the machine was disturbed' "$W26_T57_D4")"
 
+# ── §W27-111 / §W27-112 (wave-27 T13, REQ-11 AC-11.1, AC-11.2; D20): the task list is rebuilt at plan approval ──
+#
+# WHAT THIS OWNS. The approval block of steps/3.md carries the delete-and-recreate rule, the
+# `task-add` paragraph names the entry a new row gets and the recreated order, and steps/0.md's
+# format section points to Step 3. Each absence sits beside a positive through the same
+# extractor (`w26_hits`, a whitespace-normalised fixed-string find) on the same file, and a
+# doctored copy that has the old text back proves the pin goes red. HERMETIC: committed finals.
+W27_111_RULE='On approval, rebuild the task list from the plan before the first dispatch: delete every pending entry and recreate them in execution order'
+W27_111_ORDER='in the order the Step-3 card'"'"'s batches print'
+W27_111_APPEND='The task tool appends, so adding entries without recreating the later ones leaves the list out of order.'
+W27_111_PROGRESS="Mark a row's entry in progress in the turn it is dispatched."
+expect_nonempty "W27-111 precondition: the extractor finds the approval line on steps/3.md" \
+  "$(w26_hits 'approved-by: <user> <ISO-UTC>' "$STEP3_MD")"
+expect_nonempty "W27-111: AC-11.1 — steps/3.md carries the delete-and-recreate rule at approval" \
+  "$(w26_hits "$W27_111_RULE" "$STEP3_MD")"
+expect_nonempty "W27-111a: …in the card's batch order, naming one entry per ## Tasks row" \
+  "$(w26_hits "$W27_111_ORDER" "$STEP3_MD")"
+expect_nonempty "W27-111b: …and why the later entries are recreated" \
+  "$(w26_hits "$W27_111_APPEND" "$STEP3_MD")"
+expect_nonempty "W27-111c: …and marks a row's entry in progress when it is dispatched" \
+  "$(w26_hits "$W27_111_PROGRESS" "$STEP3_MD")"
+expect_nonempty "W27-111d: …and it sits after the approved-by block, before the card" \
+  "$(awk '/^approved-by: <user>/ { a = 1 } a && /On approval, rebuild the task list/ { r = 1 } r && /^Step 3 · Plan/ { print "ok"; exit } /^Step 3 · Plan/ { exit }' "$STEP3_MD")"
+expect_nonempty "W27-111e: steps/0.md's format section points to it" \
+  "$(w26_hits 'The per-task expansion happens at plan approval; see Step 3.' "$STEP0_MD")"
+expect_nonempty "W27-112: AC-11.2 — the task-add paragraph says a new row gets its task-list entry the same turn" \
+  "$(w26_hits 'A row added by `task-add` gets its task-list entry the same turn, and the entries after it are recreated to keep the order.' "$STEP3_MD")"
+expect_nonempty "W27-112a: …inside the paragraph that locks the wave shape at approval" \
+  "$(awk '/Wave shape locks at approval/ { p = 1 } p && /gets its task-list entry the same turn/ { print "ok"; exit }' "$STEP3_MD")"
+
 finish
