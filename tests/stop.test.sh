@@ -699,6 +699,17 @@ s7_fire "$S9_D0" "$S9_TX0"
 expect_contains "9h: a turn that launched nothing reads 0 of 2" "launched 0 of 2" "$(s9_headline)"
 expect_contains "9i: …and names both rows" "not launched: T13 T14" "$(s9_headline)"
 
+# T16 (wave-26, D17): the ledger line ends with `idle=` and `room=`, the ready rows no launch and no
+# decline covered while a slot was free, and the free slots at that moment. Positive on the same
+# line first: the launched row is out of idle, the unlaunched one is in, and room is the line's own free.
+S9_LED0="$S9_D0/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
+S9_FREE="$(sed -n 's/.*|free=\([0-9]*\)|.*/\1/p' "$S9_LED" 2>/dev/null)"
+expect_true "9n: T16 the ledger line carries a free count to compare room against" test -n "$S9_FREE"
+expect_contains "9o: T16 the row this turn did not launch is idle, the one it launched is not" \
+  "|idle=T14|room=$S9_FREE" "$(cat "$S9_LED" 2>/dev/null)"
+expect_contains "9p: T16 a turn that launched nothing leaves both ready rows idle" \
+  "|idle=T13,T14|room=" "$(cat "$S9_LED0" 2>/dev/null)"
+
 # THE LINE BUDGET (found while implementing, not at RED): the user line is width.sh's 100
 # columns and refuse.sh refuses a longer one, which would turn this refusal into a refuse-call
 # error. Eight ready rows, nothing launched: the headline names what fits and counts the rest,
