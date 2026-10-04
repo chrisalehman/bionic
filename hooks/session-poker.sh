@@ -2996,29 +2996,12 @@ launch_sync_lock() {  # <lock dir> <wait: yes|no> -> 0 held, 1 another live writ
 }
 
 # The tree and base spawn-worktree.sh recorded for <name> in this session, `path<TAB>base`, or
-# nothing. The file, its symlink refusals and its line filter are worktree.sh's; this reads the
-# base beside the path, which the public reader does not return. The last line wins.
+# nothing. worktree.sh owns the read (`workspace_record_for_name`, wave-26 T40): a path counts
+# only where git lists it as a linked worktree (wave-25 T18), so a line any script appended
+# naming the main checkout never fills a row; the last line that counts wins.
 launch_sync_workspace() {  # <root> <sid> <name>
-  local f
-  declare -F _wt_workspaces_file >/dev/null 2>&1 || return 0
-  f="$(_wt_workspaces_file "$1" "$2")" || return 0
-  _wt_workspaces_unlinked "$1" "$f" || return 0
-  [ -f "$f" ] && [ -r "$f" ] || return 0
-  LW_SID="$2" LW_NAME="$3" awk -F'|' -v schema="${WORKSPACE_SCHEMA:-workspace/v1}" '
-    BEGIN { sid = ENVIRON["LW_SID"]; want = ENVIRON["LW_NAME"] }
-    { sub(/\r$/, "") }
-    $1 != schema { next }
-    {
-      s = ""; n = ""; p = ""; b = ""; hn = 0
-      for (i = 2; i <= NF; i++) {
-        if (index($i, "session=") == 1) s = substr($i, 9)
-        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
-        else if (index($i, "path=") == 1) p = substr($i, 6)
-        else if (index($i, "base=") == 1) b = substr($i, 6)
-      }
-      if (s == sid && substr(p, 1, 1) == "/" && hn && n == want) last = p "\t" b
-    }
-    END { if (last != "") print last }' "$f" 2>/dev/null
+  declare -F workspace_record_for_name >/dev/null 2>&1 || return 0
+  workspace_record_for_name "$1" "$2" "$3" 2>/dev/null || return 0
 }
 
 # A recorded tree as the plan writes it: relative to the project root when it sits under it.
@@ -3344,6 +3327,8 @@ ${hand}  $(launch_sync_hand ledger-add "$lid" "${lpairs[@]}")"$'\n'
 #   patrol-<sid>.state[.armed] this file                     the Patrol stamp and its marker
 #   stop-orders-<sid>.state    hooks/stop-orders.sh          the order queue
 #   tick-digest-<sid>.state    this file                     the tick's digest and duty
+#   workspaces-<sid>.state     scripts/lib/worktree.sh       the run's workspace record
+#   gate-<sid>.state           hooks/permission-answer.sh    the reserved requests to escalate
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE THEREFORE UNREACHABLE FROM HERE, and that
 # is a property of the enumeration rather than a list to maintain: `context-spend.state` and
