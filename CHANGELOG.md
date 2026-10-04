@@ -255,6 +255,9 @@ Known limits, carried to the next release:
   the full runner would run it once and report it `void`.
 - A review row that is idle at a run's end stays pending, on the WAIT and CHAIN lines, until you set
   it landed or dropped.
+- The full-suite runner must be dispatched in the background, as every dispatch must. Dispatched in
+  the foreground, its own full run is refused with "no set was recorded for this agent", because a
+  launch is recorded only when the dispatch call returns; 1.10.0 behaves the same.
 - Each Bash call forks one more process than in 1.10.0, each tick and each turn end spends about
   0.4 s recording launches, and the plan-row verbs take 0.75 to 0.87 s on a loaded machine
   against a one-second budget; `proof-add review` takes 48 to 99 ms more for its range check.
