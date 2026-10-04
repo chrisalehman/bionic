@@ -138,6 +138,15 @@ expect_block "refspec push HEAD:main"                 "git push origin HEAD:main
 # A case-blind filesystem runs `GIT` as git (wave-24 T31): the capitalised push is a push.
 expect_block "capitalised: GIT push origin main"      "GIT push origin main"
 expect_block "capitalised: Git push (bare, on main)"  "Git push"
+# The words in front of git are names too (wave-25 T12): `SUDO` runs sudo and `BASH` runs bash
+# on a case-blind filesystem, so each of these is the push its lower-case form is.
+expect_block "capitalised prefix: SUDO git push origin main"   "SUDO git push origin main"
+expect_block "capitalised runner: BASH -c '<push>'"           "BASH -c 'git push origin main'"
+expect_block "capitalised prefix: Env X=1 git push"            "Env X=1 git push origin main"
+expect_block "capitalised prefix: NOHUP git push (bare)"       "NOHUP git push"
+# …and a commit is still a commit: this wall admits one on main, in either casing.
+expect_allow "control: bash -c '<commit>' on main is admitted" "bash -c 'git commit -m x'"
+expect_allow "capitalised runner: BASH -c '<commit>' is admitted exactly as bash -c is" "BASH -c 'git commit -m x'"
 
 # ============================================================
 # SECTION 2: On master branch — every push must be blocked
@@ -343,6 +352,15 @@ expect_block "AC-9 zsh -c '<string>'"             "zsh -c 'git push origin main'
 expect_block "AC-9 dash -c '<string>'"            "dash -c 'git push origin main'"
 expect_block "AC-9 eval \"<string>\""             'eval "git push origin main"'
 expect_block "AC-9 eval '<string>'"               "eval 'git push origin main'"
+# wave-25 T12: the prefix and runner words fold, off main too.
+expect_block "T12 SUDO -u <user>"                 "SUDO -u ci git push origin main"
+expect_block "T12 Time -p"                        "Time -p git push origin main"
+expect_block "T12 XARGS -I{}"                     "XARGS -I{} git push origin main"
+expect_block "T12 /usr/bin/ENV -C <dir>"          "/usr/bin/ENV -C $ENGAGED_REPO git push origin main"
+expect_block "T12 Eval '<string>'"                "Eval 'git push origin main'"
+expect_block "T12 ZSH -c '<string>'"              "ZSH -c 'git push origin main'"
+expect_allow "T12 SUDO push to a topic branch"    "SUDO git push origin topic/main"
+expect_allow "T12 sudoku is no prefix: not git"   "sudoku git push origin main"
 expect_block "AC-9 sh -c over a construct"        "sh -c '( git push origin main )'"
 
 # --- stacked: a prefix in front of a construct, and vice versa ---

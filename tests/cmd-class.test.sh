@@ -1842,6 +1842,113 @@ expect_true "§FX find-follow mutant parses" bash -n "$FX_MUT3"
 expect_eq "§FX find-follow mutant: plain -delete is still a D (the mutant runs)" "D${T}/a" "$(FX_LIB="$FX_MUT3" fx_shape 'find /a -delete')"
 expect_eq "§FX find-follow mutant: -L -delete names only the root — the defect" "D${T}/a" "$(FX_LIB="$FX_MUT3" fx_shape 'find -L /a -delete')"
 
+section "§FOLD — wave-25 T12: a command NAME is read the way the machine resolves it"
+# On a case-blind filesystem `BASH` runs bash, `TEE` runs tee and `RM` runs rm (`command -v
+# TEE` finds /usr/bin/TEE), so a reader that matched the literal name read each of them as an
+# unknown word: a suite the farm-out wall never saw, a memory-store write the memory wall never
+# saw, a delete the effects reader called unknown. The fold is ONE awk function
+# (`cmd_word_fold`, CMD_WORD_FOLD_AWK) applied to the command word and the wrapper words, in
+# every mode. Operands, paths, flags and subcommands never fold. Six builtins never fold either:
+# `cd`, `pushd`, `popd`, `wait`, `exit`, `return`, whose capitalised spelling is a different
+# program (/usr/bin/CD is `builtin cd` in a child shell and moves nothing) or no program. A
+# reader that folded them would believe in a directory change or an exit that never happened.
+
+# --- class: each name class, in its capitalised form, beside its lower-case control ---
+for _p in 'suite|bash tests/run.sh|BASH tests/run.sh' 'suite|bash tests/cmd-class.test.sh|Bash tests/cmd-class.test.sh' \
+          'suite|sudo bash tests/run.sh|SUDO bash tests/run.sh' 'suite|env bash tests/run.sh|ENV bash tests/run.sh' \
+          'suite|time bash tests/run.sh|TIME bash tests/run.sh' 'suite|nohup bash tests/run.sh|NOHUP bash tests/run.sh' \
+          'suite|timeout 60 bash tests/run.sh|TIMEOUT 60 bash tests/run.sh' 'suite|nice -n 5 bash tests/run.sh|Nice -n 5 bash tests/run.sh' \
+          'suite|xargs bash tests/run.sh|XARGS bash tests/run.sh' 'suite|ssh box bash tests/run.sh|SSH box bash tests/run.sh' \
+          'suite|command bash tests/run.sh|COMMAND bash tests/run.sh' 'suite|bash -c "bash tests/run.sh"|BASH -c "bash tests/run.sh"' \
+          'suite|eval "bash tests/run.sh"|EVAL "bash tests/run.sh"' 'suite|sh -c "sh tests/a.test.sh"|SH -c "SH tests/a.test.sh"' \
+          'suite|pytest|PYTEST' 'suite|jest|Jest' 'suite|npm test|NPM test' 'suite|npx jest|NPX jest' \
+          'suite|go test ./...|GO test ./...' 'suite|make test|Make test' 'build|make|MAKE' 'build|cargo build|CARGO build' \
+          'install|npm install|NPM install' 'install|pip install x|PIP install x' 'install|uv sync|UV sync' \
+          'install|brew install x|BREW install x' 'build|docker build .|DOCKER build .'; do
+  IFS='|' read -r _cls _lo _up <<< "$_p"
+  case_is "$_cls" "$_lo" "§FOLD control: $_lo is $_cls"
+  case_is "$_cls" "$_up" "§FOLD $_up is $_cls, exactly as $_lo"
+done
+# --- only the WORD folds: an operand, a path, a flag or a subcommand keeps its case ---
+case_is suite 'bash tests/run.sh'          '§FOLD control: the runner path in lower case is the suite'
+case_is none  'bash TESTS/RUN.SH'          '§FOLD an operand path never folds: TESTS/RUN.SH is not the runner'
+case_is none  './tests/X.TEST.SH'          '§FOLD a script path at argv[0] never folds either'
+case_is none  'npm TEST'                   '§FOLD a subcommand never folds: npm TEST is not npm test'
+case_is none  'bash -n tests/x.test.sh'    '§FOLD control: -n reads the suite and runs nothing'
+case_is suite 'bash -N tests/x.test.sh'    '§FOLD a flag never folds: -N is not -n'
+# --- cd is not folded: /usr/bin/CD moves nothing, so it licenses no bare run.sh ---
+case_is suite 'cd tests && bash run.sh'    '§FOLD control: a cd licenses the bare run.sh'
+case_is none  'CD tests && bash run.sh'    '§FOLD CD moves nothing, so it licenses nothing'
+
+# --- head: the tier-2 matcher reads the folded word ---
+expect_eq "§FOLD head: SUDO NPX comes off and the word folds" 'npx create-thing' "$(head_of _ 'SUDO NPX create-thing')"
+expect_eq "§FOLD head: GIT clone reads as git clone"            'git clone https://x/r.git' "$(head_of _ 'GIT clone https://x/r.git')"
+expect_eq "§FOLD head: a runner string's word folds too"         'docker run x' "$(head_of _ "BASH -c 'DOCKER run x'")"
+expect_eq "§FOLD head: bash <(CAT F) collapses as bash <(cat F)" 'bash tests/run.sh' "$(head_of _ 'bash <(CAT tests/run.sh)')"
+expect_eq "§FOLD head: only the word folds, never its operands"  'npx Create-Thing' "$(head_of _ 'NPX Create-Thing')"
+
+# --- targets and claims ---
+targets_are 'x.test.sh' 'bash tests/x.test.sh'
+targets_are 'x.test.sh' 'BASH tests/x.test.sh'
+targets_are 'run.sh'    'SUDO Bash tests/run.sh'
+targets_are ''          'bash tests/X.TEST.SH'
+
+# --- backgrounded: NOHUP is a wrapper; WAIT is /usr/bin/WAIT and collects no job ---
+bg_is yes 'NOHUP bash tests/run.sh'        '§FOLD NOHUP backgrounds as nohup does'
+bg_is no  'bash tests/run.sh & wait'       '§FOLD control: wait collects the job'
+bg_is yes 'bash tests/run.sh & WAIT'       '§FOLD WAIT is not wait: the job is still pending'
+
+# --- writes: every writer, and the wrappers in front of one ---
+wt_are '/a/f' 'echo x | TEE /a/f'
+wt_are '/a/f' 'Tee -a /a/f'
+wt_are '/a/y' 'CP /x /a/y'
+wt_are '/a/y' 'MV /x /a/y'
+wt_are '/a/t' 'TOUCH /a/t'
+wt_are '/a/d' 'MKDIR -p /a/d'
+wt_are '/a/l' 'LN -s /x /a/l'
+wt_are '/a/f' "SED -i '' s/a/b/ /a/f"
+wt_are '/a/f' 'SUDO tee /a/f'
+wt_are '/a/f' "BASH -c 'TEE /a/f'"
+wt_are '/a/f' 'cd /a && TEE f'
+wt_are '/A/F' 'TEE /A/F'
+wt_are ''     "SED -I '' s/a/b/ /a/f"
+wt_are '/x/f' 'cd /x && tee f' /w
+wt_are '/w/f' 'CD /x && tee f' /w
+
+# --- effects: deletes, writes and readers; the transparent prefixes fold ---
+fx_are "D${T}/a/b" 'RM -rf /a/b'
+fx_are "D${T}/a/b" 'Rm /a/b'
+fx_are "D${T}/a/d" 'RMDIR /a/d'
+fx_are "D${T}/a/u" 'UNLINK /a/u'
+fx_are "D${T}/a/b
+W${T}/c" 'MV /a/b /c'
+fx_are "W${T}/a/f" 'TOUCH /a/f'
+fx_are "D${T}/a/b" 'ENV rm /a/b'
+fx_are "D${T}/a/b" 'COMMAND rm /a/b'
+fx_are "D${T}/a/b" 'NOHUP rm /a/b'
+fx_are "D${T}/a/b" 'TIME rm /a/b'
+fx_are "D${T}/a/b" 'NICE -n 5 rm /a/b'
+fx_are "D${T}/a/b" 'TIMEOUT 5 rm /a/b'
+fx_are "D${T}/a/b" "BASH -c 'RM /a/b'"
+fx_are "D${T}/a/b" '/bin/RM /a/b'
+fx_are '' 'CAT /a/b'
+fx_are '' 'GIT status'
+fx_are '' 'Ls /a'
+fx_are "D${T}/A/B" 'rm -rf /A/B'
+fx_are "D${T}/x/f" 'cd /x && rm f' /w
+fx_are "D${T}/w/f
+?" 'CD /x && rm f' /w
+fx_are "D${T}/x/f" 'cd /x || exit; rm f' /w
+fx_are '?' 'cd /x || EXIT; rm f' /w
+
+# --- THE PLANTED DEFECT, as a mutant: the one awk fold made the identity ---
+FOLD_MUT="$SANDBOX/cmd-class.fold-mutant.sh"
+sed 's|^      if (w !~ /\[ABCDEFGHIJKLMNOPQRSTUVWXYZ\]/) return w$|      return w|' "$LIB" > "$FOLD_MUT"
+expect_eq "§FOLD mutant: one line changed" "1" "$(diff "$LIB" "$FOLD_MUT" | grep -c '^>')"
+expect_true "§FOLD mutant parses" bash -n "$FOLD_MUT"
+expect_eq "§FOLD mutant still reads rm -rf /a/b (the mutant runs)" "D${T}/a/b" "$(FX_LIB="$FOLD_MUT" fx_shape 'rm -rf /a/b')"
+expect_eq "§FOLD mutant reads RM -rf /a/b as unknown — the defect" '?' "$(FX_LIB="$FOLD_MUT" fx_shape 'RM -rf /a/b')"
+
 section "§QESC — wave-24 T30: a backslash before the close is read from one map, a word from one split"
 # `cmdnorm_qend` answers a double quote with a backslash before its close from a map of every
 # quote no backslash hides, built once per text, and `argv_tok` reads its characters from one
