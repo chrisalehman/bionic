@@ -1147,9 +1147,10 @@ so_roster_row "$R15" fu-row ".bionic/docs/record/fu.md" "" "fu-row@session-6c856
 R15CFG="$SANDBOX/r15-config"
 mkdir -p "$R15CFG/projects/-fixture"
 R15TR="$R15CFG/projects/-fixture/$SID.jsonl"
-r15_msg() {  # [name]
+r15_msg() {  # [name] — the agent's report, naming its deliverable (wave-24 T29: a message that
+  # names none is no completion signal)
   jq -nc --arg b "<teammate-message teammate_id=\"${1:-fu-row}\" color=\"blue\" summary=\"done\">
-report
+report: .bionic/docs/record/fu.md
 </teammate-message>" '{type:"user",timestamp:"2026-09-23T10:00:01.000Z",message:{role:"user",content:$b}}' >> "$R15TR"
 }
 r15_send() {  # [name]

@@ -1314,8 +1314,9 @@ DARK
   # the command that closes it. The same `budget_open_writers` that produced the count asks each
   # name alone, so the rows listed are the rows counted and a read-only row is never one of them.
   # Run on the refusal path only. The ack command is PRINTED for the orchestrator and never run
-  # here: this gate executes the sweeper on no path, and the suite pins that.
-  DP_ACK_SCRIPT="${HOOK_DIR}/session-sweeper.sh"
+  # here: this gate executes the sweeper on no path, and the suite pins that. The path is
+  # printed as ONE shell word, so a plugin root with a space pastes whole (wave-24 T29, I2).
+  DP_ACK_SCRIPT="$(refuse_shell_word "${HOOK_DIR}/session-sweeper.sh")"
   budget_writer_rows() {
     local f="$1" nm
     while IFS= read -r nm; do
@@ -2288,7 +2289,9 @@ dp_refuse_findings
 # the object through `jq`, so no JSON is escaped by hand here. This is the only stdout this path
 # prints (a refusal exited above, and nothing below writes to it), so it is one object by
 # construction. With no `jq` the lines fall back to `warn`, as fold.sh does for its own nudge.
-_dp_adv_all=$(brief_body_advisories "$(_jq '.tool_input.prompt')" "$AGENT_NAME" "$C_FILES" "$SUITES_ALLOWED" "$C_RE_EXECUTES" "$HOOK_DIR/session-poker.sh")
+# The poker path goes in as ONE shell word (wave-24 T29, critic I2): the amend line prints it
+# verbatim, and a plugin root with a space split in two when pasted.
+_dp_adv_all=$(brief_body_advisories "$(_jq '.tool_input.prompt')" "$AGENT_NAME" "$C_FILES" "$SUITES_ALLOWED" "$C_RE_EXECUTES" "$(refuse_shell_word "$HOOK_DIR/session-poker.sh")")
 if [ -n "$_dp_adv_all" ]; then
   _dp_adv_ctx="brief advisory (the dispatch is allowed; nothing was refused):
 $_dp_adv_all"
