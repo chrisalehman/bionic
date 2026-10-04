@@ -175,6 +175,13 @@ BIN_NO_CLAUDE="${TMP}/toolbox-no-claude"
 _TOOLS_MISSING="$(make_tool_dir "$BIN" yes)$(make_tool_dir "$BIN_NO_CLAUDE" no)"
 if [ -z "$_TOOLS_MISSING" ]; then ok "T0: the fixture's tool directory carries every program doctor runs"
 else no "T0: a program doctor runs is missing from the fixture's tool directory" "$_TOOLS_MISSING"; fi
+# THE HOST'S OWN TOOLS ARE NOT IN IT. Beside T0, which proves the directory is populated, this proves the
+# three tools doctor asks about and the host may really have are not reachable through it.
+_T0B_FOUND=""
+for _t0b in npm brew notebooklm; do
+  [ -e "${BIN}/${_t0b}" ] && _T0B_FOUND="${_T0B_FOUND} ${_t0b}"
+done
+expect_eq "T0b: the fixture's tool directory carries no npm, brew or notebooklm" "" "$_T0B_FOUND"
 
 # THE PAGE IS STDOUT, AND STDERR IS KEPT ASIDE RATHER THAN MERGED INTO IT.
 #
@@ -210,6 +217,31 @@ run_doctor_no_claude() {  # <claude-home> — the same page with the CLI off PAT
       bash "$DOCTOR_SH" < /dev/null 2>"$DOCTOR_ERR_FILE" )
 }
 
+# THE FILTERED RUN (BIONIC_DOCTOR_ONLY, doctor.sh's test seam). The same fixture and the same tool
+# directory, but doctor gathers and prints only the sections named: it skips the dependency sweep, which is
+# most of a whole run and reads nothing a version row, a drift line or a PATROL row is made of. Every launch
+# in this suite, whole or filtered, runs with PATH replaced by the tool directory above, so no launch reaches
+# the host's installed claude, npm, brew, notebooklm, pnpm or uv: `claude` is a stub that exits 1 at once, the
+# others are inert stubs or absent (T0b below pins the absent three).
+#
+# A ROW MAY USE IT ONLY IF (1) every line it asserts on is printed by a section in the filter: the NATIVE
+# table (the version row among it), PATROL (the drift line), PROJECT or the fix lines; (2) a row that asserts a
+# line ABSENT reads a line with one producer in doctor.sh, so absence on the subset is absence on the page (the
+# drift line has one; the version row is the one `version_row` extracts, and Section 11 checks that the
+# filtered page's row is the whole page's); (3) it does not read the header, the problem count, the verdict
+# block's fix lines, `plugin source:`, the other tables or RESOURCES; (4) its section keeps at least one whole
+# run; (5) Section 11 compares a filtered page with the whole page on one fixture.
+#
+# EVERY SECTION KEEPS A WHOLE RUN, because a defect at the doctor's entry point (the option parser, the
+# library sourcing) is only seen by a row that executes the real page. The rows that read a line no filter
+# prints stay whole: the fit-the-budget rows, the fix-line rows, the header and `plugin source:` rows, and the
+# MCP rows of Section 12.
+run_doctor_only() {  # <sections> <claude-home> [cwd] — the filtered page; stderr kept in $DOCTOR_ERR_FILE
+  ( cd "${3:-$REPO}" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_DOCTOR_ONLY="$1" \
+      BIONIC_CLAUDE_HOME="$2" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      bash "$DOCTOR_SH" < /dev/null 2>"$DOCTOR_ERR_FILE" )
+}
+
 # The version row alone — the one line in BIONIC NATIVE beginning with one of
 # the three status glyphs followed by "version". Read to EOF (no `grep -q`
 # early close, per assert-helper-race.test.sh).
@@ -222,6 +254,12 @@ run_doctor_no_claude() {  # <claude-home> — the same page with the CLI off PAT
 # and same repair as tests/doctor-walls.test.sh's `walls_rows`.
 version_row() {  # <full-output>
   printf '%s\n' "$1" | awk '/^  [^ ]+ version /'
+}
+
+# The BIONIC NATIVE table: from its heading to the blank line that ends it (no row in it is blank). Read to
+# EOF, so no early close; the same extractor serves a whole page and a filtered one.
+native_block() {  # <output>
+  printf '%s\n' "$1" | awk '/^BIONIC NATIVE/ { p = 1 } p && /^$/ { exit } p'
 }
 
 section "Section 1: git feed, installed == marketplace latest"
@@ -462,7 +500,9 @@ expect_all_lines_fit "29: the malformed-version page still fits the budget" "$OU
 CLONE8="$(make_git_marketplace_clone "9.9.9-rc.1")"
 HOME8="$(make_registry_home)"
 write_known_marketplaces "$HOME8" '{"source":"github","repo":"example/bionic"}' "$CLONE8"
-ROW8="$(version_row "$(run_doctor "$HOME8")")"
+# The filtered run (see `run_doctor_only`): row 30 reads only the version row, and this section keeps
+# the whole run above (OUT7) for 26-29.
+ROW8="$(version_row "$(run_doctor_only NATIVE "$HOME8")")"
 expect_match "30: a dotted/dashed prerelease version is still reported" \
   "*9.9.9-rc.1 available*" "$ROW8"
 
@@ -706,7 +746,7 @@ write_installed_plugins_sha "$HOME10" "$REPO" "$REPO_HEAD"
 
 # The same run, from the unrelated repository. `run_doctor` cd's to $REPO, so
 # this case spells its own cd — that is the variable under test.
-OUT10="$( cd "$UNRELATED" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+OUT10="$( cd "$UNRELATED" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
     BIONIC_CLAUDE_HOME="$HOME10" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
     bash "$DOCTOR_SH" < /dev/null 2>&1 )"
 ROW10="$(version_row "$OUT10")"
@@ -733,9 +773,10 @@ HOME12="$(make_registry_home)"
 write_known_marketplaces "$HOME12" '{"source":"directory","path":"'"$REPO"'"}' "$REPO"
 write_installed_plugins_sha "$HOME12" "$NOREPO" "$REPO_HEAD"
 
-OUT12="$( cd "$UNRELATED" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
-    BIONIC_CLAUDE_HOME="$HOME12" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
-    bash "$DOCTOR_SH" < /dev/null 2>&1 )"
+# The filtered run from the unrelated cwd (the cwd is the variable under test, and `run_doctor_only` takes
+# it): 37b and 37c read only the version row. The whole run from that cwd is OUT10 above, which also
+# reads the header.
+OUT12="$(run_doctor_only NATIVE "$HOME12" "$UNRELATED")"
 ROW12="$(version_row "$OUT12")"
 
 expect_match "37b: a registry path with no history falls through to the plugin root" \
@@ -772,6 +813,59 @@ expect_no_match "41: an ahead install raises no verdict line" \
 expect_no_match "42: an ahead install is not marked broken" "*✗ version*" "$ROW11"
 
 
+section "Section 11: the NATIVE filter prints the BIONIC NATIVE table, and only it"
+
+# WHAT THIS SECTION OWNS. Rows 30, 37b, 37c, 62 and 63 run the filtered doctor (`run_doctor_only`), and
+# they are only as good as the claim that a filtered page carries the same lines as the whole one. The whole
+# page here is Section 2's (OUT2: a git feed that lags, so the table carries a ✗ version row) and the
+# filtered page is the same fixture through the seam. The whole run these rows stand on is that one: a
+# defect at the doctor's entry point empties both pages and every row below goes red with it.
+BLOCK_WHOLE2="$(native_block "$OUT2")"
+OUT_ONLY2="$(run_doctor_only NATIVE "$HOME2")"
+BLOCK_ONLY2="$(native_block "$OUT_ONLY2")"
+
+expect_match "64: the whole page's table carries the lagging version row (the positive for 65)" \
+  "*✗ version*9.9.9 available*" "$BLOCK_WHOLE2"
+expect_match "65: a filtered NATIVE run prints the BIONIC NATIVE table, with the version row" \
+  "BIONIC NATIVE*✗ version*9.9.9 available*" "$BLOCK_ONLY2"
+expect_eq "66: …and that table is the whole page's, line for line" "$BLOCK_WHOLE2" "$BLOCK_ONLY2"
+expect_eq "67: …so the version row a filtered run prints is the whole page's" \
+  "$ROW2" "$(version_row "$OUT_ONLY2")"
+
+# NOTHING ELSE RIDES IT. The positives are the whole page's own header, THIRD PARTY heading and verdict
+# line on the same fixture; the verdict line is the `→` that begins a line (the version row carries one
+# mid-line).
+arrow_lines() { printf '%s\n' "$1" | awk '/^→ /'; }
+expect_match "68: the whole page carries the header and the THIRD PARTY table" \
+  "Bionic Doctor — payload*THIRD PARTY*" "$OUT2"
+expect_nonempty "69: …and a verdict line (the positive for 72)" "$(arrow_lines "$OUT2")"
+expect_no_match "70: a filtered NATIVE page has no header" "*Bionic Doctor — payload*" "$OUT_ONLY2"
+expect_no_match "71: …no THIRD PARTY table" "*THIRD PARTY*" "$OUT_ONLY2"
+expect_empty "72: …and no verdict line" "$(arrow_lines "$OUT_ONLY2")"
+
+# THE GATHER THAT MOVED OUT OF THE SWEEP STILL RUNS. The duplicate-registration scan is one of the two
+# gathers the table needs: on a registry that names bionic under two marketplaces the table carries a
+# `duplicates` row, and the filtered page must carry it too. The control is the same fixture with the
+# second registration removed.
+dup_row() { printf '%s\n' "$1" | awk '/^  [^ ]+ duplicates /'; }
+HOME_DUP="$(make_registry_home)"
+write_known_marketplaces "$HOME_DUP" '{"source":"github","repo":"example/bionic"}' "$CLONE1"
+jq -nc '{plugins:{"bionic@bionic":[{installPath:"/x/a"}], "bionic@my-fork":[{installPath:"/x/b"}]}}' \
+  > "$HOME_DUP/plugins/installed_plugins.json"
+HOME_ONE="$(make_registry_home)"
+write_known_marketplaces "$HOME_ONE" '{"source":"github","repo":"example/bionic"}' "$CLONE1"
+jq -nc '{plugins:{"bionic@bionic":[{installPath:"/x/a"}]}}' > "$HOME_ONE/plugins/installed_plugins.json"
+expect_match "73: a registry naming bionic twice prints a duplicates row on the filtered page" \
+  "*duplicates*registered twice*" "$(dup_row "$(run_doctor_only NATIVE "$HOME_DUP")")"
+expect_empty "74: …and the same registry naming it once prints none" \
+  "$(dup_row "$(run_doctor_only NATIVE "$HOME_ONE")")"
+
+# AN UNKNOWN NAME IS REFUSED, and the refusal lists the valid ones, this one among them.
+UNK_OUT="$(run_doctor_only NOPE "$HOME2")"; UNK_RC=$?
+expect_eq "75: an unknown section name exits 2 with nothing on stdout" "2:" "${UNK_RC}:${UNK_OUT}"
+expect_match "76: …and the refusal on stderr lists NATIVE among the valid names" \
+  "doctor.sh: unknown section 'NOPE'*NATIVE*" "$(cat "$DOCTOR_ERR_FILE" 2>/dev/null)"
+
 section "Section 12: the claude CLI absent, and present, on one fixture (AC-7)"
 
 # THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
@@ -784,7 +878,9 @@ section "Section 12: the claude CLI absent, and present, on one fixture (AC-7)"
 # asserted here — the absent render, and the present one that proves the absent
 # assertion is not matching everything.
 OUT_NOCLI="$(run_doctor_no_claude "$HOME1")"
-OUT_WITHCLI="$(run_doctor "$HOME1")"
+# The CLI-present half is Section 1's page: `run_doctor "$HOME1"` again would be the same drive on the
+# same fixture with the same tool directory, so it is read, not repeated.
+OUT_WITHCLI="$OUT1"
 
 expect_match "43: with the CLI off PATH, an MCP row names that as the cause"   "*chrome-devtools*the claude CLI is not on PATH*" "$OUT_NOCLI"
 expect_no_match "44: …and with the CLI present that cause is nowhere on the page"   "*the claude CLI is not on PATH*" "$OUT_WITHCLI"
@@ -910,11 +1006,14 @@ expect_match "61: …naming the running root and the remedy" \
   "*running=${PAYLOAD} — the Patrol must be armed from the running root*" "$LINE_DIFFER"
 
 H_SAME="$(make_drift_home same)"
-OUT_SAME="$(run_doctor "$H_SAME")"
+# 62 and 63 run the filtered doctor (`run_doctor_only`): the drift line is printed by the PATROL section
+# and has one producer in doctor.sh, so its absence on the filtered page is its absence on the whole one.
+# The whole run of this section is H_DIFFER above.
+OUT_SAME="$(run_doctor_only PATROL "$H_SAME")"
 expect_eq "62: byte-identical pokers print no drift line" "" "$(drift_line "$OUT_SAME")"
 expect_match "62b: …and the page still rendered (the PATROL section is there)" "*PATROL*" "$OUT_SAME"
 
-OUT_NOENTRY="$(run_doctor "$(make_registry_home)")"
+OUT_NOENTRY="$(run_doctor_only PATROL "$(make_registry_home)")"
 expect_eq "63: no registry entry for bionic prints no drift line" "" "$(drift_line "$OUT_NOENTRY")"
 expect_match "63b: …and the page still rendered" "*PATROL*" "$OUT_NOENTRY"
 
