@@ -503,6 +503,27 @@ expect_eq "5d2: the 3-segment chain with no tier-1 segment is silent (chain tier
 expect_contains "5d3: …and the same chain with a build segment behind it still denies — the hook ran the chain path to completion" \
   "chain-class command" "$CHAIN_DENY_OUT"
 
+# THE WRAPPED CALL IS CLASSIFIED ONCE TOO (wave-26 T39). The booking wrap (`_bsg_wrap_text`,
+# wave-26 T7) asks for the command's class and its segment lines, and a short call asks it
+# twice: farm-out's short pass to learn whether the kill can ride, then background-suite-guard
+# to stage it (A-T9.10). Each ask used to fork its own `cmd_class` and `cmd_class_lines`, four
+# readings of one text; they now read the one reading the hook made. 5e1 is the proof the
+# call was wrapped at all, so the count is not one made by a hook that left early.
+WRAP_PAYLOAD=$(jq -nc --arg s "$SID" --arg c "$PROJECT" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+    tool_input:{command:"bash tests/x.test.sh", timeout:60000}, tool_use_id:"toolu_t39_wrap"}')
+WRAP_OUT=$(printf '%s' "$WRAP_PAYLOAD" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" \
+  CLAUDE_PROJECT_DIR="" BIONIC_PLUGINS_DIR="$NO_PLUGINS" bash "$BASH_WALLS_HOOK" 2>/dev/null)
+FD_WRAP="$SANDBOX/tracefd-wrap.txt"
+trace_fd_hook "$BASH_WALLS_HOOK" "$WRAP_PAYLOAD" "$FD_WRAP"
+WRAP_LINES_FORKS=$(count_mode "$FD_WRAP" lines)
+echo "hook-latency: wrapped short suite call — classifier mode=lines=$WRAP_LINES_FORKS"
+
+expect_eq "5e: a suite call the hook wraps is classified once, not once per ask" \
+  "1" "$WRAP_LINES_FORKS"
+expect_contains "5e1: …and it is wrapped: the staged command is the booking shim's" \
+  "booked.sh" "$WRAP_OUT"
+
 # ─────────────────────────────────────────────────────────────────────────────
 section "6: the governing-skill hook walks the plans directory exactly once"
 
