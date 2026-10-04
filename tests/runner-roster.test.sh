@@ -839,4 +839,39 @@ expect_eq "9.26 …and completion order really did disagree: the slow suite land
 expect_eq "9.27 …while the report printed that same suite FIRST" \
   "aaa-slow.test.sh" "$(rr_labels_ordered "$RR9_OUT" | sed -n '1p')"
 
+
+# ============================================================
+section "§10 the header names the head and the dirt of the tree under test (wave-26 T4; D5)"
+# ============================================================
+#
+# A run's verdict is a claim about one state of the code, so the header says which:
+# `head=<40-hex> dirty=<porcelain lines>` for the tree the runner cd's into. The scratch tree
+# is made a repository with one commit and then dirtied by a file it does not track; the
+# expected values are git's own answers for that tree, taken by this suite, not counts
+# written down here. A tree that is no repository says so rather than inventing a head.
+T10="$TMPROOT/t10"
+rr_tree "$T10"
+rr_stub "$T10" "h-one"
+( cd "$T10" && git init -q . && git add -A \
+  && git -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+       -c core.hooksPath=/dev/null commit -q -m tree ) >/dev/null 2>&1
+printf 'untracked\n' > "$T10/dirt.txt"
+T10_HEAD="$(git -C "$T10" rev-parse HEAD 2>/dev/null)"
+T10_DIRTY="$(git -C "$T10" status --porcelain 2>/dev/null | awk 'END { print NR+0 }')"
+expect_regex "10.0 precondition: the scratch tree has a 40-hex head" '^[0-9a-f]{40}$' "$T10_HEAD"
+expect_true "10.0b precondition: …and git counts it dirty" test "$T10_DIRTY" -gt 0
+rr_drive "$T10"
+expect_eq "10.1 the run over the scratch tree is green" "0" "$RR_RC"
+expect_eq "10.2 the header carries one head= line, naming that tree's head and dirt" \
+  "head=${T10_HEAD} dirty=${T10_DIRTY}" "$(printf '%s\n' "$RR_OUT" | /usr/bin/grep '^head=')"
+expect_true "10.3 …and it sits in the header, before the first suite's verdict" \
+  test "$(printf '%s\n' "$RR_OUT" | awk '/^head=/ { print NR; exit }')" -lt \
+       "$(printf '%s\n' "$RR_OUT" | awk '/h-one\.test\.sh/ { print NR; exit }')"
+T10N="$TMPROOT/t10n"
+rr_tree "$T10N"
+rr_stub "$T10N" "h-two"
+rr_drive "$T10N"
+expect_eq "10.4 a tree that is no repository names no head" "head=none dirty=none" \
+  "$(printf '%s\n' "$RR_OUT" | /usr/bin/grep '^head=')"
+
 finish
