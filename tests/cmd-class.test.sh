@@ -1944,8 +1944,8 @@ fxr_are "R${T}/a/f" 'tail -n 2 /a/f' /w
 fxr_are "R${T}/a/f
 R${T}/a/g" 'wc -l /a/f /a/g'
 fxr_are "R${T}/a/in" 'cat < /a/in'
-fxr_are "W${T}/w/f
-R${T}/h/.ssh/id_rsa" 'tee f < ~/.ssh/id_rsa' /w
+fxr_are "R${T}/h/.ssh/id_rsa
+W${T}/w/f" 'tee f < ~/.ssh/id_rsa' /w
 fxr_are "R${T}/a/f" 'grep x /a/f'
 fxr_are "R${T}/a/f" "grep -e 'x' -- /a/f"
 fxr_are '' 'grep x'
@@ -1982,7 +1982,10 @@ fxr_are '' 'test -f /a/f' /w
 fxr_are '?' 'cat ~/.ss?/id'
 fxr_are '?' 'cat f'
 fxr_are '?' 'cd $X && cat f' /w
-fxr_are '?' 'cp ~/.ss?/id /w/k' /w
+fxr_are "W${T}/w/k
+?" 'cp ~/.ss?/id /w/k' /w
+# …and without the word the output is the one it always was: the hook asks for reads (T17).
+fx_are "W${T}/w/k" 'cp ~/.ss?/id /w/k' /w
 # A read beneath a cp or mv destination written earlier reads through what was copied there.
 fxr_are "RR${T}/w/a
 W${T}/w/b
