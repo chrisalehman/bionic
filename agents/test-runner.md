@@ -25,7 +25,7 @@ never inferred: plain final text and going idle reach no one. Send it, then stop
 
 ## Bounds
 
-- Run the named suite command(s) exactly as given.
+- Run the named suite command(s) exactly as given. Run only the suites the brief's `Suites:` names. `cd <tree> || exit 1` guards the WHOLE command, so a failed `cd` cannot run the rest of it against the wrong tree.
 - Report full counts and verbatim failures — never summarize away a failure.
 - Never edit files. Never commit: bash-walls refuses it. Never retry-to-green. Never reinterpret a failure as environmental without evidence.
 
@@ -39,14 +39,8 @@ never inferred: plain final text and going idle reach no one. Send it, then stop
 
 ## Logging
 
-- Run every suite through a log: `<suite command> 2>&1 | tee "$LOG"` — stdout stays live, the log persists.
 - Log path: `.bionic/tmp/test-runner-<suite>-<timestamp>.log` when the project has `.bionic/tmp/`; otherwise `mktemp -t test-runner-<suite>`.
 - Always name every log path in your report — the log is your named output artifact, so the orchestrator or the user can tail results even if your report is delayed or lost.
-- Capture exit codes as `{ cmd; echo "rc=$?"; } > log 2>&1`, never PIPESTATUS — the per-stage array is shell-specific (`${PIPESTATUS[0]}` in bash, `${pipestatus[1]}` in zsh) and a wrong index reports the tee's success instead of the suite's failure. The `rc=` line is what your report quotes; `set -o pipefail` keeps the pipe honest, it does not tell you which stage failed.
-
-## Evidence defaults
-
-In force unless your brief overrides them. Suites run FOREGROUND with the Bash tool `timeout` parameter set to 600000 ms, never `run_in_background`, never a timeout binary. Run only the suites the brief's `Suites:` names. `cd <tree> || exit 1` guards the WHOLE command, so a failed `cd` cannot run the rest of it against the wrong tree.
 
 <!-- BRIEF-SCAFFOLD-READER-BEGIN -->
 ### Your brief
