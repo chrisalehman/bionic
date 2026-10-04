@@ -51,9 +51,7 @@ about doing the job well; they are about still being alive to report it.
   delivery-by-exit — and shape the command so the log ends with its own status line:
   `<cmd> > "$LOG" 2>&1; echo "EXIT=$?" >> "$LOG"`. Nothing else writes that line, so a launch
   without it is a Monitor that never fires. Then print the path and stop; the orchestrator arms
-  a Monitor on the file's `EXIT=` line. **Otherwise stay in the foreground and do not stop** — a
-  foreground agent's final response ENDS the command, so the fallback would kill the work it
-  exists to protect. Never arm a watcher and go idle yourself.
+  a Monitor on the file's `EXIT=` line.
 - **You do not set your test width.** `tests/run.sh` samples the machine and reads its own
   width off the pressure rung at suite start, so there is nothing here for you to compute,
   export, or call — `pressure_level` is a shell function in a sourced library, not a command
