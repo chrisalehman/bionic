@@ -9837,11 +9837,14 @@ expect_eq "S18.1 …and no hook file carries --name-only" "" \
 
 # A SECOND RECONCILIATION IS RED, written the ways a real one would be (review 11 S2, cases A to
 # C), never in the detector's own spelling: each is one added file in a copy of the library, and
-# the exactly-one row asked of that copy reads 2.
+# the exactly-one row asked of that copy reads 2. No source is doctored, so there is no source
+# line for §S19.4's anchor to hold: the added file is written through `$s18_new`, a name its
+# cross-gate site pattern does not read as a mutant.
 s18_second() {  # <label> <body> -> "<parses> <count>" for a copy of the library plus recon2.sh
+  local s18_new="$S18_MUT/recon2.sh"
   rm -rf "$S18_MUT"; mkdir -p "$S18_MUT"; cp "$S18_LIB_DIR"/*.sh "$S18_MUT/"
-  printf '#!/bin/bash\n%s\n' "$2" > "$S18_MUT/recon2.sh"
-  printf '%s %s' "$(bash -n "$S18_MUT/recon2.sh" 2>/dev/null && echo yes || echo no)" \
+  printf '#!/bin/bash\n%s\n' "$2" > "$s18_new"
+  printf '%s %s' "$(bash -n "$s18_new" 2>/dev/null && echo yes || echo no)" \
     "$(s18_reconcilers "$S18_MUT" | grep -c . | tr -d ' ')"
 }
 S18_MUT="$SANDBOX/s18-lib"
