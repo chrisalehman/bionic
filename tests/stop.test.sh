@@ -1424,5 +1424,15 @@ expect_contains "LH4 precondition: the proof at C is now newer than the tick" "h
 s7_fire "$LH_D" "$LH_TX"
 expect_absent "LH4: §F3 a proof newer than the tick's digest leaves its head out: no review of nothing" \
   "Fillable gap" "$(reason_of)$STOP_ERR"
+# LH5 (wave-26 T54; review 17 N4): the proof at C made in the tick's own second. A proof in the
+# same second as the digest cannot be ordered against it, and keeping the head owed a review of
+# nothing once; a tie now hands in no head, and the review waits for the next tick. LH4's control,
+# on this fixture, is the positive: a proof older than the digest still owes it.
+sed -i.bak "s/head=$LH_C at=2026-10-04T02:00:00Z/head=$LH_C at=2026-10-04T01:00:00Z/" "$LH_P"
+expect_contains "LH5 precondition: the proof at C carries the digest's own second" "head=$LH_C at=2026-10-04T01:00:00Z" \
+  "$(grep '^proved: kind=review' "$LH_P" | tail -1)"
+s7_fire "$LH_D" "$LH_TX"
+expect_absent "LH5: §N4 a proof in the digest's own second leaves its head out: no review of nothing" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
 
 finish

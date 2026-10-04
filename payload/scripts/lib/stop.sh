@@ -2374,9 +2374,12 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     # (a)). The digest can be fresh for the turn and still older than a `proof-add review` made
     # after the tick at a newer head (a landing, then the proof): handed in, the tick's head reads
     # as a landing past that proof and the wall would owe a review of nothing. So the head goes in
-    # only when the digest's `at=` is not older than the newest review proof's `at=`; otherwise
+    # only when the digest's `at=` is newer than the newest review proof's `at=`; otherwise
     # there is none, as off a tick's turn, and the review waits for the next tick. Both stamps are
     # the wall's already: the digest it reads above and the plan it was handed. No git is read.
+    # A TIE HANDS IN NO HEAD (wave-26 T54; review 17 N4): a proof in the tick's own second cannot
+    # be ordered against it, and the soft side is a review that waits one tick, not one owed for
+    # nothing.
     if [ -n "$at" ] && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
       _ST_LIVE_HEAD="$(tick_digest_field "$digest" head)"
       if [ -n "$_ST_LIVE_HEAD" ] && [ -n "$_ST_PLAN" ]; then
@@ -2387,7 +2390,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
           insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {
             a = substr($0, RSTART + 4, RLENGTH - 4); if (a > m) m = a }
           END { print m }' "$_ST_PLAN" 2>/dev/null)"
-        [ -n "$rvat" ] && [ "${at:0:19}" \< "${rvat:0:19}" ] && _ST_LIVE_HEAD=""
+        [ -n "$rvat" ] && ! [ "${rvat:0:19}" \< "${at:0:19}" ] && _ST_LIVE_HEAD=""
       fi
     fi
   fi
