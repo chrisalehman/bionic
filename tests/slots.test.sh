@@ -467,11 +467,6 @@ B12_T0=$SECONDS
 B12_DT=$((SECONDS - B12_T0))
 expect_ne "B12.11 slots_take_all itself answers non-zero on that store" 0 "$B12_RC"
 expect_true "B12.12 …at once (took ${B12_DT}s)" test "$B12_DT" -le 2
-# --unbooked (T9) takes no place, so a store it cannot write is nothing to it: it runs and
-# says nothing about the store (A-T36.10).
-B12_OUT="$(bk --unbooked --kill-after 5 -- 'echo ran-short; exit 4' 2>&1)"; B12_RC=$?
-expect_status "B12.13 --unbooked on that store runs its command with its own code" 4 "$B12_RC"
-expect_eq "B12.14 …and prints only the command's output, no line about the store" "ran-short" "$B12_OUT"
 chmod 755 "$ST"
 
 # B13. Words after `--` are never re-parsed as shell (review 4 F6). The one meaning is one
@@ -485,15 +480,13 @@ B13_OUT="$(bk -- "printf '%s\n' 'one-literal-argument; echo SECOND-COMMAND-RAN'"
 expect_status "B13.4 the same command as one word runs" 0 "$B13_RC"
 expect_eq "B13.5 …with its quoted argument kept literal" \
   "one-literal-argument; echo SECOND-COMMAND-RAN" "$B13_OUT"
-# The one-word rule holds with --unbooked and --kill-after alike (A-T36.11).
-B13_OUT="$(bk --unbooked --kill-after 5 -- printf '%s\n' 'x; echo SECOND-COMMAND-RAN' 2>&1)"; B13_RC=$?
-expect_status "B13.6 several words with --unbooked --kill-after are a usage error (exit 2)" 2 "$B13_RC"
-expect_absent "B13.7 …and nothing in them ran" "SECOND-COMMAND-RAN" "$B13_OUT"
+# The one-word rule holds with --kill-after too (A-T36.11).
 B13_OUT="$(bk --kill-after 5 -- printf '%s\n' 'x; echo SECOND-COMMAND-RAN' 2>&1)"; B13_RC=$?
-expect_status "B13.8 …and with --kill-after alone (exit 2)" 2 "$B13_RC"
+expect_status "B13.8 several words with --kill-after are a usage error (exit 2)" 2 "$B13_RC"
 expect_contains "B13.9 …saying to pass one word" "one word" "$B13_OUT"
-B13_OUT="$(bk --unbooked --kill-after 5 -- "printf '%s\n' 'x; echo SECOND-COMMAND-RAN'" 2>&1)"; B13_RC=$?
-expect_eq "B13.10 the same command as one word runs under --unbooked, its argument literal" \
+expect_absent "B13.7 …and nothing in them ran" "SECOND-COMMAND-RAN" "$B13_OUT"
+B13_OUT="$(bk --kill-after 5 -- "printf '%s\n' 'x; echo SECOND-COMMAND-RAN'" 2>&1)"; B13_RC=$?
+expect_eq "B13.10 the same command as one word runs under --kill-after, its argument literal" \
   "x; echo SECOND-COMMAND-RAN" "$B13_OUT"
 
 # ═══════════════════════════════════════════════════════════════════ §QUIET
@@ -945,34 +938,92 @@ K3_STAMPS="$(stamps_of "$ROW/repo")"
 expect_status "K3.1 the killed run exits 124" 124 "$K3_RC"
 expect_regex "K3.2 …and its stamp says rc=124" '\|rc=124\|' "$(tail -1 "$K3_STAMPS" 2>/dev/null)"
 
-# U1. --unbooked: the kill and its line, and nothing else. The wall sends a short command with
-# no suite segment this way (A-T9.1): a stamp is a suite's proof and the landing rule reads the
-# LAST one in a tree, so a short `make` must neither stamp nor take a place. Each negative sits
-# beside the booked run's positive on the same store and the same stamp file.
-newrow u1
+# K4. THE LIMIT COVERS THE WAIT FOR A PLACE (review 8 F2, A-T44.2). The only place is held past
+# the limit, so the command cannot start inside it: the shim gives up AT the limit, not at the
+# ceiling, with the line and the code of a run killed at its limit, and runs nothing.
+newrow k4
 mkrepo "$ROW/repo"
-U1_STAMPS="$(stamps_of "$ROW/repo")"
-U1_PROBE="printf '%s|' \"\${BIONIC_SLOT_HELD:-unset}\"; cat '$ST'/place.*/pid 2>/dev/null | grep -c . ; true"
-U1_BOOKED="$( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
-    bash "$BOOKED" --kill-after 5 -- "$U1_PROBE" 2>/dev/null )"; U1_RC=$?
-expect_status "U1.1 control: a booked --kill-after run exits 0" 0 "$U1_RC"
-expect_eq "U1.2 …inside a place it holds (held, one place)" "1|1" "$U1_BOOKED"
-U1_N0="$(grep -c . "$U1_STAMPS" 2>/dev/null)"
-expect_eq "U1.3 …and it stamped" "1" "$U1_N0"
-U1_UNB="$( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 BIONIC_QUIET=1 \
-    bash "$BOOKED" --unbooked --kill-after 5 -- "$U1_PROBE" 2>/dev/null )"; U1_RC=$?
-expect_status "U1.4 --unbooked runs the command, its code passed through" 0 "$U1_RC"
-expect_eq "U1.5 …holding no place, BIONIC_QUIET in the environment unread" "unset|0" "$U1_UNB"
-expect_eq "U1.6 …and writing no stamp" "$U1_N0" "$(grep -c . "$U1_STAMPS" 2>/dev/null)"
-U1_OUT="$( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 \
-    bash "$BOOKED" --unbooked --kill-after 1 -- 'sleep 20; echo never' 2>&1 )"; U1_RC=$?
-expect_status "U1.7 --unbooked still kills past the limit: exit 124" 124 "$U1_RC"
-expect_contains "U1.8 …with the short-limit line" "over the short limit" "$U1_OUT"
-expect_eq "U1.9 …and a killed unbooked run stamps nothing either" "$U1_N0" "$(grep -c . "$U1_STAMPS" 2>/dev/null)"
-bk --unbooked -- 'touch u.ran' > /dev/null 2>&1; U1_RC=$?
-expect_status "U1.10 --unbooked without --kill-after is a usage error" 2 "$U1_RC"
-bk --unbooked --quiet --kill-after 5 -- 'touch u.ran' > /dev/null 2>&1; U1_RC=$?
-expect_status "U1.11 --unbooked with --quiet is a usage error" 2 "$U1_RC"
-expect_false "U1.12 …and neither ran the command" test -e "$ROW/u.ran"
+K4_STAMPS="$(stamps_of "$ROW/repo")"
+sleep 30 & K4_H=$!; BG="$BG $K4_H"
+mkdir -p "$ST/place.1"; printf '%s\n' "$K4_H" > "$ST/place.1/pid"
+K4_T0=$SECONDS
+K4_OUT="$( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=1 BIONIC_SLOTS_POLL=0.1 \
+    BIONIC_SLOTS_MAX_WAIT=12 bash "$BOOKED" --kill-after 2 -- "touch $ROW/k4.ran" 2>&1 )"; K4_RC=$?
+K4_DT=$(( SECONDS - K4_T0 ))
+expect_status "K4.1 a short command with no place free inside its limit exits 124" 124 "$K4_RC"
+expect_true "K4.2 …at its 2 s limit, not at the 12 s ceiling (took ${K4_DT}s)" test "$K4_DT" -lt 10
+expect_contains "K4.3 …it waited, naming the holder" "$K4_H" "$K4_OUT"
+expect_contains "K4.4 …with the line of a run stopped at its limit" \
+  "booked: stopped after 2s — over the short limit; a longer command belongs in a subagent" "$K4_OUT"
+expect_false "K4.5 …and its command never ran" test -e "$ROW/k4.ran"
+expect_eq "K4.6 …so no stamp was written" "0" "$(cat "$K4_STAMPS" 2>/dev/null | grep -c .)"
+kill "$K4_H" 2>/dev/null; wait "$K4_H" 2>/dev/null
+( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=1 BIONIC_SLOTS_MAX_WAIT=12 \
+    bash "$BOOKED" --kill-after 5 -- "touch $ROW/k4.ran" ) >/dev/null 2>&1; K4_RC=$?
+expect_status "K4.7 with the holder gone the same call runs" 0 "$K4_RC"
+expect_true "K4.8 …its command ran" test -e "$ROW/k4.ran"
+expect_eq "K4.9 …and it stamped (beside K4.6)" "1" "$(cat "$K4_STAMPS" 2>/dev/null | grep -c .)"
+
+# K5. THE KILL IS TIMED FROM THE SHIM'S START, so the wait spends the limit. The place is held
+# for 4 s and the command needs 4 s: inside a 6 s limit counted from the run it would finish
+# (at about 8 s, 2 s to spare); counted from the shim's start it is stopped at 6 s (2 s early).
+newrow k5
+SN=1; MW=30
+( sleep 4 ) & K5_H=$!; BG="$BG $K5_H"
+mkdir -p "$ST/place.1"; printf '%s\n' "$K5_H" > "$ST/place.1/pid"
+K5_OUT="$(bk --kill-after 6 -- 'sleep 4; echo finished' 2>&1)"; K5_RC=$?
+expect_contains "K5.1 the command waited for its place" "waiting for a place" "$K5_OUT"
+expect_status "K5.2 …and was stopped at 6 s from the shim's start: exit 124" 124 "$K5_RC"
+expect_contains "K5.3 …with the short-limit line" "over the short limit" "$K5_OUT"
+expect_absent "K5.4 …before it could finish" "finished" "$K5_OUT"
+
+# K6. A BOOKED COMMAND KEEPS THE SIGNALS IT WOULD HAVE UNWRAPPED (review 8 F3, A-T44.5). A command
+# started in the background without job control starts with SIGINT and SIGQUIT ignored, and
+# every process below inherits that. Each command runs unwrapped first; the booked run, in
+# bash and under --shell as the wall writes it, must print the same.
+newrow k6
+K6_INT='trap "echo got-int" INT; kill -INT $$; sleep 0.2; echo after'
+K6_QUIT='trap "echo got-quit" QUIT; kill -QUIT $$; sleep 0.2; echo after'
+K6_KID="sh -c 'kill -INT \$\$; echo survived'; echo \"rc=\$?\""
+K6_PLAIN="$(bash -c "$K6_INT" 2>&1)"
+expect_eq "K6.1 control: unwrapped, the command's own INT trap runs" "got-int"$'\n'"after" "$K6_PLAIN"
+expect_eq "K6.2 booked, it runs the same" "$K6_PLAIN" "$(bk -- "$K6_INT" 2>&1)"
+K6_PLAIN="$(bash -c "$K6_QUIT" 2>&1)"
+expect_eq "K6.3 control: unwrapped, the QUIT trap runs" "got-quit"$'\n'"after" "$K6_PLAIN"
+expect_eq "K6.4 booked, it runs the same" "$K6_PLAIN" "$(bk -- "$K6_QUIT" 2>&1)"
+K6_PLAIN="$(bash -c "$K6_KID" 2>&1)"
+expect_eq "K6.5 control: unwrapped, a process below the command dies of INT" "rc=130" "$K6_PLAIN"
+expect_eq "K6.6 booked, it dies the same way: INT is not ignored below the shim" "$K6_PLAIN" "$(bk -- "$K6_KID" 2>&1)"
+expect_eq "K6.7 …under --shell as well" "$K6_PLAIN" "$(bk --shell "$H_SH" -- "$K6_KID" 2>&1)"
+expect_eq "K6.8 …and under --kill-after, which always had job control" "$K6_PLAIN" "$(bk --kill-after 9 -- "$K6_KID" 2>&1)"
+
+# K7. EVERY COMMAND LEADS ITS OWN PROCESS GROUP NOW, so a shim stopped by a signal kills the
+# group with the tree: a child whose parent already exited dies too, as under --kill-after (K1).
+newrow k7
+SN=1; MW=5
+bk -- "(sleep 30 > /dev/null 2>&1 & echo \$! > $ROW/orphan.kid); touch $ROW/k.started; sleep 30" > "$ROW/k.out" 2>&1 &
+BG="$BG $!"; K7_BG=$!
+wait_file "$ROW/k.started"
+K7_SHIM="$(held_pids)"; K7_SHIM="${K7_SHIM% }"
+expect_regex "K7.1 the running command holds the place" '^[0-9]+$' "$K7_SHIM"
+K7_KID="$(cat "$ROW/orphan.kid" 2>/dev/null)"
+expect_regex "K7.2 the orphaned child recorded its pid" '^[0-9]+$' "$K7_KID"
+kill -TERM "$K7_SHIM" 2>/dev/null
+wait "$K7_BG" 2>/dev/null
+expect_true "K7.3 TERM to the shim kills the orphan too, outside the tree but inside the group" \
+  bash -c "for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 ${K7_KID:-999999} 2>/dev/null || exit 0; sleep 0.2; done; exit 1"
+expect_eq "K7.4 …and the place was released" "" "$(places)"
+
+# U1. --unbooked IS GONE (the lead's ruling at T44): only a suite is wrapped, so the shim has no
+# command to run without a place. The flag is now an unknown option.
+newrow u1
+bk --unbooked --kill-after 5 -- "touch $ROW/u.ran" > "$ROW/u.out" 2>&1; U1_RC=$?
+expect_status "U1.1 --unbooked is a usage error (exit 2)" 2 "$U1_RC"
+expect_contains "U1.2 …the usage line names the options there are" "--kill-after <seconds>" "$(cat "$ROW/u.out")"
+expect_absent "U1.3 …and --unbooked is not one of them" "unbooked" "$(cat "$ROW/u.out")"
+expect_false "U1.4 …and the command did not run" test -e "$ROW/u.ran"
+bk --kill-after 5 -- "touch $ROW/u.ran" > /dev/null 2>&1; U1_RC=$?
+expect_status "U1.5 the same call without it runs" 0 "$U1_RC"
+expect_true "U1.6 …and its command ran (beside U1.4)" test -e "$ROW/u.ran"
 
 finish

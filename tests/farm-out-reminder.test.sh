@@ -419,12 +419,14 @@ expect_empty "5h: …and nothing on stderr" "$ERR"
 section "SHORT — a short command stays on the thread, known by the call's own timeout (wave-26 T9, D14, AC-4.1)"
 #
 # THE PASS READS THE TIMEOUT, NEVER THE NAME. A tier-1 command whose Bash call declares a
-# `timeout` of at most the short limit (`farm-out-short-ms:`, default 120000) passes, and the
-# booking wrap carries `--kill-after <s>` so the shim stops it before the harness's own timeout
-# would move it to the background (s = the timeout in whole seconds less 5, at least 1). The
-# same command with no timeout is refused, and the refusal's first fix names the limit. Every
-# row here pairs a pass with a refusal of the SAME command, so a pass keyed on the command's
-# name cannot satisfy both.
+# `timeout` from 6000 ms to the short limit (`farm-out-short-ms:`, default 120000) passes. A
+# command that holds a suite segment is wrapped as any suite is, plus `--kill-after <s>`, so the
+# shim stops it before the harness's own timeout would move it to the background (s = the
+# timeout in whole seconds less 5). A command with no suite segment runs exactly as typed, with
+# no shim: the harness's own timeout bounds it (the lead's ruling at T44). The same command with
+# no timeout is refused, and the refusal's first fix names the limit. Every row here pairs a
+# pass with a refusal of the SAME command, so a pass keyed on the command's name cannot satisfy
+# both.
 #
 # FIXTURE FIDELITY: `tool_input.timeout` is the Bash tool's own millisecond field, the one
 # background-suite-guard's ARM R already reads (tests/background-suite-guard.test.sh builds it
@@ -439,9 +441,6 @@ reason_of() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision
 first_fix() { local r; r="$(reason_of)"; case "$r" in *'Fix: '*) r="${r#*Fix: }"; printf '%s' "${r%% — *}" ;; esac; }
 kill_re() {  # <seconds> <command regex> — the wrap, carrying --kill-after <seconds>
   printf '%s' "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --kill-after $1 -- $2\$"
-}
-unbooked_re() {  # <seconds> <command regex> — the kill-only wrap: --unbooked, no place, no stamp
-  printf '%s' "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --unbooked --kill-after $1 -- $2\$"
 }
 
 # S1 (the eval): a one-file suite command with timeout 60000 is allowed and wrapped with a kill limit.
@@ -465,30 +464,45 @@ expect_empty "S3f: …and nothing is wrapped (beside S1's wrap on the same extra
 # a word and null are not.
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" 120000)"
 expect_regex "S4a: timeout 120000 (at the limit) passes, killed at 115 s" "$(kill_re 115 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
-run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" 3000)"
-expect_regex "S4b: timeout 3000 passes, killed at the 1 s floor" "$(kill_re 1 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+# UNDER SIX SECONDS IS NOT SHORT (review 8 N1, A-T44.1): the kill would land at one second and
+# its two-second grace would outlive the harness's own timeout, so the shim's line would be lost.
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" 6000)"
+expect_regex "S4b: timeout 6000 (the floor) passes, killed at 1 s" "$(kill_re 1 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" 5999)"
+expect_eq "S4e: timeout 5999 is not short — refused" "deny" "$(decision_of)"
+expect_empty "S4f: …and not wrapped (beside S4b's wrap)" "$(wrapped_cmd)"
+expect_contains "S4g: …the user line asks for at least the floor" \
+  "bionic: run refused — this command belongs in a subagent (timeout ≥6000 ms, or dispatch it)" "$ERR"
+expect_contains "S4h: …and the reason's first fix names the whole band" "timeout of 6000 to 120000 ms" "$(first_fix)"
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" 'make')" 1000)"
+expect_eq "S4i: a 1000 ms build is refused the same way" "deny" "$(decision_of)"
+expect_contains "S4j: …with the same user line" "(timeout ≥6000 ms, or dispatch it)" "$ERR"
 for _t in 120001 0 -5 60000.5 '"soon"' null 99999999999; do
   run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE")" "$_t")"
   expect_eq "S4c: timeout $_t is not short — refused" "deny" "$(decision_of)"
   expect_empty "S4d: …and not wrapped [$_t]" "$(wrapped_cmd)"
 done
 
-# EVERY CLASS THE WALL REFUSES IS SHORT BY THE SAME TEST, and each is wrapped so the kill holds.
-# A command with no suite segment goes through the shim `--unbooked`: the kill only, no place
-# and no stamp (the lead's ruling, A-T9.1; slots §KILL U1 proves the shim side). A chain with a
-# suite segment is booked and stamped like any suite.
-# (The wrap writes a plain word bare and anything else single-quoted, A-T7.7.)
-for _c in 'make' 'npm install' 'cd x && make && echo ok'; do
-  _q=$(printf '%s' "$_c" | sed 's/[.]/\\./g')
+# EVERY CLASS THE WALL REFUSES IS SHORT BY THE SAME TEST, BUT ONLY A SUITE IS WRAPPED (the lead's
+# ruling at T44, which removed `--unbooked`). A short command with no suite segment comes back
+# with nothing at all: no updated input, no decision, no line. The wrap would run it in a child
+# shell, where a `cd` does not carry to the next call, and the harness's timeout bounds it
+# anyway. A short command with a suite segment is wrapped as any suite is, plus `--kill-after`.
+for _c in 'make' 'npm install' 'cd x && make && echo ok' 'BIONIC_SLOT_HELD=1 make'; do
   run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$_c")" 30000)"
-  expect_empty "S5a: a short [$_c] is not refused" "$(decision_of)"
-  expect_regex "S5b: …and is wrapped --unbooked with a kill limit of 25 s [$_c]" "$(unbooked_re 25 "'?$_q'?")" "$(wrapped_cmd)"
+  expect_status "S5a: a short [$_c] exits 0" 0 "$ST"
+  expect_empty "S5b: …prints nothing on stdout: no wrap, no decision [$_c]" "$OUT"
+  expect_empty "S5f: …and nothing on stderr [$_c]" "$ERR"
   run_hook "$(mk_payload "$SHORTR" "$_c")"
   expect_eq "S5c: …while [$_c] with no timeout is refused" "deny" "$(decision_of)"
+  expect_contains "S5g: …with its user line on stderr [$_c]" "bionic: run refused" "$ERR"
 done
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "cd x && make && $ONE")" 30000)"
-expect_regex "S5e: a short chain with a suite segment is booked, not --unbooked" \
+expect_regex "S5e: a short chain that ends in a suite is wrapped with the kill limit" \
   "$(kill_re 25 "'cd x && make && bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "make && $ONE && echo done")" 30000)"
+expect_regex "S5h: a short chain with a suite in the middle is wrapped too" \
+  "$(kill_re 25 "'make && bash tests/one\\.test\\.sh && echo done'")" "$(wrapped_cmd)"
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "BIONIC_QUIET=1 $ONE")" 60000)"
 expect_regex "S5d: a short whole-machine suite carries --quiet and the kill limit" \
   "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --quiet --kill-after 55 -- " "$(wrapped_cmd)"
@@ -506,6 +520,10 @@ expect_contains "S7b: …its first fix names the prefix that kept it from the ki
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE &")" 60000)"
 expect_eq "S7c: a short call the shell backgrounds is refused" "deny" "$(decision_of)"
 expect_contains "S7d: …its first fix says to run it in the foreground" "foreground" "$(first_fix)"
+# A backgrounded build escapes the harness's timeout as it would escape the shim (A-T44.4).
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "make &")" 60000)"
+expect_eq "S7e: a short build the shell backgrounds is refused" "deny" "$(decision_of)"
+expect_contains "S7f: …its first fix says to run it in the foreground" "foreground" "$(first_fix)"
 
 # THE LIMIT IS THE PROJECT'S: `farm-out-short-ms:` in .bionic/config.yaml. A malformed value is
 # the default; 0 means no call is short, and the fix is dispatch alone.
@@ -526,8 +544,12 @@ for _v in soon '' -1 '12 ms' 9999999999; do
   run_hook "$(mk_payload "$SHORTC" "$ONE")"
   expect_contains "S8f: …and the refusal names it [$_v]" "(timeout ≤120000 ms, or dispatch it)" "$ERR"
 done
+printf 'farm-out-short-ms: 5999\n' > "$SHORTC/.bionic/config.yaml"
+run_hook "$(with_timeout "$(mk_payload "$SHORTC" "$ONE")" 5999)"
+expect_eq "S8i: a limit under the 6000 ms floor makes no call short" "deny" "$(decision_of)"
+expect_contains "S8j: …and the fix is dispatch alone" "(dispatch it with the Agent tool)" "$ERR"
 printf 'farm-out-short-ms: 0\n' > "$SHORTC/.bionic/config.yaml"
-run_hook "$(with_timeout "$(mk_payload "$SHORTC" "$ONE")" 1000)"
+run_hook "$(with_timeout "$(mk_payload "$SHORTC" "$ONE")" 6000)"
 expect_eq "S8g: under farm-out-short-ms: 0 no call is short" "deny" "$(decision_of)"
 expect_contains "S8h: …and the fix is dispatch alone" "(dispatch it with the Agent tool)" "$ERR"
 
@@ -560,6 +582,32 @@ for _c in 'npx tsc --noEmit' 'uvx ruff check .' 'NPX create-thing' 'sudo npx cre
   expect_empty "S2b: …prints nothing on stdout [$_c]" "$OUT"
   expect_empty "S2c: …and nothing on stderr [$_c]" "$ERR"
 done
+
+# ---------------------------------------------------------------------------
+section "CHAIN-NL — a suite on its own line after a 3-segment chain is refused as on one line (review 8, T39 item 1)"
+#
+# THE CHAIN ARM READS THE FLATTENED TEXT, where a newline is a space, so a suite on the line
+# after `a && b && c` became an argument of `c` and no segment classified: the call came back
+# wrapped with no limit. When no segment classifies, the arm now reads the raw command whole.
+# Each row pairs the two-line form with the one-line form on the same extractors.
+NL_ONE='true && true && true && bash tests/t.test.sh'
+NL_TWO="$(printf 'true && true && true\nbash tests/t.test.sh')"
+run_hook "$(mk_payload "$SHORTR" "$NL_ONE")"
+NL_ONE_ERR="$ERR"
+expect_eq "NL1: the one-line form is refused" "deny" "$(decision_of)"
+expect_contains "NL2: …as class=chain" "farm-out [deny] class=chain" "$NL_ONE_ERR"
+run_hook "$(mk_payload "$SHORTR" "$NL_TWO")"
+expect_eq "NL3: the two-line form is refused too" "deny" "$(decision_of)"
+expect_eq "NL4: …with the same stderr, word for word" "$NL_ONE_ERR" "$ERR"
+expect_contains "NL5: …naming the test-runner as the one-line form does" "Agent(subagent_type: test-runner" "$(reason_of)"
+expect_empty "NL6: …and nothing is wrapped (beside NL7's wrap)" "$(wrapped_cmd)"
+run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$NL_TWO")" 60000)"
+expect_regex "NL7: the two-line form with a short timeout is a short suite: wrapped with the kill limit" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --kill-after 55 -- " "$(wrapped_cmd)"
+NL_PLAIN="$(printf 'true && true && true\necho done')"
+run_hook "$(mk_payload "$SHORTR" "$NL_PLAIN")"
+expect_status "NL8: the same chain with no suite on its next line exits 0" 0 "$ST"
+expect_empty "NL9: …and is not refused (beside NL3's deny)" "$(decision_of)"
 
 # ---------------------------------------------------------------------------
 section "6 — the audit stream: outside the project, and carrying no command text"
