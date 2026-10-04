@@ -362,7 +362,7 @@ expect_contains "R-1 farm-out DENIES a suite command with NO plan on disk (nudge
 expect_eq "R-1 …exiting 0" "0" "$ST"
 
 # The tier-2 nudge, same world: no plan, engaged, still spoken.
-run_hook "$(mk_bash_payload "$FARM_NORUN" 'npx create-react-app x')" "$FARM_OUT"
+run_hook "$(mk_bash_payload "$FARM_NORUN" 'docker run x')" "$FARM_OUT"
 expect_contains "R-1 …the tier-2 nudge also fires with no plan on disk" \
   'additionalContext' "$OUT"
 
@@ -440,10 +440,22 @@ for sc in "${SUPERSET_SUITES[@]}"; do
 done
 
 # --- behaviour the library must not have changed ---
-expect_empty "the sanctioned override still silences the wall" \
-  "$(farm_decision 'FARM_OUT_ALLOW=1 bash tests/run.sh')"
-expect_empty "…including as an env prefix mid-chain" \
-  "$(farm_decision 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh')"
+# THE OVERRIDE SILENCES FARM-OUT'S DENY, NOT THE BOOKING (wave-26 T7, D8): the allowed call
+# comes back as the booking wrap alone — no deny, no advisory — around the original command.
+expect_wrap_only() {  # <label> <original command> — reads $OUT
+  local _cmd _s _r="'\\''"
+  expect_eq "$1 (no deny and no advisory beside the booking wrap)" '["hookEventName","updatedInput"]' \
+    "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
+  _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
+  expect_regex "$1 (the updated command runs the booking shim)" \
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? -- " "$_cmd"
+  _s=${2//\'/$_r}
+  expect_eq "$1 (around the original command, byte for byte)" "'$_s'" "${_cmd#* -- }"
+}
+run_hook "$(mk_bash_payload "$FARM_REPO" 'FARM_OUT_ALLOW=1 bash tests/run.sh')" "$FARM_OUT"
+expect_wrap_only "the sanctioned override still silences the wall" 'FARM_OUT_ALLOW=1 bash tests/run.sh'
+run_hook "$(mk_bash_payload "$FARM_REPO" 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh')" "$FARM_OUT"
+expect_wrap_only "…including as an env prefix mid-chain" 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh'
 expect_empty "a subagent payload leaves farm-out silent (agent_type non-empty)" \
   "$(printf '%s' "$(mk_bash_payload "$FARM_REPO" 'bash tests/run.sh')" \
      | jq '. + {agent_type:"general-purpose"}' \
@@ -459,17 +471,17 @@ D=$(farm_decision 'bash claude-bootstrap.sh')
 expect_contains "a bootstrap-class command still denies" '"deny"' "$D"
 
 # --- B-4a: tier-2 reads the library, so its wrappers come off too ---
-# `npx`/`uvx`/`git clone`/`docker run` are the NUDGE tier. Before the sed twins
+# `git clone`/`docker run` are the NUDGE tier (the npx/uvx nudge retired at wave-26 T9). Before the sed twins
 # were deleted, only env/nohup/timeout/FARM_OUT_*= came off, so a sudo- or
 # assignment-wrapped tier-2 command reached the matcher with the wrapper still
 # at argv[0] and nudged nobody.
-expect_contains "B-4a tier-2 still nudges a bare npx" 'additionalContext' \
-  "$(farm_decision 'npx create-thing')"
+expect_contains "B-4a tier-2 still nudges a bare docker run" 'additionalContext' \
+  "$(farm_decision 'docker run x')"
 # A DIFFERENT class, because nudge_once suppresses a repeat of the same one.
 expect_contains "B-4a …and now through sudo" 'additionalContext' \
   "$(farm_decision 'sudo git clone https://example.invalid/r.git')"
-expect_empty "B-4a …but prose naming npx still says nothing" \
-  "$(farm_decision 'echo run npx create-thing first')"
+expect_empty "B-4a …but prose naming docker run still says nothing" \
+  "$(farm_decision 'echo run docker run x first')"
 
 # --- advisory mode still downgrades a deny to a nudge ---
 printf 'farm-out-mode: advisory\n' > "$FARM_REPO/.bionic/config.yaml"
@@ -813,7 +825,7 @@ expect_empty "AC-6 farm-out is SILENT on a suite command in an unengaged session
 expect_empty "AC-6 …and says nothing on stderr either" "$ERR"
 expect_eq "AC-6 …exiting 0" "0" "$ST"
 
-run_hook "$(mk_bash_payload "$FARM_REPO" 'npx create-react-app x')" "$FARM_OUT"
+run_hook "$(mk_bash_payload "$FARM_REPO" 'docker run x')" "$FARM_OUT"
 expect_empty "AC-6 …the tier-2 nudge is silent too" "$OUT$ERR"
 
 # THE OVERRIDE IS NOT CONSULTED, because there is nothing to override: an audit line
