@@ -55,10 +55,14 @@ P="$SANDBOX/proj"
 TREE="$P/.worktrees/25-T1"
 OUT="$SANDBOX/outside"
 mkdir -p "$P/hooks" "$P/.bionic/tmp" "$P/.bionic/docs/plans/epic-99" "$P/.bionic/docs/specs/epic-99" \
-         "$P/.bionic/docs/record/$PLAN_BASE" "$TREE/a/sub" "$TREE/sub" "$OUT/sub" "$SANDBOX/proj-scratch"
+         "$P/.bionic/docs/record/$PLAN_BASE" "$OUT/sub" "$SANDBOX/proj-scratch"
 git -C "$P" init -q 2>/dev/null
 git -C "$P" checkout -q -b "$BRANCH" 2>/dev/null
 git -C "$P" -c user.email=fx@example.invalid -c user.name=fx commit -q --allow-empty -m init 2>/dev/null
+# The asker's tree is a REAL linked worktree, as spawn-worktree makes one: a recorded tree counts
+# only when git lists it (w25-T18), and these rows are about the reader, not about that rule.
+git -C "$P" worktree add -q -b wt/w99-T1 "$TREE" 2>/dev/null
+mkdir -p "$TREE/a/sub" "$TREE/sub"
 PLAN="$P/.bionic/docs/plans/epic-99/$PLAN_BASE.plan.md"
 cat > "$PLAN" <<PEPLAN
 ---
@@ -132,6 +136,7 @@ answer_is() {
 # ══════════════════════════════════════════════════════════════════════════════════════
 section "§E0 the fixture: the link is real and the kernel puts link/.. outside the tree"
 
+expect_true "E0.0 the tree is a linked worktree of the project" test -f "$TREE/.git"
 expect_true "E0.1 tree/link is a symlink" test -L "$TREE/link"
 expect_eq "E0.2 the kernel resolves tree/link/.. to the outside directory" "$OUT" "$(cd -P "$TREE/link/.." && pwd -P)"
 answer_is allow "E0.3 control: the teammate writing inside its tree is allowed" "touch $TREE/ok.txt"
