@@ -909,7 +909,7 @@ tick_digest_file() {  # <session-id> -> absolute path, or empty
 # so a re-arm does not raise them a second time. `change=` is the fingerprint of the plan's
 # `## Tasks` statuses and its ready set (wave-26 T15; D16): the task-list duty is owed only when
 # it moved, so `arm` does not carry it and the first tick after an arm compares against nothing.
-write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change>]]] -> 0 written, 1 not
+write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change> [<live head>]]]] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
   [ -n "$f" ] || return 1
@@ -928,6 +928,11 @@ write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <du
     fi
     if [ -n "${8:-}" ]; then
       printf 'change=%s\n' "$8"
+    fi
+    # THE HEAD THIS TICK JUDGED `live:head` AGAINST (wave-26 T32; A-T14.2), so the turn-end wall,
+    # which reads no git, hands the same head to the same ready set on this tick's turn.
+    if [ -n "${9:-}" ]; then
+      printf 'head=%s\n' "$9"
     fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
@@ -1512,6 +1517,28 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
     && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
   SCHED_WRITERS="$(budget_field "$SCHED_BUDGET" writers)"
   SCHED_JOBS="$(budget_field "$SCHED_BUDGET" test_jobs)"
+  sched_live_head "$1"
+}
+
+# THE WORKING BRANCH'S HEAD, the one fact the readiness program cannot read from the plan
+# (wave-26 T14; D10, review 5 F8). A `live:head` review is ready again once the head has moved
+# past the last `proved: kind=review` line, and the head lives in git: the tick reads it here,
+# from the checkout holding the plan's `working-branch:` (lib/proof.sh `proof_head`, the same
+# answer `proof-add` records), and hands it to every ready-set question this tick asks through
+# UNITS_LIVE_HEAD. Only a plan that carries a review proof needs it — before the first one, a
+# landed row is enough — so a tick on any other plan runs no git. No head (no branch, no
+# checkout) is no head: the review waits, saying so. The stop wall reads no git of its own, so
+# it hands in none (A-T14.2).
+sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
+  UNITS_LIVE_HEAD=""
+  [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
+  /usr/bin/grep -q '^[[:space:]-]*proved:.*kind=review' "$SCHED_PLAN" 2>/dev/null || return 0
+  if ! declare -F proof_head >/dev/null 2>&1; then
+    [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
+  fi
+  declare -F proof_head >/dev/null 2>&1 && declare -F proof_working_branch >/dev/null 2>&1 || return 0
+  UNITS_LIVE_HEAD="$(proof_head "$1" "$(proof_working_branch "$SCHED_PLAN")" 2>/dev/null)" || UNITS_LIVE_HEAD=""
+  return 0
 }
 
 # ── THE APPROVAL GATE (epic-21 T4, AC-5). A printed FILL is a dispatch instruction — the
@@ -3083,7 +3110,7 @@ launch_sync_sweep() {  # <plan> <root>
 launch_sync_project() {
   local plan="$1" root="$2" sid="$3" roster="$4" acks="$5" out="$6"
   local open rec i j n=0 nl=0 hits h hasl=0 haswt=0 hasbs=0 s4 s4wt s4bs
-  local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand
+  local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand rvat rvids
   local us=$'\037'
   local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LROW FINAL LGID LGAG pairs lpairs
   LS_SAID=""; LS_FAILS=""; LS_HANDS=""
@@ -3129,6 +3156,10 @@ EOF
   done < "$out.ledger"
   rm -f "$out.ledger"
   s4="$(launch_sync_step4 "$plan")"; s4wt="${s4%%$'\t'*}"; s4bs="${s4#*$'\t'}"; [ -n "$s4" ] || s4bs=""
+  # THE LAST REVIEW PROOF AND THE ROWS IT RETURNS (wave-26 T14): `proof-add review` puts every
+  # `live:head` row back to pending, and a launch from before that proof is a pass already read.
+  rvat="$(awk '/^[ \t]*```/ { f = !f; next } !f && /^[ \t-]*proved:/ && match($0, /kind=review /) && match($0, / at=[^ ]+/) { a = substr($0, RSTART + 4, RLENGTH - 4); if (a > m) m = a } END { print m }' "$plan" 2>/dev/null)"
+  rvids=" $(units_live_rows "$plan" 2>/dev/null | cut -f1 | tr '\n' ' ')"
   cp "$plan" "$out" || return 1
   j=0
   while [ "$j" -lt "$nl" ]; do
@@ -3152,6 +3183,21 @@ EOF
       fi ;;
     esac
     noroom=0
+    # A PENDING ROW WHOSE LAUNCH IS ALREADY LEDGERED WAS PUT BACK ON PURPOSE (wave-26 T14: a review
+    # row returns to `pending` on its proof while its reviewer may still be open). The launch was
+    # recorded once; it is not re-applied to the row, and the next pass is its own launch.
+    lid=""
+    if [ "$st" = pending ] && [ "$hasl" = 1 ]; then
+      k=0
+      while [ "$k" -lt "${#LGAG[@]}" ]; do
+        case "${LGAG[k]}" in *"($name)") lid=have; break ;; esac
+        k=$((k + 1))
+      done
+    fi
+    if [ -z "$lid" ] && [ "$st" = pending ] && [ -n "$rvat" ] && [ -n "${LLA[j]}" ]; then
+      case "$rvids" in *" ${RID[i]} "*) [ "${LLA[j]}" \< "$rvat" ] && lid=read ;; esac
+    fi
+    if [ -n "$lid" ]; then j=$((j + 1)); continue; fi
     if [ "${FINAL[i]}" = "$j" ]; then
       if [ "$st" = pending ] && [ "$treeless" = 1 ]; then
         pairs=(status=active "agent=$name")
@@ -5348,10 +5394,10 @@ EOF
   # or a review read, so the same code was proved again and again. A proof is one line under
   # `## SDLC State` — `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<record/ path>`
   # (payload/scripts/lib/proof.sh owns its shape and its reader, `proof_last`) — and what is
-  # unproved is the difference since the head it names. The head is `git rev-parse HEAD` of the
-  # checkout holding the plan's `working-branch:`, never an operand. The line goes in through
-  # the shared transaction; every refusal below leaves the plan byte-identical and names its
-  # fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
+  # unproved is the difference since the head it names. The head is the one the evidence attests
+  # (its run header or its reviewed: range, held against the working-branch checkout; T14),
+  # never an operand. The line goes in through the shared transaction; every refusal below
+  # leaves the plan byte-identical and names its fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
   # the tick never reads it, so it is not one of the libraries every verb needs.
   proof-add)
     if ! { declare -F proof_last >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -5400,13 +5446,42 @@ EOF
         die "REFUSED — no checkout of $PV_REPO has working-branch $(clean "$PF_WB") checked out, so its head cannot be read; check the branch out (its worktree) and run proof-add again. The plan is unchanged."
         exit 1 ;;
     esac
+    # THE HEAD IS THE ONE THE EVIDENCE READ (wave-26 T14; review 7 F1). The checkout's head only
+    # bounds it: a run's log must have read exactly that head on a clean tree, a review a commit
+    # on its history, and the proof names what the evidence attests (lib/proof.sh
+    # `proof_attested`). A task landed between the run and this verb is not proved by it.
+    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$(proof_checkout "$PV_REPO" "$PF_WB")")"; then
+      die "REFUSED — $(clean "$PF_HEAD"). The plan is unchanged."
+      exit 1
+    fi
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL")"
     if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the proof; the plan is unchanged."
       exit 1
     fi
+    # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING (wave-26 T14; D10). Every active
+    # review row reading `live:head` (`units_live_rows`, the kind default included) returns to
+    # `pending` in the same write, with its agent, worktree and base cells cleared: the row is
+    # one row across every pass, each pass its own launch — the launch recorder sets it active
+    # again and adds that pass's ledger line, so the ledger is not touched here (A-T14.4). The
+    # next landing past this proof makes it ready again (units.sh `live_head`).
+    PF_BACK=""
+    if [ "$PF_KIND" = review ]; then
+      for _pf_id in $(units_live_rows "$PV_NEW" 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { print $1 }'); do
+        _pf_cells=(status=pending agent=—)
+        units_has_column "$PV_NEW" worktree && _pf_cells+=(worktree=—)
+        units_has_column "$PV_NEW" base && _pf_cells+=(base=—)
+        if ! units_table_cells "$PV_NEW" set tasks "$_pf_id" "${_pf_cells[@]}" > "$PV_NEW.back" 2>/dev/null || [ ! -s "$PV_NEW.back" ]; then
+          rm -f "$PV_NEW.back"
+          die "REFUSED — review row $_pf_id could not be returned to pending in $PV_PLAN; the plan is unchanged."
+          exit 1
+        fi
+        mv "$PV_NEW.back" "$PV_NEW"
+        PF_BACK="${PF_BACK:+$PF_BACK }$_pf_id"
+      done
+    fi
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
-    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL: written to $PV_PLAN; dry-committed first."
+    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
     exit 0
     ;;
 
@@ -5562,7 +5637,7 @@ EOF
       fi
       rm -f "$TICK_BUF" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
-        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" \
+        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
       exit "$rc"
@@ -5635,7 +5710,7 @@ EOF
           awk '
             $1 != "poker:" { next }
             $2 == "note:" { print $3, $4, $5; next }
-            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED)$/ { print $2, $3, $4 }
+            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE)$/ { print $2, $3, $4 }
           ' "$TICK_BUF" | LC_ALL=C sort
         } | cksum | awk '{ print $1 "-" $2 }' )"
       fi
@@ -6825,7 +6900,7 @@ EOF
           # same way (the rung from `pressure_level`, the occupancy by the same predicate:
           # wave-19 audit V-2, T2d), so what it names is what this prints.
           SCHED_READY="${SCHED_RO_READY:-$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")}"
-          SCHED_IDS=""; SCHED_N=0
+          SCHED_IDS=""; SCHED_N=0; SCHED_OFFERED=""
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
             # THE LINE PRINTS THE AGENT NAME, NOT THE TASK ID (T22, A-orch-33). They are the
@@ -6834,7 +6909,7 @@ EOF
             # and then the ONLY safe token to print is the free one: see `fill_name` for why
             # the roster, and not the plan, is what "spent" is read from.
             SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(fill_name "$ROSTER_FILE" "$(clean "$TASK_ID")")"
-            SCHED_N=$((SCHED_N + 1))
+            SCHED_N=$((SCHED_N + 1)); SCHED_OFFERED="${SCHED_OFFERED} $(clean "$TASK_ID")"
           done <<EOF
 $SCHED_READY
 EOF
@@ -6846,6 +6921,21 @@ EOF
             # observed 19:00:46Z as `poker: FILL T13` above `decision=QUIET`).
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
+            # THE RANGE AN OFFERED REVIEW READS (wave-26 T32; T14, AC-6.5): one line per offered
+            # row that reads `live:head`, naming the difference past the last review proof, from
+            # the head this tick already read (UNITS_LIVE_HEAD; no git here). Before the first
+            # review proof there is no range, and no line: the review reads all the landed work.
+            SCHED_RANGE="$(units_live_range "$SCHED_PLAN" 2>/dev/null)"
+            if [ -n "$SCHED_RANGE" ]; then
+              while IFS="$(printf '\t')" read -r LR_ID _; do
+                [ -n "$LR_ID" ] || continue
+                case "$SCHED_OFFERED " in
+                  *" $LR_ID "*) say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more" ;;
+                esac
+              done <<EOF
+$(units_live_rows "$SCHED_PLAN" 2>/dev/null)
+EOF
+            fi
           else
             # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
             # which answer holds the rows, and the standing line above says why.
