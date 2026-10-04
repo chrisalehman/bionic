@@ -253,7 +253,8 @@ guarded "$R1" 'bash tests/run.sh'
 expect_eq "B2a the full tree is REFUSED against a narrow budget" "2" "$ST"
 expect_contains "B2a …naming the full tree" "tests/run.sh" "$VERR"
 expect_contains "B2a …calling itself a BUDGET" "BUDGET" "$VERR"
-expect_contains "B2a …and naming the standing ruling it makes mechanical" "One regression means one" "$VERR"
+expect_contains "B2a …and naming the rule it makes mechanical: the full run is the released head's" \
+  "The full suite runs once, on the head being released" "$VERR"
 
 R2=$(mk_repo b2)
 add_row "$R2" name=w-b2 "agent_id=$ACTOR" suites_allowed=run.sh suites_source=declared files=
@@ -832,12 +833,13 @@ expect_contains "B13h …with the budget refusal" "BUDGET" "$VERR"
 # a row that does not carry it, whatever that row declares under `re_executes=`.
 guarded "$R13" 'bash tests/run.sh'
 expect_eq "B13i the full tree is still REFUSED against a row that does not carry it" "2" "$ST"
-expect_contains "B13i …by the one-regression arm, not the budget one" "One regression means one" "$VERR"
+expect_contains "B13i …by the full-tree arm, not the budget one" \
+  "The full suite runs once, on the head being released" "$VERR"
 
-# …AND A BRIEF CANNOT BUY THE FULL TREE WITH THE NEW LABEL. `regression_rows()` counts the
+# …AND A BRIEF CANNOT BUY THE FULL TREE WITH THE NEW LABEL. The dispatch wall judges the
 # `run.sh` token in `suites_allowed=` and reads nothing else, so a run declared under
-# `Re-executes:` is uncounted at dispatch; if it were also admitted here, one spelling would
-# spend a budget the standing ruling caps at one per run and no counter would ever see it.
+# `Re-executes:` is unjudged at dispatch; if it were also admitted here, one spelling would
+# spend a full run the proof record never weighed.
 # The full-tree arm therefore runs AHEAD of the declared runs, and this row is why.
 R13E=$(mk_repo b13e)
 add_row "$R13E" name=w-b13e "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
@@ -845,7 +847,7 @@ add_row "$R13E" name=w-b13e "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
   "re_executes=\`bash tests/run.sh\`"
 guarded "$R13E" 'bash tests/run.sh'
 expect_eq "B13j a DECLARED run naming the full tree is still REFUSED" "2" "$ST"
-expect_contains "B13j …by the one-regression arm" "One regression means one" "$VERR"
+expect_contains "B13j …by the full-tree arm" "The full suite runs once, on the head being released" "$VERR"
 # The same row still holds its other half: the declared set is not voided by the refusal.
 guarded "$R13E" 'bash tests/alpha.test.sh'
 expect_eq "B13k …and the row's budgeted suite still runs" "0" "$ST"
