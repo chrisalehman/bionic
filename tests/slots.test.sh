@@ -687,4 +687,76 @@ expect_regex "H3.3 the stamp's cmd= is the ORIGINAL command, not the shell form"
   "\\|rc=5\\|.*\\|cmd=echo 'it''s'; exit 5\$" "$H3_LINE"
 expect_absent "H3.4 …with no trace of the shell or the eval in it" "eval" "$H3_LINE"
 
+# ═══════════════════════════════════════════════════════════════════ §KILL
+section "KILL — --kill-after stops the command's whole process group, says why, exits 124 (wave-26 T9, D14)"
+#
+# The Bash wall wraps a short main-thread command with `--kill-after <s>` (A-T9.1..3). Past
+# <s> the shim stops the command's PROCESS GROUP, not only the tree it can still see: a child
+# whose parent already exited is reparented away from the tree, but stays in the group.
+# The orphan's streams go to /dev/null: holding this capture's pipe open would make the `$(…)`
+# wait for it to end on its own, and the row would read a natural death as a kill.
+newrow k1
+K1_T0=$SECONDS
+K1_OUT="$(bk --kill-after 1 -- "(sleep 30 > /dev/null 2>&1 & echo \$! > $ROW/orphan.kid); sleep 30" 2>&1)"; K1_RC=$?
+K1_DT=$(( SECONDS - K1_T0 ))
+expect_status "K1.1 a command past --kill-after exits 124" 124 "$K1_RC"
+expect_true "K1.1b …well before the command would have ended (took ${K1_DT}s)" test "$K1_DT" -lt 15
+K1_KID="$(cat "$ROW/orphan.kid" 2>/dev/null)"
+expect_regex "K1.2 the orphaned child recorded its pid" '^[0-9]+$' "$K1_KID"
+expect_true "K1.3 …and the orphan, outside the command's tree, was killed too" \
+  bash -c "for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 ${K1_KID:-999999} 2>/dev/null || exit 0; sleep 0.2; done; exit 1"
+expect_contains "K1.4 the one line says it is over the short limit" "over the short limit" "$K1_OUT"
+expect_contains "K1.5 …and that the fix is a subagent, not a longer timeout" "a longer command belongs in a subagent" "$K1_OUT"
+expect_eq "K1.6 …and it is the only line: no job notice from the shell" "1" \
+  "$(printf '%s\n' "$K1_OUT" | grep -c .)"
+
+# K2. --kill-after composes with --shell and --quiet, in the order the wall writes them.
+newrow k2
+K2_OUT="$(bk --shell "$H_SH" --quiet --kill-after 1 -- 'sleep 20; echo never' 2>&1)"; K2_RC=$?
+expect_status "K2.1 --shell --quiet --kill-after: exit 124" 124 "$K2_RC"
+expect_contains "K2.2 …with the short-limit line" "over the short limit" "$K2_OUT"
+expect_absent "K2.3 …and the command did not finish" "never" "$K2_OUT"
+K2_OUT="$(bk --shell "$H_SH" --quiet --kill-after 5 -- 'echo inside; exit 4' 2>&1)"; K2_RC=$?
+expect_status "K2.4 inside the limit the command's own code passes through" 4 "$K2_RC"
+expect_contains "K2.5 …with its output" "inside" "$K2_OUT"
+
+# K3. A killed run stamps 124, so a landing never reads it as proof.
+newrow k3
+mkrepo "$ROW/repo"
+K3_STAMPS="$(stamps_of "$ROW/repo")"
+( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+    bash "$BOOKED" --kill-after 1 -- 'sleep 20' ) >/dev/null 2>&1; K3_RC=$?
+expect_status "K3.1 the killed run exits 124" 124 "$K3_RC"
+expect_regex "K3.2 …and its stamp says rc=124" '\|rc=124\|' "$(tail -1 "$K3_STAMPS" 2>/dev/null)"
+
+# U1. --unbooked: the kill and its line, and nothing else. The wall sends a short command with
+# no suite segment this way (A-T9.1): a stamp is a suite's proof and the landing rule reads the
+# LAST one in a tree, so a short `make` must neither stamp nor take a place. Each negative sits
+# beside the booked run's positive on the same store and the same stamp file.
+newrow u1
+mkrepo "$ROW/repo"
+U1_STAMPS="$(stamps_of "$ROW/repo")"
+U1_PROBE="printf '%s|' \"\${BIONIC_SLOT_HELD:-unset}\"; cat '$ST'/place.*/pid 2>/dev/null | grep -c . ; true"
+U1_BOOKED="$( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+    bash "$BOOKED" --kill-after 5 -- "$U1_PROBE" 2>/dev/null )"; U1_RC=$?
+expect_status "U1.1 control: a booked --kill-after run exits 0" 0 "$U1_RC"
+expect_eq "U1.2 …inside a place it holds (held, one place)" "1|1" "$U1_BOOKED"
+U1_N0="$(grep -c . "$U1_STAMPS" 2>/dev/null)"
+expect_eq "U1.3 …and it stamped" "1" "$U1_N0"
+U1_UNB="$( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 BIONIC_QUIET=1 \
+    bash "$BOOKED" --unbooked --kill-after 5 -- "$U1_PROBE" 2>/dev/null )"; U1_RC=$?
+expect_status "U1.4 --unbooked runs the command, its code passed through" 0 "$U1_RC"
+expect_eq "U1.5 …holding no place, BIONIC_QUIET in the environment unread" "unset|0" "$U1_UNB"
+expect_eq "U1.6 …and writing no stamp" "$U1_N0" "$(grep -c . "$U1_STAMPS" 2>/dev/null)"
+U1_OUT="$( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 \
+    bash "$BOOKED" --unbooked --kill-after 1 -- 'sleep 20; echo never' 2>&1 )"; U1_RC=$?
+expect_status "U1.7 --unbooked still kills past the limit: exit 124" 124 "$U1_RC"
+expect_contains "U1.8 …with the short-limit line" "over the short limit" "$U1_OUT"
+expect_eq "U1.9 …and a killed unbooked run stamps nothing either" "$U1_N0" "$(grep -c . "$U1_STAMPS" 2>/dev/null)"
+bk --unbooked -- 'touch u.ran' > /dev/null 2>&1; U1_RC=$?
+expect_status "U1.10 --unbooked without --kill-after is a usage error" 2 "$U1_RC"
+bk --unbooked --quiet --kill-after 5 -- 'touch u.ran' > /dev/null 2>&1; U1_RC=$?
+expect_status "U1.11 --unbooked with --quiet is a usage error" 2 "$U1_RC"
+expect_false "U1.12 …and neither ran the command" test -e "$ROW/u.ran"
+
 finish
