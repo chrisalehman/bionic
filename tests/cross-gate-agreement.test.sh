@@ -2168,6 +2168,7 @@ done
 # makes the unanchored pattern answer wrong instead of merely reading identically anyway.
 I1_MUT_DIR="$SANDBOX/fx/i1-unanchored"
 mkdir -p "$I1_MUT_DIR"
+anchor "$PARTY_LG_SRC" 'grep "^$1="' 1
 awk '{ sub(/grep "\^\$1="/, "grep \"$1=\""); print }' "$PARTY_LG_SRC" > "$I1_MUT_DIR/stop.sh"
 I1_DECOY="${ROSTER_ROW_SCHEMA}|prev_status=confirmed|status=UNMET"
 
@@ -2924,6 +2925,7 @@ cp "$K_ROSTER_FULL" "$KROSTER"
 # instead of copying the joined row forward. It is applied to a COPY of the recorder
 # and driven over a SECOND chain, so the chain above is untouched.
 KMUT="$(plant_hook_tree "$SANDBOX/recorder-mutant")/execution-recorder.sh"
+anchor "$PARTY_ER" 'if (f ~ /^status=/)' 3
 awk '{ print; if (index($0, "if (f ~ /^status=/)")) print "      if (f ~ /^deliverable=/) f = \"deliverable=\"" }' \
   "$PARTY_ER" > "$KMUT"
 if cmp -s "$PARTY_ER" "$KMUT"; then
@@ -3456,6 +3458,7 @@ MMUT="$(plant_hook_tree "$SANDBOX/ack-mutant")"
 cp "$SG_M" "$MMUT/stop-guard.sh"
 cp "$LG_M" "$MMUT/stop.sh"
 cp "$SO_M" "$MMUT/stop-orders.sh"
+anchor "$SWEEPER" 'row_acked "$_pname"' 1
 awk '{ if (index($0, "row_acked \"$_pname\"") > 0) $0 = "    _acked=no"
        print }' "$SWEEPER" > "$MMUT/session-sweeper.sh"
 expect_contains "the mutated owner reports the acked row as unacked" "|acked=no|" \
@@ -3678,6 +3681,7 @@ expect_eq "the longest hook loader span is at most $N_CAP lines (${N_LONGEST:-no
 # measurement no longer fits.
 mkdir -p "$SANDBOX/fx"
 N_MUT_HOOK="$SANDBOX/fx/fat-loader-copy.sh"
+anchor -E "$BIONIC_HOOKS_DIR/agent-context-guard.sh" '^# --- bionic-loader/v2 BEGIN$' 1
 awk -v cap="$N_CAP" '
   { print }
   /^# --- bionic-loader\/v2 BEGIN$/ { for (i = 0; i <= cap; i++) print "# padding the span past the cap" }
@@ -4503,6 +4507,7 @@ expect_contains "the writer's row carries launched_at at all" "launched_at" "$N_
 # variable too would leave the mutant unable to run and prove nothing about the key.
 mkdir -p "$SANDBOX/fx"
 N_MUT_LIB="$SANDBOX/fx/renamed-roster.sh"
+anchor "$N_ROSTER_LIB" '|launched_at=' 1
 sed 's/|launched_at=/|launchedat=/' "$N_ROSTER_LIB" > "$N_MUT_LIB"
 if cmp -s "$N_ROSTER_LIB" "$N_MUT_LIB"; then
   no "the launched_at rename applies to the roster writer" \
@@ -4632,6 +4637,7 @@ expect_eq "on the LIVE roster the resumed name now reads MET (the recorded findi
 # UNMET the field case actually suffered. This is the assertion that proves the three above
 # are about the pin rather than about a fixture that could never have failed.
 N_MUT_ER="$SANDBOX/fx/unpinned-recorder.sh"
+anchor "$BIONIC_HOOKS_DIR/execution-recorder.sh" 'PRIOR_LAUNCH=$(prior_launch_for_agent' 2
 awk '{ if (index($0, "PRIOR_LAUNCH=$(prior_launch_for_agent") > 0)
          sub(/prior_launch_for_agent/, "true prior_launch_for_agent")
        print }' "$BIONIC_HOOKS_DIR/execution-recorder.sh" > "$N_MUT_ER"
@@ -4864,6 +4870,7 @@ expect_contains "…and the roster marker is keyed to the LATER row agent_id" \
 LG_MUT_HOOK="$(plant_lg_tree "$SANDBOX/fx/lg-first-wins")"
 LG_MUT_DIR="${LG_MUT_HOOK%/stop.sh}"
 cp "$SWEEPER" "$LG_MUT_DIR/session-sweeper.sh"
+anchor -E "$PARTY_LG_SRC" '^    dl\[name\] = deliv$' 1
 awk '{
        if ($0 == "    dl[name] = deliv") {
          print "    if (!(name in dl)) dl[name] = deliv"
@@ -5458,6 +5465,7 @@ q_agent_side "$Q_C2" toolu_f2
 # sensitive to. The mutation is the defect ITSELF — patrol's pre-test truncation, restored
 # to a copy — so the assertion is that C1's fixture separates the copies again.
 Q_MUT="$SANDBOX/fx/refusal-credit/patrol-truncating.sh"
+anchor "$PARTY_PT" '(if ($full | test(' 1
 sed 's/(if ($full | test(/(if (($full | .[0:200]) | test(/' "$PARTY_PT" > "$Q_MUT"
 Q_MUT_R="$( ( . "$Q_MUT" >/dev/null 2>&1; _patrol_scan "$Q_C1" ) 2>/dev/null \
             | awk -F'\t' '$1=="REFUSED"{print $2+0}' )"
@@ -6471,6 +6479,7 @@ S4_CTRL=$(s4_pk "$S4_R2" "$SID_A")
 expect_contains "control: the copied tree with an UNMUTATED library still honours the binding" \
   "$S4_R2A" "$S4_CTRL"
 
+anchor "$RUN_LIB" '  if plan=$(session_plan "$root" "$sid"); then' 1
 sed 's/  if plan=$(session_plan "$root" "$sid"); then/  if false \&\& plan=$(session_plan "$root" "$sid"); then/' \
   "$RUN_LIB" > "$S4_MUT/scripts/lib/run.sh"
 
@@ -6948,6 +6957,7 @@ expect_contains "…and what came back carries the doctored value, so the writer
 # This is the drift the pin exists for: the one writer moving away from the shape on disk.
 RA2_MUT="$SANDBOX/ra2-mutant"
 mkdir -p "$RA2_MUT"
+anchor "$RA2_ROSTER_LIB" '|absent=$absent' 1
 sed 's/|absent=\$absent//' "$RA2_ROSTER_LIB" > "$RA2_MUT/roster.sh"
 expect_eq "the writer-doctoring arm really removed absent= from the emitted row" "yes" \
   "$([ "$(LC_ALL=C grep -c 'absent=\$absent' "$RA2_MUT/roster.sh" | tr -d ' ')" = "0" ] && echo yes || echo no)"
@@ -7419,6 +7429,7 @@ LA_MUT_S="$SANDBOX/la-mutant-status"
 mkdir -p "$LA_MUT_S/hooks" "$LA_MUT_S/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$LA_MUT_S/scripts/lib/" 2>/dev/null
 cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT_S/hooks/" 2>/dev/null
+anchor "$LIB_DIR_SRC/agents.sh" 'print name "|" type "|" status' 1
 sed 's/print name "|" type "|" status/print name "|" type "|" "running"/' \
   "$LIB_DIR_SRC/agents.sh" > "$LA_MUT_S/scripts/lib/agents.sh"
 expect_eq "mutation A applies (the parser's print line has not moved)" "no" \
@@ -7459,6 +7470,7 @@ LA_MUT_F="$SANDBOX/la-mutant-filter"
 mkdir -p "$LA_MUT_F/hooks" "$LA_MUT_F/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$LA_MUT_F/scripts/lib/" 2>/dev/null
 cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT_F/hooks/" 2>/dev/null
+anchor "$LIB_DIR_SRC/agents.sh" 'if (name != "") print name "|" type "|" status' 1
 sed 's/if (name != "") print name "|" type "|" status/if (name != "" \&\& status == "running") print name "|" type "|" status/' \
   "$LIB_DIR_SRC/agents.sh" > "$LA_MUT_F/scripts/lib/agents.sh"
 expect_eq "mutation B applies" "no" \
@@ -8150,16 +8162,18 @@ expect_eq "no file opens a \`case\` inside a command substitution on one line" "
 # and `-n` catches it; inside double quotes it parses clean and then truncates the
 # substitution at the first `)` at RUN time, leaking the rest as literal text. That is the
 # shape `-n` cannot see, and the one this grep exists for.
-BP_INLINE_MUT="$SANDBOX/bp-inline.sh"
+# A PLANT, not a mutant: printf writes it whole, so no shipped text sits under it for an
+# `anchor` to hold, and §S19.4's cross-gate site pattern rightly does not count it.
+BP_INLINE_PLANT="$SANDBOX/bp-inline.sh"
 BP_DOL='$'
 printf '#!/bin/bash\nx="%s(case "%s1" in *a*) echo yes ;; *) echo no ;; esac)"\nprintf "%%s" "%sx"\n' \
-  "$BP_DOL" "$BP_DOL" "$BP_DOL" > "$BP_INLINE_MUT"
+  "$BP_DOL" "$BP_DOL" "$BP_DOL" > "$BP_INLINE_PLANT"
 expect_eq "the mutation arm: the quoted one-line shape PARSES, so -n cannot catch it" "0" \
-  "$(/bin/bash -n "$BP_INLINE_MUT" >/dev/null 2>&1; echo $?)"
+  "$(/bin/bash -n "$BP_INLINE_PLANT" >/dev/null 2>&1; echo $?)"
 expect_contains "…and at run time it leaks its own source text instead of answering" \
-  "esac)" "$(/bin/bash "$BP_INLINE_MUT" abc 2>/dev/null)"
+  "esac)" "$(/bin/bash "$BP_INLINE_PLANT" abc 2>/dev/null)"
 expect_eq "…but the grep catches it" "yes" \
-  "$([ -n "$(LC_ALL=C grep -nE "$BP_RE" "$BP_INLINE_MUT")" ] && echo yes || echo no)"
+  "$([ -n "$(LC_ALL=C grep -nE "$BP_RE" "$BP_INLINE_PLANT")" ] && echo yes || echo no)"
 
 # THE THIRD SHAPE, WHICH NEITHER `-n` NOR A RUN CAN SEE UNTIL THE DATA GROWS (wave-14 T37).
 # `echo "$VAR" | grep -q PAT` parses, and answers correctly, for as long as $VAR fits in the
@@ -8217,17 +8231,18 @@ expect_eq "…while a CODE line carrying the idiom is still caught, comment or n
 
 # THE MUTATION ARM, in two halves. The first proves the grep discriminates; the second
 # proves the defect it stands for is REAL under pipefail, so the row is not a style pin.
-BP_Q_MUT="$SANDBOX/bp-quitting-grep.sh"
+# A plant written whole by printf, like $BP_INLINE_PLANT above: nothing shipped to anchor.
+BP_Q_PLANT="$SANDBOX/bp-quitting-grep.sh"
 printf '#!/bin/bash\nset -uo pipefail\nBIG="%s1"\nif ! echo "%sBIG" | grep -qE "^needle" ; then\n  echo REFUSED\nelse\n  echo ALLOWED\nfi\n' \
-  "$BP_Q_DOL" "$BP_Q_DOL" > "$BP_Q_MUT"
+  "$BP_Q_DOL" "$BP_Q_DOL" > "$BP_Q_PLANT"
 expect_eq "the mutation arm: the planted idiom PARSES, so -n cannot catch it" "0" \
-  "$(/bin/bash -n "$BP_Q_MUT" >/dev/null 2>&1; echo $?)"
+  "$(/bin/bash -n "$BP_Q_PLANT" >/dev/null 2>&1; echo $?)"
 expect_eq "…and the grep catches it" "yes" \
-  "$([ -n "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_MUT")" ] && echo yes || echo no)"
+  "$([ -n "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_PLANT")" ] && echo yes || echo no)"
 # The same planted file, run twice on the SAME needle, differing only in how much data
 # trails the match: under the buffer it answers ALLOWED, over it the wall inverts.
-BP_Q_SMALL="$(/bin/bash "$BP_Q_MUT" "$(printf 'needle\npadding\n')")"
-BP_Q_BIG="$(/bin/bash "$BP_Q_MUT" "$(printf 'needle\n'; LC_ALL=C awk 'BEGIN{for(i=0;i<9000;i++) print "padding padding padding padding padding padding"}')")"
+BP_Q_SMALL="$(/bin/bash "$BP_Q_PLANT" "$(printf 'needle\npadding\n')")"
+BP_Q_BIG="$(/bin/bash "$BP_Q_PLANT" "$(printf 'needle\n'; LC_ALL=C awk 'BEGIN{for(i=0;i<9000;i++) print "padding padding padding padding padding padding"}')")"
 expect_eq "…the planted idiom answers correctly while the subject fits the pipe buffer" \
   "ALLOWED" "$BP_Q_SMALL"
 expect_eq "…and INVERTS once it does not: a present needle read as absent" \
@@ -9005,6 +9020,7 @@ expect_false "DS.5 a hinted row with no table entry resolves to no row" \
 expect_true "DS.5 …while a label the table carries does resolve (the row above is not vacuous)" \
   ds_row_for "legacy hook files" "$DS_TABLE"
 DS_MUT_DOC="$DS_MUT/scripts/doctor.sh"
+anchor -E "$PARTY_DOCTOR" '^echo "RESOURCES"$' 1
 LC_ALL=C awk -v row="$DS_INVENTED" '
   $0 == "echo \"RESOURCES\"" {
     print "_doctor_env_row \"$DOCTOR_BAD\" \"" row "\" \"present\" \" \xe2\x86\x92 /bionic:setup\""
@@ -9031,6 +9047,7 @@ expect_eq "DS.5 …while the shipped doctor leaves it empty" \
 # was written before 1.5.1, and the core row goes straight back to promising a
 # repair setup has no item for. DS.2's party row must go red on it.
 DS_MUT_CORE="$DS_MUT/scripts/doctor-literal.sh"
+anchor -E "$PARTY_DOCTOR" '_doctor_dep_hint="\$\(bionic_check_dep_hint' 1
 LC_ALL=C awk '
   /_doctor_dep_hint="\$\(bionic_check_dep_hint/ { print "  _doctor_dep_hint=\"/bionic:setup\""; next }
   { print }' "$PARTY_DOCTOR" > "$DS_MUT_CORE"
@@ -9080,6 +9097,7 @@ DS_MUT7="$DS_DIR/mutant-lib"
 rm -rf "$DS_MUT7"; mkdir -p "$DS_MUT7"
 cp -R "$DS_PAYLOAD/scripts" "$DS_MUT7/scripts"
 DS_MUT_CHECKS="$DS_MUT7/scripts/lib/checks.sh"
+anchor -E "$DS_CHECKS_LIB" '^  _bionic_checks_emit "legacy-hook-files" ' 1
 LC_ALL=C sed '/^  _bionic_checks_emit "legacy-hook-files" /d' "$DS_CHECKS_LIB" > "$DS_MUT_CHECKS"
 expect_eq "DS.7 the doctored library differs from the shipped one by exactly the row" \
   "1" "$(diff "$DS_CHECKS_LIB" "$DS_MUT_CHECKS" | grep -c '^< ')"
@@ -9125,6 +9143,7 @@ expect_contains "DS.7 …while the shipped doctor still carries it, from the sam
 # take with nothing in the table to say what it repairs or who repairs it. DS.2b's
 # set-against-set row is the one that must catch it.
 DS_MUT_SETUP8="$DS_MUT/scripts/setup-invented.sh"
+anchor -E "$PARTY_SETUP" '^_setup_item_ids\(\) \{$' 1
 LC_ALL=C awk '
   /^_setup_item_ids\(\) \{$/ { print; print "  say \"invented-item\""; next }
   { print }' "$PARTY_SETUP" > "$DS_MUT_SETUP8"
@@ -9156,6 +9175,7 @@ DS_MUT9="$DS_DIR/mutant-hint"
 rm -rf "$DS_MUT9"; mkdir -p "$DS_MUT9"
 cp -R "$DS_PAYLOAD/scripts" "$DS_MUT9/scripts"
 DS_MUT_CHECKS9="$DS_MUT9/scripts/lib/checks.sh"
+anchor -E "$DS_CHECKS_LIB" '^  _bionic_checks_emit "legacy-hook-files" .* "\$r_setup"$' 1
 LC_ALL=C sed 's|^\(  _bionic_checks_emit "legacy-hook-files" .*\) "\$r_setup"$|\1 ""|' \
   "$DS_CHECKS_LIB" > "$DS_MUT_CHECKS9"
 expect_eq "DS.9 the doctored library differs from the shipped one by exactly the one hint" \
@@ -9192,6 +9212,7 @@ DS_MUT10="$DS_DIR/mutant-row"
 rm -rf "$DS_MUT10"; mkdir -p "$DS_MUT10"
 cp -R "$DS_PAYLOAD/scripts" "$DS_MUT10/scripts"
 DS_MUT_CHECKS10="$DS_MUT10/scripts/lib/checks.sh"
+anchor -E "$DS_CHECKS_LIB" '^  _bionic_checks_emit "statusline-npx" ' 1
 LC_ALL=C awk '
   /^  _bionic_checks_emit "statusline-npx" / {
     print "  _bionic_checks_emit \"probe-unrendered\" \"planted probe row\" \"bionic_check_legacy_hook_files\" \"user\" \"\" \"clear it by hand\""
@@ -9251,6 +9272,7 @@ DS_MUT11="$DS_DIR/mutant-env"
 rm -rf "$DS_MUT11"; mkdir -p "$DS_MUT11"
 cp -R "$DS_PAYLOAD/scripts" "$DS_MUT11/scripts"
 DS_MUT_DOC11="$DS_MUT11/scripts/doctor-own-env-rule.sh"
+anchor "$PARTY_DOCTOR" 'if bionic_check_fires "env:${_env_key}"; then _env_fires=yes; else _env_fires=no; fi' 1
 LC_ALL=C awk '
   /if bionic_check_fires "env:\$\{_env_key\}"; then _env_fires=yes; else _env_fires=no; fi/ {
     print "  if [ -z \"$_env_configured\" ]; then _env_fires=yes; else _env_fires=no; fi"; next }
@@ -9338,6 +9360,7 @@ DS_MUT12="$DS_DIR/mutant-alias"
 rm -rf "$DS_MUT12"; mkdir -p "$DS_MUT12"
 cp -R "$DS_PAYLOAD/scripts" "$DS_MUT12/scripts"
 DS_MUT_DOC12="$DS_MUT12/scripts/doctor-own-alias-rule.sh"
+anchor -E "$PARTY_DOCTOR" '^LEGACY_ALIAS_FIRES=no; bionic_check_fires legacy-alias' 1
 LC_ALL=C awk -v repl='LEGACY_ALIAS_FIRES=no; case "$(detect_zshrc_legacy_block)" in *present=yes) LEGACY_ALIAS_FIRES=yes ;; esac' '
   /^LEGACY_ALIAS_FIRES=no; bionic_check_fires legacy-alias/ { print repl; next }
   { print }' "$PARTY_DOCTOR" > "$DS_MUT_DOC12"
@@ -9458,6 +9481,7 @@ done
 # The pre-fix bug, planted. A copy of session-poker.sh with ONLY the a/b-strip line reverted
 # to a bare assignment — the exact shape this section would have caught before T6.
 CG_MUT="$SANDBOX/fx/cg/session-poker-nostrip.sh"
+anchor -E "$PARTY_PK" '^  step="\$\{current%\[ab\]\}"$' 1
 LC_ALL=C awk '{
   if ($0 == "  step=\"${current%[ab]}\"") { print "  step=\"$current\"" } else { print }
 }' "$PARTY_PK" > "$CG_MUT"
@@ -11470,6 +11494,7 @@ expect_eq "SV …and neither author surface still carries the retired 'on its ow
 # with the shared constant — proving the equality pin above is load-bearing rather than
 # comparing an empty string to itself.
 SV_MUT="$SANDBOX/skill-stale-scaffold.md"
+anchor -E "$SV_SKILL" 'other runners: Re-executes:$' 1
 sed 's/other runners: Re-executes:$/other runners: Re-executes:, on its own paragraph/' \
   "$SV_SKILL" > "$SV_MUT" 2>/dev/null
 SV_MUT_LINE="$(sv_suites_line "$SV_MUT")"
@@ -11724,6 +11749,7 @@ expect_eq "CG-close no reader keeps a private name-only ack set (acked[an] = 1)"
 CGC_MUT="$SANDBOX/cgc-mut"
 CGC_MUT_HOOK="$(plant_hook_tree "$CGC_MUT")"
 cp "$CGC_STOP" "$CGC_MUT_HOOK/stop.sh"
+anchor "$CGC_LIBDIR/stop.sh" 'FILL_OPEN="$(roster_open_names ' 1
 awk '{
   if (index($0, "FILL_OPEN=\"$(roster_open_names ") > 0) {
     print "      FILL_OPEN=1  # mutant: the name-only reading, which reads the fixture as closed"
@@ -11867,6 +11893,7 @@ expect_eq "CG-close-all none of the three keeps a MET close (state == MET, or a 
 # row over the `met` world must go red: the mutant says closed where the other three say open.
 CGA_MUT="$SANDBOX/cga-mut"
 plant_hook_tree "$CGA_MUT" >/dev/null
+anchor "$CGC_LIBDIR/patrol.sh" 'open_names="$(roster_open_names ' 1
 awk '{
   if (index($0, "open_names=\"$(roster_open_names ") > 0) {
     print "  open_names=\"$(roster_open_names \"$f\" \"$ledger\" | grep -vxF -e \"$(grep \"|state=MET\" \"$f\" | tr \"|\" \"\\n\" | sed -n \"s/^name=//p\")\")\"  # mutant: a MET marker closes"
@@ -11975,6 +12002,8 @@ CGT_MUT="$SANDBOX/cgt-mut"
 CGT_MUT_HOOK="$(plant_hook_tree "$CGT_MUT")"
 cp "$SWEEPER" "$CGT_MUT_HOOK/session-sweeper.sh"   # the tick refuses without its sibling
 # The marker token is read off the shared constant, never spelled (§S17's scan).
+anchor "$CGC_POKER" '*"$nl$RN$nl"*) : ;; *) continue ;; esac' 1
+anchor "$PARTY_ER" 'grep -qxF -- "$DUP_NAME" <<< "$(roster_open_names ' 1
 awk -v mk="${SWEPT_SCHEMA}|" '{
   if (index($0, "*\"$nl$RN$nl\"*) : ;; *) continue ;; esac") > 0) {
     print "    case \"$(grep -F \"" mk "\" \"$roster\" | grep -F \"|state=MET\")\" in *\"|name=${RN}|\"*) continue ;; esac  # mutant: the MET skip"
