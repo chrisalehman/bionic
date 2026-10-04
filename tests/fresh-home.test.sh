@@ -24,14 +24,13 @@
 # asserted too, but as a SECOND question ("does the report agree with the
 # machine"), never as the first.
 #
-# AND ONE ASSERTION IS NEGATIVE, DELIBERATELY BESIDE THE POSITIVE ONES (AC-7).
-# `~/.claude/CLAUDE.md` is the user's own file: bionic gave up managing memory on
-# 2026-08-20 and delegates it entirely to the harness. Nothing the plugin does may
-# create it. An absence proves nothing on its own — an empty $HOME is full of
-# absences, and a suite whose setup silently did nothing would pass such a check
-# perfectly. It earns its keep only because it sits in the SAME run as the
-# positive manifest above it: the run that proves setup wrote seven things is the
-# run that proves it did not write this eighth.
+# `~/.claude/CLAUDE.md` IS THE USER'S OWN FILE, AND SINCE wave-27 (D16) SETUP OFFERS
+# ONE THING FOR IT: bionic's working principles, between markers, written only on
+# a yes. Before that, AC-7 held that nothing the plugin does may create the file
+# (bionic gave up managing memory on 2026-08-20). The all-yes run now does create
+# it, so the manifest asserts it holds EXACTLY bionic's block and nothing else, and
+# Group 5 asserts remove takes it back to no file at all. The negative that
+# survives is `$HOME/CLAUDE.md`, a file no item names, beside the positive.
 #
 # HERMETIC, AND WHAT THAT COSTS. `$HOME` is a fixture directory and PATH is
 # REPLACED (not prefixed) by a bin dir this suite builds, so a real brew, npm, uv
@@ -760,6 +759,12 @@ RC_START_LIT="$(env_sh_var RC_START)"
 RC_END_LIT="$(env_sh_var RC_END)"
 RC_PROXY_LINE="$(env_sh rc_default claude-proxy)"
 
+# The working-principles item's markers and text, likewise read from the payload:
+# the block setup writes is the block the shipped file carries (wave-27 D16).
+PRINCIPLES_START_LIT="$(env_sh_var PRINCIPLES_START)"
+PRINCIPLES_END_LIT="$(env_sh_var PRINCIPLES_END)"
+PRINCIPLES_SHIPPED="${PAYLOAD}/context/working-principles.md"
+
 # The lines BETWEEN bionic's markers, in order. Not "does the file contain the
 # proxy line": a proxy line outside the markers is a line bionic does not own.
 rc_block_lines() {  # <file>
@@ -985,14 +990,26 @@ expect_eq "manifest: setup wrote NO permission rules of its own" "" \
 # Absence proves nothing on its own; it proves something HERE because the same
 # run just proved setup wrote the six things above it.
 # The same extractor, in the same run, on the same fixture machine, says `yes` to
-# a file setup did write — which is the only thing that makes the two `no`s below
-# it mean anything at all.
+# a file setup did write — which is the only thing that makes the `no` below it
+# mean anything at all.
 expect_eq "the path extractor says yes to a file setup did write" "yes" \
   "$(path_exists "$SETTINGS")"
-expect_eq "manifest: ~/.claude/CLAUDE.md was NOT created — the plugin never touches it (AC-7)" \
-  "no" "$(path_exists "$GLOBAL_MEMORY")"
-expect_eq "manifest: no CLAUDE.md was written at the top of \$HOME either (AC-7)" \
+expect_eq "manifest: no CLAUDE.md was written at the top of \$HOME (AC-7)" \
   "no" "$(path_exists "${HOME_FIX}/CLAUDE.md")"
+
+# ── the working principles: ~/.claude/CLAUDE.md holds bionic's block and only it ──
+#
+# The expected bytes are built from the SHIPPED file through env.sh's own reader,
+# proven non-empty first, so an empty text could not make an empty file pass.
+expect_ne "env.sh names the principles start marker" "" "$PRINCIPLES_START_LIT"
+env_sh markers_get "$PRINCIPLES_SHIPPED" "$PRINCIPLES_START_LIT" "$PRINCIPLES_END_LIT" > "$TMP/principles-body"
+expect_true "the shipped principles text reads back non-empty" test -s "$TMP/principles-body"
+{ printf '%s\n' "$PRINCIPLES_START_LIT"; cat "$TMP/principles-body"; printf '%s\n' "$PRINCIPLES_END_LIT"; } \
+  > "$TMP/principles-expected.md"
+expect_eq "manifest: setup created ~/.claude/CLAUDE.md on the all-yes run" "yes" \
+  "$(path_exists "$GLOBAL_MEMORY")"
+expect_true "manifest: ~/.claude/CLAUDE.md is exactly bionic's marked principles block" \
+  cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
 
 # DELETED AT THE REVIVE (epic-18 wave-03): a third AC-7 row that grepped setup's
 # PRINTED OUTPUT for the string `CLAUDE.md`. It pinned wording rather than
@@ -1215,6 +1232,35 @@ expect_true "4c setup --all: leaves the migrated layout alone instead of re-copy
 expect_no_match "4c setup --all: does not offer to install ccstatusline again" \
   '*install ccstatusline*' "$(cat "$SETUP_OUT_C")"
 
+# ---------------------------------------------------------------------------
+# Group 4d — an edited principles block under --all (wave-27 D16, AC-9.4).
+#
+# `--all`'s one yes is given over a page, before any difference is on screen, and
+# it answers every other question in the run. An edited block must not be one of
+# them: setup shows the difference and replaces the block only on a yes typed at
+# THAT question. So the run is fed one `y` for the page and nothing but `n` after
+# it — whichever read reaches the principles question gets a no — and the edit
+# must survive; the twin, fed only `y`, must replace it. Same machine as Group 5,
+# which then removes a present block.
+# ---------------------------------------------------------------------------
+
+section "Group 4d: --all asks again, live, before replacing an edited principles block"
+
+{ printf '%s\n' "$PRINCIPLES_START_LIT"; cat "$TMP/principles-body"; printf '%s\n' '- my own rule'
+  printf '%s\n' "$PRINCIPLES_END_LIT"; } > "$GLOBAL_MEMORY"
+cp "$GLOBAL_MEMORY" "$TMP/principles-edited.md"
+expect_false "4d precondition: the edited block is not the shipped one" \
+  cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
+SETUP_OUT_D="$TMP/setup-edited-no.txt"
+{ printf 'y\n'; for _ in $(seq 1 79); do printf 'n\n'; done; } | run_payload "$SETUP_SH" --all > "$SETUP_OUT_D" 2>&1
+expect_match "4d: setup --all printed the difference, the user's line included" \
+  '*my own rule*' "$(cat "$SETUP_OUT_D")"
+expect_true "4d: a no at the live question keeps the edit, byte for byte" \
+  cmp -s "$TMP/principles-edited.md" "$GLOBAL_MEMORY"
+printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$TMP/setup-edited-yes.txt" 2>&1
+expect_true "4d: a yes at the same question replaces the block with the shipped text" \
+  cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
+
 
 # ---------------------------------------------------------------------------
 # Group 5 — remove --all undoes the manifest (AC-10, the second half).
@@ -1229,6 +1275,7 @@ CCS_WAS_THERE=no; [ -f "$CCS_CONFIG" ] && CCS_WAS_THERE=yes
 NB_WAS_THERE=no;  [ -f "$NB_SKILL" ]   && NB_WAS_THERE=yes
 VENV_WAS_THERE=no; [ -x "${VENV_DIR}/bin/python" ] && VENV_WAS_THERE=yes
 RC_BLOCK_WAS="$(yn "$(rc_block_lines "$RC_FILE_FIX")")"
+MEMORY_WAS="$(path_exists "$GLOBAL_MEMORY")"
 SL_WAS="$(yn "$(jqf '.statusLine.command // ""')")"
 ENV_NAMES_WAS="$(yn "$(settings_env_names "$SETTINGS")")"
 
@@ -1300,10 +1347,12 @@ expect_eq "doctor: the claude() shell proxy row follows the block back off the d
 # AC-7 again, from the other direction: a teardown that deleted a file the plugin
 # never wrote would be the 2026-08-20 mistake repeated. The positive twin is the
 # line above it, on the same extractor — a file that IS still there afterwards.
+# The CLAUDE.md row below is the other case: a file setup CREATED to hold only
+# bionic's block, which remove takes back to no file (wave-27 D16).
 expect_eq "remove: the user's own shell rc survives the teardown" "yes" \
   "$(path_exists "$RC_FILE_FIX")"
-expect_eq "remove: ~/.claude/CLAUDE.md is still not a file this plugin touches (AC-7)" \
-  "no" "$(path_exists "$GLOBAL_MEMORY")"
+expect_eq "remove: ~/.claude/CLAUDE.md held only bionic's block, and is gone again with it" \
+  "yes no" "${MEMORY_WAS} $(path_exists "$GLOBAL_MEMORY")"
 
 
 # ---------------------------------------------------------------------------

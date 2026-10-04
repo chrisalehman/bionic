@@ -9458,4 +9458,48 @@ expect_eq "AMEND-ROOT4 the spelling the refusal names is accepted" "0" "$RC"
 expect_eq "AMEND-ROOT4 …and recorded" "hooks/a.sh,CONTEXT.md,Widgetfile,./Otherfile" \
   "$(s30_field "$(s30_last "$RAR")" files)"
 
+# ============================================================
+section "Section 55 §RECON-PLAN: the tick asks for a task-list reconcile when current: moves 3 to 4 and when the table grows (wave-27 T13; REQ-11 AC-11.3; D20)"
+# ============================================================
+#
+# The tick's digest records the plan's `current:` and its `## Tasks` row count. The tick prints
+# the same `poker: RECONCILE` line it already prints for a status or ready-set change when
+# `current:` was 3 at the last digest and is 4 now, or the row count has grown; and nothing
+# extra when neither moved. Every row below waits on the world (an `ext:` read), so the ready
+# set and the decision stay QUIET across the whole case: no status or ready-set move can print
+# the line, and what prints it here is the new reading alone.
+SRP_ROW1="| T1 | 4 | build | waits on CI | implementor | ext:ci-rp | 15m | REQ-x | a.sh | pending |"
+SRP_ROW2="| T2 | 4 | build | waits on CI too | implementor | ext:ci-rp | 15m | REQ-x | b.sh | pending |"
+sRP_plan() { sp_plan_at_step "$RRP" "$1" "$SRP_ROW1" "${@:2}" >/dev/null; }
+RRP="$(make_repo s55-recon-plan)"
+poke "$RRP" arm
+sRP_plan 3
+poke_pressure "$RRP" 8192 1.0 tick
+expect_contains "RPa precondition: the first tick at current: 3 read the plan (the held row is named)" "poker: HELD T1 ext:ci-rp" "$OUT"
+expect_absent "RPa2 …and asks no reconcile: nothing has moved yet" "poker: RECONCILE" "$OUT"
+expect_contains "RPa3 precondition: the digest records the plan's current: and its row count" \
+  "plan_current=3 plan_rows=1" \
+  "$(/usr/bin/grep -E '^plan_(current|rows)=' "$(digest_of "$RRP")" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+sRP_plan 4
+poke_pressure "$RRP" 8192 1.0 tick
+expect_contains "RPb AC-11.3 current: moves from 3 to 4: the tick prints the RECONCILE line" "poker: RECONCILE — " "$OUT"
+expect_contains "RPb2 …in the wording the status-change path already prints" \
+  "poker: RECONCILE — a ## Tasks status or the ready set changed since the last tick: TaskList, and bring the task list in line with the plan" "$OUT"
+expect_eq "RPb3 …once" "1" "$(count_lines_matching 'poker: RECONCILE' "$OUT")"
+expect_contains "RPb4 …and the digest owes the duty" "duty=owed" "$(cat "$(digest_of "$RRP")" 2>/dev/null)"
+poke_pressure "$RRP" 8192 1.0 tick
+expect_absent "RPc the next tick over the same plan prints no RECONCILE" "poker: RECONCILE" "$OUT"
+expect_contains "RPc2 …and says so: unchanged" "unchanged since" "$OUT"
+sRP_plan 4 "$SRP_ROW2"
+poke_pressure "$RRP" 8192 1.0 tick
+expect_contains "RPd a row added to the table: the tick prints the RECONCILE line" "poker: RECONCILE — " "$OUT"
+poke_pressure "$RRP" 8192 1.0 tick
+expect_absent "RPe …and the tick after it prints none" "poker: RECONCILE" "$OUT"
+sRP_plan 5 "$SRP_ROW2"
+poke_pressure "$RRP" 8192 1.0 tick
+expect_absent "RPf current: moving 4 to 5 is not a reconcile" "poker: RECONCILE" "$OUT"
+expect_eq "RPf2 …and the digest keeps what it read (current 5, two rows)" "plan_current=5 plan_rows=2" \
+  "$(/usr/bin/grep -E '^plan_(current|rows)=' "$(digest_of "$RRP")" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
+
 finish

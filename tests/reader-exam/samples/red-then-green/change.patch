@@ -1,0 +1,83 @@
+diff --git a/bin/land.sh b/bin/land.sh
+index 32f4935..4d05a06 100755
+--- a/bin/land.sh
++++ b/bin/land.sh
+@@ -1,6 +1,10 @@
+ #!/bin/bash
+-# bin/land.sh <onto> — merges the branch the current checkout has out into <onto>.
++# bin/land.sh <onto> — merges the branch the current checkout has out into <onto>, once the
++# branch's suite runs let it (lib/landcheck.sh).
+ set -uo pipefail
+ [ "$#" -eq 1 ] || { echo "usage: land.sh <onto>" >&2; exit 2; }
++. "$(dirname "$0")/../lib/landcheck.sh"
+ branch="$(git symbolic-ref --short HEAD)" || exit 2
++why="$(land_check .)"
++[ -z "$why" ] || { echo "$why" >&2; exit 1; }
+ git checkout -q "$1" && git merge -q --no-ff -m "land $branch" "$branch" && echo "LANDED $branch onto $1"
+diff --git a/docs/record/T1.md b/docs/record/T1.md
+new file mode 100644
+index 0000000..0074952
+--- /dev/null
++++ b/docs/record/T1.md
+@@ -0,0 +1,13 @@
++# T1 — landing reads the stamps
++
++reuse: the stamps are written by bin/run-suite.sh, unchanged; land_check is their first
++reader. Searched lib/ and bin/ for another reader of trellis-stamps: none.
++
++AC-1.1, AC-1.2: `bash tests/landcheck.test.sh` → rc=0
++```
++ok - no run at all is refused
++ok - a red run at the head is refused
++ok - a green run at the head lands
++ok - a red run at an older head is history
++ok - a run only at an older head is refused
++```
+diff --git a/lib/landcheck.sh b/lib/landcheck.sh
+new file mode 100644
+index 0000000..5275536
+--- /dev/null
++++ b/lib/landcheck.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++# lib/landcheck.sh — whether a checkout's suite runs let it land (spec REQ-1).
++
++# land_check <dir> — prints why <dir> may not land, or nothing when it may.
++land_check() {
++  local file head line
++  file="$(git -C "$1" rev-parse --absolute-git-dir)/trellis-stamps"
++  [ -s "$file" ] || { echo "refused: no suite has run in $1"; return; }
++  head="$(git -C "$1" rev-parse --verify -q 'HEAD^{commit}')"
++  line="$(tail -n 1 "$file")"
++  case "$line" in
++    "stamp head=$head "*) ;;
++    *) echo "refused: no suite has run at $head"; return ;;
++  esac
++  case "$line" in
++    *" rc=0 "*) ;;
++    *) echo "refused: a suite failed at $head: ${line#* suite=}" ;;
++  esac
++}
+diff --git a/tests/landcheck.test.sh b/tests/landcheck.test.sh
+new file mode 100644
+index 0000000..efb2b0d
+--- /dev/null
++++ b/tests/landcheck.test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++. "$(dirname "$0")/lib.sh"
++. "$(dirname "$0")/../lib/landcheck.sh"
++
++r="$(scratch_repo)"
++head="$(git -C "$r" rev-parse HEAD)"
++stamps="$r/.git/trellis-stamps"
++check "no run at all is refused" "refused: no suite has run in $r" "$(land_check "$r")"
++printf 'stamp head=%s rc=1 suite=tests/a.test.sh\n' "$head" > "$stamps"
++check "a red run at the head is refused" "refused: a suite failed at $head: tests/a.test.sh" "$(land_check "$r")"
++printf 'stamp head=%s rc=0 suite=tests/a.test.sh\n' "$head" > "$stamps"
++check "a green run at the head lands" "" "$(land_check "$r")"
++printf 'stamp head=0000000000000000000000000000000000000000 rc=1 suite=tests/a.test.sh\nstamp head=%s rc=0 suite=tests/a.test.sh\n' "$head" > "$stamps"
++check "a red run at an older head is history" "" "$(land_check "$r")"
++printf 'stamp head=0000000000000000000000000000000000000000 rc=0 suite=tests/a.test.sh\n' > "$stamps"
++check "a run only at an older head is refused" "refused: no suite has run at $head" "$(land_check "$r")"
++done_testing

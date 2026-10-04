@@ -913,7 +913,7 @@ tick_digest_file() {  # <session-id> -> absolute path, or empty
 # so a re-arm does not raise them a second time. `change=` is the fingerprint of the plan's
 # `## Tasks` statuses and its ready set (wave-26 T15; D16): the task-list duty is owed only when
 # it moved, so `arm` does not carry it and the first tick after an arm compares against nothing.
-write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change> [<live head>]]]] -> 0 written, 1 not
+write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows>]]]]] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
   [ -n "$f" ] || return 1
@@ -937,6 +937,15 @@ write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <du
     # which reads no git, hands the same head to the same ready set on this tick's turn.
     if [ -n "${9:-}" ]; then
       printf 'head=%s\n' "$9"
+    fi
+    # THE PLAN'S `current:` AND ITS `## Tasks` ROW COUNT, as this tick read them (wave-27 T13; D20):
+    # the next tick asks for a task-list reconcile when current: went 3 to 4 or the count grew.
+    # `arm` carries neither, so the first tick after an arm compares against nothing.
+    if [ -n "${10:-}" ]; then
+      printf 'plan_current=%s\n' "${10}"
+    fi
+    if [ -n "${11:-}" ]; then
+      printf 'plan_rows=%s\n' "${11}"
     fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
@@ -5807,6 +5816,7 @@ EOF
     # floor state in (lib/units.sh `_units_floor_state`), so a tick runs `proof_state` once.
     [ -z "$TICK_BUF" ] || _UNITS_MEMO_FLOOR="$TICK_BUF.floor"
     TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed; TICK_CHANGE=""; TICK_CHANGE_STORE=""
+    TICK_PLAN_CUR=""; TICK_PLAN_ROWS=""
     TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
     TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
@@ -5829,7 +5839,7 @@ EOF
       fi
       rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
-        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" \
+        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
       exit "$rc"
@@ -5869,6 +5879,18 @@ EOF
       units_rows "$SCHED_PLAN" 2>/dev/null | awk -F'\t' 'NF { print $1 "|" $10 }'
       printf 'ready=%s\n' "$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
     }
+    # THE TASK LIST IS REBUILT AT PLAN APPROVAL (wave-27 T13; D20; steps/3.md). No hook reads a
+    # task list, so this line is the only wall the rule has: the duty is also owed when the
+    # plan's `current:` was 3 at the last digest and is 4 now, or its row count has grown, and
+    # it is owed on a QUIET tick too (a plan at approval has nothing open yet).
+    tick_plan_moved() {  # -> 0 when the digest's last reading of the plan is behind this one
+      local pc pr
+      pc="$(tick_digest_field "$TICK_DIGEST_FILE" plan_current)"
+      pr="$(tick_digest_field "$TICK_DIGEST_FILE" plan_rows)"
+      { [ "$pc" = 3 ] && [ "$TICK_PLAN_CUR" = 4 ]; } && return 0
+      case "$pr" in ''|*[!0-9]*) return 1 ;; esac
+      [ -n "$TICK_PLAN_ROWS" ] && [ "$TICK_PLAN_ROWS" -gt "$pr" ]
+    }
     tick_conclude() {  # <decision before the gate>
       local cur="" prev=""
       TICK_DECIDED="$1"
@@ -5881,6 +5903,8 @@ EOF
       TICK_CHANGE="none"
       if [ -n "${SCHED_PLAN:-}" ] && [ -f "${SCHED_PLAN:-}" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
         TICK_CHANGE="$(tick_plan_memoised tick_change_rows | cksum | awk '{ print $1 "-" $2 }')"
+        TICK_PLAN_CUR="$(sched_plan_current "$SCHED_PLAN")"
+        TICK_PLAN_ROWS="$(tick_plan_memoised tick_change_rows | grep -vc '^ready=')"
       fi
       if [ -n "$TICK_BUF" ]; then
         TICK_DIGEST="$( {
@@ -5928,7 +5952,8 @@ EOF
       fi
       TICK_SINCE="$(iso_now)"
       TICK_DUTY=none
-      if [ "$TICK_DECIDED" != QUIET ] && [ "$TICK_CHANGE" != "$(tick_digest_field "$TICK_DIGEST_FILE" change)" ]; then
+      if { [ "$TICK_DECIDED" != QUIET ] && [ "$TICK_CHANGE" != "$(tick_digest_field "$TICK_DIGEST_FILE" change)" ]; } \
+         || tick_plan_moved; then
         TICK_DUTY=owed
         # THE DUTY IS PRINTED (wave-26 T32; review-6 F2). It used to live only in the digest
         # file, so the Patrol prompt asked for the refresh on a change the model could not see.
