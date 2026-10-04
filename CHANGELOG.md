@@ -12,21 +12,21 @@ Versioning follows semver from 1.9.0 on:
 
 ## 1.10.0 — 2026-10-04
 
-A run that is never left waiting on a dialog. In a session engaged with a bionic run, bionic now
-answers Claude Code's permission question itself: yes when everything the call writes or deletes
-is inside the asking agent's own workspace, no with a line that fixes it otherwise, and no for
-anything kept for you, which reaches you once through the Patrol. This is a minor release: it adds
-a capability and refuses some actions that were not refused before, and nothing a project already
-relies on is removed.
+A run that is never left waiting on a dialog. In a session engaged with a bionic run, in bypass and
+auto mode, bionic now answers Claude Code's permission question itself: yes when everything the
+call writes or deletes is inside the asking agent's own workspace, no with a line that fixes it
+otherwise, and no for anything kept for you, which reaches you once through the Patrol. This is a
+minor release: it adds a capability and refuses some actions that were not refused before, and
+nothing a project already relies on is removed.
 
 What you will notice:
 
-- **bionic answers the permission question in an engaged run.** Where Claude Code would put a
-  "may I run this?" dialog in front of you, bionic answers it, so a lead or an agent working
-  while you are away is not stopped until you come back. A yes covers that one call. A no is a
-  message the agent reads: it says what bionic could not place, names the workspace, and gives
-  one next step, and the agent carries on. Once a session is engaged, a failure inside bionic
-  answers no and says what failed; it never answers yes.
+- **bionic answers the permission question in an engaged run, in bypass and auto mode.** Where
+  Claude Code would put a "may I run this?" dialog in front of you, bionic answers it, so a lead
+  or an agent working while you are away is not stopped until you come back. A yes covers that
+  one call. A no is a message the agent reads: it says what bionic could not place, names the
+  workspace, and gives one next step, and the agent carries on. Once a session is engaged, in
+  either mode, a failure inside bionic answers no and says what failed; it never answers yes.
 - **What is allowed: work inside the asker's own workspace.** The lead may write and delete in
   the run's checkout, the worktrees this session created, the session scratch directory, and the
   run's record directory and plan files. An agent given a worktree may write and delete in its
@@ -48,15 +48,18 @@ What you will notice:
   `release`, `repo` and `api`; `npm`, `pnpm` or `yarn publish`; `cargo publish`; `gem push`;
   `twine upload`), credentials (`gh auth`, `npm login`, `security`, and the common credential
   stores), production infrastructure (`terraform`, `kubectl`, `vercel`, `aws`, `gcloud`, `az`) and
-  those tools' billing commands are never allowed. The denial names the category and offers no
-  workaround. bionic records the request, and the lead's Patrol tick prints it once as a
-  `poker: GATE <asker> — <category>: <command>` line, so the lead raises it with you once,
+  those tools' billing commands are never allowed by bionic. The denial names the category and
+  offers no workaround. bionic records the request, and the lead's Patrol tick prints it once as
+  a `poker: GATE <asker> — <category>: <command>` line, so the lead raises it with you once,
   through your own notify channel. bionic sends no notification itself. The Patrol prompt moves
   to version 3, and a Patrol started with the older prompt is told once to re-arm.
 - **It works inside Claude Code's permissions, never around them.** bionic answers only what
-  Claude Code asks. Your permission mode, your own allow, ask and deny rules, and every call Claude
-  Code settles itself are untouched; an answer persists nothing and writes no setting. A session
-  that has not engaged a run gets the stock dialog as before, and a tool whose job is to ask you
+  Claude Code asks, and only in bypass and auto mode, the two modes in which you have told Claude
+  Code not to ask. In default, accept-edits and plan mode bionic answers nothing and the dialog
+  reaches you exactly as in 1.9.0, because the mode is your answer to how much you want to be
+  asked. Your permission mode, your own allow, ask and deny rules, and every call Claude Code
+  settles itself are untouched; an answer persists nothing and writes no setting. A session that
+  has not engaged a run gets the stock dialog as before, and a tool whose job is to ask you
   something (a question, a plan approval) is never answered by bionic.
 - **Every answer is logged.** One line per answer goes to `permission-answers.log` in the
   project's log directory under your home (`~/.claude/logs/<project>-<checksum>/`, beside the
@@ -80,7 +83,7 @@ What you will notice:
   only a shell builtin or keyword (`exec`, `eval`, `cd`, `source`) keeps its case, because the
   shell runs nothing for `EXEC`: `EXEC git push` pushes nothing, and is not read as a push.
 
-Newly refused, when Claude Code asks about them:
+Newly refused, when Claude Code asks about them in bypass or auto mode:
 
 - A command that makes a link (`ln`) is denied with a fix, and so is every write, delete and read
   after a `cp` or `mv` in the same command, `mv a b && echo x > log` included. What was copied or
