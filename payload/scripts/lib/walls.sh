@@ -5118,23 +5118,34 @@ _fo_short_limit() {  # -> sets _FO_SHORT_MS from `farm-out-short-ms:`, default 1
 
 _FO_SHORT_FLOOR_MS=6000
 _fo_short_pass() {  # -> 0 when this call is short: a suite its wrap will stop at the limit, or a non-suite left as typed
-  local _t _s
+  local _t
   WALL_SHORT_KILL_AFTER=""
   _t="$(bionic_jq .tool_input.timeout)"
   case "$_t" in ''|*[!0-9]*) return 1 ;; esac
   [ "${#_t}" -le 9 ] || return 1
   _t=$((10#$_t))
   [ "$_t" -gt 0 ] && [ "$_t" -le "$_FO_SHORT_MS" ] || return 1
-  if [ "$_t" -lt "$_FO_SHORT_FLOOR_MS" ]; then _FO_SHORT_WHY=tooshort; return 1; fi
-  _s=$((_t / 1000 - 5))
   # THE ONE BUILDER DECIDES (T7's seam): a suite passes only if the wrap the suite guard
   # will stage can carry the kill. The text built here is discarded; that wall builds it
   # again from the same inputs and stages it, because only one rewrite reaches the fold.
-  WALL_SHORT_KILL_AFTER="$_s"
-  _bsg_wrap_text no && return 0
-  WALL_SHORT_KILL_AFTER=""
-  _FO_SHORT_WHY="$_BSG_WRAP_WHY"
-  [ "$_FO_SHORT_WHY" = class ] || return 1
+  # THE FLOOR BINDS ONLY A SUITE (review 12 F5, A-T50.4): it is room for the shim's kill, so a
+  # command with a suite segment under it is refused with the floor as its fix, and a build is
+  # judged below exactly as at the floor, since no shim would stop it. Under the floor only the
+  # class is asked, the builder's own first question; building a wrap no one will stage would
+  # cost the refusal forks it never paid before.
+  if [ "$_t" -ge "$_FO_SHORT_FLOOR_MS" ]; then
+    WALL_SHORT_KILL_AFTER=$((_t / 1000 - 5))
+    _bsg_wrap_text no && return 0
+    WALL_SHORT_KILL_AFTER=""
+    _FO_SHORT_WHY="$_BSG_WRAP_WHY"
+    [ "$_FO_SHORT_WHY" = class ] || return 1
+  else
+    _FO_SHORT_WHY=tooshort
+    [ -r "$BIONIC_LIB/cmd-class.sh" ] || return 1
+    wall_libs background-suite-guard cmd-class.sh || return 1
+    _wall_class_read "$COMMAND"
+    [ "$_WALL_CLASS" != suite ] || return 1
+  fi
   # NOT A SUITE: a build, an install or a bootstrap passes as typed, with no shim (the lead's
   # ruling at T44); the harness's own timeout bounds it. `class` is also the builder's answer
   # when it could not read the command at all, so the pass holds only on a reading of THIS
@@ -5265,7 +5276,9 @@ esac
 # THE KILL LIMIT is the timeout in whole seconds less five (A-T9.2): the shim must stop the
 # command, and say why, before the harness's own timeout moves it to the background, where
 # nobody reads the line. Under the six-second floor no limit leaves room for the kill's grace,
-# so such a call is refused with the floor as its fix (review 8 N1, A-T44.1).
+# so such a call with a suite segment is refused with the floor as its fix (review 8 N1,
+# A-T44.1). A build under the floor has no shim to make room for: it passes as typed, as it
+# would at the floor (review 12 F5, A-T50.4).
 _FO_SHORT_WHY=""
 _fo_short_limit
 if _fo_short_pass; then return 0; fi
