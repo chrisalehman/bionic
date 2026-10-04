@@ -879,6 +879,68 @@ Fix: bind this session to the run it is working, or write this session's own pla
      governing-skill hook binds it on the first write), then retry the dispatch."
 fi
 
+# ==================================== A ROW THAT READS AN APPROVAL WAITS FOR IT (wave-26 T13)
+# (REQ-6 AC-6.2; spec D3, ADR-043.)
+#
+# THE PLAN'S APPROVAL IS NOT THE ONLY ONE. A row whose `reads` cell names `approval:<name>` —
+# the release reads `approval:release` — is not ready until `## SDLC State` carries
+# `approved: <name> …`, a line only `session-poker.sh approve` writes, on the user's reply. The
+# ready set (lib/fill.sh over lib/units.sh) never offers such a row; this arm refuses the
+# dispatch that would start one anyway, whatever the role, because the thing being waited for
+# is the user's act and no role is entitled to stand in for it.
+#
+# WHICH ROW A DISPATCH IS: the Agent call's NAME, by the rule `fill_row_launched` uses — the id
+# itself or the id behind a `<prefix>-`, with the `-r<n>` re-run suffix taken off. A name that
+# is no row's id is not judged here. `approval:plan` is the arm above.
+DP_ROW_NAME=$(_jq '.tool_input.name')
+if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
+  DP_APPROVAL_WAITS=$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v nm="$DP_ROW_NAME" '
+    function mine(id,   b, l) {
+      b = nm
+      if (match(b, /-r[0-9]+$/)) b = substr(b, 1, RSTART - 1)
+      if (b == id) return 1
+      l = length(id)
+      return (length(b) > l + 1 && substr(b, length(b) - l) == "-" id)
+    }
+    $1 != "" && mine($1) {
+      m = split($13, a, ",")
+      for (k = 1; k <= m; k++) {
+        t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
+        if (t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ && t != "approval:plan") print $1 "\t" substr(t, 10)
+      }
+    }')
+  if [ -n "$DP_APPROVAL_WAITS" ]; then
+    DP_APPROVALS_HAD=$(awk '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^## SDLC State/ { st = 1; next }
+      /^## / { st = 0 }
+      st {
+        l = $0; sub(/^[ \t]*-?[ \t]*/, "", l)
+        if (l !~ /^approved[ \t]*:/) next
+        sub(/^approved[ \t]*:[ \t]*/, "", l); split(l, w, /[ \t]+/)
+        if (w[1] != "") printf " %s ", w[1]
+      }' "$PLAN" 2>/dev/null)
+    while IFS=$'\t' read -r DP_AW_ID DP_AW_NAME; do
+      [ -n "$DP_AW_NAME" ] || continue
+      case "$DP_APPROVALS_HAD" in *" $DP_AW_NAME "*) continue ;; esac
+      dp_finding "row ${DP_AW_ID} waits for approval:${DP_AW_NAME}" \
+        "record it with the approve verb" \
+        "Dispatch: ${DP_ROW_NAME} (row ${DP_AW_ID} of ${PLAN})
+Reads:    approval:${DP_AW_NAME} — and ## SDLC State carries no 'approved: ${DP_AW_NAME}' line.
+
+An approval is an act of the user. The row waits for it, the ready set does not offer it, and no
+dispatch starts it before the line exists.
+
+Fix: put the decision to the user; on their reply, record it, then retry the dispatch:
+       bash $(refuse_shell_word "$HOOK_DIR/session-poker.sh") approve ${DP_AW_NAME} '<the reply, verbatim>'
+     Silence, a question, or a partial reply is never recorded as approval."
+    done <<DP_AW
+$DP_APPROVAL_WAITS
+DP_AW
+  fi
+fi
+
 # ======================================= ONE LEVEL OF DELEGATION (wave-20 T7, AC-9.4)
 # (spec D9 and its Writer-origin invariant; design ledger Δ11 as amended by Δ12.)
 #
