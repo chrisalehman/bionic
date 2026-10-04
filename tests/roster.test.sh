@@ -169,6 +169,25 @@ expect_contains "R5d …and claims= is whatever the caller passed, untouched by 
 expect_eq "R5e the keys sit before tool_use_id=, after the instrument fields: the row minus them is the plain row" \
   "$R5_PLAIN" "$(printf '%s' "$R5_AM" | sed 's/|amended=[^|]*//')"
 
+section "R5h — the hold and the done marker are row keys (wave-24 T7, REQ-4 AC-4.3; D1, D3; A-orch-4)"
+
+# `hold` records the orchestrator's standing stand-down answer (`held=<at> <reason> fp=<fp>`),
+# and T9 lifts a brief's `Done marker:` to `done=<path>`. Both are PRESENT-IF-PASSED, like the
+# two audit keys above: a row naming neither is the plain row, byte for byte.
+R5H_HELD="$(lib roster_row "${R5_BASE[@]}" "held=2026-10-03T01:00:00Z idle | on purpose fp=2026-09-23T00:00:00Z:1790000000:1")"
+R5H_DONE="$(lib roster_row "${R5_BASE[@]}" "done=rec/x.done")"
+expect_contains "R5h-a held= is written when passed, its pipe folded" \
+  "|held=2026-10-03T01:00:00Z idle   on purpose fp=2026-09-23T00:00:00Z:1790000000:1|" "$R5H_HELD"
+expect_contains "R5h-b done= is written when passed" "|done=rec/x.done|" "$R5H_DONE"
+expect_absent "R5h-c a row that names neither carries neither" "held=" \
+  "$R5_PLAIN$(printf '%s' "$R5_PLAIN" | grep -o 'done=')"
+expect_eq "R5h-d the row minus held= is the plain row" \
+  "$R5_PLAIN" "$(printf '%s' "$R5H_HELD" | sed 's/|held=[^|]*//')"
+expect_eq "R5h-e the row minus done= is the plain row" \
+  "$R5_PLAIN" "$(printf '%s' "$R5H_DONE" | sed 's/|done=[^|]*//')"
+lib roster_row "${R5_BASE[@]}" "helds=x" >/dev/null
+expect_status "R5h-f a near-miss key is still refused" "2" "$?"
+
 section "R6 — live_ids_of_name asks the one close predicate (epic-23 wave-20 T17, REQ-10; D10)"
 
 # THE DEFECT (T2's carry-over, research D3 §REQ-10). `live_ids_of_name` — the stop wall's

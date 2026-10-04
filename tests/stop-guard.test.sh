@@ -617,6 +617,55 @@ run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "hushed-reviewer")"
 expect_status "a supervised named target still engages the full guard path: REFUSED, it is working" 2 "$GUARD_ST"
 expect_absent "…and this is NOT the passthrough branch" "PASSTHROUGH" "$GUARD_ERR"
 
+section "§BID — a background shell id is the one the TRANSCRIPT recorded, else a 9-character [bt] id (wave-24 T10; REQ-7 AC-7.4; D12, research R4 §3)"
+#
+# The harness names a background shell `b<8 chars>` since 2026-09-03 (`t<8>` before), and records
+# the id it handed out as `"backgroundTaskId":"<id>"`. The carve used to be `^t[a-z0-9]{8,}$`,
+# so every real id was refused as "on no roster row". Standing is still asked FIRST: a name this
+# session's roster carries is guarded whatever it is spelled like.
+
+# bid1 — the id the harness handed out, `b` and nine characters: passes through, logged.
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "b66vjp0ok")"
+expect_status "bid1 a harness-spelled id (b66vjp0ok) with no row: PASSES THROUGH" 0 "$GUARD_ST"
+expect_regex "bid1 …and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
+
+# bid2 — an id that is off the fallback shape is refused until the transcript records it, and
+# passes the moment it does. Same payload, same roster: the transcript line is the only change.
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "xq7mkd2wx")"
+expect_status "bid2 an off-shape id the transcript never recorded: REFUSED" 2 "$GUARD_ST"
+expect_contains "bid2 …as on no roster row" "no roster row of this session" "$GUARD_ERR"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_bid2","content":"Command running in background with ID: xq7mkd2wx"}]},"toolUseResult":{"stdout":"","backgroundTaskId":"xq7mkd2wx"}}' >> "$W4_TR"
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "xq7mkd2wx")"
+expect_status "bid2b …and once the transcript records backgroundTaskId xq7mkd2wx: PASSES THROUGH" 0 "$GUARD_ST"
+expect_regex "bid2b …logged" 'PASSTHROUGH' "$GUARD_ERR"
+# …EXACTLY that id: a prefix of a recorded id is a different id.
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "xq7mkd2")"
+expect_status "bid2c a prefix of a recorded id: REFUSED" 2 "$GUARD_ST"
+
+# bid3 — a rostered name that wears the fallback shape (`b` + eight) is guarded, not waved
+# through: standing is asked first. The agent is working, so the guard refuses it.
+plant_agent "$W4_SUB" "abootstrap1-8888888888888888" "bootstrap1"
+sg_roster_row "$W4_REPO" "$SID_A" "bootstrap1" "abootstrap1-8888888888888888"
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "bootstrap1")"
+expect_status "bid3 a ROSTERED 9-character b-name (bootstrap1): still guarded, REFUSED" 2 "$GUARD_ST"
+expect_absent "bid3 …and this is NOT the passthrough branch" "PASSTHROUGH" "$GUARD_ERR"
+# …even when the transcript records that very string as a background id.
+printf '%s\n' '{"toolUseResult":{"backgroundTaskId":"bootstrap1"}}' >> "$W4_TR"
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "bootstrap1")"
+expect_status "bid3b …and a transcript record of it does not take it out of the guard" 2 "$GUARD_ST"
+expect_absent "bid3b …nor reach the passthrough" "PASSTHROUGH" "$GUARD_ERR"
+
+# bid4 — an unrostered name that is a name and not an id: refused (a hyphen is no id).
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "backlog-census")"
+expect_status "bid4 an unrostered name (backlog-census): REFUSED" 2 "$GUARD_ST"
+expect_contains "bid4 …as on no roster row" "no roster row of this session" "$GUARD_ERR"
+
+# bid5 — the fallback is exactly nine: a longer `b`/`t` run is not an id the harness hands out.
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "b66vjp0okz")"
+expect_status "bid5 a ten-character b-run: REFUSED" 2 "$GUARD_ST"
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "tvivnv41s")"
+expect_status "bid5b …and the old t-spelling, nine characters, still passes" 0 "$GUARD_ST"
+
 section "Section 5: THE GATE LOOKS FOR ITSELF (REQ-2, AC-2.1/2.2/2.3; ADR-028)"
 #
 # WHAT THIS REPLACES. Sections 5, 6, 6b, 8 and 9 drove the record's five rules — D-1 activity

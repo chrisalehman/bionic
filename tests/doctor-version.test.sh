@@ -529,8 +529,9 @@ echo "--- 7d: a git feed has no filesystem path, so it can never read 'this chec
 HOME12="$(make_registry_home)"
 write_known_marketplaces "$HOME12" '{"source":"github","repo":"example/bionic"}' "/tmp/some-clone"
 LINE12="$(plugin_source_line "$(run_doctor "$HOME12")")"
-expect_match "31f: the repo slug prints as-is, verdict OTHER — nothing here can match a root" \
-  "*example/bionic*\[OTHER checkout — the CLI loads the plugin from THERE\]" "$LINE12"
+expect_match "31f: the repo slug prints as-is, verdict is the feed word — nothing here can match a root" \
+  "*example/bionic*\[github feed\]" "$LINE12"
+expect_no_match "31f2: …and a GitHub source is never an OTHER checkout" "*OTHER checkout*" "$LINE12"
 
 echo "--- 7e: the bracket verdict survives truncation; the path gives way instead ---"
 
@@ -597,6 +598,56 @@ write_known_marketplaces "$HOME_DCV2" '{"source":"directory","path":"'"$DCV_OTHE
 VERDICT_DCV2="$(dcv_verdict "$HOME_DCV2" "$DCV_MAIN")"
 expect_eq "31j: an unrelated separate clone reads the PLAIN verdict, no qualifier" \
   "OTHER checkout" "$VERDICT_DCV2"
+
+section "Section GH: a GitHub-feed install — plugin root is a cache copy with no .git (D15, AC-10.2/10.3)"
+
+# THE HEADER'S SHA AND THE BRACKET'S WORD ON THE PUBLIC INSTALL. Every drive above runs doctor
+# from this checkout with BIONIC_PLUGIN_ROOT inside a git tree, so `detect_registry_sha_lag`
+# always found a HEAD. On a public install the CLI runs the plugin from a cache copy with no
+# .git: the registry's `gitCommitSha` is the one fact doctor holds, and it has to print. The
+# copy below is laid out like that cache (no payload/), outside any repository, and the doctor
+# driven is the COPY's own, so nothing here reads this checkout.
+GH_SHA="0123456789abcdef0123456789abcdef01234567"
+GH_CACHE="$(mktemp -d -p "$TMP")/cache/bionic/bionic/${REAL_VERSION}"
+mkdir -p "$GH_CACHE"
+cp -R "$PAYLOAD"/. "$GH_CACHE"/
+expect_false "GH0: the cache copy is not inside a git tree" \
+  bash -c 'cd "$1" && git rev-parse --git-dir' _ "$GH_CACHE"
+
+write_installed_plugins_gh() {  # <claude-home> <installPath> [<gitCommitSha>]
+  if [ $# -ge 3 ]; then write_installed_plugins_sha "$1" "$2" "$3"
+  else
+    jq -nc --arg path "$2" '{plugins:{"bionic@bionic":[{installPath:$path}]}}' \
+      > "$1/plugins/installed_plugins.json"
+  fi
+}
+
+run_doctor_at_cache() {  # <claude-home> -> the cache copy's own doctor, from outside any repo
+  ( cd "$TMP" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$GH_CACHE" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      bash "$GH_CACHE/scripts/doctor.sh" < /dev/null 2>"$DOCTOR_ERR_FILE" )
+}
+
+HOME_GH="$(make_registry_home)"
+write_known_marketplaces "$HOME_GH" '{"source":"github","repo":"example/bionic"}' "$CLONE1"
+write_installed_plugins_gh "$HOME_GH" "$GH_CACHE" "$GH_SHA"
+OUT_GH="$(run_doctor_at_cache "$HOME_GH")"
+HEAD_GH="$(printf '%s\n' "$OUT_GH" | awk 'NR==1')"
+LINE_GH="$(plugin_source_line "$OUT_GH")"
+
+expect_match "GH1: the header carries the registry sha's first eight characters" \
+  "Bionic Doctor — payload ${REAL_VERSION} @ 01234567" "$HEAD_GH"
+expect_no_match "GH2: …and does not read unknown" "*@ unknown*" "$HEAD_GH"
+expect_match "GH3: the plugin-source bracket names the feed" \
+  "plugin source: example/bionic*\[github feed*\]" "$LINE_GH"
+expect_no_match "GH4: …and a GitHub source is never an OTHER checkout" "*OTHER checkout*" "$LINE_GH"
+
+HOME_GHN="$(make_registry_home)"
+write_known_marketplaces "$HOME_GHN" '{"source":"github","repo":"example/bionic"}' "$CLONE1"
+write_installed_plugins_gh "$HOME_GHN" "$GH_CACHE"
+HEAD_GHN="$(run_doctor_at_cache "$HOME_GHN" | awk 'NR==1')"
+expect_match "GH5: no gitCommitSha in the registry reads unknown — never an invented sha" \
+  "Bionic Doctor — payload ${REAL_VERSION} @ unknown" "$HEAD_GHN"
 
 section "Section 8: feed kind is keyed on the installed plugin's own marketplace name (AC-18, L-DETECT/4.1)"
 

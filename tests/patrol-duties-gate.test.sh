@@ -1011,16 +1011,19 @@ u_prompt "$d" "merge the two landed trees and tell me where we are"
 a_text "$d" "fill-declined: the wave head has not merged, so neither row can base off it."
 fire "$d"; expect_allow "60: a fill-declined line answers the gap as it answers a printed FILL"
 
-# 60a: A DECLINE ANSWERS ONE TURN. The line is the model's text in turn N; turn N+1 is a new
-# user prompt with the gap still open and no decline in it, so it is refused again — block,
-# allow, block. The wall judges every Stop on the computed gap (wave-20 D5), not on what an
-# earlier turn said.
+# 60a: A DECLINE STANDS AGAINST THE READY SET IT ANSWERED (re-authored at wave-24 T8, D2; it
+# used to pin "a decline answers one turn"). The line is the model's text in turn N. Turn N+1
+# has the same ready set and no decline, so the ledger's line from turn N still answers it.
+# Turn N+2 has a row turn N never saw, so it is refused, naming only that row.
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_prompt "$d" "first turn"
 a_text "$d" "fill-declined: waiting on the wave head."
 fire "$d"; expect_allow "60a: turn N — the decline answers the gap"
 u_prompt "$d" "second turn, nothing said about the gap"
-fire "$d"; expect_block "60a: F3 — turn N+1, gap still open, no decline in it — is refused again" "T2"
+fire "$d"; expect_allow "60a2: D2 turn N+1, the same ready set — the decline still stands"
+printf '%s\n' "$LEDGER_READY_20" >> "$d/.bionic/docs/plans/$PLAN_REL"
+u_prompt "$d" "third turn, a new row is ready"
+fire "$d"; expect_block "60a3: D2 turn N+2, a row the decline never saw — refused, naming it" "T20" "T2 "
 
 # 60b: and a dispatch of every ready row answers it too. A DISPATCH IS TWO FACTS ON DISK
 # (wave-20 Δ7, count not names): the roster row the dispatch wall writes at launch, and the
@@ -1211,8 +1214,9 @@ POKER_64M="${BIONIC_HOOKS_DIR}/session-poker.sh"
 d=$(LEDGER_BUDGET='parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe' \
       make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 echo "done" > "$d/landed-64m.md"
+: > "$d/W-MET.done"   # the agent said so, by its Done marker: MET needs it (wave-24 T9, D3)
 roster_row_fixture status=intended session="$SID" name=W-MET agent_id= \
-  deliverable="$d/landed-64m.md" >> "$d/.bionic/tmp/roster-$SID.state"
+  deliverable="$d/landed-64m.md" "done=$d/W-MET.done" >> "$d/.bionic/tmp/roster-$SID.state"
 CFG_64M="$(mktemp -d)"; mkdir -p "$CFG_64M/projects/-fixture-project"
 {
   jq -nc '{type:"user",timestamp:"2026-09-05T00:50:00.000Z",message:{role:"user",content:"go"}}'
@@ -1885,6 +1889,113 @@ fire "$d"; expect_block "M12b: …and the tick, in the same refusal" "$MK_TICK"
 
 # THE RING AND THE PROBES STAY PINNED for the rest of the suite (wave-20): §6 drives the same
 # fill duty on live ledgers, and an unpinned ring is this machine's real one.
+
+# ============================================================
+section "Section QUIET: the task-list duty is owed only when the tick said so (wave-24 T8, REQ-4, AC-4.13; D5)"
+#
+# THE DEFECT. Every Patrol tick turn owed a task-list refresh, including the turns whose tick
+# had nothing to say. A quiet run's Patrol therefore spent each turn calling TaskList so the stop
+# wall would let it end. The tick (T7) now writes `duty=owed|none` to its digest file,
+# `.bionic/tmp/tick-digest-<sid>.state`. It writes `none` when it printed `unchanged`, or when it
+# decided QUIET with no open row. The collector reads that line and hands it to the duty.
+#
+# THE TICK IS THE REAL ONE, run twice over the same world so the second run prints `unchanged`.
+# The wall then judges that tick's turn with the tick's own output in it and no TaskList. The
+# control is a real FILL tick on a live ledger: its turn owes the refresh and is refused once.
+# A turn with no digest file still owes the refresh: rows 2, 12, 13 and 22b above drive that
+# case on the marker and stamp alone.
+QT_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+qt_tick() {  # <dir> <config dir> -> the real tick's stdout
+  local ring="$2/clear.ring"
+  [ -f "$ring" ] || cp "$CLEAR_RING" "$ring"
+  ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$2" BIONIC_PRESSURE_RING="$ring" \
+      bash "$QT_POKER" tick 2>/dev/null )
+}
+qt_duty() { sed -n 's/^duty=//p' "$1/.bionic/tmp/tick-digest-$SID.state" 2>/dev/null | head -1; }
+require_helpers qt_tick qt_duty
+
+# Q0: the prompt asks for ListAgents only when the roster has an open row (T7's wording; AC-4.13).
+QT_PROMPT="$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$QT_POKER" prompt 2>/dev/null)"
+expect_contains "Q0: AC-4.13 the Patrol prompt asks for ListAgents only with an open row" \
+  "ListAgents only when the roster has an open row" "$QT_PROMPT"
+
+# Q1: a quiet world, ticked twice. The second tick prints `unchanged` and owes nothing.
+d=$(make_env); roster_header > "$d/.bionic/tmp/roster-$SID.state"; ( cd "$d" && git init -q . 2>/dev/null )
+QT_CFG="$(mktemp -d)"
+qt_tick "$d" "$QT_CFG" >/dev/null
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "Q1 precondition: the second tick over the same facts prints unchanged" \
+  "poker: unchanged since" "$QT_OUT"
+expect_eq "Q1 precondition: …and writes duty=none" "none" "$(qt_duty "$d")"
+u_marker "$d"; u_tick_out "$d" "$QT_OUT"
+fire "$d"; expect_allow "Q1: AC-4.13 the unchanged tick's turn, no TaskList — passes"
+rm -rf "$QT_CFG"
+
+# Q2: the same quiet world with an open row on the roster. The tick decides with something open,
+# so it writes duty=owed and the turn owes the refresh.
+d=$(make_env); ( cd "$d" && git init -q . 2>/dev/null )
+{ roster_header
+  roster_row_fixture status=intended session="$SID" name=W-OPEN agent_id= deliverable="$d/never-written-q2.md"
+} > "$d/.bionic/tmp/roster-$SID.state"
+QT_CFG="$(mktemp -d)"
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_eq "Q2 precondition: a tick with an open row writes duty=owed" "owed" "$(qt_duty "$d")"
+u_marker "$d"; u_tick_out "$d" "$QT_OUT"
+fire "$d"; expect_block "Q2: the owed duty with no TaskList is refused" "$TL_MISSING"
+rm -rf "$QT_CFG"
+
+# Q3: a FILL tick turn with no TaskList is refused once. The fill itself is declined in the
+# turn, so the task-list duty is the only thing left to refuse.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2"); ( cd "$d" && git init -q . 2>/dev/null )
+roster_header > "$d/.bionic/tmp/roster-$SID.state"
+QT_CFG="$(mktemp -d)"
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "Q3 precondition: the real tick fills" "poker: FILL T2" "$QT_OUT"
+expect_eq "Q3 precondition: …and writes duty=owed" "owed" "$(qt_duty "$d")"
+u_marker "$d"; u_tick_out "$d" "$QT_OUT"
+a_text "$d" "fill-declined: T2 waits on the wave head's merge"
+fire "$d"; expect_block "Q3: AC-4.13 a FILL tick turn with no TaskList is refused" "$TL_MISSING"
+fire "$d" Stop true; expect_allow "Q3b: …once — the re-entered Stop passes"
+rm -rf "$QT_CFG"
+
+# Q4 (wave-24 T27; critic I3, review 15): a digest older than this turn's tick is no digest. A
+# tick that exits on a refusal writes none, so the last tick's duty=none would otherwise excuse a
+# later turn. The collector reads the digest through the tick's own path and reader
+# (lib/patrol.sh `tick_digest_path`, `tick_digest_field`) and compares its `at=` with the
+# marker's timestamp, as the NOTICK arm compares the stamp. Same world, same digest, two markers.
+qt_marker_at() {  # <dir> <iso timestamp>
+  jq -nc --arg t "bionic-patrol session=$SID8 — Patrol tick. Run: bash /abs/hooks/session-poker.sh tick" --arg ts "$2" \
+    '{type:"user",isMeta:true,isSidechain:false,userType:"external",timestamp:$ts,message:{role:"user",content:$t}}' \
+    >> "$1/transcript.jsonl"
+}
+d=$(make_env); roster_header > "$d/.bionic/tmp/roster-$SID.state"; ( cd "$d" && git init -q . 2>/dev/null )
+QT_CFG="$(mktemp -d)"
+qt_tick "$d" "$QT_CFG" >/dev/null
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_eq "Q4 precondition: the quiet tick writes duty=none" "none" "$(qt_duty "$d")"
+expect_regex "Q4 precondition: …and the instant it wrote the digest" '^at=[0-9]{4}-[0-9]{2}-[0-9]{2}T' \
+  "$(grep '^at=' "$d/.bionic/tmp/tick-digest-$SID.state" 2>/dev/null)"
+qt_marker_at "$d" "2000-01-01T00:00:00.000Z"; u_tick_out "$d" "$QT_OUT"
+fire "$d"; expect_allow "Q4a: a digest written after the turn's marker excuses the refresh"
+: > "$d/transcript.jsonl"
+qt_marker_at "$d" "2999-01-01T00:00:00.000Z"; tick_stamp "$d" "2999-01-01T00:00:01Z"
+u_tick_out "$d" "poker: REFUSED — the tick could not decide"
+fire "$d"; expect_block "Q4b: critic I3 a digest older than the turn's marker is stale — the refresh is owed" "$TL_MISSING"
+# Q4c: an UNCHANGED tick rewrites `at=` and keeps `since=`, or every quiet tick after the first
+# would read as stale and owe the refresh again (AC-4.13). The digest is aged by hand to the
+# year 2000; the marker is from 2001; the real tick runs again over the same facts.
+QT_DIG="$d/.bionic/tmp/tick-digest-$SID.state"
+QT_SINCE="$(sed -n 's/^since=//p' "$QT_DIG" | head -1)"
+sed -i.bak 's/^at=.*/at=2000-01-01T00:00:00Z/' "$QT_DIG"
+expect_eq "Q4c precondition: the digest is aged to 2000" "at=2000-01-01T00:00:00Z" "$(grep '^at=' "$QT_DIG")"
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "Q4c precondition: the tick over the same facts prints unchanged" "poker: unchanged since" "$QT_OUT"
+expect_eq "Q4c the unchanged tick keeps since=" "$QT_SINCE" "$(sed -n 's/^since=//p' "$QT_DIG" | head -1)"
+expect_regex "Q4c2 …and rewrites at= to its own instant" '^at=(20[2-9][0-9])-' "$(grep '^at=' "$QT_DIG")"
+: > "$d/transcript.jsonl"
+qt_marker_at "$d" "2001-01-01T00:00:00.000Z"; u_tick_out "$d" "$QT_OUT"
+fire "$d"; expect_allow "Q4c3: the unchanged tick's turn reads duty=none — no refresh owed"
+rm -rf "$QT_CFG"
 
 # ============================================================
 section "Section 6: marker scope — a file the agent merely READ is not a decline (review F2)"

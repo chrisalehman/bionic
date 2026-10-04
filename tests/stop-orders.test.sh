@@ -54,15 +54,23 @@ make_repo() {  # <name> -> repo path
 # RENAMED OFF THE WRITER'S NAME (S17): `roster_row` is the production writer
 # (payload/scripts/lib/roster.sh), and a private definition of that name would shadow the
 # one writer with a fixture.
-so_roster_row() {  # <repo> <name> <deliverable> [waiver] [teammate-id] [claims] [progress] [cadence]
+so_roster_row() {  # <repo> <name> <deliverable> [waiver] [teammate-id] [claims] [progress] [cadence] [done marker]
   local repo="$1" name="$2" deliv="$3" waiver="${4:-}" tmid="${5:-}" claims="${6:-}"
-  local progress="${7:-}" cadence="${8:-}"
+  local progress="${7:-}" cadence="${8:-}" dmark="${9:-}"
   local f="$repo/.bionic/tmp/roster-$SID.state"
   [ -f "$f" ] || roster_header > "$f"
   roster_row_fixture status=confirmed session="$SID" name="$name" agent_id= \
     launched_at=2026-08-05T00:00:00Z deliverable="$deliv" claims="$claims" \
-    waiver="$waiver" teammate_id="$tmid" progress="$progress" cadence="$cadence" >> "$f"
+    waiver="$waiver" teammate_id="$tmid" progress="$progress" cadence="$cadence" \
+    ${dmark:+"done=$dmark"} >> "$f"
   return 0
+}
+
+# THE AGENT SAID SO (wave-24 T9, REQ-4 AC-4.8; D3). MET is a landed deliverable AND a completion
+# signal after the launch; a fixture whose session transcript carries a panel but no report
+# reads a landed row UNMET without one. A row meant to read MET gets its Done marker, written now.
+so_said() {  # <repo> <name> -> the marker path, the marker written
+  mkdir -p "$1/.bionic/tmp"; : > "$1/.bionic/tmp/$2.done"; printf '%s/.bionic/tmp/%s.done' "$1" "$2"
 }
 
 # A BOUND PLAN (wave-20 T8, REQ-1, D1). standdown lands a tree onto the session's bound
@@ -644,7 +652,8 @@ run_orders_cfg() {  # <repo> <args…> — like run_orders, with the metadata ro
 }
 
 echo landed > "$R8/.bionic/docs/record/landed.md"
-so_roster_row "$R8" "met-row"   ".bionic/docs/record/landed.md"  "" "met-row@session-6c85684c"
+so_roster_row "$R8" "met-row"   ".bionic/docs/record/landed.md"  "" "met-row@session-6c85684c" "" "" "" \
+  "$(so_said "$R8" met-row)"
 so_roster_row "$R8" "still-at-it" ".bionic/docs/record/nope.md"  "" "still-at-it@session-6c85684c"
 so_roster_row "$R8" "walked-off"  ".bionic/docs/record/nope2.md" "" "walked-off@session-6c85684c"
 plant_live "$R8TR" fresh "still-at-it"
@@ -815,7 +824,8 @@ expect_absent "…and lists the abandoned row nowhere: closed, and nobody left t
 # MET, but the fresh panel still lists the agent: refused, naming it live (C4) — the
 # defect's sharper edge, a landed contract whose agent is still working.
 echo landed > "$R9/.bionic/docs/record/met-live.md"
-so_roster_row "$R9" "met-live" ".bionic/docs/record/met-live.md" "" "met-live@session-6c85684c"
+so_roster_row "$R9" "met-live" ".bionic/docs/record/met-live.md" "" "met-live@session-6c85684c" "" "" "" \
+  "$(so_said "$R9" met-live)"
 plant_live "$R9TR" fresh "met-live"
 run_orders_cfg "$R9" stopped met-live
 expect_status "stopped on a row the fresh panel still lists is refused, exit 2 (C4)" 2 "$ST"
@@ -906,7 +916,8 @@ R11TR="$R8CFG/projects/$R11SLUG/$SID.jsonl"
 # written, so the row was UNMET and this block pinned a merge of work nobody landed. A lease
 # ends in a merge only for a landed row (MET or WAIVED); the UNMET shape is R12 below.
 echo landed > "$R11/.bionic/docs/record/n3.md"
-so_roster_row "$R11" "acked-gone-lease" ".bionic/docs/record/n3.md" "" "acked-gone-lease@session-6c85684c"
+so_roster_row "$R11" "acked-gone-lease" ".bionic/docs/record/n3.md" "" "acked-gone-lease@session-6c85684c" "" "" "" \
+  "$(so_said "$R11" acked-gone-lease)"
 so_bind_plan "$R11" wave/fixture >/dev/null
 ( cd "$R11" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack acked-gone-lease ) >/dev/null 2>&1
 # A fresh panel that lists nobody: the row's agent is gone, not merely stale.
@@ -1136,9 +1147,10 @@ so_roster_row "$R15" fu-row ".bionic/docs/record/fu.md" "" "fu-row@session-6c856
 R15CFG="$SANDBOX/r15-config"
 mkdir -p "$R15CFG/projects/-fixture"
 R15TR="$R15CFG/projects/-fixture/$SID.jsonl"
-r15_msg() {  # [name]
+r15_msg() {  # [name] — the agent's report, naming its deliverable (wave-24 T29: a message that
+  # names none is no completion signal)
   jq -nc --arg b "<teammate-message teammate_id=\"${1:-fu-row}\" color=\"blue\" summary=\"done\">
-report
+report: .bionic/docs/record/fu.md
 </teammate-message>" '{type:"user",timestamp:"2026-09-23T10:00:01.000Z",message:{role:"user",content:$b}}' >> "$R15TR"
 }
 r15_send() {  # [name]
@@ -1219,7 +1231,8 @@ r16_orders() {  # <args…> — run_orders_cfg with this section's config dir
   ERR=$(cat "$SANDBOX/.err")
 }
 echo landed > "$R16/.bionic/docs/record/fc.md"
-so_roster_row "$R16" fu-closed ".bionic/docs/record/fc.md" "" "fu-closed@session-6c85684c"
+so_roster_row "$R16" fu-closed ".bionic/docs/record/fc.md" "" "fu-closed@session-6c85684c" "" "" "" \
+  "$(so_said "$R16" fu-closed)"
 so_bind_plan "$R16" wave/fixture >/dev/null
 # A fresh panel that lists nobody: the agent is gone. `stopped` closes the row through the
 # sweeper's ack, by human, reason landed.

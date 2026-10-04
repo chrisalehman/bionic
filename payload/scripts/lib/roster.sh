@@ -62,6 +62,14 @@
 # pattern — a reason carrying `.*` then matched half the machine and held the row live. A row
 # that names neither is byte-identical to the rows written before them.
 #
+# TWO ANSWER KEYS ride on the same terms (wave-24, REQ-4; ADR-041). `held=<iso> <reason>
+# fp=<launch>:<deliverable mtime>:<completion-message count>` is written by `session-poker.sh
+# hold`: the orchestrator's standing answer to a stand-down, honoured by the tick while the
+# fingerprint is unchanged. `done=<path>` is the brief's `Done marker:`, lifted at dispatch.
+# `held=` is never copied to a successor row: a new contract answers for itself. `done=` is
+# copied by `hold` and `amend`, whose row is the same contract, and dropped by `extend`, whose
+# re-opened row is new work (`row_copy_args` in hooks/session-poker.sh, `drop-done`).
+#
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
 # `re_executes=` say how wide the dispatched agent's instrument may be: the files its brief
@@ -118,6 +126,72 @@ role_is_readonly() {  # <subagent_type> -> 0 a read-only role · 1 anything else
   case "$want" in ''|*[[:space:]]*) return 1 ;; esac
   case " $ROLE_READONLY_SET " in *" $want "*) return 0 ;; esac
   return 1
+}
+
+# ---------- WHAT A ROW COSTS (wave-24 T10, REQ-7 AC-7.1/7.2, D11; research R4 §1) -----------
+#
+# TWO CEILINGS, TWO RULES, ONE ROLE FIELD. A writer slot is held by a role that can write the
+# tree; a read-only role holds none, so the dispatch wall must neither count its open row nor
+# ask a slot for its incoming dispatch, and the Patrol's fill must not read it as occupancy
+# either. A suite slot is held by a row that runs a suite — one whose brief declared a
+# `Subprocess claim:` (`claims=`), or a `bionic:test-runner`, the one read-only role whose whole
+# job is to run suites and the one that used to hold nothing because its brief rarely said so.
+# The row carries its role as `subagent_type=` (no schema change), and this file owns
+# `role_is_readonly`, so the two questions are answered here and nowhere else:
+# `hooks/dispatch-preflight.sh` and `hooks/session-poker.sh`'s tick both call
+# `budget_open_writers`, which is what keeps the open count the one refuses on and the
+# occupancy the other fills against the SAME number.
+#
+# FAIL-CLOSED ON WHAT IT CANNOT READ. A name with no roster row, an empty `subagent_type=` and
+# a type outside the allow-list all count as a writer (`role_is_readonly` answers "writer" for
+# the unknown), and a roster that cannot be read counts every name — spending a slot on a row
+# that might be a writer is the direction that refuses more, never less.
+budget_open_writers() {  # <roster file>; stdin: the open names, one per line -> the writers among them
+  local f="${1:-}" names types type nn n=0 ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}"
+  names="$(cat)"
+  [ -n "$names" ] || { printf '0'; return 0; }
+  nn="$(printf '%s\n' "$names" | awk 'NF { c++ } END { printf "%d", c + 0 }')"
+  if [ -z "$f" ] || [ ! -f "$f" ] || [ -L "$f" ] || [ ! -r "$f" ]; then
+    printf '%s' "$nn"
+    return 0
+  fi
+  # THE LATEST ROW OF EACH NAME carries the role the name runs as. One pass over the file; one
+  # `T:<type>` line comes back per name asked for, in the order asked, the type empty when no
+  # row names it. A reply that is not one line per name is not read: every name is a writer.
+  types="$(ROSTER_BOW_NAMES="$names" ROSTER_BOW_F="$f" awk -v rpfx="roster-state/${ver}|" '
+    BEGIN {
+      nn = split(ENVIRON["ROSTER_BOW_NAMES"], ask, "\n")
+      for (i = 1; i <= nn; i++) want[ask[i]] = 1
+      f = ENVIRON["ROSTER_BOW_F"]
+      while ((getline line < f) > 0) {
+        if (index(line, rpfx) != 1) continue
+        np = split(line, p, "|"); nm = ""; st = ""
+        for (i = 1; i <= np; i++) {
+          if (substr(p[i], 1, 5) == "name=") nm = substr(p[i], 6)
+          else if (substr(p[i], 1, 14) == "subagent_type=") st = substr(p[i], 15)
+        }
+        if (nm in want) last[nm] = st
+      }
+      close(f)
+      for (i = 1; i <= nn; i++) if (ask[i] != "") print "T:" ((ask[i] in last) ? last[ask[i]] : "")
+    }' </dev/null 2>/dev/null)"
+  if [ "$(printf '%s\n' "$types" | awk 'NF { c++ } END { printf "%d", c + 0 }')" != "$nn" ]; then
+    printf '%s' "$nn"
+    return 0
+  fi
+  while IFS= read -r type; do
+    [ -n "$type" ] || continue
+    role_is_readonly "${type#T:}" || n=$(( n + 1 ))
+  done <<< "$types"
+  printf '%s' "$n"
+}
+
+roster_row_holds_suite() {  # <roster row line> -> 0 it holds a suite slot (a claim, or a test-runner) · 1 not
+  local line="$1" type claims
+  claims="$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)"
+  [ -n "$claims" ] && return 0
+  type="$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^subagent_type=//p' | head -1)"
+  [ "$type" = "bionic:test-runner" ]
 }
 
 # The header comment line every roster file opens with. Both writers emit it when the file
@@ -184,7 +258,9 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
   local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
+  local held="" done_marker=""
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
+  local has_held=0 has_done=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
@@ -228,6 +304,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       adopted_from)  adopted_from="$val"; has_adopted_from=1 ;;
       amended)       amended="$val";      has_amended=1 ;;
       extended)      extended="$val";     has_extended=1 ;;
+      held)          held="$val";         has_held=1 ;;
+      done)          done_marker="$val";  has_done=1 ;;
       files)          files="$val";          has_files=1 ;;
       suites_allowed) suites_allowed="$val"; has_suites_allowed=1 ;;
       suites_source)  suites_source="$val";  has_suites_source=1 ;;
@@ -250,6 +328,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_adopted_from" -eq 1 ]; then out="$out|adopted_from=$adopted_from"; fi
   if [ "$has_amended" -eq 1 ]; then  out="$out|amended=$amended"; fi
   if [ "$has_extended" -eq 1 ]; then out="$out|extended=$extended"; fi
+  if [ "$has_held" -eq 1 ]; then     out="$out|held=$held"; fi
+  if [ "$has_done" -eq 1 ]; then     out="$out|done=$done_marker"; fi
   out="$out|tool_use_id=$tool_use_id|plan=$plan"
   printf '%s\n' "$out"
   return 0

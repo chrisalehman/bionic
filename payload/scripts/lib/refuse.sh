@@ -13,6 +13,9 @@
 #   refuse_channel <mode> <field> -> one cell of the channel table, on stdout;
 #         exit 1 and silent for an unknown mode or field.
 #   refuse_modes -> the modes usable as a refusal channel, one per line.
+#   refuse_plugin_root -> the plugin root this library was loaded from, for a fix line.
+#   refuse_shell_word <word> [placeholder] -> <word> as one shell argument, quoted if needed.
+#   refuse_quote <word> -> <word> as one single-quoted shell argument, always.
 #
 # THE VERDICT IS EXACTLY ONE LINE:
 #
@@ -397,4 +400,41 @@ $(_refuse_fold_detail "$detail")"
   # not emit would otherwise fall out of `refuse` with status 0 and wave the action
   # through.
   _refuse_selfrefuse "\"$mode\" is a refusal channel with no emitter" "add the emitter to refuse.sh"
+}
+
+# ---------- THE FIX LINE'S PIECES (wave-24 T13, D10) ----------
+#
+# EVERY REFUSAL PRINTS ITS FIX OR SAYS WHY IT CANNOT. A fix that is a command is printed as
+# one a reader can paste: the real root, the real names, every word quoted as a shell reads
+# it. These three were the budget arm's own (lib/walls.sh) until the landing refusal in
+# lib/stop.sh needed the same line, so they live beside the renderer every refusing hook
+# already sources.
+#
+# THE PLUGIN ROOT is the tree this library was loaded from. `$BIONIC_LIB` is
+# `<root>/scripts/lib`, and `hooks/` sits beside `scripts/` in every layout the loader
+# accepts, so `<root>/hooks/<verb>.sh` is a path a reader can paste, never the
+# `<plugin-root>` placeholder. When the loader's variable is absent the placeholder is the
+# honest fallback.
+refuse_plugin_root() {  # -> the plugin root, or <plugin-root>
+  local _root=""
+  if [ -n "${BIONIC_LIB:-}" ] && [ -d "$BIONIC_LIB/../.." ]; then
+    _root="$(cd "$BIONIC_LIB/../.." 2>/dev/null && pwd)" || _root=""
+  fi
+  printf '%s' "${_root:-<plugin-root>}"
+}
+
+# refuse_quote <word> -> the word single-quoted, an embedded `'` closed, escaped and reopened.
+refuse_quote() {
+  printf "'%s'" "$(printf '%s' "${1-}" | sed "s/'/'\\\\''/g")"
+}
+
+# refuse_shell_word <word> [placeholder] -> <word> as one shell argument: bare when it is made
+# only of characters no shell treats specially, single-quoted otherwise. An empty word prints
+# the placeholder, unquoted.
+refuse_shell_word() {
+  case "${1:-}" in
+    '') printf '%s' "${2:-}" ;;
+    *[!A-Za-z0-9._/@:+=,-]*) refuse_quote "$1" ;;
+    *) printf '%s' "$1" ;;
+  esac
 }

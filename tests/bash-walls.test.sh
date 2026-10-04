@@ -297,16 +297,17 @@ expect_absent "3f3: …and none of it on stdout, which is the JSON modes' wire" 
 # ---------------------------------------------------------------------------
 section "4 — a block and a model-facing nudge on one payload (R7)"
 #
-# A push to main that is ALSO a chain-class command. protect-main refuses on stderr at
+# A push to main that ALSO draws a farm-out nudge (a `git clone` head — the chain tier-2 nudge
+# this fixture used to ride is retired, wave-24 T11). protect-main refuses on stderr at
 # exit 2; farm-out-reminder nudges on stdout as JSON. Two channels, one process, and
 # neither may eat the other.
 
-run_hook "$(mk_payload "$R_PUSH" 'git push origin main && ./build.sh && ./deploy.sh')"
+run_hook "$(mk_payload "$R_PUSH" 'git clone u d && git push origin main')"
 expect_status "4a: the refusal decides the status" 2 "$ST"
 expect_contains "4b: …and the user stream carries the push refusal" \
   "bionic: push refused — main is a protected branch here" "$ERR"
 expect_eq "4c: stdout carries exactly one JSON document" "1" "$(json_docs)"
-expect_contains "4d: …the nudge, on its own channel" "chain-class command on the main thread" \
+expect_contains "4d: …the nudge, on its own channel" "clone-class command on the main thread" \
   "$(context_of)"
 expect_absent "4e: the nudge never leaks onto the user's stream" \
   "production-shaped work belongs in a subagent" "$ERR"
@@ -314,12 +315,12 @@ expect_absent "4e: the nudge never leaks onto the user's stream" \
 # ---------------------------------------------------------------------------
 section "5 — a refused commit and a nudge: the same shape from the other gate"
 
-run_hook "$(mk_payload "$R_COMMIT" 'git commit -m "step 5" && ./build.sh && ./deploy.sh')"
+run_hook "$(mk_payload "$R_COMMIT" 'git clone u d && git commit -m "step 5"')"
 expect_status "5a: the gate's refusal decides the status" 2 "$ST"
 expect_contains "5b: …with the gate's own words on the user stream" \
   "bionic: commit refused" "$ERR"
 expect_eq "5c: stdout still carries exactly one JSON document" "1" "$(json_docs)"
-expect_contains "5d: …and it is the nudge" "chain-class command" "$(context_of)"
+expect_contains "5d: …and it is the nudge" "clone-class command" "$(context_of)"
 
 # ---------------------------------------------------------------------------
 section "6 — two channels blocking at once: the JSON wire wins, and keeps both reasons"
@@ -970,6 +971,26 @@ expect_contains "15a12b: …with the reason placeholder quoted there too" \
 B15_LINE="$(printf '%s\n' "$ERR" | sed -n 's/.*widen it: \(.*\) (main runs it).*/\1/p' | head -1)"
 expect_true "15a12c: …and that line parses as bash too [$B15_LINE]" bash -n -c "$B15_LINE"
 
+# (a2b) A PLUGIN ROOT WITH A SPACE (wave-24 T28; critic I2, AC-6.5). The remedy line printed
+# the root bare, so `<root with space>/hooks/session-poker.sh` pasted as two arguments. The
+# line is built by `_budget_remedy_line` from `refuse_plugin_root`, which reads `$BIONIC_LIB`;
+# no hook can be loaded from a root this test makes up, so the function is driven directly,
+# extracted the way 15g2 extracts `_budget_wire_list`, with the loader's variable pointed at a
+# root whose name holds a space. The printed line is then read back as the shell reads it.
+SP_ROOT="$SANDBOX/plugin root"
+mkdir -p "$SP_ROOT/scripts/lib"
+SP_LINE=$(BIONIC_LIB="$SP_ROOT/scripts/lib" _BUDGET_ROW_NAME=t15sp bash -c '. "$1/refuse.sh"
+  eval "$(awk "/^_budget_remedy_line\(\)/,/^}/" "$1/walls.sh")"; _budget_remedy_line alpha.test.sh' \
+  _ "$WALLS_LIB")
+SP_LINE="${SP_LINE#widen it: }"; SP_LINE="${SP_LINE% (main runs it)}"
+expect_contains "15a13 precondition: the remedy line was built, under the spaced root" \
+  "plugin root/hooks/session-poker.sh" "$SP_LINE"
+SP_ARG2=$(eval "set -- $SP_LINE"; printf '%s' "$2")
+expect_eq "15a13: …and pasted, the script path is ONE argument [$SP_LINE]" \
+  "$SP_ROOT/hooks/session-poker.sh" "$SP_ARG2"
+SP_ARG3=$(eval "set -- $SP_LINE"; printf '%s' "$3")
+expect_eq "15a14: …and the verb is the next one, not the tail of a split path" "amend" "$SP_ARG3"
+
 # (a3) THE WIRE-LIST COUNT NAMES DECLARATIONS (wave-22 T4; REQ-4, D7, AC-4.1/4.2). When the one
 # declared run does not fit the verdict line's room, the line says what the count counts —
 # `1 declared run (printed below)` — and the full command still prints after `On the budget:`.
@@ -1032,10 +1053,42 @@ fi
 
 # (b) the shell-variable-name case — an unexpanded `$s.test.sh` cannot be checked against
 # the budget, but the budget it WOULD have checked against still belongs on the wire.
-run_hook "$(mk_payload "$R15" 'for s in a b; do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+# THE BODY REASSIGNS THE VARIABLE (wave-24 T13, A-orch-15). Since T5 a loop over a literal
+# word list resolves to its suites and meets the ORDINARY refusal, so the fixture that drives
+# THIS arm is the one the classifier still cannot resolve: `s=c` in the body.
+run_hook "$(mk_payload "$R15" 'for s in a b; do s=c; bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
 expect_status "15b: an unexpanded suite name is still refused" 2 "$ST"
 expect_contains "15b2: …and the recorded budget is on the DEFAULT stderr too" \
   "archive.test.sh" "$ERR"
+expect_contains "15b3: …by the unexpanded-name arm, not the ordinary one" \
+  "unexpanded name" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+# THE HEADER'S WORDS ARE NOT WHAT RUNS (wave-24 T26, walk-head-b surprise 3): `s=c` makes this
+# loop run c twice, so printing `bash tests/a.test.sh` would be a false fix — the same wall
+# refuses it. The refusal says no list can be derived and asks for the literal lines meant.
+# fails-when: the reassigning loop's refusal prints its header words.
+expect_contains "15b4: …saying no literal list can be derived from a body that reassigns" \
+  "no literal list can be derived" "$ERR"
+expect_contains "15b5: …naming the reassignment as the reason" "reassigns its variable" "$ERR"
+expect_contains "15b5b: …and asking for the literal lines the agent means" \
+  "Write the literal lines you mean, one call each: bash tests/<name>.test.sh" "$ERR"
+expect_absent "15b6: …never the header's words as a line to run" "bash tests/a.test.sh" "$ERR"
+expect_absent "15b6b: …never the canned alpha example the arm used to print" "alpha.test.sh" "$ERR"
+# THE FIX IS THE LOOP'S OWN WORDS when the body leaves the variable alone (wave-24 T13, D10,
+# AC-6.3): an `eval` keeps the classifier from expanding the command, and the lines the loop
+# would have run are read off `cmd_suite_loop_lines` — never a canned example.
+run_hook "$(mk_payload "$R15" 'for s in a b; do bash "tests/$s.test.sh"; done; eval :' "$ACTOR" omit Bash test-runner)"
+expect_status "15b10: a loop the classifier will not expand is refused as unexpanded" 2 "$ST"
+expect_contains "15b11: …by the unexpanded-name arm" \
+  "unexpanded name" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "15b12: …printing the loop's first word as the literal line to run" \
+  "    bash tests/a.test.sh" "$ERR"
+expect_contains "15b13: …and its second" "    bash tests/b.test.sh" "$ERR"
+# A `$` THE TEXT GIVES NO WORDS FOR still refuses, and says why it has no line to print.
+run_hook "$(mk_payload "$R15" 'for s in $(ls tests); do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+expect_status "15b7: a loop over a command substitution is refused as unexpanded" 2 "$ST"
+expect_contains "15b8: …and says the text gives no literal list to print" \
+  "no literal list" "$ERR"
+expect_absent "15b9: …printing no line it cannot know" "bash tests/a.test.sh" "$ERR"
 
 # (c) the full-tree case (`tests/run.sh`, not on this row's budget). A FRESH row: R15's
 # own set literally contains the token "run.sh" as one of its two allowed SUITE NAMES,
@@ -1120,8 +1173,10 @@ LONG_SUITE="tests/a-suite-name-far-too-long-to-fit-even-bare-on-one-refusal-line
 roster_row_fixture "session=$SID" name=t15long "agent_id=$ACTOR" \
   "suites_allowed=$LONG_SUITE" suites_source=derived files= \
   >> "$R15L/.bionic/tmp/roster-$SID.state"
-run_hook "$(mk_payload "$R15L" 'for s in a b; do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+run_hook "$(mk_payload "$R15L" 'for s in a b; do s=c; bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
 expect_status "15g1: an unexpanded name against a too-long single suite is still refused" 2 "$ST"
+expect_contains "15g1: …through the unexpanded-name arm this fallback is named for" \
+  "unexpanded name" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "15g1: …and the line falls back to an honest count, never a cut name" \
   "1 suite" "$ERR"
 expect_absent "15g1: …never a mid-name character cut (the ellipsis glyph)" "…" "$ERR"
@@ -1725,12 +1780,25 @@ am_refused "19e: behind an env prefix with options and an assignment" \
 am_refused "19f: the script run directly, by relative path" "./hooks/session-poker.sh amend w20-sub --reason r --files+ a/b.sh"
 am_refused "19g: second segment of a chain" "echo hi; bash hooks/session-poker.sh task-add a b c d e f g h i"
 am_refused "19h: inside bash -c" "bash -c 'bash $AM_POKER amend w20-sub --reason r --files+ a/b.sh'"
+# §ARM-A (hold) — wave-24 T7, REQ-4 AC-4.6, D1: a hold is the orchestrator's standing answer to a
+# stand-down, so an agent that could run it would keep itself up.
+am_refused "19o: bash session-poker.sh hold" "bash $AM_POKER hold w20-sub 'idle on purpose'"
+# §ARM-A (plan-row verbs) — wave-24 T15, REQ-9 AC-9.4, D14: the five verbs write the bound plan,
+# and an agent that could run them could move `current:` or mark its own row landed.
+am_refused "19p: bash session-poker.sh task-set" "bash $AM_POKER task-set T2 status=landed"
+am_refused "19q: bash session-poker.sh step-line" "bash $AM_POKER step-line T2 'landed at abc1234'"
+am_refused "19r: bash session-poker.sh current" "bash $AM_POKER current 5"
+am_refused "19s: bash session-poker.sh ledger-add" "bash $AM_POKER ledger-add T2 agent=w20-sub"
+am_refused "19t: bash session-poker.sh ledger-set" "bash $AM_POKER ledger-set T2 landed=yes"
 
 # THE PAIRED POSITIVES. The same verbs from the main thread (no agent_id) are the
 # orchestrator's and pass this arm; a subagent's own read-only poker verbs pass; and a quoted
 # mention is an argument to echo, not a call.
 am_admitted "19i: amend from the main thread" "bash $AM_POKER amend w20-sub --reason r --files+ a/b.sh" ""
 am_admitted "19j: task-add from the main thread" "bash $AM_POKER task-add a b c d e f g h i" ""
+am_admitted "19j2: hold from the main thread" "bash $AM_POKER hold w20-sub 'idle on purpose'" ""
+am_admitted "19j3: current from the main thread" "bash $AM_POKER current 5" ""
+am_admitted "19j4: task-set from the main thread" "bash $AM_POKER task-set T2 status=landed" ""
 am_admitted "19k: a subagent's tick" "bash $AM_POKER tick"
 am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
 am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"
@@ -1829,5 +1897,166 @@ expect_absent "20i: …the role arm says nothing" "read-only role" "$ERR"
 run_hook "$(mk_payload "$R_FORGE" 'git commit -m "x"' "$FORGE_ID" omit Bash bionic:test-runner)"
 expect_status "20i: …and with no row the payload's own read-only type still binds (the fallback)" 2 "$ST"
 expect_contains "20i: …saying no roster row names it" "no roster row names you" "$ERR"
+
+# ---------------------------------------------------------------------------
+section "21 — AC-5.3: the shared screen still says maybe for every spelling the parser reads (wave-24 T4, REQ-5, D6)"
+#
+# fails-when: `g\<newline>it`, `'g'it`, `"gi"t` or `\g\i\t` reads "provably not" through the new
+# screen, or the screen's cache answers one command with another command's strip.
+#
+# THE SCREEN CHANGED SHAPE, NOT MEANING (wave-24-fixit-1811 T4). `_wall_mentions_git` used to
+# strip the command itself with four `${v//…/}` passes, and so did three other screens in this
+# process; bash 3.2 pays matches × length for each, and a quote-dense command timed the hook
+# out. Now a literal `git` answers at once, and only a miss runs `_wall_screen` — one awk pass,
+# cached at file scope keyed on the text. The T24 spellings are exactly the ones the literal
+# check misses, so each of them is the awk path, read two ways: the function itself, and
+# protect-main's refusal through the one process.
+WALLS_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh"
+mg_answer() {  # <command text>... -> one 0/1 per argument, space-joined, all in ONE process
+  bash -c '. "$1" >/dev/null 2>&1; shift; o=""
+    for c in "$@"; do _wall_mentions_git "$c"; o="$o$? "; done; printf "%s" "${o% }"' _ "$WALLS_LIB" "$@"
+}
+BW21_NL="$(printf 'g\\\n''it push origin main')"
+expect_eq "21a: each obfuscated spelling is still 'maybe' (0), and a git-free quoted command is 'provably not' (1)" \
+  "0 0 0 0 1" "$(mg_answer "$BW21_NL" "'g'it push origin main" '"gi"t push origin main' '\g\i\t push origin main' "echo 'hi' \"there\"")"
+# THE CACHE IS KEYED ON THE TEXT: one process, three different commands asked in turn — a hit,
+# a miss, the hit again. A single-slot cache that forgot to compare its key would answer the
+# second with the first's strip, or the third with the second's.
+expect_eq "21b: …asked in one process in turn, the cache never answers one command with another's strip" \
+  "0 1 0" "$(mg_answer "'g'it push" "echo 'x'" "'g'it push")"
+
+for _bw21 in "$BW21_NL" "'g'it push origin main" '"gi"t push origin main' '\g\i\t push origin main'; do
+  run_hook "$(mk_payload "$R_QUIET" "$_bw21")"
+  expect_status "21c: [$(printf '%q' "$_bw21")] is still a push to main through the one process" 2 "$ST"
+  expect_contains "21c: …refused in protect-main's own words" "main is a protected branch here" "$ERR"
+done
+
+# ---------------------------------------------------------------------------
+section "§MEM — an engaged session never writes the auto-memory store (REQ-3, D16; AC-3.2)"
+#
+# THE INCIDENT (wave-23 A-orch-30). An engaged orchestrator obeyed the harness's standing
+# memory directive in ONE Bash call: `cd <store> && cat >> <topic>.md <<'EOF' … EOF` then
+# `sed -i '' …` on MEMORY.md. The store's path appeared only in the `cd`. The wall is
+# `wall_memory_store` in payload/scripts/lib/walls.sh; this hook is its collector, handing it
+# the store root and the command's write targets (`cmd_write_targets`, cmd-class.sh).
+#
+# THE STORE ROOT IS `${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/projects/*/memory`.
+# run_hook pins HOME inside the sandbox; the two variables are emptied on every row that does
+# not set them, so the machine's own values cannot leak in.
+R_MEM="$(mk_repo memwall)"
+MEM_STORE="$FAKE_HOME/.claude/projects/-x/memory"
+mkdir -p "$MEM_STORE"
+MEM_NOENV=(BIONIC_CLAUDE_HOME= CLAUDE_CONFIG_DIR=)
+MEM_REPLAY="$(printf 'cd %s && cat >> decision-reframe.md <<%sEOF%s\n- refined: goal, options, recommendation\nEOF\nsed -i %s%s %ss|^- \\[Decision reframe|- [Decision reframe|%s MEMORY.md' \
+  "$MEM_STORE" "'" "'" "'" "'" "'" "'")"
+
+mem_refused() {  # <label> <cwd> <command> [env…]
+  local _l="$1" _d="$2" _c="$3"; shift 3
+  run_hook "$(mk_payload "$_d" "$_c")" "$@"
+  expect_status "§MEM $_l: refused" 2 "$ST"
+  expect_contains "§MEM $_l: …naming the run's own record" "record/<wave>/assumptions.md" "$ERR"
+  expect_contains "§MEM $_l: …and a rule proposal" "rule proposal" "$ERR"
+}
+
+mem_refused "replay of A-orch-30 (cd + heredoc append + sed -i)" "$R_MEM" "$MEM_REPLAY" "${MEM_NOENV[@]}"
+mem_refused "redirect under ~" "$R_MEM" 'echo x > ~/.claude/projects/-x/memory/a.md' "${MEM_NOENV[@]}"
+mem_refused "append under \$HOME" "$R_MEM" 'echo x >> $HOME/.claude/projects/-x/memory/a.md' "${MEM_NOENV[@]}"
+mem_refused "redirect under \"\${HOME}\"" "$R_MEM" 'printf x > "${HOME}/.claude/projects/-x/memory/a.md"' "${MEM_NOENV[@]}"
+mem_refused "tee" "$R_MEM" 'printf x | tee ~/.claude/projects/-x/memory/a.md' "${MEM_NOENV[@]}"
+mem_refused "sed -i" "$R_MEM" "sed -i '' 's/a/b/' ~/.claude/projects/-x/memory/MEMORY.md" "${MEM_NOENV[@]}"
+mem_refused "cp destination" "$R_MEM" 'cp /tmp/x ~/.claude/projects/-x/memory/' "${MEM_NOENV[@]}"
+mem_refused "mv destination" "$R_MEM" 'mv /tmp/x ~/.claude/projects/-x/memory/b.md' "${MEM_NOENV[@]}"
+mem_refused "touch" "$R_MEM" 'touch ~/.claude/projects/-x/memory/c.md' "${MEM_NOENV[@]}"
+mem_refused "mkdir of the store itself" "$R_MEM" 'mkdir -p ~/.claude/projects/-x/memory' "${MEM_NOENV[@]}"
+mem_refused "ln" "$R_MEM" 'ln -s /tmp/x ~/.claude/projects/-x/memory/d.md' "${MEM_NOENV[@]}"
+mem_refused "cd into the store, relative sed -i" "$R_MEM" \
+  "cd ~/.claude/projects/-x && cd memory && sed -i '' 's/a/b/' MEMORY.md" "${MEM_NOENV[@]}"
+mem_refused "a dot-dot spelling" "$R_MEM" 'touch ~/.claude/projects/-x/notes/../memory/e.md' "${MEM_NOENV[@]}"
+# THE ROOT MOVES WITH ITS VARIABLES, each spelled out in the command and as a literal path.
+MEM_BCH="$SANDBOX/bch"; MEM_CCD="$SANDBOX/ccd"
+mem_refused "BIONIC_CLAUDE_HOME, literal path" "$R_MEM" "touch $MEM_BCH/projects/-y/memory/a.md" \
+  BIONIC_CLAUDE_HOME="$MEM_BCH" CLAUDE_CONFIG_DIR=
+mem_refused "BIONIC_CLAUDE_HOME, spelled" "$R_MEM" 'echo x > "$BIONIC_CLAUDE_HOME/projects/-y/memory/a.md"' \
+  BIONIC_CLAUDE_HOME="$MEM_BCH" CLAUDE_CONFIG_DIR=
+mem_refused "CLAUDE_CONFIG_DIR, literal path" "$R_MEM" "touch $MEM_CCD/projects/-y/memory/a.md" \
+  BIONIC_CLAUDE_HOME= CLAUDE_CONFIG_DIR="$MEM_CCD"
+mem_refused "CLAUDE_CONFIG_DIR, spelled" "$R_MEM" 'echo x >> $CLAUDE_CONFIG_DIR/projects/-y/memory/a.md' \
+  BIONIC_CLAUDE_HOME= CLAUDE_CONFIG_DIR="$MEM_CCD"
+mem_refused "CLAUDE_CONFIG_DIR given as ~/…" "$R_MEM" 'touch ~/ccd/projects/-y/memory/a.md' \
+  BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=~/ccd'
+# THE STORE IS THE ROOT'S, NOT EVERY `memory` DIRECTORY: with BIONIC_CLAUDE_HOME set, the
+# default root is not the store — the precedence the collector resolves.
+run_hook "$(mk_payload "$R_MEM" "touch $MEM_BCH/projects/-y/memory/a.md")" BIONIC_CLAUDE_HOME="$MEM_BCH" CLAUDE_CONFIG_DIR=
+expect_status "§MEM precedence: BIONIC_CLAUDE_HOME's store is refused…" 2 "$ST"
+run_hook "$(mk_payload "$R_MEM" 'touch ~/.claude/projects/-x/memory/a.md')" BIONIC_CLAUDE_HOME="$MEM_BCH" CLAUDE_CONFIG_DIR=
+expect_status "§MEM precedence: …and ~/.claude's is not the store while BIONIC_CLAUDE_HOME names another" 0 "$ST"
+# A RELATIVE TARGET WITH NO cd RESOLVES AGAINST THE PAYLOAD'S cwd. The cwd is the engaged
+# repo, because engagement is the cwd's project's: a payload whose cwd IS the store resolves
+# no engaged root, and every wall in this process stands down for it (A-T12.6).
+mem_refused "relative target joined to the payload cwd" "$R_MEM" \
+  'echo x > ../home/.claude/projects/-x/memory/a.md' "${MEM_NOENV[@]}"
+
+# ---------------------------------------------------------------------------
+section "§MEM-ok — reading the store, and writing elsewhere, stay open (AC-3.3)"
+#
+# THE SAME ENGAGED REPO, THE SAME EXTRACTOR (the hook's exit status) as §MEM above, so each
+# admission here is read beside a refusal of the same shape. The fourth row is the wave's own
+# AC-5.4 readback: it names the store AND redirects, to a path outside it.
+for _mo in \
+  'cat ~/.claude/projects/-x/memory/MEMORY.md' \
+  'ls -la ~/.claude/projects/-x/memory' \
+  'find ~/.claude/projects/-x/memory -newer .bionic/tmp/m -type f' \
+  '{ find ~/.claude/projects/-x/memory -newer .bionic/tmp/m -type f; } > .bionic/docs/record/x.txt' \
+  'rm -f ~/.claude/projects/-x/memory/old.md' \
+  'tar -cf /tmp/mem.tar ~/.claude/projects/-x/memory' \
+  'cp ~/.claude/projects/-x/memory/MEMORY.md .bionic/docs/record/memory-copy.md' \
+  "$(printf 'cat > .bionic/docs/record/n.md <<%sEOF%s\necho x > ~/.claude/projects/-x/memory/a.md\nEOF' "'" "'")" \
+  'touch ~/.claude/projects/-x/notes.md'; do
+  run_hook "$(mk_payload "$R_MEM" "$_mo")" "${MEM_NOENV[@]}"
+  expect_status "§MEM-ok [$(printf '%.60s' "$_mo")]: admitted" 0 "$ST"
+  expect_absent "§MEM-ok …and no memory refusal on the wire" "assumptions.md" "$ERR"
+done
+
+# ---------------------------------------------------------------------------
+section "§MEM-unengaged — a session that never invoked bionic writes its store freely (AC-3.4)"
+#
+# R_PLAIN carries no engagement marker. The same writes §MEM refuses, with the same env.
+for _mu in \
+  "$(printf '%s' "$MEM_REPLAY")" \
+  'echo x > ~/.claude/projects/-x/memory/a.md' \
+  'printf x | tee ~/.claude/projects/-x/memory/a.md' \
+  "sed -i '' 's/a/b/' ~/.claude/projects/-x/memory/MEMORY.md" \
+  'touch ~/.claude/projects/-x/memory/c.md'; do
+  run_hook "$(mk_payload "$R_PLAIN" "$_mu")" "${MEM_NOENV[@]}"
+  expect_status "§MEM-unengaged [$(printf '%.60s' "$_mu")]: admitted" 0 "$ST"
+  expect_empty "§MEM-unengaged …silently" "$OUT$ERR"
+done
+
+# ---------------------------------------------------------------------------
+section "§CDT — the later-cd scan reads every segment before the first git, in one split (T28)"
+#
+# `_eg_cd_targets` lists the `cd` targets after the command's first separator and before its
+# first `git`, for the evidence gate's ambiguity check. T28 replaced its one-pass-per-segment
+# loop with a single `read` split (the 64 KB timing is tests/hook-timeout.test.sh b4). These
+# rows pin what the split must still answer: the four separators, the empty segments a
+# doubled or trailing separator leaves, a `git` inside a segment ending the scan there, and
+# nothing read after it. Each row answers the same on the loop it replaced.
+# The function is defined past walls.sh's early `return`, so it is extracted the way 15g2
+# extracts `_budget_wire_list`: awk between its own `()` line and its closing `}`, then eval.
+cdt_of() {  # <command> -> the targets, `|`-terminated
+  bash -c 'eval "$(awk "/^_eg_cd_targets\(\)/,/^}/" "$1")"; _eg_cd_targets "$2"
+    printf "%s" "$_EG_CDS" | tr "\n" "|"' _ "$WALLS_LIB" "$1"
+}
+expect_contains "§CDT the extractor finds the function" "_eg_cd_targets()" \
+  "$(awk '/^_eg_cd_targets\(\)/,/^}/' "$WALLS_LIB")"
+expect_eq "§CDT the leading cd is not in the list; the second is" "/b|" "$(cdt_of 'cd /a && cd /b && git commit')"
+expect_eq "§CDT every separator splits, and a bare cd is home" "/b|/c d|/e|~|" \
+  "$(cdt_of "$(printf 'cd /a; cd /b|cd "/c d"&cd %s/e%s\ncd\ngit commit' "'" "'")")"
+expect_eq "§CDT doubled and trailing separators name nothing" "/b|" "$(cdt_of 'cd /a;; ;cd /b ;')"
+expect_eq "§CDT blank lines name nothing" "/b|" "$(cdt_of "$(printf 'cd /a\n\n\ncd /b\n\ngit commit')")"
+expect_eq "§CDT a subshell opener comes off the front" "/b|" "$(cdt_of 'cd /a && (cd /b && git commit)')"
+expect_eq "§CDT the first git ends the scan, inside a word too" "/b|" "$(cdt_of 'cd /a && cd /b && echo legit; cd /c')"
+expect_eq "§CDT a cd after the commit is never read" "" "$(cdt_of 'cd /a && git commit -m x && cd /z')"
+expect_eq "§CDT one segment has nothing after it to read" "" "$(cdt_of 'cd /a')"
 
 finish

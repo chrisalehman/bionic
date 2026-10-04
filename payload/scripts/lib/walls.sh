@@ -174,16 +174,67 @@ wall_libs() {  # <wall name> <basename>… -> 0 all sourced · 1 one named, call
 #
 # IT ASSIGNS RATHER THAN PRINTS, so no caller needs a command substitution: the
 # pipeline it replaces cost three forks and the `$( )` around it a fourth.
+#
+# THE WORDS GO INTO AN ARRAY AND COME OUT JOINED ONCE (wave-24-fixit-1811 T4; REQ-5,
+# D6). The loop this replaces appended each word to a growing string, which copies the
+# whole string per word: a 64 KB command took seconds under bash 3.2 AND under 5.3
+# (research-R2 addendum; tests/hook-timeout.test.sh row b). `"${_ws[*]}"` joins with
+# the first character of IFS, so IFS narrows to one space for the join and only then.
+# `-` keeps an empty array from tripping `set -u` on bash 3.2.
+#
+# A LEADING CR, VT OR FF IS AN EMPTY FIRST WORD. Those three are IFS characters but not
+# IFS whitespace, so the shell splits an empty field in front of them; the loop never
+# printed a separator while its output was still empty, and the join does. A word never
+# holds a space, so every leading space of the join is one of those empty words, and
+# removing that run gives the loop's output byte for byte. It is removed by `sed`, one
+# fork on a command that starts with one of those three characters and on no other: the
+# shell's own `${v#"${v%%[! ]*}"}` is quadratic in the run on bash 3.2 (30 000 of them
+# took 2 s).
 _WALL_FLAT=""
 _wall_flatten() {  # <text> -> sets _WALL_FLAT
-  local _w _out="" _glob=0 IFS=$' \t\n\r\v\f'
+  local _glob=0 IFS=$' \t\n\r\v\f'
+  local -a _ws
   case $- in *f*) _glob=1 ;; esac
   set -f
-  for _w in $1; do
-    if [ -z "$_out" ]; then _out="$_w"; else _out="$_out $_w"; fi
-  done
+  _ws=($1)
   [ "$_glob" = 1 ] || set +f
-  _WALL_FLAT="$_out"
+  IFS=' '
+  _WALL_FLAT="${_ws[*]-}"
+  case "$_WALL_FLAT" in ' '*) _WALL_FLAT=$(printf '%s' "$_WALL_FLAT" | LC_ALL=C sed 's/^ *//') ;; esac
+}
+
+# ─── _wall_screen — the command with quotes and backslashes gone, once ─────
+#
+# Sets `_WALL_STRIPPED` to `$1` with every backslash-NEWLINE pair removed, then every
+# remaining `\`, `'` and `"`. That is the text the screens below look for a word in —
+# `_wall_mentions_git` (three callers), `_wall_cmd_fill`'s tier-2 screen, `_eg_placed`'s
+# disqualifier and the poker-verb screen — and each of them used to strip it again for
+# itself with three or four `${v//…/}` passes (wave-24-fixit-1811 T4; REQ-5, D6).
+#
+# WHY ONE awk PASS AND NOT `${v//…/}`. bash 3.2 pays matches × length for `${v//x/}`:
+# a 7.7 K command holding 1,618 single quotes took 5 s for ONE such pass, a 64 KB heredoc
+# over two minutes, and every hook runs under a 10 s timeout that fails open (research-R2
+# §1, §4). awk deletes the same bytes in one pass. It runs under `LC_ALL=C` because all
+# three characters are ASCII and no UTF-8 continuation byte can equal one of them. A line
+# that ends in a backslash loses its newline with it, which is the continuation rule the
+# old first pass spelled `${_p//\\$'\n'/}` (wave-14 T24, security 1b).
+#
+# THE CACHE IS KEYED ON THE TEXT, at file scope, because bash-walls.sh runs every wall
+# in one process (`bionic_fold`) and each of them asks about the same `$COMMAND`. A
+# different text recomputes; it never reads another command's strip. A text with none of
+# the three characters is its own strip, and costs no fork.
+_WALL_SCREEN_SET=0; _WALL_SCREEN_KEY=""; _WALL_STRIPPED=""
+_wall_screen() {  # <command text> -> sets _WALL_STRIPPED
+  if [ "$_WALL_SCREEN_SET" = 1 ] && [ "$1" = "$_WALL_SCREEN_KEY" ]; then return 0; fi
+  case "$1" in
+    *[\\\'\"]*)
+      _WALL_STRIPPED=$(printf '%s' "$1" | LC_ALL=C awk '
+        { e = (substr($0, length($0)) == "\\")
+          gsub(/[\\\047"]/, "")
+          printf "%s%s", $0, (e ? "" : "\n") }') ;;
+    *) _WALL_STRIPPED="$1" ;;
+  esac
+  _WALL_SCREEN_KEY="$1"; _WALL_SCREEN_SET=1
 }
 
 # ─── _wall_mentions_git — the cheap superset of "this could be a git command" ─
@@ -192,8 +243,8 @@ _wall_flatten() {  # <text> -> sets _WALL_FLAT
 # in payload/scripts/lib/git-argv.sh provably cannot find one (REQ-10, T11).
 #
 # WHY A SUPERSET IS SOUND HERE, AND WHY IT IS SPELLED LIKE THIS. `git_argv_parse`
-# accepts argv[0] only as the literal `git` or a path ending `/git`
-# (git-argv.sh's `git|*/git) shift`), and the only transformation between the
+# accepts argv[0] only as `git` or a path ending `/git`, in any letter case
+# (git-argv.sh's `git_argv_is_git`), and the only transformation between the
 # command TEXT and that token is unquoting: the parser strips backslashes and
 # quote characters and does not expand variables, globs or `$'…'`. So the three
 # characters `git` must survive in the text with nothing but backslashes and
@@ -215,11 +266,24 @@ _wall_flatten() {  # <text> -> sets _WALL_FLAT
 # IT IS A SCREEN, NEVER A VERDICT. A hit runs the real parser and the parser
 # decides; only a miss short-circuits, and a miss is the case the parser was
 # always going to answer "no push, no commit" to.
+#
+# THE LITERAL FIRST (wave-24-fixit-1811 T4; REQ-5, D6). Removing characters other than
+# g, i and t cannot separate a `git` that is already there, so a literal hit is the
+# same answer the strip would give, for no work. Only a miss pays for `_wall_screen`.
+#
+# ANY LETTER CASE (wave-24 T31). The reader folds the program word's case, because a
+# case-blind filesystem runs `GIT push` as git, so the screen must answer "maybe" for every
+# casing it folds, or `GIT push origin main` is screened out before the reader is asked. The
+# lower-case literal stays first: it is the common hit. A miss asks the any-case glob of the
+# strip only, never of the raw text too, since removing `\`, `'` and `"` cannot split a `GIT`
+# that is already there. The glob runs under `LC_ALL=C`: in a UTF-8 locale bash 3.2 matches a
+# bracket glob through its wide-character path, measured 2-4x the literal on a 180 KB command,
+# and all six letters are ASCII. `local` restores the caller's locale. No fork either way.
 _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
-  local _p="$1"
-  _p="${_p//\\$'\n'/}"
-  _p="${_p//\\/}"; _p="${_p//\'/}"; _p="${_p//\"/}"
-  case "$_p" in *git*) return 0 ;; esac
+  case "$1" in *git*) return 0 ;; esac
+  local LC_ALL=C
+  _wall_screen "$1"
+  case "$_WALL_STRIPPED" in *[Gg][Ii][Tt]*) return 0 ;; esac
   return 1
 }
 
@@ -240,8 +304,8 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 #
 #   _WALL_SAFE_FLAT   the heredoc-free, whitespace-squeezed one-line command
 #   _WALL_HEAD        the tier-2 head reduction, or "" when tier 2 provably cannot fire
-#   _WALL_CHAIN_SEGS  the `&&` segments, newline-joined, untrimmed
-#   _WALL_CHAIN_COUNT how many of them carry a non-blank character
+#   _WALL_CHAIN_SEGS  the command's segments, newline-joined and trimmed, when its text holds `&&`
+#   _WALL_CHAIN_COUNT how many of them there are (see 3 below)
 #
 # WHAT IS SKIPPED, AND WHY EACH SKIP IS SOUND — none of them is a new reading, and
 # none of them narrows what the wall can see:
@@ -263,19 +327,23 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 #     then looking for the substring tests. A miss cannot be a tier-2 match, and the
 #     empty head it leaves takes `classify_tier2`'s own `*) return 1` arm.
 #
-#  3. THE `&&` SPLIT IS SHELL, NOT `awk` + `grep`. `_WALL_SAFE_FLAT` has been through
-#     `_wall_flatten`, whose IFS carries all six characters `[[:space:]]` names — so
-#     it holds no newline, tab, CR, VT or FF at all, and the newline-joined segment
-#     list is unambiguous by construction. The split is left-to-right and
-#     non-overlapping on the literal two characters `&&`, which is what
-#     `gsub(/&&/, "\n")` did, `&&&&` included; the count is of segments carrying a
-#     non-blank character, which is what `grep -cE '[^[:space:]]'` counted.
+#  3. THE CHAIN IS READ BY THE QUOTE-AWARE SEGMENTER, AND ONLY WHEN `&&` IS IN THE TEXT
+#     (wave-24 T11, D12, AC-7.7). The count used to be a quote-blind split on the two
+#     characters `&&`, so the `&&` inside `git commit -m "a && b"` or inside the notification
+#     one-liner's quoted title was a chain link of its own. It is now the segment list of
+#     `cmd_class_lines` — the same `segments()` the class reading uses, which reads quotes,
+#     `\&`, groups and `;`/`|` — so a chain is the shell's own list, never a count of a
+#     substring. The segments are that function's, trimmed, and the count is how many it
+#     returned; a blank one is skipped, as the old count skipped it. A flattened command with no `&&` anywhere in its
+#     text is not a chain and costs no segmenter: a `&&` the quotes hide still pays one
+#     `awk`, and every other command pays nothing. The count decides one thing now, the
+#     LABEL and ROLE of a tier-1 deny: the chain tier-2 nudge that also read it is retired.
 #
 # IT IS A FILL, NEVER A VERDICT. Every class this wall acts on still comes from
 # `cmd_class` — one reader, cmd-class.sh — over the same strings as before.
 _WALL_SAFE_FLAT=""; _WALL_HEAD=""; _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
 _wall_cmd_fill() {  # <raw command text> -> sets the four values above
-  local _p _rest _seg _segs=""
+  local _cls _seg _segs=""
 
   case "$1" in
     *'<<'*) _wall_flatten "$(cmd_strip_heredocs "$1")" ;;
@@ -283,9 +351,14 @@ _wall_cmd_fill() {  # <raw command text> -> sets the four values above
   esac
   _WALL_SAFE_FLAT="$_WALL_FLAT"
 
-  _p="$_WALL_SAFE_FLAT"
-  _p="${_p//\\/}"; _p="${_p//\'/}"; _p="${_p//\"/}"
-  case "$_p" in
+  # THE SCREEN READS THE RAW COMMAND'S STRIP (`_wall_screen`, shared with every other
+  # screen in this process; wave-24-fixit-1811 T4), not a strip of its own over
+  # `_WALL_SAFE_FLAT`. That is a superset: the flat form only deletes heredoc bodies and
+  # squeezes whitespace, which can remove a word but never join one. A word found only
+  # in a heredoc body costs one head reduction, and the head — read from the flat form —
+  # still cannot start with it.
+  _wall_screen "$1"
+  case "$_WALL_STRIPPED" in
     *git*|*docker*|*npx*|*uvx*) _WALL_HEAD=$(cmd_unwrap_head "$_WALL_SAFE_FLAT") ;;
     *)                          _WALL_HEAD="" ;;
   esac
@@ -293,17 +366,13 @@ _wall_cmd_fill() {  # <raw command text> -> sets the four values above
   _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
   case "$_WALL_SAFE_FLAT" in
     *"&&"*)
-      _rest="$_WALL_SAFE_FLAT"
-      while :; do
-        case "$_rest" in
-          *"&&"*) _seg="${_rest%%&&*}"; _rest="${_rest#*&&}" ;;
-          *)      _seg="$_rest"; _rest=""; _segs="$_segs$_seg"
-                  case "$_seg" in *[![:space:]]*) _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 )) ;; esac
-                  break ;;
-        esac
+      while IFS=$'\t' read -r _cls _seg; do
+        [ -n "$_seg" ] || continue
         _segs="$_segs$_seg"$'\n'
-        case "$_seg" in *[![:space:]]*) _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 )) ;; esac
-      done
+        _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 ))
+      done <<EOF
+$(cmd_class_lines "$_WALL_SAFE_FLAT")
+EOF
       _WALL_CHAIN_SEGS="$_segs"
       ;;
   esac
@@ -1196,20 +1265,27 @@ bionic_context 2>/dev/null || exit 0
 # characters this scan splits segments on, so no target it yields can contain one. A path
 # holding a space or a glob character is carried intact, and `_eg_path_fold`'s own `set -f`
 # guard is what keeps it intact downstream.
+#
+# ONE SPLIT, NOT ONE PASS PER SEGMENT (wave-24 T28). The segments come off in a single `read`
+# split on the four characters, and the first `git` is cut from the segment that holds it.
+# Taking them off the front one at a time cost a whole-remainder `${_rest#*[;&|…]}` per
+# segment, and cutting the remainder at `git` with `%%git*` one more: `cd <dir> && <64 KB
+# heredoc> … git commit` took 17.75 s under 3.2 and 7.02 s under 5.3, past the hook's 10 s.
+# The empty segments the split adds (a doubled separator, a trailing one) name no `cd`.
 _EG_CDS=""
 _eg_cd_targets() {
-  local _t="${1:-}" _rest _seg _p
+  local _t="${1:-}" _rest _seg _p _i=0 _n _last=0
+  local -a _segs=()
   _EG_CDS=""
   case "$_t" in
     *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
     *) return 0 ;;
   esac
-  case "$_rest" in *git*) _rest="${_rest%%git*}" ;; esac
-  while [ -n "$_rest" ]; do
-    case "$_rest" in
-      *[\;\&\|$'\n']*) _seg="${_rest%%[;&|$'\n']*}"; _rest="${_rest#*[;&|$'\n']}" ;;
-      *) _seg="$_rest"; _rest="" ;;
-    esac
+  IFS=$';&|\n' read -r -d '' -a _segs <<< "$_rest" || :
+  _n=${#_segs[@]}
+  while [ "$_i" -lt "$_n" ] && [ "$_last" = 0 ]; do
+    _seg="${_segs[_i]}"; _i=$((_i + 1))
+    case "$_seg" in *git*) _seg="${_seg%%git*}"; _last=1 ;; esac
     while [ -n "$_seg" ]; do
       case "$_seg" in
         ' '*|'	'*|'('*|'{'*) _seg="${_seg#?}" ;;
@@ -1219,9 +1295,9 @@ _eg_cd_targets() {
     case "$_seg" in
       'cd'|'cd '*|'cd	'*)
         _p="${_seg#cd}"
-        while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
-        while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
-        while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+        while :; do case "$_p" in ' '*) _p="${_p# }" ;; *) break ;; esac; done
+        while :; do case "$_p" in '	'*) _p="${_p#	}" ;; *) break ;; esac; done
+        while :; do case "$_p" in *' ') _p="${_p% }" ;; *) break ;; esac; done
         case "$_p" in
           '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
           "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
@@ -1386,16 +1462,27 @@ _eg_commit_cwd() {
       ;;
   esac
   # (2) — the leading `cd`, read off the front of the command and nowhere else.
+  #
+  # THE LEADING BLANKS COME OFF BEHIND A `case` (wave-24-fixit-1811 T4). `[ "${_c# }" != "$_c" ]`
+  # asked bash to try every prefix of the command against one space before it could answer no,
+  # and on a 64 KB command holding any multibyte character that one test cost 0.7 s under 3.2
+  # and 5.3 alike (tests/hook-timeout.test.sh row b'). A `case` on the first character answers
+  # at once, and the removal then runs only when it matches.
   _c="$COMMAND"
-  while [ "${_c# }" != "$_c" ]; do _c="${_c# }"; done
-  while [ "${_c#	}" != "$_c" ]; do _c="${_c#	}"; done
+  while :; do case "$_c" in ' '*) _c="${_c# }" ;; *) break ;; esac; done
+  while :; do case "$_c" in '	'*) _c="${_c#	}" ;; *) break ;; esac; done
+  #
+  # THE SAME HOLDS FOR THE PATH AFTER `cd` (wave-24 T28). `_p` is cut at the first `;&|` or
+  # newline FIRST, so the blanks come off a few bytes rather than the whole command, and each
+  # comes off behind a `case`: the `[ "${_p# }" != "$_p" ]` loops that stood here failed once
+  # per loop on the whole command, 1.27 s under 3.2 and 5.3 on a 64 KB heredoc.
   case "$_c" in
     'cd '*|'cd	'*)
       _p="${_c#cd}"
-      while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
-      while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
       _p="${_p%%[;&|$'\n']*}"
-      while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+      while :; do case "$_p" in ' '*) _p="${_p# }" ;; *) break ;; esac; done
+      while :; do case "$_p" in '	'*) _p="${_p#	}" ;; *) break ;; esac; done
+      while :; do case "$_p" in *' ') _p="${_p% }" ;; *) break ;; esac; done
       case "$_p" in
         '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
         "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
@@ -1505,28 +1592,33 @@ _eg_commit_count() {
 # it too, even inside a `git -c` value. The WHOLE text is scanned, before and after the
 # commit. Words inside a quoted commit message are read as words, which is the fail-closed
 # direction; a writer commits with `-F`.
+#
+# THE SCAN IS ONE awk PASS (wave-24-fixit-1811 T4; REQ-5, D6). In the shell it cut each
+# segment off with `${_t#*[;&|\n]}`, which bash 3.2 pays for quadratically in the distance to
+# the separator: a 7.7 K commit command spent 4.7 s here alone (tests/hook-timeout.test.sh row
+# c). The awk is the same three folds in the same order, the same cut — every empty piece it
+# adds, at a trailing separator, has the empty first word the shell loop also passed — and the
+# same leading-blank strip and first word. `LC_ALL=C` reads bytes; every character it tests is
+# ASCII. The text arrives through ENVIRON, never `-v`, which would read its backslashes.
 _eg_git_only() {
-  local _t="${1:-}" _seg _w
+  local _t="${1:-}"
   case "$_t" in
     *'sh -c'*|*'sh	-c'*) return 1 ;;
     *[\(\)\{\}\`]*) return 1 ;;
   esac
-  _t="${_t//">&"/>}"; _t="${_t//"<&"/<}"; _t="${_t//"&>"/>}"
-  while [ -n "$_t" ]; do
-    case "$_t" in
-      *[\;\&\|$'\n']*) _seg="${_t%%[;&|$'\n']*}"; _t="${_t#*[;&|$'\n']}" ;;
-      *) _seg="$_t"; _t="" ;;
-    esac
-    while [ "${_seg# }" != "$_seg" ] || [ "${_seg#	}" != "$_seg" ]; do
-      _seg="${_seg# }"; _seg="${_seg#	}"
-    done
-    _w="${_seg%%[ 	]*}"
-    case "$_w" in
-      ''|git|true|:|exit) : ;;
-      *) return 1 ;;
-    esac
-  done
-  return 0
+  _EG_GO_TEXT="$_t" LC_ALL=C awk '
+    BEGIN {
+      t = ENVIRON["_EG_GO_TEXT"]
+      gsub(/>&/, ">", t); gsub(/<&/, "<", t); gsub(/&>/, ">", t)
+      n = split(t, seg, /[;&|\n]/)
+      for (i = 1; i <= n; i++) {
+        w = seg[i]
+        sub(/^[ \t]+/, "", w)
+        sub(/[ \t].*$/, "", w)
+        if (w != "" && w != "git" && w != "true" && w != ":" && w != "exit") exit 1
+      }
+      exit 0
+    }' </dev/null
 }
 
 # _eg_placed -> 0 when the ONE commit's directory was read in a shape git obeys exactly as the
@@ -1559,9 +1651,10 @@ _eg_git_only() {
 # already judged rather than exempted (A-T6.13).
 _eg_placed() {
   local _c _sep _dq
-  _dq="${COMMAND//\"/}"
-  _dq="${_dq//\'/}"
-  _dq="${_dq//\\/}"
+  # THE SHARED STRIP (`_wall_screen`; wave-24-fixit-1811 T4). It also joins a
+  # backslash-newline, which the shell does too, so `--git-\<newline>dir` now costs
+  # the exemption as well — the fail-closed direction this copy exists for.
+  _wall_screen "$COMMAND"; _dq="$_WALL_STRIPPED"
   case "$COMMAND" in
     *--git-dir*|*--work-tree*|*GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*) return 1 ;;
   esac
@@ -1573,7 +1666,8 @@ _eg_placed() {
     cd)
       [ "$_EG_COMMIT_NC" -eq 0 ] || return 1
       _c="$COMMAND"
-      while [ "${_c# }" != "$_c" ] || [ "${_c#	}" != "$_c" ]; do _c="${_c# }"; _c="${_c#	}"; done
+      # Behind a `case`, as in `_eg_commit_cwd` (wave-24-fixit-1811 T4).
+      while :; do case "$_c" in ' '*) _c="${_c# }" ;; '	'*) _c="${_c#	}" ;; *) break ;; esac; done
       _sep="${_c#"${_c%%[;&|$'\n']*}"}"
       case "$_sep" in
         '&&'*) _sep="${_sep#&&}" ;;
@@ -2604,7 +2698,7 @@ Fix: on the user's literal 'approved', record 'approved-by: <user> <ISO-UTC> \"<
 # demanding it here would be the Verify gate's demand moved four steps early.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_fails_when() {
-  local step rows line ac block_txt fw
+  local step rows ac
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
@@ -2614,22 +2708,46 @@ validate_fails_when() {
   rows=$(echo "$MATRIX" | grep -E '^[[:space:]]*\|')
   [ -n "$rows" ] || return 0
 
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
-    ac=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    [ "$ac" = "AC" ] && continue
-    [ -n "$ac" ] || continue
-    block_txt=$(matrix_block "$ac")
-    [ -n "$block_txt" ] || continue
-    fw=$(echo "$block_txt" | grep -E '^[[:space:]]*fails-when[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*fails-when[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-    [ -n "$fw" ] && continue
-    _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
+  # ONE PASS, NOT SIX PROCESSES A ROW (wave-24 T15; REQ-9 AC-9.7). The walk used to fork an
+  # awk for the row's AC, `matrix_block` for its block, and grep|head|sed|sed for the key — 240
+  # processes and half a second on a 40-row matrix, paid by every commit from Step 4 on and by
+  # every plan-row verb's dry commit. The awk below is the same walk, rule for rule: the table
+  # rows in order, the separator and the `AC` header skipped, the AC as the cell between the
+  # first two pipes; its block as `matrix_block` reads it (every header line whose bullet-
+  # stripped text begins `<AC>:`, then the lines under it until a line that is not indented);
+  # a block with no non-empty line is no block; and the FIRST `fails-when:` line of the block
+  # is the one judged, empty after its key or not. It prints the first AC that fails.
+  ac=$(printf '%s\n' "$MATRIX" | awk '
+    { L[++n] = $0 }
+    END {
+      for (i = 1; i <= n; i++) {
+        line = L[i]
+        if (line !~ /^[[:space:]]*\|/) continue
+        if (line ~ /^[[:space:]]*\|[-|:[:space:]]*$/) continue
+        split(line, c, "|"); ac = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", ac)
+        if (ac == "AC" || ac == "") continue
+        if (ac in ok) continue
+        key = ac ":"; f = 0; body = 0; seen = 0; fw = ""
+        for (j = 1; j <= n; j++) {
+          hdr = L[j]; sub(/^[-*+][[:space:]]+/, "", hdr)
+          if (index(hdr, key) == 1) { f = 1; continue }
+          if (L[j] ~ /^[^[:space:]]/) f = 0
+          if (!f) continue
+          if (L[j] != "") body = 1
+          if (!seen && L[j] ~ /^[[:space:]]*fails-when[[:space:]]*:/) {
+            seen = 1; fw = L[j]
+            sub(/^[[:space:]]*fails-when[[:space:]]*:[[:space:]]*/, "", fw); sub(/[[:space:]]+$/, "", fw)
+          }
+        }
+        if (!body || fw != "") { ok[ac] = 1; continue }
+        print ac; exit
+      }
+    }')
+  [ -n "$ac" ] || return 0
+  _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
 Plan: $PLAN
 Fix: add 'fails-when: <the planted defect this eval must go red on>' to the '${ac}:' block — it is authored in the spec's '## Eval design' and rendered here."
-    refuse exit2 commit "that matrix row names no 'fails-when:'" "add a 'fails-when:' line" "$_eg_detail"
-  done <<< "$rows"
+  refuse exit2 commit "that matrix row names no 'fails-when:'" "add a 'fails-when:' line" "$_eg_detail"
   return 0
 }
 
@@ -4512,7 +4630,7 @@ validate_dispatch_ledger() {
   [ "$RIGOR" = "audited" ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
-  local tasks rows line id ev violations findings
+  local tasks rows id ev violations findings _eg_ph
   # THE ROWS AND THE INVARIANTS BOTH COME FROM lib/units.sh (REQ-1e, spec §2 D3).
   # This is the check the widened table breaks hardest: `| id | step | kind | task |
   # agent | deps | size | serves | Files | status |` puts `agent` at the `$6` this
@@ -4582,21 +4700,39 @@ Fix: repair each row named above; the columns are id | step | kind | task | agen
   refuse_missing_evidence_lines "$(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }')"
   refuse_unlaunched_rows "$(printf '%s\n' "$findings" \
     | awk '$1 == "launch" { v = $0; sub(/^launch [^ ]+ /, "", v); print $2 ": " v }')"
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    id=$(units_field "$line" id)
-    case "$id" in T[0-9]*) : ;; *) continue ;; esac
-    # Evidence line in ## SDLC State (anchored, same lookup as task scale).
-    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
-         | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-    if is_placeholder_value "$ev"; then
-      _eg_detail="canonical-sdlc dispatched task ${id} evidence line is a placeholder ('${ev}').
+  # Evidence line in ## SDLC State (anchored, same lookup as task scale), judged for a
+  # placeholder. ONE PASS (wave-24 T15; REQ-9 AC-9.7): this walk forked grep|head|sed|sed for
+  # the line and sed|tr for the test, six processes a row; the awk is the same lookup — the
+  # first section line matching `^[[:space:]]*-?[[:space:]]*<id>[[:space:]]*:`, its text after
+  # that prefix with trailing space trimmed — and `is_placeholder_value`'s whole-value test
+  # (trimmed, lower-cased, one of its seven tokens). It prints the first `<id><TAB><ev>` that is
+  # a placeholder, rows in table order.
+  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  _eg_ph=$(printf '%s\n' "$SECTION" | EG_IDS="$(printf '%s\n' "$rows" | awk -F'\t' '$1 ~ /^T[0-9]/ { print $1 }')" awk '
+    { L[++n] = $0 }
+    END {
+      m = split(ENVIRON["EG_IDS"], ids, "\n")
+      for (k = 1; k <= m; k++) {
+        id = ids[k]; if (id == "") continue
+        pat = "^[[:space:]]*-?[[:space:]]*" id "[[:space:]]*:"
+        for (i = 1; i <= n; i++) {
+          if (L[i] !~ pat) continue
+          ev = L[i]; sub(pat "[[:space:]]*", "", ev); sub(/[[:space:]]+$/, "", ev)
+          v = ev; sub(/^[[:space:]]+/, "", v); v = tolower(v)
+          if (v == "todo" || v == "pending" || v == "in progress" || v == "inprogress" || v == "xxx" || v == "tbd" || v == "placeholder") {
+            printf "%s\t%s\n", id, ev; exit
+          }
+          break
+        }
+      }
+    }')
+  if [ -n "$_eg_ph" ]; then
+    id="${_eg_ph%%$'\t'*}"; ev="${_eg_ph#*$'\t'}"
+    _eg_detail="canonical-sdlc dispatched task ${id} evidence line is a placeholder ('${ev}').
 Plan: $PLAN
 Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing."
-      refuse exit2 commit "the dispatched task's evidence is a placeholder" "replace it with evidence" "$_eg_detail"
-    fi
-  done <<< "$rows"
+    refuse exit2 commit "the dispatched task's evidence is a placeholder" "replace it with evidence" "$_eg_detail"
+  fi
   return 0
 }
 
@@ -4641,173 +4777,6 @@ dispatch() {
 
 dispatch
 exit 0
-}
-
-# ─── the chain arm's exempt set — one `&&` segment, read as the shell runs it ──
-#
-# `_chain_seg_split <segment>` sets `_CHAIN_STAGES` (the segment's commands, newline-joined, split
-# at every unquoted `|`, `|&`, `;` and lone `&`) and `_CHAIN_WRITES` (1 when an unquoted redirect
-# writes a file: `>`, `>>`, `>|`, `&>`, `N>`, `>&word`, `>(…)`; never `>/dev/null`, `>&2`, `2>&1`,
-# `>&-`). Quotes are honoured — `jq ".a > 1" f` carries no redirect — and a backslash escapes the
-# next character. A `>` with no readable word after it fails closed, as a write.
-#
-# WHY A SEGMENT IS NOT ITS HEAD (wave-21 T14; critic-4e6d4a9 I2). The exempt set judged an `&&`
-# segment by its first word, so `date > stamp`, `jq . a > b`, `sort f>out`, `uniq f>g` and
-# `jq … | tee f` all passed as observation, and `git status; rm -rf build` hid a `rm` behind a
-# `git`. Spec D8 calls the set an allowlist of OBSERVATION, and none of those observes.
-#
-# A SCREEN FIRST: a segment holding none of `|`, `;`, `&`, `>` is one command that writes nothing
-# through a redirect, and pays for no character walk.
-_CHAIN_STAGES=""; _CHAIN_WRITES=""
-_chain_seg_split() {  # <segment> -> sets _CHAIN_STAGES, _CHAIN_WRITES
-  local s="$1" n i=0 c q="" cur="" out="" t dup
-  _CHAIN_WRITES=""
-  case "$s" in
-    *[\|\;\&\>]*) : ;;
-    *) _CHAIN_STAGES="$s"; return 0 ;;
-  esac
-  n=${#s}
-  while [ "$i" -lt "$n" ]; do
-    c="${s:i:1}"
-    if [ -n "$q" ]; then
-      cur="$cur$c"
-      if [ "$q" = '"' ] && [ "$c" = '\' ]; then
-        i=$((i + 1)); cur="$cur${s:i:1}"
-      elif [ "$c" = "$q" ]; then
-        q=""
-      fi
-      i=$((i + 1)); continue
-    fi
-    case "$c" in
-      \\) cur="$cur$c${s:i+1:1}"; i=$((i + 2)); continue ;;
-      \'|\") q="$c"; cur="$cur$c" ;;
-      \||\;)
-        out="$out$cur"$'\n'; cur=""
-        if [ "$c" = '|' ] && [ "${s:i+1:1}" = '&' ]; then i=$((i + 1)); fi ;;
-      \&)
-        # `&>` is a redirect, read at its `>`; a lone `&` ends a command.
-        if [ "${s:i+1:1}" != '>' ]; then out="$out$cur"$'\n'; cur=""; fi ;;
-      \>)
-        # A descriptor number written against the `>` (`2>`) belongs to the redirect, not to the
-        # command's operands.
-        case "$cur" in
-          [0-9]|[0-9][0-9]) cur="" ;;
-          *' '[0-9]|*' '[0-9][0-9]) cur="${cur% *} " ;;
-        esac
-        i=$((i + 1))
-        if [ "${s:i:1}" = '>' ]; then i=$((i + 1)); fi
-        if [ "${s:i:1}" = '|' ]; then i=$((i + 1)); fi
-        dup=""
-        if [ "${s:i:1}" = '&' ]; then dup=1; i=$((i + 1)); fi
-        while [ "${s:i:1}" = ' ' ]; do i=$((i + 1)); done
-        t=""
-        while [ "$i" -lt "$n" ]; do
-          c="${s:i:1}"
-          case "$c" in ' '|\||\;|\&|\<|\>|\(|\)) break ;; esac
-          t="$t$c"; i=$((i + 1))
-        done
-        t="${t//\'/}"; t="${t//\"/}"
-        case "$t" in
-          '') _CHAIN_WRITES=1 ;;
-          /dev/null|/dev/stdout|/dev/stderr) : ;;
-          *)
-            if [ -z "$dup" ]; then
-              _CHAIN_WRITES=1
-            else
-              case "$t" in -|[0-9]|[0-9][0-9]) : ;; *) _CHAIN_WRITES=1 ;; esac
-            fi ;;
-        esac
-        continue ;;
-      *) cur="$cur$c" ;;
-    esac
-    i=$((i + 1))
-  done
-  _CHAIN_STAGES="$out$cur"
-}
-
-# `_chain_stage_observes <command>` -> 0 when the one command only reads or reports, 1 otherwise.
-#
-# THE LINE THIS LIST DRAWS: observation is exempt, production is nudged. A command that only
-# reads or reports (git, read tools, date/pwd/jq/sort, gh view/list/watch, a GET gh api) never
-# makes a chain production-shaped; one that writes the tree (rm, mv, cp, mkdir, touch, tee) or
-# the remote (gh api -X POST, gh pr merge) does. Redirects never reach here: `_chain_seg_split`
-# has already answered them for the whole segment.
-# THE SAME EXEMPT SET, ASKED WITH A BUILTIN. The regex was anchored at `^` over literal words
-# each followed by a literal space, which is exactly what these patterns are — a bare `git` with
-# no argument stays non-exempt in both spellings. The read tools that take stdin are exempt bare
-# too (wave-21 T14): a pipe stage reads its input, so `sort f | head` observes.
-_chain_stage_observes() {  # <one trimmed command>
-  local _xo _xn _xdd _xw _xm _xf _xp
-  local -a _xws
-  case "$1" in
-    'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
-    'sed '*|'echo '*|'printf '*|'test '*|'cd '*|'which '*|'command '*|'false '*|\
-    'pwd'|'pwd '*|'true'|'true '*|'date'|'date '*|'jq'|'jq '*|\
-    'basename'|'basename '*|\
-    'ls'|'cat'|'head'|'tail'|'wc'|\
-    'gh run watch'|'gh run watch '*) return 0 ;;
-    'sort'|'sort '*|'uniq'|'uniq '*)
-      # `sort`/`uniq` observe only with NO OUTPUT FLAG and AT MOST ONE OPERAND (wave-21 T13
-      # item 8): `sort -o f f` / `--output` writes a file, and `uniq in out` writes its second
-      # operand. A short-option cluster carrying `o` counts as the output flag; a word after
-      # `--` is an operand; an option's separate argument (`-k 2`) counts as an operand,
-      # which can only ever turn an observation into a nudge.
-      _xo=0; _xn=0; _xdd=""
-      # SPLIT BY `read -a`, never by an unquoted expansion: a `*` in the segment is a word
-      # here, not a glob over the cwd.
-      read -r -a _xws <<< "$1"
-      for _xw in "${_xws[@]:1}"; do
-        if [ -z "$_xdd" ]; then
-          case "$_xw" in
-            --) _xdd=1; continue ;;
-            --output|--output=*) _xo=1; break ;;
-            --*) continue ;;
-            -) : ;;
-            -*o*) _xo=1; break ;;
-            -*) continue ;;
-          esac
-        fi
-        _xn=$((_xn + 1))
-      done
-      [ "$_xo" -eq 0 ] && [ "$_xn" -le 1 ] ;;
-    'gh api'|'gh api '*)
-      # `gh api` observes unless a method other than GET is named — and a field or an input
-      # body (`-f`, `-F`, `--field`, `--raw-field`, `--input`) makes it a POST unless GET is
-      # named (wave-21 T13 item 8). Under a named GET, gh sends fields as query parameters,
-      # so they still observe; `--input` is a request BODY and is never an observation.
-      # THE LAST METHOD WINS, as gh reads its flags (wave-21 T14; critic-4e6d4a9 I2): a GET
-      # matched anywhere let `gh api -X GET -X POST` pass as an observation.
-      _xm=""; _xf=""; _xp=""
-      read -r -a _xws <<< "$1"
-      for _xw in "${_xws[@]:2}"; do
-        if [ -n "$_xp" ]; then _xm="$_xw"; _xp=""; continue; fi
-        case "$_xw" in
-          --input|--input=*) return 1 ;;
-          -X|--method) _xp=1 ;;
-          --method=*) _xm="${_xw#--method=}" ;;
-          -X?*) _xm="${_xw#-X}" ;;
-          -f|-F|--field|--raw-field|-f?*|-F?*|--field=*|--raw-field=*) _xf=1 ;;
-        esac
-      done
-      # A method flag with no word after it names no method gh would send: fail closed.
-      [ -z "$_xp" ] || return 1
-      _xm="${_xm//\'/}"; _xm="${_xm//\"/}"
-      case "$_xm" in
-        [Gg][Ee][Tt]) return 0 ;;
-        '') [ -z "$_xf" ]; return ;;
-        *) return 1 ;;
-      esac ;;
-    'gh '*)
-      # `gh <noun> view` / `gh <noun> list` observe; every other verb is production. The verb
-      # is the word AFTER THE NOUN (wave-21 T13 item 8): matched anywhere, `gh pr merge 5
-      # --body view` passed as an observation.
-      _xw="${1#gh }"; _xw="${_xw#* }"; _xw="${_xw%% *}"
-      case "$_xw" in
-        view|list) return 0 ;;
-        *) return 1 ;;
-      esac ;;
-    *) return 1 ;;
-  esac
 }
 
 # ─── wall_farm_out_reminder — hooks/farm-out-reminder.sh ─────────────────────
@@ -4885,7 +4854,7 @@ wall_farm_out_reminder() {  # <event> -> 0 nothing · 1 nudge · 2 deny
 
 
 local MODE FLAT SAFE_FLAT TARGET CLASS ROLE CHAIN_SEGS CHAIN_COUNT CHAIN_ROLE
-local _cfg _seg _has_nonexempt
+local _cfg _seg
 MODE="block"
 if [ -f "$BIONIC_ROOT/.bionic/config.yaml" ]; then
   _cfg=$(grep -E '^farm-out-mode:' "$BIONIC_ROOT/.bionic/config.yaml" 2>/dev/null | head -1 \
@@ -5027,7 +4996,7 @@ nudge_once() {  # $1=class $2=role — ONE nudge per (session, class); repeat = 
   log_event "nudge" "$1"; emit_nudge "$1" "$2"; return 1
 }
 
-# ── main flow: override → unwrap → tier-1 deny → tier-2 nudge (single + chain) ──
+# ── main flow: override → unwrap → tier-1 deny (single + chain) → tier-2 nudge (single) ──
 # Chain-aware: the override token is honored ANYWHERE in the invocation —
 # leading, after a separator (;/&/|), or as an env-prefix mid-chain
 # (`cd x && FARM_OUT_ALLOW=1 bash tests/run.sh`) — not only in leading
@@ -5096,48 +5065,13 @@ if classify_tier2 "$TARGET"; then
   nudge_once "$CLASS" "$ROLE"; return $?
 fi
 
-# Chain tier-2 arm: ≥3 segments, NO tier-1 segment (the tier-1 arm above would
-# have exited otherwise), ≥1 non-exempt segment → nudge as class=chain.
-if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
-  _has_nonexempt=""
-  local _xst
-  while IFS= read -r _seg; do
-    # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
-    # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
-    # either end is single spaces.
-    while :; do
-      case "$_seg" in
-        ' '*) _seg="${_seg# }" ;;
-        *' ') _seg="${_seg% }" ;;
-        *)    break ;;
-      esac
-    done
-    [ -n "$_seg" ] || continue
-    # A SEGMENT IS JUDGED AS THE SHELL RUNS IT (wave-21 T14; critic-4e6d4a9 I2): a write through
-    # an unquoted redirect makes it production whatever its head, and every command of a pipe or
-    # a `;` list is judged on its own — `_chain_seg_split` reads both, `_chain_stage_observes`
-    # is the exempt set.
-    _chain_seg_split "$_seg"
-    if [ -n "$_CHAIN_WRITES" ]; then _has_nonexempt=1; break; fi
-    while IFS= read -r _xst; do
-      while :; do
-        case "$_xst" in
-          ' '*) _xst="${_xst# }" ;;
-          *' ') _xst="${_xst% }" ;;
-          *)    break ;;
-        esac
-      done
-      [ -n "$_xst" ] || continue
-      _chain_stage_observes "$_xst" || { _has_nonexempt=1; break; }
-    done <<EOF
-$_CHAIN_STAGES
-EOF
-    [ -z "$_has_nonexempt" ] || break
-  done <<EOF
-$CHAIN_SEGS
-EOF
-  if [ -n "$_has_nonexempt" ]; then nudge_once "chain" "implementor"; return $?; fi
-fi
+# THE CHAIN TIER-2 ARM IS RETIRED (wave-24 T11, D12, AC-7.7). A chain of three or more
+# segments with no tier-1 segment used to be nudged as class=chain when a segment's head was
+# outside an allowlist of observers. Eight of eight recent firings were observation or
+# notification one-liners — one of them the notification command the user's own CLAUDE.md
+# prescribes — and the count it read was quote-blind (research R4 §6). Tier 1 above and the
+# tier-2 singles (`git clone`, `docker run|pull`, `npx`/`uvx`) are unchanged: a chain that runs
+# a suite, a build or an install still denies, and a chain that merely does work is silent.
 
 return 0
 }
@@ -5145,7 +5079,9 @@ return 0
 # ─── _wall_poker_contract_verb — is this a call of a contract-changing poker verb ─
 #
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
-# `session-poker.sh amend|extend|task-add`; 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
+# `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14); 1 otherwise (wave-20
+# T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5192,7 +5128,8 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
     shift
     _next="${1:-}"
     case "$_next" in
-      amend|extend|task-add) _WALL_POKER_VERB="$_next"; return 0 ;;
+      amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set)
+        _WALL_POKER_VERB="$_next"; return 0 ;;
     esac
   done <<< "$(git_argv_expand "$1")"
   return 1
@@ -5344,9 +5281,8 @@ the tree as it is and send the report; the orchestrator lands the work."
   #
   # THE SCREEN is the literal name with quotes and backslashes removed, as `_wall_mentions_git`
   # screens git; a hit runs the argv reader (`_wall_poker_contract_verb`, above), which decides.
-  local _bsg_p="${COMMAND//\\$'\n'/}"
-  _bsg_p="${_bsg_p//\\/}"; _bsg_p="${_bsg_p//\'/}"; _bsg_p="${_bsg_p//\"/}"
-  case "$_bsg_p" in
+  _wall_screen "$COMMAND"
+  case "$_WALL_STRIPPED" in
     *session-poker*)
       if _wall_poker_contract_verb "$COMMAND"; then
         fold_block exit2 "$_WALL_POKER_VERB" \
@@ -5764,22 +5700,38 @@ budget_refuse() {  # <suite basename>
   # cannot read — but the ordinary headline is false in exactly this case: every one of
   # those suites may be on the budget, and it sends the reader to audit a set that is not
   # the problem. Two readers hit it before this branch existed.
+  #
+  # THE FIX IS THE LOOP'S OWN WORDS (wave-24 T13, D10, AC-6.3). A loop whose header is all
+  # literal words still names its suites when the classifier will not expand the command:
+  # `cmd_suite_loop_lines` (lib/cmd-class.sh) puts each word into the path the body runs and
+  # hands back one `bash <path>` line each. The wall prints them and never parses the loop
+  # itself. A `$` the text gives no words for — `$(ls)`, a glob, a prefix assignment — has no
+  # line to print, and neither has a loop whose body reassigns its variable, since its header
+  # is not what runs (wave-24 T26); the detail says so and asks for the lines meant.
   case "$1" in
     *'$'*|*'`'*)
+      local _loop_lines _spell
+      _loop_lines="$(cmd_suite_loop_lines "$COMMAND" 2>/dev/null | sed 's/^/    /')"
+      if [ -n "$_loop_lines" ]; then
+        _spell="Spell each suite literally, one call each — the words of the loop header:
+${_loop_lines}"
+      else
+        _spell="From this text no literal list can be derived: a command substitution, a glob or
+a prefix assignment names no words, and a loop whose body reassigns its variable runs something
+other than the words of its header, so no line is printed for it.
+Write the literal lines you mean, one call each: bash tests/<name>.test.sh"
+      fi
       fold_block exit2 suite-run \
         "$(_budget_wire_fact "unexpanded name; allowed: " suite-run "spell each suite literally" "$2")" \
         "spell each suite literally" \
         "The name as read: $1
 
-This command names its suite with a shell variable, and this wall reads your command
-text BEFORE the shell expands it — so the name never resolves to a suite it can check
-against your budget. It may well be on it; nothing here can tell.
+This wall reads your command text BEFORE the shell expands it, so a suite named by a
+variable never resolves to a name it can check against your budget.
 
-Spell the suite literally, one per call:
-    bash tests/alpha.test.sh
-    bash tests/beta.test.sh
+On the budget: ${2:-(nothing — this brief declared Suites: none)}
 
-On the budget: ${2:-(nothing — this brief declared Suites: none)}"
+${_spell}"
       return 2 ;;
   esac
   fold_block exit2 suite-run \
@@ -5800,13 +5752,11 @@ $(_budget_remedy_line "$1")"
 }
 
 # THE REMEDY LINE (T6, REQ-5, AC-5.2). A refusal that names the budget and not the verb that
-# widens it sent two readers to hunt for it. The plugin root is the tree this library was
-# loaded from — `$BIONIC_LIB` is `<root>/scripts/lib`, and `hooks/session-poker.sh` sits
-# beside `scripts/` in every layout the loader accepts — so the line carries a path the
-# orchestrator can paste, never the `<plugin-root>` placeholder. When the loader's variable
-# is absent the placeholder is the honest fallback. `<name>` is the row's own name, read off
-# the roster by the arm that refuses, when that arm has it — printed as the roster carries it,
-# single-quoted when a shell would split it or act on it (wave-21 T13).
+# widens it sent two readers to hunt for it. The root is `refuse_plugin_root` and each word is
+# `refuse_shell_word`, both in lib/refuse.sh since wave-24 T13 (D10), where the landing
+# refusal reads them too. `<name>` is the row's own name, read off the roster by the arm that
+# refuses, when that arm has it — printed as the roster carries it, single-quoted when a shell
+# would split it or act on it (wave-21 T13).
 #
 # THE FLAG FITS WHAT WAS REFUSED (wave-21 T13; walk-3b45d05 item 4). `amend` widens a suite with
 # `--suites+ <suite>` and a run with `--reexec+ '<cmd>'`. A refused suite FILE — one word, a
@@ -5817,27 +5767,17 @@ $(_budget_remedy_line "$1")"
 # a file named `why` followed by a `>` with no word, so the pasted line was a parse error before
 # `amend` ever read its arguments. `'<why>'` is one word, like `'<cmd>'`.
 _budget_remedy_line() {  # <the refused suite or run>
-  local _root="<plugin-root>" _widen="--reexec+ '<cmd>'"
-  if [ -n "${BIONIC_LIB:-}" ] && [ -d "$BIONIC_LIB/../.." ]; then
-    _root="$(cd "$BIONIC_LIB/../.." 2>/dev/null && pwd)" || _root="<plugin-root>"
-  fi
+  local _widen="--reexec+ '<cmd>'"
   case "${1:-}" in
     *[[:space:]]*) : ;;
-    *.test.sh) _widen="--suites+ $(_budget_shell_word "$1")" ;;
+    *.test.sh) _widen="--suites+ $(refuse_shell_word "$1")" ;;
   esac
-  printf "widen it: bash %s/hooks/session-poker.sh amend %s %s --reason '<why>' (main runs it)" \
-    "$_root" "$(_budget_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
-}
-
-# _budget_shell_word <word> [placeholder] -> <word> as one shell argument: bare when it is made
-# only of characters no shell treats specially, single-quoted otherwise (an embedded `'` closed,
-# escaped and reopened). An empty word prints the placeholder, unquoted.
-_budget_shell_word() {
-  case "${1:-}" in
-    '') printf '%s' "${2:-}" ;;
-    *[!A-Za-z0-9._/@:+=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
-    *) printf '%s' "$1" ;;
-  esac
+  # THE SCRIPT PATH IS ONE WORD (wave-24 T28; critic I2): a plugin root holding a space split
+  # into two arguments when the line was pasted, so the whole path goes through
+  # `refuse_shell_word`, the same quoting the row name gets.
+  printf "widen it: bash %s amend %s %s --reason '<why>' (main runs it)" \
+    "$(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh")" \
+    "$(refuse_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
 }
 
 # THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named
@@ -6028,4 +5968,42 @@ if [ -z "$_BSG_TIMEOUT" ] || [ "$_BSG_TIMEOUT" -lt "$_BSG_MAX" ]; then
 fi
 
 return 0
+}
+
+# ─── wall_memory_store — an engaged session never writes the auto-memory store ─
+#
+# (wave-24-fixit-1811 T12; REQ-3, D16.) The CLI's standing memory directive outranks nothing
+# in a plan, and an engaged orchestrator once obeyed it mid-run: `cd <store> && cat >>
+# <topic>.md <<'EOF' … EOF` then `sed -i` on MEMORY.md, one Bash call, the store's path only
+# in the `cd` (wave-23 A-orch-30). What a run learns belongs where the run can see it — the
+# plan, the reviewer and the next session's walls all read `record/<wave>/assumptions.md`,
+# and none of them reads the store.
+#
+# A PREDICATE OVER TWO FACTS IT IS HANDED (the freeze, .claude/rules/hook-authoring.md).
+# hooks/bash-walls.sh, the collector, resolves both before the fold:
+#   BIONIC_MEM_PROJECTS    `${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/projects`
+#   BIONIC_WRITE_TARGETS   the command's write targets, one per line (cmd-class.sh
+#                          `cmd_write_targets`): resolved, `~`/`$HOME` expanded, `.`/`..` folded
+# Either one empty is "nothing to judge". The store is any `<projects>/*/memory` directory and
+# everything under it; a READ of it never reaches this wall, because a read has no target.
+#
+# ENGAGED SESSIONS ONLY, by where it is called: bash-walls.sh exits before the fold for a
+# session that never invoked the skill. The Write/Edit half is in
+# hooks/canonical-sdlc-governing-skill.sh, on `tool_input.file_path`, with the same words.
+wall_memory_store() {  # <event> -> 0 nothing · 2 block
+  local _mp="${BIONIC_MEM_PROJECTS:-}" _t _hit=""
+  [ -n "$_mp" ] && [ -n "${BIONIC_WRITE_TARGETS:-}" ] || return 0
+  while IFS= read -r _t; do
+    case "$_t" in
+      "$_mp"/*/memory|"$_mp"/*/memory/*) _hit="$_t"; break ;;
+    esac
+  done <<< "$BIONIC_WRITE_TARGETS"
+  [ -n "$_hit" ] || return 0
+  fold_block exit2 write "this writes the memory store" "use record/<wave>/assumptions.md" \
+    "This command writes $_hit, inside the auto-memory store ($_mp/*/memory). An engaged run
+keeps what it learns where the run can see it: a judgment call goes in
+record/<wave>/assumptions.md, and a correction that should outlive the run goes to the user
+as a rule proposal (record/<wave>/user-rules-proposed.md), for the rules file that owns it.
+Nothing that gates or reviews this run reads the store. Reading it stays open."
+  return 2
 }

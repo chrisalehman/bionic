@@ -2025,5 +2025,36 @@ _LG_DIRECT="$(bash -c '. "'"$_LG_LIBDIR"'/units.sh"; . "'"$_LG_LIBDIR"'/stop.sh"
 expect_contains "18g(fold): _lg_row_for_tree itself folds the cell — an explicitly lowercased basename ('slice18g') still matches the plan's mixed-case cell ('Slice18G'), pinned on both filesystem classes" \
   "rc=0 id=T1" "$_LG_DIRECT"
 
+section "§FIX: the undeclared-files refusal prints the amend that declares them (wave-24 T13, D10, AC-6.5)"
+
+# THE REFUSAL THAT NAMED ITS FIX IN PROSE. "Add the file(s) to Files: and re-derive" left the
+# reader to find the verb, its root and its flags. The line is now the command itself: the
+# real plugin root, the row's name and every undeclared path, each one shell word — a path
+# holding a space stays one `--files+` argument, never two.
+#
+# fails-when: a placeholder (`<name>`, `<plugin-root>`) where the value is known, or a path
+# with a space split into two words.
+RFIX="$(make_git_wave_repo rfix)"
+WTFIX=$(make_slice_tree "$RFIX" w-1)
+commit_files "$WTFIX" "in scope" declared/one.sh
+commit_files "$WTFIX" "out of scope" "a b.sh" undeclared/two.sh
+add_row "$RFIX" name=w-1 agent_id="$AID_A" deliverable=.bionic/docs/record/sfix.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$RFIX" .bionic/docs/record/sfix.md
+run_gate "$GATE" "$(stop_payload "$RFIX" "$SID" false)"
+expect_status "FIX1: the diff outside Files: refuses" "2" "$RC"
+FIX_LINE="$(printf '%s\n' "$OUT_VSTDERR" | /usr/bin/grep -m1 -F 'session-poker.sh amend' || true)"
+expect_true "FIX2: …and the refusal carries an amend line" test -n "$FIX_LINE"
+expect_contains "FIX3: …naming the row and the spaced path as ONE quoted word" \
+  "session-poker.sh amend 'w-1' --files+ 'a b.sh' --files+ 'undeclared/two.sh' --reason '" "$FIX_LINE"
+expect_absent "FIX4: …never the declared path" "declared/one.sh'" "$FIX_LINE"
+FIX_ROOT="$(printf '%s\n' "$FIX_LINE" | sed -n 's/.*bash \(.*\)\/hooks\/session-poker\.sh amend .*/\1/p')"
+expect_true "FIX5: …rooted at a real plugin root that holds the poker" test -f "$FIX_ROOT/hooks/session-poker.sh"
+expect_absent "FIX6: …with no placeholder where the value is known" "<" "$FIX_LINE"
+# THE LINE PARSES AS THE WORDS IT MEANS: a shell reads it back into exactly these arguments.
+FIX_ARGV="$(bash -c 'eval "set -- ${1#*session-poker.sh }"; printf "[%s]" "$@"' _ "$FIX_LINE" 2>&1)"
+expect_contains "FIX7: …and a shell reads it back as amend, the name, two --files+ paths and a reason" \
+  "[amend][w-1][--files+][a b.sh][--files+][undeclared/two.sh][--reason][" "$FIX_ARGV"
+
 finish
 

@@ -3132,7 +3132,8 @@ s22_set_budget() {
     "$plan" > "$plan.tmp" && mv "$plan.tmp" "$plan"
 }
 
-# s22_roster_row <repo> <sid> <name> [claims] — one launch row in the shipped schema.
+# s22_roster_row <repo> <sid> <name> [claims] [subagent_type] — one launch row in the shipped
+# schema; the type defaults to `implementor`, the writer every earlier section planted.
 s22_roster_row() {
   local f; f="$(roster_path "$1" "$2")"
   mkdir -p "$(dirname "$f")"
@@ -3140,7 +3141,7 @@ s22_roster_row() {
   # `claims=` and nothing else, and `roster_row_no_plan` is the shape this fixture has
   # always had (tests/lib/roster-row.sh, S14).
   roster_row_no_plan status=intended "session=$2" "name=$3" agent_id= \
-    launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
+    launched_at=2026-09-02T00:00:00Z "subagent_type=${5:-implementor}" model= \
     "deliverable=/tmp/d-$3" source=declared "duration=~10 minutes" progress= \
     "claims=${4:-}" cadence= absent= waiver= "tool_use_id=t-$3" >> "$f"
 }
@@ -5932,10 +5933,14 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # prompt-only line, a blank, the pointer — and the variable part is unmoved. The meta row
 # below holds the scaffold at nine lines, so the next line added to it moves this cap on
 # purpose rather than by surprise.
-expect_eq "§combined meta: the shipped scaffold is nine lines, the count both caps are built on" \
-  "9" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
-expect_status "§combined …the wire is at most 17 lines (13 + 1 extra fault + 3 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 17 ] && echo 0 || echo 1)"
+#
+# RAISED 17 -> 18 (wave-24 T9, REQ-4 AC-4.8, A-T9.12), by that clause: the scaffold gained the
+# optional `Done marker:` line. The FIXED part is fourteen — one refusal line, a blank, TEN
+# scaffold lines, the prompt-only line, a blank, the pointer — and the variable part is unmoved.
+expect_eq "§combined meta: the shipped scaffold is ten lines, the count both caps are built on" \
+  "10" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
+expect_status "§combined …the wire is at most 18 lines (14 + 1 extra fault + 3 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 18 ] && echo 0 || echo 1)"
 expect_contains "§combined …and the fixed line that grew it is the prompt-only sentence" \
   "The wall reads the prompt text only." "$GATE_REASON"
 # AND THE THIRD LINE IS THE NEW WALL'S, NAMED — a cap raised without saying which line
@@ -6917,14 +6922,16 @@ expect_contains "§three-arms …and the brief-shape fault" \
 # scaffold. Three faults, no not-checked line: twelve plus two.
 # The fixed part is THIRTEEN since wave-21 T7 (AC-7.2): the scaffold's ninth line is the
 # optional `Subprocess claim:` (§combined holds the nine). Three faults: thirteen plus two.
-expect_status "§three-arms …and the wire is at most 15 lines (13 + one per additional fault)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 15 ] && echo 0 || echo 1)"
+# The fixed part is FOURTEEN since wave-24 T9 (AC-4.8): the scaffold's tenth line is the
+# optional `Done marker:` (§combined holds the ten). Three faults: fourteen plus two.
+expect_status "§three-arms …and the wire is at most 16 lines (14 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 16 ] && echo 0 || echo 1)"
 # NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
-# MOVED WITH THE FIXED PART (wave-21 T7): a wire that grew by nothing is thirteen lines now,
-# so the floor that proves growth is fourteen.
-expect_status "§three-arms …and it really grew: more than the thirteen-line fixed part" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 14 ] && echo 0 || echo 1)"
+# MOVED WITH THE FIXED PART (wave-21 T7; again at wave-24 T9): a wire that grew by nothing is
+# fourteen lines now, so the floor that proves growth is fifteen.
+expect_status "§three-arms …and it really grew: more than the fourteen-line fixed part" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 15 ] && echo 0 || echo 1)"
 # THE SHAPE BANS OF WAVE-13 STAND: no per-fault heading, no fault-count sentence, no
 # stacked `Fix:` paragraphs. One line per fault is a LINE, not a section.
 expect_absent "§three-arms …no fault-count header sentence" "SHAPE FAULTS" "$GATE_REASON"
@@ -8554,11 +8561,403 @@ expect_absent "brief-lib …never a finding" "finding:" "$BV"
 
 printf '#!/bin/bash\nsleep 8\n' > "$BRIEF_CONF/stub-impact.sh"
 BV=$(IMPACT_BOUND_S=1 brief_verdict implementor "$BRIEF_CONF" "Files: payload/scripts/lib/widget.sh")
-expect_contains "brief-lib a derivation past its bound is a finding" "finding: the impact command did not answer" "$BV"
+expect_contains "brief-lib a derivation past its bound is a finding" "finding: the impact command timed out after 1 s" "$BV"
 expect_contains "brief-lib …answered rc=2, so the door knows the suite set was never built" "rc=2" "$BV"
 
 expect_eq "brief-lib brief_field hands back the Files: set as the row stores it" \
   "payload/a.sh,payload/b.sh" \
   "$(bash -c '. "$1" || exit 9; brief_field "$(lift_contract_fields "Files: payload/a.sh, payload/b.sh")" files' _ "$BRIEF_LIB" 2>&1)"
+
+# ============================================================================
+section "§ADV — the brief body is read for a run or a write the contract never declared (wave-24 T14; REQ-8, D13)"
+# ============================================================================
+#
+# Nothing used to read the body: `lift_contract_fields` takes labelled lines only, so a brief
+# that says "run bash tests/foo.test.sh" under `Suites: tests/widget.test.sh` was admitted and
+# the agent was refused at its first command, minutes later. D13 makes the dispatch say so
+# while the author is still holding the brief — an ADVISORY (a WARN on the pass path, with the
+# `amend` line that would declare the run), never a refusal: the research corpus had 0 true
+# positives in 202 briefs, so the exit code is not the advisory's to change (AC-8.4).
+#
+# fails-when: the undeclared run is not named with its declaring line, or the advisory changes
+# the verdict, or the declared suite beside it is advised about as well.
+
+adv_brief() {  # <body lines> -> BRIEF_FULL's contract with the given body lines before Suites:
+  printf 'Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · audited · wave.
+Your task: implement the widget behind the existing seam.
+%s
+Expected artifact: .bionic/docs/record/w99-widget.txt
+Exit condition: the artifact exists and the paired suite is green.
+Expected duration: ~25 minutes.
+Progress artifact: .bionic/tmp/w99-widget.progress
+Files: payload/scripts/lib/widget.sh
+Suites: tests/widget.test.sh' "$1"
+}
+
+# adv_ctx -> the model-facing advisory text of the last gate run, `` when stdout carries none.
+# THE ADVISORY RIDES `hookSpecificOutput.additionalContext` on stdout (A-orch-20), so it is read
+# through `jq` like the harness reads it; a stdout that is not one parseable object reads as empty.
+adv_ctx() { printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+adv_objects() { printf '%s' "$GATE_OUT" | jq -s 'length' 2>/dev/null; }
+
+REPO=$(make_repo advbase yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Scope constraint: touch only payload/scripts/lib/widget.sh.')" "w99-adv")"
+ADV_BASE_VERDICT="$GATE_VERDICT"; ADV_BASE_ST="$GATE_ST"; ADV_BASE_OUT="$GATE_OUT"
+expect_eq "ADV the brief with no body run is admitted" "allow" "$ADV_BASE_VERDICT"
+expect_empty "ADV …and prints nothing on stdout" "$GATE_OUT"
+expect_absent "ADV …nor on stderr" "the brief body" "$GATE_ERR"
+
+REPO=$(make_repo advrun yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'When the seam is in, run `bash tests/foo.test.sh` and report the count.
+Then `bash tests/widget.test.sh` for the paired suite.
+bash tests/bar.test.sh
+cd /x/tree && bash tests/baz.test.sh')" "w99-adv")"
+expect_eq "ADV an undeclared body run is still ADMITTED (AC-8.4)" "$ADV_BASE_VERDICT" "$GATE_VERDICT"
+expect_eq "ADV …with the exit status the no-advisory brief had (AC-8.4)" "$ADV_BASE_ST" "$GATE_ST"
+expect_eq "ADV …stdout is ONE parseable JSON object" "1" "$(adv_objects)"
+expect_eq "ADV …on the model's channel, a PreToolUse additionalContext" "PreToolUse" \
+  "$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.hookEventName // ""' 2>/dev/null)"
+expect_eq "ADV …that carries no verdict (no permissionDecision)" "" \
+  "$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.permissionDecision // ""' 2>/dev/null)"
+expect_absent "ADV …and the advisory is not also on stderr" "the brief body" "$GATE_ERR"
+ADV_CTX=$(adv_ctx)
+expect_contains "ADV the advisory names the undeclared suite (AC-8.1)" "foo.test.sh" "$ADV_CTX"
+expect_contains "ADV …and the declaring line" 'run `bash tests/foo.test.sh` and report the count' "$ADV_CTX"
+expect_contains "ADV …as the amend line that declares it" "amend w99-adv --suites+ foo.test.sh" "$ADV_CTX"
+expect_contains "ADV …a bare command line is read the same way" "amend w99-adv --suites+ bar.test.sh" "$ADV_CTX"
+expect_contains "ADV …and one behind a cd prefix" "amend w99-adv --suites+ baz.test.sh" "$ADV_CTX"
+expect_absent "ADV …while the declared suite is not advised about" "--suites+ widget.test.sh" "$ADV_CTX"
+expect_status "ADV …and the launch was journalled as usual" \
+  "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ============================================================================
+section "§ADV-quiet — the same text in an excluded region is not an advisory (AC-8.2)"
+# ============================================================================
+# One brief, one positive control: `pos.test.sh` sits on a plain line and MUST be advised, so an
+# empty stderr cannot be a dead reader; every other name sits in a region the predicate skips.
+REPO=$(make_repo advquiet yes)
+write_attestation "$REPO" "$SID_A"
+ADVQ_BODY='Read first: run `bash tests/rf.test.sh` to see the baseline
+  and `bash tests/rf2.test.sh` on the line after it.
+Never run `bash tests/nev.test.sh` here.
+Please do not run bash tests/dn.test.sh either.
+Example only, e.g. `bash tests/eg.test.sh`.
+
+```
+bash tests/fence.test.sh
+```
+
+    bash tests/ind.test.sh
+
+Run `bash tests/pos.test.sh` last.'
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief "$ADVQ_BODY")" "w99-advq")"
+ADV_CTX=$(adv_ctx)
+expect_eq "ADV-quiet the brief is admitted" "allow" "$GATE_VERDICT"
+expect_eq "ADV-quiet …with one parseable object on stdout" "1" "$(adv_objects)"
+expect_contains "ADV-quiet the control line IS advised (the reader works)" "--suites+ pos.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet Read first: is not advised" "rf.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet …nor its continuation line" "rf2.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet a never-line is not advised" "nev.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet a do-not line is not advised" "dn.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet an e.g. line is not advised" "eg.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet a fenced block is not advised" "fence.test.sh" "$ADV_CTX"
+expect_absent "ADV-quiet a 4-space-indented block is not advised" "ind.test.sh" "$ADV_CTX"
+
+# ============================================================================
+section "§ADV-files — an imperative edit of a path outside Files: is advised (AC-8.3)"
+# ============================================================================
+# Same shape: `other.sh` is the positive control, everything else is a shape the strict
+# predicate leaves alone (declared, record file, no path object, a never-line, a mention).
+REPO=$(make_repo advfiles yes)
+write_attestation "$REPO" "$SID_A"
+ADVF_BODY='Edit payload/scripts/lib/other.sh to add the seam.
+Update payload/scripts/lib/widget.sh with the new field.
+Update .bionic/docs/record/w99/notes.md when you finish.
+Fix the failing assertion in the paired suite.
+Never edit payload/scripts/lib/nev.sh from here.
+The old shape lives in payload/scripts/lib/mention.sh and stays as it is.
+Rewrite the `payload/scripts/lib/quoted.sh` helper if it blocks you.
+
+```
+Modify payload/scripts/lib/fence.sh
+```'
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief "$ADVF_BODY")" "w99-advf")"
+ADV_CTX=$(adv_ctx)
+expect_eq "ADV-files the brief is admitted" "allow" "$GATE_VERDICT"
+expect_eq "ADV-files …with ONE parseable object on stdout, the advisory inside its additionalContext" "1" "$(adv_objects)"
+expect_eq "ADV-files …with exit 0 (AC-8.4)" "0" "$GATE_ST"
+expect_contains "ADV-files an edit outside Files: is advised, with its amend line" \
+  "amend w99-advf --files+ payload/scripts/lib/other.sh" "$ADV_CTX"
+expect_contains "ADV-files …naming the declaring line" "Edit payload/scripts/lib/other.sh to add the seam" "$ADV_CTX"
+expect_contains "ADV-files a backticked object is read" "--files+ payload/scripts/lib/quoted.sh" "$ADV_CTX"
+expect_absent "ADV-files a path inside Files: is not advised" "--files+ payload/scripts/lib/widget.sh" "$ADV_CTX"
+expect_absent "ADV-files a record path is not advised" "notes.md" "$ADV_CTX"
+expect_absent "ADV-files a never-line is not advised" "nev.sh" "$ADV_CTX"
+expect_absent "ADV-files a plain mention is not advised" "mention.sh" "$ADV_CTX"
+expect_absent "ADV-files a fenced block is not advised" "fence.sh" "$ADV_CTX"
+expect_absent "ADV-files an edit with no path object is not advised" "failing assertion" "$ADV_CTX"
+
+# ================================== §RO / §TR: THE ROLE DECIDES WHAT A ROW COSTS
+# (wave-24 T10; REQ-7 AC-7.1, AC-7.2; D11, research R4 §1)
+#
+# A read-only role writes nothing, so it holds no WRITER slot, and an incoming read-only
+# dispatch asks for none (no +1). A `bionic:test-runner` is the one read-only role that runs a
+# suite, so it holds a SUITE slot whether or not its brief declared a `Subprocess claim:`.
+
+section "§RO — a read-only role leaves the writer count and asks for no slot (AC-7.1)"
+
+ro_budget_repo() {  # <name> <budget line> -> repo with a plan, an attestation and that budget
+  local r; r=$(make_repo "$1" yes)
+  write_attestation "$r" "$SID_A"
+  s22_set_budget "$r" "$2"
+  printf '%s' "$r"
+}
+RO_NONE="$SANDBOX/.ro-none.jsonl"
+mk_transcript "$RO_NONE" none
+
+# ro1 — a read-only dispatch at open == writers is ADMITTED; the paired control is a writer.
+REPO=$(ro_budget_repo ro1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro1-r" "claude-sonnet-5" "$RO_NONE" "bionic:researcher")"
+expect_eq "ro1 one writer open against writers=1 → a researcher dispatch is ADMITTED (no +1)" "allow" "$GATE_VERDICT"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "ro1c …and the same roster REFUSES a writer (the control)" "deny" "$GATE_VERDICT"
+expect_contains "ro1c …at the writer count" "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
+
+# ro2 — a read-only ROW holds no writer slot: a writer is admitted past it, on a dark panel and
+# on a fresh one that lists it.
+REPO=$(ro_budget_repo ro2 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro2-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "ro2 one researcher open against writers=1, dark panel → a writer is ADMITTED" "allow" "$GATE_VERDICT"
+RO_LIVE="$SANDBOX/.ro-live.jsonl"
+mk_transcript "$RO_LIVE" fresh R-ONE
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro2-w2" "claude-sonnet-5" "$RO_LIVE" "implementor")"
+expect_eq "ro2b …and with the researcher LISTED on a fresh panel" "allow" "$GATE_VERDICT"
+
+# ro3 — the exclusion is per row: a researcher and a writer open, writers=1, a writer is
+# refused and the count it names is the writer's alone.
+REPO=$(ro_budget_repo ro3 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro3-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "ro3 researcher + writer open against writers=1 → a writer is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "ro3 …open counts the writer and not the researcher" \
+  "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
+
+# ro4 — the exclusion does not leak: a bare `researcher`, an unknown type and an empty type are
+# writers (role_is_readonly is an allow-list), so each holds the slot.
+_ro=0
+for _t in researcher acme:helper general-purpose ""; do
+  _ro=$((_ro + 1))
+  REPO=$(ro_budget_repo "ro4-$_ro" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+  s22_roster_row "$REPO" "$SID_A" "X-ONE" "" "$_t"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro4-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+  expect_eq "ro4 an open row of type '${_t:-<empty>}' still holds a writer slot → a writer is REFUSED" "deny" "$GATE_VERDICT"
+  expect_contains "ro4 …counted open=1" "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
+done
+
+# ro5 — a read-only row that declared a claim still holds its SUITE slot (the claim is a fact
+# about what it runs, not about what it writes).
+REPO=$(ro_budget_repo ro5 "writers=9 suites=1 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "bash tests/run.sh" "bionic:researcher"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro5-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "ro5 a claim-declaring researcher against suites=1 → REFUSED on the suite count" "deny" "$GATE_VERDICT"
+expect_contains "ro5 …claimed=1" "suites: budget=1 claimed=1 with-this-dispatch=2" "$GATE_VERR"
+
+# ro6 — a read-only row CLOSED by an ack on a dark panel gives nothing back it never held:
+# the writer count stays what the open writers say.
+REPO=$(ro_budget_repo ro6 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+s22_ack "$REPO" "$SID_A" "R-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "ro6-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "ro6 an acked researcher and an open writer against writers=1 → a writer is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "ro6 …open=1, not 0 (the ack did not subtract a slot the researcher never held)" \
+  "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
+
+section "§TR — a test-runner row holds a suite slot, claim or no claim (AC-7.2)"
+
+# tr1 — suites=2, two claim-less test-runner rows, a third dispatch is REFUSED.
+REPO=$(ro_budget_repo tr1 "writers=9 suites=2 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "T-ONE" "" "bionic:test-runner"
+s22_roster_row "$REPO" "$SID_A" "T-TWO" "" "bionic:test-runner"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr1 two claim-less test-runners against suites=2 → the third dispatch is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "tr1 …naming the suite count" "suites: budget=2 claimed=2 with-this-dispatch=3" "$GATE_VERR"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr1-t" "claude-sonnet-5" "$RO_NONE" "bionic:test-runner")"
+expect_eq "tr1b …a third TEST-RUNNER is refused the same way (the incoming +1 is the suite's)" "deny" "$GATE_VERDICT"
+
+# tr2 — the paired controls: one test-runner is under the ceiling; and two claim-less rows of
+# any OTHER role hold no suite slot.
+REPO=$(ro_budget_repo tr2 "writers=9 suites=2 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "T-ONE" "" "bionic:test-runner"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr2-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr2 one test-runner against suites=2 → ADMITTED" "allow" "$GATE_VERDICT"
+REPO=$(ro_budget_repo tr2b "writers=9 suites=2 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
+s22_roster_row "$REPO" "$SID_A" "R-TWO" "" "bionic:auditor"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr2b-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr2b …and claim-less researcher, auditor and writer rows hold no suite slot → ADMITTED" "allow" "$GATE_VERDICT"
+
+# tr3 — a test-runner that ALSO declared a claim is one slot, not two.
+REPO=$(ro_budget_repo tr3 "writers=9 suites=2 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "T-ONE" "bash tests/run.sh" "bionic:test-runner"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr3-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr3 one claim-declaring test-runner against suites=2 → ADMITTED (one slot)" "allow" "$GATE_VERDICT"
+
+# tr4 — a test-runner CLOSED by an ack on a dark panel gives its suite slot back.
+REPO=$(ro_budget_repo tr4 "writers=9 suites=1 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "T-ONE" "" "bionic:test-runner"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr4-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr4 one open test-runner against suites=1 → REFUSED (the control)" "deny" "$GATE_VERDICT"
+s22_ack "$REPO" "$SID_A" "T-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "tr4-w2" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "tr4b …and once acked its suite slot is free → ADMITTED" "allow" "$GATE_VERDICT"
+
+# ================================== §WHY: A REFUSAL SAYS HOW TO GET PAST IT
+# (wave-24 T13; REQ-6 AC-6.7; D10. Chris 2026-10-03: "Why can't it be obvious from the outset
+# how to invoke them properly?")
+#
+# fails-when: the writer-budget refusal names no open row, an impact timeout says "fix
+# impact-command", or a complete brief is shown the blank scaffold.
+section "§WHY — the writer budget names its rows, a timeout says so, a complete brief sees no scaffold (AC-6.7)"
+
+# why1 — the writer-budget refusal lists the open rows it COUNTED, each with the command that
+# closes it. The count is `budget_open_writers`, so a read-only row it did not count is not
+# listed: the positive and the negative read the same reason.
+REPO=$(ro_budget_repo why1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+s22_roster_row "$REPO" "$SID_A" "R-ONE" "" "bionic:researcher"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "why1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "why1 one writer and one researcher open against writers=1 → REFUSED" "deny" "$GATE_VERDICT"
+WHY1_LINE="$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -F 'W-ONE' | /usr/bin/grep -m1 -F 'session-sweeper.sh ack' || true)"
+expect_true "why1 …the reason lists the open writer row with the command that closes it" test -n "$WHY1_LINE"
+expect_contains "why1 …the command is the ack verb on that name" "session-sweeper.sh ack 'W-ONE'" "$WHY1_LINE"
+WHY1_ROOT="$(printf '%s\n' "$WHY1_LINE" | sed -n 's/.*bash \(.*\)\/session-sweeper\.sh ack .*/\1/p')"
+expect_true "why1 …rooted at the real hooks directory" test -f "$WHY1_ROOT/session-sweeper.sh"
+expect_absent "why1 …and never the read-only row it did not count" "R-ONE" "$GATE_REASON"
+expect_absent "why1 …and no placeholder root anywhere in the reason" "<plugin-root>" "$GATE_REASON"
+
+# why2 — the impact finding: a bound that expired says "timed out after N s", and its fix is
+# not "fix impact-command" — the command may be fine and the brief too wide. A command that
+# FAILED is a different sentence, naming its exit status, and never a timeout.
+why_brief() {  # <bound or ""> -> the sink's finding/warn lines, with the fix beside the fact
+  bash -c '
+    . "$1" || exit 9
+    sink() { case "$1" in finding) printf "finding: %s (%s)\n" "$2" "$3" ;; warn) printf "warn: %s\n" "$2" ;; esac; }
+    rc=0
+    brief_validate_fields "$(lift_contract_fields "Files: payload/scripts/lib/widget.sh" implementor)" implementor "$2" sink || rc=$?
+    printf "rc=%s\n" "$rc"
+  ' _ "$BRIEF_LIB" "$BRIEF_CONF" 2>&1
+}
+printf '#!/bin/bash\nsleep 8\n' > "$BRIEF_CONF/stub-impact.sh"
+WHY2="$(IMPACT_BOUND_S=1 why_brief)"
+expect_contains "why2 a derivation past its bound says it timed out, and after how long" \
+  "finding: the impact command timed out after 1 s" "$WHY2"
+expect_absent "why2 …never 'fix impact-command' for a command that may be fine" "fix impact-command" "$WHY2"
+expect_contains "why2 …still rc=2, so the door knows the suite set was never built" "rc=2" "$WHY2"
+printf '#!/bin/bash\nexit 3\n' > "$BRIEF_CONF/stub-impact.sh"
+WHY2F="$(why_brief)"
+expect_contains "why2f a command that FAILED names its exit status" "the impact command failed (exit 3)" "$WHY2F"
+expect_absent "why2f …and is never called a timeout" "timed out" "$WHY2F"
+
+# why3 — a several-fault refusal whose brief already carries every scaffold line shows no
+# scaffold: it would tell the author to add nothing. Two faults on a complete brief: the writer
+# budget and the name in flight. The control is the same two faults on a brief missing one
+# line, which still carries the marked scaffold.
+REPO=$(ro_budget_repo why3 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "W-ONE" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "why3 two faults on a complete brief → REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "why3 …the reason carries the second fault's line" "that name is in flight" "$GATE_REASON"
+expect_absent "why3 …and no blank scaffold line" "Expected duration: <N> minutes" "$GATE_REASON"
+expect_absent "why3 …and no <ADD> mark" "<ADD>" "$GATE_REASON"
+WHY3_PARTIAL="$(printf '%s\n' "$BRIEF_FULL" | /usr/bin/grep -v '^Expected duration:')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$WHY3_PARTIAL" "W-ONE" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "why3c the same faults on a brief missing a line → REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "why3c …and the scaffold marks the line it lacks" "Expected duration: <N> minutes <ADD>" "$GATE_REASON"
+
+
+# ============================================================================
+section "§DONE-lift — the brief's Done marker is lifted to the roster as done= (wave-24 T9; REQ-4 AC-4.8, D3)"
+# ============================================================================
+#
+# The landing verdict reads `done=` as one of the completion signals (hooks/session-sweeper.sh
+# `row_said`). The lift carries `Done marker:` at line start; a slot or a prose mention declares
+# nothing.
+# fails-when: the label does not lift, or a scaffold slot or a mid-line mention lifts as a marker.
+lift_done() { bash -c '. "$1" || exit 9; lift_contract_fields "$2" | grep "^done="' _ "$BRIEF_LIB" "$1"; }
+expect_eq "DL1 a Done marker line lifts as done=" "done=.bionic/docs/record/w99.done" \
+  "$(lift_done 'Expected artifact: .bionic/docs/record/w99.md
+Done marker: .bionic/docs/record/w99.done
+Files: payload/scripts/lib/widget.sh')"
+expect_eq "DL2 …the scaffold slot, pasted unfilled, lifts none" "" \
+  "$(lift_done 'Expected artifact: .bionic/docs/record/w99.md
+Done marker: <path>   # optional
+Files: payload/scripts/lib/widget.sh')"
+expect_eq "DL3 …nor does a mention that is not at the start of its line" "" \
+  "$(lift_done 'Expected artifact: .bionic/docs/record/w99.md
+
+Note: touch the done marker: .bionic/tmp/w99.done when finished.
+Files: payload/scripts/lib/widget.sh')"
+
+# THROUGH THE WALL: the lifted marker is on the launch row the verdict reads, and a brief that
+# names none writes a row with no `done=` key at all (byte-identical to the rows before T9).
+REPO=$(make_repo dldone yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Done marker: .bionic/tmp/w99-widget.done')" "w99-done")"
+DL_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "DL4 a brief naming a Done marker is admitted" "allow" "$GATE_VERDICT"
+expect_eq "DL4b …and its launch row carries it as done=" ".bionic/tmp/w99-widget.done" "$(roster_field "$DL_ROW" done)"
+REPO=$(make_repo dlnodone yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'Scope constraint: touch only payload/scripts/lib/widget.sh.')" "w99-nodone")"
+DL_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_contains "DL5 a brief naming no Done marker writes its launch row" "status=intended" "$DL_ROW"
+expect_absent "DL5b …with no done= key on it" "|done=" "$DL_ROW"
+
+# ============================================================================
+section "§ROOT — a printed fix line under a plugin root with a space pastes as one argument per word (wave-24 T29; critic I2; AC-6.5)"
+# ============================================================================
+#
+# The writer-budget refusal's ack line and the advisory's amend line printed the hooks path
+# bare, so a plugin root with a space (a `--plugin-dir` checkout under `~/My Projects/`, a
+# config dir with a space) split into two words when pasted. The gate here runs from a COPY of
+# the payload under `<sandbox>/my plugin/`, the layout an installed plugin has, so the root the
+# lines print is one with a space in it. Each line is parsed the way a pasting shell reads it
+# (`eval set --`, nothing executed) and the script path must come back as ONE argument.
+# fails-when: the printed script path splits at the space.
+root_args() { eval "set -- $1"; printf '%s\n' "$@"; }  # <command text> -> its words, one per line
+ROOT_SP="$SANDBOX/my plugin"
+cp -RL "${BIONIC_SCRIPTS_DIR}/payload" "$ROOT_SP"
+ROOT_GATE_SAVED="$GATE"; GATE="$ROOT_SP/hooks/dispatch-preflight.sh"
+expect_true "root0 the gate under test is the copy under a root with a space" test -f "$GATE"
+
+REPO=$(ro_budget_repo root1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "root1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "root1 one open writer against writers=1 → REFUSED" "deny" "$GATE_VERDICT"
+ROOT1_LINE="$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -F 'W-ONE' | /usr/bin/grep -m1 -F 'session-sweeper.sh' || true)"
+expect_true "root1 …the reason carries the ack line" test -n "$ROOT1_LINE"
+ROOT1_ARGS="$(root_args "${ROOT1_LINE#*close it: }")"
+expect_eq "root1 …which parses as bash, the script, ack and the name" "4" "$(printf '%s\n' "$ROOT1_ARGS" | /usr/bin/grep -c '')"
+expect_contains "root1 …its script path is one argument, space and all" "my plugin/hooks/session-sweeper.sh" "$(printf '%s\n' "$ROOT1_ARGS" | sed -n 2p)"
+expect_true "root1 …naming the real file" test -f "$(printf '%s\n' "$ROOT1_ARGS" | sed -n 2p)"
+
+REPO=$(make_repo rootadv yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'When the seam is in, run `bash tests/foo.test.sh` and report the count.')" "w99-adv")"
+ROOT2_LINE="$(adv_ctx | /usr/bin/grep -m1 -F -- '--suites+ foo.test.sh' || true)"
+expect_true "root2 the advisory prints the amend line" test -n "$ROOT2_LINE"
+ROOT2_ARGS="$(root_args "${ROOT2_LINE#*to declare it: }")"
+expect_eq "root2 …which parses as bash, the script, amend, the name, the flag, the suite, --reason, why" "8" "$(printf '%s\n' "$ROOT2_ARGS" | /usr/bin/grep -c '')"
+expect_contains "root2 …its script path is one argument, space and all" "my plugin/hooks/session-poker.sh" "$(printf '%s\n' "$ROOT2_ARGS" | sed -n 2p)"
+expect_true "root2 …naming the real file" test -f "$(printf '%s\n' "$ROOT2_ARGS" | sed -n 2p)"
+GATE="$ROOT_GATE_SAVED"
+
 
 finish

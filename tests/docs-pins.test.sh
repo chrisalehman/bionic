@@ -911,7 +911,7 @@ section "Section 6: Step 8's tmp wipe spares session-keyed state"
 # THE FIELD NAME `tmp-wiped:` IS DELIBERATELY UNTOUCHED (§Evidence, step 8 row). It is an
 # evidence key the gate parses, not prose; renaming it would be an interface change and is
 # not what the finding asked for.
-PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the six \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
+PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the seven \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`/\`tick-digest\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
 PIN_TMP_BLANKET='wipe `.bionic/tmp/*`;'
 
 if has_pin "$STEP8_MD" "$PIN_TMP_SPARE"; then
@@ -4163,5 +4163,138 @@ while IFS=$'\t' read -r _d2_file _d2_phrase; do
   fi
 done < "$D2_ROWS_FILE"
 expect_true "D2-count: 34 landed rows plus the card-format rule were read (35)" test "$d2_i" -eq 35
+
+section "Section HOLD: wave-24 T7 — the stand-down's standing answer is named where the duty is (REQ-4, AC-4.12; D1, D5)"
+#
+# `hold` that only the usage text knew would be a verb nobody runs: the duty is met where it is
+# read — the dispatch doctrine (source and render) and the Patrol prompt the cron job carries.
+# The stand-down refusal's own text is the stop wall's (payload/scripts/lib/stop.sh), pinned with
+# that file's owner.
+# ONE wording for the doctrine and the prompt (wave-24 T27/T29, critic I4): NAME and a quoted
+# reason, because a bare `<name>` or `<reason>` pastes as a redirect from a file of that name.
+PIN_HOLD_VERB="session-poker.sh hold NAME 'why it stays up'"
+PIN_HOLD_LIST='`ListAgents` only when the roster has an open row'
+HOLD_BLOCK="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
+for _hold_f in "$DISPATCH_MD" "$HOLD_BLOCK"; do
+  if has_pin "$_hold_f" "$PIN_HOLD_VERB"; then
+    ok "HOLD-a: ${_hold_f#"$REPO"/} names the hold verb beside the stand-down duty"
+  else
+    no "HOLD-a: ${_hold_f#"$REPO"/} names the hold verb beside the stand-down duty" "file: $_hold_f"
+  fi
+  if has_pin "$_hold_f" "$PIN_HOLD_LIST"; then
+    ok "HOLD-b: ${_hold_f#"$REPO"/} asks for ListAgents only with an open row"
+  else
+    no "HOLD-b: ${_hold_f#"$REPO"/} asks for ListAgents only with an open row" "file: $_hold_f"
+  fi
+done
+HOLD_PROMPT="$(CLAUDE_CODE_SESSION_ID=0123456789abcdef bash "$POKER_SH" prompt 2>/dev/null)"
+expect_nonempty "HOLD-c precondition: the poker printed its Patrol prompt" "$HOLD_PROMPT"
+# THE PROMPT'S HOLD LINE PASTES AS ONE COMMAND (wave-24 T27; critic I4): the reason is a quoted
+# placeholder, never a bare `<reason>` a shell reads as a redirect. The doctrine (HOLD-a) prints
+# the same words since w24-T29, so one pin serves both.
+expect_contains "HOLD-c: the Patrol prompt names the hold verb, its reason a quoted placeholder" "$PIN_HOLD_VERB" "$HOLD_PROMPT"
+# The retired ask must be gone from the doctrine too: "ListAgents, before the tick" every tick.
+expect_eq "HOLD-d: the unconditional 'before the tick' ListAgents line is gone from dispatch.md" "0" \
+  "$(grep -c 'ListAgents`, before the tick, for a fresh answer' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+expect_eq "HOLD-d2: …and the pattern finds the shape it targets" "1" \
+  "$(printf -- '- **List the panel.** `ListAgents`, before the tick, for a fresh answer.\n' | grep -c 'ListAgents`, before the tick, for a fresh answer' | tr -cd '0-9')"
+
+section "Section VERB: wave-24 T15 — the steps name the plan-row verbs where they told a hand edit (REQ-9, AC-9.8; D14)"
+#
+# A verb only the usage text knew would be a verb nobody types: the step that tells the run to
+# move `current:`, write a step line, set a row's cells or ledger a dispatch names the verb that
+# does it, in the template and in its render. Each retired hand-edit sentence is gone, with a
+# control that its pattern finds the shape it targets, and each verb the doctrine names is one
+# the poker accepts — a renamed verb fails here rather than in a run.
+VERB_BLOCK="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
+VERB_S3_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/steps/3.md.tmpl"
+VERB_S5_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl"
+verb_pin() {  # <id> <needle> <file>…
+  local id="$1" needle="$2" f; shift 2
+  for f in "$@"; do
+    if has_pin "$f" "$needle"; then ok "$id: ${f#"$REPO"/} names $needle"
+    else no "$id: ${f#"$REPO"/} names $needle" "file: $f"; fi
+  done
+}
+verb_pin VERB-a '`task-set <id> status=active`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-b '`step-line`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-c '`current <N>`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-d '`ledger-add`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-e '`ledger-set`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-f '`session-poker.sh current <N>`' "$STEP3_MD" "$VERB_S3_TMPL"
+verb_pin VERB-g '`task-set <id> worktree=<tree>`' "$STEP3_MD" "$VERB_S3_TMPL"
+verb_pin VERB-g2 '`step-line <N> <text>`' "$STEP3_MD" "$VERB_S3_TMPL"
+verb_pin VERB-h '`session-poker.sh current 6`' "$STEP5_MD" "$VERB_S5_TMPL"
+# The retired sentences, each beside a control that its pattern matches the sentence it was.
+verb_gone() {  # <id> <needle> <the old sentence> <file>
+  expect_eq "$1: ${4#"$REPO"/} no longer tells the hand edit" "0" \
+    "$(_flatten "$4" | grep -cF -- "$2" | tr -cd '0-9')"
+  expect_eq "$1c: …and the pattern finds the shape it targets" "1" \
+    "$(printf '%s\n' "$3" | grep -cF -- "$2" | tr -cd '0-9')"
+}
+verb_gone VERB-i 'bump `current:` and replace the line in place' \
+  'one `Step N: <evidence>` line per step; bump `current:` and replace the line in place when advancing.' "$STEP3_MD"
+verb_gone VERB-j "Write the tree's name into the row's" \
+  "Write the tree's name into the row's \`worktree\` cell as you create the tree." "$STEP3_MD"
+verb_gone VERB-k "Write the unit's row the moment you dispatch it" \
+  "Write the unit's row the moment you dispatch it, status \`active\`." "$DISPATCH_MD"
+verb_gone VERB-l 'Probe it before advancing with' \
+  'Probe it before advancing with `git commit --dry-run --allow-empty`: every wall runs, nothing is written.' "$STEP5_MD"
+for _vv in task-set step-line current ledger-add ledger-set; do
+  _vout="$(CLAUDE_CODE_SESSION_ID=0123456789abcdef bash "$POKER_SH" "$_vv" 2>&1)"
+  expect_nonempty "VERB-m precondition: the poker answered $_vv" "$_vout"
+  expect_absent "VERB-m: the poker accepts the documented verb $_vv" "unknown verb" "$_vout"
+done
+
+section "Section SEMVER: wave-24 T18 — one versioning policy, in identical lines, in CLAUDE.md and the CHANGELOG header; the newest entry is plugin.json's version (REQ-11, AC-11.1/AC-11.2; D19)"
+#
+# WHAT THIS OWNS. From 1.9.0 bionic versions by semver, and the policy is stated twice: in the
+# repo CLAUDE.md, which a session working here reads, and in the CHANGELOG's header, which a user
+# reads. AC-11.2 fails when either lacks it or the two disagree, so the block is extracted from
+# each file by one reader and compared byte for byte. The block opens on its lead line and runs to
+# the first blank line. The CHANGELOG is also a version surface (AC-11.1): its newest entry's
+# heading must name plugin.json's version, which Section 1 and AC-17 do not read.
+SEMVER_CLAUDE="${REPO}/CLAUDE.md"
+SEMVER_CHANGELOG="${REPO}/CHANGELOG.md"
+# semver_block <file> -> the policy lines, from "Versioning follows semver" to the first blank line.
+semver_block() { awk '/^Versioning follows semver/ { p = 1 } p && /^$/ { exit } p' "$1" 2>/dev/null; }
+# changelog_head_version <file> -> the version on the first "## <version> — <date>" heading.
+changelog_head_version() { awk '/^## [0-9]/ { print $2; exit }' "$1" 2>/dev/null; }
+# first_line_of <file> <ERE> -> the line number of the first match, empty when none.
+first_line_of() { grep -nE -- "$2" "$1" 2>/dev/null | head -1 | cut -d: -f1; }
+
+SV_CLAUDE="$(semver_block "$SEMVER_CLAUDE")"
+SV_CHANGELOG="$(semver_block "$SEMVER_CHANGELOG")"
+expect_nonempty "SEMVER-1: CLAUDE.md carries the versioning policy block" "$SV_CLAUDE"
+expect_nonempty "SEMVER-2: CHANGELOG.md carries the versioning policy block" "$SV_CHANGELOG"
+SV_FLAT="$(printf '%s\n' "$SV_CLAUDE" | tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g')"
+for _sv in \
+  '**MAJOR** for a change that breaks a documented contract a user or project already relies on' \
+  'a removed verb or field, a `canonical_sdlc_version` bump, an artifact a user must migrate' \
+  '**MINOR** for new capability or a behaviour a user notices, including a newly refused action or an upgrade step' \
+  '**PATCH** for a fix within existing behaviour'; do
+  expect_contains "SEMVER-3: the policy says: $_sv" "$_sv" "$SV_FLAT"
+done
+expect_eq "SEMVER-4: CLAUDE.md and the CHANGELOG header state the policy in identical lines" \
+  "$SV_CLAUDE" "$SV_CHANGELOG"
+SV_AT="$(first_line_of "$SEMVER_CHANGELOG" '^Versioning follows semver')"
+SV_FIRST_ENTRY="$(first_line_of "$SEMVER_CHANGELOG" '^## [0-9]')"
+expect_nonempty "SEMVER-5 precondition: the CHANGELOG has a release entry" "$SV_FIRST_ENTRY"
+expect_true "SEMVER-5: the CHANGELOG's policy sits in its header, above the first release entry" \
+  test "${SV_AT:-999999}" -lt "${SV_FIRST_ENTRY:-0}"
+expect_eq "SEMVER-6: the CHANGELOG's newest entry is plugin.json's version" \
+  "$(plugin_version_of "$PLUGIN_JSON")" "$(changelog_head_version "$SEMVER_CHANGELOG")"
+# Anti-vacuity: one word changed in one file's block must read as a disagreement, through the
+# same reader, while that reader still finds the doctored block.
+anchor "$SEMVER_CLAUDE" 'or an upgrade step' 1
+sed 's/or an upgrade step/or a new setting/' "$SEMVER_CLAUDE" > "$TMP/semver-claude-doctored.md"
+SV_DOCTORED="$(semver_block "$TMP/semver-claude-doctored.md")"
+expect_nonempty "SEMVER-7 precondition: the doctored CLAUDE.md still has a policy block" "$SV_DOCTORED"
+expect_ne "SEMVER-7: a one-word change in CLAUDE.md's policy reads as a disagreement (pin discriminates)" \
+  "$SV_CHANGELOG" "$SV_DOCTORED"
+awk '!d && /^## [0-9]/ { $2 = "0.0.0-mismatch"; d = 1 } 1' "$SEMVER_CHANGELOG" \
+  > "$TMP/semver-changelog-doctored.md"
+expect_eq "SEMVER-8: a doctored newest heading reads as its own version (pin discriminates)" \
+  "0.0.0-mismatch" "$(changelog_head_version "$TMP/semver-changelog-doctored.md")"
 
 finish

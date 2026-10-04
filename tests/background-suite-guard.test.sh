@@ -425,6 +425,9 @@ expect_eq "B8c an off-budget basename OUTSIDE the repo is allowed" "0" "$ST"
 expect_empty "B8c …silently" "$OUT$ERR"
 guarded "$R1" 'bash /some/other/tree/tests/run.sh'
 expect_eq "B8d …and so is a full tree that is not this one" "0" "$ST"
+guarded "$R1" '/bin/bash /private/tmp/scratch/replay/run.sh'
+expect_eq "B8d2 a script merely NAMED run.sh is not the full tree, and is allowed (T24)" "0" "$ST"
+expect_empty "B8d2 …silently" "$OUT$ERR"
 
 # CONTROL: the same basename inside the repo is refused, so B8c is scoping and not silence.
 guarded "$R1" 'bash tests/probe2.test.sh'
@@ -471,12 +474,27 @@ section "B9 — a suite named by a shell VARIABLE is a different refusal (C-5, A
 # Re-spelled (wave-14 T8 c088189 → T18 fcd5a16 → T25): the label "unexpanded name; budget: "
 # read as if the SET named the budget rather than the set of what is ALLOWED; renamed to
 # "unexpanded name; allowed: ".
+# A LITERAL LOOP IS NO LONGER THIS STATE (wave-24 T5, AC-6.3, D9). The reading resolves
+# `for s in alpha beta` into the two suites it names before the arm compares, so the loop
+# over two on-budget suites passes, and the same loop carrying an off-budget word draws the
+# ORDINARY refusal naming it. The unexpanded refusal is kept for a body that reassigns the
+# variable, which is the shape B9a now drives.
 guarded "$R1" 'for s in alpha beta; do bash "tests/$s.test.sh"; done'
+expect_eq "B9a0 a loop over a literal list of on-budget suites is ALLOWED" "0" "$ST"
+expect_empty "B9a0 …silently" "$OUT$ERR"
+guarded "$R1" 'for s in alpha gamma; do bash "tests/$s.test.sh"; done'
+expect_eq "B9a1 the same loop naming an off-budget suite is REFUSED" "2" "$ST"
+expect_contains "B9a1 …naming the off-budget suite, resolved" "gamma.test.sh" "$VERR"
+expect_absent "B9a1 …not as an unexpanded name" "unexpanded name" "$ERR"
+
+guarded "$R1" 'for s in alpha beta; do s=gamma; bash "tests/$s.test.sh"; done'
 expect_eq "B9a a variable-named suite is still REFUSED" "2" "$ST"
 expect_contains "B9a …saying the name could not be resolved at hook time" \
   "unexpanded name; allowed: alpha.test.sh" "$ERR"
-expect_contains "B9a …and telling the reader what to type instead" \
-  "Spell the suite literally, one per call" "$VERR"
+# The sentence and its line shape are the ones tests/bash-walls.test.sh 15b5b pins on the same
+# reassigning fixture (wave-24 T28, A-T28.7): one wording, owned by walls.sh's unexpanded arm.
+expect_contains "B9a …and telling the reader what to type instead: literal lines, one call each" \
+  "Write the literal lines you mean, one call each: bash tests/<name>.test.sh" "$VERR"
 # THE HEADLINE THE READER ACTS ON must not claim the suite is off a budget the hook never
 # managed to check it against.
 expect_absent "B9a …never claiming it is off the budget" "is not on this agent's suite budget" "$ERR"
@@ -616,7 +634,8 @@ b11_line "B11a row 11 (backgrounded)" \
 # The longer full-tree label leaves six fewer columns for the set, which is why B11d's line
 # now shows one token instead of "alpha.test.sh +1 more" — recomputed through
 # `_budget_wire_fact`, not hand-guessed (T25 report).
-guarded "$R1" 'for s in alpha beta; do bash "tests/$s.test.sh"; done'
+# A body that reassigns `s` (wave-24 T5): a literal loop alone now resolves (B9a0).
+guarded "$R1" 'for s in alpha beta; do s=gamma; bash "tests/$s.test.sh"; done'
 b11_line "B11b row 12 (an unexpanded name)" \
   "bionic: suite-run refused — unexpanded name; allowed: alpha.test.sh (spell each suite literally)"
 
@@ -881,6 +900,43 @@ guarded "$R13G" 'go test ./...'
 expect_eq "B13p a run NEITHER declared run named is still REFUSED" "2" "$ST"
 expect_contains "B13p …naming the run that was asked for" "go test" "$VERR"
 expect_contains "B13p …and calling itself a BUDGET, not a wall" "BUDGET" "$VERR"
+
+
+section "B14 — wave-24 T5 (AC-6.4, 7.3, 7.5, 7.6): the classifier is right in both directions, at the wall"
+# The library rows live in tests/cmd-class.test.sh §WAIT/§CASE/§REDIR/§LOOP/§VAR; these are
+# the same shapes through the shipped hook, against R1's row (alpha, beta on the budget), so
+# a false refusal the library stopped making and a bypass it closed are both seen where an
+# agent meets them.
+
+# ADMITTED NOW (were refused).
+guarded "$R1" 'bash tests/alpha.test.sh & bash tests/beta.test.sh & wait'
+expect_eq "B14a a fan-out that waits is ALLOWED" "0" "$ST"
+expect_empty "B14a …silently" "$OUT$ERR"
+guarded "$R1" '<tests/gamma.test.sh wc -l'
+expect_eq "B14b reading an off-budget suite through a glued redirect is ALLOWED" "0" "$ST"
+expect_empty "B14b …silently" "$OUT$ERR"
+guarded "$R1" 'case $x in (tests/gamma.test.sh) echo hit;; esac'
+expect_eq "B14c an off-budget suite named only in a case pattern is ALLOWED" "0" "$ST"
+expect_empty "B14c …silently" "$OUT$ERR"
+
+# STILL REFUSED beside them, the same arm speaking.
+guarded "$R1" 'bash tests/alpha.test.sh & bash tests/beta.test.sh'
+expect_eq "B14d a fan-out that does not wait is still REFUSED" "2" "$ST"
+expect_contains "B14d …by the backgrounded-suite fact" "a backgrounded suite's result is never read" "$ERR"
+
+# REFUSED NOW (were bypasses — class none, so no arm saw a suite).
+guarded "$R1" '2>/dev/null bash tests/gamma.test.sh'
+expect_eq "B14e an off-budget run behind a leading redirect is REFUSED" "2" "$ST"
+expect_contains "B14e …naming it" "gamma.test.sh" "$VERR"
+guarded "$R1" 'case $x in a) bash tests/gamma.test.sh;; esac'
+expect_eq "B14f an off-budget run inside a case arm is REFUSED" "2" "$ST"
+expect_contains "B14f …naming it" "gamma.test.sh" "$VERR"
+guarded "$R1" 'X=gamma.test.sh; bash tests/$X'
+expect_eq "B14g an off-budget suite held whole in a variable is REFUSED" "2" "$ST"
+expect_contains "B14g …naming it, resolved" "gamma.test.sh" "$VERR"
+guarded "$R1" 'X=alpha.test.sh; bash tests/$X'
+expect_eq "B14h control: the same shape holding an on-budget suite is ALLOWED" "0" "$ST"
+expect_empty "B14h …silently" "$OUT$ERR"
 
 
 finish
