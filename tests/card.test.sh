@@ -1805,7 +1805,7 @@ sed -e '/^| T2 |/s#| lib/b\.sh | lib/a\.sh |#| lib/b.sh, lib/b2.sh | lib/a.sh |#
     -e '/^| T3 |/s#| — | 45 |#| ext:wave-96-final | 45 |#' \
     -e '/^| T3 |/s#| lib/c\.sh | lib/b\.sh |#| lib/c.sh | lib/b.sh, lib/a.sh, lib/b2.sh |#' \
   "$S3C_PLAN" > "$S3X_PLAN"
-expect_eq "S3-CHAIN 9d precondition: the copy gained the token and T2's second file" "1 3" \
+expect_eq "S3-CHAIN 9d precondition: the copy gained the token and T2's second file" "1 2" \
   "$(grep -c 'ext:wave-96-final' "$S3X_PLAN" | tr -cd '0-9') $(grep -o 'lib/b2\.sh' "$S3X_PLAN" | grep -c . | tr -cd '0-9')"
 whole_card step3 "$S3X_PLAN"; S3X="$WC_OUT"
 expect_eq "S3-CHAIN 9d: …each predecessor once, in table order, then the deps cell's ext: token" \
