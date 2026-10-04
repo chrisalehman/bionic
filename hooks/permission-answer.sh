@@ -350,7 +350,7 @@ else
   case "$?" in
     0) PA_CLASS=writer ;;
     1) PA_CLASS=reader; PA_OWN="" ;;
-    *) _pa_fail "the workspace record for this session could not be read (a symlink, or a file that cannot be opened)" ;;
+    *) _pa_fail "the workspace record for this session could not be read (a symlink, a file that cannot be opened, or git could not be asked which trees are its linked worktrees)" ;;
   esac
 fi
 
@@ -388,7 +388,7 @@ case "$PA_CLASS" in
     case "$?" in
       0) while IFS= read -r PA_T; do _pa_root tree "$PA_T"; done <<< "$PA_TREES" ;;
       1) : ;;
-      *) _pa_fail "the workspace record for this session could not be read (a symlink, or a file that cannot be opened)" ;;
+      *) _pa_fail "the workspace record for this session could not be read (a symlink, a file that cannot be opened, or git could not be asked which trees are its linked worktrees)" ;;
     esac
     _pa_root record "$(_pa_record_dir "$PA_PLAN")"
     _pa_root plan "$PA_PLAN"
