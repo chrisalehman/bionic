@@ -1981,6 +1981,20 @@ fire "$d"; expect_allow "Q4a: a digest written after the turn's marker excuses t
 qt_marker_at "$d" "2999-01-01T00:00:00.000Z"; tick_stamp "$d" "2999-01-01T00:00:01Z"
 u_tick_out "$d" "poker: REFUSED — the tick could not decide"
 fire "$d"; expect_block "Q4b: critic I3 a digest older than the turn's marker is stale — the refresh is owed" "$TL_MISSING"
+# Q4c: an UNCHANGED tick rewrites `at=` and keeps `since=`, or every quiet tick after the first
+# would read as stale and owe the refresh again (AC-4.13). The digest is aged by hand to the
+# year 2000; the marker is from 2001; the real tick runs again over the same facts.
+QT_DIG="$d/.bionic/tmp/tick-digest-$SID.state"
+QT_SINCE="$(sed -n 's/^since=//p' "$QT_DIG" | head -1)"
+sed -i.bak 's/^at=.*/at=2000-01-01T00:00:00Z/' "$QT_DIG"
+expect_eq "Q4c precondition: the digest is aged to 2000" "at=2000-01-01T00:00:00Z" "$(grep '^at=' "$QT_DIG")"
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "Q4c precondition: the tick over the same facts prints unchanged" "poker: unchanged since" "$QT_OUT"
+expect_eq "Q4c the unchanged tick keeps since=" "$QT_SINCE" "$(sed -n 's/^since=//p' "$QT_DIG" | head -1)"
+expect_regex "Q4c2 …and rewrites at= to its own instant" '^at=(20[2-9][0-9])-' "$(grep '^at=' "$QT_DIG")"
+: > "$d/transcript.jsonl"
+qt_marker_at "$d" "2001-01-01T00:00:00.000Z"; u_tick_out "$d" "$QT_OUT"
+fire "$d"; expect_allow "Q4c3: the unchanged tick's turn reads duty=none — no refresh owed"
 rm -rf "$QT_CFG"
 
 # ============================================================

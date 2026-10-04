@@ -4189,7 +4189,10 @@ for _hold_f in "$DISPATCH_MD" "$HOLD_BLOCK"; do
 done
 HOLD_PROMPT="$(CLAUDE_CODE_SESSION_ID=0123456789abcdef bash "$POKER_SH" prompt 2>/dev/null)"
 expect_nonempty "HOLD-c precondition: the poker printed its Patrol prompt" "$HOLD_PROMPT"
-expect_contains "HOLD-c: the Patrol prompt names the hold verb" "$PIN_HOLD_VERB" "$HOLD_PROMPT"
+# THE PROMPT'S HOLD LINE PASTES AS ONE COMMAND (wave-24 T27; critic I4): the reason is a quoted
+# placeholder, never a bare `<reason>` a shell reads as a redirect. The doctrine (HOLD-a) prints
+# the same words since w24-T29, so one pin serves both.
+expect_contains "HOLD-c: the Patrol prompt names the hold verb, its reason a quoted placeholder" "$PIN_HOLD_VERB" "$HOLD_PROMPT"
 # The retired ask must be gone from the doctrine too: "ListAgents, before the tick" every tick.
 expect_eq "HOLD-d: the unconditional 'before the tick' ListAgents line is gone from dispatch.md" "0" \
   "$(grep -c 'ListAgents`, before the tick, for a fresh answer' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
