@@ -108,12 +108,14 @@
 #                                targets and the files of tee, sed -i, touch, mkdir, ln, and
 #                                the cp/mv destination (wave-24 T12, D16). The memory wall's
 #                                collector, hooks/bash-walls.sh, reads it.
-#   cmd_effects        <cmd> [<cwd>]
+#   cmd_effects        <cmd> [<cwd>] [reads]
 #                             -> what the command writes (`W<TAB>path`) and deletes
 #                                (`D<TAB>path`), absolute, or `?<TAB>reason<TAB>segment` for
 #                                anything it cannot read in full (wave-25 T2, D5). The
 #                                permission answer reads it and allows only a command with no
-#                                `?` line. See _CMD_EFFECTS_AWK for the reading.
+#                                `?` line. With the word `reads`, also what it reads
+#                                (`R<TAB>path`, `RR<TAB>path` for a read that descends; T16).
+#                                See _CMD_EFFECTS_AWK for the reading.
 #
 # [WALL: tests/cmd-class.test.sh]
 
@@ -1091,7 +1093,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # mode=effects: cmd_effects (wave-25 T2, D5) — the W, D and ? lines of _CMD_EFFECTS_AWK,
       # read by the writes walk with FX set, which routes each segment to fx_seg.
       if (mode == "effects") {
-        FX = 1; fx_init()
+        FX = 1; fx_init(); FXR = (ENVIRON["_CMD_FX_READS"] == "reads")
         WT_BASE = ENVIRON["_CMD_WT_CWD"]; split("", WT_SEEN); split("", FX_SEEN)
         if (FX_HDSEG != "") fx_unk("a heredoc body runs a command substitution", FX_HDSEG)
         if (FX_HDODD != "") fx_unk("a heredoc the reader does not place", FX_HDODD)
@@ -1489,6 +1491,25 @@ cmd_write_targets() {  # <command> [<cwd>] -> one resolved write target per line
 #                           unlink, the sources of mv, the roots of `find ... -delete`
 #   ?<TAB><reason><TAB><segment>   anything else that may act; the segment is flattened to one
 #                           line and cut at 300 characters
+# and, only when the third argument is the word `reads` (T16; review B3c, S4):
+#   R<TAB><absolute path>   a file or directory read: each operand of cat, head, tail, wc, ls
+#                           and grep (ls with none reads its directory), each `<` input, each
+#                           source of cp, each file of sed, each operand of `git diff --no-index`
+#   RR<TAB><absolute path>  a directory read and descended: grep -r/-R/--recursive/-d recurse
+#                           (or a GREP_OPTIONS the text assigns), ls -R, every root of find, a
+#                           cp -R/-a source, and the repository a git reader reads (-C or cwd)
+# Without the word the output is byte for byte what it was before T16 added it.
+#
+# A PATH KEEPS ITS `..` (T16, review B1): it is joined to the directory it is read against and
+# printed absolute, with only `.` and empty components taken out, because the kernel resolves
+# `..` after following a link and only the hook (grant_resolve) can see the link. A cd target is
+# the one place the shell folds `..` as text; after a cd through `..` a path is printed against
+# both the folded and the unfolded directory (fx_emit), and a second such cd is `?`.
+#
+# A LINK MADE IN THE SAME COMMAND (T16, review B2). The hook resolves every path at question
+# time, before the command runs. So `ln` is `?`, and so is any path at or beneath a cp or mv
+# destination written earlier in the command (a delete AT it only when spelled with a trailing
+# slash), since what was copied or moved there may be a link. `mkdir` makes no link.
 #
 # READ, NOT GUESSED. Argv[0] after the transparent prefixes (assignments, openers, `env`,
 # `command`, `exec`, `nohup`, `setsid`, `time`, `nice`, `timeout`) must be in the writer
@@ -1501,7 +1522,7 @@ cmd_write_targets() {  # <command> [<cwd>] -> one resolved write target per line
 # `source`/`.`; a `git` subcommand that is not a known reader, `git -c`, `--output`; `find`
 # with `-exec` or a file-printing primary; a sed script that writes or runs (`w`, `e`, `-f`).
 #
-# READS (orchestrator additions 2026-10-03). A read prints no line, so a read whose file the
+# READS (orchestrator additions 2026-10-03). Without `reads` a read prints no line, so a read whose file the
 # text does not name is `?`: an operand of cat, ls, head, tail, grep, wc, a git reader or find,
 # or an input redirect `<`, that still holds a variable, substitution, glob, brace or leading
 # `~` after expansion, or that came from a substituted literal (`d=.ssh; cat ~/$d/id`).
@@ -1606,22 +1627,69 @@ _CMD_EFFECTS_AWK='
       FX_SEEN[k] = 1
       print "?\t" r "\t" s
     }
-    # A W or D line for w, resolved as wt_emit resolves it, or a ? when the shell still has
-    # something to decide about the path.
-    function fx_emit(tag, w, cwd,   p, c) {
+    # AN EFFECT PATH KEEPS ITS `..` (T16, review B1). The kernel resolves `a/link/..` AFTER it
+    # follows the link, so a `..` folded as text names a place the command never touches, and
+    # the hook, which resolves each path physically (grant_resolve), never saw the link. Only `.`
+    # and empty components come out, each naming the directory it stands in. p is absolute.
+    function fx_abs(p,   n, P, i, out) {
+      n = split(p, P, "/"); out = ""
+      for (i = 1; i <= n; i++) if (P[i] != "" && P[i] != ".") out = out "/" P[i]
+      return (out == "" ? "/" : out)
+    }
+    function fx_under(p, d) { return (d == "/" || index(p, d "/") == 1) }
+    # A PATH THROUGH WHAT THIS COMMAND COPIED OR MOVED (T16, review B2). The hook resolves every
+    # path at question time, before a cp or mv destination holds what the command puts there, and
+    # that may be a link. So a path strictly beneath a destination written earlier is unknown; so
+    # is a write or read AT it, which goes through such a link, and a delete at it spelled with a
+    # trailing slash, which follows one. A plain delete at it removes the link itself. Each path
+    # is compared both as printed and folded, so a `c/../b/x` spelling is beneath b too.
+    # Returns 1 when the line was printed (or already had been).
+    function fx_put(tag, p, w,   x, d, q) {
+      if (FX_ND) {
+        q = wt_norm(p)
+        for (x = 1; x <= FX_ND; x++) {
+          d = FX_DEST[x]
+          if (fx_under(p, d) || fx_under(q, d) || ((p == d || q == d) && (tag != "D" || w ~ /\/\.?$/))) {
+            fx_unk("a path through " d ", which cp or mv wrote earlier in this command and may now be a link: " w, FX_SEG)
+            return 0
+          }
+        }
+      }
+      p = tag "\t" p
+      if (!(p in FX_SEEN)) { FX_SEEN[p] = 1; print p }
+      return 1
+    }
+    function fx_dest(p) { FX_DEST[++FX_ND] = p; FX_DEST[++FX_ND] = wt_norm(p) }
+    # A W or D line for w, joined to the directory it is read against, or a ? when the shell
+    # still has something to decide about the path. With FX_REG set (a cp or mv destination),
+    # each path printed is remembered for fx_put.
+    #
+    # THE ONE PLACE `..` IS FOLDED AS TEXT IS A CD TARGET, because there the shell folds it too:
+    # bash and zsh `cd a/link/..` move to a, not to the parent of the link. But bash falls back to
+    # the unfolded path when the folded one does not exist, so when the directory came from a cd
+    # through `..`, the path is printed twice, against the folded directory and against the
+    # unfolded one. Either can be the place, and the hook requires both inside: printing both can
+    # only refuse. A second cd through `..` multiplies the places, and fx_cd calls it unknown.
+    function fx_emit(tag, w, cwd,   p, o, c, b, k) {
       if (w == "") return
-      p = fx_expand(w)
+      p = fx_expand(w); o = p; b = ""
       if (substr(p, 1, 1) != "/" && !wt_rooted(p)) {
         if (cwd == FX_LOST) { fx_unk("a relative target after a directory the text cannot name: " w, FX_SEG); return }
         c = fx_expand(cwd)
-        if (c != "") p = c "/" p
-        if (!wt_rooted(p) && WT_BASE != "") p = WT_BASE "/" p
+        b = c
+        if (!wt_rooted(b) && WT_BASE != "") b = (b == "" ? WT_BASE : WT_BASE "/" b)
+        if (b != "") p = b "/" p
       }
       if (p ~ /[[$`*?{]/ || substr(p, 1, 1) == "~") { fx_unk("a variable, substitution or pattern in the target: " w, FX_SEG); return }
       if (p ~ /[\001-\037]/) { fx_unk("a control character in the target", FX_SEG); return }
       if (substr(p, 1, 1) != "/") { fx_unk("a relative target and no cwd: " w, FX_SEG); return }
-      p = tag "\t" wt_norm(p)
-      if (!(p in FX_SEEN)) { FX_SEEN[p] = 1; print p }
+      p = fx_abs(p)
+      k = fx_put(tag, p, w)
+      if (k && FX_REG) fx_dest(p)
+      if (b == "" || !index("/" b "/", "/../")) return
+      p = fx_abs(wt_norm(b) "/" o)
+      k = fx_put(tag, p, w)
+      if (k && FX_REG) fx_dest(p)
     }
     # The directory a cd, pushd or popd moves to. One the text cannot name is FX_LOST, and
     # every relative path after it is unknown rather than read against the wrong directory.
@@ -1636,6 +1704,8 @@ _CMD_EFFECTS_AWK='
       if (d ~ /[[$`*?{]/ || substr(d, 1, 1) == "~") { fx_unk("a cd to a variable or pattern: " d, t); return FX_LOST }
       if (substr(d, 1, 1) == "/") return d
       if (cwd == FX_LOST) return FX_LOST
+      # Each cd through `..` may be folded or not (fx_emit), so two of them name four places.
+      if (index("/" d "/", "/../") && index("/" cwd "/", "/../")) { fx_unk("a second cd through ..: the shell may fold each one either way", t); return FX_LOST }
       return (cwd == "" ? d : cwd "/" d)
     }
     function fx_shell(B, m, cwd, depth, t,   j, c) {
@@ -1650,7 +1720,98 @@ _CMD_EFFECTS_AWK='
       if (depth >= 2) { fx_unk("a third nested shell: the reader stops at two", t); return }
       wt_run(B[j], cwd, depth + 1)
     }
-    function fx_git(B, m, t,   j, s) {
+    # WHAT A COMMAND READS (T16; review B3c, S4), printed only when the caller passes the word
+    # `reads`: `R<TAB>path` for each file or directory read, `RR<TAB>path` for one the reader
+    # descends. The path rule is fx_emit s, so `..` stays in and a cp or mv destination is
+    # honoured; an operand the text does not name is the `?` fx_rop already gives.
+    function fx_read(tag, w, cwd) {
+      if (fx_rop(w)) { FX_ROPA = 1; return }
+      fx_emit(tag, w, cwd)
+    }
+    # The operands of a pure reader. Options are not operands, and neither is grep s pattern. An
+    # option value is consumed only where the reader always takes one: a value read as an operand
+    # adds a harmless line, an operand read as a value hides a read. RR for grep -r, -R,
+    # --recursive, -d recurse or a GREP_OPTIONS the text assigns, and for ls -R. ls with no
+    # operand reads the directory it runs in, and so does a recursive grep.
+    function fx_reads(B, m, cwd,   j, w, b, opt, pat, rec, n, O) {
+      b = B[1]; opt = 1; pat = (b == "grep"); rec = (b == "grep" && FX_GREPR); n = 0
+      for (j = 2; j <= m; j++) {
+        w = B[j]
+        if (opt && w == "--") { opt = 0; continue }
+        if (opt && w ~ /^-./) {
+          if (w ~ /^--(file|exclude-from|files0-from)=/) fx_read("R", substr(w, index(w, "=") + 1), cwd)
+          if (b == "grep") {
+            if (w == "-e" || w == "--regexp") { pat = 0; j++ }
+            else if (w ~ /^(-e.|--regexp=)/ || w ~ /^--file=/) pat = 0
+            else if (w == "-f" || w == "--file") { pat = 0; j++; if (j <= m) fx_read("R", B[j], cwd) }
+            else if (w == "-d" || w == "--directories") { j++; if (B[j] == "recurse") rec = 1 }
+            else if (w == "-drecurse" || w == "--directories=recurse" || w == "--recursive" || w == "--dereference-recursive") rec = 1
+            else if (w ~ /^(-m|-A|-B|-D|--max-count|--after-context|--before-context|--devices|--include|--exclude|--exclude-dir|--include-dir|--label|--binary-files)$/) j++
+            else if (w ~ /^-[^-]/ && w ~ /[rR]/) rec = 1
+          }
+          else if (b == "ls") { if (w == "--recursive" || (w ~ /^-[^-]/ && index(w, "R"))) rec = 1 }
+          else if (b == "head" || b == "tail") { if (w == "-n" || w == "-c" || w == "-b" || w == "--lines" || w == "--bytes") j++ }
+          continue
+        }
+        if (pat) { pat = 0; continue }
+        O[++n] = w
+      }
+      if (n == 0 && (b == "ls" || rec)) O[++n] = "."
+      for (j = 1; j <= n; j++) fx_read((rec ? "RR" : "R"), O[j], cwd)
+    }
+    # git reads the repository its directory holds (-C, or the cwd), and --git-dir and
+    # --work-tree name; with --no-index, diff reads each operand, wherever it is.
+    function fx_gitreads(B, m, cwd,   j, d, s, ni, w) {
+      d = ""
+      for (j = 2; j <= m && B[j] ~ /^-/; j++) {
+        if (B[j] == "-C") { j++; d = (d == "" || substr(fx_expand(B[j]), 1, 1) == "/" ? B[j] : d "/" B[j]); continue }
+        if (B[j] == "--git-dir" || B[j] == "--work-tree") { j++; fx_read("RR", B[j], cwd); continue }
+        if (B[j] ~ /^--(git-dir|work-tree)=/) { fx_read("RR", substr(B[j], index(B[j], "=") + 1), cwd); continue }
+        if (B[j] == "--namespace") j++
+      }
+      fx_read("RR", (d == "" ? "." : d), cwd)
+      ni = 0
+      for (s = j + 1; s <= m; s++) if (B[s] == "--no-index") ni = 1
+      if (!ni) return
+      for (s = j + 1; s <= m; s++) {
+        w = B[s]
+        if (w ~ /^-./) continue
+        fx_read("R", (d == "" || substr(fx_expand(w), 1, 1) == "/" || fx_rop(w) ? w : d "/" w), cwd)
+      }
+    }
+    # sed reads every file operand, with -i or without: the script is the first operand unless
+    # -e or --expression gave one. (-f is unknown before this is reached.)
+    function fx_sedreads(B, m, cwd,   j, w, opt, hasE, np, P) {
+      opt = 1; hasE = 0; np = 0
+      for (j = 2; j <= m; j++) {
+        w = B[j]
+        if (opt && w == "--") { opt = 0; continue }
+        if (opt && (w == "--expression" || w ~ /^-[nrsuzE]*e$/)) { j++; hasE = 1; continue }
+        if (opt && (w ~ /^--expression=/ || w ~ /^-[nrsuzE]*e./)) { hasE = 1; continue }
+        if (opt && w == "-i") { if (j < m && B[j + 1] == "") j++; continue }
+        if (opt && w ~ /^-./) continue
+        P[++np] = w
+      }
+      for (j = (hasE ? 1 : 2); j <= np; j++) fx_read("R", P[j], cwd)
+    }
+    # cp reads its sources, descending with -R, -r, -a, --recursive or --archive.
+    function fx_cpreads(B, m, cwd,   j, w, opt, np, P, tdir, rec) {
+      opt = 1; np = 0; tdir = 0; rec = 0
+      for (j = 2; j <= m; j++) {
+        w = B[j]
+        if (opt && w == "--") { opt = 0; continue }
+        if (opt && (w == "-t" || w == "--target-directory")) { j++; tdir = 1; continue }
+        if (opt && w ~ /^(--target-directory=|-t.)/) { tdir = 1; continue }
+        if (opt && (w == "-S" || w == "--suffix")) { j++; continue }
+        if (opt && (w == "--recursive" || w == "--archive")) { rec = 1; continue }
+        if (opt && w ~ /^-[^-]/) { if (w ~ /[rRa]/) rec = 1; continue }
+        if (opt && w ~ /^-./) continue
+        P[++np] = w
+      }
+      if (!tdir) np--
+      for (j = 1; j <= np; j++) fx_read((rec ? "RR" : "R"), P[j], cwd)
+    }
+    function fx_git(B, m, t, cwd,   j, s) {
       for (j = 2; j <= m && B[j] ~ /^-/; j++) {
         if (B[j] == "-c" || B[j] ~ /^--config-env/) { fx_unk("git -c sets config that can run a command", t); return }
         if (B[j] ~ /^--exec-path=/) { fx_unk("git --exec-path runs git programs from elsewhere", t); return }
@@ -1660,6 +1821,7 @@ _CMD_EFFECTS_AWK='
       if (!(("git:" s) in FX_READ)) { fx_unk("git " s " is not a known reader", t); return }
       if (FX_EXP || fx_rargs(B, m, 2)) FX_ROPA = 1
       for (j++; j <= m; j++) if (B[j] ~ /^--output(=|$)/) { fx_unk("git " s " --output writes a file", t); return }
+      if (FXR) fx_gitreads(B, m, cwd)
     }
     # find: its roots are read operands, and -delete deletes each. -L, -H and -follow walk
     # through symlinks to places the roots do not name (orchestrator addition 2026-10-03:
@@ -1683,6 +1845,8 @@ _CMD_EFFECTS_AWK='
       if (fl) { fx_unk("find follows symlinks", t); return }
       for (j = 1; j <= nr; j++) if (fx_rop(RT[j])) FX_ROPA = 1
       if (FX_EXP) FX_ROPA = 1
+      # A find descends every root it names, or the directory it runs in when it names none.
+      if (FXR) { if (nr == 0) fx_read("RR", ".", cwd); for (j = 1; j <= nr; j++) fx_read("RR", RT[j], cwd) }
       if (!del) return
       if (nr == 0) RT[++nr] = "."
       for (j = 1; j <= nr; j++) fx_emit("D", RT[j], cwd)
@@ -1758,12 +1922,14 @@ _CMD_EFFECTS_AWK='
       n = wt_tok(t, W, K); m = 0
       for (j = 1; j <= n; j++) {
         if (K[j] == "I" && W[j] == "<" && j < n && K[j + 1] == "W" && fx_rop(W[j + 1])) FX_ROPA = 1
+        if (FXR && K[j] == "I" && W[j] == "<" && j < n && K[j + 1] == "W") fx_read("R", W[j + 1], cwd)
         if (K[j] == "R" || K[j] == "I") { if (K[j] == "R" && j < n && K[j + 1] == "W") fx_emit("W", W[j + 1], cwd); j++; continue }
         if (K[j] == "W") A[++m] = W[j]
       }
       for (i = 1; i <= m; i++) {
         w = A[i]
         if (w ~ /^(HOME|BIONIC_CLAUDE_HOME|CLAUDE_CONFIG_DIR)[+]?=/) FX_NOEXP = 1
+        if (w ~ /^GREP_OPTIONS[+]?=/) FX_GREPR = 1
         if (w ~ /^(HOME|BIONIC_CLAUDE_HOME|CLAUDE_CONFIG_DIR|PATH|CDPATH|IFS|ENV|BASH_ENV|SHELLOPTS|BASHOPTS|LD_[A-Z0-9_]*|DYLD_[A-Z0-9_]*|GIT_[A-Z0-9_]*)[+]?=/)
           fx_unk("assigns a variable that moves what runs or where: " w, t)
         if (w == "!") neg = 1
@@ -1813,23 +1979,30 @@ _CMD_EFFECTS_AWK='
       # neither is a reserved word.
       bt = b; b = cmd_word_fold(b); B[1] = b
       if (b ~ /^(ba|z|k|da)?sh$/) { fx_shell(B, m, cwd, depth, t); return cwd }
-      if (b == "git") { fx_git(B, m, t); return cwd }
+      if (b == "git") { fx_git(B, m, t, cwd); return cwd }
       if (b == "find") { fx_find(B, m, cwd, t); return cwd }
       if (b in FX_READ) {
         if (b ~ /^(cat|ls|head|tail|grep|wc)$/ && (FX_EXP || fx_rargs(B, m, 2))) FX_ROPA = 1
+        if (FXR && b ~ /^(cat|ls|head|tail|grep|wc)$/) fx_reads(B, m, cwd)
         if (b == "date") for (j = 2; j <= m; j++) if (B[j] ~ /^(-s|--set)/ || B[j] !~ /^[-+]/) fx_unk("date may set the clock", t)
         return cwd
       }
       if (b == "rm" || b == "rmdir" || b == "unlink") { fx_del(B, m, cwd); return cwd }
-      if (b == "mv") { fx_del(B, m, cwd); wt_argv(B, m, cwd); return cwd }
+      if (b == "mv") { fx_del(B, m, cwd); FX_REG = 1; wt_argv(B, m, cwd); FX_REG = 0; return cwd }
+      if (b == "cp") { if (FXR) fx_cpreads(B, m, cwd); FX_REG = 1; wt_argv(B, m, cwd); FX_REG = 0; return cwd }
+      # A link, symbolic or hard, redirects every later path through it, and the hook resolves
+      # each path at question time, before the link exists (T16, review B2).
+      if (b == "ln") { fx_unk("a link redirects every later path, and it does not exist yet when they are resolved", t); return cwd }
       if (b == "sed") {
         for (j = 2; j <= m; j++) {
           if (B[j] == "-f" || B[j] ~ /^--file/ || B[j] ~ /^-[nrsuzE]*f/) { fx_unk("sed reads its script from a file", t); return cwd }
           if (B[j] ~ /(^|[^A-Za-z])[wW][ \t]+[^ \t]/ || B[j] ~ /(^|[^A-Za-z])e([ \t;}]|$)/) { fx_unk("a sed script that writes or runs", t); return cwd }
         }
-        wt_argv(B, m, cwd); return cwd
+        wt_argv(B, m, cwd)
+        if (FXR) fx_sedreads(B, m, cwd)
+        return cwd
       }
-      if (b == "tee" || b == "touch" || b == "mkdir" || b == "cp" || b == "ln") { wt_argv(B, m, cwd); return cwd }
+      if (b == "tee" || b == "touch" || b == "mkdir") { wt_argv(B, m, cwd); return cwd }
       if (b == "eval") { fx_unk("eval runs text the reader does not read", t); return cwd }
       if (b == "source" || b == ".") { fx_unk("source runs a file the reader does not read", t); return cwd }
       if (b == "xargs") { fx_unk("xargs takes its targets from stdin", t); return cwd }
@@ -1851,8 +2024,8 @@ _CMD_EFFECTS_STUBS='
     function fx_step(depth, i, k, g, before) { return before }
 '
 
-cmd_effects() {  # <command> [<cwd>] -> W/D<TAB><absolute path> or ?<TAB><reason><TAB><segment> per line (D5, REQ-2)
-  printf '%s' "${1-}" | _CMD_WT_CWD="${2-}" _cmd_class_awk effects
+cmd_effects() {  # <command> [<cwd>] [reads] -> W/D<TAB><absolute path> or ?<TAB><reason><TAB><segment> per line (D5, REQ-2); with `reads`, R/RR<TAB><absolute path> too (T16)
+  printf '%s' "${1-}" | _CMD_WT_CWD="${2-}" _CMD_FX_READS="${3-}" _cmd_class_awk effects
   return 0
 }
 
