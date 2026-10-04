@@ -1082,7 +1082,7 @@ expect_eq "W5b BIONIC_QUIET=1 in the prefix is --quiet" \
   "bash $SHIM --shell $WSH --quiet --suites t.test.sh -- 'BIONIC_QUIET=1 bash tests/t.test.sh'" "$WRAP"
 guarded "$RW" 'cd tests && bash solo.test.sh'
 expect_eq "W5c a solo suite reached through a leading cd is --quiet too (and stamps where the cd went)" \
-  "bash $SHIM --shell $WSH --quiet --stamp-dir $RW/tests --suites solo.test.sh -- 'cd tests && bash solo.test.sh'" "$WRAP"
+  "bash $SHIM --shell $WSH --quiet --stamp-dir $RW/tests --suites bash_solo.test.sh -- 'cd tests && bash solo.test.sh'" "$WRAP"
 guarded "$RW" 'bash tests/t.test.sh'
 expect_absent "W5d a plain suite is not" "--quiet" "$WRAP"
 expect_nonempty "W5d …though it is wrapped" "$WRAP"
@@ -1095,16 +1095,16 @@ expect_nonempty "W5d …though it is wrapped" "$WRAP"
 # subshell, a pipe, a background job, `pushd`), gives no option at all: the shim then stamps
 # its own directory, as before, never a guessed one.
 W10_ABS="$SANDBOX/trees/t1"
-w10() {  # <label> <command> <expected --stamp-dir value, or "" for none>
+w10() {  # <label> <command> <expected --stamp-dir value, or "" for none> [<expected --suites word; default t.test.sh>]
   guarded "$RW" "$2"
   expect_eq "W10$1 [$2] is allowed" "0" "$ST"
   expect_nonempty "W10$1 …and wrapped" "$WRAP"
   if [ -n "$3" ]; then
     _wall_q="$3"; case "$3" in *' '*) _wall_q="$(sq "$3")" ;; esac
     expect_eq "W10$1 …with --stamp-dir $3" \
-      "bash $SHIM --shell $WSH --stamp-dir $_wall_q --suites t.test.sh -- $(sq "$2")" "$WRAP"
+      "bash $SHIM --shell $WSH --stamp-dir $_wall_q --suites ${4:-t.test.sh} -- $(sq "$2")" "$WRAP"
   else
-    expect_eq "W10$1 …with no --stamp-dir" "bash $SHIM --shell $WSH --suites t.test.sh -- $(sq "$2")" "$WRAP"
+    expect_eq "W10$1 …with no --stamp-dir" "bash $SHIM --shell $WSH --suites ${4:-t.test.sh} -- $(sq "$2")" "$WRAP"
   fi
 }
 w10 a "cd $W10_ABS || exit 1; bash tests/t.test.sh" "$W10_ABS"
@@ -1132,8 +1132,8 @@ w10 r "cd -P $W10_ABS && bash tests/t.test.sh" ""
 w10 s "cd \"\$T\"; cd $W10_ABS && bash tests/t.test.sh" "$W10_ABS"
 # …but a RELATIVE one after it does not: relative to an unknown place is unknown.
 w10 t 'cd "$T"; cd t1 && bash tests/t.test.sh' ""
-# Only the cd segments AHEAD of the first suite count.
-w10 u "bash tests/t.test.sh; cd $W10_ABS; bash tests/t.test.sh" ""
+# Only the cd segments AHEAD of the first suite count. (Two runs joined by `;` are named `?`, T63.)
+w10 u "bash tests/t.test.sh; cd $W10_ABS; bash tests/t.test.sh" "" "'?'"
 # A cd behind `&&` runs whenever the suite does (a failed step before it stops both), so it counts.
 w10 v "true && cd $W10_ABS && bash tests/t.test.sh" "$W10_ABS"
 
