@@ -13350,8 +13350,28 @@ ub_stop() {
   UB_ERR=$(cat "$SANDBOX/ub.err")
 }
 ub_decision() { printf '%s' "$UB_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+# ub_names_id <text> <id> -> the lines that name <id> as a word of its own: a row id a hook
+# printed (`FILL T5`, `not launched: T5`, `T4→T5`, `fill=T5`), never the same letters inside a
+# path or a longer name (`.worktrees/26-T5/`, `T47-T5`, `T50`). A row id is judged by what the
+# hook SAYS about the row; the paths it prints are wherever this suite and its sandbox happen
+# to sit, and a tree or TMPDIR named for a task once turned these rows red (wave-26 T47).
+ub_names_id() {
+  printf '%s\n' "$1" | /usr/bin/grep -E "(^|[^A-Za-z0-9_./-])$2([^A-Za-z0-9_/-]|\$)"
+  return 0
+}
 ub_iso() { date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ; }
-require_helpers ub_mode ub_adv ub_stop ub_decision ub_iso
+require_helpers ub_mode ub_adv ub_stop ub_decision ub_iso ub_names_id
+# The extractor on a planted text: an id inside a path or a longer name is not a mention, an id
+# the hook printed as a row is, on each line kind that names one.
+expect_eq "UB ub_names_id keeps the lines that name T5 as a row, and only those" \
+  "poker: FILL T5|poker-tick/v1|decision=FILL|fill=T5|poker: CHAIN T4→T5 (30 min)|not launched: T5." \
+  "$(ub_names_id "poker: note: run \`bash /x/.worktrees/26-T5/hooks/session-poker.sh arm\`
+run resolved by newest-plan fallback (session unbound) — /tmp/T47-T5/w1r/run.md; bind
+poker: FILL T5
+poker-tick/v1|decision=FILL|fill=T5
+poker: CHAIN T4→T5 (30 min)
+poker: WAIT T50 — needs T4
+not launched: T5." T5 | paste -sd'|' -)"
 
 UB_ADVS=""   # one normalized advisory per fallback drive, newline-joined, in arm order
 ub_collect() {  # <arm> <output> <plan>
@@ -13461,12 +13481,12 @@ jq -nc '{type:"user",uuid:"u-ub4",isSidechain:false,timestamp:"2026-10-02T19:40:
 ub_mode "$UB4" "$SID_A" "$UB4_P" fallback
 ub_stop "$UB4" "$SID_A" "$UB4/turn.jsonl"
 expect_eq "UB.4 fill gate, fallback: no refusal for <p>'s ready row" "" "$(ub_decision)"
-expect_absent "UB.4 …and T5 is named nowhere" "T5" "$UB_OUT$UB_ERR"
+expect_eq "UB.4 …and T5 is named nowhere" "" "$(ub_names_id "$UB_OUT$UB_ERR" T5)"
 ub_collect fill-gate "$UB_ERR" "$UB4_P"
 ub_mode "$UB4" "$SID_A" "$UB4_P" bound
 ub_stop "$UB4" "$SID_A" "$UB4/turn.jsonl"
 expect_eq "UB.4 fill gate, bound-open (control): the same turn is refused" "block" "$(ub_decision)"
-expect_contains "UB.4 …naming T5 as not launched" "not launched: T5" "$UB_ERR"
+expect_contains "UB.4 …naming T5 as not launched" "not launched: T5" "$(ub_names_id "$UB_ERR" T5)"
 
 # ---- UB.5 patrol-revive ------------------------------------------------------
 UB5=$(new_repo "ub-revive"); UB5_P="$UB5/.bionic/docs/plans/epic-99/run.md"
@@ -13560,35 +13580,19 @@ UB8_OUT=$(ub_tick "$UB8" "$SID_A")
 expect_absent "UB.8 tick, fallback: no FILL line is prescribed from <p>" "poker: FILL " "$UB8_OUT"
 expect_absent "UB.8 …and the decision is not FILL" "decision=FILL" "$UB8_OUT"
 expect_contains "UB.8 …it says it fills nothing, as a session with no run does" "no FILL — " "$UB8_OUT"
-# THE ROOTS ARE FOLDED BEFORE THE ID IS LOOKED FOR (wave-25 T15). The tick prints paths: the
-# plan's, under the sandbox, and its own in the re-arm note, under the tree this suite runs
-# from. A tree at `.worktrees/25-T5` once turned this row red with no T5 printed as a task.
-# Folding the sandbox and the hooks directory, logical and physical, to placeholders leaves
-# only what the tick itself wrote; the first row proves the fold ran on this output.
-ub_fold_roots() {  # <text> -> text with the sandbox and hooks roots folded to <sandbox>/<hooks>
-  printf '%s\n' "$1" | awk -v a="$SANDBOX" -v b="$UB_HOOKS_REAL" -v c="$BIONIC_HOOKS_DIR" '
-    function fold(s, p, t,   i) { if (p == "") return s
-      while ((i = index(s, p)) > 0) s = substr(s, 1, i-1) t substr(s, i+length(p)); return s }
-    { $0 = fold($0, a, "<sandbox>"); $0 = fold($0, b, "<hooks>"); print fold($0, c, "<hooks>") }'
-}
-UB_HOOKS_REAL=$(cd "$BIONIC_HOOKS_DIR" && pwd -P)
-UB8_FOLDED=$(ub_fold_roots "$UB8_OUT")
-expect_contains "UB.8 …the roots fold ran on this output (the plan path reads <sandbox>/)" \
-  "<sandbox>/fx/ub-tick/" "$UB8_FOLDED"
-# The fold on a hooks root that holds the id, as `.worktrees/25-T5` did: the root goes, a row
-# id the tick printed stays.
-UB8_T5_ROOT=$(BIONIC_HOOKS_DIR=/x/.worktrees/25-T5/hooks UB_HOOKS_REAL=/x/.worktrees/25-T5/hooks \
-  ub_fold_roots "poker: FILL T5 — bash /x/.worktrees/25-T5/hooks/session-poker.sh arm")
-expect_contains "UB.8 …a T5-holding hooks root folds to <hooks>" "bash <hooks>/session-poker.sh arm" "$UB8_T5_ROOT"
-expect_contains "UB.8 …and a row id printed outside it is kept" "FILL T5 — " "$UB8_T5_ROOT"
-expect_absent "UB.8 …and <p>'s ready row T5 is named nowhere" "T5" "$UB8_FOLDED"
+# THE ID IS READ AS A ROW, NOT AS LETTERS (wave-25 T15, then wave-26 T47). The tick prints paths:
+# the plan's, under the sandbox, and its own in the re-arm note, under the tree this suite runs
+# from. A tree at `.worktrees/25-T5` once turned this row red with no T5 printed as a task, and
+# folding those two roots left every other path (a TMPDIR, a home) still able to; `ub_names_id`
+# reads only an id the tick printed as a word of its own, on any line.
+expect_eq "UB.8 …and <p>'s ready row T5 is named nowhere" "" "$(ub_names_id "$UB8_OUT" T5)"
 UB8_ADV=$(printf '%s\n' "$UB8_OUT" | sed 's/^poker: //' | grep '^run resolved by newest-plan fallback' \
   | awk -v p="$UB8_P" '{ while ((i = index($0, p)) > 0) $0 = substr($0, 1, i-1) "<p>" substr($0, i+length(p)); print }')
 expect_eq "UB.8 …and the advisory is printed exactly once" "1" "$(printf '%s' "$UB8_ADV" | grep -c . || true)"
 expect_eq "UB.8 …and it is run_unbound_advisory's, byte for byte" "$UB_TEMPLATE" "$UB8_ADV"
 ub_mode "$UB8" "$SID_A" "$UB8_P" bound
 UB8_OUT=$(ub_tick "$UB8" "$SID_A")
-expect_contains "UB.8 tick, bound-open (control): the same tick prescribes FILL" "FILL T5" "$UB8_OUT"
+expect_contains "UB.8 tick, bound-open (control): the same tick prescribes FILL" "FILL T5" "$(ub_names_id "$UB8_OUT" T5)"
 expect_absent "UB.8 …and never says the session is unbound" "session unbound" "$UB8_OUT"
 
 # ---- THE SEVEN SAY ONE THING -------------------------------------------------
@@ -13647,10 +13651,10 @@ expect_eq "UB.9 …and A's binding is untouched" "plan=$UB9_P" \
 ub_stop "$UB9" "$SID_C" "$UB9/turn.jsonl"
 expect_eq "UB.9 C's turn end: no refusal" "" "$(ub_decision)"
 expect_absent "UB.9 …and A's ready row is named nowhere" "not launched: T5" "$UB_OUT$UB_ERR"
-expect_absent "UB.9 …nor T5 at all" "T5" "$UB_OUT$UB_ERR"
+expect_eq "UB.9 …nor T5 at all" "" "$(ub_names_id "$UB_OUT$UB_ERR" T5)"
 ub_stop "$UB9" "$SID_A" "$UB9/turn.jsonl"
 expect_eq "UB.9 A's turn end on the same tree (control): refused" "block" "$(ub_decision)"
-expect_contains "UB.9 …naming T5 as not launched" "not launched: T5" "$UB_ERR$UB_OUT"
+expect_contains "UB.9 …naming T5 as not launched" "not launched: T5" "$(ub_names_id "$UB_ERR$UB_OUT" T5)"
 
 # ============================================================
 section "SD — a standing fill decline: the tick's FILL and the stop wall's refusal name the same rows (wave-24 T27; REQ-4 AC-4.7; D2; Step-6 review C2/U1)"
