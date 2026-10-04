@@ -5360,6 +5360,17 @@ EOF
         exit 1 ;;
     esac
     plan_verb_open approve
+    # A NAME NO ROW READS IS REFUSED (wave-26 T46; review 10 F6). `approve relase` used to be
+    # recorded "once" while the release kept waiting in silence; the names the rows read, as
+    # `approval:<name>` or `live:approval:<name>` (units.sh `units_approval_names`), are the only
+    # names an approval can satisfy. Exact match, case included, as readiness keys it.
+    AP_READ="$(units_approval_names "$PV_PLAN" | /usr/bin/grep -v '^plan$' | tr '\n' ' ' | sed 's/ $//')"
+    case " $AP_READ " in
+      *" $AP_NAME "*) : ;;
+      *)
+        die "REFUSED — no row in $PV_PLAN reads approval:$AP_NAME, so recording it would satisfy nothing; the rows read: ${AP_READ:-(no named approval)}. Approve one of those names exactly; the plan is unchanged."
+        exit 1 ;;
+    esac
     AP_HAVE="$(awk -v want="$AP_NAME" '
       /^[[:space:]]*```/ { fence = !fence; next }
       fence { next }
@@ -5436,6 +5447,13 @@ EOF
       /*) PF_ABS="$PF_EVID" ;;
       *)  PF_ABS="$PF_DOCS/$PF_EVID" ;;
     esac
+    # A SYMLINK IS NOT A RECORD (wave-26 T46; review 10 F7). The check below resolves the
+    # directory, not the file, so a link under record/ to a log elsewhere would be admitted and the
+    # evidence it cites could change after the proof. Refused by name, before it is read.
+    if [ -L "$PF_ABS" ]; then
+      die "REFUSED — the evidence $(clean "$PF_EVID") is a symbolic link (to $(clean "$(readlink "$PF_ABS")")), and what it points at can change after the proof; copy the log into the record (cp it to that path) and run proof-add again. The plan is unchanged."
+      exit 1
+    fi
     PF_REAL=""
     [ -n "$PF_DOCS" ] && [ -f "$PF_ABS" ] \
       && PF_REAL="$(cd "$(dirname "$PF_ABS")" 2>/dev/null && pwd -P)/$(basename "$PF_ABS")"
@@ -5474,15 +5492,21 @@ EOF
       die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the proof; the plan is unchanged."
       exit 1
     fi
-    # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING (wave-26 T14; D10). Every active
-    # review row reading `live:head` (`units_live_rows`, the kind default included) returns to
-    # `pending` in the same write, with its agent, worktree and base cells cleared: the row is
-    # one row across every pass, each pass its own launch — the launch recorder sets it active
-    # again and adds that pass's ledger line, so the ledger is not touched here (A-T14.4). The
-    # next landing past this proof makes it ready again (units.sh `live_head`).
+    # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING (wave-26 T14; D10). The active review
+    # row reading `live:head` (`units_live_rows`, the kind default included) whose `Files` hold
+    # this evidence returns to `pending` in the same write — that row alone: the proof of another
+    # review, the settled final one among them, leaves a live pass still running where it is
+    # (wave-26 T46; review 10 F3). The evidence is handed in both spellings, from the docs root
+    # (`record/…`) and from the repository, so a Files cell in either matches. It returns with
+    # its agent, worktree and base cells cleared: the row is one row across every pass, each pass
+    # its own launch — the launch recorder sets it active again and adds that pass's ledger line,
+    # so the ledger is not touched here (A-T14.4). The next landing past this proof makes it
+    # ready again (units.sh `live_head`).
     PF_BACK=""
     if [ "$PF_KIND" = review ]; then
-      for _pf_id in $(units_live_rows "$PV_NEW" 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { print $1 }'); do
+      PF_DOCREL="$(docs_root "$PV_REPO")"
+      case "$PF_DOCREL" in "$PV_REPO"/*) PF_DOCREL="${PF_DOCREL#"$PV_REPO"/}/$PF_REL" ;; *) PF_DOCREL="" ;; esac
+      for _pf_id in $(units_live_rows "$PV_NEW" "$PF_REL" $PF_DOCREL 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { print $1 }'); do
         _pf_cells=(status=pending agent=—)
         units_has_column "$PV_NEW" worktree && _pf_cells+=(worktree=—)
         units_has_column "$PV_NEW" base && _pf_cells+=(base=—)
