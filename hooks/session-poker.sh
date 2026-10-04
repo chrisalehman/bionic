@@ -6055,8 +6055,9 @@ EOF
         # usable evidence, for the same reason: no reading is not a bad reading, and a wave
         # that stalled on a missing probe would be worse than one that filled its budget.
         # THE STANDING FILL DECLINE (wave-24 T27; D2, AC-4.7; Step-6 review C2/U1). The stop wall
-        # treats the rows the session's latest `fill-declined:` answered as answered while
-        # `current:` is unchanged, so a FILL naming them asked again for an answer already given.
+        # treats the rows the session's latest `fill-declined:` answered as answered until the
+        # ready set gains a row it did not see (wave-26 T15; D16), so a FILL naming them asked
+        # again for an answer already given.
         # One reader, `fill_standing_decline` (lib/fill.sh), the stop collector's own: the tick
         # prints the decline while it stands and the ready set below leaves its rows out.
         SCHED_SD="$(fill_standing_decline "$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"
@@ -6123,7 +6124,7 @@ EOF
             # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
             # which answer holds the rows, and the standing line above says why.
             if [ -n "$SCHED_SD_IDS" ] && [ -n "$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")" ]; then
-              say "no FILL — every ready row is answered by the standing fill-declined (${SCHED_SD_IDS}); it stands until a row it did not see is ready or current: moves."
+              say "no FILL — every ready row is answered by the standing fill-declined (${SCHED_SD_IDS}); it stands until a row it did not see is ready."
             else
               say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
             fi

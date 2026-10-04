@@ -7635,13 +7635,13 @@ expect_contains "41i3 a decline that answered every ready row prints as standing
   "poker: fill-declined standing since 2026-10-03T09:00:00Z — the batch waits on the BASE merge" "$OUT"
 expect_eq "41i4 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
 expect_absent "41i5 …nor decision=FILL" "decision=FILL" "$OUT"
-# The three ways a line stands for nothing, each beside the full FILL it then leaves standing.
+# A moved current: is not one of the ways a line stands for nothing (wave-26 T15; D16).
 R41M="$(mk_rung_repo s41-sd-moved)"
 s41_sd_line "$R41M" "$SID" 3 ONE,TWO,THREE,FOUR "answered at an earlier step"
 poke_rung "$R41M" 60 0 tick
-expect_eq "41i6 a decline taken at another current: does not stand — the full FILL prints" \
-  "poker: FILL ONE TWO THREE FOUR" "$(s41_fill_line "$OUT")"
-expect_absent "41i7 …and no standing line" "fill-declined standing" "$OUT"
+expect_contains "41i6 wave-26 T15 (D16) a decline taken at another current: still stands over the same ready set" \
+  "fill-declined standing since " "$OUT"
+expect_eq "41i7 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
 R41O="$(mk_rung_repo s41-sd-other)"
 s41_sd_line "$R41O" "ffffffff-0000-4000-8000-000000000000" 4 ONE,TWO,THREE,FOUR "another session's answer"
 poke_rung "$R41O" 60 0 tick
