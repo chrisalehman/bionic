@@ -957,40 +957,57 @@ section "Group 11: the workspace readers — one file, read by key, refused thro
 # foreign line, a line with no path or a relative one, a CRLF ending. rc 1 is "nothing
 # recorded"; rc 2 is "refused", the file or a directory above it a symlink, or a session id
 # no file can be named for.
+#
+# EVERY PATH IN THESE LINES IS A REAL LINKED WORKTREE of the fixture repository (wave-25 T18):
+# a recorded path counts only when git lists it as one (Group 11b), so a row that wants the
+# session filter, the schema filter or the CRLF handling to be the thing that decides must
+# hand those filters a path the git rule would otherwise accept.
 
 expect_true "workspace_for_name is defined"    declare -f workspace_for_name
 expect_true "workspaces_of_session is defined" declare -f workspaces_of_session
 
-WK="$TMP/ws-reader"; mkdir -p "$WK/.bionic/tmp"
+# A linked worktree with no commit of its own, at <repo>/<parent>/<name>; echoes the path git
+# lists for it (the repository's path is physical, and git records the physical path).
+ws_tree() {  # <repo> <name> [parent dir, default .worktrees]
+  local r="$1" p="${3:-$1/.worktrees}"
+  git -C "$r" worktree add --quiet -b "ws/$2" "$p/$2" HEAD >/dev/null 2>&1
+  printf '%s' "$(cd "$p/$2" && pwd -P)"
+}
+
+WK="$(new_repo "$TMP/ws-reader")"; mkdir -p "$WK/.bionic/tmp"
 WKSID="reader-session-01"
 WKF="$WK/.bionic/tmp/workspaces-${WKSID}.state"
+WA1="$(ws_tree "$WK" a-1)"; WB1="$(ws_tree "$WK" b-1)"; WA2="$(ws_tree "$WK" a-2)"
+WC1="$(ws_tree "$WK" c-1)"; WAF="$(ws_tree "$WK" a-foreign)"; WAR="$(ws_tree "$WK" a-roster)"
 {
-  printf 'workspace/v1|session=%s|name=a|path=/t/a-1|branch=wt/a|base=0|plan=none|at=2026-10-03T00:00:00Z\n' "$WKSID"
-  printf 'workspace/v1|session=%s|name=b|path=/t/b-1|branch=wt/b|base=0|plan=none|at=2026-10-03T00:00:01Z\n' "$WKSID"
-  printf 'workspace/v1|session=%s|name=a|path=/t/a-2|branch=wt/a2|base=0|plan=none|at=2026-10-03T00:00:02Z\n' "$WKSID"
-  printf 'workspace/v1|session=someone-else|name=a|path=/t/a-foreign|branch=wt/x|base=0|plan=none|at=2026-10-03T00:00:03Z\n'
+  printf 'workspace/v1|session=%s|name=a|path=%s|branch=wt/a|base=0|plan=none|at=2026-10-03T00:00:00Z\n' "$WKSID" "$WA1"
+  printf 'workspace/v1|session=%s|name=b|path=%s|branch=wt/b|base=0|plan=none|at=2026-10-03T00:00:01Z\n' "$WKSID" "$WB1"
+  printf 'workspace/v1|session=%s|name=a|path=%s|branch=wt/a2|base=0|plan=none|at=2026-10-03T00:00:02Z\n' "$WKSID" "$WA2"
+  printf 'workspace/v1|session=someone-else|name=a|path=%s|branch=wt/x|base=0|plan=none|at=2026-10-03T00:00:03Z\n' "$WAF"
   # A line of ANOTHER schema naming `a` with a path, after a's last real line: a reader that
-  # did not key on the schema would answer /t/a-roster below. Built by the roster writer
+  # did not key on the schema would answer the a-roster tree below. Built by the roster writer
   # (tests/lib/roster-row.sh, as cross-gate §S17 requires) and given the path a workspace
   # line would carry.
-  printf '%s|path=/t/a-roster\n' "$(roster_row_fixture session="$WKSID" name=a)"
+  printf '%s|path=%s\n' "$(roster_row_fixture session="$WKSID" name=a)" "$WAR"
   printf 'workspace/v1|session=%s|name=e|branch=wt/e|base=0|plan=none|at=2026-10-03T00:00:04Z\n' "$WKSID"
   printf 'workspace/v1|session=%s|name=d|path=relative/d|branch=wt/d|base=0|plan=none|at=2026-10-03T00:00:05Z\n' "$WKSID"
-  printf 'workspace/v1|session=%s|name=c|path=/t/c-1|branch=wt/c|base=0|plan=none|at=2026-10-03T00:00:06Z\r\n' "$WKSID"
+  printf 'workspace/v1|session=%s|name=c|path=%s|branch=wt/c|base=0|plan=none|at=2026-10-03T00:00:06Z\r\n' "$WKSID" "$WC1"
 } > "$WKF"
 
 wk() { "$@"; echo "rc=$?"; }
+expect_eq "fixture: every tree the lines name is one git lists" "6" \
+  "$(git -C "$WK" worktree list --porcelain | /usr/bin/grep -c -E "^worktree ${WK}/\.worktrees/(a-1|b-1|a-2|c-1|a-foreign|a-roster)\$")"
 expect_eq "fixture: the foreign-schema line naming a, with a path, is in the file" "1" \
-  "$(/usr/bin/grep -c "^$(roster_row_schema)|.*|name=a|.*|path=/t/a-roster\$" "$WKF")"
-expect_eq "the last line for a name answers"               "$(printf '/t/a-2\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" a)"
-expect_eq "another name answers its own"                   "$(printf '/t/b-1\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" b)"
-expect_eq "a CRLF line answers without the CR"             "$(printf '/t/c-1\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" c)"
+  "$(/usr/bin/grep -c "^$(roster_row_schema)|.*|name=a|.*|path=${WAR}\$" "$WKF")"
+expect_eq "the last line for a name answers"               "$(printf '%s\nrc=0' "$WA2")" "$(wk workspace_for_name "$WK" "$WKSID" a)"
+expect_eq "another name answers its own"                   "$(printf '%s\nrc=0' "$WB1")" "$(wk workspace_for_name "$WK" "$WKSID" b)"
+expect_eq "a CRLF line answers without the CR"             "$(printf '%s\nrc=0' "$WC1")" "$(wk workspace_for_name "$WK" "$WKSID" c)"
 expect_eq "a relative path is not a recorded tree"         "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" d)"
 expect_eq "a line with no path is not a recorded tree"     "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" e)"
 expect_eq "a name nobody recorded has none"                "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" z)"
 expect_eq "an empty name has none"                        "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" "")"
 expect_eq "workspaces_of_session: this session's valid paths, in order" \
-  "$(printf '/t/a-1\n/t/b-1\n/t/a-2\n/t/c-1\nrc=0')" "$(wk workspaces_of_session "$WK" "$WKSID")"
+  "$(printf '%s\n%s\n%s\n%s\nrc=0' "$WA1" "$WB1" "$WA2" "$WC1")" "$(wk workspaces_of_session "$WK" "$WKSID")"
 expect_eq "no file: workspace_for_name has none"           "rc=1" "$(wk workspace_for_name "$WK" no-file-session a)"
 expect_eq "no file: workspaces_of_session has none"        "rc=1" "$(wk workspaces_of_session "$WK" no-file-session)"
 expect_eq "a session id no file can be named for is refused" "rc=2" "$(wk workspace_for_name "$WK" "../tmp/x" a)"
@@ -1005,6 +1022,141 @@ expect_eq "…and by workspaces_of_session" "rc=2" "$(wk workspaces_of_session "
 WKT="$TMP/ws-reader-tmplink"; mkdir -p "$WKT/.bionic"
 ln -s "$WK/.bionic/tmp" "$WKT/.bionic/tmp"
 expect_eq "a symlinked .bionic/tmp is refused" "rc=2" "$(wk workspace_for_name "$WKT" "$WKSID" a)"
+
+section "Group 11b: a recorded path counts only when git lists it as a linked worktree (wave-25 T18, critic C1, A-orch-36)"
+#
+# The record file sits in `.bionic/tmp`, and a script the permission hook never sees can append
+# to it (spec N7). A line naming the main checkout made `workspace_for_name` answer the main
+# checkout, and the hook then granted a writer all of it. The rule is by place: a path counts
+# only when `git worktree list` names it as a LINKED worktree of this repository, spelled as
+# git spells it, and it resolves physically to that same spelling. Anything else is skipped,
+# so an earlier true line for the name still answers. A yes is exact; the only error allowed
+# is refusing something harmless (A-orch-29).
+#
+# THE PLANTED DEFECTS. The rule removed: every "skipped" row below answers the forged path.
+# The rule by prefix (`<root>/.worktrees/`): the main checkout and its parent are still
+# skipped, but the plain directory, the removed tree, the recreated directory, the symlink and
+# the `..` spelling under `.worktrees/` answer, and the two trees under another parent are
+# refused.
+
+WG="$(new_repo "$TMP/ws-git")"; mkdir -p "$WG/.bionic/tmp"
+WGSID="git-rule-session"
+WGF="$WG/.bionic/tmp/workspaces-${WGSID}.state"
+WGT="$(ws_tree "$WG" f-1)"
+mkdir -p "$WG/trees" "$TMP/ws-elsewhere"
+WGIN="$(ws_tree "$WG" g-1 "$WG/trees")"
+WGOUT="$(ws_tree "$WG" g-2 "$TMP/ws-elsewhere")"
+WGGONE="$(ws_tree "$WG" gone)"; git -C "$WG" worktree remove "$WGGONE" >/dev/null 2>&1
+WGPRUNE="$(ws_tree "$WG" pruned)"; rm -rf "$WGPRUNE"; mkdir -p "$WGPRUNE"
+WGSWAP="$(ws_tree "$WG" swapped)"; rm -rf "$WGSWAP"; ln -s "$WG" "$WGSWAP"
+WGPLAIN="$WG/.worktrees/plain"; mkdir -p "$WGPLAIN"
+WO="$(new_repo "$TMP/ws-other")"; WGFOREIGN="$(ws_tree "$WO" o-1)"
+WGUPPER="$(printf '%s' "$WGT" | tr '[:lower:]' '[:upper:]')"
+
+wg_line() {  # <name> <path> -> one workspace line of this session
+  printf 'workspace/v1|session=%s|name=%s|path=%s|branch=wt/x|base=0|plan=none|at=2026-10-04T00:00:00Z\n' "$WGSID" "$1" "$2"
+}
+
+# The fixture, proven before it is read: git lists the true trees and the three it still
+# carries (the recreated directory as prunable, the symlink as a live tree); it does not list
+# the removed tree, the plain directory, the main checkout's parent or the other repository's.
+WGLIST="$(git -C "$WG" worktree list --porcelain)"
+expect_contains "fixture: git lists the true tree"                 "worktree $WGT"   "$WGLIST"
+expect_contains "fixture: git lists the tree under trees/"         "worktree $WGIN"  "$WGLIST"
+expect_contains "fixture: git lists the tree outside the root"     "worktree $WGOUT" "$WGLIST"
+expect_contains "fixture: git still lists the recreated directory" "worktree $WGPRUNE" "$WGLIST"
+expect_contains "fixture: …and calls it prunable"                  "prunable" "$WGLIST"
+expect_contains "fixture: git still lists the symlinked tree"      "worktree $WGSWAP" "$WGLIST"
+expect_absent   "fixture: git does not list the removed tree"      "worktree $WGGONE" "$WGLIST"
+expect_absent   "fixture: git does not list the plain directory"   "worktree $WGPLAIN" "$WGLIST"
+expect_absent   "fixture: git does not list the other repository's tree" "worktree $WGFOREIGN" "$WGLIST"
+expect_true     "fixture: the removed tree's directory is gone"    test ! -e "$WGGONE"
+expect_true     "fixture: the swapped tree is a symlink to main"   test -L "$WGSWAP"
+
+# One forged line after one true line for the same name: the true tree still answers.
+wg_skips() {  # <label> <forged path>
+  { wg_line f "$WGT"; wg_line f "$2"; } > "$WGF"
+  expect_eq "$1: skipped, the earlier true tree answers" "$(printf '%s\nrc=0' "$WGT")" "$(wk workspace_for_name "$WG" "$WGSID" f)"
+}
+wg_skips "a line naming the main checkout"                  "$WG"
+wg_skips "a line naming the parent of the main checkout"    "${WG%/*}"
+wg_skips "a line naming a real directory git does not list" "$WGPLAIN"
+wg_skips "a line naming a tree that was removed"            "$WGGONE"
+wg_skips "a line naming a removed tree's recreated directory (git: prunable)" "$WGPRUNE"
+wg_skips "a line naming a symlink standing where a tree was" "$WGSWAP"
+wg_skips "a line naming the true tree through .."           "$WGT/../f-1"
+wg_skips "a line naming .worktrees itself"                  "$WGT/.."
+wg_skips "a line naming the true tree in another letter case" "$WGUPPER"
+wg_skips "a line naming the true tree with a trailing slash" "$WGT/"
+wg_skips "a line naming another repository's linked worktree" "$WGFOREIGN"
+
+# With only untrue lines the name has none: rc 1, never a path.
+{ wg_line u "$WG"; wg_line u "${WG%/*}"; wg_line u "$WGPLAIN"; wg_line u "$WGSWAP"; } > "$WGF"
+expect_eq "only untrue lines: the name has none (rc 1)" "rc=1" "$(wk workspace_for_name "$WG" "$WGSID" u)"
+expect_eq "…and the session lists none (rc 1)" "rc=1" "$(wk workspaces_of_session "$WG" "$WGSID")"
+
+# The positives that keep the rule from over-refusing: a tree under another parent counts,
+# inside the root and outside it, each as git lists it.
+{ wg_line g "$WGIN"; wg_line h "$WGOUT"; } > "$WGF"
+expect_eq "a tree created under <root>/trees counts" "$(printf '%s\nrc=0' "$WGIN")" "$(wk workspace_for_name "$WG" "$WGSID" g)"
+expect_eq "a tree created under a parent outside the root counts" "$(printf '%s\nrc=0' "$WGOUT")" "$(wk workspace_for_name "$WG" "$WGSID" h)"
+
+# The lead's reader: only the true trees, in order.
+{
+  wg_line f "$WGT"; wg_line x "$WG"; wg_line g "$WGIN"; wg_line x "${WG%/*}"; wg_line x "$WGPLAIN"
+  wg_line x "$WGGONE"; wg_line x "$WGPRUNE"; wg_line x "$WGSWAP"; wg_line x "$WGFOREIGN"
+  wg_line x "$WGT/../f-1"; wg_line h "$WGOUT"
+} > "$WGF"
+expect_eq "workspaces_of_session lists only the trees git lists, in order" \
+  "$(printf '%s\n%s\n%s\nrc=0' "$WGT" "$WGIN" "$WGOUT")" "$(wk workspaces_of_session "$WG" "$WGSID")"
+
+# GIT IS ASKED ONCE PER ANSWER, never once per line, and not at all when no line could count.
+# A `git` first on PATH counts its calls and runs the real one.
+WGSHIM="$TMP/ws-git-shim"; mkdir -p "$WGSHIM"
+printf '#!/bin/bash\nprintf x >> "%s"\nexec "%s" "$@"\n' "$WGSHIM/calls" "$(command -v git)" > "$WGSHIM/git"
+chmod +x "$WGSHIM/git"
+: > "$WGSHIM/calls"
+WGOUT11="$(PATH="$WGSHIM:$PATH" wk workspaces_of_session "$WG" "$WGSID")"
+expect_eq "through the counting git, the answer is the same three trees" \
+  "$(printf '%s\n%s\n%s\nrc=0' "$WGT" "$WGIN" "$WGOUT")" "$WGOUT11"
+expect_eq "…and git was asked once for eleven lines" "x" "$(cat "$WGSHIM/calls")"
+: > "$WGSHIM/calls"
+WGOUTZ="$(PATH="$WGSHIM:$PATH" wk workspace_for_name "$WG" "$WGSID" nobody)"
+expect_eq "a name with no line has none" "rc=1" "$WGOUTZ"
+expect_eq "…and asks git nothing" "" "$(cat "$WGSHIM/calls")"
+
+# WHEN GIT CANNOT BE ASKED the reader never answers yes: the same line, naming a tree git does
+# list for its own repository, under a root that is no repository, is refused (rc 2).
+WGNR="$TMP/ws-no-repo"; mkdir -p "$WGNR/.bionic/tmp"
+wg_line f "$WGT" > "$WGNR/.bionic/tmp/workspaces-${WGSID}.state"
+{ wg_line f "$WGT"; } > "$WGF"
+expect_eq "control: under its own repository the line answers" "$(printf '%s\nrc=0' "$WGT")" "$(wk workspace_for_name "$WG" "$WGSID" f)"
+expect_eq "under a root git cannot read, workspace_for_name refuses (rc 2)" "rc=2" "$(wk workspace_for_name "$WGNR" "$WGSID" f)"
+expect_eq "…and so does workspaces_of_session" "rc=2" "$(wk workspaces_of_session "$WGNR" "$WGSID")"
+WGBROKEN="$TMP/ws-git-broken"; mkdir -p "$WGBROKEN"
+printf '#!/bin/bash\nexit 1\n' > "$WGBROKEN/git"; chmod +x "$WGBROKEN/git"
+expect_eq "with a git that fails, the reader refuses too (rc 2)" "rc=2" \
+  "$(PATH="$WGBROKEN:$PATH" wk workspace_for_name "$WG" "$WGSID" f)"
+
+# THE LAUNCH RECORDER'S READER (wave-26 T40). The launch recorder fills a plan row's worktree and
+# base cells from this record, so it asks the same rule: the tree is the one workspace_for_name
+# answers, and the base is the one on the last line naming that tree.
+expect_true "workspace_record_for_name is defined" declare -F workspace_record_for_name
+wg_line_b() {  # <name> <path> <base>
+  printf 'workspace/v1|session=%s|name=%s|path=%s|branch=wt/x|base=%s|plan=none|at=2026-10-04T00:00:00Z\n' "$WGSID" "$1" "$2" "$3"
+}
+{ wg_line_b f "$WGT" aaaaaaaa; wg_line_b f "$WG" bbbbbbbb; } > "$WGF"
+expect_eq "record: a forged line naming the main checkout is skipped, the true tree and its base answer" \
+  "$(printf '%s\taaaaaaaa\nrc=0' "$WGT")" "$(wk workspace_record_for_name "$WG" "$WGSID" f)"
+{ wg_line_b f "$WGIN" cccccccc; wg_line_b f "$WGT" dddddddd; } > "$WGF"
+expect_eq "record: the last true line answers, with its own base" \
+  "$(printf '%s\tdddddddd\nrc=0' "$WGT")" "$(wk workspace_record_for_name "$WG" "$WGSID" f)"
+{ wg_line_b f "$WGT" eeeeeeee; wg_line_b g "$WGIN" ffffffff; wg_line_b f "$WGPLAIN" 99999999; } > "$WGF"
+expect_eq "record: another name's line and an untrue line leave the true tree's base" \
+  "$(printf '%s\teeeeeeee\nrc=0' "$WGT")" "$(wk workspace_record_for_name "$WG" "$WGSID" f)"
+{ wg_line_b u "$WG" 11111111; wg_line_b u "$WGPLAIN" 22222222; } > "$WGF"
+expect_eq "record: only untrue lines: none (rc 1)" "rc=1" "$(wk workspace_record_for_name "$WG" "$WGSID" u)"
+expect_eq "record: under a root git cannot read, refused (rc 2)" "rc=2" "$(wk workspace_record_for_name "$WGNR" "$WGSID" f)"
 
 # ---------------------------------------------------------------------------
 # THE LANDING RULE (wave-26 T10, T31, D7, D19). A tree lands on its LAST stamped suite run when
@@ -1288,6 +1440,164 @@ expect_match "a land whose merge has a commit on top refuses, undo=failed" \
   "spawn-worktree: REFUSED reason=onto-moved branch=under-a-commit * undo=failed — *" "$OUTLP"
 expect_eq "the commit on top is still the onto branch's head" "on top of the merge" \
   "$(git -C "$LR" log -1 --format=%s wave/fixture)"
+
+section "§LAND-UNDO: the undo never drops a commit it did not make, and the land names its own merge (review 11 B1, S1, N2)"
+
+# Every land below runs in this repository, whose checkout <LU> holds wave/fixture. The seam is a
+# `git` function in the land's subshell: an arrival commits onto the branch as `git merge` is
+# called (the onto-moved case), then [action] runs once the merge has returned, then the
+# [n]-th git call after that is preceded by another writer's commit, its sha kept in $FORCED. The
+# calls are counted in a file, since most of them run inside a command substitution's subshell.
+LU="$(new_repo "$TMP/land-undo")"; shared_file "$LU"
+FORCED="$TMP/land-undo-forced.sha"; CALLS="$TMP/land-undo-calls"
+land_raced() {  # <tree> <arrival text> [action: none|touch|ontop|stage|misread] [n] — lands <tree>
+  local lr_merged="" lr_calls lr_tree="$1" lr_text="$2" lr_act="${3:-none}" lr_n="${4:-0}"
+  rm -f "$FORCED"; echo 0 > "$CALLS"
+  git() {
+    if [ -n "$lr_merged" ]; then
+      lr_calls=$(( $(cat "$CALLS") + 1 )); echo "$lr_calls" > "$CALLS"
+      if { [ "$lr_calls" = "$lr_n" ] && [ ! -e "$FORCED" ]; } || { [ "$lr_n" = gap ] && [ ! -e "$FORCED" ] \
+          && { [ "${3:-}" = reset ] || [ "${3:-}" = update-ref ]; }; }; then
+        echo "$lr_calls" > "$LU/forced.txt"; command git -C "$LU" add forced.txt
+        command git -C "$LU" commit --quiet -m "another writer's commit" && command git -C "$LU" rev-parse HEAD > "$FORCED"
+      fi
+    elif [ "${3:-}" = merge ] && [ "${4:-}" = --no-ff ]; then
+      if [ "$lr_act" != misread ]; then
+        awk -v t="$lr_text" 'NR == 4 { $0 = t } { print }' "$LU/shared.txt" > "$LU/shared.new" \
+          && mv "$LU/shared.new" "$LU/shared.txt" && command git -C "$LU" commit --quiet -am "$lr_text"
+      fi
+      command git "$@" || return
+      lr_merged=1
+      case "$lr_act" in
+        touch) echo "edited during the land" >> "$LU/${lr_tree##*/}.txt" ;;
+        stage) echo "staged during the land" >> "$LU/file.txt"; command git -C "$LU" add file.txt ;;
+        ontop|misread) command git -C "$LU" merge --quiet --no-ff -m "merge other (land)" other-land ;;
+      esac
+      return 0
+    fi
+    command git "$@"
+  }
+  worktree_land "$lr_tree" wave/fixture
+}
+# The commits of <list> that no branch of <repo> reaches, one per line.
+lost_commits() {  # <repo> <list>
+  local all; all="$(git -C "$1" rev-list --branches)"
+  printf '%s\n' "$2" | while read -r c; do
+    [ -n "$c" ] && ! printf '%s\n' "$all" | grep -qx "$c" && printf '%s\n' "$c"
+  done
+  return 0
+}
+# Back to a clean checkout between arms; whatever a land left is read before this runs.
+lu_clean() { git -C "$LU" reset --quiet --hard; git -C "$LU" clean --quiet -fd; }
+# The tree another land merges in the instant after this one's merge: one commit, its own file.
+lu_other() {  # <file> — branch other-land: wave/fixture plus <file>
+  git -C "$LU" branch -f other-land "$(git -C "$LU" commit-tree -p wave/fixture -m "other work" \
+    "$( { git -C "$LU" ls-tree wave/fixture
+          printf '100644 blob %s\t%s\n' "$(echo other | git -C "$LU" hash-object -w --stdin)" "$1"; } \
+        | git -C "$LU" mktree)")"
+}
+
+# The extractor is proved before anything reads an empty answer from it: a commit no branch holds
+# is listed, and a branch head is not.
+LUD="$(git -C "$LU" commit-tree -p wave/fixture -m dangling "$(git -C "$LU" rev-parse 'wave/fixture^{tree}')")"
+expect_eq "lost_commits lists a commit no branch holds" "$LUD" "$(lost_commits "$LU" "$LUD")"
+expect_eq "…and not one a branch holds" "" "$(lost_commits "$LU" "$(git -C "$LU" rev-parse wave/fixture)")"
+
+# B1, THE OLD GAP. A commit lands in the checkout just before the undo moves the branch back: the
+# undo must decline, and that commit stays the branch's head.
+LUG="$(new_tree "$LU" gap-racer)"; green_stamp "$LUG"; LUGB="$(git -C "$LU" rev-list --branches)"
+OUTLUG="$(land_raced "$LUG" "arrived before the gap" none gap)"
+expect_true "fixture: the other writer's commit was made in the gap" test -s "$FORCED"
+expect_eq   "that commit is still the onto branch's head" "$(cat "$FORCED" 2>/dev/null)" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq   "no commit is lost, that one included" "" "$(lost_commits "$LU" "$LUGB
+$(cat "$FORCED" 2>/dev/null)")"
+expect_match "and the land says the merge stands under it" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=gap-racer * undo=failed — the merge stands under a later commit: *" "$OUTLUG"
+lu_clean
+
+# AFTER ANY OUTCOME OF THE UNDO, NO COMMIT IS LOST. Another writer commits before the n-th git call
+# the land makes after its merge, for every n the land reaches; the undo is done (the land made no
+# n-th call), declined (the commit came first), or failed half-way (touch: a file the merge
+# brought in is edited in the checkout, so the checkout cannot follow the branch back). Each time,
+# every commit that existed before the land, and the other writer's, is reachable from a branch.
+LUOUT=""; LULOST=""; LUFIRED=0
+for lu_mode in none touch; do
+  for lu_n in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    lu_t="$(new_tree "$LU" "any-${lu_mode}-${lu_n}")"; green_stamp "$lu_t"
+    lu_before="$(git -C "$LU" rev-list --branches)"
+    lu_out="$(land_raced "$lu_t" "arrived ${lu_mode} ${lu_n}" "$lu_mode" "$lu_n")"
+    [ -s "$FORCED" ] && { LUFIRED=$((LUFIRED + 1)); lu_before="${lu_before}
+$(cat "$FORCED")"; }
+    LULOST="${LULOST}$(lost_commits "$LU" "$lu_before" | sed "s/^/${lu_mode}-${lu_n} lost /")"
+    case "$lu_out" in
+      *"undo=failed"*) LUOUT="${LUOUT} ${lu_mode}:failed" ;;
+      *"the merge is undone"*) LUOUT="${LUOUT} ${lu_mode}:undone" ;;
+      *) LUOUT="${LUOUT} ${lu_mode}:other" ;;
+    esac
+    lu_clean
+  done
+done
+expect_match "the undo was done in some arms" "* none:undone*" "$LUOUT"
+expect_match "…declined in some" "* none:failed*" "$LUOUT"
+expect_match "…and failed half-way in others" "* touch:failed*" "$LUOUT"
+expect_no_match "every arm ended in one of those three" "*:other*" "$LUOUT"
+expect_ne "the other writer committed in some arms" "0" "$LUFIRED"
+expect_eq "and no commit that existed is unreachable from a branch, after any of them" "" "$LULOST"
+
+# THE UNDO THAT FAILS HALF-WAY puts the branch back on the merge, and the checkout with it: a file
+# the merge brought in was edited during the land, so the checkout cannot follow the branch back.
+LUT="$(new_tree "$LU" touched)"; green_stamp "$LUT"; LUTH="$(git -C "$LUT" rev-parse HEAD)"
+OUTLUT="$(land_raced "$LUT" "arrived under an edit" touch)"
+LUTM="$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq   "fixture: the onto branch holds the land's merge" "$LUTH" "$(git -C "$LU" rev-parse 'wave/fixture^2')"
+expect_match "the land says the merge stands and how to undo it" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=touched * merge=${LUTM} undo=failed — the merge stands: reset wave/fixture to $(git -C "$LU" rev-parse "${LUTM}^1") in ${LU} by hand, *" "$OUTLUT"
+expect_eq   "the checkout's index is the merge's" "" "$(git -C "$LU" diff --cached --name-only)"
+expect_eq   "and the edit is kept, unstaged" " M touched.txt" "$(git -C "$LU" status --porcelain --untracked-files=no)"
+lu_clean
+
+# S1(a), THE LAND NAMES ITS OWN MERGE. Another land merges on top in the instant after this one's
+# merge, before it is read back; this land was judged on the head it merged onto and lands, naming
+# its merge, not the other's.
+lu_other other-a.txt
+LUM="$(new_tree "$LU" misread)"; green_stamp "$LUM"; LUMH="$(git -C "$LUM" rev-parse HEAD)"
+OUTLUM="$(land_raced "$LUM" "" misread)"
+LUMM="$(git -C "$LU" rev-parse 'wave/fixture^1')"
+expect_eq "fixture: the other land's merge is the head, on top of this land's" "$LUMH" "$(git -C "$LU" rev-parse "${LUMM}^2")"
+expect_match "the land lands and names its own merge" \
+  "spawn-worktree: LANDED branch=misread onto=wave/fixture checkout=${LU} merge=${LUMM} *" "$OUTLUM"
+expect_eq "the other land's merge is still the head" "merge other (land)" "$(git -C "$LU" log -1 --format=%s wave/fixture)"
+lu_clean
+
+# S1(b), THE FIX PRINTED WHEN A COMMIT SITS ON TOP. An arrival makes this land's merge onto-moved,
+# and another land merges on top before the undo: the undo declines, and the line prints the
+# revert, which keeps the other land; a reset to the first parent would drop it.
+lu_other other-b.txt
+LUP="$(new_tree "$LU" under-a-land)"; green_stamp "$LUP"; LUPH="$(git -C "$LUP" rev-parse HEAD)"
+OUTLUP="$(land_raced "$LUP" "arrived under a land" ontop)"
+LUPM="$(git -C "$LU" rev-parse 'wave/fixture^1')"; LUPO="$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq "fixture: this land's merge sits under the other land's" "$LUPH" "$(git -C "$LU" rev-parse "${LUPM}^2")"
+expect_match "the line names this land's merge and prints the revert" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=under-a-land * merge=${LUPM} undo=failed — the merge stands under a later commit: git -C ${LU} revert -m 1 ${LUPM}, *" "$OUTLUP"
+expect_no_match "and prints no reset" "*reset*" "$OUTLUP"
+LUPFIX="$(printf '%s' "$OUTLUP" | sed -n 's/.*: \(git -C [^ ]* revert -m 1 [0-9a-f]*\),.*/\1/p')"
+expect_eq "fixture: the printed fix reads back" "git -C ${LU} revert -m 1 ${LUPM}" "$LUPFIX"
+# shellcheck disable=SC2086 # the printed command is run as an operator would type it
+GIT_EDITOR=: command $LUPFIX >/dev/null 2>&1
+expect_true "following it keeps the other land's merge" git -C "$LU" merge-base --is-ancestor "$LUPO" wave/fixture
+expect_eq "…and takes this land's work off the branch" "" "$(git -C "$LU" ls-tree --name-only wave/fixture under-a-land.txt)"
+expect_eq "…while the other land's work stays" "other-b.txt" "$(git -C "$LU" ls-tree --name-only wave/fixture other-b.txt)"
+lu_clean
+
+# N2, A CHANGE STAGED DURING THE LAND. A successful undo keeps it, staged.
+LUS="$(new_tree "$LU" stager)"; green_stamp "$LUS"
+OUTLUS="$(land_raced "$LUS" "arrived under a stage" stage)"
+expect_match "fixture: the merge was undone" "spawn-worktree: REFUSED reason=onto-moved branch=stager * — the merge is undone and the tree kept; *" "$OUTLUS"
+expect_eq "the onto branch is back on the arrival" "arrived under a stage" "$(git -C "$LU" log -1 --format=%s wave/fixture)"
+expect_eq "the staged change is still staged" "M  file.txt" "$(git -C "$LU" status --porcelain --untracked-files=no)"
+expect_eq "…with its content" "staged during the land" "$(tail -n 1 "$LU/file.txt")"
+expect_false "and the tree's file left the checkout with the merge" test -e "$LU/stager.txt"
+lu_clean
 
 section "§LAND-KEEP: after each refusal the tree's record link still resolves (AC-9.1)"
 #

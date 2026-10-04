@@ -575,8 +575,9 @@ payload_for() {
     session-start)
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"SessionStart",source:"startup"}' ;;
     # The carrier's question: a command whose rm target is a variable, which it answers deny.
+    # A bypass session's lead asks: the carrier answers only in bypass and auto mode (T20).
     permission-answer)
-      jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PermissionRequest",tool_name:"Bash",tool_input:{command:"rm -f $TR"},permission_suggestions:[]}' ;;
+      jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,permission_mode:"bypassPermissions",hook_event_name:"PermissionRequest",tool_name:"Bash",tool_input:{command:"rm -f $TR"},permission_suggestions:[]}' ;;
   esac
 }
 

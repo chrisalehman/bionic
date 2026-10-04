@@ -279,7 +279,11 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 # included (wave-26 D19). The link is dropped only just before `git worktree
 # remove`, the one act that needs it gone, and put back if git refuses that.
 # Two refusals can only be known after the merge, `onto-moved` and `branch-moved`
-# (review 7 F8, F9); each undoes the merge first, so it leaves the same state.
+# (review 7 F8, F9); each undoes the merge first, so it leaves the same state. The
+# exception is a refusal that says `undo=failed` (review 11 S1): the undo declined, because
+# a commit sits on the merge or a change in the checkout touches a file the merge brought,
+# so the merge stands on <onto>, the tree is kept, and the line prints the one fix that
+# removes nothing but the merge.
 #
 # THE LANDING RULE (wave-26 D7, as ruled in A-orch-26). A tree lands on its own
 # green run. It must first contain what landed since it branched only where that
@@ -321,11 +325,32 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 _wt_say() { printf '%s: %s\n' "${WORKTREE_CONTRACT_PROG:-spawn-worktree}" "$*"; }
 _wt_refuse() { _wt_say "REFUSED reason=$*"; return 2; }
 
-# The checkout holding <branch>, from `git worktree list --porcelain`: one
+# Every checkout git lists for <root>, from `git worktree list --porcelain`: one
 # `worktree <path>` stanza per checkout, its `branch refs/heads/<b>` line naming
-# what it holds. A detached or bare stanza holds no branch and is skipped. The
-# path is printed physically (`pwd -P`), the form every other path in this file
-# is compared in.
+# what it holds. Printed one per line as `<ref>` TAB `<path as git prints it>`,
+# the ref `-` for a detached or bare stanza, and the MAIN checkout first, because
+# git lists it first. rc 1 when git cannot be asked or lists nothing (a root that
+# is no repository). The one reader of the porcelain: `worktree_checkout_of` and
+# the workspace readers below both take it from here.
+_wt_checkouts() {  # <root>
+  local list line path="" ref="-" n=0
+  list="$(git -C "${1:-}" worktree list --porcelain 2>/dev/null)" || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*)
+        [ "$n" -gt 0 ] && printf '%s\t%s\n' "$ref" "$path"
+        path="${line#worktree }"; ref="-"; n=$((n + 1)) ;;
+      "branch "*) ref="${line#branch }" ;;
+    esac
+  done <<EOF
+$list
+EOF
+  [ "$n" -gt 0 ] || return 1
+  printf '%s\t%s\n' "$ref" "$path"
+}
+
+# The checkout holding <branch>. The path is printed physically (`pwd -P`), the
+# form every other path in this file is compared in.
 #
 #   0  one checkout holds it -> its path
 #   1  no checkout holds it
@@ -333,17 +358,13 @@ _wt_refuse() { _wt_say "REFUSED reason=$*"; return 2; }
 #      paths, space-separated: which of them to merge in is not a guess to make
 #   3  the one stanza's directory cannot be entered (a prunable entry) -> its path
 worktree_checkout_of() {  # <root> <branch>
-  local root="${1:-}" want="refs/heads/${2:-}" line path="" hits="" n=0 abs
+  local want="refs/heads/${2:-}" ref path hits="" n=0 abs
   [ -n "${2:-}" ] || return 1
-  while IFS= read -r line; do
-    case "$line" in
-      "worktree "*) path="${line#worktree }" ;;
-      "branch "*)
-        [ "${line#branch }" = "$want" ] || continue
-        n=$((n + 1)); hits="${hits:+$hits }${path}" ;;
-    esac
+  while IFS=$'\t' read -r ref path; do
+    [ "$ref" = "$want" ] || continue
+    n=$((n + 1)); hits="${hits:+$hits }${path}"
   done <<EOF
-$(git -C "$root" worktree list --porcelain 2>/dev/null)
+$(_wt_checkouts "${1:-}")
 EOF
   [ "$n" -eq 0 ] && return 1
   if [ "$n" -gt 1 ]; then printf '%s' "$hits"; return 2; fi
@@ -448,16 +469,53 @@ _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
   _wt_refuse "not-current branch=${1} onto=${2} onto_head=${3:-<none>} ${4} — merge ${2} into the tree, re-run its suites, land again"
 }
 
-# THE UNDO OF A MERGE A LAND MUST NOT KEEP (review 7 F8, F9). Only the land's own merge is
-# undone: the checkout must still sit on <merge sha>, that commit's second parent must be the
-# head the land merged (so a commit someone made on top of it is never reset away), and
-# `reset --keep` refuses rather than overwrite a file changed since. Returns 1, the merge left
-# standing, when any of them fails.
-_wt_undo_merge() {  # <checkout> <merge sha> <first parent> <head merged>
-  [ -n "${3:-}" ] && [ -n "${4:-}" ] || return 1
-  [ "$(git -C "$1" rev-parse --verify --quiet HEAD 2>/dev/null)" = "$2" ] || return 1
-  [ "$(git -C "$1" rev-parse --verify --quiet "${2}^2" 2>/dev/null)" = "$4" ] || return 1
-  git -C "$1" reset --quiet --keep "$3" >/dev/null 2>&1
+# THE UNDO OF A MERGE A LAND MUST NOT KEEP (review 7 F8, F9; review 11 B1). Only the land's own
+# merge is undone (its second parent is the head the land merged), and <onto> moves back by
+# compare-and-swap: `update-ref <ref> <first parent> <merge>` moves it only if it still holds the
+# merge, in one locked step, so a commit made on top of the merge at any instant stays on the
+# branch and the undo declines. The checkout then follows with a two-tree `read-tree -m -u`, which
+# keeps every uncommitted change, a staged one staged, and refuses rather than overwrite a file
+# the merge touched and someone changed since; on that refusal the swap is reversed, again only
+# if nothing moved the branch meanwhile. Returns 1, the merge left standing, when any step declines.
+_wt_undo_merge() {  # <checkout> <onto> <merge sha> <first parent> <head merged>
+  local ref="refs/heads/${2:-}"
+  [ -n "${2:-}" ] && [ -n "${3:-}" ] && [ -n "${4:-}" ] && [ -n "${5:-}" ] || return 1
+  [ "$(git -C "$1" rev-parse --verify --quiet "${3}^2" 2>/dev/null)" = "$5" ] || return 1
+  [ "$(git -C "$1" symbolic-ref --quiet HEAD 2>/dev/null)" = "$ref" ] || return 1
+  git -C "$1" update-ref -m "land: undo ${3}" "$ref" "$4" "$3" >/dev/null 2>&1 || return 1
+  git -C "$1" update-index -q --refresh >/dev/null 2>&1
+  git -C "$1" read-tree -m -u "$3" "$4" >/dev/null 2>&1 && return 0
+  git -C "$1" update-ref -m "land: undo refused, ${3} restored" "$ref" "$3" "$4" >/dev/null 2>&1
+  return 1
+}
+
+# THE LAND'S OWN MERGE (review 11 S1). HEAD after `git merge` is that merge unless another writer
+# committed on top in the instant between; so the merge is the newest first-parent commit of
+# <onto> since the judged head whose second parent is the head this land merged. Empty when
+# <onto> no longer holds one.
+_wt_own_merge() {  # <checkout> <onto> <judged onto head> <head merged> -> sha
+  local c p1 p2 more
+  while read -r c p1 p2 more; do
+    [ "$p2" = "$4" ] && [ -z "$more" ] && { printf '%s' "$c"; return 0; }
+  done <<EOF
+$(git -C "$1" rev-list --first-parent --parents "${3}..refs/heads/${2}" 2>/dev/null)
+EOF
+  return 1
+}
+
+# WHAT TO DO WHEN THE UNDO DECLINED (review 11 S1): a reset only while <onto> still sits on the
+# land's merge, since then it removes that merge and nothing else; under a later commit, the revert
+# that takes the merge's changes out and keeps that commit; never a reset past another writer's work.
+_wt_undo_failed_fix() {  # <checkout> <onto> <merge sha or empty> <first parent>
+  local at
+  at="$(git -C "$1" rev-parse --verify --quiet "refs/heads/${2}" 2>/dev/null)"
+  if [ -n "$3" ] && [ "$at" = "$3" ]; then
+    printf 'the merge stands: reset %s to %s in %s by hand' "$2" "${4:-its first parent}" "$1"
+  elif [ -n "$3" ] && git -C "$1" merge-base --is-ancestor "$3" "refs/heads/${2}" 2>/dev/null; then
+    printf 'the merge stands under a later commit: git -C %s revert -m 1 %s' "$1" "$3"
+  else
+    printf 'the merge is not on %s any more: nothing to undo' "$2"
+  fi
 }
 
 worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
@@ -562,7 +620,7 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     git -C "$co" merge --abort >/dev/null 2>&1
     _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co}"; return 2
   fi
-  merge_sha="$(git -C "$co" rev-parse HEAD 2>/dev/null)"
+  merge_sha="$(_wt_own_merge "$co" "$onto" "$onto_head" "$head")"
 
   # THE MERGE IS CHECKED AGAINST WHAT WAS JUDGED (review 7 F8, F9). `git merge` reads the
   # head of <onto> for itself, after the read above, and merges onto whatever it finds: a land
@@ -571,7 +629,7 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   # must still hold the head that was merged: a commit its writer added since would be left
   # unlanded on a branch whose tree is about to go. Either way this land's merge is undone,
   # which moves <onto> back to the head another writer gave it, and the tree is kept.
-  parent="$(git -C "$co" rev-parse --verify --quiet "${merge_sha}^1" 2>/dev/null)"
+  parent=""; [ -n "$merge_sha" ] && parent="$(git -C "$co" rev-parse --verify --quiet "${merge_sha}^1" 2>/dev/null)"
   tip="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${branch}" 2>/dev/null)"
   moved=""
   if [ "$parent" != "$onto_head" ]; then
@@ -582,10 +640,10 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     fix="re-run the tree's suites at its head, land again"
   fi
   if [ -n "$moved" ]; then
-    if _wt_undo_merge "$co" "$merge_sha" "$parent" "$head"; then
+    if _wt_undo_merge "$co" "$onto" "$merge_sha" "$parent" "$head"; then
       _wt_refuse "${moved} — the merge is undone and the tree kept; ${fix}"; return 2
     fi
-    _wt_refuse "${moved} merge=${merge_sha} undo=failed — the merge stands: reset ${onto} to ${parent:-its first parent} in ${co} by hand, then ${fix}"; return 2
+    _wt_refuse "${moved} merge=${merge_sha:-<none>} undo=failed — $(_wt_undo_failed_fix "$co" "$onto" "$merge_sha" "$parent"), then ${fix}"; return 2
   fi
 
   # No --force here either. If git refuses now, the merge has landed and the
@@ -727,8 +785,19 @@ worktree_for_row() {  # <main-root> <row name> -> path (whether or not it exists
 # recorded has no tree, whatever `.worktrees/` holds. Not a roster key: the tree exists
 # before the roster row does.
 #
-# APPEND-ONLY, THE LAST LINE WINS. A second create for one name appends a second line;
-# `workspace_for_name` returns the later tree, `workspaces_of_session` every tree in order.
+# APPEND-ONLY, THE LAST LINE THAT COUNTS WINS. A second create for one name appends a second
+# line; `workspace_for_name` returns the later tree, `workspaces_of_session` every tree in order.
+#
+# A PATH COUNTS ONLY WHERE GIT SAYS A TREE IS (wave-25 T18, critic C1, A-orch-36). The file sits
+# in `.bionic/tmp`, and a script the permission hook never sees can append to it, so a line is
+# a claim and git is the witness: the path counts only when `git worktree list` names it as a
+# LINKED worktree of this repository, spelled exactly as git spells it, resolving physically to
+# that same spelling, with the `.git` file a linked tree has. Never the main checkout or a
+# directory above it. A line that does not count is skipped, so an earlier true line still
+# answers: the rule only narrows. Decided by place, never by a prefix: `create` accepts any
+# parent directory. A yes is exact (A-orch-29), so a `..`, a trailing slash or another letter
+# case is refused even where it names the same tree. Git is asked once per answer, and not at
+# all when no line could count; when it cannot be asked the answer is rc 2, never a path.
 #
 # THE SYMLINK REFUSAL IS THE ROSTER'S (hooks/dispatch-preflight.sh `attested`): `.bionic`,
 # `.bionic/tmp` and the file itself are each refused when they are a symlink, by the writer
@@ -805,9 +874,45 @@ worktree_record_workspace() {  # <root> <sid> <name> <abs tree> <branch> <base s
     || { printf 'workspace-file-unwritable'; return 1; }
 }
 
-# Both readers in one walk, read by key. A line counts when it is this schema, names THIS
-# session (the file name alone is not trusted for that) and carries an absolute path; a
-# CRLF ending is translated, never kept in the path.
+# rc 0 when no component of the absolute <path> is a symbolic link, so the path is its own
+# physical name. Read with `[ -L ]` per component rather than `_wt_abs`, which costs a subshell
+# per candidate on the permission hook's path; the two agree here because a candidate has
+# already matched git's spelling exactly, and git records a tree by its physical path (measured
+# on git 2.50: a tree added through /tmp is listed under /private/tmp), with no `.` or `..`.
+_wt_unlinked_path() {  # <absolute path>
+  local rest="${1#/}" at=""
+  while [ -n "$rest" ]; do
+    at="${at}/${rest%%/*}"
+    [ -L "$at" ] && return 1
+    case "$rest" in */*) rest="${rest#*/}" ;; *) rest="" ;; esac
+  done
+  return 0
+}
+
+# The candidates that count, by the rule above: every one in order (<all> 1) or the last
+# (<all> 0). 0 printed, 1 none counts, 2 git cannot be asked.
+_wt_listed_trees() {  # <root> <candidate paths, one per line> <all: 1 or 0>
+  local listed main="" linked="" first=1 ref path p last="" nl=$'\n'
+  listed="$(_wt_checkouts "$1")" || return 2
+  while IFS=$'\t' read -r ref path; do
+    if [ "$first" = 1 ]; then main="$path"; first=0; continue; fi
+    linked="${linked}${path}${nl}"
+  done <<< "$listed"
+  while IFS= read -r p; do
+    case "${nl}${linked}" in *"${nl}${p}${nl}"*) : ;; *) continue ;; esac
+    case "${main}/" in "${p}"/*) continue ;; esac
+    [ -d "$p" ] && [ -f "${p}/.git" ] || continue
+    _wt_unlinked_path "$p" || continue
+    if [ "$3" = 1 ]; then printf '%s\n' "$p"; fi
+    last="$p"
+  done <<< "$2"
+  [ -n "$last" ] || return 1
+  [ "$3" = 1 ] || printf '%s\n' "$last"
+}
+
+# Both readers in one walk, read by key. A line is a candidate when it is this schema, names
+# THIS session (the file name alone is not trusted for that) and carries an absolute path; a
+# CRLF ending is translated, never kept in the path. A candidate counts by `_wt_listed_trees`.
 _wt_workspace_paths() {  # <root> <sid> <name> <all: 1 or 0>
   local f out
   f="$(_wt_workspaces_file "$1" "$2")" || return 2
@@ -826,12 +931,10 @@ _wt_workspace_paths() {  # <root> <sid> <name> <all: 1 or 0>
         else if (index($i, "path=") == 1) p = substr($i, 6)
       }
       if (s != sid || substr(p, 1, 1) != "/") next
-      if (all == "1") print p
-      else if (hn && n == want) last = p
-    }
-    END { if (all != "1" && last != "") print last }' "$f" 2>/dev/null)" || return 2
+      if (all == "1" || (hn && n == want)) print p
+    }' "$f" 2>/dev/null)" || return 2
   [ -n "$out" ] || return 1
-  printf '%s\n' "$out"
+  _wt_listed_trees "$1" "$out" "$4"
 }
 
 workspace_for_name() {  # <root> <sid> <name> -> the last tree recorded for <name>; 1 none, 2 refused
@@ -841,4 +944,29 @@ workspace_for_name() {  # <root> <sid> <name> -> the last tree recorded for <nam
 
 workspaces_of_session() {  # <root> <sid> -> every tree recorded, one per line; 1 none, 2 refused
   _wt_workspace_paths "${1:-}" "${2:-}" "" 1
+}
+
+# The tree and base recorded for <name>, `<tree><TAB><base>`, by the rule above (wave-26 T40).
+# The launch recorder fills a plan row's worktree and base cells from this record, so it asks
+# the same witness: the tree is the one `workspace_for_name` answers, and the base is the one on
+# the last line naming that tree. 1 none, 2 refused.
+workspace_record_for_name() {  # <root> <sid> <name> -> tree TAB base
+  local tree f rc
+  tree="$(workspace_for_name "${1:-}" "${2:-}" "${3:-}")" || { rc=$?; return "$rc"; }
+  f="$(_wt_workspaces_file "$1" "$2")" || return 2
+  WT_SID="$2" WT_NAME="$3" WT_TREE="$tree" awk -F'|' -v schema="$WORKSPACE_SCHEMA" '
+    BEGIN { sid = ENVIRON["WT_SID"]; want = ENVIRON["WT_NAME"]; tree = ENVIRON["WT_TREE"]; b = "" }
+    { sub(/\r$/, "") }
+    $1 != schema { next }
+    {
+      s = ""; n = ""; p = ""; v = ""; hn = 0
+      for (i = 2; i <= NF; i++) {
+        if (index($i, "session=") == 1) s = substr($i, 9)
+        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
+        else if (index($i, "path=") == 1) p = substr($i, 6)
+        else if (index($i, "base=") == 1) v = substr($i, 6)
+      }
+      if (s == sid && hn && n == want && p == tree) b = v
+    }
+    END { printf "%s\t%s\n", tree, b }' "$f" 2>/dev/null || return 2
 }
