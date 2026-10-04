@@ -253,6 +253,22 @@ run_wall() {  # <payload> <wall> — the positive control: straight in, no guard
   return 0
 }
 
+# expect_wrap_only <label> <original command> <the shim options after --shell/--quiet, as a regex> — stdout is the booking wrap ALONE (wave-26 T7,
+# D8). An allowed suite command through hooks/bash-walls.sh now comes back rewritten into
+# payload/scripts/booked.sh, so a G9 cell that read "silent" reads exactly this instead: no
+# deny and no advisory (the object holds nothing but the event name and updatedInput), and
+# the updated command is the shim around the ORIGINAL command, byte for byte.
+expect_wrap_only() {
+  local _cmd _s _r="'\\''"
+  expect_eq "$1 …no deny and no advisory beside the booking wrap" '["hookEventName","updatedInput"]' \
+    "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
+  _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
+  expect_regex "$1 …the updated command runs the booking shim" \
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?$3 -- " "$_cmd"
+  _s=${2//\'/$_r}
+  expect_eq "$1 …around the original command, byte for byte" "'$_s'" "${_cmd#* -- }"
+}
+
 section "G0 — the guard exists and is syntactically sound"
 # (file-exists fixture check removed epic-18 W3 4/6: no production subject -- see ledger-agent-context-guard.md)
 if bash -n "$GUARD" 2>"$SANDBOX/.syn"; then ok "the guard parses (bash -n)"; else
@@ -626,19 +642,24 @@ expect_contains "G9.1 …naming the recorded set" "alpha.test.sh" "$VERR"
 # on the way out, which is tests/bash-walls.test.sh §14x-14z's row, not this file's.
 run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/alpha.test.sh' yes 1800000)" "$SUITE_WALL"
 expect_eq "G9.1 control: an ON-budget suite passes the same process" "0" "$ST"
-expect_empty "G9.1 …silently" "$OUT$ERR"
+# SILENT NOW MEANS NO REFUSAL AND NO ADVISORY (wave-26 T7): every allowed suite call carries
+# the booking wrap, so stdout is that and nothing else, and stderr stays empty.
+expect_wrap_only "G9.1" 'bash tests/alpha.test.sh' ' --suites alpha\.test\.sh'
+expect_empty "G9.1 …and nothing on stderr" "$ERR"
 
 # CELL 2: MAIN THREAD (no agent_id) + armed -> silent. This is the cell the wrapper used
 # to own, and the one that would have been lost if the predicate had not moved with it.
 run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' no)" "$SUITE_WALL"
 expect_eq "G9.2 main thread + armed: silent" "0" "$ST"
-expect_empty "G9.2 …silently" "$OUT$ERR"
+expect_wrap_only "G9.2" 'bash tests/gamma.test.sh' ' --suites gamma\.test\.sh'
+expect_empty "G9.2 …and nothing on stderr" "$ERR"
 
 # CELL 3: agent context + UNARMED (no roster) -> silent.
 disarm_roster "$REPO_S"
 run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
 expect_eq "G9.3 agent context + unarmed: silent" "0" "$ST"
-expect_empty "G9.3 …silently" "$OUT$ERR"
+expect_wrap_only "G9.3" 'bash tests/gamma.test.sh' ' --suites gamma\.test\.sh'
+expect_empty "G9.3 …and nothing on stderr" "$ERR"
 arm_roster "$REPO_S"
 roster_row_fixture "session=$SID" name=t6nested "agent_id=$AGENT_ID" \
   suites_allowed=alpha.test.sh suites_source=declared files= \

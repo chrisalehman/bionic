@@ -16,6 +16,10 @@
 # refused, `tests/run.sh` is refused unless the row carries it, and `FARM_OUT_ALLOW=1`
 # does not widen either.
 #
+# §WRAP (wave-26 T7, D8) owns the booking wrap: an allowed suite command, on any thread,
+# comes back rewritten into payload/scripts/booked.sh, and the wrapped command behaves as
+# the unwrapped one does when run the way the harness runs a Bash call.
+#
 # THE B-9 ARM IS NOT RE-TESTED HERE. The backgrounded-suite refusal this hook has carried
 # since bionic 1.3.2 belongs to tests/cmd-class.test.sh §C4, which drives it through
 # hooks/agent-context-guard.sh exactly as hooks.json registers it. What IS asserted here
@@ -46,6 +50,8 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 PAYLOAD_HOOKS="$REPO_ROOT/payload/hooks"
+# A run of this suite may itself be inside a booked command; §WRAP measures an unbooked caller.
+unset BIONIC_SLOT_HELD BIONIC_SLOT_PLACE BIONIC_SLOT_QUIET BIONIC_QUIET
 # THE SEAM IS hooks/bash-walls.sh (epic-23 wave-11-lean-spine, T23), and there is no
 # longer a WRAPPER to drive through. This wall is `wall_background_suite_guard` in
 # payload/scripts/lib/walls.sh, and the partition hooks/agent-context-guard.sh used to
@@ -123,6 +129,15 @@ mk_payload() {  # <cwd> <command> [agent_id] [run_in_background:true|false|omit]
 
 OUT=""; ERR=""; ST=0
 EXTRA_ENV=""
+# THE WRAP IS TAKEN OFF STDOUT INTO ITS OWN VARIABLES (wave-26 T7, D8). An allowed suite
+# command now comes back rewritten into the booking shim: stdout carries one object whose
+# only content is `updatedInput`. That is not a verdict and not an advisory, so the rows
+# above §WRAP, which read `$OUT$ERR` as "nothing was refused and nothing was said", keep
+# reading exactly that. The split takes ONLY that shape: an object whose hookSpecificOutput
+# holds nothing but the event name and an updatedInput whose command runs booked.sh. Any
+# other stdout (a deny, a nudge, a wrap beside a nudge) stays in `$OUT` whole. §WRAP reads
+# `$WRAP` (the rewritten command) and `$WRAP_INPUT` (the whole rewritten tool_input).
+WRAP=""; WRAP_INPUT=""
 run_hook() {  # <payload> <hook> [args...]
   local payload="$1"; shift
   local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
@@ -132,6 +147,13 @@ run_hook() {  # <payload> <hook> [args...]
           CLAUDE_PROJECT_DIR= $EXTRA_ENV bash "$@" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
+  WRAP=""; WRAP_INPUT=""
+  if [ -n "$OUT" ] && printf '%s' "$OUT" | jq -e '(.hookSpecificOutput | keys) == ["hookEventName","updatedInput"]
+        and (.hookSpecificOutput.updatedInput.command | test("/scripts/booked\\.sh"))' >/dev/null 2>&1; then
+    WRAP_INPUT=$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput.updatedInput')
+    WRAP=$(printf '%s' "$WRAP_INPUT" | jq -r '.command')
+    OUT=""
+  fi
   return 0
 }
 
@@ -231,7 +253,8 @@ guarded "$R1" 'bash tests/run.sh'
 expect_eq "B2a the full tree is REFUSED against a narrow budget" "2" "$ST"
 expect_contains "B2a …naming the full tree" "tests/run.sh" "$VERR"
 expect_contains "B2a …calling itself a BUDGET" "BUDGET" "$VERR"
-expect_contains "B2a …and naming the standing ruling it makes mechanical" "One regression means one" "$VERR"
+expect_contains "B2a …and naming the rule it makes mechanical: the full run is the released head's" \
+  "The full suite runs once, on the head being released" "$VERR"
 
 R2=$(mk_repo b2)
 add_row "$R2" name=w-b2 "agent_id=$ACTOR" suites_allowed=run.sh suites_source=declared files=
@@ -810,12 +833,13 @@ expect_contains "B13h …with the budget refusal" "BUDGET" "$VERR"
 # a row that does not carry it, whatever that row declares under `re_executes=`.
 guarded "$R13" 'bash tests/run.sh'
 expect_eq "B13i the full tree is still REFUSED against a row that does not carry it" "2" "$ST"
-expect_contains "B13i …by the one-regression arm, not the budget one" "One regression means one" "$VERR"
+expect_contains "B13i …by the full-tree arm, not the budget one" \
+  "The full suite runs once, on the head being released" "$VERR"
 
-# …AND A BRIEF CANNOT BUY THE FULL TREE WITH THE NEW LABEL. `regression_rows()` counts the
+# …AND A BRIEF CANNOT BUY THE FULL TREE WITH THE NEW LABEL. The dispatch wall judges the
 # `run.sh` token in `suites_allowed=` and reads nothing else, so a run declared under
-# `Re-executes:` is uncounted at dispatch; if it were also admitted here, one spelling would
-# spend a budget the standing ruling caps at one per run and no counter would ever see it.
+# `Re-executes:` is unjudged at dispatch; if it were also admitted here, one spelling would
+# spend a full run the proof record never weighed.
 # The full-tree arm therefore runs AHEAD of the declared runs, and this row is why.
 R13E=$(mk_repo b13e)
 add_row "$R13E" name=w-b13e "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
@@ -823,7 +847,7 @@ add_row "$R13E" name=w-b13e "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
   "re_executes=\`bash tests/run.sh\`"
 guarded "$R13E" 'bash tests/run.sh'
 expect_eq "B13j a DECLARED run naming the full tree is still REFUSED" "2" "$ST"
-expect_contains "B13j …by the one-regression arm" "One regression means one" "$VERR"
+expect_contains "B13j …by the full-tree arm" "The full suite runs once, on the head being released" "$VERR"
 # The same row still holds its other half: the declared set is not voided by the refusal.
 guarded "$R13E" 'bash tests/alpha.test.sh'
 expect_eq "B13k …and the row's budgeted suite still runs" "0" "$ST"
@@ -966,5 +990,312 @@ expect_contains "B15e …by the B-9 fact" "a backgrounded suite's result is neve
 # ONLY THE WORD FOLDS: an operand path keeps its case, beside B15a's positive.
 guarded "$R1" 'bash TESTS/GAMMA.TEST.SH'
 expect_eq "B15f an operand never folds: TESTS/GAMMA.TEST.SH is no suite file this arm budgets" "0" "$ST"
+
+section "WRAP — an allowed suite command is rewritten into the booking shim (wave-26 T7, D8)"
+# THE CLAIM. Every suite-class Bash call the walls allow comes back with `updatedInput`
+# whose command is `bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] -- <cmd>`,
+# on the main thread and in an agent, so the booking and the run stamp happen for any
+# project's runner. Left alone: a command already the shim, a suite segment carrying
+# `BIONIC_SLOT_HELD=1` in its own prefix (the opt-out), a non-suite command, a command the
+# shell itself backgrounds, and any call a wall refuses. The quoting rows run the wrapped
+# command against THIS tree's shim and compare it with the unwrapped one run the way the
+# harness runs a Bash call: `<shell> -c 'eval <cmd> < /dev/null'`.
+#
+# FIXTURE FIDELITY: the harness shape is measured (wave-26 T7 record, the process table of
+# a live Bash call). The plugin root is this tree's payload, reached through
+# payload/hooks/bash-walls.sh exactly as the plugin cache lays it out. The slot store is a
+# scratch directory. The harness shell is zsh where the machine has it, as on the machine
+# the ruling was made on; without zsh the rows run with bash as the harness.
+SHIM="$REPO_ROOT/payload/scripts/booked.sh"
+WSH="$(command -v zsh 2>/dev/null)"; [ -n "$WSH" ] || WSH="$(command -v bash)"
+export GIT_CEILING_DIRECTORIES="${SANDBOX%/*}"
+sq() { local s="$1" r="'\\''"; s="${s//\'/$r}"; printf "'%s'" "$s"; }
+
+RW=$(mk_repo wrap)
+add_row "$RW" name=w-wrap "agent_id=$ACTOR" "suites_allowed=t.test.sh solo.test.sh" \
+  suites_source=declared files=
+mkdir -p "$RW/tests"
+printf '#!/bin/bash\necho t\n' > "$RW/tests/t.test.sh"
+printf '#!/bin/bash\n# a timing suite\n# runner: solo\necho solo\n' > "$RW/tests/solo.test.sh"
+
+EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL="
+guarded "$RW" 'bash tests/t.test.sh'
+expect_eq "W1a an armed agent's on-budget suite is allowed" "0" "$ST"
+expect_eq "W1b …and comes back as the shim around the original, under the harness's shell" \
+  "bash $SHIM --shell $WSH --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+expect_empty "W1c …with nothing said on stderr" "$ERR"
+expect_eq "W1d …and every other field of tool_input rides through" "86400000" \
+  "$(printf '%s' "$WRAP_INPUT" | jq -r '.timeout')"
+
+# MAIN THREAD. A suite there is farm-out's to refuse; the sanctioned override lets it run,
+# and then it is wrapped like any other.
+run_hook "$(mk_payload "$RW" 'FARM_OUT_ALLOW=1 bash tests/t.test.sh' "")" "$GUARD"
+expect_eq "W2a the main thread's overridden suite is wrapped too" \
+  "bash $SHIM --shell $WSH --suites t.test.sh -- 'FARM_OUT_ALLOW=1 bash tests/t.test.sh'" "$WRAP"
+run_hook "$(mk_payload "$RW" 'bash tests/t.test.sh' "")" "$GUARD"
+expect_contains "W2b without the override farm-out refuses it" "permissionDecision" "$OUT"
+expect_empty "W2c …and a refused call carries no wrap" "$WRAP"
+expect_absent "W2c …anywhere on stdout" "booked.sh" "$OUT"
+
+# UNARMED: an engaged session's agent with no roster is wrapped, so booking does not depend
+# on the dispatch wall having armed the session.
+RU=$(mk_repo wrap-unarmed)
+rm -f "$RU/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$RU" 'bash tests/t.test.sh' "$ACTOR")" "$GUARD"
+expect_eq "W3 an unarmed agent's suite is wrapped" \
+  "bash $SHIM --shell $WSH --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+
+# LEFT ALONE, each beside W1's positive on the same repo and the same reader.
+for sp in 'BIONIC_SLOT_HELD=1 bash tests/t.test.sh' \
+          'cd . && BIONIC_SLOT_HELD=1 bash tests/t.test.sh 2>&1 | tee /tmp/w.log' \
+          "bash $SHIM -- 'bash tests/t.test.sh'" \
+          "bash $SHIM --shell $WSH -- 'bash tests/t.test.sh'" \
+          'ls -la'; do
+  guarded "$RW" "$sp"
+  expect_eq "W4a [$sp] is allowed" "0" "$ST"
+  expect_empty "W4a …and left alone: no wrap" "$WRAP"
+  expect_empty "W4a …and nothing else on either stream" "$OUT$ERR"
+done
+guarded "$RW" 'bash tests/gamma.test.sh'
+expect_eq "W4b an off-budget suite is refused" "2" "$ST"
+expect_absent "W4b …and the refusal carries no wrap" "booked.sh" "$OUT$WRAP"
+guarded "$RW" 'bash tests/t.test.sh' "$ACTOR" true
+expect_eq "W4c a backgrounded suite is still refused by ARM 1" "2" "$ST"
+expect_absent "W4c …with no wrap" "booked.sh" "$OUT$WRAP"
+mkdir -p "$FAKE_HOME/.claude/projects/-sandbox/memory"
+guarded "$RW" "bash tests/t.test.sh > $FAKE_HOME/.claude/projects/-sandbox/memory/MEMORY.md"
+expect_eq "W4d a suite whose output another wall refuses (the memory store, folded AFTER this one)" "2" "$ST"
+expect_contains "W4d …is refused by that wall" "memory store" "$ERR"
+expect_absent "W4d …and the refusal wins: no wrap" "booked.sh" "$OUT$WRAP"
+run_hook "$(mk_payload "$RU" 'FARM_OUT_ALLOW=1 bash tests/t.test.sh &' "")" "$GUARD"
+expect_empty "W4e a suite the shell backgrounds is never wrapped (its stamp would read rc=0 at once)" "$WRAP"
+run_hook "$(mk_payload "$RU" 'FARM_OUT_ALLOW=1 bash tests/t.test.sh' "")" "$GUARD"
+expect_nonempty "W4e …while the same suite in the foreground is" "$WRAP"
+
+# THE TIMING CHECK: a target carrying `# runner: solo` in its first 30 lines, or
+# BIONIC_QUIET=1 in the suite segment's own prefix, takes the whole machine.
+guarded "$RW" 'bash tests/solo.test.sh'
+expect_eq "W5a a solo suite is wrapped with --quiet" \
+  "bash $SHIM --shell $WSH --quiet --suites solo.test.sh -- 'bash tests/solo.test.sh'" "$WRAP"
+guarded "$RW" 'BIONIC_QUIET=1 bash tests/t.test.sh'
+expect_eq "W5b BIONIC_QUIET=1 in the prefix is --quiet" \
+  "bash $SHIM --shell $WSH --quiet --suites t.test.sh -- 'BIONIC_QUIET=1 bash tests/t.test.sh'" "$WRAP"
+guarded "$RW" 'cd tests && bash solo.test.sh'
+expect_eq "W5c a solo suite reached through a leading cd is --quiet too (and stamps where the cd went)" \
+  "bash $SHIM --shell $WSH --quiet --stamp-dir $RW/tests --suites bash_solo.test.sh -- 'cd tests && bash solo.test.sh'" "$WRAP"
+guarded "$RW" 'bash tests/t.test.sh'
+expect_absent "W5d a plain suite is not" "--quiet" "$WRAP"
+expect_nonempty "W5d …though it is wrapped" "$WRAP"
+
+# WHERE THE STAMP GOES (wave-26 T56, final review B1). The shim stands in the payload's cwd,
+# the main checkout, while `cd <tree> || exit 1; bash tests/…` runs the suite in the tree. So
+# the wall reads the command's leading literal `cd` segments up to the first suite segment —
+# the same walk that finds a solo target — and hands the shim `--stamp-dir <where they lead>`.
+# A `cd` the wall cannot read as a literal, or one whose reach it cannot be sure of (a
+# subshell, a pipe, a background job, `pushd`), gives no option at all: the shim then stamps
+# its own directory, as before, never a guessed one.
+W10_ABS="$SANDBOX/trees/t1"
+w10() {  # <label> <command> <expected --stamp-dir value, or "" for none> [<expected --suites word; default t.test.sh>]
+  guarded "$RW" "$2"
+  expect_eq "W10$1 [$2] is allowed" "0" "$ST"
+  expect_nonempty "W10$1 …and wrapped" "$WRAP"
+  if [ -n "$3" ]; then
+    _wall_q="$3"; case "$3" in *' '*) _wall_q="$(sq "$3")" ;; esac
+    expect_eq "W10$1 …with --stamp-dir $3" \
+      "bash $SHIM --shell $WSH --stamp-dir $_wall_q --suites ${4:-t.test.sh} -- $(sq "$2")" "$WRAP"
+  else
+    expect_eq "W10$1 …with no --stamp-dir" "bash $SHIM --shell $WSH --suites ${4:-t.test.sh} -- $(sq "$2")" "$WRAP"
+  fi
+}
+w10 a "cd $W10_ABS || exit 1; bash tests/t.test.sh" "$W10_ABS"
+w10 b 'cd .worktrees/t1 && bash tests/t.test.sh' "$RW/.worktrees/t1"
+w10 c "cd $SANDBOX/trees; cd t1 || exit 1; bash tests/t.test.sh" "$SANDBOX/trees/t1"
+w10 d "cd '$SANDBOX/a tree' || exit 1; bash tests/t.test.sh" "$SANDBOX/a tree"
+w10 e "cd \"$W10_ABS\" || exit 1; bash tests/t.test.sh" "$W10_ABS"
+w10 f 'bash tests/t.test.sh' ""
+# The doctrine's evidence shape (T58's), behind the cwd guard and in a brace group.
+w10 g "cd $W10_ABS || exit 1; set -o pipefail; bash tests/t.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" "$W10_ABS"
+w10 h "{ cd $W10_ABS || exit 1; bash tests/t.test.sh; }" "$W10_ABS"
+w10 i "cd $W10_ABS || exit 1; { bash tests/t.test.sh; echo \"rc=\$?\"; } > /dev/null 2>&1" "$W10_ABS"
+# No sure reading: each of these stamps the shim's own directory, as before T56.
+w10 j 'cd "$T" || exit 1; bash tests/t.test.sh' ""
+w10 k "(cd $W10_ABS; true); bash tests/t.test.sh" ""
+w10 l "true | cd $W10_ABS; bash tests/t.test.sh" ""
+# (A `cd` the shell backgrounds, `cd x & bash tests/…`, never reaches the wrap: ARM 1 refuses it.)
+w10 m "true || cd $W10_ABS; bash tests/t.test.sh" ""
+w10 n "pushd $W10_ABS && bash tests/t.test.sh" ""
+w10 o "cd $SANDBOX && pushd trees && bash tests/t.test.sh" ""
+w10 p "if cd $W10_ABS; then bash tests/t.test.sh; fi" ""
+w10 q 'cd $(git rev-parse --show-toplevel) && bash tests/t.test.sh' ""
+w10 r "cd -P $W10_ABS && bash tests/t.test.sh" ""
+# A cd the wall cannot read, then an ABSOLUTE one: the absolute one decides where the suite runs.
+w10 s "cd \"\$T\"; cd $W10_ABS && bash tests/t.test.sh" "$W10_ABS"
+# …but a RELATIVE one after it does not: relative to an unknown place is unknown.
+w10 t 'cd "$T"; cd t1 && bash tests/t.test.sh' ""
+# Only the cd segments AHEAD of the first suite count. (Two runs joined by `;` are named `?`, T63.)
+w10 u "bash tests/t.test.sh; cd $W10_ABS; bash tests/t.test.sh" "" "'?'"
+# A cd behind `&&` runs whenever the suite does (a failed step before it stops both), so it counts.
+w10 v "true && cd $W10_ABS && bash tests/t.test.sh" "$W10_ABS"
+
+# WHICH SUITES THE STAMP NAMES (wave-26 T61, critic F1; T63, critic K4-S1/N1/N2). The land keeps
+# the newest stamp of each suite, so the wall hands the shim `--suites <names>`, one per suite the
+# command runs, in position order, each once. A suite FILE that is this tree's own
+# `tests/<basename>` (cmd_claim_scope, rooted at the stamp dir or the cwd) is its BASENAME: typed
+# relative, `./`, absolute or inside the capture, one name. Every other claim is named by its RUN,
+# each character outside the name set turned into `_` (`npm test` is `npm_test`). `?` is a run
+# with a `$` in it, a run longer than 100 characters, a basename outside the set, and a command
+# whose suite runs are joined by anything but `&&`. The unarmed agent's repo (W3) runs any suite.
+w11() {  # <label> <command> <expected options between --shell and -->
+  run_hook "$(mk_payload "$RU" "$2" "$ACTOR")" "$GUARD"
+  expect_eq "W11$1 [$2] is wrapped naming its suites" "bash $SHIM --shell $WSH $3 -- $(sq "$2")" "$WRAP"
+}
+w11 a 'bash tests/a.test.sh && bash tests/b.test.sh' '--suites a.test.sh,b.test.sh'
+w11 b 'bash tests/a.test.sh; bash tests/a.test.sh' "--suites '?'"
+w11 c "bash $RU/tests/a.test.sh" '--suites a.test.sh'
+w11 d "cd $W10_ABS || exit 1; set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" \
+  "--stamp-dir $W10_ABS --suites a.test.sh"
+w11 e 'cd tests && bash a.test.sh' "--stamp-dir $RU/tests --suites bash_a.test.sh"
+w11 f 'pytest -q' '--suites pytest_-q'
+w11 g 'make test && bash tests/a.test.sh' '--suites make_test,a.test.sh'
+w11 h "bash 'tests/a,b.test.sh'" "--suites '?'"
+# A runner is named by its own text: a re-run of it clears its own red, another runner does not.
+w11 i 'npm test' '--suites npm_test'
+w11 j 'go test ./...' '--suites go_test_._...'
+w11 k 'set -o pipefail; npm test 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc' '--suites npm_test'
+# Its text can never forge the field: a `,`, `|`, `=`, a quote and a space all become `_`.
+w11 l 'npm test -- --grep "a,b|c=d"' '--suites npm_test_--_--grep__a_b_c_d_'
+# A suite file that is not this tree's own tests/<basename> is named by its run (critic K4-N2).
+w11 m 'bash other/a.test.sh' '--suites bash_other_a.test.sh'
+w11 n 'bash ../x/tests/a.test.sh' '--suites bash_.._x_tests_a.test.sh'
+# `?`: a `$` the reading could not resolve, and a run past 100 characters (exactly 100 is named).
+w11 o 'pytest "$T"' "--suites '?'"
+W11_X100="pytest tests/$(printf '%087d' 0)"
+w11 p "$W11_X100" "--suites pytest_tests_$(printf '%087d' 0)"
+w11 q "${W11_X100}1" "--suites '?'"
+# Two suite runs whose one exit code may not speak for both (critic K4-N1): `||`, a pipe, a newline.
+w11 r 'bash tests/a.test.sh || bash tests/b.test.sh' "--suites '?'"
+w11 s 'bash tests/a.test.sh | tee l && bash tests/b.test.sh' "--suites '?'"
+w11 t "bash tests/a.test.sh
+npm test" "--suites '?'"
+
+# WHICH SHELL: CLAUDE_CODE_SHELL, then SHELL, each only when it names bash or zsh by an
+# absolute path; otherwise no --shell, which is the shim's bash -c.
+EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL=$(command -v bash)"
+guarded "$RW" 'bash tests/t.test.sh'
+expect_eq "W6a CLAUDE_CODE_SHELL wins over SHELL" \
+  "bash $SHIM --shell $(command -v bash) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+EXTRA_ENV="SHELL=/bin/sh CLAUDE_CODE_SHELL="
+guarded "$RW" 'bash tests/t.test.sh'
+expect_eq "W6b a shell the harness would not use names none: bash -c" \
+  "bash $SHIM --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+EXTRA_ENV="SHELL= CLAUDE_CODE_SHELL="
+guarded "$RW" 'bash tests/t.test.sh'
+expect_eq "W6c neither set: bash -c" "bash $SHIM --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL="
+
+# ONE ANSWER, BOTH REWRITES: ARM R raises a missing timeout and the wrap rewrites the
+# command, in that order, on the same object.
+NO_TIMEOUT=$(mk_payload "$RW" 'bash tests/t.test.sh' "$ACTOR" | jq -c 'del(.tool_input.timeout)')
+EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL= BASH_MAX_TIMEOUT_MS=600000"
+run_hook "$NO_TIMEOUT" "$GUARD"
+EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL="
+expect_eq "W7a a suite with no timeout is allowed" "0" "$ST"
+expect_eq "W7b …its timeout is raised to the harness maximum" "600000" \
+  "$(printf '%s' "$WRAP_INPUT" | jq -r '.timeout')"
+expect_eq "W7c …and its command is wrapped, in the same updatedInput" \
+  "bash $SHIM --shell $WSH --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+expect_contains "W7d …and the repair is logged as before" "repaired from=absent to=600000" "$ERR"
+
+# BEHAVIOUR. Each command runs once as the harness runs it and once as the harness runs its
+# wrap, in the same fresh directory, with a free place. stdout, stderr, the exit code, every
+# file written (path and content) and the working directory the suite saw must agree.
+RX=$(mk_repo wrap-run)
+rm -f "$RX/.bionic/tmp/roster-$SID.state"
+EXD="$SANDBOX/exec"
+fresh_exec() {
+  rm -rf "$EXD"; mkdir -p "$EXD/tests" "$EXD/sub"
+  printf '%s\n' '#!/bin/bash' \
+    'echo "out:$#:$*:${FOO:-}:$(pwd -P)"' 'echo "err:$*" >&2' \
+    'printf "%s\n" "$*" >> "$(dirname "$0")/written.txt"' \
+    '[ "${1:-}" = fail ] && exit 3' 'exit 0' > "$EXD/tests/t.test.sh"
+}
+harness_run() {  # <command> — run it as the harness does, in $EXD; prints the observation
+  ( cd "$EXD" && env BIONIC_SLOTS_DIR="$SANDBOX/slots" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=20 \
+      "$WSH" -c "eval $(sq "$1") < /dev/null" > "$SANDBOX/.xo" 2> "$SANDBOX/.xe"; echo "rc=$?" > "$SANDBOX/.xr" )
+  printf '%s\n--stdout--\n%s\n--stderr--\n%s\n--files--\n' "$(cat "$SANDBOX/.xr")" \
+    "$(cat "$SANDBOX/.xo")" "$(cat "$SANDBOX/.xe")"
+  ( cd "$EXD" && find . -type f | sort | while IFS= read -r f; do printf '%s:\n' "$f"; cat "$f"; done )
+}
+W8_CMDS=( "bash tests/t.test.sh 'single q' \"double q\" plain"
+          'bash tests/t.test.sh "$HOME" '"'"'$HOME'"'"
+          'bash tests/t.test.sh a && bash tests/t.test.sh b'
+          'cd sub && bash ../tests/t.test.sh in-sub'
+          'FOO=1 bash tests/t.test.sh env'
+          'bash tests/t.test.sh redir > out.log 2> err.log'
+          'set -o pipefail; bash tests/t.test.sh fail 2>&1 | tee run.log; echo "rc=$?"'
+          'bash tests/t.test.sh fail; echo "rc=$?"'
+          'bash tests/t.test.sh fail'
+          "bash tests/t.test.sh \"it's\""
+          "$(printf 'bash tests/t.test.sh one\nbash tests/t.test.sh two')"
+          'echo "a\nb"; bash tests/t.test.sh esc'
+          'F="x y"; bash tests/t.test.sh $F'
+          'bash tests/t.test.sh fail | cat > /dev/null; echo "first=${pipestatus[1]}"'
+          'ls nomatch*.zz; bash tests/t.test.sh glob' )
+W8_I=0
+for c in "${W8_CMDS[@]}"; do
+  W8_I=$((W8_I + 1))
+  run_hook "$(mk_payload "$RX" "$c" "$ACTOR")" "$GUARD"
+  if [ -z "$WRAP" ]; then no "W8.$W8_I [$c] is wrapped" "no wrap came back (OUT=$OUT ERR=$ERR)"; continue; fi
+  W8_WRAP="$WRAP"
+  fresh_exec; W8_PLAIN="$(harness_run "$c")"
+  fresh_exec; W8_WRAPPED="$(harness_run "$W8_WRAP")"
+  expect_contains "W8.$W8_I the unwrapped run reached the suite [$c]" "./tests/written.txt:" "$W8_PLAIN"
+  expect_eq "W8.$W8_I wrapped and unwrapped agree on rc, stdout, stderr, files and cwd [$c]" \
+    "$W8_PLAIN" "$W8_WRAPPED"
+done
+
+# THE DIFFERENTIAL: the comparison above can fail. With no harness shell named the wrap is
+# the shim's bash -c, and under a zsh harness the echo-escape command reads differently.
+case "$WSH" in
+  */zsh)
+    EXTRA_ENV="SHELL= CLAUDE_CODE_SHELL="
+    run_hook "$(mk_payload "$RX" 'echo "a\nb"; bash tests/t.test.sh esc' "$ACTOR")" "$GUARD"
+    EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL="
+    expect_absent "W8d control: the bash -c wrap names no shell" "--shell" "$WRAP"
+    expect_nonempty "W8d control: …and is a wrap" "$WRAP"
+    fresh_exec; W8_PLAIN="$(harness_run 'echo "a\nb"; bash tests/t.test.sh esc')"
+    fresh_exec; W8_WRAPPED="$(harness_run "$WRAP")"
+    expect_ne "W8d control: …which a zsh harness disagrees with, so W8's comparison bites" \
+      "$W8_PLAIN" "$W8_WRAPPED" ;;
+  *) ok "W8d control skipped: no zsh, so bash is the harness and bash -c agrees with it" ;;
+esac
+
+# WHAT THE WRAP STILL LOSES, each failing LOUD, never doing something else.
+# (a) A function or alias the harness's shell snapshot defines is not visible inside the
+#     shim's shell: the command stops with "command not found" and exit 127.
+run_hook "$(mk_payload "$RX" 't7fn && bash tests/t.test.sh fn' "$ACTOR")" "$GUARD"
+W9_WRAP="$WRAP"
+expect_nonempty "W9a a command calling a snapshot function is wrapped" "$W9_WRAP"
+fresh_exec
+W9_PLAIN="$(cd "$EXD" && "$WSH" -c "t7fn() { echo from-fn; }; eval $(sq 't7fn && bash tests/t.test.sh fn') < /dev/null" 2>&1; echo "rc=$?")"
+fresh_exec
+W9_WRAPPED="$(cd "$EXD" && env BIONIC_SLOTS_DIR="$SANDBOX/slots" BIONIC_SLOTS_N=2 \
+  "$WSH" -c "t7fn() { echo from-fn; }; eval $(sq "$W9_WRAP") < /dev/null" 2>&1; echo "rc=$?")"
+expect_contains "W9b unwrapped, the function runs" "from-fn" "$W9_PLAIN"
+expect_contains "W9c wrapped, it is not found" "not found" "$W9_WRAPPED"
+expect_contains "W9d …and the call ends 127, loud" "rc=127" "$W9_WRAPPED"
+expect_absent "W9e …and nothing else ran in its place" "from-fn" "$W9_WRAPPED"
+expect_absent "W9e …not even the suite behind &&" "out:" "$W9_WRAPPED"
+# (b) A cd inside the command does not carry to the next call: the harness records the
+#     directory in ITS shell after the command, and the cd happened in the shim's child.
+run_hook "$(mk_payload "$RX" 'cd sub && bash ../tests/t.test.sh cd' "$ACTOR")" "$GUARD"
+W9_WRAP="$WRAP"
+fresh_exec
+W9_PLAIN="$(cd "$EXD" && "$WSH" -c "eval $(sq 'cd sub && bash ../tests/t.test.sh cd') < /dev/null && pwd -P" 2>/dev/null | tail -1)"
+fresh_exec
+W9_WRAPPED="$(cd "$EXD" && env BIONIC_SLOTS_DIR="$SANDBOX/slots" BIONIC_SLOTS_N=2 \
+  "$WSH" -c "eval $(sq "$W9_WRAP") < /dev/null && pwd -P" 2>/dev/null | tail -1)"
+expect_eq "W9f unwrapped, the harness records the cd" "$EXD/sub" "$W9_PLAIN"
+expect_eq "W9g wrapped, it records the directory the call started in" "$EXD" "$W9_WRAPPED"
 
 finish

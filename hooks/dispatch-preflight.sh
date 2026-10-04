@@ -221,8 +221,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # string this hook used to carry (spec AC-25, design ledger D3).
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roster.sh"
-# THE PLAN'S `## Tasks` LEDGER HAS ONE READER TOO (wave-15 REQ-5, D7). The floor-once wall
-# at the bottom of this file asks whether any step-4 row is still open, and it asks
+# THE PLAN'S `## Tasks` LEDGER HAS ONE READER TOO (wave-15 REQ-5, D7). The full-run wall
+# at the bottom of this file asks whether any row that writes tracked files is open, and it asks
 # `units_rows` — the library epic-23 wave-11 built to be the only parser of that table.
 # A second split in this hook is the exact defect REQ-1e removed from the evidence gate.
 # shellcheck source=/dev/null
@@ -832,9 +832,14 @@ fi
 # [WALL: tests/dispatch-preflight.test.sh]
 DP_SUBAGENT=$(_jq '.tool_input.subagent_type')
 if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$PLAN" ]; then
-  # `current:` and `approved-by:` out of `## SDLC State`, in one pass each, fence-blind
-  # on purpose: this arm reads two keys, and the gate that owns the section's grammar is
-  # the evidence gate. A key this reader cannot find reads as absent, never as malformed.
+  # `approved-by:` IS READ BY THE FILL'S OWN READER (wave-26 T5; review 10 F2): `fill_plan_approved`
+  # (lib/fill.sh), fence-aware and taking a bulleted `- approved-by:`, so the tick that FILLs a
+  # row and this wall that admits its writer can never disagree about whether the plan is
+  # approved. fill.sh is sourced here, lazily, at the one arm that reads it. A library directory
+  # without the function REFUSES the writer, naming the reader and the file (wave-26 T56; final
+  # review N2, ruled): before wave 26 the line was read inline and an unapproved plan refused,
+  # and an approval this hook cannot read is no approval. Read-only roles never reach here.
+  # `current:` is read only to name the step in the refusal, fence-blind as before.
   DP_CURRENT=$(awk '
     /^## SDLC State/ { st = 1; next }
     st && /^## / { exit }
@@ -842,14 +847,29 @@ if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$PLAN" ]; then
       sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, "");
       print; exit }
   ' "$PLAN" 2>/dev/null) || DP_CURRENT=""
-  DP_APPROVED=$(awk '
-    /^## SDLC State/ { st = 1; next }
-    st && /^## / { exit }
-    st && /^[[:space:]]*approved-by[[:space:]]*:/ {
-      sub(/^[[:space:]]*approved-by[[:space:]]*:[[:space:]]*/, "");
-      sub(/[[:space:]]+$/, ""); print; exit }
-  ' "$PLAN" 2>/dev/null) || DP_APPROVED=""
-  if [ -z "$DP_APPROVED" ]; then
+  if ! declare -F fill_plan_approved >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/fill.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$BIONIC_LIB/fill.sh"
+  fi
+  DP_APPROVED=""
+  if ! declare -F fill_plan_approved >/dev/null 2>&1; then
+    DP_APPROVED=unreadable
+  elif fill_plan_approved "$PLAN"; then
+    DP_APPROVED=yes
+  fi
+  if [ "$DP_APPROVED" = unreadable ]; then
+    dp_finding "the approval reader lib/fill.sh cannot be loaded" "reinstall the plugin" \
+      "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
+Plan: ${PLAN}
+Reader: fill_plan_approved, from ${BIONIC_LIB:-<no library directory>}/fill.sh — not there, or it
+        does not define the function, so whether this plan is approved cannot be read.
+
+A writer is admitted only on an approval this hook has read; one it cannot read is no approval.
+Before approval only a read-only role dispatches: ${ROLE_READONLY_SET}.
+
+Fix: reinstall the plugin (claude plugin install bionic@bionic) so its scripts/lib carries
+     fill.sh again, then retry the dispatch."
+  elif [ -z "$DP_APPROVED" ]; then
     dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \
       "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
 Plan: ${PLAN}
@@ -877,6 +897,74 @@ acted on. Before approval only a read-only role dispatches: ${ROLE_READONLY_SET}
 
 Fix: bind this session to the run it is working, or write this session's own plan (the
      governing-skill hook binds it on the first write), then retry the dispatch."
+fi
+
+# ==================================== A ROW THAT READS AN APPROVAL WAITS FOR IT (wave-26 T13)
+# (REQ-6 AC-6.2; spec D3, ADR-043.)
+#
+# THE PLAN'S APPROVAL IS NOT THE ONLY ONE. A row whose `reads` cell names `approval:<name>` —
+# the release reads `approval:release` — is not ready until `## SDLC State` carries
+# `approved: <name> …`, a line only `session-poker.sh approve` writes, on the user's reply. The
+# ready set (lib/fill.sh over lib/units.sh) never offers such a row; this arm refuses the
+# dispatch that would start one anyway, whatever the role, because the thing being waited for
+# is the user's act and no role is entitled to stand in for it.
+#
+# WHICH ROW A DISPATCH IS: the Agent call's NAME, by the rule `fill_row_launched` uses — the id
+# itself or the id behind a `<prefix>-`, with the `-r<n>` re-run suffix taken off. A name that
+# is no row's id is not judged here. `approval:plan` is the arm above.
+DP_ROW_NAME=$(_jq '.tool_input.name')
+# DP_MINE_AWK: the awk function `mine(id)`, 1 when the dispatch name `nm` is row <id>'s. This arm
+# and the full-run wall's floor row both read through it.
+DP_MINE_AWK='
+    function mine(id,   b, l) {
+      b = nm
+      if (match(b, /-r[0-9]+$/)) b = substr(b, 1, RSTART - 1)
+      if (b == id) return 1
+      l = length(id)
+      return (length(b) > l + 1 && substr(b, length(b) - l) == "-" id)
+    }'
+if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
+  DP_APPROVAL_WAITS=$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"'
+    $1 != "" && mine($1) {
+      m = split($13, a, ",")
+      for (k = 1; k <= m; k++) {
+        t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
+        # A LIVE READ OF AN APPROVAL IS STILL AN APPROVAL READ (review 10 F5): readiness waits
+        # on `live:approval:<name>` exactly as on the bare token, so this arm does too.
+        sub(/^live:/, "", t)
+        if (t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ && t != "approval:plan") print $1 "\t" substr(t, 10)
+      }
+    }')
+  if [ -n "$DP_APPROVAL_WAITS" ]; then
+    DP_APPROVALS_HAD=$(awk '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^## SDLC State/ { st = 1; next }
+      /^## / { st = 0 }
+      st {
+        l = $0; sub(/^[ \t]*-?[ \t]*/, "", l)
+        if (l !~ /^approved[ \t]*:/) next
+        sub(/^approved[ \t]*:[ \t]*/, "", l); split(l, w, /[ \t]+/)
+        if (w[1] != "") printf " %s ", w[1]
+      }' "$PLAN" 2>/dev/null)
+    while IFS=$'\t' read -r DP_AW_ID DP_AW_NAME; do
+      [ -n "$DP_AW_NAME" ] || continue
+      case "$DP_APPROVALS_HAD" in *" $DP_AW_NAME "*) continue ;; esac
+      dp_finding "row ${DP_AW_ID} waits for approval:${DP_AW_NAME}" \
+        "record it with the approve verb" \
+        "Dispatch: ${DP_ROW_NAME} (row ${DP_AW_ID} of ${PLAN})
+Reads:    approval:${DP_AW_NAME} — and ## SDLC State carries no 'approved: ${DP_AW_NAME}' line.
+
+An approval is an act of the user. The row waits for it, the ready set does not offer it, and no
+dispatch starts it before the line exists.
+
+Fix: put the decision to the user; on their reply, record it, then retry the dispatch:
+       bash $(refuse_shell_word "$HOOK_DIR/session-poker.sh") approve ${DP_AW_NAME} '<the reply, verbatim>'
+     Silence, a question, or a partial reply is never recorded as approval."
+    done <<DP_AW
+$DP_APPROVAL_WAITS
+DP_AW
+  fi
 fi
 
 # ======================================= ONE LEVEL OF DELEGATION (wave-20 T7, AC-9.4)
@@ -1119,7 +1207,7 @@ fi
 
 if [ -n "$PARALLEL_BUDGET" ]; then
 
-  # OPEN ROWS AND THE SUITES THEY CLAIM, in one pass over the roster (spec AC-7).
+  # OPEN ROWS, in one pass over the roster (spec AC-7).
   #
   # "Open" no longer asks the roster whether a row was ever closed — it asks THIS
   # TURN'S ListAgents answer whether the row's agent is STILL WORKING. A dispatch row
@@ -1147,11 +1235,14 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # disagree about who is listed — only about what the status means, which is the whole
   # point of asking two questions (tests/cross-gate-agreement.test.sh §LA.5).
   #
-  # A CLAIM IS READ OFF THE LEDGER, never off the process table (WALLS/3): a row whose
-  # brief declared a subprocess claim spends a suite. Asking `pgrep` per row would be
-  # truer to the word "running" and would put a process spawn per row on the dispatch
-  # path; the ledger is the artifact this gate already owns. A claim only spends a
-  # suite while its row is OPEN — a finished agent's old claim costs nothing.
+  # NO SUITE IS COUNTED HERE (wave-26 T8; D8, REQ-6 AC-6.3). This pass used to count a
+  # second number beside the open rows, the rows holding a suite (a declared subprocess
+  # claim, or a test-runner), for a ceiling that refused the next dispatch at
+  # `claimed + 1 > suites`. That booked a suite for an agent's whole life whether it ran one
+  # or not, and refused a read-only agent that would run nothing. A suite run now books a
+  # machine-wide place as it starts (payload/scripts/lib/slots.sh, through the Bash wall's
+  # shim), so hand-out asks nothing about suites. The row's `claims=` field stays: the
+  # Patrol tick reads it to name the youngest suite-running writer under memory pressure.
   #
   # AMBIGUOUS COUNTS AS OPEN (the name present more than once) — folded into the
   # predicate's own exit 0, so this function never sees it as a separate case. The safe
@@ -1167,8 +1258,8 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # turned into a whole-dispatch refusal naming a ListAgents call as the repair. That made
   # a chore a PRECONDITION of a judgement, and it is struck: no hook requires the model to
   # perform an act before it will judge one (spec P-A). The fallback is the roster itself,
-  # which this wall already owns and already reads. So the answer is ALWAYS `<open>
-  # <claimed>` and the exit is ALWAYS 0; a dispatch is judged against a count that may be
+  # which this wall already owns and already reads. So the answer is ALWAYS `<open>`
+  # and the exit is ALWAYS 0; a dispatch is judged against a count that may be
   # generous, never deferred.
   #
   # AND ON THAT DARK PATH THE ROSTER ANSWERS WITH EVERYTHING IT KNOWS (wave-14 D7, REQ-3).
@@ -1192,10 +1283,10 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # it can speak to — an `idle` row still closes, an absent row still closes — and the
   # Patrol tick still consumes the same reader unchanged. Only the case where there is
   # nothing to read has stopped being an error.
-  budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>", then the open names (exit 0)
-    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed="" notfresh=""
-    local la_out la_rc row_dark dark="" closed still_open open_names="" holds
-    if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
+  budget_roster_counts() {  # <roster file> <transcript> -> "<open>", then the open names (exit 0)
+    local f="$1" transcript="$2" line nm seen open=0 primed="" notfresh=""
+    local la_out la_rc row_dark dark="" closed still_open open_names=""
+    if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in "roster-state/${ROSTER_VERSION}|status=intended|"*) ;; *) continue ;; esac
@@ -1256,16 +1347,13 @@ if [ -n "$PARALLEL_BUDGET" ]; then
           # list, and `budget_open_writers` (payload/scripts/lib/roster.sh) turns that list into
           # the writer count after the dark rows are settled, so a read-only row holds no
           # writer slot and the Patrol's tick, which calls the same function, reads the same
-          # number. The SUITE slot is the row's own: a declared claim, or a test-runner.
+          # number.
           open_names="${open_names}${nm}
 "
-          holds=""
-          roster_row_holds_suite "$line" && { holds=1; claimed=$(( claimed + 1 )); }
-          # COUNTED BY THE FALLBACK, NOT BY A READING. The row goes on the dark list with
-          # whether it holds a suite slot, and the block below asks the roster whether it has
-          # since closed. A row the panel spoke for never lands here, which is what makes that
-          # question unreachable on the fresh path.
-          [ -n "$row_dark" ] && dark="${dark}${nm}|${holds}
+          # COUNTED BY THE FALLBACK, NOT BY A READING. The row goes on the dark list, and the
+          # block below asks the roster whether it has since closed. A row the panel spoke for
+          # never lands here, which is what makes that question unreachable on the fresh path.
+          [ -n "$row_dark" ] && dark="${dark}${nm}
 "
           ;;
         1) : ;;
@@ -1274,11 +1362,10 @@ if [ -n "$PARALLEL_BUDGET" ]; then
 
     # THE DARK ROWS, SETTLED IN ONE PASS (wave-14 REQ-3, D7). One read of the roster and one
     # of the ack ledger, for every dark row at once — never per row, and never at all on a
-    # turn where the panel answered for every row. A landed row gives its writer slot back
-    # AND the suite its brief claimed: a finished agent runs nothing.
+    # turn where the panel answered for every row. A landed row gives its writer slot back.
     if [ -n "$dark" ]; then
       still_open=$(roster_open_names "$f" "$ACK_LEDGER_FILE")
-      closed=$(while IFS='|' read -r nm claims; do
+      closed=$(while IFS= read -r nm; do
                  [ -n "$nm" ] || continue
                  /usr/bin/grep -qxF -- "$nm" <<< "$still_open" || printf '%s\n' "$nm"
                done <<DARKNAMES
@@ -1286,7 +1373,7 @@ $dark
 DARKNAMES
 )
       if [ -n "$closed" ]; then
-        while IFS='|' read -r nm claims; do
+        while IFS= read -r nm; do
           [ -n "$nm" ] || continue
           # A HERE-STRING, NOT A PIPE (correctness review F8; the reason
           # is stated in this comment, no rule file carries it). `grep -q` exits at its first match; under this
@@ -1297,7 +1384,6 @@ DARKNAMES
           # process to lose.
           /usr/bin/grep -qxF -- "$nm" <<< "$closed" || continue
           open_names=$(printf '%s' "$open_names" | /usr/bin/grep -vxF -- "$nm")
-          [ -n "$claims" ] && claimed=$(( claimed - 1 ))
         done <<DARK
 $dark
 DARK
@@ -1307,7 +1393,7 @@ DARK
     open=$(printf '%s\n' "$open_names" | budget_open_writers "$f")
     # THE NAMES RIDE BELOW THE COUNTS (wave-24 T13, D10), one per line, so the writer-budget
     # refusal can list the rows it counted without a second reading of the roster.
-    printf '%s %s\n%s' "$open" "$claimed" "$open_names"
+    printf '%s\n%s' "$open" "$open_names"
   }
 
   # budget_writer_rows <roster file> <open names> -> one line per open WRITER row: its name and
@@ -1342,15 +1428,15 @@ WRITERNAMES
     printf '%s' "$n"
   }
 
-  # FIRST CEILING WINS, STILL (wave-14 REQ-8, D3). The three ceilings are three readings of
+  # FIRST CEILING WINS, STILL (wave-14 REQ-8, D3). The ceilings are readings of
   # ONE wall and one repair — "land or stand down a row" clears whichever of them fired — so
-  # reporting all three would spend three lines of the refusal's budget to say one thing
-  # three ways. The guard keeps the arm's pre-REQ-8 behaviour exactly: the first ceiling
-  # passed is the one named. What changed is that the wall records instead of exiting, so
+  # reporting each would spend a line of the refusal's budget per ceiling to say one thing
+  # several ways (two since wave-26 T8 removed the suites arm). The guard keeps the arm's
+  # pre-REQ-8 behaviour exactly: the first ceiling passed is the one named. What changed is that the wall records instead of exiting, so
   # the arms after it are read in the same pass.
   BUDGET_DENIED=""
   budget_deny() {  # <fact> <the one line naming the resource, its ceiling and its count> [rows]
-    # ONE FIX FOR ALL THREE ARMS (rows 43-45): the fact names which ceiling was passed
+    # ONE FIX FOR EVERY ARM (rows 43 and 45): the fact names which ceiling was passed
     # and the repair is the same act whichever it was. The writer arm adds the rows it counted,
     # each with the command that closes it (wave-24 T13, D10, AC-6.7).
     [ -z "$BUDGET_DENIED" ] || return 0
@@ -1380,15 +1466,14 @@ machine genuinely has the room."
   # ListAgents answer refused the whole dispatch, telling the orchestrator to call the
   # tool and come back — and telling a dispatched agent, which holds no such tool, to ask
   # the orchestrator instead. Both halves are gone. `budget_roster_counts` now always
-  # answers `<open> <claimed>`, falling back to the roster's own open rows when there is
-  # no answer to read, so the three ceilings below are the only thing left between a
+  # answers `<open>`, falling back to the roster's own open rows when there is
+  # no answer to read, so the ceilings below are the only thing left between a
   # brief and its dispatch.
   BUDGET_COUNTS=$(budget_roster_counts "$ROSTER_FILE" "$BUDGET_TRANSCRIPT")
   BUDGET_OPEN_NAMES=""
   case "$BUDGET_COUNTS" in *$'\n'*) BUDGET_OPEN_NAMES="${BUDGET_COUNTS#*$'\n'}" ;; esac
   BUDGET_COUNTS="${BUDGET_COUNTS%%$'\n'*}"
-  BUDGET_OPEN="${BUDGET_COUNTS%% *}"
-  BUDGET_CLAIMED="${BUDGET_COUNTS##* }"
+  BUDGET_OPEN="$BUDGET_COUNTS"
   BUDGET_UNMEASURED=""
 
   B_WRITERS="$DP_BUDGET_WRITERS"
@@ -1404,21 +1489,21 @@ machine genuinely has the room."
     BUDGET_UNMEASURED="${BUDGET_UNMEASURED} writers"
   fi
 
-  B_SUITES=$(budget_field "$PARALLEL_BUDGET" suites)
-  if [ -n "$B_SUITES" ]; then
-    [ $(( BUDGET_CLAIMED + 1 )) -gt "$B_SUITES" ] && budget_deny \
-      "this passes the run's suite budget" \
-      "suites: budget=${B_SUITES} claimed=${BUDGET_CLAIMED} with-this-dispatch=$(( BUDGET_CLAIMED + 1 ))"
-  else
-    BUDGET_UNMEASURED="${BUDGET_UNMEASURED} suites"
-  fi
+  # NO SUITES ARM (wave-26 T8; D8, REQ-6 AC-6.3). It refused a dispatch at
+  # `claimed + 1 > suites`: a suite booked for every claiming agent's whole life, and one more
+  # for every dispatch, read-only included. A suite run books its own machine-wide place as it
+  # starts now (payload/scripts/lib/slots.sh), so hand-out counts no suites.
 
   B_TREES=$(budget_field "$PARALLEL_BUDGET" worktrees)
   if [ -n "$B_TREES" ]; then
     BUDGET_LIVE=$(budget_live_trees "$BIONIC_ROOT")
-    [ $(( BUDGET_LIVE + 1 )) -gt "$B_TREES" ] && budget_deny \
+    # A READ-ONLY DISPATCH ASKS FOR NO WORKTREE (wave-26 T8, D8), as it asks for no writer
+    # slot above: it writes nothing, so it is handed no tree.
+    BUDGET_TREE_ASK=1
+    role_is_readonly "$DP_SUBAGENT" && BUDGET_TREE_ASK=0
+    [ $(( BUDGET_LIVE + BUDGET_TREE_ASK )) -gt "$B_TREES" ] && budget_deny \
       "this passes the run's worktree budget" \
-      "worktrees: budget=${B_TREES} live=${BUDGET_LIVE} with-this-dispatch=$(( BUDGET_LIVE + 1 ))"
+      "worktrees: budget=${B_TREES} live=${BUDGET_LIVE} with-this-dispatch=$(( BUDGET_LIVE + BUDGET_TREE_ASK ))"
   else
     BUDGET_UNMEASURED="${BUDGET_UNMEASURED} worktrees"
   fi
@@ -1653,7 +1738,7 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 #
 # SO EVERYTHING BELOW THE ATTESTATION POOLS. The arming wall, the approval checkpoint, the
 # lease wall, the budget, the name-in-flight arm, the five brief-shape arms and the
-# one-regression wall all call `dp_finding` and carry on. Principle P-A reads the same way
+# full-run wall all call `dp_finding` and carry on. Principle P-A reads the same way
 # at a wall as at a precondition: where the machine already has the facts, the machine
 # reports them; asking the model to rediscover them one round trip at a time is a chore on
 # the normal path.
@@ -2045,9 +2130,8 @@ fi
 # are what they were. Its loud-but-passing line goes through this file's `warn()`.
 #
 # RC 2 IS THE EARLY SPEND (Step-6 architecture review §2.2). The derivation overran its bound,
-# its finding is already pooled, and the suite set the one-regression and floor-once walls
-# below read was never built. Those two walls are this file's, so this file says `not
-# checked` for them and spends the pool here: there is nothing below but walls that depend on
+# its finding is already pooled, and the suite set the full-run wall below reads was never
+# built. That wall is this file's, so this file says `not checked` for it and spends the pool here: there is nothing below but walls that depend on
 # the derivation, and an arm added below that does NOT must be pooled above this call.
 dp_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
   case "$1" in
@@ -2060,191 +2144,175 @@ brief_validate_fields "$LIFTED" "$DP_SUBAGENT" "$BIONIC_ROOT" dp_brief_sink || D
 SUITES_ALLOWED="$BRIEF_SUITES_ALLOWED"
 SUITES_SOURCE="$BRIEF_SUITES_SOURCE"
 if [ "$DP_BRIEF_RC" -eq 2 ]; then
-  dp_not_checked "one-regression" "a suite set"
-  dp_not_checked "floor-once" "a suite set"
+  dp_not_checked "full-run" "a suite set"
   dp_refuse_findings
 fi
 
-# ============================================= THE ONE-REGRESSION WALL (AC-24)
-# (seed item 4; the standing ruling "one regression means one" made mechanical.)
+# ===================================================== THE FULL-RUN WALL (wave-26 REQ-3, D6)
+# (replaces the one-regression wall, AC-24, and the floor-once wall, REQ-5 D7, of 1.10.)
 #
-# The full tree is run ONCE per run, at integration close, by one dispatched runner. A
-# second runner in the same run is not a mistake the orchestrator makes in ignorance — it
-# is the shape a re-proof takes after a merge, a bump or a panic — so the wall does not
-# forbid it, it makes it COST A WRITTEN REASON in the plan, where a reader will find it
-# next to the run it explains.
+# THE FULL SUITE IS TIED TO THE CODE STATE, NOT TO A COUNT OF RUNS. Through 1.10 this file
+# counted full-tree rows on the roster and charged one written cause line on the plan per
+# extra run, and a sibling arm held the floor while any step-4 row was open unless such a line
+# released it. A count says nothing about what the tree needs: a re-proof after an outside merge
+# cost a sentence, and a second run over a head already proved cost one too. Both arms, and the
+# cause line, are gone.
 #
-# NEWER IS COUNTED, NOT TIMED. "A `regression-cause:` line newer than the last regression
-# row" cannot be read off a clock: the plan file is rewritten after every task, so its
-# mtime is newer than everything and the rule would be vacuous within minutes. It is read
-# as a LEDGER instead — the Nth full-tree dispatch of a run needs the (N-1)th cause line
-# on the plan — which is monotone, hermetic, and forces one new sentence per extra
-# regression rather than one sentence that licenses all of them.
+# ONE QUESTION, ASKED OF THE PROOF RECORD. `proof_state` (lib/proof.sh) is the one place that
+# runs git for this decision, and it answers in three words: `covered` (the working branch's head
+# is the one the last floor proof names), `bounded` (the change since that proof is provable by
+# the suites the map names for it) or `unbounded` (anything else, with its reason). A full run is
+# owed only when the change cannot be bounded; covered and bounded are refused, and the bounded
+# refusal names the suites that prove the change.
 #
-# ROWS ARE COUNTED BY NAME. hooks/execution-recorder.sh appends a `status=confirmed` copy
-# of a row it did not write from scratch, so one dispatch is two or more lines carrying the
-# same budget; counting lines would refuse the second half of the first regression.
+# AND ONE HOLD, ASKED OF THE READY SET. Unbounded is not enough while a row the floor waits on
+# still writes tracked files: a run now proves a head that does not survive the row landing.
+# ONLY THE FLOOR'S OWN WAITS HOLD IT (wave-26 T52; review 14 B1, ruling R1). Through T5 this arm
+# counted every open row with its own reading of `Files`, so the release, which waits FOR the
+# floor, held the floor for ever, and a `record/…` path read as tracked. Now lib/units.sh
+# `units_floor_holds` answers: the rows the floor row waits on through its deps and its reads,
+# judged by the ready set's own program, not landed, that write a tracked file by its
+# `writes_head` — one owner for both questions. The floor row is the dispatch's own, by its name
+# (`mine`, the approval arm's rule); a dispatch that names no row is held by what the plan's open
+# verify and test rows wait on.
 #
-# PLAN-FREE SESSIONS SKIP IT. An engaged session with no bound plan has nowhere to write a
-# cause, and the budget wall above already binds every such dispatch.
-regression_rows() {  # -> the number of DISTINCT agent names already dispatched with run.sh
-  [ -f "$ROSTER_FILE" ] || { printf '0'; return 0; }
-  [ -L "$ROSTER_FILE" ] && { printf '0'; return 0; }
-  awk -F'|' -v ver="roster-state/${ROSTER_VERSION}" '
-    $1 != ver { next }
-    {
-      name = ""; allowed = ""
-      for (i = 1; i <= NF; i++) {
-        if ($i ~ /^name=/)                name    = substr($i, 6)
-        else if ($i ~ /^suites_allowed=/) allowed = substr($i, 16)
-      }
-      if (name == "" || allowed == "") next
-      n = split(allowed, parts, " ")
-      for (j = 1; j <= n; j++) if (parts[j] == "run.sh") { seen[name] = 1; break }
-    }
-    END { c = 0; for (k in seen) c++; print c }
-  ' "$ROSTER_FILE" 2>/dev/null
+# LOADED LAZILY, LIKE brief.sh's BOUND. proof.sh is sourced at the one arm that spends it, from
+# the directory the loader settled on. A copied hook whose library directory predates proof.sh
+# says `not checked` for this arm rather than refusing a dispatch for a library it cannot see.
+#
+# PLAN-FREE SESSIONS SKIP IT. With no bound plan there is no proof record and no ledger.
+fr_open_writers() {  # -> `id<TAB>step<TAB>status` for each row the floor waits on that writes the head
+  local floor=""
+  [ -n "$PLAN" ] && [ -f "$PLAN" ] || return 0
+  [ -z "$DP_ROW_NAME" ] || floor="$(units_rows "$PLAN" 2>/dev/null \
+    | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' $1 != "" && mine($1) { print $1; exit }')"
+  units_floor_holds "$PLAN" "$floor" 2>/dev/null
 }
-regression_causes() {  # -> how many `regression-cause:` lines the plan carries under ## SDLC State
-  [ -n "$PLAN" ] && [ -f "$PLAN" ] || { printf '0'; return 0; }
-  awk '
-    /^## SDLC State/ { instate = 1; next }
-    /^## / { instate = 0 }
-    instate && /^[ \t]*regression-cause[ \t]*:/ { c++ }
-    END { print c + 0 }
-  ' "$PLAN" 2>/dev/null
+# fr_fit <budget> <item>... -> the items comma-joined while they fit <budget> columns, then
+# ` +<n>` for the rest; at least the first item, cut to the budget, is always named.
+fr_fit() {
+  local budget="$1" out="" shown=0 n=0 full=0 sep cand; shift
+  for cand in "$@"; do
+    n=$((n + 1))
+    [ "$full" -eq 0 ] || continue
+    sep=""; [ -z "$out" ] || sep=", "
+    if [ $((${#out} + ${#sep} + ${#cand})) -le "$budget" ]; then
+      out="$out$sep$cand"; shown=$((shown + 1))
+    else
+      full=1
+    fi
+  done
+  if [ "$shown" -eq 0 ] && [ "$n" -gt 0 ]; then
+    out="$(printf '%s' "$1" | cut -c1-"$budget")"; shown=1
+  fi
+  [ "$shown" -lt "$n" ] && out="$out +$((n - shown))"
+  printf '%s' "$out"
 }
-# THE ARM'S OWN DEPENDENCY, STATED (AC-8.2). This wall's whole input is the set built
-# above — declared or derived — and a brief that produced none leaves it unable to answer
-# rather than answering "no". R2 Q2 lists it as the clearest case in the file.
 if [ -z "$SUITES_ALLOWED" ]; then
-  dp_not_checked "one-regression" "a suite set"
-  # AND THE FLOOR-ONCE WALL BELOW READS THE SAME SET, for the same reason and with the
-  # same answer: two walls keyed on `run.sh` in the set, both unable to speak without one.
-  dp_not_checked "floor-once" "a suite set"
+  # THE ARM'S OWN DEPENDENCY, STATED (AC-8.2): its whole input is the set built above, and a
+  # brief that produced none leaves it unable to answer rather than answering "no".
+  dp_not_checked "full-run" "a suite set"
 fi
 case " $SUITES_ALLOWED " in
   *" run.sh "*)
     if [ -n "$PLAN" ]; then
-      _reg_rows=$(regression_rows); _reg_causes=$(regression_causes)
-      case "$_reg_rows" in ''|*[!0-9]*) _reg_rows=0 ;; esac
-      case "$_reg_causes" in ''|*[!0-9]*) _reg_causes=0 ;; esac
-      if [ "$_reg_rows" -gt 0 ] && [ "$_reg_causes" -lt "$_reg_rows" ]; then
-        _dp_detail="Full-tree runs on this roster: ${_reg_rows}. Recorded causes on the plan: ${_reg_causes}.
-One regression means one: the tree is proved once, at integration close, and a
-second full run is a deliberate act that owes its reason to the next reader.
-
-Fix: record why this one is needed, under \`## SDLC State\` in —
-    $PLAN
-
-    regression-cause: <why the tree must be re-proved>
-
-Then retry the dispatch. A narrower brief needs no cause: name only the suites
-the change actually reaches."
-        dp_finding "this run already ran the full tree" "record the cause on the plan" "$_dp_detail"
+      if ! declare -F proof_state >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
+        # shellcheck source=/dev/null
+        . "$BIONIC_LIB/proof.sh"
       fi
-    fi
-    ;;
-esac
-
-# ================================================= THE FLOOR-ONCE WALL (REQ-5, D7)
-# (seed row 5, Chris DevX item 1: six full floors in wave-14; the prose rule at
-# skills/canonical-sdlc/dispatch.md:12 made mechanical.)
-#
-# WHAT IT ASKS, AND WHY IT IS NOT THE WALL ABOVE. The one-regression wall counts full-tree
-# rows on the ROSTER and charges one written cause per extra run. It says nothing about
-# whether the work being proved is FINISHED, and that is the half wave-14 paid for six
-# times: a floor run while Step-4 rows are still open proves a tree that no longer exists
-# by the time those rows land, so its result is stale before it is read and the next floor
-# is owed anyway. This wall reads the PLAN's `## Tasks` ledger instead and refuses a
-# full-tree dispatch while any step-4 or fold-in row is `pending` or `active`.
-#
-# THE PREDICATE IS THE PLAN'S OWN VOCABULARY (A-T5.1). A row counts as open work when its
-# `step` cell is 4 — the deliverable phase — OR its task text names a FOLD-IN, whatever
-# step the row sits at. Fold-ins are the case the step cell cannot see: wave-14 carried
-# eleven of them registered at steps 5 and 6, each one a change to the tree the floor had
-# already proved (`wave-14-tune-181.plan.md` rows T14-T27, T11c). The reading is
-# deliberately WIDE — a row that merely mentions a fold-in is counted — because the cost of
-# a false positive here is one sentence on the plan and the cost of a false negative is a
-# floor nobody can trust.
-#
-# THE OVERRIDE IS THE SAME LINE THE WALL ABOVE ASKS FOR, read the same way: any
-# `regression-cause:` under `## SDLC State` releases this arm. Not counted, unlike the
-# regression wall's ledger — a run that has stated once, in writing, that it is flooring
-# over open rows has said the thing this wall exists to make it say (AC-5.3).
-#
-# OPEN AND SILENT WITH NOTHING TO READ. No bound plan, no `## Tasks` table, or a brief that
-# does not reach the full tree, and this arm never speaks (AC-5.4). `units_rows` exits 1
-# and prints nothing on a plan with no table, which is exactly the answer wanted.
-#
-# ONE PARSER. The ledger is read through `units_rows` (lib/units.sh), never by a split of
-# this hook's own — AC-5.5, and the defect REQ-1e existed to remove.
-floor_open_rows() {  # -> `id<TAB>step<TAB>status` for each open step-4/fold-in row
-  [ -n "$PLAN" ] && [ -f "$PLAN" ] || return 0
-  units_rows "$PLAN" 2>/dev/null | awk -F'\t' '
-    {
-      status = tolower($10)
-      if (status != "pending" && status != "active") next
-      if ($2 != "4" && index(tolower($4), "fold-in") == 0) next
-      printf "%s\t%s\t%s\n", $1, $2, status
-    }
-  '
-}
-case " $SUITES_ALLOWED " in
-  *" run.sh "*)
-    if [ -n "$PLAN" ]; then
-      _floor_open="$(floor_open_rows)"
-      _floor_causes=$(regression_causes)
-      case "$_floor_causes" in ''|*[!0-9]*) _floor_causes=0 ;; esac
-      if [ -n "$_floor_open" ] && [ "$_floor_causes" -eq 0 ]; then
-        # THE ONE LINE HAS A COLUMN BUDGET AND THE ID LIST DOES NOT (AC-E1.3). The wire is
-        # `bionic: dispatch refused — <fact> (<fix>)` capped at 100 columns with the fix at
-        # 40, so the fact gets 39: the ids are taken while they fit and the remainder is
-        # counted rather than dropped. Every open row is named in full in `detail`, which
-        # is where a reader who needs the list goes anyway.
-        _floor_n=0; _floor_shown=0; _floor_ids=""; _floor_lines=""
-        while IFS=$'\t' read -r _fo_id _fo_step _fo_status; do
-          [ -n "$_fo_id" ] || continue
-          _floor_n=$((_floor_n + 1))
-          # PADDED, so a reader scans the parenthesis column rather than the ids. One fork
-          # per open row, on a path that only runs when the dispatch is already refused.
-          _floor_lines="${_floor_lines}    $(printf '%-4s' "$_fo_id") (step ${_fo_step}, ${_fo_status})
-"
-          if [ "$_floor_n" -eq "$((_floor_shown + 1))" ]; then
-            _floor_cand="${_floor_ids:+$_floor_ids, }$_fo_id"
-            if [ "${#_floor_cand}" -le 17 ]; then
-              _floor_ids="$_floor_cand"; _floor_shown=$((_floor_shown + 1))
-            fi
+      _fr_state=""
+      if declare -F proof_state >/dev/null 2>&1; then
+        _fr_state="$(proof_state "$PLAN" "$BIONIC_ROOT" 2>/dev/null)"
+      fi
+      _fr_moment="The full suite runs once, on the head being released; after that pass a later
+change is proved by its affected suites, and a second full run is needed only when the
+change cannot be bounded: a merge from outside the run, or a changed file the map answers
+with every suite or with none."
+      _fr_proof="$(proof_last_line "$PLAN" floor 2>/dev/null)"
+      _fr_head="$(proof_last "$PLAN" floor 2>/dev/null)"
+      _fr_short="$(printf '%.7s' "$_fr_head")"
+      case "$_fr_state" in
+        '')
+          dp_not_checked "full-run" "the proof record (lib/proof.sh)" ;;
+        covered*)
+          # THE RELEASED HEAD IS NAMED (T52; review 14 N6). proof_state says which working head it
+          # judged; an empty change since the proof is covered too (A-T5.5), so that head can
+          # differ from the proof's, and the line names the head being released.
+          _fr_cur="${_fr_state#covered}"; _fr_cur="${_fr_cur#$'\t'}"
+          _fr_tree=""
+          if [ -n "$_fr_cur" ] && [ "$_fr_cur" != "$_fr_head" ]; then
+            _fr_tree=" (the tree proved at ${_fr_short})"
+            _fr_short="$(printf '%.7s' "$_fr_cur")"
           fi
-        done <<FLOOR_OPEN_ROWS
-$_floor_open
-FLOOR_OPEN_ROWS
-        # AT LEAST ONE ID IS ALWAYS NAMED. A single id longer than the whole budget would
-        # otherwise leave the fact saying "+1" and naming nothing.
-        if [ "$_floor_shown" -eq 0 ]; then
-          _floor_ids="$(printf '%s' "${_floor_open%%$'\t'*}" | cut -c1-17)"
-          _floor_shown=1
-        fi
-        if [ "$_floor_shown" -lt "$_floor_n" ]; then
-          _floor_ids="$_floor_ids +$((_floor_n - _floor_shown))"
-        fi
-        _dp_detail="Open rows on the plan's \`## Tasks\` ledger:
-${_floor_lines}
-The full tree is proved ONCE per run, at integration close, over a tree nobody is
-still writing to. A floor run while Step-4 rows are open proves a tree that does not
-survive them landing: the result is stale before it is read, and the next floor is
-owed anyway. Six of wave-14's floors were spent that way.
+          _dp_detail="The working branch's head ${_fr_short}${_fr_tree} is the tree the plan's last floor proof read:
+    ${_fr_proof}
 
-Fix: land or drop those rows, then retry the dispatch.
+${_fr_moment}
 
-Or, if this floor is deliberate, say so once under \`## SDLC State\` in —
-    $PLAN
+Fix: dispatch no full run. That proof stands for this head; a change landed after
+it is proved by the suites it affects, named when the full run is refused again."
+          dp_finding "head ${_fr_short} is already proved" "keep the floor proof; run nothing" "$_dp_detail" ;;
+        bounded*)
+          _fr_suites="${_fr_state#*$'\t'}"
+          # THE LIST STAYS READABLE AND THE FIX STAYS WHOLE (A-T5.4). The detail lists at most
+          # twelve suites, one per line, then counts the rest; the `Suites:` line below it names
+          # every one, because a brief built from a shortened list would prove less than the
+          # change needs.
+          _fr_n=0; _fr_list=""; _fr_line=""
+          set -f
+          for _fr_s in $_fr_suites; do
+            _fr_n=$((_fr_n + 1))
+            [ "$_fr_n" -le 12 ] && _fr_list="${_fr_list}    ${_fr_s}
+"
+            _fr_line="${_fr_line:+$_fr_line }tests/${_fr_s}"
+          done
+          [ "$_fr_n" -gt 12 ] && _fr_list="${_fr_list}    … and $((_fr_n - 12)) more
+"
+          # shellcheck disable=SC2086
+          _fr_names="$(fr_fit 26 $_fr_suites)"
+          set +f
+          _dp_detail="The change since the floor proof at ${_fr_short} is bounded: the map answers every
+changed file, and ${_fr_n} suite(s) prove it:
+${_fr_list}
+${_fr_moment}
 
-    regression-cause: <why the tree must be re-proved with rows open>
+Fix: dispatch those suites instead of the full tree. This brief line names all ${_fr_n}:
+    Suites: ${_fr_line}"
+          dp_finding "bounded: ${_fr_names}" "run those suites, not the tree" "$_dp_detail" ;;
+        unbounded*)
+          _fr_why="${_fr_state#*$'\t'}"
+          _fr_open=""
+          # A copied hook whose units.sh predates the floor holds cannot ask; it says so.
+          if declare -F units_floor_holds >/dev/null 2>&1; then
+            _fr_open="$(fr_open_writers)"
+          else
+            dp_not_checked "full-run hold" "the floor holds (lib/units.sh units_floor_holds)"
+          fi
+          if [ -n "$_fr_open" ]; then
+            _fr_lines=""; _fr_idv=""
+            while IFS=$'\t' read -r _fo_id _fo_step _fo_status; do
+              [ -n "$_fo_id" ] || continue
+              _fr_lines="${_fr_lines}    $(printf '%-4s' "$_fo_id") (step ${_fo_step}, ${_fo_status})
+"
+              _fr_idv="${_fr_idv:+$_fr_idv }$_fo_id"
+            done <<FR_OPEN_ROWS
+$_fr_open
+FR_OPEN_ROWS
+            set -f
+            # shellcheck disable=SC2086
+            _fr_ids="$(fr_fit 9 $_fr_idv)"
+            set +f
+            _dp_detail="The change since the last floor proof cannot be bounded (${_fr_why}),
+so a full run is owed. But rows the floor waits on still write tracked files, and a run now
+proves a head that does not survive them landing:
+${_fr_lines}
+${_fr_moment}
 
-A narrower brief needs no cause: name only the suites the change actually reaches."
-        dp_finding "Step-4 rows open: ${_floor_ids}" "land them, or state the cause" "$_dp_detail"
-      fi
+Fix: land or drop those rows, then dispatch the full run."
+            dp_finding "rows write tracked files: ${_fr_ids}" "land them, then dispatch it" "$_dp_detail"
+          fi
+          ;;
+      esac
     fi
     ;;
 esac
@@ -2255,10 +2323,11 @@ esac
 # LEDGER. So this is where the list is spent: one refusal carrying every fault every arm
 # from the arming wall down found, in file order, or a silent return when they found none.
 #
-# IT MOVED DOWN PAST THE ONE-REGRESSION WALL (wave-14 REQ-8). It used to sit between the
+# IT MOVED DOWN PAST THE FULL-RUN WALL (wave-14 REQ-8; the one-regression wall then).
+# It used to sit between the
 # brief-shape arms and that wall, which was right while only the brief-shape arms pooled
 # and wrong the moment the state arms joined them: a dispatch over budget AND re-running
-# the full tree was refused for the budget, and met the regression wall on the next
+# the full tree was refused for the budget, and met the full-run wall on the next
 # attempt — the exact shape AC-8.1 forbids ("fixing the first alone produces a refusal
 # naming a fault the first could have named").
 #

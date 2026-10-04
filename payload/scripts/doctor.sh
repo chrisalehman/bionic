@@ -107,6 +107,82 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# BIONIC_DOCTOR_ONLY — A TEST SEAM, NOT A FEATURE. A comma-separated list of the page's own section names;
+# when set, the run gathers and prints only those and skips every gather they do not need — above all the
+# dependency sweep and the CLI's plugin listing, which are most of a run and read nothing from the project.
+# It exists so a suite that asserts on one section's rows does not pay for the whole page.
+#
+#   PATROL    the PATROL section (the session rows and the drift line)
+#   PROJECT   the PROJECT section (the run, predecessors, auto-memory, links, restart-needed)
+#   FIXES     the "→" fix lines raised by the sections gathered here, printed as the verdict block prints them
+#   NATIVE    the BIONIC NATIVE table, which carries the version row: its gathers are the plugin listing
+#             and the duplicate-registration scan, and it prints between the fix lines and PATROL
+#
+# A filtered page has NO verdict line, NO problem count and none of the tables or RESOURCES: only the named
+# sections, so a row that asserts on any of those runs the whole page. An unknown name is refused before any
+# fact is gathered, with one line on stderr and status 2 (the status an unknown option gets). Unset or empty,
+# the page is byte-identical to a run without this seam.
+DOCTOR_ONLY="${BIONIC_DOCTOR_ONLY:-}"
+_doctor_filtering() { [ -n "$DOCTOR_ONLY" ]; }
+_doctor_want() {  # <name>... -> 0 when unfiltered, or when any named section is in the filter
+  _doctor_filtering || return 0
+  local n
+  for n in "$@"; do
+    case ",${DOCTOR_ONLY}," in *",${n},"*) return 0 ;; esac
+  done
+  return 1
+}
+if _doctor_filtering; then
+  _doctor_only_rest="$DOCTOR_ONLY"
+  while [ -n "$_doctor_only_rest" ]; do
+    _doctor_only_one="${_doctor_only_rest%%,*}"
+    case "$_doctor_only_rest" in *,*) _doctor_only_rest="${_doctor_only_rest#*,}" ;; *) _doctor_only_rest="" ;; esac
+    case "$_doctor_only_one" in
+      PATROL|PROJECT|FIXES|NATIVE) ;;
+      *) echo "doctor.sh: unknown section '${_doctor_only_one}' in BIONIC_DOCTOR_ONLY — the sections are PATROL, PROJECT, FIXES, NATIVE" >&2
+         exit 2 ;;
+    esac
+  done
+fi
+
+# THE "→" FIX LINES THAT ARE NOT THE COLLAPSED SETUP LINE, printed one per line. A function so that
+# the verdict below and a filtered run (BIONIC_DOCTOR_ONLY) print them through one routine. It sits up
+# here, outside the whole-page gate the verdict is inside, so a filtered run can reach it.
+_doctor_print_other_fixes() {
+  [ -n "$FIX_LINES_OTHER" ] || return 0
+  while IFS= read -r _fix_other; do
+    [ -n "$_fix_other" ] || continue
+    # THE BOUND IS THE LOOP'S, AND THE COMMAND IS WHAT SURVIVES IT (wave-01
+    # S4, AC-6; closes DOCTOR/13). These lines were the one part of the report
+    # printed with a bare `printf` and no bound — which held only while every
+    # one of them was short by construction, and stopped holding when the
+    # core-absence line started carrying a variable-length name list and the
+    # dependency-unknown line started carrying a spelled-out cause (105
+    # columns with the CLI off PATH).
+    #
+    # THE FIXIT ALREADY TRIED A BOUND HERE AND REVERTED IT (c9f66b5, dd07b33).
+    # It failed because it passed the whole line as `bionic_line`'s tail, so
+    # the ellipsis ate the END of the line — which is where doctor's first
+    # format rule puts the command. The tail is not one string: it is a
+    # problem and then a command, split on the same FIRST arrow `fix` itself
+    # splits on to name the problem. Passed separately, the problem half
+    # absorbs the whole shortfall and the command is printed whole, which is
+    # exactly the contract `bionic_line`'s third argument exists for.
+    #
+    # A command with no room left to protect it in falls back to
+    # `bionic_line`'s own documented degenerate case — one bound over the
+    # whole tail — and that is the library's ruling, not a new one here.
+    _fix_head="${_fix_other%% → *}"
+    _fix_cmd="${_fix_other#* → }"
+    if [ "$_fix_head" = "$_fix_other" ]; then
+      # No arrow: nothing to protect, one bound over the line.
+      printf '%s\n' "$(bionic_line '→ ' "$_fix_other")"
+    else
+      printf '%s\n' "$(bionic_line '→ ' "$_fix_head" " → ${_fix_cmd}")"
+    fi
+  done <<< "$FIX_LINES_OTHER"
+}
+
 # No `dirname` here for the same reason the libraries give: a diagnosis that
 # needs coreutils to locate itself dies on the broken machine it exists for.
 _doctor_self_dir() {
@@ -847,6 +923,7 @@ HALF_FACT="$(detect_half_uninstalled)";      HALF_STATE="${HALF_FACT##*half-unin
 
 HAVE_JQ=yes; command -v jq >/dev/null 2>&1 || HAVE_JQ=no
 
+if _doctor_want NATIVE; then
 # ─── The two facts that come from outside this machine's files ───────────────
 #
 # LOAD STATE is the CLI's own conclusion and is not written anywhere readable, so
@@ -912,7 +989,9 @@ while IFS= read -r _dup_line; do
 done <<EOF
 $DUP_LINES
 EOF
+fi  # _doctor_want NATIVE
 
+if ! _doctor_filtering; then
 # ─── The dependency sweep ────────────────────────────────────────────────────
 #
 # One pass over the table produces three renderings at once — the dependency
@@ -1247,6 +1326,7 @@ while IFS= read -r dep_name; do
       ;;
   esac
 done < <(dep_names)
+fi  # ! _doctor_filtering
 
 # ─── The one address this page is about ──────────────────────────────────────
 #
@@ -1319,6 +1399,7 @@ EOF
 #     fact that could tell an armed Patrol from a dead one — see the gate on
 #     `_patrol_flush` below, which is where the whole argument lives. "Running
 #     Patrols or nothing" needs a way to know which; this is the only one.
+if _doctor_want PATROL FIXES; then
 PATROL_ROWS=""
 _patrol_add() { PATROL_ROWS="${PATROL_ROWS}$1"$'\n'; }
 
@@ -1518,6 +1599,7 @@ done <<EOF
 $PATROL_LINES
 EOF
 _patrol_flush
+fi  # _doctor_want PATROL FIXES
 
 # ─── This project: the run, its predecessors, and the machine ────────────────
 #
@@ -1525,6 +1607,7 @@ _patrol_flush
 # now — that section is the page's first project-scoped reader, and it cannot
 # scope itself to an address that has not been computed yet (FIX-DOCTOR/1).
 
+if _doctor_want PROJECT FIXES; then
 RUN_ROWS=""
 _run_add() { RUN_ROWS="${RUN_ROWS}$1"$'\n'; }
 
@@ -1780,7 +1863,9 @@ if [ -n "$_doctor_hooks_mtime" ]; then
 $(patrol_live_sessions 2>/dev/null)
 EOF
 fi
+fi  # _doctor_want PROJECT FIXES
 
+if ! _doctor_filtering; then
 # ─── The machine, and the budget each live session recorded on it ────────────
 #
 # THE READER IS THE SCHEMA'S OWNER (AC-25, L-RESOURCES/1). The attestation format
@@ -2231,37 +2316,7 @@ else
   fi
   printf '%s\n' "$_doctor_verdict"
   if [ -n "$FIX_LINES_OTHER" ]; then
-    while IFS= read -r _fix_other; do
-      [ -n "$_fix_other" ] || continue
-      # THE BOUND IS THE LOOP'S, AND THE COMMAND IS WHAT SURVIVES IT (wave-01
-      # S4, AC-6; closes DOCTOR/13). These lines were the one part of the report
-      # printed with a bare `printf` and no bound — which held only while every
-      # one of them was short by construction, and stopped holding when the
-      # core-absence line started carrying a variable-length name list and the
-      # dependency-unknown line started carrying a spelled-out cause (105
-      # columns with the CLI off PATH).
-      #
-      # THE FIXIT ALREADY TRIED A BOUND HERE AND REVERTED IT (c9f66b5, dd07b33).
-      # It failed because it passed the whole line as `bionic_line`'s tail, so
-      # the ellipsis ate the END of the line — which is where doctor's first
-      # format rule puts the command. The tail is not one string: it is a
-      # problem and then a command, split on the same FIRST arrow `fix` itself
-      # splits on to name the problem. Passed separately, the problem half
-      # absorbs the whole shortfall and the command is printed whole, which is
-      # exactly the contract `bionic_line`'s third argument exists for.
-      #
-      # A command with no room left to protect it in falls back to
-      # `bionic_line`'s own documented degenerate case — one bound over the
-      # whole tail — and that is the library's ruling, not a new one here.
-      _fix_head="${_fix_other%% → *}"
-      _fix_cmd="${_fix_other#* → }"
-      if [ "$_fix_head" = "$_fix_other" ]; then
-        # No arrow: nothing to protect, one bound over the line.
-        printf '%s\n' "$(bionic_line '→ ' "$_fix_other")"
-      else
-        printf '%s\n' "$(bionic_line '→ ' "$_fix_head" " → ${_fix_cmd}")"
-      fi
-    done <<< "$FIX_LINES_OTHER"
+    _doctor_print_other_fixes
     # The one command that cannot ride on its own line: a raw URL inside a
     # pipefail wrapper, printed whole underneath rather than wrapped by the
     # terminal into something nobody can paste.
@@ -2278,6 +2333,8 @@ fi
 # and is repaired by re-installing the plugin; everything in the next arrived
 # through /bionic:setup and is repaired by running it again. A reader who knows
 # which table a broken row is in already knows what to type.
+fi  # the whole-page gate, closed so a filtered run can print this table alone
+if _doctor_want NATIVE; then
 echo ""
 echo "BIONIC NATIVE — ships inside the plugin"
 _doctor_native_row " " "component" "count" "detail"
@@ -2393,6 +2450,8 @@ esac
 [ "$HALF_STATE" = "yes" ] && \
   _doctor_native_row "$DOCTOR_BAD" "install" "—" "half-uninstalled — the CLI no longer knows bionic"
 printf '%s' "$DUP_ROWS"
+fi  # _doctor_want NATIVE
+if ! _doctor_filtering; then
 
 # ─── Table 2 — the tools and plugins bionic depends on ───────────────────────
 echo ""
@@ -2584,6 +2643,15 @@ echo ""
 echo "RESOURCES"
 printf '%s' "$RESOURCES_ROWS"
 
+fi  # the whole-page gate opened above, at "The machine, and the budget"
+
+# THE FILTERED RUN'S FIX LINES (BIONIC_DOCTOR_ONLY=…FIXES…): the lines the gathered sections raised,
+# printed by the one routine the whole page's verdict block prints them with. A whole run reaches
+# the same routine from the verdict, so a line reads the same in both.
+if _doctor_filtering && _doctor_want FIXES; then
+  _doctor_print_other_fixes
+fi
+
 # ─── The Patrol ──────────────────────────────────────────────────────────────
 #
 # RUNNING PATROLS OR NOTHING. See the gathering comment above for the full
@@ -2595,6 +2663,7 @@ printf '%s' "$RESOURCES_ROWS"
 # rather than below for that reason: the Patrol block is read from its header to
 # end of output by more than one caller, and a section appended after it would
 # arrive inside everything that reads it.
+if _doctor_want PATROL; then
 echo ""
 echo "PATROL"
 # GATED ON WHETHER THERE IS ANYTHING TO SAY, not on the count of firing Patrols (REQ-11).
@@ -2625,15 +2694,18 @@ if [ -n "$_drift_reg" ] && [ "$_drift_reg" != "$_drift_run" ]; then
     echo "  plugin-root drift: registry=${_drift_reg} running=${_drift_run} — the Patrol must be armed from the running root"
   fi
 fi
+fi
 # THE RUN, THE PREDECESSORS, THE LEGACY LINKS AND AUTO MEMORY — the rows that are about
 # this PROJECT rather than about this machine. They used to print unheaded under PATROL,
 # so `auto-memory` read as a Patrol finding beside `none running` (wave-23 T10, walk
 # surprise 1). The header goes AFTER the Patrol's own rows and the drift line, so the
 # Patrol block — read from its header to end of output by more than one caller — still
 # contains every row it contained before; only the label above the project rows changed.
+if _doctor_want PROJECT; then
 echo ""
 echo "PROJECT"
 printf '%s' "$RUN_ROWS"
+fi
 
 # The version the dependency sweep already probed. Used only where a package
 # manager reports that a row is outdated without saying what is installed — the

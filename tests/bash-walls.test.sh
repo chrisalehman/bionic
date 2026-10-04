@@ -173,11 +173,13 @@ context_of()  { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContex
 # `updated_timeout_of` alone cannot: both read "" from jq's `// empty`.
 updated_timeout_of()  { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.timeout // empty' 2>/dev/null; }
 has_updated_input()   { printf '%s' "$OUT" | jq -e '.hookSpecificOutput.updatedInput' >/dev/null 2>&1 && echo yes || echo no; }
+# updated_command_of — the rewritten command (wave-26 T7): the booking wrap, when one rode.
+updated_command_of()  { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null; }
 # line_of <regex> — the 1-based line of the first stderr line matching, or empty.
 line_of()     { printf '%s\n' "$ERR" | awk -v re="$1" '$0 ~ re {print NR; exit}'; }
 
 require_helpers mk_repo block_plan arm_roster mk_payload run_hook json_docs deny_reason \
-                context_of line_of updated_timeout_of has_updated_input
+                context_of line_of updated_timeout_of has_updated_input updated_command_of
 
 setup_section "the repos"
 R_QUIET="$(mk_repo quiet)"
@@ -790,6 +792,13 @@ expect_contains "14d: …the repair is logged, naming the agent" \
 # would still find. This is the ONE line that would have caught it.
 expect_eq "14e0: …and stderr is EXACTLY that one log line — no stray shell error beside it" \
   "canonical-sdlc [suite-timeout]: repaired from=absent to=600000 agent=$ACTOR" "$ERR"
+# ONE ANSWER, BOTH REWRITES (wave-26 T7, D8). The repair sets `timeout`; the booking wrap
+# then rewrites `command` on the SAME object, so neither change overwrites the other.
+expect_eq "14e1: …one JSON document on stdout" "1" "$(json_docs)"
+expect_regex "14e2: …whose command is the booking wrap around the original" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "$(updated_command_of)"
+expect_eq "14e3: …beside the repaired timeout" "600000" "$(updated_timeout_of)"
 
 # (b) a timeout BELOW the maximum — raised, not left alone.
 run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 3000)" \
@@ -803,7 +812,13 @@ expect_contains "14f: …logged with the ORIGINAL value, not the repaired one" \
 run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 600000)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "14g: a suite call already at the harness maximum is not refused" 0 "$ST"
-expect_eq "14h: …and carries no updatedInput — there is nothing to repair" "no" "$(has_updated_input)"
+# THE WRAP RIDES EVERY ALLOWED SUITE CALL (wave-26 T7, D8), so updatedInput is present here
+# too — but its timeout is the caller's own, untouched: there was nothing to repair.
+expect_eq "14h: …its timeout is left as the caller set it — there is nothing to repair" \
+  "600000" "$(updated_timeout_of)"
+expect_regex "14h2: …and the only rewrite is the booking wrap around the original command" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "$(updated_command_of)"
 expect_empty "14i: …no repair logged either" "$ERR"
 
 # (d) ARM 1 UNCHANGED — a backgrounded suite is still refused, and the repair arm (which
@@ -820,6 +835,20 @@ expect_eq "14l: …and carries no updatedInput" "no" "$(has_updated_input)"
 run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600000
 expect_eq "14m: a main-thread suite call carries no updatedInput — the repair never reaches it" \
   "no" "$(has_updated_input)"
+# …BUT WHERE THE MAIN THREAD MAY RUN IT, IT IS BOOKED (wave-26 T7, D8). Under
+# `farm-out-mode: advisory` farm-out nudges instead of refusing; the call is allowed, so the
+# wrap rides beside the nudge in one document, and the timeout is the main thread's own.
+R_ADV="$(mk_repo advisory)"
+printf 'farm-out-mode: advisory\n' > "$R_ADV/.bionic/config.yaml"
+run_hook "$(mk_payload "$R_ADV" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600000
+expect_status "14m1: an advisory main-thread suite call is allowed" 0 "$ST"
+expect_eq "14m2: …one JSON document on stdout" "1" "$(json_docs)"
+expect_regex "14m3: …carrying the booking wrap" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "$(updated_command_of)"
+expect_eq "14m4: …and no timeout repair on the main thread" "" "$(updated_timeout_of)"
+expect_nonempty "14m4: …(the reader works: the wrap's command is non-empty on the same object)" \
+  "$(updated_command_of)"
 
 # (f) SUBAGENT, NON-SUITE CONTROL — `cmd_class` never answers "suite", so the whole
 # function returns before ARM 1 or the repair arm, exactly as section 1's `ls -la` row.
@@ -1154,7 +1183,14 @@ expect_contains "15e5: …with an honest count of what did not fit" "more" "$ERR
 run_hook "$(mk_payload "$R15" 'bash tests/archive.test.sh' "$ACTOR" omit Bash test-runner 600000)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "15f: an on-budget suite is still allowed" 0 "$ST"
-expect_empty "15f2: …and both streams stay empty" "$OUT$ERR"
+# THE ONLY STDOUT IS THE BOOKING WRAP (wave-26 T7, D8), which every allowed suite call
+# carries: no nudge, no refusal, and nothing on stderr.
+expect_empty "15f2: …stderr stays empty" "$ERR"
+expect_regex "15f3: …and stdout is the booking wrap alone" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites archive\\.test\\.sh -- 'bash tests/archive\\.test\\.sh'\$" \
+  "$(updated_command_of)"
+expect_eq "15f4: …with no other channel beside it" '["hookEventName","updatedInput"]' \
+  "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
 
 # (g) T25 fold-in (review-correctness-d3930dd.md F3, F7): THE HONEST FLOOR WHEN THERE IS NO
 # ROOM AT ALL. (e) above proves the wide-budget case (a whole token plus a "+N more" count);
@@ -1808,6 +1844,13 @@ am_refused "19q: bash session-poker.sh step-line" "bash $AM_POKER step-line T2 '
 am_refused "19r: bash session-poker.sh current" "bash $AM_POKER current 5"
 am_refused "19s: bash session-poker.sh ledger-add" "bash $AM_POKER ledger-add T2 agent=w20-sub"
 am_refused "19t: bash session-poker.sh ledger-set" "bash $AM_POKER ledger-set T2 landed=yes"
+# §ARM-A (proof-add) — wave-26 T5, REQ-3 D5/D6: a proof line decides whether the full run is
+# admitted, so an agent that could write one could prove its own head.
+am_refused "19u: bash session-poker.sh proof-add" \
+  "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt"
+# §ARM-A (approve) — wave-26 T5 after T13: an approval line is what releases a gate act, so an
+# agent that could write one would approve its own step.
+am_refused "19v: bash session-poker.sh approve" "bash $AM_POKER approve release 'approved'"
 
 # THE PAIRED POSITIVES. The same verbs from the main thread (no agent_id) are the
 # orchestrator's and pass this arm; a subagent's own read-only poker verbs pass; and a quoted
@@ -1817,6 +1860,9 @@ am_admitted "19j: task-add from the main thread" "bash $AM_POKER task-add a b c 
 am_admitted "19j2: hold from the main thread" "bash $AM_POKER hold w20-sub 'idle on purpose'" ""
 am_admitted "19j3: current from the main thread" "bash $AM_POKER current 5" ""
 am_admitted "19j4: task-set from the main thread" "bash $AM_POKER task-set T2 status=landed" ""
+am_admitted "19j5: proof-add from the main thread" \
+  "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt" ""
+am_admitted "19j6: approve from the main thread" "bash $AM_POKER approve release 'approved'" ""
 am_admitted "19k: a subagent's tick" "bash $AM_POKER tick"
 am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
 am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"

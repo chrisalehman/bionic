@@ -2113,4 +2113,797 @@ expect_eq "16e: agent_type AND row both bionic — the terms print once" "1" "$(
 expect_contains "16e: …and the row still gains terms-delivered=" "|terms-delivered=20" \
   "$(grep 'status=identified' "$S16E_REPO/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)"
 
+
+# ============================================================
+section "Section 17: §ACTIVE — a confirmed launch moves its plan row (wave-26 T12, D4, AC-1.4)"
+# ============================================================
+#
+# The act that confirms a launch on the roster also sets the plan row `active` and adds its
+# `## Dispatch ledger` line, through the plan-row verbs' own transaction (session-poker.sh
+# task-set and ledger-add: copy, validate, dry commit through the real gate, swap). The plan
+# text stays the commit gate's source. The id-to-name rule is `fill_row_launched`'s.
+#
+# THE FIXTURE IS A PLAN THE REAL GATE ADMITS, the shape tests/session-poker.test.sh §34 builds:
+# audited, multi_agent, use_worktree, a Step-4 block, a `- T<n>:` line per row and a matrix row
+# with its `fails-when:`. Precondition 17a drives that gate on it, so every refusal below is
+# about the change, not the fixture.
+#
+# fails-when: the recorder confirms the roster row and leaves the plan row `pending` (17b red);
+# it writes for a launch that maps to no row (17d); a failed transaction passes silently (17e);
+# it writes below `current: 4` or without a bound plan (17h, 17i); the hook waits on the plan
+# (17j3, 17k); a re-dispatch goes unledgered (17g); a killed write leaves half a launch (17m, 17n).
+ACT_LAUNCHED="2026-10-04T03:37:12Z"
+ACT_BASE="0123456789abcdef0123456789abcdef01234567"
+act_world() {  # <label> <current> [bind: yes|no] [extra pending build rows] -> repo path; engaged, bound, plan committed
+  local r="$SANDBOX/act-$1/repo" cur="$2" bind="${3:-yes}" extra="${4:-0}" p n
+  mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/plans/epic-99-fixture" "$r/.bionic/docs/specs/epic-99-fixture"
+  git -C "$r" init -q 2>/dev/null
+  git -C "$r" config user.email t@example.com
+  git -C "$r" config user.name "T"
+  echo seed > "$r/README.md"; git -C "$r" add README.md; git -C "$r" commit -qm seed 2>/dev/null
+  printf '# requirements\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  p="$r/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: audited\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: %s\n' "$cur"
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: abc1234\n  branch: wave/01-fixture\n'
+    printf -- '- T1: landed at record/T1.md\n- T2: dispatched to w1-T2\n'
+    printf -- '- T3: pending dispatch — .worktrees/01-T3\n- T4: pending dispatch — .worktrees/01-T4\n'
+    printf -- '- T5: pending dispatch\n'
+    n=6; while [ "$n" -lt $((6 + extra)) ]; do printf -- '- T%s: pending dispatch\n' "$n"; n=$((n + 1)); done
+    printf '\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+    printf '| T2 | 4 | build | the second build | w1-T2 | — | 30 | REQ-1 | b.sh | 01-T2 | abc1234 | active |\n'
+    printf '| T3 | 4 | build | the third build | — | — | 30 | REQ-1 | c.sh | — | — | pending |\n'
+    printf '| T4 | 4 | build | the fourth build | — | — | 30 | REQ-1 | d.sh | — | — | pending |\n'
+    printf '| T5 | 5 | verify | the floor | test-runner | T1, T2, T3, T4 | 30 | REQ-1 | — | — | — | pending |\n'
+    n=6; while [ "$n" -lt $((6 + extra)) ]; do
+      printf '| T%s | 4 | build | build number %s | — | — | 30 | REQ-1 | f%s.sh | — | — | pending |\n' "$n" "$n" "$n"
+      n=$((n + 1))
+    done
+    printf '\n'
+    printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
+    printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w1-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n'
+    printf '| T2 | implementor (w1-T2) | 2026-10-04T03:00Z | 30 min | record/T2.md | — | batch 1 |\n'
+  } > "$p"
+  ( cd "$r" && git add -f "$p" .bionic/docs/specs && git commit -qm plan ) >/dev/null 2>&1
+  # T2 is active under w1-T2, so the roster carries that launch: the gate's launch finding
+  # reads an active row's agent against this session's roster.
+  { roster_header
+    roster_row_fixture status=confirmed session="$SID_A" name=w1-T2 agent_id=a17w1t2000000001 \
+      launched_at=2026-10-04T03:00:00Z subagent_type=bionic:implementor tool_use_id=toolu_01ACTT2a
+  } > "$r/.bionic/tmp/roster-${SID_A}.state"
+  if [ "$bind" = yes ]; then
+    printf 'plan=%s\nengaged_at=2026-10-04T03:00:00Z\n' "$p" > "$r/.bionic/tmp/engaged-$SID_A.state"
+  else
+    : > "$r/.bionic/tmp/engaged-$SID_A.state"
+  fi
+  printf '%s' "$r"
+}
+act_plan() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md' "$1"; }
+act_intended() {  # <repo> <name> <tool_use_id> [subagent_type] -> the intended row the dispatch wall writes
+  local f="$1/.bionic/tmp/roster-${SID_A}.state"
+  [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture status=intended session="$SID_A" name="$2" agent_id= \
+    launched_at="$ACT_LAUNCHED" subagent_type="${4:-bionic:implementor}" \
+    deliverable=.bionic/docs/record/wave-01/T3-report.md duration='~45 minutes.' \
+    progress=.bionic/tmp/w1.progress tool_use_id="$3" >> "$f"
+}
+act_workspace() {  # <repo> <name> <tree basename> -> the line spawn-worktree.sh create --for writes
+  # A REAL LINKED WORKTREE (wave-26 T40): the record counts a path only where git lists it
+  # (worktree.sh `_wt_listed_trees`, wave-25 T18), so a plain directory would be skipped. The
+  # path is written as git lists it, physical, as spawn-worktree.sh create writes it.
+  local t
+  t="$(cd "$1" && pwd -P)/.worktrees/$3"
+  git -C "$1" worktree list --porcelain | grep -qxF "worktree $t" \
+    || git -C "$1" worktree add -q -b "wt/$3" "$t" >/dev/null 2>&1
+  printf 'workspace/v1|session=%s|name=%s|path=%s|branch=wt/%s|base=%s|plan=%s|at=2026-10-04T03:36:00Z\n' \
+    "$SID_A" "$2" "$t" "$3" "$ACT_BASE" "$(act_plan "$1")" >> "$1/.bionic/tmp/workspaces-$SID_A.state"
+}
+act_gate() {  # <repo> -> rc of the REAL commit gate on a main-root commit in this session
+  local input
+  input="$(jq -n --arg s "$SID_A" --arg cwd "$1" '{session_id: $s, cwd: $cwd,
+    hook_event_name: "PreToolUse", tool_name: "Bash",
+    tool_input: {command: "git commit -m x"}, tool_use_id: "toolu_act"}')"
+  ( cd "$1" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID_A" \
+      bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" <<< "$input" >/dev/null 2>&1 )
+}
+act_launch() {  # <repo> <name> <agent id> <tool_use_id>
+  run_rec "$(mk_agent_post "$SID_A" "$SANDBOX/act.jsonl" "$1" "$2" "$3" "$4")"
+}
+act_row() { grep -F "| $2 | " "$(act_plan "$1")" | head -1; }
+act_ledger_row() { sed -n '/^## Dispatch ledger/,$p' "$(act_plan "$1")" | grep -F "| $2 | " | head -1; }
+
+# ---------- 17a: the fixture is admitted by the real gate (the control) ----------
+ACT_A="$(act_world launch 4)"
+act_gate "$ACT_A"; expect_eq "17a precondition: the fixture plan and roster are admitted by the real commit gate" "0" "$?"
+expect_contains "17a2 precondition: row T3 starts pending" "| — | — | pending |" "$(act_row "$ACT_A" T3)"
+
+# THE RECORDER NO LONGER WRITES THE PLAN ITSELF (wave-26 T32; review-3 F1, F2, F6). It starts
+# `session-poker.sh launch-sync` and does not wait for it: one transaction that applies every
+# open launch the plan lacks, its row and its ledger line in one validated write. The Patrol
+# tick and the turn-end wall call the same verb, so whichever runs first does the work and a
+# failure of the detached call is printed by the next of them. Rows marked INLINE run the
+# detached call in the foreground (BIONIC_LAUNCH_SYNC_INLINE=1), so the plan can be read the
+# moment the hook returns; 17j and 17k run it detached, as a session does.
+ACT_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+SYNC_OUT=""; SYNC_RC=0
+act_sync() {  # <repo> [--wait] -> SYNC_OUT (stdout and stderr) and SYNC_RC of the verb, run by hand
+  SYNC_OUT="$( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$ACT_POKER" launch-sync ${2:+"$2"} 2>&1 )"; SYNC_RC=$?
+}
+act_until() {  # <seconds> <command>... -> 0 once the command succeeds within the bound
+  local end=$(( $(date +%s) + $1 )); shift
+  while [ "$(date +%s)" -lt "$end" ]; do "$@" >/dev/null 2>&1 && return 0; sleep 0.1; done
+  "$@" >/dev/null 2>&1
+}
+act_confirmed() {  # <repo> <name> -> a confirmed roster row, as the recorder writes one, with no hook run
+  roster_row_fixture status=confirmed session="$SID_A" name="$2" agent_id="a17$(printf '%s' "$2" | tr -dc 'A-Za-z0-9')0000" \
+    launched_at="$ACT_LAUNCHED" subagent_type=bionic:implementor \
+    deliverable=.bionic/docs/record/wave-01/T3-report.md duration='~45 minutes.' \
+    tool_use_id="toolu_c$2" >> "$1/.bionic/tmp/roster-${SID_A}.state"
+}
+act_has() {  # <repo> <fixed text> -> 0 when the plan carries it
+  grep -qF -- "$2" "$(act_plan "$1")"
+}
+# WHAT A ROW STARTED, AND A BOUND ON IT (wave-26 T51; review 13 F1, F8). A transaction runs in
+# the fixture's repo, so every bash process whose working directory is under it was started by
+# the row that built it: that is how a row finds what it left running, without naming a process
+# by its command text (another suite's transaction has the same text). `act_bg` starts
+# launch-sync in a process group of its own, and `act_bg_end` waits for it a fixed number of
+# times and then kills that group whole, so a row whose subject hangs fails in seconds and leaves
+# nothing behind.
+act_procs() {  # <dir> -> the pids of bash processes whose working directory is <dir> or below it
+  local d
+  d="$(cd "$1" 2>/dev/null && pwd -P)" || return 0
+  lsof -a -c bash -d cwd -Fpn 2>/dev/null | awk -v d="$d" '
+    /^p/ { p = substr($0, 2); next }
+    /^n/ { n = substr($0, 2); if (n == d || index(n, d "/") == 1) print p }'
+}
+ACT_BG=""
+act_bg() {  # <repo> [--wait] -> ACT_BG, the pid and process group of launch-sync started apart
+  rm -f "$SANDBOX/act-bg.rc" "$SANDBOX/act-bg.out"
+  ACT_BG="$( set -m
+    ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$ACT_POKER" launch-sync ${2:+"$2"} \
+        > "$SANDBOX/act-bg.out" 2>&1
+      echo "$?" > "$SANDBOX/act-bg.rc" ) </dev/null >/dev/null 2>&1 &
+    echo "$!" )"
+}
+act_bg_end() {  # <seconds> -> SYNC_RC and SYNC_OUT; 124, its whole group killed, when it outran the bound
+  local i=0 n=$(( $1 * 10 ))
+  while [ ! -s "$SANDBOX/act-bg.rc" ] && [ "$i" -lt "$n" ]; do sleep 0.1; i=$((i + 1)); done
+  if [ -s "$SANDBOX/act-bg.rc" ]; then
+    SYNC_RC="$(cat "$SANDBOX/act-bg.rc")"
+  else
+    kill -9 -- "-$ACT_BG" 2>/dev/null
+    SYNC_RC=124
+  fi
+  SYNC_OUT="$(cat "$SANDBOX/act-bg.out" 2>/dev/null)"
+}
+require_helpers act_sync act_until act_confirmed act_has act_procs act_bg act_bg_end
+command -v lsof >/dev/null 2>&1 || { echo "execution-recorder: lsof absent — the rows that find what they left running cannot read"; exit 1; }
+
+# ---------- 17b: a confirmed launch of w1-T3 leaves row T3 active with a ledger line (INLINE) ----------
+export BIONIC_LAUNCH_SYNC_INLINE=1
+act_intended "$ACT_A" w1-T3 toolu_01ACTT3
+act_workspace "$ACT_A" w1-T3 01-T3
+act_launch "$ACT_A" w1-T3 a17b000000000001 toolu_01ACTT3
+expect_contains "17b0 the roster row is confirmed (the arm ran)" "name=w1-T3" \
+  "$(grep 'status=confirmed' "$ACT_A/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)"
+expect_eq "17b §ACTIVE row T3 is active under the dispatch name, in the tree spawn recorded" \
+  "| T3 | 4 | build | the third build | w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | 01234567 | active |" \
+  "$(act_row "$ACT_A" T3)"
+expect_eq "17c §ACTIVE …and the dispatch ledger carries its line, its tree and base in the notes" \
+  "| T3 | implementor (w1-T3) | 2026-10-04T03:37Z | 45 min | .bionic/docs/record/wave-01/T3-report.md | — | .worktrees/01-T3 @ 01234567 |" \
+  "$(act_ledger_row "$ACT_A" T3)"
+expect_eq "17c2 …the launch is silent" "" "$REC_ERR"
+expect_eq "17c3 …and the hook exits 0" "0" "$REC_ST"
+act_gate "$ACT_A"; expect_eq "17c4 …and the plan as written is still admitted by the gate" "0" "$?"
+expect_contains "17c5 …row T4 is untouched" "| d.sh | — | — | pending |" "$(act_row "$ACT_A" T4)"
+cp "$(act_plan "$ACT_A")" "$SANDBOX/act-before"
+act_sync "$ACT_A"
+expect_eq "17c6 §SYNC idempotent: a second transaction right after writes nothing and says nothing" "" "$SYNC_OUT"
+expect_eq "17c7 …exits 0" "0" "$SYNC_RC"
+expect_true "17c8 …and the plan is byte-identical" cmp -s "$SANDBOX/act-before" "$(act_plan "$ACT_A")"
+
+# ---------- 17s: a forged record line naming the main checkout does not fill the row (wave-26 T40) ----------
+# The record file sits in .bionic/tmp, where any script can append to it. The launch reads it
+# through worktree.sh's `workspace_record_for_name`, which counts a path only where git lists it
+# as a linked worktree (wave-25 T18), so the true tree and its base still fill row T3.
+ACT_S="$(act_world forged 4)"
+act_intended "$ACT_S" w1-T3 toolu_01ACTS3
+act_workspace "$ACT_S" w1-T3 01-T3
+printf 'workspace/v1|session=%s|name=w1-T3|path=%s|branch=main|base=fedcba9876543210fedcba9876543210fedcba98|plan=%s|at=2026-10-04T03:36:30Z\n' \
+  "$SID_A" "$ACT_S" "$(act_plan "$ACT_S")" >> "$ACT_S/.bionic/tmp/workspaces-$SID_A.state"
+expect_contains "17s0 fixture: the forged line naming the main checkout is the record's last" "path=$ACT_S|branch=main" \
+  "$(tail -n 1 "$ACT_S/.bionic/tmp/workspaces-$SID_A.state")"
+act_launch "$ACT_S" w1-T3 a17s000000000001 toolu_01ACTS3
+expect_eq "17s §ACTIVE a forged line naming the main checkout is skipped: row T3 takes the true tree and its base" \
+  "| T3 | 4 | build | the third build | w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | 01234567 | active |" \
+  "$(act_row "$ACT_S" T3)"
+
+# ---------- 17d: a launch that maps to no row writes nothing and is silent ----------
+act_intended "$ACT_A" w1-R5 toolu_01ACTR5
+act_launch "$ACT_A" w1-R5 a17d000000000001 toolu_01ACTR5
+expect_contains "17d0 the researcher's roster row is confirmed (the arm ran)" "name=w1-R5" \
+  "$(grep 'status=confirmed' "$ACT_A/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null | grep -F 'w1-R5')"
+expect_true "17d §ACTIVE a launch named w1-R5 leaves the plan byte-identical" cmp -s "$SANDBOX/act-before" "$(act_plan "$ACT_A")"
+expect_eq "17d2 …and says nothing" "" "$REC_ERR"
+
+# ---------- 17f: the same agent launched again on its active row is a no-op ----------
+act_intended "$ACT_A" w1-T3 toolu_01ACTT3b
+act_launch "$ACT_A" w1-T3 a17f000000000001 toolu_01ACTT3b
+expect_contains "17f0 the second roster row is confirmed (the arm ran)" "tool_use_id=toolu_01ACTT3b" \
+  "$(grep 'status=confirmed' "$ACT_A/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)"
+expect_true "17f §ACTIVE an active row under the same agent is left byte-identical" cmp -s "$SANDBOX/act-before" "$(act_plan "$ACT_A")"
+expect_eq "17f2 …silently" "" "$REC_ERR"
+
+# ---------- 17g: a re-dispatch moves the agent cell and gets its own ledger line (review-3 F1) ----------
+# T2 is active under w1-T2, and w1-T2-r1 maps to it by the -r<n> rule. Through T12 the hook
+# refused and printed only a task-set; the re-dispatch went unledgered. Now the latest open
+# launch of a row holds its agent cell, and every open launch has its ledger line.
+act_intended "$ACT_A" w1-T2-r1 toolu_01ACTT2
+act_launch "$ACT_A" w1-T2-r1 a17g000000000001 toolu_01ACTT2
+expect_eq "17g §F1 the re-dispatch moves row T2's agent cell to the new name, tree and base kept" \
+  "| T2 | 4 | build | the second build | w1-T2-r1 | — | 30 | REQ-1 | b.sh | 01-T2 | abc1234 | active |" \
+  "$(act_row "$ACT_A" T2)"
+expect_eq "17g2 …and adds its own ledger line, keyed T2r1, in the row's tree" \
+  "| T2r1 | implementor (w1-T2-r1) | 2026-10-04T03:37Z | 45 min | .bionic/docs/record/wave-01/T3-report.md | — | 01-T2 @ abc1234 |" \
+  "$(act_ledger_row "$ACT_A" T2r1)"
+expect_contains "17g3 …while the first agent's line stays" "| T2 | implementor (w1-T2) |" "$(act_ledger_row "$ACT_A" T2)"
+expect_eq "17g4 …silently" "" "$REC_ERR"
+act_gate "$ACT_A"; expect_eq "17g5 …and the gate admits the moved cell: it names a launch on the roster" "0" "$?"
+cp "$(act_plan "$ACT_A")" "$SANDBOX/act-before"
+act_sync "$ACT_A"
+expect_eq "17g6 …and nothing is left to apply" "" "$SYNC_OUT"
+expect_true "17g7 …the plan byte-identical" cmp -s "$SANDBOX/act-before" "$(act_plan "$ACT_A")"
+
+# ---------- 17e: a launch that cannot be recorded is never silent: the next caller prints it ----------
+# T4 is a build row with no tree recorded and an empty worktree cell, so it cannot go active
+# (units.sh: an active row names a worktree). Nothing of that launch is written (its row and its
+# line go together), the hook stays silent because it never waits, and the next transaction,
+# run here by hand as the tick and the turn-end wall run it, prints what it could not apply.
+act_intended "$ACT_A" w1-T4 toolu_01ACTT4
+act_launch "$ACT_A" w1-T4 a17e000000000001 toolu_01ACTT4
+expect_contains "17e0 the launch is confirmed (the arm ran)" "name=w1-T4" \
+  "$(grep 'status=confirmed' "$ACT_A/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)"
+expect_eq "17e the hook itself says nothing: it does not wait for the transaction" "" "$REC_ERR"
+expect_true "17e2 …and nothing of that launch is written" cmp -s "$SANDBOX/act-before" "$(act_plan "$ACT_A")"
+act_sync "$ACT_A"
+expect_contains "17e3 §SYNC the next transaction prints the launch it could not record" "poker: NOT-RECORDED T4" "$SYNC_OUT"
+expect_contains "17e4 …naming the launch" "w1-T4" "$SYNC_OUT"
+expect_contains "17e5 …and why" "no tree is recorded" "$SYNC_OUT"
+expect_contains "17e6 …with the row's command to run by hand" "task-set T4 status=active agent=w1-T4" "$SYNC_OUT"
+expect_contains "17e7 …and the ledger's" "ledger-add T4" "$SYNC_OUT"
+expect_eq "17e8 …exits 1" "1" "$SYNC_RC"
+expect_true "17e9 …and the plan is unchanged" cmp -s "$SANDBOX/act-before" "$(act_plan "$ACT_A")"
+
+# ---------- 17h: below current: 4 nothing is written ----------
+ACT_H="$(act_world early 3)"
+cp "$(act_plan "$ACT_H")" "$SANDBOX/act-h-before"
+act_intended "$ACT_H" w1-T3 toolu_01ACTH
+act_workspace "$ACT_H" w1-T3 01-T3
+act_launch "$ACT_H" w1-T3 a17h000000000001 toolu_01ACTH
+expect_contains "17h0 the roster row is confirmed (the arm ran)" "name=w1-T3" \
+  "$(grep 'status=confirmed' "$ACT_H/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)"
+expect_true "17h §ACTIVE at current: 3 the plan is byte-identical" cmp -s "$SANDBOX/act-h-before" "$(act_plan "$ACT_H")"
+expect_eq "17h2 …silently" "" "$REC_ERR"
+
+# ---------- 17i: with no bound plan nothing is written ----------
+ACT_I="$(act_world unbound 4 no)"
+cp "$(act_plan "$ACT_I")" "$SANDBOX/act-i-before"
+act_intended "$ACT_I" w1-T3 toolu_01ACTI
+act_workspace "$ACT_I" w1-T3 01-T3
+act_launch "$ACT_I" w1-T3 a17i000000000001 toolu_01ACTI
+expect_contains "17i0 the roster row is confirmed (the arm ran)" "name=w1-T3" \
+  "$(grep 'status=confirmed' "$ACT_I/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)"
+expect_true "17i §ACTIVE an unbound session leaves the plan byte-identical" cmp -s "$SANDBOX/act-i-before" "$(act_plan "$ACT_I")"
+expect_eq "17i2 …silently" "" "$REC_ERR"
+
+# ---------- 17j: the hook never waits; a dead holder's lock is taken over, a live one is waited out ----------
+ACT_J="$(act_world lock 4)"
+ACT_LOCK="$ACT_J/.bionic/tmp/launch-sync.lock"
+mkdir -p "$ACT_LOCK"; ( exit 0 ) & ACT_DEAD=$!; wait "$ACT_DEAD" 2>/dev/null
+printf '%s' "$ACT_DEAD" > "$ACT_LOCK/pid"
+act_intended "$ACT_J" w1-T3 toolu_01ACTJ
+act_workspace "$ACT_J" w1-T3 01-T3
+act_launch "$ACT_J" w1-T3 a17j000000000001 toolu_01ACTJ
+expect_contains "17j §SYNC a lock whose holder is gone is taken over: row T3 is active" \
+  "| w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | 01234567 | active |" "$(act_row "$ACT_J" T3)"
+expect_no_file "17j2 …and the lock is released after the write" "$ACT_LOCK"
+# DETACHED from here: the hook starts the transaction and returns. A live holder keeps the lock,
+# so the detached call waits for it while the hook has long since exited; once the holder is
+# gone, the waiter applies the launch.
+unset BIONIC_LAUNCH_SYNC_INLINE
+sleep 120 & ACT_HOLDER=$!
+mkdir -p "$ACT_LOCK"; printf '%s' "$ACT_HOLDER" > "$ACT_LOCK/pid"
+cp "$(act_plan "$ACT_J")" "$SANDBOX/act-j-before"
+act_intended "$ACT_J" w1-T4 toolu_01ACTJ4
+act_workspace "$ACT_J" w1-T4 01-T4
+ACT_T0=$(date +%s)
+act_launch "$ACT_J" w1-T4 a17j000000000002 toolu_01ACTJ4
+ACT_T1=$(date +%s)
+expect_true "17j3 §SYNC the hook returns without waiting on the held lock ($((ACT_T1 - ACT_T0)) s, the waiter's bound is 60 s)" \
+  test "$((ACT_T1 - ACT_T0))" -lt 5
+expect_eq "17j4 …silently, exit 0" "0:" "$REC_ST:$REC_ERR"
+expect_true "17j5 …and the plan is unchanged while the holder lives" cmp -s "$SANDBOX/act-j-before" "$(act_plan "$ACT_J")"
+expect_eq "17j6 …and the holder keeps its lock" "$ACT_HOLDER" "$(cat "$ACT_LOCK/pid" 2>/dev/null)"
+kill "$ACT_HOLDER" 2>/dev/null; wait "$ACT_HOLDER" 2>/dev/null
+act_until 60 act_has "$ACT_J" "| d.sh | .worktrees/01-T4 | 01234567 | active |"
+expect_contains "17j7 §SYNC once the holder is gone, the detached call applies the launch: row T4 active" \
+  "| w1-T4 | — | 30 | REQ-1 | d.sh | .worktrees/01-T4 | 01234567 | active |" "$(act_row "$ACT_J" T4)"
+expect_contains "17j8 …with its ledger line" "| T4 | implementor (w1-T4) |" "$(act_ledger_row "$ACT_J" T4)"
+act_until 30 test ! -e "$ACT_LOCK"
+expect_no_file "17j9 …and the lock is released" "$ACT_LOCK"
+
+# ---------- 17k: a batch of eight launches, detached, ends as eight rows and eight lines ----------
+# Through T12 each launch ran two transactions inside its own hook under a 5 s lock wait, so a
+# batch past about three printed the busy refusal. Now each hook only starts the transaction:
+# the first to take the lock writes every launch on the roster in one write, and the rest find
+# nothing, or the launches confirmed after it read the roster.
+ACT_K="$(act_world batch 4 yes 7)"
+ACT_K_IDS="T3 T4 T6 T7 T8 T9 T10 T11"
+# A launch the recorder never ran for (its confirmation written, no hook) is applied by the
+# next caller, before any hook has run here: the positive for 17k6 on the same extractor and fixture.
+act_confirmed "$ACT_K" w1-T12
+act_workspace "$ACT_K" w1-T12 01-T12
+act_sync "$ACT_K"
+expect_contains "17k7 §SYNC the next caller applies a launch no hook recorded, and says so" \
+  "poker: LAUNCHED T12 w1-T12" "$SYNC_OUT"
+expect_contains "17k8 …row T12 active" "| .worktrees/01-T12 | 01234567 | active |" "$(act_row "$ACT_K" T12)"
+for ACT_ID in $ACT_K_IDS; do
+  act_intended "$ACT_K" "w1-$ACT_ID" "toolu_01K$ACT_ID"
+  act_workspace "$ACT_K" "w1-$ACT_ID" "01-$ACT_ID"
+done
+# THE EIGHT HOOKS RACE (wave-26 T51; review 13 F8). Through T32 this row fired them one after
+# another, so the recorder never raced itself here. They now start together, each in the
+# background, so their eight detached transactions queue on one lock at once. The row waits for
+# every hook with a bound, then for every launch, and then for every transaction the hooks
+# started: none outlives the row, and none is left to run after the sandbox is removed.
+ACT_K_PIDS=""; ACT_K_T0=$(date +%s)
+for ACT_ID in $ACT_K_IDS; do
+  ( mk_agent_post "$SID_A" "$SANDBOX/act.jsonl" "$ACT_K" "w1-$ACT_ID" "a17k0000000$ACT_ID" "toolu_01K$ACT_ID" \
+      | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$REC" >/dev/null 2>"$SANDBOX/act-k-$ACT_ID.err"
+    echo "$?" > "$SANDBOX/act-k-$ACT_ID.rc" ) &
+  ACT_K_PIDS="$ACT_K_PIDS $!"
+done
+act_k_hooks() {  # -> 0 once every hook the batch started has returned
+  local p
+  for p in $ACT_K_PIDS; do kill -0 "$p" 2>/dev/null && return 1; done
+  return 0
+}
+act_until 30 act_k_hooks
+ACT_K_SLOW=$(( $(date +%s) - ACT_K_T0 ))
+ACT_K_HUNG=""
+for ACT_P in $ACT_K_PIDS; do
+  kill -0 "$ACT_P" 2>/dev/null && { ACT_K_HUNG="$ACT_K_HUNG $ACT_P"; kill -9 "$ACT_P" 2>/dev/null; }
+  wait "$ACT_P" 2>/dev/null
+done
+expect_eq "17k §BATCH the eight hooks, started together, all return ($ACT_K_SLOW s for the batch)" "" "$ACT_K_HUNG"
+expect_true "17k1 …at once" test "$ACT_K_SLOW" -lt 10
+expect_eq "17k2 …each exit 0" "0 0 0 0 0 0 0 0" "$(for ACT_ID in $ACT_K_IDS; do cat "$SANDBOX/act-k-$ACT_ID.rc" 2>/dev/null; done | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "17k2b …and says nothing" "" "$(for ACT_ID in $ACT_K_IDS; do cat "$SANDBOX/act-k-$ACT_ID.err" 2>/dev/null; done)"
+act_k_done() {
+  local i
+  for i in $ACT_K_IDS; do
+    act_has "$ACT_K" "| .worktrees/01-$i | 01234567 | active |" || return 1
+    sed -n '/^## Dispatch ledger/,$p' "$(act_plan "$ACT_K")" | grep -qF "(w1-$i) |" || return 1
+  done
+  return 0
+}
+act_until 120 act_k_done
+for ACT_ID in $ACT_K_IDS; do
+  expect_contains "17k3 §BATCH row $ACT_ID is active under w1-$ACT_ID in its tree" \
+    "| w1-$ACT_ID | — | 30 | REQ-1 |" "$(act_row "$ACT_K" "$ACT_ID")"
+  expect_contains "17k3b …$ACT_ID active" "| .worktrees/01-$ACT_ID | 01234567 | active |" "$(act_row "$ACT_K" "$ACT_ID")"
+  expect_contains "17k4 …and its ledger line names the launch" "| implementor (w1-$ACT_ID) |" "$(act_ledger_row "$ACT_K" "$ACT_ID")"
+  expect_eq "17k4b …once" "1" "$(sed -n '/^## Dispatch ledger/,$p' "$(act_plan "$ACT_K")" | grep -cF "(w1-$ACT_ID) |")"
+done
+# THE EXTRACTOR READS, on the same fixture: a process this row starts in the repo is found.
+( cd "$ACT_K" && while :; do sleep 1; done ) & ACT_K_PLANT=$!
+act_until 10 test -n "$(act_procs "$ACT_K")"
+expect_contains "17k8b precondition: a process the row starts in the repo is found by its working directory" \
+  " $ACT_K_PLANT " " $(act_procs "$ACT_K" | tr '\n' ' ')"
+kill "$ACT_K_PLANT" 2>/dev/null; wait "$ACT_K_PLANT" 2>/dev/null
+act_k_quiet() { [ -z "$(act_procs "$ACT_K")" ]; }
+act_until 90 act_k_quiet
+ACT_K_LEFT="$(act_procs "$ACT_K" | tr '\n' ' ' | sed 's/ $//')"
+[ -n "$ACT_K_LEFT" ] && kill -9 $ACT_K_LEFT 2>/dev/null
+expect_eq "17k9 §F8 no transaction the hooks started outlives the row" "" "$ACT_K_LEFT"
+expect_no_file "17k9b …and the lock is released" "$ACT_K/.bionic/tmp/launch-sync.lock"
+act_gate "$ACT_K"; expect_eq "17k5 …and the plan the batch wrote is admitted by the gate" "0" "$?"
+act_sync "$ACT_K" --wait
+expect_eq "17k6 …with nothing left to apply" "0:" "$SYNC_RC:$SYNC_OUT"
+
+# ---------- 17l: a launch with no tree of its own takes the wave's tree for its ledger line only ----------
+# T5 is a verify row run by a test-runner, which spawns no tree. Its ledger line names the
+# Step-4 block's worktree and base-sha; the row's worktree cell is never filled with them. Its
+# Files cell names nothing outside the docs root, so the row goes active with no tree (units.sh
+# `units_writes_head`, ruled by the orchestrator: a row that writes no tracked path owes no tree).
+export BIONIC_LAUNCH_SYNC_INLINE=1
+ACT_L="$(act_world readonly 4)"
+act_intended "$ACT_L" w1-T5 toolu_01ACTL bionic:test-runner
+act_launch "$ACT_L" w1-T5 a17l000000000001 toolu_01ACTL
+expect_eq "17l §TREELESS the ledger line takes the Step-4 block's tree and base" \
+  "| T5 | test-runner (w1-T5) | 2026-10-04T03:37Z | 45 min | .bionic/docs/record/wave-01/T3-report.md | — | .worktrees/01-fixture @ abc1234 |" \
+  "$(act_ledger_row "$ACT_L" T5)"
+expect_contains "17l2 …the row is active under the launch" "| w1-T5 | T1, T2, T3, T4 | 30 | REQ-1 | — | — | — | active |" "$(act_row "$ACT_L" T5)"
+expect_contains "17l3 …and its worktree and base cells stay empty" "| REQ-1 | — | — | — |" "$(act_row "$ACT_L" T5)"
+act_gate "$ACT_L"; expect_eq "17l4 …and the gate admits the plan" "0" "$?"
+cp "$(act_plan "$ACT_L")" "$SANDBOX/act-l-before"
+act_sync "$ACT_L"
+expect_eq "17l5 …and the next transaction has nothing to add" "0:" "$SYNC_RC:$SYNC_OUT"
+expect_true "17l6 …the plan byte-identical" cmp -s "$SANDBOX/act-l-before" "$(act_plan "$ACT_L")"
+
+# ---------- 17m: a transaction killed mid-write leaves the plan as it was (review-3 F2) ----------
+# The row and its ledger line are one write: the projection and the dry commit run on a copy,
+# and the copy replaces the plan by one rename. A kill before the rename leaves the plan
+# byte-identical and the launch unrecorded, and the next caller records both halves.
+ACT_M="$(act_world kill 4)"
+act_confirmed "$ACT_M" w1-T3
+act_workspace "$ACT_M" w1-T3 01-T3
+cp "$(act_plan "$ACT_M")" "$SANDBOX/act-m-before"
+( cd "$ACT_M" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$ACT_POKER" launch-sync ) >/dev/null 2>&1 &
+ACT_SYNC_PID=$!
+ACT_SEEN=""
+act_m_copy() {
+  local f
+  for f in "$(act_plan "$ACT_M")".launch-sync.*; do
+    [ -e "$f" ] && { ACT_SEEN="$f"; return 0; }
+  done
+  return 1
+}
+ACT_END=$(( $(date +%s) + 60 ))
+while [ -z "$ACT_SEEN" ] && [ "$(date +%s)" -lt "$ACT_END" ] && kill -0 "$ACT_SYNC_PID" 2>/dev/null; do
+  act_m_copy || sleep 0.02
+done
+kill -9 "$ACT_SYNC_PID" 2>/dev/null; wait "$ACT_SYNC_PID" 2>/dev/null
+expect_nonempty "17m precondition: the kill landed while the judged copy existed" "$ACT_SEEN"
+expect_true "17m §F2 a transaction killed before its rename leaves the plan byte-identical" \
+  cmp -s "$SANDBOX/act-m-before" "$(act_plan "$ACT_M")"
+act_sync "$ACT_M" --wait
+expect_contains "17m2 …the next caller records the launch" "poker: LAUNCHED T3 w1-T3" "$SYNC_OUT"
+expect_contains "17m3 …its row" "| .worktrees/01-T3 | 01234567 | active |" "$(act_row "$ACT_M" T3)"
+expect_contains "17m4 …and its ledger line, in the same write" "| implementor (w1-T3) |" "$(act_ledger_row "$ACT_M" T3)"
+ACT_SEEN=""; act_m_copy
+expect_eq "17m5 …and the killed run's copy beside the plan is gone" "" "$ACT_SEEN"
+
+# ---------- 17n: a ledger the line cannot be written to records nothing of the launch (review-3 F6) ----------
+# Through T12 two verbs ran one after the other, so task-set could succeed and ledger-add then
+# refuse: a row active with no line. That case no longer exists: the row and its line are
+# projected together, and when either cannot be projected neither is written and the next
+# caller names both commands. A ledger header with no `agent` column is such a table.
+ACT_N="$(act_world ledger 4)"
+sed -i.bak 's/^| id | agent | dispatched |/| id | who | dispatched |/' "$(act_plan "$ACT_N")"
+expect_contains "17n precondition: the ledger header has no agent column" "| id | who | dispatched |" "$(cat "$(act_plan "$ACT_N")")"
+cp "$(act_plan "$ACT_N")" "$SANDBOX/act-n-before"
+act_intended "$ACT_N" w1-T3 toolu_01ACTN
+act_workspace "$ACT_N" w1-T3 01-T3
+act_launch "$ACT_N" w1-T3 a17n000000000001 toolu_01ACTN
+expect_true "17n §F6 the row does not go active without its line" cmp -s "$SANDBOX/act-n-before" "$(act_plan "$ACT_N")"
+act_sync "$ACT_N"
+expect_contains "17n2 …the next caller says so" "poker: NOT-RECORDED T3 w1-T3" "$SYNC_OUT"
+expect_contains "17n3 …naming the ledger" "## Dispatch ledger" "$SYNC_OUT"
+expect_contains "17n4 …with both commands" "task-set T3 status=active agent=w1-T3" "$SYNC_OUT"
+expect_contains "17n5 …both" "ledger-add T3" "$SYNC_OUT"
+expect_eq "17n6 …exit 1" "1" "$SYNC_RC"
+
+# ---------- 17o: a plan that keeps no dispatch ledger gets the row alone ----------
+ACT_O="$(act_world noledger 4)"
+sed -i.bak '/^## Dispatch ledger/,$d' "$(act_plan "$ACT_O")"
+expect_absent "17o precondition: the plan has no ## Dispatch ledger" "## Dispatch ledger" "$(cat "$(act_plan "$ACT_O")")"
+act_intended "$ACT_O" w1-T3 toolu_01ACTO
+act_workspace "$ACT_O" w1-T3 01-T3
+act_launch "$ACT_O" w1-T3 a17o000000000001 toolu_01ACTO
+expect_contains "17o2 a plan with no dispatch ledger still gets its row active" \
+  "| .worktrees/01-T3 | 01234567 | active |" "$(act_row "$ACT_O" T3)"
+act_sync "$ACT_O"
+expect_eq "17o3 …and owes no line it has no table for" "0:" "$SYNC_RC:$SYNC_OUT"
+
+# ---------- 17p: a row put back to pending is not re-activated by the launch already ledgered ----------
+# A review row returns to `pending` on its proof (wave-26 T14) while its reviewer may still be
+# open on the roster. That launch was recorded once, row and line; the transaction must not
+# re-apply it. The next pass is its own launch, which is applied.
+ACT_P="$(act_world putback 4)"
+act_intended "$ACT_P" w1-T3 toolu_01ACTP
+act_workspace "$ACT_P" w1-T3 01-T3
+act_launch "$ACT_P" w1-T3 a17p000000000001 toolu_01ACTP
+expect_contains "17p precondition: the launch made row T3 active" "| .worktrees/01-T3 | 01234567 | active |" "$(act_row "$ACT_P" T3)"
+sed -i.bak 's/^| T3 | 4 | build | the third build | w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees\/01-T3 | 01234567 | active |$/| T3 | 4 | build | the third build | — | — | 30 | REQ-1 | c.sh | — | — | pending |/' "$(act_plan "$ACT_P")"
+expect_contains "17p precondition: the row is put back to pending, its cells cleared" "| c.sh | — | — | pending |" "$(act_row "$ACT_P" T3)"
+cp "$(act_plan "$ACT_P")" "$SANDBOX/act-p-before"
+act_sync "$ACT_P"
+expect_eq "17p the launch already ledgered is not applied again" "0:" "$SYNC_RC:$SYNC_OUT"
+expect_true "17p2 …the plan byte-identical" cmp -s "$SANDBOX/act-p-before" "$(act_plan "$ACT_P")"
+act_workspace "$ACT_P" w1-T3-r1 01-T3b
+unset BIONIC_LAUNCH_SYNC_INLINE
+act_confirmed "$ACT_P" w1-T3-r1
+act_sync "$ACT_P"
+expect_contains "17p3 …while the next pass, its own launch, is applied" "poker: LAUNCHED T3 w1-T3-r1" "$SYNC_OUT"
+expect_contains "17p4 …with its own ledger line" "| T3r1 | implementor (w1-T3-r1) |" "$(act_ledger_row "$ACT_P" T3r1)"
+unset BIONIC_LAUNCH_SYNC_INLINE
+
+
+# ---------- 17q: a review row is judged against its own proof only (wave-26 T51; review 13 F2, F4, (b)) ----------
+# A launch older than a review proof is a pass already read, so a pending review row is not
+# re-activated by it (T32, A-T32.17). Since T46 a proof returns only the row whose Files hold its
+# evidence, so the proof a launch is judged against is the newest proof of ITS row. L (T6) is a
+# live review, F (T7) the final review, which reads the head. The orders are review 13 (b)'s,
+# each on a plan with and without a ## Dispatch ledger. A proof line is written as proof-add
+# writes it, and the row it returns is put back to pending as proof-add puts it.
+act_review_world() {  # <label> <ledger: yes|no> -> repo; T6 a live review, T7 the final review, both pending
+  local r p
+  r="$(act_world "$1" 4)"; p="$(act_plan "$r")"
+  awk '
+    /^- T5: / { print; print "- T6: live review"; print "- T7: final review"; next }
+    /^\| id \| step \|/ { print $0 " reads |"; next }
+    /^\|---\|---\|---\|---\|---\|---\|---\|---\|---\|---\|---\|---\|$/ { print $0 "---|"; next }
+    /^\| T[0-9]+ \| [0-9] \|/ {
+      if ($0 ~ /^\| T5 /) sub(/\| T1, T2, T3, T4 \|/, "| — |")
+      print $0 "  |"
+      if ($0 ~ /^\| T5 /) {
+        print "| T6 | 6 | review | follows the build | critic | — | 30 | REQ-1 | .bionic/docs/record/wave-01/L.md | — | — | pending |  |"
+        print "| T7 | 6 | review | the final review | critic | — | 30 | REQ-1 | .bionic/docs/record/wave-01/final.md | — | — | pending | head |"
+      }
+      next }
+    { print }' "$p" > "$p.x" && mv "$p.x" "$p"
+  [ "$2" = no ] && { awk '/^## Dispatch ledger/ { skip = 1 } !skip' "$p" > "$p.x" && mv "$p.x" "$p"; }
+  printf '%s' "$r"
+}
+act_proof() {  # <repo> <at> <evidence> -> a review proof line, where proof-add writes it
+  local p; p="$(act_plan "$1")"
+  awk -v line="proved: kind=review head=1111111111111111111111111111111111111111 at=$2 evidence=$3" '
+    { print } /^approved-by:/ && !d { print line; d = 1 }' "$p" > "$p.x" && mv "$p.x" "$p"
+}
+act_putback() {  # <repo> <row id> -> the row back to pending, its agent cleared, as proof-add returns it
+  local p; p="$(act_plan "$1")"
+  awk -v id="$2" -F'|' 'BEGIN { OFS = "|" } $2 == " " id " " { $6 = " — "; $13 = " pending " } { print }' "$p" > "$p.x" && mv "$p.x" "$p"
+}
+act_launch_at() {  # <repo> <name> <launched_at> -> a confirmed critic launch at that minute
+  roster_row_fixture status=confirmed session="$SID_A" name="$2" agent_id="a17$(printf '%s' "$2" | tr -dc 'A-Za-z0-9')0000" \
+    launched_at="$3" subagent_type=bionic:critic deliverable=.bionic/docs/record/wave-01/x.md duration='30 minutes' \
+    tool_use_id="toolu_c$2" >> "$1/.bionic/tmp/roster-${SID_A}.state"
+}
+act_cells() {  # <repo> <row id> -> `<agent>/<status>` of the row
+  act_row "$1" "$2" | awk -F'|' '{ gsub(/ /, "", $6); gsub(/ /, "", $13); print $6 "/" $13 }'
+}
+act_lines() {  # <repo> <name> -> how many ledger lines name the launch
+  sed -n '/^## Dispatch ledger/,$p' "$(act_plan "$1")" | grep -cF "($2) |"
+}
+require_helpers act_review_world act_proof act_putback act_launch_at act_cells act_lines
+export BIONIC_LAUNCH_SYNC_INLINE=1
+ACT_Q="$(act_review_world review-ctl yes)"
+act_gate "$ACT_Q"; expect_eq "17q precondition: the review fixture is admitted by the real commit gate" "0" "$?"
+for ACT_LED in yes no; do
+  # O2: L launched and not yet applied; then F's proof; then the sync. F's proof returns no live
+  # row, so it says nothing about L's launch: L goes active.
+  ACT_Q="$(act_review_world "o2-$ACT_LED" "$ACT_LED")"
+  act_launch_at "$ACT_Q" w1-T7 2026-10-04T09:50:00Z; act_sync "$ACT_Q"
+  act_launch_at "$ACT_Q" w1-T6 2026-10-04T10:00:00Z
+  act_proof "$ACT_Q" 2026-10-04T10:05:00Z record/wave-01/final.md
+  act_sync "$ACT_Q"
+  expect_contains "17q O2 ledger=$ACT_LED §F2 a final-review proof leaves the live review's launch to be applied" \
+    "poker: LAUNCHED T6 w1-T6" "$SYNC_OUT"
+  expect_eq "17q2 O2 ledger=$ACT_LED …row T6 active under it" "w1-T6/active" "$(act_cells "$ACT_Q" T6)"
+  [ "$ACT_LED" = yes ] && expect_eq "17q3 O2 …with one ledger line" "1" "$(act_lines "$ACT_Q" w1-T6)"
+  # O7: the same, with L's launch and F's proof in the same second.
+  ACT_Q="$(act_review_world "o7-$ACT_LED" "$ACT_LED")"
+  act_launch_at "$ACT_Q" w1-T6 2026-10-04T10:05:00Z
+  act_proof "$ACT_Q" 2026-10-04T10:05:00Z record/wave-01/final.md
+  act_sync "$ACT_Q"
+  expect_eq "17q4 O7 ledger=$ACT_LED a launch in the same second as another row's proof is applied" "w1-T6/active" "$(act_cells "$ACT_Q" T6)"
+  # O1: L applied, F applied, F's proof: L stays active.
+  ACT_Q="$(act_review_world "o1-$ACT_LED" "$ACT_LED")"
+  act_launch_at "$ACT_Q" w1-T6 2026-10-04T10:00:00Z; act_sync "$ACT_Q"
+  act_launch_at "$ACT_Q" w1-T7 2026-10-04T10:01:00Z; act_sync "$ACT_Q"
+  act_proof "$ACT_Q" 2026-10-04T10:05:00Z record/wave-01/final.md
+  act_sync "$ACT_Q"
+  expect_eq "17q5 O1 ledger=$ACT_LED the live review applied before F's proof stays active" "w1-T6/active" "$(act_cells "$ACT_Q" T6)"
+  # O3: L applied, then L's own proof returns T6 to pending while its reviewer is still open:
+  # the launch that proof read is not applied again.
+  ACT_Q="$(act_review_world "o3-$ACT_LED" "$ACT_LED")"
+  act_launch_at "$ACT_Q" w1-T6 2026-01-04T10:00:00Z; act_sync "$ACT_Q"
+  expect_eq "17q6 O3 ledger=$ACT_LED precondition: L applied" "w1-T6/active" "$(act_cells "$ACT_Q" T6)"
+  act_putback "$ACT_Q" T6
+  act_proof "$ACT_Q" 2026-01-04T10:20:00Z record/wave-01/L.md
+  cp "$(act_plan "$ACT_Q")" "$SANDBOX/act-q-before"
+  act_sync "$ACT_Q"
+  expect_eq "17q7 O3 ledger=$ACT_LED the launch L's own proof read is not applied again" "—/pending" "$(act_cells "$ACT_Q" T6)"
+  expect_true "17q8 O3 ledger=$ACT_LED …the plan byte-identical" cmp -s "$SANDBOX/act-q-before" "$(act_plan "$ACT_Q")"
+  # O5 (F4): `extend` re-opens the reviewer already read: a new roster row, launched now. It is
+  # the same launch, judged by its first minute, so it is not applied again.
+  ( cd "$ACT_Q" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$ACT_POKER" extend w1-T6 "a second look" ) >/dev/null 2>&1
+  expect_contains "17q9 O5 ledger=$ACT_LED precondition: extend appended a row for w1-T6" "extended=" \
+    "$(grep -F '|name=w1-T6|' "$ACT_Q/.bionic/tmp/roster-${SID_A}.state" | tail -1)"
+  act_sync "$ACT_Q"
+  expect_eq "17q10 O5 ledger=$ACT_LED §F4 an extended reviewer already read is not re-activated" "—/pending" "$(act_cells "$ACT_Q" T6)"
+  expect_true "17q11 O5 ledger=$ACT_LED …the plan byte-identical" cmp -s "$SANDBOX/act-q-before" "$(act_plan "$ACT_Q")"
+  # O4: the next pass, launched after the proof under its own name, is applied.
+  act_launch_at "$ACT_Q" w1-T6-r1 2026-01-04T10:30:00Z
+  act_sync "$ACT_Q"
+  expect_eq "17q12 O4 ledger=$ACT_LED the next pass, launched after the proof, is applied" "w1-T6-r1/active" "$(act_cells "$ACT_Q" T6)"
+done
+
+# ---------- 17s: a lock that cannot be made ends the wait at once (wave-26 T51; review 13 F1) ----------
+# The lock is a directory under .bionic/tmp. When that directory cannot be written, or is
+# removed while a call waits for the lock, mkdir fails with no lock there to take over: the
+# call returns at once, says so, and changes nothing. Through T32 the takeover arm looped
+# without its bound and the call never returned. Each run here is bounded and killed whole.
+unset BIONIC_LAUNCH_SYNC_INLINE
+ACT_S="$(act_world nolock 4)"
+act_confirmed "$ACT_S" w1-T3
+act_workspace "$ACT_S" w1-T3 01-T3
+cp "$(act_plan "$ACT_S")" "$SANDBOX/act-s-before"
+chmod a-w "$ACT_S/.bionic/tmp"
+act_bg "$ACT_S" --wait; act_bg_end 20
+chmod u+w "$ACT_S/.bionic/tmp"
+expect_ne "17s §F1 the waiting call returns when .bionic/tmp cannot be written (rc $SYNC_RC; 124 is the bound)" "124" "$SYNC_RC"
+expect_contains "17s2 …and says the lock cannot be made" "cannot be made" "$SYNC_OUT"
+expect_eq "17s3 …exit 1: a fault the next caller cannot repair by waiting" "1" "$SYNC_RC"
+expect_true "17s4 …and the plan is unchanged" cmp -s "$SANDBOX/act-s-before" "$(act_plan "$ACT_S")"
+expect_eq "17s5 …and nothing it started is left running" "" "$(act_procs "$ACT_S")"
+# A WAITER WHOSE LOCK DIRECTORY IS REMOVED: a live holder keeps the lock, the call waits, and the
+# whole .bionic/tmp goes (a sandbox removed under queued waiters).
+sleep 120 & ACT_S_HOLDER=$!
+mkdir -p "$ACT_S/.bionic/tmp/launch-sync.lock"; printf '%s' "$ACT_S_HOLDER" > "$ACT_S/.bionic/tmp/launch-sync.lock/pid"
+cp -R "$ACT_S/.bionic/tmp" "$SANDBOX/act-s-tmp"
+act_bg "$ACT_S" --wait
+sleep 1
+rm -rf "$ACT_S/.bionic/tmp"
+act_bg_end 20
+expect_ne "17s6 §F1 a waiting call whose lock directory is removed returns (rc $SYNC_RC; 124 is the bound)" "124" "$SYNC_RC"
+expect_eq "17s7 …and nothing it started is left running" "" "$(act_procs "$ACT_S")"
+kill "$ACT_S_HOLDER" 2>/dev/null; wait "$ACT_S_HOLDER" 2>/dev/null
+rm -rf "$SANDBOX/act-s-tmp/launch-sync.lock"; mv "$SANDBOX/act-s-tmp" "$ACT_S/.bionic/tmp"
+act_sync "$ACT_S" --wait
+expect_contains "17s8 …and once the directory can be written, the launch is applied" "poker: LAUNCHED T3 w1-T3" "$SYNC_OUT"
+
+# ---------- 17t: a plan replaced mid-transaction is a retryable refusal (wave-26 T51; review 13 F6) ----------
+# Another writer's rename between the transaction's checksum and its own is what the checksum
+# is there to catch: nothing is written, and the next caller applies the launch. It exits 75,
+# apart from a refusal the next caller cannot repair, so the turn-end wall can leave it to the
+# next tick (lib/stop.sh). The other writer lands while the transaction's judged copy exists.
+ACT_T="$(act_world race 4)"
+act_confirmed "$ACT_T" w1-T3
+act_workspace "$ACT_T" w1-T3 01-T3
+act_bg "$ACT_T"
+ACT_SEEN=""
+act_t_copy() {
+  local f
+  for f in "$(act_plan "$ACT_T")".launch-sync.*; do
+    [ -e "$f" ] && { ACT_SEEN="$f"; return 0; }
+  done
+  return 1
+}
+ACT_END=$(( $(date +%s) + 30 ))
+while [ -z "$ACT_SEEN" ] && [ "$(date +%s)" -lt "$ACT_END" ] && [ ! -s "$SANDBOX/act-bg.rc" ]; do
+  act_t_copy || sleep 0.02
+done
+printf '\n<!-- another writer -->\n' >> "$(act_plan "$ACT_T")"
+act_bg_end 30
+expect_nonempty "17t precondition: the other writer landed while the judged copy existed" "$ACT_SEEN"
+expect_eq "17t §F6 a plan replaced under the transaction exits 75, retryable" "75" "$SYNC_RC"
+expect_contains "17t2 …and says to run it again" "Run launch-sync again" "$SYNC_OUT"
+expect_contains "17t3 …the other writer's change is kept" "<!-- another writer -->" "$(cat "$(act_plan "$ACT_T")")"
+expect_contains "17t4 …and T3 is still pending" "| c.sh | — | — | pending |" "$(act_row "$ACT_T" T3)"
+act_sync "$ACT_T"
+expect_contains "17t5 …and the next caller applies the launch" "poker: LAUNCHED T3 w1-T3" "$SYNC_OUT"
+expect_eq "17t6 …and nothing it started is left running" "" "$(act_procs "$ACT_T")"
+
+# ---------- 17u: a name reused after its ack is a new launch (wave-26 T54; review 17 S1) ----------
+# The live review's pass is applied, its own proof returns T6 to pending, the orchestrator acks
+# the finished reviewer (which frees the name), and the same name is dispatched for the next
+# difference: a new agent id and a new tool call. T51 dated a name by its earliest launch across
+# every row that ever carried it, so the new pass read as older than the proof and never went
+# active, with nothing printed; at ledger=yes the name-keyed ledger guard dropped it the same way.
+# A launch is now dated by its own lineage, and the ledger guard keys on it too. 17q9–17q11 are
+# the control: `extend` keeps the agent id and the tool call, so it stays the launch already read.
+# The teammate case (17u5) is the same reuse with a confirmed row that carries no agent id yet.
+act_launch_as() {  # <repo> <name> <launched_at> <agent id> <tool_use_id> -> a confirmed critic launch
+  roster_row_fixture status=confirmed session="$SID_A" name="$2" agent_id="$4" \
+    launched_at="$3" subagent_type=bionic:critic deliverable=.bionic/docs/record/wave-01/x.md duration='30 minutes' \
+    tool_use_id="$5" >> "$1/.bionic/tmp/roster-${SID_A}.state"
+}
+act_ack() {  # <repo> <name> <at> -> the ack the sweeper writes for a finished agent
+  local le="$1/.bionic/tmp/sweeper-${SID_A}.state"
+  [ -f "$le" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$le"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+    "$3" "$SID_A" "$2" >> "$le"
+}
+require_helpers act_launch_as act_ack
+export BIONIC_LAUNCH_SYNC_INLINE=1
+for ACT_LED in yes no; do
+  for ACT_ID in a17reuse00000002 ""; do
+    ACT_U="$(act_review_world "r1-$ACT_LED-${ACT_ID:-teammate}" "$ACT_LED")"
+    act_launch_as "$ACT_U" w1-T6 2026-01-04T10:00:00Z "${ACT_ID:+a17reuse00000001}" toolu_01REUSE1; act_sync "$ACT_U"
+    act_putback "$ACT_U" T6
+    act_proof "$ACT_U" 2026-01-04T10:20:00Z record/wave-01/L.md
+    act_ack "$ACT_U" w1-T6 2026-01-04T10:22:00Z
+    act_sync "$ACT_U"
+    ACT_W="17u"; [ -n "$ACT_ID" ] || ACT_W="17u5"
+    expect_eq "$ACT_W precondition ledger=$ACT_LED: the read pass, acked, leaves T6 pending" "—/pending" "$(act_cells "$ACT_U" T6)"
+    act_launch_as "$ACT_U" w1-T6 2026-01-04T10:30:00Z "$ACT_ID" toolu_01REUSE2
+    act_sync "$ACT_U"
+    expect_contains "$ACT_W ledger=$ACT_LED §S1 the name dispatched again after its ack is a new launch, said" \
+      "poker: LAUNCHED T6 w1-T6" "$SYNC_OUT"
+    expect_eq "${ACT_W}2 ledger=$ACT_LED …row T6 active under it" "w1-T6/active" "$(act_cells "$ACT_U" T6)"
+    [ "$ACT_LED" = yes ] && expect_eq "${ACT_W}3 ledger=$ACT_LED …with a ledger line for each pass" "2" "$(act_lines "$ACT_U" w1-T6)"
+    act_gate "$ACT_U"; expect_eq "${ACT_W}4 ledger=$ACT_LED …and the plan is admitted by the gate" "0" "$?"
+  done
+done
+
+# ---------- 17v: a lock mkdir that keeps failing sleeps and says so (wave-26 T54; review 17 N1) ----------
+# The lock's directory exists and can be written, but mkdir fails with no lock there (a full disk
+# or a quota): a stub mkdir fails for the lock path only and counts its calls. Through T51 the
+# waiting call spun without sleeping to its 60 s bound and every caller then exited 0 in silence.
+# Now a pass with no lock there sleeps like a held lock, and three in a row end the call with one
+# line and exit 75, retryable: the next tick runs the same transaction. No knob is set: the give-up
+# is three passes, so the row's own bound is the act_bg_end seconds.
+unset BIONIC_LAUNCH_SYNC_INLINE
+ACT_V="$(act_world nospace 4)"
+act_confirmed "$ACT_V" w1-T3
+act_workspace "$ACT_V" w1-T3 01-T3
+cp "$(act_plan "$ACT_V")" "$SANDBOX/act-v-before"
+mkdir -p "$SANDBOX/act-v-bin"
+printf '#!/bin/bash\ncase "$*" in *launch-sync.lock) printf x >> %s; exit 1 ;; esac\nexec /bin/mkdir "$@"\n' \
+  "$SANDBOX/act-v-calls" > "$SANDBOX/act-v-bin/mkdir"
+chmod +x "$SANDBOX/act-v-bin/mkdir"
+for ACT_W in --wait ""; do
+  : > "$SANDBOX/act-v-calls"
+  ACT_V_PATH="$PATH"; PATH="$SANDBOX/act-v-bin:$PATH"
+  act_bg "$ACT_V" $ACT_W
+  PATH="$ACT_V_PATH"
+  act_bg_end 20
+  ACT_N="17v"; [ -n "$ACT_W" ] || ACT_N="17v7"
+  expect_ne "$ACT_N §N1 ${ACT_W:-no-wait}: a lock mkdir failing with no lock there ends the call (rc $SYNC_RC; 124 is the bound)" "124" "$SYNC_RC"
+  expect_eq "${ACT_N}b …after three passes, each one slept" "xxx" "$(cat "$SANDBOX/act-v-calls" 2>/dev/null)"
+  expect_eq "${ACT_N}c …exit 75: the next caller repairs it" "75" "$SYNC_RC"
+  expect_contains "${ACT_N}d …and says the launch was not applied and the next tick applies it" \
+    "No launch was applied by this call; the next tick applies them" "$SYNC_OUT"
+  expect_true "${ACT_N}e …and the plan is unchanged" cmp -s "$SANDBOX/act-v-before" "$(act_plan "$ACT_V")"
+  expect_eq "${ACT_N}f …and nothing it started is left running" "" "$(act_procs "$ACT_V")"
+done
+act_sync "$ACT_V"
+expect_contains "17v9 …and once mkdir works, the launch is applied" "poker: LAUNCHED T3 w1-T3" "$SYNC_OUT"
+
+# ---------- 17w: the race exit is the verb's own, never the caller's (wave-26 T54; review 17 N2) ----------
+# PV_RACE_RC was read before the script set it, so a value in the caller's environment chose the
+# exit of a race: with PV_RACE_RC=0 exported, a race beside a launch the plan cannot record (w1-T4:
+# its row writes the head and no tree is recorded) exited 0, and the turn-end wall let the turn end.
+# A stub jq lands another writer's line in the plan when the dry commit's payload is built, once.
+ACT_REALJQ="$(command -v jq)"
+mkdir -p "$SANDBOX/act-w-bin"
+for ACT_W in 1 2; do
+  ACT_U="$(act_world "race-env-$ACT_W" 4)"
+  act_confirmed "$ACT_U" w1-T3
+  act_workspace "$ACT_U" w1-T3 01-T3
+  [ "$ACT_W" = 1 ] && act_confirmed "$ACT_U" w1-T4
+  printf '#!/bin/bash\ncase "$*" in *toolu_planverb*) [ -e %s.raced ] || { printf "\\n<!-- another writer -->\\n" >> %s; : > %s.raced; } ;; esac\nexec %s "$@"\n' \
+    "$(act_plan "$ACT_U")" "$(act_plan "$ACT_U")" "$(act_plan "$ACT_U")" "$ACT_REALJQ" > "$SANDBOX/act-w-bin/jq"
+  chmod +x "$SANDBOX/act-w-bin/jq"
+  ACT_V_PATH="$PATH"; PATH="$SANDBOX/act-w-bin:$PATH"
+  export PV_RACE_RC=0
+  act_sync "$ACT_U"
+  unset PV_RACE_RC
+  PATH="$ACT_V_PATH"
+  expect_file "17w precondition $ACT_W: the other writer landed while the judged copy existed" "$(act_plan "$ACT_U").raced"
+  if [ "$ACT_W" = 1 ]; then
+    expect_contains "17w2 …and the launch the plan cannot take is printed" "poker: NOT-RECORDED T4 w1-T4" "$SYNC_OUT"
+    expect_eq "17w3 §N2 PV_RACE_RC=0 in the caller's environment does not end a race beside a NOT-RECORDED launch with 0" "1" "$SYNC_RC"
+  else
+    expect_eq "17w4 control: a race alone exits the verb's own 75 whatever the caller exported" "75" "$SYNC_RC"
+  fi
+done
+
 finish

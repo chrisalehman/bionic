@@ -230,8 +230,10 @@ ack_rows() {  # <repo> <name>...
 # CLOCK DISCIPLINE HOLDS: nothing here sleeps. `touch` after the write is what makes a
 # fixture the newest candidate, exactly as `backdate` drives staleness above.
 plan_body() {  # <current> [evidence text for the Step-<current> line] -> a whole plan file
-  printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: %s\n\n- Step %s: %s\n' \
-    "$1" "$1" "${2:-evidence for this step}"
+  printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: %s\n' "$1"
+  # Past Step 3 the plan carries its approval, the fact the fill keys on (wave-26 T13; D3).
+  case "${1%[ab]}" in [4-9]) printf '%s\n' 'approved-by: fixture 2026-10-04T00:00Z "approved"' ;; esac
+  printf '\n- Step %s: %s\n' "$1" "${2:-evidence for this step}"
 }
 
 write_plan() {  # <repo> <body> [path relative to <docs-root>/plans]
@@ -2051,6 +2053,9 @@ wave_plan() {  # <repo> <budget line body, or "-" for none> <table row>...
 SP_TASKS_HEADER='| id | step | kind | task | agent | deps | size | serves | Files | status |
 |---|---|---|---|---|---|---|---|---|---|
 '
+# THE APPROVAL A LIVE FIXTURE CARRIES (wave-26 T13; D3, AC-6.2). The ready set keys on the plan's
+# `approved-by:` line, not on `current: >= 4`, so a fixture that means "past Step 3" writes it.
+SP_APPROVED_LINE='approved-by: fixture 2026-10-04T00:00Z "approved"'
 
 wave_plan_at() {  # <repo> <path under <docs-root>/plans> <budget or "-"> <table row>... -> the path
   local repo="$1" rel="$2" budget="$3"; shift 3
@@ -2061,7 +2066,7 @@ wave_plan_at() {  # <repo> <path under <docs-root>/plans> <budget or "-"> <table
     printf 'governing-skill: superpowers:writing-plans\n'
     [ "$budget" = "-" ] || printf 'parallel-budget: %s\n' "$budget"
     printf -- '---\n\n'
-    printf '# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf '# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
     printf '## Tasks\n\n'
     printf '%s' "$SP_TASKS_HEADER"
     local row
@@ -2358,7 +2363,7 @@ expect_contains "a CRITICAL ring quarters both numbers" \
   "poker: rung=2/8 writers=2 test_jobs=5" "$OUT"
 expect_contains "…and the fill names ONLY the quarter-ceiling, in table order" \
   "poker: FILL ONE TWO" "$OUT"
-expect_absent   "…never the third ready task" "THREE" "$OUT"
+expect_absent   "…never the third ready task" "THREE" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # SWAP REACHES THE SAME BAND BY THE OTHER TERM, so the rung is not a free-percentage
 # thermometer wearing a band's name.
@@ -2374,7 +2379,7 @@ R11C5="$(mk_rung_repo s11-rung-critical-open)"
 add_row "$R11C5" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_rung "$R11C5" 8 0 tick
 expect_contains "one open row against a rung of 2 leaves a gap of one" "poker: FILL ONE" "$OUT"
-expect_absent   "…and the second ready task waits on the machine, not on the budget" "TWO" "$OUT"
+expect_absent   "…and the second ready task waits on the machine, not on the budget" "TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 add_row "$R11C5" name=w2 deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_rung "$R11C5" 8 0 tick
 expect_absent   "two open rows against a rung of 2 fill nothing" "poker: FILL" "$OUT"
@@ -2531,7 +2536,7 @@ poke_pressure "$R12A" 8192 1.0 tick
 expect_eq "a filling tick exits 0" "0" "$RC"
 expect_contains "three ready and a gap of two fills exactly two, in table order" \
   "poker: FILL ONE TWO" "$OUT"
-expect_absent "…and does not reach the third" "THREE" "$OUT"
+expect_absent "…and does not reach the third" "THREE" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # ---------- 12a-T22: THE FILL LINE PRINTS THE NAME, NOT THE TASK ID ----------
 #
@@ -2760,7 +2765,7 @@ wave_plan "$R12B" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
 add_row "$R12B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R12B" 8192 1.0 tick
 expect_contains "one open row against writers=2 leaves a gap of one" "poker: FILL ONE" "$OUT"
-expect_absent "…and the second ready task waits" "TWO" "$OUT"
+expect_absent "…and the second ready task waits" "TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # ---------- 12c: gap zero -> no FILL, and the reason is the budget ----------
 R12C="$(make_repo s12-fill-full)"; new_roster "$R12C"
@@ -2794,7 +2799,7 @@ wave_plan "$R12E" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| FREE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12E" 8192 1.0 tick
 expect_contains "a pending task with an unlanded dep is held back" "poker: FILL BASE FREE" "$OUT"
-expect_absent "…and DEPENDENT is not named" "DEPENDENT" "$OUT"
+expect_absent "…and DEPENDENT is not named" "DEPENDENT" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # Several deps, one of them unlanded: ALL of them must be landed, not any.
 R12F="$(make_repo s12-multi-dep)"; new_roster "$R12F"
@@ -2804,7 +2809,7 @@ wave_plan "$R12F" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| C | 4 | build | fixture task | implementor | A,B | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12F" 8192 1.0 tick
 expect_contains "a task whose deps are landed AND pending is not ready" "poker: FILL B" "$OUT"
-expect_absent "…so C waits for every one of them" " C" "$OUT"
+expect_absent "…so C waits for every one of them" " C" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # A dependency the table does not carry at all is not confirmable, and an unconfirmable
 # dependency holds its task back — a task held costs a batch, a task dispatched onto an
@@ -2815,7 +2820,7 @@ wave_plan "$R12G" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| FINE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12G" 8192 1.0 tick
 expect_contains "an unknown dependency holds its task back" "poker: FILL FINE" "$OUT"
-expect_absent "…and ORPHAN is not filled" "ORPHAN" "$OUT"
+expect_absent "…and ORPHAN is not filled" "ORPHAN" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # ---------- 12h: the table is read BY HEADER NAME, not by column position ----------
 #
@@ -2828,7 +2833,7 @@ mkdir -p "$(dirname "$f12h")"
 {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
   printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
   printf '## Tasks\n\n'
   printf '| status | owner | id | step | complexity | deps |\n|---|---|---|---|---|---|\n'
   printf '| landed | ada | BASE | 4 | complex | — |\n'
@@ -2848,7 +2853,7 @@ mkdir -p "$(dirname "$f12i")"
 {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
   printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
   printf 'The task table looks like this:\n\n'
   printf '```\n## Tasks\n\n'
   printf '%s' "$SP_TASKS_HEADER"
@@ -2899,7 +2904,7 @@ sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   {
     printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: %s\n\n' "$current"
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: %s\n%s\n\n' "$current" "$SP_APPROVED_LINE"
     printf -- '- Step %s: in progress\n\n' "$current"
     printf '## Tasks\n\n'
     printf '%s' "$SP_TASKS_HEADER"
@@ -2946,10 +2951,15 @@ sp_plan_at_step "$R12K3" 6 \
   "| T3 | 6 | review | behind the floor | critic | T2 | 15m | REQ-x | c.sh | pending |" \
   "| T4 | 8 | integrate | deps landed, step not reached | implementor | T1 | 15m | REQ-x | — | pending |" > /dev/null
 poke_pressure "$R12K3" 8192 1.0 tick
-expect_contains "a table with no ready row says so (T10b: was '…and integrate/close rows wait for their step.')" \
-  "no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step." "$OUT"
-expect_contains "…and names the integrate row it holds (T10b)" \
-  "Held for their step: T4: step 8 integrate row waits for current: 8." "$OUT"
+expect_contains "a table with no ready row says so" "no pending task is ready" "$OUT"
+# THE BULK SENTENCE IS GONE (wave-26 T13; D9, AC-6.6): each waiting row is on its own WAIT line
+# with the read it lacks and the row that writes it, the step hold among them.
+expect_absent "…and no longer as the bulk sentence that named no row" \
+  "none has all its dependencies landed" "$OUT"
+expect_contains "…the review names the floor it waits for" \
+  "poker: WAIT T3 — waits for T2 (active)" "$OUT"
+expect_contains "…and the integrate row its step (T10b)" \
+  "poker: WAIT T4 — step 8 integrate row waits for current: 8" "$OUT"
 expect_absent "…and names no step it filtered by" "pending step-" "$OUT"
 
 # 12l — THE DIFFERENTIAL (wave-19 REQ-5 AC-5.2, D6; ADR-034 decision 2). The tick and the
@@ -4605,7 +4615,11 @@ s22_plan_at_current() {  # <repo> <current> -> the path, an eight-task writers=8
     printf 'governing-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n'
     printf -- '---\n\n# fixture plan (mirrors the observed wave-01 shape)\n\n'
-    printf '## SDLC State\n\ncurrent: %s\n\n- Step %s: in progress\n\n' "$cur" "$cur"
+    printf '## SDLC State\n\ncurrent: %s\n' "$cur"
+    # Approved exactly when the step says Step 3 has passed, so every row below still reads
+    # as it did when `current:` was the gate; 22i and 22j pull the two facts apart.
+    case "${cur%[ab]}" in [4-9]) printf '%s\n' "${S22_APPROVAL-$SP_APPROVED_LINE}" ;; *) [ -n "${S22_APPROVAL:-}" ] && printf '%s\n' "$S22_APPROVAL" ;; esac
+    printf '\n- Step %s: in progress\n\n' "$cur"
     printf '## Tasks\n\n'
     printf '%s' "$SP_TASKS_HEADER"
     local id
@@ -4743,6 +4757,24 @@ expect_eq "a plan with no current: line still ticks cleanly (exit 0)" "0" "$RC"
 expect_absent "no current: line at all — no FILL" "poker: FILL" "$OUT"
 expect_contains "…named as unreadable, with an empty value" \
   "no FILL — plan current: unreadable (none)" "$OUT"
+
+# ---------- 22i/22j: THE GATE IS THE APPROVAL, NOT THE STEP (wave-26 T13; D3, AC-6.2) ----------
+#
+# `current:` is the orchestrator's own word; `approved-by:` is the user's act, and the one fact
+# the dispatch wall already keys a writer on. The two are pulled apart here: a plan at
+# `current: 4` with no approval line fills nothing, and a plan at `current: 3` that carries one
+# fills — the differential that fails if the fill still keys on `current: >= 4`.
+R22I="$(make_repo s22-current-4-unapproved)"; new_roster "$R22I"
+S22_APPROVAL="" s22_plan_at_current "$R22I" 4 >/dev/null
+poke_pressure "$R22I" 8192 1.0 tick
+expect_absent "22i AC-6.2 current: 4 with no approved-by: prints no FILL" "poker: FILL" "$OUT"
+expect_contains "22i2 …and names the pending approval" "Step-3 approval pending" "$OUT"
+R22J="$(make_repo s22-current-3-approved)"; new_roster "$R22J"
+S22_APPROVAL="$SP_APPROVED_LINE" s22_plan_at_current "$R22J" 3 >/dev/null
+poke_pressure "$R22J" 8192 1.0 tick
+expect_contains "22j AC-6.2 current: 3 with approved-by: present fills all eight" \
+  "poker: FILL S1 S2 S3 S4 S12 S14 S15 S16" "$OUT"
+expect_absent "22j2 …and names no pending approval" "Step-3 approval pending" "$OUT"
 
 # ============================================================
 section "Section 23: clean() — list fields survive the 400-char cut (REQ-9, D7)"
@@ -6275,7 +6307,7 @@ s31_task_plan() {  # <repo> <current> -> the path; six columns, T1 in flight, T2
     printf 'scale: task\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n'
     printf -- '---\n\n# fixture task-scale plan\n\n'
-    printf '## SDLC State\n\ncurrent: %s\n\n- %s: in progress\n\n' "$cur" "$cur"
+    printf '## SDLC State\n\ncurrent: %s\n%s\n\n- %s: in progress\n\n' "$cur" "$SP_APPROVED_LINE" "$cur"
     printf '## Tasks\n\n'
     printf '| id | intent | rigor | description | status | worktree |\n'
     printf '|---|---|---|---|---|---|\n'
@@ -6698,7 +6730,7 @@ section "Section 34: task-add — a schedule change is a transaction (wave-20 RE
 # `task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>` — the table's
 # own column order, the nine cells an author writes (status, worktree and base are the
 # dispatcher's). It projects the row onto a COPY of the bound plan (`units_add_row`: the row,
-# its `- <id>:` line, and a Step-4 id threaded into the frontier Step-5+ rows), runs
+# its `- <id>:` line, and no other row), runs
 # `units_validate` on the copy and a dry commit through the REAL hooks/bash-walls.sh, and only
 # then moves the copy over the plan. On any refusal the plan is byte-identical and the words
 # that refused it print. AC-5.3 fails-when: "after task-add of a Step-4 row mid-run the next
@@ -6778,28 +6810,39 @@ expect_contains "34b2g …and the repository-level grammar fact is a note, not a
 expect_contains "34b3 …the row is in the plan, pending" \
   "| T6 | 4 | build | the fixup found mid-run | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" "$(cat "$P34A")"
 expect_contains "34b4 …with its - T6: line" "- T6: pending dispatch — added by task-add" "$(cat "$P34A")"
-expect_contains "34b5 …and threaded into the Step-5 row's deps" \
+# THREADED, AS IN 1.10, BECAUSE THIS TABLE HAS NO reads COLUMN (wave-26 T62; critic 2 K2-F1).
+# The validator no longer demands the edge (D2), but with no head read for the floor the deps
+# task-add writes are the one thing that holds it behind a late build.
+expect_contains "34b5 …and threaded into the Step-5 row's deps (a table without reads)" \
   "| T5 | 5 | verify | the floor | test-runner | T1, T2, T6 |" "$(cat "$P34A")"
 s34_gate "$R34A"
 expect_eq "34b6 AC-5.3 the next commit is admitted: no dependency the verb should have written is missing" \
   "0" "$GATE_RC"
 
-# ---------- 34c: the CONTROL — the same row hand-added without the threading is refused ----------
+# ---------- 34c: the same row hand-added, with no threading, is ADMITTED (wave-26 T2, D2) ----------
+# Through 1.10 this was the control that the verb's threading was needed: the hand edit was
+# refused for the Step-4 prerequisite it did not write into T5. The rule is removed, so the
+# same gate admits the same edit.
 R34C="$(make_repo s34-hand)"; ( cd "$R34C" && git commit -q --allow-empty -m init )
 P34C="$(s34_plan "$R34C" 4)"
 awk '{ print }
      /^\| T5 \| 5 \|/ { print "| T6 | 4 | build | the fixup, hand-added | implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" }
      /^- T5: / { print "- T6: pending dispatch — by hand" }' "$P34C" > "$P34C.tmp" && mv "$P34C.tmp" "$P34C"
 s34_gate "$R34C"
-expect_eq "34c the hand-added row without the threading is refused by the same gate" "2" "$GATE_RC"
-expect_contains "34c2 …naming the missing prerequisite" "T5: step 5 is missing 1 step-4 prerequisite: T6" "$GATE_ERR"
+expect_eq "34c the hand-added row with no threading is admitted by the same gate" "0" "$GATE_RC"
+expect_contains "34c2 …with T5's deps cell as its author wrote it" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2 |" "$(cat "$P34C")"
 
-# ---------- 34d: refused by the validator — the plan is byte-identical, the words print ----------
-SUM34="$(cksum < "$P34A")"
+# ---------- 34d: a later-step row that names one build row is ADMITTED (wave-26 T2, D2) ----------
+# It used to be refused for the Step-4 rows it did not reach. Admitted now, the plan changes only
+# by that row and its line; the refusal rows below re-take the checksum after it.
 poke "$R34A" task-add T7 5 verify 'a second floor, unthreaded' test-runner 'T1' 30 REQ-5 '—'
-expect_eq "34d a row the validator refuses exits 1" "1" "$RC"
-expect_eq "34d2 AC-5.3 …and the plan is byte-identical" "$SUM34" "$(cksum < "$P34A")"
-expect_contains "34d3 …and the validator's words print" "T7: step 5 is missing 2 step-4 prerequisites: T2, T6" "$OUT"
+expect_eq "34d a Step-5 row naming one build row is admitted (exit 0)" "0" "$RC"
+expect_contains "34d2 …the row is in the plan with the deps its author wrote" \
+  "| T7 | 5 | verify | a second floor, unthreaded | test-runner | T1 |" "$(cat "$P34A")"
+expect_contains "34d3 …and no other row's deps changed (a Step-5 add threads nothing)" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2, T6 |" "$(cat "$P34A")"
+SUM34="$(cksum < "$P34A")"
 
 poke "$R34A" task-add T6 4 build 'the same id again' implementor '—' 30 REQ-5 'lib/d.sh'
 expect_eq "34d4 a duplicate id is refused" "1" "$RC"
@@ -7001,6 +7044,62 @@ expect_contains "35r T11b fill-report folds the refused turn's two lines into on
 expect_contains "35s …and the turn's final line is the one that saw both launches: nothing missed" \
   "|launched=W-T1,W-T2|" "$(tail -n 1 "$S35Q_LED" 2>/dev/null)"
 
+# ---------- §REPORT (wave-26 T16, D17; AC-6.8): idle minutes and peak width, from stamps the code wrote ----------
+#
+# The ledger line ends with `idle=` (the ready rows no launch and no decline covered while a slot was
+# free) and `room=`; `fill-report` adds `idle minutes: <n>` (the interval from a line whose idle= is
+# non-empty to the next line, once per interval) and `peak width: <n>` (the most roster rows open at
+# one instant: `launched_at` to the sweeper ledger's ack stamp, the one close rule; no ack, open to now).
+#
+# THE FIXTURE: idle=T2 at 10:00, then a 12-minute interval to 10:12 (an 8-minute one after it has
+# idle= empty and counts nothing). Four roster rows: A 10:00-10:10, B 10:05-10:15, C 10:08-open,
+# D 10:20-open. Three are open at 10:08-10:10 and never more, so the peak is 3: four rows launched
+# would read 4, and the two open now would read 2.
+s35r_line() {  # <at> <turn> <idle> <room>
+  printf 'fill-ledger/v1|at=%s|session=%s|turn=%s|current=5|state=ok|ceiling=8|width=8|open=2|free=%s|ready=T2|launched=|declined=|missed=1|idle=%s|room=%s\n' \
+    "$1" "$SID" "$2" "$4" "$3" "$4"
+}
+R35R="$(make_repo s35r)"
+P35R="$(plan_at "$R35R" epic-99-fixture/wave-35-rp.plan.md "$(plan_body 5)")"
+L35R="$R35R/.bionic/docs/record/wave-35-rp/fill-ledger.log"
+mkdir -p "${L35R%/*}"
+{
+  s35r_line 2026-09-23T10:00:00Z u-r1 T2 3
+  s35r_line 2026-09-23T10:12:00Z u-r2 ''  2
+  s35r_line 2026-09-23T10:20:00Z u-r3 ''  0
+} > "$L35R"
+new_roster "$R35R"
+add_row_to "$R35R" "$SID" name=rp-a launched_at=2026-09-23T10:00:00Z
+add_row_to "$R35R" "$SID" name=rp-b launched_at=2026-09-23T10:05:00Z
+add_row_to "$R35R" "$SID" name=rp-c launched_at=2026-09-23T10:08:00Z
+add_row_to "$R35R" "$SID" name=rp-d launched_at=2026-09-23T10:20:00Z
+s20_ack "$R35R" rp-a 2026-09-23T10:10:00Z
+s20_ack "$R35R" rp-b 2026-09-23T10:15:00Z
+OUT="$( cd "$R35R" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35R" 2>&1 )"; RC=$?
+expect_eq "35t fill-report exits 0 on the idle/width fixture" "0" "$RC"
+expect_contains "35u AC-6.8 the planted 12-minute interval, exactly" "idle minutes: 12" "$OUT"
+expect_contains "35v AC-6.8 the instant three rows overlap, exactly" "peak width: 3" "$OUT"
+# A PLAN THAT SAYS OTHERWISE CHANGES NOTHING: the report reads the ledger and the roster, never prose.
+OUT_R1="$OUT"
+printf '\nThe run sat idle for 99 minutes at 2026-01-01T00:00:00Z and ran 9 wide at 2026-01-01T00:00:00Z.\n' >> "$P35R"
+OUT="$( cd "$R35R" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35R" 2>&1 )"
+expect_eq "35w a plan carrying a misleading time and width changes nothing in the report" "$OUT_R1" "$OUT"
+# THE ZERO CASE, so 35u cannot pass on a constant: no line names an idle row, and an old-shape line
+# (no idle= field at all) reads as none. The roster is the same, so the width still reads 3.
+R35Z="$(make_repo s35z)"
+P35Z="$(plan_at "$R35Z" epic-99-fixture/wave-35-rz.plan.md "$(plan_body 5)")"
+L35Z="$R35Z/.bionic/docs/record/wave-35-rz/fill-ledger.log"
+mkdir -p "${L35Z%/*}"
+{
+  s35r_line 2026-09-23T10:00:00Z u-z1 '' 3
+  s35_line 2026-09-23T10:12:00Z u-z2 ok T2 '' '' 1
+} > "$L35Z"
+cp "$(roster_of "$R35R")" "$(roster_of "$R35Z")"
+cp "$(ack_ledger_of "$R35R")" "$(ack_ledger_of "$R35Z")"
+OUT="$( cd "$R35Z" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35Z" 2>&1 )"
+expect_contains "35x no idle row names a zero, and an old-shape line is none" "idle minutes: 0" "$OUT"
+expect_contains "35y …while the same roster still reads its peak" "peak width: 3" "$OUT"
+
 # ============================================================
 section "Section 36: prompt — the canonical Patrol prompt (wave-20 REQ-6, AC-6.1; D6)"
 # ============================================================
@@ -7041,8 +7140,11 @@ sp_plan_at_step "$R37A" 5 \
 poke_pressure "$R37A" 8192 1.0 tick
 expect_absent "37a C3 at current: 5 the landed-dep Step-7 release row is not filled" \
   "poker: FILL" "$OUT"
-expect_contains "37b …and the tick's no-FILL line names the hold" \
-  "T3: step 7 doc row waits for current: 7" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: no FILL')"
+# A TABLE WITHOUT `reads` KEEPS THE RELEASE'S STEP HOLD (wave-26 T13, A-T13.1): it has no
+# `approval:release` to wait on, so its step is the one thing holding it. The hold is named on
+# the row's own WAIT line now, not inside the no-FILL sentence.
+expect_contains "37b …and the tick's WAIT line names the hold" \
+  "T3 — step 7 doc row waits for current: 7" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: WAIT')"
 
 # 37c — AT ITS STEP THE RELEASE FILLS. Same table at current: 7.
 R37C="$(make_repo s37-at-step)"; new_roster "$R37C"
@@ -7458,6 +7560,37 @@ s41_fp_case launch 'grep -F "|name=w-1|" "$(roster_of "$R")" | tail -1 | sed "s/
 s41_fp_case mtime 'backdate "$R/w1-report.md" 200'
 s41_fp_case message 's41_transcript 2 "w-1:idle"'
 
+# ---------- §DECLINE-tick (wave-26 T15, AC-4.6; D16): a stand-down decline stands as a hold does ----------
+# The decline used to answer its own turn only: the next tick ordered the same unchanged agent
+# down again. The stop wall now writes the decline to the roster as `hold` writes it, so the real
+# tick reads it through the hold's own fingerprint check. The second turn, with the agent
+# unchanged, is not refused. A new message from the agent is a changed agent, and its turn is.
+R41DC="$(s41_world s41-decline)"
+s41_transcript 1 "w-1:idle"
+poke "$R41DC" tick
+expect_contains "41dc precondition: the tick stands w-1 down" "poker: STANDDOWN w-1" "$OUT"
+S41DC_TR="$(s41_turn "$R41DC" "$OUT")"
+jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"text",text:"standdown-declined: w-1 is kept for a second pass"}]}}' >> "$S41DC_TR"
+s41_stop "$R41DC" "$S41DC_TR"
+expect_eq "41dc2 the declining turn ends" "" "$(printf '%s' "$S41_STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+# An unrelated row joins, so the next tick prints in full rather than `unchanged` (an unchanged
+# tick writes no order whatever the answer was) and has to decide w-1 again.
+add_row "$R41DC" name=busy2 deliverable="$R41DC/never-written-2.md" duration="4 hours" launched_at="$(iso_ago 60)"
+s41_transcript 1 "w-1:idle" "busy2:running"
+poke "$R41DC" tick
+expect_absent "41dc3 precondition: the tick prints in full" "unchanged since" "$OUT"
+expect_contains "41dc3 AC-4.6 the next tick reads the decline as a hold" "poker: held w-1 since " "$OUT"
+expect_absent "41dc4 …and does not stand w-1 down again" "poker: STANDDOWN" "$OUT"
+s41_stop "$R41DC" "$(s41_turn "$R41DC" "$OUT")"
+expect_eq "41dc5 AC-4.6 the second turn, same agent and no decline text, is not refused" "" \
+  "$(printf '%s' "$S41_STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+s41_transcript 2 "w-1:idle" "busy2:running"
+poke "$R41DC" tick
+expect_contains "41dc6 a new message from w-1 voids the decline: the tick stands it down" "poker: STANDDOWN w-1" "$OUT"
+s41_stop "$R41DC" "$(s41_turn "$R41DC" "$OUT")"
+expect_contains "41dc7 …and that turn, with no answer, is refused" "stand-down unanswered" \
+  "$(printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null)"
+
 # ---------- §HOLD-idle (AC-4.5; D1): a held idle row is not re-opened ----------
 R41I="$(s41_world s41-hold-idle)"
 s41_transcript 1 "w-1:idle"
@@ -7479,7 +7612,8 @@ expect_contains "41f precondition: arm recorded the prompt version" "prompt_vers
 poke "$R41D" tick
 S41D_T1="$OUT"
 expect_contains "41f2 the first tick prints its decision" "decision=QUIET" "$S41D_T1"
-expect_contains "41f3 …and owes the task-list duty (an open row)" "duty=owed" "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
+expect_contains "41f3 …and, QUIET with a row open, prints WAITING (wave-26 T15; D16)" "poker: WAITING" "$S41D_T1"
+expect_contains "41f3b …and owes no task-list duty" "duty=none" "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
 poke "$R41D" tick
 expect_eq "41f4 AC-4.9 the second tick's stdout is exactly one line" "1" \
   "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
@@ -7547,13 +7681,13 @@ expect_contains "41i3 a decline that answered every ready row prints as standing
   "poker: fill-declined standing since 2026-10-03T09:00:00Z — the batch waits on the BASE merge" "$OUT"
 expect_eq "41i4 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
 expect_absent "41i5 …nor decision=FILL" "decision=FILL" "$OUT"
-# The three ways a line stands for nothing, each beside the full FILL it then leaves standing.
+# A moved current: is not one of the ways a line stands for nothing (wave-26 T15; D16).
 R41M="$(mk_rung_repo s41-sd-moved)"
 s41_sd_line "$R41M" "$SID" 3 ONE,TWO,THREE,FOUR "answered at an earlier step"
 poke_rung "$R41M" 60 0 tick
-expect_eq "41i6 a decline taken at another current: does not stand — the full FILL prints" \
-  "poker: FILL ONE TWO THREE FOUR" "$(s41_fill_line "$OUT")"
-expect_absent "41i7 …and no standing line" "fill-declined standing" "$OUT"
+expect_contains "41i6 wave-26 T15 (D16) a decline taken at another current: still stands over the same ready set" \
+  "fill-declined standing since " "$OUT"
+expect_eq "41i7 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
 R41O="$(mk_rung_repo s41-sd-other)"
 s41_sd_line "$R41O" "ffffffff-0000-4000-8000-000000000000" 4 ONE,TWO,THREE,FOUR "another session's answer"
 poke_rung "$R41O" 60 0 tick
@@ -8120,5 +8254,1177 @@ poke "$R45T" tick
 expect_contains "45k5 …so a Patrol armed under v=2 is told to re-arm" \
   "its prompt is v=2 and this poker prints v=${S45_V}" "$OUT"
 unset CLAUDE_CONFIG_DIR
+
+# ============================================================
+section "Section 47 §WAIT: the tick names every pending row — FILL or WAIT, with its unmet read and writer — and the longest chain (wave-26 T13; REQ-6 AC-6.6; D9)"
+# ============================================================
+#
+# A TABLE WITH A `reads` COLUMN, so every row waits for what it reads and the kind defaults
+# apply (D1). The fixture carries one row of each way to wait: a path an active row writes
+# (T2), an external prerequisite (T3), an approval nobody has given (T4, the release), and the
+# settled head every open code row writes (T6, the floor). T5 reads only the plan's approval
+# and is the one ready writer. Sizes are minutes, so the longest chain is checkable by hand:
+# T1 (30) → T2 (20) → T6 (60) = 110, against T5 (40) → T6 = 100 and T4 (15) → T6 = 75.
+s47_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, current: 4
+  local repo="$1" writers="$2"; shift 2
+  local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" row
+  mkdir -p "$(dirname "$f")"
+  {
+    printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=%s suites=2 worktrees=8 test_jobs=8 source=probe\n' "$writers"
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    for row in "$@"; do printf '%s\n' "$row"; done
+  } > "$f"
+  touch "$f"
+  printf '%s' "$f"
+}
+s47_lines() { printf '%s\n' "$OUT" | /usr/bin/grep "^poker: $1 " ; }  # <WAIT|FILL|CHAIN>
+
+R47="$(make_repo s46-wait)"; new_roster "$R47"
+s47_plan "$R47" 2 \
+  "| T1 | 4 | build | in flight | implementor | — | 30 | REQ-x | payload/x.sh | active | |" \
+  "| T2 | 4 | build | reads what T1 writes | implementor | — | 20 | REQ-x | payload/y.sh | pending | payload/x.sh |" \
+  "| T3 | 4 | build | held by the world | implementor | ext:vendor-fix | 10 | REQ-x | payload/z.sh | pending | |" \
+  "| T4 | 7 | doc | the release | implementor | — | 15 | REQ-x | CHANGELOG.md | pending | approval:release |" \
+  "| T5 | 4 | build | ready | implementor | — | 40 | REQ-x | payload/w.sh | pending | |" \
+  "| T6 | 5 | verify | the floor | auditor | — | 60 | REQ-x | .bionic/docs/record/floor.md | pending | |" >/dev/null
+poke_pressure "$R47" 8192 1.0 tick
+expect_eq "47a the tick over a reads table exits 0" "0" "$RC"
+expect_nonempty "47a2 …and prints WAIT lines (the extractor reads real output)" "$(s47_lines WAIT)"
+expect_contains "47b the one ready writer is filled" "poker: FILL T5" "$OUT"
+expect_contains "47c a path read names the row that writes it and its status" \
+  "poker: WAIT T2 — reads payload/x.sh, written by T1 (active)" "$OUT"
+expect_contains "47d an external prerequisite is named as itself" "poker: WAIT T3 — ext:vendor-fix" "$OUT"
+expect_eq "47e the release waits for its approval and nothing else — no step hold in a reads table" \
+  "poker: WAIT T4 — approval:release" "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T4 ')"
+expect_contains "47f the floor names the head's writers, the active one first" \
+  "poker: WAIT T6 — reads head, written by T1 (active), T2 (pending)" "$OUT"
+# AC-6.6: EVERY PENDING ROW IS ON A FILL OR A WAIT LINE, the fixture's ids walked one by one.
+S47_FILL="$(s47_lines FILL)"
+for _s47 in T2 T3 T4 T5 T6; do
+  _s47_on=no
+  case " ${S47_FILL#poker: FILL } " in *" $_s47 "*) _s47_on=fill ;; esac
+  [ -n "$(s47_lines WAIT | /usr/bin/grep "^poker: WAIT $_s47 — ")" ] && _s47_on="${_s47_on/no/wait}"
+  expect_ne "47g AC-6.6 pending $_s47 is on a FILL or a WAIT line" "no" "$_s47_on"
+done
+expect_absent "47g2 …and the active row is on neither (it is not pending)" "WAIT T1 " "$(s47_lines WAIT)"
+expect_absent "47h the bulk sentence is gone" "none has all its dependencies landed" "$OUT"
+expect_eq "47i AC-6.6 the CHAIN line is the fixture's longest chain, by hand: 30 + 20 + 60" \
+  "poker: CHAIN T1→T2→T6 (110 min)" "$(s47_lines CHAIN)"
+# THE DIFFERENTIAL: land T1 and the chain moves to the next heaviest path, so 47i reads the
+# graph and not a constant.
+sed -i.bak 's/| payload\/x.sh | active |/| payload\/x.sh | landed |/' "$R47/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+poke_pressure "$R47" 8192 1.0 tick
+expect_eq "47j with T1 landed the chain is T5 → T6 (40 + 60)" "poker: CHAIN T5→T6 (100 min)" "$(s47_lines CHAIN)"
+expect_contains "47j2 …and T2, its read now landed, is filled beside T5" "poker: FILL T2 T5" "$OUT"
+
+# ============================================================
+section "Section 47 §READY-EARLY (tick half): a doc row whose reads exist is offered before its step; a read-only row outside the writer gap (wave-26 T13; REQ-6 AC-6.1; D3, D9)"
+# ============================================================
+#
+# current: 4 and one task landed. The Step-7 doc row reads the plan approval and the head, and
+# nothing open writes the head, so it is ready now — it is not held until current: 7 (D3). The
+# review row (kind review) takes no writer slot, so it is offered whatever the writer gap.
+# A Step-7 doc row names the approval it waits for (wave-26 T62; K2-F3): this one is notes, not the
+# release, so it reads approval:plan.
+s47_early() {  # <repo> -> the plan; writers=1
+  s47_plan "$1" 1 \
+    "| T1 | 4 | build | landed | implementor | — | 30 | REQ-x | payload/x.sh | landed | |" \
+    "| T2 | 7 | doc | the release notes draft | implementor | — | 20 | REQ-x | .bionic/docs/record/notes.md | pending | approval:plan, head |" \
+    "| T3 | 6 | review | the review | critic | — | 30 | REQ-x | .bionic/docs/record/review.md | pending | |" >/dev/null
+}
+R47E="$(make_repo s46-early)"; new_roster "$R47E"; s47_early "$R47E"
+poke_pressure "$R47E" 8192 1.0 tick
+expect_contains "47k AC-6.1 at current: 4 the tick offers the doc row and the review row" "poker: FILL T2 T3" "$OUT"
+# THE WRITER GAP CLOSED: one writer open, writers=1. The doc row is a writer and waits for a
+# slot; the review is read-only and is still offered.
+R47F="$(make_repo s46-early-full)"; new_roster "$R47F"; s47_early "$R47F"
+add_row "$R47F" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R47F" 8192 1.0 tick
+expect_contains "47l D9 with no writer slot free the read-only review is still offered" "poker: FILL T3" "$OUT"
+expect_absent "47l2 …and the doc row, a writer, is not on the FILL line" "T2" "$(s47_lines FILL)"
+expect_contains "47l3 …it is on a WAIT line saying it is ready and waits for a writer slot" \
+  "poker: WAIT T2 — ready; no writer slot free" "$OUT"
+# REVIEW 10 ANSWER (b) (wave-26 T46): THE EXEMPTION IS THE RECORD, NOT THE KIND ALONE. A verify
+# row whose Files name tracked code was offered with no slot free, then demanded by the wall and
+# refused by the budget. It now takes a writer place like any writer; the same row writing only
+# the record is still offered outside the gap.
+s47_verify() {  # <repo> <T4 Files> -> the plan; writers=1, one writer open
+  s47_plan "$1" 1 \
+    "| T1 | 4 | build | landed | implementor | — | 30 | REQ-x | payload/x.sh | landed | |" \
+    "| T4 | 5 | verify | the floor | test-runner | — | 30 | REQ-x | $2 | pending | |" >/dev/null
+  add_row "$1" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+}
+R47G="$(make_repo s47-verify-code)"; new_roster "$R47G"; s47_verify "$R47G" "payload/v.sh"
+poke_pressure "$R47G" 8192 1.0 tick
+expect_contains "47l4 b a verify row naming tracked code, no writer slot free: one WAIT line with the budget reason" \
+  "poker: WAIT T4 — ready; no writer slot free" "$OUT"
+expect_absent "47l5 …and it is not on a FILL line" "T4" "$(s47_lines FILL)"
+R47H="$(make_repo s47-verify-record)"; new_roster "$R47H"; s47_verify "$R47H" ".bionic/docs/record/floor.md"
+poke_pressure "$R47H" 8192 1.0 tick
+expect_contains "47l6 b the same row writing only the record, no writer slot free: offered" "poker: FILL T4" "$OUT"
+
+# ============================================================
+section "Section 47 §APPROVE: approve <name> '<reply>' writes the approved: line through the verb transaction (wave-26 T13; REQ-6 AC-6.2; D3)"
+# ============================================================
+S47_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R47A="$(make_repo s46-approve)"; ( cd "$R47A" && git commit -q --allow-empty -m init )
+git -C "$R47A" config user.name "Dana Fixture"
+P47A="$(s42_plan "$R47A" 4)"
+# A READS TABLE (wave-26 T46; review 10 F6): approve records only a name some row reads, so the
+# fixture's open rows read two — T5 `approval:release`, the active T2 `live:approval:ship`; the
+# landed T1 reads `live:approval:landedonly`, which satisfies nothing (wave-26 T52; review 14 N4).
+awk '
+  /^\| id \| step \|/ { print $0 " reads |"; next }
+  /^\|---\|/ { print $0 "---|"; next }
+  /^\| T1 \|/ { print $0 " live:approval:landedonly |"; next }
+  /^\| T2 \|/ { print $0 " live:approval:ship |"; next }
+  /^\| T5 \|/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " approval:release |"; next }
+  /^\| T[0-9]+ \|/ { print $0 "  |"; next }
+  { print }' "$P47A" > "$P47A.tmp" && mv "$P47A.tmp" "$P47A"
+s42_snap "$R47A" "$P47A"
+s34_gate "$R47A"
+expect_eq "47m0 precondition: the reads-table fixture is admitted by the real commit gate" "0" "$GATE_RC"
+poke "$R47A" approve release 'Ship it.'
+expect_eq "47m approve release exits 0" "0" "$RC"
+expect_contains "47m2 …and says what it wrote" "approve — release" "$OUT"
+S47_LINE="$(/usr/bin/grep '^approved: release ' "$P47A")"
+expect_regex "47n the line is approved: <name> by <git user> <ISO-UTC> \"<reply>\"" \
+  '^approved: release by Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z "Ship it\."$' "$S47_LINE"
+expect_eq "47n2 …inside ## SDLC State, ahead of the next section" "SDLC" \
+  "$(awk '/^## /{ s = $2 } /^approved: release /{ print s; exit }' "$P47A")"
+expect_eq "47n3 …and git diff --numstat shows one line added, none removed" "1 0;" "$(s42_numstat "$R47A")"
+s34_gate "$R47A"
+expect_eq "47o the commit gate admits the approved plan" "0" "$GATE_RC"
+s42_snap "$R47A" "$P47A"
+poke "$R47A" approve release 'Again.'
+s42_unchanged "47p a second approve of the same name" 1 "$P47A"
+expect_contains "47p2 …naming the line already there" "approved: release" "$OUT"
+poke "$R47A" approve plan 'approved'
+s42_unchanged "47q approve plan" 1 "$P47A"
+expect_contains "47q2 …saying the plan's approval is the approved-by: line written at Step 3" \
+  "approved-by:" "$OUT"
+expect_contains "47q3 …at Step 3" "Step 3" "$OUT"
+poke "$R47A" approve 'rel|x' 'ok'
+s42_unchanged "47r a name outside the approval:<name> grammar" 2 "$P47A"
+poke "$R47A" approve integrate "a
+b"
+s42_unchanged "47s a reply carrying a line break" 1 "$P47A"
+poke "$R47A" approve integrate
+s42_unchanged "47t no reply at all" 2 "$P47A"
+# REVIEW 10 F6: A NAME NO ROW READS IS REFUSED, and the refusal lists the names that are read,
+# so a mistyped name is not recorded "once" while the row it was meant for waits in silence.
+# The match is exact: a name in another case is another name.
+poke "$R47A" approve relase 'Ship it.'
+s42_unchanged "47t2 F6 a name no row reads (a typo of release)" 1 "$P47A"
+expect_contains "47t3 …naming the names the rows read" "the rows read: release ship" "$OUT"
+poke "$R47A" approve Release 'Ship it.'
+s42_unchanged "47t4 F6 the read name in another case" 1 "$P47A"
+# REVIEW 14 N4 (wave-26 T52): a name only the landed T1 reads satisfies nothing, so it is refused
+# and is not among the names listed.
+poke "$R47A" approve landedonly 'Go.'
+s42_unchanged "47t4b N4 a name read only by a landed row" 1 "$P47A"
+expect_contains "47t4c …listing only the names open rows read" "the rows read: release ship" "$OUT"
+poke "$R47A" approve ship 'Go.'
+expect_eq "47t5 F6 a name read as live:approval:<name> is recorded" "0" "$RC"
+expect_contains "47t6 …the line written" "approved: ship by Dana Fixture" "$(cat "$P47A")"
+POKE_BOUND="$S47_BOUND_WAS"
+
+# ============================================================
+section "Section 47 §WAITING-READY: WAITING says nothing is ready only when nothing is (wave-26 T13; review-6 F3; D9, D16)"
+# ============================================================
+#
+# A QUIET tick with a row running printed `WAITING — <n> running, nothing ready` whatever the
+# ready set held, so a full writer budget or a standing fill-declined read as "nothing ready"
+# while a row was ready. Each such row now has its WAIT line saying why, and WAITING prints only
+# when the untrimmed ready set is empty. Three worlds over one table shape, writers=1 and one
+# writer running: a ready row the budget cannot take, a ready row the standing decline answered
+# (writers=2, so a slot is free), and the control where the row waits on an unlanded read.
+s47_quiet() {  # <repo> <writers> <T2 reads> -> the plan; T9 active, T2 pending, one writer open
+  s47_plan "$1" "$2" \
+    "| T9 | 4 | build | in flight | implementor | — | 30 | REQ-x | payload/q.sh | active | |" \
+    "| T2 | 4 | build | the row | implementor | — | 20 | REQ-x | payload/r.sh | pending | $3 |" >/dev/null
+  add_row "$1" name=w1 deliverable="$1/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
+}
+R47Q="$(make_repo s47-waiting-full)"; new_roster "$R47Q"; s47_quiet "$R47Q" 1 ""
+poke_pressure "$R47Q" 8192 1.0 tick
+expect_contains "47u F3 a full writer budget names the ready row it cannot take, and why" \
+  "poker: WAIT T2 — ready; no writer slot free" "$OUT"
+expect_absent "47u2 …and does not say nothing is ready" "poker: WAITING" "$OUT"
+R47R="$(make_repo s47-waiting-declined)"; new_roster "$R47R"; s47_quiet "$R47R" 2 ""
+mkdir -p "$R47R/.bionic/docs/record/wave-01-fixture"
+printf 'fill-ledger/v1|at=2026-10-04T00:00:00Z|session=%s|turn=u-47r|current=4|state=ok|ceiling=2|width=2|open=1|free=1|ready=T2|launched=|declined=T2 waits on the merge|missed=1\n' "$SID" \
+  > "$R47R/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
+poke_pressure "$R47R" 8192 1.0 tick
+expect_contains "47v precondition: the standing decline is read" "fill-declined standing since" "$OUT"
+expect_contains "47v2 F3 a ready row the standing decline answered is named, and why" \
+  "poker: WAIT T2 — ready; answered by the standing fill-declined" "$OUT"
+expect_absent "47v3 …and the tick does not say nothing is ready" "poker: WAITING" "$OUT"
+R47S="$(make_repo s47-waiting-none)"; new_roster "$R47S"; s47_quiet "$R47S" 1 "payload/q.sh"
+poke_pressure "$R47S" 8192 1.0 tick
+expect_contains "47w the control: the row waits on what T9 writes, on its WAIT line" \
+  "poker: WAIT T2 — reads payload/q.sh, written by T9 (active)" "$OUT"
+expect_contains "47w2 …and with nothing ready and a row running, WAITING prints" \
+  "poker: WAITING — 1 running, nothing ready" "$OUT"
+
+# ============================================================
+section "Section 46 §PROOF-ADD: a proof names the head it read (wave-26 T4; REQ-3 AC-3.2; D5)"
+# ============================================================
+#
+# `proof-add <floor|review|task> <evidence>` writes one line inside `## SDLC State`:
+# `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>`. The head
+# is never an operand: it is the one the evidence names (a run log's `head=` header, a
+# review's `reviewed: a..b` end; T14), held against the checkout holding the plan's
+# `working-branch:`, which here is a linked worktree one commit ahead of the main checkout,
+# so a head read from the cwd would be the wrong one. The write is §42's transaction: a
+# copy, a dry commit through the real gate, a checksum, a swap; every refusal leaves the
+# plan byte-identical. `proof_last <plan> <kind>` (payload/scripts/lib/proof.sh) reads the
+# newest line of a kind back.
+S46_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
+s46_last() {  # <plan> <kind> -> proof_last's answer, from the library itself
+  bash -c '. "$1" && proof_last "$2" "$3"' _ "$S46_LIB" "$1" "$2" 2>/dev/null
+}
+s46_proved() { /usr/bin/grep -E '^proved: ' "$1"; }  # <plan> -> its proof lines
+
+R46="$(make_repo s46-proof)"; ( cd "$R46" && git commit -q --allow-empty -m init )
+P46="$(s42_plan "$R46" 4)"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P46" > "$P46.tmp" && mv "$P46.tmp" "$P46"
+# THREE SUITES ARE THE ROSTER (wave-26 T52; review 14 N1): a floor log's `Gating:` tally must
+# count every tests/*.test.sh at the head it read, so the fixture's logs say 3.
+mkdir -p "$R46/tests"
+for s46s in a b c; do printf '#!/bin/bash\n' > "$R46/tests/$s46s.test.sh"; done
+( cd "$R46" && git add -f "$P46" tests && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$R46/.worktrees/01-fixture" \
+  && git -C "$R46/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
+W46_HEAD="$(git -C "$R46/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+mkdir -p "$R46/.bionic/docs/record/wave-01-fixture" "$R46/.bionic/docs/plans/elsewhere"
+# THE EVIDENCE ATTESTS ITS HEAD (wave-26 T14; review 7 F1): a floor log carries the suite runner's
+# header line `head=<sha> dirty=<n>`, a review its `reviewed: <a>..<b>` line.
+printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 3 passed, 0 failed\n' "$W46_HEAD" > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
+printf 'review notes\n' > "$R46/.bionic/docs/record/wave-01-fixture/review.md"
+printf 'not a record\n' > "$R46/.bionic/docs/plans/elsewhere/notes.md"
+expect_regex "46a0 precondition: the working branch's checkout has a 40-hex head" '^[0-9a-f]{40}$' "$W46_HEAD"
+expect_true "46a0b precondition: …which is not the main checkout's head" \
+  test "$W46_HEAD" != "$(git -C "$R46" rev-parse HEAD)"
+s34_gate "$R46"
+expect_eq "46a0c precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "46a0d precondition: the plan carries no proof line yet" "" "$(s46_proved "$P46")"
+expect_true "46a0e precondition: proof.sh is in the tree under test" test -r "$S46_LIB"
+
+# ---------- the write ----------
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+expect_eq "46a proof-add floor exits 0" "0" "$RC"
+expect_contains "46a2 …and says what it wrote" "proof-add — kind=floor head=$W46_HEAD" "$OUT"
+expect_eq "46a3 …git diff --numstat shows one line added" "1 0;" "$(s42_numstat "$R46")"
+expect_regex "46a4 …in the proof line's shape, with the working branch's head" \
+  "^proved: kind=floor head=${W46_HEAD} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor.txt$" \
+  "$(s46_proved "$P46")"
+expect_eq "46a5 …inside ## SDLC State" "SDLC" \
+  "$(awk '/^##[[:space:]]/ { s = $2 } /^proved: / { print s; exit }' "$P46")"
+expect_eq "46a6 proof_last reads the floor head back" "$W46_HEAD" "$(s46_last "$P46" floor)"
+expect_eq "46a7 …and a kind never proved reads nothing" "" "$(s46_last "$P46" review)"
+s34_gate "$R46"
+expect_eq "46a8 …and the next commit is admitted" "0" "$GATE_RC"
+
+# A later proof of the same kind is the one proof_last reads; an absolute path under record/
+# is written docs-root relative.
+git -C "$R46/.worktrees/01-fixture" commit -q --allow-empty -m "more wave work" >/dev/null 2>&1
+W46_HEAD2="$(git -C "$R46/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+# The review names what it read in abbreviated form; the proof names the commit it resolves to.
+printf '# review\n\nreviewed: %s..%s (the fixture)\n\nnotes\n' "${W46_HEAD:0:8}" "${W46_HEAD2:0:10}" \
+  > "$R46/.bionic/docs/record/wave-01-fixture/review.md"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add review "$R46/.bionic/docs/record/wave-01-fixture/review.md"
+expect_eq "46b proof-add review by absolute path exits 0" "0" "$RC"
+expect_eq "46b2 …one line added" "1 0;" "$(s42_numstat "$R46")"
+expect_contains "46b3 …naming the evidence under record/" \
+  "proved: kind=review head=${W46_HEAD2} " "$(s46_proved "$P46")"
+expect_contains "46b4 …docs-root relative" "evidence=record/wave-01-fixture/review.md" "$(s46_proved "$P46" | tail -1)"
+# REVIEW 7 F1: THE SAME FLOOR LOG AFTER A LANDING PROVES NOTHING NEW. The log read W46_HEAD; the
+# branch has moved to W46_HEAD2 with no run, so re-citing it is refused and the floor proof
+# stays at the head the run read. A log of a run at W46_HEAD2 proves W46_HEAD2.
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+s42_unchanged "46b5 F1 the floor log of the old head, after a landing" 1 "$P46"
+expect_contains "46b5b …naming both heads and the fix" \
+  "read head ${W46_HEAD:0:12}, but the working branch is at ${W46_HEAD2:0:12}; run it again on ${W46_HEAD2:0:12}" "$OUT"
+expect_eq "46b6 F1 proof_last floor still reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor2.txt
+expect_eq "46b6b …a log of a run at the new head exits 0" "0" "$RC"
+expect_eq "46b6c …and proof_last floor reads the new head" "$W46_HEAD2" "$(s46_last "$P46" floor)"
+expect_eq "46b7 …and the review head is its own, resolved from the review's reviewed: line" "$W46_HEAD2" "$(s46_last "$P46" review)"
+expect_eq "46b8 …the proof lines sit together, newest last" "floor review floor" \
+  "$(s46_proved "$P46" | sed -E 's/^proved: kind=([a-z]+) .*/\1/' | tr '\n' ' ' | sed 's/ $//')"
+
+# ---------- F1: what the evidence must attest, each refusal naming its fix ----------
+S46_REC="$R46/.bionic/docs/record/wave-01-fixture"
+printf 'floor log\nhead=%s dirty=3\n' "$W46_HEAD2" > "$S46_REC/floor-dirty.txt"
+printf 'floor log\nhead=none dirty=none\n' > "$S46_REC/floor-norepo.txt"
+printf 'a log with no run header\n' > "$S46_REC/floor-bare.txt"
+printf '# review\n\nno range here\n' > "$S46_REC/review-bare.md"
+printf '# review\n\nreviewed: %s..0123456789abcdef0123456789abcdef01234567\n' "${W46_HEAD:0:8}" > "$S46_REC/review-gone.md"
+S46_SIDE="$(git -C "$R46" commit-tree -p "$W46_HEAD" -m "a side commit" "$(git -C "$R46" rev-parse "$W46_HEAD^{tree}")" 2>/dev/null)"
+printf '# review\n\nreviewed: %s..%s\n' "${W46_HEAD:0:8}" "$S46_SIDE" > "$S46_REC/review-side.md"
+printf '# review\n\nreviewed: %s..%s\n' "${W46_HEAD:0:8}" "$W46_HEAD" > "$S46_REC/review-older.md"
+expect_regex "46f0 precondition: the side commit exists" '^[0-9a-f]{40}$' "$S46_SIDE"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-dirty.txt
+s42_unchanged "46f F1 a run at the head on a dirty tree" 1 "$P46"
+expect_contains "46f2 …naming the dirt and the fix" "dirty tree (dirty=3); commit, run it again" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-norepo.txt
+s42_unchanged "46f3 F1 a run that read no repository (head=none)" 1 "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-bare.txt
+s42_unchanged "46f4 F1 a floor evidence with no run header" 1 "$P46"
+expect_contains "46f5 …naming the line it needs" "carries no head=<sha> dirty=<n> line" "$OUT"
+poke "$R46" proof-add review record/wave-01-fixture/review-bare.md
+s42_unchanged "46f6 F1 a review with no reviewed: line" 1 "$P46"
+expect_contains "46f7 …naming the line it needs" "carries no reviewed: <a>..<b> line" "$OUT"
+poke "$R46" proof-add review record/wave-01-fixture/review-gone.md
+s42_unchanged "46f8 F1 a review that read a commit this repository lacks" 1 "$P46"
+poke "$R46" proof-add review record/wave-01-fixture/review-side.md
+s42_unchanged "46f9 F1 a review of a commit off the working branch" 1 "$P46"
+expect_contains "46f10 …naming it" "which is not on the working branch" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/review-older.md
+s42_unchanged "46f11 a floor proof never reads a review's range" 1 "$P46"
+# REVIEW 10 F1 (wave-26 T5): A RUN AT THE HEAD MUST ALSO HAVE PASSED. The header says which head
+# the run read, the runner's last `Gating:` line how it ended; a red run, a note quoting the
+# header, a void suite, and a green inner verdict above a red outer one prove nothing. The green
+# log at the same head (floor2.txt, 46b6b) is this block's positive control.
+printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 3 failed\n' "$W46_HEAD2" > "$S46_REC/floor-red.txt"
+printf '# review notes\nThe runner printed:\nhead=%s dirty=0\n(no run here)\n' "$W46_HEAD2" > "$S46_REC/floor-quote.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 0 failed\nVoid: 1 — not timed\n' "$W46_HEAD2" > "$S46_REC/floor-void.txt"
+printf 'floor log\nhead=%s dirty=0\n───── x: captured output ─────\nGating: 5 passed, 0 failed\n───── end x ─────\nGating: 40 passed, 2 failed\n' \
+  "$W46_HEAD2" > "$S46_REC/floor-inner.txt"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-red.txt
+s42_unchanged "46f12 F1 a red run at the head, on a clean tree" 1 "$P46"
+expect_contains "46f12b …naming the verdict and the fix" "did not pass (Gating: 40 passed, 3 failed); fix it, run it again" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-quote.txt
+s42_unchanged "46f13 F1 a note that quotes the run header" 1 "$P46"
+expect_contains "46f13b …naming the verdict it lacks" "has no Gating: <n> passed, <m> failed verdict" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-void.txt
+s42_unchanged "46f14 F1 a run whose tally does not reach the roster, with a Void: line" 1 "$P46"
+expect_contains "46f14b …naming the tally against the roster" "40 passed and 1 void of 3 suites" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-inner.txt
+s42_unchanged "46f15 F1 a green inner verdict above the runner's red one" 1 "$P46"
+poke "$R46" proof-add task record/wave-01-fixture/floor-red.txt
+s42_unchanged "46f16 F1 a task proof citing a red run" 1 "$P46"
+# REVIEW 14 S3, N1, N2 (wave-26 T52). THE LAST RUN IN THE LOG IS JUDGED, and a verdict that sits
+# inside a failing suite's captured output is not the runner's: a log cut off after a nested
+# green verdict, or a red run for this head with another head's green run appended, proves
+# nothing. A floor must be a WHOLE run: passed plus void reaches the suites at the head (three
+# here). A void suite passed (T43), so a whole run with one is a floor.
+printf 'floor log\nhead=%s dirty=0\n✗ FAIL\n───── x.test.sh: captured output ─────\nGating: 3 passed, 0 failed\n───── end x.test.sh ─────\n' \
+  "$W46_HEAD2" > "$S46_REC/floor-cut.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nFailed:\nhead=0123456789abcdef0123456789abcdef01234567 dirty=0\nGating: 3 passed, 0 failed\n' \
+  "$W46_HEAD2" > "$S46_REC/floor-appended.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\n' "$W46_HEAD2" > "$S46_REC/floor-part.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\nVoid: 1 — not timed, each for the reason given; advisory, not a failure:\n    - c.test.sh (the machine was busy)\nNo gating suite failed; 1 void\n' \
+  "$W46_HEAD2" > "$S46_REC/floor-whole-void.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' \
+  "$W46_HEAD2" "$W46_HEAD2" > "$S46_REC/floor-rerun.txt"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-cut.txt
+s42_unchanged "46f17 S3 a log cut off after a nested green verdict inside a capture" 1 "$P46"
+expect_contains "46f17b …saying the verdict is inside a captured output" "inside a suite's captured output" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-appended.txt
+s42_unchanged "46f18 S3 a red run for this head with another head's green run appended" 1 "$P46"
+expect_contains "46f18b …judged by the last run, which read another head" "read head 0123456789ab" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-part.txt
+s42_unchanged "46f19 N1 a green verdict over one suite of the three at the head" 1 "$P46"
+expect_contains "46f19b …naming the tally against the roster" "1 passed and 0 void of 3 suites" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-whole-void.txt
+expect_eq "46f20 N2 a whole run with one void suite that passed is a floor" "0" "$RC"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-rerun.txt
+expect_eq "46f21 S3 a red run then a green rerun on the same head: the last run is judged, and it passed" "0" "$RC"
+# A REVIEW OF AN OLDER HEAD IS A TRUE PROOF OF THAT HEAD: what landed since stays unread.
+poke "$R46" proof-add review record/wave-01-fixture/review-older.md
+expect_eq "46g a review of an ancestor of the branch head exits 0" "0" "$RC"
+expect_eq "46g2 …and proves the head it read, not the branch head" "$W46_HEAD" "$(s46_last "$P46" review)"
+# kind=task takes whichever the evidence carries, the run header first (A-T14.9).
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add task record/wave-01-fixture/floor2.txt
+expect_eq "46g3 a task proof citing a run log at the head exits 0" "0" "$RC"
+poke "$R46" proof-add task record/wave-01-fixture/review-older.md
+expect_eq "46g4 …and one citing a review of an older head exits 0" "0" "$RC"
+expect_eq "46g5 …proving the head that review read" "$W46_HEAD" "$(s46_last "$P46" task)"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add task record/wave-01-fixture/floor-bare.txt
+s42_unchanged "46g6 a task proof whose evidence attests no head" 1 "$P46"
+expect_contains "46g7 …naming both forms" "neither a head=<sha> dirty=<n> run header nor a reviewed: <a>..<b> line" "$OUT"
+
+# ---------- the refusals: byte-identical, naming the fix ----------
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add bogus record/wave-01-fixture/floor.txt
+s42_unchanged "46c a kind outside floor|review|task" 1 "$P46"
+expect_contains "46c2 …naming the three kinds" "floor, review or task" "$OUT"
+poke "$R46" proof-add floor plans/elsewhere/notes.md
+s42_unchanged "46c3 an evidence path outside record/" 1 "$P46"
+expect_contains "46c4 …naming record/" "under record/" "$OUT"
+poke "$R46" proof-add floor record/../plans/elsewhere/notes.md
+s42_unchanged "46c5 a path that climbs out of record/" 1 "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/absent.txt
+s42_unchanged "46c6 a missing evidence file" 1 "$P46"
+expect_contains "46c7 …naming the file" "absent.txt" "$OUT"
+# REVIEW 10 F7 (wave-26 T46): A SYMLINK UNDER record/ IS NOT A RECORD. The check resolved the
+# directory, not the file, so a link to a log elsewhere was admitted and the evidence could
+# change after the proof. The same bytes as a regular file under record/ are admitted.
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/plans/elsewhere/run.log"
+ln -s ../../plans/elsewhere/run.log "$S46_REC/floor-link.txt"
+expect_true "46c7b precondition: the link is a symlink to a log outside record/" test -L "$S46_REC/floor-link.txt"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-link.txt
+s42_unchanged "46c7c F7 evidence that is a symlink" 1 "$P46"
+expect_contains "46c7d …naming the fix: copy the log into the record" "copy the log into the record" "$OUT"
+cp "$R46/.bionic/docs/plans/elsewhere/run.log" "$S46_REC/floor-copy.txt"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-copy.txt
+expect_eq "46c7e …and the same log copied into the record is admitted" "0" "$RC"
+s42_snap "$R46" "$P46"
+printf 'x\n' > "$R46/.bionic/docs/record/wave-01-fixture/two words.txt"
+poke "$R46" proof-add floor "record/wave-01-fixture/two words.txt"
+s42_unchanged "46c8 an evidence path with a space (the line is space-separated)" 1 "$P46"
+poke "$R46" proof-add floor
+s42_unchanged "46c9 one operand is the usage error" 2 "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor.txt "$W46_HEAD"
+s42_unchanged "46c10 …and so is a head given as an operand" 2 "$P46"
+
+# The head is held against the working branch's checkout, so a plan whose branch no checkout
+# holds, or that names none, is refused before any evidence head is read.
+sed 's#^working-branch: wave/01-fixture$#working-branch: wave/99-gone#' "$P46" > "$P46.tmp" && mv "$P46.tmp" "$P46"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+s42_unchanged "46d a working-branch: no checkout holds" 1 "$P46"
+expect_contains "46d2 …naming the branch" "wave/99-gone" "$OUT"
+sed '/^working-branch: /d' "$P46" > "$P46.tmp" && mv "$P46.tmp" "$P46"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+s42_unchanged "46d3 a plan naming no working-branch:" 1 "$P46"
+expect_contains "46d4 …naming the key to add" "working-branch:" "$OUT"
+expect_eq "46e no projection copy is left beside the plan" "" \
+  "$(find "$R46/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
+POKE_BOUND="$S46_BOUND_WAS"
+
+# ============================================================
+section "Section 48 §READY-EARLY (review half): a review follows the build — offered once per landed difference, back to pending on its proof (wave-26 T14; REQ-6 AC-6.1, AC-6.5; D10)"
+# ============================================================
+#
+# A reads table at current: 4 with one build landed and one still active. The review row (an
+# empty reads cell, so `approval:plan, live:head`) is offered as soon as the first build lands,
+# with no review proof yet (AC-6.1). Dispatched, it is active; `proof-add review` records the
+# working branch's head A and returns the row to `pending` with its agent, worktree and base
+# cells cleared — the next pass is its own launch and its own ledger line. The tick reads the
+# head from the checkout holding `working-branch:` (a linked worktree one commit ahead of the
+# main checkout, as §46), so at A the review waits, naming the proof's head; one more commit on
+# the working branch — a landing — and the tick offers it again (AC-6.5). A tick that read the
+# head from the main checkout would see a head other than A and offer it at 48e.
+S48_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+s48_row() {  # <plan> <id> -> the row's cells, `|`-joined and trimmed: id|…|status|reads
+  awk -F'|' -v id="$2" '{ c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c) } c == id {
+    o = ""; for (i = 2; i < NF; i++) { v = $i; gsub(/^[ \t]+|[ \t]+$/, "", v); o = o (i > 2 ? "|" : "") v }
+    print o; exit }' "$1"
+}
+s48_fill_has() {  # <id> -> yes when the tick's FILL line names it
+  case " $(s47_lines FILL | sed 's/^poker: FILL //') " in *" $1 "*) printf yes ;; *) printf no ;; esac
+}
+
+R48="$(make_repo s48-review)"; new_roster "$R48"; ( cd "$R48" && git commit -q --allow-empty -m init )
+add_row "$R48" name=w-T2 deliverable=b.md duration="4 hours" launched_at="$(iso_ago 600)"
+P48="$(s42_plan "$R48" 4)"
+awk '
+  /^current: / && !wb { print; print "working-branch: wave/01-fixture"; wb = 1; next }
+  /^- T5: / { print "- T3: review passes, one per landed difference — record/wave-01-fixture/review.md" }
+  /^\| id \| step \|/ { intab = 1
+    print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
+    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    print "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |"
+    print "| T2 | 4 | build | the second build | w-T2 | — | 30 | REQ-1 | b.sh | 01-T2 | abc1234 | active |  |"
+    print "| T3 | 6 | review | follows the build | critic | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/review.md | — | — | pending |  |"
+    print "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | — | — | — | pending |  |"
+    next }
+  intab && /^\|/ { next }
+  { intab = 0; print }' "$P48" > "$P48.tmp" && mv "$P48.tmp" "$P48"
+( cd "$R48" && git add -f "$P48" && git commit -qm "reads table" \
+  && git worktree add -q -b wave/01-fixture "$R48/.worktrees/01-fixture" \
+  && git -C "$R48/.worktrees/01-fixture" commit -q --allow-empty -m "the first build lands" ) >/dev/null 2>&1
+mkdir -p "$R48/.bionic/docs/record/wave-01-fixture"
+W48_A="$(git -C "$R48/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+printf '# review\n\nreviewed: %s..%s (the first build)\n' "$(git -C "$R48" rev-parse HEAD)" "$W48_A" \
+  > "$R48/.bionic/docs/record/wave-01-fixture/review.md"
+expect_eq "48a0 precondition: the T3 row is a review with an empty reads cell, pending" \
+  "T3|6|review|follows the build|critic|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|pending|" \
+  "$(s48_row "$P48" T3)"
+expect_true "48a0b precondition: the working branch's head is not the main checkout's" \
+  test "$W48_A" != "$(git -C "$R48" rev-parse HEAD)"
+s34_gate "$R48"
+expect_eq "48a0c precondition: the reads-table plan is admitted by the real commit gate" "0" "$GATE_RC"
+
+# ---------- AC-6.1: no review proof yet, one build landed, one active — offered now ----------
+poke_pressure "$R48" 8192 1.0 tick
+expect_nonempty "48a the tick prints a FILL line (the extractor reads real output)" "$(s47_lines FILL)"
+expect_eq "48a2 AC-6.1 with one build landed and one still active, the review is on the FILL line" "yes" "$(s48_fill_has T3)"
+
+# ---------- dispatched, then its proof: the row goes back to pending ----------
+add_row "$R48" name=w-T3 deliverable=review.md duration="1 hour" launched_at="$(iso_ago 60)"
+poke "$R48" task-set T3 status=active agent=w-T3 worktree=01-T3 base=abc1234
+expect_eq "48b0 precondition: task-set moves T3 active" "0" "$RC"
+poke_pressure "$R48" 8192 1.0 tick
+expect_eq "48b an active review is not offered again" "no" "$(s48_fill_has T3)"
+expect_absent "48b2 …and it is on no WAIT line (it is not pending)" "WAIT T3 " "$(s47_lines WAIT)"
+s42_snap "$R48" "$P48"
+poke "$R48" proof-add review record/wave-01-fixture/review.md
+expect_eq "48c proof-add review exits 0" "0" "$RC"
+expect_contains "48c2 …writes the proof at the working branch's head" "proved: kind=review head=${W48_A} " \
+  "$(/usr/bin/grep -E '^proved: ' "$P48")"
+expect_eq "48c3 …and returns the review row to pending, its agent, worktree and base cleared" \
+  "T3|6|review|follows the build|—|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|pending|" \
+  "$(s48_row "$P48" T3)"
+expect_eq "48c4 …touching nothing else: the proof line added, the one row rewritten" "2 1;" "$(s42_numstat "$R48")"
+expect_contains "48c5 …and it says which row it returned" "T3 back to pending" "$OUT"
+s34_gate "$R48"
+expect_eq "48c6 …and the next commit is admitted" "0" "$GATE_RC"
+
+# ---------- AC-6.5: at head A it waits, naming A; one landing later it is offered ----------
+poke_pressure "$R48" 8192 1.0 tick
+expect_nonempty "48d the tick prints WAIT lines (the extractor reads real output)" "$(s47_lines WAIT)"
+expect_eq "48d2 AC-6.5 at the proof's head the review is not offered" "no" "$(s48_fill_has T3)"
+expect_eq "48d3 …its WAIT line names the proof head it has not moved past" \
+  "poker: WAIT T3 — live:head: nothing landed past the review proof at ${W48_A:0:12}" \
+  "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 ')"
+git -C "$R48/.worktrees/01-fixture" commit -q --allow-empty -m "the second build lands" >/dev/null 2>&1
+W48_B="$(git -C "$R48/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+expect_true "48e0 precondition: the working branch moved past A" test "$W48_B" != "$W48_A"
+poke_pressure "$R48" 8192 1.0 tick
+expect_eq "48e AC-6.5 one landing past the proof and the review is offered again" "yes" "$(s48_fill_has T3)"
+expect_absent "48e2 …and it is on no WAIT line" "WAIT T3 " "$(s47_lines WAIT)"
+
+# REVIEW 10 F3 (wave-26 T46): ONLY THE ROW WHOSE RECORD IS THE EVIDENCE GOES BACK. A live review
+# T3 is mid-pass while the settled final review T8 (reads head) is active beside it; the final
+# review's proof returned T3 to pending too, and the next landing re-offered it under a reviewer
+# still running. Now the final review's proof moves no row, and T3's own proof still returns it
+# (a Files cell spelled record/… matches the same evidence: units LIVE.15e).
+R48F="$(make_repo s48-final)"; new_roster "$R48F"; ( cd "$R48F" && git commit -q --allow-empty -m init )
+add_row "$R48F" name=w-T3 deliverable=review.md duration="1 hour" launched_at="$(iso_ago 60)"
+add_row "$R48F" name=w-T8 deliverable=final.md duration="1 hour" launched_at="$(iso_ago 60)"
+P48F="$(s42_plan "$R48F" 4)"
+awk '
+  /^current: / && !wb { print; print "working-branch: wave/01-fixture"; wb = 1; next }
+  /^- T5: / { print "- T3: review passes — record/wave-01-fixture/review.md"; print "- T8: the final review — record/wave-01-fixture/final.md" }
+  /^\| id \| step \|/ { intab = 1
+    print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
+    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    print "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |"
+    print "| T3 | 6 | review | follows the build | w-T3 | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/review.md | — | — | active |  |"
+    print "| T8 | 6 | review | the final review | w-T8 | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/final.md | — | — | active | approval:plan, head |"
+    print "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | — | — | — | pending |  |"
+    next }
+  intab && /^\|/ { next }
+  { intab = 0; print }' "$P48F" > "$P48F.tmp" && mv "$P48F.tmp" "$P48F"
+( cd "$R48F" && git add -f "$P48F" && git commit -qm "reads table" \
+  && git worktree add -q -b wave/01-fixture "$R48F/.worktrees/01-fixture" \
+  && git -C "$R48F/.worktrees/01-fixture" commit -q --allow-empty -m "the first build lands" ) >/dev/null 2>&1
+mkdir -p "$R48F/.bionic/docs/record/wave-01-fixture"
+W48F_A="$(git -C "$R48F/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+printf '# final review\n\nreviewed: %s..%s (the wave)\n' "$(git -C "$R48F" rev-parse HEAD)" "$W48F_A" \
+  > "$R48F/.bionic/docs/record/wave-01-fixture/final.md"
+printf '# review\n\nreviewed: %s..%s (the first build)\n' "$(git -C "$R48F" rev-parse HEAD)" "$W48F_A" \
+  > "$R48F/.bionic/docs/record/wave-01-fixture/review.md"
+s34_gate "$R48F"
+expect_eq "48f0 precondition: the two-review plan is admitted by the real commit gate" "0" "$GATE_RC"
+s42_snap "$R48F" "$P48F"
+poke "$R48F" proof-add review record/wave-01-fixture/final.md
+expect_eq "48f F3 the final review's proof exits 0" "0" "$RC"
+expect_contains "48f2 …and writes its proof line" "proved: kind=review head=${W48F_A} " \
+  "$(/usr/bin/grep -E '^proved: ' "$P48F")"
+expect_eq "48f3 F3 …and leaves the live review mid-pass active, its agent kept" \
+  "T3|6|review|follows the build|w-T3|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|active|" \
+  "$(s48_row "$P48F" T3)"
+expect_eq "48f4 …touching nothing but the proof line" "1 0;" "$(s42_numstat "$R48F")"
+expect_absent "48f5 …and it names no row returned" "back to pending" "$OUT"
+s42_snap "$R48F" "$P48F"
+poke "$R48F" proof-add review record/wave-01-fixture/review.md
+expect_eq "48g F3 the live review's own proof exits 0" "0" "$RC"
+expect_eq "48g2 …and returns T3 to pending, its agent cleared" \
+  "T3|6|review|follows the build|—|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|pending|" \
+  "$(s48_row "$P48F" T3)"
+expect_eq "48g3 …and only T3: the final review stays active" "active" \
+  "$(s48_row "$P48F" T8 | awk -F'|' '{ print $12 }')"
+# REVIEW 14 S4 (wave-26 T51): A REVIEW PROOF THAT RETURNS NO LIVE ROW SAYS SO. The live review's
+# record was written under another name than its Files cell (`review-14.md`, Files `review.md`):
+# the proof returns no row, rightly (T46), and through T46 the success line said nothing of it, so
+# the active pass was never offered again and nobody saw why. The verb now names the active live
+# review rows and their Files on such a proof, and still resets none of them. The control: once no
+# live review is active, the final review's proof says nothing of the kind.
+awk -F'|' 'BEGIN { OFS = "|" } $2 == " T3 " { $6 = " w-T3 "; $13 = " active " } { print }' "$P48F" > "$P48F.tmp" && mv "$P48F.tmp" "$P48F"
+expect_eq "48h precondition: the live review T3 is active again, its agent named" \
+  "T3|6|review|follows the build|w-T3|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|active|" \
+  "$(s48_row "$P48F" T3)"
+cp "$R48F/.bionic/docs/record/wave-01-fixture/review.md" "$R48F/.bionic/docs/record/wave-01-fixture/review-14.md"
+poke "$R48F" proof-add review record/wave-01-fixture/review-14.md
+expect_eq "48h S4 a review proof no live row's Files hold exits 0" "0" "$RC"
+expect_contains "48h2 S4 …and says it returned no live review row, naming the active one and its Files" \
+  "no active live review row holds record/wave-01-fixture/review-14.md in its Files: T3 (.bionic/docs/record/wave-01-fixture/review.md)" "$OUT"
+expect_eq "48h3 …and resets nothing: T3 stays active under its agent" \
+  "T3|6|review|follows the build|w-T3|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|active|" \
+  "$(s48_row "$P48F" T3)"
+poke "$R48F" proof-add review record/wave-01-fixture/review.md
+expect_contains "48h4 control precondition: T3's own proof returns it" "T3 back to pending" "$OUT"
+poke "$R48F" proof-add review record/wave-01-fixture/final.md
+expect_eq "48h5 control: with no live review active, the final review's proof exits 0" "0" "$RC"
+expect_absent "48h6 control …and says nothing of live rows" "no active live review row holds" "$OUT"
+POKE_BOUND="$S48_BOUND_WAS"
+
+# ============================================================
+section "Section 49 §SYNC: the tick applies the launches the plan lacks, in one write (wave-26 T32, D4; review-3 F1, F2)"
+# ============================================================
+#
+# The launch recorder starts `launch-sync` and does not wait for it. The tick runs the same
+# transaction before it reads the plan, so a launch the detached call did not record (killed,
+# refused, or never started) is recorded here and says so once, and one that cannot be recorded
+# is printed on every tick until it is fixed. The fixture is §34's plan, which the real commit
+# gate admits, with T2's agent cell naming a launch on the roster (the gate reads it there).
+S49_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R49="$(make_repo s49-sync)"; ( cd "$R49" && git commit -q --allow-empty -m init )
+P49="$(s34_plan "$R49" 4)"
+sed -e 's/^| T2 | 4 | build | the second build | implementor |/| T2 | 4 | build | the second build | w-T2 |/' \
+    "$P49" > "$P49.tmp" && mv "$P49.tmp" "$P49"
+awk '{ print } /^- T5: pending dispatch/ { print "- T6: pending dispatch"; print "- T7: pending dispatch" }
+  /^\| T2 \| 4 \| build/ {
+  print "| T6 | 4 | build | the sixth build | — | — | 30 | REQ-1 | f.sh | — | — | pending |"
+  print "| T7 | 4 | build | the seventh build | — | — | 30 | REQ-1 | g.sh | — | — | pending |" }' "$P49" > "$P49.tmp" && mv "$P49.tmp" "$P49"
+new_roster "$R49"
+add_row "$R49" name=w-T2 agent_id=a-w-T2 launched_at="$(iso_ago 600)"
+add_row "$R49" name=w-T6 agent_id=a-w-T6 launched_at="$(iso_ago 60)" deliverable=t6.md duration="45 minutes" \
+  subagent_type=bionic:implementor
+# A real linked worktree, its path as git lists it: the record counts nothing else (wave-26 T40).
+T49_TREE="$(cd "$R49" && pwd -P)/.worktrees/01-T6"; git -C "$R49" worktree add -q -b wt/01-T6 "$T49_TREE" >/dev/null 2>&1
+printf 'workspace/v1|session=%s|name=w-T6|path=%s|branch=wt/01-T6|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
+  "$SID" "$T49_TREE" "$P49" >> "$R49/.bionic/tmp/workspaces-$SID.state"
+expect_contains "49 precondition: T6 is in the table, pending" "| f.sh | — | — | pending |" "$(grep '^| T6 |' "$P49")"
+s34_gate "$R49"
+expect_eq "49 precondition: the fixture is admitted by the real commit gate" "0" "$GATE_RC"
+
+poke_pressure "$R49" 8192 1.0 tick
+expect_contains "49a §SYNC the tick records the launch the plan lacked, and says so" "poker: LAUNCHED T6 w-T6" "$OUT"
+expect_contains "49a2 …row T6 is active in its tree" "| w-T6 | — | 30 | REQ-1 | f.sh | .worktrees/01-T6 | 01234567 | active |" \
+  "$(grep '^| T6 |' "$P49")"
+expect_absent "49a3 …and the ready set it fills from no longer offers T6" "FILL T6" "$OUT"
+poke_pressure "$R49" 8192 1.0 tick
+expect_absent "49b …the next tick has nothing to record and says nothing of it" "poker: LAUNCHED" "$OUT"
+expect_contains "49b2 …while it still decides" "decision=" "$OUT"
+
+# 49c: a launch that cannot be recorded (a build row, no tree) is printed by the tick.
+add_row "$R49" name=w-T7 agent_id=a-w-T7 launched_at="$(iso_ago 30)" deliverable=t7.md duration="45 minutes"
+cp "$P49" "$TMPROOT/s49-before"
+poke_pressure "$R49" 8192 1.0 tick
+expect_contains "49c §SYNC the tick prints the launch it could not record" "poker: NOT-RECORDED T7 w-T7" "$OUT"
+expect_contains "49c2 …with the command to run by hand" "task-set T7 status=active agent=w-T7" "$OUT"
+expect_true "49c3 …and the plan is unchanged" cmp -s "$TMPROOT/s49-before" "$P49"
+expect_eq "49d no projection copy is left beside the plan" "" \
+  "$(find "$R49/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
+
+# 49f (wave-26 T51; review 13 F1): the lock cannot be made — .bionic/tmp is not writable. The tick's
+# call leaves a held lock to its holder and does not wait, yet through T32 its takeover arm looped
+# without a bound and the tick never returned. Run in a process group of its own, bounded, and
+# killed whole past the bound; what it left running is read by working directory.
+s49_procs() {  # <dir> -> the pids of bash processes whose working directory is <dir> or below it
+  local d
+  d="$(cd "$1" 2>/dev/null && pwd -P)" || return 0
+  lsof -a -c bash -d cwd -Fpn 2>/dev/null | awk -v d="$d" '
+    /^p/ { p = substr($0, 2); next }
+    /^n/ { n = substr($0, 2); if (n == d || index(n, d "/") == 1) print p }'
+}
+s49_tick_bounded() {  # <seconds> <repo> -> OUT, RC; 124, the tick's whole group killed, past the bound
+  local i=0 n=$(( $1 * 10 )) p
+  rm -f "$TMPROOT/s49f.rc"
+  p="$( set -m
+    ( cd "$2" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 \
+        bash "$POKER" tick > "$TMPROOT/s49f.out" 2>&1
+      echo "$?" > "$TMPROOT/s49f.rc" ) </dev/null >/dev/null 2>&1 &
+    echo "$!" )"
+  while [ ! -s "$TMPROOT/s49f.rc" ] && [ "$i" -lt "$n" ]; do sleep 0.1; i=$((i + 1)); done
+  if [ -s "$TMPROOT/s49f.rc" ]; then RC="$(cat "$TMPROOT/s49f.rc")"; else kill -9 -- "-$p" 2>/dev/null; RC=124; fi
+  OUT="$(cat "$TMPROOT/s49f.out" 2>/dev/null)"
+}
+require_helpers s49_procs s49_tick_bounded
+command -v lsof >/dev/null 2>&1 || { echo "session-poker: lsof absent — 49f cannot read what it left running"; exit 1; }
+( cd "$R49" && while :; do sleep 1; done ) & S49_PLANT=$!
+sleep 0.5
+expect_contains "49f precondition: a process the row starts in the repo is found by its working directory" \
+  " $S49_PLANT " " $(s49_procs "$R49" | tr '\n' ' ')"
+kill "$S49_PLANT" 2>/dev/null; wait "$S49_PLANT" 2>/dev/null
+poke_bind "$R49"
+chmod a-w "$R49/.bionic/tmp"
+s49_tick_bounded 20 "$R49"
+chmod u+w "$R49/.bionic/tmp"
+expect_ne "49f §F1 the tick returns when the launch lock cannot be made (rc $RC; 124 is the bound)" "124" "$RC"
+expect_contains "49f2 …and prints that the lock cannot be made" "cannot be made" "$OUT"
+expect_eq "49f3 …and leaves nothing running" "" "$(s49_procs "$R49")"
+
+# 49e (wave-26 T32; T14, AC-6.5): the offered review names the range it reads. §48's world as it
+# ends: a review proof at A, one landing to B, the review offered again. The digest is removed so
+# the tick prints in full; the head is the one the tick reads for live:head, with no git of its own.
+expect_nonempty "49e precondition: §48 left its world and both heads" "${R48:-}${W48_A:-}${W48_B:-}"
+rm -f "$R48/.bionic/tmp/tick-digest-$SID.state"
+poke_pressure "$R48" 8192 1.0 tick
+expect_eq "49e precondition: the tick offers the review" "yes" "$(s48_fill_has T3)"
+expect_contains "49e AC-6.5 …and names the range it reads, the proof's head to the head now" \
+  "poker: RANGE T3 ${W48_A}..${W48_B}" "$OUT"
+expect_absent "49e2 …and only for the review: the active build has no RANGE line" "poker: RANGE T2" "$OUT"
+# 49e3 (wave-26 T62; critic 3 S3): THE DIGEST THIS REAL TICK WROTE CARRIES THAT HEAD. The turn-end
+# wall reads `head=` from it and hands it to the same ready set (stop.sh); stop.test.sh §LH plants
+# the field by hand, so this is the one row that reads what the tick itself wrote.
+expect_eq "49e3 …and the digest the tick wrote carries the head it judged live:head against" "head=${W48_B}" \
+  "$(/usr/bin/grep -E '^head=' "$(digest_of "$R48")" 2>/dev/null)"
+POKE_BOUND="$S49_BOUND_WAS"
+
+
+# ============================================================
+section "Section 50 §FIRST-TICK: the armed first tick names the ready set — FILL, WAIT and CHAIN from the scheduler's one site (wave-26 T59; REQ-6 AC-6.6)"
+# ============================================================
+#
+# THE FIRST TICK OF EVERY RUN FINDS NO ROSTER: arming precedes dispatch (§13a). Through T58 that
+# arm printed the rung, the holds and the ledger, then `QUIET — armed, nothing dispatched yet`,
+# and exited above the scheduler, so FILL, WAIT and CHAIN never printed on the one tick where
+# every ready row is unstarted. Both arms now run the scheduler from one site, and the decision
+# line agrees with what the tick printed: FILL with its `fill=` field when it names rows, QUIET
+# (exit 0, stamp kept) when nothing is ready or approval is pending. The approval gate
+# holds as everywhere: the gate is the plan's `approved-by:` line (wave-26 T13), so the plan at
+# current: 3 below carries none, as a plan before Step-3 approval does.
+s50_plan() {  # <repo> <current> <approved-by line, or empty> -> the plan path
+  local f="$1/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")"
+  {
+    printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: %s\n%s\n\n- Step %s: in progress\n\n' "$2" "$3" "$2"
+    printf '## Tasks\n\n%s' "$SP_TASKS_HEADER"
+    printf '| T1 | 4 | build | ready, the long one | implementor | — | 20m | REQ-x | a.sh | pending |\n'
+    printf '| T2 | 4 | build | ready | implementor | — | 10m | REQ-x | b.sh | pending |\n'
+    printf '| T3 | 4 | build | ready | implementor | — | 5m | REQ-x | c.sh | pending |\n'
+    printf '| T4 | 4 | build | waits on T1 | implementor | T1 | 15m | REQ-x | d.sh | pending |\n'
+  } > "$f"
+  printf '%s' "$f"
+}
+s50_last() { printf '%s\n' "$OUT" | tail -1; }
+
+R50="$(make_repo s50-first-tick)"
+poke "$R50" arm
+s50_plan "$R50" 4 "$SP_APPROVED_LINE" >/dev/null
+poke_pressure "$R50" 8192 1.0 tick
+expect_eq "50a the armed first tick exits 0" "0" "$RC"
+expect_eq "50a3 precondition: …with no roster file on disk, the no-roster arm" "no" "$([ -e "$(roster_of "$R50")" ] && echo yes || echo no)"
+expect_contains "50b the first tick fills the three ready rows" "poker: FILL T1 T2 T3" "$OUT"
+expect_contains "50c …names the waiting row with the read it lacks and its writer" \
+  "poker: WAIT T4 — waits for T1 (pending)" "$OUT"
+expect_contains "50d …and the longest chain, by hand: 20 + 15" "poker: CHAIN T1→T4 (35 min)" "$OUT"
+expect_contains "50a2 …and its sentence is the FILL band's own" \
+  "poker: FILL — T1 T2 T3 named for dispatch; the decision line carries them." "$OUT"
+S50_FILL="$(s38_line_no 'poker: FILL T')"; S50_WAIT="$(s38_line_no 'poker: WAIT ')"
+S50_CHAIN="$(s38_line_no 'poker: CHAIN ')"; S50_SAID="$(s38_line_no 'poker: FILL — ')"
+expect_true "50e …each above the band's sentence (fill=$S50_FILL wait=$S50_WAIT chain=$S50_CHAIN said=$S50_SAID)" \
+  test "$S50_FILL" -gt 0 -a "$S50_WAIT" -gt "$S50_FILL" -a "$S50_CHAIN" -gt "$S50_WAIT" -a "$S50_SAID" -gt "$S50_CHAIN"
+expect_regex "50f the decision line agrees with what the tick printed: last, FILL, and the fill field" \
+  '^poker-tick/v1\|at=[^|]+\|session=[^|]+\|decision=FILL\|total=0\|open=0\|fill=T1 T2 T3$' "$(s50_last)"
+expect_absent "50f2 …and the QUIET sentence is not printed beside it" "poker: QUIET" "$OUT"
+expect_eq "50g the rung prints once, from the one site" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
+expect_eq "50h the stamp is kept" "yes" "$([ -f "$(stamp_of "$R50")" ] && echo yes || echo no)"
+expect_eq "50i the tick digest the stop collector reads carries the FILL band, and the duty it owes" \
+  "decision=FILL duty=owed" \
+  "$(/usr/bin/grep -E '^(decision|duty)=' "$R50/.bionic/tmp/tick-digest-$SID.state" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
+# 50k — A FIRST TICK WITH NOTHING READY IS STILL QUIET: the one row waits on the world.
+R50K="$(make_repo s50-first-tick-nothing-ready)"
+poke "$R50K" arm
+sp_plan_at_step "$R50K" 4 \
+  "| T1 | 4 | build | waits on CI | implementor | ext:ci-50k | 15m | REQ-x | a.sh | pending |" >/dev/null
+poke_pressure "$R50K" 8192 1.0 tick
+expect_eq "50k the first tick with nothing ready exits 0" "0" "$RC"
+expect_contains "50k2 precondition: …and read the plan: the held row is named" "poker: HELD T1 ext:ci-50k" "$OUT"
+expect_absent "50k3 …names no row to fill" "poker: FILL" "$OUT"
+expect_contains "50k4 …and decides QUIET in the no-roster arm" \
+  "poker: QUIET — armed, nothing dispatched yet on this session" "$OUT"
+expect_regex "50k5 …with the QUIET decision line, no fill field" \
+  '^poker-tick/v1\|at=[^|]+\|session=[^|]+\|decision=QUIET\|total=0\|open=0$' "$(s50_last)"
+expect_contains "50k6 …and a digest that says QUIET" "decision=QUIET" \
+  "$(cat "$R50K/.bionic/tmp/tick-digest-$SID.state" 2>/dev/null)"
+
+# 50j — THE SAME TABLE BEFORE STEP-3 APPROVAL: no FILL, no WAIT, no CHAIN, the approval line,
+# and the same QUIET decision and exit code.
+R50B="$(make_repo s50-first-tick-step3)"
+poke "$R50B" arm
+s50_plan "$R50B" 3 "" >/dev/null
+poke_pressure "$R50B" 8192 1.0 tick
+expect_eq "50j the first tick before approval exits 0" "0" "$RC"
+expect_contains "50j2 …and prints the approval line" \
+  "poker: no FILL — plan at current: 3, Step-3 approval pending" "$OUT"
+expect_absent "50j3 …and names no row to fill" "poker: FILL" "$OUT"
+expect_absent "50j4 …no WAIT line" "poker: WAIT" "$OUT"
+expect_absent "50j5 …and no CHAIN line" "poker: CHAIN" "$OUT"
+expect_contains "50j6 …deciding QUIET in the no-roster arm" \
+  "poker: QUIET — armed, nothing dispatched yet on this session" "$OUT"
+expect_regex "50j7 …with the decision line unchanged" \
+  '^poker-tick/v1\|at=[^|]+\|session=[^|]+\|decision=QUIET\|total=0\|open=0$' "$(s50_last)"
+
+# ============================================================
+section "Section 51 §ADD-READS: a task added mid-run says what it reads, and the graph is the one a fresh derivation gives (wave-26 T59; REQ-5 AC-5.4)"
+# ============================================================
+#
+# `task-add` takes an optional tenth operand, `<reads>`, passed to `units_add_row` as the row's
+# reads cell (wave-26 T2, A-T2.14). In a table with a reads column a row waits for what it
+# reads and its deps carry only `ext:<slug>`, so the add needs no hand-written dependency: its
+# edges come from the table. A `—` reads is the cell `—`, which the readiness program reads as
+# the kind's default. A reads operand on a table with no reads column has nowhere to go and is
+# refused, unless it is `—`, which writes what the nine-operand form writes.
+#
+# THE FIXTURE IS §34's, WITH A reads COLUMN: s34_plan's admitted plan, its table widened by one
+# column and T5's deps (task ids, which a reads table refuses) emptied.
+S51_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S51_UNITS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/units.sh"
+s51_plan() {  # <repo> -> the plan path; s34_plan's, with a reads column
+  local p; p="$(s34_plan "$1" 4)"
+  awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
+       t && /^\| id / { print $0 " reads |"; next }
+       t && /^\|---/ { print $0 "---|"; next }
+       t && /^\| T/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " — |"; next }
+       { print }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  printf '%s' "$p"
+}
+s51_edges() { bash -c '. "$1" && units_edges "$2"' _ "$S51_UNITS" "$1" 2>/dev/null | LC_ALL=C sort; }  # <plan>
+s51_rows() { /usr/bin/grep '^| T[0-9]' "$1"; }  # <plan> -> its task rows
+
+R51="$(make_repo s51-add-reads)"; ( cd "$R51" && git commit -q --allow-empty -m init )
+P51="$(s51_plan "$R51")"
+s34_gate "$R51"
+expect_eq "51a precondition: the reads-table fixture is admitted by the real commit gate" "0" "$GATE_RC"
+S51_ROWS_BEFORE="$(s51_rows "$P51")"
+poke "$R51" task-add T6 4 build 'reads what T2 writes' bionic:implementor '—' 30 REQ-5 'lib/c.sh' 'b.sh'
+expect_eq "51b task-add with a reads operand and no deps exits 0" "0" "$RC"
+expect_contains "51b2 …the reads operand is the row's reads cell" \
+  "| T6 | 4 | build | reads what T2 writes | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending | b.sh |" "$(cat "$P51")"
+S51_EDGES="$(s51_edges "$P51")"
+expect_contains "51c AC-5.4 the added row's edge comes from what it reads: T2 writes b.sh" \
+  "$(printf 'T2\tT6\tb.sh')" "$S51_EDGES"
+# THE FRESH DERIVATION: the same table written by hand in a second repo, its edges derived.
+R51F="$(make_repo s51-add-reads-fresh)"; ( cd "$R51F" && git commit -q --allow-empty -m init )
+P51F="$(s51_plan "$R51F")"
+awk '{ print }
+     /^\| T5 \| 5 \|/ { print "| T6 | 4 | build | reads what T2 writes | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending | b.sh |" }
+     /^- T5: / { print "- T6: pending dispatch — by hand" }' "$P51F" > "$P51F.tmp" && mv "$P51F.tmp" "$P51F"
+expect_nonempty "51d precondition: the hand-written table derives edges" "$(s51_edges "$P51F")"
+expect_eq "51d2 AC-5.4 the graph after the add equals a fresh derivation of the same table" \
+  "$(s51_edges "$P51F")" "$S51_EDGES"
+expect_eq "51e no other row is touched: T6 is appended to no later row's deps (every other row byte-identical)" \
+  "$S51_ROWS_BEFORE" "$(s51_rows "$P51" | /usr/bin/grep -v '^| T6 ')"
+s34_gate "$R51"
+expect_eq "51f the next commit is admitted" "0" "$GATE_RC"
+
+# 51g — REFUSALS LEAVE THE PLAN BYTE-IDENTICAL (cmp, §42's helpers).
+s42_snap "$R51" "$P51"
+poke "$R51" task-add T6 4 build 'the same id again' implementor '—' 30 REQ-5 'lib/d.sh' 'a.sh'
+s42_unchanged "51g a duplicate id with a reads operand" 1 "$P51"
+expect_contains "51g2 …naming the duplicate" "T6: duplicate id" "$OUT"
+poke "$R51" task-add T7 4 build 'a read naming nothing' implementor '—' 30 REQ-5 'lib/d.sh' 'nonsense'
+s42_unchanged "51g3 a reads token naming no artifact" 1 "$P51"
+expect_contains "51g4 …in the validator's words" "read nonsense names no artifact" "$OUT"
+poke "$R51" task-add T7 4 build 'a bare word for Files' implementor '—' 30 REQ-5 'CHANGELOG' 'a.sh'
+s42_unchanged "51g5 a Files operand the dispatch grammar refuses" 1 "$P51"
+poke "$R51" task-add T7 4 build 'eleven' implementor '—' 30 REQ-5 'lib/d.sh' 'a.sh' extra
+s42_unchanged "51g6 eleven operands are the usage error" 2 "$P51"
+expect_contains "51g7 …and the usage names the optional reads operand" "[<reads>]" "$OUT"
+
+# 51h — TEN OPERANDS ON A TABLE WITHOUT THE COLUMN: a read has nowhere to go, so it is refused
+# in one line, the plan byte-identical; `—` is the nine-operand form, byte for byte.
+R51N="$(make_repo s51-no-reads)"; ( cd "$R51N" && git commit -q --allow-empty -m init )
+P51N="$(s42_plan "$R51N" 4)"
+s42_snap "$R51N" "$P51N"
+poke "$R51N" task-add T6 4 build 'reads into no column' implementor '—' 30 REQ-5 'lib/c.sh' 'b.sh'
+s42_unchanged "51h a reads operand on a table with no reads column" 1 "$P51N"
+expect_contains "51h2 …saying why, in one line" "has no reads column" "$OUT"
+poke "$R51N" task-add T6 4 build 'the dash reads' implementor '—' 30 REQ-5 'lib/c.sh' '—'
+expect_eq "51h3 a — reads on that table is admitted" "0" "$RC"
+R51M="$(make_repo s51-nine)"; ( cd "$R51M" && git commit -q --allow-empty -m init )
+P51M="$(s42_plan "$R51M" 4)"
+poke "$R51M" task-add T6 4 build 'the dash reads' implementor '—' 30 REQ-5 'lib/c.sh'
+expect_eq "51h4 precondition: the nine-operand add of the same row exits 0" "0" "$RC"
+expect_eq "51h5 …and the — reads wrote what the nine-operand form writes, byte for byte (the add's instant aside)" \
+  "$(sed -E 's/ added by task-add at [0-9TZ:-]+$//' "$P51M")" "$(sed -E 's/ added by task-add at [0-9TZ:-]+$//' "$P51N")"
+POKE_BOUND="$S51_BOUND_WAS"
+
+# ============================================================
+section "Section 52 §RUN-END: integrate waits for an open build, and the WAIT line names it (wave-26 T62; critic 2 K2-F5)"
+# ============================================================
+#
+# A reads table at current: 8, the floor and the review both proved, the review row landed, and
+# a late fix from the review still active. Integrate reads its default, now `proof:floor,
+# proof:review, head`, so the open build holds the merge and the tick says so. Through T61 the
+# tick offered the merge beside the build (FILL T3) and the turn-end wall demanded it.
+# THE PROOFS NAME THE HEAD THE WORKING BRANCH IS AT (wave-26 T64): from T64 a floor proof stands
+# only while proof_state answers covered or bounded, so the repository gets one commit, the plan
+# names its branch as `working-branch:`, and both proofs name that commit, not a made-up hex.
+s52_plan() {  # <repo> <T6 status> -> the plan path
+  local f h b
+  ( cd "$1" && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+  h="$(git -C "$1" rev-parse HEAD 2>/dev/null)"; b="$(git -C "$1" symbolic-ref --short HEAD 2>/dev/null)"
+  f="$(s47_plan "$1" 2 \
+    "| T1 | 4 | build | landed | implementor | — | 30 | REQ-x | payload/x.sh | landed | |" \
+    "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/floor.log | landed | |" \
+    "| T2 | 6 | review | the final review | critic | — | 30 | REQ-x | .bionic/docs/record/review.md | landed | |" \
+    "| T6 | 6 | build | late fix from the review | implementor | — | 20 | REQ-x | payload/x.sh | $2 | |" \
+    "| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-x | — | pending | |")"
+  awk -v h="$h" -v b="$b" '
+    /^current: / { print "current: 8"; print "working-branch: " b; next }
+    { print }
+    /^approved-by: / { print "proved: kind=floor head=" h " at=2026-10-04T11:00:00Z evidence=record/floor.log"
+                       print "proved: kind=review head=" h " at=2026-10-04T11:05:00Z evidence=record/review.md" }' \
+    "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  printf '%s' "$f"
+}
+R52="$(make_repo s52-open-build)"; new_roster "$R52"; s52_plan "$R52" active >/dev/null
+add_row "$R52" name=w-T6 deliverable=T6.md duration="1 hour" launched_at="$(iso_ago 10)"
+poke_pressure "$R52" 8192 1.0 tick
+expect_nonempty "52a precondition: the tick prints WAIT lines (the extractor reads real output)" "$(s47_lines WAIT)"
+expect_contains "52a2 K2-F5 integrate waits on head, and its WAIT line names the late build" \
+  "poker: WAIT T3 — reads head, written by T6 (active)" "$OUT"
+R52L="$(make_repo s52-landed)"; new_roster "$R52L"; s52_plan "$R52L" landed >/dev/null
+poke_pressure "$R52L" 8192 1.0 tick
+expect_contains "52b the build landed, both proofs in: the merge is offered" "poker: FILL T3" "$OUT"
+
+# ============================================================
+section "Section 53 §REVIEW-RANGE: a review proof starts where the last one ended (wave-26 T62; critic 2 K2-F2)"
+# ============================================================
+#
+# `reviewed: <a>..<b>`: through T61 only <b> was attested, so `<head~1>..<head>` and
+# `zzzz..<head>` were recorded as a review of everything up to the head. <a> must now be a
+# commit on <b>'s history, at or before the last review proof's head, or, before the first
+# review proof, at or before the plan's base: the Step-4 block's `base-sha:`, a real commit here.
+# The working branch is cut from that base and carries four commits, C1 to C4.
+S53_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R53="$(make_repo s53-range)"; ( cd "$R53" && git commit -q --allow-empty -m init )
+S53_B="$(git -C "$R53" rev-parse HEAD)"
+P53="$(s42_plan "$R53" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${S53_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P53" > "$P53.tmp" && mv "$P53.tmp" "$P53"
+( cd "$R53" && git add -f "$P53" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$R53/.worktrees/01-fixture" "$S53_B" ) >/dev/null 2>&1
+for s53c in 1 2 3 4; do git -C "$R53/.worktrees/01-fixture" commit -q --allow-empty -m "C$s53c" >/dev/null 2>&1; done
+S53_C1="$(git -C "$R53/.worktrees/01-fixture" rev-parse HEAD~3)"; S53_C2="$(git -C "$R53/.worktrees/01-fixture" rev-parse HEAD~2)"
+S53_C3="$(git -C "$R53/.worktrees/01-fixture" rev-parse HEAD~1)"; S53_C4="$(git -C "$R53/.worktrees/01-fixture" rev-parse HEAD)"
+S53_REC="$R53/.bionic/docs/record/wave-01-fixture"; mkdir -p "$S53_REC"
+s53_review() { printf '# review\n\nreviewed: %s..%s\n' "$1" "$2" > "$S53_REC/$3"; }  # <a> <b> <file>
+expect_regex "53a0 precondition: the working branch's head is C4, a 40-hex commit" '^[0-9a-f]{40}$' "$S53_C4"
+expect_eq "53a0b precondition: the plan's base is the branch point" "$S53_B" \
+  "$(git -C "$R53" merge-base "$S53_B" "$S53_C1")"
+s53_review "$S53_C1" "$S53_C2" first-late.md
+s53_review zzzz "$S53_C2" junk.md
+s53_review "$S53_C3" "$S53_C2" backwards.md
+s53_review "${S53_B:0:10}" "$S53_C2" first.md
+s42_snap "$R53" "$P53"
+poke "$R53" proof-add review record/wave-01-fixture/first-late.md
+s42_unchanged "53a the first review starting past the plan's base" 1 "$P53"
+expect_contains "53a2 …naming the base and the range to read" \
+  "starts at ${S53_C1:0:12}, past the plan's base ${S53_B:0:12}, so what landed between them is unread; review ${S53_B:0:12}..${S53_C2:0:12}" "$OUT"
+poke "$R53" proof-add review record/wave-01-fixture/junk.md
+s42_unchanged "53b a range whose start is no commit (the critic's zzzz)" 1 "$P53"
+expect_contains "53b2 …saying so" "starts at zzzz, which is no commit here" "$OUT"
+poke "$R53" proof-add review record/wave-01-fixture/backwards.md
+s42_unchanged "53c a range whose start is not on its end's history" 1 "$P53"
+expect_contains "53c2 …saying so" "which is not on the history of its end ${S53_C2:0:12}" "$OUT"
+poke "$R53" proof-add review record/wave-01-fixture/first.md
+expect_eq "53d the first review from the base is recorded (exit 0)" "0" "$RC"
+expect_eq "53d2 …at the end it read" "$S53_C2" "$(s46_last "$P53" review)"
+# THE NEXT REVIEW STARTS AT OR BEFORE C2. One that read only the last commit, C3..C4, leaves C3
+# unread and is refused; C2..C4 and an overlap from C1 are both recorded.
+s53_review "$S53_C3" "$S53_C4" narrow.md
+s53_review "$S53_C2" "$S53_C4" second.md
+s42_snap "$R53" "$P53"
+poke "$R53" proof-add review record/wave-01-fixture/narrow.md
+s42_unchanged "53e K2-F2 a review of <head~1>..<head> past the last review proof" 1 "$P53"
+expect_contains "53e2 …naming the proof and the range to read" \
+  "starts at ${S53_C3:0:12}, past the last review proof ${S53_C2:0:12}, so what landed between them is unread; review ${S53_C2:0:12}..${S53_C4:0:12}" "$OUT"
+poke "$R53" proof-add review record/wave-01-fixture/second.md
+expect_eq "53f the review from the last proof is recorded (exit 0)" "0" "$RC"
+expect_eq "53f2 …at its end" "$S53_C4" "$(s46_last "$P53" review)"
+s53_review "$S53_C1" "$S53_C4" overlap.md
+poke "$R53" proof-add review record/wave-01-fixture/overlap.md
+expect_eq "53g a review that starts before the last proof (an overlap) is recorded" "0" "$RC"
+POKE_BOUND="$S53_BOUND_WAS"
+
+# ============================================================
+section "Section 54 §FULL-RUN-REQUIRED: integrate waits for a full run when the change past the floor proof cannot be bounded (wave-26 T64; REQ-3 AC-3.3, AC-3.4)"
+# ============================================================
+#
+# AC-3.4: "A second full run is required when the change cannot be bounded … Fails when a planted
+# new file under a directory no suite names lands with no suite run at all." Through T63 the run
+# only ADMITTED that full run: a task tree with no suite stamp lands (by design: a file no suite
+# names has no affected suite), and integrate's `proof:floor` read took any floor proof line,
+# whatever its head, so the tick offered the merge on a change no suite had read.
+#
+# EVERYTHING HERE IS THE PRODUCT'S OWN: the working branch `wave/01-fixture` in a linked checkout
+# (as §46); its full runs are the shipped suite runner, copied byte for byte into the fixture with
+# three green suites (runner-roster's recipe), so every log is a real runner's log; each proof
+# line is written by `proof-add`; each task tree lands through the real `worktree_land`; the WAIT
+# and FILL lines are the tick's. The map (`impact-command:`) answers lib/one.sh with two suites,
+# lib/every.sh with all three, anything else with nothing. Integrate reads its kind default.
+S54_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R54="$(make_repo s54-full-run)"; new_roster "$R54"
+S54_WT="$R54/.worktrees/01-fixture"
+S54_REC="$R54/.bionic/docs/record/wave-01-fixture"
+S54_MAP="$TMPROOT/s54-map.sh"
+S54_COUNT="$TMPROOT/s54-map.count"
+S54_WTLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/worktree.sh"
+{
+  printf '#!/bin/bash\n'
+  printf 'printf "x\\n" >> "%s"\n' "$S54_COUNT"
+  printf 'for f in "$@"; do\n'
+  printf '  case "$f" in\n'
+  printf '    lib/one.sh)   for s in a b; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
+  printf '    lib/every.sh) for s in a b c; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
+  printf '  esac\n'
+  printf 'done\n'
+} > "$S54_MAP"
+mkdir -p "$R54/tests/lib" "$R54/payload/scripts/lib" "$R54/lib" "$S54_REC"
+cp "$BIONIC_SCRIPTS_DIR/tests/run.sh" "$R54/tests/run.sh"
+cp "$BIONIC_SCRIPTS_DIR/tests/lib/resolve-roots.sh" "$BIONIC_SCRIPTS_DIR/tests/lib/assert.sh" "$R54/tests/lib/"
+cp "$BIONIC_SCRIPTS_DIR"/payload/scripts/lib/*.sh "$R54/payload/scripts/lib/"
+for s54s in a b c; do
+  printf '#!/bin/bash\nset -uo pipefail\n. "$(dirname "$0")/lib/assert.sh"\nsection "%s"\nexpect_eq "%s ran" x x\nfinish\n' \
+    "$s54s" "$s54s" > "$R54/tests/$s54s.test.sh"
+done
+printf 'one\n' > "$R54/lib/one.sh"; printf 'every\n' > "$R54/lib/every.sh"
+printf '.bionic/\n.worktrees/\n' > "$R54/.gitignore"
+( cd "$R54" && git add .gitignore tests payload lib && git commit -qm base ) >/dev/null 2>&1
+S54_BASE="$(git -C "$R54" rev-parse HEAD 2>/dev/null)"
+P54="$(s42_plan "$R54" 4)"
+awk '
+  /^current: / && !wb { print; print "working-branch: wave/01-fixture"; wb = 1; next }
+  /^- T5: / { print; print "- T3: integrate at Step 8"; next }
+  /^\| id \| step \|/ { intab = 1
+    print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
+    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    print "| T1 | 4 | build | the build | implementor | — | 30 | REQ-1 | lib/one.sh | — | — | landed |  |"
+    print "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/floor.log | — | — | landed |  |"
+    print "| T2 | 6 | review | the final review | critic | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/final-review.md | — | — | landed |  |"
+    print "| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-1 | — | — | — | pending |  |"
+    next }
+  intab && /^\|/ { next }
+  { intab = 0; print }' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
+( cd "$R54" && git add -f "$P54" && git commit -qm "reads table" \
+  && git worktree add -q -b wave/01-fixture "$S54_WT" ) >/dev/null 2>&1
+printf 'impact-command: bash %s\n' "$S54_MAP" > "$R54/.bionic/config.yaml"
+# s54_full <log> -> the copied runner, run whole in the working checkout, its log in the record
+s54_full() {
+  ( cd "$S54_WT" && env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_PLACE -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
+      -u BIONIC_LOAD_NOW_FILE BIONIC_SLOTS_DIR="$TMPROOT/s54-slots" BIONIC_SLOTS_N=2 BIONIC_SLOTS_POLL=0.1 \
+      BIONIC_SLOTS_MAX_WAIT=20 BIONIC_SLOTS_NOTE_S=5 BIONIC_PRESSURE_RING="$TMPROOT/s54-ring" \
+      BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+      bash tests/run.sh ) > "$S54_REC/$1" 2>&1
+}
+# s54_land <id> <path> <content> -> a task tree on wt/01-<id> commits one file and NO suite runs
+# in it (no stamp); the real land merges it. Leaves S54_LAND.
+s54_land() {
+  local t="$R54/.worktrees/01-$1"
+  git -C "$S54_WT" worktree add -q -b "wt/01-$1" "$t" HEAD >/dev/null 2>&1
+  mkdir -p "$(dirname "$t/$2")"; printf '%s\n' "$3" > "$t/$2"
+  ( cd "$t" && git add "$2" && git commit -qm "$1: $2" ) >/dev/null 2>&1
+  S54_LAND="$( . "$S54_WTLIB" >/dev/null 2>&1; worktree_land "$t" wave/01-fixture 2>&1 )"
+}
+# s54_floor <log> -> a full run on the working head, recorded by proof-add floor
+s54_floor() { s54_full "$1"; poke "$R54" proof-add floor "record/wave-01-fixture/$1"; }
+# s54_tick -> the tick at current: 8 (proof-add runs at current: 4, where the fixture plan's gate
+# admits it; the tick reads current: 8, where integrate is no longer held for its step). The
+# digest is cleared first, so each tick prints its whole reading rather than "unchanged" (as 48).
+s54_tick() {
+  rm -f "$(digest_of "$R54")"
+  sed 's/^current: 4$/current: 8/' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
+  poke_pressure "$R54" 8192 1.0 tick
+  sed 's/^current: 8$/current: 4/' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
+}
+s54_wait() { s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 '; }
+
+S54_W0="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
+s54_floor floor-1.log
+expect_contains "54a0 precondition: the copied runner's log names the working head on a clean tree" \
+  "head=${S54_W0} dirty=0" "$(cat "$S54_REC/floor-1.log")"
+expect_contains "54a0b precondition: …and its verdict, every suite passed" "Gating: 3 passed, 0 failed" \
+  "$(cat "$S54_REC/floor-1.log")"
+expect_eq "54a0c precondition: proof-add floor recorded it (exit 0)" "0" "$RC"
+printf '# final review\n\nreviewed: %s..%s\n' "$S54_BASE" "$S54_W0" > "$S54_REC/review.md"
+poke "$R54" proof-add review record/wave-01-fixture/review.md
+expect_eq "54a0d precondition: proof-add review recorded the review (exit 0)" "0" "$RC"
+expect_eq "54a0e precondition: the plan's floor proof names the working head" "$S54_W0" "$(s46_last "$P54" floor)"
+s54_tick
+expect_contains "54a at the proved head integrate is offered" "poker: FILL T3" "$OUT"
+
+# ---------- AC-3.4, the criterion's planted defect: a new file under a directory no suite names ----------
+s54_land T7 newdir/x.sh 'new'
+expect_contains "54b0 precondition: the task tree with no suite run LANDED through the real land" \
+  "spawn-worktree: LANDED branch=wt/01-T7" "$S54_LAND"
+expect_false "54b0b precondition: …and no suite ever stamped it" \
+  test -e "$R54/.git/worktrees/01-T7/bionic-stamps"
+S54_W1="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
+s54_tick
+expect_nonempty "54b1 precondition: the tick prints a WAIT line for integrate (the extractor reads real output)" "$(s54_wait)"
+expect_eq "54b AC-3.4 integrate WAITS: the head moved past the floor proof in a way the map cannot bound, and the line names the way out" \
+  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor" \
+  "$(s54_wait)"
+expect_absent "54b2 …and the merge is not offered" "poker: FILL T3" "$OUT"
+# THE COST: one tick runs proof_state once, though its schedule and its change fingerprint each
+# ask the ready set. The map is the one process the state runs that this suite can count.
+: > "$S54_COUNT"; s54_tick; S54_TICK_MAPS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+: > "$S54_COUNT"; ( . "$S46_LIB" >/dev/null 2>&1; proof_state "$P54" "$R54" ) >/dev/null 2>&1
+S54_PS_MAPS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+expect_true "54b2c precondition: one proof_state over this change calls the map (the counter reads real calls)" \
+  test "$S54_PS_MAPS" -gt 0
+expect_eq "54b2d …and one tick calls it exactly as often: the floor state is computed once per tick" \
+  "$S54_PS_MAPS" "$S54_TICK_MAPS"
+s54_floor floor-2.log
+expect_eq "54b3 the way out: a full run on the new head, recorded with proof-add floor (exit 0)" "0" "$RC"
+expect_eq "54b4 …at that head" "$S54_W1" "$(s46_last "$P54" floor)"
+s54_tick
+expect_contains "54b5 …and the tick offers the merge" "poker: FILL T3" "$OUT"
+
+# ---------- AC-3.3 still holds: a bounded change after a full pass is proved by its suites ----------
+s54_land T8 lib/one.sh 'one, changed'
+expect_contains "54c0 precondition: the bounded change LANDED" "spawn-worktree: LANDED branch=wt/01-T8" "$S54_LAND"
+s54_tick
+expect_contains "54c AC-3.3 a change the map bounds leaves the pass standing: the merge is offered" "poker: FILL T3" "$OUT"
+expect_eq "54c2 …with no WAIT line for it" "" "$(s54_wait)"
+
+# ---------- a change the map answers with every suite ----------
+s54_land T9 lib/every.sh 'every, changed'
+expect_contains "54d0 precondition: the every-suite change LANDED" "spawn-worktree: LANDED branch=wt/01-T9" "$S54_LAND"
+s54_tick
+expect_contains "54d a change the map answers with every suite: integrate WAITS, saying so" \
+  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W1:0:12} in a way the map cannot bound (the map answers the change with every suite (3 of 3))" \
+  "$OUT"
+expect_absent "54d2 …and the merge is not offered" "poker: FILL T3" "$OUT"
+s54_floor floor-3.log
+s54_tick
+expect_contains "54d3 …until a full run on its head is recorded" "poker: FILL T3" "$OUT"
+
+# ---------- a merge of work from outside the run (a file the map bounds, so only the outside rule holds it) ----------
+S54_W3="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
+( cd "$S54_WT" && git checkout -q -b other-work && printf 'one, from outside\n' > lib/one.sh \
+  && git commit -qam 'outside work' && git checkout -q wave/01-fixture \
+  && git merge -q --no-ff -m 'merge other-work' other-work ) >/dev/null 2>&1
+expect_true "54e0 precondition: the outside commit is on the working branch" \
+  git -C "$S54_WT" merge-base --is-ancestor other-work wave/01-fixture
+s54_tick
+expect_contains "54e a merge from outside the run: integrate WAITS, saying another branch carries it" \
+  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W3:0:12} in a way the map cannot bound (1 of 2 commits since ${S54_W3:0:7} are on another branch than wave/01-fixture" \
+  "$OUT"
+expect_absent "54e2 …and the merge is not offered" "poker: FILL T3" "$OUT"
+s54_floor floor-4.log
+s54_tick
+expect_contains "54e3 …until a full run on the merge is recorded" "poker: FILL T3" "$OUT"
+POKE_BOUND="$S54_BOUND_WAS"
 
 finish

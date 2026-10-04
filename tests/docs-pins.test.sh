@@ -381,7 +381,7 @@ PIN_PROBE='`resources_probe` prints `cores=… mem_gb=… disk_free_gb=…`; `re
 # to the RUNG off a live-trimmed open count, so the pin was holding a contradiction green. A
 # pin follows the sentence it is a pin FOR: when the doctrine is corrected the needle moves
 # with it, or the test outlives the thing it was protecting.
-PIN_FILL='every task with no unmet dependency dispatches in one batch sized by the rung the tick prints — `poker: rung=<n>/<ceiling>`, the machine'"'"'s answer to how wide it will carry right now — with `writers` as the ceiling that rung is taken against and the only number the wall enforces'
+PIN_FILL='every ready task dispatches in one batch sized by the rung the tick prints — `poker: rung=<n>/<ceiling>`, the machine'"'"'s answer to how wide it will carry right now — with `writers` as the ceiling that rung is taken against and the only number the wall enforces'
 # RE-POINTED, WRITER-FACING (Step-6 readability R-8). The old needle held a sentence that
 # was correct in SKILL.md — where it addresses the DISPATCHER, and where PIN_JOBS_SKILL still
 # holds it — and had been pasted verbatim into a block every other bullet of which is
@@ -577,7 +577,7 @@ fi
 # list at S10 (S8's report: "docs-pins.test.sh:327 still pins the token in SKILL.md and is
 # S10's to retire" — NARROW is gone from hooks/session-poker.sh entirely).
 PINS_RUNGS_MISSING=""
-for token in 'EMERGENCY' 'HOLD' 'rung=<n>/<ceiling>' 'FILL <ids>' 'fill-declined: <reason>' 'Step-3 approval pending'; do
+for token in 'EMERGENCY' 'HOLD' 'rung=<n>/<ceiling>' 'FILL <ids>' 'fill-declined: <reason>' 'approval:<name>'; do
   has_pin "$DISPATCH_MD" "$token" || PINS_RUNGS_MISSING="${PINS_RUNGS_MISSING} ${token}"
 done
 if [ -z "$PINS_RUNGS_MISSING" ]; then
@@ -669,7 +669,7 @@ expect_eq "26: patrol-duties-gate.sh rebuilds the SAME prefix SKILL.md documents
 # CAPTURED, THEN MATCHED — never `_flatten | grep -q`. SKILL.md is past the 64 KiB pipe
 # buffer, so under this file's `set -o pipefail` an early-exiting `grep -q` SIGPIPEs the
 # producer and the pipeline returns 141: a real match reported as a miss, intermittently.
-TICK_RESUME_NEEDLE='delete every job whose prompt begins with the patrol marker `bionic-patrol session=`'
+TICK_RESUME_NEEDLE='delete every job whose prompt begins with `bionic-patrol session=`'
 TICK_FLAT=$(_flatten "$DISPATCH_MD")
 case "$TICK_FLAT" in
   *"$TICK_RESUME_NEEDLE"*)
@@ -851,8 +851,9 @@ PIN_TASKLIST='**The resume ritual rebuilds the task list after it binds:** run `
 # RE-POINTED at the sentence that separates the rung from the two HOLDS (Step-6 readability
 # R-5/R-6). The prompt used to say "Three rungs, in order:" and then list two, and used the
 # word `rung` for the advisory pair AND for `pressure_level`'s integer eleven words apart.
-# The pin still holds the NARROW/RELAX retirement, which is what it was for.
-PIN_RUNG='The rung is the separate thing they are often confused with: `pressure_level`'"'"'s integer, printed on every tick as `poker: rung=<n>/<ceiling>`, and it is the number a fill is sized by. NARROW and RELAX are retired — regulation is the rung'"'"'s, read by every consumer at the moment of use, never a tick'"'"'s advice.'
+# RE-POINTED (wave-26): the NARROW/RELAX retirement sentence described a mechanism long gone
+# and was cut; the pin now holds the sentence that says what sizes a fill.
+PIN_RUNG='Neither resizes a fill. The rung is `pressure_level`'"'"'s integer, printed on every tick as `poker: rung=<n>/<ceiling>`, and it is the number a fill is sized by.'
 
 if has_pin "$DISPATCH_MD" "$PIN_TASKLIST"; then
   ok "48: SKILL.md's resume ritual rebuilds the task list after it binds, verbatim"
@@ -862,9 +863,9 @@ else
 fi
 
 if has_pin "$DISPATCH_MD" "$PIN_RUNG"; then
-  ok "49: SKILL.md's Patrol prompt names the rung line and retires NARROW/RELAX, verbatim"
+  ok "49: SKILL.md's Patrol prompt names the rung line and what sizes a fill, verbatim"
 else
-  no "49: SKILL.md's Patrol prompt names the rung line and retires NARROW/RELAX, verbatim" \
+  no "49: SKILL.md's Patrol prompt names the rung line and what sizes a fill, verbatim" \
      "file: $DISPATCH_MD"
 fi
 
@@ -878,9 +879,9 @@ else
   ok "50: a doctored SKILL.md fails the task-list pin (pin discriminates)"
 fi
 
-anchor "$DISPATCH_MD" 'NARROW and RELAX are retired' 1
+anchor "$DISPATCH_MD" 'it is the number a fill is sized by' 1
 DOCTORED_RUNG="$TMP/skill-rung-mutated.md"
-sed 's/NARROW and RELAX are retired/NARROW and RELAX still apply/' "$DISPATCH_MD" > "$DOCTORED_RUNG"
+sed 's/it is the number a fill is sized by/it is a number a fill may ignore/' "$DISPATCH_MD" > "$DOCTORED_RUNG"
 if has_pin "$DOCTORED_RUNG" "$PIN_RUNG"; then
   no "51: a doctored SKILL.md fails the rung pin (pin discriminates)" \
      "the pin matched a doctored copy"
@@ -1055,36 +1056,24 @@ else
   ok "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)"
 fi
 
-section "Section 8: SKILL.md carries its OWN copy of the rung-pointer sentence (AC-18)"
+section "Section 8: dispatch.md no longer points a writer at the rung (the writer does not set its width)"
 #
-# THE GAP THE READBACK NAMED. Assertions 11/12 pin the rendered role files against
-# `PIN_JOBS`, but nothing here had ever checked SKILL.md's own restatement of the same
-# sentence in its "Fill the budget" paragraph — so a hand-edit to SKILL.md's copy could
-# drift from the briefs' copy with no suite ever noticing.
-#
-# THE ONE REAL DIFFERENCE: SKILL.md's copy is prose inside a running paragraph, never
-# bolded, where `agents-src/blocks/survival.md`'s copy leads a bulleted brief and IS bolded
-# (`**Each brief…**`). `PIN_JOBS` encodes that bold form, so it is the wrong needle for
-# SKILL.md; this pins the same words in the form SKILL.md actually carries them.
-PIN_JOBS_SKILL='Each brief in the batch points the writer at the rung: `take your test width from pressure_level at suite start; the ceiling is this header'"'"'s test_jobs`.'
-
-if has_pin "$DISPATCH_MD" "$PIN_JOBS_SKILL"; then
-  ok "53: SKILL.md carries its own copy of the rung-pointer sentence (AC-18)"
-else
-  no "53: SKILL.md carries its own copy of the rung-pointer sentence (AC-18)" "file: $DISPATCH_MD"
-fi
-
-# Anti-vacuity, same 47-style shape: a doctored SKILL.md must fail the pin above.
-anchor "$DISPATCH_MD" 'Each brief in the batch points the writer at the rung' 1
+# RETIRED (wave-26). This section pinned dispatch.md's sentence telling every brief to say
+# "take your test width from pressure_level at suite start", while the dispatch terms
+# (PIN_JOBS, pins 11/12) tell the writer the opposite: tests/run.sh reads its own width and
+# `pressure_level` is not a command. The sentence was cut; the pin now holds its absence,
+# beside the positive it contradicted, and a doctored copy proves the absence arm can fail.
+PIN_JOBS_SKILL='take your test width from pressure_level at suite start'
+expect_true "53 precondition: the dispatch terms still tell the writer it does not set its width" \
+  has_pin "$SURVIVAL_SHIPPED" "$PIN_JOBS"
+expect_false "53: dispatch.md no longer tells a brief to point the writer at the rung" \
+  has_pin "$DISPATCH_MD" "$PIN_JOBS_SKILL"
+anchor "$DISPATCH_MD" '**Fill the budget.**' 1
 DOCTORED_SKILL_JOBS="$TMP/skill-jobs-mutated.md"
-sed 's/Each brief in the batch points the writer at the rung/Each brief in the batch reads the frozen literal/' \
+sed 's/\*\*Fill the budget\.\*\*/**Fill the budget.** Each brief in the batch points the writer at the rung: `take your test width from pressure_level at suite start`./' \
   "$DISPATCH_MD" > "$DOCTORED_SKILL_JOBS"
-if has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"; then
-  no "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)" \
-     "the pin matched a copy that says the opposite"
-else
-  ok "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)"
-fi
+expect_true "54: a dispatch.md that brings the sentence back is caught (pin discriminates)" \
+  has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"
 
 
 section "Section 9: the tick interval, in every place it is written down (D-3)"
@@ -1163,7 +1152,7 @@ PIN_S13_DERIVE='the impact command named in `.bionic/config.yaml` turns them int
 PIN_S13_DECLARE='Where no impact command is configured, name the closed set yourself under `Suites:`'
 PIN_S13_WAIVER='a brief that runs no suite at all waives with `Suites: none`'
 PIN_S13_NEITHER='A brief carrying neither label refuses at dispatch.'
-PIN_S13_REGRESSION='a second one refuses unless the plan'"'"'s `## SDLC State` carries a `regression-cause:` line for it'
+PIN_S13_REGRESSION='The dispatch wall refuses any other full run and names the suites that prove the change.'
 
 for _p in FILES DERIVE DECLARE WAIVER NEITHER REGRESSION; do
   eval "_pv=\$PIN_S13_$_p"
@@ -1395,8 +1384,10 @@ expect_contains "68e: …it points at the dispatch brief instead" \
 same_everywhere 69 "the critic prompt template is one text in the block, the skill file and agents/critic.md" \
   "${BLOCK_DIR}/critic-template.md" "CRITIC-TEMPLATE" "$STEP6_MD" "${REPO}/agents/critic.md"
 
-same_everywhere 70 "the duplication axis is one text in the block, the skill file and agents/critic.md" \
-  "${BLOCK_DIR}/duplication-axis.md" "DUPLICATION-AXIS" "$STEP6_MD" "${REPO}/agents/critic.md"
+# RE-POINTED (wave-26 T1, AC-1.3): the axis is the Stance-1 reviewer's, so agents/critic.md
+# stopped injecting it; §W26-3 pins the absence against a mutant render.
+same_everywhere 70 "the duplication axis is one text in the block and the skill file" \
+  "${BLOCK_DIR}/duplication-axis.md" "DUPLICATION-AXIS" "$STEP6_MD"
 
 same_everywhere 71 "the terminal-disposition rule is one text in the block and the skill file" \
   "${BLOCK_DIR}/terminal-disposition.md" "TERMINAL-DISPOSITION" "$STEP9_MD"
@@ -1453,18 +1444,10 @@ expect_absent "75b: …and names the deleted manifest nowhere" \
 # byte-for-byte, the same `has_pin` idiom §1-§5 use.
 section "Section 6: K3 — premise text (Context/Problem first, Mechanisms inherited)"
 
-# AC-K3.1: Context and Problem is the FIRST thing the frame approves — ahead of
-# the orchestrator's own design intuition and every decision below it. Pinned as
-# one substring spanning the frame's opening clause straight into the
-# Context-and-Problem sentence, so the pin itself IS an adjacency (hence order)
-# check: it can only match a copy where nothing has been inserted, or swapped
-# in, between "before any question." and "Its first approval is
-# **Context and Problem". RE-ANCHORED (epic-23 wave-13 T2, AC-8.1/AC-8.2): the
-# heading lost its ", for a stranger" clause — the explanation itself
-# ("written as if for a reader who has never opened this repo") stays, just not
-# folded into the bold span — and "ratification" became "approval" (the T2
-# ratif→approv sweep).
-PIN_K3_FIRST='**Open with the frame**, before any question. Its first approval is **Context and Problem**'
+# AC-K3.1, REWRITTEN (wave-26 T19, AC-2.1): the frame used to open by approving Context and
+# Problem first. Step 1 already approves the problem and its context, so the frame now opens by
+# saying so and asks nothing again; §W26-7e pins the old approval's absence beside a mutation.
+PIN_K3_FIRST='**Open with the frame**, before any question. Step 1 approved the problem and its context; the frame does not ask again.'
 
 # AC-K3.2, half 1: the frame carries a "Mechanisms inherited" item, each line
 # marked kept or questioned.
@@ -1475,9 +1458,9 @@ PIN_K3_MECH='**Mechanisms inherited**, one line per substrate or mechanism the d
 PIN_K3_STRATEGIC='placing a test cohort in a tier, a job on a runtime surface, or a workload on hardware is **strategic by rule**'
 
 if has_pin "$STEP2_MD" "$PIN_K3_FIRST"; then
-  ok "76: SKILL.md's Step-2 frame approves Context and Problem first"
+  ok "76: steps/2.md's frame opens without re-approving the problem Step 1 approved"
 else
-  no "76: SKILL.md's Step-2 frame approves Context and Problem first" "file: $STEP2_MD"
+  no "76: steps/2.md's frame opens without re-approving the problem Step 1 approved" "file: $STEP2_MD"
 fi
 
 if has_pin "$STEP2_MD" "$PIN_K3_MECH"; then
@@ -1494,27 +1477,8 @@ fi
 
 # --- Anti-vacuity: the same pins must discriminate a mutated copy ---
 
-# 79: ORDER REVERSED (AC-K3.1's own fails-when). The doctored copy swaps the
-# Context-and-Problem sentence and the Design-intuition sentence in place — the
-# literal shape of "the order is reversed" — rather than deleting anything, so a
-# pin that merely checked PRESENCE of both phrases would stay green through it.
-anchor -E "$STEP2_MD" 'Its first approval is \*\*Context and Problem\*\*' 1
-DOCTORED_K3_ORDER="$TMP/skill-k3-order-reversed.md"
-sed -E '
-s/(\*\*Open with the frame\*\*, before any question\. )(Its first approval is \*\*Context and Problem\*\*: the problem and the goal, written as if for a reader who has never opened this repo; this comes before your own design intuition and before every decision in the frame below it — a change not yet explainable to someone who was not there is not yet understood\. )(Then your own \*\*Design intuition\*\*, the shape you expect to be right, stated so the user can push on it; )/\1\3\2/
-' "$STEP2_MD" > "$DOCTORED_K3_ORDER"
-if has_pin "$DOCTORED_K3_ORDER" "$PIN_K3_FIRST"; then
-  no "79: order-reversed SKILL.md fails the first-approval pin (pin discriminates)" \
-     "the mutated copy still matched — the pin does not see the reorder"
-else
-  ok "79: order-reversed SKILL.md fails the first-approval pin (pin discriminates)"
-fi
-# Control: prove the doctored copy really moved Design intuition ahead of
-# Context and Problem, rather than merely mangling the text into something that
-# happens to fail the pin for an unrelated reason.
-expect_contains "79b: …and the doctored copy really does read Design intuition, then Context and Problem" \
-  'Then your own **Design intuition**, the shape you expect to be right, stated so the user can push on it; Its first approval is **Context and Problem' \
-  "$(cat "$DOCTORED_K3_ORDER")"
+# 79 and 79b (the Context-and-Problem order reversal) were deleted with the text they
+# mutated (wave-26 T19); W26-7em is the mutation arm for its return.
 
 # 80: Mechanisms inherited ABSENT (AC-K3.2's fails-when). The strategic-by-rule
 # clause stays untouched in this copy — proof the mutation removed only the
@@ -1728,12 +1692,23 @@ else
   no "91b: …and a requirement row names its provenance and its criteria count" "card body: $CARD1"
 fi
 
-if has_all "$CARD2" "Decisions" "serves" "ADR" "Ownership" "Eval design" "Artifacts"; then
-  ok "92a: the Step-2 card carries Decisions (serves/ADR), Ownership, Eval design, Artifacts"
+# 92a REWRITTEN (wave-26 T19, D13): the card the design is approved on carries a prose head
+# and names every artifact by path; Ownership left the card for the `show ownership` sub-view.
+if has_all "$CARD2" "Goal" "Approach" "Worth your eye" "Decisions" "serves" "ADR" "Eval design" \
+                    "Artifacts" "ledger" "reqs" "show ownership"; then
+  ok "92a: the Step-2 card carries Goal, Approach, Worth your eye, Decisions (serves/ADR), Eval design, Artifacts (with the ledger and requirements) and the ownership sub-view"
 else
-  no "92a: the Step-2 card carries Decisions (serves/ADR), Ownership, Eval design, Artifacts" \
+  no "92a: the Step-2 card carries Goal, Approach, Worth your eye, Decisions (serves/ADR), Eval design, Artifacts (with the ledger and requirements) and the ownership sub-view" \
      "card body: $CARD2"
 fi
+expect_absent "92a1: …and no Ownership block of its own (it is the sub-view)" \
+  "$(printf '\n  Ownership\n')" "$(printf '\n%s\n' "$CARD2")"
+anchor -E "$STEP2_MD" '^  Eval design' 1
+DOCTORED_STEP2_OWN="$TMP/step2-ownership-back.md"
+awk '/^  Eval design/ { print "  Ownership"; print "    <concept>    owner <module>"; print "" } { print }' \
+  "$STEP2_MD" > "$DOCTORED_STEP2_OWN"
+expect_contains "92a1m: a Step-2 card with its Ownership block put back is caught by 92a1's extractor" \
+  "$(printf '\n  Ownership\n')" "$(printf '\n%s\n' "$(card_span "$DOCTORED_STEP2_OWN" 'Step 2 · Design')")"
 
 # 92a2: AC-11.2's sibling for Step 2 (T8's carry-over, wave-19 REQ-11). `_card_step2`
 # (payload/scripts/card.sh) never prints an `Open at approval` section — the scaffold
@@ -1771,18 +1746,22 @@ else
      "card body: $CARD2"
 fi
 
-if has_all "$CARD3" "Problem" "Branches" "Tasks" "kind" "depends" "agent" \
-                    "Eval design" "Verification" "Artifacts"; then
-  ok "93a: the Step-3 card carries Problem, Branches, Tasks (kind/depends/agent), Eval design, Verification, Artifacts"
+if has_all "$CARD3" "Branches" "Tasks" "kind" "depends" "agent" "serves" \
+                    "Chain and width" "Verification" "Artifacts"; then
+  ok "93a: the Step-3 card carries Branches, Tasks (kind/depends/agent, each with what it serves), Chain and width, Verification, Artifacts"
 else
-  no "93a: the Step-3 card carries Problem, Branches, Tasks (kind/depends/agent), Eval design, Verification, Artifacts" \
+  no "93a: the Step-3 card carries Branches, Tasks (kind/depends/agent, each with what it serves), Chain and width, Verification, Artifacts" \
      "card body: $CARD3"
 fi
-if has_all "$CARD3" "first batch"; then
-  ok "93b: …and the parallel width names its first batch"
+if has_all "$CARD3" "longest chain" " min" "peak width" " writers" "    spec  "; then
+  ok "93b: …the longest chain with its minutes, the peak width against the writers, and the design's path"
 else
-  no "93b: …and the parallel width names its first batch" "card body: $CARD3"
+  no "93b: …the longest chain with its minutes, the peak width against the writers, and the design's path" "card body: $CARD3"
 fi
+# Step 3 approves the plan and the matrix only (wave-26 D12): the purpose and the eval counts
+# were approved with the design, so the card the two rows above read repeats neither.
+expect_absent "93c: …and no Problem block repeats the purpose" "  Problem" "$CARD3"
+expect_absent "93d: …and no eval-count line repeats the design's counts" "criteria ·" "$CARD3"
 
 # --- both branch lines, on every card --------------------------------------
 #
@@ -2054,15 +2033,19 @@ fi
 # OWN output, per `_card_batch_widths` — went unseen on both sides. `pw` counts those
 # lines (marker only, not the numbers, which are plan-specific) the same way `art` counts
 # artifact labels, so a side that drops the line goes red against the side that keeps it.
-card3_shape() {  # <card text on stdin> -> each section heading's first word, artifact labels, batch-line count
-  awk '/^  [A-Z]/ { print $1; art = ($1 == "Artifacts"); pw = ($1 == "Parallel"); next }
+# wave-26 D12: the width block is `Chain and width`, and its chain and peak lines are read the
+# way the batch lines are, so a side that drops one goes red against the side that keeps it.
+card3_shape() {  # <card text on stdin> -> each section heading's first word, artifact labels, width lines
+  awk '/^  [A-Z]/ { print $1; art = ($1 == "Artifacts"); pw = ($1 == "Chain"); next }
        art && /^    [a-z]/ { print "artifact:" $1 }
+       pw && /^    (longest chain|peak width)  / { print "width:" $1 }
        pw && /^    batch / { print "batch" }'
 }
 SHAPE_PLAN="$TMP/wave-97-shape.plan.md"
 printf '%s\n' '---' 'scale: wave' 'walk: required' 'rigor: audited' \
   'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' \
-  'working-branch: wave/97-shape' 'integration-branch: main' 'base-sha: abc1234' '---' '' \
+  'working-branch: wave/97-shape' 'integration-branch: main' 'base-sha: abc1234' \
+  'spec: specs/epic-97/wave-97-shape.spec.md' '---' '' \
   '# fixture wave 97 · plan' '' '## Goal' '' 'Render one card to compare against the scaffold.' '' \
   '## SDLC State' '' 'current: 3' '' '## Tasks' '' \
   '| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |' \
@@ -2101,6 +2084,17 @@ if [ "$(card_span "$DOCTORED_NO_BATCH" 'Step 3 · Plan' | card3_shape)" = "$SHAP
   no "107g: a scaffold missing the renderer's batch line still matches (pin is vacuous)"
 else
   ok "107g: a scaffold missing the renderer's batch line fails 107e (pin discriminates)"
+fi
+
+# 107h: Anti-vacuity — wave-26 D12. The chain line is the card's own output, like the batch
+# line; a scaffold that drops it must fail 107e through the `width:` arm.
+anchor "$STEP3_MD" '    longest chain  ' 1
+DOCTORED_NO_CHAIN="$TMP/step3-no-chain-line.md"
+awk '/^    longest chain  / { next } { print }' "$STEP3_MD" > "$DOCTORED_NO_CHAIN"
+if [ "$(card_span "$DOCTORED_NO_CHAIN" 'Step 3 · Plan' | card3_shape)" = "$SHAPE_RENDERED" ]; then
+  no "107h: a scaffold missing the renderer's chain line still matches (pin is vacuous)"
+else
+  ok "107h: a scaffold missing the renderer's chain line fails 107e (pin discriminates)"
 fi
 
 section "Section 16: K5.4 — the goal-paragraph rule text (design ledger K5.4, plan task 21)"
@@ -2375,24 +2369,22 @@ pin_writer_rule() {  # <n> <label> <pin text>
   fi
 }
 
-pin_writer_rule "116a" "AC-1c.4 §5 #1 — suites run foreground with the tool timeout at 600000 ms" \
-  'Suites run FOREGROUND with the Bash tool `timeout` parameter set to 600000 ms, never `run_in_background`, never a timeout binary.'
+# 116a retired (wave-26 T1, AC-1.5): the foreground timeout is stated once, in the dispatch
+# terms, by the harness maximum the wall enforces; §W26-5 pins that no role file restates it.
 pin_writer_rule "116b" "AC-1c.4 §5 #2 — only the suites the brief names" \
   "Run only the suites the brief's \`Suites:\` names."
 pin_writer_rule "116c" "AC-1c.4 §5 #8 — the cd guard covers the whole command" \
   '`cd <tree> || exit 1` guards the WHOLE command'
 
-# #7 is a CORRECTION, so it takes both halves: the new rule present, and the sentence that
-# taught the opposite gone. An absence arm alone would pass on a file that lost the whole
-# Logging section, which is why the positive half is asserted over the same file first.
-expect_contains "116d: AC-1c.4 §5 #7 — agents/test-runner.md captures exit codes with the rc= form" \
-  'Capture exit codes as `{ cmd; echo "rc=$?"; } > log 2>&1`, never PIPESTATUS' \
+# #7 is a CORRECTION, so it takes both halves. RE-POINTED (wave-26 T1, AC-1.5): the rc= recipe
+# was a second capture recipe beside the dispatch terms' `2>&1 | tee`, the one the wall's own
+# remedy prints; the role files now carry neither, and §W26-5 pins the one kept. The positive
+# half is the Logging section the recipe sat in, asserted over the same file first.
+expect_contains "116d: AC-1c.4 §5 #7 — agents/test-runner.md keeps its Logging section" \
+  'Log path: `.bionic/tmp/test-runner-<suite>-<timestamp>.log`' \
   "$(cat "${REPO}/agents/test-runner.md")"
 expect_absent "116e: …and no longer INSTRUCTS the shell-specific PIPESTATUS array (the contradiction is gone)" \
-  'the per-stage array is shell-specific — `${PIPESTATUS[0]}` in **bash** (zero-indexed)' \
-  "$(cat "${REPO}/agents/test-runner.md")"
-expect_contains "116f: …and the implementors carry the same rc= rule" \
-  'Capture exit codes as' "$(cat "${REPO}/agents/senior-implementor.md")"
+  'PIPESTATUS' "$(cat "${REPO}/agents/test-runner.md")"
 section "Section 18: REQ-1b — the split skill's byte caps and the core's step index"
 #
 # WHAT THIS SECTION OWNS. wave-11-lean-spine row 1b split the governing skill into a CORE
@@ -3303,18 +3295,8 @@ else
   no "149b: AC-9.1 — steps/2.md's decision row fits within 100 columns with the sample values" "width=$(card_cols "$DEC_ROW_LINE")"
 fi
 
-# 150: Step-2 Ownership row — its labels are literals inside the format, so the header is
-# the bare section name and the row is the whole check.
-OWN_ROW_LINE="$(grep -m1 '^    <concept>' "$STEP2_MD" 2>/dev/null)"
-OWN_RENDERED="$(printf '%s\t%s\t%s\t%s\n' '<concept>' '<module>' '<where it renders>' '<suite>' \
-  | card_rows ownership)"
-expect_eq "150: AC-9.1 — steps/2.md's Ownership header and row are exactly what card.sh renders" \
-  "$(printf '%s\n' '  Ownership' "$OWN_ROW_LINE")" "$OWN_RENDERED"
-if [ "$(card_cols "$OWN_ROW_LINE")" -le 100 ]; then
-  ok "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values ($(card_cols "$OWN_ROW_LINE"))"
-else
-  no "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values" "width=$(card_cols "$OWN_ROW_LINE")"
-fi
+# 150 and 150b (the Step-2 Ownership row against card.sh) were deleted with the row (wave-26
+# T19): Ownership is the `show ownership` sub-view, and tests/card.test.sh holds its format.
 
 # 151: Step-2 Eval-design header, both REQ rows and the total row — five RIGHT-aligned
 # count columns, which is the one kind whose fields are not all left-padded.
@@ -3341,8 +3323,8 @@ fi
 TASK_HEADER_LINE="$(grep -m1 '^  Tasks' "$STEP3_MD" 2>/dev/null)"
 TASK_ROW_LINES=()
 while IFS= read -r _line; do TASK_ROW_LINES+=("$_line"); done < <(grep '^    <n>' "$STEP3_MD" 2>/dev/null)
-TASK_RENDERED="$( { printf '%s\t%s\tbuild\t—\tsenior-implementor\n' '<n>' '<the task in one line>'
-                    printf '%s\t%s\ttest\t<n>\timplementor\n' '<n>' '<the task in one line>'; } | card_rows task)"
+TASK_RENDERED="$( { printf '%s\t%s\tbuild\t—\tsenior-implementor\n' '<n>' '<the task> · serves <REQ-n>'
+                    printf '%s\t%s\ttest\t<n>\timplementor\n' '<n>' '<the task> · serves <REQ-n>'; } | card_rows task)"
 expect_eq "152: AC-9.1/AC-9.4 — steps/3.md's Tasks header and both rows are exactly what card.sh renders" \
   "$(printf '%s\n' "$TASK_HEADER_LINE" "${TASK_ROW_LINES[0]:-}" "${TASK_ROW_LINES[1]:-}")" "$TASK_RENDERED"
 if [ "$(card_cols "${TASK_ROW_LINES[0]:-}")" -le 100 ] && [ "$(card_cols "${TASK_ROW_LINES[1]:-}")" -le 100 ]; then
@@ -3841,6 +3823,24 @@ case "$T35_SECTION" in
        "section: ${T35_SECTION:-<absent>}" ;;
 esac
 
+# The optional `reads` column (wave-26 T2): each wall's Fix line says so after the twelve, and
+# the section above names it, so a table that carries it is not read as the wrong header.
+for _t35_src in "payload/scripts/lib/walls.sh" "hooks/canonical-sdlc-governing-skill.sh"; do
+  if /usr/bin/grep -F 'base | status. A reads column is optional and may sit anywhere in the header.' \
+       "${REPO}/${_t35_src}" >/dev/null 2>&1; then
+    ok "189b: ${_t35_src}'s Fix line says the reads column is optional"
+  else
+    no "189b: ${_t35_src}'s Fix line says the reads column is optional" "absent from ${_t35_src}"
+  fi
+done
+case "$T35_SECTION" in
+  *'the optional `reads` (below)'*)
+    ok "189c: …and operational-rules.md's sentence names the optional reads column beside the twelve" ;;
+  *)
+    no "189c: …and operational-rules.md's sentence names the optional reads column beside the twelve" \
+       "section: ${T35_SECTION:-<absent>}" ;;
+esac
+
 # Anti-vacuity: the pre-1.8.4 header (ten-plus-one, `status` before `worktree`, no `base`)
 # must read back UNEQUAL against the same derived expectation, and must fail 188's test —
 # proving 187/188 discriminate rather than passing on any pipe-delimited line.
@@ -4082,7 +4082,7 @@ rh_pin "RH3b: stop.sh's task-list comment points at env.sh, with no memory/ cita
 ub_span "$RH_UNITS_LIB" 'THE PROJECTOR UNDER `task-add`' '1\. THE ROW' > "$TMP/rh-units-raw.txt"
 expect_true "RH4-0: units.sh's projector span was found (non-empty)" test -s "$TMP/rh-units-raw.txt"
 rh_flat "$TMP/rh-units-raw.txt" > "$TMP/rh-units.txt"
-rh_pin "RH4: units.sh's projector comment carries its reason, with no retired note citation" "$TMP/rh-units.txt" "Both refuse the WRITER" "memory ${RH_N}ote"
+rh_pin "RH4: units.sh's projector comment carries its reason, with no retired note citation" "$TMP/rh-units.txt" "it refuses the WRITER, not the author of the row" "memory ${RH_N}ote"
 
 # RH5 — operational-rules.md doctrine lines.
 rh_flat "$RH_OPS" > "$TMP/rh-ops.txt"
@@ -4105,8 +4105,9 @@ section "Section D2: wave-23 T18 — every landed candidate rule is in its owner
 # WHAT THIS OWNS. T8 landed the D2 candidate rules in their owner files: the repo CLAUDE.md, the
 # four path-scoped rule files, the orchestrator-dispatch block and the test-runner template. T3's
 # section RH pins the re-homed reasons; nothing pinned the landings themselves, so an edit that
-# dropped a rule would pass. One pin per landed row (34) plus the card-format rule in
-# plan-authoring.md. The report-contract row was declined (A-T3.1) and has no pin.
+# dropped a rule would pass. One pin per landed row plus the card-format rule in
+# plan-authoring.md. The report-contract row was declined (A-T3.1) and has no pin; the hand
+# dry-run row was cut by wave-26 T1 (the advance verb dry-commits), and §W26-6 pins its absence.
 #
 # Each pin asserts the row's key phrase is in its owner file, and for the block and the template
 # also in the rendered surface a session loads (dispatch.md; agents/test-runner.md). Each is proven
@@ -4138,7 +4139,6 @@ CLAUDE.md	becomes a fixit in a fresh canonical-sdlc run
 .claude/rules/agent-discipline.md	Steps 0-3 need a human present
 .claude/rules/agent-discipline.md	Run `git log -1` before every `git commit --amend`
 .claude/rules/plan-authoring.md	Provenance is one short clause
-.claude/rules/plan-authoring.md	pipe a synthetic commit payload through `bash-walls.sh`
 .claude/rules/plan-authoring.md	A tune row's numeric target is a round number, not a gate
 .claude/rules/plan-authoring.md	the named size reduction is the acceptance criterion
 .claude/rules/plan-authoring.md	check what it actually carries
@@ -4146,7 +4146,7 @@ agents-src/blocks/orchestrator-dispatch.md	stop-orders.sh stopped <name>` closes
 agents-src/blocks/orchestrator-dispatch.md	Any TaskUpdate on a task a named agent owns resumes that agent
 agents-src/blocks/orchestrator-dispatch.md	read only when that call returns
 agents-src/blocks/orchestrator-dispatch.md	Split a task that spans many files across writers at dispatch time
-agents-src/blocks/orchestrator-dispatch.md	The six-axis review can run during Step 5 on the fixed diff
+agents-src/blocks/orchestrator-dispatch.md	A final review with a settled `head` read covers cross-task problems
 agents-src/blocks/orchestrator-dispatch.md	On a model-tier outage, hold
 agents-src/templates/test-runner.md.tmpl	A revert-and-watch stubs the production file only
 .claude/rules/plan-authoring.md	The Step-2 card parses decisions only as
@@ -4167,7 +4167,8 @@ while IFS=$'\t' read -r _d2_file _d2_phrase; do
     rh_pin "D2.${d2_i}r: rendered ${_d2_rend} carries \"${_d2_phrase}\"" "$TMP/d2-rend-${d2_i}.txt" "$_d2_phrase" ""
   fi
 done < "$D2_ROWS_FILE"
-expect_true "D2-count: 34 landed rows plus the card-format rule were read (35)" test "$d2_i" -eq 35
+expect_true "D2-count: every row of the table was read ($d2_i)" \
+  test "$d2_i" -gt 0 -a "$d2_i" -eq "$(grep -c . "$D2_ROWS_FILE")"
 
 section "Section HOLD: wave-24 T7 — the stand-down's standing answer is named where the duty is (REQ-4, AC-4.12; D1, D5)"
 #
@@ -4221,7 +4222,7 @@ verb_pin() {  # <id> <needle> <file>…
     else no "$id: ${f#"$REPO"/} names $needle" "file: $f"; fi
   done
 }
-verb_pin VERB-a '`task-set <id> status=active`' "$DISPATCH_MD" "$VERB_BLOCK"
+verb_pin VERB-a '`task-set`' "$DISPATCH_MD" "$VERB_BLOCK"
 verb_pin VERB-b '`step-line`' "$DISPATCH_MD" "$VERB_BLOCK"
 verb_pin VERB-c '`current <N>`' "$DISPATCH_MD" "$VERB_BLOCK"
 verb_pin VERB-d '`ledger-add`' "$DISPATCH_MD" "$VERB_BLOCK"
@@ -4386,5 +4387,483 @@ expect_contains "PB-d2 precondition: the doctored docs still have the section" \
   '## Permission answers' "$PB_OPS_DOCTORED"
 expect_absent "PB-d2: docs with the off switch removed fail PB-d (the pin discriminates)" \
   'permission-answers: false' "$PB_OPS_DOCTORED"
+
+
+section "Section W26: wave-26 T1 — nothing is ordered twice (REQ-1, AC-1.1, 1.2, 1.3, 1.5, 1.6, AC-1.4 doctrine half; D15)"
+#
+# WHAT THIS OWNS. Wave-26 removes work the doctrine ordered twice: a second auditor pass, six
+# reviewers where one does, a critic re-doing the reviewer's and the auditor's checks, duties
+# stated twice with different values, and steps the tool already performs. Each arm asserts an
+# absence over the shipped doctrine, beside a positive on the same extractor and file, and a
+# doctored copy (or, for W26-3, a mutant render) proves the arm goes red when the cut text is
+# back. HERMETIC: reads the committed finals by path; doctored copies live under $TMP.
+W26_DOCTRINE="$(ls "${SKILL_DIR}"/SKILL.md "${SKILL_DIR}"/dispatch.md "${SKILL_DIR}"/operational-rules.md \
+  "${SKILL_DIR}"/steps/*.md "${REPO}"/agents/*.md "${REPO}"/payload/context/survival.md 2>/dev/null)"
+W26_ROLES="$(ls "${REPO}"/agents/*.md 2>/dev/null)"
+# w26_hits <fixed string> <file>… -> the files whose flattened text carries it, one per line.
+w26_hits() {
+  local needle="$1" f; shift
+  for f in "$@"; do has_pin "$f" "$needle" && printf '%s\n' "${f#"$REPO"/}"; done
+}
+# w26_doctor <file> <text> -> a copy of the file with the text appended, its path on stdout.
+w26_doctor() {
+  local out; out="$TMP/w26-$(printf '%s' "$1$2" | cksum | tr -cd '0-9').md"
+  { cat "$1"; printf '\n%s\n' "$2"; } > "$out" 2>/dev/null
+  printf '%s' "$out"
+}
+
+# W26-1 (AC-1.1): no shipped doctrine file names a second auditor pass.
+# shellcheck disable=SC2086  # word-split on purpose: one path per line, none with spaces
+expect_nonempty "W26-1 precondition: the extractor finds a phrase every doctrine set carries (the auditor)" \
+  "$(w26_hits 'auditor' $W26_DOCTRINE)"
+# shellcheck disable=SC2086
+expect_eq "W26-1: AC-1.1 — no shipped doctrine file names a second pass" "" \
+  "$(w26_hits 'second pass' $W26_DOCTRINE)"
+W26_D1="$(w26_doctor "$DISPATCH_MD" "Only the auditor's second pass waits for the floor.")"
+expect_nonempty "W26-1m: a dispatch.md that keeps \"the auditor's second pass\" is caught" \
+  "$(w26_hits 'second pass' "$W26_D1")"
+
+# W26-2 (AC-1.2): one reviewer, and the two flags that add another.
+expect_nonempty "W26-2: AC-1.2 — steps/6.md names one reviewer for the six axes" \
+  "$(w26_hits 'One reviewer takes all six axes' "$STEP6_MD")"
+expect_nonempty "W26-2b: …and the security or performance flag that adds one" \
+  "$(w26_hits 'A security or performance flag adds one reviewer' "$STEP6_MD")"
+expect_eq "W26-2c: …and no longer runs the axes in parallel" "" \
+  "$(w26_hits 'Run the axes in parallel' "$STEP6_MD")"
+W26_D2="$(w26_doctor "$STEP6_MD" 'Run the axes in parallel.')"
+expect_nonempty "W26-2m: a steps/6.md that keeps \"Run the axes in parallel\" is caught" \
+  "$(w26_hits 'Run the axes in parallel' "$W26_D2")"
+
+# W26-3 (AC-1.3): the critic carries neither the reviewer's duplication axis nor the auditor's
+# evidence check. The mutant is a real render: a clone whose critic template injects the block
+# again, so the arm proves it reads what the renderer writes, not a hand-made copy.
+W26_CRITIC="${REPO}/agents/critic.md"
+expect_nonempty "W26-3 precondition: agents/critic.md carries its prompt template" \
+  "$(w26_hits 'CRITIC-TEMPLATE-BEGIN' "$W26_CRITIC")"
+expect_eq "W26-3: AC-1.3 — agents/critic.md carries no duplication axis" "" \
+  "$(w26_hits 'Duplication axis' "$W26_CRITIC")"
+expect_eq "W26-3b: …and no fabricated-evidence check" "" \
+  "$(w26_hits 'fabricated evidence' "$W26_CRITIC")"
+W26_CLONE="$TMP/w26-clone"
+if clone_render_tree "$W26_CLONE" \
+   && printf '\n<!-- INJECT: duplication-axis -->\n' >> "$W26_CLONE/agents-src/templates/critic.md.tmpl" \
+   && bash "$W26_CLONE/agents-src/render.sh" >/dev/null 2>&1; then
+  expect_nonempty "W26-3m precondition: the mutant render wrote a critic role file" \
+    "$(w26_hits 'CRITIC-TEMPLATE-BEGIN' "$W26_CLONE/agents/critic.md")"
+  expect_nonempty "W26-3m: a critic template that still injects the duplication block is caught" \
+    "$(w26_hits 'Duplication axis' "$W26_CLONE/agents/critic.md")"
+else
+  no "W26-3m: a critic template that still injects the duplication block is caught" \
+     "the mutant clone did not render: $W26_CLONE"
+fi
+
+# W26-5 (AC-1.5): one suite timeout and one capture recipe; the closing-message and
+# foreground duties once per role file. The timeout and the capture recipe the tooling
+# enforces live in the dispatch terms (the wall raises a smaller timeout to
+# BASH_MAX_TIMEOUT_MS; its refusal's remedy prints `2>&1 | tee`), so no role file states its own.
+W26_SURV="${REPO}/payload/context/survival.md"
+expect_nonempty "W26-5 precondition: the dispatch terms state the timeout by the harness maximum" \
+  "$(w26_hits 'BASH_MAX_TIMEOUT_MS' "$W26_SURV")"
+# RE-POINTED (wave-26 T20, review-2 F1): the kept recipe writes the exit code into the log,
+# because `tee` alone leaves it only in the call's status and PIPESTATUS is empty under zsh.
+# The orchestrator gets no dispatch terms, so dispatch.md carries the same line.
+# RE-SHAPED (wave-26 T58): `land` reads the stamp the booking shim writes from the exit code of
+# the WHOLE command, and a recipe whose last segment is the `echo` always exits 0 — a red suite
+# captured as taught was stamped green. The recipe now ends `exit $rc`.
+W26_RECIPE='2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc'
+for _w26_f in "$W26_SURV" "$DISPATCH_MD"; do
+  expect_nonempty "W26-5b: the capture recipe in ${_w26_f#"$REPO"/} writes rc=\$? into the log" \
+    "$(w26_hits "$W26_RECIPE" "$_w26_f")"
+  expect_nonempty "W26-5p precondition: ${_w26_f#"$REPO"/} bans PIPESTATUS" \
+    "$(w26_hits 'never `PIPESTATUS`' "$_w26_f")"
+done
+# W26-5r: no doctrine file teaches the old recipe, whose last segment is the `echo` of the code.
+# The positive on the same extractor and files is W26-5b above (the new recipe is found).
+W26_OLD_RECIPE='echo "rc=$?" >> "$LOG"'
+# shellcheck disable=SC2086
+expect_eq "W26-5r: no shipped doctrine ends a suite capture in echo \"rc=\$?\" (the command would exit 0)" "" \
+  "$(w26_hits "$W26_OLD_RECIPE" $W26_DOCTRINE)"
+W26_D5R="$(w26_doctor "$W26_SURV" "set -o pipefail; <command> 2>&1 | tee \"\$LOG\"; $W26_OLD_RECIPE")"
+expect_nonempty "W26-5rm: a survival.md that teaches the old capture recipe is caught" \
+  "$(w26_hits "$W26_OLD_RECIPE" "$W26_D5R")"
+# w26_pipestatus_outside_ban <file>… -> the files that name PIPESTATUS anywhere but the ban.
+w26_pipestatus_outside_ban() {
+  local f flat
+  for f in "$@"; do
+    flat="$(_flatten "$f")"; flat="${flat//never \`PIPESTATUS\`/}"
+    case "$flat" in *PIPESTATUS*) printf '%s\n' "${f#"$REPO"/}" ;; esac
+  done
+}
+# shellcheck disable=SC2086
+expect_eq "W26-5p: …and no doctrine names PIPESTATUS except in that ban" "" \
+  "$(w26_pipestatus_outside_ban $W26_DOCTRINE)"
+W26_D5P="$(w26_doctor "$W26_SURV" 'echo "rc=${PIPESTATUS[0]}" >> "$LOG"')"
+expect_nonempty "W26-5pm: a survival.md that teaches PIPESTATUS beside the ban is caught" \
+  "$(w26_pipestatus_outside_ban "$W26_D5P")"
+# shellcheck disable=SC2086
+expect_eq "W26-5: AC-1.5 — no role file states a suite timeout of its own" "" \
+  "$(w26_hits '600000 ms' $W26_ROLES)"
+# shellcheck disable=SC2086
+expect_eq "W26-5c: …and no shipped text gives the second capture recipe" "" \
+  "$(w26_hits 'echo "rc=$?"; } > log 2>&1' $W26_DOCTRINE)"
+W26_D5="$(w26_doctor "${REPO}/agents/test-runner.md" 'parameter set to 600000 ms')"
+expect_nonempty "W26-5m: a test-runner.md that keeps \"600000 ms\" beside the 30-minute text is caught" \
+  "$(w26_hits '600000 ms' "$W26_D5")"
+# w26_count <ERE> <file> -> the lines of the file that match, as a number.
+w26_count() { /usr/bin/grep -cE -- "$1" "$2" 2>/dev/null | tr -cd '0-9'; }
+W26_CLOSE='SendMessage'
+W26_FG='[Ff][Oo][Rr][Ee][Gg][Rr][Oo][Uu][Nn][Dd]'
+# RE-SHAPED (wave-26 T20, review-2 F3): 5e/5g were exact-count pins on a word ("at most one
+# line says SendMessage"), red the moment any text adds the word and blind to a duplicate
+# phrased without it. They are now absences of the copies T1 cut, the shape of W26-5c.
+W26_CLOSE_NONE=""; W26_FG_NONE=""
+for _w26_r in $W26_ROLES; do
+  _w26_c="$(w26_count "$W26_CLOSE" "$_w26_r")"; _w26_f="$(w26_count "$W26_FG" "$_w26_r")"
+  [ "${_w26_c:-0}" -ge 1 ] || W26_CLOSE_NONE="$W26_CLOSE_NONE ${_w26_r##*/}"
+  [ "${_w26_f:-0}" -ge 1 ] || W26_FG_NONE="$W26_FG_NONE ${_w26_r##*/}"
+done
+expect_eq "W26-5d precondition: every role file carries the closing-message duty (missing in:${W26_CLOSE_NONE:- none})" \
+  "" "$W26_CLOSE_NONE"
+# shellcheck disable=SC2086
+expect_eq "W26-5e: …and no doctrine keeps the cut second copy of it" "" \
+  "$(w26_hits 'Completion-by-artifact: your closing SendMessage' $W26_DOCTRINE)"
+expect_eq "W26-5f precondition: every role file carries the foreground duty (missing in:${W26_FG_NONE:- none})" \
+  "" "$W26_FG_NONE"
+# shellcheck disable=SC2086
+expect_eq "W26-5g: …and no doctrine keeps either cut second copy of it" "" \
+  "$(w26_hits 'Suites run FOREGROUND' $W26_DOCTRINE; w26_hits 'Otherwise stay in the foreground' $W26_DOCTRINE)"
+W26_D5E="$(w26_doctor "${REPO}/agents/implementor.md" '- Completion-by-artifact: your closing SendMessage names the artifact path(s) this task produced.')"
+expect_nonempty "W26-5em: an implementor.md that keeps the second closing-message copy is caught" \
+  "$(w26_hits 'Completion-by-artifact: your closing SendMessage' "$W26_D5E")"
+W26_D5F="$(w26_doctor "${REPO}/agents/implementor.md" 'Suites run FOREGROUND with the Bash tool `timeout` parameter.')"
+expect_nonempty "W26-5gm precondition: the doctored implementor.md still carries its dispatch rules" \
+  "$(w26_hits 'DISPATCH-RULES-BEGIN' "$W26_D5F")"
+expect_nonempty "W26-5gm: an implementor.md carrying the cut foreground copy is caught" \
+  "$(w26_hits 'Suites run FOREGROUND' "$W26_D5F")"
+W26_D5G="$(w26_doctor "$W26_SURV" 'Otherwise stay in the foreground and do not stop.')"
+expect_nonempty "W26-5gn: a survival.md carrying the cut fallback foreground copy is caught" \
+  "$(w26_hits 'Otherwise stay in the foreground' "$W26_D5G")"
+
+# W26-6 (AC-1.6, and AC-1.4's doctrine half): no doctrine orders a step the tool already
+# performs. Each absence sits beside a positive on the same file through the same extractor.
+W26_PLANRULE="${REPO}/.claude/rules/plan-authoring.md"
+expect_nonempty "W26-6 precondition: operational-rules.md reads (a kept heading)" \
+  "$(w26_hits '## Permission answers' "$OPRULES")"
+expect_eq "W26-6a: AC-1.6 — no skill re-invocation on resume" "" \
+  "$(w26_hits 'Re-invocation after ANY resume' "$OPRULES")"
+expect_eq "W26-6b: …and no probe dispatch, in operational-rules.md or dispatch.md" "" \
+  "$(w26_hits 'healthy probe' "$OPRULES"; w26_hits 'throwaway dispatch carrying no deliverable' "$DISPATCH_MD")"
+W26_D6="$(w26_doctor "$OPRULES" 'Re-invocation after ANY resume is standing practice, not a repair.')"
+expect_nonempty "W26-6am: an operational-rules.md that keeps \"Re-invocation after ANY resume\" is caught" \
+  "$(w26_hits 'Re-invocation after ANY resume' "$W26_D6")"
+expect_nonempty "W26-6c precondition: plan-authoring.md reads (a kept rule)" \
+  "$(w26_hits 'A tune target never blocks a wave' "$W26_PLANRULE")"
+expect_eq "W26-6c: …no hand dry-run before a step advance" "" \
+  "$(w26_hits 'pipe a synthetic commit payload' "$W26_PLANRULE")"
+expect_nonempty "W26-6d precondition: dispatch.md reads (the ledger rule it keeps)" \
+  "$(w26_hits 'Ledger the dispatch, not the return' "$DISPATCH_MD")"
+expect_eq "W26-6d: …no reconcile at every turn end" "" \
+  "$(w26_hits 'Before ending a turn, reconcile' "$DISPATCH_MD")"
+# shellcheck disable=SC2086
+expect_nonempty "W26-6e precondition: the role files read (the cd guard they keep)" \
+  "$(w26_hits 'guards the WHOLE command' $W26_ROLES)"
+# shellcheck disable=SC2086
+expect_eq "W26-6e: …no writer enumerating suites beyond its own" "" \
+  "$(w26_hits 'enumerated every test entry point' $W26_ROLES)"
+expect_nonempty "W26-6f precondition: operational-rules.md keeps the refactor evidence key" \
+  "$(w26_hits '`behavior-preservation:`' "$OPRULES")"
+expect_eq "W26-6f: …no separate post run for a refactor" "" \
+  "$(w26_hits 'baseline + post runs' "$OPRULES")"
+expect_nonempty "W26-6g precondition: dispatch.md keeps the roster as the launch record" \
+  "$(w26_hits 'is the authoritative launch record' "$DISPATCH_MD")"
+expect_eq "W26-6g: AC-1.4 doctrine half — no hand task-set/ledger-add at dispatch" "" \
+  "$(w26_hits '`ledger-add` as you dispatch it' "$DISPATCH_MD")"
+expect_eq "W26-6h: …and no manual check of a deliverable the landing verdict found" "" \
+  "$(w26_hits 'verify that the named artifact exists before believing the report' "$DISPATCH_MD")"
+
+# ── §W26-7, W26-13, W26-14 (wave-26 T19; REQ-2 AC-2.1, REQ-7 AC-7.2/7.3, REQ-5's doc; D12, D13)
+#
+# WHAT THIS OWNS. The design is approved once, on the Step-2 card that closes the interview;
+# Step 3 approves the plan and the matrix only; the planner cuts the plan for width; a run
+# re-plans by verb on five named triggers; operational-rules.md documents the `reads` column
+# and the `approve` and `proof-add` verbs. Every absence sits beside a positive through the
+# same extractor on the same file, and a doctored copy proves each arm goes red when the old
+# text is back or a needed clause is gone. HERMETIC: committed finals by path; copies in $TMP.
+
+# W26-7 (AC-2.1): steps/2.md closes the interview on the card; no text approves the design at Step 3.
+expect_nonempty "W26-7 precondition: steps/2.md carries the Step-2 card's question" \
+  "$(w26_hits 'Do you approve this design?' "$STEP2_MD")"
+expect_nonempty "W26-7: AC-2.1 — steps/2.md closes the interview by presenting the Step-2 card" \
+  "$(w26_hits 'then present the Step-2 card below' "$STEP2_MD")"
+expect_nonempty "W26-7b: …and names that card's approval the one approval of the design" \
+  "$(w26_hits 'the one approval of the design' "$STEP2_MD")"
+W26_T19_STEP3_DESIGN="approves design, plan, and matrix together
+fails the Step-3 approval
+approved at the Step-3 approval alongside everything else
+the path the Step-3 approval display prints
+the pointer is what the Step-3 approval display prints"
+w26_t19_step3_design() {  # <file>… -> each file carrying any retired Step-3 design approval
+  local n
+  while IFS= read -r n; do
+    # shellcheck disable=SC2068
+    w26_hits "$n" $@
+  done <<< "$W26_T19_STEP3_DESIGN"
+}
+# shellcheck disable=SC2086
+expect_eq "W26-7c: …and no shipped doctrine approves the design at Step 3" "" \
+  "$(w26_t19_step3_design $W26_DOCTRINE)"
+W26_D7="$(w26_doctor "$STEP3_MD" 'The binding approval approves design, plan, and matrix together.')"
+expect_nonempty "W26-7cm: a steps/3.md that approves the design again is caught" \
+  "$(w26_t19_step3_design "$W26_D7")"
+expect_eq "W26-7d: …and the design no longer goes back whole before the spec is written" "" \
+  "$(w26_hits 'goes back whole' "$STEP2_MD")"
+expect_nonempty "W26-7e precondition: Question 1 still approves the frame" \
+  "$(w26_hits '**Question 1 approves the frame**' "$STEP2_MD")"
+expect_eq "W26-7e: …and does not re-approve the problem and context Step 1 approved" "" \
+  "$(w26_hits 'Context and Problem' "$STEP2_MD")"
+W26_D7E="$(w26_doctor "$STEP2_MD" '**Question 1 approves the frame, Context and Problem first**; nothing is walked until it holds.')"
+expect_nonempty "W26-7em: a steps/2.md whose Question 1 re-approves Context and Problem is caught" \
+  "$(w26_hits 'Context and Problem' "$W26_D7E")"
+expect_nonempty "W26-7f: steps/3.md says Step 3 approves the plan and the matrix only" \
+  "$(w26_hits 'Step 3 approves the plan and the matrix only' "$STEP3_MD")"
+
+# W26-13 (AC-7.2): steps/3.md carries both width instructions, not only the split.
+W26_SPLIT='Split a task on the longest chain wherever it can be split'
+W26_SHORT='gets one short first task'
+expect_nonempty "W26-13: AC-7.2 — steps/3.md tells the planner to split the longest chain" \
+  "$(w26_hits "$W26_SPLIT" "$STEP3_MD")"
+expect_nonempty "W26-13b: …and gives a file two tasks write, when it cannot be merged, one short first task" \
+  "$(w26_hits "$W26_SHORT" "$STEP3_MD")"
+expect_nonempty "W26-13c: …and otherwise lets the two run side by side and reconcile on landing" \
+  "$(w26_hits 'run side by side and reconcile on landing' "$STEP3_MD")"
+expect_nonempty "W26-13d: …and a row declares a read only where another row writes it" \
+  "$(w26_hits 'A row declares what it reads only where it reads what another row writes' "$STEP3_MD")"
+W26_D13="$TMP/w26-step3-split-only.md"
+sed "s/${W26_SHORT}//" "$STEP3_MD" > "$W26_D13" 2>/dev/null
+expect_nonempty "W26-13m precondition: the split-only copy keeps the split instruction" \
+  "$(w26_hits "$W26_SPLIT" "$W26_D13")"
+expect_eq "W26-13m: …and a steps/3.md carrying only the split instruction is caught" "" \
+  "$(w26_hits "$W26_SHORT" "$W26_D13")"
+
+# W26-14 (AC-7.3): the five re-plan triggers and the verbs, in steps/3.md; the schema's doc in
+# operational-rules.md.
+W26_TRIGGERS='a finding, a red test, an approved scope change, a task overrunning its size, a report naming follow-up work'
+expect_nonempty "W26-14: AC-7.3 — steps/3.md names the five re-plan triggers" \
+  "$(w26_hits "$W26_TRIGGERS" "$STEP3_MD")"
+expect_nonempty "W26-14b: …and re-plans by the verbs, never by editing the table by hand" \
+  "$(w26_hits '`task-add` and `task-set`, never by editing the table by hand' "$STEP3_MD")"
+W26_D14="$TMP/w26-step3-four-triggers.md"
+sed 's/a red test, //' "$STEP3_MD" > "$W26_D14" 2>/dev/null
+expect_nonempty "W26-14m precondition: the four-trigger copy keeps the verbs" \
+  "$(w26_hits '`task-add` and `task-set`' "$W26_D14")"
+expect_eq "W26-14m: …and a steps/3.md missing one trigger is caught" "" \
+  "$(w26_hits "$W26_TRIGGERS" "$W26_D14")"
+for _w26_iface in \
+  'comma-separated: a path in the `Files` grammar · `head` · `record` · `proof:<kind>` · `approval:<name>` · `ext:<slug>`; a live read is `live:<artifact>`; empty takes the kind default' \
+  'build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head`, and at Step 7 or later an `approval:` read written out (`approval:release` for the release) · integrate `proof:floor, proof:review, head` · close the integrate row'"'"'s merge' \
+  'a table without it reads each id as "wait for that task to land"' \
+  'a `Files` entry ending in `!`' \
+  'session-poker.sh approve <name> '"'"'<reply>'"'"'' \
+  'approved: <name> by <who> <ISO-UTC> "<reply>"' \
+  'session-poker.sh proof-add <kind> <evidence path>' \
+  'proved: kind=<floor\|review\|task> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>'; do
+  expect_nonempty "W26-14c: REQ-5 — operational-rules.md documents: ${_w26_iface%%;*}" \
+    "$(w26_hits "$_w26_iface" "$OPRULES")"
+done
+
+# ============================================================
+# W26-15 (wave-26 T21, AC-8.2): the rule for test authors — no exact count of things in the
+# shipped tree — is written in the test-harness rules file, with both allowed forms.
+# ============================================================
+W26_15_RULES="${REPO}/.claude/rules/test-harness.md"
+W26_15_SENTENCE='No test pins an exact count of things in the shipped tree.'
+W26_15_REL='**A relation.**'
+W26_15_CEIL='**A ceiling.**'
+W26_15_OWN='exact number is fine when the number IS the behaviour'
+expect_nonempty "W26-15 precondition: the extractor reads the rules file (it carries its Anti-vacuity heading)" \
+  "$(w26_hits '## Anti-vacuity' "$W26_15_RULES")"
+expect_nonempty "W26-15: AC-8.2 — test-harness.md states the rule" \
+  "$(w26_hits "$W26_15_SENTENCE" "$W26_15_RULES")"
+expect_nonempty "W26-15b: …and names the relation form" "$(w26_hits "$W26_15_REL" "$W26_15_RULES")"
+expect_nonempty "W26-15c: …and names the ceiling form" "$(w26_hits "$W26_15_CEIL" "$W26_15_RULES")"
+expect_nonempty "W26-15d: …and says when an exact number stands" "$(w26_hits "$W26_15_OWN" "$W26_15_RULES")"
+anchor "$W26_15_RULES" "$W26_15_CEIL" 1
+DOCTORED_W26_15="$TMP/w26-15-no-ceiling.md"
+grep -vF -- "$W26_15_CEIL" "$W26_15_RULES" > "$DOCTORED_W26_15" 2>/dev/null
+expect_nonempty "W26-15m precondition: the doctored copy keeps the rule's sentence" \
+  "$(w26_hits "$W26_15_SENTENCE" "$DOCTORED_W26_15")"
+expect_eq "W26-15m: …and a rules file naming no ceiling form is caught" "" \
+  "$(w26_hits "$W26_15_CEIL" "$DOCTORED_W26_15")"
+
+section "Section W26b: wave-26 T20 — one moment for the full run, the minimal forms (REQ-3 AC-3.1 static, AC-3.6; REQ-4 AC-4.2, 4.3, 4.4; D15)"
+#
+# WHAT THIS OWNS. The doctrine names one moment for the full suite (the head being released),
+# drops every order to run it to land or to commit, models the shortest landed line the commit
+# gate accepts, lets a report cite a saved log, and marks the scaffold's progress lines as
+# needed from fifteen minutes. Each absence sits beside a positive on the same extractor and
+# file; a doctored copy proves the arm goes red when the old text is back. HERMETIC.
+W26_CLAUDE="${REPO}/CLAUDE.md"
+W26_STEP4="${SKILL_DIR}/steps/4.md"
+W26_STEP5="${SKILL_DIR}/steps/5.md"
+W26_CORE="${SKILL_DIR}/SKILL.md"
+W26_MOMENT='The full suite runs once, on the head being released; after that pass a later change is proved by its affected suites, and a second full run is needed only when the change cannot be bounded'
+
+# W26-8 (AC-3.1 static): no doctrine requires a full run to land or to commit.
+expect_nonempty "W26-8 precondition: the dispatch terms still name the full-suite runner" \
+  "$(w26_hits 'tests/run.sh' "$W26_SURV")"
+# shellcheck disable=SC2086
+expect_eq "W26-8: AC-3.1 — no doctrine gives the full run to a Step-5 runner row" "" \
+  "$(w26_hits 'belongs to the Step-5 runner' $W26_DOCTRINE)"
+expect_eq "W26-8a: …and dispatch.md keeps no one-row-per-run order for it" "" \
+  "$(w26_hits 'belongs on one row per run' "$DISPATCH_MD")"
+expect_nonempty "W26-8b: the dispatch terms say a task lands on its affected suites" \
+  "$(w26_hits 'A task lands on the suites its change affects.' "$W26_SURV")"
+W26_D8="$(w26_doctor "$W26_SURV" 'one full-tree regression per run belongs to the Step-5 runner, not to a writer')"
+expect_nonempty "W26-8m: a survival.md that keeps the Step-5 runner order is caught" \
+  "$(w26_hits 'belongs to the Step-5 runner' "$W26_D8")"
+# The no-ceremony rule lives in the orchestrator's doctrine and nowhere a writer reads.
+W26_RULE='earns its place only if it can fail in a way nothing already run can'
+expect_nonempty "W26-8c: the skill core carries the no-ceremony rule" "$(w26_hits "$W26_RULE" "$W26_CORE")"
+# shellcheck disable=SC2086
+expect_eq "W26-8d: …and no role file carries it" "" "$(w26_hits "$W26_RULE" $W26_ROLES)"
+expect_nonempty "W26-8r precondition: the resume ritual still runs adopt" \
+  "$(w26_hits 'session-poker.sh adopt` before its first dispatch' "$DISPATCH_MD")"
+expect_eq "W26-8r: …and orders no second hand ledger of what adopt prints" "" \
+  "$(w26_hits 'Ledger every row it prints' "$DISPATCH_MD")"
+# The patrol prompt's last bullet continues the run only when something is ready or changed.
+expect_nonempty "W26-8w: dispatch.md says a WAITING or unchanged tick owes nothing" \
+  "$(w26_hits 'A `poker: WAITING` or unchanged tick owes nothing' "$DISPATCH_MD")"
+expect_eq "W26-8x: …and no longer continues after every tick unconditionally" "" \
+  "$(w26_hits 'Then continue toward the goal until a wall.' "$DISPATCH_MD")"
+
+# W26-9 (AC-3.6): one moment, the same words, in every place that names the full run.
+for _w26_f in "$W26_STEP5" "$W26_SURV" "$DISPATCH_MD" "$W26_CLAUDE"; do
+  expect_nonempty "W26-9: AC-3.6 — ${_w26_f#"$REPO"/} names the released head as the full run's moment" \
+    "$(w26_hits "$W26_MOMENT" "$_w26_f")"
+done
+# shellcheck disable=SC2086
+expect_eq "W26-9a: …and no doctrine or CLAUDE.md says \"integration close\"" "" \
+  "$(w26_hits 'integration close' $W26_DOCTRINE "$W26_CLAUDE")"
+# shellcheck disable=SC2086
+expect_eq "W26-9b: …or \"before any commit\"" "" \
+  "$(w26_hits 'before any commit' $W26_DOCTRINE "$W26_CLAUDE")"
+# shellcheck disable=SC2086
+expect_eq "W26-9c: …or a regression-cause line" "" \
+  "$(w26_hits 'regression-cause' $W26_DOCTRINE "$W26_CLAUDE")"
+expect_eq "W26-9d: …and Step 5 runs no whole-suite floor on every change" "" \
+  "$(w26_hits 'whole-suite floor' "$W26_STEP5")"
+expect_nonempty "W26-9e: CLAUDE.md asks only the affected suites before a commit" \
+  "$(w26_hits 'Before a commit, the suites the change affects are green.' "$W26_CLAUDE")"
+W26_D9="$(w26_doctor "$W26_CLAUDE" 'Must be green before any commit.')"
+expect_nonempty "W26-9m: a CLAUDE.md that keeps \"before any commit\" is caught" \
+  "$(w26_hits 'before any commit' "$W26_D9")"
+
+# W26-9h..9k (AC-3.6, the hooks' half; wave-26 T5): the full-run refusals in the dispatch wall
+# and the Bash wall name the released head, and nothing in hooks/ or payload/scripts/ says
+# "integration close" or offers a regression-cause: line as the fix. The absence rows read the
+# same file list the precondition proves the extractor finds the new wording in.
+W26_DP_HOOK="${REPO}/hooks/dispatch-preflight.sh"
+W26_HOOK_MOMENT='The full suite runs once, on the head being released'
+for _w26_f in "$W26_DP_HOOK" "${REPO}/payload/scripts/lib/walls.sh"; do
+  expect_nonempty "W26-9h: ${_w26_f#"$REPO"/} names the released head as the full run's moment" \
+    "$(w26_hits "$W26_HOOK_MOMENT" "$_w26_f")"
+done
+W26_CODE="$(/usr/bin/find "${REPO}/hooks" "${REPO}/payload/scripts" -type f 2>/dev/null | sort)"
+# shellcheck disable=SC2086
+expect_nonempty "W26-9i precondition: the code scan reads files that carry the released-head wording" \
+  "$(w26_hits "$W26_HOOK_MOMENT" $W26_CODE)"
+# shellcheck disable=SC2086
+expect_eq "W26-9i: no hook or script says \"integration close\"" "" \
+  "$(w26_hits 'integration close' $W26_CODE)"
+# shellcheck disable=SC2086
+expect_eq "W26-9j: …or names a regression-cause line" "" \
+  "$(w26_hits 'regression-cause' $W26_CODE)"
+anchor "$W26_DP_HOOK" "$W26_HOOK_MOMENT" 1
+DOCTORED_W26_HOOK="$TMP/w26-dispatch-preflight-doctored.sh"
+sed 's/on the head being released/at integration close/' "$W26_DP_HOOK" > "$DOCTORED_W26_HOOK"
+expect_nonempty "W26-9k: a dispatch wall that says \"integration close\" again is caught" \
+  "$(w26_hits 'integration close' "$DOCTORED_W26_HOOK")"
+
+# W26-10 (AC-4.2): the shortest landed line is modelled, and it passes the gate's own check.
+# The shape check is the gate's function, lifted out of walls.sh, never a copy of its rule.
+W26_PROOF_FN="$(/usr/bin/awk '/^is_proof_shaped\(\) \{/ { on = 1 } on { print } on && /^\}/ { exit }' \
+  "${REPO}/payload/scripts/lib/walls.sh" 2>/dev/null)"
+expect_nonempty "W26-10 precondition: the gate's is_proof_shaped is readable from walls.sh" "$W26_PROOF_FN"
+w26_shaped() { ( eval "$W26_PROOF_FN"; is_proof_shaped "$1" ) >/dev/null 2>&1 && echo yes || echo no; }
+W26_LINE="$(/usr/bin/grep -o '`- T[0-9][0-9]*: [^`]*`' "$W26_STEP4" 2>/dev/null | head -1 | tr -d '`')"
+expect_nonempty "W26-10: AC-4.2 — steps/4.md carries a one-line \`- T<n>:\` example" "$W26_LINE"
+expect_true "W26-10a: …of 80 characters or fewer" test "${#W26_LINE}" -le 80 -a "${#W26_LINE}" -gt 0
+expect_eq "W26-10b: …that the commit gate's shape check accepts" "yes" "$(w26_shaped "${W26_LINE#*: }")"
+expect_true "W26-10c: …and that names the auditor verdict a done row owes at peer-reviewed rigor" \
+  /usr/bin/grep -Ewq 'auditor' <<< "$W26_LINE"
+expect_eq "W26-10m: a prose line is refused by the same check (the check discriminates)" "no" \
+  "$(w26_shaped 'done, all green')"
+W26_S0="$(/usr/bin/grep -m1 '^\*\*Evidence:\*\* `Step 0:' "$STEP0_MD" 2>/dev/null)"
+expect_nonempty "W26-10d precondition: steps/0.md carries the Step-0 evidence template" "$W26_S0"
+expect_absent "W26-10d: …which does not repeat the frontmatter's integration branch" "integration-branch=" "$W26_S0"
+expect_absent "W26-10e: …or its parallel budget" "parallel-budget=" "$W26_S0"
+
+# W26-11 (AC-4.3): a report may cite a saved log in place of pasted output.
+W26_RC_OLD="carries the command that proves it and that command's output, or the explicit label"
+for _w26_f in $W26_ROLES "$DISPATCH_MD"; do
+  expect_nonempty "W26-11: AC-4.3 — ${_w26_f#"$REPO"/} names a saved log as proof" \
+    "$(w26_hits 'the path of a saved log' "$_w26_f")"
+  expect_eq "W26-11a: …and ${_w26_f#"$REPO"/} no longer asks for pasted output alone" "" \
+    "$(w26_hits "$W26_RC_OLD" "$_w26_f")"
+done
+# shellcheck disable=SC2086
+expect_eq "W26-11b: …and no surface makes every unverified label a re-check" "" \
+  "$(w26_hits 'obligates the orchestrator to re-check before' $W26_ROLES "$DISPATCH_MD")"
+W26_D11="$(w26_doctor "${REPO}/agents/researcher.md" "Every claim carries the command that proves it and that command's output, or the explicit label \`unverified\`.")"
+expect_nonempty "W26-11m: a role file that keeps the pasted-output form is caught" \
+  "$(w26_hits "that command's output, or the explicit label" "$W26_D11")"
+
+# W26-12 (AC-4.4): both scaffold lines carry the fifteen-minute mark on every surface — the
+# six role files (the reader block), dispatch.md and SKILL.md (the author block).
+W26_MARK='(tasks of 15 min or more)'
+w26_label_line() { /usr/bin/grep -m1 "^$1:" "$2" 2>/dev/null; }
+for _w26_f in $W26_ROLES "$DISPATCH_MD" "$W26_CORE"; do
+  for _w26_l in 'Progress artifact' 'Cadence'; do
+    _w26_v="$(w26_label_line "$_w26_l" "$_w26_f")"
+    expect_nonempty "W26-12 precondition: ${_w26_f#"$REPO"/} has its ${_w26_l}: line" "$_w26_v"
+    expect_contains "W26-12: AC-4.4 — ${_w26_f#"$REPO"/} marks ${_w26_l}: as needed from 15 minutes" \
+      "$W26_MARK" "$_w26_v"
+  done
+done
+_w26_body="$(cat "${REPO}/agents/auditor.md" 2>/dev/null)"
+anchor "${REPO}/agents/auditor.md" "$W26_MARK" 2
+DOCTORED_W26_12="$TMP/w26-12-doctored.md"
+printf '%s\n' "${_w26_body// "$W26_MARK"/}" > "$DOCTORED_W26_12"
+expect_nonempty "W26-12m precondition: the doctored auditor.md still has its Cadence: line" \
+  "$(w26_label_line 'Cadence' "$DOCTORED_W26_12")"
+expect_absent "W26-12m: a role file whose Cadence: line lost the mark is caught" \
+  "$W26_MARK" "$(w26_label_line 'Cadence' "$DOCTORED_W26_12")"
+
+# ── §W26-T57 (wave-26 final review S1, S2, N4): three doctrine sentences made true to the code ──
+#
+# WHAT THIS OWNS. S1: the `proof verb` row names the head the evidence attests, not the
+# checkout's HEAD. S2: steps/5.md tells the orchestrator to record the floor proof after the
+# full run. N4: dispatch.md says only a passing disturbed run is `void`. Each absence sits
+# beside a positive through the same extractor on the same file, and a doctored copy that has
+# the old text back proves the absence arm goes red. HERMETIC: committed finals; copies in $TMP.
+W26_T57_S1_NEW='the head the evidence names: a run log'"'"'s `head=` header, a review'"'"'s `reviewed: a..b` end; never an operand'
+W26_T57_S1_OLD='the head is `git rev-parse HEAD` of the working branch'"'"'s checkout'
+expect_nonempty "W26-T57a: S1 — the proof verb row names the head the evidence attests" \
+  "$(w26_hits "$W26_T57_S1_NEW" "$OPRULES")"
+expect_eq "W26-T57b: …and no longer calls it the checkout's HEAD" "" \
+  "$(w26_hits "$W26_T57_S1_OLD" "$OPRULES")"
+W26_T57_D1="$(w26_doctor "$OPRULES" "| proof verb | \`session-poker.sh proof-add <kind> <evidence path>\`; $W26_T57_S1_OLD, never an operand |")"
+expect_nonempty "W26-T57bm: an operational-rules.md that keeps the checkout-HEAD sentence is caught" \
+  "$(w26_hits "$W26_T57_S1_OLD" "$W26_T57_D1")"
+expect_nonempty "W26-T57c: S2 — steps/5.md tells the orchestrator to record the floor proof" \
+  "$(w26_hits 'then record it: `session-poker.sh proof-add floor <log>`' "$STEP5_MD")"
+W26_T57_N4_NEW='a disturbed passing run reports `void`; a failing one is a failure'
+expect_nonempty "W26-T57d: N4 — dispatch.md says a disturbed passing run is void and a failing one a failure" \
+  "$(w26_hits "$W26_T57_N4_NEW" "$DISPATCH_MD")"
+expect_eq "W26-T57e: …and no longer says a disturbed run is never a failure" "" \
+  "$(w26_hits 'not a failure, when the machine was disturbed' "$DISPATCH_MD")"
+W26_T57_D4="$(w26_doctor "$DISPATCH_MD" 'It reports `void`, not a failure, when the machine was disturbed.')"
+expect_nonempty "W26-T57em: a dispatch.md that keeps the old void sentence is caught" \
+  "$(w26_hits 'not a failure, when the machine was disturbed' "$W26_T57_D4")"
 
 finish
