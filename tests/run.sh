@@ -431,6 +431,18 @@ ENV_STAMP="$(printf 'env: os=%s bash=%s locale=%s path=%s' \
   "$PIN")"
 echo "$ENV_STAMP"
 
+# ── THE HEAD STAMP (wave-26 T4; REQ-3 AC-3.2, D5) ────────────────────────────
+# Which code the verdict is about: the commit the tree under test (this runner's own
+# checkout, cd'd into above) has checked out, and how many porcelain lines it differs from
+# that commit by. Step-5 evidence copies the head into its `head:` field and the commit gate
+# refuses a block without one, so this line is what a proof names. Taken once, here, before
+# any suite runs: the suites write only under $TMP. A tree that is no repository says so.
+if HEAD_SHA="$(git rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" && [ -n "$HEAD_SHA" ]; then
+  echo "head=${HEAD_SHA} dirty=$(git status --porcelain 2>/dev/null | awk 'END { print NR+0 }')"
+else
+  echo "head=none dirty=none"
+fi
+
 ( . tests/lib/resolve-roots.sh
   printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
     "$BIONIC_HOOKS_DIR" "$BIONIC_SKILLS_DIR" "$BIONIC_SCRIPTS_DIR" )

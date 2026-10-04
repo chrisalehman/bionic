@@ -5175,9 +5175,21 @@ expect_eq "operational-rules.md's live SUPPORTED_SDLC_VERSION value agrees with 
 expect_eq "lifecycle.svg's title renders the same version" \
   "$V_ORIGIN_VAL" "$(v_lifecycle_val "$V_LIFECYCLE")"
 
+# v_hc_chips_ok <svg> -> yes when the file carries at least one chip. The agreement
+# relation below (every chip equals the gate's version) is vacuous over an empty set; this is
+# the row that says the set is not empty. A count is not asked: a fourth chip is not a defect.
+v_hc_chips_ok() {
+  [ "$(v_hookchain_vals "$1" | grep -c '[0-9]')" -ge 1 ] && echo yes || echo no
+}
+# v_hc_agree <svg> <version> -> yes when no chip disagrees with the version (empty set: yes)
+v_hc_agree() {
+  local _v _bad=0
+  for _v in $(v_hookchain_vals "$1"); do [ "$_v" = "$2" ] || _bad=1; done
+  [ "$_bad" -eq 0 ] && echo yes || echo no
+}
 V_HC_VALS="$(v_hookchain_vals "$V_HOOKCHAIN")"
-expect_eq "hook-chain.svg carries exactly three version-pin chips (not fewer, not more)" "3" \
-  "$(printf '%s\n' "$V_HC_VALS" | grep -c '[0-9]')"
+expect_eq "hook-chain.svg carries at least one version-pin chip (the agreement rows below are not vacuous)" "yes" \
+  "$(v_hc_chips_ok "$V_HOOKCHAIN")"
 V_HC_N=0
 for _v in $V_HC_VALS; do
   V_HC_N=$((V_HC_N + 1))
@@ -10053,6 +10065,53 @@ expect_eq "S19.4 …and the derivation names a site whose anchor was deleted" "1
 expect_eq "S19.4 …from a copy that really did lose one line (not vacuous)" "1" \
   "$(( $(wc -l < "$S19_DOCS_PINS") - $(wc -l < "$S19_SB/unanchored.test.sh") ))"
 
+# --- §S19.4 agent-context-guard: every doctored copy of the guard is anchored ---
+# agent-context-guard builds its mutants through one helper, so a site is any line
+# writing a copy of "$GUARD" to a file. The suite does not use docs-pins' DOCTORED…=
+# idiom, so it gets its own site pattern, and a pattern that finds no site is RED
+# here rather than a silent pass of the relation below it.
+#
+# THE ANCHOR MAY SIT ANYWHERE EARLIER IN THE SITE'S BLOCK (the lines since the last
+# blank one), not within a fixed distance: one anchor legitimately guards several
+# mutants written back to back, and a multi-line sed or awk puts the site line far
+# below the call it belongs to. Comment lines are never sites.
+s19_block_sites() {  # s19_block_sites <suite> <site-ERE> -> "<sites> <unanchored>"
+  S19_SITE_RE="$2" awk '
+    /^[ \t]*$/ { anchored = 0; next }
+    /^[ \t]*#/ { next }
+    /^[ \t]*anchor[ \t]/ { anchored = 1 }
+    $0 ~ ENVIRON["S19_SITE_RE"] { sites++; if (!anchored) bare++ }
+    END { print sites + 0, bare + 0 }
+  ' "$1"
+}
+S19_ACG="$S19_TESTS_DIR/agent-context-guard.test.sh"
+S19_ACG_SITE='"\$GUARD" > "'
+S19_ACG_REAL="$(s19_block_sites "$S19_ACG" "$S19_ACG_SITE")"
+S19_ACG_REAL_SITES="${S19_ACG_REAL%% *}"
+expect_eq "S19.4 the agent-context-guard site pattern finds at least one doctored site" "yes" \
+  "$([ "${S19_ACG_REAL_SITES:-0}" -ge 1 ] 2>/dev/null && echo yes || echo no)"
+expect_eq "S19.4 every agent-context-guard doctoring site is anchored" "0" \
+  "${S19_ACG_REAL#* }"
+
+# THE PLANTED DEFECTS, on copies. A bare site — a doctored copy of the guard with no
+# anchor in its block — must be named; and a copy whose sites no longer carry the
+# pattern's target must report no site, which is what turns the row above RED.
+cp "$S19_ACG" "$S19_SB/acg-bare.test.sh"
+# built with %s so this file does not itself carry the site it plants
+printf '\nsed %s "$GUARD" %s "$MUTANT_TREE/hooks/mutant-bare.sh"\n' "'s/x/y/'" '>' >> "$S19_SB/acg-bare.test.sh"
+S19_ACG_BARE="$(s19_block_sites "$S19_SB/acg-bare.test.sh" "$S19_ACG_SITE")"
+expect_eq "S19.4 …and the derivation names a planted bare agent-context-guard site" "1" \
+  "${S19_ACG_BARE#* }"
+S19_ACG_BARE_SITES="${S19_ACG_BARE%% *}"
+expect_eq "S19.4 …which the pattern counted as one more site (not vacuous)" "1" \
+  "$(( ${S19_ACG_BARE_SITES:-0} - ${S19_ACG_REAL_SITES:-0} ))"
+sed 's/"\$GUARD" > "/"$GUARD_GONE" > "/' "$S19_ACG" > "$S19_SB/acg-nosite.test.sh"
+expect_eq "S19.4 …and a copy with the target renamed really changed (not vacuous)" "yes" \
+  "$([ "$(/usr/bin/grep -c 'GUARD_GONE' "$S19_SB/acg-nosite.test.sh")" -ge 1 ] && echo yes || echo no)"
+S19_ACG_NONE="$(s19_block_sites "$S19_SB/acg-nosite.test.sh" "$S19_ACG_SITE")"
+expect_eq "S19.4 …and on it the site pattern finds no site, so the at-least-one row goes RED" "0" \
+  "${S19_ACG_NONE%% *}"
+
 # ============================================================
 section "S17 — no private builder of a shared shape remains (AC-28)"
 # ============================================================
@@ -11379,18 +11438,26 @@ rc_disallows_write_edit() {  # <role file> -> 0 when its frontmatter disallows b
     | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' > "$SANDBOX/rc-dis.txt"
   /usr/bin/grep -qx Write "$SANDBOX/rc-dis.txt" && /usr/bin/grep -qx Edit "$SANDBOX/rc-dis.txt"
 }
-RC_WANT="Explore Plan"; RC_WRITERS=""; RC_FILES=0
-for _rc_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
-  [ -f "$_rc_f" ] || continue
-  RC_FILES=$((RC_FILES + 1))
-  _rc_name="bionic:$(basename "$_rc_f" .md)"
-  if rc_disallows_write_edit "$_rc_f"; then RC_WANT="$RC_WANT $_rc_name"
-  else RC_WRITERS="$RC_WRITERS $_rc_name"; fi
-done
+rc_scan() {  # <agents dir> -> sets RC_WANT, RC_WRITERS, RC_FILES from the role files in it
+  RC_WANT="Explore Plan"; RC_WRITERS=""; RC_FILES=0
+  local _rc_f _rc_name
+  for _rc_f in "$1"/*.md; do
+    [ -f "$_rc_f" ] || continue
+    RC_FILES=$((RC_FILES + 1))
+    _rc_name="bionic:$(basename "$_rc_f" .md)"
+    if rc_disallows_write_edit "$_rc_f"; then RC_WANT="$RC_WANT $_rc_name"
+    else RC_WRITERS="$RC_WRITERS $_rc_name"; fi
+  done
+}
+rc_roles_ok() {  # <agents dir> -> yes when the scan read at least one role file; the set
+                 # relation below is vacuous over none. A file count is not asked.
+  ( rc_scan "$1"; [ "$RC_FILES" -ge 1 ] && echo yes || echo no )
+}
+rc_scan "$BIONIC_SCRIPTS_DIR/agents"
 rc_sorted() { printf '%s\n' $1 | /usr/bin/grep -v '^$' | LC_ALL=C sort | tr '\n' ' '; }
 RC_GOT=$( ( . "$RC_LIB" >/dev/null 2>&1 || exit 1; printf '%s' "${ROLE_READONLY_SET:-}" ) )
-expect_eq "RC the role files read at all: six role files; four read-only plus two harness types (not vacuous)" "6 6" \
-  "$RC_FILES $(printf '%s\n' $RC_WANT | /usr/bin/grep -c .)"
+expect_eq "RC the role files read at all: at least one role file (the set relation below is not vacuous)" "yes" \
+  "$(rc_roles_ok "$BIONIC_SCRIPTS_DIR/agents")"
 expect_eq "RC ROLE_READONLY_SET = role files disallowing Write+Edit ∪ {Explore, Plan}" \
   "$(rc_sorted "$RC_WANT")" "$(rc_sorted "$RC_GOT")"
 # THE PREDICATE, NOT ONLY THE CONSTANT: every member answers yes, every writer role and every
@@ -12452,6 +12519,38 @@ expect_eq "CG-turn the writer keys the three lines by the two prompts" "$CGT_PRO
 expect_eq "CG-turn fill-report counts the writer's turns, and they are the prompts" "$CGT_PROMPTS" "$CGT_TURNS"
 
 # ============================================================
+section "PIN-REL — a pin on the shipped tree is a relation, not a count: planted additions stay green, an emptied set is red (wave-26 T21, AC-8.1)"
+#
+# The two pins this section covers (the chips in hook-chain.svg, the role files under agents/)
+# are exercised on COPIES under $SANDBOX; the shipped tree is never touched. Each pair of arms
+# is the same row against two copies of one subject: one with an item PLANTED (a fourth chip, a
+# seventh role file) and one with every item of the kind REMOVED.
+PR_DIR="$SANDBOX/pin-rel"; rm -rf "$PR_DIR"; mkdir -p "$PR_DIR/agents-plus" "$PR_DIR/agents-none"
+# the extractor reads real chips on the shipped file, or every arm below proves nothing
+expect_eq "PIN-REL the chip extractor finds chips in the shipped hook-chain.svg (not vacuous)" "yes" \
+  "$([ -n "$(v_hookchain_vals "$V_HOOKCHAIN")" ] && echo yes || echo no)"
+PR_CHIPS_REAL="$(v_hookchain_vals "$V_HOOKCHAIN" | grep -c '[0-9]')"
+# a fourth chip: the first chip line, repeated once
+{ cat "$V_HOOKCHAIN"; grep -m1 '<text class="version-pin"' "$V_HOOKCHAIN"; } > "$PR_DIR/chips-plus.svg"
+grep -v 'class="version-pin"' "$V_HOOKCHAIN" > "$PR_DIR/chips-none.svg"
+expect_eq "PIN-REL the planted copy really carries one more chip than the shipped file" "$((PR_CHIPS_REAL + 1))" \
+  "$(v_hookchain_vals "$PR_DIR/chips-plus.svg" | grep -c '[0-9]')"
+expect_eq "PIN-REL the emptied copy still parses and carries no chip" "0 yes" \
+  "$(v_hookchain_vals "$PR_DIR/chips-none.svg" | grep -c '[0-9]') $([ -s "$PR_DIR/chips-none.svg" ] && echo yes || echo no)"
+expect_eq "PIN-REL a fourth chip: the non-empty row stays green" "yes" "$(v_hc_chips_ok "$PR_DIR/chips-plus.svg")"
+expect_eq "PIN-REL …and the agreement relation stays green" "yes" "$(v_hc_agree "$PR_DIR/chips-plus.svg" "$V_ORIGIN_VAL")"
+expect_eq "PIN-REL no chip at all: the non-empty row is red" "no" "$(v_hc_chips_ok "$PR_DIR/chips-none.svg")"
+# a seventh role file: a copy of a writer role under another name (no entry owed in the set)
+cp "$BIONIC_SCRIPTS_DIR"/agents/*.md "$PR_DIR/agents-plus/"
+cp "$BIONIC_SCRIPTS_DIR/agents/implementor.md" "$PR_DIR/agents-plus/seventh.md"
+expect_eq "PIN-REL the planted copy really carries one more role file than the shipped tree" \
+  "$(ls "$BIONIC_SCRIPTS_DIR"/agents/*.md | wc -l | tr -d ' ') plus1" \
+  "$(($(ls "$PR_DIR"/agents-plus/*.md | wc -l) - 1)) plus1"
+expect_eq "PIN-REL a seventh role file: the non-empty row stays green" "yes" "$(rc_roles_ok "$PR_DIR/agents-plus")"
+expect_eq "PIN-REL …and the read-only set relation stays green" "$(rc_sorted "$RC_WANT")" \
+  "$( rc_scan "$PR_DIR/agents-plus"; rc_sorted "$RC_WANT" )"
+expect_eq "PIN-REL no role file at all: the non-empty row is red" "no" "$(rc_roles_ok "$PR_DIR/agents-none")"
+
 section "RC-nest — ARM C and the delegation arm read ONE role and ONE agent context off the same nested payload (wave-20 T7b; review R15, critic C4)"
 # ============================================================
 #
