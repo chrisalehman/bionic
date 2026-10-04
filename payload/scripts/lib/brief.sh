@@ -1114,7 +1114,8 @@ brief_field() {
 #       (an entry that equals it, prefixes it as a directory, or matches it as a glob).
 # Each finding is ONE line (the declaring line is cut at 100 columns, control and non-ASCII
 # bytes dropped) so the caller can hand it to its `warn` verbatim. <poker> is the command that
-# prefixes `amend`; <name> the dispatched name (empty reads as `<name>`).
+# prefixes `amend`, printed verbatim, so the caller passes it already one shell word
+# (`refuse_shell_word`; wave-24 T29, critic I2); <name> the dispatched name (empty reads as `<name>`).
 brief_body_advisories() {
   printf '%s\n' "${1-}" | awk -v NAME="${2-}" -v FILES="${3-}" -v SUITES="${4-}" -v RUNS="${5-}" -v POKER="${6-}" '
     BEGIN { Q = "\047" }

@@ -4170,7 +4170,9 @@ section "Section HOLD: wave-24 T7 — the stand-down's standing answer is named 
 # read — the dispatch doctrine (source and render) and the Patrol prompt the cron job carries.
 # The stand-down refusal's own text is the stop wall's (payload/scripts/lib/stop.sh), pinned with
 # that file's owner.
-PIN_HOLD_VERB='session-poker.sh hold <name> <reason>'
+# ONE wording for the doctrine and the prompt (wave-24 T27/T29, critic I4): NAME and a quoted
+# reason, because a bare `<name>` or `<reason>` pastes as a redirect from a file of that name.
+PIN_HOLD_VERB="session-poker.sh hold NAME 'why it stays up'"
 PIN_HOLD_LIST='`ListAgents` only when the roster has an open row'
 HOLD_BLOCK="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
 for _hold_f in "$DISPATCH_MD" "$HOLD_BLOCK"; do
@@ -4188,10 +4190,9 @@ done
 HOLD_PROMPT="$(CLAUDE_CODE_SESSION_ID=0123456789abcdef bash "$POKER_SH" prompt 2>/dev/null)"
 expect_nonempty "HOLD-c precondition: the poker printed its Patrol prompt" "$HOLD_PROMPT"
 # THE PROMPT'S HOLD LINE PASTES AS ONE COMMAND (wave-24 T27; critic I4): the reason is a quoted
-# placeholder, never a bare `<reason>` a shell reads as a redirect. The doctrine lines above keep
-# PIN_HOLD_VERB until w24-T29 re-words their sources to the same text.
-PIN_HOLD_PROMPT="session-poker.sh hold NAME 'why it stays up'"
-expect_contains "HOLD-c: the Patrol prompt names the hold verb, its reason a quoted placeholder" "$PIN_HOLD_PROMPT" "$HOLD_PROMPT"
+# placeholder, never a bare `<reason>` a shell reads as a redirect. The doctrine (HOLD-a) prints
+# the same words since w24-T29, so one pin serves both.
+expect_contains "HOLD-c: the Patrol prompt names the hold verb, its reason a quoted placeholder" "$PIN_HOLD_VERB" "$HOLD_PROMPT"
 # The retired ask must be gone from the doctrine too: "ListAgents, before the tick" every tick.
 expect_eq "HOLD-d: the unconditional 'before the tick' ListAgents line is gone from dispatch.md" "0" \
   "$(grep -c 'ListAgents`, before the tick, for a fresh answer' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
