@@ -89,7 +89,7 @@ explain <axis> · set <flag>=<value>
 - **No freeform titles.** An entry without a `<task>:` or `<task>/<task>:` prefix is malformed.
 - Mark `in_progress` on starting and `completed` the moment it is done — never batch completions. When a subagent finishes, the orchestrator updates the entry; dispatched work is ledgered in the plan, never as a bare task.
 
-The list is the user's visible progress surface. No hook can read a task list, so the format is the whole discipline.
+The list is the user's visible progress surface. No hook can read a task list, so the format is the whole discipline. The per-task expansion happens at plan approval; see Step 3.
 
 **Override DSL.** `set <axis|flag>=<value>` and `set verify(<AC>)=<tier>`, comma-separated, ending in `confirm`. `explain [axis]` renders the axis tables and never counts as confirmation; a free-text question about the display is treated as `explain`, never as a parse error. A rigor override BELOW a derivable floor is **accepted, never refused** — no code refuses it, and neither does this skill. Before locking, name the binding floor, the evidence class it was buying ("audited adds the independent critic; without it, silent wrong assumptions are caught only by self-review"), and what specifically is given up; then proceed with the user's value and record `rigor-override: <user> <date> derived=<v> chosen=<v>` in frontmatter, so every later reader sees a decision rather than a derivation error. The floor checks read that marker and log `user-overridden` instead of a violation. Advisory strength scales with the floor's reason — the security/privacy flag floor gets the strongest language here — but there are **no carve-outs**: every floor accepts the override.
 
