@@ -18,8 +18,10 @@
 # One section per Eval-design row of the spec that names this suite (§A1, §A2, §A4–§A12),
 # each built to go red on the planted defect its matrix block names under `fails-when:`; then
 # §A13–§A16, the brief's additions (main= for every class, allow paths end to end, the gate
-# line, the size bound). §A8 and §A9 read EVERY decision the suite collected, so they run last
-# but one.
+# line, the size bound); §A17–§A22, T17's (a credential store refused by the place a path
+# reaches, a reader's report bounded by what the lead holds, no delete of a workspace root, the
+# bound on targets, on and off read alike by the hook and the doctor, and reads end to end).
+# §A8 and §A9 read EVERY decision the suite collected, so they run last but one.
 #
 # HERMETIC. Every project is a fixture under one mktemp sandbox: a git repository on the
 # run's working branch, a `.bionic` tree with a plan, an engagement marker, a roster and a
@@ -903,6 +905,50 @@ for a21c in false False unset; do
   expect_nonempty "A21.$a21c.0 the doctor printed its permission-answers row" "$A21ROW"
   expect_eq "A21.$a21c.1 [$a21c] the hook and the doctor agree, and say $a21want" "$a21want|$a21want" "$a21hook|$a21doc"
 done
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§A22 a read that reaches a credential store is refused, by the path it takes or the tree it walks"
+
+# Through the real hook and the real reader (wave-25 T16's `reads` mode): every file a pure
+# reader reads comes back as an R line and every directory it descends as an RR line, and
+# the hook asks the reserved table about each, typed and resolved, with the home directory as
+# a fact (wave-25 T17, review B3c and S4). A read is no effect on the roots, so the reserved
+# table is the only guard a read meets.
+A22P="$(make_project a22 bound)"
+A22T="$A22P/.worktrees/25-T1"
+add_roster_row "$A22P" w99-T1 aw99-T1-0974313b7a6b74f2 bionic:senior-implementor "$(record_of "$A22P")/T1.md"
+add_workspace "$A22P" w99-T1 "$A22T"
+mkdir -p "$HOME_FX/.ssh" "$HOME_FX/.kube" "$A22T/src"
+: > "$HOME_FX/.ssh/id_rsa"
+: > "$HOME_FX/.kube/config"
+: > "$A22T/src/a.txt"
+ln -s "$HOME_FX/.ssh" "$A22T/k"
+a22() {  # <command> -> the writer's question, cwd its tree
+  drive "$A22P" "$(payload "$A22P" Bash "$(bash_ti "$1")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A22T")"
+}
+a22_cred() {  # <label> <command>
+  a22 "$2"
+  expect_eq "$1: deny" "deny" "$(behavior "$OUT")"
+  expect_contains "$1: …as credentials, on the record" "|deny-reserved|credentials:" "$(tail -1 "$(log_of "$A22P")" 2>/dev/null)"
+}
+a22_cred "A22.1 cat through a link into ~/.ssh, by its full path" "cat $A22T/k/id_rsa"
+a22_cred "A22.2 cat through the link, relative to the tree" "cat k/id_rsa"
+a22_cred "A22.3 head through the link" "head -1 k/id_rsa"
+a22_cred "A22.4 one store among ordinary reads" "cat $A22T/src/a.txt k/id_rsa"
+a22_cred "A22.5 a recursive grep of the home directory" "grep -r BEGIN $HOME_FX"
+a22_cred "A22.6 a recursive grep of /" "grep -r BEGIN /"
+a22_cred "A22.7 a recursive listing of the home directory" "ls -R $HOME_FX"
+a22_cred "A22.8 a find rooted at the home directory" "find $HOME_FX -name config"
+a22_cred "A22.9 a copy of a store's file through the link into the tree" "cp k/id_rsa $A22T/stolen"
+a22_cred "A22.10 a recursive copy of ~/.kube, the directory above a store, into the tree" "cp -R $HOME_FX/.kube $A22T/kube"
+a22 "cat $A22T/src/a.txt"
+expect_eq "A22.c1 control: cat of an ordinary file in the tree: allow" "allow" "$(behavior "$OUT")"
+a22 "grep -r needle $A22T/src"
+expect_eq "A22.c2 control: a recursive grep of the tree's own src: allow" "allow" "$(behavior "$OUT")"
+a22 "cp $A22T/src/a.txt $A22T/b.txt"
+expect_eq "A22.c3 control: a copy of an ordinary file within the tree: allow" "allow" "$(behavior "$OUT")"
+a22 "find $A22T/src -name '*.txt'"
+expect_eq "A22.c4 control: a find rooted in the tree: allow" "allow" "$(behavior "$OUT")"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
 section "§A8 no decision object anywhere in the suite carries interrupt"
