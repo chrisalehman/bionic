@@ -21,6 +21,9 @@
 #                no `|`; outside a git tree, no stamp and no error.
 #   §NESTED-ENV  `BIONIC_SLOT_HELD=1` books nothing and is what the command sees; a shim
 #                inside a shim never waits on its own parent; `BIONIC_QUIET=1` is `--quiet`.
+#   §SHELL       `--shell <path>` runs the command the way the harness runs a Bash call
+#                (`<path> -c "eval '<cmd>'"`), so its output, diagnostics and exit code are
+#                the harness's own; the stamp's `cmd=` stays the command as given (T7).
 #
 # HERMETIC. No row touches the real store: every call sets BIONIC_SLOTS_DIR to a scratch
 # directory and BIONIC_SLOTS_N, and the load is read from BIONIC_LOAD_NOW_FILE, a file the
@@ -620,5 +623,68 @@ expect_false "N4.2 …and does not run above it" test -e "$ROW/q.ran"
 N4_OUT="$(bk -- "touch $ROW/plain.ran" 2>&1)"; N4_RC=$?
 expect_status "N4.3 without it, the same load does not hold a shared take" 0 "$N4_RC"
 expect_true "N4.4 …which runs" test -e "$ROW/plain.ran"
+
+# ════════════════════════════════════════════════════════════════════ §SHELL
+section "SHELL — --shell runs the command the way the harness does; cmd= stays the original"
+#
+# THE RULING (wave-26 T7, A-T7.1). The Bash wall wraps a suite command in this shim, and the
+# harness runs a Bash call as `<its shell> -c '… eval <command> < /dev/null'`. A plain
+# `bash -c` under a zsh harness changes what the command means (echo escapes, word
+# splitting, `${pipestatus}`, an unmatched glob), so the wall names the harness's shell with
+# `--shell` and the shim evals the command under it. With no `--shell` it is `bash -c`, as
+# built. The rows compare against the harness's own shape, run here directly.
+H_SH="$(command -v zsh 2>/dev/null)"
+[ -n "$H_SH" ] || H_SH="$(command -v bash)"
+sq() { local s="$1" r="'\\''"; s="${s//\'/$r}"; printf "'%s'" "$s"; }
+harness() {  # <command> — the command as the harness runs it, in this row's directory
+  ( cd "$ROW" && "$H_SH" -c "eval $(sq "$1") < /dev/null" 2>&1; echo "rc=$?" )
+}
+
+newrow h1
+H1_CMDS=( 'echo "a\nb"; true'
+          'F="x y"; printf "[%s]" $F; echo'
+          'false | true; echo "first=${pipestatus[1]}"'
+          'ls nomatch*.zz; echo after'
+          'nosuchcmd_t7; echo "rc=$?"'
+          'echo "$#"; exit 4' )
+H1_I=0
+for H1_C in "${H1_CMDS[@]}"; do
+  H1_I=$((H1_I + 1))
+  H1_WANT="$(harness "$H1_C")"
+  H1_GOT="$( bk --shell "$H_SH" -- "$H1_C" < /dev/null 2>&1; echo "rc=$?" )"
+  expect_eq "H1.$H1_I under --shell $H_SH the shim answers what the harness answers: [$H1_C]" \
+    "$H1_WANT" "$H1_GOT"
+done
+# The differential: without --shell the same commands are bash's, so at least one row above
+# would have read differently under a zsh harness. Asserted only where zsh is the harness.
+case "$H_SH" in
+  */zsh)
+    expect_ne "H1.d without --shell the shim is bash -c, which a zsh harness disagrees with" \
+      "$(harness 'echo "a\nb"')" "$(bk -- 'echo "a\nb"' 2>&1; echo "rc=$?")" ;;
+  *) ok "H1.d skipped: no zsh on this machine, so bash is the harness and the two agree" ;;
+esac
+
+newrow h2
+H2_OUT="$(bk --shell "$H_SH" -- 'printf %s "${BIONIC_SLOT_HELD:-unset}"' 2>/dev/null)"
+expect_eq "H2.1 under --shell the command is still inside its place" "1" "$H2_OUT"
+H2_OUT="$(bk --shell="$H_SH" -- 'echo eq-form' 2>&1)"; H2_RC=$?
+expect_status "H2.2 --shell=<path> is the same option" 0 "$H2_RC"
+expect_eq "H2.3 …and runs" "eq-form" "$H2_OUT"
+bk --shell > /dev/null 2>&1; H2_RC=$?
+expect_status "H2.4 --shell with no value is a usage error" 2 "$H2_RC"
+bk --shell "" -- 'echo x' > /dev/null 2>&1; H2_RC=$?
+expect_status "H2.5 an empty --shell is a usage error" 2 "$H2_RC"
+
+newrow h3
+mkrepo "$ROW/repo"
+H3_STAMPS="$(stamps_of "$ROW/repo")"
+( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+    bash "$BOOKED" --shell "$H_SH" -- "echo 'it''s'; exit 5" ) >/dev/null 2>&1; H3_RC=$?
+expect_status "H3.1 under --shell the shim answers the command's code" 5 "$H3_RC"
+H3_LINE="$(tail -1 "$H3_STAMPS" 2>/dev/null)"
+expect_nonempty "H3.2 a stamp was written" "$H3_LINE"
+expect_regex "H3.3 the stamp's cmd= is the ORIGINAL command, not the shell form" \
+  "\\|rc=5\\|.*\\|cmd=echo 'it''s'; exit 5\$" "$H3_LINE"
+expect_absent "H3.4 …with no trace of the shell or the eval in it" "eval" "$H3_LINE"
 
 finish
