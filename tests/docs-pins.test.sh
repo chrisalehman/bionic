@@ -1698,6 +1698,7 @@ else
 fi
 expect_absent "92a1: …and no Ownership block of its own (it is the sub-view)" \
   "$(printf '\n  Ownership\n')" "$(printf '\n%s\n' "$CARD2")"
+anchor -E "$STEP2_MD" '^  Eval design' 1
 DOCTORED_STEP2_OWN="$TMP/step2-ownership-back.md"
 awk '/^  Eval design/ { print "  Ownership"; print "    <concept>    owner <module>"; print "" } { print }' \
   "$STEP2_MD" > "$DOCTORED_STEP2_OWN"
@@ -3798,6 +3799,24 @@ case "$T35_SECTION" in
        "section: ${T35_SECTION:-<absent>}" ;;
 esac
 
+# The optional `reads` column (wave-26 T2): each wall's Fix line says so after the twelve, and
+# the section above names it, so a table that carries it is not read as the wrong header.
+for _t35_src in "payload/scripts/lib/walls.sh" "hooks/canonical-sdlc-governing-skill.sh"; do
+  if /usr/bin/grep -F 'base | status. A reads column is optional and may sit anywhere in the header.' \
+       "${REPO}/${_t35_src}" >/dev/null 2>&1; then
+    ok "189b: ${_t35_src}'s Fix line says the reads column is optional"
+  else
+    no "189b: ${_t35_src}'s Fix line says the reads column is optional" "absent from ${_t35_src}"
+  fi
+done
+case "$T35_SECTION" in
+  *'the optional `reads` (below)'*)
+    ok "189c: …and operational-rules.md's sentence names the optional reads column beside the twelve" ;;
+  *)
+    no "189c: …and operational-rules.md's sentence names the optional reads column beside the twelve" \
+       "section: ${T35_SECTION:-<absent>}" ;;
+esac
+
 # Anti-vacuity: the pre-1.8.4 header (ten-plus-one, `status` before `worktree`, no `base`)
 # must read back UNEQUAL against the same derived expectation, and must fail 188's test —
 # proving 187/188 discriminate rather than passing on any pipe-delimited line.
@@ -4039,7 +4058,7 @@ rh_pin "RH3b: stop.sh's task-list comment points at env.sh, with no memory/ cita
 ub_span "$RH_UNITS_LIB" 'THE PROJECTOR UNDER `task-add`' '1\. THE ROW' > "$TMP/rh-units-raw.txt"
 expect_true "RH4-0: units.sh's projector span was found (non-empty)" test -s "$TMP/rh-units-raw.txt"
 rh_flat "$TMP/rh-units-raw.txt" > "$TMP/rh-units.txt"
-rh_pin "RH4: units.sh's projector comment carries its reason, with no retired note citation" "$TMP/rh-units.txt" "Both refuse the WRITER" "memory ${RH_N}ote"
+rh_pin "RH4: units.sh's projector comment carries its reason, with no retired note citation" "$TMP/rh-units.txt" "it refuses the WRITER, not the author of the row" "memory ${RH_N}ote"
 
 # RH5 — operational-rules.md doctrine lines.
 rh_flat "$RH_OPS" > "$TMP/rh-ops.txt"
@@ -4615,6 +4634,29 @@ for _w26_iface in \
   expect_nonempty "W26-14c: REQ-5 — operational-rules.md documents: ${_w26_iface%%;*}" \
     "$(w26_hits "$_w26_iface" "$OPRULES")"
 done
+
+# ============================================================
+# W26-15 (wave-26 T21, AC-8.2): the rule for test authors — no exact count of things in the
+# shipped tree — is written in the test-harness rules file, with both allowed forms.
+# ============================================================
+W26_15_RULES="${REPO}/.claude/rules/test-harness.md"
+W26_15_SENTENCE='No test pins an exact count of things in the shipped tree.'
+W26_15_REL='**A relation.**'
+W26_15_CEIL='**A ceiling.**'
+W26_15_OWN='exact number is fine when the number IS the behaviour'
+expect_nonempty "W26-15 precondition: the extractor reads the rules file (it carries its Anti-vacuity heading)" \
+  "$(w26_hits '## Anti-vacuity' "$W26_15_RULES")"
+expect_nonempty "W26-15: AC-8.2 — test-harness.md states the rule" \
+  "$(w26_hits "$W26_15_SENTENCE" "$W26_15_RULES")"
+expect_nonempty "W26-15b: …and names the relation form" "$(w26_hits "$W26_15_REL" "$W26_15_RULES")"
+expect_nonempty "W26-15c: …and names the ceiling form" "$(w26_hits "$W26_15_CEIL" "$W26_15_RULES")"
+expect_nonempty "W26-15d: …and says when an exact number stands" "$(w26_hits "$W26_15_OWN" "$W26_15_RULES")"
+W26_15_D="$TMP/w26-15-no-ceiling.md"
+grep -vF -- "$W26_15_CEIL" "$W26_15_RULES" > "$W26_15_D" 2>/dev/null
+expect_nonempty "W26-15m precondition: the doctored copy keeps the rule's sentence" \
+  "$(w26_hits "$W26_15_SENTENCE" "$W26_15_D")"
+expect_eq "W26-15m: …and a rules file naming no ceiling form is caught" "" \
+  "$(w26_hits "$W26_15_CEIL" "$W26_15_D")"
 
 section "Section W26b: wave-26 T20 — one moment for the full run, the minimal forms (REQ-3 AC-3.1 static, AC-3.6; REQ-4 AC-4.2, 4.3, 4.4; D15)"
 #
