@@ -157,8 +157,9 @@ land    ends the lease in one act: merges the tree's branch --no-ff into the
         or no bound plan, when the plan names no branch or a branch no one
         checkout holds, on a dirty tree, on nothing to land, or while a
         suite is running. The landing rule refuses not-current (work
-        landed since touches a file the tree changed), stale-proof (the
-        last green run is not at the tree's clean head), and, after the
+        landed since touches a file the tree changed), stale-proof (some
+        suite run at the tree's head was last red or dirty, or no run is at
+        the head, naming the suite), and, after the
         merge and undoing it, onto-moved (the branch moved after the last
         check), branch-moved (the tree's branch gained a commit) and
         onto-switched (the checkout was on another branch when it merged;

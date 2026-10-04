@@ -76,7 +76,7 @@ proof_head() {
   git -C "$wt" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null
 }
 
-# proof_attested <kind> <evidence file> <checkout> -> the 40-hex head the evidence attests, exit
+# proof_attested <kind> <evidence file> <checkout> [<plan>] -> the 40-hex head the evidence attests, exit
 # 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
 #   floor  a full run's log: its LAST `head=<sha> dirty=<n>` line, the header the suite runner
 #          prints before any suite, so the last run in the log is the one judged (T52). <sha>
@@ -86,9 +86,14 @@ proof_head() {
 #   review a review: its first `reviewed: <a>..<b>` line. <b> must resolve to a commit that is
 #          the checkout's HEAD or an ancestor of it; the proof names that commit — a review of an
 #          older head is a true proof of that older head, and what landed since is unread.
+#          <a> must be a commit on <b>'s history, and at or before what the plan already has
+#          read (a review proof only): its last review proof's head, or with none its base, so no
+#          commit between two review proofs goes unread (wave-26 T62; critic 2 K2-F2). With no
+#          <plan>, or a plan whose base names no commit here, the first review is held to the
+#          other checks alone.
 #   task   whichever of the two the evidence carries, the run header first (A-T14.9).
 proof_attested() {
-  local kind="$1" ev="$2" co="$3" head stamp sha dirty rng b bh verdict roster
+  local kind="$1" ev="$2" co="$3" plan="${4:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster
   head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
   stamp="$(awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { s = $0 } END { if (s != "") print s }' "$ev" 2>/dev/null)"
@@ -171,6 +176,29 @@ proof_attested() {
       printf 'the review in %s read up to %s, which is not on the working branch (at %s); review that branch and name its commit' \
         "$ev" "$(printf '%s' "$bh" | cut -c1-12)" "$(printf '%s' "$head" | cut -c1-12)"; return 1
     fi
+    # WHERE THE RANGE STARTS IS ATTESTED TOO (wave-26 T62; critic 2 K2-F2). Only its end was read,
+    # so `<head~1>..<head>`, or a start that is no commit at all, proved every commit before it.
+    a="${rng%%..*}"
+    case "$a" in
+      ''|*[!0-9a-fA-F]*) ah="" ;;
+      *) ah="$(git -C "$co" rev-parse --verify -q "$a^{commit}" 2>/dev/null)" ;;
+    esac
+    [ -n "$ah" ] \
+      || { printf 'the review in %s starts at %s, which is no commit here; name the commit it read from as reviewed: <a>..<b>' "$ev" "$a"; return 1; }
+    if ! git -C "$co" merge-base --is-ancestor "$ah" "$bh" 2>/dev/null; then
+      printf 'the review in %s starts at %s, which is not on the history of its end %s; name the range it read as reviewed: <a>..<b>' \
+        "$ev" "$(printf '%s' "$ah" | cut -c1-12)" "$(printf '%s' "$bh" | cut -c1-12)"; return 1
+    fi
+    if [ -n "$plan" ] && [ "$kind" = review ]; then
+      since="$(proof_last "$plan" review)"; what="the last review proof"
+      [ -n "$since" ] || { since="$(proof_plan_base "$plan")"; what="the plan's base"; }
+      sh=""; [ -n "$since" ] && sh="$(git -C "$co" rev-parse --verify -q "$since^{commit}" 2>/dev/null)"
+      if [ -n "$sh" ] && ! git -C "$co" merge-base --is-ancestor "$ah" "$sh" 2>/dev/null; then
+        printf 'the review in %s starts at %s, past %s %s, so what landed between them is unread; review %s..%s' \
+          "$ev" "$(printf '%s' "$ah" | cut -c1-12)" "$what" "$(printf '%s' "$sh" | cut -c1-12)" \
+          "$(printf '%s' "$sh" | cut -c1-12)" "$(printf '%s' "$bh" | cut -c1-12)"; return 1
+      fi
+    fi
     printf '%s' "$bh"; return 0
   fi
   case "$kind" in
@@ -179,6 +207,22 @@ proof_attested() {
     *) printf 'the evidence %s carries neither a head=<sha> dirty=<n> run header nor a reviewed: <a>..<b> line; cite a run log or a review' "$ev" ;;
   esac
   return 1
+}
+
+# proof_plan_base <plan> -> the commit the plan's run started from, as written, or nothing: the
+# first `base-sha:` inside its unfenced `## SDLC State` (the Step-4 block `current 4` fills), then
+# the frontmatter key of the same name. The first review proof starts at or before it (K2-F2).
+proof_plan_base() {
+  [ -f "$1" ] || return 0
+  awk '
+    NR == 1 && $0 == "---" { fm = 1; next }
+    fm && $0 == "---" { fm = 0; next }
+    fm && /^base-sha[ \t]*:/ { if (f == "") { f = $0; sub(/^base-sha[ \t]*:[ \t]*/, "", f); sub(/[ \t].*$/, "", f); gsub(/["\047]/, "", f) } next }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && /^[ \t]*base-sha[ \t]*:/ { v = $0; sub(/^[ \t]*base-sha[ \t]*:[ \t]*/, "", v); sub(/[ \t].*$/, "", v); print v; done = 1; exit }
+    END { if (!done && f != "") print f }' "$1"
 }
 
 # proof_awk -> the awk function `proof_fields(s)`, THE ONE READING OF A PROOF LINE (wave-26 T14;

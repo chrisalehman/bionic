@@ -96,8 +96,8 @@ run_hook() {
 # row that read "silent" for this wall reads exactly this instead: no deny and no advisory on
 # stdout (the object holds nothing but the event name and updatedInput), and the updated
 # command is the shim around the ORIGINAL command, byte for byte.
-expect_wrap_only() {  # <label> <command> [<options regex after --shell; default ( --quiet)?>]
-  local _cmd _s _r="'\\''" _o="${3-( --quiet)?}"
+expect_wrap_only() {  # <label> <command> [<options regex after --shell; default ( --quiet)?>] [<suites; default run\.sh>]
+  local _cmd _s _r="'\\''" _o="${3-( --quiet)?} --suites ${4-run\\.sh}"
   expect_eq "$1: …no deny and no advisory beside the booking wrap" '["hookEventName","updatedInput"]' \
     "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
   _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
@@ -440,8 +440,8 @@ wrapped_cmd() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.com
 reason_of() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null; }
 # first_fix — the reason's text from its FIRST "Fix: " to the end of that sentence's clause.
 first_fix() { local r; r="$(reason_of)"; case "$r" in *'Fix: '*) r="${r#*Fix: }"; printf '%s' "${r%% — *}" ;; esac; }
-kill_re() {  # <seconds> <command regex> — the wrap, carrying --kill-after <seconds>
-  printf '%s' "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --kill-after $1 -- $2\$"
+kill_re() {  # <seconds> <command regex> [<suites; default one\.test\.sh>] — the wrap, carrying --kill-after <seconds>
+  printf '%s' "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? --kill-after $1 --suites ${3-one\\.test\\.sh} -- $2\$"
 }
 
 # S1 (the eval): a one-file suite command with timeout 60000 is allowed and wrapped with a kill limit.
@@ -517,7 +517,7 @@ expect_regex "S5h: a short chain with a suite in the middle is wrapped too" \
   "$(kill_re 25 "'make && bash tests/one\\.test\\.sh && echo done'")" "$(wrapped_cmd)"
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "BIONIC_QUIET=1 $ONE")" 60000)"
 expect_regex "S5d: a short whole-machine suite carries --quiet and the kill limit" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --quiet --kill-after 55 -- " "$(wrapped_cmd)"
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --quiet --kill-after 55 --suites one\\.test\\.sh -- " "$(wrapped_cmd)"
 
 # A SHORT CALL THAT IS NOT TIER-1 IS LEFT ALONE: nothing to pass, so nothing to wrap or kill.
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" 'ls -la')" 5000)"
@@ -572,12 +572,12 @@ run_hook "$(with_timeout "$(mk_payload "$ADV" "$ONE")" 60000)"
 expect_regex "S9a: under advisory a short call passes with its kill limit" "$(kill_re 55 "'bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
 expect_empty "S9b: …and draws no nudge" "$(ctx_of)"
 run_hook "$(with_timeout "$(mk_payload "$OFFREPO" "$ONE")" 60000)"
-expect_wrap_only "S9c: under off the wrap carries no kill" "$ONE"
+expect_wrap_only "S9c: under off the wrap carries no kill" "$ONE" "( --quiet)?" "one\\.test\\.sh"
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "FARM_OUT_ALLOW=1 $ONE")" 60000)"
-expect_wrap_only "S9d: the override wins, no kill" "FARM_OUT_ALLOW=1 $ONE"
+expect_wrap_only "S9d: the override wins, no kill" "FARM_OUT_ALLOW=1 $ONE" "( --quiet)?" "one\\.test\\.sh"
 expect_contains "S9e: …and is audited" "farm-out [override] class=user-sanctioned" "$ERR"
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$ONE" Bash implementor)" 60000)"
-expect_wrap_only "S9f: a subagent's short call carries no kill" "$ONE"
+expect_wrap_only "S9f: a subagent's short call carries no kill" "$ONE" "( --quiet)?" "one\\.test\\.sh"
 run_hook "$(with_timeout "$(mk_payload "$PLAIN" "$ONE")" 60000)"
 expect_empty "S9g: an unengaged session's short call is untouched (beside S1)" "$OUT$ERR"
 
@@ -615,7 +615,7 @@ expect_contains "NL5: …naming the test-runner as the one-line form does" "Agen
 expect_empty "NL6: …and nothing is wrapped (beside NL7's wrap)" "$(wrapped_cmd)"
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "$NL_TWO")" 60000)"
 expect_regex "NL7: the two-line form with a short timeout is a short suite: wrapped with the kill limit" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --kill-after 55 -- " "$(wrapped_cmd)"
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --kill-after 55 --suites t\\.test\\.sh -- " "$(wrapped_cmd)"
 NL_PLAIN="$(printf 'true && true && true\necho done')"
 run_hook "$(mk_payload "$SHORTR" "$NL_PLAIN")"
 expect_status "NL8: the same chain with no suite on its next line exits 0" 0 "$ST"
