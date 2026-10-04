@@ -1500,6 +1500,28 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
     && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
   SCHED_WRITERS="$(budget_field "$SCHED_BUDGET" writers)"
   SCHED_JOBS="$(budget_field "$SCHED_BUDGET" test_jobs)"
+  sched_live_head "$1"
+}
+
+# THE WORKING BRANCH'S HEAD, the one fact the readiness program cannot read from the plan
+# (wave-26 T14; D10, review 5 F8). A `live:head` review is ready again once the head has moved
+# past the last `proved: kind=review` line, and the head lives in git: the tick reads it here,
+# from the checkout holding the plan's `working-branch:` (lib/proof.sh `proof_head`, the same
+# answer `proof-add` records), and hands it to every ready-set question this tick asks through
+# UNITS_LIVE_HEAD. Only a plan that carries a review proof needs it — before the first one, a
+# landed row is enough — so a tick on any other plan runs no git. No head (no branch, no
+# checkout) is no head: the review waits, saying so. The stop wall reads no git of its own, so
+# it hands in none (A-T14.2).
+sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
+  UNITS_LIVE_HEAD=""
+  [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
+  /usr/bin/grep -q '^[[:space:]-]*proved:.*kind=review' "$SCHED_PLAN" 2>/dev/null || return 0
+  if ! declare -F proof_head >/dev/null 2>&1; then
+    [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
+  fi
+  declare -F proof_head >/dev/null 2>&1 && declare -F proof_working_branch >/dev/null 2>&1 || return 0
+  UNITS_LIVE_HEAD="$(proof_head "$1" "$(proof_working_branch "$SCHED_PLAN")" 2>/dev/null)" || UNITS_LIVE_HEAD=""
+  return 0
 }
 
 # ── THE APPROVAL GATE (epic-21 T4, AC-5). A printed FILL is a dispatch instruction — the
@@ -4979,10 +5001,10 @@ EOF
   # or a review read, so the same code was proved again and again. A proof is one line under
   # `## SDLC State` — `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<record/ path>`
   # (payload/scripts/lib/proof.sh owns its shape and its reader, `proof_last`) — and what is
-  # unproved is the difference since the head it names. The head is `git rev-parse HEAD` of the
-  # checkout holding the plan's `working-branch:`, never an operand. The line goes in through
-  # the shared transaction; every refusal below leaves the plan byte-identical and names its
-  # fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
+  # unproved is the difference since the head it names. The head is the one the evidence attests
+  # (its run header or its reviewed: range, held against the working-branch checkout; T14),
+  # never an operand. The line goes in through the shared transaction; every refusal below
+  # leaves the plan byte-identical and names its fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
   # the tick never reads it, so it is not one of the libraries every verb needs.
   proof-add)
     if ! { declare -F proof_last >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -5031,13 +5053,42 @@ EOF
         die "REFUSED — no checkout of $PV_REPO has working-branch $(clean "$PF_WB") checked out, so its head cannot be read; check the branch out (its worktree) and run proof-add again. The plan is unchanged."
         exit 1 ;;
     esac
+    # THE HEAD IS THE ONE THE EVIDENCE READ (wave-26 T14; review 7 F1). The checkout's head only
+    # bounds it: a run's log must have read exactly that head on a clean tree, a review a commit
+    # on its history, and the proof names what the evidence attests (lib/proof.sh
+    # `proof_attested`). A task landed between the run and this verb is not proved by it.
+    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$(proof_checkout "$PV_REPO" "$PF_WB")")"; then
+      die "REFUSED — $(clean "$PF_HEAD"). The plan is unchanged."
+      exit 1
+    fi
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL")"
     if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the proof; the plan is unchanged."
       exit 1
     fi
+    # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING (wave-26 T14; D10). Every active
+    # review row reading `live:head` (`units_live_rows`, the kind default included) returns to
+    # `pending` in the same write, with its agent, worktree and base cells cleared: the row is
+    # one row across every pass, each pass its own launch — the launch recorder sets it active
+    # again and adds that pass's ledger line, so the ledger is not touched here (A-T14.4). The
+    # next landing past this proof makes it ready again (units.sh `live_head`).
+    PF_BACK=""
+    if [ "$PF_KIND" = review ]; then
+      for _pf_id in $(units_live_rows "$PV_NEW" 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { print $1 }'); do
+        _pf_cells=(status=pending agent=—)
+        units_has_column "$PV_NEW" worktree && _pf_cells+=(worktree=—)
+        units_has_column "$PV_NEW" base && _pf_cells+=(base=—)
+        if ! units_table_cells "$PV_NEW" set tasks "$_pf_id" "${_pf_cells[@]}" > "$PV_NEW.back" 2>/dev/null || [ ! -s "$PV_NEW.back" ]; then
+          rm -f "$PV_NEW.back"
+          die "REFUSED — review row $_pf_id could not be returned to pending in $PV_PLAN; the plan is unchanged."
+          exit 1
+        fi
+        mv "$PV_NEW.back" "$PV_NEW"
+        PF_BACK="${PF_BACK:+$PF_BACK }$_pf_id"
+      done
+    fi
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
-    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL: written to $PV_PLAN; dry-committed first."
+    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
     exit 0
     ;;
 

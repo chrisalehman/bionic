@@ -906,8 +906,8 @@ section "§11 NESTED — a solo suite takes the whole machine; a nested run neve
 #   (c) the take really waits: a foreign holder of another place delays the solo suite
 #       until that holder is gone.
 #   (d) VOID: a run during which the load rose is re-run; still disturbed after two
-#       retries, the suite is reported void, never failed. One disturbed run followed by a
-#       clean one is an ordinary pass.
+#       retries, a suite that passed is reported void, never failed. One disturbed run
+#       followed by a clean one is an ordinary pass.
 #   (e) HELD TRAVELS WITH ITS PLACE: a solo suite is handed BIONIC_SLOT_PLACE naming a
 #       place its hold covers, whether the run was booked or took the machine itself; and
 #       two booked runs that each reach their solo drain together both complete, the second
@@ -919,6 +919,9 @@ section "§11 NESTED — a solo suite takes the whole machine; a nested run neve
 #       the load, measured from the CPU its worker used; its own load alone never voids it.
 #   (h) A STORE THAT CANNOT BE WRITTEN (review 4 F5): the suite is reported VOID at once,
 #       and the reason names the store, not a drain that never happened.
+#   (i) A VOID SUITE THAT FAILED IS A FAILURE (wave-26 T43; review 8 F1): on every path that
+#       can void a suite, a suite whose last run failed fails the run, is counted once in the
+#       fail tally, and carries its void reason on its failure line.
 
 RRN_BOOKED="$REPO/payload/scripts/booked.sh"
 expect_true "11.0 the shim the outer run is booked through exists" test -f "$RRN_BOOKED"
@@ -1259,6 +1262,157 @@ expect_eq "11.69 …the suite still ran once, so its output is there to read" "1
   "$(awk 'END { print NR + 0 }' "$RRN_MARKS/store.runs" 2>/dev/null)"
 expect_true "11.70 …at once, not after the maximum wait (took ${RRN_SDT}s, wait 30s)" \
   test "$RRN_SDT" -le 15
+
+# ---- (i) A VOID SUITE THAT FAILED IS A FAILURE ------------------------------
+# A void says the suite's timing was not measured; it says nothing about its rows. Until T43
+# the runner judged a void before it judged the exit status, so a solo suite that failed on
+# a busy machine was counted in neither tally and the run exited 0. The suite here reads a
+# plan, one word per try (the last word repeats): `<outcome>:<load>`. The outcome is pass,
+# fail (a planted row that fails) or lost (a call to a helper that does not exist, which
+# exits 0); the load is clean, void (raised, and lowered three seconds later, as (d) does)
+# or stuck (raised for good). Each drive has an id, and a lowering happens only while its
+# own drive is the current one, so a late one cannot lower a later drive's raised load.
+TNX="$RRN/void-fail"
+rr_tree "$TNX"
+rr_stub "$TNX" "x-plain"
+cat > "$TNX/tests/aaa-vfail.test.sh" <<'RRX_SUITE'
+#!/bin/bash
+# runner: solo
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+section "aaa-vfail"
+printf "run\n" >> "$RRN_MARKS/vf.runs"
+n="$(awk 'END { print NR + 0 }' "$RRN_MARKS/vf.runs")"
+step="$(awk -v n="$n" '{ print (n <= NF ? $n : $NF) }' "$RRN_MARKS/vf.plan")"
+id="$(cat "$RRN_MARKS/vf.id")"
+case "$step" in
+  *:void)
+    printf "99\n" > "$RRN_LOAD"
+    ( sleep 3; [ "$(cat "$RRN_MARKS/vf.id" 2>/dev/null)" = "$id" ] && printf "0\n" > "$RRN_LOAD" ) >/dev/null 2>&1 & ;;
+  *:stuck) printf "99\n" > "$RRN_LOAD" ;;
+esac
+case "$step" in
+  fail:*) expect_eq "the planted row" "pass" "fail" ;;
+  lost:*) rrx_helper_that_does_not_exist ;;
+esac
+expect_eq "aaa-vfail ran" "x" "x"
+finish
+RRX_SUITE
+RRX_ID=0
+rrx_prep() {  # <plan> <load at start> — a fresh drive: no marks, no store, a new id
+  rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"; printf '%s\n' "$2" > "$RRN_LOAD"
+  RRX_ID=$((RRX_ID + 1)); printf '%s\n' "$RRX_ID" > "$RRN_MARKS/vf.id"
+  printf '%s\n' "$1" > "$RRN_MARKS/vf.plan"
+}
+rrx_runs() { awk 'END { print NR + 0 }' "$RRN_MARKS/vf.runs" 2>/dev/null || echo 0; }
+rrx_gating() { printf '%s\n' "$RRN_OUT" | grep '^Gating: '; }
+rrx_sum() { rrx_gating | awk '{ print $2 + $4 }'; }  # passed + failed
+# The entries of one summary block: its heading line and the `    - ` lines under it.
+rrx_block() { printf '%s\n' "$RRN_OUT" | awk -v h="^$1:" '$0 ~ h { on = 1; print; next } on && /^    - / { print; next } { on = 0 }'; }
+RRX_SUITES="$(rr_glob "$TNX" | awk 'END { print NR + 0 }')"
+expect_eq "11.71 precondition: the fixture tree holds two suites, one solo" "2 1" \
+  "$RRX_SUITES $(grep -l '^# runner: solo' "$TNX"/tests/*.test.sh | awk 'END { print NR + 0 }')"
+
+# A suite that failed on every try, and every try disturbed: the defect itself.
+rrx_prep "fail:void" 0
+rrn_drive "$TNX" 2 20 bash tests/run.sh
+expect_eq "11.72 a solo suite that failed and was void fails the run" "1" "$RRN_RC"
+expect_true "11.73 …every try was disturbed: it was re-run" test "$(rrx_runs)" -ge 2
+expect_contains "11.74 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
+expect_contains "11.75 …with its void reason beside it: its timing was not measured either" \
+  "VOID (timing not measured: the load rose" "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.76 the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
+expect_eq "11.77 …so the tallies add up to the suites run" "$RRX_SUITES" "$(rrx_sum)"
+expect_contains "11.78 it is listed under Failed:" "- aaa-vfail.test.sh" "$(rrx_block Failed)"
+expect_contains "11.79 …with its void reason" "timing not measured" "$(rrx_block Failed)"
+expect_eq "11.80 …and not also under Void: (counted once; 11.87 is the positive)" "" "$(rrx_block Void)"
+expect_absent "11.81 …and the run does not say no gating suite failed (11.88 is the positive)" \
+  "No gating suite failed" "$RRN_OUT"
+
+# A suite that passed on every try, every try disturbed: void, as before T43.
+rrx_prep "pass:void" 0
+rrn_drive "$TNX" 2 20 bash tests/run.sh
+expect_eq "11.82 a solo suite that passed and was void does not fail the run" "0" "$RRN_RC"
+expect_true "11.83 …every try was disturbed: it was re-run" test "$(rrx_runs)" -ge 2
+expect_contains "11.84 …its verdict line reads VOID" "~ VOID (timing not measured" "$(rrn_line aaa-vfail.test.sh)"
+expect_absent "11.85 …not FAIL" "FAIL" "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.86 the Gating line counts it in neither tally" "Gating: 1 passed, 0 failed" "$(rrx_gating)"
+expect_contains "11.87 …it is listed under Void:" "- aaa-vfail.test.sh" "$(rrx_block Void)"
+expect_contains "11.88 …the run says no gating suite failed, and one is void" \
+  "No gating suite failed; 1 void" "$RRN_OUT"
+expect_eq "11.89 …so the tallies and the void list add up to the suites run" "$RRX_SUITES" \
+  "$(( $(rrx_sum) + $(rrx_block Void | grep -c '^    - ') ))"
+expect_eq "11.90 …and nothing is listed under Failed: (11.78 is the positive)" "" "$(rrx_block Failed)"
+
+# A suite that failed and was never disturbed: a plain failure, as before T43.
+rrx_prep "fail:clean" 0
+rrn_drive "$TNX" 2 20 bash tests/run.sh
+expect_eq "11.91 a solo suite that failed undisturbed fails the run" "1" "$RRN_RC"
+expect_eq "11.92 …it ran once" "1" "$(rrx_runs)"
+expect_contains "11.93 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
+expect_absent "11.94 …with no void reason" "VOID" "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.95 …and the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
+
+# THE RETRY: the last try's result stands, because each try rewrites the suite's capture.
+rrx_prep "fail:void pass:clean" 0
+rrn_drive "$TNX" 2 20 bash tests/run.sh
+expect_eq "11.96 failed and disturbed, then passed undisturbed: the run is green" "0" "$RRN_RC"
+expect_eq "11.97 …it ran twice" "2" "$(rrx_runs)"
+expect_contains "11.98 …and its verdict line reads PASS" "✓ PASS" "$(rrn_line aaa-vfail.test.sh)"
+rrx_prep "pass:void fail:clean" 0
+rrn_drive "$TNX" 2 20 bash tests/run.sh
+expect_eq "11.99 passed and disturbed, then failed undisturbed: the run fails" "1" "$RRN_RC"
+expect_eq "11.100 …it ran twice" "2" "$(rrx_runs)"
+expect_contains "11.101 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
+expect_absent "11.102 …and the measured try carries no void reason" "VOID" "$(rrn_line aaa-vfail.test.sh)"
+
+# THE CEILING RAN OUT BEFORE A RETRY: the one disturbed run's failure stands.
+rrx_prep "fail:stuck" 0
+rrn_drive "$TNX" 2 3 bash tests/run.sh
+expect_eq "11.103 failed, disturbed, and no room for a retry: the run fails" "1" "$RRN_RC"
+expect_eq "11.104 …it ran once" "1" "$(rrx_runs)"
+expect_contains "11.105 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
+expect_contains "11.106 …saying the ceiling ran out" "ran out before a retry could start" \
+  "$(rrn_line aaa-vfail.test.sh)"
+
+# THE SETTLE GAVE UP ON THE FIRST TRY: the suite ran once, unbooked, and failed.
+rrx_prep "fail:clean" 99
+rrn_drive "$TNX" 2 2 bash tests/run.sh
+expect_eq "11.107 failed after a settle that gave up: the run fails" "1" "$RRN_RC"
+expect_eq "11.108 …it ran once" "1" "$(rrx_runs)"
+expect_contains "11.109 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
+expect_contains "11.110 …saying the load never settled" "never settled" "$(rrn_line aaa-vfail.test.sh)"
+
+# A STORE THAT CANNOT BE WRITTEN: the suite ran once, unbooked, and failed.
+rrx_prep "fail:clean" 0
+rm -rf "$RRN_RO"; mkdir -p "$RRN_RO"; chmod 555 "$RRN_RO"
+RRN_SAVE="$RRN_SLOTS"; RRN_SLOTS="$RRN_RO"
+rrn_drive "$TNX" 2 30 bash tests/run.sh
+RRN_SLOTS="$RRN_SAVE"
+chmod 755 "$RRN_RO"
+expect_eq "11.111 failed with a store that cannot be written: the run fails" "1" "$RRN_RC"
+expect_eq "11.112 …it ran once" "1" "$(rrx_runs)"
+expect_contains "11.113 …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
+expect_contains "11.114 …naming the store" "the store $RRN_RO could not be written" \
+  "$(rrn_line aaa-vfail.test.sh)"
+
+# EXITED 0 OVER A COMMAND THAT WAS NOT FOUND, every try disturbed: a failure too.
+rrx_prep "lost:void" 0
+rrn_drive "$TNX" 2 20 bash tests/run.sh
+expect_eq "11.115 exited 0 but lost a command, and void: the run fails" "1" "$RRN_RC"
+expect_contains "11.116 …its verdict line names the lost command" "a command it called was not found" \
+  "$(rrn_line aaa-vfail.test.sh)"
+expect_contains "11.117 …and its void reason" "VOID (timing not measured" "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.118 …and the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
+
+# --serial takes nothing and voids nothing: a disturbed failure is a plain failure there.
+rrx_prep "fail:void" 0
+rrn_drive "$TNX" 2 20 bash tests/run.sh --serial
+expect_eq "11.119 --serial: a solo suite that failed fails the run" "1" "$RRN_RC"
+expect_contains "11.120 --serial: …its verdict line reads FAIL" "✗ FAIL" "$(rrn_line aaa-vfail.test.sh)"
+expect_absent "11.121 --serial: …with no void reason, since nothing was checked" "VOID" \
+  "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.122 --serial: …and the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
 
 # ============================================================
 section "§TIMING a nested run writes no rows into the outer run's timing file (wave-26 T26; D20, AC-10.2)"
