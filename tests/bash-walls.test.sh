@@ -2174,7 +2174,8 @@ wait_ceiling_of() {  # the staged wrap's --max-wait value, or empty
 # The shim's default when the wrap names none: 1200 s unless BIONIC_SLOTS_MAX_WAIT says otherwise.
 WC_DEFAULT=1200
 R_WC="$(mk_repo waitceil)"
-arm_roster "$R_WC"
+# ON THE BUDGET (wave-27 T5, D15): an agent suite with no recorded set is refused, never wrapped.
+bw_dispatched "$R_WC" twaitceil suites_allowed=x.test.sh suites_source=declared files=
 # (a) the eval: an agent's suite call with no timeout, raised by ARM R to 600 000 ms.
 run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" \
   BASH_MAX_TIMEOUT_MS=600000
