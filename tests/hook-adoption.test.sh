@@ -116,6 +116,7 @@ stop-orders|open|no
 session-sweeper|open|no
 stop-check|open|no
 engage|open|no
+permission-answer|open|yes
 '
 
 section "0 — the carrier and non-vacuity"
@@ -206,7 +207,7 @@ expect_eq "no hook still defines a private resolve_project_root (POKER landed th
 # so the ask is now either call, and a hook that resolves no root at all still fails.
 # ONE LINE, and it has to be: the membership test below is a `case` glob on `" $name "`,
 # and a newline between two names is not the space that pattern needs.
-CTX_CALLERS=" agent-context-guard bash-walls canonical-sdlc-governing-skill dispatch-preflight execution-recorder session-start stop stop-guard "
+CTX_CALLERS=" agent-context-guard bash-walls canonical-sdlc-governing-skill dispatch-preflight execution-recorder permission-answer session-start stop stop-guard "
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
@@ -244,7 +245,7 @@ section "3 — one session id: every reader asks the library"
 # rather than the list being shortened: a hook that asks for NEITHER still fails.
 SID_VIA_LIB='agent-context-guard bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
-stop session-start stop-guard'
+stop session-start stop-guard permission-answer'
 SID_DIRECT='preflight-probe stop-orders session-sweeper stop-check engage'
 SID_READERS="$SID_VIA_LIB
 $SID_DIRECT"
@@ -573,6 +574,9 @@ payload_for() {
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,agent_id:"aw1impl-1111111111111111",hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"echo hi"}}' ;;
     session-start)
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"SessionStart",source:"startup"}' ;;
+    # The carrier's question: a command whose rm target is a variable, which it answers deny.
+    permission-answer)
+      jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PermissionRequest",tool_name:"Bash",tool_input:{command:"rm -f $TR"},permission_suggestions:[]}' ;;
   esac
 }
 
@@ -695,7 +699,9 @@ section "5c — THE ENGAGEMENT SWITCH gates every hook, uniformly (task-engaged-
 # The roster is the seven hooks task-engaged-session T2 moved behind the switch.
 # canonical-sdlc-evidence-gate, canonical-sdlc-governing-skill and farm-out-reminder are
 # T3's and join this list with their own guard, in their own commit.
-ENGAGEMENT_SCOPED='dispatch-preflight execution-recorder stop-guard stop'
+# permission-answer joined at wave-25 T4: the carrier answers only an engaged session, and
+# the stock dialog is what a bystander gets.
+ENGAGEMENT_SCOPED='dispatch-preflight execution-recorder stop-guard stop permission-answer'
 
 for hook in $ENGAGEMENT_SCOPED; do
   # an OPEN run, every precondition seeded, and the marker deliberately removed
@@ -802,7 +808,7 @@ section "5d — ONE session-id guard: a malformed or empty key silences all fift
 
 GUARD_FIFTEEN='agent-context-guard bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
-stop session-start stop-guard'
+stop session-start stop-guard permission-answer'
 
 # A wall for agent-context-guard to hand its payload to: it takes the wall's path as $1 and
 # exits 0 without one, so every row below it would be silent for the wrong reason.
@@ -1092,6 +1098,67 @@ drive_broken_home bash-walls "$FH" "$(bash_payload_at 'git push origin main' "$F
 expect_eq "the compound keeps protect-main's every-project reach: push refused with no .bionic (exit 2)" "2" "$DRV_ST"
 drive_broken_home bash-walls "$FH" "$(bash_payload_at 'ls' "$FH/plain/deep")"
 expect_eq "…and refuses [ls] there too — it cannot read the command it must classify" "2" "$DRV_ST"
+
+section "§DENY — the one sanctioned difference: after engagement, the carrier's failures answer deny"
+#
+# THE DIFFERENCE, AND WHY IT IS SANCTIONED RATHER THAN BENT INTO THE LOADER (epic-23
+# wave-25-never-paused, spec D8; T4). Every hook above either steps aside or refuses when it
+# cannot work, and §1 holds each to one of the two. hooks/permission-answer.sh answers the
+# platform's permission question, and for it stepping aside means the stock dialog: in an
+# unattended run, the halt the hook exists to remove. So its direction is split at the one
+# fact that decides who may answer at all. BEFORE engagement is established it is an `open`
+# hook like the rest — the loader's fail-open arm, silent, byte-identical block (§1 holds that
+# too). AFTER engagement and the switch are established, an exit trap turns every exit that
+# has printed no decision into a DENY naming the failure, rc 0. The canonical loader block is
+# untouched; the difference lives below it, in that one file, and this section is where it
+# is recorded and held.
+#
+# THE SANCTIONED SET IS ONE HOOK, and it is derived as well as named: a hook that prints a
+# PermissionRequest decision is a hook whose silence is a dialog, so it must be on this list,
+# and nothing else may be.
+DENY_SANCTIONED='permission-answer'
+DENY_ACTUAL=$(/usr/bin/grep -l 'hookEventName:"PermissionRequest"' "$HOOKS"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the hooks that print a PermissionRequest decision are exactly the sanctioned set" \
+  "$DENY_SANCTIONED" "$DENY_ACTUAL"
+PA_HOOK="$HOOKS/permission-answer.sh"
+# THE ORDER IS THE DIFFERENCE: the trap is armed only below the engagement guard, the switch
+# and the human-input pass-through, so nothing before engagement can answer.
+pa_line() { /usr/bin/grep -n -m1 -F -- "$1" "$PA_HOOK" 2>/dev/null | cut -d: -f1; }
+PA_L_GUARD="$(pa_line '[ "$BIONIC_ENGAGED" = 1 ] || exit 0')"
+PA_L_SWITCH="$(pa_line 'permission-answers true')"
+PA_L_HUMAN="$(pa_line 'AskUserQuestion|ExitPlanMode) exit 0')"
+PA_L_TRAP="$(pa_line "trap '_pa_on_exit' EXIT")"
+expect_nonempty "the carrier's engagement guard, switch, pass-through and trap are all found (not vacuous)" \
+  "${PA_L_GUARD:+g}${PA_L_SWITCH:+s}${PA_L_HUMAN:+h}${PA_L_TRAP:+t}"
+expect_eq "…and the trap is armed below all three" "yes" \
+  "$([ -n "$PA_L_TRAP" ] && [ "${PA_L_GUARD:-99999}" -lt "$PA_L_TRAP" ] \
+       && [ "${PA_L_SWITCH:-99999}" -lt "$PA_L_TRAP" ] && [ "${PA_L_HUMAN:-99999}" -lt "$PA_L_TRAP" ] \
+       && echo yes || echo no)"
+
+# DRIVEN, both halves, on one engaged fixture with a payload the carrier cannot read.
+PA_ROOT=$(mk_root pa-deny open)
+seed_hook permission-answer "$PA_ROOT"
+PA_FX_OUT="$(cd "$PA_ROOT" && printf '%s' '{"tool_name":"Bash","tool_input":' | env HOME="$SANDBOX/home" \
+    BIONIC_PLUGINS_DIR="$SANDBOX/plugins" CLAUDE_CODE_SESSION_ID="$SID" bash "$PA_HOOK" 2>/dev/null)"
+PA_FX_ST=$?
+expect_eq "engaged, unreadable payload: the carrier exits 0" "0" "$PA_FX_ST"
+expect_eq "…and answers DENY, where every other hook would step aside" "deny" \
+  "$(printf '%s' "$PA_FX_OUT" | jq -r '.hookSpecificOutput.decision.behavior // "none"' 2>/dev/null)"
+# The same payload in the same project, the session NOT engaged: silent, like the fleet.
+rm -f "$PA_ROOT/.bionic/tmp/engaged-$SID.state"
+PA_FX_OUT="$(cd "$PA_ROOT" && printf '%s' '{"tool_name":"Bash","tool_input":' | env HOME="$SANDBOX/home" \
+    BIONIC_PLUGINS_DIR="$SANDBOX/plugins" CLAUDE_CODE_SESSION_ID="$SID" bash "$PA_HOOK" 2>/dev/null)"
+PA_FX_ST=$?
+expect_eq "not engaged, the same payload: exit 0" "0" "$PA_FX_ST"
+expect_empty "…and nothing on stdout: before engagement it is an open hook" "$PA_FX_OUT"
+# And a broken install, engaged or not, is the loader's fail-open arm: silent, one stderr line.
+: > "$PA_ROOT/.bionic/tmp/engaged-$SID.state"
+cp "$PA_HOOK" "$BROKEN/hooks/permission-answer.sh"
+drive_broken permission-answer "$(payload_for permission-answer "$PA_ROOT")"
+expect_eq "no library, engaged project: exit 0" "0" "$DRV_ST"
+expect_empty "…nothing on stdout (engagement cannot be read, so nothing is claimed)" "$DRV_OUT"
+expect_contains "…and the loader's one line names the library" "library" "$DRV_ERR"
 
 # ---------------------------------------------------------------------------
 # §EXEC — every command hooks.json registers is EXECUTABLE (T3 re-drive finding 3,

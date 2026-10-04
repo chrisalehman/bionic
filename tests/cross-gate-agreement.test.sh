@@ -3076,6 +3076,7 @@ SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
 Stop||${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh|10
 PreToolUse|Skill|${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
 UserPromptExpansion||${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
+PermissionRequest||${CLAUDE_PLUGIN_ROOT}/hooks/permission-answer.sh|10
 '
 while IFS= read -r _row; do
   [ -n "$_row" ] || continue
@@ -3084,6 +3085,14 @@ while IFS= read -r _row; do
 done <<L2EOF
 $L2_EXPECTED
 L2EOF
+# THE CARRIER IS ON PermissionRequest AND NOWHERE ELSE (wave-25 T4; AC-5.2, spec D1). The
+# question it answers is asked only when the platform would show a dialog; registered on
+# PreToolUse too it would judge calls that run with no dialog, and a call that would have run
+# unasked must run exactly as before. Every row naming the file is read, so a second
+# registration on any event fails here, not only a PreToolUse one.
+expect_eq "the permission carrier is registered exactly once, on PermissionRequest only, timeout 10" \
+  'PermissionRequest||${CLAUDE_PLUGIN_ROOT}/hooks/permission-answer.sh|10' \
+  "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -F '/hooks/permission-answer.sh')"
 
 # --- L.3 EXACTLY ONCE PER (hook, event, matcher) ---
 #
@@ -3738,7 +3747,7 @@ done
 # hooks/bash-walls.sh, whose bodies are functions of payload/scripts/lib/walls.sh.
 N_CTX_FIFTEEN='agent-context-guard bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
-session-start stop stop-guard'
+session-start stop stop-guard permission-answer'
 
 for _h in $N_CTX_FIFTEEN; do
   expect_eq "$_h.sh asks lib/context.sh:bionic_context for its context" "yes" \
@@ -3842,7 +3851,13 @@ ctx_ladder_carriers() {  # <hooks-dir> <names…> -> basenames reading a rung be
 # directory is not documented to be the session's. It is exempt from the row below and held
 # by the two rows after it instead: exactly one such read, and no CLAUDE_PROJECT_DIR at all.
 # An exemption that grew to a second read, or to rung 1, fails.
-N_CTX_LADDER_EXEMPT='canonical-sdlc-governing-skill'
+# THE SECOND, FOR THE SAME QUESTION (wave-25 T4). hooks/permission-answer.sh hands the command
+# reader the directory the asking agent's command runs in, so its relative targets resolve
+# where the shell will resolve them: where the action was issued from, never which project
+# the hook is scoped to (that is still the ladder's, through bionic_context). Held by the
+# same two rows: one payload-cwd read, no rung 1.
+N_CTX_LADDER_EXEMPT='canonical-sdlc-governing-skill
+permission-answer'
 # A `grep -v`, not a `case`: a one-line `case` inside a command substitution is the shape
 # this suite's own §case row forbids, and bash refuses to parse it here too.
 N_CTX_LADDER_SWEPT=$(printf '%s\n' $N_CTX_FIFTEEN \
@@ -3872,8 +3887,8 @@ N_CTX_COUNT=$(printf '%s\n' $N_CTX_FIFTEEN | /usr/bin/grep -c .)
 expect_eq "…and the ladder sweep found a source line and a body in every one of them" \
   "$N_CTX_COUNT" "$N_CTX_READABLE"
 expect_true "…over a roster that is not empty" test "$N_CTX_COUNT" -ge 6
-expect_eq "…of which all but one are swept and that one is the declared exemption" \
-  "$((N_CTX_COUNT - 1))" \
+expect_eq "…of which all but the declared exemptions are swept" \
+  "$((N_CTX_COUNT - $(printf '%s\n' $N_CTX_LADDER_EXEMPT | /usr/bin/grep -c .)))" \
   "$(printf '%s\n' $N_CTX_LADDER_SWEPT | wc -l | tr -d ' ')"
 
 # MUTATION — an absence row passes as happily when the detector is broken as when the tree
@@ -3907,7 +3922,7 @@ expect_eq "…and a hook that reaches for a rung below its sources is caught" \
 # hooks/bash-walls.sh, whose bodies are functions of payload/scripts/lib/walls.sh.
 N_SID_VIA_CTX='agent-context-guard bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
-session-start stop stop-guard'
+session-start stop stop-guard permission-answer'
 N_SID_DIRECT='engage preflight-probe session-sweeper stop-check stop-orders'
 N_SID_READERS="$N_SID_VIA_CTX
 $N_SID_DIRECT"
@@ -3985,7 +4000,7 @@ expect_eq "the via-the-library roster names every hook that calls bionic_context
 # THE FIVE PreToolUse|Bash WALLS ARE ONE FILE (epic-23 wave-11-lean-spine, T23):
 # hooks/bash-walls.sh, whose bodies are functions of payload/scripts/lib/walls.sh.
 N_ENGAGED_READERS='agent-context-guard bash-walls
-dispatch-preflight execution-recorder stop-guard'
+dispatch-preflight execution-recorder stop-guard permission-answer'
 N_ENGAGED_OWN_ROOT='canonical-sdlc-governing-skill'
 N_ENGAGED_DATA='session-poker session-start'
 
@@ -10894,6 +10909,14 @@ expect_eq "AP.1 log_finding is defined in exactly one file under hooks/ + payloa
   "1" "$(ap_count log_finding "$AP_TREE/hooks" "$AP_SCRIPTS" "$AP_LIB")"
 expect_eq "AP.1 …and that file is payload/scripts/lib/root.sh" \
   "$AP_LIB/root.sh" "$(ap_where log_finding)"
+# THE ANSWER LOG'S PAIR (wave-25 T4, spec D9) lives beside audit_path for the same reason
+# audit_path does, and is held the same way: one definition each, owner named.
+for _apfn in answers_path log_answer; do
+  expect_eq "AP.1 $_apfn is defined in exactly one file under hooks/ + payload/" \
+    "1" "$(ap_count "$_apfn" "$AP_TREE/hooks" "$AP_SCRIPTS" "$AP_LIB")"
+  expect_eq "AP.1 …and that file is payload/scripts/lib/root.sh" \
+    "$AP_LIB/root.sh" "$(ap_where "$_apfn")"
+done
 
 # --- (b) THE FORMER CARRIERS CARRY NOTHING. Named one by one rather than inferred from the
 # count, so that a re-introduced copy says WHICH file grew it back. ---
@@ -10939,6 +10962,17 @@ expect_contains "AP.3 log_finding echoes the finding to stderr" \
 expect_contains "AP.3 …and appends it to the audit file the caller's contract addressed" \
   "ap-fixture ap-check: a detail ($AP_PROJ/plan.md)" \
   "$(cat "$AP_H/.claude/logs/My-Proj--$AP_SUM/sdlc-audit.md" 2>/dev/null)"
+expect_eq "AP.3 answers_path names permission-answers.log in audit_path's own directory" \
+  "$AP_H/.claude/logs/My-Proj--$AP_SUM/permission-answers.log" \
+  "$( ( HOME="$AP_H"; . "$AP_LIB/root.sh" >/dev/null 2>&1; answers_path "$AP_PROJ" ) 2>/dev/null )"
+AP_LA_ERR="$( ( HOME="$AP_H"; . "$AP_LIB/root.sh" >/dev/null 2>&1
+    log_answer "$AP_PROJ" "an answer line" ) 2>&1 >/dev/null )"
+expect_contains "AP.3 log_answer appends the line to that file" "an answer line" \
+  "$(cat "$AP_H/.claude/logs/My-Proj--$AP_SUM/permission-answers.log" 2>/dev/null)"
+expect_eq "AP.3 …and, unlike log_finding, says nothing on stderr (its caller owns stdout and stderr)" \
+  "" "$AP_LA_ERR"
+( HOME=""; . "$AP_LIB/root.sh" >/dev/null 2>&1; log_answer "$AP_PROJ" "x" ) >/dev/null 2>&1
+expect_eq "AP.3 …and with no \$HOME it reports failure (rc 1) rather than writing anywhere" "1" "$?"
 
 # --- (d) THE MUTATION ARM: the count discriminates. A throwaway tree laid out like the
 # shipped one, with ONE extra carrier re-growing all three definitions — the exact drift
@@ -10951,8 +10985,10 @@ cp "$AP_LIB/root.sh" "$AP_LIB/run.sh" "$AP_MUT/scripts/lib/"
   printf 'audit_path() {\n  :\n}\n'
   printf 'normalize_newlines() {\n  :\n}\n'
   printf 'log_finding() {\n  :\n}\n'
+  printf 'answers_path() {\n  :\n}\n'
+  printf 'log_answer() {\n  :\n}\n'
 } > "$AP_MUT/hooks/a-carrier-that-grew-them-back.sh"
-for _apfn in audit_path normalize_newlines log_finding; do
+for _apfn in audit_path normalize_newlines log_finding answers_path log_answer; do
   expect_eq "AP.4 a second carrier of $_apfn reads as 2, so AP.1 can go red" \
     "2" "$(ap_count "$_apfn" "$AP_MUT/hooks" "$AP_MUT/scripts" "$AP_MUT/scripts/lib")"
 done
