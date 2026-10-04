@@ -1131,7 +1131,9 @@ brief_body_advisories() {
       return (index(RUNS, b) > 0)
     }
     function glob_re(g) {
-      gsub(/[.+^$(){}|\\]/, "\\\\&", g); gsub(/\*/, ".*", g); gsub(/\?/, ".", g)
+      # A BRACKET IS A PLAIN CHARACTER (review 7 F4), as units.sh reads one: left unescaped it
+      # opened a class awk could not close, and the whole advisory program died with rc 2.
+      gsub(/[.+^$(){}|\\]/, "\\\\&", g); gsub(/\[/, "\\\\&", g); gsub(/\*/, ".*", g); gsub(/\?/, ".", g)
       return "^" g "$"
     }
     function in_files(p,   n, parts, i, e, ls, lp) {
@@ -1643,9 +1645,9 @@ itself has become slow, that is the thing to fix: it runs on every dispatch."
         # a declared `Suites:` needs less derivation or none. A command that FAILED is the warn
         # below, which names its exit status; the two never share a sentence.
         found=1; "$sink" finding "the impact command timed out after ${IMPACT_BOUND_S} s" "declare Suites:, narrow Files:" "$detail"
-        # NOTHING DERIVED MEANS NOTHING TO JUDGE AGAINST (AC-8.2). The walls that read the suite
-        # set (the dispatch wall's one-regression and floor-once arms) are the caller's, so the
-        # caller is told the set was never built — rc 2 — and says `not checked` for them itself.
+        # NOTHING DERIVED MEANS NOTHING TO JUDGE AGAINST (AC-8.2). The wall that reads the suite
+        # set (the dispatch wall's full-run arm) is the caller's, so the
+        # caller is told the set was never built — rc 2 — and says `not checked` for it itself.
         # rc 2 IS ALSO AN EARLY SPEND for the dispatch wall (Step-6 architecture review §2.2):
         # there is nothing below this branch but checks that depend on the derivation, so an
         # arm added after it that does NOT must be pooled above the derivation instead.

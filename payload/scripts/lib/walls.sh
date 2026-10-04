@@ -5353,8 +5353,8 @@ return 0
 #
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
 # `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
-# `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14); 1 otherwise (wave-20
-# T9, REQ-4, AC-4.2).
+# `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `proof-add` and
+# `approve` — wave-26 T5, REQ-3 D5, REQ-1); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5404,7 +5404,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
     shift
     _next="${1:-}"
     case "$_next" in
-      amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set)
+      amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|proof-add|approve)
         _WALL_POKER_VERB="$_next"; return 0 ;;
     esac
   done <<< "$(git_argv_expand "$1")"
@@ -6162,7 +6162,7 @@ _budget_wire_fact() {
 #
 # EXACTLY, not a prefix. `npx jest` and `npx jest --testPathPatterns 'x'` are different
 # spends — the first runs the whole tree — and a match that accepted one for the other would
-# lose the one-regression rule to a spelling. Both sides are already collapsed by the time
+# lose the full-run budget to a spelling. Both sides are already collapsed by the time
 # they meet: the lift collapses each marked run before writing it
 # (hooks/dispatch-preflight.sh `collapse()`), the classifier collapses the argv text it read
 # (payload/scripts/lib/cmd-class.sh `ws1()`), and those two are the same rule written once
@@ -6234,7 +6234,7 @@ You asked for: $1
 
 Run only what is on it. If the change genuinely reaches further than the brief said,
 say so in your report and let the orchestrator widen the brief — a wider instrument is
-its decision to make, and it is the one holding the one-regression budget for the run.
+its decision to make, and it is the one holding the suite budget for the run.
 $(_budget_remedy_line "$1")"
   return 2
 }
@@ -6287,12 +6287,13 @@ while IFS=$'\t' read -r _kind _target _run; do
 
   # ---------- THE FULL TREE, FIRST AND FAIL-CLOSED ----------
   #
-  # AHEAD OF THE DECLARED RUNS, and that order is the whole of the one-regression rule.
-  # `tests/run.sh` is counted at dispatch by `regression_rows()`, which reads the `run.sh`
-  # token in `suites_allowed=` and nothing else — so a brief that declared the full tree
-  # under `Re-executes:` instead would be uncounted there AND admitted here, and one
-  # spelling would spend a budget the standing ruling caps at one per run. The full tree
-  # goes on a row that NAMES it, in the field the counter reads.
+  # AHEAD OF THE DECLARED RUNS, and that order is the whole of the full-run rule. The
+  # dispatch wall judges `tests/run.sh` by the `run.sh` token in `suites_allowed=` and nothing
+  # else, asking the proof record whether the change since the last floor proof can be bounded
+  # (hooks/dispatch-preflight.sh, the full-run wall) — so a brief that declared the full tree
+  # under `Re-executes:` instead would be unjudged there AND admitted here, and one spelling
+  # would spend a run the proof record says is not owed. The full tree goes on a row that NAMES
+  # it, in the field the dispatch wall reads.
   if [ "$_kind" = "file" ] && [ "$_target" = "run.sh" ]; then
     # AC-21: "tests/run.sh is refused unless the row carries it."
     case " $SUITES_ALLOWED " in
@@ -6307,10 +6308,10 @@ while IFS=$'\t' read -r _kind _target _run; do
     fold_block exit2 suite-run \
       "$(_budget_wire_fact "full tree refused; allowed: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
       "run your brief's suites" \
-      "This is a BUDGET arm, not a safety wall. One regression means one: the whole tree is
-proved once per run, by one dispatched runner whose row carries tests/run.sh, at
-integration close. A second full run costs forty minutes and proves what the first one
-already did.
+      "This is a BUDGET arm, not a safety wall.
+The full suite runs once, on the head being released, by one dispatched runner whose row
+carries tests/run.sh; after that pass a later change is proved by its affected suites. A
+full run from a writer row costs forty minutes and proves a head nobody is releasing.
 
 On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
 
@@ -6318,8 +6319,9 @@ Run the suites your brief named instead, one call each, by the suite file itself
     bash tests/${_ft_first:-<suite>.test.sh}
 \`tests/run.sh --one\` is not that spelling: it is the runner's internal worker mode, fed a
 queue only the runner itself builds, and it is the full-tree runner as far as this budget
-is concerned. If the tree genuinely must be re-proved, say so in your report: the
-orchestrator records the cause on the plan and dispatches the runner."
+is concerned. If the change cannot be bounded — a merge from outside the run, or a file the
+map answers with every suite or with none — say so in your report: the orchestrator
+dispatches the runner, and the dispatch wall admits it only then."
     return 2
   fi
   # ---------- WHAT THE BRIEF SAID IT WOULD RUN, RUNS (REQ-1 AC-1.5) ----------
