@@ -4827,4 +4827,31 @@ expect_nonempty "W26-12m precondition: the doctored auditor.md still has its Cad
 expect_absent "W26-12m: a role file whose Cadence: line lost the mark is caught" \
   "$W26_MARK" "$(w26_label_line 'Cadence' "$DOCTORED_W26_12")"
 
+# ── §W26-T57 (wave-26 final review S1, S2, N4): three doctrine sentences made true to the code ──
+#
+# WHAT THIS OWNS. S1: the `proof verb` row names the head the evidence attests, not the
+# checkout's HEAD. S2: steps/5.md tells the orchestrator to record the floor proof after the
+# full run. N4: dispatch.md says only a passing disturbed run is `void`. Each absence sits
+# beside a positive through the same extractor on the same file, and a doctored copy that has
+# the old text back proves the absence arm goes red. HERMETIC: committed finals; copies in $TMP.
+W26_T57_S1_NEW='the head the evidence names: a run log'"'"'s `head=` header, a review'"'"'s `reviewed: a..b` end; never an operand'
+W26_T57_S1_OLD='the head is `git rev-parse HEAD` of the working branch'"'"'s checkout'
+expect_nonempty "W26-T57a: S1 — the proof verb row names the head the evidence attests" \
+  "$(w26_hits "$W26_T57_S1_NEW" "$OPRULES")"
+expect_eq "W26-T57b: …and no longer calls it the checkout's HEAD" "" \
+  "$(w26_hits "$W26_T57_S1_OLD" "$OPRULES")"
+W26_T57_D1="$(w26_doctor "$OPRULES" "| proof verb | \`session-poker.sh proof-add <kind> <evidence path>\`; $W26_T57_S1_OLD, never an operand |")"
+expect_nonempty "W26-T57bm: an operational-rules.md that keeps the checkout-HEAD sentence is caught" \
+  "$(w26_hits "$W26_T57_S1_OLD" "$W26_T57_D1")"
+expect_nonempty "W26-T57c: S2 — steps/5.md tells the orchestrator to record the floor proof" \
+  "$(w26_hits 'then record it: `session-poker.sh proof-add floor <log>`' "$STEP5_MD")"
+W26_T57_N4_NEW='a disturbed passing run reports `void`; a failing one is a failure'
+expect_nonempty "W26-T57d: N4 — dispatch.md says a disturbed passing run is void and a failing one a failure" \
+  "$(w26_hits "$W26_T57_N4_NEW" "$DISPATCH_MD")"
+expect_eq "W26-T57e: …and no longer says a disturbed run is never a failure" "" \
+  "$(w26_hits 'not a failure, when the machine was disturbed' "$DISPATCH_MD")"
+W26_T57_D4="$(w26_doctor "$DISPATCH_MD" 'It reports `void`, not a failure, when the machine was disturbed.')"
+expect_nonempty "W26-T57em: a dispatch.md that keeps the old void sentence is caught" \
+  "$(w26_hits 'not a failure, when the machine was disturbed' "$W26_T57_D4")"
+
 finish
