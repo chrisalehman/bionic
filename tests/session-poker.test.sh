@@ -8984,8 +8984,9 @@ section "Section 50 §FIRST-TICK: the armed first tick names the ready set — F
 # THE FIRST TICK OF EVERY RUN FINDS NO ROSTER: arming precedes dispatch (§13a). Through T58 that
 # arm printed the rung, the holds and the ledger, then `QUIET — armed, nothing dispatched yet`,
 # and exited above the scheduler, so FILL, WAIT and CHAIN never printed on the one tick where
-# every ready row is unstarted. Both arms now run the scheduler from one site; the first tick
-# still concludes QUIET, exit 0, with its stamp kept and its digest written. The approval gate
+# every ready row is unstarted. Both arms now run the scheduler from one site, and the decision
+# line agrees with what the tick printed: FILL with its `fill=` field when it names rows, QUIET
+# (exit 0, stamp kept) when nothing is ready or approval is pending. The approval gate
 # holds as everywhere: the gate is the plan's `approved-by:` line (wave-26 T13), so the plan at
 # current: 3 below carries none, as a plan before Step-3 approval does.
 s50_plan() {  # <repo> <current> <approved-by line, or empty> -> the plan path
@@ -9010,23 +9011,41 @@ poke "$R50" arm
 s50_plan "$R50" 4 "$SP_APPROVED_LINE" >/dev/null
 poke_pressure "$R50" 8192 1.0 tick
 expect_eq "50a the armed first tick exits 0" "0" "$RC"
-expect_contains "50a2 precondition: …and is the no-roster arm, deciding QUIET" \
-  "poker: QUIET — armed, nothing dispatched yet on this session" "$OUT"
-expect_eq "50a3 precondition: …with no roster file on disk" "no" "$([ -e "$(roster_of "$R50")" ] && echo yes || echo no)"
+expect_eq "50a3 precondition: …with no roster file on disk, the no-roster arm" "no" "$([ -e "$(roster_of "$R50")" ] && echo yes || echo no)"
 expect_contains "50b the first tick fills the three ready rows" "poker: FILL T1 T2 T3" "$OUT"
 expect_contains "50c …names the waiting row with the read it lacks and its writer" \
   "poker: WAIT T4 — waits for T1 (pending)" "$OUT"
 expect_contains "50d …and the longest chain, by hand: 20 + 15" "poker: CHAIN T1→T4 (35 min)" "$OUT"
-S50_FILL="$(s38_line_no 'poker: FILL ')"; S50_WAIT="$(s38_line_no 'poker: WAIT ')"
-S50_CHAIN="$(s38_line_no 'poker: CHAIN ')"; S50_QUIET="$(s38_line_no 'poker: QUIET')"
-expect_true "50e …each above the QUIET sentence (fill=$S50_FILL wait=$S50_WAIT chain=$S50_CHAIN quiet=$S50_QUIET)" \
-  test "$S50_FILL" -gt 0 -a "$S50_WAIT" -gt "$S50_FILL" -a "$S50_CHAIN" -gt "$S50_WAIT" -a "$S50_QUIET" -gt "$S50_CHAIN"
-expect_regex "50f the decision line is unchanged: last, QUIET, total and open zero, and no fill field" \
-  '^poker-tick/v1\|at=[^|]+\|session=[^|]+\|decision=QUIET\|total=0\|open=0$' "$(s50_last)"
+expect_contains "50a2 …and its sentence is the FILL band's own" \
+  "poker: FILL — T1 T2 T3 named for dispatch; the decision line carries them." "$OUT"
+S50_FILL="$(s38_line_no 'poker: FILL T')"; S50_WAIT="$(s38_line_no 'poker: WAIT ')"
+S50_CHAIN="$(s38_line_no 'poker: CHAIN ')"; S50_SAID="$(s38_line_no 'poker: FILL — ')"
+expect_true "50e …each above the band's sentence (fill=$S50_FILL wait=$S50_WAIT chain=$S50_CHAIN said=$S50_SAID)" \
+  test "$S50_FILL" -gt 0 -a "$S50_WAIT" -gt "$S50_FILL" -a "$S50_CHAIN" -gt "$S50_WAIT" -a "$S50_SAID" -gt "$S50_CHAIN"
+expect_regex "50f the decision line agrees with what the tick printed: last, FILL, and the fill field" \
+  '^poker-tick/v1\|at=[^|]+\|session=[^|]+\|decision=FILL\|total=0\|open=0\|fill=T1 T2 T3$' "$(s50_last)"
+expect_absent "50f2 …and the QUIET sentence is not printed beside it" "poker: QUIET" "$OUT"
 expect_eq "50g the rung prints once, from the one site" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
 expect_eq "50h the stamp is kept" "yes" "$([ -f "$(stamp_of "$R50")" ] && echo yes || echo no)"
-expect_eq "50i the tick digest is written as on any tick" "yes" \
-  "$([ -s "$R50/.bionic/tmp/tick-digest-$SID.state" ] && echo yes || echo no)"
+expect_eq "50i the tick digest the stop collector reads carries the FILL band, and the duty it owes" \
+  "decision=FILL duty=owed" \
+  "$(/usr/bin/grep -E '^(decision|duty)=' "$R50/.bionic/tmp/tick-digest-$SID.state" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
+# 50k — A FIRST TICK WITH NOTHING READY IS STILL QUIET: the one row waits on the world.
+R50K="$(make_repo s50-first-tick-nothing-ready)"
+poke "$R50K" arm
+sp_plan_at_step "$R50K" 4 \
+  "| T1 | 4 | build | waits on CI | implementor | ext:ci-50k | 15m | REQ-x | a.sh | pending |" >/dev/null
+poke_pressure "$R50K" 8192 1.0 tick
+expect_eq "50k the first tick with nothing ready exits 0" "0" "$RC"
+expect_contains "50k2 precondition: …and read the plan: the held row is named" "poker: HELD T1 ext:ci-50k" "$OUT"
+expect_absent "50k3 …names no row to fill" "poker: FILL" "$OUT"
+expect_contains "50k4 …and decides QUIET in the no-roster arm" \
+  "poker: QUIET — armed, nothing dispatched yet on this session" "$OUT"
+expect_regex "50k5 …with the QUIET decision line, no fill field" \
+  '^poker-tick/v1\|at=[^|]+\|session=[^|]+\|decision=QUIET\|total=0\|open=0$' "$(s50_last)"
+expect_contains "50k6 …and a digest that says QUIET" "decision=QUIET" \
+  "$(cat "$R50K/.bionic/tmp/tick-digest-$SID.state" 2>/dev/null)"
 
 # 50j — THE SAME TABLE BEFORE STEP-3 APPROVAL: no FILL, no WAIT, no CHAIN, the approval line,
 # and the same QUIET decision and exit code.
