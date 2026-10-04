@@ -1297,6 +1297,7 @@ esac
 case "$step" in
   fail:*) expect_eq "the planted row" "pass" "fail" ;;
   lost:*) rrx_helper_that_does_not_exist ;;
+  killw:*) sleep 1; kill -9 "$PPID"; sleep 1 ;;
 esac
 expect_eq "aaa-vfail ran" "x" "x"
 finish
@@ -1466,6 +1467,45 @@ rrn_drive "$TNX" 2 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
 expect_contains "11.133 a solo suite disturbed once and clean on the retry: it passed" "✓ PASS" \
   "$(rrn_line aaa-vfail.test.sh)"
 expect_eq "11.134 …its undisturbed try is a measurement, so the file holds its one shaped row" "1" \
+  "$(rrx_tshaped "$RRX_TF" aaa-vfail.test.sh)"
+
+# A TRY THAT WRITES NOTHING READS AS NOTHING (wave-26 T49; review 12 F1). A worker writes its
+# exit code and its seconds only after its suite ends, so a worker killed on a retry left the
+# EARLIER try's files in place and the runner judged the retry by them. `killw` kills the
+# suite's own worker with SIGKILL: no exit code, no seconds, no progress line.
+rrx_prep "pass:void killw:clean" 0
+rm -f "$RRX_TF"
+rrn_drive "$TNX" 2 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
+expect_eq "11.135 precondition: a passing disturbed try, then a retry whose worker was killed, ran twice" "2" \
+  "$(rrx_runs)"
+expect_contains "11.136 …the suite is reported killed with no exit status, not passed" \
+  "✗ KILLED (no exit status recorded)" "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.137 …the run exits non-zero" "1" "$RRN_RC"
+expect_eq "11.138 …the Gating line counts it failed" "Gating: 1 passed, 1 failed" "$(rrx_gating)"
+expect_contains "11.139 …it is listed under Failed:" "- aaa-vfail.test.sh" "$(rrx_block Failed)"
+expect_absent "11.140 …and the run does not call itself all green" "All gating suites green" "$RRN_OUT"
+expect_eq "11.141 …the timing file holds no row for it: the earlier try's seconds are not read" "0" \
+  "$(rrx_trows "$RRX_TF" aaa-vfail.test.sh)"
+expect_eq "11.142 …while the plain suite of the same run has its shaped row" "1" \
+  "$(rrx_tshaped "$RRX_TF" x-plain.test.sh)"
+
+# The same hole from the failing side: the earlier try's FAILURE must not be read as the retry's.
+rrx_prep "fail:void killw:clean" 0
+rm -f "$RRX_TF"
+rrn_drive "$TNX" 2 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
+expect_contains "11.143 failed and disturbed, then the retry's worker killed: the line says no exit status, not a stale FAIL" \
+  "✗ KILLED (no exit status recorded)" "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.144 …the run exits non-zero" "1" "$RRN_RC"
+expect_eq "11.145 …and the timing file holds no row for it" "0" "$(rrx_trows "$RRX_TF" aaa-vfail.test.sh)"
+
+# CONTROL for the two above: the retry's worker survives. The earlier try's failure is not read
+# and its seconds are not written; the last try's result stands, and it is a timed measurement.
+rrx_prep "fail:void pass:clean" 0
+rm -f "$RRX_TF"
+rrn_drive "$TNX" 2 20 env BIONIC_TEST_TIMING="$RRX_TF" bash tests/run.sh
+expect_eq "11.146 failed and disturbed, then passed on a clean retry: the run is green" "0" "$RRN_RC"
+expect_contains "11.147 …its verdict line reads PASS" "✓ PASS" "$(rrn_line aaa-vfail.test.sh)"
+expect_eq "11.148 …and the timing file holds its one shaped row, from the retry" "1" \
   "$(rrx_tshaped "$RRX_TF" aaa-vfail.test.sh)"
 
 # ============================================================
