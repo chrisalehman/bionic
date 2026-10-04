@@ -95,12 +95,13 @@ expect_eq   "WRITERS_MAX"       "32"   "${WRITERS_MAX:-unset}"
 expect_eq   "HOLD_FREE_MB"      "1024" "${HOLD_FREE_MB:-unset}"
 expect_eq   "HOLD_LOAD_FACTOR"  "1.5"  "${HOLD_LOAD_FACTOR:-unset}"
 expect_eq   "EMERGENCY_FREE_MB" "256"  "${EMERGENCY_FREE_MB:-unset}"
+expect_eq   "QUIET_LOAD_DEFAULT" "0.5" "${QUIET_LOAD_DEFAULT:-unset}"
 
 # The datum is the point of the constant. A number with no provenance is the thing this
 # task exists to remove, so every assignment above must carry a trailing comment.
 for _c in MEM_RESERVE_GB MEM_PER_SUITE_GB CORES_PER_SUITE DISK_PER_TREE_GB WRITERS_EXTRA \
           TEST_JOBS_MIN TEST_JOBS_MAX WORKTREES_MIN WORKTREES_MAX WRITERS_MIN WRITERS_MAX \
-          HOLD_FREE_MB HOLD_LOAD_FACTOR EMERGENCY_FREE_MB; do
+          HOLD_FREE_MB HOLD_LOAD_FACTOR EMERGENCY_FREE_MB QUIET_LOAD_DEFAULT; do
   if grep -Eq "^${_c}=[^ ]+[[:space:]]+#[[:space:]]*\S" "$LIB"; then
     ok "$_c assignment carries a datum comment"
   else
@@ -1016,5 +1017,47 @@ $K2_BAD
 EOF
 expect_eq "a sample pressure_band refuses is a sample pressure_level does not count" \
   "" "$K2_BAD_DISAGREE"
+
+
+# ════════════════════════════════════════════════════════════ §L — resources_settled
+
+section "L — resources_settled: the load NOW against cores × quiet-load (wave-26 D8)"
+
+# Every row reads the load from a file the row writes (BIONIC_LOAD_NOW_FILE), and runs in a
+# scratch directory with GIT_CEILING_DIRECTORIES above it, so the config it reads is the
+# row's own and never this repository's.
+L_DIR="$TMPROOT/settled"; mkdir -p "$L_DIR/plain" "$L_DIR/cfg/.bionic"
+L_LOAD="$L_DIR/load"
+printf 'quiet-load: 0.25\n' > "$L_DIR/cfg/.bionic/config.yaml"
+settled() {  # <dir> <load> <cores> -> the rc of resources_settled there
+  printf '%s\n' "$2" > "$L_LOAD"
+  ( cd "$1" && GIT_CEILING_DIRECTORIES="$L_DIR" BIONIC_LOAD_NOW_FILE="$L_LOAD" \
+      resources_settled "$3" >/dev/null 2>&1 ); printf '%s' "$?"
+}
+expect_eq "L.1 at the line exactly (2.00 on 4 cores × 0.5) the machine is settled" 0 \
+  "$(settled "$L_DIR/plain" 2.00 4)"
+expect_eq "L.2 just above it (2.01) it is not" 1 "$(settled "$L_DIR/plain" 2.01 4)"
+. "$REPO_ROOT/payload/scripts/lib/roots.sh"
+expect_eq "L.3 with roots.sh loaded, the project's quiet-load: 0.25 moves the line to 1.00" 0 \
+  "$(settled "$L_DIR/cfg" 1.00 4)"
+expect_eq "L.4 …and 1.01 is above it" 1 "$(settled "$L_DIR/cfg" 1.01 4)"
+expect_eq "L.5 a project with no config keeps the default line" 0 "$(settled "$L_DIR/plain" 2.00 4)"
+expect_eq "L.6 an unreadable load is not calm" 1 "$(settled "$L_DIR/plain" garbage 4)"
+expect_eq "L.7 a bad <cores> is refused with rc 2" 2 "$(settled "$L_DIR/plain" 0.1 zero)"
+expect_eq "L.8 resources_settled_line names the same line it judges" "1.00" \
+  "$( cd "$L_DIR/cfg" && GIT_CEILING_DIRECTORIES="$L_DIR" resources_settled_line 4 )"
+# Without the file override, BIONIC_PROBE_LOAD_1M still pins the reading.
+expect_eq "L.9 BIONIC_PROBE_LOAD_1M is the reading when no file is named (0.5 on 4 cores)" 0 \
+  "$( cd "$L_DIR/plain" && GIT_CEILING_DIRECTORIES="$L_DIR" BIONIC_PROBE_LOAD_1M=0.5 \
+      resources_settled 4 >/dev/null 2>&1; printf '%s' "$?")"
+expect_eq "L.10 …and 9 on 4 cores is above the line" 1 \
+  "$( cd "$L_DIR/plain" && GIT_CEILING_DIRECTORIES="$L_DIR" BIONIC_PROBE_LOAD_1M=9 \
+      resources_settled 4 >/dev/null 2>&1; printf '%s' "$?")"
+# The real machine: shape only, the §C convention.
+L_REAL="$( unset BIONIC_LOAD_NOW_FILE BIONIC_PROBE_LOAD_1M; resources_settled "$(_res_cores)" \
+  >/dev/null 2>&1; printf '%s' "$?")"
+expect_regex "L.11 on this machine resources_settled answers 0 or 1" '^[01]$' "$L_REAL"
+expect_regex "L.12 …from a numeric reading of the load now" '^[0-9]+(\.[0-9]+)?$' \
+  "$( unset BIONIC_LOAD_NOW_FILE BIONIC_PROBE_LOAD_1M; _res_load_now )"
 
 finish
