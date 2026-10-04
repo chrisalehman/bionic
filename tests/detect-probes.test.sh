@@ -673,6 +673,66 @@ expect_match "…and its grandchild is not left running on the machine afterward
   "*grandchild_alive=no*" "$T22_TO"
 echo "      (timeout arm: $T22_TO, bound=2s, probe sleeps 40s)"
 
+section "Group 6d2: the bound lets go when the probe does (T38)"
+#
+# WHAT A FAST PROBE COST. The poll slept a whole second before its first look, so a probe
+# that answered in milliseconds still held its caller for a second: about four of them in
+# every doctor run, one in setup, one in the Patrol read. These rows pin the release, and
+# beside it the half that must not move: the limit is still whole seconds and still kills.
+#
+# NO TIGHT BOUND. The clock is `date +%s`, whole seconds, on a machine that may be at load
+# 20, so each row asserts a relation with room in it: four instant probes inside two seconds
+# against the four-plus the once-a-second poll needs, a hung probe cut off no sooner than its
+# limit and no later than a single-digit wait.
+
+cat > "$TMP/t38-fast.sh" <<'T38FAST'
+#!/bin/bash
+. "$1" >/dev/null 2>&1 || { echo "source-failed"; exit 2; }
+start="$(date +%s)"
+outs=""
+for _n in 1 2 3 4; do outs="$outs$(detect_bounded 5 sh -c 'echo FAST')"; done
+elapsed=$(( $(date +%s) - start ))
+echo "outs=$outs elapsed=$elapsed"
+T38FAST
+
+T38_FAST="$(PATH="$T22_BIN" bash "$TMP/t38-fast.sh" "$DETECT_SH" 2>/dev/null)"
+T38_FAST_S="${T38_FAST##*elapsed=}"
+expect_match "four instant probes in a row each answer" "outs=FASTFASTFASTFAST *" "$T38_FAST"
+expect_true "…and together take under two seconds, not a second apiece" \
+  bash -c '[ -n "$1" ] && [ "$1" -le 2 ]' _ "$T38_FAST_S"
+echo "      (fast arm: $T38_FAST, four probes, each bound 5s)"
+
+T38_RC_OUT="$(t22_bounded "$TMP/t38-rc.err" 5 sh -c 'echo SAID_IT; exit 7')"
+T38_RC=$?
+expect_eq "an instant probe's output is passed through unchanged" "SAID_IT" "$T38_RC_OUT"
+expect_eq "…and its own exit code is the bound's exit code" "7" "$T38_RC"
+
+# THE LIMIT IS STILL WHOLE SECONDS. A probe that needs one second under a three-second bound
+# finishes; a poll that counted each short look as a second would cut it off at a third of one.
+T38_LATE_OUT="$(t22_bounded "$TMP/t38-late.err" 3 sh -c 'sleep 1; echo LATE_OK')"
+T38_LATE=$?
+expect_eq "a probe that takes a second under a three-second bound is not cut off early" \
+  "LATE_OK" "$T38_LATE_OUT"
+expect_eq "…and exits with its own code, not 124" "0" "$T38_LATE"
+
+cat > "$TMP/t38-hung.sh" <<'T38HUNG'
+#!/bin/bash
+. "$1" >/dev/null 2>&1 || { echo "source-failed"; exit 2; }
+start="$(date +%s)"
+out="$(detect_bounded 2 sh -c 'echo PARTIAL; sleep 40')"
+rc=$?
+elapsed=$(( $(date +%s) - start ))
+echo "rc=$rc out=$out elapsed=$elapsed"
+T38HUNG
+
+T38_HUNG="$(PATH="$T22_BIN" bash "$TMP/t38-hung.sh" "$DETECT_SH" 2>/dev/null)"
+T38_HUNG_S="${T38_HUNG##*elapsed=}"
+expect_match "a hung probe is still cut off with 124, and what it said first is read" \
+  "rc=124 out=PARTIAL *" "$T38_HUNG"
+expect_true "…no sooner than its two-second limit and well inside ten" \
+  bash -c '[ -n "$1" ] && [ "$1" -ge 2 ] && [ "$1" -le 9 ]' _ "$T38_HUNG_S"
+echo "      (hung arm: $T38_HUNG, bound=2s, probe sleeps 40s)"
+
 
 section "Group 6e: detect_auto_memory — the four states (wave-23 D5, AC-3.2, AC-3.3)"
 #
