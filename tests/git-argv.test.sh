@@ -329,6 +329,35 @@ eq "has_any_sub: quoted prose is not in the set"      "no" "$(any_of 'echo "git 
 eq "has_any_sub: a one-verb set is has_sub"           "yes:commit" "$(any_of 'git commit -m x' commit)"
 eq "has_any_sub: a verb is matched whole, never as a prefix" "no" "$(any_of 'git commit-tree t' commit)"
 
+section "Section 1g: the program word is read as the machine resolves it (wave-24 T31)"
+#
+# The default macOS filesystem is case-blind, so `GIT push` and `Git push` run git, and a
+# reader that matched the literal word `git` let both past every wall. Each casing must read
+# EXACTLY as the lower-case form does, verb and arguments alike, for a push and for verbs the
+# evidence gate and the read-only arm ask about. The `parse_cmd … && eq` lines are in the
+# shape Section 6 extracts, so the walls.sh screen is asked about each of them too.
+parse_cmd 'GIT push origin main' && eq "GIT push reads as a push" "push" "$GIT_SUB" \
+  || no "GIT push reads as a push" "no git segment parsed"
+parse_cmd 'Git commit -m x' && eq "Git commit reads as a commit" "commit" "$GIT_SUB" \
+  || no "Git commit reads as a commit" "no git segment parsed"
+parse_cmd '/usr/bin/GIT push origin main' && eq "an absolute GIT path reads as a push" "push" "$GIT_SUB" \
+  || no "an absolute GIT path reads as a push" "no git segment parsed"
+read_of() {  # <command> -> <sub>|<args> of its first git segment, or "none"
+  if parse_cmd "$1"; then printf '%s|%s' "$GIT_SUB" "${GIT_ARGS//$US/ }"; else echo none; fi
+}
+for _tail in 'push origin main' 'commit -m x' 'cherry-pick abc'; do
+  _want="$(read_of "git $_tail")"
+  eq "control: git $_tail reads" "${_tail%% *}" "${_want%%|*}"
+  for _w in GIT Git gIt /usr/bin/GIT; do
+    eq "$_w $_tail reads exactly as git $_tail" "$_want" "$(read_of "$_w $_tail")"
+  done
+done
+eq "has_any_sub: GIT push origin main is a push" "yes:push"  "$(any_of 'GIT push origin main' push)"
+eq "has_any_sub: Git push origin main is a push" "yes:push"  "$(any_of 'Git push origin main' push)"
+eq "has_any_sub: GIT merge is in the set"        "yes:merge" "$(any_of 'GIT merge x')"
+# The fold is of the whole word, never a substring: a longer name is its own program.
+eq "has_any_sub: GITK push is not git"           "no"        "$(any_of 'GITK push origin main' push)"
+
 if parse_cmd "echo 'git push origin main'"; then
   no "quoted prose is not a git command" "parsed as git ${GIT_SUB}"
 else

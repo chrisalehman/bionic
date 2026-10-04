@@ -135,6 +135,9 @@ expect_block "compound with ||"                       "false || git push origin 
 expect_block "force push flag at end"                 "git push origin main -f"
 expect_block "force push --force at end"              "git push origin feat/x --force"
 expect_block "refspec push HEAD:main"                 "git push origin HEAD:main"
+# A case-blind filesystem runs `GIT` as git (wave-24 T31): the capitalised push is a push.
+expect_block "capitalised: GIT push origin main"      "GIT push origin main"
+expect_block "capitalised: Git push (bare, on main)"  "Git push"
 
 # ============================================================
 # SECTION 2: On master branch — every push must be blocked
