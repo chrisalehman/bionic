@@ -159,7 +159,11 @@ land    ends the lease in one act: merges the tree's branch --no-ff into the
         merge and undoing it, onto-moved (the branch moved after the last
         check), branch-moved (the tree's branch gained a commit) and
         onto-switched (the checkout was on another branch when it merged;
-        the merge is undone there). An undo that could not finish says
+        the merge is undone there). A land undoes only a merge it made
+        itself: when git merge made none, or none the land can prove its
+        own, it refuses merge-unproven, and a merge made on a detached HEAD
+        is refused onto-detached; neither undoes anything, and each line
+        says where the checkout stood. An undo that could not finish says
         undo=failed and the step to take by hand, which never moves another
         branch; a commit made in the checkout during the undo is named as
         arrived=<sha>, since it may carry the task's changes unjudged.
