@@ -1669,7 +1669,7 @@ units_chain() {
     { sub(/\r$/, "") }
     $0 ~ /^[ \t]*$/ { next }
     $1 == "N" {
-      if (NF != 3) die("malformed node line: " $0)
+      if (NF != 3 || $2 == "") die("malformed node line: " $0)
       if ($3 !~ /^[0-9]+$/) die("minutes of " $2 " is not a whole number: \"" $3 "\"")
       if ($2 in at) die("node " $2 " is declared twice")
       n++; id[n] = $2; at[$2] = n; mins[n] = $3 + 0
@@ -1730,8 +1730,8 @@ units_chain() {
           for (i = 1; i <= n && run < ceil; i++) if (!began[i] && wait[i] == 0) {
             began[i] = 1; running[i] = 1; run++; fin[i] = t + mins[i]; moved = 1
           }
-          if (run > peak) peak = run
         } while (moved)
+        if (run > peak) peak = run
         nextt = -1
         for (i = 1; i <= n; i++) if (running[i] && (nextt < 0 || fin[i] < nextt)) nextt = fin[i]
         if (nextt < 0) break

@@ -1060,4 +1060,34 @@ expect_regex "L.11 on this machine resources_settled answers 0 or 1" '^[01]$' "$
 expect_regex "L.12 …from a numeric reading of the load now" '^[0-9]+(\.[0-9]+)?$' \
   "$( unset BIONIC_LOAD_NOW_FILE BIONIC_PROBE_LOAD_1M; _res_load_now )"
 
+# THE VOID CHECK DOES NOT COUNT THE COMMAND'S OWN LOAD (wave-26 T36, review 4 F4). A run's
+# own share of the one-minute average is its mean concurrency (child CPU over wall time)
+# weighted by how much of the average the run covered, 1 − e^(−wall/60). The void check
+# takes that share off the reading before comparing it with the line.
+expect_regex "L.13 a single-threaded 50 s run adds about 0.57 to the one-minute average" \
+  '^0\.56[0-9]*$' "$(resources_own_load 50 50 2>/dev/null)"
+expect_regex "L.14 a run that used no CPU adds nothing" '^0(\.0+)?$' "$(resources_own_load 0 30 2>/dev/null)"
+expect_eq "L.15 a bad reading is refused with rc 2" 2 \
+  "$(resources_own_load x 10 >/dev/null 2>&1; printf '%s' "$?")"
+undisturbed() {  # <load after> <cores> <own> -> the rc of resources_undisturbed
+  printf '%s\n' "$1" > "$L_LOAD"
+  ( cd "$L_DIR/plain" && GIT_CEILING_DIRECTORIES="$L_DIR" BIONIC_LOAD_NOW_FILE="$L_LOAD" \
+      resources_undisturbed "$2" "$3" >/dev/null 2>&1 ); printf '%s' "$?"
+}
+# The reviewer's case: 2 cores (line 1.00), settled at the line, then a single-threaded
+# solo suite of 50 s whose own share lifts the reading by its own 0.57.
+L_OWN="$(resources_own_load 50 50 2>/dev/null)"
+L_AFTER="$(awk -v o="$L_OWN" 'BEGIN { printf "%.4f\n", 1.00 + o }')"
+expect_eq "L.16 the reviewer's case: the plain settled check calls that run void" 1 \
+  "$(settled "$L_DIR/plain" "$L_AFTER" 2)"
+expect_eq "L.17 …and the void check, which takes the run's own share off, does not" 0 \
+  "$(undisturbed "$L_AFTER" 2 "$L_OWN")"
+expect_eq "L.18 …nor does a run settled near the line (0.95 + 0.57)" 0 \
+  "$(undisturbed 1.52 2 "$L_OWN")"
+L_DIST="$(awk -v o="$L_OWN" 'BEGIN { printf "%.4f\n", 1.00 + o + o }')"
+expect_eq "L.19 one foreign single-threaded process over the same run is a disturbance: void" 1 \
+  "$(undisturbed "$L_DIST" 2 "$L_OWN")"
+expect_eq "L.20 an unreadable load is still not calm" 1 "$(undisturbed garbage 2 0)"
+expect_eq "L.21 a bad <own> is refused with rc 2" 2 "$(undisturbed 0.1 2 lots)"
+
 finish
