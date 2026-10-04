@@ -364,8 +364,19 @@ _git_argv_skip() {
   [ "$_hadf" -eq 1 ] || set +f
 
   while [ $# -gt 0 ]; do
+    # THE OPENERS ARE READ AS TYPED; every other arm compares the word's fold (wave-25 T12):
+    # bash matches a reserved word case-exactly, and a capitalised prefix runs the prefix.
     case "$1" in
-      '('|')'|'{'|'}'|'!'|then|else|elif|do|done|fi|if|while|until|command|nohup|exec)
+      '('|')'|'{'|'}'|'!'|then|else|elif|do|done|fi|if|while|until)
+        shift
+        continue
+        ;;
+    esac
+    # A word holding `=` is an assignment (or a value), never a name: it is not folded, so a
+    # long `MSG="..."` prefix costs no substitution pass.
+    case "$1" in *=*) CMD_WORD_FOLDED="$1" ;; *) cmd_word_fold "$1" ;; esac
+    case "$CMD_WORD_FOLDED" in
+      command|nohup|exec)
         shift
         ;;
       env|*/env)
@@ -501,19 +512,57 @@ _git_argv_skip() {
   return 0
 }
 
+# cmd_word_fold <word> -> sets CMD_WORD_FOLDED
+#
+# THE ONE SHELL RULE for reading a command NAME the way the machine resolves it (wave-25 T12;
+# the awk twin is `cmd_word_fold` in cmd-class.sh's CMD_WORD_FOLD_AWK). The default macOS
+# filesystem is case-blind: `command -v SUDO` finds /usr/bin/SUDO and `command -v BASH` finds
+# /bin/BASH, so `SUDO git push origin main` is a push, and a reader that compared the literal
+# `sudo` left `SUDO` as argv[0] and read no git at all (wave-24 T31 closed the git word; this
+# closes the words around it). Every reader in this file and in walls.sh compares a NAME it
+# recognises against this fold of the word, never against the word as typed.
+#
+# WHAT IT FOLDS: the 26 ASCII capitals, nothing else, so a multibyte word is never re-cased.
+# Always, whatever the filesystem: on a case-sensitive one `SUDO` does not resolve, so reading
+# it as sudo refuses only a command that would have failed anyway. The caller decides WHICH
+# words are names; an operand, a path, a flag or a subcommand is never handed here (git
+# refuses `git PUSH`, and a path's case is the filesystem's business).
+#
+# WHAT IS NEVER HANDED HERE: the reserved words (`then`, `do`, `if`, ...), which bash matches
+# case-exactly, and six builtins whose capitalised spelling is a different program or none:
+# `cd`, `pushd`, `popd`, `wait`, `exit`, `return`. /usr/bin/CD runs `builtin cd` in a child
+# shell and moves nothing, /usr/bin/WAIT collects no job of this shell, and PUSHD, POPD, EXIT
+# and RETURN resolve to nothing. A reader that folded them would believe in a directory change,
+# a collected job or an exit that never happened, which is the fail-open direction.
+#
+# NO FORK, AND A LOWER-CASE WORD COSTS ONE `case`. bash 3.2 has no `${x,,}`; `tr` would fork on
+# every word of every segment. A word with a capital pays 26 substitutions, which on a command
+# name is microseconds.
+CMD_WORD_FOLDED=""
+cmd_word_fold() {
+  CMD_WORD_FOLDED="$1"
+  case "$1" in *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*) ;; *) return 0 ;; esac
+  local _w="$1"
+  _w="${_w//A/a}"; _w="${_w//B/b}"; _w="${_w//C/c}"; _w="${_w//D/d}"; _w="${_w//E/e}"
+  _w="${_w//F/f}"; _w="${_w//G/g}"; _w="${_w//H/h}"; _w="${_w//I/i}"; _w="${_w//J/j}"
+  _w="${_w//K/k}"; _w="${_w//L/l}"; _w="${_w//M/m}"; _w="${_w//N/n}"; _w="${_w//O/o}"
+  _w="${_w//P/p}"; _w="${_w//Q/q}"; _w="${_w//R/r}"; _w="${_w//S/s}"; _w="${_w//T/t}"
+  _w="${_w//U/u}"; _w="${_w//V/v}"; _w="${_w//W/w}"; _w="${_w//X/x}"; _w="${_w//Y/y}"
+  _w="${_w//Z/z}"
+  CMD_WORD_FOLDED="$_w"
+}
+
 # git_argv_is_git <word>
 #
 # THE ONE ANSWER to "does this argv[0] run git" (wave-24 T31). Returns 0 for `git` or a path
-# ending `/git` in ANY letter case, 1 otherwise. The default macOS filesystem is case-blind:
-# `command -v GIT` finds /usr/bin/GIT, so `GIT push origin main` runs a push, and a reader that
-# matched the literal word let it past every wall. Folding always, whatever the filesystem,
-# is the fail-closed direction: where `GIT` does not resolve, the command it would refuse
-# fails anyway. Only the program word folds. git itself refuses `git PUSH` ("cannot handle
-# PUSH as a builtin"), so the subcommand stays case-exact. A glob, not `tr`, so the hot path
-# pays no fork; bash 3.2 has no `${x,,}`.
+# ending `/git` in ANY letter case, 1 otherwise: `GIT push origin main` runs a push on a
+# case-blind filesystem. The letter case is `cmd_word_fold`'s question, above, and this asks
+# it. Only the program word folds. git itself refuses `git PUSH` ("cannot handle PUSH as a
+# builtin"), so the subcommand stays case-exact.
 git_argv_is_git() {
-  case "$1" in
-    [Gg][Ii][Tt]|*/[Gg][Ii][Tt]) return 0 ;;
+  cmd_word_fold "$1"
+  case "$CMD_WORD_FOLDED" in
+    git|*/git) return 0 ;;
   esac
   return 1
 }
@@ -610,7 +659,8 @@ git_argv_inner() {
   [ "$_hadf" -eq 1 ] || set +f
 
   [ $# -gt 0 ] || return 1
-  _b="${1##*/}"
+  cmd_word_fold "${1##*/}"
+  _b="$CMD_WORD_FOLDED"
   case "$_b" in
     sh|bash|zsh|dash|ksh|ash)
       shift

@@ -260,6 +260,55 @@ CMD_RUN_NORM_AWK='
     }
 '
 
+# ---------- A COMMAND NAME, READ THE WAY THE MACHINE RESOLVES IT (wave-25 T12) ----------
+#
+# THE ONE AWK RULE, pasted into every program `_cmd_class_awk` runs; its shell twin is
+# `cmd_word_fold` in git-argv.sh, whose header states the rule in full. The default macOS
+# filesystem is case-blind, so `BASH tests/run.sh` runs the suite, `TEE <path>` writes it and
+# `RM <path>` deletes it, and every table below that matched the literal name read each of them
+# as an unknown word. Every NAME a table recognises (the prefixes and runners the reader
+# unwraps, the writers, deleters and pure readers, the suite, build and install runners) is
+# compared to `cmd_word_fold` of the word, so the tables hold lower-case names only.
+#
+# WHAT IS NOT FOLDED, at the call sites: operands, paths, flags and subcommands (`npm TEST` is
+# not `npm test`, and `bash TESTS/RUN.SH` names no suite this reader knows); a script named at
+# argv[0] by its path (`./tests/X.TEST.SH`), for the same reason its operand form is not; the
+# reserved words, which bash matches case-exactly; and six builtins whose capitalised spelling
+# is another program or none, so that folding them would invent a directory change, a collected
+# job or an exit: `cd`, `pushd`, `popd`, `wait`, `exit`, `return` (/usr/bin/CD runs `builtin cd`
+# in a child shell and moves nothing).
+#
+# ASCII ONLY. macOS awk lower-cases a multibyte capital too (`tolower("É")` is `é`), so a word
+# with anything outside printable ASCII is folded letter by letter from the 26-letter table.
+# A word with no capital, the common case, costs one regex test and is returned as is.
+#
+# `cmd_head_fold` is the same rule for a TEXT whose first word is the command word (up to the
+# first blank): that word folded and the rest untouched. IT NEVER RUNS A REGEX OVER THE TEXT.
+# macOS awk walks a regex over the whole string even when it is anchored at `^` (measured: one
+# `s ~ /^[^ \t]*[A-Z]/` on 655 KB costs 3.8 ms, a `substr` on it nothing measurable), so a fold
+# that asked the text cost a pass per strip step, 50 ms a row on tests/hook-timeout.test.sh
+# rows g to j. The word is cut out by `index`, and only the word meets a regex.
+#
+# NO APOSTROPHE MAY APPEAR IN THIS TEXT, for the reason CMD_RUN_NORM_AWK gives.
+CMD_WORD_FOLD_AWK='
+    function cmd_word_fold(w,   n, C, i, j, o) {
+      if (w !~ /[ABCDEFGHIJKLMNOPQRSTUVWXYZ]/) return w
+      if (w ~ /^[!-~]*$/) return tolower(w)
+      n = split(w, C, ""); o = ""
+      for (i = 1; i <= n; i++) {
+        j = index("ABCDEFGHIJKLMNOPQRSTUVWXYZ", C[i])
+        o = o (j ? substr("abcdefghijklmnopqrstuvwxyz", j, 1) : C[i])
+      }
+      return o
+    }
+    function cmd_head_fold(s,   k, w) {
+      k = index(s, " "); w = (k ? substr(s, 1, k - 1) : s)
+      k = index(w, "\t"); if (k) w = substr(w, 1, k - 1)
+      if (w !~ /[ABCDEFGHIJKLMNOPQRSTUVWXYZ]/) return s
+      return cmd_word_fold(w) substr(s, length(w) + 1)
+    }
+'
+
 # The awk program. `mode=heredoc` stops after step 1; `mode=lines` runs the whole reading.
 _cmd_class_awk() {  # <mode> ; command on stdin
   # ONLY mode=effects PARSES _CMD_EFFECTS_AWK (wave-25 T2). awk compiles the whole program on
@@ -268,7 +317,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
   # of the six names the shared code calls, so each program defines every function once.
   local _fx="$_CMD_EFFECTS_STUBS"
   [ "$1" = effects ] && _fx="$_CMD_EFFECTS_AWK"
-  awk -v mode="$1" "$CMD_RUN_NORM_AWK$_CMD_WRITES_AWK$_fx"'
+  awk -v mode="$1" "$CMD_RUN_NORM_AWK$CMD_WORD_FOLD_AWK$_CMD_WRITES_AWK$_fx"'
     function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     function base(p) { sub(/.*\//, "", p); return p }
     # ONE RUN, ONE SPELLING (REQ-1 AC-1.5). The same collapse
@@ -498,7 +547,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # tests/run.sh and ( time git push ) both read through. Reading argv[0] of a
     # segment WITHOUT this is strictly narrower than the whitespace-anchored
     # string match bionic 1.3.1 used, which is the regression this repairs.
-    function strip_leading(s,   t) {
+    function strip_leading(s,   t, h) {
       s = trim(s)
       for (;;) {
         t = s
@@ -508,7 +557,16 @@ _cmd_class_awk() {  # <mode> ; command on stdin
           s = trim(substr(s, RLENGTH + 1))
         } else if (match(s, /^(then|else|elif|do|done|fi|if|while|until|env|command|exec)([ \t]+|$)/)) {
           s = trim(substr(s, RLENGTH + 1))
-        } else if (match(s, /^(nohup|setsid)([ \t]+|$)/)) {
+        # FROM HERE ON A NAME, matched on h, the head folded (wave-25 T12, see CMD_WORD_FOLD_AWK).
+        # The fold keeps every length, so RLENGTH cuts s where it cut h, and what comes off is
+        # always the text as typed. The arm above reads as typed: a reserved word is no name, and
+        # a lower-case env, command or exec is its own fold. Only a head the fold changed is
+        # asked about those three again, so a lower-case command pays no extra regex pass here
+        # (each one walks the whole text in macOS awk). The assignment and the redirection are
+        # no names either.
+        } else if ((h = cmd_head_fold(s)) != s && match(h, /^(env|command|exec)([ \t]+|$)/)) {
+          s = trim(substr(s, RLENGTH + 1))
+        } else if (match(h, /^(nohup|setsid)([ \t]+|$)/)) {
           # A WRAPPER, NOT JUST AN OPENER (D8, REQ-6). Stripped the same way env/exec are —
           # setsid NOW JOINS nohup so `setsid bash tests/run.sh` reaches the bash/sh arm
           # instead of falling through to none with argv[0]=setsid — but the strip also
@@ -516,19 +574,19 @@ _cmd_class_awk() {  # <mode> ; command on stdin
           # even though classify_argv never sees the word again. One reading, two answers.
           SAW_WRAPPER = 1
           s = trim(substr(s, RLENGTH + 1))
-        } else if (match(s, /^time([ \t]+-p)?([ \t]+|$)/)) {
+        } else if (match(h, /^time([ \t]+-p)?([ \t]+|$)/)) {
           s = trim(substr(s, RLENGTH + 1))
-        } else if (match(s, /^nice([ \t]+(-n[ \t]*[0-9]+|-[0-9]+|--adjustment[= \t][ \t]*[0-9]+))?([ \t]+|$)/)) {
+        } else if (match(h, /^nice([ \t]+(-n[ \t]*[0-9]+|-[0-9]+|--adjustment[= \t][ \t]*[0-9]+))?([ \t]+|$)/)) {
           s = trim(substr(s, RLENGTH + 1))
-        } else if (match(s, /^(sudo|doas)([ \t]+|$)/)) {
+        } else if (match(h, /^(sudo|doas)([ \t]+|$)/)) {
           s = skip_opts(trim(substr(s, RLENGTH + 1)), " -u -g -p -U -C -r -t -h -D -R ")
-        } else if (match(s, /^xargs([ \t]+|$)/)) {
+        } else if (match(h, /^xargs([ \t]+|$)/)) {
           s = skip_opts(trim(substr(s, RLENGTH + 1)), " -I -i -n -L -P -s -E -a -d --replace --max-args --max-procs --max-lines --arg-file --delimiter --eof ")
-        } else if (match(s, /^ssh([ \t]+|$)/)) {
+        } else if (match(h, /^ssh([ \t]+|$)/)) {
           s = drop_word(skip_opts(trim(substr(s, RLENGTH + 1)), " -o -p -i -l -F -L -R -D -b -c -e -m -O -Q -S -W -w -J -E -B -I "))
-        } else if (match(s, /^(find|[^ \t]*\/find)([ \t]+|$)/)) {
+        } else if (match(h, /^(find|[^ \t]*\/find)([ \t]+|$)/)) {
           s = after_exec(s)
-        } else if (match(s, /^g?timeout[ \t]+(-[^ \t]+[ \t]+)*[0-9]+[smhd]?[ \t]+/)) {
+        } else if (match(h, /^g?timeout[ \t]+(-[^ \t]+[ \t]+)*[0-9]+[smhd]?[ \t]+/)) {
           s = trim(substr(s, RLENGTH + 1))
         } else if (match(s, /^[0-9]*(&>>|&>|>>|>[|]|>&|<&|<>|<|>)/)) {
           # A LEADING REDIRECTION IS PLUMBING, glued (`<tests/a.test.sh wc -l`) or detached
@@ -555,18 +613,21 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         return substr(s, 2, length(s) - 2)
       return s
     }
-    function unwrap_runner(s,   inner, j) {
-      if (match(s, /^(ba|z|k|da)?sh[ \t]+-[a-z]*c[ \t]+/))
+    # The runner and the reader are names, matched on the folded head (CMD_WORD_FOLD_AWK); the
+    # string, the flags and the file come off s as typed.
+    function unwrap_runner(s,   inner, j, h) {
+      h = cmd_head_fold(s)
+      if (match(h, /^(ba|z|k|da)?sh[ \t]+-[a-z]*c[ \t]+/))
         return dequote_whole(substr(s, RLENGTH + 1))
-      if (match(s, /^eval[ \t]+/))
+      if (match(h, /^eval[ \t]+/))
         return dequote_whole(substr(s, RLENGTH + 1))
       # `bash <(cat FILE)` is `bash FILE` with a reader in the way; collapse to the script
       # that actually runs, or the workaround walks straight past the suite arm.
-      if (match(s, /^(ba)?sh[ \t]+<\(/)) {
+      if (match(h, /^(ba)?sh[ \t]+<\(/)) {
         inner = substr(s, RLENGTH + 1)
         j = index(inner, ")")
         if (j > 0) inner = substr(inner, 1, j - 1)
-        sub(/^(cat|tac)[ \t]+/, "", inner)
+        if (match(cmd_head_fold(inner), /^(cat|tac)[ \t]+/)) inner = substr(inner, RLENGTH + 1)
         return "bash " trim(inner)
       }
       return s
@@ -612,7 +673,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # positions this does. It is set ONLY for the two script forms that name a file —
     # pytest, `npm test`, `go test` and `make test` are suite-class and name no
     # tests/<x>.test.sh, so they leave it empty and the caller reports no target.
-    function classify_argv_read(s,   a, n, i, a1, a2, b0, b1, npxshift) {
+    function classify_argv_read(s,   a, n, i, a1, a2, b0, b1, npxshift, n0) {
       LAST_TARGET = ""; LAST_PATH = ""; LAST_DRY = 0
       n = argv_tok(s, a)
       if (n == 0) return "none"
@@ -621,7 +682,9 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # the script and a reader that insisted on a position would miss the one spelling
       # anybody types. The CLASS is untouched: the command still runs the runner.
       for (i = 1; i <= n; i++) if (a[i] == "--dry-run") LAST_DRY = 1
-      b0 = base(a[1])
+      # b0 is the word as typed, for the arms that read a SCRIPT FILE by its name; n0 is its fold
+      # (CMD_WORD_FOLD_AWK), for every arm that reads a command NAME (wave-25 T12).
+      b0 = base(a[1]); n0 = cmd_word_fold(b0)
       # A PACKAGE RUNNER IS A PREFIX, NOT A COMMAND (REQ-1 AC-1.5). `npx jest …` runs jest
       # and spends what a jest run spends; `npx create-react-app x` runs something else
       # entirely, and the tier-2 nudge is the wall that speaks for those. The prefix comes
@@ -630,14 +693,14 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # `npx …` head it matches on (B-4a), and stripping it there would take the nudge s
       # subject away from it.
       npxshift = 0
-      if (b0 == "npx" || b0 == "bunx" || b0 == "pnpx") npxshift = 1
-      else if ((b0 == "npm" || b0 == "pnpm" || b0 == "yarn" || b0 == "bun") && n >= 2 && (a[2] == "dlx" || a[2] == "exec")) npxshift = 2
+      if (n0 == "npx" || n0 == "bunx" || n0 == "pnpx") npxshift = 1
+      else if ((n0 == "npm" || n0 == "pnpm" || n0 == "yarn" || n0 == "bun") && n >= 2 && (a[2] == "dlx" || a[2] == "exec")) npxshift = 2
       if (npxshift > 0 && n > npxshift) {
         for (i = 1; i + npxshift <= n; i++) a[i] = a[i + npxshift]
         n = n - npxshift
-        b0 = base(a[1])
+        b0 = base(a[1]); n0 = cmd_word_fold(b0)
       }
-      if (b0 == "bash" || b0 == "sh" || b0 == "zsh" || b0 == "dash" || b0 == "ksh") {
+      if (n0 == "bash" || n0 == "sh" || n0 == "zsh" || n0 == "dash" || n0 == "ksh") {
         # SKIP THE RUNNER S OWN OPTIONS — BUT READ THEM FIRST (REQ-5, D13). This loop used
         # to skip every leading flag alike, so `bash -n tests/x.test.sh` reached the suite
         # arm with the same target `bash tests/x.test.sh` does and a writer checking a
@@ -678,32 +741,32 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         LAST_PATH = a[1]
         return "suite"
       }
-      if (b0 == "pytest") return "suite"
+      if (n0 == "pytest") return "suite"
       # `jest` NAMED, the runner the seed and D1 are about. Bare, or behind the `npx`
       # prefix dropped above — both are one run of one project s tests.
-      if (b0 == "jest") return "suite"
-      if (b0 == "npm" || b0 == "pnpm" || b0 == "yarn") {
+      if (n0 == "jest") return "suite"
+      if (n0 == "npm" || n0 == "pnpm" || n0 == "yarn") {
         if (a1 == "test") return "suite"
         if (a1 == "install" || a1 == "add" || a1 == "ci") return "install"
         if (a1 == "run" && a2 == "build") return "build"
         return "none"
       }
-      if (b0 == "go" || b0 == "cargo") {
+      if (n0 == "go" || n0 == "cargo") {
         if (a1 == "test") return "suite"
         if (a1 == "build") return "build"
         return "none"
       }
       # `make clean` is trivial and stays silent; `make test`/`make check` are the suite;
       # bare `make` and every other target is a build.
-      if (b0 == "make") {
+      if (n0 == "make") {
         if (a1 == "test" || a1 == "check") return "suite"
         if (a1 == "clean") return "none"
         return "build"
       }
-      if (b0 == "pip" || b0 == "pip3") return (a1 == "install" ? "install" : "none")
-      if (b0 == "uv")   return ((a1 == "sync" || a1 == "pip") ? "install" : "none")
-      if (b0 == "brew") return (a1 == "install" ? "install" : "none")
-      if (b0 == "docker") return (a1 == "build" ? "build" : "none")
+      if (n0 == "pip" || n0 == "pip3") return (a1 == "install" ? "install" : "none")
+      if (n0 == "uv")   return ((a1 == "sync" || a1 == "pip") ? "install" : "none")
+      if (n0 == "brew") return (a1 == "install" ? "install" : "none")
+      if (n0 == "docker") return (a1 == "build" ? "build" : "none")
       return "none"
     }
 
@@ -1007,7 +1070,10 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         hd0 = trim(out)
         gsub(/\n/, " ", hd0)
         hd1 = strip_leading(hd0)
-        printf "%s", strip_leading(unwrap_runner(hd1))
+        # Its command word folded (wave-25 T12), so the tier-2 matcher compares a name to a name.
+        # An option left at the front (env -C keeps its own here) is a flag, and never folds.
+        hd0 = strip_leading(unwrap_runner(hd1))
+        printf "%s", (substr(hd0, 1, 1) == "-" ? hd0 : cmd_head_fold(hd0))
         exit
       }
       # mode=bg: cmd_backgrounded (D8, REQ-6) — "1" when the TEXT backgrounds the
@@ -1327,7 +1393,7 @@ _CMD_WRITES_AWK='
       return cwd "/" d
     }
     function wt_argv(A, m, cwd,   b, j, w, opt, inp, hasE, np, P, tdir) {
-      b = base(A[1]); opt = 1; np = 0
+      b = cmd_word_fold(base(A[1])); opt = 1; np = 0
       if (b == "tee" || b == "touch" || b == "mkdir") {
         for (j = 2; j <= m; j++) {
           w = A[j]
@@ -1733,6 +1799,9 @@ _CMD_EFFECTS_AWK='
           fx_unk("assigns a variable that moves what runs or where: " w, t)
         if (w == "!") neg = 1
         if (w ~ /^[A-Za-z_][A-Za-z0-9_]*[+]?=/ || w ~ /^([{}()!]|then|else|elif|do|done|fi|if|while|until|esac)$/) continue
+        # The prefixes are names, read through the fold (CMD_WORD_FOLD_AWK); the reserved words
+        # and the assignments above are not.
+        w = cmd_word_fold(w)
         if (w ~ /^(env|command|exec|nohup|setsid)$/) {
           if (i < m && A[i + 1] ~ /^-/) { fx_unk("an option of " w " the reader does not parse", t); FX_SEG = sv; return cwd }
           continue
@@ -1759,7 +1828,7 @@ _CMD_EFFECTS_AWK='
       FX_SEG = sv
       return cwd
     }
-    function fx_argv(B, m, cwd, depth, t,   b, d, j) {
+    function fx_argv(B, m, cwd, depth, t,   b, d, j, bt) {
       b = B[1]
       if (index(b, "/")) {
         d = b; sub(/\/[^\/]*$/, "", d)
@@ -1769,6 +1838,11 @@ _CMD_EFFECTS_AWK='
       if (b == "cd" || b == "pushd" || b == "popd") return fx_cd(B, m, cwd, t)
       # A loop or case header names words, and exit or return ends the shell: none acts on a file.
       if (b == "for" || b == "select" || b == "case" || b == "exit" || b == "return") return cwd
+      # EVERY TABLE BELOW HOLDS NAMES, compared to the word folded (CMD_WORD_FOLD_AWK, wave-25
+      # T12), and B[1] carries the fold to the readers that ask it again (fx_rargs, fx_del).
+      # The two lines above read as typed: the cd family, exit and return are not folded, and
+      # neither is a reserved word.
+      bt = b; b = cmd_word_fold(b); B[1] = b
       if (b ~ /^(ba|z|k|da)?sh$/) { fx_shell(B, m, cwd, depth, t); return cwd }
       if (b == "git") { fx_git(B, m, t); return cwd }
       if (b == "find") { fx_find(B, m, cwd, t); return cwd }
@@ -1790,10 +1864,10 @@ _CMD_EFFECTS_AWK='
       if (b == "eval") { fx_unk("eval runs text the reader does not read", t); return cwd }
       if (b == "source" || b == ".") { fx_unk("source runs a file the reader does not read", t); return cwd }
       if (b == "xargs") { fx_unk("xargs takes its targets from stdin", t); return cwd }
-      if (b ~ /^(python[0-9.]*|perl[0-9.]*|ruby|node|nodejs|deno|bun|php|lua|Rscript|osascript|tclsh|pwsh|awk|gawk|mawk|nawk)$/) {
-        fx_unk("an interpreter body or a heredoc fed to one: " b, t); return cwd
+      if (b ~ /^(python[0-9.]*|perl[0-9.]*|ruby|node|nodejs|deno|bun|php|lua|rscript|osascript|tclsh|pwsh|awk|gawk|mawk|nawk)$/) {
+        fx_unk("an interpreter body or a heredoc fed to one: " bt, t); return cwd
       }
-      fx_unk("not a known reader or writer: " b, t)
+      fx_unk("not a known reader or writer: " bt, t)
       return cwd
     }
 '
