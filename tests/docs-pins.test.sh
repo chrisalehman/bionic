@@ -908,10 +908,15 @@ section "Section 6: Step 8's tmp wipe spares session-keyed state"
 # 44d below pin the class list against `PATROL_STATE_CLASSES` directly so the two cannot
 # drift apart again without one of them turning red.
 #
+# NO HAND COUNT (wave-25 T15). The sentence said "the seven" until `workspaces` and `gate`
+# joined the list; the count is gone, because 44c below already compares the number of
+# names against `PATROL_STATE_CLASSES`, and the six bytes paid for the two new names under
+# row 115's cap.
+#
 # THE FIELD NAME `tmp-wiped:` IS DELIBERATELY UNTOUCHED (§Evidence, step 8 row). It is an
 # evidence key the gate parses, not prose; renaming it would be an interface change and is
 # not what the finding asked for.
-PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the seven \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`/\`tick-digest\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
+PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`/\`tick-digest\`/\`workspaces\`/\`gate\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
 PIN_TMP_BLANKET='wipe `.bionic/tmp/*`;'
 
 if has_pin "$STEP8_MD" "$PIN_TMP_SPARE"; then
