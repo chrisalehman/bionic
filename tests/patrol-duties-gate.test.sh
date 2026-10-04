@@ -1682,7 +1682,21 @@ expect_contains "L1b: AC-5.5 Stop 1 appended a fill-ledger/v1 line" "fill-ledger
 expect_eq "L1c: …keyed by the turn's prompt" "u-turn-0001" "$(led_field "$L1" turn)"
 expect_eq "L1d: …launched names the turn's Agent call" "W-T2" "$(led_field "$L1" launched)"
 expect_eq "L1e: …and nothing was missed" "0" "$(led_field "$L1" missed)"
-expect_eq "L1f: …with fourteen fields, schema first" "14" "$(printf '%s' "$L1" | awk -F'|' '{ print NF }')"
+# A RELATION, NOT A COUNT (wave-26 T15; D18): the line leads with its schema and carries each
+# field this section reads by name. A writer that adds a field (T16's idle= and room=) leaves it
+# true; one that drops or renames a field breaks it.
+led_missing_keys() {  # <line> <key>... -> the keys the line does not carry, space-joined
+  local l="$1" k out=""; shift
+  for k in "$@"; do
+    case "|${l#*|}|" in *"|$k="*) : ;; *) out="${out}${out:+ }$k" ;; esac
+  done
+  printf '%s' "$out"
+}
+expect_contains "L1f precondition: the line leads with its schema" "fill-ledger/v1|" "${L1%%|*}|"
+expect_eq "L1f: …and carries every field this section reads, by name" "" \
+  "$(led_missing_keys "$L1" at session turn current state ceiling width open free ready launched declined missed)"
+expect_eq "L1f2: …and the reader names a field the line lacks (the empty answer above is a reading)" \
+  "nosuchfield" "$(led_missing_keys "$L1" turn nosuchfield)"
 expect_eq "L1g: …the session it belongs to" "$SID" "$(led_field "$L1" session)"
 
 # Stop 2: T2 has landed, T3 is ready, the turn sends nothing -> refused, and recorded missed.
@@ -1825,7 +1839,12 @@ led_user "$d" "u-turn-0007" "2026-09-23T11:00:00.000Z" "carry on"
 a_text "$d" "fill-declined: the head is mid-merge | back in ten"
 fire "$d"; expect_allow "L7a: the declined turn ends"
 expect_contains "L7b: …and its reason is on the ledger line" "the head is mid-merge" "$(led_field "$(led_line "$d" 1)" declined)"
-expect_eq "L7c: …with the line still fourteen fields" "14" "$(led_line "$d" 1 | awk -F'|' '{ print NF }')"
+# The squash keeps the fields: the words after the reason's pipe stay inside declined=, and the
+# fields that follow it are still read by name (a relation, not a count; wave-26 T15, D18).
+expect_contains "L7c: …the text after the reason's pipe stays in declined=" "back in ten" \
+  "$(led_field "$(led_line "$d" 1)" declined)"
+expect_eq "L7c2: …and missed= after it still reads by name" "" \
+  "$(led_missing_keys "$(led_line "$d" 1)" declined missed)"
 
 # ============================================================
 section "Section 5f: a Patrol marker turn that ran no tick is refused once (wave-20 REQ-6, AC-6.2; D6)"
@@ -1931,17 +1950,20 @@ u_marker "$d"; u_tick_out "$d" "$QT_OUT"
 fire "$d"; expect_allow "Q1: AC-4.13 the unchanged tick's turn, no TaskList — passes"
 rm -rf "$QT_CFG"
 
-# Q2: the same quiet world with an open row on the roster. The tick decides with something open,
-# so it writes duty=owed and the turn owes the refresh.
+# Q2: the same quiet world with an open row on the roster. Through wave-24 a tick that decided
+# with something open wrote duty=owed. Since wave-26 T15 (D16) a QUIET tick with a row open
+# prints WAITING and owes nothing: no status moved and nothing became ready. Section CHANGE
+# drives the cases that do owe.
 d=$(make_env); ( cd "$d" && git init -q . 2>/dev/null )
 { roster_header
   roster_row_fixture status=intended session="$SID" name=W-OPEN agent_id= deliverable="$d/never-written-q2.md"
 } > "$d/.bionic/tmp/roster-$SID.state"
 QT_CFG="$(mktemp -d)"
 QT_OUT="$(qt_tick "$d" "$QT_CFG")"
-expect_eq "Q2 precondition: a tick with an open row writes duty=owed" "owed" "$(qt_duty "$d")"
+expect_contains "Q2 precondition: a QUIET tick with an open row prints WAITING" "poker: WAITING" "$QT_OUT"
+expect_eq "Q2 precondition: …and writes duty=none" "none" "$(qt_duty "$d")"
 u_marker "$d"; u_tick_out "$d" "$QT_OUT"
-fire "$d"; expect_block "Q2: the owed duty with no TaskList is refused" "$TL_MISSING"
+fire "$d"; expect_allow "Q2: D16 the WAITING tick's turn, no TaskList — passes"
 rm -rf "$QT_CFG"
 
 # Q3: a FILL tick turn with no TaskList is refused once. The fill itself is declined in the
@@ -1995,6 +2017,101 @@ expect_regex "Q4c2 …and rewrites at= to its own instant" '^at=(20[2-9][0-9])-'
 : > "$d/transcript.jsonl"
 qt_marker_at "$d" "2001-01-01T00:00:00.000Z"; u_tick_out "$d" "$QT_OUT"
 fire "$d"; expect_allow "Q4c3: the unchanged tick's turn reads duty=none — no refresh owed"
+rm -rf "$QT_CFG"
+
+# ============================================================
+section "Section CHANGE: the task-list duty is owed only when a row's status or the ready set changed (wave-26 T15, REQ-4, AC-4.5; D16)"
+#
+# THE DEFECT (research-R2 §3, P4/P5). Any tick that printed more than `unchanged` owed the
+# task-list refresh. A tick whose only news was a progress file's age, a load band or a roster
+# row's liveness still ordered a TaskList, and a tick with every slot busy and nothing to do
+# still told the orchestrator to continue. The tick now keeps a second fingerprint in its digest,
+# over the `## Tasks` statuses and the ready set alone. The duty is owed only when that moved.
+# A QUIET tick with a row open prints `poker: WAITING — <n> running, nothing ready` and owes
+# nothing. The real tick runs twice over one world, and the real wall judges the second tick's
+# turn.
+qt_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+qt_backdate() {  # <file> <seconds ago>
+  touch -t "$(date -v-"$2"S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-$2 seconds" +%Y%m%d%H%M.%S)" "$1"
+}
+require_helpers qt_now qt_backdate
+
+# C0: the prompt ends the turn's duties at WAITING or unchanged, and asks for the refresh only on
+# a change.
+expect_contains "C0: AC-4.5 the Patrol prompt ends the turn at a WAITING line" \
+  'a "poker: WAITING" line' "$QT_PROMPT"
+expect_contains "C0b: …and says that turn owes nothing more" "owes nothing more" "$QT_PROMPT"
+expect_contains "C0c: …and asks for the refresh only on a change" \
+  "TaskList and reconcile only when a row's status or the ready set changed" "$QT_PROMPT"
+expect_absent "C0d: …and the unconditional continue is gone" "Then continue the run toward its goal until a wall." "$QT_PROMPT"
+
+# C1: one open row whose progress file goes quiet between two ticks. The second tick prints in
+# full (the row is quieter than its cadence) and owes nothing: no status moved, nothing became
+# ready.
+d=$(make_env); ( cd "$d" && git init -q . 2>/dev/null )
+echo started > "$d/prog-c1.md"
+{ roster_header
+  roster_row_fixture status=intended session="$SID" name=W-PROG agent_id= deliverable="$d/never-written-c1.md" \
+    progress="$d/prog-c1.md" cadence="10 minutes" duration="4 hours" launched_at="$(qt_now)"
+} > "$d/.bionic/tmp/roster-$SID.state"
+QT_CFG="$(mktemp -d)"
+QT_OUT1="$(qt_tick "$d" "$QT_CFG")"
+expect_absent "C1 precondition: the first tick does not find the row quiet" "quieter than the declared cadence" "$QT_OUT1"
+expect_contains "C1 precondition: …while it prints its decision" "decision=" "$QT_OUT1"
+qt_backdate "$d/prog-c1.md" 3600
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "C1 precondition: the progress file's age is news — the second tick prints in full" \
+  "quieter than the declared cadence" "$QT_OUT"
+expect_eq "C1: AC-4.5 a tick whose only change is a progress file's age writes duty=none" "none" "$(qt_duty "$d")"
+u_marker "$d"; u_tick_out "$d" "$QT_OUT"
+fire "$d"; expect_allow "C1b: …and its turn ends with no TaskList"
+rm -rf "$QT_CFG"
+
+# C2: a FILL tick, ticked twice: the second is unchanged and owes nothing. Then a row's status
+# moves with the ready set unchanged. The third tick owes the refresh.
+# T5 waits on T2, so dropping it moves a status and leaves the ready set {T2} as it was.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_BLOCKED"); ( cd "$d" && git init -q . 2>/dev/null )
+roster_header > "$d/.bionic/tmp/roster-$SID.state"
+QT_CFG="$(mktemp -d)"
+qt_tick "$d" "$QT_CFG" >/dev/null
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "C2 precondition: the second tick over the same FILL world prints unchanged" "poker: unchanged since" "$QT_OUT"
+expect_eq "C2 precondition: …and writes duty=none" "none" "$(qt_duty "$d")"
+sed -i.bak '/^| T5 |/s/| pending |/| dropped |/' "$d/.bionic/docs/plans/$PLAN_REL"
+expect_contains "C2 precondition: T5 is dropped" "| T5 |" "$(grep -F '| dropped |' "$d/.bionic/docs/plans/$PLAN_REL")"
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "C2 precondition: the ready set is still T2 alone" "poker: FILL T2" "$QT_OUT"
+expect_eq "C2: AC-4.5 a row whose status moved is a change — duty=owed" "owed" "$(qt_duty "$d")"
+u_marker "$d"; u_tick_out "$d" "$QT_OUT"
+a_text "$d" "fill-declined: T2 waits on the wave head's merge"
+fire "$d"; expect_block "C2b: …and its turn with no TaskList is refused" "$TL_MISSING"
+rm -rf "$QT_CFG"
+
+# C3: every writer slot busy. One writer slot, one open row, a ready row it cannot take: the
+# tick prints WAITING with the count of running rows, and owes nothing even on its first tick.
+d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
+  make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2"); ( cd "$d" && git init -q . 2>/dev/null )
+{ roster_header
+  roster_row_fixture status=intended session="$SID" name=W-BUSY agent_id= deliverable="$d/never-written-c3.md" \
+    duration="4 hours" launched_at="$(qt_now)"
+} > "$d/.bionic/tmp/roster-$SID.state"
+QT_CFG="$(mktemp -d)"
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "C3 precondition: the budget is full, so nothing fills" "the budget is full" "$QT_OUT"
+expect_regex "C3: AC-4.5 a tick with every slot busy prints WAITING" \
+  'poker: WAITING — [1-9][0-9]* running, nothing ready' "$QT_OUT"
+expect_eq "C3b: …and writes duty=none" "none" "$(qt_duty "$d")"
+u_marker "$d"; u_tick_out "$d" "$QT_OUT"
+fire "$d"; expect_allow "C3c: …so its turn ends with no TaskList"
+rm -rf "$QT_CFG"
+
+# C4: WAITING needs a running row. The same quiet world with an empty roster prints the QUIET
+# line and no WAITING.
+d=$(make_env); roster_header > "$d/.bionic/tmp/roster-$SID.state"; ( cd "$d" && git init -q . 2>/dev/null )
+QT_CFG="$(mktemp -d)"
+QT_OUT="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "C4 precondition: the empty roster's tick prints QUIET" "poker: QUIET — no open row" "$QT_OUT"
+expect_absent "C4: …and no WAITING, with nothing running" "poker: WAITING" "$QT_OUT"
 rm -rf "$QT_CFG"
 
 # ============================================================
