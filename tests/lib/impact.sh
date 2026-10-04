@@ -13,11 +13,18 @@
 # at once, which is why the completeness criterion (AC-19) is a planted edit
 # against real suites and not a reading of this file.
 #
-# WHAT IT IS NOT. Not a gate. The Step-5 tests floor still runs every suite on
-# every change, unconditionally (AC-23). This governs DISPATCH — how wide a
-# writer's instrument may be — and an over-broad answer costs compute while an
-# under-broad one costs a missed regression. It is therefore built to be SOUND
-# rather than tight: every rule below over-approximates on purpose.
+# IT IS A GATE NOW (wave-26 REQ-3, D6; T52, review 14 N7). Through 1.10 the
+# Step-5 floor ran every suite on every change and this answer governed only how
+# wide a writer's instrument may be. Since 1.11 the full run is tied to the proof
+# record: payload/scripts/lib/proof.sh `proof_state` asks this program what the
+# change since the last full-run proof reaches, and when every changed file has
+# an answer short of the whole roster, the dispatch wall REFUSES a second full
+# run and names these suites instead. So an under-broad answer here is a
+# regression no run catches, and an over-broad one costs compute. It is
+# therefore built to be SOUND rather than tight: every rule below
+# over-approximates on purpose. Two kinds of change are taken out of its hands:
+# the full-suite runner and anything under tests/lib/ always owe a full run, as
+# does deleting a suite, whatever this program answers for them.
 #
 # ── THE EDGE KINDS ───────────────────────────────────────────────────────────
 #

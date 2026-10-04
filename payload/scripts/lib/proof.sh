@@ -78,18 +78,20 @@ proof_head() {
 
 # proof_attested <kind> <evidence file> <checkout> -> the 40-hex head the evidence attests, exit
 # 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
-#   floor  a full run's log: its first `head=<sha> dirty=<n>` line, the header the suite runner
-#          prints before any suite. <sha> must be the checkout's HEAD and <n> 0, and the
-#          runner's verdict after it must read `Gating: <n> passed, 0 failed` with no `Void:`.
+#   floor  a full run's log: its LAST `head=<sha> dirty=<n>` line, the header the suite runner
+#          prints before any suite, so the last run in the log is the one judged (T52). <sha>
+#          must be the checkout's HEAD and <n> 0; the runner's verdict after it must read
+#          `Gating: <n> passed, 0 failed`, outside any suite's captured output; and the run must
+#          be WHOLE: <n> passed plus the suites its `Void:` line lists equal the suites at <sha>.
 #   review a review: its first `reviewed: <a>..<b>` line. <b> must resolve to a commit that is
 #          the checkout's HEAD or an ancestor of it; the proof names that commit — a review of an
 #          older head is a true proof of that older head, and what landed since is unread.
 #   task   whichever of the two the evidence carries, the run header first (A-T14.9).
 proof_attested() {
-  local kind="$1" ev="$2" co="$3" head stamp sha dirty rng b bh verdict
+  local kind="$1" ev="$2" co="$3" head stamp sha dirty rng b bh verdict roster
   head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
-  stamp="$(awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { print; exit }' "$ev" 2>/dev/null)"
+  stamp="$(awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { s = $0 } END { if (s != "") print s }' "$ev" 2>/dev/null)"
   rng="$(awk '/^reviewed:[ \t]/ { sub(/^reviewed:[ \t]+/, ""); sub(/[ \t].*$/, ""); print; exit }' "$ev" 2>/dev/null)"
   case "$kind" in
     floor) rng="" ;;
@@ -112,24 +114,45 @@ proof_attested() {
     # read, not how it ended: a red run, or a note that quotes the header, attests the head all
     # the same, and the full-run wall reads a proved head as needing no run. So the runner's own
     # verdict, `Gating: <n> passed, <m> failed` (tests/run.sh), must follow the header with n > 0
-    # and m = 0. The LAST such line is the runner's: a suite's captured output can hold an inner
-    # run's verdict above it. A `Void:` line refuses too (A-T5.15): a void suite is counted in
-    # neither tally, so `0 failed` does not yet say it passed.
+    # and m = 0.
+    # THE LAST RUN IN THE LOG, AND ITS OWN VERDICT (T52; review 14 S3). The stamp above is the
+    # last header and the verdict is the last `Gating:` line after it, so a red run with another
+    # head's green run appended is judged by the appended run, which read another head. A verdict
+    # that a capture-close line (`───── end <suite> ─────`, the runner's `_verdict`) follows sat
+    # inside a failing suite's captured output, a nested run's: the runner prints its own verdict
+    # after every capture, so a log whose last verdict is followed by one was cut off.
+    # A VOID SUITE PASSED (T43), so a `Void:` line no longer refuses (review 14 N2, retiring
+    # A-T5.15); its count joins the tally below.
     verdict="$(awk '
-      !seen && /^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; next }
-      seen && /^Gating: [0-9]+ passed, [0-9]+ failed$/ { v = $2 " " $4 }
-      seen && /^Void: / { void = 1 }
-      END { if (v == "") print "none"; else print v " " (void + 0) }' "$ev" 2>/dev/null)"
+      /^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; v = ""; void = 0; inside = 0; next }
+      !seen { next }
+      /^Gating: [0-9]+ passed, [0-9]+ failed$/ { v = $2 " " $4; void = 0; inside = 0; next }
+      v != "" && index($0, "───── end ") == 1 { inside = 1 }
+      v != "" && /^Void: [0-9]+ / { void = $2 + 0 }
+      END { if (v == "") print "none"; else print v " " void " " inside }' "$ev" 2>/dev/null)"
     case "$verdict" in
       none|'')
         printf 'the run in %s has no Gating: <n> passed, <m> failed verdict after its head= line; cite the whole log of a full run that finished' "$ev"; return 1 ;;
     esac
     set -- $verdict
+    if [ "$4" != 0 ]; then
+      printf 'the last verdict in %s sits inside a suite'"'"'s captured output (a ───── end line follows it), so the run itself has none; cite the whole log of a full run that finished' "$ev"; return 1
+    fi
     if [ "$2" != 0 ] || [ "$1" = 0 ]; then
       printf 'the run in %s did not pass (Gating: %s passed, %s failed); fix it, run it again and cite that log' "$ev" "$1" "$2"; return 1
     fi
-    if [ "$3" != 0 ]; then
-      printf 'the run in %s left a suite void (its Void: line); re-run it on a quiet machine and cite that log' "$ev"; return 1
+    # A FLOOR IS A WHOLE RUN (T52; review 14 N1). The runner's roster is every tests/*.test.sh
+    # in the tree, with no skip list and no subset mode (a match that is not a suite stops the
+    # run before any verdict), and every suite on it ends passed, failed or void. So a floor's
+    # passed plus void equals the suites at the head the run read: one git call, here in the
+    # verb, never in a wall. A clean tree (dirty=0, checked above) holds no untracked suite.
+    if [ "$kind" = floor ]; then
+      roster="$(git -C "$co" ls-tree --name-only "$head" tests/ 2>/dev/null \
+        | awk '/^tests\/[^\/]+\.test\.sh$/ { n++ } END { print n + 0 }')"
+      if [ "$(($1 + $3))" -ne "${roster:-0}" ]; then
+        printf 'the run in %s is not a whole run (%s passed and %s void of %s suites at its head); cite the log of a full run' \
+          "$ev" "$1" "$3" "${roster:-0}"; return 1
+      fi
     fi
     printf '%s' "$head"; return 0
   fi
@@ -225,7 +248,9 @@ proof_add_line() {
 
 # proof_state <plan> <tree> -> what the change since the last floor proof needs, one line:
 #
-#     covered                          the working branch's head is the one the proof names
+#     covered<TAB><head>               the working branch's head is the one the proof names, or
+#                                      no file changed since it; <head> is the working head
+#                                      judged, which the refusal names (T52; review 14 N6)
 #     bounded<TAB><suite> <suite>…     every changed file has a non-empty answer from the map,
 #                                      the union is not every suite, and no commit in the range
 #                                      is on another branch
@@ -248,9 +273,25 @@ proof_add_line() {
 # branches contains (research R7 §5, which found commit subjects unreliable). The task branches
 # are `wt/<NN>-*`, NN read from a `wave/<NN>-…` working branch, the convention spawn-worktree
 # and close-out share; a working branch of any other shape excludes only itself, which reads
-# the run's own task branches as outside — the safe direction again.
+# the run's own task branches as outside — the safe direction again. "Some branch" is a local
+# branch, a remote-tracking ref (`git merge origin/main`, `git pull`) or a tag, the run's own
+# names excluded under any remote (T52; review 14 S1). ONE CASE CANNOT BE SEEN: an outside branch
+# deleted after its merge leaves its commits on no ref but the working branch, exactly like a
+# landed task branch that was deleted, and reads as the run's own.
+#
+# A CHANGE TO THE RUNNER OR TO tests/lib/ OWES A FULL RUN (T52; ruling R2): every suite runs
+# through the one and sources the other, so the map's answer for them is not the reach of the
+# change. A change that DELETES A SUITE owes one too (review 14 N8; A-T52.6): the roster the full
+# run reads has changed, and no remaining suite is known to prove the deletion. Both are asked of
+# the file list before the outside test and the map, at no git cost.
+#
+# THE MAP IS ASKED FOR THE CHANGE, THEN FOR EACH FILE IT LEFT UNNAMED (T52; review 14 S2). The
+# map prints one line per suite, naming the strongest file that reaches it, so a file whose
+# suites another changed file claims is named by no line. Such a file is asked again alone,
+# inside the same bound, and only a file whose own answer is empty is "answered with no suite".
+# A suite the working checkout does not hold is never named, and never counts as an answer.
 proof_state() {
-  local plan="$1" tree="$2" h c wb wt files nn total rest cmd tmp lst pid over rc roster ans
+  local plan="$1" tree="$2" h c wb wt files nn total rest cmd tmp lst roster ans f s rc nog
   local d
   h="$(proof_last "$plan" floor)"
   [ -n "$h" ] || { printf 'unbounded\tno floor proof on this plan yet\n'; return 0; }
@@ -262,20 +303,38 @@ proof_state() {
     || { printf 'unbounded\tthe head of %s cannot be read\n' "$wb"; return 0; }
   h="$(git -C "$wt" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" \
     || { printf 'unbounded\tthe proved head is not a commit here\n'; return 0; }
-  [ "$h" != "$c" ] || { printf 'covered\n'; return 0; }
+  [ "$h" != "$c" ] || { printf 'covered\t%s\n' "$c"; return 0; }
   git -C "$wt" merge-base --is-ancestor "$h" "$c" 2>/dev/null \
     || { printf 'unbounded\tthe proved head %.7s is not in the history of %s\n' "$h" "$wb"; return 0; }
   files="$(git -C "$wt" diff --name-only --no-renames "$h" "$c" 2>/dev/null)" \
     || { printf 'unbounded\tgit cannot list the change since %.7s\n' "$h"; return 0; }
   # NO FILE CHANGED: the tree is the one the proof read, so it is covered whatever the commits.
-  [ -n "$files" ] || { printf 'covered\n'; return 0; }
+  [ -n "$files" ] || { printf 'covered\t%s\n' "$c"; return 0; }
+
+  # THE RUNNER, THE TEST LIBRARY, A DELETED SUITE: a full run, whatever the map says (R2, N8).
+  while IFS= read -r f; do
+    case "$f" in
+      tests/run.sh)
+        printf 'unbounded\tthe change touches the full-suite runner %s, which every suite runs through\n' "$f"; return 0 ;;
+      tests/lib/*)
+        printf 'unbounded\tthe change touches %s, in the test library the suites run on\n' "$f"; return 0 ;;
+      tests/*/*) ;;
+      tests/*.test.sh)
+        [ -e "$wt/$f" ] || { printf 'unbounded\tthe change deletes the suite %s, so the roster a full run reads has changed\n' "$f"; return 0; } ;;
+    esac
+  done <<PROOF_FILES
+$files
+PROOF_FILES
 
   nn="$(printf '%s' "$wb" | sed -nE 's#^wave/([0-9]+)-.*#\1#p')"
   total="$(git -C "$wt" rev-list --count "$h..$c" 2>/dev/null)"
   if [ -n "$nn" ]; then
-    rest="$(git -C "$wt" rev-list --count "$h..$c" --not --exclude="$wb" --exclude="wt/${nn}-*" --branches 2>/dev/null)"
+    rest="$(git -C "$wt" rev-list --count "$h..$c" --not \
+      --exclude="$wb" --exclude="wt/${nn}-*" --branches \
+      --exclude="*/$wb" --exclude="*/wt/${nn}-*" --remotes --tags 2>/dev/null)"
   else
-    rest="$(git -C "$wt" rev-list --count "$h..$c" --not --exclude="$wb" --branches 2>/dev/null)"
+    rest="$(git -C "$wt" rev-list --count "$h..$c" --not \
+      --exclude="$wb" --branches --exclude="*/$wb" --remotes --tags 2>/dev/null)"
   fi
   case "$total$rest" in ''|*[!0-9]*)
     printf 'unbounded\tgit cannot count the commits since %.7s\n' "$h"; return 0 ;;
@@ -297,61 +356,100 @@ proof_state() {
   fi
   cmd="$(config_value "$tree" impact-command "" 2>/dev/null)"
   [ -n "$cmd" ] || { printf 'unbounded\tno impact-command is configured to map the change to suites\n'; return 0; }
-  roster="$(ls "$wt"/tests/*.test.sh 2>/dev/null | wc -l | tr -d ' ')"
-  [ "${roster:-0}" -gt 0 ] 2>/dev/null \
-    || { printf 'unbounded\tthe working checkout has no suite roster (tests/*.test.sh) to count against\n'; return 0; }
-
-  # THE MAP, BOUNDED THE WAY brief.sh BOUNDS ITS DERIVATION: a backgrounded child, a clock, a
-  # kill. It runs in the working checkout, so a file the change added is a file the map can see.
   tmp="${TMPDIR:-/tmp}/bionic-proof-$$-${RANDOM}"
   lst="$tmp.files"; printf '%s\n' "$files" > "$lst"
+  for s in "$wt"/tests/*.test.sh; do [ -f "$s" ] && printf '%s\n' "${s##*/}"; done > "$tmp.roster"
+  roster="$(awk 'END { print NR + 0 }' "$tmp.roster")"
+  if [ "${roster:-0}" -eq 0 ]; then
+    rm -f "$lst" "$tmp.roster"
+    printf 'unbounded\tthe working checkout has no suite roster (tests/*.test.sh) to count against\n'; return 0
+  fi
+
+  # THE MAP, BOUNDED THE WAY brief.sh BOUNDS ITS DERIVATION, ONE BOUND FOR EVERY CALL BELOW.
+  # It runs in the working checkout, so a file the change added is a file the map can see.
+  SECONDS=0
+  # The files split one per line, a path with a space whole; the COMMAND is configuration and
+  # splits on blanks, as brief.sh runs it. Globbing is off for the split and restored after.
+  case "$-" in *f*) nog=1 ;; *) nog=0 ;; esac
+  set -f; IFS='
+'
+  # shellcheck disable=SC2086
+  set -- $files
+  unset IFS; [ "$nog" -eq 1 ] || set +f
+  _proof_map "$wt" "$cmd" "$tmp.out" "$@"; rc=$?
+  # THE JOINT ANSWER, THEN EACH FILE IT LEFT UNNAMED, ALONE, IN TABLE ORDER. A line is
+  # `<suite><TAB><reason>:<file>`; a file is named when a line for a suite the checkout holds
+  # names it after the reason. The first file whose own answer names no such suite is the reason.
+  if [ "$rc" -eq 0 ]; then
+    _proof_named "$tmp.roster" "$tmp.out" > "$tmp.named"
+    ans="$(awk 'FILENAME == ARGV[1] { got[$0] = 1; next } $0 != "" && !($0 in got)' \
+      "$tmp.named" "$lst" 2>/dev/null)"
+    while [ -n "$ans" ]; do
+      f="${ans%%$'\n'*}"
+      case "$ans" in *$'\n'*) ans="${ans#*$'\n'}" ;; *) ans="" ;; esac
+      _proof_map "$wt" "$cmd" "$tmp.one" "$f"; rc=$?
+      [ "$rc" -eq 0 ] || break
+      if [ -z "$(_proof_named "$tmp.roster" "$tmp.one")" ]; then
+        rm -f "$tmp.out" "$tmp.one" "$tmp.named" "$tmp.roster" "$lst"
+        printf 'unbounded\tthe map answers %s with no suite\n' "$f"; return 0
+      fi
+      cat "$tmp.one" >> "$tmp.out"
+    done
+  fi
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$tmp.out" "$tmp.one" "$tmp.named" "$tmp.roster" "$lst"
+    if [ "${_PROOF_MAP_OVER:-0}" -eq 1 ]; then
+      printf 'unbounded\tthe map overran its %s s bound\n' "${IMPACT_BOUND_S:-10}"; return 0
+    fi
+    printf 'unbounded\tthe map failed (exit %s)\n' "$rc"; return 0
+  fi
+  # THE SUITES: those the checkout holds, once each, sorted; or every suite.
+  ans="$(awk -F'\t' 'FILENAME == ARGV[1] { have[$0] = 1; next } ($1 in have) { print $1 }' \
+    "$tmp.roster" "$tmp.out" 2>/dev/null | sort -u)"
+  rm -f "$tmp.out" "$tmp.one" "$tmp.named" "$tmp.roster" "$lst"
+  [ -n "$ans" ] || { printf 'unbounded\tthe map gave no answer\n'; return 0; }
+  s="$(printf '%s\n' "$ans" | awk 'END { print NR + 0 }')"
+  if [ "$s" -ge "$roster" ]; then
+    printf 'unbounded\tthe map answers the change with every suite (%s of %s)\n' "$s" "$roster"; return 0
+  fi
+  printf 'bounded\t%s\n' "$(printf '%s\n' "$ans" | tr '\n' ' ' | sed 's/ $//')"
+}
+
+# _proof_named <roster file> <answer file> -> each file the answer names on a line for a suite
+# the roster holds: `<suite><TAB><reason>:<file>`, the file after the reason's first colon.
+_proof_named() {
+  awk -F'\t' '
+    FILENAME == ARGV[1] { have[$0] = 1; next }
+    ($1 in have) { p = index($2, ":"); if (p) print substr($2, p + 1) }' "$1" "$2" 2>/dev/null
+}
+
+# _proof_map <checkout> <command> <out> <file>... -> the map's exit status, its answer in <out>;
+# 124 with _PROOF_MAP_OVER=1 when the bound (IMPACT_BOUND_S, counted on the caller's SECONDS)
+# ran out. THE BOUND KILLS THE MAP ITSELF (T52; review 14 N5): the subshell execs the command,
+# so the pid the clock watches is the map's own, not a shell that would leave it running. TERM
+# first, then KILL after a second for a map that ignores TERM, so the wall never waits on it.
+_proof_map() {
+  local wt="$1" cmd="$2" out="$3" pid i
+  shift 3
+  _PROOF_MAP_OVER=0
   (
     cd "$wt" 2>/dev/null || exit 1
     set -f
-    # The files split one per line, a path with a space whole; the COMMAND is configuration
-    # and splits on blanks, as brief.sh runs it.
-    IFS='
-'
     # shellcheck disable=SC2086
-    set -- $files
-    unset IFS
-    # shellcheck disable=SC2086
-    $cmd "$@" > "$tmp.out" 2>/dev/null
+    exec $cmd "$@" > "$out" 2>/dev/null
   ) &
   pid=$!
-  SECONDS=0; over=0
   while kill -0 "$pid" 2>/dev/null; do
-    if [ "$SECONDS" -ge "${IMPACT_BOUND_S:-10}" ]; then kill -TERM "$pid" 2>/dev/null; over=1; break; fi
+    if [ "$SECONDS" -ge "${IMPACT_BOUND_S:-10}" ]; then
+      _PROOF_MAP_OVER=1
+      kill -TERM "$pid" 2>/dev/null
+      i=0
+      while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 10 ]; do sleep 0.1; i=$((i + 1)); done
+      kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
     sleep 0.1
   done
-  wait "$pid" 2>/dev/null; rc=$?
-  if [ "$over" -eq 1 ]; then
-    rm -f "$tmp.out" "$lst"
-    printf 'unbounded\tthe map overran its %s s bound\n' "${IMPACT_BOUND_S:-10}"; return 0
-  fi
-  if [ "$rc" -ne 0 ]; then
-    rm -f "$tmp.out" "$lst"
-    printf 'unbounded\tthe map failed (exit %s)\n' "$rc"; return 0
-  fi
-  # ONE PASS OVER THE ANSWER. A line is `<suite><TAB><reason>:<file>`; a file is answered when a
-  # line names it after the reason. The first file nobody answers is the reason, in table
-  # order; otherwise the suites, sorted, or every suite.
-  ans="$(awk -F'\t' -v roster="$roster" '
-    FILENAME == ARGV[1] { if ($0 != "") order[++n] = $0; next }
-    $1 != "" {
-      if (!($1 in s)) { s[$1] = 1; ns++ }
-      p = index($2, ":"); if (p) got[substr($2, p + 1)] = 1
-    }
-    END {
-      for (i = 1; i <= n; i++) if (!(order[i] in got)) { print "none\t" order[i]; exit }
-      if (ns >= roster) { print "every\t" ns; exit }
-      for (k in s) print "suite\t" k
-    }' "$lst" "$tmp.out" 2>/dev/null)"
-  rm -f "$tmp.out" "$lst"
-  case "$ans" in
-    none*)  printf 'unbounded\tthe map answers %s with no suite\n' "${ans#*$'\t'}"; return 0 ;;
-    every*) printf 'unbounded\tthe map answers the change with every suite (%s of %s)\n' "${ans#*$'\t'}" "$roster"; return 0 ;;
-    '')     printf 'unbounded\tthe map gave no answer\n'; return 0 ;;
-  esac
-  printf 'bounded\t%s\n' "$(printf '%s\n' "$ans" | cut -f2 | sort | tr '\n' ' ' | sed 's/ $//')"
+  wait "$pid" 2>/dev/null
 }
