@@ -321,12 +321,15 @@ mechanically: Step 6's duplication axis anchors on the owner column, and the agr
 column is the obligation the reviewer reads back. Shape:
 
 ```
-| concept | owning module (SSoT) | rendering surfaces | agreement test |
-|---|---|---|---|
-| version pin value | canonical-sdlc-evidence-gate.sh's `SUPPORTED_SDLC_VERSION` | both hooks · this file's version history · the two SVG diagrams | `tests/cross-gate-agreement.test.sh` §V pins all five renderings against the gate's value, with a mutation arm |
-| agreement-test exemplar + authoring rules | SKILL.md §Step 6 | SKILL.md §Step 6 · agents/critic.md AXIS block · this section | AXIS-marker rows in tests/agent-roles.test.sh — the pin covers two of the three surfaces; this section is the unpinned one |
+| concept | owning module (SSoT) | reuses | rendering surfaces | agreement test |
+|---|---|---|---|---|
+| version pin value | canonical-sdlc-evidence-gate.sh's `SUPPORTED_SDLC_VERSION` | none fits: no other file holds a version constant | both hooks · this file's version history · the two SVG diagrams | `tests/cross-gate-agreement.test.sh` §V pins all five renderings against the gate's value, with a mutation arm |
+| agreement-test exemplar + authoring rules | SKILL.md §Step 6 | the marker mechanism in tests/agent-roles.test.sh | SKILL.md §Step 6 · agents/critic.md AXIS block · this section | AXIS-marker rows in tests/agent-roles.test.sh — the pin covers two of the three surfaces; this section is the unpinned one |
 ```
 
+- **The `reuses` cell names the existing site the design reuses, or `none fits: <why>`.** Empty is
+  a finding: the design never looked. A writer's `reuse:` report line answers the same question
+  for each site the build added.
 - **One row per concept rendered at more than one surface.** A concept that exists in exactly
   one place has nothing to disagree with itself about, and listing it is padding. The table is a
   duplication ledger, not an inventory of the change.
@@ -475,6 +478,15 @@ project out entirely) governs whether Step 9 moves anything at all. The move its
 relative path>`, never `record:` — is `archive_run`'s contract, documented at its own
 definition in `payload/scripts/lib/archive.sh`; SKILL.md §Step 9 names the call and the
 `archived:` evidence line it produces.
+
+**The released version (`release:`, wave-27 T4).** An optional plan frontmatter field,
+`release: <version>`, names what the run released. `close-out.sh` writes it into the Step 9
+`delivered:` line, the epic row's version cell and the continuation header. With no field, no
+version is written in any of them: the epic cell reads `—`. The installed tool's own version is
+never used for the release. It stays on `attested-by: close-out.sh <version>`, which names the
+tool that performed the tail. Close-out also writes the Step 9 line: a plan reaches Step 8
+with no `- Step 9:` line, and the close adds one under the Step-8 block before replacing it with
+`delivered:`.
 
 ## Permission answers (1.10.0)
 

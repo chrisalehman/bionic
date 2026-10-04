@@ -1407,14 +1407,23 @@ expect_true "74a: payload/integrity/rendered.sha256 exists" test -f "$RENDERED_M
 expect_false "74b: payload/integrity/agents.sha256 is gone" \
   test -f "${REPO}/payload/integrity/agents.sha256"
 MANIFEST_BODY="$(grep -v '^#' "$RENDERED_MANIFEST" 2>/dev/null | grep -v '^[[:space:]]*$')"
-# TWENTY-FOUR AT THIS MERGE, reconciling both wave-11 rows against the twelve that came
-# before them: six roles, five commands, the split skill's twelve finals (the core, ten step
-# files and the dispatch reference — row 1b, +11) and payload/context/survival.md, the fourth
-# render unit's one output (1c, +1). The number is hard-coded rather than counted from the
-# tree on purpose, exactly as it was at twelve: a count derived from whatever the renderer
-# just produced would agree with itself no matter what the renderer dropped.
-expect_eq "74c: it carries one row per rendered file (six roles, five commands, the split skill's twelve, the dispatch terms)" \
-  "24" "$(printf '%s\n' "$MANIFEST_BODY" | wc -l | tr -d ' ')"
+# ONE ROW PER TEMPLATE, a relation rather than a number (wave-27 T8: a hard-coded 24 went red
+# on every new rendering, and two rows were adding them side by side). The count is taken
+# from the SOURCES, the templates of the five render units, never from the finals: a count
+# derived from whatever the renderer just produced would agree with itself no matter what the
+# renderer dropped, and the templates are what it was asked to render.
+MANIFEST_TMPLS="$(ls "${REPO}"/agents-src/templates/*.md.tmpl "${REPO}"/agents-src/templates/commands/*.md.tmpl \
+  "${REPO}"/agents-src/templates/skills/canonical-sdlc/*.md.tmpl \
+  "${REPO}"/agents-src/templates/skills/canonical-sdlc/steps/*.md.tmpl \
+  "${REPO}"/agents-src/templates/context/*.md.tmpl 2>/dev/null | wc -l | tr -d ' ')"
+expect_true "74c precondition: the five render units hold templates" test "${MANIFEST_TMPLS:-0}" -gt 0
+expect_eq "74c: it carries one row per template (roles, commands, the split skill, the context files)" \
+  "$MANIFEST_TMPLS" "$(printf '%s\n' "$MANIFEST_BODY" | wc -l | tr -d ' ')"
+for _ctx in "${REPO}"/agents-src/templates/context/*.md.tmpl; do
+  _ctx="${_ctx##*/}"
+  expect_contains "74h: …including context/${_ctx%.tmpl}, plugin-root-relative" \
+    "  context/${_ctx%.tmpl}" "$MANIFEST_BODY"
+done
 expect_contains "74c2: …including a step file, plugin-root-relative" \
   "  skills/canonical-sdlc/steps/4.md" "$MANIFEST_BODY"
 expect_contains "74c3: …and the dispatch reference" \
@@ -3595,7 +3604,7 @@ else
      "mutated copy still read 0"
 fi
 
-# ============================================================
+# =====================================================
 section "Section 30: T9 — the scaffold span rule, cell shapes and the two counters (epic-23 wave-17-fixit-184, REQ-5/REQ-7/REQ-10, AC-5.5/AC-7.1/AC-10.3)"
 # ============================================================
 #
@@ -4895,5 +4904,154 @@ expect_nonempty "W27-112: AC-11.2 — the task-add paragraph says a new row gets
   "$(w26_hits 'A row added by `task-add` gets its task-list entry the same turn, and the entries after it are recreated to keep the order.' "$STEP3_MD")"
 expect_nonempty "W27-112a: …inside the paragraph that locks the wave shape at approval" \
   "$(awk '/Wave shape locks at approval/ { p = 1 } p && /gets its task-list entry the same turn/ { print "ok"; exit }' "$STEP3_MD")"
+=======
+section "Section W27-reuse: wave-27 T12 — a writer looks for an existing site first, and a design names what it reuses (REQ-4 AC-4.1, AC-4.2; D8)"
+#
+# WHAT THIS OWNS. §W27-41: the implementor-mechanics block, and so both writer role files, carry
+# the search duty and the `reuse:` report line in both of its forms. §W27-42: the Step-2 ownership
+# line and the operational-rules exemplar carry the `reuses` column, in the one column order.
+# Each pin sits beside a doctored copy with the text gone, which proves the arm goes red. HERMETIC.
+W27_DUTY='before adding a function, a file or a configuration key, search for an existing site that does the job'
+W27_LINE_A='`reuse: searched <what> · reused <site>`'
+W27_LINE_B='`reuse: searched <what> · none fits: <why>`'
+W27_BLOCK="${REPO}/agents-src/blocks/implementor-mechanics.md"
+for _w27_f in "$W27_BLOCK" "${REPO}/agents/implementor.md" "${REPO}/agents/senior-implementor.md"; do
+  _w27_n="${_w27_f#"$REPO"/}"
+  expect_nonempty "W27-41a: $_w27_n carries the search duty" "$(w26_hits "$W27_DUTY" "$_w27_f")"
+  expect_nonempty "W27-41b: $_w27_n carries the reused form of the reuse: line" "$(w26_hits "$W27_LINE_A" "$_w27_f")"
+  expect_nonempty "W27-41c: $_w27_n carries the none-fits form of the reuse: line" "$(w26_hits "$W27_LINE_B" "$_w27_f")"
+done
+for _w27_f in "${REPO}/agents/auditor.md" "${REPO}/agents/researcher.md"; do
+  expect_eq "W27-41d: ${_w27_f#"$REPO"/}, which writes no code, carries no search duty" "" "$(w26_hits "$W27_DUTY" "$_w27_f")"
+done
+W27_DOC41="$TMP/w27-41-doctored.md"
+tr '\n' ' ' < "$W27_BLOCK" | sed 's/search for[[:space:]]*an existing site that does the job/search/' > "$W27_DOC41"
+expect_eq "W27-41m: a block that lost the search duty is caught" "" "$(w26_hits "$W27_DUTY" "$W27_DOC41")"
+expect_nonempty "W27-41mp precondition: the doctored block still carries the reuse: line" "$(w26_hits "$W27_LINE_A" "$W27_DOC41")"
+
+W27_COLS='`concept → owning module (SSoT) → reuses → rendering surfaces → agreement test`'
+W27_GLOSS='`reuses` names the existing site reused, or `none fits: <why>`'
+W27_HDR='| concept | owning module (SSoT) | reuses | rendering surfaces | agreement test |'
+expect_nonempty "W27-42a: steps/2.md's ownership line carries the reuses column in order" "$(w26_hits "$W27_COLS" "$STEP2_MD")"
+expect_nonempty "W27-42b: …and says what the cell holds" "$(w26_hits "$W27_GLOSS" "$STEP2_MD")"
+expect_nonempty "W27-42c: operational-rules.md's exemplar header carries the reuses column" "$(w26_hits "$W27_HDR" "$OPRULES")"
+expect_nonempty "W27-42d: …and an exemplar row names a reused site or none fits" "$(w26_hits '| none fits:' "$OPRULES")"
+W27_DOC42="$TMP/w27-42-doctored.md"
+sed 's/ → reuses → / → /' "$STEP2_MD" > "$W27_DOC42"
+expect_eq "W27-42m: a steps/2.md whose ownership line lost the column is caught" "" "$(w26_hits "$W27_COLS" "$W27_DOC42")"
+expect_nonempty "W27-42mp precondition: the doctored copy still carries the ownership line" \
+  "$(w26_hits '**Ownership table** — `concept → owning module (SSoT) → rendering surfaces → agreement test`' "$W27_DOC42")"
+
+# ── §W27-T8 (wave-27 T8; REQ-3 AC-3.2, REQ-4 AC-4.3/4.4, REQ-1 AC-1.6, REQ-5 AC-5.1; D5, D9, D10) ──
+#
+# WHAT THIS OWNS. The three checks files a reader is pushed at start, one per reading question,
+# each rendered from its block. Pinned here: each fits its cap; the rendered span is its block;
+# every structure check id carries its failing case; no id is named in two files (the file half
+# of §W27-32 — the role-file half is the reader-roles row's); the two code files end their checks
+# with the whole-read section and its "not a second read" sentence (§W27-6); the evidence file is
+# the auditor mandate and the adversarial file the critic template, minus the self-review notes and
+# plus the sentence that the reader sees no other verdict. Each absence sits beside a positive on
+# the same extractor and file, and a doctored copy proves each arm goes red. HERMETIC: committed
+# finals by path; doctored copies under $TMP.
+W27_CHECKS_DIR="${REPO}/payload/context"
+W27_QUESTIONS="evidence adversarial structure"
+W27_IDS="reuse one-site single-job open-closed substitution narrow-interface dependency-direction"
+W27_CAP=4500
+W27_WHOLE='this is not a second read of each piece'
+# w27_ids_in <file> -> the structure check ids the file names as whole words, one per line.
+w27_ids_in() {
+  local id
+  for id in $W27_IDS; do _flatten "$1" | grep -qwF -- "$id" && printf '%s\n' "$id"; done
+}
+# w27_check_line <file> <id> -> the file's check line for the id, in the interface form.
+w27_check_line() { grep -F -- "- **$2** — " "$1" 2>/dev/null | head -1; }
+
+for _q in $W27_QUESTIONS; do
+  _f="${W27_CHECKS_DIR}/checks-${_q}.md"
+  _bytes="$(wc -c < "$_f" 2>/dev/null | tr -cd '0-9')"
+  expect_true "W27-T8a: AC-5.1 — payload/context/checks-${_q}.md is rendered and non-empty" test -s "$_f"
+  expect_true "W27-T8b: …and fits the ${W27_CAP}-byte cap (${_bytes:-missing} B)" \
+    test "${_bytes:-99999}" -le "$W27_CAP"
+  _upper="$(printf 'checks-%s' "$_q" | tr '[:lower:]' '[:upper:]')"
+  same_everywhere "W27-T8c-${_q}" "the ${_q} checks are one text in the block and the rendered file" \
+    "${BLOCK_DIR}/checks-${_q}.md" "$_upper" "$_f"
+  expect_eq "W27-T8d: …and the file ends with the record form" "question: ${_q}" \
+    "$(grep -o "^question: ${_q}\$" "$_f" 2>/dev/null | head -1)"
+done
+W27_PADDED="$TMP/w27-padded.md"
+{ cat "${W27_CHECKS_DIR}/checks-structure.md"; head -c "$W27_CAP" /dev/zero | tr '\0' 'x'; } > "$W27_PADDED" 2>/dev/null
+expect_false "W27-T8bm: a checks file padded past the cap is caught" \
+  test "$(wc -c < "$W27_PADDED" | tr -cd '0-9')" -le "$W27_CAP"
+
+# AC-4.3 text half: every structure id has its check line, and the line names its failing case.
+W27_STRUCT="${W27_CHECKS_DIR}/checks-structure.md"
+for _id in $W27_IDS; do
+  _line="$(w27_check_line "$W27_STRUCT" "$_id")"
+  expect_nonempty "W27-T8e: checks-structure.md carries the \`${_id}\` check in the interface form" "$_line"
+  expect_contains "W27-T8f: …and its line names the case it fails on" "Fails when " "$_line"
+done
+W27_NOFAIL="$TMP/w27-nofail.md"
+anchor "$W27_STRUCT" '- **single-job** — ' 1
+sed '/^- \*\*single-job\*\* — /s/Fails when /Wrong when /' "$W27_STRUCT" > "$W27_NOFAIL" 2>/dev/null
+expect_nonempty "W27-T8fm precondition: the doctored copy still has the single-job line" \
+  "$(w27_check_line "$W27_NOFAIL" single-job)"
+expect_absent "W27-T8fm: a single-job line with no failing case is caught" \
+  "Fails when " "$(w27_check_line "$W27_NOFAIL" single-job)"
+expect_contains "W27-T8g: the structure record form has one check line per id" \
+  'check: <id> <PASS|FLAG|FAIL|n/a> <reason>' "$(cat "$W27_STRUCT" 2>/dev/null)"
+expect_contains "W27-T8h: AC-4.4 text half — with no design table, the reader searches the codebase" \
+  'search the codebase' "$(_flatten "$W27_STRUCT")"
+expect_contains "W27-T8i: the agreement-test duty sits under one-site" \
+  'A pair with no named test is a FLAG' "$(_flatten "$W27_STRUCT")"
+
+# §W27-32, file half (AC-3.2): each id is named in exactly one checks file, the structure one.
+for _id in $W27_IDS; do
+  _homes=""
+  for _q in $W27_QUESTIONS; do
+    # Captured first: `grep -q` on a live pipe closes it early, and under pipefail the
+    # writer's SIGPIPE fails the match.
+    _named="$(w27_ids_in "${W27_CHECKS_DIR}/checks-${_q}.md")"
+    printf '%s\n' "$_named" | grep -xF -- "$_id" >/dev/null && _homes="${_homes} checks-${_q}.md"
+  done
+  expect_eq "W27-32: AC-3.2 — \`${_id}\` is named in one checks file only" " checks-structure.md" "$_homes"
+done
+W27_ADV_DOCTORED="$(w26_doctor "${W27_CHECKS_DIR}/checks-adversarial.md" 'Also ask whether one-site holds.')"
+expect_contains "W27-32m: a checks-adversarial.md that names one-site is caught" \
+  "one-site" "$(w27_ids_in "$W27_ADV_DOCTORED")"
+
+# §W27-6 (AC-1.6 text half): the two code files end with the whole read; the evidence file has none.
+for _q in adversarial structure; do
+  _f="${W27_CHECKS_DIR}/checks-${_q}.md"
+  expect_contains "W27-6: AC-1.6 — checks-${_q}.md has its whole-read section" \
+    '## A whole read' "$(cat "$_f" 2>/dev/null)"
+  expect_nonempty "W27-6b: …saying the whole read is not a second read of each piece" \
+    "$(w26_hits "$W27_WHOLE" "$_f")"
+done
+expect_contains "W27-6c precondition: checks-evidence.md has its record section" \
+  'question: evidence' "$(cat "${W27_CHECKS_DIR}/checks-evidence.md" 2>/dev/null)"
+expect_absent "W27-6c: …and no whole read: evidence is not a code question" \
+  '## A whole read' "$(cat "${W27_CHECKS_DIR}/checks-evidence.md" 2>/dev/null)"
+W27_NOWHOLE="$TMP/w27-nowhole.md"
+anchor "${W27_CHECKS_DIR}/checks-structure.md" "$W27_WHOLE" 1
+sed "s/$W27_WHOLE/it may also re-read each piece/" "$W27_STRUCT" > "$W27_NOWHOLE" 2>/dev/null
+expect_contains "W27-6m precondition: the doctored copy keeps its whole-read section" \
+  '## A whole read' "$(cat "$W27_NOWHOLE" 2>/dev/null)"
+expect_eq "W27-6m: a whole read that drops the sentence is caught" "" "$(w26_hits "$W27_WHOLE" "$W27_NOWHOLE")"
+
+# The moved texts: evidence is the auditor mandate; adversarial is the critic template, edited twice.
+W27_EVID="${W27_CHECKS_DIR}/checks-evidence.md"
+W27_ADV="${W27_CHECKS_DIR}/checks-adversarial.md"
+expect_nonempty "W27-T8j: checks-evidence.md opens the auditor mandate" \
+  "$(w26_hits "Your job is to falsify the claim that this wave's requirements were faithfully implemented **and proven**" "$W27_EVID")"
+expect_nonempty "W27-T8j2: …and closes it" \
+  "$(w26_hits 'a factual claim carrying neither its proving command with output nor the label "unverified" is itself a finding.' "$W27_EVID")"
+expect_nonempty "W27-T8k: checks-adversarial.md carries the critic template" \
+  "$(w26_hits 'Your job is to find what went wrong in this change.' "$W27_ADV")"
+expect_eq "W27-T8k2: …without the self-review notes" "" "$(w26_hits '6-axis self-review notes' "$W27_ADV")"
+expect_nonempty "W27-T8k3: …and tells the reader it sees no other reader's verdict" \
+  "$(w26_hits "You are shown no other reader's verdict" "$W27_ADV")"
+W27_ADV_NOTES="$(w26_doctor "$W27_ADV" 'You have the 6-axis self-review notes.')"
+expect_nonempty "W27-T8k2m: a checks-adversarial.md that hands over the notes again is caught" \
+  "$(w26_hits '6-axis self-review notes' "$W27_ADV_NOTES")"
 
 finish
