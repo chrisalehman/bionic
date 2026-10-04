@@ -139,7 +139,10 @@ create  makes the branch AND the worktree at exactly <base-sha>, verifies
         both, plants <worktree>/.bionic -> <main-root>/.bionic (D7; unless the
         branch already tracks something at that path), and prints one OK
         attestation line. Default parent: <main-root>/.worktrees. A relative
-        parent resolves against the main root, never against pwd. With
+        parent resolves against the main root, never against pwd. A parent
+        inside the checkout that git does not already ignore is added, once,
+        to the repository's local info/exclude (never .gitignore), so the
+        checkout does not read as dirty; remove and land leave that line. With
         --for <name>, also appends one workspace/v1 line for that agent to
         <main-root>/.bionic/tmp/workspaces-<session>.state (session from
         CLAUDE_CODE_SESSION_ID); refused, before anything is made, with no
@@ -203,6 +206,47 @@ abort_created() {
   cleanup_partial
   contract "FAIL reason=$1"
   exit 1
+}
+
+# THE TREE PARENT STAYS OUT OF THE CHECKOUT'S STATUS (wave-26 T60). The default parent,
+# <main-root>/.worktrees, lies inside the main checkout, and a project whose own ignore rules
+# never name it shows `?? .worktrees/` for as long as any tree is open. The booking shim then
+# stamps the checkout dirty and a floor proof is refused with "commit, run it again" — a fix
+# that cannot work, because the dirt is the tree directory itself. So when the parent lies
+# inside the checkout and git does not already ignore the tree, ONE line anchored to the
+# repository root (`/.worktrees/`) goes into the repository's LOCAL exclude file,
+# <git common dir>/info/exclude. Never the project's .gitignore or any tracked file: this is
+# a per-clone fact about where trees live, not a project decision. Once only (an ignored tree
+# adds nothing, and the line itself makes the next tree ignored), nothing for a parent
+# outside the checkout, and nothing for a parent that IS the checkout root (`/` would ignore
+# everything). `remove` and `land` leave the line: the next tree needs it.
+#
+# Best-effort by design: the tree is already verified and recorded, so a failure to write the
+# file is one stderr line saying how to fix it by hand, never a failed create. The attestation
+# line on stdout is untouched either way.
+exclude_tree_parent() {  # <main-root> <parent-abs> <tree-abs>
+  local root="$1" parent="$2" tree="$3" rel line common exfile
+  case "${parent}/" in "${root}/"*) ;; *) return 0 ;; esac
+  rel="${parent#"${root}"}"; rel="${rel#/}"
+  [ -n "$rel" ] || return 0
+  # Ask git about the tree itself: that is the path whose status is at stake, and it exists
+  # by now, so a directory-only rule (`name/`) is matched the way status will match it.
+  git -C "$root" check-ignore -q -- "${tree#"${root}"/}" 2>/dev/null && return 0
+  # Glob metacharacters and spaces in the directory name are escaped, so the line means the
+  # directory and nothing wider.
+  line="/$(printf '%s' "$rel" | sed -e 's/[][\*?]/\\&/g' -e 's/ /\\ /g')/"
+  common="$(cd "$root" 2>/dev/null && git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  [ -n "$common" ] || common="$(cd "$root" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null)"
+  case "$common" in /*) ;; ?*) common="${root}/${common}" ;; esac
+  exfile="${common}/info/exclude"
+  if [ -n "$common" ] && mkdir -p "${common}/info" 2>/dev/null \
+     && { [ ! -s "$exfile" ] || [ -z "$(tail -c1 "$exfile")" ] || printf '\n' 2>/dev/null >> "$exfile"; } 2>/dev/null \
+     && printf '%s\n' "$line" 2>/dev/null >> "$exfile"; then
+    return 0
+  fi
+  printf '%s: warning: could not write %s; the main checkout will read as dirty while a tree is open. Ignore %s by hand in .gitignore or .git/info/exclude.\n' \
+    "$PROG" "${exfile}" "$line" >&2
+  return 0
 }
 
 cmd_create() {
@@ -314,6 +358,10 @@ cmd_create() {
             worktree_record_workspace "$main_root" "$sid" "$name" "$wt" "$branch" "$base_sha" )" \
       || abort_created "${why:-workspace-unrecorded}"
   fi
+
+  # After the tree is verified and recorded, so an aborted create leaves no exclude line behind;
+  # never fails the create (see exclude_tree_parent).
+  exclude_tree_parent "$main_root" "$parent_abs" "$wt"
 
   contract "OK path=${wt} branch=${branch} head=${head} base=${base_sha}${alias_field}"
 }
