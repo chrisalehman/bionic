@@ -1822,8 +1822,10 @@ D${T}/a/r" "$(printf '%s\n' "$FX_OUT" | grep -E '^(W|D)')"
 
 # --- mutation control: the unknown line taken out is the write-target mode's omission ---
 FX_MUT="$SANDBOX/cmd-class.fx-mutant.sh"
-anchor "$LIB" 'print "?\t" r "\t" s' 1
-grep -vF 'print "?\t" r "\t" s' "$LIB" > "$FX_MUT"
+# The unknown line is held for fx_flush (T19), so the mutant empties the one function that holds it.
+FX_UNK_LINE='function fx_unk(r, s) { FXO[++FXON] = "?\t" fx_flat(r) "\t" fx_flat(s) }'
+anchor "$LIB" "$FX_UNK_LINE" 1
+A="$FX_UNK_LINE" awk '{ if (index($0, ENVIRON["A"])) print "    function fx_unk(r, s) { }"; else print }' "$LIB" > "$FX_MUT"
 expect_true "§FX mutant: the library without its unknown line still parses" bash -n "$FX_MUT"
 expect_eq "§FX mutant: a delete is still read (the mutant runs)" "D${T}/a/b" "$(FX_LIB="$FX_MUT" fx_shape 'rm -f /a/b')"
 expect_eq "§FX mutant: the variable target is omitted — the defect" "" "$(FX_LIB="$FX_MUT" fx_shape 'rm -f $X')"
