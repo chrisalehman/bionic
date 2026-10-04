@@ -182,7 +182,10 @@ ${1:-}"
 # LAST WRITE WINS, undecorated — unlike `fold_context`'s accumulation. Exactly one of the
 # five walls ever calls this (background-suite-guard), so there is only ever one write; a
 # second caller would need this file to also invent an ORDER for two rewrites of the same
-# `tool_input`, which nothing here is asked to do yet.
+# `tool_input`, which nothing here is asked to do yet. That wall now makes two rewrites
+# (the timeout repair, then the booking wrap's command; wave-26 T7, D8) and orders them
+# itself, in ONE object built by `_bsg_stage_input` in walls.sh, so this verb is still
+# called once per event.
 fold_update_input() {
   _BF_PEND_UPDATED_INPUT="${1:-}"
 }
