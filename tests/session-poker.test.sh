@@ -8329,4 +8329,54 @@ expect_eq "46e no projection copy is left beside the plan" "" \
   "$(find "$R46/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
 POKE_BOUND="$S46_BOUND_WAS"
 
+
+# ============================================================
+section "Section 47 §SYNC: the tick applies the launches the plan lacks, in one write (wave-26 T32, D4; review-3 F1, F2)"
+# ============================================================
+#
+# The launch recorder starts `launch-sync` and does not wait for it. The tick runs the same
+# transaction before it reads the plan, so a launch the detached call did not record (killed,
+# refused, or never started) is recorded here and says so once, and one that cannot be recorded
+# is printed on every tick until it is fixed. The fixture is §34's plan, which the real commit
+# gate admits, with T2's agent cell naming a launch on the roster (the gate reads it there).
+S47_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R47="$(make_repo s47-sync)"; ( cd "$R47" && git commit -q --allow-empty -m init )
+P47="$(s34_plan "$R47" 4)"
+sed -e 's/^| T2 | 4 | build | the second build | implementor |/| T2 | 4 | build | the second build | w-T2 |/' \
+    "$P47" > "$P47.tmp" && mv "$P47.tmp" "$P47"
+awk '{ print } /^- T5: pending dispatch/ { print "- T6: pending dispatch"; print "- T7: pending dispatch" }
+  /^\| T2 \| 4 \| build/ {
+  print "| T6 | 4 | build | the sixth build | — | — | 30 | REQ-1 | f.sh | — | — | pending |"
+  print "| T7 | 4 | build | the seventh build | — | — | 30 | REQ-1 | g.sh | — | — | pending |" }' "$P47" > "$P47.tmp" && mv "$P47.tmp" "$P47"
+new_roster "$R47"
+add_row "$R47" name=w-T2 agent_id=a-w-T2 launched_at="$(iso_ago 600)"
+add_row "$R47" name=w-T6 agent_id=a-w-T6 launched_at="$(iso_ago 60)" deliverable=t6.md duration="45 minutes" \
+  subagent_type=bionic:implementor
+mkdir -p "$R47/.worktrees/01-T6"
+printf 'workspace/v1|session=%s|name=w-T6|path=%s|branch=wt/01-T6|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
+  "$SID" "$R47/.worktrees/01-T6" "$P47" >> "$R47/.bionic/tmp/workspaces-$SID.state"
+expect_contains "47 precondition: T6 is in the table, pending" "| f.sh | — | — | pending |" "$(grep '^| T6 |' "$P47")"
+s34_gate "$R47"
+expect_eq "47 precondition: the fixture is admitted by the real commit gate" "0" "$GATE_RC"
+
+poke_pressure "$R47" 8192 1.0 tick
+expect_contains "47a §SYNC the tick records the launch the plan lacked, and says so" "poker: LAUNCHED T6 w-T6" "$OUT"
+expect_contains "47a2 …row T6 is active in its tree" "| w-T6 | — | 30 | REQ-1 | f.sh | .worktrees/01-T6 | 01234567 | active |" \
+  "$(grep '^| T6 |' "$P47")"
+expect_absent "47a3 …and the ready set it fills from no longer offers T6" "FILL T6" "$OUT"
+poke_pressure "$R47" 8192 1.0 tick
+expect_absent "47b …the next tick has nothing to record and says nothing of it" "poker: LAUNCHED" "$OUT"
+expect_contains "47b2 …while it still decides" "decision=" "$OUT"
+
+# 47c: a launch that cannot be recorded (a build row, no tree) is printed by the tick.
+add_row "$R47" name=w-T7 agent_id=a-w-T7 launched_at="$(iso_ago 30)" deliverable=t7.md duration="45 minutes"
+cp "$P47" "$TMPROOT/s47-before"
+poke_pressure "$R47" 8192 1.0 tick
+expect_contains "47c §SYNC the tick prints the launch it could not record" "poker: NOT-RECORDED T7 w-T7" "$OUT"
+expect_contains "47c2 …with the command to run by hand" "task-set T7 status=active agent=w-T7" "$OUT"
+expect_true "47c3 …and the plan is unchanged" cmp -s "$TMPROOT/s47-before" "$P47"
+expect_eq "47d no projection copy is left beside the plan" "" \
+  "$(find "$R47/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
+POKE_BOUND="$S47_BOUND_WAS"
+
 finish
