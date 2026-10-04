@@ -694,9 +694,12 @@ expect_contains "53a: …and opens with the Step-2 title" "Step 2 · Design" "$S
 expect_contains "54: the Decisions section carries D1 with its serves cell" "D1" "$S2"
 expect_contains "54a: …and D1's ADR pointer rather than 'none'" "adr-099-fixture.md" "$S2"
 expect_contains "54b: …and D2, whose serves cell is REQ-2" "D2" "$S2"
-expect_contains "55: the Ownership section carries the spec's own table rows" \
-  "owner lib/first.sh" "$S2"
-expect_contains "55a: …and the second concept's test suite" "tests/second.test.sh" "$S2"
+# T17 (wave-26 D13): Ownership is no longer on the default card — it is the `ownership`
+# sub-view. 55/55a read the table's rows from the sub-view; §S2-LABEL owns the pairing.
+whole_card step2 "$SPEC_FIX" ownership; S2_OWN="$WC_OUT"
+expect_contains "55: the Ownership sub-view carries the spec's own table rows" \
+  "owner lib/first.sh" "$S2_OWN"
+expect_contains "55a: …and the second concept's test suite" "tests/second.test.sh" "$S2_OWN"
 expect_contains "56: the Eval design section counts REQ-1's criteria by type" "REQ-1" "$S2"
 expect_contains "56a: …and carries a total row" "total" "$S2"
 expect_contains "57: the Step-2 card ends at its own approval question" \
@@ -1476,5 +1479,152 @@ expect_contains "165b: …with its provenance in the same cell" "provenance user
 whole_card step1 "$T10_TASK_PLAN"
 expect_empty "165c: …and the T10 plan, which carries no ## Requirements, renders an empty block" \
   "$(card_reqs_block "$WC_OUT")"
+
+section "Section 11: T17 — §S2-HEAD §S2-LABEL, the Step-2 card is one card a person can approve from"
+
+# THE FIXTURE IS A COPY of the suite's own Step-2 spec, with the pieces the wave-26 spec
+# carries added to the COPY: frontmatter `requirements:` `design-ledger:` `adrs:`, a
+# `### Approach` paragraph, a `### Worth your eye` list (the first bullet long enough to
+# wrap), labelled decisions, and one long Eval design row. Nothing under `.bionic/` is
+# touched, and SPEC_FIX itself stays the "no head sections" input the absence rows read.
+S2H_SPEC="${CARD_SANDBOX}/wave-99-head.spec.md"
+S2H_APPROACH='Two pieces are independent and build against the interfaces above: the first thing and the second thing. The doctrine cuts land first, because every text addition is paid for by them, and the direct fixes touch no shared design at all.'
+S2H_W1='**Booking is the riskiest piece.** No shared lock exists in the code today, and four suites run a test run inside themselves. If it overruns, sensing the load alone is the fallback.'
+S2H_W2='**A declared read is not checked.** A unit that reads something it did not declare can start too early.'
+S2H_LONG_EVAL='`bash tests/first.test.sh` → §LONG: the card on the fixture prints every block in order, and a third criterion whose eval text is long enough to fold inside the eval column of the sub-view without leaving the budget'
+S2H_LONG_FAIL='the renderer prints the eval cell whole on one line and the line leaves the one-hundred column budget by a clear margin'
+awk -v approach="$S2H_APPROACH" -v w1="$S2H_W1" -v w2="$S2H_W2" '
+  /^base-sha:/ {
+    print
+    print "requirements: specs/epic-99/wave-99-fixture.requirements.md"
+    print "design-ledger: record/wave-99/design-ledger.md"
+    print "adrs: adrs/epic-99/adr-099-fixture.md · adrs/epic-99/adr-098-second.md · .bionic/docs/adrs/epic-99/adr-097-given.md"
+    next }
+  /^- \*\*`lib\/first.sh`\*\* owns the first thing/ {
+    print "- **D1 — The first thing lives in one file** and hands the second thing to its"; next }
+  /^- \*\*`lib\/second.sh`\*\* owns the second thing/ {
+    print "- **D2 — The second thing lives in one file.** (D2; REQ-2)"; next }
+  /^### 3\. Ownership table/ {
+    print "### Approach\n\n" approach "\n"
+    print "### Worth your eye\n\n- " w1 "\n- " w2 "\n" }
+  { print }' "$SPEC_FIX" > "$S2H_SPEC"
+printf '| REQ-1 | fixture run | AC-1.3 a third criterion with a long eval | live | %s | %s |\n' \
+  "$S2H_LONG_EVAL" "$S2H_LONG_FAIL" >> "$S2H_SPEC"
+
+whole_card step2 "$S2H_SPEC"; S2H="$WC_OUT"; S2H_RC="$WC_RC"
+expect_eq "S2-HEAD 1: step2 exits 0 on the head fixture" "0" "$S2H_RC"
+
+s2h_line() {  # <card> <exact line> -> its line number, or 0 when no line is exactly that
+  printf '%s\n' "$1" | grep -n -x -F -- "$2" | head -1 | cut -d: -f1 | grep . || printf '0'
+}
+L_TITLE="$(s2h_line "$S2H" 'Step 2 · Design')"
+L_GOAL="$(s2h_line "$S2H" '  Goal')"
+L_APPR="$(s2h_line "$S2H" '  Approach')"
+L_WORTH="$(s2h_line "$S2H" '  Worth your eye')"
+L_BR="$(s2h_line "$S2H" '  Branches')"
+L_DEC="$(printf '%s\n' "$S2H" | grep -n '^  Decisions' | head -1 | cut -d: -f1)"
+L_EVAL="$(printf '%s\n' "$S2H" | grep -n '^  Eval design' | head -1 | cut -d: -f1)"
+L_ART="$(s2h_line "$S2H" '  Artifacts')"
+L_Q="$(s2h_line "$S2H" 'Do you approve this design? Reply "approved" to approve it.')"
+L_SUB="$(s2h_line "$S2H" 'show evals <req> · explain <decision> · show ownership')"
+expect_nonempty "S2-HEAD 2: every block's line was found (the order check reads real numbers)" \
+  "$(printf '%s' "${L_TITLE#0}${L_GOAL#0}${L_APPR#0}${L_WORTH#0}${L_BR#0}${L_DEC}${L_EVAL}${L_ART#0}${L_Q#0}${L_SUB#0}")"
+S2H_ORDER_OK=no
+if [ "${L_TITLE:-0}" -ge 1 ] && [ "${L_GOAL:-0}" -gt "${L_TITLE:-0}" ] && [ "${L_APPR:-0}" -gt "${L_GOAL:-0}" ] \
+  && [ "${L_WORTH:-0}" -gt "${L_APPR:-0}" ] && [ "${L_BR:-0}" -gt "${L_WORTH:-0}" ] \
+  && [ "${L_DEC:-0}" -gt "${L_BR:-0}" ] && [ "${L_EVAL:-0}" -gt "${L_DEC:-0}" ] \
+  && [ "${L_ART:-0}" -gt "${L_EVAL:-0}" ] && [ "${L_Q:-0}" -gt "${L_ART:-0}" ] \
+  && [ "${L_SUB:-0}" -gt "${L_Q:-0}" ]; then S2H_ORDER_OK=yes; fi
+expect_eq "S2-HEAD 3: Goal, Approach, Worth your eye, Branches, Decisions, Eval design, Artifacts, the question, the sub-views — in that order" \
+  "yes" "$S2H_ORDER_OK"
+
+expect_contains "S2-HEAD 4: Goal carries the spec's Goal paragraph" \
+  "Answer the fixture's two requirements with a design small enough to read whole." "$S2H"
+expect_contains "S2-HEAD 5: Approach carries the paragraph's opening" \
+  "Two pieces are independent and build against the interfaces above" "$S2H"
+expect_contains "S2-HEAD 5a: …and its closing, wrapped onto a later line" "touch no shared design at all." "$S2H"
+expect_contains "S2-HEAD 6: Worth your eye carries the first bullet, markup off" \
+  "    Booking is the riskiest piece. No shared lock exists" "$S2H"
+expect_absent "S2-HEAD 6a: …with no bold markers left in it" "**" "$S2H"
+S2H_WBLOCK="$(printf '%s\n' "$S2H" | sed -n '/^  Worth your eye$/,/^$/p')"
+S2H_W_L2="$(printf '%s\n' "$S2H_WBLOCK" | sed -n 3p)"
+expect_regex "S2-HEAD 6b: the first bullet's continuation line is indented two more than its first line" \
+  '^      [^ ]' "$S2H_W_L2"
+expect_contains "S2-HEAD 6c: the second bullet starts flush again, its own entry" \
+  "    A declared read is not checked." "$S2H"
+expect_empty "S2-HEAD 7: no line of the head card is wider than the budget (the spec's own path line excepted)" \
+  "$(over_budget "$(without_artifact_path "$S2H")")"
+
+expect_contains "S2-HEAD 8: Artifacts names the spec" "    spec  ${S2H_SPEC}" "$S2H"
+expect_contains "S2-HEAD 8a: …the first ADR, under the docs root" \
+  "    adr  .bionic/docs/adrs/epic-99/adr-099-fixture.md" "$S2H"
+expect_contains "S2-HEAD 8b: …the second ADR on a line of its own" \
+  "    adr  .bionic/docs/adrs/epic-99/adr-098-second.md" "$S2H"
+expect_contains "S2-HEAD 8c: …an ADR already given in full is not prefixed twice" \
+  "    adr  .bionic/docs/adrs/epic-99/adr-097-given.md" "$S2H"
+expect_absent "S2-HEAD 8d: …and no ADR line carries the join mark" " · adrs/" "$S2H"
+expect_contains "S2-HEAD 8e: …the ledger, from design-ledger:" \
+  "    ledger  .bionic/docs/record/wave-99/design-ledger.md" "$S2H"
+expect_contains "S2-HEAD 8f: …and the requirements, from requirements:" \
+  "    reqs  .bionic/docs/specs/epic-99/wave-99-fixture.requirements.md" "$S2H"
+expect_contains "S2-HEAD 9: the sub-view line closes the card" \
+  "show evals <req> · explain <decision> · show ownership" "$S2H"
+
+# THE ABSENT SECTIONS: the suite's plain spec has no Approach, no Worth your eye, no adrs: and
+# no design-ledger:. The positive on this same card is the Goal and the spec line.
+expect_contains "S2-HEAD 10: the plain spec's card still carries its Goal" \
+  "Answer the fixture's two requirements" "$S2"
+expect_contains "S2-HEAD 10a: …and the spec line" "    spec  ${SPEC_FIX}" "$S2"
+expect_absent "S2-HEAD 10b: …but no Approach block" "  Approach" "$S2"
+expect_absent "S2-HEAD 10c: …no Worth your eye block" "Worth your eye" "$S2"
+expect_absent "S2-HEAD 10d: …no adr line" "    adr  " "$S2"
+expect_absent "S2-HEAD 10e: …and no ledger line" "    ledger  " "$S2"
+
+# §S2-LABEL — the decision label prints once, and Ownership is a request.
+expect_contains "S2-LABEL 1: D1's row reads its label and then the text" \
+  "D1   The first thing lives in one file" "$S2H"
+expect_contains "S2-LABEL 1a: …and D2's" "D2   The second thing lives in one file." "$S2H"
+expect_no_regex "S2-LABEL 2: no line repeats a decision's label" 'D[0-9]+ +D[0-9]+ ' "$S2H"
+expect_absent "S2-LABEL 2a: …nor keeps the dash after it" "D1 —" "$S2H"
+expect_absent "S2-LABEL 3: the default card prints no Ownership block" "  Ownership" "$S2H"
+expect_absent "S2-LABEL 3a: …and none of its rows" "owner lib/first.sh" "$S2H"
+
+whole_card step2 "$S2H_SPEC" ownership; S2H_OWN="$WC_OUT"; S2H_OWN_RC="$WC_RC"
+expect_eq "S2-LABEL 4: the ownership sub-view exits 0" "0" "$S2H_OWN_RC"
+expect_contains "S2-LABEL 4a: …prints the Ownership block with its rows" "  Ownership" "$S2H_OWN"
+expect_contains "S2-LABEL 4b: …the second row too" "tests/second.test.sh" "$S2H_OWN"
+expect_absent "S2-LABEL 4c: …and nothing else of the card" "Step 2 · Design" "$S2H_OWN"
+expect_absent "S2-LABEL 4d: …no Decisions block" "Decisions" "$S2H_OWN"
+
+whole_card step2 "$S2H_SPEC" evals REQ-1; S2H_EV="$WC_OUT"; S2H_EV_RC="$WC_RC"
+expect_eq "S2-LABEL 5: the evals sub-view exits 0 on a known REQ" "0" "$S2H_EV_RC"
+expect_contains "S2-LABEL 5a: …names the criterion" "AC-1.2 the second criterion" "$S2H_EV"
+expect_contains "S2-LABEL 5b: …its type" "hermetic" "$S2H_EV"
+expect_contains "S2-LABEL 5c: …its eval" "bash tests/first.test.sh" "$S2H_EV"
+expect_contains "S2-LABEL 5d: …and its fails-when" "it reds" "$S2H_EV"
+expect_contains "S2-LABEL 5e: …the first criterion too, with its own fails-when" "the pin is gone" "$S2H_EV"
+expect_contains "S2-LABEL 5f: …the long third criterion's fails-when, folded but whole" \
+  "by a clear margin" "$S2H_EV"
+expect_absent "S2-LABEL 5g: …and no other requirement's criterion" "AC-2.1" "$S2H_EV"
+expect_empty "S2-LABEL 5h: …no line of it is wider than the budget" "$(over_budget "$S2H_EV")"
+whole_card step2 "$S2H_SPEC" evals REQ-2; S2H_EV2="$WC_OUT"
+expect_contains "S2-LABEL 5i: REQ-2's view names REQ-2's criterion" "AC-2.1 the only criterion" "$S2H_EV2"
+expect_absent "S2-LABEL 5j: …and not REQ-1's" "AC-1.1" "$S2H_EV2"
+
+# THE REFUSALS: one line, exit 2, nothing on stdout.
+s2h_refusal() {  # <label> <args...>
+  local label="$1"; shift
+  whole_card step2 "$S2H_SPEC" "$@"
+  expect_eq "${label}: exits 2" "2" "$WC_RC"
+  expect_empty "${label}a: …prints nothing on stdout" "$WC_OUT"
+  expect_eq "${label}b: …and exactly one line on stderr" "1" "$(printf '%s\n' "$WC_ERR" | grep -c . | tr -d ' ')"
+  expect_contains "${label}c: …that names the valid forms" "evals <REQ" "$WC_ERR"
+}
+s2h_refusal "S2-LABEL 6: an unknown sub-view" nonsense
+s2h_refusal "S2-LABEL 7: an unknown requirement id" evals REQ-9
+s2h_refusal "S2-LABEL 8: evals with no requirement" evals
+s2h_refusal "S2-LABEL 9: ownership with a stray argument" ownership extra
+whole_card step3 "$PLAN_FIX" ownership
+expect_eq "S2-LABEL 10: a sub-view on any other step stays a usage error" "64" "$WC_RC"
 
 finish
