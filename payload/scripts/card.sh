@@ -729,8 +729,20 @@ function flush_dec(   line, id, serves) {
     sub(/;.*$/, "", id)
     line = substr(line, 1, RSTART - 1)
     gsub(/\*\*/, "", line)
-    print "DROW" OFS id OFS clean(firstsent(clean(line))) OFS clean(serves)
+    # THE LABEL PRINTS ONCE (wave-26 D13). The spec writes `**D1 — title**` and the row has an
+    # id column of its own, so the leading `D<n> —` is the same word twice; it comes off here,
+    # before the first sentence is taken, and a text that carries no label is left alone.
+    line = clean(line)
+    sub(/^D[0-9]+[ \t]*(—|--|-|:)[ \t]*/, "", line)
+    print "DROW" OFS id OFS clean(firstsent(line)) OFS clean(serves)
   }
+}
+# A `Worth your eye` bullet: one entry, its continuation lines joined, markup off.
+function flush_worth(   t) {
+  if (wbuf == "") return
+  t = wbuf; wbuf = ""
+  gsub(/\*\*/, "", t)
+  print "WORTH" OFS clean(t)
 }
 function flush_adr(   line, path, rest, id) {
   if (abuf == "") return
@@ -744,7 +756,7 @@ function flush_adr(   line, path, rest, id) {
     rest = substr(rest, RSTART + RLENGTH)
   }
 }
-function flush_all() { flush_nd(); flush_req(); flush_dec(); flush_adr() }
+function flush_all() { flush_nd(); flush_req(); flush_dec(); flush_adr(); flush_worth() }
 BEGIN { OFS = "\t"; ERRMSG = ""; mrows = 0; enum = 0 }
 NR == 1 && $0 == "---" { fm = 1; next }
 fm == 1 && $0 == "---" { fm = 0; next }
@@ -757,6 +769,8 @@ fm == 1 {
   else if (k == "rigor") RIGOR = v
   else if (k == "walk") WALK = v
   else if (k == "adrs") ADRS = v
+  else if (k == "design-ledger") LEDGER = v
+  else if (k == "requirements") REQSF = v
   else if (k == "parallel-budget") {
     if (match(v, /writers=[0-9]+/)) WRITERS = substr(v, RSTART + 8, RLENGTH - 8)
   }
@@ -787,12 +801,27 @@ fm == 1 {
   else if (h ~ /Component boundaries/) sub2 = "dec"
   else if (h ~ /Ownership table/) { sub2 = "own"; orow = 0 }
   else if (h ~ /ADR pointers/) sub2 = "adr"
+  else if (h ~ /^Approach[ \t]*$/) sub2 = "approach"
+  else if (h ~ /^Worth your eye[ \t]*$/) sub2 = "worth"
   else sub2 = ""
   next
 }
 sec == "goal" && goaldone != 1 {
   if (trim($0) == "") { if (GOAL != "") goaldone = 1 }
   else GOAL = GOAL (GOAL == "" ? "" : " ") clean($0)
+  next
+}
+# THE APPROACH AND WORTH YOUR EYE (wave-26 D13). Both are `###` sections of `## Design`; they
+# are read BEFORE the design-paragraph arm below, which would otherwise take an Approach
+# that happens to be the first text under the heading for the design paragraph.
+sub2 == "approach" {
+  if (trim($0) != "") APPROACH = APPROACH (APPROACH == "" ? "" : " ") clean($0)
+  next
+}
+sub2 == "worth" {
+  if (/^- /) { flush_worth(); wbuf = substr($0, 3) }
+  else if (/^[ \t]+[^ \t]/ && wbuf != "") wbuf = wbuf " " trim($0)
+  else if (trim($0) == "") flush_worth()
   next
 }
 # THE DESIGN PARAGRAPH (D8). A task-scale run writes its design as a PARAGRAPH in the
@@ -853,6 +882,7 @@ sec == "eval" && /^[ \t]*\|/ {
   n = cells($0, c)
   if (n < 4) next
   r = c[1]
+  ncrit++; crow[ncrit] = r OFS c[3] OFS c[4] OFS c[5] OFS c[6]
   if (!(r in eapp)) { eapp[r] = c[2]; enum++; eord[enum] = r }
   ecnt[r, c[4]]++
   tot[c[4]]++
@@ -905,6 +935,9 @@ END {
   print "META" OFS "scale" OFS SCALE
   print "META" OFS "design" OFS DESIGN
   print "META" OFS "adrs" OFS ADRS
+  print "META" OFS "ledger" OFS LEDGER
+  print "META" OFS "reqs" OFS REQSF
+  print "META" OFS "approach" OFS APPROACH
   print "META" OFS "writers" OFS WRITERS
   print "META" OFS "firstb" OFS FIRSTB
   print "META" OFS "mrows" OFS mrows
@@ -913,6 +946,7 @@ END {
   print "META" OFS "t2" OFS (tier["T2"] + 0)
   print "META" OFS "t3" OFS (tier["T3"] + 0)
   print "META" OFS "t4" OFS (tier["T4"] + 0)
+  for (i = 1; i <= ncrit; i++) print "CROW" OFS crow[i]
   for (i = 1; i <= enum; i++) {
     r = eord[i]
     print "EROW" OFS r OFS eapp[r] OFS (ecnt[r, "static"] + 0) OFS (ecnt[r, "unit"] + 0) \
@@ -929,6 +963,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_ERR=""; WCARD_GOAL=""; WCARD_DESIGN=""; WCARD_SCALE=""
   WCARD_WB=""; WCARD_IB=""; WCARD_BASE=""; WCARD_RIGOR=""; WCARD_WALK=""; WCARD_ADRS=""
   WCARD_WRITERS=""; WCARD_FIRSTB=""; WCARD_MROWS="0"
+  WCARD_LEDGER=""; WCARD_REQS=""; WCARD_APPROACH=""; WCARD_WORTH=(); WCARD_CROW=()
   WCARD_T0="0"; WCARD_T1="0"; WCARD_T2="0"; WCARD_T3="0"; WCARD_T4="0"
   WCARD_ND=(); WCARD_RROW=(); WCARD_DROW=(); WCARD_OROW=(); WCARD_EROW=(); WCARD_TROW=()
   WCARD_ADRK=(); WCARD_ADRV=()
@@ -948,6 +983,8 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
           wb) WCARD_WB="$v" ;;           ib) WCARD_IB="$v" ;;
           base) WCARD_BASE="$v" ;;       rigor) WCARD_RIGOR="$v" ;;
           walk) WCARD_WALK="$v" ;;       adrs) WCARD_ADRS="$v" ;;
+          ledger) WCARD_LEDGER="$v" ;;   reqs) WCARD_REQS="$v" ;;
+          approach) WCARD_APPROACH="$v" ;;
           scale) WCARD_SCALE="$v" ;;     design) WCARD_DESIGN="$v" ;;
           writers) WCARD_WRITERS="$v" ;; firstb) WCARD_FIRSTB="$v" ;;
           mrows) WCARD_MROWS="$v" ;;
@@ -955,6 +992,8 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
           t3) WCARD_T3="$v" ;; t4) WCARD_T4="$v" ;;
         esac ;;
       ND)   WCARD_ND[${#WCARD_ND[@]}]="$rest" ;;
+      WORTH) WCARD_WORTH[${#WCARD_WORTH[@]}]="$rest" ;;
+      CROW) WCARD_CROW[${#WCARD_CROW[@]}]="$rest" ;;
       RROW) WCARD_RROW[${#WCARD_RROW[@]}]="$rest" ;;
       DROW) WCARD_DROW[${#WCARD_DROW[@]}]="$rest" ;;
       OROW) WCARD_OROW[${#WCARD_OROW[@]}]="$rest" ;;
@@ -1307,9 +1346,65 @@ _card_step2_task() {  # <citation path>
   printf '\nDo you approve this design? Reply "approved" to approve it.\n'
 }
 
+# THE DOCS ROOT, SPELLED THE WAY THE SPEC'S OWN PATH LINE IS (wave-26 D13). A frontmatter
+# `adrs:`, `design-ledger:` or `requirements:` value is written under the docs root
+# (`adrs/…`, `record/…`, `specs/…`), and the card prints every artifact by the path a reader
+# opens — project-relative, `.bionic/docs/…` by default. The root is the configured one
+# (`docs_root`, the reading every other caller uses), made relative to the project when it
+# sits under it and printed whole when it does not.
+_card_docs_prefix() {
+  local root d
+  root="$(project_root "$PWD" 2>/dev/null)"
+  d="$(docs_root "$root" 2>/dev/null)"
+  case "$d" in
+    "$root"/*) printf '%s' "${d#"$root"/}" ;;
+    *)         printf '%s' "${d:-.bionic/docs}" ;;
+  esac
+}
+
+# One frontmatter path, in full. Only a value that starts `specs/`, `adrs/` or `record/` gets
+# the root in front; anything else (already in full, or not under the docs root) is printed as
+# written, because a path the card rewrites by guess is a path nobody can open.
+_card_full_path() {  # <value> <docs prefix>
+  case "$1" in
+    specs/*|adrs/*|record/*) printf '%s/%s' "$2" "$1" ;;
+    *)                       printf '%s' "$1" ;;
+  esac
+}
+
+# A frontmatter value that names several paths joins them with " · "; each prints on a line of
+# its own under the label. Nothing is folded — a path is for opening, not reading.
+_card_artifact_lines() {  # <label> <value> <docs prefix>
+  local label="$1" v="$2" p
+  [ -n "$v" ] || return 0
+  while IFS= read -r p; do
+    p="${p#"${p%%[![:space:]]*}"}"; p="${p%"${p##*[![:space:]]}"}"
+    [ -n "$p" ] || continue
+    printf '    %s  %s\n' "$label" "$(_card_full_path "$p" "$3")"
+  done < <(printf '%s\n' "${v// · /$'\n'}")
+}
+
+# ONE CARD THE DESIGN IS APPROVED ON (wave-26 D13). The head says what is being built and why
+# it is shaped so (Goal, Approach, Worth your eye); the tables below it say what is decided and
+# how each criterion is proven; the Artifacts say where each piece lives, by the path a reader
+# opens. Ownership and one requirement's evals are not on it — they are asked for, as the
+# sub-views the last line offers.
 _card_step2() {  # <artifact path>
   if [ "$CARD_SCALE" = "task" ]; then _card_step2_task "$1"; return 0; fi
-  printf 'Step 2 · Design\n\n'
+  local e dp
+  printf 'Step 2 · Design\n\n  Goal\n'
+  _card_fold_at 4 "$WCARD_GOAL"
+  printf '\n'
+  if [ -n "$WCARD_APPROACH" ]; then
+    printf '  Approach\n'
+    _card_fold_at 4 "$WCARD_APPROACH"
+    printf '\n'
+  fi
+  if [ "${#WCARD_WORTH[@]}" -gt 0 ]; then
+    printf '  Worth your eye\n'
+    for e in "${WCARD_WORTH[@]}"; do _card_worth_entry "$e"; done
+    printf '\n'
+  fi
   _card_branches
   printf '\n'
   CARD_ROWS=()
@@ -1319,15 +1414,102 @@ _card_step2() {  # <artifact path>
   done
   _card_render_batch decision
   printf '\n'
-  CARD_ROWS=( ${WCARD_OROW[@]+"${WCARD_OROW[@]}"} )
-  _card_render_batch ownership
-  printf '\n'
   CARD_ROWS=( ${WCARD_EROW[@]+"${WCARD_EROW[@]}"} )
   _card_render_batch eval-design
+  dp="$(_card_docs_prefix)"
   printf '\n  Artifacts\n    spec  %s\n' "$1"
-  [ -n "$WCARD_ADRS" ] && printf '    adrs  %s\n' "$WCARD_ADRS"
+  _card_artifact_lines adr "$WCARD_ADRS" "$dp"
+  _card_artifact_lines ledger "$WCARD_LEDGER" "$dp"
+  _card_artifact_lines reqs "$WCARD_REQS" "$dp"
   printf '\nDo you approve this design? Reply "approved" to approve it.\n'
-  printf 'show evals <req> · explain <decision>\n'
+  printf 'show evals <req> · explain <decision> · show ownership\n'
+}
+
+# A `Worth your eye` entry: its first line flush at the block's indent, every continuation
+# line two columns further in, so one entry is one visible unit. The fold budget is the
+# continuation's (the narrower), which leaves the first line two columns of slack.
+_card_worth_entry() {  # <text>
+  local line first=1
+  while IFS= read -r line; do
+    if [ "$first" -eq 1 ]; then
+      _card_rstrip "    ${line}"; first=0
+    else
+      _card_rstrip "      ${line}"
+    fi
+    printf '\n'
+  done < <(bionic_wrap "${1:-}" $(( BIONIC_LINE_WIDTH - 6 )))
+}
+
+# ── THE STEP-2 SUB-VIEWS (wave-26 D13) ───────────────────────────────────────
+# `card.sh step2 <spec> ownership` is the Ownership table and nothing else; `… evals <REQ>` is
+# one requirement's Eval design rows. Both read the same parse the whole card reads, and the
+# table goes through the same row kind it always did.
+_card_step2_ownership() {
+  CARD_ROWS=( ${WCARD_OROW[@]+"${WCARD_OROW[@]}"} )
+  _card_render_batch ownership
+}
+
+# A labelled line at an indent: the label once, padded, then the text folded in the column
+# that is left, continuation lines under the text.
+_card_labelled() {  # <indent> <label> <text>
+  local ind="$1" label="$2" text="$3" line first=1 lw=12
+  while IFS= read -r line; do
+    if [ "$first" -eq 1 ]; then
+      _card_rstrip "$(_card_spaces "$ind")$(_card_pad "$label" "$lw")${line}"; first=0
+    else
+      _card_rstrip "$(_card_spaces $(( ind + lw )))${line}"
+    fi
+    printf '\n'
+  done < <(bionic_wrap "$text" $(( BIONIC_LINE_WIDTH - ind - lw )))
+}
+
+_card_step2_evals() {  # <REQ id>
+  local row crit typ ev fails
+  printf '  Eval design · %s\n' "$1"
+  for row in ${WCARD_CROW[@]+"${WCARD_CROW[@]}"}; do
+    _card_split "$row"
+    [ "${CARD_CELLS[0]:-}" = "$1" ] || continue
+    crit="${CARD_CELLS[1]:-}"; typ="${CARD_CELLS[2]:-}"; ev="${CARD_CELLS[3]:-}"; fails="${CARD_CELLS[4]:-}"
+    _card_fold_at 4 "$crit"
+    _card_labelled 6 type "$typ"
+    _card_labelled 6 eval "$ev"
+    _card_labelled 6 "fails when" "$fails"
+  done
+}
+
+# THE REFUSAL IS ONE LINE AND EXIT 2 (not 64: the artifact was fine, the request was not).
+_card_step2_refuse() {  # <what was wrong>
+  local ids="" row r
+  for row in ${WCARD_EROW[@]+"${WCARD_EROW[@]}"}; do
+    r="${row%%"$CARD_TAB"*}"
+    case "$r" in total|'') continue ;; esac
+    ids="${ids}${ids:+ }${r}"
+  done
+  printf 'card.sh: %s — valid forms: step2 <spec> · step2 <spec> ownership · step2 <spec> evals <REQ-id>%s\n' \
+    "$1" "${ids:+ (REQ-id: ${ids})}" >&2
+  exit 2
+}
+
+# `step2 <spec> [ownership | evals <REQ-id>]`, the arguments after the artifact. A task-scale
+# card offers neither view, so it refuses both.
+_card_step2_view() {  # <artifact path as given> <args...>
+  shift
+  local view="${1:-}" known=0 row r
+  [ "$CARD_SCALE" != "task" ] || _card_step2_refuse "a task-scale design has no sub-views"
+  case "$view" in
+    ownership)
+      [ "$#" -eq 1 ] || _card_step2_refuse "ownership takes no argument"
+      _card_step2_ownership ;;
+    evals)
+      [ "$#" -eq 2 ] || _card_step2_refuse "evals takes one requirement id"
+      for row in ${WCARD_EROW[@]+"${WCARD_EROW[@]}"}; do
+        r="${row%%"$CARD_TAB"*}"
+        [ "$r" = "$2" ] && [ "$r" != "total" ] && known=1
+      done
+      [ "$known" -eq 1 ] || _card_step2_refuse "no requirement '$2' in the Eval design"
+      _card_step2_evals "$2" ;;
+    *) _card_step2_refuse "unknown sub-view '${view}'" ;;
+  esac
 }
 
 # TWO PATHS, AND THEY ARE NOT THE SAME PATH. `$1` is the CITATION — the
@@ -1393,9 +1575,18 @@ _card_render_batch() {  # <kind> — renders CARD_ROWS[], already set
 
 case "$1" in
   step1|step2|step3)
-    [ "$#" -eq 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))"
+    if [ "$1" = step2 ]; then
+      [ "$#" -ge 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))"
+    else
+      [ "$#" -eq 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))"
+    fi
     [ -f "$2" ] && [ -r "$2" ] || _card_usage "$1: no readable artifact at '$2'"
     _card_load "$1" "$2" || _card_usage "$2: ${WCARD_ERR}"
+    if [ "$1" = step2 ] && [ "$#" -gt 2 ]; then
+      shift
+      _card_step2_view "$@"
+      exit 0
+    fi
     _card_art="$(_card_artifact_rel "$2")"
     case "$1" in
       step1) _card_step1 "$_card_art" ;;

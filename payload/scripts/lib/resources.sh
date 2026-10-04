@@ -113,6 +113,12 @@ EMERGENCY_FREE_MB=256  # datum: kill at ~188 MB (tests/run.sh:83-89) — the flo
                        # above the measured kernel SIGKILL point, so the tick acts before
                        # the kernel does.
 
+# The settled line a timing check starts under (resources_settled, below). It decides only
+# when a whole-machine take may start, never a width; `quiet-load:` in config overrides it.
+QUIET_LOAD_DEFAULT=0.5 # datum: wave-26 research R6 §3 — load ~8.6 on 8 cores (1.07 × cores)
+                       # moved hook-timeout's verbs from 0.59-0.67 s to 1.01-1.15 s; half a
+                       # core per core is the nearest round line well under that dilation.
+
 # ── pressure BANDS (AC-13, AC-14, design-ledger D3). These decide the RUNG — how much of
 # the Step-0 ceiling a consumer may use right now. They are constants beside the sensor and
 # NOT a config knob: a threshold a project could move is a threshold no wave can reason
@@ -805,3 +811,68 @@ pressure_level() {
   printf '%s\n' "$rung"
 }
 
+
+# ───────────────────────────────────────────────────────────────── resources_settled
+
+# resources_settled <cores> — rc 0 when the load NOW is at most `cores × quiet-load`, rc 1
+# when it is above that line or cannot be read, rc 2 on a bad argument. Prints nothing.
+#
+# THE LOAD NOW, NOT THE RING (wave-26 D8). A timing check asks "is the machine calm at this
+# moment", and the ring's 300 s median is the wrong reader for that: it lags a drained batch
+# by minutes. The reading is the one-minute load average — `sysctl -n vm.loadavg` on Darwin,
+# `/proc/loadavg` on Linux — through `_res_load_now`, which a test overrides with
+# BIONIC_LOAD_NOW_FILE (a path whose first field is the reading, so a command under test can
+# move the load mid-run), the way BIONIC_PRESSURE_RING overrides the ring. Below that,
+# BIONIC_PROBE_LOAD_1M still pins it, as it does for every other load reader here.
+#
+# THE LINE. `quiet-load:` from the project's config, read through `config_value` when the
+# caller has sourced roots.sh, else QUIET_LOAD_DEFAULT. A value that is not a non-negative
+# number falls back to the default rather than to a line nothing can ever get under.
+#
+# AN UNREADABLE LOAD IS NOT CALM. Unlike the pressure readers, which degrade a missing sensor
+# to "no hold", this one answers rc 1: a timing check started on no evidence is the void
+# result the check exists to prevent. Its callers bound the wait (booked.sh).
+_res_load_now() {
+  if [ -n "${BIONIC_LOAD_NOW_FILE:-}" ]; then
+    awk 'NR == 1 { print $1; exit }' "${BIONIC_LOAD_NOW_FILE}" 2>/dev/null
+    return 0
+  fi
+  _res_load_1m
+}
+
+_res_quiet_load() {  # the settled line's factor: config `quiet-load:`, else the default
+  local root q=''
+  if command -v config_value >/dev/null 2>&1; then
+    if command -v project_root >/dev/null 2>&1; then
+      root="$(project_root 2>/dev/null)"
+    fi
+    [ -n "${root:-}" ] || root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    q="$(config_value "$root" quiet-load "$QUIET_LOAD_DEFAULT" 2>/dev/null)"
+  fi
+  case "${q:-}" in
+    ''|*[!0-9.]*|*.*.*|.) q="$QUIET_LOAD_DEFAULT" ;;
+  esac
+  printf '%s' "$q"
+}
+
+resources_settled() {
+  local cores="${1:-}" load q
+  if ! _res_is_uint "$cores" || [ "$cores" -lt 1 ]; then
+    printf 'resources_settled: need <cores> as a positive integer, got: %s\n' "${1:-}" >&2
+    return 2
+  fi
+  load="$(_res_load_now)"
+  case "${load:-}" in
+    ''|*[!0-9.]*|*.*.*|.) return 1 ;;
+  esac
+  q="$(_res_quiet_load)"
+  awk -v l="$load" -v c="$cores" -v q="$q" 'BEGIN { exit !(l + 0 <= c * q) }'
+}
+
+# resources_settled_line <cores> — the line itself, `cores × quiet-load`, for a caller that
+# says what it is waiting for. Same factor, same fallback, as resources_settled.
+resources_settled_line() {
+  local cores="${1:-}"
+  _res_is_uint "$cores" && [ "$cores" -ge 1 ] || return 2
+  awk -v c="$cores" -v q="$(_res_quiet_load)" 'BEGIN { printf "%.2f\n", c * q }'
+}
