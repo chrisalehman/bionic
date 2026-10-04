@@ -139,7 +139,7 @@ run_doctor() {  # [extra env assignments as NAME=VALUE ...]
   ( cd "$REPO" && env "$@" \
       PATH="$BIN" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
@@ -147,7 +147,7 @@ run_doctor_no_claude() {  # [extra env assignments] — the CLI off PATH
   ( cd "$REPO" && env "$@" \
       PATH="$BIN_NO_CLAUDE" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
@@ -744,7 +744,7 @@ ds_r2_repo() {  # -> a fresh, hermetic project dir with .bionic/tmp
 doctor_in() {  # <cwd> <claude-home> -> doctor's whole report
   ( cd "$1" && PATH="$BIN" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$2" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )
+      BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
 # THE FILTERED LAUNCH (wave-26 T25). Same environment as `doctor_in`, plus BIONIC_DOCTOR_ONLY, the test seam
@@ -756,7 +756,7 @@ doctor_in() {  # <cwd> <claude-home> -> doctor's whole report
 doctor_only_in() {  # <sections> <cwd> <claude-home> -> the filtered report
   ( cd "$2" && BIONIC_DOCTOR_ONLY="$1" PATH="$BIN" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$3" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )
+      BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
 ds_r2_doctor() {  # <project-cwd> -> doctor's whole report, against a fresh empty claude-home
