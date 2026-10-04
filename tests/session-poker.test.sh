@@ -8531,7 +8531,7 @@ POKE_BOUND="$S46_BOUND_WAS"
 
 
 # ============================================================
-section "Section 47 §SYNC: the tick applies the launches the plan lacks, in one write (wave-26 T32, D4; review-3 F1, F2)"
+section "Section 48 §SYNC: the tick applies the launches the plan lacks, in one write (wave-26 T32, D4; review-3 F1, F2)"
 # ============================================================
 #
 # The launch recorder starts `launch-sync` and does not wait for it. The tick runs the same
