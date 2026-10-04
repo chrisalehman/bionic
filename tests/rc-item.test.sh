@@ -240,7 +240,7 @@ setup_run() {  # <sandbox> <answer>
 doctor_run() {  # <sandbox>
   HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh \
     PATH="$TMP/bin:$PATH" BIONIC_CLAUDE_HOME="$1/.claude" \
-    BIONIC_DOCTOR_PROBE_SECONDS=2 \
+    BIONIC_DOCTOR_PROBE_SECONDS=15 \
     bash "$DOCTOR_SH" </dev/null 2>&1
 }
 

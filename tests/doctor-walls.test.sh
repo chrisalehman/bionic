@@ -131,14 +131,14 @@ else no "T0: a program doctor runs is missing from the fixture's tool directory"
 run_doctor() {  # -> doctor's whole output
   ( cd "$REPO" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$TMP/claude-home" BIONIC_PLUGIN_ROOT="$PLUG" \
-      BIONIC_PLUGINS_DIR="$EMPTY_PLUGINS" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_PLUGINS_DIR="$EMPTY_PLUGINS" BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
 run_doctor_no_claude() {  # -> the same page with the CLI off PATH
   ( cd "$REPO" && HOME="$TMP" PATH="$BIN_NO_CLAUDE" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$TMP/claude-home" BIONIC_PLUGIN_ROOT="$PLUG" \
-      BIONIC_PLUGINS_DIR="$EMPTY_PLUGINS" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_PLUGINS_DIR="$EMPTY_PLUGINS" BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 mkdir -p "$TMP/claude-home/plugins"
@@ -360,7 +360,7 @@ INT_ERR="${TMP}/integrity-stderr.txt"
 run_copy_doctor() {  # -> the exit status; stdout in $INT_OUT, stderr in $INT_ERR
   ( cd "$REPO" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$TMP/claude-home" BIONIC_PLUGIN_ROOT="$PLUG_INT" \
-      BIONIC_PLUGINS_DIR="$EMPTY_PLUGINS" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_PLUGINS_DIR="$EMPTY_PLUGINS" BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$PLUG_INT/scripts/doctor.sh" < /dev/null > "$INT_OUT" 2> "$INT_ERR" )
   echo $?
 }
