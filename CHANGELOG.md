@@ -28,7 +28,10 @@ What you will notice:
   `proof:<kind>`, `approval:<name>` or `ext:<slug>`, and `live:<artifact>` for a read that is
   satisfied by what exists now. An empty cell takes the kind's default: build `approval:plan`;
   verify and doc `approval:plan, head`; review `approval:plan, live:head`; integrate
-  `proof:floor, proof:review`. The edges between rows are computed from these cells and never
+  `proof:floor, proof:review, head`, so integrate also waits for any open build. A document row at
+  Step 7 or later is the release and must name the approval it waits for (`approval:release`, or
+  `approval:plan` for a document that needs no release): the validator refuses it otherwise, and it
+  is never offered before that approval exists. The edges between rows are computed from these cells and never
   written: in a table with `reads`, the `deps` cell holds only `ext:` tokens. The rule that every
   verify, review and doc row waits for every build row is gone, so a review that reads only the diff
   no longer waits for verification. Two rows that write one file run side by side and reconcile on
@@ -36,7 +39,8 @@ What you will notice:
   it waits for the first to land. `task-add` takes the cell as an optional last operand, and
   `task-set <id> reads=<…>` sets it on a row later; a `reads` operand for a table with no `reads`
   column is refused, with a line that says so. A table without the column reads each `deps` id as
-  "wait for that task to land", as before.
+  "wait for that task to land", as before, and a build added mid-run still holds the full run, as in
+  1.10.0.
 - **Your approvals are the only step barriers.** No row is ready until the plan's `approved-by:`
   line exists. Any other approval a row reads, such as `approval:release`, is recorded with
   `session-poker.sh approve <name> '<reply>'`, your reply quoted verbatim, as an
@@ -52,8 +56,9 @@ What you will notice:
   or the ready set changed, and the tick says so on a `poker: RECONCILE` line. A read-only row (a
   review, a research pass) no longer takes a writer place. A fill or stand-down decline stands until
   the set it answered changes. The first tick of a run, before anything is dispatched, names the
-  ready work and prints the same lines. The Patrol prompt moves to version 5, and a Patrol started with an
-  older prompt is told once to re-arm.
+  ready work and prints the same lines, and when it names work it ends in `FILL`, as every later
+  tick does. The Patrol prompt moves to version 5, and a Patrol started with an older prompt is told
+  once to re-arm.
 - **A launch moves its own plan row.** When bionic records the launch of a named agent, it sets that
   agent's plan row `active` and adds the row's dispatch-ledger line itself, one write for a batch of
   launches. The doctrine no longer asks for `task-set` and `ledger-add` by hand at dispatch.
@@ -61,7 +66,11 @@ What you will notice:
   landed work exists past the last review proof and no review is open, and it reads only that
   difference. Recording the review with `session-poker.sh proof-add review <record>` returns the row
   to pending, so the next landing offers a review of the new difference alone. A final review that
-  reads the settled `head` covers problems across tasks.
+  reads the settled `head` covers problems across tasks. `proof-add review` refuses a record whose
+  `reviewed: <a>..<b>` range starts at no commit, starts at a commit that is not on the history of
+  its end, or starts past the last review proof (or, for the first review, past the plan's base), so
+  that what landed in between is unread; each line names the range to read instead. When a review
+  is idle, with nothing landed past its proof, it no longer holds integrate back.
 - **A proof names the head it read, and the full suite runs once.**
   `session-poker.sh proof-add <floor|review|task> <evidence under record/>` writes
   `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<path>` under `## SDLC State`. The head
@@ -81,8 +90,11 @@ What you will notice:
   files lands. After the merge it checks that neither branch moved and that the merge is its own.
   If one did move, it undoes only the merge it made and keeps the tree. If it cannot prove the merge
   is its own, it undoes nothing. Either way the refusal says where the checkout stood.
-- **A red suite stays red at the land.** The land reads every suite stamped at the tree's head, so
-  a red suite followed by another suite's green run is refused, as a red suite alone is.
+- **A red suite stays red at the land.** A stamp names the suites its command ran. The land takes
+  the newest stamp of every suite at the tree's head, and each must be green on a clean tree, so a
+  red suite followed by another suite's green run is refused, and the refusal names the suite
+  (`suite=<name>`). A suite that never got to run (no place, stopped at its limit, signalled while
+  it waited) stamps the end it reached, so the land refuses the tree until that suite is run green.
 - **A suite run books a place on the machine.** The Bash wall runs every suite-class command, on any
   thread, through `scripts/booked.sh`. The shim takes one of N machine-wide places (the store is
   `~/.claude/bionic/slots`, or `BIONIC_SLOTS_DIR`; N is the suite count bionic's machine probe gives,
@@ -153,7 +165,15 @@ Newly refused:
 - A turn end, once, when the launch record could not write a launch into the plan ("a launch is not
   recorded in the plan": run the commands `session-poker.sh launch-sync` prints), and when a ready
   read-only row has room to run.
-- In a table with a `reads` column: a task id in `deps`, and a cycle of reads.
+- In a table with a `reads` column: a task id in `deps`, a cycle of reads, an open document row at
+  Step 7 or later that reads no approval (the line names the fix: `approval:release`, or
+  `approval:plan` for a document that needs no release), and a `reads` operand to `task-add` on a
+  table that has no such column.
+- `session-poker.sh proof-add review` for a record whose `reviewed: <a>..<b>` range starts at no
+  commit, at a commit that is not on the history of `<b>`, or past the last review proof so that
+  what landed in between is unread. The line names the range to review.
+- A land of a tree whose newest stamp of any suite at its head is red, is dirty, or is the end of a
+  suite that never ran; the refusal names the suite.
 - `session-poker.sh approve` and `proof-add` from a subagent: like the other plan verbs, they are the
   orchestrator's. `proof-add` also refuses evidence that is a symbolic link, is outside `record/`, or
   does not exist.
@@ -188,6 +208,11 @@ Known limits, carried to the next release:
 
 - A suite command that swallows its own exit code (one ending in `; echo done`, or `|| true`) exits
   0, so its stamp records a pass and `land` lets the tree through. Use the capture shape above.
+  Two suites in one command have one exit code between them: non-zero marks both red, and in
+  `a; b` the code of `a` is lost.
+- A green full run does not clear an earlier red stamp of a single suite; that suite must be run
+  green by itself. A stamp that names no suite and is red or dirty at the head is cleared only by a
+  new commit and a re-run.
 - A `cd` the wall cannot read as a literal (a variable, `pushd`, a subshell or a pipe ahead of the
   suite) stamps the checkout the call started in, and a run under `BIONIC_SLOT_HELD=1` stamps
   nothing, so both leave the task tree without a stamp. `land` reads a tree with no stamp as a tree
@@ -212,11 +237,20 @@ Known limits, carried to the next release:
 - An agent name freed and dispatched again within the same minute as its earlier ledger line can be
   read as already recorded, so its row is not set `active`.
 - `land`'s busy-suite check does not see a test runner whose path holds a space.
-- When the last stamp is a passing run reported `void`, `land` refuses it as `why=red` and says
-  "make the suites green": the refusal is right, and its words are not.
+- When the newest stamp of a suite is a passing run reported `void`, or the end of a suite that
+  never got to run, `land` refuses it as `why=red` and says "make the suites green": the refusal is
+  right, and its words are not.
+- `BIONIC_SLOT_HELD=1` with no place lets a whole-machine timing run start while another agent
+  holds a place.
+- The shim may wait for a place longer than the Bash call's own timeout, which moves the call to
+  the background on a busy machine.
+- A suite marked `# runner: solo`, run by a writer on a machine that never settles, exits 69 where
+  the full runner would run it once and report it `void`.
+- A review row that is idle at a run's end stays pending, on the WAIT and CHAIN lines, until you set
+  it landed or dropped.
 - Each Bash call forks one more process than in 1.10.0, each tick and each turn end spends about
   0.4 s recording launches, and the plan-row verbs take 0.75 to 0.87 s on a loaded machine
-  against a one-second budget.
+  against a one-second budget; `proof-add review` takes 48 to 99 ms more for its range check.
 - The limits listed for 1.10.0 still hold, and of those listed for 1.9.0 only the one about a
   refused land is closed.
 
