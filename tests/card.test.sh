@@ -1823,4 +1823,35 @@ expect_eq "S3-CHAIN 10: a deps-only table prints its deps cell as written, a lan
   "T1" "$(s3_dep "$S3D" T4)"
 expect_eq "S3-CHAIN 10a: …and a cell of three ids" "T1, T2, T3" "$(s3_dep "$S3D" T5)"
 
+section "Section W27-42: T12 — the ownership sub-view prints the reuses column when the table has it (AC-4.2; D8)"
+# The same fixture spec twice: as it is (a four-column table) and with a `reuses` column between the
+# owner and the surfaces. The four-column table must print exactly what it printed before the
+# column existed; the five-column one must print the reuses cell, whole, beside its own row.
+W27_SPEC_OLD="$SPEC_FIX"
+W27_SPEC_NEW="${CARD_SANDBOX}/wave-99-reuses.spec.md"
+sed -e 's#^| concept | owning module (SSoT) | rendering surfaces | agreement test |$#| concept | owner | reuses | surfaces | agreement test |#' \
+    -e 's#^|---|---|---|---|$#|---|---|---|---|---|#' \
+    -e 's#^| first thing | `lib/first.sh` | #| first thing | `lib/first.sh` | `lib/base.sh` first_helper | #' \
+    -e 's#^| second thing | `lib/second.sh` | #| second thing | `lib/second.sh` | none fits: nothing else computes it | #' \
+  "$SPEC_FIX" > "$W27_SPEC_NEW"
+expect_eq "W27-42 precondition: the copy's table gained its reuses header and both reuses cells" "3" \
+  "$(grep -c '| reuses |\|`lib/base.sh` first_helper\|none fits: nothing else computes it' "$W27_SPEC_NEW" | tr -cd '0-9')"
+whole_card step2 "$W27_SPEC_NEW" ownership; W27_OWN_NEW="$WC_OUT"
+expect_eq "W27-42a: the five-column table's ownership sub-view exits 0" "0" "$WC_RC"
+expect_contains "W27-42b: …prints the first row's reuses cell" "reuses lib/base.sh first_helper" "$W27_OWN_NEW"
+expect_contains "W27-42c: …and the second row's, whole" "reuses none fits: nothing else computes it" "$W27_OWN_NEW"
+expect_contains "W27-42d: …beside the rows' own owner, surfaces and test cells" "owner lib/first.sh" "$W27_OWN_NEW"
+expect_contains "W27-42e: …and the surfaces cell it printed before" "surfaces card.sh rows" "$W27_OWN_NEW"
+expect_contains "W27-42f: …and the test cell" "tests/second.test.sh" "$W27_OWN_NEW"
+expect_empty "W27-42g: …no line of it is wider than the budget" "$(over_budget "$W27_OWN_NEW")"
+whole_card step2 "$W27_SPEC_OLD" ownership; W27_OWN_OLD="$WC_OUT"
+expect_nonempty "W27-42h precondition: the four-column table's sub-view is non-empty" "$W27_OWN_OLD"
+expect_absent "W27-42i: the four-column table prints no reuses line" "reuses" "$W27_OWN_OLD"
+expect_eq "W27-42j: …and prints exactly what it printed before the column existed" \
+  "$(printf '%s\n' \
+    "  Ownership" \
+    "    first thing  owner lib/first.sh   surfaces card.sh rows           test tests/first.test.sh" \
+    "    second thing owner lib/second.sh  surfaces the fixture card       test tests/second.test.sh")" \
+  "$W27_OWN_OLD"
+
 finish
