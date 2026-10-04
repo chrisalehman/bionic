@@ -1741,18 +1741,22 @@ else
      "card body: $CARD2"
 fi
 
-if has_all "$CARD3" "Problem" "Branches" "Tasks" "kind" "depends" "agent" \
-                    "Eval design" "Verification" "Artifacts"; then
-  ok "93a: the Step-3 card carries Problem, Branches, Tasks (kind/depends/agent), Eval design, Verification, Artifacts"
+if has_all "$CARD3" "Branches" "Tasks" "kind" "depends" "agent" "serves" \
+                    "Chain and width" "Verification" "Artifacts"; then
+  ok "93a: the Step-3 card carries Branches, Tasks (kind/depends/agent, each with what it serves), Chain and width, Verification, Artifacts"
 else
-  no "93a: the Step-3 card carries Problem, Branches, Tasks (kind/depends/agent), Eval design, Verification, Artifacts" \
+  no "93a: the Step-3 card carries Branches, Tasks (kind/depends/agent, each with what it serves), Chain and width, Verification, Artifacts" \
      "card body: $CARD3"
 fi
-if has_all "$CARD3" "first batch"; then
-  ok "93b: …and the parallel width names its first batch"
+if has_all "$CARD3" "longest chain" " min" "peak width" " writers" "    spec  "; then
+  ok "93b: …the longest chain with its minutes, the peak width against the writers, and the design's path"
 else
-  no "93b: …and the parallel width names its first batch" "card body: $CARD3"
+  no "93b: …the longest chain with its minutes, the peak width against the writers, and the design's path" "card body: $CARD3"
 fi
+# Step 3 approves the plan and the matrix only (wave-26 D12): the purpose and the eval counts
+# were approved with the design, so the card the two rows above read repeats neither.
+expect_absent "93c: …and no Problem block repeats the purpose" "  Problem" "$CARD3"
+expect_absent "93d: …and no eval-count line repeats the design's counts" "criteria ·" "$CARD3"
 
 # --- both branch lines, on every card --------------------------------------
 #
@@ -2024,15 +2028,19 @@ fi
 # OWN output, per `_card_batch_widths` — went unseen on both sides. `pw` counts those
 # lines (marker only, not the numbers, which are plan-specific) the same way `art` counts
 # artifact labels, so a side that drops the line goes red against the side that keeps it.
-card3_shape() {  # <card text on stdin> -> each section heading's first word, artifact labels, batch-line count
-  awk '/^  [A-Z]/ { print $1; art = ($1 == "Artifacts"); pw = ($1 == "Parallel"); next }
+# wave-26 D12: the width block is `Chain and width`, and its chain and peak lines are read the
+# way the batch lines are, so a side that drops one goes red against the side that keeps it.
+card3_shape() {  # <card text on stdin> -> each section heading's first word, artifact labels, width lines
+  awk '/^  [A-Z]/ { print $1; art = ($1 == "Artifacts"); pw = ($1 == "Chain"); next }
        art && /^    [a-z]/ { print "artifact:" $1 }
+       pw && /^    (longest chain|peak width)  / { print "width:" $1 }
        pw && /^    batch / { print "batch" }'
 }
 SHAPE_PLAN="$TMP/wave-97-shape.plan.md"
 printf '%s\n' '---' 'scale: wave' 'walk: required' 'rigor: audited' \
   'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' \
-  'working-branch: wave/97-shape' 'integration-branch: main' 'base-sha: abc1234' '---' '' \
+  'working-branch: wave/97-shape' 'integration-branch: main' 'base-sha: abc1234' \
+  'spec: specs/epic-97/wave-97-shape.spec.md' '---' '' \
   '# fixture wave 97 · plan' '' '## Goal' '' 'Render one card to compare against the scaffold.' '' \
   '## SDLC State' '' 'current: 3' '' '## Tasks' '' \
   '| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |' \
@@ -2071,6 +2079,17 @@ if [ "$(card_span "$DOCTORED_NO_BATCH" 'Step 3 · Plan' | card3_shape)" = "$SHAP
   no "107g: a scaffold missing the renderer's batch line still matches (pin is vacuous)"
 else
   ok "107g: a scaffold missing the renderer's batch line fails 107e (pin discriminates)"
+fi
+
+# 107h: Anti-vacuity — wave-26 D12. The chain line is the card's own output, like the batch
+# line; a scaffold that drops it must fail 107e through the `width:` arm.
+anchor "$STEP3_MD" '    longest chain  ' 1
+DOCTORED_NO_CHAIN="$TMP/step3-no-chain-line.md"
+awk '/^    longest chain  / { next } { print }' "$STEP3_MD" > "$DOCTORED_NO_CHAIN"
+if [ "$(card_span "$DOCTORED_NO_CHAIN" 'Step 3 · Plan' | card3_shape)" = "$SHAPE_RENDERED" ]; then
+  no "107h: a scaffold missing the renderer's chain line still matches (pin is vacuous)"
+else
+  ok "107h: a scaffold missing the renderer's chain line fails 107e (pin discriminates)"
 fi
 
 section "Section 16: K5.4 — the goal-paragraph rule text (design ledger K5.4, plan task 21)"
@@ -3299,8 +3318,8 @@ fi
 TASK_HEADER_LINE="$(grep -m1 '^  Tasks' "$STEP3_MD" 2>/dev/null)"
 TASK_ROW_LINES=()
 while IFS= read -r _line; do TASK_ROW_LINES+=("$_line"); done < <(grep '^    <n>' "$STEP3_MD" 2>/dev/null)
-TASK_RENDERED="$( { printf '%s\t%s\tbuild\t—\tsenior-implementor\n' '<n>' '<the task in one line>'
-                    printf '%s\t%s\ttest\t<n>\timplementor\n' '<n>' '<the task in one line>'; } | card_rows task)"
+TASK_RENDERED="$( { printf '%s\t%s\tbuild\t—\tsenior-implementor\n' '<n>' '<the task> · serves <REQ-n>'
+                    printf '%s\t%s\ttest\t<n>\timplementor\n' '<n>' '<the task> · serves <REQ-n>'; } | card_rows task)"
 expect_eq "152: AC-9.1/AC-9.4 — steps/3.md's Tasks header and both rows are exactly what card.sh renders" \
   "$(printf '%s\n' "$TASK_HEADER_LINE" "${TASK_ROW_LINES[0]:-}" "${TASK_ROW_LINES[1]:-}")" "$TASK_RENDERED"
 if [ "$(card_cols "${TASK_ROW_LINES[0]:-}")" -le 100 ] && [ "$(card_cols "${TASK_ROW_LINES[1]:-}")" -le 100 ]; then
@@ -4651,12 +4670,13 @@ expect_nonempty "W26-15: AC-8.2 — test-harness.md states the rule" \
 expect_nonempty "W26-15b: …and names the relation form" "$(w26_hits "$W26_15_REL" "$W26_15_RULES")"
 expect_nonempty "W26-15c: …and names the ceiling form" "$(w26_hits "$W26_15_CEIL" "$W26_15_RULES")"
 expect_nonempty "W26-15d: …and says when an exact number stands" "$(w26_hits "$W26_15_OWN" "$W26_15_RULES")"
-W26_15_D="$TMP/w26-15-no-ceiling.md"
-grep -vF -- "$W26_15_CEIL" "$W26_15_RULES" > "$W26_15_D" 2>/dev/null
+anchor "$W26_15_RULES" "$W26_15_CEIL" 1
+DOCTORED_W26_15="$TMP/w26-15-no-ceiling.md"
+grep -vF -- "$W26_15_CEIL" "$W26_15_RULES" > "$DOCTORED_W26_15" 2>/dev/null
 expect_nonempty "W26-15m precondition: the doctored copy keeps the rule's sentence" \
-  "$(w26_hits "$W26_15_SENTENCE" "$W26_15_D")"
+  "$(w26_hits "$W26_15_SENTENCE" "$DOCTORED_W26_15")"
 expect_eq "W26-15m: …and a rules file naming no ceiling form is caught" "" \
-  "$(w26_hits "$W26_15_CEIL" "$W26_15_D")"
+  "$(w26_hits "$W26_15_CEIL" "$DOCTORED_W26_15")"
 
 section "Section W26b: wave-26 T20 — one moment for the full run, the minimal forms (REQ-3 AC-3.1 static, AC-3.6; REQ-4 AC-4.2, 4.3, 4.4; D15)"
 #
@@ -4767,12 +4787,13 @@ for _w26_f in $W26_ROLES "$DISPATCH_MD" "$W26_CORE"; do
       "$W26_MARK" "$_w26_v"
   done
 done
-W26_D12="$TMP/w26-12-doctored.md"
 _w26_body="$(cat "${REPO}/agents/auditor.md" 2>/dev/null)"
-printf '%s\n' "${_w26_body// "$W26_MARK"/}" > "$W26_D12"
+anchor "${REPO}/agents/auditor.md" "$W26_MARK" 2
+DOCTORED_W26_12="$TMP/w26-12-doctored.md"
+printf '%s\n' "${_w26_body// "$W26_MARK"/}" > "$DOCTORED_W26_12"
 expect_nonempty "W26-12m precondition: the doctored auditor.md still has its Cadence: line" \
-  "$(w26_label_line 'Cadence' "$W26_D12")"
+  "$(w26_label_line 'Cadence' "$DOCTORED_W26_12")"
 expect_absent "W26-12m: a role file whose Cadence: line lost the mark is caught" \
-  "$W26_MARK" "$(w26_label_line 'Cadence' "$W26_D12")"
+  "$W26_MARK" "$(w26_label_line 'Cadence' "$DOCTORED_W26_12")"
 
 finish
