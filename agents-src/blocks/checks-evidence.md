@@ -11,4 +11,4 @@ result: <pass|flag|fail>
 scope: <piece|whole>
 ```
 
-`<a>..<b>` is the range whose evidence you judged; `b` is the head your answer is about. `result` is `fail` when any verdict is REFUTED, `flag` when any is UNVERIFIABLE and none REFUTED, otherwise `pass`.
+`<a>..<b>` is the range whose evidence you judged; `b` is the head your answer is about. `scope` is `whole` when you audit the run's matrix and `piece` when you audit one fix. `result` is `fail` when any verdict is REFUTED, `flag` when any is UNVERIFIABLE and none REFUTED, otherwise `pass`.
