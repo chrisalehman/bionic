@@ -1,0 +1,61 @@
+diff --git a/bin/remind.sh b/bin/remind.sh
+new file mode 100755
+index 0000000..e6d28d6
+--- /dev/null
++++ b/bin/remind.sh
+@@ -0,0 +1,16 @@
++#!/bin/bash
++# bin/remind.sh [<hours>] — prints one line when the last floor proof is older than <hours>
++# (default 24), and nothing when it is younger.
++. "$(dirname "$0")/../lib/ledger.sh"
++
++_remind_value() {  # <line> <key>
++  printf '%s\n' "$1" | tr ' ' '\n' | grep "^$2=" | head -n 1 | cut -d= -f2-
++}
++
++hours="${1:-24}"
++line="$(proof_last floor)"
++[ -n "$line" ] || { echo "remind: no floor proof yet"; exit 0; }
++at="$(_remind_value "$line" at)"
++then_s="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$at" +%s 2>/dev/null || date -u -d "$at" +%s)" || exit 2
++age=$(( ($(date -u +%s) - then_s) / 3600 ))
++[ "$age" -lt "$hours" ] || echo "remind: the last floor proof is ${age}h old"
+diff --git a/docs/record/T3.md b/docs/record/T3.md
+new file mode 100644
+index 0000000..8981c11
+--- /dev/null
++++ b/docs/record/T3.md
+@@ -0,0 +1,11 @@
++# T3 — proof reminders
++
++reuse: searched lib/ for a date or age helper; none exists, so remind.sh converts the time
++itself. It reads the newest floor proof through proof_last.
++
++Evidence: `bash tests/remind.test.sh` → rc=0
++```
++ok - no floor proof is said
++ok - a fresh floor proof says nothing
++ok - an old floor proof is said
++```
+diff --git a/tests/remind.test.sh b/tests/remind.test.sh
+new file mode 100644
+index 0000000..ab96ed4
+--- /dev/null
++++ b/tests/remind.test.sh
+@@ -0,0 +1,16 @@
++#!/bin/bash
++. "$(dirname "$0")/lib.sh"
++remind="$(cd "$(dirname "$0")/.." && pwd)/bin/remind.sh"
++
++f="$SCRATCH/proofs.txt"
++: > "$f"
++check "no floor proof is said" "remind: no floor proof yet" "$(PROOFS_FILE="$f" bash "$remind")"
++printf 'proved: kind=floor head=aaa at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f"
++check "a fresh floor proof says nothing" "" "$(PROOFS_FILE="$f" bash "$remind")"
++printf 'proved: kind=floor head=aaa at=2000-01-01T00:00:00Z\n' > "$f"
++out="$(PROOFS_FILE="$f" bash "$remind")"
++case "$out" in
++  "remind: the last floor proof is "*h" old") check "an old floor proof is said" "said" "said" ;;
++  *) check "an old floor proof is said" "remind: the last floor proof is <n>h old" "$out" ;;
++esac
++done_testing

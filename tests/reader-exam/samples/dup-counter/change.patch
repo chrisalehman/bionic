@@ -1,0 +1,58 @@
+diff --git a/bin/stamp.sh b/bin/stamp.sh
+new file mode 100755
+index 0000000..7ac9d30
+--- /dev/null
++++ b/bin/stamp.sh
+@@ -0,0 +1,13 @@
++#!/bin/bash
++# bin/stamp.sh '<command>' — runs <command> in the current checkout and appends one line to
++# the checkout's trellis-stamps file in its git directory: the head it ran at, how many paths
++# the checkout differed from that head by, and the command's exit code. Exits with that code.
++set -uo pipefail
++[ "$#" -eq 1 ] || { echo "usage: stamp.sh '<command>'" >&2; exit 2; }
++gitdir="$(git rev-parse --absolute-git-dir)" || exit 2
++head="$(git rev-parse --verify -q 'HEAD^{commit}')" || exit 2
++dirty="$(git status --porcelain | wc -l | tr -d ' ')"
++bash -c "$1"
++rc=$?
++printf 'stamp head=%s dirty=%s rc=%s\n' "$head" "$dirty" "$rc" >> "$gitdir/trellis-stamps"
++exit "$rc"
+diff --git a/docs/record/T2.md b/docs/record/T2.md
+new file mode 100644
+index 0000000..ee37363
+--- /dev/null
++++ b/docs/record/T2.md
+@@ -0,0 +1,12 @@
++# T2 — the run stamp
++
++reuse: searched bin/ and lib/ for anything that writes a stamp or runs a command on a
++checkout's behalf; nothing does, so bin/stamp.sh is new.
++
++Evidence: `bash tests/stamp.test.sh` → rc=0
++```
++ok - a green run is stamped
++ok - the command's exit code is the stamp's exit code
++ok - a red run is stamped
++ok - a dirty checkout is stamped dirty
++```
+diff --git a/tests/stamp.test.sh b/tests/stamp.test.sh
+new file mode 100644
+index 0000000..b8806e6
+--- /dev/null
++++ b/tests/stamp.test.sh
+@@ -0,0 +1,15 @@
++#!/bin/bash
++. "$(dirname "$0")/lib.sh"
++stamp="$(cd "$(dirname "$0")/.." && pwd)/bin/stamp.sh"
++
++r="$(scratch_repo)"
++head="$(git -C "$r" rev-parse HEAD)"
++( cd "$r" && bash "$stamp" 'true' )
++check "a green run is stamped" "stamp head=$head dirty=0 rc=0" "$(tail -n 1 "$r/.git/trellis-stamps")"
++( cd "$r" && bash "$stamp" 'exit 3' )
++check "the command's exit code is the stamp's exit code" "3" "$?"
++check "a red run is stamped" "stamp head=$head dirty=0 rc=3" "$(tail -n 1 "$r/.git/trellis-stamps")"
++: > "$r/work.txt"
++( cd "$r" && bash "$stamp" 'true' )
++check "a dirty checkout is stamped dirty" "stamp head=$head dirty=1 rc=0" "$(tail -n 1 "$r/.git/trellis-stamps")"
++done_testing
