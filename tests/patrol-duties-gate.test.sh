@@ -2049,8 +2049,17 @@ require_helpers qt_now qt_backdate
 expect_contains "C0: AC-4.5 the Patrol prompt ends the turn at a WAITING line" \
   'a "poker: WAITING" line' "$QT_PROMPT"
 expect_contains "C0b: …and says that turn owes nothing more" "owes nothing more" "$QT_PROMPT"
-expect_contains "C0c: …and asks for the refresh only on a change" \
+# Keyed to the line the tick prints (wave-26 T32; review-6 F2), never to a change the model
+# cannot see.
+expect_contains "C0c: …and asks for the refresh only when the tick printed its RECONCILE line" \
+  'TaskList and reconcile only if a "poker: RECONCILE" line printed' "$QT_PROMPT"
+expect_absent "C0e: …the sentence keyed to an unprinted change is gone" \
   "TaskList and reconcile only when a row's status or the ready set changed" "$QT_PROMPT"
+# A FILL leaves the dispatch to the orchestrator and nothing else: the launch records its row
+# and its ledger line (wave-26 T32; D4).
+expect_contains "C0f: …a FILL asks for the dispatch, and says the launch records the row" \
+  "its launch records the row active and its ledger line" "$QT_PROMPT"
+expect_absent "C0g: …and no longer asks the orchestrator to ledger it by hand" "(and ledger it active in ## Tasks)" "$QT_PROMPT"
 expect_absent "C0d: …and the unconditional continue is gone" "Then continue the run toward its goal until a wall." "$QT_PROMPT"
 
 # C1: one open row whose progress file goes quiet between two ticks. The second tick prints in
@@ -2137,6 +2146,58 @@ QT_CFG="$(mktemp -d)"
 QT_OUT="$(qt_tick "$d" "$QT_CFG")"
 expect_contains "C4 precondition: the empty roster's tick prints QUIET" "poker: QUIET — no open row" "$QT_OUT"
 expect_absent "C4: …and no WAITING, with nothing running" "poker: WAITING" "$QT_OUT"
+rm -rf "$QT_CFG"
+
+# C5 (wave-26 T32; review-6 F1): a QUIET tick does not use up a change. A FILL tick sets the
+# baseline; a writer takes the one slot, so the next ticks are QUIET; T5's status
+# moves while they wait; the writer goes, and the FILL tick after owes the refresh, once. Through
+# T15 every tick wrote its fingerprint, the QUIET one included, so this FILL tick owed nothing.
+# The control is the same sequence with no status move: its FILL tick owes nothing.
+c5_world() {  # -> project dir; writers=1, T2 ready, T5 behind it
+  local d
+  d=$(LEDGER_BUDGET='parallel-budget: writers=1 suites=1 worktrees=4 test_jobs=1 source=probe' \
+    make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_BLOCKED"); ( cd "$d" && git init -q . 2>/dev/null )
+  printf '%s' "$d"
+}
+c5_busy() {  # <dir> -> one writer on the roster, holding the one slot
+  { roster_header
+    roster_row_fixture status=intended session="$SID" name=W-BUSY agent_id= deliverable="$1/never-written-c5.md" \
+      duration="4 hours" launched_at="$(qt_now)"
+  } > "$1/.bionic/tmp/roster-$SID.state"
+}
+c5_run() {  # <dir> <config> <move: yes|no> -> C5_OUT, the FILL tick after the wait
+  roster_header > "$1/.bionic/tmp/roster-$SID.state"
+  C5_OUT0="$(qt_tick "$1" "$2")"
+  c5_busy "$1"
+  C5_OUT1="$(qt_tick "$1" "$2")"
+  [ "$3" = yes ] && sed -i.bak '/^| T5 |/s/| pending |/| dropped |/' "$1/.bionic/docs/plans/$PLAN_REL"
+  C5_OUT2="$(qt_tick "$1" "$2")"
+  roster_header > "$1/.bionic/tmp/roster-$SID.state"
+  C5_OUT="$(qt_tick "$1" "$2")"
+}
+require_helpers c5_world c5_busy c5_run
+d=$(c5_world); QT_CFG="$(mktemp -d)"
+c5_run "$d" "$QT_CFG" yes
+expect_contains "C5 precondition: the baseline tick fills" "poker: FILL T2" "$C5_OUT0"
+expect_contains "C5 precondition: …the writer's tick is QUIET" "decision=QUIET" "$C5_OUT1"
+expect_contains "C5 precondition: …the tick over the status move is QUIET too" "decision=QUIET" "$C5_OUT2"
+expect_contains "C5 precondition: T5 was dropped while they waited" "| dropped |" "$(grep '^| T5 |' "$d/.bionic/docs/plans/$PLAN_REL")"
+expect_contains "C5 precondition: …and the slot frees: the tick fills again" "poker: FILL T2" "$C5_OUT"
+expect_eq "C5: F1 a change first seen on a QUIET tick is owed by the next FILL tick" "owed" "$(qt_duty "$d")"
+expect_contains "C6: F2 …and that tick prints the duty as its own line" "poker: RECONCILE" "$C5_OUT"
+u_marker "$d"; u_tick_out "$d" "$C5_OUT"
+fire "$d"; expect_block "C7: F2 …its turn with no refresh is refused" "$TL_MISSING"
+expect_contains "C7b: …and the refusal names the line it answers" "poker: RECONCILE" "$(reason_of)"
+C5_OUT3="$(qt_tick "$d" "$QT_CFG")"
+expect_contains "C5b precondition: the same facts ticked again are unchanged" "poker: unchanged since" "$C5_OUT3"
+expect_eq "C5b: …so the refresh is owed once" "none" "$(qt_duty "$d")"
+expect_absent "C6b: …and the RECONCILE line is not printed again" "poker: RECONCILE" "$C5_OUT3"
+rm -rf "$QT_CFG"
+d=$(c5_world); QT_CFG="$(mktemp -d)"
+c5_run "$d" "$QT_CFG" no
+expect_contains "C5c precondition: the control's slot frees and the tick decides FILL" "decision=FILL" "$C5_OUT"
+expect_eq "C5c: with no status move the FILL tick after the wait owes nothing" "none" "$(qt_duty "$d")"
+expect_absent "C6c: …and prints no RECONCILE line" "poker: RECONCILE" "$C5_OUT"
 rm -rf "$QT_CFG"
 
 # ============================================================

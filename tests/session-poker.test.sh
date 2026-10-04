@@ -8684,4 +8684,64 @@ expect_eq "48e AC-6.5 one landing past the proof and the review is offered again
 expect_absent "48e2 …and it is on no WAIT line" "WAIT T3 " "$(s47_lines WAIT)"
 POKE_BOUND="$S48_BOUND_WAS"
 
+# ============================================================
+section "Section 49 §SYNC: the tick applies the launches the plan lacks, in one write (wave-26 T32, D4; review-3 F1, F2)"
+# ============================================================
+#
+# The launch recorder starts `launch-sync` and does not wait for it. The tick runs the same
+# transaction before it reads the plan, so a launch the detached call did not record (killed,
+# refused, or never started) is recorded here and says so once, and one that cannot be recorded
+# is printed on every tick until it is fixed. The fixture is §34's plan, which the real commit
+# gate admits, with T2's agent cell naming a launch on the roster (the gate reads it there).
+S49_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R49="$(make_repo s49-sync)"; ( cd "$R49" && git commit -q --allow-empty -m init )
+P49="$(s34_plan "$R49" 4)"
+sed -e 's/^| T2 | 4 | build | the second build | implementor |/| T2 | 4 | build | the second build | w-T2 |/' \
+    "$P49" > "$P49.tmp" && mv "$P49.tmp" "$P49"
+awk '{ print } /^- T5: pending dispatch/ { print "- T6: pending dispatch"; print "- T7: pending dispatch" }
+  /^\| T2 \| 4 \| build/ {
+  print "| T6 | 4 | build | the sixth build | — | — | 30 | REQ-1 | f.sh | — | — | pending |"
+  print "| T7 | 4 | build | the seventh build | — | — | 30 | REQ-1 | g.sh | — | — | pending |" }' "$P49" > "$P49.tmp" && mv "$P49.tmp" "$P49"
+new_roster "$R49"
+add_row "$R49" name=w-T2 agent_id=a-w-T2 launched_at="$(iso_ago 600)"
+add_row "$R49" name=w-T6 agent_id=a-w-T6 launched_at="$(iso_ago 60)" deliverable=t6.md duration="45 minutes" \
+  subagent_type=bionic:implementor
+mkdir -p "$R49/.worktrees/01-T6"
+printf 'workspace/v1|session=%s|name=w-T6|path=%s|branch=wt/01-T6|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
+  "$SID" "$R49/.worktrees/01-T6" "$P49" >> "$R49/.bionic/tmp/workspaces-$SID.state"
+expect_contains "49 precondition: T6 is in the table, pending" "| f.sh | — | — | pending |" "$(grep '^| T6 |' "$P49")"
+s34_gate "$R49"
+expect_eq "49 precondition: the fixture is admitted by the real commit gate" "0" "$GATE_RC"
+
+poke_pressure "$R49" 8192 1.0 tick
+expect_contains "49a §SYNC the tick records the launch the plan lacked, and says so" "poker: LAUNCHED T6 w-T6" "$OUT"
+expect_contains "49a2 …row T6 is active in its tree" "| w-T6 | — | 30 | REQ-1 | f.sh | .worktrees/01-T6 | 01234567 | active |" \
+  "$(grep '^| T6 |' "$P49")"
+expect_absent "49a3 …and the ready set it fills from no longer offers T6" "FILL T6" "$OUT"
+poke_pressure "$R49" 8192 1.0 tick
+expect_absent "49b …the next tick has nothing to record and says nothing of it" "poker: LAUNCHED" "$OUT"
+expect_contains "49b2 …while it still decides" "decision=" "$OUT"
+
+# 49c: a launch that cannot be recorded (a build row, no tree) is printed by the tick.
+add_row "$R49" name=w-T7 agent_id=a-w-T7 launched_at="$(iso_ago 30)" deliverable=t7.md duration="45 minutes"
+cp "$P49" "$TMPROOT/s49-before"
+poke_pressure "$R49" 8192 1.0 tick
+expect_contains "49c §SYNC the tick prints the launch it could not record" "poker: NOT-RECORDED T7 w-T7" "$OUT"
+expect_contains "49c2 …with the command to run by hand" "task-set T7 status=active agent=w-T7" "$OUT"
+expect_true "49c3 …and the plan is unchanged" cmp -s "$TMPROOT/s49-before" "$P49"
+expect_eq "49d no projection copy is left beside the plan" "" \
+  "$(find "$R49/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
+
+# 49e (wave-26 T32; T14, AC-6.5): the offered review names the range it reads. §48's world as it
+# ends: a review proof at A, one landing to B, the review offered again. The digest is removed so
+# the tick prints in full; the head is the one the tick reads for live:head, with no git of its own.
+expect_nonempty "49e precondition: §48 left its world and both heads" "${R48:-}${W48_A:-}${W48_B:-}"
+rm -f "$R48/.bionic/tmp/tick-digest-$SID.state"
+poke_pressure "$R48" 8192 1.0 tick
+expect_eq "49e precondition: the tick offers the review" "yes" "$(s48_fill_has T3)"
+expect_contains "49e AC-6.5 …and names the range it reads, the proof's head to the head now" \
+  "poker: RANGE T3 ${W48_A}..${W48_B}" "$OUT"
+expect_absent "49e2 …and only for the review: the active build has no RANGE line" "poker: RANGE T2" "$OUT"
+POKE_BOUND="$S49_BOUND_WAS"
+
 finish
