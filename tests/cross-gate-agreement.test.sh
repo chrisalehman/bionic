@@ -10053,6 +10053,53 @@ expect_eq "S19.4 …and the derivation names a site whose anchor was deleted" "1
 expect_eq "S19.4 …from a copy that really did lose one line (not vacuous)" "1" \
   "$(( $(wc -l < "$S19_DOCS_PINS") - $(wc -l < "$S19_SB/unanchored.test.sh") ))"
 
+# --- §S19.4 agent-context-guard: every doctored copy of the guard is anchored ---
+# agent-context-guard builds its mutants through one helper, so a site is any line
+# writing a copy of "$GUARD" to a file. The suite does not use docs-pins' DOCTORED…=
+# idiom, so it gets its own site pattern, and a pattern that finds no site is RED
+# here rather than a silent pass of the relation below it.
+#
+# THE ANCHOR MAY SIT ANYWHERE EARLIER IN THE SITE'S BLOCK (the lines since the last
+# blank one), not within a fixed distance: one anchor legitimately guards several
+# mutants written back to back, and a multi-line sed or awk puts the site line far
+# below the call it belongs to. Comment lines are never sites.
+s19_block_sites() {  # s19_block_sites <suite> <site-ERE> -> "<sites> <unanchored>"
+  S19_SITE_RE="$2" awk '
+    /^[ \t]*$/ { anchored = 0; next }
+    /^[ \t]*#/ { next }
+    /^[ \t]*anchor[ \t]/ { anchored = 1 }
+    $0 ~ ENVIRON["S19_SITE_RE"] { sites++; if (!anchored) bare++ }
+    END { print sites + 0, bare + 0 }
+  ' "$1"
+}
+S19_ACG="$S19_TESTS_DIR/agent-context-guard.test.sh"
+S19_ACG_SITE='"\$GUARD" > "'
+S19_ACG_REAL="$(s19_block_sites "$S19_ACG" "$S19_ACG_SITE")"
+S19_ACG_REAL_SITES="${S19_ACG_REAL%% *}"
+expect_eq "S19.4 the agent-context-guard site pattern finds at least one doctored site" "yes" \
+  "$([ "${S19_ACG_REAL_SITES:-0}" -ge 1 ] 2>/dev/null && echo yes || echo no)"
+expect_eq "S19.4 every agent-context-guard doctoring site is anchored" "0" \
+  "${S19_ACG_REAL#* }"
+
+# THE PLANTED DEFECTS, on copies. A bare site — a doctored copy of the guard with no
+# anchor in its block — must be named; and a copy whose sites no longer carry the
+# pattern's target must report no site, which is what turns the row above RED.
+cp "$S19_ACG" "$S19_SB/acg-bare.test.sh"
+# built with %s so this file does not itself carry the site it plants
+printf '\nsed %s "$GUARD" %s "$MUTANT_TREE/hooks/mutant-bare.sh"\n' "'s/x/y/'" '>' >> "$S19_SB/acg-bare.test.sh"
+S19_ACG_BARE="$(s19_block_sites "$S19_SB/acg-bare.test.sh" "$S19_ACG_SITE")"
+expect_eq "S19.4 …and the derivation names a planted bare agent-context-guard site" "1" \
+  "${S19_ACG_BARE#* }"
+S19_ACG_BARE_SITES="${S19_ACG_BARE%% *}"
+expect_eq "S19.4 …which the pattern counted as one more site (not vacuous)" "1" \
+  "$(( ${S19_ACG_BARE_SITES:-0} - ${S19_ACG_REAL_SITES:-0} ))"
+sed 's/"\$GUARD" > "/"$GUARD_GONE" > "/' "$S19_ACG" > "$S19_SB/acg-nosite.test.sh"
+expect_eq "S19.4 …and a copy with the target renamed really changed (not vacuous)" "yes" \
+  "$([ "$(/usr/bin/grep -c 'GUARD_GONE' "$S19_SB/acg-nosite.test.sh")" -ge 1 ] && echo yes || echo no)"
+S19_ACG_NONE="$(s19_block_sites "$S19_SB/acg-nosite.test.sh" "$S19_ACG_SITE")"
+expect_eq "S19.4 …and on it the site pattern finds no site, so the at-least-one row goes RED" "0" \
+  "${S19_ACG_NONE%% *}"
+
 # ============================================================
 section "S17 — no private builder of a shared shape remains (AC-28)"
 # ============================================================
