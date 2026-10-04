@@ -63,24 +63,27 @@
 # Inside a whole-machine hold (`BIONIC_SLOT_QUIET=1`) a nested shim, quiet or not, books
 # nothing and runs.
 #
-# --kill-after <s>: <s> seconds after the shim starts, the command's whole process group is
-# killed, one line says it is over the short limit and belongs in a subagent, and the shim exits
-# 124. THE LIMIT COVERS THE WAIT FOR A PLACE (T44, review 8 F2): every wait's ceiling is cut to
-# <s>, and the kill is timed from the shim's start, not the run's, so the call ends inside the
-# harness's own timeout whatever the machine is doing. A command that never got its place prints
-# the lib's give-up line (naming the holders), then the same short-limit line, and exits 124; it
-# ran nothing, so it stamps nothing. A void --quiet run's retry gets only what is left.
+# --kill-after <s>: once MORE than <s> seconds have passed since the shim started, the command's
+# whole process group is killed, one line says it is over the short limit and belongs in a
+# subagent, and the shim exits 124. The clock is `$SECONDS`, whole seconds, so the kill lands
+# up to a second past <s> and never before it (review 12 F4, A-T50.3). THE LIMIT COVERS THE WAIT
+# FOR A PLACE (T44, review 8 F2): every wait gives up by the same rule, and the kill is timed
+# from the shim's start, not the run's, so the call ends inside the harness's own timeout
+# whatever the machine is doing. A command that never got its place prints the lib's give-up
+# line (naming the holders), then the same short-limit line, and exits 124; it ran nothing, so
+# it stamps nothing. A void --quiet run's retry gets only what is left.
 #
 # EVERY COMMAND LEADS ITS OWN PROCESS GROUP (`set -m` around the one spawn; T44, review 8 F3).
 # Without job control bash starts a background command with SIGINT and SIGQUIT ignored, and every
 # process below it inherits that, so a suite that traps or relies on an interrupt behaved
 # differently wrapped. Under `set -m` the command keeps the dispositions it would have had
-# unwrapped. What that changes: a signal the shim takes (HUP, INT, TERM) is passed on by its trap
-# to the command's tree AND its group, so a child that outlived its parent dies too, as under
-# --kill-after; a signal sent to the CALLER's process group no longer reaches the command
-# directly, only through the shim's trap, so a SIGKILL to that group (which runs no trap) leaves
-# the command running; and with a controlling terminal the command is a background group, so a
-# read from that terminal stops it (a harness Bash call has none, A-T9.4).
+# unwrapped. What that changes: a signal the shim takes (HUP, INT, QUIT, TERM) is passed on by
+# its trap AS ITSELF to the command's group, and whatever is left two seconds later (the
+# command, or a child that outlived its parent) gets TERM, then KILL, as under --kill-after
+# (review 12 F3, A-T50.2); a signal sent to the CALLER's process group no longer reaches the
+# command directly, only through the shim's trap, so a SIGKILL to that group (which runs no
+# trap) leaves the command running; and with a controlling terminal the command is a
+# background group, so a read from that terminal stops it (a harness Bash call has none, A-T9.4).
 #
 # EXIT CODES. The command's own, except:
 #   2    usage: no `--`, no command, more than one word after `--` (with or without
@@ -88,13 +91,16 @@
 #   69   no place within BIONIC_SLOTS_MAX_WAIT (the line names the holders), a
 #        whole-machine take whose load never settled within it, or a whole-machine take on
 #        a store it cannot write; the command never ran
-#   75   void: the load rose during the run on the first run and both retries, or the
-#        ceiling ran out before a retry could start
+#   75   void over a PASSING run: the load rose during the run on the first run and both
+#        retries, or the ceiling ran out before a retry could start. A failing run keeps its
+#        own code and still prints the void line (review 12 F2, A-T50.1; the runner's rule)
 #   124  --kill-after fired, during the run or during the wait for a place
 #   128+n  the shim itself was stopped by signal n (its command is killed with it)
-# 75 is EX_TEMPFAIL, "try again later", which is what a void timing check means. A command
-# can exit 69, 75 or 124 itself; the shim's own always comes after a `booked:` or `slots:`
-# line on stderr, and the stamp of either is never proof of a green run.
+# 75 is EX_TEMPFAIL, "try again later", which is what a void timing check of a green run means;
+# over a red one it would hide the failure behind a reason to re-run. A command can exit 69,
+# 75 or 124 itself; the shim's own always comes after a `booked:` or `slots:` line on stderr,
+# and the stamp of either is never proof of a green run. The stamp's `rc=` is the exit code;
+# it has no field for the void, so a void failure's stamp reads as the failure it is.
 #
 # THE WAITS. Every wait polls every BIONIC_SLOTS_POLL seconds, printing a line at the start
 # and every BIONIC_SLOTS_NOTE_S (lib/slots.sh). BIONIC_SLOTS_MAX_WAIT is the total: the place
@@ -239,8 +245,12 @@ booked_run() {  # runs $cmd; sets RUN_RC
   set +m
   if [ -n "$kill_after" ]; then
     # Timed from the shim's start (BOOKED_T0), so the wait for a place spends the limit too.
+    # `$SECONDS` counts whole seconds of the wall clock, so a difference of N is anywhere in
+    # (N-1, N+1) seconds: only "more than N" is never early (review 12 F4, A-T50.3). It fires
+    # up to a second late, which the five seconds the wall leaves before the harness's own
+    # timeout absorb with the kill's grace.
     while kill -0 "$CHILD" 2>/dev/null; do
-      if [ $((SECONDS - BOOKED_T0)) -ge "$kill_after" ]; then
+      if [ $((SECONDS - BOOKED_T0)) -gt "$kill_after" ]; then
         booked_kill_tree "$CHILD"
         killed=1
         break
@@ -259,7 +269,15 @@ booked_run() {  # runs $cmd; sets RUN_RC
 }
 
 booked_on_signal() {  # <signal number>
-  [ -z "$CHILD" ] || booked_kill_tree "$CHILD"
+  local i=0
+  if [ -n "$CHILD" ]; then
+    # THE SIGNAL GOES ON AS ITSELF (review 12 F3, A-T50.2): the command's group gets what the shim
+    # got, so an INT handler sees INT, as it would unwrapped. Two seconds later whatever is left,
+    # the leader or an orphan in its group, gets the TERM-then-KILL of booked_kill_tree.
+    kill -"$1" -- "-$CHILD" 2>/dev/null
+    while [ "$i" -lt 20 ] && kill -0 "$CHILD" 2>/dev/null; do i=$((i + 1)); sleep 0.1; done
+    booked_kill_tree "$CHILD"
+  fi
   CHILD=""
   RUN_RC=$((128 + $1))
   [ "$STARTED" -eq 0 ] || booked_stamp "$RUN_RC"
@@ -267,6 +285,7 @@ booked_on_signal() {  # <signal number>
 }
 trap 'booked_on_signal 1' HUP
 trap 'booked_on_signal 2' INT
+trap 'booked_on_signal 3' QUIT
 trap 'booked_on_signal 15' TERM
 trap 'slots_release "$$"; [ -z "${BOOKED_TIMES:-}" ] || rm -f "$BOOKED_TIMES"' EXIT
 
@@ -309,7 +328,9 @@ BOOKED_MAX_WAIT="$(_slots_max_wait)"; BOOKED_CUT=0
 if [ -n "$kill_after" ] && [ "$kill_after" -le "$BOOKED_MAX_WAIT" ]; then
   BOOKED_MAX_WAIT=$kill_after; BOOKED_CUT=1
 fi
-SLOTS_DEADLINE=$((BOOKED_T0 + BOOKED_MAX_WAIT))
+# Every wait gives up at "$SECONDS >= deadline", so the cut limit gets one second more: the
+# wait then gives up past the limit, never before it, by the kill's own rule (A-T50.3).
+SLOTS_DEADLINE=$((BOOKED_T0 + BOOKED_MAX_WAIT + BOOKED_CUT))
 
 booked_no_place() {  # the wait ran out before the command could start; it ran nothing
   # At the short limit it is the same end as a run stopped there: its line, 124 (A-T44.3).
@@ -346,7 +367,7 @@ else
       # A run already happened and was void; the ceiling ran out before another could start.
       printf 'booked: void — the ceiling of %ss ran out before a retry could start; a timing result from this machine now would not mean anything\n' \
         "$BOOKED_MAX_WAIT" >&2
-      RUN_RC=$BOOKED_VOID_RC
+      [ "$RUN_RC" -ne 0 ] || RUN_RC=$BOOKED_VOID_RC
       break
     fi
     export BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1
@@ -368,7 +389,7 @@ else
       printf 'void\n' >&2
       printf 'booked: void — the load rose above %s during every run (last %s, about %s of it the run'\''s own); a timing result from this machine now would not mean anything\n' \
         "$line" "$rose" "$own" >&2
-      RUN_RC=$BOOKED_VOID_RC
+      [ "$RUN_RC" -ne 0 ] || RUN_RC=$BOOKED_VOID_RC
       break
     fi
     printf 'void\n' >&2
