@@ -2975,6 +2975,100 @@ case "$VERB" in
     fi
     FR_OUT="$(fill_ledger_report "$FR_FILE" "$FR_SLUG" "$FR_OPEN" "${BIONIC_NOW_EPOCH:-}")"
     printf '%s\n' "$FR_OUT"
+    # IDLE MINUTES AND PEAK WIDTH (wave-26 T16, D17). Both are read from times code wrote with the
+    # clock and never from the plan's text: the ledger's `at=` and `idle=`, the roster's
+    # `launched_at=` and the sweeper ledger's ack stamps, through the roster lib's own close rule.
+    FR_NOW="${BIONIC_NOW_EPOCH:-}"
+    case "$FR_NOW" in ''|*[!0-9]*) FR_NOW="$(date -u +%s)" ;; esac
+    FR_LED_IN=/dev/null
+    [ -f "$FR_FILE" ] && [ ! -L "$FR_FILE" ] && FR_LED_IN="$FR_FILE"
+    # Idle: the lines are folded by turn (the last of a turn wins, as the report above folds them),
+    # ordered by `at`, and a line whose idle= is non-empty owns the interval to the next line; the
+    # last one owns the interval to now only while the run is open. An interval counts once, however
+    # many rows idled in it.
+    FR_IDLE_S="$(awk -v open="$FR_OPEN" -v now="$FR_NOW" "$_PATROL_ISO_AWK"'
+      function fr_field(line, key,   i, n, parts) {
+        n = split(line, parts, "|")
+        for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+        return ""
+      }
+      index($0, "fill-ledger/v1|") == 1 {
+        e = iso2epoch(fr_field($0, "at"))
+        if (e < 0) next
+        k = fr_field($0, "turn")
+        if (k != "" && (k in slot)) { i = slot[k] } else { i = ++n; if (k != "") slot[k] = i }
+        ep[i] = e; id[i] = fr_field($0, "idle")
+      }
+      END {
+        for (i = 1; i <= n; i++) ord[i] = i
+        for (i = 2; i <= n; i++) {
+          v = ord[i]; j = i - 1
+          while (j >= 1 && ep[ord[j]] > ep[v]) { ord[j + 1] = ord[j]; j-- }
+          ord[j + 1] = v
+        }
+        idle = 0
+        for (x = 1; x <= n; x++) {
+          i = ord[x]
+          if (id[i] == "") continue
+          if (x < n) end = ep[ord[x + 1]]
+          else end = (open == "yes" ? now : ep[i])
+          if (end > ep[i]) idle += end - ep[i]
+        }
+        printf "%d\n", idle
+      }' "$FR_LED_IN")"
+    case "$FR_IDLE_S" in ''|*[!0-9]*) FR_IDLE_S=0 ;; esac
+    # Width: every session the ledger names (and this one) has a roster; each live row is open from
+    # its occupancy stamp to the ack that closes its name (`_roster_acks`, `_roster_discharged`:
+    # an ack strictly later than the launch), or to now. A row's `intended`, `confirmed` and
+    # `identified` lines share a name and a stamp, so (name, stamp) is one interval.
+    FR_SIDS="$(awk -F'|' '
+      index($0, "fill-ledger/v1|") == 1 {
+        for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) print substr($i, 9)
+      }' "$FR_LED_IN" | sort -u)"
+    FR_SID_NOW="$(session_id 2>/dev/null)" || FR_SID_NOW=""
+    FR_SIDS="$(printf '%s\n%s\n' "$FR_SIDS" "$FR_SID_NOW" | sort -u)"
+    FR_SPANS=""
+    for FR_S in $FR_SIDS; do
+      case "$FR_S" in ''|*[!A-Za-z0-9_-]*) continue ;; esac
+      FR_RF="$REPO_REAL/.bionic/tmp/roster-${FR_S}.state"
+      FR_AF="$REPO_REAL/.bionic/tmp/sweeper-${FR_S}.state"
+      { [ -f "$FR_RF" ] && [ ! -L "$FR_RF" ] && [ -r "$FR_RF" ]; } || continue
+      { [ -f "$FR_AF" ] && [ ! -L "$FR_AF" ] && [ -r "$FR_AF" ]; } || FR_AF=""
+      FR_SPANS="${FR_SPANS}$(FR_RF="$FR_RF" FR_AF="$FR_AF" awk -v now="$FR_NOW" \
+        -v rpfx="roster-state/${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}|" "$_PATROL_ISO_AWK$_ROSTER_OPEN_AWK"'
+        BEGIN {
+          _roster_acks(ENVIRON["FR_AF"], ACK)
+          f = ENVIRON["FR_RF"]
+          while ((getline line < f) > 0) {
+            if (index(line, rpfx) != 1) continue
+            if (!_roster_live(_roster_kv(line, "status"))) continue
+            nm = _roster_kv(line, "name"); if (nm == "") nm = "(unnamed)"
+            st = _roster_occupied_at(line); if (!_roster_stamp_ok(st)) continue
+            key = nm SUBSEP st; if (key in seen) continue
+            seen[key] = 1
+            b = iso2epoch(st); en = now
+            if ((nm in ACK) && _roster_discharged(st, ACK[nm])) en = iso2epoch(ACK[nm])
+            if (en < b) en = b
+            printf "%d %d\n", b, en
+          }
+          close(f)
+        }' </dev/null)
+"
+    done
+    FR_PEAK="$(printf '%s' "$FR_SPANS" | awk '
+      NF == 2 { n++; s[n] = $1; e[n] = $2 }
+      END {
+        peak = 0
+        for (i = 1; i <= n; i++) {
+          c = 0
+          for (j = 1; j <= n; j++) if (s[j] <= s[i] && (s[i] < e[j] || j == i)) c++
+          if (c > peak) peak = c
+        }
+        printf "%d\n", peak
+      }')"
+    case "$FR_PEAK" in ''|*[!0-9]*) FR_PEAK=0 ;; esac
+    printf 'idle minutes: %d\n' "$(( (FR_IDLE_S + 30) / 60 ))"
+    printf 'peak width: %d\n' "$FR_PEAK"
     FR_HEAD="$(printf '%s\n' "$FR_OUT" | head -n 1)"
     FR_M="${FR_HEAD#*|missed=}"; FR_M="${FR_M%%|*}"
     FR_H="${FR_HEAD#*|hold=}"; FR_H="${FR_H%%|*}"
