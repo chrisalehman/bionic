@@ -7011,6 +7011,62 @@ expect_contains "35r T11b fill-report folds the refused turn's two lines into on
 expect_contains "35s …and the turn's final line is the one that saw both launches: nothing missed" \
   "|launched=W-T1,W-T2|" "$(tail -n 1 "$S35Q_LED" 2>/dev/null)"
 
+# ---------- §REPORT (wave-26 T16, D17; AC-6.8): idle minutes and peak width, from stamps the code wrote ----------
+#
+# The ledger line ends with `idle=` (the ready rows no launch and no decline covered while a slot was
+# free) and `room=`; `fill-report` adds `idle minutes: <n>` (the interval from a line whose idle= is
+# non-empty to the next line, once per interval) and `peak width: <n>` (the most roster rows open at
+# one instant: `launched_at` to the sweeper ledger's ack stamp, the one close rule; no ack, open to now).
+#
+# THE FIXTURE: idle=T2 at 10:00, then a 12-minute interval to 10:12 (an 8-minute one after it has
+# idle= empty and counts nothing). Four roster rows: A 10:00-10:10, B 10:05-10:15, C 10:08-open,
+# D 10:20-open. Three are open at 10:08-10:10 and never more, so the peak is 3: four rows launched
+# would read 4, and the two open now would read 2.
+s35r_line() {  # <at> <turn> <idle> <room>
+  printf 'fill-ledger/v1|at=%s|session=%s|turn=%s|current=5|state=ok|ceiling=8|width=8|open=2|free=%s|ready=T2|launched=|declined=|missed=1|idle=%s|room=%s\n' \
+    "$1" "$SID" "$2" "$4" "$3" "$4"
+}
+R35R="$(make_repo s35r)"
+P35R="$(plan_at "$R35R" epic-99-fixture/wave-35-rp.plan.md "$(plan_body 5)")"
+L35R="$R35R/.bionic/docs/record/wave-35-rp/fill-ledger.log"
+mkdir -p "${L35R%/*}"
+{
+  s35r_line 2026-09-23T10:00:00Z u-r1 T2 3
+  s35r_line 2026-09-23T10:12:00Z u-r2 ''  2
+  s35r_line 2026-09-23T10:20:00Z u-r3 ''  0
+} > "$L35R"
+new_roster "$R35R"
+add_row_to "$R35R" "$SID" name=rp-a launched_at=2026-09-23T10:00:00Z
+add_row_to "$R35R" "$SID" name=rp-b launched_at=2026-09-23T10:05:00Z
+add_row_to "$R35R" "$SID" name=rp-c launched_at=2026-09-23T10:08:00Z
+add_row_to "$R35R" "$SID" name=rp-d launched_at=2026-09-23T10:20:00Z
+s20_ack "$R35R" rp-a 2026-09-23T10:10:00Z
+s20_ack "$R35R" rp-b 2026-09-23T10:15:00Z
+OUT="$( cd "$R35R" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35R" 2>&1 )"; RC=$?
+expect_eq "35t fill-report exits 0 on the idle/width fixture" "0" "$RC"
+expect_contains "35u AC-6.8 the planted 12-minute interval, exactly" "idle minutes: 12" "$OUT"
+expect_contains "35v AC-6.8 the instant three rows overlap, exactly" "peak width: 3" "$OUT"
+# A PLAN THAT SAYS OTHERWISE CHANGES NOTHING: the report reads the ledger and the roster, never prose.
+OUT_R1="$OUT"
+printf '\nThe run sat idle for 99 minutes at 2026-01-01T00:00:00Z and ran 9 wide at 2026-01-01T00:00:00Z.\n' >> "$P35R"
+OUT="$( cd "$R35R" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35R" 2>&1 )"
+expect_eq "35w a plan carrying a misleading time and width changes nothing in the report" "$OUT_R1" "$OUT"
+# THE ZERO CASE, so 35u cannot pass on a constant: no line names an idle row, and an old-shape line
+# (no idle= field at all) reads as none. The roster is the same, so the width still reads 3.
+R35Z="$(make_repo s35z)"
+P35Z="$(plan_at "$R35Z" epic-99-fixture/wave-35-rz.plan.md "$(plan_body 5)")"
+L35Z="$R35Z/.bionic/docs/record/wave-35-rz/fill-ledger.log"
+mkdir -p "${L35Z%/*}"
+{
+  s35r_line 2026-09-23T10:00:00Z u-z1 '' 3
+  s35_line 2026-09-23T10:12:00Z u-z2 ok T2 '' '' 1
+} > "$L35Z"
+cp "$(roster_of "$R35R")" "$(roster_of "$R35Z")"
+cp "$(ack_ledger_of "$R35R")" "$(ack_ledger_of "$R35Z")"
+OUT="$( cd "$R35Z" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35Z" 2>&1 )"
+expect_contains "35x no idle row names a zero, and an old-shape line is none" "idle minutes: 0" "$OUT"
+expect_contains "35y …while the same roster still reads its peak" "peak width: 3" "$OUT"
+
 # ============================================================
 section "Section 36: prompt — the canonical Patrol prompt (wave-20 REQ-6, AC-6.1; D6)"
 # ============================================================

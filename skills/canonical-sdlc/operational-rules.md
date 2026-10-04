@@ -109,13 +109,31 @@ A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale
 - **`kind`** — one of `build | test | verify | review | doc | integrate | close | prototype`.
 - **`task`** — the row's task in one line; `complexity: standard | complex` rides in this cell for Step-4 rows.
 - **`agent`** — carries the ROSTER NAME the dispatch gave the agent (for example `w21-T5`), byte for byte, never the role: the commit gate matches an `active` row's cell to a roster `name=`, and the role lives in the task cell's complexity tag and the dispatch ledger. A row nobody was dispatched for leaves the cell empty or `—`. A row dispatched before 1.8.8 with a role in this cell is refused by the 1.8.8 commit gate once a roster exists ("names no launched agent"), even with its `- T<n>:` line written; to migrate an in-flight plan, write each `active` row's roster name into the cell.
-- **`deps`** — task ids (`T1`, or `T1, T4` for more than one) or an external prerequisite `ext:<slug>` (`T1, ext:ci-green`), never prose. An `ext:` token holds the row out of the ready set, and the Patrol tick names it on a `HELD` line, until the token is removed from the cell. A prose token here (`"dep T17 (rows; lands after T15)"`) is parsed as its own id and refused as unknown — `units.sh`'s bring-forward validator splits this cell on `,`, and every token must resolve in the id set or match `ext:<slug>` (a letter or digit, then letters, digits, `.`, `_` or `-`); a token with a blank inside is refused.
+- **`deps`** — task ids (`T1`, or `T1, T4` for more than one) or an external prerequisite `ext:<slug>` (`T1, ext:ci-green`), never prose. A table that carries `reads` refuses a task id here; a table without it reads each id as "wait for that task to land". With `reads`, this cell holds only `ext:` tokens, and every edge between rows comes from `reads`. An `ext:` token, in either cell, holds the row out of the ready set, and the Patrol tick names it on a `HELD` line, until the token is removed from the cell. A prose token here (`"dep T17 (rows; lands after T15)"`) is parsed as its own id and refused as unknown — `units.sh`'s bring-forward validator splits this cell on `,`, and every token must resolve in the id set or match `ext:<slug>` (a letter or digit, then letters, digits, `.`, `_` or `-`); a token with a blank inside is refused.
+- **`reads`** (optional, found by its header name like every column, so it may sit anywhere) — what the row must have before it is ready. Write a read only where the row reads what another row writes; an empty cell takes the kind default. The edges between rows are computed from these cells, never written by hand.
+
+  | piece | shape |
+  |---|---|
+  | reads cell | comma-separated: a path in the `Files` grammar · `head` · `record` · `proof:<kind>` · `approval:<name>` · `ext:<slug>`; a live read is `live:<artifact>`; empty takes the kind default |
+  | kind defaults | build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:floor, proof:review` · close the integrate row's merge |
+
 - **`size`** — the row's expected duration in minutes.
 - **`serves`** — the requirement id(s) this row discharges.
-- **`Files`** — every path the row may create or edit (the dispatch budget's source).
+- **`Files`** — every path the row may create or edit (the dispatch budget's source). Two rows that write one file run side by side and reconcile on landing; a `Files` entry ending in `!` is unmergeable, and a second row that writes it waits for the first to land.
 - **`worktree`** (optional) — the row's tree path once created; `—` while none exists yet.
 - **`base`** (optional, ADR-032) — rides beside `worktree`: the commit the tree was cut from, as `spawn-worktree.sh` printed it at creation. Absent (`—`) means the landing gate reconstructs the base from `working-branch:` instead, and says so.
 - **`status`** — the two ledgers side by side: a wave row is `pending | active | landed | dropped`; a task-scale row is one of `pending`, `active`, `done`, `dropped` (`steps/3.md` documents that ledger). The terminal words never cross: a wave row that has landed is `landed`, not `done`, and `done` never appears as a wave-table status. At task scale `done` means the work is finished and the tree released, and the auditor and critic verdicts it owes are owed from Step 6 — a numeric `current:` of 6 or more, the first moment those verdicts can exist — never while `current:` is still `T<n>` (ADR-033).
+
+**Approvals and proofs a `reads` cell names.** `approval:plan` is the `approved-by:` line Step 3 writes. Any other approval, and every proof, is a line inside `## SDLC State` that only its verb writes, never a hand edit:
+
+| piece | shape |
+|---|---|
+| approval line | `approved: <name> by <who> <ISO-UTC> "<reply>"` inside `## SDLC State`; `approval:plan` is the existing `approved-by:` line |
+| approval verb | `session-poker.sh approve <name> '<reply>'` |
+| proof line | `proved: kind=<floor\|review\|task> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>` inside `## SDLC State` |
+| proof verb | `session-poker.sh proof-add <kind> <evidence path>`; the head is `git rev-parse HEAD` of the working branch's checkout, never an operand |
+
+`approve` is run on the user's own reply, quoted verbatim, the same rule as the `approved` word at Step 3.
 
 **`working-branch:`** in the plan's frontmatter names the wave's own branch: the key `lib/stop.sh`'s landing gate reads to merge-base a task tree against — "what this task added" is computed against that branch, not against the main checkout's current one — and, since T8 (wave-20, REQ-1), the branch `worktree_land_for_session` merges a landed tree into, in the checkout that holds it. A plan naming none falls back to the main checkout's branch, announced inert.
 
@@ -165,7 +183,7 @@ template the author reached for first. Five rungs, cheapest first:
 - **standalone design doc** — the suggested default when the design outlives the wave that
   authored it, or when several waves will implement it: an epic-level domain model, a mechanism a
   later wave builds. This is what a `design:` pointer resolves to, so choosing this rung is
-  choosing to be pointed at, and the pointer is what the Step-3 approval display prints.
+  choosing to be pointed at.
 - **structured models** — a logical domain model, C4 context/container/component views, sequence
   diagrams — the suggested default when component or integration *topology* is the hard part and
   would hide in prose. Prose describes two components well and five badly; the moment "who calls
@@ -213,7 +231,8 @@ question — go open the file.
 Those four things reach the user through a frame, and the frame comes before any question. Seven
 lines, one or two sentences each — the whole thing is a screen, not a document.
 
-- **Problem** — what is wrong or missing now, in the user's terms rather than the code's.
+- **Problem** — one line restating what Step 1 approved, in the user's terms, for orientation
+  only: Step 1 approved the problem and its context, and question 1 does not ask again.
 - **Goal** — what "designed" looks like when this interview ends.
 - **Design intuition** — the shape you already expect to be right, stated plainly enough to be
   wrong. Withholding it to seem neutral wastes the user's turn: nobody can push on a lean you
@@ -228,7 +247,8 @@ lines, one or two sentences each — the whole thing is a screen, not a document
 - **Artifact form** — the rung derived from the menu above, printed as a suggested default with
   its one-line reason.
 
-Then question 1, which approves the frame and nothing else. Worked, at wave scale:
+Then question 1, which approves the frame — the design's direction and its decision map — and
+nothing else. Worked, at wave scale:
 
 > **Problem.** Two hooks each hard-code the supported version; nothing makes them move together.
 > **Goal.** One owner for that value, and a test that goes red when any rendering site drifts.
@@ -263,7 +283,7 @@ question. The shape is: what A buys and costs, what B buys and costs, which way 
 — which hands the user something to disagree with inside one turn.
 
 **A tactical choice you may default**, which is what the mark is for, but a default is never
-silent. State it the turn you take it, or at the latest in the closing approval, in the form
+silent. State it the turn you take it, or at the latest on the closing card, in the form
 "I defaulted X to Y because Z; say the word and it changes." A tactical default nobody ever saw
 is the same defect as an unlogged assumption, one step earlier.
 
@@ -271,6 +291,17 @@ is the same defect as an unlogged assumption, one step earlier.
 the constant lives in `lib/`; the pin suite widens to four sites" — so the user reads a design
 being built rather than a transcript being taken. Skip the deltas and the close becomes the
 first time the user sees the design whole, which is too late for it to be the first time.
+
+#### Closing on the card
+
+The walk ends, the spec is written in one complete Write, and the interview closes by presenting
+the Step-2 card, rendered from that spec by `card.sh step2 <spec>`. The user's approval of the
+card is the one approval of the design. Nothing is approved before the spec exists, because the
+card reads it: the Goal, `### Approach`, `### Worth your eye` (each call the user should check,
+with its risk), the decisions, the Eval design, and the paths of the spec, each ADR, the design
+ledger and the requirements. Ownership and one requirement's evals are sub-views, asked for by
+name (`card.sh step2 <spec> ownership`, `card.sh step2 <spec> evals <REQ>`). Step 3 approves the
+plan and the matrix only; it cites the design and does not put it to the user again.
 
 #### The waiver
 
@@ -386,13 +417,12 @@ A wave may carry both the pointer and a local `## Design` section, and that is t
 shape when an inherited design is right about the domain but silent on this wave's specifics:
 the pointer names what governs, the local section carries only the delta. The local section does
 not excuse the pointer: a `design:` that is present is resolved, existence-checked and
-`..`-refused whatever else the spec carries, because the path it names is the one the approval
-display prints for the user to open. Whether the inherited design suffices is judgment, approved
-at the Step-3 approval alongside everything else.
+`..`-refused whatever else the spec carries, because the path it names is the one the user
+opens. Whether the inherited design suffices is judgment, approved on the Step-2 card.
 
 `design-waived:` is not a lighter version of the pointer. Waived means no design governs this
 artifact; a pointer means one does and here is where. Waiving because the design lives elsewhere
-destroys the one thing the approval display is built to carry — the path the user would open.
+destroys the one thing the pointer is built to carry — the path the user would open.
 
 ## Close-out report (Step 9)
 
