@@ -9806,39 +9806,54 @@ S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 # The claim is unchanged — ONE owner of the reconciliation — and the address moved with the
 # sweep at T12, so the files are counted over the library and a stray copy left behind under
 # hooks/ fails the second row below.
-# A RECONCILER IS A FILE THAT DOES BOTH HALVES (review 9 follow-up): it computes a name-only
-# diff AND names a roster row's `files=` key as a quoted literal, the form a row reader compares
-# a field against. A name-only diff alone is not one: worktree.sh diffs a tree against the landed
-# work to find the files both changed, and never reads a row. The key alone is not one either:
-# brief.sh writes `files=` into a row and computes no diff.
+# A RECONCILER IS A FILE THAT DOES BOTH HALVES (review 9 follow-up, widened at review 11 S2): it
+# lists changed paths, by any of git's forms for it (`diff --name-only`, `--name-status`,
+# `diff --stat`, `status --porcelain`), AND it READS a roster row's `files=` key, by any of the
+# repo's read forms (the quoted literal a row reader compares against, a `files=*)` case arm, or a
+# `*_field … files` key reader). Writing the key is not reading it, so brief.sh's
+# `print "files=" v` counts only because brief.sh lists no changed paths, and worktree.sh's
+# `printf 'files=%s'` matches no read form. A path list alone is not one either: worktree.sh
+# diffs a tree against the landed work to find the files both changed, and never reads a row.
+S18_DIFF_RE='--name-only|--name-status|diff --stat|status --porcelain'
+S18_READ_RE='"files="|files=\*\)|_field[^)]*[ "]files([^=_A-Za-z0-9]|$)'
 s18_reconcilers() {  # <dir> -> the .sh files under it that do both halves, one per line
   local _f
   for _f in "$1"/*.sh; do
     [ -f "$_f" ] || continue
-    /usr/bin/grep -qF -- '--name-only' "$_f" && /usr/bin/grep -qF '"files="' "$_f" && printf '%s\n' "$_f"
+    /usr/bin/grep -qE -- "$S18_DIFF_RE" "$_f" && /usr/bin/grep -qE -- "$S18_READ_RE" "$_f" && printf '%s\n' "$_f"
   done
   return 0
 }
 S18_LIB_DIR="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
 expect_eq "S18.1 exactly one library file reconciles a diff against a row's files=" "1" \
   "$(s18_reconcilers "$S18_LIB_DIR" | grep -c . | tr -d ' ')"
-expect_eq "S18.1 …and no hook file does it any more" "0" \
-  "$(s18_reconcilers "$BIONIC_HOOKS_DIR" | grep -c . | tr -d ' ')"
 expect_eq "S18.1 …and it is payload/scripts/lib/stop.sh" "1" \
   "$(s18_reconcilers "$S18_LIB_DIR" | grep -c '/stop\.sh$')"
+# No hook computes a name-only diff at all: the reconciliation's diff left hooks/ with the sweep.
+expect_ne "S18.1 the hooks are read: at least one hook file is there" "0" \
+  "$(ls "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | grep -c . | tr -d ' ')"
+expect_eq "S18.1 …and no hook file carries --name-only" "" \
+  "$(/usr/bin/grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null)"
 
-# A SECOND RECONCILIATION IS RED. A copy of the library where worktree.sh, which already diffs,
-# also reads a row's files= — the exactly-one row asked of that copy reads 2.
-S18_MUT="$SANDBOX/s18-lib"; rm -rf "$S18_MUT"; mkdir -p "$S18_MUT"
-cp "$S18_LIB_DIR"/*.sh "$S18_MUT/"
-anchor "$S18_LIB_DIR/worktree.sh" '_wt_not_current() {' 1
-awk -v ins='  decl="${row#*|}"; [ "${decl%%=*}=" = "files=" ] && decl="${decl#files=}"' \
-  '{ print } index($0, "_wt_not_current() {") == 1 { print ins }' \
-  "$S18_LIB_DIR/worktree.sh" > "$S18_MUT/worktree.sh"
-expect_eq "S18.1 the doctored worktree.sh still parses and now names the row's files= key" "yes 1" \
-  "$(bash -n "$S18_MUT/worktree.sh" 2>/dev/null && echo yes || echo no) $(/usr/bin/grep -cF '"files="' "$S18_MUT/worktree.sh" | tr -d ' ')"
-expect_eq "S18.1 a second reconciliation in a copy of the library: the exactly-one row reads 2" "2" \
-  "$(s18_reconcilers "$S18_MUT" | grep -c . | tr -d ' ')"
+# A SECOND RECONCILIATION IS RED, written the ways a real one would be (review 11 S2, cases A to
+# C), never in the detector's own spelling: each is one added file in a copy of the library, and
+# the exactly-one row asked of that copy reads 2.
+s18_second() {  # <label> <body> -> "<parses> <count>" for a copy of the library plus recon2.sh
+  rm -rf "$S18_MUT"; mkdir -p "$S18_MUT"; cp "$S18_LIB_DIR"/*.sh "$S18_MUT/"
+  printf '#!/bin/bash\n%s\n' "$2" > "$S18_MUT/recon2.sh"
+  printf '%s %s' "$(bash -n "$S18_MUT/recon2.sh" 2>/dev/null && echo yes || echo no)" \
+    "$(s18_reconcilers "$S18_MUT" | grep -c . | tr -d ' ')"
+}
+S18_MUT="$SANDBOX/s18-lib"
+expect_eq "S18.1 a second reconciler through the repo's own key reader (case A) reads 2" "yes 2" \
+  "$(s18_second A 'recon2() { local decl changed; decl="$(brief_field "$1" files)"; changed="$(git diff --name-only "$2..HEAD")"; printf "%s\n" $changed | grep -vxF "$decl"; }')"
+expect_eq "S18.1 …through a --name-status diff and a quoted-key read (case B) reads 2" "yes 2" \
+  "$(s18_second B 'recon2() { local row="$1" decl; decl="${row##*"files="}"; git diff --name-status "$2..HEAD" | cut -f2 | grep -vxF "$decl"; }')"
+expect_eq "S18.1 …through status --porcelain (case C) reads 2" "yes 2" \
+  "$(s18_second C 'recon2() { local row="$1" decl; decl="${row##*"files="}"; git status --porcelain | cut -c4- | grep -vxF "$decl"; }')"
+# The same copy with a file that only WRITES the key stays at 1.
+expect_eq "S18.1 …while a file that lists changed paths and only writes the key reads 1" "yes 1" \
+  "$(s18_second W 'recon2() { git diff --name-only "$1..HEAD" | while read -r f; do printf "files=%s\n" "$f"; done; }')"
 
 # --- §S18.2 the row -> worktree mapping has ONE definition (worktree.sh's `worktree_for_row`,
 # payload/scripts/lib/worktree.sh's own docblock: "a second spelling of it there is a second
