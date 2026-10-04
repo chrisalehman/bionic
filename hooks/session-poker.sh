@@ -4532,8 +4532,8 @@ EOF
     ;;
 
   # THE ROW-ADD VERB (wave-20 REQ-5, AC-5.3; Δ5, research D1 §3). A schedule change is a
-  # TRANSACTION: `units_add_row` projects the row onto a COPY of the bound plan (the row, its
-  # `- <id>:` line, and a Step-4 id threaded into the frontier rows that owe it), the copy is
+  # TRANSACTION: `units_add_row` projects the row onto a COPY of the bound plan (the row and its
+  # `- <id>:` line, and no other row), the copy is
   # judged twice — by `units_validate`, and by a dry `git commit` through the REAL
   # hooks/bash-walls.sh — and only a copy both admit is moved over the plan. On any refusal
   # the plan is byte-identical and the words that refused it print. The precedent is
@@ -4612,7 +4612,7 @@ EOF
     fi
 
     plan_verb_swap task-add "$TA_ID added" writer
-    say "task-add — $TA_ID added to $TA_PLAN: the row, its - $TA_ID: line, and the deps it owes; validated and dry-committed first."
+    say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
     exit 0
     ;;
 
