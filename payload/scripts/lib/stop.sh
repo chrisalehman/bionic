@@ -1561,7 +1561,7 @@ stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local -a _FF_IDS
   local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
   local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
-  local _LS_OUT LAUNCH_REASON=""
+  local _LS_OUT _LS_RC LAUNCH_REASON=""
   local FACT FIX REASON
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
@@ -1657,11 +1657,21 @@ PLAN_NAME=""
 # the two places (the Patrol tick is the other). The same transaction runs here, on a bound open
 # run only. A launch it records is silent. One it cannot record refuses the turn once, joined to
 # the other duties below, with the words and the hand commands the verb printed. A lock another
-# writer holds is left to it and says nothing.
+# writer holds is left to it and says nothing. A RETRYABLE EXIT IS NOT A REFUSAL (wave-26 T51;
+# review 13 F6): 75 is another writer replacing the plan while the transaction judged its copy,
+# which the checksum is there to catch and the next caller repairs by running again. A turn end
+# is the wrong place to fail shut on that: the turn is not refused for it, the launch stays
+# unrecorded, and the next tick, which runs the same transaction before it reads the plan,
+# records it and owes its reconcile. Every other non-zero exit is a fault no retry repairs (a
+# launch the plan cannot take, the validator or the commit gate refusing the batch, a lock that
+# cannot be made, a dry commit that cannot run) and refuses the turn once, as before.
 if [ "$BIONIC_RUN_WORD" = bound-open ] && [ -n "$PLAN_NAME" ] && [ -f "${HOOK_DIR}/session-poker.sh" ]; then
   _LS_OUT="$( cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" \
-    bash "${HOOK_DIR}/session-poker.sh" launch-sync 2>&1 )" \
-    || LAUNCH_REASON="Launches not recorded in the plan: the launch-sync transaction could not record every launch this session made, and it said: ${_LS_OUT} Fix what it names or run the commands it prints, then stop again — this gate blocks once."
+    bash "${HOOK_DIR}/session-poker.sh" launch-sync 2>&1 )"; _LS_RC=$?
+  case "$_LS_RC" in
+    0|75) : ;;
+    *) LAUNCH_REASON="Launches not recorded in the plan: the launch-sync transaction could not record every launch this session made, and it said: ${_LS_OUT} Fix what it names or run the commands it prints, then stop again — this gate blocks once." ;;
+  esac
 fi
 
 # ---------- the plan's BASENAME ----------
@@ -2225,7 +2235,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
   _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""
   local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
-  local digest duty at led standing gap rcount rgap slot
+  local digest duty at rvat led standing gap rcount rgap slot
 
   [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
   [ "${BIONIC_ENGAGED:-0}" = 1 ] || return 1
@@ -2359,8 +2369,26 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     # digest: the wall reads no git, so on a tick's turn it hands the tick's head to the ready set
     # below, and a follow-up review the tick offered is a review the wall owes. Off a tick turn,
     # or with a stale digest, there is no head, and a live review waits here as before.
+    #
+    # A HEAD OLDER THAN THE NEWEST REVIEW PROOF IS NOT HANDED IN (wave-26 T51; review 13 F3, review 10
+    # (a)). The digest can be fresh for the turn and still older than a `proof-add review` made
+    # after the tick at a newer head (a landing, then the proof): handed in, the tick's head reads
+    # as a landing past that proof and the wall would owe a review of nothing. So the head goes in
+    # only when the digest's `at=` is not older than the newest review proof's `at=`; otherwise
+    # there is none, as off a tick's turn, and the review waits for the next tick. Both stamps are
+    # the wall's already: the digest it reads above and the plan it was handed. No git is read.
     if [ -n "$at" ] && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
       _ST_LIVE_HEAD="$(tick_digest_field "$digest" head)"
+      if [ -n "$_ST_LIVE_HEAD" ] && [ -n "$_ST_PLAN" ]; then
+        rvat="$(awk '
+          /^[ \t]*```/ { f = !f; next }
+          f { next }
+          /^##[ \t]/ { insdlc = ($0 ~ /^##[ \t]+SDLC State/); next }
+          insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {
+            a = substr($0, RSTART + 4, RLENGTH - 4); if (a > m) m = a }
+          END { print m }' "$_ST_PLAN" 2>/dev/null)"
+        [ -n "$rvat" ] && [ "${at:0:19}" \< "${rvat:0:19}" ] && _ST_LIVE_HEAD=""
+      fi
     fi
   fi
 

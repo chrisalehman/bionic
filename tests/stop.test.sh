@@ -1258,6 +1258,91 @@ STOP_OUT=$(env HOME="$LS_HOME" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SI
 expect_eq "LS2e: …once: the re-entered Stop passes" "" "$(sd_decision)"
 
 
+# A BOUND ON THE WALL, AND WHAT IT LEFT RUNNING (wave-26 T51; review 13 F1, F6). `ls_fire_bg`
+# starts the Stop hook in a process group of its own; `ls_fire_end` waits for it a fixed number
+# of times, then kills that group whole and reads 124. A transaction runs in the fixture's
+# project, so every bash process whose working directory is under it was started by the row.
+LS_BG=""; LS_BGDIR="$(mktemp -d)"
+ls_fire_bg() {  # <project> <transcript> -> LS_BG, the pid and process group of the Stop hook
+  local home payload
+  home=$(cd "$(mktemp -d)" && pwd -P)
+  payload=$(jq -nc --arg c "$1" --arg t "$2" --arg s "$SID" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}')
+  rm -f "$LS_BGDIR/rc" "$LS_BGDIR/out" "$LS_BGDIR/err"
+  LS_BG="$( set -m
+    ( env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" \
+        BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+        bash "$HOOK" <<< "$payload" > "$LS_BGDIR/out" 2> "$LS_BGDIR/err"
+      echo "$?" > "$LS_BGDIR/rc" ) </dev/null >/dev/null 2>&1 &
+    echo "$!" )"
+}
+ls_fire_end() {  # <seconds> -> STOP_OUT, STOP_ERR, STOP_RC; 124, the group killed, past the bound
+  local i=0 n=$(( $1 * 10 ))
+  while [ ! -s "$LS_BGDIR/rc" ] && [ "$i" -lt "$n" ]; do sleep 0.1; i=$((i + 1)); done
+  if [ -s "$LS_BGDIR/rc" ]; then STOP_RC="$(cat "$LS_BGDIR/rc")"; else kill -9 -- "-$LS_BG" 2>/dev/null; STOP_RC=124; fi
+  STOP_OUT="$(cat "$LS_BGDIR/out" 2>/dev/null)"; STOP_ERR="$(cat "$LS_BGDIR/err" 2>/dev/null)"
+}
+ls_procs() {  # <dir> -> the pids of bash processes whose working directory is <dir> or below it
+  local d
+  d="$(cd "$1" 2>/dev/null && pwd -P)" || return 0
+  lsof -a -c bash -d cwd -Fpn 2>/dev/null | awk -v d="$d" '
+    /^p/ { p = substr($0, 2); next }
+    /^n/ { n = substr($0, 2); if (n == d || index(n, d "/") == 1) print p }'
+}
+require_helpers ls_fire_bg ls_fire_end ls_procs
+command -v lsof >/dev/null 2>&1 || { echo "stop: lsof absent — the LS rows that find what they left running cannot read"; exit 1; }
+
+# LS3 (review 13 F1): the lock cannot be made — .bionic/tmp is not writable. Through T32 the
+# transaction looped without its bound and the turn end never returned.
+LS_E="$(ls_world)"
+ls_launch "$LS_E" w1-T3 01-T3
+( cd "$LS_E" && while :; do sleep 1; done ) & LS_PLANT=$!
+sleep 0.5
+expect_contains "LS3 precondition: a process the row starts in the project is found by its working directory" \
+  " $LS_PLANT " " $(ls_procs "$LS_E" | tr '\n' ' ')"
+kill "$LS_PLANT" 2>/dev/null; wait "$LS_PLANT" 2>/dev/null
+sd_turn "$LS_TX" u-ls-3 "fill-declined: T4 waits on the T3 merge"
+chmod a-w "$LS_E/.bionic/tmp"
+ls_fire_bg "$LS_E" "$LS_TX"; ls_fire_end 20
+chmod u+w "$LS_E/.bionic/tmp"
+expect_ne "LS3: §F1 the turn end returns when the launch lock cannot be made (rc $STOP_RC; 124 is the bound)" "124" "$STOP_RC"
+expect_eq "LS3b: …and leaves nothing running" "" "$(ls_procs "$LS_E")"
+expect_contains "LS3c: …and names the lock it could not make" "cannot be made" "$(reason_of)"
+sd_turn "$LS_TX" u-ls-3b "fill-declined: T4 waits on the T3 merge"
+s7_fire "$LS_E" "$LS_TX"
+expect_contains "LS3d: …and once it can, the next turn end records the launch" \
+  "| w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | 01234567 | active |" "$(cat "$(ls_plan "$LS_E")")"
+
+# LS4 (review 13 F6): another writer replaces the plan while the transaction judges its copy. That
+# is a retryable refusal (exit 75): the turn end is not refused for it, and the next caller
+# applies the launch. A refusal no retry repairs (LS4d) still refuses it, on the same extractor.
+LS_R="$(ls_world)"
+ls_launch "$LS_R" w1-T3 01-T3
+sd_turn "$LS_TX" u-ls-4 "fill-declined: T4 waits on the T3 merge"
+ls_fire_bg "$LS_R" "$LS_TX"
+LS_SEEN=""; LS_END=$(( $(date +%s) + 30 ))
+while [ -z "$LS_SEEN" ] && [ "$(date +%s)" -lt "$LS_END" ] && [ ! -s "$LS_BGDIR/rc" ]; do
+  for LS_F in "$(ls_plan "$LS_R")".launch-sync.*; do [ -e "$LS_F" ] && LS_SEEN="$LS_F"; done
+  [ -n "$LS_SEEN" ] || sleep 0.02
+done
+printf '\n<!-- another writer -->\n' >> "$(ls_plan "$LS_R")"
+ls_fire_end 30
+expect_nonempty "LS4 precondition: the other writer landed while the judged copy existed" "$LS_SEEN"
+expect_contains "LS4 precondition: …so the transaction wrote nothing: T3 still pending" "| c.sh | — | — | pending |" \
+  "$(grep '^| T3 |' "$(ls_plan "$LS_R")")"
+expect_absent "LS4: §F6 a plan replaced under the transaction does not refuse the turn" \
+  "Launches not recorded" "$(reason_of)$STOP_ERR"
+sd_turn "$LS_TX" u-ls-4b "fill-declined: T4 waits on the T3 merge"
+s7_fire "$LS_R" "$LS_TX"
+expect_contains "LS4b: …and the next turn end records the launch" \
+  "| w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | 01234567 | active |" "$(cat "$(ls_plan "$LS_R")")"
+expect_contains "LS4c: …keeping the other writer's change" "<!-- another writer -->" "$(cat "$(ls_plan "$LS_R")")"
+ls_launch "$LS_R" w1-T4
+sd_turn "$LS_TX" u-ls-4d
+s7_fire "$LS_R" "$LS_TX"
+expect_contains "LS4d: …while a launch the plan cannot record still refuses the turn" "Launches not recorded" "$(reason_of)"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 section "LH: on a tick's turn the wall judges live:head against the tick's head (wave-26 T32; A-T14.2)"
 
@@ -1288,9 +1373,9 @@ lh_fixture() {  # -> project dir; T1 landed (writes lib/a.sh), T2 a review prove
     > "$d/.bionic/tmp/roster-$SID.state"
   printf '%s' "$d"
 }
-lh_digest() {  # <project> <head> -> the tick digest, as the tick writes it, after the turn's marker
+lh_digest() {  # <project> <head> [at] -> the tick digest, as the tick writes it, after the turn's marker (at: now)
   printf 'patrol-digest/v1\nprompt_version=5\ndigest=1-1\nsince=2026-10-04T00:00:00Z\ndecision=FILL\nduty=none\nat=%s\nhead=%s\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" > "$1/.bionic/tmp/tick-digest-$SID.state"
+    "${3:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$2" > "$1/.bionic/tmp/tick-digest-$SID.state"
 }
 require_helpers lh_fixture lh_digest
 LH_D="$(lh_fixture)"
@@ -1316,6 +1401,28 @@ expect_contains "LH3 precondition: the plan now carries a later review proof at 
   "$(grep '^proved: kind=review' "$LH_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md")"
 s7_fire "$LH_D" "$LH_TX"
 expect_absent "LH3: a proof at the digest's head, added after the tick, leaves nothing for the wall to owe" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+
+# LH4 (review 13 F3; review 10 (a)'s guard): the tick wrote head=B, then a landing moved the head
+# to C and `proof-add review` recorded a proof at C, after the tick. The digest is still fresh for
+# the turn, but its head is older than the newest proof: handed in, B against C reads as a
+# landing past the proof and the wall owes a review of nothing. The wall hands the digest's head
+# in only when its `at=` is not older than the newest review proof's `at=`. The control is the
+# same plan with the proof at C made before the tick: then B is the tick's head past the proof.
+LH_C="cccccccccccccccccccccccccccccccccccccccc"
+LH_P="$LH_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+sed -i.bak "s/^\(proved: kind=review head=$LH_B at=2026-10-04T00:10:00Z evidence=record\/r2.txt\)\$/\1\\
+proved: kind=review head=$LH_C at=2026-10-04T00:30:00Z evidence=record\/r3.txt/" "$LH_P"
+expect_contains "LH4 precondition: the newest review proof is at C" "head=$LH_C at=2026-10-04T00:30:00Z" \
+  "$(grep '^proved: kind=review' "$LH_P" | tail -1)"
+lh_digest "$LH_D" "$LH_B" 2026-10-04T01:00:00Z
+s7_fire "$LH_D" "$LH_TX"
+expect_contains "LH4 control: a tick after the proof at C, at head B, owes the review" "Fillable gap at turn end" "$(reason_of)"
+sed -i.bak "s/head=$LH_C at=2026-10-04T00:30:00Z/head=$LH_C at=2026-10-04T02:00:00Z/" "$LH_P"
+expect_contains "LH4 precondition: the proof at C is now newer than the tick" "head=$LH_C at=2026-10-04T02:00:00Z" \
+  "$(grep '^proved: kind=review' "$LH_P" | tail -1)"
+s7_fire "$LH_D" "$LH_TX"
+expect_absent "LH4: §F3 a proof newer than the tick's digest leaves its head out: no review of nothing" \
   "Fillable gap" "$(reason_of)$STOP_ERR"
 
 finish

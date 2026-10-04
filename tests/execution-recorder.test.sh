@@ -2257,7 +2257,42 @@ act_confirmed() {  # <repo> <name> -> a confirmed roster row, as the recorder wr
 act_has() {  # <repo> <fixed text> -> 0 when the plan carries it
   grep -qF -- "$2" "$(act_plan "$1")"
 }
-require_helpers act_sync act_until act_confirmed act_has
+# WHAT A ROW STARTED, AND A BOUND ON IT (wave-26 T51; review 13 F1, F8). A transaction runs in
+# the fixture's repo, so every bash process whose working directory is under it was started by
+# the row that built it: that is how a row finds what it left running, without naming a process
+# by its command text (another suite's transaction has the same text). `act_bg` starts
+# launch-sync in a process group of its own, and `act_bg_end` waits for it a fixed number of
+# times and then kills that group whole, so a row whose subject hangs fails in seconds and leaves
+# nothing behind.
+act_procs() {  # <dir> -> the pids of bash processes whose working directory is <dir> or below it
+  local d
+  d="$(cd "$1" 2>/dev/null && pwd -P)" || return 0
+  lsof -a -c bash -d cwd -Fpn 2>/dev/null | awk -v d="$d" '
+    /^p/ { p = substr($0, 2); next }
+    /^n/ { n = substr($0, 2); if (n == d || index(n, d "/") == 1) print p }'
+}
+ACT_BG=""
+act_bg() {  # <repo> [--wait] -> ACT_BG, the pid and process group of launch-sync started apart
+  rm -f "$SANDBOX/act-bg.rc" "$SANDBOX/act-bg.out"
+  ACT_BG="$( set -m
+    ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$ACT_POKER" launch-sync ${2:+"$2"} \
+        > "$SANDBOX/act-bg.out" 2>&1
+      echo "$?" > "$SANDBOX/act-bg.rc" ) </dev/null >/dev/null 2>&1 &
+    echo "$!" )"
+}
+act_bg_end() {  # <seconds> -> SYNC_RC and SYNC_OUT; 124, its whole group killed, when it outran the bound
+  local i=0 n=$(( $1 * 10 ))
+  while [ ! -s "$SANDBOX/act-bg.rc" ] && [ "$i" -lt "$n" ]; do sleep 0.1; i=$((i + 1)); done
+  if [ -s "$SANDBOX/act-bg.rc" ]; then
+    SYNC_RC="$(cat "$SANDBOX/act-bg.rc")"
+  else
+    kill -9 -- "-$ACT_BG" 2>/dev/null
+    SYNC_RC=124
+  fi
+  SYNC_OUT="$(cat "$SANDBOX/act-bg.out" 2>/dev/null)"
+}
+require_helpers act_sync act_until act_confirmed act_has act_procs act_bg act_bg_end
+command -v lsof >/dev/null 2>&1 || { echo "execution-recorder: lsof absent — the rows that find what they left running cannot read"; exit 1; }
 
 # ---------- 17b: a confirmed launch of w1-T3 leaves row T3 active with a ledger line (INLINE) ----------
 export BIONIC_LAUNCH_SYNC_INLINE=1
@@ -2431,16 +2466,34 @@ for ACT_ID in $ACT_K_IDS; do
   act_intended "$ACT_K" "w1-$ACT_ID" "toolu_01K$ACT_ID"
   act_workspace "$ACT_K" "w1-$ACT_ID" "01-$ACT_ID"
 done
-ACT_K_SLOW=0; ACT_K_ERR=""
+# THE EIGHT HOOKS RACE (wave-26 T51; review 13 F8). Through T32 this row fired them one after
+# another, so the recorder never raced itself here. They now start together, each in the
+# background, so their eight detached transactions queue on one lock at once. The row waits for
+# every hook with a bound, then for every launch, and then for every transaction the hooks
+# started: none outlives the row, and none is left to run after the sandbox is removed.
+ACT_K_PIDS=""; ACT_K_T0=$(date +%s)
 for ACT_ID in $ACT_K_IDS; do
-  ACT_T0=$(date +%s)
-  act_launch "$ACT_K" "w1-$ACT_ID" "a17k0000000$ACT_ID" "toolu_01K$ACT_ID"
-  ACT_T1=$(date +%s)
-  [ "$((ACT_T1 - ACT_T0))" -gt "$ACT_K_SLOW" ] && ACT_K_SLOW=$((ACT_T1 - ACT_T0))
-  ACT_K_ERR="$ACT_K_ERR$REC_ERR"
+  ( mk_agent_post "$SID_A" "$SANDBOX/act.jsonl" "$ACT_K" "w1-$ACT_ID" "a17k0000000$ACT_ID" "toolu_01K$ACT_ID" \
+      | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$REC" >/dev/null 2>"$SANDBOX/act-k-$ACT_ID.err"
+    echo "$?" > "$SANDBOX/act-k-$ACT_ID.rc" ) &
+  ACT_K_PIDS="$ACT_K_PIDS $!"
 done
-expect_true "17k §BATCH each of the eight hooks returns at once (slowest $ACT_K_SLOW s)" test "$ACT_K_SLOW" -lt 5
-expect_eq "17k2 …and says nothing" "" "$ACT_K_ERR"
+act_k_hooks() {  # -> 0 once every hook the batch started has returned
+  local p
+  for p in $ACT_K_PIDS; do kill -0 "$p" 2>/dev/null && return 1; done
+  return 0
+}
+act_until 30 act_k_hooks
+ACT_K_SLOW=$(( $(date +%s) - ACT_K_T0 ))
+ACT_K_HUNG=""
+for ACT_P in $ACT_K_PIDS; do
+  kill -0 "$ACT_P" 2>/dev/null && { ACT_K_HUNG="$ACT_K_HUNG $ACT_P"; kill -9 "$ACT_P" 2>/dev/null; }
+  wait "$ACT_P" 2>/dev/null
+done
+expect_eq "17k §BATCH the eight hooks, started together, all return ($ACT_K_SLOW s for the batch)" "" "$ACT_K_HUNG"
+expect_true "17k1 …at once" test "$ACT_K_SLOW" -lt 10
+expect_eq "17k2 …each exit 0" "0 0 0 0 0 0 0 0" "$(for ACT_ID in $ACT_K_IDS; do cat "$SANDBOX/act-k-$ACT_ID.rc" 2>/dev/null; done | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "17k2b …and says nothing" "" "$(for ACT_ID in $ACT_K_IDS; do cat "$SANDBOX/act-k-$ACT_ID.err" 2>/dev/null; done)"
 act_k_done() {
   local i
   for i in $ACT_K_IDS; do
@@ -2455,8 +2508,20 @@ for ACT_ID in $ACT_K_IDS; do
     "| w1-$ACT_ID | — | 30 | REQ-1 |" "$(act_row "$ACT_K" "$ACT_ID")"
   expect_contains "17k3b …$ACT_ID active" "| .worktrees/01-$ACT_ID | 01234567 | active |" "$(act_row "$ACT_K" "$ACT_ID")"
   expect_contains "17k4 …and its ledger line names the launch" "| implementor (w1-$ACT_ID) |" "$(act_ledger_row "$ACT_K" "$ACT_ID")"
+  expect_eq "17k4b …once" "1" "$(sed -n '/^## Dispatch ledger/,$p' "$(act_plan "$ACT_K")" | grep -cF "(w1-$ACT_ID) |")"
 done
-act_until 60 test ! -e "$ACT_K/.bionic/tmp/launch-sync.lock"
+# THE EXTRACTOR READS, on the same fixture: a process this row starts in the repo is found.
+( cd "$ACT_K" && while :; do sleep 1; done ) & ACT_K_PLANT=$!
+act_until 10 test -n "$(act_procs "$ACT_K")"
+expect_contains "17k8b precondition: a process the row starts in the repo is found by its working directory" \
+  " $ACT_K_PLANT " " $(act_procs "$ACT_K" | tr '\n' ' ')"
+kill "$ACT_K_PLANT" 2>/dev/null; wait "$ACT_K_PLANT" 2>/dev/null
+act_k_quiet() { [ -z "$(act_procs "$ACT_K")" ]; }
+act_until 90 act_k_quiet
+ACT_K_LEFT="$(act_procs "$ACT_K" | tr '\n' ' ' | sed 's/ $//')"
+[ -n "$ACT_K_LEFT" ] && kill -9 $ACT_K_LEFT 2>/dev/null
+expect_eq "17k9 §F8 no transaction the hooks started outlives the row" "" "$ACT_K_LEFT"
+expect_no_file "17k9b …and the lock is released" "$ACT_K/.bionic/tmp/launch-sync.lock"
 act_gate "$ACT_K"; expect_eq "17k5 …and the plan the batch wrote is admitted by the gate" "0" "$?"
 act_sync "$ACT_K" --wait
 expect_eq "17k6 …with nothing left to apply" "0:" "$SYNC_RC:$SYNC_OUT"
@@ -2568,5 +2633,172 @@ act_sync "$ACT_P"
 expect_contains "17p3 …while the next pass, its own launch, is applied" "poker: LAUNCHED T3 w1-T3-r1" "$SYNC_OUT"
 expect_contains "17p4 …with its own ledger line" "| T3r1 | implementor (w1-T3-r1) |" "$(act_ledger_row "$ACT_P" T3r1)"
 unset BIONIC_LAUNCH_SYNC_INLINE
+
+
+# ---------- 17q: a review row is judged against its own proof only (wave-26 T51; review 13 F2, F4, (b)) ----------
+# A launch older than a review proof is a pass already read, so a pending review row is not
+# re-activated by it (T32, A-T32.17). Since T46 a proof returns only the row whose Files hold its
+# evidence, so the proof a launch is judged against is the newest proof of ITS row. L (T6) is a
+# live review, F (T7) the final review, which reads the head. The orders are review 13 (b)'s,
+# each on a plan with and without a ## Dispatch ledger. A proof line is written as proof-add
+# writes it, and the row it returns is put back to pending as proof-add puts it.
+act_review_world() {  # <label> <ledger: yes|no> -> repo; T6 a live review, T7 the final review, both pending
+  local r p
+  r="$(act_world "$1" 4)"; p="$(act_plan "$r")"
+  awk '
+    /^- T5: / { print; print "- T6: live review"; print "- T7: final review"; next }
+    /^\| id \| step \|/ { print $0 " reads |"; next }
+    /^\|---\|---\|---\|---\|---\|---\|---\|---\|---\|---\|---\|---\|$/ { print $0 "---|"; next }
+    /^\| T[0-9]+ \| [0-9] \|/ {
+      if ($0 ~ /^\| T5 /) sub(/\| T1, T2, T3, T4 \|/, "| — |")
+      print $0 "  |"
+      if ($0 ~ /^\| T5 /) {
+        print "| T6 | 6 | review | follows the build | critic | — | 30 | REQ-1 | .bionic/docs/record/wave-01/L.md | — | — | pending |  |"
+        print "| T7 | 6 | review | the final review | critic | — | 30 | REQ-1 | .bionic/docs/record/wave-01/final.md | — | — | pending | head |"
+      }
+      next }
+    { print }' "$p" > "$p.x" && mv "$p.x" "$p"
+  [ "$2" = no ] && { awk '/^## Dispatch ledger/ { skip = 1 } !skip' "$p" > "$p.x" && mv "$p.x" "$p"; }
+  printf '%s' "$r"
+}
+act_proof() {  # <repo> <at> <evidence> -> a review proof line, where proof-add writes it
+  local p; p="$(act_plan "$1")"
+  awk -v line="proved: kind=review head=1111111111111111111111111111111111111111 at=$2 evidence=$3" '
+    { print } /^approved-by:/ && !d { print line; d = 1 }' "$p" > "$p.x" && mv "$p.x" "$p"
+}
+act_putback() {  # <repo> <row id> -> the row back to pending, its agent cleared, as proof-add returns it
+  local p; p="$(act_plan "$1")"
+  awk -v id="$2" -F'|' 'BEGIN { OFS = "|" } $2 == " " id " " { $6 = " — "; $13 = " pending " } { print }' "$p" > "$p.x" && mv "$p.x" "$p"
+}
+act_launch_at() {  # <repo> <name> <launched_at> -> a confirmed critic launch at that minute
+  roster_row_fixture status=confirmed session="$SID_A" name="$2" agent_id="a17$(printf '%s' "$2" | tr -dc 'A-Za-z0-9')0000" \
+    launched_at="$3" subagent_type=bionic:critic deliverable=.bionic/docs/record/wave-01/x.md duration='30 minutes' \
+    tool_use_id="toolu_c$2" >> "$1/.bionic/tmp/roster-${SID_A}.state"
+}
+act_cells() {  # <repo> <row id> -> `<agent>/<status>` of the row
+  act_row "$1" "$2" | awk -F'|' '{ gsub(/ /, "", $6); gsub(/ /, "", $13); print $6 "/" $13 }'
+}
+act_lines() {  # <repo> <name> -> how many ledger lines name the launch
+  sed -n '/^## Dispatch ledger/,$p' "$(act_plan "$1")" | grep -cF "($2) |"
+}
+require_helpers act_review_world act_proof act_putback act_launch_at act_cells act_lines
+export BIONIC_LAUNCH_SYNC_INLINE=1
+ACT_Q="$(act_review_world review-ctl yes)"
+act_gate "$ACT_Q"; expect_eq "17q precondition: the review fixture is admitted by the real commit gate" "0" "$?"
+for ACT_LED in yes no; do
+  # O2: L launched and not yet applied; then F's proof; then the sync. F's proof returns no live
+  # row, so it says nothing about L's launch: L goes active.
+  ACT_Q="$(act_review_world "o2-$ACT_LED" "$ACT_LED")"
+  act_launch_at "$ACT_Q" w1-T7 2026-10-04T09:50:00Z; act_sync "$ACT_Q"
+  act_launch_at "$ACT_Q" w1-T6 2026-10-04T10:00:00Z
+  act_proof "$ACT_Q" 2026-10-04T10:05:00Z record/wave-01/final.md
+  act_sync "$ACT_Q"
+  expect_contains "17q O2 ledger=$ACT_LED §F2 a final-review proof leaves the live review's launch to be applied" \
+    "poker: LAUNCHED T6 w1-T6" "$SYNC_OUT"
+  expect_eq "17q2 O2 ledger=$ACT_LED …row T6 active under it" "w1-T6/active" "$(act_cells "$ACT_Q" T6)"
+  [ "$ACT_LED" = yes ] && expect_eq "17q3 O2 …with one ledger line" "1" "$(act_lines "$ACT_Q" w1-T6)"
+  # O7: the same, with L's launch and F's proof in the same second.
+  ACT_Q="$(act_review_world "o7-$ACT_LED" "$ACT_LED")"
+  act_launch_at "$ACT_Q" w1-T6 2026-10-04T10:05:00Z
+  act_proof "$ACT_Q" 2026-10-04T10:05:00Z record/wave-01/final.md
+  act_sync "$ACT_Q"
+  expect_eq "17q4 O7 ledger=$ACT_LED a launch in the same second as another row's proof is applied" "w1-T6/active" "$(act_cells "$ACT_Q" T6)"
+  # O1: L applied, F applied, F's proof: L stays active.
+  ACT_Q="$(act_review_world "o1-$ACT_LED" "$ACT_LED")"
+  act_launch_at "$ACT_Q" w1-T6 2026-10-04T10:00:00Z; act_sync "$ACT_Q"
+  act_launch_at "$ACT_Q" w1-T7 2026-10-04T10:01:00Z; act_sync "$ACT_Q"
+  act_proof "$ACT_Q" 2026-10-04T10:05:00Z record/wave-01/final.md
+  act_sync "$ACT_Q"
+  expect_eq "17q5 O1 ledger=$ACT_LED the live review applied before F's proof stays active" "w1-T6/active" "$(act_cells "$ACT_Q" T6)"
+  # O3: L applied, then L's own proof returns T6 to pending while its reviewer is still open:
+  # the launch that proof read is not applied again.
+  ACT_Q="$(act_review_world "o3-$ACT_LED" "$ACT_LED")"
+  act_launch_at "$ACT_Q" w1-T6 2026-01-04T10:00:00Z; act_sync "$ACT_Q"
+  expect_eq "17q6 O3 ledger=$ACT_LED precondition: L applied" "w1-T6/active" "$(act_cells "$ACT_Q" T6)"
+  act_putback "$ACT_Q" T6
+  act_proof "$ACT_Q" 2026-01-04T10:20:00Z record/wave-01/L.md
+  cp "$(act_plan "$ACT_Q")" "$SANDBOX/act-q-before"
+  act_sync "$ACT_Q"
+  expect_eq "17q7 O3 ledger=$ACT_LED the launch L's own proof read is not applied again" "—/pending" "$(act_cells "$ACT_Q" T6)"
+  expect_true "17q8 O3 ledger=$ACT_LED …the plan byte-identical" cmp -s "$SANDBOX/act-q-before" "$(act_plan "$ACT_Q")"
+  # O5 (F4): `extend` re-opens the reviewer already read: a new roster row, launched now. It is
+  # the same launch, judged by its first minute, so it is not applied again.
+  ( cd "$ACT_Q" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$ACT_POKER" extend w1-T6 "a second look" ) >/dev/null 2>&1
+  expect_contains "17q9 O5 ledger=$ACT_LED precondition: extend appended a row for w1-T6" "extended=" \
+    "$(grep -F '|name=w1-T6|' "$ACT_Q/.bionic/tmp/roster-${SID_A}.state" | tail -1)"
+  act_sync "$ACT_Q"
+  expect_eq "17q10 O5 ledger=$ACT_LED §F4 an extended reviewer already read is not re-activated" "—/pending" "$(act_cells "$ACT_Q" T6)"
+  expect_true "17q11 O5 ledger=$ACT_LED …the plan byte-identical" cmp -s "$SANDBOX/act-q-before" "$(act_plan "$ACT_Q")"
+  # O4: the next pass, launched after the proof under its own name, is applied.
+  act_launch_at "$ACT_Q" w1-T6-r1 2026-01-04T10:30:00Z
+  act_sync "$ACT_Q"
+  expect_eq "17q12 O4 ledger=$ACT_LED the next pass, launched after the proof, is applied" "w1-T6-r1/active" "$(act_cells "$ACT_Q" T6)"
+done
+
+# ---------- 17s: a lock that cannot be made ends the wait at once (wave-26 T51; review 13 F1) ----------
+# The lock is a directory under .bionic/tmp. When that directory cannot be written, or is
+# removed while a call waits for the lock, mkdir fails with no lock there to take over: the
+# call returns at once, says so, and changes nothing. Through T32 the takeover arm looped
+# without its bound and the call never returned. Each run here is bounded and killed whole.
+unset BIONIC_LAUNCH_SYNC_INLINE
+ACT_S="$(act_world nolock 4)"
+act_confirmed "$ACT_S" w1-T3
+act_workspace "$ACT_S" w1-T3 01-T3
+cp "$(act_plan "$ACT_S")" "$SANDBOX/act-s-before"
+chmod a-w "$ACT_S/.bionic/tmp"
+act_bg "$ACT_S" --wait; act_bg_end 20
+chmod u+w "$ACT_S/.bionic/tmp"
+expect_ne "17s §F1 the waiting call returns when .bionic/tmp cannot be written (rc $SYNC_RC; 124 is the bound)" "124" "$SYNC_RC"
+expect_contains "17s2 …and says the lock cannot be made" "cannot be made" "$SYNC_OUT"
+expect_eq "17s3 …exit 1: a fault the next caller cannot repair by waiting" "1" "$SYNC_RC"
+expect_true "17s4 …and the plan is unchanged" cmp -s "$SANDBOX/act-s-before" "$(act_plan "$ACT_S")"
+expect_eq "17s5 …and nothing it started is left running" "" "$(act_procs "$ACT_S")"
+# A WAITER WHOSE LOCK DIRECTORY IS REMOVED: a live holder keeps the lock, the call waits, and the
+# whole .bionic/tmp goes (a sandbox removed under queued waiters).
+sleep 120 & ACT_S_HOLDER=$!
+mkdir -p "$ACT_S/.bionic/tmp/launch-sync.lock"; printf '%s' "$ACT_S_HOLDER" > "$ACT_S/.bionic/tmp/launch-sync.lock/pid"
+cp -R "$ACT_S/.bionic/tmp" "$SANDBOX/act-s-tmp"
+act_bg "$ACT_S" --wait
+sleep 1
+rm -rf "$ACT_S/.bionic/tmp"
+act_bg_end 20
+expect_ne "17s6 §F1 a waiting call whose lock directory is removed returns (rc $SYNC_RC; 124 is the bound)" "124" "$SYNC_RC"
+expect_eq "17s7 …and nothing it started is left running" "" "$(act_procs "$ACT_S")"
+kill "$ACT_S_HOLDER" 2>/dev/null; wait "$ACT_S_HOLDER" 2>/dev/null
+rm -rf "$SANDBOX/act-s-tmp/launch-sync.lock"; mv "$SANDBOX/act-s-tmp" "$ACT_S/.bionic/tmp"
+act_sync "$ACT_S" --wait
+expect_contains "17s8 …and once the directory can be written, the launch is applied" "poker: LAUNCHED T3 w1-T3" "$SYNC_OUT"
+
+# ---------- 17t: a plan replaced mid-transaction is a retryable refusal (wave-26 T51; review 13 F6) ----------
+# Another writer's rename between the transaction's checksum and its own is what the checksum
+# is there to catch: nothing is written, and the next caller applies the launch. It exits 75,
+# apart from a refusal the next caller cannot repair, so the turn-end wall can leave it to the
+# next tick (lib/stop.sh). The other writer lands while the transaction's judged copy exists.
+ACT_T="$(act_world race 4)"
+act_confirmed "$ACT_T" w1-T3
+act_workspace "$ACT_T" w1-T3 01-T3
+act_bg "$ACT_T"
+ACT_SEEN=""
+act_t_copy() {
+  local f
+  for f in "$(act_plan "$ACT_T")".launch-sync.*; do
+    [ -e "$f" ] && { ACT_SEEN="$f"; return 0; }
+  done
+  return 1
+}
+ACT_END=$(( $(date +%s) + 30 ))
+while [ -z "$ACT_SEEN" ] && [ "$(date +%s)" -lt "$ACT_END" ] && [ ! -s "$SANDBOX/act-bg.rc" ]; do
+  act_t_copy || sleep 0.02
+done
+printf '\n<!-- another writer -->\n' >> "$(act_plan "$ACT_T")"
+act_bg_end 30
+expect_nonempty "17t precondition: the other writer landed while the judged copy existed" "$ACT_SEEN"
+expect_eq "17t §F6 a plan replaced under the transaction exits 75, retryable" "75" "$SYNC_RC"
+expect_contains "17t2 …and says to run it again" "Run launch-sync again" "$SYNC_OUT"
+expect_contains "17t3 …the other writer's change is kept" "<!-- another writer -->" "$(cat "$(act_plan "$ACT_T")")"
+expect_contains "17t4 …and T3 is still pending" "| c.sh | — | — | pending |" "$(act_row "$ACT_T" T3)"
+act_sync "$ACT_T"
+expect_contains "17t5 …and the next caller applies the launch" "poker: LAUNCHED T3 w1-T3" "$SYNC_OUT"
+expect_eq "17t6 …and nothing it started is left running" "" "$(act_procs "$ACT_T")"
 
 finish
