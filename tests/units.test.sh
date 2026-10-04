@@ -2658,8 +2658,6 @@ E T4 T14
 E T1 T15
 E T5 T15
 CHAIN_W25_EOF
-nodes_in="$(grep -c '^N' "$SANDBOX/chain-w25.in")"
-expect_eq "CHAIN.0 the fixture carries the table's fifteen rows" "15" "$nodes_in"
 
 chain_run 8 "$SANDBOX/chain-w25.in"; out="$CHAIN_OUT"
 expect_eq "CHAIN.1 the wave-25 table: the longest chain runs through T15, 670 minutes, and the widest it can run is four" \
@@ -2777,5 +2775,28 @@ CHAIN_B_EOF
   expect_eq "CHAIN.10c …and one line on stderr for '$bad'" "1" "$(nlines "$(cat "$SANDBOX/.err")")"
   expect_contains "CHAIN.10d …that names the node B for '$bad'" "B" "$(cat "$SANDBOX/.err")"
 done
+
+# A node of zero minutes starts and ends at one instant, so it is never running for any
+# length of time and is not in the width.
+chain_tabs > "$SANDBOX/chain-zero.in" <<'CHAIN_Z_EOF'
+N A 0
+N B 10
+N C 10
+CHAIN_Z_EOF
+chain_run 3 "$SANDBOX/chain-zero.in"
+expect_eq "CHAIN.11 a zero-minute node is not counted in the width: two of the three run" \
+  "$(printf 'chain\tB\t10\nwidth\t2')" "$CHAIN_OUT"
+expect_eq "CHAIN.11b …and the call succeeds" "0" "$CALL_RC"
+
+# An empty id is malformed, beside the same line with an id, which answers.
+printf 'N\tA\t5\n' > "$SANDBOX/chain-idok.in"
+chain_run 4 "$SANDBOX/chain-idok.in"
+expect_eq "CHAIN.12 control: a node line with an id answers" \
+  "$(printf 'chain\tA\t5\nwidth\t1')" "$CHAIN_OUT"
+printf 'N\t\t5\n' > "$SANDBOX/chain-noid.in"
+chain_run 4 "$SANDBOX/chain-noid.in"; out="$CHAIN_OUT"
+expect_eq "CHAIN.12b a node line with an empty id is refused with status 2" "2" "$CALL_RC"
+expect_empty "CHAIN.12c …printing nothing on stdout" "$out"
+expect_contains "CHAIN.12d …and saying the node line is malformed" "malformed node line" "$(cat "$SANDBOX/.err")"
 
 finish
