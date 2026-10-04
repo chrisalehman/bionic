@@ -718,6 +718,22 @@ if [ "$SERIAL" -eq 0 ]; then
       sleep "$(_slots_poll)"
     done
   }
+  # HELD TRAVELS WITH ITS PLACE (wave-26 T8, booking review). The lending rule reads
+  # BIONIC_SLOT_PLACE to know which place is the caller's own; HELD without it makes a nested
+  # whole-machine take guess, and two runs that each reach their solo drain could then wait on
+  # each other until the maximum wait. So the solo launch names a place this hold covers: the
+  # one this run was booked into, when it was, or else the first place it holds itself.
+  _solo_place() {  # -> the place path to hand the solo suite as BIONIC_SLOT_PLACE
+    local f
+    if [ "${BIONIC_SLOT_HELD:-}" = 1 ] && [ -n "${BIONIC_SLOT_PLACE:-}" ] && [ -d "$BIONIC_SLOT_PLACE" ]; then
+      printf '%s' "$BIONIC_SLOT_PLACE"
+      return 0
+    fi
+    for f in "$(slots_dir)"/place.*; do
+      [ "$(_slots_pid_of "$f")" = "$$" ] && { printf '%s' "$f"; return 0; }
+    done
+    return 0
+  }
   _solo_run() {  # <label> — one solo suite; leaves <label>.void when every try was disturbed
     local label="$1" tries=0 why cores
     rm -f "$TMP/${label}.void"
@@ -740,7 +756,8 @@ if [ "$SERIAL" -eq 0 ]; then
         echo "tests/run.sh: void — ${label}: ${why}; it ran unbooked and is not retried" >&2
         return 0
       fi
-      BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1 bash "$SELF" --one "$label" </dev/null
+      BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1 BIONIC_SLOT_PLACE="$(_solo_place)" \
+        bash "$SELF" --one "$label" </dev/null
       resources_settled "$cores" || \
         why="the load rose to $(_res_load_now) during the run, above the settled line $(resources_settled_line "$cores")"
       slots_release "$$"
