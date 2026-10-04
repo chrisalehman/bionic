@@ -796,7 +796,7 @@ expect_eq "14e0: …and stderr is EXACTLY that one log line — no stray shell e
 # then rewrites `command` on the SAME object, so neither change overwrites the other.
 expect_eq "14e1: …one JSON document on stdout" "1" "$(json_docs)"
 expect_regex "14e2: …whose command is the booking wrap around the original" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "14e3: …beside the repaired timeout" "600000" "$(updated_timeout_of)"
 
@@ -817,7 +817,7 @@ expect_status "14g: a suite call already at the harness maximum is not refused" 
 expect_eq "14h: …its timeout is left as the caller set it — there is nothing to repair" \
   "600000" "$(updated_timeout_of)"
 expect_regex "14h2: …and the only rewrite is the booking wrap around the original command" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_empty "14i: …no repair logged either" "$ERR"
 
@@ -844,7 +844,7 @@ run_hook "$(mk_payload "$R_ADV" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600
 expect_status "14m1: an advisory main-thread suite call is allowed" 0 "$ST"
 expect_eq "14m2: …one JSON document on stdout" "1" "$(json_docs)"
 expect_regex "14m3: …carrying the booking wrap" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "14m4: …and no timeout repair on the main thread" "" "$(updated_timeout_of)"
 expect_nonempty "14m4: …(the reader works: the wrap's command is non-empty on the same object)" \
@@ -1187,7 +1187,7 @@ expect_status "15f: an on-budget suite is still allowed" 0 "$ST"
 # carries: no nudge, no refusal, and nothing on stderr.
 expect_empty "15f2: …stderr stays empty" "$ERR"
 expect_regex "15f3: …and stdout is the booking wrap alone" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? -- 'bash tests/archive\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites archive\\.test\\.sh -- 'bash tests/archive\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "15f4: …with no other channel beside it" '["hookEventName","updatedInput"]' \
   "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
