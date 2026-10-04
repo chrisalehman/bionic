@@ -139,7 +139,12 @@ bionic_check_wall_carrier() {  # -> the hook basename that carries the wall func
   printf '%s' "$c"
 }
 
-BIONIC_WALL_HOOKS="$(bionic_check_wall_roster)"
+# THE SIXTH ENTRY IS A STANDALONE HOOK (epic-23 wave-25-never-paused, REQ-7, AC-7.3): the
+# PermissionRequest carrier is not a wall function and declares nothing in walls.sh, so its name
+# is appended here. `bionic_check_wall_file` already resolves an undeclared name to
+# hooks/<name>.sh and `bionic_check_wall_want` reads that hook's own BIONIC_LIB_WANT line, so a
+# broken loader in it is a row like any wall's. Without this the doctor could not see it.
+BIONIC_WALL_HOOKS="$(bionic_check_wall_roster) permission-answer"
 
 bionic_check_payload_root() { plugin_root; }
 
