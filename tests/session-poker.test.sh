@@ -9427,4 +9427,35 @@ s54_tick
 expect_contains "54e3 …until a full run on the merge is recorded" "poker: FILL T3" "$OUT"
 POKE_BOUND="$S54_BOUND_WAS"
 
+
+# ============================================================
+section "AMEND-ROOT: amend reads a Files: entry with the dispatch wall's one reader (wave-27 T29; REQ-12 AC-12.3, D21)"
+# ============================================================
+#
+# THE DEFECT, from a real run: the stop wall printed `amend <name> --files+ 'CONTEXT.md'` and
+# amend REFUSED it as a change of nothing, because the grammar read a Files: entry as a path
+# only when it carried a `/`. amend now reads each addition with the one reader in brief.sh,
+# the dispatch wall's own: a path carries a `/`, or an extension, or names a file at the root.
+RAR="$(make_repo amend-root)"; new_roster "$RAR"; s30_row "$RAR"
+poke "$RAR" amend w1 --files+ 'CONTEXT.md' --reason 'the fix touches the root file'
+expect_eq "AMEND-ROOT AC-12.3 amend --files+ 'CONTEXT.md' succeeds" "0" "$RC"
+expect_eq "AMEND-ROOT …and files= holds the root file as written" "hooks/a.sh,CONTEXT.md" \
+  "$(s30_field "$(s30_last "$RAR")" files)"
+# A bare name with no extension is a path when the file exists at the root.
+echo x > "$RAR/Widgetfile"
+poke "$RAR" amend w1 --files+ Widgetfile --reason 'and the root build file'
+expect_eq "AMEND-ROOT2 a bare name that exists at the root is accepted" "0" "$RC"
+expect_eq "AMEND-ROOT2 …and stored as written" "hooks/a.sh,CONTEXT.md,Widgetfile" \
+  "$(s30_field "$(s30_last "$RAR")" files)"
+# Any other entry refuses, naming the spelling that is accepted, and writes nothing.
+RAR_SUM="$(cksum < "$(roster_of "$RAR")")"
+poke "$RAR" amend w1 --files+ Otherfile --reason 'a name with no file behind it'
+expect_eq "AMEND-ROOT3 an entry that is not read as a path is REFUSED (exit 1)" "1" "$RC"
+expect_contains "AMEND-ROOT3 …naming the entry and the accepted spelling" "./Otherfile" "$OUT"
+expect_eq "AMEND-ROOT3 …and writes nothing" "$RAR_SUM" "$(cksum < "$(roster_of "$RAR")")"
+poke "$RAR" amend w1 --files+ ./Otherfile --reason 'the spelling it named'
+expect_eq "AMEND-ROOT4 the spelling the refusal names is accepted" "0" "$RC"
+expect_eq "AMEND-ROOT4 …and recorded" "hooks/a.sh,CONTEXT.md,Widgetfile,./Otherfile" \
+  "$(s30_field "$(s30_last "$RAR")" files)"
+
 finish
