@@ -13826,4 +13826,114 @@ expect_ne "MEMROOT mutation: …and on the brace spelling the agreement pin goes
   "$(mr_bw "$PARTY_EG" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')" \
   "$(mr_gs "$MR_MUT_HOOKS/canonical-sdlc-governing-skill.sh" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')"
 
+section "PRF — the proof line: one writer, every reader gives its kind, head and time back (wave-26 T56; final review S3 row 4)"
+# THE ROW THE OWNERSHIP TABLE NAMED AND NOBODY WROTE. A proof line is written by one writer,
+# proof.sh `proof_line` placed by `proof_add_line` (what `session-poker.sh proof-add` runs), and
+# read by four readers: `proof_last` / `proof_last_line` (proof.sh), the readiness program's
+# `proof_fields` (units.sh, seen here through `units_live_range`, which prints the last review
+# proof's head), and two inline `at=` readers, the turn-end wall's (payload/scripts/lib/stop.sh)
+# and the launch sync's (hooks/session-poker.sh). The last two are awk programs inside larger
+# functions, so they are run here as the files carry them: each is cut out of its file by its
+# own text (the needle below, anchored once in each), never by a line number.
+#
+# The fixture is written ONLY through the writer, then doctored around: two review proofs, then
+# a floor proof with the NEWEST time, so a reader blind to the kind answers the floor's time; a
+# fenced proof line and one under another heading, each newer still, so a reader blind to the
+# fence or the section answers theirs. Every reader must answer the last review line the writer
+# wrote: kind review, its head, its time.
+PRF_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+PRF_STOP="$PRF_LIB/stop.sh"
+PRF_POKER="$BIONIC_HOOKS_DIR/session-poker.sh"
+PRF_NEEDLE='insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {'
+PRF_D="$SANDBOX/fx/prf"; mkdir -p "$PRF_D"
+PRF_PLAN="$PRF_D/plan.md"
+PRF_A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+PRF_B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+PRF_C=cccccccccccccccccccccccccccccccccccccccc
+PRF_LIVE=dddddddddddddddddddddddddddddddddddddddd
+# prf_cut <file> — the single-quoted awk program whose text holds PRF_NEEDLE: from the `awk '`
+# that opens it to the `' "$` that closes it. Nothing when either end is missing.
+prf_cut() {
+  PRF_N="$PRF_NEEDLE" awk -v q="'" '
+    BEGIN { n = ENVIRON["PRF_N"] }
+    { line[NR] = $0 }
+    index($0, n) && !hit { hit = NR }
+    END {
+      if (!hit) exit 1
+      for (s = hit; s > 0 && !index(line[s], "awk " q); s--) ;
+      for (e = hit; e <= NR && !index(line[e], q " \"$"); e++) ;
+      if (s < 1 || e > NR || s == e) exit 1
+      t = line[s]; print substr(t, index(t, "awk " q) + 5)
+      for (i = s + 1; i < e; i++) print line[i]
+      t = line[e]; print substr(t, 1, index(t, q " \"$") - 1)
+    }' "$1"
+}
+# prf_at <file> — that program run over the fixture; the first field of its first line is the
+# time it answers (stop.sh prints the newest `at=`; the launch sync prints `at<TAB>evidence`,
+# newest first, after its own `sort -r`).
+prf_at() {
+  local p; p="$(prf_cut "$1")" || return 0
+  [ -n "$p" ] || return 0
+  awk "$p" "$PRF_PLAN" 2>/dev/null | sort -r | head -n 1 | cut -f1
+}
+# THE WRITER, and nothing else, puts the proof lines in. The plan carries a units table so the
+# readiness program has rows to run over (units_live_range prints nothing on an empty table).
+{
+  printf -- '---\nworking-branch: wave/prf\n---\n# prf fixture\n\n## SDLC State\n\ncurrent: 4\n'
+  printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | landed work | implementor | — | 30 | REQ-x | lib/a.sh |  | landed |\n'
+  printf '| T3 | 6 | review | follows the build | critic | — | 30 | REQ-x | .bionic/docs/record/w/review.md |  | pending |\n'
+} > "$PRF_PLAN"
+(
+  # shellcheck source=/dev/null
+  . "$PRF_LIB/proof.sh" || exit 1
+  for _l in "$(proof_line review "$PRF_A" 2026-10-04T10:00:00Z record/w/r1.md)" \
+            "$(proof_line review "$PRF_B" 2026-10-04T11:00:00Z record/w/r2.md)" \
+            "$(proof_line floor "$PRF_C" 2026-10-04T12:00:00Z record/w/floor.txt)"; do
+    proof_add_line "$PRF_PLAN" "$_l" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN" || exit 1
+  done
+)
+expect_eq "PRF fixture: the writer placed three proof lines inside ## SDLC State" "3" \
+  "$(awk '/^## /{s=($0 ~ /SDLC State/)} s && /^proved: /' "$PRF_PLAN" | grep -c .)"
+# The decoys, each newer than every real line: a fenced proof inside the section, and one under
+# another heading. No reader may answer either.
+awk '{ print } /^current: 4$/ { print "```"; print "proved: kind=review head=" h " at=2026-10-04T13:00:00Z evidence=record/w/fenced.md"; print "```" }' \
+  h="$PRF_C" "$PRF_PLAN" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN"
+printf '\n## Notes\n\nproved: kind=review head=%s at=2026-10-04T14:00:00Z evidence=record/w/elsewhere.md\n' "$PRF_C" >> "$PRF_PLAN"
+expect_eq "PRF fixture: the two decoys are in (one fenced, one under ## Notes)" "2" \
+  "$(grep -c 'evidence=record/w/\(fenced\|elsewhere\)\.md' "$PRF_PLAN")"
+PRF_LINE="$(. "$PRF_LIB/proof.sh" && proof_last_line "$PRF_PLAN" review)"
+expect_eq "PRF proof_last_line: the last review line, as the writer wrote it" \
+  "proved: kind=review head=$PRF_B at=2026-10-04T11:00:00Z evidence=record/w/r2.md" "$PRF_LINE"
+expect_eq "PRF proof_last (review): its head" "$PRF_B" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review)"
+expect_eq "PRF proof_last (floor): the floor line is a different kind, with its own head" "$PRF_C" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" floor)"
+expect_eq "PRF units.sh (proof_fields, through units_live_range): the same review head" "${PRF_B}..${PRF_LIVE}" \
+  "$(. "$PRF_LIB/units.sh" && UNITS_LIVE_HEAD="$PRF_LIVE" units_live_range "$PRF_PLAN")"
+anchor "$PRF_STOP" "$PRF_NEEDLE" 1
+anchor "$PRF_POKER" "$PRF_NEEDLE" 1
+expect_nonempty "PRF the turn-end wall's at= reader is cut out of stop.sh by its text" "$(prf_cut "$PRF_STOP")"
+expect_nonempty "PRF the launch sync's at= reader is cut out of session-poker.sh by its text" "$(prf_cut "$PRF_POKER")"
+PRF_AT="${PRF_LINE##* at=}"; PRF_AT="${PRF_AT%% *}"
+expect_eq "PRF stop.sh's at= reader: the time of the same review line" "$PRF_AT" "$(prf_at "$PRF_STOP")"
+expect_eq "PRF session-poker.sh's at= reader: the time of the same review line" "$PRF_AT" "$(prf_at "$PRF_POKER")"
+# THE DOCTORED SITE. A copy of stop.sh whose reader has lost its kind test (the drift a review
+# reader most plausibly takes: "any proof's time") must answer the floor's time, and so turn the
+# agreement above red. The copy still yields a program, so the difference is the reader's.
+PRF_MUT="$PRF_D/stop.sh.mut"
+PRF_MUT_TEXT='insdlc && /^proved:[ \t]/ && match($0, / at=[^ ]+/) {'
+PRF_N="$PRF_NEEDLE" PRF_R="$PRF_MUT_TEXT" awk '
+  BEGIN { n = ENVIRON["PRF_N"]; r = ENVIRON["PRF_R"] }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$PRF_STOP" > "$PRF_MUT"
+expect_eq "PRF mutation: the doctored copy lost exactly the kind test" "0 1" \
+  "$(grep -cF -- "$PRF_NEEDLE" "$PRF_MUT") $(grep -cF -- "$PRF_MUT_TEXT" "$PRF_MUT")"
+PRF_NEEDLE_SAVED="$PRF_NEEDLE"; PRF_NEEDLE="$PRF_MUT_TEXT"
+expect_nonempty "PRF mutation: …and still yields a reader that runs" "$(prf_at "$PRF_MUT")"
+expect_ne "PRF mutation: …which answers another line's time, so the agreement row goes red" \
+  "$PRF_AT" "$(prf_at "$PRF_MUT")"
+PRF_NEEDLE="$PRF_NEEDLE_SAVED"
+
 finish

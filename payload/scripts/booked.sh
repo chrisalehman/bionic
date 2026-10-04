@@ -3,6 +3,7 @@
 # release (epic-23 wave-26-never-idle, D8, D14; REQ-6 AC-6.3, AC-6.4, REQ-4 AC-4.1).
 #
 #   bash <plugin-root>/scripts/booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>]
+#                                        [--stamp-dir <dir>]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -43,6 +44,14 @@
 # the one line `?? .bionic` when the tree's `.bionic` is a symlink (spawn-worktree's link). In a linked worktree the git dir is the tree's own
 # (`.git/worktrees/<name>`), so a stamp never lands in another checkout. Outside a git
 # tree, or in one with no commit, there is no stamp and no error. worktree_land reads it.
+#
+# --stamp-dir <dir>: THE TREE THE SUITE RUNS IN, WHEN THAT IS NOT WHERE THE SHIM STANDS (wave-26
+# T56, final review B1). The wall wraps the WHOLE command, so `cd <tree> || exit 1; bash tests/x`
+# typed from the main checkout starts the shim in the main checkout; the wall reads the leading
+# literal `cd` and passes where it leads. Head and dirty are then read in <dir> (relative to the
+# shim's own directory) and the stamp goes to <dir>'s git dir; the command itself still runs where
+# the shim stands, and its own `cd` moves it. A <dir> that does not exist or is in no work tree
+# is "outside a git tree": no stamp, no error, never a stamp in the shim's own tree instead.
 #
 # NESTING. When `BIONIC_SLOT_HELD=1` is already set the command is inside a place, so it
 # books nothing and runs (a nested run must never wait on its own parent). Otherwise the
@@ -129,11 +138,11 @@ BOOKED_KILLED_RC=124
 BOOKED_RETRIES=2
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] -- <command>\n' >&2
   exit 2
 }
 
-kill_after=""; quiet=0; sep=0; run_shell=""
+kill_after=""; quiet=0; sep=0; run_shell=""; stamp_dir=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --kill-after)   [ "$#" -ge 2 ] || booked_usage; kill_after="$2"; shift 2 ;;
@@ -141,6 +150,8 @@ while [ "$#" -gt 0 ]; do
     --quiet)        quiet=1; shift ;;
     --shell)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; run_shell="$2"; shift 2 ;;
     --shell=*)      run_shell="${1#--shell=}"; [ -n "$run_shell" ] || booked_usage; shift ;;
+    --stamp-dir)    [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; stamp_dir="$2"; shift 2 ;;
+    --stamp-dir=*)  stamp_dir="${1#--stamp-dir=}"; [ -n "$stamp_dir" ] || booked_usage; shift ;;
     --)             sep=1; shift; break ;;
     *)              booked_usage ;;
   esac
@@ -159,17 +170,20 @@ cmd="$*"
 
 # ── the stamp, read before anything runs ─────────────────────────────────────
 stamp_file=""; stamp_head=""; stamp_dirty=""
-if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] &&
-   stamp_head="$(git rev-parse --verify -q HEAD 2>/dev/null)" && [ -n "$stamp_head" ]; then
-  stamp_file="$(git rev-parse --absolute-git-dir 2>/dev/null)/bionic-stamps"
+# Every read goes to --stamp-dir when one is given (`git -C`, no subshell, no extra fork).
+stamp_git=(git)
+[ -z "$stamp_dir" ] || stamp_git=(git -C "$stamp_dir")
+if [ "$("${stamp_git[@]}" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] &&
+   stamp_head="$("${stamp_git[@]}" rev-parse --verify -q HEAD 2>/dev/null)" && [ -n "$stamp_head" ]; then
+  stamp_file="$("${stamp_git[@]}" rev-parse --absolute-git-dir 2>/dev/null)/bionic-stamps"
   # The tree's own `.bionic` link (spawn-worktree plants it) is not a change to the tree,
   # but git lists it as `?? .bionic` unless the project ignores `.bionic` without a slash.
   # Exactly that one line is skipped, and only when the link is there; nothing else is.
-  stamp_top="$(git rev-parse --show-toplevel 2>/dev/null)"
+  stamp_top="$("${stamp_git[@]}" rev-parse --show-toplevel 2>/dev/null)"
   if [ -n "$stamp_top" ] && [ -L "$stamp_top/.bionic" ]; then
-    stamp_dirty="$(git status --porcelain 2>/dev/null | grep -cvxF -- '?? .bionic')"
+    stamp_dirty="$("${stamp_git[@]}" status --porcelain 2>/dev/null | grep -cvxF -- '?? .bionic')"
   else
-    stamp_dirty="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+    stamp_dirty="$("${stamp_git[@]}" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
   fi
   case "$stamp_dirty" in ''|*[!0-9]*) stamp_dirty=0 ;; esac
 fi

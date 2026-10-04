@@ -95,6 +95,7 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `refuse exit2 dispatch "the environment check ran and did not pass" "fix what the probe named" \` — probe ran and failed — fix: `${PREFLIGHT_CMD}` once the named failure is fixed
 - `dp_finding "$fact" "$fix" "${reasons}` — Patrol stamp forwarder — fix: `bash <hooks>/session-poker.sh arm` or the CronCreate steps, from the arm that called it
 - `dp_finding "the Patrol fires but never ticks" "run the tick; replace the job" \` — Patrol fires but never ticks — fix: `bash ${POKER_SCRIPT} tick`, then the job replaced
+- `dp_finding "the approval reader lib/fill.sh cannot be loaded" "reinstall the plugin" \` — plan approval unreadable (wave-26 T56, final review N2) — fix: `claude plugin install bionic@bionic`, named in the detail
 - `dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \` — unapproved plan — none: approval is the user's literal word, which no command supplies
 - `dp_finding "this session is bound to no run" "bind it, or write its plan" \` — session bound to no run — none: the run to bind is the reader's choice among open runs; `session-poker.sh bind <plan>` needs that plan
 - `dp_finding "row ${DP_AW_ID} waits for approval:${DP_AW_NAME}" \` — row reads an approval nobody gave — none: the approval is the user's reply, which no command supplies; once given, `session-poker.sh approve <name> '<reply>'` records it
