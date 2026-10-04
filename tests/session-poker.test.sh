@@ -8384,6 +8384,43 @@ s42_unchanged "47t no reply at all" 2 "$P47A"
 POKE_BOUND="$S47_BOUND_WAS"
 
 # ============================================================
+section "Section 47 §WAITING-READY: WAITING says nothing is ready only when nothing is (wave-26 T13; review-6 F3; D9, D16)"
+# ============================================================
+#
+# A QUIET tick with a row running printed `WAITING — <n> running, nothing ready` whatever the
+# ready set held, so a full writer budget or a standing fill-declined read as "nothing ready"
+# while a row was ready. Each such row now has its WAIT line saying why, and WAITING prints only
+# when the untrimmed ready set is empty. Three worlds over one table shape, writers=1 and one
+# writer running: a ready row the budget cannot take, a ready row the standing decline answered
+# (writers=2, so a slot is free), and the control where the row waits on an unlanded read.
+s47_quiet() {  # <repo> <writers> <T2 reads> -> the plan; T9 active, T2 pending, one writer open
+  s47_plan "$1" "$2" \
+    "| T9 | 4 | build | in flight | implementor | — | 30 | REQ-x | payload/q.sh | active | |" \
+    "| T2 | 4 | build | the row | implementor | — | 20 | REQ-x | payload/r.sh | pending | $3 |" >/dev/null
+  add_row "$1" name=w1 deliverable="$1/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
+}
+R47Q="$(make_repo s47-waiting-full)"; new_roster "$R47Q"; s47_quiet "$R47Q" 1 ""
+poke_pressure "$R47Q" 8192 1.0 tick
+expect_contains "47u F3 a full writer budget names the ready row it cannot take, and why" \
+  "poker: WAIT T2 — ready; no writer slot free" "$OUT"
+expect_absent "47u2 …and does not say nothing is ready" "poker: WAITING" "$OUT"
+R47R="$(make_repo s47-waiting-declined)"; new_roster "$R47R"; s47_quiet "$R47R" 2 ""
+mkdir -p "$R47R/.bionic/docs/record/wave-01-fixture"
+printf 'fill-ledger/v1|at=2026-10-04T00:00:00Z|session=%s|turn=u-47r|current=4|state=ok|ceiling=2|width=2|open=1|free=1|ready=T2|launched=|declined=T2 waits on the merge|missed=1\n' "$SID" \
+  > "$R47R/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
+poke_pressure "$R47R" 8192 1.0 tick
+expect_contains "47v precondition: the standing decline is read" "fill-declined standing since" "$OUT"
+expect_contains "47v2 F3 a ready row the standing decline answered is named, and why" \
+  "poker: WAIT T2 — ready; answered by the standing fill-declined" "$OUT"
+expect_absent "47v3 …and the tick does not say nothing is ready" "poker: WAITING" "$OUT"
+R47S="$(make_repo s47-waiting-none)"; new_roster "$R47S"; s47_quiet "$R47S" 1 "payload/q.sh"
+poke_pressure "$R47S" 8192 1.0 tick
+expect_contains "47w the control: the row waits on what T9 writes, on its WAIT line" \
+  "poker: WAIT T2 — reads payload/q.sh, written by T9 (active)" "$OUT"
+expect_contains "47w2 …and with nothing ready and a row running, WAITING prints" \
+  "poker: WAITING — 1 running, nothing ready" "$OUT"
+
+# ============================================================
 section "Section 46 §PROOF-ADD: a proof names the head it read (wave-26 T4; REQ-3 AC-3.2; D5)"
 # ============================================================
 #
