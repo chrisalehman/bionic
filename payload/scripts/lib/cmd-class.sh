@@ -288,7 +288,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
   # ONLY mode=effects PARSES _CMD_EFFECTS_AWK (wave-25 T2). awk compiles the whole program on
   # every call, and the effects reader is a fifth of this file: pasted into every mode it cost
   # each classifier call 1.7 ms (7.3 -> 9.0 ms, measured). The other modes get one-line stubs
-  # of the six names the shared code calls, so each program defines every function once.
+  # of the seven names the shared code calls, so each program defines every function once.
   local _fx="$_CMD_EFFECTS_STUBS"
   [ "$1" = effects ] && _fx="$_CMD_EFFECTS_AWK"
   awk -v mode="$1" "$CMD_RUN_NORM_AWK$CMD_WORD_FOLD_AWK$_CMD_WRITES_AWK$_fx"'
@@ -1094,10 +1094,11 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # read by the writes walk with FX set, which routes each segment to fx_seg.
       if (mode == "effects") {
         FX = 1; fx_init(); FXR = (ENVIRON["_CMD_FX_READS"] == "reads")
-        WT_BASE = ENVIRON["_CMD_WT_CWD"]; split("", WT_SEEN); split("", FX_SEEN)
+        WT_BASE = ENVIRON["_CMD_WT_CWD"]; split("", WT_SEEN)
         if (FX_HDSEG != "") fx_unk("a heredoc body runs a command substitution", FX_HDSEG)
         if (FX_HDODD != "") fx_unk("a heredoc the reader does not place", FX_HDODD)
         wt_run(out, "", 0)
+        fx_flush()
         exit
       }
       k = segments(out, seg)
@@ -1507,9 +1508,11 @@ cmd_write_targets() {  # <command> [<cwd>] -> one resolved write target per line
 # both the folded and the unfolded directory (fx_emit), and a second such cd is `?`.
 #
 # A LINK MADE IN THE SAME COMMAND (T16, review B2). The hook resolves every path at question
-# time, before the command runs. So `ln` is `?`, and so is any path at or beneath a cp or mv
-# destination written earlier in the command (a delete AT it only when spelled with a trailing
-# slash), since what was copied or moved there may be a link. `mkdir` makes no link.
+# time, before the command runs. So `ln` is `?`, and so is every write, delete and read after a
+# cp or mv in the command (T19, A-orch-37): what was copied or moved may be a link, and a link
+# already on disk can reach the destination by a spelling the text does not show. The cp or
+# mv s own lines stay; where the order cannot be told, an earlier line is later too (fx_cut).
+# `mkdir` makes no link.
 #
 # READ, NOT GUESSED. Argv[0] after the transparent prefixes (assignments, openers, `env`,
 # `command`, `exec`, `nohup`, `setsid`, `time`, `nice`, `timeout`) must be in the writer
@@ -1621,12 +1624,9 @@ _CMD_EFFECTS_AWK='
       gsub(/[\t\r\n]+/, " ", s)
       return trim(s)
     }
-    function fx_unk(r, s,   k) {
-      r = fx_flat(r); s = fx_flat(s); k = r "\t" s
-      if (k in FX_SEEN) return
-      FX_SEEN[k] = 1
-      print "?\t" r "\t" s
-    }
+    # EVERY LINE IS HELD UNTIL THE WALK ENDS (T19), in the order it was read, and fx_flush prints
+    # each distinct line once: a cp or mv can turn lines read before it into unknowns (fx_cut).
+    function fx_unk(r, s) { FXO[++FXON] = "?\t" fx_flat(r) "\t" fx_flat(s) }
     # AN EFFECT PATH KEEPS ITS `..` (T16, review B1). The kernel resolves `a/link/..` AFTER it
     # follows the link, so a `..` folded as text names a place the command never touches, and
     # the hook, which resolves each path physically (grant_resolve), never saw the link. Only `.`
@@ -1636,33 +1636,40 @@ _CMD_EFFECTS_AWK='
       for (i = 1; i <= n; i++) if (P[i] != "" && P[i] != ".") out = out "/" P[i]
       return (out == "" ? "/" : out)
     }
-    function fx_under(p, d) { return (d == "/" || index(p, d "/") == 1) }
-    # A PATH THROUGH WHAT THIS COMMAND COPIED OR MOVED (T16, review B2). The hook resolves every
-    # path at question time, before a cp or mv destination holds what the command puts there, and
-    # that may be a link. So a path strictly beneath a destination written earlier is unknown; so
-    # is a write or read AT it, which goes through such a link, and a delete at it spelled with a
-    # trailing slash, which follows one. A plain delete at it removes the link itself. Each path
-    # is compared both as printed and folded, so a `c/../b/x` spelling is beneath b too.
-    # Returns 1 when the line was printed (or already had been).
-    function fx_put(tag, p, w,   x, d, q) {
-      if (FX_ND) {
-        q = wt_norm(p)
-        for (x = 1; x <= FX_ND; x++) {
-          d = FX_DEST[x]
-          if (fx_under(p, d) || fx_under(q, d) || ((p == d || q == d) && (tag != "D" || w ~ /\/\.?$/))) {
-            fx_unk("a path through " d ", which cp or mv wrote earlier in this command and may now be a link: " w, FX_SEG)
-            return 0
-          }
-        }
+    # A W, D, R or RR line, held with the segment it came from (FXSI, set by fx_seg).
+    function fx_put(tag, p) { FXO[++FXON] = tag "\t" p; FXE[FXON] = p; FXEI[FXON] = FXSI }
+    # AFTER A CP OR MV THE READER CANNOT SAY WHERE A PATH LEADS (T19, A-orch-37). The hook
+    # resolves every path at question time, before the copy or move puts anything in place, and
+    # what it puts there may be a link. Comparing a later path with the destination as text is
+    # not enough: a link already on disk reaches the destination by a spelling that does not
+    # show it (tree/l -> tree/b, then tree/l/evil/sub after `cp -R evil b`). So every W, D, R and
+    # RR line read after the cp or mv segment is unknown, as everything after an `ln` is. The
+    # segment s own lines stay. LATER means after it in the order the shell runs, which is the
+    # order the walk reads across `&&`, `||`, `;`, a subshell and a nested `sh -c`; where that
+    # order cannot be told, an earlier line is later too. That is a loop, a pipeline the segment
+    # is a later stage of, and a list sent to the background with `&` ahead of it, at this depth
+    # or one around it; then every line from the start of that depth s walk is later.
+    # fx_step calls it once the segment is read.
+    function fx_cut(depth,   r, d, x, u) {
+      FX_CPP = 0; r = FXON + 1
+      for (d = 0; d <= depth; d++) {
+        x = FXIC[d] - 1
+        u = (FXLP[d] || WSK[d, x] == "|" || WSK[d, x] == "|&")
+        for (x = 1; x < FXIC[d] && !u; x++) if (WSK[d, x] == "&") u = 1
+        if (u && FXB0[d] + 1 < r) r = FXB0[d] + 1
       }
-      p = tag "\t" p
-      if (!(p in FX_SEEN)) { FX_SEEN[p] = 1; print p }
-      return 1
+      if (!FX_CUT || r < FX_CUT) FX_CUT = r
     }
-    function fx_dest(p) { FX_DEST[++FX_ND] = p; FX_DEST[++FX_ND] = wt_norm(p) }
+    function fx_flush(   n, l, P) {
+      for (n = 1; n <= FXON; n++) {
+        l = FXO[n]
+        if (FX_CUT && n >= FX_CUT && (n in FXE))
+          l = "?\t" fx_flat("a copy or move earlier in this command may have placed a link: " FXE[n]) "\t" fx_flat(FXSG[FXEI[n]])
+        if (!(l in P)) { P[l] = 1; print l }
+      }
+    }
     # A W or D line for w, joined to the directory it is read against, or a ? when the shell
-    # still has something to decide about the path. With FX_REG set (a cp or mv destination),
-    # each path printed is remembered for fx_put.
+    # still has something to decide about the path.
     #
     # THE ONE PLACE `..` IS FOLDED AS TEXT IS A CD TARGET, because there the shell folds it too:
     # bash and zsh `cd a/link/..` move to a, not to the parent of the link. But bash falls back to
@@ -1670,7 +1677,7 @@ _CMD_EFFECTS_AWK='
     # through `..`, the path is printed twice, against the folded directory and against the
     # unfolded one. Either can be the place, and the hook requires both inside: printing both can
     # only refuse. A second cd through `..` multiplies the places, and fx_cd calls it unknown.
-    function fx_emit(tag, w, cwd,   p, o, c, b, k) {
+    function fx_emit(tag, w, cwd,   p, o, c, b) {
       if (w == "") return
       p = fx_expand(w); o = p; b = ""
       if (substr(p, 1, 1) != "/" && !wt_rooted(p)) {
@@ -1683,13 +1690,9 @@ _CMD_EFFECTS_AWK='
       if (p ~ /[[$`*?{]/ || substr(p, 1, 1) == "~") { fx_unk("a variable, substitution or pattern in the target: " w, FX_SEG); return }
       if (p ~ /[\001-\037]/) { fx_unk("a control character in the target", FX_SEG); return }
       if (substr(p, 1, 1) != "/") { fx_unk("a relative target and no cwd: " w, FX_SEG); return }
-      p = fx_abs(p)
-      k = fx_put(tag, p, w)
-      if (k && FX_REG) fx_dest(p)
+      fx_put(tag, fx_abs(p))
       if (b == "" || !index("/" b "/", "/../")) return
-      p = fx_abs(wt_norm(b) "/" o)
-      k = fx_put(tag, p, w)
-      if (k && FX_REG) fx_dest(p)
+      fx_put(tag, fx_abs(wt_norm(b) "/" o))
     }
     # The directory a cd, pushd or popd moves to. One the text cannot name is FX_LOST, and
     # every relative path after it is unknown rather than read against the wrong directory.
@@ -1722,8 +1725,8 @@ _CMD_EFFECTS_AWK='
     }
     # WHAT A COMMAND READS (T16; review B3c, S4), printed only when the caller passes the word
     # `reads`: `R<TAB>path` for each file or directory read, `RR<TAB>path` for one the reader
-    # descends. The path rule is fx_emit s, so `..` stays in and a cp or mv destination is
-    # honoured; an operand the text does not name is the `?` fx_rop already gives.
+    # descends. The path rule is fx_emit s, so `..` stays in and a read after a cp or mv is
+    # unknown (fx_cut); an operand the text does not name is the `?` fx_rop already gives.
     function fx_read(tag, w, cwd) {
       if (fx_rop(w)) { FX_ROPA = 1; return }
       fx_emit(tag, w, cwd)
@@ -1877,12 +1880,15 @@ _CMD_EFFECTS_AWK='
     # one segment through different literal values that end in different directories are lost.
     function fx_step(depth, i, k, g, before,   x, c, c1, s, pv, nx) {
       if (FXN[depth, g]) { FXS[depth, g] = before; FXC[depth, g] = 0; FXI[depth, g] = i; FXN[depth, g] = 0 }
+      if (i == 1) FXB0[depth] = FXON
+      FXIC[depth] = i
       for (x = 1; x <= WNX[depth, i]; x++) {
         FX_EXP = (WX[depth, i, x] != WRAW[depth, i])
         c1 = fx_seg(trim(WX[depth, i, x]), before, depth)
         if (x == 1) c = c1
         else if (c1 != c) c = FX_LOST
       }
+      if (FX_CPP) fx_cut(depth)
       s = WSK[depth, i]; pv = (i > 1 ? WSK[depth, i - 1] : "")
       if (c != before) {
         if (s == "|" || s == "|&" || pv == "|" || pv == "|&") c = before
@@ -1909,7 +1915,7 @@ _CMD_EFFECTS_AWK='
     # the cwd the segments after it inherit. A segment holding a command or process
     # substitution is not read further: its words are not the words the shell will see, so
     # neither is any path in it, nor the directory a cd in it names.
-    function fx_seg(t, cwd, depth,   W, K, n, j, A, m, i, w, B, sv, neg) {
+    function fx_seg(t, cwd, depth,   W, K, n, j, A, m, i, w, B, sv, svi, neg) {
       if (index(t, "$(") || index(t, "`") || index(t, "<(") || index(t, ">(")) {
         fx_unk("a command substitution runs a command the reader does not read", t)
         return FX_LOST
@@ -1918,7 +1924,7 @@ _CMD_EFFECTS_AWK='
       # segmenter may have carried the next line into it.
       if (substr(t, 1, 1) == "#" && t !~ /[\047"\\\n]/) return cwd
       if (index(t, "\n") && t ~ /(^|[ \t\n])#/) { fx_unk("a comment inside a segment that spans lines", t); return FX_LOST }
-      sv = FX_SEG; FX_SEG = t; neg = 0; FX_ROPA = 0
+      sv = FX_SEG; svi = FXSI; FX_SEG = t; FXSG[++FXSN] = t; FXSI = FXSN; neg = 0; FX_ROPA = 0
       n = wt_tok(t, W, K); m = 0
       for (j = 1; j <= n; j++) {
         if (K[j] == "I" && W[j] == "<" && j < n && K[j + 1] == "W" && fx_rop(W[j + 1])) FX_ROPA = 1
@@ -1938,7 +1944,7 @@ _CMD_EFFECTS_AWK='
         # and the assignments above are not.
         w = cmd_word_fold(w)
         if (w ~ /^(env|command|exec|nohup|setsid)$/) {
-          if (i < m && A[i + 1] ~ /^-/) { fx_unk("an option of " w " the reader does not parse", t); FX_SEG = sv; return cwd }
+          if (i < m && A[i + 1] ~ /^-/) { fx_unk("an option of " w " the reader does not parse", t); FX_SEG = sv; FXSI = svi; return cwd }
           continue
         }
         if (w == "time") { if (A[i + 1] == "-p") i++; continue }
@@ -1950,17 +1956,17 @@ _CMD_EFFECTS_AWK='
         if (w == "timeout" || w == "gtimeout") {
           for (i++; i <= m && A[i] ~ /^-/; i++) if (A[i] ~ /^(-s|-k|--signal|--kill-after)$/) i++
           if (A[i] ~ /^[0-9.]+[smhd]?$/) continue
-          fx_unk("a timeout the reader does not parse", t); FX_SEG = sv; return cwd
+          fx_unk("a timeout the reader does not parse", t); FX_SEG = sv; FXSI = svi; return cwd
         }
         break
       }
       m = m - i + 1
       for (j = 1; j <= m; j++) B[j] = A[i + j - 1]
-      if (neg && m > 0 && base(B[1]) ~ /^(cd|pushd|popd)$/) { fx_unk("a negated cd: what follows runs where it failed", t); FX_SEG = sv; return FX_LOST }
+      if (neg && m > 0 && base(B[1]) ~ /^(cd|pushd|popd)$/) { fx_unk("a negated cd: what follows runs where it failed", t); FX_SEG = sv; FXSI = svi; return FX_LOST }
       if (m > 0) cwd = fx_argv(B, m, cwd, depth, t)
       if (FX_ROPA) fx_unk("unresolved read operand", t)
       FX_ROPA = 0
-      FX_SEG = sv
+      FX_SEG = sv; FXSI = svi
       return cwd
     }
     function fx_argv(B, m, cwd, depth, t,   b, d, j, bt) {
@@ -1988,8 +1994,9 @@ _CMD_EFFECTS_AWK='
         return cwd
       }
       if (b == "rm" || b == "rmdir" || b == "unlink") { fx_del(B, m, cwd); return cwd }
-      if (b == "mv") { fx_del(B, m, cwd); FX_REG = 1; wt_argv(B, m, cwd); FX_REG = 0; return cwd }
-      if (b == "cp") { if (FXR) fx_cpreads(B, m, cwd); FX_REG = 1; wt_argv(B, m, cwd); FX_REG = 0; return cwd }
+      # A copy or move may put a link in place: what is read after it is unknown (fx_cut).
+      if (b == "mv") { fx_del(B, m, cwd); wt_argv(B, m, cwd); FX_CPP = 1; return cwd }
+      if (b == "cp") { if (FXR) fx_cpreads(B, m, cwd); wt_argv(B, m, cwd); FX_CPP = 1; return cwd }
       # A link, symbolic or hard, redirects every later path through it, and the hook resolves
       # each path at question time, before the link exists (T16, review B2).
       if (b == "ln") { fx_unk("a link redirects every later path, and it does not exist yet when they are resolved", t); return cwd }
@@ -2022,6 +2029,7 @@ _CMD_EFFECTS_STUBS='
     function fx_emit(tag, w, cwd) { }
     function fx_text(s, depth, k) { return 0 }
     function fx_step(depth, i, k, g, before) { return before }
+    function fx_flush() { }
 '
 
 cmd_effects() {  # <command> [<cwd>] [reads] -> W/D<TAB><absolute path> or ?<TAB><reason><TAB><segment> per line (D5, REQ-2); with `reads`, R/RR<TAB><absolute path> too (T16)

@@ -27,7 +27,9 @@
 #
 # ANTI-VACUITY (per .claude/rules/test-harness.md). Every deny sits beside an allow on the same
 # fixture, by the same asker, through the same reader feature: a `..` under a real directory, a
-# cd and a relative `..`, and `mkdir -p d && echo x > d/f`, which must stay readable.
+# cd and a relative `..`, and `mkdir -p d && echo x > d/f`, which must stay readable. §E3 (T19)
+# adds two honest links already on disk and proves the delete through them alone is allowed
+# before it asserts that the same delete after a cp or mv is denied.
 #
 # Usage: bash tests/permission-effects.test.sh
 
@@ -169,5 +171,32 @@ answer_is deny "E2.8 mv, then a write AT the destination: deny" "mv $TREE/a $TRE
 answer_is allow "E2.9 mkdir -p d && echo x > d/f stays allowed" "mkdir -p $TREE/d && echo x > $TREE/d/f"
 answer_is allow "E2.10 a relative mkdir -p d && echo x > d/f stays allowed" "mkdir -p d2 && echo x > d2/f"
 answer_is allow "E2.11 a cp with no later path beneath it is allowed" "cp $TREE/a/f $TREE/c.txt"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§E3 T19: after a cp or mv, a link already on disk can reach the destination by another spelling"
+# Two honest links already in the tree (a worktree holds `.bionic -> <main>/.bionic`; a
+# repository can track a linked directory): rl -> rb, both inside, and evil/sub -> outside. At
+# question time rl/evil/sub/victim resolves to rb/evil/sub/victim, inside, because rb/evil does
+# not exist yet; once `cp -R evil rb` has run, the kernel puts that path outside (A-orch-37,
+# the orchestrator's scratch t19probe/probe2.sh ran the real cp).
+mkdir -p "$TREE/rb" "$TREE/evil"
+ln -s "$TREE/rb" "$TREE/rl"
+ln -s "$OUT" "$TREE/evil/sub"
+expect_true "E3.0a tree/rl is a symlink into the tree" test -L "$TREE/rl"
+expect_true "E3.0b tree/evil/sub is a symlink" test -L "$TREE/evil/sub"
+expect_eq "E3.0c the kernel resolves tree/evil/sub outside" "$OUT" "$(cd -P "$TREE/evil/sub" && pwd -P)"
+# The control: alone, the delete through rl resolves inside and is allowed. The deny rows below
+# are therefore the cp before it, not the link.
+answer_is allow "E3.0d control: the delete through rl alone resolves inside: allow" "rm -rf $TREE/rl/evil/sub/victim"
+answer_is deny "E3.1 cp -R evil rb, then rm through rl and the copied link: deny" "cp -R $TREE/evil $TREE/rb && rm -rf $TREE/rl/evil/sub/victim"
+answer_is deny "E3.2 mv evil rb, then rm through rl and the moved link: deny" "mv $TREE/evil $TREE/rb && rm -rf $TREE/rl/evil/sub/victim"
+answer_is deny "E3.3 cp -R evil rb, then a write through rl: deny" "cp -R $TREE/evil $TREE/rb && echo x > $TREE/rl/evil/sub/f"
+drive "cp -R $TREE/evil $TREE/rb && rm -rf $TREE/rl/evil/sub/victim"
+expect_contains "E3.4 the denial says why" "a copy or move earlier in this command may have placed a link" "$(message)"
+# The paired allows on the same fixture: a single cp inside the tree with nothing after it, a
+# relative one, and mkdir with a write after it, through the honest link too.
+answer_is allow "E3.5 a single cp inside the tree, nothing after it: allow" "cp $TREE/a/f $TREE/rb/g"
+answer_is allow "E3.6 a relative single cp, nothing after it: allow" "cp a/f rl/g2"
+answer_is allow "E3.7 mkdir -p d && echo x > d/f through the honest link: allow" "mkdir -p $TREE/rl/d && echo x > $TREE/rl/d/f"
 
 finish
