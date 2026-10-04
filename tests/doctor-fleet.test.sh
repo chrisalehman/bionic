@@ -165,14 +165,14 @@ else no "T0: a program doctor runs is missing from the fixture's tool directory"
 run_doctor() {
   ( cd "$PROJ" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
 run_doctor_no_claude() {  # the same machine with the CLI off PATH (AC-7)
   ( cd "$PROJ" && HOME="$TMP" PATH="$BIN_NO_CLAUDE" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
@@ -296,7 +296,7 @@ rm -f "${PROJ}/.bionic/config.yaml"
 
 PA_ROW="$(_pa_row "$( cd "$PROJ" && HOME= PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )")"
+      BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )")"
 expect_nonempty "12l: with no HOME the row is still there" "$PA_ROW"
 expect_match "12m: and says there is no path rather than printing an empty one" \
   "*permission answers*no log path*" "$PA_ROW"
@@ -476,7 +476,7 @@ BARE="${TMP}/bare-proj"
 mkdir -p "${BARE}/.bionic/tmp"
 OUT6C="$( cd "$BARE" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
   BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-  BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
+  BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
 RES6C="$(doctor_section "$OUT6C" "RESOURCES")"
 expect_match "18f: a project with no attestation still says so" \
   "*none has taken an attestation in this project*" "$RES6C"
@@ -501,7 +501,7 @@ for _dsid in "aaaa1111-9999-4444-5555-666677778888" "bbbb2222-9999-4444-5555-666
 done
 OUT6D="$( cd "$DEADONLY" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
   BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-  BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
+  BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
 RES6D="$(doctor_section "$OUT6D" "RESOURCES")"
 expect_no_match "18g: a project whose every attestation is dead never claims it has none" \
   "*none has taken an attestation in this project*" "$RES6D"

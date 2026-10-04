@@ -1305,5 +1305,17 @@ lh_digest "$LH_D" "$LH_A"
 s7_fire "$LH_D" "$LH_TX"
 expect_absent "LH2: at the proof's own head the review waits, and the wall owes nothing" \
   "Fillable gap" "$(reason_of)$STOP_ERR"
+# LH3 (review 10): the tick wrote head=B, then `proof-add review` recorded a proof at B in the
+# same turn, and the digest is still fresh. The wall compares the digest's head with the plan's
+# CURRENT last review proof, so B against B is nothing landed past it: no review of nothing.
+lh_digest "$LH_D" "$LH_B"
+sed -i.bak "s/^\(proved: kind=review head=$LH_A at=2026-10-04T00:00:00Z evidence=record\/r.txt\)\$/\1\\
+proved: kind=review head=$LH_B at=2026-10-04T00:10:00Z evidence=record\/r2.txt/" \
+  "$LH_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+expect_contains "LH3 precondition: the plan now carries a later review proof at B" "head=$LH_B" \
+  "$(grep '^proved: kind=review' "$LH_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md")"
+s7_fire "$LH_D" "$LH_TX"
+expect_absent "LH3: a proof at the digest's head, added after the tick, leaves nothing for the wall to owe" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
 
 finish

@@ -334,7 +334,7 @@ fill_ready_tagged() {  # <plan>
 # ── THE ROWS THAT TAKE NO WRITER SLOT (wave-26 T13; D9) ───────────────────────
 #
 # fill_readonly_ids <plan> -> the ids, space-joined, of the rows whose kind is `verify` or
-# `review`, in table order.
+# `review` and whose `Files` cell names no tracked path, in table order.
 #
 # THE RULE IS THE KIND, BECAUSE THE KIND IS WHAT THE TABLE CARRIES (A-T13.2). A writer slot is a
 # writer's: an agent that edits a worktree. The dispatch wall knows the role it is launching
@@ -345,9 +345,15 @@ fill_ready_tagged() {  # <plan>
 # their own record. Every other kind — build, test, doc, prototype, integrate, close — edits the
 # tree and is trimmed to the gap. A verify row's suite run takes a place of its own (D8's
 # booking), not a writer slot, so offering it outside the gap overcommits nothing the gap counts.
+#
+# …WHILE ITS FILES SAY SO (wave-26 T46; review 10 answer b). Nothing holds a verify or review row
+# to the record: one whose Files name tracked code was offered whatever the gap, demanded by the
+# wall, and refused by the dispatch budget, which counts the writer role it runs under. Such a
+# row takes a writer place like any writer and, at a full budget, waits with the budget reason;
+# the test is units.sh `writes_head`, the predicate that decides which rows owe a tree.
 fill_readonly_ids() {  # <plan> -> ids, space-joined
-  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '
-    $3 == "verify" || $3 == "review" { printf "%s%s", (n++ ? " " : ""), $1 }'
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' "$(_units_files_awk)"'
+    ($3 == "verify" || $3 == "review") && !writes_head($9) { printf "%s%s", (n++ ? " " : ""), $1 }'
 }
 
 # ── THE NAME A ROW IS DISPATCHED UNDER ────────────────────────────────────────

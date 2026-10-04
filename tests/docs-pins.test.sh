@@ -4746,6 +4746,32 @@ W26_D9="$(w26_doctor "$W26_CLAUDE" 'Must be green before any commit.')"
 expect_nonempty "W26-9m: a CLAUDE.md that keeps \"before any commit\" is caught" \
   "$(w26_hits 'before any commit' "$W26_D9")"
 
+# W26-9h..9k (AC-3.6, the hooks' half; wave-26 T5): the full-run refusals in the dispatch wall
+# and the Bash wall name the released head, and nothing in hooks/ or payload/scripts/ says
+# "integration close" or offers a regression-cause: line as the fix. The absence rows read the
+# same file list the precondition proves the extractor finds the new wording in.
+W26_DP_HOOK="${REPO}/hooks/dispatch-preflight.sh"
+W26_HOOK_MOMENT='The full suite runs once, on the head being released'
+for _w26_f in "$W26_DP_HOOK" "${REPO}/payload/scripts/lib/walls.sh"; do
+  expect_nonempty "W26-9h: ${_w26_f#"$REPO"/} names the released head as the full run's moment" \
+    "$(w26_hits "$W26_HOOK_MOMENT" "$_w26_f")"
+done
+W26_CODE="$(/usr/bin/find "${REPO}/hooks" "${REPO}/payload/scripts" -type f 2>/dev/null | sort)"
+# shellcheck disable=SC2086
+expect_nonempty "W26-9i precondition: the code scan reads files that carry the released-head wording" \
+  "$(w26_hits "$W26_HOOK_MOMENT" $W26_CODE)"
+# shellcheck disable=SC2086
+expect_eq "W26-9i: no hook or script says \"integration close\"" "" \
+  "$(w26_hits 'integration close' $W26_CODE)"
+# shellcheck disable=SC2086
+expect_eq "W26-9j: …or names a regression-cause line" "" \
+  "$(w26_hits 'regression-cause' $W26_CODE)"
+anchor "$W26_DP_HOOK" "$W26_HOOK_MOMENT" 1
+DOCTORED_W26_HOOK="$TMP/w26-dispatch-preflight-doctored.sh"
+sed 's/on the head being released/at integration close/' "$W26_DP_HOOK" > "$DOCTORED_W26_HOOK"
+expect_nonempty "W26-9k: a dispatch wall that says \"integration close\" again is caught" \
+  "$(w26_hits 'integration close' "$DOCTORED_W26_HOOK")"
+
 # W26-10 (AC-4.2): the shortest landed line is modelled, and it passes the gate's own check.
 # The shape check is the gate's function, lifted out of walls.sh, never a copy of its rule.
 W26_PROOF_FN="$(/usr/bin/awk '/^is_proof_shaped\(\) \{/ { on = 1 } on { print } on && /^\}/ { exit }' \

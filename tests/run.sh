@@ -557,7 +557,7 @@ _lost_command() {
 # _verdict <label> <exit-status-or-empty> <captured-output-file>
 # The one place a result is judged and printed, so the two modes cannot drift.
 _verdict() {
-  local label="$1" rc="$2" out="$3" sig="" lost=""
+  local label="$1" rc="$2" out="$3" sig="" lost="" vwhy="" also=""
   # The adoption wall refused this suite before it ran (S10). It never had an
   # exit status, so it is judged from the refusal the wall left behind.
   if [ -f "$TMP/${label}.refused" ]; then
@@ -569,40 +569,39 @@ _verdict() {
     echo "───── end ${label} ─────"
     return
   fi
-  # EVERY TRY OF A SOLO SUITE WAS DISTURBED (wave-26 T8). Its timing rows measured the
-  # machine, not the code, so this is a reading and not a verdict: printed here, listed under
-  # `Void:`, and counted in neither tally. A void suite that also exited non-zero shows its
-  # capture, so whatever it reported can still be read.
-  if [ -f "$TMP/${label}.void" ]; then
-    echo "~ VOID (timing not measured: $(cat "$TMP/${label}.void"))"
-    void=$((void+1))
-    voided="${voided}\n    - ${label} ($(cat "$TMP/${label}.void"))"
-    if [ "$rc" != "0" ]; then
-      echo "───── ${label}: captured output ─────"
-      [ -f "$out" ] && cat "$out"
-      echo "───── end ${label} ─────"
-    fi
-    return
-  fi
+  # EVERY TRY OF A SOLO SUITE WAS DISTURBED (wave-26 T8), or it was never measured at all.
+  # Its timing rows measured the machine, not the code. That says how the suite was timed,
+  # not whether it passed (T43, review 8 F1): a void suite that passed is a reading and not a
+  # verdict, printed here, listed under `Void:`, and counted in neither tally; a void suite
+  # that failed is judged below like any failure, counted once in the fail tally with its
+  # capture shown, and its void reason rides on its verdict line and its `Failed:` entry.
+  [ -f "$TMP/${label}.void" ] && vwhy="$(cat "$TMP/${label}.void")"
   lost="$(_lost_command "$out")"
   if [ "$rc" = "0" ] && [ -z "$lost" ]; then
+    if [ -n "$vwhy" ]; then
+      echo "~ VOID (timing not measured: ${vwhy})"
+      void=$((void+1))
+      voided="${voided}\n    - ${label} (${vwhy})"
+      return
+    fi
     echo "✓ PASS"; pass=$((pass+1)); return
   fi
+  [ -n "$vwhy" ] && also="; also VOID (timing not measured: ${vwhy})"
   fail=$((fail+1))
   if [ "$rc" = "0" ]; then
     # Exited 0, but the interpreter said a command it called does not exist.
-    echo "✗ FAIL (exited 0; a command it called was not found)"
-    failed="${failed}\n    - ${label} (exited 0, but: ${lost})"
+    echo "✗ FAIL (exited 0; a command it called was not found)${also}"
+    failed="${failed}\n    - ${label} (exited 0, but: ${lost})${also}"
   elif [ -z "$rc" ]; then
     # No .rc file: the worker itself did not survive to write one.
-    echo "✗ KILLED (no exit status recorded)"
-    failed="${failed}\n    - ${label} (killed, no exit status)"
+    echo "✗ KILLED (no exit status recorded)${also}"
+    failed="${failed}\n    - ${label} (killed, no exit status)${also}"
   elif [ "$rc" -gt 128 ] 2>/dev/null && sig="$(kill -l $((rc - 128)) 2>/dev/null)" && [ -n "$sig" ]; then
-    echo "✗ KILLED (SIG${sig})"
-    failed="${failed}\n    - ${label} (killed by SIG${sig})"
+    echo "✗ KILLED (SIG${sig})${also}"
+    failed="${failed}\n    - ${label} (killed by SIG${sig})${also}"
   else
-    echo "✗ FAIL"
-    failed="${failed}\n    - ${label}"
+    echo "✗ FAIL${also}"
+    failed="${failed}\n    - ${label}${also}"
   fi
   echo "───── ${label}: captured output ─────"
   [ -f "$out" ] && cat "$out"
@@ -701,7 +700,9 @@ if [ "$SERIAL" -eq 0 ]; then
   # and if every try was disturbed it is reported VOID (see _verdict). A take or a settle
   # that gave up at the ceiling is a disturbance too; the suite still runs once, so its
   # output is there to read, but it is not retried — waiting the whole ceiling again
-  # would only say the same thing.
+  # would only say the same thing. Each try rewrites the suite's .rc and .out, so its
+  # verdict is its last run's; a void only marks how that run was timed, and a last run
+  # that failed is a failure of the run (T43).
   #
   # ONE CEILING PER SUITE (wave-26 T26, review 4 F3). The take, the settle and every
   # retry of one solo suite give up at one deadline, SLOTS_DEADLINE, set once before its
@@ -768,10 +769,22 @@ if [ "$SERIAL" -eq 0 ]; then
     done
     return 0
   }
+  # A TRY THAT WRITES NOTHING READS AS NOTHING (wave-26 T49; review 12 F1). A worker writes
+  # <label>.rc and <label>.sec only after its suite ends, so a worker killed before that leaves
+  # the files of the try before it, and the report walk judged the retry by them: a pass
+  # printed for a run that never finished, and a timing row from a disturbed try. The files
+  # are removed right before each worker launch, so a worker that ends without a result leaves
+  # no .rc, which _verdict reports as KILLED (no exit status recorded), and no .sec, which
+  # the walk times nothing from. The capture goes too: it is the other half of a try's result,
+  # and the advisory tally and a KILLED verdict both print what is in it.
+  _solo_clear() {  # <label> — forget the previous try's result
+    rm -f "$TMP/${1}.rc" "$TMP/${1}.sec" "$TMP/${1}.out"
+  }
   _solo_run() {  # <label> — one solo suite; leaves <label>.void when it was never measured
     local label="$1" tries=0 why last="" cores max take cpu0 t0 own
     rm -f "$TMP/${label}.void"
     if [ "$_SOLO_BOOK" != yes ]; then
+      _solo_clear "$label"
       bash "$SELF" --one "$label" </dev/null
       return 0
     fi
@@ -795,11 +808,13 @@ if [ "$SERIAL" -eq 0 ]; then
           echo "tests/run.sh: void — ${label}: ${last}; ${why}" >&2
           return 0
         fi
+        _solo_clear "$label"
         bash "$SELF" --one "$label" </dev/null
         printf '%s\n' "$why" >"$TMP/${label}.void"
         echo "tests/run.sh: void — ${label}: ${why}; it ran unbooked and is not retried" >&2
         return 0
       fi
+      _solo_clear "$label"
       _solo_cpu; cpu0=$_SOLO_CPU; t0=$SECONDS
       BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1 BIONIC_SLOT_PLACE="$(_solo_place)" \
         bash "$SELF" --one "$label" </dev/null
@@ -844,7 +859,9 @@ if [ "$SERIAL" -eq 0 ]; then
     _label "$label"
     rc=""
     [ -f "$TMP/${label}.rc" ] && rc="$(cat "$TMP/${label}.rc")"
-    [ -f "$TMP/${label}.sec" ] && _timing "$label" "$(cat "$TMP/${label}.sec")"
+    # A void suite's seconds are disturbed ones (T48; review 11 N1): the file holds measurements
+    # only, and a row has no field to say otherwise, so a void suite gets no row at all.
+    [ -f "$TMP/${label}.sec" ] && [ ! -f "$TMP/${label}.void" ] && _timing "$label" "$(cat "$TMP/${label}.sec")"
     _verdict "$label" "$rc" "$TMP/${label}.out"
   done <"$QUEUE"
 fi
@@ -885,7 +902,8 @@ echo "Gating: ${pass} passed, ${fail} failed"
 # VOID IS SAID, AND IT IS NOT A FAILURE (wave-26 T8). Its own line, like `Advisory:`, so the
 # `Gating:` line above keeps its shape; and the run exits on its failures alone. What it does
 # not do is call itself all green: a void suite's timing was never measured. Each entry says
-# why, since a disturbance is only one of the causes (wave-26 T26).
+# why, since a disturbance is only one of the causes (wave-26 T26). Only a suite that passed
+# is listed here; one that failed is under `Failed:`, its reason beside it (T43).
 [ "$void" -ne 0 ] && echo -e "Void: ${void} — not timed, each for the reason given; advisory, not a failure:${voided}"
 echo "$ENV_STAMP"
 if [ "$fail" -ne 0 ]; then
