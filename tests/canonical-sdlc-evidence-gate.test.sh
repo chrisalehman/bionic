@@ -91,6 +91,28 @@ write_generic_evidence() {
     > "$dir/.bionic/docs/record/generic-evidence.md"
 }
 
+# THE FIXTURE HEAD (wave-26 T4, D5; AC-3.2). Step-5 evidence names the head its run read,
+# and the gate refuses a `head:` that is not a commit, or that the release head does not
+# contain — so every green Step-5 block below carries `head: ${EG_HEAD}`, and the directory
+# its commit is driven from must be a repository holding that commit. `eg_head_repo` makes
+# one: an empty commit with a fixed author, committer, date and message, so every fixture
+# repository has the SAME head and one constant serves every block. `write_plan` and
+# `write_project_plan` plant it for any plan that carries the line; a fixture whose plan
+# does not is left a plain directory, exactly as before this wave.
+eg_head_repo() {  # <dir> — makes <dir> a repository whose HEAD is $EG_HEAD (idempotent)
+  [ -e "$1/.git" ] && return 0
+  git -C "$1" init -q 2>/dev/null || return 1
+  GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' GIT_COMMITTER_DATE='2026-01-01T00:00:00Z' \
+    git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid \
+      -c commit.gpgsign=false -c core.hooksPath=/dev/null \
+      commit -q --allow-empty -m 'fixture head' 2>/dev/null
+}
+EG_HEAD="$(_d=$(mktemp -d); eg_head_repo "$_d"; git -C "$_d" rev-parse HEAD 2>/dev/null; rm -rf "$_d")"
+eg_head_plant() {  # <dir> <plan content> — a plan naming the fixture head gets its repository
+  case "$2" in *"head: ${EG_HEAD}"*) eg_head_repo "$1" ;; esac
+  return 0
+}
+
 # ---------- engagement (task-engaged-session, AC-6) ----------
 #
 # Since 2026-09-03 this gate asks one question before it asks anything else: did this
@@ -154,6 +176,7 @@ make_project() {
 write_project_plan() {
   local project_dir="$1" content="$2" name="${3:-active.md}"
   local path="$project_dir/.bionic/docs/plans/$name"
+  eg_head_plant "$project_dir" "$content"
   printf '%s\n' "$content" > "$path"
   touch "$path"
   echo "$path"
@@ -166,6 +189,7 @@ write_project_plan() {
 write_plan() {
   local home_dir="$1" content="$2" name="${3:-active.md}"
   local path="$home_dir/.bionic/docs/plans/$name"
+  eg_head_plant "$home_dir" "$content"
   printf '%s\n' "$content" > "$path"
   # Ensure mtime > any prior plan in this test by nudging forward.
   touch "$path"
@@ -861,6 +885,7 @@ EOF
 step5_base="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
 
@@ -1286,6 +1311,7 @@ h17j1=$(make_home)
 write_plan "$h17j1" "$(plan 5 "  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5" "$matrix_complete")" > /dev/null
 expect_block "17j Step-5 missing auditor → block" \
   "$h17j1" 'git commit -m "x"' "auditor"
@@ -1340,6 +1366,7 @@ expect_block "17m malformed row (extra literal |) → block" \
 v101_step5_noauditor="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5"
 
 # Mixed matrix mid-walk: AC-1 discharged with full T3 evidence, AC-2 still
@@ -2452,7 +2479,8 @@ ac10_wt="$ac10_tmp/wt"
 engage "$ac10_main"
 mkdir -p "$ac10_wt/.bionic/docs/plans"
 h21c=$(make_home)
-printf '%s\n' "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" \
+# This repository has a head of its own, so the Step-5 block names it (wave-26 T4, D5).
+printf '%s\n' "$(r7_wave_plan tune 5 "${step5_base/$EG_HEAD/$(git -C "$ac10_main" rev-parse HEAD)}" "$matrix_complete")" \
   > "$ac10_main/.bionic/docs/plans/active.md"
 touch "$ac10_main/.bionic/docs/plans/active.md"
 printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-07T00:00Z approved\nStep 5: TODO\n' \
@@ -4322,7 +4350,8 @@ mkdir -p "$s25g_main/.bionic/docs/plans"
 git -C "$s25g_main" init -q .
 git -C "$s25g_main" commit -q --allow-empty -m init
 engage "$s25g_main"
-plan 5 "$step5_base" "$matrix_w25g" > "$s25g_main/.bionic/docs/plans/wave-01-x.plan.md"
+# The Step-5 block names this repository's own head (wave-26 T4, D5): every tree below is cut from it.
+plan 5 "${step5_base/$EG_HEAD/$(git -C "$s25g_main" rev-parse HEAD)}" "$matrix_w25g" > "$s25g_main/.bionic/docs/plans/wave-01-x.plan.md"
 
 # (a) NO alias: a PLAIN `git worktree add` — this world exists whether or not `create` plants
 # an alias, and is the honest control — the record written relative from inside it lands
@@ -5440,6 +5469,7 @@ It refused as AC-3 predicted, then passed once the file existed."
 walk_step5_with_artifact="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
   walk-artifact: record/walk-20260801.md"
@@ -5447,6 +5477,7 @@ walk_step5_with_artifact="  cmd: bash test.sh
 walk_step5_no_artifact="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md"
 
@@ -5465,6 +5496,7 @@ stack-health: before: process restarts 0; walk not yet run
 walk_step5_pending="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5"
 
 # 26a — walk: required, rows discharged, no walk-artifact line → block.
@@ -5526,6 +5558,7 @@ write_walk_artifact "$h26h" "$walk_clean_text" > /dev/null
 write_plan "$h26h" "$(walk_plan5 'walk: required' "  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
   walk-artifact: .bionic/docs/record/walk-20260801.md" "$matrix_complete")" > /dev/null
@@ -5538,6 +5571,7 @@ printf 'walk narration living outside the record\n' > "$h26i/.bionic/docs/escape
 write_plan "$h26i" "$(walk_plan5 'walk: required' "  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
   walk-artifact: record/../escaped.md" "$matrix_complete")" > /dev/null
@@ -5550,6 +5584,7 @@ printf 'walk narration in the wrong place\n' > "$h26j/.bionic/docs/plans/walk.md
 write_plan "$h26j" "$(walk_plan5 'walk: required' "  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
   walk-artifact: .bionic/docs/plans/walk.md" "$matrix_complete")" > /dev/null
@@ -5588,6 +5623,7 @@ expect_block "26l off-enum 'walk: bogus' + discharged rows + no artifact → blo
 walk_step5_packed_ok="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
   walk-artifact: record/walk-20260801.md; cmd: bash test.sh; pass: 332; total: 332"
@@ -5595,6 +5631,7 @@ walk_step5_packed_ok="  cmd: bash test.sh
 walk_step5_packed_bad="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
   walk-artifact: record/../escaped.md; cmd: bash test.sh; pass: 332; total: 332"
@@ -6306,6 +6343,7 @@ m32_missing_key="${m32_empty_aud/  readback: 332\/332 asserted/  fixture-fidelit
 step5_noaud="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5"
 
 # ---- AC-26: at `tested` the wall is not there ------------------------------
@@ -7065,6 +7103,7 @@ env_two_covered_decl='environments: macos-system (covered by this wave) · windo
 env_step5_covered="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
   environments-covered: macos-system"
@@ -7072,6 +7111,7 @@ env_step5_covered="  cmd: bash test.sh
 env_step5_no_covered_line="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md"
 
@@ -7150,6 +7190,7 @@ expect_audit_line "36h2 …and the no-op is still recorded on the audit-file cha
 env_step5_overclaim_fog="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
   environments-covered: macos-system, linux-system"
@@ -7162,6 +7203,7 @@ expect_block "36i environments-covered claims a FOG environment → block" \
 env_step5_overclaim_undeclared="  cmd: bash test.sh
   pass: 332
   total: 332
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
   environments-covered: macos-system, freebsd"
@@ -8666,6 +8708,7 @@ expect_block "17t12 …and so does an empty one" \
 step5_72="  cmd: bash tests/run.sh
   pass: 72
   total: 72
+  head: ${EG_HEAD}
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
 step5_71="  cmd: bash tests/run.sh
@@ -8701,6 +8744,7 @@ expect_eq "17t14b …in those words" \
 step5_advisory="  cmd: bash tests/run.sh
   pass: 72
   total: 72
+  head: ${EG_HEAD}
   advisory-exceeded: 3
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
@@ -9233,5 +9277,103 @@ expect_eq "D4h4 19f's fixture: exit 0" "0" "$HOOK_EXIT"
 expect_contains "D4h5 …and the finding line byte for byte" \
   "canonical-sdlc [task-ledger]: task T2 has invalid status 'doing' (want pending|active|done|dropped)" \
   "$HOOK_STDERR"
+
+# ============================================================
+section "§HEAD: Step-5 evidence names the head its run read (wave-26 T4; REQ-3 AC-3.2; D5)"
+# ============================================================
+#
+# A PASS THAT DOES NOT SAY WHICH CODE IT READ CANNOT BE COMPARED WITH ANYTHING. Beside
+# cmd/pass/total/output the block now carries `head:`, and the gate refuses it absent, when
+# it is not a commit in the repository the commit is made in, and when the release head does
+# not contain it (`git merge-base --is-ancestor`). The release head is the tip of the plan's
+# `working-branch:` when the plan names one that resolves, and the HEAD of the directory the
+# commit is made in otherwise. Every refusal is one line naming its fix. The positive control
+# for each arm is the same fixture with the one fact corrected.
+eg_commit() {  # <dir> <message> — one empty commit, fixed identity, no hooks
+  git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid \
+    -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q --allow-empty -m "$2" 2>/dev/null
+}
+step5_head() {  # <head line, or empty for none> [extra flush-left SDLC State line]
+  printf '  cmd: bash tests/run.sh\n  pass: 72\n  total: 72\n'
+  [ -n "$1" ] && printf '  head: %s\n' "$1"
+  printf '  output: .bionic/docs/plans/wave-01.plan.md#step-5\n  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md'
+  [ -n "${2:-}" ] && printf '\n%s' "$2"
+  return 0
+}
+expect_true "HEAD0 precondition: the fixture head is a 40-hex commit id" \
+  /usr/bin/grep -qE '^[0-9a-f]{40}$' <<<"$EG_HEAD"
+
+# --- absent ---
+hHa=$(make_home); eg_head_repo "$hHa"
+write_plan "$hHa" "$(plan 5 "$(step5_head '')" "$matrix_complete")" > /dev/null
+expect_block "HEADa a green Step-5 block with no head: → block" \
+  "$hHa" 'git commit -m "x"' "names no head"
+expect_eq "HEADa2 …in one line that names the fix" \
+  "bionic: commit refused — this step's evidence names no head (add head: <sha the run read>)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+write_plan "$hHa" "$(plan 5 "$(step5_head "$EG_HEAD")" "$matrix_complete")" > /dev/null
+expect_allow "HEADa3 …and the same block naming the repository's HEAD → allow" \
+  "$hHa" 'git commit -m "x"'
+
+# --- not a commit ---
+hHb=$(make_home); eg_head_repo "$hHb"
+write_plan "$hHb" "$(plan 5 "$(step5_head 0123456789abcdef0123456789abcdef01234567)" "$matrix_complete")" > /dev/null
+expect_block "HEADb a head: that is no commit in the repository → block" \
+  "$hHb" 'git commit -m "x"' "is not a commit"
+expect_eq "HEADb2 …in one line that names the fix" \
+  "bionic: commit refused — the Step-5 head: is not a commit here (record the sha the run read)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "HEADb3 …and the detail names the value read" \
+  "0123456789abcdef0123456789abcdef01234567" "$HOOK_VSTDERR"
+write_plan "$hHb" "$(plan 5 "$(step5_head HEAD)" "$matrix_complete")" > /dev/null
+expect_block "HEADb4 a symbolic head: (HEAD) is not a recorded head → block" \
+  "$hHb" 'git commit -m "x"' "is not a commit"
+write_plan "$hHb" "$(plan 5 "$(step5_head "${EG_HEAD:0:12}")" "$matrix_complete")" > /dev/null
+expect_allow "HEADb5 …while an abbreviated sha of a real commit → allow" \
+  "$hHb" 'git commit -m "x"'
+
+# --- not contained: the commit being made does not hold it ---
+hHc=$(make_home); eg_head_repo "$hHc"
+git -C "$hHc" checkout -q -b side 2>/dev/null; eg_commit "$hHc" "side work"
+HC_SIDE="$(git -C "$hHc" rev-parse HEAD)"
+git -C "$hHc" checkout -q - 2>/dev/null
+expect_eq "HEADc0 precondition: the side commit exists and HEAD is back on the fixture head" \
+  "$EG_HEAD" "$(git -C "$hHc" rev-parse HEAD)"
+write_plan "$hHc" "$(plan 5 "$(step5_head "$HC_SIDE")" "$matrix_complete")" > /dev/null
+expect_block "HEADc a head: on another line of history than the commit → block" \
+  "$hHc" 'git commit -m "x"' "does not contain head:"
+expect_eq "HEADc2 …in one line that names the fix" \
+  "bionic: commit refused — the release head does not contain head: (re-run the floor on release head)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+# An older head the commit DOES contain is a contained head: staleness is proof_state's
+# question (T5), not this one's.
+eg_commit "$hHc" "ahead of the proof"
+expect_true "HEADc3 precondition: HEAD moved past the fixture head" \
+  test "$(git -C "$hHc" rev-parse HEAD)" != "$EG_HEAD"
+write_plan "$hHc" "$(plan 5 "$(step5_head "$EG_HEAD")" "$matrix_complete")" > /dev/null
+expect_allow "HEADc4 …while an ancestor of the commit's HEAD → allow" \
+  "$hHc" 'git commit -m "x"'
+
+# --- the plan's working-branch is the release head ---
+# The commit is driven from the main checkout (on its own branch), and the run's floor ran
+# on the wave branch: the head is the wave branch's, which HEAD does not contain. With the
+# plan naming `working-branch:` the release head is that branch's tip, and it holds the head.
+hHd=$(make_home); eg_head_repo "$hHd"
+git -C "$hHd" branch wave/99-fx 2>/dev/null
+git -C "$hHd" checkout -q wave/99-fx 2>/dev/null; eg_commit "$hHd" "wave work"
+HD_WAVE="$(git -C "$hHd" rev-parse HEAD)"
+git -C "$hHd" checkout -q - 2>/dev/null
+write_plan "$hHd" "$(plan 5 "$(step5_head "$HD_WAVE" 'working-branch: wave/99-fx')" "$matrix_complete")" > /dev/null
+expect_allow "HEADd the wave head, the plan naming working-branch: wave/99-fx → allow" \
+  "$hHd" 'git commit -m "x"'
+write_plan "$hHd" "$(plan 5 "$(step5_head "$HD_WAVE")" "$matrix_complete")" > /dev/null
+expect_block "HEADd2 …and the same head with no working-branch: is judged against HEAD → block" \
+  "$hHd" 'git commit -m "x"' "does not contain head:"
+git -C "$hHd" checkout -q -b other 2>/dev/null; eg_commit "$hHd" "elsewhere"
+HD_OTHER="$(git -C "$hHd" rev-parse HEAD)"
+git -C "$hHd" checkout -q - 2>/dev/null
+write_plan "$hHd" "$(plan 5 "$(step5_head "$HD_OTHER" 'working-branch: wave/99-fx')" "$matrix_complete")" > /dev/null
+expect_block "HEADd3 …and a head the working branch does not hold → block" \
+  "$hHd" 'git commit -m "x"' "does not contain head:"
 
 finish
