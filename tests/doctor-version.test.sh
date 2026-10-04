@@ -207,13 +207,13 @@ run_doctor() {  # <claude-home> [shell-rc] [extra doctor args...]
   local h="$1" rcfile="${2:-$FIXTURE_RC}"
   if [ $# -ge 2 ]; then shift 2; else shift $#; fi
   ( cd "$REPO" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$rcfile" \
-      BIONIC_CLAUDE_HOME="$h" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_CLAUDE_HOME="$h" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" "$@" < /dev/null 2>"$DOCTOR_ERR_FILE" )
 }
 
 run_doctor_no_claude() {  # <claude-home> — the same page with the CLI off PATH
   ( cd "$REPO" && HOME="$TMP" PATH="$BIN_NO_CLAUDE" BIONIC_SHELL_RC="$FIXTURE_RC" \
-      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>"$DOCTOR_ERR_FILE" )
 }
 
@@ -238,7 +238,7 @@ run_doctor_no_claude() {  # <claude-home> — the same page with the CLI off PAT
 # MCP rows of Section 12.
 run_doctor_only() {  # <sections> <claude-home> [cwd] — the filtered page; stderr kept in $DOCTOR_ERR_FILE
   ( cd "${3:-$REPO}" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_DOCTOR_ONLY="$1" \
-      BIONIC_CLAUDE_HOME="$2" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_CLAUDE_HOME="$2" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>"$DOCTOR_ERR_FILE" )
 }
 
@@ -664,7 +664,7 @@ write_installed_plugins_gh() {  # <claude-home> <installPath> [<gitCommitSha>]
 
 run_doctor_at_cache() {  # <claude-home> -> the cache copy's own doctor, from outside any repo
   ( cd "$TMP" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
-      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$GH_CACHE" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$GH_CACHE" BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$GH_CACHE/scripts/doctor.sh" < /dev/null 2>"$DOCTOR_ERR_FILE" )
 }
 
@@ -747,7 +747,7 @@ write_installed_plugins_sha "$HOME10" "$REPO" "$REPO_HEAD"
 # The same run, from the unrelated repository. `run_doctor` cd's to $REPO, so
 # this case spells its own cd — that is the variable under test.
 OUT10="$( cd "$UNRELATED" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
-    BIONIC_CLAUDE_HOME="$HOME10" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+    BIONIC_CLAUDE_HOME="$HOME10" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=15 \
     bash "$DOCTOR_SH" < /dev/null 2>&1 )"
 ROW10="$(version_row "$OUT10")"
 

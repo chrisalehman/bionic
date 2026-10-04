@@ -291,6 +291,12 @@ for _t in $_TOOLS_REAL; do
   else _TOOLS_MISSING="${_TOOLS_MISSING}${_TOOLS_MISSING:+ }${_t}"; fi
 done
 
+# THE SHELL RC AND HOME ARE FIXTURES, NOT THE MACHINE'S. PATH is already the tool directory; HOME and the rc
+# were still the host's, so the page printed host-derived lines (the shell proxy row, the renderer and browser
+# rows) that no row here reads. An empty rc, as the sister suites carry.
+FIXTURE_RC="${TMP}/dot.zshrc"
+: > "$FIXTURE_RC"
+
 # ---------- driving doctor ----------
 
 # THE PROBE BOUND IS 15 SECONDS, THE DOCTOR'S OWN DEFAULT, ON EVERY LAUNCH. It was 3, and no row here is
@@ -311,7 +317,8 @@ done
 # here. The cwd is now an argument, and it is the fixture repo the session under
 # test actually lives in.
 run_doctor() {  # <claude-home> <project-cwd>
-  ( cd "$2" && PATH="$BIN" BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=15 \
+  ( cd "$2" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
@@ -339,7 +346,8 @@ patrol_block() {  # <full-output>
 # three, in 14 the first of three, in 15 the first of four and in 17 the first of five do, and the rest of
 # each use this.
 run_doctor_only() {  # <claude-home> <project-cwd>
-  ( cd "$2" && PATH="$BIN" BIONIC_DOCTOR_ONLY="PATROL,PROJECT,FIXES" BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+  ( cd "$2" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_DOCTOR_ONLY="PATROL,PROJECT,FIXES" \
+      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
       BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
