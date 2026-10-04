@@ -854,13 +854,19 @@ WKF="$WK/.bionic/tmp/workspaces-${WKSID}.state"
   printf 'workspace/v1|session=%s|name=b|path=/t/b-1|branch=wt/b|base=0|plan=none|at=2026-10-03T00:00:01Z\n' "$WKSID"
   printf 'workspace/v1|session=%s|name=a|path=/t/a-2|branch=wt/a2|base=0|plan=none|at=2026-10-03T00:00:02Z\n' "$WKSID"
   printf 'workspace/v1|session=someone-else|name=a|path=/t/a-foreign|branch=wt/x|base=0|plan=none|at=2026-10-03T00:00:03Z\n'
-  printf 'roster-state/v1|session=%s|name=a|path=/t/a-roster\n' "$WKSID"
+  # A line of ANOTHER schema naming `a` with a path, after a's last real line: a reader that
+  # did not key on the schema would answer /t/a-roster below. Built by the roster writer
+  # (tests/lib/roster-row.sh, as cross-gate §S17 requires) and given the path a workspace
+  # line would carry.
+  printf '%s|path=/t/a-roster\n' "$(roster_row_fixture session="$WKSID" name=a)"
   printf 'workspace/v1|session=%s|name=e|branch=wt/e|base=0|plan=none|at=2026-10-03T00:00:04Z\n' "$WKSID"
   printf 'workspace/v1|session=%s|name=d|path=relative/d|branch=wt/d|base=0|plan=none|at=2026-10-03T00:00:05Z\n' "$WKSID"
   printf 'workspace/v1|session=%s|name=c|path=/t/c-1|branch=wt/c|base=0|plan=none|at=2026-10-03T00:00:06Z\r\n' "$WKSID"
 } > "$WKF"
 
 wk() { "$@"; echo "rc=$?"; }
+expect_eq "fixture: the foreign-schema line naming a, with a path, is in the file" "1" \
+  "$(/usr/bin/grep -c "^$(roster_row_schema)|.*|name=a|.*|path=/t/a-roster\$" "$WKF")"
 expect_eq "the last line for a name answers"               "$(printf '/t/a-2\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" a)"
 expect_eq "another name answers its own"                   "$(printf '/t/b-1\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" b)"
 expect_eq "a CRLF line answers without the CR"             "$(printf '/t/c-1\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" c)"
