@@ -34,7 +34,8 @@
 # tool_name, tool_input, permission_suggestions, plus agent_id and agent_type for an agent.
 # The session id is the LEAD's for every asker (measured). Roster rows come from the
 # production writer (`roster_row` through tests/lib/roster-row.sh); workspace lines are the
-# T1 interface shape, written by hand because the writer needs a real `git worktree add`.
+# T1 interface shape, written by hand, and the trees they name are real linked worktrees of
+# the fixture project (the reader counts nothing else, T18).
 #
 # ANTI-VACUITY (per .claude/rules/test-harness.md). Every silence (§A4, §A10, §A11, §A5.h) sits
 # beside an answer on the same fixture; every deny section carries an allow on the same facts;
@@ -81,10 +82,14 @@ make_project() {
   dir="$SANDBOX/$name"
   mkdir -p "$dir/src" "$dir/.bionic/tmp" "$dir/.bionic/docs/plans/epic-99" \
            "$dir/.bionic/docs/specs/epic-99" "$dir/.bionic/docs/record/$PLAN_BASE" \
-           "$dir/.worktrees/25-T1" "$dir/.worktrees/25-T9" "$SANDBOX/$name-scratch"
+           "$SANDBOX/$name-scratch"
   git -C "$dir" init -q 2>/dev/null
   git -C "$dir" checkout -q -b "$BRANCH" 2>/dev/null
   git -C "$dir" -c user.email=fx@example.invalid -c user.name=fx commit -q --allow-empty -m init 2>/dev/null
+  # The two trees the sections name are LINKED WORKTREES of the project, as `create` makes
+  # them: a recorded path counts only when git lists it as one (wave-25 T18, §A2b).
+  git -C "$dir" worktree add -q -b wt/25-T1 "$dir/.worktrees/25-T1" HEAD >/dev/null 2>&1
+  git -C "$dir" worktree add -q -b wt/25-T9 "$dir/.worktrees/25-T9" HEAD >/dev/null 2>&1
   plan="$dir/.bionic/docs/plans/epic-99/$PLAN_BASE.plan.md"
   cat > "$plan" <<PAPLAN
 ---
@@ -267,6 +272,75 @@ drive "$A2P" "$(payload "$A2P" Bash "$(bash_ti "touch $A2P/src/d.txt")" a0000000
 expect_eq "A2.21 an agent id with no roster row: one decision" "1" "$(n_obj "$OUT")"
 expect_eq "A2.22 …a deny" "deny" "$(behavior "$OUT")"
 expect_contains "A2.23 …that is still the failure naming the missing row" "the roster has no row for the asking agent a00000000000000000" "$(message "$OUT")"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§A2b a forged workspace line never widens a grant: only a tree git lists counts (wave-25 T18, critic C1)"
+#
+# The record lives in .bionic/tmp, and a script the hook never sees can append to it (N7). A
+# line naming the main checkout, or its parent, after the writer's true line made the reader
+# answer the forged path and the hook grant the writer the hook libraries themselves. Driven
+# through the hook, for the writer's own root and for the lead's tree roots, each deny beside
+# the allow the true tree still gets.
+
+A2BP="$(make_project a2b bound)"
+A2BT="$A2BP/.worktrees/25-T1"
+mkdir -p "$A2BP/hooks"; : > "$A2BP/hooks/x.sh"
+add_roster_row "$A2BP" w99-T1 aw99-T1-0974313b7a6b74f2 bionic:senior-implementor "$(record_of "$A2BP")/T1.md"
+add_workspace "$A2BP" w99-T1 "$A2BT"
+expect_contains "A2b.0 fixture: the writer's tree is one git lists" "worktree $A2BT" "$(git -C "$A2BP" worktree list --porcelain)"
+drive "$A2BP" "$(payload "$A2BP" Write "$(file_ti "$A2BP/hooks/x.sh")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A2BT")"
+expect_eq "A2b.0b control: before any forged line, the writer may not write the main checkout's hooks" "deny" "$(behavior "$OUT")"
+
+# A line naming the main checkout, appended after the true one.
+add_workspace "$A2BP" w99-T1 "$A2BP"
+drive "$A2BP" "$(payload "$A2BP" Write "$(file_ti "$A2BP/hooks/x.sh")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A2BT")"
+expect_eq "A2b.1 forged path=<main>: a writer's Write to <main>/hooks/x.sh is denied" "deny" "$(behavior "$OUT")"
+expect_contains "A2b.2 …and the writer's grant it names holds the true tree" "$A2BT" "$(message "$OUT")"
+drive "$A2BP" "$(payload "$A2BP" Bash "$(bash_ti "rm -rf $A2BP/hooks")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A2BT")"
+expect_eq "A2b.3 forged path=<main>: a writer's delete of <main>/hooks is denied" "deny" "$(behavior "$OUT")"
+drive "$A2BP" "$(payload "$A2BP" Write "$(file_ti "$A2BT/inside.txt")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A2BT")"
+expect_eq "A2b.4 paired positive: a write inside the writer's true tree is still allowed" "allow" "$(behavior "$OUT")"
+
+# A line naming the parent of the main checkout, appended after both.
+add_workspace "$A2BP" w99-T1 "${A2BP%/*}"
+drive "$A2BP" "$(payload "$A2BP" Write "$(file_ti "$A2BP/hooks/x.sh")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A2BT")"
+expect_eq "A2b.5 forged path=<parent of main>: the Write to <main>/hooks/x.sh is denied" "deny" "$(behavior "$OUT")"
+drive "$A2BP" "$(payload "$A2BP" Bash "$(bash_ti "touch $SANDBOX/a2b-elsewhere.txt")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A2BT")"
+expect_eq "A2b.6 …and so is a write beside the project" "deny" "$(behavior "$OUT")"
+drive "$A2BP" "$(payload "$A2BP" Bash "$(bash_ti "touch $A2BT/inside2.txt")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A2BT")"
+expect_eq "A2b.7 paired positive: the true tree is still the writer's" "allow" "$(behavior "$OUT")"
+
+# The rule is by place, not by a `.worktrees/` prefix: `create` accepts another parent
+# directory, and a writer whose tree git lists there keeps it.
+A2BT4="$A2BP/trees/25-T4"
+git -C "$A2BP" worktree add -q -b wt/25-T4 "$A2BT4" HEAD >/dev/null 2>&1
+add_roster_row "$A2BP" w99-T4 aw99-T4-1 bionic:senior-implementor "$(record_of "$A2BP")/T4.md"
+add_workspace "$A2BP" w99-T4 "$A2BT4"
+drive "$A2BP" "$(payload "$A2BP" Write "$(file_ti "$A2BT4/inside.txt")" aw99-T4-1 w99-T4 "$A2BT4")"
+expect_eq "A2b.8 a writer whose tree git lists under <root>/trees writes inside it: allow" "allow" "$(behavior "$OUT")"
+
+# THE LEAD'S TREE ROOTS. The lead's checkout is a linked worktree holding the working branch,
+# so the main checkout is no root of its own; every recorded tree of the session is.
+A2LP="$(make_project a2l bound)"
+A2LW="$A2LP/.worktrees/25-wave"
+git -C "$A2LP" checkout -q -b side 2>/dev/null
+git -C "$A2LP" worktree add -q "$A2LW" "$BRANCH" >/dev/null 2>&1
+mkdir -p "$A2LP/hooks"; : > "$A2LP/hooks/x.sh"
+add_workspace "$A2LP" w99-T1 "$A2LP/.worktrees/25-T1"
+drive "$A2LP" "$(payload "$A2LP" Write "$(file_ti "$A2LW/x.txt")")"
+expect_eq "A2b.lead.0 control: the lead writes inside its checkout (a linked worktree)" "allow" "$(behavior "$OUT")"
+drive "$A2LP" "$(payload "$A2LP" Write "$(file_ti "$A2LP/hooks/x.sh")")"
+expect_eq "A2b.lead.0b control: before any forged line, the lead may not write the main checkout's hooks" "deny" "$(behavior "$OUT")"
+add_workspace "$A2LP" w99-X "$A2LP"
+add_workspace "$A2LP" w99-Y "${A2LP%/*}"
+drive "$A2LP" "$(payload "$A2LP" Write "$(file_ti "$A2LP/hooks/x.sh")")"
+expect_eq "A2b.lead.1 forged path=<main>: the lead's Write to <main>/hooks/x.sh is denied" "deny" "$(behavior "$OUT")"
+drive "$A2LP" "$(payload "$A2LP" Bash "$(bash_ti "rm -rf $A2LP/hooks")")"
+expect_eq "A2b.lead.2 …and its delete of <main>/hooks" "deny" "$(behavior "$OUT")"
+drive "$A2LP" "$(payload "$A2LP" Bash "$(bash_ti "touch $SANDBOX/a2l-elsewhere.txt")")"
+expect_eq "A2b.lead.3 forged path=<parent of main>: a write beside the project is denied" "deny" "$(behavior "$OUT")"
+drive "$A2LP" "$(payload "$A2LP" Write "$(file_ti "$A2LP/.worktrees/25-T1/y.txt")")"
+expect_eq "A2b.lead.4 paired positive: the session's true recorded tree is still the lead's" "allow" "$(behavior "$OUT")"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
 section "§A4 tools that collect human input are never answered"
@@ -527,10 +601,12 @@ for t in "$A13P/.bionic/docs/notes.md" "$A13P/.worktrees/25-T9/f.txt" "$A13P/.gi
   expect_eq "A13.lead.1 the lead deleting ${t#"$A13P"/}: deny" "deny" "$(behavior "$OUT")"
   expect_contains "A13.lead.2 …because it is a shared directory of the project" "shared directories" "$(message "$OUT")"
 done
-# A writer whose recorded tree is the main root itself.
+# A writer with a recorded tree. (Until T18 this tree was the main root itself; a recorded
+# main checkout is no one's tree now, §A2b, so the writer's tree is a linked worktree and the
+# deny below still has to come from the shared-directory rule, which its reason names.)
 add_roster_row "$A13P" w99-W aw99-W-1 bionic:senior-implementor "$(record_of "$A13P")/W.md"
-add_workspace "$A13P" w99-W "$A13P"
-drive "$A13P" "$(payload "$A13P" Bash "$(bash_ti "rm -f $A13P/src/y.txt")" aw99-W-1 w99-W)"
+add_workspace "$A13P" w99-W "$A13P/.worktrees/25-T1"
+drive "$A13P" "$(payload "$A13P" Bash "$(bash_ti "rm -f $A13P/.worktrees/25-T1/y.txt")" aw99-W-1 w99-W)"
 expect_eq "A13.writer.0 control: the writer deletes inside its recorded tree" "allow" "$(behavior "$OUT")"
 drive "$A13P" "$(payload "$A13P" Bash "$(bash_ti "rm -f $A13P/.git/config")" aw99-W-1 w99-W)"
 expect_eq "A13.writer.1 the writer deleting .git: deny" "deny" "$(behavior "$OUT")"
