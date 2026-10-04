@@ -2238,8 +2238,9 @@ expect_eq "READS.14d …and no kind default applies without the column: T3 is re
 } > "$SANDBOX/reads.roster"
 READY_ROST="$(call units_ready "$SANDBOX/reads.md" 4 "$SANDBOX/reads.roster")"
 expect_eq "READS.15 a ready row open on the roster under w26-T1 is subtracted" "no" "$(has_line "$READY_ROST" T1)"
-expect_eq "READS.15b …the other ready rows stay" "yes yes" \
-  "$(printf '%s %s' "$(has_line "$READY_ROST" T3)" "$(has_line "$READY_ROST" T5)")"
+# The review T3 is not among them: nothing in this table has landed, so it waits for the first
+# landing (wave-26 T14, READS.6).
+expect_eq "READS.15b …the other ready row stays" "yes" "$(has_line "$READY_ROST" T5)"
 expect_eq "READS.15c …and without a roster operand T1 is offered" "yes" "$(has_line "$READY_READS" T1)"
 
 # ============================================================
