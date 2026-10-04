@@ -3,7 +3,7 @@
 # release (epic-23 wave-26-never-idle, D8, D14; REQ-6 AC-6.3, AC-6.4, REQ-4 AC-4.1).
 #
 #   bash <plugin-root>/scripts/booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>]
-#                                        [--stamp-dir <dir>]
+#                                        [--stamp-dir <dir>] [--suites <names>]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -35,7 +35,7 @@
 # and the dirty count (`git status --porcelain | wc -l`) of the tree the shim stands in are
 # read; when the command ends one line is appended to that tree's own git dir:
 #
-#   stamp/v1|head=<40-hex>|dirty=<count>|rc=<n>|at=<ISO-UTC>|cmd=<first 120 chars>
+#   stamp/v1|head=<40-hex>|dirty=<count>|rc=<n>|at=<ISO-UTC>[|suites=<names>]|cmd=<first 120 chars>
 #
 # They are read BEFORE the command because what a green run proves is the tree it ran on,
 # not the tree its own output left behind. In `cmd=` every `|`, newline, carriage return and
@@ -52,6 +52,16 @@
 # shim's own directory) and the stamp goes to <dir>'s git dir; the command itself still runs where
 # the shim stands, and its own `cd` moves it. A <dir> that does not exist or is in no work tree
 # is "outside a git tree": no stamp, no error, never a stamp in the shim's own tree instead.
+#
+# --suites <names>: WHICH SUITES THE COMMAND RAN (wave-26 T61, critic F1). The doctrine runs a
+# brief's suites one call each, so one tree collects one stamp per suite, and `cmd=` cannot say
+# which suite a line was for (behind the doctrine's `cd <tree> || exit 1;` its 120 characters are
+# the path). The wall names the suite files the command runs, by basename, comma-joined, `?` for
+# one it cannot name, and the shim writes them as the field `suites=<names>` between `at=` and
+# `cmd=`, as handed. Any character outside a name's set (letters, digits, `.`, `_`, `+`, `-`, the
+# `,` and `?`) becomes `?`, so the field is always one field of one line. Handed nothing, the
+# shim writes the line without the field, as before; a reader that stops at `cmd=` and ignores a
+# key it does not know reads both. An empty value is usage.
 #
 # NESTING. When `BIONIC_SLOT_HELD=1` is already set the command is inside a place, so it
 # books nothing and runs (a nested run must never wait on its own parent). Otherwise the
@@ -138,11 +148,11 @@ BOOKED_KILLED_RC=124
 BOOKED_RETRIES=2
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] -- <command>\n' >&2
   exit 2
 }
 
-kill_after=""; quiet=0; sep=0; run_shell=""; stamp_dir=""
+kill_after=""; quiet=0; sep=0; run_shell=""; stamp_dir=""; suites=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --kill-after)   [ "$#" -ge 2 ] || booked_usage; kill_after="$2"; shift 2 ;;
@@ -152,6 +162,8 @@ while [ "$#" -gt 0 ]; do
     --shell=*)      run_shell="${1#--shell=}"; [ -n "$run_shell" ] || booked_usage; shift ;;
     --stamp-dir)    [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; stamp_dir="$2"; shift 2 ;;
     --stamp-dir=*)  stamp_dir="${1#--stamp-dir=}"; [ -n "$stamp_dir" ] || booked_usage; shift ;;
+    --suites)       [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; suites="$2"; shift 2 ;;
+    --suites=*)     suites="${1#--suites=}"; [ -n "$suites" ] || booked_usage; shift ;;
     --)             sep=1; shift; break ;;
     *)              booked_usage ;;
   esac
@@ -196,10 +208,11 @@ booked_one_line() {  # <text> <n> — pipes and line breaks made spaces, then th
 
 booked_stamp() {  # <rc>
   [ -n "$stamp_file" ] || return 0
-  local c
+  local c s=""
   c="$(booked_one_line "$cmd" 120)"
-  printf 'stamp/v1|head=%s|dirty=%s|rc=%s|at=%s|cmd=%s\n' \
-    "$stamp_head" "${stamp_dirty:-0}" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$c" \
+  [ -z "$suites" ] || s="|suites=${suites//[!A-Za-z0-9._+,?-]/?}"
+  printf 'stamp/v1|head=%s|dirty=%s|rc=%s|at=%s%s|cmd=%s\n' \
+    "$stamp_head" "${stamp_dirty:-0}" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$s" "$c" \
     >> "$stamp_file" 2>/dev/null
   return 0
 }
