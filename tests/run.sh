@@ -769,10 +769,22 @@ if [ "$SERIAL" -eq 0 ]; then
     done
     return 0
   }
+  # A TRY THAT WRITES NOTHING READS AS NOTHING (wave-26 T49; review 12 F1). A worker writes
+  # <label>.rc and <label>.sec only after its suite ends, so a worker killed before that leaves
+  # the files of the try before it, and the report walk judged the retry by them: a pass
+  # printed for a run that never finished, and a timing row from a disturbed try. The files
+  # are removed right before each worker launch, so a worker that ends without a result leaves
+  # no .rc, which _verdict reports as KILLED (no exit status recorded), and no .sec, which
+  # the walk times nothing from. The capture goes too: it is the other half of a try's result,
+  # and the advisory tally and a KILLED verdict both print what is in it.
+  _solo_clear() {  # <label> — forget the previous try's result
+    rm -f "$TMP/${1}.rc" "$TMP/${1}.sec" "$TMP/${1}.out"
+  }
   _solo_run() {  # <label> — one solo suite; leaves <label>.void when it was never measured
     local label="$1" tries=0 why last="" cores max take cpu0 t0 own
     rm -f "$TMP/${label}.void"
     if [ "$_SOLO_BOOK" != yes ]; then
+      _solo_clear "$label"
       bash "$SELF" --one "$label" </dev/null
       return 0
     fi
@@ -796,11 +808,13 @@ if [ "$SERIAL" -eq 0 ]; then
           echo "tests/run.sh: void — ${label}: ${last}; ${why}" >&2
           return 0
         fi
+        _solo_clear "$label"
         bash "$SELF" --one "$label" </dev/null
         printf '%s\n' "$why" >"$TMP/${label}.void"
         echo "tests/run.sh: void — ${label}: ${why}; it ran unbooked and is not retried" >&2
         return 0
       fi
+      _solo_clear "$label"
       _solo_cpu; cpu0=$_SOLO_CPU; t0=$SECONDS
       BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1 BIONIC_SLOT_PLACE="$(_solo_place)" \
         bash "$SELF" --one "$label" </dev/null
