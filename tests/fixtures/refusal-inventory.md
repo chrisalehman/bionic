@@ -97,7 +97,6 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `dp_finding "this dispatch came from a worktree" "dispatch from the main checkout" \` — dispatch from a worktree — none: the fix is to dispatch from the main checkout, a change of where, not a command
 - `dp_finding "$1" "land or stand down a row" \` — budget_deny forwarder — fix: `bash ${HOOK_DIR}/stop-orders.sh standdown`, rooted at the real hooks directory
 - `[ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && budget_deny \` — writer budget — fix: each counted open row with `bash <hooks>/session-sweeper.sh ack '<name>'` (`budget_writer_rows`)
-- `[ $(( BUDGET_CLAIMED + 1 )) -gt "$B_SUITES" ] && budget_deny \` — suite budget — fix: `bash ${HOOK_DIR}/stop-orders.sh standdown`, through budget_deny
 - `[ $(( BUDGET_LIVE + 1 )) -gt "$B_TREES" ] && budget_deny \` — worktree budget — fix: `bash ${HOOK_DIR}/stop-orders.sh standdown`, through budget_deny
 - `dp_finding "that name is in flight" "use the FILL line's name" \` — name in flight — none: the fix is the name the tick's FILL line printed, which only that tick output carries
 - `refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"` — single-finding refusal — none: a forwarder; the fix is the one finding's own
