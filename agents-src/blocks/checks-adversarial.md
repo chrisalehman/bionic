@@ -2,7 +2,7 @@
 
 ## A whole read
 
-When the range is the whole run (`scope: whole`), read only how the pieces interact and what they duplicate between them; this is not a second read of each piece. Each piece was read as it landed. Look for what no single piece can show: a contract one piece changed and another still assumes, two pieces that each solved the same problem, an ordering that holds inside each piece and breaks across them.
+When the range is the whole run (`scope: whole`), read only how the pieces interact; this is not a second read of each piece. Each piece was read as it landed. Look for what no single piece can show: a contract one piece changed and another still assumes, an ordering that holds inside each piece and breaks across them. What the pieces duplicate is the structure reader's.
 
 ## The record
 

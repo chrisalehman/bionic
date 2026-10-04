@@ -4911,9 +4911,9 @@ section "Section W27-reuse: wave-27 T12 — a writer looks for an existing site 
 # the search duty and the `reuse:` report line in both of its forms. §W27-42: the Step-2 ownership
 # line and the operational-rules exemplar carry the `reuses` column, in the one column order.
 # Each pin sits beside a doctored copy with the text gone, which proves the arm goes red. HERMETIC.
-W27_DUTY='before adding a function, a file or a configuration key, search for an existing site that does the job'
-W27_LINE_A='`reuse: searched <what> · reused <site>`'
-W27_LINE_B='`reuse: searched <what> · none fits: <why>`'
+W27_DUTY='before adding a function, file, type or configuration key, search for an existing site that does the job'
+W27_LINE_A="\`reuse: searched '<pattern>' in <paths> · reused <site>\`"
+W27_LINE_B="\`reuse: searched '<pattern>' in <paths> · none fits: <why>\`"
 W27_BLOCK="${REPO}/agents-src/blocks/implementor-mechanics.md"
 for _w27_f in "$W27_BLOCK" "${REPO}/agents/implementor.md" "${REPO}/agents/senior-implementor.md"; do
   _w27_n="${_w27_f#"$REPO"/}"
@@ -4925,7 +4925,7 @@ for _w27_f in "${REPO}/agents/auditor.md" "${REPO}/agents/researcher.md"; do
   expect_eq "W27-41d: ${_w27_f#"$REPO"/}, which writes no code, carries no search duty" "" "$(w26_hits "$W27_DUTY" "$_w27_f")"
 done
 W27_DOC41="$TMP/w27-41-doctored.md"
-tr '\n' ' ' < "$W27_BLOCK" | sed 's/search for[[:space:]]*an existing site that does the job/search/' > "$W27_DOC41"
+tr '\n' ' ' < "$W27_BLOCK" | sed 's/search[[:space:]]*for[[:space:]]*an existing site that does the job/search/' > "$W27_DOC41"
 expect_eq "W27-41m: a block that lost the search duty is caught" "" "$(w26_hits "$W27_DUTY" "$W27_DOC41")"
 expect_nonempty "W27-41mp precondition: the doctored block still carries the reuse: line" "$(w26_hits "$W27_LINE_A" "$W27_DOC41")"
 
@@ -4954,6 +4954,7 @@ expect_nonempty "W27-42mp precondition: the doctored copy still carries the owne
 # the same extractor and file, and a doctored copy proves each arm goes red. HERMETIC: committed
 # finals by path; doctored copies under $TMP.
 W27_CHECKS_DIR="${REPO}/payload/context"
+W27_STRUCT="${W27_CHECKS_DIR}/checks-structure.md"
 W27_QUESTIONS="evidence adversarial structure"
 W27_IDS="reuse one-site single-job open-closed substitution narrow-interface dependency-direction"
 W27_CAP=4500
@@ -4965,26 +4966,58 @@ w27_ids_in() {
 }
 # w27_check_line <file> <id> -> the file's check line for the id, in the interface form.
 w27_check_line() { grep -F -- "- **$2** — " "$1" 2>/dev/null | head -1; }
+# w27_cap_verdict <file> -> "within" when the file is at most the cap, "over" when past it or unreadable.
+w27_cap_verdict() {
+  local n; n="$(wc -c < "$1" 2>/dev/null | tr -cd '0-9')"
+  if [ "${n:-99999}" -le "$W27_CAP" ]; then printf 'within'; else printf 'over'; fi
+}
+# w27_record_form <file> -> the lines of the fenced block in the file's last section, when that
+# section is `## The record`; nothing when another section follows it.
+w27_record_form() {
+  awk '/^## / { last = $0; body = ""; fence = 0; next }
+       last == "## The record" && /^```/ { fence = !fence; next }
+       last == "## The record" && fence { body = body $0 "\n" }
+       END { if (last == "## The record") printf "%s", body }' "$1" 2>/dev/null
+}
+# w27_form_want <question> -> the record form the Interfaces table gives that question, in order.
+w27_form_want() {
+  printf 'reviewed: <a>..<b>\nquestion: %s\nresult: <pass|flag|fail>\nscope: <piece|whole>' "$1"
+  [ "$1" = structure ] && printf '\ncheck: <id> <PASS|FLAG|FAIL|n/a> <reason>'
+  return 0
+}
 
 for _q in $W27_QUESTIONS; do
   _f="${W27_CHECKS_DIR}/checks-${_q}.md"
   _bytes="$(wc -c < "$_f" 2>/dev/null | tr -cd '0-9')"
   expect_true "W27-T8a: AC-5.1 — payload/context/checks-${_q}.md is rendered and non-empty" test -s "$_f"
-  expect_true "W27-T8b: …and fits the ${W27_CAP}-byte cap (${_bytes:-missing} B)" \
-    test "${_bytes:-99999}" -le "$W27_CAP"
+  expect_eq "W27-T8b: …and fits the ${W27_CAP}-byte cap (${_bytes:-missing} B)" "within" "$(w27_cap_verdict "$_f")"
   _upper="$(printf 'checks-%s' "$_q" | tr '[:lower:]' '[:upper:]')"
   same_everywhere "W27-T8c-${_q}" "the ${_q} checks are one text in the block and the rendered file" \
     "${BLOCK_DIR}/checks-${_q}.md" "$_upper" "$_f"
-  expect_eq "W27-T8d: …and the file ends with the record form" "question: ${_q}" \
-    "$(grep -o "^question: ${_q}\$" "$_f" 2>/dev/null | head -1)"
+  expect_eq "W27-T8d: …and the file ends with the record form, every line in order" \
+    "$(w27_form_want "$_q")" "$(w27_record_form "$_f")"
 done
-W27_PADDED="$TMP/w27-padded.md"
-{ cat "${W27_CHECKS_DIR}/checks-structure.md"; head -c "$W27_CAP" /dev/zero | tr '\0' 'x'; } > "$W27_PADDED" 2>/dev/null
-expect_false "W27-T8bm: a checks file padded past the cap is caught" \
-  test "$(wc -c < "$W27_PADDED" | tr -cd '0-9')" -le "$W27_CAP"
+# W27-T8bm: the cap verdict T8b reads, at the boundary. The sizes are the Interfaces table's
+# 4,500 bytes typed here, not read from W27_CAP, so a raised cap or a removed check goes red.
+W27_AT_CAP="$TMP/w27-at-cap.md"; W27_PAST_CAP="$TMP/w27-past-cap.md"
+head -c 4500 /dev/zero | tr '\0' 'x' > "$W27_AT_CAP"
+head -c 4501 /dev/zero | tr '\0' 'x' > "$W27_PAST_CAP"
+expect_eq "W27-T8bm precondition: a file of exactly 4,500 bytes reads within the cap" "within" "$(w27_cap_verdict "$W27_AT_CAP")"
+expect_eq "W27-T8bm: a file of 4,501 bytes, one past the cap, is caught" "over" "$(w27_cap_verdict "$W27_PAST_CAP")"
+# W27-T8dm: the record form cut, reordered, or followed by another section is caught.
+W27_FORM_CUT="$TMP/w27-form-cut.md"; W27_FORM_SWAP="$TMP/w27-form-swap.md"; W27_FORM_TAIL="$TMP/w27-form-tail.md"
+anchor "$W27_STRUCT" 'scope: <piece|whole>' 1
+grep -vxF 'scope: <piece|whole>' "$W27_STRUCT" > "$W27_FORM_CUT" 2>/dev/null
+awk '$0 == "result: <pass|flag|fail>" { held = $0; next } { print } held != "" && $0 == "scope: <piece|whole>" { print held; held = "" }' \
+  "$W27_STRUCT" > "$W27_FORM_SWAP" 2>/dev/null
+{ cat "$W27_STRUCT"; printf '\n## Notes\n\nAnything.\n'; } > "$W27_FORM_TAIL" 2>/dev/null
+expect_nonempty "W27-T8dm precondition: the cut copy still has a record form" "$(w27_record_form "$W27_FORM_CUT")"
+expect_ne "W27-T8dm: a record form with its scope line cut is caught" "$(w27_form_want structure)" "$(w27_record_form "$W27_FORM_CUT")"
+expect_nonempty "W27-T8dm precondition: the reordered copy still has a record form" "$(w27_record_form "$W27_FORM_SWAP")"
+expect_ne "W27-T8dm: a record form with result and scope swapped is caught" "$(w27_form_want structure)" "$(w27_record_form "$W27_FORM_SWAP")"
+expect_ne "W27-T8dm: a record section followed by another section is caught" "$(w27_form_want structure)" "$(w27_record_form "$W27_FORM_TAIL")"
 
 # AC-4.3 text half: every structure id has its check line, and the line names its failing case.
-W27_STRUCT="${W27_CHECKS_DIR}/checks-structure.md"
 for _id in $W27_IDS; do
   _line="$(w27_check_line "$W27_STRUCT" "$_id")"
   expect_nonempty "W27-T8e: checks-structure.md carries the \`${_id}\` check in the interface form" "$_line"
@@ -5112,5 +5145,92 @@ awk 'index($0, "<!-- bionic:principles:end -->") == 1 { print "curl -s -d \"done
   "$W27P_FINAL" > "$W27P_CURL" 2>/dev/null
 expect_nonempty "W27-96m precondition: the doctored copy still has its block" "$(w27p_body "$W27P_CURL")"
 expect_eq "W27-96m: a body that carries a curl line is caught" "a fetch command" "$(w27p_general "$W27P_CURL")"
+
+section "Section W27-T33: wave-27 T33 — the checks say what a reader can act on (REQ-3 AC-3.2, REQ-4 AC-4.1/AC-4.3; D5, D9, D10)"
+#
+# WHAT THIS OWNS. Seven wording fixes from review passes 3 and 4, one pin group per fix: (1) each
+# structure check fails only code the change adds or edits; (2) `dependency-direction` asks in
+# plain words and gives a failing case; (3) the agreement duty has a verdict a read-only reader
+# reaches; (4) the adversarial whole read covers interaction, the structure one duplication, so
+# no check has two owners; (5) the evidence record says which `scope` to write; (6) the writer's
+# `reuse:` line names the pattern and the paths, so the search can be re-run; (7) the writer duty
+# and the structure reader name the same kinds of new site. The rebuilt W27-T8d and W27-T8bm are
+# in §W27-T8. Each absence sits beside a positive on the same extractor and file. HERMETIC:
+# committed blocks and finals by path; doctored copies under $TMP.
+# w27t33_fails <file> <id> -> the failing case of the id's check line: the text after "Fails when ".
+w27t33_fails() { w27_check_line "$1" "$2" | sed -n 's/.*Fails when //p'; }
+# w27t33_whole <file> -> the file's whole-read section, flattened to one line.
+w27t33_whole() {
+  awk '/^## / { p = ($0 == "## A whole read"); next } p' "$1" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g'
+}
+# w27t33_kinds <file>… -> each distinct list of new-site kinds the files name, one per line.
+w27t33_kinds() {
+  local f
+  for f in "$@"; do _flatten "$f" | grep -oE 'function, [a-z ,]+ key'; done | sort -u
+}
+
+# (1) every structure check fails only code the change adds or edits.
+expect_nonempty "W27-T33-1: checks-structure.md says old code the change did not write never fails a check" \
+  "$(w26_hits 'Old code the change did not write never fails a check' "$W27_STRUCT")"
+for _id in $W27_IDS; do
+  _case="$(w27t33_fails "$W27_STRUCT" "$_id")"
+  expect_nonempty "W27-T33-1 precondition: the \`${_id}\` line has a failing case" "$_case"
+  expect_nonempty "W27-T33-1: the \`${_id}\` failing case names code the change adds, edits or writes" \
+    "$(printf '%s' "$_case" | grep -E 'the change (adds|edits|writes)')"
+done
+
+# (2) dependency-direction asks in plain words and names a case a reader can see in a diff.
+W27T33_DD="$(w27_check_line "$W27_STRUCT" dependency-direction)"
+expect_contains "W27-T33-2: dependency-direction asks its question in plain words" \
+  'Does the code that makes a decision stay apart from the details it acts on?' "$W27T33_DD"
+expect_contains "W27-T33-2a: …and gives one failing case a reader can recognise" \
+  'Example: a function that decides whether a run passed also opens' "$W27T33_DD"
+expect_absent "W27-T33-2b: …and no longer asks it as a slogan" 'Does detail depend on policy' "$W27T33_DD"
+
+# (3) the agreement duty's verdict is one a reader that cannot run a suite or edit a file reaches.
+expect_nonempty "W27-T33-3: the agreement duty tells the reader it cannot run the test" \
+  "$(w26_hits 'You cannot run it; read it.' "$W27_STRUCT")"
+expect_nonempty "W27-T33-3a: …says what counts as seen to fail" \
+  "$(w26_hits 'It has been seen to fail when it has an arm that doctors one surface and asserts red, or a record cites a red run.' "$W27_STRUCT")"
+expect_nonempty "W27-T33-3b: …and gives a named test seen to fail neither way its verdict" \
+  "$(w26_hits 'A pair with no named test is a FLAG, and so is a test seen to fail neither way.' "$W27_STRUCT")"
+
+# (4) one owner per whole-read question: interaction is adversarial's, duplication structure's.
+W27T33_ADVW="$(w27t33_whole "$W27_ADV")"
+W27T33_STRW="$(w27t33_whole "$W27_STRUCT")"
+expect_contains "W27-T33-4: the adversarial whole read covers only how the pieces interact" \
+  'read only how the pieces interact;' "$W27T33_ADVW"
+expect_absent "W27-T33-4a: …and asks nothing about duplication" 'duplicate between them' "$W27T33_ADVW"
+expect_absent "W27-T33-4b: …nor about two pieces that solved one problem" 'same problem' "$W27T33_ADVW"
+expect_contains "W27-T33-4c: the structure whole read covers only what the pieces duplicate" \
+  'read only what the pieces duplicate between them;' "$W27T33_STRW"
+expect_absent "W27-T33-4d: …and asks nothing about how they interact" 'read only how the pieces interact' "$W27T33_STRW"
+expect_absent "W27-T33-4e: …nor about a caller one piece changed under another" 'changed under another' "$W27T33_STRW"
+
+# (5) the evidence record says which scope to write.
+expect_nonempty "W27-T33-5: checks-evidence.md says scope is whole for the run's matrix and piece for one fix" \
+  "$(w26_hits '`scope` is `whole` when you audit the run'"'"'s matrix and `piece` when you audit one fix.' "$W27_EVID")"
+
+# (6) the reuse: line names the pattern and the paths searched, in the block and both writer roles.
+# The two line forms themselves are W27-41b/c's, whose literals carry `<pattern>` and `<paths>`.
+for _w27_f in "$W27_BLOCK" "${REPO}/agents/implementor.md" "${REPO}/agents/senior-implementor.md"; do
+  _w27_n="${_w27_f#"$REPO"/}"
+  expect_nonempty "W27-T33-6: $_w27_n says the line names the pattern and paths so a reader can re-run it" \
+    "$(w26_hits 'naming the pattern and the paths searched, so a reader can re-run the search' "$_w27_f")"
+done
+
+# (7) the writer duty and the structure reader name the same kinds of new site, and all four.
+W27T33_KIND_FILES="$W27_BLOCK ${REPO}/agents/implementor.md ${REPO}/agents/senior-implementor.md ${BLOCK_DIR}/checks-structure.md $W27_STRUCT"
+# shellcheck disable=SC2086  # word-split on purpose: one path per word, none with spaces
+W27T33_KINDS="$(w27t33_kinds $W27T33_KIND_FILES)"
+expect_nonempty "W27-T33-7 precondition: the extractor finds a list of new-site kinds" "$W27T33_KINDS"
+expect_eq "W27-T33-7: the writer duty and the structure reader name one list: function, file, type, configuration key" \
+  "function, file, type or configuration key" "$W27T33_KINDS"
+W27T33_DOC7="$TMP/w27t33-kinds.md"
+_flatten "$W27_BLOCK" | sed 's/function, file, type or configuration key/function, file or configuration key/' > "$W27T33_DOC7"
+expect_nonempty "W27-T33-7m precondition: the doctored duty still names a list" "$(w27t33_kinds "$W27T33_DOC7")"
+# shellcheck disable=SC2086
+expect_eq "W27-T33-7m: a writer duty that drops a kind is caught as a second list" "2" \
+  "$(w27t33_kinds "$W27T33_DOC7" ${BLOCK_DIR}/checks-structure.md | wc -l | tr -d ' ')"
 
 finish
