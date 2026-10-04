@@ -38,6 +38,9 @@
 #   * ROSTER ROWS — built through tests/lib/roster-row.sh, which delegates to the one
 #     production writer (payload/scripts/lib/roster.sh). No row here is hand-typed, so a
 #     field this suite believes in that the writer stopped emitting fails loudly.
+#   * THE AGENT'S FIRST ROW — the dispatch wall's shape, `agent_id=` empty, with the id
+#     written by hooks/execution-recorder.sh's start arm (`dispatched`, wave-27 T5). Only a
+#     successor row (ARM 2's confirmation, an amend) is planted carrying the id.
 #   * session ids, plan text — SYNTHESIZED.
 #
 # Usage: bash tests/background-suite-guard.test.sh
@@ -96,6 +99,29 @@ mk_repo() {
 add_row() {
   local repo="$1"; shift
   roster_row_fixture "session=$SID" "$@" >> "$repo/.bionic/tmp/roster-$SID.state"
+}
+
+# dispatched <repo> <agent id> <key=value>... — THE LAUNCH ROW AS THE DISPATCH WALL WRITES IT,
+# then the agent's own start (wave-27 T5, D15, AC-8.1). The row is `status=intended` with
+# `agent_id=` EMPTY, as hooks/dispatch-preflight.sh writes it; the id reaches the roster only
+# through hooks/execution-recorder.sh's SubagentStart arm, driven here with the agent's id and
+# its type. Rows planted with the id already on them hid walk-triage-3's defect: every budget
+# case started from a row whose id was known before any hook had written it. A later row that
+# carries the id (ARM 2's confirmation, an amend) is still `add_row`'s, because those writers do.
+REC="$PAYLOAD_HOOKS/execution-recorder.sh"
+BSG_TYPE="bionic:senior-implementor"
+BSG_TUID=0
+dispatched() {
+  local repo="$1" aid="$2"; shift 2
+  BSG_TUID=$((BSG_TUID + 1))
+  add_row "$repo" status=intended agent_id= "subagent_type=$BSG_TYPE" "tool_use_id=toolu_01bsgdisp$BSG_TUID" "$@"
+  jq -n --arg s "$SID" --arg c "$repo" --arg a "$aid" --arg t "$BSG_TYPE" \
+    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
+      agent_id:$a, agent_type:$t, hook_event_name:"SubagentStart"}' \
+    | env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
+        BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" \
+        CLAUDE_PROJECT_DIR= bash "$REC" >/dev/null 2>&1
 }
 
 # `agent_type` TRAVELS WITH `agent_id` (T23). A dispatched agent's tool-class payload
@@ -191,7 +217,7 @@ fi
 
 section "B1 — a stated budget: on it passes, off it refuses"
 R1=$(mk_repo b1)
-add_row "$R1" name=w-b1 "agent_id=$ACTOR" "suites_allowed=alpha.test.sh beta.test.sh" \
+dispatched "$R1" "$ACTOR" name=w-b1 "suites_allowed=alpha.test.sh beta.test.sh" \
   suites_source=derived files=payload/scripts/lib/widget.sh
 
 guarded "$R1" 'bash tests/alpha.test.sh'
@@ -257,7 +283,7 @@ expect_contains "B2a …and naming the rule it makes mechanical: the full run is
   "The full suite runs once, on the head being released" "$VERR"
 
 R2=$(mk_repo b2)
-add_row "$R2" name=w-b2 "agent_id=$ACTOR" suites_allowed=run.sh suites_source=declared files=
+dispatched "$R2" "$ACTOR" name=w-b2 suites_allowed=run.sh suites_source=declared files=
 guarded "$R2" 'bash tests/run.sh'
 expect_eq "B2b the Step-5 runner, whose row carries run.sh, is allowed" "0" "$ST"
 expect_empty "B2b …silently" "$OUT$ERR"
@@ -285,13 +311,15 @@ guarded "$R1" 'bash tests/alpha.test.sh'
 expect_eq "B3e non-vacuity: an on-budget suite still passes with the override set" "0" "$ST"
 EXTRA_ENV=""
 
-section "B4 — the three states of suites_allowed"
+section "B4 — the three states of suites_allowed, and no row at all"
 # `none` is a DECLARED empty set (the `Suites: none` waiver); an empty value is a budget
-# that was stated and came out empty; an absent key is a row written before the wall. They
-# are three different facts and the arm answers each differently.
+# that was stated and came out empty; an absent key is a row written before the wall; no row
+# is an agent whose id never reached the roster. The last three record NO SET, and since
+# wave-27 T5 (D15) a suite command from an agent with no recorded set is REFUSED, naming why:
+# admitted, it ran unbudgeted and stamped `?` (walk-triage-3 §1).
 
 R4A=$(mk_repo b4a)
-add_row "$R4A" name=w-b4a "agent_id=$ACTOR" suites_allowed=none suites_source=declared files=
+dispatched "$R4A" "$ACTOR" name=w-b4a suites_allowed=none suites_source=declared files=
 guarded "$R4A" 'bash tests/alpha.test.sh'
 expect_eq "B4a a Suites: none row refuses every named suite" "2" "$ST"
 expect_contains "B4a …saying the brief declared none" "Suites: none" "$VERR"
@@ -299,20 +327,23 @@ guarded "$R4A" 'bash tests/run.sh'
 expect_eq "B4a …and the full tree with it" "2" "$ST"
 
 R4B=$(mk_repo b4b)
-add_row "$R4B" name=w-b4b "agent_id=$ACTOR" suites_allowed= suites_source=derived files=x/y.sh
+dispatched "$R4B" "$ACTOR" name=w-b4b suites_allowed= suites_source=derived files=x/y.sh
 guarded "$R4B" 'bash tests/alpha.test.sh'
-expect_eq "B4b an EMPTY budget stands aside for a named suite" "0" "$ST"
-expect_empty "B4b …silently" "$OUT$ERR"
+expect_eq "B4b an EMPTY budget refuses a named suite" "2" "$ST"
+expect_contains "B4b …saying no set is recorded" "no suite set is recorded for this agent" "$ERR"
+expect_contains "B4b …and why: the row records none" "your roster row records no suite set" "$VERR"
+expect_contains "B4b …with the verb that records one, for this row" "amend w-b4b --suites+ alpha.test.sh" "$VERR"
+expect_empty "B4b …and nothing staged to run it" "$WRAP"
 guarded "$R4B" 'bash tests/run.sh'
-expect_eq "B4b …but never for the full tree" "2" "$ST"
+expect_eq "B4b …and the full tree too" "2" "$ST"
 
 R4C=$(mk_repo b4c)
-add_row "$R4C" name=w-b4c "agent_id=$ACTOR"          # a pre-wall row: no key at all
+dispatched "$R4C" "$ACTOR" name=w-b4c          # a pre-wall row: no key at all
 guarded "$R4C" 'bash tests/alpha.test.sh'
-expect_eq "B4c a row from before the wall stands aside for a named suite" "0" "$ST"
-expect_empty "B4c …silently" "$OUT$ERR"
+expect_eq "B4c a row from before the wall refuses a named suite" "2" "$ST"
+expect_contains "B4c …saying no set is recorded" "no suite set is recorded for this agent" "$ERR"
 guarded "$R4C" 'bash tests/run.sh'
-expect_eq "B4c …but the full tree is still refused" "2" "$ST"
+expect_eq "B4c …and the full tree" "2" "$ST"
 expect_contains "B4c …saying no set was recorded" "no set was recorded" "$VERR"
 # NON-VACUITY: the row really is on the roster and really carries this agent's id, so B4c
 # is the ABSENT KEY being read and not a row the hook failed to find.
@@ -322,21 +353,32 @@ expect_absent "B4c …and it carries no suites_allowed key" \
   "suites_allowed=" "$(cat "$R4C/.bionic/tmp/roster-$SID.state")"
 
 R4D=$(mk_repo b4d)                                   # no row for this agent at all
-add_row "$R4D" name=someone-else "agent_id=$OTHER" suites_allowed=alpha.test.sh suites_source=declared files=
+dispatched "$R4D" "$OTHER" name=someone-else suites_allowed=alpha.test.sh suites_source=declared files=
 guarded "$R4D" 'bash tests/alpha.test.sh'
-expect_eq "B4d no row for this agent stands aside for a named suite" "0" "$ST"
+expect_eq "B4d no row for this agent refuses a named suite" "2" "$ST"
+expect_contains "B4d …saying no set is recorded" "no suite set is recorded for this agent" "$ERR"
+expect_contains "B4d …and why: no row carries its id" "no roster row carries your agent id $ACTOR" "$VERR"
+expect_absent "B4d …never another agent's set as its budget" "On the budget: alpha.test.sh" "$VERR"
 guarded "$R4D" 'bash tests/run.sh'
 expect_eq "B4d …and still refuses the full tree" "2" "$ST"
-# NON-VACUITY: another agent's row IS on this roster and is not read as ours.
-guarded "$R4D" 'bash tests/gamma.test.sh'
-expect_eq "B4d another agent's narrow budget does not bind this one" "0" "$ST"
+# A NAME THE HOOK CANNOT EXPAND, from an agent with no set: refused for the missing set.
+guarded "$R4D" 'for s in alpha beta; do s=gamma; bash "tests/$s.test.sh"; done'
+expect_eq "B4d a suite named by a variable is refused too" "2" "$ST"
+expect_contains "B4d …for the missing set" "no suite set is recorded for this agent" "$ERR"
+expect_empty "B4d …with nothing staged to run it" "$WRAP"
+# NON-VACUITY: the other agent's row IS on this roster, joined at its start, and binds IT.
+guarded "$R4D" 'bash tests/alpha.test.sh' "$OTHER"
+expect_eq "B4d control: the other agent's own budgeted suite is admitted" "0" "$ST"
+guarded "$R4D" 'bash tests/gamma.test.sh' "$OTHER"
+expect_eq "B4d control: …and its off-budget suite refused by its own set" "2" "$ST"
+expect_contains "B4d control: …the set its start joined" "alpha.test.sh" "$VERR"
 
 section "B5 — the LAST row carrying this id wins"
 # One dispatch becomes several rows: the launch row, hooks/execution-recorder.sh's
 # `status=confirmed` copy, and — across a /clear — hooks/session-poker.sh's adopted row.
 # Each carries the budget forward, and the newest is the current statement about the agent.
 R5=$(mk_repo b5)
-add_row "$R5" name=w-b5 "agent_id=$ACTOR" status=intended suites_allowed=alpha.test.sh \
+dispatched "$R5" "$ACTOR" name=w-b5 suites_allowed=alpha.test.sh \
   suites_source=declared files=
 add_row "$R5" name=w-b5 "agent_id=$ACTOR" status=confirmed suites_allowed="alpha.test.sh delta.test.sh" \
   suites_source=declared files=
@@ -352,7 +394,7 @@ section "B5c — a successor row carrying re_executes= admits the run (T6, AC-5.
 # a command that is accepted and then does nothing. The positive and its refused control sit
 # together: a pin on the admit alone would also pass a wall that admitted everything.
 R5C=$(mk_repo b5c)
-add_row "$R5C" name=w-b5c "agent_id=$ACTOR" status=intended suites_allowed=alpha.test.sh \
+dispatched "$R5C" "$ACTOR" name=w-b5c suites_allowed=alpha.test.sh \
   suites_source=declared files=
 guarded "$R5C" "npx jest --testPathPatterns 'x'"
 expect_eq "B5c before the widen, the run is refused" "2" "$ST"
@@ -670,6 +712,11 @@ guarded "$R1" 'bash tests/run.sh'
 b11_line "B11d row 14 (the full tree)" \
   "bionic: suite-run refused — full tree refused; allowed: alpha.test.sh (run your brief's suites)"
 
+# NO RECORDED SET (wave-27 T5, D15): R4D carries no row for this agent.
+guarded "$R4D" 'bash tests/alpha.test.sh'
+b11_line "B11d2 no set recorded" \
+  "bionic: suite-run refused — no suite set is recorded for this agent (send main the suites you need)"
+
 # AC-E1.5, the pair — RE-SPELLED (wave-14 T8 c088189 → T18 fcd5a16 → T25), then
 # RE-AUTHORED BY ADR-030 (T22, the A-T4.10 precedent). What the knob gates has moved
 # twice. First the compact fact line took the allowed set onto the DEFAULT stream
@@ -767,7 +814,7 @@ section "B13 — REQ-1 AC-1.5: the row's DECLARED runs are the budget for a runn
 # by a spelling.
 
 R13=$(mk_repo b13)
-add_row "$R13" name=w-b13 "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
+dispatched "$R13" "$ACTOR" name=w-b13 "suites_allowed=alpha.test.sh" \
   suites_source=declared files=src/widget.ts \
   "re_executes=\`npx jest --testPathPatterns 'x'\`"
 
@@ -800,7 +847,7 @@ expect_empty "B13d …silently" "$OUT$ERR"
 # one declaration (AC-1.2), and an arm that honoured only one of them would refuse a brief
 # the dispatch wall admitted.
 R13B=$(mk_repo b13b)
-add_row "$R13B" name=w-b13b "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
+dispatched "$R13B" "$ACTOR" name=w-b13b "suites_allowed=alpha.test.sh" \
   suites_source=declared files=payload/scripts/lib/widget.sh \
   "re_executes=\`bash tests/gamma.test.sh\`"
 guarded "$R13B" 'bash tests/gamma.test.sh'
@@ -810,21 +857,21 @@ guarded "$R13B" 'bash tests/delta.test.sh'
 expect_eq "B13f …and a suite NEITHER channel names is still refused" "2" "$ST"
 expect_contains "B13f …naming the suite that was asked for" "delta.test.sh" "$VERR"
 
-# THE FAIL DIRECTION IS UNCHANGED (the arm's own preamble). A row with no budget key at all
-# means the journal failed or the row predates the wall, and an agent is not punished for a
-# bookkeeping failure it did not cause: a NAMED run passes in silence, exactly as a named
-# suite does.
+# NO RECORDED SET REFUSES THE RUNNER SPELLING TOO (wave-27 T5, D15). A row with neither
+# `suites_allowed=` nor `re_executes=` records no set, and a named run is refused with the
+# reason, exactly as a named suite is (B4b-B4d) — never admitted unbudgeted.
 R13C=$(mk_repo b13c)
-add_row "$R13C" name=w-b13c "agent_id=$ACTOR" files=src/widget.ts
+dispatched "$R13C" "$ACTOR" name=w-b13c files=src/widget.ts
 guarded "$R13C" "npx jest --testPathPatterns 'x'"
-expect_eq "B13g with NO budget on the row a runner form passes" "0" "$ST"
-expect_empty "B13g …silently" "$OUT$ERR"
+expect_eq "B13g with NO budget on the row a runner form is refused" "2" "$ST"
+expect_contains "B13g …saying no set is recorded" "no suite set is recorded for this agent" "$ERR"
+expect_contains "B13g …naming the run it was asked for" "npx jest --testPathPatterns 'x'" "$VERR"
 
 # …AND `Suites: none` IS A STATED EMPTY SET, for the runner spelling too. AC-1.7's words are
 # "admitted at dispatch, every suite refused at run time"; before this wave the runner forms
 # were the exception that made that sentence false.
 R13D=$(mk_repo b13d)
-add_row "$R13D" name=w-b13d "agent_id=$ACTOR" suites_allowed=none suites_source=declared files=
+dispatched "$R13D" "$ACTOR" name=w-b13d suites_allowed=none suites_source=declared files=
 guarded "$R13D" 'pytest tests/x.py'
 expect_eq "B13h a waived row refuses the runner spelling too" "2" "$ST"
 expect_contains "B13h …with the budget refusal" "BUDGET" "$VERR"
@@ -842,7 +889,7 @@ expect_contains "B13i …by the full-tree arm, not the budget one" \
 # spend a full run the proof record never weighed.
 # The full-tree arm therefore runs AHEAD of the declared runs, and this row is why.
 R13E=$(mk_repo b13e)
-add_row "$R13E" name=w-b13e "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
+dispatched "$R13E" "$ACTOR" name=w-b13e "suites_allowed=alpha.test.sh" \
   suites_source=declared files=payload/scripts/lib/widget.sh \
   "re_executes=\`bash tests/run.sh\`"
 guarded "$R13E" 'bash tests/run.sh'
@@ -871,7 +918,7 @@ expect_empty "B13k …silently" "$OUT$ERR"
 # where the pipe was; or the refusal prints the budget with the encoding still in it.
 R13F=$(mk_repo b13f)
 B13_QP="npx jest --testPathPattern='(a|b).spec.ts'"
-add_row "$R13F" name=w-b13f "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
+dispatched "$R13F" "$ACTOR" name=w-b13f "suites_allowed=alpha.test.sh" \
   suites_source=declared files=src/widget.ts "re_executes=\`${B13_QP}\`"
 
 B13_ROW="$(grep -v '^#' "$R13F/.bionic/tmp/roster-$SID.state" | tail -1)"
@@ -908,7 +955,7 @@ expect_absent "B13n5 …with no percent-encoding shown to the reader" "%7C" "$VE
 #
 # fails-when: the second declared run is refused, or the undeclared control is admitted.
 R13G=$(mk_repo b13g)
-add_row "$R13G" name=w-b13g "agent_id=$ACTOR" \
+dispatched "$R13G" "$ACTOR" name=w-b13g \
   suites_source=declared files=src/widget.ts \
   "re_executes=\`npx jest --testPathPatterns 'x'\` \`pytest tests/unit\`"
 
@@ -1010,9 +1057,16 @@ SHIM="$REPO_ROOT/payload/scripts/booked.sh"
 WSH="$(command -v zsh 2>/dev/null)"; [ -n "$WSH" ] || WSH="$(command -v bash)"
 export GIT_CEILING_DIRECTORIES="${SANDBOX%/*}"
 sq() { local s="$1" r="'\\''"; s="${s//\'/$r}"; printf "'%s'" "$s"; }
+# mw — the --max-wait every wrap without a kill limit carries: the staged timeout, in seconds,
+# less ten (wave-27 T6, AC-8.3). The rule's own rows are tests/bash-walls.test.sh §WAIT-CEIL;
+# here it is read off the same updatedInput as the command, so each row pins the relation.
+mw() {
+  local t; t="$(printf '%s' "$WRAP_INPUT" | jq -r '.timeout // empty' 2>/dev/null)"
+  printf -- '--max-wait %s' "$(( ${t:-120000} / 1000 - 10 ))"
+}
 
 RW=$(mk_repo wrap)
-add_row "$RW" name=w-wrap "agent_id=$ACTOR" "suites_allowed=t.test.sh solo.test.sh" \
+dispatched "$RW" "$ACTOR" name=w-wrap "suites_allowed=t.test.sh solo.test.sh" \
   suites_source=declared files=
 mkdir -p "$RW/tests"
 printf '#!/bin/bash\necho t\n' > "$RW/tests/t.test.sh"
@@ -1022,7 +1076,7 @@ EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL="
 guarded "$RW" 'bash tests/t.test.sh'
 expect_eq "W1a an armed agent's on-budget suite is allowed" "0" "$ST"
 expect_eq "W1b …and comes back as the shim around the original, under the harness's shell" \
-  "bash $SHIM --shell $WSH --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM --shell $WSH $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
 expect_empty "W1c …with nothing said on stderr" "$ERR"
 expect_eq "W1d …and every other field of tool_input rides through" "86400000" \
   "$(printf '%s' "$WRAP_INPUT" | jq -r '.timeout')"
@@ -1031,7 +1085,7 @@ expect_eq "W1d …and every other field of tool_input rides through" "86400000" 
 # and then it is wrapped like any other.
 run_hook "$(mk_payload "$RW" 'FARM_OUT_ALLOW=1 bash tests/t.test.sh' "")" "$GUARD"
 expect_eq "W2a the main thread's overridden suite is wrapped too" \
-  "bash $SHIM --shell $WSH --suites t.test.sh -- 'FARM_OUT_ALLOW=1 bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM --shell $WSH $(mw) --suites t.test.sh -- 'FARM_OUT_ALLOW=1 bash tests/t.test.sh'" "$WRAP"
 run_hook "$(mk_payload "$RW" 'bash tests/t.test.sh' "")" "$GUARD"
 expect_contains "W2b without the override farm-out refuses it" "permissionDecision" "$OUT"
 expect_empty "W2c …and a refused call carries no wrap" "$WRAP"
@@ -1043,7 +1097,7 @@ RU=$(mk_repo wrap-unarmed)
 rm -f "$RU/.bionic/tmp/roster-$SID.state"
 run_hook "$(mk_payload "$RU" 'bash tests/t.test.sh' "$ACTOR")" "$GUARD"
 expect_eq "W3 an unarmed agent's suite is wrapped" \
-  "bash $SHIM --shell $WSH --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM --shell $WSH $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
 
 # LEFT ALONE, each beside W1's positive on the same repo and the same reader.
 for sp in 'BIONIC_SLOT_HELD=1 bash tests/t.test.sh' \
@@ -1076,13 +1130,13 @@ expect_nonempty "W4e …while the same suite in the foreground is" "$WRAP"
 # BIONIC_QUIET=1 in the suite segment's own prefix, takes the whole machine.
 guarded "$RW" 'bash tests/solo.test.sh'
 expect_eq "W5a a solo suite is wrapped with --quiet" \
-  "bash $SHIM --shell $WSH --quiet --suites solo.test.sh -- 'bash tests/solo.test.sh'" "$WRAP"
+  "bash $SHIM --shell $WSH --quiet $(mw) --suites solo.test.sh -- 'bash tests/solo.test.sh'" "$WRAP"
 guarded "$RW" 'BIONIC_QUIET=1 bash tests/t.test.sh'
 expect_eq "W5b BIONIC_QUIET=1 in the prefix is --quiet" \
-  "bash $SHIM --shell $WSH --quiet --suites t.test.sh -- 'BIONIC_QUIET=1 bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM --shell $WSH --quiet $(mw) --suites t.test.sh -- 'BIONIC_QUIET=1 bash tests/t.test.sh'" "$WRAP"
 guarded "$RW" 'cd tests && bash solo.test.sh'
 expect_eq "W5c a solo suite reached through a leading cd is --quiet too (and stamps where the cd went)" \
-  "bash $SHIM --shell $WSH --quiet --stamp-dir $RW/tests --suites bash_solo.test.sh -- 'cd tests && bash solo.test.sh'" "$WRAP"
+  "bash $SHIM --shell $WSH --quiet $(mw) --stamp-dir $RW/tests --suites bash_solo.test.sh -- 'cd tests && bash solo.test.sh'" "$WRAP"
 guarded "$RW" 'bash tests/t.test.sh'
 expect_absent "W5d a plain suite is not" "--quiet" "$WRAP"
 expect_nonempty "W5d …though it is wrapped" "$WRAP"
@@ -1102,9 +1156,9 @@ w10() {  # <label> <command> <expected --stamp-dir value, or "" for none> [<expe
   if [ -n "$3" ]; then
     _wall_q="$3"; case "$3" in *' '*) _wall_q="$(sq "$3")" ;; esac
     expect_eq "W10$1 …with --stamp-dir $3" \
-      "bash $SHIM --shell $WSH --stamp-dir $_wall_q --suites ${4:-t.test.sh} -- $(sq "$2")" "$WRAP"
+      "bash $SHIM --shell $WSH $(mw) --stamp-dir $_wall_q --suites ${4:-t.test.sh} -- $(sq "$2")" "$WRAP"
   else
-    expect_eq "W10$1 …with no --stamp-dir" "bash $SHIM --shell $WSH --suites ${4:-t.test.sh} -- $(sq "$2")" "$WRAP"
+    expect_eq "W10$1 …with no --stamp-dir" "bash $SHIM --shell $WSH $(mw) --suites ${4:-t.test.sh} -- $(sq "$2")" "$WRAP"
   fi
 }
 w10 a "cd $W10_ABS || exit 1; bash tests/t.test.sh" "$W10_ABS"
@@ -1147,7 +1201,7 @@ w10 v "true && cd $W10_ABS && bash tests/t.test.sh" "$W10_ABS"
 # whose suite runs are joined by anything but `&&`. The unarmed agent's repo (W3) runs any suite.
 w11() {  # <label> <command> <expected options between --shell and -->
   run_hook "$(mk_payload "$RU" "$2" "$ACTOR")" "$GUARD"
-  expect_eq "W11$1 [$2] is wrapped naming its suites" "bash $SHIM --shell $WSH $3 -- $(sq "$2")" "$WRAP"
+  expect_eq "W11$1 [$2] is wrapped naming its suites" "bash $SHIM --shell $WSH $(mw) $3 -- $(sq "$2")" "$WRAP"
 }
 w11 a 'bash tests/a.test.sh && bash tests/b.test.sh' '--suites a.test.sh,b.test.sh'
 w11 b 'bash tests/a.test.sh; bash tests/a.test.sh' "--suites '?'"
@@ -1183,14 +1237,14 @@ npm test" "--suites '?'"
 EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL=$(command -v bash)"
 guarded "$RW" 'bash tests/t.test.sh'
 expect_eq "W6a CLAUDE_CODE_SHELL wins over SHELL" \
-  "bash $SHIM --shell $(command -v bash) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM --shell $(command -v bash) $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
 EXTRA_ENV="SHELL=/bin/sh CLAUDE_CODE_SHELL="
 guarded "$RW" 'bash tests/t.test.sh'
 expect_eq "W6b a shell the harness would not use names none: bash -c" \
-  "bash $SHIM --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
 EXTRA_ENV="SHELL= CLAUDE_CODE_SHELL="
 guarded "$RW" 'bash tests/t.test.sh'
-expect_eq "W6c neither set: bash -c" "bash $SHIM --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+expect_eq "W6c neither set: bash -c" "bash $SHIM $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
 EXTRA_ENV="SHELL=$WSH CLAUDE_CODE_SHELL="
 
 # ONE ANSWER, BOTH REWRITES: ARM R raises a missing timeout and the wrap rewrites the
@@ -1203,7 +1257,7 @@ expect_eq "W7a a suite with no timeout is allowed" "0" "$ST"
 expect_eq "W7b …its timeout is raised to the harness maximum" "600000" \
   "$(printf '%s' "$WRAP_INPUT" | jq -r '.timeout')"
 expect_eq "W7c …and its command is wrapped, in the same updatedInput" \
-  "bash $SHIM --shell $WSH --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
+  "bash $SHIM --shell $WSH $(mw) --suites t.test.sh -- 'bash tests/t.test.sh'" "$WRAP"
 expect_contains "W7d …and the repair is logged as before" "repaired from=absent to=600000" "$ERR"
 
 # BEHAVIOUR. Each command runs once as the harness runs it and once as the harness runs its
