@@ -672,6 +672,26 @@ expect_status "Q9.3 …yet the run is not void: its own load is not a disturbanc
 expect_eq "Q9.4 …and it ran once" 1 "$(wc -l < "$ROW/runs" | tr -d ' ')"
 expect_absent "Q9.5 …with no void line" "void" "$Q9_OUT"
 
+# Q10. A FAILURE STAYS A FAILURE WHEN IT IS ALSO VOID (review 12 F2, A-T50.1; the runner's rule
+# since T43). 75 is "try again later", which is what a disturbed PASS means (Q4.1, Q8.7). Over a
+# failing run it would hide the failure's own code behind a reason to re-run; so the code is
+# the command's, and the void line is still printed.
+newrow q10
+Q10_CMD="echo run >> $ROW/runs; printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 & exit 3"
+Q10_OUT="$(bk --quiet -- "$Q10_CMD" 2>&1)"; Q10_RC=$?
+expect_status "Q10.1 a failing run voided every time exits with its own code (3), not 75" 3 "$Q10_RC"
+expect_contains "Q10.2 …and still says it was void" "booked: void — the load rose above" "$Q10_OUT"
+expect_eq "Q10.3 …after the first run and two retries, as a passing void does (Q4.3)" 3 \
+  "$(wc -l < "$ROW/runs" | tr -d ' ')"
+expect_eq "Q10.4 …and every place is free afterwards" "" "$(places)"
+# The other void end: the ceiling runs out before a retry can start (Q8's second shape).
+newrow q10b
+MW=4
+Q10B_CMD="echo run >> $ROW/runs; printf '99.0\n' > $LOADF; ( sleep 2.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 & exit 3"
+Q10B_OUT="$(bk --quiet -- "$Q10B_CMD" 2>&1)"; Q10B_RC=$?
+expect_contains "Q10.5 the retries ran out of ceiling" "ran out before a retry could start" "$Q10B_OUT"
+expect_status "Q10.6 …and the failing run keeps its own code (3), not 75 (beside Q8.7's 75 for a pass)" 3 "$Q10B_RC"
+
 # ═══════════════════════════════════════════════════════════════════ §STAMP
 section "STAMP — stamp/v1 in the tree's own git dir: head and dirty before, rc after"
 
@@ -746,6 +766,14 @@ mkrepo "$ROW/repo"
   >/dev/null 2>&1; S6_RC=$?
 expect_status "S6.1 the voided run exits 75" 75 "$S6_RC"
 expect_regex "S6.2 …and its stamp carries rc=75" '\|rc=75\|' "$(tail -1 "$(stamps_of "$ROW/repo")" 2>/dev/null)"
+# A voided run that FAILED is stamped with its own code (review 12 F2, A-T50.1): still red, and
+# red for its own reason. The stamp has no field for the void, and its shape does not change.
+( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=20 \
+    BIONIC_SLOTS_POLL=0.1 BIONIC_LOAD_NOW_FILE="$LOADF" \
+    bash "$BOOKED" --quiet -- "printf '99.0\n' > $LOADF; ( sleep 1.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 & exit 3" ) \
+  >/dev/null 2>&1; S6_RC=$?
+expect_status "S6.3 a voided run that failed exits with its own code (3)" 3 "$S6_RC"
+expect_regex "S6.4 …and its stamp carries rc=3, not rc=75" '\|rc=3\|' "$(tail -1 "$(stamps_of "$ROW/repo")" 2>/dev/null)"
 
 # S7. The tree's own `.bionic` link is not dirt. With no ignore entry git lists it as
 # `?? .bionic`; the stamp skips exactly that line when `.bionic` is a symlink, and counts
@@ -1013,6 +1041,116 @@ wait "$K7_BG" 2>/dev/null
 expect_true "K7.3 TERM to the shim kills the orphan too, outside the tree but inside the group" \
   bash -c "for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 ${K7_KID:-999999} 2>/dev/null || exit 0; sleep 0.2; done; exit 1"
 expect_eq "K7.4 …and the place was released" "" "$(places)"
+
+# K8. A SIGNAL SENT TO THE SHIM REACHES THE COMMAND AS ITSELF, AND QUIT IS TAKEN TOO (review 12
+# F3, A-T50.2). K6 has the command signal itself; here the signal comes from outside, as an
+# interrupt or a stop from the harness would. The shim is started with INT and QUIT at their
+# defaults, as a harness spawn starts a call: perl resets them before it execs the shim, because
+# this suite may itself have been started with them ignored (a background job without job
+# control is), and a signal ignored on entry can be neither trapped nor received. The command
+# traps each signal and writes the one it saw; an orphan it left behind (outside its tree,
+# inside its group) must die too, and the place must be free afterwards.
+# EVERY WAIT HERE IS BOUNDED: a shim that does not end within 8 s of the signal is a failed row,
+# and the row then stops what it started itself, so a regression fails in seconds, never hangs.
+newrow k8
+SN=1; MW=5
+K8_CMD="for s in INT QUIT TERM HUP; do trap \"echo got-\$s > $ROW/k8.saw; exit 7\" \$s; done; echo \$\$ > $ROW/k8.pid; (sleep 30 > /dev/null 2>&1 & echo \$! > $ROW/k8.kid); touch $ROW/k8.started; while :; do sleep 0.1; done"
+gone() {  # <pid> — rc 0 once the pid is gone, within two seconds
+  local i=0
+  while kill -0 "${1:-999999}" 2>/dev/null; do i=$((i + 1)); [ "$i" -lt 20 ] || return 1; sleep 0.1; done
+  return 0
+}
+k8_drive() {  # <signal> [<shim option>...] -> K8_RC (or "hung"), K8_SAW, K8_PID, K8_KID
+  local _sig="$1" _job _shim _i=0
+  shift
+  rm -f "$ROW"/k8.*
+  # `exec` all the way down, so the job's pid IS the shim's.
+  ( cd "$ROW" || exit 1
+    exec env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N="$SN" BIONIC_SLOTS_POLL="$POLL" \
+      BIONIC_SLOTS_MAX_WAIT="$MW" BIONIC_SLOTS_NOTE_S="$NOTE" BIONIC_LOAD_NOW_FILE="$LOADF" \
+      perl -e '$SIG{INT} = $SIG{QUIT} = "DEFAULT"; exec @ARGV or exit 126' \
+      bash "$BK_SCRIPT" "$@" -- "$K8_CMD" ) > "$ROW/k8.out" 2>&1 &
+  _job=$!
+  BG="$BG $_job"
+  wait_file "$ROW/k8.started" 10
+  _shim="$(held_pids)"; _shim="${_shim% }"
+  K8_SHIM_OK=0; [ "$_shim" = "$_job" ] && K8_SHIM_OK=1
+  K8_PID="$(cat "$ROW/k8.pid" 2>/dev/null)"; K8_KID="$(cat "$ROW/k8.kid" 2>/dev/null)"
+  kill -"$_sig" "$_job" 2>/dev/null
+  while kill -0 "$_job" 2>/dev/null && [ "$_i" -lt 80 ]; do _i=$((_i + 1)); sleep 0.1; done
+  if kill -0 "$_job" 2>/dev/null; then
+    K8_RC=hung
+    kill_tree "$_job"
+    wait "$_job" 2>/dev/null
+  else
+    wait "$_job" 2>/dev/null; K8_RC=$?
+  fi
+  K8_SAW="$(cat "$ROW/k8.saw" 2>/dev/null)"
+}
+k8_reap() {  # after the rows: a command a failing shim left running is this suite's to stop
+  [ -z "$K8_PID" ] || kill -KILL "$K8_PID" 2>/dev/null
+  [ -z "$K8_KID" ] || kill -KILL "$K8_KID" 2>/dev/null
+  rm -rf "$ST"
+}
+for _k8 in INT:130 QUIT:131 TERM:143 HUP:129; do
+  _sig="${_k8%:*}"
+  k8_drive "$_sig"
+  expect_eq "K8.0 [$_sig] the shim holds the place" 1 "$K8_SHIM_OK"
+  expect_regex "K8.1 [$_sig] the command and its orphan were running" '^[0-9]+ [0-9]+$' "$K8_PID $K8_KID"
+  expect_eq "K8.2 [$_sig] the command saw the signal the shim took, not TERM" "got-$_sig" "$K8_SAW"
+  expect_status "K8.3 [$_sig] the shim exits 128 + the signal's number" "${_k8#*:}" "$K8_RC"
+  expect_true "K8.4 [$_sig] the command is gone" gone "$K8_PID"
+  expect_true "K8.5 [$_sig] …and so is its orphan, outside its tree but inside its group" gone "$K8_KID"
+  expect_eq "K8.6 [$_sig] …and the place was released (beside K7.1's held place)" "" "$(places)"
+  k8_reap
+done
+for _sig in INT QUIT; do
+  k8_drive "$_sig" --shell "$H_SH"
+  expect_eq "K8.7 [$_sig] under --shell ${H_SH##*/} the command saw the signal too" "got-$_sig" "$K8_SAW"
+  expect_true "K8.8 [$_sig] …and it is gone" gone "$K8_PID"
+  expect_eq "K8.9 [$_sig] …with the place free" "" "$(places)"
+  k8_reap
+done
+
+# K9. THE LIMIT NEVER FIRES EARLY (review 12 F4, A-T50.3). The elapsed time is read from
+# `$SECONDS`, which counts whole seconds of the wall clock, so "elapsed >= limit" is true as
+# soon as a second boundary passes after the shim's start: up to a second early. Each run here
+# starts 0.4 s into a wall-clock second (perl's clock), so a boundary always falls inside the
+# 0.8 s command, early enough for the 0.2 s poll to see it: before T50 every such run was killed
+# under a 1 s limit. The command records whether its run crossed a boundary, so the row proves
+# the condition was there.
+newrow k9
+k9_align() {  # sleep until the wall clock is 0.4 s into a second
+  perl -MTime::HiRes=time,sleep -e '$f = time - int(time); sleep(($f < 0.4 ? 0.4 : 1.4) - $f)'
+}
+K9_CMD='s=$(date +%s); sleep 0.8; [ "$(date +%s)" = "$s" ] || echo crossed; echo done'
+K9_KILLED=0; K9_DONE=0; K9_CROSSED=0
+for _i in 1 2 3 4 5; do
+  k9_align
+  _out="$(bk --kill-after 1 -- "$K9_CMD" 2>&1)"; _rc=$?
+  [ "$_rc" -ne 124 ] || K9_KILLED=$((K9_KILLED + 1))
+  case "$_out" in *done*) K9_DONE=$((K9_DONE + 1)) ;; esac
+  case "$_out" in *crossed*) K9_CROSSED=$((K9_CROSSED + 1)) ;; esac
+done
+expect_eq "K9.1 a 0.8 s command under --kill-after 1 is never killed (killed $K9_KILLED of 5)" 0 "$K9_KILLED"
+expect_eq "K9.2 …every run finished" 5 "$K9_DONE"
+expect_true "K9.3 …and a second boundary fell inside the command in at least 4 of 5 runs (saw $K9_CROSSED)" \
+  test "$K9_CROSSED" -ge 4
+k9_align
+_out="$(bk --kill-after 1 -- 'sleep 3; echo done' 2>&1)"; _rc=$?
+expect_status "K9.4 the same limit still stops a 3 s command (124; beside K9.1 on the same code)" 124 "$_rc"
+# The limit spends the wait for a place too (K4), and gives up there by the same rule. The only
+# place is held until 0.9 s after the aligned start: inside the limit, so the command runs.
+SN=1
+for _i in 1 2 3; do
+  k9_align
+  ( sleep 0.9 ) & K9_H=$!; BG="$BG $K9_H"
+  mkdir -p "$ST/place.1"; printf '%s\n' "$K9_H" > "$ST/place.1/pid"
+  _out="$(bk --kill-after 1 -- 'echo ran' 2>&1)"; _rc=$?
+  expect_status "K9.5 [$_i] a place freed 0.9 s in is taken under a 1 s limit, not given up early" 0 "$_rc"
+  expect_contains "K9.6 [$_i] …it waited for it first" "waiting for a place" "$_out"
+  wait "$K9_H" 2>/dev/null
+done
 
 # U1. --unbooked IS GONE (the lead's ruling at T44): only a suite is wrapped, so the shim has no
 # command to run without a place. The flag is now an unknown option.
