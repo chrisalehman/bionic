@@ -5442,6 +5442,10 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # `_bsg_cd_walk` says when it is sure; otherwise there is no option and the shim stamps its own
 # directory, as before.
 #
+# --suites: WHICH SUITES THE COMMAND RUNS (wave-26 T61, critic F1), so the land can keep the newest
+# stamp of each suite apart. `_bsg_suites` names them from the claim's own `targets` reading,
+# the one the solo check reads too.
+#
 # THE SEAM FOR T9 is `wall_booked_argv`: the one function that builds the shim's argument
 # list. An option such as `--kill-after <s>` goes in as an extra argument there.
 _WALL_WORD=""
@@ -5554,8 +5558,13 @@ _bsg_cd_walk() {
   return 0
 }
 
+# _BSG_TARGETS — the command's suite claims, cmd-class.sh's `targets` reading: one
+# `<kind>\t<basename>\t<run>\t<path>` line per distinct claim. Read ONCE per wrap (wave-26 T61):
+# the solo check and the suite names below both read it, so naming the suites costs no fork.
+_BSG_TARGETS=""
+
 # _bsg_solo_target — 0 when a suite file the command runs declares `# runner: solo` in its
-# first 30 lines. The path is the claim's own (cmd-class.sh's `targets` reading), resolved
+# first 30 lines. The path is the claim's own (_BSG_TARGETS), resolved
 # against _BSG_CD_DIR, which `_bsg_cd_walk` set from this command's class lines just before.
 # Only a regular file is read, so a FIFO cannot hang the hook.
 _bsg_solo_target() {
@@ -5573,8 +5582,30 @@ _bsg_solo_target() {
           [ -z "${_rest//[[:space:]]/}" ] && return 0 ;;
       esac
     done < "$_f"
-  done <<< "$(printf '%s' "$COMMAND" | _cmd_class_awk targets)"
+  done <<< "$_BSG_TARGETS"
   return 1
+}
+
+# _bsg_suites — sets _BSG_SUITES to the shim's --suites value (wave-26 T61, critic F1): the
+# BASENAME of each suite file the command runs, from _BSG_TARGETS, in position order, each once,
+# comma-joined. The basename is the name the dispatch budget already counts a suite by, and it is
+# the same however the suite is typed: relative, absolute, behind a `cd`, inside the capture. A
+# claim with no file (`pytest`, `make test`), or a basename carrying anything outside
+# letters, digits, `.`, `_`, `+` and `-` (a `$` the reading could not resolve, a comma), is `?`:
+# a run the land cannot keep apart from any other suite. No claim at all is `?` too. Pure
+# parameter expansion over the reading already made.
+_BSG_SUITES=""
+_bsg_suites() {
+  local _k _b _r _p
+  _BSG_SUITES=""
+  while IFS=$'\t' read -r _k _b _r _p; do
+    [ -n "$_k" ] || continue
+    [ "$_k" = file ] || _b='?'
+    case "$_b" in '?') : ;; ''|*[!A-Za-z0-9._+-]*) _b='?' ;; esac
+    case ",$_BSG_SUITES," in *",$_b,"*) continue ;; esac
+    _BSG_SUITES="${_BSG_SUITES:+$_BSG_SUITES,}$_b"
+  done <<< "$_BSG_TARGETS"
+  [ -n "$_BSG_SUITES" ] || _BSG_SUITES='?'
 }
 
 # wall_booked_argv <command> <quiet: 0|1> [<shim option>...] — sets WALL_BOOKED_ARGV to the
@@ -5637,10 +5668,14 @@ _bsg_wrap_text() {
   # ONE WALK, TWO READERS (T56): where the leading `cd` segments lead is the solo reader's base
   # and, when the walk is sure of it, the shim's --stamp-dir.
   _bsg_cd_walk "$_lines"
+  # ONE TARGETS READING, TWO READERS (T61): the solo check and the shim's --suites.
+  _BSG_TARGETS="$(printf '%s' "$COMMAND" | _cmd_class_awk targets)"
+  _bsg_suites
   [ "$_quiet" = 1 ] || ! _bsg_solo_target || _quiet=1
   set --
   [ -z "$_k" ] || set -- --kill-after "$_k"
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
+  set -- "$@" --suites "$_BSG_SUITES"
   wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
     _wall_sh_word "$_w"

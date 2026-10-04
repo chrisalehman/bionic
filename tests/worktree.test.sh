@@ -1159,14 +1159,17 @@ expect_eq "record: only untrue lines: none (rc 1)" "rc=1" "$(wk workspace_record
 expect_eq "record: under a root git cannot read, refused (rc 2)" "rc=2" "$(wk workspace_record_for_name "$WGNR" "$WGSID" f)"
 
 # ---------------------------------------------------------------------------
-# THE LANDING RULE (wave-26 T10, T31, D7, D19). A tree lands on its LAST stamped suite run when
-# that run was green, on a clean tree, at its current head — and it must first contain what
+# THE LANDING RULE (wave-26 T10, T31, D7, D19, T61). A tree lands when, for every suite stamped at
+# its current head, the NEWEST stamp of that suite is green on a clean tree — and it must first contain what
 # landed since only when that landed work touches a file the tree also changed (A-orch-26).
 # The stamp is one line per suite-class run, appended to the tree's own git directory by the
-# booking shim (T6); these arms write the lines by hand, in exactly the interface's shape.
+# booking shim (T6); these arms write the lines by hand, in exactly the interface's shape: since
+# T61 the shim names the suite a run was for (`suites=`, before `cmd=`), and these lines stand for
+# runs of one suite, tests/one.test.sh, so they name it as the shim now does. A line with no
+# `suites=` (an older shim's) is §LAND-SUITES's row (g).
 stamp_file() { printf '%s/bionic-stamps' "$(git -C "$1" rev-parse --absolute-git-dir)"; }
 stamp() {  # <tree> <head> <dirty> <rc>
-  printf 'stamp/v1|head=%s|dirty=%s|rc=%s|at=2026-10-03T00:00:00Z|cmd=bash tests/one.test.sh\n' \
+  printf 'stamp/v1|head=%s|dirty=%s|rc=%s|at=2026-10-03T00:00:00Z|suites=one.test.sh|cmd=bash tests/one.test.sh\n' \
     "$2" "$3" "$4" >> "$(stamp_file "$1")"
 }
 green_stamp() { stamp "$1" "$(git -C "$1" rev-parse HEAD)" 0 0; }
@@ -1194,7 +1197,7 @@ expect_match "the stamp file sits in the tree's own git directory" \
 stamp "$LGT" "0000000000000000000000000000000000000000" 0 1
 green_stamp "$LGT"
 expect_match "the last stamp line reads back in the interface's shape" \
-  "stamp/v1|head=$(git -C "$LGT" rev-parse HEAD)|dirty=0|rc=0|at=*|cmd=bash tests/one.test.sh" \
+  "stamp/v1|head=$(git -C "$LGT" rev-parse HEAD)|dirty=0|rc=0|at=*|suites=one.test.sh|cmd=bash tests/one.test.sh" \
   "$(tail -n 1 "$(stamp_file "$LGT")")"
 OUTLG="$(worktree_land "$LGT" wave/fixture)"; RCLG=$?
 expect_match "a green run of one suite at the tree's head lands (an earlier red line is history)" \
@@ -1280,27 +1283,31 @@ expect_match "an empty stamp file is refused stale-proof, unreadable" \
 # THE COMMAND'S TEXT NEVER SPEAKS FOR THE RUN (review 2 F2). `cmd=` is the last field and free
 # text; the reader stops at it, whatever follows. The first line is the review's probe input.
 LCH="$(git -C "$LCB" rev-parse HEAD)"
-printf 'stamp/v1|head=%s|dirty=0|rc=1|at=t|cmd=a|rc=0\n' "$LCH" >> "$(stamp_file "$LCB")"
+printf 'stamp/v1|head=%s|dirty=0|rc=1|at=t|suites=one.test.sh|cmd=a|rc=0\n' "$LCH" >> "$(stamp_file "$LCB")"
 expect_eq "fixture: the last line carries rc=0 after cmd=" "cmd=a|rc=0" \
   "$(tail -n 1 "$(stamp_file "$LCB")" | sed 's/.*|cmd=/cmd=/')"
 expect_match "a red run whose command text carries |rc=0 is refused stale-proof, red" \
   "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 *" "$(worktree_land "$LCB" wave/fixture)"
-printf 'stamp/v1|head=%s|dirty=3|rc=0|at=t|cmd=a|dirty=0\n' "$LCH" >> "$(stamp_file "$LCB")"
+printf 'stamp/v1|head=%s|dirty=3|rc=0|at=t|suites=one.test.sh|cmd=a|dirty=0\n' "$LCH" >> "$(stamp_file "$LCB")"
 expect_match "a dirty run whose command text carries |dirty=0 is refused stale-proof, dirty" \
   "spawn-worktree: REFUSED reason=stale-proof why=dirty dirty=3 *" "$(worktree_land "$LCB" wave/fixture)"
-printf 'stamp/v1|head=%s|dirty=0|rc=0|at=t|cmd=a|head=%s\n' "0000000000000000000000000000000000000000" "$LCH" \
+# Since T61 every line at the head is read, so this row needs a file holding none: a line on
+# another head is history beside a line at the head, and only a file with NO line at the head is
+# refused why=head.
+: > "$(stamp_file "$LCB")"
+printf 'stamp/v1|head=%s|dirty=0|rc=0|at=t|suites=one.test.sh|cmd=a|head=%s\n' "0000000000000000000000000000000000000000" "$LCH" \
   >> "$(stamp_file "$LCB")"
 expect_match "a run on another head whose command text carries the tree's head is refused stale-proof, head" \
   "spawn-worktree: REFUSED reason=stale-proof why=head stamp_head=0000000000000000000000000000000000000000 *" \
   "$(worktree_land "$LCB" wave/fixture)"
 # A key twice BEFORE cmd= is no line the shim writes: which one holds is not a guess to make.
-printf 'stamp/v1|head=%s|dirty=0|rc=1|rc=0|at=t|cmd=a\n' "$LCH" >> "$(stamp_file "$LCB")"
+printf 'stamp/v1|head=%s|dirty=0|rc=1|rc=0|at=t|suites=one.test.sh|cmd=a\n' "$LCH" >> "$(stamp_file "$LCB")"
 expect_match "a key given twice before cmd= is refused stale-proof, unreadable" \
   "spawn-worktree: REFUSED reason=stale-proof why=unreadable *" "$(worktree_land "$LCB" wave/fixture)"
 expect_eq   "no ref moved across all of them" "$LCREFS" "$(refs_of "$LC")"
 # The fix, step two: re-run at the head, green, clean. The command text carries a red rc and a
 # dirty count; the reader stopped at cmd=, so the run's own fields decide. The arm discriminates.
-printf 'stamp/v1|head=%s|dirty=0|rc=0|at=t|cmd=bash tests/one.test.sh|rc=1|dirty=9\n' "$LCH" \
+printf 'stamp/v1|head=%s|dirty=0|rc=0|at=t|suites=one.test.sh|cmd=bash tests/one.test.sh|rc=1|dirty=9\n' "$LCH" \
   >> "$(stamp_file "$LCB")"
 expect_match "the same tree lands once its last run is green, clean, at its head" \
   "spawn-worktree: LANDED branch=second onto=wave/fixture *" "$(worktree_land "$LCB" wave/fixture)"
@@ -2007,7 +2014,7 @@ ls_wrap() {  # <command> — the command the real wall hands the harness, cwd = 
 ls_harness() {  # <command> — run as the harness runs a Bash call, standing in the main checkout
   local q="'\\''" s; s="${1//\'/$q}"
   ( cd "$LS" && env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
-      BIONIC_SLOTS_DIR="$TMP/land-shim-slots" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=20 \
+      BIONIC_SLOTS_DIR="$TMP/land-shim-slots" BIONIC_SLOTS_N="${LS_SLOTS_N:-2}" BIONIC_SLOTS_MAX_WAIT="${LS_MAX_WAIT:-20}" BIONIC_SLOTS_POLL=0.1 \
       /bin/bash -c "eval '$s' < /dev/null" ) >/dev/null 2>&1
 }
 ls_tree() {  # <branch> <suite exit code> -> the tree, its suite committed, nothing else in it
@@ -2024,7 +2031,7 @@ ls_case() {  # <label> <branch> <suite rc> <command after the cd guard> <cd targ
   c="cd $5 || exit 1; $4"
   w="$(ls_wrap "$c")"
   expect_match "$1: the wall wraps it in the shim with the tree as the stamp dir" \
-    "bash *booked.sh --shell /bin/bash --stamp-dir $t -- *" "$w"
+    "bash *booked.sh --shell /bin/bash --stamp-dir $t --suites a.test.sh -- *" "$w"
   ls_harness "$w"
   expect_match "$1: the shim stamped the TREE's git dir, at its head, with the suite's own code" \
     "stamp/v1|head=$(git -C "$t" rev-parse HEAD)|dirty=0|rc=$3|*" "$(tail -n 1 "$(stamp_file "$t")" 2>/dev/null)"
@@ -2040,5 +2047,154 @@ ls_case "(iii) cd <abs tree>, bare suite, green" shim-green-bare 0 'bash tests/a
   "$LS/.worktrees/shim-green-bare" "spawn-worktree: LANDED branch=shim-green-bare onto=wave/fixture *"
 ls_case "(iii) cd <rel tree>, the doctrine's capture, green" shim-green-capture 0 "$LS_CAPTURE" \
   ".worktrees/shim-green-capture" "spawn-worktree: LANDED branch=shim-green-capture onto=wave/fixture *"
+
+section "§LAND-SUITES: every suite stamped at the head, each by its newest stamp (wave-26 T61, critic F1)"
+#
+# The doctrine runs a brief's suites one call each, so each suite writes its own stamp line.
+# Before T61 the land read only the LAST line: suite a red, then suite b green, at one head,
+# LANDED. Now the wall names each run's suites (`--suites`, the basenames), the shim writes
+# them as `suites=` before `cmd=`, and the land refuses unless, for EVERY suite stamped at the
+# tree's head, the newest stamp of that suite is green on a clean tree. Every row here runs
+# through the real wall (ls_wrap), the real shim from the main checkout (ls_harness) and the
+# real land. A tree's two suites exit with the code in a file outside the tree, so one head
+# can be run red and then green without a commit.
+LSU_RC="$TMP/land-suites-rc"; mkdir -p "$LSU_RC"
+lsu_tree() {  # <branch> -> a tree whose tests/a.test.sh and tests/b.test.sh are committed
+  local t s; t="$(new_tree "$LS" "$1")"
+  mkdir -p "$t/tests"
+  for s in a b; do printf '#!/bin/bash\nexit "$(cat %s/%s.%s)"\n' "$LSU_RC" "$1" "$s" > "$t/tests/$s.test.sh"; done
+  git -C "$t" add tests && git -C "$t" commit --quiet -m "$1 suites"
+  printf '%s' "$t"
+}
+LSU_WRAP=""
+lsu_run() {  # <tree> <a|b> <rc> [<command after the cd guard>] — the suite at <rc>, wall + shim
+  echo "$3" > "$LSU_RC/${1##*/}.$2"
+  LSU_WRAP="$(ls_wrap "cd $1 || exit 1; ${4:-bash tests/$2.test.sh}")"
+  ls_harness "$LSU_WRAP"
+}
+lsu_stamps() {  # <tree> -> "<suites>:<rc>" per stamp line, oldest first, `-` for no suites=
+  awk -F'|' '{ s = "-"; r = ""
+    for (i = 2; i <= NF; i++) { if ($i ~ /^cmd=/) break
+      if ($i ~ /^suites=/) s = substr($i, 8); if ($i ~ /^rc=/) r = substr($i, 4) }
+    printf "%s%s:%s", (NR > 1 ? " " : ""), s, r }' "$(stamp_file "$1")" 2>/dev/null
+}
+
+# (a) THE CRITIC'S CASE: a red, then b green, at one head.
+LSA="$(lsu_tree su-a-red-b-green)"
+lsu_run "$LSA" a 1; lsu_run "$LSA" b 0
+expect_eq "(a) the wall named each run's suite, the shim stamped it, in order" \
+  "a.test.sh:1 b.test.sh:0" "$(lsu_stamps "$LSA")"
+LSA_REFS="$(refs_of "$LS")"
+OUTLSA="$(worktree_land "$LSA" wave/fixture)"; RCLSA=$?
+expect_match "(a) a red then b green at one head is REFUSED, naming a" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=a.test.sh head=$(git -C "$LSA" rev-parse HEAD) *" "$OUTLSA"
+expect_eq "(a) that refusal exits 2" "2" "$RCLSA"
+expect_eq "(a) no ref moved" "$LSA_REFS" "$(refs_of "$LS")"
+
+# (b) a red, then a green after a flake, at the same head: a's newest is green.
+LSB="$(lsu_tree su-a-red-a-green)"
+lsu_run "$LSB" a 1; lsu_run "$LSB" a 0
+expect_eq "(b) two stamps of a, red then green" "a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSB")"
+expect_match "(b) a red then a green at the same head LANDS" \
+  "spawn-worktree: LANDED branch=su-a-red-a-green onto=wave/fixture *" "$(worktree_land "$LSB" wave/fixture)"
+
+# (c) the same suite typed two ways: plain behind an absolute cd, then the doctrine's capture
+# behind a relative cd. One name, so the green capture is a's newest stamp.
+LSC="$(lsu_tree su-typed-two-ways)"
+lsu_run "$LSC" a 1
+echo 0 > "$LSU_RC/su-typed-two-ways.a"
+LSU_WRAP="$(ls_wrap "cd .worktrees/su-typed-two-ways || exit 1; set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc")"
+ls_harness "$LSU_WRAP"
+expect_match "(c) the capture shape is wrapped with the tree and the one suite name" \
+  "bash *booked.sh --shell /bin/bash --stamp-dir $LS/.worktrees/su-typed-two-ways --suites a.test.sh -- *" "$LSU_WRAP"
+expect_eq "(c) both stamps name a.test.sh" "a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSC")"
+expect_match "(c) a red typed plainly, then a green in the capture shape, LANDS" \
+  "spawn-worktree: LANDED branch=su-typed-two-ways onto=wave/fixture *" "$(worktree_land "$LSC" wave/fixture)"
+
+# (d) both suites green.
+LSD="$(lsu_tree su-both-green)"
+lsu_run "$LSD" a 0; lsu_run "$LSD" b 0
+expect_eq "(d) a green, b green" "a.test.sh:0 b.test.sh:0" "$(lsu_stamps "$LSD")"
+expect_match "(d) a green and b green LAND" \
+  "spawn-worktree: LANDED branch=su-both-green onto=wave/fixture *" "$(worktree_land "$LSD" wave/fixture)"
+
+# (e) a red at an older head is history once the tree moves: a commit, then a green.
+LSE="$(lsu_tree su-older-head)"
+lsu_run "$LSE" a 1
+echo e > "$LSE/e.txt"; git -C "$LSE" add e.txt; git -C "$LSE" commit --quiet -m "fix after red"
+lsu_run "$LSE" a 0
+expect_eq "(e) a red, then a green on the new head" "a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSE")"
+expect_match "(e) a red at an older head, then a green at the new head, LANDS" \
+  "spawn-worktree: LANDED branch=su-older-head onto=wave/fixture *" "$(worktree_land "$LSE" wave/fixture)"
+
+# (f) a green, then b red: today's behaviour, kept, and now the refusal names b.
+LSF="$(lsu_tree su-a-green-b-red)"
+lsu_run "$LSF" a 0; lsu_run "$LSF" b 1
+expect_match "(f) a green then b red is REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=b.test.sh *" "$(worktree_land "$LSF" wave/fixture)"
+
+# (h) ONE COMMAND, TWO SUITES, ONE EXIT CODE. A red one marks both suites red (the land cannot
+# tell which failed), so a later green of a alone still leaves b red.
+LSH="$(lsu_tree su-two-in-one)"
+echo 0 > "$LSU_RC/su-two-in-one.a"
+lsu_run "$LSH" b 1 'bash tests/a.test.sh && bash tests/b.test.sh'
+expect_match "(h) the two-suite command is wrapped naming both" \
+  "bash *booked.sh --shell /bin/bash --stamp-dir $LSH --suites a.test.sh,b.test.sh -- *" "$LSU_WRAP"
+lsu_run "$LSH" a 0
+expect_eq "(h) one line names both, red; then a alone, green" \
+  "a.test.sh,b.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSH")"
+expect_match "(h) b's newest stamp is still the red two-suite run: REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=b.test.sh *" "$(worktree_land "$LSH" wave/fixture)"
+lsu_run "$LSH" b 0
+expect_match "(h) …and once b runs green alone the tree LANDS" \
+  "spawn-worktree: LANDED branch=su-two-in-one onto=wave/fixture *" "$(worktree_land "$LSH" wave/fixture)"
+
+# (i) A SUITE THAT NEVER GOT A PLACE (critic 3 S5). a runs green; b waits for the one place, which
+# another run holds, and gives up (69). Its line names b, so the land refuses on it; once b runs
+# green the tree lands.
+LSI="$(lsu_tree su-b-no-place)"
+lsu_run "$LSI" a 0
+sleep 60 & LSI_H=$!
+mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSI_H" > "$TMP/land-shim-slots/place.1/pid"
+export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsu_run "$LSI" b 0; unset LS_SLOTS_N LS_MAX_WAIT
+kill "$LSI_H" 2>/dev/null; wait "$LSI_H" 2>/dev/null
+expect_eq "(i) a green, then b's no-place end stamped with its suite and 69" \
+  "a.test.sh:0 b.test.sh:69" "$(lsu_stamps "$LSI")"
+expect_match "(i) a green then b out of places at one head is REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=69 suite=b.test.sh *" "$(worktree_land "$LSI" wave/fixture)"
+lsu_run "$LSI" b 0
+expect_match "(i) …and once b runs green the tree LANDS" \
+  "spawn-worktree: LANDED branch=su-b-no-place onto=wave/fixture *" "$(worktree_land "$LSI" wave/fixture)"
+
+# (g) A LINE THAT NAMES NO SUITE: an older shim's (no `suites=`), or `?` for a run the wall could
+# not name. It could be ANY suite, so no later run at that head can clear a red or dirty one;
+# the fix is a commit, then the suites again. A green one asks nothing.
+LSG="$(lsu_tree su-older-shim)"
+echo 1 > "$LSU_RC/su-older-shim.a"
+LSU_WRAP="$(ls_wrap "cd $LSG || exit 1; bash tests/a.test.sh")"
+LSG_OLD="${LSU_WRAP/ --suites a.test.sh/}"
+expect_ne "(g) fixture: the older wall's wrap is the real one without --suites" "$LSU_WRAP" "$LSG_OLD"
+ls_harness "$LSG_OLD"
+echo 0 > "$LSU_RC/su-older-shim.a"; ls_harness "$LSG_OLD"
+lsu_run "$LSG" a 0
+expect_eq "(g) two older-shim lines (red, green), then a named green" "-:1 -:0 a.test.sh:0" "$(lsu_stamps "$LSG")"
+OUTLSG="$(worktree_land "$LSG" wave/fixture)"
+expect_match "(g) an older-shim red line at the head is REFUSED, naming no suite, whatever ran after" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=? head=$(git -C "$LSG" rev-parse HEAD) — *" "$OUTLSG"
+expect_match "(g) …and the fix is a commit, not a re-run" "*commit, then re-run the tree's suites at the new head, land again" "$OUTLSG"
+echo g > "$LSG/g.txt"; git -C "$LSG" add g.txt; git -C "$LSG" commit --quiet -m "new head"
+ls_harness "$LSG_OLD"
+expect_match "(g) an older-shim GREEN line at the head LANDS: it asks nothing" \
+  "spawn-worktree: LANDED branch=su-older-shim onto=wave/fixture *" "$(worktree_land "$LSG" wave/fixture)"
+# The wall's own `?`: a suite named through a variable from the environment.
+LSQ="$(lsu_tree su-unnamed)"
+echo 1 > "$LSU_RC/su-unnamed.a"
+LSU_WRAP="$(ls_wrap "cd $LSQ || exit 1; bash tests/\$LSU_X.test.sh")"
+expect_match "(g) a suite the wall cannot name is wrapped as ?" "bash *booked.sh * --suites '?' -- *" "$LSU_WRAP"
+export LSU_X=a; ls_harness "$LSU_WRAP"; unset LSU_X
+lsu_run "$LSQ" a 0
+expect_eq "(g) the unnamed red, then a named green" "?:1 a.test.sh:0" "$(lsu_stamps "$LSQ")"
+expect_match "(g) the unnamed red run is REFUSED, naming ?" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=? *" "$(worktree_land "$LSQ" wave/fixture)"
 
 finish
