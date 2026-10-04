@@ -446,6 +446,74 @@ relative path>`, never `record:` — is `archive_run`'s contract, documented at 
 definition in `payload/scripts/lib/archive.sh`; SKILL.md §Step 9 names the call and the
 `archived:` evidence line it produces.
 
+## Permission answers (1.10.0)
+
+An unattended run should not stop on a permission dialog that nobody is there to answer. From
+1.10.0, a session that has engaged a canonical-sdlc run answers the platform's permission
+questions itself. The Step-0 card says so on its `permissions` line, and approving the card is
+your consent.
+
+**Three tiers.**
+
+1. **The platform decides what it decides.** Your permission mode, your own allow, ask and deny
+   rules, and every call the platform settles without asking are untouched. Where the platform
+   refuses a call outright, the refusal stands.
+2. **An engaged run answers what the platform asks.** It allows the call when every file the
+   call would write or delete is inside the asker's workspace. Otherwise it denies, and the
+   denial names what it could not place, names the workspace, and gives one next step, usually:
+   put the script in a file inside the workspace and run it with `bash <file>`. A denial does
+   not stop the agent; it carries on with the fix.
+3. **Reserved categories go to the human.** An action in a reserved category is never allowed.
+   The denial names the category and offers no workaround. The asker reports it to the lead,
+   which raises it with you once, as a gate act.
+
+**The workspace, per asker.**
+
+| asker | may write | may also delete |
+|---|---|---|
+| the lead (the session running the run) | the run's checkout, the trees this session created, the session scratch, the run's record directory and plan files | all of the same |
+| a writer (an agent given a worktree) | its own tree, the session scratch, the run's record directory | its own tree and the scratch, never the record |
+| a read-only agent | the session scratch and its own declared report | the scratch |
+| an engaged session with no bound run | the session scratch | the scratch |
+
+Paths are compared after symlinks and `..` are resolved. A target bionic cannot read (a
+variable, a glob, code handed to an interpreter) counts as outside. When a run works in the
+project's main checkout, that checkout does not grant the shared `.bionic`, `.worktrees` and
+`.git` directories. bionic's own state files under `.bionic/tmp` and the answer log are in no
+workspace.
+
+**The reserved list, as built** (`payload/scripts/lib/grant.sh`):
+
+- `leaves-the-machine`: `git push`; `gh pr`, `issue`, `release`, `repo` and `api`; `npm`,
+  `pnpm` or `yarn publish`; `cargo publish`; `gem push`; `twine upload`.
+- `credentials`: anything that names `~/.ssh`, `~/.aws`, `~/.config/gh`, a `.netrc` or a `.env`
+  file; `gh auth`; `npm login`; `security`.
+- `production-infrastructure`: `terraform`, `kubectl`, `vercel`, `aws`, `gcloud`, `az`.
+- `billing`: those cloud tools' billing commands (`billing`, `ce`, `budgets`, `consumption`).
+
+A reserved action the table does not recognise is still never allowed: bionic cannot say what
+it does, so it is denied with a fix.
+
+**What it leaves alone.** bionic changes no permission mode and writes no settings; an answer
+covers that one question and persists nothing. It never answers in a session that has not
+engaged a run, where you get the stock dialog, and never answers a tool whose job is to ask you
+something (a question, a plan approval). Once a session is engaged, a failure to decide is a
+denial that says why, never an allow.
+
+**Turning it off.** Set `permission-answers: false` in `.bionic/config.yaml`. Any other value,
+or no key, leaves it on. With it off, every question comes to you as before.
+
+**The answer log.** Every answer appends one line to `permission-answers.log` in the project's
+log directory under your home (`~/.claude/logs/<project>-<checksum>/`), beside bionic's audit
+log. `/bionic:doctor` names the exact path and whether answers are on. A line holds the time,
+the session, who asked, the tool, the decision (allow, deny with a fix, deny reserved), the
+reason, and the first 120 characters of the command.
+
+**Limits.** It does not reverse a platform refusal; agents are taught the route the platform
+does not refuse instead. It does not contain what a script does once it runs: bionic vouches
+only for what it can read in the call. It does not read code handed to an interpreter (a
+`python -c` body, for one); such a call is denied with a fix.
+
 ## Evidence gate
 
 - **Canonical-sdlc plan files must include a `## SDLC State` section** — `current: N` (or `T<n>` at task scale) and `Step N: <evidence>` lines. The `canonical-sdlc-evidence-gate.sh` PreToolUse hook blocks `git commit` when the current step's evidence line is missing, empty, or a placeholder (TODO/pending/in progress/XXX/TBD/placeholder). Update `## SDLC State` *before* staging, not after.

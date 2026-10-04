@@ -282,7 +282,10 @@ generated_header() {
   case "$1" in
     agents-src/templates/skills/canonical-sdlc/steps/* | \
     agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl | \
-    agents-src/templates/skills/canonical-sdlc/dispatch.md.tmpl)
+    agents-src/templates/skills/canonical-sdlc/dispatch.md.tmpl | \
+    agents-src/templates/auditor.md.tmpl | agents-src/templates/critic.md.tmpl | \
+    agents-src/templates/implementor.md.tmpl | agents-src/templates/researcher.md.tmpl | \
+    agents-src/templates/senior-implementor.md.tmpl | agents-src/templates/test-runner.md.tmpl)
       # ONE LINE across the whole split-skill surface — core, dispatch reference and the
       # ten step files alike — and the reason is the budget the split exists to serve.
       # REQ-1b's byte caps (docs-pins Section 17) are measured against exactly these
@@ -291,6 +294,8 @@ generated_header() {
       # hand edit either way, so nothing enforceable is lost (2026-09-11 cap ruling,
       # "no growth" total). Ratified 2026-09-11 for the core and dispatch reference too,
       # after the T5-report §3 prunable-narrative estimate proved too small on its own.
+      # The six role files joined in wave-25 (T6, A-T6): their caps (docs-pins 111b, 111c,
+      # 125) had 11 B free and the shared role block needed a line in all six.
       cat <<EOF
 <!-- GENERATED FILE — DO NOT EDIT. Rendered by agents-src/render.sh from $1. -->
 EOF
