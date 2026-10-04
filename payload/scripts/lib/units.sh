@@ -536,6 +536,22 @@ units_live_rows() { _units_sched liverows "${1:-}" ""; }
 # validator refuses them the way it refuses any id the table does not carry.
 _units_ext_re() { printf '%s' '^ext:[A-Za-z0-9][A-Za-z0-9._-]*$'; }
 
+# _units_proof_awk -> proof.sh's `proof_awk`, the one reading of a proof line, sourced from this
+# file's own directory on first use (wave-26 T14; review 7 F6). If it cannot be loaded, a
+# function that reads no line as a proof: no proof is the cautious answer for a settled read.
+_units_proof_awk() {
+  local d
+  if ! declare -F proof_awk >/dev/null 2>&1; then
+    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+    [ -n "$d" ] && [ -f "$d/proof.sh" ] && . "$d/proof.sh" >/dev/null 2>&1
+  fi
+  if declare -F proof_awk >/dev/null 2>&1; then
+    proof_awk
+  else
+    printf '%s' ' function proof_fields(s) { PROOF_KIND = ""; PROOF_HEAD = ""; return 0 } '
+  fi
+}
+
 # _units_sched <ready|held|waiting|edges> <plan> <step> — THE ONE PROGRAM behind the four verbs,
 # so a row the ready set leaves out is the row `units_waiting` explains and the edge
 # `units_edges` prints. One stream: the rows (`units_rows`, so a memoised caller pays no second
@@ -569,7 +585,7 @@ _units_sched() {
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
   } | awk -F'\t' -v mode="$mode" -v want="$step" -v scale="$scale" -v hasreads="$hasreads" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" \
-      -v extre="$(_units_ext_re)" "$(_units_sched_awk)"
+      -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_sched_awk)"
 }
 
 # _units_sched_awk -> the awk program `_units_sched` runs. Printed by a function so the comments
@@ -598,11 +614,11 @@ _units_sched_awk() {
       } else if (l ~ /^approved[ \t]*:/) {
         v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
         if (aw[1] != "") appr[aw[1]] = 1
-      } else if (l ~ /^proved[ \t]*:/ && match(l, /kind=[A-Za-z0-9_-]+/)) {
-        k = substr(l, RSTART + 5, RLENGTH - 5); proved[k] = 1
-        # THE HEAD IS KEPT (wave-26 T14; review 5 F8): the last line of a kind is the newest, the
-        # order the writer appends in, so `live:head` compares against the last review proof.
-        if (match(l, /head=[0-9A-Fa-f]+/)) { v = substr(l, RSTART + 5, RLENGTH - 5); prvh[k] = tolower(v) }
+      } else if (proof_fields($0)) {
+        # ONE READING OF A PROOF LINE, proof.sh `proof_fields` (wave-26 T14; review 7 F6), the one
+        # `proof_last` reads through. THE HEAD IS KEPT (review 5 F8): the last line of a kind is
+        # the newest, the order the writer appends in, so `live:head` compares against it.
+        proved[PROOF_KIND] = 1; prvh[PROOF_KIND] = PROOF_HEAD
       }
       next
     }

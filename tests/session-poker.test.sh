@@ -8447,7 +8447,9 @@ awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d =
   && git -C "$R46/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
 W46_HEAD="$(git -C "$R46/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 mkdir -p "$R46/.bionic/docs/record/wave-01-fixture" "$R46/.bionic/docs/plans/elsewhere"
-printf 'floor log\n' > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
+# THE EVIDENCE ATTESTS ITS HEAD (wave-26 T14; review 7 F1): a floor log carries the suite runner's
+# header line `head=<sha> dirty=<n>`, a review its `reviewed: <a>..<b>` line.
+printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\n' "$W46_HEAD" > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
 printf 'review notes\n' > "$R46/.bionic/docs/record/wave-01-fixture/review.md"
 printf 'not a record\n' > "$R46/.bionic/docs/plans/elsewhere/notes.md"
 expect_regex "46a0 precondition: the working branch's checkout has a 40-hex head" '^[0-9a-f]{40}$' "$W46_HEAD"
@@ -8478,6 +8480,9 @@ expect_eq "46a8 …and the next commit is admitted" "0" "$GATE_RC"
 # is written docs-root relative.
 git -C "$R46/.worktrees/01-fixture" commit -q --allow-empty -m "more wave work" >/dev/null 2>&1
 W46_HEAD2="$(git -C "$R46/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+# The review names what it read in abbreviated form; the proof names the commit it resolves to.
+printf '# review\n\nreviewed: %s..%s (the fixture)\n\nnotes\n' "${W46_HEAD:0:8}" "${W46_HEAD2:0:10}" \
+  > "$R46/.bionic/docs/record/wave-01-fixture/review.md"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add review "$R46/.bionic/docs/record/wave-01-fixture/review.md"
 expect_eq "46b proof-add review by absolute path exits 0" "0" "$RC"
@@ -8485,13 +8490,69 @@ expect_eq "46b2 …one line added" "1 0;" "$(s42_numstat "$R46")"
 expect_contains "46b3 …naming the evidence under record/" \
   "proved: kind=review head=${W46_HEAD2} " "$(s46_proved "$P46")"
 expect_contains "46b4 …docs-root relative" "evidence=record/wave-01-fixture/review.md" "$(s46_proved "$P46" | tail -1)"
+# REVIEW 7 F1: THE SAME FLOOR LOG AFTER A LANDING PROVES NOTHING NEW. The log read W46_HEAD; the
+# branch has moved to W46_HEAD2 with no run, so re-citing it is refused and the floor proof
+# stays at the head the run read. A log of a run at W46_HEAD2 proves W46_HEAD2.
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
-expect_eq "46b5 a second floor proof exits 0" "0" "$RC"
-expect_eq "46b6 proof_last floor reads the newer head" "$W46_HEAD2" "$(s46_last "$P46" floor)"
-expect_eq "46b7 …and the review head is its own" "$W46_HEAD2" "$(s46_last "$P46" review)"
+s42_unchanged "46b5 F1 the floor log of the old head, after a landing" 1 "$P46"
+expect_contains "46b5b …naming both heads and the fix" \
+  "read head ${W46_HEAD:0:12}, but the working branch is at ${W46_HEAD2:0:12}; run it again on ${W46_HEAD2:0:12}" "$OUT"
+expect_eq "46b6 F1 proof_last floor still reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
+printf 'floor log\nhead=%s dirty=0\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor2.txt
+expect_eq "46b6b …a log of a run at the new head exits 0" "0" "$RC"
+expect_eq "46b6c …and proof_last floor reads the new head" "$W46_HEAD2" "$(s46_last "$P46" floor)"
+expect_eq "46b7 …and the review head is its own, resolved from the review's reviewed: line" "$W46_HEAD2" "$(s46_last "$P46" review)"
 expect_eq "46b8 …the proof lines sit together, newest last" "floor review floor" \
   "$(s46_proved "$P46" | sed -E 's/^proved: kind=([a-z]+) .*/\1/' | tr '\n' ' ' | sed 's/ $//')"
+
+# ---------- F1: what the evidence must attest, each refusal naming its fix ----------
+S46_REC="$R46/.bionic/docs/record/wave-01-fixture"
+printf 'floor log\nhead=%s dirty=3\n' "$W46_HEAD2" > "$S46_REC/floor-dirty.txt"
+printf 'floor log\nhead=none dirty=none\n' > "$S46_REC/floor-norepo.txt"
+printf 'a log with no run header\n' > "$S46_REC/floor-bare.txt"
+printf '# review\n\nno range here\n' > "$S46_REC/review-bare.md"
+printf '# review\n\nreviewed: %s..0123456789abcdef0123456789abcdef01234567\n' "${W46_HEAD:0:8}" > "$S46_REC/review-gone.md"
+S46_SIDE="$(git -C "$R46" commit-tree -p "$W46_HEAD" -m "a side commit" "$(git -C "$R46" rev-parse "$W46_HEAD^{tree}")" 2>/dev/null)"
+printf '# review\n\nreviewed: %s..%s\n' "${W46_HEAD:0:8}" "$S46_SIDE" > "$S46_REC/review-side.md"
+printf '# review\n\nreviewed: %s..%s\n' "${W46_HEAD:0:8}" "$W46_HEAD" > "$S46_REC/review-older.md"
+expect_regex "46f0 precondition: the side commit exists" '^[0-9a-f]{40}$' "$S46_SIDE"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-dirty.txt
+s42_unchanged "46f F1 a run at the head on a dirty tree" 1 "$P46"
+expect_contains "46f2 …naming the dirt and the fix" "dirty tree (dirty=3); commit, run it again" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-norepo.txt
+s42_unchanged "46f3 F1 a run that read no repository (head=none)" 1 "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-bare.txt
+s42_unchanged "46f4 F1 a floor evidence with no run header" 1 "$P46"
+expect_contains "46f5 …naming the line it needs" "carries no head=<sha> dirty=<n> line" "$OUT"
+poke "$R46" proof-add review record/wave-01-fixture/review-bare.md
+s42_unchanged "46f6 F1 a review with no reviewed: line" 1 "$P46"
+expect_contains "46f7 …naming the line it needs" "carries no reviewed: <a>..<b> line" "$OUT"
+poke "$R46" proof-add review record/wave-01-fixture/review-gone.md
+s42_unchanged "46f8 F1 a review that read a commit this repository lacks" 1 "$P46"
+poke "$R46" proof-add review record/wave-01-fixture/review-side.md
+s42_unchanged "46f9 F1 a review of a commit off the working branch" 1 "$P46"
+expect_contains "46f10 …naming it" "which is not on the working branch" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/review-older.md
+s42_unchanged "46f11 a floor proof never reads a review's range" 1 "$P46"
+# A REVIEW OF AN OLDER HEAD IS A TRUE PROOF OF THAT HEAD: what landed since stays unread.
+poke "$R46" proof-add review record/wave-01-fixture/review-older.md
+expect_eq "46g a review of an ancestor of the branch head exits 0" "0" "$RC"
+expect_eq "46g2 …and proves the head it read, not the branch head" "$W46_HEAD" "$(s46_last "$P46" review)"
+# kind=task takes whichever the evidence carries, the run header first (A-T14.9).
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add task record/wave-01-fixture/floor2.txt
+expect_eq "46g3 a task proof citing a run log at the head exits 0" "0" "$RC"
+poke "$R46" proof-add task record/wave-01-fixture/review-older.md
+expect_eq "46g4 …and one citing a review of an older head exits 0" "0" "$RC"
+expect_eq "46g5 …proving the head that review read" "$W46_HEAD" "$(s46_last "$P46" task)"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add task record/wave-01-fixture/floor-bare.txt
+s42_unchanged "46g6 a task proof whose evidence attests no head" 1 "$P46"
+expect_contains "46g7 …naming both forms" "neither a head=<sha> dirty=<n> run header nor a reviewed: <a>..<b> line" "$OUT"
 
 # ---------- the refusals: byte-identical, naming the fix ----------
 s42_snap "$R46" "$P46"
@@ -8572,8 +8633,9 @@ awk '
   && git worktree add -q -b wave/01-fixture "$R48/.worktrees/01-fixture" \
   && git -C "$R48/.worktrees/01-fixture" commit -q --allow-empty -m "the first build lands" ) >/dev/null 2>&1
 mkdir -p "$R48/.bionic/docs/record/wave-01-fixture"
-printf 'review notes\n' > "$R48/.bionic/docs/record/wave-01-fixture/review.md"
 W48_A="$(git -C "$R48/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+printf '# review\n\nreviewed: %s..%s (the first build)\n' "$(git -C "$R48" rev-parse HEAD)" "$W48_A" \
+  > "$R48/.bionic/docs/record/wave-01-fixture/review.md"
 expect_eq "48a0 precondition: the T3 row is a review with an empty reads cell, pending" \
   "T3|6|review|follows the build|critic|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|pending|" \
   "$(s48_row "$P48" T3)"
