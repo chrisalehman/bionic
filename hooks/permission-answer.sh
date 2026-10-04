@@ -325,8 +325,9 @@ if [ -n "$PA_AGENT" ]; then
   PA_ROW="$(roster_row_for_id "$PA_ROSTER" "$PA_AGENT")" \
     || _pa_fail "the roster has no row for the asking agent $PA_AGENT"
   PA_NAME="$(_pa_row_field "$PA_ROW" name)"
-  [ -n "$PA_NAME" ] || _pa_fail "the roster row for agent $PA_AGENT names no agent"
-  PA_ASKER="$PA_NAME"
+  # An agent dispatched without a name has a real row whose name= is empty: that is a reader
+  # (a tree is recorded for a name, and it has none), not a fault. It stays labelled by its id.
+  [ -z "$PA_NAME" ] || PA_ASKER="$PA_NAME"
 fi
 
 # ---------- its class ----------
@@ -340,6 +341,8 @@ if [ -z "$PA_AGENT" ]; then
     bound-unreadable) _pa_fail "the run this session is bound to cannot be read ($BIONIC_RUN_PLAN)" ;;
     *) PA_CLASS=unbound ;;
   esac
+elif [ -z "$PA_NAME" ]; then
+  PA_CLASS=reader
 else
   PA_OWN="$(workspace_for_name "$BIONIC_ROOT" "$BIONIC_SID" "$PA_NAME")"
   case "$?" in
