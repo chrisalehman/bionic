@@ -637,6 +637,198 @@ drive "$A16P" "$(payload "$A16P" Bash "$(bash_ti "touch $A16P/src/$(printf 'y%.0
 expect_eq "A16.4 control: a long but readable command is read (allow)" "allow" "$(behavior "$OUT")"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
+section "§A17 a credential store is refused through any path that reaches it"
+
+# The reserved table used to be asked about the path a file tool TYPED, so a Read through a
+# symlink into ~/.ssh was allowed (review B3a). The hook now asks about the resolved path as
+# well, and either spelling matching is a credentials denial (wave-25 T17).
+A17P="$(make_project a17 bound)"
+A17T="$A17P/.worktrees/25-T1"
+add_roster_row "$A17P" w99-T1 aw99-T1-0974313b7a6b74f2 bionic:senior-implementor "$(record_of "$A17P")/T1.md"
+add_workspace "$A17P" w99-T1 "$A17T"
+mkdir -p "$HOME_FX/.ssh" "$HOME_FX/.kube"
+: > "$HOME_FX/.ssh/id_rsa"
+: > "$A17P/src/plain.txt"
+: > "$A17T/.env"
+ln -s "$HOME_FX/.ssh" "$A17T/k"
+ln -s "$A17P/src" "$A17T/s"
+ln -s "$A17T/.env" "$A17T/settings"
+a17() {  # <tool> <path> -> drives the writer's file-tool question
+  drive "$A17P" "$(payload "$A17P" "$1" "$(file_ti "$2")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A17T")"
+}
+a17 Read "$A17T/k/id_rsa"
+expect_eq "A17.1 a Read through a link into ~/.ssh: deny" "deny" "$(behavior "$OUT")"
+expect_contains "A17.2 …as credentials, on the record" "|deny-reserved|credentials:" "$(tail -1 "$(log_of "$A17P")" 2>/dev/null)"
+expect_contains "A17.3 …and the message says credentials" "touches credentials" "$(message "$OUT")"
+a17 Read "$A17T/s/plain.txt"
+expect_eq "A17.4 control: a Read through a link to an ordinary place: allow" "allow" "$(behavior "$OUT")"
+a17 Write "$A17T/k/authorized_keys"
+expect_eq "A17.5 a Write through the link into ~/.ssh: deny" "deny" "$(behavior "$OUT")"
+expect_contains "A17.6 …as credentials, not as an ordinary outside write" "|deny-reserved|credentials:" "$(tail -1 "$(log_of "$A17P")" 2>/dev/null)"
+a17 Edit "$A17T/k/config"
+expect_contains "A17.7 an Edit through the link: credentials" "|deny-reserved|credentials:" "$(tail -1 "$(log_of "$A17P")" 2>/dev/null)"
+a17 Write "$A17T/settings"
+expect_eq "A17.8 a Write to a name in its own tree that links to a .env: deny" "deny" "$(behavior "$OUT")"
+expect_contains "A17.9 …as credentials" "|deny-reserved|credentials:" "$(tail -1 "$(log_of "$A17P")" 2>/dev/null)"
+a17 Write "$A17T/notes.txt"
+expect_eq "A17.10 control: a Write to an ordinary file in its tree: allow" "allow" "$(behavior "$OUT")"
+for st in .npmrc .pypirc .git-credentials .kube/config .docker/config.json .gnupg/pubring.kbx .config/gcloud/credentials.db .cargo/credentials.toml .azure/msal_token_cache.json; do
+  a17 Read "$HOME_FX/$st"
+  expect_eq "A17.store Read ~/$st: deny" "deny" "$(behavior "$OUT")"
+  drive "$A17P" "$(payload "$A17P" Bash "$(bash_ti "cat $HOME_FX/$st")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A17T")"
+  expect_contains "A17.store 'cat ~/$st': credentials" "|deny-reserved|credentials:" "$(tail -1 "$(log_of "$A17P")" 2>/dev/null)"
+done
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§A18 a read-only agent's report is a root only inside what the lead holds"
+
+# The roster's deliverable= became the reader's write root with no containment test, so a
+# report named under the main checkout's hooks/ or in another writer's tree was writable
+# (review S1). It now counts only when it is a file inside the run's record directory or the
+# session scratch; otherwise it contributes no root (wave-25 T17).
+A18P="$(make_project a18 bound)"
+A18S="$(scratch_of "$A18P")"
+A18R="$(record_of "$A18P")"
+mkdir -p "$A18R/sub"
+add_roster_row "$A18P" w99-RA aw99-RA-1 general-purpose "$A18P/src"
+add_roster_row "$A18P" w99-RB aw99-RB-1 general-purpose "$A18P/.worktrees/25-T1/r.md"
+add_roster_row "$A18P" w99-RC aw99-RC-1 general-purpose "$A18R/sub"
+add_roster_row "$A18P" w99-RD aw99-RD-1 general-purpose "$A18R/RD.md"
+add_roster_row "$A18P" "" a18unnamed00000001 general-purpose "$A18P/src/u.md"
+add_roster_row "$A18P" w99-RE aw99-RE-1 general-purpose "src/rel.md"
+a18() {  # <agent id> <path> -> the reader's Write question
+  drive "$A18P" "$(payload "$A18P" Write "$(file_ti "$2")" "$1" general-purpose)"
+}
+a18 aw99-RA-1 "$A18P/src/x.txt"
+expect_eq "A18.1 a report naming the main checkout's src: a write under it is denied" "deny" "$(behavior "$OUT")"
+expect_contains "A18.2 …and the grant named is the scratch alone" "This read-only agent may write and delete under $A18S." "$(message "$OUT")"
+a18 aw99-RB-1 "$A18P/.worktrees/25-T1/r.md"
+expect_eq "A18.3 a report in another writer's tree: denied" "deny" "$(behavior "$OUT")"
+a18 aw99-RC-1 "$A18R/sub/x.md"
+expect_eq "A18.4 a report naming a directory in the record: a write under it is denied" "deny" "$(behavior "$OUT")"
+a18 aw99-RD-1 "$A18R/RD.md"
+expect_eq "A18.5 control: a report file in the record: allow" "allow" "$(behavior "$OUT")"
+a18 a18unnamed00000001 "$A18P/src/u.md"
+expect_eq "A18.6 an unnamed agent's report in the main checkout: denied" "deny" "$(behavior "$OUT")"
+a18 aw99-RE-1 "$A18P/src/rel.md"
+expect_eq "A18.7 a relative report outside the record: denied" "deny" "$(behavior "$OUT")"
+a18 aw99-RA-1 "$A18S/notes.md"
+expect_eq "A18.8 control: the same reader writing the scratch: allow" "allow" "$(behavior "$OUT")"
+# An unbound session has no record directory: a report there contributes no root.
+A18U="$(make_project a18u none)"
+add_roster_row "$A18U" w99-RU aw99-RU-1 general-purpose "$(record_of "$A18U")/RU.md"
+add_roster_row "$A18U" w99-RS aw99-RS-1 general-purpose "$(scratch_of "$A18U")/RS.md"
+drive "$A18U" "$(payload "$A18U" Write "$(file_ti "$(record_of "$A18U")/RU.md")" aw99-RU-1 general-purpose)"
+expect_eq "A18.9 unbound: a report in the record is denied (no run, no record held)" "deny" "$(behavior "$OUT")"
+drive "$A18U" "$(payload "$A18U" Write "$(file_ti "$(scratch_of "$A18U")/RS.md")" aw99-RS-1 general-purpose)"
+expect_eq "A18.10 unbound control: a report in the scratch: allow" "allow" "$(behavior "$OUT")"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§A19 a delete of a workspace root itself is denied; beneath it is allowed"
+
+# `rm -rf <own tree>` and `rm -rf <scratch>` were allowed: containment matched the root
+# itself (review N5). A delete must now be strictly beneath a delete root (wave-25 T17).
+A19P="$(make_project a19 bound)"
+A19T="$A19P/.worktrees/25-T1"
+A19S="$(scratch_of "$A19P")"
+add_roster_row "$A19P" w99-T1 aw99-T1-0974313b7a6b74f2 bionic:senior-implementor "$(record_of "$A19P")/T1.md"
+add_workspace "$A19P" w99-T1 "$A19T"
+drive "$A19P" "$(payload "$A19P" Bash "$(bash_ti "rm -rf $A19T")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A19T")"
+expect_eq "A19.1 a writer deleting its own tree: deny" "deny" "$(behavior "$OUT")"
+expect_contains "A19.2 …because it is a root of the workspace" "a root of the workspace" "$(message "$OUT")"
+expect_contains "A19.3 …and it is sent to the lead" "ask the lead" "$(message "$OUT")"
+drive "$A19P" "$(payload "$A19P" Bash "$(bash_ti "rm -rf $A19T/build")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A19T")"
+expect_eq "A19.4 control: a delete beneath its tree: allow" "allow" "$(behavior "$OUT")"
+drive "$A19P" "$(payload "$A19P" Bash "$(bash_ti "rm -rf $A19S")")"
+expect_eq "A19.5 the lead deleting the session scratch: deny" "deny" "$(behavior "$OUT")"
+expect_contains "A19.6 …and it is sent to the human" "report it to the human" "$(message "$OUT")"
+drive "$A19P" "$(payload "$A19P" Bash "$(bash_ti "rm -rf $A19S/tmp")")"
+expect_eq "A19.7 control: a delete beneath the scratch: allow" "allow" "$(behavior "$OUT")"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§A20 a command with more targets than the hook reads is denied at once"
+
+# One fork per target ran a 2000-operand rm past the hook's 10 s registration (review S3),
+# and a killed hook leaves the stock dialog. The hook resolves in one process, and past a
+# fixed number of effects it answers with one `?` and a denial instead of resolving them.
+# The number is read from the hook, so the rows follow it.
+A20P="$(make_project a20 bound)"
+A20T="$A20P/.worktrees/25-T1"
+add_roster_row "$A20P" w99-T1 aw99-T1-0974313b7a6b74f2 bionic:senior-implementor "$(record_of "$A20P")/T1.md"
+add_workspace "$A20P" w99-T1 "$A20T"
+A20_MAX="$(sed -n 's/^PA_EFFECTS_MAX=\([0-9][0-9]*\)$/\1/p' "$HOOK")"
+expect_regex "A20.0 the hook states its number of effects (non-empty readback)" '^[0-9]+$' "$A20_MAX"
+a20_cmd() { awk -v n="$1" 'BEGIN { s = "rm -f"; for (i = 1; i <= n; i++) s = s " f" i; printf "%s", s }'; }
+TIMEFORMAT='%R'
+A20PL="$(payload "$A20P" Bash "$(bash_ti "$(a20_cmd "$(( ${A20_MAX:-0} + 1 ))")")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A20T")"
+A20_T1="$( { time drive "$A20P" "$A20PL" >/dev/null 2>&1; } 2>&1 )"
+drive "$A20P" "$A20PL"
+expect_eq "A20.1 one effect past the number: deny" "deny" "$(behavior "$OUT")"
+expect_contains "A20.2 …as too many targets to read" "too many targets to read" "$(message "$OUT")"
+expect_eq "A20.3 …in under 5 s (took ${A20_T1}s)" "yes" "$(awk -v t="$A20_T1" 'BEGIN { print (t != "" && t + 0 < 5.0) ? "yes" : "no" }')"
+A20PL="$(payload "$A20P" Bash "$(bash_ti "$(a20_cmd 2000)")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A20T")"
+A20_T2="$( { time drive "$A20P" "$A20PL" >/dev/null 2>&1; } 2>&1 )"
+drive "$A20P" "$A20PL"
+expect_eq "A20.4 the 2000-operand rm the review timed: deny, in under 5 s (took ${A20_T2}s)" "deny|yes" \
+  "$(behavior "$OUT")|$(awk -v t="$A20_T2" 'BEGIN { print (t != "" && t + 0 < 5.0) ? "yes" : "no" }')"
+A20PL="$(payload "$A20P" Bash "$(bash_ti "$(a20_cmd "${A20_MAX:-1}")")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A20T")"
+A20_T3="$( { time drive "$A20P" "$A20PL" >/dev/null 2>&1; } 2>&1 )"
+drive "$A20P" "$A20PL"
+echo "§A20: at the number (${A20_MAX:-?} targets) the hook took ${A20_T3}s; one past it ${A20_T1}s; 2000 targets ${A20_T2}s"
+expect_eq "A20.5 control: exactly the number of targets, all inside the tree, is read: allow" "allow" "$(behavior "$OUT")"
+expect_eq "A20.6 …inside the registration (took ${A20_T3}s)" "yes" "$(awk -v t="$A20_T3" 'BEGIN { print (t != "" && t + 0 < 10.0) ? "yes" : "no" }')"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§A21 on and off are one reading: the hook and the doctor agree on one config"
+
+# The ownership table names this suite for on/off across the hook and the doctor (spec §3),
+# and each was tested alone (review S5). Here both read the SAME .bionic/config.yaml: the hook
+# is silent exactly when the doctor's row reads off. The doctor runs on a tool directory of
+# the fixture's (doctor-fleet.test.sh's pattern), so its run time is not this machine's
+# package roster.
+A21P="$(make_project a21 bound)"
+A21BIN="$SANDBOX/a21-bin"
+mkdir -p "$A21BIN" "$SANDBOX/a21-claude/plugins" "$SANDBOX/a21-claude/sessions"
+: > "$SANDBOX/a21-dot.zshrc"
+for t in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail sort uniq wc cut jq \
+         mktemp find xargs shasum uname date touch diff cmp printf true false sleep dirname basename realpath \
+         id ps df sysctl vm_stat git strings cksum; do
+  p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$A21BIN/$t"
+done
+for t in node pnpm gh rg uv docker aws; do
+  printf '#!/bin/sh\ncase "$1" in --version) echo 1.0.0 ;; esac\nexit 0\n' > "$A21BIN/$t"
+  chmod +x "$A21BIN/$t"
+done
+printf '#!/bin/sh\nexit 1\n' > "$A21BIN/claude"
+chmod +x "$A21BIN/claude"
+a21_doctor() {
+  ( cd "$A21P" && HOME="$HOME_FX" PATH="$A21BIN" BIONIC_SHELL_RC="$SANDBOX/a21-dot.zshrc" \
+      BIONIC_CLAUDE_HOME="$SANDBOX/a21-claude" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" \
+      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$REPO_ROOT/payload/scripts/doctor.sh" < /dev/null 2>&1 ) \
+    | /usr/bin/grep -m1 'permission answers'
+}
+for a21c in false False unset; do
+  case "$a21c" in
+    unset) rm -f "$A21P/.bionic/config.yaml"; a21want=on ;;
+    false) printf 'permission-answers: false\n' > "$A21P/.bionic/config.yaml"; a21want=off ;;
+    *) printf 'permission-answers: %s\n' "$a21c" > "$A21P/.bionic/config.yaml"; a21want=on ;;
+  esac
+  drive "$A21P" "$(payload "$A21P" Bash "$(bash_ti "$INCIDENT")")"
+  a21hook=unknown
+  if [ "$RC" = 0 ] && [ -z "$OUT" ]; then a21hook=off
+  elif [ "$(behavior "$OUT")" = deny ]; then a21hook=on
+  fi
+  A21ROW="$(a21_doctor)"
+  a21doc=unknown
+  case "$A21ROW" in
+    *"permission answers"*" off "*) a21doc=off ;;
+    *"permission answers"*" on "*) a21doc=on ;;
+  esac
+  expect_nonempty "A21.$a21c.0 the doctor printed its permission-answers row" "$A21ROW"
+  expect_eq "A21.$a21c.1 [$a21c] the hook and the doctor agree, and say $a21want" "$a21want|$a21want" "$a21hook|$a21doc"
+done
+
+# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A8 no decision object anywhere in the suite carries interrupt"
 
 # The extractor is proved on a planted object first, so an empty answer below is real.
