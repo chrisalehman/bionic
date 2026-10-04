@@ -878,17 +878,11 @@ sec == "tasks" && /^[ \t]*\|/ {
     if (sv ~ /[A-Za-z0-9]/) t = t " · serves " sv
     print "TROW" OFS c[1] OFS t OFS c[3] OFS c[6] OFS c[5]
   }
-  # THE FIRST BATCH, ASKED OF EACH TABLE IN ITS OWN TERMS. A wave row is in the first
-  # batch when it is a Step-4 row depending on nothing; a task row has no step cell and
-  # no deps cell to ask about — the task arm of `units_ready` says so, "READY is `pending`
-  # alone" — so the question there is the status cell, and a card that kept the wave
-  # predicate said "first batch not declared" on every task-scale plan ever written.
-  if (SCALE == "task") {
-    if (c[5] == "pending") FIRSTB = FIRSTB (FIRSTB == "" ? "" : ", ") c[1]
-  }
-  else if (c[2] == "4" && (c[6] == "—" || c[6] == "-" || c[6] == "")) {
-    FIRSTB = FIRSTB (FIRSTB == "" ? "" : ", ") c[1]
-  }
+  # THE FIRST BATCH, TASK SCALE ONLY. A task row has no step cell and no deps cell to ask
+  # about — the task arm of `units_ready` says so, "READY is `pending` alone" — so the
+  # question is the status cell. A wave card prints batch 1 off the derived graph instead
+  # (wave-26 D12), so no wave arm walks the deps cell here.
+  if (SCALE == "task" && c[5] == "pending") FIRSTB = FIRSTB (FIRSTB == "" ? "" : ", ") c[1]
   next
 }
 sec == "eval" && /^[ \t]*\|/ {
@@ -1331,40 +1325,96 @@ _card_batch_widths() {  # <plan> <rung> <scale> -> one `batch <k> · <n> of <run
 # same graph the tick schedules from. A size cell that is not a number of minutes counts 0
 # (`30m` counts 30), because a row the planner did not size still sits on the graph.
 #
-# Sets CARD_CHAIN (ids joined by commas), CARD_CHAIN_MIN and CARD_PEAK; returns 1 with the
-# library's own message in CARD_CHAIN_ERR when it refuses (a cycle, say).
+# Sets CARD_CHAIN (ids joined by commas), CARD_CHAIN_MIN, CARD_PEAK and CARD_EDGES (the
+# `units_edges` lines, kept for the depends column); returns 1 with the library's own message
+# in CARD_CHAIN_ERR when it refuses (a cycle, say).
+#
+# THE ANSWER IS SPLIT BY PARAMETER EXPANSION, NOT `IFS=<TAB> read` (review 9 F1). A tab is IFS
+# whitespace, so `read` folds a run of tabs into one delimiter, and the empty chain's
+# `chain<TAB><TAB>0` put the minutes in the ids field: `no open task` could never print.
 _card_chain() {  # <plan> <writer ceiling>
-  local rows edges out k a b
+  local rows out line rest
   CARD_CHAIN=""; CARD_CHAIN_MIN=0; CARD_PEAK=0; CARD_CHAIN_ERR=""
   rows="$(units_rows "${1:-}" 2>/dev/null)" || rows=""
-  edges="$(units_edges "${1:-}" 2>/dev/null)" || edges=""
+  CARD_EDGES="$(units_edges "${1:-}" 2>/dev/null)" || CARD_EDGES=""
   out="$( { printf '%s\n' "$rows" | awk -F'\t' '
               $1 != "" && ($10 == "pending" || $10 == "active") {
                 m = 0; if (match($7, /^[0-9]+/)) m = substr($7, 1, RLENGTH) + 0
                 print "N\t" $1 "\t" m
               }'
-            printf '%s\n' "$edges" | awk -F'\t' 'NF >= 2 && $1 != "" && !(($1, $2) in seen) {
+            printf '%s\n' "$CARD_EDGES" | awk -F'\t' 'NF >= 2 && $1 != "" && !(($1, $2) in seen) {
                 seen[$1, $2] = 1; print "E\t" $1 "\t" $2 }'
           } | units_chain "${2:-1}" 2>&1 )" || { CARD_CHAIN_ERR="${out#units_chain: }"; return 1; }
-  while IFS="$CARD_TAB" read -r k a b; do
-    case "$k" in
-      chain) CARD_CHAIN="$a"; CARD_CHAIN_MIN="${b:-0}" ;;
-      width) CARD_PEAK="${a:-0}" ;;
+  while IFS= read -r line; do
+    rest="${line#*"$CARD_TAB"}"
+    case "$line" in
+      chain"$CARD_TAB"*)
+        CARD_CHAIN="${rest%%"$CARD_TAB"*}"
+        case "$rest" in *"$CARD_TAB"*) CARD_CHAIN_MIN="${rest#*"$CARD_TAB"}" ;; esac ;;
+      width"$CARD_TAB"*) CARD_PEAK="${rest:-0}" ;;
     esac
   done < <(printf '%s\n' "$out")
+  [ -n "$CARD_CHAIN_MIN" ] || CARD_CHAIN_MIN=0
   return 0
+}
+
+# THE DEPENDS COLUMN OF A TABLE WITH A `reads` COLUMN (review 9, answer (b)). There the deps cell
+# holds only `ext:` tokens, because a row waits on what it reads, so the cell alone shows a dash
+# for a row that waits on another through a read. Each wave task row's depends becomes the ids
+# `units_edges` puts before it (the edges `_card_chain` already fetched), once each and in table
+# order, then the deps cell's `ext:` tokens; a row with neither keeps a dash. The edges join open
+# rows only, so a predecessor that has landed no longer shows: what remains is what it waits for.
+# A deps-only table is left as the plan wrote it.
+_card_reads_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
+  local out line
+  units_has_column "${1:-}" reads || return 0
+  [ "${#WCARD_TROW[@]}" -gt 0 ] || return 0
+  out="$( { printf '%s\n' "${CARD_EDGES:-}"; printf '\034\n'; printf '%s\n' "${WCARD_TROW[@]}"; } | awk -F'\t' '
+    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+    $0 == "\034" { rows = 1; next }
+    !rows { if (NF >= 2 && $1 != "" && $2 != "") before[$2, $1] = 1; next }
+    $0 != "" { n++; line[n] = $0; id[n] = $1 }
+    END {
+      for (i = 1; i <= n; i++) {
+        m = split(line[i], f, "\t")
+        dep = ""
+        for (j = 1; j <= n; j++) if (j != i && ((id[i], id[j]) in before)) dep = dep (dep == "" ? "" : ", ") id[j]
+        k = split(f[4], tok, ",")
+        for (t = 1; t <= k; t++) {
+          v = trim(tok[t])
+          if (v ~ /^ext:/) dep = dep (dep == "" ? "" : ", ") v
+        }
+        if (dep == "") dep = "—"
+        f[4] = dep
+        out = f[1]
+        for (j = 2; j <= m; j++) out = out "\t" f[j]
+        print out
+      }
+    }')" || return 0
+  [ -n "$out" ] || return 0
+  WCARD_TROW=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && WCARD_TROW[${#WCARD_TROW[@]}]="$line"
+  done < <(printf '%s\n' "$out")
+}
+
+# The writer ceiling the chain is scheduled under: the plan's writer budget, or with none
+# declared the row count, so the schedule is not capped.
+_card_chain_ceil() {  # <plan>
+  local ceil="$WCARD_WRITERS"
+  case "$ceil" in ''|*[!0-9]*|0) ceil="$(units_rows "${1:-}" 2>/dev/null | grep -c .)" ;; esac
+  [ "${ceil:-0}" -gt 0 ] 2>/dev/null || ceil=1
+  printf '%s' "$ceil"
 }
 
 # The wave card's width block: the chain, its minutes, the peak width against the writer
 # budget, and the per-batch widths, all from the one derived graph. With no writer budget the
-# schedule is not capped (the ceiling is the row count) and the line says the budget is absent.
+# line says the budget is absent. `_card_chain` has run already (its edges fill the Tasks
+# block's depends column, printed above this one) and left its status in CARD_CHAIN_RC.
 _card_chain_block() {  # <plan>
-  local plan="$1" w="$WCARD_WRITERS" ceil chain peak
-  ceil="$w"
-  case "$ceil" in ''|*[!0-9]*|0) ceil="$(units_rows "$plan" 2>/dev/null | grep -c .)" ;; esac
-  [ "${ceil:-0}" -gt 0 ] 2>/dev/null || ceil=1
+  local plan="$1" w="$WCARD_WRITERS" chain peak
   printf '  Chain and width\n'
-  if _card_chain "$plan" "$ceil"; then
+  if [ "${CARD_CHAIN_RC:-1}" -eq 0 ]; then
     if [ -n "$CARD_CHAIN" ]; then
       chain="${CARD_CHAIN//,/ → } · ${CARD_CHAIN_MIN} min"
     else
@@ -1627,6 +1677,13 @@ _card_step2_view() {  # <artifact path as given> <args...>
 # serves, and the longest chain and the peak width the derived graph gives. A task-scale table
 # carries no sizes, so its width block stays the writer budget and the first batch.
 _card_step3() {  # <citation path> <artifact path as given>
+  # THE CHAIN IS ASKED BEFORE THE TASKS ARE RENDERED: its edges are the depends column of a
+  # table with a `reads` column, and the graph is fetched once for both.
+  if [ "$CARD_SCALE" != "task" ]; then
+    CARD_CHAIN_RC=0
+    _card_chain "$2" "$(_card_chain_ceil "$2")" || CARD_CHAIN_RC=1
+    _card_reads_depends "$2"
+  fi
   printf 'Step 3 · Plan\n\n'
   _card_branches
   printf '\n'
