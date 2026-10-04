@@ -4170,7 +4170,9 @@ section "Section HOLD: wave-24 T7 — the stand-down's standing answer is named 
 # read — the dispatch doctrine (source and render) and the Patrol prompt the cron job carries.
 # The stand-down refusal's own text is the stop wall's (payload/scripts/lib/stop.sh), pinned with
 # that file's owner.
-PIN_HOLD_VERB='session-poker.sh hold <name> <reason>'
+# ONE wording for the doctrine and the prompt (wave-24 T27/T29, critic I4): NAME and a quoted
+# reason, because a bare `<name>` or `<reason>` pastes as a redirect from a file of that name.
+PIN_HOLD_VERB="session-poker.sh hold NAME 'why it stays up'"
 PIN_HOLD_LIST='`ListAgents` only when the roster has an open row'
 HOLD_BLOCK="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
 for _hold_f in "$DISPATCH_MD" "$HOLD_BLOCK"; do
@@ -4188,10 +4190,9 @@ done
 HOLD_PROMPT="$(CLAUDE_CODE_SESSION_ID=0123456789abcdef bash "$POKER_SH" prompt 2>/dev/null)"
 expect_nonempty "HOLD-c precondition: the poker printed its Patrol prompt" "$HOLD_PROMPT"
 # THE PROMPT'S HOLD LINE PASTES AS ONE COMMAND (wave-24 T27; critic I4): the reason is a quoted
-# placeholder, never a bare `<reason>` a shell reads as a redirect. The doctrine lines above keep
-# PIN_HOLD_VERB until w24-T29 re-words their sources to the same text.
-PIN_HOLD_PROMPT="session-poker.sh hold NAME 'why it stays up'"
-expect_contains "HOLD-c: the Patrol prompt names the hold verb, its reason a quoted placeholder" "$PIN_HOLD_PROMPT" "$HOLD_PROMPT"
+# placeholder, never a bare `<reason>` a shell reads as a redirect. The doctrine (HOLD-a) prints
+# the same words since w24-T29, so one pin serves both.
+expect_contains "HOLD-c: the Patrol prompt names the hold verb, its reason a quoted placeholder" "$PIN_HOLD_VERB" "$HOLD_PROMPT"
 # The retired ask must be gone from the doctrine too: "ListAgents, before the tick" every tick.
 expect_eq "HOLD-d: the unconditional 'before the tick' ListAgents line is gone from dispatch.md" "0" \
   "$(grep -c 'ListAgents`, before the tick, for a fresh answer' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
@@ -4244,5 +4245,56 @@ for _vv in task-set step-line current ledger-add ledger-set; do
   expect_nonempty "VERB-m precondition: the poker answered $_vv" "$_vout"
   expect_absent "VERB-m: the poker accepts the documented verb $_vv" "unknown verb" "$_vout"
 done
+
+section "Section SEMVER: wave-24 T18 — one versioning policy, in identical lines, in CLAUDE.md and the CHANGELOG header; the newest entry is plugin.json's version (REQ-11, AC-11.1/AC-11.2; D19)"
+#
+# WHAT THIS OWNS. From 1.9.0 bionic versions by semver, and the policy is stated twice: in the
+# repo CLAUDE.md, which a session working here reads, and in the CHANGELOG's header, which a user
+# reads. AC-11.2 fails when either lacks it or the two disagree, so the block is extracted from
+# each file by one reader and compared byte for byte. The block opens on its lead line and runs to
+# the first blank line. The CHANGELOG is also a version surface (AC-11.1): its newest entry's
+# heading must name plugin.json's version, which Section 1 and AC-17 do not read.
+SEMVER_CLAUDE="${REPO}/CLAUDE.md"
+SEMVER_CHANGELOG="${REPO}/CHANGELOG.md"
+# semver_block <file> -> the policy lines, from "Versioning follows semver" to the first blank line.
+semver_block() { awk '/^Versioning follows semver/ { p = 1 } p && /^$/ { exit } p' "$1" 2>/dev/null; }
+# changelog_head_version <file> -> the version on the first "## <version> — <date>" heading.
+changelog_head_version() { awk '/^## [0-9]/ { print $2; exit }' "$1" 2>/dev/null; }
+# first_line_of <file> <ERE> -> the line number of the first match, empty when none.
+first_line_of() { grep -nE -- "$2" "$1" 2>/dev/null | head -1 | cut -d: -f1; }
+
+SV_CLAUDE="$(semver_block "$SEMVER_CLAUDE")"
+SV_CHANGELOG="$(semver_block "$SEMVER_CHANGELOG")"
+expect_nonempty "SEMVER-1: CLAUDE.md carries the versioning policy block" "$SV_CLAUDE"
+expect_nonempty "SEMVER-2: CHANGELOG.md carries the versioning policy block" "$SV_CHANGELOG"
+SV_FLAT="$(printf '%s\n' "$SV_CLAUDE" | tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g')"
+for _sv in \
+  '**MAJOR** for a change that breaks a documented contract a user or project already relies on' \
+  'a removed verb or field, a `canonical_sdlc_version` bump, an artifact a user must migrate' \
+  '**MINOR** for new capability or a behaviour a user notices, including a newly refused action or an upgrade step' \
+  '**PATCH** for a fix within existing behaviour'; do
+  expect_contains "SEMVER-3: the policy says: $_sv" "$_sv" "$SV_FLAT"
+done
+expect_eq "SEMVER-4: CLAUDE.md and the CHANGELOG header state the policy in identical lines" \
+  "$SV_CLAUDE" "$SV_CHANGELOG"
+SV_AT="$(first_line_of "$SEMVER_CHANGELOG" '^Versioning follows semver')"
+SV_FIRST_ENTRY="$(first_line_of "$SEMVER_CHANGELOG" '^## [0-9]')"
+expect_nonempty "SEMVER-5 precondition: the CHANGELOG has a release entry" "$SV_FIRST_ENTRY"
+expect_true "SEMVER-5: the CHANGELOG's policy sits in its header, above the first release entry" \
+  test "${SV_AT:-999999}" -lt "${SV_FIRST_ENTRY:-0}"
+expect_eq "SEMVER-6: the CHANGELOG's newest entry is plugin.json's version" \
+  "$(plugin_version_of "$PLUGIN_JSON")" "$(changelog_head_version "$SEMVER_CHANGELOG")"
+# Anti-vacuity: one word changed in one file's block must read as a disagreement, through the
+# same reader, while that reader still finds the doctored block.
+anchor "$SEMVER_CLAUDE" 'or an upgrade step' 1
+sed 's/or an upgrade step/or a new setting/' "$SEMVER_CLAUDE" > "$TMP/semver-claude-doctored.md"
+SV_DOCTORED="$(semver_block "$TMP/semver-claude-doctored.md")"
+expect_nonempty "SEMVER-7 precondition: the doctored CLAUDE.md still has a policy block" "$SV_DOCTORED"
+expect_ne "SEMVER-7: a one-word change in CLAUDE.md's policy reads as a disagreement (pin discriminates)" \
+  "$SV_CHANGELOG" "$SV_DOCTORED"
+awk '!d && /^## [0-9]/ { $2 = "0.0.0-mismatch"; d = 1 } 1' "$SEMVER_CHANGELOG" \
+  > "$TMP/semver-changelog-doctored.md"
+expect_eq "SEMVER-8: a doctored newest heading reads as its own version (pin discriminates)" \
+  "0.0.0-mismatch" "$(changelog_head_version "$TMP/semver-changelog-doctored.md")"
 
 finish
