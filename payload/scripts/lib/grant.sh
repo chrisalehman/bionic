@@ -535,6 +535,9 @@ grant_decide() {
           fix="Write it under $dir instead."
         elif [ "$f_how" = add-only ]; then
           fix="Leave it in place and write a new file beside it instead."
+        elif [ "$cls" = lead ] || [ "$cls" = unbound ]; then
+          # The lead session has no lead above it to ask: its next step is the human.
+          fix="Leave it in place, and report it to the human if it must go."
         else
           fix="Leave it in place and ask the lead to remove it if it must go."
         fi

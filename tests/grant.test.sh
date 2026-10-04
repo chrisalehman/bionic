@@ -552,8 +552,12 @@ expect_eq "G11.w3 a write in a sibling tree is deny-fix" "deny-fix" "$(kind "$(d
 expect_eq "G11.w4 a delete in a sibling tree is deny-fix" "deny-fix" "$(kind "$(dec writer "$G11_WRITER" "$(D "$P/.worktrees/25-T10/f")")")"
 expect_eq "G11.w5 a writer's write under the record dir (inside .bionic) allows" "allow" "$(dec writer "$G11_WRITER" "$(W "$REC/T9.md")")"
 G11_WREC="$(dec writer "$G11_WRITER" "$(D "$REC/T9.md")")"
+# The add-only wording is matched by a `case` OUTSIDE a command substitution: a one-line
+# `case` inside one is the shape tests/cross-gate-agreement.test.sh §BP forbids.
+G11_WREC_HOW=""
+case "$G11_WREC" in *"not delete"*) G11_WREC_HOW="not delete" ;; esac
 expect_eq "G11.w6 …its delete there is still the add-only deny-fix" "deny-fix|not delete" \
-  "$(kind "$G11_WREC")|$(case "$G11_WREC" in (*"not delete"*) printf 'not delete' ;; esac)"
+  "$(kind "$G11_WREC")|$G11_WREC_HOW"
 
 # A writer whose own tree IS the main root, as §G6 hands it: the shared directories stay out.
 G11_WMAIN="own=$P${NL}main=$P${NL}scratch=$S"
@@ -659,5 +663,33 @@ expect_eq "G12.18 with a main root, W /dev/null still allows" "allow" "$(dec lea
 G12_MSG="$(dec writer "$WRITER_FACTS" "$(W /dev/null)${NL}$(W /elsewhere/x)${NL}$(W /dev/stderr)")"
 expect_contains "G12.19 a denial beside sink writes names the real target" "/elsewhere/x" "$(fld 2 "$G12_MSG")"
 expect_no_regex "G12.20 …and counts no sink among the failing effects" 'more of its effects|/dev/' "$(fld 2 "$G12_MSG")"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G13 a delete outside the delete roots: an agent is sent to the lead, the lead to the human"
+
+# Rule 6's delete fix used to tell every class to ask the lead, the lead included (T11's
+# concern 1). The lead and an unbound session ARE the lead session: there is no lead above
+# them to ask, so their next step is the human. An agent's is still the lead. Same target,
+# same rule, four classes.
+G13_T="/elsewhere/old.txt"
+for cls in lead unbound; do
+  case "$cls" in lead) f="$LEAD_FACTS" ;; unbound) f="$UNBOUND_FACTS" ;; esac
+  v="$(dec "$cls" "$f" "$(D "$G13_T")")"
+  expect_eq "G13.$cls.0 $cls: a delete outside its roots is deny-fix" "deny-fix" "$(kind "$v")"
+  expect_contains "G13.$cls.1 …the reason is rule 6's (outside where it may delete)" "outside where" "$(fld 2 "$v")"
+  expect_contains "G13.$cls.2 …and the fix sends it to the human" "report it to the human" "$(fld 3 "$v")"
+  expect_absent "G13.$cls.3 …never to ask the lead (it is the lead)" "ask the lead" "$(fld 3 "$v")"
+done
+for cls in writer reader; do
+  case "$cls" in writer) f="$WRITER_FACTS" ;; reader) f="$READER_FACTS" ;; esac
+  v="$(dec "$cls" "$f" "$(D "$G13_T")")"
+  expect_eq "G13.$cls.0 $cls: a delete outside its roots is deny-fix" "deny-fix" "$(kind "$v")"
+  expect_contains "G13.$cls.1 …the reason is rule 6's (outside where it may delete)" "outside where" "$(fld 2 "$v")"
+  expect_contains "G13.$cls.2 …and the fix sends the agent to the lead" "ask the lead to remove it" "$(fld 3 "$v")"
+  expect_absent "G13.$cls.3 …not past it to the human" "human" "$(fld 3 "$v")"
+done
+# The other rule-6 delete wording is unchanged: an agent deleting in the add-only record.
+expect_eq "G13.addonly the add-only record fix is untouched" "Leave it in place and write a new file beside it instead." \
+  "$(fld 3 "$(dec writer "$WRITER_FACTS" "$(D "$REC/a.md")")")"
 
 finish

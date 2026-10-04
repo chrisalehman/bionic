@@ -1557,6 +1557,31 @@ else
   _run_add "$(_doctor_item "$DOCTOR_NIL" "active run" "none — no open plan under this root")"
 fi
 
+# THE PERMISSION ANSWERS (epic-23 wave-25-never-paused, REQ-7, AC-7.3; spec D9). The
+# PermissionRequest hook answers on bionic's own authority unless `.bionic/config.yaml` says
+# `permission-answers: false`, and writes one line per answer to a log outside the project.
+# This row says which of the two is true here and where the log is, so a person who wonders
+# why a prompt did or did not appear can find the record without reading a hook.
+#
+# READ THE WAY THE HOOK READS IT, never restated: `config_value` with the hook's own default
+# (on), and only the literal `false` is off. THE PATH IS `answers_path`'s, never re-derived
+# here, so the row and the hook cannot name different files. Doctor diagnoses and changes
+# nothing, so the log's directory is named, not created, whether or not it exists yet. A
+# stated switch is a choice and not a fault, hence the dash for off, as for every row that
+# reports a state nobody needs to repair. The path is the protected tail, because a log path
+# cut short is a row that withholds the one thing it was printed to say.
+_doctor_pa_state="on"; _doctor_pa_sym="$DOCTOR_OK"
+[ "$(config_value "$DOCTOR_ROOT" permission-answers true 2>/dev/null)" = "false" ] \
+  && { _doctor_pa_state="off"; _doctor_pa_sym="$DOCTOR_NIL"; }
+if _doctor_pa_log="$(answers_path "$DOCTOR_ROOT" 2>/dev/null)" && [ -n "$_doctor_pa_log" ]; then
+  _run_add "$(_doctor_rtrim "$(bionic_line \
+    "$(printf '  %s %-30s ' "$_doctor_pa_sym" "permission answers")" \
+    "${_doctor_pa_state} · log " "$(_doctor_tilde "$_doctor_pa_log")")")"
+else
+  _run_add "$(_doctor_item "$DOCTOR_NIL" "permission answers" \
+    "${_doctor_pa_state} · no log path — HOME is not set")"
+fi
+
 # PREDECESSOR ROSTERS (AC-4's doctor line). A `/clear` re-keys the session — the
 # env and the hook payload both (probe A-probe-1/2) — and leaves the previous
 # session's roster on disk with rows nobody will ever close. Those rows are the
