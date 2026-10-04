@@ -303,6 +303,41 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
   return 1
 }
 
+# ─── _wall_class_read — the whole command's class reading, made once per text ─
+#
+# ONE READING PER TEXT PER HOOK (wave-26 T39). Several askers want the whole command's class
+# and its segment lines in one Bash call: the fill's chain count, farm-out's tier-1 arm, the
+# suite guard's filter, and the booking wrap (`_bsg_wrap_text`), which a short call asks
+# twice (A-T9.10). Each used to fork its own `cmd_class` (which is `cmd_class_lines` read by
+# priority) or `cmd_class_lines`, so one call paid two to four readings of one text. This keeps
+# the last reading and the text it was made of: an ask for the same text reads it, and any
+# other text forks a fresh one.
+#
+# KEYED ON THE TEXT, NOT ON WHO ASKED (A-T39.1). The fill reads the flattened, heredoc-free
+# form and the wrap reads the raw command, and the two readings differ: `_wall_flatten` turns
+# a newline into a space, so `cd x<NL>bash tests/a.test.sh` is one segment of class none flat
+# and a suite raw. A reading serves only the text it was made of, which is the whole proof
+# that the cached answer is the one a fork would give. A raw command that is already flat (one
+# line, single spaces, no heredoc) is one text to both askers and pays one reading.
+#
+# THE CLASS IS `cmd_class`'s OWN PRIORITY READ (cmd-class.sh), the same two anchored `case`
+# tests per class word over the same lines. A SEGMENT IS NEVER ASKED HERE: the chain arm's
+# per-segment reads would evict the whole command's reading, which the wrap still wants.
+_WALL_CLASS_READ=0; _WALL_CLASS_TEXT=""; _WALL_CLASS_LINES=""; _WALL_CLASS=""
+_wall_class_read() {  # <whole command text> -> sets _WALL_CLASS_LINES and _WALL_CLASS
+  local _l _c
+  [ "$_WALL_CLASS_READ" = 1 ] && [ "$_WALL_CLASS_TEXT" = "$1" ] && return 0
+  _WALL_CLASS_LINES="$(cmd_class_lines "$1")"
+  _WALL_CLASS_TEXT="$1"; _WALL_CLASS_READ=1
+  _l=$'\n'"$_WALL_CLASS_LINES"$'\n'
+  for _c in suite bootstrap install build; do
+    case "$_l" in
+      *$'\n'"$_c"$'\t'*|*$'\n'"$_c"$'\n'*) _WALL_CLASS="$_c"; return 0 ;;
+    esac
+  done
+  _WALL_CLASS=none
+}
+
 # ─── _wall_cmd_fill — ONE fill for the farm-out wall's three classifier readings ─
 #
 # THE THREE READINGS ARE ONE COMMAND READ THREE WAYS (epic-23 wave-14 T17, REQ-4;
@@ -357,6 +392,8 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 #     text is not a chain and costs no segmenter: a `&&` the quotes hide still pays one
 #     `awk`, and every other command pays nothing. The count decides one thing now, the
 #     LABEL and ROLE of a tier-1 deny: the chain tier-2 nudge that also read it is retired.
+#     The segment list is `_wall_class_read`'s (wave-26 T39), so the booking wrap reads it
+#     again for free when the raw command is the flat text.
 #
 # IT IS A FILL, NEVER A VERDICT. Every class this wall acts on still comes from
 # `cmd_class` — one reader, cmd-class.sh — over the same strings as before.
@@ -406,12 +443,13 @@ _wall_cmd_fill() {  # <raw command text> -> sets the four values above
   _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
   case "$_WALL_SAFE_FLAT" in
     *"&&"*)
+      _wall_class_read "$_WALL_SAFE_FLAT"
       while IFS=$'\t' read -r _cls _seg; do
         [ -n "$_seg" ] || continue
         _segs="$_segs$_seg"$'\n'
         _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 ))
       done <<EOF
-$(cmd_class_lines "$_WALL_SAFE_FLAT")
+$_WALL_CLASS_LINES
 EOF
       _WALL_CHAIN_SEGS="$_segs"
       ;;
@@ -5119,8 +5157,11 @@ classify_tier1() {  # $1=command text → sets CLASS ROLE, rc 0 on match
   # purpose; the ≥3-segment chain is a separate arm (class=chain) reached only when
   # this one skips.
   # [WALL: tests/cmd-class.test.sh]
+  # THE WHOLE COMMAND IS READ THROUGH `_wall_class_read` (wave-26 T39), the one reading the
+  # booking wrap reads after this wall; a chain segment pays its own fork, so it never evicts it.
   local c
-  c=$(cmd_class "$1")
+  if [ "$1" = "${CMD-}" ]; then _wall_class_read "$1"; c="$_WALL_CLASS"
+  else c=$(cmd_class "$1"); fi
   [ "$c" = "none" ] && return 1
   CLASS="$c"; ROLE=$(role_for_class "$c")
   return 0
@@ -5486,14 +5527,16 @@ _bsg_wrap_text() {
     _BSG_WRAP_WHY=class
     [ -r "$BIONIC_LIB/cmd-class.sh" ] || return 1
     wall_libs background-suite-guard cmd-class.sh || return 1
-    _cls="$(cmd_class "$COMMAND")"
+    _wall_class_read "$COMMAND"; _cls="$_WALL_CLASS"
     if [ -n "$_k" ]; then [ "$_cls" != none ] || return 1
     else [ "$_cls" = suite ] || return 1; fi
     _BSG_WRAP_WHY=background
     ! cmd_backgrounded "$COMMAND" || return 1
     _BSG_WRAP_WHY=""
   fi
-  _lines="$(cmd_class_lines "$COMMAND")"
+  # ONE READING OF THE COMMAND PER HOOK (wave-26 T39): the class above and these lines are the
+  # reading farm-out or the suite guard already made of this text, when one did.
+  _wall_class_read "$COMMAND"; _lines="$_WALL_CLASS_LINES"
   while IFS=$'\t' read -r _cls _seg; do
     [ "$_cls" != suite ] || _suite=1
     case "$_cls" in suite) : ;; none|'') continue ;; *) [ -n "$_k" ] || continue ;; esac
@@ -5739,7 +5782,8 @@ add and why, or the row to add — and it runs the verb."
 # source nor prints a line about a file it was never going to read.
 wall_libs background-suite-guard cmd-class.sh || return 0
 
-[ "$(cmd_class "$COMMAND")" = "suite" ] || return 0
+_wall_class_read "$COMMAND"
+[ "$_WALL_CLASS" = "suite" ] || return 0
 
 # A SHELL-BACKGROUNDED SUITE IS CAUGHT LIKE A TOOL-BACKGROUNDED ONE (D8, REQ-6). The tool
 # flag read above sees only `run_in_background: true`; it has never seen `bash
