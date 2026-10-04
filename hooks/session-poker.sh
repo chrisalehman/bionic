@@ -5929,6 +5929,26 @@ EOF
       return 0
     }
 
+    # THE RANKED BAND, ONE COPY FOR BOTH ARMS THAT DECIDE (REQ-10 AC-10.2, D5; wave-26 T59). The
+    # roster arm and the armed first tick both rank this tick's contributors here, so the
+    # decision line agrees with what the tick printed whichever arm printed it: a first tick
+    # that named a FILL decides FILL, with the same `fill=` field. The ranking and its reasons
+    # are documented where the roster arm calls it.
+    tick_band() {  # -> TICK_DECISION, the band left standing once tick_conclude has run
+      TICK_DECISION=QUIET
+      [ -n "$SD_ORDER_NAMES" ] && TICK_DECISION=STANDDOWN
+      [ -n "${SCHED_FILL:-}" ] && TICK_DECISION=FILL
+      [ -n "$NOTIFY_ROWS" ] && TICK_DECISION=NOTIFY
+      # A PENDING GATE REQUEST IS THE THIRD CONTRIBUTOR (wave-25 T5; D7): tick_conclude raises the
+      # band to NOTIFY for it, so the band is read back from there.
+      tick_conclude "$TICK_DECISION"
+      TICK_DECISION="$TICK_DECIDED"
+    }
+    # THE FILL BAND'S OWN SENTENCE. The `poker: FILL <ids>` line the duty wall reads was printed
+    # by the scheduler where it was decided; this says what the decision line then says, so the
+    # two channels agree on one tick (D5).
+    tick_fill_sentence() { say "FILL — ${SCHED_FILL} named for dispatch; the decision line carries them."; }
+
     # THE STOP ORDERS THIS TICK OWES, written once the decision is known (wave-24 T7; D1, D4). An
     # unchanged tick writes none: the stop wall reads its stand-down set off this tick's orders,
     # and a turn told only "unchanged" must not be refused for a STANDDOWN it was never shown.
@@ -6991,17 +7011,25 @@ EOF
         # refuse a writer's first commit on); then the ready set, FILL, WAIT and CHAIN, or the
         # line saying why there is none, the approval gate first. This is the first tick of every
         # run, so it is the tick where the batch not yet sent is most worth naming. Through T58
-        # this arm printed the first two and exited, and the batch went unnamed. The arm still
-        # concludes QUIET, exit 0, its stamp kept.
+        # this arm printed the first two and exited, and the batch went unnamed.
         tick_scheduler
         # THE SENTENCE FIRST, THE DECISION LINE LAST (REQ-10 AC-10.4). Every band in this
         # verb prints its explanation above its machine line, so the last line a tick prints
         # is always the answer — whichever arm answered.
-        tick_conclude QUIET
-        if [ "$TICK_DECIDED" = NOTIFY ]; then
+        #
+        # THE BAND IS THE ROSTER ARM'S, FROM THE SAME `tick_band` (wave-26 T59; D5): a FILL this
+        # tick printed makes it FILL, with its `fill=` field, exit 0; nothing ready, or approval
+        # pending, leaves it QUIET, exit 0, stamp kept; a gate request raises it to NOTIFY.
+        tick_band
+        if [ "$TICK_DECISION" = NOTIFY ]; then
           tick_gate_report
-          tick_decision_line NOTIFY "$TOTAL" "$OPEN" "" "" "" "" "$TICK_GATE_FIELD"
+          tick_decision_line NOTIFY "$TOTAL" "$OPEN" "" "" "${SCHED_FILL:-}" "" "$TICK_GATE_FIELD"
           exit 1
+        fi
+        if [ "$TICK_DECISION" = FILL ]; then
+          tick_fill_sentence
+          tick_decision_line FILL "$TOTAL" "$OPEN" "" "" "$SCHED_FILL"
+          exit 0
         fi
         say "QUIET — armed, nothing dispatched yet on this session"
         tick_decision_line QUIET "$TOTAL" "$OPEN"
@@ -7168,14 +7196,10 @@ EOF
     #
     # STANDDOWN JOINS THE BAND (wave-24 T7, REQ-4 AC-4.2; D4). It fed none, so a tick that had
     # just named an agent to stop printed `decision=QUIET` under the line that named it.
-    TICK_DECISION=QUIET
-    [ -n "$SD_ORDER_NAMES" ] && TICK_DECISION=STANDDOWN
-    [ -n "$SCHED_FILL" ] && TICK_DECISION=FILL
-    [ -n "$NOTIFY_ROWS" ] && TICK_DECISION=NOTIFY
-    # A PENDING GATE REQUEST IS THE THIRD CONTRIBUTOR (wave-25 T5; D7): tick_conclude raises the
-    # band to NOTIFY for it, so the band is read back from there.
-    tick_conclude "$TICK_DECISION"
-    TICK_DECISION="$TICK_DECIDED"
+    #
+    # ONE COPY: `tick_band`, defined beside `tick_conclude` above, which the armed first tick
+    # calls too (wave-26 T59).
+    tick_band
 
     if [ "$TICK_DECISION" = NOTIFY ]; then
       # THE SENTENCES FIRST, ONE PER ARM THAT HAS SOMETHING — a tick holding only the other
@@ -7200,10 +7224,7 @@ EOF
     # live number is `open=` on the decision line, and the trim line above says so
     # whenever the two differ.
     if [ "$TICK_DECISION" = FILL ]; then
-      # THE FILL BAND'S OWN SENTENCE. The `poker: FILL <ids>` line the duty wall reads was
-      # printed by the scheduler where it was decided; this says what the decision line then
-      # says, so the two channels agree on one tick (D5).
-      say "FILL — ${SCHED_FILL} named for dispatch; the decision line carries them."
+      tick_fill_sentence
     elif [ "$TICK_DECISION" = STANDDOWN ]; then
       say "STANDDOWN — ${SD_ORDER_NAMES} met and still on the panel; TaskStop each, or hold it."
     elif [ "$OPEN_ROSTER" -eq 0 ]; then
