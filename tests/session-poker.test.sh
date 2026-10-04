@@ -6698,7 +6698,7 @@ section "Section 34: task-add — a schedule change is a transaction (wave-20 RE
 # `task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>` — the table's
 # own column order, the nine cells an author writes (status, worktree and base are the
 # dispatcher's). It projects the row onto a COPY of the bound plan (`units_add_row`: the row,
-# its `- <id>:` line, and a Step-4 id threaded into the frontier Step-5+ rows), runs
+# its `- <id>:` line, and no other row), runs
 # `units_validate` on the copy and a dry commit through the REAL hooks/bash-walls.sh, and only
 # then moves the copy over the plan. On any refusal the plan is byte-identical and the words
 # that refused it print. AC-5.3 fails-when: "after task-add of a Step-4 row mid-run the next
@@ -6778,28 +6778,38 @@ expect_contains "34b2g …and the repository-level grammar fact is a note, not a
 expect_contains "34b3 …the row is in the plan, pending" \
   "| T6 | 4 | build | the fixup found mid-run | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" "$(cat "$P34A")"
 expect_contains "34b4 …with its - T6: line" "- T6: pending dispatch — added by task-add" "$(cat "$P34A")"
-expect_contains "34b5 …and threaded into the Step-5 row's deps" \
-  "| T5 | 5 | verify | the floor | test-runner | T1, T2, T6 |" "$(cat "$P34A")"
+# NO THREADING (wave-26 T2, D2): the Step-5 row keeps the deps its author wrote. The rule that
+# made every Step-5+ row wait for every Step-4 row is gone, so the add owes no other row an edit.
+expect_contains "34b5 …and the Step-5 row's deps are as written: nothing is threaded" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2 |" "$(cat "$P34A")"
 s34_gate "$R34A"
 expect_eq "34b6 AC-5.3 the next commit is admitted: no dependency the verb should have written is missing" \
   "0" "$GATE_RC"
 
-# ---------- 34c: the CONTROL — the same row hand-added without the threading is refused ----------
+# ---------- 34c: the same row hand-added, with no threading, is ADMITTED (wave-26 T2, D2) ----------
+# Through 1.10 this was the control that the verb's threading was needed: the hand edit was
+# refused for the Step-4 prerequisite it did not write into T5. The rule is removed, so the
+# same gate admits the same edit.
 R34C="$(make_repo s34-hand)"; ( cd "$R34C" && git commit -q --allow-empty -m init )
 P34C="$(s34_plan "$R34C" 4)"
 awk '{ print }
      /^\| T5 \| 5 \|/ { print "| T6 | 4 | build | the fixup, hand-added | implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" }
      /^- T5: / { print "- T6: pending dispatch — by hand" }' "$P34C" > "$P34C.tmp" && mv "$P34C.tmp" "$P34C"
 s34_gate "$R34C"
-expect_eq "34c the hand-added row without the threading is refused by the same gate" "2" "$GATE_RC"
-expect_contains "34c2 …naming the missing prerequisite" "T5: step 5 is missing 1 step-4 prerequisite: T6" "$GATE_ERR"
+expect_eq "34c the hand-added row with no threading is admitted by the same gate" "0" "$GATE_RC"
+expect_contains "34c2 …with T5's deps cell as its author wrote it" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2 |" "$(cat "$P34C")"
 
-# ---------- 34d: refused by the validator — the plan is byte-identical, the words print ----------
-SUM34="$(cksum < "$P34A")"
+# ---------- 34d: a later-step row that names one build row is ADMITTED (wave-26 T2, D2) ----------
+# It used to be refused for the Step-4 rows it did not reach. Admitted now, the plan changes only
+# by that row and its line; the refusal rows below re-take the checksum after it.
 poke "$R34A" task-add T7 5 verify 'a second floor, unthreaded' test-runner 'T1' 30 REQ-5 '—'
-expect_eq "34d a row the validator refuses exits 1" "1" "$RC"
-expect_eq "34d2 AC-5.3 …and the plan is byte-identical" "$SUM34" "$(cksum < "$P34A")"
-expect_contains "34d3 …and the validator's words print" "T7: step 5 is missing 2 step-4 prerequisites: T2, T6" "$OUT"
+expect_eq "34d a Step-5 row naming one build row is admitted (exit 0)" "0" "$RC"
+expect_contains "34d2 …the row is in the plan with the deps its author wrote" \
+  "| T7 | 5 | verify | a second floor, unthreaded | test-runner | T1 |" "$(cat "$P34A")"
+expect_contains "34d3 …and no other row's deps changed" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2 |" "$(cat "$P34A")"
+SUM34="$(cksum < "$P34A")"
 
 poke "$R34A" task-add T6 4 build 'the same id again' implementor '—' 30 REQ-5 'lib/d.sh'
 expect_eq "34d4 a duplicate id is refused" "1" "$RC"
@@ -7514,6 +7524,37 @@ s41_fp_case launch 'grep -F "|name=w-1|" "$(roster_of "$R")" | tail -1 | sed "s/
 s41_fp_case mtime 'backdate "$R/w1-report.md" 200'
 s41_fp_case message 's41_transcript 2 "w-1:idle"'
 
+# ---------- §DECLINE-tick (wave-26 T15, AC-4.6; D16): a stand-down decline stands as a hold does ----------
+# The decline used to answer its own turn only: the next tick ordered the same unchanged agent
+# down again. The stop wall now writes the decline to the roster as `hold` writes it, so the real
+# tick reads it through the hold's own fingerprint check. The second turn, with the agent
+# unchanged, is not refused. A new message from the agent is a changed agent, and its turn is.
+R41DC="$(s41_world s41-decline)"
+s41_transcript 1 "w-1:idle"
+poke "$R41DC" tick
+expect_contains "41dc precondition: the tick stands w-1 down" "poker: STANDDOWN w-1" "$OUT"
+S41DC_TR="$(s41_turn "$R41DC" "$OUT")"
+jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"text",text:"standdown-declined: w-1 is kept for a second pass"}]}}' >> "$S41DC_TR"
+s41_stop "$R41DC" "$S41DC_TR"
+expect_eq "41dc2 the declining turn ends" "" "$(printf '%s' "$S41_STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+# An unrelated row joins, so the next tick prints in full rather than `unchanged` (an unchanged
+# tick writes no order whatever the answer was) and has to decide w-1 again.
+add_row "$R41DC" name=busy2 deliverable="$R41DC/never-written-2.md" duration="4 hours" launched_at="$(iso_ago 60)"
+s41_transcript 1 "w-1:idle" "busy2:running"
+poke "$R41DC" tick
+expect_absent "41dc3 precondition: the tick prints in full" "unchanged since" "$OUT"
+expect_contains "41dc3 AC-4.6 the next tick reads the decline as a hold" "poker: held w-1 since " "$OUT"
+expect_absent "41dc4 …and does not stand w-1 down again" "poker: STANDDOWN" "$OUT"
+s41_stop "$R41DC" "$(s41_turn "$R41DC" "$OUT")"
+expect_eq "41dc5 AC-4.6 the second turn, same agent and no decline text, is not refused" "" \
+  "$(printf '%s' "$S41_STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+s41_transcript 2 "w-1:idle" "busy2:running"
+poke "$R41DC" tick
+expect_contains "41dc6 a new message from w-1 voids the decline: the tick stands it down" "poker: STANDDOWN w-1" "$OUT"
+s41_stop "$R41DC" "$(s41_turn "$R41DC" "$OUT")"
+expect_contains "41dc7 …and that turn, with no answer, is refused" "stand-down unanswered" \
+  "$(printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null)"
+
 # ---------- §HOLD-idle (AC-4.5; D1): a held idle row is not re-opened ----------
 R41I="$(s41_world s41-hold-idle)"
 s41_transcript 1 "w-1:idle"
@@ -7535,7 +7576,8 @@ expect_contains "41f precondition: arm recorded the prompt version" "prompt_vers
 poke "$R41D" tick
 S41D_T1="$OUT"
 expect_contains "41f2 the first tick prints its decision" "decision=QUIET" "$S41D_T1"
-expect_contains "41f3 …and owes the task-list duty (an open row)" "duty=owed" "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
+expect_contains "41f3 …and, QUIET with a row open, prints WAITING (wave-26 T15; D16)" "poker: WAITING" "$S41D_T1"
+expect_contains "41f3b …and owes no task-list duty" "duty=none" "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
 poke "$R41D" tick
 expect_eq "41f4 AC-4.9 the second tick's stdout is exactly one line" "1" \
   "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
@@ -7603,13 +7645,13 @@ expect_contains "41i3 a decline that answered every ready row prints as standing
   "poker: fill-declined standing since 2026-10-03T09:00:00Z — the batch waits on the BASE merge" "$OUT"
 expect_eq "41i4 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
 expect_absent "41i5 …nor decision=FILL" "decision=FILL" "$OUT"
-# The three ways a line stands for nothing, each beside the full FILL it then leaves standing.
+# A moved current: is not one of the ways a line stands for nothing (wave-26 T15; D16).
 R41M="$(mk_rung_repo s41-sd-moved)"
 s41_sd_line "$R41M" "$SID" 3 ONE,TWO,THREE,FOUR "answered at an earlier step"
 poke_rung "$R41M" 60 0 tick
-expect_eq "41i6 a decline taken at another current: does not stand — the full FILL prints" \
-  "poker: FILL ONE TWO THREE FOUR" "$(s41_fill_line "$OUT")"
-expect_absent "41i7 …and no standing line" "fill-declined standing" "$OUT"
+expect_contains "41i6 wave-26 T15 (D16) a decline taken at another current: still stands over the same ready set" \
+  "fill-declined standing since " "$OUT"
+expect_eq "41i7 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
 R41O="$(mk_rung_repo s41-sd-other)"
 s41_sd_line "$R41O" "ffffffff-0000-4000-8000-000000000000" 4 ONE,TWO,THREE,FOUR "another session's answer"
 poke_rung "$R41O" 60 0 tick

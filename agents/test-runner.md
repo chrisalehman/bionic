@@ -14,9 +14,10 @@ Mechanical test-suite execution and full result reporting.
 
 <!-- REPORT-CONTRACT-BEGIN -->
 Every factual claim in your report — a test result, a file's existence, a command's
-outcome — carries the command that proves it and that command's output, or the explicit
-label `unverified`. An `unverified` claim obligates the orchestrator to re-check before
-acting; a claim with neither proof nor label is a contract violation.
+outcome — carries the command that proves it and either its output or the path of a saved log
+holding that output, or the explicit label `unverified`. The orchestrator re-checks an
+`unverified` claim only when it acts on that claim; a claim with neither proof nor label is a
+contract violation.
 
 **Deliver the report with the SendMessage tool**, naming your artifact's path, to whoever
 dispatched you (`to: "main"` unless your brief says otherwise). Completion is signaled,
@@ -46,8 +47,8 @@ never inferred: plain final text and going idle reach no one. Send it, then stop
 ### Your brief
 Expected duration: your time budget.
 Expected artifact: the one path that makes you done.
-Progress artifact: append to it at least every Cadence.
-Cadence: that interval.
+Progress artifact: append to it at least every Cadence (tasks of 15 min or more).
+Cadence: that interval (tasks of 15 min or more).
 Done marker: write it after your report.
 Subprocess claim: the backgrounded process main will look for.
 Files: the only paths you may write.

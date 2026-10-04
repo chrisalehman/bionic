@@ -103,6 +103,23 @@ written, not detected afterwards.
   orphaned continuation args that still execute, dead fixture dependencies. Verify each
   touched suite with strict stderr, not rc alone.
 
+## No exact counts of the shipped tree
+
+No test pins an exact count of things in the shipped tree. A count of chips, role files,
+suites or mentions goes red on every legitimate addition, and the repair is retyping the
+number, which proves nothing. Two forms are allowed in its place:
+
+- **A relation.** Assert what each item must satisfy, and add one row that the set is not
+  empty so the relation cannot pass over nothing. Example: every version chip in
+  `hook-chain.svg` carries the supported version, plus a row that at least one chip exists.
+- **A ceiling.** Assert a bound the tree must stay under. Example: the role files total at
+  or under a byte cap; a loader span at or under its cap; a command under its time limit.
+
+An exact number is fine when the number IS the behaviour: an exit code, a pass count equal to
+the total, the width a function prints, or a fixture the test built itself (three planted
+entries, three found). Prove a conversion the way `§PIN-REL` does, on a COPY with an item
+planted (stays green) and with every item removed (the non-empty row is red).
+
 ## Running suites and drives
 
 - **Explicit bash, never zsh.** Run a `#!/bin/bash` library or PoC under explicit `bash`.
