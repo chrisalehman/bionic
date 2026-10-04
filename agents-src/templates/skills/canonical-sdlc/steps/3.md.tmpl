@@ -51,6 +51,8 @@ walls, and the fails-when wall beside them, bind at every scale — a task-scale
 `current: T<n>` is past Step 3. The Patrol's below-Step-4 fill refusal is the second
 backstop.
 
+On approval, rebuild the task list from the plan before the first dispatch: delete every pending entry and recreate them in execution order — one `<step>/<n>: <short desc>` entry per `## Tasks` row, in the order the Step-3 card's batches print, for every step the table has rows at, then one `<step>: <desc>` entry for each remaining step. The task tool appends, so adding entries without recreating the later ones leaves the list out of order. Mark a row's entry in progress in the turn it is dispatched.
+
 ```
 Step 3 · Plan
 
@@ -80,5 +82,5 @@ show evals <req> · show task <n> · explain <decision>
 
 Card: `bash <plugin-root>/scripts/card.sh step3 <plan.md>` renders it whole; no stdin.
 
-**Wave shape locks at approval, and changes only by re-plan**, on a finding, a red test, an approved scope change, a task overrunning its size, a report naming follow-up work: rows are added or changed by `task-add` and `task-set`, never by editing the table by hand. Any other discovery is a W+1 candidate; one that makes the wave structurally impossible surfaces a Wake Note and halts.
+**Wave shape locks at approval, and changes only by re-plan**, on a finding, a red test, an approved scope change, a task overrunning its size, a report naming follow-up work: rows are added or changed by `task-add` and `task-set`, never by editing the table by hand. A row added by `task-add` gets its task-list entry the same turn, and the entries after it are recreated to keep the order. Any other discovery is a W+1 candidate; one that makes the wave structurally impossible surfaces a Wake Note and halts.
 

@@ -128,6 +128,28 @@ Step 5: TODO" > "$1/.bionic/docs/plans/active.md"
 # for the backgrounded-suite arm, which is the arm this suite drives.
 arm_roster() { : > "$1/.bionic/tmp/roster-$SID.state"; }
 
+# bw_dispatched <repo> <name> <key=value>... — ACTOR's launch row as the dispatch wall writes it,
+# `agent_id=` EMPTY, on a fresh roster, and then ACTOR's own start through
+# hooks/execution-recorder.sh, which is what writes the id (wave-27 T5, D15, AC-8.1). A row
+# planted with the id already on it hid walk-triage-3's defect: the budget arm was only ever
+# shown an id no hook had written.
+REC_HOOK="${BIONIC_HOOKS_DIR}/execution-recorder.sh"
+BW_TUID=0
+bw_dispatched() {
+  local repo="$1" name="$2"; shift 2
+  BW_TUID=$((BW_TUID + 1))
+  roster_header > "$repo/.bionic/tmp/roster-$SID.state"
+  roster_row_fixture "session=$SID" status=intended "name=$name" agent_id= \
+    subagent_type=bionic:test-runner "tool_use_id=toolu_01bwdisp$BW_TUID" "$@" \
+    >> "$repo/.bionic/tmp/roster-$SID.state"
+  jq -n --arg s "$SID" --arg c "$repo" --arg a "$ACTOR" \
+    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
+      agent_id:$a, agent_type:"bionic:test-runner", hook_event_name:"SubagentStart"}' \
+    | env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
+        CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$REC_HOOK" >/dev/null 2>&1
+}
+
 # mk_payload <cwd> <command> [agent_id] [run_in_background] [tool_name] [agent_type] [timeout]
 #
 # `agent_type` IS A SEPARATE FIELD FROM `agent_id` and the two walls read different ones:
@@ -773,7 +795,9 @@ section "14 — repair: a suite call's timeout is raised to the harness maximum 
 # reading a composed verdict by accident.
 
 R_REPAIR="$(mk_repo repair)"
-arm_roster "$R_REPAIR"
+# ON THE BUDGET, so the budget arm passes every call below and the repair is what answers. A
+# suite from an agent with no recorded set is refused since wave-27 T5 (D15), never repaired.
+bw_dispatched "$R_REPAIR" t14repair suites_allowed=x.test.sh suites_source=declared files=
 
 # (a) no `timeout` at all — the harness's own default (two minutes) is what kills a real
 # suite, and this is the shape a dispatched worker's Bash call carries when it names none.
@@ -796,7 +820,7 @@ expect_eq "14e0: …and stderr is EXACTLY that one log line — no stray shell e
 # then rewrites `command` on the SAME object, so neither change overwrites the other.
 expect_eq "14e1: …one JSON document on stdout" "1" "$(json_docs)"
 expect_regex "14e2: …whose command is the booking wrap around the original" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "14e3: …beside the repaired timeout" "600000" "$(updated_timeout_of)"
 
@@ -808,7 +832,7 @@ expect_contains "14f: …logged with the ORIGINAL value, not the repaired one" \
   "repaired from=3000 to=600000 agent=$ACTOR" "$ERR"
 
 # (c) a timeout AT the maximum — nothing to repair, and ARM 2's budget arm decides the call
-# instead (an empty roster row passes in silence, same as section 7's unarmed-suite rows).
+# instead (x.test.sh is on the row's budget, so it passes in silence).
 run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 600000)" \
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "14g: a suite call already at the harness maximum is not refused" 0 "$ST"
@@ -817,7 +841,7 @@ expect_status "14g: a suite call already at the harness maximum is not refused" 
 expect_eq "14h: …its timeout is left as the caller set it — there is nothing to repair" \
   "600000" "$(updated_timeout_of)"
 expect_regex "14h2: …and the only rewrite is the booking wrap around the original command" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_empty "14i: …no repair logged either" "$ERR"
 
@@ -844,7 +868,7 @@ run_hook "$(mk_payload "$R_ADV" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600
 expect_status "14m1: an advisory main-thread suite call is allowed" 0 "$ST"
 expect_eq "14m2: …one JSON document on stdout" "1" "$(json_docs)"
 expect_regex "14m3: …carrying the booking wrap" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait [0-9]+ --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "14m4: …and no timeout repair on the main thread" "" "$(updated_timeout_of)"
 expect_nonempty "14m4: …(the reader works: the wrap's command is non-empty on the same object)" \
@@ -893,14 +917,11 @@ expect_contains "14s: …logged as 'absent', the contract's own shape for it" \
 # cannot be satisfied by the fold, because `log_finding`'s stderr line (and its audit write)
 # leave the process before the fold ever renders a verdict.
 R_ORDER="$(mk_repo armorder)"
-arm_roster "$R_ORDER"
 # Through the one production writer, same as tests/agent-context-guard.test.sh §G9: a field
 # this fixture believes in that `roster_row` stopped emitting fails loudly instead of
-# quietly budgeting nothing.
-. "$(dirname "$0")/lib/roster-row.sh"
-roster_row_fixture "session=$SID" name=t13writer "agent_id=$ACTOR" \
-  suites_allowed=alpha.test.sh suites_source=declared files= \
-  >> "$R_ORDER/.bionic/tmp/roster-$SID.state"
+# quietly budgeting nothing. The id arrives through the start arm (`bw_dispatched`).
+bw_dispatched "$R_ORDER" t13writer \
+  suites_allowed=alpha.test.sh suites_source=declared files=
 
 run_hook "$(mk_payload "$R_ORDER" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash test-runner)" \
   BASH_MAX_TIMEOUT_MS=600000
@@ -949,11 +970,9 @@ section "15 — §budget-on-the-wire (T8, AC-5.2): the allowed set reaches exit-
 # through $VERR, which section 14 and tests/agent-context-guard.test.sh §G9 already cover.
 
 R15="$(mk_repo budgetwire)"
-: > "$R15/.bionic/tmp/roster-$SID.state"
 . "$(dirname "$0")/lib/roster-row.sh"
-roster_row_fixture "session=$SID" name=t15writer "agent_id=$ACTOR" \
-  "suites_allowed=archive.test.sh run.sh" suites_source=derived files= \
-  >> "$R15/.bionic/tmp/roster-$SID.state"
+bw_dispatched "$R15" t15writer \
+  "suites_allowed=archive.test.sh run.sh" suites_source=derived files=
 
 WIRE_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
 
@@ -986,10 +1005,8 @@ expect_absent "15a9: …never the literal <plugin-root> placeholder" "<plugin-ro
 # (a2) A REFUSED RUN keeps `--reexec+ '<cmd>'`: a runner command is no suite file, and a run
 # is what that flag widens. A row whose budget declares one run, asked for another.
 R15X="$(mk_repo budgetwirerun2)"
-: > "$R15X/.bionic/tmp/roster-$SID.state"
-roster_row_fixture "session=$SID" name=t15runner "agent_id=$ACTOR" \
-  "re_executes=\`npx jest --testPathPatterns 'x'\`" suites_source=declared files= \
-  >> "$R15X/.bionic/tmp/roster-$SID.state"
+bw_dispatched "$R15X" t15runner \
+  "re_executes=\`npx jest --testPathPatterns 'x'\`" suites_source=declared files=
 run_hook "$(mk_payload "$R15X" 'npx jest --testPathPatterns y' "$ACTOR" omit Bash test-runner)"
 expect_status "15a10: an undeclared run is refused" 2 "$ST"
 expect_contains "15a11: …and its remedy names the run flag, --reexec+ '<cmd>'" \
@@ -1025,11 +1042,9 @@ expect_eq "15a14: …and the verb is the next one, not the tail of a split path"
 # `1 declared run (printed below)` — and the full command still prints after `On the budget:`.
 # A fitting run is the command itself, unchanged (the short form, pinned below from a RED run).
 R15W="$(mk_repo budgetwirelongrun)"
-: > "$R15W/.bionic/tmp/roster-$SID.state"
 W15_RUN="pytest tests/unit/test_a_very_long_module_name_that_cannot_fit_on_any_line.py -k widget"
-roster_row_fixture "session=$SID" name=t15wide "agent_id=$ACTOR" \
-  "re_executes=\`$W15_RUN\`" suites_source=declared files= \
-  >> "$R15W/.bionic/tmp/roster-$SID.state"
+bw_dispatched "$R15W" t15wide \
+  "re_executes=\`$W15_RUN\`" suites_source=declared files=
 run_hook "$(mk_payload "$R15W" 'npx jest --testPathPatterns y' "$ACTOR" omit Bash test-runner)"
 expect_status "15a20: an undeclared run against one over-wide declared run is refused" 2 "$ST"
 W15_LINE="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
@@ -1043,10 +1058,8 @@ expect_absent "15a23: …and the line no longer reads the bare count 'allowed: 1
 # THE SHORT FORM, PINNED VERBATIM (AC-4.2): a declared run that FITS prints as itself; the verdict
 # line below was copied from a RED-time run at a220bd6 and must not change.
 R15S="$(mk_repo budgetwireshortrun)"
-: > "$R15S/.bionic/tmp/roster-$SID.state"
-roster_row_fixture "session=$SID" name=t15short "agent_id=$ACTOR" \
-  "re_executes=\`npm test\`" suites_source=declared files= \
-  >> "$R15S/.bionic/tmp/roster-$SID.state"
+bw_dispatched "$R15S" t15short \
+  "re_executes=\`npm test\`" suites_source=declared files=
 run_hook "$(mk_payload "$R15S" 'npx jest --testPathPatterns y' "$ACTOR" omit Bash test-runner)"
 expect_eq "15a24: a fitting declared run keeps the verdict line byte-for-byte" \
   "bionic: suite-run refused — allowed: \`npm test\` (run only the budgeted suites)" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
@@ -1056,10 +1069,8 @@ expect_eq "15a24: a fitting declared run keeps the verdict line byte-for-byte" \
 # shell would split or act on is single-quoted instead, so the line is still pasteable and
 # still names the row.
 R15Q="$(mk_repo budgetwirequote)"
-: > "$R15Q/.bionic/tmp/roster-$SID.state"
-roster_row_fixture "session=$SID" "name=w budget;rm" "agent_id=$ACTOR" \
-  "suites_allowed=archive.test.sh" suites_source=derived files= \
-  >> "$R15Q/.bionic/tmp/roster-$SID.state"
+bw_dispatched "$R15Q" "w budget;rm" \
+  "suites_allowed=archive.test.sh" suites_source=derived files=
 run_hook "$(mk_payload "$R15Q" 'bash tests/close-out.test.sh' "$ACTOR" omit Bash test-runner)"
 expect_status "15a13: an off-budget suite for a row with an unsafe name is refused" 2 "$ST"
 expect_contains "15a14: …and the remedy names the row as the roster carries it, quoted" \
@@ -1124,10 +1135,8 @@ expect_absent "15b9: …printing no line it cannot know" "bash tests/a.test.sh" 
 # which is also the one token that waives this exact arm (walls.sh: `*" run.sh "*)
 # continue`) — reusing it here would test nothing.
 R15R="$(mk_repo budgetwirerun)"
-: > "$R15R/.bionic/tmp/roster-$SID.state"
-roster_row_fixture "session=$SID" name=t15run "agent_id=$ACTOR" \
-  suites_allowed=archive.test.sh suites_source=declared files= \
-  >> "$R15R/.bionic/tmp/roster-$SID.state"
+bw_dispatched "$R15R" t15run \
+  suites_allowed=archive.test.sh suites_source=declared files=
 run_hook "$(mk_payload "$R15R" 'bash tests/run.sh' "$ACTOR" omit Bash test-runner)"
 expect_status "15c: the full tree is refused when the row does not carry it" 2 "$ST"
 expect_contains "15c2: …and the recorded budget is on the DEFAULT stderr" \
@@ -1136,10 +1145,8 @@ expect_contains "15c2: …and the recorded budget is on the DEFAULT stderr" \
 # (d) THE PAIRED NEGATIVE — a brief that declared `Suites: none` carries no fabricated
 # token, and the wire says so honestly rather than silently going quiet about it.
 R15N="$(mk_repo budgetwirenone)"
-: > "$R15N/.bionic/tmp/roster-$SID.state"
-roster_row_fixture "session=$SID" name=t15none "agent_id=$ACTOR" \
-  suites_allowed=none suites_source=declared files= \
-  >> "$R15N/.bionic/tmp/roster-$SID.state"
+bw_dispatched "$R15N" t15none \
+  suites_allowed=none suites_source=declared files=
 run_hook "$(mk_payload "$R15N" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash test-runner)"
 expect_status "15d: a Suites: none row still refuses" 2 "$ST"
 expect_contains "15d2: …and the DEFAULT stderr says so honestly — 'none' on the wire" \
@@ -1155,13 +1162,11 @@ expect_absent "15d3: …never a fabricated suite token on the verdict line" "gam
 # fits ONE line — token boundaries, not a mid-name cut, and a "+N more" count for what
 # does not fit.
 R15W="$(mk_repo budgetwirewide)"
-: > "$R15W/.bionic/tmp/roster-$SID.state"
 WIDE_SET=""
 for i in $(seq 1 38); do WIDE_SET="$WIDE_SET s${i}.test.sh"; done
 WIDE_SET="${WIDE_SET# }"
-roster_row_fixture "session=$SID" name=t15wide "agent_id=$ACTOR" \
-  "suites_allowed=$WIDE_SET" suites_source=derived files= \
-  >> "$R15W/.bionic/tmp/roster-$SID.state"
+bw_dispatched "$R15W" t15wide \
+  "suites_allowed=$WIDE_SET" suites_source=derived files=
 run_hook "$(mk_payload "$R15W" 'bash tests/zzz-off-budget.test.sh' "$ACTOR" omit Bash test-runner)"
 expect_status "15e: an off-budget suite against a 38-suite row is refused" 2 "$ST"
 expect_eq "15e2: …still exactly one VERDICT line" "1" \
@@ -1187,7 +1192,7 @@ expect_status "15f: an on-budget suite is still allowed" 0 "$ST"
 # carries: no nudge, no refusal, and nothing on stderr.
 expect_empty "15f2: …stderr stays empty" "$ERR"
 expect_regex "15f3: …and stdout is the booking wrap alone" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites archive\\.test\\.sh -- 'bash tests/archive\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites archive\\.test\\.sh -- 'bash tests/archive\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "15f4: …with no other channel beside it" '["hookEventName","updatedInput"]' \
   "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
@@ -1204,11 +1209,9 @@ expect_eq "15f4: …with no other channel beside it" '["hookEventName","updatedI
 # this wave's other two literals in force) drives the deepest fallback for real, through
 # the production hook.
 R15L="$(mk_repo budgetwirelong)"
-: > "$R15L/.bionic/tmp/roster-$SID.state"
 LONG_SUITE="tests/a-suite-name-far-too-long-to-fit-even-bare-on-one-refusal-line.test.sh"
-roster_row_fixture "session=$SID" name=t15long "agent_id=$ACTOR" \
-  "suites_allowed=$LONG_SUITE" suites_source=derived files= \
-  >> "$R15L/.bionic/tmp/roster-$SID.state"
+bw_dispatched "$R15L" t15long \
+  "suites_allowed=$LONG_SUITE" suites_source=derived files=
 run_hook "$(mk_payload "$R15L" 'for s in a b; do s=c; bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
 expect_status "15g1: an unexpanded name against a too-long single suite is still refused" 2 "$ST"
 expect_contains "15g1: …through the unexpanded-name arm this fallback is named for" \
@@ -1675,10 +1678,7 @@ T4_BT='`'
 # on a command no wall has an opinion about.
 T4_NONE='bash tests/no-suggestion-was-printed.test.sh'
 t4_row() {  # <repo> <name> <key=value>... — an armed roster with one budgeted row for ACTOR
-  local repo="$1" name="$2"; shift 2
-  roster_header > "$repo/.bionic/tmp/roster-$SID.state"
-  roster_row_fixture "session=$SID" "name=$name" "agent_id=$ACTOR" "$@" \
-    >> "$repo/.bionic/tmp/roster-$SID.state"
+  bw_dispatched "$@"
 }
 t4_drive() {  # <repo> <command> [run_in_background] — as a dispatched test-runner, timeout set
   run_hook "$(mk_payload "$1" "$2" "$ACTOR" "${3:-omit}" Bash test-runner 600000)"
@@ -2158,5 +2158,58 @@ expect_eq "§CDT one segment has nothing after it to read" "" "$(cdt_of 'cd /a')
 expect_eq "§CDT a cd after a GIT commit is never read, as after git" "" "$(cdt_of 'cd /a && GIT commit -m x && cd /z')"
 expect_eq "§CDT …nor after Git, behind its own subshell opener" "/b|" "$(cdt_of 'cd /a && cd /b && (Git commit -m x); cd /z')"
 expect_eq "§CDT an uppercase word that is not git ends nothing" "/b|" "$(cdt_of 'cd /a && echo GITHUB && cd /b && git commit -m x')"
+
+section "§WAIT-CEIL — the wrapped command never waits for a place longer than its call lasts (wave-27 T6, AC-8.3)"
+#
+# Critic 3 S2 (wave 26). The shim's wait defaults to 1200 s (lib/slots.sh _slots_max_wait), and
+# ARM R raises a suite call to BASH_MAX_TIMEOUT_MS, 600 000 ms on an install without tier 2: a
+# writer on a full machine waited past its own call, which the harness then moved to the
+# background, where its result is not evidence. The wrap now passes the staged timeout in
+# seconds, less a ten-second margin, as `--max-wait`; the shim uses the smaller of that and its
+# default (tests/slots.test.sh §MAX-WAIT). A short call carries `--kill-after` instead, which
+# already bounds the wait inside the call, so it gets no `--max-wait`.
+wait_ceiling_of() {  # the staged wrap's --max-wait value, or empty
+  updated_command_of | awk '{ for (i = 1; i < NF; i++) if ($i == "--max-wait") { print $(i + 1); exit } }'
+}
+# The shim's default when the wrap names none: 1200 s unless BIONIC_SLOTS_MAX_WAIT says otherwise.
+WC_DEFAULT=1200
+R_WC="$(mk_repo waitceil)"
+# ON THE BUDGET (wave-27 T5, D15): an agent suite with no recorded set is refused, never wrapped.
+bw_dispatched "$R_WC" twaitceil suites_allowed=x.test.sh suites_source=declared files=
+# (a) the eval: an agent's suite call with no timeout, raised by ARM R to 600 000 ms.
+run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_eq "WC1: an agent's suite call is staged at the harness maximum" "600000" "$(updated_timeout_of)"
+expect_contains "WC2: …and wrapped (the reader works on this output)" "/scripts/booked.sh" "$(updated_command_of)"
+WC_S="$(wait_ceiling_of)"
+expect_true "WC3: …with a wait ceiling at most the call's timeout (${WC_S:-none, so ${WC_DEFAULT}} s in a 600 s call)" \
+  test "${WC_S:-$WC_DEFAULT}" -le 600
+expect_eq "WC4: …which is the staged timeout in seconds less ten" "590" "$WC_S"
+expect_regex "WC5: …named before --suites, the original command intact after --" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "$(updated_command_of)"
+# (b) under the tier-2 ceiling the margin follows the staged value.
+run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 1800000)" \
+  BASH_MAX_TIMEOUT_MS=1800000
+expect_eq "WC6: a call staged at 1 800 000 ms carries --max-wait 1790 (the shim keeps its smaller default)" \
+  "1790" "$(wait_ceiling_of)"
+# (c) the main thread's own timeout, where the main thread may run a suite (advisory mode).
+R_WCA="$(mk_repo waitceil-adv)"
+printf 'farm-out-mode: advisory\n' > "$R_WCA/.bionic/config.yaml"
+run_hook "$(mk_payload "$R_WCA" 'bash tests/x.test.sh' '' omit Bash '' 300000)" BASH_MAX_TIMEOUT_MS=600000
+expect_eq "WC7: a main-thread call keeps its own timeout, unrepaired" "300000" "$(updated_timeout_of)"
+expect_eq "WC8: …and its wait ceiling is that timeout less ten" "290" "$(wait_ceiling_of)"
+# (d) no timeout at all: the harness's default, two minutes unless BASH_DEFAULT_TIMEOUT_MS says.
+run_hook "$(mk_payload "$R_WCA" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600000 BASH_DEFAULT_TIMEOUT_MS=
+expect_eq "WC9: a call with no timeout gets the harness default's ceiling (120 s less ten)" "110" "$(wait_ceiling_of)"
+run_hook "$(mk_payload "$R_WCA" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600000 BASH_DEFAULT_TIMEOUT_MS=240000
+expect_eq "WC10: …or BASH_DEFAULT_TIMEOUT_MS's, when it is set" "230" "$(wait_ceiling_of)"
+# (e) a short call is bounded by its kill limit and carries no second ceiling.
+run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' '' omit Bash '' 60000)" BASH_MAX_TIMEOUT_MS=600000
+expect_contains "WC11: a short call is wrapped with its kill limit" "--kill-after 55" "$(updated_command_of)"
+expect_eq "WC12: …and no --max-wait beside it (beside WC4 on the same reader)" "" "$(wait_ceiling_of)"
+# (f) a staged timeout too small to leave the margin still hands the shim a valid ceiling: 1 s.
+run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" BASH_MAX_TIMEOUT_MS=5000
+expect_eq "WC13: a call staged at 5000 ms carries --max-wait 1, never 0 or less" "1" "$(wait_ceiling_of)"
 
 finish

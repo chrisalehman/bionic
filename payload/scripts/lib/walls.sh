@@ -5409,7 +5409,8 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # WHAT IT DOES. A suite-class Bash call that every wall allows comes back with its command
 # rewritten through `fold_update_input` into the shim the plugin ships:
 #
-#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--stamp-dir <dir>] -- '<the command>'
+#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--kill-after <s> | --max-wait <s>]
+#                                          [--stamp-dir <dir>] [--suites <names>] -- '<the command>'
 #
 # The shim books one of the machine's places, stamps the run and runs the command
 # (payload/scripts/booked.sh). This is the one site that sees every runner in every project
@@ -5445,6 +5446,13 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # --suites: WHICH SUITES THE COMMAND RUNS (wave-26 T61, critic F1), so the land can keep the newest
 # stamp of each suite apart. `_bsg_suites` names them from the claim's own `targets` reading,
 # the one the solo check reads too.
+#
+# --max-wait: THE CALL'S OWN BOUND ON THE WAIT (wave-27 T6, critic 3 S2). The staged timeout in
+# seconds, less a ten-second margin, so a wait for a place gives up inside the call rather than
+# outliving it into the background: ARM R's raised value when it repairs the call, else the
+# call's own `timeout`, else the harness default (BASH_DEFAULT_TIMEOUT_MS, two minutes unset).
+# The shim takes the smaller of it and its own default. A short call carries --kill-after
+# instead, whose limit already bounds the wait, so it gets none.
 #
 # THE SEAM FOR T9 is `wall_booked_argv`: the one function that builds the shim's argument
 # list. An option such as `--kill-after <s>` goes in as an extra argument there.
@@ -5657,6 +5665,22 @@ wall_booked_argv() {
 # pass as typed.
 _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
 WALL_SHORT_KILL_AFTER=""
+_BSG_STAGED_MS=""
+# _bsg_wait_s — sets _BSG_WAIT_S to the shim's --max-wait for this call: the staged timeout
+# (_BSG_STAGED_MS, set by _bsg_stage_input when ARM R raises it), else the call's own, else the
+# harness default; in seconds, less ten, never under 1. A variable, not a `$( )`, so the wrap
+# forks nothing more than the timeout read. The number reading is _fo_short_pass's.
+_BSG_WAIT_S=""
+_bsg_wait_s() {
+  local _t="${_BSG_STAGED_MS:-}"
+  [ -n "$_t" ] || _t="$(bionic_jq .tool_input.timeout)"
+  [ -n "$_t" ] || _t="${BASH_DEFAULT_TIMEOUT_MS:-120000}"
+  case "$_t" in ''|*[!0-9]*) _t=120000 ;; esac
+  [ "${#_t}" -le 9 ] || _t=999999999
+  _t=$((10#$_t / 1000 - 10))
+  [ "$_t" -ge 1 ] || _t=1
+  _BSG_WAIT_S="$_t"
+}
 _bsg_wrap_text() {
   local _c _w _lines _cls _seg _quiet=0 _k="${WALL_SHORT_KILL_AFTER:-}"
   _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
@@ -5694,7 +5718,7 @@ _bsg_wrap_text() {
   _bsg_suites
   [ "$_quiet" = 1 ] || ! _bsg_solo_target || _quiet=1
   set --
-  [ -z "$_k" ] || set -- --kill-after "$_k"
+  if [ -n "$_k" ]; then set -- --kill-after "$_k"; else _bsg_wait_s; set -- --max-wait "$_BSG_WAIT_S"; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
   set -- "$@" --suites "$_BSG_SUITES"
   wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
@@ -5711,7 +5735,9 @@ _bsg_wrap_text() {
 # rc 0 when something was staged, 1 when there was nothing to stage.
 _bsg_stage_input() {
   local _t="${2:-}" _upd
+  _BSG_STAGED_MS="$_t"
   _bsg_wrap_text "$1" || _BSG_WRAP_TEXT=""
+  _BSG_STAGED_MS=""
   [ -n "$_t" ] || [ -n "$_BSG_WRAP_TEXT" ] || return 1
   _upd=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --arg t "$_t" --arg c "$_BSG_WRAP_TEXT" \
     '.tool_input + (if $t == "" then {} else {timeout: ($t | tonumber)} end)
@@ -6001,11 +6027,11 @@ fi
 # a wrong answer costs rather than uniformly:
 #
 #   no row for this agent, or a row with no `suites_allowed` key at all
-#       A row is written for every dispatch that passes the wall, so its absence means the
-#       journal failed or the row predates the wall. Refusing every suite would punish an
-#       agent for a bookkeeping failure it did not cause, so a NAMED suite passes in
-#       silence. `tests/run.sh` still does not: a full-tree run is the one act the standing
-#       ruling caps at one per run, and no row is not a licence to spend it.
+#       A row is written for every dispatch that passes the wall, and it gains the agent's
+#       id when the agent starts (hooks/execution-recorder.sh, wave-27 T5), so its absence
+#       is a fault. A named suite or run is REFUSED, naming which of the two it is
+#       (`budget_unrecorded`); it used to pass in silence, unbudgeted and unstamped
+#       (walk-triage-3). A row that declares runs only still holds a runner form to them.
 #
 #   `suites_allowed=` present but EMPTY
 #       A budget was stated and came out empty — the impact command failed or derived
@@ -6039,7 +6065,7 @@ fi
 # protect.
 local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES _BUDGET_ROW _bseen _bseg _bkey
 local -a _bsegs
-local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME=""
+local _CLAIMS _kind _target _run _shown _BUDGET_ROW_NAME="" _BUDGET_UNSET_WHY
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
@@ -6117,6 +6143,10 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   RE_EXECUTES=$(cmd_runs_norm "$RE_EXECUTES")
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
+# WHY NO SET, when there is none (wave-27 T5, D15): a row that states none, or no row carrying
+# this id at all. `budget_unrecorded` below prints it.
+_BUDGET_UNSET_WHY="your roster row records no suite set"
+[ -n "${_BUDGET_ROW:-}" ] || _BUDGET_UNSET_WHY="no roster row carries your agent id $ACTOR"
 
 # `none` is a STATED empty set and reads as one: nothing is on the budget, so the loop
 # below refuses every target it is handed.
@@ -6351,6 +6381,27 @@ $(_budget_remedy_line "$1")"
   return 2
 }
 
+# budget_unrecorded <the refused suite or run> — NO SET IS RECORDED FOR THIS AGENT (wave-27 T5,
+# D15). A row with no set, or no row at all, used to let a named suite through in silence, on
+# the reading that an agent should not pay for a bookkeeping failure it did not cause. The walk
+# showed the cost (walk-triage-3 §1): a foreground runner had no row, was refused its full run,
+# and any suite it named would have run unbudgeted. The id now reaches the row at agent start
+# (hooks/execution-recorder.sh, the type join), so a missing set is a fault to name, never a run
+# to spend. The remedy names the row when there is one to widen.
+budget_unrecorded() {  # <the refused suite or run>
+  local _how="With no row there is nothing to widen until the orchestrator records one."
+  [ -z "${_BUDGET_ROW:-}" ] || _how="$(_budget_remedy_line "$1")"
+  fold_block exit2 suite-run "no suite set is recorded for this agent" "send main the suites you need" \
+    "${_BUDGET_UNSET_WHY}, so this BUDGET arm cannot tell a budgeted run
+from an extra one, and it refuses rather than run the suite unbudgeted and unstamped.
+
+You asked for: $1
+
+Send the orchestrator the suites you need and why; it records them.
+$_how"
+  return 2
+}
+
 # THE REMEDY LINE (T6, REQ-5, AC-5.2). A refusal that names the budget and not the verb that
 # widens it sent two readers to hunt for it. The root is `refuse_plugin_root` and each word is
 # `refuse_shell_word`, both in lib/refuse.sh since wave-24 T13 (D10), where the landing
@@ -6457,11 +6508,11 @@ dispatches the runner, and the dispatch wall admits it only then."
   # The row's declared runs are the whole set for this spelling: `suites_allowed=` holds
   # shell-suite basenames and a run can never be on it, so there is no second set to ask.
   #
-  # THE FAIL DIRECTION IS UNCHANGED. A row with NEITHER statement — no `suites_allowed=`
-  # key and no declared runs — is a bookkeeping failure the agent did not cause, and a
-  # named run passes in silence exactly as a named suite does.
+  # NO STATEMENT IS REFUSED, NAMING WHY (wave-27 T5, D15). A row with NEITHER statement — no
+  # `suites_allowed=` key and no declared runs — or no row at all used to pass a named run in
+  # silence; see `budget_unrecorded`.
   if [ "$_kind" != "file" ]; then
-    [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || continue
+    [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || { budget_unrecorded "$_run"; return 2; }
     # BOTH STATEMENTS ON THE WIRE, runs first: the reader ran a runner form, so the runs
     # are the half of the budget that can answer it.
     _shown="$RE_EXECUTES"
@@ -6470,6 +6521,7 @@ dispatches the runner, and the dispatch wall admits it only then."
     return 2
   fi
 
+  [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || { budget_unrecorded "$_target"; return 2; }
   [ "$BUDGET_STATED" = yes ] || continue
   case " $SUITES_ALLOWED " in
     *" $_target "*) : ;;

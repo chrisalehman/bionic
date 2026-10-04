@@ -3632,7 +3632,7 @@ else
      "mutated copy still read 0"
 fi
 
-# ============================================================
+# =====================================================
 section "Section 30: T9 — the scaffold span rule, cell shapes and the two counters (epic-23 wave-17-fixit-184, REQ-5/REQ-7/REQ-10, AC-5.5/AC-7.1/AC-10.3)"
 # ============================================================
 #
@@ -4904,6 +4904,73 @@ expect_eq "W26-T57e: …and no longer says a disturbed run is never a failure" "
 W26_T57_D4="$(w26_doctor "$DISPATCH_MD" 'It reports `void`, not a failure, when the machine was disturbed.')"
 expect_nonempty "W26-T57em: a dispatch.md that keeps the old void sentence is caught" \
   "$(w26_hits 'not a failure, when the machine was disturbed' "$W26_T57_D4")"
+
+# ── §W27-111 / §W27-112 (wave-27 T13, REQ-11 AC-11.1, AC-11.2; D20): the task list is rebuilt at plan approval ──
+#
+# WHAT THIS OWNS. The approval block of steps/3.md carries the delete-and-recreate rule, the
+# `task-add` paragraph names the entry a new row gets and the recreated order, and steps/0.md's
+# format section points to Step 3. Each absence sits beside a positive through the same
+# extractor (`w26_hits`, a whitespace-normalised fixed-string find) on the same file, and a
+# doctored copy that has the old text back proves the pin goes red. HERMETIC: committed finals.
+W27_111_RULE='On approval, rebuild the task list from the plan before the first dispatch: delete every pending entry and recreate them in execution order'
+W27_111_ORDER='in the order the Step-3 card'"'"'s batches print'
+W27_111_APPEND='The task tool appends, so adding entries without recreating the later ones leaves the list out of order.'
+W27_111_PROGRESS="Mark a row's entry in progress in the turn it is dispatched."
+expect_nonempty "W27-111 precondition: the extractor finds the approval line on steps/3.md" \
+  "$(w26_hits 'approved-by: <user> <ISO-UTC>' "$STEP3_MD")"
+expect_nonempty "W27-111: AC-11.1 — steps/3.md carries the delete-and-recreate rule at approval" \
+  "$(w26_hits "$W27_111_RULE" "$STEP3_MD")"
+expect_nonempty "W27-111a: …in the card's batch order, naming one entry per ## Tasks row" \
+  "$(w26_hits "$W27_111_ORDER" "$STEP3_MD")"
+expect_nonempty "W27-111b: …and why the later entries are recreated" \
+  "$(w26_hits "$W27_111_APPEND" "$STEP3_MD")"
+expect_nonempty "W27-111c: …and marks a row's entry in progress when it is dispatched" \
+  "$(w26_hits "$W27_111_PROGRESS" "$STEP3_MD")"
+expect_nonempty "W27-111d: …and it sits after the approved-by block, before the card" \
+  "$(awk '/^approved-by: <user>/ { a = 1 } a && /On approval, rebuild the task list/ { r = 1 } r && /^Step 3 · Plan/ { print "ok"; exit } /^Step 3 · Plan/ { exit }' "$STEP3_MD")"
+expect_nonempty "W27-111e: steps/0.md's format section points to it" \
+  "$(w26_hits 'The per-task expansion happens at plan approval; see Step 3.' "$STEP0_MD")"
+expect_nonempty "W27-112: AC-11.2 — the task-add paragraph says a new row gets its task-list entry the same turn" \
+  "$(w26_hits 'A row added by `task-add` gets its task-list entry the same turn, and the entries after it are recreated to keep the order.' "$STEP3_MD")"
+expect_nonempty "W27-112a: …inside the paragraph that locks the wave shape at approval" \
+  "$(awk '/Wave shape locks at approval/ { p = 1 } p && /gets its task-list entry the same turn/ { print "ok"; exit }' "$STEP3_MD")"
+=======
+section "Section W27-reuse: wave-27 T12 — a writer looks for an existing site first, and a design names what it reuses (REQ-4 AC-4.1, AC-4.2; D8)"
+#
+# WHAT THIS OWNS. §W27-41: the implementor-mechanics block, and so both writer role files, carry
+# the search duty and the `reuse:` report line in both of its forms. §W27-42: the Step-2 ownership
+# line and the operational-rules exemplar carry the `reuses` column, in the one column order.
+# Each pin sits beside a doctored copy with the text gone, which proves the arm goes red. HERMETIC.
+W27_DUTY='before adding a function, a file or a configuration key, search for an existing site that does the job'
+W27_LINE_A='`reuse: searched <what> · reused <site>`'
+W27_LINE_B='`reuse: searched <what> · none fits: <why>`'
+W27_BLOCK="${REPO}/agents-src/blocks/implementor-mechanics.md"
+for _w27_f in "$W27_BLOCK" "${REPO}/agents/implementor.md" "${REPO}/agents/senior-implementor.md"; do
+  _w27_n="${_w27_f#"$REPO"/}"
+  expect_nonempty "W27-41a: $_w27_n carries the search duty" "$(w26_hits "$W27_DUTY" "$_w27_f")"
+  expect_nonempty "W27-41b: $_w27_n carries the reused form of the reuse: line" "$(w26_hits "$W27_LINE_A" "$_w27_f")"
+  expect_nonempty "W27-41c: $_w27_n carries the none-fits form of the reuse: line" "$(w26_hits "$W27_LINE_B" "$_w27_f")"
+done
+for _w27_f in "${REPO}/agents/auditor.md" "${REPO}/agents/researcher.md"; do
+  expect_eq "W27-41d: ${_w27_f#"$REPO"/}, which writes no code, carries no search duty" "" "$(w26_hits "$W27_DUTY" "$_w27_f")"
+done
+W27_DOC41="$TMP/w27-41-doctored.md"
+tr '\n' ' ' < "$W27_BLOCK" | sed 's/search for[[:space:]]*an existing site that does the job/search/' > "$W27_DOC41"
+expect_eq "W27-41m: a block that lost the search duty is caught" "" "$(w26_hits "$W27_DUTY" "$W27_DOC41")"
+expect_nonempty "W27-41mp precondition: the doctored block still carries the reuse: line" "$(w26_hits "$W27_LINE_A" "$W27_DOC41")"
+
+W27_COLS='`concept → owning module (SSoT) → reuses → rendering surfaces → agreement test`'
+W27_GLOSS='`reuses` names the existing site reused, or `none fits: <why>`'
+W27_HDR='| concept | owning module (SSoT) | reuses | rendering surfaces | agreement test |'
+expect_nonempty "W27-42a: steps/2.md's ownership line carries the reuses column in order" "$(w26_hits "$W27_COLS" "$STEP2_MD")"
+expect_nonempty "W27-42b: …and says what the cell holds" "$(w26_hits "$W27_GLOSS" "$STEP2_MD")"
+expect_nonempty "W27-42c: operational-rules.md's exemplar header carries the reuses column" "$(w26_hits "$W27_HDR" "$OPRULES")"
+expect_nonempty "W27-42d: …and an exemplar row names a reused site or none fits" "$(w26_hits '| none fits:' "$OPRULES")"
+W27_DOC42="$TMP/w27-42-doctored.md"
+sed 's/ → reuses → / → /' "$STEP2_MD" > "$W27_DOC42"
+expect_eq "W27-42m: a steps/2.md whose ownership line lost the column is caught" "" "$(w26_hits "$W27_COLS" "$W27_DOC42")"
+expect_nonempty "W27-42mp precondition: the doctored copy still carries the ownership line" \
+  "$(w26_hits '**Ownership table** — `concept → owning module (SSoT) → rendering surfaces → agreement test`' "$W27_DOC42")"
 
 # ── §W27-T8 (wave-27 T8; REQ-3 AC-3.2, REQ-4 AC-4.3/4.4, REQ-1 AC-1.6, REQ-5 AC-5.1; D5, D9, D10) ──
 #
