@@ -3604,7 +3604,7 @@ else
      "mutated copy still read 0"
 fi
 
-# =====================================================
+# ============================================================
 section "Section 30: T9 — the scaffold span rule, cell shapes and the two counters (epic-23 wave-17-fixit-184, REQ-5/REQ-7/REQ-10, AC-5.5/AC-7.1/AC-10.3)"
 # ============================================================
 #
@@ -4904,7 +4904,6 @@ expect_nonempty "W27-112: AC-11.2 — the task-add paragraph says a new row gets
   "$(w26_hits 'A row added by `task-add` gets its task-list entry the same turn, and the entries after it are recreated to keep the order.' "$STEP3_MD")"
 expect_nonempty "W27-112a: …inside the paragraph that locks the wave shape at approval" \
   "$(awk '/Wave shape locks at approval/ { p = 1 } p && /gets its task-list entry the same turn/ { print "ok"; exit }' "$STEP3_MD")"
-=======
 section "Section W27-reuse: wave-27 T12 — a writer looks for an existing site first, and a design names what it reuses (REQ-4 AC-4.1, AC-4.2; D8)"
 #
 # WHAT THIS OWNS. §W27-41: the implementor-mechanics block, and so both writer role files, carry
