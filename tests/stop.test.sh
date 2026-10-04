@@ -870,17 +870,8 @@ expect_absent "SD3c: …and not T7, which the decline answered" "T7" "$(printf '
 expect_eq "SD3d: …and the refused turn's line carries no decline, so the standing set does not grow" \
   "" "$(sd_field "$(sd_led "$SD_D" | tail -1)" declined)"
 
-# SD4: `current:` moved. The decline answered a step that is over, so it no longer stands.
-SD_D4="$(sd_fixture)"
-SD_P4="$SD_D4/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
-sd_turn "$SD_TX" u-sd4-1 "fill-declined: T7 waits on the T6 merge"
-s7_fire "$SD_D4" "$SD_TX"
-expect_eq "SD4 precondition: the declining turn ends" "" "$(sd_decision)"
-sed -i.bak 's/^current: 4$/current: 4b/' "$SD_P4"
-sd_turn "$SD_TX" u-sd4-2
-s7_fire "$SD_D4" "$SD_TX"
-expect_eq "SD4: AC-4.7 current: moved — the same ready set is refused" "block" "$(sd_decision)"
-expect_contains "SD4b: …naming T7" "not launched: T7" "$STOP_ERR"
+# SD4 (the `current:` move) is §DECLINE's D2 now: since wave-26 T15 (D16) a move of `current:`
+# alone no longer voids a standing decline, so the row that pinned the refusal was inverted there.
 
 # SD5: an empty `fill-declined:` is not an answer, in its own turn or the next.
 SD_D5="$(sd_fixture)"
@@ -992,6 +983,60 @@ s7_fire "$SDR_D4" "$SDR_TX"
 expect_contains "SDR4b: …a hold older than this turn's tick does not answer that tick's order" \
   "stand-down unanswered" "$(reason_of)"
 rm -rf "$SDR_CFG"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "DECLINE: a decline stands until the set it answered changes (wave-26 T15, REQ-4, AC-4.6; D16)"
+
+# THE DEFECT (research-R2 §3, P1 and P3). A `fill-declined:` stood until a new row was ready
+# or `current:` moved, so a run whose author wanted serial execution wrote a fresh decline after
+# every step move over the same ready set. A `standdown-declined:` stood for its own turn only,
+# so the next tick ordered the same unchanged agent down again and the turn had to decline it
+# again. Now a fill decline stands until the READY SET gains a row it did not answer. A
+# stand-down decline is written to the roster as `hold` writes it, so it stands until the
+# agent's launch, deliverable or messages move. The tick reads that check (hold_fingerprint).
+# The end-to-end proof, through the real tick, is tests/session-poker.test.sh §41 DECLINE-tick.
+export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
+
+# D1/D2: the fill decline. Turn one declines ready {T7}. `current:` moves and the ready set does
+# not: the second turn, with no text, is not refused.
+DC_D="$(sd_fixture)"
+DC_P="$DC_D/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+sd_turn "$SD_TX" u-dc-1 "fill-declined: T7 waits on the T6 merge"
+s7_fire "$DC_D" "$SD_TX"
+expect_eq "D1 precondition: the declining turn ends" "" "$(sd_decision)"
+sed -i.bak 's/^current: 4$/current: 4b/' "$DC_P"
+expect_contains "D1 precondition: current: moved" "current: 4b" "$(cat "$DC_P")"
+sd_turn "$SD_TX" u-dc-2
+s7_fire "$DC_D" "$SD_TX"
+expect_eq "D2: AC-4.6 current: moved over the same ready set — the decline stands, not refused" "" "$(sd_decision)"
+expect_contains "D2b: …and the turn's ledger line carries the standing reason" \
+  "T7 waits on the T6 merge" "$(sd_field "$(sd_led "$DC_D" | tail -1)" declined)"
+# D3: the ready set changes. Refused, naming the row the decline never saw.
+printf '| T8 | 4 | build | a row nobody declined | implementor | — | 15m | REQ-x | b.sh | pending | — |\n' >> "$DC_P"
+sd_turn "$SD_TX" u-dc-3
+s7_fire "$DC_D" "$SD_TX"
+expect_eq "D3: AC-4.6 a changed ready set is refused" "block" "$(sd_decision)"
+expect_contains "D3b: …naming the new row" "not launched: T8" "$STOP_ERR"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# D4: the stand-down decline is written where hold writes. The tick turn that declines W-SDR with
+# a reason ends, and the roster's latest W-SDR row now carries `held=<at> <reason> fp=…`, the
+# answer the tick reads on every later tick.
+DC_D4="$(sdr_fixture)"
+DC_CFG="$(mktemp -d)"
+DC_ROWS="$(grep -c '|name=W-SDR|' "$DC_D4/.bionic/tmp/roster-$SID.state")"
+sdr_turn "$SDR_TX" "standdown-declined: W-SDR is writing its record, one more cadence"
+CLAUDE_CONFIG_DIR="$DC_CFG" s7_fire "$DC_D4" "$SDR_TX"
+expect_eq "D4 precondition: the declining tick turn ends" "" "$(sd_decision)"
+DC_ROW="$(grep -F '|name=W-SDR|' "$DC_D4/.bionic/tmp/roster-$SID.state" | tail -1)"
+expect_regex "D4: AC-4.6 the decline is written as a hold, with its reason and the fingerprint" \
+  '\|held=[0-9TZ:-]+ is writing its record, one more cadence fp=[^|]+\|' "$DC_ROW"
+expect_eq "D4b: …one row added" "$((DC_ROWS + 1))" "$(grep -c '|name=W-SDR|' "$DC_D4/.bionic/tmp/roster-$SID.state")"
+# D5: the re-entered Stop of the same turn writes no second hold.
+CLAUDE_CONFIG_DIR="$DC_CFG" s7_fire "$DC_D4" "$SDR_TX"
+expect_eq "D5 precondition: the same turn's Stop again ends" "" "$(sd_decision)"
+expect_eq "D5: …and adds no second held row" "$((DC_ROWS + 1))" "$(grep -c '|name=W-SDR|' "$DC_D4/.bionic/tmp/roster-$SID.state")"
+rm -rf "$DC_CFG"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "FO: the stop wall's occupancy is the tick's — a read-only row holds no writer slot (wave-24 T13, D11)"

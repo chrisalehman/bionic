@@ -1925,7 +1925,10 @@ fi
 #     computed set leaves out an acked row, so it is never asked about;
 #   - a `standdown-declined: <name> <reason>` line at the start of a line of the model's own
 #     reply — the fill-declined rule (AC-5.4): never thinking, a tool input or a tool result.
-#     The reason is required (wave-24 T8, AC-4.10): a name alone is not an answer;
+#     The reason is required (wave-24 T8, AC-4.10): a name alone is not an answer. It stands as
+#     a hold does (wave-26 T15, AC-4.6; D16): below, the wall writes it to the roster through
+#     `session-poker.sh hold`, so the tick reads it with the hold's fingerprint check and orders
+#     no stop while the agent's launch, deliverable and messages are unchanged;
 #   - a HOLD written since this turn's tick (wave-24 T8; D1, AC-4.12): `session-poker.sh hold
 #     <name> <reason>` appends the row with `held=<iso> …`, and `stop_standdown_set` leaves out
 #     a row held at or after the bound. Read off the roster, never the command's words. The
@@ -1988,6 +1991,33 @@ if [ -n "$_SD_SET" ]; then
   ')
 fi
 
+# A STAND-DOWN DECLINE STANDS AS A HOLD DOES (wave-26 T15, REQ-4 AC-4.6; D16, research-R2 §3
+# P3). It answered its own turn and no other, so the next tick that printed in full ordered the
+# same unchanged agent down again and the turn had to decline it again. Each name of the set
+# this turn declined with a reason is now written as the `hold` verb writes it: a successor row
+# carrying `held=<at> <reason> fp=<fingerprint>`. The tick's own check then leaves it standing
+# until the agent's launch, deliverable or messages move. The verb is the writer, so the row is
+# the one a typed `hold` would have written. A hold the verb refuses changes nothing here: the
+# decline still answers this turn, as it always did. The re-entered Stop of the same turn writes
+# no second row, because a name held at or after the bound has left `_SD_SET`
+# (`stop_standdown_set`).
+if [ -n "$_SD_SET" ] && [ -f "${HOOK_DIR}/session-poker.sh" ]; then
+  printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" '
+    $1 == "USER" {
+      t = $2; sub(/^[ \t]+/, "", t)
+      tick = (index(t, mark) == 1)
+      n = 0; split("", why)
+      next
+    }
+    $1 == "SD-DECLINE" { if (!($2 in why)) order[++n] = $2; why[$2] = $3; next }
+    END { if (tick) for (i = 1; i <= n; i++) printf "%s\t%s\n", order[i], why[order[i]] }
+  ' | while IFS=$'\t' read -r _sd_name _sd_why; do
+    case " $_SD_SET " in *" $_sd_name "*) : ;; *) continue ;; esac
+    ( cd "$BIONIC_ROOT" 2>/dev/null || exit 9
+      CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "${HOOK_DIR}/session-poker.sh" hold "$_sd_name" "$_sd_why" ) >/dev/null 2>&1
+  done
+fi
+
 if [ -n "$STANDDOWN_MISSING" ]; then
   # ONE hold COMMAND PER NAME, each pasteable as printed (wave-24 T27; critic I4): the real
   # name, and the reason as the tick's own quoted placeholder (`HOLD_REASON_SLOT` in
@@ -1999,7 +2029,7 @@ if [ -n "$STANDDOWN_MISSING" ]; then
   for _sd_hold in $STANDDOWN_MISSING; do
     STANDDOWN_HOLDS="${STANDDOWN_HOLDS}${STANDDOWN_HOLDS:+; }bash ${_sd_poker} hold ${_sd_hold} 'why it stays up'"
   done
-  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped, held nor declined them. TaskStop each. To keep an idle agent up, run: ${STANDDOWN_HOLDS} — the tick then stops ordering it while nothing about it changes. Or write a line \"standdown-declined: <name> <reason>\" for this turn alone. Then stop again — this gate blocks once."
+  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped, held nor declined them. TaskStop each. To keep an idle agent up, run: ${STANDDOWN_HOLDS} — the tick then stops ordering it while nothing about it changes. Or write a line \"standdown-declined: <name> <reason>\": it is kept as that hold. Then stop again — this gate blocks once."
 else
   STANDDOWN_REASON=""
 fi
@@ -2148,7 +2178,7 @@ return 2
 #   MARK clear|resume                the ritual arm, scoped as before (review F2): a marker is
 #                                    read only off rows the orchestrator authored, never a tool
 #                                    result
-#   SD-DECLINE <name>                `standdown-declined: <name> <reason>` at a LINE START of a
+#   SD-DECLINE <name> <reason>       `standdown-declined: <name> <reason>` at a LINE START of a
 #                                    main-thread assistant TEXT block — the DECLINE rule, for the
 #                                    stand-down (wave-20 T19). The name alone is not an answer:
 #                                    the reason must carry a letter or digit (wave-24 T8, D2,
@@ -2219,8 +2249,8 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
         else empty end ),
       ( if ($main and $r.type == "assistant" and (($r.message.content // []) | type) == "array") then
           ([$r.message.content[]? | select(.type == "text") | .text] | join("\n"))
-          | [scan("(?:^|\n)standdown-declined:[ \t]*([A-Za-z0-9_.-]+)[^A-Za-z0-9_.\n-][^\n]*[[:alnum:]]")] | .[]
-          | "SD-DECLINE\t" + .[0]
+          | [scan("(?:^|\n)standdown-declined:[ \t]*([A-Za-z0-9_.-]+)[^A-Za-z0-9_.\n-]([^\n]*[[:alnum:]])")] | .[]
+          | "SD-DECLINE\t" + .[0] + "\t" + (.[1] | gsub("[\t\r]"; " "))
         else empty end ),
       (
         if ($main | not) then empty
