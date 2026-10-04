@@ -1,0 +1,3 @@
+question: structure
+result: fail
+token: check: reuse FAIL
