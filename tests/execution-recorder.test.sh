@@ -2202,9 +2202,15 @@ act_intended() {  # <repo> <name> <tool_use_id> [subagent_type] -> the intended 
     progress=.bionic/tmp/w1.progress tool_use_id="$3" >> "$f"
 }
 act_workspace() {  # <repo> <name> <tree basename> -> the line spawn-worktree.sh create --for writes
-  mkdir -p "$1/.worktrees/$3"   # the record is written after the tree is verified
+  # A REAL LINKED WORKTREE (wave-26 T40): the record counts a path only where git lists it
+  # (worktree.sh `_wt_listed_trees`, wave-25 T18), so a plain directory would be skipped. The
+  # path is written as git lists it, physical, as spawn-worktree.sh create writes it.
+  local t
+  t="$(cd "$1" && pwd -P)/.worktrees/$3"
+  git -C "$1" worktree list --porcelain | grep -qxF "worktree $t" \
+    || git -C "$1" worktree add -q -b "wt/$3" "$t" >/dev/null 2>&1
   printf 'workspace/v1|session=%s|name=%s|path=%s|branch=wt/%s|base=%s|plan=%s|at=2026-10-04T03:36:00Z\n' \
-    "$SID_A" "$2" "$1/.worktrees/$3" "$3" "$ACT_BASE" "$(act_plan "$1")" >> "$1/.bionic/tmp/workspaces-$SID_A.state"
+    "$SID_A" "$2" "$t" "$3" "$ACT_BASE" "$(act_plan "$1")" >> "$1/.bionic/tmp/workspaces-$SID_A.state"
 }
 act_gate() {  # <repo> -> rc of the REAL commit gate on a main-root commit in this session
   local input
@@ -2275,6 +2281,22 @@ act_sync "$ACT_A"
 expect_eq "17c6 §SYNC idempotent: a second transaction right after writes nothing and says nothing" "" "$SYNC_OUT"
 expect_eq "17c7 …exits 0" "0" "$SYNC_RC"
 expect_true "17c8 …and the plan is byte-identical" cmp -s "$SANDBOX/act-before" "$(act_plan "$ACT_A")"
+
+# ---------- 17s: a forged record line naming the main checkout does not fill the row (wave-26 T40) ----------
+# The record file sits in .bionic/tmp, where any script can append to it. The launch reads it
+# through worktree.sh's `workspace_record_for_name`, which counts a path only where git lists it
+# as a linked worktree (wave-25 T18), so the true tree and its base still fill row T3.
+ACT_S="$(act_world forged 4)"
+act_intended "$ACT_S" w1-T3 toolu_01ACTS3
+act_workspace "$ACT_S" w1-T3 01-T3
+printf 'workspace/v1|session=%s|name=w1-T3|path=%s|branch=main|base=fedcba9876543210fedcba9876543210fedcba98|plan=%s|at=2026-10-04T03:36:30Z\n' \
+  "$SID_A" "$ACT_S" "$(act_plan "$ACT_S")" >> "$ACT_S/.bionic/tmp/workspaces-$SID_A.state"
+expect_contains "17s0 fixture: the forged line naming the main checkout is the record's last" "path=$ACT_S|branch=main" \
+  "$(tail -n 1 "$ACT_S/.bionic/tmp/workspaces-$SID_A.state")"
+act_launch "$ACT_S" w1-T3 a17s000000000001 toolu_01ACTS3
+expect_eq "17s §ACTIVE a forged line naming the main checkout is skipped: row T3 takes the true tree and its base" \
+  "| T3 | 4 | build | the third build | w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | 01234567 | active |" \
+  "$(act_row "$ACT_S" T3)"
 
 # ---------- 17d: a launch that maps to no row writes nothing and is silent ----------
 act_intended "$ACT_A" w1-R5 toolu_01ACTR5

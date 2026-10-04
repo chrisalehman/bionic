@@ -1396,4 +1396,27 @@ for c in engaged roster patrol preflight sweeper; do
 done
 expect_eq "5.9: .bionic/tmp/ is empty afterwards — nothing here is live" "0" "$(tmp_entries "$P6")"
 
+# ---------- wave-25 T15: the workspace record (`workspaces-<sid>.state`, written by
+# ---------- spawn-worktree.sh create) and the gate file (`gate-<sid>.state`, written by
+# ---------- hooks/permission-answer.sh) are session-keyed too. B (still live from above)
+# ---------- keeps both through A's close-out; A's own and dead D's go.
+
+P7="$(mk_fixture p7)"
+for c in workspaces gate; do
+  for s in "$TS_SID_A" "$TS_SID_B" "$TS_SID_D"; do
+    printf '%s state for %s\n' "$c" "$s" > "$P7/.bionic/tmp/$c-$s.state"
+  done
+done
+run_close_as "$TS_SID_A" "$P7" run
+expect_eq "5.10: run (as A, with B live and D dead, workspaces and gate files only) exits 0" "0" "$CO_RC"
+for c in workspaces gate; do
+  expect_eq "5.11 ($c): live B's $c file survives A's close-out" "yes" \
+    "$(tmp_file_exists "$P7" "$c" "$TS_SID_B")"
+  expect_eq "5.12 ($c): A's own $c file is removed" "no" \
+    "$(tmp_file_exists "$P7" "$c" "$TS_SID_A")"
+  expect_eq "5.13 ($c): dead D's $c file is removed" "no" \
+    "$(tmp_file_exists "$P7" "$c" "$TS_SID_D")"
+done
+expect_eq "5.14: only B's 2 spared files remain under .bionic/tmp/" "2" "$(tmp_entries "$P7")"
+
 finish

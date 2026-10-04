@@ -674,8 +674,9 @@ section "3c — permission-answer: a 52 KB question answered inside its 10 s reg
 # only a reading that got past the body can give; a small question beside it is the baseline.
 PA_HOOK="${BIONIC_HOOKS_DIR}/permission-answer.sh"
 PA_REG=10
+# The lead of a bypass session asks: the carrier answers only in bypass and auto mode (T20).
 jq --arg cmd "$(jq -r '.tool_input.command' "$SANDBOX/in/e.json")" \
-  '.hook_event_name = "PermissionRequest" | del(.tool_use_id)
+  '.hook_event_name = "PermissionRequest" | del(.tool_use_id) | .permission_mode = "bypassPermissions"
    | .tool_input.command = ($cmd + "\ngit push origin main") | .permission_suggestions = []' \
   "$SANDBOX/in/e.json" > "$SANDBOX/in/pa52.json"
 jq '.tool_input.command = "touch out.txt"' "$SANDBOX/in/pa52.json" > "$SANDBOX/in/pa-small.json"

@@ -15,7 +15,12 @@
 # to go red on the planted defect its matrix block names under `fails-when:`. §G11 holds AC-2.2
 # and AC-2.7 where the run works in the main checkout itself: the project's shared directories
 # under the main root are no checkout's, and the main root is no one's to delete. §G12 holds
-# the device sinks: a write to /dev/null and its kin is no effect, a delete of one is judged. §G0 is the
+# the device sinks: a write to /dev/null and its kin is no effect, a delete of one is judged.
+# §G13–§G15 are T11's and T13's (who a fix sends the asker to; which program a word runs).
+# §G16–§G21 are T17's, the review's place-not-spelling findings: every common credential store
+# by every spelling (§G16), read lines and the reserved reading of them (§G17), a reader's
+# report bounded by what the lead holds (§G18), the state classes agreeing with patrol.sh's
+# (§G19), no delete of a root itself (§G20), and the one-process resolver (§G21). §G0 is the
 # purity rule the decision rests on (the freeze): the decision and the reserved table read no
 # file, no environment and run no git, so the same facts give the same verdict anywhere.
 #
@@ -177,12 +182,12 @@ expect_eq "G0.8 …and git never ran" "" "$(cat "$SANDBOX/git-ran" 2>/dev/null)"
 # Static: no function the lib defines, other than the resolver, carries a filesystem reach.
 # The extractor is proved on the resolver first, where the reach is meant to be.
 G0_FNS="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; declare -F | awk "{print \$3}" | grep -E "^_?grant_"' _ "$LIB")"
-G0_RESOLVER="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; declare -f grant_resolve' _ "$LIB")"
+G0_RESOLVER="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; declare -f _grant_resolve_set' _ "$LIB")"
 expect_regex "G0.9 the extractor sees the resolver's reach (readlink, pwd -P)" 'readlink' "$G0_RESOLVER"
 expect_regex "G0.10 the lib defines the four public functions" '^grant_decide$' "$G0_FNS"
 G0_REACH=""
 while IFS= read -r fn; do
-  case "$fn" in grant_resolve|_grant_resolve*|'') continue ;; esac
+  case "$fn" in grant_resolve|grant_resolve_lines|_grant_resolve*|'') continue ;; esac
   body="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; declare -f "$2"' _ "$LIB" "$fn")"
   if printf '%s' "$body" | grep -Eq 'readlink|pwd|(^|[^-_[:alnum:]])cd |\[ -[edfLrs] |\$\{?HOME|(^|[^<])< *[/"$]|(^|[^-_[:alnum:]])cat '; then
     G0_REACH="$G0_REACH $fn"
@@ -534,7 +539,7 @@ expect_eq "G11.12 a write under the lead's own record root (inside .bionic) allo
 expect_eq "G11.13 …and the lead's delete there allows" "allow" "$(dec lead "$G11_LEAD" "$(D "$REC/T11-carve-outs.md")")"
 expect_eq "G11.14 a write to the run's plan file allows" "allow" "$(dec lead "$G11_LEAD" "$(W "$PLAN")")"
 expect_eq "G11.15 a delete inside a recorded tree under .worktrees allows" "allow" "$(dec lead "$G11_LEAD" "$(D "$G11_T9/build")")"
-expect_eq "G11.16 …and a delete of that recorded tree itself allows" "allow" "$(dec lead "$G11_LEAD" "$(D "$G11_T9")")"
+expect_eq "G11.16 …but a delete of that recorded tree itself is deny-fix: a root is deleted by no one (§G20)" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "$G11_T9")")")"
 expect_eq "G11.17 .bionic spelled in another case is still shared (case-blind filesystems)" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "$P/.Bionic/docs")")")"
 expect_eq "G11.18 .git spelled in another case is still shared" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(W "$P/.GIT/config")")")"
 expect_eq "G11.19 the main root written with a trailing slash is still the main root" "deny-fix" "$(kind "$(dec lead "$G11_LEAD" "$(D "$P/")")")"
@@ -594,7 +599,7 @@ expect_eq "G11.above2 …and a delete of the main root is deny-fix" "deny-fix" "
 G11_NOMAIN="checkout=$P${NL}scratch=$S${NL}record=$REC"
 expect_eq "G11.diff1 no main root: a delete of .bionic/docs/x allows, as before" "allow" "$(dec lead "$G11_NOMAIN" "$(D "$P/.bionic/docs/x")")"
 expect_eq "G11.diff2 …with the main root: deny-fix" "deny-fix" "$(kind "$(dec lead "$G11_NOMAIN${NL}main=$P" "$(D "$P/.bionic/docs/x")")")"
-expect_eq "G11.diff3 no main root: a delete of the main root allows, as before" "allow" "$(dec lead "$G11_NOMAIN" "$(D "$P")")"
+expect_eq "G11.diff3 no main root: a delete of the main root through a root above it allows, as before (G11.above2 is the pair)" "allow" "$(dec lead "checkout=${P%/*}" "$(D "$P")")"
 expect_eq "G11.diff4 an empty main= is no main root" "allow" "$(dec lead "$G11_NOMAIN${NL}main=" "$(D "$P/.git/x")")"
 expect_eq "G11.diff5 grant_decide with five arguments decides as before" "allow" "$(call grant_decide lead "$P" "$P" "$(D "$P/.git/x")" "")"
 expect_eq "G11.diff6 …and with the main root as the sixth argument, deny-fix" "deny-fix" "$(kind "$(call grant_decide lead "$P" "$P" "$(D "$P/.git/x")" "" "$P")")"
@@ -691,5 +696,387 @@ done
 # The other rule-6 delete wording is unchanged: an agent deleting in the add-only record.
 expect_eq "G13.addonly the add-only record fix is untouched" "Leave it in place and write a new file beside it instead." \
   "$(fld 3 "$(dec writer "$WRITER_FACTS" "$(D "$REC/a.md")")")"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G14 which program a word runs is the shared reader's; a match made to refuse stays case-blind"
+
+# Two questions, two rules (wave-25 T13; Chris's Step-4 ruling and A-orch-29). WHICH PROGRAM
+# a word runs is git-argv.sh's `cmd_word_fold`, the one rule every reader asks: an external
+# program word folds, so `GH` runs gh. A path or an argument matched in order to REFUSE
+# (a credential store, a reserved subcommand) is matched without regard to case, looser
+# than the fold: refusing something harmless is the only error a refusing guard may make.
+#
+# Every program word of the table, capitalised: each is still its category.
+G14_PROG="GIT push origin wave/x|leaves-the-machine
+Git push origin wave/x|leaves-the-machine
+GH pr create --fill|leaves-the-machine
+Gh auth token|credentials
+NPM publish|leaves-the-machine
+PNPM publish|leaves-the-machine
+YARN npm publish|leaves-the-machine
+CARGO publish|leaves-the-machine
+GEM push x.gem|leaves-the-machine
+TWINE upload dist/x|leaves-the-machine
+SECURITY find-generic-password -s x -w|credentials
+TERRAFORM apply|production-infrastructure
+KUBECTL apply -f deploy.yaml|production-infrastructure
+VERCEL --prod|production-infrastructure
+AWS s3 cp f s3://b/f|production-infrastructure
+GCLOUD billing accounts list|billing
+AZ group delete -n rg|production-infrastructure
+/usr/local/bin/TERRAFORM destroy|production-infrastructure
+SUDO gh pr create --fill|leaves-the-machine
+Sudo pnpm publish --access public|leaves-the-machine
+COMMAND npm publish|leaves-the-machine
+NOHUP cargo publish|leaves-the-machine
+ENV X=1 gh pr create --fill|leaves-the-machine"
+while IFS='|' read -r what cat; do
+  expect_eq "G14.prog '$what' is $cat" "$cat" "$(call grant_reserved Bash "$what")"
+done <<< "$G14_PROG"
+# Every subcommand and option word the table refuses on, capitalised: still refused.
+G14_SUB="git PUSH origin wave/x|leaves-the-machine
+gh PR create --fill|leaves-the-machine
+gh -R o/r RELEASE create v1|leaves-the-machine
+gh --REPO o/r ISSUE create|leaves-the-machine
+gh API repos/o/r/issues|leaves-the-machine
+gh AUTH token|credentials
+npm PUBLISH|leaves-the-machine
+npm LOGIN|credentials
+pnpm -C d publish|leaves-the-machine
+yarn NPM publish|leaves-the-machine
+cargo YANK --version 1.0.0|leaves-the-machine
+gem PUSH x.gem|leaves-the-machine
+gem SIGNIN|credentials
+twine UPLOAD dist/x|leaves-the-machine
+aws CE get-cost-and-usage|billing
+az CONSUMPTION usage list|billing"
+while IFS='|' read -r what cat; do
+  expect_eq "G14.sub '$what' is $cat" "$cat" "$(call grant_reserved Bash "$what")"
+done <<< "$G14_SUB"
+# Every credential store, capitalised, in a command and as a tool's path.
+G14_CRED="Bash|cat ~/.SSH/id_ed25519
+Bash|cp \$HOME/.AWS/credentials /tmp/x
+Bash|ssh-add --key=~/.Ssh/id_rsa
+Bash|cat /w/proj/.ENV
+Bash|SOURCE .Env.Local
+Read|/Users/alice/.AWS/credentials
+Write|/Users/alice/.Config/GH/hosts.yml
+Edit|/Users/alice/.NETRC
+Write|/w/proj/.ENV
+Read|/w/proj/.Env.Production"
+while IFS='|' read -r tool what; do
+  expect_eq "G14.cred $tool '$what' is credentials" "credentials" "$(call grant_reserved "$tool" "$what")"
+done <<< "$G14_CRED"
+# A capitalised word the shared reader does NOT fold: a shell builtin or keyword exists only
+# in the shell, which matches it case-exactly, so `EXEC gh …` is "command not found" and runs
+# no gh (git-argv.sh, `cmd_word_fold`'s never list). The grant reads it as the reader does:
+# no category. The lower-case spelling, on the same extractor, is the category.
+G14_NEVER="exec gh pr create --fill|EXEC gh pr create --fill
+exec terraform apply|Exec terraform apply
+if gh pr create; then :; fi|IF gh pr create; then :; fi
+then gh pr create|THEN gh pr create
+do npm publish|DO npm publish"
+while IFS='|' read -r runs never; do
+  expect_eq "G14.never.0 '$runs' runs the program: a category" "nonempty" \
+    "$([ -n "$(call grant_reserved Bash "$runs")" ] && echo nonempty || echo empty)"
+  expect_eq "G14.never.1 '$never' runs nothing (the reader does not fold it): no category" "" \
+    "$(call grant_reserved Bash "$never")"
+done <<< "$G14_NEVER"
+# …and it is still denied, never allowed: the real effects reader (cmd-class.sh, T2's) marks
+# the unknown word `?`, and the decision denies it with a fix.
+CMD_LIB="$REPO_ROOT/payload/scripts/lib/cmd-class.sh"
+while IFS='|' read -r runs never; do
+  fx="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; cmd_effects "$2" /w/proj' _ "$CMD_LIB" "$never" 2>/dev/null)"
+  expect_regex "G14.never.2 the reader marks '$never' unknown" "^\\?${TAB}" "$fx"
+  expect_eq "G14.never.3 …and '$never' is decided deny-fix" "deny-fix" \
+    "$(kind "$(dec lead "$LEAD_FACTS" "$fx" "$(call grant_reserved Bash "$never")")")"
+done <<< "$G14_NEVER"
+# The grant keeps no lower-casing of its own: the program word is the reader's fold, and a
+# refusal's match is case-blind by matching, not by a second copy of the words.
+G14_SRC="$(cat "$LIB" 2>/dev/null)"
+expect_regex "G14.src the lib asks the shared reader's fold" 'cmd_word_fold' "$G14_SRC"
+expect_no_regex "G14.src2 …and lower-cases no word itself" "tr '\\[:upper:\\]'|tr A-Z|tr '\\[A-Z\\]'" "$G14_SRC"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G15 every fix line sends the asker to the one above its own class"
+
+# A fix line never tells an asker to ask itself (T4's concern 2, wave-25 T13). A writer or a
+# read-only agent is sent to the lead. The lead and an unbound session have no lead above
+# them: they are sent to the human. Three fix lines, every class, each row keeping §G7's rule
+# (three fields, one next step).
+g15_check() {  # <label> <verdict> <reason needle> <want in fix> <never in fix>
+  expect_eq "$1.0 deny-fix with three fields" "deny-fix|3" "$(kind "$2")|$(printf '%s\n' "$2" | awk -F'\t' '{print NF}')"
+  expect_contains "$1.1 the reason names what failed" "$3" "$(fld 2 "$2")"
+  expect_contains "$1.2 the fix sends it to the $4" "$4" "$(fld 3 "$2")"
+  expect_absent "$1.3 …never to the $5" "$5" "$(fld 3 "$2")"
+  expect_eq "$1.4 the next step is one sentence" "1" "$(fld 3 "$2" | grep -o '\. ' | wc -l | awk '{print $1 + 1}')"
+}
+for cls in lead unbound writer reader; do
+  case "$cls" in
+    lead) f="$LEAD_FACTS"; up=human; not=lead ;;
+    unbound) f="$UNBOUND_FACTS"; up=human; not=lead ;;
+    writer) f="$WRITER_FACTS"; up=lead; not=human ;;
+    reader) f="$READER_FACTS"; up=lead; not=human ;;
+  esac
+  # The no-workspace fix: no facts, so no root to work in.
+  g15_check "G15.none.$cls" "$(dec "$cls" "" "$(W "$P/x")")" "no workspace" "$up" "$not"
+  # Rule 2: one of bionic's own state files.
+  g15_check "G15.state.$cls" "$(dec "$cls" "$f" "$(W "$P/.bionic/tmp/gate-sid-1.state")")" "bionic's own state" "$up" "$not"
+  # Rule 5, a delete: the main checkout's .git, which no root grants.
+  g15_check "G15.git.$cls" "$(dec "$cls" "$f${NL}main=$P" "$(D "$P/.git/index")")" "$P/.git" "$up" "$not"
+done
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G16 every common credential store is refused by any spelling of its path"
+
+# The stores a common tool keeps a secret in by default, at home spelled three ways and
+# capitalised (wave-25 T17, review B3b). The clean rows beside them are the same names one
+# component or one suffix off, so a table that refused every dotted word is red there.
+G16_STORES=".npmrc
+.pypirc
+.git-credentials
+.kube/config
+.docker/config.json
+.gnupg/pubring.kbx
+.config/gcloud/credentials.db
+.cargo/credentials.toml
+.azure/msal_token_cache.json
+.ssh/id_rsa
+.aws/credentials
+.config/gh/hosts.yml
+.netrc"
+while IFS= read -r st; do
+  for spell in "/Users/alice/$st" "~/$st" "\$HOME/$st"; do
+    expect_eq "G16.bash 'cat $spell' is credentials" "credentials" "$(call grant_reserved Bash "cat $spell")"
+  done
+  expect_eq "G16.read Read /Users/alice/$st is credentials" "credentials" "$(call grant_reserved Read "/Users/alice/$st")"
+  G16_UP="$(printf '%s' "$st" | tr '[:lower:]' '[:upper:]')"
+  expect_eq "G16.case Read /Users/alice/$G16_UP is credentials" "credentials" "$(call grant_reserved Read "/Users/alice/$G16_UP")"
+done <<< "$G16_STORES"
+G16_CLEAN="Bash|cat /w/proj/docs/npmrc-guide.md
+Bash|cat /w/proj/.npmrc.md
+Bash|ls /Users/alice/.kube
+Bash|/Users/alice/.cargo/bin/cargo build
+Bash|ls /Users/alice/.docker/contexts
+Read|/Users/alice/.kube/cache/discovery.json
+Read|/w/proj/config.json
+Read|/w/proj/docs/.git-credentials-helper.md
+Bash|cat /w/proj/.gitconfig"
+while IFS='|' read -r tool what; do
+  expect_eq "G16.clean $tool '$what' is not reserved" "" "$(call grant_reserved "$tool" "$what")"
+done <<< "$G16_CLEAN"
+# One list: the lib names its stores once, and every name on it is refused under a home.
+G16_LIST="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; printf "%s" "${GRANT_CREDENTIAL_STORES-}"' _ "$LIB")"
+expect_nonempty "G16.list the lib names its credential stores in one list" "$G16_LIST"
+set -f
+for st in $G16_LIST; do
+  probe="${st%/}"
+  case "$st" in */) probe="$probe/x" ;; esac
+  probe="${probe//\*/local}"
+  expect_eq "G16.list '$st' (Read ~/$probe) is credentials" "credentials" "$(call grant_reserved Read "~/$probe")"
+done
+set +f
+for st in .npmrc .pypirc .git-credentials .kube/config .docker/config.json .gnupg/ .config/gcloud/ .cargo/credentials.toml .azure/; do
+  case " $G16_LIST " in
+    *" $st "*) ok "G16.named the list names $st" ;;
+    *) no "G16.named the list names $st" "$G16_LIST" ;;
+  esac
+done
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G17 a read changes nothing about the roots; a read that reaches a credential store is reserved"
+
+# The reader's read lines (wave-25 T16's frozen interface): `R<TAB>path` for each file or
+# directory a pure reader reads, `RR<TAB>path` for a read that descends beneath it. The
+# decision accepts them and confines nothing by them; the reserved table reads them, every
+# spelling the hook hands it, with the home directory as a fact (T17, review B3c and S4).
+R() { printf 'R\t%s' "$1"; }
+RR() { printf 'RR\t%s' "$1"; }
+expect_eq "G17.1 a read alone allows" "allow" "$(dec writer "$WRITER_FACTS" "$(R /elsewhere/a.txt)")"
+expect_eq "G17.2 a recursive read alone allows" "allow" "$(dec writer "$WRITER_FACTS" "$(RR /elsewhere)")"
+expect_eq "G17.3 a read outside beside a write inside allows: a read is not confined by a write root" "allow" \
+  "$(dec writer "$WRITER_FACTS" "$(R /elsewhere/a)${NL}$(RR /elsewhere/d)${NL}$(W "$T1/b")")"
+G17_4="$(dec writer "$WRITER_FACTS" "$(R /elsewhere/a)${NL}$(W /elsewhere/b)")"
+expect_eq "G17.4 a read beside a write outside is deny-fix" "deny-fix" "$(kind "$G17_4")"
+expect_contains "G17.4b …naming the write" "/elsewhere/b is outside" "$(fld 2 "$G17_4")"
+expect_absent "G17.4c …and counting no read among its failing effects" "more of its effects" "$(fld 2 "$G17_4")"
+expect_eq "G17.5 an R line with no path is malformed input, rc 2" "2" "$(call grant_decide writer "/x" "/x" "R${TAB}" >/dev/null; printf '%s' "$CALL_RC")"
+expect_eq "G17.6 an RX line is malformed input, rc 2" "2" "$(call grant_decide writer "/x" "/x" "RX${TAB}/x/f" >/dev/null; printf '%s' "$CALL_RC")"
+expect_eq "G17.7 a read the resolver marked unresolved is accepted, and allows" "allow" \
+  "$(call grant_decide writer "/x" "/x" "R${TAB}?${TAB}k/id")"
+expect_eq "G17.8 a read with a reserved category is deny-reserved" "deny-reserved" \
+  "$(kind "$(dec writer "$WRITER_FACTS" "$(R /Users/alice/.ssh/id_rsa)" credentials)")"
+
+H=/Users/alice
+expect_eq "G17.r1 a read of a store file is credentials" "credentials" "$(call grant_reserved_effects "$H" "$(R "$H/.ssh/id_rsa")")"
+expect_eq "G17.r2 …a read of an ordinary file is no category" "" "$(call grant_reserved_effects "$H" "$(R "$H/src/a.txt")")"
+expect_eq "G17.r3 a read of the home directory itself, not recursive, is no category" "" "$(call grant_reserved_effects "$H" "$(R "$H")")"
+expect_eq "G17.r4 a recursive read of the home directory reaches every store: credentials" "credentials" "$(call grant_reserved_effects "$H" "$(RR "$H")")"
+expect_eq "G17.r5 a recursive read of / is credentials" "credentials" "$(call grant_reserved_effects "$H" "$(RR /)")"
+expect_eq "G17.r6 a recursive read above home is credentials" "credentials" "$(call grant_reserved_effects "$H" "$(RR /Users)")"
+expect_eq "G17.r7 a recursive read of ~/.config (above two stores) is credentials" "credentials" "$(call grant_reserved_effects "$H" "$(RR "$H/.config")")"
+expect_eq "G17.r8 a recursive read of ~/.kube (above its config) is credentials" "credentials" "$(call grant_reserved_effects "$H" "$(RR "$H/.kube")")"
+expect_eq "G17.r9 a recursive read of a project tree is no category" "" "$(call grant_reserved_effects "$H" "$(RR /w/proj/src)")"
+expect_eq "G17.r10 a recursive read of a sibling sharing home's prefix is no category" "" "$(call grant_reserved_effects "$H" "$(RR /Users/alice2)")"
+expect_eq "G17.r11 a recursive read of home spelled in another case is credentials" "credentials" "$(call grant_reserved_effects "$H" "$(RR /users/ALICE/)")"
+expect_eq "G17.r12 with no home fact, a recursive read is credentials (it may reach any store)" "credentials" "$(call grant_reserved_effects "" "$(RR /w/proj/src)")"
+expect_eq "G17.r13 …while a plain read is still judged by its shape" "" "$(call grant_reserved_effects "" "$(R /w/proj/src/a)")"
+expect_eq "G17.r14 a write that lands on a store is credentials" "credentials" "$(call grant_reserved_effects "$H" "$(W /w/proj/.env)")"
+expect_eq "G17.r15 a delete that lands on a store is credentials" "credentials" "$(call grant_reserved_effects "$H" "$(D "$H/.aws/config")")"
+expect_eq "G17.r16 a store path behind the resolver's mark is still read" "credentials" \
+  "$(call grant_reserved_effects "$H" "R${TAB}?${TAB}$H/.ssh/id_rsa")"
+expect_eq "G17.r17 an unknown line is no category" "" "$(call grant_reserved_effects "$H" "$(U 'a reason' 'make')")"
+expect_eq "G17.r18 one store among many lines is credentials" "credentials" \
+  "$(call grant_reserved_effects "$H" "$(R /w/a)${NL}$(W /w/b)${NL}$(R "$H/.npmrc")${NL}$(D /w/c)")"
+expect_eq "G17.r19 a recursive read inside a store is credentials by its shape" "credentials" "$(call grant_reserved_effects "/nowhere" "$(RR /Users/bob/.gnupg)")"
+G17_NCM="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127
+grant_reserved_effects /Users/alice "$(printf "RR\t/Users/ALICE")" >/dev/null
+shopt -q nocasematch && printf on || printf off
+shopt -s nocasematch
+grant_reserved_effects /Users/alice "$(printf "R\t/w/a")" >/dev/null
+shopt -q nocasematch && printf on || printf off' _ "$LIB")"
+expect_eq "G17.ncm the caller's nocasematch is left as it was, off and on" "offon" "$G17_NCM"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G18 a read-only agent's report is a root only inside what the lead holds"
+
+# ADR-042 decision 1: a grant is never wider than its parent. A reader's report counts only
+# when it is strictly inside the run's record directory or the session scratch, the two
+# places the lead holds; anywhere else it contributes no root (T17, review S1).
+G18_IN="scratch=$S${NL}record=$REC${NL}report=$REC/R2.md"
+expect_eq "G18.1 a report in the record directory: a write to it allows" "allow" "$(dec reader "$G18_IN" "$(W "$REC/R2.md")")"
+expect_eq "G18.2 a report in the scratch: a write to it allows" "allow" "$(dec reader "scratch=$S${NL}report=$S/r.md" "$(W "$S/r.md")")"
+G18_3="$(dec reader "scratch=$S${NL}record=$REC${NL}report=$P/hooks" "$(W "$P/hooks/bash-walls.sh")")"
+expect_eq "G18.3 a report naming the main checkout's hooks: a write there is deny-fix" "deny-fix" "$(kind "$G18_3")"
+expect_contains "G18.3b …and the grant it names is the scratch alone" "This read-only agent may write and delete under $S." "$(fld 2 "$G18_3")"
+expect_eq "G18.4 a report file in the main checkout: a write to it is deny-fix" "deny-fix" \
+  "$(kind "$(dec reader "scratch=$S${NL}record=$REC${NL}report=$P/hooks/r.md" "$(W "$P/hooks/r.md")")")"
+expect_eq "G18.5 a report in another writer's tree: deny-fix" "deny-fix" \
+  "$(kind "$(dec reader "scratch=$S${NL}record=$REC${NL}report=$T1/r.md" "$(W "$T1/r.md")")")"
+expect_eq "G18.6 a report that is the record directory itself grants nothing under it" "deny-fix" \
+  "$(kind "$(dec reader "scratch=$S${NL}record=$REC${NL}report=$REC" "$(W "$REC/x.md")")")"
+expect_eq "G18.7 a report in the record directory with no record fact (an unbound session): deny-fix" "deny-fix" \
+  "$(kind "$(dec reader "scratch=$S${NL}report=$REC/R2.md" "$(W "$REC/R2.md")")")"
+expect_eq "G18.8 a report beside the record directory sharing its prefix: deny-fix" "deny-fix" \
+  "$(kind "$(dec reader "scratch=$S${NL}record=$REC${NL}report=$REC-old/x.md" "$(W "$REC-old/x.md")")")"
+expect_eq "G18.9 the scratch itself as the report grants nothing more than the scratch" "deny-fix" \
+  "$(kind "$(dec reader "scratch=$S${NL}report=$S" "$(D "$S")")")"
+expect_eq "G18.10 with the main root, a report in the record under .bionic still allows" "allow" \
+  "$(dec reader "scratch=$S${NL}record=$REC${NL}report=$REC/R2.md${NL}main=$P" "$(W "$REC/R2.md")")"
+expect_eq "G18.11 a writer is not bounded by this: its record write still allows" "allow" \
+  "$(dec writer "own=$T1${NL}scratch=$S${NL}record=$REC" "$(W "$REC/T1.md")")"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G19 bionic's own state is every session-state class patrol.sh owns"
+
+# The grant keeps its own copy of the class list, because it must not source patrol.sh (the
+# freeze: the decision reads nothing). This section is the agreement: the two lists are one
+# set, and every class on patrol.sh's list is state for every asker (T17, review S2).
+PATROL_LIB="${GRANT_TEST_PATROL_LIB:-$REPO_ROOT/payload/scripts/lib/patrol.sh}"
+G19_PATROL="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$PATROL_LIB")"
+G19_GRANT="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; printf "%s" "${GRANT_STATE_CLASSES-}"' _ "$LIB")"
+expect_nonempty "G19.0 patrol.sh's class list reads" "$G19_PATROL"
+expect_nonempty "G19.0b …and so does the grant's" "$G19_GRANT"
+expect_eq "G19.1 the grant's state classes are patrol.sh's, as a set" \
+  "$(printf '%s\n' $G19_PATROL | sort -u | tr '\n' ' ')" "$(printf '%s\n' $G19_GRANT | sort -u | tr '\n' ' ')"
+g19_state() {  # <class> <facts> <effect> -> kind|state
+  local v how=""
+  v="$(dec "$1" "$2" "$3")"
+  case "$v" in *"bionic's own state"*) how=state ;; esac
+  printf '%s|%s' "$(kind "$v")" "$how"
+}
+for c in $G19_PATROL; do
+  for cls in lead writer reader unbound; do
+    case "$cls" in
+      lead) f="checkout=$P" ;; writer) f="own=$P" ;; *) f="scratch=$P/.bionic/tmp" ;;
+    esac
+    expect_eq "G19.$c.$cls $cls: a write to $c-sid-1.state is state" "deny-fix|state" "$(g19_state "$cls" "$f" "$(W "$P/.bionic/tmp/$c-sid-1.state")")"
+  done
+  expect_eq "G19.$c.d a delete of $c-sid-1.state is state" "deny-fix|state" "$(g19_state lead "checkout=$P" "$(D "$P/.bionic/tmp/$c-sid-1.state")")"
+  G19_UP="$(printf '%s' "$c" | tr '[:lower:]' '[:upper:]')"
+  expect_eq "G19.$c.case $G19_UP-sid-1.state is state (case-blind filesystems)" "deny-fix|state" "$(g19_state lead "checkout=$P" "$(W "$P/.bionic/tmp/$G19_UP-sid-1.state")")"
+done
+expect_eq "G19.armed the Patrol stamp's .armed sibling is state" "deny-fix|state" "$(g19_state lead "checkout=$P" "$(W "$P/.bionic/tmp/patrol-sid-1.state.armed")")"
+expect_eq "G19.ctl an ordinary file beside them is not state" "allow|" "$(g19_state lead "checkout=$P" "$(W "$P/.bionic/tmp/notes.txt")")"
+G19_SRC="$(cat "$LIB" 2>/dev/null)"
+expect_regex "G19.src the source-line extractor sees the lib's one sibling (git-argv.sh)" '\. "\$_GRANT_LIB_DIR/git-argv\.sh"' "$G19_SRC"
+expect_no_regex "G19.src2 …and the lib sources no patrol.sh" '(\.|source) +"?[^ ]*patrol\.sh' "$G19_SRC"
+G19_NCM="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127
+grant_decide lead /w /w "$(printf "W\t/w/.bionic/tmp/Roster-x.state")" >/dev/null
+shopt -q nocasematch && printf on || printf off
+shopt -s nocasematch
+grant_decide lead /w /w "$(printf "W\t/w/.bionic/tmp/notes")" >/dev/null
+shopt -q nocasematch && printf on || printf off' _ "$LIB")"
+expect_eq "G19.ncm the decision leaves the caller's nocasematch as it was, off and on" "offon" "$G19_NCM"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G20 a delete must be strictly beneath a delete root: a root itself is no one's to delete"
+
+# `rm -rf <own tree>`, `rm -rf <wave checkout>` and `rm -rf <scratch>` each deleted a whole
+# workspace through a containment that matched the root itself (review N5). A write to a root
+# path is unchanged; a delete is allowed only strictly beneath a delete root (T17).
+g20_check() {  # <label> <verdict> <want in fix> <never in fix>
+  expect_eq "$1.0 deny-fix" "deny-fix" "$(kind "$2")"
+  expect_contains "$1.1 the reason says it is a root of the workspace" "a root of the workspace" "$(fld 2 "$2")"
+  expect_contains "$1.2 the fix sends it to the $3" "$3" "$(fld 3 "$2")"
+  expect_absent "$1.3 …never to the $4" "$4" "$(fld 3 "$2")"
+}
+g20_check "G20.w.tree writer: a delete of its own tree" "$(dec writer "$WRITER_FACTS" "$(D "$T1")")" "lead" "human"
+g20_check "G20.w.slash writer: …spelled with a trailing slash" "$(dec writer "$WRITER_FACTS" "$(D "$T1/")")" "lead" "human"
+g20_check "G20.w.dot writer: …spelled with a trailing /." "$(dec writer "$WRITER_FACTS" "$(D "$T1/.")")" "lead" "human"
+g20_check "G20.w.scratch writer: a delete of the scratch" "$(dec writer "$WRITER_FACTS" "$(D "$S")")" "lead" "human"
+g20_check "G20.r.scratch reader: a delete of the scratch" "$(dec reader "$READER_FACTS" "$(D "$S")")" "lead" "human"
+g20_check "G20.l.wave lead: a delete of the wave checkout" "$(dec lead "$LEAD_FACTS" "$(D "$WAVE")")" "human" "ask the lead"
+g20_check "G20.l.tree lead: a delete of a tree it recorded" "$(dec lead "$LEAD_FACTS" "$(D "$T1")")" "human" "ask the lead"
+g20_check "G20.l.rec lead: a delete of the record directory" "$(dec lead "$LEAD_FACTS" "$(D "$REC")")" "human" "ask the lead"
+g20_check "G20.l.plan lead: a delete of the plan file" "$(dec lead "$LEAD_FACTS" "$(D "$PLAN")")" "human" "ask the lead"
+g20_check "G20.u.scratch unbound: a delete of the scratch" "$(dec unbound "$UNBOUND_FACTS" "$(D "$S")")" "human" "ask the lead"
+expect_eq "G20.c1 control: the writer's delete beneath its tree allows" "allow" "$(dec writer "$WRITER_FACTS" "$(D "$T1/build")")"
+expect_eq "G20.c2 control: a write to the tree root itself still allows" "allow" "$(dec writer "$WRITER_FACTS" "$(W "$T1")")"
+expect_eq "G20.c3 control: the lead's delete beneath the wave checkout allows" "allow" "$(dec lead "$LEAD_FACTS" "$(D "$WAVE/build")")"
+expect_eq "G20.c4 control: the scratch's contents may go" "allow" "$(dec unbound "$UNBOUND_FACTS" "$(D "$S/tmp")")"
+expect_eq "G20.c5 a root strictly beneath another delete root may be deleted through the outer one" "allow" \
+  "$(dec lead "checkout=$P${NL}tree=$P/.worktrees/25-T9" "$(D "$P/.worktrees/25-T9")")"
+expect_eq "G20.c6 a sibling sharing the root's prefix is plain outside, not a root" "deny-fix|outside where" \
+  "$(v="$(dec writer "$WRITER_FACTS" "$(D "$T1OLD")")"; printf '%s|' "$(kind "$v")"; case "$v" in (*"outside where"*) printf 'outside where' ;; esac)"
+expect_contains "G20.msg the root denial names the root" "$T1" "$(fld 2 "$(dec writer "$WRITER_FACTS" "$(D "$T1")")")"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G21 one resolver for a whole effect list gives the answers one path at a time gives"
+
+# The hook used to fork once per effect to resolve it, and a 2000-operand rm ran past its
+# registration (review S3). grant_resolve_lines resolves a whole list in one process; this
+# section holds it to grant_resolve's answers on §G5's real tree, line for line.
+G21_IN="$(W "$G5/tree/real.txt")
+$(D "$G5/tree/sub/new.txt")
+$(R "$G5/tree/out/f")
+$(RR "$G5/tree/abs")
+$(W "$G5/tree/dangling")
+$(D "$G5/tree/../x")
+$(W "tree/real.txt")
+$(U 'a reason' 'make build')
+$(W /dev/null)
+$(W /dev/fd/3)
+$(W /dev/fd/x)
+$(R "$G5/tree/nope/../x")
+$(RR "$G5/tree/.bionic/record")"
+G21_WANT=""
+while IFS= read -r line; do
+  k="${line%%"$TAB"*}"; p="${line#*"$TAB"}"
+  case "$k:$p" in
+    \?:*|W:/dev/null|W:/dev/fd/3) G21_WANT="$G21_WANT$line$NL" ;;
+    *) G21_WANT="$G21_WANT$k$TAB$(call grant_resolve "$p")$NL" ;;
+  esac
+done <<< "$G21_IN"
+G21_GOT="$(call grant_resolve_lines "$G21_IN")"
+expect_contains "G21.0 the one-at-a-time answers read (a resolved path among them)" "$G5/outside/f" "$G21_WANT"
+expect_eq "G21.1 the batch gives the same answers, line for line" "${G21_WANT%"$NL"}" "$G21_GOT"
+expect_eq "G21.2 rc 0" "0" "$(call grant_resolve_lines "$G21_IN" >/dev/null; printf '%s' "$CALL_RC")"
+G21_CWD="$(cd / && bash -c '. "$1" >/dev/null 2>&1 || exit 127; grant_resolve_lines "$(printf "W\t%s/tree/sub/a" "$2")" >/dev/null; pwd' _ "$LIB" "$G5")"
+expect_eq "G21.3 the caller's directory is where it was" "/" "$G21_CWD"
+G21_MANY="$(i=1; while [ "$i" -le 400 ]; do printf 'D\t%s/tree/f%s\n' "$G5" "$i"; i=$((i + 1)); done)"
+G21_MOUT="$(call grant_resolve_lines "$G21_MANY")"
+expect_eq "G21.4 four hundred effects, four hundred answers" "400" "$(printf '%s\n' "$G21_MOUT" | grep -c "^D${TAB}$G5/tree/f")"
+expect_eq "G21.5 …the last of them resolved" "D${TAB}$G5/tree/f400" "$(printf '%s\n' "$G21_MOUT" | tail -1)"
 
 finish

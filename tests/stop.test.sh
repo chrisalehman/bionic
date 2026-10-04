@@ -1223,9 +1223,11 @@ ls_launch() {  # <project> <name> [tree basename] -> a confirmed launch, and its
     launched_at=2026-10-04T03:37:00Z subagent_type=bionic:implementor deliverable=.bionic/docs/record/w1/r.md \
     duration='45 minutes' tool_use_id="toolu_LS$2" >> "$1/.bionic/tmp/roster-$SID.state"
   [ -n "${3:-}" ] || return 0
-  mkdir -p "$1/.worktrees/$3"
+  # A real linked worktree, its path as git lists it: the record counts nothing else (wave-26 T40).
+  local t; t="$(cd "$1" && pwd -P)/.worktrees/$3"
+  git -C "$1" worktree add -q -b "wt/$3" "$t" >/dev/null 2>&1
   printf 'workspace/v1|session=%s|name=%s|path=%s|branch=wt/%s|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
-    "$SID" "$2" "$1/.worktrees/$3" "$3" "$(ls_plan "$1")" >> "$1/.bionic/tmp/workspaces-$SID.state"
+    "$SID" "$2" "$t" "$3" "$(ls_plan "$1")" >> "$1/.bionic/tmp/workspaces-$SID.state"
 }
 require_helpers ls_world ls_plan ls_launch
 LS_TX="$(mktemp)"

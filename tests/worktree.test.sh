@@ -957,40 +957,57 @@ section "Group 11: the workspace readers — one file, read by key, refused thro
 # foreign line, a line with no path or a relative one, a CRLF ending. rc 1 is "nothing
 # recorded"; rc 2 is "refused", the file or a directory above it a symlink, or a session id
 # no file can be named for.
+#
+# EVERY PATH IN THESE LINES IS A REAL LINKED WORKTREE of the fixture repository (wave-25 T18):
+# a recorded path counts only when git lists it as one (Group 11b), so a row that wants the
+# session filter, the schema filter or the CRLF handling to be the thing that decides must
+# hand those filters a path the git rule would otherwise accept.
 
 expect_true "workspace_for_name is defined"    declare -f workspace_for_name
 expect_true "workspaces_of_session is defined" declare -f workspaces_of_session
 
-WK="$TMP/ws-reader"; mkdir -p "$WK/.bionic/tmp"
+# A linked worktree with no commit of its own, at <repo>/<parent>/<name>; echoes the path git
+# lists for it (the repository's path is physical, and git records the physical path).
+ws_tree() {  # <repo> <name> [parent dir, default .worktrees]
+  local r="$1" p="${3:-$1/.worktrees}"
+  git -C "$r" worktree add --quiet -b "ws/$2" "$p/$2" HEAD >/dev/null 2>&1
+  printf '%s' "$(cd "$p/$2" && pwd -P)"
+}
+
+WK="$(new_repo "$TMP/ws-reader")"; mkdir -p "$WK/.bionic/tmp"
 WKSID="reader-session-01"
 WKF="$WK/.bionic/tmp/workspaces-${WKSID}.state"
+WA1="$(ws_tree "$WK" a-1)"; WB1="$(ws_tree "$WK" b-1)"; WA2="$(ws_tree "$WK" a-2)"
+WC1="$(ws_tree "$WK" c-1)"; WAF="$(ws_tree "$WK" a-foreign)"; WAR="$(ws_tree "$WK" a-roster)"
 {
-  printf 'workspace/v1|session=%s|name=a|path=/t/a-1|branch=wt/a|base=0|plan=none|at=2026-10-03T00:00:00Z\n' "$WKSID"
-  printf 'workspace/v1|session=%s|name=b|path=/t/b-1|branch=wt/b|base=0|plan=none|at=2026-10-03T00:00:01Z\n' "$WKSID"
-  printf 'workspace/v1|session=%s|name=a|path=/t/a-2|branch=wt/a2|base=0|plan=none|at=2026-10-03T00:00:02Z\n' "$WKSID"
-  printf 'workspace/v1|session=someone-else|name=a|path=/t/a-foreign|branch=wt/x|base=0|plan=none|at=2026-10-03T00:00:03Z\n'
+  printf 'workspace/v1|session=%s|name=a|path=%s|branch=wt/a|base=0|plan=none|at=2026-10-03T00:00:00Z\n' "$WKSID" "$WA1"
+  printf 'workspace/v1|session=%s|name=b|path=%s|branch=wt/b|base=0|plan=none|at=2026-10-03T00:00:01Z\n' "$WKSID" "$WB1"
+  printf 'workspace/v1|session=%s|name=a|path=%s|branch=wt/a2|base=0|plan=none|at=2026-10-03T00:00:02Z\n' "$WKSID" "$WA2"
+  printf 'workspace/v1|session=someone-else|name=a|path=%s|branch=wt/x|base=0|plan=none|at=2026-10-03T00:00:03Z\n' "$WAF"
   # A line of ANOTHER schema naming `a` with a path, after a's last real line: a reader that
-  # did not key on the schema would answer /t/a-roster below. Built by the roster writer
+  # did not key on the schema would answer the a-roster tree below. Built by the roster writer
   # (tests/lib/roster-row.sh, as cross-gate §S17 requires) and given the path a workspace
   # line would carry.
-  printf '%s|path=/t/a-roster\n' "$(roster_row_fixture session="$WKSID" name=a)"
+  printf '%s|path=%s\n' "$(roster_row_fixture session="$WKSID" name=a)" "$WAR"
   printf 'workspace/v1|session=%s|name=e|branch=wt/e|base=0|plan=none|at=2026-10-03T00:00:04Z\n' "$WKSID"
   printf 'workspace/v1|session=%s|name=d|path=relative/d|branch=wt/d|base=0|plan=none|at=2026-10-03T00:00:05Z\n' "$WKSID"
-  printf 'workspace/v1|session=%s|name=c|path=/t/c-1|branch=wt/c|base=0|plan=none|at=2026-10-03T00:00:06Z\r\n' "$WKSID"
+  printf 'workspace/v1|session=%s|name=c|path=%s|branch=wt/c|base=0|plan=none|at=2026-10-03T00:00:06Z\r\n' "$WKSID" "$WC1"
 } > "$WKF"
 
 wk() { "$@"; echo "rc=$?"; }
+expect_eq "fixture: every tree the lines name is one git lists" "6" \
+  "$(git -C "$WK" worktree list --porcelain | /usr/bin/grep -c -E "^worktree ${WK}/\.worktrees/(a-1|b-1|a-2|c-1|a-foreign|a-roster)\$")"
 expect_eq "fixture: the foreign-schema line naming a, with a path, is in the file" "1" \
-  "$(/usr/bin/grep -c "^$(roster_row_schema)|.*|name=a|.*|path=/t/a-roster\$" "$WKF")"
-expect_eq "the last line for a name answers"               "$(printf '/t/a-2\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" a)"
-expect_eq "another name answers its own"                   "$(printf '/t/b-1\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" b)"
-expect_eq "a CRLF line answers without the CR"             "$(printf '/t/c-1\nrc=0')" "$(wk workspace_for_name "$WK" "$WKSID" c)"
+  "$(/usr/bin/grep -c "^$(roster_row_schema)|.*|name=a|.*|path=${WAR}\$" "$WKF")"
+expect_eq "the last line for a name answers"               "$(printf '%s\nrc=0' "$WA2")" "$(wk workspace_for_name "$WK" "$WKSID" a)"
+expect_eq "another name answers its own"                   "$(printf '%s\nrc=0' "$WB1")" "$(wk workspace_for_name "$WK" "$WKSID" b)"
+expect_eq "a CRLF line answers without the CR"             "$(printf '%s\nrc=0' "$WC1")" "$(wk workspace_for_name "$WK" "$WKSID" c)"
 expect_eq "a relative path is not a recorded tree"         "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" d)"
 expect_eq "a line with no path is not a recorded tree"     "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" e)"
 expect_eq "a name nobody recorded has none"                "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" z)"
 expect_eq "an empty name has none"                        "rc=1" "$(wk workspace_for_name "$WK" "$WKSID" "")"
 expect_eq "workspaces_of_session: this session's valid paths, in order" \
-  "$(printf '/t/a-1\n/t/b-1\n/t/a-2\n/t/c-1\nrc=0')" "$(wk workspaces_of_session "$WK" "$WKSID")"
+  "$(printf '%s\n%s\n%s\n%s\nrc=0' "$WA1" "$WB1" "$WA2" "$WC1")" "$(wk workspaces_of_session "$WK" "$WKSID")"
 expect_eq "no file: workspace_for_name has none"           "rc=1" "$(wk workspace_for_name "$WK" no-file-session a)"
 expect_eq "no file: workspaces_of_session has none"        "rc=1" "$(wk workspaces_of_session "$WK" no-file-session)"
 expect_eq "a session id no file can be named for is refused" "rc=2" "$(wk workspace_for_name "$WK" "../tmp/x" a)"
@@ -1005,6 +1022,141 @@ expect_eq "…and by workspaces_of_session" "rc=2" "$(wk workspaces_of_session "
 WKT="$TMP/ws-reader-tmplink"; mkdir -p "$WKT/.bionic"
 ln -s "$WK/.bionic/tmp" "$WKT/.bionic/tmp"
 expect_eq "a symlinked .bionic/tmp is refused" "rc=2" "$(wk workspace_for_name "$WKT" "$WKSID" a)"
+
+section "Group 11b: a recorded path counts only when git lists it as a linked worktree (wave-25 T18, critic C1, A-orch-36)"
+#
+# The record file sits in `.bionic/tmp`, and a script the permission hook never sees can append
+# to it (spec N7). A line naming the main checkout made `workspace_for_name` answer the main
+# checkout, and the hook then granted a writer all of it. The rule is by place: a path counts
+# only when `git worktree list` names it as a LINKED worktree of this repository, spelled as
+# git spells it, and it resolves physically to that same spelling. Anything else is skipped,
+# so an earlier true line for the name still answers. A yes is exact; the only error allowed
+# is refusing something harmless (A-orch-29).
+#
+# THE PLANTED DEFECTS. The rule removed: every "skipped" row below answers the forged path.
+# The rule by prefix (`<root>/.worktrees/`): the main checkout and its parent are still
+# skipped, but the plain directory, the removed tree, the recreated directory, the symlink and
+# the `..` spelling under `.worktrees/` answer, and the two trees under another parent are
+# refused.
+
+WG="$(new_repo "$TMP/ws-git")"; mkdir -p "$WG/.bionic/tmp"
+WGSID="git-rule-session"
+WGF="$WG/.bionic/tmp/workspaces-${WGSID}.state"
+WGT="$(ws_tree "$WG" f-1)"
+mkdir -p "$WG/trees" "$TMP/ws-elsewhere"
+WGIN="$(ws_tree "$WG" g-1 "$WG/trees")"
+WGOUT="$(ws_tree "$WG" g-2 "$TMP/ws-elsewhere")"
+WGGONE="$(ws_tree "$WG" gone)"; git -C "$WG" worktree remove "$WGGONE" >/dev/null 2>&1
+WGPRUNE="$(ws_tree "$WG" pruned)"; rm -rf "$WGPRUNE"; mkdir -p "$WGPRUNE"
+WGSWAP="$(ws_tree "$WG" swapped)"; rm -rf "$WGSWAP"; ln -s "$WG" "$WGSWAP"
+WGPLAIN="$WG/.worktrees/plain"; mkdir -p "$WGPLAIN"
+WO="$(new_repo "$TMP/ws-other")"; WGFOREIGN="$(ws_tree "$WO" o-1)"
+WGUPPER="$(printf '%s' "$WGT" | tr '[:lower:]' '[:upper:]')"
+
+wg_line() {  # <name> <path> -> one workspace line of this session
+  printf 'workspace/v1|session=%s|name=%s|path=%s|branch=wt/x|base=0|plan=none|at=2026-10-04T00:00:00Z\n' "$WGSID" "$1" "$2"
+}
+
+# The fixture, proven before it is read: git lists the true trees and the three it still
+# carries (the recreated directory as prunable, the symlink as a live tree); it does not list
+# the removed tree, the plain directory, the main checkout's parent or the other repository's.
+WGLIST="$(git -C "$WG" worktree list --porcelain)"
+expect_contains "fixture: git lists the true tree"                 "worktree $WGT"   "$WGLIST"
+expect_contains "fixture: git lists the tree under trees/"         "worktree $WGIN"  "$WGLIST"
+expect_contains "fixture: git lists the tree outside the root"     "worktree $WGOUT" "$WGLIST"
+expect_contains "fixture: git still lists the recreated directory" "worktree $WGPRUNE" "$WGLIST"
+expect_contains "fixture: …and calls it prunable"                  "prunable" "$WGLIST"
+expect_contains "fixture: git still lists the symlinked tree"      "worktree $WGSWAP" "$WGLIST"
+expect_absent   "fixture: git does not list the removed tree"      "worktree $WGGONE" "$WGLIST"
+expect_absent   "fixture: git does not list the plain directory"   "worktree $WGPLAIN" "$WGLIST"
+expect_absent   "fixture: git does not list the other repository's tree" "worktree $WGFOREIGN" "$WGLIST"
+expect_true     "fixture: the removed tree's directory is gone"    test ! -e "$WGGONE"
+expect_true     "fixture: the swapped tree is a symlink to main"   test -L "$WGSWAP"
+
+# One forged line after one true line for the same name: the true tree still answers.
+wg_skips() {  # <label> <forged path>
+  { wg_line f "$WGT"; wg_line f "$2"; } > "$WGF"
+  expect_eq "$1: skipped, the earlier true tree answers" "$(printf '%s\nrc=0' "$WGT")" "$(wk workspace_for_name "$WG" "$WGSID" f)"
+}
+wg_skips "a line naming the main checkout"                  "$WG"
+wg_skips "a line naming the parent of the main checkout"    "${WG%/*}"
+wg_skips "a line naming a real directory git does not list" "$WGPLAIN"
+wg_skips "a line naming a tree that was removed"            "$WGGONE"
+wg_skips "a line naming a removed tree's recreated directory (git: prunable)" "$WGPRUNE"
+wg_skips "a line naming a symlink standing where a tree was" "$WGSWAP"
+wg_skips "a line naming the true tree through .."           "$WGT/../f-1"
+wg_skips "a line naming .worktrees itself"                  "$WGT/.."
+wg_skips "a line naming the true tree in another letter case" "$WGUPPER"
+wg_skips "a line naming the true tree with a trailing slash" "$WGT/"
+wg_skips "a line naming another repository's linked worktree" "$WGFOREIGN"
+
+# With only untrue lines the name has none: rc 1, never a path.
+{ wg_line u "$WG"; wg_line u "${WG%/*}"; wg_line u "$WGPLAIN"; wg_line u "$WGSWAP"; } > "$WGF"
+expect_eq "only untrue lines: the name has none (rc 1)" "rc=1" "$(wk workspace_for_name "$WG" "$WGSID" u)"
+expect_eq "…and the session lists none (rc 1)" "rc=1" "$(wk workspaces_of_session "$WG" "$WGSID")"
+
+# The positives that keep the rule from over-refusing: a tree under another parent counts,
+# inside the root and outside it, each as git lists it.
+{ wg_line g "$WGIN"; wg_line h "$WGOUT"; } > "$WGF"
+expect_eq "a tree created under <root>/trees counts" "$(printf '%s\nrc=0' "$WGIN")" "$(wk workspace_for_name "$WG" "$WGSID" g)"
+expect_eq "a tree created under a parent outside the root counts" "$(printf '%s\nrc=0' "$WGOUT")" "$(wk workspace_for_name "$WG" "$WGSID" h)"
+
+# The lead's reader: only the true trees, in order.
+{
+  wg_line f "$WGT"; wg_line x "$WG"; wg_line g "$WGIN"; wg_line x "${WG%/*}"; wg_line x "$WGPLAIN"
+  wg_line x "$WGGONE"; wg_line x "$WGPRUNE"; wg_line x "$WGSWAP"; wg_line x "$WGFOREIGN"
+  wg_line x "$WGT/../f-1"; wg_line h "$WGOUT"
+} > "$WGF"
+expect_eq "workspaces_of_session lists only the trees git lists, in order" \
+  "$(printf '%s\n%s\n%s\nrc=0' "$WGT" "$WGIN" "$WGOUT")" "$(wk workspaces_of_session "$WG" "$WGSID")"
+
+# GIT IS ASKED ONCE PER ANSWER, never once per line, and not at all when no line could count.
+# A `git` first on PATH counts its calls and runs the real one.
+WGSHIM="$TMP/ws-git-shim"; mkdir -p "$WGSHIM"
+printf '#!/bin/bash\nprintf x >> "%s"\nexec "%s" "$@"\n' "$WGSHIM/calls" "$(command -v git)" > "$WGSHIM/git"
+chmod +x "$WGSHIM/git"
+: > "$WGSHIM/calls"
+WGOUT11="$(PATH="$WGSHIM:$PATH" wk workspaces_of_session "$WG" "$WGSID")"
+expect_eq "through the counting git, the answer is the same three trees" \
+  "$(printf '%s\n%s\n%s\nrc=0' "$WGT" "$WGIN" "$WGOUT")" "$WGOUT11"
+expect_eq "…and git was asked once for eleven lines" "x" "$(cat "$WGSHIM/calls")"
+: > "$WGSHIM/calls"
+WGOUTZ="$(PATH="$WGSHIM:$PATH" wk workspace_for_name "$WG" "$WGSID" nobody)"
+expect_eq "a name with no line has none" "rc=1" "$WGOUTZ"
+expect_eq "…and asks git nothing" "" "$(cat "$WGSHIM/calls")"
+
+# WHEN GIT CANNOT BE ASKED the reader never answers yes: the same line, naming a tree git does
+# list for its own repository, under a root that is no repository, is refused (rc 2).
+WGNR="$TMP/ws-no-repo"; mkdir -p "$WGNR/.bionic/tmp"
+wg_line f "$WGT" > "$WGNR/.bionic/tmp/workspaces-${WGSID}.state"
+{ wg_line f "$WGT"; } > "$WGF"
+expect_eq "control: under its own repository the line answers" "$(printf '%s\nrc=0' "$WGT")" "$(wk workspace_for_name "$WG" "$WGSID" f)"
+expect_eq "under a root git cannot read, workspace_for_name refuses (rc 2)" "rc=2" "$(wk workspace_for_name "$WGNR" "$WGSID" f)"
+expect_eq "…and so does workspaces_of_session" "rc=2" "$(wk workspaces_of_session "$WGNR" "$WGSID")"
+WGBROKEN="$TMP/ws-git-broken"; mkdir -p "$WGBROKEN"
+printf '#!/bin/bash\nexit 1\n' > "$WGBROKEN/git"; chmod +x "$WGBROKEN/git"
+expect_eq "with a git that fails, the reader refuses too (rc 2)" "rc=2" \
+  "$(PATH="$WGBROKEN:$PATH" wk workspace_for_name "$WG" "$WGSID" f)"
+
+# THE LAUNCH RECORDER'S READER (wave-26 T40). The launch recorder fills a plan row's worktree and
+# base cells from this record, so it asks the same rule: the tree is the one workspace_for_name
+# answers, and the base is the one on the last line naming that tree.
+expect_true "workspace_record_for_name is defined" declare -F workspace_record_for_name
+wg_line_b() {  # <name> <path> <base>
+  printf 'workspace/v1|session=%s|name=%s|path=%s|branch=wt/x|base=%s|plan=none|at=2026-10-04T00:00:00Z\n' "$WGSID" "$1" "$2" "$3"
+}
+{ wg_line_b f "$WGT" aaaaaaaa; wg_line_b f "$WG" bbbbbbbb; } > "$WGF"
+expect_eq "record: a forged line naming the main checkout is skipped, the true tree and its base answer" \
+  "$(printf '%s\taaaaaaaa\nrc=0' "$WGT")" "$(wk workspace_record_for_name "$WG" "$WGSID" f)"
+{ wg_line_b f "$WGIN" cccccccc; wg_line_b f "$WGT" dddddddd; } > "$WGF"
+expect_eq "record: the last true line answers, with its own base" \
+  "$(printf '%s\tdddddddd\nrc=0' "$WGT")" "$(wk workspace_record_for_name "$WG" "$WGSID" f)"
+{ wg_line_b f "$WGT" eeeeeeee; wg_line_b g "$WGIN" ffffffff; wg_line_b f "$WGPLAIN" 99999999; } > "$WGF"
+expect_eq "record: another name's line and an untrue line leave the true tree's base" \
+  "$(printf '%s\teeeeeeee\nrc=0' "$WGT")" "$(wk workspace_record_for_name "$WG" "$WGSID" f)"
+{ wg_line_b u "$WG" 11111111; wg_line_b u "$WGPLAIN" 22222222; } > "$WGF"
+expect_eq "record: only untrue lines: none (rc 1)" "rc=1" "$(wk workspace_record_for_name "$WG" "$WGSID" u)"
+expect_eq "record: under a root git cannot read, refused (rc 2)" "rc=2" "$(wk workspace_record_for_name "$WGNR" "$WGSID" f)"
 
 # ---------------------------------------------------------------------------
 # THE LANDING RULE (wave-26 T10, T31, D7, D19). A tree lands on its LAST stamped suite run when
