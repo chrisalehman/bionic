@@ -610,6 +610,10 @@ fi
 
 section "Section 8: the column budget"
 
+# THE POSITIVE BESIDE THE NEGATIVE (wave-26 T25). `too_wide` of an EMPTY page is empty, so with a defect planted
+# at the doctor's entry point, where the run prints nothing, row 15 alone still passed.
+expect_match "15a: the page measured is the fullest run's, not an empty one (it prints the THIRD PARTY table)" \
+  "*THIRD PARTY*" "$OUT6"
 _over="$(too_wide "$OUT6")"
 if [ -z "$_over" ]; then ok "15: every line of the fullest run fits 100 columns"
 else no "15: a line exceeds 100 columns" "$_over"; fi
