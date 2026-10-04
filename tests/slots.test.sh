@@ -607,8 +607,10 @@ expect_contains "Q7.2 …and runs" "nested-quiet" "$Q7_OUT"
 
 # Q8. One ceiling covers every wait of one call (review 4 F3): the drain, the settle and
 # every void retry share BIONIC_SLOTS_MAX_WAIT. Before T36 each wait got the whole ceiling.
+# The foreign place drains at half the ceiling, so the drain always completes inside it and
+# the two shapes stay apart: one ceiling ends at 8 s, a fresh one per wait at 4 + 8 s.
 newrow q8
-MW=4
+MW=8
 bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; Q8_A=$!
 wait_file "$ROW/a.started"
 ( sleep 4; touch "$ROW/a.go" ) >/dev/null 2>&1 & BG="$BG $!"
