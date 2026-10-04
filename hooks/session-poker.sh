@@ -19,6 +19,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
 #     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
+#     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | current | ledger-add | ledger-set …
+#                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -158,7 +160,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh fill.sh observe.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh fill.sh observe.sh refuse.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -290,6 +292,12 @@ BIONIC_LOADER_REFUSE
 # reads.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/observe.sh"
+# THE PASTED POKER PATH (wave-24 T29; critic I2, A-T27.8). The Patrol prompt, the STANDDOWN
+# line and the re-arm note print this script's path for a reader to paste; it is ONE shell
+# word, so a plugin root with a space pastes whole. refuse.sh's `refuse_shell_word` owns the rule.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/refuse.sh"
+POKER_WORD="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="20m"
@@ -332,6 +340,22 @@ PATROL_STAMP_SUFFIX=".state"
 # untouched.
 PATROL_ARMED_SCHEMA="patrol-armed/v1"
 PATROL_ARMED_SUFFIX=".armed"
+
+# THE TICK DIGEST AND THE PROMPT VERSION (wave-24 T7, REQ-4; D4, D5; ADR-041). The digest file
+# holds what one tick carries to the next: a hash of what the tick decided (no timestamp enters
+# it), when that answer was first given, the decision band, whether the turn owes the task-list
+# duty (`duty=owed|none`, read by the stop wall's collector), and the Patrol prompt version
+# `arm` recorded. A tick whose hash matches the file's prints one line. The prompt version is
+# bumped whenever the prompt's wording changes what a tick turn is asked to do, so a Patrol armed
+# under an older one is told to re-arm.
+PATROL_DIGEST_SCHEMA="patrol-digest/v1"
+# THE HOLD'S REASON, AS EVERY FIX LINE PRINTS IT (wave-24 T27; critic I4): a quoted
+# placeholder, so a line pasted as printed is one argument and never a redirect from a file
+# named `reason`. The stop wall's stand-down refusal prints the same words
+# (payload/scripts/lib/stop.sh `STANDDOWN_HOLDS`); tests/session-poker.test.sh §HOLD-fix pins
+# the three sites.
+HOLD_REASON_SLOT="'why it stays up'"
+PATROL_PROMPT_VERSION=2
 
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
 # stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
@@ -378,8 +402,14 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --window   defer a dead session whose own newest file is younger than the poker interval"
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
+  die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id> <col>=<val>...   set cells of a ## Tasks row (any header column but Files, which amend widens)"
+  die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh current <N|T<n>>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
+  die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
+  die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   exit 2
@@ -462,6 +492,16 @@ case "$VERB" in
     EXTEND_NAME="$1"
     EXTEND_REASON="$2"
     ;;
+  # THE THIRD, and for the same reason: a hold is an answer, and an answer with no reason is
+  # one the tick could not print back (wave-24 T7, D1). A reason of only blanks is no reason
+  # either: the tick would print the hold with nothing after its dash (T27, review C3).
+  hold)
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "hold takes exactly two arguments: the name to keep up and the reason."
+    fi
+    HOLD_NAME="$1"
+    HOLD_REASON="$2"
+    ;;
   # THE NINE CELLS AN AUTHOR WRITES, IN THE TABLE'S OWN COLUMN ORDER (wave-20 REQ-5, AC-5.3;
   # Δ5). `status`, `worktree` and `base` are the dispatcher's cells and are not operands:
   # a new row is `pending` and names no tree. Every operand is required — `—` is how the
@@ -504,6 +544,47 @@ case "$VERB" in
     [ -n "$AMEND_REASON" ] || usage "amend takes --reason <why>: the roster says why a contract changed."
     [ -n "$AMEND_FILES$AMEND_SUITES$AMEND_RUNS" ] \
       || usage "amend changes nothing without --files+, --suites+ or --reexec+."
+    ;;
+  # THE PLAN-ROW VERBS (wave-24 T15; REQ-9, D14). A row verb takes an id and one or more
+  # `<column>=<value>` operands; the shape is checked here and the content in the verb, so a
+  # malformed call is the usage error (2) and a value the plan cannot hold is the verb's own
+  # refusal (1), with the plan untouched either way. Operands are kept in an array, not
+  # newline-joined as amend's are: a value with a line break must reach the verb to be refused
+  # by name, not split into two operands here.
+  task-set|ledger-add|ledger-set)
+    if [ $# -lt 2 ] || [ -z "$1" ]; then
+      usage "$VERB takes an id and at least one <column>=<value>."
+    fi
+    PV_ID="$1"; shift
+    for _pv_a in "$@"; do
+      case "$_pv_a" in
+        [!=]*=*) : ;;
+        *) usage "$VERB: '$_pv_a' is not <column>=<value>." ;;
+      esac
+    done
+    PV_PAIRS=("$@")
+    ;;
+  step-line)
+    PV_APPEND=""
+    if [ $# -eq 3 ] && [ "$3" = "--append" ]; then PV_APPEND=append; set -- "$1" "$2"; fi
+    if [ $# -ne 2 ] || [ -z "$2" ]; then
+      usage "step-line takes <N|T<n>> <text> [--append]."
+    fi
+    case "$1" in
+      [0-9]|[0-9][ab]) : ;;
+      T[0-9]*) case "${1#T}" in *[!0-9]*) usage "step-line: '$1' is not a task id (T<n>)." ;; esac ;;
+      *) usage "step-line: '$1' is neither a step number (0-9, 4a) nor a task id (T<n>)." ;;
+    esac
+    PV_KEY="$1"; PV_TEXT="$2"
+    ;;
+  current)
+    [ $# -eq 1 ] && [ -n "$1" ] || usage "current takes one argument: the step number (0-8) or the task id (T<n>) to move to."
+    case "$1" in
+      9|9a|9b|[0-8]|[0-8][ab]) : ;;
+      T[0-9]*) case "${1#T}" in *[!0-9]*) usage "current: '$1' is not a task id (T<n>)." ;; esac ;;
+      *) usage "current: '$1' is neither a step number (0-8) nor a task id (T<n>)." ;;
+    esac
+    PV_KEY="$1"
     ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
@@ -761,6 +842,39 @@ write_patrol_armed_marker() {  # <session-id> -> 0 written, 1 not
   [ -L "$f" ] && return 1
   printf '%s|at=%s|session=%s\n' "$PATROL_ARMED_SCHEMA" "$(iso_now)" "$sid" \
     > "$f" 2>/dev/null || return 1
+  chmod 600 "$f" 2>/dev/null
+  return 0
+}
+
+# THE DIGEST FILE'S PATH, beside the stamp under the same resolved root. The path and its
+# reader, `tick_digest_field`, are lib/patrol.sh's (`tick_digest_path`), which the stop
+# collector calls too (wave-24 T27; critic I3).
+tick_digest_file() {  # <session-id> -> absolute path, or empty
+  local f
+  f="$(patrol_stamp_file "$1")" || return 1
+  [ -n "$f" ] || return 1
+  tick_digest_path "${f%/.bionic/tmp/*}" "$1"
+}
+
+# The digest file is rewritten whole, under the stamp's write guard. `arm` writes only the
+# version, so the first tick after an arm prints in full. A tick's digest carries `at=`, the
+# instant it was written: `since=` is the instant the facts last changed and an unchanged tick
+# keeps it, so only `at=` tells the stop collector the digest is this turn's (critic I3).
+write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty>] -> 0 written, 1 not
+  local f d
+  f="$(tick_digest_file "$1")" || return 1
+  [ -n "$f" ] || return 1
+  d="${f%/*}"
+  tmp_dir_ok "$d" || return 1
+  mkdir -p "$d" 2>/dev/null || return 1
+  [ -L "$f" ] && return 1
+  {
+    printf '%s\n' "$PATROL_DIGEST_SCHEMA"
+    [ -n "$2" ] && printf 'prompt_version=%s\n' "$2"
+    if [ -n "${3:-}" ]; then
+      printf 'digest=%s\nsince=%s\ndecision=%s\nduty=%s\nat=%s\n' "$3" "$4" "$5" "$6" "$(iso_now)"
+    fi
+  } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
   return 0
 }
@@ -1709,7 +1823,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes
+adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes|done
   # THE OPEN SET IS ASKED ONCE, of the one predicate, over the predecessor's roster as it
   # stands — no session filter, because every row on it carries the predecessor's own id.
   # Handed to awk through the environment rather than `-v`, which would read a backslash in
@@ -1763,6 +1877,8 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       # no budget on it. An apostrophe cannot appear in this comment: the awk program is one
       # single-quoted argument.
       v = kv($0, "re_executes");    if (v != "") rex[n]    = v
+      # THE DONE MARKER (wave-24 T9, D3): the same contract, so its completion signal too.
+      v = kv($0, "done");           if (v != "") dmark[n]  = v
       # THE ATTRIBUTION, carried forward exactly as the contract fields are. It is the bound
       # plan of the session that dispatched the row, stamped at the instant the row was
       # written (hooks/dispatch-preflight.sh). Rows written before this wave carry no such
@@ -1780,10 +1896,10 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       for (i = 1; i <= cnt; i++) {
         n = order[i]
         if (!(n in isopen)) continue
-        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
                launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
                ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n], \
-               files[n], sallow[n], ssrc[n], rex[n]
+               files[n], sallow[n], ssrc[n], rex[n], dmark[n]
       }
     }
   ' "$1" 2>/dev/null
@@ -1843,10 +1959,10 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
 # where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
 # the adopter is now the session that owns the row — the launching session is already
 # recorded, separately, in `adopted_from=`.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites_source> <re_executes> -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites_source> <re_executes> [<done>] -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
   local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" waiver="${13:-}" d
-  local files="${14:-}" sallow="${15:-}" ssrc="${16:-}" rex="${17:-}"
+  local files="${14:-}" sallow="${15:-}" ssrc="${16:-}" rex="${17:-}" dmark="${18:-}"
   local -a RR_ARGS
   local ROW=""
   local -a INSTRUMENT_FIELDS
@@ -1930,6 +2046,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     absent=
     "waiver=$(clean "$waiver")"
     ${INSTRUMENT_FIELDS[@]+"${INSTRUMENT_FIELDS[@]}"}
+    ${dmark:+"done=$(clean "$dmark")"}
     "teammate_id=$(clean "$addr")"
     "adopted_from=$(clean "$osid")"
     tool_use_id=
@@ -2270,8 +2387,11 @@ note() { printf 'poker: note: %s\n' "$1"; }
 # key and a present-but-empty one are different rows to a by-key reader. The two audit keys
 # (`amended=`, `extended=`) are NOT copied — each belongs to the row that did the act, and
 # the history is the row sequence.
+# THE DONE MARKER TRAVELS with `hold` and `amend`, which continue the contract, and not with
+# `extend`, which re-opens it for new work signalled afresh (wave-24 T9, D3; A-orch-31): the
+# verdict reads the latest row, so a copy that dropped `done=` would un-say a finished agent.
 ROW_COPY_ARGS=()
-row_copy_args() {  # <row> <session id> -> sets ROW_COPY_ARGS
+row_copy_args() {  # <row> <session id> [drop-done] -> sets ROW_COPY_ARGS
   local row="$1" k
   ROW_COPY_ARGS=("session=$2")
   for k in status name agent_id launched_at subagent_type model deliverable source duration \
@@ -2281,10 +2401,77 @@ row_copy_args() {  # <row> <session id> -> sets ROW_COPY_ARGS
   for k in files suites_allowed suites_source teammate_id adopted_from; do
     row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
   done
+  if [ "${3-}" != drop-done ] && row_has_key "$row" done; then
+    ROW_COPY_ARGS+=("done=$(line_field "$row" done)")
+  fi
   if row_has_key "$row" re_executes; then
     ROW_COPY_ARGS+=("re_executes=$(clean "$(line_field "$row" re_executes)" re_executes)")
   fi
   return 0
+}
+
+# ---------------------------------------------------------------- the hold's fingerprint
+#
+# A HOLD STANDS WHILE ITS FACTS DO (wave-24 T7, REQ-4; D1, ADR-041 d1). The fingerprint is the
+# three facts a stand-down answer rests on: the row's launch (a re-dispatch is a new contract),
+# its deliverable's mtime (a rewrite is new work), and how many completion messages the agent
+# has sent (a new report is a new answer to read). It holds no instant of the tick that computed
+# it, so two ticks over the same facts compute the same string. A deliverable list takes the
+# newest mtime across its paths; a missing path reads 0.
+#
+# THE MESSAGE COUNT IS READ AS THE SWEEPER READS A REPLY (hooks/session-sweeper.sh
+# `read_followups`): a `<teammate-message teammate_id="<name>">` or `<agent-message
+# from="<name>">` envelope in a user record or a queued-command attachment of this session's own
+# transcript, an idle notice excluded — an idle notice says a turn ended, and one arrives after
+# every report, so counting it would void every hold on the agent's next idle. No transcript or
+# no jq counts 0, the same on every tick, so the fingerprint stays comparable.
+hold_reply_count() {  # <transcript> <name> [<teammate address>] -> the count on stdout
+  local tr="$1" name="$2" tid="${3:-}"
+  tid="${tid%%@*}"
+  if [ -z "$tr" ] || [ ! -f "$tr" ] || ! command -v jq >/dev/null 2>&1; then
+    printf '0'; return 0
+  fi
+  grep -F -e '<teammate-message' -e '<agent-message' "$tr" 2>/dev/null \
+    | jq -R -r --arg n "$name" --arg t "$tid" '
+        def replies:
+          [scan("<(?:teammate-message teammate_id|agent-message from)=\"([^\"]+)\"[^>]*>((?:(?!</(?:teammate-message|agent-message)>)[\\s\\S])*)")]
+          | .[]
+          | select((.[1] | (fromjson? // null) | type == "object" and .type == "idle_notification") | not)
+          | .[0];
+        (fromjson? // empty)
+        | select(type == "object" and .isSidechain != true)
+        | if .type == "user" then
+            (.message.content
+             | if type == "string" then .
+               elif type == "array" then ([.[] | select(type == "object" and .type == "text") | .text] | join("\n"))
+               else "" end | replies)
+          elif .type == "attachment" then
+            (.attachment | select(type == "object" and .type == "queued_command")
+             | .prompt | select(type == "string") | replies)
+          else empty end
+        | sub(" \\[[^]]*\\]$"; "") | sub("@.*$"; "")
+        | select(. == $n or ($t != "" and . == $t))' 2>/dev/null \
+    | awk 'END { printf "%d", NR }'
+}
+
+hold_fingerprint() {  # <roster row> <repo root> <transcript> -> <launched_at>:<mtime>:<count>
+  local row="$1" repo="$2" tr="$3" deliv p m newest=0 old
+  deliv="$(line_field "$row" deliverable)"
+  old="$IFS"; IFS=','; set -f
+  # shellcheck disable=SC2086
+  set -- $deliv
+  set +f; IFS="$old"
+  for p in "$@"; do
+    p="$(printf '%s' "$p" | sed -e 's/^ *//' -e 's/ *$//')"
+    [ -n "$p" ] || continue
+    case "$p" in /*) : ;; *) p="$repo/$p" ;; esac
+    m=0
+    [ -e "$p" ] && m="$(file_mtime "$p")"
+    case "$m" in ''|*[!0-9]*) m=0 ;; esac
+    [ "$m" -gt "$newest" ] && newest="$m"
+  done
+  printf '%s:%s:%s' "$(line_field "$row" launched_at)" "$newest" \
+    "$(hold_reply_count "$tr" "$(line_field "$row" name)" "$(line_field "$row" teammate_id)")"
 }
 
 # THE IDENTITY OF A SUCCESSOR ROW (epic-23 wave-22 T1; REQ-1 AC-1.1/AC-1.2, D1; ADR-039). The
@@ -2395,6 +2582,139 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
   printf '%s' "$1" | awk -F'`' '{ for (i = 2; i <= NF; i += 2) if ($i != "") print $i }'
 }
 
+# ---------------------------------------------------------------- the plan transaction
+#
+# ONE TRANSACTION, SIX DOORS (wave-24 T15; REQ-9, D14). `task-add` (wave-20 Δ5) was the one
+# verb that wrote the plan, and everything a run did to its plan besides — a status cell, a
+# `- T<n>:` line, `current:`, a dispatch-ledger row — was a hand edit (research-R5 item 6: 339
+# plan-writing commands across nine sessions). The five plan-row verbs take task-add's
+# transaction whole, and task-add now takes it from here too: the change is projected onto a
+# COPY through units.sh, the copy is judged by a dry `git commit` through the REAL
+# hooks/bash-walls.sh, the plan's checksum is compared with the one taken BEFORE the
+# projection read it, and only then is the copy moved over the plan. On any refusal the plan
+# is byte-identical and the words that refused it print.
+#
+# THE DRY RUN IS BOUND TO THE COPY, NEVER TO THE PLAN: its own engagement marker for a
+# synthetic session whose `plan=` names the dry copy, removed after (close-out.sh's pattern).
+# Both copies sit beside the plan under names that do not end in `.md`, so no plan walk can
+# read one as a run. The judged copy is a WRITER's commit (task-add's rule): past Step 4 the
+# dry copy carries `current: 4`, because a main-root commit during Verify is held to the
+# Step-5 block the run is still writing. `current` is the one exception — what it asks is
+# whether the run can commit at the step it moves to, so its copy is judged as it stands.
+#
+# MAIN THREAD ONLY is the Bash wall's to enforce (payload/scripts/lib/walls.sh, the
+# `agent_id` verb list); these refuse what the script can see: no session key (3), an
+# unengaged session (decides nothing, 0), and a session with no BOUND open plan (1) — a
+# writing verb never writes the newest-plan fallback.
+
+# plan_verb_open <verb> -> sets PV_REPO, PV_PLAN, PV_CUR, PV_SUM, PV_NEW, PV_DRY, PV_MARK, PV_SID
+# and arms the cleanup; exits on every refusal above.
+plan_verb_open() {
+  local verb="$1" sid run
+  sid="$(session_id)" || sid=""
+  if [ -z "$sid" ]; then
+    die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+    die "$verb writes ONE session's bound plan, so without the key there is nothing to write."
+    exit 3
+  fi
+  if ! engaged_session "$(project_root "$PWD")" "$sid"; then
+    say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+    exit 0
+  fi
+  PV_REPO="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+  if [ -z "$PV_REPO" ]; then
+    die "REFUSED — cannot resolve the working directory."
+    exit 2
+  fi
+  run="$(session_run "$PV_REPO" "$sid")"
+  case "$run" in
+    'bound-open '*) PV_PLAN="${run#bound-open }" ;;
+    *)
+      die "REFUSED — $verb writes the plan this session is bound to, and it has no bound open run (${run:-none})."
+      die "Bind this session to its run first (this script's bind verb), then run $verb again."
+      exit 1 ;;
+  esac
+  PV_CUR="$(_fill_current_field "$PV_PLAN")"
+  # THE CHECKSUM IS TAKEN HERE, BEFORE ANY PROJECTION READS THE PLAN, so an edit that lands
+  # between the read and the swap is an edit the comparison sees.
+  PV_SUM="$(cksum < "$PV_PLAN" 2>/dev/null)"
+  PV_NEW="${PV_PLAN}.${verb}.$$"
+  PV_DRY="${PV_PLAN}.${verb}-dry.$$"
+  PV_SID="planverb-$$"
+  PV_MARK="$(engaged_marker_path "$PV_REPO" "$PV_SID")" || PV_MARK=""
+  trap 'rm -f "$PV_NEW" "$PV_NEW.2" "$PV_DRY" ${PV_MARK:+"$PV_MARK"}' EXIT
+}
+
+# plan_verb_swap <verb> <what changed> <dry: writer|as-is> -> judges $PV_NEW and moves it over
+# $PV_PLAN; exits 1 on a refusal, 2 when the dry commit cannot run. Returns 0 once swapped,
+# and exits 0 with nothing written when the projection IS the plan.
+plan_verb_swap() {
+  local verb="$1" what="$2" dry="$3" cur err rc
+  if cmp -s "$PV_NEW" "$PV_PLAN"; then
+    say "$verb — $what: the plan already reads so; nothing was written."
+    exit 0
+  fi
+  cur="${PV_CUR%[ab]}"
+  case "$cur" in
+    ''|*[!0-9]*) dry=as-is ;;
+  esac
+  if [ "$dry" = writer ] && [ "$cur" -gt 4 ]; then
+    awk '
+      /^[[:space:]]*```/ { fence = !fence; print; next }
+      fence { print; next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
+      insdlc && !done && /^[[:space:]]*current[[:space:]]*:/ { print "current: 4"; done = 1; next }
+      { print }' "$PV_NEW" > "$PV_DRY"
+  else
+    cp "$PV_NEW" "$PV_DRY"
+  fi
+  if [ ! -f "$HOOK_DIR/bash-walls.sh" ] || [ -z "$PV_MARK" ] || ! command -v jq >/dev/null 2>&1; then
+    die "REFUSED — the dry commit cannot be run (no bash-walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
+    exit 2
+  fi
+  mkdir -p "${PV_MARK%/*}" 2>/dev/null
+  printf 'plan=%s\nengaged_at=%s\n' "$PV_DRY" "$(iso_now)" > "$PV_MARK"
+  err="$(cd "$PV_REPO" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$PV_SID" BIONIC_WALL_VERBOSE=1 \
+    bash "$HOOK_DIR/bash-walls.sh" 2>&1 >/dev/null <<< "$(jq -n --arg s "$PV_SID" --arg cwd "$PV_REPO" --arg v "$verb" \
+      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+        tool_input: {command: ("git commit -m " + $v)}, tool_use_id: "toolu_planverb"}')")"
+  rc=$?
+  rm -f "$PV_MARK"
+  if [ "$rc" -ne 0 ]; then
+    [ -n "$err" ] && printf '%s\n' "$err" >&2
+    die "REFUSED — the commit gate refused the plan with $what (rc=$rc); the plan is unchanged."
+    [ "$verb" = current ] && die "Write what that step owes first (step-line <N> <text>, and its block), then move current: again."
+    exit 1
+  fi
+  if [ "$(cksum < "$PV_PLAN" 2>/dev/null)" != "$PV_SUM" ]; then
+    die "REFUSED — $PV_PLAN changed while the plan with $what was being judged; nothing was written. Run $verb again."
+    exit 1
+  fi
+  if ! mv -f "$PV_NEW" "$PV_PLAN"; then
+    die "REFUSED — could not move the judged copy over $PV_PLAN; the plan is unchanged."
+    exit 2
+  fi
+  return 0
+}
+
+# A cell value the plan can hold: no pipe, tab or line break (AC-9.2). 0 when it can.
+plan_verb_value_ok() {
+  case "$1" in *'|'*|*$'\t'*|*$'\n'*|*$'\r'*) return 1 ;; esac
+  return 0
+}
+
+# A row id the table can key on: one token, a letter or digit first, then letters, digits,
+# `.`, `_` or `-` (wave-24 T27, C1). 0 when it is one.
+# ASCII BY SPELLING, NOT BY RANGE (wave-24 T29; critic addendum A3): `[A-Za-z]` is a collation
+# range, and /bin/bash 3.2 under a UTF-8 locale matched é, ö, ß and a fullwidth Ｔ with it, so
+# `Ｔ9` keyed a row that reads as T9. Every admitted character is listed, so no locale widens it.
+PV_ID_ALNUM='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+plan_verb_id_ok() {
+  case "$1" in ["$PV_ID_ALNUM"]*) : ;; *) return 1 ;; esac
+  case "$1" in *[!"$PV_ID_ALNUM"._-]*) return 1 ;; esac
+  return 0
+}
+
 # ---------------------------------------------------------------- the sweep
 #
 # THE OTHER HALF OF `adopt` (fixit 1.5.1 T5; ideas/fixit-1.5.2-dead-session-sweep.md).
@@ -2412,14 +2732,17 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 # rejected on the record (D-5): the residue is exactly what `adopt` reads, so a hook that
 # cleared it at engagement would delete the evidence of the thing it was helping with.
 #
-# THE FIVE SESSION-KEYED CLASSES, and no sixth. Each is `<class>-<session id>.state` under
-# `<root>/.bionic/tmp`, plus the Patrol stamp's `.armed` sibling:
+# THE SESSION-KEYED CLASSES, and no others — scripts/lib/patrol.sh's PATROL_STATE_CLASSES.
+# Each is `<class>-<session id>.state` under `<root>/.bionic/tmp`, plus the Patrol stamp's
+# `.armed` sibling:
 #
 #   roster-<sid>.state         hooks/dispatch-preflight.sh   the dispatch ledger
 #   preflight-<sid>.state      hooks/preflight-probe.sh      the budget attestation
 #   engaged-<sid>.state        scripts/lib/binding.sh        the engagement marker
 #   sweeper-<sid>.state        hooks/session-sweeper.sh      the ack ledger
 #   patrol-<sid>.state[.armed] this file                     the Patrol stamp and its marker
+#   stop-orders-<sid>.state    hooks/stop-orders.sh          the order queue
+#   tick-digest-<sid>.state    this file                     the tick's digest and duty
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE THEREFORE UNREACHABLE FROM HERE, and that
 # is a property of the enumeration rather than a list to maintain: `context-spend.state` and
@@ -2527,6 +2850,13 @@ case "$VERB" in
   # the resume ritual deletes stray jobs by), then the tick by this script's absolute path.
   # One line, because it is a CronCreate prompt. READ-ONLY and outside the engagement gate,
   # like `interval`: it decides nothing.
+  #
+  # IT ASKS ONLY FOR WHAT THE TICK PRINTED (wave-24 T7, REQ-4; D5). Through 1.8.10 it asked for a
+  # `fill-declined:` line on every tick, and all 29 declines of that run answered nothing a wall
+  # had asked. Each answer is now conditional on the line that owes it, ListAgents on an open
+  # row, the task-list refresh on a tick that said more than `unchanged`, and `v=` after the
+  # marker names the prompt's version so `arm` can record it and a later tick can ask for a
+  # re-arm when the poker has moved on.
   prompt)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -2534,8 +2864,8 @@ case "$VERB" in
       die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
       exit 3
     fi
-    printf 'bionic-patrol session=%s — Patrol tick. ListAgents, then run: bash %s tick — the tick decides per row. Then: TaskList and reconcile; dispatch every ready row the wall names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>"; TaskStop each STANDDOWN or write "standdown-declined: <name> <reason>"; then continue the run toward its goal until a wall.\n' \
-      "${SESSION_ID:0:8}" "${HOOK_DIR}/session-poker.sh"
+    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. Unless the tick printed only "unchanged" or a QUIET with no open row: TaskList and reconcile. Then continue the run toward its goal until a wall.\n' \
+      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$HOLD_REASON_SLOT"
     exit 0
     ;;
 
@@ -2615,6 +2945,11 @@ case "$VERB" in
     # still stands.
     write_patrol_armed_marker "$SESSION_ID" \
       || die "WARN — the arming instant could not be recorded; this Patrol will not auto-DISARM (run \`disarm\` to stop it)."
+    # THE PROMPT VERSION THIS ARM PAIRS WITH (wave-24 T7; D5). An arm follows the CronCreate of
+    # `prompt`'s output, so the version this poker prints is the one the job now carries. The
+    # digest it replaces is dropped with it: the first tick after an arm prints in full.
+    write_tick_digest "$SESSION_ID" "$PATROL_PROMPT_VERSION" \
+      || die "WARN — the prompt version could not be recorded; the tick will ask for a re-arm."
     say "armed — the Patrol stamp is fresh for this session: $(patrol_stamp_file "$SESSION_ID")"
     exit 0
     ;;
@@ -2773,7 +3108,7 @@ case "$VERB" in
       OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
 
       while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN RWAIVER \
-                            RFILES RSALLOW RSSRC RREX; do
+                            RFILES RSALLOW RSSRC RREX RDONE; do
         [ -n "$RNAME" ] || continue
 
         # ---- IS THIS ROW STILL SOMEBODY'S WORK? (REQ-9 AC-9.1/9.2; D10)
@@ -3065,7 +3400,7 @@ case "$VERB" in
               if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
                    "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR" \
                    "${ADOPT_OWN_PLAN:-none}" "$RWAIVER" \
-                   "$RFILES" "$RSALLOW" "$RSSRC" "$RREX"; then
+                   "$RFILES" "$RSALLOW" "$RSSRC" "$RREX" "$RDONE"; then
                 ROW_JOURNALLED=yes
                 # THE MARKER COPY (S17, AC-12 attempt 2). `payload/scripts/lib/stop.sh`
                 # (`stop_landing_gate`, reached from hooks/stop.sh) is this schema's one
@@ -3778,7 +4113,7 @@ EOF
     # THE COPY IS `row_copy_args`'s, shared with `amend`; this verb overrides two fields: the
     # launch, bumped to now (the whole point — the old deliverable then predates it), and
     # its reason, as data. `claims=` travels with the copy, untouched.
-    row_copy_args "$EXTEND_ROW" "$SESSION_ID"
+    row_copy_args "$EXTEND_ROW" "$SESSION_ID" drop-done
     identity_args "$ROSTER_FILE" "$EXTEND_NAME" "$EXTEND_ROW"
     EXTEND_RR_ARGS=("${ROW_COPY_ARGS[@]}")
     EXTEND_RR_ARGS+=(${POKER_ID_ARGS[@]+"${POKER_ID_ARGS[@]}"})
@@ -3794,6 +4129,79 @@ EOF
       exit 2
     }
     say "extended — $EXTEND_NAME is open again: $ROSTER_FILE"
+    exit 0
+    ;;
+
+  # THE STANDING ANSWER TO A STAND-DOWN (wave-24 T7; REQ-4, AC-4.3; spec D1, ADR-041 d1). A
+  # finished agent kept up on purpose — an auditor held for a second pass — was ordered down
+  # on every tick, because the only answer the stop wall read was a `standdown-declined:` line
+  # in that one turn's text. `hold` writes the answer where the tick reads its facts: a
+  # successor row of the name, copied as `extend` and `amend` copy it, carrying `held=<at>
+  # <reason> fp=<fingerprint>`. While the fingerprint is unchanged the tick prints `held <name>`
+  # and writes no stop order, so the stop wall's stand-down set — computed from orders — has
+  # nothing to ask. Any change voids it without a write: a new launch, a rewritten deliverable,
+  # a new completion message. The row's launch is the copy's, so the row stays MET; unlike
+  # `extend`, nothing re-opens.
+  #
+  # REFUSED: no session key (3), an unengaged session (decides nothing, 0), no row of the name,
+  # a row that is not MET or is already closed (1). A subagent cannot reach this verb: the Bash
+  # wall refuses it with `amend`, `extend` and `task-add` (payload/scripts/lib/walls.sh).
+  hold)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "A hold answers for ONE session's roster, so without the key there is nothing to write."
+      exit 3
+    fi
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
+      die "REFUSED — no row named $HOLD_NAME: this session has no roster at $ROSTER_FILE."
+      exit 1
+    fi
+    HOLD_ROW="$(grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null \
+      | grep -F "|name=${HOLD_NAME}|" | tail -1)"
+    if [ -z "$HOLD_ROW" ]; then
+      die "REFUSED — no row named $HOLD_NAME on this session's roster ($ROSTER_FILE)."
+      exit 1
+    fi
+    # THE VERDICT IS THE SWEEPER'S, read as the tick reads it. A hold answers a stand-down, and
+    # only a MET, unacked row is ever stood down.
+    SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
+    HOLD_VERDICT="$( cd "$REPO_REAL" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+      bash "$SWEEPER" verdict "$HOLD_NAME" 2>/dev/null | grep -F "landing-verdict/v1|" | tail -1 )"
+    HOLD_STATE="$(line_field "$HOLD_VERDICT" state)"
+    if [ "$HOLD_STATE" != MET ] || [ "$(line_field "$HOLD_VERDICT" acked)" = yes ]; then
+      die "REFUSED — $HOLD_NAME reads ${HOLD_STATE:-no verdict}$( [ "$(line_field "$HOLD_VERDICT" acked)" = yes ] && printf ', closed'); a hold answers a stand-down, and only a MET, open row is stood down."
+      exit 1
+    fi
+    HOLD_TR="$(session_transcript "$SESSION_ID")" || HOLD_TR=""
+    HOLD_FP="$(hold_fingerprint "$HOLD_ROW" "$REPO_REAL" "$HOLD_TR")"
+    HOLD_NOW="$(iso_now)"
+    row_copy_args "$HOLD_ROW" "$SESSION_ID"
+    identity_args "$ROSTER_FILE" "$HOLD_NAME" "$HOLD_ROW"
+    HOLD_RR_ARGS=("${ROW_COPY_ARGS[@]}")
+    HOLD_RR_ARGS+=(${POKER_ID_ARGS[@]+"${POKER_ID_ARGS[@]}"})
+    HOLD_RR_ARGS+=("held=$HOLD_NOW $(clean "$HOLD_REASON") fp=$HOLD_FP")
+    HOLD_NEW_ROW="$(roster_row "${HOLD_RR_ARGS[@]}")" || HOLD_NEW_ROW=""
+    if [ -z "$HOLD_NEW_ROW" ]; then
+      die "REFUSED — could not build the held row for $HOLD_NAME."
+      exit 2
+    fi
+    printf '%s\n' "$HOLD_NEW_ROW" >> "$ROSTER_FILE" 2>/dev/null || {
+      die "REFUSED — could not write to $ROSTER_FILE."
+      exit 2
+    }
+    say "held — $HOLD_NAME stays up while its launch, deliverable and messages are unchanged (fp=$HOLD_FP); the tick prints it held and orders no stop: $ROSTER_FILE"
     exit 0
     ;;
 
@@ -3989,51 +4397,16 @@ EOF
   # it wrote. Nothing else judges a Bash write of the plan: the governing-skill hook sees
   # Write and Edit only.
   #
-  # THE DRY COMMIT IS A WRITER'S, JUDGED BY THE TASK ARMS. The commit AC-5.3 names is the next
-  # writer's, from a row's tree, and the gate judges that commit at Step 4 whatever the run's
-  # step (`CURRENT=4`, walls.sh's row fork). A main-root commit during Verify would instead be
-  # held to the Step-5 block the run is still writing, and no row could ever be added during
-  # Verify — which is when fixups are found. So the dry copy carries `current: 4` when the run
-  # is past it; the copy that is swapped in keeps the run's own `current:`.
-  #
-  # THE DRY RUN IS BOUND TO THE COPY, NEVER TO THE PLAN. It arms its own engagement marker for
-  # a synthetic session whose `plan=` names the dry copy — close-out.sh's pattern, with a
-  # binding instead of the newest-plan fallback — and removes it after. Both copies sit
-  # beside the plan under names that do not end in `.md`, so no plan walk (`_run_candidates`,
-  # the misplaced-plan sweep) can ever read one as a run.
-  #
-  # MAIN THREAD ONLY is the Bash wall's to enforce (wave-20 T9); this verb refuses what it can
-  # see: no session key, an unengaged session, a session with no BOUND open plan (a writing
-  # verb never writes the newest-plan fallback), and a run below Step 4.
+  # THE TRANSACTION IS SHARED (wave-24 T15): `plan_verb_open` and `plan_verb_swap`, above the
+  # verbs, carry the dry commit — a writer's, judged by the task arms, so the dry copy carries
+  # `current: 4` when the run is past it and the copy swapped in keeps the run's own
+  # `current:` — the copy's own engagement marker, the checksum and the swap. What is task-add's
+  # alone is below: a run below Step 4 is refused, the Files cell is judged by the dispatch
+  # grammar, and the projection is `units_add_row`, judged by `units_validate` before the gate.
   task-add)
-    SESSION_ID="$(session_id)" || SESSION_ID=""
-    if [ -z "$SESSION_ID" ]; then
-      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
-      die "A row is added to ONE session's bound plan, so without the key there is nothing to write."
-      exit 3
-    fi
-    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
-      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
-      exit 0
-    fi
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-
-    TA_RUN="$(session_run "$REPO_REAL" "$SESSION_ID")"
-    case "$TA_RUN" in
-      'bound-open '*) TA_PLAN="${TA_RUN#bound-open }" ;;
-      *)
-        die "REFUSED — task-add writes the plan this session is bound to, and it has no bound open run (${TA_RUN:-none})."
-        die "Bind this session to its run first (this script's bind verb), then add the row."
-        exit 1 ;;
-    esac
-
-    TA_CUR="$(_fill_current_field "$TA_PLAN")"
-    TA_CUR="${TA_CUR%[ab]}"
+    plan_verb_open task-add
+    TA_PLAN="$PV_PLAN"; REPO_REAL="$PV_REPO"
+    TA_CUR="${PV_CUR%[ab]}"
     case "$TA_CUR" in
       ''|*[!0-9]*)
         die "REFUSED — $TA_PLAN has current: ${TA_CUR:-(none)}; task-add changes a wave plan past Step-3 approval, whose current: is a step number."
@@ -4081,66 +4454,186 @@ EOF
         ;;
     esac
 
-    TA_SUM="$(cksum < "$TA_PLAN" 2>/dev/null)"
-    TA_NEW="${TA_PLAN}.task-add.$$"
-    TA_DRY="${TA_PLAN}.task-add-dry.$$"
-    TA_SID="taskadd-$$"
-    TA_MARK="$(engaged_marker_path "$REPO_REAL" "$TA_SID")" || TA_MARK=""
-    trap 'rm -f "$TA_NEW" "$TA_DRY" ${TA_MARK:+"$TA_MARK"}' EXIT
-
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" > "$TA_NEW" 2>/dev/null || [ ! -s "$TA_NEW" ]; then
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
 
-    TA_VIOL="$(units_validate "$TA_NEW" 2>&1)"
+    TA_VIOL="$(units_validate "$PV_NEW" 2>&1)"
     if [ -n "$TA_VIOL" ]; then
       die "REFUSED — with $TA_ID added, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
       printf '%s\n' "$TA_VIOL" >&2
       exit 1
     fi
 
-    if [ "$TA_CUR" -gt 4 ]; then
-      awk '
-        /^[[:space:]]*```/ { fence = !fence; print; next }
-        fence { print; next }
-        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
-        insdlc && !done && /^[[:space:]]*current[[:space:]]*:/ { print "current: 4"; done = 1; next }
-        { print }' "$TA_NEW" > "$TA_DRY"
-    else
-      cp "$TA_NEW" "$TA_DRY"
-    fi
-
-    TA_HOOK="$HOOK_DIR/bash-walls.sh"
-    if [ ! -f "$TA_HOOK" ] || [ -z "$TA_MARK" ] || ! command -v jq >/dev/null 2>&1; then
-      die "REFUSED — the dry commit cannot be run (no bash-walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
-      exit 2
-    fi
-    mkdir -p "${TA_MARK%/*}" 2>/dev/null
-    printf 'plan=%s\nengaged_at=%s\n' "$TA_DRY" "$(iso_now)" > "$TA_MARK"
-    TA_INPUT="$(jq -n --arg s "$TA_SID" --arg cwd "$REPO_REAL" \
-      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
-        tool_input: {command: "git commit -m task-add"}, tool_use_id: "toolu_taskadd"}')"
-    TA_ERR="$(cd "$REPO_REAL" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$TA_SID" BIONIC_WALL_VERBOSE=1 \
-      bash "$TA_HOOK" <<< "$TA_INPUT" 2>&1 >/dev/null)"
-    TA_GATE=$?
-    rm -f "$TA_MARK"
-    if [ "$TA_GATE" -ne 0 ]; then
-      [ -n "$TA_ERR" ] && printf '%s\n' "$TA_ERR" >&2
-      die "REFUSED — the commit gate refused the plan with $TA_ID added (rc=$TA_GATE); the plan is unchanged."
-      exit 1
-    fi
-
-    if [ "$(cksum < "$TA_PLAN" 2>/dev/null)" != "$TA_SUM" ]; then
-      die "REFUSED — $TA_PLAN changed while $TA_ID was being judged; nothing was written. Run task-add again."
-      exit 1
-    fi
-    if ! mv -f "$TA_NEW" "$TA_PLAN"; then
-      die "REFUSED — could not move the judged copy over $TA_PLAN; the plan is unchanged."
-      exit 2
-    fi
+    plan_verb_swap task-add "$TA_ID added" writer
     say "task-add — $TA_ID added to $TA_PLAN: the row, its - $TA_ID: line, and the deps it owes; validated and dry-committed first."
+    exit 0
+    ;;
+
+  # THE ROW-CELL VERBS (wave-24 T15; REQ-9 AC-9.1/9.2, D14). `task-set` sets cells of a
+  # `## Tasks` row, `ledger-set` of a `## Dispatch ledger` row, and `ledger-add` appends a ledger
+  # row; each through `units_table_cells`, on the shared transaction. A `## Tasks` column is any
+  # the header carries by `units_has_column` — `rigor` is slot 3's task-scale name — except two:
+  # `id`, the key the row is found by, and `Files`, which is a dispatched agent's CONTRACT once
+  # it is on the roster (editing the plan row changes nothing a wall reads), so the refusal
+  # names `amend`, the verb that widens it. `task-set` is judged by `units_validate` before the
+  # gate, as `task-add` is: a status, step or deps cell is a schedule change.
+  task-set|ledger-add|ledger-set)
+    # THE ID AND THE COLUMN NAME ARE OPERANDS TOO (wave-24 T27; Step-6 review C1). `ledger-add`
+    # writes its id into the new row's first cell, and a line break there forged a plan line
+    # the commit gate admitted. The id is one token of the grammar every ledger row already
+    # carries (`T7`, `T22b`, `T17-critic`); a name is held to the values' own rule.
+    if ! plan_verb_id_ok "$PV_ID"; then
+      die "REFUSED — '$(clean "$PV_ID")' is not one row id: an id is one token of letters, digits, '.', '_' or '-', beginning with a letter or a digit. The plan is unchanged."
+      exit 1
+    fi
+    for _pv_a in ${PV_PAIRS[@]+"${PV_PAIRS[@]}"}; do
+      _pv_n="${_pv_a%%=*}"
+      if ! plan_verb_value_ok "$_pv_n"; then
+        die "REFUSED — the column name '$(clean "$_pv_n")' carries a |, a tab or a line break, which no table header can hold; the plan is unchanged."
+        exit 1
+      fi
+      if ! plan_verb_value_ok "${_pv_a#*=}"; then
+        die "REFUSED — the value for $_pv_n carries a |, a tab or a line break, which no table cell can hold; the plan is unchanged."
+        exit 1
+      fi
+      [ "$VERB" = task-set ] || continue
+      _pv_l="$(printf '%s' "$_pv_n" | tr '[:upper:]' '[:lower:]')"
+      case "$_pv_l" in
+        files)
+          die "REFUSED — task-set does not write Files — widen a dispatched contract with amend: bash ${HOOK_DIR}/session-poker.sh amend <name> --files+ <path> --reason <why>. The plan is unchanged."
+          exit 1 ;;
+        id)
+          die "REFUSED — id is the key task-set finds $PV_ID by, not a cell to set; the plan is unchanged."
+          exit 1 ;;
+        rigor) _pv_l=kind ;;
+      esac
+      PV_COLS="${PV_COLS:-} $_pv_l"
+    done
+    plan_verb_open "$VERB"
+    if [ "$VERB" = task-set ]; then
+      for _pv_l in ${PV_COLS:-}; do
+        if ! units_has_column "$PV_PLAN" "$_pv_l"; then
+          die "REFUSED — the ## Tasks header of $PV_PLAN carries no column $_pv_l; the plan is unchanged."
+          exit 1
+        fi
+      done
+    fi
+    case "$VERB" in
+      task-set)   PV_MODE=set; PV_SECT=tasks ;;
+      ledger-set) PV_MODE=set; PV_SECT=ledger ;;
+      ledger-add) PV_MODE=add; PV_SECT=ledger ;;
+    esac
+    PV_RC=0
+    units_table_cells "$PV_PLAN" "$PV_MODE" "$PV_SECT" "$PV_ID" "${PV_PAIRS[@]}" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    PV_TABLE="## Tasks"; [ "$PV_SECT" = ledger ] && PV_TABLE="## Dispatch ledger"
+    case "$PV_RC" in
+      0) : ;;
+      1) die "REFUSED — $PV_PLAN carries no $PV_TABLE table; the plan is unchanged."; exit 1 ;;
+      2) if [ "$PV_MODE" = add ]; then die "REFUSED — the $PV_TABLE table already carries a row $PV_ID; set its cells with ledger-set. The plan is unchanged."
+         else die "REFUSED — the $PV_TABLE table carries no row $PV_ID; the plan is unchanged."; fi
+         exit 1 ;;
+      3) die "REFUSED — the $PV_TABLE header carries no column named in: ${PV_PAIRS[*]%%=*}; the plan is unchanged."; exit 1 ;;
+      5) die "REFUSED — the $PV_TABLE table carries more than one row $PV_ID; which one is meant is not the verb's to guess. The plan is unchanged."; exit 1 ;;
+      *) die "REFUSED — the value cannot be written as a table cell; the plan is unchanged."; exit 1 ;;
+    esac
+    if [ "$VERB" = task-set ]; then
+      PV_VIOL="$(units_validate "$PV_NEW" 2>&1)"
+      if [ -n "$PV_VIOL" ]; then
+        die "REFUSED — with that change, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
+        printf '%s\n' "$PV_VIOL" >&2
+        exit 1
+      fi
+    fi
+    PV_WHAT="$PV_ID ${PV_PAIRS[*]}"
+    [ "$PV_MODE" = add ] && PV_WHAT="$PV_ID added to the dispatch ledger"
+    plan_verb_swap "$VERB" "$PV_WHAT" writer
+    say "$VERB — $PV_WHAT: written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
+  # THE STEP-LINE VERB (wave-24 T15; REQ-9 AC-9.6, D14). The `- Step N:` and `- T<n>:` lines
+  # under `## SDLC State` are the run's evidence, and the gate reads them; `units_step_line`
+  # rewrites one line's text (or adds the line, after its kind's last), and never the block
+  # under it. Step 9 is close-out's, as `current: 9` is (payload/scripts/close-out.sh).
+  step-line)
+    case "$PV_KEY" in
+      9|9a|9b)
+        die "REFUSED — the Step 9 line is close-out's to write, with current: 9 (bash <plugin-root>/scripts/close-out.sh); the plan is unchanged."
+        exit 1 ;;
+    esac
+    case "$PV_TEXT" in
+      *$'\n'*|*$'\r'*)
+        die "REFUSED — a step line is one line, and the text carries a line break; the plan is unchanged."
+        exit 1 ;;
+    esac
+    plan_verb_open step-line
+    if ! units_step_line "$PV_PLAN" "$PV_KEY" "$PV_TEXT" "$PV_APPEND" > "$PV_NEW" 2>/dev/null; then
+      die "REFUSED — $PV_PLAN carries no ## SDLC State section; the plan is unchanged."
+      exit 1
+    fi
+    PV_LABEL="$PV_KEY"; case "$PV_KEY" in T*) : ;; *) PV_LABEL="Step $PV_KEY" ;; esac
+    plan_verb_swap step-line "the $PV_LABEL line written" writer
+    say "step-line — $PV_LABEL: written to $PV_PLAN${PV_APPEND:+ (appended)}; dry-committed first."
+    exit 0
+    ;;
+
+  # THE STEP MOVE (wave-24 T15; REQ-9 AC-9.5, D14; A-orch-8). `current:` moves through
+  # `units_set_current`, and the copy is judged AT the step it moves to — the advance is the
+  # commit the gate is asked about, so a step whose block is not written yet is refused here,
+  # in the gate's words, and not at the first commit after it. `current: 9` is close-out's.
+  #
+  # ADVANCING TO 4 WRITES WHAT THE FIRST WRITER'S COMMIT IS REFUSED WITHOUT. The Step-4 block's
+  # `worktree:`, `base-sha:` and `branch:` (walls.sh `shape_block`) are facts of the moment of
+  # the advance: the branch is the plan's own `working-branch:`, its head is the base every
+  # writer starts from, and the checkout holding it is the worktree. Each field the block lacks
+  # is filled from those (`units_step_fields`); a field already written is never rewritten, and
+  # a fact that cannot be read is not guessed — the field stays absent and the gate says so.
+  current)
+    case "$PV_KEY" in
+      9|9a|9b)
+        die "REFUSED — current: 9 is close-out's to write, with the Step 9 line (bash <plugin-root>/scripts/close-out.sh); the plan is unchanged."
+        exit 1 ;;
+    esac
+    plan_verb_open current
+    if ! units_set_current "$PV_PLAN" "$PV_KEY" > "$PV_NEW" 2>/dev/null; then
+      die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State; the plan is unchanged."
+      exit 1
+    fi
+    PV_FILLED=""
+    if [ "$PV_KEY" = 4 ]; then
+      PV_WB="$(awk '
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+        insdlc && /^[[:space:]]*working-branch[[:space:]]*:/ {
+          v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
+          print v; exit }' "$PV_PLAN")"
+      if [ -n "$PV_WB" ]; then
+        PV_FIELDS=()
+        PV_WT="$(git -C "$PV_REPO" worktree list --porcelain 2>/dev/null \
+          | awk -v b="branch refs/heads/$PV_WB" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }')"
+        if [ -n "$PV_WT" ]; then
+          PV_WT="$(cd "$PV_WT" 2>/dev/null && pwd -P)"
+          case "$PV_WT" in
+            "$PV_REPO") PV_FIELDS+=("worktree=.") ;;
+            "$PV_REPO"/*) PV_FIELDS+=("worktree=${PV_WT#"$PV_REPO"/}") ;;
+            ?*) PV_FIELDS+=("worktree=$PV_WT") ;;
+          esac
+        fi
+        PV_SHA="$(git -C "$PV_REPO" rev-parse --short --verify -q "refs/heads/$PV_WB" 2>/dev/null)"
+        [ -n "$PV_SHA" ] && PV_FIELDS+=("base-sha=$PV_SHA")
+        PV_FIELDS+=("branch=$PV_WB")
+        if units_step_fields "$PV_NEW" 4 "${PV_FIELDS[@]}" > "$PV_NEW.2" 2>/dev/null; then
+          cmp -s "$PV_NEW.2" "$PV_NEW" || PV_FILLED="; the Step-4 block gained what it lacked of: ${PV_FIELDS[*]}"
+          mv -f "$PV_NEW.2" "$PV_NEW"
+        fi
+      fi
+    fi
+    plan_verb_swap current "current: $PV_KEY" as-is
+    say "current — current: $PV_KEY in $PV_PLAN (was ${PV_CUR:-none})$PV_FILLED; dry-committed at that step first."
     exit 0
     ;;
 
@@ -4188,6 +4681,132 @@ EOF
     # first thing after the session key exists to name the file with.
     write_patrol_stamp "$SESSION_ID" tick \
       || die "WARN — the Patrol stamp could not be written; the tick itself is unaffected."
+
+    # ---------- THE TICK SAYS WHAT CHANGED, OR "unchanged" (wave-24 T7, REQ-4; D4, D5) ----------
+    #
+    # THE DEFECT (research-R1). Every tick printed its whole reading — the rung, the holds, the
+    # stand-downs, the fill — whether or not anything had moved since the last one, and the
+    # Patrol prompt asked the model to answer each of them every time. A tick over the same
+    # facts now prints one line: `poker: unchanged since <at> — decision=<band>`.
+    #
+    # THE OUTPUT IS HELD UNTIL THE DECISION. Every line the tick prints below goes to a buffer;
+    # `tick_conclude` hashes what was decided (the band, the sorted per-row verdicts, the named
+    # lines, the fill, `current:`, the pressure band — never an instant) and compares it with the
+    # hash `tick_digest_file` kept from the last tick. The exit trap then prints the buffer, or
+    # the one line, and writes the file. A tick that exits on a refusal prints its buffer as it
+    # always did and writes no digest. stderr is not held: a warning is a warning on every tick.
+    #
+    # THE PROMPT VERSION rides the same file: `arm` records the version its prompt carried, and a
+    # tick that finds none, or an older one, prints one re-arm line above everything else.
+    TICK_BUF="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-tick.XXXXXX" 2>/dev/null)" || TICK_BUF=""
+    TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed
+    TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
+    TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
+    TICK_REARM=""
+    case "$TICK_PVER" in ''|*[!0-9]*) TICK_PVER_N=0 ;; *) TICK_PVER_N="$TICK_PVER" ;; esac
+    if [ "$TICK_PVER_N" -lt "$PATROL_PROMPT_VERSION" ]; then
+      TICK_REARM="poker: note: re-arm the Patrol — its prompt is v=${TICK_PVER:-unrecorded} and this poker prints v=${PATROL_PROMPT_VERSION}: replace the bionic-patrol job with one carrying the output of \`bash ${POKER_WORD} prompt\`, then run \`bash ${POKER_WORD} arm\`"
+    fi
+    tick_emit() {
+      local rc=$?
+      [ -n "$TICK_BUF" ] || exit "$rc"
+      exec 1>&3 3>&-
+      if [ -n "$TICK_DIGEST" ] && [ -n "$TICK_REARM" ]; then
+        printf '%s\n' "$TICK_REARM"
+      fi
+      if [ "$TICK_UNCHANGED" = yes ]; then
+        say "unchanged since ${TICK_SINCE} — decision=${TICK_DECIDED}"
+      else
+        cat "$TICK_BUF" 2>/dev/null
+      fi
+      rm -f "$TICK_BUF" 2>/dev/null
+      if [ -n "$TICK_DIGEST" ]; then
+        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" \
+          || die "WARN — the tick digest could not be written; the next tick prints in full."
+      fi
+      exit "$rc"
+    }
+    if [ -n "$TICK_BUF" ]; then
+      exec 3>&1 1>"$TICK_BUF"
+      trap tick_emit EXIT
+    fi
+
+    # THE DECISION, HASHED (D4). Called once, by whichever arm decides, BEFORE that arm prints
+    # its sentence and its decision line — so the buffer holds exactly the lines the decision
+    # was reached on. What enters the hash: the band, the decision line's counts and lists, the
+    # pressure band (its state and rung), `current:`, every row's verdict as `name|state|acked`
+    # sorted, and the named lines the tick printed reduced to their kind and subject (a
+    # STANDDOWN, a held row, a GONE report, a duplicate tell, an ext: hold, a ledger finding, a
+    # standing fill decline, a note). Never an instant, an age or a measurement: those move on every tick by themselves.
+    # DISARM is terminal and an EMERGENCY names a writer to stop, so both always print in full.
+    #
+    # THE DUTY (A-orch-4; D5, research-R7 item 5). The task-list refresh is owed on a tick turn
+    # unless the tick said `unchanged`, or decided QUIET with no open row on the roster; the stop
+    # wall's collector reads this line, so a quiet turn is not refused for a chore with nothing
+    # behind it.
+    tick_conclude() {  # <decision>
+      local cur="" prev=""
+      TICK_DECIDED="$1"
+      if [ -n "${SCHED_PLAN:-}" ] && [ -f "${SCHED_PLAN:-}" ]; then
+        cur="$(_sched_plan_current_field "$SCHED_PLAN")"
+      fi
+      if [ -n "$TICK_BUF" ]; then
+        TICK_DIGEST="$( {
+          printf 'decision=%s|total=%s|open=%s|notify=%s|fill=%s|trees=%s\n' "$1" "$TOTAL" "$OPEN" \
+            "${NOTIFY_ROWS:-}" "${SCHED_FILL:-}" "${LEASE_TREES:-}"
+          printf 'pressure=%s|rung=%s|current=%s\n' "${SCHED_STATE:-}" "${SCHED_RUNG:-}" "$cur"
+          printf '%s\n' "$VERDICT_OUT" | awk -F'|' '
+            $1 == "landing-verdict/v1" {
+              n = ""; st = ""; ak = ""
+              for (i = 2; i <= NF; i++) {
+                if (index($i, "name=") == 1) n = substr($i, 6)
+                else if (index($i, "state=") == 1) st = substr($i, 7)
+                else if (index($i, "acked=") == 1) ak = substr($i, 7)
+              }
+              print n "|" st "|" ak
+            }' | LC_ALL=C sort
+          awk '
+            $1 != "poker:" { next }
+            $2 == "note:" { print $3, $4, $5; next }
+            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined)$/ { print $2, $3, $4 }
+          ' "$TICK_BUF" | LC_ALL=C sort
+        } | cksum | awk '{ print $1 "-" $2 }' )"
+      fi
+      prev="$(tick_digest_field "$TICK_DIGEST_FILE" digest)"
+      if [ -n "$TICK_DIGEST" ] && [ "$1" != DISARM ] && [ "${SCHED_STATE:-}" != emergency ] \
+         && [ "$TICK_DIGEST" = "$prev" ]; then
+        TICK_UNCHANGED=yes
+        TICK_SINCE="$(tick_digest_field "$TICK_DIGEST_FILE" since)"
+        [ -n "$TICK_SINCE" ] || TICK_SINCE="$(iso_now)"
+        TICK_DUTY=none
+        return 0
+      fi
+      TICK_SINCE="$(iso_now)"
+      TICK_DUTY=owed
+      [ "$1" = QUIET ] && [ "${OPEN_ROSTER:-0}" -eq 0 ] && TICK_DUTY=none
+      tick_write_orders
+      return 0
+    }
+
+    # THE STOP ORDERS THIS TICK OWES, written once the decision is known (wave-24 T7; D1, D4). An
+    # unchanged tick writes none: the stop wall reads its stand-down set off this tick's orders,
+    # and a turn told only "unchanged" must not be refused for a STANDDOWN it was never shown.
+    # The answer the last turn gave stands until a fact moves.
+    SD_ORDER_NAMES=""
+    tick_write_orders() {
+      local n out
+      for n in $SD_ORDER_NAMES; do
+        if [ -f "$ORDERS" ]; then
+          out=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                 CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                 bash "$ORDERS" order "$n" --by patrol 2>&1 ) \
+            || say "STANDDOWN ${n} — the order could NOT be written, so the stop gate will still ask: $(clean "$(printf '%s' "$out" | head -1)")"
+        else
+          say "STANDDOWN ${n} — sibling hooks/stop-orders.sh not found, so no order was written; order it yourself before stopping."
+        fi
+      done
+      return 0
+    }
 
     # The sweeper is this script's sibling — same resolution as hooks/landing-gate.sh's.
     SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
@@ -4712,15 +5331,22 @@ EOF
         for SD_NAME in $STANDDOWN_NAMES; do
           case "$SD_PANEL" in
             *"|${SD_NAME}|"*)
-              say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written)"
-              if [ -f "$ORDERS" ]; then
-                SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
-                          CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
-                          bash "$ORDERS" order "$SD_NAME" --by patrol 2>&1 ) \
-                  || say "STANDDOWN ${SD_NAME} — the order could NOT be written, so the stop gate will still ask: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
-              else
-                say "STANDDOWN ${SD_NAME} — sibling hooks/stop-orders.sh not found, so no order was written; order it yourself before stopping."
+              # A HELD ROW IS ANSWERED ALREADY (wave-24 T7; D1, ADR-041 d1). Its latest row
+              # carries the orchestrator's `held=<at> <reason> fp=<fingerprint>`; while the
+              # fingerprint computed now is the one recorded, the tick prints the hold and writes
+              # no order. A changed fingerprint falls through to the stand-down, writing nothing
+              # to void it: the next `hold` is a new answer to new facts.
+              SD_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+                | grep -F "|name=${SD_NAME}|" | tail -1)"
+              SD_HELD="$(line_field "$SD_ROW" held)"
+              if [ -n "$SD_HELD" ] && [ "${SD_HELD##* fp=}" != "$SD_HELD" ] \
+                 && [ "${SD_HELD##* fp=}" = "$(hold_fingerprint "$SD_ROW" "$REPO_REAL" "$TICK_TR")" ]; then
+                SD_HELD_REST="${SD_HELD#* }"
+                say "held ${SD_NAME} since ${SD_HELD%% *} — ${SD_HELD_REST% fp=*}"
+                continue
               fi
+              say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written), or keep it up with: bash ${POKER_WORD} hold ${SD_NAME} ${HOLD_REASON_SLOT}"
+              SD_ORDER_NAMES="${SD_ORDER_NAMES}${SD_ORDER_NAMES:+ }${SD_NAME}"
               ;;
             *)
               case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
@@ -4847,14 +5473,23 @@ EOF
     # Every unacked name the walk saw, minus every name the arm above has just acked. Only an
     # ack that WROTE counts as a close: a refused `ack` left the row open, and the wall will
     # count it too.
-    TICK_OCCUPIED=0
+    #
+    # THE WRITERS AMONG THEM (wave-24 T10, REQ-7 AC-7.1, D11). A read-only role holds no writer
+    # slot, so it is not occupancy: the names go through `budget_open_writers`
+    # (payload/scripts/lib/roster.sh), the same function the dispatch wall counts its `open=`
+    # with, and a Patrol that read a researcher as a full seat would hold a FILL the wall
+    # would have admitted.
+    TICK_OCC_NAMES=""
     while IFS= read -r OCC_NAME; do
       [ -n "$OCC_NAME" ] || continue
       case "$TICK_ACKED_NOW" in *"|${OCC_NAME}|"*) continue ;; esac
-      TICK_OCCUPIED=$((TICK_OCCUPIED + 1))
+      TICK_OCC_NAMES="${TICK_OCC_NAMES}${OCC_NAME}
+"
     done <<EOF
 $TICK_UNACKED_NAMES
 EOF
+    TICK_OCCUPIED="$(printf '%s' "$TICK_OCC_NAMES" | budget_open_writers "$ROSTER_FILE")"
+    case "$TICK_OCCUPIED" in ''|*[!0-9]*) TICK_OCCUPIED=0 ;; esac
 
     # "No roster" and "empty roster" are different facts, and only the latter may DISARM
     # (ap review A-1, item 2). A roster with zero verdict lines because the file plain does
@@ -4900,6 +5535,7 @@ EOF
         # THE SENTENCE FIRST, THE DECISION LINE LAST (REQ-10 AC-10.4). Every band in this
         # verb prints its explanation above its machine line, so the last line a tick prints
         # is always the answer — whichever arm answered.
+        tick_conclude QUIET
         say "QUIET — armed, nothing dispatched yet on this session"
         tick_decision_line QUIET "$TOTAL" "$OPEN"
         exit 0
@@ -4967,6 +5603,7 @@ EOF
       # …AND THE PLAN REPORT, for the same reason (wave-21 T13): a delivered run whose ledger
       # still carries a finding is one the gate would refuse, and this is the last tick to say so.
       tick_plan_memoised tick_plan_report
+      tick_conclude DISARM
       say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
       tick_decision_line DISARM "$TOTAL" "$OPEN"
       # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
@@ -5189,6 +5826,17 @@ EOF
         # floor — the same direction `pressure_level` itself takes when the ring holds no
         # usable evidence, for the same reason: no reading is not a bad reading, and a wave
         # that stalled on a missing probe would be worse than one that filled its budget.
+        # THE STANDING FILL DECLINE (wave-24 T27; D2, AC-4.7; Step-6 review C2/U1). The stop wall
+        # treats the rows the session's latest `fill-declined:` answered as answered while
+        # `current:` is unchanged, so a FILL naming them asked again for an answer already given.
+        # One reader, `fill_standing_decline` (lib/fill.sh), the stop collector's own: the tick
+        # prints the decline while it stands and the ready set below leaves its rows out.
+        SCHED_SD="$(fill_standing_decline "$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"
+        SCHED_SD_AT=""; SCHED_SD_WHY=""; SCHED_SD_IDS=""
+        if [ -n "$SCHED_SD" ]; then
+          IFS=$'\037' read -r SCHED_SD_AT SCHED_SD_WHY SCHED_SD_IDS <<< "$SCHED_SD"
+          say "fill-declined standing since ${SCHED_SD_AT} — $(clean "$SCHED_SD_WHY")"
+        fi
         SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"
         SCHED_GAP=$(( SCHED_WIDTH - TICK_OCCUPIED ))
         [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
@@ -5214,7 +5862,7 @@ EOF
           # roster's unacked rows after this tick's own acks. The wall measures both the
           # same way (the rung from `pressure_level`, the occupancy by the same predicate:
           # wave-19 audit V-2, T2d), so what it names is what this prints.
-          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")"
+          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")"
           SCHED_IDS=""; SCHED_N=0
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
@@ -5244,7 +5892,13 @@ EOF
             # left out for their step and no others.
             # The ext-held rows were printed as HELD lines above and are not step holds.
             SCHED_HELD="$(printf '%s\n' "$SCHED_HOLDS" | awk 'NF && index($0, ": held by ext:") == 0 { printf "%s%s", (n++ ? "; " : ""), $0 }')"
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
+            # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
+            # which answer holds the rows, and the standing line above says why.
+            if [ -n "$SCHED_SD_IDS" ] && [ -n "$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")" ]; then
+              say "no FILL — every ready row is answered by the standing fill-declined (${SCHED_SD_IDS}); it stands until a row it did not see is ready or current: moves."
+            else
+              say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
+            fi
           fi
         fi
       fi
@@ -5261,13 +5915,18 @@ EOF
     # carried in `trees=` below (AC-10.3). The rows and details are concatenated rather than
     # given a field each, so no consumer of this schema has to learn a new key to see them.
     #
-    # THE BAND IS THE RANKED MAXIMUM, ascending: QUIET is the floor, a fill raises it to
-    # FILL, a row needing surfacing raises it to NOTIFY. DISARM is terminal and has already
-    # exited. Every lower band keeps its own field, so nothing this tick learned is lost to
-    # the band that won — a NOTIFY tick still reports the fill it ordered.
+    # THE BAND IS THE RANKED MAXIMUM, ascending: QUIET is the floor, a stand-down raises it to
+    # STANDDOWN, a fill to FILL, a row needing surfacing to NOTIFY. DISARM is terminal and has
+    # already exited. Every lower band keeps its own field, so nothing this tick learned is lost
+    # to the band that won — a NOTIFY tick still reports the fill it ordered.
+    #
+    # STANDDOWN JOINS THE BAND (wave-24 T7, REQ-4 AC-4.2; D4). It fed none, so a tick that had
+    # just named an agent to stop printed `decision=QUIET` under the line that named it.
     TICK_DECISION=QUIET
+    [ -n "$SD_ORDER_NAMES" ] && TICK_DECISION=STANDDOWN
     [ -n "$SCHED_FILL" ] && TICK_DECISION=FILL
     [ -n "$NOTIFY_ROWS" ] && TICK_DECISION=NOTIFY
+    tick_conclude "$TICK_DECISION"
 
     if [ "$TICK_DECISION" = NOTIFY ]; then
       # THE SENTENCES FIRST, ONE PER ARM THAT HAS SOMETHING — a tick holding only the other
@@ -5295,6 +5954,8 @@ EOF
       # printed by the scheduler where it was decided; this says what the decision line then
       # says, so the two channels agree on one tick (D5).
       say "FILL — ${SCHED_FILL} named for dispatch; the decision line carries them."
+    elif [ "$TICK_DECISION" = STANDDOWN ]; then
+      say "STANDDOWN — ${SD_ORDER_NAMES} met and still on the panel; TaskStop each, or hold it."
     elif [ "$OPEN_ROSTER" -eq 0 ]; then
       say "QUIET — no open row on this roster, but the run is not delivered (${RUN_STATE_WHY}); the Patrol keeps its stamp and its clock."
     else

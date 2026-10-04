@@ -2200,10 +2200,13 @@ roster_header > "$DROSTER"
 # the observation takes the agent id — and therefore the working log — off this row, and every
 # `d_row` below is a CONTRACT row named for its case rather than for the agent.
 roster_identify "$DREPO" "$SID_A" "deliv" "adeliv-2222222222222222"
+# Every contract row carries a Done marker written after its launch (wave-24 T9, D3): MET is the
+# deliverable AND a completion signal, and this section compares the deliverable half only.
 d_row() {  # <name> <deliverable value>
+  : > "$DREPO/.bionic/tmp/$1.done"
   roster_row_fixture status=confirmed session="$SID_A" name="$1" \
     agent_id=adeliv-2222222222222222 launched_at="$D_LAUNCHED" deliverable="$2" \
-    duration="1 minute" tool_use_id="toolu_01$1" >> "$DROSTER"
+    duration="1 minute" "done=$DREPO/.bionic/tmp/$1.done" tool_use_id="toolu_01$1" >> "$DROSTER"
 }
 
 # The stop gate's answer, read off the evidence it prints for a human rather than off a
@@ -2307,10 +2310,13 @@ J_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 # `agent_id=` is filled here because it is the SWEEP's join key (epic-16 wave-03, T4c): a
 # row whose id is absent from the Stop payload's `background_tasks[]` has landed and is
 # judged, and one still listed there is skipped. The rest of the row is the writer's own.
+# Each row's agent said it was done, by its Done marker (wave-24 T9, D3): this section asks the
+# deliverable half of MET, so the signal half is held true for every row.
 jrow() {  # <name> <deliverable> <progress> <cadence> <waiver> [tool_use_id]
+  : > "$JREPO/.bionic/tmp/$1.done"
   roster_row_fixture status=confirmed session="$SID_A" name="$1" agent_id="a-$1" \
     launched_at="$J_LAUNCHED" deliverable="$2" progress="$3" cadence="$4" waiver="$5" \
-    tool_use_id="${6:-toolu_01LANDING}" >> "$JROSTER"
+    "done=$JREPO/.bionic/tmp/$1.done" tool_use_id="${6:-toolu_01LANDING}" >> "$JROSTER"
 }
 
 roster_header > "$JROSTER"
@@ -2660,6 +2666,7 @@ K_BRIEF='Canonical-sdlc Step 4, task 6 of epic-16 wave-01; build · audited · w
 Expected artifact: .bionic/docs/record/w16-chain.md
 Expected duration: ~30 minutes. Progress artifact: .bionic/tmp/w16-chain.progress, cadence ~7m.
 Subprocess claim: `w16-chain-marker` → .bionic/tmp/w16-chain.log
+Done marker: .bionic/tmp/w16-chain.done
 Exit condition: the artifact exists.
 Suites: tests/widget.test.sh'
 
@@ -2737,6 +2744,11 @@ expect_eq "…and it reads the contract off the chain, not off nothing" "STILL-L
 sleep 1
 mkdir -p "$KREPO/.bionic/docs/record"
 echo "the task report" > "$KREPO/.bionic/docs/record/w16-chain.md"
+# …and the agent says it is done, through the Done marker its brief declared (wave-24 T9, D3):
+# the lift carried it to the launch row, and every row of the chain copied it forward.
+: > "$KREPO/.bionic/tmp/w16-chain.done"
+expect_contains "…the chain carries the brief's Done marker to its latest row (T9)" \
+  "|done=.bionic/tmp/w16-chain.done|" "$(grep '|name=w16-chain|' "$KROSTER" | tail -1)"
 K_VERDICT=$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict w16-chain 2>/dev/null )
 K_VLINE=$(printf '%s\n' "$K_VERDICT" | grep -F 'landing-verdict/v1|' | head -1)
 expect_eq "…and the same chain reads MET once the artifact lands" "MET" \
@@ -2759,8 +2771,8 @@ expect_contains "…from the same source" "progress_source=roster" "$K_MLINE"
 # both readers must also agree the artifact is not there.
 k_sw_path() {  # the path the VERB says the contract names, whatever state it reports
   j_field "$K_VLINE" detail \
-    | grep -oE '(missing|delivered|empty)=[^ ]+' | head -1 | cut -d= -f2-
-}
+    | grep -oE '(missing|delivered|empty)=[^ ;]+' | head -1 | cut -d= -f2-
+}   # `;` ends a conjunct: the detail joins them with "; " (a MET row adds `said=…`, T9)
 K_SC_DELIV=$(printf '%s' "$K_MLINE" | tr '|' '\n' | grep '^deliverables=' | head -1 | cut -d= -f2-)
 expect_eq "the verb and the observation name the same deliverable" \
   "$(k_sw_path)" "${K_SC_DELIV#*:}"
@@ -2933,6 +2945,10 @@ else
   else
     ok "a dropped forward-copy makes the chain invariant RED"
   fi
+  # The mutant agent says it is done too (wave-24 T9, D3): its Done marker is dated past its
+  # launch, so the one thing this verdict varies is the contract the mutation retracted.
+  touch -t "$(date -v+60S +%Y%m%d%H%M.%S 2>/dev/null || date -d '+60 seconds' +%Y%m%d%H%M.%S)" \
+    "$KREPO/.bionic/tmp/w16-chain.done"
   # …and the consequence the invariant is a proxy for: the contract is RETRACTED.
   # The verdict now calls a row MET for naming nothing, which is the false clean
   # answer the landing gate would pass a stopping agent on.
@@ -4503,7 +4519,7 @@ n_cycle() {  # <tool_use_id> — one full dispatch cycle through all three real 
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
       hook_event_name:"PreToolUse", tool_name:"Agent",
       tool_input:{description:"a dispatch", subagent_type:"implementor", name:"resumed",
-                  prompt:("Expected artifact: " + $d + "\nSuites: tests/widget.test.sh")},
+                  prompt:("Expected artifact: " + $d + "\nDone marker: " + $d + ".done\nSuites: tests/widget.test.sh")},
       tool_use_id:$u}' | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
   jq -n --arg s "$SID_A" --arg c "$NLR" --arg u "$1" --arg a "$NLR_ID" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
@@ -4549,6 +4565,7 @@ rm -f "$NLR/.bionic/tmp/roster-$SID_A.state.bak"
 # The takeover's delivery: written between the original launch and the resume, which is the
 # artifact the field case's landing gate called missing.
 echo "the takeover wrote this" > "$NLR_ART"
+: > "$NLR_ART.done"   # the agent says so, by the Done marker its brief declared (wave-24 T9, D3)
 touch -t "$(date -v-1800S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-1800 seconds" +%Y%m%d%H%M.%S)" "$NLR_ART"
 expect_eq "before the resume, the delivered contract reads MET" "MET" "$(n_state)"
 
@@ -9990,263 +10007,11 @@ printf 'if cmp -%s "$SKILL_MD" "$DOCTORED_REPLANTED"; then no "x" "the %s target
 expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom planted back" "1" \
   "$(/usr/bin/grep -cE -- "$S19_HANDROLLED" "$S19_SB/replanted.test.sh" | tr -d ' ')"
 
-# --- §S19.3 POSITIVE: every doctoring site declares through `anchor` ---
-# The census: a doctoring site in docs-pins is a `DOCTORED…="$TMP/…"` assignment.
-# RE-POINTED at THIS merge (epic-22 K1 + K3 + K4 + K5 + K5.4, plan tasks 15/17/18/19/21,
-# landing together): K1 (Section 12) added three doctoring sites and three anchor calls,
-# 23->26/24->27; K3 (Section 6) added three more (order-reversed, Mechanisms-inherited-
-# stripped, strategic-by-rule-stripped mutants), 26->29/27->30; K5 (Section 13) added
-# three more again (DOCTORED_NO_REQ_LAYOUT, DOCTORED_NO_SENTENCE, DOCTORED_NO_ROW_CLAUSE),
-# 29->32/30->33; K4 (Section 15) added two more (DOCTORED_NO_ROWRULE,
-# DOCTORED_NO_CLOSEDBY), 32->34/33->35; K5.4 (Section 16, plan task 21) added one more
-# (DOCTORED_NO_K54_CLAUSE), 34->35/35->36 — A-31's own warning that a later card with a
-# branch pair moves this count, landing on schedule. RE-DERIVED BY DIRECT GREP over the
-# merged docs-pins.test.sh at each point, not carried forward from any pre-merge side.
-#
-# WAVE-11, BOTH ROWS, RECONCILED AT THIS MERGE: +3 each on the 35/36 baseline. 1c
-# (Section 17, the lean spine) doctors two copies — DOCTORED_SURVIVAL, the second-home
-# census mutant, and DOCTORED_FIRST, the attribution-stripped mutant — and declares them
-# with two anchor calls, 35->37/36->38. Row 1b (Section 18, the split skill's byte caps)
-# doctors one more — DOCTORED_FAT_CORE, a core padded past its own cap — and declares it
-# with one anchor, 37->38/38->39. The split itself moved no count: the four structural
-# assertions it rewrote replaced one anchor with one anchor, and the 99 re-pointed rows
-# changed which file a pin reads, never how many mutants the suite builds.
-#
-# 39->40 at epic-23 wave-13 (2026-09-14): T3 (Section 24, "the repair rule reaches the
-# rendered survival text") added one more doctoring site, DOCTORED_REPAIR, declared by
-# one anchor call. RE-DERIVED BY DIRECT GREP over the merged docs-pins.test.sh at THIS
-# commit (T12, fold-in), not carried forward: A-orch-25 named this a pre-existing
-# drift from before the wave's own T1 landed, and A-orch-35 attributed the added site
-# to T2 — direct measurement (`git diff b8b6bd6 8b80980 -- tests/docs-pins.test.sh`)
-# shows it lands with T3's merge instead; corrected here against the grep, not the note.
-#
-# 40->41 at epic-23 wave-14-tune-181 (2026-09-15, T15 fold-in): T10 (Section 27, "card row
-# formats at fixed widths", REQ-9) added one more doctoring site, DOCTORED_NO_RULE — the
-# copy of steps/1.md with the shared card rule line stripped, which is AC-9.2's own
-# mutation arm — declared by one anchor call on $CARD_RULE_LINE. ATTRIBUTED FROM THE DIFF,
-# not from the task list: `git log -p 0fe69ed..HEAD -- tests/docs-pins.test.sh` shows two
-# commits touching the file (63054a1 T10, c821781 T14) and exactly one of them, 63054a1,
-# adds a `DOCTORED…="$TMP/` line and an `anchor` line; T14's docs commit adds neither.
-# RE-DERIVED BY DIRECT GREP at THIS commit, as every number in this section is.
-#
-# 41->41 (sites move, anchors DON'T) at epic-23 wave-14-tune-181 (2026-09-15, T32 fold-in):
-# `git log -p 0eb4e8b..3ac952b -- tests/docs-pins.test.sh` shows two commits touching the
-# file — 395320a (T31) and eb49bcc (T28) — and only ONE of them touches a DOCTORED… or
-# anchor line: `git show 395320a -- tests/docs-pins.test.sh | grep -E
-# '^[+-](DOCTORED[A-Z0-9_]*="\$TMP/|[[:space:]]*anchor[[:space:]])'` is EMPTY — T31's pins
-# 148-152 render a card's own printf format against its sample values and compare, no
-# doctored copy, no `anchor` call, so it moves neither term (this corrects the dispatch
-# note that named T31 as a second contributor; measured against the diff, not assumed).
-# `git show eb49bcc -- tests/docs-pins.test.sh | grep -E
-# '^[+-](DOCTORED[A-Z0-9_]*="\$TMP/|[[:space:]]*anchor[[:space:]])'` shows T28 adds ONE
-# doctoring site, `DOCTORED_PATROL_T28="$TMP/patrol-classes-mutated.sh"` (44d, the
-# anti-vacuity arm for 44c's class-list agreement pin), and REWRITES an existing anchor
-# line in place (`anchor "$STEP8_MD" 'sparing every session-keyed file' 1` ->
-# `anchor "$STEP8_MD" "sparing a LIVE neighbour session" 1`, the T1 spare-rule sentence)
-# rather than adding a new one. Net: sites 40->41, anchor CALLS unmoved at 41 — the two
-# terms now read EQUAL rather than the +1 (Section 8's two-sentence rewrite) offset every
-# earlier entry in this history describes, for a DIFFERENT reason: DOCTORED_PATROL_T28 was
-# built without its own `anchor` precondition (44d's if/elif chain checks the mutation
-# took effect inline, but not through the `anchor` helper this census counts). That is a
-# real gap in tests/docs-pins.test.sh, OUT OF THIS TASK'S Files: (cross-gate-agreement.test.sh
-# only) — see A-T32.2, routed the same way A-T24.7 and A-T27.9 routed the same shape of
-# finding. §S19.4 (below) is the row that catches it, and stays red here on purpose: an
-# invariant a real defect trips is not re-pinned to match the defect.
-#
-# 41->42 (anchors move, sites DON'T) at epic-23 wave-14-tune-181 (2026-09-15, T33 fold-in):
-# wave-14 T28 (`eb49bcc`) added `DOCTORED_PATROL_T28` without its own `anchor` precondition
-# — the gap T32 found and routed via A-T32.2. T33 closes it, adding one `anchor` call (the
-# un-doctored `PATROL_STATE_CLASSES="…"` line in payload/scripts/lib/patrol.sh, matched
-# once, immediately above the site's `sed`) and nothing else — 44a-44d are unchanged. Sites
-# stay 41 (T33 adds no new `DOCTORED…="$TMP/…"` assignment); anchor CALLS move 41->42.
-# 41->42 SITES and 42->43 ANCHORS at epic-23 wave-14-tune-181 (2026-09-15, T36): T36
-# retires the printf format lines from the three approval cards for a real renderer
-# (payload/scripts/card.sh, which FOLDS the free-text cell — Chris 2026-09-15 "D4: I want
-# the wrapped version"), and re-spells docs-pins Section 27 onto it. Section 27 keeps its
-# one existing site (DOCTORED_NO_RULE, re-pointed from the old card rule line to the new
-# pointer line) and adds ONE: DOCTORED_CARD_ROW, the Step-2 decision row nudged one column
-# right, which is the discriminator for the block of rows that now compare each card's
-# header and sample rows against what card.sh actually prints. It carries its own `anchor`
-# immediately above it, so both terms move together, +1 each. Section 27's OTHER new
-# mutation arm is deliberately NOT a site: `REPLANTED_FMT` APPENDS a format line to a copy
-# rather than stripping one, and an append cannot silently match nothing — the same call
-# §Roots makes, for the same reason, and the reason this census counts strips.
-# 44 sites / 45 anchors at epic-23 wave-19-fixit-186 (2026-09-22, T9c fold-in), TWO GAPS
-# CLOSED TOGETHER rather than one: wave-19 T11/Tdoc (9d1a7e8) added DOCTORED_STEP2_OPEN_AT
-# (Section 12, rows 92a2/92a3 — the Step-2 sibling to Section 15's 107f/107g pattern,
-# proving the retired "Open at approval" section stays out of the Step-2 card scaffold)
-# without its own anchor call. Auditing the modelled-on pair found the model itself
-# short one: wave-18-fixit-185 T8 (0ee1a5d) had already added DOCTORED_NO_BATCH (Section
-# 15's 107g, the dropped-batch-line anti-vacuity arm) the same way, unanchored, and no
-# task since had it in Files: to close it — the same shape T32's DOCTORED_PATROL_T28 gap
-# held until T33 closed it (A-T32.2, above). T9c closes both: `anchor "$STEP2_MD" '  Arti-
-# facts' 1` immediately above DOCTORED_STEP2_OPEN_AT, and `anchor "$STEP3_MD" '    batch '
-# 1` immediately above DOCTORED_NO_BATCH. Net: sites 42->44 (+2, one per gap), anchor CALLS
-# 43->45 (+2, one new anchor per newly-declared site, no pre-existing offset absorbed).
-# RE-DERIVED BY DIRECT GREP over docs-pins.test.sh at THIS commit, as every number in this
-# section is:
-#   grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' tests/docs-pins.test.sh        -> 44
-#   grep -cE '^[[:space:]]*anchor[[:space:]]' tests/docs-pins.test.sh     -> 45
-expect_eq "S19.3 docs-pins holds 44 doctoring sites" "44" \
-  "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 45 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change; wave-14 T33 adds one, DOCTORED_PATROL_T28's own anchor; wave-14 T36 adds one, the nudged-card-row discriminator; wave-18 T8's Section-15 107g gap and wave-19 T11/Tdoc's Section-12 92a3 gap each add one, both closed by wave-19 T9c)" "45" \
-  "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
-# 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
-# anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
-# governing-skill mutation added one. 25 at this merge: epic-22 wave-01 N1 retired §R
-# along with the four `resolve_docs_root()` copies it held, and its awk mutant's `anchor`
-# went with it. §Roots replaces §R and deliberately carries none — an anchor exists to catch
-# a pattern-based rewrite that silently matched nothing, and §Roots' arm APPENDS a heredoc,
-# which cannot no-op, then asserts the definition count moved from 1 to 2. That is a
-# stronger precondition than an anchor, and it is a row a reader can watch fail.
-# 26 at epic-22 wave-01 task 11: §Refuse's migration mutant anchors the four BLOCKED
-# lines it strips from a scratch copy of protect-main.sh before stripping them, so a
-# rename of that hook's refusal text cannot leave the "a migrated hook drops out of the
-# set" arm passing over an unmutated file.
-#
-# 27 at epic-23 wave-14-tune-181 (2026-09-15, T27 fold-in, duplication review F1): §BR's
-# generation-cap mutant (detect.sh's `_detect_bound_kill_tree`, doctored from 16 to 1)
-# anchors its one needle before the `sed`. RE-DERIVED BY DIRECT GREP over this file at
-# THIS commit, as every number in this section is.
-#
-# 29 at epic-23 wave-14-tune-181 (2026-09-15, T35 fold-in): §L.4c's `DOCTORED_L4C` — a
-# copy of lib/bounds.sh carrying each inner bound AT its hook's registration, the mutant
-# that proves the invariant rows discriminate — anchors BOTH lines its one `sed` rewrites,
-# `^IMPACT_BOUND_S=[0-9]+$` and `^LG_IMPACT_BOUND_S=[0-9]+$`. Two anchor calls for one
-# doctored file, which is what the helper's per-LINE count means: +2, 27 -> 29. RE-DERIVED
-# BY DIRECT GREP over this file at THIS commit.
-#
-# 30 at epic-23 wave-15-fixit-182 (2026-09-17, T1): §PV — the Patrol verdict's single
-# definition — anchors `^patrol_verdict\(\)` in lib/patrol.sh before asserting the
-# tree-wide count, so a second definition grown in a hook cannot make that row pass by
-# moving what it reads. One anchor call, 29 -> 30. RE-DERIVED BY DIRECT GREP over this file
-# at THIS commit, as every number in this section is.
-#
-# 31 at epic-23 wave-16-fixit-183 (2026-09-19, T4): §R2 — the knob-unset harness ADR-030's
-# tests must run under — anchors the `[REQ-2 AC-2.3 KNOB-UNSET SECTION: BEGIN]` marker in
-# tests/refuse.test.sh before the awk that splices `export BIONIC_WALL_VERBOSE=1` in after
-# it, so a renamed marker cannot leave the doctored copy byte-identical to the shipped suite
-# and the four absence greps passing over it. One anchor call, 30 -> 31. RE-DERIVED BY DIRECT
-# GREP over this file at THIS commit, as every number in this section is.
-#
-# 32 at epic-23 wave-16-fixit-183 (2026-09-20, T25): §bring-forward — one source for the
-# step both callers judge against — anchors the gate caller line in payload/scripts/lib/walls.sh
-# before the sed that hands that caller a step again, so the row asserting neither caller
-# passes one is provably able to fail. One anchor call, 31 -> 32. RE-DERIVED BY DIRECT GREP
-# over this file at THIS commit, as every number in this section is.
-#
-# 34 at epic-23 wave-20-fixit-187 (2026-09-23, T4): §S13b lifts `lift_contract_fields` out of
-# hooks/dispatch-preflight.sh to run it beside the claim reader, and anchors both ends of the
-# lift (the `LEAD_CHARS=` start line and the function's head) so a moved function fails the
-# precondition rather than lifting air. Two anchor calls, 32 -> 34, by direct grep.
-#
-# 32 at epic-23 wave-20-fixit-187 (2026-09-23, T6): the lift moved into
-# payload/scripts/lib/brief.sh, and §S13b sources that library instead of lifting the
-# function's text out of the hook, so its two anchors have nothing left to guard. §S13.2's two
-# anchors moved with the reduction they guard and stay. Two anchor calls, 34 -> 32, by direct
-# grep.
-#
-# 33 at epic-23 wave-23-fixit-1810 (2026-10-02, T2): §DS DS.10b — the auto-memory row's
-# doctor call site deleted from a copy of doctor.sh — anchors the three `_run_add` lines
-# before the awk that drops them, so a renamed call site cannot leave the mutant identical
-# to the shipped page. One anchor call, 32 -> 33, by direct grep.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 33 more" "33" \
-  "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
-# The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
-# the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
-# the F2 fold-in (review-b B-12) — the two whole-line moves its §17 doctors into
-# hooks/landing-gate.sh to prove the swept-marker extraction fails loudly.
-expect_eq "S19.3 …and agent-context-guard by one, now that mutate_guard anchors per call" "1" \
-  "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/agent-context-guard.test.sh")"
-expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and the two line moves §17 doctors" "3" \
-  "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/landing-gate.test.sh")"
-# THE TOTAL AC-30 NAMES. Stated as its own measured literal rather than left to the
-# reader to add up: this is the number that has to move when a doctoring site is
-# added or removed anywhere in the four suites that build mutants.
-# 53 since the fold-in landings (A-44). F1 (item 17) and F2 (item 11) each added two
-# anchors — F1 in this suite, F2 in landing-gate — and each rewrote this total from 49
-# to 51 in BYTE-IDENTICAL text, so the merge was conflict-free and the pin was two short
-# of the tree. Measured at the merged head, not predicted: 24 + 25 + 1 + 3 = 53.
-# 65 once five epic-22 tasks landed on the 53 baseline, THIS merge included: K1 (plan
-# task 15) gave docs-pins three more anchor CALLS (Section 12's anti-vacuity mutants);
-# R6 (plan task 3) gave this suite one more through §V; K3 (plan task 17, Section 6)
-# gave docs-pins three more again; K5 (plan task 19, Section 13) gave docs-pins three
-# more again; K4 (plan task 18, Section 15) gave docs-pins two more; K5.4 (plan task
-# 21, Section 16) gave docs-pins one more — 27 -> 36 across K1+K3+K4+K5+K5.4 (the first
-# row above, which counts anchor CALLS — one more than its 35 doctoring SITES, a
-# pre-existing +1 offset Section 8's own comment names: one doctoring site there is
-# rewritten by two anchored sentences). N1 retired §R and the one anchor its awk mutant
-# declared (down from 26). E1 (plan task 11) gave this suite one BACK through §Refuse,
-# whose migration mutant anchors the four BLOCKED lines it strips from a scratch
-# protect-main.sh before stripping them — so this suite is 26 again (the row above this
-# one), for a different reason than it was before N1.
-#
-# 39 + 26 + 1 + 3 = 69 — RE-DERIVED BY DIRECT GREP over the merged files at THIS commit,
-# never carried forward from any pre-merge side, which is the whole reason this literal
-# exists.
-#
-# 70 at epic-23 wave-13 (2026-09-14, T12 fold-in): 40 + 26 + 1 + 3, the docs-pins term
-# alone moving for the reason the row above this one now names (T3's DOCTORED_REPAIR).
-#
-# 71 at epic-23 wave-14-tune-181 (2026-09-15, T15 fold-in): 41 + 26 + 1 + 3, the docs-pins
-# term alone moving again — T10's Section 27 rule-line mutant, attributed from the diff in
-# the paragraph above. The other three terms are unmoved and were re-measured, not assumed:
-# this wave's landings touch cross-gate-agreement.test.sh and landing-gate.test.sh in prose
-# and in numbers, never by adding or removing an `anchor` call.
-#
-# 72 at epic-23 wave-14-tune-181 (2026-09-15, T27 fold-in): 41 + 27 + 1 + 3, the
-# cross-gate-agreement.test.sh term alone moving — §BR's own anchor call, the row above
-# this one. docs-pins, agent-context-guard and landing-gate are unmoved and were
-# re-measured, not assumed.
-#
-# 73 at epic-23 wave-14-tune-181 (2026-09-15, T33 fold-in): 42 + 27 + 1 + 3, the
-# docs-pins term alone moving again — T33's `DOCTORED_PATROL_T28` anchor, the row above
-# this one (§S19.3's second row). cross-gate-agreement.test.sh, agent-context-guard and
-# landing-gate are unmoved and were re-measured, not assumed.
-#
-# 75 at epic-23 wave-14-tune-181 (2026-09-15, T35 fold-in): 42 + 29 + 1 + 3, the
-# cross-gate-agreement.test.sh term alone moving — §L.4c's two anchors on the
-# bounds-at-the-registration mutant, the row above this one. docs-pins,
-# agent-context-guard and landing-gate are unmoved and were re-measured, not assumed:
-# T35 touches landing-gate §16i in prose, in its clock and in its cap, and adds no
-# `anchor` call there.
-#
-# 76 at epic-23 wave-14-tune-181 (2026-09-15, T36, MEASURED AT THE MERGE): 43 + 29 + 1 + 3,
-# the docs-pins term alone moving on top of T35's — T36's `DOCTORED_CARD_ROW` anchor, the
-# discriminator for the rows that now compare each card against what payload/scripts/card.sh
-# prints (§S19.3's first two rows). T35 and T36 were written in parallel off 89f6944 and each
-# predicted a total the other's landing invalidated (74 and 75); this number is neither
-# prediction but a fresh grep over the four files AT THE MERGED HEAD, which is the only
-# reading this literal has ever accepted.
-#
-# tests/refuse.test.sh IS NOT IN THIS CENSUS, and that is a Step-9 disposition rather
-# than an oversight. It carries ONE anchor call site, reached three times: its
-# `mutant()` helper calls `anchor` before every `sed`, so a mutant cannot be added
-# there without a precondition, and the census's per-file grep would count 1 whatever
-# the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
-# including that one. What is missing is only this bookkeeping count, and adding a
-# fifth term to it is a change to a section task 11 does not own.
-# 77 at epic-23 wave-15-fixit-182 (2026-09-17, T1): +1 from §PV's anchor above; the other
-# three files are untouched by that task.
-# 79 at epic-23 wave-16-fixit-183: +1 from this wave's T4 (§R2's knob-unset splice) and +1
-# from T25 (§bring-forward's caller mutant), both in this file; the other three are
-# untouched by either task.
-# 81 at epic-23 wave-19-fixit-186 (2026-09-22, T9c fold-in): 44 + 32 + 1 + 3, the docs-pins
-# term alone moving again — T9c's two new anchor calls (the row above this one, S19.3's
-# second row) closing the DOCTORED_STEP2_OPEN_AT and DOCTORED_NO_BATCH gaps.
-# cross-gate-agreement.test.sh, agent-context-guard and landing-gate are unmoved and were
-# re-measured, not assumed.
-# 83 at epic-23 wave-20-fixit-187 (2026-09-23, T4): 45 + 34 + 1 + 3 — §S13b's two lift
-# anchors in this file; the other three files are untouched by that task.
-# 81 at epic-23 wave-20-fixit-187 (2026-09-23, T6): 45 + 32 + 1 + 3 — §S13b sources the
-# grammar library instead of lifting its text, and its two anchors go with the lift.
-# 82 at epic-23 wave-23-fixit-1810 (2026-10-02, T2): 45 + 33 + 1 + 3 — §DS DS.10b's anchor
-# in this file; the other three files are untouched by that task. MEASURE AGAIN AT THE
-# WAVE MERGE: T1 edits this file in parallel.
-expect_eq "S19.3 …82 anchor call sites across the four doctoring suites, all told" "82" \
-  "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
-        "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
-     | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
+# --- §S19.3 retired (wave-24): six exact-count pins on `anchor` calls (docs-pins sites and calls,
+# this suite, agent-context-guard, landing-gate, and their total). An exact count goes red on
+# every legitimate new mutant and is repaired by retyping the number, so it tested the author's
+# memory, not the tree. The relation it stood for is derived below, in §S19.4, with its paired
+# positive; §S19.2 holds the absence side across every suite.
 
 # --- §S19.4 COMPLETENESS: no doctoring site is left undeclared ---
 # Mechanically derived rather than counted: every `DOCTORED…="$TMP/…"` assignment
@@ -11504,7 +11269,9 @@ section "SV — the shared brief-scaffold block is byte-identical across its two
 
 SV_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
 SV_DISPATCH="$BIONIC_SKILLS_DIR/canonical-sdlc/dispatch.md"
-SV_SUITES_LINE='Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:'
+# The column padding before the comment was cut to two spaces at wave-24 T9 (A-T9.9), the
+# bytes paying for the scaffold's Done marker: line; the words are unchanged.
+SV_SUITES_LINE='Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:'
 
 sv_suites_line() {  # <file> -> the scaffold's Suites: line, or empty
   awk '/^Suites: none/ { print; exit }' "$1" 2>/dev/null
@@ -12149,10 +11916,11 @@ _cgtc_del="$_cgtc_r/cgtc-report.md"
 echo delivered > "$_cgtc_del"
 touch -t 202609011200 "$_cgtc_del"      # after the launch below, in any zone within 12 h of UTC
 roster_header > "$_cgtc_roster"
+: > "$_cgtc_r/cgtc.done"                 # the agent said so (wave-24 T9, D3)
 roster_row_fixture status=confirmed session="$SID_A" name="$_cgtc_name" agent_id="$_cgtc_id" \
-  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtc_del" tool_use_id=toolu_01CGTC >> "$_cgtc_roster"
+  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtc_del" "done=$_cgtc_r/cgtc.done" tool_use_id=toolu_01CGTC >> "$_cgtc_roster"
 roster_row_fixture status=identified session="$SID_A" name="$_cgtc_name" agent_id="$_cgtc_id" \
-  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtc_del" tool_use_id=toolu_01CGTC >> "$_cgtc_roster"
+  launched_at=2026-09-01T00:00:00Z deliverable="$_cgtc_del" "done=$_cgtc_r/cgtc.done" tool_use_id=toolu_01CGTC >> "$_cgtc_roster"
 cgc_ack "$_cgtc_ledger" 2026-09-02T00:00:00Z "$_cgtc_name"
 jq -nc '{type:"user",isMeta:true,isSidechain:false,userType:"external",
          message:{role:"user",content:"carry on"}}' > "$_cgtc_r/cgc-transcript.jsonl"
@@ -12398,9 +12166,10 @@ CGSD_R=$(new_repo cgsd)
 CGSD_RO="$CGSD_R/.bionic/tmp/roster-$SID_A.state"
 roster_header > "$CGSD_RO"
 for _cgsd_n in sd-a sd-b sd-gone; do
-  echo done > "$CGSD_R/landed-$_cgsd_n.md"
+  echo done > "$CGSD_R/landed-$_cgsd_n.md"; : > "$CGSD_R/$_cgsd_n.done"   # landed and said (T9, D3)
   roster_row_fixture status=intended session="$SID_A" name="$_cgsd_n" agent_id= \
-    tool_use_id="toolu_01CGSD${_cgsd_n#sd-}" deliverable="$CGSD_R/landed-$_cgsd_n.md" >> "$CGSD_RO"
+    tool_use_id="toolu_01CGSD${_cgsd_n#sd-}" deliverable="$CGSD_R/landed-$_cgsd_n.md" \
+    "done=$CGSD_R/$_cgsd_n.done" >> "$CGSD_RO"
 done
 roster_row_fixture status=intended session="$SID_A" name=sd-open agent_id= \
   tool_use_id=toolu_01CGSDOPEN deliverable="$CGSD_R/never-written.md" >> "$CGSD_RO"
@@ -12454,6 +12223,139 @@ expect_contains "CG-standdown the wall refuses the tick's turn for the stand-dow
 expect_eq "CG-standdown the wall's computed set is the tick's printed set, with no line to read" \
   "$CGSD_PRINTED" "$CGSD_WALL"
 
+
+# ============================================================
+section "HD — a HELD row: the tick and the stop wall agree it owes nothing (wave-24 T7; REQ-4 AC-4.3; D1, ADR-041 d1/d3)"
+# ============================================================
+#
+# The hold lives on the roster, the tick reads it and writes no order, and the stop wall computes
+# its stand-down set from orders alone — so the wall needs no reading of the hold to agree. One
+# fixture, both readers: CG-standdown's world with sd-a held through the REAL verb. The tick must
+# print `held sd-a` and stand down sd-b alone, and the wall's computed set must be {sd-b}.
+HD_R=$(new_repo hd)
+HD_RO="$HD_R/.bionic/tmp/roster-$SID_A.state"
+roster_header > "$HD_RO"
+for _hd_n in sd-a sd-b; do
+  echo done > "$HD_R/landed-$_hd_n.md"; : > "$HD_R/$_hd_n.done"   # landed and said (T9, D3)
+  roster_row_fixture status=intended session="$SID_A" name="$_hd_n" agent_id= \
+    tool_use_id="toolu_01HD${_hd_n#sd-}" deliverable="$HD_R/landed-$_hd_n.md" \
+    "done=$HD_R/$_hd_n.done" >> "$HD_RO"
+done
+roster_row_fixture status=intended session="$SID_A" name=sd-open agent_id= \
+  tool_use_id=toolu_01HDOPEN deliverable="$HD_R/never-written.md" >> "$HD_RO"
+cgc_plan "$HD_R/.bionic/docs/plans/epic-99/hd.plan.md" \
+  'parallel-budget: writers=1 suites=4 worktrees=32 test_jobs=8 source=probe' 1
+s4_bind "$HD_R" "$SID_A" "$HD_R/.bionic/docs/plans/epic-99/hd.plan.md"
+s4_attest "$HD_R" "$SID_A"
+HD_CFG="$SANDBOX/hd-config"; mkdir -p "$HD_CFG/projects/-hd"
+{
+  jq -nc '{type:"user",timestamp:"2026-09-05T00:50:00.000Z",message:{role:"user",content:"go"}}'
+  jq -nc '{type:"assistant",timestamp:"2026-09-05T00:51:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01HDLIST",name:"ListAgents",input:{}}]}}'
+  jq -nc --arg b "$(live_answer_body "sd-a:idle" "sd-b:idle" "sd-open:running")" \
+    '{type:"user",timestamp:"2026-09-05T00:52:23.349Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01HDLIST",content:$b}]}}'
+} > "$HD_CFG/projects/-hd/$SID_A.jsonl"
+hd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$HD_CFG" \
+  BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+  BIONIC_PROBE_LOAD_1M=0.1 "$@"; }
+HD_HOLD=$( cd "$HD_R" && hd_env bash "$CGSD_POKER" hold sd-a "kept for a second pass" 2>&1 ); HD_HOLD_RC=$?
+expect_eq "HD precondition: the hold verb took sd-a (rc 0)" "0" "$HD_HOLD_RC"
+cgc_ring
+HD_TICK=$( cd "$HD_R" && hd_env bash "$CGSD_POKER" tick 2>&1 )
+HD_PRINTED=$(printf '%s\n' "$HD_TICK" | sed -n 's/^poker: STANDDOWN \([A-Za-z0-9_.-]*\) .*/\1/p' | LC_ALL=C sort -u | tr '\n' ' ')
+expect_eq "HD the tick stands down the unheld MET row alone" "sd-b " "$HD_PRINTED"
+expect_contains "HD2 …and prints the held one as held" "poker: held sd-a since " "$HD_TICK"
+HD_TR="$HD_R/hd-transcript.jsonl"
+{
+  jq -nc --arg t "bionic-patrol session=${SID_A:0:8} — Patrol tick. Run: bash $CGSD_POKER tick" \
+    '{type:"user",isMeta:true,isSidechain:false,userType:"external",message:{role:"user",content:$t}}'
+  jq -nc --arg c "bash $CGSD_POKER tick" \
+    '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01HDTICK",name:"Bash",input:{command:$c}}]}}'
+  jq -nc --arg o "$HD_TICK" \
+    '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01HDTICK",content:$o}]}}'
+  jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01HDTL",name:"TaskList",input:{}}]}}'
+} > "$HD_TR"
+cgc_ring
+HD_OUT=$(s4_stop_payload "$HD_R" "$SID_A" "$HD_TR" | hd_env bash "$CGSD_STOP" 2>/dev/null)
+HD_REASON=$(printf '%s' "$HD_OUT" | jq -r '.reason // ""' 2>/dev/null)
+HD_WALL=""
+for _hd_n in sd-a sd-b sd-open; do
+  case " $(printf '%s' "$HD_REASON" | tr -c 'A-Za-z0-9_.-' ' ') " in
+    *" $_hd_n "*) HD_WALL="${HD_WALL}${_hd_n} " ;;
+  esac
+done
+expect_contains "HD3 the wall refuses the turn for the one row the tick stood down" \
+  "stand-down unanswered" "$HD_REASON"
+expect_eq "HD4 the wall's computed set is the tick's: the held row is in neither" "$HD_PRINTED" "$HD_WALL"
+
+# ============================================================
+section "OCC — preflight's open count and the tick's occupancy agree on a mixed roster (wave-24 T10; REQ-7 AC-7.1; D11)"
+# ============================================================
+#
+# One roster: a writer, two researchers and a test-runner, all unacked. A read-only role holds no
+# WRITER slot, so the one writer is the whole occupancy at both readers. Preflight reads it as the
+# `open=` of its writer refusal, the tick as the occupancy of its fill line, and the two numbers
+# are asserted EQUAL and asserted ONE: equal alone is also what the unfixed code gives (it counts
+# four at both), so the absolute figure is what makes this test fail on that code.
+OCC_R=$(new_repo occ)
+OCC_RO="$OCC_R/.bionic/tmp/roster-$SID_A.state"
+roster_header > "$OCC_RO"
+roster_row_fixture status=intended session="$SID_A" name=oc-w agent_id= \
+  tool_use_id=toolu_01OCW deliverable="$OCC_R/never-oc-w.md" >> "$OCC_RO"
+for _oc in oc-r1:bionic:researcher oc-r2:bionic:researcher oc-t:bionic:test-runner; do
+  roster_row_fixture status=intended session="$SID_A" name="${_oc%%:*}" agent_id= \
+    subagent_type="${_oc#*:}" tool_use_id="toolu_01OC${_oc%%:*}" \
+    deliverable="$OCC_R/never-${_oc%%:*}.md" >> "$OCC_RO"
+done
+expect_eq "OCC precondition: the fixture roster holds four rows, three of them read-only" "4/3" \
+  "$(grep -c '^roster-state/' "$OCC_RO")/$(grep -c 'subagent_type=bionic:' "$OCC_RO")"
+cgc_plan "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md" \
+  'parallel-budget: writers=1 suites=9 worktrees=32 test_jobs=8 source=probe' 1
+s4_bind "$OCC_R" "$SID_A" "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md"
+s4_attest "$OCC_R" "$SID_A"
+occ_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
+  BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+  BIONIC_PROBE_LOAD_1M=0.1 "$@"; }
+OCC_PF=$( cd "$OCC_R" && mk_agent_payload "$SID_A" "$OCC_R" | occ_env bash "$PARTY_DP" 2>&1 )
+OCC_PF_N=$(printf '%s\n' "$OCC_PF" | sed -n 's/.*writers: budget=1 open=\([0-9][0-9]*\) with-this-dispatch=.*/\1/p' | head -1)
+cgc_ring
+OCC_TICK=$( cd "$OCC_R" && occ_env bash "$CGSD_POKER" tick 2>&1 )
+OCC_TICK_N=$(printf '%s\n' "$OCC_TICK" | sed -n -e 's/.* occupied=\([0-9][0-9]*\) gap=.*/\1/p' \
+  -e 's/.* and \([0-9][0-9]*\) unacked roster row(s).*/\1/p' | head -1)
+expect_eq "OCC1 preflight refuses a writer, counting ONE open writer" "1" "$OCC_PF_N"
+expect_eq "OCC2 the tick's occupancy is ONE" "1" "$OCC_TICK_N"
+expect_eq "OCC3 …and the two readers' numbers are equal" "$OCC_PF_N" "$OCC_TICK_N"
+OCC_PF_RO=$( cd "$OCC_R" && mk_agent_payload "$SID_A" "$OCC_R" \
+  | jq -c '.tool_input.subagent_type="bionic:researcher" | .tool_input.name="oc-r3"' \
+  | occ_env bash "$PARTY_DP" 2>&1 ); OCC_PF_RO_RC=$?
+expect_eq "OCC4 a read-only dispatch against the same full roster is admitted (rc 0)" "0" "$OCC_PF_RO_RC"
+expect_absent "OCC4b …with no writer-budget refusal" "writers: budget=" "$OCC_PF_RO"
+
+# THE THIRD READER, THE STOP WALL (wave-24 T27; Step-6 review U4). `stop.sh`'s fill collector
+# counts the same open set through the same `budget_open_writers`, and records the count as the
+# fill ledger's `open=`. Asked over the same roster and plan, its number must be the other two's.
+# The mutation arm drives a planted tree whose collector counts every open row, the shape a
+# caller that skipped the writer filter would take, and the pin must move.
+occ_stop() {  # <stop hook> -> the `open=` of the ledger line that Stop wrote
+  local tr="$OCC_R/occ-turn.jsonl"
+  jq -nc '{type:"user",uuid:"u-occ",isSidechain:false,timestamp:"2026-10-03T00:00:00Z",message:{role:"user",content:"carry on"}}' > "$tr"
+  cgc_ring
+  s4_stop_payload "$OCC_R" "$SID_A" "$tr" | occ_env BIONIC_NOW_EPOCH=1700000000 bash "$1" >/dev/null 2>&1
+  tail -1 "$OCC_R/.bionic/docs/record/occ/fill-ledger.log" 2>/dev/null | sed -n 's/.*|open=\([0-9]*\)|.*/\1/p'
+}
+OCC_STOP_N="$(occ_stop "$CGSD_STOP")"
+expect_eq "OCC5 the stop wall's open count is ONE" "1" "$OCC_STOP_N"
+expect_eq "OCC6 …and equal to preflight's and the tick's" "$OCC_PF_N/$OCC_TICK_N" "$OCC_STOP_N/$OCC_STOP_N"
+OCC_MUT_HOOK="$(plant_lg_tree "$SANDBOX/fx/occ-mut")"
+cp "$SWEEPER" "$(dirname "$OCC_MUT_HOOK")/session-sweeper.sh"
+anchor "$(dirname "$OCC_MUT_HOOK")/../scripts/lib/stop.sh" \
+  'FILL_OPEN="$(roster_open_names "$FILL_ROSTER" "$FILL_ACKS" "$BIONIC_SID" | budget_open_writers "$FILL_ROSTER")"' 1
+sed 's/^\(  FILL_OPEN="\$(roster_open_names "\$FILL_ROSTER" "\$FILL_ACKS" "\$BIONIC_SID"\) | budget_open_writers "\$FILL_ROSTER")"$/\1 | grep -c .)"/' \
+  "$(dirname "$OCC_MUT_HOOK")/../scripts/lib/stop.sh" > "$SANDBOX/fx/occ-mut/stop.sh.mut"
+cp "$SANDBOX/fx/occ-mut/stop.sh.mut" "$(dirname "$OCC_MUT_HOOK")/../scripts/lib/stop.sh"
+OCC_MUT_N="$(occ_stop "$OCC_MUT_HOOK")"
+# FIVE: the fixture's four rows, and the researcher OCC4's admitted dispatch rostered.
+expect_eq "OCC7 mutation: a stop wall that counts every open row reads five (the mutant ran)" "5" "$OCC_MUT_N"
+expect_ne "OCC7b …and the agreement pin goes red on it" "$OCC_PF_N" "$OCC_MUT_N"
 
 # ============================================================
 section "CG-turn — the ledger writer and fill-report agree on what a turn is (epic-23 wave-20 T11b; Step-6 review R3, critic C1)"
@@ -12629,8 +12531,12 @@ cgfu_world() {  # <case: closed|open|again> -> repo path
       ;;
   esac
   cfg="$SANDBOX/cgfu-cfg-$1"; mkdir -p "$cfg/projects/-cgfu"
+  # Each hand-back names landed.md (wave-24 T29: a message that names no deliverable is no
+  # completion signal).
   {
-    jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T00:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done\n</agent-message>")}}'
+    jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T00:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done: landed.md\n</agent-message>")}}'
+    # The relaunched contract reports too, after its own launch (wave-24 T9, D3: MET needs it).
+    [ "$1" = again ] && jq -nc --arg n "$n" '{type:"user",isMeta:true,isSidechain:false,timestamp:"2026-09-01T02:30:00.000Z",message:{role:"user",content:("Another Claude session sent a message:\n<agent-message from=\"" + $n + "\">\n[Subagent hand-back] done again: landed.md\n</agent-message>")}}'
     jq -nc --arg n "$n" '{type:"assistant",isSidechain:false,timestamp:"2026-09-01T03:00:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01CGFUSEND",name:"SendMessage",input:{to:$n,summary:"s",message:"one more thing"}}]}}'
   } > "$cfg/projects/-cgfu/$SID_A.jsonl"
   printf '%s' "$r"
@@ -13449,5 +13355,152 @@ expect_absent "UB.9 …nor T5 at all" "T5" "$UB_OUT$UB_ERR"
 ub_stop "$UB9" "$SID_A" "$UB9/turn.jsonl"
 expect_eq "UB.9 A's turn end on the same tree (control): refused" "block" "$(ub_decision)"
 expect_contains "UB.9 …naming T5 as not launched" "not launched: T5" "$UB_ERR$UB_OUT"
+
+# ============================================================
+section "SD — a standing fill decline: the tick's FILL and the stop wall's refusal name the same rows (wave-24 T27; REQ-4 AC-4.7; D2; Step-6 review C2/U1)"
+# ============================================================
+#
+# The stop wall reads the session's latest declined fill-ledger line as the standing answer for
+# the ready rows it saw, while `current:` is unchanged, and refuses a turn only for the rows it
+# did not answer. The tick asks the same reader (`fill_standing_decline`) and leaves those rows
+# out of its FILL. One fixture, both readers, the same question: which ready rows are owed? Two
+# ready rows, R1 and R2, a ledger line answering R1. The tick must print `FILL R2`, and the wall
+# must refuse a silent turn naming R2 alone. A second world whose line answers both: no FILL,
+# and the turn ends. The mutation arm is a planted poker that never asks the reader.
+sd_world() {  # <label> <ready ids the ledger line answered, comma-joined> -> repo
+  local r
+  r=$(new_repo "sd-$1")
+  roster_header > "$r/.bionic/tmp/roster-$SID_A.state"
+  cgc_plan "$r/.bionic/docs/plans/epic-99/sd.plan.md" \
+    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+  s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/sd.plan.md"
+  s4_attest "$r" "$SID_A"
+  mkdir -p "$r/.bionic/docs/record/sd"
+  printf 'fill-ledger/v1|at=2026-10-03T09:00:00Z|session=%s|turn=u-sd-0|current=4|state=ok|ceiling=8|width=8|open=0|free=8|ready=%s|launched=|declined=R1 waits on the base merge|missed=2\n' \
+    "$SID_A" "$2" > "$r/.bionic/docs/record/sd/fill-ledger.log"
+  jq -nc '{type:"user",uuid:"u-sd-1",isSidechain:false,timestamp:"2026-10-03T09:05:00Z",message:{role:"user",content:"carry on"}}' \
+    > "$r/sd-turn.jsonl"
+  printf '%s' "$r"
+}
+sd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$SANDBOX/sd-no-config" "${CGC_ENV[@]}" "$@"; }
+sd_tick() {  # <repo> <poker> -> the ids the tick's FILL line names, sorted, space-joined
+  cgc_ring
+  ( cd "$1" && sd_env bash "$2" tick 2>&1 ) > "$1/sd-tick.out"
+  sed -n 's/^poker: FILL \([A-Za-z0-9_. -]*\)$/\1/p' "$1/sd-tick.out" | head -1 | tr ' ' '\n' \
+    | LC_ALL=C sort | tr '\n' ' '
+}
+sd_wall() {  # <repo> -> the ids the stop wall refuses the turn for, sorted, space-joined
+  cgc_ring
+  s4_stop_payload "$1" "$SID_A" "$1/sd-turn.jsonl" | sd_env bash "$CGSD_STOP" 2>/dev/null \
+    | jq -r '.reason // ""' 2>/dev/null \
+    | sed -n 's/.*these rows are ready to dispatch — \(.*\) — and this turn.*/\1/p' | tr ' ' '\n' \
+    | LC_ALL=C sort | tr '\n' ' '
+}
+SD_R=$(sd_world some R1)
+SD_TICK=$(sd_tick "$SD_R" "$CGSD_POKER")
+expect_contains "SD precondition: the tick prints the standing decline" \
+  "poker: fill-declined standing since 2026-10-03T09:00:00Z — R1 waits on the base merge" "$(cat "$SD_R/sd-tick.out")"
+expect_eq "SD1 the tick fills the row the decline did not answer" "R2 " "$SD_TICK"
+expect_eq "SD2 …and the stop wall refuses the silent turn for exactly that row" "$SD_TICK" "$(sd_wall "$SD_R")"
+SD_RA=$(sd_world all R1,R2)
+expect_eq "SD3 a decline that answered both: the tick fills nothing" "" "$(sd_tick "$SD_RA" "$CGSD_POKER")"
+expect_contains "SD3b …while it prints the decline as standing" "poker: fill-declined standing since " \
+  "$(cat "$SD_RA/sd-tick.out")"
+expect_eq "SD4 …and the stop wall owes nothing either" "" "$(sd_wall "$SD_RA")"
+# THE MUTATION ARM. A planted poker whose standing read is gone: it prints `FILL R1 R2` over the
+# same fixture while the wall still refuses for R2 alone, and the pin must go red.
+SD_MUT="$SANDBOX/fx/sd-mut"
+mkdir -p "$SD_MUT/hooks" "$SD_MUT/scripts"
+ln -s "$CGC_LIBDIR" "$SD_MUT/scripts/lib"
+for _sd_sib in "$BIONIC_HOOKS_DIR"/*; do
+  [ "$(basename "$_sd_sib")" = session-poker.sh ] || ln -s "$_sd_sib" "$SD_MUT/hooks/$(basename "$_sd_sib")"
+done
+anchor "$CGSD_POKER" 'SCHED_SD="$(fill_standing_decline ' 1
+sed 's/^\( *\)SCHED_SD="\$(fill_standing_decline .*$/\1SCHED_SD=""/' "$CGSD_POKER" > "$SD_MUT/hooks/session-poker.sh"
+SD_RM=$(sd_world mut R1,R2)
+SD_MUT_TICK=$(sd_tick "$SD_RM" "$SD_MUT/hooks/session-poker.sh")
+expect_eq "SD5 mutation: the tick that never asks the reader fills both rows (it ran)" "R1 R2 " "$SD_MUT_TICK"
+expect_ne "SD5b …and the agreement pin goes red on it" "$(sd_wall "$SD_RM")" "$SD_MUT_TICK"
+
+# ============================================================
+section "RPL — the hold's reply count and the sweeper's reply reader are one envelope grammar (wave-24 T27; Step-6 review U2; D3)"
+# ============================================================
+#
+# Two hook processes read "the agent replied" off a transcript: `hold_reply_count` in
+# session-poker.sh (the hold's fingerprint) and `transcript_events` in session-sweeper.sh (MET's
+# completion signal). D3 says the first reuses the second's reply index; two processes share no
+# memory, so each carries `def replies:` and this pins the two copies' grammar equal: the
+# envelope scan and the idle-notice exclusion, the lines after `def replies:` up to the one that
+# shapes each file's own output. The mutation arm doctors one copy and the pin must move.
+rpl_grammar() {  # <file> -> the two grammar lines of its `def replies:`, trimmed
+  awk '{ t = $0; sub(/^[ \t]+/, "", t) }
+       t == "def replies:" { on = 1; n = 0; next }
+       on && n < 3 { n++; if (t != "| .[]") print t }
+       on && n == 3 { exit }' "$1"
+}
+RPL_PK="$(rpl_grammar "$CGSD_POKER")"
+RPL_SW="$(rpl_grammar "$SWEEPER")"
+expect_contains "RPL precondition: the poker's copy reads the envelope scan" "teammate-message teammate_id" "$RPL_PK"
+expect_contains "RPL precondition: …and the idle-notice exclusion" "idle_notification" "$RPL_PK"
+expect_eq "RPL the sweeper's reply grammar is the poker's, line for line" "$RPL_PK" "$RPL_SW"
+RPL_MUT="$SANDBOX/fx/rpl-mut.sh"
+anchor "$CGSD_POKER" 'teammate-message teammate_id|agent-message from' 1
+sed 's/teammate-message teammate_id|agent-message from/teammate-message teammate_id/' "$CGSD_POKER" > "$RPL_MUT"
+RPL_MUT_G="$(rpl_grammar "$RPL_MUT")"
+expect_contains "RPL2 mutation: the doctored copy still yields its grammar" "teammate-message teammate_id" "$RPL_MUT_G"
+expect_ne "RPL2b …and the pin goes red on it" "$RPL_SW" "$RPL_MUT_G"
+
+# ============================================================
+section "MEMROOT — the two memory walls resolve one store root (wave-24 T27; Step-6 review U3; D16)"
+# ============================================================
+#
+# The Bash half (bash-walls.sh, the collector for `wall_memory_store`) and the Write|Edit half
+# (canonical-sdlc-governing-skill.sh) each resolve `${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-
+# $HOME/.claude}}` and expand `~`, `$HOME` and `${HOME}` spelled into the variable. Each hook's
+# own §MEM drives it alone, so a change to one spelling in one hook went unseen. One engaged
+# repo, one HOME, the same absolute path asked of both hooks under each root spelling: both
+# refuse a store path, and both admit the default root's store while another root is named.
+MR_R=$(new_repo memroot)
+MR_H="$SANDBOX/memroot-home"; mkdir -p "$MR_H"
+mr_bw() {  # <hook> <path> [env…] -> exit status
+  local h="$1" p="$2"; shift 2
+  mk_bash_payload "$SID_A" /dev/null "$MR_R" "touch $p" \
+    | env -u CLAUDE_PROJECT_DIR HOME="$MR_H" CLAUDE_CODE_SESSION_ID="$SID_A" "$@" bash "$h" >/dev/null 2>&1
+  printf '%s' "$?"
+}
+mr_gs() {  # <hook> <path> [env…] -> exit status
+  local h="$1" p="$2"; shift 2
+  jq -n --arg s "$SID_A" --arg c "$MR_R" --arg p "$p" \
+    '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Write", tool_input:{file_path:$p, content:"x"}}' \
+    | env -u CLAUDE_PROJECT_DIR HOME="$MR_H" CLAUDE_CODE_SESSION_ID="$SID_A" "$@" bash "$h" >/dev/null 2>&1
+  printf '%s' "$?"
+}
+# label | path asked | want (2 refused, 0 admitted) | BIONIC_CLAUDE_HOME | CLAUDE_CONFIG_DIR
+MR_CASES="default|$MR_H/.claude/projects/-x/memory/a.md|2||
+tilde|$MR_H/ccd/projects/-x/memory/a.md|2||~/ccd
+dollar|$MR_H/ccd/projects/-x/memory/a.md|2||\$HOME/ccd
+brace|$MR_H/ccd/projects/-x/memory/a.md|2||\${HOME}/ccd
+slash|$MR_H/bch/projects/-x/memory/a.md|2|$MR_H/bch/|
+precedence|$MR_H/bch/projects/-x/memory/a.md|2|$MR_H/bch|$MR_H/ccd
+not-the-store|$MR_H/.claude/projects/-x/memory/a.md|0|$MR_H/bch|"
+while IFS='|' read -r _mr_l _mr_p _mr_w _mr_b _mr_c; do
+  [ -n "$_mr_l" ] || continue
+  _mr_bw="$(mr_bw "$PARTY_EG" "$_mr_p" BIONIC_CLAUDE_HOME="$_mr_b" CLAUDE_CONFIG_DIR="$_mr_c")"
+  _mr_gs="$(mr_gs "$PARTY_SG_W" "$_mr_p" BIONIC_CLAUDE_HOME="$_mr_b" CLAUDE_CONFIG_DIR="$_mr_c")"
+  expect_eq "MEMROOT $_mr_l: bash-walls answers $_mr_w" "$_mr_w" "$_mr_bw"
+  expect_eq "MEMROOT $_mr_l: …and governing-skill gives the same answer" "$_mr_bw" "$_mr_gs"
+done <<MR_EOF
+$MR_CASES
+MR_EOF
+# THE MUTATION ARM: a planted governing-skill whose `${HOME}` arm is gone. The two hooks must
+# then disagree on the `brace` spelling, and agree again on `dollar`, which the arm does not touch.
+MR_MUT_HOOKS="$(plant_hook_tree "$SANDBOX/fx/memroot-mut")"
+anchor "$PARTY_SG_W" "'\${HOME}'|'\${HOME}/'*) GS_MEM_ROOT=" 1
+grep -vF "'\${HOME}'|'\${HOME}/'*) GS_MEM_ROOT=" "$PARTY_SG_W" > "$MR_MUT_HOOKS/canonical-sdlc-governing-skill.sh"
+expect_eq "MEMROOT mutation: the doctored hook still refuses the dollar spelling (it runs)" "2" \
+  "$(mr_gs "$MR_MUT_HOOKS/canonical-sdlc-governing-skill.sh" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=$HOME/ccd')"
+expect_ne "MEMROOT mutation: …and on the brace spelling the agreement pin goes red" \
+  "$(mr_bw "$PARTY_EG" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')" \
+  "$(mr_gs "$MR_MUT_HOOKS/canonical-sdlc-governing-skill.sh" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')"
 
 finish

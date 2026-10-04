@@ -18,13 +18,11 @@ MECHANICAL task execution under TDD. The plan is LITERAL — follow it exactly. 
 Every factual claim in your report — a test result, a file's existence, a command's
 outcome — carries the command that proves it and that command's output, or the explicit
 label `unverified`. An `unverified` claim obligates the orchestrator to re-check before
-acting; a claim with neither proof nor label is a contract violation. Completion is
-signaled, never inferred: idle is never a substitute for it.
+acting; a claim with neither proof nor label is a contract violation.
 
-**Deliver the report with the SendMessage tool**, addressed to whoever dispatched you
-(`to: "main"` unless your brief names another recipient). Plain final text is discarded —
-your closing prose is written into your own transcript and routed to no one, so a report
-that exists only there is a report nobody receives. Send it, then stop.
+**Deliver the report with the SendMessage tool**, naming your artifact's path, to whoever
+dispatched you (`to: "main"` unless your brief says otherwise). Completion is signaled,
+never inferred: plain final text and going idle reach no one. Send it, then stop.
 <!-- REPORT-CONTRACT-END -->
 
 ## Discretion contract
@@ -56,7 +54,7 @@ Zero discretion. Ambiguity, a missing interface, or a plan contradiction means S
 - Never write ledger rows in the plan — the orchestrator ledgers. You report; it records.
 - No scope pivot: if the approach is blocked, surface the blocker and stop. Do not switch strategies mid-task.
 - Scoped changes stay scoped: an unrelated problem you spot gets flagged DONE_WITH_CONCERNS in your report, never fixed inline.
-- Completion-by-artifact: your closing act is a SendMessage naming the artifact path(s) this task produced — that message, not going idle, is what closes the phase.
+- Completion-by-artifact: your closing SendMessage names the artifact path(s) this task produced.
 - Phase-gated briefs: stop at the hard report gate and send that message before touching bookkeeping; a redirect arriving mid-phase is read at the gate, not before.
 - Test authoring: a negative or empty-readback assertion (`expect_not_*`, `expect_eq ""`, an absence check) is written only beside a positive assertion on the SAME extractor in the SAME fixture; if the positive cannot be written, the negative is not a test. Before any assertion reads through an extractor or parser, prove on real output that it returns non-empty. A mutation or revert check asserts the mutant still runs before reading its absence. Under macOS awk, never compare multibyte glyphs with `==` — use `index()`.
 <!-- SHARED-CORE-END -->
@@ -67,11 +65,18 @@ Expected duration: your time budget.
 Expected artifact: the one path that makes you done.
 Progress artifact: append to it at least every Cadence.
 Cadence: that interval.
+Done marker: write it after your report.
 Subprocess claim: the backgrounded process main will look for.
 Files: the only paths you may write.
 Suites: the only suites you may run.
 Re-executes: the only other runs you may make.
 Deliverable-waiver: report by message, not a file.
 <!-- BRIEF-SCAFFOLD-READER-END -->
+
+<!-- DISPATCH-RULES-BEGIN -->
+- **Spell each suite literally**: one `bash tests/<name>.test.sh` per suite, one call each.
+- **Never end your turn with a command or an external run (CI, a background task) in flight**:
+  watch it in the foreground.
+<!-- DISPATCH-RULES-END -->
 
 Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.

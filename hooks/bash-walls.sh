@@ -22,7 +22,7 @@
 # it is given, in the order it is given. The five are independent — none reads state
 # another writes during one event — so the argument order below is about how a composed
 # refusal READS, not about correctness. Every one of them always runs: a push that is
-# also a chain-class command gets both answers.
+# also draws a farm-out nudge gets both answers.
 #
 # THE PAYLOAD AND THE COMMAND ARE READ BEFORE THE LIBRARY IS. Not for convenience: the
 # repair allowlist in `loader_fail_closed` needs the command text, and it has to be
@@ -237,10 +237,42 @@ bionic_context 2>/dev/null || exit 0
 EVENT=$(bionic_jq .hook_event_name)
 [ -n "$EVENT" ] || EVENT="PreToolUse"
 
+# THE MEMORY STORE'S TWO FACTS, gathered for `wall_memory_store` (wave-24-fixit-1811 T12;
+# REQ-3, D16). A sixth wall, after the manifest's five, and a pure predicate over what this
+# block hands it — the store root and the command's write targets — per the freeze.
+#
+# THE SCREEN IS THE WORD `memory`, in the command, its quote-free strip (T4's `_wall_screen`
+# cache, shared with every screen in this process) or the payload cwd. A store path always
+# carries it; a command whose text, strip and cwd all lack it cannot name a store target
+# except through a glob or a variable the text does not pin, which `cmd_write_targets` could
+# not resolve either. A miss costs no fork and loads nothing.
+#
+# cmd-class.sh IS NOT IN THIS HOOK'S BIONIC_LIB_WANT (A-56.1: a union is fail-closed at its
+# widest member), so a hit loads it the way an advisory wall does: `wall_libs`, which steps
+# aside naming the file when it is missing, and then this wall has nothing to judge.
+BIONIC_MEM_PROJECTS=""; BIONIC_WRITE_TARGETS=""; _bw_mem=0
+case "$COMMAND$BIONIC_CWD" in *memory*) _bw_mem=1 ;; esac
+if [ "$_bw_mem" = 0 ]; then
+  _wall_screen "$COMMAND"
+  case "$_WALL_STRIPPED" in *memory*) _bw_mem=1 ;; esac
+fi
+if [ "$_bw_mem" = 1 ] && wall_libs memory-store cmd-class.sh; then
+  BIONIC_WRITE_TARGETS=$(cmd_write_targets "$COMMAND" "$BIONIC_CWD")
+  _bw_ch="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}}"
+  case "$_bw_ch" in
+    '~'|'~/'*)             _bw_ch="${HOME:-}${_bw_ch#\~}" ;;
+    '$HOME'|'$HOME/'*)     _bw_ch="${HOME:-}${_bw_ch#\$HOME}" ;;
+    '${HOME}'|'${HOME}/'*) _bw_ch="${HOME:-}${_bw_ch#\$\{HOME\}}" ;;
+  esac
+  case "$_bw_ch" in */) _bw_ch="${_bw_ch%/}" ;; esac
+  BIONIC_MEM_PROJECTS="$_bw_ch/projects"
+fi
+
 bionic_fold "$EVENT" \
   wall_protect_main \
   wall_protect_database \
   wall_evidence_gate \
   wall_farm_out_reminder \
-  wall_background_suite_guard
+  wall_background_suite_guard \
+  wall_memory_store
 exit $?

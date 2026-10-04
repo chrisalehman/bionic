@@ -11,6 +11,12 @@
 # machine-independent cost a shell hook can carry — jq, grep, awk, one more `git`
 # call — and unlike wall-clock ms it does not move between runs or machines.
 #
+# THE ONE EXCEPTION IS tests/hook-timeout.test.sh (wave-24-fixit-1811 T4, spec D7; Chris
+# 2026-10-03, design ledger Δ2). It gates wall-clock, 2 s per input, because the failure it
+# guards is a hook killed by its own `timeout:` in hooks.json — a cost that is quadratic in
+# the input, not a count of forks, and invisible here. Its margin is an order of magnitude
+# each way, so the noise argument above does not reach it. Every other number stays counts.
+#
 # THE COUNT, NOT THE NAME. `^\++ (cmd)( |$)` over the trace, summed across a fixed
 # roster of externals (jq grep awk sed cut tr git date stat find sort uniq head
 # tail wc python3 basename dirname readlink realpath) — one or more leading `+`
@@ -452,8 +458,14 @@ expect_eq "5c: a command that CAN reach tier 2 still gets its head reduction" \
 expect_true "5c2: …and the wall still speaks for it — the screen is not a silence" \
   test -n "$TIER2_OUT"
 
-# THE CHAIN SPLIT IS SHELL NOW, not an `awk` plus a `grep` plus a `sed` per segment.
-# Driven, not merely counted: the same chain must still raise the chain nudge.
+# THE CHAIN COUNT IS cmd-class.sh's `segments()` NOW (wave-24 T11, AC-7.7), not a split of
+# its own. T11 retired the chain tier-2 farm-out nudge and deleted `_chain_seg_split`,
+# `_CHAIN_SEG_AWK` and `_chain_stage_observes`; `_wall_cmd_fill` counts a `&&` chain through
+# the quote-aware segmenter, reached via `cmd_class_lines`. So `cd a && ls -l && npx cowsay hi`
+# is SILENT by design (tests/farm-out-reminder.test.sh §4b), and silence proves nothing alone:
+# a hook that exited early is silent too. 5d2 therefore pairs it with a chain the tier-1 arm
+# still denies — the same shape as tests/hook-timeout.test.sh rows d (silent) and d2 (deny) —
+# and the deny text is the proof that the hook ran the chain path to completion.
 CHAIN_PAYLOAD=$(jq -nc --arg s "$SID" --arg c "$PROJECT" \
   '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
     tool_input:{command:"cd a && ls -l && npx cowsay hi"}, tool_use_id:"toolu_t17_chain"}')
@@ -462,12 +474,34 @@ CHAIN_OUT=$(printf '%s' "$CHAIN_PAYLOAD" | env HOME="$FAKE_HOME" CLAUDE_CODE_SES
 FD_CHAIN="$SANDBOX/tracefd-chain.txt"
 trace_fd_hook "$BASH_WALLS_HOOK" "$CHAIN_PAYLOAD" "$FD_CHAIN"
 
-echo "hook-latency: chain payload — chain-split-awk=$(count_lines "$FD_CHAIN" "$XT"'.*gsub\(/&&/') sed=$(count_lines "$FD_CHAIN" "$XT_CMD"'sed( |$)')"
+# THE PAIRED WITNESS: the same chain with `&& make && echo three` behind it reaches tier 1.
+CHAIN_DENY_PAYLOAD=$(jq -nc --arg s "$SID" --arg c "$PROJECT" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+    tool_input:{command:"cd a && ls -l && npx cowsay hi && make && echo three"}, tool_use_id:"toolu_t23_chain_deny"}')
+CHAIN_DENY_OUT=$(printf '%s' "$CHAIN_DENY_PAYLOAD" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" \
+  CLAUDE_PROJECT_DIR="" BIONIC_PLUGINS_DIR="$NO_PLUGINS" bash "$BASH_WALLS_HOOK" 2>/dev/null)
 
-expect_eq "5d: the && split forks no awk of its own" \
-  "0" "$(count_lines "$FD_CHAIN" "$XT"'.*gsub\(/&&/')"
-expect_true "5d2: …and the chain still raises its nudge" \
-  test -n "$CHAIN_OUT"
+CHAIN_LINES_FORKS=$(count_mode "$FD_CHAIN" lines)
+CHAIN_HEAD_FORKS=$(count_mode "$FD_CHAIN" head)
+echo "hook-latency: chain payload — classifier mode=lines=$CHAIN_LINES_FORKS mode=head=$CHAIN_HEAD_FORKS"
+
+# THE FORK COUNT, MEASURED (wave-24 T23) on the 3-segment `cd a && ls -l && npx cowsay hi`:
+# `awk -v mode=lines` forks = 4, `awk -v mode=head` forks = 1. The four `lines` forks are cmd-class.sh's
+# `cmd_class_lines` (cmd-class.sh:1292) — one at trace depth 2, the segmentation of the whole
+# flattened text that `_wall_cmd_fill` counts through (T11's path), and three at depth 3, one per
+# segment. The `head` fork is the `npx` segment's tier-2 head reduction. The 1 + 3 split is read
+# off the trace nesting, not separately asserted. The old `gsub(/&&/` awk is gone with
+# `_chain_seg_split`, so the old zero-count could only pass vacuously and is not kept: the pin is
+# the positive count on the same `count_mode` extractor that 5a/5b/5c already use.
+expect_eq "5d: the && chain count forks cmd_class_lines 1 + 3 times (segments() path, T11), not a split of its own" \
+  "4" "$CHAIN_LINES_FORKS"
+expect_eq "5d1: …and reduces exactly one head, the npx segment's" \
+  "1" "$CHAIN_HEAD_FORKS"
+# 5d2 — silent by T11's design, so the silence is only evidence beside the deny below.
+expect_eq "5d2: the 3-segment chain with no tier-1 segment is silent (chain tier 2 retired, T11)" \
+  "" "$CHAIN_OUT"
+expect_contains "5d3: …and the same chain with a build segment behind it still denies — the hook ran the chain path to completion" \
+  "chain-class command" "$CHAIN_DENY_OUT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "6: the governing-skill hook walks the plans directory exactly once"

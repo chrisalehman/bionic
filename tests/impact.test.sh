@@ -951,4 +951,114 @@ expect_contains "planted: a sandbox x.tmpl -> skills/x.md pair is followed (AC-1
 expect_eq "planted: …while the base fixture (no render.sh) resolves nothing for the same shape" \
   "" "$(suites "$FX" agents-src/templates/x.md.tmpl)"
 
+# ── §NEST a root that holds nested worktrees and sandbox records ────────────
+# WHY (wave-24 T19, AC-5.5). At the main checkout, which holds ten nested
+# worktrees under `.worktrees/` and a `.bionic/docs/record` tree of sandbox
+# copies, one call ran past 190 s; inside a worktree with none it took 5 s. Two
+# walks were to blame, and only one of them was the one the first reading named:
+#   - the `.git` / `.worktrees` exclusions were `-not -path`, which filters the
+#     RESULTS and still descends; `-prune` does not descend at all.
+#   - the symlink walk never excluded `.bionic` at all, so every symlink in a
+#     sandbox record became a root alias, and each alias is another pass of the
+#     de-aliasing loop for every edge the derivation resolves. That one is the
+#     bulk of the minutes: `find` over all of `.worktrees` costs ~10 ms.
+# The fixture reproduces both at a scale where the unfixed program is slow
+# enough to measure and the fixed one is not: sixty suites (edges to resolve),
+# ten nested worktree copies, and 400 symlinks under `.bionic`.
+NEST_BUDGET_MS=10000
+
+# mk_nest_root <dir> <1|0> — sixty suites each pinning one hook and one library;
+# with <1>, ten nested worktree copies and 400 sandbox-record symlinks beside them.
+mk_nest_root() {
+  local r="$1" noise="$2" i k w
+  mkdir -p "$r/tests/lib" "$r/hooks" "$r/payload/scripts/lib"
+  ln -s ../hooks "$r/payload/hooks"
+  printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\n' >"$r/tests/lib/resolve-roots.sh"
+  : >"$r/tests/run.sh"
+  for i in $(seq 1 60); do
+    printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\ngrep -q x "${BIONIC_SCRIPTS_DIR}/hooks/h%s.sh"\ngrep -q x "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/l%s.sh"\n' \
+      "$i" "$i" >"$r/tests/s$i.test.sh"
+    printf '#!/bin/bash\necho h%s\n' "$i" >"$r/hooks/h$i.sh"
+    printf '#!/bin/bash\necho l%s\n' "$i" >"$r/payload/scripts/lib/l$i.sh"
+    printf 'run "s%s.test.sh" bash tests/s%s.test.sh\n' "$i" "$i" >>"$r/tests/run.sh"
+  done
+  [ "$noise" = 1 ] || return 0
+  mkdir -p "$r/.bionic/docs/record/x"
+  for k in $(seq 1 400); do ln -s ../../../../hooks "$r/.bionic/docs/record/x/lnk$k"; done
+  for w in 1 2 3 4 5 6 7 8 9 10; do
+    mkdir -p "$r/.worktrees/w$w"
+    cp -R "$r/tests" "$r/hooks" "$r/payload" "$r/.worktrees/w$w/"
+  done
+}
+
+NEST_QUIET="$TMP/nest-quiet"
+NEST_NOISY="$TMP/nest-noisy"
+mk_nest_root "$NEST_QUIET" 0
+mk_nest_root "$NEST_NOISY" 1
+
+NEST_QUIET_MS="$(timed_ms "$TMP/nest.quiet" env BIONIC_IMPACT_CACHE_DIR="" \
+  BIONIC_IMPACT_ROOT="$NEST_QUIET" bash "$IMPACT" hooks/h7.sh payload/scripts/lib/l9.sh)"
+NEST_NOISY_MS="$(timed_ms "$TMP/nest.noisy" env BIONIC_IMPACT_CACHE_DIR="" \
+  BIONIC_IMPACT_ROOT="$NEST_NOISY" bash "$IMPACT" hooks/h7.sh payload/scripts/lib/l9.sh)"
+
+# NOT VACUOUS: an empty answer would be "identical" to an empty answer, and a
+# failed timing instrument reads as the slowest possible time below.
+expect_nonempty "nest: the quiet root answers at all" "$(cat "$TMP/nest.quiet")"
+expect_contains "nest: …and names the suite that pins hooks/h7.sh" "s7.test.sh" "$(cat "$TMP/nest.quiet")"
+expect_eq "nest: nested worktrees and sandbox-record symlinks change no line of the answer"   "$(cat "$TMP/nest.quiet")" "$(cat "$TMP/nest.noisy")"
+if [ "${NEST_NOISY_MS:-999999}" -lt "$NEST_BUDGET_MS" ]; then
+  ok "nest: a root with ten nested worktrees answers in < ${NEST_BUDGET_MS} ms (${NEST_NOISY_MS} ms; quiet ${NEST_QUIET_MS} ms)"
+else
+  no "nest: a root with ten nested worktrees answers in < ${NEST_BUDGET_MS} ms" \
+     "${NEST_NOISY_MS:-no timing} ms (quiet root ${NEST_QUIET_MS:-no timing} ms) — the walks still pay for what they exclude"
+fi
+
+# ── §NEST-LIB sandbox beds under .bionic are not library directories ────────
+# WHY (wave-24 T21, AC-5.5). With T19's prunes in, the main checkout still took
+# 17.7 s cold against 5.3 s at a clean worktree, and 13.1 s of it was settling the
+# `source?` candidates. The library-directory walk pruned `.git` and `.worktrees`
+# but not `.bionic`, where critic and review beds hold whole copies of `tests/lib`
+# and `payload/scripts/lib`: eight extra library directories, so every source line
+# offered four times the candidates, and every candidate a bed copy satisfied
+# became a real `source` edge, each settled by a forked de-alias. The fixture
+# reproduces it: hooks that source their library through `$BIONIC_LIB` (no static
+# reading resolves it, so every library directory is a candidate) and forty beds
+# that copy `tests/` and `payload/` under `.bionic/docs/record`.
+mk_bed_root() { # mk_bed_root <dir> <beds>
+  local r="$1" n="$2" i b
+  mk_nest_root "$r" 0
+  for i in $(seq 1 60); do
+    printf '#!/bin/bash\n. "$BIONIC_LIB/l%s.sh"\necho h%s\n' "$i" "$i" >"$r/hooks/h$i.sh"
+  done
+  for b in $(seq 1 "$n"); do
+    mkdir -p "$r/.bionic/docs/record/beds/b$b"
+    cp -R "$r/tests" "$r/payload" "$r/.bionic/docs/record/beds/b$b/"
+  done
+}
+BED_QUIET="$TMP/bed-quiet"
+BED_NOISY="$TMP/bed-noisy"
+mk_bed_root "$BED_QUIET" 0
+mk_bed_root "$BED_NOISY" 40
+
+BED_QUIET_MS="$(timed_ms "$TMP/bed.quiet" env BIONIC_IMPACT_CACHE_DIR="" \
+  BIONIC_IMPACT_ROOT="$BED_QUIET" bash "$IMPACT" hooks/h7.sh payload/scripts/lib/l9.sh)"
+BED_NOISY_MS="$(timed_ms "$TMP/bed.noisy" env BIONIC_IMPACT_CACHE_DIR="" \
+  BIONIC_IMPACT_ROOT="$BED_NOISY" bash "$IMPACT" hooks/h7.sh payload/scripts/lib/l9.sh)"
+
+expect_contains "nest-lib: the quiet root names the suite that pins payload/scripts/lib/l9.sh" \
+  "s9.test.sh" "$(cat "$TMP/bed.quiet")"
+expect_eq "nest-lib: forty sandbox beds change no line of the answer" \
+  "$(cat "$TMP/bed.quiet")" "$(cat "$TMP/bed.noisy")"
+# The hook's `$BIONIC_LIB` source resolves to the real library — and only to it.
+expect_contains "nest-lib: a hook's \$BIONIC_LIB source reaches the real library (s7 via h7)" \
+  "s7.test.sh" "$(oneline "$BED_NOISY" payload/scripts/lib/l7.sh)"
+expect_eq "nest-lib: …and never a bed's copy of it, which no suite reads" \
+  "" "$(suites "$BED_NOISY" .bionic/docs/record/beds/b1/payload/scripts/lib/l7.sh)"
+if [ "${BED_NOISY_MS:-999999}" -lt "$NEST_BUDGET_MS" ]; then
+  ok "nest-lib: a root holding forty sandbox beds answers in < ${NEST_BUDGET_MS} ms (${BED_NOISY_MS} ms; quiet ${BED_QUIET_MS} ms)"
+else
+  no "nest-lib: a root holding forty sandbox beds answers in < ${NEST_BUDGET_MS} ms" \
+     "${BED_NOISY_MS:-no timing} ms (quiet root ${BED_QUIET_MS:-no timing} ms) — the library walk still enters .bionic"
+fi
+
 finish

@@ -724,17 +724,26 @@ if [ -n "$IS_START" ]; then
   # NEVER FAILS THE HOOK (PostToolUse invariant, restated at the top of this file): a
   # missing or unreadable file prints nothing and logs one stderr line rather than
   # touching the exit code below.
+  #
+  # A SECOND DECIDER, ON THE JOINED ROW (wave-24 T6, D8, research-R3 Q2/Q3). For a teammate
+  # `agent_type` is the dispatch NAME, so the test above never fires for one. The name join
+  # below finds the roster row, and that row's `subagent_type=` carries the TYPE the
+  # dispatch declared; `terms_for_row` asks it the same `bionic:*` question once the join
+  # has run, and prints at most once (`TERMS_DELIVERED`). Delivery still never depends on a
+  # row existing: the `agent_type` test here is first and unchanged.
+  TERMS_DELIVERED=""
+  deliver_terms() {
+    SURVIVAL_FILE="$BIONIC_LIB/../../context/survival.md"
+    if [ -r "$SURVIVAL_FILE" ]; then
+      jq -cn --rawfile _sf_c "$SURVIVAL_FILE" \
+        '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$_sf_c}}' \
+        2>/dev/null && TERMS_DELIVERED=1
+    else
+      echo "execution-recorder: survival terms not found at $SURVIVAL_FILE — printing nothing" >&2
+    fi
+  }
   case "$(sanitize "$START_TYPE" 200)" in
-    bionic:*)
-      SURVIVAL_FILE="$BIONIC_LIB/../../context/survival.md"
-      if [ -r "$SURVIVAL_FILE" ]; then
-        jq -cn --rawfile _sf_c "$SURVIVAL_FILE" \
-          '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$_sf_c}}' \
-          2>/dev/null
-      else
-        echo "execution-recorder: survival terms not found at $SURVIVAL_FILE — printing nothing" >&2
-      fi
-      ;;
+    bionic:*) deliver_terms ;;
   esac
 
   [ -f "$ROSTER_FILE" ] || exit 0
@@ -974,6 +983,13 @@ if [ -n "$IS_START" ]; then
   fi
   [ -n "$ROW" ] || exit 0
 
+  # THE TEAMMATE'S TERMS, decided on the row the joins above found (wave-24 T6, D8).
+  case "$(line_field "$ROW" subagent_type)" in
+    bionic:*) [ -n "$TERMS_DELIVERED" ] || deliver_terms ;;
+  esac
+  TERMS_AT=""
+  [ -n "$TERMS_DELIVERED" ] && TERMS_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
   # S6 (AC-5, R6): THE RESUME CASE. `agent_id` here is the transcript form, and
   # a resume delivers this same event again for an id the roster already
   # carries — see prior_launch_for_agent() above (defined beside ROSTER_FILE).
@@ -1015,18 +1031,20 @@ if [ -n "$IS_START" ]; then
   # `restarted_at` follows the same substitute-or-append rule, and only on a restart: the
   # joined row is an intended/confirmed row, which no writer stamps with one, so on every
   # other identification the row is byte-identical to before T20b.
-  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" -v ra="$RESTARTED_AT" '
-    BEGIN { RS = "|"; ORS = ""; seen = 0; rseen = 0 }
+  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" -v ra="$RESTARTED_AT" -v td="$TERMS_AT" '
+    BEGIN { RS = "|"; ORS = ""; seen = 0; rseen = 0; tseen = 0 }
     {
       f = $0
       if (f ~ /^status=/)   f = "status=identified"
+      if (td != "" && f ~ /^terms-delivered=/) { f = "terms-delivered=" td; tseen = 1 }
       if (f ~ /^agent_id=/) { f = "agent_id=" id; seen = 1 }
       if (pl != "" && f ~ /^launched_at=/) f = "launched_at=" pl
       if (ra != "" && f ~ /^restarted_at=/) { f = "restarted_at=" ra; rseen = 1 }
       printf "%s%s", (NR > 1 ? "|" : ""), f
     }
     END { if (!seen) printf "|agent_id=%s", id
-          if (ra != "" && !rseen) printf "|restarted_at=%s", ra }')
+          if (ra != "" && !rseen) printf "|restarted_at=%s", ra
+          if (td != "" && !tseen) printf "|terms-delivered=%s", td }')
   printf '%s\n' "$IDENTIFIED" >> "$ROSTER_FILE" 2>/dev/null
 
   # NO BOUND ON THE ROSTER, for the reason ARM 2 gives above: a roster row is a

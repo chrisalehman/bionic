@@ -107,7 +107,7 @@ TOOL_NAME=$(_jq '.tool_name')
 # brings `cmd-class.sh` (wave-20 T4; REQ-7, D7) in itself for CMD_RUN_NORM_AWK, the one run
 # normaliser its lift pastes in, so this hook names only brief.sh and lets that source do
 # the pulling.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh"
+BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -234,6 +234,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # variables, so sourcing them costs a parse and nothing else.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/brief.sh"
+# THE MODEL-FACING ADVISORY'S EMITTER (wave-24 T14, A-orch-20): `_fold_emit_context` is the one
+# builder of `hookSpecificOutput.additionalContext`, the farm-out nudge's. Functions only.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/fold.sh"
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
@@ -1188,9 +1192,9 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # it can speak to — an `idle` row still closes, an absent row still closes — and the
   # Patrol tick still consumes the same reader unchanged. Only the case where there is
   # nothing to read has stopped being an error.
-  budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
+  budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>", then the open names (exit 0)
     local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed="" notfresh=""
-    local la_out la_rc row_dark dark="" closed still_open
+    local la_out la_rc row_dark dark="" closed still_open open_names="" holds
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
@@ -1248,14 +1252,20 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       fi
       case "$la_rc" in
         0)
-          open=$(( open + 1 ))
-          claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
-          [ -n "$claims" ] && claimed=$(( claimed + 1 ))
+          # THE ROW'S ROLE DECIDES WHAT IT COSTS (wave-24 T10, D11). Its NAME joins the open
+          # list, and `budget_open_writers` (payload/scripts/lib/roster.sh) turns that list into
+          # the writer count after the dark rows are settled, so a read-only row holds no
+          # writer slot and the Patrol's tick, which calls the same function, reads the same
+          # number. The SUITE slot is the row's own: a declared claim, or a test-runner.
+          open_names="${open_names}${nm}
+"
+          holds=""
+          roster_row_holds_suite "$line" && { holds=1; claimed=$(( claimed + 1 )); }
           # COUNTED BY THE FALLBACK, NOT BY A READING. The row goes on the dark list with
-          # its claim, and the block below asks the roster whether it has since closed. A
-          # row the panel spoke for never lands here, which is what makes that question
-          # unreachable on the fresh path.
-          [ -n "$row_dark" ] && dark="${dark}${nm}|${claims}
+          # whether it holds a suite slot, and the block below asks the roster whether it has
+          # since closed. A row the panel spoke for never lands here, which is what makes that
+          # question unreachable on the fresh path.
+          [ -n "$row_dark" ] && dark="${dark}${nm}|${holds}
 "
           ;;
         1) : ;;
@@ -1286,7 +1296,7 @@ DARKNAMES
           # grep's own 0 — a closed row reads as still open. A here-string has no second
           # process to lose.
           /usr/bin/grep -qxF -- "$nm" <<< "$closed" || continue
-          open=$(( open - 1 ))
+          open_names=$(printf '%s' "$open_names" | /usr/bin/grep -vxF -- "$nm")
           [ -n "$claims" ] && claimed=$(( claimed - 1 ))
         done <<DARK
 $dark
@@ -1294,7 +1304,29 @@ DARK
       fi
     fi
 
-    printf '%s %s' "$open" "$claimed"
+    open=$(printf '%s\n' "$open_names" | budget_open_writers "$f")
+    # THE NAMES RIDE BELOW THE COUNTS (wave-24 T13, D10), one per line, so the writer-budget
+    # refusal can list the rows it counted without a second reading of the roster.
+    printf '%s %s\n%s' "$open" "$claimed" "$open_names"
+  }
+
+  # budget_writer_rows <roster file> <open names> -> one line per open WRITER row: its name and
+  # the command that closes it. The same `budget_open_writers` that produced the count asks each
+  # name alone, so the rows listed are the rows counted and a read-only row is never one of them.
+  # Run on the refusal path only. The ack command is PRINTED for the orchestrator and never run
+  # here: this gate executes the sweeper on no path, and the suite pins that. The path is
+  # printed as ONE shell word, so a plugin root with a space pastes whole (wave-24 T29, I2).
+  DP_ACK_SCRIPT="$(refuse_shell_word "${HOOK_DIR}/session-sweeper.sh")"
+  budget_writer_rows() {
+    local f="$1" nm
+    while IFS= read -r nm; do
+      [ -n "$nm" ] || continue
+      [ "$(printf '%s\n' "$nm" | budget_open_writers "$f")" = "1" ] || continue
+      printf '    open: %s — once it has landed, close it: bash %s ack %s\n' \
+        "$nm" "$DP_ACK_SCRIPT" "$(refuse_quote "$nm")"
+    done <<WRITERNAMES
+$2
+WRITERNAMES
   }
 
   # LIVE LEASES ON DISK. A directory under `.worktrees` whose `.git` is a FILE is a
@@ -1317,13 +1349,15 @@ DARK
   # passed is the one named. What changed is that the wall records instead of exiting, so
   # the arms after it are read in the same pass.
   BUDGET_DENIED=""
-  budget_deny() {  # <fact> <the one line naming the resource, its ceiling and its count>
+  budget_deny() {  # <fact> <the one line naming the resource, its ceiling and its count> [rows]
     # ONE FIX FOR ALL THREE ARMS (rows 43-45): the fact names which ceiling was passed
-    # and the repair is the same act whichever it was.
+    # and the repair is the same act whichever it was. The writer arm adds the rows it counted,
+    # each with the command that closes it (wave-24 T13, D10, AC-6.7).
     [ -z "$BUDGET_DENIED" ] || return 0
     BUDGET_DENIED=1
     dp_finding "$1" "land or stand down a row" \
-      "    $2
+      "    $2${3:+
+$3}
 
 budget: ${PARALLEL_BUDGET}
   declared by ${PLAN}
@@ -1331,7 +1365,7 @@ budget: ${PARALLEL_BUDGET}
 That string is derived once, at Step 0, from this machine's own resources probe, and
 recorded verbatim — nothing re-derives it here, and raising it is a Step-0 act.
 
-Fix: land or stand down an open row first (\`bash <plugin-root>/hooks/stop-orders.sh
+Fix: land or stand down an open row first (\`bash ${HOOK_DIR}/stop-orders.sh
 standdown\` computes the batch), or re-run Step 0's probe and raise the line if the
 machine genuinely has the room."
   }
@@ -1350,15 +1384,22 @@ machine genuinely has the room."
   # no answer to read, so the three ceilings below are the only thing left between a
   # brief and its dispatch.
   BUDGET_COUNTS=$(budget_roster_counts "$ROSTER_FILE" "$BUDGET_TRANSCRIPT")
+  BUDGET_OPEN_NAMES=""
+  case "$BUDGET_COUNTS" in *$'\n'*) BUDGET_OPEN_NAMES="${BUDGET_COUNTS#*$'\n'}" ;; esac
+  BUDGET_COUNTS="${BUDGET_COUNTS%%$'\n'*}"
   BUDGET_OPEN="${BUDGET_COUNTS%% *}"
   BUDGET_CLAIMED="${BUDGET_COUNTS##* }"
   BUDGET_UNMEASURED=""
 
   B_WRITERS="$DP_BUDGET_WRITERS"
   if [ -n "$B_WRITERS" ]; then
-    [ $(( BUDGET_OPEN + 1 )) -gt "$B_WRITERS" ] && budget_deny \
+    # A READ-ONLY DISPATCH ASKS FOR NO WRITER SLOT (wave-24 T10, D11): the +1 is a writer's.
+    BUDGET_ASK=1
+    role_is_readonly "$DP_SUBAGENT" && BUDGET_ASK=0
+    [ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && budget_deny \
       "this passes the run's writer budget" \
-      "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + 1 ))"
+      "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + BUDGET_ASK ))" \
+      "$(budget_writer_rows "$ROSTER_FILE" "$BUDGET_OPEN_NAMES")"
   elif [ -z "$DP_BUDGET_NAMED" ]; then
     BUDGET_UNMEASURED="${BUDGET_UNMEASURED} writers"
   fi
@@ -1552,6 +1593,7 @@ C_PROGRESS=$(sanitize "$(field_of progress)" 300)
 C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 C_WAIVER=$(sanitize "$(field_of waiver)" 300)
+C_DONE=$(sanitize "$(field_of done)" 300)   # the Done marker (wave-24 T9, D3); on the row only when declared
 # THE THREE INSTRUMENT FIELDS, READ THROUGH THE GRAMMAR (wave-20 T6; REQ-4, D4, Δ10).
 # `brief_field` (payload/scripts/lib/brief.sh) bounds each kind as the roster row stores it —
 # the three are list-valued and never cut — so the scaffold marks and the row below hold
@@ -1780,19 +1822,31 @@ dp_scaffold_marked() {
 # The single-fault no-deliverable detail carries the same constant, and the shared
 # brief-scaffold block (agents-src/blocks/brief-scaffold.md) says the same in its header.
 DP_PROMPT_ONLY="The wall reads the prompt text only. A brief file the prompt points at is not read, so copy its scaffold lines into the prompt."
+#
+# A BRIEF THAT LACKS NO LINE IS SHOWN NO SCAFFOLD (wave-24 T13, D10, AC-6.7). The scaffold is
+# there to say which lines to add, and its `<ADD>` marks are that answer. When it carries no
+# mark the brief already has every line, the faults are state (a full budget, a name in flight),
+# and nine blank template lines under them sent the author looking for a brief fault that does
+# not exist. So the scaffold and the prompt-only line ride only beside a mark.
 dp_refuse_findings() {
   [ "$DP_FINDING_N" -gt 0 ] || return 0
   if [ "$DP_FINDING_N" -eq 1 ]; then
     refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
   fi
+  local _scaffold
+  _scaffold="$(dp_scaffold_marked)"
+  case "$_scaffold" in
+    *' <ADD>'*) _scaffold="${_scaffold}
+${DP_PROMPT_ONLY}
+
+" ;;
+    *) _scaffold="" ;;
+  esac
   # `DP_FAULT_LINES` and `DP_NOTCHECKED` each end in their own newline when non-empty and
   # are empty strings otherwise, so this interpolation adds no blank line when either is
   # absent — a two-fault brief with nothing unchecked renders exactly one extra line.
   refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
-    "${DP_FAULT_LINES}${DP_NOTCHECKED}$(dp_scaffold_marked)
-${DP_PROMPT_ONLY}
-
-See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required."
+    "${DP_FAULT_LINES}${DP_NOTCHECKED}${_scaffold}See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required."
 }
 
 # ======================================================= THE AMBIGUITY WALL
@@ -2213,6 +2267,46 @@ esac
 # exits 0, which is exactly the status the ledger below would otherwise read as a launch.
 dp_refuse_findings
 
+# ============================= THE BRIEF BODY ADVISORY (wave-24 T14; REQ-8, D13)
+#
+# A dispatch that reached this line is allowed, so what follows is only ever said, never decided.
+# `brief_body_advisories` (payload/scripts/lib/brief.sh) reads the PROSE the contract grammar
+# never sees for the two shapes that meet a wall minutes later — a `bash tests/x.test.sh` the
+# row does not budget, and an edit of a path outside `Files:` — and each finding goes out on
+# the model's channel, ending in the `amend` line that would declare it. Placed below the spend
+# so a refused dispatch carries only its refusal, and above the ledger so the advice precedes the
+# journalled launch; nothing it does can change the exit status (AC-8.4).
+#
+# THE CHANNEL IS THE MODEL'S (A-orch-20): `hookSpecificOutput.additionalContext` on stdout, exit 0.
+# An advisory the model never reads is silence, and AC-8.1/8.3 fail on silence; stderr from a
+# passing PreToolUse reaches nobody the author is, and is not on refuse.sh's measured channel
+# table at all. That table scores `additionalContext` model:no, but it was a headless stream-json
+# measurement. Observed live in the interactive orchestrator session (2026-10-03): walls.sh's
+# farm-out tier-1 nudge, which rides this same field, arrived as "PreToolUse:Bash hook additional
+# context: farm-out checkpoint ...", so the channel does reach the model there.
+#
+# THE EMITTER IS THE FARM-OUT NUDGE'S, NOT A SECOND ONE: `_fold_emit_context` (lib/fold.sh) builds
+# the object through `jq`, so no JSON is escaped by hand here. This is the only stdout this path
+# prints (a refusal exited above, and nothing below writes to it), so it is one object by
+# construction. With no `jq` the lines fall back to `warn`, as fold.sh does for its own nudge.
+# The poker path goes in as ONE shell word (wave-24 T29, critic I2): the amend line prints it
+# verbatim, and a plugin root with a space split in two when pasted.
+_dp_adv_all=$(brief_body_advisories "$(_jq '.tool_input.prompt')" "$AGENT_NAME" "$C_FILES" "$SUITES_ALLOWED" "$C_RE_EXECUTES" "$(refuse_shell_word "$HOOK_DIR/session-poker.sh")")
+if [ -n "$_dp_adv_all" ]; then
+  _dp_adv_ctx="brief advisory (the dispatch is allowed; nothing was refused):
+$_dp_adv_all"
+  _dp_adv_json=$(_fold_emit_context PreToolUse "$_dp_adv_ctx")
+  if [ -n "$_dp_adv_json" ]; then
+    printf '%s\n' "$_dp_adv_json"
+  else
+    while IFS= read -r _dp_adv; do
+      [ -n "$_dp_adv" ] && warn "$_dp_adv"
+    done <<ADV_EOF
+$_dp_adv_all
+ADV_EOF
+  fi
+fi
+
 # ---------- THE LEDGER STOPS AT DEPTH ONE ----------
 # (session-20260815-landing-supervision T6; design D1 "writers stay put".)
 #
@@ -2346,6 +2440,7 @@ ROW=$(roster_row \
   "suites_allowed=${SUITES_ALLOWED}" \
   "suites_source=${SUITES_SOURCE}" \
   "re_executes=${C_RE_EXECUTES}" \
+  ${C_DONE:+"done=${C_DONE}"} \
   "tool_use_id=${TOOL_USE_ID}" \
   "plan=${ROSTER_PLAN}") || ROW=""
 

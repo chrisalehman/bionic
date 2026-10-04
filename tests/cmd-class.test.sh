@@ -193,6 +193,27 @@ case_is none 'bash run.sh'
 case_is none 'run.sh'
 case_is none 'sudo git status'
 
+# --- T24: only the PROJECT'S runner is the full-suite runner ---
+# The arms read the basename `run.sh` alone, so any script of that name — a scratch replay
+# harness, `scripts/run.sh` — was classed `suite` and refused as the full tree. The runner
+# is `tests/run.sh`, `./tests/run.sh`, or a path ending `/tests/run.sh`.
+case_is none '/bin/bash /private/tmp/x/run.sh'
+case_is none 'bash scripts/run.sh'
+case_is none './run.sh'
+case_is none 'sh run.sh'
+case_is none 'scripts/run.sh'
+case_is none './scripts/run.sh --serial'
+case_is none 'sudo bash /tmp/scratch/replay/run.sh'
+# CONTROLS — the project's runner, in every spelling, stays the suite.
+case_is suite 'bash tests/run.sh'
+case_is suite './tests/run.sh'
+case_is suite 'bash /abs/repo/tests/run.sh'
+case_is suite 'tests/run.sh --serial'
+case_is suite '/abs/repo/tests/run.sh'
+case_is suite '/bin/bash /abs/repo/tests/run.sh --serial'
+case_is none 'bash tests/run.sh --dry-run'
+case_is none '/abs/repo/tests/run.sh --help'
+
 # --- cmd_unwrap_head: the reduction farm-out's tier-2 matcher reads (B-4a) ---
 # It replaced two sed twins in farm-out-reminder.sh whose rule set was smaller
 # than the library's, so `sudo npx x` and `FOO=1 npx x` never reached tier-2.
@@ -969,8 +990,11 @@ targets_in_are '$s.test.sh'      'bash "tests/$s.test.sh"'
 # --- (b) --dry-run runs nothing, so it spends nothing ---
 targets_in_are ''                'bash tests/run.sh --dry-run'
 targets_in_are ''                'bash tests/run.sh --dry-run 2>&1 | tee /tmp/d.log'
-expect_eq "C8 …and --dry-run is still suite-CLASS (the class arm is unchanged)" \
-  "suite" "$(class_of 'bash tests/run.sh --dry-run')"
+# THE CLASS FOLLOWS NOW (wave-24 T5, AC-7.5). This row used to pin `--dry-run` as still
+# suite-CLASS, and on the main thread that class drew the farm-out deny for a command that
+# runs nothing (research R4 §4). §CASE below owns the whole flag set.
+expect_eq "C8 …and --dry-run is not suite-class either" \
+  "none" "$(class_of 'bash tests/run.sh --dry-run')"
 # The exemption is the flag, not the runner: a real run beside it is still named.
 targets_in_are 'run.sh'          'bash tests/run.sh --serial'
 
@@ -1205,5 +1229,430 @@ expect_eq "C11 …and leaves a field with nothing to strip byte-identical" \
   "${T4_BT}npx jest --testPathPatterns 'x|y'${T4_BT}" \
   "$(runs_norm_of "${T4_BT}npx jest --testPathPatterns 'x|y'${T4_BT}")"
 expect_eq "C11 …and an empty field is empty" "" "$(runs_norm_of '')"
+
+
+section "§WAIT — REQ-7 AC-7.3 (D12): a fan-out that waits is not backgrounded"
+# THE FALSE REFUSAL (research R4 §2). `cmd_backgrounded` answered yes for any bare `&`, so
+# `a & b & wait` — two suites in parallel, the shell held until both finish — was refused as
+# if its result could never be read. The rule now: a `&` job is PENDING in its subshell
+# group until an unconditional bare `wait` in that same group, outside any branch the job
+# was not also in, and not a pipeline stage. A job still pending at the end backgrounds.
+# Driven through C9's `bg_of`, whose positive rows (C9) sit beside these.
+bg_is no  'bash tests/a.test.sh & bash tests/b.test.sh & wait'
+bg_is no  '(bash tests/a.test.sh & bash tests/b.test.sh & wait)'
+bg_is no  '( bash tests/a.test.sh & bash tests/b.test.sh & wait ) 2>&1 | tee /tmp/w.log'
+bg_is no  'bash tests/a.test.sh & bash tests/b.test.sh &
+wait'
+bg_is no  'for s in a b; do bash tests/$s.test.sh & done; wait'
+bg_is no  'for s in a b; do bash tests/$s.test.sh & wait; done'
+bg_is no  'bash tests/a.test.sh & bash tests/b.test.sh & wait; echo rc=$?'
+# STILL REFUSED — every shape the requirement names, and the branch shapes beside them.
+bg_is yes 'bash tests/a.test.sh &'
+bg_is yes 'bash tests/a.test.sh & bash tests/b.test.sh'
+bg_is yes '(bash tests/a.test.sh &); wait'
+bg_is yes 'bash tests/a.test.sh & false && wait'
+bg_is yes 'bash tests/a.test.sh & wait | cat'
+bg_is yes 'bash tests/a.test.sh & p=$!; wait $p'
+bg_is yes 'nohup bash tests/a.test.sh'
+bg_is yes 'setsid bash tests/a.test.sh'
+bg_is yes 'bash tests/a.test.sh & (wait)'
+bg_is yes 'bash tests/a.test.sh & wait %1; bash tests/b.test.sh &'
+bg_is yes 'bash tests/a.test.sh & wait &'
+bg_is yes 'bash tests/a.test.sh & if true; then wait; fi'
+bg_is yes 'bash tests/a.test.sh & if true; then
+wait
+fi'
+bg_is yes 'case $x in a) bash tests/a.test.sh & ;; b) wait;; esac'
+bg_is yes 'if c; then bash tests/a.test.sh & else wait; fi'
+bg_is yes 'nohup bash tests/a.test.sh & wait'
+# `wait $p` must be pinned against a positive on the same shape, or a wait-parser that
+# admitted nothing would pass it: `wait` with no operand is the admit, one word apart.
+bg_is no  'bash tests/a.test.sh & wait'
+
+
+section "§CASE — REQ-7 AC-7.5 (D12): a flag that runs nothing, and the words of a case"
+# TWO FALSE REFUSALS AND ONE BYPASS (research R4 §4). `tests/run.sh --dry-run`, `-h`,
+# `--help` and `--list` read as suite-class, so the main-thread farm-out wall denied a
+# command that runs nothing; a suite named only in a `case` PATTERN landed at argv[0] and
+# read as a run; and a suite run inside a case ARM read as `case` at argv[0], class none.
+for ro in 'bash tests/run.sh --dry-run' './tests/run.sh --list' 'bash tests/run.sh --help' \
+          'tests/run.sh -h' 'bash tests/run.sh --serial --dry-run'; do
+  expect_eq "§CASE [$ro] is not a suite run" "none" "$(class_of "$ro")"
+  expect_eq "§CASE …and claims nothing" "" "$(claims_of "$ro")"
+done
+expect_empty "§CASE farm-out is SILENT on bash tests/run.sh --dry-run" \
+  "$(farm_decision 'bash tests/run.sh --dry-run')"
+# POSITIVE, SAME EXTRACTORS: --serial alone is the full tree, and a suite file is not
+# exempted by a flag it does not take.
+expect_eq "§CASE --serial alone is still a full-tree run" "suite" "$(class_of 'bash tests/run.sh --serial')"
+expect_eq "§CASE …naming run.sh" "run.sh" "$(targets_of 'bash tests/run.sh --serial')"
+expect_eq "§CASE ./tests/run.sh is still a run" "run.sh" "$(targets_of './tests/run.sh')"
+expect_eq "§CASE a suite file given --help is still that suite's run" \
+  "a.test.sh" "$(targets_of 'bash tests/a.test.sh --help')"
+
+# THE PATTERN LIST IS NOT A COMMAND.
+expect_eq "§CASE a suite named only in a (pattern) is not a run" \
+  "none" "$(class_of 'case $x in (tests/b.test.sh) echo b;; esac')"
+expect_eq "§CASE …nor in an alternation" \
+  "none" "$(class_of 'case $f in a) :;; tests/run.sh|tests/b.test.sh) echo hit;; esac')"
+expect_eq "§CASE …and names nothing" "" \
+  "$(targets_of 'case $f in a) :;; tests/run.sh|tests/b.test.sh) echo hit;; esac')"
+# THE ARM BODY IS. Same extractor, same shape, the suite moved from pattern to body.
+expect_eq "§CASE a suite run inside a case arm is a run" \
+  "suite" "$(class_of 'case $x in a) bash tests/a.test.sh;; esac')"
+targets_are 'a.test.sh' 'case $x in a) bash tests/a.test.sh;; esac'
+targets_are 'b.test.sh' 'case $x in a) echo;; b) bash tests/b.test.sh;; esac'
+targets_are 'a.test.sh' 'case $x in a) bash tests/a.test.sh; esac'
+targets_are 'a.test.sh' 'case "$x" in
+  a|b) bash tests/a.test.sh ;;
+  *) echo no ;;
+esac'
+targets_are 'c.test.sh' 'case $x in a) :;; esac; bash tests/c.test.sh'
+targets_are 'a.test.sh
+b.test.sh' 'case $x in a) case $y in q) bash tests/a.test.sh;; esac;; b) bash tests/b.test.sh;; esac'
+targets_are 'a.test.sh' 'for x in 1; do case $x in 1) bash tests/a.test.sh;; esac; done'
+
+
+section "§REDIR — REQ-7 AC-7.6 (D12): a leading redirection is plumbing, never argv[0]"
+# THE FALSE REFUSAL AND THE BYPASS (research R4 §5). `strip_leading` had no rule for a
+# redirection, so a GLUED input redirect (`<tests/a.test.sh wc -l`) put the suite path at
+# argv[0] and read as a run of it, while a redirect IN FRONT of a real run
+# (`2>/dev/null bash tests/a.test.sh`) left `2>/dev/null` at argv[0] and read as none.
+for rd in '<tests/a.test.sh wc -l' '<$R/tests/a.test.sh wc -l' \
+          'while read l; do :; done <$R/tests/a.test.sh' '< tests/a.test.sh wc -l' \
+          '<"tests/a.test.sh" wc -l'; do
+  expect_eq "§REDIR [$rd] reads a suite file, it does not run it" "none" "$(class_of "$rd")"
+  expect_eq "§REDIR …and claims nothing" "" "$(claims_of "$rd")"
+done
+expect_empty "§REDIR farm-out is SILENT on <tests/a.test.sh wc -l" \
+  "$(farm_decision '<tests/a.test.sh wc -l')"
+for rr in '2>/dev/null bash tests/a.test.sh' '>log bash tests/a.test.sh' \
+          '< /dev/null bash tests/a.test.sh' '2> "a b.log" bash tests/a.test.sh' \
+          '>>log 2>&1 bash tests/a.test.sh' 'FOO=1 2>/dev/null bash tests/a.test.sh'; do
+  expect_eq "§REDIR [$rr] runs the suite behind the redirect" "suite" "$(class_of "$rr")"
+  expect_eq "§REDIR …and names it" "a.test.sh" "$(targets_of "$rr")"
+done
+expect_eq "§REDIR …and its run is the command, not the plumbing in front of it" \
+  "bash tests/a.test.sh" "$(claim_run_of '2>/dev/null bash tests/a.test.sh')"
+
+
+section "§LOOP — REQ-6 AC-6.3 (D9): a literal loop or assignment resolves before it refuses"
+# THE REFUSAL THAT CHECKED NOTHING (research R3 Q1). The budget arm reads the command text
+# before the shell expands it, so `for s in a b; do bash tests/$s.test.sh; done` reached it
+# as the one claim `$s.test.sh`, refused as unexpanded — about 100 refusals all-time, 57 of
+# them loops over a fully literal word list. A literal word list, or one literal assignment
+# separated by `;`, `&&` or a newline, is resolved here into the suites it names. A body
+# that reassigns the variable keeps the `$` claim, so the refusal still fires there.
+targets_are 'a.test.sh
+b.test.sh' 'for s in a b; do bash tests/$s.test.sh; done'
+targets_are 'a.test.sh
+b.test.sh' 'for s in a b; do bash "tests/$s.test.sh"; done'
+targets_are 'a.test.sh
+b.test.sh' 'for s in a b; do bash tests/${s}.test.sh; done'
+targets_are 'a.test.sh
+b.test.sh' 'for s in "a" '"'b'"'; do bash tests/$s.test.sh; done'
+targets_are 'a.test.sh
+b.test.sh' 'for s in a b
+do
+  bash tests/$s.test.sh 2>&1 | tee /tmp/$s.log
+done'
+targets_are 'x-p.test.sh
+y-p.test.sh' 'for a in x y; do for b in p; do bash tests/$a-$b.test.sh; done; done'
+targets_are 'a.test.sh' 's=a; bash tests/$s.test.sh'
+targets_are 'a.test.sh' 's=a && bash tests/$s.test.sh'
+targets_are 'a.test.sh' 's=a
+bash tests/$s.test.sh'
+expect_eq "§LOOP …the resolved claim carries the resolved run" \
+  "bash tests/a.test.sh" "$(claim_run_of 's=a; bash tests/$s.test.sh')"
+# SCOPED, as the budget arm calls it: each resolved path is this repo's tests/<basename>.
+expect_eq "§LOOP scoped to a repo root, each resolved suite is that repo's" "a.test.sh
+b.test.sh" "$(targets_of_in "$C8_ROOT" 'for s in a b; do bash tests/$s.test.sh; done')"
+
+# KEPT UNRESOLVED — the same extractor answering `$` beside the resolved rows above.
+targets_are '$s.test.sh' 'for s in a b; do s=run; bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in a b; do read s; bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in a b; do printf -v s x; bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in a b; do export s=c; bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in $(seq 3); do bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in $set; do bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 'for s in a*; do bash tests/$s.test.sh; done'
+targets_are '$s.test.sh' 's=a bash tests/$s.test.sh'
+targets_are '$s.test.sh' 's=a; s=b; bash tests/$s.test.sh'
+targets_are '$s.test.sh' 's=a | bash tests/$s.test.sh'
+targets_are '$s.test.sh' 's=a & bash tests/$s.test.sh'
+targets_are '$s.test.sh' 'false || s=a; bash tests/$s.test.sh'
+targets_are '$s.test.sh' '(s=a); bash tests/$s.test.sh'
+targets_are '$s.test.sh' 'if c; then s=a; fi; bash tests/$s.test.sh'
+targets_are '$s.test.sh' 'bash tests/$s.test.sh; s=a'
+targets_are '$s.test.sh' 's=$(pick); bash tests/$s.test.sh'
+targets_are '$s.test.sh' 'eval x; s=a; bash tests/$s.test.sh'
+targets_are '$s.test.sh' 'for s in a; do bash '"'"'tests/$s.test.sh'"'"'; done'
+targets_are 'a.test.sh
+b.test.sh
+$s.test.sh' 'for s in a b; do bash tests/$s.test.sh; done; bash tests/$s.test.sh'
+# THE SAME SHAPE WITH THE VARIABLE INSIDE ITS OWN GROUP resolves, beside `(s=a); …` above.
+targets_are 'a.test.sh' '(s=a; bash tests/$s.test.sh)'
+
+section "§LOOPLINES — wave-24 T13 (D10, AC-6.3): the loop's own words, as the lines to run"
+# THE REFUSAL THAT HAD NOTHING TO PRINT. A `$` claim the classifier will not resolve used to
+# be answered with a canned `alpha`/`beta` example. `cmd_suite_loop_lines` is the one reading
+# of the loop header that refusal prints: each literal word of the `for` list put into the
+# suite path the body runs, one `bash <path>` line each, read by the same awk as the claims —
+# never a second parse in the wall.
+loop_lines_of() {  # <command> -> cmd_suite_loop_lines' answer
+  bash -c '. "$1" || { echo "SOURCE-FAILED"; exit 1; }; cmd_suite_loop_lines "$2"' _ "$LIB" "$1" 2>&1
+}
+loop_lines_are() {  # <expected, newline-joined> <command>
+  expect_eq "loop lines [$2]" "$1" "$(loop_lines_of "$2")"
+}
+loop_lines_are 'bash tests/a.test.sh
+bash tests/b.test.sh' 'for s in a b; do bash "tests/$s.test.sh"; done'
+# A command the claims will not expand at all (an `eval`) still has a body that leaves V alone,
+# so its header words are what the loop runs.
+loop_lines_are 'bash tests/a.test.sh
+bash tests/b.test.sh' 'for s in a b; do bash "tests/$s.test.sh"; done; eval :'
+# The path is the one the body names, so a `./` spelling and a trailing tee stay the body's own.
+loop_lines_are 'bash ./tests/a.test.sh
+bash ./tests/b.test.sh' 'for s in a b; do bash ./tests/$s.test.sh 2>&1 | tee log; done'
+# Nested literal loops: every pair, in header order.
+loop_lines_are 'bash tests/x-p.test.sh
+bash tests/y-p.test.sh' 'for a in x y; do for b in p; do bash tests/$a-$b.test.sh; done; done'
+# A word repeated in the header is one line.
+loop_lines_are 'bash tests/a.test.sh' 'for s in a a; do bash tests/$s.test.sh; done'
+# A BODY THAT REASSIGNS THE VARIABLE runs something other than the header's words (wave-24
+# T26, walk-head-b surprise 3): `s=c` runs c twice, so printing a and b would hand the reader
+# a false fix. Nothing is derived, by any of the forms that assign — beside the rows above on
+# the same extractor, and for the nested frame whose OUTER variable is the one reassigned.
+# fails-when: a reassigning body still prints the header words.
+loop_lines_are '' 'for s in a b; do s=c; bash "tests/$s.test.sh"; done'
+loop_lines_are '' 'for s in a b; do read s; bash tests/${s}.test.sh; done'
+loop_lines_are '' 'for s in a b; do s=run; bash ./tests/$s.test.sh 2>&1 | tee log; done'
+loop_lines_are '' 'for a in x y; do for b in p; do a=z; bash tests/$a-$b.test.sh; done; done'
+loop_lines_are '' 'for s in a a; do s=c; bash tests/$s.test.sh; done'
+# NOTHING TO PRINT — the same extractor, beside the rows above: a header that is not all literal,
+# a `$` with no loop around it, and a suite segment outside the loop.
+loop_lines_are '' 'for s in $(seq 3); do bash tests/$s.test.sh; done'
+loop_lines_are '' 'for s in a*; do bash tests/$s.test.sh; done'
+loop_lines_are '' 's=a bash tests/$s.test.sh'
+loop_lines_are '' 'for s in a b; do echo $s; done; bash tests/$s.test.sh'
+loop_lines_are '' 'for s in a b; do s=c; echo "tests/$s.test.sh"; done'
+
+
+section "§VAR — REQ-6 AC-6.4 (D9): a variable holding a whole suite name is a suite run"
+# THE BYPASS (research R3 Q1, "guarantee gap"). `X=a.test.sh; bash tests/$X` and
+# `for f in tests/a.test.sh; do bash $f; done` read class NONE: the `.test.sh` the classifier
+# keys on was inside the variable, so neither the budget nor the farm-out wall saw a suite.
+expect_eq "§VAR X=a.test.sh; bash tests/\$X is a suite run" "suite" "$(class_of 'X=a.test.sh; bash tests/$X')"
+targets_are 'a.test.sh' 'X=a.test.sh; bash tests/$X'
+expect_eq "§VAR …as a FILE claim" "file" "$(claim_kinds_of 'X=a.test.sh; bash tests/$X')"
+expect_eq "§VAR a loop over whole suite paths is a suite run" "suite" \
+  "$(class_of 'for f in tests/a.test.sh tests/b.test.sh; do bash $f; done')"
+targets_are 'a.test.sh
+b.test.sh' 'for f in tests/a.test.sh tests/b.test.sh; do bash $f; done'
+expect_eq "§VAR …scoped to a repo root, as the budget arm asks" "a.test.sh" \
+  "$(targets_of_in "$C8_ROOT" 'X=a.test.sh; bash tests/$X')"
+# NEGATIVE CONTROLS on the same extractors: a variable holding something that is not a
+# suite stays what it was.
+expect_eq "§VAR X=notes.txt; cat \$X is not a suite run" "none" "$(class_of 'X=notes.txt; cat $X')"
+expect_eq "§VAR a loop over scripts that are not suites is not a suite run" "none" \
+  "$(class_of 'for f in a.sh b.sh; do bash $f; done')"
+targets_are '' 'for f in a.sh b.sh; do bash $f; done'
+
+
+section "§WT — REQ-3 (D16): cmd_write_targets names the paths a command writes"
+# THE MEMORY WALL READS THIS (walls.sh `wall_memory_store`, hooks/bash-walls.sh collects). The
+# store has to be told apart from its READERS: a wave's own readback names the store and
+# redirects (`{ find <store> -newer m; } > record/x.txt`), so "the text mentions the store"
+# refuses the audit. What a command WRITES is a property of argv positions and redirect
+# targets, read with the same segmentation this file uses for everything else.
+#
+# HOME IS PINNED to /h for every row, so `~` and `$HOME` expand to a known prefix. The
+# optional second argument is the payload cwd that a relative target with no `cd` before it
+# resolves against.
+wt_of() {  # <command> [<cwd>] [env assignments…] -> the library's write targets, one per line
+  local _c="$1" _d="${2-}"; shift; [ $# -gt 0 ] && shift
+  printf '%s' "$_c" | env HOME=/h BIONIC_CLAUDE_HOME= CLAUDE_CONFIG_DIR= "$@" bash -c '
+    set -uo pipefail
+    . "$1" || { echo "SOURCE-FAILED"; exit 1; }
+    cmd_write_targets "$(cat)" "$2"' _ "$LIB" "$_d"
+}
+wt_are() {  # <expected, newline-joined> <command> [<cwd>] [env…]
+  expect_eq "write targets [$(printf '%q' "$2")]" "$1" "$(wt_of "$2" "${3-}" "${@:4}")"
+}
+
+# --- redirects: every operator that opens a file for writing ---
+wt_are '/a/b.md' 'echo hi > /a/b.md'
+wt_are '/a/b.md' 'echo hi >> /a/b.md'
+wt_are '/a/c' 'echo hi >| /a/c'
+wt_are '/a/d' 'cmd &> /a/d'
+wt_are '/a/e' 'cmd 2>/a/e'
+wt_are '/a/f' '2>/a/f cmd'
+wt_are '/a/g' 'echo hi >/a/g'
+wt_are '/a/h b' 'echo hi > "/a/h b"'
+# A DUPLICATION IS NOT A FILE, and neither is an input redirect or a here-string.
+wt_are '/a/i' 'cmd > /a/i 2>&1'
+wt_are '' 'cmd 2>&1 >&2 <in.txt'
+wt_are '' 'grep x <<< "$v"'
+# A HEREDOC BODY IS TEXT, NEVER A COMMAND: its `>` writes nothing. The command that opened it
+# still writes its own redirect target.
+wt_are '/a/c.md' "$(printf 'cat > /a/c.md <<%sEOF%s\nbody > /x/y\ntouch /x/z\nEOF' "'" "'")"
+# QUOTED TEXT IS AN ARGUMENT, so a `>` inside quotes is prose.
+wt_are '' "echo '> /a/no'"
+wt_are '' 'git commit -m "x > /a/no"'
+
+# --- argv writers ---
+wt_are '/a/t1
+/a/t2' 'printf x | tee -a /a/t1 /a/t2'
+wt_are '/a/f.md' "sed -i '' 's/a/b/' /a/f.md"
+wt_are '/a/f.md' "sed -i 's/a/b/' /a/f.md"
+wt_are '/a/f.md
+/a/g.md' "sed -i.bak -e 's/a/b/' /a/f.md /a/g.md"
+wt_are '/a/f.md' "sed --in-place -E 's/a/b/' /a/f.md"
+# NEGATIVE beside the positives above on the same extractor: sed without -i writes stdout.
+wt_are '' "sed 's/a/b/' /a/f.md"
+wt_are '/b/dest' 'cp /a/src /b/dest'
+wt_are '/d' 'mv x y z /d/'
+wt_are '/d' 'cp -t /d a b'
+wt_are '/d' 'mv --target-directory=/d a'
+wt_are '/a/x
+/a/y' 'touch /a/x /a/y'
+wt_are '/a/x' 'touch -r /a/ref /a/x'
+wt_are '/a/m' 'mkdir -p /a/m'
+wt_are '/a/n' 'mkdir -m 700 /a/n'
+wt_are '/a/link' 'ln -s /src /a/link'
+# READERS WRITE NOTHING — the AC-3.3 set, each beside the writers above.
+wt_are '' 'cat /a/b'
+wt_are '' 'ls -la /a'
+wt_are '' 'find /s -newer m -type f'
+wt_are '' 'rm -f /s/f'
+wt_are '' 'tar -cf - /s'
+wt_are '/r/x.txt' '{ find /s -newer m; } > /r/x.txt'
+
+# --- one level of `sh -c` / `eval`, and command-taking prefixes ---
+wt_are '/a/q' "bash -c 'echo hi > /a/q'"
+wt_are '/a/s' 'sudo tee /a/s'
+wt_are '/a/v' 'X=1 env Y=2 touch /a/v'
+
+# --- `~`, `$HOME`, `${HOME}` and the store-root variables expand ---
+wt_are '/h/.claude/projects/p/memory/a' 'touch ~/.claude/projects/p/memory/a'
+wt_are '/h/x' 'echo > "$HOME/x"'
+wt_are '/h/y' 'echo > ${HOME}/y'
+wt_are '/h' 'mkdir ~'
+wt_are '/c/projects/p/memory/f' 'echo > $CLAUDE_CONFIG_DIR/projects/p/memory/f' '' CLAUDE_CONFIG_DIR=/c
+wt_are '/b/projects/p/memory/f' 'echo > "${BIONIC_CLAUDE_HOME}/projects/p/memory/f"' '' BIONIC_CLAUDE_HOME=/b
+# An unset store variable stays a literal: nothing here invents a value.
+wt_are '$CLAUDE_CONFIG_DIR/f' 'echo > $CLAUDE_CONFIG_DIR/f'
+
+# --- relative targets resolve against a preceding cd, then against the payload cwd ---
+# THE WAVE-23 SHAPE (A-orch-30): the store's path appears only in the `cd`, the heredoc body
+# is prose, and the writes that follow name bare basenames.
+wt_are '/s/x.md
+/s/MEMORY.md' "$(printf 'cd /s && cat >> x.md <<%sEOF%s\n- line > not a target\nEOF\nsed -i %s%s %ss|a|b|%s MEMORY.md' "'" "'" "'" "'" "'" "'")"
+wt_are '/h/.claude/projects/p/memory/a.md' 'cd ~/.claude/projects/p/memory && touch a.md'
+wt_are '/s/sub/f' 'cd /s; cd sub && echo > f'
+wt_are '/t/f' 'cd /s && echo > ../t/f'
+wt_are '/w/out.txt' 'echo > out.txt' /w
+wt_are 'out.txt' 'echo > out.txt'
+wt_are '/w/x' 'echo > ./x' /w
+# A cd INSIDE A SUBSHELL ends with it.
+wt_are '/w/out.txt' '(cd /s && ls) && echo > out.txt' /w
+wt_are '/s/in.txt' '(cd /s && echo > in.txt)' /w
+# `cd` alone is home; `cd -` is a directory the text cannot name, so the payload cwd stands.
+wt_are '/h/f' 'cd && touch f' /w
+wt_are '/w/f' 'cd /s && cd - && touch f' /w
+
+# --- a double-quoted target is read whole and unescaped in one split (T28) ---
+# wt_tok copies a quoted run in one piece and drops its escapes with one split on the
+# backslash. Each row answers the same as the character walk it replaced. The last two rows
+# hold a newline inside the quote (the unclosed one reaches the reader with its line end), and
+# they are the ones a split on the one-character string "\\" got wrong: macOS awk also splits
+# such a string on newline. (A newline inside a target reads as `/`, because the path fold
+# splits the same way.)
+wt_are '/a/b\c' 'echo x > "/a/b\\c"'
+wt_are '/a/b"c' 'echo x > "/a/b\"c"'
+wt_are '/a/\\' 'echo x > "/a/\\\\"'
+wt_are '/a/l1/l2\x' "$(printf 'echo x > "/a/l1\nl2\\\\x"')"
+wt_are '/a/x' 'tee "/a/x\'
+
+section "§QRUN — wave-24 T22: a quoted run is found whole, never walked"
+# `cmdnorm_qend` finds where a quote closes and the three readers copy the run in one piece
+# (segments, argv_tok, cmdnorm_run). Each pair below differs only in whether the quote closes
+# before the `;`, so a reader that closes it early or late turns one answer into the other.
+case_is none  'echo "a\" ; make ; b"' 'a \" inside double quotes does not close them'
+case_is build 'echo "a\\"; make'     'a \\ inside double quotes is one backslash, and the quote closes'
+case_is build "echo 'a\\'; make"     'a backslash inside single quotes hides nothing'
+case_is none  'echo "a; make'        'a quote that never closes runs to the end'
+case_is none  'echo "a\'             'a backslash at the very end of an unclosed quote'
+# An unclosed quote in argv[0] or argv[1] is no word at all, to its last character.
+case_is none  '"make'                'argv[0] in a quote that never closes is not make'
+case_is none  'npm "install'         'argv[1] in a quote that never closes is not install'
+case_is build 'echo "\é"; make'      'a backslash before a multibyte character'
+case_is build "'make' -j4"           'argv[0] spelled inside quotes is still argv[0]'
+case_is install '"npm" install'      'a quoted word joins its unquoted neighbour'
+case_is none  '"npm install"'        'a quoted run holding a space is prose'
+expect_eq "§QRUN a quoted redirect is an argument, the trailing one comes off" \
+  "bash tests/x.test.sh \"a > b\"" "$(norm_of 'bash tests/x.test.sh "a > b" > log')"
+expect_eq "§QRUN an escaped quote does not end the run before the redirect" \
+  "pytest \"a\\\" > b\"" "$(norm_of 'pytest "a\" > b" 2>&1')"
+
+section "§QESC — wave-24 T30: a backslash before the close is read from one map, a word from one split"
+# `cmdnorm_qend` answers a double quote with a backslash before its close from a map of every
+# quote no backslash hides, built once per text, and `argv_tok` reads its characters from one
+# split. Each pair differs only in whether the quote before the `;` is hidden, so a map that
+# miscounts a backslash run turns one answer into the other.
+case_is none  'echo "x\\\"; make"'        'three backslashes: the third hides the quote'
+case_is build 'echo "x\\\\"; make'        'four backslashes are two, and the quote closes'
+case_is build 'echo "\"\"\"x"; make'      'escaped quotes before the close'
+case_is none  'echo "a\"b" "c\"d; make"'  'a second quoted run on the same text finds its own close'
+case_is build 'echo "a\"b" "c\"d"; make'  '…and closes when its quote stands'
+case_is none  "$(printf 'printf "a\\"b" <<EOF\nmake\nEOF')" 'a heredoc opened after an escaped quote: its body is text'
+# A word longer than argv_tok's 64-character pieces, escaped and quoted across the seams.
+QESC_A70=$(printf 'a%.0s' $(seq 70))
+targets_are "${QESC_A70}${QESC_A70}b.test.sh" "bash tests/${QESC_A70}${QESC_A70}\\b.test.sh"
+targets_are "${QESC_A70}qz.test.sh" "bash tests/${QESC_A70}\"q\"z.test.sh"
+
+# THE MAP AGAINST THE WALK IT REPLACED. Every string of one to six characters over
+# { " \ ' a }, every quote in it, both escape modes: `cmdnorm_qend` must answer what the
+# c0d6ab04 walk (copied below) answers. Then every prefix of each string is asked the same
+# questions right after the whole string was, which is the path where the map built on the
+# longer text answers for the shorter one.
+bash -c '. "$1" || exit 1; printf "%s" "$CMD_RUN_NORM_AWK"' _ "$LIB" > "$SANDBOX/qesc-lib.awk"
+cat > "$SANDBOX/qesc.awk" <<'AWK'
+function ref_qend(s, i, q, esc,   t, j, k, b) {
+  j = i + 1
+  for (;;) {
+    t = substr(s, j)
+    k = index(t, q)
+    if (esc && q == "\"") { b = index(t, "\\"); if (b > 0 && (k == 0 || b < k)) { j += b + 1; continue } }
+    return (k == 0 ? length(s) + 1 : j + k - 1)
+  }
+}
+function ask(s,   i, c, e, k, want, got) {
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (c != "\"" && c != "\047") continue
+    for (e = 0; e <= 1; e++) {
+      want = ref_qend(s, i, c, e); got = cmdnorm_qend(s, i, c, e); N++
+      k = index(substr(s, i + 1), c); if (k > 0 && want > k + i) HID++
+      if (want != got) { BAD++; if (BAD <= 5) printf "DIFF s=[%s] i=%d esc=%d want=%d got=%d\n", s, i, e, want, got }
+    }
+  }
+}
+function gen(p, n,   x, k) {
+  if (length(p) > 0) { ask(p); for (k = 1; k < length(p); k++) ask(substr(p, 1, k)) }
+  if (n == 0) return
+  for (x = 1; x <= 4; x++) gen(p A[x], n - 1)
+}
+BEGIN { A[1] = "\""; A[2] = "\\"; A[3] = "\047"; A[4] = "a"; gen("", 6)
+        printf "asked=%d hidden=%d diffs=%d\n", N, HID, BAD }
+AWK
+QESC_OUT=$(awk -f "$SANDBOX/qesc-lib.awk" -f "$SANDBOX/qesc.awk" 2>&1)
+QESC_SUM=$(printf '%s\n' "$QESC_OUT" | grep '^asked=')
+expect_true "§QESC the oracle ran and asked over 10 000 questions [$QESC_SUM]" \
+  awk -v l="$QESC_SUM" 'BEGIN { split(l, f, /[= ]/); exit !(f[2] + 0 > 10000) }'
+expect_true "§QESC …and in over 1 000 of them a backslash hid the first quote [$QESC_SUM]" \
+  awk -v l="$QESC_SUM" 'BEGIN { split(l, f, /[= ]/); exit !(f[4] + 0 > 1000) }'
+expect_eq "§QESC cmdnorm_qend answers every one as the c0d6ab04 walk does" \
+  "diffs=0" "$(printf '%s\n' "$QESC_SUM" | grep -o 'diffs=[0-9]*')$(printf '%s\n' "$QESC_OUT" | grep '^DIFF' | head -3)"
 
 finish

@@ -568,25 +568,74 @@ act_continuation() {
 #
 # KEYED ON THE WAVE NUMBER, which is the only column that cannot be two things at once.
 # The table is found by its HEADER ROW rather than by the heading above it: a heading is
-# prose somebody may reword, and `| wave |` is the table's own first cell.
+# prose somebody may reword, and the header is the table's own. An epic can carry more than
+# one table headed `wave` (a planned one beside the shipped one), so the header is the one
+# whose first cell is `wave` AND which has a `shipped` cell.
 EPIC_LINE=""
+
+# epic_shipped_table <file> [<row>] -> the ONE locator for that table, shared by the reader
+# (`epic_has_row`), the presence check (`presence_missing`) and the writer (`act_epic`).
+# With no row: prints the table, header through its last row (the rows run to the first
+# line not starting `|`), or nothing when the file has no such table. With a row: prints the
+# whole file with the row appended to that table. The row travels in the environment, not
+# `-v`, because `-v` would interpret the backslashes a spec path can carry.
+epic_shipped_table() {
+  CO_ROW="${2:-}" awk '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    function shipped_header(line,   n, a, i) {
+      n = split(line, a, "|")
+      if (tolower(trim(a[2])) != "wave") return 0
+      for (i = 3; i <= n; i++) if (tolower(trim(a[i])) == "shipped") return 1
+      return 0
+    }
+    BEGIN { row = ENVIRON["CO_ROW"] }
+    !seen && /^\|/ && shipped_header($0) { intable = 1; seen = 1 }
+    intable && !/^\|/ { if (row != "" && !done) { print row; done = 1 } intable = 0 }
+    row != "" || intable { print }
+    END { if (row != "" && intable && !done) print row }
+  ' "$1" 2>/dev/null
+}
+
+# epic_adrs -> the ADR numbers this wave shipped, `040, 041`, or nothing. The spec the
+# plan's `spec:` line names carries `adrs:` as paths joined by ` · `; the plan's own `adrs:`
+# is the fallback for a spec without one. Each segment yields its first `adr-<digits>`.
+epic_adrs() {
+  local specrel specfile adrs
+  specrel="$(plan_frontmatter_get "$PLAN" "spec")"
+  [ -n "$specrel" ] || specrel="$WAVE_SLUG.spec.md"
+  specfile="$DROOT/$specrel"
+  [ -f "$specfile" ] || specfile="$(find "$DROOT/specs" -name "${specrel##*/}" -type f 2>/dev/null | head -1)"
+  [ -n "$specfile" ] && adrs="$(plan_frontmatter_get "$specfile" "adrs")" || adrs=""
+  [ -n "$adrs" ] || adrs="$(plan_frontmatter_get "$PLAN" "adrs")"
+  printf '%s\n' "$adrs" | awk '
+    {
+      n = split($0, seg, / · /)
+      for (i = 1; i <= n; i++) {
+        s = seg[i]; sub(/^.*\//, "", s)
+        if (match(s, /adr-[0-9]+/)) printf "%s%s", (out++ ? ", " : ""), substr(s, RSTART + 4, RLENGTH - 4)
+      }
+    }'
+}
+
 epic_row() {
-  local spec sha
+  local spec sha adrs
   spec="$(plan_frontmatter_get "$PLAN" "spec")"
   spec="${spec##*/}"
   [ -n "$spec" ] || spec="$WAVE_SLUG.spec.md"
   # THE SHA IS FILLED, NOT MARKED. Act 1 has already proved the working branch reachable
-  # from the integration branch, so the integration head is a fact this script holds; only
-  # the ADR column stays `<fill>`, because which ADRs a wave shipped is not on disk in any
-  # form this row could read. A `<fill>` over a knowable fact is just work moved.
+  # from the integration branch, so the integration head is a fact this script holds. The
+  # ADR cell is read from the spec's `adrs:` line; it stays `<fill: ADRs>` only when neither
+  # the spec nor the plan names one, because "none shipped" and "not recorded" look the same
+  # on disk.
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  printf '| %s | %s | `%s` | `%s`, `.requirements.md` | <fill: ADRs> | %s, %s @ %s |\n' \
-    "$WAVE_NUM" "$VERSION" "${PLAN##*/}" "$spec" "$TODAY" "$INTEGRATION" "${sha:-<fill: SHA>}"
+  adrs="$(epic_adrs)"
+  printf '| %s | %s | `%s` | `%s`, `.requirements.md` | %s | %s, %s @ %s |\n' \
+    "$WAVE_NUM" "$VERSION" "${PLAN##*/}" "$spec" "${adrs:-<fill: ADRs>}" "$TODAY" "$INTEGRATION" "${sha:-<fill: SHA>}"
 }
 
 epic_has_row() {
   [ -f "$EPIC_PLAN" ] || return 1
-  grep -qE "^\|[[:space:]]*${WAVE_NUM}[[:space:]]*\|" "$EPIC_PLAN"
+  epic_shipped_table "$EPIC_PLAN" | grep -qE "^\|[[:space:]]*${WAVE_NUM}[[:space:]]*\|"
 }
 
 act_epic() {
@@ -599,12 +648,7 @@ act_epic() {
     return 0
   fi
   local tmp="$EPIC_PLAN.close-out.$$"
-  CO_ROW="$(epic_row)" awk '
-    /^\|[[:space:]]*wave[[:space:]]*\|/ && !seen { intable = 1; seen = 1 }
-    intable && !/^\|/ && !done { print ENVIRON["CO_ROW"]; done = 1; intable = 0 }
-    { print }
-    END { if (!done && intable) print ENVIRON["CO_ROW"] }
-  ' "$EPIC_PLAN" > "$tmp" 2>/dev/null
+  epic_shipped_table "$EPIC_PLAN" "$(epic_row)" > "$tmp"
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp"
     _co_refuse "could not rewrite ${EPIC_PLAN##*/} to add the wave $WAVE_NUM row"
@@ -840,9 +884,8 @@ presence_missing() {
     printf 'no Step 9 line in ## SDLC State of %s (add `- Step 9: (pending)`)' "$PLAN"
     return 0
   fi
-  if [ -f "$EPIC_PLAN" ] && ! epic_has_row \
-     && ! grep -qE '^\|[[:space:]]*wave[[:space:]]*\|' "$EPIC_PLAN"; then
-    printf 'no | wave | table in %s for the wave %s row to be written into' "${EPIC_PLAN##*/}" "$WAVE_NUM"
+  if [ -f "$EPIC_PLAN" ] && [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
+    printf 'no | wave | table with a shipped column in %s for the wave %s row to be written into' "${EPIC_PLAN##*/}" "$WAVE_NUM"
   fi
   return 0
 }
