@@ -1357,8 +1357,8 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
           # table at COMMIT time, which is one round trip and a refused commit too late:
           # by then the orchestrator has briefed writers off it. `units_validate` is the
           # single definition of the Task invariants — id shape and uniqueness, step in
-          # 3-9, the kind and status vocabularies, deps that name a row, and a Step-5+
-          # row depending transitively on every Step-4 row — and its output is one line
+          # 3-9, the kind and status vocabularies, deps that name a row, and a table with a `reads`
+          # column's own cells — and its output is one line
           # per fault, each naming an id and a rule, which is what a writer can act on.
           #
           # SAME SCOPE AS THE MATRIX ARM ABOVE, deliberately: `*.plan.md`, numeric
@@ -1448,7 +1448,7 @@ Fix: repair every line above in one pass — each is a separate arm that would o
                 _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) has a '## Tasks' table that breaks the Task invariants:
 ${_gs_units_bad}
 Path: $FILE_PATH
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status."
+Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status. A reads column is optional and may sit anywhere in the header."
                 refuse exit2 write "this plan's Tasks table is invalid" "fix the row the detail names" "$_gs_detail"
               fi
             fi

@@ -576,9 +576,16 @@ _units_sched_awk() {
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     function isopen(j) { return (st[j] == "pending" || st[j] == "active") }
     function isglob(e) { return (index(e, "*") > 0 || index(e, "?") > 0) }
-    function glob_re(g) {
-      gsub(/[.+^$(){}|\\]/, "\\\\&", g); gsub(/\*/, ".*", g); gsub(/\?/, ".", g)
-      return "^" g "$"
+    # glob_re(g): the glob as an anchored ERE, built once per entry. The grammar globs with * and
+    # ? only, so a bracket is a character like any other: `[` is escaped with the rest, and a
+    # `Files` entry carrying one can never become a broken regex that stops every verb (T35 F5;
+    # `units_validate` refuses the entry, naming its row). A `]` outside a class is literal already.
+    function glob_re(g,   o) {
+      if (g in gre) return gre[g]
+      o = g
+      gsub(/[.+^$(){}|\\]/, "\\\\&", g); gsub(/\[/, "\\\\&", g); gsub(/\*/, ".*", g); gsub(/\?/, ".", g)
+      gre[o] = "^" g "$"
+      return gre[o]
     }
     # covers(e, p): the Files entry e covers the path p (brief.sh `in_files`, one pair).
     function covers(e, p,   ls, lp) {
@@ -604,6 +611,74 @@ _units_sched_awk() {
     function writes(j, p,   k) {
       for (k = 1; k <= nfe[j]; k++) if (overlap(fe[j, k], p)) return 1
       return 0
+    }
+
+    # THE PATH INDEX (T35 F7): every Files entry of an open row, filed once per parse under the keys
+    # a literal path can reach it by, so a read or an unmergeable hold asks a handful of keys
+    # instead of every entry of every row. For a literal entry e and a literal path t, covers(e, t)
+    # or covers(t, e) holds exactly when one of these does — `E:` e itself, which t reaches as
+    # itself, as a prefix ending at a slash or just before one, or as a tail after a slash; `P:` each
+    # prefix of e ending at a slash, which t reaches when t (or t plus a slash) is one; `S:` each
+    # tail of e after a slash, which t reaches as itself. A glob entry is listed, not filed (gl*
+    # every glob, gm* the marked ones), and a glob t falls back to the scan.
+    function ixput(key, j, k) { ixn[key]++; ixj[key, ixn[key]] = j; ixk[key, ixn[key]] = k }
+    function ixadd(j, k,   e, l, p) {
+      e = fe[j, k]
+      if (isglob(e)) {
+        ngl++; glj[ngl] = j; glk[ngl] = k
+        if (bg[j, k]) { ngm++; gmj[ngm] = j; gmk[ngm] = k }
+        return
+      }
+      ixput("E:" e, j, k)
+      l = length(e)
+      for (p = 1; p <= l; p++) {
+        if (substr(e, p, 1) != "/") continue
+        ixput("P:" substr(e, 1, p), j, k)
+        if (p < l) ixput("S:" substr(e, p + 1), j, k)
+      }
+    }
+    function ixlk(key, mk,   q) {
+      for (q = 1; q <= ixn[key]; q++) {
+        if (mk && !bg[ixj[key, q], ixk[key, q]]) continue
+        nc++; cj[nc] = ixj[key, q]; ck[nc] = ixk[key, q]
+      }
+    }
+    # entries(t, mk) -> every (row, entry) pair of an open row whose entry overlaps t, in
+    # cj[1..nc] / ck[1..nc], unordered and possibly repeated; only marked entries when mk is set.
+    function entries(t, mk,   l, p, q, j, k) {
+      nc = 0
+      if (isglob(t)) {
+        for (j = 1; j <= n; j++) {
+          if (!isopen(j)) continue
+          for (k = 1; k <= nfe[j]; k++)
+            if ((!mk || bg[j, k]) && overlap(fe[j, k], t)) { nc++; cj[nc] = j; ck[nc] = k }
+        }
+        return
+      }
+      ixlk("E:" t, mk)
+      l = length(t)
+      for (p = 1; p <= l; p++) {
+        if (substr(t, p, 1) != "/") continue
+        ixlk("E:" substr(t, 1, p), mk)
+        if (p > 1) ixlk("E:" substr(t, 1, p - 1), mk)
+        if (p < l) ixlk("E:" substr(t, p + 1), mk)
+      }
+      if (substr(t, l) == "/") ixlk("P:" t, mk)
+      ixlk("P:" t "/", mk)
+      ixlk("S:" t, mk)
+      if (mk) { for (q = 1; q <= ngm; q++) if (overlap(fe[gmj[q], gmk[q]], t)) { nc++; cj[nc] = gmj[q]; ck[nc] = gmk[q] } }
+      else    { for (q = 1; q <= ngl; q++) if (overlap(fe[glj[q], glk[q]], t)) { nc++; cj[nc] = glj[q]; ck[nc] = glk[q] } }
+    }
+    # open_writers(t) -> the open rows writing the path t, ascending, in ow[1..now]; worked out
+    # once per path and kept, since the answer does not depend on who asks.
+    function open_writers(t,   c, j, s, x) {
+      if (!(t in owc)) {
+        entries(t, 0); s = ""
+        for (c = 1; c <= nc; c++) x[cj[c]] = 1
+        for (j = 1; j <= n; j++) if (j in x) s = s " " j
+        owc[t] = s
+      }
+      now = split(owc[t], ow, " ")
     }
     function kdef(k) {
       if (k == "verify" || k == "test" || k == "doc") return "approval:plan, head"
@@ -639,24 +714,31 @@ _units_sched_awk() {
 
     # judge(i, t) -> 1 when row i read t is satisfied; otherwise 0, with the rows named as its
     # writers in wj[1..nw] (those still open, plus a task-id row in any unsatisfied state).
-    function judge(i, t,   j, a) {
+    function judge(i, t,   j, a, q) {
       nw = 0
       if (t ~ extre) return 0
       if (substr(t, 1, 9) == "approval:") return (substr(t, 10) in appr)
       if (substr(t, 1, 5) == "live:") return live_sat(i, substr(t, 6))
+      # A PROOF IS SETTLED ONLY WHEN NOTHING OPEN WILL WRITE A NEWER ONE (T35 F2): a re-floor row
+      # added after the floor was proved makes that line stale, so the open writers are asked
+      # first and the line counts only when there are none.
       if (substr(t, 1, 6) == "proof:") {
         a = substr(t, 7)
-        if (a in proved) return 1
         for (j = 1; j <= n; j++) {
           if (j == i || !isopen(j)) continue
           if ((a == "floor" && (knd[j] == "verify" || knd[j] == "test")) || (a == "review" && knd[j] == "review")) wj[++nw] = j
         }
-        return 0
+        return (nw == 0 && (a in proved))
       }
+      # A ROW THAT READS THE SETTLED head STILL WRITES IT FOR A ROW AT A LATER STEP (T35 F1). The
+      # exception A-T2.4 made is kept between equals and toward earlier steps — the walk does not
+      # wait for the release — but a test, doc or build row at Step 4 that reads head and writes
+      # code holds the Step-5 floor. `record` takes the same rule over `.bionic/` paths.
       if (t == "head" || t == "record") {
         for (j = 1; j <= n; j++) {
           if (j == i || !isopen(j)) continue
-          if (t == "head" ? (code[j] && !rhead[j]) : (docs[j] && !rrec[j])) wj[++nw] = j
+          q = (t == "head") ? rhead[j] : rrec[j]
+          if ((t == "head" ? code[j] : docs[j]) && (!q || stp[j] + 0 < stp[i] + 0)) wj[++nw] = j
         }
         return (nw == 0)
       }
@@ -672,7 +754,8 @@ _units_sched_awk() {
       }
       if (t ~ /^T[0-9]+$/) return 0
       if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
-        for (j = 1; j <= n; j++) if (j != i && isopen(j) && writes(j, t)) wj[++nw] = j
+        open_writers(t)
+        for (q = 1; q <= now; q++) if (ow[q] != i) wj[++nw] = ow[q]
         return (nw == 0)
       }
       return 0
@@ -680,19 +763,25 @@ _units_sched_awk() {
 
     # bang(i) -> the rows holding row i on an unmergeable path, in hb[1..nh] with the marked path
     # in hp[1..nh]: open rows declaring an overlapping path either side marked, that are active,
-    # or pending and above row i.
-    function bang(i,   j, k, m) {
+    # or pending and above row i. Per holder, the first of row i entries that meets it, and for an
+    # unmarked entry the holder first marked one — the pair the walk over every pair found first,
+    # now found through the index (T35 F7), and not looked for at all in a table with no mark.
+    function bang(i,   j, k, m, c) {
       nh = 0
-      for (j = 1; j <= n; j++) {
-        if (j == i || !isopen(j)) continue
-        if (!(st[j] == "active" || j < i)) continue
-        for (k = 1; k <= nfe[i]; k++) {
-          for (m = 1; m <= nfe[j]; m++) {
-            if (!(bg[i, k] || bg[j, m]) || !overlap(fe[i, k], fe[j, m])) continue
-            nh++; hb[nh] = j; hp[nh] = (bg[i, k] ? fe[i, k] : fe[j, m]) "!"
-            k = nfe[i] + 1; break
-          }
+      if (!nbg) return 0
+      bgen++
+      for (k = 1; k <= nfe[i]; k++) {
+        entries(fe[i, k], !bg[i, k])
+        for (c = 1; c <= nc; c++) {
+          j = cj[c]; m = ck[c]
+          if (j == i || !(st[j] == "active" || j < i)) continue
+          if (hgen[j] != bgen) { hgen[j] = bgen; hk[j] = k; hm[j] = m }
+          else if (hk[j] == k && m < hm[j]) hm[j] = m
         }
+      }
+      for (j = 1; j <= n; j++) {
+        if (hgen[j] != bgen) continue
+        nh++; hb[nh] = j; hp[nh] = (bg[i, hk[j]] ? fe[i, hk[j]] : fe[j, hm[j]]) "!"
       }
       return nh
     }
@@ -708,8 +797,9 @@ _units_sched_awk() {
           if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
           mark = (substr(e, length(e)) == "!")
           if (mark) e = substr(e, 1, length(e) - 1)
-          nfe[i]++; fe[i, nfe[i]] = e; bg[i, nfe[i]] = mark
+          nfe[i]++; fe[i, nfe[i]] = e; bg[i, nfe[i]] = mark; nbg += mark
           if (index(e, ".bionic/") == 1) docs[i] = 1; else code[i] = 1
+          if (isopen(i)) ixadd(i, nfe[i])
         }
         r = rd[i]
         if (hasreads && r !~ /[A-Za-z0-9]/) r = kdef(knd[i])
@@ -743,8 +833,11 @@ _units_sched_awk() {
           if (gate && stp[i] + 0 > want + 0) held = 1
         }
         if (mode == "waiting" && held) printf "%s\tstep:%s\t-\t-\n", id[i], stp[i]
+        # THE READY AND HELD ANSWERS STOP AT THE FIRST READ THAT DECIDES THEM (T35 F7): ready needs
+        # one unmet read to say no, held one unmet read that is not ext:. Waiting names them all.
         unmet = 0; other = 0; ext = ""
         for (k = 1; k <= ntk[i]; k++) {
+          if ((mode == "ready" && unmet) || (mode == "held" && other)) break
           t = tk[i, k]
           if (judge(i, t)) continue
           unmet++
@@ -753,6 +846,7 @@ _units_sched_awk() {
           if (nw == 0) printf "%s\t%s\t-\t-\n", id[i], t
           for (w = 1; w <= nw; w++) printf "%s\t%s\t%s\t%s\n", id[i], t, id[wj[w]], st[wj[w]]
         }
+        if ((mode == "ready" && unmet) || (mode == "held" && other)) continue
         if (bang(i) > 0) {
           unmet++; other++
           if (mode == "waiting") for (h = 1; h <= nh; h++) printf "%s\t%s\t%s\t%s\n", id[i], hp[h], id[hb[h]], st[hb[h]]
@@ -800,7 +894,7 @@ _units_sched_awk() {
 # EVERY FAULT IS REPORTED, not just the first. A writer fixing one line at a time against a
 # wall that stops at the first complaint pays a round trip per fault.
 units_validate() {
-  local plan="${1:-}" out rc ctl missing cols over rows violations _c _o found=0 haswt hasreads
+  local plan="${1:-}" out rc ctl missing cols over rows violations cycles _c _o found=0 haswt hasreads
 
   out="$(_units_table "$plan")"; rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -857,7 +951,7 @@ units_validate() {
         for (i in ss) states[ss[i]] = 1
       }
       $1 == "" { next }
-      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; sta[n] = $10; wtc[n] = $11
+      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; fil[n] = $9; sta[n] = $10; wtc[n] = $11
         bsc[n] = $12; rd[n] = $13; count[$1]++ }
       END {
         for (i = 1; i <= n; i++) {
@@ -959,14 +1053,81 @@ units_validate() {
               if (substr(t, 1, 5) == "live:") t = substr(t, 6)
               if (t == "head" || t == "record" || t == "merge") continue
               if (t ~ /^proof:(floor|review|task)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
-              if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) continue
+              if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
+                if (index(t, "[") || index(t, "]")) printf "%s: read %s has a bracket; paths glob with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
+                continue
+              }
               printf "%s: read %s names no artifact\n", id[i], a[j]
             }
+          }
+
+          # A BRACKET IN A Files ENTRY CANNOT BE COMPILED AS WRITTEN (wave-26 T35; review 5 F5). The
+          # grammar globs with * and ? only; the readiness program reads a bracket as itself, so an
+          # author who wrote a class would get a literal match. Entries are taken the way the
+          # readiness program takes them: a bare word, a dash or an entry with a blank declares
+          # nothing, and the unmergeable mark is not part of the path.
+          m = split(fil[i], a, ",")
+          for (j = 1; j <= m; j++) {
+            gsub(/^[ \t]+|[ \t]+$/, "", a[j]); sub(/^\.\//, "", a[j])
+            if (a[j] == "" || a[j] !~ /[\/.*?]/ || a[j] ~ /[ \t]/) continue
+            sub(/!$/, "", a[j])
+            if (index(a[j], "[") || index(a[j], "]")) printf "%s: Files entry %s has a bracket; Files globs with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
           }
         }
       }')"
     if [ -n "$violations" ]; then
       printf '%s\n' "$violations"
+      found=1
+    fi
+
+    # A CYCLE OF WAITS IS A DEADLOCK NOTHING ELSE REPORTS (wave-26 T35; review 5 F3). Each row on
+    # it is waiting, each names the other as its writer, and a wall built on "nothing ready, all
+    # waiting" sees an ordinary wait. The edges are `units_edges`' own, so the check sees every
+    # wait the scheduler acts on: a settled read, a task-id dep, and the unmergeable hold, which
+    # closes a loop as surely as a read (`lib/x.sh!` held by one row that reads what the other
+    # writes). Only PENDING rows can be stuck: an active row is already running and lands, and
+    # the wait clears, so a loop through one is no deadlock. One line per cycle, named against
+    # its first row in table order; a row that merely waits behind a cycle is not on it.
+    cycles="$({ printf '%s\n' "$rows"; printf '\034edges\n'; _units_sched edges "$plan" "" 2>/dev/null; } \
+      | awk -F'\t' '
+      $0 == SUBSEP "edges" { part = 1; next }
+      !part { if ($1 != "") { n++; id[n] = $1; at[$1] = n; if ($10 == "pending") pend[n] = 1 }; next }
+      {
+        f = at[$1]; t = at[$2]
+        if (!f || !t || !pend[f] || !pend[t] || ((f, t) in e)) next
+        e[f, t] = 1; nout[f]++; out[f, nout[f]] = t; nin[t]++; inn[t, nin[t]] = f
+      }
+      END {
+        # PRUNE what cannot be on a cycle: a row nothing waits on, or that waits on nothing left.
+        for (i = 1; i <= n; i++) if (pend[i]) { live[i] = 1; din[i] = nin[i]; dout[i] = nout[i] }
+        do {
+          gone = 0
+          for (i = 1; i <= n; i++) {
+            if (!live[i] || (din[i] && dout[i])) continue
+            live[i] = 0; gone = 1
+            for (k = 1; k <= nout[i]; k++) din[out[i, k]]--
+            for (k = 1; k <= nin[i]; k++) dout[inn[i, k]]--
+          }
+        } while (gone)
+        # WHAT IS LEFT lies on a cycle or between two; a cycle is a set of rows each reaching the
+        # others, so each left row is grouped with the rows it reaches and is reached by.
+        for (i = 1; i <= n; i++) {
+          if (!live[i] || grp[i]) continue
+          split("", fw); split("", bw); fw[i] = 1; bw[i] = 1
+          do { more = 0
+            for (a = 1; a <= n; a++) {
+              if (!live[a]) continue
+              if (fw[a]) for (k = 1; k <= nout[a]; k++) if (live[out[a, k]] && !fw[out[a, k]]) { fw[out[a, k]] = 1; more = 1 }
+              if (bw[a]) for (k = 1; k <= nin[a]; k++) if (live[inn[a, k]] && !bw[inn[a, k]]) { bw[inn[a, k]] = 1; more = 1 }
+            }
+          } while (more)
+          s = ""; c = 0
+          for (a = 1; a <= n; a++) if (fw[a] && bw[a]) { grp[a] = 1; s = s (c++ ? ", " : "") id[a] }
+          if (c > 1) printf "%s: read cycle through %s; each waits on the next, so none can ever be ready\n", id[i], s
+        }
+      }')"
+    if [ -n "$cycles" ]; then
+      printf '%s\n' "$cycles"
       found=1
     fi
   fi

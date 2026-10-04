@@ -1181,7 +1181,7 @@ fi
 
 if [ -n "$PARALLEL_BUDGET" ]; then
 
-  # OPEN ROWS AND THE SUITES THEY CLAIM, in one pass over the roster (spec AC-7).
+  # OPEN ROWS, in one pass over the roster (spec AC-7).
   #
   # "Open" no longer asks the roster whether a row was ever closed — it asks THIS
   # TURN'S ListAgents answer whether the row's agent is STILL WORKING. A dispatch row
@@ -1209,11 +1209,14 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # disagree about who is listed — only about what the status means, which is the whole
   # point of asking two questions (tests/cross-gate-agreement.test.sh §LA.5).
   #
-  # A CLAIM IS READ OFF THE LEDGER, never off the process table (WALLS/3): a row whose
-  # brief declared a subprocess claim spends a suite. Asking `pgrep` per row would be
-  # truer to the word "running" and would put a process spawn per row on the dispatch
-  # path; the ledger is the artifact this gate already owns. A claim only spends a
-  # suite while its row is OPEN — a finished agent's old claim costs nothing.
+  # NO SUITE IS COUNTED HERE (wave-26 T8; D8, REQ-6 AC-6.3). This pass used to count a
+  # second number beside the open rows, the rows holding a suite (a declared subprocess
+  # claim, or a test-runner), for a ceiling that refused the next dispatch at
+  # `claimed + 1 > suites`. That booked a suite for an agent's whole life whether it ran one
+  # or not, and refused a read-only agent that would run nothing. A suite run now books a
+  # machine-wide place as it starts (payload/scripts/lib/slots.sh, through the Bash wall's
+  # shim), so hand-out asks nothing about suites. The row's `claims=` field stays: the
+  # Patrol tick reads it to name the youngest suite-running writer under memory pressure.
   #
   # AMBIGUOUS COUNTS AS OPEN (the name present more than once) — folded into the
   # predicate's own exit 0, so this function never sees it as a separate case. The safe
@@ -1229,8 +1232,8 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # turned into a whole-dispatch refusal naming a ListAgents call as the repair. That made
   # a chore a PRECONDITION of a judgement, and it is struck: no hook requires the model to
   # perform an act before it will judge one (spec P-A). The fallback is the roster itself,
-  # which this wall already owns and already reads. So the answer is ALWAYS `<open>
-  # <claimed>` and the exit is ALWAYS 0; a dispatch is judged against a count that may be
+  # which this wall already owns and already reads. So the answer is ALWAYS `<open>`
+  # and the exit is ALWAYS 0; a dispatch is judged against a count that may be
   # generous, never deferred.
   #
   # AND ON THAT DARK PATH THE ROSTER ANSWERS WITH EVERYTHING IT KNOWS (wave-14 D7, REQ-3).
@@ -1254,10 +1257,10 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # it can speak to — an `idle` row still closes, an absent row still closes — and the
   # Patrol tick still consumes the same reader unchanged. Only the case where there is
   # nothing to read has stopped being an error.
-  budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>", then the open names (exit 0)
-    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed="" notfresh=""
-    local la_out la_rc row_dark dark="" closed still_open open_names="" holds
-    if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
+  budget_roster_counts() {  # <roster file> <transcript> -> "<open>", then the open names (exit 0)
+    local f="$1" transcript="$2" line nm seen open=0 primed="" notfresh=""
+    local la_out la_rc row_dark dark="" closed still_open open_names=""
+    if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in "roster-state/${ROSTER_VERSION}|status=intended|"*) ;; *) continue ;; esac
@@ -1318,16 +1321,13 @@ if [ -n "$PARALLEL_BUDGET" ]; then
           # list, and `budget_open_writers` (payload/scripts/lib/roster.sh) turns that list into
           # the writer count after the dark rows are settled, so a read-only row holds no
           # writer slot and the Patrol's tick, which calls the same function, reads the same
-          # number. The SUITE slot is the row's own: a declared claim, or a test-runner.
+          # number.
           open_names="${open_names}${nm}
 "
-          holds=""
-          roster_row_holds_suite "$line" && { holds=1; claimed=$(( claimed + 1 )); }
-          # COUNTED BY THE FALLBACK, NOT BY A READING. The row goes on the dark list with
-          # whether it holds a suite slot, and the block below asks the roster whether it has
-          # since closed. A row the panel spoke for never lands here, which is what makes that
-          # question unreachable on the fresh path.
-          [ -n "$row_dark" ] && dark="${dark}${nm}|${holds}
+          # COUNTED BY THE FALLBACK, NOT BY A READING. The row goes on the dark list, and the
+          # block below asks the roster whether it has since closed. A row the panel spoke for
+          # never lands here, which is what makes that question unreachable on the fresh path.
+          [ -n "$row_dark" ] && dark="${dark}${nm}
 "
           ;;
         1) : ;;
@@ -1336,11 +1336,10 @@ if [ -n "$PARALLEL_BUDGET" ]; then
 
     # THE DARK ROWS, SETTLED IN ONE PASS (wave-14 REQ-3, D7). One read of the roster and one
     # of the ack ledger, for every dark row at once — never per row, and never at all on a
-    # turn where the panel answered for every row. A landed row gives its writer slot back
-    # AND the suite its brief claimed: a finished agent runs nothing.
+    # turn where the panel answered for every row. A landed row gives its writer slot back.
     if [ -n "$dark" ]; then
       still_open=$(roster_open_names "$f" "$ACK_LEDGER_FILE")
-      closed=$(while IFS='|' read -r nm claims; do
+      closed=$(while IFS= read -r nm; do
                  [ -n "$nm" ] || continue
                  /usr/bin/grep -qxF -- "$nm" <<< "$still_open" || printf '%s\n' "$nm"
                done <<DARKNAMES
@@ -1348,7 +1347,7 @@ $dark
 DARKNAMES
 )
       if [ -n "$closed" ]; then
-        while IFS='|' read -r nm claims; do
+        while IFS= read -r nm; do
           [ -n "$nm" ] || continue
           # A HERE-STRING, NOT A PIPE (correctness review F8; the reason
           # is stated in this comment, no rule file carries it). `grep -q` exits at its first match; under this
@@ -1359,7 +1358,6 @@ DARKNAMES
           # process to lose.
           /usr/bin/grep -qxF -- "$nm" <<< "$closed" || continue
           open_names=$(printf '%s' "$open_names" | /usr/bin/grep -vxF -- "$nm")
-          [ -n "$claims" ] && claimed=$(( claimed - 1 ))
         done <<DARK
 $dark
 DARK
@@ -1369,7 +1367,7 @@ DARK
     open=$(printf '%s\n' "$open_names" | budget_open_writers "$f")
     # THE NAMES RIDE BELOW THE COUNTS (wave-24 T13, D10), one per line, so the writer-budget
     # refusal can list the rows it counted without a second reading of the roster.
-    printf '%s %s\n%s' "$open" "$claimed" "$open_names"
+    printf '%s\n%s' "$open" "$open_names"
   }
 
   # budget_writer_rows <roster file> <open names> -> one line per open WRITER row: its name and
@@ -1404,15 +1402,15 @@ WRITERNAMES
     printf '%s' "$n"
   }
 
-  # FIRST CEILING WINS, STILL (wave-14 REQ-8, D3). The three ceilings are three readings of
+  # FIRST CEILING WINS, STILL (wave-14 REQ-8, D3). The ceilings are readings of
   # ONE wall and one repair — "land or stand down a row" clears whichever of them fired — so
-  # reporting all three would spend three lines of the refusal's budget to say one thing
-  # three ways. The guard keeps the arm's pre-REQ-8 behaviour exactly: the first ceiling
-  # passed is the one named. What changed is that the wall records instead of exiting, so
+  # reporting each would spend a line of the refusal's budget per ceiling to say one thing
+  # several ways (two since wave-26 T8 removed the suites arm). The guard keeps the arm's
+  # pre-REQ-8 behaviour exactly: the first ceiling passed is the one named. What changed is that the wall records instead of exiting, so
   # the arms after it are read in the same pass.
   BUDGET_DENIED=""
   budget_deny() {  # <fact> <the one line naming the resource, its ceiling and its count> [rows]
-    # ONE FIX FOR ALL THREE ARMS (rows 43-45): the fact names which ceiling was passed
+    # ONE FIX FOR EVERY ARM (rows 43 and 45): the fact names which ceiling was passed
     # and the repair is the same act whichever it was. The writer arm adds the rows it counted,
     # each with the command that closes it (wave-24 T13, D10, AC-6.7).
     [ -z "$BUDGET_DENIED" ] || return 0
@@ -1442,15 +1440,14 @@ machine genuinely has the room."
   # ListAgents answer refused the whole dispatch, telling the orchestrator to call the
   # tool and come back — and telling a dispatched agent, which holds no such tool, to ask
   # the orchestrator instead. Both halves are gone. `budget_roster_counts` now always
-  # answers `<open> <claimed>`, falling back to the roster's own open rows when there is
-  # no answer to read, so the three ceilings below are the only thing left between a
+  # answers `<open>`, falling back to the roster's own open rows when there is
+  # no answer to read, so the ceilings below are the only thing left between a
   # brief and its dispatch.
   BUDGET_COUNTS=$(budget_roster_counts "$ROSTER_FILE" "$BUDGET_TRANSCRIPT")
   BUDGET_OPEN_NAMES=""
   case "$BUDGET_COUNTS" in *$'\n'*) BUDGET_OPEN_NAMES="${BUDGET_COUNTS#*$'\n'}" ;; esac
   BUDGET_COUNTS="${BUDGET_COUNTS%%$'\n'*}"
-  BUDGET_OPEN="${BUDGET_COUNTS%% *}"
-  BUDGET_CLAIMED="${BUDGET_COUNTS##* }"
+  BUDGET_OPEN="$BUDGET_COUNTS"
   BUDGET_UNMEASURED=""
 
   B_WRITERS="$DP_BUDGET_WRITERS"
@@ -1466,21 +1463,21 @@ machine genuinely has the room."
     BUDGET_UNMEASURED="${BUDGET_UNMEASURED} writers"
   fi
 
-  B_SUITES=$(budget_field "$PARALLEL_BUDGET" suites)
-  if [ -n "$B_SUITES" ]; then
-    [ $(( BUDGET_CLAIMED + 1 )) -gt "$B_SUITES" ] && budget_deny \
-      "this passes the run's suite budget" \
-      "suites: budget=${B_SUITES} claimed=${BUDGET_CLAIMED} with-this-dispatch=$(( BUDGET_CLAIMED + 1 ))"
-  else
-    BUDGET_UNMEASURED="${BUDGET_UNMEASURED} suites"
-  fi
+  # NO SUITES ARM (wave-26 T8; D8, REQ-6 AC-6.3). It refused a dispatch at
+  # `claimed + 1 > suites`: a suite booked for every claiming agent's whole life, and one more
+  # for every dispatch, read-only included. A suite run books its own machine-wide place as it
+  # starts now (payload/scripts/lib/slots.sh), so hand-out counts no suites.
 
   B_TREES=$(budget_field "$PARALLEL_BUDGET" worktrees)
   if [ -n "$B_TREES" ]; then
     BUDGET_LIVE=$(budget_live_trees "$BIONIC_ROOT")
-    [ $(( BUDGET_LIVE + 1 )) -gt "$B_TREES" ] && budget_deny \
+    # A READ-ONLY DISPATCH ASKS FOR NO WORKTREE (wave-26 T8, D8), as it asks for no writer
+    # slot above: it writes nothing, so it is handed no tree.
+    BUDGET_TREE_ASK=1
+    role_is_readonly "$DP_SUBAGENT" && BUDGET_TREE_ASK=0
+    [ $(( BUDGET_LIVE + BUDGET_TREE_ASK )) -gt "$B_TREES" ] && budget_deny \
       "this passes the run's worktree budget" \
-      "worktrees: budget=${B_TREES} live=${BUDGET_LIVE} with-this-dispatch=$(( BUDGET_LIVE + 1 ))"
+      "worktrees: budget=${B_TREES} live=${BUDGET_LIVE} with-this-dispatch=$(( BUDGET_LIVE + BUDGET_TREE_ASK ))"
   else
     BUDGET_UNMEASURED="${BUDGET_UNMEASURED} worktrees"
   fi
