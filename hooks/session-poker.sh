@@ -360,7 +360,10 @@ HOLD_REASON_SLOT="'why it stays up'"
 # so a Patrol armed under v=2 does not know it and the tick's re-arm note asks for the new job.
 # v=4 (wave-26 T15; D16): an `unchanged` or a WAITING tick ends the turn's duties, the task-list
 # refresh is asked only on a change, and "continue" only when something is ready or changed.
-PATROL_PROMPT_VERSION=4
+# v=5 (wave-26 T32; review-6 F2): the refresh is asked only when the tick printed its RECONCILE
+# line, which it prints whenever the duty is owed (v=4 asked on a change the tick never printed),
+# and a FILL asks for the dispatch alone: the launch records the row and its ledger line.
+PATROL_PROMPT_VERSION=5
 
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
 # stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
@@ -417,6 +420,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the working branch's head"
+  die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   exit 2
@@ -618,6 +622,14 @@ case "$VERB" in
       usage "proof-add takes exactly two arguments: <floor|review|task> <evidence path under record/> (the head is read from the working branch's checkout)."
     fi
     PF_KIND="$1"; PF_EVID="$2"
+    ;;
+  # ONE OPTIONAL FLAG (wave-26 T32; D4): `--wait` waits for another writer's lock, which only the
+  # launch recorder's detached call can afford; the tick and the turn-end wall leave a held lock
+  # to its holder.
+  launch-sync)
+    LS_WAIT=no
+    if [ $# -eq 1 ] && [ "$1" = --wait ]; then LS_WAIT=yes
+    elif [ $# -ne 0 ]; then usage "launch-sync takes at most one flag: --wait."; fi
     ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
@@ -897,7 +909,7 @@ tick_digest_file() {  # <session-id> -> absolute path, or empty
 # so a re-arm does not raise them a second time. `change=` is the fingerprint of the plan's
 # `## Tasks` statuses and its ready set (wave-26 T15; D16): the task-list duty is owed only when
 # it moved, so `arm` does not carry it and the first tick after an arm compares against nothing.
-write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change>]]] -> 0 written, 1 not
+write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change> [<live head>]]]] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
   [ -n "$f" ] || return 1
@@ -916,6 +928,11 @@ write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <du
     fi
     if [ -n "${8:-}" ]; then
       printf 'change=%s\n' "$8"
+    fi
+    # THE HEAD THIS TICK JUDGED `live:head` AGAINST (wave-26 T32; A-T14.2), so the turn-end wall,
+    # which reads no git, hands the same head to the same ready set on this tick's turn.
+    if [ -n "${9:-}" ]; then
+      printf 'head=%s\n' "$9"
     fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
@@ -2909,6 +2926,396 @@ plan_verb_id_ok() {
   return 0
 }
 
+# ---------------------------------------------------------------- the launch sync
+#
+# ONE TRANSACTION FOR EVERY LAUNCH THE PLAN LACKS (wave-26 T32; D4, review-3 F1, F2, F6). Through
+# T12 the launch recorder ran `task-set` and then `ledger-add` inside its own hook, about a second
+# each, under a 10 s limit: a batch of launches outran it and the later ones printed the busy
+# refusal. `launch-sync` reads this session's roster and the bound plan and writes, in ONE
+# validated, dry-committed write (the shared transaction above), every open launch whose row is
+# not yet active under it or whose ledger line is missing. The recorder starts it without
+# waiting; the Patrol tick and the turn-end wall run it too. Whichever runs first does the work,
+# and the others find nothing to do and say nothing.
+#
+# WHICH LAUNCHES: the OPEN names of this session's roster (`roster_open_names`, the predicate the
+# ready set reads), each by its latest `confirmed` or `identified` row. A finished agent's launch
+# is never applied again, so a row returned to `pending` (a review row after its proof) is not
+# re-activated under an old name. A name maps to a `## Tasks` row by `fill_row_launched`; a row
+# that is `landed` or `dropped` is left alone.
+#
+# WHAT IS WRITTEN, PER LAUNCH, AND ALL OF IT OR NONE OF IT: the row's `status=active` and agent,
+# its empty `worktree` and `base` filled from the tree spawn-worktree.sh recorded for the name;
+# and one `## Dispatch ledger` line, `<role> (<name>)`, the launch minute, the brief duration, the
+# deliverable, and `<tree> @ <base>` in the notes. A row's agent cell is its LATEST open launch,
+# so a `-r<n>` re-dispatch moves the cell and gets its own line, keyed `<id>r<n>` (F1). A launch
+# with no tree of its own (a reviewer or a test-runner whose row's Files name nothing outside the
+# docs root, `units_writes_head`) goes active with an empty worktree cell, which units_validate
+# admits for exactly such a row, and takes the Step-4 block's `worktree:` and `base-sha:` for its
+# ledger line only: the wave's tree in the row would read to the commit gate as the row's own. A
+# row that writes the head with no tree recorded cannot go active at all and is printed. A plan with no
+# `## Dispatch ledger` heading keeps no ledger, and its launches get the row alone.
+#
+# NEVER HALF A LAUNCH (F2, F6). The row and its line are projected together on a scratch copy and
+# kept only when both project; the batch is validated and dry-committed once, and the plan is
+# replaced by one rename. A run killed before the rename leaves the plan byte-identical and the
+# next caller applies the launch whole; the copy it left is removed by the next run once its pid
+# is gone. The T12 case of a ledger-add refusing after task-set succeeded cannot arise.
+#
+# ONE WRITER: a lock under `.bionic/tmp`, mkdir and pid. `--wait` (the recorder's detached call)
+# waits up to LAUNCH_SYNC_WAIT seconds; the tick and the turn-end wall leave a held lock to its
+# holder. A holder whose pid is gone, or a lock older than LAUNCH_SYNC_STALE seconds, is taken
+# over.
+#
+# WHAT IT PRINTS: `poker: LAUNCHED <id> <name> — <what was written>` once, by whichever caller
+# wrote it; `poker: NOT-RECORDED <id> <name> — <why>` and the commands to run by hand, by every
+# caller, until it is fixed (exit 1). Nothing at all when there is nothing to do.
+LAUNCH_SYNC_WAIT=60
+LAUNCH_SYNC_STALE=120
+LAUNCH_SYNC_LOCK=""
+
+launch_sync_unlock() {
+  [ -n "$LAUNCH_SYNC_LOCK" ] && rm -rf "$LAUNCH_SYNC_LOCK" 2>/dev/null
+  LAUNCH_SYNC_LOCK=""
+  return 0
+}
+
+launch_sync_lock() {  # <lock dir> <wait: yes|no> -> 0 held, 1 another live writer holds it
+  local d="$1" wait="$2" pid start="$SECONDS"
+  while :; do
+    if mkdir "$d" 2>/dev/null; then
+      printf '%s' "$$" > "$d/pid" 2>/dev/null
+      LAUNCH_SYNC_LOCK="$d"
+      return 0
+    fi
+    pid="$(cat "$d/pid" 2>/dev/null)"
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then rm -rf "$d" 2>/dev/null; continue; fi
+    if [ $(( $(now_epoch) - $(file_mtime "$d") )) -gt "$LAUNCH_SYNC_STALE" ]; then rm -rf "$d" 2>/dev/null; continue; fi
+    [ "$wait" = yes ] && [ $((SECONDS - start)) -lt "$LAUNCH_SYNC_WAIT" ] || return 1
+    sleep 0.2
+  done
+}
+
+# The tree and base spawn-worktree.sh recorded for <name> in this session, `path<TAB>base`, or
+# nothing. The file, its symlink refusals and its line filter are worktree.sh's; this reads the
+# base beside the path, which the public reader does not return. The last line wins.
+launch_sync_workspace() {  # <root> <sid> <name>
+  local f
+  declare -F _wt_workspaces_file >/dev/null 2>&1 || return 0
+  f="$(_wt_workspaces_file "$1" "$2")" || return 0
+  _wt_workspaces_unlinked "$1" "$f" || return 0
+  [ -f "$f" ] && [ -r "$f" ] || return 0
+  LW_SID="$2" LW_NAME="$3" awk -F'|' -v schema="${WORKSPACE_SCHEMA:-workspace/v1}" '
+    BEGIN { sid = ENVIRON["LW_SID"]; want = ENVIRON["LW_NAME"] }
+    { sub(/\r$/, "") }
+    $1 != schema { next }
+    {
+      s = ""; n = ""; p = ""; b = ""; hn = 0
+      for (i = 2; i <= NF; i++) {
+        if (index($i, "session=") == 1) s = substr($i, 9)
+        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
+        else if (index($i, "path=") == 1) p = substr($i, 6)
+        else if (index($i, "base=") == 1) b = substr($i, 6)
+      }
+      if (s == sid && substr(p, 1, 1) == "/" && hn && n == want) last = p "\t" b
+    }
+    END { if (last != "") print last }' "$f" 2>/dev/null
+}
+
+# A recorded tree as the plan writes it: relative to the project root when it sits under it.
+launch_sync_rel() {  # <root> <absolute tree>
+  local root="$1" p="$2" root_p
+  [ -d "$p" ] && p="$(cd "$p" 2>/dev/null && pwd -P)"
+  root_p="$(cd "$root" 2>/dev/null && pwd -P)"
+  case "$p" in
+    "$root"/*)   p="${p#"$root"/}" ;;
+    "$root_p"/*) p="${p#"$root_p"/}" ;;
+  esac
+  printf '%s' "$p"
+}
+
+# The brief duration as the ledger writes it: `60 minutes`, `~45 minutes.` -> `60 min`, `45 min`;
+# anything else verbatim.
+launch_sync_minutes() {  # <duration>
+  local d="$1" n
+  d="${d#\~}"; d="${d%.}"
+  n="${d%%[!0-9]*}"
+  case "${d#"$n"}" in
+    ' min'|' mins'|' minute'|' minutes'|min|mins|m) [ -n "$n" ] && { printf '%s min' "$n"; return 0; } ;;
+  esac
+  printf '%s' "$1"
+}
+
+# The Step-4 block's `worktree:` and `base-sha:`, `tree<TAB>base`, or nothing.
+launch_sync_step4() {  # <plan>
+  awk '
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { sdlc = ($0 ~ /^##[ \t]+SDLC State/); inb = 0; next }
+    !sdlc { next }
+    /^[ \t]*-?[ \t]*Step[ \t]+4[ \t]*:/ { inb = 1; next }
+    inb && /^[ \t]*- / { inb = 0 }
+    inb && /^[ \t]+worktree[ \t]*:/ { v = $0; sub(/^[ \t]+worktree[ \t]*:[ \t]*/, "", v); sub(/[ \t].*$/, "", v); wt = v }
+    inb && /^[ \t]+base-sha[ \t]*:/ { v = $0; sub(/^[ \t]+base-sha[ \t]*:[ \t]*/, "", v); sub(/[ \t].*$/, "", v); bs = v }
+    END { if (wt != "") print wt "\t" bs }' "$1" 2>/dev/null
+}
+
+# The dispatch ledger's rows, `id<TAB>agent cell`; exit 1 when the plan has no ## Dispatch ledger.
+launch_sync_ledger() {  # <plan>
+  awk '
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { inl = ($0 ~ /^##[ \t]+Dispatch ledger[ \t]*$/ && !done); if (inl) seen = 1; else if (seen) done = 1; rows = 0; next }
+    !inl || $0 !~ /^[ \t]*\|/ { next }
+    { rows++ }
+    rows == 1 || $0 ~ /^[ \t]*\|[ \t:|-]*$/ { next }
+    { n = split($0, c, "|"); id = c[2]; ag = c[3]
+      gsub(/^[ \t]+|[ \t]+$/, "", id); gsub(/^[ \t]+|[ \t]+$/, "", ag)
+      if (id != "") print id "\t" ag }
+    END { exit(seen ? 0 : 1) }' "$1" 2>/dev/null
+}
+
+# The open launches, `name launched_at duration deliverable subagent_type` joined by the unit
+# separator (\037: a field may be empty, and `read` folds runs of a whitespace separator), each by
+# its latest confirmed or identified row, in the roster order of that row.
+launch_sync_launches() {  # <roster> <sid> <open names, one per line>
+  LS_OPEN="$3" LS_SID="$2" awk -F'|' '
+    BEGIN { n = split(ENVIRON["LS_OPEN"], o, "\n"); for (i = 1; i <= n; i++) if (o[i] != "") open[o[i]] = 1
+            sid = ENVIRON["LS_SID"] }
+    $1 != "roster-state/v1" { next }
+    {
+      split("", kv)
+      for (i = 2; i <= NF; i++) {
+        e = index($i, "="); if (e < 2) continue
+        k = substr($i, 1, e - 1); if (!(k in kv)) kv[k] = substr($i, e + 1)
+      }
+      if (kv["status"] != "confirmed" && kv["status"] != "identified") next
+      nm = kv["name"]; if (nm == "" || !(nm in open)) next
+      if (kv["session"] != "" && kv["session"] != sid) next
+      at[nm] = NR
+      rec[nm] = nm "\037" kv["launched_at"] "\037" kv["duration"] "\037" kv["deliverable"] "\037" kv["subagent_type"]
+    }
+    END { for (k in at) print at[k] "\t" rec[k] }' "$1" 2>/dev/null | sort -n | cut -f2-
+}
+
+# The command a person runs for one of the plan-row verbs, quoted where it must be.
+launch_sync_hand() {  # <verb> <operand>...
+  local out a
+  out="bash ${POKER_WORD} $1"; shift
+  for a in "$@"; do out="$out $(refuse_shell_word "$a")"; done
+  printf '%s' "$out"
+}
+
+# Removes what a run killed before its rename left beside the plan: the copies and the dry
+# commit's engagement marker of a pid that is gone.
+launch_sync_sweep() {  # <plan> <root>
+  local f pid m
+  for f in "$1".launch-sync.* "$1".launch-sync-dry.*; do
+    [ -e "$f" ] || continue
+    pid="${f#"$1".launch-sync}"; pid="${pid#-dry}"; pid="${pid#.}"; pid="${pid%%.*}"
+    case "$pid" in ''|*[!0-9]*) continue ;; esac
+    kill -0 "$pid" 2>/dev/null && continue
+    rm -f "$f" 2>/dev/null
+    m="$(engaged_marker_path "$2" "planverb-$pid" 2>/dev/null)" && [ -n "$m" ] && rm -f "$m" 2>/dev/null
+  done
+  return 0
+}
+
+# launch_sync_project <plan> <root> <sid> <roster> <ack ledger> <out>
+#   -> writes the projected plan to <out>; sets LS_SAID (lines for what it applies), LS_FAILS
+#   (lines for what it cannot) and LS_HANDS (every applied launch's commands, for a batch the
+#   gate refuses). 0 when something was projected, 1 when nothing was.
+launch_sync_project() {
+  local plan="$1" root="$2" sid="$3" roster="$4" acks="$5" out="$6"
+  local open rec i j n=0 nl=0 hits h hasl=0 haswt=0 hasbs=0 s4 s4wt s4bs
+  local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand rvat rvids
+  local us=$'\037'
+  local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LROW FINAL LGID LGAG pairs lpairs
+  LS_SAID=""; LS_FAILS=""; LS_HANDS=""
+  open="$(roster_open_names "$roster" "$acks" "$sid" 2>/dev/null)"
+  [ -n "$open" ] || return 1
+  while IFS="$us" read -r name la du dl ty; do
+    [ -n "$name" ] || continue
+    LN[nl]="$name"; LLA[nl]="$la"; LDU[nl]="$du"; LDL[nl]="$dl"; LTY[nl]="$ty"; nl=$((nl + 1))
+  done <<EOF
+$(launch_sync_launches "$roster" "$sid" "$open")
+EOF
+  [ "$nl" -gt 0 ] || return 1
+  while IFS="$us" read -r rec _ _ _ ag _ _ _ fil st wt bs _; do
+    [ -n "$rec" ] || continue
+    RID[n]="$rec"; RFIL[n]="$fil"; RAG[n]="$ag"; RST[n]="$st"; RWT[n]="$wt"; RBS[n]="$bs"; FINAL[n]=-1
+    n=$((n + 1))
+  done <<EOF
+$(units_rows "$plan" 2>/dev/null | tr '\t' '\037')
+EOF
+  [ "$n" -gt 0 ] || return 1
+  j=0
+  while [ "$j" -lt "$nl" ]; do
+    hits=0; h=-1; i=0
+    while [ "$i" -lt "$n" ]; do
+      if fill_row_launched "${RID[i]}" "${LN[j]}"; then hits=$((hits + 1)); h="$i"; fi
+      i=$((i + 1))
+    done
+    LROW[j]=-1
+    if [ "$hits" -gt 1 ]; then
+      LS_FAILS="${LS_FAILS}NOT-RECORDED ? ${LN[j]} — the name maps to more than one ## Tasks row; set the row it runs by hand: $(launch_sync_hand task-set '<id>' status=active "agent=${LN[j]}")"$'\n'
+    elif [ "$hits" -eq 1 ]; then
+      case "${RST[h]}" in pending|active) LROW[j]="$h"; FINAL[h]="$j" ;; esac
+    fi
+    j=$((j + 1))
+  done
+  units_has_column "$plan" worktree && haswt=1
+  units_has_column "$plan" base && hasbs=1
+  if launch_sync_ledger "$plan" > "$out.ledger"; then hasl=1; fi
+  i=0
+  while IFS="$(printf '\t')" read -r lid ag; do
+    [ -n "$lid" ] || continue
+    LGID[i]="$lid"; LGAG[i]="$ag"; i=$((i + 1))
+  done < "$out.ledger"
+  rm -f "$out.ledger"
+  s4="$(launch_sync_step4 "$plan")"; s4wt="${s4%%$'\t'*}"; s4bs="${s4#*$'\t'}"; [ -n "$s4" ] || s4bs=""
+  # THE LAST REVIEW PROOF AND THE ROWS IT RETURNS (wave-26 T14): `proof-add review` puts every
+  # `live:head` row back to pending, and a launch from before that proof is a pass already read.
+  rvat="$(awk '/^[ \t]*```/ { f = !f; next } !f && /^[ \t-]*proved:/ && match($0, /kind=review /) && match($0, / at=[^ ]+/) { a = substr($0, RSTART + 4, RLENGTH - 4); if (a > m) m = a } END { print m }' "$plan" 2>/dev/null)"
+  rvids=" $(units_live_rows "$plan" 2>/dev/null | cut -f1 | tr '\n' ' ')"
+  cp "$plan" "$out" || return 1
+  j=0
+  while [ "$j" -lt "$nl" ]; do
+    i="${LROW[j]}"
+    if [ "$i" -lt 0 ]; then j=$((j + 1)); continue; fi
+    name="${LN[j]}"; st="${RST[i]}"; ag="${RAG[i]}"; wt="${RWT[i]}"; bs="${RBS[i]}"; fil="${RFIL[i]}"
+    pairs=(); lpairs=(); what=""; treeless=0; wtnew=""; bsnew=""
+    ws="$(launch_sync_workspace "$root" "$sid" "$name")"
+    if [ -n "$ws" ]; then
+      case "$wt" in *[A-Za-z0-9]*) : ;; *) [ "$haswt" = 1 ] && wtnew="$(launch_sync_rel "$root" "${ws%%$'\t'*}")" ;; esac
+      case "$bs" in *[A-Za-z0-9]*) : ;; *)
+        case "${ws#*$'\t'}" in *[A-Za-z0-9]*) [ "$hasbs" = 1 ] && bsnew="$(printf '%s' "${ws#*$'\t'}" | cut -c1-8)" ;; esac ;;
+      esac
+    fi
+    # A LAUNCH WITH NO TREE OF ITS OWN: no record for the name, an empty cell, and a Files cell
+    # that names nothing outside the docs root (units.sh `units_writes_head`, the predicate the
+    # validator asks before it owes the row a tree).
+    case "$wt" in *[A-Za-z0-9]*) : ;; *)
+      if [ -z "$wtnew" ] && [ "$haswt" = 1 ]; then
+        units_writes_head "$fil" || treeless=1
+      fi ;;
+    esac
+    noroom=0
+    # A PENDING ROW WHOSE LAUNCH IS ALREADY LEDGERED WAS PUT BACK ON PURPOSE (wave-26 T14: a review
+    # row returns to `pending` on its proof while its reviewer may still be open). The launch was
+    # recorded once; it is not re-applied to the row, and the next pass is its own launch.
+    lid=""
+    if [ "$st" = pending ] && [ "$hasl" = 1 ]; then
+      k=0
+      while [ "$k" -lt "${#LGAG[@]}" ]; do
+        case "${LGAG[k]}" in *"($name)") lid=have; break ;; esac
+        k=$((k + 1))
+      done
+    fi
+    if [ -z "$lid" ] && [ "$st" = pending ] && [ -n "$rvat" ] && [ -n "${LLA[j]}" ]; then
+      case "$rvids" in *" ${RID[i]} "*) [ "${LLA[j]}" \< "$rvat" ] && lid=read ;; esac
+    fi
+    if [ -n "$lid" ]; then j=$((j + 1)); continue; fi
+    if [ "${FINAL[i]}" = "$j" ]; then
+      if [ "$st" = pending ] && [ "$treeless" = 1 ]; then
+        pairs=(status=active "agent=$name")
+        what="row active with no tree of its own (its Files write nothing the head carries)"
+      elif [ "$st" = pending ] && [ "$haswt" = 1 ] && [ -z "$wtnew" ] && { case "$wt" in *[A-Za-z0-9]*) false ;; *) true ;; esac; }; then
+        noroom=1
+        pairs=(status=active "agent=$name" 'worktree=<tree>' 'base=<sha>')
+      elif [ "$st" = pending ]; then
+        pairs=(status=active "agent=$name")
+        [ -n "$wtnew" ] && pairs+=("worktree=$wtnew")
+        [ -n "$bsnew" ] && pairs+=("base=$bsnew")
+        what="row active${wtnew:+ in $wtnew}"
+      elif [ "$ag" != "$name" ]; then
+        pairs=("agent=$name")
+        [ -n "$bsnew" ] && pairs+=("base=$bsnew")
+        what="the agent cell was ${ag:-empty}"
+      fi
+    fi
+    lid=""
+    if [ "$hasl" = 1 ]; then
+      k=0
+      while [ "$k" -lt "${#LGAG[@]}" ]; do
+        case "${LGAG[k]}" in *"($name)") lid=have; break ;; esac
+        k=$((k + 1))
+      done
+      if [ -z "$lid" ]; then
+        lid="${RID[i]}"
+        sfx="${name##*-r}"; case "$name" in *-r[0-9]*) case "$sfx" in *[!0-9]*) sfx=1 ;; esac ;; *) sfx=1 ;; esac
+        while :; do
+          k=0
+          while [ "$k" -lt "${#LGID[@]}" ] && [ "${LGID[k]}" != "$lid" ]; do k=$((k + 1)); done
+          [ "$k" -lt "${#LGID[@]}" ] || break
+          lid="${RID[i]}r$sfx"; sfx=$((sfx + 1))
+        done
+        role="${LTY[j]##*:}"; [ -n "$role" ] || role=agent
+        la="${LLA[j]}"
+        case "$la" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]*Z) la="${la:0:16}Z" ;; esac
+        du="$(launch_sync_minutes "${LDU[j]}")"
+        lpairs=("agent=$role ($name)")
+        [ -n "$la" ] && lpairs+=("dispatched=$la")
+        [ -n "$du" ] && lpairs+=("expected=$du")
+        [ -n "${LDL[j]}" ] && lpairs+=("artifact=${LDL[j]}")
+        if [ -n "$ws" ]; then
+          wsbs=""; case "${ws#*$'\t'}" in *[A-Za-z0-9]*) wsbs="$(printf '%s' "${ws#*$'\t'}" | cut -c1-8)" ;; esac
+          lpairs+=("notes=$(launch_sync_rel "$root" "${ws%%$'\t'*}")${wsbs:+ @ $wsbs}")
+        elif [ "$treeless" = 1 ] && [ -n "$s4wt" ]; then
+          lpairs+=("notes=$s4wt${s4bs:+ @ $s4bs}")
+        else
+          case "$wt" in *[A-Za-z0-9]*)
+            case "$bs" in *[A-Za-z0-9]*) lpairs+=("notes=$wt @ $bs") ;; *) lpairs+=("notes=$wt") ;; esac ;;
+          esac
+        fi
+      else
+        lid=""
+      fi
+    fi
+    # A ROW THAT CANNOT GO ACTIVE: nothing of the launch is written, and both commands print.
+    if [ "$noroom" = 1 ]; then
+      LS_FAILS="${LS_FAILS}NOT-RECORDED ${RID[i]} $name — no tree is recorded for $name and row ${RID[i]} names none, so it cannot go active (spawn its tree with spawn-worktree.sh create --for $name, or fill the cells by hand). Nothing of this launch was written; run:
+  $(launch_sync_hand task-set "${RID[i]}" "${pairs[@]}")${lid:+
+  $(launch_sync_hand ledger-add "$lid" "${lpairs[@]}")}"$'\n'
+      j=$((j + 1)); continue
+    fi
+    if [ "${#pairs[@]}" -eq 0 ] && [ -z "$lid" ]; then j=$((j + 1)); continue; fi
+    # THE LAUNCH WHOLE OR NOT AT ALL: both halves on a scratch copy, kept only together.
+    rc=0
+    cp "$out" "$out.l" || return 1
+    if [ "${#pairs[@]}" -gt 0 ]; then
+      units_table_cells "$out.l" set tasks "${RID[i]}" "${pairs[@]}" > "$out.r" 2>/dev/null || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        LS_FAILS="${LS_FAILS}NOT-RECORDED ${RID[i]} $name — row ${RID[i]} of ## Tasks could not take ${pairs[*]} (units_table_cells exit $rc). Nothing of this launch was written; run:
+  $(launch_sync_hand task-set "${RID[i]}" "${pairs[@]}")${lid:+
+  $(launch_sync_hand ledger-add "$lid" "${lpairs[@]}")}"$'\n'
+        rm -f "$out.l" "$out.r"; j=$((j + 1)); continue
+      fi
+      mv -f "$out.r" "$out.l"
+    fi
+    if [ -n "$lid" ]; then
+      units_table_cells "$out.l" add ledger "$lid" "${lpairs[@]}" > "$out.r" 2>/dev/null || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        hand=""
+        [ "${#pairs[@]}" -gt 0 ] && hand="  $(launch_sync_hand task-set "${RID[i]}" "${pairs[@]}")"$'\n'
+        LS_FAILS="${LS_FAILS}NOT-RECORDED ${RID[i]} $name — the ## Dispatch ledger could not take its line (units_table_cells exit $rc: a header without one of agent, dispatched, expected, artifact or notes, or the id $lid taken). Nothing of this launch was written; run:
+${hand}  $(launch_sync_hand ledger-add "$lid" "${lpairs[@]}")"$'\n'
+        rm -f "$out.l" "$out.r"; j=$((j + 1)); continue
+      fi
+      mv -f "$out.r" "$out.l"
+      LGID[${#LGID[@]}]="$lid"; LGAG[${#LGAG[@]}]="$role ($name)"
+      what="${what:+$what, }ledger line $lid"
+    fi
+    mv -f "$out.l" "$out"
+    [ "${#pairs[@]}" -gt 0 ] && RAG[i]="$name"
+    LS_SAID="${LS_SAID}LAUNCHED ${RID[i]} $name — $what"$'\n'
+    [ "${#pairs[@]}" -gt 0 ] && LS_HANDS="${LS_HANDS}  $(launch_sync_hand task-set "${RID[i]}" "${pairs[@]}")"$'\n'
+    [ -n "$lid" ] && LS_HANDS="${LS_HANDS}  $(launch_sync_hand ledger-add "$lid" "${lpairs[@]}")"$'\n'
+    j=$((j + 1))
+  done
+  [ -n "$LS_SAID" ] || { rm -f "$out"; return 1; }
+  return 0
+}
+
 # ---------------------------------------------------------------- the sweep
 #
 # THE OTHER HALF OF `adopt` (fixit 1.5.1 T5; ideas/fixit-1.5.2-dead-session-sweep.md).
@@ -3049,7 +3456,8 @@ case "$VERB" in
   # `fill-declined:` line on every tick, and all 29 declines of that run answered nothing a wall
   # had asked. Each answer is now conditional on the line that owes it, ListAgents on an open
   # row, the task-list refresh only on a change of a row's status or the ready set (wave-26 T15;
-  # D16), nothing at all after `unchanged` or WAITING, and `v=` after the
+  # D16), which the tick prints as its RECONCILE line (T32), nothing at all after `unchanged` or
+  # WAITING, and `v=` after the
   # marker names the prompt's version so `arm` can record it and a later tick can ask for a
   # re-arm when the poker has moved on.
   prompt)
@@ -3059,7 +3467,7 @@ case "$VERB" in
       die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
       exit 3
     fi
-    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. If it printed only "unchanged", or a "poker: WAITING" line, the run is waiting on its agents and this turn owes nothing more: end it. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. TaskList and reconcile only when a row'"'"'s status or the ready set changed since the last tick. Continue the run toward its goal until a wall only when something is ready or changed.\n' \
+    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. If it printed only "unchanged", or a "poker: WAITING" line, the run is waiting on its agents and this turn owes nothing more: end it. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (its launch records the row active and its ledger line: write neither by hand) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. TaskList and reconcile only if a "poker: RECONCILE" line printed. Continue the run toward its goal until a wall only when something is ready or changed.\n' \
       "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$HOLD_REASON_SLOT"
     exit 0
     ;;
@@ -5092,6 +5500,73 @@ EOF
     exit 0
     ;;
 
+
+  # THE LAUNCH SYNC (wave-26 T32; D4). Its reasoning is above the verbs, beside the functions it
+  # runs. Silent, exit 0, wherever there is nothing it may write: no engagement, no bound open run,
+  # a plan before Step 4 (`current:` not a step of 4 or more), no roster, or a lock another writer
+  # holds when the caller does not wait. Only a launch it cannot record prints and exits 1.
+  launch-sync)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "launch-sync applies ONE session's launches, so without the key there is nothing to read."
+      exit 3
+    fi
+    LS_ROOT="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)" || LS_ROOT=""
+    [ -n "$LS_ROOT" ] || exit 0
+    engaged_session "$LS_ROOT" "$SESSION_ID" || exit 0
+    LS_RUN="$(session_run "$LS_ROOT" "$SESSION_ID" 2>/dev/null)" || LS_RUN=""
+    case "$LS_RUN" in 'bound-open '*) LS_PLAN="${LS_RUN#bound-open }" ;; *) exit 0 ;; esac
+    # THE ROSTER FIRST: a session that has confirmed no launch has nothing to apply, and the
+    # turn-end wall runs this on every Stop, so the plan is not read for it (patrol-duties-gate 70).
+    LS_ROSTER="$LS_ROOT/.bionic/tmp/roster-${SESSION_ID}.state"
+    [ -f "$LS_ROSTER" ] && [ ! -L "$LS_ROSTER" ] || exit 0
+    grep -qE '\|status=(confirmed|identified)\|' "$LS_ROSTER" 2>/dev/null || exit 0
+    LS_CUR="$(_fill_current_field "$LS_PLAN")"; LS_CUR="${LS_CUR%[ab]}"
+    case "$LS_CUR" in ''|*[!0-9]*) exit 0 ;; esac
+    [ "$LS_CUR" -ge 4 ] || exit 0
+    tmp_dir_ok "$LS_ROOT/.bionic/tmp" || exit 0
+    launch_sync_lock "$LS_ROOT/.bionic/tmp/launch-sync.lock" "$LS_WAIT" || exit 0
+    trap 'launch_sync_unlock' EXIT
+    plan_verb_open launch-sync
+    # THE CHECKSUM AGAIN, NOW THE LOCK IS HELD: plan_verb_open took it before this run owned the
+    # plan, and a writer that finished in between is not a change this transaction has to refuse.
+    PV_SUM="$(cksum < "$PV_PLAN" 2>/dev/null)"
+    LS_SWAPPED=no
+    launch_sync_exit() {
+      local rc=$?
+      rm -f "$PV_NEW" "$PV_NEW.2" "$PV_NEW.l" "$PV_NEW.r" "$PV_NEW.ledger" "$PV_DRY" ${PV_MARK:+"$PV_MARK"} 2>/dev/null
+      if [ "$rc" -ne 0 ] && [ "$LS_SWAPPED" = no ] && [ -n "${LS_HANDS:-}" ]; then
+        die "launch-sync: nothing was written. Fix what refused it, then run these by hand (or let the next tick retry):"
+        printf '%s' "$LS_HANDS" >&2
+      fi
+      launch_sync_unlock
+    }
+    trap launch_sync_exit EXIT
+    launch_sync_sweep "$PV_PLAN" "$PV_REPO"
+    LS_RC=0
+    LS_PROJECTED=no
+    launch_sync_project "$PV_PLAN" "$PV_REPO" "$SESSION_ID" "$LS_ROSTER" \
+      "$PV_REPO/.bionic/tmp/sweeper-${SESSION_ID}.state" "$PV_NEW" && LS_PROJECTED=yes
+    # WHAT CANNOT BE RECORDED PRINTS FIRST, so a refusal of the rest below cannot hide it.
+    if [ -n "$LS_FAILS" ]; then
+      printf '%s' "$LS_FAILS" | sed 's/^NOT-RECORDED /poker: NOT-RECORDED /'
+      LS_RC=1
+    fi
+    if [ "$LS_PROJECTED" = yes ]; then
+      LS_VIOL="$(units_validate "$PV_NEW" 2>&1)"
+      if [ -n "$LS_VIOL" ]; then
+        die "REFUSED — with these launches recorded, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
+        printf '%s\n' "$LS_VIOL" >&2
+        exit 1
+      fi
+      plan_verb_swap launch-sync "$(printf '%s' "$LS_SAID" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $2 }') recorded" writer
+      LS_SWAPPED=yes
+      printf '%s' "$LS_SAID" | sed 's/^/poker: /'
+    fi
+    exit "$LS_RC"
+    ;;
+
   tick)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -5154,7 +5629,7 @@ EOF
     # THE PROMPT VERSION rides the same file: `arm` records the version its prompt carried, and a
     # tick that finds none, or an older one, prints one re-arm line above everything else.
     TICK_BUF="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-tick.XXXXXX" 2>/dev/null)" || TICK_BUF=""
-    TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed; TICK_CHANGE=""
+    TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed; TICK_CHANGE=""; TICK_CHANGE_STORE=""
     TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
     TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
@@ -5177,7 +5652,7 @@ EOF
       fi
       rm -f "$TICK_BUF" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
-        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE" \
+        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
       exit "$rc"
@@ -5250,9 +5725,20 @@ EOF
           awk '
             $1 != "poker:" { next }
             $2 == "note:" { print $3, $4, $5; next }
-            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined)$/ { print $2, $3, $4 }
+            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE)$/ { print $2, $3, $4 }
           ' "$TICK_BUF" | LC_ALL=C sort
         } | cksum | awk '{ print $1 "-" $2 }' )"
+      fi
+      # THE STORED FINGERPRINT IS THE LAST ONE A DUTY WAS JUDGED AGAINST (wave-26 T32; review-6
+      # F1). A QUIET tick owes nothing, so it writes back the value it read: a status move it saw
+      # first is still owed by the next tick that can owe it. Through T15 every tick wrote its own,
+      # and a move first seen while the run WAITED was used up. The whole-decision hash above still
+      # takes this tick's own fingerprint, so a QUIET tick over a move prints in full. With no
+      # value stored yet (the first tick after an arm), the QUIET tick's own is the baseline.
+      TICK_CHANGE_STORE="$TICK_CHANGE"
+      if [ "$TICK_DECIDED" = QUIET ]; then
+        prev="$(tick_digest_field "$TICK_DIGEST_FILE" change)"
+        [ -n "$prev" ] && TICK_CHANGE_STORE="$prev"
       fi
       prev="$(tick_digest_field "$TICK_DIGEST_FILE" digest)"
       if [ -n "$TICK_DIGEST" ] && [ "$1" != DISARM ] && [ "${SCHED_STATE:-}" != emergency ] \
@@ -5267,6 +5753,10 @@ EOF
       TICK_DUTY=none
       if [ "$TICK_DECIDED" != QUIET ] && [ "$TICK_CHANGE" != "$(tick_digest_field "$TICK_DIGEST_FILE" change)" ]; then
         TICK_DUTY=owed
+        # THE DUTY IS PRINTED (wave-26 T32; review-6 F2). It used to live only in the digest
+        # file, so the Patrol prompt asked for the refresh on a change the model could not see.
+        # The prompt and the stop wall's refusal both name this line.
+        say "RECONCILE — a ## Tasks status or the ready set changed since the last tick: TaskList, and bring the task list in line with the plan"
       fi
       tick_write_orders
       return 0
@@ -5311,6 +5801,18 @@ EOF
       exit 2
     fi
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+
+    # ---------- THE LAUNCHES THE PLAN LACKS, WRITTEN BEFORE THE PLAN IS READ (wave-26 T32; D4) ----
+    #
+    # The launch recorder starts `launch-sync` and does not wait for it, so the tick runs the same
+    # transaction before anything below reads the plan: a launch the detached call did not record
+    # is recorded here (its LAUNCHED line enters this tick's output and its status this tick's
+    # change fingerprint), and one that cannot be recorded prints its NOT-RECORDED line and the
+    # commands to run by hand. A child process, as the recorder runs it: its refusals exit, and a
+    # tick must not. It leaves a lock another writer holds to that writer.
+    if [ -f "$ROSTER_FILE" ]; then
+      ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" launch-sync 2>&1 ) || :
+    fi
 
     # ---------- THE GATE REQUESTS, READ ONCE (wave-25 T5, REQ-4 AC-4.3; D7) ----------
     #
@@ -6413,7 +6915,7 @@ EOF
           # same way (the rung from `pressure_level`, the occupancy by the same predicate:
           # wave-19 audit V-2, T2d), so what it names is what this prints.
           SCHED_READY="${SCHED_RO_READY:-$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")}"
-          SCHED_IDS=""; SCHED_N=0
+          SCHED_IDS=""; SCHED_N=0; SCHED_OFFERED=""
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
             # THE LINE PRINTS THE AGENT NAME, NOT THE TASK ID (T22, A-orch-33). They are the
@@ -6422,7 +6924,7 @@ EOF
             # and then the ONLY safe token to print is the free one: see `fill_name` for why
             # the roster, and not the plan, is what "spent" is read from.
             SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(fill_name "$ROSTER_FILE" "$(clean "$TASK_ID")")"
-            SCHED_N=$((SCHED_N + 1))
+            SCHED_N=$((SCHED_N + 1)); SCHED_OFFERED="${SCHED_OFFERED} $(clean "$TASK_ID")"
           done <<EOF
 $SCHED_READY
 EOF
@@ -6434,6 +6936,21 @@ EOF
             # observed 19:00:46Z as `poker: FILL T13` above `decision=QUIET`).
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
+            # THE RANGE AN OFFERED REVIEW READS (wave-26 T32; T14, AC-6.5): one line per offered
+            # row that reads `live:head`, naming the difference past the last review proof, from
+            # the head this tick already read (UNITS_LIVE_HEAD; no git here). Before the first
+            # review proof there is no range, and no line: the review reads all the landed work.
+            SCHED_RANGE="$(units_live_range "$SCHED_PLAN" 2>/dev/null)"
+            if [ -n "$SCHED_RANGE" ]; then
+              while IFS="$(printf '\t')" read -r LR_ID _; do
+                [ -n "$LR_ID" ] || continue
+                case "$SCHED_OFFERED " in
+                  *" $LR_ID "*) say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more" ;;
+                esac
+              done <<EOF
+$(units_live_rows "$SCHED_PLAN" 2>/dev/null)
+EOF
+            fi
           else
             # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
             # which answer holds the rows, and the standing line above says why.
