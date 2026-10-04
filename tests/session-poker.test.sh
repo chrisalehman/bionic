@@ -8850,6 +8850,29 @@ expect_eq "48g2 …and returns T3 to pending, its agent cleared" \
   "$(s48_row "$P48F" T3)"
 expect_eq "48g3 …and only T3: the final review stays active" "active" \
   "$(s48_row "$P48F" T8 | awk -F'|' '{ print $12 }')"
+# REVIEW 14 S4 (wave-26 T51): A REVIEW PROOF THAT RETURNS NO LIVE ROW SAYS SO. The live review's
+# record was written under another name than its Files cell (`review-14.md`, Files `review.md`):
+# the proof returns no row, rightly (T46), and through T46 the success line said nothing of it, so
+# the active pass was never offered again and nobody saw why. The verb now names the active live
+# review rows and their Files on such a proof, and still resets none of them. The control: once no
+# live review is active, the final review's proof says nothing of the kind.
+awk -F'|' 'BEGIN { OFS = "|" } $2 == " T3 " { $6 = " w-T3 "; $13 = " active " } { print }' "$P48F" > "$P48F.tmp" && mv "$P48F.tmp" "$P48F"
+expect_eq "48h precondition: the live review T3 is active again, its agent named" \
+  "T3|6|review|follows the build|w-T3|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|active|" \
+  "$(s48_row "$P48F" T3)"
+cp "$R48F/.bionic/docs/record/wave-01-fixture/review.md" "$R48F/.bionic/docs/record/wave-01-fixture/review-14.md"
+poke "$R48F" proof-add review record/wave-01-fixture/review-14.md
+expect_eq "48h S4 a review proof no live row's Files hold exits 0" "0" "$RC"
+expect_contains "48h2 S4 …and says it returned no live review row, naming the active one and its Files" \
+  "no live review row holds record/wave-01-fixture/review-14.md in its Files: T3 (.bionic/docs/record/wave-01-fixture/review.md)" "$OUT"
+expect_eq "48h3 …and resets nothing: T3 stays active under its agent" \
+  "T3|6|review|follows the build|w-T3|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|active|" \
+  "$(s48_row "$P48F" T3)"
+poke "$R48F" proof-add review record/wave-01-fixture/review.md
+expect_contains "48h4 control precondition: T3's own proof returns it" "T3 back to pending" "$OUT"
+poke "$R48F" proof-add review record/wave-01-fixture/final.md
+expect_eq "48h5 control: with no live review active, the final review's proof exits 0" "0" "$RC"
+expect_absent "48h6 control …and says nothing of live rows" "no live review row holds" "$OUT"
 POKE_BOUND="$S48_BOUND_WAS"
 
 # ============================================================
@@ -8900,6 +8923,44 @@ expect_contains "49c2 …with the command to run by hand" "task-set T7 status=ac
 expect_true "49c3 …and the plan is unchanged" cmp -s "$TMPROOT/s49-before" "$P49"
 expect_eq "49d no projection copy is left beside the plan" "" \
   "$(find "$R49/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
+
+# 49f (wave-26 T51; review 13 F1): the lock cannot be made — .bionic/tmp is not writable. The tick's
+# call leaves a held lock to its holder and does not wait, yet through T32 its takeover arm looped
+# without a bound and the tick never returned. Run in a process group of its own, bounded, and
+# killed whole past the bound; what it left running is read by working directory.
+s49_procs() {  # <dir> -> the pids of bash processes whose working directory is <dir> or below it
+  local d
+  d="$(cd "$1" 2>/dev/null && pwd -P)" || return 0
+  lsof -a -c bash -d cwd -Fpn 2>/dev/null | awk -v d="$d" '
+    /^p/ { p = substr($0, 2); next }
+    /^n/ { n = substr($0, 2); if (n == d || index(n, d "/") == 1) print p }'
+}
+s49_tick_bounded() {  # <seconds> <repo> -> OUT, RC; 124, the tick's whole group killed, past the bound
+  local i=0 n=$(( $1 * 10 )) p
+  rm -f "$TMPROOT/s49f.rc"
+  p="$( set -m
+    ( cd "$2" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 \
+        bash "$POKER" tick > "$TMPROOT/s49f.out" 2>&1
+      echo "$?" > "$TMPROOT/s49f.rc" ) </dev/null >/dev/null 2>&1 &
+    echo "$!" )"
+  while [ ! -s "$TMPROOT/s49f.rc" ] && [ "$i" -lt "$n" ]; do sleep 0.1; i=$((i + 1)); done
+  if [ -s "$TMPROOT/s49f.rc" ]; then RC="$(cat "$TMPROOT/s49f.rc")"; else kill -9 -- "-$p" 2>/dev/null; RC=124; fi
+  OUT="$(cat "$TMPROOT/s49f.out" 2>/dev/null)"
+}
+require_helpers s49_procs s49_tick_bounded
+command -v lsof >/dev/null 2>&1 || { echo "session-poker: lsof absent — 49f cannot read what it left running"; exit 1; }
+( cd "$R49" && while :; do sleep 1; done ) & S49_PLANT=$!
+sleep 0.5
+expect_contains "49f precondition: a process the row starts in the repo is found by its working directory" \
+  " $S49_PLANT " " $(s49_procs "$R49" | tr '\n' ' ')"
+kill "$S49_PLANT" 2>/dev/null; wait "$S49_PLANT" 2>/dev/null
+poke_bind "$R49"
+chmod a-w "$R49/.bionic/tmp"
+s49_tick_bounded 20 "$R49"
+chmod u+w "$R49/.bionic/tmp"
+expect_ne "49f §F1 the tick returns when the launch lock cannot be made (rc $RC; 124 is the bound)" "124" "$RC"
+expect_contains "49f2 …and prints that the lock cannot be made" "cannot be made" "$OUT"
+expect_eq "49f3 …and leaves nothing running" "" "$(s49_procs "$R49")"
 
 # 49e (wave-26 T32; T14, AC-6.5): the offered review names the range it reads. §48's world as it
 # ends: a review proof at A, one landing to B, the review offered again. The digest is removed so
