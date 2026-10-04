@@ -170,6 +170,11 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
       # separator the `owner` column already printed before it.
       CARD_FMT_1='    %-12s owner %-14s %-22s test %s'; CARD_NF_1=4; CARD_FOLD_1=2
       CARD_LABEL_1="surfaces " ;;
+    ownership-reuses)
+      # The ownership row, then a second line for the reuses cell (wave-27 D8): the format of
+      # line 1 is `ownership`'s own, so the two kinds never disagree about a column.
+      _card_spec ownership || return 1
+      CARD_LINES=2; CARD_FMT_2='    reuses %s'; CARD_NF_2=1; CARD_FOLD_2=0 ;;
     eval-design)
       CARD_SECTION="Eval design"
       CARD_HDRCOLS="2:static 3:unit 4:hermetic 5:live 6:human"
@@ -913,8 +918,13 @@ sub2 == "dec" {
 }
 sub2 == "own" && /^[ \t]*\|/ {
   orow++
-  if (orow <= 2) next
+  # THE REUSES COLUMN (wave-27 D8): a header whose third cell reads `reuses` makes a five-cell
+  # table, `concept | owner | reuses | surfaces | test`. Its row goes out as the four cells every
+  # table has always sent, then the reuses cell fifth; a table without the column is untouched.
+  if (orow == 1) { n = cells($0, c); own5 = (n >= 5 && tolower(trim(c[3])) == "reuses"); next }
+  if (orow == 2) next
   n = cells($0, c)
+  if (own5) { if (n >= 5) print "OROW" OFS c[1] OFS c[2] OFS c[4] OFS c[5] OFS c[3]; next }
   if (n < 4) next
   print "OROW" OFS c[1] OFS c[2] OFS c[3] OFS c[4]
   next
@@ -1599,7 +1609,12 @@ _card_worth_entry() {  # <text>
 # table goes through the same row kind it always did.
 _card_step2_ownership() {
   CARD_ROWS=( ${WCARD_OROW[@]+"${WCARD_OROW[@]}"} )
-  _card_render_batch ownership
+  # A table with the `reuses` column sends five cells a row (see the awk's own-table arm): the
+  # reuses cell goes on a second line under its row, in the kind that carries one.
+  case "${CARD_ROWS[0]:-}" in
+    *"$CARD_TAB"*"$CARD_TAB"*"$CARD_TAB"*"$CARD_TAB"*) _card_render_batch ownership-reuses ;;
+    *) _card_render_batch ownership ;;
+  esac
 }
 
 # A labelled line at an indent: the label once, padded, then the text folded in the column
