@@ -1991,10 +1991,13 @@ fi
 if [ -n "$STANDDOWN_MISSING" ]; then
   # ONE hold COMMAND PER NAME, each pasteable as printed (wave-24 T27; critic I4): the real
   # name, and the reason as the tick's own quoted placeholder (`HOLD_REASON_SLOT` in
-  # hooks/session-poker.sh), never a bare `<reason>` a shell reads as a redirect.
+  # hooks/session-poker.sh), never a bare `<reason>` a shell reads as a redirect. The poker path
+  # is one shell word, as the tick prints it (wave-24 T29; critic addendum A2), so a plugin root
+  # with a space pastes whole.
   STANDDOWN_HOLDS=""
+  _sd_poker="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
   for _sd_hold in $STANDDOWN_MISSING; do
-    STANDDOWN_HOLDS="${STANDDOWN_HOLDS}${STANDDOWN_HOLDS:+; }bash ${HOOK_DIR}/session-poker.sh hold ${_sd_hold} 'why it stays up'"
+    STANDDOWN_HOLDS="${STANDDOWN_HOLDS}${STANDDOWN_HOLDS:+; }bash ${_sd_poker} hold ${_sd_hold} 'why it stays up'"
   done
   STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped, held nor declined them. TaskStop each. To keep an idle agent up, run: ${STANDDOWN_HOLDS} — the tick then stops ordering it while nothing about it changes. Or write a line \"standdown-declined: <name> <reason>\" for this turn alone. Then stop again — this gate blocks once."
 else

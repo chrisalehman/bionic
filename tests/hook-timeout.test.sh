@@ -34,6 +34,9 @@
 #   g   bash-walls       a 200 KB single-quoted `python3 -c` body, engaged, `memory` in the cwd (T28)
 #   b3  bash-walls       b's heredoc behind `cd sub && `, committing (T28)
 #   b4  bash-walls       b's heredoc behind `cd <absolute repo> && `, committing (T28)
+#   h   bash-walls       207 KB of `\"` in one double-quoted `echo` body, then `make` (T30)
+#   h2  bash-walls       the same body written into the memory store, so `memory` is in the command
+#   j   bash-walls       207 KB of escaped JSON `{\"k\":1}` in a `python3 -c` body, into the store
 # Every row runs under `/bin/bash` (3.2 on macOS, the interpreter ADR-001 pins) AND under
 # the newest bash on PATH: the 64 KB command also took 3.9 s under bash 5.3, so moving off
 # 3.2 was never the fix.
@@ -375,6 +378,22 @@ meta["g_bytes"] = len(gq.encode())
 meta["g_memory"] = (gq + " > out.md").count("memory")
 meta["g_inner_quotes"] = "\n".join(gb).count("'")
 
+# -- h, h2, j: escape-dense double-quoted bodies (T30, critic Addendum 1 A1). A backslash before
+#    the close used to cost a copy of the rest of the text, in every reader that finds a quote's
+#    end. h's `make` after the body draws a build deny, h2 and j write the store after theirs,
+#    and each verdict can only come from a reading that got past the body --
+hb = '\\"' * (207 * 1024 // 2)
+json.dump(bash_payload(r_chain, 'echo "' + hb + '"\nmake'), open(d + "/h.json", "w"))
+json.dump(bash_payload(r_chain, 'echo "' + hb + '" > ~/.claude/projects/-x/memory/n.md'), open(d + "/h2.json", "w"))
+jb = '{\\"k\\":1}' * (207 * 1024 // 9)
+jc = "python3 -c \"print('" + jb + "')\" > ~/.claude/projects/-x/memory/n.md"
+json.dump(bash_payload(r_chain, jc), open(d + "/j.json", "w"))
+meta["h_bytes"] = len(hb.encode())
+meta["h_backslashes"] = hb.count("\\")
+meta["h_memory"] = ('echo "' + hb + '"\nmake').count("memory")
+meta["j_bytes"] = len(jc.encode())
+meta["j_backslashes"] = jc.count("\\")
+
 json.dump(meta, open(d + "/meta.json", "w"))
 PY
 
@@ -396,6 +415,12 @@ expect_true "fixture: g's command is at least 200 000 bytes" test "$(meta g_byte
 expect_eq "fixture: g's body holds no single quote, so it is one quoted word" "0" "$(meta g_inner_quotes)"
 expect_eq "fixture: g's command never says memory — the cwd is what screens it in" "0" "$(meta g_memory)"
 expect_contains "fixture: …and g's cwd does" "memory" "$(jq -r .cwd "$SANDBOX/in/g.json")"
+expect_true "fixture: h's body is at least 207 KB" test "$(meta h_bytes)" -ge 211968
+expect_true "fixture: …and over 100 000 of its bytes are backslashes" test "$(meta h_backslashes)" -ge 100000
+expect_eq "fixture: h's command never says memory" "0" "$(meta h_memory)"
+expect_contains "fixture: …and h2's does" "memory" "$(jq -r .tool_input.command "$SANDBOX/in/h2.json")"
+expect_true "fixture: j's command is at least 207 KB" test "$(meta j_bytes)" -ge 211968
+expect_true "fixture: …with over 40 000 backslashes (22%)" test "$(meta j_backslashes)" -ge 40000
 
 # ---------- the rows ----------
 
@@ -454,6 +479,18 @@ row b4 "$WALLS_HOOK" "$R_COMMIT" 2 "evidence line is a placeholder" err
 export BIONIC_CLAUDE_HOME="$FAKE_HOME/.claude"
 row g  "$WALLS_HOOK" "$R_MEM"    0 SILENT out
 row g2 "$WALLS_HOOK" "$R_MEM"    2 "this writes the memory store" err
+unset BIONIC_CLAUDE_HOME
+
+section "2d — bash-walls: 207 KB of escapes inside double quotes (T30)"
+# The critic measured these at 5.7 s (h's shape), 11.0 s (h2's, with `> memory-notes.txt`) and
+# 7.9 s (j's) under bash 3.2 on c0d6ab04: h2's shape was past the hook's 10 s timeout, so every
+# wall failed open. h2 and j write the store rather than memory-notes.txt so that a verdict
+# witnesses the walk; the cost is the same, because `memory` anywhere in the command is what
+# sends it through cmd_write_targets.
+export BIONIC_CLAUDE_HOME="$FAKE_HOME/.claude"
+row h  "$WALLS_HOOK" "$R_CHAIN"  0 "farm-out [deny] class=build" err
+row h2 "$WALLS_HOOK" "$R_CHAIN"  2 "this writes the memory store" err
+row j  "$WALLS_HOOK" "$R_CHAIN"  2 "this writes the memory store" err
 unset BIONIC_CLAUDE_HOME
 
 # ---------- the self-check ----------
@@ -617,6 +654,25 @@ jq -r '.tool_input.command' | awk '
     END { s = a[1]; for (i = 2; i <= m; i++) s = s "\n" a[i]; wt_tok(s, W, K) }'
 SH
 
+# h: cmd-class.sh:153-161 at c0d6ab04 — `cmdnorm_qend`, which copied the rest of the text once
+# per backslash before the close. Called at h's opening quote three times, as segments(),
+# cmdnorm_run() and wt_tok() each called it once in one hook run; the hook made more calls.
+cat > "$SANDBOX/hot-h.sh" <<'SH'
+jq -r '.tool_input.command' | awk '
+    function cmdnorm_qend(s, i, q, esc,   t, j, k, b) {
+      j = i + 1
+      for (;;) {
+        t = substr(s, j)
+        k = index(t, q)
+        if (esc && q == "\"") { b = index(t, "\\"); if (b > 0 && (k == 0 || b < k)) { j += b + 1; continue } }
+        return (k == 0 ? length(s) + 1 : j + k - 1)
+      }
+    }
+    { a[++m] = $0 }
+    END { s = a[1]; for (i = 2; i <= m; i++) s = s "\n" a[i]; o = index(s, "\"")
+          for (r = 1; r <= 3; r++) cmdnorm_qend(s, o, "\"", 1) }'
+SH
+
 selfcheck() {  # <id> <snippet> [base the hot line is copied from]
   local base="${3:-7223b594}"
   ht_time /bin/bash "$SANDBOX/$2" "$SANDBOX/in/$1.json" "$SANDBOX" "$CAP"
@@ -638,6 +694,7 @@ selfcheck d  hot-d.sh
 selfcheck e  hot-e.sh
 selfcheck b4 hot-b4.sh ac258929
 selfcheck g  hot-g.sh  ac258929
+selfcheck h  hot-h.sh  c0d6ab04
 
 section "3b — §FX: cmd_effects reads g's 200 KB command under ${BUDGET}s (wave-25 T2, D5)"
 # The permission answer reads every command the CLI asks about through cmd_effects, so it carries

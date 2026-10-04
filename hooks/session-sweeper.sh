@@ -833,7 +833,9 @@ transcript_of() {  # <session id> -> path on stdout, empty when there is none
 
 # Every record of a transcript this file reads, one TAB-separated line each, in record order:
 #   S <to> <ts>        an orchestrator SendMessage
-#   R <name> <ts>      a reply envelope carrying the agent's own words (never an idle notice)
+#   R <name> <ts> <body>  a reply envelope carrying the agent's own words (never an idle
+#                      notice); the body on one line, tabs and newlines as spaces, so the
+#                      completion signal can ask whether it names the deliverable (wave-24 T29)
 #   N <id> <ts>        a COMPLETED task-notification, once under its task-id and once under its
 #                      tool-use-id (wave-24 T9, D3): the harness's word that a background agent
 #                      finished, in the carriers a reply uses
@@ -846,12 +848,12 @@ transcript_events() {  # <transcript>
           [scan("<(?:teammate-message teammate_id|agent-message from)=\"([^\"]+)\"[^>]*>((?:(?!</(?:teammate-message|agent-message)>)[\\s\\S])*)")]
           | .[]
           | select((.[1] | (fromjson? // null) | type == "object" and .type == "idle_notification") | not)
-          | "R\t\(.[0])";
+          | ["R", .[0], (.[1] | gsub("[\t\r\n]+"; " "))];
         def notes:
           [scan("<task-notification>((?:(?!</task-notification>)[\\s\\S])*)")]
           | .[] | .[0]
           | select(test("<status>completed</status>"))
-          | ([scan("<(?:task-id|tool-use-id)>([^<]+)</")] | .[] | "N\t\(.[0])");
+          | ([scan("<(?:task-id|tool-use-id)>([^<]+)</")] | .[] | ["N", .[0], ""]);
         def said: (replies, notes);
         (fromjson? // empty)
         | select(type == "object" and .isSidechain != true)
@@ -865,12 +867,12 @@ transcript_events() {  # <transcript>
              | if type == "string" then .
                elif type == "array" then ([.[] | select(type == "object" and .type == "text") | .text] | join("\n"))
                else "" end
-             | said | "\(.)\t\($ts)")
+             | said | "\(.[0])\t\(.[1])\t\($ts)\t\(.[2])")
           elif .type == "attachment" then
             (.attachment
              | select(type == "object" and .type == "queued_command")
              | .prompt | select(type == "string")
-             | said | "\(.)\t\($ts)")
+             | said | "\(.[0])\t\(.[1])\t\($ts)\t\(.[2])")
           else empty end' 2>/dev/null
 }
 
@@ -944,7 +946,12 @@ EOF
 # than its launch, and reading that as done is how a working agent was ordered to stand down
 # (w23-floor6, research R1 §4). The other half is a signal AFTER `launched_at`, any one of:
 #   a message    the agent's own reply envelope, by name or bare teammate address — the
-#                `R` records `read_followups` already reads, idle notices excluded
+#                `R` records `read_followups` already reads, idle notices excluded — that
+#                NAMES a deliverable, by its declared path or its basename (wave-24 T29,
+#                critic I1, A-orch-46). Any message used to count, and a mid-task question
+#                over a deliverable already written read MET and was stood down. With
+#                several deliverables, naming one is enough; a row that declares none has
+#                nothing to name, so any message counts there (A-T29.1)
 #   a task-notification  a COMPLETED one whose task-id is the row's `agent_id=` or whose
 #                tool-use-id is its `tool_use_id=`
 #   the Done marker      the brief's `Done marker:`, lifted to `done=`: a real file, not a
@@ -985,13 +992,24 @@ row_said() {  # <roster row> <launched epoch|""> <launched ISO> -> 0 said, 1 not
   [ "$have" = 1 ] || return 2
   hit="$(printf '%s\n' "$ev" | SAID_NAME="$(line_field "$row" name)" \
       SAID_TID="$(line_field "$row" teammate_id)" SAID_AID="$(line_field "$row" agent_id)" \
-      SAID_TUID="$(line_field "$row" tool_use_id)" SAID_AT="${le:+${liso:0:19}}" awk -F'\t' '
+      SAID_TUID="$(line_field "$row" tool_use_id)" SAID_AT="${le:+${liso:0:19}}" \
+      SAID_DELIV="$(line_field "$row" deliverable)" awk -F'\t' '
     BEGIN { n = ENVIRON["SAID_NAME"]; t = ENVIRON["SAID_TID"]; sub(/@.*$/, "", t)
-            a = ENVIRON["SAID_AID"]; u = ENVIRON["SAID_TUID"]; l = ENVIRON["SAID_AT"] }
+            a = ENVIRON["SAID_AID"]; u = ENVIRON["SAID_TUID"]; l = ENVIRON["SAID_AT"]
+            nd = 0; m = split(ENVIRON["SAID_DELIV"], dl, ",")
+            for (i = 1; i <= m; i++) {
+              p = dl[i]; sub(/^ +/, "", p); sub(/ +$/, "", p); if (p == "") continue
+              b = p; sub(/^.*\//, "", b); nd++; dp[nd] = p; db[nd] = b
+            } }
+    function names(s,   i) {
+      if (nd == 0) return 1
+      for (i = 1; i <= nd; i++) if (index(s, dp[i]) || (db[i] != "" && index(s, db[i]))) return 1
+      return 0
+    }
     {
       k = ""
       if ($1 == "R") { r = $2; sub(/@.*$/, "", r)
-                       if (r != "" && (r == n || (t != "" && r == t))) k = "message" }
+                       if (r != "" && (r == n || (t != "" && r == t)) && names($4)) k = "message" }
       else if ($1 == "N" && $2 != "" && ($2 == a || $2 == u)) k = "task-notification"
       if (k != "" && (l == "" || substr($3, 1, 19) >= l)) { print k " at " $3; exit }
     }')"
@@ -1087,7 +1105,7 @@ verdict_row() {  # <roster row>
     case $? in
       0) sig="$SAID" ;;
       1) VERDICT_CAUSE="unsaid"
-         fails="unsaid=$(line_field "$row" name) (no message, completed task-notification or Done marker after launched_at ${launched:-unreadable})${oks:+ — landed: $oks}" ;;
+         fails="unsaid=$(line_field "$row" name) (no message naming the deliverable, completed task-notification or Done marker after launched_at ${launched:-unreadable})${oks:+ — landed: $oks}" ;;
       *) sig="completion signal not judged (no transcript to read, no Done marker declared)" ;;
     esac
   fi
@@ -1290,7 +1308,7 @@ EOF
         [ -n "$_l" ] && say "$_l"
       done
       [ "$_unsaid" -lt "$_unmet" ] && say "the named artifacts are not on disk as the brief declared them."
-      [ "$_unsaid" -gt 0 ] && say "the artifacts landed, but no message, completed task-notification or Done marker followed the launch — the agent gives one by sending its report with SendMessage, or by writing the Done marker its brief names."
+      [ "$_unsaid" -gt 0 ] && say "the artifacts landed, but no message naming them, completed task-notification or Done marker followed the launch — the agent gives one by sending its report, naming its artifact, with SendMessage, or by writing the Done marker its brief names."
       say "Nothing was stopped, judged, or recorded — this verb only reads."
       exit 1
     fi

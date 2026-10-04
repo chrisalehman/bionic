@@ -3,6 +3,115 @@
 Earlier releases are recorded as git tags (`v1.4.3` … `v1.8.3`) rather than in this file,
 which starts at 1.8.4.
 
+Versioning follows semver from 1.9.0 on:
+- **MAJOR** for a change that breaks a documented contract a user or project already relies
+  on: a removed verb or field, a `canonical_sdlc_version` bump, an artifact a user must migrate.
+- **MINOR** for new capability or a behaviour a user notices, including a newly refused action
+  or an upgrade step.
+- **PATCH** for a fix within existing behaviour.
+
+## 1.9.0 — 2026-10-03
+
+A quieter terminal that is right the first time. The Patrol asks a question once and then keeps
+quiet until something changes, the hooks answer large commands well inside their time limit, and
+when bionic does refuse an action it prints the line that fixes it. This is a minor release: it
+adds verbs and one newly refused action (writing Claude Code's memory store), and nothing a
+project already relies on is removed.
+
+What you will notice:
+
+- **A quieter Patrol, and `hold`.** When you decide an idle agent should keep running, say so
+  once: `session-poker.sh hold <name> <reason>` records the decision on the agent's roster row.
+  While nothing about that agent changes, the tick writes no stop order and prints one
+  `held <name> since <at> — <reason>` line instead. A new message from the agent, a rewritten
+  deliverable or a relaunch cancels the hold on its own. A `fill-declined:` answer now stands
+  until a new task becomes ready or the plan's step moves, and the tick prints the standing
+  answer. Both kinds of decline need a reason. A tick with nothing new prints a single
+  `unchanged since <at>` line and owes no task-list refresh, a stand-down shows in the band as
+  `STANDDOWN` rather than QUIET, and a Patrol started with an older prompt is told once to
+  re-arm. Only the orchestrator can hold: a subagent's `hold` is refused.
+- **Done means the agent said so.** An agent is counted finished only when its deliverable exists
+  AND it has signalled completion since launch: a message that names the deliverable, a completed
+  task notification, or the `Done marker:` file its brief names. A mid-task question no longer
+  gets an agent stopped because its output file already exists. Briefs gain an optional
+  `Done marker:` line for agents that report by file.
+- **Hooks no longer time out on large commands.** The Bash and governing-skill hooks now read a
+  command once, in one pass, instead of re-scanning it per check. Commands of 64 KB, including
+  long heredocs, quoted `python3 -c` bodies and backslash-heavy quoted text, are judged in well
+  under two seconds under both macOS `/bin/bash` 3.2 and current bash, where some used to run past
+  the hook's limit and pass unchecked. A timed suite (`tests/hook-timeout.test.sh`) holds that line
+  under both shells. The impact check the dispatch wall runs now skips nested worktrees and
+  `.bionic`, so it answers in seconds at a project root holding several worktrees.
+- **Every refusal prints a fix you can paste.** Each refusal site in the Bash walls, the stop
+  wall, the dispatch wall and the stop guard (99 of them, listed in
+  `tests/fixtures/refusal-inventory.md`) ends with the command or line that resolves it. A landing
+  refused for touching a file outside the brief prints the `amend … --files+` line, quoted so it
+  survives a path with spaces, and a refused dispatch names its real cause once, with the roster
+  rows it counted and the command that closes each.
+- **The memory-store wall.** In a session engaged with a bionic run, writing into Claude Code's
+  per-project memory store (`<claude home>/projects/*/memory/`) is refused, whether by Write, Edit
+  or a shell redirect, `tee`, `sed -i`, `cp`/`mv`, `touch`, `mkdir` or `ln`, under every spelling
+  of the home directory. The refusal says where that content belongs instead: the run's
+  assumptions file or a rule proposal. Reading, listing and deleting still pass, and a session
+  not engaged with a run is never refused.
+- **Plan rows by command.** Five new `session-poker.sh` verbs edit the plan in place through the
+  same safe write the task-add verb uses: `task-set <id> <column>=<value>…` changes those cells
+  only, `step-line <N> <text> [--append]` writes a step's evidence line, `current <N>` moves the
+  plan's step (and refuses 9, naming close-out), and `ledger-add` and `ledger-set` add and amend
+  dispatch-ledger rows. A bad column, id or value, or an edit that raced another, is refused with
+  the plan untouched. The canonical-sdlc step files now name these verbs where they used to
+  describe a hand edit.
+- **The brief advisory.** A dispatch brief whose body tells the agent to run a suite its
+  `Suites:` and `Re-executes:` lines do not declare, or to edit a path outside its `Files:` line,
+  draws an advisory naming the line to add. It never blocks the dispatch. Text inside
+  `Read first:`, a code block or a "never" line is not read as an instruction.
+- **A truthful version line.** On a plugin installed from GitHub, where the plugin directory has
+  no `.git`, `/bionic:version` and doctor's header now print the commit recorded by Claude Code's
+  plugin registry and say `github feed`, where they used to print `unknown` or call it another
+  checkout. With no commit recorded the answer is `unknown`, never a guess.
+
+Fixes:
+
+- Fewer false refusals. Read-only agents (researcher, test-runner, auditor, critic) no longer
+  count against the writer budget, and every test-runner counts against the suite budget. Not
+  read as backgrounded: `a & b & wait`. Not read as a suite run: `tests/run.sh --dry-run`, `-h`,
+  `--help` or `--list`, a glued input redirect from a suite file, or a script named `run.sh`
+  outside the project's `tests/`. A `&&` inside a quoted commit message or notification command
+  no longer draws the chain note, and stopping a background shell by its id passes the stop guard.
+- The suite budget reads a `for` loop over a literal word list, and a variable holding a whole
+  suite name, as the suites they run, so the right loop passes and the wrong one is refused by
+  name.
+- Bionic's dispatch rules reach a named teammate at start, as they already reached a subagent,
+  and every role file carries the suite-spelling rule inline.
+- The stop wall counts open writers the same way the tick and the dispatch wall do.
+- Close-out writes an epic's wave row only into the shipped-waves table, even when the planned
+  table above it lists the same wave (the limit 1.8.10 carried), and fills the row's ADR cell from
+  the wave spec.
+- `ledger-add` checks its id as well as its values, so an id carrying a newline can no longer
+  write a forged plan line, and the plan-row verbs accept plain ASCII ids only, under any locale;
+  a hold with a blank reason is refused; fix lines print the plugin root quoted.
+- The doctor-reads suite no longer depends on the `claude` and `npm` found on the runner's PATH.
+
+Known limits, carried to the next release:
+
+- The memory-store wall does not see every way to write a file: `rsync`, `dd of=`, `tar x -C`, a
+  symlinked path, process substitution, `cd -` into the store, and a write from inside an
+  interpreter such as `python3 -c` all pass. When `BIONIC_CLAUDE_HOME` and `CLAUDE_CONFIG_DIR`
+  name different homes, only the one that takes precedence is guarded.
+- A very large unquoted command (about 200 KB) still takes over ten seconds through the Bash hook
+  under `/bin/bash` 3.2, past the hook's limit, so the walls do not judge it. Commands of 64 KB are
+  well inside the limit.
+- `bash run.sh` after a `cd` still reads as the full suite run.
+- A `Done marker:` file must be strictly newer than the agent's launch, while a completion message
+  sent in the same second counts.
+- A refused `spawn-worktree.sh land` can remove the worktree's `.bionic` link before it refuses.
+- Verification Matrix rows and Step-5 floor fields have no verbs yet and are still edited by hand.
+
+One rule for a Patrol answer (ADR-041): an answer stands until the facts it answered change, the
+tick prints every answer it honours, and an agent is done only when it says so. It amends
+ADR-036's one-turn decline and reverses ADR-037's rejection of a decline kept on disk, because the
+tick now reports what it holds.
+
 ## 1.8.10 — 2026-10-03
 
 A session bound to no plan is now told so and left alone by every gate that acts on a plan,
