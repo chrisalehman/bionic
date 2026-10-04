@@ -536,15 +536,20 @@ units_live_rows() { _units_sched liverows "${1:-}" ""; }
 # validator refuses them the way it refuses any id the table does not carry.
 _units_ext_re() { printf '%s' '^ext:[A-Za-z0-9][A-Za-z0-9._-]*$'; }
 
-# _units_proof_awk -> proof.sh's `proof_awk`, the one reading of a proof line, sourced from this
-# file's own directory on first use (wave-26 T14; review 7 F6). If it cannot be loaded, a
-# function that reads no line as a proof: no proof is the cautious answer for a settled read.
-_units_proof_awk() {
+# _units_proof_awk -> proof.sh's `proof_awk`, the one reading of a proof line (wave-26 T14;
+# review 7 F6). proof.sh is sourced from this file's own directory once, when this file is
+# loaded (below), not per question: readiness is asked inside command substitutions, where a
+# lazy source would be paid again on every call. If it cannot be loaded, a function that reads
+# no line as a proof: no proof is the cautious answer for a settled read.
+_units_proof_lib() {
   local d
-  if ! declare -F proof_awk >/dev/null 2>&1; then
-    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-    [ -n "$d" ] && [ -f "$d/proof.sh" ] && . "$d/proof.sh" >/dev/null 2>&1
-  fi
+  declare -F proof_awk >/dev/null 2>&1 && return 0
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  [ -n "$d" ] && [ -f "$d/proof.sh" ] && . "$d/proof.sh" >/dev/null 2>&1
+  return 0
+}
+_units_proof_lib
+_units_proof_awk() {
   if declare -F proof_awk >/dev/null 2>&1; then
     proof_awk
   else
