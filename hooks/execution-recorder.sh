@@ -15,9 +15,9 @@
 #   SubagentStart     — the IDENTIFICATION arm (epic-16 wave-01; re-keyed in
 #                       wave-03). When the agent itself starts, its TRANSCRIPT-form
 #                       id is joined BY THAT ID onto the roster as an `identified`
-#                       row. It used to join by name, off this payload's
-#                       `agent_type` — which carries the subagent TYPE, so the join
-#                       never matched (t4-probes-report.md §5.1).
+#                       row; a teammate by its name, and a plain dispatch whose
+#                       launch call has not returned by its TYPE (wave-27 T5), so a
+#                       foreground agent has its budget from its first tool call.
 #
 # WHY POSTTOOLUSE IS THE WHOLE POINT. The facts this script records are claims that something
 # HAPPENED, and a PreToolUse hook cannot make one: it fires before the tool runs and never
@@ -719,11 +719,11 @@ fi
 #
 # WHAT THE REPAIR COSTS, stated rather than left to be discovered. An `intended`
 # row carries an EMPTY `agent_id` until ARM 2 completes it, and an empty id is not
-# a key — so this arm can no longer rescue a dispatch whose PostToolUse never
-# fired. A TEAMMATE row is not identified by this id join, because ARM 2 deliberately
-# leaves its `agent_id=` empty (the launch response carries only the ADDRESSING
-# form, and writing that into `agent_id=` would turn every by-id wall's input from
-# unknown into wrong). A teammate IS identified, by the NAME join at SubagentStart
+# a key — so the id join cannot rescue a dispatch whose PostToolUse has not fired;
+# the TYPE join below does, for a bionic role (wave-27 T5). A TEAMMATE row is not
+# identified by this id join, because ARM 2 deliberately leaves its `agent_id=` empty
+# (the launch response carries only the ADDRESSING form, and writing that into
+# `agent_id=` would turn every by-id wall's input from unknown into wrong). A teammate IS identified, by the NAME join at SubagentStart
 # below, and its `confirmed` row carries no id by design; the roster's one rule for
 # the rows written after that moment is stated in payload/scripts/lib/roster.sh at
 # `roster_row_for_id` (ADR-039). Both misses were ALREADY there — a join on a field
@@ -1014,6 +1014,58 @@ if [ -n "$IS_START" ]; then
       [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
       ROW="$line"
     done < "$ROSTER_FILE"
+  fi
+  # THE TYPE JOIN (wave-27 T5, D15, AC-8.1; walk-triage-3). Reached when neither join above
+  # found a row, which for a plain dispatch whose launch call has not returned is every time:
+  # the dispatch wall wrote its row with `agent_id=` EMPTY, ARM 2 fills the id only when the
+  # Agent call returns, and a FOREGROUND call returns when the agent has finished. Until then the
+  # budget arm (payload/scripts/lib/walls.sh) found no row for the id and refused a runner its
+  # own full run. This event carries the id and, for a plain dispatch, the subagent TYPE in
+  # `agent_type` — and the row carries that type in `subagent_type=`. So the row gains its id
+  # here, at the door, and ARM 2 stays the second writer of the same value.
+  #
+  # ONLY A BIONIC ROLE, AND ONLY ONE CANDIDATE. A candidate is a launch (keyed by `tool_use_id`)
+  # of this session and this type that no row has yet given an id or a `teammate_id=`: a
+  # teammate is joined by the name join above, and a launch that already has an id belongs to
+  # an agent that already started. Two candidates are two launches this event cannot tell apart
+  # — the name the start carries is the only tie-break, and the name join above already spent
+  # it — so both are left to ARM 2's tool_use_id join and one line says so. A third-party type
+  # is left out because nothing in bionic budgets it, and `general-purpose` is the one type a
+  # teammate could also be named (the A-D1 residual above).
+  if [ -z "$ROW" ] && [ -z "${RESTART_AFTER_ACK:-}" ]; then
+    case "$START_TYPE" in
+      bionic:*)
+        # The field reader is roster.sh's own (`_roster_kv`), loaded lazily as the duplicate-start
+        # check above loads it: only a start both joins missed ever pays for it.
+        roster_sh_load
+        TYPE_PICK=$(awk -v sid="$BIONIC_SID" -v ty="$START_TYPE" -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
+          index($0, pre) == 1 {
+            if (_roster_kv($0, "session") != sid) next
+            u = _roster_kv($0, "tool_use_id"); if (u == "") next
+            if (!(u in last)) order[++n] = u
+            last[u] = $0
+            if (_roster_kv($0, "agent_id") != "" || _roster_kv($0, "teammate_id") != "") claimed[u] = 1
+          }
+          END {
+            c = 0
+            for (i = 1; i <= n; i++) {
+              u = order[i]
+              if (u in claimed) continue
+              st = _roster_kv(last[u], "status")
+              if (st != "intended" && st != "confirmed") continue
+              if (_roster_kv(last[u], "subagent_type") != ty) continue
+              c++; pick = last[u]
+            }
+            print c
+            if (c == 1) print pick
+          }' "$ROSTER_FILE" 2>/dev/null)
+        case "${TYPE_PICK%%$'\n'*}" in
+          1) ROW="${TYPE_PICK#*$'\n'}" ;;
+          0|'') : ;;
+          *) echo "execution-recorder: ${TYPE_PICK%%$'\n'*} launches of $START_TYPE on this session roster have no id and the start names none of them; agent $START_ID is left to the return of its launch call" >&2 ;;
+        esac
+        ;;
+    esac
   fi
   # A RESTART AFTER AN ACK RE-IDENTIFIES FROM THE ID'S LATEST STARTED ROW (epic-23 wave-22 T9;
   # ADR-039 Δ2; critic-b2f70c1 C1). Both joins above accept `intended|confirmed` only, and the

@@ -2,8 +2,8 @@
 # booked.sh — RUN A COMMAND INSIDE A MACHINE-WIDE PLACE: stamp, book, run, record rc,
 # release (epic-23 wave-26-never-idle, D8, D14; REQ-6 AC-6.3, AC-6.4, REQ-4 AC-4.1).
 #
-#   bash <plugin-root>/scripts/booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>]
-#                                        [--stamp-dir <dir>] [--suites <names>]
+#   bash <plugin-root>/scripts/booked.sh [--kill-after <seconds>] [--max-wait <seconds>] [--quiet]
+#                                        [--shell <path>] [--stamp-dir <dir>] [--suites <names>]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -85,6 +85,11 @@
 # load again. If it rose above the settled line by more than the run's own share (from the
 # CPU its children used, `times`; resources_own_load) the run is VOID: print `void`, release,
 # and go again, at most twice more. Its own load is not a disturbance (T36, review 4 F4).
+# A TAKE OR A SETTLE THAT GIVES UP ON THE FIRST TRY RUNS THE COMMAND ONCE, UNBOOKED, AND VOID
+# (wave-27 T6, critic 3 S4): the runner's rule (tests/run.sh _solo_run), so a timing suite on a
+# machine that never settles has output to read whoever runs it. It prints `void` and why, and
+# ends with the command's code, or 75 over a pass. A store it cannot write still refuses (69,
+# below), and a give-up at --kill-after still ends 124: the wait spent the call there.
 # Inside a whole-machine hold (`BIONIC_SLOT_QUIET=1`) a nested shim, quiet or not, books
 # nothing and runs.
 #
@@ -97,6 +102,13 @@
 # whatever the machine is doing. A command that never got its place prints the lib's give-up
 # line (naming the holders), then the same short-limit line, and exits 124; it ran nothing, and it
 # still stamps 124 (see EVERY END STAMPS). A void --quiet run's retry gets only what is left.
+#
+# --max-wait <s>: THE CALL'S OWN BOUND ON THE WAIT (wave-27 T6, critic 3 S2). The wall passes the
+# Bash call's staged timeout, in seconds, less ten; the ceiling of every wait is then the smaller
+# of <s> and BIONIC_SLOTS_MAX_WAIT, so a wait for a place gives up inside the call instead of
+# outliving it into the background. It never raises the ceiling, and it kills nothing: a command
+# that got its place runs as long as it runs. The wall leaves it out beside --kill-after, whose
+# limit already bounds the wait.
 #
 # EVERY COMMAND LEADS ITS OWN PROCESS GROUP (`set -m` around the one spawn; T44, review 8 F3).
 # Without job control bash starts a background command with SIGINT and SIGQUIT ignored, and every
@@ -113,11 +125,12 @@
 # EXIT CODES. The command's own, except:
 #   2    usage: no `--`, no command, more than one word after `--` (with or without
 #        --kill-after), a bad --kill-after, or an option the shim does not know
-#   69   no place within BIONIC_SLOTS_MAX_WAIT (the line names the holders), a
-#        whole-machine take whose load never settled within it, or a whole-machine take on
-#        a store it cannot write; the command never ran
+#   69   no place within the ceiling (BIONIC_SLOTS_MAX_WAIT, or --max-wait when smaller; the
+#        line names the holders), or a whole-machine take on a store it cannot write; the
+#        command never ran
 #   75   void over a PASSING run: the load rose during the run on the first run and both
-#        retries, or the ceiling ran out before a retry could start. A failing run keeps its
+#        retries, the ceiling ran out before a retry could start, or the whole machine was not
+#        had on the first try and the one run was unbooked. A failing run keeps its
 #        own code and still prints the void line (review 12 F2, A-T50.1; the runner's rule)
 #   124  --kill-after fired, during the run or during the wait for a place
 #   128+n  the shim itself was stopped by signal n (its command is killed with it)
@@ -131,7 +144,8 @@
 # and every BIONIC_SLOTS_NOTE_S (lib/slots.sh). BIONIC_SLOTS_MAX_WAIT is the total: the place
 # or the marker, the drain, the settle and every void retry give up together at one ceiling
 # taken as the shim starts (SLOTS_DEADLINE; T36, review 4 F3), and under --kill-after that
-# ceiling is the limit when the limit is shorter (T44). The store and count follow
+# ceiling is the limit when the limit is shorter (T44), and --max-wait when it is (wave-27
+# T6). The store and count follow
 # BIONIC_SLOTS_DIR and BIONIC_SLOTS_N; the load follows BIONIC_LOAD_NOW_FILE (lib/resources.sh).
 #
 # BASH 3.2.
@@ -154,15 +168,17 @@ BOOKED_KILLED_RC=124
 BOOKED_RETRIES=2
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--kill-after <seconds>] [--max-wait <seconds>] [--quiet] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] -- <command>\n' >&2
   exit 2
 }
 
-kill_after=""; quiet=0; sep=0; run_shell=""; stamp_dir=""; suites=""
+kill_after=""; max_wait=""; quiet=0; sep=0; run_shell=""; stamp_dir=""; suites=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --kill-after)   [ "$#" -ge 2 ] || booked_usage; kill_after="$2"; shift 2 ;;
     --kill-after=*) kill_after="${1#--kill-after=}"; shift ;;
+    --max-wait)     [ "$#" -ge 2 ] || booked_usage; max_wait="$2"; shift 2 ;;
+    --max-wait=*)   max_wait="${1#--max-wait=}"; shift ;;
     --quiet)        quiet=1; shift ;;
     --shell)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; run_shell="$2"; shift 2 ;;
     --shell=*)      run_shell="${1#--shell=}"; [ -n "$run_shell" ] || booked_usage; shift ;;
@@ -179,10 +195,12 @@ if [ "$#" -gt 1 ]; then
   printf 'booked: %s words after --, and each would be parsed again as shell — pass the command as one word: booked.sh -- '\''<the whole command line>'\''\n' "$#" >&2
   exit 2
 fi
-case "$kill_after" in
-  '') : ;;
-  *[!0-9]*|0) booked_usage ;;
-esac
+for _n in "$kill_after" "$max_wait"; do
+  case "$_n" in
+    '') : ;;
+    *[!0-9]*|0) booked_usage ;;
+  esac
+done
 [ "${BIONIC_QUIET:-}" = 1 ] && quiet=1
 cmd="$*"
 
@@ -364,9 +382,11 @@ booked_times() {
 # ── main ─────────────────────────────────────────────────────────────────────
 what="$(booked_one_line "$cmd" 60)"
 # One ceiling for every wait below: the place or marker, the drain, the settle, the retries.
-# Under --kill-after it is the limit when that is shorter, and the kill counts from here (T44).
+# It is --max-wait when that is shorter (wave-27 T6). Under --kill-after it is the limit when
+# that is shorter still, and the kill counts from here (T44).
 BOOKED_T0=$SECONDS
 BOOKED_MAX_WAIT="$(_slots_max_wait)"; BOOKED_CUT=0
+if [ -n "$max_wait" ] && [ "$max_wait" -lt "$BOOKED_MAX_WAIT" ]; then BOOKED_MAX_WAIT=$max_wait; fi
 if [ -n "$kill_after" ] && [ "$kill_after" -le "$BOOKED_MAX_WAIT" ]; then
   BOOKED_MAX_WAIT=$kill_after; BOOKED_CUT=1
 fi
@@ -382,6 +402,14 @@ booked_no_place() {  # the wait ran out before the command could start; it ran n
   booked_over_limit
   booked_stamp "$BOOKED_KILLED_RC"
   exit "$BOOKED_KILLED_RC"
+}
+
+booked_void() {  # <why> — a whole-machine run that was not measured: `void`, why, and 75 over a pass
+  # A failing run keeps its own code (review 12 F2, A-T50.1): 75 over it would hide the failure
+  # behind a reason to re-run.
+  printf 'void\n' >&2
+  printf 'booked: void — %s\n' "$1" >&2
+  [ "$RUN_RC" -ne 0 ] || RUN_RC=$BOOKED_VOID_RC
 }
 
 # The lib reads its ceiling from BIONIC_SLOTS_MAX_WAIT; each take is handed the shim's own for
@@ -405,13 +433,22 @@ else
   tries=0
   BOOKED_TIMES="$(mktemp "${TMPDIR:-/tmp}/booked-times.XXXXXX" 2>/dev/null)"
   while :; do
-    if ! BIONIC_SLOTS_MAX_WAIT=$BOOKED_MAX_WAIT slots_take_all "$$" "$what" >/dev/null ||
-       ! booked_settle; then
-      [ "$tries" -gt 0 ] || booked_no_place
+    BIONIC_SLOTS_MAX_WAIT=$BOOKED_MAX_WAIT slots_take_all "$$" "$what" >/dev/null; take_rc=$?
+    [ "$take_rc" -ne 0 ] || booked_settle || take_rc=1
+    if [ "$take_rc" -ne 0 ] && [ "$tries" -eq 0 ]; then
+      # A store it cannot write refuses (69), and a give-up at the short limit ends 124.
+      [ "$take_rc" -ne 2 ] && [ "$BOOKED_CUT" -eq 0 ] || booked_no_place
+      # THE RUNNER'S RULE (tests/run.sh _solo_run; wave-27 T6): the whole machine was not had
+      # within the ceiling, so the command runs once, unbooked, and the run is void. No retry:
+      # waiting the whole ceiling again would only say the same thing.
+      slots_release "$$"
+      booked_run
+      booked_void "the whole machine was not had within the ceiling of ${BOOKED_MAX_WAIT}s; it ran unbooked and is not retried"
+      break
+    fi
+    if [ "$take_rc" -ne 0 ]; then
       # A run already happened and was void; the ceiling ran out before another could start.
-      printf 'booked: void — the ceiling of %ss ran out before a retry could start; a timing result from this machine now would not mean anything\n' \
-        "$BOOKED_MAX_WAIT" >&2
-      [ "$RUN_RC" -ne 0 ] || RUN_RC=$BOOKED_VOID_RC
+      booked_void "the ceiling of ${BOOKED_MAX_WAIT}s ran out before a retry could start; a timing result from this machine now would not mean anything"
       break
     fi
     export BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1
@@ -430,10 +467,7 @@ else
     if [ -n "$outer_held" ]; then export BIONIC_SLOT_HELD="$outer_held"; else unset BIONIC_SLOT_HELD; fi
     tries=$((tries + 1))
     if [ "$tries" -gt "$BOOKED_RETRIES" ]; then
-      printf 'void\n' >&2
-      printf 'booked: void — the load rose above %s during every run (last %s, about %s of it the run'\''s own); a timing result from this machine now would not mean anything\n' \
-        "$line" "$rose" "$own" >&2
-      [ "$RUN_RC" -ne 0 ] || RUN_RC=$BOOKED_VOID_RC
+      booked_void "the load rose above $line during every run (last $rose, about $own of it the run's own); a timing result from this machine now would not mean anything"
       break
     fi
     printf 'void\n' >&2
