@@ -1709,6 +1709,7 @@ else
 fi
 expect_absent "92a1: …and no Ownership block of its own (it is the sub-view)" \
   "$(printf '\n  Ownership\n')" "$(printf '\n%s\n' "$CARD2")"
+anchor -E "$STEP2_MD" '^  Eval design' 1
 DOCTORED_STEP2_OWN="$TMP/step2-ownership-back.md"
 awk '/^  Eval design/ { print "  Ownership"; print "    <concept>    owner <module>"; print "" } { print }' \
   "$STEP2_MD" > "$DOCTORED_STEP2_OWN"
