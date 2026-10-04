@@ -159,7 +159,7 @@ section "Section 1: an intact tree — every wall's library resolves"
 OUT1="$(run_doctor)"
 ROWS1="$(walls_rows "$OUT1")"
 
-expect_match "1: the walls row is a checkmark at five of five" "*✓ walls*5/5*" "$ROWS1"
+expect_match "1: the walls row is a checkmark at six of six" "*✓ walls*6/6*" "$ROWS1"
 expect_no_match "2: no per-wall failure row prints on an intact tree" "*cannot load*" "$ROWS1"
 expect_no_match "3: no wall reaches the FIX section on an intact tree" \
   "*wall cannot load*" "$OUT1"
@@ -175,7 +175,7 @@ rm -f "$PLUG/scripts/lib/git-argv.sh"
 OUT2="$(run_doctor)"
 ROWS2="$(walls_rows "$OUT2")"
 
-expect_match "4: the summary row drops to three of five and is a cross" "*✗ walls*3/5*" "$ROWS2"
+expect_match "4: the summary row drops to three of six and is a cross" "*✗ walls*3/6*" "$ROWS2"
 expect_match "5: protect-main is named with the library it wanted" \
   "*protect-main*git-argv.sh*" "$ROWS2"
 expect_match "6: the evidence gate is named with the library it wanted" \
@@ -211,13 +211,35 @@ ROWS3="$(walls_rows "$OUT3")"
 # run.sh session.sh), so a "0/5" here would be asserting a wall had broken that
 # had not. The pair below is the assertion: four red, and the fifth explicitly
 # not named on the page.
-expect_match "9: four of the five walls no longer resolve" "*✗ walls*1/5*" "$ROWS3"
+expect_match "9: five of the six no longer resolve" "*✗ walls*1/6*" "$ROWS3"
 expect_no_match "9: …and the one that wants neither deleted library is not named" \
   "*protect-database*" "$ROWS3"
 expect_match "10: farm-out-reminder is named with cmd-class.sh" \
   "*farm-out-reminder*cmd-class.sh*" "$ROWS3"
 expect_match "11: background-suite-guard is named with cmd-class.sh" \
   "*background-suite-guard*cmd-class.sh*" "$ROWS3"
+
+section "Section 3b: the permission-answer hook is in the census (wave-25, REQ-7, AC-7.3)"
+
+# THE SIXTH ENTRY IS A HOOK, NOT A WALL FUNCTION. hooks/permission-answer.sh is standalone, so the
+# roster in lib/checks.sh appends its name to the five walls.sh declares, and the row text calls it
+# what the code calls every entry. A FRESH COPY, with ONLY roster.sh deleted: roster.sh is a library
+# no wall wants, so the five walls stay green and the one red row is this hook's, named with the file
+# it wanted. (The tree above has lost git-argv.sh and cmd-class.sh, which the hook also wants, and
+# the probe names the FIRST unreadable want, so it could not show which library the row names.)
+PLUG_PA="${TMP}/plug-pa"
+mkdir -p "$PLUG_PA"
+cp -RL "${PAYLOAD}/." "$PLUG_PA/" 2>/dev/null
+expect_true "3b.0: the fixture copy carries the hook and the library this section deletes" \
+  test -f "$PLUG_PA/hooks/permission-answer.sh" -a -f "$PLUG_PA/scripts/lib/roster.sh"
+rm -f "$PLUG_PA/scripts/lib/roster.sh"
+OUT_PA="$(PLUG="$PLUG_PA" run_doctor)"
+ROWS_PA="$(walls_rows "$OUT_PA")"
+expect_match "3b.1: the summary row counts the hook: five of six" "*✗ walls*5/6*" "$ROWS_PA"
+expect_match "3b.2: the broken loader is named with the file it wanted" \
+  "*permission-answer*cannot load*roster.sh*" "$ROWS_PA"
+expect_no_match "3b.3: no wall function is named (they are intact)" "*protect-main*" "$ROWS_PA"
+expect_match "3b.4: the FIX section carries the line" "*permission-answer*cannot load*roster.sh*" "$OUT_PA"
 
 section "Section 4: every line this report printed fits the column budget"
 
