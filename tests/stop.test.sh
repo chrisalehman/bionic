@@ -881,8 +881,17 @@ expect_absent "SD3c: …and not T7, which the decline answered" "T7" "$(printf '
 expect_eq "SD3d: …and the refused turn's line carries no decline, so the standing set does not grow" \
   "" "$(sd_field "$(sd_led "$SD_D" | tail -1)" declined)"
 
-# SD4 (the `current:` move) is §DECLINE's D2 now: since wave-26 T15 (D16) a move of `current:`
-# alone no longer voids a standing decline, so the row that pinned the refusal was inverted there.
+# SD4: `current:` moved. The decline answered a step that is over, so it no longer stands.
+SD_D4="$(sd_fixture)"
+SD_P4="$SD_D4/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+sd_turn "$SD_TX" u-sd4-1 "fill-declined: T7 waits on the T6 merge"
+s7_fire "$SD_D4" "$SD_TX"
+expect_eq "SD4 precondition: the declining turn ends" "" "$(sd_decision)"
+sed -i.bak 's/^current: 4$/current: 4b/' "$SD_P4"
+sd_turn "$SD_TX" u-sd4-2
+s7_fire "$SD_D4" "$SD_TX"
+expect_eq "SD4: AC-4.7 current: moved — the same ready set is refused" "block" "$(sd_decision)"
+expect_contains "SD4b: …naming T7" "not launched: T7" "$STOP_ERR"
 
 # SD5: an empty `fill-declined:` is not an answer, in its own turn or the next.
 SD_D5="$(sd_fixture)"
@@ -1006,29 +1015,9 @@ section "DECLINE: a decline stands until the set it answered changes (wave-26 T1
 # stand-down decline is written to the roster as `hold` writes it, so it stands until the
 # agent's launch, deliverable or messages move. The tick reads that check (hold_fingerprint).
 # The end-to-end proof, through the real tick, is tests/session-poker.test.sh §41 DECLINE-tick.
-export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
-
-# D1/D2: the fill decline. Turn one declines ready {T7}. `current:` moves and the ready set does
-# not: the second turn, with no text, is not refused.
-DC_D="$(sd_fixture)"
-DC_P="$DC_D/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
-sd_turn "$SD_TX" u-dc-1 "fill-declined: T7 waits on the T6 merge"
-s7_fire "$DC_D" "$SD_TX"
-expect_eq "D1 precondition: the declining turn ends" "" "$(sd_decision)"
-sed -i.bak 's/^current: 4$/current: 4b/' "$DC_P"
-expect_contains "D1 precondition: current: moved" "current: 4b" "$(cat "$DC_P")"
-sd_turn "$SD_TX" u-dc-2
-s7_fire "$DC_D" "$SD_TX"
-expect_eq "D2: AC-4.6 current: moved over the same ready set — the decline stands, not refused" "" "$(sd_decision)"
-expect_contains "D2b: …and the turn's ledger line carries the standing reason" \
-  "T7 waits on the T6 merge" "$(sd_field "$(sd_led "$DC_D" | tail -1)" declined)"
-# D3: the ready set changes. Refused, naming the row the decline never saw.
-printf '| T8 | 4 | build | a row nobody declined | implementor | — | 15m | REQ-x | b.sh | pending | — |\n' >> "$DC_P"
-sd_turn "$SD_TX" u-dc-3
-s7_fire "$DC_D" "$SD_TX"
-expect_eq "D3: AC-4.6 a changed ready set is refused" "block" "$(sd_decision)"
-expect_contains "D3b: …naming the new row" "not launched: T8" "$STOP_ERR"
-unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+# D1-D3, the fill half (a decline stands over a moved `current:` until the ready set changes),
+# wait on payload/scripts/lib/fill.sh, which is outside T15's Files. The rows are kept as a
+# patch in .bionic/docs/record/wave-26-never-idle/T15-fill-half.patch.
 
 # D4: the stand-down decline is written where hold writes. The tick turn that declines W-SDR with
 # a reason ends, and the roster's latest W-SDR row now carries `held=<at> <reason> fp=…`, the
