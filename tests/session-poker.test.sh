@@ -8864,7 +8864,7 @@ cp "$R48F/.bionic/docs/record/wave-01-fixture/review.md" "$R48F/.bionic/docs/rec
 poke "$R48F" proof-add review record/wave-01-fixture/review-14.md
 expect_eq "48h S4 a review proof no live row's Files hold exits 0" "0" "$RC"
 expect_contains "48h2 S4 …and says it returned no live review row, naming the active one and its Files" \
-  "no live review row holds record/wave-01-fixture/review-14.md in its Files: T3 (.bionic/docs/record/wave-01-fixture/review.md)" "$OUT"
+  "no active live review row holds record/wave-01-fixture/review-14.md in its Files: T3 (.bionic/docs/record/wave-01-fixture/review.md)" "$OUT"
 expect_eq "48h3 …and resets nothing: T3 stays active under its agent" \
   "T3|6|review|follows the build|w-T3|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|active|" \
   "$(s48_row "$P48F" T3)"
@@ -8872,7 +8872,7 @@ poke "$R48F" proof-add review record/wave-01-fixture/review.md
 expect_contains "48h4 control precondition: T3's own proof returns it" "T3 back to pending" "$OUT"
 poke "$R48F" proof-add review record/wave-01-fixture/final.md
 expect_eq "48h5 control: with no live review active, the final review's proof exits 0" "0" "$RC"
-expect_absent "48h6 control …and says nothing of live rows" "no live review row holds" "$OUT"
+expect_absent "48h6 control …and says nothing of live rows" "no active live review row holds" "$OUT"
 POKE_BOUND="$S48_BOUND_WAS"
 
 # ============================================================
