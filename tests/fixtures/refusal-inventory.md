@@ -109,8 +109,8 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `dp_finding "the deliverable is outside this repository" "name a path inside the repo" "$_dp_detail"` — deliverable outside the repo — none: the in-repo path is the author's choice
 - `dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"` — no deliverable — none: the artifact path is the author's choice
 - `finding) dp_finding "$2" "$3" "$4" ;;` — brief.sh sink forwarder — none: a forwarder; brief.sh findings carry their own fix (the impact timeout names Suites:/Files:)
-- `dp_finding "head ${_fr_short} is already proved" "keep the floor proof; run nothing" "$_dp_detail"` — full run on the proved head — none: the head is proved and there is nothing to run; the detail names the proof line and its evidence
-- `dp_finding "bounded: ${_fr_names}" "run those suites, not the tree" "$_dp_detail"` — full run over a bounded change — fix: `Suites: tests/<suite> …`, printed whole in the detail, every suite the map named
+- `dp_finding "head ${_fr_short} is already proved" "keep the floor proof; run nothing" "$_dp_detail" ;;` — full run on the proved head — none: the head is proved and there is nothing to run; the detail names the proof line and its evidence
+- `dp_finding "bounded: ${_fr_names}" "run those suites, not the tree" "$_dp_detail" ;;` — full run over a bounded change — fix: `Suites: tests/<suite> …`, printed whole in the detail, every suite the map named
 - `dp_finding "rows write tracked files: ${_fr_ids}" "land them, then dispatch it" "$_dp_detail"` — full run while rows write the head — none: the fix is landing or dropping those rows, acts not commands
 
 ## hooks/stop-guard.sh
