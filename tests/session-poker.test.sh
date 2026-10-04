@@ -6778,28 +6778,38 @@ expect_contains "34b2g …and the repository-level grammar fact is a note, not a
 expect_contains "34b3 …the row is in the plan, pending" \
   "| T6 | 4 | build | the fixup found mid-run | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" "$(cat "$P34A")"
 expect_contains "34b4 …with its - T6: line" "- T6: pending dispatch — added by task-add" "$(cat "$P34A")"
-expect_contains "34b5 …and threaded into the Step-5 row's deps" \
-  "| T5 | 5 | verify | the floor | test-runner | T1, T2, T6 |" "$(cat "$P34A")"
+# NO THREADING (wave-26 T2, D2): the Step-5 row keeps the deps its author wrote. The rule that
+# made every Step-5+ row wait for every Step-4 row is gone, so the add owes no other row an edit.
+expect_contains "34b5 …and the Step-5 row's deps are as written: nothing is threaded" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2 |" "$(cat "$P34A")"
 s34_gate "$R34A"
 expect_eq "34b6 AC-5.3 the next commit is admitted: no dependency the verb should have written is missing" \
   "0" "$GATE_RC"
 
-# ---------- 34c: the CONTROL — the same row hand-added without the threading is refused ----------
+# ---------- 34c: the same row hand-added, with no threading, is ADMITTED (wave-26 T2, D2) ----------
+# Through 1.10 this was the control that the verb's threading was needed: the hand edit was
+# refused for the Step-4 prerequisite it did not write into T5. The rule is removed, so the
+# same gate admits the same edit.
 R34C="$(make_repo s34-hand)"; ( cd "$R34C" && git commit -q --allow-empty -m init )
 P34C="$(s34_plan "$R34C" 4)"
 awk '{ print }
      /^\| T5 \| 5 \|/ { print "| T6 | 4 | build | the fixup, hand-added | implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" }
      /^- T5: / { print "- T6: pending dispatch — by hand" }' "$P34C" > "$P34C.tmp" && mv "$P34C.tmp" "$P34C"
 s34_gate "$R34C"
-expect_eq "34c the hand-added row without the threading is refused by the same gate" "2" "$GATE_RC"
-expect_contains "34c2 …naming the missing prerequisite" "T5: step 5 is missing 1 step-4 prerequisite: T6" "$GATE_ERR"
+expect_eq "34c the hand-added row with no threading is admitted by the same gate" "0" "$GATE_RC"
+expect_contains "34c2 …with T5's deps cell as its author wrote it" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2 |" "$(cat "$P34C")"
 
-# ---------- 34d: refused by the validator — the plan is byte-identical, the words print ----------
-SUM34="$(cksum < "$P34A")"
+# ---------- 34d: a later-step row that names one build row is ADMITTED (wave-26 T2, D2) ----------
+# It used to be refused for the Step-4 rows it did not reach. Admitted now, the plan changes only
+# by that row and its line; the refusal rows below re-take the checksum after it.
 poke "$R34A" task-add T7 5 verify 'a second floor, unthreaded' test-runner 'T1' 30 REQ-5 '—'
-expect_eq "34d a row the validator refuses exits 1" "1" "$RC"
-expect_eq "34d2 AC-5.3 …and the plan is byte-identical" "$SUM34" "$(cksum < "$P34A")"
-expect_contains "34d3 …and the validator's words print" "T7: step 5 is missing 2 step-4 prerequisites: T2, T6" "$OUT"
+expect_eq "34d a Step-5 row naming one build row is admitted (exit 0)" "0" "$RC"
+expect_contains "34d2 …the row is in the plan with the deps its author wrote" \
+  "| T7 | 5 | verify | a second floor, unthreaded | test-runner | T1 |" "$(cat "$P34A")"
+expect_contains "34d3 …and no other row's deps changed" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2 |" "$(cat "$P34A")"
+SUM34="$(cksum < "$P34A")"
 
 poke "$R34A" task-add T6 4 build 'the same id again' implementor '—' 30 REQ-5 'lib/d.sh'
 expect_eq "34d4 a duplicate id is refused" "1" "$RC"
