@@ -130,14 +130,14 @@ role_is_readonly() {  # <subagent_type> -> 0 a read-only role · 1 anything else
 
 # ---------- WHAT A ROW COSTS (wave-24 T10, REQ-7 AC-7.1/7.2, D11; research R4 §1) -----------
 #
-# TWO CEILINGS, TWO RULES, ONE ROLE FIELD. A writer slot is held by a role that can write the
-# tree; a read-only role holds none, so the dispatch wall must neither count its open row nor
-# ask a slot for its incoming dispatch, and the Patrol's fill must not read it as occupancy
-# either. A suite slot is held by a row that runs a suite — one whose brief declared a
-# `Subprocess claim:` (`claims=`), or a `bionic:test-runner`, the one read-only role whose whole
-# job is to run suites and the one that used to hold nothing because its brief rarely said so.
+# ONE CEILING, ONE ROLE FIELD. A writer slot is held by a role that can write the tree; a
+# read-only role holds none, so the dispatch wall must neither count its open row nor ask a
+# slot for its incoming dispatch, and the Patrol's fill must not read it as occupancy either.
+# (A second rule lived here until wave-26 T8: a row holding a SUITE slot, for the hand-out
+# suites ceiling. That ceiling is gone — a suite run books a machine-wide place as it starts,
+# payload/scripts/lib/slots.sh — and so is its predicate.)
 # The row carries its role as `subagent_type=` (no schema change), and this file owns
-# `role_is_readonly`, so the two questions are answered here and nowhere else:
+# `role_is_readonly`, so the question is answered here and nowhere else:
 # `hooks/dispatch-preflight.sh` and `hooks/session-poker.sh`'s tick both call
 # `budget_open_writers`, which is what keeps the open count the one refuses on and the
 # occupancy the other fills against the SAME number.
@@ -184,14 +184,6 @@ budget_open_writers() {  # <roster file>; stdin: the open names, one per line ->
     role_is_readonly "${type#T:}" || n=$(( n + 1 ))
   done <<< "$types"
   printf '%s' "$n"
-}
-
-roster_row_holds_suite() {  # <roster row line> -> 0 it holds a suite slot (a claim, or a test-runner) · 1 not
-  local line="$1" type claims
-  claims="$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)"
-  [ -n "$claims" ] && return 0
-  type="$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^subagent_type=//p' | head -1)"
-  [ "$type" = "bionic:test-runner" ]
 }
 
 # The header comment line every roster file opens with. Both writers emit it when the file
