@@ -91,6 +91,9 @@ Fixes:
   write a forged plan line, and the plan-row verbs accept plain ASCII ids only, under any locale;
   a hold with a blank reason is refused; fix lines print the plugin root quoted.
 - The doctor-reads suite no longer depends on the `claude` and `npm` found on the runner's PATH.
+- The Bash walls read `git` in any letter case. On macOS's case-blind filesystem `GIT push origin
+  main` runs git, and it used to pass the protected-branch wall, the commit gate and the read-only
+  role check unseen; `GIT`, `Git` and `/usr/bin/GIT` are now read exactly as `git`.
 
 Known limits, carried to the next release:
 
