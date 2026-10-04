@@ -161,7 +161,7 @@ SETUP_LIB_DIR="${BIONIC_LIB_DIR:-$(_setup_self_dir)/lib}"
 # instead of the reinstall route this guard exists to print. patrol.sh is here
 # for the same reason one level down: checks.sh soft-sources it for the
 # dead-session detector, so it is part of what a complete payload means.
-for _setup_lib in deps.sh detect.sh hooks.sh jit.sh env.sh width.sh checks.sh patrol.sh; do
+for _setup_lib in deps.sh detect.sh hooks.sh jit.sh env.sh markers.sh width.sh checks.sh patrol.sh; do
   if [ ! -f "${SETUP_LIB_DIR}/${_setup_lib}" ]; then
     echo "setup.sh: cannot find ${SETUP_LIB_DIR}/${_setup_lib} — the payload looks incomplete." >&2
     echo "          reinstall with: claude plugin install bionic@bionic" >&2
@@ -181,6 +181,12 @@ done
 # roster they all walk (`ENV_KEYS`) is spelled exactly once, there.
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/env.sh"
+# markers.sh, which env.sh already soft-sourced: the marker-block walk the rc item
+# and the working-principles item write through. Named here as well so the
+# file-to-suite map (tests/lib/impact.sh, one hop from a script) sees this script
+# read it; the library's own guard makes the second source a no-op.
+# shellcheck source=/dev/null
+. "${SETUP_LIB_DIR}/markers.sh"
 # checks.sh, THE TABLE OF CHECKS. Every id this script offers, every predicate
 # that decides whether an item is outstanding, and the party that repairs it come
 # from there — and doctor reads the same rows. Until 1.5.1 the roster and the
@@ -418,6 +424,14 @@ _setup_item_verb() {  # <name>
       say "remove ${_setup_verb_count} installed agent role file(s) that no longer match the payload, from $(_setup_agent_copies_dir)" ;;
     legacy-permission-block) say "remove bionic's retired permission block from $(_dep_settings_file)" ;;
     permission-mode)    say "set Claude Code's default permission mode to ${BIONIC_DEFAULT_PERMISSION_MODE}" ;;
+    working-principles)
+      # AN EDITED BLOCK IS NOT ANSWERED BY THIS PAGE. Its replacement is asked
+      # again, live, after the difference is shown (step 13), so the page says so.
+      if [ "$(principles_state)" = "edited" ]; then
+        say "show how your edited working principles in $(principles_file) differ from bionic's text, and ask again before replacing them"
+      else
+        say "add bionic's working principles to $(principles_file), between markers"
+      fi ;;
     *)                  return 1 ;;
   esac
   return 0
@@ -1650,6 +1664,54 @@ _setup_default_mode() {
   return 0
 }
 
+# ─── Step 13 — the working principles ────────────────────────────────────────
+#
+# THE USER'S OWN INSTRUCTION FILE, WRITTEN ONLY ON A YES (wave-27 D16). A short
+# set of working principles, offered for `<claude home>/CLAUDE.md` and written
+# between bionic's markers; nothing outside them is touched, and a file that is
+# not there is created only on that yes. The text, the file and the three states
+# are env.sh's (`principles_*`); this step owns the questions.
+#
+# AN EDITED BLOCK GETS A SECOND, LIVE QUESTION. The writer rebuilds the block
+# whole, so replacing a block the user changed would throw their change away.
+# The difference is printed first, and the replacement waits for a yes typed at
+# THAT question — under `--all` too, where the page's one yes was given before
+# the difference was on screen, so the page's flag is lifted for this one read.
+
+setup_working_principles() {
+  _setup_wants working-principles || return 0
+  say ""
+  say "13. Working principles"
+  local file state
+  file="$(principles_file)"
+  state="$(principles_state)"
+
+  [ "$state" != "present" ] || { item "$SETUP_OK" "working principles" "already in ${file} — nothing to do"; return 0; }  # idempotence guard: principles item
+
+  if [ "$state" = "edited" ]; then
+    say "   ${file} carries bionic's working principles, edited. What replacing them would change:"
+    principles_diff | while IFS= read -r _setup_diff_line || [ -n "$_setup_diff_line" ]; do
+      say "     ${_setup_diff_line}"
+    done
+    SETUP_ALL=0 RM_ALL=0 consent "   Replace your edited block with bionic's text?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "your edit in ${file} is kept."; return 0; fi  # consent gate: principles edit
+  else
+    say "   bionic's working principles are not in ${file}:"
+    say "   — seven short rules for how a session works: prove it before calling it done,"
+    say "     offload long work, lead with what the reader needs to decide."
+    consent "   Add them to ${file}, between bionic's markers?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${file} is unchanged."; action "add bionic's working principles to ${file} — $(_setup_answer_yes working-principles)"; return 0; fi  # consent gate: principles item
+  fi
+
+  if principles_set; then
+    item "$SETUP_OK" "working principles" "written to ${file} — new sessions read them"
+  else
+    item "$SETUP_BAD" "working principles" "could not write ${file}"
+    action "add bionic's working principles to ${file} (bionic could not write the file)"
+  fi
+  return 0
+}
+
 # ─── The summary ─────────────────────────────────────────────────────────────
 
 setup_summary() {
@@ -1783,6 +1845,7 @@ setup_legacy_skill_copy
 setup_legacy_hook_files
 setup_legacy_agent_copies
 setup_permission_mode
+setup_working_principles
 setup_summary
 
 exit 0

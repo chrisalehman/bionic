@@ -36,9 +36,10 @@
 # tests/remove.test.sh used to pin that writer's shape and wall the payload
 # against a second one appearing beside it. It was deleted at epic-18 wave-03
 # and nothing replaced it. In the same wave this file grew a staging pair of its
-# own for the shell rc (`_rc_stage_tmp` / `_rc_publish_tmp`, below), which makes
-# three copies of the stage-then-publish shape in the payload — setup.sh's,
-# remove.sh's, and this one. They are spelled alike on purpose and today they
+# own for the shell rc (now lib/markers.sh's `_markers_stage_tmp` /
+# `_markers_publish_tmp`, moved there at wave-27 T7), which makes three copies of
+# the stage-then-publish shape in the payload — setup.sh's, remove.sh's, and
+# that one. They are spelled alike on purpose and today they
 # are held together by nothing but that: wave-03 plan residual (b), weighed by
 # its critic at F4 as acceptable debt. Do not read the resemblance as a pin.
 #
@@ -58,6 +59,13 @@ _env_self_dir() {
 if ! declare -F _dep_settings_write_jq >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$(cd "$(_env_self_dir)" && pwd -P)/deps.sh"
+fi
+
+# markers.sh, the same soft source: the marker-block walk both of this file's
+# block items (the shell rc, the working principles) write and strip through.
+if ! declare -F markers_set >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$(cd "$(_env_self_dir)" && pwd -P)/markers.sh"
 fi
 
 # ─── The names bionic owns ───────────────────────────────────────────────────
@@ -349,107 +357,39 @@ rc_default() {  # <item> — prints the line, exit 1 if the item is not bionic's
 # that is not there, and a line that is there but outside the block, are both
 # "bionic has not written this" — the second because it is somebody else's line.
 rc_get() {  # <item>
-  local item="${1:-}" want file line inside=0
+  local item="${1:-}" want file line
   want="$(rc_default "$item")" || return 1
   file="$(rc_file)" || return 1
-  [ -f "$file" ] || return 1
-  while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$line" = "$RC_START" ]; then inside=1; continue; fi
-    if [ "$line" = "$RC_END" ];   then inside=0; continue; fi
-    if [ "$inside" = "1" ] && [ "$line" = "$want" ]; then return 0; fi
-  done < "$file"
+  while IFS= read -r line; do
+    [ "$line" = "$want" ] && return 0
+  done < <(markers_get "$file" "$RC_START" "$RC_END")
   return 1
 }
 
 # ─── The rc writer ───────────────────────────────────────────────────────────
 #
-# THE MODE TRAVELS WITH THE CONTENT. Staged beside the target under `umask 077`,
-# widened to the target's mode only at the instant of publication, and renamed
-# over the RESOLVED target rather than a symlink — setup.sh's `_setup_stage_tmp`
-# / `_setup_publish_tmp` pair and remove.sh's `_rm_stage_tmp` / `_rm_publish_tmp`
-# pair, spelled the same way here so a reader of any one of the three finds the
-# same shape — a convention, not a wall: nothing tests the three against each
-# other (see the header). A shell rc is if anything the likeliest of bionic's three write targets to
-# hold a plaintext token — it is where people put `export …_API_KEY=` — and `mv`
-# replaces the inode, so without this a file a user deliberately kept at 0600
-# comes back at whatever the umask says.
+# THE WALK IS lib/markers.sh's. `_rc_rewrite` and its staging pair lived here
+# until wave-27 T7, when the principles item needed the same block in a second
+# file; they moved there whole (`_markers_rewrite`, `_markers_stage_tmp`,
+# `_markers_publish_tmp`) and the reasons moved with them — the mode that travels
+# with the content, and the block rebuilt wholesale rather than filtered (epic-18
+# wave-03 critic F1/F2). What stays here is what is the rc item's own: which file,
+# which markers, and which one line goes between them.
 
-_rc_file_mode() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
-  local mode
-  mode="$(stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null)"
-  [ -e "$1" ] || mode=""
-  printf '%s' "$mode"
-}
-
-_rc_stage_tmp() {  # <tmp> — created empty at 0600; the caller writes, then publishes
-  local tmp="$1"
-  rm -f "$tmp"
-  (umask 077; : > "$tmp") || return 1
-  return 0
-}
-
-_rc_publish_tmp() {  # <tmp> <file> — <file> is the resolved target
-  local tmp="$1" file="$2" mode
-  mode="$(_rc_file_mode "$file")"
-  [ -n "$mode" ] && chmod "$mode" "$tmp"
-  mv "$tmp" "$file"
-}
-
-# Everything the file holds EXCEPT bionic's block. One walk, so `rc_set` and
-# `rc_unset` cannot come to disagree about what the block is.
-#
-# THE BLOCK IS REBUILT WHOLESALE, NEVER FILTERED. Whatever sits between the
-# markers goes — an older payload's proxy text, a line somebody hand-edited in
-# there, the half of a block an interrupted run left behind. `rc_set` then
-# writes the block back as exactly `rc_default`'s line and `rc_unset` writes no
-# block at all, so what the markers hold is always a function of the roster and
-# never of what was found on disk. Carrying unrecognised in-block lines forward
-# was tried and deleted: it round-tripped the block body out through a command
-# substitution, which strips the trailing newline, so a surviving line fused
-# with whatever was printed after it and the user's rc came back syntactically
-# invalid — `zsh -n` parse error, `rc_get` then reporting absent while doctor
-# reported present (epic-18 wave-03, critic F1/F2). The day `RC_ITEMS` grows a
-# second entry, both items are written from the roster here; nothing inside
-# bionic's own markers is salvaged out of the file.
-_rc_rewrite() {  # <file> <tmp> — <tmp> gets every line of <file> outside the block
-  local file="$1" tmp="$2"
-  local line inside=0 pending=0
-  while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$line" = "$RC_START" ]; then inside=1; continue; fi
-    if [ "$line" = "$RC_END" ];   then inside=0; continue; fi
-    [ "$inside" = "1" ] && continue
-    # Outside the block, the file is reproduced line for line. Blank lines are
-    # deferred so a run of them survives exactly as it was — the same shape
-    # remove.sh's `_rm_strip_marker_block` holds to.
-    if [ "$pending" = "1" ]; then printf '\n' >> "$tmp"; pending=0; fi
-    if [ -z "$line" ]; then pending=1; continue; fi
-    printf '%s\n' "$line" >> "$tmp"
-  done < "$file"
-  [ "$pending" = "1" ] && printf '\n' >> "$tmp"
-  return 0
-}
-
-# IDEMPOTENT BY CONSTRUCTION, not by a guard that could be wrong: the block is
-# removed and rewritten whole on every call, so a second run produces the same
-# bytes and a block left half-written by an interrupted run is repaired rather
-# than appended beside.
+# IDEMPOTENT BY CONSTRUCTION: `markers_set` removes and rewrites the block whole
+# on every call, so a second run produces the same bytes and a block left
+# half-written by an interrupted run is repaired rather than appended beside. The
+# day `RC_ITEMS` grows a second entry, both items are written from the roster
+# here; nothing inside bionic's own markers is salvaged out of the file.
 rc_set() {  # <item>
-  local item="${1:-}" want file target tmp
+  local item="${1:-}" want file body rc
   want="$(rc_default "$item")" || return 1
   file="$(rc_file)" || return 1
-  target="$(bionic_link_target "$file")"
-  tmp="${target}.bionic.tmp"
-  _rc_stage_tmp "$tmp" || return 1
-  if [ -f "$file" ]; then
-    _rc_rewrite "$file" "$tmp" || { rm -f "$tmp"; return 1; }
-  fi
-  {
-    printf '%s\n' "$RC_START"
-    printf '%s\n' "$want"
-    printf '%s\n' "$RC_END"
-  } >> "$tmp" || { rm -f "$tmp"; return 1; }
-  _rc_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
-  return 0
+  body="$(mktemp "${TMPDIR:-/tmp}/bionic-rc-body.XXXXXX")" || return 1
+  printf '%s\n' "$want" > "$body"
+  markers_set "$file" "$RC_START" "$RC_END" "$body"; rc=$?
+  rm -f "$body"
+  return "$rc"
 }
 
 # Absent is success, for env_unset's reason: a teardown that failed because there
@@ -461,17 +401,95 @@ rc_set() {  # <item>
 # THE BLOCK GOES WHOLE. An empty marker pair left in a user's rc is bionic
 # footprint that reads as a bionic setting whose value nobody can find — the
 # same defect the retired env block left behind, and the reason remove strips
-# markers rather than filtering the line between them. `_rc_rewrite` drops the
-# markers with their contents, so there is nothing left to decide about here.
+# markers rather than filtering the line between them.
 rc_unset() {  # <item>
-  local item="${1:-}" file target tmp
+  local item="${1:-}" file
   rc_default "$item" >/dev/null || return 1
   file="$(rc_file)" || return 1
-  [ -f "$file" ] || return 0
-  target="$(bionic_link_target "$file")"
-  tmp="${target}.bionic.tmp"
-  _rc_stage_tmp "$tmp" || return 1
-  _rc_rewrite "$file" "$tmp" || { rm -f "$tmp"; return 1; }
-  _rc_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
+  markers_strip "$file" "$RC_START" "$RC_END"
+}
+
+# ─── The working-principles item ─────────────────────────────────────────────
+#
+# A SHORT SET OF WORKING PRINCIPLES IN THE USER'S OWN INSTRUCTION FILE, offered
+# at setup (wave-27 D16, REQ-9). `<claude home>/CLAUDE.md` is the user's file and
+# the CLI reads it into every session; bionic's text goes in between its own
+# markers, written only on a yes, and comes out by those markers on remove.
+#
+# THE TEXT HAS ONE SOURCE. agents-src/templates/context/working-principles.md.tmpl
+# renders payload/context/working-principles.md, and the shipped file carries the
+# text between these same two markers, so the body setup writes is
+# `markers_get` of the payload file — the same walk that reads the user's block,
+# and no parser for the render's do-not-edit header. Doctor's three states are a
+# comparison of those two reads.
+#
+#   present — the user's block is byte-for-byte the shipped text
+#   edited  — a block is there and differs: the user's own edit, or an older text
+#   absent  — no block
+#
+# AN EDIT IS NEVER DISCARDED SILENTLY. `markers_set` rebuilds a block whole, so
+# setup on an `edited` block prints the difference and writes only on a second,
+# live yes (setup.sh `setup_working_principles`).
+#
+# Verbatim. remove.sh's standalone door carries byte-equal copies
+# (RM_PRINCIPLES_START / RM_PRINCIPLES_END) because it cannot source this file;
+# tests/principles-item.test.sh §REMOVE pins them equal.
+PRINCIPLES_START='<!-- bionic:principles:start -->'
+PRINCIPLES_END='<!-- bionic:principles:end -->'
+
+principles_file()      { printf '%s/CLAUDE.md\n' "$(claude_home)"; }
+principles_text_file() { printf '%s/context/working-principles.md\n' "$(plugin_root)"; }
+
+# present | edited | absent. A shipped file that cannot be read leaves a block
+# reading `edited`, never `present`: nothing can be said to match a text that is
+# not there.
+principles_state() {
+  local mine shipped
+  mine="$(markers_get "$(principles_file)" "$PRINCIPLES_START" "$PRINCIPLES_END"; printf '%s' "rc=$?")"
+  case "$mine" in *rc=1) printf 'absent\n'; return 0 ;; esac
+  shipped="$(markers_get "$(principles_text_file)" "$PRINCIPLES_START" "$PRINCIPLES_END"; printf '%s' "rc=$?")"
+  if [ "$mine" = "$shipped" ]; then printf 'present\n'; else printf 'edited\n'; fi
+  return 0
+}
+
+# The difference between the user's block and the shipped text, as a unified
+# diff — what a yes would change. Empty when they agree.
+principles_diff() {
+  local mine shipped
+  mine="$(mktemp "${TMPDIR:-/tmp}/bionic-principles-mine.XXXXXX")" || return 1
+  shipped="$(mktemp "${TMPDIR:-/tmp}/bionic-principles-shipped.XXXXXX")" || { rm -f "$mine"; return 1; }
+  markers_get "$(principles_file)" "$PRINCIPLES_START" "$PRINCIPLES_END" > "$mine"
+  markers_get "$(principles_text_file)" "$PRINCIPLES_START" "$PRINCIPLES_END" > "$shipped"
+  diff -u -L "your block" -L "bionic's text" "$mine" "$shipped"
+  rm -f "$mine" "$shipped"
+  return 0
+}
+
+# Writes the shipped text between the markers, creating the claude home and the
+# file if neither is there: the caller asked first. Refuses when the payload's
+# text cannot be read, rather than writing an empty block.
+principles_set() {
+  local file body rc
+  file="$(principles_file)"
+  body="$(mktemp "${TMPDIR:-/tmp}/bionic-principles-body.XXXXXX")" || return 1
+  if ! markers_get "$(principles_text_file)" "$PRINCIPLES_START" "$PRINCIPLES_END" > "$body" || \
+     [ ! -s "$body" ]; then
+    rm -f "$body"; return 1
+  fi
+  mkdir -p "${file%/*}" || { rm -f "$body"; return 1; }
+  markers_set "$file" "$PRINCIPLES_START" "$PRINCIPLES_END" "$body"; rc=$?
+  rm -f "$body"
+  return "$rc"
+}
+
+# Strips the block. A CLAUDE.md left EMPTY by the strip held nothing but bionic's
+# block, so it is taken back off too — a file setup created comes back as no
+# file, which is what the machine had before. A symlinked file is never deleted:
+# its target belongs to whatever manages the link.
+principles_unset() {
+  local file
+  file="$(principles_file)"
+  markers_strip "$file" "$PRINCIPLES_START" "$PRINCIPLES_END" || return 1
+  if [ -f "$file" ] && [ ! -L "$file" ] && [ ! -s "$file" ]; then rm -f "$file"; fi
   return 0
 }
