@@ -8861,6 +8861,44 @@ expect_true "49c3 …and the plan is unchanged" cmp -s "$TMPROOT/s49-before" "$P
 expect_eq "49d no projection copy is left beside the plan" "" \
   "$(find "$R49/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
 
+# 49f (wave-26 T51; review 13 F1): the lock cannot be made — .bionic/tmp is not writable. The tick's
+# call leaves a held lock to its holder and does not wait, yet through T32 its takeover arm looped
+# without a bound and the tick never returned. Run in a process group of its own, bounded, and
+# killed whole past the bound; what it left running is read by working directory.
+s49_procs() {  # <dir> -> the pids of bash processes whose working directory is <dir> or below it
+  local d
+  d="$(cd "$1" 2>/dev/null && pwd -P)" || return 0
+  lsof -a -c bash -d cwd -Fpn 2>/dev/null | awk -v d="$d" '
+    /^p/ { p = substr($0, 2); next }
+    /^n/ { n = substr($0, 2); if (n == d || index(n, d "/") == 1) print p }'
+}
+s49_tick_bounded() {  # <seconds> <repo> -> OUT, RC; 124, the tick's whole group killed, past the bound
+  local i=0 n=$(( $1 * 10 )) p
+  rm -f "$TMPROOT/s49f.rc"
+  p="$( set -m
+    ( cd "$2" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 \
+        bash "$POKER" tick > "$TMPROOT/s49f.out" 2>&1
+      echo "$?" > "$TMPROOT/s49f.rc" ) </dev/null >/dev/null 2>&1 &
+    echo "$!" )"
+  while [ ! -s "$TMPROOT/s49f.rc" ] && [ "$i" -lt "$n" ]; do sleep 0.1; i=$((i + 1)); done
+  if [ -s "$TMPROOT/s49f.rc" ]; then RC="$(cat "$TMPROOT/s49f.rc")"; else kill -9 -- "-$p" 2>/dev/null; RC=124; fi
+  OUT="$(cat "$TMPROOT/s49f.out" 2>/dev/null)"
+}
+require_helpers s49_procs s49_tick_bounded
+command -v lsof >/dev/null 2>&1 || { echo "session-poker: lsof absent — 49f cannot read what it left running"; exit 1; }
+( cd "$R49" && while :; do sleep 1; done ) & S49_PLANT=$!
+sleep 0.5
+expect_contains "49f precondition: a process the row starts in the repo is found by its working directory" \
+  " $S49_PLANT " " $(s49_procs "$R49" | tr '\n' ' ')"
+kill "$S49_PLANT" 2>/dev/null; wait "$S49_PLANT" 2>/dev/null
+poke_bind "$R49"
+chmod a-w "$R49/.bionic/tmp"
+s49_tick_bounded 20 "$R49"
+chmod u+w "$R49/.bionic/tmp"
+expect_ne "49f §F1 the tick returns when the launch lock cannot be made (rc $RC; 124 is the bound)" "124" "$RC"
+expect_contains "49f2 …and prints that the lock cannot be made" "cannot be made" "$OUT"
+expect_eq "49f3 …and leaves nothing running" "" "$(s49_procs "$R49")"
+
 # 49e (wave-26 T32; T14, AC-6.5): the offered review names the range it reads. §48's world as it
 # ends: a review proof at A, one landing to B, the review offered again. The digest is removed so
 # the tick prints in full; the head is the one the tick reads for live:head, with no git of its own.
