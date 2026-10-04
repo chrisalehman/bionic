@@ -447,6 +447,19 @@ _pa_bytes() {  # <text> -> its length in bytes
   printf '%s' "${#1}"
 }
 
+# _pa_more_than <lines> <n> — rc 0 when the text holds more than <n> lines. It reads at most
+# n+1 of them in this process, so a small question pays no fork for the count. Read, not cut
+# off the front by expansion: under bash 3.2 each `${v#*<newline>}` copies and rescans the
+# whole remainder, which on 2000 lines cost seconds (measured).
+_pa_more_than() {
+  local line n=0
+  while IFS= read -r line; do
+    n=$((n + 1))
+    [ "$n" -gt "$2" ] && return 0
+  done <<< "$1"
+  return 1
+}
+
 PA_STAGE="reading what the action does"
 PA_BIG=0
 PA_MANY=0
@@ -463,9 +476,9 @@ case "$PA_TOOL" in
     else
       PA_RAW="$(cmd_effects "$PA_CMD" "$PA_CWD" reads 2>/dev/null)" \
         || _pa_fail "the command reader failed (cmd_effects rc $?)"
-      PA_N="$(printf '%s\n' "$PA_RAW" | awk 'NF { n++ } END { print n + 0 }')"
-      if [ "${PA_N:-0}" -gt "$PA_EFFECTS_MAX" ]; then
+      if [ -n "$PA_RAW" ] && _pa_more_than "$PA_RAW" "$PA_EFFECTS_MAX"; then
         PA_MANY=1
+        PA_N="$(printf '%s\n' "$PA_RAW" | awk 'END { print NR }')"
         PA_EFFECTS="?${PA_TAB}too many targets to read: $PA_N, past the $PA_EFFECTS_MAX bionic reads${PA_TAB}$(_pa_clean "$PA_CMD" 200)"
       else
         PA_EFFECTS="$(grant_resolve_lines "$PA_RAW")"
@@ -506,15 +519,20 @@ if [ "$PA_BIG" = 0 ]; then
     Bash)
       PA_CAT="$(grant_reserved Bash "$PA_CMD")" || _pa_fail "the reserved table failed (grant_reserved rc $?)"
       if [ -z "$PA_CAT" ] && [ "$PA_MANY" = 0 ] && [ -n "$PA_RAW" ]; then
+        # The home directory is the fact an RR line is judged against; resolved only when
+        # the reader printed one, so no other question pays for it.
         PA_HOME=""
-        [ -z "${HOME:-}" ] || PA_HOME="$(grant_resolve "$HOME")" || PA_HOME=""
+        case "$PA_NL$PA_RAW" in
+          *"${PA_NL}RR$PA_TAB"*)
+            [ -z "${HOME:-}" ] || PA_HOME="$(grant_resolve "$HOME")" || PA_HOME="" ;;
+        esac
         PA_CAT="$(grant_reserved_effects "$PA_HOME" "$PA_RAW$PA_NL$PA_EFFECTS")" \
           || _pa_fail "the reserved table failed (grant_reserved_effects rc $?)"
       fi
       ;;
     Write|Edit|MultiEdit|NotebookEdit|Read)
       PA_CAT="$(grant_reserved "$PA_TOOL" "$PA_PATH")" || _pa_fail "the reserved table failed (grant_reserved rc $?)"
-      if [ -z "$PA_CAT" ] && [ -n "$PA_RESOLVED_PATH" ]; then
+      if [ -z "$PA_CAT" ] && [ -n "$PA_RESOLVED_PATH" ] && [ "$PA_RESOLVED_PATH" != "$PA_PATH" ]; then
         PA_CAT="$(grant_reserved "$PA_TOOL" "${PA_RESOLVED_PATH#\?"$PA_TAB"}")" \
           || _pa_fail "the reserved table failed (grant_reserved rc $?)"
       fi
