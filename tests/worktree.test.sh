@@ -117,6 +117,8 @@ bind_plan() {  # <repo> <sid> <working-branch or empty> -> echoes the plan path
 # Every ref and its object, one line each: a refused land changes NONE of them, which is
 # "no merge commit anywhere" read off git rather than off the refusal line.
 refs_of() { git -C "$1" for-each-ref --format='%(refname) %(objectname)'; }
+# Every worktree, its path and its branch, without the heads: what a land removes or keeps.
+trees_of() { git -C "$1" worktree list --porcelain | grep -v '^HEAD '; }
 
 # shellcheck source=/dev/null
 . "$LIB" 2>/dev/null || { echo "FAIL: the library does not source ($LIB)"; exit 1; }
@@ -633,6 +635,30 @@ expect_match "a runner behind an interpreter option refuses" \
   "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} *script=${S}/tests/run.sh" \
   "$(worktree_land "$BT12" wave/fixture)"
 stop_runner
+# BUNDLED OPTIONS (review 7 F7). Each `o` or `O` in a cluster takes the next word, as bash reads
+# it, so the common `bash -euo pipefail <runner>` is the runner, not `pipefail`.
+expect_true "a stand-in runner started as bash -euo pipefail tests/run.sh" \
+  start_runner_argv "$S" "*bash -euo pipefail tests/run.sh" bash -euo pipefail tests/run.sh
+expect_match "a runner behind a bundled -euo pipefail refuses" \
+  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} *script=${S}/tests/run.sh" \
+  "$(worktree_land "$BT12" wave/fixture)"
+stop_runner
+# The walk itself, one argv per row, as `ps` would print it. Runners first, then the command
+# strings and stdin the same walk must never take for a script.
+for argv in "bash tests/run.sh" "bash -e tests/run.sh" "bash -o pipefail tests/run.sh" \
+            "bash -euo pipefail tests/run.sh" "bash -eo pipefail tests/run.sh" \
+            "bash +euo pipefail tests/run.sh" "bash -oo pipefail errexit tests/run.sh" \
+            "bash -eO extglob tests/run.sh" "bash - tests/run.sh" "bash -- tests/run.sh" \
+            "bash + tests/run.sh" "bash --rcfile /dev/null tests/run.sh" "zsh -euo pipefail tests/run.sh"; do
+  # shellcheck disable=SC2086  # one argv word per word, as ps prints it
+  expect_eq "the walk finds the runner in: ${argv}" "tests/run.sh" "$(_wt_runner_script $argv)"
+done
+for argv in "bash -c tests/run.sh" "bash -ec tests/run.sh" "bash -euo pipefail -c tests/run.sh" \
+            "bash -co pipefail tests/run.sh" "bash +c tests/run.sh" "bash -s tests/run.sh" \
+            "bash -o pipefail" "bash -euo"; do
+  # shellcheck disable=SC2086
+  expect_false "the walk finds no runner in: ${argv}" _wt_runner_script $argv
+done
 expect_true "a process started with the root's tests/run.sh as its argv[0]" \
   start_runner_argv "$ELSE" "$S/tests/run.sh 30" bash -c "exec -a '$S/tests/run.sh' sleep 30"
 expect_match "a process whose argv[0] is the runner's script refuses" \
@@ -1323,13 +1349,97 @@ expect_match "a head that moved only on other files still lands" \
   "spawn-worktree: LANDED branch=bystander onto=wave/fixture *" "$OUTLO"
 expect_eq "the merge sits on the commit that arrived" "shared.txt line 3" \
   "$(git -C "$LR" log -1 --format=%s 'wave/fixture^1')"
-# The tree's own branch moving in that window is not merged: the head judged is the head merged.
+# THE TREE'S OWN BRANCH MOVES AFTER ITS HEAD WAS JUDGED (review 7 F9). Landing the judged head
+# and removing the tree would leave the newer commit unlanded on the branch with nothing said, so
+# the merge is undone and the land refused, naming both heads; the tree, its commit and <onto>
+# are as they were.
 LRM="$(new_tree "$LR" mover)"; green_stamp "$LRM"; LRMH="$(git -C "$LRM" rev-parse HEAD)"
+LRMO="$(git -C "$LR" rev-parse wave/fixture)"; LRMW="$(trees_of "$LR")"
 OUTLM="$(_wt_busy_suite() { echo late > "$LRM/late.txt"; git -C "$LRM" add late.txt; git -C "$LRM" commit --quiet -m late; return 1; }
-         worktree_land "$LRM" wave/fixture)"
-expect_ne "fixture: the tree's branch moved inside the window" "$LRMH" "$(git -C "$LR" rev-parse mover)"
-expect_match "the tree lands" "spawn-worktree: LANDED branch=mover onto=wave/fixture *" "$OUTLM"
-expect_eq "and the merge took the head its green run was on" "$LRMH" "$(git -C "$LR" rev-parse 'wave/fixture^2')"
+         worktree_land "$LRM" wave/fixture)"; RCLM=$?
+LRMT="$(git -C "$LR" rev-parse mover)"
+expect_ne "fixture: the tree's branch moved inside the window" "$LRMH" "$LRMT"
+expect_match "a branch that moved past its judged head is refused branch-moved, naming both heads" \
+  "spawn-worktree: REFUSED reason=branch-moved branch=mover judged=${LRMH} branch_head=${LRMT} — *" "$OUTLM"
+expect_match "the refusal names its fix" "*re-run the tree's suites at its head, land again*" "$OUTLM"
+expect_eq   "that refusal exits 2" "2" "$RCLM"
+expect_eq   "the undo leaves the onto branch's head where it was" "$LRMO" "$(git -C "$LR" rev-parse wave/fixture)"
+expect_true "the tree survives" test -d "$LRM"
+expect_eq   "the tree's branch keeps its newer commit" "$LRMT" "$(git -C "$LR" rev-parse mover)"
+expect_eq   "the worktree list is as it was" "$LRMW" "$(trees_of "$LR")"
+expect_eq   "the onto checkout is clean" "" "$(git -C "$LR" status --porcelain --untracked-files=no)"
+# The fix: a green run at the new head, then the same land goes through and takes that head.
+green_stamp "$LRM"
+expect_match "with a green run at its new head the tree lands" \
+  "spawn-worktree: LANDED branch=mover onto=wave/fixture *" "$(worktree_land "$LRM" wave/fixture)"
+expect_eq "and the merge took the newer commit" "$LRMT" "$(git -C "$LR" rev-parse 'wave/fixture^2')"
+
+# THE HEAD MOVES AFTER ITS LAST READ, AS `git merge` STARTS (review 7 F8). A `git` function in the
+# land's subshell commits onto the branch when the merge is called, which is after every read the
+# land makes and before git's own. The merge commit's first parent is then not the head judged:
+# the merge is undone and the land refused, and nothing else is changed.
+land_with_arrival() {  # <tree> <line> <text> [on-top] — lands <tree>; run it inside $(…), it defines git()
+  local arr_done="" arr_line="$2" arr_text="$3" arr_top="${4:-}"
+  git() {
+    if [ -z "$arr_done" ] && [ "${3:-}" = merge ] && [ "${4:-}" = --no-ff ]; then
+      arr_done=1
+      awk -v n="$arr_line" -v t="$arr_text" 'NR == n { $0 = t } { print }' "$LR/shared.txt" > "$LR/shared.new" \
+        && mv "$LR/shared.new" "$LR/shared.txt" && command git -C "$LR" commit --quiet -am "arrived at merge"
+      command git "$@" || return
+      # With [on-top], another writer also commits on top of the merge before the land reads it.
+      [ -z "$arr_top" ] || command git -C "$LR" commit --quiet --allow-empty -m "on top of the merge"
+      return 0
+    fi
+    command git "$@"
+  }
+  worktree_land "$1" wave/fixture
+}
+LRF="$(new_tree "$LR" late-racer)"; set_line "$LRF" shared.txt 1 "late racer"; green_stamp "$LRF"
+LRFJ="$(git -C "$LR" rev-parse wave/fixture)"; LRFB="$(git -C "$LR" rev-parse late-racer)"
+LRFW="$(trees_of "$LR")"
+OUTLF="$(land_with_arrival "$LRF" 6 "arrived at merge")"; RCLF=$?
+LRFA="$(git -C "$LR" rev-parse wave/fixture)"
+expect_eq "fixture: the arrival is the onto branch's head, one commit past the judged head" "$LRFJ" \
+  "$(git -C "$LR" rev-parse 'wave/fixture^1')"
+expect_match "a merge made onto a head that moved after the last read is refused onto-moved" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=late-racer onto=wave/fixture judged=${LRFJ} merged_onto=${LRFA} — *" "$OUTLF"
+expect_match "the refusal names its fix" "*land again to judge the head wave/fixture holds now*" "$OUTLF"
+expect_eq   "that refusal exits 2" "2" "$RCLF"
+expect_eq   "the undo leaves the onto branch on the arrival, not on the merge" "arrived at merge" \
+  "$(git -C "$LR" log -1 --format=%s wave/fixture)"
+expect_true "the tree survives" test -d "$LRF"
+expect_eq   "the tree's branch is where it was" "$LRFB" "$(git -C "$LR" rev-parse late-racer)"
+expect_eq   "the worktree list is as it was" "$LRFW" "$(trees_of "$LR")"
+expect_eq   "the onto checkout is clean" "" "$(git -C "$LR" status --porcelain --untracked-files=no)"
+expect_eq   "and its shared.txt is the arrival's" "$(git -C "$LR" show wave/fixture:shared.txt)" "$(cat "$LR/shared.txt")"
+# Landing again judges the head that arrived: it changed shared.txt, which the tree changed too.
+expect_match "landing again judges the new head and refuses the overlap" \
+  "spawn-worktree: REFUSED reason=not-current branch=late-racer onto=wave/fixture onto_head=${LRFA} files=shared.txt *" \
+  "$(worktree_land "$LRF" wave/fixture)"
+# An arrival on a file the tree never changed is refused the same way, and landing again lands.
+LRG="$(new_tree "$LR" late-bystander)"; green_stamp "$LRG"
+expect_match "a merge made onto an arrival on another file is refused onto-moved too" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=late-bystander *" "$(land_with_arrival "$LRG" 5 "arrived elsewhere")"
+expect_match "landing again lands, onto the arrival" \
+  "spawn-worktree: LANDED branch=late-bystander onto=wave/fixture *" "$(worktree_land "$LRG" wave/fixture)"
+expect_eq "the merge sits on the commit that arrived" "arrived at merge" \
+  "$(git -C "$LR" log -1 --format=%s 'wave/fixture^1')"
+# AN UNDO GIT REFUSES IS SAID, never passed off as a refusal that changed nothing.
+LRU="$(new_tree "$LR" undo-refused)"; green_stamp "$LRU"; LRUH="$(git -C "$LRU" rev-parse HEAD)"
+OUTLU="$(_wt_undo_merge() { return 1; }; land_with_arrival "$LRU" 4 "arrived again")"; RCLU=$?
+expect_match "an undo that fails says the merge stands and how to undo it" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=undo-refused * merge=$(git -C "$LR" rev-parse wave/fixture) undo=failed — the merge stands: reset wave/fixture to $(git -C "$LR" rev-parse 'wave/fixture^1') in ${LR} by hand, *" "$OUTLU"
+expect_eq   "that refusal exits 2" "2" "$RCLU"
+expect_eq   "and the merge it names is the tree's judged head" "$LRUH" "$(git -C "$LR" rev-parse 'wave/fixture^2')"
+expect_true "the tree survives" test -d "$LRU"
+# A COMMIT ON TOP OF THE MERGE IS NEVER RESET AWAY. The head the land reads back is then not its
+# own merge, so the undo declines and says so; the other writer's commit stays the head.
+LRP="$(new_tree "$LR" under-a-commit)"; green_stamp "$LRP"
+OUTLP="$(land_with_arrival "$LRP" 2 "arrived under" on-top)"
+expect_match "a land whose merge has a commit on top refuses, undo=failed" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=under-a-commit * undo=failed — *" "$OUTLP"
+expect_eq "the commit on top is still the onto branch's head" "on top of the merge" \
+  "$(git -C "$LR" log -1 --format=%s wave/fixture)"
 
 section "§LAND-KEEP: after each refusal the tree's record link still resolves (AC-9.1)"
 #

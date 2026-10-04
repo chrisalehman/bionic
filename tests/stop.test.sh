@@ -1255,4 +1255,53 @@ STOP_OUT=$(env HOME="$LS_HOME" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SI
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:true,background_tasks:[]}')" 2>/dev/null)
 expect_eq "LS2e: …once: the re-entered Stop passes" "" "$(sd_decision)"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "LH: on a tick's turn the wall judges live:head against the tick's head (wave-26 T32; A-T14.2)"
+
+# After the first review proof a `live:head` review is ready only when the working branch's head
+# has moved past the proof's head, and the head lives in git. The tick reads it; the wall reads
+# no git, so through T14 it handed the ready set no head and never owed a follow-up review the
+# tick had offered. The tick now writes the head it judged against into its digest (`head=`),
+# and on that tick's turn the wall hands the same head in. The digest here is written as the
+# tick writes it, fresh for the turn; the control is the same digest naming the proof's head.
+LH_A="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+LH_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+lh_fixture() {  # -> project dir; T1 landed (writes lib/a.sh), T2 a review proved at LH_A
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n'
+    printf 'proved: kind=review head=%s at=2026-10-04T00:00:00Z evidence=record/r.txt\n\n- Step 4: in progress\n\n' "$LH_A"
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the build | implementor | — | 15m | REQ-x | lib/a.sh |  | landed |\n'
+    printf '| T2 | 6 | review | the review | critic | — | 15m | REQ-x | — |  | pending |\n'
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+    > "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+lh_digest() {  # <project> <head> -> the tick digest, as the tick writes it, after the turn's marker
+  printf 'patrol-digest/v1\nprompt_version=5\ndigest=1-1\nsince=2026-10-04T00:00:00Z\ndecision=FILL\nduty=none\nat=%s\nhead=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" > "$1/.bionic/tmp/tick-digest-$SID.state"
+}
+require_helpers lh_fixture lh_digest
+LH_D="$(lh_fixture)"
+LH_TX="$(mktemp)"
+s7_transcript "$LH_TX" "poker: FILL T2"
+lh_digest "$LH_D" "$LH_B"
+s7_fire "$LH_D" "$LH_TX"
+expect_contains "LH1: with the tick's head past the proof, the wall owes the follow-up review" \
+  "Fillable gap at turn end" "$(reason_of)"
+expect_contains "LH1b: …naming it" "T2" "$(reason_of)"
+lh_digest "$LH_D" "$LH_A"
+s7_fire "$LH_D" "$LH_TX"
+expect_absent "LH2: at the proof's own head the review waits, and the wall owes nothing" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+
 finish

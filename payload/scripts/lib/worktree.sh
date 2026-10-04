@@ -193,17 +193,24 @@ _wt_cwd_in_project() {  # <path> <main-root> [target-checkout]
 # arguments, never a script, so a shell whose command text merely MENTIONS the runner — the
 # harness wraps every Bash call in `zsh -c '…'`, wait loops and progress notes included — is
 # not one (T31). Prints the script word and returns 0, or returns 1.
+#
+# The options are walked as bash reads them (review 7 F7): a `-` or `+` cluster is one word,
+# and EACH `o` or `O` in it takes the next word as its argument, so `-euo pipefail` and
+# `-oo pipefail errexit` skip theirs. A `c` or `s` anywhere in a cluster, `+c` included, makes
+# it a command string or stdin. `-` and `--` end the options; of the long ones only
+# `--rcfile` and `--init-file` take an argument. zsh reads these forms the same way.
 _wt_runner_script() {  # <argv word>...
+  local takes
   case "${1:-}" in *tests/run.sh) printf '%s' "$1"; return 0 ;; esac
   [ "$#" -gt 1 ] || return 1
   shift
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --) shift; break ;;
-      -o|+o|-O|+O|--rcfile|--init-file) shift 2 || return 1 ;;
+      -|--) shift; break ;;
+      --rcfile|--init-file) shift 2 || return 1 ;;
       --*) shift ;;
-      -*[cs]*) return 1 ;;
-      [-+]?*) shift ;;
+      [-+]*[cs]*) return 1 ;;
+      [-+]*) takes="${1//[!oO]/}"; shift $((1 + ${#takes})) || return 1 ;;
       *) break ;;
     esac
   done
@@ -271,6 +278,8 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 # leaves the repository exactly as it found it — the tree's `.bionic` record link
 # included (wave-26 D19). The link is dropped only just before `git worktree
 # remove`, the one act that needs it gone, and put back if git refuses that.
+# Two refusals can only be known after the merge, `onto-moved` and `branch-moved`
+# (review 7 F8, F9); each undoes the merge first, so it leaves the same state.
 #
 # THE LANDING RULE (wave-26 D7, as ruled in A-orch-26). A tree lands on its own
 # green run. It must first contain what landed since it branched only where that
@@ -456,9 +465,21 @@ _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
   _wt_refuse "not-current branch=${1} onto=${2} onto_head=${3:-<none>} ${4} — merge ${2} into the tree, re-run its suites, land again"
 }
 
+# THE UNDO OF A MERGE A LAND MUST NOT KEEP (review 7 F8, F9). Only the land's own merge is
+# undone: the checkout must still sit on <merge sha>, that commit's second parent must be the
+# head the land merged (so a commit someone made on top of it is never reset away), and
+# `reset --keep` refuses rather than overwrite a file changed since. Returns 1, the merge left
+# standing, when any of them fails.
+_wt_undo_merge() {  # <checkout> <merge sha> <first parent> <head merged>
+  [ -n "${3:-}" ] && [ -n "${4:-}" ] || return 1
+  [ "$(git -C "$1" rev-parse --verify --quiet HEAD 2>/dev/null)" = "$2" ] || return 1
+  [ "$(git -C "$1" rev-parse --verify --quiet "${2}^2" 2>/dev/null)" = "$4" ] || return 1
+  git -C "$1" reset --quiet --keep "$3" >/dev/null 2>&1
+}
+
 worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
-  local dirt onto_head head why link_to overlap now
+  local dirt onto_head head why link_to overlap now parent tip moved fix
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -542,7 +563,7 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   # THE HEAD IS READ AGAIN JUST BEFORE THE MERGE (review 2 F7). Another land onto
   # <onto> may have gone through since the read above; if the head moved, the
   # not-current decision is taken again against the head the merge will meet.
-  # What remains is the gap between this read and `git merge`'s own read of HEAD.
+  # A move after this read is caught once the merge is made, below.
   now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${onto}" 2>/dev/null)"
   if [ "$now" != "$onto_head" ]; then
     onto_head="$now"
@@ -559,6 +580,30 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co}"; return 2
   fi
   merge_sha="$(git -C "$co" rev-parse HEAD 2>/dev/null)"
+
+  # THE MERGE IS CHECKED AGAINST WHAT WAS JUDGED (review 7 F8, F9). `git merge` reads the
+  # head of <onto> for itself, after the read above, and merges onto whatever it finds: a land
+  # onto the same branch that completed in between is merged onto unjudged, with rc 0. So the
+  # merge commit's first parent must be the onto head that was judged. And the tree's branch
+  # must still hold the head that was merged: a commit its writer added since would be left
+  # unlanded on a branch whose tree is about to go. Either way this land's merge is undone,
+  # which moves <onto> back to the head another writer gave it, and the tree is kept.
+  parent="$(git -C "$co" rev-parse --verify --quiet "${merge_sha}^1" 2>/dev/null)"
+  tip="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${branch}" 2>/dev/null)"
+  moved=""
+  if [ "$parent" != "$onto_head" ]; then
+    moved="onto-moved branch=${branch} onto=${onto} judged=${onto_head} merged_onto=${parent:-<none>}"
+    fix="land again to judge the head ${onto} holds now"
+  elif [ "$tip" != "$head" ]; then
+    moved="branch-moved branch=${branch} judged=${head} branch_head=${tip:-<none>}"
+    fix="re-run the tree's suites at its head, land again"
+  fi
+  if [ -n "$moved" ]; then
+    if _wt_undo_merge "$co" "$merge_sha" "$parent" "$head"; then
+      _wt_refuse "${moved} — the merge is undone and the tree kept; ${fix}"; return 2
+    fi
+    _wt_refuse "${moved} merge=${merge_sha} undo=failed — the merge stands: reset ${onto} to ${parent:-its first parent} in ${co} by hand, then ${fix}"; return 2
+  fi
 
   # No --force here either. If git refuses now, the merge has landed and the
   # tree has not gone; the line says both so the operator is not left guessing
