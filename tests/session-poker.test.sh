@@ -8121,4 +8121,114 @@ expect_contains "45k5 …so a Patrol armed under v=2 is told to re-arm" \
   "its prompt is v=2 and this poker prints v=${S45_V}" "$OUT"
 unset CLAUDE_CONFIG_DIR
 
+
+# ============================================================
+section "Section 46 §PROOF-ADD: a proof names the head it read (wave-26 T4; REQ-3 AC-3.2; D5)"
+# ============================================================
+#
+# `proof-add <floor|review|task> <evidence>` writes one line inside `## SDLC State`:
+# `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>`. The head
+# is never an operand: it is `git rev-parse HEAD` of the checkout holding the plan's
+# `working-branch:`, which here is a linked worktree one commit ahead of the main checkout,
+# so a head read from the cwd would be the wrong one. The write is §42's transaction: a
+# copy, a dry commit through the real gate, a checksum, a swap; every refusal leaves the
+# plan byte-identical. `proof_last <plan> <kind>` (payload/scripts/lib/proof.sh) reads the
+# newest line of a kind back.
+S46_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
+s46_last() {  # <plan> <kind> -> proof_last's answer, from the library itself
+  bash -c '. "$1" && proof_last "$2" "$3"' _ "$S46_LIB" "$1" "$2" 2>/dev/null
+}
+s46_proved() { /usr/bin/grep -E '^proved: ' "$1"; }  # <plan> -> its proof lines
+
+R46="$(make_repo s46-proof)"; ( cd "$R46" && git commit -q --allow-empty -m init )
+P46="$(s42_plan "$R46" 4)"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P46" > "$P46.tmp" && mv "$P46.tmp" "$P46"
+( cd "$R46" && git add -f "$P46" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$R46/.worktrees/01-fixture" \
+  && git -C "$R46/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
+W46_HEAD="$(git -C "$R46/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+mkdir -p "$R46/.bionic/docs/record/wave-01-fixture" "$R46/.bionic/docs/plans/elsewhere"
+printf 'floor log\n' > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
+printf 'review notes\n' > "$R46/.bionic/docs/record/wave-01-fixture/review.md"
+printf 'not a record\n' > "$R46/.bionic/docs/plans/elsewhere/notes.md"
+expect_regex "46a0 precondition: the working branch's checkout has a 40-hex head" '^[0-9a-f]{40}$' "$W46_HEAD"
+expect_true "46a0b precondition: …which is not the main checkout's head" \
+  test "$W46_HEAD" != "$(git -C "$R46" rev-parse HEAD)"
+s34_gate "$R46"
+expect_eq "46a0c precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "46a0d precondition: the plan carries no proof line yet" "" "$(s46_proved "$P46")"
+expect_true "46a0e precondition: proof.sh is in the tree under test" test -r "$S46_LIB"
+
+# ---------- the write ----------
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+expect_eq "46a proof-add floor exits 0" "0" "$RC"
+expect_contains "46a2 …and says what it wrote" "proof-add — kind=floor head=$W46_HEAD" "$OUT"
+expect_eq "46a3 …git diff --numstat shows one line added" "1 0;" "$(s42_numstat "$R46")"
+expect_regex "46a4 …in the proof line's shape, with the working branch's head" \
+  "^proved: kind=floor head=${W46_HEAD} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/floor.txt$" \
+  "$(s46_proved "$P46")"
+expect_eq "46a5 …inside ## SDLC State" "SDLC" \
+  "$(awk '/^##[[:space:]]/ { s = $2 } /^proved: / { print s; exit }' "$P46")"
+expect_eq "46a6 proof_last reads the floor head back" "$W46_HEAD" "$(s46_last "$P46" floor)"
+expect_eq "46a7 …and a kind never proved reads nothing" "" "$(s46_last "$P46" review)"
+s34_gate "$R46"
+expect_eq "46a8 …and the next commit is admitted" "0" "$GATE_RC"
+
+# A later proof of the same kind is the one proof_last reads; an absolute path under record/
+# is written docs-root relative.
+git -C "$R46/.worktrees/01-fixture" commit -q --allow-empty -m "more wave work" >/dev/null 2>&1
+W46_HEAD2="$(git -C "$R46/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add review "$R46/.bionic/docs/record/wave-01-fixture/review.md"
+expect_eq "46b proof-add review by absolute path exits 0" "0" "$RC"
+expect_eq "46b2 …one line added" "1 0;" "$(s42_numstat "$R46")"
+expect_contains "46b3 …naming the evidence under record/" \
+  "proved: kind=review head=${W46_HEAD2} " "$(s46_proved "$P46")"
+expect_contains "46b4 …docs-root relative" "evidence=record/wave-01-fixture/review.md" "$(s46_proved "$P46" | tail -1)"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+expect_eq "46b5 a second floor proof exits 0" "0" "$RC"
+expect_eq "46b6 proof_last floor reads the newer head" "$W46_HEAD2" "$(s46_last "$P46" floor)"
+expect_eq "46b7 …and the review head is its own" "$W46_HEAD2" "$(s46_last "$P46" review)"
+expect_eq "46b8 …the proof lines sit together, newest last" "floor review floor" \
+  "$(s46_proved "$P46" | sed -E 's/^proved: kind=([a-z]+) .*/\1/' | tr '\n' ' ' | sed 's/ $//')"
+
+# ---------- the refusals: byte-identical, naming the fix ----------
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add bogus record/wave-01-fixture/floor.txt
+s42_unchanged "46c a kind outside floor|review|task" 1 "$P46"
+expect_contains "46c2 …naming the three kinds" "floor, review or task" "$OUT"
+poke "$R46" proof-add floor plans/elsewhere/notes.md
+s42_unchanged "46c3 an evidence path outside record/" 1 "$P46"
+expect_contains "46c4 …naming record/" "under record/" "$OUT"
+poke "$R46" proof-add floor record/../plans/elsewhere/notes.md
+s42_unchanged "46c5 a path that climbs out of record/" 1 "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/absent.txt
+s42_unchanged "46c6 a missing evidence file" 1 "$P46"
+expect_contains "46c7 …naming the file" "absent.txt" "$OUT"
+printf 'x\n' > "$R46/.bionic/docs/record/wave-01-fixture/two words.txt"
+poke "$R46" proof-add floor "record/wave-01-fixture/two words.txt"
+s42_unchanged "46c8 an evidence path with a space (the line is space-separated)" 1 "$P46"
+poke "$R46" proof-add floor
+s42_unchanged "46c9 one operand is the usage error" 2 "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor.txt "$W46_HEAD"
+s42_unchanged "46c10 …and so is a head given as an operand" 2 "$P46"
+
+# The head comes from the working branch's checkout or not at all.
+sed 's#^working-branch: wave/01-fixture$#working-branch: wave/99-gone#' "$P46" > "$P46.tmp" && mv "$P46.tmp" "$P46"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+s42_unchanged "46d a working-branch: no checkout holds" 1 "$P46"
+expect_contains "46d2 …naming the branch" "wave/99-gone" "$OUT"
+sed '/^working-branch: /d' "$P46" > "$P46.tmp" && mv "$P46.tmp" "$P46"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
+s42_unchanged "46d3 a plan naming no working-branch:" 1 "$P46"
+expect_contains "46d4 …naming the key to add" "working-branch:" "$OUT"
+expect_eq "46e no projection copy is left beside the plan" "" \
+  "$(find "$R46/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
+POKE_BOUND="$S46_BOUND_WAS"
+
 finish
