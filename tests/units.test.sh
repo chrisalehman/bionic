@@ -2141,4 +2141,184 @@ tr '\n' '\r' < "$SANDBOX/ledger-task.md" > "$SANDBOX/ledger-task-cr.md"
 expect_eq "17d.16 a CR-only plan reads the same" \
   "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task-cr.md" "")"
 
+# ============================================================
+section "CHAIN — wave-26 T3: units_chain, the longest chain and the widest the plan can run (REQ-7, AC-7.1 lib half; D12)"
+# ============================================================
+# Pure over stdin: `N<TAB><id><TAB><minutes>` and `E<TAB><from><TAB><to>` lines in, the longest
+# chain and the width out. It reads no plan, so every fixture here is the lines themselves.
+# The fixtures are written with single spaces and turned to tabs by `tr`, which knows no
+# column and so cannot agree with the reader by accident.
+chain_tabs() { tr ' ' '\t'; }
+# chain_run <ceiling> <file> — sets CHAIN_OUT and CALL_RC in THIS shell (a `$(call …)` would
+# lose the status to its subshell and leave the last row'"'"'s behind).
+chain_run() { call units_chain "$1" < "$2" > "$SANDBOX/.chain-out"; CHAIN_OUT="$(cat "$SANDBOX/.chain-out")"; }
+
+# The wave-25 plan's `## Tasks` table (ids, `size`, `deps`), written out literally from
+# .bionic/docs/plans/epic-23-bionic-tech-debt/wave-25-never-paused.plan.md at bc1516fc.
+# That table carries fifteen rows; T15 (deps T1, T5; T8 waits for it) is the row that makes
+# the chain 670 minutes through T15, where the same table without T15 gives 610 through T5, T8.
+chain_tabs > "$SANDBOX/chain-w25.in" <<'CHAIN_W25_EOF'
+N T1 60
+N T2 90
+N T3 120
+N T4 150
+N T5 75
+N T6 75
+N T7 40
+N T8 120
+N T9 60
+N T10 45
+N T11 40
+N T12 120
+N T13 30
+N T14 30
+N T15 60
+E T1 T4
+E T2 T4
+E T3 T4
+E T11 T4
+E T4 T5
+E T1 T6
+E T4 T7
+E T1 T8
+E T2 T8
+E T3 T8
+E T4 T8
+E T5 T8
+E T6 T8
+E T7 T8
+E T12 T8
+E T13 T8
+E T14 T8
+E T15 T8
+E T8 T9
+E T8 T10
+E T9 T10
+E T3 T11
+E T4 T13
+E T12 T13
+E T4 T14
+E T1 T15
+E T5 T15
+CHAIN_W25_EOF
+nodes_in="$(grep -c '^N' "$SANDBOX/chain-w25.in")"
+expect_eq "CHAIN.0 the fixture carries the table's fifteen rows" "15" "$nodes_in"
+
+chain_run 8 "$SANDBOX/chain-w25.in"; out="$CHAIN_OUT"
+expect_eq "CHAIN.1 the wave-25 table: the longest chain runs through T15, 670 minutes, and the widest it can run is four" \
+  "$(printf 'chain\tT3,T11,T4,T5,T15,T8,T9,T10\t670\nwidth\t4')" "$out"
+expect_eq "CHAIN.1b …and the call succeeds" "0" "$CALL_RC"
+
+# The plan's stated chain: the table before T15 joined it. Dropping T15's node and edges is
+# a name-blind filter on the fixture above, so both sides share one specimen.
+grep -v 'T15' "$SANDBOX/chain-w25.in" > "$SANDBOX/chain-w25-no15.in"
+expect_eq "CHAIN.2 without T15 the chain is the 610-minute one: T3,T11,T4,T5,T8,T9,T10" \
+  "chain	T3,T11,T4,T5,T8,T9,T10	610" "$(call units_chain 8 < "$SANDBOX/chain-w25-no15.in" | head -n 1)"
+
+# WIDTH NEVER EXCEEDS THE CEILING: four nodes are ready at the start, so every ceiling below
+# four is reached, and a ceiling above four is not.
+for ceil in 1 2 3 4 5 8; do
+  want="$ceil"; [ "$ceil" -gt 4 ] && want=4
+  got="$(call units_chain "$ceil" < "$SANDBOX/chain-w25.in" | awk -F'\t' '$1 == "width" { print $2 }')"
+  expect_eq "CHAIN.3 ceiling $ceil: width is $want" "$want" "$got"
+done
+expect_eq "CHAIN.3b the chain does not depend on the ceiling" \
+  "chain	T3,T11,T4,T5,T15,T8,T9,T10	670" "$(call units_chain 1 < "$SANDBOX/chain-w25.in" | head -n 1)"
+
+# A DIAMOND: A then B and C side by side, then D.
+chain_tabs > "$SANDBOX/chain-diamond.in" <<'CHAIN_D_EOF'
+N A 10
+N B 20
+N C 30
+N D 5
+E A B
+E A C
+E B D
+E C D
+CHAIN_D_EOF
+expect_eq "CHAIN.4 a diamond: the chain takes the longer side, the width is the two sides" \
+  "$(printf 'chain\tA,C,D\t45\nwidth\t2')" "$(call units_chain 4 < "$SANDBOX/chain-diamond.in")"
+expect_eq "CHAIN.4b a ceiling of one runs the sides one after the other" \
+  "width	1" "$(call units_chain 1 < "$SANDBOX/chain-diamond.in" | tail -n 1)"
+
+# A TIE goes to the chain whose ids come first in input order.
+chain_tabs > "$SANDBOX/chain-tie.in" <<'CHAIN_T_EOF'
+N A 10
+N C 30
+N B 30
+N D 5
+E A B
+E A C
+E B D
+E C D
+CHAIN_T_EOF
+expect_eq "CHAIN.5 two chains of equal minutes: the one through C, which comes first in the input, wins" \
+  "chain	A,C,D	45" "$(call units_chain 4 < "$SANDBOX/chain-tie.in" | head -n 1)"
+
+# NODES WITH NO EDGES: three of them, the chain is the largest alone, the first on a tie.
+chain_tabs > "$SANDBOX/chain-free.in" <<'CHAIN_F_EOF'
+N X 15
+N Y 15
+N Z 5
+CHAIN_F_EOF
+expect_eq "CHAIN.6 three free nodes, ceiling 5: the first of the equal largest is the chain, all three run at once" \
+  "$(printf 'chain\tX\t15\nwidth\t3')" "$(call units_chain 5 < "$SANDBOX/chain-free.in")"
+expect_eq "CHAIN.6b …and ceiling 2 holds the width to two" \
+  "width	2" "$(call units_chain 2 < "$SANDBOX/chain-free.in" | tail -n 1)"
+
+# REFUSALS: one line on stderr naming the cause, rc 2, nothing on stdout. Each refusal sits
+# beside the same fixture made valid, which answers, so the empty readback is read off a
+# call that runs.
+chain_tabs > "$SANDBOX/chain-ok.in" <<'CHAIN_OK_EOF'
+N A 10
+N B 20
+E A B
+CHAIN_OK_EOF
+expect_eq "CHAIN.7 control: the acyclic pair answers" \
+  "$(printf 'chain\tA,B\t30\nwidth\t1')" "$(call units_chain 4 < "$SANDBOX/chain-ok.in")"
+
+chain_tabs > "$SANDBOX/chain-cycle.in" <<'CHAIN_C_EOF'
+N A 10
+N B 20
+E A B
+E B A
+CHAIN_C_EOF
+chain_run 4 "$SANDBOX/chain-cycle.in"; out="$CHAIN_OUT"
+expect_eq "CHAIN.8 a cycle is refused with status 2" "2" "$CALL_RC"
+expect_empty "CHAIN.8b …printing nothing on stdout" "$out"
+expect_eq "CHAIN.8c …and one line on stderr" "1" "$(nlines "$(cat "$SANDBOX/.err")")"
+expect_regex "CHAIN.8d …that says cycle and names its members" 'cycle.*A.*B' "$(cat "$SANDBOX/.err")"
+
+chain_tabs > "$SANDBOX/chain-self.in" <<'CHAIN_S_EOF'
+N A 10
+E A A
+CHAIN_S_EOF
+chain_run 4 "$SANDBOX/chain-self.in"
+expect_eq "CHAIN.8e an edge from a node to itself is a cycle: status 2" "2" "$CALL_RC"
+
+chain_tabs > "$SANDBOX/chain-unknown.in" <<'CHAIN_U_EOF'
+N A 10
+N B 20
+E A B
+E B Q9
+CHAIN_U_EOF
+chain_run 4 "$SANDBOX/chain-unknown.in"; out="$CHAIN_OUT"
+expect_eq "CHAIN.9 an edge naming an unknown id is refused with status 2" "2" "$CALL_RC"
+expect_empty "CHAIN.9b …printing nothing on stdout" "$out"
+expect_eq "CHAIN.9c …and one line on stderr" "1" "$(nlines "$(cat "$SANDBOX/.err")")"
+expect_contains "CHAIN.9d …that names the id" "Q9" "$(cat "$SANDBOX/.err")"
+
+for bad in abc 1.5 -3 ""; do
+  chain_tabs > "$SANDBOX/chain-bad.in" <<CHAIN_B_EOF
+N A 10
+N B $bad
+E A B
+CHAIN_B_EOF
+  chain_run 4 "$SANDBOX/chain-bad.in"; out="$CHAIN_OUT"
+  expect_eq "CHAIN.10 minutes '$bad' is refused with status 2" "2" "$CALL_RC"
+  expect_empty "CHAIN.10b …printing nothing on stdout for '$bad'" "$out"
+  expect_eq "CHAIN.10c …and one line on stderr for '$bad'" "1" "$(nlines "$(cat "$SANDBOX/.err")")"
+  expect_contains "CHAIN.10d …that names the node B for '$bad'" "B" "$(cat "$SANDBOX/.err")"
+done
+
 finish
