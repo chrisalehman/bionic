@@ -279,7 +279,11 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 # included (wave-26 D19). The link is dropped only just before `git worktree
 # remove`, the one act that needs it gone, and put back if git refuses that.
 # Two refusals can only be known after the merge, `onto-moved` and `branch-moved`
-# (review 7 F8, F9); each undoes the merge first, so it leaves the same state.
+# (review 7 F8, F9); each undoes the merge first, so it leaves the same state. The
+# exception is a refusal that says `undo=failed` (review 11 S1): the undo declined, because
+# a commit sits on the merge or a change in the checkout touches a file the merge brought,
+# so the merge stands on <onto>, the tree is kept, and the line prints the one fix that
+# removes nothing but the merge.
 #
 # THE LANDING RULE (wave-26 D7, as ruled in A-orch-26). A tree lands on its own
 # green run. It must first contain what landed since it branched only where that
@@ -465,21 +469,110 @@ _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
   _wt_refuse "not-current branch=${1} onto=${2} onto_head=${3:-<none>} ${4} — merge ${2} into the tree, re-run its suites, land again"
 }
 
-# THE UNDO OF A MERGE A LAND MUST NOT KEEP (review 7 F8, F9). Only the land's own merge is
-# undone: the checkout must still sit on <merge sha>, that commit's second parent must be the
-# head the land merged (so a commit someone made on top of it is never reset away), and
-# `reset --keep` refuses rather than overwrite a file changed since. Returns 1, the merge left
-# standing, when any of them fails.
-_wt_undo_merge() {  # <checkout> <merge sha> <first parent> <head merged>
-  [ -n "${3:-}" ] && [ -n "${4:-}" ] || return 1
-  [ "$(git -C "$1" rev-parse --verify --quiet HEAD 2>/dev/null)" = "$2" ] || return 1
-  [ "$(git -C "$1" rev-parse --verify --quiet "${2}^2" 2>/dev/null)" = "$4" ] || return 1
-  git -C "$1" reset --quiet --keep "$3" >/dev/null 2>&1
+# THE UNDO OF A MERGE A LAND MUST NOT KEEP (review 7 F8, F9; review 11 B1). Only the land's own
+# merge is undone (its second parent is the head the land merged), and <onto> moves back by
+# compare-and-swap: `update-ref <ref> <first parent> <merge>` moves it only if it still holds the
+# merge, in one locked step, so a commit made on top of the merge at any instant stays on the
+# branch and the undo declines. The checkout then follows with a two-tree `read-tree -m -u`, which
+# keeps every uncommitted change, a staged one staged, and refuses rather than overwrite a file
+# the merge touched and someone changed since; on that refusal the swap is reversed, again only
+# if nothing moved the branch meanwhile. Returns 1, the merge left standing, when any step declines.
+# A COMMIT MADE DURING THE UNDO (review 15 F1). Between the swap and the checkout's `read-tree`
+# the checkout still holds the merge's tree while its branch sits on the first parent, so a
+# commit made there carries the task's changes onto <onto>, unjudged. The branch is read once
+# more on the way out, after the checkout followed and after a reverse swap that failed; a head
+# that is not where the undo left it is printed, with 3 (the checkout followed, so its index has
+# the task's changes taken out again) or 4 (it did not). A commit made after the checkout
+# followed, which changes no file the merge changed, carries nothing of the task: the undo stands.
+_wt_undo_merge() {  # <checkout> <onto> <merge sha> <first parent> <head merged> -> [arrived sha]
+  local ref="refs/heads/${2:-}" at
+  [ -n "${2:-}" ] && [ -n "${3:-}" ] && [ -n "${4:-}" ] && [ -n "${5:-}" ] || return 1
+  [ "$(git -C "$1" rev-parse --verify --quiet "${3}^2" 2>/dev/null)" = "$5" ] || return 1
+  [ "$(git -C "$1" symbolic-ref --quiet HEAD 2>/dev/null)" = "$ref" ] || return 1
+  git -C "$1" update-ref -m "land: undo ${3}" "$ref" "$4" "$3" >/dev/null 2>&1 || return 1
+  git -C "$1" update-index -q --refresh >/dev/null 2>&1
+  if git -C "$1" read-tree -m -u "$3" "$4" >/dev/null 2>&1; then
+    at="$(git -C "$1" rev-parse --verify --quiet "$ref" 2>/dev/null)"
+    [ "$at" = "$4" ] && return 0
+    [ -n "$at" ] && ! _wt_shares_a_file "$1" "$4" "$3" "$at" && return 0
+    printf '%s' "${at:-<none>}"; return 3
+  fi
+  git -C "$1" update-ref -m "land: undo refused, ${3} restored" "$ref" "$3" "$4" >/dev/null 2>&1 && return 1
+  at="$(git -C "$1" rev-parse --verify --quiet "$ref" 2>/dev/null)"
+  case "$at" in "$3"|"$4") return 1 ;; esac
+  printf '%s' "${at:-<none>}"; return 4
+}
+
+# Whether <b> and <c> each change, against <base>, a file in common. Unreadable reads as yes.
+_wt_shares_a_file() {  # <checkout> <base> <b> <c>
+  local nl='
+' one two f
+  one="$(git -C "$1" diff --no-renames --name-only "$2" "$3" 2>/dev/null)" \
+    && two="$(git -C "$1" diff --no-renames --name-only "$2" "$4" 2>/dev/null)" || return 0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "${nl}${two}${nl}" in *"${nl}${f}${nl}"*) return 0 ;; esac
+  done <<EOF
+$one
+EOF
+  return 1
+}
+
+# THE LAND'S OWN MERGE (review 11 S1). HEAD after `git merge` is that merge unless another writer
+# committed on top in the instant between; so the merge is the newest first-parent commit of
+# <onto> since the judged head whose second parent is the head this land merged. Empty when
+# <onto> no longer holds one.
+_wt_own_merge() {  # <checkout> <onto> <judged onto head> <head merged> -> sha
+  local c p1 p2 more
+  while read -r c p1 p2 more; do
+    [ "$p2" = "$4" ] && [ -z "$more" ] && { printf '%s' "$c"; return 0; }
+  done <<EOF
+$(git -C "$1" rev-list --first-parent --parents "${3}..refs/heads/${2}" 2>/dev/null)
+EOF
+  return 1
+}
+
+# WHAT TO DO WHEN THE UNDO DECLINED (review 11 S1): a reset only while <onto> still sits on the
+# land's merge, since then it removes that merge and nothing else; under a later commit, the revert
+# that takes the merge's changes out and keeps that commit; never a reset past another writer's work.
+# THE RESET ONLY WHERE IT MOVES <onto> (review 15 F2): typed in a checkout that is detached or on
+# another branch, a reset moves that instead, so there the advice moves <onto> itself, by the same
+# compare-and-swap the undo uses, and names the checkout's state.
+_wt_undo_failed_fix() {  # <checkout> <onto> <merge sha or empty> <first parent>
+  local at on
+  at="$(git -C "$1" rev-parse --verify --quiet "refs/heads/${2}" 2>/dev/null)"
+  if [ -n "$3" ] && [ "$at" = "$3" ]; then
+    on="$(git -C "$1" symbolic-ref --quiet HEAD 2>/dev/null)"
+    if [ "$on" = "refs/heads/${2}" ]; then
+      printf 'the merge stands: reset %s to %s in %s by hand' "$2" "${4:-its first parent}" "$1"
+    else
+      if [ -n "$on" ]; then on="on ${on#refs/heads/}"; else on="detached"; fi
+      printf 'the merge stands and %s is %s, not on %s, so move the branch itself: git -C %s update-ref refs/heads/%s %s %s' \
+        "$1" "$on" "$2" "$1" "$2" "${4:-<first parent>}" "$3"
+    fi
+  elif [ -n "$3" ] && git -C "$1" merge-base --is-ancestor "$3" "refs/heads/${2}" 2>/dev/null; then
+    printf 'the merge stands under a later commit: git -C %s revert -m 1 %s' "$1" "$3"
+  else
+    printf 'the merge is not on %s any more: nothing to undo' "$2"
+  fi
+}
+
+# WHAT TO SAY WHEN A COMMIT ARRIVED DURING THE UNDO (review 15 F1): the commit, that it may carry
+# the task's changes unjudged, and the way to take them out: the checkout's own staged change when
+# it followed the branch back, the reverse of the merge's changes otherwise.
+_wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrived sha> <3|4>
+  printf 'commit %s arrived on %s during the undo, made while %s held merge %s, so it may carry the task'"'"'s changes, unjudged; ' \
+    "$5" "$2" "$1" "$3"
+  if [ "$6" = 3 ]; then
+    printf '%s has them taken out, staged: review git -C %s diff --cached and commit it, or re-judge %s at %s' "$1" "$1" "$2" "$5"
+  else
+    printf 'take them out (git -C %s diff %s %s is that change) or re-judge %s at %s' "$1" "$3" "$4" "$2" "$5"
+  fi
 }
 
 worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
-  local dirt onto_head head why link_to overlap now parent tip moved fix
+  local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -579,7 +672,21 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     git -C "$co" merge --abort >/dev/null 2>&1
     _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co}"; return 2
   fi
-  merge_sha="$(git -C "$co" rev-parse HEAD 2>/dev/null)"
+  merge_sha="$(_wt_own_merge "$co" "$onto" "$onto_head" "$head")"
+
+  # THE MERGE WENT WHERE THE CHECKOUT WAS (review 15 F3). `git merge` merges onto the checkout's
+  # HEAD, so a checkout switched to another branch after the clean check takes the merge there.
+  # When <onto> holds no merge of this land, the checkout's branch is searched the same way, and a
+  # merge found there is undone there.
+  undo_on="$onto"
+  if [ -z "$merge_sha" ]; then
+    undo_on="$(git -C "$co" symbolic-ref --quiet HEAD 2>/dev/null)"
+    undo_on="${undo_on#refs/heads/}"
+    if [ -n "$undo_on" ] && [ "$undo_on" != "$onto" ]; then
+      merge_sha="$(_wt_own_merge "$co" "$undo_on" "$onto_head" "$head")"
+    fi
+    [ -n "$merge_sha" ] || undo_on="$onto"
+  fi
 
   # THE MERGE IS CHECKED AGAINST WHAT WAS JUDGED (review 7 F8, F9). `git merge` reads the
   # head of <onto> for itself, after the read above, and merges onto whatever it finds: a land
@@ -588,10 +695,13 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   # must still hold the head that was merged: a commit its writer added since would be left
   # unlanded on a branch whose tree is about to go. Either way this land's merge is undone,
   # which moves <onto> back to the head another writer gave it, and the tree is kept.
-  parent="$(git -C "$co" rev-parse --verify --quiet "${merge_sha}^1" 2>/dev/null)"
+  parent=""; [ -n "$merge_sha" ] && parent="$(git -C "$co" rev-parse --verify --quiet "${merge_sha}^1" 2>/dev/null)"
   tip="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${branch}" 2>/dev/null)"
   moved=""
-  if [ "$parent" != "$onto_head" ]; then
+  if [ "$undo_on" != "$onto" ]; then
+    moved="onto-switched branch=${branch} onto=${onto} checkout=${co} merged_into=${undo_on}"
+    fix="check out ${onto} in ${co}, land again"
+  elif [ "$parent" != "$onto_head" ]; then
     moved="onto-moved branch=${branch} onto=${onto} judged=${onto_head} merged_onto=${parent:-<none>}"
     fix="land again to judge the head ${onto} holds now"
   elif [ "$tip" != "$head" ]; then
@@ -599,10 +709,17 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     fix="re-run the tree's suites at its head, land again"
   fi
   if [ -n "$moved" ]; then
-    if _wt_undo_merge "$co" "$merge_sha" "$parent" "$head"; then
-      _wt_refuse "${moved} — the merge is undone and the tree kept; ${fix}"; return 2
-    fi
-    _wt_refuse "${moved} merge=${merge_sha} undo=failed — the merge stands: reset ${onto} to ${parent:-its first parent} in ${co} by hand, then ${fix}"; return 2
+    arrived="$(_wt_undo_merge "$co" "$undo_on" "$merge_sha" "$parent" "$head")"; rc=$?
+    case $rc in
+      0)
+        if [ "$undo_on" != "$onto" ]; then
+          _wt_refuse "${moved} merge=${merge_sha} — the merge is undone on ${undo_on} and the tree kept; ${fix}"; return 2
+        fi
+        _wt_refuse "${moved} — the merge is undone and the tree kept; ${fix}"; return 2 ;;
+      3|4)
+        _wt_refuse "${moved} merge=${merge_sha} undo=failed arrived=${arrived} — $(_wt_undo_arrival_fix "$co" "$undo_on" "$merge_sha" "$parent" "$arrived" "$rc"), then ${fix}"; return 2 ;;
+    esac
+    _wt_refuse "${moved} merge=${merge_sha:-<none>} undo=failed — $(_wt_undo_failed_fix "$co" "$undo_on" "$merge_sha" "$parent"), then ${fix}"; return 2
   fi
 
   # No --force here either. If git refuses now, the merge has landed and the

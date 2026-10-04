@@ -2818,6 +2818,8 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 # unengaged session (decides nothing, 0), and a session with no BOUND open plan (1) — a
 # writing verb never writes the newest-plan fallback.
 
+# A plan another writer replaced while the copy was judged exits 1, or PV_RACE_RC when the caller
+# set it: launch-sync sets 75, the one refusal the next caller repairs by running again (T51).
 # plan_verb_open <verb> -> sets PV_REPO, PV_PLAN, PV_CUR, PV_SUM, PV_NEW, PV_DRY, PV_MARK, PV_SID
 # and arms the cleanup; exits on every refusal above.
 plan_verb_open() {
@@ -2899,7 +2901,7 @@ plan_verb_swap() {
   fi
   if [ "$(cksum < "$PV_PLAN" 2>/dev/null)" != "$PV_SUM" ]; then
     die "REFUSED — $PV_PLAN changed while the plan with $what was being judged; nothing was written. Run $verb again."
-    exit 1
+    exit "${PV_RACE_RC:-1}"
   fi
   if ! mv -f "$PV_NEW" "$PV_PLAN"; then
     die "REFUSED — could not move the judged copy over $PV_PLAN; the plan is unchanged."
@@ -2979,18 +2981,35 @@ launch_sync_unlock() {
   return 0
 }
 
-launch_sync_lock() {  # <lock dir> <wait: yes|no> -> 0 held, 1 another live writer holds it
-  local d="$1" wait="$2" pid start="$SECONDS"
+# EVERY PASS IS BOUNDED, AND A LOCK THAT CANNOT BE MADE IS SAID AT ONCE (wave-26 T51; review 13
+# F1). Through T32 a takeover went straight back to the top of the loop, past the wait bound, and
+# when mkdir failed because the lock's directory was missing or could not be written there was
+# never a lock to take over: the loop ran for ever, and the tick's and the turn-end wall's calls
+# with it. The bound is now the first thing each pass asks (the waiting call's seconds, or three
+# passes for a call that does not wait), a takeover that removed nothing waits like a held lock,
+# and a failed mkdir under a directory that is not there or not writable returns 2 at once.
+launch_sync_lock() {  # <lock dir> <wait: yes|no> -> 0 held, 1 another writer holds it, 2 no lock can be made here
+  local d="$1" wait="$2" pid start="$SECONDS" pass=0
   while :; do
+    if [ "$wait" = yes ]; then
+      [ $((SECONDS - start)) -lt "$LAUNCH_SYNC_WAIT" ] || return 1
+    else
+      [ "$pass" -lt 3 ] || return 1
+    fi
+    pass=$((pass + 1))
     if mkdir "$d" 2>/dev/null; then
       printf '%s' "$$" > "$d/pid" 2>/dev/null
       LAUNCH_SYNC_LOCK="$d"
       return 0
     fi
+    [ -d "${d%/*}" ] && [ -w "${d%/*}" ] || return 2
     pid="$(cat "$d/pid" 2>/dev/null)"
-    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then rm -rf "$d" 2>/dev/null; continue; fi
-    if [ $(( $(now_epoch) - $(file_mtime "$d") )) -gt "$LAUNCH_SYNC_STALE" ]; then rm -rf "$d" 2>/dev/null; continue; fi
-    [ "$wait" = yes ] && [ $((SECONDS - start)) -lt "$LAUNCH_SYNC_WAIT" ] || return 1
+    if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } \
+      || [ $(( $(now_epoch) - $(file_mtime "$d") )) -gt "$LAUNCH_SYNC_STALE" ]; then
+      rm -rf "$d" 2>/dev/null
+      [ -e "$d" ] || continue
+    fi
+    [ "$wait" = yes ] || return 1
     sleep 0.2
   done
 }
@@ -3059,7 +3078,9 @@ launch_sync_ledger() {  # <plan>
 
 # The open launches, `name launched_at duration deliverable subagent_type` joined by the unit
 # separator (\037: a field may be empty, and `read` folds runs of a whitespace separator), each by
-# its latest confirmed or identified row, in the roster order of that row.
+# its latest confirmed or identified row, in the roster order of that row. The launch minute is the
+# name's FIRST (wave-26 T51; review 13 F4): `extend` appends a row launched now for a reviewer it
+# re-opens, and that is the same launch, which a proof of its row may already have read.
 launch_sync_launches() {  # <roster> <sid> <open names, one per line>
   LS_OPEN="$3" LS_SID="$2" awk -F'|' '
     BEGIN { n = split(ENVIRON["LS_OPEN"], o, "\n"); for (i = 1; i <= n; i++) if (o[i] != "") open[o[i]] = 1
@@ -3075,9 +3096,10 @@ launch_sync_launches() {  # <roster> <sid> <open names, one per line>
       nm = kv["name"]; if (nm == "" || !(nm in open)) next
       if (kv["session"] != "" && kv["session"] != sid) next
       at[nm] = NR
-      rec[nm] = nm "\037" kv["launched_at"] "\037" kv["duration"] "\037" kv["deliverable"] "\037" kv["subagent_type"]
+      if (kv["launched_at"] != "" && (!(nm in la) || kv["launched_at"] < la[nm])) la[nm] = kv["launched_at"]
+      rec[nm] = kv["duration"] "\037" kv["deliverable"] "\037" kv["subagent_type"]
     }
-    END { for (k in at) print at[k] "\t" rec[k] }' "$1" 2>/dev/null | sort -n | cut -f2-
+    END { for (k in at) print at[k] "\t" k "\037" la[k] "\037" rec[k] }' "$1" 2>/dev/null | sort -n | cut -f2-
 }
 
 # The command a person runs for one of the plan-row verbs, quoted where it must be.
@@ -3103,6 +3125,44 @@ launch_sync_sweep() {  # <plan> <root>
   return 0
 }
 
+# IS THIS LAUNCH A PASS ITS ROW'S OWN PROOF ALREADY READ (wave-26 T51; review 13 F2, F4). A review
+# row returns to `pending` on its proof while its reviewer may still be open, and a launch older
+# than that proof is the pass the proof read: it is not applied again (T32, A-T32.17). Since T46 a
+# proof returns only the row whose Files hold its evidence (`units_live_rows`, both spellings, as
+# proof-add hands them), so a launch is judged against the proofs of ITS row alone: the proof of
+# another review, the final one among them, says nothing about it, and a live launch the sync had
+# not yet applied when such a proof landed is applied. Newest proof first; the first one not newer
+# than the launch ends the search. The proofs are read once per transaction, and only when a pending
+# row has a launch to judge.
+LS_PROOFS=""; LS_PROOFS_READ=no
+launch_sync_read() {  # <plan> <root> <row id> <launched_at> -> 0 when a review proof of that row is newer than the launch
+  local plan="$1" root="$2" id="$3" la="$4" at ev doc
+  [ -n "$la" ] || return 1
+  if [ "$LS_PROOFS_READ" = no ]; then
+    LS_PROOFS="$(awk '
+      /^[ \t]*```/ { f = !f; next }
+      f { next }
+      /^##[ \t]/ { insdlc = ($0 ~ /^##[ \t]+SDLC State/); next }
+      insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {
+        a = substr($0, RSTART + 4, RLENGTH - 4)
+        if (match($0, / evidence=[^ ]+/)) print a "\t" substr($0, RSTART + 10, RLENGTH - 10)
+      }' "$plan" 2>/dev/null | sort -r)"
+    LS_PROOFS_READ=yes
+  fi
+  [ -n "$LS_PROOFS" ] || return 1
+  doc="$(docs_root "$root" 2>/dev/null)"
+  case "$doc" in "$root"/*) doc="${doc#"$root"/}" ;; *) doc="" ;; esac
+  while IFS="$(printf '\t')" read -r at ev; do
+    [ -n "$at" ] && [ -n "$ev" ] || continue
+    [ "$la" \< "$at" ] || return 1
+    units_live_rows "$plan" "$ev" ${doc:+"$doc/$ev"} 2>/dev/null \
+      | awk -F'\t' -v id="$id" '$1 == id && $2 == "review" { f = 1 } END { exit !f }' && return 0
+  done <<EOF
+$LS_PROOFS
+EOF
+  return 1
+}
+
 # launch_sync_project <plan> <root> <sid> <roster> <ack ledger> <out>
 #   -> writes the projected plan to <out>; sets LS_SAID (lines for what it applies), LS_FAILS
 #   (lines for what it cannot) and LS_HANDS (every applied launch's commands, for a batch the
@@ -3110,10 +3170,10 @@ launch_sync_sweep() {  # <plan> <root>
 launch_sync_project() {
   local plan="$1" root="$2" sid="$3" roster="$4" acks="$5" out="$6"
   local open rec i j n=0 nl=0 hits h hasl=0 haswt=0 hasbs=0 s4 s4wt s4bs
-  local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand rvat rvids
+  local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand
   local us=$'\037'
   local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LROW FINAL LGID LGAG pairs lpairs
-  LS_SAID=""; LS_FAILS=""; LS_HANDS=""
+  LS_SAID=""; LS_FAILS=""; LS_HANDS=""; LS_PROOFS=""; LS_PROOFS_READ=no
   open="$(roster_open_names "$roster" "$acks" "$sid" 2>/dev/null)"
   [ -n "$open" ] || return 1
   while IFS="$us" read -r name la du dl ty; do
@@ -3156,10 +3216,6 @@ EOF
   done < "$out.ledger"
   rm -f "$out.ledger"
   s4="$(launch_sync_step4 "$plan")"; s4wt="${s4%%$'\t'*}"; s4bs="${s4#*$'\t'}"; [ -n "$s4" ] || s4bs=""
-  # THE LAST REVIEW PROOF AND THE ROWS IT RETURNS (wave-26 T14): `proof-add review` puts every
-  # `live:head` row back to pending, and a launch from before that proof is a pass already read.
-  rvat="$(awk '/^[ \t]*```/ { f = !f; next } !f && /^[ \t-]*proved:/ && match($0, /kind=review /) && match($0, / at=[^ ]+/) { a = substr($0, RSTART + 4, RLENGTH - 4); if (a > m) m = a } END { print m }' "$plan" 2>/dev/null)"
-  rvids=" $(units_live_rows "$plan" 2>/dev/null | cut -f1 | tr '\n' ' ')"
   cp "$plan" "$out" || return 1
   j=0
   while [ "$j" -lt "$nl" ]; do
@@ -3194,8 +3250,8 @@ EOF
         k=$((k + 1))
       done
     fi
-    if [ -z "$lid" ] && [ "$st" = pending ] && [ -n "$rvat" ] && [ -n "${LLA[j]}" ]; then
-      case "$rvids" in *" ${RID[i]} "*) [ "${LLA[j]}" \< "$rvat" ] && lid=read ;; esac
+    if [ -z "$lid" ] && [ "$st" = pending ] && launch_sync_read "$plan" "$root" "${RID[i]}" "${LLA[j]}"; then
+      lid=read
     fi
     if [ -n "$lid" ]; then j=$((j + 1)); continue; fi
     if [ "${FINAL[i]}" = "$j" ]; then
@@ -5504,8 +5560,21 @@ EOF
         PF_BACK="${PF_BACK:+$PF_BACK }$_pf_id"
       done
     fi
+    # A REVIEW PROOF THAT RETURNS NO LIVE ROW WHILE ONE IS ACTIVE SAYS SO (wave-26 T51; review 14
+    # S4). The record of a live pass written under another name than its row's Files returns
+    # nothing, rightly, and the pass is then never offered again; through T46 the success line
+    # said nothing of it. The active live review rows are named with their Files, so the mismatch
+    # is seen at once. None is reset: a proof moves only the row whose Files hold it (T46, review
+    # 10 F3), and the final review's proof is one such. With no live review active it says nothing.
+    PF_NONE=""
+    if [ "$PF_KIND" = review ] && [ -z "$PF_BACK" ]; then
+      _pf_live=" $(units_live_rows "$PV_NEW" 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { printf "%s ", $1 }')"
+      [ "$_pf_live" = " " ] || PF_NONE="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' -v ids="$_pf_live" '
+        index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
+    fi
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
+    [ -n "$PF_NONE" ] && say "proof-add — no live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
     exit 0
     ;;
 
@@ -5513,7 +5582,11 @@ EOF
   # THE LAUNCH SYNC (wave-26 T32; D4). Its reasoning is above the verbs, beside the functions it
   # runs. Silent, exit 0, wherever there is nothing it may write: no engagement, no bound open run,
   # a plan before Step 4 (`current:` not a step of 4 or more), no roster, or a lock another writer
-  # holds when the caller does not wait. Only a launch it cannot record prints and exits 1.
+  # holds when the caller does not wait. What it cannot write prints, and the exit says whether a
+  # retry repairs it (wave-26 T51; review 13 F6): 75 when another writer replaced the plan while
+  # this one judged its copy, which the next caller repairs by running again; 1 for every refusal
+  # no retry repairs (a launch the plan cannot take, the validator or the commit gate refusing the
+  # batch, a lock that cannot be made); 2 when the dry commit cannot run at all.
   launch-sync)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -5535,7 +5608,18 @@ EOF
     case "$LS_CUR" in ''|*[!0-9]*) exit 0 ;; esac
     [ "$LS_CUR" -ge 4 ] || exit 0
     tmp_dir_ok "$LS_ROOT/.bionic/tmp" || exit 0
-    launch_sync_lock "$LS_ROOT/.bionic/tmp/launch-sync.lock" "$LS_WAIT" || exit 0
+    # A LOCK THAT CANNOT BE MADE IS NOT A LOCK ANOTHER WRITER HOLDS (wave-26 T51; review 13 F1):
+    # held, the holder writes the launches and this call says nothing; not makeable, no caller
+    # can write them until the directory can be written, so it is said, exit 1, as a refusal.
+    LS_LOCK_RC=0
+    launch_sync_lock "$LS_ROOT/.bionic/tmp/launch-sync.lock" "$LS_WAIT" || LS_LOCK_RC=$?
+    case "$LS_LOCK_RC" in
+      0) : ;;
+      2)
+        die "REFUSED — the launch-sync lock $LS_ROOT/.bionic/tmp/launch-sync.lock cannot be made: its directory is missing or not writable. Nothing was written; no launch of this session is recorded in the plan until it can be."
+        exit 1 ;;
+      *) exit 0 ;;
+    esac
     trap 'launch_sync_unlock' EXIT
     plan_verb_open launch-sync
     # THE CHECKSUM AGAIN, NOW THE LOCK IS HELD: plan_verb_open took it before this run owned the
@@ -5569,6 +5653,7 @@ EOF
         printf '%s\n' "$LS_VIOL" >&2
         exit 1
       fi
+      [ "$LS_RC" = 0 ] && PV_RACE_RC=75   # a launch it could not record keeps exit 1
       plan_verb_swap launch-sync "$(printf '%s' "$LS_SAID" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $2 }') recorded" writer
       LS_SWAPPED=yes
       printf '%s' "$LS_SAID" | sed 's/^/poker: /'

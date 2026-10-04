@@ -157,7 +157,12 @@ land    ends the lease in one act: merges the tree's branch --no-ff into the
         landed since touches a file the tree changed), stale-proof (the
         last green run is not at the tree's clean head), and, after the
         merge and undoing it, onto-moved (the branch moved after the last
-        check) and branch-moved (the tree's branch gained a commit).
+        check), branch-moved (the tree's branch gained a commit) and
+        onto-switched (the checkout was on another branch when it merged;
+        the merge is undone there). An undo that could not finish says
+        undo=failed and the step to take by hand, which never moves another
+        branch; a commit made in the checkout during the undo is named as
+        arrived=<sha>, since it may carry the task's changes unjudged.
 USAGE
 }
 
