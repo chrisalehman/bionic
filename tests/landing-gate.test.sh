@@ -1321,6 +1321,8 @@ cp "$HOOKS_DIR/session-sweeper.sh" "$SUPDIR/hooks/session-sweeper.sh"
 # latest state, so the UNMET comparison rejects it too. The mutant is therefore the
 # over-broad implementation this arm could plausibly have been written as — supersede any
 # teammate row whose artifact is on disk — rather than a single-character typo.
+anchor -E "$GATE_SRC" '\(nm in mstate\)' 1
+anchor -E "$GATE_SRC" 'mstate\[nm\] !=' 1
 awk '{
        if (index($0, "(nm in mstate)") > 0 || index($0, "mstate[nm] !=") > 0) {
          print "        if (0) continue"
