@@ -1,0 +1,67 @@
+diff --git a/docs/record/T1.md b/docs/record/T1.md
+new file mode 100644
+index 0000000..e7d3a72
+--- /dev/null
++++ b/docs/record/T1.md
+@@ -0,0 +1,12 @@
++# T1 — the full-run decision
++
++reuse: reach_suites (lib/reach.sh) answers which suites a file reaches; fullrun_decision only
++reads its answer. Searched lib/ and bin/ for another full-run decision: none.
++
++AC-1.1 evidence, tier T2 (the real map file, real paths): `bash tests/fullrun.test.sh` → rc=0
++```
++ok - a bounded change names its suite
++ok - a bounded change refuses the full run
++ok - a file under a directory no suite names is unbounded
++ok - an unbounded change admits the full run
++```
+diff --git a/lib/fullrun.sh b/lib/fullrun.sh
+new file mode 100644
+index 0000000..b6ba39d
+--- /dev/null
++++ b/lib/fullrun.sh
+@@ -0,0 +1,16 @@
++#!/bin/bash
++# lib/fullrun.sh — whether a change gets a full run (spec D1).
++. "$(dirname "${BASH_SOURCE[0]}")/reach.sh"
++
++# fullrun_decision <file>... — the suites the change reaches, one per line, then `admit` when
++# one of them is `unbounded` and `refuse` otherwise.
++fullrun_decision() {
++  local suites
++  suites="$(reach_suites "$@")"
++  printf '%s\n' "$suites"
++  if printf '%s\n' "$suites" | grep -qx unbounded; then
++    echo admit
++  else
++    echo refuse
++  fi
++}
+diff --git a/tests/fullrun.test.sh b/tests/fullrun.test.sh
+new file mode 100644
+index 0000000..1cdf96c
+--- /dev/null
++++ b/tests/fullrun.test.sh
+@@ -0,0 +1,12 @@
++#!/bin/bash
++. "$(dirname "$0")/lib.sh"
++cd "$(dirname "$0")/.." || exit 1
++. lib/fullrun.sh
++
++out="$(fullrun_decision lib/reach.sh)"
++check "a bounded change names its suite" "tests/reach.test.sh" "$(sed -n 1p <<<"$out")"
++check "a bounded change refuses the full run" "refuse" "$(tail -n 1 <<<"$out")"
++out="$(fullrun_decision docs/new/notes.md)"
++check "a file under a directory no suite names is unbounded" "unbounded" "$(sed -n 1p <<<"$out")"
++check "an unbounded change admits the full run" "admit" "$(tail -n 1 <<<"$out")"
++done_testing
+diff --git a/tests/map.txt b/tests/map.txt
+index 9cf95e1..0f22c9a 100644
+--- a/tests/map.txt
++++ b/tests/map.txt
+@@ -1,3 +1,4 @@
+ lib/reach.sh tests/reach.test.sh
+ lib/ tests/reach.test.sh
+ bin/land.sh tests/land.test.sh
++lib/fullrun.sh tests/fullrun.test.sh
