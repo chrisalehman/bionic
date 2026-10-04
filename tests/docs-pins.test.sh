@@ -1063,9 +1063,10 @@ expect_true "53 precondition: the dispatch terms still tell the writer it does n
   has_pin "$SURVIVAL_SHIPPED" "$PIN_JOBS"
 expect_false "53: dispatch.md no longer tells a brief to point the writer at the rung" \
   has_pin "$DISPATCH_MD" "$PIN_JOBS_SKILL"
+anchor "$DISPATCH_MD" '**Fill the budget.**' 1
 DOCTORED_SKILL_JOBS="$TMP/skill-jobs-mutated.md"
-{ cat "$DISPATCH_MD"; printf '\nEach brief in the batch points the writer at the rung: `%s`.\n' "$PIN_JOBS_SKILL"; } \
-  > "$DOCTORED_SKILL_JOBS"
+sed 's/\*\*Fill the budget\.\*\*/**Fill the budget.** Each brief in the batch points the writer at the rung: `take your test width from pressure_level at suite start`./' \
+  "$DISPATCH_MD" > "$DOCTORED_SKILL_JOBS"
 expect_true "54: a dispatch.md that brings the sentence back is caught (pin discriminates)" \
   has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"
 
@@ -4420,8 +4421,30 @@ fi
 W26_SURV="${REPO}/payload/context/survival.md"
 expect_nonempty "W26-5 precondition: the dispatch terms state the timeout by the harness maximum" \
   "$(w26_hits 'BASH_MAX_TIMEOUT_MS' "$W26_SURV")"
-expect_nonempty "W26-5b precondition: …and the one capture recipe" \
-  "$(w26_hits '2>&1 | tee "$LOG"' "$W26_SURV")"
+# RE-POINTED (wave-26 T20, review-2 F1): the kept recipe writes the exit code into the log,
+# because `tee` alone leaves it only in the call's status and PIPESTATUS is empty under zsh.
+# The orchestrator gets no dispatch terms, so dispatch.md carries the same line.
+W26_RECIPE='2>&1 | tee "$LOG"; echo "rc=$?" >> "$LOG"'
+for _w26_f in "$W26_SURV" "$DISPATCH_MD"; do
+  expect_nonempty "W26-5b: the capture recipe in ${_w26_f#"$REPO"/} writes rc=\$? into the log" \
+    "$(w26_hits "$W26_RECIPE" "$_w26_f")"
+  expect_nonempty "W26-5p precondition: ${_w26_f#"$REPO"/} bans PIPESTATUS" \
+    "$(w26_hits 'never `PIPESTATUS`' "$_w26_f")"
+done
+# w26_pipestatus_outside_ban <file>… -> the files that name PIPESTATUS anywhere but the ban.
+w26_pipestatus_outside_ban() {
+  local f flat
+  for f in "$@"; do
+    flat="$(_flatten "$f")"; flat="${flat//never \`PIPESTATUS\`/}"
+    case "$flat" in *PIPESTATUS*) printf '%s\n' "${f#"$REPO"/}" ;; esac
+  done
+}
+# shellcheck disable=SC2086
+expect_eq "W26-5p: …and no doctrine names PIPESTATUS except in that ban" "" \
+  "$(w26_pipestatus_outside_ban $W26_DOCTRINE)"
+W26_D5P="$(w26_doctor "$W26_SURV" 'echo "rc=${PIPESTATUS[0]}" >> "$LOG"')"
+expect_nonempty "W26-5pm: a survival.md that teaches PIPESTATUS beside the ban is caught" \
+  "$(w26_pipestatus_outside_ban "$W26_D5P")"
 # shellcheck disable=SC2086
 expect_eq "W26-5: AC-1.5 — no role file states a suite timeout of its own" "" \
   "$(w26_hits '600000 ms' $W26_ROLES)"
@@ -4435,25 +4458,36 @@ expect_nonempty "W26-5m: a test-runner.md that keeps \"600000 ms\" beside the 30
 w26_count() { /usr/bin/grep -cE -- "$1" "$2" 2>/dev/null | tr -cd '0-9'; }
 W26_CLOSE='SendMessage'
 W26_FG='[Ff][Oo][Rr][Ee][Gg][Rr][Oo][Uu][Nn][Dd]'
-W26_CLOSE_BAD=""; W26_CLOSE_NONE=""; W26_FG_BAD=""; W26_FG_NONE=""
+# RE-SHAPED (wave-26 T20, review-2 F3): 5e/5g were exact-count pins on a word ("at most one
+# line says SendMessage"), red the moment any text adds the word and blind to a duplicate
+# phrased without it. They are now absences of the copies T1 cut, the shape of W26-5c.
+W26_CLOSE_NONE=""; W26_FG_NONE=""
 for _w26_r in $W26_ROLES; do
   _w26_c="$(w26_count "$W26_CLOSE" "$_w26_r")"; _w26_f="$(w26_count "$W26_FG" "$_w26_r")"
   [ "${_w26_c:-0}" -ge 1 ] || W26_CLOSE_NONE="$W26_CLOSE_NONE ${_w26_r##*/}"
-  [ "${_w26_c:-0}" -le 1 ] || W26_CLOSE_BAD="$W26_CLOSE_BAD ${_w26_r##*/}=${_w26_c}"
   [ "${_w26_f:-0}" -ge 1 ] || W26_FG_NONE="$W26_FG_NONE ${_w26_r##*/}"
-  [ "${_w26_f:-0}" -le 1 ] || W26_FG_BAD="$W26_FG_BAD ${_w26_r##*/}=${_w26_f}"
 done
 expect_eq "W26-5d precondition: every role file carries the closing-message duty (missing in:${W26_CLOSE_NONE:- none})" \
   "" "$W26_CLOSE_NONE"
-expect_eq "W26-5e: …and none carries it twice" "" "$W26_CLOSE_BAD"
+# shellcheck disable=SC2086
+expect_eq "W26-5e: …and no doctrine keeps the cut second copy of it" "" \
+  "$(w26_hits 'Completion-by-artifact: your closing SendMessage' $W26_DOCTRINE)"
 expect_eq "W26-5f precondition: every role file carries the foreground duty (missing in:${W26_FG_NONE:- none})" \
   "" "$W26_FG_NONE"
-expect_eq "W26-5g: …and none carries it twice" "" "$W26_FG_BAD"
+# shellcheck disable=SC2086
+expect_eq "W26-5g: …and no doctrine keeps either cut second copy of it" "" \
+  "$(w26_hits 'Suites run FOREGROUND' $W26_DOCTRINE; w26_hits 'Otherwise stay in the foreground' $W26_DOCTRINE)"
+W26_D5E="$(w26_doctor "${REPO}/agents/implementor.md" '- Completion-by-artifact: your closing SendMessage names the artifact path(s) this task produced.')"
+expect_nonempty "W26-5em: an implementor.md that keeps the second closing-message copy is caught" \
+  "$(w26_hits 'Completion-by-artifact: your closing SendMessage' "$W26_D5E")"
 W26_D5F="$(w26_doctor "${REPO}/agents/implementor.md" 'Suites run FOREGROUND with the Bash tool `timeout` parameter.')"
 expect_nonempty "W26-5gm precondition: the doctored implementor.md still carries its dispatch rules" \
   "$(w26_hits 'DISPATCH-RULES-BEGIN' "$W26_D5F")"
-expect_true "W26-5gm: an implementor.md carrying the foreground duty twice is caught" \
-  test "$(w26_count "$W26_FG" "$W26_D5F")" -gt 1
+expect_nonempty "W26-5gm: an implementor.md carrying the cut foreground copy is caught" \
+  "$(w26_hits 'Suites run FOREGROUND' "$W26_D5F")"
+W26_D5G="$(w26_doctor "$W26_SURV" 'Otherwise stay in the foreground and do not stop.')"
+expect_nonempty "W26-5gn: a survival.md carrying the cut fallback foreground copy is caught" \
+  "$(w26_hits 'Otherwise stay in the foreground' "$W26_D5G")"
 
 # W26-6 (AC-1.6, and AC-1.4's doctrine half): no doctrine orders a step the tool already
 # performs. Each absence sits beside a positive on the same file through the same extractor.
