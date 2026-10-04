@@ -35,6 +35,18 @@ Docs and chores stay out.
 bionic is open source for a general audience. No consumer-project names, tools or incidents
 appear in anything it ships.
 
+## Versioning
+
+Versioning follows semver from 1.9.0 on:
+- **MAJOR** for a change that breaks a documented contract a user or project already relies
+  on: a removed verb or field, a `canonical_sdlc_version` bump, an artifact a user must migrate.
+- **MINOR** for new capability or a behaviour a user notices, including a newly refused action
+  or an upgrade step.
+- **PATCH** for a fix within existing behaviour.
+
+`CHANGELOG.md` opens with the same lines; `tests/docs-pins.test.sh` §SEMVER fails when the two
+disagree.
+
 ## Path-scoped rules
 
 See `.claude/rules/` for guidance scoped by path — hook authoring, test-harness traps,

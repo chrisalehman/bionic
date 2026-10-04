@@ -24,7 +24,16 @@ claude plugin install bionic@bionic
 
 The first tells Claude Code where bionic lives; the second installs it. The suffix names
 the marketplace — the plugin and its marketplace are both called `bionic` — so the id is
-unambiguous even when another marketplace carries a plugin of the same name. Update with
+unambiguous even when another marketplace carries a plugin of the same name.
+
+**Turn on auto-update.** Claude Code leaves auto-update off for marketplaces it doesn't
+publish itself, so without this step bionic stays at the version you installed. In a
+session, run `/plugin`, open the **Marketplaces** tab, select **bionic**, and choose
+**Enable auto-update**. Claude Code then checks for a new version a few minutes into each
+session. The update applies at your next session, or right away if you run
+`/reload-plugins`. If the option isn't there, something in your environment has turned
+plugin updates off, such as `DISABLE_AUTOUPDATER` or
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. To update by hand instead, run
 `claude plugin update bionic@bionic`.
 
 <details>
@@ -234,6 +243,34 @@ Tools that only some work needs — the Playwright CLI and a headless Chromium, 
 DevTools server, the design skill, an animation package — are never asked about here. Each is
 offered once, with one question, the first time something actually reaches for it, and
 declining degrades that route rather than breaking the session.
+
+## Reinstalling for auto-update
+
+If you installed bionic before auto-update was an option, or never turned it on, do a clean
+reinstall once. After that, updates arrive on their own.
+
+1. **Remove the old install.** In a Claude Code session, run `/bionic:remove` and say yes
+   to each item. It also clears out anything the older installer left in `~/.claude`, and
+   its last step uninstalls the plugin. If Claude Code doesn't recognize `/bionic:remove`,
+   the plugin is already gone. Run this in a terminal instead. It asks the same questions:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/chrisalehman/bionic/main/payload/scripts/remove.sh -o /tmp/bionic-remove.sh
+   bash /tmp/bionic-remove.sh
+   ```
+
+2. **Restart Claude Code.** Quit every open session and start a new one.
+3. **Install again.** In a terminal:
+
+   ```bash
+   claude plugin marketplace add chrisalehman/bionic
+   claude plugin install bionic@bionic
+   ```
+
+4. **Turn on auto-update.** Run `/plugin`, open the **Marketplaces** tab, select
+   **bionic**, and choose **Enable auto-update**.
+5. **Set up and check.** Run `/bionic:setup`, then `/bionic:doctor`. The doctor's report
+   should show a single bionic install with no errors.
 
 ## Removing it
 
