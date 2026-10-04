@@ -396,10 +396,11 @@ units_rows() {
 #   - a path: every open row with a `Files` entry that covers it or that it covers — exact,
 #     directory prefix, glob or path suffix, the `in_files` rule of brief.sh, never string
 #     equality alone;
-#   - `head`: every open row with a `Files` path outside `.bionic/`, EXCEPT a row that itself
+#   - `head`: every open row with a `Files` path outside the record, EXCEPT a row that itself
 #     reads the settled `head`: such a row is downstream of the head, and counting it a writer
 #     would make the walk wait for the release and the release for the walk (A-T2.4);
-#   - `record`: the same over paths under `.bionic/`, excepting rows that read `record`;
+#   - `record`: the same over paths in the record (`.bionic/…`, or `record/…` spelled from the
+#     docs root), excepting rows that read `record`;
 #   - `merge`: every open integrate row;
 #   - a task id (a table without `reads`): that row, until it lands;
 #   - `proof:<kind>`: a `proved: kind=<kind>` line inside `## SDLC State`; until one exists the
@@ -423,7 +424,7 @@ units_rows() {
 # compares the proof line's `head=` with THE WORKING BRANCH'S HEAD NOW, which this program does
 # not fetch: the caller sets UNITS_LIVE_HEAD (the Patrol tick reads it from git; the stop wall
 # sets none). A plan with no review proof yet needs no head: the first review is ready once a
-# row writing outside `.bionic/` has landed. With a proof and no head handed in, nothing past
+# row writing outside the record has landed. With a proof and no head handed in, nothing past
 # the proof can be seen, so the row waits (the cautious direction, as below). Each wait names
 # why after the read: `live:head: nothing has landed yet`, `…: nothing landed past the review
 # proof at <12 hex>`, `…: the head past the review proof at <12 hex> is not known here`,
@@ -524,10 +525,26 @@ units_edges() { _units_sched edges "${1:-}" ""; }
 # not moved past the proof.
 units_live_range() { _units_sched range "${1:-}" ""; }
 
-# units_live_rows <plan> -> `<id><TAB><kind><TAB><status>` for every row reading `live:head`, an
-# empty cell's kind default included, table order (wave-26 T14). `proof-add review` reads it to
-# return the active review rows to `pending`.
-units_live_rows() { _units_sched liverows "${1:-}" ""; }
+# units_live_rows <plan> [<path>...] -> `<id><TAB><kind><TAB><status>` for every row reading
+# `live:head`, an empty cell's kind default included, table order (wave-26 T14). Handed paths, only
+# the rows whose `Files` cover one of them (the overlap rule a read uses): `proof-add review` hands
+# its evidence, in both spellings, and returns that row alone to `pending` — the proof of another
+# review (the final one, settled on the head) moves no live row mid-pass (wave-26 T46; review 10 F3).
+units_live_rows() { local plan="${1:-}"; shift; _UNITS_EVIDENCE="$*" _units_sched liverows "$plan" ""; }
+
+# units_approval_names <plan> -> each name a row reads as `approval:<name>` or
+# `live:approval:<name>`, once, sorted (wave-26 T46; review 10 F6). `approve` records only these:
+# a name no row reads would be recorded once while the row it was meant for waits. The match is
+# exact, case included, as the readiness program keys it. `plan` is a read like any other here.
+units_approval_names() {
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '{
+    m = split($13, a, ",")
+    for (k = 1; k <= m; k++) {
+      t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); sub(/^live:/, "", t)
+      if (t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) print substr(t, 10)
+    }
+  }' | sort -u
+}
 
 # _units_ext_re -> the shape of an external prerequisite token, as an awk ERE (wave-21 T4; D3).
 # ONE SPELLING for the validator that admits it and the readiness program that reports it, so
@@ -589,8 +606,40 @@ _units_sched() {
     printf '\034rows\n'; printf '%s\n' "$rows"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
   } | awk -F'\t' -v mode="$mode" -v want="$step" -v scale="$scale" -v hasreads="$hasreads" \
-      -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" \
-      -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_sched_awk)"
+      -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
+      -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_sched_awk)"
+}
+
+# _units_files_awk -> the awk functions `in_docs(entry)` and `writes_head(cell)`. `in_docs` is 1
+# when a `Files` path entry is the record, not the tracked tree: under `.bionic/`, or spelled from
+# the docs root as `record/…` (the spelling proof lines and older plans use; review 10 F4).
+# `writes_head` is 1 when a `Files` cell names a path that is not, the tracked tree a writer
+# commits to the head; 0 when every path entry is the record, or the cell names no path at all (a
+# bare word or a dash declares nothing).
+# ONE PREDICATE, THREE READERS (wave-26 T32, T46): the scheduler asks it which rows write the head
+# a floor proves and which landed rows a first live review reads, `units_validate` which active
+# rows owe a tree of their own, and fill.sh `fill_readonly_ids` which verify or review rows take
+# no writer slot; the scheduler asks `in_docs` which rows write what a `record` read waits on.
+# Prepended to each program; NO APOSTROPHE inside it (it is single-quoted).
+_units_files_awk() {
+  printf '%s' '
+    function in_docs(e) { return (index(e, ".bionic/") == 1 || index(e, "record/") == 1) }
+    function writes_head(cell,   a, m, k, e) {
+      m = split(cell, a, ",")
+      for (k = 1; k <= m; k++) {
+        e = a[k]; sub(/^[ \t]+/, "", e); sub(/[ \t]+$/, "", e); sub(/^\.\//, "", e)
+        if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
+        if (!in_docs(e)) return 1
+      }
+      return 0
+    }
+'
+}
+
+# units_writes_head <Files cell> -> 0 when the cell names a path outside the record, 1 when not:
+# the same predicate, for a shell caller (session-poker.sh launch-sync).
+units_writes_head() {
+  printf '%s\n' "${1:-}" | awk "$(_units_files_awk)"'{ exit !writes_head($0) }'
 }
 
 # _units_sched_awk -> the awk program `_units_sched` runs. Printed by a function so the comments
@@ -813,7 +862,7 @@ _units_sched_awk() {
       # A ROW THAT READS THE SETTLED head STILL WRITES IT FOR A ROW AT A LATER STEP (T35 F1). The
       # exception A-T2.4 made is kept between equals and toward earlier steps — the walk does not
       # wait for the release — but a test, doc or build row at Step 4 that reads head and writes
-      # code holds the Step-5 floor. `record` takes the same rule over `.bionic/` paths.
+      # code holds the Step-5 floor. `record` takes the same rule over record paths.
       if (t == "head" || t == "record") {
         for (j = 1; j <= n; j++) {
           if (j == i || !isopen(j)) continue
@@ -870,7 +919,7 @@ _units_sched_awk() {
       satisfied = (scale == "task") ? "done" : "landed"
       for (i = 1; i <= n; i++) {
         # THE FILES CELL: path entries only (a bare word or a dash declares nothing), the mark
-        # taken off and remembered; code[] and docs[] say which side of `.bionic/` it writes.
+        # taken off and remembered; code[] and docs[] say which side of the record it writes.
         m = split(fil[i], a, ",")
         for (k = 1; k <= m; k++) {
           e = trim(a[k]); sub(/^\.\//, "", e)
@@ -878,9 +927,10 @@ _units_sched_awk() {
           mark = (substr(e, length(e)) == "!")
           if (mark) e = substr(e, 1, length(e) - 1)
           nfe[i]++; fe[i, nfe[i]] = e; bg[i, nfe[i]] = mark; nbg += mark
-          if (index(e, ".bionic/") == 1) docs[i] = 1; else code[i] = 1
+          if (in_docs(e)) docs[i] = 1
           if (isopen(i)) ixadd(i, nfe[i])
         }
+        code[i] = writes_head(fil[i])
         r = rd[i]
         if (hasreads && r !~ /[A-Za-z0-9]/) r = kdef(knd[i])
         if (hasreads) { m = split(r, a, ","); for (k = 1; k <= m; k++) addtok(i, a[k]) }
@@ -892,7 +942,12 @@ _units_sched_awk() {
         exit
       }
       if (mode == "liverows") {
-        for (i = 1; i <= n; i++) if (rlive[i]) printf "%s\t%s\t%s\n", id[i], knd[i], st[i]
+        ne = split(evid, ev, " ")
+        for (i = 1; i <= n; i++) {
+          if (!rlive[i]) continue
+          if (ne) { for (k = 1; k <= ne; k++) if (writes(i, ev[k])) break; if (k > ne) continue }
+          printf "%s\t%s\t%s\n", id[i], knd[i], st[i]
+        }
         exit
       }
       for (i = 1; i <= n; i++) {
@@ -1025,7 +1080,7 @@ units_validate() {
   rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" '
+      -v extre="$(_units_ext_re)" "$(_units_files_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: none of its cells can be trusted to name what it breaks.
@@ -1080,7 +1135,12 @@ units_validate() {
           # would refuse the ordinary end state of every wave.
           # NO APOSTROPHE ANYWHERE ABOVE: this comment is inside the single-quoted awk
           # program, and one would close the quote (the header note says so).
-          if (haswt == 1 && sta[i] == "active" && wtc[i] !~ /[A-Za-z0-9]/)
+          #
+          # ONLY A ROW THAT WRITES THE HEAD (wave-26 T32). A row whose Files cell names no
+          # tracked path (a verify, a review, a doc record under the docs root) commits nothing
+          # a gate must attribute, so it runs active with no tree of its own; writes_head is
+          # the predicate the scheduler asks of the same cell.
+          if (haswt == 1 && sta[i] == "active" && wtc[i] !~ /[A-Za-z0-9]/ && writes_head(fil[i]))
             printf "%s: active row names no worktree\n", id[i]
 
           # THE ORIGIN IS DECLARED BESIDE THE IDENTITY (wave-17 REQ-2, AC-2.1, D3, ADR-032).
@@ -1211,7 +1271,9 @@ units_validate() {
           } while (more)
           s = ""; c = 0
           for (a = 1; a <= n; a++) if (fw[a] && bw[a]) { grp[a] = 1; s = s (c++ ? ", " : "") id[a] }
-          if (c > 1) printf "%s: read cycle through %s; each waits on the next, so none can ever be ready\n", id[i], s
+          # A ROW THAT WAITS ON ITSELF is a cycle of one (wave-26 T32; review 7 F5): its group
+          # holds only itself, so the count alone never named it, and it was never ready.
+          if (c > 1 || ((i, i) in e)) printf "%s: read cycle through %s; each waits on the next, so none can ever be ready\n", id[i], s
         }
       }')"
     if [ -n "$cycles" ]; then
