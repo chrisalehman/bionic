@@ -10,6 +10,131 @@ Versioning follows semver from 1.9.0 on:
   or an upgrade step.
 - **PATCH** for a fix within existing behaviour.
 
+## 1.10.0 — 2026-10-04
+
+A run that is never left waiting on a dialog. In a session engaged with a bionic run, in bypass and
+auto mode, bionic now answers Claude Code's permission question itself: yes when everything the
+call writes or deletes is inside the asking agent's own workspace, no with a line that fixes it
+otherwise, and no for anything kept for you, which reaches you once through the Patrol. This is a
+minor release: it adds a capability and refuses some actions that were not refused before, and
+nothing a project already relies on is removed.
+
+What you will notice:
+
+- **bionic answers the permission question in an engaged run, in bypass and auto mode.** Where
+  Claude Code would put a "may I run this?" dialog in front of you, bionic answers it, so a lead
+  or an agent working while you are away is not stopped until you come back. A yes covers that
+  one call. A no is a message the agent reads: it says what bionic could not place, names the
+  workspace, and gives one next step, and the agent carries on. Once a session is engaged, in
+  either mode, a failure inside bionic answers no and says what failed; it never answers yes.
+- **What is allowed: work inside the asker's own workspace.** The lead may write and delete in
+  the run's checkout, the worktrees this session created, the session scratch directory, and the
+  run's record directory and plan files. An agent given a worktree may write and delete in its
+  own tree and the scratch, and write, but not delete, in the run's record directory. A read-only
+  agent may write and delete in the scratch, and write its declared report when that report lies
+  in the record directory or the scratch. A plain read is allowed unless it reaches a credential
+  store. Paths are compared after links and `..` are resolved, so a link that leads out of the
+  workspace does not count as inside it. No one deletes a workspace's root itself (the asker's
+  tree, the checkout, the scratch). When a run works in the project's main checkout, that checkout
+  does not grant the project's shared `.bionic`, `.worktrees` and `.git` directories, and bionic's
+  own state files are in no workspace.
+- **What is denied, with a fix.** Anything bionic cannot show to be inside the workspace: a
+  target outside it, a target it cannot read (a variable, a glob, code handed to an interpreter
+  such as `python3 -c`), a command over 64 KB, or one with more than 200 targets. The fix is one
+  step the asker can follow: put the commands in a script file in the scratch directory and run
+  it with `bash`, write the file under the workspace instead, or leave the file and ask the lead
+  (you, when the asker is the lead) to remove it.
+- **What is kept for you.** Everything that leaves the machine (`git push`; `gh pr`, `issue`,
+  `release`, `repo` and `api`; `npm`, `pnpm` or `yarn publish`; `cargo publish`; `gem push`;
+  `twine upload`), credentials (`gh auth`, `npm login`, `security`, and the common credential
+  stores), production infrastructure (`terraform`, `kubectl`, `vercel`, `aws`, `gcloud`, `az`) and
+  those tools' billing commands are never allowed by bionic. The denial names the category and
+  offers no workaround. bionic records the request, and the lead's Patrol tick prints it once as
+  a `poker: GATE <asker> — <category>: <command>` line, so the lead raises it with you once,
+  through your own notify channel. bionic sends no notification itself. The Patrol prompt moves
+  to version 3, and a Patrol started with the older prompt is told once to re-arm.
+- **It works inside Claude Code's permissions, never around them.** bionic answers only what
+  Claude Code asks, and only in bypass and auto mode, the two modes in which you have told Claude
+  Code not to ask. In default, accept-edits and plan mode bionic answers nothing and the dialog
+  reaches you exactly as in 1.9.0, because the mode is your answer to how much you want to be
+  asked. Your permission mode, your own allow, ask and deny rules, and every call Claude Code
+  settles itself are untouched; an answer persists nothing and writes no setting. A session that
+  has not engaged a run gets the stock dialog as before, and a tool whose job is to ask you
+  something (a question, a plan approval) is never answered by bionic.
+- **Every answer is logged.** One line per answer goes to `permission-answers.log` in the
+  project's log directory under your home (`~/.claude/logs/<project>-<checksum>/`, beside the
+  audit log): the time, the session, who asked, the tool, the decision, the reason, and the first
+  120 characters of the command or path. An allow that cannot be written to the log becomes a
+  denial. `/bionic:doctor` gains a `permission answers` row that says on or off and names the
+  log's path, and its walls count includes the new hook.
+- **One switch, declared on the Step-0 card.** The card gains a `permissions` line, `answered
+  from the run's workspace | off`, and approving the card is the consent.
+  `permission-answers: false` in `.bionic/config.yaml` turns answering off. Only that literal value
+  does; any other value, or no key, leaves it on.
+- **A worktree is recorded for the agent it was made for.**
+  `spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir] [--for <name>]` records
+  the new tree as that agent's workspace, and the dispatch rules tell the dispatcher to pass the
+  name it gives the agent. A named create with no session to record into is refused before any
+  tree is made. An agent with no recorded tree, or one dispatched without a name, is answered as a
+  read-only agent.
+- **Command words are read the way the machine resolves them.** On macOS's case-blind filesystem
+  `RM`, `SUDO` and `GH` run rm, sudo and gh, so the walls and the permission answers now read every
+  command name they recognise in any letter case, as 1.9.0 did for `git` alone. A word that is
+  only a shell builtin or keyword (`exec`, `eval`, `cd`, `source`) keeps its case, because the
+  shell runs nothing for `EXEC`: `EXEC git push` pushes nothing, and is not read as a push.
+
+Newly refused, when Claude Code asks about them in bypass or auto mode:
+
+- A command that makes a link (`ln`) is denied with a fix, and so is every write, delete and read
+  after a `cp` or `mv` in the same command, `mv a b && echo x > log` included. What was copied or
+  moved may be a link, and bionic resolves paths before the command runs, so it cannot tell where
+  a later path leads. Two calls, or a script file, do the same work.
+- A credential store is refused through any path that reaches it: `~/.ssh`, `~/.aws`,
+  `~/.config/gh`, `~/.gnupg`, `~/.config/gcloud`, `~/.azure`, `~/.kube/config`,
+  `~/.docker/config.json`, `~/.cargo/credentials.toml`, and `.netrc`, `.npmrc`, `.pypirc`,
+  `.git-credentials` and `.env` files, whether named directly, through a link or a `..`, in any
+  letter case, as the source of a copy, or inside a recursive read of your home directory, of a
+  directory in it that holds a store, or of `/`. This holds for the Read tool as well as for Bash.
+- A recorded worktree counts as an agent's workspace only when git lists it as a linked worktree
+  of the repository. A line in the workspace record that names any other directory, the main
+  checkout or a directory above it among them, is skipped.
+
+Fixes:
+
+- Reading every command name in any letter case closes two ways past the walls: a subagent's
+  `BASH session-poker.sh amend …` reached the amend, and `ENV -C <repo> git commit` skipped the
+  commit gate.
+- The two new per-session files, the workspace record and the gate requests, are swept with the
+  rest of a session's state.
+
+Known limits, carried to the next release:
+
+- bionic reads only the call it is asked about. A command it denied, written into a script file
+  as the fix says and run with `bash`, runs without bionic reading what the script does.
+- In bypass and auto modes Claude Code can draw its stock dialog for a fraction of a second while
+  the answer is worked out; the answer replaces it.
+- In auto mode Claude Code refuses a background teammate's command itself, before any question,
+  so bionic is never asked.
+- In bypass mode Claude Code asks nothing for an ordinary command with literal paths, so bionic is
+  consulted only for the shapes Claude Code still asks about, such as a script whose target is a
+  variable.
+- Every asker shares the session's one scratch directory, so an agent may write and delete another
+  agent's scripts there.
+- A reserved denial tells the asker to report it to the lead, even when the asker is the lead.
+- The memory-store wall compares the path's letter case, so a capitalised spelling of the store's
+  path passes it on a case-blind filesystem.
+- A recursive read of a project tree that holds a `.env` file is allowed; only a recursive read of
+  your home directory's stores, or of `/`, is refused.
+- Answers are measured for subagents and in-process teammates; teammates in split panes are not
+  measured. When Claude Code's question carries no scratch path, as in one headless shape, the
+  scratch is not part of any workspace.
+- The limits listed for 1.9.0 still hold; none was worked on in this release.
+
+One rule for every answer (ADR-042): a run's authority is a chain of grants. You grant the run by
+approving it, the run grants each agent a workspace, and no grant is wider than its parent. A guard
+fails closed by direction: a yes needs the path exactly as recorded, a no matches every spelling
+that could reach the protected place, and the only error left is refusing something harmless.
+
 ## 1.9.0 — 2026-10-03
 
 A quieter terminal that is right the first time. The Patrol asks a question once and then keeps
