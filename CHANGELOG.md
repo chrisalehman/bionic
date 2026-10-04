@@ -80,9 +80,12 @@ What you will notice:
   suites your file-to-suite map (`impact-command:` in `.bionic/config.yaml`) names for it, and a
   full-run dispatch goes ahead only when the change cannot be bounded: a commit from outside the
   run, a changed file the map answers with every suite or with none, a change to the full-suite
-  runner or the shared test library, or no floor proof yet. A project with no `impact-command:`
-  gets every full run it asks for, as before. The `regression-cause:` line is no longer asked for or
-  read.
+  runner or the shared test library, or no floor proof yet. Integration waits for that run: while
+  the change past the last floor proof cannot be bounded, the integrate row is not ready, and the
+  tick's `WAIT` line gives the reason and asks for a full run on the head, recorded with
+  `proof-add floor`. A project with no `impact-command:` gets every full run it asks for, as before,
+  and its integration waits for a full run on the head whenever anything changed past the last one.
+  The `regression-cause:` line is no longer asked for or read.
 - **A task lands on its own green run.** `spawn-worktree.sh land` no longer needs a full run. It
   reads the stamps the booking shim (next bullet) leaves in the tree's own git directory, and refuses
   a tree whose stamped suite run was at another head, on a dirty tree, or red, and a tree that
@@ -230,7 +233,8 @@ Known limits, carried to the next release:
   proof, every full run is admitted.
 - "The full suite runs once" takes effect only where the project's runner writes the log header the
   proof verb reads and the project names an `impact-command:` in `.bionic/config.yaml`; elsewhere
-  every full run is admitted, which costs time and never a missed run.
+  every full run is admitted, and integration waits for a full run on the head whenever anything
+  changed past the last one, which costs time and never a missed run.
 - A change that merges a branch which was deleted afterwards reads as part of the run, so it is
   bounded where it should not be. Any tag inside the proved range draws a full run.
 - The ready set reads a bulleted `- approved-by:` line as the plan's approval, and the commit gate
