@@ -4701,8 +4701,8 @@ validate_dispatch_ledger() {
   #
   # DELEGATED, NOT RESTATED. The status enum this function carried is one of the
   # Task invariants `units_validate` now owns, and it owns the rest of them too —
-  # id shape, step range, kind vocabulary, deps that resolve, and the Step-5+ rows
-  # depending transitively on every Step-4 row. One violation line per fault, each
+  # id shape, step range, kind vocabulary, deps that resolve, and the `reads` cells
+  # of a table that carries them. One violation line per fault, each
   # naming its id and its rule, is what the writer gets back.
   #
   # WHAT STAYS HERE is the pair of facts units.sh cannot know: that this plan owes a
@@ -4740,7 +4740,7 @@ Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); 
     _eg_detail="canonical-sdlc audited multi_agent wave plan's '## Tasks' table breaks the Task invariants:
 ${violations}
 Plan: $PLAN
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status."
+Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status. A reads column is optional and may sit anywhere in the header."
     refuse exit2 commit "that dispatched task's row is invalid" "fix the row the detail names" "$_eg_detail"
   fi
   # PRESENCE IS ASKED OF THE WHOLE TABLE AT ONCE (AC-5.1). This loop used to refuse at the

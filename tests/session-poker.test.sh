@@ -6698,7 +6698,7 @@ section "Section 34: task-add — a schedule change is a transaction (wave-20 RE
 # `task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>` — the table's
 # own column order, the nine cells an author writes (status, worktree and base are the
 # dispatcher's). It projects the row onto a COPY of the bound plan (`units_add_row`: the row,
-# its `- <id>:` line, and a Step-4 id threaded into the frontier Step-5+ rows), runs
+# its `- <id>:` line, and no other row), runs
 # `units_validate` on the copy and a dry commit through the REAL hooks/bash-walls.sh, and only
 # then moves the copy over the plan. On any refusal the plan is byte-identical and the words
 # that refused it print. AC-5.3 fails-when: "after task-add of a Step-4 row mid-run the next
