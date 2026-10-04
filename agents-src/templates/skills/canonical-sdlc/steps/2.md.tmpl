@@ -37,13 +37,13 @@ The evidence gate reads the rendered column: from `current: 4` on, an AC block w
 
 **The Design Interview — mandatory.** Step 2 is semi-interactive, and this is what that interactivity is for. It runs as an interview: a frame, then a walk, one turn at a time. Two shapes are refuted by dogfood — **batch presentation**, the design delivered whole as a wall of text with an ambiguous call to action, and **question-without-frame**, a fork posed before its terms exist.
 
-**Open with the frame**, before any question. Its first approval is **Context and Problem**: the problem and the goal, written as if for a reader who has never opened this repo; this comes before your own design intuition and before every decision in the frame below it — a change not yet explainable to someone who was not there is not yet understood. Then your own **Design intuition**, the shape you expect to be right, stated so the user can push on it; **Requirements served**, citing the requirements this design answers — the provenance chain's first link, upstream of every decision's own citation; **Mechanisms inherited**, one line per substrate or mechanism the design builds on, each marked `kept` or `questioned` — a `questioned` line becomes a strategic fork; a decision map naming each choice ahead **strategic** or **tactical**, where placing a test cohort in a tier, a job on a runtime surface, or a workload on hardware is **strategic by rule** and is never defaulted; the capture plan, naming where the design ledger accretes; and the artifact form derived from the form menu. Which views the change touches and which you considered and excluded belong here too, one clause each (the view menu lives in `operational-rules.md`). **Question 1 approves the frame, Context and Problem first**; nothing is walked until it holds.
+**Open with the frame**, before any question. Step 1 approved the problem and its context; the frame does not ask again. It opens on your own **Design intuition**, the shape you expect to be right, stated so the user can push on it; **Requirements served**, citing the requirements this design answers — the provenance chain's first link, upstream of every decision's own citation; **Mechanisms inherited**, one line per substrate or mechanism the design builds on, each marked `kept` or `questioned` — a `questioned` line becomes a strategic fork; a decision map naming each choice ahead **strategic** or **tactical**, where placing a test cohort in a tier, a job on a runtime surface, or a workload on hardware is **strategic by rule** and is never defaulted; the capture plan, naming where the design ledger accretes; and the artifact form derived from the form menu. Which views the change touches and which you considered and excluded belong here too, one clause each (the view menu lives in `operational-rules.md`). **Question 1 approves the frame** — the design's direction and its decision map; nothing is walked until it holds.
 
 **Then walk the map, one decision per turn.** A strategic choice gets a question stating the tension and your own lean; a tactical choice you may default, but every default is **surfaced at approval**, never silent. The design ledger accretes visibly — each answer folds in as a named delta the turn it lands, so the user reads a design being built rather than a transcript. Load-bearing assumptions are posed as **questions to the user**, not as statements they must think to challenge.
 
-**Close by composing.** The design goes back whole — decisions, rejected alternatives with the reason each lost, assumptions — for approval **before the spec's first Write**. Proceed only on the user's engagement, or on the user's explicit waiver of the interview, recorded verbatim in the design's assumptions; `design-interview: false` at Step 0 is that waiver's **standing Step-0 form** — recorded as `false <user> <date>`, and the verbatim assumptions line is still owed, quoting the Step-0 reply. Silence is not engagement, and **an agent never waives it** — there is no agent-side waiver.
+**Close on the card.** Write the spec — decisions, rejected alternatives with the reason each lost, assumptions — then present the Step-2 card below, rendered from it; its approval is the one approval of the design. Proceed only on the user's engagement, or on the user's explicit waiver of the interview, recorded verbatim in the design's assumptions; `design-interview: false` at Step 0 is that waiver's **standing Step-0 form** — recorded as `false <user> <date>`, and the verbatim assumptions line is still owed, quoting the Step-0 reply. Silence is not engagement, and **an agent never waives it** — there is no agent-side waiver.
 
-No new *approval* stop: the binding approval remains the Step-3 checkpoint, which approves design, plan, and matrix together, and the wall below is a write-time structural gate that grants approval to nothing. **No hook can see a conversation** — exactly as with Step 1's Q&A, the mandate is the whole enforcement. It does fix the authoring order: the interview is where the design gets composed, so the spec lands after it in one complete Write — a requirements-only first draft of a wave-or-epic spec blocks on the write that would create the file.
+The wall below is a write-time structural gate that grants approval to nothing. **No hook can see a conversation** — exactly as with Step 1's Q&A, the mandate is the whole enforcement. It does fix the authoring order: the spec lands after the walk in one complete Write — a requirements-only first draft of a wave-or-epic spec blocks on the write that would create the file.
 
 **The prototype unit — a design question answered by a throwaway.** A prototype is named before it starts, three fields: the *question* it answers, what "right" looks like, and a *timebox*. It **ships nothing** — its output is a design decision, written to the spec with attribution, that the build task cites — and it **never owns a matrix row**, because nothing about a throwaway is provable by an eval. Two homes: **Step 2** by default — a candidate prototype is proposed inside the design interview and the user picks whether to run it, walk it as an ordinary decision instead, or skip it; and **Step 4**, by exception, as a `kind: prototype` task — dispatched, throwaway, its record artifact and the ruling it writes back to the spec — only when the shape could not be seen without code, and the task states that reason. The no-row rule is structural, not advisory: a `kind: prototype` task whose Verification Matrix carries an AC block naming it is refused by the evidence gate — the row belongs to whichever task ships the ruling, never to the prototype that produced it.
 
@@ -52,21 +52,30 @@ No new *approval* stop: the binding approval remains the Step-3 checkpoint, whic
 **One wall, three ways to satisfy it.** A spec at `scale: wave` or `scale: epic` must carry at least one of:
 
 - **(a) in place** — a flush-left `## Design` section in the spec itself;
-- **(b) by reference** — frontmatter `design: <path>` resolving to a real file that itself contains a flush-left `## Design`; typically an epic-level design a wave implements. Path resolution follows the walk-artifact template, widened by its leader set: an absolute path stands as written; a path led by one of the docs-root artifact directories — `specs/`, `plans/`, `adrs/`, `incidents/`, `record/` — resolves against the docs root; every other relative path resolves against the project root, so the fully-spelled `.bionic/docs/specs/…` an author is likely to paste lands where the short form does; and a `..` component is refused outright. A wave may carry both the pointer and a supplementary local section, and a pointer that is present is validated either way — it names the path the Step-3 approval display prints, so it is never decorative;
+- **(b) by reference** — frontmatter `design: <path>` resolving to a real file that itself contains a flush-left `## Design`; typically an epic-level design a wave implements. Path resolution follows the walk-artifact template, widened by its leader set: an absolute path stands as written; a path led by one of the docs-root artifact directories — `specs/`, `plans/`, `adrs/`, `incidents/`, `record/` — resolves against the docs root; every other relative path resolves against the project root, so the fully-spelled `.bionic/docs/specs/…` an author is likely to paste lands where the short form does; and a `..` component is refused outright. A wave may carry both the pointer and a supplementary local section, and a pointer that is present is validated either way, so it is never decorative;
 - **(c) waived** — frontmatter `design-waived:`, the user's move, documented with the Waiver Protocol.
 
-Presence and resolution are the whole check; the five parts are never inspected and their quality never graded. An empty `## Design` clears the wall and fails the Step-3 approval — which is the approval that was always going to be the one that could tell.
+Presence and resolution are the whole check; the five parts are never inspected and their quality never graded. An empty `## Design` clears the wall and fails at the card, the one approval that can tell.
 
 **Scale.** `task` gets a design paragraph per non-trivial task, written in the session plan — a prose obligation the reviewer reads, with **no wall at task scale at all**. `wave` gets a page or two. Nothing gets forty.
 
-**The step ends at the card below, rendered in full.** One row per design decision, the
-ownership table, and the Eval design as ONE ROW PER REQUIREMENT with its type counts — never
-the whole eval table, which is hundreds of lines and was rejected as a display. `show evals
-<req>` renders one requirement's block: its approach, and per criterion the criterion, the type,
-the eval, and its "fails when".
+**The card, rendered in full.** The Goal, the spec's `### Approach` and `### Worth your eye`
+(each call with its risk), one row per decision, and the Eval design as ONE ROW PER REQUIREMENT
+with its type counts — never the whole eval table, which was rejected as a display. `show
+ownership` prints the ownership table (`card.sh step2 <spec> ownership`); `show evals <req>` one
+requirement's approach and, per criterion, its type, eval and "fails when" (`… evals <REQ>`).
 
 ```
 Step 2 · Design
+
+  Goal
+    <the spec's goal>
+
+  Approach
+    <the order the pieces are built in, and why>
+
+  Worth your eye
+    <a call the user should check> — <its risk>
 
   Branches
     working       <branch>              (from <base> @ <sha>)
@@ -75,9 +84,6 @@ Step 2 · Design
   Decisions                                           serves         ADR
     D<n> <the decision in one line>                   <REQ ids>      <file | none>
 
-  Ownership
-    <concept>    owner <module>       surfaces <where it renders>     test <suite>
-
   Eval design                                     static unit  hermetic  live  human
     REQ-<id> <how it is proven, one line>              2     1         3     0      1
     REQ-<id> <how it is proven, one line>              1     0         2     1      0
@@ -85,10 +91,12 @@ Step 2 · Design
 
   Artifacts
     spec  <docs-root>/specs/epic-NN-<slug>/wave-NN-<slug>.spec.md
-    adrs  <docs-root>/adrs/epic-NN-<slug>/adr-NNN-<slug>.md
+    adr  <docs-root>/adrs/epic-NN-<slug>/adr-NNN-<slug>.md
+    ledger  <docs-root>/record/wave-NN-<slug>/design-ledger.md
+    reqs  <docs-root>/specs/epic-NN-<slug>/wave-NN-<slug>.requirements.md
 
 Do you approve this design? Reply "approved" to approve it.
-show evals <req> · explain <decision>
+show evals <req> · explain <decision> · show ownership
 ```
 
 Card: `bash <plugin-root>/scripts/card.sh step2 <spec.md>` renders it whole; no stdin.
