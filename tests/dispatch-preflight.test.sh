@@ -5157,80 +5157,260 @@ expect_absent "27q9 …and no word of the comment reaches the row" "whole budget
   "$S27Q9_ROW"
 
 # ============================================================================
-section "S28: one regression per run (AC-24)"
+setup_section "S28: the full-run wall asks the proof state (wave-26 REQ-3, D6)"
 # ============================================================================
 #
-# The full tree is proved once per run, by one dispatched runner, at integration close.
-# A second full-tree dispatch is not forbidden — it is the shape a re-proof legitimately
-# takes after a merge — it is made to COST A WRITTEN REASON on the plan, where the next
-# reader finds it beside the run it explains.
+# THE FULL SUITE IS TIED TO THE CODE STATE, NOT TO A COUNT OF RUNS. Through 1.10 this wall
+# counted full-tree rows on the roster and charged one `regression-cause:` line per extra
+# run, and a sibling arm held the floor while any step-4 row was open unless a cause line
+# released it. Both arms are gone. The wall now asks the proof record one question
+# (`proof_state`, payload/scripts/lib/proof.sh): is the working branch's head the one the
+# last floor proof names (`covered`), is the change since that proof provable by a named
+# set of suites (`bounded`), or neither (`unbounded`)? A full run is admitted only when the
+# state is unbounded and no row that writes tracked files is open.
 #
-# NEWER IS COUNTED, NOT TIMED (A-S13-4). The plan file is rewritten after every task, so
-# its mtime is newer than everything within minutes and a timestamp comparison would be
-# vacuous by lunchtime. The Nth full-tree dispatch of a run needs the (N-1)th
-# `regression-cause:` line — monotone, hermetic, and one new sentence per extra run.
+# THE FIXTURE (pf_repo) IS A REAL REPOSITORY ON A WORKING BRANCH. Five committed suites under
+# tests/ are the roster; `.bionic/config.yaml` names a map stub that answers lib/one.sh with
+# three suites, lib/every.sh with all five, and anything else with nothing. Every shape the
+# state depends on — the floor head, the commits since it, which branches carry them — is a
+# git fact the fixture builds, never a value handed to the code under test.
+#
+# fails-when: the wall admits the run because a cause line exists (AC-3.3); an empty answer
+# is read as "no suite needed" (AC-3.4); the cause-line arm survives, or the wall reads
+# roster row counts, not the proof (AC-3.5).
 
-BRIEF_REGRESSION='Your task: run the tests floor.
+PF_LIB_DIR="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+[ -r "$PF_LIB_DIR/proof.sh" ] || PF_LIB_DIR="${BIONIC_HOOKS_DIR}/../scripts/lib"
+PF_MAP="$SANDBOX/pf-map.sh"
+{
+  printf '#!/bin/bash\n'
+  printf 'for f in "$@"; do\n'
+  printf '  case "$f" in\n'
+  printf '    lib/one.sh)   for s in a b c; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
+  printf '    lib/every.sh) for s in a b c d e; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
+  printf '  esac\n'
+  printf 'done\n'
+} > "$PF_MAP"
+
+PF_FULL_BRIEF='Your task: run the full suite on the working head.
 Expected artifact: .bionic/docs/record/w28-floor.log
 Expected duration: ~40 minutes.
 Suites: tests/run.sh'
 
-s28_add_cause() {  # <repo> <reason>
-  local plan="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-  printf 'regression-cause: %s\n' "$2" >> "$plan"
+# pf_repo <name> -> a wave fixture checked out on `wave/99-test`, five suites, the map stub.
+pf_repo() {
+  local repo s
+  repo=$(make_repo "$1" yes)
+  git -C "$repo" checkout -q -b wave/99-test 2>/dev/null
+  mkdir -p "$repo/tests" "$repo/lib"
+  for s in a b c d e; do printf '#!/bin/bash\n' > "$repo/tests/$s.test.sh"; done
+  printf 'one\n' > "$repo/lib/one.sh"
+  printf 'every\n' > "$repo/lib/every.sh"
+  git -C "$repo" add tests lib
+  git -C "$repo" commit -qm base 2>/dev/null
+  printf 'impact-command: bash %s\n' "$PF_MAP" > "$repo/.bionic/config.yaml"
+  printf '%s' "$repo"
 }
+# pf_commit <repo> <path> <content> -> one commit on whatever the checkout holds.
+pf_commit() {
+  mkdir -p "$(dirname "$1/$2")"
+  printf '%s\n' "$3" > "$1/$2"
+  git -C "$1" add "$2"
+  git -C "$1" commit -qm "change $2" 2>/dev/null
+}
+pf_plan_path() { printf '%s/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md' "$1"; }
+# pf_row <id> <step> <status> <Files> -> one `## Tasks` data row.
+pf_row() {
+  printf '| %s | %s | build | does the thing | implementor | — | 30 | REQ-1 | %s | — | %s |' \
+    "$1" "$2" "$4" "$3"
+}
+# pf_plan <repo> <floor head, or empty> [<row>...] — the plan, written whole: a `## Tasks`
+# heading closes `## SDLC State`, so a proof or cause line appended after it would be outside
+# the section. PF_STATE_EXTRA, when set, is one more line inside `## SDLC State`.
+PF_STATE_EXTRA=""
+pf_plan() {
+  local repo="$1" head="$2" row; shift 2
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
+    printf 'intent: build\nrigor: audited\nscale: wave\n---\n\n# Test wave plan\n\n'
+    printf '## SDLC State\n\n'
+    printf 'integration-branch: main\nworking-branch: wave/99-test\ncurrent: 5\n'
+    printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n\n'
+    printf -- '- Step 5: verify\n'
+    [ -z "$head" ] || \
+      printf 'proved: kind=floor head=%s at=2026-10-04T00:00:00Z evidence=record/w99-floor.txt\n' "$head"
+    [ -z "$PF_STATE_EXTRA" ] || printf '%s\n' "$PF_STATE_EXTRA"
+    if [ "$#" -gt 0 ]; then
+      printf '\n## Tasks\n\n'
+      printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
+      printf -- '|---|---|---|---|---|---|---|---|---|---|---|\n'
+      for row in "$@"; do printf '%s\n' "$row"; done
+    fi
+  } > "$(pf_plan_path "$repo")"
+}
+# pf_state <repo> -> what proof_state prints for the fixture's plan and tree.
+pf_state() {
+  ( . "$PF_LIB_DIR/proof.sh" >/dev/null 2>&1; proof_state "$(pf_plan_path "$1")" "$1" ) 2>/dev/null
+}
+pf_line() { printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: '; }
 
-REPO=$(make_repo r28 yes)
+section "§PROOF-BOUNDED — a change the map bounds refuses the full run and names its suites (AC-3.3)"
+REPO=$(pf_repo rpb)
 write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_REGRESSION" "w28-runner-one")"
-expect_status "28a the FIRST full-tree dispatch of a run passes" "0" "$GATE_ST"
-ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "28a …and its row carries run.sh, which is what makes it countable" \
-  "run.sh" "$(roster_field "$ROW" suites_allowed)"
+PF_H=$(git -C "$REPO" rev-parse HEAD)
+pf_commit "$REPO" lib/one.sh 'one, changed'
+# THE CAUSE LINE IS PLANTED ON PURPOSE: AC-3.3 fails when the wall admits the run because one
+# exists. Through 1.10 this exact line released a second full run.
+PF_STATE_EXTRA='regression-cause: the tree must be re-proved'
+pf_plan "$REPO" "$PF_H"
+PF_STATE_EXTRA=""
+expect_eq "PB.1 proof_state: one changed file the map answers with three of five suites is bounded by those three" \
+  "$(printf 'bounded\ta.test.sh b.test.sh c.test.sh')" "$(pf_state "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pb-full")"
+expect_eq "PB.2 a full-run dispatch after a floor proof is REFUSED when the change is bounded" \
+  "deny" "$GATE_VERDICT"
+expect_contains "PB.2 …though the plan carries a regression-cause: line, which buys nothing now" \
+  "regression-cause:" "$(cat "$(pf_plan_path "$REPO")")"
+expect_contains "PB.2 …the one line says the change is bounded" "bounded" "$(pf_line)"
+expect_contains "PB.2 …and the detail names the three suites, ready to copy into a brief" \
+  "Suites: tests/a.test.sh tests/b.test.sh tests/c.test.sh" "$GATE_VERR"
+expect_absent "PB.2 …and no suite the map did not answer" "d.test.sh" "$GATE_VERR"
+expect_contains "PB.2 …naming the proved head it measured from" "${PF_H:0:7}" "$GATE_VERR"
+expect_absent "PB.2 …and asks for no cause line" "regression-cause" "$GATE_VERR"
+expect_status "PB.2 …and the refused dispatch journalled no row" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: prove the change.
+Expected artifact: .bionic/docs/record/w28-bounded.txt
+Expected duration: ~10 minutes.
+Suites: tests/a.test.sh tests/b.test.sh tests/c.test.sh' "w-pb-narrow")"
+expect_eq "PB.3 the brief the refusal names, those three suites, dispatches" "allow" "$GATE_VERDICT"
 
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_REGRESSION" "w28-runner-two")"
-expect_eq "28b a SECOND full-tree dispatch in the same run is REFUSED" "deny" "$GATE_VERDICT"
-expect_contains "28b …counting what it found" "Full-tree runs on this roster: 1" "$GATE_VERR"
-# READ OUT OF THE FIX BLOCK, not merely "somewhere on stderr" — the unbound-session
-# advisory this gate prints on every run also names the plan path, so a plain contains
-# passes over a wall that never fired.
-# Compared from the fixture root rightwards, because the gate resolves symlinks on the
-# path it prints (/var -> /private/var on macOS) while $REPO does not.
-S28_FIXLINE=$(printf '%s\n' "$GATE_VERR" | grep -A1 -F 'under `## SDLC State` in' | tail -1 | sed 's/^[[:space:]]*//')
-expect_status "28b …naming the plan the cause belongs on, inside its own Fix block" \
-  "/repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" "${S28_FIXLINE##*/r28}"
-expect_contains "28b …and the line to write" "regression-cause:" "$GATE_VERR"
-expect_status "28b …and the refused dispatch journalled no second row" \
-  "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+# A TASK BRANCH OF THIS RUN IS NOT OUTSIDE WORK. The same one-file change, landed through
+# `wt/99-T1` the way the land verb merges, stays bounded: only another branch's commit makes
+# the change unbounded (the discriminator for PU.3 below).
+REPO=$(pf_repo rpbt)
+PF_H=$(git -C "$REPO" rev-parse HEAD)
+git -C "$REPO" checkout -q -b wt/99-T1 2>/dev/null
+pf_commit "$REPO" lib/one.sh 'one, from the task'
+git -C "$REPO" checkout -q wave/99-test 2>/dev/null
+git -C "$REPO" merge -q --no-ff -m 'merge wt/99-T1 (land)' wt/99-T1 2>/dev/null
+pf_plan "$REPO" "$PF_H"
+expect_eq "PB.4 a change landed from the run's own task branch stays bounded" \
+  "$(printf 'bounded\ta.test.sh b.test.sh c.test.sh')" "$(pf_state "$REPO")"
 
-s28_add_cause "$REPO" "the merge changed the loader; the tree must be re-proved"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_REGRESSION" "w28-runner-three")"
-expect_status "28c a recorded regression-cause: releases the second run" "0" "$GATE_ST"
-expect_status "28c …and it is journalled" \
-  "2" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_REGRESSION" "w28-runner-four")"
-expect_eq "28d …but the cause is spent: a THIRD run needs a second one" "deny" "$GATE_VERDICT"
-expect_contains "28d …and the count says so" "Full-tree runs on this roster: 2" "$GATE_VERR"
-
-# A NARROWER BRIEF NEEDS NO CAUSE — the rule is about the full tree, not about dispatching.
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: fix the widget.
-Expected artifact: .bionic/docs/record/w28-narrow.md
-Suites: tests/widget.test.sh' "w28-narrow")"
-expect_status "28e a narrow brief in the same run is unaffected" "0" "$GATE_ST"
-
-# CONTROL: the cause line only counts under `## SDLC State`. A cause written into the
-# prose above it is not a ledger entry, and the wall must not read one.
-REPO=$(make_repo r28f yes)
+section "§PROOF-UNBOUNDED — what no named set of suites can prove admits the full run (AC-3.4)"
+# A NEW FILE UNDER A DIRECTORY NO SUITE NAMES. The map answers it with nothing, and nothing is
+# not "no suite needed": it is a change no suite is known to prove.
+REPO=$(pf_repo rpu1)
 write_attestation "$REPO" "$SID_A"
-S28F_PLAN="$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-S28F_BODY=$(cat "$S28F_PLAN")
-printf '%s\n' "${S28F_BODY/# Test wave plan/# Test wave plan
-regression-cause: written outside the ledger}" > "$S28F_PLAN"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_REGRESSION" "w28f-one")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_REGRESSION" "w28f-two")"
-expect_eq "28f a regression-cause above ## SDLC State does not count" "deny" "$GATE_VERDICT"
-expect_contains "28f …and the wall still reports zero causes" "Recorded causes on the plan: 0" "$GATE_VERR"
+PF_H=$(git -C "$REPO" rev-parse HEAD)
+pf_commit "$REPO" newdir/zz.sh 'new'
+pf_plan "$REPO" "$PF_H"
+PF_S=$(pf_state "$REPO")
+expect_eq "PU.1 proof_state: a file the map answers with nothing is unbounded" "unbounded" "${PF_S%%$'\t'*}"
+expect_contains "PU.1 …and the reason names the file" "newdir/zz.sh" "$PF_S"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu1-full")"
+expect_eq "PU.1 …and the full run is ADMITTED, with no cause line on the plan" "allow" "$GATE_VERDICT"
+expect_status "PU.1 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# A CHANGE THE MAP ANSWERS WITH EVERY SUITE. The union is the roster, which is a full run by
+# another name.
+REPO=$(pf_repo rpu2)
+PF_H=$(git -C "$REPO" rev-parse HEAD)
+pf_commit "$REPO" lib/every.sh 'every, changed'
+pf_plan "$REPO" "$PF_H"
+PF_S=$(pf_state "$REPO")
+expect_eq "PU.2 proof_state: a change the map answers with every suite is unbounded" "unbounded" "${PF_S%%$'\t'*}"
+expect_contains "PU.2 …and the reason says every suite" "every suite" "$PF_S"
+
+# A COMMIT ANOTHER BRANCH CONTAINS. The file is one the map bounds (PB.1), so only the outside
+# rule can make this unbounded: a merge brings work no proof of this run has read.
+REPO=$(pf_repo rpu3)
+write_attestation "$REPO" "$SID_A"
+PF_H=$(git -C "$REPO" rev-parse HEAD)
+git -C "$REPO" checkout -q -b other-work 2>/dev/null
+pf_commit "$REPO" lib/one.sh 'one, from outside'
+git -C "$REPO" checkout -q wave/99-test 2>/dev/null
+git -C "$REPO" merge -q --no-ff -m 'merge other-work' other-work 2>/dev/null
+pf_plan "$REPO" "$PF_H"
+PF_S=$(pf_state "$REPO")
+expect_eq "PU.3 proof_state: a range holding a commit another branch contains is unbounded" \
+  "unbounded" "${PF_S%%$'\t'*}"
+expect_contains "PU.3 …and the reason says another branch carries it" "another branch" "$PF_S"
+
+# NO FLOOR PROOF YET: the first full run of a plan is always admitted.
+REPO=$(pf_repo rpu4)
+write_attestation "$REPO" "$SID_A"
+pf_plan "$REPO" ""
+PF_S=$(pf_state "$REPO")
+expect_eq "PU.4 proof_state: a plan with no floor proof is unbounded" "unbounded" "${PF_S%%$'\t'*}"
+expect_contains "PU.4 …saying so" "no floor proof" "$PF_S"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu4-full")"
+expect_eq "PU.4 …and the plan's first full run is ADMITTED" "allow" "$GATE_VERDICT"
+
+# UNBOUNDED IS NOT ENOUGH WHILE A ROW STILL WRITES TRACKED FILES. A full run over a head that an
+# open row is about to move proves a tree that does not survive the row landing.
+REPO=$(pf_repo rpu5)
+write_attestation "$REPO" "$SID_A"
+pf_plan "$REPO" "" \
+  "$(pf_row T1 4 landed lib/one.sh)" \
+  "$(pf_row T2 4 active 'lib/two.sh, tests/two.test.sh')" \
+  "$(pf_row T3 6 pending 'lib/one.sh!')" \
+  "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu5-full")"
+expect_eq "PU.5 an unbounded full run is REFUSED while rows that write tracked files are open" \
+  "deny" "$GATE_VERDICT"
+expect_contains "PU.5 …the one line names the active writer" "T2" "$(pf_line)"
+expect_contains "PU.5 …and the pending one at a later step, whose Files are tracked too" "T3" "$(pf_line)"
+expect_absent "PU.5 …but not the landed row" "T1" "$(pf_line)"
+expect_absent "PU.5 …nor the open row that writes only under .bionic/" "T12" "$(pf_line)"
+expect_contains "PU.5 …the detail gives each its step and status" "step 4, active" "$GATE_VERR"
+expect_absent "PU.5 …and asks for no cause line" "regression-cause" "$GATE_VERR"
+expect_status "PU.5 …and journalled no row" "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+REPO=$(pf_repo rpu6)
+write_attestation "$REPO" "$SID_A"
+pf_plan "$REPO" "" \
+  "$(pf_row T1 4 landed lib/one.sh)" \
+  "$(pf_row T2 4 dropped lib/two.sh)" \
+  "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu6-full")"
+expect_eq "PU.6 with every tracked-file writer landed or dropped, the full run is ADMITTED" "allow" "$GATE_VERDICT"
+expect_absent "PU.6 …with nothing from this arm on the wire" "write tracked files" "$GATE_ERR"
+
+section "§PROOF-COVERED — the proved head refuses, an outside merge admits (AC-3.5)"
+REPO=$(pf_repo rpc)
+write_attestation "$REPO" "$SID_A"
+PF_H=$(git -C "$REPO" rev-parse HEAD)
+pf_plan "$REPO" "$PF_H"
+expect_eq "PC.1 proof_state: the head the last floor proof names is covered" "covered" "$(pf_state "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pc-full")"
+expect_eq "PC.1 a full run on the proved head is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "PC.1 …the one line says the head is proved" "already proved" "$(pf_line)"
+expect_contains "PC.1 …the detail names the head and the evidence" "record/w99-floor.txt" "$GATE_VERR"
+expect_contains "PC.1 …and the head" "${PF_H:0:7}" "$GATE_VERR"
+# …AND AFTER AN OUTSIDE MERGE THE SAME PLAN DISPATCHES, with no cause line written anywhere.
+git -C "$REPO" checkout -q -b other-work 2>/dev/null
+pf_commit "$REPO" lib/one.sh 'one, from outside'
+git -C "$REPO" checkout -q wave/99-test 2>/dev/null
+git -C "$REPO" merge -q --no-ff -m 'merge other-work' other-work 2>/dev/null
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pc-after")"
+expect_eq "PC.2 after an outside merge the full run is ADMITTED" "allow" "$GATE_VERDICT"
+expect_absent "PC.2 …and the plan carries no regression-cause: line" "regression-cause" \
+  "$(cat "$(pf_plan_path "$REPO")")"
+expect_contains "PC.2 …(the plan read is the one with the floor proof)" "proved: kind=floor" \
+  "$(cat "$(pf_plan_path "$REPO")")"
+expect_status "PC.2 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# THE ARM READS NO CAUSE LINE AND NO ROSTER COUNT. A second admitted full run on an unbounded
+# change is not a count the wall keeps: the roster already holds w-pc-after's row.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pc-again")"
+expect_eq "PC.3 a second full run on the same unbounded change is not refused by a roster count" \
+  "allow" "$GATE_VERDICT"
+expect_eq "PC.3 …the hook defines no cause-line reader" "0" \
+  "$(/usr/bin/grep -c 'regression_causes\|regression-cause' "$GATE")"
+expect_eq "PC.3 …and no roster counter of full-tree rows" "0" "$(/usr/bin/grep -c 'regression_rows' "$GATE")"
+expect_nonempty "PC.3 …(the extractor reads the hook: it holds the proof_state call)" \
+  "$(/usr/bin/grep -n 'proof_state' "$GATE")"
 
 section "SECTION 29 — the derivation is BOUNDED, and the overrun is a refusal (review-c C-16)"
 # THE DEFECT. The impact command is the whole of this gate's cost — ~0.3 s without it,
@@ -5886,16 +6066,20 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # RAISED 17 -> 18 (wave-24 T9, REQ-4 AC-4.8, A-T9.12), by that clause: the scaffold gained the
 # optional `Done marker:` line. The FIXED part is fourteen — one refusal line, a blank, TEN
 # scaffold lines, the prompt-only line, a blank, the pointer — and the variable part is unmoved.
+#
+# LOWERED 18 -> 17 (wave-26 T5, REQ-3 D6): the one-regression and floor-once arms became ONE
+# full-run arm, so a brief with no suite set leaves one wall unable to answer, not two. The
+# variable part is one extra fault plus two not-checked lines; the fixed part is unmoved.
 expect_eq "§combined meta: the shipped scaffold is ten lines, the count both caps are built on" \
   "10" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
-expect_status "§combined …the wire is at most 18 lines (14 + 1 extra fault + 3 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 18 ] && echo 0 || echo 1)"
+expect_status "§combined …the wire is at most 17 lines (14 + 1 extra fault + 2 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 17 ] && echo 0 || echo 1)"
 expect_contains "§combined …and the fixed line that grew it is the prompt-only sentence" \
   "The wall reads the prompt text only." "$GATE_REASON"
-# AND THE THIRD LINE IS THE NEW WALL'S, NAMED — a cap raised without saying which line
-# filled it is a widened tolerance, which is the mistake the comment above warns about.
-expect_contains "§combined …and the line that filled it is the floor-once wall's" \
-  "not checked: floor-once, needs a suite set" "$GATE_REASON"
+# AND THE FULL-RUN WALL'S LINE IS NAMED — a cap without saying which line fills it is a
+# widened tolerance, which is the mistake the comment above warns about.
+expect_contains "§combined …and one not-checked line is the full-run wall's" \
+  "not checked: full-run, needs a suite set" "$GATE_REASON"
 
 # EACH LABEL, MARKED BY WHETHER THIS BRIEF CARRIES IT — not by which wall fired. The
 # absent Files: and the absent Deliverable-waiver: lines earn ` <ADD>`; the present
@@ -6928,7 +7112,7 @@ section "§not-checked — a dependent arm says so, rather than going quiet (wav
 # ============================================================================
 #
 # SOME ARMS GENUINELY CANNOT ANSWER until an earlier one has produced something. The
-# one-regression wall reads `SUITES_ALLOWED` for `run.sh`; a brief that declares neither
+# full-run wall reads `SUITES_ALLOWED` for `run.sh`; a brief that declares neither
 # `Files:` nor `Suites:` produces no set at all, so the wall has nothing to read. Silence
 # there is the thing AC-8.2 forbids: the author fixes the pooled faults, dispatches again,
 # and meets a refusal the gate could have TOLD them was coming. The shape is the one the
@@ -6945,11 +7129,11 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_NO_SET" "wnotchk")"
 expect_eq "§not-checked a brief with no Files: and no Suites: is refused" "deny" "$GATE_VERDICT"
 expect_contains "§not-checked …naming the suite-allowance fault" \
   "this brief declares no Files: and no Suites:" "$GATE_REASON"
-expect_contains "§not-checked …and saying the one-regression wall was not checked, and why" \
-  "not checked: one-regression, needs a suite set" "$GATE_REASON"
+expect_contains "§not-checked …and saying the full-run wall was not checked, and why" \
+  "not checked: full-run, needs a suite set" "$GATE_REASON"
 # THE CONTROL, and it is what stops this from pinning a constant string. It has to be a
 # refusal on the SAME wire — two faults, so the several-fault wire is what is read — over a
-# brief that DOES declare a suite set, which leaves the one-regression wall checkable. An
+# brief that DOES declare a suite set, which leaves the full-run wall checkable. An
 # unarmed Patrol supplies the second fault without touching the brief.
 REPO=$(make_repo rnotchk2 yes)
 write_attestation "$REPO" "$SID_A"
@@ -6958,7 +7142,7 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONE_SHAPE_FAULT" "wnotchk2
 expect_eq "§not-checked control: a two-fault brief that DECLARES Suites: is refused too" \
   "deny" "$GATE_VERDICT"
 expect_absent "§not-checked …with no not-checked line for a wall that COULD be checked" \
-  "not checked: one-regression" "$GATE_REASON"
+  "not checked: full-run" "$GATE_REASON"
 
 section "§slow-impact — a slow derivation is admitted, and derives the same set (wave-14 REQ-7, AC-7.1)"
 # ============================================================================
@@ -7143,67 +7327,16 @@ expect_no_regex "§bound-one-owner …leaving no tick budget behind to drift aga
   '^[[:space:]]*IMPACT_BOUND_TICKS=' "$DP_GATE_SRC"
 
 # ============================================================================
-section "S32: the floor-once wall — a second full floor waits for Step 4 (REQ-5, D7)"
+section "S32: the full-run wall is silent where it has nothing to judge (wave-26 D6)"
 # ============================================================================
 #
-# THE RULE MADE MECHANICAL. `skills/canonical-sdlc/dispatch.md:12` has said for three
-# releases that the full tree belongs on one row per run, the Step-5 runner's. Nothing
-# enforced the half that matters most: a floor run WHILE Step-4 rows are still open
-# proves a tree that no longer exists by the time those rows land, and wave-14 paid for
-# it six times (seed row 5, Chris DevX item 1).
+# THE FLOOR-ONCE ARM IS FOLDED INTO S28's WALL. Its question ("is the work being proved
+# finished?") survives as the open-writer hold §PROOF-UNBOUNDED drives; its override, a
+# `regression-cause:` line, does not. What stays here is the half S28 does not drive: the
+# briefs and sessions the arm never speaks to, the not-checked line, and the one-parser pins.
 #
-# THE SIBLING WALL IS NOT THIS ONE. S28 above counts full-tree rows on the ROSTER and
-# asks for one written cause per extra run; it says nothing about whether the work being
-# proved is finished. This wall reads the PLAN's `## Tasks` ledger and asks whether any
-# step-4 or fold-in row is still `pending` or `active`. Both can fire on one dispatch and
-# they pool into one refusal like every other pair of arms in this file.
-#
-# THE LEDGER IS READ THROUGH `units_rows`, THE ONE TASKS PARSER (AC-5.5). The static pins
-# at the end of this section are what hold that; a second table split in this hook is the
-# defect REQ-1e existed to remove and it would land back here first.
-#
-# fails-when: a run.sh brief is admitted with an open step-4 row and no recorded cause;
-# an all-landed ledger is refused; a recorded cause does not release the dispatch; a
-# non-floor brief, an unbound session or a plan with no `## Tasks` is touched by this arm.
-
-# s32_row <id> <step> <status> [task text] -> one `## Tasks` data row
-s32_row() {
-  printf '| %s | %s | build | %s | implementor | — | 30 | REQ-1 | payload/scripts/lib/widget.sh | — | %s |' \
-    "$1" "$2" "${4:-does the thing}" "$3"
-}
-
-# s32_plan <repo> <regression-cause text, or empty> <row>... — rewrite the fixture plan
-#
-# WRITTEN WHOLE, NOT APPENDED. `## Tasks` is a section heading, so it CLOSES
-# `## SDLC State`: a cause line appended to the end of a plan that carries a Tasks table
-# is outside the ledger and neither this wall nor S28's counts it (S28f pins that reading
-# from the other side). The cause therefore has to be placed inside the state section
-# when the file is built, which is what this helper is for.
-s32_plan() {
-  local repo="$1" cause="$2"; shift 2
-  local plan="$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-  local row
-  {
-    printf -- '---\n'
-    printf 'governing-skill: canonical-sdlc\n'
-    printf 'canonical_sdlc_version: 14\n'
-    printf 'intent: build\n'
-    printf 'rigor: audited\n'
-    printf 'scale: wave\n'
-    printf -- '---\n\n'
-    printf '# Test wave plan\n\n'
-    printf '## SDLC State\n\n'
-    printf 'integration-branch: main\n'
-    printf 'current: 4\n'
-    printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n\n'
-    printf -- '- Step 4: tasks in flight\n'
-    [ -z "$cause" ] || printf 'regression-cause: %s\n' "$cause"
-    printf '\n## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
-    printf -- '|---|---|---|---|---|---|---|---|---|---|---|\n'
-    for row in "$@"; do printf '%s\n' "$row"; done
-  } > "$plan"
-}
+# fails-when: a non-full-run brief or an unbound session is touched by this arm; a brief with
+# no suite set leaves it silent; the hook grows a second Tasks parser.
 
 S32_FLOOR_BRIEF='Your task: run the tests floor.
 Expected artifact: .bionic/docs/record/w32-floor.log
@@ -7215,164 +7348,47 @@ Expected artifact: .bionic/docs/record/w32-widget.md
 Expected duration: ~15 minutes.
 Suites: tests/widget.test.sh'
 
-# ---- AC-5.1: an open step-4 row refuses the floor, and the refusal names it ----
-REPO=$(make_repo r32a yes)
+# THE CONTROL FIRST: on this very ledger the full-run brief is refused, so the silent rows
+# below discriminate on the brief and the binding, not on a ledger that holds nothing.
+REPO=$(pf_repo r32a)
 write_attestation "$REPO" "$SID_A"
-s32_plan "$REPO" "" \
-  "$(s32_row T1 4 landed)" \
-  "$(s32_row T3 4 pending)" \
-  "$(s32_row T12 5 pending 'Step-5 floor at the integration head')"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-one")"
-expect_eq "32a a full-tree brief is REFUSED while a step-4 row is pending" "deny" "$GATE_VERDICT"
-expect_contains "32a …and the one line names the open row by id" \
-  "T3" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
-expect_contains "32a …saying what is open" "Step-4 rows open" "$GATE_ERR"
-expect_contains "32a …the detail gives the row its step and status" "step 4, pending" "$GATE_VERR"
-expect_contains "32a …and names the plan the cause would go on" \
-  "wave-01-test.plan.md" "$GATE_VERR"
-expect_contains "32a …and the line to write" "regression-cause:" "$GATE_VERR"
-# THE STEP-5 ROW IS NOT THE FLOOR'S BUSINESS. T12 is `pending` at step 5 — the runner row
-# this very dispatch would fill — and a wall that counted it would refuse every floor
-# forever, which is the failure mode this arm is one assertion away from.
-expect_absent "32a …and the step-5 runner row is NOT counted against the floor" \
-  "T12" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
-expect_status "32a …and the refused dispatch journalled no row" \
-  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-# ---- AC-5.1: an ACTIVE row counts too, and several are all named ----
-REPO=$(make_repo r32b yes)
-write_attestation "$REPO" "$SID_A"
-s32_plan "$REPO" "" \
-  "$(s32_row T1 4 landed)" \
-  "$(s32_row T2 4 active)" \
-  "$(s32_row T3 4 pending)"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-two")"
-expect_eq "32b an ACTIVE step-4 row refuses the floor as well as a pending one" "deny" "$GATE_VERDICT"
-S32B_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')
-expect_contains "32b …and BOTH open rows are named on the one line" "T2" "$S32B_LINE"
-expect_contains "32b …the second one too" "T3" "$S32B_LINE"
-expect_absent "32b …and the landed row is not" "T1" "$S32B_LINE"
-
-# ---- AC-5.1: a FOLD-IN row at a later step counts (the plan's own vocabulary) ----
-#
-# A fold-in is work that lands AFTER the step it is folded into — wave-14 carried eleven
-# of them at steps 5 and 6, and every one of them changed the tree the floor had proved.
-# The predicate is the plan's own word (A-T5.1): a row whose `step` cell is 4, or whose
-# task text names a fold-in.
-REPO=$(make_repo r32c yes)
-write_attestation "$REPO" "$SID_A"
-s32_plan "$REPO" "" \
-  "$(s32_row T1 4 landed)" \
-  "$(s32_row T20 6 pending 'Step-6 fold-in (review F1): re-spell the pin')"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-foldin")"
-expect_eq "32c an open FOLD-IN row at step 6 refuses the floor" "deny" "$GATE_VERDICT"
-expect_contains "32c …naming it" "T20" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
-# THE CONTROL that keeps the row above from passing on the step cell: an ordinary step-6
-# row with the same status and no fold-in in its text is NOT counted.
-REPO=$(make_repo r32c2 yes)
-write_attestation "$REPO" "$SID_A"
-s32_plan "$REPO" "" \
-  "$(s32_row T1 4 landed)" \
-  "$(s32_row T20 6 pending 'Step-6 six-axis review at the audited head')"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-plain6")"
-expect_status "32c control: an ordinary open step-6 row does NOT refuse the floor" "0" "$GATE_ST"
-
-# ---- AC-5.2: every step-4 row landed or dropped, and the floor is admitted ----
-REPO=$(make_repo r32d yes)
-write_attestation "$REPO" "$SID_A"
-s32_plan "$REPO" "" \
-  "$(s32_row T1 4 landed)" \
-  "$(s32_row T2 4 dropped)" \
-  "$(s32_row T3 4 landed)" \
-  "$(s32_row T12 5 pending 'Step-5 floor at the integration head')"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-clear")"
-expect_status "32d the floor is ADMITTED once every step-4 row is landed or dropped" "0" "$GATE_ST"
-expect_absent "32d …with nothing from this arm on the wire" "Step-4 rows open" "$GATE_ERR"
-expect_status "32d …and it is journalled" \
-  "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-# ---- AC-5.3: a recorded cause releases the floor with rows still open ----
-#
-# WRITTEN AS A PAIR (A-T5.5). The positive half alone is vacuous at a parent that has no
-# wall: exit 0 is what an absent arm gives too. Its discriminator is the second half —
-# the SAME ledger without the cause line, on a fresh repo, must refuse — so the block goes
-# red at a parent where the wall is missing and green only where the override is read.
-REPO=$(make_repo r32e yes)
-write_attestation "$REPO" "$SID_A"
-s32_plan "$REPO" "the merge changed the loader; the tree must be re-proved" \
-  "$(s32_row T1 4 landed)" \
-  "$(s32_row T3 4 pending)"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-caused")"
-expect_status "32e a recorded regression-cause: admits the floor with T3 still pending" "0" "$GATE_ST"
-expect_absent "32e …with nothing from this arm on the wire" "Step-4 rows open" "$GATE_ERR"
-REPO=$(make_repo r32e2 yes)
-write_attestation "$REPO" "$SID_A"
-s32_plan "$REPO" "" \
-  "$(s32_row T1 4 landed)" \
-  "$(s32_row T3 4 pending)"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-uncaused")"
-expect_eq "32e discriminator: the SAME ledger without the cause line is refused" "deny" "$GATE_VERDICT"
-# AND THE CAUSE IS READ WHERE S28 READS ITS OWN: under `## SDLC State`, nowhere else.
-REPO=$(make_repo r32e3 yes)
-write_attestation "$REPO" "$SID_A"
-s32_plan "$REPO" "" \
-  "$(s32_row T1 4 landed)" \
-  "$(s32_row T3 4 pending)"
-printf 'regression-cause: written after the table, outside the ledger\n' \
-  >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-outside")"
-expect_eq "32e …a cause written below the Tasks table is outside ## SDLC State and does not count" \
-  "deny" "$GATE_VERDICT"
-
-# ---- AC-5.4: the arm is silent on everything that is not a floor ----
-REPO=$(make_repo r32f yes)
-write_attestation "$REPO" "$SID_A"
-s32_plan "$REPO" "" \
-  "$(s32_row T1 4 landed)" \
-  "$(s32_row T3 4 pending)"
+pf_plan "$REPO" "" "$(pf_row T3 4 pending payload/scripts/lib/widget.sh)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor")"
+expect_eq "32a control: a full-run brief over an open tracked-file writer is refused" "deny" "$GATE_VERDICT"
+expect_contains "32a …naming the writer" "T3" "$(pf_line)"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_NARROW_BRIEF" "w32-narrow")"
-expect_status "32f a brief that does not name tests/run.sh is untouched by this arm" "0" "$GATE_ST"
-expect_absent "32f …silently" "Step-4 rows open" "$GATE_ERR"
+expect_eq "32f a brief that does not name tests/run.sh is untouched by this arm" "allow" "$GATE_VERDICT"
+expect_absent "32f …silently" "write tracked files" "$GATE_ERR"
 
-# A PLAN WITH NO `## Tasks` TABLE is open and silent — which is every fixture above this
-# section, and the reason none of them changed when this wall landed.
-REPO=$(make_repo r32g yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-no-table")"
-expect_status "32g a bound plan with no ## Tasks table admits the floor" "0" "$GATE_ST"
-expect_absent "32g …silently" "Step-4 rows open" "$GATE_ERR"
-
-# NO BOUND PLAN AT ALL: nowhere to read a ledger and nowhere to write a cause.
+# NO BOUND PLAN AT ALL: no proof record to read and no ledger.
 REPO=$(make_repo r32h yes)
 write_attestation "$REPO" "$SID_A"
 rm -rf "$REPO/.bionic/docs/plans"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-unbound")"
-expect_status "32h an unbound session admits the floor" "0" "$GATE_ST"
-expect_absent "32h …silently" "Step-4 rows open" "$GATE_ERR"
+expect_eq "32h an unbound session admits the full run" "allow" "$GATE_VERDICT"
+expect_absent "32h …silently" "write tracked files" "$GATE_ERR"
 
-# ---- AC-5.4: and the arm says so when it cannot answer (wave-14 AC-8.2's shape) ----
+# ---- and the arm says so when it cannot answer (wave-14 AC-8.2's shape) ----
 REPO=$(make_repo r32i yes)
 write_attestation "$REPO" "$SID_A"
-s32_plan "$REPO" "" "$(s32_row T3 4 pending)"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: review the wave.
 Expected duration: 20 minutes.' "w32-no-set")"
 expect_contains "32i a brief with no suite set leaves this arm unable to answer, and it says so" \
-  "not checked: floor-once, needs a suite set" "$GATE_REASON"
+  "not checked: full-run, needs a suite set" "$GATE_REASON"
+expect_absent "32i …once, under one name: the two retired arm names are gone" \
+  "not checked: floor-once" "$GATE_REASON"
 
-# ---- AC-5.5: one Tasks parser, and it is the library's ----
+# ---- one Tasks parser, and it is the library's ----
 S32_HOOK="$GATE"
 expect_status "32j the hook reads the ledger through units_rows" "yes" \
   "$([ "$(/usr/bin/grep -c 'units_rows' "$S32_HOOK")" -ge 1 ] && echo yes || echo no)"
 expect_status "32j …and declares units.sh in its own BIONIC_LIB_WANT" "yes" \
   "$(sed -n 's/^BIONIC_LIB_WANT="\(.*\)"$/\1/p' "$S32_HOOK" | head -1 \
      | tr ' ' '\n' | /usr/bin/grep -qx 'units.sh' && echo yes || echo no)"
-# NO SECOND TABLE PARSER. The matrix spelled this pin as "`split(` on `|` is zero", which
-# was written against a `grep -r payload/` that returns nothing at all (payload/hooks is a
-# SYMLINK and `grep -r` does not follow one — A-T5.4). The hook has carried exactly one
-# split-on-pipe since epic-16: a roster-state LINE reader (`dp_roster_contracts` until
-# epic-23 wave-20 T2; since D10 the name-in-flight arm's status label, the close itself being
-# the library's `roster_open_names`), which is not a markdown table. So the pin is re-spelled (A-T5.3): the count stays at one, that one
-# is the roster reader, and nothing in this hook scans for a `## Tasks` heading.
+# NO SECOND TABLE PARSER. The hook has carried exactly one split-on-pipe since epic-16: a
+# roster-state LINE reader (since D10 the name-in-flight arm's status label), which is not a
+# markdown table. The count stays at one, that one is the roster reader, and nothing in this
+# hook scans for a `## Tasks` heading.
 expect_eq "32j …and carries exactly one awk split on a pipe, the roster-line reader" \
   "1" "$(/usr/bin/grep -cE 'split\([^)]*\|' "$S32_HOOK")"
 expect_contains "32j …which splits a roster LINE, not a markdown table" \

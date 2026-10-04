@@ -1808,6 +1808,10 @@ am_refused "19q: bash session-poker.sh step-line" "bash $AM_POKER step-line T2 '
 am_refused "19r: bash session-poker.sh current" "bash $AM_POKER current 5"
 am_refused "19s: bash session-poker.sh ledger-add" "bash $AM_POKER ledger-add T2 agent=w20-sub"
 am_refused "19t: bash session-poker.sh ledger-set" "bash $AM_POKER ledger-set T2 landed=yes"
+# §ARM-A (proof-add) — wave-26 T5, REQ-3 D5/D6: a proof line decides whether the full run is
+# admitted, so an agent that could write one could prove its own head.
+am_refused "19u: bash session-poker.sh proof-add" \
+  "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt"
 
 # THE PAIRED POSITIVES. The same verbs from the main thread (no agent_id) are the
 # orchestrator's and pass this arm; a subagent's own read-only poker verbs pass; and a quoted
@@ -1817,6 +1821,8 @@ am_admitted "19j: task-add from the main thread" "bash $AM_POKER task-add a b c 
 am_admitted "19j2: hold from the main thread" "bash $AM_POKER hold w20-sub 'idle on purpose'" ""
 am_admitted "19j3: current from the main thread" "bash $AM_POKER current 5" ""
 am_admitted "19j4: task-set from the main thread" "bash $AM_POKER task-set T2 status=landed" ""
+am_admitted "19j5: proof-add from the main thread" \
+  "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt" ""
 am_admitted "19k: a subagent's tick" "bash $AM_POKER tick"
 am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
 am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"
