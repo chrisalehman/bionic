@@ -223,16 +223,32 @@ _wall_flatten() {  # <text> -> sets _WALL_FLAT
 # in one process (`bionic_fold`) and each of them asks about the same `$COMMAND`. A
 # different text recomputes; it never reads another command's strip. A text with none of
 # the three characters is its own strip, and costs no fork.
-_WALL_SCREEN_SET=0; _WALL_SCREEN_KEY=""; _WALL_STRIPPED=""
-_wall_screen() {  # <command text> -> sets _WALL_STRIPPED
+#
+# THE SAME PASS ANSWERS THE TIER-2 SCREEN IN ANY LETTER CASE (wave-25 T12). `_wall_cmd_fill`
+# needs to know whether the strip holds `git`, `docker`, `npx` or `uvx` in a case its
+# lower-case literals miss, and on a 160 KB command every bash glob over the strip cost 5 to
+# 30 ms (tests/hook-timeout.test.sh rows g and j). awk already holds each line here, so it
+# lower-cases it (ASCII only, under `LC_ALL=C`) and looks for the four words, until the first
+# hit; a line the continuation rule joins to the next is carried into it, as the strip joins it. The answer, `_WALL_SCREEN_T2`, rides in front of the strip as one character and comes off
+# before the strip is stored, so the strip is byte for byte what it was. A text the fast path
+# keeps whole leaves it empty, and `_wall_tier2_any_case` asks the strip itself.
+_WALL_SCREEN_SET=0; _WALL_SCREEN_KEY=""; _WALL_STRIPPED=""; _WALL_SCREEN_T2=""
+_wall_screen() {  # <command text> -> sets _WALL_STRIPPED and _WALL_SCREEN_T2
   if [ "$_WALL_SCREEN_SET" = 1 ] && [ "$1" = "$_WALL_SCREEN_KEY" ]; then return 0; fi
+  # Bytes, not characters, for the two globs and the cut below: every character they test is
+  # ASCII, and in a UTF-8 locale bash 3.2 widens the whole string first (wave-25 T12).
+  local _o LC_ALL=C
   case "$1" in
     *[\\\'\"]*)
-      _WALL_STRIPPED=$(printf '%s' "$1" | LC_ALL=C awk '
+      _o=$(printf '%s' "$1" | LC_ALL=C awk '
         { e = (substr($0, length($0)) == "\\")
           gsub(/[\\\047"]/, "")
-          printf "%s%s", $0, (e ? "" : "\n") }') ;;
-    *) _WALL_STRIPPED="$1" ;;
+          if (!t) { l = p tolower($0); t = (index(l, "git") || index(l, "docker") || index(l, "npx") || index(l, "uvx")); p = (e ? l : "") }
+          L[NR] = $0 (e ? "" : "\n") }
+        END { printf "%d", t; for (i = 1; i <= NR; i++) printf "%s", L[i] }')
+      case "$_o" in 1*) _WALL_SCREEN_T2=1 ;; *) _WALL_SCREEN_T2=0 ;; esac
+      _WALL_STRIPPED="${_o#?}" ;;
+    *) _WALL_STRIPPED="$1"; _WALL_SCREEN_T2="" ;;
   esac
   _WALL_SCREEN_KEY="$1"; _WALL_SCREEN_SET=1
 }
@@ -325,7 +341,10 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 #     four words, those letters survive in the text with nothing but quotes and
 #     backslashes between them — which is exactly what removing those characters and
 #     then looking for the substring tests. A miss cannot be a tier-2 match, and the
-#     empty head it leaves takes `classify_tier2`'s own `*) return 1` arm.
+#     empty head it leaves takes `classify_tier2`'s own `*) return 1` arm. Since wave-25
+#     T12 the head's first word comes back folded to lower case (`GIT clone` heads as
+#     `git clone`), so the letters survive in ANY case, and the screen asks for them in
+#     any case once the lower-case literals miss.
 #
 #  3. THE CHAIN IS READ BY THE QUOTE-AWARE SEGMENTER, AND ONLY WHEN `&&` IS IN THE TEXT
 #     (wave-24 T11, D12, AC-7.7). The count used to be a quote-blind split on the two
@@ -341,6 +360,21 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
 #
 # IT IS A FILL, NEVER A VERDICT. Every class this wall acts on still comes from
 # `cmd_class` — one reader, cmd-class.sh — over the same strings as before.
+# _wall_tier2_any_case -> 0 when the strip `_wall_screen` just made holds `git`, `docker`, `npx`
+# or `uvx` in any letter case. `_wall_screen`'s awk pass answered it already for a text with a
+# quote or a backslash in it; for one without (no awk ran, and the strip is the text) the
+# globs ask here, under `LC_ALL=C`: in a UTF-8 locale bash 3.2 matches a bracket glob through its
+# wide-character path (wave-24 T31 measured 2-4x), and every letter is ASCII. A function of its
+# own so the locale ends with it.
+_wall_tier2_any_case() {
+  case "$_WALL_SCREEN_T2" in 1) return 0 ;; 0) return 1 ;; esac
+  local LC_ALL=C
+  case "$_WALL_STRIPPED" in
+    *[Gg][Ii][Tt]*|*[Dd][Oo][Cc][Kk][Ee][Rr]*|*[Nn][Pp][Xx]*|*[Uu][Vv][Xx]*) return 0 ;;
+  esac
+  return 1
+}
+
 _WALL_SAFE_FLAT=""; _WALL_HEAD=""; _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
 _wall_cmd_fill() {  # <raw command text> -> sets the four values above
   local _cls _seg _segs=""
@@ -357,10 +391,16 @@ _wall_cmd_fill() {  # <raw command text> -> sets the four values above
   # squeezes whitespace, which can remove a word but never join one. A word found only
   # in a heredoc body costs one head reduction, and the head — read from the flat form —
   # still cannot start with it.
+  #
+  # IN ANY LETTER CASE (wave-25 T12). The head reduction folds its command word, so `GIT clone`
+  # heads as `git clone` (cmd-class.sh `cmd_word_fold`) and the screen has to say maybe for it.
+  # The lower-case literals stay first, as `_wall_mentions_git` keeps its literal first: they
+  # are the common hit. Only their miss pays for `_wall_tier2_any_case`.
   _wall_screen "$1"
   case "$_WALL_STRIPPED" in
     *git*|*docker*|*npx*|*uvx*) _WALL_HEAD=$(cmd_unwrap_head "$_WALL_SAFE_FLAT") ;;
-    *)                          _WALL_HEAD="" ;;
+    *) _WALL_HEAD=""
+       if _wall_tier2_any_case; then _WALL_HEAD=$(cmd_unwrap_head "$_WALL_SAFE_FLAT"); fi ;;
   esac
 
   _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
@@ -1272,8 +1312,15 @@ bionic_context 2>/dev/null || exit 0
 # segment, and cutting the remainder at `git` with `%%git*` one more: `cd <dir> && <64 KB
 # heredoc> … git commit` took 17.75 s under 3.2 and 7.02 s under 5.3, past the hook's 10 s.
 # The empty segments the split adds (a doubled separator, a trailing one) name no `cd`.
+#
+# UNDER `LC_ALL=C` (wave-25 T12). In a UTF-8 locale bash 3.2 widens the whole subject string
+# before every glob, so each `case` on a segment is a pass over it, and the any-case test below
+# added one per segment (measured +15 ms on tests/hook-timeout.test.sh row b4). Every character
+# this function tests or cuts at is ASCII, and no UTF-8 byte of a longer character equals one,
+# so reading bytes gives the same lists; `local` ends the locale with the function.
 _EG_CDS=""
 _eg_cd_targets() {
+  local LC_ALL=C
   local _t="${1:-}" _rest _seg _p _i=0 _n _last=0
   local -a _segs=()
   _EG_CDS=""
@@ -1292,6 +1339,18 @@ _eg_cd_targets() {
         *) break ;;
       esac
     done
+    # A COMMIT SPELLED IN ANOTHER LETTER CASE ENDS THE SCAN TOO (wave-25 T12). The cut above
+    # finds the literal `git` only, so after `GIT commit` the scan read on and took a later
+    # `cd` for a second directory: a refusal of a commit whose lower-case form passes. Only a
+    # segment whose WORD is git ends it here, asked of git-argv.sh's `git_argv_is_git` (the
+    # gate always loads it) and only for a segment that opens with one of the three spellings
+    # the literal cut cannot have taken (`G`, `gI`, `giT`): the word is cut off those few
+    # segments, never off every one. `echo GITHUB` is no commit, and the scan reads on past
+    # it. A path to git (`/usr/bin/GIT commit`) is not cut here and reads on, which can only
+    # refuse.
+    case "$_seg" in
+      G*|gI*|giT*) if git_argv_is_git "${_seg%%[ 	]*}"; then _seg=""; _last=1; fi ;;
+    esac
     case "$_seg" in
       'cd'|'cd '*|'cd	'*)
         _p="${_seg#cd}"
@@ -1417,8 +1476,10 @@ _eg_commit_cwd() {
   local _line _oldifs _hadf _p _c _gc
   _EG_CWD=""; _EG_CWD_SRC=""; _EG_CDS=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
+  # `env` in any letter case: the argv reader folds the prefix word (wave-25 T12), so
+  # `ENV -C <dir> git commit` is placed by its directory exactly as `env -C <dir>` is.
   case " $COMMAND " in
-    *" -C "*|*" -C"[\"\']*|*env*)
+    *" -C "*|*" -C"[\"\']*|*env*|*[Ee][Nn][Vv]*)
       _oldifs="$IFS"; _hadf=0
       while IFS= read -r _line; do
         [ -n "$_line" ] || continue
@@ -4974,7 +5035,9 @@ classify_tier2() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
   # matcher's first word for any of them to fire; the `case` asks exactly that
   # with a builtin and lets the greps decide only when one of them still can.
   # A command that begins with none of the four words is the overwhelming case
-  # and now costs nothing.
+  # and now costs nothing. The head arrives with its command word already folded to
+  # lower case (`cmd_unwrap_head`, wave-25 T12), so `GIT clone` is matched here as
+  # `git clone` and these anchors stay lower-case names.
   local c="$1"
   case "$c" in
     git*|docker*|npx*|uvx*) : ;;
@@ -5115,7 +5178,10 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
     [ "$_hadf" -eq 1 ] || set +f
     [ $# -gt 0 ] || continue
     _script=""
-    case "${1##*/}" in
+    # The runner word is a NAME, read through git-argv.sh's fold (wave-25 T12): `BASH x.sh`
+    # runs bash on a case-blind filesystem. The script's own path keeps its case.
+    cmd_word_fold "${1##*/}"
+    case "$CMD_WORD_FOLDED" in
       bash|sh|zsh|dash|ksh|.|source)
         shift
         while [ $# -gt 0 ]; do

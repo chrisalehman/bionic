@@ -908,10 +908,15 @@ section "Section 6: Step 8's tmp wipe spares session-keyed state"
 # 44d below pin the class list against `PATROL_STATE_CLASSES` directly so the two cannot
 # drift apart again without one of them turning red.
 #
+# NO HAND COUNT (wave-25 T15). The sentence said "the seven" until `workspaces` and `gate`
+# joined the list; the count is gone, because 44c below already compares the number of
+# names against `PATROL_STATE_CLASSES`, and the six bytes paid for the two new names under
+# row 115's cap.
+#
 # THE FIELD NAME `tmp-wiped:` IS DELIBERATELY UNTOUCHED (§Evidence, step 8 row). It is an
 # evidence key the gate parses, not prose; renaming it would be an interface change and is
 # not what the finding asked for.
-PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the seven \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`/\`tick-digest\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
+PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`/\`tick-digest\`/\`workspaces\`/\`gate\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
 PIN_TMP_BLANKET='wipe `.bionic/tmp/*`;'
 
 if has_pin "$STEP8_MD" "$PIN_TMP_SPARE"; then
@@ -4296,5 +4301,90 @@ awk '!d && /^## [0-9]/ { $2 = "0.0.0-mismatch"; d = 1 } 1' "$SEMVER_CHANGELOG" \
   > "$TMP/semver-changelog-doctored.md"
 expect_eq "SEMVER-8: a doctored newest heading reads as its own version (pin discriminates)" \
   "0.0.0-mismatch" "$(changelog_head_version "$TMP/semver-changelog-doctored.md")"
+
+section "Section PB: wave-25 T6 — the permission boundary is declared on the Step-0 card, in every role, in the dispatch doctrine and in the shipped docs (REQ-3 AC-3.4, REQ-6 AC-6.2, REQ-8 AC-8.2; D10, D11)"
+#
+# WHAT THIS OWNS. An engaged run answers the platform's permission questions itself, so it
+# must say so where the user approves the run (the Step-0 card's Gates block), teach every
+# agent the route the platform never refuses (one line in the shared role block, rendered
+# into all six roles), have the dispatcher name the agent when it creates its tree (the
+# workspace record reads that name), and tell a user the whole contract in the shipped
+# operational rules. The card line is paid for inside the skill's byte cap: rows 111-115 and
+# 125 above are this section's other half, and they do not move.
+#
+# HERMETIC. Reads the committed rendered files, the block source and operational-rules.md by
+# path; doctored copies live under $TMP.
+PB_STEP0="${REPO}/skills/canonical-sdlc/steps/0.md"
+PB_DISPATCH="${REPO}/skills/canonical-sdlc/dispatch.md"
+PB_OPS="${REPO}/skills/canonical-sdlc/operational-rules.md"
+PB_BLOCK="${REPO}/agents-src/blocks/dispatch-rules.md"
+PB_LINE="    permissions   answered from the run's workspace | off"
+PB_RULE='run as `bash <file>`'
+# pb_gates <file> -> the lines under the layout's `  Gates` heading, to the first blank line.
+pb_gates() { awk '/^  Gates$/ { g = 1; next } g && /^$/ { exit } g' "$1" 2>/dev/null; }
+# pb_after_interview <file> -> the Gates line that directly follows the `interview` line.
+pb_after_interview() { pb_gates "$1" | awk 'p { print; exit } /^    interview /{ p = 1 }'; }
+# pb_ops_section <file> -> the `## Permission answers` section, to the next `## ` heading.
+pb_ops_section() { awk '/^## Permission answers/ { p = 1; print; next } p && /^## / { exit } p' "$1" 2>/dev/null; }
+
+PB_GATES="$(pb_gates "$PB_STEP0")"
+expect_contains "PB-a precondition: the Gates block of steps/0.md reads (it carries the walk line)" \
+  "    walk          <required | exempt>" "$PB_GATES"
+expect_eq "PB-a: AC-6.2 — the Gates line after interview is the permissions line, in the layout" \
+  "$PB_LINE" "$(pb_after_interview "$PB_STEP0")"
+expect_contains "PB-a2: AC-6.2 — the step names the off switch beside the consent" \
+  'permission-answers: false' "$(cat "$PB_STEP0" 2>/dev/null)"
+anchor "$PB_STEP0" "$PB_LINE" 1
+grep -vF -- "$PB_LINE" "$PB_STEP0" > "$TMP/pb-step0-doctored.md" 2>/dev/null
+expect_contains "PB-a3 precondition: the doctored card still has its Gates block" \
+  "    walk          <required | exempt>" "$(pb_gates "$TMP/pb-step0-doctored.md")"
+expect_ne "PB-a3: a card with the line removed fails PB-a (the pin discriminates)" \
+  "$PB_LINE" "$(pb_after_interview "$TMP/pb-step0-doctored.md")"
+
+PB_ROLES=0
+PB_ROLE_MISS=""
+for _rf in "${REPO}"/agents/*.md; do
+  [ -f "$_rf" ] || continue
+  PB_ROLES=$((PB_ROLES + 1))
+  grep -qF -- "$PB_RULE" "$_rf" || PB_ROLE_MISS="${PB_ROLE_MISS} ${_rf##*/}"
+done
+expect_eq "PB-b precondition: the role-file set is the six roles" "6" "$PB_ROLES"
+expect_eq "PB-b: AC-3.4 — every role file carries the script-in-a-file rule (missing in:${PB_ROLE_MISS:- none})" \
+  "" "$PB_ROLE_MISS"
+expect_eq "PB-b2: AC-3.4 — the rule lives once in the shared role block" \
+  "1" "$(grep -cF -- "$PB_RULE" "$PB_BLOCK" 2>/dev/null | tr -cd '0-9')"
+expect_contains "PB-b3: AC-3.4 — the rule names the inline form it replaces" \
+  "never inline as \`bash -c '…'\`" "$(tr '\n' ' ' < "$PB_BLOCK" 2>/dev/null | sed 's/  */ /g')"
+anchor "${REPO}/agents/researcher.md" "$PB_RULE" 1
+grep -vF -- "$PB_RULE" "${REPO}/agents/researcher.md" > "$TMP/pb-role-doctored.md" 2>/dev/null
+expect_contains "PB-b4 precondition: the doctored role file still carries the shared block's other rules" \
+  'Spell each suite literally' "$(cat "$TMP/pb-role-doctored.md")"
+expect_eq "PB-b4: a role file with the rule's line removed reads as missing it (the pin discriminates)" \
+  "0" "$(grep -cF -- "$PB_RULE" "$TMP/pb-role-doctored.md" | tr -cd '0-9')"
+
+PB_SPAWN="$(grep -F 'Parallel writers work in spawned worktrees' "$PB_DISPATCH" 2>/dev/null)"
+expect_contains "PB-c precondition: dispatch.md's spawned-worktree paragraph reads" \
+  'spawn-worktree.sh' "$PB_SPAWN"
+expect_contains "PB-c: the dispatcher passes the agent's name to create with --for" \
+  '`--for <name>`' "$PB_SPAWN"
+
+PB_OPS_SEC="$(pb_ops_section "$PB_OPS")"
+expect_contains "PB-d precondition: operational-rules.md has its Permission answers section" \
+  '## Permission answers' "$PB_OPS_SEC"
+for _pb in \
+  '**The platform decides what it decides.**' \
+  '**An engaged run answers what the platform asks.**' \
+  '**Reserved categories go to the human.**' \
+  '`leaves-the-machine`' '`credentials`' '`production-infrastructure`' '`billing`' \
+  'permission-answers: false' 'permission-answers.log'; do
+  expect_contains "PB-d: AC-8.2 — the shipped docs state: $_pb" "$_pb" "$PB_OPS_SEC"
+done
+anchor "$PB_OPS" 'permission-answers: false' 1
+sed 's/permission-answers: false/permission-answers: (unset)/' "$PB_OPS" > "$TMP/pb-ops-doctored.md"
+PB_OPS_DOCTORED="$(pb_ops_section "$TMP/pb-ops-doctored.md")"
+expect_contains "PB-d2 precondition: the doctored docs still have the section" \
+  '## Permission answers' "$PB_OPS_DOCTORED"
+expect_absent "PB-d2: docs with the off switch removed fail PB-d (the pin discriminates)" \
+  'permission-answers: false' "$PB_OPS_DOCTORED"
 
 finish

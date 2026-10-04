@@ -392,3 +392,27 @@ log_finding() {  # $1=check-id  $2=detail — never blocks, always returns 0
   echo "canonical-sdlc [$1]: $2" >&2
   return 0
 }
+
+# THE ANSWER LOG (epic-23 wave-25-never-paused, REQ-7, spec D9). hooks/permission-answer.sh
+# writes one line per permission answer to `permission-answers.log`, in the SAME directory
+# audit_path names — so one slug rule places both, outside every project and every workspace
+# (AC-7.2), and the doctor can name the path without a second rule. Derived from audit_path
+# rather than restating its slug, so the two can never name different directories.
+# [INSTRUMENT]
+answers_path() {  # $1=project root → absolute permission-answers log path; rc 1 if no $HOME
+  local a
+  a=$(audit_path "$1") || return 1
+  printf '%s/permission-answers.log' "${a%/*}"
+}
+
+# The answer log's appender. UNLIKE log_finding IT ECHOES NOTHING: its caller answers the
+# platform on stdout and keeps its stream for that one object. It reports failure, rc 1, and
+# does not swallow it, because the caller's rule is "no answer without a line": an allow that
+# could not be put on the record is turned into a denial there.
+# [INSTRUMENT]
+log_answer() {  # $1=project root  $2=the answer line — appends it; rc 1 when it could not
+  local f
+  f=$(answers_path "$1") || return 1
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 1
+  printf '%s\n' "$2" >> "$f" 2>/dev/null
+}
