@@ -186,14 +186,39 @@ _wt_cwd_in_project() {  # <path> <main-root> [target-checkout]
   return 1
 }
 
+# THE RUNNER'S OWN SCRIPT, from its command line as `ps` prints it, one word per argument.
+# A process IS the runner only when it runs the script: argv[0] ends in `tests/run.sh`, or
+# argv[0] is an interpreter and its first word past the options does. A `-c` (or `-s`)
+# among those options means the words that follow are a command string or positional
+# arguments, never a script, so a shell whose command text merely MENTIONS the runner — the
+# harness wraps every Bash call in `zsh -c '…'`, wait loops and progress notes included — is
+# not one (T31). Prints the script word and returns 0, or returns 1.
+_wt_runner_script() {  # <argv word>...
+  case "${1:-}" in *tests/run.sh) printf '%s' "$1"; return 0 ;; esac
+  [ "$#" -gt 1 ] || return 1
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --) shift; break ;;
+      -o|+o|-O|+O|--rcfile|--init-file) shift 2 || return 1 ;;
+      --*) shift ;;
+      -*[cs]*) return 1 ;;
+      [-+]?*) shift ;;
+      *) break ;;
+    esac
+  done
+  case "${1:-}" in *tests/run.sh) printf '%s' "$1"; return 0 ;; esac
+  return 1
+}
+
 # The D1 predicate. Prints `pid=<pid> cwd=<cwd> script=<path>` for the first runner that
-# satisfies it and returns 0; returns 1 when none does. A field that could not be read
-# prints `unreadable`. The script path is the first command-line word ending in
-# `tests/run.sh`, taken against the working directory when it is relative, with its
-# directory made physical when that directory exists, so a symlinked spelling (`/tmp` for
-# `/private/tmp`) still compares.
+# satisfies it and returns 0; returns 1 when none does. A working directory that could not
+# be read prints `unreadable`. The script is `_wt_runner_script`'s word, taken against the
+# working directory when it is relative, with its directory made physical, so a symlinked
+# spelling (`/tmp` for `/private/tmp`) still compares. A candidate whose script cannot be
+# resolved to a file is not a runner: no opinion, as for an unreadable process.
 _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=...
-  local root="${1:-}" co="${2:-}" pids cwds pid cmd cwd script dir tok
+  local root="${1:-}" co="${2:-}" pids cwds pid cmd cwd script dir
   local -a words
   [ -n "$root" ] || return 1
   pids="$(_wt_suite_pids)"
@@ -207,21 +232,17 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
     # reused, since pgrep answered.
     case "$cmd" in *tests/run.sh*) : ;; *) continue ;; esac
     cwd="$(printf '%s\n' "$cwds" | awk -v p="$pid" '$1 == p { sub(/^[^ ]* /, ""); print; exit }')"
-    script=""
     read -r -a words <<< "$cmd"
-    for tok in "${words[@]}"; do
-      case "$tok" in *tests/run.sh) script="$tok"; break ;; esac
-    done
+    script="$(_wt_runner_script "${words[@]}")" || continue
     case "$script" in
-      '') : ;;
       /*) : ;;
-      *) if [ -n "$cwd" ]; then script="${cwd}/${script}"; else script=""; fi ;;
+      *) [ -n "$cwd" ] || continue; script="${cwd}/${script}" ;;
     esac
-    if [ -n "$script" ]; then
-      dir="$(cd "${script%/*}" 2>/dev/null && pwd -P)" && script="${dir}/${script##*/}"
-    fi
+    dir="$(cd "${script%/*}" 2>/dev/null && pwd -P)" || continue
+    script="${dir}/${script##*/}"
+    [ -f "$script" ] || continue
     if _wt_cwd_in_project "$script" "$root" "$co" || _wt_cwd_in_project "$cwd" "$root" "$co"; then
-      printf 'pid=%s cwd=%s script=%s' "$pid" "${cwd:-unreadable}" "${script:-unreadable}"
+      printf 'pid=%s cwd=%s script=%s' "$pid" "${cwd:-unreadable}" "$script"
       return 0
     fi
   done
