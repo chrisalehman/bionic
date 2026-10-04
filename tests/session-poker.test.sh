@@ -8731,6 +8731,17 @@ expect_contains "49c2 …with the command to run by hand" "task-set T7 status=ac
 expect_true "49c3 …and the plan is unchanged" cmp -s "$TMPROOT/s49-before" "$P49"
 expect_eq "49d no projection copy is left beside the plan" "" \
   "$(find "$R49/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
+
+# 49e (wave-26 T32; T14, AC-6.5): the offered review names the range it reads. §48's world as it
+# ends: a review proof at A, one landing to B, the review offered again. The digest is removed so
+# the tick prints in full; the head is the one the tick reads for live:head, with no git of its own.
+expect_nonempty "49e precondition: §48 left its world and both heads" "${R48:-}${W48_A:-}${W48_B:-}"
+rm -f "$R48/.bionic/tmp/tick-digest-$SID.state"
+poke_pressure "$R48" 8192 1.0 tick
+expect_eq "49e precondition: the tick offers the review" "yes" "$(s48_fill_has T3)"
+expect_contains "49e AC-6.5 …and names the range it reads, the proof's head to the head now" \
+  "poker: RANGE T3 ${W48_A}..${W48_B}" "$OUT"
+expect_absent "49e2 …and only for the review: the active build has no RANGE line" "poker: RANGE T2" "$OUT"
 POKE_BOUND="$S49_BOUND_WAS"
 
 finish

@@ -3127,7 +3127,7 @@ launch_sync_sweep() {  # <plan> <root>
 launch_sync_project() {
   local plan="$1" root="$2" sid="$3" roster="$4" acks="$5" out="$6"
   local open rec i j n=0 nl=0 hits h hasl=0 haswt=0 hasbs=0 s4 s4wt s4bs
-  local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand
+  local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand rvat rvids
   local us=$'\037'
   local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LROW FINAL LGID LGAG pairs lpairs
   LS_SAID=""; LS_FAILS=""; LS_HANDS=""
@@ -3173,6 +3173,10 @@ EOF
   done < "$out.ledger"
   rm -f "$out.ledger"
   s4="$(launch_sync_step4 "$plan")"; s4wt="${s4%%$'\t'*}"; s4bs="${s4#*$'\t'}"; [ -n "$s4" ] || s4bs=""
+  # THE LAST REVIEW PROOF AND THE ROWS IT RETURNS (wave-26 T14): `proof-add review` puts every
+  # `live:head` row back to pending, and a launch from before that proof is a pass already read.
+  rvat="$(awk '/^[ \t]*```/ { f = !f; next } !f && /^[ \t-]*proved:/ && match($0, /kind=review /) && match($0, / at=[^ ]+/) { a = substr($0, RSTART + 4, RLENGTH - 4); if (a > m) m = a } END { print m }' "$plan" 2>/dev/null)"
+  rvids=" $(units_live_rows "$plan" 2>/dev/null | cut -f1 | tr '\n' ' ')"
   cp "$plan" "$out" || return 1
   j=0
   while [ "$j" -lt "$nl" ]; do
@@ -3206,6 +3210,9 @@ EOF
         case "${LGAG[k]}" in *"($name)") lid=have; break ;; esac
         k=$((k + 1))
       done
+    fi
+    if [ -z "$lid" ] && [ "$st" = pending ] && [ -n "$rvat" ] && [ -n "${LLA[j]}" ]; then
+      case "$rvids" in *" ${RID[i]} "*) [ "${LLA[j]}" \< "$rvat" ] && lid=read ;; esac
     fi
     if [ -n "$lid" ]; then j=$((j + 1)); continue; fi
     if [ "${FINAL[i]}" = "$j" ]; then
@@ -5718,7 +5725,7 @@ EOF
           awk '
             $1 != "poker:" { next }
             $2 == "note:" { print $3, $4, $5; next }
-            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED)$/ { print $2, $3, $4 }
+            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE)$/ { print $2, $3, $4 }
           ' "$TICK_BUF" | LC_ALL=C sort
         } | cksum | awk '{ print $1 "-" $2 }' )"
       fi
@@ -6908,7 +6915,7 @@ EOF
           # same way (the rung from `pressure_level`, the occupancy by the same predicate:
           # wave-19 audit V-2, T2d), so what it names is what this prints.
           SCHED_READY="${SCHED_RO_READY:-$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")}"
-          SCHED_IDS=""; SCHED_N=0
+          SCHED_IDS=""; SCHED_N=0; SCHED_OFFERED=""
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
             # THE LINE PRINTS THE AGENT NAME, NOT THE TASK ID (T22, A-orch-33). They are the
@@ -6917,7 +6924,7 @@ EOF
             # and then the ONLY safe token to print is the free one: see `fill_name` for why
             # the roster, and not the plan, is what "spent" is read from.
             SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(fill_name "$ROSTER_FILE" "$(clean "$TASK_ID")")"
-            SCHED_N=$((SCHED_N + 1))
+            SCHED_N=$((SCHED_N + 1)); SCHED_OFFERED="${SCHED_OFFERED} $(clean "$TASK_ID")"
           done <<EOF
 $SCHED_READY
 EOF
@@ -6929,6 +6936,21 @@ EOF
             # observed 19:00:46Z as `poker: FILL T13` above `decision=QUIET`).
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
+            # THE RANGE AN OFFERED REVIEW READS (wave-26 T32; T14, AC-6.5): one line per offered
+            # row that reads `live:head`, naming the difference past the last review proof, from
+            # the head this tick already read (UNITS_LIVE_HEAD; no git here). Before the first
+            # review proof there is no range, and no line: the review reads all the landed work.
+            SCHED_RANGE="$(units_live_range "$SCHED_PLAN" 2>/dev/null)"
+            if [ -n "$SCHED_RANGE" ]; then
+              while IFS="$(printf '\t')" read -r LR_ID _; do
+                [ -n "$LR_ID" ] || continue
+                case "$SCHED_OFFERED " in
+                  *" $LR_ID "*) say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more" ;;
+                esac
+              done <<EOF
+$(units_live_rows "$SCHED_PLAN" 2>/dev/null)
+EOF
+            fi
           else
             # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
             # which answer holds the rows, and the standing line above says why.
