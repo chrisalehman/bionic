@@ -1081,10 +1081,61 @@ guarded "$RW" 'BIONIC_QUIET=1 bash tests/t.test.sh'
 expect_eq "W5b BIONIC_QUIET=1 in the prefix is --quiet" \
   "bash $SHIM --shell $WSH --quiet -- 'BIONIC_QUIET=1 bash tests/t.test.sh'" "$WRAP"
 guarded "$RW" 'cd tests && bash solo.test.sh'
-expect_contains "W5c a solo suite reached through a leading cd is --quiet too" " --quiet -- " "$WRAP"
+expect_eq "W5c a solo suite reached through a leading cd is --quiet too (and stamps where the cd went)" \
+  "bash $SHIM --shell $WSH --quiet --stamp-dir $RW/tests -- 'cd tests && bash solo.test.sh'" "$WRAP"
 guarded "$RW" 'bash tests/t.test.sh'
 expect_absent "W5d a plain suite is not" "--quiet" "$WRAP"
 expect_nonempty "W5d …though it is wrapped" "$WRAP"
+
+# WHERE THE STAMP GOES (wave-26 T56, final review B1). The shim stands in the payload's cwd,
+# the main checkout, while `cd <tree> || exit 1; bash tests/…` runs the suite in the tree. So
+# the wall reads the command's leading literal `cd` segments up to the first suite segment —
+# the same walk that finds a solo target — and hands the shim `--stamp-dir <where they lead>`.
+# A `cd` the wall cannot read as a literal, or one whose reach it cannot be sure of (a
+# subshell, a pipe, a background job, `pushd`), gives no option at all: the shim then stamps
+# its own directory, as before, never a guessed one.
+W10_ABS="$SANDBOX/trees/t1"
+w10() {  # <label> <command> <expected --stamp-dir value, or "" for none>
+  guarded "$RW" "$2"
+  expect_eq "W10$1 [$2] is allowed" "0" "$ST"
+  expect_nonempty "W10$1 …and wrapped" "$WRAP"
+  if [ -n "$3" ]; then
+    _wall_q="$3"; case "$3" in *' '*) _wall_q="$(sq "$3")" ;; esac
+    expect_eq "W10$1 …with --stamp-dir $3" \
+      "bash $SHIM --shell $WSH --stamp-dir $_wall_q -- $(sq "$2")" "$WRAP"
+  else
+    expect_eq "W10$1 …with no --stamp-dir" "bash $SHIM --shell $WSH -- $(sq "$2")" "$WRAP"
+  fi
+}
+w10 a "cd $W10_ABS || exit 1; bash tests/t.test.sh" "$W10_ABS"
+w10 b 'cd .worktrees/t1 && bash tests/t.test.sh' "$RW/.worktrees/t1"
+w10 c "cd $SANDBOX/trees; cd t1 || exit 1; bash tests/t.test.sh" "$SANDBOX/trees/t1"
+w10 d "cd '$SANDBOX/a tree' || exit 1; bash tests/t.test.sh" "$SANDBOX/a tree"
+w10 e "cd \"$W10_ABS\" || exit 1; bash tests/t.test.sh" "$W10_ABS"
+w10 f 'bash tests/t.test.sh' ""
+# The doctrine's evidence shape (T58's), behind the cwd guard and in a brace group.
+w10 g "cd $W10_ABS || exit 1; set -o pipefail; bash tests/t.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" "$W10_ABS"
+w10 h "{ cd $W10_ABS || exit 1; bash tests/t.test.sh; }" "$W10_ABS"
+w10 i "cd $W10_ABS || exit 1; { bash tests/t.test.sh; echo \"rc=\$?\"; } > /dev/null 2>&1" "$W10_ABS"
+# No sure reading: each of these stamps the shim's own directory, as before T56.
+w10 j 'cd "$T" || exit 1; bash tests/t.test.sh' ""
+w10 k "(cd $W10_ABS; true); bash tests/t.test.sh" ""
+w10 l "true | cd $W10_ABS; bash tests/t.test.sh" ""
+# (A `cd` the shell backgrounds, `cd x & bash tests/…`, never reaches the wrap: ARM 1 refuses it.)
+w10 m "true || cd $W10_ABS; bash tests/t.test.sh" ""
+w10 n "pushd $W10_ABS && bash tests/t.test.sh" ""
+w10 o "cd $SANDBOX && pushd trees && bash tests/t.test.sh" ""
+w10 p "if cd $W10_ABS; then bash tests/t.test.sh; fi" ""
+w10 q 'cd $(git rev-parse --show-toplevel) && bash tests/t.test.sh' ""
+w10 r "cd -P $W10_ABS && bash tests/t.test.sh" ""
+# A cd the wall cannot read, then an ABSOLUTE one: the absolute one decides where the suite runs.
+w10 s "cd \"\$T\"; cd $W10_ABS && bash tests/t.test.sh" "$W10_ABS"
+# …but a RELATIVE one after it does not: relative to an unknown place is unknown.
+w10 t 'cd "$T"; cd t1 && bash tests/t.test.sh' ""
+# Only the cd segments AHEAD of the first suite count.
+w10 u "bash tests/t.test.sh; cd $W10_ABS; bash tests/t.test.sh" ""
+# A cd behind `&&` runs whenever the suite does (a failed step before it stops both), so it counts.
+w10 v "true && cd $W10_ABS && bash tests/t.test.sh" "$W10_ABS"
 
 # WHICH SHELL: CLAUDE_CODE_SHELL, then SHELL, each only when it names bash or zsh by an
 # absolute path; otherwise no --shell, which is the shim's bash -c.

@@ -821,6 +821,57 @@ expect_eq "S8.4 …whose only rc= field is the real one" "rc=5" \
 expect_eq "S8.5 …and whose only head= field is the tree's" "head=$(git -C "$ROW/repo" rev-parse HEAD)" \
   "$(printf '%s\n' "$S8_LINE" | tr '|' '\n' | grep '^head=')"
 
+# S9. --stamp-dir <dir> (wave-26 T56, final review B1): the wall passes the directory the
+# command's leading literal `cd` reaches, because the shim itself stands in the main checkout.
+# Head and dirty are read THERE and the stamp goes to THAT tree's git dir; nothing lands in the
+# shim's own. A dir that does not exist or is in no work tree: no stamp and no error, as outside
+# a git tree (S4) — never a stamp in the wrong place.
+newrow s9
+mkrepo "$ROW/main"
+git -C "$ROW/main" worktree add -q "$ROW/wt" -b side 2>/dev/null
+printf 'x\n' > "$ROW/wt/untracked"
+S9_MAIN_STAMPS="$(stamps_of "$ROW/main")"
+S9_WT_STAMPS="$(stamps_of "$ROW/wt")"
+s9_run() {  # <command> <shim option>... — one booked run standing in the main checkout
+  local c="$1"; shift
+  ( cd "$ROW/main" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+      bash "$BOOKED" "$@" -- "$c" ) 2>"$ROW/err"
+}
+S9_OUT="$(s9_run 'cd ../wt || exit 1; echo ran; exit 4' --stamp-dir "$ROW/wt")"; S9_RC=$?
+expect_status "S9.1 with --stamp-dir the shim still answers the command's code" 4 "$S9_RC"
+expect_eq "S9.2 …and runs it where the shim stands (the cd is the command's own)" "ran" "$S9_OUT"
+expect_regex "S9.3 the stamp lands in the stamp dir's git dir, with ITS head and PRE-run dirty count" \
+  "^stamp/v1\\|head=$(git -C "$ROW/wt" rev-parse HEAD)\\|dirty=1\\|rc=4\\|at=[^|]*\\|cmd=cd ../wt    exit 1; echo ran; exit 4\$" \
+  "$(tail -1 "$S9_WT_STAMPS" 2>/dev/null)"
+expect_false "S9.4 …and nothing lands in the checkout the shim stood in" test -e "$S9_MAIN_STAMPS"
+expect_eq "S9.5 …with nothing on stderr" "" "$(cat "$ROW/err")"
+s9_run 'true' --stamp-dir=../wt >/dev/null
+expect_eq "S9.6 --stamp-dir=<dir>, relative to where the shim stands, is the same option" "2" \
+  "$(grep -c . "$S9_WT_STAMPS" 2>/dev/null)"
+s9_run 'exit 0' >/dev/null
+expect_regex "S9.7 without the option, today's behaviour: the shim's own tree, its own head" \
+  "^stamp/v1\\|head=$(git -C "$ROW/main" rev-parse HEAD)\\|dirty=0\\|rc=0\\|" "$(tail -1 "$S9_MAIN_STAMPS" 2>/dev/null)"
+expect_eq "S9.7 …and the stamp dir of the earlier runs gets nothing more" "2" \
+  "$(grep -c . "$S9_WT_STAMPS" 2>/dev/null)"
+mkdir -p "$ROW/plain"
+for sd in "$ROW/no-such-dir" "$ROW/plain"; do
+  S9_OUT="$(s9_run 'echo ran; exit 5' --stamp-dir "$sd")"; S9_RC=$?
+  expect_status "S9.8 [${sd##*/}] a stamp dir in no work tree: the command runs with its code" 5 "$S9_RC"
+  expect_eq "S9.8 [${sd##*/}] …and its output" "ran" "$S9_OUT"
+  expect_eq "S9.8 [${sd##*/}] …nothing on stderr" "" "$(cat "$ROW/err")"
+  expect_eq "S9.8 [${sd##*/}] …no stamp in the shim's own tree (one line, from S9.7)" "1" \
+    "$(grep -c . "$S9_MAIN_STAMPS" 2>/dev/null)"
+  expect_eq "S9.8 [${sd##*/}] …nor in the worktree's (two lines, from S9.1 and S9.6)" "2" \
+    "$(grep -c . "$S9_WT_STAMPS" 2>/dev/null)"
+done
+expect_eq "S9.8 …and no stamp file anywhere else under the row" \
+  "$(printf '%s\n%s' "$S9_MAIN_STAMPS" "$S9_WT_STAMPS" | sort)" \
+  "$(find "$ROW" -name bionic-stamps 2>/dev/null | sort)"
+s9_run 'true' --stamp-dir >/dev/null; S9_RC=$?
+expect_status "S9.9 --stamp-dir with no value is usage (exit 2)" 2 "$S9_RC"
+s9_run 'true' --stamp-dir= >/dev/null; S9_RC=$?
+expect_status "S9.9 …and so is an empty --stamp-dir=" 2 "$S9_RC"
+
 # ══════════════════════════════════════════════════════════════════ §NESTED-ENV
 section "NESTED-ENV — a command inside a place books nothing and never waits on its parent"
 
