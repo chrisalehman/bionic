@@ -5821,6 +5821,59 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w30c" "claude-sonne
 expect_status "30c control: the same writer dispatch with approved-by present passes" "0" "$GATE_ST"
 expect_absent "30c …with no refusal printed" "BLOCKED" "$GATE_ERR"
 
+# --- 30n: THE READER CANNOT BE LOADED — the writer is refused (wave-26 T56; final review N2) ---
+# The approval is read by fill.sh's `fill_plan_approved`, sourced lazily at this arm. Before T56 a
+# library directory without it said `not checked` and ADMITTED the writer; before wave 26 the line
+# was read inline and an unapproved plan was refused. Ruled: an approval the hook cannot read is
+# no approval. A copied hook beside a library directory that holds every file but fill.sh, on the
+# APPROVED plan of 30c, is refused, naming the reader and the file; the same copy beside the whole
+# library admits it, unchanged.
+n2_plant() {  # <root> <with fill.sh: yes|no> -> the copied hook's path
+  local root="$1" lib f
+  lib="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)"
+  mkdir -p "$root/hooks" "$root/scripts/lib"
+  for f in "$lib"/*; do
+    [ "$2" = no ] && [ "${f##*/}" = fill.sh ] && continue
+    ln -s "$f" "$root/scripts/lib/${f##*/}"
+  done
+  cp "$GATE" "$root/hooks/dispatch-preflight.sh"
+  printf '%s' "$root/hooks/dispatch-preflight.sh"
+}
+N2_SAVED_GATE="$GATE"
+N2_ROOT=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/n2-nofill.XXXXXX")" && pwd -P)
+GATE="$(n2_plant "$N2_ROOT/nofill" no)"
+expect_false "30n fixture: the copied library has no fill.sh" test -e "$N2_ROOT/nofill/scripts/lib/fill.sh"
+expect_true "30n fixture: …and has its neighbours (units.sh)" test -e "$N2_ROOT/nofill/scripts/lib/units.sh"
+REPO=$(make_repo r30n yes)
+write_attestation "$REPO" "$SID_A"
+k2_write_plan "$REPO" 4 "$K2_APPROVED_LINE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w30n" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
+expect_eq "30n a writer whose plan approval cannot be read (no lib/fill.sh) is refused" "deny" "$GATE_VERDICT"
+expect_contains "30n …and the refusal says the approval reader could not be loaded" \
+  "the approval reader lib/fill.sh cannot be loaded (reinstall the plugin)" "$GATE_ERR"
+expect_contains "30n …naming the reader and the copy's library it looked in" "fill_plan_approved, from $N2_ROOT/nofill/" "$GATE_VERR"
+expect_contains "30n …and the file" "/scripts/lib/fill.sh — not there" "$GATE_VERR"
+expect_absent "30n …and it is no longer a not-checked line beside an admission" \
+  "not checked: plan approval" "$GATE_VERR"
+GATE="$(n2_plant "$N2_ROOT/withfill" yes)"
+REPO=$(make_repo r30n2 yes)
+write_attestation "$REPO" "$SID_A"
+k2_write_plan "$REPO" 4 "$K2_APPROVED_LINE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w30n2" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
+expect_status "30n control: the same copy beside the whole library admits the approved writer" "0" "$GATE_ST"
+expect_absent "30n control: …with no word of the reader" "cannot be loaded" "$GATE_ERR$GATE_VERR"
+# A read-only role is not asked for an approval, so a missing reader refuses it nothing.
+GATE="$N2_ROOT/nofill/hooks/dispatch-preflight.sh"
+REPO=$(make_repo r30n3 yes)
+write_attestation "$REPO" "$SID_A"
+k2_write_plan "$REPO" 4 ""
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w30n3" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:researcher")"
+expect_status "30n a read-only role through the copy with no fill.sh still passes" "0" "$GATE_ST"
+GATE="$N2_SAVED_GATE"; rm -rf "$N2_ROOT"
+
 # --- 30d: an approved-by whose value is empty records no approval ---
 REPO=$(make_repo r30d yes)
 write_attestation "$REPO" "$SID_A"
