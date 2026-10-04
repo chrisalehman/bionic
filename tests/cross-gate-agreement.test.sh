@@ -9802,16 +9802,43 @@ expect_eq "S13.5 the guard reads the key the wall writes" "0" \
 S18_LG="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh"
 S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 
-# --- §S18.1 exactly one file computes a Files: diff, and it is lib/stop.sh ---
+# --- §S18.1 exactly one file reconciles a diff against a row's files=, and it is lib/stop.sh ---
 # The claim is unchanged — ONE owner of the reconciliation — and the address moved with the
-# sweep at T12, so the count is taken over the library and a stray copy left behind under
+# sweep at T12, so the files are counted over the library and a stray copy left behind under
 # hooks/ fails the second row below.
-expect_eq "S18.1 exactly one library file diffs a worktree by name-only" "1" \
-  "$(grep -lF -- '--name-only' "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"/*.sh | wc -l | tr -d ' ')"
+# A RECONCILER IS A FILE THAT DOES BOTH HALVES (review 9 follow-up): it computes a name-only
+# diff AND names a roster row's `files=` key as a quoted literal, the form a row reader compares
+# a field against. A name-only diff alone is not one: worktree.sh diffs a tree against the landed
+# work to find the files both changed, and never reads a row. The key alone is not one either:
+# brief.sh writes `files=` into a row and computes no diff.
+s18_reconcilers() {  # <dir> -> the .sh files under it that do both halves, one per line
+  local _f
+  for _f in "$1"/*.sh; do
+    [ -f "$_f" ] || continue
+    /usr/bin/grep -qF -- '--name-only' "$_f" && /usr/bin/grep -qF '"files="' "$_f" && printf '%s\n' "$_f"
+  done
+  return 0
+}
+S18_LIB_DIR="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+expect_eq "S18.1 exactly one library file reconciles a diff against a row's files=" "1" \
+  "$(s18_reconcilers "$S18_LIB_DIR" | grep -c . | tr -d ' ')"
 expect_eq "S18.1 …and no hook file does it any more" "0" \
-  "$(grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | wc -l | tr -d ' ')"
+  "$(s18_reconcilers "$BIONIC_HOOKS_DIR" | grep -c . | tr -d ' ')"
 expect_eq "S18.1 …and it is payload/scripts/lib/stop.sh" "1" \
-  "$(grep -lF -- '--name-only' "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"/*.sh | grep -c '/stop\.sh$')"
+  "$(s18_reconcilers "$S18_LIB_DIR" | grep -c '/stop\.sh$')"
+
+# A SECOND RECONCILIATION IS RED. A copy of the library where worktree.sh, which already diffs,
+# also reads a row's files= — the exactly-one row asked of that copy reads 2.
+S18_MUT="$SANDBOX/s18-lib"; rm -rf "$S18_MUT"; mkdir -p "$S18_MUT"
+cp "$S18_LIB_DIR"/*.sh "$S18_MUT/"
+anchor "$S18_LIB_DIR/worktree.sh" '_wt_not_current() {' 1
+awk -v ins='  decl="${row#*|}"; [ "${decl%%=*}=" = "files=" ] && decl="${decl#files=}"' \
+  '{ print } index($0, "_wt_not_current() {") == 1 { print ins }' \
+  "$S18_LIB_DIR/worktree.sh" > "$S18_MUT/worktree.sh"
+expect_eq "S18.1 the doctored worktree.sh still parses and now names the row's files= key" "yes 1" \
+  "$(bash -n "$S18_MUT/worktree.sh" 2>/dev/null && echo yes || echo no) $(/usr/bin/grep -cF '"files="' "$S18_MUT/worktree.sh" | tr -d ' ')"
+expect_eq "S18.1 a second reconciliation in a copy of the library: the exactly-one row reads 2" "2" \
+  "$(s18_reconcilers "$S18_MUT" | grep -c . | tr -d ' ')"
 
 # --- §S18.2 the row -> worktree mapping has ONE definition (worktree.sh's `worktree_for_row`,
 # payload/scripts/lib/worktree.sh's own docblock: "a second spelling of it there is a second
