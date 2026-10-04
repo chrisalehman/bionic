@@ -2820,6 +2820,9 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 
 # A plan another writer replaced while the copy was judged exits 1, or PV_RACE_RC when the caller
 # set it: launch-sync sets 75, the one refusal the next caller repairs by running again (T51).
+# Set here, before any verb runs, so a value in the caller's environment never chooses the exit
+# (wave-26 T54; review 17 N2).
+PV_RACE_RC=""
 # plan_verb_open <verb> -> sets PV_REPO, PV_PLAN, PV_CUR, PV_SUM, PV_NEW, PV_DRY, PV_MARK, PV_SID
 # and arms the cleanup; exits on every refusal above.
 plan_verb_open() {
@@ -2988,8 +2991,16 @@ launch_sync_unlock() {
 # with it. The bound is now the first thing each pass asks (the waiting call's seconds, or three
 # passes for a call that does not wait), a takeover that removed nothing waits like a held lock,
 # and a failed mkdir under a directory that is not there or not writable returns 2 at once.
-launch_sync_lock() {  # <lock dir> <wait: yes|no> -> 0 held, 1 another writer holds it, 2 no lock can be made here
-  local d="$1" wait="$2" pid start="$SECONDS" pass=0
+#
+# A MKDIR THAT FAILS WITH NO LOCK THERE IS NOT A HELD LOCK EITHER (wave-26 T54; review 17 N1). The
+# directory exists and can be written, yet mkdir fails and nothing is there to wait for or take
+# over: a full disk, a quota, an I/O error. Through T51 the takeover arm removed nothing and went
+# straight back to the top without sleeping, so the waiting call spun to its 60 s, and every caller
+# then exited 0 in silence. Such a pass now sleeps like a held lock, and three of them in a row
+# return 3: one is a holder releasing between this call's mkdir and its look (A-T51.2), three
+# 0.2 s apart are not.
+launch_sync_lock() {  # <lock dir> <wait: yes|no> -> 0 held, 1 another writer holds it, 2 no lock can be made here, 3 mkdir keeps failing with no lock there
+  local d="$1" wait="$2" pid start="$SECONDS" pass=0 bare=0
   while :; do
     if [ "$wait" = yes ]; then
       [ $((SECONDS - start)) -lt "$LAUNCH_SYNC_WAIT" ] || return 1
@@ -3003,6 +3014,13 @@ launch_sync_lock() {  # <lock dir> <wait: yes|no> -> 0 held, 1 another writer ho
       return 0
     fi
     [ -d "${d%/*}" ] && [ -w "${d%/*}" ] || return 2
+    if [ ! -e "$d" ]; then
+      bare=$((bare + 1))
+      [ "$bare" -lt 3 ] || return 3
+      sleep 0.2
+      continue
+    fi
+    bare=0
     pid="$(cat "$d/pid" 2>/dev/null)"
     if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } \
       || [ $(( $(now_epoch) - $(file_mtime "$d") )) -gt "$LAUNCH_SYNC_STALE" ]; then
@@ -3061,7 +3079,9 @@ launch_sync_step4() {  # <plan>
     END { if (wt != "") print wt "\t" bs }' "$1" 2>/dev/null
 }
 
-# The dispatch ledger's rows, `id<TAB>agent cell`; exit 1 when the plan has no ## Dispatch ledger.
+# The dispatch ledger's rows, `id agent-cell dispatched-cell` joined by the unit separator (the
+# dispatched cell found by its header, empty when the table has none); exit 1 when the plan has no
+# ## Dispatch ledger.
 launch_sync_ledger() {  # <plan>
   awk '
     /^[ \t]*```/ { fence = !fence; next }
@@ -3069,18 +3089,48 @@ launch_sync_ledger() {  # <plan>
     /^##[ \t]/ { inl = ($0 ~ /^##[ \t]+Dispatch ledger[ \t]*$/ && !done); if (inl) seen = 1; else if (seen) done = 1; rows = 0; next }
     !inl || $0 !~ /^[ \t]*\|/ { next }
     { rows++ }
-    rows == 1 || $0 ~ /^[ \t]*\|[ \t:|-]*$/ { next }
-    { n = split($0, c, "|"); id = c[2]; ag = c[3]
-      gsub(/^[ \t]+|[ \t]+$/, "", id); gsub(/^[ \t]+|[ \t]+$/, "", ag)
-      if (id != "") print id "\t" ag }
+    rows == 1 { dc = 0; n = split($0, c, "|"); for (k = 2; k <= n; k++) { h = c[k]; gsub(/^[ \t]+|[ \t]+$/, "", h); if (h == "dispatched") dc = k }; next }
+    $0 ~ /^[ \t]*\|[ \t:|-]*$/ { next }
+    { n = split($0, c, "|"); id = c[2]; ag = c[3]; dt = (dc ? c[dc] : "")
+      gsub(/^[ \t]+|[ \t]+$/, "", id); gsub(/^[ \t]+|[ \t]+$/, "", ag); gsub(/^[ \t]+|[ \t]+$/, "", dt)
+      if (id != "") print id "\037" ag "\037" dt }
     END { exit(seen ? 0 : 1) }' "$1" 2>/dev/null
+}
+
+# IS THIS LAUNCH ALREADY LEDGERED (wave-26 T32, A-T32.14; T54, review 17 S1). A ledger line names
+# its launch `<role> (<name>)`, and a name an ack freed can be dispatched again: a line of the same
+# name counts for this launch only when its `dispatched=` minute is not older than this launch's
+# first minute (`launch_sync_launches`). A line whose cell is not an ISO minute, or a launch with no
+# minute, keeps the name alone as the key, as before. Reads the projection's LGAG and LGDT.
+launch_sync_ledgered() {  # <name> <launched_at> -> 0 when a ledger line records this launch
+  local name="$1" m="" k=0 d
+  case "$2" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]*) m="${2:0:16}Z" ;; esac
+  while [ "$k" -lt "${#LGAG[@]}" ]; do
+    case "${LGAG[k]}" in
+      *"($name)")
+        d="${LGDT[k]}"
+        case "$d" in
+          [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]*) [ -n "$m" ] && [ "${d:0:16}Z" \< "$m" ] || return 0 ;;
+          *) return 0 ;;
+        esac ;;
+    esac
+    k=$((k + 1))
+  done
+  return 1
 }
 
 # The open launches, `name launched_at duration deliverable subagent_type` joined by the unit
 # separator (\037: a field may be empty, and `read` folds runs of a whitespace separator), each by
 # its latest confirmed or identified row, in the roster order of that row. The launch minute is the
-# name's FIRST (wave-26 T51; review 13 F4): `extend` appends a row launched now for a reviewer it
-# re-opens, and that is the same launch, which a proof of its row may already have read.
+# FIRST of the name's latest launch (wave-26 T51; review 13 F4): `extend` appends a row launched now
+# for a reviewer it re-opens, and that is the same launch, which a proof of its row may already have
+# read. ONE LAUNCH, NOT ONE NAME (wave-26 T54; review 17 S1): a name an ack freed can be dispatched
+# again, and that is a new pass, which the old pass's first minute would date before the proof that
+# read the old pass. So the minute is the earliest among the rows of the latest row's lineage: those
+# that share its agent id or its tool_use_id. `extend`, `amend` and `hold` copy both, and the
+# recorder's rows of one dispatch share the tool_use_id (a teammate's confirmed row carries no agent
+# id until its identified row), while a new dispatch has neither. A latest row with neither falls
+# back to every row of the name.
 launch_sync_launches() {  # <roster> <sid> <open names, one per line>
   LS_OPEN="$3" LS_SID="$2" awk -F'|' '
     BEGIN { n = split(ENVIRON["LS_OPEN"], o, "\n"); for (i = 1; i <= n; i++) if (o[i] != "") open[o[i]] = 1
@@ -3095,11 +3145,18 @@ launch_sync_launches() {  # <roster> <sid> <open names, one per line>
       if (kv["status"] != "confirmed" && kv["status"] != "identified") next
       nm = kv["name"]; if (nm == "" || !(nm in open)) next
       if (kv["session"] != "" && kv["session"] != sid) next
-      at[nm] = NR
-      if (kv["launched_at"] != "" && (!(nm in la) || kv["launched_at"] < la[nm])) la[nm] = kv["launched_at"]
+      at[nm] = NR; r++; last[nm] = r
+      rn[r] = nm; ri[r] = kv["agent_id"]; rt[r] = kv["tool_use_id"]; rl[r] = kv["launched_at"]
       rec[nm] = kv["duration"] "\037" kv["deliverable"] "\037" kv["subagent_type"]
     }
-    END { for (k in at) print at[k] "\t" k "\037" la[k] "\037" rec[k] }' "$1" 2>/dev/null | sort -n | cut -f2-
+    END {
+      for (q = 1; q <= r; q++) {
+        nm = rn[q]; l = last[nm]
+        if (ri[l] != "" || rt[l] != "")
+          if (!((ri[l] != "" && ri[q] == ri[l]) || (rt[l] != "" && rt[q] == rt[l]))) continue
+        if (rl[q] != "" && (!(nm in la) || rl[q] < la[nm])) la[nm] = rl[q]
+      }
+      for (k in at) print at[k] "\t" k "\037" la[k] "\037" rec[k] }' "$1" 2>/dev/null | sort -n | cut -f2-
 }
 
 # The command a person runs for one of the plan-row verbs, quoted where it must be.
@@ -3172,7 +3229,7 @@ launch_sync_project() {
   local open rec i j n=0 nl=0 hits h hasl=0 haswt=0 hasbs=0 s4 s4wt s4bs
   local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand
   local us=$'\037'
-  local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LROW FINAL LGID LGAG pairs lpairs
+  local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LROW FINAL LGID LGAG LGDT pairs lpairs
   LS_SAID=""; LS_FAILS=""; LS_HANDS=""; LS_PROOFS=""; LS_PROOFS_READ=no
   open="$(roster_open_names "$roster" "$acks" "$sid" 2>/dev/null)"
   [ -n "$open" ] || return 1
@@ -3210,9 +3267,9 @@ EOF
   units_has_column "$plan" base && hasbs=1
   if launch_sync_ledger "$plan" > "$out.ledger"; then hasl=1; fi
   i=0
-  while IFS="$(printf '\t')" read -r lid ag; do
+  while IFS="$us" read -r lid ag la; do
     [ -n "$lid" ] || continue
-    LGID[i]="$lid"; LGAG[i]="$ag"; i=$((i + 1))
+    LGID[i]="$lid"; LGAG[i]="$ag"; LGDT[i]="$la"; i=$((i + 1))
   done < "$out.ledger"
   rm -f "$out.ledger"
   s4="$(launch_sync_step4 "$plan")"; s4wt="${s4%%$'\t'*}"; s4bs="${s4#*$'\t'}"; [ -n "$s4" ] || s4bs=""
@@ -3241,14 +3298,11 @@ EOF
     noroom=0
     # A PENDING ROW WHOSE LAUNCH IS ALREADY LEDGERED WAS PUT BACK ON PURPOSE (wave-26 T14: a review
     # row returns to `pending` on its proof while its reviewer may still be open). The launch was
-    # recorded once; it is not re-applied to the row, and the next pass is its own launch.
+    # recorded once; it is not re-applied to the row, and the next pass is its own launch, under
+    # a name of its own or under this one again once an ack freed it (`launch_sync_ledgered`).
     lid=""
-    if [ "$st" = pending ] && [ "$hasl" = 1 ]; then
-      k=0
-      while [ "$k" -lt "${#LGAG[@]}" ]; do
-        case "${LGAG[k]}" in *"($name)") lid=have; break ;; esac
-        k=$((k + 1))
-      done
+    if [ "$st" = pending ] && [ "$hasl" = 1 ] && launch_sync_ledgered "$name" "${LLA[j]}"; then
+      lid=have
     fi
     if [ -z "$lid" ] && [ "$st" = pending ] && launch_sync_read "$plan" "$root" "${RID[i]}" "${LLA[j]}"; then
       lid=read
@@ -3274,11 +3328,7 @@ EOF
     fi
     lid=""
     if [ "$hasl" = 1 ]; then
-      k=0
-      while [ "$k" -lt "${#LGAG[@]}" ]; do
-        case "${LGAG[k]}" in *"($name)") lid=have; break ;; esac
-        k=$((k + 1))
-      done
+      launch_sync_ledgered "$name" "${LLA[j]}" && lid=have
       if [ -z "$lid" ]; then
         lid="${RID[i]}"
         sfx="${name##*-r}"; case "$name" in *-r[0-9]*) case "$sfx" in *[!0-9]*) sfx=1 ;; esac ;; *) sfx=1 ;; esac
@@ -3341,7 +3391,7 @@ ${hand}  $(launch_sync_hand ledger-add "$lid" "${lpairs[@]}")"$'\n'
         rm -f "$out.l" "$out.r"; j=$((j + 1)); continue
       fi
       mv -f "$out.r" "$out.l"
-      LGID[${#LGID[@]}]="$lid"; LGAG[${#LGAG[@]}]="$role ($name)"
+      LGID[${#LGID[@]}]="$lid"; LGAG[${#LGAG[@]}]="$role ($name)"; LGDT[${#LGDT[@]}]="$la"
       what="${what:+$what, }ledger line $lid"
     fi
     mv -f "$out.l" "$out"
@@ -5574,7 +5624,7 @@ EOF
     fi
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
-    [ -n "$PF_NONE" ] && say "proof-add — no live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
+    [ -n "$PF_NONE" ] && say "proof-add — no active live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
     exit 0
     ;;
 
@@ -5584,7 +5634,8 @@ EOF
   # a plan before Step 4 (`current:` not a step of 4 or more), no roster, or a lock another writer
   # holds when the caller does not wait. What it cannot write prints, and the exit says whether a
   # retry repairs it (wave-26 T51; review 13 F6): 75 when another writer replaced the plan while
-  # this one judged its copy, which the next caller repairs by running again; 1 for every refusal
+  # this one judged its copy, which the next caller repairs by running again, and when the lock's
+  # mkdir keeps failing with no lock there (T54; review 17 N1), said in one line; 1 for every refusal
   # no retry repairs (a launch the plan cannot take, the validator or the commit gate refusing the
   # batch, a lock that cannot be made); 2 when the dry commit cannot run at all.
   launch-sync)
@@ -5618,6 +5669,9 @@ EOF
       2)
         die "REFUSED — the launch-sync lock $LS_ROOT/.bionic/tmp/launch-sync.lock cannot be made: its directory is missing or not writable. Nothing was written; no launch of this session is recorded in the plan until it can be."
         exit 1 ;;
+      3)
+        die "launch-sync — the lock $LS_ROOT/.bionic/tmp/launch-sync.lock could not be made although its directory can be written (a full disk or a quota?). No launch was applied by this call; the next tick applies them once it can be."
+        exit 75 ;;
       *) exit 0 ;;
     esac
     trap 'launch_sync_unlock' EXIT

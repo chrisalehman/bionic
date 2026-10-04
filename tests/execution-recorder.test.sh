@@ -2801,4 +2801,109 @@ act_sync "$ACT_T"
 expect_contains "17t5 …and the next caller applies the launch" "poker: LAUNCHED T3 w1-T3" "$SYNC_OUT"
 expect_eq "17t6 …and nothing it started is left running" "" "$(act_procs "$ACT_T")"
 
+# ---------- 17u: a name reused after its ack is a new launch (wave-26 T54; review 17 S1) ----------
+# The live review's pass is applied, its own proof returns T6 to pending, the orchestrator acks
+# the finished reviewer (which frees the name), and the same name is dispatched for the next
+# difference: a new agent id and a new tool call. T51 dated a name by its earliest launch across
+# every row that ever carried it, so the new pass read as older than the proof and never went
+# active, with nothing printed; at ledger=yes the name-keyed ledger guard dropped it the same way.
+# A launch is now dated by its own lineage, and the ledger guard keys on it too. 17q9–17q11 are
+# the control: `extend` keeps the agent id and the tool call, so it stays the launch already read.
+# The teammate case (17u5) is the same reuse with a confirmed row that carries no agent id yet.
+act_launch_as() {  # <repo> <name> <launched_at> <agent id> <tool_use_id> -> a confirmed critic launch
+  roster_row_fixture status=confirmed session="$SID_A" name="$2" agent_id="$4" \
+    launched_at="$3" subagent_type=bionic:critic deliverable=.bionic/docs/record/wave-01/x.md duration='30 minutes' \
+    tool_use_id="$5" >> "$1/.bionic/tmp/roster-${SID_A}.state"
+}
+act_ack() {  # <repo> <name> <at> -> the ack the sweeper writes for a finished agent
+  local le="$1/.bionic/tmp/sweeper-${SID_A}.state"
+  [ -f "$le" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$le"
+  printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
+    "$3" "$SID_A" "$2" >> "$le"
+}
+require_helpers act_launch_as act_ack
+export BIONIC_LAUNCH_SYNC_INLINE=1
+for ACT_LED in yes no; do
+  for ACT_ID in a17reuse00000002 ""; do
+    ACT_U="$(act_review_world "r1-$ACT_LED-${ACT_ID:-teammate}" "$ACT_LED")"
+    act_launch_as "$ACT_U" w1-T6 2026-01-04T10:00:00Z "${ACT_ID:+a17reuse00000001}" toolu_01REUSE1; act_sync "$ACT_U"
+    act_putback "$ACT_U" T6
+    act_proof "$ACT_U" 2026-01-04T10:20:00Z record/wave-01/L.md
+    act_ack "$ACT_U" w1-T6 2026-01-04T10:22:00Z
+    act_sync "$ACT_U"
+    ACT_W="17u"; [ -n "$ACT_ID" ] || ACT_W="17u5"
+    expect_eq "$ACT_W precondition ledger=$ACT_LED: the read pass, acked, leaves T6 pending" "—/pending" "$(act_cells "$ACT_U" T6)"
+    act_launch_as "$ACT_U" w1-T6 2026-01-04T10:30:00Z "$ACT_ID" toolu_01REUSE2
+    act_sync "$ACT_U"
+    expect_contains "$ACT_W ledger=$ACT_LED §S1 the name dispatched again after its ack is a new launch, said" \
+      "poker: LAUNCHED T6 w1-T6" "$SYNC_OUT"
+    expect_eq "${ACT_W}2 ledger=$ACT_LED …row T6 active under it" "w1-T6/active" "$(act_cells "$ACT_U" T6)"
+    [ "$ACT_LED" = yes ] && expect_eq "${ACT_W}3 ledger=$ACT_LED …with a ledger line for each pass" "2" "$(act_lines "$ACT_U" w1-T6)"
+    act_gate "$ACT_U"; expect_eq "${ACT_W}4 ledger=$ACT_LED …and the plan is admitted by the gate" "0" "$?"
+  done
+done
+
+# ---------- 17v: a lock mkdir that keeps failing sleeps and says so (wave-26 T54; review 17 N1) ----------
+# The lock's directory exists and can be written, but mkdir fails with no lock there (a full disk
+# or a quota): a stub mkdir fails for the lock path only and counts its calls. Through T51 the
+# waiting call spun without sleeping to its 60 s bound and every caller then exited 0 in silence.
+# Now a pass with no lock there sleeps like a held lock, and three in a row end the call with one
+# line and exit 75, retryable: the next tick runs the same transaction. No knob is set: the give-up
+# is three passes, so the row's own bound is the act_bg_end seconds.
+unset BIONIC_LAUNCH_SYNC_INLINE
+ACT_V="$(act_world nospace 4)"
+act_confirmed "$ACT_V" w1-T3
+act_workspace "$ACT_V" w1-T3 01-T3
+cp "$(act_plan "$ACT_V")" "$SANDBOX/act-v-before"
+mkdir -p "$SANDBOX/act-v-bin"
+printf '#!/bin/bash\ncase "$*" in *launch-sync.lock) printf x >> %s; exit 1 ;; esac\nexec /bin/mkdir "$@"\n' \
+  "$SANDBOX/act-v-calls" > "$SANDBOX/act-v-bin/mkdir"
+chmod +x "$SANDBOX/act-v-bin/mkdir"
+for ACT_W in --wait ""; do
+  : > "$SANDBOX/act-v-calls"
+  ACT_V_PATH="$PATH"; PATH="$SANDBOX/act-v-bin:$PATH"
+  act_bg "$ACT_V" $ACT_W
+  PATH="$ACT_V_PATH"
+  act_bg_end 20
+  ACT_N="17v"; [ -n "$ACT_W" ] || ACT_N="17v7"
+  expect_ne "$ACT_N §N1 ${ACT_W:-no-wait}: a lock mkdir failing with no lock there ends the call (rc $SYNC_RC; 124 is the bound)" "124" "$SYNC_RC"
+  expect_eq "${ACT_N}b …after three passes, each one slept" "xxx" "$(cat "$SANDBOX/act-v-calls" 2>/dev/null)"
+  expect_eq "${ACT_N}c …exit 75: the next caller repairs it" "75" "$SYNC_RC"
+  expect_contains "${ACT_N}d …and says the launch was not applied and the next tick applies it" \
+    "No launch was applied by this call; the next tick applies them" "$SYNC_OUT"
+  expect_true "${ACT_N}e …and the plan is unchanged" cmp -s "$SANDBOX/act-v-before" "$(act_plan "$ACT_V")"
+  expect_eq "${ACT_N}f …and nothing it started is left running" "" "$(act_procs "$ACT_V")"
+done
+act_sync "$ACT_V"
+expect_contains "17v9 …and once mkdir works, the launch is applied" "poker: LAUNCHED T3 w1-T3" "$SYNC_OUT"
+
+# ---------- 17w: the race exit is the verb's own, never the caller's (wave-26 T54; review 17 N2) ----------
+# PV_RACE_RC was read before the script set it, so a value in the caller's environment chose the
+# exit of a race: with PV_RACE_RC=0 exported, a race beside a launch the plan cannot record (w1-T4:
+# its row writes the head and no tree is recorded) exited 0, and the turn-end wall let the turn end.
+# A stub jq lands another writer's line in the plan when the dry commit's payload is built, once.
+ACT_REALJQ="$(command -v jq)"
+mkdir -p "$SANDBOX/act-w-bin"
+for ACT_W in 1 2; do
+  ACT_U="$(act_world "race-env-$ACT_W" 4)"
+  act_confirmed "$ACT_U" w1-T3
+  act_workspace "$ACT_U" w1-T3 01-T3
+  [ "$ACT_W" = 1 ] && act_confirmed "$ACT_U" w1-T4
+  printf '#!/bin/bash\ncase "$*" in *toolu_planverb*) [ -e %s.raced ] || { printf "\\n<!-- another writer -->\\n" >> %s; : > %s.raced; } ;; esac\nexec %s "$@"\n' \
+    "$(act_plan "$ACT_U")" "$(act_plan "$ACT_U")" "$(act_plan "$ACT_U")" "$ACT_REALJQ" > "$SANDBOX/act-w-bin/jq"
+  chmod +x "$SANDBOX/act-w-bin/jq"
+  ACT_V_PATH="$PATH"; PATH="$SANDBOX/act-w-bin:$PATH"
+  export PV_RACE_RC=0
+  act_sync "$ACT_U"
+  unset PV_RACE_RC
+  PATH="$ACT_V_PATH"
+  expect_file "17w precondition $ACT_W: the other writer landed while the judged copy existed" "$(act_plan "$ACT_U").raced"
+  if [ "$ACT_W" = 1 ]; then
+    expect_contains "17w2 …and the launch the plan cannot take is printed" "poker: NOT-RECORDED T4 w1-T4" "$SYNC_OUT"
+    expect_eq "17w3 §N2 PV_RACE_RC=0 in the caller's environment does not end a race beside a NOT-RECORDED launch with 0" "1" "$SYNC_RC"
+  else
+    expect_eq "17w4 control: a race alone exits the verb's own 75 whatever the caller exported" "75" "$SYNC_RC"
+  fi
+done
+
 finish
