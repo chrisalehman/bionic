@@ -96,13 +96,13 @@ run_hook() {
 # row that read "silent" for this wall reads exactly this instead: no deny and no advisory on
 # stdout (the object holds nothing but the event name and updatedInput), and the updated
 # command is the shim around the ORIGINAL command, byte for byte.
-expect_wrap_only() {
-  local _cmd _s _r="'\\''"
+expect_wrap_only() {  # <label> <command> [<options regex after --shell; default ( --quiet)?>]
+  local _cmd _s _r="'\\''" _o="${3-( --quiet)?}"
   expect_eq "$1: …no deny and no advisory beside the booking wrap" '["hookEventName","updatedInput"]' \
     "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
   _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
   expect_regex "$1: …the updated command runs the booking shim" \
-    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? -- " "$_cmd"
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?${_o} -- " "$_cmd"
   _s=${2//\'/$_r}
   expect_eq "$1: …around the original command, byte for byte" "'$_s'" "${_cmd#* -- }"
 }
@@ -394,7 +394,8 @@ expect_contains "5b: …and is audited by name" "farm-out [override] class=user-
 # CHAIN-AWARE (W4's false fire): the token is honoured after a separator too, not only
 # in leading position.
 run_hook "$(mk_payload "$ENGAGED" 'cd /x && FARM_OUT_ALLOW=1 bash tests/run.sh')"
-expect_wrap_only "5c honoured mid-chain as well" 'cd /x && FARM_OUT_ALLOW=1 bash tests/run.sh'
+# The leading literal `cd` is where the suite runs, so the shim stamps there (wave-26 T56).
+expect_wrap_only "5c honoured mid-chain as well" 'cd /x && FARM_OUT_ALLOW=1 bash tests/run.sh' ' --stamp-dir /x'
 
 # `farm-out-mode: advisory` DOWNGRADES a deny to a nudge.
 ADV="$(mk_repo advisory yes)"
@@ -507,8 +508,10 @@ for _c in 'make' 'npm install' 'cd x && make && echo ok' 'BIONIC_SLOT_HELD=1 mak
   expect_contains "S5g: …with its user line on stderr [$_c]" "bionic: run refused" "$ERR"
 done
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "cd x && make && $ONE")" 30000)"
-expect_regex "S5e: a short chain that ends in a suite is wrapped with the kill limit" \
-  "$(kill_re 25 "'cd x && make && bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
+# The kill limit, then where the leading `cd` leads, resolved against the payload cwd (wave-26 T56).
+S5E_DIR_RE="$(printf '%s' "$SHORTR/x" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
+expect_regex "S5e: a short chain that ends in a suite is wrapped with the kill limit and its stamp dir" \
+  "$(kill_re "25 --stamp-dir $S5E_DIR_RE" "'cd x && make && bash tests/one\\.test\\.sh'")" "$(wrapped_cmd)"
 run_hook "$(with_timeout "$(mk_payload "$SHORTR" "make && $ONE && echo done")" 30000)"
 expect_regex "S5h: a short chain with a suite in the middle is wrapped too" \
   "$(kill_re 25 "'make && bash tests/one\\.test\\.sh && echo done'")" "$(wrapped_cmd)"

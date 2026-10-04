@@ -5409,7 +5409,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # WHAT IT DOES. A suite-class Bash call that every wall allows comes back with its command
 # rewritten through `fold_update_input` into the shim the plugin ships:
 #
-#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] -- '<the command>'
+#     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--quiet] [--stamp-dir <dir>] -- '<the command>'
 #
 # The shim books one of the machine's places, stamps the run and runs the command
 # (payload/scripts/booked.sh). This is the one site that sees every runner in every project
@@ -5435,6 +5435,12 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
 # --quiet: a suite segment carrying `BIONIC_QUIET=1` in its prefix, or a suite file whose
 # first 30 lines hold `# runner: solo` (tests/run.sh's `_is_solo_suite` rule, read the same
 # way), takes the whole machine for a timing check.
+#
+# --stamp-dir: WHERE THE SUITE RUNS, when a leading literal `cd` moves it (wave-26 T56, final
+# review B1). The shim stands in the payload's cwd, so without it `cd <tree> || exit 1; bash
+# tests/x` from the main checkout stamps the main checkout and the tree lands on no stamp.
+# `_bsg_cd_walk` says when it is sure; otherwise there is no option and the shim stamps its own
+# directory, as before.
 #
 # THE SEAM FOR T9 is `wall_booked_argv`: the one function that builds the shim's argument
 # list. An option such as `--kill-after <s>` goes in as an extra argument there.
@@ -5482,23 +5488,78 @@ _wall_prefix_sets() {  # <segment> <NAME> <value> -> 0 when the segment's leadin
   return 1
 }
 
-# _bsg_solo_target <class lines> — 0 when a suite file the command runs declares
-# `# runner: solo` in its first 30 lines. The path is the claim's own (cmd-class.sh's
-# `targets` reading), resolved against the payload cwd moved by each literal `cd` segment
-# before the first suite segment. Only a regular file is read, so a FIFO cannot hang the hook.
-_bsg_solo_target() {
-  local _dir _cls _seg _p _k _b _r _f _n _l _rest
-  _dir="$(bionic_jq .cwd)"; [ -n "$_dir" ] || _dir="${BIONIC_CWD:-}"
+# _bsg_cd_walk <class lines> — THE ONE WALK of the command's leading literal `cd` segments, up
+# to its first suite segment, read twice (wave-26 T56, final review B1). Pure parameter
+# expansion: no fork beyond the one `bionic_jq .cwd` the solo reader always paid. It sets
+#
+#   _BSG_CD_DIR     the payload cwd moved by every `cd` the walk can read as a literal; one it
+#                   cannot read is skipped. The solo reader's base: a miss there costs --quiet.
+#   _BSG_STAMP_DIR  where the first suite segment runs, when a `cd` moved it and the walk is
+#                   SURE of it; "" otherwise. The shim's --stamp-dir: a guess there would put a
+#                   run's stamp in another tree, so anything unsure gives none and the shim
+#                   stamps its own directory, as before T56.
+#
+# SURE means: every `cd` ahead of the suite is a literal path (bare, single- or double-quoted
+# with nothing to expand; `~` and `~/…` from HOME; bare `cd` is HOME) or, after one that is not,
+# an absolute one re-anchors; no other segment ahead of it names `cd`, `pushd` or `popd`
+# (`if cd x`, `X=1 cd x`); and the raw text ahead of the suite holds no subshell, pipe,
+# background job or command substitution (`( … )`, `|`, `&`, a backquote), nor a `cd` behind
+# `||`, which may not run. The class lines flatten all of those away, so the raw text is asked.
+_BSG_CD_DIR=""; _BSG_STAMP_DIR=""
+_bsg_cd_walk() {
+  local _cls _seg _p _q _sure=1 _moved=0 _pre _t
+  _BSG_CD_DIR="$(bionic_jq .cwd)"; [ -n "$_BSG_CD_DIR" ] || _BSG_CD_DIR="${BIONIC_CWD:-}"
+  _BSG_STAMP_DIR=""
+  [ -n "$_BSG_CD_DIR" ] || _sure=0
+  _seg=""
   while IFS=$'\t' read -r _cls _seg; do
     [ "$_cls" = suite ] && break
+    _seg="${_seg#\{}"; _seg="${_seg#"${_seg%%[![:space:]]*}"}"
     case "$_seg" in
-      cd[[:space:]]*)
-        _p="${_seg#cd}"; _p="${_p#"${_p%%[![:space:]]*}"}"; _p="${_p%"${_p##*[![:space:]]}"}"
-        case "$_p" in \'*\') _p="${_p#\'}"; _p="${_p%\'}" ;; \"*\") _p="${_p#\"}"; _p="${_p%\"}" ;; esac
-        case "$_p" in ''|-*|*'$'*|*'`'*|*[[:space:]]*) continue ;; '~'|'~/'*) _p="${HOME:-}${_p#\~}" ;; esac
-        case "$_p" in /*) _dir="$_p" ;; *) _dir="$_dir/$_p" ;; esac ;;
+      cd|cd[[:space:]]*) : ;;
+      *)
+        case " $_seg " in
+          *[[:space:]]cd[[:space:]]*|*[[:space:]]pushd[[:space:]]*|*[[:space:]]popd[[:space:]]*) _sure=0 ;;
+        esac
+        continue ;;
     esac
+    _p="${_seg#cd}"; _p="${_p#"${_p%%[![:space:]]*}"}"; _p="${_p%"${_p##*[![:space:]]}"}"
+    _q=0
+    case "$_p" in
+      '') _p="${HOME:-}"; _q=1 ;;
+      \'*\') _p="${_p#\'}"; _p="${_p%\'}"; _q=1; case "$_p" in *\'*) _p="" ;; esac ;;
+      \"*\") _p="${_p#\"}"; _p="${_p%\"}"; _q=1; case "$_p" in *[\"\$\`\\]*) _p="" ;; esac ;;
+    esac
+    if [ "$_q" = 0 ]; then
+      case "$_p" in
+        '~'|'~/'*) [ -n "${HOME:-}" ] && _p="${HOME}${_p#\~}" || _p="" ;;
+        *[[:space:]\'\"\\\$\`\*\?\[\~]*) _p="" ;;
+      esac
+    fi
+    case "$_p" in ''|-*) _sure=0; continue ;; esac
+    case "$_p" in
+      /*) _BSG_CD_DIR="$_p"; _sure=1 ;;
+      *)  _BSG_CD_DIR="$_BSG_CD_DIR/$_p" ;;
+    esac
+    _moved=1
   done <<< "$1"
+  [ "$_moved" = 1 ] && [ "$_sure" = 1 ] && [ "$_cls" = suite ] && [ -n "$_seg" ] || return 0
+  _pre="${COMMAND%%"$_seg"*}"
+  [ "$_pre" != "$COMMAND" ] || return 0
+  _t="${_pre//[[:space:]]/}"
+  case "$_t" in *'||cd'*|*'||{cd'*) return 0 ;; esac
+  _t="${_t//||/}"; _t="${_t//&&/}"
+  case "$_t" in *[\(\)\|\&\`]*) return 0 ;; esac
+  _BSG_STAMP_DIR="$_BSG_CD_DIR"
+  return 0
+}
+
+# _bsg_solo_target — 0 when a suite file the command runs declares `# runner: solo` in its
+# first 30 lines. The path is the claim's own (cmd-class.sh's `targets` reading), resolved
+# against _BSG_CD_DIR, which `_bsg_cd_walk` set from this command's class lines just before.
+# Only a regular file is read, so a FIFO cannot hang the hook.
+_bsg_solo_target() {
+  local _dir="$_BSG_CD_DIR" _p _k _b _r _f _n _l _rest
   while IFS=$'\t' read -r _k _b _r _p; do
     [ "$_k" = file ] && [ -n "$_p" ] || continue
     case "$_p" in *'$'*|*'`'*) continue ;; /*) _f="$_p" ;; *) _f="$_dir/$_p" ;; esac
@@ -5573,12 +5634,14 @@ _bsg_wrap_text() {
     ! _wall_prefix_sets "$_seg" BIONIC_SLOT_HELD 1 || { _BSG_WRAP_WHY=held; return 1; }
     ! _wall_prefix_sets "$_seg" BIONIC_QUIET 1 || _quiet=1
   done <<< "$_lines"
-  [ "$_quiet" = 1 ] || ! _bsg_solo_target "$_lines" || _quiet=1
-  if [ -n "$_k" ]; then
-    wall_booked_argv "$COMMAND" "$_quiet" --kill-after "$_k" || { _BSG_WRAP_WHY=noshim; return 1; }
-  else
-    wall_booked_argv "$COMMAND" "$_quiet" || { _BSG_WRAP_WHY=noshim; return 1; }
-  fi
+  # ONE WALK, TWO READERS (T56): where the leading `cd` segments lead is the solo reader's base
+  # and, when the walk is sure of it, the shim's --stamp-dir.
+  _bsg_cd_walk "$_lines"
+  [ "$_quiet" = 1 ] || ! _bsg_solo_target || _quiet=1
+  set --
+  [ -z "$_k" ] || set -- --kill-after "$_k"
+  [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
+  wall_booked_argv "$COMMAND" "$_quiet" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
     _wall_sh_word "$_w"
     _BSG_WRAP_TEXT="${_BSG_WRAP_TEXT:+$_BSG_WRAP_TEXT }$_WALL_WORD"
