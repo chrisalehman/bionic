@@ -251,12 +251,14 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 # included (wave-26 D19). The link is dropped only just before `git worktree
 # remove`, the one act that needs it gone, and put back if git refuses that.
 #
-# THE LANDING RULE (wave-26 D7). A tree lands only on its own green run, in a
-# state that contains everything landed before it: `not-current` when the head
-# of <onto> is not an ancestor of the tree's head, `stale-proof` when the LAST
-# line of the tree's stamp file (`<git-dir>/bionic-stamps`, written by the
-# booking shim) is on another head, on a dirty tree, or red. No stamp file at
-# all means no suite-class command ever ran in the tree, and is not refused.
+# THE LANDING RULE (wave-26 D7, as ruled in A-orch-26). A tree lands on its own
+# green run. It must first contain what landed since it branched only where that
+# landed work touches a file the tree also changed: `not-current` names those
+# files (`_wt_not_current`). `stale-proof` when the LAST line of the tree's stamp
+# file (`<git-dir>/bionic-stamps`, written by the booking shim) is on another
+# head, on a dirty tree, or red. No stamp file at all means no suite-class
+# command ever ran in the tree, and is not refused. The head of <onto> is read
+# again just before the merge, and a moved head is judged again (review 2 F7).
 #
 # TWO BOUNDS ON THE POWER (security review F1). This function merges into a
 # branch and deletes a worktree; both of those are irreversible enough that
@@ -325,8 +327,14 @@ EOF
 # returns 0 when that line is not proof for <head>: on another head, on a dirty tree, red,
 # or not a stamp at all. Returns 1 when it is proof — and when there is no stamp file, which
 # means no suite-class command ever ran in the tree.
+#
+# `cmd=` is the last field and free text, so the read STOPS there (review 2 F2): what follows
+# is the command, whatever it contains, and a `|rc=0` in it never speaks for the run. That
+# holds by itself, without the shim's pipe replacement. Before `cmd=`, each of head, dirty
+# and rc appears exactly once; a line giving one twice is no line the shim writes.
 _wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
   local wt="${1:-}" head="${2:-}" gd file last f s_head="" s_dirty="" s_rc=""
+  local n_head=0 n_dirty=0 n_rc=0
   local again="re-run the tree's suites at its head, land again"
   local -a fields
   gd="$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null)"
@@ -340,11 +348,14 @@ _wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
   esac
   for f in "${fields[@]}"; do
     case "$f" in
-      head=*)  s_head="${f#head=}" ;;
-      dirty=*) s_dirty="${f#dirty=}" ;;
-      rc=*)    s_rc="${f#rc=}" ;;
+      cmd=*)   break ;;
+      head=*)  s_head="${f#head=}";   n_head=$((n_head + 1)) ;;
+      dirty=*) s_dirty="${f#dirty=}"; n_dirty=$((n_dirty + 1)) ;;
+      rc=*)    s_rc="${f#rc=}";       n_rc=$((n_rc + 1)) ;;
     esac
   done
+  [ "${n_head}${n_dirty}${n_rc}" = "111" ] \
+    || { printf 'why=unreadable stamps=%s — %s' "$file" "$again"; return 0; }
   case "${s_head}:${s_dirty}:${s_rc}" in
     :*|*::*|*:|*[!0-9a-f:]*) printf 'why=unreadable stamps=%s — %s' "$file" "$again"; return 0 ;;
   esac
@@ -360,9 +371,56 @@ _wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
   return 1
 }
 
+# THE NOT-CURRENT READ (wave-26 D7, as ruled in A-orch-26). Where landed work the tree lacks
+# touches a file the tree also changed, the merge would combine two changes to one file that
+# no green run has seen together. Prints `files=<the overlap>` and returns 0 when the tree must
+# merge <onto> first; returns 1 when it may land as it is — it contains <onto head>, or nothing
+# it lacks touches a file it changed. Anything git cannot answer is printed as
+# `files=<unreadable>` and refused, never landed.
+#
+# Both sides are read from the merge base, as the merge itself reads them: the tree's side is
+# what it changed since, the landed side what the merge would bring in from <onto head>. That
+# holds a merge commit's own resolution, and leaves out a landed change that a later landed
+# commit reverted, which the merge never brings. Renames are OFF whatever the user's diff
+# config says: a rename is its old path deleted and its new path added, so a rename on either
+# side of an edit on the other overlaps on the old path.
+_wt_not_current() {  # <root> <onto head> <tree head> -> files=... | nothing
+  local root="${1:-}" onto_head="${2:-}" head="${3:-}" mine landed f hits="" n=0 nl='
+'
+  case "${onto_head}:${head}" in
+    :*|*:|*[!0-9a-f:]*) printf 'files=<unreadable>'; return 0 ;;
+  esac
+  git -C "$root" merge-base --is-ancestor "$onto_head" "$head" 2>/dev/null
+  case $? in
+    0) return 1 ;;
+    1) : ;;
+    *) printf 'files=<unreadable>'; return 0 ;;
+  esac
+  mine="$(git -C "$root" diff --no-renames --name-only "${onto_head}...${head}" 2>/dev/null)" \
+    && landed="$(git -C "$root" diff --no-renames --name-only "${head}...${onto_head}" 2>/dev/null)" \
+    || { printf 'files=<unreadable>'; return 0; }
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "${nl}${landed}${nl}" in
+      *"${nl}${f}${nl}"*)
+        n=$((n + 1))
+        if [ "$n" -le 5 ]; then hits="${hits:+${hits},}${f}"; fi ;;
+    esac
+  done <<EOF
+$mine
+EOF
+  [ "$n" -gt 0 ] || return 1
+  if [ "$n" -gt 5 ]; then hits="${hits},+$((n - 5))-more"; fi
+  printf 'files=%s' "$hits"
+}
+
+_wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
+  _wt_refuse "not-current branch=${1} onto=${2} onto_head=${3:-<none>} ${4} — merge ${2} into the tree, re-run its suites, land again"
+}
+
 worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
-  local dirt onto_head head why link_to
+  local dirt onto_head head why link_to overlap now
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -419,14 +477,13 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     _wt_refuse "nothing-to-land branch=${branch} onto=${onto}"; return 2
   fi
 
-  # NOT CURRENT: the tree must contain everything landed before it, so the tests
-  # it passed ran on the state the merge will produce.
+  # NOT CURRENT: what landed since the tree branched must be in it wherever it
+  # touches a file the tree also changed, so no file the merge combines is untested.
   onto_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${onto}" 2>/dev/null)"
   head="$(git -C "$wt_abs" rev-parse --verify --quiet HEAD 2>/dev/null)"
-  if ! git -C "$root" merge-base --is-ancestor "$onto_head" "$head" 2>/dev/null; then
-    _wt_refuse "not-current branch=${branch} onto=${onto} onto_head=${onto_head} — merge ${onto} into the tree, re-run its suites, land again"
-    return 2
-  fi
+  overlap="$(_wt_not_current "$root" "$onto_head" "$head")" && {
+    _wt_refuse_not_current "$branch" "$onto" "$onto_head" "$overlap"; return 2
+  }
 
   why="$(_wt_stale_proof "$wt_abs" "$head")" && {
     _wt_refuse "stale-proof ${why}"; return 2
@@ -444,9 +501,22 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     _wt_refuse "suite-running ${busy}"; return 2
   }
 
+  # THE HEAD IS READ AGAIN JUST BEFORE THE MERGE (review 2 F7). Another land onto
+  # <onto> may have gone through since the read above; if the head moved, the
+  # not-current decision is taken again against the head the merge will meet.
+  # What remains is the gap between this read and `git merge`'s own read of HEAD.
+  now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${onto}" 2>/dev/null)"
+  if [ "$now" != "$onto_head" ]; then
+    onto_head="$now"
+    overlap="$(_wt_not_current "$root" "$onto_head" "$head")" && {
+      _wt_refuse_not_current "$branch" "$onto" "$onto_head" "$overlap"; return 2
+    }
+  fi
+
   # --no-ff ALWAYS: a fast-forward would erase the fact that this was a task,
-  # and the merge commit is what the ledger row points at.
-  if ! git -C "$co" merge --no-ff -m "merge ${branch} (land)" "$branch" >/dev/null 2>&1; then
+  # and the merge commit is what the ledger row points at. The head merged is
+  # the one judged above, not whatever the branch holds by now.
+  if ! git -C "$co" merge --no-ff -m "merge ${branch} (land)" "$head" >/dev/null 2>&1; then
     git -C "$co" merge --abort >/dev/null 2>&1
     _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co}"; return 2
   fi

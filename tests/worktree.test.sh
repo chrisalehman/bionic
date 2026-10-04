@@ -893,8 +893,9 @@ ln -s "$WK/.bionic/tmp" "$WKT/.bionic/tmp"
 expect_eq "a symlinked .bionic/tmp is refused" "rc=2" "$(wk workspace_for_name "$WKT" "$WKSID" a)"
 
 # ---------------------------------------------------------------------------
-# THE LANDING RULE (wave-26 T10, D7, D19). A tree lands only when it CONTAINS the branch it
-# lands onto and its LAST stamped suite run was green, on a clean tree, at its current head.
+# THE LANDING RULE (wave-26 T10, T31, D7, D19). A tree lands on its LAST stamped suite run when
+# that run was green, on a clean tree, at its current head — and it must first contain what
+# landed since only when that landed work touches a file the tree also changed (A-orch-26).
 # The stamp is one line per suite-class run, appended to the tree's own git directory by the
 # booking shim (T6); these arms write the lines by hand, in exactly the interface's shape.
 stamp_file() { printf '%s/bionic-stamps' "$(git -C "$1" rev-parse --absolute-git-dir)"; }
@@ -903,6 +904,16 @@ stamp() {  # <tree> <head> <dirty> <rc>
     "$2" "$3" "$4" >> "$(stamp_file "$1")"
 }
 green_stamp() { stamp "$1" "$(git -C "$1" rev-parse HEAD)" 0 0; }
+# A file six lines long that two branches can each change on a different line and still merge
+# cleanly, so what refuses an overlap is the landing rule and never a conflict.
+shared_file() {  # <checkout> — commits shared.txt on the branch it sits on
+  printf 'l1\nl2\nl3\nl4\nl5\nl6\n' > "$1/shared.txt"
+  git -C "$1" add shared.txt && git -C "$1" commit --quiet -m "shared file"
+}
+set_line() {  # <checkout> <file> <line no> <text> — rewrites one line and commits it
+  awk -v n="$3" -v t="$4" 'NR == n { $0 = t } { print }' "$1/$2" > "$1/$2.new" && mv "$1/$2.new" "$1/$2"
+  git -C "$1" commit --quiet -am "$2 line $3"
+}
 # The record link resolves: a symlink at <tree>/.bionic that reaches the main root's state.
 link_ok() { test -L "$1/.bionic" && test -f "$1/.bionic/docs/note.md"; }
 
@@ -930,19 +941,39 @@ expect_false "a docs-only tree has no stamp file" test -e "$(stamp_file "$LGD")"
 expect_match "and it lands without one" \
   "spawn-worktree: LANDED branch=docs-arm onto=wave/fixture *" "$(worktree_land "$LGD" wave/fixture)"
 
-section "§LAND-CURRENT: a tree lacking a landed commit is refused not-current; a stale green run, stale-proof (AC-5.3)"
+section "§LAND-CURRENT: behind on a file it also changed is not-current, behind only on other files lands; a stale green run, stale-proof (AC-5.3)"
 
 LC="$(new_repo "$TMP/land-current")"
+shared_file "$LC"
+
+# BEHIND ONLY ON OTHER FILES. Two trees side by side; the first's landing touches first.txt,
+# which the second never changed, so the second lands on its own green run without merging.
 LCA="$(new_tree "$LC" first)"
-LCB="$(new_tree "$LC" second)"
-green_stamp "$LCA"; green_stamp "$LCB"
+LCN="$(new_tree "$LC" apart)"
+green_stamp "$LCA"; green_stamp "$LCN"
 expect_match "the first of two side-by-side trees lands" \
   "spawn-worktree: LANDED branch=first *" "$(worktree_land "$LCA" wave/fixture)"
+expect_eq "fixture: the second now lacks the head it lands onto" "1" \
+  "$(git -C "$LCN" merge-base --is-ancestor wave/fixture HEAD; echo $?)"
+OUTLN="$(worktree_land "$LCN" wave/fixture)"; RCLN=$?
+expect_match "a tree lacking only a commit that touches other files lands" \
+  "spawn-worktree: LANDED branch=apart onto=wave/fixture *" "$OUTLN"
+expect_eq "that land exits 0" "0" "$RCLN"
+
+# BEHIND ON A FILE IT ALSO CHANGED. Both trees change shared.txt, on lines far apart: the merge
+# would go through cleanly and produce a shared.txt neither tree's green run ever saw.
+LCC="$(new_tree "$LC" third)";  set_line "$LCC" shared.txt 1 "third"
+LCB="$(new_tree "$LC" second)"; set_line "$LCB" shared.txt 6 "second"
+green_stamp "$LCC"; green_stamp "$LCB"
+expect_match "a tree changing shared.txt lands" \
+  "spawn-worktree: LANDED branch=third *" "$(worktree_land "$LCC" wave/fixture)"
 LCREFS="$(refs_of "$LC")"
 OUTLC="$(worktree_land "$LCB" wave/fixture)"; RCLC=$?
-expect_match "the second, green but lacking the first's landing, is refused not-current" \
+expect_match "the second, green but lacking a landed commit on a file it changed, is refused not-current" \
   "spawn-worktree: REFUSED reason=not-current branch=second onto=wave/fixture *" "$OUTLC"
-expect_match "the refusal names the head it lacks" "*onto_head=$(git -C "$LC" rev-parse wave/fixture)*" "$OUTLC"
+expect_match "the refusal names the file both changed" "* files=shared.txt *" "$OUTLC"
+expect_no_match "and not the file only the tree changed" "*second.txt*" "$OUTLC"
+expect_match "the refusal names the head it lacks" "*onto_head=$(git -C "$LC" rev-parse wave/fixture) *" "$OUTLC"
 expect_match "and names the fix in one line" \
   "*merge wave/fixture into the tree, re-run its suites, land again" "$OUTLC"
 expect_eq   "that refusal exits 2" "2" "$RCLC"
@@ -979,18 +1010,93 @@ expect_match "a last line that is no stamp is refused stale-proof, unreadable" \
 : > "$(stamp_file "$LCB")"
 expect_match "an empty stamp file is refused stale-proof, unreadable" \
   "spawn-worktree: REFUSED reason=stale-proof why=unreadable *" "$(worktree_land "$LCB" wave/fixture)"
+
+# THE COMMAND'S TEXT NEVER SPEAKS FOR THE RUN (review 2 F2). `cmd=` is the last field and free
+# text; the reader stops at it, whatever follows. The first line is the review's probe input.
+LCH="$(git -C "$LCB" rev-parse HEAD)"
+printf 'stamp/v1|head=%s|dirty=0|rc=1|at=t|cmd=a|rc=0\n' "$LCH" >> "$(stamp_file "$LCB")"
+expect_eq "fixture: the last line carries rc=0 after cmd=" "cmd=a|rc=0" \
+  "$(tail -n 1 "$(stamp_file "$LCB")" | sed 's/.*|cmd=/cmd=/')"
+expect_match "a red run whose command text carries |rc=0 is refused stale-proof, red" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 *" "$(worktree_land "$LCB" wave/fixture)"
+printf 'stamp/v1|head=%s|dirty=3|rc=0|at=t|cmd=a|dirty=0\n' "$LCH" >> "$(stamp_file "$LCB")"
+expect_match "a dirty run whose command text carries |dirty=0 is refused stale-proof, dirty" \
+  "spawn-worktree: REFUSED reason=stale-proof why=dirty dirty=3 *" "$(worktree_land "$LCB" wave/fixture)"
+printf 'stamp/v1|head=%s|dirty=0|rc=0|at=t|cmd=a|head=%s\n' "0000000000000000000000000000000000000000" "$LCH" \
+  >> "$(stamp_file "$LCB")"
+expect_match "a run on another head whose command text carries the tree's head is refused stale-proof, head" \
+  "spawn-worktree: REFUSED reason=stale-proof why=head stamp_head=0000000000000000000000000000000000000000 *" \
+  "$(worktree_land "$LCB" wave/fixture)"
+# A key twice BEFORE cmd= is no line the shim writes: which one holds is not a guess to make.
+printf 'stamp/v1|head=%s|dirty=0|rc=1|rc=0|at=t|cmd=a\n' "$LCH" >> "$(stamp_file "$LCB")"
+expect_match "a key given twice before cmd= is refused stale-proof, unreadable" \
+  "spawn-worktree: REFUSED reason=stale-proof why=unreadable *" "$(worktree_land "$LCB" wave/fixture)"
 expect_eq   "no ref moved across all of them" "$LCREFS" "$(refs_of "$LC")"
-# The fix, step two: re-run at the head, green, clean. The arm discriminates.
-green_stamp "$LCB"
+# The fix, step two: re-run at the head, green, clean. The command text carries a red rc and a
+# dirty count; the reader stopped at cmd=, so the run's own fields decide. The arm discriminates.
+printf 'stamp/v1|head=%s|dirty=0|rc=0|at=t|cmd=bash tests/one.test.sh|rc=1|dirty=9\n' "$LCH" \
+  >> "$(stamp_file "$LCB")"
 expect_match "the same tree lands once its last run is green, clean, at its head" \
   "spawn-worktree: LANDED branch=second onto=wave/fixture *" "$(worktree_land "$LCB" wave/fixture)"
+
+# A RENAME OR A DELETION COUNTS ITS OLD PATH (A-T31.1). The tree renames shared.txt; a landing
+# edits it. Git's merge would carry the edit into the renamed file, untested by the tree.
+LCR="$(new_tree "$LC" renamer)"
+git -C "$LCR" mv shared.txt moved.txt; git -C "$LCR" commit --quiet -m "rename shared"
+LCE="$(new_tree "$LC" editor)"; set_line "$LCE" shared.txt 3 "editor"
+green_stamp "$LCR"; green_stamp "$LCE"
+expect_match "a tree editing shared.txt lands" \
+  "spawn-worktree: LANDED branch=editor *" "$(worktree_land "$LCE" wave/fixture)"
+expect_match "a tree that renamed it away, lacking that landing, is refused not-current on the old path" \
+  "spawn-worktree: REFUSED reason=not-current branch=renamer * files=shared.txt *" "$(worktree_land "$LCR" wave/fixture)"
+
+# A LANDED CHANGE A LATER LANDING REVERTED IS NOT BROUGHT IN (A-T31.3). The merge leaves the
+# tree's shared.txt as the tree tested it, so the tree lands without merging first.
+LCV="$(new_tree "$LC" reverted)"; set_line "$LCV" shared.txt 2 "reverted"; green_stamp "$LCV"
+set_line "$LC" shared.txt 4 "landed"; git -C "$LC" revert --quiet --no-edit HEAD >/dev/null 2>&1
+expect_eq "fixture: the branch's last commit reverts a change to shared.txt" "shared.txt line 4" \
+  "$(git -C "$LC" log -1 --format=%s 'wave/fixture^')"
+expect_match "a tree lacking a change to its file that was reverted since lands" \
+  "spawn-worktree: LANDED branch=reverted onto=wave/fixture *" "$(worktree_land "$LCV" wave/fixture)"
+
+# THE HEAD MOVES BETWEEN THE READ AND THE MERGE (review 2 F7). The busy-suite scan is the last
+# act before the merge; standing in for it, a landing onto the same branch arrives in that window.
+LR="$(new_repo "$TMP/land-race")"
+shared_file "$LR"
+LRT="$(new_tree "$LR" racer)"; set_line "$LRT" shared.txt 1 "racer"; green_stamp "$LRT"
+LRB="$(git -C "$LR" rev-parse wave/fixture)"
+OUTLR="$(_wt_busy_suite() { set_line "$LR" shared.txt 6 "arrived"; return 1; }
+         worktree_land "$LRT" wave/fixture)"; RCLR=$?
+expect_ne "fixture: the branch moved inside the window" "$LRB" "$(git -C "$LR" rev-parse wave/fixture)"
+expect_match "a head that moved onto a file the tree changed is refused not-current" \
+  "spawn-worktree: REFUSED reason=not-current branch=racer * files=shared.txt *" "$OUTLR"
+expect_match "naming the head it moved to" "*onto_head=$(git -C "$LR" rev-parse wave/fixture) *" "$OUTLR"
+expect_eq   "that refusal exits 2" "2" "$RCLR"
+expect_eq   "nothing merged: the tree's head is not in the branch" "1" \
+  "$(git -C "$LR" merge-base --is-ancestor racer wave/fixture; echo $?)"
+expect_true "the tree survives" test -d "$LRT"
+# The other direction: a head that moves only on other files lands, onto the head it moved to.
+LRO="$(new_tree "$LR" bystander)"; green_stamp "$LRO"
+OUTLO="$(_wt_busy_suite() { set_line "$LR" shared.txt 3 "arrived again"; return 1; }
+         worktree_land "$LRO" wave/fixture)"
+expect_match "a head that moved only on other files still lands" \
+  "spawn-worktree: LANDED branch=bystander onto=wave/fixture *" "$OUTLO"
+expect_eq "the merge sits on the commit that arrived" "shared.txt line 3" \
+  "$(git -C "$LR" log -1 --format=%s 'wave/fixture^1')"
+# The tree's own branch moving in that window is not merged: the head judged is the head merged.
+LRM="$(new_tree "$LR" mover)"; green_stamp "$LRM"; LRMH="$(git -C "$LRM" rev-parse HEAD)"
+OUTLM="$(_wt_busy_suite() { echo late > "$LRM/late.txt"; git -C "$LRM" add late.txt; git -C "$LRM" commit --quiet -m late; return 1; }
+         worktree_land "$LRM" wave/fixture)"
+expect_ne "fixture: the tree's branch moved inside the window" "$LRMH" "$(git -C "$LR" rev-parse mover)"
+expect_match "the tree lands" "spawn-worktree: LANDED branch=mover onto=wave/fixture *" "$OUTLM"
+expect_eq "and the merge took the head its green run was on" "$LRMH" "$(git -C "$LR" rev-parse 'wave/fixture^2')"
 
 section "§LAND-KEEP: after each refusal the tree's record link still resolves (AC-9.1)"
 #
 # The link is dropped only just before `git worktree remove`. Each arm proves the link
 # resolves before the land, refuses, proves it still resolves, then lands the same tree.
 
-LK="$(new_repo "$TMP/land-keep")"
+LK="$(new_repo "$TMP/land-keep")"; shared_file "$LK"
 keep_tree() {  # <branch> -> tree path, with its record link and a green stamp at its head
   local t; t="$(new_tree "$LK" "$1")"
   ln -s "${LK}/.bionic" "$t/.bionic"; green_stamp "$t"; printf '%s' "$t"
@@ -1008,8 +1114,8 @@ expect_true "nothing-to-land arm: the link resolves before the land" link_ok "$K
 expect_match "nothing-to-land is refused" "spawn-worktree: REFUSED reason=nothing-to-land*" "$(worktree_land "$KN" wave/fixture)"
 expect_true "after nothing-to-land, the link still resolves" link_ok "$KN"
 
-KC="$(keep_tree keep-current)"
-KCO="$(keep_tree keep-current-other)"
+KC="$(keep_tree keep-current)"; set_line "$KC" shared.txt 1 "keep"; green_stamp "$KC"
+KCO="$(keep_tree keep-current-other)"; set_line "$KCO" shared.txt 6 "other"; green_stamp "$KCO"
 worktree_land "$KCO" wave/fixture >/dev/null
 expect_true "not-current arm: the link resolves before the land" link_ok "$KC"
 expect_match "not-current is refused" "spawn-worktree: REFUSED reason=not-current*" "$(worktree_land "$KC" wave/fixture)"
@@ -1037,10 +1143,9 @@ expect_true "after suite-running, the link still resolves" link_ok "$KS"
 stop_runner
 
 # Every refused tree above lands once its cause is gone, and only then is its link dropped.
-# Each landing makes the next tree not-current, so each takes the named fix first: merge
-# the branch it lands onto, re-run, land.
+# None of them changed a file another landing touched, so each lands on its own green run
+# without merging first (KC took the not-current fix above).
 for t in "$KD" "$KC" "$KO" "$KS"; do
-  git -C "$t" merge --quiet --no-edit wave/fixture >/dev/null 2>&1; green_stamp "$t"
   expect_match "the refused tree ${t##*/} lands once its cause is gone" \
     "spawn-worktree: LANDED branch=${t##*/} *" "$(worktree_land "$t" wave/fixture)"
   expect_false "and its tree, link included, is gone" test -e "$t"
