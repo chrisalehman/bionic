@@ -10,23 +10,30 @@
 # THE STORE. `${BIONIC_SLOTS_DIR:-$HOME/.claude/bionic/slots}`, one per machine, holding:
 #
 #   place.<i>/pid    a held place, i in 1..N; `pid` is the holder, `what` names its command
+#   place.<i>/since  when the holder started (`ps -o lstart=`), written before `pid`
 #   place.<i>/lent   the pid of a nested whole-machine take that lent this place (below)
 #   quiet/pid        the whole-machine marker; while it is held no new place is handed out
 #   .reap/           a short lock taken only to reclaim a dead holder's place
 #
+# It is under `$HOME`, not `CLAUDE_CONFIG_DIR`: one count for every session on the machine,
+# where a store per Claude profile would hand out N places per profile (review 4, A1).
 # The count is `${BIONIC_SLOTS_N:-<suites from resources_budget>}`.
 #
 # THE PRIMITIVE IS mkdir (bash 3.2, and no flock on macOS). `mkdir` is atomic: of two
-# takers racing for one place exactly one creates it. The holder then writes its pid, and a
-# place whose pid is gone (`kill -0`, as patrol_live_sessions) is free to the next taker. A
-# place with no pid yet is a take in progress and is left alone, unless it is older than a
-# minute, which only a taker killed between `mkdir` and its pid write leaves behind.
+# takers racing for one place exactly one creates it. The holder then writes its start time
+# and its pid. A place is held while that pid lives AND started at that time: a pid the OS
+# has since handed to another process does not hold it (T36, review 4 F2). A place with no
+# `since` (claimed by an older bionic) falls back to `kill -0`. A place with no pid yet is a
+# take in progress and is left alone, unless it is older than a minute, which only a taker
+# killed between `mkdir` and its pid write leaves behind. Every take reaps every dead place
+# it can see, not only the one it found taken, so a dead place never lingers behind a free one.
 #
 # RECLAIMING IS SERIALISED; TAKING IS NOT. Two reclaimers that both saw one dead holder must
 # not both remove the place, or the second removes the place the first just took. So the
 # check-and-remove runs under `.reap/` (held for microseconds), and a removal is a `mv` to a
 # scratch name first, so a reader sees the whole place or none of it. A plain take of a free
-# place never touches the lock.
+# place never touches the lock. A lock left by a dead reclaimer is stolen one stealer at a
+# time (`.reap.steal.<pid>`, see _slots_steal), so a stale lock never lets two in (F1).
 #
 # THE WHOLE-MACHINE TAKE (slots_take_all). Take the marker first, which stops new shared
 # takes; then take every free place and wait for the held ones to drain. A shared take
@@ -53,16 +60,27 @@
 # what it holds. Both takes return 1 at the maximum wait, after one stderr line naming the
 # holders; slots_take_all gives back what it took first.
 #
+# A STORE THAT CANNOT BE WRITTEN (T36, review 4 F5) is found before any wait, and both takes
+# return 2 at once. Booking manages throughput; it is not a guard. So slots_take says
+# nothing and leaves the choice to its caller (booked.sh runs the command unbooked, with one
+# line that says so), while slots_take_all prints one line naming the store: a timing check
+# taken without the machine is worth nothing, so a whole-machine take refuses.
+#
 # THE KNOBS, each with a ceiling so a test can never hang:
 #
 #   BIONIC_SLOTS_POLL      seconds between looks while waiting        default 1 (decimals ok)
 #   BIONIC_SLOTS_MAX_WAIT  seconds before a wait gives up             default 1200
 #   BIONIC_SLOTS_NOTE_S    seconds between "still waiting" lines      default 60
 #
+# ONE CEILING FOR A CALLER'S WAITS (T36, review 4 F3). A caller that waits more than once —
+# booked.sh: the marker, the drain, the settle, every void retry — sets SLOTS_DEADLINE once,
+# to `$SECONDS + max`, and every wait here gives up at it rather than starting its own.
+# Unset, each take's waits share one ceiling of their own, as before.
+#
 # WHAT IT DOES NOT GUARANTEE. Exclusion holds among takers only: a session on an older
-# bionic, an unengaged one, or a terminal takes no place. A reused pid reads as alive until
-# its process ends. A holder killed with SIGKILL runs no trap: its place is reclaimed by the
-# next taker, but a command it left running keeps running.
+# bionic, an unengaged one, or a terminal takes no place. A holder killed with SIGKILL runs
+# no trap: its place is reclaimed by the next taker, but a command it left running keeps
+# running.
 #
 # BASH 3.2. No associative arrays, no `$BASHPID`, no `flock`.
 #
@@ -83,6 +101,8 @@ fi
 
 SLOTS_ORPHAN_MIN=1   # a place with no pid this many minutes old was left by a killed taker
 SLOTS_TAKEN=""
+SLOTS_DEADLINE=""    # a $SECONDS value every wait of this caller gives up at (see THE KNOBS)
+_SLOTS_SINCE=""; _SLOTS_SINCE_PID=""
 
 slots_dir() {
   printf '%s\n' "${BIONIC_SLOTS_DIR:-$HOME/.claude/bionic/slots}"
@@ -127,15 +147,46 @@ _slots_note_s() {
   esac
 }
 
+# _slots_deadline <max> — the $SECONDS value a wait starting now gives up at: the caller's
+# SLOTS_DEADLINE when it set one for all its waits together, else now + <max>.
+_slots_deadline() {
+  case "${SLOTS_DEADLINE:-}" in
+    ''|*[!0-9]*) printf '%s' "$((SECONDS + $1))" ;;
+    *) printf '%s' "$SLOTS_DEADLINE" ;;
+  esac
+}
+
 _slots_pid_of() {  # <dir> -> the pid recorded in <dir>/pid, or nothing
   local p=''
-  [ -r "$1/pid" ] && read -r p < "$1/pid" 2>/dev/null
+  # Braced: a file removed between a test and the read would print the redirect's error.
+  { read -r p < "$1/pid"; } 2>/dev/null
   case "$p" in ''|*[!0-9]*) p='' ;; esac
   printf '%s' "$p"
 }
 
 _slots_alive() {  # <pid> — rc 0 while that process exists
   [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null
+}
+
+# _slots_since <pid> -> when that process started, one space between fields; nothing when
+# it is gone. The C locale and UTC make it the same string whoever asks.
+_slots_since() {
+  local s
+  s="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null)"
+  # shellcheck disable=SC2086
+  set -- $s
+  printf '%s' "$*"
+}
+
+# _slots_holds <dir> <pid> — rc 0 while <pid> lives AND is the process that claimed <dir>:
+# a pid the OS handed to another process since does not hold it (review 4 F2).
+_slots_holds() {
+  local s='' now
+  _slots_alive "$2" || return 1
+  { read -r s < "$1/since"; } 2>/dev/null
+  [ -n "$s" ] || return 0        # claimed by an older bionic: kill -0 is all there is
+  now="$(_slots_since "$2")"
+  [ -z "$now" ] || [ "$now" = "$s" ]   # a ps that cannot answer leaves it held
 }
 
 _slots_old() {  # <dir> — rc 0 when it is older than SLOTS_ORPHAN_MIN minutes
@@ -147,7 +198,7 @@ _slots_state() {  # <dir> -> free | live | taking | dead | orphan
   [ -d "$1" ] || { printf 'free'; return 0; }
   p="$(_slots_pid_of "$1")"
   if [ -n "$p" ]; then
-    if _slots_alive "$p"; then printf 'live'; else printf 'dead'; fi
+    if _slots_holds "$1" "$p"; then printf 'live'; else printf 'dead'; fi
   elif _slots_old "$1"; then
     printf 'orphan'
   else
@@ -157,7 +208,13 @@ _slots_state() {  # <dir> -> free | live | taking | dead | orphan
 
 _slots_claim() {  # <place> <pid> [<what>] — rc 0 when this call created the place
   local place="$1"
+  # The holder's start is read once per pid, before the mkdir, to keep the claim short.
+  if [ "$_SLOTS_SINCE_PID" != "$2" ]; then
+    _SLOTS_SINCE="$(_slots_since "$2")"; _SLOTS_SINCE_PID="$2"
+  fi
   mkdir "$place" 2>/dev/null || return 1
+  # The start before the pid: whoever reads the pid finds the start beside it.
+  [ -z "$_SLOTS_SINCE" ] || printf '%s\n' "$_SLOTS_SINCE" > "$place/since"
   printf '%s\n' "$2" > "$place/pid"
   [ -z "${3:-}" ] || printf '%s\n' "$3" > "$place/what"
   return 0
@@ -170,16 +227,40 @@ _slots_drop() {  # <store> <dir> — remove a place whole: rename first, then de
   fi
 }
 
+_slots_lock_stale() {  # <lock> <its pid, or nothing> — rc 0 when its holder is dead or it is old
+  { [ -n "$2" ] && ! _slots_alive "$2"; } || _slots_old "$1"
+}
+
+# _slots_steal <store> <the stale lock's pid, or nothing> — drop a stale reap lock, one
+# stealer at a time; rc 0 when this call dropped it. Reading the lock's dead pid and then
+# dropping the lock is check-then-act: two stealers that both read it would each drop a
+# lock, the second dropping the one the first had just taken, and both would reap the same
+# place (review 4 F1). So a stealer first takes `.reap.steal.<pid>` (mkdir: one wins) and,
+# under it, drops the lock only while it is still that stale lock. A lock changes hands only
+# through a stealer of its pid, and those take turns. A token older than the orphan line was
+# left by a stealer killed inside its microseconds, and is cleared.
+_slots_steal() {
+  local tok="$1/.reap.steal.${2:-none}" rc=1
+  if ! mkdir "$tok" 2>/dev/null; then
+    _slots_old "$tok" && _slots_drop "$1" "$tok"
+    return 1
+  fi
+  if [ "$(_slots_pid_of "$1/.reap")" = "${2:-}" ] && _slots_lock_stale "$1/.reap" "${2:-}"; then
+    _slots_drop "$1" "$1/.reap"; rc=0
+  fi
+  rmdir "$tok" 2>/dev/null
+  return "$rc"
+}
+
 _slots_lock() {  # <store> — the reap lock; rc 1 if it cannot be had in about two seconds
   local lk="$1/.reap" i=0 p
   while ! mkdir "$lk" 2>/dev/null; do
-    p="$(_slots_pid_of "$lk")"
-    if { [ -n "$p" ] && ! _slots_alive "$p"; } || _slots_old "$lk"; then
-      _slots_drop "$1" "$lk"
-      continue
-    fi
     i=$((i + 1))
     [ "$i" -lt 100 ] || return 1
+    p="$(_slots_pid_of "$lk")"
+    if _slots_lock_stale "$lk" "$p" && _slots_steal "$1" "$p"; then
+      continue
+    fi
     sleep 0.02
   done
   printf '%s\n' "$$" > "$lk/pid"
@@ -205,7 +286,7 @@ _slots_take_one() {  # <store> <place> <pid> [<what>] — claim, reclaiming a de
 _slots_who() {  # <dir> -> "pid <p> (<what>)"
   local p w=''
   p="$(_slots_pid_of "$1")"
-  [ -r "$1/what" ] && read -r w < "$1/what" 2>/dev/null
+  { read -r w < "$1/what"; } 2>/dev/null
   printf 'pid %s' "${p:-?}"
   [ -z "$w" ] || printf ' (%s)' "$w"
 }
@@ -222,7 +303,7 @@ _slots_quiet_blocks() {  # <store> <self pid> — rc 0 when another live take ho
 
 _slots_lent_live() {  # <place> — rc 0 when a live nested take has lent this place
   local p=''
-  [ -r "$1/lent" ] && read -r p < "$1/lent" 2>/dev/null
+  { read -r p < "$1/lent"; } 2>/dev/null
   case "$p" in ''|*[!0-9]*) return 1 ;; esac
   _slots_alive "$p"
 }
@@ -245,28 +326,43 @@ _slots_holders() {  # <store> <self pid> -> "pid 1 (a), pid 2 (b)" for every liv
 
 # _slots_note <text> — the waiting line: once at the start of a wait, then
 # once every BIONIC_SLOTS_NOTE_S. Reads and moves _SLOTS_NOTED, which each wait resets.
+# _slots_note_due answers whether it would print now, so a caller builds an expensive line
+# (the holders) only then: `_slots_note_due && _slots_note "… $(_slots_holders …)"`.
 _SLOTS_NOTED=-1
+_slots_note_due() {
+  [ "$_SLOTS_NOTED" -lt 0 ] || [ $((SECONDS - _SLOTS_NOTED)) -ge "$(_slots_note_s)" ]
+}
 _slots_note() {
-  local now=$SECONDS
-  if [ "$_SLOTS_NOTED" -lt 0 ] || [ $((now - _SLOTS_NOTED)) -ge "$(_slots_note_s)" ]; then
+  if _slots_note_due; then
     printf 'slots: %s\n' "$1" >&2
-    _SLOTS_NOTED=$now
+    _SLOTS_NOTED=$SECONDS
   fi
 }
 
+_slots_store_ok() {  # <store> — rc 0 when the store exists (made if need be) and can be written
+  mkdir -p "$1" 2>/dev/null && [ -w "$1" ] && [ -x "$1" ]
+}
+
+_slots_sweep() {  # <store> — reap every dead place, so none lingers behind a free one (F2)
+  local f
+  for f in "$1"/place.*; do
+    [ -d "$f" ] || continue
+    _slots_reap "$1" "$f" || :
+  done
+}
+
 slots_take() {
-  local pid="${1:-$$}" what="${2:-}" d n i place start poll max
+  local pid="${1:-$$}" what="${2:-}" d n i place start poll max deadline
   SLOTS_TAKEN=""
   if [ "${BIONIC_SLOT_HELD:-}" = 1 ] || [ "${BIONIC_SLOT_QUIET:-}" = 1 ]; then
     return 0
   fi
-  d="$(slots_dir)"; n="$(slots_count)"
+  d="$(slots_dir)"
+  _slots_store_ok "$d" || return 2     # silent: the caller says what it does unbooked
+  n="$(slots_count)"
   poll="$(_slots_poll)"; max="$(_slots_max_wait)"
-  if ! mkdir -p "$d" 2>/dev/null; then
-    printf 'slots: cannot create the store %s\n' "$d" >&2
-    return 1
-  fi
-  start=$SECONDS; _SLOTS_NOTED=-1
+  deadline="$(_slots_deadline "$max")"; start=$((deadline - max)); _SLOTS_NOTED=-1
+  _slots_sweep "$d"
   while :; do
     if ! _slots_quiet_blocks "$d" "$pid"; then
       i=1
@@ -284,43 +380,44 @@ slots_take() {
         i=$((i + 1))
       done
     fi
-    if [ $((SECONDS - start)) -ge "$max" ]; then
+    if [ "$SECONDS" -ge "$deadline" ]; then
       printf 'slots: gave up after %ss with no place free — held by %s\n' \
         "$((SECONDS - start))" "$(_slots_holders "$d" "$pid")" >&2
       return 1
     fi
-    _slots_note "waiting for a place — all $n held by $(_slots_holders "$d" "$pid")"
+    _slots_note_due && _slots_note "waiting for a place — all $n held by $(_slots_holders "$d" "$pid")"
     sleep "$poll"
   done
 }
 
 slots_take_all() {
-  local pid="${1:-$$}" what="${2:-}" d n i f place start poll max own='' allow=0 left who
+  local pid="${1:-$$}" what="${2:-}" d n i f place start poll max deadline own='' allow=0 left who
   SLOTS_TAKEN=""
   [ "${BIONIC_SLOT_QUIET:-}" = 1 ] && return 0
-  d="$(slots_dir)"; n="$(slots_count)"
-  poll="$(_slots_poll)"; max="$(_slots_max_wait)"
-  if ! mkdir -p "$d" 2>/dev/null; then
-    printf 'slots: cannot create the store %s\n' "$d" >&2
-    return 1
+  d="$(slots_dir)"
+  if ! _slots_store_ok "$d"; then
+    printf 'slots: cannot write the store %s, so the whole machine cannot be taken and a timing result would mean nothing — fix: make it writable, or point BIONIC_SLOTS_DIR at a directory you can write\n' "$d" >&2
+    return 2
   fi
+  n="$(slots_count)"
+  poll="$(_slots_poll)"; max="$(_slots_max_wait)"
   if [ "${BIONIC_SLOT_HELD:-}" = 1 ]; then
     own="${BIONIC_SLOT_PLACE:-}"
     case "$own" in "$d"/place.*) [ -d "$own" ] || own='' ;; *) own='' ;; esac
     [ -n "$own" ] || allow=1
   fi
-  start=$SECONDS; _SLOTS_NOTED=-1
+  deadline="$(_slots_deadline "$max")"; start=$((deadline - max)); _SLOTS_NOTED=-1
 
   # The marker. A nested take lends its parent's place while it waits here.
   [ -z "$own" ] || printf '%s\n' "$pid" > "$own/lent"
   until _slots_take_one "$d" "$d/quiet" "$pid" "$what"; do
-    if [ $((SECONDS - start)) -ge "$max" ]; then
+    if [ "$SECONDS" -ge "$deadline" ]; then
       [ -z "$own" ] || rm -f "$own/lent"
       printf 'slots: gave up after %ss waiting for the whole machine — held by %s\n' \
         "$((SECONDS - start))" "$(_slots_holders "$d" "$pid")" >&2
       return 1
     fi
-    _slots_note "waiting for the whole machine — held by $(_slots_holders "$d" "$pid")"
+    _slots_note_due && _slots_note "waiting for the whole machine — held by $(_slots_holders "$d" "$pid")"
     sleep "$poll"
   done
   [ -z "$own" ] || rm -f "$own/lent"
@@ -351,7 +448,7 @@ slots_take_all() {
       printf '%s\n' "$d/quiet"
       return 0
     fi
-    if [ $((SECONDS - start)) -ge "$max" ]; then
+    if [ "$SECONDS" -ge "$deadline" ]; then
       slots_release "$pid"
       printf 'slots: gave up after %ss waiting for the places to drain — held by %s\n' \
         "$((SECONDS - start))" "$who" >&2
@@ -373,7 +470,7 @@ slots_release() {
       continue
     fi
     p=''
-    [ -r "$f/lent" ] && read -r p < "$f/lent" 2>/dev/null
+    { read -r p < "$f/lent"; } 2>/dev/null
     [ "$p" = "$pid" ] && rm -f "$f/lent"
   done
   return 0
