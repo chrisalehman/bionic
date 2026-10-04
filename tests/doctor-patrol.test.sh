@@ -293,6 +293,14 @@ done
 
 # ---------- driving doctor ----------
 
+# THE PROBE BOUND IS 15 SECONDS, THE DOCTOR'S OWN DEFAULT, ON EVERY LAUNCH. It was 3, and no row here is
+# about a probe that hangs: `_patrol_scan` (lib/patrol.sh) runs its jq over the session's transcript under
+# `detect_bounded` at this bound, and a scan cut short returns nothing, so the session has no Patrol job and
+# the page drops it whole. On a busy machine a jq that took over 3 s therefore decided a row about idle time
+# (row 81 went red once under load, 82 stayed green). A fixture's bound must not decide a row that is not
+# about the bound, and `detect_bounded` returns within a tenth of a second of the probe ending, so a
+# generous bound costs a fast probe nothing.
+#
 # DOCTOR IS ALWAYS RUN FROM INSIDE THE PROJECT IT IS DIAGNOSING, because that is
 # the only thing that makes its answer addressable: `project_root "$PWD"` is
 # doctor's `DOCTOR_ROOT`, and the Patrol section reports on the sessions belonging
@@ -303,7 +311,7 @@ done
 # here. The cwd is now an argument, and it is the fixture repo the session under
 # test actually lives in.
 run_doctor() {  # <claude-home> <project-cwd>
-  ( cd "$2" && PATH="$BIN" BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+  ( cd "$2" && PATH="$BIN" BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
@@ -332,7 +340,7 @@ patrol_block() {  # <full-output>
 # each use this.
 run_doctor_only() {  # <claude-home> <project-cwd>
   ( cd "$2" && PATH="$BIN" BIONIC_DOCTOR_ONLY="PATROL,PROJECT,FIXES" BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )
+      BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
 section "Section 1: no live Patrol anywhere"
