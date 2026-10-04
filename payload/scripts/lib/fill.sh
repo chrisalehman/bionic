@@ -374,9 +374,10 @@ fill_row_launched() {  # <task id> <names, comma-joined> -> 0 launched · 1 not
 # still holds next turn ("T7 waits on T6's merge") used to have to be written again on every
 # turn end. The fill ledger keeps each Stop's ready set, `current:` and decline, so the
 # session's latest declined line is the standing answer: the ids it answered are its ready set
-# less the rows that turn launched, and it stands while `current:` reads as it did then. A row
-# it never saw, or a moved `current:`, is unanswered. Another session's line is not this
-# conversation's answer.
+# less the rows that turn launched. A row it never saw is unanswered. A move of `current:` alone
+# re-asks nothing (wave-26 T15, AC-4.6; D16): the decline stands until the READY SET gains a row
+# it did not answer. The third operand is kept so neither caller changes. Another session's
+# line is not this conversation's answer.
 #
 # ONE READER, TWO PROCESSES (Step-6 review C2/U1). The stop wall's collector refuses a turn
 # only for the rows this does not answer, and the tick prints it and leaves those rows out of
@@ -405,7 +406,6 @@ fill_standing_decline() {  # <ledger path> <session id> <current: as read now>
     END { if (last != "") print last }')"
   [ -n "$line" ] || return 0
   IFS=$'\037' read -r at st_cur ready launched reason <<< "$line"
-  [ "$st_cur" = "$cur" ] || return 0
   for id in ${ready//,/ }; do
     fill_row_launched "$id" "$launched" && continue
     ids="${ids}${ids:+ }${id}"
