@@ -117,6 +117,12 @@ fixture_git() {
 # current: 9: frontmatter (walk exempt, tested rigor, no named deploy target), a
 # `## SDLC State` naming both branches, and a complete `## Verification Matrix` whose
 # one T1 row owes tier-run/readback/evidence and has them.
+#
+# THE STATE A RUN IS IN BEFORE ITS TOOLS CLOSE IT, AND NOTHING THE TOOLS WRITE (wave-27 T4,
+# D14, AC-7.3). No builder here plants `current: 8` or a Step 9 line: the first is the
+# `current` verb's to write and the second is close-out's. A plan that carried either by
+# hand would hide exactly the two refusals wave-26 met on its own close (research-riders-map
+# B1, B2). §FIX-SHAPE reads these builders and fails if one comes back.
 fixture_plan_text() {
   local aroot="$1" current="$2"
   cat <<PLAN_HEAD
@@ -149,7 +155,6 @@ approved-by: fixture 2026-09-14T00:00Z "approved"
 
 - Step 7: CLOSED — n/a: no ADR owed by a fixture
 - Step 8: (pending)
-- Step 9: (pending)
 
 ## Tasks
 
@@ -213,8 +218,9 @@ EPIC
 
 # mk_fixture <name> -> an initialised project at $SANDBOX/<name>, echoed. Contains:
 # a git repo whose `wave/01-fixture` is merged into `main`, a `wt/01-x` branch holding no
-# commit `main` has not taken, `.bionic/tmp/` with three files, the plan at Step 8, an
-# open epic plan with a shipped-wave table, and the matrix's evidence file.
+# commit `main` has not taken, `.bionic/tmp/` with three files, the plan at Step 7 with no
+# Step 9 line, an open epic plan with a shipped-wave table, and the matrix's evidence file.
+# A row that closes the fixture moves it to Step 8 with `advance_to` first.
 mk_fixture() {
   # ONE ASSIGNMENT PER `local`. Every word on a `local` line is expanded BEFORE the
   # builtin assigns any of them, so `local name="$1" p="$SANDBOX/$name"` reads `$name`
@@ -236,7 +242,7 @@ mk_fixture() {
   # The epic plan FIRST, the wave plan second: `active_plan`'s newest-mtime walk is how
   # the gate picks which plan to read, and the wave plan is the one under test.
   fixture_epic_text > "$p/.bionic/docs/plans/epic-fx/epic.plan.md"
-  fixture_plan_text "$aroot" 8 > "$p/.bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
+  fixture_plan_text "$aroot" 7 > "$p/.bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
   touch "$p/.bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
 
   (
@@ -327,12 +333,11 @@ base: main @ fixture
 intent: bugfix
 rigor: tested
 scale: wave
-current: 8
+current: 7
 approved-by: fixture 2026-09-14T00:00Z "approved"
 
 - Step 7: CLOSED — n/a: no ADR owed by a fixture
 - Step 8: (pending)
-- Step 9: (pending)
 
 ## Tasks
 
@@ -402,12 +407,11 @@ base: main @ fixture
 intent: bugfix
 rigor: tested
 scale: wave
-current: 8
+current: 7
 approved-by: fixture 2026-09-14T00:00Z "approved"
 
 - Step 7: CLOSED — n/a: no ADR owed by a fixture
 - Step 8: (pending)
-- Step 9: (pending)
 
 ## Tasks
 
@@ -449,6 +453,19 @@ PLAN_CENSUS
 PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
 EPIC_REL=".bionic/docs/plans/epic-fx/epic.plan.md"
 CONT_REL=".bionic/docs/record/wave-01-fixture/continuation.md"
+UNITS_LIB="$REPO_ROOT/payload/scripts/lib/units.sh"
+
+# advance_to <project> <N> -> the fixture plan's `current:` moved to N by `units_set_current`,
+# the writer the `current` verb itself calls (hooks/session-poker.sh, the `current)` arm), so
+# the plan holds the bytes the verb writes. The verb's own dry commit is NOT asked here: until
+# wave-27 T14 it demands the Step-8 block close-out writes, and from T14 it demands the
+# review facts; §E2E is the row that drives the whole verb.
+advance_to() {
+  local plan="$1/$PLAN_REL"
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "advance_to: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  bash -c '. "$1" && units_set_current "$2" "$3"' _ "$UNITS_LIB" "$plan" "$2" > "$plan.adv" \
+    && mv "$plan.adv" "$plan"
+}
 
 # ---------- drivers ----------
 
@@ -557,7 +574,7 @@ branch_exists() {
 require_helpers in_fixture fixture_git contains fixture_plan_text fixture_epic_text mk_fixture \
                 add_unreached_branch add_foreign_unreached_branch run_close run_close_as gate_rc \
                 run_open_rc tmp_entries sha_of branch_exists plant_tmp_session tmp_file_exists \
-                mk_census_fixture mk_census_branch mk_census_fixture_nowt
+                mk_census_fixture mk_census_branch mk_census_fixture_nowt advance_to
 
 # ============================================================
 section "0 — the script exists, parses, and refuses an unusable call"
@@ -576,7 +593,7 @@ expect_eq "0f: …and one outside the sandbox (this repository)" "1" \
 expect_eq "0g: …while a real fixture path is entered" "0" \
   "$( ( in_fixture "$SB_HOME" ) >/dev/null 2>&1; echo $? )"
 
-P0="$(mk_fixture p0)"
+P0="$(mk_fixture p0)"; advance_to "$P0" 8
 run_close "$P0" "fly"
 expect_eq "0c: an unknown verb exits 2" "2" "$CO_RC"
 expect_eq "0d: …and says which verbs there are" "yes" "$(contains "$CO_OUT" "check")"
@@ -589,7 +606,7 @@ expect_eq "0d: …and says which verbs there are" "yes" "$(contains "$CO_OUT" "c
 ROWS04="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1 | file.txt | active | 04-T1 |
 | T2 | 4 | build | fixture writer two | implementor | — | 10 | AC-1 | file.txt | active | 04-T2 |"
 
-P0H="$(mk_census_fixture p0h "w51/04-fixit" "$ROWS04")"
+P0H="$(mk_census_fixture p0h "w51/04-fixit" "$ROWS04")"; advance_to "$P0H" 8
 mk_census_branch "$P0H" wt/04-T1
 mk_census_branch "$P0H" wt/04-T2
 mk_census_branch "$P0H" wt/99-x   # a foreign branch — no row of this plan names it
@@ -601,7 +618,7 @@ expect_eq "0j: …never the foreign, unregistered wt/99-x" "no" "$(contains "$CO
 
 # working-branch: main is now an ordinary value — it decided nothing before this
 # wave read it for anything but the merge act, and it decides nothing extra now.
-P0K="$(mk_census_fixture p0k "main" "$ROWS04")"
+P0K="$(mk_census_fixture p0k "main" "$ROWS04")"; advance_to "$P0K" 8
 mk_census_branch "$P0K" wt/04-T1
 mk_census_branch "$P0K" wt/04-T2
 run_close "$P0K" check
@@ -612,7 +629,7 @@ expect_eq "0k2: …and still censuses its registered trees" "yes" \
 # A plan whose `## Tasks` table names no tree: an EMPTY census is the conservative
 # failure, and `check`/`run` both proceed rather than refusing.
 ROWS_EMPTY="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1 | file.txt | active | — |"
-P0L="$(mk_census_fixture p0l "wave/01-fixture" "$ROWS_EMPTY")"
+P0L="$(mk_census_fixture p0l "wave/01-fixture" "$ROWS_EMPTY")"; advance_to "$P0L" 8
 run_close "$P0L" check
 expect_eq "0l: a plan with no filled worktree cell does not refuse" "0" "$CO_RC"
 expect_eq "0m: …and says so by name, not silently" "yes" \
@@ -630,7 +647,7 @@ section "0n — REQ-6 (AC-6.2): a wave control — the register meets today's sh
 
 ROWS16="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1 | file.txt | landed | 16-a |
 | T2 | 4 | build | fixture writer two | implementor | — | 10 | AC-1 | file.txt | active | 16-b |"
-P0N="$(mk_census_fixture p0n "wave/16-fixit-183" "$ROWS16")"
+P0N="$(mk_census_fixture p0n "wave/16-fixit-183" "$ROWS16")"; advance_to "$P0N" 8
 (
   in_fixture "$P0N" || exit 1
   git checkout -q -b wave/16-fixit-183
@@ -675,7 +692,7 @@ ROWS_NOWT="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1
 
 # 0o1-0o5: an unmerged wt/01-T1 (git cherry shows a `+` line against the working
 # branch) — today (unfixed) this passes silently; the fix must refuse and say so.
-P0O="$(mk_census_fixture_nowt p0o "wave/01-x" "$ROWS_NOWT")"
+P0O="$(mk_census_fixture_nowt p0o "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0O" 8
 (
   in_fixture "$P0O" || exit 1
   git checkout -q -b wave/01-x
@@ -702,7 +719,7 @@ expect_eq "0o5b: …the branch survives (nothing was deleted, nothing else was d
 
 # 0p: a columnless table whose only wt/* branch is fully merged — the fallback still
 # fires (announced) but finds nothing to refuse, and the run proceeds.
-P0P="$(mk_census_fixture_nowt p0p "wave/01-x" "$ROWS_NOWT")"
+P0P="$(mk_census_fixture_nowt p0p "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0P" 8
 (
   in_fixture "$P0P" || exit 1
   git checkout -q -b wave/01-x
@@ -736,7 +753,7 @@ section "0q — C7: the column-less fallback is scoped to wt/<NN>-*, exactly as 
 # deleted"). At 4e2ac66 (unfixed) this WOULD-REFUSEs and `run` refuses rc=2; at 72e07ec
 # (1.8.3) and after this fix, `wt/07-z` falls outside `wt/01-*` and is invisible.
 
-P0Q="$(mk_census_fixture_nowt p0q "wave/01-x" "$ROWS_NOWT")"
+P0Q="$(mk_census_fixture_nowt p0q "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0Q" 8
 (
   in_fixture "$P0Q" || exit 1
   git checkout -q -b wave/01-x
@@ -773,7 +790,7 @@ section "0r — C7: a column-less WAVE-scale plan whose working-branch is not wa
 # `scale: wave` plan (this fixture's own scale — every fixture here is wave-scale); a
 # task-scale plan has no wave number to want, and §ANY-BRANCH below pins it closing.
 
-P0R="$(mk_census_fixture_nowt p0r "topic/not-a-wave-branch" "$ROWS_NOWT")"
+P0R="$(mk_census_fixture_nowt p0r "topic/not-a-wave-branch" "$ROWS_NOWT")"; advance_to "$P0R" 8
 run_close "$P0R" check
 expect_eq "0r1: check refuses (1.8.3 refused before act 1, for either verb)" "2" "$CO_RC"
 expect_eq "0r2: …with 1.8.3's own wording" "yes" \
@@ -787,7 +804,7 @@ expect_eq "0r4: …with the same wording" "yes" \
 # A table WITH the worktree column never derives a wave number at all — the register
 # names its own trees — so the same non-wave-shaped working-branch is untouched there.
 ROWS_WT_SHAPED="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1 | file.txt | active | 01-T1 |"
-P0S="$(mk_census_fixture p0s "topic/not-a-wave-branch" "$ROWS_WT_SHAPED")"
+P0S="$(mk_census_fixture p0s "topic/not-a-wave-branch" "$ROWS_WT_SHAPED")"; advance_to "$P0S" 8
 run_close "$P0S" check
 expect_eq "0s1: a registered table with the same branch shape is never refused for it" "0" "$CO_RC"
 
@@ -802,7 +819,7 @@ section "ANY-BRANCH — T11 (AC-9.2): a column-less TASK-scale plan closes on an
 
 mk_task_scale_fixture() {
   local name="$1" working="$2" p
-  p="$(mk_census_fixture_nowt "$name" "$working" "$ROWS_NOWT")"
+  p="$(mk_census_fixture_nowt "$name" "$working" "$ROWS_NOWT")"; advance_to "$p" 8
   sed -i.bak 's/^scale: wave$/scale: task/' "$p/$PLAN_REL" && rm -f "$p/$PLAN_REL.bak"
   (
     in_fixture "$p" || exit 1
@@ -830,7 +847,7 @@ expect_eq "AB5: …prints no shape refusal" "no" "$(contains "$CO_OUT" "is not w
 section "1 — AC-4.1: run performs the tail and the gate allows the commit"
 # ============================================================
 
-P1="$(mk_fixture p1)"
+P1="$(mk_fixture p1)"; advance_to "$P1" 8
 expect_eq "1.0: the fixture starts with three entries under .bionic/tmp/" "3" "$(tmp_entries "$P1")"
 run_close "$P1" run
 
@@ -904,7 +921,7 @@ expect_eq "1ai: …and the run directory stayed, the epic being open" "yes" \
 section "2 — AC-4.3: an unreached wt/* branch refuses by name and nothing else happens"
 # ============================================================
 
-P2="$(mk_fixture p2)"
+P2="$(mk_fixture p2)"; advance_to "$P2" 8
 add_unreached_branch "$P2"
 PLAN_BEFORE="$(sha_of "$P2/$PLAN_REL")"
 run_close "$P2" run
@@ -933,7 +950,7 @@ expect_eq "2i: …and the fully reachable wt/01-x is deleted" "no" "$(branch_exi
 # it or delete it, and `check`'s report line must name only the registered tree this
 # plan actually holds (`wt/01-x`; `wt/01-y`'s row is registered too, but that branch
 # does not exist yet in this fixture).
-P2F="$(mk_fixture p2f)"
+P2F="$(mk_fixture p2f)"; advance_to "$P2F" 8
 add_foreign_unreached_branch "$P2F"
 run_close "$P2F" check
 expect_eq "2j: check does not refuse over a foreign wt/07-z" "0" "$CO_RC"
@@ -952,7 +969,7 @@ expect_eq "2o: …while this wave's own wt/01-x is still deleted as before" "no"
 section "3 — AC-4.4: a second run is a no-op"
 # ============================================================
 
-P3="$(mk_fixture p3)"
+P3="$(mk_fixture p3)"; advance_to "$P3" 8
 run_close "$P3" run
 expect_eq "3a: the first run exits 0" "0" "$CO_RC"
 PLAN_SHA="$(sha_of "$P3/$PLAN_REL")"
@@ -972,7 +989,7 @@ expect_eq "3g: …and still exactly one row for wave 01" "1" \
 section "4 — check is a diagnosis: it reports and changes nothing"
 # ============================================================
 
-P4="$(mk_fixture p4)"
+P4="$(mk_fixture p4)"; advance_to "$P4" 8
 PLAN4_SHA="$(sha_of "$P4/$PLAN_REL")"
 EPIC4_SHA="$(sha_of "$P4/$EPIC_REL")"
 run_close "$P4" check
@@ -1003,7 +1020,7 @@ section "4b — critic2 N-3 (T16): run's dry-run judges the plan while it is sti
 # resolved bound-closed and the commit gate exited 0 before it read any step evidence. Here
 # `run` is given a plan with NO Step-8 line. It must refuse (rc 2) and must not flip the
 # plan to delivered; at d067c07d it flipped current to 9 and wrote delivered: first.
-P16="$(mk_fixture p16)"
+P16="$(mk_fixture p16)"; advance_to "$P16" 8
 grep -v '^- Step 8:' "$P16/$PLAN_REL" > "$P16/plan.tmp" && mv "$P16/plan.tmp" "$P16/$PLAN_REL"
 run_close "$P16" run
 expect_eq "4k: run on a plan with no Step-8 line refuses rc 2" "2" "$CO_RC"
@@ -1016,7 +1033,7 @@ expect_eq "4n: …and no gate: ok was reported" "no" "$(contains "$CO_OUT" "gate
 # A refusal that only the GATE can make (the matrix evidence file is gone): the gate judges
 # the open plan at current 8 and refuses before the Step-9 flip. Since T17 that refusal comes
 # from the pre-flight, before the Step-8 block is written into the plan at all (§4c).
-P17="$(mk_fixture p17)"
+P17="$(mk_fixture p17)"; advance_to "$P17" 8
 rm -f "$P17/.bionic/docs/record/generic-evidence.md"
 run_close "$P17" run
 expect_eq "4o: run refuses when the gate refuses the open plan (rc 2)" "2" "$CO_RC"
@@ -1035,7 +1052,7 @@ section "4c — critic3 P-1 (T17): run asks the gate first; check and run agree"
 # clears it"), so it could not say which outcome `run` would reach. Now both verbs write
 # phase 8's block into a scratch copy of the plan, bind a synthetic marker to the copy,
 # and ask the real gate; `run` touches nothing until that pre-flight passes.
-P18="$(mk_fixture p18)"
+P18="$(mk_fixture p18)"; advance_to "$P18" 8
 rm -f "$P18/.bionic/docs/record/generic-evidence.md"
 PLAN18_SHA="$(sha_of "$P18/$PLAN_REL")"
 EPIC18_SHA="$(sha_of "$P18/$EPIC_REL")"
@@ -1066,7 +1083,7 @@ expect_eq "4ad: …and no scratch copy is left beside the plan" "0" \
 
 # The control: the same fixture with its evidence. check says the gate allows the plan run
 # would write, and run then performs the tail as §1 does.
-P19="$(mk_fixture p19)"
+P19="$(mk_fixture p19)"; advance_to "$P19" 8
 run_close "$P19" check
 expect_eq "4ae: check on the valid plan says the gate allows the plan run would write" "yes" \
   "$(contains "$CO_OUT" "gate: ok against the plan run would write")"
@@ -1084,8 +1101,7 @@ section "4d — critic3 P-3 (T17): run refuses unless the plan reads current: 8"
 # refused by name, before anything is touched; check reports the same verdict.
 for _co_cur in 7 4; do
   P20="$(mk_fixture "p20-$_co_cur")"
-  sed "s/^current: 8\$/current: $_co_cur/" "$P20/$PLAN_REL" > "$P20/plan.tmp" \
-    && mv "$P20/plan.tmp" "$P20/$PLAN_REL"
+  advance_to "$P20" "$_co_cur"
   PLAN20_SHA="$(sha_of "$P20/$PLAN_REL")"
   EPIC20_SHA="$(sha_of "$P20/$EPIC_REL")"
   run_close "$P20" check
@@ -1105,12 +1121,14 @@ for _co_cur in 7 4; do
 done
 
 # ============================================================
-section "4e — critic4 Q-1 (T19): the two readbacks that used to fire after the acts are presence checks before them"
+section "4e — critic4 Q-1 (T19), wave-27 T4 (D14, B2): the Step 9 line is close-out's to write; the wave table is still a presence check"
 # ============================================================
 # `run` used to delete branches, wipe tmp and write the continuation and epic row, and only
 # then refuse for a plan with no `- Step 9:` line or an epic plan with no `| wave |` table.
-# Both are known before the first act. `run` now refuses rc 2 naming what is missing and
-# touches nothing; `check` reports the same two checks.
+# T19 made both presence checks before the first act. Since wave-27 T4 the first one is
+# gone: `step-line 9` is refused by the poker as close-out's to write, so a plan reaches
+# close-out with no Step 9 line, and close-out writes it. It is written with phase 8's block
+# and never earlier, so a refusal still leaves the plan byte-for-byte as it was.
 presence_state() {
   printf 'br=%s tmp=%s cont=%s cur8=%s epicrow=%s' \
     "$(branch_exists "$1" "wt/01-x")" "$(tmp_entries "$1")" \
@@ -1118,19 +1136,49 @@ presence_state() {
     "$(grep -qE '^current: 8$' "$1/$PLAN_REL" && echo yes || echo no)" \
     "$(grep -c '^| 01 ' "$1/$EPIC_REL")"
 }
-TA="$(mk_fixture t19a)"
-grep -v '^- Step 9:' "$TA/$PLAN_REL" > "$TA/plan.tmp" && mv "$TA/plan.tmp" "$TA/$PLAN_REL"
-PRE_A="$(presence_state "$TA")"; PLAN_A_SHA="$(sha_of "$TA/$PLAN_REL")"; EPIC_A_SHA="$(sha_of "$TA/$EPIC_REL")"
+# step_lines <plan> <N> -> how many `Step N:` lines `## SDLC State` carries.
+step_lines() {
+  awk -v n="$2" '
+    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
+    insdlc && $0 ~ "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+" n "[[:space:]]*:" { c++ }
+    END { print c + 0 }' "$1"
+}
+TA="$(mk_fixture t19a)"; advance_to "$TA" 8
+expect_eq "q1.0: the fixture carries its Step-8 line (the counter reads this plan)" "1" "$(step_lines "$TA/$PLAN_REL" 8)"
+expect_eq "q1.0b: …and no Step 9 line: nothing planted it" "0" "$(step_lines "$TA/$PLAN_REL" 9)"
 run_close "$TA" check
-expect_eq "q1.1: check names the missing Step-9 line" "yes" "$(contains "$CO_OUT" "no Step 9 line in ## SDLC State")"
+expect_eq "q1.1: check does not refuse for the missing Step 9 line" "no" "$(contains "$CO_OUT" "no Step 9 line in ## SDLC State of")"
+expect_eq "q1.1b: …it says run writes it" "yes" "$(contains "$CO_OUT" 'run writes `- Step 9: (pending)`')"
 run_close "$TA" run
-expect_eq "q1.2: run on a plan with no Step-9 line refuses rc 2" "2" "$CO_RC"
-expect_eq "q1.3: …naming the missing line" "yes" "$(contains "$CO_OUT" "no Step 9 line in ## SDLC State")"
-expect_eq "q1.4: …before any act (no worktree-removed line)" "no" "$(contains "$CO_OUT" "worktree-removed:")"
-expect_eq "q1.5: …branch, tmp, continuation, current: and epic row untouched" "$PRE_A" "$(presence_state "$TA")"
-expect_eq "q1.6: …plan and epic plan byte-identical" "$PLAN_A_SHA/$EPIC_A_SHA" "$(sha_of "$TA/$PLAN_REL")/$(sha_of "$TA/$EPIC_REL")"
+expect_eq "q1.2: run on a plan with no Step 9 line closes rc 0" "0" "$CO_RC"
+expect_eq "q1.3: …and the plan carries exactly one Step 9 line" "1" "$(step_lines "$TA/$PLAN_REL" 9)"
+expect_eq "q1.4: …which is the delivered line" "yes" \
+  "$(grep -qE '^- Step 9: delivered: ' "$TA/$PLAN_REL" && echo yes || echo no)"
+expect_eq "q1.5: …written after the Step-8 block" "yes" \
+  "$(awk '/^- Step 8: CLOSED /{s8=NR} /^- Step 9: delivered: /{s9=NR} END{print (s8 && s9 > s8) ? "yes" : "no"}' "$TA/$PLAN_REL")"
 
-TB="$(mk_fixture t19b)"
+# A refusal on a plan with no Step 9 line writes no Step 9 line: the evidence file is gone,
+# so the pre-flight refuses, and the plan is byte-for-byte what it was.
+TD="$(mk_fixture t19d)"; advance_to "$TD" 8
+rm -f "$TD/.bionic/docs/record/generic-evidence.md"
+PRE_D="$(presence_state "$TD")"; PLAN_D_SHA="$(sha_of "$TD/$PLAN_REL")"
+run_close "$TD" run
+expect_eq "q1.6: a refused run on a plan with no Step 9 line exits 2" "2" "$CO_RC"
+expect_eq "q1.6b: …the plan is byte-identical (no Step 9 line was written early)" "$PLAN_D_SHA" "$(sha_of "$TD/$PLAN_REL")"
+expect_eq "q1.6c: …branch, tmp, continuation, current: and epic row untouched" "$PRE_D" "$(presence_state "$TD")"
+
+# A plan written before T4, carrying a `- Step 9: (pending)` line by hand, still closes with
+# one Step 9 line: close-out replaces the line it finds and adds none.
+TE="$(mk_fixture t19e)"; advance_to "$TE" 8
+awk '{ print } /^- Step 8: \(pending\)$/ { print "- Step 9: (pending)" }' "$TE/$PLAN_REL" > "$TE/plan.tmp" \
+  && mv "$TE/plan.tmp" "$TE/$PLAN_REL"
+expect_eq "q1.6d: precondition: the older plan carries its hand-written Step 9 line" "1" "$(step_lines "$TE/$PLAN_REL" 9)"
+run_close "$TE" run
+expect_eq "q1.6e: …it closes rc 0" "0" "$CO_RC"
+expect_eq "q1.6f: …with exactly one Step 9 line, the delivered one" "1/yes" \
+  "$(step_lines "$TE/$PLAN_REL" 9)/$(grep -qE '^- Step 9: delivered: ' "$TE/$PLAN_REL" && echo yes || echo no)"
+
+TB="$(mk_fixture t19b)"; advance_to "$TB" 8
 printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# epic-fx\n\n## SDLC State\n\ncurrent: 4\n\n## Notes\n\nNo waves table yet.\n' > "$TB/$EPIC_REL"
 PRE_B="$(presence_state "$TB")"; PLAN_B_SHA="$(sha_of "$TB/$PLAN_REL")"; EPIC_B_SHA="$(sha_of "$TB/$EPIC_REL")"
 run_close "$TB" check
@@ -1142,11 +1190,117 @@ expect_eq "q1.10: …before any act" "no" "$(contains "$CO_OUT" "worktree-remove
 expect_eq "q1.11: …branch, tmp, continuation, current: and epic row untouched" "$PRE_B" "$(presence_state "$TB")"
 expect_eq "q1.12: …plan and epic plan byte-identical" "$PLAN_B_SHA/$EPIC_B_SHA" "$(sha_of "$TB/$PLAN_REL")/$(sha_of "$TB/$EPIC_REL")"
 
-TC="$(mk_fixture t19c)"
+TC="$(mk_fixture t19c)"; advance_to "$TC" 8
 run_close "$TC" check
 expect_eq "q1.13: check on the valid fixture names no missing line" "no" "$(contains "$CO_OUT" "WOULD REFUSE — no ")"
 run_close "$TC" run
 expect_eq "q1.14: run on the valid fixture still succeeds" "0" "$CO_RC"
+
+# ============================================================
+section "VER — wave-27 T4 (AC-7.2, D14, B3): the released version is the run's, never the tool's"
+# ============================================================
+# `VERSION` is the INSTALLED bionic's (`plugin_root`'s plugin.json). It is what attests, and
+# it used to be what the delivered line, the epic row and the continuation header called the
+# release too — wave-26 corrected two of them by hand. The release is the plan's own
+# `release:` field now, and with no field no version is written. The tool here is THIS
+# checkout's payload (run_close pins BIONIC_PLUGIN_ROOT), read the way co_version reads it.
+TOOLV="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
+RELV="7.7.7-fixture"
+expect_nonempty "VER0: the tool's version reads from its manifest" "$TOOLV"
+expect_ne "VER0b: …and differs from the release the fixture names" "$RELV" "$TOOLV"
+
+# epic_version_cell <project> -> the version cell of the epic's wave-01 row, trimmed.
+epic_version_cell() {
+  grep '^| 01 |' "$1/$EPIC_REL" | head -1 | awk -F'|' '{ v = $3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v }'
+}
+# delivered_line <project> -> the plan's Step 9 delivered line.
+delivered_line() { grep -m1 '^- Step 9: delivered: ' "$1/$PLAN_REL"; }
+
+PV1="$(mk_fixture ver1)"; advance_to "$PV1" 8
+awk -v r="$RELV" '{ print } /^walk: exempt$/ { print "release: " r }' "$PV1/$PLAN_REL" > "$PV1/plan.tmp" \
+  && mv "$PV1/plan.tmp" "$PV1/$PLAN_REL"
+expect_eq "VER1: precondition: the plan's frontmatter names the release" "1" "$(grep -c "^release: $RELV\$" "$PV1/$PLAN_REL" | tr -d ' ')"
+run_close "$PV1" run
+expect_eq "VER2: run with release: closes rc 0" "0" "$CO_RC"
+DL1="$(delivered_line "$PV1")"
+expect_nonempty "VER3: the delivered line is there to read" "$DL1"
+expect_eq "VER4: …it carries the plan's release after the slug" "yes" "$(contains "$DL1" "wave-01-fixture $RELV — ")"
+expect_eq "VER5: …and not the tool's version" "no" "$(contains "$DL1" "$TOOLV")"
+expect_eq "VER6: the epic row's version cell is the plan's release" "$RELV" "$(epic_version_cell "$PV1")"
+expect_eq "VER7: the continuation header carries the release" "yes" "$(contains "$(head -1 "$PV1/$CONT_REL")" "$RELV")"
+expect_eq "VER8: …and not the tool's version" "no" "$(contains "$(head -1 "$PV1/$CONT_REL")" "$TOOLV")"
+expect_eq "VER9: attested-by: keeps the tool's own version, on both blocks" "2" \
+  "$(grep -c "^  attested-by: close-out.sh $TOOLV\$" "$PV1/$PLAN_REL" | tr -d ' ')"
+
+PV2="$(mk_fixture ver2)"; advance_to "$PV2" 8
+expect_eq "VER10: precondition: this plan names no release" "0" "$(grep -c '^release:' "$PV2/$PLAN_REL" | tr -d ' ')"
+run_close "$PV2" run
+expect_eq "VER11: run with no release: closes rc 0" "0" "$CO_RC"
+DL2="$(delivered_line "$PV2")"
+expect_nonempty "VER12: the delivered line is there to read" "$DL2"
+expect_eq "VER13: …it writes no version: the slug runs straight into the dash" "yes" "$(contains "$DL2" "wave-01-fixture — ")"
+expect_eq "VER14: …and never the tool's" "no" "$(contains "$DL2" "$TOOLV")"
+expect_eq "VER15: the epic row is there, with no version in its cell" "—" "$(epic_version_cell "$PV2")"
+expect_eq "VER16: the continuation header names the wave" "yes" "$(contains "$(head -1 "$PV2/$CONT_REL")" "wave-01-fixture")"
+expect_eq "VER17: …with no version in it" "no" "$(contains "$(head -1 "$PV2/$CONT_REL")" "$TOOLV")"
+expect_eq "VER18: attested-by: still names the tool's version" "2" \
+  "$(grep -c "^  attested-by: close-out.sh $TOOLV\$" "$PV2/$PLAN_REL" | tr -d ' ')"
+
+# ============================================================
+section "FIX-SHAPE — wave-27 T4 (AC-7.3, D14): the fixture builders plant nothing the tools write"
+# ============================================================
+# The builders are read out of this file. A planted `current: 8` or Step 9 line is what hid
+# B1 and B2 from every run of this suite, so the read is the whole of each builder's body.
+FS_BUILDERS="fixture_plan_text fixture_epic_text mk_fixture mk_census_fixture mk_census_fixture_nowt"
+# builder_bodies <suite file> -> every line of those functions' bodies.
+builder_bodies() {
+  awk -v names=" $FS_BUILDERS " '
+    match($0, /^[a-z_]+\(\) \{/) { n = substr($0, 1, RLENGTH - 4); inb = (index(names, " " n " ") > 0); next }
+    inb && /^\}/ { inb = 0; next }
+    inb { print }' "$1"
+}
+# builder_plants <suite file> -> the builder lines that plant what a tool writes.
+builder_plants() {
+  builder_bodies "$1" | grep -E 'current:[[:space:]]*8([^0-9]|$)|Step[[:space:]]+9|fixture_plan_text[^>]*[[:space:]]8([[:space:]]|$)'
+}
+FS_SUITE="$REPO_ROOT/tests/close-out.test.sh"
+FS_BODIES="$(builder_bodies "$FS_SUITE")"
+expect_eq "FS1: the extractor reads the plan builder's SDLC State" "yes" "$(contains "$FS_BODIES" "## SDLC State")"
+expect_eq "FS2: …and a line of each builder (plan text, mk_fixture, the census heredocs, epic text)" "yes/yes/yes/yes" \
+  "$(contains "$FS_BODIES" "current: \${current}")/$(contains "$FS_BODIES" "fixture_plan_text \"\$aroot\"")/$(contains "$FS_BODIES" "PLAN_CENSUS")/$(contains "$FS_BODIES" "# epic-fx")"
+expect_empty "FS3: no builder plants current: 8 or a Step 9 line" "$(builder_plants "$FS_SUITE")"
+# THE PAIRED POSITIVE: the same extractor on a copy with the old Step 9 line put back.
+FS_MUT="$SANDBOX/fs-mut.test.sh"
+awk '{ print } /^- Step 8: \(pending\)$/ && !d { print "- Step 9: (pending)"; d = 1 }' "$FS_SUITE" > "$FS_MUT"
+expect_nonempty "FS4: …a copy with '- Step 9: (pending)' put back in a builder is caught" "$(builder_plants "$FS_MUT")"
+sed 's/fixture_plan_text "\$aroot" 7/fixture_plan_text "$aroot" 8/' "$FS_SUITE" > "$FS_MUT"
+expect_nonempty "FS5: …and so is a builder handing the plan current 8" "$(builder_plants "$FS_MUT")"
+
+# ============================================================
+section "E2E — wave-27 T4 (AC-7.1 close-out half, D14, B1): from Step 7 with no Step 9 line, the tools close the run"
+# ============================================================
+# No hand edit: the real `session-poker.sh current 8` moves the plan, then `close-out.sh run`
+# delivers. The session is bound to the plan the way engagement binds it (tests/lib/
+# bound-marker.sh, the one bound-marker builder).
+#
+# EXPECTED RED UNTIL wave-27 T14. The verb still dry-commits the plan at Step 8 and the gate
+# demands the Step-8 block that only close-out writes, so `current 8` is refused here. T14
+# lands the verb's half (exempt 8 as 9 is exempt, refuse on `facts_state`) and removes the
+# `[red until T14]` mark from E2E2's label. T4's record names it.
+PE="$(mk_fixture e2e)"
+E2E_SID="closeout-e2e-1"
+expect_eq "E2E0: precondition: the fixture is at current: 7 with no Step 9 line" "7/0" \
+  "$(sed -n 's/^current: //p' "$PE/$PLAN_REL")/$(step_lines "$PE/$PLAN_REL" 9)"
+( in_fixture "$PE" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PE" "$E2E_SID" "$PE/$PLAN_REL" )
+( in_fixture "$PE" || exit 9
+  HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    CLAUDE_CODE_SESSION_ID="$E2E_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 ) > "$SANDBOX/e2e-poker" 2>&1
+E2E_POKER_RC=$?
+E2E_POKER_OUT="$(cat "$SANDBOX/e2e-poker")"
+run_close "$PE" run
+E2E_GOT="poker=$E2E_POKER_RC close=$CO_RC delivered=$(grep -qE '^- Step 9: delivered: ' "$PE/$PLAN_REL" && echo yes || echo no)"
+expect_eq "E2E2 [red until T14]: current 8 then close-out.sh run delivers" "poker=0 close=0 delivered=yes" "$E2E_GOT"
+[ "$E2E_GOT" = "poker=0 close=0 delivered=yes" ] || printf '      the verb said: %s\n' "$(printf '%s' "$E2E_POKER_OUT" | grep -m1 'REFUSED\|refused' )"
 
 # ============================================================
 section "4f — REQ-1 (AC-1.1–1.4): the shipped table is found once; the ADR cell is read, not marked"
@@ -1219,7 +1373,7 @@ EPIC78
 }
 
 # §78.1 — a `| 01 |` row that is not in the shipped table is not "already listed".
-T78="$(mk_fixture t78a)"
+T78="$(mk_fixture t78a)"; advance_to "$T78" 8
 epic_planned_first > "$T78/$EPIC_REL"
 expect_eq "78.0: the extractor reads the shipped table (wave 00 is one row there)" "1" \
   "$(rows_with_wave "$T78/$EPIC_REL" shipped 00)"
@@ -1237,7 +1391,7 @@ expect_eq "78.1e: …the epic-row line says appended, not already listed" "yes" 
   "$(contains "$CO_OUT" "epic-row: wave 01 appended to epic.plan.md")"
 
 # §78.2 — the planned table sits first; the row still lands in the shipped one.
-T78B="$(mk_fixture t78b)"
+T78B="$(mk_fixture t78b)"; advance_to "$T78B" 8
 epic_planned_first > "$T78B/$EPIC_REL"
 PLANNED_BEFORE="$(table_rows "$T78B/$EPIC_REL" planned)"
 SHIPPED_BEFORE="$(table_rows "$T78B/$EPIC_REL" shipped | wc -l | tr -d ' ')"
@@ -1255,7 +1409,7 @@ expect_eq "78.2e: a second run adds no second row (reader and writer agree on th
   "$(rows_with_wave "$T78B/$EPIC_REL" shipped 01)"
 
 # §78.3 — an epic whose only `| wave |` table is the planned one has nowhere to put the row.
-T78C="$(mk_fixture t78c)"
+T78C="$(mk_fixture t78c)"; advance_to "$T78C" 8
 epic_planned_first | awk '
   /^## Waves — shipped/ { skip = 1 }
   /^## Notes/ { skip = 0 }
@@ -1301,27 +1455,27 @@ mk_spec() {
 }
 SPEC_KEY="spec: specs/epic-fx/wave-01-fixture.spec.md"
 
-T86="$(mk_fixture t86a)"
+T86="$(mk_fixture t86a)"; advance_to "$T86" 8
 set_plan_keys "$T86" "$SPEC_KEY" "-"
 mk_spec "$T86" "adrs: adrs/epic-fx/adr-040-first-thing.md · adrs/epic-fx/adr-041-second-thing.md"
 run_close "$T86" run
 expect_eq "86.0: run exits 0" "0" "$CO_RC"
 expect_eq "86.1: the ADRs cell reads the spec's two ADRs, numbers joined by a comma" "040, 041" "$(adr_cell "$T86")"
 
-T86B="$(mk_fixture t86b)"
+T86B="$(mk_fixture t86b)"; advance_to "$T86B" 8
 set_plan_keys "$T86B" "$SPEC_KEY" "-"
 mk_spec "$T86B" "-"
 run_close "$T86B" run
 expect_eq "86.2a: a wave with no adrs: in spec or plan keeps the marker (run exits 0)" "0" "$CO_RC"
 expect_eq "86.2b: …the cell is exactly the marker" "<fill: ADRs>" "$(adr_cell "$T86B")"
 
-T86C="$(mk_fixture t86c)"
+T86C="$(mk_fixture t86c)"; advance_to "$T86C" 8
 set_plan_keys "$T86C" "$SPEC_KEY" "adrs: adrs/epic-fx/adr-039-from-the-plan.md"
 mk_spec "$T86C" "-"
 run_close "$T86C" run
 expect_eq "86.3: a spec without adrs: falls back to the plan's adrs:" "039" "$(adr_cell "$T86C")"
 
-T86D="$(mk_fixture t86d)"
+T86D="$(mk_fixture t86d)"; advance_to "$T86D" 8
 set_plan_keys "$T86D" "-" "adrs: adrs/epic-fx/adr-038-from-the-plan.md"
 run_close "$T86D" run
 expect_eq "86.4: a plan whose spec file is not on disk falls back to the plan's adrs:" "038" "$(adr_cell "$T86D")"
@@ -1344,7 +1498,7 @@ TS_SID_B="closeout-suite-session-b2b2b2b2"
 # ---------- AC-1.1 / AC-1.2: B is live, and is spared; A and the unkeyed/dead entries
 # ---------- are removed, with the tmp-wiped: line naming both counts.
 
-P5="$(mk_fixture p5)"
+P5="$(mk_fixture p5)"; advance_to "$P5" 8
 plant_tmp_session "$P5" "$TS_SID_A"
 plant_tmp_session "$P5" "$TS_SID_B"
 
@@ -1382,7 +1536,7 @@ expect_eq "5.6: …and the removed/spared counts (8 removed: A's 5 + the 3 basel
 # ---------- sweeper's verdict (patrol_dead_sessions), not mere sparing-by-default, decides.
 
 TS_SID_D="closeout-suite-session-d4d4d4d4"
-P6="$(mk_fixture p6)"
+P6="$(mk_fixture p6)"; advance_to "$P6" 8
 plant_tmp_session "$P6" "$TS_SID_A"
 plant_tmp_session "$P6" "$TS_SID_D"
 # TS_SID_D is never registered in $SB_HOME/.claude/sessions/ — it reads dead by
@@ -1401,7 +1555,7 @@ expect_eq "5.9: .bionic/tmp/ is empty afterwards — nothing here is live" "0" "
 # ---------- hooks/permission-answer.sh) are session-keyed too. B (still live from above)
 # ---------- keeps both through A's close-out; A's own and dead D's go.
 
-P7="$(mk_fixture p7)"
+P7="$(mk_fixture p7)"; advance_to "$P7" 8
 for c in workspaces gate; do
   for s in "$TS_SID_A" "$TS_SID_B" "$TS_SID_D"; do
     printf '%s state for %s\n' "$c" "$s" > "$P7/.bionic/tmp/$c-$s.state"
