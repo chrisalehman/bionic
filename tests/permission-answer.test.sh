@@ -241,6 +241,33 @@ expect_eq "A2.11 subagent writing its declared report: allow" "allow" "$(behavio
 drive "$A2P" "$(payload "$A2P" Write "$(file_ti "$A2T/x.txt")" af32d07b37c07888c general-purpose)"
 expect_eq "A2.12 subagent writing into the teammate's tree: deny" "deny" "$(behavior "$OUT")"
 
+# The unnamed subagent: dispatched without a name, so its roster row's name= is empty (the
+# shape the live walk rehearsal recorded). Not a fault: a reader, labelled by its agent id.
+A2UID=a30eccfe52f18bc99
+A2UR="$(record_of "$A2P")/w3-unnamed.md"
+add_roster_row "$A2P" "" "$A2UID" general-purpose "$A2UR"
+A2ULOG="$(log_of "$A2P")"
+A2UN0="$(log_lines "$A2P")"
+drive "$A2P" "$(payload "$A2P" Bash "$(bash_ti "touch $A2P/src/c.txt")" "$A2UID" general-purpose)"
+expect_eq "A2.13 unnamed subagent outside its workspace: one decision" "1" "$(n_obj "$OUT")"
+expect_eq "A2.14 …a deny" "deny" "$(behavior "$OUT")"
+expect_contains "A2.15 …naming the unnamed agent's declared report" "$A2UR" "$(message "$OUT")"
+expect_absent "A2.16 …not as a failure" "failure:" "$(message "$OUT")"
+expect_absent "A2.17 …and not as a roster row that names no agent" "names no agent" "$(message "$OUT")"
+expect_absent "A2.17b …nor the teammate's tree" "$A2T" "$(message "$OUT")"
+expect_contains "A2.18 …its answer-log line carries the agent id as the asker" "|agent $A2UID|" "$(tail -1 "$A2ULOG" 2>/dev/null)"
+expect_absent "A2.18a …and the line records no failure" "failure:" "$(tail -1 "$A2ULOG" 2>/dev/null)"
+expect_eq "A2.18b …as exactly one new answer line" "$((A2UN0 + 1))" "$(log_lines "$A2P")"
+drive "$A2P" "$(payload "$A2P" Write "$(file_ti "$A2UR")" "$A2UID" general-purpose)"
+expect_eq "A2.19 unnamed subagent writing its declared report: allow" "allow" "$(behavior "$OUT")"
+drive "$A2P" "$(payload "$A2P" Write "$(file_ti "$A2T/x.txt")" "$A2UID" general-purpose)"
+expect_eq "A2.20 unnamed subagent writing into the teammate's tree: deny" "deny" "$(behavior "$OUT")"
+# The control: an agent id the roster has no row for is still the failure.
+drive "$A2P" "$(payload "$A2P" Bash "$(bash_ti "touch $A2P/src/d.txt")" a00000000000000000 general-purpose)"
+expect_eq "A2.21 an agent id with no roster row: one decision" "1" "$(n_obj "$OUT")"
+expect_eq "A2.22 …a deny" "deny" "$(behavior "$OUT")"
+expect_contains "A2.23 …that is still the failure naming the missing row" "the roster has no row for the asking agent a00000000000000000" "$(message "$OUT")"
+
 # ══════════════════════════════════════════════════════════════════════════════════════
 section "§A4 tools that collect human input are never answered"
 
