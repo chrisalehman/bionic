@@ -899,15 +899,18 @@ fi
 # itself or the id behind a `<prefix>-`, with the `-r<n>` re-run suffix taken off. A name that
 # is no row's id is not judged here. `approval:plan` is the arm above.
 DP_ROW_NAME=$(_jq '.tool_input.name')
-if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
-  DP_APPROVAL_WAITS=$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v nm="$DP_ROW_NAME" '
+# DP_MINE_AWK: the awk function `mine(id)`, 1 when the dispatch name `nm` is row <id>'s. This arm
+# and the full-run wall's floor row both read through it.
+DP_MINE_AWK='
     function mine(id,   b, l) {
       b = nm
       if (match(b, /-r[0-9]+$/)) b = substr(b, 1, RSTART - 1)
       if (b == id) return 1
       l = length(id)
       return (length(b) > l + 1 && substr(b, length(b) - l) == "-" id)
-    }
+    }'
+if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
+  DP_APPROVAL_WAITS=$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"'
     $1 != "" && mine($1) {
       m = split($13, a, ",")
       for (k = 1; k <= m; k++) {
@@ -2148,34 +2151,28 @@ fi
 # owed only when the change cannot be bounded; covered and bounded are refused, and the bounded
 # refusal names the suites that prove the change.
 #
-# AND ONE HOLD, ASKED OF THE PLAN'S LEDGER. Unbounded is not enough while an open row still
-# writes tracked files: a run now proves a head that does not survive the row landing. A row
-# writes tracked files when one of its `Files` entries lies outside `.bionic/` — the reading the
-# graph in lib/units.sh gives its `head` writers (A-T5.6). The ledger is read through
-# `units_rows`, never a split of this file's own.
+# AND ONE HOLD, ASKED OF THE READY SET. Unbounded is not enough while a row the floor waits on
+# still writes tracked files: a run now proves a head that does not survive the row landing.
+# ONLY THE FLOOR'S OWN WAITS HOLD IT (wave-26 T52; review 14 B1, ruling R1). Through T5 this arm
+# counted every open row with its own reading of `Files`, so the release, which waits FOR the
+# floor, held the floor for ever, and a `record/…` path read as tracked. Now lib/units.sh
+# `units_floor_holds` answers: the rows the floor row waits on through its deps and its reads,
+# judged by the ready set's own program, not landed, that write a tracked file by its
+# `writes_head` — one owner for both questions. The floor row is the dispatch's own, by its name
+# (`mine`, the approval arm's rule); a dispatch that names no row is held by what the plan's open
+# verify and test rows wait on.
 #
 # LOADED LAZILY, LIKE brief.sh's BOUND. proof.sh is sourced at the one arm that spends it, from
 # the directory the loader settled on. A copied hook whose library directory predates proof.sh
 # says `not checked` for this arm rather than refusing a dispatch for a library it cannot see.
 #
 # PLAN-FREE SESSIONS SKIP IT. With no bound plan there is no proof record and no ledger.
-fr_open_writers() {  # -> `id<TAB>step<TAB>status` for each open row whose Files reach outside .bionic/
+fr_open_writers() {  # -> `id<TAB>step<TAB>status` for each row the floor waits on that writes the head
+  local floor=""
   [ -n "$PLAN" ] && [ -f "$PLAN" ] || return 0
-  units_rows "$PLAN" 2>/dev/null | awk -F'\t' '
-    {
-      status = tolower($10)
-      if (status != "pending" && status != "active") next
-      n = split($9, f, ",")
-      w = 0
-      for (i = 1; i <= n; i++) {
-        e = f[i]; gsub(/^[ \t]+|[ \t]+$/, "", e); sub(/!$/, "", e)
-        if (e == "" || e == "-" || index(e, "—") == 1) continue
-        if (index(e, ".bionic/") == 1) continue
-        w = 1
-      }
-      if (w) printf "%s\t%s\t%s\n", $1, $2, status
-    }
-  '
+  [ -z "$DP_ROW_NAME" ] || floor="$(units_rows "$PLAN" 2>/dev/null \
+    | awk -F'\t' -v nm="$DP_ROW_NAME" "$DP_MINE_AWK"' $1 != "" && mine($1) { print $1; exit }')"
+  units_floor_holds "$PLAN" "$floor" 2>/dev/null
 }
 # fr_fit <budget> <item>... -> the items comma-joined while they fit <budget> columns, then
 # ` +<n>` for the rest; at least the first item, cut to the budget, is always named.
@@ -2223,8 +2220,17 @@ with every suite or with none."
       case "$_fr_state" in
         '')
           dp_not_checked "full-run" "the proof record (lib/proof.sh)" ;;
-        covered)
-          _dp_detail="The working branch's head is the one the plan's last floor proof names:
+        covered*)
+          # THE RELEASED HEAD IS NAMED (T52; review 14 N6). proof_state says which working head it
+          # judged; an empty change since the proof is covered too (A-T5.5), so that head can
+          # differ from the proof's, and the line names the head being released.
+          _fr_cur="${_fr_state#covered}"; _fr_cur="${_fr_cur#$'\t'}"
+          _fr_tree=""
+          if [ -n "$_fr_cur" ] && [ "$_fr_cur" != "$_fr_head" ]; then
+            _fr_tree=" (the tree proved at ${_fr_short})"
+            _fr_short="$(printf '%.7s' "$_fr_cur")"
+          fi
+          _dp_detail="The working branch's head ${_fr_short}${_fr_tree} is the tree the plan's last floor proof read:
     ${_fr_proof}
 
 ${_fr_moment}
@@ -2261,7 +2267,13 @@ Fix: dispatch those suites instead of the full tree. This brief line names all $
           dp_finding "bounded: ${_fr_names}" "run those suites, not the tree" "$_dp_detail" ;;
         unbounded*)
           _fr_why="${_fr_state#*$'\t'}"
-          _fr_open="$(fr_open_writers)"
+          _fr_open=""
+          # A copied hook whose units.sh predates the floor holds cannot ask; it says so.
+          if declare -F units_floor_holds >/dev/null 2>&1; then
+            _fr_open="$(fr_open_writers)"
+          else
+            dp_not_checked "full-run hold" "the floor holds (lib/units.sh units_floor_holds)"
+          fi
           if [ -n "$_fr_open" ]; then
             _fr_lines=""; _fr_idv=""
             while IFS=$'\t' read -r _fo_id _fo_step _fo_status; do
@@ -2277,7 +2289,7 @@ FR_OPEN_ROWS
             _fr_ids="$(fr_fit 9 $_fr_idv)"
             set +f
             _dp_detail="The change since the last floor proof cannot be bounded (${_fr_why}),
-so a full run is owed. But these open rows still write tracked files, and a run now
+so a full run is owed. But rows the floor waits on still write tracked files, and a run now
 proves a head that does not survive them landing:
 ${_fr_lines}
 ${_fr_moment}

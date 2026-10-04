@@ -532,12 +532,25 @@ units_live_range() { _units_sched range "${1:-}" ""; }
 # review (the final one, settled on the head) moves no live row mid-pass (wave-26 T46; review 10 F3).
 units_live_rows() { local plan="${1:-}"; shift; _UNITS_EVIDENCE="$*" _units_sched liverows "$plan" ""; }
 
-# units_approval_names <plan> -> each name a row reads as `approval:<name>` or
+# units_floor_holds <plan> [<id>] -> `<id><TAB><step><TAB><status>`, table order, for each row the
+# FLOOR waits on that has not landed (or been dropped) and writes a tracked file (wave-26 T52;
+# review 14 B1, ruling R1). The floor is row <id>; with no id, every open verify or test row, the
+# rows `proof:floor` names as its writers. "Waits on" is the ready set's own judgment of each of
+# the floor's reads and deps (`judge` below), so a row downstream of the floor — the release,
+# which waits FOR the floor — never holds it; "writes a tracked file" is `writes_head`, so a row
+# whose Files are all record paths never does. The dispatch wall asks this before it admits a
+# full run: a run now proves a head these rows are about to move.
+units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
+
+# units_approval_names <plan> -> each name an OPEN row reads as `approval:<name>` or
 # `live:approval:<name>`, once, sorted (wave-26 T46; review 10 F6). `approve` records only these:
-# a name no row reads would be recorded once while the row it was meant for waits. The match is
-# exact, case included, as the readiness program keys it. `plan` is a read like any other here.
+# a name no row reads would be recorded once while the row it was meant for waits. A name read
+# only by a landed or dropped row satisfies nothing either, so it is not one of them (T52; review
+# 14 N4). The match is exact, case included, as the readiness program keys it. `plan` is a read
+# like any other here.
 units_approval_names() {
   units_rows "${1:-}" 2>/dev/null | awk -F'\t' '{
+    s = tolower($10); if (s != "pending" && s != "active") next
     m = split($13, a, ",")
     for (k = 1; k <= m; k++) {
       t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); sub(/^live:/, "", t)
@@ -582,9 +595,10 @@ _units_proof_awk() {
 # ONE VALUE FROM OUTSIDE THE PLAN (wave-26 T14; review 5 F8): UNITS_LIVE_HEAD, the working
 # branch's head as the caller read it, which `live:head` compares with the last review proof's
 # `head=`. Unset, a plan with a review proof cannot see past it, and its live review waits.
+# `holds` (units_floor_holds) takes the floor row's id, or nothing, in the <step> slot.
 _units_sched() {
   local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i
-  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ]; then
+  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ]; then
     case "$step" in
       ''|*[!0-9]*)
         case "$step" in
@@ -948,6 +962,24 @@ _units_sched_awk() {
           if (ne) { for (k = 1; k <= ne; k++) if (writes(i, ev[k])) break; if (k > ne) continue }
           printf "%s\t%s\t%s\n", id[i], knd[i], st[i]
         }
+        exit
+      }
+      # THE FLOOR HOLDS (T52; review 14 B1, R1): every writer the floor row (want, or each open
+      # verify or test row when want is empty) waits on through judge, kept when it has not
+      # landed and writes the tracked tree. judge never names a row downstream of the floor.
+      if (mode == "holds") {
+        for (i = 1; i <= n; i++) {
+          if (want != "") { if (id[i] != want) continue }
+          else if (!(isopen(i) && (knd[i] == "verify" || knd[i] == "test"))) continue
+          for (k = 1; k <= ntk[i]; k++) {
+            if (judge(i, tk[i, k])) continue
+            for (w = 1; w <= nw; w++) {
+              j = wj[w]
+              if (code[j] && st[j] != satisfied && st[j] != "dropped") hold[j] = 1
+            }
+          }
+        }
+        for (j = 1; j <= n; j++) if (j in hold) printf "%s\t%s\t%s\n", id[j], stp[j], st[j]
         exit
       }
       for (i = 1; i <= n; i++) {

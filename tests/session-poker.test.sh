@@ -8372,11 +8372,13 @@ R47A="$(make_repo s46-approve)"; ( cd "$R47A" && git commit -q --allow-empty -m 
 git -C "$R47A" config user.name "Dana Fixture"
 P47A="$(s42_plan "$R47A" 4)"
 # A READS TABLE (wave-26 T46; review 10 F6): approve records only a name some row reads, so the
-# fixture's rows read two — T5 `approval:release`, T1 `live:approval:ship`.
+# fixture's open rows read two — T5 `approval:release`, the active T2 `live:approval:ship`; the
+# landed T1 reads `live:approval:landedonly`, which satisfies nothing (wave-26 T52; review 14 N4).
 awk '
   /^\| id \| step \|/ { print $0 " reads |"; next }
   /^\|---\|/ { print $0 "---|"; next }
-  /^\| T1 \|/ { print $0 " live:approval:ship |"; next }
+  /^\| T1 \|/ { print $0 " live:approval:landedonly |"; next }
+  /^\| T2 \|/ { print $0 " live:approval:ship |"; next }
   /^\| T5 \|/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " approval:release |"; next }
   /^\| T[0-9]+ \|/ { print $0 "  |"; next }
   { print }' "$P47A" > "$P47A.tmp" && mv "$P47A.tmp" "$P47A"
@@ -8418,6 +8420,11 @@ s42_unchanged "47t2 F6 a name no row reads (a typo of release)" 1 "$P47A"
 expect_contains "47t3 …naming the names the rows read" "the rows read: release ship" "$OUT"
 poke "$R47A" approve Release 'Ship it.'
 s42_unchanged "47t4 F6 the read name in another case" 1 "$P47A"
+# REVIEW 14 N4 (wave-26 T52): a name only the landed T1 reads satisfies nothing, so it is refused
+# and is not among the names listed.
+poke "$R47A" approve landedonly 'Go.'
+s42_unchanged "47t4b N4 a name read only by a landed row" 1 "$P47A"
+expect_contains "47t4c …listing only the names open rows read" "the rows read: release ship" "$OUT"
 poke "$R47A" approve ship 'Go.'
 expect_eq "47t5 F6 a name read as live:approval:<name> is recorded" "0" "$RC"
 expect_contains "47t6 …the line written" "approved: ship by Dana Fixture" "$(cat "$P47A")"
@@ -8482,7 +8489,11 @@ s46_proved() { /usr/bin/grep -E '^proved: ' "$1"; }  # <plan> -> its proof lines
 R46="$(make_repo s46-proof)"; ( cd "$R46" && git commit -q --allow-empty -m init )
 P46="$(s42_plan "$R46" 4)"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P46" > "$P46.tmp" && mv "$P46.tmp" "$P46"
-( cd "$R46" && git add -f "$P46" && git commit -qm wb \
+# THREE SUITES ARE THE ROSTER (wave-26 T52; review 14 N1): a floor log's `Gating:` tally must
+# count every tests/*.test.sh at the head it read, so the fixture's logs say 3.
+mkdir -p "$R46/tests"
+for s46s in a b c; do printf '#!/bin/bash\n' > "$R46/tests/$s46s.test.sh"; done
+( cd "$R46" && git add -f "$P46" tests && git commit -qm wb \
   && git worktree add -q -b wave/01-fixture "$R46/.worktrees/01-fixture" \
   && git -C "$R46/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
 W46_HEAD="$(git -C "$R46/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
@@ -8595,12 +8606,41 @@ poke "$R46" proof-add floor record/wave-01-fixture/floor-quote.txt
 s42_unchanged "46f13 F1 a note that quotes the run header" 1 "$P46"
 expect_contains "46f13b …naming the verdict it lacks" "has no Gating: <n> passed, <m> failed verdict" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-void.txt
-s42_unchanged "46f14 F1 a run that left a suite void" 1 "$P46"
-expect_contains "46f14b …naming the Void: line" "left a suite void" "$OUT"
+s42_unchanged "46f14 F1 a run whose tally does not reach the roster, with a Void: line" 1 "$P46"
+expect_contains "46f14b …naming the tally against the roster" "40 passed and 1 void of 3 suites" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-inner.txt
 s42_unchanged "46f15 F1 a green inner verdict above the runner's red one" 1 "$P46"
 poke "$R46" proof-add task record/wave-01-fixture/floor-red.txt
 s42_unchanged "46f16 F1 a task proof citing a red run" 1 "$P46"
+# REVIEW 14 S3, N1, N2 (wave-26 T52). THE LAST RUN IN THE LOG IS JUDGED, and a verdict that sits
+# inside a failing suite's captured output is not the runner's: a log cut off after a nested
+# green verdict, or a red run for this head with another head's green run appended, proves
+# nothing. A floor must be a WHOLE run: passed plus void reaches the suites at the head (three
+# here). A void suite passed (T43), so a whole run with one is a floor.
+printf 'floor log\nhead=%s dirty=0\n✗ FAIL\n───── x.test.sh: captured output ─────\nGating: 3 passed, 0 failed\n───── end x.test.sh ─────\n' \
+  "$W46_HEAD2" > "$S46_REC/floor-cut.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nFailed:\nhead=0123456789abcdef0123456789abcdef01234567 dirty=0\nGating: 3 passed, 0 failed\n' \
+  "$W46_HEAD2" > "$S46_REC/floor-appended.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\n' "$W46_HEAD2" > "$S46_REC/floor-part.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 0 failed\nVoid: 1 — not timed, each for the reason given; advisory, not a failure:\n    - c.test.sh (the machine was busy)\nNo gating suite failed; 1 void\n' \
+  "$W46_HEAD2" > "$S46_REC/floor-whole-void.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 2 passed, 1 failed\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' \
+  "$W46_HEAD2" "$W46_HEAD2" > "$S46_REC/floor-rerun.txt"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-cut.txt
+s42_unchanged "46f17 S3 a log cut off after a nested green verdict inside a capture" 1 "$P46"
+expect_contains "46f17b …saying the verdict is inside a captured output" "inside a suite's captured output" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-appended.txt
+s42_unchanged "46f18 S3 a red run for this head with another head's green run appended" 1 "$P46"
+expect_contains "46f18b …judged by the last run, which read another head" "read head 0123456789ab" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-part.txt
+s42_unchanged "46f19 N1 a green verdict over one suite of the three at the head" 1 "$P46"
+expect_contains "46f19b …naming the tally against the roster" "1 passed and 0 void of 3 suites" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-whole-void.txt
+expect_eq "46f20 N2 a whole run with one void suite that passed is a floor" "0" "$RC"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-rerun.txt
+expect_eq "46f21 S3 a red run then a green rerun on the same head: the last run is judged, and it passed" "0" "$RC"
 # A REVIEW OF AN OLDER HEAD IS A TRUE PROOF OF THAT HEAD: what landed since stays unread.
 poke "$R46" proof-add review record/wave-01-fixture/review-older.md
 expect_eq "46g a review of an ancestor of the branch head exits 0" "0" "$RC"
@@ -8633,7 +8673,7 @@ expect_contains "46c7 …naming the file" "absent.txt" "$OUT"
 # REVIEW 10 F7 (wave-26 T46): A SYMLINK UNDER record/ IS NOT A RECORD. The check resolved the
 # directory, not the file, so a link to a log elsewhere was admitted and the evidence could
 # change after the proof. The same bytes as a regular file under record/ are admitted.
-printf 'floor log\nhead=%s dirty=0\nGating: 1 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/plans/elsewhere/run.log"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/plans/elsewhere/run.log"
 ln -s ../../plans/elsewhere/run.log "$S46_REC/floor-link.txt"
 expect_true "46c7b precondition: the link is a symlink to a log outside record/" test -L "$S46_REC/floor-link.txt"
 poke "$R46" proof-add floor record/wave-01-fixture/floor-link.txt
