@@ -150,46 +150,14 @@ CMD_RUN_NORM_AWK='
     # every append, so a 52 KB `python3 -c` body cost 0.2 s per reader. index(), never a
     # regex: substr counts bytes, so the byte after a backslash can be half a character, and
     # macOS awk aborts a match() on text that starts there.
-    #
-    # A BACKSLASH BEFORE THE CLOSE IS ANSWERED FROM ONE MAP OF THE TEXT (wave-24 T30). Skipping
-    # escapes one index() at a time copied the remainder once per backslash, so 207 KB of \"
-    # took 11 s through the Bash hook, past its 10 s timeout. The map is built once per text,
-    # and it serves any text that is a PREFIX of the one it was built on, as the first segment
-    # of a command is: the answer for a quote reads only the bytes before it.
-    function cmdnorm_qend(s, i, q, esc,   t, k, b, L, lo, hi, h) {
-      t = substr(s, i + 1); k = index(t, q); L = length(s)
-      if (esc && q == "\"") {
-        b = index(t, "\\")
-        if (b > 0 && (k == 0 || b < k)) {
-          if (!_QE_SET || L > length(_QE_S) || substr(_QE_S, 1, L) != (s "")) cmdnorm_qmap(s)
-          lo = 1; hi = _QE_N + 1
-          while (lo < hi) { h = int((lo + hi) / 2); if (_QE_U[h] > i) hi = h; else lo = h + 1 }
-          return (lo > _QE_N || _QE_U[lo] > L ? L + 1 : _QE_U[lo])
-        }
+    function cmdnorm_qend(s, i, q, esc,   t, j, k, b) {
+      j = i + 1
+      for (;;) {
+        t = substr(s, j)
+        k = index(t, q)
+        if (esc && q == "\"") { b = index(t, "\\"); if (b > 0 && (k == 0 || b < k)) { j += b + 1; continue } }
+        return (k == 0 ? length(s) + 1 : j + k - 1)
       }
-      return (k == 0 ? L + 1 : i + k)
-    }
-    # Every double quote in s that a backslash does not hide, in order, into _QE_U[1.._QE_N].
-    # The quote at p is hidden when the backslashes touching it from the left are odd in
-    # number. That run starts after the opening quote, so the answer is the same for every
-    # opening quote before p, which is why one map serves every call on s. One pass over the
-    # bytes of one split: a regex split or a gsub costs microseconds per match on macOS awk,
-    # which is most of a second over 100 K escapes.
-    function cmdnorm_qmap(s,   C, n, p, r) {
-      _QE_S = s ""; _QE_SET = 1; _QE_N = 0; r = 0
-      n = split(s, C, "")
-      for (p = 1; p <= n; p++) {
-        if (C[p] == "\\") { r++; continue }
-        if (C[p] == "\"" && r % 2 == 0) _QE_U[++_QE_N] = p
-        r = 0
-      }
-    }
-    # Q[lo..hi] as one string, joined in halves: appending the pieces in turn copies the
-    # growing string once per piece (wave-24 T28, T30).
-    function cmdnorm_join(Q, lo, hi,   h) {
-      if (lo == hi) return Q[lo]
-      h = int((lo + hi) / 2)
-      return cmdnorm_join(Q, lo, h) cmdnorm_join(Q, h + 1, hi)
     }
     function cmdnorm_run(s,   L, i, c, e, n, T, K, P, cur, cs, st, op, nx, j, w, k, cut, hit) {
       L = length(s); n = 0; cur = ""; cs = 0
@@ -299,12 +267,16 @@ _cmd_class_awk() {  # <mode> ; command on stdin
 
     # ---------- 1. heredocs ----------
     # The tag opened by this line, or "" — quote-aware, so a `<<` inside a string is text.
-    # A quoted run is found, never walked (wave-24 T30), as in segments() below.
-    function heredoc_tag(s,   i, c, L, j, t, ch) {
-      L = length(s)
+    function heredoc_tag(s,   i, c, q, L, j, t, ch) {
+      q = ""; L = length(s)
       for (i = 1; i <= L; i++) {
         c = substr(s, i, 1)
-        if (c == "'"'"'" || c == "\"") { i = cmdnorm_qend(s, i, c, 1); continue }
+        if (q != "") {
+          if (c == q) q = ""
+          else if (c == "\\" && q == "\"") i++
+          continue
+        }
+        if (c == "'"'"'" || c == "\"") { q = c; continue }
         if (c == "\\") { i++; continue }
         if (c == "<" && substr(s, i + 1, 1) == "<") {
           if (substr(s, i + 2, 1) == "<") { i += 2; continue }   # here-STRING: no body
@@ -562,32 +534,24 @@ _cmd_class_awk() {  # <mode> ; command on stdin
 
     # ---------- 4. argv ----------
     # A token quoted around whitespace is prose: it becomes \001, which matches nothing.
-    #
-    # ONE SPLIT, NEVER A SUBSTR PER CHARACTER (wave-24 T30). macOS awk measures the whole string
-    # on every substr, so walking s one substr at a time cost length squared, and appending
-    # each character copied the whole word: 207 KB of \" (read here as escapes OUTSIDE quotes,
-    # since this reader honours none inside) took 2 s. The characters come from one split, and
-    # a word is kept as pieces of at most 64 characters, joined once when it ends.
-    function argv_tok(s, a,   i, L, c, e, t, k, spaced, started, C, PC, np, ch, nc, nl) {
-      L = split(s, C, ""); np = 0; ch = ""; nc = 0; nl = 0; k = 0; spaced = 0; started = 0
+    function argv_tok(s, a,   i, L, c, e, t, cur, k, spaced, started) {
+      L = length(s); cur = ""; k = 0; spaced = 0; started = 0
       for (i = 1; i <= L; i++) {
-        c = C[i]
+        c = substr(s, i, 1)
         # No escape inside quotes here: this reader never honoured one, and still does not.
         if (c == "'"'"'" || c == "\"") {
           e = cmdnorm_qend(s, i, c, 0); t = substr(s, i + 1, e - i - 1)
           if (t ~ /[ \t]/) spaced = 1
-          PC[++np] = ch; PC[++np] = t; ch = ""; nc = 0; nl += length(t); started = 1; i = e; continue
+          cur = cur t; started = 1; i = e; continue
         }
         if (c == " " || c == "\t") {
-          if (nl || started) { PC[++np] = ch; a[++k] = (spaced ? "\001" : cmdnorm_join(PC, 1, np)); spaced = 0; started = 0 }
-          np = 0; ch = ""; nc = 0; nl = 0
+          if (cur != "" || started) { a[++k] = (spaced ? "\001" : cur); cur = ""; spaced = 0; started = 0 }
           continue
         }
-        if (c == "\\") { i++; c = C[i] }
-        ch = ch c; nl += length(c)
-        if (++nc == 64) { PC[++np] = ch; ch = ""; nc = 0 }
+        if (c == "\\") { i++; cur = cur substr(s, i, 1); continue }
+        cur = cur c
       }
-      if (nl || started) { PC[++np] = ch; a[++k] = (spaced ? "\001" : cmdnorm_join(PC, 1, np)) }
+      if (cur != "" || started) a[++k] = (spaced ? "\001" : cur)
       return k
     }
 
@@ -962,9 +926,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       for (i = 1; i <= nl; i++) {
         if (intag) { if (trim(line[i]) == tag) intag = 0; continue }
         out = out line[i] "\n"
-        # heredoc_tag answers "" for any line without a `<<` (cmd_strip_heredocs relies on
-        # the same fact), so only a line that holds one is read (wave-24 T30).
-        tag = (index(line[i], "<<") ? heredoc_tag(line[i]) : "")
+        tag = heredoc_tag(line[i])
         if (tag != "") intag = 1
       }
       if (mode == "heredoc") { printf "%s", out; exit }
@@ -1170,18 +1132,22 @@ _CMD_WRITES_AWK='
     # A double-quoted run without its escapes: a backslash hides the character after it and
     # is dropped, and one with nothing after it (the command ended inside the quote) stays.
     # One split, and the pieces joined in halves: appending them in turn would copy the
-    # growing word once per backslash. The separator is a REGEX when the run holds a newline:
-    # macOS awk splits on newline as well as on a one-character string separator, which
-    # loses every line break of a multi-line body. Without one the string separator splits
-    # the same way, and a regex split costs microseconds per match (wave-24 T30).
+    # growing word once per backslash. The separator is a REGEX on purpose: macOS awk splits
+    # on newline as well as on a one-character string separator, which loses every line
+    # break of a multi-line body.
     function wt_unesc(r,   P, np, x, Q, m) {
-      np = (index(r, "\n") ? split(r, P, /\\/) : split(r, P, "\\")); m = 1; Q[1] = P[1]
+      np = split(r, P, /\\/); m = 1; Q[1] = P[1]
       for (x = 2; x <= np; x++) {
         if (P[x] == "" && x < np) { Q[++m] = "\\"; x++; Q[++m] = P[x] }
         else if (P[x] == "") Q[++m] = "\\"
         else Q[++m] = P[x]
       }
-      return cmdnorm_join(Q, 1, m)
+      return wt_join(Q, 1, m)
+    }
+    function wt_join(Q, lo, hi,   h) {
+      if (lo == hi) return Q[lo]
+      h = int((lo + hi) / 2)
+      return wt_join(Q, lo, h) wt_join(Q, h + 1, hi)
     }
     # Words of one segment, dequoted, beside a kind: W a word, R a write redirect (the next
     # word is its file), I an input redirect (the next word is consumed), D a duplication.
@@ -1343,10 +1309,8 @@ _CMD_WRITES_AWK='
       u0 = strip_leading(t)
       u = unwrap_runner(u0)
       if (u != u0 && depth < 2) { wt_run(u, cwd, depth + 1); return cwd }
-      # Nothing came off the front, so u reads exactly as t did: the words in hand are its
-      # words, and a second tokenizing of a large quoted run is not paid (wave-24 T30).
-      if (u != t) { split("", W); split("", K); n = wt_tok(u, W, K) }
-      m = 0
+      split("", W); split("", K)
+      n = wt_tok(u, W, K); m = 0
       for (j = 1; j <= n; j++) {
         if (K[j] == "R" || K[j] == "I") { j++; continue }
         if (K[j] == "W") A[++m] = W[j]
