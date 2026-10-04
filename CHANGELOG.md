@@ -211,8 +211,11 @@ Known limits, carried to the next release:
   Two suites in one command have one exit code between them: non-zero marks both red, and in
   `a; b` the code of `a` is lost.
 - A green full run does not clear an earlier red stamp of a single suite; that suite must be run
-  green by itself. A stamp that names no suite and is red or dirty at the head is cleared only by a
-  new commit and a re-run.
+  green by itself. A runner command is named by its own text, so `pytest` and `pytest -q` are two
+  suites, and only a re-run spelled the same way clears its red. A command the wall cannot name (its
+  text holds a `$`, or runs past 100 characters) or whose suites are joined by anything but `&&`
+  (`a || b`, `a; b`, a pipe) stamps no suite, and such a stamp, red or dirty at the head, is cleared
+  only by a new commit and a re-run.
 - A `cd` the wall cannot read as a literal (a variable, `pushd`, a subshell or a pipe ahead of the
   suite) stamps the checkout the call started in, and a run under `BIONIC_SLOT_HELD=1` stamps
   nothing, so both leave the task tree without a stamp. `land` reads a tree with no stamp as a tree

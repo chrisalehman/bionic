@@ -1137,25 +1137,46 @@ w10 u "bash tests/t.test.sh; cd $W10_ABS; bash tests/t.test.sh" ""
 # A cd behind `&&` runs whenever the suite does (a failed step before it stops both), so it counts.
 w10 v "true && cd $W10_ABS && bash tests/t.test.sh" "$W10_ABS"
 
-# WHICH SUITES THE STAMP NAMES (wave-26 T61, critic F1). The land keeps the newest stamp of each
-# suite, so the wall hands the shim `--suites <names>`: the BASENAME of every suite file the
-# command runs, from the claim's own `targets` reading, in position order, each once — the same
-# suite typed relative, absolute, behind a `cd` or inside the capture is one name. A suite the
-# reading cannot name (no file: `pytest`, `make test`; a `$`; a character outside a name's set)
-# is `?`. The unarmed agent's repo (W3) runs any suite.
+# WHICH SUITES THE STAMP NAMES (wave-26 T61, critic F1; T63, critic K4-S1/N1/N2). The land keeps
+# the newest stamp of each suite, so the wall hands the shim `--suites <names>`, one per suite the
+# command runs, in position order, each once. A suite FILE that is this tree's own
+# `tests/<basename>` (cmd_claim_scope, rooted at the stamp dir or the cwd) is its BASENAME: typed
+# relative, `./`, absolute or inside the capture, one name. Every other claim is named by its RUN,
+# each character outside the name set turned into `_` (`npm test` is `npm_test`). `?` is a run
+# with a `$` in it, a run longer than 100 characters, a basename outside the set, and a command
+# whose suite runs are joined by anything but `&&`. The unarmed agent's repo (W3) runs any suite.
 w11() {  # <label> <command> <expected options between --shell and -->
   run_hook "$(mk_payload "$RU" "$2" "$ACTOR")" "$GUARD"
   expect_eq "W11$1 [$2] is wrapped naming its suites" "bash $SHIM --shell $WSH $3 -- $(sq "$2")" "$WRAP"
 }
 w11 a 'bash tests/a.test.sh && bash tests/b.test.sh' '--suites a.test.sh,b.test.sh'
-w11 b 'bash tests/a.test.sh; bash tests/a.test.sh' '--suites a.test.sh'
-w11 c "bash $W10_ABS/tests/a.test.sh" '--suites a.test.sh'
+w11 b 'bash tests/a.test.sh; bash tests/a.test.sh' "--suites '?'"
+w11 c "bash $RU/tests/a.test.sh" '--suites a.test.sh'
 w11 d "cd $W10_ABS || exit 1; set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc" \
   "--stamp-dir $W10_ABS --suites a.test.sh"
-w11 e 'cd tests && bash a.test.sh' "--stamp-dir $RU/tests --suites a.test.sh"
-w11 f 'pytest -q' "--suites '?'"
-w11 g 'make test && bash tests/a.test.sh' "--suites '?,a.test.sh'"
+w11 e 'cd tests && bash a.test.sh' "--stamp-dir $RU/tests --suites bash_a.test.sh"
+w11 f 'pytest -q' '--suites pytest_-q'
+w11 g 'make test && bash tests/a.test.sh' '--suites make_test,a.test.sh'
 w11 h "bash 'tests/a,b.test.sh'" "--suites '?'"
+# A runner is named by its own text: a re-run of it clears its own red, another runner does not.
+w11 i 'npm test' '--suites npm_test'
+w11 j 'go test ./...' '--suites go_test_._...'
+w11 k 'set -o pipefail; npm test 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc' '--suites npm_test'
+# Its text can never forge the field: a `,`, `|`, `=`, a quote and a space all become `_`.
+w11 l 'npm test -- --grep "a,b|c=d"' '--suites npm_test_--_--grep__a_b_c_d_'
+# A suite file that is not this tree's own tests/<basename> is named by its run (critic K4-N2).
+w11 m 'bash other/a.test.sh' '--suites bash_other_a.test.sh'
+w11 n 'bash ../x/tests/a.test.sh' '--suites bash_.._x_tests_a.test.sh'
+# `?`: a `$` the reading could not resolve, and a run past 100 characters (exactly 100 is named).
+w11 o 'pytest "$T"' "--suites '?'"
+W11_X100="pytest tests/$(printf '%087d' 0)"
+w11 p "$W11_X100" "--suites pytest_tests_$(printf '%087d' 0)"
+w11 q "${W11_X100}1" "--suites '?'"
+# Two suite runs whose one exit code may not speak for both (critic K4-N1): `||`, a pipe, a newline.
+w11 r 'bash tests/a.test.sh || bash tests/b.test.sh' "--suites '?'"
+w11 s 'bash tests/a.test.sh | tee l && bash tests/b.test.sh' "--suites '?'"
+w11 t "bash tests/a.test.sh
+npm test" "--suites '?'"
 
 # WHICH SHELL: CLAUDE_CODE_SHELL, then SHELL, each only when it names bash or zsh by an
 # absolute path; otherwise no --shell, which is the shim's bash -c.

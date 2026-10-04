@@ -442,20 +442,22 @@ done
 # --- behaviour the library must not have changed ---
 # THE OVERRIDE SILENCES FARM-OUT'S DENY, NOT THE BOOKING (wave-26 T7, D8): the allowed call
 # comes back as the booking wrap alone — no deny, no advisory — around the original command.
-expect_wrap_only() {  # <label> <original command> — reads $OUT
+expect_wrap_only() {  # <label> <original command> <the shim options after --shell/--quiet, as a regex> — reads $OUT
   local _cmd _s _r="'\\''"
   expect_eq "$1 (no deny and no advisory beside the booking wrap)" '["hookEventName","updatedInput"]' \
     "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
   _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
   expect_regex "$1 (the updated command runs the booking shim)" \
-    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? -- " "$_cmd"
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?$3 -- " "$_cmd"
   _s=${2//\'/$_r}
   expect_eq "$1 (around the original command, byte for byte)" "'$_s'" "${_cmd#* -- }"
 }
 run_hook "$(mk_bash_payload "$FARM_REPO" 'FARM_OUT_ALLOW=1 bash tests/run.sh')" "$FARM_OUT"
-expect_wrap_only "the sanctioned override still silences the wall" 'FARM_OUT_ALLOW=1 bash tests/run.sh'
+expect_wrap_only "the sanctioned override still silences the wall" 'FARM_OUT_ALLOW=1 bash tests/run.sh' \
+  ' --suites run\.sh'
 run_hook "$(mk_bash_payload "$FARM_REPO" 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh')" "$FARM_OUT"
-expect_wrap_only "…including as an env prefix mid-chain" 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh'
+expect_wrap_only "…including as an env prefix mid-chain" 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh' \
+  " --stamp-dir $FARM_REPO/x --suites run\\.sh"
 expect_empty "a subagent payload leaves farm-out silent (agent_type non-empty)" \
   "$(printf '%s' "$(mk_bash_payload "$FARM_REPO" 'bash tests/run.sh')" \
      | jq '. + {agent_type:"general-purpose"}' \
@@ -2245,5 +2247,51 @@ expect_eq "§PICK control: both read a suite as suite" "cmd_class=suite wall=sui
   "$(bash -c "$PICK_BOTH" _ "$LIB" "$PICK_WALL_FN" real 2>&1)"
 expect_eq "§PICK with the owner replaced, both answer the owner's word" \
   "cmd_class=picked-by-the-owner wall=picked-by-the-owner" "$(bash -c "$PICK_BOTH" _ "$LIB" "$PICK_WALL_FN" stub 2>&1)"
+
+section "§SCOPE — wave-26 T63 (critic K4-N1, K4-N2): one scoping rule, and the reading says when one exit code is split"
+#
+# THE SCOPING RULE HAS ONE SPELLING, cmd_claim_scope, and two readers: the budget
+# (cmd_suite_claims, here) and the stamp's suite names (payload/scripts/lib/walls.sh
+# `_bsg_suites`). rc 0 is <root>'s own tests/<basename>; 1 is a path elsewhere; 2 is a path
+# nothing can place (a `$`, a backtick, the bare basename a `cd` licensed). The budget keeps
+# 0 and 2 and drops 1, exactly as before the rule moved.
+scope_rc() {  # <root> <basename> <path> -> the rc
+  bash -c '. "$1" || exit 9; cmd_claim_scope "$2" "$3" "$4"; echo $?' _ "$LIB" "$@" 2>&1
+}
+expect_eq "§SCOPE tests/a.test.sh is the root's own" "0" "$(scope_rc /r a.test.sh tests/a.test.sh)"
+expect_eq "§SCOPE ./tests/a.test.sh is the root's own" "0" "$(scope_rc /r a.test.sh ./tests/a.test.sh)"
+expect_eq "§SCOPE /r/tests/a.test.sh is the root's own" "0" "$(scope_rc /r a.test.sh /r/tests/a.test.sh)"
+expect_eq "§SCOPE other/a.test.sh leads elsewhere" "1" "$(scope_rc /r a.test.sh other/a.test.sh)"
+expect_eq "§SCOPE /x/tests/a.test.sh leads elsewhere" "1" "$(scope_rc /r a.test.sh /x/tests/a.test.sh)"
+expect_eq "§SCOPE a \$ cannot be placed" "2" "$(scope_rc /r a.test.sh '$T/tests/a.test.sh')"
+expect_eq "§SCOPE a bare basename cannot be placed" "2" "$(scope_rc /r a.test.sh a.test.sh)"
+expect_eq "§SCOPE the budget keeps rc 0 and rc 2 and drops rc 1" \
+  "a.test.sh|b.test.sh|c.test.sh" \
+  "$(bash -c '. "$1" || exit 9; cmd_suite_targets "bash tests/a.test.sh && bash other/x.test.sh && bash \$T/tests/b.test.sh && cd t && bash c.test.sh" /r' _ "$LIB" 2>&1 | paste -sd'|' -)"
+
+# THE SPLIT LINE. The targets reading closes with one `split` line when two suite runs are
+# joined by anything but `&&` (or the parentheses of a subshell), because then one exit code
+# may not speak for both. It is the stamp's fact, so the budget's claims never carry it.
+split_of() {  # <command> -> the reading's kind column, one per line, `|`-joined
+  printf '%s' "$1" | bash -c '. "$1" || exit 9; _cmd_class_awk targets' _ "$LIB" 2>&1 | awk -F'\t' '{ print $1 }' | paste -sd'|' -
+}
+expect_eq "§SCOPE a && b: two claims, no split" "file|file" "$(split_of 'bash tests/a.test.sh && bash tests/b.test.sh')"
+expect_eq "§SCOPE (a) && b: a subshell is no split" "file|file" "$(split_of '(bash tests/a.test.sh) && bash tests/b.test.sh')"
+expect_eq "§SCOPE a capture shape is one claim, no split" "file" \
+  "$(split_of 'set -o pipefail; bash tests/a.test.sh 2>&1 | tee "$L"; rc=$?; echo "rc=$rc" >> "$L"; exit $rc')"
+expect_eq "§SCOPE a || b: split" "file|file|split" "$(split_of 'bash tests/a.test.sh || bash tests/b.test.sh')"
+expect_eq "§SCOPE a; b: split" "file|file|split" "$(split_of 'bash tests/a.test.sh; bash tests/b.test.sh')"
+expect_eq "§SCOPE a newline b: split" "file|file|split" "$(split_of "bash tests/a.test.sh
+bash tests/b.test.sh")"
+expect_eq "§SCOPE a | tee && b: the pipe splits" "file|file|split" \
+  "$(split_of 'bash tests/a.test.sh | tee l && bash tests/b.test.sh')"
+expect_eq "§SCOPE a; a: the same suite twice is split too" "file|split" "$(split_of 'bash tests/a.test.sh; bash tests/a.test.sh')"
+expect_eq "§SCOPE a loop over two suites: split" "file|file|split" "$(split_of 'for s in a b; do bash tests/$s.test.sh; done')"
+expect_eq "§SCOPE make test || bash tests/a.test.sh: a runner counts" "run|file|split" \
+  "$(split_of 'make test || bash tests/a.test.sh')"
+expect_eq "§SCOPE cd x || exit 1; a: the cd guard ahead of one suite is no split" "file" \
+  "$(split_of 'cd x || exit 1; bash tests/a.test.sh')"
+expect_eq "§SCOPE the budget's claims never carry the split line" "file|file" \
+  "$(claim_kinds_of 'bash tests/a.test.sh || bash tests/b.test.sh' | paste -sd'|' -)"
 
 finish

@@ -5498,6 +5498,7 @@ _wall_prefix_sets() {  # <segment> <NAME> <value> -> 0 when the segment's leadin
 #
 #   _BSG_CD_DIR     the payload cwd moved by every `cd` the walk can read as a literal; one it
 #                   cannot read is skipped. The solo reader's base: a miss there costs --quiet.
+#   _BSG_CWD        the payload cwd itself, where the shim stamps when there is no --stamp-dir.
 #   _BSG_STAMP_DIR  where the first suite segment runs, when a `cd` moved it and the walk is
 #                   SURE of it; "" otherwise. The shim's --stamp-dir: a guess there would put a
 #                   run's stamp in another tree, so anything unsure gives none and the shim
@@ -5513,7 +5514,7 @@ _BSG_CD_DIR=""; _BSG_STAMP_DIR=""
 _bsg_cd_walk() {
   local _cls _seg _p _q _sure=1 _moved=0 _pre _t
   _BSG_CD_DIR="$(bionic_jq .cwd)"; [ -n "$_BSG_CD_DIR" ] || _BSG_CD_DIR="${BIONIC_CWD:-}"
-  _BSG_STAMP_DIR=""
+  _BSG_CWD="$_BSG_CD_DIR"; _BSG_STAMP_DIR=""
   [ -n "$_BSG_CD_DIR" ] || _sure=0
   _seg=""
   while IFS=$'\t' read -r _cls _seg; do
@@ -5586,21 +5587,41 @@ _bsg_solo_target() {
   return 1
 }
 
-# _bsg_suites — sets _BSG_SUITES to the shim's --suites value (wave-26 T61, critic F1): the
-# BASENAME of each suite file the command runs, from _BSG_TARGETS, in position order, each once,
-# comma-joined. The basename is the name the dispatch budget already counts a suite by, and it is
-# the same however the suite is typed: relative, absolute, behind a `cd`, inside the capture. A
-# claim with no file (`pytest`, `make test`), or a basename carrying anything outside
-# letters, digits, `.`, `_`, `+` and `-` (a `$` the reading could not resolve, a comma), is `?`:
-# a run the land cannot keep apart from any other suite. No claim at all is `?` too. Pure
-# parameter expansion over the reading already made.
+# _bsg_suites — sets _BSG_SUITES to the shim's --suites value (wave-26 T61, critic F1; T63, critic
+# K4-S1/N1/N2): one NAME per suite the command runs, from _BSG_TARGETS, in position order, each
+# once, comma-joined. Pure parameter expansion over the reading already made: no fork.
+#
+#   - A suite FILE that `cmd_claim_scope` places as this tree's own `tests/<basename>` (the root is
+#     the stamp directory, or the payload cwd where the shim stamps without one) is named by that
+#     BASENAME, the name the dispatch budget counts it by. Typed relative, `./`, absolute, behind a
+#     `cd` or inside the capture, it is one name.
+#   - Every other claim is named by its RUN, the text the reading collapsed (`npm test`,
+#     `pytest -q`, `bash other/a.test.sh`), each character outside letters, digits, `.`, `_`, `+`
+#     and `-` turned into `_`: `npm_test`. So a re-run of the same command clears its own red,
+#     and a different command, or a different spelling of one, is a different suite.
+#   - `?` is a run the land cannot keep apart from any suite: a run with no text, a `$` or a
+#     backtick in it (nothing here can say what it expands to), a run longer than
+#     _BSG_NAME_MAX, and a whole command whose suite runs are joined by anything but `&&`
+#     (the reading's `split` line: `a || b`, `a; b`, a pipe, a loop), where one exit code
+#     cannot speak for each. No claim at all is `?` too.
+#
+# A name never carries `|`, `,`, `=`, a space or a newline, so the field stays one field; the shim
+# filters it again (booked.sh).
 _BSG_SUITES=""
+_BSG_NAME_MAX=100
 _bsg_suites() {
-  local _k _b _r _p
+  local _k _b _r _p _root="${_BSG_STAMP_DIR:-$_BSG_CWD}"
   _BSG_SUITES=""
   while IFS=$'\t' read -r _k _b _r _p; do
     [ -n "$_k" ] || continue
-    [ "$_k" = file ] || _b='?'
+    if [ "$_k" = split ]; then _BSG_SUITES='?'; return 0; fi
+    if [ "$_k" != file ] || ! cmd_claim_scope "$_root" "$_b" "$_p"; then
+      _b='?'
+      case "$_r" in
+        ''|*'$'*|*'`'*) : ;;
+        *) [ "${#_r}" -gt "$_BSG_NAME_MAX" ] || _b="${_r//[!A-Za-z0-9._+-]/_}" ;;
+      esac
+    fi
     case "$_b" in '?') : ;; ''|*[!A-Za-z0-9._+-]*) _b='?' ;; esac
     case ",$_BSG_SUITES," in *",$_b,"*) continue ;; esac
     _BSG_SUITES="${_BSG_SUITES:+$_BSG_SUITES,}$_b"
