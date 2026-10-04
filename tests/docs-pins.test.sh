@@ -4670,12 +4670,13 @@ expect_nonempty "W26-15: AC-8.2 — test-harness.md states the rule" \
 expect_nonempty "W26-15b: …and names the relation form" "$(w26_hits "$W26_15_REL" "$W26_15_RULES")"
 expect_nonempty "W26-15c: …and names the ceiling form" "$(w26_hits "$W26_15_CEIL" "$W26_15_RULES")"
 expect_nonempty "W26-15d: …and says when an exact number stands" "$(w26_hits "$W26_15_OWN" "$W26_15_RULES")"
-W26_15_D="$TMP/w26-15-no-ceiling.md"
-grep -vF -- "$W26_15_CEIL" "$W26_15_RULES" > "$W26_15_D" 2>/dev/null
+anchor "$W26_15_RULES" "$W26_15_CEIL" 1
+DOCTORED_W26_15="$TMP/w26-15-no-ceiling.md"
+grep -vF -- "$W26_15_CEIL" "$W26_15_RULES" > "$DOCTORED_W26_15" 2>/dev/null
 expect_nonempty "W26-15m precondition: the doctored copy keeps the rule's sentence" \
-  "$(w26_hits "$W26_15_SENTENCE" "$W26_15_D")"
+  "$(w26_hits "$W26_15_SENTENCE" "$DOCTORED_W26_15")"
 expect_eq "W26-15m: …and a rules file naming no ceiling form is caught" "" \
-  "$(w26_hits "$W26_15_CEIL" "$W26_15_D")"
+  "$(w26_hits "$W26_15_CEIL" "$DOCTORED_W26_15")"
 
 section "Section W26b: wave-26 T20 — one moment for the full run, the minimal forms (REQ-3 AC-3.1 static, AC-3.6; REQ-4 AC-4.2, 4.3, 4.4; D15)"
 #
@@ -4786,12 +4787,13 @@ for _w26_f in $W26_ROLES "$DISPATCH_MD" "$W26_CORE"; do
       "$W26_MARK" "$_w26_v"
   done
 done
-W26_D12="$TMP/w26-12-doctored.md"
 _w26_body="$(cat "${REPO}/agents/auditor.md" 2>/dev/null)"
-printf '%s\n' "${_w26_body// "$W26_MARK"/}" > "$W26_D12"
+anchor "${REPO}/agents/auditor.md" "$W26_MARK" 2
+DOCTORED_W26_12="$TMP/w26-12-doctored.md"
+printf '%s\n' "${_w26_body// "$W26_MARK"/}" > "$DOCTORED_W26_12"
 expect_nonempty "W26-12m precondition: the doctored auditor.md still has its Cadence: line" \
-  "$(w26_label_line 'Cadence' "$W26_D12")"
+  "$(w26_label_line 'Cadence' "$DOCTORED_W26_12")"
 expect_absent "W26-12m: a role file whose Cadence: line lost the mark is caught" \
-  "$W26_MARK" "$(w26_label_line 'Cadence' "$W26_D12")"
+  "$W26_MARK" "$(w26_label_line 'Cadence' "$DOCTORED_W26_12")"
 
 finish
