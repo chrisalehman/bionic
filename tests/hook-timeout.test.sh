@@ -655,6 +655,35 @@ expect_eq "§FX g [/bin/bash]: exit 0" "0" "$HT_RC"
 expect_contains "§FX g: the walk reached the redirect after the body" "W	$R_MEM/out.md" "$HT_OUT"
 expect_contains "§FX g: …and read the body itself as unknown" "?	" "$HT_OUT"
 
+section "3c — permission-answer: a 52 KB question answered inside its 10 s registration (wave-25 T4, D1)"
+# The carrier is registered on PermissionRequest at timeout 10, and the platform kills a hook at
+# its registration: a carrier killed mid-read answers nothing and the dialog waits, the halt it
+# exists to remove. So it is timed whole, under /bin/bash 3.2, on e's 52 KB python3 -c body with
+# a push on the next line — the command reader walks the body and the reserved table reads
+# every segment, the two costs T2 and T3 measured. The witness is the reserved denial, which
+# only a reading that got past the body can give; a small question beside it is the baseline.
+PA_HOOK="${BIONIC_HOOKS_DIR}/permission-answer.sh"
+PA_REG=10
+jq --arg cmd "$(jq -r '.tool_input.command' "$SANDBOX/in/e.json")" \
+  '.hook_event_name = "PermissionRequest" | del(.tool_use_id)
+   | .tool_input.command = ($cmd + "\ngit push origin main") | .permission_suggestions = []' \
+  "$SANDBOX/in/e.json" > "$SANDBOX/in/pa52.json"
+jq '.tool_input.command = "touch out.txt"' "$SANDBOX/in/pa52.json" > "$SANDBOX/in/pa-small.json"
+expect_true "fixture: the carrier's question is at least 52 000 bytes" \
+  test "$(jq -r '.tool_input.command' "$SANDBOX/in/pa52.json" | wc -c)" -ge 52000
+expect_eq "fixture: /bin/bash is 3.2, the shell the CLI runs the hook under" "1" "$OLD_IS_32"
+ht_time /bin/bash "$PA_HOOK" "$SANDBOX/in/pa-small.json" "$R_CHAIN" "$PA_REG"
+echo "hook-timeout: permission-answer small question under /bin/bash ($(ht_version /bin/bash)): ${HT_SECS}s rc=$HT_RC"
+expect_eq "permission-answer small [/bin/bash]: answered (denied: this unbound session's payload names no scratch)" \
+  "deny" "$(printf '%s' "$HT_OUT" | jq -r '.hookSpecificOutput.decision.behavior // "none"' 2>/dev/null)"
+ht_time /bin/bash "$PA_HOOK" "$SANDBOX/in/pa52.json" "$R_CHAIN" "$PA_REG"
+echo "hook-timeout: permission-answer 52 KB question under /bin/bash ($(ht_version /bin/bash)): ${HT_SECS}s rc=$HT_RC"
+expect_true "permission-answer 52 KB [/bin/bash]: under its ${PA_REG}s registration (took ${HT_SECS}s)" \
+  awk -v s="$HT_SECS" -v b="$PA_REG" 'BEGIN { exit !(s + 0 < b + 0) }'
+expect_eq "permission-answer 52 KB [/bin/bash]: exit 0" "0" "$HT_RC"
+expect_contains "permission-answer 52 KB: the reading got past the body to the push — a reserved denial" \
+  "leaves the machine" "$(printf '%s' "$HT_OUT" | jq -r '.hookSpecificOutput.decision.message // ""' 2>/dev/null)"
+
 # ---------- the plan-row verbs ----------
 
 VERB_BUDGET=1
