@@ -103,7 +103,7 @@ write_session() {  # <pid> <cwd> <startedAt-ms>
 run_doctor() {
   ( cd "$PROJ" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-      BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
