@@ -220,11 +220,12 @@ _bionic_jq_fill() {
     ((try (.tool_input.run_in_background) catch null) | tostring),
     (if (try (has("background_tasks")) catch false) then "yes" else "" end),
     ((try ([.background_tasks[]?.id // empty] | join("|")) catch "") | tostring),
+    s(.tool_input.timeout),
     "'"$_BIONIC_JQ_END"'"
   ' 2>/dev/null) || return 1
 
   # SPLIT BY PARAMETER EXPANSION, not by `read`: a here-string opens a temp file
-  # per read and a pipeline would put the assignments in a subshell. Twelve
+  # per read and a pipeline would put the assignments in a subshell. Thirteen
   # builtin expansions cost nothing measurable and stay in this shell.
   _rest="$_out"
   _BIONIC_JQ_CWD="${_rest%%$'\n'*}"       ; _rest="${_rest#*$'\n'}"
@@ -238,9 +239,10 @@ _bionic_jq_fill() {
   _BIONIC_JQ_BG="${_rest%%$'\n'*}"        ; _rest="${_rest#*$'\n'}"
   _BIONIC_JQ_HASBT="${_rest%%$'\n'*}"     ; _rest="${_rest#*$'\n'}"
   _BIONIC_JQ_BTIDS="${_rest%%$'\n'*}"     ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_TIMEOUT="${_rest%%$'\n'*}"  ; _rest="${_rest#*$'\n'}"
   _line="${_rest%%$'\n'*}"
 
-  # THE SENTINEL IS THE CHECK. Eleven values plus this line is the whole record;
+  # THE SENTINEL IS THE CHECK. Twelve values plus this line is the whole record;
   # anything else means a value carried a newline (or jq wrote nothing at all),
   # and a cache that cannot prove its own alignment must not be read.
   [ "$_line" = "$_BIONIC_JQ_END" ] || return 1
@@ -264,6 +266,7 @@ bionic_jq() {
                         printf '%s' "$_BIONIC_JQ_HASBT" ; return 0 ;;
       '[.background_tasks[]?.id // empty] | join("|")')
                         printf '%s' "$_BIONIC_JQ_BTIDS" ; return 0 ;;
+      .tool_input.timeout) printf '%s' "$_BIONIC_JQ_TIMEOUT" ; return 0 ;;
     esac
   fi
   printf '%s' "${BIONIC_INPUT:-}" | jq -r "$1 // empty" 2>/dev/null
