@@ -1596,6 +1596,21 @@ run_hook "$(mk_payload "$R_COMMIT" "git -C $R_COMMIT/.worktrees/19-T6 commit -m 
 expect_status "18e: a commit from a linked worktree of the engaged repository is still judged — refused" 2 "$ST"
 expect_absent "18e: …and never called outside" "outside the engaged repository" "$ERR"
 
+# wave-25 T12: the words in front of git are names, read as the machine resolves them. On a
+# case-blind filesystem `ENV`, `SUDO` and `BASH` run env, sudo and bash, so each of these is a
+# commit the gate judges exactly as its lower-case form, and R_COMMIT's block_plan refuses it.
+# Before T12 the reader left `ENV` as argv[0], saw no git, and the gate admitted the commit.
+for _bw12 in "env -C $R_SCR git commit -q --allow-empty -m x|ENV -C $R_SCR git commit -q --allow-empty -m x" \
+             "env --chdir=$R_SCR git commit -m x|Env --chdir=$R_SCR git commit -m x" \
+             "sudo git commit -m x|SUDO git commit -m x" \
+             "bash -c 'git commit -m x'|BASH -c 'git commit -m x'"; do
+  run_hook "$(mk_payload "$R_COMMIT" "${_bw12%%|*}")"
+  expect_status "18f: control — [${_bw12%%|*}] is judged and refused" 2 "$ST"
+  run_hook "$(mk_payload "$R_COMMIT" "${_bw12#*|}")"
+  expect_status "18f: [${_bw12#*|}] is judged and refused exactly as its lower-case form" 2 "$ST"
+  expect_contains "18f: …by the evidence gate" "commit refused" "$ERR"
+done
+
 
 
 # ---------------------------------------------------------------------------
@@ -1778,6 +1793,9 @@ am_refused "19d: behind cd … &&" "cd $R_AM && bash $AM_POKER amend w20-sub --s
 am_refused "19e: behind an env prefix with options and an assignment" \
   "env -u FOO BAR=1 bash $AM_POKER extend w20-sub r"
 am_refused "19f: the script run directly, by relative path" "./hooks/session-poker.sh amend w20-sub --reason r --files+ a/b.sh"
+# wave-25 T12: BASH runs bash on a case-blind filesystem, so the runner word folds here too.
+am_refused "19f2: BASH session-poker.sh amend" "BASH $AM_POKER amend w20-sub --reason r --files+ a/b.sh"
+am_refused "19f3: SUDO Sh session-poker.sh task-set" "SUDO Sh $AM_POKER task-set T2 status=landed"
 am_refused "19g: second segment of a chain" "echo hi; bash hooks/session-poker.sh task-add a b c d e f g h i"
 am_refused "19h: inside bash -c" "bash -c 'bash $AM_POKER amend w20-sub --reason r --files+ a/b.sh'"
 # §ARM-A (hold) — wave-24 T7, REQ-4 AC-4.6, D1: a hold is the orchestrator's standing answer to a
@@ -1925,6 +1943,21 @@ expect_eq "21a: each obfuscated spelling is still 'maybe' (0), and a git-free qu
 expect_eq "21b: …asked in one process in turn, the cache never answers one command with another's strip" \
   "0 1 0" "$(mg_answer "'g'it push" "echo 'x'" "'g'it push")"
 
+# 21d (wave-25 T12): the tier-2 screen in ANY letter case, answered by the same strip pass. A
+# capitalised tier-2 word is a maybe, through the awk pass (a text holding a quote or a
+# backslash, a continuation joining the word included) and through the fast path (a text with
+# neither, which keeps the text as its strip); a text with no tier-2 word at all is not. The
+# strip itself is the one the screen always made: the flag never reaches it.
+t2_answer() {  # <command text>... -> "<rc>:<strip>" per argument, `|`-joined, all in ONE process
+  bash -c '. "$1" >/dev/null 2>&1; shift; o=""
+    for c in "$@"; do _wall_screen "$c"; _wall_tier2_any_case; o="$o$?:$_WALL_STRIPPED|"; done
+    printf "%s" "$o"' _ "$WALLS_LIB" "$@"
+}
+BW21_T2NL="$(printf 'G\\\nIT clone x')"
+expect_eq "21d: each capitalised tier-2 word is 'maybe' (0) by either path, prose is not (1), and the strip is unchanged" \
+  "0:GIT clone x|0:NPX create-thing x y|0:Docker run x|0:GIT clone x|1:echo x y|1:ls -la|0:uvx tool|" \
+  "$(t2_answer 'GIT clone x' 'NPX create-thing "x y"' "'Docker' run x" "$BW21_T2NL" "echo 'x y'" 'ls -la' 'uvx tool')"
+
 for _bw21 in "$BW21_NL" "'g'it push origin main" '"gi"t push origin main' '\g\i\t push origin main'; do
   run_hook "$(mk_payload "$R_QUIET" "$_bw21")"
   expect_status "21c: [$(printf '%q' "$_bw21")] is still a push to main through the one process" 2 "$ST"
@@ -1969,6 +2002,18 @@ mem_refused "mv destination" "$R_MEM" 'mv /tmp/x ~/.claude/projects/-x/memory/b.
 mem_refused "touch" "$R_MEM" 'touch ~/.claude/projects/-x/memory/c.md' "${MEM_NOENV[@]}"
 mem_refused "mkdir of the store itself" "$R_MEM" 'mkdir -p ~/.claude/projects/-x/memory' "${MEM_NOENV[@]}"
 mem_refused "ln" "$R_MEM" 'ln -s /tmp/x ~/.claude/projects/-x/memory/d.md' "${MEM_NOENV[@]}"
+# wave-25 T12: on a case-blind filesystem `TEE` runs tee and `CP` runs cp, so each writer is
+# the same writer in any letter case, behind any prefix in any letter case.
+mem_refused "TEE" "$R_MEM" 'printf x | TEE ~/.claude/projects/-x/memory/a.md' "${MEM_NOENV[@]}"
+mem_refused "CP destination" "$R_MEM" 'CP /tmp/x ~/.claude/projects/-x/memory/' "${MEM_NOENV[@]}"
+mem_refused "SUDO Mv destination" "$R_MEM" 'SUDO Mv /tmp/x ~/.claude/projects/-x/memory/b.md' "${MEM_NOENV[@]}"
+mem_refused "BASH -c touch" "$R_MEM" "BASH -c 'touch ~/.claude/projects/-x/memory/c.md'" "${MEM_NOENV[@]}"
+mem_refused "cd into the store, SED -i" "$R_MEM" \
+  "cd ~/.claude/projects/-x/memory && SED -i '' 's/a/b/' MEMORY.md" "${MEM_NOENV[@]}"
+# …and `CD` is NOT cd: /usr/bin/CD runs `builtin cd` in a child and moves nothing, so the tee
+# below still writes into the store. A reader that folded CD would place it under /tmp.
+mem_refused "CD moves nothing, so a relative write stays in the store" "$R_MEM" \
+  "cd ~/.claude/projects/-x/memory && CD /tmp && tee a.md" "${MEM_NOENV[@]}"
 mem_refused "cd into the store, relative sed -i" "$R_MEM" \
   "cd ~/.claude/projects/-x && cd memory && sed -i '' 's/a/b/' MEMORY.md" "${MEM_NOENV[@]}"
 mem_refused "a dot-dot spelling" "$R_MEM" 'touch ~/.claude/projects/-x/notes/../memory/e.md' "${MEM_NOENV[@]}"
@@ -2044,7 +2089,9 @@ section "§CDT — the later-cd scan reads every segment before the first git, i
 # The function is defined past walls.sh's early `return`, so it is extracted the way 15g2
 # extracts `_budget_wire_list`: awk between its own `()` line and its closing `}`, then eval.
 cdt_of() {  # <command> -> the targets, `|`-terminated
-  bash -c 'eval "$(awk "/^_eg_cd_targets\(\)/,/^}/" "$1")"; _eg_cd_targets "$2"
+  # git-argv.sh is sourced first, as the evidence gate always has it (wave-25 T12): the scan
+  # asks it whether a segment's word is git in another letter case.
+  bash -c '. "${1%/*}/git-argv.sh"; eval "$(awk "/^_eg_cd_targets\(\)/,/^}/" "$1")"; _eg_cd_targets "$2"
     printf "%s" "$_EG_CDS" | tr "\n" "|"' _ "$WALLS_LIB" "$1"
 }
 expect_contains "§CDT the extractor finds the function" "_eg_cd_targets()" \
@@ -2058,5 +2105,12 @@ expect_eq "§CDT a subshell opener comes off the front" "/b|" "$(cdt_of 'cd /a &
 expect_eq "§CDT the first git ends the scan, inside a word too" "/b|" "$(cdt_of 'cd /a && cd /b && echo legit; cd /c')"
 expect_eq "§CDT a cd after the commit is never read" "" "$(cdt_of 'cd /a && git commit -m x && cd /z')"
 expect_eq "§CDT one segment has nothing after it to read" "" "$(cdt_of 'cd /a')"
+# wave-25 T12: a commit spelled GIT ends the scan exactly as git does. Before T12 the scan cut
+# only at the literal `git`, so a cd AFTER `GIT commit` was read as a second directory and the
+# commit refused where its lower-case form passes. Only a segment whose WORD folds to git
+# ends it: an `echo GITHUB` is no commit, and the scan reads on past it.
+expect_eq "§CDT a cd after a GIT commit is never read, as after git" "" "$(cdt_of 'cd /a && GIT commit -m x && cd /z')"
+expect_eq "§CDT …nor after Git, behind its own subshell opener" "/b|" "$(cdt_of 'cd /a && cd /b && (Git commit -m x); cd /z')"
+expect_eq "§CDT an uppercase word that is not git ends nothing" "/b|" "$(cdt_of 'cd /a && echo GITHUB && cd /b && git commit -m x')"
 
 finish

@@ -36,15 +36,16 @@ What you will notice:
   gets an agent stopped because its output file already exists. Briefs gain an optional
   `Done marker:` line for agents that report by file.
 - **Hooks no longer time out on large commands.** The Bash and governing-skill hooks now read a
-  command once, in one pass, instead of re-scanning it per check. Commands of 64 KB, including
-  long heredocs, quoted `python3 -c` bodies and backslash-heavy quoted text, are judged in well
-  under two seconds under both macOS `/bin/bash` 3.2 and current bash, where some used to run past
-  the hook's limit and pass unchecked. A timed suite (`tests/hook-timeout.test.sh`) holds that line
+  command once, in one pass, instead of re-scanning it per check. Commands of 64 KB (long
+  heredocs, quoted `python3 -c` bodies, a command behind a `cd`) are judged in under two seconds
+  under both macOS `/bin/bash` 3.2 and current bash, where some used to run past the hook's limit
+  and pass unchecked. A timed suite (`tests/hook-timeout.test.sh`) holds that line
   under both shells. The impact check the dispatch wall runs now skips nested worktrees and
   `.bionic`, so it answers in seconds at a project root holding several worktrees.
 - **Every refusal prints a fix you can paste.** Each refusal site in the Bash walls, the stop
   wall, the dispatch wall and the stop guard (99 of them, listed in
-  `tests/fixtures/refusal-inventory.md`) ends with the command or line that resolves it. A landing
+  `tests/fixtures/refusal-inventory.md`) ends with the command or line that resolves it, or says
+  why there is none. A landing
   refused for touching a file outside the brief prints the `amend … --files+` line, quoted so it
   survives a path with spaces, and a refused dispatch names its real cause once, with the roster
   rows it counted and the command that closes each.
@@ -89,7 +90,8 @@ Fixes:
   the wave spec.
 - `ledger-add` checks its id as well as its values, so an id carrying a newline can no longer
   write a forged plan line, and the plan-row verbs accept plain ASCII ids only, under any locale;
-  a hold with a blank reason is refused; fix lines print the plugin root quoted.
+  a hold with a blank reason is refused; the fix lines this release touched print the plugin path
+  quoted.
 - The doctor-reads suite no longer depends on the `claude` and `npm` found on the runner's PATH.
 - The Bash walls read `git` in any letter case. On macOS's case-blind filesystem `GIT push origin
   main` runs git, and it used to pass the protected-branch wall, the commit gate and the read-only
@@ -101,9 +103,11 @@ Known limits, carried to the next release:
   symlinked path, process substitution, `cd -` into the store, and a write from inside an
   interpreter such as `python3 -c` all pass. When `BIONIC_CLAUDE_HOME` and `CLAUDE_CONFIG_DIR`
   name different homes, only the one that takes precedence is guarded.
-- A very large unquoted command (about 200 KB) still takes over ten seconds through the Bash hook
-  under `/bin/bash` 3.2, past the hook's limit, so the walls do not judge it. Commands of 64 KB are
-  well inside the limit.
+- A very large command (about 200 KB), quoted or not, can still take over ten seconds through the
+  Bash hook under `/bin/bash` 3.2, past the hook's limit, so the walls do not judge it. Commands up
+  to 64 KB are inside the limit on the shapes the timed suite holds.
+- Five older fix lines (in the stop wall, the stop guard and the dispatch wall) still print the
+  plugin path unquoted, so they break when pasted from a plugin path containing a space.
 - `bash run.sh` after a `cd` still reads as the full suite run.
 - A `Done marker:` file must be strictly newer than the agent's launch, while a completion message
   sent in the same second counts.
