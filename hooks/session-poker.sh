@@ -358,7 +358,9 @@ PATROL_DIGEST_SCHEMA="patrol-digest/v1"
 HOLD_REASON_SLOT="'why it stays up'"
 # v=3 (wave-25 T5; D7): the prompt says what the decision line's `gate=` field asks of the turn,
 # so a Patrol armed under v=2 does not know it and the tick's re-arm note asks for the new job.
-PATROL_PROMPT_VERSION=3
+# v=4 (wave-26 T15; D16): an `unchanged` or a WAITING tick ends the turn's duties, the task-list
+# refresh is asked only on a change, and "continue" only when something is ready or changed.
+PATROL_PROMPT_VERSION=4
 
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
 # stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
@@ -873,8 +875,10 @@ tick_digest_file() {  # <session-id> -> absolute path, or empty
 # instant it was written: `since=` is the instant the facts last changed and an unchanged tick
 # keeps it, so only `at=` tells the stop collector the digest is this turn's (critic I3).
 # `gate_raised=` is the set of gate requests already raised (below), and `arm` carries it over,
-# so a re-arm does not raise them a second time.
-write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys>]] -> 0 written, 1 not
+# so a re-arm does not raise them a second time. `change=` is the fingerprint of the plan's
+# `## Tasks` statuses and its ready set (wave-26 T15; D16): the task-list duty is owed only when
+# it moved, so `arm` does not carry it and the first tick after an arm compares against nothing.
+write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change>]]] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
   [ -n "$f" ] || return 1
@@ -890,6 +894,9 @@ write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <du
     fi
     if [ -n "${7:-}" ]; then
       printf 'gate_raised=%s\n' "$7"
+    fi
+    if [ -n "${8:-}" ]; then
+      printf 'change=%s\n' "$8"
     fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
@@ -2912,7 +2919,8 @@ case "$VERB" in
   # IT ASKS ONLY FOR WHAT THE TICK PRINTED (wave-24 T7, REQ-4; D5). Through 1.8.10 it asked for a
   # `fill-declined:` line on every tick, and all 29 declines of that run answered nothing a wall
   # had asked. Each answer is now conditional on the line that owes it, ListAgents on an open
-  # row, the task-list refresh on a tick that said more than `unchanged`, and `v=` after the
+  # row, the task-list refresh only on a change of a row's status or the ready set (wave-26 T15;
+  # D16), nothing at all after `unchanged` or WAITING, and `v=` after the
   # marker names the prompt's version so `arm` can record it and a later tick can ask for a
   # re-arm when the poker has moved on.
   prompt)
@@ -2922,7 +2930,7 @@ case "$VERB" in
       die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
       exit 3
     fi
-    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. Unless the tick printed only "unchanged" or a QUIET with no open row: TaskList and reconcile. Then continue the run toward its goal until a wall.\n' \
+    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. If it printed only "unchanged", or a "poker: WAITING" line, the run is waiting on its agents and this turn owes nothing more: end it. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. TaskList and reconcile only when a row'"'"'s status or the ready set changed since the last tick. Continue the run toward its goal until a wall only when something is ready or changed.\n' \
       "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$HOLD_REASON_SLOT"
     exit 0
     ;;
@@ -4211,8 +4219,9 @@ EOF
 
   # THE RE-OPEN (T-h; D11; REQ-10). `verdict_row` (hooks/session-sweeper.sh) reads a name's
   # LAST roster row alone, and nothing else — `waiver=`, `deliverable=`, `launched_at=`, the
-  # `claims=`/`progress=`/`cadence=` triple. `standdown-declined:` answers one turn and
-  # writes nothing; `ack` closes a row rather than opening one. Neither re-opens a MET
+  # `claims=`/`progress=`/`cadence=` triple. `standdown-declined:` is written as a `hold`
+  # (wave-26 T15), which keeps the launch; `ack` closes a row rather than opening one. Neither
+  # re-opens a MET
   # lineage, so this verb is a plain append: a fresh row for the same name, launched NOW,
   # with the operator's reason recorded as `extended=<iso> <reason>`. It used to ride
   # `claims=`, the process pattern the sweeper hands to `pgrep -f`, so a reason carrying
@@ -4542,8 +4551,8 @@ EOF
     ;;
 
   # THE ROW-ADD VERB (wave-20 REQ-5, AC-5.3; Δ5, research D1 §3). A schedule change is a
-  # TRANSACTION: `units_add_row` projects the row onto a COPY of the bound plan (the row, its
-  # `- <id>:` line, and a Step-4 id threaded into the frontier rows that owe it), the copy is
+  # TRANSACTION: `units_add_row` projects the row onto a COPY of the bound plan (the row and its
+  # `- <id>:` line, and no other row), the copy is
   # judged twice — by `units_validate`, and by a dry `git commit` through the REAL
   # hooks/bash-walls.sh — and only a copy both admit is moved over the plan. On any refusal
   # the plan is byte-identical and the words that refused it print. The precedent is
@@ -4622,7 +4631,7 @@ EOF
     fi
 
     plan_verb_swap task-add "$TA_ID added" writer
-    say "task-add — $TA_ID added to $TA_PLAN: the row, its - $TA_ID: line, and the deps it owes; validated and dry-committed first."
+    say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
     exit 0
     ;;
 
@@ -4919,7 +4928,7 @@ EOF
     # THE PROMPT VERSION rides the same file: `arm` records the version its prompt carried, and a
     # tick that finds none, or an older one, prints one re-arm line above everything else.
     TICK_BUF="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-tick.XXXXXX" 2>/dev/null)" || TICK_BUF=""
-    TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed
+    TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed; TICK_CHANGE=""
     TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
     TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
@@ -4942,7 +4951,7 @@ EOF
       fi
       rm -f "$TICK_BUF" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
-        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" \
+        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
       exit "$rc"
@@ -4968,10 +4977,20 @@ EOF
     # same and prints the unchanged line; a new request is a new key and prints in full. No file,
     # or one with no request in it, adds nothing to the hash.
     #
-    # THE DUTY (A-orch-4; D5, research-R7 item 5). The task-list refresh is owed on a tick turn
-    # unless the tick said `unchanged`, or decided QUIET with no open row on the roster; the stop
-    # wall's collector reads this line, so a quiet turn is not refused for a chore with nothing
+    # THE DUTY (wave-26 T15, REQ-4 AC-4.5; D16, research-R2 §3 P4). The task-list refresh is
+    # owed only when a `## Tasks` row's status or the ready set moved since the last tick: that
+    # is what the ledger can fall behind on. A tick whose news is a progress file's age, a load
+    # band or a roster row's liveness prints in full and owes nothing. `TICK_CHANGE` is that
+    # fingerprint, kept in the digest as `change=` beside the whole-decision hash and entered
+    # into it too, so a tick that says `unchanged` has, by construction, nothing to reconcile.
+    # A QUIET tick owes nothing either way: with a row open it prints WAITING, which asks for
+    # nothing, and with none open there is nothing running to reconcile against (A-orch-4). The
+    # stop wall's collector reads this line, so a turn is not refused for a chore with nothing
     # behind it.
+    tick_change_rows() {  # -> the plan's id|status lines in table order, then its ready set
+      units_rows "$SCHED_PLAN" 2>/dev/null | awk -F'\t' 'NF { print $1 "|" $10 }'
+      printf 'ready=%s\n' "$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
+    }
     tick_conclude() {  # <decision before the gate>
       local cur="" prev=""
       TICK_DECIDED="$1"
@@ -4981,8 +5000,13 @@ EOF
       if [ -n "${SCHED_PLAN:-}" ] && [ -f "${SCHED_PLAN:-}" ]; then
         cur="$(_sched_plan_current_field "$SCHED_PLAN")"
       fi
+      TICK_CHANGE="none"
+      if [ -n "${SCHED_PLAN:-}" ] && [ -f "${SCHED_PLAN:-}" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
+        TICK_CHANGE="$(tick_plan_memoised tick_change_rows | cksum | awk '{ print $1 "-" $2 }')"
+      fi
       if [ -n "$TICK_BUF" ]; then
         TICK_DIGEST="$( {
+          printf 'change=%s\n' "$TICK_CHANGE"
           printf 'decision=%s|total=%s|open=%s|notify=%s|fill=%s|trees=%s\n' "$1" "$TOTAL" "$OPEN" \
             "${NOTIFY_ROWS:-}" "${SCHED_FILL:-}" "${LEASE_TREES:-}"
           printf 'pressure=%s|rung=%s|current=%s\n' "${SCHED_STATE:-}" "${SCHED_RUNG:-}" "$cur"
@@ -5014,8 +5038,10 @@ EOF
         return 0
       fi
       TICK_SINCE="$(iso_now)"
-      TICK_DUTY=owed
-      [ "$TICK_DECIDED" = QUIET ] && [ "${OPEN_ROSTER:-0}" -eq 0 ] && TICK_DUTY=none
+      TICK_DUTY=none
+      if [ "$TICK_DECIDED" != QUIET ] && [ "$TICK_CHANGE" != "$(tick_digest_field "$TICK_DIGEST_FILE" change)" ]; then
+        TICK_DUTY=owed
+      fi
       tick_write_orders
       return 0
     }
@@ -6105,8 +6131,9 @@ EOF
         # usable evidence, for the same reason: no reading is not a bad reading, and a wave
         # that stalled on a missing probe would be worse than one that filled its budget.
         # THE STANDING FILL DECLINE (wave-24 T27; D2, AC-4.7; Step-6 review C2/U1). The stop wall
-        # treats the rows the session's latest `fill-declined:` answered as answered while
-        # `current:` is unchanged, so a FILL naming them asked again for an answer already given.
+        # treats the rows the session's latest `fill-declined:` answered as answered until the
+        # ready set gains a row it did not see (wave-26 T15; D16), so a FILL naming them asked
+        # again for an answer already given.
         # One reader, `fill_standing_decline` (lib/fill.sh), the stop collector's own: the tick
         # prints the decline while it stands and the ready set below leaves its rows out.
         SCHED_SD="$(fill_standing_decline "$(fill_ledger_path "$REPO_REAL" "$SCHED_PLAN" 2>/dev/null)" "$SESSION_ID" "$(_fill_current_field "$SCHED_PLAN")")"
@@ -6173,7 +6200,7 @@ EOF
             # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
             # which answer holds the rows, and the standing line above says why.
             if [ -n "$SCHED_SD_IDS" ] && [ -n "$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")" ]; then
-              say "no FILL — every ready row is answered by the standing fill-declined (${SCHED_SD_IDS}); it stands until a row it did not see is ready or current: moves."
+              say "no FILL — every ready row is answered by the standing fill-declined (${SCHED_SD_IDS}); it stands until a row it did not see is ready."
             else
               say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
             fi
@@ -6245,6 +6272,11 @@ EOF
       # and still have gone quiet, and a QUIET tick that named only the duration was the
       # sentence B5 reported as true-but-silent.
       say "QUIET — $OPEN_ROSTER open row(s) on this roster, none past their declared duration and none quieter than its declared cadence."
+      # THE RUN IS WAITING ON ITS AGENTS (wave-26 T15, REQ-4 AC-4.5; D16, research-R2 §3 P5).
+      # Nothing filled, nothing stands down, nothing needs surfacing, and a row is open: every
+      # writer slot is taken or no row is ready. The Patrol prompt asks for nothing after this
+      # line, and the duty above is none, so the turn ends here.
+      say "WAITING — ${OPEN_ROSTER} running, nothing ready"
     fi
     tick_decision_line "$TICK_DECISION" "$TOTAL" "$OPEN" "" "" "$SCHED_FILL" "$LEASE_TREES"
     exit 0

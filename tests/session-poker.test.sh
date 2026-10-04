@@ -6698,7 +6698,7 @@ section "Section 34: task-add — a schedule change is a transaction (wave-20 RE
 # `task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>` — the table's
 # own column order, the nine cells an author writes (status, worktree and base are the
 # dispatcher's). It projects the row onto a COPY of the bound plan (`units_add_row`: the row,
-# its `- <id>:` line, and a Step-4 id threaded into the frontier Step-5+ rows), runs
+# its `- <id>:` line, and no other row), runs
 # `units_validate` on the copy and a dry commit through the REAL hooks/bash-walls.sh, and only
 # then moves the copy over the plan. On any refusal the plan is byte-identical and the words
 # that refused it print. AC-5.3 fails-when: "after task-add of a Step-4 row mid-run the next
@@ -7524,6 +7524,37 @@ s41_fp_case launch 'grep -F "|name=w-1|" "$(roster_of "$R")" | tail -1 | sed "s/
 s41_fp_case mtime 'backdate "$R/w1-report.md" 200'
 s41_fp_case message 's41_transcript 2 "w-1:idle"'
 
+# ---------- §DECLINE-tick (wave-26 T15, AC-4.6; D16): a stand-down decline stands as a hold does ----------
+# The decline used to answer its own turn only: the next tick ordered the same unchanged agent
+# down again. The stop wall now writes the decline to the roster as `hold` writes it, so the real
+# tick reads it through the hold's own fingerprint check. The second turn, with the agent
+# unchanged, is not refused. A new message from the agent is a changed agent, and its turn is.
+R41DC="$(s41_world s41-decline)"
+s41_transcript 1 "w-1:idle"
+poke "$R41DC" tick
+expect_contains "41dc precondition: the tick stands w-1 down" "poker: STANDDOWN w-1" "$OUT"
+S41DC_TR="$(s41_turn "$R41DC" "$OUT")"
+jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"text",text:"standdown-declined: w-1 is kept for a second pass"}]}}' >> "$S41DC_TR"
+s41_stop "$R41DC" "$S41DC_TR"
+expect_eq "41dc2 the declining turn ends" "" "$(printf '%s' "$S41_STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+# An unrelated row joins, so the next tick prints in full rather than `unchanged` (an unchanged
+# tick writes no order whatever the answer was) and has to decide w-1 again.
+add_row "$R41DC" name=busy2 deliverable="$R41DC/never-written-2.md" duration="4 hours" launched_at="$(iso_ago 60)"
+s41_transcript 1 "w-1:idle" "busy2:running"
+poke "$R41DC" tick
+expect_absent "41dc3 precondition: the tick prints in full" "unchanged since" "$OUT"
+expect_contains "41dc3 AC-4.6 the next tick reads the decline as a hold" "poker: held w-1 since " "$OUT"
+expect_absent "41dc4 …and does not stand w-1 down again" "poker: STANDDOWN" "$OUT"
+s41_stop "$R41DC" "$(s41_turn "$R41DC" "$OUT")"
+expect_eq "41dc5 AC-4.6 the second turn, same agent and no decline text, is not refused" "" \
+  "$(printf '%s' "$S41_STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+s41_transcript 2 "w-1:idle" "busy2:running"
+poke "$R41DC" tick
+expect_contains "41dc6 a new message from w-1 voids the decline: the tick stands it down" "poker: STANDDOWN w-1" "$OUT"
+s41_stop "$R41DC" "$(s41_turn "$R41DC" "$OUT")"
+expect_contains "41dc7 …and that turn, with no answer, is refused" "stand-down unanswered" \
+  "$(printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null)"
+
 # ---------- §HOLD-idle (AC-4.5; D1): a held idle row is not re-opened ----------
 R41I="$(s41_world s41-hold-idle)"
 s41_transcript 1 "w-1:idle"
@@ -7545,7 +7576,8 @@ expect_contains "41f precondition: arm recorded the prompt version" "prompt_vers
 poke "$R41D" tick
 S41D_T1="$OUT"
 expect_contains "41f2 the first tick prints its decision" "decision=QUIET" "$S41D_T1"
-expect_contains "41f3 …and owes the task-list duty (an open row)" "duty=owed" "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
+expect_contains "41f3 …and, QUIET with a row open, prints WAITING (wave-26 T15; D16)" "poker: WAITING" "$S41D_T1"
+expect_contains "41f3b …and owes no task-list duty" "duty=none" "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
 poke "$R41D" tick
 expect_eq "41f4 AC-4.9 the second tick's stdout is exactly one line" "1" \
   "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
@@ -7613,13 +7645,13 @@ expect_contains "41i3 a decline that answered every ready row prints as standing
   "poker: fill-declined standing since 2026-10-03T09:00:00Z — the batch waits on the BASE merge" "$OUT"
 expect_eq "41i4 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
 expect_absent "41i5 …nor decision=FILL" "decision=FILL" "$OUT"
-# The three ways a line stands for nothing, each beside the full FILL it then leaves standing.
+# A moved current: is not one of the ways a line stands for nothing (wave-26 T15; D16).
 R41M="$(mk_rung_repo s41-sd-moved)"
 s41_sd_line "$R41M" "$SID" 3 ONE,TWO,THREE,FOUR "answered at an earlier step"
 poke_rung "$R41M" 60 0 tick
-expect_eq "41i6 a decline taken at another current: does not stand — the full FILL prints" \
-  "poker: FILL ONE TWO THREE FOUR" "$(s41_fill_line "$OUT")"
-expect_absent "41i7 …and no standing line" "fill-declined standing" "$OUT"
+expect_contains "41i6 wave-26 T15 (D16) a decline taken at another current: still stands over the same ready set" \
+  "fill-declined standing since " "$OUT"
+expect_eq "41i7 …and the tick prints no FILL line" "" "$(s41_fill_line "$OUT")"
 R41O="$(mk_rung_repo s41-sd-other)"
 s41_sd_line "$R41O" "ffffffff-0000-4000-8000-000000000000" 4 ONE,TWO,THREE,FOUR "another session's answer"
 poke_rung "$R41O" 60 0 tick
