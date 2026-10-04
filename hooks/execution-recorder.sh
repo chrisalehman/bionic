@@ -193,7 +193,7 @@ fi
 # payload/scripts/lib/loader.sh. FAIL OPEN: the roster row is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh resources.sh roster.sh units.sh fill.sh worktree.sh refuse.sh"
+BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh resources.sh roster.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -316,23 +316,6 @@ roster_sh_load() {
   _ROSTER_SH_LOADED=1
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roster.sh"
-}
-# THE PLAN ROW'S LIBRARIES (wave-26 T12, D4), lazily and for the same reason: every dispatch
-# confirmation reaches this far, and only one that maps to a `## Tasks` row of a bound plan
-# needs the table reader (units.sh), the id-to-name rule (fill.sh), the tree record
-# (worktree.sh) or the refusal renderer (refuse.sh). units.sh comes first so fill.sh's own
-# guard skips its re-source. Unindented, for hook-adoption's literal match as above.
-launch_libs_load() {
-  [ -n "${_LAUNCH_LIBS_LOADED:-}" ] && return 0
-  _LAUNCH_LIBS_LOADED=1
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/units.sh"
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/fill.sh"
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/worktree.sh"
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/refuse.sh"
 }
 
 # THE ROOT (spec AC-10, lib/root.sh). `git rev-parse --show-toplevel` answered with the
@@ -499,241 +482,50 @@ latest_launch_for_agent() {  # <agent-id> -> latest launched_at for that id this
 }
 
 # ============================================================
-# THE PLAN ROW MOVES WITH THE LAUNCH (wave-26 T12, D4, AC-1.4).
+# THE PLAN ROW MOVES WITH THE LAUNCH (wave-26 T12, D4, AC-1.4; T32).
 # ============================================================
 #
 # A dispatch used to cost the orchestrator two more calls after it: `task-set <id>
 # status=active agent=<name>` and `ledger-add`, copying into the plan what this arm had just
-# confirmed on the roster. The duty was ordered twice. Now the confirmation moves the row.
+# confirmed on the roster. The confirmation now moves the row, through ONE transaction:
+# `session-poker.sh launch-sync`, which writes every open launch of this session the bound plan
+# lacks, its row and its ledger line, in one validated, dry-committed write. Its rules (which
+# launch maps to which row, the tree cells, a re-dispatch, a launch with no tree of its own) are
+# written beside it, in session-poker.sh.
 #
-# THE PLAN TEXT STAYS THE COMMIT GATE'S SOURCE (spec, rejected alternative "deriving running
-# status from the roster at read time"), so this WRITES the row, and it writes through the
-# verbs themselves: session-poker.sh task-set and ledger-add, run as the orchestrator would
-# run them, each one the shared transaction (copy, units_validate, a dry commit through the
-# real bash-walls.sh, the checksum, the swap). Nothing here edits the plan file.
+# THIS HOOK STARTS IT AND DOES NOT WAIT (T32). Through T12 the hook ran two verb transactions
+# itself, about a second each, under the 10 s limit hooks.json gives it, so a batch of launches
+# outran it and the later ones printed a busy refusal for the orchestrator to finish by hand. The
+# call is now detached: its own process group (`set -m`), no terminal, every stream on /dev/null,
+# so the hook returns at once and the harness has nothing of it to wait for. It takes `--wait`,
+# so it queues behind another launch's transaction rather than giving up.
 #
-# WHICH ROW: the one `fill_row_launched` (lib/fill.sh) maps the dispatch name to, the rule the
-# stop wall already counts launches by: the id, or the id behind a `<prefix>-`, with an
-# optional `-r<n>`. Only a `## Tasks` row of THIS session's bound open plan, at `current:` 4
-# or later, and only a `pending` one. A name that maps to no row (a researcher, `w26-R5`)
-# writes nothing and says nothing; an `active` row under the same name is already so.
+# A FAILURE STILL SURFACES. The detached call prints to nowhere, and that is safe only because
+# it is not the only caller: the Patrol tick and the turn-end wall (payload/scripts/lib/stop.sh)
+# run the same transaction, and whichever runs next prints what it could not record and the
+# commands to run by hand. A kill of the detached call cannot leave half a launch: the row and
+# its line are one write, by one rename.
 #
-# WHAT IS WRITTEN: `status=active` and `agent=<the dispatch name, byte for byte>`, plus the
-# `worktree` and `base` cells when they are empty and the tree spawn-worktree.sh recorded for
-# the same name (workspace/v1, lib/worktree.sh) supplies them, because units_validate refuses
-# an `active` row that names no tree. Then one ledger row: the id, `<role> (<name>)`, the
-# roster `launched_at` to the minute, the brief duration, the deliverable; landed and notes
-# are left to the verb default, the em dash.
+# NO RUN PREDICATE HERE (T32; tests/hook-adoption.test.sh §4). This hook is the roster
+# lifecycle and reads nothing out of the plan; the verb asks whose run the session is in, and
+# exits silently when there is none, as it does before Step 4 and without a roster.
 #
-# NEVER SILENT, NEVER BLOCKING. The launch has already happened, so a refusal cannot undo it
-# and does not try: a verb that refuses, or a row active under another agent, prints ONE
-# refusal through refuse.sh `exit2`, the PostToolUse channel whose stderr reaches the model,
-# naming the row and the command to run by hand. The roster row is already written by then.
-#
-# ONE WRITER AT A TIME. A batch dispatch confirms several launches at once, and two
-# transactions on one plan collide at the checksum, the second refused. So the two verbs run
-# under a lock in this state directory, waited on for at most LAUNCH_LOCK_WAIT seconds of the
-# hook budget; a holder whose pid is gone, or an empty lock older than LAUNCH_LOCK_STALE
-# seconds, is taken over. Out of time is a refusal like any other, naming the command.
-LAUNCH_LOCK_WAIT=5
-LAUNCH_LOCK_STALE=30
-LAUNCH_LEDGER_BY=8
-LAUNCH_LOCK=""
+# BIONIC_LAUNCH_SYNC_INLINE=1 runs the call in the foreground, still silent, so a test can read
+# the plan the moment the hook returns. Nothing in a session sets it.
 POKER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-poker.sh"
 
-launch_unlock() {
-  [ -n "$LAUNCH_LOCK" ] && rm -rf "$LAUNCH_LOCK" 2>/dev/null
-  LAUNCH_LOCK=""
-  return 0
-}
-
-launch_lock() {  # -> 0 held, 1 out of time
-  local d="$STATE_DIR/launch-record.lock" pid
-  while :; do
-    if mkdir "$d" 2>/dev/null; then
-      printf '%s' "$$" > "$d/pid" 2>/dev/null
-      LAUNCH_LOCK="$d"
-      trap launch_unlock EXIT
-      return 0
-    fi
-    pid="$(cat "$d/pid" 2>/dev/null)"
-    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
-      rm -rf "$d" 2>/dev/null; continue
-    fi
-    if [ -z "$pid" ] && [ $(( $(date +%s) - $(file_mtime "$d") )) -gt "$LAUNCH_LOCK_STALE" ]; then
-      rm -rf "$d" 2>/dev/null; continue
-    fi
-    [ "$SECONDS" -lt "$LAUNCH_LOCK_WAIT" ] || return 1
-    sleep 0.1
-  done
-}
-
-launch_hand() {  # <verb> <operand>... -> the command a person runs, quoted where it must be
-  local out a
-  out="bash $(refuse_shell_word "$POKER") $1"; shift
-  for a in "$@"; do out="$out $(refuse_shell_word "$a")"; done
-  printf '%s' "$out"
-}
-
-# THE VERDICT LINE HOLDS BIONIC_LINE_WIDTH COLUMNS (refuse.sh); a fact carrying a long name or
-# id falls back to one that fits, and the detail always carries the whole of it.
-LAUNCH_FIX="run the commands below"
-launch_refuse() {  # <fact> <detail> -> does not return
-  local fact="$1"
-  launch_unlock
-  trap - EXIT
-  if [ "$(bionic_cols "bionic: launch-record refused — $fact ($LAUNCH_FIX)")" -gt "${BIONIC_LINE_WIDTH:-100}" ]; then
-    fact="a launch did not move its plan row"
+launch_sync_start() {  # -> 0 always; starts this session's launch-sync and does not wait for it
+  [ -f "$POKER" ] || return 0
+  if [ "${BIONIC_LAUNCH_SYNC_INLINE:-}" = 1 ]; then
+    ( cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" \
+        "${BASH:-bash}" "$POKER" launch-sync --wait ) </dev/null >/dev/null 2>&1
+    return 0
   fi
-  refuse exit2 launch-record "$fact" "$LAUNCH_FIX" "$2"
-}
-
-launch_verb() {  # <verb> <operand>... -> LAUNCH_OUT, and the verb status
-  local rc=0
-  LAUNCH_OUT="$(cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" \
-    "${BASH:-bash}" "$POKER" "$@" 2>&1)" || rc=$?
-  return "$rc"
-}
-
-# The tree and base spawn-worktree.sh recorded for <name> in this session, `path<TAB>base`,
-# or nothing. The file, its symlink refusals and its line filter are worktree.sh's
-# (`_wt_workspaces_file`, `_wt_workspaces_unlinked`, `_wt_workspace_paths`); this reads the
-# base beside the path, which the public reader does not return. The last line wins.
-launch_workspace() {  # <name>
-  local f
-  declare -F _wt_workspaces_file >/dev/null 2>&1 || return 0
-  f="$(_wt_workspaces_file "$BIONIC_ROOT" "$BIONIC_SID")" || return 0
-  _wt_workspaces_unlinked "$BIONIC_ROOT" "$f" || return 0
-  [ -f "$f" ] && [ -r "$f" ] || return 0
-  LW_SID="$BIONIC_SID" LW_NAME="$1" awk -F'|' -v schema="${WORKSPACE_SCHEMA:-workspace/v1}" '
-    BEGIN { sid = ENVIRON["LW_SID"]; want = ENVIRON["LW_NAME"] }
-    { sub(/\r$/, "") }
-    $1 != schema { next }
-    {
-      s = ""; n = ""; p = ""; b = ""; hn = 0
-      for (i = 2; i <= NF; i++) {
-        if (index($i, "session=") == 1) s = substr($i, 9)
-        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
-        else if (index($i, "path=") == 1) p = substr($i, 6)
-        else if (index($i, "base=") == 1) b = substr($i, 6)
-      }
-      if (s == sid && substr(p, 1, 1) == "/" && hn && n == want) last = p "\t" b
-    }
-    END { if (last != "") print last }' "$f" 2>/dev/null
-}
-
-# A recorded tree as the plan writes it: relative to the project root when it sits under it.
-launch_rel() {  # <absolute tree>
-  local p="$1" root_p
-  [ -d "$p" ] && p="$(cd "$p" 2>/dev/null && pwd -P)"
-  root_p="$(cd "$BIONIC_ROOT" 2>/dev/null && pwd -P)"
-  case "$p" in
-    "$BIONIC_ROOT"/*) p="${p#"$BIONIC_ROOT"/}" ;;
-    "$root_p"/*)      p="${p#"$root_p"/}" ;;
-  esac
-  printf '%s' "$p"
-}
-
-# The brief duration as the ledger writes it: `60 minutes`, `~45 minutes.` -> `60 min`,
-# `45 min`; anything else verbatim.
-launch_minutes() {  # <duration>
-  local d="$1" n
-  d="${d#\~}"; d="${d%.}"
-  n="${d%%[!0-9]*}"
-  case "${d#"$n"}" in
-    ' min'|' mins'|' minute'|' minutes'|min|mins|m) [ -n "$n" ] && { printf '%s min' "$n"; return 0; } ;;
-  esac
-  printf '%s' "$1"
-}
-
-launch_record() {  # <dispatch name> <confirmed roster row>
-  local name="$1" row="$2" run plan cur rec id st ag n=0 hits="" hit="" ws wt bs role la dur art
-  local -a pairs lpairs
-  [ -n "$name" ] || return 0
-  run="$(session_run "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || :
-  case "$run" in 'bound-open '*) plan="${run#bound-open }" ;; *) return 0 ;; esac
-  launch_libs_load
-  cur="$(_fill_current_field "$plan")"; cur="${cur%[ab]}"
-  case "$cur" in ''|*[!0-9]*) return 0 ;; esac
-  [ "$cur" -ge 4 ] || return 0
-  while IFS= read -r rec; do
-    [ -n "$rec" ] || continue
-    id="$(units_field "$rec" id)"
-    fill_row_launched "$id" "$name" || continue
-    n=$((n + 1)); hits="${hits:+$hits, }$id"; hit="$rec"
-  done <<EOF
-$(units_rows "$plan" 2>/dev/null)
-EOF
-  [ "$n" -gt 0 ] || return 0
-  if [ "$n" -gt 1 ]; then
-    launch_refuse "launch $name maps to rows $hits" \
-      "The launch $name maps to more than one ## Tasks row of $plan ($hits); which one it runs is not for this hook to guess. Set the row it runs:
-$(launch_hand task-set '<id>' status=active "agent=$name")"
-  fi
-  id="$(units_field "$hit" id)"; st="$(units_field "$hit" status)"; ag="$(units_field "$hit" agent)"
-  case "$st" in
-    pending) : ;;
-    active)
-      [ "$ag" = "$name" ] && return 0
-      launch_refuse "row $id is active under $ag, not $name" \
-        "Row $id of $plan is active under $ag, and the launch $name maps to it too. If $name replaces $ag, set the row:
-$(launch_hand task-set "$id" "agent=$name")"
-      ;;
-    *) return 0 ;;
-  esac
-
-  pairs=(status=active "agent=$name")
-  wt="$(units_field "$hit" worktree)"; bs="$(units_field "$hit" base)"; ws=""
-  case "$wt" in *[A-Za-z0-9]*) case "$bs" in *[A-Za-z0-9]*) : ;; *) ws="$(launch_workspace "$name")" ;; esac ;;
-    *) ws="$(launch_workspace "$name")" ;;
-  esac
-  if [ -n "$ws" ]; then
-    case "$wt" in *[A-Za-z0-9]*) : ;; *)
-      units_has_column "$plan" worktree && pairs+=("worktree=$(launch_rel "${ws%%$'\t'*}")") ;;
-    esac
-    case "$bs" in *[A-Za-z0-9]*) : ;; *)
-      case "${ws#*$'\t'}" in *[A-Za-z0-9]*)
-        units_has_column "$plan" base && pairs+=("base=$(printf '%s' "${ws#*$'\t'}" | cut -c1-8)") ;;
-      esac ;;
-    esac
-  fi
-
-  role="$(line_field "$row" subagent_type)"; role="${role##*:}"; [ -n "$role" ] || role=agent
-  la="$(line_field "$row" launched_at)"
-  case "$la" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]*Z) la="${la:0:16}Z" ;; esac
-  dur="$(launch_minutes "$(line_field "$row" duration)")"
-  art="$(line_field "$row" deliverable)"
-  lpairs=("agent=$role ($name)")
-  [ -n "$la" ] && lpairs+=("dispatched=$la")
-  [ -n "$dur" ] && lpairs+=("expected=$dur")
-  [ -n "$art" ] && lpairs+=("artifact=$art")
-
-  if ! launch_lock; then
-    launch_refuse "row $id stays $st: the plan is busy" \
-      "Another launch was writing $plan for longer than this hook waits, so row $id was not moved. Run both:
-$(launch_hand task-set "$id" "${pairs[@]}")
-$(launch_hand ledger-add "$id" "${lpairs[@]}")"
-  fi
-  if ! launch_verb task-set "$id" "${pairs[@]}"; then
-    launch_refuse "row $id stays $st: task-set refused" \
-      "task-set refused, so row $id of $plan is not active. Fix what it names, then run both:
-$(launch_hand task-set "$id" "${pairs[@]}")
-$(launch_hand ledger-add "$id" "${lpairs[@]}")
-$LAUNCH_OUT"
-  fi
-  if [ "$SECONDS" -ge "$LAUNCH_LEDGER_BY" ]; then
-    launch_refuse "row $id is active; ledger line not written" \
-      "Row $id is active, and the hook ran out of time before its dispatch ledger line. Add it:
-$(launch_hand ledger-add "$id" "${lpairs[@]}")"
-  fi
-  if ! launch_verb ledger-add "$id" "${lpairs[@]}"; then
-    launch_refuse "row $id is active; ledger-add refused its line" \
-      "Row $id is active, and ledger-add refused its dispatch ledger line. Fix what it names, then run:
-$(launch_hand ledger-add "$id" "${lpairs[@]}")
-$LAUNCH_OUT"
-  fi
-  launch_unlock
-  trap - EXIT
+  ( set -m
+    cd "$BIONIC_ROOT" 2>/dev/null || exit 0
+    CLAUDE_CODE_SESSION_ID="$BIONIC_SID" nohup "${BASH:-bash}" "$POKER" launch-sync --wait \
+      </dev/null >/dev/null 2>&1 &
+  ) </dev/null >/dev/null 2>&1
   return 0
 }
 
@@ -875,8 +667,9 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null || exit 0
 
   # THE PLAN ROW MOVES WITH THE CONFIRMATION (wave-26 T12, D4), only once the roster row is
-  # written: the launch is the record, and the plan follows it. See `launch_record` above.
-  launch_record "$(line_field "$COMPLETED" name)" "$COMPLETED"
+  # written: the launch is the record, and the plan follows it. See `launch_sync_start` above.
+  # A dispatch with no name maps to no row, so it starts nothing.
+  [ -n "$(line_field "$COMPLETED" name)" ] && launch_sync_start
 
   # NO BOUND ON THE ROSTER, deliberately (Step-6 critic F-1, reproduced end to end in
   # record/w3-critic-repro-cap.sh). The observation record this reasoning contrasted the

@@ -1217,6 +1217,31 @@ expect_eq "12.6 the table breaks this invariant twice and no other" "2" "$(nline
 expect_eq "12.7 …and units_validate exits 1 for it" "1" \
   "$(call_rc units_validate "$SANDBOX/active-no-tree.md")"
 
+# ONLY A ROW THAT WRITES THE HEAD OWES A TREE (wave-26 T32). A verify, review or doc row whose
+# Files cell names nothing outside the docs root (or nothing at all) commits nothing a gate must
+# attribute; it runs active with an empty worktree cell. The predicate is the scheduler's
+# `writes_head`, asked of the same cell; a row naming one tracked file keeps the refusal.
+cat > "$SANDBOX/active-docs-only.md" <<'ACD_EOF'
+---
+current: 5
+---
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 5 | verify | the floor, writing its record | test-runner | — | 30m | REQ-1 | .bionic/docs/record/w/floor.txt | — | active |
+| T2 | 6 | review | the review, writing nothing | critic | — | 30m | REQ-1 | — | — | active |
+| T3 | 5 | verify | the floor that also edits a test | test-runner | — | 30m | REQ-1 | .bionic/docs/record/w/f.txt, tests/x.test.sh | — | active |
+ACD_EOF
+VAL_ACD="$(call units_validate "$SANDBOX/active-docs-only.md")"
+expect_eq "12.8 an active row whose Files are all under the docs root owes no tree" "0" \
+  "$(printf '%s\n' "$VAL_ACD" | grep -c '^T1: active row names no worktree' | tr -d ' ')"
+expect_eq "12.9 …nor does one whose Files cell names no path" "0" \
+  "$(printf '%s\n' "$VAL_ACD" | grep -c '^T2: active row names no worktree' | tr -d ' ')"
+expect_eq "12.10 …while a row naming one tracked file beside them is still refused" "1" \
+  "$(printf '%s\n' "$VAL_ACD" | grep -c '^T3: active row names no worktree' | tr -d ' ')"
+
 # ---------- the column-less table: the arm must not reach it ----------
 #
 # The same rows, one column narrower. Every `worktree` cell now reads empty for the reason
@@ -1604,12 +1629,24 @@ expect_eq "17.7 …and the argument is still checked: a word is a caller fault" 
 # THROUGH THE FILL. `fill_ready_set` is what the tick prints from and the stop wall refuses
 # from (ADR-033), so AC-5.1 is asked of it too: rung 8, one slot occupied.
 FILL_LIB="$REPO_ROOT/payload/scripts/lib/fill.sh"
-fill_call() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; shift; fill_ready_set "$@"' _ "$FILL_LIB" "$@" 2>/dev/null; }
+# THE FILL IS LIVE ON THE PLAN'S APPROVAL (wave-26 T13; D3): these fixtures ask readiness, not
+# the gate, so each is asked through a copy that carries an `approved-by:` line under its
+# `current:` in `## SDLC State`.
+fill_call() {
+  local p="$1"; shift
+  awk '{ print } /^## SDLC State/ { s = 1 } s && !d && /^current:/ { print "approved-by: fixture 2026-10-04T00:00Z \"approved\""; d = 1 }' \
+    "$p" > "$p.approved"
+  bash -c '. "$1" >/dev/null 2>&1 || exit 127; shift; fill_ready_set "$@"' _ "$FILL_LIB" "$p.approved" "$@" 2>/dev/null
+}
 expect_eq "17.8 AC-5.1 fill_ready_set at current: 5, rung 8, one open: the Step-6 row is in the set, the integrate row is not" \
   "$(printf 'T4\nT6\nT9')" "$(fill_call "$SANDBOX/graph.md" 8 1)"
+# THE APPROVAL GATE STILL HOLDS, AND IT IS THE LINE (wave-26 T13; D3): the same plan at
+# current: 5 without its `approved-by:` fills nothing, and at current: 3 with it fills.
+expect_eq "17.9 …and the approval gate still holds: without approved-by: nothing fills at current: 5" "" \
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; shift; fill_ready_set "$@"' _ "$FILL_LIB" "$SANDBOX/graph.md" 8 0 2>/dev/null)"
 sed 's/^current: 5$/current: 3/' "$SANDBOX/graph.md" > "$SANDBOX/graph-at-3.md"
-expect_eq "17.9 …and the Step-3 approval gate still holds: nothing fills at current: 3" "" \
-  "$(fill_call "$SANDBOX/graph-at-3.md" 8 0)"
+expect_eq "17.9b …while the approved plan at current: 3 fills (the gate is the approval, not the step)" \
+  "$(printf 'T4\nT6\nT9')" "$(fill_call "$SANDBOX/graph-at-3.md" 8 1)"
 
 # ---------- AC-5.2 (wave-20), RETIRED BY wave-26 T2 (D2) ----------
 #
@@ -2447,6 +2484,65 @@ expect_eq "LIVE.7 a proved: line inside a fence proves nothing" "no" \
   "$(has_line "$(call units_ready "$SANDBOX/live-reads-fenced.md" 7)" T3)"
 
 # ============================================================
+section "HOLD — wave-26 T13: a doc row waits for its reads, not its step, in a table that declares reads (REQ-6, AC-6.1, AC-6.2; D3)"
+# ============================================================
+#
+# D3 takes the step hold off `doc` rows: a doc row in a reads table waits for what it reads,
+# like any row — the release for `approval:release`, a draft for the head. A table WITHOUT the
+# column keeps the hold (A-T13.1): it has no approval to read, so its step is the one thing
+# that keeps a release from being dispatched the moment its deps land. integrate and close keep
+# theirs in either shape.
+cat > "$SANDBOX/hold-reads.md" <<'HOLD_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-04T00:00Z "approved"
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | reads | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed | implementor | — | 30 | REQ-x | lib/a.sh |  | landed |
+| T2 | 7 | doc | the notes draft, reads exist | implementor | — | 30 | REQ-x | .bionic/docs/record/w/notes.md | approval:plan | pending |
+| T3 | 7 | doc | the release | implementor | — | 30 | REQ-x | CHANGELOG.md | approval:release | pending |
+| T4 | 8 | integrate | the merge | implementor | — | 30 | REQ-x | — | approval:plan | pending |
+HOLD_EOF
+READY_HOLD="$(call units_ready "$SANDBOX/hold-reads.md" 4)"
+WAIT_HOLD="$(call units_waiting "$SANDBOX/hold-reads.md" 4)"
+expect_eq "HOLD.1 at current: 4 a Step-7 doc row whose reads exist is ready" "yes" "$(has_line "$READY_HOLD" T2)"
+expect_eq "HOLD.2 the release waits, for its approval" "yes" \
+  "$(has_line "$WAIT_HOLD" "T3${TAB}approval:release${TAB}-${TAB}-")"
+expect_eq "HOLD.2b …and not for its step" "no" "$(has_line "$WAIT_HOLD" "T3${TAB}step:7${TAB}-${TAB}-")"
+expect_eq "HOLD.3 an integrate row keeps its step hold in a reads table" "yes" \
+  "$(has_line "$WAIT_HOLD" "T4${TAB}step:8${TAB}-${TAB}-")"
+expect_eq "HOLD.3b …and is not ready" "no" "$(has_line "$READY_HOLD" T4)"
+awk '{ print } /^approved-by:/ { print "approved: release by fixture 2026-10-04T01:00:00Z \"ship it\"" }' \
+  "$SANDBOX/hold-reads.md" > "$SANDBOX/hold-reads-released.md"
+expect_eq "HOLD.4 with approved: release written, the release is ready at current: 4" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/hold-reads-released.md" 4)" T3)"
+# THE CONTROL: the same rows in a table without the reads column. The doc rows are held for
+# their step, the hold the tick names.
+cat > "$SANDBOX/hold-legacy.md" <<'HOLD_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-04T00:00Z "approved"
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | landed | implementor | — | 30 | REQ-x | lib/a.sh | landed |
+| T2 | 7 | doc | the notes draft | implementor | T1 | 30 | REQ-x | .bionic/docs/record/w/notes.md | pending |
+| T5 | 4 | build | ready | implementor | T1 | 30 | REQ-x | lib/b.sh | pending |
+HOLD_EOF
+READY_LEG="$(call units_ready "$SANDBOX/hold-legacy.md" 4)"
+expect_eq "HOLD.5 in a table without reads a Step-7 doc row is held at current: 4" "no" "$(has_line "$READY_LEG" T2)"
+expect_eq "HOLD.5b …while the build beside it is ready (the extractor reads a real set)" "yes" "$(has_line "$READY_LEG" T5)"
+expect_eq "HOLD.5c …and the hold is named" "yes" \
+  "$(has_line "$(call units_held "$SANDBOX/hold-legacy.md" 4)" "T2: step 7 doc row waits for current: 7")"
+
+# ============================================================
 section "HARDEN — wave-26 T35: the graph neither starts work early, deadlocks in silence, nor stops on one bracket (review 5, F1 F2 F3 F5 F7)"
 # ============================================================
 #
@@ -2547,6 +2643,26 @@ expect_eq "HARDEN.F3h …while the fixture still carries the loop as edges both 
      "$(has_line "$(call units_edges "$SANDBOX/f3-active.md")" "T2${TAB}T1${TAB}lib/b.sh")")"
 expect_eq "HARDEN.F3i an acyclic reads table still validates clean (READS fixture)" "0" \
   "$(call_rc units_validate "$SANDBOX/reads.md")"
+# A ROW THAT WAITS ON ITSELF is a cycle of one (wave-26 T32; review 7 F5). Its group holds only
+# itself, so the count of two or more never named it; it validated and was never ready.
+cat > "$SANDBOX/f3-self.md" <<'SELF_EOF'
+## SDLC State
+
+current: 5
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | a, waiting on itself | implementor | T1 | 30 | REQ-x | lib/a.sh | pending |
+| T2 | 4 | build | b | implementor | — | 30 | REQ-x | lib/b.sh | pending |
+SELF_EOF
+expect_eq "HARDEN.F3j precondition: the self-dependency is an edge from the row to itself" "yes" \
+  "$(has_line "$(call units_edges "$SANDBOX/f3-self.md")" "T1${TAB}T1${TAB}T1")"
+V="$(call units_validate "$SANDBOX/f3-self.md")"
+expect_eq "HARDEN.F3j F5 a row that depends on itself is refused" "1" "$(call_rc units_validate "$SANDBOX/f3-self.md")"
+expect_contains "HARDEN.F3k …as a cycle naming it" "T1: read cycle through T1" "$V"
+expect_absent "HARDEN.F3l …and not the row beside it" "T2:" "$V"
 
 # F5 — ONE BRACKET DOES NOT STOP THE PLAN. A `[` in a Files glob used to build a broken regex and
 # abort the program: every verb exit 2, nothing ready. The matcher reads a bracket literally (the

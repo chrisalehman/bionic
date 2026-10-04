@@ -81,6 +81,7 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `fold_block block stop "a FILL and a STANDDOWN went unanswered" \` — patrol duties, fill and stand-down — fix: `bash <hooks>/session-poker.sh hold NAME 'why it stays up'`, one per stood-down name in NAME, for the stand-down half; the fill half is an Agent dispatch or a `fill-declined:` line, neither a command
 - `fold_block block stop "$FILL_FACT" "$FILL_FIX" \` — patrol duties, fill alone — none: the fix is an Agent dispatch of the named rows or a `fill-declined:` line, neither a shell command
 - `fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \` — patrol duties, stand-down — fix: `bash <hooks>/session-poker.sh hold NAME 'why it stays up'`, one per stood-down name in NAME (STANDDOWN_REASON)
+- `fold_block block stop "a launch is not recorded in the plan" "run the commands it prints" \` — patrol duties, a launch the plan lacks — fix: the task-set and ledger-add commands that `session-poker.sh launch-sync` prints (LAUNCH_REASON)
 - `fold_block block stop "a Patrol marker turn ran no tick" "run the tick, then stop again" \` — patrol duties, marker turn ran no tick — fix: `bash <hooks>/session-poker.sh tick` (NOTICK_REASON)
 - `fold_block block stop "$FACT" "$FIX" "$REASON"` — patrol duties, verdict forwarder — none: a forwarder; FACT/FIX/REASON come from the duty that was missed (a TaskList or ListAgents call, tool calls)
 - `fold_block block stop "the Patrol fires but never ticks" "run the tick; replace the job" \` — patrol revive, fires but never ticks — fix: `bash <hooks>/session-poker.sh tick`, and the job replaced with `session-poker.sh prompt`'s text
@@ -96,6 +97,7 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `dp_finding "the Patrol fires but never ticks" "run the tick; replace the job" \` — Patrol fires but never ticks — fix: `bash ${POKER_SCRIPT} tick`, then the job replaced
 - `dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \` — unapproved plan — none: approval is the user's literal word, which no command supplies
 - `dp_finding "this session is bound to no run" "bind it, or write its plan" \` — session bound to no run — none: the run to bind is the reader's choice among open runs; `session-poker.sh bind <plan>` needs that plan
+- `dp_finding "row ${DP_AW_ID} waits for approval:${DP_AW_NAME}" \` — row reads an approval nobody gave — none: the approval is the user's reply, which no command supplies; once given, `session-poker.sh approve <name> '<reply>'` records it
 - `dp_finding "a subagent may launch only read-only roles" "ask the orchestrator" \` — subagent dispatching a writer — none: only the orchestrator dispatches writers, so the fix is a message to it
 - `dp_finding "this dispatch came from a worktree" "dispatch from the main checkout" \` — dispatch from a worktree — none: the fix is to dispatch from the main checkout, a change of where, not a command
 - `dp_finding "$1" "land or stand down a row" \` — budget_deny forwarder — fix: `bash ${HOOK_DIR}/stop-orders.sh standdown`, rooted at the real hooks directory
