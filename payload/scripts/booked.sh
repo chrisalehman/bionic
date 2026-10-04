@@ -264,17 +264,26 @@ booked_run() {  # runs $cmd; sets RUN_RC
   # it starts with the signal dispositions it would have had unwrapped, and the kill reaches
   # every process it started, an orphan included. The group is never the shim's own, so the
   # kill cannot reach the shim or its caller.
+  #
+  # THE FORK SPEAKS ON NOTHING (wave-26 T63, the full run's W8.3). Under `set -m` the parent and
+  # the forked child each put the child in its own group, and under load the two calls race:
+  # about one fork in a thousand, the child's call fails, and bash prints `child setpgid (<pid> to
+  # <pid>): Operation not permitted` on the stderr it holds at that moment, which is the
+  # command's. The parent's call has made the group either way. So the shim's own stderr is
+  # /dev/null for the fork alone, and the command gets the real one back (fd 9) before it runs.
+  exec 9>&2 2>/dev/null
   set -m
   if [ -n "$run_shell" ]; then
     # `eval '<cmd>'`, quoted the one way every POSIX shell reads alike: a `'` becomes `'\''`.
     # Unquoted on purpose: bash 3.2 reads `\'` inside a double-quoted ${//} differently.
     q="'\\''"; q=${cmd//\'/$q}; q="'$q'"
-    "$run_shell" -c "eval $q" 0<&0 &
+    "$run_shell" -c "eval $q" 0<&0 2>&9 9>&- &
   else
-    bash -c "$cmd" 0<&0 &
+    bash -c "$cmd" 0<&0 2>&9 9>&- &
   fi
   CHILD=$!
   set +m
+  exec 2>&9 9>&-
   if [ -n "$kill_after" ]; then
     # Timed from the shim's start (BOOKED_T0), so the wait for a place spends the limit too.
     # `$SECONDS` counts whole seconds of the wall clock, so a difference of N is anywhere in

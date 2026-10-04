@@ -2197,4 +2197,120 @@ expect_eq "(g) the unnamed red, then a named green" "?:1 a.test.sh:0" "$(lsu_sta
 expect_match "(g) the unnamed red run is REFUSED, naming ?" \
   "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=? *" "$(worktree_land "$LSQ" wave/fixture)"
 
+
+section "§LAND-NAMES: a run is named by what it is — a runner by its text, a file by its place (wave-26 T63, critic K4-S1/N1/N2)"
+#
+# T61 named a suite FILE by its basename and everything else `?`, and a red `?` at the head is
+# cleared only by a commit. So a project that runs its tests with a runner (`npm test`,
+# `pytest`) had EVERY run named `?`: one red run, a run that never got a place, or an
+# interrupted run, and the tree could not land until an empty commit. Now a runner is named by
+# its own text (`npm_test`), a suite file by its basename only when it is this tree's own
+# `tests/<basename>` (the budget's rule, cmd_claim_scope), any other file by its run, and two
+# suite runs joined by anything but `&&` are `?`. Every row runs through the real wall, the
+# real shim and the real land. The runners are stand-ins on a private PATH; nothing is
+# installed. They exit with the code in a file outside the tree, as lsu_tree's suites do.
+LSN_BIN="$TMP/land-names-bin"; mkdir -p "$LSN_BIN"
+for _r in npm pytest; do
+  printf '#!/bin/bash\nexit "$(cat %s/%s.rc)"\n' "$LSU_RC" "$_r" > "$LSN_BIN/$_r"; chmod +x "$LSN_BIN/$_r"
+done
+lsn_run() {  # <tree> <runner> <rc> [<command after the cd guard>] — the runner at <rc>, wall + shim
+  echo "$3" > "$LSU_RC/$2.rc"
+  LSU_WRAP="$(ls_wrap "cd $1 || exit 1; ${4:-$2 test}")"
+  PATH="$LSN_BIN:$PATH" ls_harness "$LSU_WRAP"
+}
+
+# (n1) THE CRITIC'S CASE: npm test red, then npm test green, at one head.
+LSN1="$(lsu_tree sn-npm-retry)"
+lsn_run "$LSN1" npm 1
+expect_match "(n1) npm test is wrapped naming its own text" \
+  "bash *booked.sh --shell /bin/bash --stamp-dir $LSN1 --suites npm_test -- *" "$LSU_WRAP"
+lsn_run "$LSN1" npm 0
+expect_eq "(n1) two stamps of npm_test, red then green" "npm_test:1 npm_test:0" "$(lsu_stamps "$LSN1")"
+expect_match "(n1) npm test red then npm test green at one head LANDS" \
+  "spawn-worktree: LANDED branch=sn-npm-retry onto=wave/fixture *" "$(worktree_land "$LSN1" wave/fixture)"
+
+# (n2) A different runner is a different suite: npm test red, then pytest green.
+LSN2="$(lsu_tree sn-npm-then-pytest)"
+lsn_run "$LSN2" npm 1; lsn_run "$LSN2" pytest 0 pytest
+expect_eq "(n2) npm_test red, then pytest green" "npm_test:1 pytest:0" "$(lsu_stamps "$LSN2")"
+OUTLSN2="$(worktree_land "$LSN2" wave/fixture)"
+expect_match "(n2) npm test red then pytest green at one head is REFUSED, naming npm_test" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=npm_test head=$(git -C "$LSN2" rev-parse HEAD) — make the suites green, *" "$OUTLSN2"
+
+# (n3) A runner that never got a place, then the same runner green.
+LSN3="$(lsu_tree sn-npm-no-place)"
+sleep 60 & LSN3_H=$!
+mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSN3_H" > "$TMP/land-shim-slots/place.1/pid"
+export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsn_run "$LSN3" npm 0; unset LS_SLOTS_N LS_MAX_WAIT
+kill "$LSN3_H" 2>/dev/null; wait "$LSN3_H" 2>/dev/null
+lsn_run "$LSN3" npm 0
+expect_eq "(n3) npm_test out of places (69), then npm_test green" "npm_test:69 npm_test:0" "$(lsu_stamps "$LSN3")"
+expect_match "(n3) a runner that never got a place, then the same runner green, LANDS" \
+  "spawn-worktree: LANDED branch=sn-npm-no-place onto=wave/fixture *" "$(worktree_land "$LSN3" wave/fixture)"
+
+# (n4) A TRUE `?` STILL STICKS: a runner whose text the reading cannot resolve (a `$`).
+LSN4="$(lsu_tree sn-unresolved)"
+export LSN_ARG=x
+lsn_run "$LSN4" pytest 1 'pytest "$LSN_ARG"'
+expect_match "(n4) a runner with a \$ in its text is wrapped as ?" "bash *booked.sh * --suites '?' -- *" "$LSU_WRAP"
+lsn_run "$LSN4" pytest 0 'pytest "$LSN_ARG"'
+expect_eq "(n4) the unnamed red, then the unnamed green" "?:1 ?:0" "$(lsu_stamps "$LSN4")"
+OUTLSN4="$(worktree_land "$LSN4" wave/fixture)"
+expect_match "(n4) a red ? at the head is REFUSED whatever ran after, naming ?" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=? *" "$OUTLSN4"
+expect_match "(n4) …and the fix is a commit, not a re-run" "*commit, then re-run the tree's suites at the new head, land again" "$OUTLSN4"
+echo n4 > "$LSN4/n4.txt"; git -C "$LSN4" add n4.txt; git -C "$LSN4" commit --quiet -m "new head"
+lsn_run "$LSN4" pytest 0 'pytest "$LSN_ARG"'
+unset LSN_ARG
+expect_match "(n4) …after a commit, the green ? LANDS" \
+  "spawn-worktree: LANDED branch=sn-unresolved onto=wave/fixture *" "$(worktree_land "$LSN4" wave/fixture)"
+
+# (n5) TWO FILES, TWO SUITES (K4-N2): tests/a.test.sh red, then other/a.test.sh green.
+LSN5="$(lsu_tree sn-other-a)"
+mkdir -p "$LSN5/other"; printf '#!/bin/bash\nexit 0\n' > "$LSN5/other/a.test.sh"
+git -C "$LSN5" add other && git -C "$LSN5" commit --quiet -m "another a.test.sh"
+lsu_run "$LSN5" a 1; lsu_run "$LSN5" a 0 'bash other/a.test.sh'
+expect_eq "(n5) the suite of this tree is a.test.sh, the other file is named by its run" \
+  "a.test.sh:1 bash_other_a.test.sh:0" "$(lsu_stamps "$LSN5")"
+expect_match "(n5) tests/a red then other/a green at one head is REFUSED, naming a" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=a.test.sh *" "$(worktree_land "$LSN5" wave/fixture)"
+
+# (n6) ONE FILE, FOUR SPELLINGS, ONE SUITE: relative, absolute, `./`, and inside the capture.
+LSN6="$(lsu_tree sn-one-file)"
+lsu_run "$LSN6" a 1
+lsu_run "$LSN6" a 1 "bash $LSN6/tests/a.test.sh"
+expect_match "(n6) the absolute path behind the cd is wrapped as a.test.sh" \
+  "bash *booked.sh --shell /bin/bash --stamp-dir $LSN6 --suites a.test.sh -- *" "$LSU_WRAP"
+lsu_run "$LSN6" a 1 'bash ./tests/a.test.sh'
+lsu_run "$LSN6" a 0 "set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc"
+expect_eq "(n6) four stamps, one name" "a.test.sh:1 a.test.sh:1 a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSN6")"
+expect_match "(n6) red three ways, then green in the capture, LANDS" \
+  "spawn-worktree: LANDED branch=sn-one-file onto=wave/fixture *" "$(worktree_land "$LSN6" wave/fixture)"
+
+# (n7) A GREEN THAT DOES NOT SPEAK FOR EVERY SUITE (K4-N1): b red, then `a || b` with a green.
+# b never ran, so the line is `?`, and its green asks nothing: b is still red.
+LSN7="$(lsu_tree sn-or-short)"
+lsu_run "$LSN7" b 1
+echo 0 > "$LSU_RC/sn-or-short.a"
+lsu_run "$LSN7" b 1 'bash tests/a.test.sh || bash tests/b.test.sh'
+expect_match "(n7) a || b is wrapped as ?" "bash *booked.sh --shell /bin/bash --stamp-dir $LSN7 --suites '?' -- *" "$LSU_WRAP"
+expect_eq "(n7) b red, then the a || b line green as ?" "b.test.sh:1 ?:0" "$(lsu_stamps "$LSN7")"
+expect_match "(n7) b red then a || b green at one head is REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=b.test.sh *" "$(worktree_land "$LSN7" wave/fixture)"
+
+# (n8) A LINE THE EARLIER WALL WROTE IS READ BY ITS OWN GRAMMAR. Before this change the wall
+# named npm test `?`; the stamp token is still stamp/v1 and the land reads that line as a `?`:
+# red at the head, it sticks even after a green npm_test line.
+LSN8="$(lsu_tree sn-earlier-wall)"
+echo 1 > "$LSU_RC/npm.rc"
+LSU_WRAP="$(ls_wrap "cd $LSN8 || exit 1; npm test")"
+LSN8_Q="'?'"; LSN8_OLD="${LSU_WRAP/ --suites npm_test/ --suites $LSN8_Q}"
+expect_ne "(n8) fixture: the earlier wall's wrap is the real one with --suites '?'" "$LSU_WRAP" "$LSN8_OLD"
+PATH="$LSN_BIN:$PATH" ls_harness "$LSN8_OLD"
+lsn_run "$LSN8" npm 0
+expect_eq "(n8) the earlier wall's ? red, then a named green" "?:1 npm_test:0" "$(lsu_stamps "$LSN8")"
+expect_match "(n8) the stamp is still stamp/v1" "stamp/v1|*" "$(head -n 1 "$(stamp_file "$LSN8")")"
+expect_match "(n8) the earlier wall's red ? at the head is REFUSED, naming ?" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=? *" "$(worktree_land "$LSN8" wave/fixture)"
+
 finish
