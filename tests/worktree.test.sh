@@ -1441,6 +1441,164 @@ expect_match "a land whose merge has a commit on top refuses, undo=failed" \
 expect_eq "the commit on top is still the onto branch's head" "on top of the merge" \
   "$(git -C "$LR" log -1 --format=%s wave/fixture)"
 
+section "§LAND-UNDO: the undo never drops a commit it did not make, and the land names its own merge (review 11 B1, S1, N2)"
+
+# Every land below runs in this repository, whose checkout <LU> holds wave/fixture. The seam is a
+# `git` function in the land's subshell: an arrival commits onto the branch as `git merge` is
+# called (the onto-moved case), then [action] runs once the merge has returned, then the
+# [n]-th git call after that is preceded by another writer's commit, its sha kept in $FORCED. The
+# calls are counted in a file, since most of them run inside a command substitution's subshell.
+LU="$(new_repo "$TMP/land-undo")"; shared_file "$LU"
+FORCED="$TMP/land-undo-forced.sha"; CALLS="$TMP/land-undo-calls"
+land_raced() {  # <tree> <arrival text> [action: none|touch|ontop|stage|misread] [n] — lands <tree>
+  local lr_merged="" lr_calls lr_tree="$1" lr_text="$2" lr_act="${3:-none}" lr_n="${4:-0}"
+  rm -f "$FORCED"; echo 0 > "$CALLS"
+  git() {
+    if [ -n "$lr_merged" ]; then
+      lr_calls=$(( $(cat "$CALLS") + 1 )); echo "$lr_calls" > "$CALLS"
+      if { [ "$lr_calls" = "$lr_n" ] && [ ! -e "$FORCED" ]; } || { [ "$lr_n" = gap ] && [ ! -e "$FORCED" ] \
+          && { [ "${3:-}" = reset ] || [ "${3:-}" = update-ref ]; }; }; then
+        echo "$lr_calls" > "$LU/forced.txt"; command git -C "$LU" add forced.txt
+        command git -C "$LU" commit --quiet -m "another writer's commit" && command git -C "$LU" rev-parse HEAD > "$FORCED"
+      fi
+    elif [ "${3:-}" = merge ] && [ "${4:-}" = --no-ff ]; then
+      if [ "$lr_act" != misread ]; then
+        awk -v t="$lr_text" 'NR == 4 { $0 = t } { print }' "$LU/shared.txt" > "$LU/shared.new" \
+          && mv "$LU/shared.new" "$LU/shared.txt" && command git -C "$LU" commit --quiet -am "$lr_text"
+      fi
+      command git "$@" || return
+      lr_merged=1
+      case "$lr_act" in
+        touch) echo "edited during the land" >> "$LU/${lr_tree##*/}.txt" ;;
+        stage) echo "staged during the land" >> "$LU/file.txt"; command git -C "$LU" add file.txt ;;
+        ontop|misread) command git -C "$LU" merge --quiet --no-ff -m "merge other (land)" other-land ;;
+      esac
+      return 0
+    fi
+    command git "$@"
+  }
+  worktree_land "$lr_tree" wave/fixture
+}
+# The commits of <list> that no branch of <repo> reaches, one per line.
+lost_commits() {  # <repo> <list>
+  local all; all="$(git -C "$1" rev-list --branches)"
+  printf '%s\n' "$2" | while read -r c; do
+    [ -n "$c" ] && ! printf '%s\n' "$all" | grep -qx "$c" && printf '%s\n' "$c"
+  done
+  return 0
+}
+# Back to a clean checkout between arms; whatever a land left is read before this runs.
+lu_clean() { git -C "$LU" reset --quiet --hard; git -C "$LU" clean --quiet -fd; }
+# The tree another land merges in the instant after this one's merge: one commit, its own file.
+lu_other() {  # <file> — branch other-land: wave/fixture plus <file>
+  git -C "$LU" branch -f other-land "$(git -C "$LU" commit-tree -p wave/fixture -m "other work" \
+    "$( { git -C "$LU" ls-tree wave/fixture
+          printf '100644 blob %s\t%s\n' "$(echo other | git -C "$LU" hash-object -w --stdin)" "$1"; } \
+        | git -C "$LU" mktree)")"
+}
+
+# The extractor is proved before anything reads an empty answer from it: a commit no branch holds
+# is listed, and a branch head is not.
+LUD="$(git -C "$LU" commit-tree -p wave/fixture -m dangling "$(git -C "$LU" rev-parse 'wave/fixture^{tree}')")"
+expect_eq "lost_commits lists a commit no branch holds" "$LUD" "$(lost_commits "$LU" "$LUD")"
+expect_eq "…and not one a branch holds" "" "$(lost_commits "$LU" "$(git -C "$LU" rev-parse wave/fixture)")"
+
+# B1, THE OLD GAP. A commit lands in the checkout just before the undo moves the branch back: the
+# undo must decline, and that commit stays the branch's head.
+LUG="$(new_tree "$LU" gap-racer)"; green_stamp "$LUG"; LUGB="$(git -C "$LU" rev-list --branches)"
+OUTLUG="$(land_raced "$LUG" "arrived before the gap" none gap)"
+expect_true "fixture: the other writer's commit was made in the gap" test -s "$FORCED"
+expect_eq   "that commit is still the onto branch's head" "$(cat "$FORCED" 2>/dev/null)" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq   "no commit is lost, that one included" "" "$(lost_commits "$LU" "$LUGB
+$(cat "$FORCED" 2>/dev/null)")"
+expect_match "and the land says the merge stands under it" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=gap-racer * undo=failed — the merge stands under a later commit: *" "$OUTLUG"
+lu_clean
+
+# AFTER ANY OUTCOME OF THE UNDO, NO COMMIT IS LOST. Another writer commits before the n-th git call
+# the land makes after its merge, for every n the land reaches; the undo is done (the land made no
+# n-th call), declined (the commit came first), or failed half-way (touch: a file the merge
+# brought in is edited in the checkout, so the checkout cannot follow the branch back). Each time,
+# every commit that existed before the land, and the other writer's, is reachable from a branch.
+LUOUT=""; LULOST=""; LUFIRED=0
+for lu_mode in none touch; do
+  for lu_n in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    lu_t="$(new_tree "$LU" "any-${lu_mode}-${lu_n}")"; green_stamp "$lu_t"
+    lu_before="$(git -C "$LU" rev-list --branches)"
+    lu_out="$(land_raced "$lu_t" "arrived ${lu_mode} ${lu_n}" "$lu_mode" "$lu_n")"
+    [ -s "$FORCED" ] && { LUFIRED=$((LUFIRED + 1)); lu_before="${lu_before}
+$(cat "$FORCED")"; }
+    LULOST="${LULOST}$(lost_commits "$LU" "$lu_before" | sed "s/^/${lu_mode}-${lu_n} lost /")"
+    case "$lu_out" in
+      *"undo=failed"*) LUOUT="${LUOUT} ${lu_mode}:failed" ;;
+      *"the merge is undone"*) LUOUT="${LUOUT} ${lu_mode}:undone" ;;
+      *) LUOUT="${LUOUT} ${lu_mode}:other" ;;
+    esac
+    lu_clean
+  done
+done
+expect_match "the undo was done in some arms" "* none:undone*" "$LUOUT"
+expect_match "…declined in some" "* none:failed*" "$LUOUT"
+expect_match "…and failed half-way in others" "* touch:failed*" "$LUOUT"
+expect_no_match "every arm ended in one of those three" "*:other*" "$LUOUT"
+expect_ne "the other writer committed in some arms" "0" "$LUFIRED"
+expect_eq "and no commit that existed is unreachable from a branch, after any of them" "" "$LULOST"
+
+# THE UNDO THAT FAILS HALF-WAY puts the branch back on the merge, and the checkout with it: a file
+# the merge brought in was edited during the land, so the checkout cannot follow the branch back.
+LUT="$(new_tree "$LU" touched)"; green_stamp "$LUT"; LUTH="$(git -C "$LUT" rev-parse HEAD)"
+OUTLUT="$(land_raced "$LUT" "arrived under an edit" touch)"
+LUTM="$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq   "fixture: the onto branch holds the land's merge" "$LUTH" "$(git -C "$LU" rev-parse 'wave/fixture^2')"
+expect_match "the land says the merge stands and how to undo it" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=touched * merge=${LUTM} undo=failed — the merge stands: reset wave/fixture to $(git -C "$LU" rev-parse "${LUTM}^1") in ${LU} by hand, *" "$OUTLUT"
+expect_eq   "the checkout's index is the merge's" "" "$(git -C "$LU" diff --cached --name-only)"
+expect_eq   "and the edit is kept, unstaged" " M touched.txt" "$(git -C "$LU" status --porcelain --untracked-files=no)"
+lu_clean
+
+# S1(a), THE LAND NAMES ITS OWN MERGE. Another land merges on top in the instant after this one's
+# merge, before it is read back; this land was judged on the head it merged onto and lands, naming
+# its merge, not the other's.
+lu_other other-a.txt
+LUM="$(new_tree "$LU" misread)"; green_stamp "$LUM"; LUMH="$(git -C "$LUM" rev-parse HEAD)"
+OUTLUM="$(land_raced "$LUM" "" misread)"
+LUMM="$(git -C "$LU" rev-parse 'wave/fixture^1')"
+expect_eq "fixture: the other land's merge is the head, on top of this land's" "$LUMH" "$(git -C "$LU" rev-parse "${LUMM}^2")"
+expect_match "the land lands and names its own merge" \
+  "spawn-worktree: LANDED branch=misread onto=wave/fixture checkout=${LU} merge=${LUMM} *" "$OUTLUM"
+expect_eq "the other land's merge is still the head" "merge other (land)" "$(git -C "$LU" log -1 --format=%s wave/fixture)"
+lu_clean
+
+# S1(b), THE FIX PRINTED WHEN A COMMIT SITS ON TOP. An arrival makes this land's merge onto-moved,
+# and another land merges on top before the undo: the undo declines, and the line prints the
+# revert, which keeps the other land; a reset to the first parent would drop it.
+lu_other other-b.txt
+LUP="$(new_tree "$LU" under-a-land)"; green_stamp "$LUP"; LUPH="$(git -C "$LUP" rev-parse HEAD)"
+OUTLUP="$(land_raced "$LUP" "arrived under a land" ontop)"
+LUPM="$(git -C "$LU" rev-parse 'wave/fixture^1')"; LUPO="$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq "fixture: this land's merge sits under the other land's" "$LUPH" "$(git -C "$LU" rev-parse "${LUPM}^2")"
+expect_match "the line names this land's merge and prints the revert" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=under-a-land * merge=${LUPM} undo=failed — the merge stands under a later commit: git -C ${LU} revert -m 1 ${LUPM}, *" "$OUTLUP"
+expect_no_match "and prints no reset" "*reset*" "$OUTLUP"
+LUPFIX="$(printf '%s' "$OUTLUP" | sed -n 's/.*: \(git -C [^ ]* revert -m 1 [0-9a-f]*\),.*/\1/p')"
+expect_eq "fixture: the printed fix reads back" "git -C ${LU} revert -m 1 ${LUPM}" "$LUPFIX"
+# shellcheck disable=SC2086 # the printed command is run as an operator would type it
+GIT_EDITOR=: command $LUPFIX >/dev/null 2>&1
+expect_true "following it keeps the other land's merge" git -C "$LU" merge-base --is-ancestor "$LUPO" wave/fixture
+expect_eq "…and takes this land's work off the branch" "" "$(git -C "$LU" ls-tree --name-only wave/fixture under-a-land.txt)"
+expect_eq "…while the other land's work stays" "other-b.txt" "$(git -C "$LU" ls-tree --name-only wave/fixture other-b.txt)"
+lu_clean
+
+# N2, A CHANGE STAGED DURING THE LAND. A successful undo keeps it, staged.
+LUS="$(new_tree "$LU" stager)"; green_stamp "$LUS"
+OUTLUS="$(land_raced "$LUS" "arrived under a stage" stage)"
+expect_match "fixture: the merge was undone" "spawn-worktree: REFUSED reason=onto-moved branch=stager * — the merge is undone and the tree kept; *" "$OUTLUS"
+expect_eq "the onto branch is back on the arrival" "arrived under a stage" "$(git -C "$LU" log -1 --format=%s wave/fixture)"
+expect_eq "the staged change is still staged" "M  file.txt" "$(git -C "$LU" status --porcelain --untracked-files=no)"
+expect_eq "…with its content" "staged during the land" "$(tail -n 1 "$LU/file.txt")"
+expect_false "and the tree's file left the checkout with the merge" test -e "$LU/stager.txt"
+lu_clean
+
 section "§LAND-KEEP: after each refusal the tree's record link still resolves (AC-9.1)"
 #
 # The link is dropped only just before `git worktree remove`. Each arm proves the link
