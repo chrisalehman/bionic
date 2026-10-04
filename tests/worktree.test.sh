@@ -210,8 +210,9 @@ section "Group 3b: worktree_land — §land-with-alias (D7)"
 # D7 plants the alias `create` now leaves in every spawned tree. A tree whose
 # ONLY untracked entry is that alias must land exactly as it always did — the
 # dirty-tree check reads `.gitignore:43`'s `.bionic` entry, unaffected by
-# whether it names a directory or a symlink — and `_wt_drop_legacy_link`
-# already deletes the link on the way in, before the dirty check runs.
+# whether it names a directory or a symlink — and the link is deleted just
+# before `git worktree remove` (wave-26 D19; §LAND-KEEP covers a project that
+# does not ignore the symlink shape).
 
 LA="$(new_repo "$TMP/land-alias")"
 LAT="$(new_tree "$LA" withalias)"
@@ -890,5 +891,188 @@ expect_eq "…and by workspaces_of_session" "rc=2" "$(wk workspaces_of_session "
 WKT="$TMP/ws-reader-tmplink"; mkdir -p "$WKT/.bionic"
 ln -s "$WK/.bionic/tmp" "$WKT/.bionic/tmp"
 expect_eq "a symlinked .bionic/tmp is refused" "rc=2" "$(wk workspace_for_name "$WKT" "$WKSID" a)"
+
+# ---------------------------------------------------------------------------
+# THE LANDING RULE (wave-26 T10, D7, D19). A tree lands only when it CONTAINS the branch it
+# lands onto and its LAST stamped suite run was green, on a clean tree, at its current head.
+# The stamp is one line per suite-class run, appended to the tree's own git directory by the
+# booking shim (T6); these arms write the lines by hand, in exactly the interface's shape.
+stamp_file() { printf '%s/bionic-stamps' "$(git -C "$1" rev-parse --absolute-git-dir)"; }
+stamp() {  # <tree> <head> <dirty> <rc>
+  printf 'stamp/v1|head=%s|dirty=%s|rc=%s|at=2026-10-03T00:00:00Z|cmd=bash tests/one.test.sh\n' \
+    "$2" "$3" "$4" >> "$(stamp_file "$1")"
+}
+green_stamp() { stamp "$1" "$(git -C "$1" rev-parse HEAD)" 0 0; }
+# The record link resolves: a symlink at <tree>/.bionic that reaches the main root's state.
+link_ok() { test -L "$1/.bionic" && test -f "$1/.bionic/docs/note.md"; }
+
+section "§LAND-GREEN: a tree whose stamped run at its head is green lands, no full run asked (AC-3.1)"
+
+LG="$(new_repo "$TMP/land-green")"
+LGT="$(new_tree "$LG" green-arm)"
+# The extractor is proved on real output before anything reads through it: the stamp file is
+# the tree's PRIVATE git directory, not the shared one, and a written line reads back.
+expect_match "the stamp file sits in the tree's own git directory" \
+  "${LG}/.git/worktrees/green-arm/bionic-stamps" "$(stamp_file "$LGT")"
+stamp "$LGT" "0000000000000000000000000000000000000000" 0 1
+green_stamp "$LGT"
+expect_match "the last stamp line reads back in the interface's shape" \
+  "stamp/v1|head=$(git -C "$LGT" rev-parse HEAD)|dirty=0|rc=0|at=*|cmd=bash tests/one.test.sh" \
+  "$(tail -n 1 "$(stamp_file "$LGT")")"
+OUTLG="$(worktree_land "$LGT" wave/fixture)"; RCLG=$?
+expect_match "a green run of one suite at the tree's head lands (an earlier red line is history)" \
+  "spawn-worktree: LANDED branch=green-arm onto=wave/fixture *" "$OUTLG"
+expect_eq "that land exits 0" "0" "$RCLG"
+
+# A tree whose contract runs no suite has no stamp file at all, and needs none.
+LGD="$(new_tree "$LG" docs-arm)"
+expect_false "a docs-only tree has no stamp file" test -e "$(stamp_file "$LGD")"
+expect_match "and it lands without one" \
+  "spawn-worktree: LANDED branch=docs-arm onto=wave/fixture *" "$(worktree_land "$LGD" wave/fixture)"
+
+section "§LAND-CURRENT: a tree lacking a landed commit is refused not-current; a stale green run, stale-proof (AC-5.3)"
+
+LC="$(new_repo "$TMP/land-current")"
+LCA="$(new_tree "$LC" first)"
+LCB="$(new_tree "$LC" second)"
+green_stamp "$LCA"; green_stamp "$LCB"
+expect_match "the first of two side-by-side trees lands" \
+  "spawn-worktree: LANDED branch=first *" "$(worktree_land "$LCA" wave/fixture)"
+LCREFS="$(refs_of "$LC")"
+OUTLC="$(worktree_land "$LCB" wave/fixture)"; RCLC=$?
+expect_match "the second, green but lacking the first's landing, is refused not-current" \
+  "spawn-worktree: REFUSED reason=not-current branch=second onto=wave/fixture *" "$OUTLC"
+expect_match "the refusal names the head it lacks" "*onto_head=$(git -C "$LC" rev-parse wave/fixture)*" "$OUTLC"
+expect_match "and names the fix in one line" \
+  "*merge wave/fixture into the tree, re-run its suites, land again" "$OUTLC"
+expect_eq   "that refusal exits 2" "2" "$RCLC"
+expect_eq   "no ref moved" "$LCREFS" "$(refs_of "$LC")"
+expect_true "the tree survives" test -d "$LCB"
+
+# The fix, step one: merge the landed branch in. The tree is now current, but its green run
+# was on the head before the merge.
+git -C "$LCB" merge --quiet --no-edit wave/fixture >/dev/null 2>&1
+expect_eq "the tree now contains the branch it lands onto" "0" \
+  "$(git -C "$LCB" merge-base --is-ancestor wave/fixture HEAD; echo $?)"
+LCREFS="$(refs_of "$LC")"   # the merge moved the tree's own branch; nothing moves from here
+OUTLH="$(worktree_land "$LCB" wave/fixture)"; RCLH=$?
+expect_match "a green run on an earlier head is refused stale-proof, naming the head" \
+  "spawn-worktree: REFUSED reason=stale-proof why=head *" "$OUTLH"
+expect_match "naming both heads" \
+  "*stamp_head=*head=$(git -C "$LCB" rev-parse HEAD)*" "$OUTLH"
+expect_match "and the fix" "*re-run the tree's suites at its head, land again" "$OUTLH"
+expect_eq   "that refusal exits 2" "2" "$RCLH"
+expect_eq   "no ref moved" "$LCREFS" "$(refs_of "$LC")"
+
+# On a dirty tree.
+stamp "$LCB" "$(git -C "$LCB" rev-parse HEAD)" 2 0
+expect_match "a green run at the head on a dirty tree is refused stale-proof, naming dirt" \
+  "spawn-worktree: REFUSED reason=stale-proof why=dirty dirty=2 *" "$(worktree_land "$LCB" wave/fixture)"
+# Red.
+stamp "$LCB" "$(git -C "$LCB" rev-parse HEAD)" 0 1
+expect_match "a red run at the head on a clean tree is refused stale-proof, naming red" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 *" "$(worktree_land "$LCB" wave/fixture)"
+# A last line that is not a stamp at all is not proof either.
+printf 'garbage\n' >> "$(stamp_file "$LCB")"
+expect_match "a last line that is no stamp is refused stale-proof, unreadable" \
+  "spawn-worktree: REFUSED reason=stale-proof why=unreadable *" "$(worktree_land "$LCB" wave/fixture)"
+: > "$(stamp_file "$LCB")"
+expect_match "an empty stamp file is refused stale-proof, unreadable" \
+  "spawn-worktree: REFUSED reason=stale-proof why=unreadable *" "$(worktree_land "$LCB" wave/fixture)"
+expect_eq   "no ref moved across all of them" "$LCREFS" "$(refs_of "$LC")"
+# The fix, step two: re-run at the head, green, clean. The arm discriminates.
+green_stamp "$LCB"
+expect_match "the same tree lands once its last run is green, clean, at its head" \
+  "spawn-worktree: LANDED branch=second onto=wave/fixture *" "$(worktree_land "$LCB" wave/fixture)"
+
+section "§LAND-KEEP: after each refusal the tree's record link still resolves (AC-9.1)"
+#
+# The link is dropped only just before `git worktree remove`. Each arm proves the link
+# resolves before the land, refuses, proves it still resolves, then lands the same tree.
+
+LK="$(new_repo "$TMP/land-keep")"
+keep_tree() {  # <branch> -> tree path, with its record link and a green stamp at its head
+  local t; t="$(new_tree "$LK" "$1")"
+  ln -s "${LK}/.bionic" "$t/.bionic"; green_stamp "$t"; printf '%s' "$t"
+}
+
+KD="$(keep_tree keep-dirty)"; echo scratch > "$KD/notes.txt"
+expect_true "dirty-tree arm: the link resolves before the land" link_ok "$KD"
+expect_match "dirty-tree is refused" "spawn-worktree: REFUSED reason=dirty-tree*" "$(worktree_land "$KD" wave/fixture)"
+expect_true "after dirty-tree, the link still resolves" link_ok "$KD"
+rm -f "$KD/notes.txt"
+
+KN="$(keep_tree keep-nothing)"
+git -C "$LK" merge --quiet --no-ff -m "already merged" keep-nothing
+expect_true "nothing-to-land arm: the link resolves before the land" link_ok "$KN"
+expect_match "nothing-to-land is refused" "spawn-worktree: REFUSED reason=nothing-to-land*" "$(worktree_land "$KN" wave/fixture)"
+expect_true "after nothing-to-land, the link still resolves" link_ok "$KN"
+
+KC="$(keep_tree keep-current)"
+KCO="$(keep_tree keep-current-other)"
+worktree_land "$KCO" wave/fixture >/dev/null
+expect_true "not-current arm: the link resolves before the land" link_ok "$KC"
+expect_match "not-current is refused" "spawn-worktree: REFUSED reason=not-current*" "$(worktree_land "$KC" wave/fixture)"
+expect_true "after not-current, the link still resolves" link_ok "$KC"
+git -C "$KC" merge --quiet --no-edit wave/fixture >/dev/null 2>&1
+
+expect_true "stale-proof arm: the link resolves before the land" link_ok "$KC"
+expect_match "stale-proof is refused" "spawn-worktree: REFUSED reason=stale-proof*" "$(worktree_land "$KC" wave/fixture)"
+expect_true "after stale-proof, the link still resolves" link_ok "$KC"
+green_stamp "$KC"
+
+KO="$(keep_tree keep-onto)"
+echo "half-done" >> "$LK/file.txt"
+expect_true "onto-checkout-dirty arm: the link resolves before the land" link_ok "$KO"
+expect_match "onto-checkout-dirty is refused" "spawn-worktree: REFUSED reason=onto-checkout-dirty*" "$(worktree_land "$KO" wave/fixture)"
+expect_true "after onto-checkout-dirty, the link still resolves" link_ok "$KO"
+git -C "$LK" checkout --quiet -- file.txt
+
+KS="$(keep_tree keep-suite)"
+make_runner "$LK"
+expect_true "a stand-in runner started in the keep fixture" start_runner "$LK" "tests/run.sh"
+expect_true "suite-running arm: the link resolves before the land" link_ok "$KS"
+expect_match "suite-running is refused" "spawn-worktree: REFUSED reason=suite-running*" "$(worktree_land "$KS" wave/fixture)"
+expect_true "after suite-running, the link still resolves" link_ok "$KS"
+stop_runner
+
+# Every refused tree above lands once its cause is gone, and only then is its link dropped.
+# Each landing makes the next tree not-current, so each takes the named fix first: merge
+# the branch it lands onto, re-run, land.
+for t in "$KD" "$KC" "$KO" "$KS"; do
+  git -C "$t" merge --quiet --no-edit wave/fixture >/dev/null 2>&1; green_stamp "$t"
+  expect_match "the refused tree ${t##*/} lands once its cause is gone" \
+    "spawn-worktree: LANDED branch=${t##*/} *" "$(worktree_land "$t" wave/fixture)"
+  expect_false "and its tree, link included, is gone" test -e "$t"
+done
+expect_true "the state the links pointed at survived every land" test -f "${LK}/.bionic/docs/note.md"
+
+# WHY THE OLD DROP SAT BEFORE THE DIRTY CHECK. A project that ignores `.bionic/` (directory
+# shape only), or not at all, sees the link as untracked work: `?? .bionic` in status, and
+# `git worktree remove` refuses over it. The dirty check passes exactly that one entry; the
+# drop just before the removal satisfies git.
+LU="$(new_repo "$TMP/land-unignored")"
+printf '.bionic/\n.worktrees/\n' > "$LU/.gitignore"
+git -C "$LU" commit --quiet -am "ignore the directory shape only"
+LUT="$(new_tree "$LU" unignored)"
+ln -s "${LU}/.bionic" "$LUT/.bionic"; green_stamp "$LUT"
+expect_eq "git reads the link as untracked work in this project" "?? .bionic" "$(git -C "$LUT" status --porcelain)"
+echo scratch > "$LUT/notes.txt"
+expect_match "another untracked file beside it is still dirty" \
+  "spawn-worktree: REFUSED reason=dirty-tree*" "$(worktree_land "$LUT" wave/fixture)"
+expect_true "and the link survives that refusal" link_ok "$LUT"
+rm -f "$LUT/notes.txt"
+expect_match "with only the link untracked, the tree lands" \
+  "spawn-worktree: LANDED branch=unignored onto=wave/fixture *" "$(worktree_land "$LUT" wave/fixture)"
+expect_false "and the tree is gone" test -e "$LUT"
+
+# A removal git refuses after the merge leaves the tree alive: its link is put back.
+LUL="$(new_tree "$LU" locked)"
+ln -s "${LU}/.bionic" "$LUL/.bionic"; green_stamp "$LUL"
+git -C "$LU" worktree lock "$LUL"
+expect_match "a locked tree merges and then its removal is refused" \
+  "spawn-worktree: REFUSED reason=worktree-remove-refused*" "$(worktree_land "$LUL" wave/fixture)"
+expect_true "after worktree-remove-refused, the link resolves again" link_ok "$LUL"
+git -C "$LU" worktree unlock "$LUL"
 
 finish
