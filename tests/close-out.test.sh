@@ -1279,28 +1279,31 @@ expect_nonempty "FS5: …and so is a builder handing the plan current 8" "$(buil
 # ============================================================
 section "E2E — wave-27 T4 (AC-7.1 close-out half, D14, B1): from Step 7 with no Step 9 line, the tools close the run"
 # ============================================================
-# No hand edit: the real `session-poker.sh current 8` moves the plan, then `close-out.sh run`
-# delivers. The session is bound to the plan the way engagement binds it (tests/lib/
-# bound-marker.sh, the one bound-marker builder).
+# The target, AC-7.1: no hand edit. The real `session-poker.sh current 8` moves the plan,
+# then `close-out.sh run` delivers. The session is bound to the plan the way engagement binds
+# it (tests/lib/bound-marker.sh, the one bound-marker builder).
 #
-# EXPECTED RED UNTIL wave-27 T14. The verb still dry-commits the plan at Step 8 and the gate
-# demands the Step-8 block that only close-out writes, so `current 8` is refused here. T14
-# lands the verb's half (exempt 8 as 9 is exempt, refuse on `facts_state`) and removes the
-# `[red until T14]` mark from E2E2's label. T4's record names it.
+# RE-AUTHORED BY T14. Today the verb dry-commits the plan at Step 8, and the gate demands the
+# Step-8 block that only close-out writes, so `current 8` is refused. E2E1–E2E3 pin that
+# refusal, green, as it stands at T4. T14 lands the verb's half (8 exempt as 9 is, refusal on
+# `facts_state`), which turns these rows red. T14 then rewrites them into the target above:
+# plant the review facts the fixture's rigor owes, run `current 8`, then `close-out.sh run`,
+# and assert `delivered:`. T4's record names this mark.
 PE="$(mk_fixture e2e)"
 E2E_SID="closeout-e2e-1"
 expect_eq "E2E0: precondition: the fixture is at current: 7 with no Step 9 line" "7/0" \
   "$(sed -n 's/^current: //p' "$PE/$PLAN_REL")/$(step_lines "$PE/$PLAN_REL" 9)"
 ( in_fixture "$PE" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PE" "$E2E_SID" "$PE/$PLAN_REL" )
+PE_SHA="$(sha_of "$PE/$PLAN_REL")"
 ( in_fixture "$PE" || exit 9
   HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     CLAUDE_CODE_SESSION_ID="$E2E_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 ) > "$SANDBOX/e2e-poker" 2>&1
 E2E_POKER_RC=$?
 E2E_POKER_OUT="$(cat "$SANDBOX/e2e-poker")"
-run_close "$PE" run
-E2E_GOT="poker=$E2E_POKER_RC close=$CO_RC delivered=$(grep -qE '^- Step 9: delivered: ' "$PE/$PLAN_REL" && echo yes || echo no)"
-expect_eq "E2E2 [red until T14]: current 8 then close-out.sh run delivers" "poker=0 close=0 delivered=yes" "$E2E_GOT"
-[ "$E2E_GOT" = "poker=0 close=0 delivered=yes" ] || printf '      the verb said: %s\n' "$(printf '%s' "$E2E_POKER_OUT" | grep -m1 'REFUSED\|refused' )"
+expect_eq "E2E1 (RE-AUTHORED BY T14): the real current 8 is refused today (exit 1)" "1" "$E2E_POKER_RC"
+expect_eq "E2E2 (RE-AUTHORED BY T14): …asking for the Step-8 block close-out writes" "yes" \
+  "$(contains "$E2E_POKER_OUT" "canonical-sdlc step 8 evidence missing required field(s): merge worktree-removed")"
+expect_eq "E2E3 (RE-AUTHORED BY T14): …and the plan is unchanged, still at current: 7" "$PE_SHA" "$(sha_of "$PE/$PLAN_REL")"
 
 # ============================================================
 section "4f — REQ-1 (AC-1.1–1.4): the shipped table is found once; the ADR cell is read, not marked"
