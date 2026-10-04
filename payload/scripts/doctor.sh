@@ -115,6 +115,8 @@ done
 #   PATROL    the PATROL section (the session rows and the drift line)
 #   PROJECT   the PROJECT section (the run, predecessors, auto-memory, links, restart-needed)
 #   FIXES     the "→" fix lines raised by the sections gathered here, printed as the verdict block prints them
+#   NATIVE    the BIONIC NATIVE table, which carries the version row: its gathers are the plugin listing
+#             and the duplicate-registration scan, and it prints between the fix lines and PATROL
 #
 # A filtered page has NO verdict line, NO problem count and none of the tables or RESOURCES: only the named
 # sections, so a row that asserts on any of those runs the whole page. An unknown name is refused before any
@@ -136,8 +138,8 @@ if _doctor_filtering; then
     _doctor_only_one="${_doctor_only_rest%%,*}"
     case "$_doctor_only_rest" in *,*) _doctor_only_rest="${_doctor_only_rest#*,}" ;; *) _doctor_only_rest="" ;; esac
     case "$_doctor_only_one" in
-      PATROL|PROJECT|FIXES) ;;
-      *) echo "doctor.sh: unknown section '${_doctor_only_one}' in BIONIC_DOCTOR_ONLY — the sections are PATROL, PROJECT, FIXES" >&2
+      PATROL|PROJECT|FIXES|NATIVE) ;;
+      *) echo "doctor.sh: unknown section '${_doctor_only_one}' in BIONIC_DOCTOR_ONLY — the sections are PATROL, PROJECT, FIXES, NATIVE" >&2
          exit 2 ;;
     esac
   done
@@ -921,7 +923,7 @@ HALF_FACT="$(detect_half_uninstalled)";      HALF_STATE="${HALF_FACT##*half-unin
 
 HAVE_JQ=yes; command -v jq >/dev/null 2>&1 || HAVE_JQ=no
 
-if ! _doctor_filtering; then
+if _doctor_want NATIVE; then
 # ─── The two facts that come from outside this machine's files ───────────────
 #
 # LOAD STATE is the CLI's own conclusion and is not written anywhere readable, so
@@ -987,7 +989,9 @@ while IFS= read -r _dup_line; do
 done <<EOF
 $DUP_LINES
 EOF
+fi  # _doctor_want NATIVE
 
+if ! _doctor_filtering; then
 # ─── The dependency sweep ────────────────────────────────────────────────────
 #
 # One pass over the table produces three renderings at once — the dependency
@@ -2329,6 +2333,8 @@ fi
 # and is repaired by re-installing the plugin; everything in the next arrived
 # through /bionic:setup and is repaired by running it again. A reader who knows
 # which table a broken row is in already knows what to type.
+fi  # the whole-page gate, closed so a filtered run can print this table alone
+if _doctor_want NATIVE; then
 echo ""
 echo "BIONIC NATIVE — ships inside the plugin"
 _doctor_native_row " " "component" "count" "detail"
@@ -2444,6 +2450,8 @@ esac
 [ "$HALF_STATE" = "yes" ] && \
   _doctor_native_row "$DOCTOR_BAD" "install" "—" "half-uninstalled — the CLI no longer knows bionic"
 printf '%s' "$DUP_ROWS"
+fi  # _doctor_want NATIVE
+if ! _doctor_filtering; then
 
 # ─── Table 2 — the tools and plugins bionic depends on ───────────────────────
 echo ""
