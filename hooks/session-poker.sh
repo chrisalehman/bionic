@@ -22,6 +22,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | current | ledger-add | ledger-set …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -420,6 +421,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
+  die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -620,12 +622,23 @@ case "$VERB" in
     ;;
   # TWO OPERANDS AND NO THIRD (wave-26 T4; REQ-3, D5): the kind and the evidence. The head is the
   # one the evidence names, held against the working branch's checkout (T14), never typed, so a
-  # head on the command line is the usage error, not a value.
+  # head on the command line is the usage error, not a value. A READING (wave-27 T2; D1, D7) adds
+  # two flags, both or neither, to a review proof only: `--question <q> --reader <name>`, in
+  # either order. Without them a review proof is 1.11.0's, so a plan built under it still works.
   proof-add)
-    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
-      usage "proof-add takes exactly two arguments: <floor|review|task> <evidence path under record/> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand)."
+    PF_USAGE="proof-add takes two arguments, <floor|review|task> <evidence path under record/>, and for a reading two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand)."
+    if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]; then usage "$PF_USAGE"; fi
+    PF_KIND="$1"; PF_EVID="$2"; PF_QUESTION=""; PF_READER=""; shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --question) [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PF_QUESTION" ] || usage "$PF_USAGE"; PF_QUESTION="$2"; shift 2 ;;
+        --reader)   [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PF_READER" ] || usage "$PF_USAGE"; PF_READER="$2"; shift 2 ;;
+        *) usage "$PF_USAGE" ;;
+      esac
+    done
+    if [ -n "$PF_QUESTION$PF_READER" ]; then
+      { [ -n "$PF_QUESTION" ] && [ -n "$PF_READER" ] && [ "$PF_KIND" = review ]; } || usage "$PF_USAGE"
     fi
-    PF_KIND="$1"; PF_EVID="$2"
     ;;
   # ONE OPTIONAL FLAG (wave-26 T32; D4): `--wait` waits for another writer's lock, which only the
   # launch recorder's detached call can afford; the tick and the turn-end wall leave a held lock
@@ -5545,6 +5558,15 @@ EOF
       die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name floor, review or task. The plan is unchanged."
       exit 1
     fi
+    if [ -n "$PF_QUESTION" ] && ! proof_question_ok "$PF_QUESTION"; then
+      die "REFUSED — '$(clean "$PF_QUESTION")' is not a reading question: name evidence, adversarial or structure. The plan is unchanged."
+      exit 1
+    fi
+    case "$PF_READER" in
+      *[[:space:]]*|*'|'*|*=*)
+        die "REFUSED — the reader name '$(clean "$PF_READER")' carries a space, a |, or an =, which the space-separated proof line cannot hold; name the reader as its roster row does. The plan is unchanged."
+        exit 1 ;;
+    esac
     plan_verb_open proof-add
     PF_DOCS="$(docs_root "$PV_REPO")"
     PF_DOCS="$(cd "$PF_DOCS" 2>/dev/null && pwd -P)"
@@ -5577,6 +5599,55 @@ EOF
         die "REFUSED — the evidence $(clean "$PF_EVID") is not under record/ of the docs root ($PF_DOCS/record/); a proof cites a record. The plan is unchanged."
         exit 1 ;;
     esac
+    # A READING CARRIES ITS QUESTION, ITS RESULT AND ITS SCOPE (wave-27 T2; D1, AC-2.1). The record's
+    # own flush-left lines say them, and for `structure` it answers every check id the shipped
+    # checks file names, the file resolved through this hook's own lib root, as execution-recorder
+    # resolves survival.md (lib/proof.sh `proof_reading`).
+    PF_RESULT=""; PF_SCOPE=""; PF_ROLE=""
+    if [ -n "$PF_QUESTION" ]; then
+      if ! PF_RS="$(proof_reading "$PF_REAL" "$PF_QUESTION" "$BIONIC_LIB/../../context/checks-structure.md")"; then
+        die "REFUSED — $(clean "$PF_RS"). The plan is unchanged."
+        exit 1
+      fi
+      PF_RESULT="${PF_RS%% *}"; PF_SCOPE="${PF_RS#* }"
+      # THE READER IS A ROW THE DISPATCH RECORDED (wave-27 T2; D7, AC-1.4). Every roster of this
+      # project is read, every session's, for a reader whose session has ended still has its row
+      # there until close-out; each row naming the reader must be a reader role, and one of them
+      # must have been dealt the question (`questions=`). A name no row carries is refused, so the
+      # orchestrator cannot register a reading in a reader's name, and a name any writer row
+      # carries is refused, so a writer cannot read its own code under it.
+      PF_ROWS=""
+      for _pf_rf in "$PV_REPO/.bionic/tmp"/roster-*.state; do
+        [ -f "$_pf_rf" ] && [ ! -L "$_pf_rf" ] || continue
+        PF_ROWS="$PF_ROWS$(awk -v want="$PF_READER" "$_ROSTER_OPEN_AWK"'
+          index($0, "roster-state/") == 1 && _roster_kv($0, "name") == want {
+            t = _roster_kv($0, "subagent_type"); if (t == "") t = "(none)"
+            print t "\t" _roster_kv($0, "questions") }' "$_pf_rf" 2>/dev/null)
+"
+      done
+      PF_ROLE="$(printf '%s' "$PF_ROWS" | PROOF_ROLES="$PROOF_READER_ROLES" awk -F'\t' -v q="$PF_QUESTION" '
+        BEGIN { n = split(ENVIRON["PROOF_ROLES"], r, " "); for (i = 1; i <= n; i++) ok[r[i]] = 1 }
+        NF { rows++
+             if (!($1 in ok)) { if (bad == "") bad = $1; next }
+             m = split($2, qs, ","); for (i = 1; i <= m; i++) if (qs[i] == q) { dealt = 1; role = $1 } }
+        END {
+          if (!rows) { print "none"; exit }
+          if (bad != "") { print "writer\t" bad; exit }
+          if (!dealt) { print "undealt"; exit }
+          print "ok\t" role }')"
+      case "$PF_ROLE" in
+        none)
+          die "REFUSED — no roster row on this machine names the reader $(clean "$PF_READER"), so nothing records it as a reader; register a reading under the name its dispatch recorded. The plan is unchanged."
+          exit 1 ;;
+        writer*)
+          die "REFUSED — the reader $(clean "$PF_READER") has a roster row of role ${PF_ROLE#*	}, which is not a reader role ($PROOF_READER_ROLES); a reading is registered for a reader, never a writer. The plan is unchanged."
+          exit 1 ;;
+        undealt)
+          die "REFUSED — the reader $(clean "$PF_READER") was not dealt the $PF_QUESTION question (the questions= of its roster row does not name it); register the reading for the reader dealt it. The plan is unchanged."
+          exit 1 ;;
+      esac
+      PF_ROLE="${PF_ROLE#*	}"
+    fi
     PF_WB="$(proof_working_branch "$PV_PLAN")"
     if [ -z "$PF_WB" ]; then
       die "REFUSED — $PV_PLAN names no working-branch:, so there is no checkout to read the head from; add 'working-branch: <branch>' under ## SDLC State. The plan is unchanged."
@@ -5594,11 +5665,12 @@ EOF
     # on its history, and the proof names what the evidence attests (lib/proof.sh
     # `proof_attested`). A task landed between the run and this verb is not proved by it.
     # The plan goes too: a review's range must start at or before its last review proof (T62).
-    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$(proof_checkout "$PV_REPO" "$PF_WB")" "$PV_PLAN")"; then
+    # A reading's range starts at or before the last proof of its own question (wave-27 T2; D1).
+    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$(proof_checkout "$PV_REPO" "$PF_WB")" "$PV_PLAN" "$PF_QUESTION")"; then
       die "REFUSED — $(clean "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
-    PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL")"
+    PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_QUESTION" "$PF_READER" "$PF_RESULT" "$PF_SCOPE")"
     if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the proof; the plan is unchanged."
       exit 1
@@ -5643,7 +5715,8 @@ EOF
         index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
     fi
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
-    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
+    PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
+    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
     [ -n "$PF_NONE" ] && say "proof-add — no active live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
     exit 0
     ;;

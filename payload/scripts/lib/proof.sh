@@ -7,7 +7,10 @@
 #     proved: kind=<floor|review|task> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>
 #
 # written only by `session-poker.sh proof-add <kind> <evidence>` through the plan verbs'
-# transaction, and read by `proof_last`. What is unproved is the difference since the head a
+# transaction, and read by `proof_last`. A READING (wave-27 T2; D1) is a review proof that adds
+# four fields, ` question=<q> reader=<roster name> result=<pass|flag|fail> scope=<piece|whole>`,
+# written by `proof-add review <record> --question <q> --reader <name>`; every reader keyed by
+# kind alone reads it as the review proof it is. What is unproved is the difference since the head a
 # proof names; `proof_state` (T5, beside these) is the reader that judges that difference.
 #
 # THE HEAD IS NEVER AN OPERAND, AND IT IS THE HEAD THE EVIDENCE READ (wave-26 T14; review 7 F1).
@@ -22,15 +25,83 @@
 # bash 3.2: no associative arrays, no `${var,,}`.
 
 PROOF_KINDS="floor review task"
+# The questions a reading answers, the values its result and scope take, and the answers a
+# structure check takes (the Interfaces table of wave-27).
+PROOF_QUESTIONS="evidence adversarial structure"
+PROOF_RESULTS="pass flag fail"
+PROOF_SCOPES="piece whole"
+PROOF_CHECK_ANSWERS="PASS FLAG FAIL n/a"
+# The roles a reading may be registered for: a reader's roster row carries one of these as its
+# `subagent_type=`, never a writer's (D7).
+PROOF_READER_ROLES="bionic:auditor bionic:critic bionic:reviewer"
 
 # proof_kind_ok <kind> -> 0 when <kind> is one of PROOF_KINDS.
 proof_kind_ok() {
   case " $PROOF_KINDS " in *" ${1:-} "*) [ -n "${1:-}" ] ;; *) return 1 ;; esac
 }
 
-# proof_line <kind> <head> <at> <evidence> -> the one proof line, newline-terminated.
+# proof_question_ok <question> -> 0 when <question> is one of PROOF_QUESTIONS.
+proof_question_ok() {
+  case " $PROOF_QUESTIONS " in *" ${1:-} "*) [ -n "${1:-}" ] ;; *) return 1 ;; esac
+}
+
+# proof_line <kind> <head> <at> <evidence> [<question> <reader> <result> <scope>] -> the one proof
+# line, newline-terminated; a reading's four fields follow the evidence when a question is given.
 proof_line() {
-  printf 'proved: kind=%s head=%s at=%s evidence=%s\n' "$1" "$2" "$3" "$4"
+  if [ -n "${5:-}" ]; then
+    printf 'proved: kind=%s head=%s at=%s evidence=%s question=%s reader=%s result=%s scope=%s\n' \
+      "$1" "$2" "$3" "$4" "$5" "${6:-}" "${7:-}" "${8:-}"
+  else
+    printf 'proved: kind=%s head=%s at=%s evidence=%s\n' "$1" "$2" "$3" "$4"
+  fi
+}
+
+# proof_reading <record> <question> [<checks file>] -> `<result> <scope>` read from a reading
+# record, exit 0; or exit 1 with one sentence saying what the record lacks and what to write (the
+# verb's refusal). The record's flush-left lines, the first of each: `reviewed: <a>..<b>` (its
+# range is proof_attested's to judge), `question: <q>` equal to <question>, `result:` one of
+# PROOF_RESULTS, `scope:` one of PROOF_SCOPES. For `structure`, <checks file> names the check ids
+# as `- **<id>**` items, and the record answers each with `check: <id> <answer> <reason>`, the
+# answer one of PROOF_CHECK_ANSWERS: a checks file that cannot be read, or names no id, refuses.
+proof_reading() {
+  local rec="$1" q="$2" ck="${3:-}" got rq rr rs ids miss
+  got="$(awk '
+    function val(s) { sub(/^[a-z]+:[ \t]*/, "", s); sub(/[ \t]+$/, "", s); return s }
+    /^reviewed:[ \t]/ { rv = "y" }
+    /^question:/ && q == "" { q = val($0) }
+    /^result:/ && r == "" { r = val($0) }
+    /^scope:/ && s == "" { s = val($0) }
+    END { printf "%s|%s|%s|%s", rv, q, r, s }' "$rec" 2>/dev/null)"
+  IFS='|' read -r got rq rr rs <<PROOF_READING
+$got
+PROOF_READING
+  [ "$got" = y ] || { printf 'the reading %s carries no reviewed: <a>..<b> line; write the range it read' "$rec"; return 1; }
+  [ -n "$rq" ] || { printf 'the reading %s carries no question: <q> line; write question: %s' "$rec" "$q"; return 1; }
+  [ "$rq" = "$q" ] \
+    || { printf 'the reading %s says question: %s, but the proof is for %s; register it under the question it answers' "$rec" "$rq" "$q"; return 1; }
+  [ -n "$rr" ] || { printf 'the reading %s carries no result: line; write result: pass, flag or fail' "$rec"; return 1; }
+  case " $PROOF_RESULTS " in *" $rr "*) : ;; *)
+    printf 'the reading %s says result: '"'"'%s'"'"', which is not one of pass, flag or fail; write the result the reader gave' "$rec" "$rr"; return 1 ;;
+  esac
+  [ -n "$rs" ] || { printf 'the reading %s carries no scope: line; write scope: piece or whole' "$rec"; return 1; }
+  case " $PROOF_SCOPES " in *" $rs "*) : ;; *)
+    printf 'the reading %s says scope: '"'"'%s'"'"', which is not one of piece or whole; write the scope the reader read' "$rec" "$rs"; return 1 ;;
+  esac
+  if [ "$q" = structure ]; then
+    [ -n "$ck" ] && [ -f "$ck" ] && [ -r "$ck" ] \
+      || { printf 'the structure checks file %s cannot be read, so the check ids a structure reading answers are unknown; reinstall the plugin' "$ck"; return 1; }
+    ids="$(awk '/^- \*\*[a-z][a-z-]*\*\*/ { s = $0; sub(/^- \*\*/, "", s); sub(/\*\*.*$/, "", s); print s }' "$ck" 2>/dev/null)"
+    [ -n "$ids" ] \
+      || { printf 'the structure checks file %s names no check id (a - **<id>** item); reinstall the plugin' "$ck"; return 1; }
+    miss="$(PROOF_IDS="$ids" PROOF_ANS="$PROOF_CHECK_ANSWERS" awk '
+      BEGIN { n = split(ENVIRON["PROOF_ANS"], a, " "); for (i = 1; i <= n; i++) ok[a[i]] = 1
+              w = split(ENVIRON["PROOF_IDS"], want, "\n") }
+      /^check:[ \t]/ { m = split($0, f, /[ \t]+/); if (m >= 4 && (f[3] in ok)) done[f[2]] = 1 }
+      END { for (i = 1; i <= w; i++) if (want[i] != "" && !(want[i] in done)) printf "%s%s", (c++ ? " " : ""), want[i] }' "$rec" 2>/dev/null)"
+    [ -z "$miss" ] \
+      || { printf 'the structure reading %s leaves %s unanswered; write one line check: <id> <answer> <reason> for each, the answer PASS, FLAG, FAIL or n/a' "$rec" "$miss"; return 1; }
+  fi
+  printf '%s %s' "$rr" "$rs"
 }
 
 # proof_working_branch <plan> -> the plan's `working-branch:`, or nothing. The `## SDLC State`
@@ -76,7 +147,7 @@ proof_head() {
   git -C "$wt" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null
 }
 
-# proof_attested <kind> <evidence file> <checkout> [<plan>] -> the 40-hex head the evidence attests, exit
+# proof_attested <kind> <evidence file> <checkout> [<plan>] [<question>] -> the 40-hex head the evidence attests, exit
 # 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
 #   floor  a full run's log: its LAST `head=<sha> dirty=<n>` line, the header the suite runner
 #          prints before any suite, so the last run in the log is the one judged (T52). <sha>
@@ -90,10 +161,12 @@ proof_head() {
 #          read (a review proof only): its last review proof's head, or with none its base, so no
 #          commit between two review proofs goes unread (wave-26 T62; critic 2 K2-F2). With no
 #          <plan>, or a plan whose base names no commit here, the first review is held to the
-#          other checks alone.
+#          other checks alone. With a <question>, the last review proof is that question's own
+#          (wave-27 T2; D1): each question is its own chain, so a reader of one question is never
+#          held to where another question's reading ended.
 #   task   whichever of the two the evidence carries, the run header first (A-T14.9).
 proof_attested() {
-  local kind="$1" ev="$2" co="$3" plan="${4:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster
+  local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster
   head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
   stamp="$(awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { s = $0 } END { if (s != "") print s }' "$ev" 2>/dev/null)"
@@ -190,7 +263,7 @@ proof_attested() {
         "$ev" "$(printf '%s' "$ah" | cut -c1-12)" "$(printf '%s' "$bh" | cut -c1-12)"; return 1
     fi
     if [ -n "$plan" ] && [ "$kind" = review ]; then
-      since="$(proof_last "$plan" review)"; what="the last review proof"
+      since="$(proof_last "$plan" review "$q")"; what="the last ${q:-review} proof"
       [ -n "$since" ] || { since="$(proof_plan_base "$plan")"; what="the plan's base"; }
       sh=""; [ -n "$since" ] && sh="$(git -C "$co" rev-parse --verify -q "$since^{commit}" 2>/dev/null)"
       if [ -n "$sh" ] && ! git -C "$co" merge-base --is-ancestor "$ah" "$sh" 2>/dev/null; then
@@ -226,7 +299,9 @@ proof_plan_base() {
 }
 
 # proof_awk -> the awk function `proof_fields(s)`, THE ONE READING OF A PROOF LINE (wave-26 T14;
-# review 7 F6): 1 when <s> is a proof line, its kind in PROOF_KIND and its head in PROOF_HEAD.
+# review 7 F6): 1 when <s> is a proof line, its kind in PROOF_KIND and its head in PROOF_HEAD; a
+# reading's four fields in PROOF_QUESTION, PROOF_READER, PROOF_RESULT and PROOF_SCOPE, each empty
+# on a line that carries none (wave-27 T2).
 # A proof line starts `proved:` at the first column (a bulleted `- proved:` is prose, not the
 # line the writer writes), and carries `kind=<lower-case word>` and `head=<7 to 40 lower-case
 # hex>` among its space-separated fields (`head=none` is no head). `proof_last` and the
@@ -234,39 +309,45 @@ proof_plan_base() {
 proof_awk() {
   printf '%s' '
     function proof_fields(s,   f, m, i) {
-      PROOF_KIND = ""; PROOF_HEAD = ""
+      PROOF_KIND = ""; PROOF_HEAD = ""; PROOF_QUESTION = ""; PROOF_READER = ""; PROOF_RESULT = ""; PROOF_SCOPE = ""
       if (s !~ /^proved:[ \t]/) return 0
       m = split(s, f, /[ \t]+/)
       for (i = 2; i <= m; i++) {
         if (f[i] ~ /^kind=/) PROOF_KIND = substr(f[i], 6)
         else if (f[i] ~ /^head=/) PROOF_HEAD = substr(f[i], 6)
+        else if (f[i] ~ /^question=/) PROOF_QUESTION = substr(f[i], 10)
+        else if (f[i] ~ /^reader=/) PROOF_READER = substr(f[i], 8)
+        else if (f[i] ~ /^result=/) PROOF_RESULT = substr(f[i], 8)
+        else if (f[i] ~ /^scope=/) PROOF_SCOPE = substr(f[i], 7)
       }
       return (PROOF_KIND ~ /^[a-z]+$/ && PROOF_HEAD ~ /^[0-9a-f]+$/ && length(PROOF_HEAD) >= 7 && length(PROOF_HEAD) <= 40)
     }
   '
 }
 
-# proof_last <plan> <kind> -> the head of the LAST `proved:` line of <kind> inside the plan's
-# unfenced `## SDLC State`, or nothing. Later lines are newer: the writer only appends.
+# proof_last <plan> <kind> [<question>] -> the head of the LAST `proved:` line of <kind> inside
+# the plan's unfenced `## SDLC State`, or nothing. Later lines are newer: the writer only appends.
+# With a <question>, the last line of that kind carrying `question=<question>` (wave-27 T2); with
+# none, the last line of the kind whatever its question, 1.11.0's reading.
 proof_last() {
-  _proof_last_read "$1" "$2" head
+  _proof_last_read "$1" "$2" head "${3:-}"
 }
 
-# proof_last_line <plan> <kind> -> that same last line, whole, or nothing: what a refusal quotes
-# when it names the proof it read (head and evidence), so no caller parses the plan itself.
+# proof_last_line <plan> <kind> [<question>] -> that same last line, whole, or nothing: what a
+# refusal quotes when it names the proof it read (head and evidence), so no caller parses the plan.
 proof_last_line() {
-  _proof_last_read "$1" "$2" line
+  _proof_last_read "$1" "$2" line "${3:-}"
 }
 
-# _proof_last_read <plan> <kind> <head|line> -> the one reader behind the two above.
+# _proof_last_read <plan> <kind> <head|line> [<question>] -> the one reader behind the two above.
 _proof_last_read() {
-  local plan="$1" kind="$2" what="$3"
+  local plan="$1" kind="$2" what="$3" q="${4:-}"
   [ -f "$plan" ] || return 0
-  awk -v k="$kind" -v what="$what" "$(proof_awk)"'
+  awk -v k="$kind" -v what="$what" -v q="$q" "$(proof_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_fields($0) && PROOF_KIND == k { last = PROOF_HEAD; lastline = $0 }
+    insdlc && proof_fields($0) && PROOF_KIND == k && (q == "" || PROOF_QUESTION == q) { last = PROOF_HEAD; lastline = $0 }
     END { if (last != "") print (what == "line" ? lastline : last) }' "$plan"
 }
 
