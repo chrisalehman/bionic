@@ -376,6 +376,18 @@ detect_rc_claude_proxy() {
   return 0
 }
 
+# The working principles in the user's own CLAUDE.md (wave-27 D16). ONE OWNER FOR
+# THE PREDICATE, for the reason just above: env.sh's `principles_state` compares
+# the block to the shipped text, and setup, doctor and this line all ask it.
+#
+#   present — the block is the shipped text, byte for byte
+#   edited  — a block is there and differs; the user's edit is theirs to keep
+#   absent  — no block: never asked, or asked and declined
+detect_working_principles() {
+  echo "env:working-principles state=$(principles_state)"
+  return 0
+}
+
 # The legacy alias block claude-bootstrap.sh used to write:
 #
 #     # ─── bionic:start ───

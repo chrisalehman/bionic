@@ -339,6 +339,13 @@ bionic_check_claude_proxy() {  # <row id>
   return 0
 }
 
+# Fires on `absent` (an offer) and on `edited` (setup shows the difference and
+# asks again); `present` is done. Neither firing state is a fault, so doctor
+# renders both as `–`, never `✗`.
+bionic_check_working_principles() {  # <row id>
+  [ "$(principles_state)" != "present" ]
+}
+
 # THE PRE-MARKER SPELLING, and the one place it is written down. setup.sh carried
 # it as `SETUP_ALIAS_PATTERN` until 1.5.1; the predicate that reads it lives here
 # now, and setup's removal step reads this same name rather than a second copy.
@@ -732,6 +739,7 @@ _bionic_checks_build() {
   # predicate rather than a second reading of the same file.
   _bionic_checks_emit "legacy-permission-block" "legacy permission block" "bionic_check_legacy_permission_block" "setup" "legacy-permission-block" "$r_setup"
   _bionic_checks_emit "permission-mode" "default permission mode" "bionic_check_permission_mode" "setup" "permission-mode" "$r_setup"
+  _bionic_checks_emit "working-principles" "working principles" "bionic_check_working_principles" "setup" "working-principles" "$r_setup"
 
   _bionic_checks_emit "statusline-npx" "statusLine command" "bionic_check_statusline_npx" "setup" "tool:ccstatusline" "$r_setup"
 
