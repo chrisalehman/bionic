@@ -5349,6 +5349,34 @@ expect_contains "PU.4 …saying so" "no floor proof" "$PF_S"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu4-full")"
 expect_eq "PU.4 …and the plan's first full run is ADMITTED" "allow" "$GATE_VERDICT"
 
+# THE RUN WAITS FOR THE RUN THE WALL ADMITS (wave-26 T64; AC-3.4). Integrate's `proof:floor` read
+# stands only while the state is covered or bounded, so on PU.1's change it waits, naming a full
+# run on the head; this wall must keep admitting exactly that run, or the two would deadlock. A
+# reads table at current: 8: the floor and review rows landed, integrate pending on its kind
+# default, a floor proof at the base and a new file under a directory no suite names since.
+REPO=$(pf_repo rpu64)
+write_attestation "$REPO" "$SID_A"
+PF_H=$(git -C "$REPO" rev-parse HEAD)
+pf_commit "$REPO" newdir/zz.sh 'new'
+pf_plan "$REPO" "$PF_H"
+awk '{ print } /^approved-by:/ { print "proved: kind=review head='"$PF_H"' at=2026-10-04T00:00:00Z evidence=record/w99-review.md" }' \
+  "$(pf_plan_path "$REPO")" > "$SANDBOX/pu64.tmp"
+{ sed 's/^current: 5$/current: 8/' "$SANDBOX/pu64.tmp"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/one.sh |  | landed |\n'
+  printf '| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | .bionic/docs/record/w99-floor.txt |  | landed |\n'
+  printf '| T2 | 6 | review | the review | critic | — | 30 | REQ-1 | .bionic/docs/record/w99-review.md |  | landed |\n'
+  printf '| T3 | 8 | integrate | merge | — | — | 10 | REQ-1 | — |  | pending |\n'
+} > "$(pf_plan_path "$REPO")"
+PF_W64="$( . "$PF_LIB_DIR/units.sh" >/dev/null 2>&1; units_waiting "$(pf_plan_path "$REPO")" 8 2>/dev/null)"
+expect_contains "PU.64 precondition: integrate waits for a full run on this head (the ready set's own wait)" \
+  "proof:floor: the head moved past the floor proof at ${PF_H:0:12} in a way the map cannot bound (the map answers newdir/zz.sh with no suite)" \
+  "$PF_W64"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w-pu64-full")"
+expect_eq "PU.64 …and the full run it waits for is ADMITTED (the wait and the wall do not deadlock)" "allow" "$GATE_VERDICT"
+expect_status "PU.64 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
 # UNBOUNDED IS NOT ENOUGH WHILE A ROW THE FLOOR WAITS ON STILL WRITES TRACKED FILES. A full run
 # over a head that such a row is about to move proves a tree that does not survive it landing.
 # ONLY THOSE ROWS HOLD IT (wave-26 T52; review 14 B1, ruling R1): through T5 this row asserted

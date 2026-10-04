@@ -1167,6 +1167,72 @@ unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+section "FLOOR-WALL: the turn-end wall never demands an integrate row whose floor proof the change has outrun (wave-26 T64; REQ-3 AC-3.4)"
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# THE WALL'S READY SET IS THE TICK'S (lib/units.sh), so the rule that integrate's `proof:floor`
+# stands only while proof_state answers covered or bounded reaches the turn end too. The fixture
+# is a git repository on `wave/99-fl` with no `impact-command:`, so any change past the floor
+# proof is unbounded; writers=1 and no writer open, so a ready integrate row is a fillable gap.
+# Each proof line is written by lib/proof.sh's own writer pair at the head the checkout is at.
+# A new file lands past the proof: the wall demands nothing, while the tick says why the row
+# waits. The differential records a floor proof at the new head: the same wall refuses the turn,
+# naming T3.
+fl_git() { git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid "${@:2}"; }
+fl_prove() {  # <project> <kind> -> a proof line at the checkout's head, by proof_line + proof_add_line
+  local p="$1/.bionic/docs/plans/epic-99-fixture/wave-99-fl.plan.md" out
+  out="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh" >/dev/null 2>&1
+          proof_add_line "$p" "$(proof_line "$2" "$(fl_git "$1" rev-parse HEAD)" 2026-10-04T12:00:00Z "record/fl/$2.txt")")" \
+    && printf '%s\n' "$out" > "$p"
+}
+fl_fixture() {  # -> project dir: proofs at the base, then a new file past them
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  fl_git "$d" init -q 2>/dev/null; fl_git "$d" checkout -q -b wave/99-fl 2>/dev/null
+  printf '.bionic/\n' > "$d/.gitignore"; fl_git "$d" add .gitignore; fl_git "$d" commit -qm base
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 8\nworking-branch: wave/99-fl\n'
+    printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 8: in progress\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the build | implementor | — | 15m | REQ-x | a.sh | landed |  |\n'
+    printf '| T5 | 5 | verify | the floor | test-runner | — | 15m | REQ-x | .bionic/docs/record/fl/floor.txt | landed |  |\n'
+    printf '| T2 | 6 | review | the review | critic | — | 15m | REQ-x | .bionic/docs/record/fl/review.md | landed |  |\n'
+    printf '| T3 | 8 | integrate | merge to main | implementor | — | 15m | REQ-x | — | pending |  |\n'
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-99-fl.plan.md"
+  fl_prove "$d" floor; fl_prove "$d" review
+  mkdir -p "$d/newdir"; printf 'new\n' > "$d/newdir/x.sh"; fl_git "$d" add newdir; fl_git "$d" commit -qm 'a new file'
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-99-fl.plan.md"
+  roster_header > "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+require_helpers fl_fixture
+
+FL_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$FL_RING"
+export BIONIC_PRESSURE_RING="$FL_RING" BIONIC_NOW_EPOCH=1700000000
+FL_TX="$(mktemp)"
+FL_D="$(fl_fixture)"
+expect_contains "FL0: the tick on the fixture says integrate waits for a full run (the ready set's reason)" \
+  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at" "$(fo_tick "$FL_D")"
+sd_turn "$FL_TX" u-fl-1
+s7_fire "$FL_D" "$FL_TX"
+expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is unbounded" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+fl_prove "$FL_D" floor
+rm -f "$FL_D/.bionic/tmp/tick-digest-$SID.state"
+expect_contains "FL2 precondition: with a floor proof at the head the tick offers integrate" "poker: FILL T3" "$(fo_tick "$FL_D")"
+sd_turn "$FL_TX" u-fl-2
+s7_fire "$FL_D" "$FL_TX"
+expect_contains "FL2: the differential — the same wall refuses the turn that left the merge undispatched" \
+  "Fillable gap at turn end" "$(reason_of)"
+expect_contains "FL2b: …naming T3" "T3" "$(reason_of)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 section "LS: the turn-end wall records the launches the plan lacks, and refuses on one it cannot (wave-26 T32, D4; review-3 F2)"
 
 # The launch recorder starts `session-poker.sh launch-sync` and does not wait for it, so its
