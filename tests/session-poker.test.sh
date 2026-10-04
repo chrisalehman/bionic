@@ -7925,4 +7925,200 @@ expect_true "44d3 …its script path one argument naming the real file" test -f 
 POKER="$S44_POKER_SAVED"
 unset CLAUDE_CONFIG_DIR
 
+# ============================================================
+section "Section 45 §GATE: a reserved request reaches the lead through the Patrol tick, once (wave-25 T5; REQ-4 AC-4.3; D7)"
+# ============================================================
+#
+# THE GAP. hooks/permission-answer.sh denies a reserved action (anything that leaves the
+# machine, credentials, billing, production infrastructure) and appends one gate line per
+# distinct request to `.bionic/tmp/gate-<lead sid>.state`. Nothing read that file, so a writer's
+# denied push reached the lead only if the writer's report happened to say so. The tick reads it
+# now: a request no tick has raised yet makes the band NOTIFY, prints one GATE line, and puts
+# `gate=<count>:<categories>` last on the decision line. The digest records it as raised, so no
+# later tick raises it again, whatever else moved; a new line raises again, and only itself.
+#
+# FIXTURE FIDELITY. The world is §41's DIGEST world (one open row inside its duration, a fresh
+# panel), so the band without the gate is QUIET and every NOTIFY here is the gate's. Gate lines
+# are written in the hook's own shape (the plan's Interfaces table: `gate/v1|at=|session=|asker=
+# |category=|head=`); §GATE-dup writes them with the REAL hook instead, fed the platform's
+# PermissionRequest payload twice (the shape tests/permission-answer.test.sh §A15 drives).
+#
+# ANTI-VACUITY. The decision-line extractor is proven on the control tick (45a reads QUIET
+# through it) before any `gate=` absence is read through it, and every absence of `gate=` or of
+# a GATE line sits beside a positive `decision=` read through the same extractor on the same
+# output. The hook drive asserts the line exists and has the gate/v1 shape beside its count.
+# fails-when: the tick ignores the gate file, or the hook appends a duplicate.
+
+S45_CFG="$(fake_config_dir s45-gate)"
+export CLAUDE_CONFIG_DIR="$S45_CFG"
+S45_TR="$S45_CFG/projects/-fixture-project/$SID.jsonl"
+gate_of() { printf '%s/.bionic/tmp/gate-%s.state' "$1" "${2:-$SID}"; }
+gate_line() {  # <asker> <category> <head> -> one request in the hook's shape
+  printf 'gate/v1|at=2026-10-03T23:00:00Z|session=%s|asker=%s|category=%s|head=%s\n' "$SID" "$1" "$2" "$3"
+}
+s45_world() {  # <label> -> a repo: armed, one open row inside its duration
+  local r; r="$(make_repo "$1")"; new_roster "$r"; armed_ago "$r"
+  add_row "$r" name=busy deliverable="$r/never-written.md" duration="4 hours" \
+    launched_at="$(iso_ago 60)"
+  printf '%s' "$r"
+}
+s45_line()  { printf '%s\n' "$1" | grep '^poker-tick/v1|' | tail -1; }  # <output> -> the decision line
+s45_field() { s45_line "$1" | tr '|' '\n' | sed -n "s/^$2=//p" | head -1; }  # <output> <key>
+s45_gates() { printf '%s\n' "$1" | grep -c '^poker: GATE ' | tr -d ' '; }  # <output> -> GATE lines
+plant_answer "$S45_TR" fresh "busy:running"
+
+# ---------- §GATE-a: no file and an empty file change nothing; one line raises NOTIFY ----------
+R45="$(s45_world s45-gate)"
+poke "$R45" tick
+expect_eq "45a precondition: no gate file, the band read off the decision line is QUIET (exit 0)" \
+  "QUIET|0" "$(s45_field "$OUT" decision)|$RC"
+expect_eq "45a2 …and the line carries no gate= field" "" "$(s45_field "$OUT" gate)"
+: > "$(gate_of "$R45")"
+poke "$R45" tick
+expect_regex "45a3 an empty gate file adds nothing to the digest: the next tick is the unchanged line" \
+  "^poker: unchanged since [0-9TZ:-]+ — decision=QUIET$" "$OUT"
+gate_line w99-T1 leaves-the-machine "git push origin wave/99-fx" >> "$(gate_of "$R45")"
+poke "$R45" tick
+expect_eq "45b AC-4.3 a gate line makes the tick decide NOTIFY (exit 1)" "NOTIFY|1" \
+  "$(s45_field "$OUT" decision)|$RC"
+expect_eq "45b2 …with a gate= field: the count and the category" "1:leaves-the-machine" \
+  "$(s45_field "$OUT" gate)"
+expect_regex "45b3 …last on the line, after the fields that were there" \
+  '\|decision=NOTIFY\|total=[0-9]+\|open=[0-9]+(\|[a-z]+=[^|]*)*\|gate=1:leaves-the-machine$' "$(s45_line "$OUT")"
+expect_eq "45b4 …so the open= reader cross-gate's la6_open_tick uses still reads it" "1" \
+  "$(s45_line "$OUT" | sed -n 's/.*decision=[A-Z]*|total=[0-9]*|open=\([0-9]*\).*/\1/p')"
+expect_eq "45b5 …and one GATE line" "1" "$(s45_gates "$OUT")"
+expect_contains "45b6 …naming the asker, the category and the command head" \
+  "poker: GATE w99-T1 — leaves-the-machine: git push origin wave/99-fx" "$OUT"
+expect_contains "45b7 …under a sentence that says what to do with it" "put each GATE line below to the human once" "$OUT"
+
+# ---------- §GATE-once: the next tick does not repeat it, whatever else moved ----------
+poke "$R45" tick
+expect_regex "45c AC-4.3 the next tick with no new line does not repeat it: it is the unchanged line" \
+  "^poker: unchanged since [0-9TZ:-]+ — decision=QUIET$" "$OUT"
+expect_eq "45c2 …exit 0, not NOTIFY's 1" "0" "$RC"
+add_row "$R45" name=busy2 deliverable="$R45/never-written-2.md" duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+plant_answer "$S45_TR" fresh "busy:running" "busy2:running"
+poke "$R45" tick
+expect_eq "45c3 another fact moved, so the tick prints in full and decides on the rows" "QUIET" \
+  "$(s45_field "$OUT" decision)"
+expect_eq "45c4 …the request already raised is not raised again: no gate= field" "" "$(s45_field "$OUT" gate)"
+expect_eq "45c5 …and no GATE line" "0" "$(s45_gates "$OUT")"
+armed_ago "$R45"
+poke "$R45" tick
+expect_eq "45c6 a re-arm drops the digest's hash, so the next tick prints in full" "QUIET" \
+  "$(s45_field "$OUT" decision)"
+expect_eq "45c7 …and keeps what was raised: no gate= field" "" "$(s45_field "$OUT" gate)"
+
+# ---------- §GATE-new: a new request raises again, and only itself ----------
+gate_line lead credentials "cat ~/.ssh/id_ed25519" >> "$(gate_of "$R45")"
+poke "$R45" tick
+expect_eq "45d a new line after a raised one raises again" "NOTIFY|1:credentials" \
+  "$(s45_field "$OUT" decision)|$(s45_field "$OUT" gate)"
+expect_eq "45d2 …with one GATE line" "1" "$(s45_gates "$OUT")"
+expect_contains "45d3 …the new request's" "poker: GATE lead — credentials: cat ~/.ssh/id_ed25519" "$OUT"
+expect_absent "45d4 …and not the one already raised" "git push origin wave/99-fx" "$OUT"
+
+# ---------- §GATE-two: two requests at once are two lines and one NOTIFY ----------
+R45T="$(s45_world s45-two)"
+{ gate_line w99-T1 leaves-the-machine "gh pr create --fill"
+  gate_line w99-T2 credentials "gh auth token"
+} > "$(gate_of "$R45T")"
+poke "$R45T" tick
+expect_eq "45e two different requests: one decision line, NOTIFY" "1|NOTIFY" \
+  "$(printf '%s\n' "$OUT" | grep -c '^poker-tick/v1|' | tr -d ' ')|$(s45_field "$OUT" decision)"
+expect_eq "45e2 …carrying the count and both categories, sorted" "2:credentials,leaves-the-machine" \
+  "$(s45_field "$OUT" gate)"
+expect_eq "45e3 …and two GATE lines" "2" "$(s45_gates "$OUT")"
+expect_contains "45e4 …one for each request" "poker: GATE w99-T2 — credentials: gh auth token" "$OUT"
+expect_contains "45e5 …the other's too" "poker: GATE w99-T1 — leaves-the-machine: gh pr create --fill" "$OUT"
+
+# ---------- §GATE-bad: a malformed line is ignored, and the tick still decides ----------
+R45M="$(s45_world s45-malformed)"
+{ printf 'not a gate line\n'
+  printf 'gate/v1|at=2026-10-03T23:00:00Z|session=%s|asker=w99-T1|head=no category here\n' "$SID"
+  printf 'gate/v1|at=2026-10-03T23:00:00Z|session=another-session|asker=w99-T1|category=billing|head=a neighbour request\n'
+  printf 'gate/v9|at=2026-10-03T23:00:00Z|session=%s|asker=w99-T1|category=billing|head=a future schema\n' "$SID"
+  printf 'gate/v1|at=2026-10-03T23:00:00Z|session=%s|asker=|category=billing|head=no asker\n' "$SID"
+} > "$(gate_of "$R45M")"
+poke "$R45M" tick
+expect_eq "45f malformed lines only: the tick completes and decides on the rows (QUIET, exit 0)" \
+  "QUIET|0" "$(s45_field "$OUT" decision)|$RC"
+expect_eq "45f2 …raising none of them: no gate= field" "" "$(s45_field "$OUT" gate)"
+gate_line w99-T1 billing "stripe charges create" >> "$(gate_of "$R45M")"
+poke "$R45M" tick
+expect_eq "45f3 …and a valid line among them is raised alone" "NOTIFY|1:billing|1" \
+  "$(s45_field "$OUT" decision)|$(s45_field "$OUT" gate)|$(s45_gates "$OUT")"
+
+# ---------- §GATE-link: a symlinked gate file is refused, not followed ----------
+R45L="$(s45_world s45-link)"
+gate_line w99-T1 leaves-the-machine "git push --force origin main" > "$TMPROOT/s45-elsewhere.state"
+ln -s "$TMPROOT/s45-elsewhere.state" "$(gate_of "$R45L")"
+poke "$R45L" tick
+expect_eq "45g a symlinked gate file: the tick decides on the rows" "QUIET" "$(s45_field "$OUT" decision)"
+expect_eq "45g2 …the link's target is not raised: no gate= field" "" "$(s45_field "$OUT" gate)"
+expect_absent "45g3 …and its request is not printed" "git push --force origin main" "$OUT"
+expect_contains "45g4 …the refusal is said, as a note" "is a symlink" "$OUT"
+
+# ---------- §GATE-first: the armed tick before any dispatch raises it too ----------
+R45F="$(make_repo s45-first)"; armed_ago "$R45F"
+gate_line lead leaves-the-machine "git push origin wave/99-fx" > "$(gate_of "$R45F")"
+poke "$R45F" tick
+expect_eq "45h no roster yet (armed, nothing dispatched): NOTIFY, gate=, exit 1" \
+  "NOTIFY|1:leaves-the-machine|1" "$(s45_field "$OUT" decision)|$(s45_field "$OUT" gate)|$RC"
+expect_contains "45h2 …with its GATE line" "poker: GATE lead — leaves-the-machine: git push origin wave/99-fx" "$OUT"
+
+# ---------- §GATE-disarm: DISARM outranks NOTIFY, and still carries the request ----------
+R45X="$(make_repo s45-disarm)"; new_roster "$R45X"; armed_ago "$R45X"; delivered_plan "$R45X"
+gate_line lead leaves-the-machine "git push origin main" > "$(gate_of "$R45X")"
+poke "$R45X" tick
+expect_eq "45i a delivered run with a request pending: the band stays DISARM (exit 0)" "DISARM|0" \
+  "$(s45_field "$OUT" decision)|$RC"
+expect_eq "45i2 …and the line still carries gate=" "1:leaves-the-machine" "$(s45_field "$OUT" gate)"
+expect_contains "45i3 …under its GATE line" "poker: GATE lead — leaves-the-machine: git push origin main" "$OUT"
+
+# ---------- §GATE-dup: the REAL hook, asked the same reserved question twice, leaves one line ----------
+# Overridable for the planted defect, never by editing the hook in the tree:
+#   W25_GATE_HOOK_UNDER_TEST=<copy>/hooks/permission-answer.sh bash tests/session-poker.test.sh
+S45_HOOK="${W25_GATE_HOOK_UNDER_TEST:-${BIONIC_HOOKS_DIR}/permission-answer.sh}"
+expect_true "45j precondition: the hook under test exists" test -f "$S45_HOOK"
+gate_ask() {  # <repo> <command> -> sets GATE_ANSWER, the decision's behavior
+  local pl
+  pl="$(jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" \
+    '{session_id:$s, transcript_path:"/dev/null", cwd:$c, permission_mode:"bypassPermissions",
+      hook_event_name:"PermissionRequest", tool_name:"Bash",
+      tool_input:{command:$cmd, description:"a fixture command"}, permission_suggestions:[]}')"
+  GATE_ANSWER="$( cd "$1" && printf '%s' "$pl" \
+    | env HOME="$TMPROOT/s45-home" CLAUDE_PROJECT_DIR="$1" CLAUDE_CODE_SESSION_ID="$SID" bash "$S45_HOOK" 2>/dev/null \
+    | jq -r '.hookSpecificOutput.decision.behavior // "none"' 2>/dev/null )"
+}
+R45H="$(s45_world s45-hook)"
+gate_ask "$R45H" "git push origin wave/99-fx"
+expect_eq "45j2 the lead's git push: the hook denies it" "deny" "$GATE_ANSWER"
+gate_ask "$R45H" "git push origin wave/99-fx"
+expect_eq "45j3 …asked again, denied again" "deny" "$GATE_ANSWER"
+expect_regex "45j4 …and the request is on file in the gate/v1 shape" \
+  "^gate/v1\|at=[0-9TZ:-]+\|session=$SID\|asker=lead\|category=leaves-the-machine\|head=git push origin wave/99-fx$" \
+  "$(head -1 "$(gate_of "$R45H")" 2>/dev/null)"
+expect_eq "45j5 AC-4.3 the same request twice leaves one line" "1" \
+  "$(grep -c '' "$(gate_of "$R45H")" 2>/dev/null | tr -d ' ')"
+poke "$R45H" tick
+expect_eq "45j6 …which the tick raises once: NOTIFY, one request, one GATE line" "NOTIFY|1:leaves-the-machine|1" \
+  "$(s45_field "$OUT" decision)|$(s45_field "$OUT" gate)|$(s45_gates "$OUT")"
+
+# ---------- §GATE-prompt: the Patrol prompt says what gate= means, and the version moved ----------
+poke "$R45T" prompt
+expect_contains "45k the Patrol prompt names the gate= field" "gate=" "$OUT"
+expect_contains "45k2 …as a gate act for the human, through the human's own notify channel" \
+  "through the human's own notify channel" "$OUT"
+expect_contains "45k3 …and not to be performed" "do not perform it" "$OUT"
+S45_V="$(printf '%s\n' "$OUT" | sed -n 's/^bionic-patrol session=[^ ]* v=\([0-9]*\) .*/\1/p')"
+expect_regex "45k4 the prompt's version moved past 2, the version before the gate sentence" '^([3-9]|[1-9][0-9]+)$' "$S45_V"
+printf 'patrol-digest/v1\nprompt_version=2\n' > "$(digest_of "$R45T")"
+poke "$R45T" tick
+expect_contains "45k5 …so a Patrol armed under v=2 is told to re-arm" \
+  "its prompt is v=2 and this poker prints v=${S45_V}" "$OUT"
+unset CLAUDE_CONFIG_DIR
+
 finish
