@@ -1035,27 +1035,25 @@ if [ -n "$IS_START" ]; then
   if [ -z "$ROW" ] && [ -z "${RESTART_AFTER_ACK:-}" ]; then
     case "$START_TYPE" in
       bionic:*)
-        TYPE_PICK=$(awk -v sid="$BIONIC_SID" -v ty="$START_TYPE" -v pre="roster-state/${ROSTER_VERSION}|" '
-          function kv(line, key,   i, n, parts) {
-            n = split(line, parts, "|")
-            for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-            return ""
-          }
+        # The field reader is roster.sh's own (`_roster_kv`), loaded lazily as the duplicate-start
+        # check above loads it: only a start both joins missed ever pays for it.
+        roster_sh_load
+        TYPE_PICK=$(awk -v sid="$BIONIC_SID" -v ty="$START_TYPE" -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
           index($0, pre) == 1 {
-            if (kv($0, "session") != sid) next
-            u = kv($0, "tool_use_id"); if (u == "") next
+            if (_roster_kv($0, "session") != sid) next
+            u = _roster_kv($0, "tool_use_id"); if (u == "") next
             if (!(u in last)) order[++n] = u
             last[u] = $0
-            if (kv($0, "agent_id") != "" || kv($0, "teammate_id") != "") claimed[u] = 1
+            if (_roster_kv($0, "agent_id") != "" || _roster_kv($0, "teammate_id") != "") claimed[u] = 1
           }
           END {
             c = 0
             for (i = 1; i <= n; i++) {
               u = order[i]
               if (u in claimed) continue
-              st = kv(last[u], "status")
+              st = _roster_kv(last[u], "status")
               if (st != "intended" && st != "confirmed") continue
-              if (kv(last[u], "subagent_type") != ty) continue
+              if (_roster_kv(last[u], "subagent_type") != ty) continue
               c++; pick = last[u]
             }
             print c
