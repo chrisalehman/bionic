@@ -2705,9 +2705,13 @@ plan_verb_value_ok() {
 
 # A row id the table can key on: one token, a letter or digit first, then letters, digits,
 # `.`, `_` or `-` (wave-24 T27, C1). 0 when it is one.
+# ASCII BY SPELLING, NOT BY RANGE (wave-24 T29; critic addendum A3): `[A-Za-z]` is a collation
+# range, and /bin/bash 3.2 under a UTF-8 locale matched é, ö, ß and a fullwidth Ｔ with it, so
+# `Ｔ9` keyed a row that reads as T9. Every admitted character is listed, so no locale widens it.
+PV_ID_ALNUM='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 plan_verb_id_ok() {
-  case "$1" in [A-Za-z0-9]*) : ;; *) return 1 ;; esac
-  case "$1" in *[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$1" in ["$PV_ID_ALNUM"]*) : ;; *) return 1 ;; esac
+  case "$1" in *[!"$PV_ID_ALNUM"._-]*) return 1 ;; esac
   return 0
 }
 

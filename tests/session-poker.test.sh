@@ -7658,6 +7658,16 @@ poke "$R42" ledger-add 'T9|x' agent=y
 s42_unchanged "42d15d §VERB-bad C1 ledger-add of an id carrying a pipe" 1 "$P42"
 poke "$R42" ledger-add 'T9 x' agent=y
 s42_unchanged "42d15e §VERB-bad C1 ledger-add of an id of two words" 1 "$P42"
+# THE GRAMMAR IS ASCII UNDER ANY LOCALE (wave-24 T29; critic addendum A3). `[A-Za-z]` is a
+# collation range, and /bin/bash 3.2 under a UTF-8 locale let é, ö, ß and a fullwidth Ｔ
+# through, so `Ｔ9` keyed a row that reads as T9. Driven by /bin/bash itself under UTF-8.
+s42_u8() {  # <verb args...> -> sets OUT, RC; /bin/bash 3.2, a UTF-8 locale
+  OUT="$( cd "$R42" && env LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 CLAUDE_CODE_SESSION_ID="$SID" /bin/bash "$POKER" "$@" 2>&1 )"; RC=$?
+}
+for _s42_id in 'é9' 'Tö' 'Ｔ9' 'T9ß'; do
+  s42_u8 ledger-add "$_s42_id" agent=y
+  s42_unchanged "42d15i §VERB-bad A3 ledger-add of the non-ASCII id $_s42_id under /bin/bash and UTF-8" 1 "$P42"
+done
 poke "$R42" ledger-set 'T1|x' notes=y
 s42_unchanged "42d15f §VERB-bad C1 ledger-set of an id carrying a pipe" 1 "$P42"
 poke "$R42" task-set "T5
@@ -7790,6 +7800,9 @@ s42_snap "$R42" "$P42"
 poke "$R42" ledger-add T2-critic agent=critic
 expect_eq "42g15b §VERB-line ledger-add of a suffixed id (T2-critic) exits 0" "0" "$RC"
 expect_eq "42g15c …one row added" "1 0;" "$(s42_numstat "$R42")"
+# A3's positive, same driver as 42d15i: an ASCII id under /bin/bash and UTF-8 is admitted.
+s42_u8 ledger-add T2-u8 agent=critic
+expect_eq "42g15d …and the same /bin/bash UTF-8 driver admits an ASCII id (T2-u8)" "0" "$RC"
 s34_gate "$R42"
 expect_eq "42g16 …and after all five verbs the next commit is admitted" "0" "$GATE_RC"
 
