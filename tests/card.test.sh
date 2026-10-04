@@ -1627,4 +1627,144 @@ s2h_refusal "S2-LABEL 9: ownership with a stray argument" ownership extra
 whole_card step3 "$PLAN_FIX" ownership
 expect_eq "S2-LABEL 10: a sub-view on any other step stays a usage error" "64" "$WC_RC"
 
+# §S2-TAIL — review-3 F3, F4, F5 on the Step-2 card: a lazy continuation line of a Worth-your-eye
+# bullet stays in that bullet; the spec's `design:` pointer is named under Artifacts; and an
+# artifact path of real length is folded at a `/` so the card holds the budget.
+S2T_SPEC="${CARD_SANDBOX}/wave-99-tail.spec.md"
+S2T_ADR='adrs/epic-23-bionic-tech-debt/adr-041-the-landing-gate-proves-the-combined-state-before-it-merges.md'
+awk -v adr="$S2T_ADR" '
+  /^base-sha:/ { print; print "adrs: " adr; print "design: specs/epic-99/epic-99-design.md"; next }
+  /^### 3\. Ownership table/ {
+    print "### Worth your eye\n\n- **First risk.** The opening half\nLAZYTAIL of the same bullet.\n- **Second risk.** Its own entry.\n" }
+  { print }' "$SPEC_FIX" > "$S2T_SPEC"
+whole_card step2 "$S2T_SPEC"; S2T="$WC_OUT"
+expect_eq "S2-TAIL 1: step2 exits 0 on the tail fixture" "0" "$WC_RC"
+expect_contains "S2-TAIL 2: F3 — an unindented continuation line stays in its bullet" \
+  "    First risk. The opening half LAZYTAIL of the same bullet." "$S2T"
+expect_contains "S2-TAIL 2a: …and the next bullet is still its own entry" "    Second risk. Its own entry." "$S2T"
+expect_contains "S2-TAIL 3: F4 — Artifacts names the spec's design: pointer, under the docs root" \
+  "    design  .bionic/docs/specs/epic-99/epic-99-design.md" "$S2T"
+expect_contains "S2-TAIL 3a: the plain spec's card names its spec" "    spec  ${SPEC_FIX}" "$S2"
+expect_absent "S2-TAIL 3b: …and no design line, because it declares no design: pointer" "    design  " "$S2"
+expect_eq "S2-TAIL 4: F5 — a real-length ADR path is folded at a slash, its head on the label's line" \
+  "1" "$(printf '%s\n' "$S2T" | grep -c -x -F '    adr  .bionic/docs/adrs/epic-23-bionic-tech-debt/' | tr -cd '0-9')"
+expect_eq "S2-TAIL 4a: …and its tail on the next line, under the path's first column" \
+  "1" "$(printf '%s\n' "$S2T" | grep -c -x -F '         adr-041-the-landing-gate-proves-the-combined-state-before-it-merges.md' | tr -cd '0-9')"
+expect_empty "S2-TAIL 4b: …so no line of the card is wider than the budget (the spec's own path line excepted)" \
+  "$(over_budget "$(without_artifact_path "$S2T")")"
+expect_contains "S2-TAIL 4c: a short ADR path still prints whole on one line" \
+  "    adr  .bionic/docs/adrs/epic-99/adr-099-fixture.md" "$S2H"
+
+# ---------------------------------------------------------------------------
+section "Section 12: T18 — §S3-SHAPE §S3-CHAIN, the Step-3 card approves the plan and the matrix only"
+#
+# AC-2.4: the Step-3 card cites the design by path, shows each task with the criteria it serves,
+# and repeats neither the eval counts nor the purpose (the Goal paragraph that was its Problem
+# block). AC-7.1: it prints the longest chain with its minutes and the peak width, computed from
+# the plan's derived graph (`units_edges` piped into `units_chain`). The chain fixture is built
+# here, so the chain and the width are known by construction rather than copied from a plan.
+
+S3S_PLAN="${CARD_SANDBOX}/wave-99-shape.plan.md"
+awk '/^base-sha:/ { print; print "spec: specs/epic-99/wave-99-fixture.spec.md"; next } { print }' \
+  "$PLAN_FIX" > "$S3S_PLAN"
+whole_card step3 "$S3S_PLAN"; S3S="$WC_OUT"
+expect_eq "S3-SHAPE 1: step3 exits 0 on the shape fixture" "0" "$WC_RC"
+expect_contains "S3-SHAPE 2: Artifacts cites the design by path, from the plan's spec:" \
+  "    spec  .bionic/docs/specs/epic-99/wave-99-fixture.spec.md" "$S3S"
+expect_contains "S3-SHAPE 2a: …beside the plan's own path" "    plan  ${S3S_PLAN}" "$S3S"
+expect_contains "S3-SHAPE 2b: a plan with no spec: still names itself" "    plan  ${PLAN_FIX}" "$S3"
+expect_absent "S3-SHAPE 2c: …and prints no spec line it cannot fill" "    spec  " "$S3"
+expect_contains "S3-SHAPE 3: T1's row carries the criteria it serves" "serves REQ-1" "$S3S"
+expect_contains "S3-SHAPE 3a: …and T2's its own" "serves REQ-2" "$S3S"
+S3S_T1="$(printf '%s\n' "$S3S" | sed -n '/^    T1 /,/^    T2 /p')"
+expect_contains "S3-SHAPE 3b: …inside T1's own row, not elsewhere on the card" "serves REQ-1" "$S3S_T1"
+expect_contains "S3-SHAPE 4: the Verification line stays" "3 matrix rows" "$S3S"
+expect_absent "S3-SHAPE 4a: …and no eval-count line repeats the design's counts" "criteria ·" "$S3S"
+expect_absent "S3-SHAPE 4b: …nor an Eval design block" "  Eval design" "$S3S"
+expect_contains "S3-SHAPE 5: Branches stays" "  Branches" "$S3S"
+expect_absent "S3-SHAPE 5a: …and the purpose is not repeated: no Problem block" "  Problem" "$S3S"
+expect_absent "S3-SHAPE 5b: …and not the Goal paragraph either" "Land the fixture's two requirements" "$S3S"
+L3_BR="$(s2h_line "$S3S" '  Branches')"
+L3_TASKS="$(printf '%s\n' "$S3S" | grep -n '^  Tasks' | head -1 | cut -d: -f1)"
+L3_CW="$(s2h_line "$S3S" '  Chain and width')"
+L3_VER="$(s2h_line "$S3S" '  Verification')"
+L3_ART="$(s2h_line "$S3S" '  Artifacts')"
+L3_Q="$(s2h_line "$S3S" 'Do you approve this plan? Reply "approved" to approve it.')"
+L3_SUB="$(s2h_line "$S3S" 'show evals <req> · show task <n> · explain <decision>')"
+S3S_ORDER=no
+if [ "${L3_BR:-0}" -ge 1 ] && [ "${L3_TASKS:-0}" -gt "${L3_BR:-0}" ] && [ "${L3_CW:-0}" -gt "${L3_TASKS:-0}" ] \
+  && [ "${L3_VER:-0}" -gt "${L3_CW:-0}" ] && [ "${L3_ART:-0}" -gt "${L3_VER:-0}" ] \
+  && [ "${L3_Q:-0}" -gt "${L3_ART:-0}" ] && [ "${L3_SUB:-0}" -gt "${L3_Q:-0}" ]; then S3S_ORDER=yes; fi
+expect_eq "S3-SHAPE 6: Branches, Tasks, Chain and width, Verification, Artifacts, the question, the sub-views — in that order" \
+  "yes" "$S3S_ORDER"
+
+# §S3-CHAIN. Eight build rows; the table has a `reads` column, so the three waits come from what a
+# row reads, not from its deps cell (every deps cell is a dash). By construction:
+#   T1 (30) → T2 (60) → T3 (45)   T2 reads lib/a.sh, which T1 writes; T3 reads lib/b.sh (T2's)
+#   T4 (20) → T5 (20)             T5 reads lib/d.sh (T4's)
+#   T6, T7, T8 (10 each)          no reads
+# The longest chain is T1, T2, T3 at 135 minutes. At the start T1, T4, T6, T7 and T8 run together,
+# so the peak width is 5 under a ceiling of 8, and 3 under a ceiling of 3. The dependency depths
+# are 0 (five rows), 1 (T2, T5) and 2 (T3) — a card that walked the deps cell would see one batch.
+S3C_PLAN="${T10_ROOT_CFG}/wave-97-chain.plan.md"
+{
+  printf '%s\n' '---' 'sdlc-step: 3' 'scale: wave' 'walk: required' 'rigor: peer-reviewed' \
+    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' \
+    'working-branch: wave/97-chain' 'integration-branch: main' 'base-sha: abc1234' '---' '' \
+    '# fixture wave 97 · plan' '' '## Goal' '' 'Run eight tasks whose chain and width are known.' '' \
+    '## SDLC State' '' 'integration-branch: main' 'current: 3' '' '## Tasks' '' \
+    '| id | step | kind | task | agent | deps | size | serves | Files | reads | worktree | status |' \
+    '|---|---|---|---|---|---|---|---|---|---|---|---|'
+  s3c_row() { printf '| %s | 4 | build | REQ-1: task %s. complexity: standard | implementor | — | %s | REQ-1 | %s | %s | — | pending |\n' "$@"; }
+  s3c_row T1 one 30 lib/a.sh '—'
+  s3c_row T2 two 60 lib/b.sh lib/a.sh
+  s3c_row T3 three 45 lib/c.sh lib/b.sh
+  s3c_row T4 four 20 lib/d.sh '—'
+  s3c_row T5 five 20 lib/e.sh lib/d.sh
+  s3c_row T6 six 10 lib/f.sh '—'
+  s3c_row T7 seven 10 lib/g.sh '—'
+  s3c_row T8 eight 10 lib/h.sh '—'
+  printf '%s\n' '' '## Verification Matrix' '' '| AC | tier | status | evidence | auditor |' \
+    '|---|---|---|---|---|' '| AC-1.1 | T2 | pending | — | — |'
+} > "$S3C_PLAN"
+whole_card step3 "$S3C_PLAN"; S3C="$WC_OUT"
+expect_eq "S3-CHAIN 1: step3 exits 0 on the chain fixture" "0" "$WC_RC"
+expect_eq "S3-CHAIN 2: the card prints the longest chain with its minutes" \
+  "1" "$(printf '%s\n' "$S3C" | grep -c -x -F '    longest chain  T1 → T2 → T3 · 135 min' | tr -cd '0-9')"
+expect_eq "S3-CHAIN 3: …and the peak width under the writer ceiling" \
+  "1" "$(printf '%s\n' "$S3C" | grep -c -x -F '    peak width     5 of 8 writers' | tr -cd '0-9')"
+expect_contains "S3-CHAIN 4: the batches come from the same derived graph: batch 1 holds five" "batch 1 · 5 of 8" "$S3C"
+expect_contains "S3-CHAIN 4a: …batch 2 the two rows that read batch 1's files" "batch 2 · 2 of 8" "$S3C"
+expect_contains "S3-CHAIN 4b: …and batch 3 the end of the chain" "batch 3 · 1 of 8" "$S3C"
+S3C3_PLAN="${T10_ROOT_CFG}/wave-97-chain3.plan.md"
+sed 's/writers=8/writers=3/' "$S3C_PLAN" > "$S3C3_PLAN"
+whole_card step3 "$S3C3_PLAN"; S3C3="$WC_OUT"
+expect_eq "S3-CHAIN 5: under a ceiling of 3 the peak width is capped at 3" \
+  "1" "$(printf '%s\n' "$S3C3" | grep -c -x -F '    peak width     3 of 3 writers' | tr -cd '0-9')"
+expect_eq "S3-CHAIN 5a: …and the chain does not change" \
+  "1" "$(printf '%s\n' "$S3C3" | grep -c -x -F '    longest chain  T1 → T2 → T3 · 135 min' | tr -cd '0-9')"
+# A legacy table (deps, no reads column) is the same graph read from its deps cells: T10_WAVE_2B
+# is five 30-minute rows, T4 after T1 and T5 after T1, T2 and T3. Two chains tie at 60 minutes;
+# the one whose ids come first is T1, T4.
+expect_eq "S3-CHAIN 6: a deps-only plan prints its chain from the deps cells" \
+  "1" "$(printf '%s\n' "$T10_2B" | grep -c -x -F '    longest chain  T1 → T4 · 60 min' | tr -cd '0-9')"
+expect_eq "S3-CHAIN 6a: …and its peak width" \
+  "1" "$(printf '%s\n' "$T10_2B" | grep -c -x -F '    peak width     3 of 8 writers' | tr -cd '0-9')"
+# A chain too long for one line folds inside the budget: twenty 5-minute rows, each after the last.
+S3L_PLAN="${T10_ROOT_CFG}/wave-97-long.plan.md"
+{
+  sed -n '1,/^|---|/p' "$T10_WAVE_2B"
+  i=1; prev='—'
+  while [ "$i" -le 20 ]; do
+    printf '| T%s | 4 | build | REQ-1: link %s. complexity: standard | implementor | %s | 5 | REQ-1 | lib/l%s.sh | — | pending |\n' \
+      "$i" "$i" "$prev" "$i"
+    prev="T$i"; i=$(( i + 1 ))
+  done
+} > "$S3L_PLAN"
+whole_card step3 "$S3L_PLAN"; S3L="$WC_OUT"
+expect_contains "S3-CHAIN 7: a twenty-row chain names its first row" "longest chain  T1 → T2 → T3" "$S3L"
+expect_contains "S3-CHAIN 7a: …and ends on its last with the whole sum" "T20 · 100 min" "$S3L"
+expect_empty "S3-CHAIN 7b: …and no line of that card is wider than the budget" \
+  "$(over_budget "$(without_artifact_path "$S3L")")"
+
 finish

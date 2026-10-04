@@ -6,7 +6,7 @@
 # checks and its prototype check, the tick's FILL, and the governing-skill Step-3 wall — so
 # that none of them carries a parser of its own. Three questions, one per function:
 #
-#   §1 units_rows <plan>          the twelve fields, in the FIXED order, whatever order the
+#   §1 units_rows <plan>          the thirteen fields, in the FIXED order, whatever order the
 #                                 table's columns are written in
 #   §10 the `worktree` cell        slot 11, OPTIONAL: a table without the column is valid
 #                                 and reads it empty (wave-14 REQ-2, ADR-027)
@@ -256,7 +256,7 @@ expect_eq "sourcing units.sh prints nothing on stdout" "" "$(bash -c '. "$1"' _ 
 expect_eq "…and nothing on stderr" "" "$(bash -c '. "$1"' _ "$LIB" 2>&1 >/dev/null)"
 
 # ============================================================
-section "1 — units_rows: the live table, twelve fields per row, in the fixed order"
+section "1 — units_rows: the live table, thirteen fields per row, in the fixed order"
 # ============================================================
 
 expect_eq "the live specimen yields one line per data row (22)" "22" "$(nlines "$ROWS_LIVE")"
@@ -266,13 +266,13 @@ expect_eq "the live specimen yields one line per data row (22)" "22" "$(nlines "
 # ends in two EMPTY fields rather than stopping at ten. A record whose width depended on which
 # columns the table happened to carry would put every caller back to counting cells, which is
 # the whole of what this reader exists to stop.
-expect_eq "every line carries exactly twelve tab-separated fields" "22" \
-  "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' 'NF == 12 { n++ } END { print n + 0 }')"
+expect_eq "every line carries exactly thirteen tab-separated fields" "22" \
+  "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' 'NF == 13 { n++ } END { print n + 0 }')"
 
 # THE FIRST ROW, WHOLE. Written out by hand from the plan, which is the point: a row asserted
 # against a value the reader itself produced would pass on any consistent misreading.
 expect_eq "T1 renders id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base in that order" \
-  "$(printf 'T1\t3\tdoc\tPlan, Tasks and matrix written; Step-3 card approved\torchestrator\t—\t30m\tall\tplan\tlanded\t\t')" \
+  "$(printf 'T1\t3\tdoc\tPlan, Tasks and matrix written; Step-3 card approved\torchestrator\t—\t30m\tall\tplan\tlanded\t\t\t')" \
   "$(printf '%s\n' "$ROWS_LIVE" | sed -n '1p')"
 
 # THE COLLISION measure §4.3 names, asserted field by field. In the shipped five-column
@@ -444,10 +444,12 @@ section "6 — units_validate: one line per broken invariant, naming the id and 
 
 VAL_BAD="$(call units_validate "$SANDBOX/broken.md")"
 
-# SEVEN (wave-20 REQ-5, AC-5.2). Seven invariants are broken, and the transitive arm reports
-# ONE line per offending row: T7 reaches only T1, so it misses X1, T4, T5 and T6, which is
-# one line naming four ids. Through 1.8.6 that was four lines (one per missing edge).
-expect_eq "a table breaking seven invariants reports seven violations" "7" "$(nlines "$VAL_BAD")"
+# SIX INVARIANTS ARE BROKEN, one row each. T7, a Step-6 row reaching only T1, used to be the
+# seventh — "every Step-5+ row depends transitively on every Step-4 row" — and that rule is
+# gone (wave-26 T2, D2): a row waits for what it reads, never for every build row. So every
+# line names one of the six offending rows, and T7 draws none.
+expect_eq "every violation line names one of the six offending rows" "" \
+  "$(printf '%s\n' "$VAL_BAD" | grep -vE '^(T1|X1|T3|T4|T5|T6): ')"
 expect_eq "…and exits 1" "1" "$(call_rc units_validate "$SANDBOX/broken.md")"
 
 expect_contains "an id used twice is named once, as a duplicate" \
@@ -462,29 +464,24 @@ expect_contains "a status outside the four names the status and the vocabulary" 
   "T5: status done is not one of pending active landed dropped" "$VAL_BAD"
 expect_contains "a dep naming no row names the dep" \
   "T6: dep T99 names no row in the table" "$VAL_BAD"
-# …AND NAMES ALL OF THEM, IN TABLE ORDER, ON ONE LINE. The author threading a plan reads the
-# whole debt in one pass instead of one edge per round trip (AC-5.2; A-orch-59 of wave-16 is
-# the ten-round-trip specimen). The duplicate `T1` row is a Step-4 row too, and it is NOT
-# reported: T7 reaches the id, and reachability is keyed on the id, not on the row.
-expect_contains "a Step-6 row that reaches no Step-4 row names the ones it misses, with the count, in table order" \
-  "T7: step 6 is missing 4 step-4 prerequisites: X1, T4, T5, T6" "$VAL_BAD"
-expect_eq "…on exactly one line" "1" \
-  "$(printf '%s\n' "$VAL_BAD" | /usr/bin/grep -c '^T7: ' | tr -d ' ')"
+# THE STEP-6 ROW THAT REACHES ONLY T1 IS NOT ACCUSED (wave-26 T2, D2). Beside the six lines
+# above, which prove the extractor reads this output, no line begins with T7.
+expect_eq "a Step-6 row that reaches one Step-4 row of five draws no violation" "" \
+  "$(printf '%s\n' "$VAL_BAD" | grep '^T7: ')"
 
 # PAIRED POSITIVE. The good row is in the same table and is not accused of anything.
 expect_eq "the one well-formed row draws no violation of its own" "0" \
   "$(printf '%s\n' "$VAL_BAD" | grep -c '^T1: [^d]' | tr -d ' ')"
 
 # ============================================================
-section "6b — the transitive rule is decided PER ROW, and the arm proves it discriminates"
+section "6b — the every-build-row rule is gone: a later row waits for what it reads (wave-26 T2, D2)"
 # ============================================================
 #
-# WHY THIS SECTION EXISTS. §6's table carries exactly one Step-5-or-later row, so a library
-# that computed the reachable set ONCE for the whole table — never resetting it between rows —
-# would pass every assertion there. That is not hypothetical: the first implementation of this
-# rule did exactly that, and the live specimen hid it, because the row before the offender
-# reached everything and left its closure behind. Two Step-5 rows, the first reaching both
-# Step-4 rows and the second reaching only one, is the smallest table that tells them apart.
+# Through 1.10 the validator refused any Step-5+ row that did not depend, transitively, on
+# every Step-4 row, and `units_add_row` threaded each new Step-4 id into the rows that owed it
+# (research R3 B4, B6). That rule is removed: a verify or final-review row waits for the build
+# through its `head` read, and a review that reads only the diff waits for nobody. The table
+# below is the one that rule used to refuse — T5 reaches T2 and not T3.
 
 cat > "$SANDBOX/leak.md" <<'LEAK_EOF'
 ## Tasks
@@ -498,27 +495,14 @@ cat > "$SANDBOX/leak.md" <<'LEAK_EOF'
 | T5 | 5 | test | reaches only T2 | test-runner | T2 | 40m | all | f.md | pending |
 LEAK_EOF
 
-VAL_LEAK="$(call units_validate "$SANDBOX/leak.md")"
-expect_eq "of two Step-5 rows, only the one that misses a Step-4 row is reported" "1" \
-  "$(nlines "$VAL_LEAK")"
-expect_contains "…naming the row and the Step-4 row it never reaches" \
-  "T5: step 5 is missing 1 step-4 prerequisite: T3" "$VAL_LEAK"
-expect_eq "…and the Step-5 row that does reach both draws nothing" "" \
-  "$(printf '%s\n' "$VAL_LEAK" | grep '^T4:')"
-
-# THE MUTATION ARM. Strip the per-row reset of the reachable set from a scratch copy of the
-# shipped library: T4's closure then leaks into T5's, T5 appears to reach T3, and the
-# violation disappears. Without this arm the three rows above pass just as loudly on a
-# library that decides the rule once for the whole table.
-anchor "$LIB" 'split("", reach)' 1
-MUTANT="$SANDBOX/units-mutant.sh"
-grep -v 'split("", reach)' "$LIB" > "$MUTANT"
-MUTANT_OUT="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_validate "$2"' \
-  _ "$MUTANT" "$SANDBOX/leak.md")"
-expect_eq "the shipped library reports it; the mutant that never resets the set does not" \
-  "1 0" "$(nlines "$VAL_LEAK") $(nlines "$MUTANT_OUT")"
-expect_eq "…and the mutant still parses, so the arm measures behaviour and not a syntax error" \
-  "yes" "$(bash -n "$MUTANT" 2>/dev/null && echo yes || echo no)"
+expect_eq "6b.1 a Step-5 row that reaches one Step-4 row of two validates clean (rc 0)" "0" \
+  "$(call_rc units_validate "$SANDBOX/leak.md")"
+# THE EXTRACTOR READS THIS FIXTURE: one real fault planted in the same table is named, and
+# still nothing accuses T5 of the edge it does not carry.
+sed 's/| T5 | 5 | test | reaches only T2 | test-runner | T2 |/| T5 | 5 | test | reaches only T2 | test-runner | T2, T99 |/' \
+  "$SANDBOX/leak.md" > "$SANDBOX/leak-t99.md"
+expect_eq "6b.2 …while a planted dep on a missing row is the one line printed" \
+  "T5: dep T99 names no row in the table" "$(call units_validate "$SANDBOX/leak-t99.md")"
 
 # ============================================================
 section "7 — units_validate: a missing column is a violation of the table, not of a row"
@@ -849,8 +833,8 @@ ESCAPED_EOF
 ROWS_ESC="$(call units_rows "$SANDBOX/escaped-cell.md")"
 
 expect_eq "three data rows, escapes and all" "3" "$(nlines "$ROWS_ESC")"
-expect_eq "every row still carries exactly twelve fields" "3" \
-  "$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' 'NF == 12 { n++ } END { print n + 0 }')"
+expect_eq "every row still carries exactly thirteen fields" "3" \
+  "$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' 'NF == 13 { n++ } END { print n + 0 }')"
 
 # THE WHOLE ROW, field by field. The shift this section exists for moves every cell AFTER
 # the escape, so asserting the escaped cell alone would pass on a reader that recovered the
@@ -1048,8 +1032,8 @@ expect_eq "a row carrying an escape AND a raw pipe is named once, for the raw on
 # the schedulers that can still read most of it.
 ROWS_RAW="$(call units_rows "$SANDBOX/raw-pipe.md")"
 expect_eq "both rows still come through units_rows" "2" "$(nlines "$ROWS_RAW")"
-expect_eq "…each carrying twelve fields" "2" \
-  "$(printf '%s\n' "$ROWS_RAW" | awk -F'\t' 'NF == 12 { n++ } END { print n + 0 }')"
+expect_eq "…each carrying thirteen fields" "2" \
+  "$(printf '%s\n' "$ROWS_RAW" | awk -F'\t' 'NF == 13 { n++ } END { print n + 0 }')"
 
 # ============================================================
 section "10 — the worktree cell: slot 11, header-keyed, and OPTIONAL (wave-14 REQ-2, ADR-027)"
@@ -1085,8 +1069,8 @@ WT_COL_EOF
 ROWS_WT="$(call units_rows "$SANDBOX/worktree-column.md")"
 
 expect_eq "the widened table yields one line per data row (3)" "3" "$(nlines "$ROWS_WT")"
-expect_eq "…each carrying twelve fields" "3" \
-  "$(printf '%s\n' "$ROWS_WT" | awk -F'\t' 'NF == 12 { n++ } END { print n + 0 }')"
+expect_eq "…each carrying thirteen fields" "3" \
+  "$(printf '%s\n' "$ROWS_WT" | awk -F'\t' 'NF == 13 { n++ } END { print n + 0 }')"
 
 # THE CELL ITSELF, through the accessor the gate uses — never by number.
 expect_eq "units_field reads T1's worktree cell by name" "14-T1" \
@@ -1264,18 +1248,13 @@ expect_eq "12.10 units_has_column is what tells the two fixtures apart" "0 1" \
      "$(call_rc units_has_column "$SANDBOX/active-no-column.md" worktree)")"
 
 # ============================================================
-section "14 — the transitive arm names EVERY unreached step-4 row (wave-17 REQ-5, AC-5.2)"
+section "14 — a mid-run build row owes no edge to any later row (wave-26 T2, D2; was wave-17 REQ-5)"
 # ============================================================
 #
-# WHY THIS SECTION EXISTS. The arm used to `break` after the first Step-4 row an offending
-# row failed to reach, so an author threading a Step-5 row against four build rows learned
-# of the second missing edge only after fixing the first, and paid one refused commit per
-# edge. wave-16's A-orch-59 is the field specimen: a mid-run row unthreaded from ten rows,
-# ten round trips. The file's own contract paragraph says EVERY FAULT IS REPORTED; this arm
-# was the exception to it.
-#
-# THE SMALLEST TABLE THAT SHOWS IT is one Step-5 row threaded to exactly one of four Step-4
-# rows: one line proves nothing about the bound, three do.
+# This section used to pin the transitive arm's full report — one Step-5 row threaded to one
+# of four Step-4 rows named all three it missed. The arm is gone with its rule (D2): the same
+# table is a valid table, because the floor row's wait is its `head` read in a reads table, or
+# its own deps ids in a table without one, and nothing else.
 
 cat > "$SANDBOX/three-missing.md" <<'THREE_EOF'
 ## Tasks
@@ -1286,39 +1265,23 @@ cat > "$SANDBOX/three-missing.md" <<'THREE_EOF'
 | T2 | 4 | build | first | implementor | T1 | 15m | REQ-x | a.sh | landed |
 | T3 | 4 | build | second | implementor | T1 | 15m | REQ-x | b.sh | landed |
 | T4 | 4 | build | third | implementor | T1 | 15m | REQ-x | c.sh | landed |
-| T5 | 4 | build | fourth | implementor | T1 | 15m | REQ-x | d.sh | landed |
+| T5 | 4 | build | fourth | implementor | T1 | 15m | REQ-x | d.sh | pending |
 | T9 | 5 | test | the floor, threaded to one build row of four | test-runner | T2 | 40m | all | f.md | pending |
 THREE_EOF
 
-VAL_THREE="$(call units_validate "$SANDBOX/three-missing.md")"
-
-# RE-AUTHORED FOR wave-20 REQ-5 (AC-5.2). Every missing edge is still named in one round
-# trip; what changed is the SHAPE — one line per offending row, with the count and the ids,
-# instead of one line per missing edge (N×M lines on a large table, triage-C claim 3).
-expect_eq "14.1 a Step-5 row missing three step-4 rows reports ONE line" "1" \
-  "$(nlines "$VAL_THREE")"
-expect_eq "14.2 …naming the row, the count and all three ids, in table order" \
-  "T9: step 5 is missing 3 step-4 prerequisites: T3, T4, T5" "$VAL_THREE"
-expect_eq "14.5 …and exits 1" "1" "$(call_rc units_validate "$SANDBOX/three-missing.md")"
-# THE ROW IT DOES REACH IS NOT ACCUSED, and neither is the Step-3 row: only Step-4 rows are
-# owed, and only the unreached ones are named.
-expect_eq "14.6 the reached step-4 row and the step-3 row draw nothing" "" \
-  "$(printf '%s\n' "$VAL_THREE" | /usr/bin/grep -E '(: |, )(T1|T2)(,|$)')"
-
-# THE MUTATION ARM. A `break` after the line that collects a missing id, in a scratch copy of
-# the shipped library: the same table then names one id instead of three. Without this arm,
-# a line that named three ids for some other reason — or a fixture that happened to miss one
-# row — would read identically.
-anchor "$LIB" 'COLLECT ONE MISSING PREREQUISITE' 1
-MUTANT_BREAK="$SANDBOX/units-mutant-break.sh"
-awk '{ print }
-     index($0, "COLLECT ONE MISSING PREREQUISITE") { getline; print; print "            break" }' \
-  "$LIB" > "$MUTANT_BREAK"
-MUTANT_BREAK_OUT="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_validate "$2"' \
-  _ "$MUTANT_BREAK" "$SANDBOX/three-missing.md")"
-expect_eq "14.7 the shipped library names three ids; the mutant that breaks names one" \
-  "3 1" "$(printf '%s\n' "$VAL_THREE" | sed -nE 's/.*is missing ([0-9]+) .*/\1/p') $(printf '%s\n' "$MUTANT_BREAK_OUT" | sed -nE 's/.*is missing ([0-9]+) .*/\1/p')"
-
+expect_eq "14.1 a Step-5 row threaded to one Step-4 row of four validates clean (rc 0)" "0" \
+  "$(call_rc units_validate "$SANDBOX/three-missing.md")"
+expect_eq "14.2 …and it is ready on its own deps: T2 landed, the open T5 is not its prerequisite" "yes" \
+  "$(call units_ready "$SANDBOX/three-missing.md" 5 | grep -qx T9 && echo yes || echo no)"
+expect_eq "14.3 …beside T5, the open build row, which is ready too" "yes" \
+  "$(call units_ready "$SANDBOX/three-missing.md" 5 | grep -qx T5 && echo yes || echo no)"
+# THE OLD MESSAGE IS GONE FROM THE LIBRARY, and so is the program that computed it: neither the
+# transitive arm's words nor `_units_graph_awk` survive in units.sh (the shipped file is read,
+# and its own `units_validate` definition proves the read found the file).
+expect_eq "14.4 units.sh still defines units_validate (the read below found the library)" "1" \
+  "$(/usr/bin/grep -c '^units_validate() {' "$LIB" | tr -d ' ')"
+expect_eq "14.5 …and carries neither the transitive arm's words nor its graph program" "0 0" \
+  "$(/usr/bin/grep -c 'step-4 prerequisite' "$LIB" | tr -d ' ') $(/usr/bin/grep -c '_units_graph_awk' "$LIB" | tr -d ' ')"
 
 # ============================================================
 section "13 — the base cell: slot 12, OPTIONAL, and a commit id when it holds one (wave-17 REQ-2, AC-2.1, ADR-032)"
@@ -1648,11 +1611,11 @@ sed 's/^current: 5$/current: 3/' "$SANDBOX/graph.md" > "$SANDBOX/graph-at-3.md"
 expect_eq "17.9 …and the Step-3 approval gate still holds: nothing fills at current: 3" "" \
   "$(fill_call "$SANDBOX/graph-at-3.md" 8 0)"
 
-# ---------- AC-5.2: one line per offending row ----------
+# ---------- AC-5.2 (wave-20), RETIRED BY wave-26 T2 (D2) ----------
 #
-# FORTY STEP-4 ROWS AND ONE MISPLACED STEP-6 ROW that reaches only the first. Through 1.8.6
-# that printed thirty-nine lines; the fails-when is "one misplaced row prints more than one
-# line".
+# FORTY STEP-4 ROWS AND ONE STEP-6 ROW that reaches only the first. wave-20 made this print one
+# line instead of thirty-nine; wave-26 removed the rule it printed, so the table is valid and
+# the review is ready on its one landed prerequisite.
 {
   printf -- '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
   printf -- '|---|---|---|---|---|---|---|---|---|---|\n'
@@ -1661,20 +1624,14 @@ expect_eq "17.9 …and the Step-3 approval gate still holds: nothing fills at cu
     printf '| T%s | 4 | build | row %s | implementor | — | 30m | REQ-x | f%s.sh | landed |\n' "$i" "$i" "$i"
     i=$((i + 1))
   done
-  printf '| T41 | 6 | review | the misplaced review | critic | T1 | 30m | REQ-x | — | pending |\n'
+  printf '| T41 | 6 | review | the review that reads one build | critic | T1 | 30m | REQ-x | — | pending |\n'
 } > "$SANDBOX/forty.md"
-VAL_FORTY="$(call units_validate "$SANDBOX/forty.md")"
-expect_eq "17.10 AC-5.2 one misplaced row over forty Step-4 rows prints ONE line" "1" "$(nlines "$VAL_FORTY")"
-expect_contains "17.11 …naming the row and the missing count" \
-  "T41: step 6 is missing 39 step-4 prerequisites: T2, T3," "$VAL_FORTY"
-expect_contains "17.12 …and the last id too" ", T40" "$VAL_FORTY"
-expect_eq "17.13 AC-5.2 …and the Step-6 row missing a Step-4 prerequisite is NOT admitted (exit 1)" "1" \
+expect_eq "17.10 a Step-6 row over forty Step-4 rows, depending on one, validates clean" "0" \
   "$(call_rc units_validate "$SANDBOX/forty.md")"
+expect_eq "17.11 …and is ready" "T41" "$(call units_ready "$SANDBOX/forty.md" 5)"
 
-# THE FRONTIER (triage-C claim 3, research D1 T-1). T90 is a Step-5 row, T91 depends on T90 and
-# T92 on T91; the late Step-4 row T11 is reached by none of them. Adding T11 to T90's deps
-# repairs all three, so ONE line names T90 and T11, and T91/T92 are folded into it — the line
-# count is the number of edits the author owes.
+# A LATE STEP-4 ROW HOLDS ONLY WHAT READS IT. T11 is added mid-run; the chain T90 → T91 → T92
+# names T1 and each other. None of them waits for T11, and the table is valid.
 cat > "$SANDBOX/added11.md" <<'ADDED_EOF'
 ## Tasks
 
@@ -1686,56 +1643,23 @@ cat > "$SANDBOX/added11.md" <<'ADDED_EOF'
 | T91 | 6 | review | after the floor | critic | T90 | 30m | REQ-x | — | pending |
 | T92 | 7 | doc | after the review | implementor | T91 | 30m | REQ-x | — | pending |
 ADDED_EOF
-VAL_ADDED="$(call units_validate "$SANDBOX/added11.md")"
-expect_eq "17.14 the frontier: one line for three rows that miss the same id through one chain" "1" "$(nlines "$VAL_ADDED")"
-expect_contains "17.15 …naming the frontier row and the id to add" \
-  "T90: step 5 is missing 1 step-4 prerequisite: T11" "$VAL_ADDED"
-expect_contains "17.16 …and the rows it repairs" "(T91, T92 reach it through T90)" "$VAL_ADDED"
-expect_eq "17.17 …and no line begins with a folded row" "" \
-  "$(printf '%s\n' "$VAL_ADDED" | grep -E '^T9[12]:')"
-
-# LANDED AND DROPPED ROWS ARE EXEMPT (research D1 T-2): a terminal row can no longer be
-# scheduled, and an edge added to it would record something false. The same late T11 with a
-# landed Step-5 row and a dropped Step-6 row: neither is accused; the pending Step-7 row is.
-cat > "$SANDBOX/terminal.md" <<'TERMINAL_EOF'
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | the planned build | implementor | — | 30m | REQ-x | a.sh | landed |
-| T11 | 4 | build | the fixup added mid-run | implementor | — | 30m | REQ-x | b.sh | pending |
-| T50 | 5 | verify | the floor, landed | test-runner | T1 | 30m | REQ-x | — | landed |
-| T51 | 6 | review | a dropped review | critic | T1 | 30m | REQ-x | — | dropped |
-| T52 | 7 | doc | the doc, still pending | implementor | T1 | 30m | REQ-x | — | pending |
-TERMINAL_EOF
-VAL_TERM="$(call units_validate "$SANDBOX/terminal.md")"
-expect_eq "17.18 landed and dropped rows are exempt from the transitive rule" "" \
-  "$(printf '%s\n' "$VAL_TERM" | grep -E '^T5[01]:')"
-expect_eq "17.19 …the pending row is still held to it, on one line" \
-  "T52: step 7 is missing 1 step-4 prerequisite: T11" "$VAL_TERM"
-
-# A CYCLE NEVER HIDES A MISSING EDGE. Two Step-5 rows that depend on each other both miss T2;
-# folding each into the other would print nothing and admit the table.
-cat > "$SANDBOX/cycle.md" <<'CYCLE_EOF'
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | reached | implementor | — | 30m | REQ-x | a.sh | landed |
-| T2 | 4 | build | reached by nobody | implementor | — | 30m | REQ-x | b.sh | landed |
-| T60 | 5 | verify | one half of a cycle | test-runner | T1, T61 | 30m | REQ-x | — | pending |
-| T61 | 5 | verify | the other half | test-runner | T60 | 30m | REQ-x | — | pending |
-CYCLE_EOF
-expect_eq "17.20 a dependency cycle between two offending rows still refuses (exit 1)" "1" \
-  "$(call_rc units_validate "$SANDBOX/cycle.md")"
-expect_contains "17.21 …and names the missing id" "T2" "$(call units_validate "$SANDBOX/cycle.md")"
+expect_eq "17.14 a late Step-4 row that no row names leaves the table valid" "0" \
+  "$(call_rc units_validate "$SANDBOX/added11.md")"
+expect_eq "17.15 …the late row and the floor are both ready; the chain behind the floor waits for it" \
+  "$(printf 'T11\nT90')" "$(call units_ready "$SANDBOX/added11.md" 5)"
+expect_eq "17.16 …and the chain's waits are its own deps, in units_edges" "yes yes" \
+  "$(E="$(call units_edges "$SANDBOX/added11.md")"; printf '%s %s' \
+     "$(printf '%s\n' "$E" | grep -qxF "T90$(printf '\t')T91$(printf '\t')T90" && echo yes || echo no)" \
+     "$(printf '%s\n' "$E" | grep -qxF "T91$(printf '\t')T92$(printf '\t')T91" && echo yes || echo no)")"
+expect_eq "17.17 …with no edge out of the late row T11" "" \
+  "$(call units_edges "$SANDBOX/added11.md" | awk -F'\t' '$1 == "T11"')"
 
 # ---------- AC-5.3: units_add_row, the pure projector under `task-add` ----------
 #
-# `units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>`
+# `units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]`
 # prints the WHOLE plan with the row added: the row as the last table row, status `pending`,
-# its `- <id>:` line under `## SDLC State`, and — for a Step-4 row — the id threaded into the
-# deps of the frontier Step-5+ rows that are not landed or dropped. It writes nothing.
+# and its `- <id>:` line under `## SDLC State`. It writes nothing, and since wave-26 T2 (D2) it
+# threads nothing: no other row's deps cell changes.
 cat > "$SANDBOX/add.md" <<'ADD_EOF'
 ---
 current: 5
@@ -1781,18 +1705,34 @@ expect_eq "17.24 …the new row is the table's last row, pending, header-keyed (
 expect_eq "17.25 …its - T6: line sits after the last - T<n>: line and its continuation" \
   "  base: abc1234|- T4: pending dispatch — .worktrees/T4|- T6: pending dispatch — added by task-add" \
   "$(printf '%s\n' "$ADD_OUT" | grep -B2 '^- T6:' | sed -E 's/ at [0-9TZ:-]+$//' | tr '\n' '|' | sed 's/|$//')"
-expect_contains "17.26 …the Step-4 id is threaded into the frontier Step-5 row T3" \
-  "| T3 | 5 | verify | the floor | test-runner | T1, T6 |" "$ADD_OUT"
-expect_contains "17.27 …but not into T4, which reaches it through T3" \
-  "| T4 | 6 | review | after the floor | critic | T3 |" "$ADD_OUT"
-expect_contains "17.28 …nor into the landed T5 (exempt)" \
-  "| T5 | 7 | doc | a landed doc | implementor | T1 |" "$ADD_OUT"
+expect_eq "17.26 a Step-4 row threads nothing (D2): every row already in the table is byte-identical" \
+  "$(grep '^| T[0-9]' "$SANDBOX/add.md")" "$(printf '%s\n' "$ADD_OUT" | grep '^| T[0-9]' | grep -v '^| T6 ')"
+expect_contains "17.27 …the Step-5 floor keeps the deps its author wrote" \
+  "| T3 | 5 | verify | the floor | test-runner | T1 |" "$ADD_OUT"
+# THE reads OPERAND (optional, eleventh): placed by the header like every cell, and dropped
+# without a word by a table that carries no reads column — exactly as an unread column is.
+cat > "$SANDBOX/add-reads.md" <<'ADDR_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-03T00:00Z "approved"
+
+- T1: landed at record/T1.md
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | reads | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30 | REQ-x | lib/a.sh |  | landed |
+ADDR_EOF
+expect_contains "17.28 the reads operand lands in the reads column of a reads table" \
+  "| T2 | 4 | build | reads a.sh | implementor | — | 30 | REQ-5 | lib/b.sh | lib/a.sh, approval:plan | pending |" \
+  "$(call units_add_row "$SANDBOX/add-reads.md" T2 4 build 'reads a.sh' implementor '—' 30 REQ-5 'lib/b.sh' 'lib/a.sh, approval:plan')"
 expect_contains "17.29 …and an escaped pipe in another row's cell survives the rewrite" \
   'the build \| with a pipe' "$ADD_OUT"
 expect_eq "17.30 …and the projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/add-projected.md")"
 
-# A LATER-STEP ROW THREADS NOTHING: the validator's only ordering rule is Step-5+ reaching
-# every Step-4 row, so a Step-6 addition changes no other row.
+# A LATER-STEP ROW THREADS NOTHING EITHER: no row is ever threaded (D2).
 ADD_OUT6="$(call units_add_row "$SANDBOX/add.md" T7 6 review 'a second review' critic 'T3' 30 REQ-5 '—')"
 expect_eq "17.31 a Step-6 row threads nothing: every other row is byte-identical" \
   "$(grep '^| T[0-9]' "$SANDBOX/add.md")" "$(printf '%s\n' "$ADD_OUT6" | grep '^| T[0-9]' | grep -v '^| T7 ')"
@@ -1879,11 +1819,11 @@ expect_eq "17b.10 R6 a backslash, an author-escaped \\| and a \$ survive byte fo
   '| T8 | 6 | review | match C:\new\table and a\|b | bionic:critic | T3 | 30 | costs $5 \t | x\y.sh | — | — | pending |' \
   "$(printf '%s\n' "$R6_OUT" | grep '^| T8 ')"
 R6_OUT4="$(call units_add_row "$SANDBOX/add.md" T9 4 build 'raw a|b and \n' 'bionic:implementor' '—' 30 REQ-5 'b.sh')"
-expect_eq "17b.11 …through the Step-4 (threading) arm as well" \
+expect_eq "17b.11 …and through a Step-4 add as well" \
   '| T9 | 4 | build | raw a\|b and \n | bionic:implementor | — | 30 | REQ-5 | b.sh | — | — | pending |' \
   "$(printf '%s\n' "$R6_OUT4" | grep '^| T9 ')"
-expect_contains "17b.12 …and the Step-5 frontier row is still threaded with the new id" \
-  "| T3 | 5 | verify | the floor | test-runner | T1, T9 |" "$R6_OUT4"
+expect_contains "17b.12 …which threads nothing: the Step-5 row keeps the deps its author wrote (D2)" \
+  "| T3 | 5 | verify | the floor | test-runner | T1 |" "$R6_OUT4"
 printf '%s\n' "$R6_OUT" > "$SANDBOX/r6-projected.md"
 expect_eq "17b.13 …and the projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/r6-projected.md")"
 
@@ -1899,8 +1839,7 @@ section "17c — wave-21 T4: an external wait is a declared prerequisite, ext:<s
 #
 # T2 is the held row (a landed task dep plus the token); T3 is the ordinary ready row; T5
 # carries a token AND an unlanded task dep, so the graph already says why it waits and the
-# held report does not name it (the 17b.6 rule). T4 is the Step-5 row that reaches every
-# Step-4 row, so the transitive rule is satisfied and the only question asked is the token.
+# held report does not name it (the 17b.6 rule). T4 is the Step-5 row behind all of them.
 cat > "$SANDBOX/ext.md" <<'EXT_EOF'
 ---
 current: 4
@@ -2140,6 +2079,524 @@ expect_eq "17d.15 units_unlined names every T-row short of a line, table order, 
 tr '\n' '\r' < "$SANDBOX/ledger-task.md" > "$SANDBOX/ledger-task-cr.md"
 expect_eq "17d.16 a CR-only plan reads the same" \
   "$(printf 'evidence T2\nstatus T3 landed')" "$(call units_findings "$SANDBOX/ledger-task-cr.md" "")"
+
+# ============================================================
+section "READS — wave-26 T2: a row declares what it reads; an empty cell takes its kind default (REQ-5, AC-5.1; D1)"
+# ============================================================
+#
+# `reads` is an OPTIONAL thirteenth slot, keyed by header name like every other: a table that
+# carries it schedules each row by what the row reads, a table without it keeps reading `deps`
+# ids as "wait for that task to land". An empty `reads` cell is never "nothing" — it is the
+# row's kind default: build `approval:plan`, verify `approval:plan, head`, review
+# `approval:plan, live:head`, doc `approval:plan, head`, integrate `proof:floor, proof:review`,
+# close the integrate row's merge. A settled read waits for every open writer of what it names;
+# `head` is written by every open row with a path outside `.bionic/`.
+TAB="$(printf '\t')"
+# has_line <text> <line> -> yes when <line> is one whole line of <text>.
+has_line() { if printf '%s\n' "$1" | grep -qxF -- "$2"; then printf yes; else printf no; fi; }
+
+cat > "$SANDBOX/reads.md" <<'READS_EOF'
+---
+current: 4
+---
+
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-03T00:00Z "approved"
+
+- Step 4: in flight
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | reads | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | a build, reads empty | implementor | — | 30 | REQ-x | lib/a.sh, tests/a.test.sh |  | pending |
+| T2 | 5 | verify | the walk, reads empty | researcher | — | 30 | REQ-x | .bionic/docs/record/w/walk.md | — | pending |
+| T3 | 6 | review | the review, reads empty | critic | — | 30 | REQ-x | .bionic/docs/record/w/review.md |  | pending |
+| T4 | 4 | build | reads a file T1 writes | implementor | — | 30 | REQ-x | lib/b.sh | lib/a.sh | pending |
+| T5 | 4 | build | reads a file no open row writes | implementor | — | 30 | REQ-x | lib/c.sh | lib/old.sh, approval:plan | pending |
+| T6 | 4 | build | reads a directory T1 writes into | implementor | — | 30 | REQ-x | lib/d.sh | lib/ | pending |
+READS_EOF
+
+ROWS_READS="$(call units_rows "$SANDBOX/reads.md")"
+expect_eq "READS.1 the header carries the optional reads column" "0" \
+  "$(call_rc units_has_column "$SANDBOX/reads.md" reads)"
+expect_eq "READS.1b …and a table written without it does not" "1" \
+  "$(call_rc units_has_column "$SANDBOX/live.md" reads)"
+expect_eq "READS.2 units_field reads the reads cell by name" "lib/old.sh, approval:plan" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_READS" | awk -F'\t' '$1 == "T5"')" reads)"
+expect_eq "READS.2b …and the record keeps its fixed slots: status is still field 10" "pending" \
+  "$(printf '%s\n' "$ROWS_READS" | awk -F'\t' '$1 == "T5"' | cut -f10)"
+expect_eq "READS.3 the reads table validates clean" "0" "$(call_rc units_validate "$SANDBOX/reads.md")"
+
+READY_READS="$(call units_ready "$SANDBOX/reads.md" 4)"
+WAIT_READS="$(call units_waiting "$SANDBOX/reads.md" 4)"
+expect_eq "READS.4 an empty build cell takes approval:plan: T1 is ready on the approved plan" "yes" \
+  "$(has_line "$READY_READS" T1)"
+expect_eq "READS.5 an empty verify cell takes approval:plan, head: T2 waits for T1, an open writer outside .bionic/" \
+  "yes" "$(has_line "$WAIT_READS" "T2${TAB}head${TAB}T1${TAB}pending")"
+expect_eq "READS.5b …so T2 is not ready" "no" "$(has_line "$READY_READS" T2)"
+expect_eq "READS.6 an empty review cell takes live:head: T3 is ready while the build is open" "yes" \
+  "$(has_line "$READY_READS" T3)"
+expect_eq "READS.7 a path read waits for the open row whose Files cover it" "yes" \
+  "$(has_line "$WAIT_READS" "T4${TAB}lib/a.sh${TAB}T1${TAB}pending")"
+expect_eq "READS.7b …and T4 is not ready" "no" "$(has_line "$READY_READS" T4)"
+expect_eq "READS.8 a path no open row writes is satisfied: T5 is ready" "yes" "$(has_line "$READY_READS" T5)"
+expect_eq "READS.9 coverage is not string equality: a directory read waits for a file written inside it" \
+  "yes" "$(has_line "$WAIT_READS" "T6${TAB}lib/${TAB}T1${TAB}pending")"
+expect_eq "READS.9b …and a row is never its own writer: T6 writes lib/d.sh and is not named against itself" "no" \
+  "$(has_line "$WAIT_READS" "T6${TAB}lib/${TAB}T6${TAB}pending")"
+
+# THE WRITER LANDS, OR IS DROPPED: either satisfies the read. Through 1.10 a dependency on a
+# dropped row was never satisfied, so its dependents waited for ever (A-T2 log).
+sed 's/| lib\/a.sh, tests\/a.test.sh |  | pending |/| lib\/a.sh, tests\/a.test.sh |  | landed |/' \
+  "$SANDBOX/reads.md" > "$SANDBOX/reads-landed.md"
+sed 's/| lib\/a.sh, tests\/a.test.sh |  | pending |/| lib\/a.sh, tests\/a.test.sh |  | dropped |/' \
+  "$SANDBOX/reads.md" > "$SANDBOX/reads-dropped.md"
+expect_eq "READS.10 once T1 lands, T4's read is satisfied" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/reads-landed.md" 4)" T4)"
+expect_eq "READS.10b …and a dropped writer satisfies it too" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/reads-dropped.md" 4)" T4)"
+
+# NO APPROVAL LINE, NOTHING THAT READS approval:plan IS READY — the default is an input, not
+# "nothing": a row whose empty cell meant nothing would be ready here.
+grep -v '^approved-by:' "$SANDBOX/reads.md" > "$SANDBOX/reads-unapproved.md"
+WAIT_UNAPP="$(call units_waiting "$SANDBOX/reads-unapproved.md" 4)"
+expect_eq "READS.11 without approved-by: the empty build cell waits on approval:plan, written by nobody in the table" \
+  "yes" "$(has_line "$WAIT_UNAPP" "T1${TAB}approval:plan${TAB}-${TAB}-")"
+expect_eq "READS.11b …and so does the empty review cell" "yes" \
+  "$(has_line "$WAIT_UNAPP" "T3${TAB}approval:plan${TAB}-${TAB}-")"
+expect_eq "READS.11c …and neither is ready" "no no" \
+  "$(R="$(call units_ready "$SANDBOX/reads-unapproved.md" 4)"; printf '%s %s' "$(has_line "$R" T1)" "$(has_line "$R" T3)")"
+
+# A TABLE WITH reads REFUSES A TASK ID IN deps (AC-5.1 fails-when: "the validator accepts
+# deps: T3 beside a reads column"). ext:<slug> stays legal there (§EXT).
+sed 's/^| T4 | 4 | build | reads a file T1 writes | implementor | — |/| T4 | 4 | build | reads a file T1 writes | implementor | T1 |/' \
+  "$SANDBOX/reads.md" > "$SANDBOX/reads-deps-id.md"
+VAL_DEPS_ID="$(call units_validate "$SANDBOX/reads-deps-id.md")"
+expect_contains "READS.12 a task id in deps beside a reads column is refused, naming the row and the id" \
+  "T4: dep T1 is not ext:<slug>" "$VAL_DEPS_ID"
+expect_eq "READS.12b …and the verb exits 1" "1" "$(call_rc units_validate "$SANDBOX/reads-deps-id.md")"
+
+# A READ NAMES SOMETHING: a path in the Files grammar or a named artifact. A token that names
+# neither is refused at the write, and never read as satisfied.
+for _bad in nonsense proof:bogus foo:bar 'lib/a b.sh'; do
+  sed "s#| lib/old.sh, approval:plan |#| lib/old.sh, $_bad |#" "$SANDBOX/reads.md" > "$SANDBOX/reads-bad.md"
+  expect_contains "READS.13 a read naming no artifact is refused: '$_bad'" \
+    "T5: read $_bad names no artifact" "$(call units_validate "$SANDBOX/reads-bad.md")"
+  expect_eq "READS.13b …and the row is not ready on it: '$_bad'" "no" \
+    "$(has_line "$(call units_ready "$SANDBOX/reads-bad.md" 4)" T5)"
+done
+
+# A TABLE WITHOUT reads STILL PARSES, and a deps id still means "wait for that task to land".
+# Nothing defaults there: a verify row with an empty deps cell waits for nobody, as before.
+cat > "$SANDBOX/legacy.md" <<'LEGACY_EOF'
+## SDLC State
+
+current: 4
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | a build | implementor | — | 30 | REQ-x | lib/a.sh | pending |
+| T2 | 4 | build | waits for T1 to land | implementor | T1 | 30 | REQ-x | lib/b.sh | pending |
+| T3 | 5 | verify | names no dependency | researcher | — | 30 | REQ-x | — | pending |
+LEGACY_EOF
+READY_LEG="$(call units_ready "$SANDBOX/legacy.md" 4)"
+expect_eq "READS.14 a table without reads validates clean" "0" "$(call_rc units_validate "$SANDBOX/legacy.md")"
+expect_eq "READS.14b …a deps id waits for that task to land: T2 is not ready while T1 is pending" "no" \
+  "$(has_line "$READY_LEG" T2)"
+expect_eq "READS.14c …and units_waiting names the id as the read and as its writer" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/legacy.md" 4)" "T2${TAB}T1${TAB}T1${TAB}pending")"
+expect_eq "READS.14d …and no kind default applies without the column: T3 is ready beside the open build" \
+  "yes" "$(has_line "$READY_LEG" T3)"
+
+# ROWS OPEN ON THE ROSTER ARE NOT READY (D9). The launch recorder moves the plan row, but until
+# it has, a row dispatched as `w26-T1` is still `pending` in the table; the id-to-name rule is
+# fill_row_launched's, the open names roster_open_names'.
+{
+  roster_header
+  roster_row_fixture status=confirmed session=s name=w26-T1 agent_id=a1
+} > "$SANDBOX/reads.roster"
+READY_ROST="$(call units_ready "$SANDBOX/reads.md" 4 "$SANDBOX/reads.roster")"
+expect_eq "READS.15 a ready row open on the roster under w26-T1 is subtracted" "no" "$(has_line "$READY_ROST" T1)"
+expect_eq "READS.15b …the other ready rows stay" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$READY_ROST" T3)" "$(has_line "$READY_ROST" T5)")"
+expect_eq "READS.15c …and without a roster operand T1 is offered" "yes" "$(has_line "$READY_READS" T1)"
+
+# ============================================================
+section "EDGES — wave-26 T2: an edge only where a read meets a write; the wave-24 replay (REQ-5, AC-5.2; D1, D2)"
+# ============================================================
+#
+# THE REPLAY. The rows below are wave-24's own (`wave-24-fixit-1811.plan.md`, `## Tasks`),
+# spliced verbatim — header, task text, deps, Files, tree and base — with only the status cell
+# rewound to the moment T29 and T30 were building and T31 was queued, while the walk T16, the
+# review T17 and the release T18 waited. The plan tree is gitignored, so the specimen lives here.
+# Under 1.10 T16's deps named every Step-4 row and T17's named T16, so the review waited for
+# the walk it never read (research R3 B4, B5). `replay-legacy.md` is that table as written;
+# `replay.md` is the same rows with a `reads` column (every cell empty, so each row takes its
+# kind default) and the deps ids cleared, plus T32, a record-only write-up the fixture adds.
+cat > "$SANDBOX/replay-legacy.md" <<'REPLAY_EOF'
+---
+current: 5
+---
+
+## SDLC State
+
+current: 5
+approved-by: fixture 2026-10-03T00:00Z "approved"
+
+- Step 5: in flight
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | Close-out finds the shipped wave table once (row 78) and fills the ADR cell from the spec (row 86) (D17) · complexity: standard | w24-T1 | — | 45 | REQ-1 | payload/scripts/close-out.sh, tests/close-out.test.sh, .bionic/docs/record/wave-24-fixit-1811/T1-close-out.md, .bionic/docs/record/wave-24-fixit-1811/assumptions.md | .worktrees/24-T1 | 7223b594 | landed |
+| T5 | 4 | build | The classifier right in both directions: bare-wait fan-outs, run.sh no-run flags, case patterns, leading redirects, literal suite loops and assignments, whole-basename variables (D9, D12) · complexity: complex | w24-T5 | — | 150 | REQ-6, REQ-7 | payload/scripts/lib/cmd-class.sh, tests/cmd-class.test.sh, tests/background-suite-guard.test.sh, .bionic/docs/record/wave-24-fixit-1811/T5-classifier.md, .bionic/docs/record/wave-24-fixit-1811/assumptions.md | .worktrees/24-T5 | 7223b594 | landed |
+| T16 | 5 | verify | The walk (head beside base, fresh processes), the live hold in this session, the 202-brief replay, version on a copy of the real cache, then the floor `bash tests/run.sh` at the final head · complexity: complex | — | T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30, T31 | 120 | REQ-1, REQ-2, REQ-3, REQ-4, REQ-5, REQ-6, REQ-7, REQ-8, REQ-9, REQ-10 | .bionic/docs/record/wave-24-fixit-1811/walk-head.md, .bionic/docs/record/wave-24-fixit-1811/live-hold.md, .bionic/docs/record/wave-24-fixit-1811/brief-replay.md | .worktrees/24-fixit-1811 | 60529224 | pending |
+| T17 | 6 | review | Six-axis review over `git diff 7223b594 <head>` by one reviewer, one verdict per axis; the critic and auditor are ledgered in the dispatch ledger · complexity: standard | w24-T17 | T16 | 60 | REQ-1, REQ-2, REQ-3, REQ-4, REQ-5, REQ-6, REQ-7, REQ-8, REQ-9, REQ-10 | .bionic/docs/record/wave-24-fixit-1811/review.md | .worktrees/24-fixit-1811 | 60529224 | pending |
+| T18 | 7 | doc | Release 1.9.0 and the semver policy: CHANGELOG (policy in its header), plugin.json, repo CLAUDE.md, re-render, integrity manifest, version pins; ADR-041 Accepted; on Chris's release approval (D19) · complexity: standard | w24-T18 | T16, T17 | 45 | REQ-11 | CHANGELOG.md, CLAUDE.md, payload/.claude-plugin/plugin.json, payload/commands/help.md, payload/integrity/rendered.sha256, tests/docs-pins.test.sh, .bionic/docs/adrs/epic-23-bionic-tech-debt/adr-041-an-answer-stands-until-its-facts-change.md, .bionic/docs/record/wave-24-fixit-1811/T18-release-190.md | .worktrees/24-T18 | c0d6ab04 | pending |
+| T29 | 4 | build | Critic findings: a message counts as the completion signal only when it names the row's deliverable, so a mid-task question no longer reads MET (I1); the fix lines in dispatch-preflight.sh and brief.sh quote the plugin root (I2, AC-6.5); dispatch.md stops saying done is the artifact on disk · complexity: complex | w24-T29 | T9, T13, T26 | 60 | REQ-4, REQ-6 | hooks/session-sweeper.sh, hooks/session-poker.sh, payload/scripts/lib/stop.sh, tests/fixtures/refusal-inventory.md, tests/refuse.test.sh, hooks/dispatch-preflight.sh, payload/scripts/lib/brief.sh, agents-src/blocks/orchestrator-dispatch.md, agents-src/blocks/report-contract.md, agents-src/templates/skills/canonical-sdlc/dispatch.md.tmpl, skills/canonical-sdlc/dispatch.md, agents/auditor.md, agents/critic.md, agents/implementor.md, agents/researcher.md, agents/senior-implementor.md, agents/test-runner.md, payload/integrity/rendered.sha256, tests/session-sweeper.test.sh, tests/dispatch-preflight.test.sh, tests/docs-pins.test.sh, tests/render.test.sh, tests/session-poker.test.sh, tests/cross-gate-agreement.test.sh, tests/stop-orders.test.sh, tests/patrol-duties-gate.test.sh, tests/stop.test.sh, tests/landing-gate.test.sh, tests/stop-guard.test.sh, tests/doctor-patrol.test.sh, tests/execution-recorder.test.sh, .bionic/docs/record/wave-24-fixit-1811/T29-critic-fixes.md, .bionic/docs/record/wave-24-fixit-1811/T29-progress.md, .bionic/docs/record/wave-24-fixit-1811/assumptions.md | .worktrees/24-T29 | ac258929 | active |
+| T30 | 4 | build | Critic addendum A1: an escape-dense quoted command no longer times the Bash hook out — cmdnorm_qend copies the remainder once per backslash, so 207 KB of escaped quotes takes 10.99 s under bash 3.2 and every wall fails open; make the quote-end scan linear, with a hook-timeout row and an output-parity differential · complexity: complex | w24-T30 | T28 | 45 | REQ-5 | payload/scripts/lib/cmd-class.sh, tests/cmd-class.test.sh, tests/hook-timeout.test.sh, .bionic/docs/record/wave-24-fixit-1811/T30-escape-dense.md, .bionic/docs/record/wave-24-fixit-1811/T30-progress.md, .bionic/docs/record/wave-24-fixit-1811/assumptions.md | .worktrees/24-T30 | c0d6ab04 | active |
+| T31 | 4 | build | A command name is compared the way the machine resolves it: GIT push and Git push are seen as git push by the shared command reader and the git screen in front of it, so protect-main cannot be passed by capitalising the program (found by wave-25, present in 1.8.10); staged on its branch, landing is Chris's call · complexity: complex | w24-T31 | T30 | 45 | REQ-7 | payload/scripts/lib/git-argv.sh, payload/scripts/lib/walls.sh, payload/scripts/lib/cmd-class.sh, tests/git-argv.test.sh, tests/bash-walls.test.sh, tests/cmd-class.test.sh, tests/protect-main.test.sh, tests/hook-timeout.test.sh, CHANGELOG.md, .bionic/docs/record/wave-24-fixit-1811/T31-command-identity.md, .bionic/docs/record/wave-24-fixit-1811/T31-progress.md, .bionic/docs/record/wave-24-fixit-1811/T31.done, .bionic/docs/record/wave-24-fixit-1811/assumptions.md | .worktrees/24-T31 | 4fd82348 | pending |
+REPLAY_EOF
+
+# The reads replay, by a transform that knows two header names and nothing else: `deps`
+# cleared to an em dash on every data row, and an empty `reads` cell appended to every row.
+awk -F'|' -v OFS='|' '
+  /^\| id \|/ { for (i = 1; i <= NF; i++) { c = $i; gsub(/ /, "", c); if (c == "deps") dc = i }
+                sub(/ \|$/, " | reads |"); print; next }
+  /^\|---/    { print $0 "---|"; next }
+  /^\| T/     { $dc = " — "; print $0 "  |"; next }
+  { print }' "$SANDBOX/replay-legacy.md" > "$SANDBOX/replay.md"
+printf '| T32 | 4 | build | a record-only write-up (fixture row) | w24-T32 | — | 20 | REQ-1 | .bionic/docs/record/wave-24-fixit-1811/T32-notes.md | .worktrees/24-T32 | c0d6ab04 | active |  |\n' \
+  >> "$SANDBOX/replay.md"
+
+expect_eq "EDGES.0 the reads replay carries the column and validates clean" "0 0" \
+  "$(call_rc units_has_column "$SANDBOX/replay.md" reads) $(call_rc units_validate "$SANDBOX/replay.md")"
+READY_REPLAY="$(call units_ready "$SANDBOX/replay.md" 5)"
+EDGES_REPLAY="$(call units_edges "$SANDBOX/replay.md")"
+WAIT_REPLAY="$(call units_waiting "$SANDBOX/replay.md" 5)"
+expect_eq "EDGES.1 AC-5.2 the review unit is ready while the verify unit is pending" "yes no" \
+  "$(printf '%s %s' "$(has_line "$READY_REPLAY" T17)" "$(has_line "$READY_REPLAY" T16)")"
+expect_eq "EDGES.2 units_edges joins each open build writing outside .bionic/ to the walk by head" "yes yes yes" \
+  "$(printf '%s %s %s' "$(has_line "$EDGES_REPLAY" "T29${TAB}T16${TAB}head")" \
+     "$(has_line "$EDGES_REPLAY" "T30${TAB}T16${TAB}head")" "$(has_line "$EDGES_REPLAY" "T31${TAB}T16${TAB}head")")"
+expect_eq "EDGES.3 AC-5.2 …and the walk does not wait for a build whose files it does not read (record-only T32)" "no" \
+  "$(has_line "$EDGES_REPLAY" "T32${TAB}T16${TAB}head")"
+expect_eq "EDGES.4 no edge enters the review: it reads live:head, which waits for nobody" "" \
+  "$(printf '%s\n' "$EDGES_REPLAY" | awk -F'\t' '$2 == "T17"')"
+expect_eq "EDGES.5 every edge is <from><TAB><to><TAB><read>, both ends rows of the table" "" \
+  "$(printf '%s\n' "$EDGES_REPLAY" | awk -F'\t' 'NF != 3 || $1 !~ /^T[0-9]+$/ || $2 !~ /^T[0-9]+$/ || $3 == ""')"
+expect_eq "EDGES.6 units_waiting names the walk's unmet read and each writer with its status" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$WAIT_REPLAY" "T16${TAB}head${TAB}T30${TAB}active")" \
+     "$(has_line "$WAIT_REPLAY" "T16${TAB}head${TAB}T31${TAB}pending")")"
+# THE RELEASE READS head TOO, AND IT WRITES CHANGELOG.md — outside .bionic/. A row that itself
+# reads the settled head is downstream of it, not a writer of it: counting it would make the
+# walk wait for the release, and the release (held for its step and its approval) for the walk.
+expect_eq "EDGES.7 a row that reads head is not a writer of head: the walk does not wait for the release" "no" \
+  "$(has_line "$EDGES_REPLAY" "T18${TAB}T16${TAB}head")"
+expect_eq "EDGES.7b …while the release does wait for the open builds" "yes" \
+  "$(has_line "$EDGES_REPLAY" "T30${TAB}T18${TAB}head")"
+
+# THE SAME ROWS AS WRITTEN, deps ids and no reads column: the review waits for the walk.
+expect_eq "EDGES.8 the legacy replay keeps 1.10's answer: the review is not ready behind the walk" "no" \
+  "$(has_line "$(call units_ready "$SANDBOX/replay-legacy.md" 5)" T17)"
+expect_eq "EDGES.8b …and units_edges reads its deps id as the edge" "yes" \
+  "$(has_line "$(call units_edges "$SANDBOX/replay-legacy.md")" "T16${TAB}T17${TAB}T16")"
+
+# ============================================================
+section "SHARE — wave-26 T2: shared files run together; only an unmergeable path holds a row (REQ-5, AC-5.3; D11)"
+# ============================================================
+#
+# Two rows that write one file are both ready: they reconcile on landing. A `Files` entry
+# ending in `!` is unmergeable, and a row holding one waits while another open row declares
+# the same path — the active row first, then table order, so two pending rows never hold each
+# other for ever.
+cat > "$SANDBOX/share.md" <<'SHARE_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-03T00:00Z "approved"
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | reads | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | shares x.sh | implementor | — | 30 | REQ-x | lib/x.sh, tests/x1.test.sh |  | pending |
+| T2 | 4 | build | shares x.sh | implementor | — | 30 | REQ-x | lib/x.sh, tests/x2.test.sh |  | pending |
+| T3 | 4 | build | y.sh, unmergeable | implementor | — | 30 | REQ-x | lib/y.sh! |  | pending |
+| T4 | 4 | build | y.sh, unmergeable | implementor | — | 30 | REQ-x | lib/y.sh!, tests/y.test.sh |  | pending |
+| T5 | 4 | build | z.sh, plain, behind an active unmergeable writer | implementor | — | 30 | REQ-x | lib/z.sh |  | pending |
+| T6 | 4 | build | z.sh, unmergeable, running | implementor | — | 30 | REQ-x | lib/z.sh! |  | active |
+SHARE_EOF
+READY_SHARE="$(call units_ready "$SANDBOX/share.md" 4)"
+expect_eq "SHARE.1 AC-5.3 two rows declaring one plain file are both ready" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$READY_SHARE" T1)" "$(has_line "$READY_SHARE" T2)")"
+expect_eq "SHARE.2 AC-5.3 two rows declaring y.sh! are not both ready: the first in table order goes" "yes no" \
+  "$(printf '%s %s' "$(has_line "$READY_SHARE" T3)" "$(has_line "$READY_SHARE" T4)")"
+expect_eq "SHARE.3 …and units_waiting names the held row, the marked path and its holder" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/share.md" 4)" "T4${TAB}lib/y.sh!${TAB}T3${TAB}pending")"
+expect_eq "SHARE.4 an active row's unmergeable path holds a pending row declaring it plain" "no" \
+  "$(has_line "$READY_SHARE" T5)"
+expect_eq "SHARE.4b …and the hold is an edge, from the holder" "yes" \
+  "$(has_line "$(call units_edges "$SANDBOX/share.md")" "T6${TAB}T5${TAB}lib/z.sh!")"
+expect_eq "SHARE.5 the mark is legal in a Files cell: the table validates clean" "0" \
+  "$(call_rc units_validate "$SANDBOX/share.md")"
+sed 's/| lib\/z.sh! |  | active |/| lib\/z.sh! |  | landed |/' "$SANDBOX/share.md" > "$SANDBOX/share-landed.md"
+expect_eq "SHARE.6 once the holder lands, the held row is ready" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/share-landed.md" 4)" T5)"
+
+# ============================================================
+section "EXT — wave-26 T2: an outside input is declared, in either cell (REQ-5, AC-5.5; D1)"
+# ============================================================
+cat > "$SANDBOX/ext-reads.md" <<'EXTR_EOF'
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-10-03T00:00Z "approved"
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | reads | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | an ordinary build | implementor | — | 30 | REQ-x | lib/a.sh |  | pending |
+| T2 | 4 | build | waits on a vendor fix | implementor | — | 30 | REQ-x | lib/b.sh | approval:plan, ext:vendor-fix | pending |
+| T3 | 4 | build | waits on CI, in the deps cell | implementor | ext:ci-green | 30 | REQ-x | lib/c.sh |  | pending |
+EXTR_EOF
+READY_EXT="$(call units_ready "$SANDBOX/ext-reads.md" 4)"
+WAIT_EXT="$(call units_waiting "$SANDBOX/ext-reads.md" 4)"
+expect_eq "EXT.1 ext: is valid in the reads cell and in the deps cell of a reads table" "0" \
+  "$(call_rc units_validate "$SANDBOX/ext-reads.md")"
+expect_eq "EXT.2 AC-5.5 a row reading ext:vendor-fix is waiting, the ordinary row ready" "no yes" \
+  "$(printf '%s %s' "$(has_line "$READY_EXT" T2)" "$(has_line "$READY_EXT" T1)")"
+expect_eq "EXT.3 AC-5.5 …named with that reason, and no writer in the table" "yes" \
+  "$(has_line "$WAIT_EXT" "T2${TAB}ext:vendor-fix${TAB}-${TAB}-")"
+expect_eq "EXT.4 an ext: token in the deps cell waits the same way" "yes no" \
+  "$(printf '%s %s' "$(has_line "$WAIT_EXT" "T3${TAB}ext:ci-green${TAB}-${TAB}-")" "$(has_line "$READY_EXT" T3)")"
+expect_eq "EXT.5 units_held reports the world's hold on a row whose other reads are met" "yes" \
+  "$(has_line "$(call units_held "$SANDBOX/ext-reads.md" 4)" "T2: held by ext:vendor-fix")"
+sed 's/| approval:plan, ext:vendor-fix |/| approval:plan |/' "$SANDBOX/ext-reads.md" > "$SANDBOX/ext-reads-done.md"
+expect_eq "EXT.6 AC-5.5 …until the token is removed" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/ext-reads-done.md" 4)" T2)"
+# AN UNKNOWN TOKEN IS NEVER SATISFIED (AC-5.5 fails-when). The validator refuses it, and the
+# ready set, asked anyway, holds the row and names the token.
+sed 's/| approval:plan, ext:vendor-fix |/| approval:plan, vendor-fix |/' "$SANDBOX/ext-reads.md" > "$SANDBOX/ext-reads-unknown.md"
+expect_eq "EXT.7 a bare word in place of the ext: token is not satisfied" "no" \
+  "$(has_line "$(call units_ready "$SANDBOX/ext-reads-unknown.md" 4)" T2)"
+expect_eq "EXT.7b …the wait names it" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/ext-reads-unknown.md" 4)" "T2${TAB}vendor-fix${TAB}-${TAB}-")"
+
+# ============================================================
+section "LIVE — wave-26 T2: a live read is satisfied by what exists; named artifacts from the plan text (REQ-6, AC-6.5 lib half; D1)"
+# ============================================================
+#
+# The lib half only: `live:<artifact>` is satisfied when the artifact exists at all. "Ready
+# again only for the difference since its last proof" is T14's rule, on the seam this leaves.
+# `proof:<kind>` reads a `proved: kind=<kind>` line and `approval:<name>` an `approved: <name>`
+# line, both inside `## SDLC State`; `approval:plan` is the `approved-by:` line.
+cat > "$SANDBOX/live-reads.md" <<'LIVE_EOF'
+## SDLC State
+
+current: 5
+approved-by: fixture 2026-10-03T00:00Z "approved"
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | reads | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | still building | implementor | — | 30 | REQ-x | lib/a.sh |  | active |
+| T2 | 6 | review | follows the build | critic | — | 30 | REQ-x | .bionic/docs/record/w/review.md | approval:plan, live:head | pending |
+| T3 | 6 | review | reads the floor proof live | critic | — | 30 | REQ-x | .bionic/docs/record/w/r2.md | live:proof:floor | pending |
+| T4 | 5 | verify | the floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/w/floor.txt | approval:plan | pending |
+| T5 | 7 | doc | the release, on its approval | implementor | — | 30 | REQ-x | .bionic/docs/record/w/release.md | approval:release, proof:floor | pending |
+LIVE_EOF
+READY_LIVE="$(call units_ready "$SANDBOX/live-reads.md" 7)"
+WAIT_LIVE="$(call units_waiting "$SANDBOX/live-reads.md" 7)"
+expect_eq "LIVE.1 a live:head read is satisfied while a build is still open" "yes" "$(has_line "$READY_LIVE" T2)"
+expect_eq "LIVE.2 live:proof:floor is not satisfied before a proved: kind=floor line exists" "no" \
+  "$(has_line "$READY_LIVE" T3)"
+expect_eq "LIVE.3 approval:release and proof:floor wait, each named; the floor's writer is the open verify row" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$WAIT_LIVE" "T5${TAB}approval:release${TAB}-${TAB}-")" \
+     "$(has_line "$WAIT_LIVE" "T5${TAB}proof:floor${TAB}T4${TAB}pending")")"
+awk '{ print } /^approved-by:/ {
+  print "proved: kind=floor head=0123456789abcdef0123456789abcdef01234567 at=2026-10-03T01:00:00Z evidence=record/w/floor.txt"
+  print "approved: release by fixture 2026-10-03T02:00:00Z \"ship it\"" }' \
+  "$SANDBOX/live-reads.md" > "$SANDBOX/live-reads-proved.md"
+READY_PROVED="$(call units_ready "$SANDBOX/live-reads-proved.md" 7)"
+expect_eq "LIVE.4 with the proof line, the live floor read is satisfied" "yes" "$(has_line "$READY_PROVED" T3)"
+# A SETTLED proof: READ WAITS FOR ITS OPEN WRITERS EVEN WITH A LINE WRITTEN (wave-26 T35, review 5
+# F2): the floor row T4 is still pending, so the line is stale until it lands.
+expect_eq "LIVE.5 with the proof and the approval lines but the floor row still open, the release waits on it" "no yes" \
+  "$(printf '%s %s' "$(has_line "$READY_PROVED" T5)" \
+     "$(has_line "$(call units_waiting "$SANDBOX/live-reads-proved.md" 7)" "T5${TAB}proof:floor${TAB}T4${TAB}pending")")"
+sed 's/| approval:plan | pending |$/| approval:plan | landed |/' "$SANDBOX/live-reads-proved.md" > "$SANDBOX/live-reads-floored.md"
+expect_eq "LIVE.5b …and once the floor row lands, the release's settled reads are satisfied" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/live-reads-floored.md" 7)" T5)"
+expect_eq "LIVE.6 a live read is never an edge: nothing enters T2 or T3" "" \
+  "$(call units_edges "$SANDBOX/live-reads.md" | awk -F'\t' '$2 == "T2" || $2 == "T3"')"
+expect_eq "LIVE.6b …while the settled proof:floor read is one, from the verify row" "yes" \
+  "$(has_line "$(call units_edges "$SANDBOX/live-reads.md")" "T4${TAB}T5${TAB}proof:floor")"
+# A FENCED LINE IS DOCUMENTATION, not a proof: the plan text is read fence-aware.
+awk '{ print } /^approved-by:/ { print "```"; print "proved: kind=floor head=x at=y evidence=z"; print "```" }' \
+  "$SANDBOX/live-reads.md" > "$SANDBOX/live-reads-fenced.md"
+expect_eq "LIVE.7 a proved: line inside a fence proves nothing" "no" \
+  "$(has_line "$(call units_ready "$SANDBOX/live-reads-fenced.md" 7)" T3)"
+
+# ============================================================
+section "HARDEN — wave-26 T35: the graph neither starts work early, deadlocks in silence, nor stops on one bracket (review 5, F1 F2 F3 F5 F7)"
+# ============================================================
+#
+# Each table below is the review's failing table (review-5, probes P5-P12), SYNTHESIZED there
+# and copied here; each was red against the lib it reviewed (3a707629).
+# hard_plan <file> <state lines> <rows...> -> a reads table with an approved plan.
+hard_plan() {
+  local f="$1" st="$2"; shift 2
+  { printf '## SDLC State\n\ncurrent: 5\napproved-by: fixture 2026-10-03T00:00Z "approved"\n%s\n\n## Tasks\n\n' "$st"
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    for r in "$@"; do printf '%s\n' "$r"; done; } > "$f"
+}
+
+# F1 — A ROW THAT READS head STILL WRITES IT FOR A ROW AT A LATER STEP. A test row (default
+# `approval:plan, head`), a doc row, or a build row naming `head` can be writing code while the
+# floor at Step 5 is asked; the floor must wait, or it proves a head without their changes.
+FLOOR='| T2 | 5 | verify | floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/w/floor.txt |  | pending |'
+hard_plan "$SANDBOX/f1-doc.md" "" \
+  '| T1 | 4 | doc | skills | implementor | — | 30 | REQ-x | skills/x/SKILL.md, tests/docs-pins.test.sh |  | pending |' "$FLOOR"
+hard_plan "$SANDBOX/f1-test.md" "" \
+  '| T1 | 4 | test | new tests | implementor | — | 30 | REQ-x | tests/new.test.sh |  | pending |' "$FLOOR"
+hard_plan "$SANDBOX/f1-build.md" "" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/a.sh | approval:plan, head | pending |' "$FLOOR"
+for v in doc test build; do
+  R="$(call units_ready "$SANDBOX/f1-$v.md" 5)"
+  expect_eq "HARDEN.F1 a $v row at Step 4 that reads head is ready, the Step-5 floor is not" "yes no" \
+    "$(printf '%s %s' "$(has_line "$R" T1)" "$(has_line "$R" T2)")"
+  expect_eq "HARDEN.F1b …the floor waits on it by head ($v)" "yes" \
+    "$(has_line "$(call units_edges "$SANDBOX/f1-$v.md")" "T1${TAB}T2${TAB}head")"
+done
+# TWO HEAD READERS AT ONE STEP DO NOT HOLD EACH OTHER: the exception A-T2.4 made still stands
+# between equals, or two test rows would wait for each other for ever.
+hard_plan "$SANDBOX/f1-peers.md" "" \
+  '| T1 | 4 | test | tests a | implementor | — | 30 | REQ-x | tests/a.test.sh |  | pending |' \
+  '| T2 | 4 | test | tests b | implementor | — | 30 | REQ-x | tests/b.test.sh |  | pending |'
+R="$(call units_ready "$SANDBOX/f1-peers.md" 5)"
+expect_eq "HARDEN.F1c two head-reading rows at one step are both ready" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$R" T1)" "$(has_line "$R" T2)")"
+# record, the same rule over .bionic/ paths (A-T2.4 applied the exception to both).
+hard_plan "$SANDBOX/f1-record.md" "" \
+  '| T1 | 4 | build | notes | implementor | — | 30 | REQ-x | .bionic/docs/record/w/notes.md | approval:plan, record | pending |' \
+  '| T2 | 5 | verify | reads the record | test-runner | — | 30 | REQ-x | lib/r.sh | approval:plan, record | pending |'
+R="$(call units_ready "$SANDBOX/f1-record.md" 5)"
+expect_eq "HARDEN.F1d a record reader at an earlier step still writes the record for a later one" "yes no" \
+  "$(printf '%s %s' "$(has_line "$R" T1)" "$(has_line "$R" T2)")"
+
+# F2 — A proof: READ WAITS FOR EVERY OPEN WRITER, EVEN WHEN A PROOF LINE EXISTS. A re-floor
+# verify row added after the floor was proved makes that proof stale: integrate must wait.
+PROVED="proved: kind=floor head=0123456789abcdef0123456789abcdef01234567 at=2026-10-03T00:00:00Z evidence=record/f.txt
+proved: kind=review head=0123456789abcdef0123456789abcdef01234567 at=2026-10-03T00:00:00Z evidence=record/r.txt"
+hard_plan "$SANDBOX/f2.md" "$PROVED" \
+  '| T1 | 5 | verify | re-floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/w/floor2.txt |  | pending |' \
+  '| T2 | 8 | integrate | merge | — | — | 30 | REQ-x | — |  | pending |'
+R="$(call units_ready "$SANDBOX/f2.md" 8)"
+expect_eq "HARDEN.F2 a proved floor with an open re-floor row: the re-floor is ready, integrate is not" "yes no" \
+  "$(printf '%s %s' "$(has_line "$R" T1)" "$(has_line "$R" T2)")"
+expect_eq "HARDEN.F2b …and integrate waits on proof:floor, naming the open verify row" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/f2.md" 8)" "T2${TAB}proof:floor${TAB}T1${TAB}pending")"
+sed 's/record\/w\/floor2.txt |  | pending |/record\/w\/floor2.txt |  | landed |/' \
+  "$SANDBOX/f2.md" > "$SANDBOX/f2-landed.md"
+expect_eq "HARDEN.F2c once the re-floor lands, the proof line satisfies integrate" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/f2-landed.md" 8)" T2)"
+
+# F3 — A READ CYCLE IS REFUSED AT VALIDATION, NAMING THE ROWS ON IT. Through two path reads, or
+# one path read closed by an unmergeable hold. A row that merely waits behind the cycle is not
+# on it; a cycle through a row already running is not a deadlock (it lands, and the wait clears).
+hard_plan "$SANDBOX/f3-reads.md" "" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/a.sh | approval:plan, lib/b.sh | pending |' \
+  '| T2 | 4 | build | b | implementor | — | 30 | REQ-x | lib/b.sh | approval:plan, lib/a.sh | pending |' \
+  '| T3 | 4 | build | c, behind the cycle | implementor | — | 30 | REQ-x | lib/c.sh | approval:plan, lib/a.sh | pending |'
+V="$(call units_validate "$SANDBOX/f3-reads.md")"; VRC="$(call_rc units_validate "$SANDBOX/f3-reads.md")"
+CYC="$(printf '%s\n' "$V" | grep -F 'read cycle')"
+expect_eq "HARDEN.F3 a cycle of two path reads is refused" "1" "$VRC"
+expect_nonempty "HARDEN.F3b …by a line that says read cycle" "$CYC"
+expect_eq "HARDEN.F3c …naming both rows on it" "yes yes" \
+  "$(printf '%s %s' "$(printf '%s' "$CYC" | grep -qw T1 && echo yes || echo no)" \
+     "$(printf '%s' "$CYC" | grep -qw T2 && echo yes || echo no)")"
+expect_eq "HARDEN.F3d …and not the row that only waits behind it" "no" \
+  "$(printf '%s' "$CYC" | grep -qw T3 && echo yes || echo no)"
+hard_plan "$SANDBOX/f3-bang.md" "" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/x.sh! | approval:plan, lib/y.sh | pending |' \
+  '| T2 | 4 | build | b | implementor | — | 30 | REQ-x | lib/y.sh, lib/x.sh |  | pending |'
+V="$(call units_validate "$SANDBOX/f3-bang.md")"; VRC="$(call_rc units_validate "$SANDBOX/f3-bang.md")"
+CYC="$(printf '%s\n' "$V" | grep -F 'read cycle')"
+expect_eq "HARDEN.F3e a cycle closed by an unmergeable hold is refused" "1" "$VRC"
+expect_eq "HARDEN.F3f …naming both rows" "yes yes" \
+  "$(printf '%s %s' "$(printf '%s' "$CYC" | grep -qw T1 && echo yes || echo no)" \
+     "$(printf '%s' "$CYC" | grep -qw T2 && echo yes || echo no)")"
+# No worktree column: an active row owes no tree there (§12), so the status is the one change.
+sed 's/| approval:plan, lib\/b.sh | pending |/| approval:plan, lib\/b.sh | active |/' \
+  "$SANDBOX/f3-reads.md" > "$SANDBOX/f3-active.md"
+V="$(call units_validate "$SANDBOX/f3-active.md")"
+expect_eq "HARDEN.F3g the same loop with one row already active is not refused as a cycle" "" \
+  "$(printf '%s\n' "$V" | grep -F 'read cycle')"
+expect_eq "HARDEN.F3h …while the fixture still carries the loop as edges both ways" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$(call units_edges "$SANDBOX/f3-active.md")" "T1${TAB}T2${TAB}lib/a.sh")" \
+     "$(has_line "$(call units_edges "$SANDBOX/f3-active.md")" "T2${TAB}T1${TAB}lib/b.sh")")"
+expect_eq "HARDEN.F3i an acyclic reads table still validates clean (READS fixture)" "0" \
+  "$(call_rc units_validate "$SANDBOX/reads.md")"
+
+# F5 — ONE BRACKET DOES NOT STOP THE PLAN. A `[` in a Files glob used to build a broken regex and
+# abort the program: every verb exit 2, nothing ready. The matcher reads a bracket literally (the
+# Files grammar globs with * and ? only), and the validator refuses the entry, naming the row.
+hard_plan "$SANDBOX/f5.md" "" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | tests/[ab*.sh |  | pending |' \
+  '| T2 | 4 | build | b | implementor | — | 30 | REQ-x | lib/b.sh | approval:plan, tests/a.sh | pending |' \
+  '| T3 | 4 | build | c, unrelated | implementor | — | 30 | REQ-x | lib/c.sh |  | pending |' \
+  '| T4 | 4 | build | d | implementor | — | 30 | REQ-x | lib/d.sh | approval:plan, tests/[ab1.sh | pending |'
+R="$(call units_ready "$SANDBOX/f5.md" 5)"; RRC="$(call_rc units_ready "$SANDBOX/f5.md" 5)"
+expect_eq "HARDEN.F5 a bracket in a Files glob: units_ready exits 0" "0" "$RRC"
+expect_eq "HARDEN.F5b …the unrelated row and the bracket row are ready" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$R" T3)" "$(has_line "$R" T1)")"
+expect_eq "HARDEN.F5c …tests/a.sh is not what tests/[ab*.sh covers, read literally: T2 is ready" "yes" \
+  "$(has_line "$R" T2)"
+expect_eq "HARDEN.F5d …tests/[ab1.sh is, read literally: T4 waits on T1" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/f5.md" 5)" "T4${TAB}tests/[ab1.sh${TAB}T1${TAB}pending")"
+expect_eq "HARDEN.F5e units_waiting and units_edges exit 0 too" "0 0" \
+  "$(call_rc units_waiting "$SANDBOX/f5.md" 5) $(call_rc units_edges "$SANDBOX/f5.md")"
+V="$(call units_validate "$SANDBOX/f5.md")"; VRC="$(call_rc units_validate "$SANDBOX/f5.md")"
+expect_eq "HARDEN.F5f the validator refuses the table" "1" "$VRC"
+expect_eq "HARDEN.F5g …naming the Files entry against its row" "yes" \
+  "$(printf '%s\n' "$V" | grep -F 'T1: Files entry tests/[ab*.sh' >/dev/null && echo yes || echo no)"
+expect_eq "HARDEN.F5h …and the read against its row" "yes" \
+  "$(printf '%s\n' "$V" | grep -F 'T4: read tests/[ab1.sh' >/dev/null && echo yes || echo no)"
+expect_eq "HARDEN.F5i …and accuses neither clean row" "" \
+  "$(printf '%s\n' "$V" | grep -E '^T(2|3):')"
+
+# F7 — READINESS IS NOT QUADRATIC IN THE FILES PAIRS. A RELATION, never a clock: the review's
+# generator at 120 rows, units_ready timed against units_rows on the same table in the same run,
+# so the machine load sits on both sides. Measured before T35: 90-108; after: 3.5-7.1.
+hard_now() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
+{ printf '## SDLC State\n\napproved-by: x\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
+  i=1; while [ "$i" -le 120 ]; do
+    files=""; for k in 1 2 3 4 5 6 7 8; do files="$files, payload/m$i/f$k.sh"; done
+    printf '| T%s | 4 | build | t | - | — | S | s | %s, tests/t%s*.test.sh, docs/d%s/! | approval:plan, payload/m%s/f1.sh, tests/t%sx.test.sh, docs/d%s/a.md | pending |\n' \
+      "$i" "${files#, }" "$i" "$i" "$((i + 1))" "$((i + 2))" "$((i + 3))"
+    i=$((i + 1))
+  done
+  printf '| T121 | 5 | verify | floor | - | — | S | s | .bionic/docs/record/x.txt |  | pending |\n'; } > "$SANDBOX/f7.md"
+t0="$(hard_now)"; NROWS="$(call units_rows "$SANDBOX/f7.md" | wc -l | tr -d ' ')"; t1="$(hard_now)"
+F7R="$(call units_ready "$SANDBOX/f7.md" 5)"; t2="$(hard_now)"
+# Every generated row reads what a neighbour writes, so nothing is ready: the table is live, and
+# the timed call did the whole judgement, when the floor names its open writers.
+expect_eq "HARDEN.F7 the 120-row table parses whole, and the floor waits on its open writers" "yes yes" \
+  "$([ "$NROWS" -gt 100 ] && echo yes || echo no) $(has_line "$(call units_waiting "$SANDBOX/f7.md" 5)" "T121${TAB}head${TAB}T1${TAB}pending")"
+expect_eq "HARDEN.F7a …and nothing is ready in it" "" "$F7R"
+expect_eq "HARDEN.F7b units_ready costs under twenty-five parses of the same table" "yes" \
+  "$(perl -e "print((($t2 - $t1) < 25 * ($t1 - $t0)) ? 'yes' : 'no')")"
 
 # ============================================================
 section "CHAIN — wave-26 T3: units_chain, the longest chain and the widest the plan can run (REQ-7, AC-7.1 lib half; D12)"

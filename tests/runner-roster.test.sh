@@ -850,8 +850,43 @@ expect_eq "9.26 …and completion order really did disagree: the slow suite land
 expect_eq "9.27 …while the report printed that same suite FIRST" \
   "aaa-slow.test.sh" "$(rr_labels_ordered "$RR9_OUT" | sed -n '1p')"
 
+
 # ============================================================
-section "§10 NESTED — a solo suite takes the whole machine; a nested run never waits on its parent (wave-26 T8, AC-6.4)"
+section "§10 the header names the head and the dirt of the tree under test (wave-26 T4; D5)"
+# ============================================================
+#
+# A run's verdict is a claim about one state of the code, so the header says which:
+# `head=<40-hex> dirty=<porcelain lines>` for the tree the runner cd's into. The scratch tree
+# is made a repository with one commit and then dirtied by a file it does not track; the
+# expected values are git's own answers for that tree, taken by this suite, not counts
+# written down here. A tree that is no repository says so rather than inventing a head.
+T10="$TMPROOT/t10"
+rr_tree "$T10"
+rr_stub "$T10" "h-one"
+( cd "$T10" && git init -q . && git add -A \
+  && git -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+       -c core.hooksPath=/dev/null commit -q -m tree ) >/dev/null 2>&1
+printf 'untracked\n' > "$T10/dirt.txt"
+T10_HEAD="$(git -C "$T10" rev-parse HEAD 2>/dev/null)"
+T10_DIRTY="$(git -C "$T10" status --porcelain 2>/dev/null | awk 'END { print NR+0 }')"
+expect_regex "10.0 precondition: the scratch tree has a 40-hex head" '^[0-9a-f]{40}$' "$T10_HEAD"
+expect_true "10.0b precondition: …and git counts it dirty" test "$T10_DIRTY" -gt 0
+rr_drive "$T10"
+expect_eq "10.1 the run over the scratch tree is green" "0" "$RR_RC"
+expect_eq "10.2 the header carries one head= line, naming that tree's head and dirt" \
+  "head=${T10_HEAD} dirty=${T10_DIRTY}" "$(printf '%s\n' "$RR_OUT" | /usr/bin/grep '^head=')"
+expect_true "10.3 …and it sits in the header, before the first suite's verdict" \
+  test "$(printf '%s\n' "$RR_OUT" | awk '/^head=/ { print NR; exit }')" -lt \
+       "$(printf '%s\n' "$RR_OUT" | awk '/h-one\.test\.sh/ { print NR; exit }')"
+T10N="$TMPROOT/t10n"
+rr_tree "$T10N"
+rr_stub "$T10N" "h-two"
+rr_drive "$T10N"
+expect_eq "10.4 a tree that is no repository names no head" "head=none dirty=none" \
+  "$(printf '%s\n' "$RR_OUT" | /usr/bin/grep '^head=')"
+
+# ============================================================
+section "§11 NESTED — a solo suite takes the whole machine; a nested run never waits on its parent (wave-26 T8, AC-6.4)"
 # ============================================================
 #
 # WHAT IT COVERS. A `# runner: solo` suite used to be held out of the run's own batch and
@@ -875,7 +910,7 @@ section "§10 NESTED — a solo suite takes the whole machine; a nested run neve
 #       clean one is an ordinary pass.
 
 RRN_BOOKED="$REPO/payload/scripts/booked.sh"
-expect_true "10.0 the shim the outer run is booked through exists" test -f "$RRN_BOOKED"
+expect_true "11.0 the shim the outer run is booked through exists" test -f "$RRN_BOOKED"
 
 RRN="$TMPROOT/n"
 RRN_MARKS="$RRN/marks"; RRN_SLOTS="$RRN/slots"; RRN_LOAD="$RRN/load"
@@ -948,39 +983,39 @@ rrn_read() { cat "$RRN_MARKS/$1" 2>/dev/null; }
 # ---- (a) the outer run inside a booked command -----------------------------
 rm -f "$RRN_MARKS"/*
 rrn_drive "$TNO" 1 4 bash "$RRN_BOOKED" -- bash tests/run.sh
-expect_eq "10.1 the booked outer run completes green" "0" "$RRN_RC"
-expect_contains "10.2 its solo suite ran holding the whole machine, taken for that suite" \
+expect_eq "11.1 the booked outer run completes green" "0" "$RRN_RC"
+expect_contains "11.2 its solo suite ran holding the whole machine, taken for that suite" \
   "aaa-nest.test.sh" "$(rrn_read outer.what)"
-expect_eq "10.3 the run nested in the solo suite completes green" "0" "$(rrn_read inner-solo.rc)"
-expect_contains "10.4 …with a real tally (the nested run happened)" "Gating:" "$(rrn_read inner-solo.out)"
-expect_absent "10.5 …and it never gave up waiting" "gave up" "$(rrn_read inner-solo.out)"
-expect_absent "10.6 …nor reported a void" "VOID" "$(rrn_read inner-solo.out)"
-expect_eq "10.7 the nested run inside the hold is marked held and quiet" "1/1" "$(rrn_read inner-solo.env)"
-expect_contains "10.8 …and took nothing of its own: the hold it ran in is still the outer suite's" \
+expect_eq "11.3 the run nested in the solo suite completes green" "0" "$(rrn_read inner-solo.rc)"
+expect_contains "11.4 …with a real tally (the nested run happened)" "Gating:" "$(rrn_read inner-solo.out)"
+expect_absent "11.5 …and it never gave up waiting" "gave up" "$(rrn_read inner-solo.out)"
+expect_absent "11.6 …nor reported a void" "VOID" "$(rrn_read inner-solo.out)"
+expect_eq "11.7 the nested run inside the hold is marked held and quiet" "1/1" "$(rrn_read inner-solo.env)"
+expect_contains "11.8 …and took nothing of its own: the hold it ran in is still the outer suite's" \
   "aaa-nest.test.sh" "$(rrn_read inner-solo.what)"
-expect_eq "10.9 the run nested in the batch completes green" "0" "$(rrn_read inner-batch.rc)"
-expect_contains "10.10 …with a real tally" "Gating:" "$(rrn_read inner-batch.out)"
-expect_absent "10.11 …and it never gave up waiting" "gave up" "$(rrn_read inner-batch.out)"
-expect_contains "10.12 …and took the whole machine itself, beside the parent's lent place" \
+expect_eq "11.9 the run nested in the batch completes green" "0" "$(rrn_read inner-batch.rc)"
+expect_contains "11.10 …with a real tally" "Gating:" "$(rrn_read inner-batch.out)"
+expect_absent "11.11 …and it never gave up waiting" "gave up" "$(rrn_read inner-batch.out)"
+expect_contains "11.12 …and took the whole machine itself, beside the parent's lent place" \
   "aaa-inner.test.sh" "$(rrn_read inner-batch.what)"
-expect_true "10.13 the store was used" test -d "$RRN_SLOTS"
-expect_eq "10.14 …and everything in it was given back: no marker, no place" "" \
+expect_true "11.13 the store was used" test -d "$RRN_SLOTS"
+expect_eq "11.14 …and everything in it was given back: no marker, no place" "" \
   "$(ls -d "$RRN_SLOTS"/quiet "$RRN_SLOTS"/place.* 2>/dev/null)"
 
 # ---- (b) the mutation control: no quiet mark on the solo launch ------------
 TNM="$RRN/outer-mut"
 rrn_outer_tree "$TNM"
 sed 's/BIONIC_SLOT_QUIET=1 //g' "$RUNNER" > "$TNM/tests/run.sh"
-expect_true "10.15 meta: the shipped runner carries the quiet mark on its solo launch" \
+expect_true "11.15 meta: the shipped runner carries the quiet mark on its solo launch" \
   grep -q 'BIONIC_SLOT_QUIET=1 ' "$RUNNER"
-expect_eq "10.16 meta: …and the doctored copy does not" "0" \
+expect_eq "11.16 meta: …and the doctored copy does not" "0" \
   "$(grep -c 'BIONIC_SLOT_QUIET=1 ' "$TNM/tests/run.sh")"
-expect_true "10.17 meta: the doctored copy still parses" bash -n "$TNM/tests/run.sh"
+expect_true "11.17 meta: the doctored copy still parses" bash -n "$TNM/tests/run.sh"
 rm -f "$RRN_MARKS"/*
 rrn_drive "$TNM" 1 2 bash "$RRN_BOOKED" -- bash tests/run.sh
-expect_contains "10.18 without the mark the nested run waits on its own parent's hold and gives up" \
+expect_contains "11.18 without the mark the nested run waits on its own parent's hold and gives up" \
   "gave up" "$(rrn_read inner-solo.out)"
-expect_contains "10.19 …which is the parent's whole-machine marker it was waiting on" \
+expect_contains "11.19 …which is the parent's whole-machine marker it was waiting on" \
   "the whole machine" "$(rrn_read inner-solo.out)"
 
 # ---- (c) a foreign holder of another place delays the solo suite -----------
@@ -1004,10 +1039,10 @@ RRN_FOREIGN="$RRN_FPID"
 rrn_drive "$TNF" 2 15 bash tests/run.sh
 RRN_FOREIGN=""
 kill "$RRN_FPID" "$RRN_KILLER" 2>/dev/null; wait "$RRN_KILLER" 2>/dev/null
-expect_eq "10.20 the run with a foreign holder completes green" "0" "$RRN_RC"
-expect_eq "10.21 the solo suite started only once the foreign holder was gone" "gone" \
+expect_eq "11.20 the run with a foreign holder completes green" "0" "$RRN_RC"
+expect_eq "11.21 the solo suite started only once the foreign holder was gone" "gone" \
   "$(rrn_read foreign.state)"
-expect_contains "10.22 …and the runner said what it was waiting for, naming the holder" \
+expect_contains "11.22 …and the runner said what it was waiting for, naming the holder" \
   "a foreign run" "$RRN_OUT"
 
 # ---- (d) VOID: the load rose during the timing run -------------------------
@@ -1029,24 +1064,24 @@ rrn_line() { printf '%s\n' "$RRN_OUT" | grep -F "  $1 "; }
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"; printf '0\n' > "$RRN_LOAD"
 RRN_VOID=always; rrn_drive "$TNV" 2 10 bash tests/run.sh
 RRN_VOID_ALWAYS_OUT="$RRN_OUT"
-expect_eq "10.23 a suite disturbed on every try does not fail the run" "0" "$RRN_RC"
-expect_true "10.24 …it was re-run" test "$(rrn_void_runs)" -ge 2
-expect_true "10.25 …and the retries stop (at most the first run and two more)" test "$(rrn_void_runs)" -le 3
-expect_contains "10.26 its verdict line reads VOID" "VOID" "$(rrn_line aaa-void.test.sh)"
-expect_absent "10.27 …not FAIL" "FAIL" "$(rrn_line aaa-void.test.sh)"
-expect_contains "10.28 the summary names it under Void:" "aaa-void.test.sh" \
+expect_eq "11.23 a suite disturbed on every try does not fail the run" "0" "$RRN_RC"
+expect_true "11.24 …it was re-run" test "$(rrn_void_runs)" -ge 2
+expect_true "11.25 …and the retries stop (at most the first run and two more)" test "$(rrn_void_runs)" -le 3
+expect_contains "11.26 its verdict line reads VOID" "VOID" "$(rrn_line aaa-void.test.sh)"
+expect_absent "11.27 …not FAIL" "FAIL" "$(rrn_line aaa-void.test.sh)"
+expect_contains "11.28 the summary names it under Void:" "aaa-void.test.sh" \
   "$(printf '%s\n' "$RRN_OUT" | sed -n '/^Void:/,$p')"
-expect_absent "10.29 …and nothing is listed under Failed:" "Failed:" "$RRN_OUT"
-expect_absent "10.30 …and the run does not call itself all green" "All gating suites green" "$RRN_OUT"
+expect_absent "11.29 …and nothing is listed under Failed:" "Failed:" "$RRN_OUT"
+expect_absent "11.30 …and the run does not call itself all green" "All gating suites green" "$RRN_OUT"
 
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"; printf '0\n' > "$RRN_LOAD"
 RRN_VOID=once; rrn_drive "$TNV" 2 10 bash tests/run.sh
-expect_eq "10.31 a suite disturbed once and clean on the retry: the run is green" "0" "$RRN_RC"
-expect_true "10.32 …it was re-run" test "$(rrn_void_runs)" -ge 2
-expect_contains "10.33 …and its verdict line reads PASS" "PASS" "$(rrn_line aaa-void.test.sh)"
-expect_absent "10.34 …with no Void: summary" "Void:" "$RRN_OUT"
-expect_contains "10.35 …and the retry was said on the way" "void" "$RRN_OUT"
-expect_contains "10.36 the always-disturbed run printed a Void: summary (10.34 is not vacuous)" \
+expect_eq "11.31 a suite disturbed once and clean on the retry: the run is green" "0" "$RRN_RC"
+expect_true "11.32 …it was re-run" test "$(rrn_void_runs)" -ge 2
+expect_contains "11.33 …and its verdict line reads PASS" "PASS" "$(rrn_line aaa-void.test.sh)"
+expect_absent "11.34 …with no Void: summary" "Void:" "$RRN_OUT"
+expect_contains "11.35 …and the retry was said on the way" "void" "$RRN_OUT"
+expect_contains "11.36 the always-disturbed run printed a Void: summary (11.34 is not vacuous)" \
   "Void:" "$RRN_VOID_ALWAYS_OUT"
 
 finish
