@@ -63,7 +63,7 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \` — read-only role commit — none: the fix is a SendMessage report, a tool call, not a command
 - `fold_block exit2 "$_WALL_POKER_VERB" \` — subagent poker verb — none: the verb is the orchestrator's alone, so the fix is a message to it
 - `fold_block exit2 suite-run "a backgrounded suite's result is never read" "run it in the foreground" \` — backgrounded suite — fix: the same command run in the foreground, printed from the refused text (`_bg_fix`)
-- `fold_block exit2 suite-run \` — budget arm, unexpanded suite name — fix: the loop header's words as `bash tests/<w>.test.sh` lines, from `cmd_suite_loop_lines`; none when the text gives no literal list, and the detail says so
+- `fold_block exit2 suite-run \` — budget arm, unexpanded suite name — fix: the loop header's words as `bash tests/<w>.test.sh` lines, from `cmd_suite_loop_lines`; none when the text gives no literal list, or when a loop's body reassigns its variable so the header is not what runs (T26), and the detail says so
 - `fold_block exit2 suite-run \` — budget arm, suite or run off the budget — fix: `bash <root>/hooks/session-poker.sh amend <name> --suites+ <suite> --reason '<why>'` (`_budget_remedy_line`)
 - `fold_block exit2 suite-run \` — budget arm, the full tree — fix: `bash tests/<first budgeted suite>`
 - `fold_block exit2 write "this writes the memory store" "use record/<wave>/assumptions.md" \` — memory wall — none: the fix is to write record/<wave>/assumptions.md or a rule proposal instead, content only the writer has
