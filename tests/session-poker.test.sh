@@ -8473,7 +8473,8 @@ section "Section 46 §PROOF-ADD: a proof names the head it read (wave-26 T4; REQ
 #
 # `proof-add <floor|review|task> <evidence>` writes one line inside `## SDLC State`:
 # `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>`. The head
-# is never an operand: it is `git rev-parse HEAD` of the checkout holding the plan's
+# is never an operand: it is the one the evidence names (a run log's `head=` header, a
+# review's `reviewed: a..b` end; T14), held against the checkout holding the plan's
 # `working-branch:`, which here is a linked worktree one commit ahead of the main checkout,
 # so a head read from the cwd would be the wrong one. The write is §42's transaction: a
 # copy, a dry commit through the real gate, a checksum, a swap; every refusal leaves the
@@ -8691,7 +8692,8 @@ s42_unchanged "46c9 one operand is the usage error" 2 "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor.txt "$W46_HEAD"
 s42_unchanged "46c10 …and so is a head given as an operand" 2 "$P46"
 
-# The head comes from the working branch's checkout or not at all.
+# The head is held against the working branch's checkout, so a plan whose branch no checkout
+# holds, or that names none, is refused before any evidence head is read.
 sed 's#^working-branch: wave/01-fixture$#working-branch: wave/99-gone#' "$P46" > "$P46.tmp" && mv "$P46.tmp" "$P46"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor.txt
@@ -8973,5 +8975,178 @@ expect_contains "49e AC-6.5 …and names the range it reads, the proof's head to
   "poker: RANGE T3 ${W48_A}..${W48_B}" "$OUT"
 expect_absent "49e2 …and only for the review: the active build has no RANGE line" "poker: RANGE T2" "$OUT"
 POKE_BOUND="$S49_BOUND_WAS"
+
+
+# ============================================================
+section "Section 50 §FIRST-TICK: the armed first tick names the ready set — FILL, WAIT and CHAIN from the scheduler's one site (wave-26 T59; REQ-6 AC-6.6)"
+# ============================================================
+#
+# THE FIRST TICK OF EVERY RUN FINDS NO ROSTER: arming precedes dispatch (§13a). Through T58 that
+# arm printed the rung, the holds and the ledger, then `QUIET — armed, nothing dispatched yet`,
+# and exited above the scheduler, so FILL, WAIT and CHAIN never printed on the one tick where
+# every ready row is unstarted. Both arms now run the scheduler from one site, and the decision
+# line agrees with what the tick printed: FILL with its `fill=` field when it names rows, QUIET
+# (exit 0, stamp kept) when nothing is ready or approval is pending. The approval gate
+# holds as everywhere: the gate is the plan's `approved-by:` line (wave-26 T13), so the plan at
+# current: 3 below carries none, as a plan before Step-3 approval does.
+s50_plan() {  # <repo> <current> <approved-by line, or empty> -> the plan path
+  local f="$1/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")"
+  {
+    printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: %s\n%s\n\n- Step %s: in progress\n\n' "$2" "$3" "$2"
+    printf '## Tasks\n\n%s' "$SP_TASKS_HEADER"
+    printf '| T1 | 4 | build | ready, the long one | implementor | — | 20m | REQ-x | a.sh | pending |\n'
+    printf '| T2 | 4 | build | ready | implementor | — | 10m | REQ-x | b.sh | pending |\n'
+    printf '| T3 | 4 | build | ready | implementor | — | 5m | REQ-x | c.sh | pending |\n'
+    printf '| T4 | 4 | build | waits on T1 | implementor | T1 | 15m | REQ-x | d.sh | pending |\n'
+  } > "$f"
+  printf '%s' "$f"
+}
+s50_last() { printf '%s\n' "$OUT" | tail -1; }
+
+R50="$(make_repo s50-first-tick)"
+poke "$R50" arm
+s50_plan "$R50" 4 "$SP_APPROVED_LINE" >/dev/null
+poke_pressure "$R50" 8192 1.0 tick
+expect_eq "50a the armed first tick exits 0" "0" "$RC"
+expect_eq "50a3 precondition: …with no roster file on disk, the no-roster arm" "no" "$([ -e "$(roster_of "$R50")" ] && echo yes || echo no)"
+expect_contains "50b the first tick fills the three ready rows" "poker: FILL T1 T2 T3" "$OUT"
+expect_contains "50c …names the waiting row with the read it lacks and its writer" \
+  "poker: WAIT T4 — waits for T1 (pending)" "$OUT"
+expect_contains "50d …and the longest chain, by hand: 20 + 15" "poker: CHAIN T1→T4 (35 min)" "$OUT"
+expect_contains "50a2 …and its sentence is the FILL band's own" \
+  "poker: FILL — T1 T2 T3 named for dispatch; the decision line carries them." "$OUT"
+S50_FILL="$(s38_line_no 'poker: FILL T')"; S50_WAIT="$(s38_line_no 'poker: WAIT ')"
+S50_CHAIN="$(s38_line_no 'poker: CHAIN ')"; S50_SAID="$(s38_line_no 'poker: FILL — ')"
+expect_true "50e …each above the band's sentence (fill=$S50_FILL wait=$S50_WAIT chain=$S50_CHAIN said=$S50_SAID)" \
+  test "$S50_FILL" -gt 0 -a "$S50_WAIT" -gt "$S50_FILL" -a "$S50_CHAIN" -gt "$S50_WAIT" -a "$S50_SAID" -gt "$S50_CHAIN"
+expect_regex "50f the decision line agrees with what the tick printed: last, FILL, and the fill field" \
+  '^poker-tick/v1\|at=[^|]+\|session=[^|]+\|decision=FILL\|total=0\|open=0\|fill=T1 T2 T3$' "$(s50_last)"
+expect_absent "50f2 …and the QUIET sentence is not printed beside it" "poker: QUIET" "$OUT"
+expect_eq "50g the rung prints once, from the one site" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
+expect_eq "50h the stamp is kept" "yes" "$([ -f "$(stamp_of "$R50")" ] && echo yes || echo no)"
+expect_eq "50i the tick digest the stop collector reads carries the FILL band, and the duty it owes" \
+  "decision=FILL duty=owed" \
+  "$(/usr/bin/grep -E '^(decision|duty)=' "$R50/.bionic/tmp/tick-digest-$SID.state" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
+# 50k — A FIRST TICK WITH NOTHING READY IS STILL QUIET: the one row waits on the world.
+R50K="$(make_repo s50-first-tick-nothing-ready)"
+poke "$R50K" arm
+sp_plan_at_step "$R50K" 4 \
+  "| T1 | 4 | build | waits on CI | implementor | ext:ci-50k | 15m | REQ-x | a.sh | pending |" >/dev/null
+poke_pressure "$R50K" 8192 1.0 tick
+expect_eq "50k the first tick with nothing ready exits 0" "0" "$RC"
+expect_contains "50k2 precondition: …and read the plan: the held row is named" "poker: HELD T1 ext:ci-50k" "$OUT"
+expect_absent "50k3 …names no row to fill" "poker: FILL" "$OUT"
+expect_contains "50k4 …and decides QUIET in the no-roster arm" \
+  "poker: QUIET — armed, nothing dispatched yet on this session" "$OUT"
+expect_regex "50k5 …with the QUIET decision line, no fill field" \
+  '^poker-tick/v1\|at=[^|]+\|session=[^|]+\|decision=QUIET\|total=0\|open=0$' "$(s50_last)"
+expect_contains "50k6 …and a digest that says QUIET" "decision=QUIET" \
+  "$(cat "$R50K/.bionic/tmp/tick-digest-$SID.state" 2>/dev/null)"
+
+# 50j — THE SAME TABLE BEFORE STEP-3 APPROVAL: no FILL, no WAIT, no CHAIN, the approval line,
+# and the same QUIET decision and exit code.
+R50B="$(make_repo s50-first-tick-step3)"
+poke "$R50B" arm
+s50_plan "$R50B" 3 "" >/dev/null
+poke_pressure "$R50B" 8192 1.0 tick
+expect_eq "50j the first tick before approval exits 0" "0" "$RC"
+expect_contains "50j2 …and prints the approval line" \
+  "poker: no FILL — plan at current: 3, Step-3 approval pending" "$OUT"
+expect_absent "50j3 …and names no row to fill" "poker: FILL" "$OUT"
+expect_absent "50j4 …no WAIT line" "poker: WAIT" "$OUT"
+expect_absent "50j5 …and no CHAIN line" "poker: CHAIN" "$OUT"
+expect_contains "50j6 …deciding QUIET in the no-roster arm" \
+  "poker: QUIET — armed, nothing dispatched yet on this session" "$OUT"
+expect_regex "50j7 …with the decision line unchanged" \
+  '^poker-tick/v1\|at=[^|]+\|session=[^|]+\|decision=QUIET\|total=0\|open=0$' "$(s50_last)"
+
+# ============================================================
+section "Section 51 §ADD-READS: a task added mid-run says what it reads, and the graph is the one a fresh derivation gives (wave-26 T59; REQ-5 AC-5.4)"
+# ============================================================
+#
+# `task-add` takes an optional tenth operand, `<reads>`, passed to `units_add_row` as the row's
+# reads cell (wave-26 T2, A-T2.14). In a table with a reads column a row waits for what it
+# reads and its deps carry only `ext:<slug>`, so the add needs no hand-written dependency: its
+# edges come from the table. A `—` reads is the cell `—`, which the readiness program reads as
+# the kind's default. A reads operand on a table with no reads column has nowhere to go and is
+# refused, unless it is `—`, which writes what the nine-operand form writes.
+#
+# THE FIXTURE IS §34's, WITH A reads COLUMN: s34_plan's admitted plan, its table widened by one
+# column and T5's deps (task ids, which a reads table refuses) emptied.
+S51_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S51_UNITS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/units.sh"
+s51_plan() {  # <repo> -> the plan path; s34_plan's, with a reads column
+  local p; p="$(s34_plan "$1" 4)"
+  awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
+       t && /^\| id / { print $0 " reads |"; next }
+       t && /^\|---/ { print $0 "---|"; next }
+       t && /^\| T/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " — |"; next }
+       { print }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  printf '%s' "$p"
+}
+s51_edges() { bash -c '. "$1" && units_edges "$2"' _ "$S51_UNITS" "$1" 2>/dev/null | LC_ALL=C sort; }  # <plan>
+s51_rows() { /usr/bin/grep '^| T[0-9]' "$1"; }  # <plan> -> its task rows
+
+R51="$(make_repo s51-add-reads)"; ( cd "$R51" && git commit -q --allow-empty -m init )
+P51="$(s51_plan "$R51")"
+s34_gate "$R51"
+expect_eq "51a precondition: the reads-table fixture is admitted by the real commit gate" "0" "$GATE_RC"
+S51_ROWS_BEFORE="$(s51_rows "$P51")"
+poke "$R51" task-add T6 4 build 'reads what T2 writes' bionic:implementor '—' 30 REQ-5 'lib/c.sh' 'b.sh'
+expect_eq "51b task-add with a reads operand and no deps exits 0" "0" "$RC"
+expect_contains "51b2 …the reads operand is the row's reads cell" \
+  "| T6 | 4 | build | reads what T2 writes | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending | b.sh |" "$(cat "$P51")"
+S51_EDGES="$(s51_edges "$P51")"
+expect_contains "51c AC-5.4 the added row's edge comes from what it reads: T2 writes b.sh" \
+  "$(printf 'T2\tT6\tb.sh')" "$S51_EDGES"
+# THE FRESH DERIVATION: the same table written by hand in a second repo, its edges derived.
+R51F="$(make_repo s51-add-reads-fresh)"; ( cd "$R51F" && git commit -q --allow-empty -m init )
+P51F="$(s51_plan "$R51F")"
+awk '{ print }
+     /^\| T5 \| 5 \|/ { print "| T6 | 4 | build | reads what T2 writes | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending | b.sh |" }
+     /^- T5: / { print "- T6: pending dispatch — by hand" }' "$P51F" > "$P51F.tmp" && mv "$P51F.tmp" "$P51F"
+expect_nonempty "51d precondition: the hand-written table derives edges" "$(s51_edges "$P51F")"
+expect_eq "51d2 AC-5.4 the graph after the add equals a fresh derivation of the same table" \
+  "$(s51_edges "$P51F")" "$S51_EDGES"
+expect_eq "51e no other row is touched: T6 is appended to no later row's deps (every other row byte-identical)" \
+  "$S51_ROWS_BEFORE" "$(s51_rows "$P51" | /usr/bin/grep -v '^| T6 ')"
+s34_gate "$R51"
+expect_eq "51f the next commit is admitted" "0" "$GATE_RC"
+
+# 51g — REFUSALS LEAVE THE PLAN BYTE-IDENTICAL (cmp, §42's helpers).
+s42_snap "$R51" "$P51"
+poke "$R51" task-add T6 4 build 'the same id again' implementor '—' 30 REQ-5 'lib/d.sh' 'a.sh'
+s42_unchanged "51g a duplicate id with a reads operand" 1 "$P51"
+expect_contains "51g2 …naming the duplicate" "T6: duplicate id" "$OUT"
+poke "$R51" task-add T7 4 build 'a read naming nothing' implementor '—' 30 REQ-5 'lib/d.sh' 'nonsense'
+s42_unchanged "51g3 a reads token naming no artifact" 1 "$P51"
+expect_contains "51g4 …in the validator's words" "read nonsense names no artifact" "$OUT"
+poke "$R51" task-add T7 4 build 'a bare word for Files' implementor '—' 30 REQ-5 'CHANGELOG' 'a.sh'
+s42_unchanged "51g5 a Files operand the dispatch grammar refuses" 1 "$P51"
+poke "$R51" task-add T7 4 build 'eleven' implementor '—' 30 REQ-5 'lib/d.sh' 'a.sh' extra
+s42_unchanged "51g6 eleven operands are the usage error" 2 "$P51"
+expect_contains "51g7 …and the usage names the optional reads operand" "[<reads>]" "$OUT"
+
+# 51h — TEN OPERANDS ON A TABLE WITHOUT THE COLUMN: a read has nowhere to go, so it is refused
+# in one line, the plan byte-identical; `—` is the nine-operand form, byte for byte.
+R51N="$(make_repo s51-no-reads)"; ( cd "$R51N" && git commit -q --allow-empty -m init )
+P51N="$(s42_plan "$R51N" 4)"
+s42_snap "$R51N" "$P51N"
+poke "$R51N" task-add T6 4 build 'reads into no column' implementor '—' 30 REQ-5 'lib/c.sh' 'b.sh'
+s42_unchanged "51h a reads operand on a table with no reads column" 1 "$P51N"
+expect_contains "51h2 …saying why, in one line" "has no reads column" "$OUT"
+poke "$R51N" task-add T6 4 build 'the dash reads' implementor '—' 30 REQ-5 'lib/c.sh' '—'
+expect_eq "51h3 a — reads on that table is admitted" "0" "$RC"
+R51M="$(make_repo s51-nine)"; ( cd "$R51M" && git commit -q --allow-empty -m init )
+P51M="$(s42_plan "$R51M" 4)"
+poke "$R51M" task-add T6 4 build 'the dash reads' implementor '—' 30 REQ-5 'lib/c.sh'
+expect_eq "51h4 precondition: the nine-operand add of the same row exits 0" "0" "$RC"
+expect_eq "51h5 …and the — reads wrote what the nine-operand form writes, byte for byte (the add's instant aside)" \
+  "$(sed -E 's/ added by task-add at [0-9TZ:-]+$//' "$P51M")" "$(sed -E 's/ added by task-add at [0-9TZ:-]+$//' "$P51N")"
+POKE_BOUND="$S51_BOUND_WAS"
 
 finish
