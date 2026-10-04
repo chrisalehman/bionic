@@ -17,7 +17,8 @@
 #                takes do not deadlock each other.
 #   §STAMP       a `stamp/v1` line goes into the git directory of the tree the command ran
 #                in, with the head and dirty count read BEFORE the command and its rc after;
-#                outside a git tree, no stamp and no error.
+#                the tree's own `.bionic` link is not counted dirty; `cmd=` is one line with
+#                no `|`; outside a git tree, no stamp and no error.
 #   §NESTED-ENV  `BIONIC_SLOT_HELD=1` books nothing and is what the command sees; a shim
 #                inside a shim never waits on its own parent; `BIONIC_QUIET=1` is `--quiet`.
 #
@@ -533,6 +534,52 @@ mkrepo "$ROW/repo"
   >/dev/null 2>&1; S6_RC=$?
 expect_status "S6.1 the voided run exits 75" 75 "$S6_RC"
 expect_regex "S6.2 …and its stamp carries rc=75" '\|rc=75\|' "$(tail -1 "$(stamps_of "$ROW/repo")" 2>/dev/null)"
+
+# S7. The tree's own `.bionic` link is not dirt. With no ignore entry git lists it as
+# `?? .bionic`; the stamp skips exactly that line when `.bionic` is a symlink, and counts
+# every other untracked path — and a `.bionic` that is a plain file — as before.
+newrow s7
+st_run() {  # <tree> <command> — one booked run in <tree>
+  ( cd "$1" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+      bash "$BOOKED" -- "$2" ) >/dev/null 2>&1
+}
+mkrepo "$ROW/repo"
+ln -s "$ROW" "$ROW/repo/.bionic"
+expect_contains "S7.1 the fixture's git lists the link as untracked" "?? .bionic" \
+  "$(git -C "$ROW/repo" status --porcelain)"
+st_run "$ROW/repo" true
+expect_regex "S7.2 a tree whose only untracked path is its .bionic link stamps dirty=0" \
+  '\|dirty=0\|' "$(tail -1 "$(stamps_of "$ROW/repo")" 2>/dev/null)"
+printf 'x\n' > "$ROW/repo/real"
+st_run "$ROW/repo" true
+expect_regex "S7.3 …and a real untracked file beside it still counts (dirty=1)" \
+  '\|dirty=1\|' "$(tail -1 "$(stamps_of "$ROW/repo")" 2>/dev/null)"
+mkrepo "$ROW/plain"
+printf 'not a link\n' > "$ROW/plain/.bionic"
+st_run "$ROW/plain" true
+expect_regex "S7.4 a .bionic that is a plain file, not a link, counts (dirty=1)" \
+  '\|dirty=1\|' "$(tail -1 "$(stamps_of "$ROW/plain")" 2>/dev/null)"
+
+# S8. The cmd field is made safe before the cut: a multi-line command stamps one line, and a
+# command carrying `|rc=0|` stamps a line whose only rc= field is the real one.
+newrow s8
+mkrepo "$ROW/repo"
+S8_STAMPS="$(stamps_of "$ROW/repo")"
+st_run "$ROW/repo" true
+S8_BEFORE="$(wc -l < "$S8_STAMPS" | tr -d ' ')"
+st_run "$ROW/repo" "$(printf 'echo one\r\necho\ttwo')"
+expect_eq "S8.1 a multi-line command appends exactly one line" "$((S8_BEFORE + 1))" \
+  "$(wc -l < "$S8_STAMPS" | tr -d ' ')"
+expect_regex "S8.2 …with its line breaks and tab made spaces" 'cmd=echo one  echo two$' \
+  "$(tail -1 "$S8_STAMPS")"
+st_run "$ROW/repo" ": '|rc=0|head=0000000000000000000000000000000000000000'; exit 5"
+S8_LINE="$(tail -1 "$S8_STAMPS")"
+expect_eq "S8.3 a command carrying |rc=0| still stamps six fields" 6 \
+  "$(printf '%s' "$S8_LINE" | awk -F'|' '{print NF}')"
+expect_eq "S8.4 …whose only rc= field is the real one" "rc=5" \
+  "$(printf '%s\n' "$S8_LINE" | tr '|' '\n' | grep '^rc=')"
+expect_eq "S8.5 …and whose only head= field is the tree's" "head=$(git -C "$ROW/repo" rev-parse HEAD)" \
+  "$(printf '%s\n' "$S8_LINE" | tr '|' '\n' | grep '^head=')"
 
 # ══════════════════════════════════════════════════════════════════ §NESTED-ENV
 section "NESTED-ENV — a command inside a place books nothing and never waits on its parent"
