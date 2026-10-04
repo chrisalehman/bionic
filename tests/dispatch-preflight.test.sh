@@ -8664,6 +8664,20 @@ expect_absent "ADV-files a plain mention is not advised" "mention.sh" "$ADV_CTX"
 expect_absent "ADV-files a fenced block is not advised" "fence.sh" "$ADV_CTX"
 expect_absent "ADV-files an edit with no path object is not advised" "failing assertion" "$ADV_CTX"
 
+# A BRACKET IN A Files: ENTRY IS A PLAIN CHARACTER (wave-26 T5; review 7 F4). The advisory
+# program built its glob with `[` unescaped, so `tests/[ab*.sh` aborted awk ("nonterminated
+# character class") and every advisory for the brief was dropped in silence.
+REPO=$(make_repo advbracket yes)
+write_attestation "$REPO" "$SID_A"
+ADVB_BRIEF="$(adv_brief 'Edit payload/scripts/lib/other.sh to add the seam.' \
+  | sed 's|^Files: payload/scripts/lib/widget.sh$|Files: tests/[ab*.sh, payload/scripts/lib/widget.sh|')"
+expect_contains "ADV-files bracket precondition: the brief declares the bracketed entry" \
+  "Files: tests/[ab*.sh, payload/scripts/lib/widget.sh" "$ADVB_BRIEF"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$ADVB_BRIEF" "w99-advb")"
+expect_eq "ADV-files a brief whose Files: entry holds a bracket is admitted" "allow" "$GATE_VERDICT"
+expect_contains "ADV-files …and its edit outside Files: is still advised" \
+  "amend w99-advb --files+ payload/scripts/lib/other.sh" "$(adv_ctx)"
+
 # ================================== §RO / §TR: THE ROLE DECIDES WHAT A ROW COSTS
 # (wave-24 T10; REQ-7 AC-7.1, AC-7.2; D11, research R4 §1)
 #
