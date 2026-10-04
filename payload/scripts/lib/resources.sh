@@ -869,6 +869,46 @@ resources_settled() {
   awk -v l="$load" -v c="$cores" -v q="$q" 'BEGIN { exit !(l + 0 <= c * q) }'
 }
 
+# resources_own_load <cpu-seconds> <wall-seconds> — a run's own share of the one-minute
+# load average at the moment it ends; rc 2 on a bad argument.
+#
+# WHY (wave-26 T36, review 4 F4). The void check reads the load after a timing run, and that
+# reading includes the run itself: a single-threaded 50 s suite lifts the one-minute average
+# by about 0.57, which on 2 cores (line 1.00) voided a run that nobody disturbed. The run's
+# mean concurrency is its children's CPU over its wall time, and the one-minute average is an
+# exponential average with a 60 s time constant, so a run of <wall> seconds at that
+# concurrency has moved it by `(cpu / wall) × (1 − e^(−wall / 60))`. Measured from `times`,
+# not guessed: what the run did, not what it was expected to do.
+LOAD_1M_TAU_S=60   # the one-minute load average's time constant (kernel EWMA, 1 − e^(−t/60))
+resources_own_load() {
+  local v
+  for v in "${1:-}" "${2:-}"; do
+    case "$v" in ''|*[!0-9.]*|*.*.*|.) return 2 ;; esac
+  done
+  awk -v c="$1" -v w="$2" -v t="$LOAD_1M_TAU_S" 'BEGIN {
+    if (w > 0) o = (c / w) * (1 - exp(-w / t)); else o = c / t
+    printf "%.4f\n", o
+  }'
+}
+
+# resources_undisturbed <cores> <own> — the void check: rc 0 when the load now, less the
+# run's own share (<own>, from resources_own_load), is at most `cores × quiet-load`; rc 1
+# above it or when the load cannot be read; rc 2 on a bad argument. The difference is taken
+# at the reading's own two decimals, so a run that only added its own share sits on the line
+# rather than a rounding error above it. What is left is the disturbance by others: a rise.
+resources_undisturbed() {
+  local cores="${1:-}" own="${2:-}" load q
+  _res_is_uint "$cores" && [ "$cores" -ge 1 ] || return 2
+  case "$own" in ''|*[!0-9.]*|*.*.*|.) return 2 ;; esac
+  load="$(_res_load_now)"
+  case "${load:-}" in
+    ''|*[!0-9.]*|*.*.*|.) return 1 ;;
+  esac
+  q="$(_res_quiet_load)"
+  awk -v l="$load" -v o="$own" -v c="$cores" -v q="$q" \
+    'BEGIN { d = sprintf("%.2f", l - o) + 0; exit !(d <= c * q) }'
+}
+
 # resources_settled_line <cores> — the line itself, `cores × quiet-load`, for a caller that
 # says what it is waiting for. Same factor, same fallback, as resources_settled.
 resources_settled_line() {
