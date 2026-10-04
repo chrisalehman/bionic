@@ -872,6 +872,55 @@ expect_status "S9.9 --stamp-dir with no value is usage (exit 2)" 2 "$S9_RC"
 s9_run 'true' --stamp-dir= >/dev/null; S9_RC=$?
 expect_status "S9.9 …and so is an empty --stamp-dir=" 2 "$S9_RC"
 
+# S10. --suites <names> (wave-26 T61, critic F1): the wall names the suite files the command runs
+# (their basenames, `?` for one it cannot name) and the shim writes them as ONE field, `suites=`,
+# just before `cmd=`, so a land can keep the newest stamp of each suite apart. Handed nothing,
+# the shim writes today's line. The field keeps one line of fields: a character outside a
+# suite name's set (letters, digits, `.`, `_`, `+`, `-`, the `,` between names, `?`) becomes `?`.
+newrow s10
+mkrepo "$ROW/repo"
+S10_STAMPS="$(stamps_of "$ROW/repo")"
+S10_HEAD="$(git -C "$ROW/repo" rev-parse HEAD)"
+s10_run() {  # <command> <shim option>... — one booked run in the repo
+  local c="$1"; shift
+  ( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=10 \
+      bash "$BOOKED" "$@" -- "$c" ) 2>"$ROW/err"
+}
+s10_run 'exit 3' --suites a.test.sh >/dev/null; S10_RC=$?
+expect_status "S10.1 with --suites the shim still answers the command's code" 3 "$S10_RC"
+expect_regex "S10.2 the stamp carries the field as handed, after at= and before cmd=" \
+  "^stamp/v1\\|head=${S10_HEAD}\\|dirty=0\\|rc=3\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\\|suites=a\\.test\\.sh\\|cmd=exit 3\$" \
+  "$(tail -1 "$S10_STAMPS" 2>/dev/null)"
+expect_eq "S10.2 …nothing on stderr" "" "$(cat "$ROW/err")"
+s10_run 'true' --suites=a.test.sh,b.test.sh >/dev/null
+expect_regex "S10.3 --suites=<names>, two names joined by a comma, is the same option" \
+  "\\|rc=0\\|at=[^|]*\\|suites=a\\.test\\.sh,b\\.test\\.sh\\|cmd=true\$" "$(tail -1 "$S10_STAMPS" 2>/dev/null)"
+s10_run 'true' --suites '?' >/dev/null
+expect_regex "S10.4 a suite the wall cannot name is written as ?" \
+  "\\|suites=\\?\\|cmd=true\$" "$(tail -1 "$S10_STAMPS" 2>/dev/null)"
+s10_run 'true' --suites "$(printf 'a|rc=0\nx y')" >/dev/null
+S10_LINE="$(tail -1 "$S10_STAMPS" 2>/dev/null)"
+expect_regex "S10.5 a pipe, a newline, a space or = in the value becomes ?, so the line keeps its fields" \
+  "\\|suites=a\\?rc\\?0\\?x\\?y\\|cmd=true\$" "$S10_LINE"
+expect_eq "S10.5 …seven fields, one rc=" "7 rc=0" \
+  "$(printf '%s' "$S10_LINE" | awk -F'|' '{print NF}') $(printf '%s\n' "$S10_LINE" | tr '|' '\n' | grep '^rc=')"
+s10_run 'true' >/dev/null
+S10_LINE="$(tail -1 "$S10_STAMPS" 2>/dev/null)"
+expect_regex "S10.6 handed nothing, the shim writes today's line" \
+  "^stamp/v1\\|head=${S10_HEAD}\\|dirty=0\\|rc=0\\|at=[^|]*\\|cmd=true\$" "$S10_LINE"
+expect_eq "S10.6 …six fields, no suites=" "6" "$(printf '%s' "$S10_LINE" | awk -F'|' '{print NF}')"
+S10_N="$(grep -c . "$S10_STAMPS")"
+s10_run 'true' --suites >/dev/null; S10_RC=$?
+expect_status "S10.7 --suites with no value is usage (exit 2)" 2 "$S10_RC"
+s10_run 'true' --suites= >/dev/null; S10_RC=$?
+expect_status "S10.7 …and so is an empty --suites=" 2 "$S10_RC"
+expect_eq "S10.7 …and neither ran nor stamped" "$S10_N" "$(grep -c . "$S10_STAMPS")"
+git -C "$ROW/repo" worktree add -q "$ROW/wt" -b side 2>/dev/null
+s10_run 'exit 1' --stamp-dir "$ROW/wt" --suites b.test.sh >/dev/null
+expect_regex "S10.8 beside --stamp-dir, the field goes with the stamp into that tree" \
+  "^stamp/v1\\|head=$(git -C "$ROW/wt" rev-parse HEAD)\\|dirty=0\\|rc=1\\|at=[^|]*\\|suites=b\\.test\\.sh\\|cmd=exit 1\$" \
+  "$(tail -1 "$(stamps_of "$ROW/wt")" 2>/dev/null)"
+
 # ══════════════════════════════════════════════════════════════════ §NESTED-ENV
 section "NESTED-ENV — a command inside a place books nothing and never waits on its parent"
 

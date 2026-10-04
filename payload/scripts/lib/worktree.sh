@@ -288,10 +288,11 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 # THE LANDING RULE (wave-26 D7, as ruled in A-orch-26). A tree lands on its own
 # green run. It must first contain what landed since it branched only where that
 # landed work touches a file the tree also changed: `not-current` names those
-# files (`_wt_not_current`). `stale-proof` when the LAST line of the tree's stamp
-# file (`<git-dir>/bionic-stamps`, written by the booking shim) is on another
-# head, on a dirty tree, or red. No stamp file at all means no suite-class
-# command ever ran in the tree, and is not refused. The head of <onto> is read
+# files (`_wt_not_current`). `stale-proof` unless, for every suite stamped at the
+# tree's head in its stamp file (`<git-dir>/bionic-stamps`, written by the booking
+# shim), the newest stamp of that suite is green on a clean tree (T61; see
+# `_wt_stale_proof`). No stamp file at all means no suite-class command ever ran
+# in the tree, and is not refused. The head of <onto> is read
 # again just before the merge, and a moved head is judged again (review 2 F7).
 #
 # TWO BOUNDS ON THE POWER (security review F1). This function merges into a
@@ -372,54 +373,93 @@ EOF
   printf '%s' "$abs"
 }
 
-# THE STALE-PROOF READ (wave-26 D7). Reads the LAST line of the tree's stamp file,
-# `stamp/v1|head=<40-hex>|dirty=<count>|rc=<n>|at=<ISO-UTC>|cmd=<...>`, appended by the
-# booking shim to `<the tree's git dir>/bionic-stamps`. Prints the reason and the fix and
-# returns 0 when that line is not proof for <head>: on another head, on a dirty tree, red,
-# or not a stamp at all. Returns 1 when it is proof — and when there is no stamp file, which
-# means no suite-class command ever ran in the tree.
+# THE STALE-PROOF READ (wave-26 D7; T61, critic F1). Reads EVERY line of the tree's stamp file,
+# `stamp/v1|head=<40-hex>|dirty=<count>|rc=<n>|at=<ISO-UTC>[|suites=<names>]|cmd=<...>`, appended
+# by the booking shim to `<the tree's git dir>/bionic-stamps`, one line per suite-class command.
+# Prints the reason and the fix and returns 0 when the tree's runs are not proof for <head>.
+# Returns 1 when they are — and when there is no stamp file, which means no suite-class command
+# ever ran in the tree.
 #
-# `cmd=` is the last field and free text, so the read STOPS there (review 2 F2): what follows
-# is the command, whatever it contains, and a `|rc=0` in it never speaks for the run. That
-# holds by itself, without the shim's pipe replacement. Before `cmd=`, each of head, dirty
-# and rc appears exactly once; a line giving one twice is no line the shim writes.
+# THE RULE: for EVERY suite stamped at <head>, the NEWEST stamp of that suite is green proof (rc 0
+# on a clean tree). The doctrine runs a brief's suites one call each, so one head collects one line
+# per suite; before T61 only the last line was read, and suite a red then suite b green LANDED.
+#   - `suites=` names the basenames a line ran, comma-joined (the wall's names, booked.sh). A line
+#     naming two suites has one exit code, so it speaks for both: red, both are red; green, both
+#     are green.
+#   - A line with no `suites=` (an older shim's) or a `?` in it is a run the land cannot keep apart
+#     from any suite. A red or dirty one at <head> refuses, and NO later run at <head> clears it:
+#     the fix is a commit, then the suites again. A green one asks nothing.
+#   - Lines on another head are history. A file with lines and none at <head> is `why=head`, naming
+#     the newest line's head.
+#   - The NEWEST line must be readable, as before: an empty file, or a last line that is no stamp,
+#     is `why=unreadable`. An unreadable line before it is no run's record (the shim writes none)
+#     and is skipped.
+# Failures are named in the order the suites first appear at <head>, dirty before red.
+#
+# `cmd=` is the last field and free text, so each line's read STOPS there (review 2 F2): what
+# follows is the command, whatever it contains, and a `|rc=0` in it never speaks for the run.
+# Before `cmd=`, each of head, dirty and rc appears exactly once and suites at most once; a line
+# giving one twice is no line the shim writes. ONE awk over the file, whatever its length.
 _wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
-  local wt="${1:-}" head="${2:-}" gd file last f s_head="" s_dirty="" s_rc=""
-  local n_head=0 n_dirty=0 n_rc=0
+  local wt="${1:-}" head="${2:-}" gd file verdict what n s
   local again="re-run the tree's suites at its head, land again"
-  local -a fields
   gd="$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null)"
   [ -n "$gd" ] || { printf 'why=unreadable stamps=%s/<no git dir> — %s' "$wt" "$again"; return 0; }
   file="${gd}/bionic-stamps"
   [ -e "$file" ] || [ -L "$file" ] || return 1
-  last="$(tail -n 1 "$file" 2>/dev/null)"
-  case "$last" in
-    'stamp/v1|'*) IFS='|' read -r -a fields <<< "$last" ;;
-    *) printf 'why=unreadable stamps=%s — %s' "$file" "$again"; return 0 ;;
+  verdict="$(awk -v want="$head" '
+    { last_ok = 0 }
+    substr($0, 1, 9) != "stamp/v1|" { next }
+    {
+      nf = split($0, f, "|"); h = d = r = s = ""; nh = nd = nr = ns = 0
+      for (i = 2; i <= nf; i++) {
+        if (substr(f[i], 1, 4) == "cmd=") break
+        if (substr(f[i], 1, 5) == "head=")        { h = substr(f[i], 6); nh++ }
+        else if (substr(f[i], 1, 6) == "dirty=")  { d = substr(f[i], 7); nd++ }
+        else if (substr(f[i], 1, 3) == "rc=")     { r = substr(f[i], 4); nr++ }
+        else if (substr(f[i], 1, 7) == "suites=") { s = substr(f[i], 8); ns++ }
+      }
+      if (nh != 1 || nd != 1 || nr != 1 || ns > 1) next
+      if (h == "" || d == "" || r == "" || (h d r) ~ /[^0-9a-f]/) next
+      last_ok = 1; last_head = h
+      if (h != want) next
+      at_head++
+      proof = (d == "0" && r == "0")
+      if (s == "") s = "?"
+      m = split(s, names, ",")
+      for (j = 1; j <= m; j++) {
+        x = names[j]; if (x == "") x = "?"
+        if (!(x in seen)) { seen[x] = 1; order[++no] = x }
+        if (x == "?") { if (!proof && !(x in state)) state[x] = d " " r }
+        else state[x] = d " " r
+      }
+    }
+    END {
+      if (NR == 0 || !last_ok) { print "unreadable"; exit }
+      if (at_head == 0) { print "head " last_head; exit }
+      for (k = 1; k <= no; k++) {
+        x = order[k]
+        if (!(x in state)) continue
+        split(state[x], v, " ")
+        if (v[1] != "0") { print "dirty " v[1] " " x; exit }
+        if (v[2] != "0") { print "red " v[2] " " x; exit }
+      }
+      print "proof"
+    }' "$file" 2>/dev/null)"
+  what="${verdict%% *}"; n="${verdict#* }"; s="${n#* }"; n="${n%% *}"
+  local fix_dirty="commit or clean the tree, $again" fix_red="make the suites green, $again"
+  if [ "$s" = "?" ]; then
+    fix_dirty="this run names no suite, so no later run at this head clears it: commit, then re-run the tree's suites at the new head, land again"
+    fix_red="$fix_dirty"
+  fi
+  case "$what" in
+    proof) return 1 ;;
+    head)  printf 'why=head stamp_head=%s head=%s — %s' "$n" "$head" "$again" ;;
+    dirty) printf 'why=dirty dirty=%s suite=%s head=%s — %s' "$n" "$s" "$head" "$fix_dirty" ;;
+    red)   printf 'why=red rc=%s suite=%s head=%s — %s' "$n" "$s" "$head" "$fix_red" ;;
+    *)     printf 'why=unreadable stamps=%s — %s' "$file" "$again" ;;
   esac
-  for f in "${fields[@]}"; do
-    case "$f" in
-      cmd=*)   break ;;
-      head=*)  s_head="${f#head=}";   n_head=$((n_head + 1)) ;;
-      dirty=*) s_dirty="${f#dirty=}"; n_dirty=$((n_dirty + 1)) ;;
-      rc=*)    s_rc="${f#rc=}";       n_rc=$((n_rc + 1)) ;;
-    esac
-  done
-  [ "${n_head}${n_dirty}${n_rc}" = "111" ] \
-    || { printf 'why=unreadable stamps=%s — %s' "$file" "$again"; return 0; }
-  case "${s_head}:${s_dirty}:${s_rc}" in
-    :*|*::*|*:|*[!0-9a-f:]*) printf 'why=unreadable stamps=%s — %s' "$file" "$again"; return 0 ;;
-  esac
-  if [ "$s_head" != "$head" ]; then
-    printf 'why=head stamp_head=%s head=%s — %s' "$s_head" "$head" "$again"; return 0
-  fi
-  if [ "$s_dirty" != "0" ]; then
-    printf 'why=dirty dirty=%s head=%s — commit or clean the tree, %s' "$s_dirty" "$head" "$again"; return 0
-  fi
-  if [ "$s_rc" != "0" ]; then
-    printf 'why=red rc=%s head=%s — make the suites green, %s' "$s_rc" "$head" "$again"; return 0
-  fi
-  return 1
+  return 0
 }
 
 # THE NOT-CURRENT READ (wave-26 D7, as ruled in A-orch-26). Where landed work the tree lacks
