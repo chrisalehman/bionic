@@ -6810,10 +6810,11 @@ expect_contains "34b2g …and the repository-level grammar fact is a note, not a
 expect_contains "34b3 …the row is in the plan, pending" \
   "| T6 | 4 | build | the fixup found mid-run | bionic:implementor | — | 30 | REQ-5 | lib/c.sh | — | — | pending |" "$(cat "$P34A")"
 expect_contains "34b4 …with its - T6: line" "- T6: pending dispatch — added by task-add" "$(cat "$P34A")"
-# NO THREADING (wave-26 T2, D2): the Step-5 row keeps the deps its author wrote. The rule that
-# made every Step-5+ row wait for every Step-4 row is gone, so the add owes no other row an edit.
-expect_contains "34b5 …and the Step-5 row's deps are as written: nothing is threaded" \
-  "| T5 | 5 | verify | the floor | test-runner | T1, T2 |" "$(cat "$P34A")"
+# THREADED, AS IN 1.10, BECAUSE THIS TABLE HAS NO reads COLUMN (wave-26 T62; critic 2 K2-F1).
+# The validator no longer demands the edge (D2), but with no head read for the floor the deps
+# task-add writes are the one thing that holds it behind a late build.
+expect_contains "34b5 …and threaded into the Step-5 row's deps (a table without reads)" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2, T6 |" "$(cat "$P34A")"
 s34_gate "$R34A"
 expect_eq "34b6 AC-5.3 the next commit is admitted: no dependency the verb should have written is missing" \
   "0" "$GATE_RC"
@@ -6839,8 +6840,8 @@ poke "$R34A" task-add T7 5 verify 'a second floor, unthreaded' test-runner 'T1' 
 expect_eq "34d a Step-5 row naming one build row is admitted (exit 0)" "0" "$RC"
 expect_contains "34d2 …the row is in the plan with the deps its author wrote" \
   "| T7 | 5 | verify | a second floor, unthreaded | test-runner | T1 |" "$(cat "$P34A")"
-expect_contains "34d3 …and no other row's deps changed" \
-  "| T5 | 5 | verify | the floor | test-runner | T1, T2 |" "$(cat "$P34A")"
+expect_contains "34d3 …and no other row's deps changed (a Step-5 add threads nothing)" \
+  "| T5 | 5 | verify | the floor | test-runner | T1, T2, T6 |" "$(cat "$P34A")"
 SUM34="$(cksum < "$P34A")"
 
 poke "$R34A" task-add T6 4 build 'the same id again' implementor '—' 30 REQ-5 'lib/d.sh'
@@ -8327,10 +8328,12 @@ section "Section 47 §READY-EARLY (tick half): a doc row whose reads exist is of
 # current: 4 and one task landed. The Step-7 doc row reads the plan approval and the head, and
 # nothing open writes the head, so it is ready now — it is not held until current: 7 (D3). The
 # review row (kind review) takes no writer slot, so it is offered whatever the writer gap.
+# A Step-7 doc row names the approval it waits for (wave-26 T62; K2-F3): this one is notes, not the
+# release, so it reads approval:plan.
 s47_early() {  # <repo> -> the plan; writers=1
   s47_plan "$1" 1 \
     "| T1 | 4 | build | landed | implementor | — | 30 | REQ-x | payload/x.sh | landed | |" \
-    "| T2 | 7 | doc | the release notes draft | implementor | — | 20 | REQ-x | .bionic/docs/record/notes.md | pending | |" \
+    "| T2 | 7 | doc | the release notes draft | implementor | — | 20 | REQ-x | .bionic/docs/record/notes.md | pending | approval:plan, head |" \
     "| T3 | 6 | review | the review | critic | — | 30 | REQ-x | .bionic/docs/record/review.md | pending | |" >/dev/null
 }
 R47E="$(make_repo s46-early)"; new_roster "$R47E"; s47_early "$R47E"
@@ -8974,6 +8977,11 @@ expect_eq "49e precondition: the tick offers the review" "yes" "$(s48_fill_has T
 expect_contains "49e AC-6.5 …and names the range it reads, the proof's head to the head now" \
   "poker: RANGE T3 ${W48_A}..${W48_B}" "$OUT"
 expect_absent "49e2 …and only for the review: the active build has no RANGE line" "poker: RANGE T2" "$OUT"
+# 49e3 (wave-26 T62; critic 3 S3): THE DIGEST THIS REAL TICK WROTE CARRIES THAT HEAD. The turn-end
+# wall reads `head=` from it and hands it to the same ready set (stop.sh); stop.test.sh §LH plants
+# the field by hand, so this is the one row that reads what the tick itself wrote.
+expect_eq "49e3 …and the digest the tick wrote carries the head it judged live:head against" "head=${W48_B}" \
+  "$(/usr/bin/grep -E '^head=' "$(digest_of "$R48")" 2>/dev/null)"
 POKE_BOUND="$S49_BOUND_WAS"
 
 
@@ -9148,5 +9156,100 @@ expect_eq "51h4 precondition: the nine-operand add of the same row exits 0" "0" 
 expect_eq "51h5 …and the — reads wrote what the nine-operand form writes, byte for byte (the add's instant aside)" \
   "$(sed -E 's/ added by task-add at [0-9TZ:-]+$//' "$P51M")" "$(sed -E 's/ added by task-add at [0-9TZ:-]+$//' "$P51N")"
 POKE_BOUND="$S51_BOUND_WAS"
+
+# ============================================================
+section "Section 52 §RUN-END: integrate waits for an open build, and the WAIT line names it (wave-26 T62; critic 2 K2-F5)"
+# ============================================================
+#
+# A reads table at current: 8, the floor and the review both proved, the review row landed, and
+# a late fix from the review still active. Integrate reads its default, now `proof:floor,
+# proof:review, head`, so the open build holds the merge and the tick says so. Through T61 the
+# tick offered the merge beside the build (FILL T3) and the turn-end wall demanded it.
+s52_plan() {  # <repo> <T6 status> -> the plan path
+  local f
+  f="$(s47_plan "$1" 2 \
+    "| T1 | 4 | build | landed | implementor | — | 30 | REQ-x | payload/x.sh | landed | |" \
+    "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/floor.log | landed | |" \
+    "| T2 | 6 | review | the final review | critic | — | 30 | REQ-x | .bionic/docs/record/review.md | landed | |" \
+    "| T6 | 6 | build | late fix from the review | implementor | — | 20 | REQ-x | payload/x.sh | $2 | |" \
+    "| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-x | — | pending | |")"
+  awk -v h=8d7216ce2835456ae38b03d6a7d30a50400cf30f '
+    /^current: / { print "current: 8"; next }
+    { print }
+    /^approved-by: / { print "proved: kind=floor head=" h " at=2026-10-04T11:00:00Z evidence=record/floor.log"
+                       print "proved: kind=review head=" h " at=2026-10-04T11:05:00Z evidence=record/review.md" }' \
+    "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  printf '%s' "$f"
+}
+R52="$(make_repo s52-open-build)"; new_roster "$R52"; s52_plan "$R52" active >/dev/null
+add_row "$R52" name=w-T6 deliverable=T6.md duration="1 hour" launched_at="$(iso_ago 10)"
+poke_pressure "$R52" 8192 1.0 tick
+expect_nonempty "52a precondition: the tick prints WAIT lines (the extractor reads real output)" "$(s47_lines WAIT)"
+expect_contains "52a2 K2-F5 integrate waits on head, and its WAIT line names the late build" \
+  "poker: WAIT T3 — reads head, written by T6 (active)" "$OUT"
+R52L="$(make_repo s52-landed)"; new_roster "$R52L"; s52_plan "$R52L" landed >/dev/null
+poke_pressure "$R52L" 8192 1.0 tick
+expect_contains "52b the build landed, both proofs in: the merge is offered" "poker: FILL T3" "$OUT"
+
+# ============================================================
+section "Section 53 §REVIEW-RANGE: a review proof starts where the last one ended (wave-26 T62; critic 2 K2-F2)"
+# ============================================================
+#
+# `reviewed: <a>..<b>`: through T61 only <b> was attested, so `<head~1>..<head>` and
+# `zzzz..<head>` were recorded as a review of everything up to the head. <a> must now be a
+# commit on <b>'s history, at or before the last review proof's head, or, before the first
+# review proof, at or before the plan's base: the Step-4 block's `base-sha:`, a real commit here.
+# The working branch is cut from that base and carries four commits, C1 to C4.
+S53_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R53="$(make_repo s53-range)"; ( cd "$R53" && git commit -q --allow-empty -m init )
+S53_B="$(git -C "$R53" rev-parse HEAD)"
+P53="$(s42_plan "$R53" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${S53_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P53" > "$P53.tmp" && mv "$P53.tmp" "$P53"
+( cd "$R53" && git add -f "$P53" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$R53/.worktrees/01-fixture" "$S53_B" ) >/dev/null 2>&1
+for s53c in 1 2 3 4; do git -C "$R53/.worktrees/01-fixture" commit -q --allow-empty -m "C$s53c" >/dev/null 2>&1; done
+S53_C1="$(git -C "$R53/.worktrees/01-fixture" rev-parse HEAD~3)"; S53_C2="$(git -C "$R53/.worktrees/01-fixture" rev-parse HEAD~2)"
+S53_C3="$(git -C "$R53/.worktrees/01-fixture" rev-parse HEAD~1)"; S53_C4="$(git -C "$R53/.worktrees/01-fixture" rev-parse HEAD)"
+S53_REC="$R53/.bionic/docs/record/wave-01-fixture"; mkdir -p "$S53_REC"
+s53_review() { printf '# review\n\nreviewed: %s..%s\n' "$1" "$2" > "$S53_REC/$3"; }  # <a> <b> <file>
+expect_regex "53a0 precondition: the working branch's head is C4, a 40-hex commit" '^[0-9a-f]{40}$' "$S53_C4"
+expect_eq "53a0b precondition: the plan's base is the branch point" "$S53_B" \
+  "$(git -C "$R53" merge-base "$S53_B" "$S53_C1")"
+s53_review "$S53_C1" "$S53_C2" first-late.md
+s53_review zzzz "$S53_C2" junk.md
+s53_review "$S53_C3" "$S53_C2" backwards.md
+s53_review "${S53_B:0:10}" "$S53_C2" first.md
+s42_snap "$R53" "$P53"
+poke "$R53" proof-add review record/wave-01-fixture/first-late.md
+s42_unchanged "53a the first review starting past the plan's base" 1 "$P53"
+expect_contains "53a2 …naming the base and the range to read" \
+  "starts at ${S53_C1:0:12}, past the plan's base ${S53_B:0:12}, so what landed between them is unread; review ${S53_B:0:12}..${S53_C2:0:12}" "$OUT"
+poke "$R53" proof-add review record/wave-01-fixture/junk.md
+s42_unchanged "53b a range whose start is no commit (the critic's zzzz)" 1 "$P53"
+expect_contains "53b2 …saying so" "starts at zzzz, which is no commit here" "$OUT"
+poke "$R53" proof-add review record/wave-01-fixture/backwards.md
+s42_unchanged "53c a range whose start is not on its end's history" 1 "$P53"
+expect_contains "53c2 …saying so" "which is not on the history of its end ${S53_C2:0:12}" "$OUT"
+poke "$R53" proof-add review record/wave-01-fixture/first.md
+expect_eq "53d the first review from the base is recorded (exit 0)" "0" "$RC"
+expect_eq "53d2 …at the end it read" "$S53_C2" "$(s46_last "$P53" review)"
+# THE NEXT REVIEW STARTS AT OR BEFORE C2. One that read only the last commit, C3..C4, leaves C3
+# unread and is refused; C2..C4 and an overlap from C1 are both recorded.
+s53_review "$S53_C3" "$S53_C4" narrow.md
+s53_review "$S53_C2" "$S53_C4" second.md
+s42_snap "$R53" "$P53"
+poke "$R53" proof-add review record/wave-01-fixture/narrow.md
+s42_unchanged "53e K2-F2 a review of <head~1>..<head> past the last review proof" 1 "$P53"
+expect_contains "53e2 …naming the proof and the range to read" \
+  "starts at ${S53_C3:0:12}, past the last review proof ${S53_C2:0:12}, so what landed between them is unread; review ${S53_C2:0:12}..${S53_C4:0:12}" "$OUT"
+poke "$R53" proof-add review record/wave-01-fixture/second.md
+expect_eq "53f the review from the last proof is recorded (exit 0)" "0" "$RC"
+expect_eq "53f2 …at its end" "$S53_C4" "$(s46_last "$P53" review)"
+s53_review "$S53_C1" "$S53_C4" overlap.md
+poke "$R53" proof-add review record/wave-01-fixture/overlap.md
+expect_eq "53g a review that starts before the last proof (an overlap) is recorded" "0" "$RC"
+POKE_BOUND="$S53_BOUND_WAS"
 
 finish
