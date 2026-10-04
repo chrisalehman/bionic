@@ -3,12 +3,13 @@
 # release (epic-23 wave-26-never-idle, D8, D14; REQ-6 AC-6.3, AC-6.4, REQ-4 AC-4.1).
 #
 #   bash <plugin-root>/scripts/booked.sh [--kill-after <seconds> [--unbooked]] [--quiet] [--shell <path>]
-#                                        -- <command>
+#                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
 # books one of N places (lib/slots.sh) before it starts and waits when none is free. The
-# words after `--` are joined with single spaces and run by `bash -c`, exactly as given: a
-# caller that wants the command byte for byte passes it as one quoted word.
+# command is ONE word after `--`, the whole command line, run exactly as given. Several words
+# are refused (exit 2): joined, they would be parsed again as shell, so a literal `;` in an
+# argument would run as a command (T36, review 4 F6). Quote the whole command as one word.
 #
 # --shell <path>: THE HARNESS'S OWN SHELL (wave-26 T7, A-T7.1). The harness runs a Bash call
 # as `<its shell> -c '… eval <command> < /dev/null'`, and under a zsh harness `bash -c` would
@@ -39,11 +40,19 @@
 # every exit path, a signal included. A shim killed with SIGKILL runs no trap; its place is
 # reclaimed by the next taker because its pid is gone.
 #
+# A STORE THAT CANNOT BE WRITTEN (T36, review 4 F5). Booking manages throughput; it is not a
+# guard. So an ordinary command runs UNBOOKED at once, with one stderr line that names the
+# store and says so. A whole-machine take does not run (exit 69, the lib's line names the
+# store): a timing result taken without the machine is worth nothing. --unbooked never reads
+# the store, so it runs and says nothing about it (A-T36.10).
+#
 # --quiet, OR BIONIC_QUIET=1: THE WHOLE MACHINE. Take every place (slots_take_all: block new
 # takes, wait for the held ones to drain), wait for `resources_settled`, run, then read the
-# load again. If it rose above the settled line the run is VOID: print `void`, release, and
-# go again, at most twice more. Inside a whole-machine hold (`BIONIC_SLOT_QUIET=1`) a nested
-# shim, quiet or not, books nothing and runs.
+# load again. If it rose above the settled line by more than the run's own share (from the
+# CPU its children used, `times`; resources_own_load) the run is VOID: print `void`, release,
+# and go again, at most twice more. Its own load is not a disturbance (T36, review 4 F4).
+# Inside a whole-machine hold (`BIONIC_SLOT_QUIET=1`) a nested shim, quiet or not, books
+# nothing and runs.
 #
 # --kill-after <s>: past <s> seconds the command's whole process group is killed, one line says
 # it is over the short limit and belongs in a subagent, and the shim exits 124.
@@ -55,18 +64,25 @@
 # would stand in for that suite. BIONIC_QUIET in the environment is not read.
 #
 # EXIT CODES. The command's own, except:
-#   2    usage: no `--`, no command, a bad --kill-after, or --unbooked without it or with --quiet
-#   69   no place within BIONIC_SLOTS_MAX_WAIT (the line names the holders), or a
-#        whole-machine take whose load never settled within it; the command never ran
-#   75   void: the load rose during the run on the first run and both retries
+#   2    usage: no `--`, no command, more than one word after `--` (with or without
+#        --unbooked or --kill-after), a bad --kill-after, or --unbooked without it or
+#        with --quiet
+#   69   no place within BIONIC_SLOTS_MAX_WAIT (the line names the holders), a
+#        whole-machine take whose load never settled within it, or a whole-machine take on
+#        a store it cannot write; the command never ran
+#   75   void: the load rose during the run on the first run and both retries, or the
+#        ceiling ran out before a retry could start
 #   124  --kill-after fired
 #   128+n  the shim itself was stopped by signal n (its command is killed with it)
-# 75 is EX_TEMPFAIL, "try again later", which is what a void timing check means.
+# 75 is EX_TEMPFAIL, "try again later", which is what a void timing check means. A command
+# can exit 69, 75 or 124 itself; the shim's own always comes after a `booked:` or `slots:`
+# line on stderr, and the stamp of either is never proof of a green run.
 #
-# THE WAITS. Every wait polls every BIONIC_SLOTS_POLL seconds and gives up at
-# BIONIC_SLOTS_MAX_WAIT, printing a line at the start and every BIONIC_SLOTS_NOTE_S (lib/
-# slots.sh). The store and count follow BIONIC_SLOTS_DIR and BIONIC_SLOTS_N; the load
-# follows BIONIC_LOAD_NOW_FILE (lib/resources.sh).
+# THE WAITS. Every wait polls every BIONIC_SLOTS_POLL seconds, printing a line at the start
+# and every BIONIC_SLOTS_NOTE_S (lib/slots.sh). BIONIC_SLOTS_MAX_WAIT is the total: the place
+# or the marker, the drain, the settle and every void retry give up together at one ceiling
+# taken as the shim starts (SLOTS_DEADLINE; T36, review 4 F3). The store and count follow
+# BIONIC_SLOTS_DIR and BIONIC_SLOTS_N; the load follows BIONIC_LOAD_NOW_FILE (lib/resources.sh).
 #
 # BASH 3.2.
 #
@@ -106,6 +122,10 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$sep" -eq 1 ] && [ "$#" -ge 1 ] || booked_usage
+if [ "$#" -gt 1 ]; then
+  printf 'booked: %s words after --, and each would be parsed again as shell — pass the command as one word: booked.sh -- '\''<the whole command line>'\''\n' "$#" >&2
+  exit 2
+fi
 case "$kill_after" in
   '') : ;;
   *[!0-9]*|0) booked_usage ;;
@@ -230,15 +250,15 @@ booked_on_signal() {  # <signal number>
 trap 'booked_on_signal 1' HUP
 trap 'booked_on_signal 2' INT
 trap 'booked_on_signal 15' TERM
-trap 'slots_release "$$"' EXIT
+trap 'slots_release "$$"; [ -z "${BOOKED_TIMES:-}" ] || rm -f "$BOOKED_TIMES"' EXIT
 
-booked_settle() {  # wait for resources_settled under the same ceiling as a place
-  local cores start max poll line
+booked_settle() {  # wait for resources_settled under the shim's one ceiling (SLOTS_DEADLINE)
+  local cores start max poll line deadline
   cores="$(_res_cores)"; max="$(_slots_max_wait)"; poll="$(_slots_poll)"
   line="$(resources_settled_line "$cores")"
-  start=$SECONDS; _SLOTS_NOTED=-1
+  deadline="$(_slots_deadline "$max")"; start=$((deadline - max)); _SLOTS_NOTED=-1
   while ! resources_settled "$cores"; do
-    if [ $((SECONDS - start)) -ge "$max" ]; then
+    if [ "$SECONDS" -ge "$deadline" ]; then
       printf 'booked: gave up after %ss — the load (%s) never settled at or below %s\n' \
         "$((SECONDS - start))" "$(_res_load_now)" "$line" >&2
       return 1
@@ -249,29 +269,61 @@ booked_settle() {  # wait for resources_settled under the same ceiling as a plac
   return 0
 }
 
+# booked_times — sets BOOKED_CPU to the CPU seconds this shell's finished children have used
+# (`times`, second line). Called directly, never in `$( )`: a subshell has no children.
+BOOKED_TIMES=""; BOOKED_CPU=0
+booked_times() {
+  BOOKED_CPU=0
+  [ -n "$BOOKED_TIMES" ] || return 0
+  times > "$BOOKED_TIMES" 2>/dev/null || return 0
+  BOOKED_CPU="$(awk '
+    function sec(x, a) { sub(/s$/, "", x); gsub(",", ".", x); split(x, a, "m"); return a[1] * 60 + a[2] }
+    NR == 2 { printf "%.3f\n", sec($1) + sec($2) }' "$BOOKED_TIMES" 2>/dev/null)"
+  [ -n "$BOOKED_CPU" ] || BOOKED_CPU=0
+}
+
 # ── main ─────────────────────────────────────────────────────────────────────
 what="$(booked_one_line "$cmd" 60)"
+# One ceiling for every wait below: the place or marker, the drain, the settle, the retries.
+SLOTS_DEADLINE=$((SECONDS + $(_slots_max_wait)))
 
 if [ "$unbooked" -eq 1 ] || [ "${BIONIC_SLOT_QUIET:-}" = 1 ] ||
    { [ "$quiet" -eq 0 ] && [ "${BIONIC_SLOT_HELD:-}" = 1 ]; }; then
   booked_run
 elif [ "$quiet" -eq 0 ]; then
-  slots_take "$$" "$what" >/dev/null || exit "$BOOKED_NOPLACE_RC"
-  export BIONIC_SLOT_HELD=1 BIONIC_SLOT_PLACE="$SLOTS_TAKEN"
+  slots_take "$$" "$what" >/dev/null; take_rc=$?
+  case "$take_rc" in
+    0) export BIONIC_SLOT_HELD=1 BIONIC_SLOT_PLACE="$SLOTS_TAKEN" ;;
+    2) printf 'booked: cannot write the store %s — this command runs unbooked, beside whatever else runs; fix: make it writable, or point BIONIC_SLOTS_DIR at a directory you can write\n' \
+         "$(slots_dir)" >&2 ;;
+    *) exit "$BOOKED_NOPLACE_RC" ;;
+  esac
   booked_run
 else
   # A whole-machine take from inside a held place reads BIONIC_SLOT_HELD to know it is
   # nested, so each retry must see the value this shim was started with.
   outer_held="${BIONIC_SLOT_HELD:-}"
   tries=0
+  BOOKED_TIMES="$(mktemp "${TMPDIR:-/tmp}/booked-times.XXXXXX" 2>/dev/null)"
   while :; do
-    slots_take_all "$$" "$what" >/dev/null || exit "$BOOKED_NOPLACE_RC"
-    booked_settle || exit "$BOOKED_NOPLACE_RC"
+    if ! slots_take_all "$$" "$what" >/dev/null || ! booked_settle; then
+      [ "$tries" -gt 0 ] || exit "$BOOKED_NOPLACE_RC"
+      # A run already happened and was void; the ceiling ran out before another could start.
+      printf 'booked: void — the ceiling of %ss ran out before a retry could start; a timing result from this machine now would not mean anything\n' \
+        "$(_slots_max_wait)" >&2
+      RUN_RC=$BOOKED_VOID_RC
+      break
+    fi
     export BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1
+    booked_times; cpu0=$BOOKED_CPU; t0=$SECONDS
     booked_run
+    booked_times; cpu1=$BOOKED_CPU; wall=$((SECONDS - t0))
     [ "$RUN_RC" -ne "$BOOKED_KILLED_RC" ] || break
     cores="$(_res_cores)"
-    resources_settled "$cores" && break
+    # The run's own share of the load is not a disturbance (review 4 F4): take it off.
+    own="$(resources_own_load "$(awk -v a="$cpu0" -v b="$cpu1" 'BEGIN { d = b - a; printf "%.3f\n", (d > 0 ? d : 0) }')" "$wall")"
+    [ -n "$own" ] || own=0
+    resources_undisturbed "$cores" "$own" && break
     rose="$(_res_load_now)"; line="$(resources_settled_line "$cores")"
     slots_release "$$"
     unset BIONIC_SLOT_QUIET
@@ -279,14 +331,14 @@ else
     tries=$((tries + 1))
     if [ "$tries" -gt "$BOOKED_RETRIES" ]; then
       printf 'void\n' >&2
-      printf 'booked: void — the load rose above %s during every run (last %s); a timing result from this machine now would not mean anything\n' \
-        "$line" "$rose" >&2
+      printf 'booked: void — the load rose above %s during every run (last %s, about %s of it the run'\''s own); a timing result from this machine now would not mean anything\n' \
+        "$line" "$rose" "$own" >&2
       RUN_RC=$BOOKED_VOID_RC
       break
     fi
     printf 'void\n' >&2
-    printf 'booked: void — the load rose to %s during the run, above the settled line %s; retrying (%s of %s)\n' \
-      "$rose" "$line" "$tries" "$BOOKED_RETRIES" >&2
+    printf 'booked: void — the load rose to %s during the run (about %s of it the run'\''s own), above the settled line %s; retrying (%s of %s)\n' \
+      "$rose" "$own" "$line" "$tries" "$BOOKED_RETRIES" >&2
   done
 fi
 
