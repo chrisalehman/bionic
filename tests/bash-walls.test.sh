@@ -820,7 +820,7 @@ expect_eq "14e0: …and stderr is EXACTLY that one log line — no stray shell e
 # then rewrites `command` on the SAME object, so neither change overwrites the other.
 expect_eq "14e1: …one JSON document on stdout" "1" "$(json_docs)"
 expect_regex "14e2: …whose command is the booking wrap around the original" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "14e3: …beside the repaired timeout" "600000" "$(updated_timeout_of)"
 
@@ -841,7 +841,7 @@ expect_status "14g: a suite call already at the harness maximum is not refused" 
 expect_eq "14h: …its timeout is left as the caller set it — there is nothing to repair" \
   "600000" "$(updated_timeout_of)"
 expect_regex "14h2: …and the only rewrite is the booking wrap around the original command" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_empty "14i: …no repair logged either" "$ERR"
 
@@ -868,7 +868,7 @@ run_hook "$(mk_payload "$R_ADV" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600
 expect_status "14m1: an advisory main-thread suite call is allowed" 0 "$ST"
 expect_eq "14m2: …one JSON document on stdout" "1" "$(json_docs)"
 expect_regex "14m3: …carrying the booking wrap" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait [0-9]+ --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "14m4: …and no timeout repair on the main thread" "" "$(updated_timeout_of)"
 expect_nonempty "14m4: …(the reader works: the wrap's command is non-empty on the same object)" \
@@ -1192,7 +1192,7 @@ expect_status "15f: an on-budget suite is still allowed" 0 "$ST"
 # carries: no nudge, no refusal, and nothing on stderr.
 expect_empty "15f2: …stderr stays empty" "$ERR"
 expect_regex "15f3: …and stdout is the booking wrap alone" \
-  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --suites archive\\.test\\.sh -- 'bash tests/archive\\.test\\.sh'\$" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites archive\\.test\\.sh -- 'bash tests/archive\\.test\\.sh'\$" \
   "$(updated_command_of)"
 expect_eq "15f4: …with no other channel beside it" '["hookEventName","updatedInput"]' \
   "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
@@ -2158,5 +2158,57 @@ expect_eq "§CDT one segment has nothing after it to read" "" "$(cdt_of 'cd /a')
 expect_eq "§CDT a cd after a GIT commit is never read, as after git" "" "$(cdt_of 'cd /a && GIT commit -m x && cd /z')"
 expect_eq "§CDT …nor after Git, behind its own subshell opener" "/b|" "$(cdt_of 'cd /a && cd /b && (Git commit -m x); cd /z')"
 expect_eq "§CDT an uppercase word that is not git ends nothing" "/b|" "$(cdt_of 'cd /a && echo GITHUB && cd /b && git commit -m x')"
+
+section "§WAIT-CEIL — the wrapped command never waits for a place longer than its call lasts (wave-27 T6, AC-8.3)"
+#
+# Critic 3 S2 (wave 26). The shim's wait defaults to 1200 s (lib/slots.sh _slots_max_wait), and
+# ARM R raises a suite call to BASH_MAX_TIMEOUT_MS, 600 000 ms on an install without tier 2: a
+# writer on a full machine waited past its own call, which the harness then moved to the
+# background, where its result is not evidence. The wrap now passes the staged timeout in
+# seconds, less a ten-second margin, as `--max-wait`; the shim uses the smaller of that and its
+# default (tests/slots.test.sh §MAX-WAIT). A short call carries `--kill-after` instead, which
+# already bounds the wait inside the call, so it gets no `--max-wait`.
+wait_ceiling_of() {  # the staged wrap's --max-wait value, or empty
+  updated_command_of | awk '{ for (i = 1; i < NF; i++) if ($i == "--max-wait") { print $(i + 1); exit } }'
+}
+# The shim's default when the wrap names none: 1200 s unless BIONIC_SLOTS_MAX_WAIT says otherwise.
+WC_DEFAULT=1200
+R_WC="$(mk_repo waitceil)"
+arm_roster "$R_WC"
+# (a) the eval: an agent's suite call with no timeout, raised by ARM R to 600 000 ms.
+run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_eq "WC1: an agent's suite call is staged at the harness maximum" "600000" "$(updated_timeout_of)"
+expect_contains "WC2: …and wrapped (the reader works on this output)" "/scripts/booked.sh" "$(updated_command_of)"
+WC_S="$(wait_ceiling_of)"
+expect_true "WC3: …with a wait ceiling at most the call's timeout (${WC_S:-none, so ${WC_DEFAULT}} s in a 600 s call)" \
+  test "${WC_S:-$WC_DEFAULT}" -le 600
+expect_eq "WC4: …which is the staged timeout in seconds less ten" "590" "$WC_S"
+expect_regex "WC5: …named before --suites, the original command intact after --" \
+  "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)? --max-wait 590 --suites x\\.test\\.sh -- 'bash tests/x\\.test\\.sh'\$" \
+  "$(updated_command_of)"
+# (b) under the tier-2 ceiling the margin follows the staged value.
+run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 1800000)" \
+  BASH_MAX_TIMEOUT_MS=1800000
+expect_eq "WC6: a call staged at 1 800 000 ms carries --max-wait 1790 (the shim keeps its smaller default)" \
+  "1790" "$(wait_ceiling_of)"
+# (c) the main thread's own timeout, where the main thread may run a suite (advisory mode).
+R_WCA="$(mk_repo waitceil-adv)"
+printf 'farm-out-mode: advisory\n' > "$R_WCA/.bionic/config.yaml"
+run_hook "$(mk_payload "$R_WCA" 'bash tests/x.test.sh' '' omit Bash '' 300000)" BASH_MAX_TIMEOUT_MS=600000
+expect_eq "WC7: a main-thread call keeps its own timeout, unrepaired" "300000" "$(updated_timeout_of)"
+expect_eq "WC8: …and its wait ceiling is that timeout less ten" "290" "$(wait_ceiling_of)"
+# (d) no timeout at all: the harness's default, two minutes unless BASH_DEFAULT_TIMEOUT_MS says.
+run_hook "$(mk_payload "$R_WCA" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600000 BASH_DEFAULT_TIMEOUT_MS=
+expect_eq "WC9: a call with no timeout gets the harness default's ceiling (120 s less ten)" "110" "$(wait_ceiling_of)"
+run_hook "$(mk_payload "$R_WCA" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600000 BASH_DEFAULT_TIMEOUT_MS=240000
+expect_eq "WC10: …or BASH_DEFAULT_TIMEOUT_MS's, when it is set" "230" "$(wait_ceiling_of)"
+# (e) a short call is bounded by its kill limit and carries no second ceiling.
+run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' '' omit Bash '' 60000)" BASH_MAX_TIMEOUT_MS=600000
+expect_contains "WC11: a short call is wrapped with its kill limit" "--kill-after 55" "$(updated_command_of)"
+expect_eq "WC12: …and no --max-wait beside it (beside WC4 on the same reader)" "" "$(wait_ceiling_of)"
+# (f) a staged timeout too small to leave the margin still hands the shim a valid ceiling: 1 s.
+run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" BASH_MAX_TIMEOUT_MS=5000
+expect_eq "WC13: a call staged at 5000 ms carries --max-wait 1, never 0 or less" "1" "$(wait_ceiling_of)"
 
 finish

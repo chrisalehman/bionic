@@ -3,7 +3,7 @@
 # run books one of N machine-wide places, and a timing check books the whole machine
 # (epic-23 wave-26-never-idle, T6; REQ-6 AC-6.3, AC-6.4 hermetic; spec D8, D14).
 #
-# WHAT IS UNDER TEST. Four claims, one section each:
+# WHAT IS UNDER TEST. The claims, one section each:
 #
 #   §BOOK        with N places, take N+1 and the last one waits, names who holds the
 #                places, and proceeds when one is released; a dead holder's place is
@@ -30,6 +30,13 @@
 #   §SHELL       `--shell <path>` runs the command the way the harness runs a Bash call
 #                (`<path> -c "eval '<cmd>'"`), so its output, diagnostics and exit code are
 #                the harness's own; the stamp's `cmd=` stays the command as given (T7).
+#   §QUIET-HELD  `BIONIC_SLOT_HELD=1` with no valid place of its own is not nested: its
+#                whole-machine take waits for every place (wave-27 T6, AC-8.2).
+#   §SOLO-SAME   a whole-machine take or settle that gives up on its first try runs the
+#                command once, unbooked, and void, as tests/run.sh does; the store and the
+#                short limit keep 69 and 124 (wave-27 T6, AC-8.4).
+#   §MAX-WAIT    `--max-wait <s>` caps every wait at the smaller of it and the default
+#                (wave-27 T6, AC-8.3; the wrap that passes it is tests/bash-walls.test.sh).
 #
 # HERMETIC. No row touches the real store: every call sets BIONIC_SLOTS_DIR to a scratch
 # directory and BIONIC_SLOTS_N, and the load is read from BIONIC_LOAD_NOW_FILE, a file the
@@ -544,14 +551,17 @@ newrow q2m
 q2_drive "$Q2M/scripts/booked.sh"
 expect_eq "Q2.6 MUTATION: without the marker check the shared take runs first" "C" "$Q2_FIRST"
 
-# Q3. It does not start above the settled load; it starts once the load settles.
+# Q3. It does not start above the settled load; it starts once the load settles. A load that
+# never settles within the ceiling gets the runner's answer (wave-27 T6, §SOLO-SAME): one
+# unbooked run, void.
 newrow q3
 printf '99.0\n' > "$LOADF"; MW=2
 Q3_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; Q3_RC=$?
-expect_status "Q3.1 above the settled line the whole-machine take gives up at the ceiling (69)" \
-  69 "$Q3_RC"
-expect_false "Q3.2 …and never ran its command" test -e "$ROW/q.ran"
+expect_status "Q3.1 above the settled line the whole-machine take gives up at the ceiling, and the run is void (75)" \
+  75 "$Q3_RC"
+expect_true "Q3.2 …its command ran once, unbooked, after the ceiling" test -e "$ROW/q.ran"
 expect_contains "Q3.3 …and says it was waiting for the load to settle" "settle" "$Q3_OUT"
+rm -f "$ROW/q.ran"
 MW=20
 ( sleep 1; printf '0.00\n' > "$LOADF" ) >/dev/null 2>&1 & BG="$BG $!"
 Q3_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; Q3_RC=$?
@@ -626,8 +636,8 @@ printf '99.0\n' > "$LOADF"
 Q8_T0=$SECONDS
 Q8_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; Q8_RC=$?
 Q8_DT=$((SECONDS - Q8_T0))
-expect_status "Q8.1 a drain then a load that never settles gives up (69)" 69 "$Q8_RC"
-expect_false "Q8.2 …without running its command" test -e "$ROW/q.ran"
+expect_status "Q8.1 a drain then a load that never settles gives up, and the one run is void (75)" 75 "$Q8_RC"
+expect_true "Q8.2 …running its command once, unbooked (wave-27 T6, §SOLO-SAME)" test -e "$ROW/q.ran"
 expect_contains "Q8.3 …after waiting for the drain" "drain" "$Q8_OUT"
 expect_true "Q8.4 …within one ceiling for both waits (took ${Q8_DT}s, ceiling ${MW}s)" \
   test "$Q8_DT" -le $((MW + 2))
@@ -992,8 +1002,8 @@ printf '99.0\n' > "$LOADF"; MW=1
 N4_OUT="$( cd "$ROW" && env BIONIC_QUIET=1 BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 \
   BIONIC_SLOTS_MAX_WAIT=1 BIONIC_SLOTS_POLL=0.1 BIONIC_LOAD_NOW_FILE="$LOADF" \
   bash "$BOOKED" -- "touch $ROW/q.ran" 2>&1)"; N4_RC=$?
-expect_status "N4.1 BIONIC_QUIET=1 waits for a settled load like --quiet (gives up: 69)" 69 "$N4_RC"
-expect_false "N4.2 …and does not run above it" test -e "$ROW/q.ran"
+expect_status "N4.1 BIONIC_QUIET=1 waits for a settled load like --quiet (gives up, void: 75)" 75 "$N4_RC"
+expect_contains "N4.2 …saying the load never settled" "never settled" "$N4_OUT"
 N4_OUT="$(bk -- "touch $ROW/plain.ran" 2>&1)"; N4_RC=$?
 expect_status "N4.3 without it, the same load does not hold a shared take" 0 "$N4_RC"
 expect_true "N4.4 …which runs" test -e "$ROW/plain.ran"
@@ -1304,5 +1314,126 @@ expect_false "U1.4 …and the command did not run" test -e "$ROW/u.ran"
 bk --kill-after 5 -- "touch $ROW/u.ran" > /dev/null 2>&1; U1_RC=$?
 expect_status "U1.5 the same call without it runs" 0 "$U1_RC"
 expect_true "U1.6 …and its command ran (beside U1.4)" test -e "$ROW/u.ran"
+
+# ═════════════════════════════════════════════════════════════ §QUIET-HELD
+section "QUIET-HELD — BIONIC_SLOT_HELD=1 with no place of its own takes no foreign place (wave-27 T6, AC-8.2)"
+# Critic 3 S1 (wave 26). `BIONIC_SLOT_HELD=1` with no usable BIONIC_SLOT_PLACE is the opt-out a
+# user types in front of a run (booked.sh's header), not a nested call: the shim and the runner
+# export the place with HELD wherever they nest. Read as "nested, parent place unknown", it let
+# the whole-machine take finish with ONE place still held by another process, so a timing check
+# ran beside that process's suite. Read as not nested, the take waits for every place.
+qh_take() {  # HELD=1 and no place: the library's whole-machine take in a child bash; prints rc=<n>
+  ( cd "$ROW" && env -u BIONIC_SLOT_PLACE BIONIC_SLOT_HELD=1 BIONIC_SLOTS_DIR="$ST" \
+      BIONIC_SLOTS_N="$SN" BIONIC_SLOTS_MAX_WAIT="$MW" BIONIC_SLOTS_POLL="$POLL" \
+      BIONIC_SLOTS_NOTE_S="$NOTE" \
+      bash -c '. "$1"; slots_take_all "$$" qh >/dev/null 2>&1; rc=$?; slots_release "$$"; echo "rc=$rc"' _ "$SLOTS" )
+}
+newrow qh1
+MW=2
+bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; QH1_A=$!
+wait_file "$ROW/a.started"
+QH1_HOLDER="$(held_pids | awk '{print $1}')"
+expect_regex "QH1.1 another process holds a place" '^[0-9]+$' "$QH1_HOLDER"
+expect_eq "QH1.2 HELD with no place: the whole-machine take does not complete past it (gives up, rc 1)" \
+  "rc=1" "$(qh_take)"
+expect_eq "QH1.3 …and the other process still holds its place" "$QH1_HOLDER" "$(held_pids | awk '{print $1}')"
+touch "$ROW/a.go"; wait "$QH1_A" 2>/dev/null
+expect_eq "QH1.4 the same take with no other holder completes (rc 0, beside QH1.2)" "rc=0" "$(qh_take)"
+# Through the shim, as typed in front of a timing suite: it waits for the drain, then runs.
+newrow qh2
+MW=20
+bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; QH2_A=$!
+wait_file "$ROW/a.started"
+( export BIONIC_SLOT_HELD=1; unset BIONIC_SLOT_PLACE; bk --quiet -- "touch $ROW/q.ran" ) \
+  > "$ROW/q.out" 2>&1 & BG="$BG $!"; QH2_Q=$!
+expect_true "QH2.1 the opt-out's whole-machine take waits for the other place to drain" \
+  wait_text "$ROW/q.out" "drain"
+expect_false "QH2.2 …and has not run its command while that place is held" test -e "$ROW/q.ran"
+touch "$ROW/a.go"
+expect_true "QH2.3 it runs once the place drains" wait_file "$ROW/q.ran"
+wait "$QH2_Q"; QH2_RC=$?
+expect_status "QH2.4 …and exits with its command's code" 0 "$QH2_RC"
+wait "$QH2_A" 2>/dev/null
+
+# ═════════════════════════════════════════════════════════════ §SOLO-SAME
+section "SOLO-SAME — a whole-machine take that gives up on its first try runs once and is void, as tests/run.sh does (wave-27 T6, AC-8.4)"
+# Critic 3 S4 (wave 26). The runner, when its solo take or settle gives up at the ceiling, runs
+# the suite once unbooked and reports it VOID (tests/run.sh _solo_run). The shim exited 69 and
+# never ran the command, so on a busy machine a writer had no result for a timing suite at all.
+# Now the shim gives the runner's answer: run once unbooked, print `void` and the reason, and
+# end with the command's code, or 75 over a pass. A store it cannot write keeps 69 (B12.7,
+# B12.8), and so does a give-up at the short limit, which keeps 124 (SS4): no time is left there.
+newrow ss1
+printf '99.0\n' > "$LOADF"; MW=2
+SS1_OUT="$(bk --quiet -- "echo run >> $ROW/runs; exit 3" 2>&1)"; SS1_RC=$?
+expect_eq "SS1.1 on a machine that never settles the command runs once" 1 \
+  "$(wc -l < "$ROW/runs" 2>/dev/null | tr -d ' ')"
+expect_status "SS1.2 …and a failing run keeps its own code (3)" 3 "$SS1_RC"
+expect_regex "SS1.3 …printing void" '(^|[^a-z])void([^a-z]|$)' "$SS1_OUT"
+expect_contains "SS1.4 …saying it ran unbooked and is not retried" "it ran unbooked and is not retried" "$SS1_OUT"
+expect_contains "SS1.5 …after the give-up line naming the load" "never settled" "$SS1_OUT"
+expect_eq "SS1.6 …and every place is free afterwards" "" "$(places)"
+# A pass is void (75), and the stamp says 75, never a green.
+newrow ss2
+mkrepo "$ROW/repo"
+printf '99.0\n' > "$LOADF"; MW=2
+SS2_OUT="$(bk --quiet --stamp-dir repo -- "echo run >> $ROW/runs" 2>&1)"; SS2_RC=$?
+expect_eq "SS2.1 a passing command on a machine that never settles runs once" 1 \
+  "$(wc -l < "$ROW/runs" 2>/dev/null | tr -d ' ')"
+expect_status "SS2.2 …and is void (75), not green" 75 "$SS2_RC"
+expect_regex "SS2.3 …stamped rc=75" '\|rc=75\|' "$(tail -1 "$(stamps_of "$ROW/repo")" 2>/dev/null)"
+# The drain gives up too: another place never drains within the ceiling.
+newrow ss3
+MW=2
+bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; SS3_A=$!
+wait_file "$ROW/a.started"
+SS3_OUT="$(bk --quiet -- "echo run >> $ROW/runs; exit 5" 2>&1)"; SS3_RC=$?
+expect_eq "SS3.1 a drain that gives up runs the command once" 1 \
+  "$(wc -l < "$ROW/runs" 2>/dev/null | tr -d ' ')"
+expect_status "SS3.2 …with its own code (5)" 5 "$SS3_RC"
+expect_contains "SS3.3 …after the give-up line naming the drain" "drain" "$SS3_OUT"
+expect_contains "SS3.4 …and is void" "it ran unbooked and is not retried" "$SS3_OUT"
+touch "$ROW/a.go"; wait "$SS3_A" 2>/dev/null
+# SS4. At the short limit the wait spent the call: nothing runs, and the end is 124 as before.
+newrow ss4
+printf '99.0\n' > "$LOADF"; MW=20
+SS4_OUT="$(bk --quiet --kill-after 1 -- "echo run >> $ROW/runs" 2>&1)"; SS4_RC=$?
+expect_status "SS4.1 a give-up at the short limit stays 124" 124 "$SS4_RC"
+expect_contains "SS4.2 …with the short-limit line" "over the short limit" "$SS4_OUT"
+expect_false "SS4.3 …and the command never ran (beside SS1.1's run on the same file)" test -e "$ROW/runs"
+
+# ═══════════════════════════════════════════════════════════════ §MAX-WAIT
+section "MAX-WAIT — --max-wait <s> caps every wait at the smaller of it and the shim's default (wave-27 T6, AC-8.3)"
+# Critic 3 S2 (wave 26). The wall passes the call's own timeout, less ten seconds, so a wait for
+# a place gives up inside the call instead of outliving it (tests/bash-walls.test.sh §WAIT-CEIL
+# pins the wrap). Here: the shim honours it, and never lets it raise its default.
+newrow mw1
+SN=1; MW=30
+bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; MW1_A=$!
+wait_file "$ROW/a.started"
+MW1_T0=$SECONDS
+MW1_OUT="$(bk --max-wait 2 -- "touch $ROW/m.ran" 2>&1)"; MW1_RC=$?
+MW1_DT=$((SECONDS - MW1_T0))
+expect_status "MW1.1 no place within --max-wait 2: the shim exits 69" 69 "$MW1_RC"
+expect_true "MW1.2 …at --max-wait, not the default ceiling (took ${MW1_DT}s, default ${MW}s)" \
+  test "$MW1_DT" -le 4
+expect_contains "MW1.3 …with the lib's give-up line naming the holder" "gave up after" "$MW1_OUT"
+expect_false "MW1.4 …and the command never ran" test -e "$ROW/m.ran"
+MW=2
+MW1_T0=$SECONDS
+bk --max-wait 30 -- "touch $ROW/m.ran" >/dev/null 2>&1; MW1_RC=$?
+MW1_DT=$((SECONDS - MW1_T0))
+expect_status "MW1.5 a --max-wait above the default does not raise it: 69" 69 "$MW1_RC"
+expect_true "MW1.6 …at the default ceiling (took ${MW1_DT}s, default ${MW}s)" test "$MW1_DT" -le 4
+touch "$ROW/a.go"; wait "$MW1_A" 2>/dev/null
+MW1_OUT="$(bk --max-wait 2 -- "touch $ROW/m.ran; echo ran" 2>&1)"; MW1_RC=$?
+expect_status "MW1.7 with a place free the command runs under --max-wait (beside MW1.4)" 0 "$MW1_RC"
+expect_eq "MW1.8 …with its output" "ran" "$MW1_OUT"
+for _v in 0 x -3; do
+  bk --max-wait "$_v" -- true >/dev/null 2>&1; MW1_RC=$?
+  expect_status "MW1.9 --max-wait '$_v' is a usage error (2)" 2 "$MW1_RC"
+done
+bk --max-wait=2 -- true >/dev/null 2>&1; MW1_RC=$?
+expect_status "MW1.10 --max-wait=<s> is read as well (0, beside MW1.9's 2)" 0 "$MW1_RC"
 
 finish
