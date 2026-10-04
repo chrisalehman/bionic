@@ -8449,7 +8449,7 @@ W46_HEAD="$(git -C "$R46/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 mkdir -p "$R46/.bionic/docs/record/wave-01-fixture" "$R46/.bionic/docs/plans/elsewhere"
 # THE EVIDENCE ATTESTS ITS HEAD (wave-26 T14; review 7 F1): a floor log carries the suite runner's
 # header line `head=<sha> dirty=<n>`, a review its `reviewed: <a>..<b>` line.
-printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\n' "$W46_HEAD" > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
+printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 3 passed, 0 failed\n' "$W46_HEAD" > "$R46/.bionic/docs/record/wave-01-fixture/floor.txt"
 printf 'review notes\n' > "$R46/.bionic/docs/record/wave-01-fixture/review.md"
 printf 'not a record\n' > "$R46/.bionic/docs/plans/elsewhere/notes.md"
 expect_regex "46a0 precondition: the working branch's checkout has a 40-hex head" '^[0-9a-f]{40}$' "$W46_HEAD"
@@ -8499,7 +8499,7 @@ s42_unchanged "46b5 F1 the floor log of the old head, after a landing" 1 "$P46"
 expect_contains "46b5b …naming both heads and the fix" \
   "read head ${W46_HEAD:0:12}, but the working branch is at ${W46_HEAD2:0:12}; run it again on ${W46_HEAD2:0:12}" "$OUT"
 expect_eq "46b6 F1 proof_last floor still reads the head the run read" "$W46_HEAD" "$(s46_last "$P46" floor)"
-printf 'floor log\nhead=%s dirty=0\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 3 passed, 0 failed\n' "$W46_HEAD2" > "$R46/.bionic/docs/record/wave-01-fixture/floor2.txt"
 s42_snap "$R46" "$P46"
 poke "$R46" proof-add floor record/wave-01-fixture/floor2.txt
 expect_eq "46b6b …a log of a run at the new head exits 0" "0" "$RC"
@@ -8538,6 +8538,29 @@ s42_unchanged "46f9 F1 a review of a commit off the working branch" 1 "$P46"
 expect_contains "46f10 …naming it" "which is not on the working branch" "$OUT"
 poke "$R46" proof-add floor record/wave-01-fixture/review-older.md
 s42_unchanged "46f11 a floor proof never reads a review's range" 1 "$P46"
+# REVIEW 10 F1 (wave-26 T5): A RUN AT THE HEAD MUST ALSO HAVE PASSED. The header says which head
+# the run read, the runner's last `Gating:` line how it ended; a red run, a note quoting the
+# header, a void suite, and a green inner verdict above a red outer one prove nothing. The green
+# log at the same head (floor2.txt, 46b6b) is this block's positive control.
+printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 3 failed\n' "$W46_HEAD2" > "$S46_REC/floor-red.txt"
+printf '# review notes\nThe runner printed:\nhead=%s dirty=0\n(no run here)\n' "$W46_HEAD2" > "$S46_REC/floor-quote.txt"
+printf 'floor log\nhead=%s dirty=0\nGating: 40 passed, 0 failed\nVoid: 1 — not timed\n' "$W46_HEAD2" > "$S46_REC/floor-void.txt"
+printf 'floor log\nhead=%s dirty=0\n───── x: captured output ─────\nGating: 5 passed, 0 failed\n───── end x ─────\nGating: 40 passed, 2 failed\n' \
+  "$W46_HEAD2" > "$S46_REC/floor-inner.txt"
+s42_snap "$R46" "$P46"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-red.txt
+s42_unchanged "46f12 F1 a red run at the head, on a clean tree" 1 "$P46"
+expect_contains "46f12b …naming the verdict and the fix" "did not pass (Gating: 40 passed, 3 failed); fix it, run it again" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-quote.txt
+s42_unchanged "46f13 F1 a note that quotes the run header" 1 "$P46"
+expect_contains "46f13b …naming the verdict it lacks" "has no Gating: <n> passed, <m> failed verdict" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-void.txt
+s42_unchanged "46f14 F1 a run that left a suite void" 1 "$P46"
+expect_contains "46f14b …naming the Void: line" "left a suite void" "$OUT"
+poke "$R46" proof-add floor record/wave-01-fixture/floor-inner.txt
+s42_unchanged "46f15 F1 a green inner verdict above the runner's red one" 1 "$P46"
+poke "$R46" proof-add task record/wave-01-fixture/floor-red.txt
+s42_unchanged "46f16 F1 a task proof citing a red run" 1 "$P46"
 # A REVIEW OF AN OLDER HEAD IS A TRUE PROOF OF THAT HEAD: what landed since stays unread.
 poke "$R46" proof-add review record/wave-01-fixture/review-older.md
 expect_eq "46g a review of an ancestor of the branch head exits 0" "0" "$RC"

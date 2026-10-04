@@ -832,9 +832,12 @@ fi
 # [WALL: tests/dispatch-preflight.test.sh]
 DP_SUBAGENT=$(_jq '.tool_input.subagent_type')
 if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$PLAN" ]; then
-  # `current:` and `approved-by:` out of `## SDLC State`, in one pass each, fence-blind
-  # on purpose: this arm reads two keys, and the gate that owns the section's grammar is
-  # the evidence gate. A key this reader cannot find reads as absent, never as malformed.
+  # `approved-by:` IS READ BY THE FILL'S OWN READER (wave-26 T5; review 10 F2): `fill_plan_approved`
+  # (lib/fill.sh), fence-aware and taking a bulleted `- approved-by:`, so the tick that FILLs a
+  # row and this wall that admits its writer can never disagree about whether the plan is
+  # approved. fill.sh is sourced here, lazily, at the one arm that reads it; a library directory
+  # without the function says `not checked` for this arm rather than refusing every writer.
+  # `current:` is read only to name the step in the refusal, fence-blind as before.
   DP_CURRENT=$(awk '
     /^## SDLC State/ { st = 1; next }
     st && /^## / { exit }
@@ -842,13 +845,16 @@ if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$PLAN" ]; then
       sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, "");
       print; exit }
   ' "$PLAN" 2>/dev/null) || DP_CURRENT=""
-  DP_APPROVED=$(awk '
-    /^## SDLC State/ { st = 1; next }
-    st && /^## / { exit }
-    st && /^[[:space:]]*approved-by[[:space:]]*:/ {
-      sub(/^[[:space:]]*approved-by[[:space:]]*:[[:space:]]*/, "");
-      sub(/[[:space:]]+$/, ""); print; exit }
-  ' "$PLAN" 2>/dev/null) || DP_APPROVED=""
+  if ! declare -F fill_plan_approved >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/fill.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$BIONIC_LIB/fill.sh"
+  fi
+  DP_APPROVED=""
+  if ! declare -F fill_plan_approved >/dev/null 2>&1; then
+    dp_not_checked "plan approval" "fill_plan_approved (lib/fill.sh)"; DP_APPROVED=unknown
+  elif fill_plan_approved "$PLAN"; then
+    DP_APPROVED=yes
+  fi
   if [ -z "$DP_APPROVED" ]; then
     dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \
       "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
@@ -906,6 +912,9 @@ if [ -n "$PLAN" ] && [ -n "$DP_ROW_NAME" ]; then
       m = split($13, a, ",")
       for (k = 1; k <= m; k++) {
         t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
+        # A LIVE READ OF AN APPROVAL IS STILL AN APPROVAL READ (review 10 F5): readiness waits
+        # on `live:approval:<name>` exactly as on the bare token, so this arm does too.
+        sub(/^live:/, "", t)
         if (t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ && t != "approval:plan") print $1 "\t" substr(t, 10)
       }
     }')

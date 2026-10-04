@@ -79,13 +79,14 @@ proof_head() {
 # proof_attested <kind> <evidence file> <checkout> -> the 40-hex head the evidence attests, exit
 # 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
 #   floor  a full run's log: its first `head=<sha> dirty=<n>` line, the header the suite runner
-#          prints before any suite. <sha> must be the checkout's HEAD and <n> 0.
+#          prints before any suite. <sha> must be the checkout's HEAD and <n> 0, and the
+#          runner's verdict after it must read `Gating: <n> passed, 0 failed` with no `Void:`.
 #   review a review: its first `reviewed: <a>..<b>` line. <b> must resolve to a commit that is
 #          the checkout's HEAD or an ancestor of it; the proof names that commit — a review of an
 #          older head is a true proof of that older head, and what landed since is unread.
 #   task   whichever of the two the evidence carries, the run header first (A-T14.9).
 proof_attested() {
-  local kind="$1" ev="$2" co="$3" head stamp sha dirty rng b bh
+  local kind="$1" ev="$2" co="$3" head stamp sha dirty rng b bh verdict
   head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
   stamp="$(awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { print; exit }' "$ev" 2>/dev/null)"
@@ -106,6 +107,29 @@ proof_attested() {
     fi
     if [ "$dirty" != 0 ]; then
       printf 'the run in %s read a dirty tree (dirty=%s); commit, run it again and cite that log' "$ev" "$dirty"; return 1
+    fi
+    # THE RUN MUST ALSO HAVE PASSED (wave-26 T5; review 10 F1). A header says which head a run
+    # read, not how it ended: a red run, or a note that quotes the header, attests the head all
+    # the same, and the full-run wall reads a proved head as needing no run. So the runner's own
+    # verdict, `Gating: <n> passed, <m> failed` (tests/run.sh), must follow the header with n > 0
+    # and m = 0. The LAST such line is the runner's: a suite's captured output can hold an inner
+    # run's verdict above it. A `Void:` line refuses too (A-T5.15): a void suite is counted in
+    # neither tally, so `0 failed` does not yet say it passed.
+    verdict="$(awk '
+      !seen && /^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; next }
+      seen && /^Gating: [0-9]+ passed, [0-9]+ failed$/ { v = $2 " " $4 }
+      seen && /^Void: / { void = 1 }
+      END { if (v == "") print "none"; else print v " " (void + 0) }' "$ev" 2>/dev/null)"
+    case "$verdict" in
+      none|'')
+        printf 'the run in %s has no Gating: <n> passed, <m> failed verdict after its head= line; cite the whole log of a full run that finished' "$ev"; return 1 ;;
+    esac
+    set -- $verdict
+    if [ "$2" != 0 ] || [ "$1" = 0 ]; then
+      printf 'the run in %s did not pass (Gating: %s passed, %s failed); fix it, run it again and cite that log' "$ev" "$1" "$2"; return 1
+    fi
+    if [ "$3" != 0 ]; then
+      printf 'the run in %s left a suite void (its Void: line); re-run it on a quiet machine and cite that log' "$ev"; return 1
     fi
     printf '%s' "$head"; return 0
   fi

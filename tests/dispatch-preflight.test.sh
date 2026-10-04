@@ -9037,5 +9037,42 @@ expect_contains "GATES2g …and the ready set offers it" "T9" "$(gates_ready "$G
 expect_contains "GATES3 AC-6.2 at current: 4 the Step-7 doc row whose reads exist is ready" \
   "T8" "$(gates_ready "$GATES_P")"
 
+# --- GATES4: one approved-by: reader (wave-26 T5; review 10 F2) ---
+# A bulleted `- approved-by:` approves on both readers; one only inside a fence approves on
+# neither. Through T13 the wall read it fence-blind and refused the bullet, so the tick FILLed a
+# row the wall then refused, and a fenced example let writers in on an unapproved plan.
+REPO=$(make_repo rgates4 yes)
+write_attestation "$REPO" "$SID_A"
+GATES_P="$(gates_plan "$REPO" "- $GATES_APPROVED")"
+expect_contains "GATES4 precondition: the plan carries the bulleted line" "- approved-by: dana" "$(cat "$GATES_P")"
+expect_contains "GATES4 the ready set offers T1 on a bulleted approved-by:" "T1 " "$(gates_ready "$GATES_P")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
+expect_eq "GATES4b …and the dispatch wall admits its writer" "allow" "$GATE_VERDICT"
+REPO=$(make_repo rgates4f yes)
+write_attestation "$REPO" "$SID_A"
+GATES_P="$(gates_plan "$REPO" '```
+approved-by: example 2026-01-01T00:00Z "approved"
+```')"
+expect_contains "GATES4c precondition: the plan carries approved-by: only inside a fence" \
+  'approved-by: example' "$(cat "$GATES_P")"
+expect_eq "GATES4c the ready set offers nothing on a fenced approved-by:" "" "$(gates_ready "$GATES_P")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T1" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
+expect_eq "GATES4d …and the dispatch wall refuses its writer" "deny" "$GATE_VERDICT"
+expect_contains "GATES4d …as unapproved" "unapproved" "$GATE_ERR"
+
+# --- GATES5: a live read of an approval is still an approval read (review 10 F5) ---
+REPO=$(make_repo rgates5 yes)
+write_attestation "$REPO" "$SID_A"
+GATES_P="$(gates_plan "$REPO" "$GATES_APPROVED")"
+sed 's/| approval:release |$/| live:approval:release |/' "$GATES_P" > "$GATES_P.tmp" && mv "$GATES_P.tmp" "$GATES_P"
+expect_contains "GATES5 precondition: T9 reads live:approval:release" "| live:approval:release |" "$(cat "$GATES_P")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w-T9" "claude-sonnet-5" \
+                             "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
+expect_eq "GATES5 a dispatch for a row reading live:approval:release before approved: release is refused" \
+  "deny" "$GATE_VERDICT"
+expect_contains "GATES5b …naming the approval it waits for" "approval:release" "$GATE_VERR"
+
 
 finish
