@@ -8492,4 +8492,97 @@ expect_eq "46e no projection copy is left beside the plan" "" \
   "$(find "$R46/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
 POKE_BOUND="$S46_BOUND_WAS"
 
+# ============================================================
+section "Section 48 §READY-EARLY (review half): a review follows the build — offered once per landed difference, back to pending on its proof (wave-26 T14; REQ-6 AC-6.1, AC-6.5; D10)"
+# ============================================================
+#
+# A reads table at current: 4 with one build landed and one still active. The review row (an
+# empty reads cell, so `approval:plan, live:head`) is offered as soon as the first build lands,
+# with no review proof yet (AC-6.1). Dispatched, it is active; `proof-add review` records the
+# working branch's head A and returns the row to `pending` with its agent, worktree and base
+# cells cleared — the next pass is its own launch and its own ledger line. The tick reads the
+# head from the checkout holding `working-branch:` (a linked worktree one commit ahead of the
+# main checkout, as §46), so at A the review waits, naming the proof's head; one more commit on
+# the working branch — a landing — and the tick offers it again (AC-6.5). A tick that read the
+# head from the main checkout would see a head other than A and offer it at 48e.
+S48_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+s48_row() {  # <plan> <id> -> the row's cells, `|`-joined and trimmed: id|…|status|reads
+  awk -F'|' -v id="$2" '{ c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c) } c == id {
+    o = ""; for (i = 2; i < NF; i++) { v = $i; gsub(/^[ \t]+|[ \t]+$/, "", v); o = o (i > 2 ? "|" : "") v }
+    print o; exit }' "$1"
+}
+s48_fill_has() {  # <id> -> yes when the tick's FILL line names it
+  case " $(s47_lines FILL | sed 's/^poker: FILL //') " in *" $1 "*) printf yes ;; *) printf no ;; esac
+}
+
+R48="$(make_repo s48-review)"; new_roster "$R48"; ( cd "$R48" && git commit -q --allow-empty -m init )
+add_row "$R48" name=w-T2 deliverable=b.md duration="4 hours" launched_at="$(iso_ago 600)"
+P48="$(s42_plan "$R48" 4)"
+awk '
+  /^current: / && !wb { print; print "working-branch: wave/01-fixture"; wb = 1; next }
+  /^- T5: / { print "- T3: review passes, one per landed difference — record/wave-01-fixture/review.md" }
+  /^\| id \| step \|/ { intab = 1
+    print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
+    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    print "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |"
+    print "| T2 | 4 | build | the second build | w-T2 | — | 30 | REQ-1 | b.sh | 01-T2 | abc1234 | active |  |"
+    print "| T3 | 6 | review | follows the build | critic | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/review.md | — | — | pending |  |"
+    print "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | — | — | — | pending |  |"
+    next }
+  intab && /^\|/ { next }
+  { intab = 0; print }' "$P48" > "$P48.tmp" && mv "$P48.tmp" "$P48"
+( cd "$R48" && git add -f "$P48" && git commit -qm "reads table" \
+  && git worktree add -q -b wave/01-fixture "$R48/.worktrees/01-fixture" \
+  && git -C "$R48/.worktrees/01-fixture" commit -q --allow-empty -m "the first build lands" ) >/dev/null 2>&1
+mkdir -p "$R48/.bionic/docs/record/wave-01-fixture"
+printf 'review notes\n' > "$R48/.bionic/docs/record/wave-01-fixture/review.md"
+W48_A="$(git -C "$R48/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+expect_eq "48a0 precondition: the T3 row is a review with an empty reads cell, pending" \
+  "T3|6|review|follows the build|critic|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|pending|" \
+  "$(s48_row "$P48" T3)"
+expect_true "48a0b precondition: the working branch's head is not the main checkout's" \
+  test "$W48_A" != "$(git -C "$R48" rev-parse HEAD)"
+s34_gate "$R48"
+expect_eq "48a0c precondition: the reads-table plan is admitted by the real commit gate" "0" "$GATE_RC"
+
+# ---------- AC-6.1: no review proof yet, one build landed, one active — offered now ----------
+poke_pressure "$R48" 8192 1.0 tick
+expect_nonempty "48a the tick prints a FILL line (the extractor reads real output)" "$(s47_lines FILL)"
+expect_eq "48a2 AC-6.1 with one build landed and one still active, the review is on the FILL line" "yes" "$(s48_fill_has T3)"
+
+# ---------- dispatched, then its proof: the row goes back to pending ----------
+add_row "$R48" name=w-T3 deliverable=review.md duration="1 hour" launched_at="$(iso_ago 60)"
+poke "$R48" task-set T3 status=active agent=w-T3 worktree=01-T3 base=abc1234
+expect_eq "48b0 precondition: task-set moves T3 active" "0" "$RC"
+poke_pressure "$R48" 8192 1.0 tick
+expect_eq "48b an active review is not offered again" "no" "$(s48_fill_has T3)"
+expect_absent "48b2 …and it is on no WAIT line (it is not pending)" "WAIT T3 " "$(s47_lines WAIT)"
+s42_snap "$R48" "$P48"
+poke "$R48" proof-add review record/wave-01-fixture/review.md
+expect_eq "48c proof-add review exits 0" "0" "$RC"
+expect_contains "48c2 …writes the proof at the working branch's head" "proved: kind=review head=${W48_A} " \
+  "$(/usr/bin/grep -E '^proved: ' "$P48")"
+expect_eq "48c3 …and returns the review row to pending, its agent, worktree and base cleared" \
+  "T3|6|review|follows the build|—|—|30|REQ-1|.bionic/docs/record/wave-01-fixture/review.md|—|—|pending|" \
+  "$(s48_row "$P48" T3)"
+expect_eq "48c4 …touching nothing else: the proof line added, the one row rewritten" "2 1;" "$(s42_numstat "$R48")"
+expect_contains "48c5 …and it says which row it returned" "T3 back to pending" "$OUT"
+s34_gate "$R48"
+expect_eq "48c6 …and the next commit is admitted" "0" "$GATE_RC"
+
+# ---------- AC-6.5: at head A it waits, naming A; one landing later it is offered ----------
+poke_pressure "$R48" 8192 1.0 tick
+expect_nonempty "48d the tick prints WAIT lines (the extractor reads real output)" "$(s47_lines WAIT)"
+expect_eq "48d2 AC-6.5 at the proof's head the review is not offered" "no" "$(s48_fill_has T3)"
+expect_eq "48d3 …its WAIT line names the proof head it has not moved past" \
+  "poker: WAIT T3 — live:head: nothing landed past the review proof at ${W48_A:0:12}" \
+  "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 ')"
+git -C "$R48/.worktrees/01-fixture" commit -q --allow-empty -m "the second build lands" >/dev/null 2>&1
+W48_B="$(git -C "$R48/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+expect_true "48e0 precondition: the working branch moved past A" test "$W48_B" != "$W48_A"
+poke_pressure "$R48" 8192 1.0 tick
+expect_eq "48e AC-6.5 one landing past the proof and the review is offered again" "yes" "$(s48_fill_has T3)"
+expect_absent "48e2 …and it is on no WAIT line" "WAIT T3 " "$(s47_lines WAIT)"
+POKE_BOUND="$S48_BOUND_WAS"
+
 finish

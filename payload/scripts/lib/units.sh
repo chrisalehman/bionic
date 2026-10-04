@@ -413,9 +413,23 @@ units_rows() {
 # that names none of these is never satisfied — the cautious direction, the one `slice_ready`
 # documented: a row held back costs a batch, a row dispatched early costs a writer's run.
 #
-# A LIVE READ, `live:<artifact>`, is satisfied by what exists and waits for nobody — see
-# `live_sat` in `_units_sched_awk`, the seam T14 builds "only the difference since its last
-# proof" on.
+# A LIVE READ, `live:<artifact>`, is satisfied by what exists and waits for nobody: the record
+# always exists, a proof or an approval once its line is written, a path unless only open rows
+# write it. A token that names none of these (`live:foo`, `live:ext:ci`, `live:T9`) is never
+# satisfied (review 5 F4). `live:head` IS A REVIEW THAT FOLLOWS THE BUILD (wave-26 T14; D10):
+# it is satisfied when landed work exists that the last `proved: kind=review` line has not read,
+# and no other row of the same kind is open — none active, and no pending `live:head` row of
+# that kind above it, so one pass runs at a time and the first goes first. "Past the last proof"
+# compares the proof line's `head=` with THE WORKING BRANCH'S HEAD NOW, which this program does
+# not fetch: the caller sets UNITS_LIVE_HEAD (the Patrol tick reads it from git; the stop wall
+# sets none). A plan with no review proof yet needs no head: the first review is ready once a
+# row writing outside `.bionic/` has landed. With a proof and no head handed in, nothing past
+# the proof can be seen, so the row waits (the cautious direction, as below). Each wait names
+# why after the read: `live:head: nothing has landed yet`, `…: nothing landed past the review
+# proof at <12 hex>`, `…: the head past the review proof at <12 hex> is not known here`,
+# `…: review T5 is open (active)`, `…: review T3 goes first`. `units_live_range` prints the
+# difference a ready review reads; `units_live_rows` the rows `proof-add review` returns to
+# `pending`.
 #
 # AN UNMERGEABLE PATH HOLDS A ROW (D11). Rows that write one file run side by side and reconcile
 # on landing; a `Files` entry ending in `!` cannot be reconciled, so a pending row is held while
@@ -492,6 +506,7 @@ units_held() { _units_sched held "$@"; }
 # gate act held for its step prints `step:<n>` first; an unmergeable hold prints the marked path
 # (`lib/x.sh!`) with its holder. Same <step> rules as `units_ready`; a row open on the roster is
 # not subtracted here (the verb takes no roster).
+# A live read that waits on no row prints why after the read: `live:head: <why>` (wave-26 T14).
 units_waiting() { _units_sched waiting "$@"; }
 
 # units_edges <plan> -> `<from id><TAB><to id><TAB><the read that joins them>`, one per line,
@@ -501,6 +516,18 @@ units_waiting() { _units_sched waiting "$@"; }
 # or dropped row is at neither end: what has landed holds nobody, so the graph is the work that
 # remains — the shape `units_chain` takes.
 units_edges() { _units_sched edges "${1:-}" ""; }
+
+# units_live_range <plan> -> `<last review proof head>..<UNITS_LIVE_HEAD>`, the difference a
+# `live:head` review reads (wave-26 T14; AC-6.5): only what landed past the last review, never
+# the whole diff again. Nothing when the plan has no review proof yet (the first review reads
+# all the landed work, from the wave's base), when no head is handed in, or when the head has
+# not moved past the proof.
+units_live_range() { _units_sched range "${1:-}" ""; }
+
+# units_live_rows <plan> -> `<id><TAB><kind><TAB><status>` for every row reading `live:head`, an
+# empty cell's kind default included, table order (wave-26 T14). `proof-add review` reads it to
+# return the active review rows to `pending`.
+units_live_rows() { _units_sched liverows "${1:-}" ""; }
 
 # _units_ext_re -> the shape of an external prerequisite token, as an awk ERE (wave-21 T4; D3).
 # ONE SPELLING for the validator that admits it and the readiness program that reports it, so
@@ -514,9 +541,12 @@ _units_ext_re() { printf '%s' '^ext:[A-Za-z0-9][A-Za-z0-9._-]*$'; }
 # `units_edges` prints. One stream: the rows (`units_rows`, so a memoised caller pays no second
 # parse), then the plan's text, from which `## SDLC State`'s approval and proof lines are read
 # fence-aware, the `_units_ledger` way.
+# ONE VALUE FROM OUTSIDE THE PLAN (wave-26 T14; review 5 F8): UNITS_LIVE_HEAD, the working
+# branch's head as the caller read it, which `live:head` compares with the last review proof's
+# `head=`. Unset, a plan with a review proof cannot see past it, and its live review waits.
 _units_sched() {
   local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i
-  if [ "$mode" != edges ]; then
+  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ]; then
     case "$step" in
       ''|*[!0-9]*)
         case "$step" in
@@ -538,6 +568,7 @@ _units_sched() {
     printf '\034rows\n'; printf '%s\n' "$rows"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
   } | awk -F'\t' -v mode="$mode" -v want="$step" -v scale="$scale" -v hasreads="$hasreads" \
+      -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" \
       -v extre="$(_units_ext_re)" "$(_units_sched_awk)"
 }
 
@@ -568,7 +599,10 @@ _units_sched_awk() {
         v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
         if (aw[1] != "") appr[aw[1]] = 1
       } else if (l ~ /^proved[ \t]*:/ && match(l, /kind=[A-Za-z0-9_-]+/)) {
-        proved[substr(l, RSTART + 5, RLENGTH - 5)] = 1
+        k = substr(l, RSTART + 5, RLENGTH - 5); proved[k] = 1
+        # THE HEAD IS KEPT (wave-26 T14; review 5 F8): the last line of a kind is the newest, the
+        # order the writer appends in, so `live:head` compares against the last review proof.
+        if (match(l, /head=[0-9A-Fa-f]+/)) { v = substr(l, RSTART + 5, RLENGTH - 5); prvh[k] = tolower(v) }
       }
       next
     }
@@ -693,17 +727,20 @@ _units_sched_awk() {
       ntk[i]++; tk[i, ntk[i]] = t
       if (t == "head") rhead[i] = 1
       if (t == "record") rrec[i] = 1
+      if (t == "live:head") rlive[i] = 1
     }
 
-    # LIVE: THE SEAM T14 BUILDS ON. Today a live read is satisfied when its artifact exists at
-    # all: the head and the record always do; a proof or an approval when its line is written; a
-    # path unless the only rows that write it are still open (none has landed it). T14 replaces
-    # the `head` arm with "a landing exists past the last review proof, and no row of this kind
-    # is open"; nothing else here needs to change for it.
+    # LIVE: a live read is satisfied when its artifact exists: the record always does; a proof or
+    # an approval when its line is written; a path unless the only rows that write it are still
+    # open (none has landed it). Anything else names no artifact and is never satisfied (review 5
+    # F4: `live:foo`, `live:ext:ci`, `live:T9` fell into the path arm and read as ready). `head`
+    # is live_head below.
     function live_sat(i, a,   j, lw, ow) {
-      if (a == "head" || a == "record") return 1
+      if (a == "head") return live_head(i)
+      if (a == "record") return 1
       if (substr(a, 1, 6) == "proof:") return (substr(a, 7) in proved)
       if (substr(a, 1, 9) == "approval:") return (substr(a, 10) in appr)
+      if (a !~ /[\/.*?]/ || a ~ /[ \t:!]/) return 0
       lw = 0; ow = 0
       for (j = 1; j <= n; j++) {
         if (j == i || st[j] == "dropped" || !writes(j, a)) continue
@@ -711,11 +748,33 @@ _units_sched_awk() {
       }
       return (lw || !ow)
     }
+    # live_head(i) -> 1 when row i may read the moving head now (wave-26 T14; D10): no other row
+    # of its kind open, and landed work past the last review proof — any landed row writing
+    # outside .bionic/ while there is no proof, the head handed in (livehead) differing from the
+    # proof head once there is one. The head is compared, not its ancestry: the range the review
+    # reads, proof..head, is the work on the head that the proof never saw, rewritten history
+    # included (A-T14.1). A wait sets lwhy, which units_waiting prints after the read.
+    function live_head(i,   j, h) {
+      for (j = 1; j <= n; j++) {
+        if (j == i || knd[j] != knd[i]) continue
+        if (st[j] == "active") { lwhy = knd[i] " " id[j] " is open (active)"; return 0 }
+        if (st[j] == "pending" && rlive[j] && j < i) { lwhy = knd[i] " " id[j] " goes first"; return 0 }
+      }
+      if (!("review" in prvh)) {
+        for (j = 1; j <= n; j++) if (j != i && st[j] == satisfied && code[j]) return 1
+        lwhy = "nothing has landed yet"; return 0
+      }
+      h = prvh["review"]
+      if (livehead == "") { lwhy = "the head past the review proof at " substr(h, 1, 12) " is not known here"; return 0 }
+      if (livehead == h) { lwhy = "nothing landed past the review proof at " substr(h, 1, 12); return 0 }
+      return 1
+    }
 
     # judge(i, t) -> 1 when row i read t is satisfied; otherwise 0, with the rows named as its
-    # writers in wj[1..nw] (those still open, plus a task-id row in any unsatisfied state).
+    # writers in wj[1..nw] (those still open, plus a task-id row in any unsatisfied state), and
+    # for a live read that waits on no row, why in lwhy.
     function judge(i, t,   j, a, q) {
-      nw = 0
+      nw = 0; lwhy = ""
       if (t ~ extre) return 0
       if (substr(t, 1, 9) == "approval:") return (substr(t, 10) in appr)
       if (substr(t, 1, 5) == "live:") return live_sat(i, substr(t, 6))
@@ -807,6 +866,14 @@ _units_sched_awk() {
         m = split(dep[i], a, ",")
         for (k = 1; k <= m; k++) addtok(i, a[k])
       }
+      if (mode == "range") {
+        if (("review" in prvh) && livehead != "" && livehead != prvh["review"]) print prvh["review"] ".." livehead
+        exit
+      }
+      if (mode == "liverows") {
+        for (i = 1; i <= n; i++) if (rlive[i]) printf "%s\t%s\t%s\n", id[i], knd[i], st[i]
+        exit
+      }
       for (i = 1; i <= n; i++) {
         if (mode == "edges") {
           if (!isopen(i)) continue
@@ -843,7 +910,7 @@ _units_sched_awk() {
           unmet++
           if (t ~ extre) ext = ext (ext == "" ? "" : " ") t; else other++
           if (mode != "waiting") continue
-          if (nw == 0) printf "%s\t%s\t-\t-\n", id[i], t
+          if (nw == 0) printf "%s\t%s\t-\t-\n", id[i], (lwhy == "" ? t : t ": " lwhy)
           for (w = 1; w <= nw; w++) printf "%s\t%s\t%s\t%s\n", id[i], t, id[wj[w]], st[wj[w]]
         }
         if ((mode == "ready" && unmet) || (mode == "held" && other)) continue

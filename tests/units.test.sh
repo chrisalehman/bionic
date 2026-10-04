@@ -2149,8 +2149,12 @@ expect_eq "READS.4 an empty build cell takes approval:plan: T1 is ready on the a
 expect_eq "READS.5 an empty verify cell takes approval:plan, head: T2 waits for T1, an open writer outside .bionic/" \
   "yes" "$(has_line "$WAIT_READS" "T2${TAB}head${TAB}T1${TAB}pending")"
 expect_eq "READS.5b …so T2 is not ready" "no" "$(has_line "$READY_READS" T2)"
-expect_eq "READS.6 an empty review cell takes live:head: T3 is ready while the build is open" "yes" \
-  "$(has_line "$READY_READS" T3)"
+# A REVIEW FOLLOWS THE BUILD (wave-26 T14; D10): live:head is ready once landed work exists that
+# no review has read. Nothing has landed in this table, so the review waits for the first landing
+# and says so; LIVE.8 is the same row ready once a build lands.
+expect_eq "READS.6 an empty review cell takes live:head: with nothing landed T3 waits for the first landing" "yes no" \
+  "$(printf '%s %s' "$(has_line "$WAIT_READS" "T3${TAB}live:head: nothing has landed yet${TAB}-${TAB}-")" \
+     "$(has_line "$READY_READS" T3)")"
 expect_eq "READS.7 a path read waits for the open row whose Files cover it" "yes" \
   "$(has_line "$WAIT_READS" "T4${TAB}lib/a.sh${TAB}T1${TAB}pending")"
 expect_eq "READS.7b …and T4 is not ready" "no" "$(has_line "$READY_READS" T4)"
@@ -2420,6 +2424,7 @@ approved-by: fixture 2026-10-03T00:00Z "approved"
 
 | id | step | kind | task | agent | deps | size | serves | Files | reads | status |
 |---|---|---|---|---|---|---|---|---|---|---|
+| T0 | 4 | build | already landed | implementor | — | 30 | REQ-x | lib/z.sh |  | landed |
 | T1 | 4 | build | still building | implementor | — | 30 | REQ-x | lib/a.sh |  | active |
 | T2 | 6 | review | follows the build | critic | — | 30 | REQ-x | .bionic/docs/record/w/review.md | approval:plan, live:head | pending |
 | T3 | 6 | review | reads the floor proof live | critic | — | 30 | REQ-x | .bionic/docs/record/w/r2.md | live:proof:floor | pending |
@@ -2428,7 +2433,7 @@ approved-by: fixture 2026-10-03T00:00Z "approved"
 LIVE_EOF
 READY_LIVE="$(call units_ready "$SANDBOX/live-reads.md" 7)"
 WAIT_LIVE="$(call units_waiting "$SANDBOX/live-reads.md" 7)"
-expect_eq "LIVE.1 a live:head read is satisfied while a build is still open" "yes" "$(has_line "$READY_LIVE" T2)"
+expect_eq "LIVE.1 a live:head read is satisfied while a build is still open, once one has landed (T0)" "yes" "$(has_line "$READY_LIVE" T2)"
 expect_eq "LIVE.2 live:proof:floor is not satisfied before a proved: kind=floor line exists" "no" \
   "$(has_line "$READY_LIVE" T3)"
 expect_eq "LIVE.3 approval:release and proof:floor wait, each named; the floor's writer is the open verify row" "yes yes" \
@@ -2457,6 +2462,125 @@ awk '{ print } /^approved-by:/ { print "```"; print "proved: kind=floor head=x a
   "$SANDBOX/live-reads.md" > "$SANDBOX/live-reads-fenced.md"
 expect_eq "LIVE.7 a proved: line inside a fence proves nothing" "no" \
   "$(has_line "$(call units_ready "$SANDBOX/live-reads-fenced.md" 7)" T3)"
+
+# A REVIEW FOLLOWS THE BUILD (wave-26 T14; D10, AC-6.1, AC-6.5). A row reading `live:head` is
+# ready when the plan is approved, landed work exists that the last `proved: kind=review` line
+# has not read, and no other row of its kind is open. "Past the last proof" compares two heads:
+# the proof line's `head=` and the working branch's head now, which the program does not fetch —
+# its caller hands it in as UNITS_LIVE_HEAD (the tick reads it from git; a caller that has none
+# gets the cautious answer, not ready). With no review proof yet, the first review is offered as
+# soon as a row that writes outside .bionic/ has landed. `units_live_range` names the difference
+# the ready review reads. SYNTHESIZED tables; the heads are fixed hex, no repository needed.
+LV_A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+LV_B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+LV_C=cccccccccccccccccccccccccccccccccccccccc
+lv_plan() {  # <file> <state lines> <rows...> -> an approved reads table
+  local f="$1" st="$2"; shift 2
+  { printf '## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n%s\n\n## Tasks\n\n' "$st"
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    for r in "$@"; do printf '%s\n' "$r"; done; } > "$f"
+}
+lv_proof() { printf 'proved: kind=review head=%s at=2026-10-04T0%s:00:00Z evidence=record/w/review.md' "$1" "${2:-1}"; }
+# live_call <head> <fn> <args...> -> `call` with UNITS_LIVE_HEAD in the child's environment.
+live_call() { local h="$1"; shift; UNITS_LIVE_HEAD="$h" call "$@"; }
+LV_BUILD_LANDED="| T1 | 4 | build | landed work | implementor | — | 30 | REQ-x | lib/a.sh |  | landed |"
+LV_BUILD_OPEN="| T2 | 4 | build | still building | implementor | — | 30 | REQ-x | lib/b.sh |  | active |"
+LV_REVIEW="| T3 | 6 | review | follows the build | critic | — | 30 | REQ-x | .bionic/docs/record/w/review.md |  | pending |"
+LV_FINAL="| T4 | 6 | review | the final review, settled head | critic | — | 30 | REQ-x | .bionic/docs/record/w/final.md | approval:plan, head | pending |"
+
+# AC-6.1: no proof yet, one build landed, one still open — the review is offered now.
+lv_plan "$SANDBOX/lv-first.md" "" "$LV_BUILD_LANDED" "$LV_BUILD_OPEN" "$LV_REVIEW" "$LV_FINAL"
+expect_eq "LIVE.8 AC-6.1 no review proof yet and one build landed: the review is ready while a build is open" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/lv-first.md" 4)" T3)"
+expect_eq "LIVE.8b …and the settled-head final review, pending, neither runs early nor holds it" "no" \
+  "$(has_line "$(call units_ready "$SANDBOX/lv-first.md" 4)" T4)"
+# THE DIFFERENTIAL: the same table with the landed build still open — nothing to review yet.
+lv_plan "$SANDBOX/lv-none.md" "" "${LV_BUILD_LANDED/| landed |/| pending |}" "$LV_BUILD_OPEN" "$LV_REVIEW"
+expect_eq "LIVE.8c …with nothing landed the review waits, and the wait says for what" "no yes" \
+  "$(printf '%s %s' "$(has_line "$(call units_ready "$SANDBOX/lv-none.md" 4)" T3)" \
+     "$(has_line "$(call units_waiting "$SANDBOX/lv-none.md" 4)" "T3${TAB}live:head: nothing has landed yet${TAB}-${TAB}-")")"
+# A landed row that wrote only the record (.bionic/) is not work a review reads.
+lv_plan "$SANDBOX/lv-rec.md" "" "| T1 | 4 | doc | a record only | implementor | — | 30 | REQ-x | .bionic/docs/record/w/n.md |  | landed |" "$LV_REVIEW"
+expect_eq "LIVE.8d …and a landed record-only row is not a landing the review reads" "no" \
+  "$(has_line "$(call units_ready "$SANDBOX/lv-rec.md" 4)" T3)"
+
+# AC-6.5: after proof-add review at head A the review is not ready at A; one more landing (head
+# B) makes it ready for A..B only, never for the whole diff again.
+lv_plan "$SANDBOX/lv-proved.md" "$(lv_proof "$LV_A")" "$LV_BUILD_LANDED" "$LV_BUILD_OPEN" "$LV_REVIEW"
+expect_eq "LIVE.9 AC-6.5 a review proof at head A and the head still A: not ready" "no" \
+  "$(has_line "$(live_call "$LV_A" units_ready "$SANDBOX/lv-proved.md" 4)" T3)"
+expect_eq "LIVE.9b …and the wait names the proof's head it has not moved past" "yes" \
+  "$(has_line "$(live_call "$LV_A" units_waiting "$SANDBOX/lv-proved.md" 4)" \
+     "T3${TAB}live:head: nothing landed past the review proof at aaaaaaaaaaaa${TAB}-${TAB}-")"
+expect_eq "LIVE.10 AC-6.5 one more landing, the head at B: ready" "yes" \
+  "$(has_line "$(live_call "$LV_B" units_ready "$SANDBOX/lv-proved.md" 4)" T3)"
+expect_eq "LIVE.10b …and the difference it reads is A..B, not the whole diff" "${LV_A}..${LV_B}" \
+  "$(live_call "$LV_B" units_live_range "$SANDBOX/lv-proved.md")"
+lv_plan "$SANDBOX/lv-proved2.md" "$(lv_proof "$LV_A" 1)
+$(lv_proof "$LV_B" 2)" "$LV_BUILD_LANDED" "$LV_BUILD_OPEN" "$LV_REVIEW"
+expect_eq "LIVE.10c two review proofs: the newest is the one compared — at B not ready, at C ready for B..C" "no yes ${LV_B}..${LV_C}" \
+  "$(printf '%s %s %s' "$(has_line "$(live_call "$LV_B" units_ready "$SANDBOX/lv-proved2.md" 4)" T3)" \
+     "$(has_line "$(live_call "$LV_C" units_ready "$SANDBOX/lv-proved2.md" 4)" T3)" \
+     "$(live_call "$LV_C" units_live_range "$SANDBOX/lv-proved2.md")")"
+expect_eq "LIVE.10d with no review proof the range is the whole landed work: units_live_range prints nothing" "" \
+  "$(live_call "$LV_B" units_live_range "$SANDBOX/lv-first.md")"
+# THE CAUTIOUS DIRECTION: a proof exists and the caller handed in no head — nothing past the
+# proof can be seen, so the row is not ready, and the wait says the head is unknown.
+expect_eq "LIVE.11 a review proof and no head handed in: not ready, the wait names the unknown head" "no yes" \
+  "$(printf '%s %s' "$(has_line "$(live_call "" units_ready "$SANDBOX/lv-proved.md" 4)" T3)" \
+     "$(has_line "$(live_call "" units_waiting "$SANDBOX/lv-proved.md" 4)" \
+        "T3${TAB}live:head: the head past the review proof at aaaaaaaaaaaa is not known here${TAB}-${TAB}-")")"
+# A fenced review proof is documentation: the table rule (one landed build) still answers.
+lv_plan "$SANDBOX/lv-fenced.md" '```
+'"$(lv_proof "$LV_A")"'
+```' "$LV_BUILD_LANDED" "$LV_REVIEW"
+expect_eq "LIVE.11b a fenced review proof is no proof: with one build landed the review is ready, head or none" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$(live_call "$LV_A" units_ready "$SANDBOX/lv-fenced.md" 4)" T3)" \
+     "$(has_line "$(live_call "" units_ready "$SANDBOX/lv-fenced.md" 4)" T3)")"
+# The plan approval is still read: the kind default is approval:plan, live:head.
+grep -v '^approved-by:' "$SANDBOX/lv-proved.md" > "$SANDBOX/lv-unapproved.md"
+expect_eq "LIVE.12 without approved-by: the head past the proof does not make it ready" "no yes" \
+  "$(printf '%s %s' "$(has_line "$(live_call "$LV_B" units_ready "$SANDBOX/lv-unapproved.md" 4)" T3)" \
+     "$(has_line "$(live_call "$LV_B" units_waiting "$SANDBOX/lv-unapproved.md" 4)" "T3${TAB}approval:plan${TAB}-${TAB}-")")"
+
+# NO ROW OF ITS KIND OPEN: a second review pass is not offered while one is running, and of two
+# pending live reviews the one higher in the table goes first.
+lv_plan "$SANDBOX/lv-busy.md" "$(lv_proof "$LV_A")" "$LV_BUILD_LANDED" "$LV_REVIEW" \
+  "| T5 | 6 | review | a review pass in flight | critic | — | 30 | REQ-x | .bionic/docs/record/w/r5.md |  | active |"
+expect_eq "LIVE.13 another review row active: the head past the proof does not make it ready" "no" \
+  "$(has_line "$(live_call "$LV_B" units_ready "$SANDBOX/lv-busy.md" 4)" T3)"
+expect_eq "LIVE.13b …the wait names the open review" "yes" \
+  "$(has_line "$(live_call "$LV_B" units_waiting "$SANDBOX/lv-busy.md" 4)" "T3${TAB}live:head: review T5 is open (active)${TAB}-${TAB}-")"
+sed 's/record\/w\/r5.md |  | active |/record\/w\/r5.md |  | landed |/' \
+  "$SANDBOX/lv-busy.md" > "$SANDBOX/lv-done.md"
+expect_eq "LIVE.13c …and once it lands the review is ready" "yes" \
+  "$(has_line "$(live_call "$LV_B" units_ready "$SANDBOX/lv-done.md" 4)" T3)"
+lv_plan "$SANDBOX/lv-two.md" "" "$LV_BUILD_LANDED" "$LV_REVIEW" \
+  "| T6 | 6 | review | a second live review | critic | — | 30 | REQ-x | .bionic/docs/record/w/r6.md | approval:plan, live:head | pending |"
+expect_eq "LIVE.13d two pending live reviews: the first is ready, the second waits for it" "yes no yes" \
+  "$(R="$(call units_ready "$SANDBOX/lv-two.md" 4)"; printf '%s %s %s' "$(has_line "$R" T3)" "$(has_line "$R" T6)" \
+     "$(has_line "$(call units_waiting "$SANDBOX/lv-two.md" 4)" "T6${TAB}live:head: review T3 goes first${TAB}-${TAB}-")")"
+
+# REVIEW 5 F4: AN UNKNOWN LIVE TOKEN IS NEVER SATISFIED. The finding's probe P8 rows, beside a
+# live path read whose only writer has landed (the positive on the same extractor).
+lv_plan "$SANDBOX/lv-p8.md" "" "$LV_BUILD_LANDED" \
+  "| T7 | 4 | build | live:foo | implementor | — | 30 | REQ-x | lib/p.sh | live:foo | pending |" \
+  "| T8 | 4 | build | live:ext:ci | implementor | — | 30 | REQ-x | lib/q.sh | live:ext:ci | pending |" \
+  "| T9 | 4 | build | live:T9 | implementor | — | 30 | REQ-x | lib/r.sh | live:T1 | pending |" \
+  "| T10 | 4 | build | live path, landed writer | implementor | — | 30 | REQ-x | lib/s.sh | live:lib/a.sh | pending |"
+READY_P8="$(call units_ready "$SANDBOX/lv-p8.md" 4)"
+expect_eq "LIVE.14 F4 live:foo, live:ext:ci and live:<task id> are not ready; a live path with its writer landed is" "no no no yes" \
+  "$(printf '%s %s %s %s' "$(has_line "$READY_P8" T7)" "$(has_line "$READY_P8" T8)" "$(has_line "$READY_P8" T9)" "$(has_line "$READY_P8" T10)")"
+
+# THE ROWS proof-add review RETURNS TO pending: `units_live_rows` lists every row reading
+# live:head with its kind and status, the kind default included; a settled head read is not one.
+lv_plan "$SANDBOX/lv-rows.md" "" "$LV_BUILD_LANDED" "${LV_REVIEW/| pending |/| active |}" "$LV_FINAL" \
+  "| T6 | 6 | doc | an addendum that reads the head live | implementor | — | 30 | REQ-x | .bionic/docs/record/w/a.md | live:head | pending |"
+LIVE_ROWS="$(call units_live_rows "$SANDBOX/lv-rows.md")"
+expect_eq "LIVE.15 units_live_rows names the review whose empty cell defaults to live:head, and the explicit reader" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$LIVE_ROWS" "T3${TAB}review${TAB}active")" "$(has_line "$LIVE_ROWS" "T6${TAB}doc${TAB}pending")")"
+expect_eq "LIVE.15b …and not the settled-head final review" "" "$(printf '%s\n' "$LIVE_ROWS" | awk -F'\t' '$1 == "T4"')"
 
 # ============================================================
 section "HOLD — wave-26 T13: a doc row waits for its reads, not its step, in a table that declares reads (REQ-6, AC-6.1, AC-6.2; D3)"
