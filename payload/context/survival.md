@@ -40,7 +40,7 @@ about doing the job well; they are about still being alive to report it.
   silently for a dispatched agent, so inside this role foreground-first stands whole: run
   the suite here. Add the prefix only when your brief tells you to.
 - **Suite output always goes to a file, with its exit code.**
-  `set -o pipefail; <command> 2>&1 | tee "$LOG"; echo "rc=$?" >> "$LOG"` — never `PIPESTATUS`,
+  `set -o pipefail; <command> 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc` (the command must exit with the suite's code, because `land` reads that code from the stamp) — never `PIPESTATUS`,
   which the tool shell leaves empty; validate the FILE, name every log path in your report. **`run_in_background` and `Monitor` are
   forbidden for evidence-producing commands** — a suite, a build, a drill — even under the
   fallback below: the harness's background-Bash output file is ephemeral and can vanish before

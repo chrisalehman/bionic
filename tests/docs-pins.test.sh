@@ -4467,13 +4467,25 @@ expect_nonempty "W26-5 precondition: the dispatch terms state the timeout by the
 # RE-POINTED (wave-26 T20, review-2 F1): the kept recipe writes the exit code into the log,
 # because `tee` alone leaves it only in the call's status and PIPESTATUS is empty under zsh.
 # The orchestrator gets no dispatch terms, so dispatch.md carries the same line.
-W26_RECIPE='2>&1 | tee "$LOG"; echo "rc=$?" >> "$LOG"'
+# RE-SHAPED (wave-26 T58): `land` reads the stamp the booking shim writes from the exit code of
+# the WHOLE command, and a recipe whose last segment is the `echo` always exits 0 — a red suite
+# captured as taught was stamped green. The recipe now ends `exit $rc`.
+W26_RECIPE='2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc'
 for _w26_f in "$W26_SURV" "$DISPATCH_MD"; do
   expect_nonempty "W26-5b: the capture recipe in ${_w26_f#"$REPO"/} writes rc=\$? into the log" \
     "$(w26_hits "$W26_RECIPE" "$_w26_f")"
   expect_nonempty "W26-5p precondition: ${_w26_f#"$REPO"/} bans PIPESTATUS" \
     "$(w26_hits 'never `PIPESTATUS`' "$_w26_f")"
 done
+# W26-5r: no doctrine file teaches the old recipe, whose last segment is the `echo` of the code.
+# The positive on the same extractor and files is W26-5b above (the new recipe is found).
+W26_OLD_RECIPE='echo "rc=$?" >> "$LOG"'
+# shellcheck disable=SC2086
+expect_eq "W26-5r: no shipped doctrine ends a suite capture in echo \"rc=\$?\" (the command would exit 0)" "" \
+  "$(w26_hits "$W26_OLD_RECIPE" $W26_DOCTRINE)"
+W26_D5R="$(w26_doctor "$W26_SURV" "set -o pipefail; <command> 2>&1 | tee \"\$LOG\"; $W26_OLD_RECIPE")"
+expect_nonempty "W26-5rm: a survival.md that teaches the old capture recipe is caught" \
+  "$(w26_hits "$W26_OLD_RECIPE" "$W26_D5R")"
 # w26_pipestatus_outside_ban <file>… -> the files that name PIPESTATUS anywhere but the ban.
 w26_pipestatus_outside_ban() {
   local f flat
