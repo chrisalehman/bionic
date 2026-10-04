@@ -272,10 +272,17 @@ command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry
 # shape would be, in 1.8.3's own words, "the defect wearing a guard". A table WITH the
 # `worktree` column never reaches this at all: the register names its own trees and needs
 # no wave number to scope anything to (ADR-032's retirement stands, unchanged, for it).
+#
+# A TASK-SCALE PLAN OWNS NO WAVE (T11, AC-9.2): a small late fix closes from a branch like
+# `fixit/x`, so a `scale: task` plan with no `worktree` column gets an empty `WT_NUM` and
+# no refusal — there is no `wt/<NN>-*` for it to census, and `wt_unreached` (below) reports
+# none. The shape refusal stays exactly as it was for every other scale.
 WT_NUM=""
 if ! units_has_column "$PLAN" worktree; then
   WT_NUM="$(printf '%s' "$WORKING" | sed -nE 's#^wave/([0-9]+)-.*#\1#p')"
-  [ -n "$WT_NUM" ] || _co_refuse "the plan's working-branch '$WORKING' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to"
+  if [ -z "$WT_NUM" ] && [ "$(plan_frontmatter_get "$PLAN" scale)" != "task" ]; then
+    _co_refuse "the plan's working-branch '$WORKING' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to"
+  fi
 fi
 
 # THE BINDING, ASKED BEFORE THE FIRST ACT (AC-4.2, D6). `archive_run` carries this check
@@ -355,6 +362,8 @@ wt_unreached() {
   local b _co_cherry candidates
   if units_has_column "$PLAN" worktree; then
     candidates="$(wt_branches)"
+  elif [ -z "$WT_NUM" ]; then
+    candidates=""
   else
     echo "close-out: no worktree column in the ## Tasks table; unreached-work census falls back to wt/${WT_NUM}-* (1.8.3 census)" >&2
     candidates="$(git -C "$ROOT" for-each-ref --format='%(refname:short)' "refs/heads/wt/${WT_NUM}-*" 2>/dev/null)"
