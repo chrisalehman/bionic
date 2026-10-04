@@ -5560,8 +5560,21 @@ EOF
         PF_BACK="${PF_BACK:+$PF_BACK }$_pf_id"
       done
     fi
+    # A REVIEW PROOF THAT RETURNS NO LIVE ROW WHILE ONE IS ACTIVE SAYS SO (wave-26 T51; review 14
+    # S4). The record of a live pass written under another name than its row's Files returns
+    # nothing, rightly, and the pass is then never offered again; through T46 the success line
+    # said nothing of it. The active live review rows are named with their Files, so the mismatch
+    # is seen at once. None is reset: a proof moves only the row whose Files hold it (T46, review
+    # 10 F3), and the final review's proof is one such. With no live review active it says nothing.
+    PF_NONE=""
+    if [ "$PF_KIND" = review ] && [ -z "$PF_BACK" ]; then
+      _pf_live=" $(units_live_rows "$PV_NEW" 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { printf "%s ", $1 }')"
+      [ "$_pf_live" = " " ] || PF_NONE="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' -v ids="$_pf_live" '
+        index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
+    fi
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
+    [ -n "$PF_NONE" ] && say "proof-add — no live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
     exit 0
     ;;
 
