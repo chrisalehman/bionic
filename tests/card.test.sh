@@ -1767,4 +1767,60 @@ expect_contains "S3-CHAIN 7a: …and ends on its last with the whole sum" "T20 �
 expect_empty "S3-CHAIN 7b: …and no line of that card is wider than the budget" \
   "$(over_budget "$(without_artifact_path "$S3L")")"
 
+# The empty chain (review 9 F1). With no open row `units_chain` prints `chain<TAB><TAB>0`, and a
+# reader that let the two tabs fold into one took the minutes for the ids: the card printed
+# `longest chain  0 · 0 min`. Every row of the chain fixture landed here, so no task is open.
+S3E_PLAN="${T10_ROOT_CFG}/wave-97-landed.plan.md"
+sed 's/| pending |$/| landed |/' "$S3C_PLAN" > "$S3E_PLAN"
+expect_eq "S3-CHAIN 8 precondition: the all-landed copy has eight landed rows and no open one" "8 0" \
+  "$(grep -c '| landed |$' "$S3E_PLAN" | tr -cd '0-9') $(grep -c '| pending |$' "$S3E_PLAN" | tr -cd '0-9')"
+whole_card step3 "$S3E_PLAN"; S3E="$WC_OUT"
+expect_eq "S3-CHAIN 8: a plan whose rows have all landed says there is no open task" \
+  "1" "$(printf '%s\n' "$S3E" | grep -c -x -F '    longest chain  no open task' | tr -cd '0-9')"
+
+# The depends column (review 9, answer (b)). A table with a `reads` column keeps only `ext:`
+# tokens in its deps cells, so a row that waits through a read showed a dash. Its depends now
+# names the rows `units_edges` puts before it, in table order and once each, then the deps
+# cell's `ext:` tokens. A deps-only table prints its deps cell as written.
+s3_dep() {  # <card> <id> -> that task row's depends cell, read at the header's column
+  local hdr blk dc ac
+  hdr="$(printf '%s\n' "$1" | grep -m1 '^  Tasks ')"
+  dc="$(col_of "$hdr" "depends")"; ac="$(col_of "$hdr" "agent")"
+  [ "$dc" -gt 0 ] && [ "$ac" -gt "$dc" ] || return 0
+  blk="$(printf '%s\n' "$1" | awk -v id="$2" '
+    index($0, "    " id " ") == 1 { f = 1; print; next }
+    f && /^          / { print; next }
+    f { exit }')"
+  read_col "$blk" "$dc" "$(( ac - dc ))"
+}
+expect_eq "S3-CHAIN 9: a row with nothing before it keeps its dash (the extractor reads the column)" \
+  "—" "$(s3_dep "$S3C" T1)"
+expect_eq "S3-CHAIN 9a: a row that waits only through a read names the row it reads from" "T1" "$(s3_dep "$S3C" T2)"
+expect_eq "S3-CHAIN 9b: …and so does the end of that chain" "T2" "$(s3_dep "$S3C" T3)"
+expect_eq "S3-CHAIN 9c: …and the second row of the other chain" "T4" "$(s3_dep "$S3C" T5)"
+# T3 reads three files, two of them T2's, and holds an `ext:` token: T1 and T2 once each, in table
+# order whatever the order of the reads, and the token after them.
+S3X_PLAN="${T10_ROOT_CFG}/wave-97-ext.plan.md"
+sed -e '/^| T2 |/s#| lib/b\.sh | lib/a\.sh |#| lib/b.sh, lib/b2.sh | lib/a.sh |#' \
+    -e '/^| T3 |/s#| — | 45 |#| ext:wave-96-final | 45 |#' \
+    -e '/^| T3 |/s#| lib/c\.sh | lib/b\.sh |#| lib/c.sh | lib/b.sh, lib/a.sh, lib/b2.sh |#' \
+  "$S3C_PLAN" > "$S3X_PLAN"
+expect_eq "S3-CHAIN 9d precondition: the copy gained the token and T2's second file" "1 2" \
+  "$(grep -c 'ext:wave-96-final' "$S3X_PLAN" | tr -cd '0-9') $(grep -o 'lib/b2\.sh' "$S3X_PLAN" | grep -c . | tr -cd '0-9')"
+whole_card step3 "$S3X_PLAN"; S3X="$WC_OUT"
+expect_eq "S3-CHAIN 9d: …each predecessor once, in table order, then the deps cell's ext: token" \
+  "T1, T2, ext:wave-96-final" "$(s3_dep "$S3X" T3)"
+expect_empty "S3-CHAIN 9e: …and no line of either card is wider than the budget" \
+  "$(over_budget "$(without_artifact_path "$S3C")")$(over_budget "$(without_artifact_path "$S3X")")"
+# A deps-only table with T1 landed: the graph has no edge from a landed row, and the cell is still
+# what the plan wrote.
+S3D_PLAN="${T10_ROOT_CFG}/wave-98-t1landed.plan.md"
+sed '/^| T1 |/s/| pending |$/| landed |/' "$T10_WAVE_2B" > "$S3D_PLAN"
+expect_eq "S3-CHAIN 10 precondition: T1 landed in the deps-only copy" "1" \
+  "$(grep -c '^| T1 |.*| landed |$' "$S3D_PLAN" | tr -cd '0-9')"
+whole_card step3 "$S3D_PLAN"; S3D="$WC_OUT"
+expect_eq "S3-CHAIN 10: a deps-only table prints its deps cell as written, a landed row included" \
+  "T1" "$(s3_dep "$S3D" T4)"
+expect_eq "S3-CHAIN 10a: …and a cell of three ids" "T1, T2, T3" "$(s3_dep "$S3D" T5)"
+
 finish
