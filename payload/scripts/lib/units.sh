@@ -424,8 +424,9 @@ units_rows() {
 # other for ever, and the first goes first.
 #
 # <step> STILL DECIDES THE GATE ACTS (wave-20 Δ6, T10b). A row of kind `integrate` or `close`,
-# or a `doc` row at Step 7 or later (the release), is ready only once <step> has reached its
-# own step. TWO TABLE SHAPES, ONE ANSWER (wave-18 REQ-3, AC-3.3; ADR-033): passed `T<n>`, only
+# or — in a table WITHOUT the `reads` column — a `doc` row at Step 7 or later (the release), is
+# ready only once <step> has reached its own step. In a table with the column a doc row waits for
+# its reads like any row, the release for `approval:release` (wave-26 T13; D3, A-T13.1). TWO TABLE SHAPES, ONE ANSWER (wave-18 REQ-3, AC-3.3; ADR-033): passed `T<n>`, only
 # task-scale rows (no step cell) are judged and a task dependency is satisfied by `done`. Any
 # other <step> is a caller fault and exits 2; no table exits 1.
 #
@@ -733,9 +734,12 @@ _units_sched_awk() {
         } else {
           # A WAVE ROW CARRIES A NUMERIC STEP, and that is all the step still decides for a work
           # row (wave-20 Δ1). A GATE ACT WAITS FOR ITS STEP (Δ6; T10b): ready only once the run
-          # has REACHED its step — reached, not equalled.
+          # has REACHED its step — reached, not equalled. A DOC ROW WAITS FOR ITS READS (wave-26
+          # T13; D3): in a table with the reads column the release reads approval:release and
+          # nothing about it is a step. A table without the column has no approval to read, so
+          # its Step-7 doc row keeps the hold (A-T13.1).
           if (stp[i] !~ /^[0-9]+$/) continue
-          gate = (knd[i] == "integrate" || knd[i] == "close" || (knd[i] == "doc" && stp[i] + 0 >= 7))
+          gate = (knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7))
           if (gate && stp[i] + 0 > want + 0) held = 1
         }
         if (mode == "waiting" && held) printf "%s\tstep:%s\t-\t-\n", id[i], stp[i]

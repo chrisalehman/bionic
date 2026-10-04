@@ -230,8 +230,10 @@ ack_rows() {  # <repo> <name>...
 # CLOCK DISCIPLINE HOLDS: nothing here sleeps. `touch` after the write is what makes a
 # fixture the newest candidate, exactly as `backdate` drives staleness above.
 plan_body() {  # <current> [evidence text for the Step-<current> line] -> a whole plan file
-  printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: %s\n\n- Step %s: %s\n' \
-    "$1" "$1" "${2:-evidence for this step}"
+  printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: %s\n' "$1"
+  # Past Step 3 the plan carries its approval, the fact the fill keys on (wave-26 T13; D3).
+  case "${1%[ab]}" in [4-9]) printf '%s\n' 'approved-by: fixture 2026-10-04T00:00Z "approved"' ;; esac
+  printf '\n- Step %s: %s\n' "$1" "${2:-evidence for this step}"
 }
 
 write_plan() {  # <repo> <body> [path relative to <docs-root>/plans]
@@ -2051,6 +2053,9 @@ wave_plan() {  # <repo> <budget line body, or "-" for none> <table row>...
 SP_TASKS_HEADER='| id | step | kind | task | agent | deps | size | serves | Files | status |
 |---|---|---|---|---|---|---|---|---|---|
 '
+# THE APPROVAL A LIVE FIXTURE CARRIES (wave-26 T13; D3, AC-6.2). The ready set keys on the plan's
+# `approved-by:` line, not on `current: >= 4`, so a fixture that means "past Step 3" writes it.
+SP_APPROVED_LINE='approved-by: fixture 2026-10-04T00:00Z "approved"'
 
 wave_plan_at() {  # <repo> <path under <docs-root>/plans> <budget or "-"> <table row>... -> the path
   local repo="$1" rel="$2" budget="$3"; shift 3
@@ -2061,7 +2066,7 @@ wave_plan_at() {  # <repo> <path under <docs-root>/plans> <budget or "-"> <table
     printf 'governing-skill: superpowers:writing-plans\n'
     [ "$budget" = "-" ] || printf 'parallel-budget: %s\n' "$budget"
     printf -- '---\n\n'
-    printf '# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf '# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
     printf '## Tasks\n\n'
     printf '%s' "$SP_TASKS_HEADER"
     local row
@@ -2358,7 +2363,7 @@ expect_contains "a CRITICAL ring quarters both numbers" \
   "poker: rung=2/8 writers=2 test_jobs=5" "$OUT"
 expect_contains "…and the fill names ONLY the quarter-ceiling, in table order" \
   "poker: FILL ONE TWO" "$OUT"
-expect_absent   "…never the third ready task" "THREE" "$OUT"
+expect_absent   "…never the third ready task" "THREE" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # SWAP REACHES THE SAME BAND BY THE OTHER TERM, so the rung is not a free-percentage
 # thermometer wearing a band's name.
@@ -2374,7 +2379,7 @@ R11C5="$(mk_rung_repo s11-rung-critical-open)"
 add_row "$R11C5" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_rung "$R11C5" 8 0 tick
 expect_contains "one open row against a rung of 2 leaves a gap of one" "poker: FILL ONE" "$OUT"
-expect_absent   "…and the second ready task waits on the machine, not on the budget" "TWO" "$OUT"
+expect_absent   "…and the second ready task waits on the machine, not on the budget" "TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 add_row "$R11C5" name=w2 deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_rung "$R11C5" 8 0 tick
 expect_absent   "two open rows against a rung of 2 fill nothing" "poker: FILL" "$OUT"
@@ -2531,7 +2536,7 @@ poke_pressure "$R12A" 8192 1.0 tick
 expect_eq "a filling tick exits 0" "0" "$RC"
 expect_contains "three ready and a gap of two fills exactly two, in table order" \
   "poker: FILL ONE TWO" "$OUT"
-expect_absent "…and does not reach the third" "THREE" "$OUT"
+expect_absent "…and does not reach the third" "THREE" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # ---------- 12a-T22: THE FILL LINE PRINTS THE NAME, NOT THE TASK ID ----------
 #
@@ -2760,7 +2765,7 @@ wave_plan "$R12B" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
 add_row "$R12B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R12B" 8192 1.0 tick
 expect_contains "one open row against writers=2 leaves a gap of one" "poker: FILL ONE" "$OUT"
-expect_absent "…and the second ready task waits" "TWO" "$OUT"
+expect_absent "…and the second ready task waits" "TWO" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # ---------- 12c: gap zero -> no FILL, and the reason is the budget ----------
 R12C="$(make_repo s12-fill-full)"; new_roster "$R12C"
@@ -2794,7 +2799,7 @@ wave_plan "$R12E" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| FREE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12E" 8192 1.0 tick
 expect_contains "a pending task with an unlanded dep is held back" "poker: FILL BASE FREE" "$OUT"
-expect_absent "…and DEPENDENT is not named" "DEPENDENT" "$OUT"
+expect_absent "…and DEPENDENT is not named" "DEPENDENT" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # Several deps, one of them unlanded: ALL of them must be landed, not any.
 R12F="$(make_repo s12-multi-dep)"; new_roster "$R12F"
@@ -2804,7 +2809,7 @@ wave_plan "$R12F" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| C | 4 | build | fixture task | implementor | A,B | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12F" 8192 1.0 tick
 expect_contains "a task whose deps are landed AND pending is not ready" "poker: FILL B" "$OUT"
-expect_absent "…so C waits for every one of them" " C" "$OUT"
+expect_absent "…so C waits for every one of them" " C" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # A dependency the table does not carry at all is not confirmable, and an unconfirmable
 # dependency holds its task back — a task held costs a batch, a task dispatched onto an
@@ -2815,7 +2820,7 @@ wave_plan "$R12G" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| FINE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12G" 8192 1.0 tick
 expect_contains "an unknown dependency holds its task back" "poker: FILL FINE" "$OUT"
-expect_absent "…and ORPHAN is not filled" "ORPHAN" "$OUT"
+expect_absent "…and ORPHAN is not filled" "ORPHAN" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # ---------- 12h: the table is read BY HEADER NAME, not by column position ----------
 #
@@ -2828,7 +2833,7 @@ mkdir -p "$(dirname "$f12h")"
 {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
   printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
   printf '## Tasks\n\n'
   printf '| status | owner | id | step | complexity | deps |\n|---|---|---|---|---|---|\n'
   printf '| landed | ada | BASE | 4 | complex | — |\n'
@@ -2848,7 +2853,7 @@ mkdir -p "$(dirname "$f12i")"
 {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
   printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
   printf 'The task table looks like this:\n\n'
   printf '```\n## Tasks\n\n'
   printf '%s' "$SP_TASKS_HEADER"
@@ -2899,7 +2904,7 @@ sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   {
     printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: %s\n\n' "$current"
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: %s\n%s\n\n' "$current" "$SP_APPROVED_LINE"
     printf -- '- Step %s: in progress\n\n' "$current"
     printf '## Tasks\n\n'
     printf '%s' "$SP_TASKS_HEADER"
@@ -2946,10 +2951,15 @@ sp_plan_at_step "$R12K3" 6 \
   "| T3 | 6 | review | behind the floor | critic | T2 | 15m | REQ-x | c.sh | pending |" \
   "| T4 | 8 | integrate | deps landed, step not reached | implementor | T1 | 15m | REQ-x | — | pending |" > /dev/null
 poke_pressure "$R12K3" 8192 1.0 tick
-expect_contains "a table with no ready row says so (T10b: was '…and integrate/close rows wait for their step.')" \
-  "no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step." "$OUT"
-expect_contains "…and names the integrate row it holds (T10b)" \
-  "Held for their step: T4: step 8 integrate row waits for current: 8." "$OUT"
+expect_contains "a table with no ready row says so" "no pending task is ready" "$OUT"
+# THE BULK SENTENCE IS GONE (wave-26 T13; D9, AC-6.6): each waiting row is on its own WAIT line
+# with the read it lacks and the row that writes it, the step hold among them.
+expect_absent "…and no longer as the bulk sentence that named no row" \
+  "none has all its dependencies landed" "$OUT"
+expect_contains "…the review names the floor it waits for" \
+  "poker: WAIT T3 — waits for T2 (active)" "$OUT"
+expect_contains "…and the integrate row its step (T10b)" \
+  "poker: WAIT T4 — step 8 integrate row waits for current: 8" "$OUT"
 expect_absent "…and names no step it filtered by" "pending step-" "$OUT"
 
 # 12l — THE DIFFERENTIAL (wave-19 REQ-5 AC-5.2, D6; ADR-034 decision 2). The tick and the
@@ -4605,7 +4615,11 @@ s22_plan_at_current() {  # <repo> <current> -> the path, an eight-task writers=8
     printf 'governing-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n'
     printf -- '---\n\n# fixture plan (mirrors the observed wave-01 shape)\n\n'
-    printf '## SDLC State\n\ncurrent: %s\n\n- Step %s: in progress\n\n' "$cur" "$cur"
+    printf '## SDLC State\n\ncurrent: %s\n' "$cur"
+    # Approved exactly when the step says Step 3 has passed, so every row below still reads
+    # as it did when `current:` was the gate; 22i and 22j pull the two facts apart.
+    case "${cur%[ab]}" in [4-9]) printf '%s\n' "${S22_APPROVAL-$SP_APPROVED_LINE}" ;; *) [ -n "${S22_APPROVAL:-}" ] && printf '%s\n' "$S22_APPROVAL" ;; esac
+    printf '\n- Step %s: in progress\n\n' "$cur"
     printf '## Tasks\n\n'
     printf '%s' "$SP_TASKS_HEADER"
     local id
@@ -4743,6 +4757,24 @@ expect_eq "a plan with no current: line still ticks cleanly (exit 0)" "0" "$RC"
 expect_absent "no current: line at all — no FILL" "poker: FILL" "$OUT"
 expect_contains "…named as unreadable, with an empty value" \
   "no FILL — plan current: unreadable (none)" "$OUT"
+
+# ---------- 22i/22j: THE GATE IS THE APPROVAL, NOT THE STEP (wave-26 T13; D3, AC-6.2) ----------
+#
+# `current:` is the orchestrator's own word; `approved-by:` is the user's act, and the one fact
+# the dispatch wall already keys a writer on. The two are pulled apart here: a plan at
+# `current: 4` with no approval line fills nothing, and a plan at `current: 3` that carries one
+# fills — the differential that fails if the fill still keys on `current: >= 4`.
+R22I="$(make_repo s22-current-4-unapproved)"; new_roster "$R22I"
+S22_APPROVAL="" s22_plan_at_current "$R22I" 4 >/dev/null
+poke_pressure "$R22I" 8192 1.0 tick
+expect_absent "22i AC-6.2 current: 4 with no approved-by: prints no FILL" "poker: FILL" "$OUT"
+expect_contains "22i2 …and names the pending approval" "Step-3 approval pending" "$OUT"
+R22J="$(make_repo s22-current-3-approved)"; new_roster "$R22J"
+S22_APPROVAL="$SP_APPROVED_LINE" s22_plan_at_current "$R22J" 3 >/dev/null
+poke_pressure "$R22J" 8192 1.0 tick
+expect_contains "22j AC-6.2 current: 3 with approved-by: present fills all eight" \
+  "poker: FILL S1 S2 S3 S4 S12 S14 S15 S16" "$OUT"
+expect_absent "22j2 …and names no pending approval" "Step-3 approval pending" "$OUT"
 
 # ============================================================
 section "Section 23: clean() — list fields survive the 400-char cut (REQ-9, D7)"
@@ -6275,7 +6307,7 @@ s31_task_plan() {  # <repo> <current> -> the path; six columns, T1 in flight, T2
     printf 'scale: task\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n'
     printf -- '---\n\n# fixture task-scale plan\n\n'
-    printf '## SDLC State\n\ncurrent: %s\n\n- %s: in progress\n\n' "$cur" "$cur"
+    printf '## SDLC State\n\ncurrent: %s\n%s\n\n- %s: in progress\n\n' "$cur" "$SP_APPROVED_LINE" "$cur"
     printf '## Tasks\n\n'
     printf '| id | intent | rigor | description | status | worktree |\n'
     printf '|---|---|---|---|---|---|\n'
@@ -7107,8 +7139,11 @@ sp_plan_at_step "$R37A" 5 \
 poke_pressure "$R37A" 8192 1.0 tick
 expect_absent "37a C3 at current: 5 the landed-dep Step-7 release row is not filled" \
   "poker: FILL" "$OUT"
-expect_contains "37b …and the tick's no-FILL line names the hold" \
-  "T3: step 7 doc row waits for current: 7" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: no FILL')"
+# A TABLE WITHOUT `reads` KEEPS THE RELEASE'S STEP HOLD (wave-26 T13, A-T13.1): it has no
+# `approval:release` to wait on, so its step is the one thing holding it. The hold is named on
+# the row's own WAIT line now, not inside the no-FILL sentence.
+expect_contains "37b …and the tick's WAIT line names the hold" \
+  "T3 — step 7 doc row waits for current: 7" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: WAIT')"
 
 # 37c — AT ITS STEP THE RELEASE FILLS. Same table at current: 7.
 R37C="$(make_repo s37-at-step)"; new_roster "$R37C"
@@ -8186,5 +8221,134 @@ poke "$R45T" tick
 expect_contains "45k5 …so a Patrol armed under v=2 is told to re-arm" \
   "its prompt is v=2 and this poker prints v=${S45_V}" "$OUT"
 unset CLAUDE_CONFIG_DIR
+
+# ============================================================
+section "Section 46 §WAIT: the tick names every pending row — FILL or WAIT, with its unmet read and writer — and the longest chain (wave-26 T13; REQ-6 AC-6.6; D9)"
+# ============================================================
+#
+# A TABLE WITH A `reads` COLUMN, so every row waits for what it reads and the kind defaults
+# apply (D1). The fixture carries one row of each way to wait: a path an active row writes
+# (T2), an external prerequisite (T3), an approval nobody has given (T4, the release), and the
+# settled head every open code row writes (T6, the floor). T5 reads only the plan's approval
+# and is the one ready writer. Sizes are minutes, so the longest chain is checkable by hand:
+# T1 (30) → T2 (20) → T6 (60) = 110, against T5 (40) → T6 = 100 and T4 (15) → T6 = 75.
+s46_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, current: 4
+  local repo="$1" writers="$2"; shift 2
+  local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" row
+  mkdir -p "$(dirname "$f")"
+  {
+    printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=%s suites=2 worktrees=8 test_jobs=8 source=probe\n' "$writers"
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    for row in "$@"; do printf '%s\n' "$row"; done
+  } > "$f"
+  touch "$f"
+  printf '%s' "$f"
+}
+s46_lines() { printf '%s\n' "$OUT" | /usr/bin/grep "^poker: $1 " ; }  # <WAIT|FILL|CHAIN>
+
+R46="$(make_repo s46-wait)"; new_roster "$R46"
+s46_plan "$R46" 2 \
+  "| T1 | 4 | build | in flight | implementor | — | 30 | REQ-x | payload/x.sh | active | |" \
+  "| T2 | 4 | build | reads what T1 writes | implementor | — | 20 | REQ-x | payload/y.sh | pending | payload/x.sh |" \
+  "| T3 | 4 | build | held by the world | implementor | ext:vendor-fix | 10 | REQ-x | payload/z.sh | pending | |" \
+  "| T4 | 7 | doc | the release | implementor | — | 15 | REQ-x | CHANGELOG.md | pending | approval:release |" \
+  "| T5 | 4 | build | ready | implementor | — | 40 | REQ-x | payload/w.sh | pending | |" \
+  "| T6 | 5 | verify | the floor | auditor | — | 60 | REQ-x | .bionic/docs/record/floor.md | pending | |" >/dev/null
+poke_pressure "$R46" 8192 1.0 tick
+expect_eq "46a the tick over a reads table exits 0" "0" "$RC"
+expect_nonempty "46a2 …and prints WAIT lines (the extractor reads real output)" "$(s46_lines WAIT)"
+expect_contains "46b the one ready writer is filled" "poker: FILL T5" "$OUT"
+expect_contains "46c a path read names the row that writes it and its status" \
+  "poker: WAIT T2 — reads payload/x.sh, written by T1 (active)" "$OUT"
+expect_contains "46d an external prerequisite is named as itself" "poker: WAIT T3 — ext:vendor-fix" "$OUT"
+expect_eq "46e the release waits for its approval and nothing else — no step hold in a reads table" \
+  "poker: WAIT T4 — approval:release" "$(s46_lines WAIT | /usr/bin/grep '^poker: WAIT T4 ')"
+expect_contains "46f the floor names the head's writers, the active one first" \
+  "poker: WAIT T6 — reads head, written by T1 (active), T2 (pending)" "$OUT"
+# AC-6.6: EVERY PENDING ROW IS ON A FILL OR A WAIT LINE, the fixture's ids walked one by one.
+S46_FILL="$(s46_lines FILL)"
+for _s46 in T2 T3 T4 T5 T6; do
+  _s46_on=no
+  case " ${S46_FILL#poker: FILL } " in *" $_s46 "*) _s46_on=fill ;; esac
+  [ -n "$(s46_lines WAIT | /usr/bin/grep "^poker: WAIT $_s46 — ")" ] && _s46_on="${_s46_on/no/wait}"
+  expect_ne "46g AC-6.6 pending $_s46 is on a FILL or a WAIT line" "no" "$_s46_on"
+done
+expect_absent "46g2 …and the active row is on neither (it is not pending)" "WAIT T1 " "$(s46_lines WAIT)"
+expect_absent "46h the bulk sentence is gone" "none has all its dependencies landed" "$OUT"
+expect_eq "46i AC-6.6 the CHAIN line is the fixture's longest chain, by hand: 30 + 20 + 60" \
+  "poker: CHAIN T1→T2→T6 (110 min)" "$(s46_lines CHAIN)"
+# THE DIFFERENTIAL: land T1 and the chain moves to the next heaviest path, so 46i reads the
+# graph and not a constant.
+sed -i.bak 's/| payload\/x.sh | active |/| payload\/x.sh | landed |/' "$R46/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+poke_pressure "$R46" 8192 1.0 tick
+expect_eq "46j with T1 landed the chain is T5 → T6 (40 + 60)" "poker: CHAIN T5→T6 (100 min)" "$(s46_lines CHAIN)"
+expect_contains "46j2 …and T2, its read now landed, is filled beside T5" "poker: FILL T2 T5" "$OUT"
+
+# ============================================================
+section "Section 46 §READY-EARLY (tick half): a doc row whose reads exist is offered before its step; a read-only row outside the writer gap (wave-26 T13; REQ-6 AC-6.1; D3, D9)"
+# ============================================================
+#
+# current: 4 and one task landed. The Step-7 doc row reads the plan approval and the head, and
+# nothing open writes the head, so it is ready now — it is not held until current: 7 (D3). The
+# review row (kind review) takes no writer slot, so it is offered whatever the writer gap.
+s46_early() {  # <repo> -> the plan; writers=1
+  s46_plan "$1" 1 \
+    "| T1 | 4 | build | landed | implementor | — | 30 | REQ-x | payload/x.sh | landed | |" \
+    "| T2 | 7 | doc | the release notes draft | implementor | — | 20 | REQ-x | .bionic/docs/record/notes.md | pending | |" \
+    "| T3 | 6 | review | the review | critic | — | 30 | REQ-x | .bionic/docs/record/review.md | pending | |" >/dev/null
+}
+R46E="$(make_repo s46-early)"; new_roster "$R46E"; s46_early "$R46E"
+poke_pressure "$R46E" 8192 1.0 tick
+expect_contains "46k AC-6.1 at current: 4 the tick offers the doc row and the review row" "poker: FILL T2 T3" "$OUT"
+# THE WRITER GAP CLOSED: one writer open, writers=1. The doc row is a writer and waits for a
+# slot; the review is read-only and is still offered.
+R46F="$(make_repo s46-early-full)"; new_roster "$R46F"; s46_early "$R46F"
+add_row "$R46F" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R46F" 8192 1.0 tick
+expect_contains "46l D9 with no writer slot free the read-only review is still offered" "poker: FILL T3" "$OUT"
+expect_absent "46l2 …and the doc row, a writer, is not on the FILL line" "T2" "$(s46_lines FILL)"
+expect_contains "46l3 …it is on a WAIT line saying it is ready and waits for a writer slot" \
+  "poker: WAIT T2 — ready; no writer slot free" "$OUT"
+
+# ============================================================
+section "Section 46 §APPROVE: approve <name> '<reply>' writes the approved: line through the verb transaction (wave-26 T13; REQ-6 AC-6.2; D3)"
+# ============================================================
+S46_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R46A="$(make_repo s46-approve)"; ( cd "$R46A" && git commit -q --allow-empty -m init )
+git -C "$R46A" config user.name "Dana Fixture"
+P46A="$(s42_plan "$R46A" 4)"
+s42_snap "$R46A" "$P46A"
+poke "$R46A" approve release 'Ship it.'
+expect_eq "46m approve release exits 0" "0" "$RC"
+expect_contains "46m2 …and says what it wrote" "approve — release" "$OUT"
+S46_LINE="$(/usr/bin/grep '^approved: release ' "$P46A")"
+expect_regex "46n the line is approved: <name> by <git user> <ISO-UTC> \"<reply>\"" \
+  '^approved: release by Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z "Ship it\."$' "$S46_LINE"
+expect_eq "46n2 …inside ## SDLC State, ahead of the next section" "SDLC" \
+  "$(awk '/^## /{ s = $2 } /^approved: release /{ print s; exit }' "$P46A")"
+expect_eq "46n3 …and git diff --numstat shows one line added, none removed" "1 0;" "$(s42_numstat "$R46A")"
+s34_gate "$R46A"
+expect_eq "46o the commit gate admits the approved plan" "0" "$GATE_RC"
+s42_snap "$R46A" "$P46A"
+poke "$R46A" approve release 'Again.'
+s42_unchanged "46p a second approve of the same name" 1 "$P46A"
+expect_contains "46p2 …naming the line already there" "approved: release" "$OUT"
+poke "$R46A" approve plan 'approved'
+s42_unchanged "46q approve plan" 1 "$P46A"
+expect_contains "46q2 …saying the plan's approval is the approved-by: line written at Step 3" \
+  "approved-by:" "$OUT"
+expect_contains "46q3 …at Step 3" "Step 3" "$OUT"
+poke "$R46A" approve 'rel|x' 'ok'
+s42_unchanged "46r a name outside the approval:<name> grammar" 2 "$P46A"
+poke "$R46A" approve integrate "a
+b"
+s42_unchanged "46s a reply carrying a line break" 1 "$P46A"
+poke "$R46A" approve integrate
+s42_unchanged "46t no reply at all" 2 "$P46A"
+POKE_BOUND="$S46_BOUND_WAS"
 
 finish

@@ -410,6 +410,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id> <col>=<val>...   set cells of a ## Tasks row (any header column but Files, which amend widens)"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N|T<n>>   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch"
+  die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
@@ -587,6 +588,24 @@ case "$VERB" in
       *) usage "current: '$1' is neither a step number (0-8) nor a task id (T<n>)." ;;
     esac
     PV_KEY="$1"
+    ;;
+  # THE APPROVAL VERB (wave-26 T13; D3, AC-6.2). Two operands, both required: the name a row
+  # reads as `approval:<name>`, in the grammar `units_validate` admits there, and the user's
+  # reply, verbatim. The name's shape is checked here, by the ASCII letters spelled out (a range
+  # is a collation range under a UTF-8 locale; wave-24 T29); the reply's is the verb's own refusal.
+  approve)
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "approve takes exactly two arguments: the approval's name and the user's reply, verbatim."
+    fi
+    case "$1" in
+      [ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789]*) : ;;
+      *) usage "approve: '$1' is not an approval name: a letter or a digit, then letters, digits, '.', '_' or '-'." ;;
+    esac
+    case "$1" in
+      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
+        usage "approve: '$1' is not an approval name: a letter or a digit, then letters, digits, '.', '_' or '-'." ;;
+    esac
+    AP_NAME="$1"; AP_REPLY="$2"
     ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
@@ -1617,6 +1636,94 @@ EOF
 $(units_findings "$SCHED_PLAN" "$ROSTER_FILE" 2>/dev/null)
 EOF
   return 0
+}
+
+# ---------------------------------------------------------------- why each row waits
+#
+# WAIT AND CHAIN, AFTER THE FILL DECISION (wave-26 T13; REQ-6 AC-6.6, D9). Through 1.10 a pending
+# row the FILL left out appeared only in one sentence ("no pending task is ready: none has all
+# its dependencies landed …"), which named no row and no read. Now every pending row the FILL did
+# not offer gets one line:
+#
+#   poker: WAIT <id> — <reason>
+#
+# the reason built from `units_waiting` (lib/units.sh), one clause per unmet read, joined `; `:
+#   - a read no row writes is named as itself: `approval:release`, `ext:vendor-fix`, `proof:floor`;
+#   - a task id read (a table without `reads`) is `waits for T2 (active)`;
+#   - any other read names its writers: `reads payload/x.sh, written by T1 (active)`;
+#   - a gate act held for its step: `step 8 integrate row waits for current: 8`.
+# A row that IS ready and was not offered says why: the writer gap is closed, or the standing
+# fill-declined answered it. Then one line for the longest remaining chain over the pending and
+# active rows — sizes from the `size` column (its leading digits, minutes), edges from
+# `units_edges`, through `units_chain` at the plan's writer ceiling:
+#
+#   poker: CHAIN <id>→<id>… (<n> min)
+#
+# A chain `units_chain` refuses (a cycle) is printed as unknown with its reason, never dropped.
+# Called inside the scheduler's one parse of the table (`tick_plan_memoised`), so the rows, the
+# waiting reads, the edges and the ready set are one reading.
+tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_* the FILL arm set
+  local rows waiting all offered line chain ids mins
+  [ -n "${SCHED_PLAN:-}" ] && [ -n "${SCHED_STEP:-}" ] || return 0
+  rows="$(units_rows "$SCHED_PLAN" 2>/dev/null)" || return 0
+  [ -n "$rows" ] || return 0
+  waiting="$(units_waiting "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null)"
+  all="$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
+  offered="$(printf '%s' "${SCHED_READY:-}" | tr '\n' ' ')"
+  while IFS= read -r line; do
+    [ -n "$line" ] && say "WAIT $(clean "$line")"
+  done <<TICK_WAIT
+$(printf '\034rows\n%s\n\034wait\n%s\n' "$rows" "$waiting" | awk -F'\t' \
+    -v offered=" $offered " -v all=" $all " -v declined=" ${SCHED_SD_IDS:-} " -v gap="${SCHED_GAP:-0}" '
+  $0 == SUBSEP "rows" { part = 1; next }
+  $0 == SUBSEP "wait" { part = 2; next }
+  part == 1 && $1 != "" { n++; id[n] = $1; knd[$1] = $3; st[$1] = $10; next }
+  part == 2 && $1 != "" {
+    key = $1 SUBSEP $2
+    if (!(key in seen)) { seen[key] = 1; nr[$1]++; rd[$1, nr[$1]] = $2 }
+    if ($3 != "-") { nw[key]++; wid[key, nw[key]] = $3; wst[key, nw[key]] = $4 }
+    next
+  }
+  END {
+    for (k = 1; k <= n; k++) {
+      i = id[k]
+      if (st[i] != "pending" || index(offered, " " i " ")) continue
+      reason = ""
+      if (nr[i] > 0) {
+        for (m = 1; m <= nr[i]; m++) {
+          r = rd[i, m]; key = i SUBSEP r
+          if (substr(r, 1, 5) == "step:") {
+            p = substr(r, 6); t = "step " p " " knd[i] " row waits for current: " p
+          } else if (nw[key] == 0) {
+            t = r
+          } else if (nw[key] == 1 && wid[key, 1] == r) {
+            t = "waits for " r " (" wst[key, 1] ")"
+          } else {
+            t = "reads " r ", written by "
+            for (w = 1; w <= nw[key]; w++) t = t (w > 1 ? ", " : "") wid[key, w] " (" wst[key, w] ")"
+          }
+          reason = reason (reason == "" ? "" : "; ") t
+        }
+      } else if (index(all, " " i " ")) {
+        if (index(declined, " " i " ")) reason = "ready; answered by the standing fill-declined"
+        else reason = "ready; no writer slot free (gap " gap ")"
+      } else continue
+      printf "%s — %s\n", i, reason
+    }
+  }')
+TICK_WAIT
+  chain="$( { printf '%s\n' "$rows" | awk -F'\t' '$10 == "pending" || $10 == "active" {
+                m = 0; if (match($7, /^[0-9]+/)) m = substr($7, RSTART, RLENGTH)
+                printf "N\t%s\t%d\n", $1, m }'
+              units_edges "$SCHED_PLAN" 2>/dev/null | awk -F'\t' 'NF >= 2 { printf "E\t%s\t%s\n", $1, $2 }'
+            } | units_chain "${SCHED_WRITERS:-1}" 2>&1 )" || {
+    say "CHAIN unknown — $(clean "$chain")"
+    return 0
+  }
+  line="$(printf '%s\n' "$chain" | awk -F'\t' '$1 == "chain" { print $2 "\t" $3; exit }')"
+  ids="${line%%$'\t'*}"; mins="${line##*$'\t'}"
+  [ -n "$ids" ] || return 0
+  say "CHAIN ${ids//,/→} (${mins} min)"
 }
 
 # tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
@@ -4781,6 +4888,74 @@ EOF
     exit 0
     ;;
 
+  # THE APPROVAL (wave-26 T13; D3, AC-6.2). A row that reads `approval:<name>` is not ready, and
+  # the dispatch wall refuses it, until `## SDLC State` carries
+  #
+  #   approved: <name> by <who> <ISO-UTC> "<reply>"
+  #
+  # written here on the user's reply and nowhere else: `<who>` is the project's git user name,
+  # the instant is `date -u`, the reply is the user's own words. It goes through the plan
+  # transaction every row verb takes (copy, dry commit through the real gate, checksum, swap),
+  # beside the approval lines already there — after the last `approved:` or `approved-by:` line,
+  # else after `current:`. An approval is recorded once: a second `approve` of a name the plan
+  # already carries is refused, so the first reply stands. `plan` is refused by name: the plan's
+  # approval is the `approved-by:` line Step 3 writes, which `approval:plan` reads.
+  approve)
+    if [ "$AP_NAME" = plan ]; then
+      die "REFUSED — approval:plan is the plan's approved-by: line, written at Step 3 when the user approves the plan card; approve records any other approval a row reads (approval:<name>). The plan is unchanged."
+      exit 1
+    fi
+    case "$AP_REPLY" in
+      *$'\n'*|*$'\r'*)
+        die "REFUSED — an approval line is one line, and the reply carries a line break; the plan is unchanged."
+        exit 1 ;;
+    esac
+    plan_verb_open approve
+    AP_HAVE="$(awk -v want="$AP_NAME" '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc {
+        l = $0; sub(/^[ \t]*-?[ \t]*/, "", l)
+        if (l !~ /^approved[ \t]*:/) next
+        sub(/^approved[ \t]*:[ \t]*/, "", l); split(l, w, /[ \t]+/)
+        if (w[1] == want) { print $0; exit }
+      }' "$PV_PLAN")"
+    if [ -n "$AP_HAVE" ]; then
+      die "REFUSED — $PV_PLAN already records this approval: $(clean "$AP_HAVE"). An approval is recorded once; the plan is unchanged."
+      exit 1
+    fi
+    AP_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
+    if [ -z "$AP_WHO" ] || ! plan_verb_value_ok "$AP_WHO"; then
+      die "REFUSED — the project has no usable git user name (git config user.name) to record as the approver; the plan is unchanged."
+      exit 1
+    fi
+    AP_LINE="approved: $AP_NAME by $AP_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ) \"$AP_REPLY\""
+    # THE LINE GOES IN THROUGH THE ENVIRONMENT, not `-v`, which would read a backslash in the
+    # user's reply as an escape and write a different reply than the one given.
+    if ! AP_LINE="$AP_LINE" awk '
+      { L[++n] = $0 }
+      END {
+        for (i = 1; i <= n; i++) {
+          if (L[i] ~ /^[[:space:]]*```/) { fence = !fence; continue }
+          if (fence) continue
+          if (L[i] ~ /^##[[:space:]]/) { if (insdlc) break; insdlc = (L[i] ~ /^##[[:space:]]+SDLC State/); continue }
+          if (!insdlc) continue
+          if (L[i] ~ /^[[:space:]]*approved(-by)?[[:space:]]*:/) at = i
+          else if (!at && !cur && L[i] ~ /^[[:space:]]*current[[:space:]]*:/) cur = i
+        }
+        if (!at) at = cur
+        if (!at) exit 1
+        for (i = 1; i <= n; i++) { print L[i]; if (i == at) print ENVIRON["AP_LINE"] }
+      }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
+      die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the approval beside; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_swap approve "approved: $AP_NAME" writer
+    say "approve — $AP_NAME: approved: $AP_NAME by $AP_WHO written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
   tick)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -6005,8 +6180,11 @@ EOF
       elif [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_STEP" ]; then
         SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
         say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
-      elif [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
-        say "no FILL — plan at current: ${SCHED_CURRENT}, Step-3 approval pending"
+      elif [ -n "$SCHED_PLAN" ] && ! fill_plan_approved "$SCHED_PLAN"; then
+        # THE GATE IS THE APPROVAL LINE, NOT THE STEP (wave-26 T13; D3, AC-6.2): the one fact
+        # `fill_ledger_live` and the dispatch wall key on. The step is named because it is
+        # what a reader looks for; the line says which fact is missing.
+        say "no FILL — plan at current: ${SCHED_CURRENT:-$(_sched_plan_current_field "$SCHED_PLAN")}, Step-3 approval pending: ## SDLC State carries no approved-by: line"
       elif [ -z "$SCHED_WRITERS" ]; then
         # A NOTE, BECAUSE THE TICK ITSELF CAN DO NOTHING ABOUT IT (REQ-10 AC-10.4; seed A 8e).
         # The budget is a measurement Step 0 writes (wave-19 REQ-3 AC-3.2, ADR-035): the
@@ -6042,7 +6220,14 @@ EOF
         SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"
         SCHED_GAP=$(( SCHED_WIDTH - TICK_OCCUPIED ))
         [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
-        if [ "$SCHED_GAP" -eq 0 ]; then
+        # A FULL WRITER BUDGET STILL OFFERS THE READ-ONLY ROWS (wave-26 T13; D9): a verify or
+        # review row takes no writer slot, and `fill_ready_set` offers it whatever the gap. So
+        # the set is asked at a closed gap too, and "the budget is full" is said only when it
+        # offered nothing.
+        SCHED_RO_READY=""
+        [ "$SCHED_GAP" -eq 0 ] && SCHED_RO_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")"
+        if [ "$SCHED_GAP" -eq 0 ] && [ -z "$SCHED_RO_READY" ]; then
+          SCHED_READY=""
           say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${TICK_OCCUPIED} unacked roster row(s): the budget is full."
         else
           # READY IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036). Through
@@ -6064,7 +6249,7 @@ EOF
           # roster's unacked rows after this tick's own acks. The wall measures both the
           # same way (the rung from `pressure_level`, the occupancy by the same predicate:
           # wave-19 audit V-2, T2d), so what it names is what this prints.
-          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")"
+          SCHED_READY="${SCHED_RO_READY:-$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED" "$SCHED_SD_IDS")}"
           SCHED_IDS=""; SCHED_N=0
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
@@ -6087,22 +6272,20 @@ EOF
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
           else
-            # THE HOLD IS NAMED ON THIS LINE (wave-20 T10b; critic C3, Δ6). "Nothing is ready"
-            # and "the release waits for Step 7" are different states of a run, and through T10
-            # this line said the first for both. `units_held` is the same readiness program as
-            # the set above, asked the other question, so it names exactly the rows the set
-            # left out for their step and no others.
-            # The ext-held rows were printed as HELD lines above and are not step holds.
-            SCHED_HELD="$(printf '%s\n' "$SCHED_HOLDS" | awk 'NF && index($0, ": held by ext:") == 0 { printf "%s%s", (n++ ? "; " : ""), $0 }')"
             # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
             # which answer holds the rows, and the standing line above says why.
             if [ -n "$SCHED_SD_IDS" ] && [ -n "$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$TICK_OCCUPIED")" ]; then
               say "no FILL — every ready row is answered by the standing fill-declined (${SCHED_SD_IDS}); it stands until a row it did not see is ready or current: moves."
             else
-              say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready: none has all its dependencies landed, and a gate act (integrate, close, or a doc row at Step 7 or later) waits for its step.${SCHED_HELD:+ Held for their step: ${SCHED_HELD}.}"
+              # THE REASONS ARE PER ROW NOW (wave-26 T13; D9, AC-6.6). Through 1.10 this line
+              # carried one sentence for every waiting row and named only the step holds; each
+              # waiting row is on its own WAIT line below, with the read it lacks and the row
+              # that writes it, the step holds among them.
+              say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} occupied=${TICK_OCCUPIED} gap=${SCHED_GAP}, and no pending task is ready."
             fi
           fi
         fi
+        tick_wait_report
       fi
     fi
 
