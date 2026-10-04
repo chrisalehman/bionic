@@ -1413,8 +1413,10 @@ MANIFEST_BODY="$(grep -v '^#' "$RENDERED_MANIFEST" 2>/dev/null | grep -v '^[[:sp
 # render unit's one output (1c, +1). The number is hard-coded rather than counted from the
 # tree on purpose, exactly as it was at twelve: a count derived from whatever the renderer
 # just produced would agree with itself no matter what the renderer dropped.
-expect_eq "74c: it carries one row per rendered file (six roles, five commands, the split skill's twelve, the dispatch terms)" \
-  "24" "$(printf '%s\n' "$MANIFEST_BODY" | wc -l | tr -d ' ')"
+# TWENTY-FIVE at wave-27 T7: payload/context/working-principles.md, the context unit's
+# second output (+1).
+expect_eq "74c: it carries one row per rendered file (six roles, five commands, the split skill's twelve, the dispatch terms, the working principles)" \
+  "25" "$(printf '%s\n' "$MANIFEST_BODY" | wc -l | tr -d ' ')"
 expect_contains "74c2: …including a step file, plugin-root-relative" \
   "  skills/canonical-sdlc/steps/4.md" "$MANIFEST_BODY"
 expect_contains "74c3: …and the dispatch reference" \
@@ -4865,5 +4867,64 @@ expect_eq "W26-T57e: …and no longer says a disturbed run is never a failure" "
 W26_T57_D4="$(w26_doctor "$DISPATCH_MD" 'It reports `void`, not a failure, when the machine was disturbed.')"
 expect_nonempty "W26-T57em: a dispatch.md that keeps the old void sentence is caught" \
   "$(w26_hits 'not a failure, when the machine was disturbed' "$W26_T57_D4")"
+
+section "Section W27P: wave-27 T7 — the working principles: one source, capped, general (REQ-9, AC-9.5/AC-9.6; D16)"
+#
+# WHAT THIS OWNS. The text setup offers for a user's own CLAUDE.md. §W27-95: one template
+# renders it, and the rendered file stays at or under 2,500 bytes. §W27-96: the text is general
+# — no command line, no notification service, no first person. Each absence sits beside a
+# positive through the same extractor on the same file, and a doctored copy proves each arm can
+# go red. Render agreement itself is Section 7's (`render.sh --check`). HERMETIC: the committed
+# final by path; doctored copies under $TMP.
+W27P_FINAL="${REPO}/payload/context/working-principles.md"
+W27P_TMPL_REL="agents-src/templates/context/working-principles.md.tmpl"
+W27P_CAP=2500
+# w27p_body <file> -> the lines between the principles markers.
+w27p_body() {
+  awk 'index($0, "<!-- bionic:principles:end -->") == 1 { inside = 0 }
+       inside { print }
+       index($0, "<!-- bionic:principles:start -->") == 1 { inside = 1 }' "$1" 2>/dev/null
+}
+# w27p_over_cap <file> -> "over" when the file exceeds the cap, "within" otherwise.
+w27p_over_cap() {
+  local n; n="$(wc -c < "$1" 2>/dev/null | tr -d ' ')"
+  if [ "${n:-0}" -gt "$W27P_CAP" ]; then printf 'over'; else printf 'within'; fi
+}
+# w27p_general <file> -> the first forbidden form its body carries, or nothing.
+w27p_general() {
+  local body; body="$(w27p_body "$1")"
+  case "$body" in
+    *'```'*)                 printf 'a fenced code block' ;;
+    *curl\ *|*wget\ *)       printf 'a fetch command' ;;
+    *ntfy*|*slack*|*Slack*)  printf 'a notification service' ;;
+    *'$ '*|*'source '*)      printf 'a shell command line' ;;
+    *' I '*|*' me '*|*' my '*|*'My '*) printf 'a first-person preference' ;;
+  esac
+}
+
+# W27-95 (AC-9.5): one template, and the final names it; the final is within the cap.
+expect_true "W27-95 precondition: the template exists" test -f "${REPO}/${W27P_TMPL_REL}"
+expect_nonempty "W27-95a: the rendered final names its one template in its generated header" \
+  "$(grep -F "$W27P_TMPL_REL" "$W27P_FINAL" 2>/dev/null)"
+expect_eq "W27-95b: no other template renders a working-principles final" "1" \
+  "$(ls "${REPO}"/agents-src/templates/*/working-principles*.tmpl "${REPO}"/agents-src/templates/working-principles*.tmpl 2>/dev/null | wc -l | tr -d ' ')"
+expect_nonempty "W27-95 precondition: the final carries a non-empty principles block" "$(w27p_body "$W27P_FINAL")"
+expect_eq "W27-95c: the rendered final is at most ${W27P_CAP} bytes" "within" "$(w27p_over_cap "$W27P_FINAL")"
+W27P_FAT="$TMP/w27p-fat.md"
+{ cat "$W27P_FINAL" 2>/dev/null; head -c "$W27P_CAP" /dev/zero | tr '\0' 'x'; } > "$W27P_FAT"
+expect_eq "W27-95m: a final one cap's worth longer is caught" "over" "$(w27p_over_cap "$W27P_FAT")"
+
+# W27-96 (AC-9.6): the text is general. The positive: the extractor sees each principle.
+for w27p_name in 'Correctness over expedience' 'Unproven means unfinished' 'Stay free' 'No ceremony' \
+                 'what the reader needs to decide' 'Decide what is yours' 'Ask first'; do
+  expect_contains "W27-96 precondition: the body carries \"${w27p_name}\"" "$w27p_name" "$(w27p_body "$W27P_FINAL")"
+done
+expect_eq "W27-96: the body carries no command line, no notification service and no first person" "" \
+  "$(w27p_general "$W27P_FINAL")"
+W27P_CURL="$TMP/w27p-curl.md"
+awk 'index($0, "<!-- bionic:principles:end -->") == 1 { print "curl -s -d \"done\" https://example.invalid/topic" } { print }' \
+  "$W27P_FINAL" > "$W27P_CURL" 2>/dev/null
+expect_nonempty "W27-96m precondition: the doctored copy still has its block" "$(w27p_body "$W27P_CURL")"
+expect_eq "W27-96m: a body that carries a curl line is caught" "a fetch command" "$(w27p_general "$W27P_CURL")"
 
 finish
