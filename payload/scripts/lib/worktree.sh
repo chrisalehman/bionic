@@ -247,9 +247,16 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 #
 # EVERY REFUSAL BEFORE THE MERGE. The order is cheapest-and-most-local first,
 # and every one of them is checked before anything is changed, so a refused land
-# leaves the repository exactly as it found it — with the single, deliberate
-# exception of a legacy `.bionic` link, which is deleted on the way in because
-# C2 retires it whatever the verdict.
+# leaves the repository exactly as it found it — the tree's `.bionic` record link
+# included (wave-26 D19). The link is dropped only just before `git worktree
+# remove`, the one act that needs it gone, and put back if git refuses that.
+#
+# THE LANDING RULE (wave-26 D7). A tree lands only on its own green run, in a
+# state that contains everything landed before it: `not-current` when the head
+# of <onto> is not an ancestor of the tree's head, `stale-proof` when the LAST
+# line of the tree's stamp file (`<git-dir>/bionic-stamps`, written by the
+# booking shim) is on another head, on a dirty tree, or red. No stamp file at
+# all means no suite-class command ever ran in the tree, and is not refused.
 #
 # TWO BOUNDS ON THE POWER (security review F1). This function merges into a
 # branch and deletes a worktree; both of those are irreversible enough that
@@ -270,8 +277,8 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 #   names. Any other linked worktree is somebody else's and is refused rather
 #   than merged and removed.
 #
-# Both are checked before the legacy-link deletion above, so the deliberate
-# exception applies only to a tree this lease is actually entitled to touch.
+# Both are checked before anything else is read in the tree, so even the link
+# drop at removal applies only to a tree this lease is actually entitled to touch.
 #
 # A CONSEQUENCE, stated rather than hidden: `spawn-worktree.sh create` honours
 # an absolute parent directory outside the checkout, and a tree created that way
@@ -312,8 +319,50 @@ EOF
   printf '%s' "$abs"
 }
 
+# THE STALE-PROOF READ (wave-26 D7). Reads the LAST line of the tree's stamp file,
+# `stamp/v1|head=<40-hex>|dirty=<count>|rc=<n>|at=<ISO-UTC>|cmd=<...>`, appended by the
+# booking shim to `<the tree's git dir>/bionic-stamps`. Prints the reason and the fix and
+# returns 0 when that line is not proof for <head>: on another head, on a dirty tree, red,
+# or not a stamp at all. Returns 1 when it is proof — and when there is no stamp file, which
+# means no suite-class command ever ran in the tree.
+_wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
+  local wt="${1:-}" head="${2:-}" gd file last f s_head="" s_dirty="" s_rc=""
+  local again="re-run the tree's suites at its head, land again"
+  local -a fields
+  gd="$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null)"
+  [ -n "$gd" ] || { printf 'why=unreadable stamps=%s/<no git dir> — %s' "$wt" "$again"; return 0; }
+  file="${gd}/bionic-stamps"
+  [ -e "$file" ] || [ -L "$file" ] || return 1
+  last="$(tail -n 1 "$file" 2>/dev/null)"
+  case "$last" in
+    'stamp/v1|'*) IFS='|' read -r -a fields <<< "$last" ;;
+    *) printf 'why=unreadable stamps=%s — %s' "$file" "$again"; return 0 ;;
+  esac
+  for f in "${fields[@]}"; do
+    case "$f" in
+      head=*)  s_head="${f#head=}" ;;
+      dirty=*) s_dirty="${f#dirty=}" ;;
+      rc=*)    s_rc="${f#rc=}" ;;
+    esac
+  done
+  case "${s_head}:${s_dirty}:${s_rc}" in
+    :*|*::*|*:|*[!0-9a-f:]*) printf 'why=unreadable stamps=%s — %s' "$file" "$again"; return 0 ;;
+  esac
+  if [ "$s_head" != "$head" ]; then
+    printf 'why=head stamp_head=%s head=%s — %s' "$s_head" "$head" "$again"; return 0
+  fi
+  if [ "$s_dirty" != "0" ]; then
+    printf 'why=dirty dirty=%s head=%s — commit or clean the tree, %s' "$s_dirty" "$head" "$again"; return 0
+  fi
+  if [ "$s_rc" != "0" ]; then
+    printf 'why=red rc=%s head=%s — make the suites green, %s' "$s_rc" "$head" "$again"; return 0
+  fi
+  return 1
+}
+
 worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
+  local dirt onto_head head why link_to
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -355,11 +404,12 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null)"
   [ -n "$branch" ] && [ "$branch" != "HEAD" ] || { _wt_refuse "worktree-head-unreadable path=${wt_abs}"; return 2; }
 
-  # C2's retirement, taken on the way in: a legacy link is untracked work as far
-  # as git is concerned and would refuse the removal below over it.
-  _wt_drop_legacy_link "$wt_abs" || :
-
-  if [ -n "$(git -C "$wt_abs" status --porcelain 2>/dev/null)" ]; then
+  # The record link is not work. In a project that ignores `.bionic` only in its
+  # directory shape, or not at all, git reads the link as `?? .bionic`; that one
+  # entry is passed here and the link itself is dropped just before the removal.
+  dirt="$(git -C "$wt_abs" status --porcelain 2>/dev/null)"
+  [ -L "${wt_abs}/.bionic" ] && dirt="$(printf '%s\n' "$dirt" | grep -vxF '?? .bionic')"
+  if [ -n "$dirt" ]; then
     _wt_refuse "dirty-tree path=${wt_abs} branch=${branch}"; return 2
   fi
 
@@ -368,6 +418,19 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   if [ "$ahead" -eq 0 ]; then
     _wt_refuse "nothing-to-land branch=${branch} onto=${onto}"; return 2
   fi
+
+  # NOT CURRENT: the tree must contain everything landed before it, so the tests
+  # it passed ran on the state the merge will produce.
+  onto_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${onto}" 2>/dev/null)"
+  head="$(git -C "$wt_abs" rev-parse --verify --quiet HEAD 2>/dev/null)"
+  if ! git -C "$root" merge-base --is-ancestor "$onto_head" "$head" 2>/dev/null; then
+    _wt_refuse "not-current branch=${branch} onto=${onto} onto_head=${onto_head} — merge ${onto} into the tree, re-run its suites, land again"
+    return 2
+  fi
+
+  why="$(_wt_stale_proof "$wt_abs" "$head")" && {
+    _wt_refuse "stale-proof ${why}"; return 2
+  }
 
   # THE TARGET CHECKOUT IS CLEAN IN WHAT GIT TRACKS. A merge into a checkout
   # holding staged or modified tracked files mixes somebody's unfinished work
@@ -391,8 +454,12 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
 
   # No --force here either. If git refuses now, the merge has landed and the
   # tree has not gone; the line says both so the operator is not left guessing
-  # which half happened.
+  # which half happened. The record link goes only now — git would refuse the
+  # removal over an unignored one — and comes back if the removal is refused.
+  link_to="$(readlink "${wt_abs}/.bionic" 2>/dev/null)"
+  _wt_drop_legacy_link "$wt_abs" || :
   if ! git -C "$root" worktree remove "$wt_abs" >/dev/null 2>&1; then
+    [ -n "$link_to" ] && [ ! -e "${wt_abs}/.bionic" ] && ln -s "$link_to" "${wt_abs}/.bionic" 2>/dev/null
     _wt_refuse "worktree-remove-refused path=${wt_abs} merged=${merge_sha}"; return 2
   fi
   git -C "$root" worktree prune >/dev/null 2>&1
