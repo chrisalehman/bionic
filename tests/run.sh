@@ -845,7 +845,9 @@ if [ "$SERIAL" -eq 0 ]; then
     _label "$label"
     rc=""
     [ -f "$TMP/${label}.rc" ] && rc="$(cat "$TMP/${label}.rc")"
-    [ -f "$TMP/${label}.sec" ] && _timing "$label" "$(cat "$TMP/${label}.sec")"
+    # A void suite's seconds are disturbed ones (T48; review 11 N1): the file holds measurements
+    # only, and a row has no field to say otherwise, so a void suite gets no row at all.
+    [ -f "$TMP/${label}.sec" ] && [ ! -f "$TMP/${label}.void" ] && _timing "$label" "$(cat "$TMP/${label}.sec")"
     _verdict "$label" "$rc" "$TMP/${label}.out"
   done <"$QUEUE"
 fi
