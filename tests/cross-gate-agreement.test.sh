@@ -9808,13 +9808,17 @@ S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 # hooks/ fails the second row below.
 # A RECONCILER IS A FILE THAT DOES BOTH HALVES (review 9 follow-up, widened at review 11 S2): it
 # lists changed paths, by any of git's forms for it (`diff --name-only`, `--name-status`,
-# `diff --stat`, `status --porcelain`), AND it READS a roster row's `files=` key, by any of the
+# `--numstat`, `diff --stat`, `status --porcelain`), AND it READS a roster row's `files=` key, by any of the
 # repo's read forms (the quoted literal a row reader compares against, a `files=*)` case arm, or a
 # `*_field … files` key reader). Writing the key is not reading it, so brief.sh's
 # `print "files=" v` counts only because brief.sh lists no changed paths, and worktree.sh's
 # `printf 'files=%s'` matches no read form. A path list alone is not one either: worktree.sh
 # diffs a tree against the landed work to find the files both changed, and never reads a row.
-S18_DIFF_RE='--name-only|--name-status|diff --stat|status --porcelain'
+# WHAT A TEXT CHECK PER FILE CANNOT SEE (review 15 F5): a reconciler whose two halves sit in two
+# files (the path list from a helper in one, the key read in the other, review 15's case E), and
+# a key read in a spelling none of the read forms lists (an awk `index($i, "files=")`). Neither
+# file then does both halves. Review is what catches those; the rows below do not pretend to.
+S18_DIFF_RE='--name-only|--name-status|--numstat|diff --stat|status --porcelain'
 S18_READ_RE='"files="|files=\*\)|_field[^)]*[ "]files([^=_A-Za-z0-9]|$)'
 s18_reconcilers() {  # <dir> -> the .sh files under it that do both halves, one per line
   local _f
@@ -9830,19 +9834,24 @@ expect_eq "S18.1 exactly one library file reconciles a diff against a row's file
 expect_eq "S18.1 …and it is payload/scripts/lib/stop.sh" "1" \
   "$(s18_reconcilers "$S18_LIB_DIR" | grep -c '/stop\.sh$')"
 # No hook computes a name-only diff at all: the reconciliation's diff left hooks/ with the sweep.
+# And no hook reconciles by any of the library row's diff forms (review 15 F5): a hook written
+# with `--name-status` or `--numstat` passes the --name-only row, and is caught by this one, as
+# the planted hook copy below proves.
 expect_ne "S18.1 the hooks are read: at least one hook file is there" "0" \
   "$(ls "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | grep -c . | tr -d ' ')"
 expect_eq "S18.1 …and no hook file carries --name-only" "" \
   "$(/usr/bin/grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null)"
+expect_eq "S18.1 …and no hook file reconciles, by any of the library row's diff forms" "" \
+  "$(s18_reconcilers "$BIONIC_HOOKS_DIR")"
 
 # A SECOND RECONCILIATION IS RED, written the ways a real one would be (review 11 S2, cases A to
 # C), never in the detector's own spelling: each is one added file in a copy of the library, and
 # the exactly-one row asked of that copy reads 2. No source is doctored, so there is no source
 # line for §S19.4's anchor to hold: the added file is written through `$s18_new`, a name its
 # cross-gate site pattern does not read as a mutant.
-s18_second() {  # <label> <body> -> "<parses> <count>" for a copy of the library plus recon2.sh
+s18_second() {  # <label> <body> [dir] -> "<parses> <count>" for a copy of <dir> (the library) plus recon2.sh
   local s18_new="$S18_MUT/recon2.sh"
-  rm -rf "$S18_MUT"; mkdir -p "$S18_MUT"; cp "$S18_LIB_DIR"/*.sh "$S18_MUT/"
+  rm -rf "$S18_MUT"; mkdir -p "$S18_MUT"; cp "${3:-$S18_LIB_DIR}"/*.sh "$S18_MUT/"
   printf '#!/bin/bash\n%s\n' "$2" > "$s18_new"
   printf '%s %s' "$(bash -n "$s18_new" 2>/dev/null && echo yes || echo no)" \
     "$(s18_reconcilers "$S18_MUT" | grep -c . | tr -d ' ')"
@@ -9854,6 +9863,12 @@ expect_eq "S18.1 …through a --name-status diff and a quoted-key read (case B) 
   "$(s18_second B 'recon2() { local row="$1" decl; decl="${row##*"files="}"; git diff --name-status "$2..HEAD" | cut -f2 | grep -vxF "$decl"; }')"
 expect_eq "S18.1 …through status --porcelain (case C) reads 2" "yes 2" \
   "$(s18_second C 'recon2() { local row="$1" decl; decl="${row##*"files="}"; git status --porcelain | cut -c4- | grep -vxF "$decl"; }')"
+expect_eq "S18.1 …through a --numstat diff (review 15 F5) reads 2" "yes 2" \
+  "$(s18_second N 'recon2() { local decl; decl="${1##*"files="}"; git diff --numstat "$2..HEAD" | cut -f3 | grep -vxF "$decl"; }')"
+# The hooks row on a planted hook: a copy of hooks/ plus one --name-status reconciler (case B,
+# which carries no --name-only) is read as one reconciler, where the real hooks read none.
+expect_eq "S18.1 a hook reconciler through a --name-status diff is caught by the hooks row" "yes 1" \
+  "$(s18_second HB 'recon2() { local row="$1" decl; decl="${row##*"files="}"; git diff --name-status "$2..HEAD" | cut -f2 | grep -vxF "$decl"; }' "$BIONIC_HOOKS_DIR")"
 # The same copy with a file that only WRITES the key stays at 1.
 expect_eq "S18.1 …while a file that lists changed paths and only writes the key reads 1" "yes 1" \
   "$(s18_second W 'recon2() { git diff --name-only "$1..HEAD" | while read -r f; do printf "files=%s\n" "$f"; done; }')"
@@ -13351,27 +13366,35 @@ ub_stop() {
 }
 ub_decision() { printf '%s' "$UB_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 # ub_names_id <text> <id> -> the lines that name <id> as a word of its own: a row id a hook
-# printed (`FILL T5`, `not launched: T5`, `T4→T5`, `fill=T5`), never the same letters inside a
-# path or a longer name (`.worktrees/26-T5/`, `T47-T5`, `T50`). A row id is judged by what the
-# hook SAYS about the row; the paths it prints are wherever this suite and its sandbox happen
-# to sit, and a tree or TMPDIR named for a task once turned these rows red (wave-26 T47).
+# printed (`FILL T5`, `not launched: T5`, `T4→T5`, `fill=T5`), or an agent's name that ends in it
+# (`w-T5`, `(w26-T5)`), never the same letters inside a path or a longer name
+# (`.worktrees/26-T5/`, `/tmp/T47-T5`, `T50`). A row id is judged by what the hook SAYS about the
+# row; the paths it prints are wherever this suite and its sandbox happen to sit, and a tree or
+# TMPDIR named for a task once turned these rows red (wave-26 T47).
+# WHAT TELLS A NAME FROM A PATH (review 15 F6): a dash before the id is part of a name when the
+# dash-joined word it ends starts after a character no path is made of; a path's last part
+# (`26-T5`, `T47-T5`) is reached through a `/`, so it is never that word.
 ub_names_id() {
-  printf '%s\n' "$1" | /usr/bin/grep -E "(^|[^A-Za-z0-9_./-])$2([^A-Za-z0-9_/-]|\$)"
+  printf '%s\n' "$1" | /usr/bin/grep -E "(^|[^A-Za-z0-9_./-])([A-Za-z0-9_]+-)*$2([^A-Za-z0-9_/-]|\$)"
   return 0
 }
 ub_iso() { date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ; }
 require_helpers ub_mode ub_adv ub_stop ub_decision ub_iso ub_names_id
 # The extractor on a planted text: an id inside a path or a longer name is not a mention, an id
 # the hook printed as a row is, on each line kind that names one.
-expect_eq "UB ub_names_id keeps the lines that name T5 as a row, and only those" \
-  "poker: FILL T5|poker-tick/v1|decision=FILL|fill=T5|poker: CHAIN T4→T5 (30 min)|not launched: T5." \
+expect_eq "UB ub_names_id keeps the lines that name T5 as a row or an agent, and only those" \
+  "poker: FILL T5|poker-tick/v1|decision=FILL|fill=T5|poker: CHAIN T4→T5 (30 min)|not launched: T5.|poker: dispatch w-T5 now|poker: LAUNCHED (w26-T5)" \
   "$(ub_names_id "poker: note: run \`bash /x/.worktrees/26-T5/hooks/session-poker.sh arm\`
 run resolved by newest-plan fallback (session unbound) — /tmp/T47-T5/w1r/run.md; bind
 poker: FILL T5
 poker-tick/v1|decision=FILL|fill=T5
 poker: CHAIN T4→T5 (30 min)
 poker: WAIT T50 — needs T4
-not launched: T5." T5 | paste -sd'|' -)"
+not launched: T5.
+poker: dispatch w-T5 now
+poker: tree at /x/.worktrees/26-T5
+poker: tmp /tmp/T47-T5
+poker: LAUNCHED (w26-T5)" T5 | paste -sd'|' -)"
 
 UB_ADVS=""   # one normalized advisory per fallback drive, newline-joined, in arm order
 ub_collect() {  # <arm> <output> <plan>
