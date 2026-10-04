@@ -3728,6 +3728,54 @@ Plan: $PLAN
 Fix: do not commit step ${step} until pass equals total."
     refuse exit2 commit "the suite is not fully green" "make pass equal total" "$_eg_detail"
   fi
+  validate_tests_head "$prefix"
+}
+
+# THE PASS NAMES THE HEAD IT READ (wave-26 T4; REQ-3 AC-3.2, D5). A green count says nothing
+# about WHICH code was green, so the block carries `head:`, and three facts about it are
+# refused here, after the counters, so a red block still meets the counters' words first:
+# no `head:` at all; a value that is not a commit in the repository the commit is made in (a
+# hex id, abbreviated or full — a symbolic `HEAD` would name whatever is checked out at commit
+# time, which is no record); and a commit the RELEASE HEAD does not contain. The release head
+# is the tip of the plan's `working-branch:` when it names one that resolves — the floor runs
+# on that branch, and the plan verbs' dry commit and a main-root commit at Step 5 are made
+# from the main checkout, whose own HEAD never holds a wave head before Step 8. A plan that
+# names no such branch is judged against the HEAD of the directory the commit is made in.
+# Whether a contained head is STALE is proof_state's question (lib/proof.sh), not this one.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+validate_tests_head() {
+  local prefix="$1" head dir wb tip
+  head=$(block_get head)
+  if [ -z "$head" ]; then
+    _eg_detail="${prefix} evidence carries no 'head:' — the commit its tests floor ran on.
+Plan: $PLAN
+Fix: add 'head: <sha>' beside cmd/pass/total/output; tests/run.sh prints it as 'head=<sha>' in its header."
+    refuse exit2 commit "this step's evidence names no head" "add head: <sha the run read>" "$_eg_detail"
+  fi
+  # The repository the commit is made in; when the commit's directory is in none, the engaged
+  # root's — the plan's own repository, the one place left that can hold the commit.
+  dir="${_EG_CWD:-}"
+  { [ -d "$dir" ] && git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; } || dir="$BIONIC_ROOT"
+  if ! grep -qE '^[0-9a-f]{7,40}$' <<< "$head" \
+     || ! git -C "$dir" cat-file -e "${head}^{commit}" 2>/dev/null; then
+    _eg_detail="${prefix} 'head: ${head}' is not a commit in the repository at ${dir}.
+Plan: $PLAN
+Fix: record the hex sha the tests floor ran on (tests/run.sh's 'head=' header line), not a branch or a symbolic name."
+    refuse exit2 commit "the Step-5 head: is not a commit here" "record the sha the run read" "$_eg_detail"
+  fi
+  wb=$(echo "$SECTION" | grep -E '^[[:space:]]*working-branch[[:space:]]*:' | head -1 \
+    | sed -E 's/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*//; s/[[:space:]].*$//')
+  [ -n "$wb" ] || wb=$(plan_frontmatter_get "$PLAN" working-branch)
+  tip=""
+  [ -n "$wb" ] && tip=$(git -C "$dir" rev-parse --verify -q "refs/heads/${wb}^{commit}" 2>/dev/null)
+  [ -n "$tip" ] || { wb=""; tip=$(git -C "$dir" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null); }
+  if [ -z "$tip" ] || ! git -C "$dir" merge-base --is-ancestor "$head" "$tip" 2>/dev/null; then
+    if [ -n "$wb" ]; then wb="working-branch $wb"; else wb="HEAD of $dir"; fi
+    _eg_detail="${prefix} 'head: ${head}' is not contained in the release head ${tip:-(none)} (${wb}).
+Plan: $PLAN
+Fix: run the tests floor on the release head, or on a commit it contains, and record that run's head."
+    refuse exit2 commit "the release head does not contain head:" "re-run the floor on release head" "$_eg_detail"
+  fi
 }
 
 # Document step: adr OR rca OR n/a.

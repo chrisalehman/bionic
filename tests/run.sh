@@ -431,6 +431,18 @@ ENV_STAMP="$(printf 'env: os=%s bash=%s locale=%s path=%s' \
   "$PIN")"
 echo "$ENV_STAMP"
 
+# ── THE HEAD STAMP (wave-26 T4; REQ-3 AC-3.2, D5) ────────────────────────────
+# Which code the verdict is about: the commit the tree under test (this runner's own
+# checkout, cd'd into above) has checked out, and how many porcelain lines it differs from
+# that commit by. Step-5 evidence copies the head into its `head:` field and the commit gate
+# refuses a block without one, so this line is what a proof names. Taken once, here, before
+# any suite runs: the suites write only under $TMP. A tree that is no repository says so.
+if HEAD_SHA="$(git rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" && [ -n "$HEAD_SHA" ]; then
+  echo "head=${HEAD_SHA} dirty=$(git status --porcelain 2>/dev/null | awk 'END { print NR+0 }')"
+else
+  echo "head=none dirty=none"
+fi
+
 ( . tests/lib/resolve-roots.sh
   printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
     "$BIONIC_HOOKS_DIR" "$BIONIC_SKILLS_DIR" "$BIONIC_SCRIPTS_DIR" )
@@ -499,6 +511,7 @@ _wall_suite() {
 }
 
 pass=0; fail=0; failed=""
+void=0; voided=""
 
 # Opt-in, and opt-in on purpose: no per-suite timing has ever existed (W7 S8
 # finding (c) had to answer "which suite is the long pole" with a line-count
@@ -545,6 +558,21 @@ _verdict() {
     echo "───── ${label}: the adoption wall ─────"
     cat "$TMP/${label}.refused"
     echo "───── end ${label} ─────"
+    return
+  fi
+  # EVERY TRY OF A SOLO SUITE WAS DISTURBED (wave-26 T8). Its timing rows measured the
+  # machine, not the code, so this is a reading and not a verdict: printed here, listed under
+  # `Void:`, and counted in neither tally. A void suite that also exited non-zero shows its
+  # capture, so whatever it reported can still be read.
+  if [ -f "$TMP/${label}.void" ]; then
+    echo "~ VOID (timing not measured: $(cat "$TMP/${label}.void"))"
+    void=$((void+1))
+    voided="${voided}\n    - ${label} ($(cat "$TMP/${label}.void"))"
+    if [ "$rc" != "0" ]; then
+      echo "───── ${label}: captured output ─────"
+      [ -f "$out" ] && cat "$out"
+      echo "───── end ${label} ─────"
+    fi
     return
   fi
   lost="$(_lost_command "$out")"
@@ -646,10 +674,120 @@ if [ "$SERIAL" -eq 0 ]; then
   # Reuses the exact `--one` worker every parallel suite already runs through —
   # same capture files, same PASS/FAIL shape — just launched serially instead of
   # under xargs, so nothing else is contending for the CPU during its drive.
+  # Its stdin is /dev/null, as under xargs: the loop below reads its labels from
+  # stdin, and a suite that read stdin would eat the labels after its own.
+  #
+  # AND ON THE WHOLE MACHINE (wave-26 T8; D8, REQ-6 AC-6.4). Held out of this run's
+  # batch was only half of it: another run on the machine — another session's,
+  # another agent's — still shared a solo suite's drive. So before each solo suite
+  # the runner takes the whole machine through payload/scripts/lib/slots.sh: the
+  # marker, which stops new places being handed out, then every place, waiting for
+  # the held ones to drain, then a settled load (`resources_settled`: the load now,
+  # not the ring's median). The hold is this process's, given back after the suite.
+  #
+  # VOID, NOT FAILED. The load is read again after the suite. If it rose above the
+  # settled line, something disturbed the drive and its timing rows measured that:
+  # the suite runs again, up to SOLO_RETRIES more times, and if every try was
+  # disturbed it is reported VOID (see _verdict). A take or a settle that gave up at
+  # the maximum wait is a disturbance too; the suite still runs once, so its output
+  # is there to read, but it is not retried — waiting the whole ceiling again would
+  # only say the same thing.
+  #
+  # NESTING (the lending rule, lib/slots.sh). A run started inside a booked command
+  # inherits BIONIC_SLOT_HELD=1 and its parent's place: the whole-machine take then
+  # waits for the OTHER places only and lends the parent's while it queues, so it
+  # never waits on its own parent. A run nested inside a solo suite (four suites
+  # drive a nested runner) inherits the quiet mark set on the solo launch below: it
+  # takes nothing, settles nothing and voids nothing, because the hold it runs in is
+  # already the whole machine and this run reads the load for it.
+  #
+  # NOT THROUGH booked.sh. The shim stamps the tree's git directory with its
+  # command's rc, and a worker always exits 0 (its verdict is the .rc file), so a
+  # stamp per solo suite would record a green the run never gave. The runner calls
+  # the library the shim calls.
+  #
+  # A TREE WITHOUT THE LIBRARY (a scratch copy of this runner) runs its solo suites
+  # unbooked, as before, and says so once.
+  SOLO_RETRIES=2
+  _solo_settle() {  # <cores> — wait for a settled load, under the place wait's ceiling
+    local start=$SECONDS
+    _SLOTS_NOTED=-1
+    while ! resources_settled "$1"; do
+      [ $((SECONDS - start)) -lt "$(_slots_max_wait)" ] || return 1
+      _slots_note "holding the whole machine, waiting for the load ($(_res_load_now)) to settle at or below $(resources_settled_line "$1")"
+      sleep "$(_slots_poll)"
+    done
+  }
+  # HELD TRAVELS WITH ITS PLACE (wave-26 T8, booking review). The lending rule reads
+  # BIONIC_SLOT_PLACE to know which place is the caller's own; HELD without it makes a nested
+  # whole-machine take guess, and two runs that each reach their solo drain could then wait on
+  # each other until the maximum wait. So the solo launch names a place this hold covers: the
+  # one this run was booked into, when it was, or else the first place it holds itself.
+  _solo_place() {  # -> the place path to hand the solo suite as BIONIC_SLOT_PLACE
+    local f
+    if [ "${BIONIC_SLOT_HELD:-}" = 1 ] && [ -n "${BIONIC_SLOT_PLACE:-}" ] && [ -d "$BIONIC_SLOT_PLACE" ]; then
+      printf '%s' "$BIONIC_SLOT_PLACE"
+      return 0
+    fi
+    for f in "$(slots_dir)"/place.*; do
+      [ "$(_slots_pid_of "$f")" = "$$" ] && { printf '%s' "$f"; return 0; }
+    done
+    return 0
+  }
+  _solo_run() {  # <label> — one solo suite; leaves <label>.void when every try was disturbed
+    local label="$1" tries=0 why cores
+    rm -f "$TMP/${label}.void"
+    if [ "$_SOLO_BOOK" != yes ]; then
+      bash "$SELF" --one "$label" </dev/null
+      return 0
+    fi
+    cores="$(_res_cores)"
+    while :; do
+      why=""
+      if ! slots_take_all "$$" "tests/run.sh solo ${label}" >/dev/null; then
+        why="the other places did not drain within $(_slots_max_wait)s"
+      elif ! _solo_settle "$cores"; then
+        why="the load ($(_res_load_now)) never settled at or below $(resources_settled_line "$cores") within $(_slots_max_wait)s"
+      fi
+      if [ -n "$why" ]; then
+        slots_release "$$"
+        bash "$SELF" --one "$label" </dev/null
+        printf '%s\n' "$why" >"$TMP/${label}.void"
+        echo "tests/run.sh: void — ${label}: ${why}; it ran unbooked and is not retried" >&2
+        return 0
+      fi
+      BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1 BIONIC_SLOT_PLACE="$(_solo_place)" \
+        bash "$SELF" --one "$label" </dev/null
+      resources_settled "$cores" || \
+        why="the load rose to $(_res_load_now) during the run, above the settled line $(resources_settled_line "$cores")"
+      slots_release "$$"
+      [ -n "$why" ] || return 0
+      tries=$((tries + 1))
+      if [ "$tries" -gt "$SOLO_RETRIES" ]; then
+        printf '%s, on every try\n' "$why" >"$TMP/${label}.void"
+        echo "tests/run.sh: void — ${label}: ${why}; no retry left" >&2
+        return 0
+      fi
+      echo "tests/run.sh: void — ${label}: ${why}; retrying (${tries} of ${SOLO_RETRIES})" >&2
+    done
+  }
   if [ -s "$SOLO" ]; then
+    _SOLO_BOOK=no
+    if [ "${BIONIC_SLOT_QUIET:-}" = 1 ]; then
+      _SOLO_BOOK=inside
+    elif [ -r "$REPO/payload/scripts/lib/slots.sh" ]; then
+      # shellcheck source=/dev/null
+      . "$REPO/payload/scripts/lib/slots.sh"
+      declare -F slots_take_all >/dev/null 2>&1 && _SOLO_BOOK=yes
+    fi
+    if [ "$_SOLO_BOOK" = yes ]; then
+      trap 'slots_release "$$"; rm -rf "$TMP"' EXIT
+    elif [ "$_SOLO_BOOK" = no ]; then
+      echo "tests/run.sh: no payload/scripts/lib/slots.sh — the solo suites run without taking the whole machine" >&2
+    fi
     while IFS= read -r _solo_label; do
       [ -n "$_solo_label" ] || continue
-      bash "$SELF" --one "$_solo_label"
+      _solo_run "$_solo_label"
     done <"$SOLO"
   fi
   while IFS="$(printf '\t')" read -r label _queued_cmd; do
@@ -695,9 +833,17 @@ fi
 echo "──────────────────────────────────────────────"
 echo "Gating: ${pass} passed, ${fail} failed"
 [ -n "$_advisory" ] && echo "$_advisory"
+# VOID IS SAID, AND IT IS NOT A FAILURE (wave-26 T8). Its own line, like `Advisory:`, so the
+# `Gating:` line above keeps its shape; and the run exits on its failures alone. What it does
+# not do is call itself all green: a void suite's timing was never measured.
+[ "$void" -ne 0 ] && echo -e "Void: ${void} — disturbed on every try, so not timed; advisory, not a failure:${voided}"
 echo "$ENV_STAMP"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
   exit 1
+fi
+if [ "$void" -ne 0 ]; then
+  echo "No gating suite failed; ${void} void — re-run on a quiet machine to time it"
+  exit 0
 fi
 echo "All gating suites green ✓"
