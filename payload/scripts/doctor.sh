@@ -226,7 +226,7 @@ DOCTOR_REPO_ROOT="$(cd "${DOCTOR_LIB}/../../.." && pwd -P)"
 # same trace, one frame deeper — and they are part of what a complete payload
 # means for this script too.
 for _doctor_lib in detect.sh env.sh patrol.sh width.sh loader.sh root.sh run.sh \
-                   resources.sh checks.sh deps.sh shell.sh worktree.sh; do
+                   resources.sh checks.sh deps.sh shell.sh worktree.sh markers.sh; do
   if [ ! -f "${DOCTOR_LIB}/${_doctor_lib}" ]; then
     echo "doctor.sh: cannot find ${DOCTOR_LIB}/${_doctor_lib} — the payload looks incomplete." >&2
     echo "           reinstall with: claude plugin install bionic@bionic" >&2
@@ -243,6 +243,11 @@ done
 # called from here, the same way this file never calls install_dep.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/env.sh"
+# markers.sh, which env.sh already soft-sourced — `markers_get` is how the
+# principles row compares the user's block to the shipped text. Named here so the
+# file-to-suite map sees doctor read it.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/markers.sh"
 # patrol.sh, which owns the ONE fact on this page that has no file behind it. The
 # CLI keeps its cron table in memory and writes none of it down, so "is the
 # Patrol armed, once, and firing" is reconstructed from a session file and a
@@ -710,6 +715,7 @@ AGENT_CAUSE="${AGENT_FACT##*cause=}"
 
 TODO_FACT="$(detect_env_todo_tools)";        TODO_STATE="${TODO_FACT##*present=}"
 RC_PROXY_FACT="$(detect_rc_claude_proxy)";   RC_PROXY_STATE="${RC_PROXY_FACT##*present=}"
+PRINCIPLES_FACT="$(detect_working_principles)"; PRINCIPLES_STATE="${PRINCIPLES_FACT##*state=}"
 LEGACY_HOOK_FACT="$(detect_legacy_channel_hooks)"; LEGACY_HOOK_COUNT="${LEGACY_HOOK_FACT##*count=}"
 SKILL_COPY_FACT="$(detect_legacy_skill_copy)"
 SKILL_COPY_PATH="${SKILL_COPY_FACT##*path=}"
@@ -2556,6 +2562,18 @@ elif [ "$RC_PROXY_STATE" = "stale" ]; then
 else
   _doctor_env3 "$DOCTOR_NIL" "$_rc_proxy_label" "—" "not set — ${_rc_proxy_hint} offers it"
 fi
+# THE WORKING PRINCIPLES, AN OFFER LIKE THE ROW ABOVE, IN THREE STATES (wave-27
+# D16). Absent is an offer nobody took; edited is the user's own change to their
+# own file, which setup will show and never overwrite without a second yes. So
+# neither is `✗`, and neither earns a fix line: both are `–` with the route, and
+# only `present` is `✓`. The state is env.sh's `principles_state`, through detect.sh.
+_principles_label="$(bionic_check_label working-principles)"
+_principles_hint="$(bionic_check_hint working-principles)"
+case "$PRINCIPLES_STATE" in
+  present) _doctor_env3 "$DOCTOR_OK"  "$_principles_label" "on"     "in $(_doctor_tilde "$(principles_file)")" ;;
+  edited)  _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "edited" "your own edit — ${_principles_hint} shows the difference" ;;
+  *)       _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "—"      "not set — ${_principles_hint} offers it" ;;
+esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
 # question — did the retired installer leave something behind — and on a machine
 # that never ran it, or has been cleaned once, all six answer no. Silence is the
