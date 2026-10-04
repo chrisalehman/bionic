@@ -1561,6 +1561,7 @@ stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local -a _FF_IDS
   local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
   local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
+  local _LS_OUT LAUNCH_REASON=""
   local FACT FIX REASON
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
@@ -1648,6 +1649,20 @@ PLAN_NAME=""
 # plan path `session_run` produced from a `find -type f`, so it names a regular file and
 # carries no trailing slash — the one case the two spellings disagree about.
 [ -n "$PLAN" ] && [ -f "$PLAN" ] && PLAN_NAME="${PLAN##*/}"
+
+# ---------- THE LAUNCHES THE PLAN LACKS (wave-26 T32; D4, review-3 F2) ----------
+#
+# The launch recorder starts `session-poker.sh launch-sync` and does not wait for it, so what
+# that detached call could not record has to reach a model somewhere: the turn's end is one of
+# the two places (the Patrol tick is the other). The same transaction runs here, on a bound open
+# run only. A launch it records is silent. One it cannot record refuses the turn once, joined to
+# the other duties below, with the words and the hand commands the verb printed. A lock another
+# writer holds is left to it and says nothing.
+if [ "$BIONIC_RUN_WORD" = bound-open ] && [ -n "$PLAN_NAME" ] && [ -f "${HOOK_DIR}/session-poker.sh" ]; then
+  _LS_OUT="$( cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" \
+    bash "${HOOK_DIR}/session-poker.sh" launch-sync 2>&1 )" \
+    || LAUNCH_REASON="Launches not recorded in the plan: the launch-sync transaction could not record every launch this session made, and it said: ${_LS_OUT} Fix what it names or run the commands it prints, then stop again — this gate blocks once."
+fi
 
 # ---------- the plan's BASENAME ----------
 #
@@ -2041,6 +2056,7 @@ fi
 TELL_REASON="$FILL_REASON"
 [ -n "$STANDDOWN_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${STANDDOWN_REASON}"
 [ -n "$NOTICK_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${NOTICK_REASON}"
+[ -n "$LAUNCH_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${LAUNCH_REASON}"
 
 # The two folds are judged TOGETHER, so a turn that skipped a duty AND left a FILL
 # unanswered is told both things once. Blocking on one and staying silent about the other
@@ -2064,6 +2080,11 @@ if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
         "$TELL_REASON"
     elif [ -n "$STANDDOWN_REASON" ]; then
       fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
+        "$TELL_REASON"
+    elif [ -z "$NOTICK_REASON" ]; then
+      # A LAUNCH THE PLAN CANNOT RECORD (wave-26 T32), alone. Beside another duty it rides in
+      # that duty's paragraph, as the marker turn's does.
+      fold_block block stop "a launch is not recorded in the plan" "run the commands it prints" \
         "$TELL_REASON"
     else
       # THE MARKER TURN THAT RAN NO TICK (wave-20 REQ-6, AC-6.2), alone. Beside another duty it
@@ -2091,7 +2112,7 @@ fi
 case "$VERDICT" in
   tasklist)
     FACT='no task-list refresh since this tick'; FIX='refresh it, then stop again'
-    REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick — TaskList or a plan-ledger write. Do one, then stop again — this gate blocks once.' ;;
+    REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed) — TaskList or a plan-ledger write. Do one, then stop again — this gate blocks once.' ;;
   *)
     return "$_adv" ;;
 esac
