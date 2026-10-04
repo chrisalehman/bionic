@@ -130,7 +130,7 @@ write_attestation_v1() {  # <session-id>
 # a reflection of the machine.
 _TOOLS_REAL="bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail
 sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf true false
-sleep dirname basename realpath id ps df sysctl vm_stat git strings"
+sleep dirname basename realpath id ps df sysctl vm_stat git strings cksum"
 _TOOLS_STUB="node pnpm gh rg uv docker aws"
 
 make_tool_dir() {  # <dir> <claude: yes|no> -> prints the reals it could NOT find
@@ -256,6 +256,51 @@ PLAN
 OUT5="$(run_doctor)"
 expect_match "11: a closed run reads as no active run" "*active run*none*" "$OUT5"
 expect_no_match "12: and does not quote a step" "*active run*current: 9*" "$OUT5"
+
+# THE PERMISSION-ANSWERS ROW (wave-25-never-paused, REQ-7, AC-7.3, spec D8/D9). The hook's
+# off switch and its answer log, named in the project section: `on`/`off`, and the path
+# `answers_path` returns for this root. Doctor reads and creates nothing, so a missing
+# `.bionic/config.yaml`, a missing log directory and an unset HOME are all rows, not errors.
+_pa_row() { printf '%s\n' "$1" | grep -m1 'permission answers'; }
+_pa_expect_path="$( cd "$PROJ" && . "${PAYLOAD}/scripts/lib/root.sh" \
+                      && HOME="$TMP" answers_path "$(project_root "$PWD")" )"
+_pa_tilde="~${_pa_expect_path#"$TMP"}"
+expect_nonempty "12a: the answer log's path is derived by answers_path (the oracle is not empty)" "$_pa_expect_path"
+
+PA_ROW="$(_pa_row "$OUT5")"
+expect_nonempty "12b: the project section has a permission-answers row" "$PA_ROW"
+expect_match "12c: a config with no key reads on" "*permission answers*on *" "$PA_ROW"
+expect_match "12d: and names the path answers_path prints for this root" "*${_pa_tilde}*" "$PA_ROW"
+expect_no_match "12e: and does not read off" "*permission answers*off*" "$PA_ROW"
+if [ ! -e "$(dirname "$_pa_expect_path")" ]; then ok "12f: doctor created no log directory to name it"
+else no "12f: doctor created the log directory" "$(dirname "$_pa_expect_path")"; fi
+
+mkdir -p "${PROJ}/.bionic"
+printf 'permission-answers: false\n' > "${PROJ}/.bionic/config.yaml"
+PA_ROW="$(_pa_row "$(run_doctor)")"
+expect_nonempty "12g: the row is there with the switch off" "$PA_ROW"
+expect_match "12h: permission-answers: false reads off" "*permission answers*off *" "$PA_ROW"
+expect_match "12i: and still names the log" "*${_pa_tilde}*" "$PA_ROW"
+
+for _pa_val in true 'yes' 'False' '"false"x' 'off' '0'; do
+  printf 'permission-answers: %s\n' "$_pa_val" > "${PROJ}/.bionic/config.yaml"
+  PA_ROW="$(_pa_row "$(run_doctor)")"
+  expect_match "12j: permission-answers: ${_pa_val} reads on (only the literal false is off)" \
+    "*permission answers*on *" "$PA_ROW"
+done
+printf "permission-answers: 'false'\n" > "${PROJ}/.bionic/config.yaml"
+PA_ROW="$(_pa_row "$(run_doctor)")"
+expect_match "12k: a quoted false reads off, as the hook's config_value reads it" \
+  "*permission answers*off *" "$PA_ROW"
+rm -f "${PROJ}/.bionic/config.yaml"
+
+PA_ROW="$(_pa_row "$( cd "$PROJ" && HOME= PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+      BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )")"
+expect_nonempty "12l: with no HOME the row is still there" "$PA_ROW"
+expect_match "12m: and says there is no path rather than printing an empty one" \
+  "*permission answers*no log path*" "$PA_ROW"
+expect_no_match "12n: and prints no path" "*logs/*" "$PA_ROW"
 
 section "Section 5: predecessor rosters with open rows"
 
