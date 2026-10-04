@@ -270,13 +270,14 @@ CMD_RUN_NORM_AWK='
 # unwraps, the writers, deleters and pure readers, the suite, build and install runners) is
 # compared to `cmd_word_fold` of the word, so the tables hold lower-case names only.
 #
-# WHAT IS NOT FOLDED, at the call sites: operands, paths, flags and subcommands (`npm TEST` is
-# not `npm test`, and `bash TESTS/RUN.SH` names no suite this reader knows); a script named at
-# argv[0] by its path (`./tests/X.TEST.SH`), for the same reason its operand form is not; the
-# reserved words, which bash matches case-exactly; and six builtins whose capitalised spelling
-# is another program or none, so that folding them would invent a directory change, a collected
-# job or an exit: `cd`, `pushd`, `popd`, `wait`, `exit`, `return` (/usr/bin/CD runs `builtin cd`
-# in a child shell and moves nothing).
+# WHAT IS NOT FOLDED: operands, paths, flags and subcommands, at the call sites (`npm TEST` is
+# not `npm test`, and `bash TESTS/RUN.SH` names no suite this reader knows), and a script named
+# at argv[0] by its path (`./tests/X.TEST.SH`), for the same reason its operand form is not. And,
+# inside the fold itself, every word whose effect exists only as a shell builtin or keyword: an
+# external program word folds, a builtin-only word does not, because the shell matches its own
+# builtins case-exactly and hands only the rest to the case-blind filesystem. The never list is
+# cd wait exec eval source pushd popd exit return and the reserved words; git-argv.sh
+# `cmd_word_fold` holds the measured table of which names fall on each side.
 #
 # ASCII ONLY. macOS awk lower-cases a multibyte capital too (`tolower("É")` is `é`), so a word
 # with anything outside printable ASCII is folded letter by letter from the 26-letter table.
@@ -293,12 +294,15 @@ CMD_RUN_NORM_AWK='
 CMD_WORD_FOLD_AWK='
     function cmd_word_fold(w,   n, C, i, j, o) {
       if (w !~ /[ABCDEFGHIJKLMNOPQRSTUVWXYZ]/) return w
-      if (w ~ /^[!-~]*$/) return tolower(w)
-      n = split(w, C, ""); o = ""
-      for (i = 1; i <= n; i++) {
-        j = index("ABCDEFGHIJKLMNOPQRSTUVWXYZ", C[i])
-        o = o (j ? substr("abcdefghijklmnopqrstuvwxyz", j, 1) : C[i])
+      if (w ~ /^[!-~]*$/) o = tolower(w)
+      else {
+        n = split(w, C, ""); o = ""
+        for (i = 1; i <= n; i++) {
+          j = index("ABCDEFGHIJKLMNOPQRSTUVWXYZ", C[i])
+          o = o (j ? substr("abcdefghijklmnopqrstuvwxyz", j, 1) : C[i])
+        }
       }
+      if (o ~ /^(cd|pushd|popd|wait|exit|return|exec|eval|source|if|then|else|elif|fi|case|esac|for|select|while|until|do|done|in|function)$/) return w
       return o
     }
     function cmd_head_fold(s,   k, w) {
@@ -559,8 +563,9 @@ _cmd_class_awk() {  # <mode> ; command on stdin
           s = trim(substr(s, RLENGTH + 1))
         # FROM HERE ON A NAME, matched on h, the head folded (wave-25 T12, see CMD_WORD_FOLD_AWK).
         # The fold keeps every length, so RLENGTH cuts s where it cut h, and what comes off is
-        # always the text as typed. The arm above reads as typed: a reserved word is no name, and
-        # a lower-case env, command or exec is its own fold. Only a head the fold changed is
+        # always the text as typed. The arm above reads as typed: a reserved word is no name, exec
+        # is a builtin the fold never touches, and a lower-case env or command is its own fold.
+        # Only a head the fold changed is
         # asked about those three again, so a lower-case command pays no extra regex pass here
         # (each one walks the whole text in macOS awk). The assignment and the redirection are
         # no names either.

@@ -528,12 +528,25 @@ _git_argv_skip() {
 # words are names; an operand, a path, a flag or a subcommand is never handed here (git
 # refuses `git PUSH`, and a path's case is the filesystem's business).
 #
-# WHAT IS NEVER HANDED HERE: the reserved words (`then`, `do`, `if`, ...), which bash matches
-# case-exactly, and six builtins whose capitalised spelling is a different program or none:
-# `cd`, `pushd`, `popd`, `wait`, `exit`, `return`. /usr/bin/CD runs `builtin cd` in a child
-# shell and moves nothing, /usr/bin/WAIT collects no job of this shell, and PUSHD, POPD, EXIT
-# and RETURN resolve to nothing. A reader that folded them would believe in a directory change,
-# a collected job or an exit that never happened, which is the fail-open direction.
+# THE RULE IS RESOLUTION: AN EXTERNAL PROGRAM WORD FOLDS; A WORD WHOSE EFFECT EXISTS ONLY AS A
+# SHELL BUILTIN OR KEYWORD DOES NOT. The case-blind lookup is the filesystem's, and the shell
+# only asks it for a word that is not one of its own builtins, which it matches case-exactly.
+# So a capitalised builtin runs whatever the PATH holds under that name, or nothing. Measured on
+# macOS (`type -P <NAME>` and a run under /bin/bash 3.2):
+#   FOLDS, an external program: sudo env nice xargs ssh find nohup sh bash zsh dash ksh cat npx
+#     pnpx npm pnpm yarn pytest make pip3 uv brew docker uvx git tee touch mkdir sed cp mv ln rm
+#     rmdir unlink ls head tail grep wc date, each found as /usr/bin/<NAME>, /bin/<NAME> or a
+#     Homebrew path; and the builtins with an external twin that does the same thing, so the
+#     capitalised word runs the twin: command (/usr/bin/COMMAND runs its arguments: `COMMAND
+#     echo x` printed x), time (/usr/bin/TIME), echo, printf, test, true, pwd.
+#   FOLDS BY KIND, NOT MEASURED (not installed here, so the capitalised form found nothing):
+#     doas timeout gtimeout setsid ash tac bunx bun jest go cargo pip.
+#   NEVER FOLDS, the effect exists only in the shell: cd and wait (/usr/bin/CD and /usr/bin/WAIT
+#     run the builtin in a child shell, so `CD /usr && pwd` printed the old directory and a job
+#     stayed pending), and exec eval source pushd popd exit return (`EXEC`, `EVAL`, `SOURCE`:
+#     "command not found"); and every reserved word. A reader that folded these would believe in
+#     a directory change, a collected job, a run or an exit that never happened.
+# The never list is checked HERE, on the folded word, so no caller can fold one by mistake.
 #
 # NO FORK, AND A LOWER-CASE WORD COSTS ONE `case`. bash 3.2 has no `${x,,}`; `tr` would fork on
 # every word of every segment. A word with a capital pays 26 substitutions, which on a command
@@ -549,6 +562,10 @@ cmd_word_fold() {
   _w="${_w//P/p}"; _w="${_w//Q/q}"; _w="${_w//R/r}"; _w="${_w//S/s}"; _w="${_w//T/t}"
   _w="${_w//U/u}"; _w="${_w//V/v}"; _w="${_w//W/w}"; _w="${_w//X/x}"; _w="${_w//Y/y}"
   _w="${_w//Z/z}"
+  case "$_w" in
+    cd|pushd|popd|wait|exit|return|exec|eval|source) return 0 ;;
+    if|then|else|elif|fi|case|esac|for|select|while|until|do|done|in|function) return 0 ;;
+  esac
   CMD_WORD_FOLDED="$_w"
 }
 
