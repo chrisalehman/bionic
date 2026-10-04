@@ -1652,7 +1652,8 @@ fx_are "W${T}/a/t" 'echo hi | tee /a/t'
 fx_are "W${T}/a/f" "sed -i 's/a/b/' /a/f"
 fx_are "W${T}/a/x" 'touch /a/x'
 fx_are "W${T}/a/m" 'mkdir -p /a/m'
-fx_are "W${T}/a/l" 'ln -s /src /a/l'
+# A link redirects every later path through it, which the hook resolves before it exists (T16).
+fx_are '?' 'ln -s /src /a/l'
 fx_are "W${T}/b/d" 'cp /a/s /b/d'
 fx_are "W${T}/a/o" 'printf x >> /a/o 2>&1'
 # A sed script that writes a file of its own (`w`) is a write nobody listed.
@@ -1723,7 +1724,8 @@ fx_are "D${T}/w/out.txt" 'rm -f out.txt' /w
 fx_are '?' 'rm -f out.txt'
 fx_are '?' 'echo > ./x'
 fx_are "D${T}/s/f" 'cd /s && rm f'
-fx_are "D${T}/w/x" 'rm ../x' /w/s
+# `..` is left in: the kernel resolves it after following a link, so only the hook can (T16).
+fx_are "D${T}/w/s/../x" 'rm ../x' /w/s
 fx_are "D${T}/h/x" 'rm ~/x'
 
 # --- a cd counts only where the text proves it ran: a failed cd leaves the shell where it was ---
@@ -1842,6 +1844,155 @@ expect_true "§FX find-follow mutant parses" bash -n "$FX_MUT3"
 expect_eq "§FX find-follow mutant: plain -delete is still a D (the mutant runs)" "D${T}/a" "$(FX_LIB="$FX_MUT3" fx_shape 'find /a -delete')"
 expect_eq "§FX find-follow mutant: -L -delete names only the root — the defect" "D${T}/a" "$(FX_LIB="$FX_MUT3" fx_shape 'find -L /a -delete')"
 
+section "§FXP — wave-25 T16: the reader never decides a place it cannot see"
+# THE TWO BLOCKERS OF THE STEP-6 REVIEW (B1, B2). Both are places where the reader was confident
+# and wrong, so the hook allowed a write or delete that landed outside the grant.
+#
+# B1. `..` is resolved by the kernel AFTER it follows a link: with tree/link -> out/sub,
+# tree/link/../escape is out/escape. A reader that folds `..` as text prints tree/escape, and
+# the hook never sees the link. So an effect path keeps its `..`, for the hook to resolve. The one
+# place the shell folds `..` as text is a cd target; there the folded and the unfolded spelling
+# are both printed, because bash falls back to the unfolded one when the folded one is missing.
+#
+# B2. The hook resolves every path at question time, before a link the command makes exists.
+# So `ln` is unknown, and a path at or beneath a cp or mv destination written earlier in the same
+# command is unknown (the copied or moved item may be a link). A write AT the destination writes
+# through such a link; a delete at it removes only the link, unless it ends in a slash.
+
+# --- B1: `..` stays in every effect path ---
+fx_are "W${T}/w/tree/link/../escape" 'echo x > tree/link/../escape' /w
+fx_are "D${T}/w/tree/link/../victim" 'cd tree/link && rm -rf ../victim' /w
+fx_are "D${T}/w/link/../victim" 'rm -rf link/../victim' /w
+fx_are "D${T}/a/b/../c" 'rm -rf /a/b/../c'
+# `.` and an empty component name the directory they stand in, so they come out; `..` does not.
+fx_are "D${T}/a/b" 'rm /a//./b'
+fx_are "W${T}/w/x" 'touch ./x' /w
+# A cd target is folded as the shell folds it, AND printed unfolded, for bash's fallback.
+fx_are "D${T}/w/a/link/../f
+D${T}/w/a/f" 'cd a/link/.. && rm f' /w
+fx_are "D${T}/w/s/../f
+D${T}/w/f" 'cd .. && rm f' /w/s
+fx_are "D${T}/w/a/link/../b/f
+D${T}/w/a/b/f" 'cd a/link/.. && cd b && rm f' /w
+# Two cds through `..` can each go either way: four places, which the two spellings do not cover.
+fx_are '?' 'cd a/.. && cd b/.. && rm f' /w
+# A cd without `..` prints one spelling, as before.
+fx_are "D${T}/x/f" 'cd /x && rm f' /w
+
+# --- B2: ln is unknown; a path at or beneath an earlier cp or mv destination is unknown ---
+fx_are "D${T}/w/tree/link/victim
+?" 'ln -s /o /w/tree/link && rm -rf /w/tree/link/victim'
+fx_are "W${T}/w/link/f
+?" 'ln -s /o link && echo x > link/f' /w
+fx_are "W${T}/w/tree/h
+?" 'ln /m/hooks/x.sh tree/h && echo y > tree/h' /w
+fx_are '?' 'LN -s /o /w/l'
+expect_contains "§FXP the ln line says why" "a link redirects every later path" "$(fx_of 'ln -s /o /w/l' | grep -F "?${T}")"
+fx_are "W${T}/w/b
+?" 'cp -R /w/a /w/b && rm -rf /w/b/sub'
+fx_are "D${T}/w/a
+W${T}/w/b
+?" 'mv /w/a /w/b && rm -rf /w/b/sub'
+fx_are "W${T}/w/b
+?" 'cp -R a b && cd b && rm -rf victim' /w
+fx_are "D${T}/w/link
+W${T}/w/b
+?" 'mv link b && echo x > b' /w
+fx_are "W${T}/w/b
+?" 'cp -R a b && rm -rf c/../b/sub' /w
+fx_are "W${T}/w/d
+?" 'cp -t /w/d a && touch /w/d/a' /w
+fx_are "D${T}/w/a
+W${T}/w/b
+?" 'mv a b && rm -rf b/' /w
+expect_contains "§FXP the beneath line names the destination" "/w/b" "$(fx_of 'cp -R a b && rm -rf b/sub' /w | grep -F "?${T}")"
+# The paired positives on the same reader: a delete of the destination itself removes only what
+# is there, a sibling that shares a prefix is not beneath, a path read before the copy is read,
+# and a directory mkdir made holds no link.
+fx_are "D${T}/w/a
+W${T}/w/b
+D${T}/w/b" 'mv a b && rm -rf b' /w
+fx_are "W${T}/w/b
+D${T}/w/bc" 'cp a /w/b && rm -rf /w/bc' /w
+fx_are "D${T}/w/b/sub
+W${T}/w/b" 'rm -rf b/sub && cp -R a b' /w
+fx_are "W${T}/w/d
+W${T}/w/d/f" 'mkdir -p d && echo x > d/f' /w
+
+# --- B3c/S4: on request, what a command reads ---
+# `cmd_effects <command> <cwd> reads` adds `R<TAB>path` for each file or directory a reader reads
+# and `RR<TAB>path` for one it descends; the path rule is B1's. The hook (T17) resolves each and
+# asks the reserved table about both spellings. Without the word the output is unchanged.
+fxr_of() {  # <command> [<cwd>] -> cmd_effects' lines in reads mode
+  local _c="$1" _d="${2-}"
+  printf '%s' "$_c" | env HOME=/h BIONIC_CLAUDE_HOME= CLAUDE_CONFIG_DIR= bash -c '
+    set -uo pipefail
+    . "$1" || { echo "SOURCE-FAILED"; exit 1; }
+    cmd_effects "$(cat)" "$2" reads' _ "${FX_LIB:-$LIB}" "$_d"
+}
+fxr_shape() { fxr_of "$@" | awk -F'\t' '$1 == "?" { u = 1; next } { print } END { if (u) print "?" }'; }
+fxr_are() {  # <expected, newline-joined> <command> [<cwd>]
+  expect_eq "reads [$(printf '%q' "$2")${3:+ in $3}]" "$1" "$(fxr_shape "$2" "${3-}")"
+}
+fxr_are "R${T}/a/b" 'cat /a/b'
+fx_are '' 'cat /a/b'
+fxr_are "R${T}/w/k/id_rsa" 'cat k/id_rsa' /w
+fxr_are "R${T}/w/s/../x" 'cat ../x' /w/s
+fxr_are "R${T}/x/f" 'cd /x && cat f' /w
+fxr_are "R${T}/a/f" 'head -n 5 /a/f' /w
+fxr_are "R${T}/a/f" 'tail -n 2 /a/f' /w
+fxr_are "R${T}/a/f
+R${T}/a/g" 'wc -l /a/f /a/g'
+fxr_are "R${T}/a/in" 'cat < /a/in'
+fxr_are "W${T}/w/f
+R${T}/h/.ssh/id_rsa" 'tee f < ~/.ssh/id_rsa' /w
+fxr_are "R${T}/a/f" 'grep x /a/f'
+fxr_are "R${T}/a/f" "grep -e 'x' -- /a/f"
+fxr_are '' 'grep x'
+fxr_are "RR${T}/a" 'grep -rn x /a'
+fxr_are "RR${T}/a" 'grep -R x /a'
+fxr_are "RR${T}/a" 'grep --recursive x /a'
+fxr_are "RR${T}/a" 'grep -d recurse x /a'
+fxr_are "RR${T}/a" 'grep --directories=recurse x /a'
+fxr_are "RR${T}/w" 'grep -r x' /w
+fxr_are "R${T}/a" 'ls /a'
+fxr_are "R${T}/w" 'ls -la' /w
+fxr_are "RR${T}/a" 'ls -R /a'
+fxr_are "RR${T}/w" 'ls -laR' /w
+fxr_are "RR${T}/s" 'find /s -type f'
+fxr_are "RR${T}/w" 'find -name x' /w
+fxr_are "RR${T}/w
+D${T}/w" 'find -delete' /w
+fxr_are "RR${T}/w" 'git status' /w
+fxr_are "RR${T}/r" 'git -C /r log' /w
+fxr_are "RR${T}/w
+R${T}/a/k
+R${T}/dev/null" 'git diff --no-index /a/k /dev/null' /w
+fxr_are "R${T}/a/f" "sed -n p /a/f"
+fxr_are "W${T}/a/f
+R${T}/a/f" "sed -i '' s/a/b/ /a/f"
+fxr_are "R${T}/a/s
+W${T}/b/d" 'cp /a/s /b/d'
+fxr_are "RR${T}/a/s
+W${T}/b/d" 'cp -R /a/s /b/d'
+fxr_are '' 'echo hi' /w
+fxr_are '' 'test -f /a/f' /w
+# A read operand the text does not name is unknown, as a write target is; so is a relative read
+# with no directory to read it against.
+fxr_are '?' 'cat ~/.ss?/id'
+fxr_are '?' 'cat f'
+fxr_are '?' 'cd $X && cat f' /w
+fxr_are '?' 'cp ~/.ss?/id /w/k' /w
+# A read beneath a cp or mv destination written earlier reads through what was copied there.
+fxr_are "RR${T}/w/a
+W${T}/w/b
+?" 'cp -R a b && cat b/k' /w
+fxr_are "R${T}/w/k
+RR${T}/w/a
+W${T}/w/k" 'cat k && cp -R a k' /w
+# GREP_OPTIONS assigned in the text can make any later grep recursive.
+fxr_are "RR${T}/a" 'GREP_OPTIONS=-r; grep x /a'
+
 section "§FOLD — wave-25 T12: a command NAME is read the way the machine resolves it"
 # On a case-blind filesystem `BASH` runs bash, `TEE` runs tee and `RM` runs rm (`command -v
 # TEE` finds /usr/bin/TEE), so a reader that matched the literal name read each of them as an
@@ -1953,5 +2104,49 @@ expect_eq "§FOLD mutant: one line changed" "1" "$(diff "$LIB" "$FOLD_MUT" | gre
 expect_true "§FOLD mutant parses" bash -n "$FOLD_MUT"
 expect_eq "§FOLD mutant still reads rm -rf /a/b (the mutant runs)" "D${T}/a/b" "$(FX_LIB="$FOLD_MUT" fx_shape 'rm -rf /a/b')"
 expect_eq "§FOLD mutant reads RM -rf /a/b as unknown — the defect" '?' "$(FX_LIB="$FOLD_MUT" fx_shape 'RM -rf /a/b')"
+
+section "§FOLDAGREE — wave-25 T16 (S6): the shell fold and the awk fold give one answer"
+# THE FOLD HAS TWO COPIES: `cmd_word_fold` in git-argv.sh (the walls and the grant) and
+# `cmd_word_fold` in CMD_WORD_FOLD_AWK (every reading of this library). Each suite tests its own,
+# so a word added to one never list and not the other changed what one reader believes runs and
+# nothing failed. This runs both over one list: every never-fold word and reserved word, and a
+# sample of folding words, each in lower case, upper case and with a leading capital.
+GA_LIB="$REPO_ROOT/payload/scripts/lib/git-argv.sh"
+FOLD_WORDS="$SANDBOX/fold-words.txt"
+for _w in cd pushd popd wait exit return exec eval source \
+          if then else elif fi case esac for select while until do done in function \
+          sudo env nice xargs ssh find nohup sh bash zsh cat npx npm make git tee touch mkdir \
+          sed cp mv ln rm rmdir unlink ls head tail grep wc date command time echo printf test \
+          true pwd timeout setsid; do
+  printf '%s\n%s\n%s\n' "$_w" "$(printf '%s' "$_w" | tr 'a-z' 'A-Z')" \
+    "$(printf '%s' "${_w:0:1}" | tr 'a-z' 'A-Z')${_w:1}"
+done > "$FOLD_WORDS"
+fold_sh() {  # <git-argv.sh> -> "<word><TAB><fold>" per word of $FOLD_WORDS
+  bash -c '. "$1" || exit 9
+    while IFS= read -r w; do cmd_word_fold "$w"; printf "%s\t%s\n" "$w" "$CMD_WORD_FOLDED"; done' _ "$1" < "$FOLD_WORDS"
+}
+FOLD_AWK_MAIN='{ printf "%s\t%s\n", $0, cmd_word_fold($0) }'
+fold_awk() {  # <cmd-class.sh> -> the same, from the awk copy
+  bash -c '. "$1" || exit 9; awk "$CMD_WORD_FOLD_AWK$2"' _ "$1" "$FOLD_AWK_MAIN" < "$FOLD_WORDS"
+}
+FOLD_N="$(grep -c . "$FOLD_WORDS")"
+FOLD_SH_OUT="$(fold_sh "$GA_LIB")"
+FOLD_AWK_OUT="$(fold_awk "$LIB")"
+expect_eq "§FOLDAGREE the shell fold read every word" "$FOLD_N" "$(printf '%s\n' "$FOLD_SH_OUT" | grep -c "$T")"
+expect_eq "§FOLDAGREE the awk fold read every word" "$FOLD_N" "$(printf '%s\n' "$FOLD_AWK_OUT" | grep -c "$T")"
+expect_contains "§FOLDAGREE the shell fold folds a program word (RM is rm)" "RM${T}rm" "$FOLD_SH_OUT"
+expect_contains "§FOLDAGREE the shell fold keeps a builtin word (WAIT is WAIT)" "WAIT${T}WAIT" "$FOLD_SH_OUT"
+expect_contains "§FOLDAGREE the awk fold folds a program word (RM is rm)" "RM${T}rm" "$FOLD_AWK_OUT"
+expect_eq "§FOLDAGREE the two folds agree on every word" "" \
+  "$(diff <(printf '%s\n' "$FOLD_SH_OUT") <(printf '%s\n' "$FOLD_AWK_OUT"))"
+# The planted defect: one never list loses a word. The row above must see it.
+FOLD_GA_MUT="$SANDBOX/git-argv.fold-mutant.sh"
+anchor "$GA_LIB" '    cd|pushd|popd|wait|exit|return|exec|eval|source) return 0 ;;' 1
+sed 's/^    cd|pushd|popd|wait|exit|return|exec|eval|source) return 0 ;;$/    cd|pushd|popd|exit|return|exec|eval|source) return 0 ;;/' "$GA_LIB" > "$FOLD_GA_MUT"
+expect_true "§FOLDAGREE mutant parses" bash -n "$FOLD_GA_MUT"
+FOLD_MUT_OUT="$(fold_sh "$FOLD_GA_MUT")"
+expect_contains "§FOLDAGREE mutant still folds RM (the mutant runs)" "RM${T}rm" "$FOLD_MUT_OUT"
+expect_contains "§FOLDAGREE mutant: the two folds now disagree on WAIT — the defect" "WAIT${T}wait" \
+  "$(diff <(printf '%s\n' "$FOLD_MUT_OUT") <(printf '%s\n' "$FOLD_AWK_OUT"))"
 
 finish
