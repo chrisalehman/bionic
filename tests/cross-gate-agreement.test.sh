@@ -2539,6 +2539,7 @@ section "J.3 — a PREDICATE change moves BOTH answers, never one (the single ow
 # things about one contract.
 JP="$(plant_hook_tree "$JMUT/predicate")"
 cp "$PARTY_LG" "$JP/stop.sh"
+anchor "$PARTY_SW" '[ ! -s "$p" ]' 1
 awk '{ sub(/\[ ! -s "[$]p" \]/, "[ ! -e \"$p\" ]"); print }' "$PARTY_SW" > "$JP/session-sweeper.sh"
 j_saved_lg="$PARTY_LG"; j_saved_sw="$PARTY_SW"
 PARTY_LG="$JP/stop.sh"; PARTY_SW="$JP/session-sweeper.sh"
@@ -5188,21 +5189,18 @@ expect_eq "lifecycle.svg's title renders the same version" \
 v_hc_chips_ok() {
   [ "$(v_hookchain_vals "$1" | grep -c '[0-9]')" -ge 1 ] && echo yes || echo no
 }
-# v_hc_agree <svg> <version> -> yes when no chip disagrees with the version (empty set: yes)
+# v_hc_agree <svg> <version> -> yes when no chip disagrees with the version (empty set: yes).
+# THE ONE OWNER OF THE RELATION (review 9 F2): the live row below and §PIN-REL's arms all ask
+# this helper, so a defect put into it reaches the live row and the pin together.
 v_hc_agree() {
   local _v _bad=0
   for _v in $(v_hookchain_vals "$1"); do [ "$_v" = "$2" ] || _bad=1; done
   [ "$_bad" -eq 0 ] && echo yes || echo no
 }
-V_HC_VALS="$(v_hookchain_vals "$V_HOOKCHAIN")"
-expect_eq "hook-chain.svg carries at least one version-pin chip (the agreement rows below are not vacuous)" "yes" \
+expect_eq "hook-chain.svg carries at least one version-pin chip (the agreement row below is not vacuous)" "yes" \
   "$(v_hc_chips_ok "$V_HOOKCHAIN")"
-V_HC_N=0
-for _v in $V_HC_VALS; do
-  V_HC_N=$((V_HC_N + 1))
-  expect_eq "…hook-chain.svg version-pin chip #$V_HC_N agrees with the gate's" \
-    "$V_ORIGIN_VAL" "$_v"
-done
+expect_eq "…every hook-chain.svg version-pin chip agrees with the gate's" "yes" \
+  "$(v_hc_agree "$V_HOOKCHAIN" "$V_ORIGIN_VAL")"
 
 # MUTATION, the discriminator: doctor the governing-skill hook's value on a COPY — the
 # shipped file is never touched — and the comparison above must be provably able to catch
@@ -9804,16 +9802,43 @@ expect_eq "S13.5 the guard reads the key the wall writes" "0" \
 S18_LG="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh"
 S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 
-# --- §S18.1 exactly one file computes a Files: diff, and it is lib/stop.sh ---
+# --- §S18.1 exactly one file reconciles a diff against a row's files=, and it is lib/stop.sh ---
 # The claim is unchanged — ONE owner of the reconciliation — and the address moved with the
-# sweep at T12, so the count is taken over the library and a stray copy left behind under
+# sweep at T12, so the files are counted over the library and a stray copy left behind under
 # hooks/ fails the second row below.
-expect_eq "S18.1 exactly one library file diffs a worktree by name-only" "1" \
-  "$(grep -lF -- '--name-only' "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"/*.sh | wc -l | tr -d ' ')"
+# A RECONCILER IS A FILE THAT DOES BOTH HALVES (review 9 follow-up): it computes a name-only
+# diff AND names a roster row's `files=` key as a quoted literal, the form a row reader compares
+# a field against. A name-only diff alone is not one: worktree.sh diffs a tree against the landed
+# work to find the files both changed, and never reads a row. The key alone is not one either:
+# brief.sh writes `files=` into a row and computes no diff.
+s18_reconcilers() {  # <dir> -> the .sh files under it that do both halves, one per line
+  local _f
+  for _f in "$1"/*.sh; do
+    [ -f "$_f" ] || continue
+    /usr/bin/grep -qF -- '--name-only' "$_f" && /usr/bin/grep -qF '"files="' "$_f" && printf '%s\n' "$_f"
+  done
+  return 0
+}
+S18_LIB_DIR="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+expect_eq "S18.1 exactly one library file reconciles a diff against a row's files=" "1" \
+  "$(s18_reconcilers "$S18_LIB_DIR" | grep -c . | tr -d ' ')"
 expect_eq "S18.1 …and no hook file does it any more" "0" \
-  "$(grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | wc -l | tr -d ' ')"
+  "$(s18_reconcilers "$BIONIC_HOOKS_DIR" | grep -c . | tr -d ' ')"
 expect_eq "S18.1 …and it is payload/scripts/lib/stop.sh" "1" \
-  "$(grep -lF -- '--name-only' "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"/*.sh | grep -c '/stop\.sh$')"
+  "$(s18_reconcilers "$S18_LIB_DIR" | grep -c '/stop\.sh$')"
+
+# A SECOND RECONCILIATION IS RED. A copy of the library where worktree.sh, which already diffs,
+# also reads a row's files= — the exactly-one row asked of that copy reads 2.
+S18_MUT="$SANDBOX/s18-lib"; rm -rf "$S18_MUT"; mkdir -p "$S18_MUT"
+cp "$S18_LIB_DIR"/*.sh "$S18_MUT/"
+anchor "$S18_LIB_DIR/worktree.sh" '_wt_not_current() {' 1
+awk -v ins='  decl="${row#*|}"; [ "${decl%%=*}=" = "files=" ] && decl="${decl#files=}"' \
+  '{ print } index($0, "_wt_not_current() {") == 1 { print ins }' \
+  "$S18_LIB_DIR/worktree.sh" > "$S18_MUT/worktree.sh"
+expect_eq "S18.1 the doctored worktree.sh still parses and now names the row's files= key" "yes 1" \
+  "$(bash -n "$S18_MUT/worktree.sh" 2>/dev/null && echo yes || echo no) $(/usr/bin/grep -cF '"files="' "$S18_MUT/worktree.sh" | tr -d ' ')"
+expect_eq "S18.1 a second reconciliation in a copy of the library: the exactly-one row reads 2" "2" \
+  "$(s18_reconcilers "$S18_MUT" | grep -c . | tr -d ' ')"
 
 # --- §S18.2 the row -> worktree mapping has ONE definition (worktree.sh's `worktree_for_row`,
 # payload/scripts/lib/worktree.sh's own docblock: "a second spelling of it there is a second
@@ -12626,6 +12651,17 @@ expect_eq "PIN-REL the emptied copy still parses and carries no chip" "0 yes" \
 expect_eq "PIN-REL a fourth chip: the non-empty row stays green" "yes" "$(v_hc_chips_ok "$PR_DIR/chips-plus.svg")"
 expect_eq "PIN-REL …and the agreement relation stays green" "yes" "$(v_hc_agree "$PR_DIR/chips-plus.svg" "$V_ORIGIN_VAL")"
 expect_eq "PIN-REL no chip at all: the non-empty row is red" "no" "$(v_hc_chips_ok "$PR_DIR/chips-none.svg")"
+
+# one chip moved to the next version: the relation the live row asks must answer no (review 9 F2)
+PR_CHIPS_MUT="$PR_DIR/chips-moved.svg"
+anchor "$V_HOOKCHAIN" "canonical_sdlc_version: ${V_ORIGIN_VAL} is" 1
+sed "s/canonical_sdlc_version: ${V_ORIGIN_VAL} is/canonical_sdlc_version: $((V_ORIGIN_VAL + 1)) is/" \
+  "$V_HOOKCHAIN" > "$PR_CHIPS_MUT"
+expect_eq "PIN-REL the moved copy keeps every chip and reads the next version on exactly one" \
+  "$PR_CHIPS_REAL 1" \
+  "$(v_hookchain_vals "$PR_CHIPS_MUT" | grep -c '[0-9]') $(v_hookchain_vals "$PR_CHIPS_MUT" | grep -c -x "$((V_ORIGIN_VAL + 1))")"
+expect_eq "PIN-REL one chip on the next version: the agreement relation is red" "no" \
+  "$(v_hc_agree "$PR_CHIPS_MUT" "$V_ORIGIN_VAL")"
 # a seventh role file: a copy of a writer role under another name (no entry owed in the set)
 cp "$BIONIC_SCRIPTS_DIR"/agents/*.md "$PR_DIR/agents-plus/"
 cp "$BIONIC_SCRIPTS_DIR/agents/implementor.md" "$PR_DIR/agents-plus/seventh.md"
