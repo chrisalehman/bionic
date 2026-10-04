@@ -5001,10 +5001,10 @@ EOF
   # or a review read, so the same code was proved again and again. A proof is one line under
   # `## SDLC State` — `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<record/ path>`
   # (payload/scripts/lib/proof.sh owns its shape and its reader, `proof_last`) — and what is
-  # unproved is the difference since the head it names. The head is `git rev-parse HEAD` of the
-  # checkout holding the plan's `working-branch:`, never an operand. The line goes in through
-  # the shared transaction; every refusal below leaves the plan byte-identical and names its
-  # fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
+  # unproved is the difference since the head it names. The head is the one the evidence attests
+  # (its run header or its reviewed: range, held against the working-branch checkout; T14),
+  # never an operand. The line goes in through the shared transaction; every refusal below
+  # leaves the plan byte-identical and names its fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
   # the tick never reads it, so it is not one of the libraries every verb needs.
   proof-add)
     if ! { declare -F proof_last >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
@@ -5053,6 +5053,14 @@ EOF
         die "REFUSED — no checkout of $PV_REPO has working-branch $(clean "$PF_WB") checked out, so its head cannot be read; check the branch out (its worktree) and run proof-add again. The plan is unchanged."
         exit 1 ;;
     esac
+    # THE HEAD IS THE ONE THE EVIDENCE READ (wave-26 T14; review 7 F1). The checkout's head only
+    # bounds it: a run's log must have read exactly that head on a clean tree, a review a commit
+    # on its history, and the proof names what the evidence attests (lib/proof.sh
+    # `proof_attested`). A task landed between the run and this verb is not proved by it.
+    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$(proof_checkout "$PV_REPO" "$PF_WB")")"; then
+      die "REFUSED — $(clean "$PF_HEAD"). The plan is unchanged."
+      exit 1
+    fi
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL")"
     if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the proof; the plan is unchanged."

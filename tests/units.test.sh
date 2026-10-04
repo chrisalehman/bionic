@@ -2531,6 +2531,27 @@ expect_eq "LIVE.11 a review proof and no head handed in: not ready, the wait nam
   "$(printf '%s %s' "$(has_line "$(live_call "" units_ready "$SANDBOX/lv-proved.md" 4)" T3)" \
      "$(has_line "$(live_call "" units_waiting "$SANDBOX/lv-proved.md" 4)" \
         "T3${TAB}live:head: the head past the review proof at aaaaaaaaaaaa is not known here${TAB}-${TAB}-")")"
+# REVIEW 7 F6: ONE READING OF A PROOF LINE. Readiness and proof.sh's `proof_last` read through the
+# same `proof_fields`: a proof line starts `proved:` at the first column and its head is hex. A
+# bulleted `- proved:` line and a `head=none` line are prose to both — so the review waits as for
+# no proof at all (nothing landed but T1, which here is pending) — while the column-0 hex line
+# is a proof to both.
+PROOF_LIB="$REPO_ROOT/payload/scripts/lib/proof.sh"
+proof_last_of() { bash -c '. "$1" && proof_last "$2" review' _ "$PROOF_LIB" "$1" 2>/dev/null; }
+LV_PENDING_BUILD="${LV_BUILD_LANDED/| landed |/| pending |}"
+lv_plan "$SANDBOX/lv-f6-hex.md" "$(lv_proof "$LV_A")" "$LV_PENDING_BUILD" "$LV_REVIEW"
+lv_plan "$SANDBOX/lv-f6-bullet.md" "- $(lv_proof "$LV_A")" "$LV_PENDING_BUILD" "$LV_REVIEW"
+lv_plan "$SANDBOX/lv-f6-none.md" "proved: kind=review head=none at=2026-10-04T01:00:00Z evidence=record/w/review.md" "$LV_PENDING_BUILD" "$LV_REVIEW"
+expect_eq "LIVE.16 F6 a column-0 hex proof line: proof_last reads it and readiness compares against it" \
+  "${LV_A} yes" "$(proof_last_of "$SANDBOX/lv-f6-hex.md") $(has_line "$(live_call "$LV_A" units_waiting "$SANDBOX/lv-f6-hex.md" 4)" \
+     "T3${TAB}live:head: nothing landed past the review proof at aaaaaaaaaaaa${TAB}-${TAB}-")"
+expect_eq "LIVE.16b F6 a bulleted - proved: line is no proof to either reader" "|yes" \
+  "$(proof_last_of "$SANDBOX/lv-f6-bullet.md")|$(has_line "$(live_call "$LV_A" units_waiting "$SANDBOX/lv-f6-bullet.md" 4)" \
+     "T3${TAB}live:head: nothing has landed yet${TAB}-${TAB}-")"
+expect_eq "LIVE.16c F6 head=none is no proof to either reader" "|yes" \
+  "$(proof_last_of "$SANDBOX/lv-f6-none.md")|$(has_line "$(live_call "$LV_A" units_waiting "$SANDBOX/lv-f6-none.md" 4)" \
+     "T3${TAB}live:head: nothing has landed yet${TAB}-${TAB}-")"
+
 # A fenced review proof is documentation: the table rule (one landed build) still answers.
 lv_plan "$SANDBOX/lv-fenced.md" '```
 '"$(lv_proof "$LV_A")"'
