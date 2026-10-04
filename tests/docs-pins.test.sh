@@ -4886,7 +4886,7 @@ for _w27_f in "${REPO}/agents/auditor.md" "${REPO}/agents/researcher.md"; do
   expect_eq "W27-41d: ${_w27_f#"$REPO"/}, which writes no code, carries no search duty" "" "$(w26_hits "$W27_DUTY" "$_w27_f")"
 done
 W27_DOC41="$TMP/w27-41-doctored.md"
-sed 's/search for an existing site that does the job/search/' "$W27_BLOCK" > "$W27_DOC41"
+tr '\n' ' ' < "$W27_BLOCK" | sed 's/search for[[:space:]]*an existing site that does the job/search/' > "$W27_DOC41"
 expect_eq "W27-41m: a block that lost the search duty is caught" "" "$(w26_hits "$W27_DUTY" "$W27_DOC41")"
 expect_nonempty "W27-41mp precondition: the doctored block still carries the reuse: line" "$(w26_hits "$W27_LINE_A" "$W27_DOC41")"
 
