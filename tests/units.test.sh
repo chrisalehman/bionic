@@ -1217,6 +1217,31 @@ expect_eq "12.6 the table breaks this invariant twice and no other" "2" "$(nline
 expect_eq "12.7 …and units_validate exits 1 for it" "1" \
   "$(call_rc units_validate "$SANDBOX/active-no-tree.md")"
 
+# ONLY A ROW THAT WRITES THE HEAD OWES A TREE (wave-26 T32). A verify, review or doc row whose
+# Files cell names nothing outside the docs root (or nothing at all) commits nothing a gate must
+# attribute; it runs active with an empty worktree cell. The predicate is the scheduler's
+# `writes_head`, asked of the same cell; a row naming one tracked file keeps the refusal.
+cat > "$SANDBOX/active-docs-only.md" <<'ACD_EOF'
+---
+current: 5
+---
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 5 | verify | the floor, writing its record | test-runner | — | 30m | REQ-1 | .bionic/docs/record/w/floor.txt | — | active |
+| T2 | 6 | review | the review, writing nothing | critic | — | 30m | REQ-1 | — | — | active |
+| T3 | 5 | verify | the floor that also edits a test | test-runner | — | 30m | REQ-1 | .bionic/docs/record/w/f.txt, tests/x.test.sh | — | active |
+ACD_EOF
+VAL_ACD="$(call units_validate "$SANDBOX/active-docs-only.md")"
+expect_eq "12.8 an active row whose Files are all under the docs root owes no tree" "0" \
+  "$(printf '%s\n' "$VAL_ACD" | grep -c '^T1: active row names no worktree' | tr -d ' ')"
+expect_eq "12.9 …nor does one whose Files cell names no path" "0" \
+  "$(printf '%s\n' "$VAL_ACD" | grep -c '^T2: active row names no worktree' | tr -d ' ')"
+expect_eq "12.10 …while a row naming one tracked file beside them is still refused" "1" \
+  "$(printf '%s\n' "$VAL_ACD" | grep -c '^T3: active row names no worktree' | tr -d ' ')"
+
 # ---------- the column-less table: the arm must not reach it ----------
 #
 # The same rows, one column narrower. Every `worktree` cell now reads empty for the reason
@@ -2505,6 +2530,24 @@ expect_eq "LIVE.8c …with nothing landed the review waits, and the wait says fo
 lv_plan "$SANDBOX/lv-rec.md" "" "| T1 | 4 | doc | a record only | implementor | — | 30 | REQ-x | .bionic/docs/record/w/n.md |  | landed |" "$LV_REVIEW"
 expect_eq "LIVE.8d …and a landed record-only row is not a landing the review reads" "no" \
   "$(has_line "$(call units_ready "$SANDBOX/lv-rec.md" 4)" T3)"
+# REVIEW 10 F4 (wave-26 T46): `record/…` is the record too, spelled from the docs root as older
+# plans and proof lines spell it; a landed row writing only there made the first review ready
+# with nothing built. The wait names why, read through the same table.
+lv_plan "$SANDBOX/lv-rec2.md" "" "| T1 | 4 | review | an earlier review | critic | — | 30 | REQ-x | record/w/r1.md |  | landed |" "$LV_REVIEW"
+expect_eq "LIVE.8e F4 a landed row whose only file is spelled record/… is no landing either, and the wait says so" "no yes" \
+  "$(printf '%s %s' "$(has_line "$(call units_ready "$SANDBOX/lv-rec2.md" 4)" T3)" \
+     "$(has_line "$(call units_waiting "$SANDBOX/lv-rec2.md" 4)" "T3${TAB}live:head: nothing has landed yet${TAB}-${TAB}-")")"
+# ONE PREDICATE (A-T46.2): the record read waits on an open row writing record/…, as it does on
+# one writing .bionic/…, and the shell spelling of the predicate answers the same.
+lv_plan "$SANDBOX/lv-recrd.md" "" \
+  "| T1 | 4 | doc | notes, record/ spelling | implementor | — | 30 | REQ-x | record/w/n.md |  | active |" \
+  "| T2 | 4 | doc | notes, .bionic/ spelling | implementor | — | 30 | REQ-x | .bionic/docs/record/w/m.md |  | active |" \
+  "| T5 | 4 | build | reads the record | implementor | — | 30 | REQ-x | lib/r.sh | approval:plan, record | pending |"
+expect_eq "LIVE.8f F4 a record read waits on the open writer of either spelling" "yes yes" \
+  "$(W="$(call units_waiting "$SANDBOX/lv-recrd.md" 4)"; printf '%s %s' \
+     "$(has_line "$W" "T5${TAB}record${TAB}T1${TAB}active")" "$(has_line "$W" "T5${TAB}record${TAB}T2${TAB}active")")"
+expect_eq "LIVE.8g F4 units_writes_head: record/… and .bionic/… write no head; a tracked path does" "1 1 0" \
+  "$(call_rc units_writes_head "record/w/r1.md") $(call_rc units_writes_head ".bionic/docs/record/w/r1.md") $(call_rc units_writes_head "record/w/r1.md, lib/a.sh")"
 
 # AC-6.5: after proof-add review at head A the review is not ready at A; one more landing (head
 # B) makes it ready for A..B only, never for the whole diff again.
@@ -2603,6 +2646,19 @@ LIVE_ROWS="$(call units_live_rows "$SANDBOX/lv-rows.md")"
 expect_eq "LIVE.15 units_live_rows names the review whose empty cell defaults to live:head, and the explicit reader" "yes yes" \
   "$(printf '%s %s' "$(has_line "$LIVE_ROWS" "T3${TAB}review${TAB}active")" "$(has_line "$LIVE_ROWS" "T6${TAB}doc${TAB}pending")")"
 expect_eq "LIVE.15b …and not the settled-head final review" "" "$(printf '%s\n' "$LIVE_ROWS" | awk -F'\t' '$1 == "T4"')"
+# REVIEW 10 F3 (wave-26 T46): handed the evidence path, units_live_rows names only the live row
+# whose Files hold it — in either spelling of the record — and none for the final review's.
+lv_plan "$SANDBOX/lv-rows2.md" "" "$LV_BUILD_LANDED" "${LV_REVIEW/| pending |/| active |}" "${LV_FINAL/| pending |/| active |}" \
+  "| T7 | 6 | review | a second live pass, record/ spelling | critic | — | 30 | REQ-x | record/w/r7.md |  | active |"
+expect_eq "LIVE.15c F3 with no evidence path both active live reviews are named" "yes yes" \
+  "$(L="$(call units_live_rows "$SANDBOX/lv-rows2.md")"; printf '%s %s' \
+     "$(has_line "$L" "T3${TAB}review${TAB}active")" "$(has_line "$L" "T7${TAB}review${TAB}active")")"
+expect_eq "LIVE.15d F3 the evidence record/w/review.md names T3 alone" "T3" \
+  "$(call units_live_rows "$SANDBOX/lv-rows2.md" "record/w/review.md .bionic/docs/record/w/review.md" | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "LIVE.15e F3 …record/w/r7.md names T7 alone" "T7" \
+  "$(call units_live_rows "$SANDBOX/lv-rows2.md" "record/w/r7.md .bionic/docs/record/w/r7.md" | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "LIVE.15f F3 …and the final review's evidence, on the same table, names no row" "" \
+  "$(call units_live_rows "$SANDBOX/lv-rows2.md" "record/w/final.md .bionic/docs/record/w/final.md")"
 
 # ============================================================
 section "HOLD — wave-26 T13: a doc row waits for its reads, not its step, in a table that declares reads (REQ-6, AC-6.1, AC-6.2; D3)"
@@ -2764,6 +2820,26 @@ expect_eq "HARDEN.F3h …while the fixture still carries the loop as edges both 
      "$(has_line "$(call units_edges "$SANDBOX/f3-active.md")" "T2${TAB}T1${TAB}lib/b.sh")")"
 expect_eq "HARDEN.F3i an acyclic reads table still validates clean (READS fixture)" "0" \
   "$(call_rc units_validate "$SANDBOX/reads.md")"
+# A ROW THAT WAITS ON ITSELF is a cycle of one (wave-26 T32; review 7 F5). Its group holds only
+# itself, so the count of two or more never named it; it validated and was never ready.
+cat > "$SANDBOX/f3-self.md" <<'SELF_EOF'
+## SDLC State
+
+current: 5
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | a, waiting on itself | implementor | T1 | 30 | REQ-x | lib/a.sh | pending |
+| T2 | 4 | build | b | implementor | — | 30 | REQ-x | lib/b.sh | pending |
+SELF_EOF
+expect_eq "HARDEN.F3j precondition: the self-dependency is an edge from the row to itself" "yes" \
+  "$(has_line "$(call units_edges "$SANDBOX/f3-self.md")" "T1${TAB}T1${TAB}T1")"
+V="$(call units_validate "$SANDBOX/f3-self.md")"
+expect_eq "HARDEN.F3j F5 a row that depends on itself is refused" "1" "$(call_rc units_validate "$SANDBOX/f3-self.md")"
+expect_contains "HARDEN.F3k …as a cycle naming it" "T1: read cycle through T1" "$V"
+expect_absent "HARDEN.F3l …and not the row beside it" "T2:" "$V"
 
 # F5 — ONE BRACKET DOES NOT STOP THE PLAN. A `[` in a Files glob used to build a broken regex and
 # abort the program: every verb exit 2, nothing ready. The matcher reads a bracket literally (the
