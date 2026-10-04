@@ -2014,7 +2014,7 @@ ls_wrap() {  # <command> — the command the real wall hands the harness, cwd = 
 ls_harness() {  # <command> — run as the harness runs a Bash call, standing in the main checkout
   local q="'\\''" s; s="${1//\'/$q}"
   ( cd "$LS" && env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
-      BIONIC_SLOTS_DIR="$TMP/land-shim-slots" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=20 \
+      BIONIC_SLOTS_DIR="$TMP/land-shim-slots" BIONIC_SLOTS_N="${LS_SLOTS_N:-2}" BIONIC_SLOTS_MAX_WAIT="${LS_MAX_WAIT:-20}" BIONIC_SLOTS_POLL=0.1 \
       /bin/bash -c "eval '$s' < /dev/null" ) >/dev/null 2>&1
 }
 ls_tree() {  # <branch> <suite exit code> -> the tree, its suite committed, nothing else in it
@@ -2148,6 +2148,23 @@ expect_match "(h) b's newest stamp is still the red two-suite run: REFUSED, nami
 lsu_run "$LSH" b 0
 expect_match "(h) …and once b runs green alone the tree LANDS" \
   "spawn-worktree: LANDED branch=su-two-in-one onto=wave/fixture *" "$(worktree_land "$LSH" wave/fixture)"
+
+# (i) A SUITE THAT NEVER GOT A PLACE (critic 3 S5). a runs green; b waits for the one place, which
+# another run holds, and gives up (69). Its line names b, so the land refuses on it; once b runs
+# green the tree lands.
+LSI="$(lsu_tree su-b-no-place)"
+lsu_run "$LSI" a 0
+sleep 60 & LSI_H=$!
+mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSI_H" > "$TMP/land-shim-slots/place.1/pid"
+export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsu_run "$LSI" b 0; unset LS_SLOTS_N LS_MAX_WAIT
+kill "$LSI_H" 2>/dev/null; wait "$LSI_H" 2>/dev/null
+expect_eq "(i) a green, then b's no-place end stamped with its suite and 69" \
+  "a.test.sh:0 b.test.sh:69" "$(lsu_stamps "$LSI")"
+expect_match "(i) a green then b out of places at one head is REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=69 suite=b.test.sh *" "$(worktree_land "$LSI" wave/fixture)"
+lsu_run "$LSI" b 0
+expect_match "(i) …and once b runs green the tree LANDS" \
+  "spawn-worktree: LANDED branch=su-b-no-place onto=wave/fixture *" "$(worktree_land "$LSI" wave/fixture)"
 
 # (g) A LINE THAT NAMES NO SUITE: an older shim's (no `suites=`), or `?` for a run the wall could
 # not name. It could be ANY suite, so no later run at that head can clear a red or dirty one;

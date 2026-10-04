@@ -45,6 +45,12 @@
 # (`.git/worktrees/<name>`), so a stamp never lands in another checkout. Outside a git
 # tree, or in one with no commit, there is no stamp and no error. worktree_land reads it.
 #
+# EVERY END STAMPS (wave-26 T61, critic 3 S5), except a usage error (exit 2), which never got as far
+# as reading the tree. A command that never got its place (69, or 124 under --kill-after) and a
+# shim signalled while it waited (128+n) stamp the code they ended on, with the same `suites=`, though
+# nothing ran: otherwise "suite a green, suite b never ran" at one head leaves only a's line, and
+# the land reads a's proof as the tree's.
+#
 # --stamp-dir <dir>: THE TREE THE SUITE RUNS IN, WHEN THAT IS NOT WHERE THE SHIM STANDS (wave-26
 # T56, final review B1). The wall wraps the WHOLE command, so `cd <tree> || exit 1; bash tests/x`
 # typed from the main checkout starts the shim in the main checkout; the wall reads the leading
@@ -89,8 +95,8 @@
 # FOR A PLACE (T44, review 8 F2): every wait gives up by the same rule, and the kill is timed
 # from the shim's start, not the run's, so the call ends inside the harness's own timeout
 # whatever the machine is doing. A command that never got its place prints the lib's give-up
-# line (naming the holders), then the same short-limit line, and exits 124; it ran nothing, so
-# it stamps nothing. A void --quiet run's retry gets only what is left.
+# line (naming the holders), then the same short-limit line, and exits 124; it ran nothing, and it
+# still stamps 124 (see EVERY END STAMPS). A void --quiet run's retry gets only what is left.
 #
 # EVERY COMMAND LEADS ITS OWN PROCESS GROUP (`set -m` around the one spawn; T44, review 8 F3).
 # Without job control bash starts a background command with SIGINT and SIGQUIT ignored, and every
@@ -218,7 +224,7 @@ booked_stamp() {  # <rc>
 }
 
 # ── running the command ──────────────────────────────────────────────────────
-CHILD=""; RUN_RC=0; STARTED=0
+CHILD=""; RUN_RC=0
 
 booked_tree() {  # <pid> — the pid and its descendants, each stopped so none can fork
   local c
@@ -254,7 +260,6 @@ booked_over_limit() {  # the one line a command stopped at its short limit gets,
 
 booked_run() {  # runs $cmd; sets RUN_RC
   local killed=0 q
-  STARTED=1
   # THE COMMAND LEADS ITS OWN PROCESS GROUP (`set -m` around the one spawn; see the header):
   # it starts with the signal dispositions it would have had unwrapped, and the kill reaches
   # every process it started, an orphan included. The group is never the shim's own, so the
@@ -307,7 +312,8 @@ booked_on_signal() {  # <signal number>
   fi
   CHILD=""
   RUN_RC=$((128 + $1))
-  [ "$STARTED" -eq 0 ] || booked_stamp "$RUN_RC"
+  # Stamped whether or not the command had started: a signal during the wait is an end too.
+  booked_stamp "$RUN_RC"
   exit "$RUN_RC"
 }
 trap 'booked_on_signal 1' HUP
@@ -361,9 +367,11 @@ SLOTS_DEADLINE=$((BOOKED_T0 + BOOKED_MAX_WAIT + BOOKED_CUT))
 
 booked_no_place() {  # the wait ran out before the command could start; it ran nothing
   # At the short limit it is the same end as a run stopped there: its line, 124 (A-T44.3).
-  # At the ordinary ceiling it is the lib's line and 69, as without --kill-after.
-  [ "$BOOKED_CUT" -eq 1 ] || exit "$BOOKED_NOPLACE_RC"
+  # At the ordinary ceiling it is the lib's line and 69, as without --kill-after. Either way it
+  # stamps that code (EVERY END STAMPS): the suite did not run, and the land must hear so.
+  [ "$BOOKED_CUT" -eq 1 ] || { booked_stamp "$BOOKED_NOPLACE_RC"; exit "$BOOKED_NOPLACE_RC"; }
   booked_over_limit
+  booked_stamp "$BOOKED_KILLED_RC"
   exit "$BOOKED_KILLED_RC"
 }
 

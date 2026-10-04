@@ -921,6 +921,43 @@ expect_regex "S10.8 beside --stamp-dir, the field goes with the stamp into that 
   "^stamp/v1\\|head=$(git -C "$ROW/wt" rev-parse HEAD)\\|dirty=0\\|rc=1\\|at=[^|]*\\|suites=b\\.test\\.sh\\|cmd=exit 1\$" \
   "$(tail -1 "$(stamps_of "$ROW/wt")" 2>/dev/null)"
 
+# S11. A RUN THAT NEVER FINISHED STILL STAMPS (wave-26 T61, critic 3 S5). A suite that never got
+# its place (69), was stopped at its short limit while it waited (124), or was signalled while it
+# waited (128+n) used to leave no line, so "a green, b never ran" at one head read as a's proof
+# alone. Each of these ends now stamps the code it ended on and the suites it was handed; the
+# land refuses on it and names the suite. A usage error (exit 2) still stamps nothing (S10.7).
+newrow s11
+mkrepo "$ROW/repo"
+S11_STAMPS="$(stamps_of "$ROW/repo")"
+sleep 60 & S11_H=$!; BG="$BG $S11_H"
+mkdir -p "$ST/place.1"; printf '%s\n' "$S11_H" > "$ST/place.1/pid"
+s11_run() {  # <max wait> <shim option>... — one booked run in the repo, the only place held
+  local mw="$1"; shift
+  ( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=1 BIONIC_SLOTS_POLL=0.1 \
+      BIONIC_SLOTS_MAX_WAIT="$mw" bash "$BOOKED" "$@" -- "touch $ROW/s11.ran" ) >"$ROW/out" 2>&1
+}
+s11_run 1 --suites b.test.sh; S11_RC=$?
+expect_status "S11.1 no place within the ceiling: the shim exits 69" 69 "$S11_RC"
+expect_false "S11.1 …and its command never ran" test -e "$ROW/s11.ran"
+expect_regex "S11.2 …and it stamped that end: rc=69, with the suite it was handed" \
+  "^stamp/v1\\|head=$(git -C "$ROW/repo" rev-parse HEAD)\\|dirty=0\\|rc=69\\|at=[^|]*\\|suites=b\\.test\\.sh\\|cmd=touch " \
+  "$(tail -1 "$S11_STAMPS" 2>/dev/null)"
+s11_run 12 --kill-after 1 --suites c.test.sh; S11_RC=$?
+expect_status "S11.3 stopped at its short limit while it waited: 124" 124 "$S11_RC"
+expect_regex "S11.4 …and it stamped rc=124 with its suite" \
+  "\\|rc=124\\|at=[^|]*\\|suites=c\\.test\\.sh\\|cmd=touch " "$(tail -1 "$S11_STAMPS" 2>/dev/null)"
+( cd "$ROW/repo" && exec env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=1 BIONIC_SLOTS_POLL=0.1 \
+    BIONIC_SLOTS_MAX_WAIT=20 BIONIC_SLOTS_NOTE_S=60 bash "$BOOKED" --suites d.test.sh -- "touch $ROW/s11.ran" ) \
+  >"$ROW/sig.out" 2>&1 & S11_S=$!; BG="$BG $S11_S"
+expect_true "S11.5 a run waiting for its place says so" wait_text "$ROW/sig.out" "waiting"
+kill -TERM "$S11_S" 2>/dev/null; wait "$S11_S" 2>/dev/null; S11_RC=$?
+expect_status "S11.5 …and signalled while it waits it ends 143" 143 "$S11_RC"
+expect_regex "S11.6 …and it stamped rc=143 with its suite, though it never ran" \
+  "\\|rc=143\\|at=[^|]*\\|suites=d\\.test\\.sh\\|cmd=touch " "$(tail -1 "$S11_STAMPS" 2>/dev/null)"
+expect_false "S11.6 …its command never ran" test -e "$ROW/s11.ran"
+expect_eq "S11.7 three ends, three lines" "3" "$(grep -c . "$S11_STAMPS" 2>/dev/null)"
+kill "$S11_H" 2>/dev/null; wait "$S11_H" 2>/dev/null
+
 # ══════════════════════════════════════════════════════════════════ §NESTED-ENV
 section "NESTED-ENV — a command inside a place books nothing and never waits on its parent"
 
@@ -1084,13 +1121,17 @@ expect_contains "K4.3 …it waited, naming the holder" "$K4_H" "$K4_OUT"
 expect_contains "K4.4 …with the line of a run stopped at its limit" \
   "booked: stopped after 2s — over the short limit; a longer command belongs in a subagent" "$K4_OUT"
 expect_false "K4.5 …and its command never ran" test -e "$ROW/k4.ran"
-expect_eq "K4.6 …so no stamp was written" "0" "$(cat "$K4_STAMPS" 2>/dev/null | grep -c .)"
+# Since T61 (critic 3 S5) a run that never got its place still stamps, with the code it ended
+# on, so a land never reads "this suite did not run" as nothing to answer for.
+expect_eq "K4.6 …and it stamped once, rc=124, though it ran nothing" "1 rc=124" \
+  "$(grep -c . "$K4_STAMPS" 2>/dev/null) $(tail -1 "$K4_STAMPS" 2>/dev/null | tr '|' '\n' | grep '^rc=')"
 kill "$K4_H" 2>/dev/null; wait "$K4_H" 2>/dev/null
 ( cd "$ROW/repo" && env BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=1 BIONIC_SLOTS_MAX_WAIT=12 \
     bash "$BOOKED" --kill-after 5 -- "touch $ROW/k4.ran" ) >/dev/null 2>&1; K4_RC=$?
 expect_status "K4.7 with the holder gone the same call runs" 0 "$K4_RC"
 expect_true "K4.8 …its command ran" test -e "$ROW/k4.ran"
-expect_eq "K4.9 …and it stamped (beside K4.6)" "1" "$(cat "$K4_STAMPS" 2>/dev/null | grep -c .)"
+expect_eq "K4.9 …and it stamped its own line, rc=0 (beside K4.6)" "2 rc=0" \
+  "$(grep -c . "$K4_STAMPS" 2>/dev/null) $(tail -1 "$K4_STAMPS" 2>/dev/null | tr '|' '\n' | grep '^rc=')"
 
 # K5. THE KILL IS TIMED FROM THE SHIM'S START, so the wait spends the limit. The place is held
 # for 4 s and the command needs 4 s: inside a 6 s limit counted from the run it would finish
