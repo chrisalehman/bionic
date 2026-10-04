@@ -282,11 +282,32 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 _wt_say() { printf '%s: %s\n' "${WORKTREE_CONTRACT_PROG:-spawn-worktree}" "$*"; }
 _wt_refuse() { _wt_say "REFUSED reason=$*"; return 2; }
 
-# The checkout holding <branch>, from `git worktree list --porcelain`: one
+# Every checkout git lists for <root>, from `git worktree list --porcelain`: one
 # `worktree <path>` stanza per checkout, its `branch refs/heads/<b>` line naming
-# what it holds. A detached or bare stanza holds no branch and is skipped. The
-# path is printed physically (`pwd -P`), the form every other path in this file
-# is compared in.
+# what it holds. Printed one per line as `<ref>` TAB `<path as git prints it>`,
+# the ref `-` for a detached or bare stanza, and the MAIN checkout first, because
+# git lists it first. rc 1 when git cannot be asked or lists nothing (a root that
+# is no repository). The one reader of the porcelain: `worktree_checkout_of` and
+# the workspace readers below both take it from here.
+_wt_checkouts() {  # <root>
+  local list line path="" ref="-" n=0
+  list="$(git -C "${1:-}" worktree list --porcelain 2>/dev/null)" || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*)
+        [ "$n" -gt 0 ] && printf '%s\t%s\n' "$ref" "$path"
+        path="${line#worktree }"; ref="-"; n=$((n + 1)) ;;
+      "branch "*) ref="${line#branch }" ;;
+    esac
+  done <<EOF
+$list
+EOF
+  [ "$n" -gt 0 ] || return 1
+  printf '%s\t%s\n' "$ref" "$path"
+}
+
+# The checkout holding <branch>. The path is printed physically (`pwd -P`), the
+# form every other path in this file is compared in.
 #
 #   0  one checkout holds it -> its path
 #   1  no checkout holds it
@@ -294,17 +315,13 @@ _wt_refuse() { _wt_say "REFUSED reason=$*"; return 2; }
 #      paths, space-separated: which of them to merge in is not a guess to make
 #   3  the one stanza's directory cannot be entered (a prunable entry) -> its path
 worktree_checkout_of() {  # <root> <branch>
-  local root="${1:-}" want="refs/heads/${2:-}" line path="" hits="" n=0 abs
+  local want="refs/heads/${2:-}" ref path hits="" n=0 abs
   [ -n "${2:-}" ] || return 1
-  while IFS= read -r line; do
-    case "$line" in
-      "worktree "*) path="${line#worktree }" ;;
-      "branch "*)
-        [ "${line#branch }" = "$want" ] || continue
-        n=$((n + 1)); hits="${hits:+$hits }${path}" ;;
-    esac
+  while IFS=$'\t' read -r ref path; do
+    [ "$ref" = "$want" ] || continue
+    n=$((n + 1)); hits="${hits:+$hits }${path}"
   done <<EOF
-$(git -C "$root" worktree list --porcelain 2>/dev/null)
+$(_wt_checkouts "${1:-}")
 EOF
   [ "$n" -eq 0 ] && return 1
   if [ "$n" -gt 1 ]; then printf '%s' "$hits"; return 2; fi
@@ -508,4 +525,179 @@ worktree_lease_overruns() {  # <main-root> <verdict-or-roster-file> -> <path>\t<
 # definition of which tree belongs to whom.
 worktree_for_row() {  # <main-root> <row name> -> path (whether or not it exists)
   printf '%s/.worktrees/%s' "${1%/}" "$(printf '%s' "${2#W-}" | tr '[:upper:]' '[:lower:]')"
+}
+
+# ---------------------------------------------------------------------------
+# Workspaces — the tree recorded for a name (wave-25 T1, REQ-2, D3).
+#
+# THE ACT THAT CREATES A TREE RECORDS WHOSE IT IS. `spawn-worktree.sh create --for <name>`
+# appends one line, after the tree is verified, to `<main-root>/.bionic/tmp/workspaces-<sid>.state`:
+#
+#   workspace/v1|session=<sid>|name=<agent name>|path=<absolute tree>|branch=<branch>|base=<sha>|plan=<absolute plan or none>|at=<ISO-UTC>
+#
+# and the two readers below answer from that file alone. That is the whole difference from
+# `worktree_for_row` above: the convention says which tree a name WOULD have, this record
+# says which tree was MADE for it. Nothing here falls back to the convention — a name nobody
+# recorded has no tree, whatever `.worktrees/` holds. Not a roster key: the tree exists
+# before the roster row does.
+#
+# APPEND-ONLY, THE LAST LINE THAT COUNTS WINS. A second create for one name appends a second
+# line; `workspace_for_name` returns the later tree, `workspaces_of_session` every tree in order.
+#
+# A PATH COUNTS ONLY WHERE GIT SAYS A TREE IS (wave-25 T18, critic C1, A-orch-36). The file sits
+# in `.bionic/tmp`, and a script the permission hook never sees can append to it, so a line is
+# a claim and git is the witness: the path counts only when `git worktree list` names it as a
+# LINKED worktree of this repository, spelled exactly as git spells it, resolving physically to
+# that same spelling, with the `.git` file a linked tree has. Never the main checkout or a
+# directory above it. A line that does not count is skipped, so an earlier true line still
+# answers: the rule only narrows. Decided by place, never by a prefix: `create` accepts any
+# parent directory. A yes is exact (A-orch-29), so a `..`, a trailing slash or another letter
+# case is refused even where it names the same tree. Git is asked once per answer, and not at
+# all when no line could count; when it cannot be asked the answer is rc 2, never a path.
+#
+# THE SYMLINK REFUSAL IS THE ROSTER'S (hooks/dispatch-preflight.sh `attested`): `.bionic`,
+# `.bionic/tmp` and the file itself are each refused when they are a symlink, by the writer
+# and by both readers, so a planted link can neither carry a record out of the tree nor hand
+# a session somebody else's.
+#
+# THE READERS' NAMES ARE THE PLAN'S INTERFACE, verbatim, which is why they carry no
+# `worktree_` prefix. Status: 0 an answer, 1 nothing recorded, 2 refused (a link on the
+# path, a file that cannot be read, or a session id no file can be named for).
+
+WORKSPACE_SCHEMA="workspace/v1"
+
+# The file for <root> <sid>, rc 1 when the session id cannot name one. The shape rule is
+# `engaged_marker_path`'s (lib/run.sh): a session that can have a marker can have this file.
+_wt_workspaces_file() {  # <root> <sid>
+  local root="${1:-}" sid="${2:-}"
+  [ -n "$root" ] && [ -n "$sid" ] || return 1
+  [ "$sid" = "unknown" ] && return 1
+  case "$sid" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  printf '%s/.bionic/tmp/workspaces-%s.state' "${root%/}" "$sid"
+}
+
+_wt_workspaces_unlinked() {  # <root> <file> -> 0 when no level of the path is a symlink
+  [ ! -L "${1%/}/.bionic" ] && [ ! -L "${1%/}/.bionic/tmp" ] && [ ! -L "$2" ]
+}
+
+# A value that would break the line: empty, or carrying the separator or a line break.
+_wt_workspace_value_bad() {  # <value>
+  case "${1:-}" in ''|*'|'*|*$'\n'*|*$'\r'*) return 0 ;; esac
+  return 1
+}
+
+# The session's bound plan as the engaged marker names it, or `none`. Never the root's
+# newest open run: that fallback is somebody else's run (lib/run.sh `session_run`).
+_wt_workspace_plan() {  # <root> <sid>
+  local lib p
+  if ! declare -f session_plan >/dev/null 2>&1; then
+    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/run.sh"
+    # shellcheck source=/dev/null
+    [ -r "$lib" ] && . "$lib" 2>/dev/null
+    declare -f session_plan >/dev/null 2>&1 || return 1
+  fi
+  p="$(session_plan "$1" "$2" 2>/dev/null)" || p=""
+  case "$p" in /*) printf '%s' "$p" ;; *) printf 'none' ;; esac
+}
+
+# Could <name> be recorded for <sid> under <root>? Silent rc 0, or the reason on stdout and
+# rc 1. `create` asks BEFORE it makes anything, so a create that could not record is refused
+# with nothing to undo; `worktree_record_workspace` asks again at the append.
+worktree_workspace_refusal() {  # <root> <sid> <name>
+  local f
+  _wt_workspace_value_bad "${3:-}" && { printf 'invalid-name'; return 1; }
+  f="$(_wt_workspaces_file "${1:-}" "${2:-}")" || { printf 'invalid-session'; return 1; }
+  _wt_workspaces_unlinked "$1" "$f" || { printf 'workspace-file-symlinked'; return 1; }
+  [ ! -e "$f" ] || [ -f "$f" ] || { printf 'workspace-file-unwritable'; return 1; }
+  return 0
+}
+
+# Append the one line. Silent rc 0, or the reason on stdout and rc 1.
+worktree_record_workspace() {  # <root> <sid> <name> <abs tree> <branch> <base sha>
+  local root="${1:-}" sid="${2:-}" name="${3:-}" path="${4:-}" branch="${5:-}" base="${6:-}" f plan v
+  worktree_workspace_refusal "$root" "$sid" "$name" || return 1
+  f="$(_wt_workspaces_file "$root" "$sid")"
+  case "$path" in /*) : ;; *) printf 'workspace-path-not-absolute'; return 1 ;; esac
+  plan="$(_wt_workspace_plan "$root" "$sid")" || { printf 'run-library-unloadable'; return 1; }
+  for v in "$path" "$branch" "$base" "$plan"; do
+    _wt_workspace_value_bad "$v" && { printf 'workspace-field-unrecordable'; return 1; }
+  done
+  mkdir -p "${f%/*}" 2>/dev/null || { printf 'workspace-file-unwritable'; return 1; }
+  _wt_workspaces_unlinked "$root" "$f" || { printf 'workspace-file-symlinked'; return 1; }
+  printf '%s|session=%s|name=%s|path=%s|branch=%s|base=%s|plan=%s|at=%s\n' \
+    "$WORKSPACE_SCHEMA" "$sid" "$name" "$path" "$branch" "$base" "$plan" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$f" 2>/dev/null \
+    || { printf 'workspace-file-unwritable'; return 1; }
+}
+
+# rc 0 when no component of the absolute <path> is a symbolic link, so the path is its own
+# physical name. Read with `[ -L ]` per component rather than `_wt_abs`, which costs a subshell
+# per candidate on the permission hook's path; the two agree here because a candidate has
+# already matched git's spelling exactly, and git records a tree by its physical path (measured
+# on git 2.50: a tree added through /tmp is listed under /private/tmp), with no `.` or `..`.
+_wt_unlinked_path() {  # <absolute path>
+  local rest="${1#/}" at=""
+  while [ -n "$rest" ]; do
+    at="${at}/${rest%%/*}"
+    [ -L "$at" ] && return 1
+    case "$rest" in */*) rest="${rest#*/}" ;; *) rest="" ;; esac
+  done
+  return 0
+}
+
+# The candidates that count, by the rule above: every one in order (<all> 1) or the last
+# (<all> 0). 0 printed, 1 none counts, 2 git cannot be asked.
+_wt_listed_trees() {  # <root> <candidate paths, one per line> <all: 1 or 0>
+  local listed main="" linked="" first=1 ref path p last="" nl=$'\n'
+  listed="$(_wt_checkouts "$1")" || return 2
+  while IFS=$'\t' read -r ref path; do
+    if [ "$first" = 1 ]; then main="$path"; first=0; continue; fi
+    linked="${linked}${path}${nl}"
+  done <<< "$listed"
+  while IFS= read -r p; do
+    case "${nl}${linked}" in *"${nl}${p}${nl}"*) : ;; *) continue ;; esac
+    case "${main}/" in "${p}"/*) continue ;; esac
+    [ -d "$p" ] && [ -f "${p}/.git" ] || continue
+    _wt_unlinked_path "$p" || continue
+    if [ "$3" = 1 ]; then printf '%s\n' "$p"; fi
+    last="$p"
+  done <<< "$2"
+  [ -n "$last" ] || return 1
+  [ "$3" = 1 ] || printf '%s\n' "$last"
+}
+
+# Both readers in one walk, read by key. A line is a candidate when it is this schema, names
+# THIS session (the file name alone is not trusted for that) and carries an absolute path; a
+# CRLF ending is translated, never kept in the path. A candidate counts by `_wt_listed_trees`.
+_wt_workspace_paths() {  # <root> <sid> <name> <all: 1 or 0>
+  local f out
+  f="$(_wt_workspaces_file "$1" "$2")" || return 2
+  _wt_workspaces_unlinked "$1" "$f" || return 2
+  [ -e "$f" ] || return 1
+  { [ -f "$f" ] && [ -r "$f" ]; } || return 2
+  out="$(WT_SID="$2" WT_NAME="$3" WT_ALL="$4" awk -F'|' -v schema="$WORKSPACE_SCHEMA" '
+    BEGIN { sid = ENVIRON["WT_SID"]; want = ENVIRON["WT_NAME"]; all = ENVIRON["WT_ALL"] }
+    { sub(/\r$/, "") }
+    $1 != schema { next }
+    {
+      s = ""; n = ""; p = ""; hn = 0
+      for (i = 2; i <= NF; i++) {
+        if (index($i, "session=") == 1) s = substr($i, 9)
+        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
+        else if (index($i, "path=") == 1) p = substr($i, 6)
+      }
+      if (s != sid || substr(p, 1, 1) != "/") next
+      if (all == "1" || (hn && n == want)) print p
+    }' "$f" 2>/dev/null)" || return 2
+  [ -n "$out" ] || return 1
+  _wt_listed_trees "$1" "$out" "$4"
+}
+
+workspace_for_name() {  # <root> <sid> <name> -> the last tree recorded for <name>; 1 none, 2 refused
+  [ -n "${3:-}" ] || return 1
+  _wt_workspace_paths "${1:-}" "${2:-}" "$3" 0
+}
+
+workspaces_of_session() {  # <root> <sid> -> every tree recorded, one per line; 1 none, 2 refused
+  _wt_workspace_paths "${1:-}" "${2:-}" "" 1
 }

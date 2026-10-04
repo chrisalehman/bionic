@@ -689,4 +689,147 @@ expect_eq   "it exits 0" "0" "$LRC4"
 ld1_stop
 unset BIONIC_CLAUDE_HOME
 
+
+section "§WS: a named create records whose tree it is (wave-25 T1, REQ-2, AC-2.1 hermetic, D3)"
+#
+# THE ACT THAT MAKES THE TREE RECORDS IT. `create … --for <name>` appends one
+# `workspace/v1` line to `<main-root>/.bionic/tmp/workspaces-<sid>.state` after the tree
+# is verified; `create` without it appends nothing and prints the same attestation it
+# always has. The readers are lib/worktree.sh's `workspace_for_name` and
+# `workspaces_of_session`, and they answer from that file alone: a name nothing recorded
+# has no tree, whatever `.worktrees/` happens to hold (no `worktree_for_row` naming
+# fallback). The session is the one `land` already reads, CLAUDE_CODE_SESSION_ID through
+# lib/session.sh, set per call here so the suite's own session never leaks in.
+#
+# THE PLANTED DEFECT (matrix AC-2.1, T1 row): `create` records nothing, or the reader
+# falls back to the naming pattern. The first makes every line-count and reader row red;
+# the second makes the `.worktrees/25-t2` row red: that tree exists, unrecorded, at exactly
+# the path `worktree_for_row` spells for the roster name `W-25-T2`, on any filesystem.
+
+WSLIB="${REPO}/payload/scripts/lib/worktree.sh"
+ws_read() {  # <fn> <args...> -> the reader's stdout, then `rc=<n>` on its own line
+  ( . "$WSLIB" 2>/dev/null || exit 9; "$@"; echo "rc=$?" )
+}
+ws_create() {  # <sid or -> <repo> <args...> -> stdout of create, then `rc=<n>`
+  local sid="$1" cwd="$2"; shift 2
+  if [ "$sid" = "-" ]; then
+    ( cd "$cwd" && env -u CLAUDE_CODE_SESSION_ID bash "$SPAWN" create "$@" 2>/dev/null; echo "rc=$?" )
+  else
+    ( cd "$cwd" && CLAUDE_CODE_SESSION_ID="$sid" bash "$SPAWN" create "$@" 2>/dev/null; echo "rc=$?" )
+  fi
+}
+ws_path() { printf '%s\n' "$1" | tr ' ' '\n' | sed -n 's/^path=//p'; }
+ws_lines() { if [ -f "$1" ]; then grep -c '' "$1"; else echo 0; fi; }
+
+WR="$(new_repo "$TMP/ws")"
+WSID="ws-session-01"
+WBASE="$(sha_of "$WR")"
+WSF="${WR}/.bionic/tmp/workspaces-${WSID}.state"
+mkdir -p "$WR/.bionic/docs/plans/epic-x" "$WR/.bionic/tmp"
+WPLAN="$WR/.bionic/docs/plans/epic-x/wave-x.plan.md"
+printf -- '---\nworking-branch: wave/25-demo\n---\n# plan\n\n## SDLC State\n\ncurrent: 4\n' > "$WPLAN"
+printf 'plan=%s\nengaged_at=2026-10-03T00:00:00Z\n' "$WPLAN" > "$WR/.bionic/tmp/engaged-${WSID}.state"
+
+# A named create: one line, all eight fields, the attestation unchanged.
+WOUT="$(ws_create "$WSID" "$WR" "$WBASE" wt/25-T1 --for w25-T1)"
+W1="$(ws_path "$WOUT")"
+expect_eq "a named create exits 0" "rc=0" "$(printf '%s\n' "$WOUT" | tail -n1)"
+expect_eq "the OK line names the tree (the extractor reads real output)" "${WR}/.worktrees/25-T1" "$W1"
+expect_eq "the attestation is byte-identical to an unnamed create's shape" \
+  "spawn-worktree: OK path=${WR}/.worktrees/25-T1 branch=wt/25-T1 head=${WBASE} base=${WBASE} alias=${WR}/.bionic" \
+  "$(printf '%s\n' "$WOUT" | sed -n 1p)"
+expect_eq "the attestation is the ONLY stdout line" "2" "$(printf '%s\n' "$WOUT" | grep -c '')"
+expect_eq "a named create appends exactly one workspace line" "1" "$(ws_lines "$WSF")"
+WLINE="$(sed -n 1p "$WSF" 2>/dev/null)"
+expect_match "the line carries all eight fields, in the interface's order" \
+  "workspace/v1|session=${WSID}|name=w25-T1|path=${W1}|branch=wt/25-T1|base=${WBASE}|plan=${WPLAN}|at=*" "$WLINE"
+expect_regex "at= is an ISO-UTC stamp and closes the line" \
+  '\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$WLINE"
+
+# An unnamed create, same session, same root: nothing appended, attestation as before.
+WOUT2="$(ws_create "$WSID" "$WR" "$WBASE" wt/25-t2)"
+expect_eq "an unnamed create exits 0" "rc=0" "$(printf '%s\n' "$WOUT2" | tail -n1)"
+expect_eq "an unnamed create's tree exists (it ran)" "${WR}/.worktrees/25-t2" "$(ws_path "$WOUT2")"
+expect_eq "an unnamed create appends nothing (the named one's line is still the only one)" \
+  "1" "$(ws_lines "$WSF")"
+expect_eq "…and writes no other workspace file" "1" \
+  "$(ls "$WR/.bionic/tmp" | grep -c '^workspaces-')"
+
+# The reader: the tree recorded for the name, and nothing for any other.
+expect_eq "workspace_for_name returns the tree recorded for the name" \
+  "$(printf '%s\nrc=0' "$W1")" "$(ws_read workspace_for_name "$WR" "$WSID" w25-T1)"
+expect_eq "another name has no tree: empty, rc 1" \
+  "rc=1" "$(ws_read workspace_for_name "$WR" "$WSID" w25-T9)"
+expect_eq "an unrecorded name whose tree exists by the naming pattern still has none (no fallback)" \
+  "rc=1" "$(ws_read workspace_for_name "$WR" "$WSID" w25-T2)"
+expect_eq "…nor under its roster spelling" \
+  "rc=1" "$(ws_read workspace_for_name "$WR" "$WSID" W-25-T2)"
+expect_eq "the same name under another session has no tree" \
+  "rc=1" "$(ws_read workspace_for_name "$WR" ws-session-other w25-T1)"
+
+# A second create for the same name: the later tree answers; the session lists both.
+WOUT3="$(ws_create "$WSID" "$WR" "$WBASE" wt/25-T1-retry --for w25-T1)"
+W3="$(ws_path "$WOUT3")"
+expect_eq "the second named create exits 0" "rc=0" "$(printf '%s\n' "$WOUT3" | tail -n1)"
+expect_eq "it appends its own line" "2" "$(ws_lines "$WSF")"
+expect_eq "workspace_for_name returns the LATER tree" \
+  "$(printf '%s\nrc=0' "$W3")" "$(ws_read workspace_for_name "$WR" "$WSID" w25-T1)"
+expect_eq "workspaces_of_session lists every recorded tree, in order" \
+  "$(printf '%s\n%s\nrc=0' "$W1" "$W3")" "$(ws_read workspaces_of_session "$WR" "$WSID")"
+
+# The flag is position-free and the positional form is untouched: flag first, with a
+# relative parent directory as the third positional.
+WOUT4="$(ws_create "$WSID" "$WR" --for w25-T4 "$WBASE" wt/25-T4 trees)"
+expect_eq "--for before the positionals, with a parent dir, exits 0" "rc=0" "$(printf '%s\n' "$WOUT4" | tail -n1)"
+expect_eq "the parent positional still places the tree" "${WR}/trees/25-T4" "$(ws_path "$WOUT4")"
+expect_eq "and the record names that tree" \
+  "$(printf '%s\nrc=0' "${WR}/trees/25-T4")" "$(ws_read workspace_for_name "$WR" "$WSID" w25-T4)"
+
+# An unbound session records plan=none (the fallback run is never this session's).
+WSID2="ws-session-unbound"
+WOUT5="$(ws_create "$WSID2" "$WR" "$WBASE" wt/25-T5 --for w25-T5)"
+expect_eq "a named create in an unbound session exits 0" "rc=0" "$(printf '%s\n' "$WOUT5" | tail -n1)"
+expect_match "its line says plan=none" "workspace/v1|session=${WSID2}|name=w25-T5|*|plan=none|at=*" \
+  "$(sed -n 1p "${WR}/.bionic/tmp/workspaces-${WSID2}.state" 2>/dev/null)"
+
+# Refusals: each before anything is created, each beside the acceptance above.
+WREFS0="$(git -C "$WR" for-each-ref --format='%(refname) %(objectname)')"
+WOUT6="$(ws_create - "$WR" "$WBASE" wt/25-T6 --for w25-T6)"
+expect_eq "a named create with no session id is refused, naming why" \
+  "$(printf 'spawn-worktree: FAIL reason=no-session\nrc=2')" "$WOUT6"
+WOUT7="$(ws_create "$WSID" "$WR" "$WBASE" wt/25-T7 --for 'w25|T7')"
+expect_eq "a name that would break the line is refused" \
+  "$(printf 'spawn-worktree: FAIL reason=invalid-name\nrc=2')" "$WOUT7"
+WOUT8="$(ws_create "$WSID" "$WR" "$WBASE" wt/25-T8 --for)"
+expect_eq "--for with no name is a usage refusal" \
+  "$(printf 'spawn-worktree: FAIL reason=usage\nrc=2')" "$WOUT8"
+expect_eq "no refused named create made a branch" "$WREFS0" \
+  "$(git -C "$WR" for-each-ref --format='%(refname) %(objectname)')"
+expect_true  "(the tree probe sees a recorded tree)" test -d "${WR}/.worktrees/25-T1"
+expect_false "…or a tree" test -e "${WR}/.worktrees/25-T6"
+
+# THE SYMLINK REFUSAL the roster files have: a symlinked workspace file (or a symlinked
+# `.bionic/tmp`) is refused, never followed, and the tree is not made.
+WSID3="ws-session-link"
+printf 'outside\n' > "$TMP/ws-outside.state"
+ln -s "$TMP/ws-outside.state" "${WR}/.bionic/tmp/workspaces-${WSID3}.state"
+WOUT9="$(ws_create "$WSID3" "$WR" "$WBASE" wt/25-T9 --for w25-T9)"
+expect_eq "a symlinked workspace file is refused, naming why" \
+  "$(printf 'spawn-worktree: FAIL reason=workspace-file-symlinked\nrc=2')" "$WOUT9"
+expect_eq "the link's target is not written through" "outside" "$(cat "$TMP/ws-outside.state")"
+expect_false "no tree was made" test -e "${WR}/.worktrees/25-T9"
+rm -f "${WR}/.bionic/tmp/workspaces-${WSID3}.state"
+WOUT10="$(ws_create "$WSID3" "$WR" "$WBASE" wt/25-T9 --for w25-T9)"
+expect_eq "the same create goes through once the link is gone (the arm discriminates)" \
+  "rc=0" "$(printf '%s\n' "$WOUT10" | tail -n1)"
+expect_eq "…and records its line in a regular file" "1" "$(ws_lines "${WR}/.bionic/tmp/workspaces-${WSID3}.state")"
+expect_true "…and makes its tree" test -d "${WR}/.worktrees/25-T9"
+
+WRL="$(new_repo "$TMP/ws-tmplink")"
+mkdir -p "$TMP/ws-elsewhere-tmp"
+ln -s "$TMP/ws-elsewhere-tmp" "${WRL}/.bionic/tmp"
+WOUT11="$(ws_create "$WSID" "$WRL" "$(sha_of "$WRL")" wt/25-T11 --for w25-T11)"
+expect_eq "a symlinked .bionic/tmp is refused too" \
+  "$(printf 'spawn-worktree: FAIL reason=workspace-file-symlinked\nrc=2')" "$WOUT11"
+
 finish

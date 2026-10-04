@@ -355,7 +355,9 @@ PATROL_DIGEST_SCHEMA="patrol-digest/v1"
 # (payload/scripts/lib/stop.sh `STANDDOWN_HOLDS`); tests/session-poker.test.sh §HOLD-fix pins
 # the three sites.
 HOLD_REASON_SLOT="'why it stays up'"
-PATROL_PROMPT_VERSION=2
+# v=3 (wave-25 T5; D7): the prompt says what the decision line's `gate=` field asks of the turn,
+# so a Patrol armed under v=2 does not know it and the tick's re-arm note asks for the new job.
+PATROL_PROMPT_VERSION=3
 
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
 # stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
@@ -860,7 +862,9 @@ tick_digest_file() {  # <session-id> -> absolute path, or empty
 # version, so the first tick after an arm prints in full. A tick's digest carries `at=`, the
 # instant it was written: `since=` is the instant the facts last changed and an unchanged tick
 # keeps it, so only `at=` tells the stop collector the digest is this turn's (critic I3).
-write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty>] -> 0 written, 1 not
+# `gate_raised=` is the set of gate requests already raised (below), and `arm` carries it over,
+# so a re-arm does not raise them a second time.
+write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys>]] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
   [ -n "$f" ] || return 1
@@ -874,9 +878,51 @@ write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <du
     if [ -n "${3:-}" ]; then
       printf 'digest=%s\nsince=%s\ndecision=%s\nduty=%s\nat=%s\n' "$3" "$4" "$5" "$6" "$(iso_now)"
     fi
+    if [ -n "${7:-}" ]; then
+      printf 'gate_raised=%s\n' "$7"
+    fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
   return 0
+}
+
+# THE GATE REQUESTS (wave-25 T5, REQ-4 AC-4.3; D7). hooks/permission-answer.sh denies a reserved
+# action and appends one line per distinct request to `.bionic/tmp/gate-<lead sid>.state`:
+#   gate/v1|at=<ISO-UTC>|session=<lead sid>|asker=<name or lead>|category=<category>|head=<command head>
+# The tick reads that file and the lead raises each request with the human once. The file is the
+# record and nothing here rewrites it; "raised" lives in the digest file as `gate_raised=`, the
+# keys of the requests the last tick saw. A request is PENDING while its key is not in that set.
+#
+# THE KEY IS THE HOOK'S DEDUPE KEY (asker, category, head; the session is the file's), hashed so
+# the digest file holds a short token per request rather than a command. The hash is computed in
+# awk under the C locale, over bytes: `cksum` per line would cost a process per request per tick.
+# A line that is not `gate/v1`, names another session, or lacks an asker, a category of the
+# reserved table's shape or a head is skipped: a malformed line raises nothing and stops nothing.
+gate_requests() {  # <gate file> <session id> <raised keys, comma-separated>
+                   # -> one line per distinct request: <key> TAB <new|raised> TAB <asker> TAB <category> TAB <head>
+  LC_ALL=C awk -v sid="$2" -v raised=",$3," '
+    BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
+    function key(s,   h, i, n) {
+      h = 0; n = length(s)
+      for (i = 1; i <= n; i++) h = (h * 31 + ord[substr(s, i, 1)]) % 2147483647
+      return h "-" n
+    }
+    index($0, "gate/v1|") != 1 { next }
+    {
+      se = ""; a = ""; c = ""; hd = ""; has_head = 0
+      nf = split($0, f, "|")
+      for (i = 2; i <= nf; i++) {
+        if (index(f[i], "session=") == 1) se = substr(f[i], 9)
+        else if (index(f[i], "asker=") == 1) a = substr(f[i], 7)
+        else if (index(f[i], "category=") == 1) c = substr(f[i], 10)
+        else if (index(f[i], "head=") == 1) { hd = substr(f[i], 6); has_head = 1 }
+      }
+      if (se != sid || a == "" || c !~ /^[a-z][a-z-]*$/ || !has_head) next
+      k = key(a "|" c "|" hd)
+      if (k in seen) next
+      seen[k] = 1
+      print k "\t" (index(raised, "," k ",") ? "raised" : "new") "\t" a "\t" c "\t" hd
+    }' "$1" 2>/dev/null
 }
 
 write_patrol_stamp() {  # <session-id> <verb> -> 0 written, 1 not
@@ -2355,8 +2401,9 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
 # and the existing `decision=|total=|open=` run stays byte-adjacent for the readers that
 # match on it (tests/cross-gate-agreement.test.sh's `la6_open_tick`). `rows=`/`detail=` keep
 # their positions, which is why they are passed through this printer rather than appended by
-# the NOTIFY arm.
-tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [tree paths]
+# the NOTIFY arm. `gate=` (wave-25 T5; D7) is the last of them: how many reserved requests this
+# tick raises and their categories, `gate=1:leaves-the-machine`.
+tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [tree paths] [gate]
   local line
   line="$(printf '%s|at=%s|session=%s|decision=%s|total=%s|open=%s' \
     "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$1" "$2" "$3")"
@@ -2364,6 +2411,7 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
   [ -n "${5:-}" ] && line="${line}|detail=${5}"
   [ -n "${6:-}" ] && line="${line}|fill=${6}"
   [ -n "${7:-}" ] && line="${line}|trees=${7}"
+  [ -n "${8:-}" ] && line="${line}|gate=${8}"
   printf '%s\n' "$line"
 }
 
@@ -2743,6 +2791,8 @@ plan_verb_id_ok() {
 #   patrol-<sid>.state[.armed] this file                     the Patrol stamp and its marker
 #   stop-orders-<sid>.state    hooks/stop-orders.sh          the order queue
 #   tick-digest-<sid>.state    this file                     the tick's digest and duty
+#   workspaces-<sid>.state     scripts/lib/worktree.sh       the run's workspace record
+#   gate-<sid>.state           hooks/permission-answer.sh    the reserved requests to escalate
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE THEREFORE UNREACHABLE FROM HERE, and that
 # is a property of the enumeration rather than a list to maintain: `context-spend.state` and
@@ -2864,7 +2914,7 @@ case "$VERB" in
       die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
       exit 3
     fi
-    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. Unless the tick printed only "unchanged" or a QUIET with no open row: TaskList and reconcile. Then continue the run toward its goal until a wall.\n' \
+    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. Unless the tick printed only "unchanged" or a QUIET with no open row: TaskList and reconcile. Then continue the run toward its goal until a wall.\n' \
       "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$HOLD_REASON_SLOT"
     exit 0
     ;;
@@ -2947,8 +2997,10 @@ case "$VERB" in
       || die "WARN — the arming instant could not be recorded; this Patrol will not auto-DISARM (run \`disarm\` to stop it)."
     # THE PROMPT VERSION THIS ARM PAIRS WITH (wave-24 T7; D5). An arm follows the CronCreate of
     # `prompt`'s output, so the version this poker prints is the one the job now carries. The
-    # digest it replaces is dropped with it: the first tick after an arm prints in full.
-    write_tick_digest "$SESSION_ID" "$PATROL_PROMPT_VERSION" \
+    # digest it replaces is dropped with it: the first tick after an arm prints in full. The gate
+    # requests already raised are kept (wave-25 T5): a re-arm is not a reason to raise them again.
+    write_tick_digest "$SESSION_ID" "$PATROL_PROMPT_VERSION" "" "" "" "" \
+      "$(tick_digest_field "$(tick_digest_file "$SESSION_ID")" gate_raised)" \
       || die "WARN — the prompt version could not be recorded; the tick will ask for a re-arm."
     say "armed — the Patrol stamp is fresh for this session: $(patrol_stamp_file "$SESSION_ID")"
     exit 0
@@ -4700,6 +4752,7 @@ EOF
     # tick that finds none, or an older one, prints one re-arm line above everything else.
     TICK_BUF="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-tick.XXXXXX" 2>/dev/null)" || TICK_BUF=""
     TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed
+    TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
     TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
     TICK_REARM=""
@@ -4721,7 +4774,7 @@ EOF
       fi
       rm -f "$TICK_BUF" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
-        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" \
+        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
       exit "$rc"
@@ -4740,13 +4793,23 @@ EOF
     # standing fill decline, a note). Never an instant, an age or a measurement: those move on every tick by themselves.
     # DISARM is terminal and an EMERGENCY names a writer to stop, so both always print in full.
     #
+    # THE GATE (wave-25 T5; D7). A pending gate request raises the band to NOTIFY unless it is
+    # DISARM, which outranks it; the caller passes the band it reached without the gate and reads
+    # the answer back from TICK_DECIDED. The hash takes that band and the keys of every request in
+    # the gate file, raised or not, so the tick after the one that raised a request hashes the
+    # same and prints the unchanged line; a new request is a new key and prints in full. No file,
+    # or one with no request in it, adds nothing to the hash.
+    #
     # THE DUTY (A-orch-4; D5, research-R7 item 5). The task-list refresh is owed on a tick turn
     # unless the tick said `unchanged`, or decided QUIET with no open row on the roster; the stop
     # wall's collector reads this line, so a quiet turn is not refused for a chore with nothing
     # behind it.
-    tick_conclude() {  # <decision>
+    tick_conclude() {  # <decision before the gate>
       local cur="" prev=""
       TICK_DECIDED="$1"
+      if [ -n "$TICK_GATE_NEW" ] && [ "$1" != DISARM ]; then
+        TICK_DECIDED=NOTIFY
+      fi
       if [ -n "${SCHED_PLAN:-}" ] && [ -f "${SCHED_PLAN:-}" ]; then
         cur="$(_sched_plan_current_field "$SCHED_PLAN")"
       fi
@@ -4755,6 +4818,7 @@ EOF
           printf 'decision=%s|total=%s|open=%s|notify=%s|fill=%s|trees=%s\n' "$1" "$TOTAL" "$OPEN" \
             "${NOTIFY_ROWS:-}" "${SCHED_FILL:-}" "${LEASE_TREES:-}"
           printf 'pressure=%s|rung=%s|current=%s\n' "${SCHED_STATE:-}" "${SCHED_RUNG:-}" "$cur"
+          [ -z "$TICK_GATE_KEYS" ] || printf 'gate=%s\n' "$TICK_GATE_KEYS"
           printf '%s\n' "$VERDICT_OUT" | awk -F'|' '
             $1 == "landing-verdict/v1" {
               n = ""; st = ""; ak = ""
@@ -4774,7 +4838,7 @@ EOF
       fi
       prev="$(tick_digest_field "$TICK_DIGEST_FILE" digest)"
       if [ -n "$TICK_DIGEST" ] && [ "$1" != DISARM ] && [ "${SCHED_STATE:-}" != emergency ] \
-         && [ "$TICK_DIGEST" = "$prev" ]; then
+         && [ -z "$TICK_GATE_NEW" ] && [ "$TICK_DIGEST" = "$prev" ]; then
         TICK_UNCHANGED=yes
         TICK_SINCE="$(tick_digest_field "$TICK_DIGEST_FILE" since)"
         [ -n "$TICK_SINCE" ] || TICK_SINCE="$(iso_now)"
@@ -4783,7 +4847,7 @@ EOF
       fi
       TICK_SINCE="$(iso_now)"
       TICK_DUTY=owed
-      [ "$1" = QUIET ] && [ "${OPEN_ROSTER:-0}" -eq 0 ] && TICK_DUTY=none
+      [ "$TICK_DECIDED" = QUIET ] && [ "${OPEN_ROSTER:-0}" -eq 0 ] && TICK_DUTY=none
       tick_write_orders
       return 0
     }
@@ -4827,6 +4891,46 @@ EOF
       exit 2
     fi
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+
+    # ---------- THE GATE REQUESTS, READ ONCE (wave-25 T5, REQ-4 AC-4.3; D7) ----------
+    #
+    # Read here, above every arm that decides, so the armed tick before any dispatch and the
+    # DISARM tick see the same requests as the full one. `gate_requests` (above) says which are
+    # pending; the keys of all of them become the digest's `gate_raised=` when this tick writes
+    # it, which is what makes the next tick read them as raised. No file is nothing pending.
+    # A symlinked file, or one under a symlinked `.bionic/tmp`, is refused as the roster files
+    # are and says so in a note; the set already raised is kept, so replacing the link with the
+    # real file later does not raise them all a second time.
+    TICK_GATE_FILE="$REPO_REAL/.bionic/tmp/gate-${SESSION_ID}.state"
+    if [ -L "$TICK_GATE_FILE" ] || ! tmp_dir_ok "${TICK_GATE_FILE%/*}"; then
+      TICK_GATE_KEYS="$(tick_digest_field "$TICK_DIGEST_FILE" gate_raised)"
+      note "gate file ${TICK_GATE_FILE} is a symlink or sits under one — not read, so no reserved request is raised from it"
+    elif [ -f "$TICK_GATE_FILE" ]; then
+      TICK_GATE_ROWS="$(gate_requests "$TICK_GATE_FILE" "$SESSION_ID" "$(tick_digest_field "$TICK_DIGEST_FILE" gate_raised)")"
+      TICK_GATE_KEYS="$(printf '%s\n' "$TICK_GATE_ROWS" | awk -F'\t' 'NF { printf "%s%s", (n++ ? "," : ""), $1 }')"
+      TICK_GATE_NEW="$(printf '%s\n' "$TICK_GATE_ROWS" | awk -F'\t' '$2 == "new"')"
+    fi
+    # THE FIELD: how many requests this tick raises, then their categories sorted and once each,
+    # `gate=2:credentials,leaves-the-machine`. The commands are on the GATE lines, not here.
+    if [ -n "$TICK_GATE_NEW" ]; then
+      TICK_GATE_FIELD="$(printf '%s\n' "$TICK_GATE_NEW" | awk -F'\t' '{ print $4 }' | LC_ALL=C sort -u \
+        | awk -v n="$(printf '%s\n' "$TICK_GATE_NEW" | grep -c .)" '{ c = c (NR > 1 ? "," : "") $0 } END { printf "%d:%s", n, c }')"
+    fi
+    # THE GATE LINES, printed by whichever arm decides, after its tick_conclude: one sentence that
+    # says what the turn owes, then one line per request this tick raises, asker, category and
+    # command head. A request already raised prints nothing; the file still holds it.
+    tick_gate_report() {
+      local k st a c h
+      [ -n "$TICK_GATE_NEW" ] || return 0
+      say "gate act — ${TICK_GATE_FIELD%%:*} reserved request(s) bionic denied: put each GATE line below to the human once, through the human's own notify channel, and do not perform it."
+      while IFS="$(printf '\t')" read -r k st a c h; do
+        [ -n "$k" ] || continue
+        say "GATE ${a} — ${c}: ${h}"
+      done <<EOF
+$TICK_GATE_NEW
+EOF
+      return 0
+    }
 
     # THE BLIND-WALL CHECK IS GONE (bionic 1.4.0, spec AC-7). It compared main-thread
     # `Agent` tool_uses in the transcript against rows on the roster and raised a NOTIFY
@@ -5536,6 +5640,11 @@ EOF
         # verb prints its explanation above its machine line, so the last line a tick prints
         # is always the answer — whichever arm answered.
         tick_conclude QUIET
+        if [ "$TICK_DECIDED" = NOTIFY ]; then
+          tick_gate_report
+          tick_decision_line NOTIFY "$TOTAL" "$OPEN" "" "" "" "" "$TICK_GATE_FIELD"
+          exit 1
+        fi
         say "QUIET — armed, nothing dispatched yet on this session"
         tick_decision_line QUIET "$TOTAL" "$OPEN"
         exit 0
@@ -5604,8 +5713,9 @@ EOF
       # still carries a finding is one the gate would refuse, and this is the last tick to say so.
       tick_plan_memoised tick_plan_report
       tick_conclude DISARM
+      tick_gate_report
       say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
-      tick_decision_line DISARM "$TOTAL" "$OPEN"
+      tick_decision_line DISARM "$TOTAL" "$OPEN" "" "" "" "" "$TICK_GATE_FIELD"
       # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
       # so the stamp this very tick wrote before it decided has to stop claiming a live
       # clock, or hooks/patrol-revive.sh reads the stop this line just chose as a death and
@@ -5926,16 +6036,20 @@ EOF
     [ -n "$SD_ORDER_NAMES" ] && TICK_DECISION=STANDDOWN
     [ -n "$SCHED_FILL" ] && TICK_DECISION=FILL
     [ -n "$NOTIFY_ROWS" ] && TICK_DECISION=NOTIFY
+    # A PENDING GATE REQUEST IS THE THIRD CONTRIBUTOR (wave-25 T5; D7): tick_conclude raises the
+    # band to NOTIFY for it, so the band is read back from there.
     tick_conclude "$TICK_DECISION"
+    TICK_DECISION="$TICK_DECIDED"
 
     if [ "$TICK_DECISION" = NOTIFY ]; then
       # THE SENTENCES FIRST, ONE PER ARM THAT HAS SOMETHING — a tick holding only the other
       # arm's finding must not print an empty one.
+      tick_gate_report
       [ -n "$NOTIFY_DETAIL" ] && say "NOTIFY — past declared duration: $NOTIFY_DETAIL"
       [ -n "$QUIET_DETAIL" ] && say "NOTIFY — quieter than the declared cadence: $QUIET_DETAIL"
       tick_decision_line NOTIFY "$TOTAL" "$OPEN" "$NOTIFY_ROWS" \
         "$(clean "${NOTIFY_DETAIL}${NOTIFY_DETAIL:+${QUIET_DETAIL:+; }}${QUIET_DETAIL}")" \
-        "$SCHED_FILL" "$LEASE_TREES"
+        "$SCHED_FILL" "$LEASE_TREES" "$TICK_GATE_FIELD"
       exit 1
     fi
 
