@@ -4660,7 +4660,7 @@ expect_eq "W26-14m: …and a steps/3.md missing one trigger is caught" "" \
   "$(w26_hits "$W26_TRIGGERS" "$W26_D14")"
 for _w26_iface in \
   'comma-separated: a path in the `Files` grammar · `head` · `record` · `proof:<kind>` · `approval:<name>` · `ext:<slug>`; a live read is `live:<artifact>`; empty takes the kind default' \
-  'build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:floor, proof:review` · close the integrate row'"'"'s merge' \
+  'build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head`, and at Step 7 or later an `approval:` read written out (`approval:release` for the release) · integrate `proof:floor, proof:review, head` · close the integrate row'"'"'s merge' \
   'a table without it reads each id as "wait for that task to land"' \
   'a `Files` entry ending in `!`' \
   'session-poker.sh approve <name> '"'"'<reply>'"'"'' \

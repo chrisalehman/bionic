@@ -115,7 +115,7 @@ A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale
   | piece | shape |
   |---|---|
   | reads cell | comma-separated: a path in the `Files` grammar · `head` · `record` · `proof:<kind>` · `approval:<name>` · `ext:<slug>`; a live read is `live:<artifact>`; empty takes the kind default |
-  | kind defaults | build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:floor, proof:review` · close the integrate row's merge |
+  | kind defaults | build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head`, and at Step 7 or later an `approval:` read written out (`approval:release` for the release) · integrate `proof:floor, proof:review, head` · close the integrate row's merge |
 
 - **`size`** — the row's expected duration in minutes.
 - **`serves`** — the requirement id(s) this row discharges.

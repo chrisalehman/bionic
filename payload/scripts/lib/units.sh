@@ -385,7 +385,9 @@ units_rows() {
 #     `ext:<slug>`, or `live:<artifact>`. An EMPTY cell takes the row's kind default, never
 #     "nothing": build `approval:plan` · verify and test `approval:plan, head` · review
 #     `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:floor,
-#     proof:review` · close `merge` (the integrate row's merge) · prototype `approval:plan`.
+#     proof:review, head` · close `merge` (the integrate row's merge) · prototype `approval:plan`.
+#     A doc row at Step 7 or later is the release and names an `approval:` read; one that names
+#     none reads `approval:release` besides (`units_validate` refuses it; wave-26 T62, K2-F3).
 #     Its `deps` cell may carry `ext:<slug>` and nothing else (`units_validate` refuses an id).
 #   - A TABLE WITHOUT ONE. Each `deps` id reads as "wait for that task to land", exactly as
 #     through 1.10, and no kind default applies: a plan written before the column schedules as
@@ -405,7 +407,10 @@ units_rows() {
 #   - a task id (a table without `reads`): that row, until it lands;
 #   - `proof:<kind>`: a `proved: kind=<kind>` line inside `## SDLC State`; until one exists the
 #     open rows that would write it — verify and test rows for `floor`, review rows for
-#     `review` — are named as its writers;
+#     `review` — are named as its writers. A pending row whose `live:head` waits because
+#     nothing landed past the review proof writes no newer proof, so it is not one (wave-26
+#     T62; K2-F4): the last review of a run returns its row to pending, and integrate would
+#     otherwise wait on it for ever;
 #   - `approval:<name>`: its line inside `## SDLC State` — `approved-by:` for `plan`,
 #     `approved: <name> …` otherwise. No row writes one; the user's act does.
 #   - `ext:<slug>`: never, until its owner removes it from the cell.
@@ -801,7 +806,7 @@ _units_sched_awk() {
     function kdef(k) {
       if (k == "verify" || k == "test" || k == "doc") return "approval:plan, head"
       if (k == "review") return "approval:plan, live:head"
-      if (k == "integrate") return "proof:floor, proof:review"
+      if (k == "integrate") return "proof:floor, proof:review, head"
       if (k == "close") return "merge"
       return "approval:plan"
     }
@@ -854,6 +859,11 @@ _units_sched_awk() {
       return 1
     }
 
+    # live_idle() -> 1 when a live:head read waits because nothing landed past the review proof:
+    # the head handed in is the one the proof names. A pending row whose live read is idle writes
+    # no newer proof until something lands (wave-26 T62; K2-F4); with the head unknown it may.
+    function live_idle() { return (("review" in prvh) && livehead != "" && livehead == prvh["review"]) }
+
     # judge(i, t) -> 1 when row i read t is satisfied; otherwise 0, with the rows named as its
     # writers in wj[1..nw] (those still open, plus a task-id row in any unsatisfied state), and
     # for a live read that waits on no row, why in lwhy.
@@ -869,7 +879,8 @@ _units_sched_awk() {
         a = substr(t, 7)
         for (j = 1; j <= n; j++) {
           if (j == i || !isopen(j)) continue
-          if ((a == "floor" && (knd[j] == "verify" || knd[j] == "test")) || (a == "review" && knd[j] == "review")) wj[++nw] = j
+          if ((a == "floor" && (knd[j] == "verify" || knd[j] == "test")) || (a == "review" && knd[j] == "review"))
+            if (!(st[j] == "pending" && rlive[j] && live_idle())) wj[++nw] = j
         }
         return (nw == 0 && (a in proved))
       }
@@ -948,6 +959,11 @@ _units_sched_awk() {
         r = rd[i]
         if (hasreads && r !~ /[A-Za-z0-9]/) r = kdef(knd[i])
         if (hasreads) { m = split(r, a, ","); for (k = 1; k <= m; k++) addtok(i, a[k]) }
+        # THE RELEASE READS ITS APPROVAL (wave-26 T62; K2-F3; D3). A doc row at Step 7 or later
+        # whose own cell names no approval (the kind default names only the plan) would be ready
+        # beside the floor; the validator refuses it, and a plan that got past the validator
+        # still never offers it before approved: release.
+        if (hasreads && knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && rd[i] !~ /(^|[ \t,:])approval:[A-Za-z0-9]/) addtok(i, "approval:release")
         m = split(dep[i], a, ",")
         for (k = 1; k <= m; k++) addtok(i, a[k])
       }
@@ -1222,6 +1238,7 @@ units_validate() {
           # A READ NAMES SOMETHING (wave-26 T2; D1): a path in the Files grammar, a named
           # artifact, `ext:<slug>`, or `live:` before an artifact or a path. A token naming
           # none of them is refused here, and the readiness program never reads it satisfied.
+          ap = 0
           r = rd[i]
           if (hasreads && r ~ /[A-Za-z0-9]/) {
             m = split(r, a, ",")
@@ -1231,6 +1248,7 @@ units_validate() {
               t = a[j]
               if (t ~ extre) continue
               if (substr(t, 1, 5) == "live:") t = substr(t, 6)
+              if (t ~ /^approval:[A-Za-z0-9]/) ap = 1
               if (t == "head" || t == "record" || t == "merge") continue
               if (t ~ /^proof:(floor|review|task)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
               if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
@@ -1240,6 +1258,14 @@ units_validate() {
               printf "%s: read %s names no artifact\n", id[i], a[j]
             }
           }
+
+          # THE RELEASE READS ITS APPROVAL (wave-26 T62; critic 2 K2-F3; D3). A doc row at Step 7
+          # or later is the release, the row the hold of a table without the column names so; on
+          # its kind default it would be ready beside the floor with no approval at all. An open
+          # one names the approval it waits for, approval:release, or approval:plan for a
+          # document that needs no release.
+          if (hasreads && !ap && knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && (sta[i] == "pending" || sta[i] == "active"))
+            printf "%s: a doc row at step 7 or later is the release and must read the approval it waits for; add approval:release to its reads (approval:plan for a document that needs no release)\n", id[i]
 
           # A BRACKET IN A Files ENTRY CANNOT BE COMPILED AS WRITTEN (wave-26 T35; review 5 F5). The
           # grammar globs with * and ? only; the readiness program reads a bracket as itself, so an
@@ -1472,9 +1498,12 @@ _units_ledger() {
 #      `pending dispatch — added by task-add at <iso>` is not a placeholder to the evidence
 #      gate (`is_placeholder_value` refuses only the bare words).
 #
-# NO OTHER ROW IS EDITED (wave-26 T2; D2). Through 1.10 a Step-4 id was also appended to the
-# deps of every later row that owed it under the every-build-row rule; that rule is gone, so a
-# new row changes nothing but itself and its line.
+# NO OTHER ROW IS EDITED IN A TABLE WITH reads (wave-26 T2; D2): its rows wait on what they read,
+# the floor on `head`, so a new row changes nothing but itself and its line. A TABLE WITHOUT THE
+# COLUMN KEEPS 1.10's THREADING (wave-26 T62; critic 2 K2-F1): there the deps are the only thing
+# that holds the floor, so a Step-4 id is appended to the deps of every open Step-5+ row on the
+# frontier — those that do not reach it, less any that reaches another of them which does not
+# reach it back. The validator no longer demands the edge; the floor needs it.
 #
 # PURE, AS EVERY VERB HERE IS: it prints and never writes, so `task-add` can judge the
 # projection (the validator, then a dry commit through the real gate) before anything is
@@ -1520,6 +1549,18 @@ units_add_row() {
       for (i = 2; i <= m; i++) out = out "\\" "|" parts[i]
       return out
     }
+    # reach(s, c) -> R[c, <id>] for every id candidate c reaches through deps from row s,
+    # breadth-first; an id is queued once, so a cycle ends.
+    function reach(s, c,   q, h, qn, k, n2, b) {
+      qn = 0; split("", seen)
+      n2 = split(adj[s], b, ",")
+      for (k = 1; k <= n2; k++) if (b[k] ~ /[A-Za-z0-9]/ && !(b[k] in seen)) { seen[b[k]] = 1; q[++qn] = b[k] }
+      for (h = 1; h <= qn; h++) {
+        R[c, q[h]] = 1
+        n2 = split(adj[q[h]], b, ",")
+        for (k = 1; k <= n2; k++) if (b[k] ~ /[A-Za-z0-9]/ && !(b[k] in seen)) { seen[b[k]] = 1; q[++qn] = b[k] }
+      }
+    }
     { L[++nl] = $0 }
     END {
       state = 0; sdlc = 0
@@ -1553,9 +1594,39 @@ units_add_row() {
         if (tstate == 2) {
           if (line !~ /^[ \t]*\|/) { tstate = 3; continue }
           lastrow = i                   # the separator counts: an empty table takes its first row
+          if (nstep != "4" || ("reads" in col) || !("deps" in col)) continue
+          split(esc(line), f, "|"); rid = trim(f[col["id"]])
+          if (rid == "" || rid ~ /^[-: ]+$/) continue
+          nr++; rl[nr] = i; rid_[nr] = rid; rstp[nr] = trim(f[col["step"]]); rsta[nr] = trim(f[col["status"]])
+          d = f[col["deps"]]; gsub(/[ \t]/, "", d); adj[rid] = d
         }
       }
       if (!lastrow || !seensdlc) exit 1
+      # A TABLE WITHOUT reads KEEPS 1.10 THREADING (wave-26 T62; critic 2 K2-F1). With no head
+      # read, a mid-run Step-4 row holds the floor only through deps, so its id goes into every
+      # open Step-5+ row that does not reach it, except one that reaches another such row that
+      # does not reach it back: that row repairs it (the frontier of c81d865e units_add_row).
+      if (nr) {
+        adj[nid] = ndeps; gsub(/[ \t]/, "", adj[nid])
+        nc = 0
+        for (r = 1; r <= nr; r++) {
+          if (rstp[r] !~ /^[0-9]+$/ || rstp[r] + 0 < 5 || rsta[r] == "landed" || rsta[r] == "dropped") continue
+          cr[++nc] = r; reach(rid_[r], nc)
+        }
+        for (c = 1; c <= nc; c++) {
+          if ((c, nid) in R) continue
+          fold = 0
+          for (e = 1; e <= nc && !fold; e++)
+            if (e != c && !((e, nid) in R) && ((c, rid_[cr[e]]) in R) && !((e, rid_[cr[c]]) in R)) fold = 1
+          if (!fold) thread[rl[cr[c]]] = 1
+        }
+        for (r in thread) {
+          m = split(esc(L[r]), f, "|"); dc = col["deps"]; d = trim(f[dc])
+          f[dc] = " " ((d ~ /[A-Za-z0-9]/) ? d ", " nid : nid) " "
+          out = f[1]; for (c = 2; c <= m; c++) out = out "|" f[c]
+          L[r] = unesc(out)
+        }
+      }
       val["id"] = nid; val["step"] = nstep; val["kind"] = nkind; val["rigor"] = nkind
       val["task"] = ntask; val["agent"] = nagent; val["deps"] = ndeps; val["size"] = nsize
       val["serves"] = nserves; val["files"] = nfiles; val["status"] = "pending"; val["reads"] = nreads
