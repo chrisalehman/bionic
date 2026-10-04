@@ -9165,16 +9165,21 @@ section "Section 52 §RUN-END: integrate waits for an open build, and the WAIT l
 # a late fix from the review still active. Integrate reads its default, now `proof:floor,
 # proof:review, head`, so the open build holds the merge and the tick says so. Through T61 the
 # tick offered the merge beside the build (FILL T3) and the turn-end wall demanded it.
+# THE PROOFS NAME THE HEAD THE WORKING BRANCH IS AT (wave-26 T64): from T64 a floor proof stands
+# only while proof_state answers covered or bounded, so the repository gets one commit, the plan
+# names its branch as `working-branch:`, and both proofs name that commit, not a made-up hex.
 s52_plan() {  # <repo> <T6 status> -> the plan path
-  local f
+  local f h b
+  ( cd "$1" && git commit -q --allow-empty -m init ) >/dev/null 2>&1
+  h="$(git -C "$1" rev-parse HEAD 2>/dev/null)"; b="$(git -C "$1" symbolic-ref --short HEAD 2>/dev/null)"
   f="$(s47_plan "$1" 2 \
     "| T1 | 4 | build | landed | implementor | — | 30 | REQ-x | payload/x.sh | landed | |" \
     "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/floor.log | landed | |" \
     "| T2 | 6 | review | the final review | critic | — | 30 | REQ-x | .bionic/docs/record/review.md | landed | |" \
     "| T6 | 6 | build | late fix from the review | implementor | — | 20 | REQ-x | payload/x.sh | $2 | |" \
     "| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-x | — | pending | |")"
-  awk -v h=8d7216ce2835456ae38b03d6a7d30a50400cf30f '
-    /^current: / { print "current: 8"; next }
+  awk -v h="$h" -v b="$b" '
+    /^current: / { print "current: 8"; print "working-branch: " b; next }
     { print }
     /^approved-by: / { print "proved: kind=floor head=" h " at=2026-10-04T11:00:00Z evidence=record/floor.log"
                        print "proved: kind=review head=" h " at=2026-10-04T11:05:00Z evidence=record/review.md" }' \
@@ -9251,5 +9256,175 @@ s53_review "$S53_C1" "$S53_C4" overlap.md
 poke "$R53" proof-add review record/wave-01-fixture/overlap.md
 expect_eq "53g a review that starts before the last proof (an overlap) is recorded" "0" "$RC"
 POKE_BOUND="$S53_BOUND_WAS"
+
+# ============================================================
+section "Section 54 §FULL-RUN-REQUIRED: integrate waits for a full run when the change past the floor proof cannot be bounded (wave-26 T64; REQ-3 AC-3.3, AC-3.4)"
+# ============================================================
+#
+# AC-3.4: "A second full run is required when the change cannot be bounded … Fails when a planted
+# new file under a directory no suite names lands with no suite run at all." Through T63 the run
+# only ADMITTED that full run: a task tree with no suite stamp lands (by design: a file no suite
+# names has no affected suite), and integrate's `proof:floor` read took any floor proof line,
+# whatever its head, so the tick offered the merge on a change no suite had read.
+#
+# EVERYTHING HERE IS THE PRODUCT'S OWN: the working branch `wave/01-fixture` in a linked checkout
+# (as §46); its full runs are the shipped suite runner, copied byte for byte into the fixture with
+# three green suites (runner-roster's recipe), so every log is a real runner's log; each proof
+# line is written by `proof-add`; each task tree lands through the real `worktree_land`; the WAIT
+# and FILL lines are the tick's. The map (`impact-command:`) answers lib/one.sh with two suites,
+# lib/every.sh with all three, anything else with nothing. Integrate reads its kind default.
+S54_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R54="$(make_repo s54-full-run)"; new_roster "$R54"
+S54_WT="$R54/.worktrees/01-fixture"
+S54_REC="$R54/.bionic/docs/record/wave-01-fixture"
+S54_MAP="$TMPROOT/s54-map.sh"
+S54_COUNT="$TMPROOT/s54-map.count"
+S54_WTLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/worktree.sh"
+{
+  printf '#!/bin/bash\n'
+  printf 'printf "x\\n" >> "%s"\n' "$S54_COUNT"
+  printf 'for f in "$@"; do\n'
+  printf '  case "$f" in\n'
+  printf '    lib/one.sh)   for s in a b; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
+  printf '    lib/every.sh) for s in a b c; do printf "%%s.test.sh\\tdir-ref:%%s\\n" "$s" "$f"; done ;;\n'
+  printf '  esac\n'
+  printf 'done\n'
+} > "$S54_MAP"
+mkdir -p "$R54/tests/lib" "$R54/payload/scripts/lib" "$R54/lib" "$S54_REC"
+cp "$BIONIC_SCRIPTS_DIR/tests/run.sh" "$R54/tests/run.sh"
+cp "$BIONIC_SCRIPTS_DIR/tests/lib/resolve-roots.sh" "$BIONIC_SCRIPTS_DIR/tests/lib/assert.sh" "$R54/tests/lib/"
+cp "$BIONIC_SCRIPTS_DIR"/payload/scripts/lib/*.sh "$R54/payload/scripts/lib/"
+for s54s in a b c; do
+  printf '#!/bin/bash\nset -uo pipefail\n. "$(dirname "$0")/lib/assert.sh"\nsection "%s"\nexpect_eq "%s ran" x x\nfinish\n' \
+    "$s54s" "$s54s" > "$R54/tests/$s54s.test.sh"
+done
+printf 'one\n' > "$R54/lib/one.sh"; printf 'every\n' > "$R54/lib/every.sh"
+printf '.bionic/\n.worktrees/\n' > "$R54/.gitignore"
+( cd "$R54" && git add .gitignore tests payload lib && git commit -qm base ) >/dev/null 2>&1
+S54_BASE="$(git -C "$R54" rev-parse HEAD 2>/dev/null)"
+P54="$(s42_plan "$R54" 4)"
+awk '
+  /^current: / && !wb { print; print "working-branch: wave/01-fixture"; wb = 1; next }
+  /^- T5: / { print; print "- T3: integrate at Step 8"; next }
+  /^\| id \| step \|/ { intab = 1
+    print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
+    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    print "| T1 | 4 | build | the build | implementor | — | 30 | REQ-1 | lib/one.sh | — | — | landed |  |"
+    print "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/floor.log | — | — | landed |  |"
+    print "| T2 | 6 | review | the final review | critic | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/final-review.md | — | — | landed |  |"
+    print "| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-1 | — | — | — | pending |  |"
+    next }
+  intab && /^\|/ { next }
+  { intab = 0; print }' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
+( cd "$R54" && git add -f "$P54" && git commit -qm "reads table" \
+  && git worktree add -q -b wave/01-fixture "$S54_WT" ) >/dev/null 2>&1
+printf 'impact-command: bash %s\n' "$S54_MAP" > "$R54/.bionic/config.yaml"
+# s54_full <log> -> the copied runner, run whole in the working checkout, its log in the record
+s54_full() {
+  ( cd "$S54_WT" && env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_PLACE -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
+      -u BIONIC_LOAD_NOW_FILE BIONIC_SLOTS_DIR="$TMPROOT/s54-slots" BIONIC_SLOTS_N=2 BIONIC_SLOTS_POLL=0.1 \
+      BIONIC_SLOTS_MAX_WAIT=20 BIONIC_SLOTS_NOTE_S=5 BIONIC_PRESSURE_RING="$TMPROOT/s54-ring" \
+      BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
+      bash tests/run.sh ) > "$S54_REC/$1" 2>&1
+}
+# s54_land <id> <path> <content> -> a task tree on wt/01-<id> commits one file and NO suite runs
+# in it (no stamp); the real land merges it. Leaves S54_LAND.
+s54_land() {
+  local t="$R54/.worktrees/01-$1"
+  git -C "$S54_WT" worktree add -q -b "wt/01-$1" "$t" HEAD >/dev/null 2>&1
+  mkdir -p "$(dirname "$t/$2")"; printf '%s\n' "$3" > "$t/$2"
+  ( cd "$t" && git add "$2" && git commit -qm "$1: $2" ) >/dev/null 2>&1
+  S54_LAND="$( . "$S54_WTLIB" >/dev/null 2>&1; worktree_land "$t" wave/01-fixture 2>&1 )"
+}
+# s54_floor <log> -> a full run on the working head, recorded by proof-add floor
+s54_floor() { s54_full "$1"; poke "$R54" proof-add floor "record/wave-01-fixture/$1"; }
+# s54_tick -> the tick at current: 8 (proof-add runs at current: 4, where the fixture plan's gate
+# admits it; the tick reads current: 8, where integrate is no longer held for its step). The
+# digest is cleared first, so each tick prints its whole reading rather than "unchanged" (as 48).
+s54_tick() {
+  rm -f "$(digest_of "$R54")"
+  sed 's/^current: 4$/current: 8/' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
+  poke_pressure "$R54" 8192 1.0 tick
+  sed 's/^current: 8$/current: 4/' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
+}
+s54_wait() { s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 '; }
+
+S54_W0="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
+s54_floor floor-1.log
+expect_contains "54a0 precondition: the copied runner's log names the working head on a clean tree" \
+  "head=${S54_W0} dirty=0" "$(cat "$S54_REC/floor-1.log")"
+expect_contains "54a0b precondition: …and its verdict, every suite passed" "Gating: 3 passed, 0 failed" \
+  "$(cat "$S54_REC/floor-1.log")"
+expect_eq "54a0c precondition: proof-add floor recorded it (exit 0)" "0" "$RC"
+printf '# final review\n\nreviewed: %s..%s\n' "$S54_BASE" "$S54_W0" > "$S54_REC/review.md"
+poke "$R54" proof-add review record/wave-01-fixture/review.md
+expect_eq "54a0d precondition: proof-add review recorded the review (exit 0)" "0" "$RC"
+expect_eq "54a0e precondition: the plan's floor proof names the working head" "$S54_W0" "$(s46_last "$P54" floor)"
+s54_tick
+expect_contains "54a at the proved head integrate is offered" "poker: FILL T3" "$OUT"
+
+# ---------- AC-3.4, the criterion's planted defect: a new file under a directory no suite names ----------
+s54_land T7 newdir/x.sh 'new'
+expect_contains "54b0 precondition: the task tree with no suite run LANDED through the real land" \
+  "spawn-worktree: LANDED branch=wt/01-T7" "$S54_LAND"
+expect_false "54b0b precondition: …and no suite ever stamped it" \
+  test -e "$R54/.git/worktrees/01-T7/bionic-stamps"
+S54_W1="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
+s54_tick
+expect_nonempty "54b1 precondition: the tick prints a WAIT line for integrate (the extractor reads real output)" "$(s54_wait)"
+expect_eq "54b AC-3.4 integrate WAITS: the head moved past the floor proof in a way the map cannot bound, and the line names the way out" \
+  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor" \
+  "$(s54_wait)"
+expect_absent "54b2 …and the merge is not offered" "poker: FILL T3" "$OUT"
+# THE COST: one tick runs proof_state once, though its schedule and its change fingerprint each
+# ask the ready set. The map is the one process the state runs that this suite can count.
+: > "$S54_COUNT"; s54_tick; S54_TICK_MAPS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+: > "$S54_COUNT"; ( . "$S46_LIB" >/dev/null 2>&1; proof_state "$P54" "$R54" ) >/dev/null 2>&1
+S54_PS_MAPS="$(awk 'END { print NR + 0 }' "$S54_COUNT")"
+expect_true "54b2c precondition: one proof_state over this change calls the map (the counter reads real calls)" \
+  test "$S54_PS_MAPS" -gt 0
+expect_eq "54b2d …and one tick calls it exactly as often: the floor state is computed once per tick" \
+  "$S54_PS_MAPS" "$S54_TICK_MAPS"
+s54_floor floor-2.log
+expect_eq "54b3 the way out: a full run on the new head, recorded with proof-add floor (exit 0)" "0" "$RC"
+expect_eq "54b4 …at that head" "$S54_W1" "$(s46_last "$P54" floor)"
+s54_tick
+expect_contains "54b5 …and the tick offers the merge" "poker: FILL T3" "$OUT"
+
+# ---------- AC-3.3 still holds: a bounded change after a full pass is proved by its suites ----------
+s54_land T8 lib/one.sh 'one, changed'
+expect_contains "54c0 precondition: the bounded change LANDED" "spawn-worktree: LANDED branch=wt/01-T8" "$S54_LAND"
+s54_tick
+expect_contains "54c AC-3.3 a change the map bounds leaves the pass standing: the merge is offered" "poker: FILL T3" "$OUT"
+expect_eq "54c2 …with no WAIT line for it" "" "$(s54_wait)"
+
+# ---------- a change the map answers with every suite ----------
+s54_land T9 lib/every.sh 'every, changed'
+expect_contains "54d0 precondition: the every-suite change LANDED" "spawn-worktree: LANDED branch=wt/01-T9" "$S54_LAND"
+s54_tick
+expect_contains "54d a change the map answers with every suite: integrate WAITS, saying so" \
+  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W1:0:12} in a way the map cannot bound (the map answers the change with every suite (3 of 3))" \
+  "$OUT"
+expect_absent "54d2 …and the merge is not offered" "poker: FILL T3" "$OUT"
+s54_floor floor-3.log
+s54_tick
+expect_contains "54d3 …until a full run on its head is recorded" "poker: FILL T3" "$OUT"
+
+# ---------- a merge of work from outside the run (a file the map bounds, so only the outside rule holds it) ----------
+S54_W3="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
+( cd "$S54_WT" && git checkout -q -b other-work && printf 'one, from outside\n' > lib/one.sh \
+  && git commit -qam 'outside work' && git checkout -q wave/01-fixture \
+  && git merge -q --no-ff -m 'merge other-work' other-work ) >/dev/null 2>&1
+expect_true "54e0 precondition: the outside commit is on the working branch" \
+  git -C "$S54_WT" merge-base --is-ancestor other-work wave/01-fixture
+s54_tick
+expect_contains "54e a merge from outside the run: integrate WAITS, saying another branch carries it" \
+  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W3:0:12} in a way the map cannot bound (1 of 2 commits since ${S54_W3:0:7} are on another branch than wave/01-fixture" \
+  "$OUT"
+expect_absent "54e2 …and the merge is not offered" "poker: FILL T3" "$OUT"
+s54_floor floor-4.log
+s54_tick
+expect_contains "54e3 …until a full run on the merge is recorded" "poker: FILL T3" "$OUT"
+POKE_BOUND="$S54_BOUND_WAS"
 
 finish

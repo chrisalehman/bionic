@@ -276,17 +276,28 @@ _units_table() {
 # `fill_ready_set`, or `units_findings` — runs the inner command on the outer parse rather than
 # reading the table a second time. The outer command is still running, so the answer is the
 # same read the outer command already holds.
+#
+# THE FLOOR STATE IS THE COMMAND'S TOO (wave-26 T64). `_UNITS_MEMO_FLOOR` names a file, written
+# the first time a question inside the command needs `proof_state` and read by every later one,
+# subshells included; it is removed when the command returns. A command that never needs the
+# state never writes it. A caller that already names one (the tick, for its whole run) keeps it,
+# and removes it itself.
 units_memoised() {  # <plan> <command> [args...]
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "${1:-}" ]; then
     shift
     "$@"
     return
   fi
-  local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1
+  local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1 _UNITS_MEMO_FLOOR="${_UNITS_MEMO_FLOOR:-}" own="" rc
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
   _UNITS_MEMO_PLAN="${1:-}"
+  if [ -z "$_UNITS_MEMO_FLOOR" ]; then
+    _UNITS_MEMO_FLOOR="${TMPDIR:-/tmp}/bionic-units-floor-$$-${RANDOM}${RANDOM}"; own=1
+  fi
   shift
-  "$@"
+  "$@"; rc=$?
+  [ -z "$own" ] || [ ! -e "$_UNITS_MEMO_FLOOR" ] || rm -f "$_UNITS_MEMO_FLOOR"
+  return "$rc"
 }
 
 # ── THE THREE VERBS, AND THE ONE ACCESSOR ────────────────────────────────────
@@ -410,7 +421,15 @@ units_rows() {
 #     `review` — are named as its writers. A pending row whose `live:head` waits because
 #     nothing landed past the review proof writes no newer proof, so it is not one (wave-26
 #     T62; K2-F4): the last review of a run returns its row to pending, and integrate would
-#     otherwise wait on it for ever;
+#     otherwise wait on it for ever. A FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64;
+#     REQ-3 AC-3.4): with no open writer, `proof:floor` is satisfied when lib/proof.sh
+#     `proof_state` answers `covered` or `bounded`, and waits on `unbounded` — a merge from
+#     outside the run, a change the map answers with every suite or a file it answers with none,
+#     or a state that cannot be computed — saying `proof:floor: the head moved past the floor
+#     proof at <12 hex> in a way the map cannot bound (<its reason>); take the full run on this
+#     head and record it with proof-add floor`. The state is asked only when a pending row's
+#     answer turns on it, a row held for its step is judged without it, and inside
+#     `units_memoised` it is asked once;
 #   - `approval:<name>`: its line inside `## SDLC State` — `approved-by:` for `plan`,
 #     `approved: <name> …` otherwise. No row writes one; the user's act does.
 #   - `ext:<slug>`: never, until its owner removes it from the cell.
@@ -602,7 +621,7 @@ _units_proof_awk() {
 # `head=`. Unset, a plan with a review proof cannot see past it, and its live review waits.
 # `holds` (units_floor_holds) takes the floor row's id, or nothing, in the <step> slot.
 _units_sched() {
-  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i
+  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i fst rc
   if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ]; then
     case "$step" in
       ''|*[!0-9]*)
@@ -621,12 +640,68 @@ _units_sched() {
   for i in 1 2 3; do ctl="${ctl#*$'\t'}"; done
   ctl="${ctl%%$'\t'*}"
   case " $ctl " in *" reads "*) hasreads=1 ;; esac
+  # THE FLOOR STATE IS ASKED ONLY WHEN AN ANSWER TURNS ON IT (wave-26 T64; REQ-3 AC-3.4). The
+  # program runs without it; when a pending row it judges reads a `proof:floor` that a proof line
+  # and no open writer would satisfy, it prints nothing and exits 3, and only then is
+  # `proof_state` run (once per memoised command, `_units_floor_state`) and the program run again
+  # with the answer. Every other plan, and every other moment of this one, runs no git here.
+  fst="$(_units_floor_kept "$plan")"
+  _units_sched_run "$mode" "$plan" "$step" "$scale" "$hasreads" "$rows" "$fst"; rc=$?
+  if [ "$rc" -eq 3 ] && [ -z "$fst" ]; then
+    fst="$(_units_floor_state "$plan")"
+    _units_sched_run "$mode" "$plan" "$step" "$scale" "$hasreads" "$rows" "$fst"; rc=$?
+  fi
+  return "$rc"
+}
+
+# _units_sched_run <mode> <plan> <step> <scale> <hasreads> <rows> <floor state> -> the program's
+# answer and its status: 3, with nothing printed, when the answer needs a floor state not handed in.
+_units_sched_run() {
   {
-    printf '\034rows\n'; printf '%s\n' "$rows"
-    printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
-  } | awk -F'\t' -v mode="$mode" -v want="$step" -v scale="$scale" -v hasreads="$hasreads" \
+    printf '\034rows\n'; printf '%s\n' "$6"
+    printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
+  } | _UNITS_FLOOR_ST="$7" awk -F'\t' -v mode="$1" -v want="$3" -v scale="$4" -v hasreads="$5" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
       -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_sched_awk)"
+}
+
+# _units_floor_state <plan> -> what lib/proof.sh `proof_state` says of the change since the plan's
+# last floor proof: `covered…`, `bounded…` or `unbounded<TAB><reason>`, one line. The tree it asks
+# is the project root the plan sits under (`<root>/.bionic/…`), or the plan's own directory, whose
+# repository git finds. Inside `units_memoised` the answer is kept in a file for the rest of the
+# command, so the tick's three questions and its ready set run `proof_state` once between them.
+# WHEN THE STATE CANNOT BE COMPUTED, THE READ IS NOT SATISFIED (the fail direction): proof.sh not
+# loadable, no git, no checkout, a map that fails or overruns all answer `unbounded` with the
+# reason, and a floor proof at the head is always the way out, because `covered` asks no map.
+_units_floor_state() {
+  local plan="${1:-}" tree st=""
+  st="$(_units_floor_kept "$plan")"
+  [ -z "$st" ] || { printf '%s\n' "$st"; return 0; }
+  case "$plan" in
+    */.bionic/*) tree="${plan%%/.bionic/*}" ;;
+    .bionic/*) tree=. ;;
+    */*) tree="${plan%/*}" ;;
+    *) tree=. ;;
+  esac
+  if declare -F proof_state >/dev/null 2>&1; then
+    st="$(proof_state "$plan" "$tree" 2>/dev/null | awk 'NR == 1')"
+  fi
+  case "$st" in
+    covered*|bounded*|unbounded*) ;;
+    *) st="$(printf 'unbounded\tthe proof state cannot be computed here (lib/proof.sh)')" ;;
+  esac
+  [ -z "${_UNITS_MEMO_FLOOR:-}" ] || printf '%s\n%s\n' "$plan" "$st" > "$_UNITS_MEMO_FLOOR" 2>/dev/null
+  printf '%s\n' "$st"
+}
+
+# _units_floor_kept <plan> -> the state the memo file keeps for <plan>, or nothing: the file's
+# first line is the plan it was asked for, the second the state. Read with the shell alone.
+_units_floor_kept() {
+  local p="" st=""
+  [ -n "${_UNITS_MEMO_FLOOR:-}" ] && [ -f "$_UNITS_MEMO_FLOOR" ] || return 0
+  { IFS= read -r p; IFS= read -r st; } < "$_UNITS_MEMO_FLOOR" 2>/dev/null
+  [ "$p" = "${1:-}" ] && printf '%s' "$st"
+  return 0
 }
 
 # _units_files_awk -> the awk functions `in_docs(entry)` and `writes_head(cell)`. `in_docs` is 1
@@ -882,6 +957,21 @@ _units_sched_awk() {
           if ((a == "floor" && (knd[j] == "verify" || knd[j] == "test")) || (a == "review" && knd[j] == "review"))
             if (!(st[j] == "pending" && rlive[j] && live_idle())) wj[++nw] = j
         }
+        # THE FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A line
+        # with no open writer satisfies the read when the change since its head is covered or
+        # bounded; unbounded, or a state that could not be computed, is a wait naming the way
+        # out. Unknown here (floorst empty) is reported through needfloor, and the shell runs
+        # this program again with the state; a row held for its step is judged without it.
+        if (nw == 0 && a == "floor" && (a in proved) && !skipfloor) {
+          if (floorst == "") needfloor = 1
+          else if (floorst !~ /^(covered|bounded)/) {
+            fr = floorst; sub(/^[^\t]*\t?/, "", fr)
+            if (fr == "") fr = "the proof state could not be computed"
+            lwhy = "the head moved past the floor proof at " substr(prvh["floor"], 1, 12) \
+              " in a way the map cannot bound (" fr "); take the full run on this head and record it with proof-add floor"
+            return 0
+          }
+        }
         return (nw == 0 && (a in proved))
       }
       # A ROW THAT READS THE SETTLED head STILL WRITES IT FOR A ROW AT A LATER STEP (T35 F1). The
@@ -940,8 +1030,23 @@ _units_sched_awk() {
       return nh
     }
 
+    # rowheld(i) -> 2 when this answer does not judge pending row i at all, 1 when it is a gate
+    # act held for its step, 0 otherwise. A WAVE ROW CARRIES A NUMERIC STEP, and that is all the
+    # step still decides for a work row (wave-20 Δ1). A GATE ACT WAITS FOR ITS STEP (Δ6; T10b):
+    # ready only once the run has REACHED its step, reached and not equalled. A DOC ROW WAITS FOR
+    # ITS READS (wave-26 T13; D3): in a table with the reads column the release reads
+    # approval:release and nothing about it is a step. A table without the column has no approval
+    # to read, so its Step-7 doc row keeps the hold (A-T13.1).
+    function rowheld(i,   gate) {
+      if (scale == "task") return (stp[i] != "") ? 2 : 0
+      if (stp[i] !~ /^[0-9]+$/) return 2
+      gate = (knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7))
+      return (gate && stp[i] + 0 > want + 0) ? 1 : 0
+    }
+
     END {
       satisfied = (scale == "task") ? "done" : "landed"
+      floorst = ENVIRON["_UNITS_FLOOR_ST"]
       for (i = 1; i <= n; i++) {
         # THE FILES CELL: path entries only (a bare word or a dash declares nothing), the mark
         # taken off and remembered; code[] and docs[] say which side of the record it writes.
@@ -998,6 +1103,15 @@ _units_sched_awk() {
         for (j = 1; j <= n; j++) if (j in hold) printf "%s\t%s\t%s\n", id[j], stp[j], st[j]
         exit
       }
+      # THE FLOOR STATE, ASKED BEFORE ANYTHING IS PRINTED (wave-26 T64). A pending row this answer
+      # judges, not held for its step, whose proof:floor read a proof line and no open writer would
+      # satisfy needs the state; without it the program prints nothing and exits 3 (_units_sched).
+      if ((mode == "ready" || mode == "held" || mode == "waiting") && floorst == "") {
+        for (i = 1; i <= n; i++) {
+          if (st[i] != "pending" || rowheld(i) != 0) continue
+          for (k = 1; k <= ntk[i]; k++) if (tk[i, k] == "proof:floor") { judge(i, tk[i, k]); if (needfloor) exit 3 }
+        }
+      }
       for (i = 1; i <= n; i++) {
         if (mode == "edges") {
           if (!isopen(i)) continue
@@ -1009,20 +1123,9 @@ _units_sched_awk() {
           continue
         }
         if (st[i] != "pending") continue
-        held = 0
-        if (scale == "task") {
-          if (stp[i] != "") continue
-        } else {
-          # A WAVE ROW CARRIES A NUMERIC STEP, and that is all the step still decides for a work
-          # row (wave-20 Δ1). A GATE ACT WAITS FOR ITS STEP (Δ6; T10b): ready only once the run
-          # has REACHED its step — reached, not equalled. A DOC ROW WAITS FOR ITS READS (wave-26
-          # T13; D3): in a table with the reads column the release reads approval:release and
-          # nothing about it is a step. A table without the column has no approval to read, so
-          # its Step-7 doc row keeps the hold (A-T13.1).
-          if (stp[i] !~ /^[0-9]+$/) continue
-          gate = (knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7))
-          if (gate && stp[i] + 0 > want + 0) held = 1
-        }
+        held = rowheld(i)
+        if (held == 2) continue
+        skipfloor = held
         if (mode == "waiting" && held) printf "%s\tstep:%s\t-\t-\n", id[i], stp[i]
         # THE READY AND HELD ANSWERS STOP AT THE FIRST READ THAT DECIDES THEM (T35 F7): ready needs
         # one unmet read to say no, held one unmet read that is not ext:. Waiting names them all.
