@@ -27,7 +27,9 @@
 #
 # ANTI-VACUITY (per .claude/rules/test-harness.md). Every deny sits beside an allow on the same
 # fixture, by the same asker, through the same reader feature: a `..` under a real directory, a
-# cd and a relative `..`, and `mkdir -p d && echo x > d/f`, which must stay readable.
+# cd and a relative `..`, and `mkdir -p d && echo x > d/f`, which must stay readable. §E3 (T19)
+# adds two honest links already on disk and proves the delete through them alone is allowed
+# before it asserts that the same delete after a cp or mv is denied.
 #
 # Usage: bash tests/permission-effects.test.sh
 
