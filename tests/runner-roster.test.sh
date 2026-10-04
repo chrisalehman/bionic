@@ -988,7 +988,7 @@ rrn_read() { cat "$RRN_MARKS/$1" 2>/dev/null; }
 
 # ---- (a) the outer run inside a booked command -----------------------------
 rm -f "$RRN_MARKS"/*
-rrn_drive "$TNO" 1 4 bash "$RRN_BOOKED" -- bash tests/run.sh
+rrn_drive "$TNO" 1 4 bash "$RRN_BOOKED" -- 'bash tests/run.sh'
 expect_eq "11.1 the booked outer run completes green" "0" "$RRN_RC"
 expect_contains "11.2 its solo suite ran holding the whole machine, taken for that suite" \
   "aaa-nest.test.sh" "$(rrn_read outer.what)"
@@ -1018,7 +1018,7 @@ expect_eq "11.16 meta: …and the doctored copy does not" "0" \
   "$(grep -c 'BIONIC_SLOT_QUIET=1 ' "$TNM/tests/run.sh")"
 expect_true "11.17 meta: the doctored copy still parses" bash -n "$TNM/tests/run.sh"
 rm -f "$RRN_MARKS"/*
-rrn_drive "$TNM" 1 2 bash "$RRN_BOOKED" -- bash tests/run.sh
+rrn_drive "$TNM" 1 2 bash "$RRN_BOOKED" -- 'bash tests/run.sh'
 expect_contains "11.18 without the mark the nested run waits on its own parent's hold and gives up" \
   "gave up" "$(rrn_read inner-solo.out)"
 expect_contains "11.19 …which is the parent's whole-machine marker it was waiting on" \
@@ -1105,7 +1105,7 @@ expect_eq "11.38 …its solo suite was marked held" "1/1" "$(rrn_read outer.env)
 expect_eq "11.39 …and handed the place its hold covers, held while the suite ran" \
   "$RRN_SLOTS/place.1 held" "$(rrn_read outer.place)"
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"
-rrn_drive "$TNO" 1 4 bash "$RRN_BOOKED" -- bash tests/run.sh
+rrn_drive "$TNO" 1 4 bash "$RRN_BOOKED" -- 'bash tests/run.sh'
 expect_eq "11.40 a booked run completes green" "0" "$RRN_RC"
 expect_eq "11.41 …and its solo suite is handed the shim's place, held while the suite ran" \
   "$RRN_SLOTS/place.1 held" "$(rrn_read outer.place)"
@@ -1124,7 +1124,7 @@ rrn_pair_tree "$RRN/pair-a" pair-a
 rrn_pair_tree "$RRN/pair-b" pair-b
 rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"
 for _w in a b; do
-  ( rrn_drive "$RRN/pair-$_w" 2 20 bash "$RRN_BOOKED" -- bash tests/run.sh
+  ( rrn_drive "$RRN/pair-$_w" 2 20 bash "$RRN_BOOKED" -- 'bash tests/run.sh'
     printf '%s\n' "$RRN_OUT" > "$RRN_MARKS/pair-$_w.out"
     printf '%s\n' "$RRN_RC" > "$RRN_MARKS/pair-$_w.rc" ) &
 done
