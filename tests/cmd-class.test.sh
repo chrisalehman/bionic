@@ -2221,4 +2221,29 @@ expect_contains "§FOLDAGREE mutant still folds RM (the mutant runs)" "RM${T}rm"
 expect_contains "§FOLDAGREE mutant: the two folds now disagree on WAIT — the defect" "WAIT${T}wait" \
   "$(diff <(printf '%s\n' "$FOLD_MUT_OUT") <(printf '%s\n' "$FOLD_AWK_OUT"))"
 
+section "§PICK — wave-26 T40: the class priority is read in one place, by cmd_class and the wall alike"
+# `cmd_class` and walls.sh's `_wall_class_read` (T39) both pick the whole command's class from
+# `cmd_class_lines` by priority. The pick is `cmd_class_pick`, and it sets CMD_CLASS_PICKED in
+# the caller's shell, so the wall pays no fork for it (tests/hook-latency.test.sh §5 counts).
+# THE OWNER IS PROVEN BY REPLACING IT: with cmd_class_pick swapped for a stub, both readers
+# answer the stub's word. A copy of the loop in either one would still answer the real class.
+pick() { bash -c '. "$1" || exit 1; cmd_class_pick "$2"; printf "%s" "$CMD_CLASS_PICKED"' _ "$LIB" "$1" 2>&1; }
+expect_eq "§PICK suite outranks build, wherever it sits" "suite" "$(pick "build${T}make"$'\n'"suite${T}bash tests/a.test.sh")"
+expect_eq "§PICK install outranks build" "install" "$(pick "build${T}make"$'\n'"install${T}npm ci")"
+expect_eq "§PICK a class word alone on its line counts" "bootstrap" "$(pick "none${T}ls"$'\n'"bootstrap")"
+expect_eq "§PICK a field that only contains a class word is not it" "none" "$(pick "not-suite${T}x"$'\n'"suites${T}y")"
+expect_eq "§PICK no lines: none" "none" "$(pick "")"
+PICK_WALL_FN="$(sed -n '/^_wall_class_read() {/,/^}/p' "$(dirname "$LIB")/walls.sh")"
+expect_true "§PICK the wall's reader is found in walls.sh" test -n "$PICK_WALL_FN"
+# shellcheck disable=SC2016  # expanded by the inner bash
+PICK_BOTH='. "$1" || exit 1; eval "$2"
+  _WALL_CLASS_READ=0; _WALL_CLASS_TEXT=""
+  [ "$3" = stub ] && cmd_class_pick() { CMD_CLASS_PICKED=picked-by-the-owner; }
+  _wall_class_read "bash tests/a.test.sh"
+  printf "cmd_class=%s wall=%s" "$(cmd_class "bash tests/a.test.sh")" "$_WALL_CLASS"'
+expect_eq "§PICK control: both read a suite as suite" "cmd_class=suite wall=suite" \
+  "$(bash -c "$PICK_BOTH" _ "$LIB" "$PICK_WALL_FN" real 2>&1)"
+expect_eq "§PICK with the owner replaced, both answer the owner's word" \
+  "cmd_class=picked-by-the-owner wall=picked-by-the-owner" "$(bash -c "$PICK_BOTH" _ "$LIB" "$PICK_WALL_FN" stub 2>&1)"
+
 finish
