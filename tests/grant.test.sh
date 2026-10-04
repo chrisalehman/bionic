@@ -692,4 +692,133 @@ done
 expect_eq "G13.addonly the add-only record fix is untouched" "Leave it in place and write a new file beside it instead." \
   "$(fld 3 "$(dec writer "$WRITER_FACTS" "$(D "$REC/a.md")")")"
 
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G14 which program a word runs is the shared reader's; a match made to refuse stays case-blind"
+
+# Two questions, two rules (wave-25 T13; Chris's Step-4 ruling and A-orch-29). WHICH PROGRAM
+# a word runs is git-argv.sh's `cmd_word_fold`, the one rule every reader asks: an external
+# program word folds, so `GH` runs gh. A path or an argument matched in order to REFUSE
+# (a credential store, a reserved subcommand) is matched without regard to case, looser
+# than the fold: refusing something harmless is the only error a refusing guard may make.
+#
+# Every program word of the table, capitalised: each is still its category.
+G14_PROG="GIT push origin wave/x|leaves-the-machine
+Git push origin wave/x|leaves-the-machine
+GH pr create --fill|leaves-the-machine
+Gh auth token|credentials
+NPM publish|leaves-the-machine
+PNPM publish|leaves-the-machine
+YARN npm publish|leaves-the-machine
+CARGO publish|leaves-the-machine
+GEM push x.gem|leaves-the-machine
+TWINE upload dist/x|leaves-the-machine
+SECURITY find-generic-password -s x -w|credentials
+TERRAFORM apply|production-infrastructure
+KUBECTL apply -f deploy.yaml|production-infrastructure
+VERCEL --prod|production-infrastructure
+AWS s3 cp f s3://b/f|production-infrastructure
+GCLOUD billing accounts list|billing
+AZ group delete -n rg|production-infrastructure
+/usr/local/bin/TERRAFORM destroy|production-infrastructure
+SUDO gh pr create --fill|leaves-the-machine
+Sudo pnpm publish --access public|leaves-the-machine
+COMMAND npm publish|leaves-the-machine
+NOHUP cargo publish|leaves-the-machine
+ENV X=1 gh pr create --fill|leaves-the-machine"
+while IFS='|' read -r what cat; do
+  expect_eq "G14.prog '$what' is $cat" "$cat" "$(call grant_reserved Bash "$what")"
+done <<< "$G14_PROG"
+# Every subcommand and option word the table refuses on, capitalised: still refused.
+G14_SUB="git PUSH origin wave/x|leaves-the-machine
+gh PR create --fill|leaves-the-machine
+gh -R o/r RELEASE create v1|leaves-the-machine
+gh --REPO o/r ISSUE create|leaves-the-machine
+gh API repos/o/r/issues|leaves-the-machine
+gh AUTH token|credentials
+npm PUBLISH|leaves-the-machine
+npm LOGIN|credentials
+pnpm -C d publish|leaves-the-machine
+yarn NPM publish|leaves-the-machine
+cargo YANK --version 1.0.0|leaves-the-machine
+gem PUSH x.gem|leaves-the-machine
+gem SIGNIN|credentials
+twine UPLOAD dist/x|leaves-the-machine
+aws CE get-cost-and-usage|billing
+az CONSUMPTION usage list|billing"
+while IFS='|' read -r what cat; do
+  expect_eq "G14.sub '$what' is $cat" "$cat" "$(call grant_reserved Bash "$what")"
+done <<< "$G14_SUB"
+# Every credential store, capitalised, in a command and as a tool's path.
+G14_CRED="Bash|cat ~/.SSH/id_ed25519
+Bash|cp \$HOME/.AWS/credentials /tmp/x
+Bash|ssh-add --key=~/.Ssh/id_rsa
+Bash|cat /w/proj/.ENV
+Bash|SOURCE .Env.Local
+Read|/Users/alice/.AWS/credentials
+Write|/Users/alice/.Config/GH/hosts.yml
+Edit|/Users/alice/.NETRC
+Write|/w/proj/.ENV
+Read|/w/proj/.Env.Production"
+while IFS='|' read -r tool what; do
+  expect_eq "G14.cred $tool '$what' is credentials" "credentials" "$(call grant_reserved "$tool" "$what")"
+done <<< "$G14_CRED"
+# A capitalised word the shared reader does NOT fold: a shell builtin or keyword exists only
+# in the shell, which matches it case-exactly, so `EXEC gh …` is "command not found" and runs
+# no gh (git-argv.sh, `cmd_word_fold`'s never list). The grant reads it as the reader does:
+# no category. The lower-case spelling, on the same extractor, is the category.
+G14_NEVER="exec gh pr create --fill|EXEC gh pr create --fill
+exec terraform apply|Exec terraform apply
+if gh pr create; then :; fi|IF gh pr create; then :; fi
+then gh pr create|THEN gh pr create
+do npm publish|DO npm publish"
+while IFS='|' read -r runs never; do
+  expect_eq "G14.never.0 '$runs' runs the program: a category" "nonempty" \
+    "$([ -n "$(call grant_reserved Bash "$runs")" ] && echo nonempty || echo empty)"
+  expect_eq "G14.never.1 '$never' runs nothing (the reader does not fold it): no category" "" \
+    "$(call grant_reserved Bash "$never")"
+done <<< "$G14_NEVER"
+# …and it is still denied, never allowed: the real effects reader (cmd-class.sh, T2's) marks
+# the unknown word `?`, and the decision denies it with a fix.
+CMD_LIB="$REPO_ROOT/payload/scripts/lib/cmd-class.sh"
+while IFS='|' read -r runs never; do
+  fx="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; cmd_effects "$2" /w/proj' _ "$CMD_LIB" "$never" 2>/dev/null)"
+  expect_regex "G14.never.2 the reader marks '$never' unknown" "^\\?${TAB}" "$fx"
+  expect_eq "G14.never.3 …and '$never' is decided deny-fix" "deny-fix" \
+    "$(kind "$(dec lead "$LEAD_FACTS" "$fx" "$(call grant_reserved Bash "$never")")")"
+done <<< "$G14_NEVER"
+# The grant keeps no lower-casing of its own: the program word is the reader's fold, and a
+# refusal's match is case-blind by matching, not by a second copy of the words.
+G14_SRC="$(cat "$LIB" 2>/dev/null)"
+expect_regex "G14.src the lib asks the shared reader's fold" 'cmd_word_fold' "$G14_SRC"
+expect_no_regex "G14.src2 …and lower-cases no word itself" "tr '\\[:upper:\\]'|tr A-Z|tr '\\[A-Z\\]'" "$G14_SRC"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+section "§G15 every fix line sends the asker to the one above its own class"
+
+# A fix line never tells an asker to ask itself (T4's concern 2, wave-25 T13). A writer or a
+# read-only agent is sent to the lead. The lead and an unbound session have no lead above
+# them: they are sent to the human. Three fix lines, every class, each row keeping §G7's rule
+# (three fields, one next step).
+g15_check() {  # <label> <verdict> <reason needle> <want in fix> <never in fix>
+  expect_eq "$1.0 deny-fix with three fields" "deny-fix|3" "$(kind "$2")|$(printf '%s\n' "$2" | awk -F'\t' '{print NF}')"
+  expect_contains "$1.1 the reason names what failed" "$3" "$(fld 2 "$2")"
+  expect_contains "$1.2 the fix sends it to the $4" "$4" "$(fld 3 "$2")"
+  expect_absent "$1.3 …never to the $5" "$5" "$(fld 3 "$2")"
+  expect_eq "$1.4 the next step is one sentence" "1" "$(fld 3 "$2" | grep -o '\. ' | wc -l | awk '{print $1 + 1}')"
+}
+for cls in lead unbound writer reader; do
+  case "$cls" in
+    lead) f="$LEAD_FACTS"; up=human; not=lead ;;
+    unbound) f="$UNBOUND_FACTS"; up=human; not=lead ;;
+    writer) f="$WRITER_FACTS"; up=lead; not=human ;;
+    reader) f="$READER_FACTS"; up=lead; not=human ;;
+  esac
+  # The no-workspace fix: no facts, so no root to work in.
+  g15_check "G15.none.$cls" "$(dec "$cls" "" "$(W "$P/x")")" "no workspace" "$up" "$not"
+  # Rule 2: one of bionic's own state files.
+  g15_check "G15.state.$cls" "$(dec "$cls" "$f" "$(W "$P/.bionic/tmp/gate-sid-1.state")")" "bionic's own state" "$up" "$not"
+  # Rule 5, a delete: the main checkout's .git, which no root grants.
+  g15_check "G15.git.$cls" "$(dec "$cls" "$f${NL}main=$P" "$(D "$P/.git/index")")" "$P/.git" "$up" "$not"
+done
+
 finish

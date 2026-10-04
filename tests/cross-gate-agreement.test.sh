@@ -13506,7 +13506,28 @@ UB8_OUT=$(ub_tick "$UB8" "$SID_A")
 expect_absent "UB.8 tick, fallback: no FILL line is prescribed from <p>" "poker: FILL " "$UB8_OUT"
 expect_absent "UB.8 …and the decision is not FILL" "decision=FILL" "$UB8_OUT"
 expect_contains "UB.8 …it says it fills nothing, as a session with no run does" "no FILL — " "$UB8_OUT"
-expect_absent "UB.8 …and <p>'s ready row T5 is named nowhere" "T5" "$UB8_OUT"
+# THE ROOTS ARE FOLDED BEFORE THE ID IS LOOKED FOR (wave-25 T15). The tick prints paths: the
+# plan's, under the sandbox, and its own in the re-arm note, under the tree this suite runs
+# from. A tree at `.worktrees/25-T5` once turned this row red with no T5 printed as a task.
+# Folding the sandbox and the hooks directory, logical and physical, to placeholders leaves
+# only what the tick itself wrote; the first row proves the fold ran on this output.
+ub_fold_roots() {  # <text> -> text with the sandbox and hooks roots folded to <sandbox>/<hooks>
+  printf '%s\n' "$1" | awk -v a="$SANDBOX" -v b="$UB_HOOKS_REAL" -v c="$BIONIC_HOOKS_DIR" '
+    function fold(s, p, t,   i) { if (p == "") return s
+      while ((i = index(s, p)) > 0) s = substr(s, 1, i-1) t substr(s, i+length(p)); return s }
+    { $0 = fold($0, a, "<sandbox>"); $0 = fold($0, b, "<hooks>"); print fold($0, c, "<hooks>") }'
+}
+UB_HOOKS_REAL=$(cd "$BIONIC_HOOKS_DIR" && pwd -P)
+UB8_FOLDED=$(ub_fold_roots "$UB8_OUT")
+expect_contains "UB.8 …the roots fold ran on this output (the plan path reads <sandbox>/)" \
+  "<sandbox>/fx/ub-tick/" "$UB8_FOLDED"
+# The fold on a hooks root that holds the id, as `.worktrees/25-T5` did: the root goes, a row
+# id the tick printed stays.
+UB8_T5_ROOT=$(BIONIC_HOOKS_DIR=/x/.worktrees/25-T5/hooks UB_HOOKS_REAL=/x/.worktrees/25-T5/hooks \
+  ub_fold_roots "poker: FILL T5 — bash /x/.worktrees/25-T5/hooks/session-poker.sh arm")
+expect_contains "UB.8 …a T5-holding hooks root folds to <hooks>" "bash <hooks>/session-poker.sh arm" "$UB8_T5_ROOT"
+expect_contains "UB.8 …and a row id printed outside it is kept" "FILL T5 — " "$UB8_T5_ROOT"
+expect_absent "UB.8 …and <p>'s ready row T5 is named nowhere" "T5" "$UB8_FOLDED"
 UB8_ADV=$(printf '%s\n' "$UB8_OUT" | sed 's/^poker: //' | grep '^run resolved by newest-plan fallback' \
   | awk -v p="$UB8_P" '{ while ((i = index($0, p)) > 0) $0 = substr($0, 1, i-1) "<p>" substr($0, i+length(p)); print }')
 expect_eq "UB.8 …and the advisory is printed exactly once" "1" "$(printf '%s' "$UB8_ADV" | grep -c . || true)"

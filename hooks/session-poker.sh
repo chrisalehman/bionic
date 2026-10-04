@@ -2808,6 +2808,8 @@ plan_verb_id_ok() {
 #   patrol-<sid>.state[.armed] this file                     the Patrol stamp and its marker
 #   stop-orders-<sid>.state    hooks/stop-orders.sh          the order queue
 #   tick-digest-<sid>.state    this file                     the tick's digest and duty
+#   workspaces-<sid>.state     scripts/lib/worktree.sh       the run's workspace record
+#   gate-<sid>.state           hooks/permission-answer.sh    the reserved requests to escalate
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE THEREFORE UNREACHABLE FROM HERE, and that
 # is a property of the enumeration rather than a list to maintain: `context-spend.state` and
