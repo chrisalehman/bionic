@@ -21,7 +21,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | current | ledger-add | ledger-set …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
-#     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the working branch's head (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -411,7 +411,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind)"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id> <col>=<val>...   set cells of a ## Tasks row (any header column but Files, which amend widens)"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
@@ -419,7 +419,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
-  die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the working branch's head"
+  die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -517,12 +517,15 @@ case "$VERB" in
   # Δ5). `status`, `worktree` and `base` are the dispatcher's cells and are not operands:
   # a new row is `pending` and names no tree. Every operand is required — `—` is how the
   # table itself spells "none" — so a short list is the usage error, never a guessed default.
+  # THE TENTH, `<reads>`, IS THE ONE OPTIONAL CELL (wave-26 T59; REQ-5 AC-5.4): the reads column
+  # a table may carry (wave-26 T2), from which the row's edges are computed. Left off, the row
+  # is written exactly as the nine-operand form always wrote it.
   task-add)
-    if [ $# -ne 9 ]; then
-      usage "task-add takes exactly nine arguments: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> (write — for none)."
+    if [ $# -ne 9 ] && [ $# -ne 10 ]; then
+      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none)."
     fi
     TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
-    TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"
+    TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"; TA_READS="${10:-}"
     ;;
   # THE ONE VERB WITH REPEATABLE FLAGS (wave-20 T9, REQ-4; spec D4). Each `--files+`,
   # `--suites+` and `--reexec+` names ONE addition and may be given again; `--reason` is
@@ -615,11 +618,12 @@ case "$VERB" in
     esac
     AP_NAME="$1"; AP_REPLY="$2"
     ;;
-  # TWO OPERANDS AND NO THIRD (wave-26 T4; REQ-3, D5): the kind and the evidence. The head is
-  # read from git, never typed, so a head on the command line is the usage error, not a value.
+  # TWO OPERANDS AND NO THIRD (wave-26 T4; REQ-3, D5): the kind and the evidence. The head is the
+  # one the evidence names, held against the working branch's checkout (T14), never typed, so a
+  # head on the command line is the usage error, not a value.
   proof-add)
     if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
-      usage "proof-add takes exactly two arguments: <floor|review|task> <evidence path under record/> (the head is read from the working branch's checkout)."
+      usage "proof-add takes exactly two arguments: <floor|review|task> <evidence path under record/> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand)."
     fi
     PF_KIND="$1"; PF_EVID="$2"
     ;;
@@ -5208,6 +5212,21 @@ EOF
       exit 1
     fi
 
+    # A READ NEEDS A COLUMN TO GO IN (wave-26 T59; REQ-5 AC-5.4). The projection drops a value
+    # its table has no column for, so a reads operand on a table without one would be accepted
+    # and lost, and the row would wait on nothing it declared. Refused instead, in one line.
+    # `—` (or `-`, or empty) declares nothing and is the nine-operand form; in a reads table it
+    # is the cell `—`, which the readiness program reads as the kind's default (lib/units.sh).
+    case "$TA_READS" in
+      ''|'—'|'-') : ;;
+      *)
+        if ! units_has_column "$TA_PLAN" reads; then
+          die "REFUSED — the ## Tasks table of $TA_PLAN has no reads column, so the reads operand '$(clean "$TA_READS")' has nowhere to go; add the column, or name what $TA_ID waits for in its deps. The plan is unchanged."
+          exit 1
+        fi
+        ;;
+    esac
+
     # THE FILES CELL IS JUDGED BY THE DISPATCH GRAMMAR (wave-20 T9; D4, Δ10; T6 carry-over).
     # The cell becomes a brief's `Files:` line at dispatch, so it is read here exactly as the
     # dispatch wall will read it: a cell the lift reads as no path — a template slot, a bare
@@ -5246,7 +5265,7 @@ EOF
     esac
 
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
@@ -6665,203 +6684,15 @@ EOF
     TICK_OCCUPIED="$(printf '%s' "$TICK_OCC_NAMES" | budget_open_writers "$ROSTER_FILE")"
     case "$TICK_OCCUPIED" in ''|*[!0-9]*) TICK_OCCUPIED=0 ;; esac
 
-    # "No roster" and "empty roster" are different facts, and only the latter may DISARM
-    # (ap review A-1, item 2). A roster with zero verdict lines because the file plain does
-    # not exist is indistinguishable, from the arithmetic alone, from a roster that exists
-    # and legitimately has nothing open yet — but the first case is usually the wrong project
-    # root having been resolved, and DISARM is silent and terminal for the rest of the
-    # session (doctrine, skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the
-    # Patrol"). Checked only on the TOTAL=0 path: any row at all on the roster proves the
-    # file exists, so OPEN=0-with-TOTAL>0 can never be the absent-file case.
-    if [ "$TOTAL" -eq 0 ] && [ ! -e "$ROSTER_FILE" ]; then
-      # AC-38 (fold-in ratified 2026-09-03): THE ARM SPLITS. "No roster" was one refusal
-      # covering two states that deserve opposite answers, and the wrong one was observed on
-      # this wave's own Patrol tick #1 — an orchestrator that had armed at engagement, was
-      # standing in the right project, and had simply not dispatched anything yet got
-      # REFUSED with a wall of candidate paths describing a root that was perfectly correct.
-      # Arming precedes dispatch by design (SKILL.md §Dispatch: "arm at engagement"), so the
-      # first tick of every run reaches this line, and answering it with a refusal teaches
-      # the reader to ignore the one message that also reports a mis-resolved root.
-      #
-      # THE TWO STATES, and the fact that tells them apart:
-      #   armed here, and the walk CHOSE a real `.bionic`  -> QUIET. The Patrol is doing its
-      #     job; there is simply nothing on the roster yet. Exit 0, stamp kept (it was
-      #     written above), one line, and no candidate walk — the root is not in doubt.
-      #   anything else                                     -> the refusal below, unchanged.
-      #
-      # THE ARMING RECORD IS THE LOAD-BEARING HALF. It is written only by `arm`, and its
-      # path is resolved against the SAME root the roster's is, so a tick that resolved the
-      # wrong root finds no arming record there either and refuses — which is exactly the
-      # failure the refusal exists to report. The root tag is the second guard, and it is
-      # read off the walk taken ABOVE the stamp write for the reason given there.
-      TICK_ARMED="$(patrol_armed_file "$SESSION_ID")" || TICK_ARMED=""
-      if [ -n "$TICK_ARMED" ] && [ -f "$TICK_ARMED" ] && [ ! -L "$TICK_ARMED" ] \
-         && [ "$TICK_ROOT_TAG" = "chosen" ]; then
-        # THE RUNG, BEFORE THE DECISION LINE, exactly as the scheduler block prints it below
-        # (AC-17: on EVERY tick). This is the first tick of every run — arming precedes
-        # dispatch by design — so it is also the tick where the width the machine will carry
-        # is most worth knowing, right before the batch that has not been sent yet.
-        rung_report "$REPO_REAL" "$SESSION_ID"
-        # THE HOLDS AND THE LEDGER ON THE FIRST TICK TOO (wave-21 T13). No roster yet is the
-        # reader's no-roster rule, the gate's own, so what this prints is what the gate would
-        # refuse a writer's first commit on.
-        tick_plan_memoised tick_plan_report
-        # THE SENTENCE FIRST, THE DECISION LINE LAST (REQ-10 AC-10.4). Every band in this
-        # verb prints its explanation above its machine line, so the last line a tick prints
-        # is always the answer — whichever arm answered.
-        tick_conclude QUIET
-        if [ "$TICK_DECIDED" = NOTIFY ]; then
-          tick_gate_report
-          tick_decision_line NOTIFY "$TOTAL" "$OPEN" "" "" "" "" "$TICK_GATE_FIELD"
-          exit 1
-        fi
-        say "QUIET — armed, nothing dispatched yet on this session"
-        tick_decision_line QUIET "$TOTAL" "$OPEN"
-        exit 0
-      fi
-      die "REFUSED — no roster at $ROSTER_FILE; this is not the same as an empty one."
-      die "An armed session with nothing dispatched yet is QUIET, and was answered above — so"
-      die "reaching this line means the Patrol never armed here, or the wrong project root was"
-      die "resolved. Either way nothing was read to decide DISARM from, and DISARM ends the"
-      die "Patrol for the rest of this session."
-      # THE WALK, SHOWN (2.4, AC-13). The sentence above names the likely cause and then
-      # leaves the reader with the one question they cannot answer from a message: WHICH
-      # ancestor was taken, and what was passed over to get there. That answer is a property
-      # of the filesystem above their cwd, so it is printed rather than described —
-      # `project_root_candidates` is the same walk `project_root` just took, one line per
-      # ancestor with the reason it was rejected, and the chosen one marked. A phantom
-      # `.bionic` nested under a project, a symlinked one, a `.bionic` that only exists
-      # inside $HOME: each shows up as its own line with its own tag.
-      die "The root came from this walk over the ancestors of $PWD (path, then verdict):"
-      printf '%s\n' "$TICK_ROOT_WALK" | while IFS= read -r ROOT_CAND; do
-        die "  $ROOT_CAND"
-      done
-      exit 2
-    fi
-
-    # THE RUN-STATE READ, taken only where it can change the answer. `TOTAL == 0` implies
-    # `OPEN == 0` — the loop that raises OPEN is the loop that raises TOTAL — so this single
-    # test covers both arms of the old predicate, and a roster with open work never pays for
-    # a find over the docs tree.
-    RUN_STATE=open
-    RUN_STATE_WHY="the roster still carries open work"
-    # THE TERMINAL DECISION KEEPS THE ROSTER'S COUNT, never the live set's (S19). DISARM
-    # removes the stamp and ends the Patrol for the rest of the session, and the state it
-    # would fire on here is precisely the one that most needs supervising: a row whose
-    # contract is UNMET and whose agent has finished without delivering. `open=` and the
-    # fill are advisory arithmetic and may be trimmed; this may not.
-    if [ "$OPEN_ROSTER" -eq 0 ]; then
-      # RESOLVED HERE, IN THIS SHELL, FIRST: `run_state` below runs in a command substitution,
-      # so a latch it sets dies with the subshell and `sched_budget_read` would resolve and
-      # announce a second time. One resolution in the parent, one announcement.
-      resolve_run "$REPO_REAL" "$SESSION_ID"
-      RUN_STATE_RAW="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")" "$SESSION_ID")"
-      RUN_STATE="${RUN_STATE_RAW%%|*}"
-      RUN_STATE_WHY="${RUN_STATE_RAW#*|}"
-    fi
-
-    # DISARM — no open row AND a run that says it is delivered, in a delivery that POSTDATES
-    # this Patrol's arming (R-13: an older one is the previous run's close-out, still newest
-    # while the new run's plan does not exist yet). "No open row" alone was the whole
-    # predicate until 1.3.2, and it is also exactly what a live wave looks like between two
-    # batches: every writer of a task landed, the next not yet briefed. The tick ended the
-    # Patrol there, terminally, and the rest of the wave ran unsupervised (epic-20 W1
-    # dogfood, idea §B-4; R-4, AC-13/AC-14). The first conjunct still generalizes the spec's
-    # literal "disarmed on empty roster" to a roster whose every row is MET/WAIVED/acked (S2
-    # design decision, logged to the plan); the second is what tells a finish from a lull.
+    # ─────────────────────────────────────── the scheduler, defined once for two callers
     #
-    # An empty roster on a run that has not delivered falls through to QUIET below, and QUIET
-    # KEEPS THE STAMP — which is the half that matters on disk. The clock keeps running, the
-    # arming wall stays satisfied, and hooks/patrol-revive.sh has nothing to report.
-    if [ "$OPEN_ROSTER" -eq 0 ] && [ "$RUN_STATE" = delivered ]; then
-      # THE RUNG ON THE TERMINAL TICK TOO (AC-17). The number is moot to a Patrol that is
-      # stopping, and that is not the point: the acceptance criterion is that every tick
-      # reports it, and an operator reading the last tick of a run in a transcript should not
-      # have to know which arm printed the line and which did not.
-      rung_report "$REPO_REAL" "$SESSION_ID"
-      # …AND THE PLAN REPORT, for the same reason (wave-21 T13): a delivered run whose ledger
-      # still carries a finding is one the gate would refuse, and this is the last tick to say so.
-      tick_plan_memoised tick_plan_report
-      tick_conclude DISARM
-      tick_gate_report
-      say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
-      tick_decision_line DISARM "$TOTAL" "$OPEN" "" "" "" "" "$TICK_GATE_FIELD"
-      # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
-      # so the stamp this very tick wrote before it decided has to stop claiming a live
-      # clock, or hooks/patrol-revive.sh reads the stop this line just chose as a death and
-      # blocks every remaining turn of the session demanding a re-arm nobody wants (critic
-      # C-2, epic-19 w1). It is LAST so that nothing above it can be skipped by it: the
-      # decision line is already printed, and a removal that fails costs a late notice
-      # rather than a lost decision.
-      remove_patrol_stamp "$SESSION_ID" \
-        || die "WARN — the Patrol stamp could not be removed; the death notice may fire on later turns."
-      exit 0
-    fi
-
-    # ─────────────────────────────────────── the lease overrun (spec AC-28)
-    #
-    # A spawned worktree is a leased slot bound to the ledger row that dispatched its
-    # writer, and the lease ends when that row is fact-discharged (design ledger C1). A tree
-    # still standing after that is a slot counted against the worktree budget that nobody
-    # holds — and nothing else in the fleet walks `.worktrees` against the roster, so it
-    # stays invisible until someone runs out of budget.
-    #
-    # READ OFF THE VERDICT THIS TICK ALREADY TOOK. `$VERDICT_OUT` is one
-    # `session-sweeper.sh verdict` over the whole roster, and it is where the discharge
-    # vocabulary lives: `state=MET`/`WAIVED`, and the `acked=` the sweeper folds in from its
-    # own ledger. A roster read on its own would miss every acked row. The library takes a
-    # FILE, so the lines this tick is already holding are spilled to a temporary one and
-    # removed again — never into `.bionic/tmp`, which is state the operator reads.
-    #
-    # THE CONVENTION AND THE PREDICATE ARE THE LIBRARY'S, not a second copy here:
-    # `.worktrees/<dir>` belongs to the row named `W-<DIR>` uppercased, and "discharged"
-    # means acked or MET/CLOSED/WAIVED. Three callers share that definition
-    # (payload/scripts/lib/worktree.sh's header names them); this is the third.
-    #
-    # PLACED AFTER DISARM, BEFORE THE SCHEDULER. A run that has DELIVERED exits above, and
-    # its standing trees are the integration step's assertion to make rather than a Patrol
-    # line nobody is left to read.
-    #
-    # IT REMOVES NOTHING. `spawn-worktree.sh land` is the act and the orchestrator runs it;
-    # the tick says the tree is standing and stops there.
-    #
-    # AND IT IS A NOTE, NOT A BAND (REQ-10 AC-10.3; D5). This walk used to feed NOTIFY, so a
-    # tree left standing after its row was discharged raised the exit-1 band on EVERY tick
-    # for the life of the tree — nothing here is remembered between ticks — and buried the
-    # decision the roster had actually reached. A standing tree is a fact about disk: it
-    # prints as `poker: note:` and it rides the decision line in a `trees=` field of its own,
-    # where a reader that wants to act on it can find it without the tick having claimed
-    # something was wrong.
-    LEASE_TREES=""
-    LEASE_FILE="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-verdict.XXXXXX" 2>/dev/null)" || LEASE_FILE=""
-    if [ -n "$LEASE_FILE" ]; then
-      printf '%s\n' "$VERDICT_OUT" > "$LEASE_FILE" 2>/dev/null
-      while IFS= read -r LEASE_LINE; do
-        [ -n "$LEASE_LINE" ] || continue
-        LEASE_PATH="$(printf '%s' "$LEASE_LINE" | cut -f1)"
-        LEASE_ROW="$(printf '%s' "$LEASE_LINE" | cut -f2)"
-        [ -n "$LEASE_PATH" ] && [ -n "$LEASE_ROW" ] || continue
-        note "tree stands $LEASE_PATH — row discharged; land or remove"
-        LEASE_TREES="${LEASE_TREES}${LEASE_TREES:+,}$(clean "$LEASE_PATH")"
-      done <<EOF
-$(worktree_lease_overruns "$REPO_REAL" "$LEASE_FILE")
-EOF
-      rm -f "$LEASE_FILE" 2>/dev/null || :
-    else
-      die "WARN — no temporary file for the lease walk; standing worktrees were not checked."
-    fi
-
-    # ─────────────────────────────────────── the scheduler: pressure, then fills
-    #
-    # PLACED HERE, after DISARM and before NOTIFY/QUIET, and the placement is the contract.
-    # DISARM exits above: a run that has DELIVERED gets no fills, because there is nothing
-    # left to fill. Everything else — a live wave, a lull between batches, a roster with an
-    # overdue row — gets both the pressure reading and the fill decision, and then the
-    # decision line it was already going to get. A tick that filled instead of notifying
-    # would trade a report the operator asked for against one they did not.
-    #
-    # PRESSURE FIRST, ALWAYS. See the block comment above `space_field` for why the order is
-    # not negotiable and why nothing here re-derives the budget.
+    # ONE SITE, TWO ARMS (wave-26 T59; REQ-6 AC-6.6). The pressure reading, the budget, the
+    # EMERGENCY line and the scheduler's body below are what every tick that decides prints its
+    # FILL, RANGE, WAIT and CHAIN lines from. The armed first tick (no roster yet, just below)
+    # exits above the place this is called on every other tick, so it calls it too: the one tick
+    # where every ready row is still unstarted names them, from this same code. Defined here,
+    # ahead of both, and called once by whichever arm the tick takes.
+    tick_scheduler() {
     # THE FILL THIS TICK ORDERED, empty until the scheduler names one — the FILL band's own
     # input to the ranked decision below (D5).
     SCHED_FILL=""
@@ -6914,7 +6745,8 @@ EOF
     # every assignment it makes is this shell's — nothing in it runs in a subshell.
     tick_schedule() {
     # THE REPORT, AND THE CEILINGS IT IS TAKEN AGAINST — both in `rung_report` above, which
-    # the two arms that exit ABOVE this block call for themselves (AC-17, Step-6 review C-5).
+    # the DISARM arm, exiting above this block, calls for itself (AC-17, Step-6 review C-5);
+    # the armed first tick calls this whole scheduler instead (T59).
     # The budget read is memoized, so reaching it a second time here costs one plan read.
     rung_report "$REPO_REAL" "$SESSION_ID"
 
@@ -7119,6 +6951,207 @@ EOF
 
     }
     tick_plan_memoised tick_schedule
+    }
+
+    # "No roster" and "empty roster" are different facts, and only the latter may DISARM
+    # (ap review A-1, item 2). A roster with zero verdict lines because the file plain does
+    # not exist is indistinguishable, from the arithmetic alone, from a roster that exists
+    # and legitimately has nothing open yet — but the first case is usually the wrong project
+    # root having been resolved, and DISARM is silent and terminal for the rest of the
+    # session (doctrine, skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the
+    # Patrol"). Checked only on the TOTAL=0 path: any row at all on the roster proves the
+    # file exists, so OPEN=0-with-TOTAL>0 can never be the absent-file case.
+    if [ "$TOTAL" -eq 0 ] && [ ! -e "$ROSTER_FILE" ]; then
+      # AC-38 (fold-in ratified 2026-09-03): THE ARM SPLITS. "No roster" was one refusal
+      # covering two states that deserve opposite answers, and the wrong one was observed on
+      # this wave's own Patrol tick #1 — an orchestrator that had armed at engagement, was
+      # standing in the right project, and had simply not dispatched anything yet got
+      # REFUSED with a wall of candidate paths describing a root that was perfectly correct.
+      # Arming precedes dispatch by design (SKILL.md §Dispatch: "arm at engagement"), so the
+      # first tick of every run reaches this line, and answering it with a refusal teaches
+      # the reader to ignore the one message that also reports a mis-resolved root.
+      #
+      # THE TWO STATES, and the fact that tells them apart:
+      #   armed here, and the walk CHOSE a real `.bionic`  -> QUIET. The Patrol is doing its
+      #     job; there is simply nothing on the roster yet. Exit 0, stamp kept (it was
+      #     written above), one line, and no candidate walk — the root is not in doubt.
+      #   anything else                                     -> the refusal below, unchanged.
+      #
+      # THE ARMING RECORD IS THE LOAD-BEARING HALF. It is written only by `arm`, and its
+      # path is resolved against the SAME root the roster's is, so a tick that resolved the
+      # wrong root finds no arming record there either and refuses — which is exactly the
+      # failure the refusal exists to report. The root tag is the second guard, and it is
+      # read off the walk taken ABOVE the stamp write for the reason given there.
+      TICK_ARMED="$(patrol_armed_file "$SESSION_ID")" || TICK_ARMED=""
+      if [ -n "$TICK_ARMED" ] && [ -f "$TICK_ARMED" ] && [ ! -L "$TICK_ARMED" ] \
+         && [ "$TICK_ROOT_TAG" = "chosen" ]; then
+        # THE SCHEDULER, FROM ITS ONE SITE (wave-26 T59; REQ-6 AC-6.6), above the decision line.
+        # The rung (AC-17: on EVERY tick); the holds and the ledger (wave-21 T13: no roster yet
+        # is the reader's no-roster rule, the gate's own, so what prints is what the gate would
+        # refuse a writer's first commit on); then the ready set, FILL, WAIT and CHAIN, or the
+        # line saying why there is none, the approval gate first. This is the first tick of every
+        # run, so it is the tick where the batch not yet sent is most worth naming. Through T58
+        # this arm printed the first two and exited, and the batch went unnamed. The arm still
+        # concludes QUIET, exit 0, its stamp kept.
+        tick_scheduler
+        # THE SENTENCE FIRST, THE DECISION LINE LAST (REQ-10 AC-10.4). Every band in this
+        # verb prints its explanation above its machine line, so the last line a tick prints
+        # is always the answer — whichever arm answered.
+        tick_conclude QUIET
+        if [ "$TICK_DECIDED" = NOTIFY ]; then
+          tick_gate_report
+          tick_decision_line NOTIFY "$TOTAL" "$OPEN" "" "" "" "" "$TICK_GATE_FIELD"
+          exit 1
+        fi
+        say "QUIET — armed, nothing dispatched yet on this session"
+        tick_decision_line QUIET "$TOTAL" "$OPEN"
+        exit 0
+      fi
+      die "REFUSED — no roster at $ROSTER_FILE; this is not the same as an empty one."
+      die "An armed session with nothing dispatched yet is QUIET, and was answered above — so"
+      die "reaching this line means the Patrol never armed here, or the wrong project root was"
+      die "resolved. Either way nothing was read to decide DISARM from, and DISARM ends the"
+      die "Patrol for the rest of this session."
+      # THE WALK, SHOWN (2.4, AC-13). The sentence above names the likely cause and then
+      # leaves the reader with the one question they cannot answer from a message: WHICH
+      # ancestor was taken, and what was passed over to get there. That answer is a property
+      # of the filesystem above their cwd, so it is printed rather than described —
+      # `project_root_candidates` is the same walk `project_root` just took, one line per
+      # ancestor with the reason it was rejected, and the chosen one marked. A phantom
+      # `.bionic` nested under a project, a symlinked one, a `.bionic` that only exists
+      # inside $HOME: each shows up as its own line with its own tag.
+      die "The root came from this walk over the ancestors of $PWD (path, then verdict):"
+      printf '%s\n' "$TICK_ROOT_WALK" | while IFS= read -r ROOT_CAND; do
+        die "  $ROOT_CAND"
+      done
+      exit 2
+    fi
+
+    # THE RUN-STATE READ, taken only where it can change the answer. `TOTAL == 0` implies
+    # `OPEN == 0` — the loop that raises OPEN is the loop that raises TOTAL — so this single
+    # test covers both arms of the old predicate, and a roster with open work never pays for
+    # a find over the docs tree.
+    RUN_STATE=open
+    RUN_STATE_WHY="the roster still carries open work"
+    # THE TERMINAL DECISION KEEPS THE ROSTER'S COUNT, never the live set's (S19). DISARM
+    # removes the stamp and ends the Patrol for the rest of the session, and the state it
+    # would fire on here is precisely the one that most needs supervising: a row whose
+    # contract is UNMET and whose agent has finished without delivering. `open=` and the
+    # fill are advisory arithmetic and may be trimmed; this may not.
+    if [ "$OPEN_ROSTER" -eq 0 ]; then
+      # RESOLVED HERE, IN THIS SHELL, FIRST: `run_state` below runs in a command substitution,
+      # so a latch it sets dies with the subshell and `sched_budget_read` would resolve and
+      # announce a second time. One resolution in the parent, one announcement.
+      resolve_run "$REPO_REAL" "$SESSION_ID"
+      RUN_STATE_RAW="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")" "$SESSION_ID")"
+      RUN_STATE="${RUN_STATE_RAW%%|*}"
+      RUN_STATE_WHY="${RUN_STATE_RAW#*|}"
+    fi
+
+    # DISARM — no open row AND a run that says it is delivered, in a delivery that POSTDATES
+    # this Patrol's arming (R-13: an older one is the previous run's close-out, still newest
+    # while the new run's plan does not exist yet). "No open row" alone was the whole
+    # predicate until 1.3.2, and it is also exactly what a live wave looks like between two
+    # batches: every writer of a task landed, the next not yet briefed. The tick ended the
+    # Patrol there, terminally, and the rest of the wave ran unsupervised (epic-20 W1
+    # dogfood, idea §B-4; R-4, AC-13/AC-14). The first conjunct still generalizes the spec's
+    # literal "disarmed on empty roster" to a roster whose every row is MET/WAIVED/acked (S2
+    # design decision, logged to the plan); the second is what tells a finish from a lull.
+    #
+    # An empty roster on a run that has not delivered falls through to QUIET below, and QUIET
+    # KEEPS THE STAMP — which is the half that matters on disk. The clock keeps running, the
+    # arming wall stays satisfied, and hooks/patrol-revive.sh has nothing to report.
+    if [ "$OPEN_ROSTER" -eq 0 ] && [ "$RUN_STATE" = delivered ]; then
+      # THE RUNG ON THE TERMINAL TICK TOO (AC-17). The number is moot to a Patrol that is
+      # stopping, and that is not the point: the acceptance criterion is that every tick
+      # reports it, and an operator reading the last tick of a run in a transcript should not
+      # have to know which arm printed the line and which did not.
+      rung_report "$REPO_REAL" "$SESSION_ID"
+      # …AND THE PLAN REPORT, for the same reason (wave-21 T13): a delivered run whose ledger
+      # still carries a finding is one the gate would refuse, and this is the last tick to say so.
+      tick_plan_memoised tick_plan_report
+      tick_conclude DISARM
+      tick_gate_report
+      say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
+      tick_decision_line DISARM "$TOTAL" "$OPEN" "" "" "" "" "$TICK_GATE_FIELD"
+      # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
+      # so the stamp this very tick wrote before it decided has to stop claiming a live
+      # clock, or hooks/patrol-revive.sh reads the stop this line just chose as a death and
+      # blocks every remaining turn of the session demanding a re-arm nobody wants (critic
+      # C-2, epic-19 w1). It is LAST so that nothing above it can be skipped by it: the
+      # decision line is already printed, and a removal that fails costs a late notice
+      # rather than a lost decision.
+      remove_patrol_stamp "$SESSION_ID" \
+        || die "WARN — the Patrol stamp could not be removed; the death notice may fire on later turns."
+      exit 0
+    fi
+
+    # ─────────────────────────────────────── the lease overrun (spec AC-28)
+    #
+    # A spawned worktree is a leased slot bound to the ledger row that dispatched its
+    # writer, and the lease ends when that row is fact-discharged (design ledger C1). A tree
+    # still standing after that is a slot counted against the worktree budget that nobody
+    # holds — and nothing else in the fleet walks `.worktrees` against the roster, so it
+    # stays invisible until someone runs out of budget.
+    #
+    # READ OFF THE VERDICT THIS TICK ALREADY TOOK. `$VERDICT_OUT` is one
+    # `session-sweeper.sh verdict` over the whole roster, and it is where the discharge
+    # vocabulary lives: `state=MET`/`WAIVED`, and the `acked=` the sweeper folds in from its
+    # own ledger. A roster read on its own would miss every acked row. The library takes a
+    # FILE, so the lines this tick is already holding are spilled to a temporary one and
+    # removed again — never into `.bionic/tmp`, which is state the operator reads.
+    #
+    # THE CONVENTION AND THE PREDICATE ARE THE LIBRARY'S, not a second copy here:
+    # `.worktrees/<dir>` belongs to the row named `W-<DIR>` uppercased, and "discharged"
+    # means acked or MET/CLOSED/WAIVED. Three callers share that definition
+    # (payload/scripts/lib/worktree.sh's header names them); this is the third.
+    #
+    # PLACED AFTER DISARM, BEFORE THE SCHEDULER. A run that has DELIVERED exits above, and
+    # its standing trees are the integration step's assertion to make rather than a Patrol
+    # line nobody is left to read.
+    #
+    # IT REMOVES NOTHING. `spawn-worktree.sh land` is the act and the orchestrator runs it;
+    # the tick says the tree is standing and stops there.
+    #
+    # AND IT IS A NOTE, NOT A BAND (REQ-10 AC-10.3; D5). This walk used to feed NOTIFY, so a
+    # tree left standing after its row was discharged raised the exit-1 band on EVERY tick
+    # for the life of the tree — nothing here is remembered between ticks — and buried the
+    # decision the roster had actually reached. A standing tree is a fact about disk: it
+    # prints as `poker: note:` and it rides the decision line in a `trees=` field of its own,
+    # where a reader that wants to act on it can find it without the tick having claimed
+    # something was wrong.
+    LEASE_TREES=""
+    LEASE_FILE="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-verdict.XXXXXX" 2>/dev/null)" || LEASE_FILE=""
+    if [ -n "$LEASE_FILE" ]; then
+      printf '%s\n' "$VERDICT_OUT" > "$LEASE_FILE" 2>/dev/null
+      while IFS= read -r LEASE_LINE; do
+        [ -n "$LEASE_LINE" ] || continue
+        LEASE_PATH="$(printf '%s' "$LEASE_LINE" | cut -f1)"
+        LEASE_ROW="$(printf '%s' "$LEASE_LINE" | cut -f2)"
+        [ -n "$LEASE_PATH" ] && [ -n "$LEASE_ROW" ] || continue
+        note "tree stands $LEASE_PATH — row discharged; land or remove"
+        LEASE_TREES="${LEASE_TREES}${LEASE_TREES:+,}$(clean "$LEASE_PATH")"
+      done <<EOF
+$(worktree_lease_overruns "$REPO_REAL" "$LEASE_FILE")
+EOF
+      rm -f "$LEASE_FILE" 2>/dev/null || :
+    else
+      die "WARN — no temporary file for the lease walk; standing worktrees were not checked."
+    fi
+
+    # ─────────────────────────────────────── the scheduler: pressure, then fills
+    #
+    # PLACED HERE, after DISARM and before NOTIFY/QUIET, and the placement is the contract.
+    # DISARM exits above: a run that has DELIVERED gets no fills, because there is nothing
+    # left to fill. Everything else — a live wave, a lull between batches, a roster with an
+    # overdue row — gets both the pressure reading and the fill decision, and then the
+    # decision line it was already going to get. A tick that filled instead of notifying
+    # would trade a report the operator asked for against one they did not.
+    #
+    # PRESSURE FIRST, ALWAYS. See the block comment above `space_field` for why the order is
+    # not negotiable and why nothing here re-derives the budget. The armed first tick exits
+    # above this line and calls the same `tick_scheduler` there (wave-26 T59).
+    tick_scheduler
 
     # ─────────────────────────────────────── the ranked decision (REQ-10 AC-10.2; D5)
     #
