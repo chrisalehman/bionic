@@ -912,6 +912,13 @@ section "§11 NESTED — a solo suite takes the whole machine; a nested run neve
 #       place its hold covers, whether the run was booked or took the machine itself; and
 #       two booked runs that each reach their solo drain together both complete, the second
 #       waiting for the first rather than each waiting on the other's place.
+#   (f) ONE CEILING (wave-26 T26; review 4 F3): the take, the settle and every retry of one
+#       solo suite give up at one deadline; the settle does not start a clock of its own after
+#       the drain, and a retry the ceiling has no room for is not run at all.
+#   (g) OWN LOAD (review 4 F4): the check after the run leaves out the suite's own share of
+#       the load, measured from the CPU its worker used; its own load alone never voids it.
+#   (h) A STORE THAT CANNOT BE WRITTEN (review 4 F5): the suite is reported VOID at once,
+#       and the reason names the store, not a drain that never happened.
 
 RRN_BOOKED="$REPO/payload/scripts/booked.sh"
 expect_true "11.0 the shim the outer run is booked through exists" test -f "$RRN_BOOKED"
@@ -1062,7 +1069,9 @@ rr_stub "$TNV" "v-plain"
 rrn_suite "$TNV/tests/aaa-void.test.sh" yes aaa-void \
 'printf "run\n" >> "$RRN_MARKS/void.runs"
 n="$(awk "END { print NR + 0 }" "$RRN_MARKS/void.runs")"
-if [ "$RRN_VOID" = always ] || [ "$n" -eq 1 ]; then
+if [ "$RRN_VOID" = stuck ]; then
+  printf "99\n" > "$RRN_LOAD"
+elif [ "$RRN_VOID" = always ] || [ "$n" -eq 1 ]; then
   printf "99\n" > "$RRN_LOAD"
   ( sleep 3; printf "0\n" > "$RRN_LOAD" ) >/dev/null 2>&1 &
 fi'
@@ -1140,5 +1149,184 @@ expect_contains "11.46 each solo suite ran under its own shim's place (a)" \
 expect_contains "11.47 …(b)" "$RRN_SLOTS/place." "$(rrn_read pair-b.place)"
 expect_eq "11.48 …and everything was given back" "" \
   "$(ls -d "$RRN_SLOTS"/quiet "$RRN_SLOTS"/place.* 2>/dev/null)"
+
+# ---- (f) ONE CEILING: the drain and the settle share one deadline -----------
+# A foreign holder of place.2 is killed RRN_CD seconds after the whole-machine marker appears
+# (a watcher waits for the marker, so the drain is timed from the take, not from the drive),
+# and the load stays above the line throughout. Under one ceiling the settle gives up when the
+# take's ceiling runs out, RRN_CMW seconds after the marker; a settle with a clock of its own
+# gives up RRN_CD + RRN_CMW seconds after it. The suite then runs once, unbooked, and records
+# when it started: the gap is read between two stamps of this fixture, not off the drive's
+# wall time, so the runner's own start-up on a loaded machine is not in it.
+TNC="$RRN/ceiling"
+rr_tree "$TNC"
+rr_stub "$TNC" "c-plain"
+rrn_suite "$TNC/tests/aaa-ceil.test.sh" yes aaa-ceil \
+'date +%s > "$RRN_MARKS/ceil.start"
+if kill -0 "$RRN_FOREIGN" 2>/dev/null; then s=alive; else s=gone; fi
+printf "%s\n" "$s" > "$RRN_MARKS/ceil.foreign"'
+RRN_CMW=6; RRN_CD=4
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"; mkdir -p "$RRN_SLOTS/place.2"
+printf '99\n' > "$RRN_LOAD"
+( sleep 60 >/dev/null 2>&1 & printf '%s\n' "$!" > "$RRN_SLOTS/place.2/pid" )
+RRN_FPID="$(cat "$RRN_SLOTS/place.2/pid")"
+printf 'a foreign run\n' > "$RRN_SLOTS/place.2/what"
+( i=0
+  while [ ! -d "$RRN_SLOTS/quiet" ] && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
+  date +%s > "$RRN_MARKS/ceil.take"
+  sleep "$RRN_CD"; kill "$RRN_FPID" ) >/dev/null 2>&1 &
+RRN_WATCHER=$!
+RRN_FOREIGN="$RRN_FPID"
+rrn_drive "$TNC" 2 "$RRN_CMW" bash tests/run.sh
+RRN_FOREIGN=""
+kill "$RRN_FPID" "$RRN_WATCHER" 2>/dev/null; wait "$RRN_WATCHER" 2>/dev/null
+RRN_CT="$(rrn_read ceil.take)"; RRN_CS="$(rrn_read ceil.start)"
+expect_eq "11.49 one ceiling: the void does not fail the run" "0" "$RRN_RC"
+expect_regex "11.50 …the watcher saw the whole-machine marker taken" '^[0-9]+$' "$RRN_CT"
+expect_regex "11.51 …and the suite recorded its start" '^[0-9]+$' "$RRN_CS"
+expect_eq "11.52 …the drain finished inside the ceiling: the foreign holder was gone" "gone" \
+  "$(rrn_read ceil.foreign)"
+expect_contains "11.53 …so the void is the settle's, not the drain's" "never settled" \
+  "$(rrn_line aaa-ceil.test.sh)"
+expect_true "11.54 the settle gave up at the take's own ceiling: the suite started within ${RRN_CMW}s + 2 of the marker (took $(( ${RRN_CS:-0} - ${RRN_CT:-0} ))s; a clock of its own takes $((RRN_CD + RRN_CMW))s)" \
+  test "$(( ${RRN_CS:-999} - ${RRN_CT:-0} ))" -le $((RRN_CMW + 2))
+
+# A run voided by a load that never comes down: the retry's settle meets the same ceiling, so
+# the retry never starts, and the suite is not run a second time unbooked either — its one
+# disturbed run already left its output to read.
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"; printf '0\n' > "$RRN_LOAD"
+RRN_VOID=stuck; rrn_drive "$TNV" 2 3 bash tests/run.sh; RRN_VOID=""
+expect_eq "11.55 a disturbance that outlasts the ceiling: the run is not failed" "0" "$RRN_RC"
+expect_contains "11.56 …its verdict line reads VOID" "VOID" "$(rrn_line aaa-void.test.sh)"
+expect_contains "11.57 …because the ceiling ran out before a retry could start" \
+  "ran out before a retry could start" "$(rrn_line aaa-void.test.sh)"
+expect_eq "11.58 …so it ran once: no retry without room, and no unbooked run after it" "1" \
+  "$(rrn_void_runs)"
+
+# ---- (g) OWN LOAD: the suite's own share of the load is not a disturbance ---
+# The suite burns CPU for two seconds, then sets the load reading to the settled line plus
+# HALF of its own share of the one-minute average, computed from its own `times`. Anything
+# above its own share would be someone else's; its own load alone must not void it. The line
+# is read the way the runner reads it, in the fixture tree.
+TNL="$RRN/own"
+rr_tree "$TNL"
+rr_stub "$TNL" "o-plain"
+RRN_OLINE="$( cd "$TNL" && . payload/scripts/lib/resources.sh && resources_settled_line "$(_res_cores)" )"
+expect_regex "11.59 the settled line is read" '^[0-9]+\.[0-9]+$' "$RRN_OLINE"
+cat > "$RRN/burn.sh" <<'RRN_BURN'
+s=$SECONDS; while [ $((SECONDS - s)) -lt 2 ]; do :; done
+w=$((SECONDS - s)); times > "$1/own.t"
+awk -v line="$2" -v w="$w" '
+  function sec(x, a) { sub(/s$/, "", x); gsub(",", ".", x); split(x, a, "m"); return a[1] * 60 + a[2] }
+  NR == 1 { cpu = sec($1) + sec($2); own = (cpu / w) * (1 - exp(-w / 60)); printf "%.6f\n", line + own / 2 }
+' "$1/own.t" > "$1/own.after"
+cat "$1/own.after" > "$3"
+RRN_BURN
+rrn_suite "$TNL/tests/aaa-own.test.sh" yes aaa-own \
+"echo run >> \"\$RRN_MARKS/own.runs\"
+bash \"$RRN/burn.sh\" \"\$RRN_MARKS\" $RRN_OLINE \"\$RRN_LOAD\""
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_SLOTS"; printf '0\n' > "$RRN_LOAD"
+rrn_drive "$TNL" 2 10 bash tests/run.sh
+RRN_OAFTER="$(rrn_read own.after)"
+expect_true "11.60 the load after the run is above the settled line (${RRN_OAFTER:-?} > $RRN_OLINE)" \
+  awk -v a="${RRN_OAFTER:-0}" -v l="$RRN_OLINE" 'BEGIN { exit !(a + 0 > l + 0) }'
+expect_eq "11.61 …yet the run is green" "0" "$RRN_RC"
+expect_contains "11.62 …and the suite's verdict line reads PASS: its own load is not a disturbance" \
+  "PASS" "$(rrn_line aaa-own.test.sh)"
+expect_eq "11.63 …and it ran once" "1" \
+  "$(awk 'END { print NR + 0 }' "$RRN_MARKS/own.runs" 2>/dev/null)"
+
+# ---- (h) A STORE THAT CANNOT BE WRITTEN: VOID at once, saying so ------------
+TNS="$RRN/store"
+rr_tree "$TNS"
+rr_stub "$TNS" "s-plain"
+rrn_suite "$TNS/tests/aaa-store.test.sh" yes aaa-store 'echo run >> "$RRN_MARKS/store.runs"'
+RRN_RO="$RRN/ro-store"
+rm -f "$RRN_MARKS"/*; rm -rf "$RRN_RO"; mkdir -p "$RRN_RO"; chmod 555 "$RRN_RO"
+expect_true "11.64 precondition: the store cannot be written" test ! -w "$RRN_RO"
+RRN_SAVE="$RRN_SLOTS"; RRN_SLOTS="$RRN_RO"
+RRN_T0=$SECONDS
+rrn_drive "$TNS" 2 30 bash tests/run.sh
+RRN_SDT=$((SECONDS - RRN_T0))
+RRN_SLOTS="$RRN_SAVE"
+chmod 755 "$RRN_RO"
+expect_eq "11.65 a store that cannot be written: the run is not failed" "0" "$RRN_RC"
+expect_contains "11.66 …the suite's verdict line reads VOID" "VOID" "$(rrn_line aaa-store.test.sh)"
+expect_contains "11.67 …and says the store could not be written, naming it" \
+  "the store $RRN_RO could not be written" "$(rrn_line aaa-store.test.sh)"
+expect_absent "11.68 …not that places did not drain" "drain" "$(rrn_line aaa-store.test.sh)"
+expect_eq "11.69 …the suite still ran once, so its output is there to read" "1" \
+  "$(awk 'END { print NR + 0 }' "$RRN_MARKS/store.runs" 2>/dev/null)"
+expect_true "11.70 …at once, not after the maximum wait (took ${RRN_SDT}s, wait 30s)" \
+  test "$RRN_SDT" -le 15
+
+# ============================================================
+section "§TIMING a nested run writes no rows into the outer run's timing file (wave-26 T26; D20, AC-10.2)"
+# ============================================================
+#
+# `BIONIC_TEST_TIMING` names a file a full run appends one `<label>TAB<seconds>` row to per
+# suite. Four suites in this repo drive a nested runner over a scratch tree, and a nested run
+# that inherited the knob wrote ITS fixture labels into the real run's file: 60 of 135 rows of
+# one floor run (research R4 §B1). The fixture is that shape at its smallest: an outer tree
+# whose one suite drives a nested run over an inner tree, with the knob set on the outer run.
+TT_INNER="$TMPROOT/tt-inner"
+rr_tree "$TT_INNER"
+rr_stub "$TT_INNER" "zin-timed"
+TT="$TMPROOT/tt"
+rr_tree "$TT"
+rr_stub "$TT" "t-plain"
+cat > "$TT/tests/t-outer.test.sh" <<'RRT_NESTED'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+section "t-outer"
+( cd "$RRT_INNER" && bash tests/run.sh >/dev/null 2>&1 )
+expect_eq "the nested run over the inner tree is green" "0" "$?"
+finish
+RRT_NESTED
+
+rrt_drive() {  # <dir> <timing-file> [mode] — leaves RR_OUT and RR_RC
+  local dir="$1" tf="$2" mode="${3:-}"
+  RR_OUT="$( cd "$dir" && \
+    RR_MARKS="$RR_MARKS" RRT_INNER="$TT_INNER" \
+    BIONIC_PRESSURE_RING="$TMPROOT/ring" \
+    BIONIC_NOW_EPOCH="$RR_NOW" \
+    BIONIC_TEST_JOBS_CEILING="2" \
+    BIONIC_PROBE_FREE_PCT="44" \
+    BIONIC_PROBE_SWAP_PCT="0" \
+    BIONIC_PROBE_LOAD_1M="0.1" \
+    BIONIC_TEST_TIMING="$tf" \
+    env "${RR_SLOTS_ENV[@]}" bash tests/run.sh ${mode:+"$mode"} 2>&1 )"
+  RR_RC=$?
+}
+rrt_labels() { LC_ALL=C awk -F'\t' '{ print $1 }' "$1" 2>/dev/null | sort -u; }
+rrt_shaped() {  # <file> — how many lines are `<label>.test.sh TAB <whole seconds>`
+  LC_ALL=C awk -F'\t' 'NF == 2 && $1 ~ /\.test\.sh$/ && $2 ~ /^[0-9]+$/ { n++ } END { print n+0 }' "$1" 2>/dev/null
+}
+
+TTF="$TMPROOT/tt.timing.tsv"
+rm -f "$TTF" "$RR_MARKS/zin-timed.ran"
+rrt_drive "$TT" "$TTF"
+expect_eq "T.1 the outer run is green, nested drive and all" "0" "$RR_RC"
+# PAIRED POSITIVE: the nested run happened, so a row missing below is a knob that did not
+# leak, not a nested run that never ran.
+expect_eq "T.2 the nested run really ran its own suite" "yes" \
+  "$([ -f "$RR_MARKS/zin-timed.ran" ] && echo yes || echo no)"
+expect_eq "T.3 the timing file names the outer tree's suites, as a set" \
+  "$(rr_glob "$TT")" "$(rrt_labels "$TTF")"
+expect_absent "T.4 …and carries no row for the nested run's fixture suite" \
+  "zin-timed.test.sh" "$(cat "$TTF" 2>/dev/null)"
+expect_eq "T.5 …one shaped row per real suite: two lines, both shaped" "2 2" \
+  "$(LC_ALL=C awk 'END { print NR+0 }' "$TTF" 2>/dev/null) $(rrt_shaped "$TTF")"
+
+# --serial writes each row as its suite lands, from the same parent; the nested run is the same.
+TTS="$TMPROOT/tt.timing-serial.tsv"
+rm -f "$TTS" "$RR_MARKS/zin-timed.ran"
+rrt_drive "$TT" "$TTS" --serial
+expect_eq "T.6 --serial: the outer run is green" "0" "$RR_RC"
+expect_eq "T.7 --serial: …the nested run really ran" "yes" \
+  "$([ -f "$RR_MARKS/zin-timed.ran" ] && echo yes || echo no)"
+expect_eq "T.8 --serial: …and the timing file names the outer tree's suites only" \
+  "$(rr_glob "$TT")" "$(rrt_labels "$TTS")"
 
 finish
