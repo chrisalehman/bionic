@@ -2440,8 +2440,14 @@ awk '{ print } /^approved-by:/ {
   "$SANDBOX/live-reads.md" > "$SANDBOX/live-reads-proved.md"
 READY_PROVED="$(call units_ready "$SANDBOX/live-reads-proved.md" 7)"
 expect_eq "LIVE.4 with the proof line, the live floor read is satisfied" "yes" "$(has_line "$READY_PROVED" T3)"
-expect_eq "LIVE.5 with the proof and the approval lines, the release's settled reads are satisfied" "yes" \
-  "$(has_line "$READY_PROVED" T5)"
+# A SETTLED proof: READ WAITS FOR ITS OPEN WRITERS EVEN WITH A LINE WRITTEN (wave-26 T35, review 5
+# F2): the floor row T4 is still pending, so the line is stale until it lands.
+expect_eq "LIVE.5 with the proof and the approval lines but the floor row still open, the release waits on it" "no yes" \
+  "$(printf '%s %s' "$(has_line "$READY_PROVED" T5)" \
+     "$(has_line "$(call units_waiting "$SANDBOX/live-reads-proved.md" 7)" "T5${TAB}proof:floor${TAB}T4${TAB}pending")")"
+sed 's/| approval:plan | pending |$/| approval:plan | landed |/' "$SANDBOX/live-reads-proved.md" > "$SANDBOX/live-reads-floored.md"
+expect_eq "LIVE.5b …and once the floor row lands, the release's settled reads are satisfied" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/live-reads-floored.md" 7)" T5)"
 expect_eq "LIVE.6 a live read is never an edge: nothing enters T2 or T3" "" \
   "$(call units_edges "$SANDBOX/live-reads.md" | awk -F'\t' '$2 == "T2" || $2 == "T3"')"
 expect_eq "LIVE.6b …while the settled proof:floor read is one, from the verify row" "yes" \
@@ -2510,6 +2516,158 @@ expect_eq "HOLD.5 in a table without reads a Step-7 doc row is held at current: 
 expect_eq "HOLD.5b …while the build beside it is ready (the extractor reads a real set)" "yes" "$(has_line "$READY_LEG" T5)"
 expect_eq "HOLD.5c …and the hold is named" "yes" \
   "$(has_line "$(call units_held "$SANDBOX/hold-legacy.md" 4)" "T2: step 7 doc row waits for current: 7")"
+
+# ============================================================
+section "HARDEN — wave-26 T35: the graph neither starts work early, deadlocks in silence, nor stops on one bracket (review 5, F1 F2 F3 F5 F7)"
+# ============================================================
+#
+# Each table below is the review's failing table (review-5, probes P5-P12), SYNTHESIZED there
+# and copied here; each was red against the lib it reviewed (3a707629).
+# hard_plan <file> <state lines> <rows...> -> a reads table with an approved plan.
+hard_plan() {
+  local f="$1" st="$2"; shift 2
+  { printf '## SDLC State\n\ncurrent: 5\napproved-by: fixture 2026-10-03T00:00Z "approved"\n%s\n\n## Tasks\n\n' "$st"
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    for r in "$@"; do printf '%s\n' "$r"; done; } > "$f"
+}
+
+# F1 — A ROW THAT READS head STILL WRITES IT FOR A ROW AT A LATER STEP. A test row (default
+# `approval:plan, head`), a doc row, or a build row naming `head` can be writing code while the
+# floor at Step 5 is asked; the floor must wait, or it proves a head without their changes.
+FLOOR='| T2 | 5 | verify | floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/w/floor.txt |  | pending |'
+hard_plan "$SANDBOX/f1-doc.md" "" \
+  '| T1 | 4 | doc | skills | implementor | — | 30 | REQ-x | skills/x/SKILL.md, tests/docs-pins.test.sh |  | pending |' "$FLOOR"
+hard_plan "$SANDBOX/f1-test.md" "" \
+  '| T1 | 4 | test | new tests | implementor | — | 30 | REQ-x | tests/new.test.sh |  | pending |' "$FLOOR"
+hard_plan "$SANDBOX/f1-build.md" "" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/a.sh | approval:plan, head | pending |' "$FLOOR"
+for v in doc test build; do
+  R="$(call units_ready "$SANDBOX/f1-$v.md" 5)"
+  expect_eq "HARDEN.F1 a $v row at Step 4 that reads head is ready, the Step-5 floor is not" "yes no" \
+    "$(printf '%s %s' "$(has_line "$R" T1)" "$(has_line "$R" T2)")"
+  expect_eq "HARDEN.F1b …the floor waits on it by head ($v)" "yes" \
+    "$(has_line "$(call units_edges "$SANDBOX/f1-$v.md")" "T1${TAB}T2${TAB}head")"
+done
+# TWO HEAD READERS AT ONE STEP DO NOT HOLD EACH OTHER: the exception A-T2.4 made still stands
+# between equals, or two test rows would wait for each other for ever.
+hard_plan "$SANDBOX/f1-peers.md" "" \
+  '| T1 | 4 | test | tests a | implementor | — | 30 | REQ-x | tests/a.test.sh |  | pending |' \
+  '| T2 | 4 | test | tests b | implementor | — | 30 | REQ-x | tests/b.test.sh |  | pending |'
+R="$(call units_ready "$SANDBOX/f1-peers.md" 5)"
+expect_eq "HARDEN.F1c two head-reading rows at one step are both ready" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$R" T1)" "$(has_line "$R" T2)")"
+# record, the same rule over .bionic/ paths (A-T2.4 applied the exception to both).
+hard_plan "$SANDBOX/f1-record.md" "" \
+  '| T1 | 4 | build | notes | implementor | — | 30 | REQ-x | .bionic/docs/record/w/notes.md | approval:plan, record | pending |' \
+  '| T2 | 5 | verify | reads the record | test-runner | — | 30 | REQ-x | lib/r.sh | approval:plan, record | pending |'
+R="$(call units_ready "$SANDBOX/f1-record.md" 5)"
+expect_eq "HARDEN.F1d a record reader at an earlier step still writes the record for a later one" "yes no" \
+  "$(printf '%s %s' "$(has_line "$R" T1)" "$(has_line "$R" T2)")"
+
+# F2 — A proof: READ WAITS FOR EVERY OPEN WRITER, EVEN WHEN A PROOF LINE EXISTS. A re-floor
+# verify row added after the floor was proved makes that proof stale: integrate must wait.
+PROVED="proved: kind=floor head=0123456789abcdef0123456789abcdef01234567 at=2026-10-03T00:00:00Z evidence=record/f.txt
+proved: kind=review head=0123456789abcdef0123456789abcdef01234567 at=2026-10-03T00:00:00Z evidence=record/r.txt"
+hard_plan "$SANDBOX/f2.md" "$PROVED" \
+  '| T1 | 5 | verify | re-floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/w/floor2.txt |  | pending |' \
+  '| T2 | 8 | integrate | merge | — | — | 30 | REQ-x | — |  | pending |'
+R="$(call units_ready "$SANDBOX/f2.md" 8)"
+expect_eq "HARDEN.F2 a proved floor with an open re-floor row: the re-floor is ready, integrate is not" "yes no" \
+  "$(printf '%s %s' "$(has_line "$R" T1)" "$(has_line "$R" T2)")"
+expect_eq "HARDEN.F2b …and integrate waits on proof:floor, naming the open verify row" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/f2.md" 8)" "T2${TAB}proof:floor${TAB}T1${TAB}pending")"
+sed 's/record\/w\/floor2.txt |  | pending |/record\/w\/floor2.txt |  | landed |/' \
+  "$SANDBOX/f2.md" > "$SANDBOX/f2-landed.md"
+expect_eq "HARDEN.F2c once the re-floor lands, the proof line satisfies integrate" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/f2-landed.md" 8)" T2)"
+
+# F3 — A READ CYCLE IS REFUSED AT VALIDATION, NAMING THE ROWS ON IT. Through two path reads, or
+# one path read closed by an unmergeable hold. A row that merely waits behind the cycle is not
+# on it; a cycle through a row already running is not a deadlock (it lands, and the wait clears).
+hard_plan "$SANDBOX/f3-reads.md" "" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/a.sh | approval:plan, lib/b.sh | pending |' \
+  '| T2 | 4 | build | b | implementor | — | 30 | REQ-x | lib/b.sh | approval:plan, lib/a.sh | pending |' \
+  '| T3 | 4 | build | c, behind the cycle | implementor | — | 30 | REQ-x | lib/c.sh | approval:plan, lib/a.sh | pending |'
+V="$(call units_validate "$SANDBOX/f3-reads.md")"; VRC="$(call_rc units_validate "$SANDBOX/f3-reads.md")"
+CYC="$(printf '%s\n' "$V" | grep -F 'read cycle')"
+expect_eq "HARDEN.F3 a cycle of two path reads is refused" "1" "$VRC"
+expect_nonempty "HARDEN.F3b …by a line that says read cycle" "$CYC"
+expect_eq "HARDEN.F3c …naming both rows on it" "yes yes" \
+  "$(printf '%s %s' "$(printf '%s' "$CYC" | grep -qw T1 && echo yes || echo no)" \
+     "$(printf '%s' "$CYC" | grep -qw T2 && echo yes || echo no)")"
+expect_eq "HARDEN.F3d …and not the row that only waits behind it" "no" \
+  "$(printf '%s' "$CYC" | grep -qw T3 && echo yes || echo no)"
+hard_plan "$SANDBOX/f3-bang.md" "" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/x.sh! | approval:plan, lib/y.sh | pending |' \
+  '| T2 | 4 | build | b | implementor | — | 30 | REQ-x | lib/y.sh, lib/x.sh |  | pending |'
+V="$(call units_validate "$SANDBOX/f3-bang.md")"; VRC="$(call_rc units_validate "$SANDBOX/f3-bang.md")"
+CYC="$(printf '%s\n' "$V" | grep -F 'read cycle')"
+expect_eq "HARDEN.F3e a cycle closed by an unmergeable hold is refused" "1" "$VRC"
+expect_eq "HARDEN.F3f …naming both rows" "yes yes" \
+  "$(printf '%s %s' "$(printf '%s' "$CYC" | grep -qw T1 && echo yes || echo no)" \
+     "$(printf '%s' "$CYC" | grep -qw T2 && echo yes || echo no)")"
+# No worktree column: an active row owes no tree there (§12), so the status is the one change.
+sed 's/| approval:plan, lib\/b.sh | pending |/| approval:plan, lib\/b.sh | active |/' \
+  "$SANDBOX/f3-reads.md" > "$SANDBOX/f3-active.md"
+V="$(call units_validate "$SANDBOX/f3-active.md")"
+expect_eq "HARDEN.F3g the same loop with one row already active is not refused as a cycle" "" \
+  "$(printf '%s\n' "$V" | grep -F 'read cycle')"
+expect_eq "HARDEN.F3h …while the fixture still carries the loop as edges both ways" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$(call units_edges "$SANDBOX/f3-active.md")" "T1${TAB}T2${TAB}lib/a.sh")" \
+     "$(has_line "$(call units_edges "$SANDBOX/f3-active.md")" "T2${TAB}T1${TAB}lib/b.sh")")"
+expect_eq "HARDEN.F3i an acyclic reads table still validates clean (READS fixture)" "0" \
+  "$(call_rc units_validate "$SANDBOX/reads.md")"
+
+# F5 — ONE BRACKET DOES NOT STOP THE PLAN. A `[` in a Files glob used to build a broken regex and
+# abort the program: every verb exit 2, nothing ready. The matcher reads a bracket literally (the
+# Files grammar globs with * and ? only), and the validator refuses the entry, naming the row.
+hard_plan "$SANDBOX/f5.md" "" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | tests/[ab*.sh |  | pending |' \
+  '| T2 | 4 | build | b | implementor | — | 30 | REQ-x | lib/b.sh | approval:plan, tests/a.sh | pending |' \
+  '| T3 | 4 | build | c, unrelated | implementor | — | 30 | REQ-x | lib/c.sh |  | pending |' \
+  '| T4 | 4 | build | d | implementor | — | 30 | REQ-x | lib/d.sh | approval:plan, tests/[ab1.sh | pending |'
+R="$(call units_ready "$SANDBOX/f5.md" 5)"; RRC="$(call_rc units_ready "$SANDBOX/f5.md" 5)"
+expect_eq "HARDEN.F5 a bracket in a Files glob: units_ready exits 0" "0" "$RRC"
+expect_eq "HARDEN.F5b …the unrelated row and the bracket row are ready" "yes yes" \
+  "$(printf '%s %s' "$(has_line "$R" T3)" "$(has_line "$R" T1)")"
+expect_eq "HARDEN.F5c …tests/a.sh is not what tests/[ab*.sh covers, read literally: T2 is ready" "yes" \
+  "$(has_line "$R" T2)"
+expect_eq "HARDEN.F5d …tests/[ab1.sh is, read literally: T4 waits on T1" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/f5.md" 5)" "T4${TAB}tests/[ab1.sh${TAB}T1${TAB}pending")"
+expect_eq "HARDEN.F5e units_waiting and units_edges exit 0 too" "0 0" \
+  "$(call_rc units_waiting "$SANDBOX/f5.md" 5) $(call_rc units_edges "$SANDBOX/f5.md")"
+V="$(call units_validate "$SANDBOX/f5.md")"; VRC="$(call_rc units_validate "$SANDBOX/f5.md")"
+expect_eq "HARDEN.F5f the validator refuses the table" "1" "$VRC"
+expect_eq "HARDEN.F5g …naming the Files entry against its row" "yes" \
+  "$(printf '%s\n' "$V" | grep -F 'T1: Files entry tests/[ab*.sh' >/dev/null && echo yes || echo no)"
+expect_eq "HARDEN.F5h …and the read against its row" "yes" \
+  "$(printf '%s\n' "$V" | grep -F 'T4: read tests/[ab1.sh' >/dev/null && echo yes || echo no)"
+expect_eq "HARDEN.F5i …and accuses neither clean row" "" \
+  "$(printf '%s\n' "$V" | grep -E '^T(2|3):')"
+
+# F7 — READINESS IS NOT QUADRATIC IN THE FILES PAIRS. A RELATION, never a clock: the review's
+# generator at 120 rows, units_ready timed against units_rows on the same table in the same run,
+# so the machine load sits on both sides. Measured before T35: 90-108; after: 3.5-7.1.
+hard_now() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
+{ printf '## SDLC State\n\napproved-by: x\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
+  i=1; while [ "$i" -le 120 ]; do
+    files=""; for k in 1 2 3 4 5 6 7 8; do files="$files, payload/m$i/f$k.sh"; done
+    printf '| T%s | 4 | build | t | - | — | S | s | %s, tests/t%s*.test.sh, docs/d%s/! | approval:plan, payload/m%s/f1.sh, tests/t%sx.test.sh, docs/d%s/a.md | pending |\n' \
+      "$i" "${files#, }" "$i" "$i" "$((i + 1))" "$((i + 2))" "$((i + 3))"
+    i=$((i + 1))
+  done
+  printf '| T121 | 5 | verify | floor | - | — | S | s | .bionic/docs/record/x.txt |  | pending |\n'; } > "$SANDBOX/f7.md"
+t0="$(hard_now)"; NROWS="$(call units_rows "$SANDBOX/f7.md" | wc -l | tr -d ' ')"; t1="$(hard_now)"
+F7R="$(call units_ready "$SANDBOX/f7.md" 5)"; t2="$(hard_now)"
+# Every generated row reads what a neighbour writes, so nothing is ready: the table is live, and
+# the timed call did the whole judgement, when the floor names its open writers.
+expect_eq "HARDEN.F7 the 120-row table parses whole, and the floor waits on its open writers" "yes yes" \
+  "$([ "$NROWS" -gt 100 ] && echo yes || echo no) $(has_line "$(call units_waiting "$SANDBOX/f7.md" 5)" "T121${TAB}head${TAB}T1${TAB}pending")"
+expect_eq "HARDEN.F7a …and nothing is ready in it" "" "$F7R"
+expect_eq "HARDEN.F7b units_ready costs under twenty-five parses of the same table" "yes" \
+  "$(perl -e "print((($t2 - $t1) < 25 * ($t1 - $t0)) ? 'yes' : 'no')")"
 
 # ============================================================
 section "CHAIN — wave-26 T3: units_chain, the longest chain and the widest the plan can run (REQ-7, AC-7.1 lib half; D12)"
