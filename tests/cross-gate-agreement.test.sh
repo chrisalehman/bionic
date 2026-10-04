@@ -2539,6 +2539,7 @@ section "J.3 — a PREDICATE change moves BOTH answers, never one (the single ow
 # things about one contract.
 JP="$(plant_hook_tree "$JMUT/predicate")"
 cp "$PARTY_LG" "$JP/stop.sh"
+anchor "$PARTY_SW" '[ ! -s "$p" ]' 1
 awk '{ sub(/\[ ! -s "[$]p" \]/, "[ ! -e \"$p\" ]"); print }' "$PARTY_SW" > "$JP/session-sweeper.sh"
 j_saved_lg="$PARTY_LG"; j_saved_sw="$PARTY_SW"
 PARTY_LG="$JP/stop.sh"; PARTY_SW="$JP/session-sweeper.sh"
@@ -5188,21 +5189,18 @@ expect_eq "lifecycle.svg's title renders the same version" \
 v_hc_chips_ok() {
   [ "$(v_hookchain_vals "$1" | grep -c '[0-9]')" -ge 1 ] && echo yes || echo no
 }
-# v_hc_agree <svg> <version> -> yes when no chip disagrees with the version (empty set: yes)
+# v_hc_agree <svg> <version> -> yes when no chip disagrees with the version (empty set: yes).
+# THE ONE OWNER OF THE RELATION (review 9 F2): the live row below and §PIN-REL's arms all ask
+# this helper, so a defect put into it reaches the live row and the pin together.
 v_hc_agree() {
   local _v _bad=0
   for _v in $(v_hookchain_vals "$1"); do [ "$_v" = "$2" ] || _bad=1; done
   [ "$_bad" -eq 0 ] && echo yes || echo no
 }
-V_HC_VALS="$(v_hookchain_vals "$V_HOOKCHAIN")"
-expect_eq "hook-chain.svg carries at least one version-pin chip (the agreement rows below are not vacuous)" "yes" \
+expect_eq "hook-chain.svg carries at least one version-pin chip (the agreement row below is not vacuous)" "yes" \
   "$(v_hc_chips_ok "$V_HOOKCHAIN")"
-V_HC_N=0
-for _v in $V_HC_VALS; do
-  V_HC_N=$((V_HC_N + 1))
-  expect_eq "…hook-chain.svg version-pin chip #$V_HC_N agrees with the gate's" \
-    "$V_ORIGIN_VAL" "$_v"
-done
+expect_eq "…every hook-chain.svg version-pin chip agrees with the gate's" "yes" \
+  "$(v_hc_agree "$V_HOOKCHAIN" "$V_ORIGIN_VAL")"
 
 # MUTATION, the discriminator: doctor the governing-skill hook's value on a COPY — the
 # shipped file is never touched — and the comparison above must be provably able to catch
@@ -12626,6 +12624,17 @@ expect_eq "PIN-REL the emptied copy still parses and carries no chip" "0 yes" \
 expect_eq "PIN-REL a fourth chip: the non-empty row stays green" "yes" "$(v_hc_chips_ok "$PR_DIR/chips-plus.svg")"
 expect_eq "PIN-REL …and the agreement relation stays green" "yes" "$(v_hc_agree "$PR_DIR/chips-plus.svg" "$V_ORIGIN_VAL")"
 expect_eq "PIN-REL no chip at all: the non-empty row is red" "no" "$(v_hc_chips_ok "$PR_DIR/chips-none.svg")"
+
+# one chip moved to the next version: the relation the live row asks must answer no (review 9 F2)
+PR_CHIPS_MUT="$PR_DIR/chips-moved.svg"
+anchor "$V_HOOKCHAIN" "canonical_sdlc_version: ${V_ORIGIN_VAL} is" 1
+sed "s/canonical_sdlc_version: ${V_ORIGIN_VAL} is/canonical_sdlc_version: $((V_ORIGIN_VAL + 1)) is/" \
+  "$V_HOOKCHAIN" > "$PR_CHIPS_MUT"
+expect_eq "PIN-REL the moved copy keeps every chip and reads the next version on exactly one" \
+  "$PR_CHIPS_REAL 1" \
+  "$(v_hookchain_vals "$PR_CHIPS_MUT" | grep -c '[0-9]') $(v_hookchain_vals "$PR_CHIPS_MUT" | grep -c -x "$((V_ORIGIN_VAL + 1))")"
+expect_eq "PIN-REL one chip on the next version: the agreement relation is red" "no" \
+  "$(v_hc_agree "$PR_CHIPS_MUT" "$V_ORIGIN_VAL")"
 # a seventh role file: a copy of a writer role under another name (no entry owed in the set)
 cp "$BIONIC_SCRIPTS_DIR"/agents/*.md "$PR_DIR/agents-plus/"
 cp "$BIONIC_SCRIPTS_DIR/agents/implementor.md" "$PR_DIR/agents-plus/seventh.md"
