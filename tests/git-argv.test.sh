@@ -374,6 +374,71 @@ else
   ok "a heredoc body is not a git command"
 fi
 
+section "Section 1h: a prefix or runner word is read as the machine resolves it (wave-25 T12)"
+#
+# Section 1g folds the program word. The words IN FRONT of it are names too: on a case-blind
+# filesystem `SUDO` runs sudo and `BASH` runs bash (`command -v SUDO` finds /usr/bin/SUDO), so
+# `SUDO git push origin main` is a push, and a skip that matched the literal `sudo` left
+# `SUDO` as argv[0] and read no git at all. Each pair below is one command in two casings,
+# and the reading (verb and arguments) must be the same; the control row proves the
+# lower-case form is read as git, so an equal "none" can never pass a pair.
+for _pair in 'sudo|SUDO' 'sudo -u ci|Sudo -u ci' 'doas|DOAS' 'env|ENV' 'env -i|Env -i' \
+             '/usr/bin/env|/usr/bin/ENV' 'env X=1|Env X=1' 'time|TIME' 'time -p|Time -p' \
+             'timeout 60|TIMEOUT 60' 'gtimeout 60|GTimeout 60' '/opt/x/timeout 5|/opt/x/TIMEOUT 5' \
+             'nice -n 10|NICE -n 10' 'xargs -I{}|XARGS -I{}' 'ssh box|SSH box' \
+             'find . -exec|FIND . -exec' '/usr/bin/find . -exec|/usr/bin/Find . -exec' \
+             'command|COMMAND' 'nohup|NOHUP' 'sudo nohup|SUDO NoHup'; do
+  _lo="${_pair%%|*}"; _up="${_pair#*|}"
+  _want="$(read_of "$_lo git push origin main")"
+  eq "1h control: $_lo git push reads as a push" "push" "${_want%%|*}"
+  eq "1h $_up git push reads exactly as $_lo git push" "$_want" "$(read_of "$_up git push origin main")"
+done
+for _pair in "sh -c|SH -c" "bash -c|BASH -c" "bash -lc|Bash -lc" "zsh -c|ZSH -c" "dash -c|Dash -c" \
+             "ksh -c|KSH -c" "ash -c|ASH -c" "/bin/bash -c|/bin/BASH -c"; do
+  _lo="${_pair%%|*}"; _up="${_pair#*|}"
+  _want="$(read_of "$_lo 'git push origin main'")"
+  eq "1h control: $_lo '<push>' reads as a push" "push" "${_want%%|*}"
+  eq "1h $_up '<push>' reads exactly as $_lo '<push>'" "$_want" "$(read_of "$_up 'git push origin main'")"
+done
+eq "1h ENV -C records its directory, as env -C does" "/tmp/r" "$(chdir_of 'ENV -C /tmp/r git commit -m x')"
+# A BUILTIN-ONLY WORD DOES NOT FOLD: the shell matches its builtins case-exactly, and `EXEC`,
+# `EVAL` and `SOURCE` are "command not found" (measured), so nothing after them runs. Each sits
+# beside its lower-case positive on the same reader. `COMMAND` is the other side of the rule:
+# /usr/bin/COMMAND runs its arguments, so it folds and the push is a push (pairs above).
+eq "1h control: exec git push is a push"               "yes:push" "$(any_of 'exec git push origin main' push)"
+eq "1h Exec git push runs nothing: not a push"         "no"       "$(any_of 'Exec git push origin main' push)"
+eq "1h control: eval '<push>' is a push"               "yes:push" "$(any_of "eval 'git push origin main'" push)"
+eq "1h EVAL '<push>' runs nothing: not a push"         "no"       "$(any_of "EVAL 'git push origin main'" push)"
+eq "1h COMMAND git push is a push, as command git push" "yes:push" "$(any_of 'COMMAND git push origin main' push)"
+# The rule as the fold states it, one word per row: an external program folds, a builtin-only
+# word or a reserved word comes back as typed.
+for _fw in 'SUDO|sudo' 'COMMAND|command' 'TIME|time' 'Echo|echo' '/usr/bin/ENV|/usr/bin/env' 'CD|CD' 'WAIT|WAIT' \
+           'EXEC|EXEC' 'Eval|Eval' 'SOURCE|SOURCE' 'PushD|PushD' 'EXIT|EXIT' 'RETURN|RETURN' 'THEN|THEN' 'Do|Do'; do
+  cmd_word_fold "${_fw%%|*}"
+  eq "1h cmd_word_fold ${_fw%%|*} -> ${_fw#*|}" "${_fw#*|}" "$CMD_WORD_FOLDED"
+done
+eq "1h ENV -S runs its string, as env -S does" "yes:push" "$(any_of "ENV -S 'git push origin main'" push)"
+# ONLY THE WORD FOLDS: a longer name is its own program, and an option is not a word. Each
+# negative stands beside the positive on the same reader: `sudo` is a prefix, `sudoku` is not.
+eq "1h sudoku is not a prefix (control: sudo is)" "yes:push" "$(any_of 'sudo git push origin main' push)"
+eq "1h sudoku git push stays what it was: not git" "no"       "$(any_of 'sudoku git push origin main' push)"
+eq "1h SUDOKU git push is not git either"           "no"       "$(any_of 'SUDOKU git push origin main' push)"
+eq "1h BASHFUL -c is not a runner"                  "no"       "$(any_of "BASHFUL -c 'git push origin main'" push)"
+eq "1h bash -C is not bash -c: a flag never folds"  "no"       "$(any_of "bash -C 'git push origin main'" push)"
+eq "1h time -P is not time -p: the flag stays argv" "no"       "$(any_of 'time -P git push origin main' push)"
+
+# THE PLANTED DEFECT, as a mutant: the one shell fold (cmd_word_fold) made the identity. The
+# mutant must still parse and still read the lower-case form, and must then miss SUDO.
+GA_MUT="$(mktemp -d "${TMPDIR:-/tmp}/ga-mut.XXXXXX")"; cleanup_dirs+=("$GA_MUT")
+sed '/^cmd_word_fold() {/,/^}/s/^  CMD_WORD_FOLDED="\$1"$/  CMD_WORD_FOLDED="$1"; return 0/' "$LIB" > "$GA_MUT/git-argv.sh"
+eq "1h mutant: the fold was made the identity (one line changed)" "1" \
+  "$(diff "$LIB" "$GA_MUT/git-argv.sh" | grep -c '^>')"
+ga_mut() {  # <command> -> yes|no from the mutant library, in a child shell
+  bash -c '. "$1" || exit 9; git_argv_has_sub "$2" push && echo yes || echo no' _ "$GA_MUT/git-argv.sh" "$1"
+}
+eq "1h mutant still reads sudo git push (the mutant runs)" "yes" "$(ga_mut 'sudo git push origin main')"
+eq "1h mutant misses SUDO git push — the defect this section exists for" "no" "$(ga_mut 'SUDO git push origin main')"
+
 section "Section 1c: git_push_targets — destinations and force"
 
 dests_of() {  # <command> -> destinations joined by `|`
@@ -754,6 +819,13 @@ eq "R-12 ssh <host>"        "yes" "$(has_push 'ssh box git push origin main')"
 eq "R-12 sh -c"             "yes" "$(has_push "sh -c 'git push origin main'")"
 eq "R-12 eval"              "yes" "$(has_push 'eval "git push origin main"')"
 eq "R-12 bare & separator"  "yes" "$(has_push 'true & git push origin main')"
+# wave-25 T12: the prefix and runner words fold as the program word does (Section 1h has the
+# pairs). In the shape Section 6 extracts, so the walls.sh screen is asked about each.
+eq "T12 SUDO"               "yes" "$(has_push 'SUDO git push origin main')"
+eq "T12 BASH -c"            "yes" "$(has_push "BASH -c 'git push origin main'")"
+eq "T12 Eval runs nothing"  "no"  "$(has_push 'Eval "git push origin main"')"
+eq "T12 Env X=1"            "yes" "$(has_push 'Env X=1 git push origin main')"
+eq "T12 TIME then NOHUP"    "yes" "$(has_push 'TIME NOHUP git push origin main')"
 
 # REQ-3 N2 (wave-20 T3): the env spellings are pushes too — protect-main reads this list.
 eq "REQ-3 env -C <dir>"        "yes" "$(has_push 'env -C /tmp/r git push origin main')"
