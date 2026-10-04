@@ -1860,7 +1860,7 @@ for _p in 'suite|bash tests/run.sh|BASH tests/run.sh' 'suite|bash tests/cmd-clas
           'suite|timeout 60 bash tests/run.sh|TIMEOUT 60 bash tests/run.sh' 'suite|nice -n 5 bash tests/run.sh|Nice -n 5 bash tests/run.sh' \
           'suite|xargs bash tests/run.sh|XARGS bash tests/run.sh' 'suite|ssh box bash tests/run.sh|SSH box bash tests/run.sh' \
           'suite|command bash tests/run.sh|COMMAND bash tests/run.sh' 'suite|bash -c "bash tests/run.sh"|BASH -c "bash tests/run.sh"' \
-          'suite|eval "bash tests/run.sh"|EVAL "bash tests/run.sh"' 'suite|sh -c "sh tests/a.test.sh"|SH -c "SH tests/a.test.sh"' \
+          'suite|sh -c "sh tests/a.test.sh"|SH -c "SH tests/a.test.sh"' \
           'suite|pytest|PYTEST' 'suite|jest|Jest' 'suite|npm test|NPM test' 'suite|npx jest|NPX jest' \
           'suite|go test ./...|GO test ./...' 'suite|make test|Make test' 'build|make|MAKE' 'build|cargo build|CARGO build' \
           'install|npm install|NPM install' 'install|pip install x|PIP install x' 'install|uv sync|UV sync' \
@@ -1876,6 +1876,11 @@ case_is none  './tests/X.TEST.SH'          '§FOLD a script path at argv[0] neve
 case_is none  'npm TEST'                   '§FOLD a subcommand never folds: npm TEST is not npm test'
 case_is none  'bash -n tests/x.test.sh'    '§FOLD control: -n reads the suite and runs nothing'
 case_is suite 'bash -N tests/x.test.sh'    '§FOLD a flag never folds: -N is not -n'
+# --- a builtin-only word never folds: EVAL, EXEC and SOURCE resolve to nothing ---
+case_is suite 'eval "bash tests/run.sh"'   '§FOLD control: eval runs its string'
+case_is none  'EVAL "bash tests/run.sh"'   '§FOLD EVAL is not eval: it runs nothing'
+case_is suite 'exec bash tests/run.sh'     '§FOLD control: exec runs its command'
+case_is none  'EXEC bash tests/run.sh'     '§FOLD EXEC is not exec: it runs nothing'
 # --- cd is not folded: /usr/bin/CD moves nothing, so it licenses no bare run.sh ---
 case_is suite 'cd tests && bash run.sh'    '§FOLD control: a cd licenses the bare run.sh'
 case_is none  'CD tests && bash run.sh'    '§FOLD CD moves nothing, so it licenses nothing'
