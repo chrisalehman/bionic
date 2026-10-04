@@ -16,8 +16,10 @@
 #   stamp/v1|head=<40-hex>|dirty=<count>|rc=<n>|at=<ISO-UTC>|cmd=<first 120 chars>
 #
 # They are read BEFORE the command because what a green run proves is the tree it ran on,
-# not the tree its own output left behind. In `cmd=` a `|` becomes `¦` and a line break a
-# space, so the line keeps six fields. In a linked worktree the git dir is the tree's own
+# not the tree its own output left behind. In `cmd=` every `|`, newline, carriage return and
+# tab becomes a space BEFORE the cut to 120, so a stamp is always one line of six fields and
+# `cmd=` can never carry a `|rc=…` into a reader that splits on `|`. The dirty count skips
+# the one line `?? .bionic` when the tree's `.bionic` is a symlink (spawn-worktree's link). In a linked worktree the git dir is the tree's own
 # (`.git/worktrees/<name>`), so a stamp never lands in another checkout. Outside a git
 # tree, or in one with no commit, there is no stamp and no error. worktree_land reads it.
 #
@@ -97,20 +99,28 @@ stamp_file=""; stamp_head=""; stamp_dirty=""
 if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] &&
    stamp_head="$(git rev-parse --verify -q HEAD 2>/dev/null)" && [ -n "$stamp_head" ]; then
   stamp_file="$(git rev-parse --absolute-git-dir 2>/dev/null)/bionic-stamps"
-  stamp_dirty="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  # The tree's own `.bionic` link (spawn-worktree plants it) is not a change to the tree,
+  # but git lists it as `?? .bionic` unless the project ignores `.bionic` without a slash.
+  # Exactly that one line is skipped, and only when the link is there; nothing else is.
+  stamp_top="$(git rev-parse --show-toplevel 2>/dev/null)"
+  if [ -n "$stamp_top" ] && [ -L "$stamp_top/.bionic" ]; then
+    stamp_dirty="$(git status --porcelain 2>/dev/null | grep -cvxF -- '?? .bionic')"
+  else
+    stamp_dirty="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  fi
+  case "$stamp_dirty" in ''|*[!0-9]*) stamp_dirty=0 ;; esac
 fi
 
-booked_one_line() {  # <text> <n> — the first <n> characters, line breaks made spaces
-  local s="${1:0:$2}"
-  s="${s//$'\n'/ }"; s="${s//$'\r'/ }"; s="${s//$'\t'/ }"
-  printf '%s' "$s"
+booked_one_line() {  # <text> <n> — pipes and line breaks made spaces, then the first <n> chars
+  local s="$1"
+  s="${s//|/ }"; s="${s//$'\n'/ }"; s="${s//$'\r'/ }"; s="${s//$'\t'/ }"
+  printf '%s' "${s:0:$2}"
 }
 
 booked_stamp() {  # <rc>
   [ -n "$stamp_file" ] || return 0
   local c
   c="$(booked_one_line "$cmd" 120)"
-  c="${c//|/¦}"
   printf 'stamp/v1|head=%s|dirty=%s|rc=%s|at=%s|cmd=%s\n' \
     "$stamp_head" "${stamp_dirty:-0}" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$c" \
     >> "$stamp_file" 2>/dev/null
