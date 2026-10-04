@@ -310,6 +310,15 @@ expect_eq "A2b.6 …and so is a write beside the project" "deny" "$(behavior "$O
 drive "$A2BP" "$(payload "$A2BP" Bash "$(bash_ti "touch $A2BT/inside2.txt")" aw99-T1-0974313b7a6b74f2 w99-T1 "$A2BT")"
 expect_eq "A2b.7 paired positive: the true tree is still the writer's" "allow" "$(behavior "$OUT")"
 
+# The rule is by place, not by a `.worktrees/` prefix: `create` accepts another parent
+# directory, and a writer whose tree git lists there keeps it.
+A2BT4="$A2BP/trees/25-T4"
+git -C "$A2BP" worktree add -q -b wt/25-T4 "$A2BT4" HEAD >/dev/null 2>&1
+add_roster_row "$A2BP" w99-T4 aw99-T4-1 bionic:senior-implementor "$(record_of "$A2BP")/T4.md"
+add_workspace "$A2BP" w99-T4 "$A2BT4"
+drive "$A2BP" "$(payload "$A2BP" Write "$(file_ti "$A2BT4/inside.txt")" aw99-T4-1 w99-T4 "$A2BT4")"
+expect_eq "A2b.8 a writer whose tree git lists under <root>/trees writes inside it: allow" "allow" "$(behavior "$OUT")"
+
 # THE LEAD'S TREE ROOTS. The lead's checkout is a linked worktree holding the working branch,
 # so the main checkout is no root of its own; every recorded tree of the session is.
 A2LP="$(make_project a2l bound)"
