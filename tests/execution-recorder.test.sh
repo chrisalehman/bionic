@@ -2441,7 +2441,9 @@ expect_eq "17k6 …with nothing left to apply" "0:" "$SYNC_RC:$SYNC_OUT"
 
 # ---------- 17l: a launch with no tree of its own takes the wave's tree for its ledger line only ----------
 # T5 is a verify row run by a test-runner, which spawns no tree. Its ledger line names the
-# Step-4 block's worktree and base-sha; the row's worktree cell is never filled with them.
+# Step-4 block's worktree and base-sha; the row's worktree cell is never filled with them. Its
+# Files cell names nothing outside the docs root, so the row goes active with no tree (units.sh
+# `units_writes_head`, ruled by the orchestrator: a row that writes no tracked path owes no tree).
 export BIONIC_LAUNCH_SYNC_INLINE=1
 ACT_L="$(act_world readonly 4)"
 act_intended "$ACT_L" w1-T5 toolu_01ACTL bionic:test-runner
@@ -2449,7 +2451,7 @@ act_launch "$ACT_L" w1-T5 a17l000000000001 toolu_01ACTL
 expect_eq "17l §TREELESS the ledger line takes the Step-4 block's tree and base" \
   "| T5 | test-runner (w1-T5) | 2026-10-04T03:37Z | 45 min | .bionic/docs/record/wave-01/T3-report.md | — | .worktrees/01-fixture @ abc1234 |" \
   "$(act_ledger_row "$ACT_L" T5)"
-expect_contains "17l2 …the row names the launch" "| w1-T5 |" "$(act_row "$ACT_L" T5)"
+expect_contains "17l2 …the row is active under the launch" "| w1-T5 | T1, T2, T3, T4 | 30 | REQ-1 | — | — | — | active |" "$(act_row "$ACT_L" T5)"
 expect_contains "17l3 …and its worktree and base cells stay empty" "| REQ-1 | — | — | — |" "$(act_row "$ACT_L" T5)"
 act_gate "$ACT_L"; expect_eq "17l4 …and the gate admits the plan" "0" "$?"
 cp "$(act_plan "$ACT_L")" "$SANDBOX/act-l-before"

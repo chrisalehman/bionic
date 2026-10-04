@@ -1217,6 +1217,31 @@ expect_eq "12.6 the table breaks this invariant twice and no other" "2" "$(nline
 expect_eq "12.7 …and units_validate exits 1 for it" "1" \
   "$(call_rc units_validate "$SANDBOX/active-no-tree.md")"
 
+# ONLY A ROW THAT WRITES THE HEAD OWES A TREE (wave-26 T32). A verify, review or doc row whose
+# Files cell names nothing outside the docs root (or nothing at all) commits nothing a gate must
+# attribute; it runs active with an empty worktree cell. The predicate is the scheduler's
+# `writes_head`, asked of the same cell; a row naming one tracked file keeps the refusal.
+cat > "$SANDBOX/active-docs-only.md" <<'ACD_EOF'
+---
+current: 5
+---
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 5 | verify | the floor, writing its record | test-runner | — | 30m | REQ-1 | .bionic/docs/record/w/floor.txt | — | active |
+| T2 | 6 | review | the review, writing nothing | critic | — | 30m | REQ-1 | — | — | active |
+| T3 | 5 | verify | the floor that also edits a test | test-runner | — | 30m | REQ-1 | .bionic/docs/record/w/f.txt, tests/x.test.sh | — | active |
+ACD_EOF
+VAL_ACD="$(call units_validate "$SANDBOX/active-docs-only.md")"
+expect_eq "12.8 an active row whose Files are all under the docs root owes no tree" "0" \
+  "$(printf '%s\n' "$VAL_ACD" | grep -c '^T1: active row names no worktree' | tr -d ' ')"
+expect_eq "12.9 …nor does one whose Files cell names no path" "0" \
+  "$(printf '%s\n' "$VAL_ACD" | grep -c '^T2: active row names no worktree' | tr -d ' ')"
+expect_eq "12.10 …while a row naming one tracked file beside them is still refused" "1" \
+  "$(printf '%s\n' "$VAL_ACD" | grep -c '^T3: active row names no worktree' | tr -d ' ')"
+
 # ---------- the column-less table: the arm must not reach it ----------
 #
 # The same rows, one column narrower. Every `worktree` cell now reads empty for the reason
@@ -2618,6 +2643,26 @@ expect_eq "HARDEN.F3h …while the fixture still carries the loop as edges both 
      "$(has_line "$(call units_edges "$SANDBOX/f3-active.md")" "T2${TAB}T1${TAB}lib/b.sh")")"
 expect_eq "HARDEN.F3i an acyclic reads table still validates clean (READS fixture)" "0" \
   "$(call_rc units_validate "$SANDBOX/reads.md")"
+# A ROW THAT WAITS ON ITSELF is a cycle of one (wave-26 T32; review 7 F5). Its group holds only
+# itself, so the count of two or more never named it; it validated and was never ready.
+cat > "$SANDBOX/f3-self.md" <<'SELF_EOF'
+## SDLC State
+
+current: 5
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | a, waiting on itself | implementor | T1 | 30 | REQ-x | lib/a.sh | pending |
+| T2 | 4 | build | b | implementor | — | 30 | REQ-x | lib/b.sh | pending |
+SELF_EOF
+expect_eq "HARDEN.F3j precondition: the self-dependency is an edge from the row to itself" "yes" \
+  "$(has_line "$(call units_edges "$SANDBOX/f3-self.md")" "T1${TAB}T1${TAB}T1")"
+V="$(call units_validate "$SANDBOX/f3-self.md")"
+expect_eq "HARDEN.F3j F5 a row that depends on itself is refused" "1" "$(call_rc units_validate "$SANDBOX/f3-self.md")"
+expect_contains "HARDEN.F3k …as a cycle naming it" "T1: read cycle through T1" "$V"
+expect_absent "HARDEN.F3l …and not the row beside it" "T2:" "$V"
 
 # F5 — ONE BRACKET DOES NOT STOP THE PLAN. A `[` in a Files glob used to build a broken regex and
 # abort the program: every verb exit 2, nothing ready. The matcher reads a bracket literally (the

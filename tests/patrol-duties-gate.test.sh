@@ -2055,6 +2055,11 @@ expect_contains "C0c: …and asks for the refresh only when the tick printed its
   'TaskList and reconcile only if a "poker: RECONCILE" line printed' "$QT_PROMPT"
 expect_absent "C0e: …the sentence keyed to an unprinted change is gone" \
   "TaskList and reconcile only when a row's status or the ready set changed" "$QT_PROMPT"
+# A FILL leaves the dispatch to the orchestrator and nothing else: the launch records its row
+# and its ledger line (wave-26 T32; D4).
+expect_contains "C0f: …a FILL asks for the dispatch, and says the launch records the row" \
+  "its launch records the row active and its ledger line" "$QT_PROMPT"
+expect_absent "C0g: …and no longer asks the orchestrator to ledger it by hand" "(and ledger it active in ## Tasks)" "$QT_PROMPT"
 expect_absent "C0d: …and the unconditional continue is gone" "Then continue the run toward its goal until a wall." "$QT_PROMPT"
 
 # C1: one open row whose progress file goes quiet between two ticks. The second tick prints in
@@ -2144,7 +2149,7 @@ expect_absent "C4: …and no WAITING, with nothing running" "poker: WAITING" "$Q
 rm -rf "$QT_CFG"
 
 # C5 (wave-26 T32; review-6 F1): a QUIET tick does not use up a change. A FILL tick sets the
-# baseline; a writer takes the one slot, so the next ticks are QUIET (WAITING); T5's status
+# baseline; a writer takes the one slot, so the next ticks are QUIET; T5's status
 # moves while they wait; the writer goes, and the FILL tick after owes the refresh, once. Through
 # T15 every tick wrote its fingerprint, the QUIET one included, so this FILL tick owed nothing.
 # The control is the same sequence with no status move: its FILL tick owes nothing.
@@ -2174,8 +2179,8 @@ require_helpers c5_world c5_busy c5_run
 d=$(c5_world); QT_CFG="$(mktemp -d)"
 c5_run "$d" "$QT_CFG" yes
 expect_contains "C5 precondition: the baseline tick fills" "poker: FILL T2" "$C5_OUT0"
-expect_contains "C5 precondition: …the writer's ticks wait" "poker: WAITING" "$C5_OUT1"
-expect_contains "C5 precondition: …the tick over the status move waits too" "poker: WAITING" "$C5_OUT2"
+expect_contains "C5 precondition: …the writer's tick is QUIET" "decision=QUIET" "$C5_OUT1"
+expect_contains "C5 precondition: …the tick over the status move is QUIET too" "decision=QUIET" "$C5_OUT2"
 expect_contains "C5 precondition: T5 was dropped while they waited" "| dropped |" "$(grep '^| T5 |' "$d/.bionic/docs/plans/$PLAN_REL")"
 expect_contains "C5 precondition: …and the slot frees: the tick fills again" "poker: FILL T2" "$C5_OUT"
 expect_eq "C5: F1 a change first seen on a QUIET tick is owed by the next FILL tick" "owed" "$(qt_duty "$d")"

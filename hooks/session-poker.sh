@@ -361,7 +361,8 @@ HOLD_REASON_SLOT="'why it stays up'"
 # v=4 (wave-26 T15; D16): an `unchanged` or a WAITING tick ends the turn's duties, the task-list
 # refresh is asked only on a change, and "continue" only when something is ready or changed.
 # v=5 (wave-26 T32; review-6 F2): the refresh is asked only when the tick printed its RECONCILE
-# line, which it prints whenever the duty is owed; v=4 asked on a change the tick never printed.
+# line, which it prints whenever the duty is owed (v=4 asked on a change the tick never printed),
+# and a FILL asks for the dispatch alone: the launch records the row and its ledger line.
 PATROL_PROMPT_VERSION=5
 
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
@@ -2920,11 +2921,11 @@ plan_verb_id_ok() {
 # and one `## Dispatch ledger` line, `<role> (<name>)`, the launch minute, the brief duration, the
 # deliverable, and `<tree> @ <base>` in the notes. A row's agent cell is its LATEST open launch,
 # so a `-r<n>` re-dispatch moves the cell and gets its own line, keyed `<id>r<n>` (F1). A launch
-# with no tree of its own (a reviewer, a test-runner on a verify, review, doc or test row) takes
-# the Step-4 block's `worktree:` and `base-sha:` for its line only; the row's tree cell is never
-# filled with the wave's tree, which the commit gate would read as the row's own, so the row names
-# the launch and stays `pending` (units_validate refuses an active row that names no tree). A
-# build row with no tree recorded cannot go active at all and is printed. A plan with no
+# with no tree of its own (a reviewer or a test-runner whose row's Files name nothing outside the
+# docs root, `units_writes_head`) goes active with an empty worktree cell, which units_validate
+# admits for exactly such a row, and takes the Step-4 block's `worktree:` and `base-sha:` for its
+# ledger line only: the wave's tree in the row would read to the commit gate as the row's own. A
+# row that writes the head with no tree recorded cannot go active at all and is printed. A plan with no
 # `## Dispatch ledger` heading keeps no ledger, and its launches get the row alone.
 #
 # NEVER HALF A LAUNCH (F2, F6). The row and its line are projected together on a scratch copy and
@@ -3099,9 +3100,9 @@ launch_sync_sweep() {  # <plan> <root>
 launch_sync_project() {
   local plan="$1" root="$2" sid="$3" roster="$4" acks="$5" out="$6"
   local open rec i j n=0 nl=0 hits h hasl=0 haswt=0 hasbs=0 s4 s4wt s4bs
-  local name la du dl ty st ag wt bs kind ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand
+  local name la du dl ty st ag wt bs fil ws wsbs wtnew bsnew treeless noroom what lid sfx k role rc hand
   local us=$'\037'
-  local -a RID RKIND RAG RST RWT RBS LN LLA LDU LDL LTY LROW FINAL LGID LGAG pairs lpairs
+  local -a RID RFIL RAG RST RWT RBS LN LLA LDU LDL LTY LROW FINAL LGID LGAG pairs lpairs
   LS_SAID=""; LS_FAILS=""; LS_HANDS=""
   open="$(roster_open_names "$roster" "$acks" "$sid" 2>/dev/null)"
   [ -n "$open" ] || return 1
@@ -3112,9 +3113,9 @@ launch_sync_project() {
 $(launch_sync_launches "$roster" "$sid" "$open")
 EOF
   [ "$nl" -gt 0 ] || return 1
-  while IFS="$us" read -r rec _ kind _ ag _ _ _ _ st wt bs _; do
+  while IFS="$us" read -r rec _ _ _ ag _ _ _ fil st wt bs _; do
     [ -n "$rec" ] || continue
-    RID[n]="$rec"; RKIND[n]="$kind"; RAG[n]="$ag"; RST[n]="$st"; RWT[n]="$wt"; RBS[n]="$bs"; FINAL[n]=-1
+    RID[n]="$rec"; RFIL[n]="$fil"; RAG[n]="$ag"; RST[n]="$st"; RWT[n]="$wt"; RBS[n]="$bs"; FINAL[n]=-1
     n=$((n + 1))
   done <<EOF
 $(units_rows "$plan" 2>/dev/null | tr '\t' '\037')
@@ -3150,7 +3151,7 @@ EOF
   while [ "$j" -lt "$nl" ]; do
     i="${LROW[j]}"
     if [ "$i" -lt 0 ]; then j=$((j + 1)); continue; fi
-    name="${LN[j]}"; st="${RST[i]}"; ag="${RAG[i]}"; wt="${RWT[i]}"; bs="${RBS[i]}"; kind="${RKIND[i]}"
+    name="${LN[j]}"; st="${RST[i]}"; ag="${RAG[i]}"; wt="${RWT[i]}"; bs="${RBS[i]}"; fil="${RFIL[i]}"
     pairs=(); lpairs=(); what=""; treeless=0; wtnew=""; bsnew=""
     ws="$(launch_sync_workspace "$root" "$sid" "$name")"
     if [ -n "$ws" ]; then
@@ -3159,16 +3160,19 @@ EOF
         case "${ws#*$'\t'}" in *[A-Za-z0-9]*) [ "$hasbs" = 1 ] && bsnew="$(printf '%s' "${ws#*$'\t'}" | cut -c1-8)" ;; esac ;;
       esac
     fi
-    # A LAUNCH WITH NO TREE OF ITS OWN: no record for the name, an empty cell, a read-only kind.
+    # A LAUNCH WITH NO TREE OF ITS OWN: no record for the name, an empty cell, and a Files cell
+    # that names nothing outside the docs root (units.sh `units_writes_head`, the predicate the
+    # validator asks before it owes the row a tree).
     case "$wt" in *[A-Za-z0-9]*) : ;; *)
       if [ -z "$wtnew" ] && [ "$haswt" = 1 ]; then
-        case "$kind" in verify|review|doc|test) treeless=1 ;; esac
+        units_writes_head "$fil" || treeless=1
       fi ;;
     esac
     noroom=0
     if [ "${FINAL[i]}" = "$j" ]; then
       if [ "$st" = pending ] && [ "$treeless" = 1 ]; then
-        [ "$ag" = "$name" ] || { pairs=("agent=$name"); what="the row names it and stays pending: a launch with no tree of its own takes none"; }
+        pairs=(status=active "agent=$name")
+        what="row active with no tree of its own (its Files write nothing the head carries)"
       elif [ "$st" = pending ] && [ "$haswt" = 1 ] && [ -z "$wtnew" ] && { case "$wt" in *[A-Za-z0-9]*) false ;; *) true ;; esac; }; then
         noroom=1
         pairs=(status=active "agent=$name" 'worktree=<tree>' 'base=<sha>')
@@ -3417,7 +3421,7 @@ case "$VERB" in
       die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
       exit 3
     fi
-    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. If it printed only "unchanged", or a "poker: WAITING" line, the run is waiting on its agents and this turn owes nothing more: end it. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (and ledger it active in ## Tasks) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. TaskList and reconcile only if a "poker: RECONCILE" line printed. Continue the run toward its goal until a wall only when something is ready or changed.\n' \
+    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. If it printed only "unchanged", or a "poker: WAITING" line, the run is waiting on its agents and this turn owes nothing more: end it. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (its launch records the row active and its ledger line: write neither by hand) or write a line "fill-declined: <reason>". Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. TaskList and reconcile only if a "poker: RECONCILE" line printed. Continue the run toward its goal until a wall only when something is ready or changed.\n' \
       "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$HOLD_REASON_SLOT"
     exit 0
     ;;
