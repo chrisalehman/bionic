@@ -5048,6 +5048,8 @@ emit_deny() {  # $1=class $2=role
   # short and the fix is dispatch alone.
   local _fix="dispatch it with the Agent tool"
   [ "$_FO_SHORT_MS" -eq 0 ] || _fix="timeout ≤${_FO_SHORT_MS} ms, or dispatch it"
+  # A call refused for a timeout under the floor already has one at most the limit (A-T44.1).
+  [ "$_FO_SHORT_WHY" != tooshort ] || _fix="timeout ≥${_FO_SHORT_FLOOR_MS} ms, or dispatch it"
   fold_block deny run "this command belongs in a subagent" "$_fix" \
     "$(deny_reason "$1" "$2")"
   return 2
@@ -5081,6 +5083,7 @@ deny_reason() {  # $1=class $2=role
   case "$_FO_SHORT_WHY" in
     held)       lead="drop the BIONIC_SLOT_HELD=1 prefix, which keeps this short call out of the shim that stops it at its limit" ;;
     background) lead="run it in the foreground, without the trailing &: a command the shell backgrounds escapes the shim that stops a short call at its limit" ;;
+    tooshort)   lead="give this Bash call a timeout of $_FO_SHORT_FLOOR_MS to $_FO_SHORT_MS ms; under $_FO_SHORT_FLOOR_MS ms the command could not be stopped, and say why, before the harness's own timeout" ;;
     *) [ "$_FO_SHORT_MS" -eq 0 ] ||
          lead="give this Bash call a timeout of at most $_FO_SHORT_MS ms; it then runs here and is stopped at that limit" ;;
   esac
@@ -5092,7 +5095,8 @@ _fo_short_limit() {  # -> sets _FO_SHORT_MS from `farm-out-short-ms:`, default 1
   # READ WHERE farm-out-mode IS READ, the same project file, in this shell with no fork.
   # The first such line decides. A value that is not a whole number of at most nine
   # digits is the default, never "off": a typo must not widen what passes (A-T9.6).
-  # `0` is a valid value and means no call is short.
+  # `0` is a valid value and means no call is short, and so does any value under the floor
+  # (A-T44.1): no timeout could be both at most the limit and at least the floor.
   local _l _v _f="$BIONIC_ROOT/.bionic/config.yaml"
   _FO_SHORT_MS=120000
   [ -f "$_f" ] || return 0
@@ -5105,13 +5109,15 @@ _fo_short_limit() {  # -> sets _FO_SHORT_MS from `farm-out-short-ms:`, default 1
           ''|*[!0-9]*) : ;;
           *) [ "${#_v}" -gt 9 ] || _FO_SHORT_MS=$((10#$_v)) ;;
         esac
+        [ "$_FO_SHORT_MS" -ge "$_FO_SHORT_FLOOR_MS" ] || _FO_SHORT_MS=0
         return 0 ;;
     esac
   done < "$_f"
   return 0
 }
 
-_fo_short_pass() {  # -> 0 when this call is short and its wrap will stop it at the limit
+_FO_SHORT_FLOOR_MS=6000
+_fo_short_pass() {  # -> 0 when this call is short: a suite its wrap will stop at the limit, or a non-suite left as typed
   local _t _s
   WALL_SHORT_KILL_AFTER=""
   _t="$(bionic_jq .tool_input.timeout)"
@@ -5119,15 +5125,25 @@ _fo_short_pass() {  # -> 0 when this call is short and its wrap will stop it at 
   [ "${#_t}" -le 9 ] || return 1
   _t=$((10#$_t))
   [ "$_t" -gt 0 ] && [ "$_t" -le "$_FO_SHORT_MS" ] || return 1
-  _s=$((_t / 1000 - 5)); [ "$_s" -ge 1 ] || _s=1
-  # THE ONE BUILDER DECIDES (T7's seam): the pass holds only if the wrap the suite guard
+  if [ "$_t" -lt "$_FO_SHORT_FLOOR_MS" ]; then _FO_SHORT_WHY=tooshort; return 1; fi
+  _s=$((_t / 1000 - 5))
+  # THE ONE BUILDER DECIDES (T7's seam): a suite passes only if the wrap the suite guard
   # will stage can carry the kill. The text built here is discarded; that wall builds it
   # again from the same inputs and stages it, because only one rewrite reaches the fold.
   WALL_SHORT_KILL_AFTER="$_s"
   _bsg_wrap_text no && return 0
   WALL_SHORT_KILL_AFTER=""
   _FO_SHORT_WHY="$_BSG_WRAP_WHY"
-  return 1
+  [ "$_FO_SHORT_WHY" = class ] || return 1
+  # NOT A SUITE: a build, an install or a bootstrap passes as typed, with no shim (the lead's
+  # ruling at T44); the harness's own timeout bounds it. `class` is also the builder's answer
+  # when it could not read the command at all, so the pass holds only on a reading of THIS
+  # text, and never for a command the shell backgrounds, which no timeout bounds (A-T44.4).
+  _FO_SHORT_WHY=""
+  [ "$_WALL_CLASS_READ" = 1 ] && [ "$_WALL_CLASS_TEXT" = "$COMMAND" ] || return 1
+  case "$_WALL_CLASS" in build|install|bootstrap) : ;; *) return 1 ;; esac
+  if cmd_backgrounded "$COMMAND"; then _FO_SHORT_WHY=background; return 1; fi
+  return 0
 }
 
 # ── classification (B-5: argv positions, read by scripts/lib/cmd-class.sh) ───────
@@ -5227,23 +5243,29 @@ case "$FLAT" in
     ;;
 esac
 
-# ── THE SHORT PASS (wave-26 T9, D14, AC-4.1) ──────────────────────────────────
+# ── THE SHORT PASS (wave-26 T9, D14, AC-4.1; T44) ─────────────────────────────
 # A SHORT COMMAND STAYS ON THE THREAD, and it is known by the time limit its own Bash call
 # declares, never by its name: a one-file suite and a whole-tree run are the same words to a
 # classifier, while the `timeout` is the caller's own promise of how long the thread waits.
-# A call whose `timeout` is at most the short limit passes, and the booking wrap
-# (`_bsg_wrap_text`, staged by background-suite-guard after this wall) carries
-# `--kill-after <s>` so the shim stops it there. A short timeout the shim cannot enforce is
-# not short: the opt-out prefix and a shell-backgrounded command both run outside the shim,
-# so they fall to the refusal below with the reason named (A-T9.5).
+# A call whose `timeout` is from the floor (6000 ms) to the short limit passes.
+#
+# ONLY A SUITE IS WRAPPED (the lead's ruling at T44). A command that holds a suite segment is
+# wrapped as any suite is (`_bsg_wrap_text`, staged by background-suite-guard after this wall),
+# plus `--kill-after <s>` so the shim stops it there. A command with no suite segment passes
+# exactly as typed, with no shim: the wrap would run it in a child shell, where its `cd` would
+# not carry to the next call, in silence, and the harness's own timeout bounds it already.
+# A short timeout nothing can enforce is not short: the opt-out prefix on a suite and a
+# shell-backgrounded command both escape the bound, so they fall to the refusal below with the
+# reason named (A-T9.5, A-T44.4).
 #
 # THE TIMEOUT comes from the cached tool input (lib/context.sh), never a fetch of its own.
 # Absent, zero, negative, fractional, non-numeric or longer than nine digits is not short;
 # the Bash tool's field is a whole number of milliseconds (A-T9.3).
 #
-# THE KILL LIMIT is the timeout in whole seconds less five, at least one (A-T9.2): the shim
-# must stop the command, and say why, before the harness's own timeout moves it to the
-# background, where nobody reads the line.
+# THE KILL LIMIT is the timeout in whole seconds less five (A-T9.2): the shim must stop the
+# command, and say why, before the harness's own timeout moves it to the background, where
+# nobody reads the line. Under the six-second floor no limit leaves room for the kill's grace,
+# so such a call is refused with the floor as its fix (review 8 N1, A-T44.1).
 _FO_SHORT_WHY=""
 _fo_short_limit
 if _fo_short_pass; then return 0; fi
@@ -5290,6 +5312,11 @@ if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
   done <<EOF
 $CHAIN_SEGS
 EOF
+  # THE RAW COMMAND, WHEN NO FLAT SEGMENT CLASSIFIED (review 8, T39 item 1; T44). The segments
+  # are cut from the flattened text, where a newline is a space, so a suite on the line after
+  # `a && b && c` reads as an argument of `c`. The whole command's own reading keeps the line
+  # break; it is `_wall_class_read`'s, which the booking wrap reads after this wall anyway.
+  [ -n "$CHAIN_ROLE" ] || { classify_tier1 "$CMD" && CHAIN_ROLE="$ROLE"; }
   if [ -n "$CHAIN_ROLE" ]; then emit_tier1 "chain" "$CHAIN_ROLE"; return $?; fi
 fi
 
@@ -5505,15 +5532,14 @@ wall_booked_argv() {
 # command; rc 1 when this command is left alone (see the header above for which), naming
 # why in _BSG_WRAP_WHY: shim, class, background, held or noshim.
 #
-# A SHORT CALL (wave-26 T9, D14): when farm-out-reminder has set WALL_SHORT_KILL_AFTER, any
-# tier-1 class is wrapped, not only a suite, and the shim gets `--kill-after <s>`. The wrap
-# is what stops a short call at its limit, so a short build that went unwrapped would be a
-# pass with no limit at all. The opt-out is then read on every tier-1 segment. A short
-# command with no suite segment is wrapped `--unbooked`: the kill and its line only.
+# A SHORT CALL (wave-26 T9, D14; T44): when farm-out-reminder has set WALL_SHORT_KILL_AFTER,
+# the shim also gets `--kill-after <s>`. Nothing else changes: only a suite is wrapped, short
+# or not (the lead's ruling at T44); a short command with no suite segment is farm-out's to
+# pass as typed.
 _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
 WALL_SHORT_KILL_AFTER=""
 _bsg_wrap_text() {
-  local _c _w _lines _cls _seg _quiet=0 _suite=0 _k="${WALL_SHORT_KILL_AFTER:-}"
+  local _c _w _lines _cls _seg _quiet=0 _k="${WALL_SHORT_KILL_AFTER:-}"
   _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
   _c="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
   case "$_c" in
@@ -5528,8 +5554,7 @@ _bsg_wrap_text() {
     [ -r "$BIONIC_LIB/cmd-class.sh" ] || return 1
     wall_libs background-suite-guard cmd-class.sh || return 1
     _wall_class_read "$COMMAND"; _cls="$_WALL_CLASS"
-    if [ -n "$_k" ]; then [ "$_cls" != none ] || return 1
-    else [ "$_cls" = suite ] || return 1; fi
+    [ "$_cls" = suite ] || return 1
     _BSG_WRAP_WHY=background
     ! cmd_backgrounded "$COMMAND" || return 1
     _BSG_WRAP_WHY=""
@@ -5538,18 +5563,12 @@ _bsg_wrap_text() {
   # reading farm-out or the suite guard already made of this text, when one did.
   _wall_class_read "$COMMAND"; _lines="$_WALL_CLASS_LINES"
   while IFS=$'\t' read -r _cls _seg; do
-    [ "$_cls" != suite ] || _suite=1
-    case "$_cls" in suite) : ;; none|'') continue ;; *) [ -n "$_k" ] || continue ;; esac
+    [ "$_cls" = suite ] || continue
     ! _wall_prefix_sets "$_seg" BIONIC_SLOT_HELD 1 || { _BSG_WRAP_WHY=held; return 1; }
-    [ "$_cls" != suite ] || ! _wall_prefix_sets "$_seg" BIONIC_QUIET 1 || _quiet=1
+    ! _wall_prefix_sets "$_seg" BIONIC_QUIET 1 || _quiet=1
   done <<< "$_lines"
-  [ "$_quiet" = 1 ] || [ "$_suite" = 0 ] || ! _bsg_solo_target "$_lines" || _quiet=1
-  # NO SUITE SEGMENT, NO PLACE AND NO STAMP (the lead's ruling, A-T9.1): a short build goes
-  # through the shim for its limit only. A stamp is a suite's proof, and the landing rule
-  # reads the last one in a tree, so a stamped `make` would stand in for the suite before it.
-  if [ -n "$_k" ] && [ "$_suite" = 0 ]; then
-    wall_booked_argv "$COMMAND" 0 --unbooked --kill-after "$_k" || { _BSG_WRAP_WHY=noshim; return 1; }
-  elif [ -n "$_k" ]; then
+  [ "$_quiet" = 1 ] || ! _bsg_solo_target "$_lines" || _quiet=1
+  if [ -n "$_k" ]; then
     wall_booked_argv "$COMMAND" "$_quiet" --kill-after "$_k" || { _BSG_WRAP_WHY=noshim; return 1; }
   else
     wall_booked_argv "$COMMAND" "$_quiet" || { _BSG_WRAP_WHY=noshim; return 1; }

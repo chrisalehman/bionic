@@ -2,7 +2,7 @@
 # booked.sh — RUN A COMMAND INSIDE A MACHINE-WIDE PLACE: stamp, book, run, record rc,
 # release (epic-23 wave-26-never-idle, D8, D14; REQ-6 AC-6.3, AC-6.4, REQ-4 AC-4.1).
 #
-#   bash <plugin-root>/scripts/booked.sh [--kill-after <seconds> [--unbooked]] [--quiet] [--shell <path>]
+#   bash <plugin-root>/scripts/booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -16,9 +16,19 @@
 # change what the command means (echo escapes, word splitting, `${pipestatus}`, an
 # unmatched glob). With `--shell` the command runs as `<path> -c "eval '<command>'"`: the
 # same shell, the same `eval`, so even the shell's own diagnostics read `(eval):1: …` as
-# they do unwrapped. What the shim cannot carry is the harness's shell snapshot (aliases,
-# functions, options) and a `cd` that should outlive the call; both fail loud, see the
-# T7 record. The stamp's `cmd=` is always the command as given, never this form.
+# they do unwrapped. The stamp's `cmd=` is always the command as given, never this form.
+#
+# WHAT A WRAPPED COMMAND LOSES (T44, review 8 F4; the T7 record said "fails loud", and for most
+# of this it does not). The command runs in the shim's child shell, not in the harness's own:
+#   - a `cd` (or `pushd`) does not outlive the call: the next Bash call starts where this one
+#     did, and NOTHING says so;
+#   - the harness's shell snapshot is not loaded: a name that exists only as a snapshot alias
+#     or function stops with `command not found` (127), which is loud, but one that shadows a
+#     command on PATH runs the PATH command instead, in silence, and the snapshot's shell
+#     options are zsh's or bash's defaults, also in silence.
+# This is why the wall wraps only a suite, short or not (the lead's ruling at T44): a suite's
+# `cd` rarely needs to outlive it, and the booking is worth the loss. A suite that needs any of
+# these opts out with `BIONIC_SLOT_HELD=1` in its own prefix and runs exactly as typed.
 #
 # THE ORDER, AND WHY THE STAMP IS READ FIRST. Before booking, the head (`git rev-parse HEAD`)
 # and the dirty count (`git status --porcelain | wc -l`) of the tree the shim stands in are
@@ -43,8 +53,7 @@
 # A STORE THAT CANNOT BE WRITTEN (T36, review 4 F5). Booking manages throughput; it is not a
 # guard. So an ordinary command runs UNBOOKED at once, with one stderr line that names the
 # store and says so. A whole-machine take does not run (exit 69, the lib's line names the
-# store): a timing result taken without the machine is worth nothing. --unbooked never reads
-# the store, so it runs and says nothing about it (A-T36.10).
+# store): a timing result taken without the machine is worth nothing.
 #
 # --quiet, OR BIONIC_QUIET=1: THE WHOLE MACHINE. Take every place (slots_take_all: block new
 # takes, wait for the held ones to drain), wait for `resources_settled`, run, then read the
@@ -54,25 +63,34 @@
 # Inside a whole-machine hold (`BIONIC_SLOT_QUIET=1`) a nested shim, quiet or not, books
 # nothing and runs.
 #
-# --kill-after <s>: past <s> seconds the command's whole process group is killed, one line says
-# it is over the short limit and belongs in a subagent, and the shim exits 124.
+# --kill-after <s>: <s> seconds after the shim starts, the command's whole process group is
+# killed, one line says it is over the short limit and belongs in a subagent, and the shim exits
+# 124. THE LIMIT COVERS THE WAIT FOR A PLACE (T44, review 8 F2): every wait's ceiling is cut to
+# <s>, and the kill is timed from the shim's start, not the run's, so the call ends inside the
+# harness's own timeout whatever the machine is doing. A command that never got its place prints
+# the lib's give-up line (naming the holders), then the same short-limit line, and exits 124; it
+# ran nothing, so it stamps nothing. A void --quiet run's retry gets only what is left.
 #
-# --unbooked (only with --kill-after, never with --quiet): THE KILL AND NOTHING ELSE (wave-26
-# T9, A-T9.1). The wall sends a short command of a class other than suite through the shim for
-# its limit only: it books no place and writes no stamp, because a stamp is a suite's proof
-# and the landing rule reads the LAST one in a tree; a short `make` stamped after a green suite
-# would stand in for that suite. BIONIC_QUIET in the environment is not read.
+# EVERY COMMAND LEADS ITS OWN PROCESS GROUP (`set -m` around the one spawn; T44, review 8 F3).
+# Without job control bash starts a background command with SIGINT and SIGQUIT ignored, and every
+# process below it inherits that, so a suite that traps or relies on an interrupt behaved
+# differently wrapped. Under `set -m` the command keeps the dispositions it would have had
+# unwrapped. What that changes: a signal the shim takes (HUP, INT, TERM) is passed on by its trap
+# to the command's tree AND its group, so a child that outlived its parent dies too, as under
+# --kill-after; a signal sent to the CALLER's process group no longer reaches the command
+# directly, only through the shim's trap, so a SIGKILL to that group (which runs no trap) leaves
+# the command running; and with a controlling terminal the command is a background group, so a
+# read from that terminal stops it (a harness Bash call has none, A-T9.4).
 #
 # EXIT CODES. The command's own, except:
 #   2    usage: no `--`, no command, more than one word after `--` (with or without
-#        --unbooked or --kill-after), a bad --kill-after, or --unbooked without it or
-#        with --quiet
+#        --kill-after), a bad --kill-after, or an option the shim does not know
 #   69   no place within BIONIC_SLOTS_MAX_WAIT (the line names the holders), a
 #        whole-machine take whose load never settled within it, or a whole-machine take on
 #        a store it cannot write; the command never ran
 #   75   void: the load rose during the run on the first run and both retries, or the
 #        ceiling ran out before a retry could start
-#   124  --kill-after fired
+#   124  --kill-after fired, during the run or during the wait for a place
 #   128+n  the shim itself was stopped by signal n (its command is killed with it)
 # 75 is EX_TEMPFAIL, "try again later", which is what a void timing check means. A command
 # can exit 69, 75 or 124 itself; the shim's own always comes after a `booked:` or `slots:`
@@ -81,7 +99,8 @@
 # THE WAITS. Every wait polls every BIONIC_SLOTS_POLL seconds, printing a line at the start
 # and every BIONIC_SLOTS_NOTE_S (lib/slots.sh). BIONIC_SLOTS_MAX_WAIT is the total: the place
 # or the marker, the drain, the settle and every void retry give up together at one ceiling
-# taken as the shim starts (SLOTS_DEADLINE; T36, review 4 F3). The store and count follow
+# taken as the shim starts (SLOTS_DEADLINE; T36, review 4 F3), and under --kill-after that
+# ceiling is the limit when the limit is shorter (T44). The store and count follow
 # BIONIC_SLOTS_DIR and BIONIC_SLOTS_N; the load follows BIONIC_LOAD_NOW_FILE (lib/resources.sh).
 #
 # BASH 3.2.
@@ -104,17 +123,16 @@ BOOKED_KILLED_RC=124
 BOOKED_RETRIES=2
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--kill-after <seconds> [--unbooked]] [--quiet] [--shell <path>] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>] -- <command>\n' >&2
   exit 2
 }
 
-kill_after=""; quiet=0; sep=0; run_shell=""; unbooked=0
+kill_after=""; quiet=0; sep=0; run_shell=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --kill-after)   [ "$#" -ge 2 ] || booked_usage; kill_after="$2"; shift 2 ;;
     --kill-after=*) kill_after="${1#--kill-after=}"; shift ;;
     --quiet)        quiet=1; shift ;;
-    --unbooked)     unbooked=1; shift ;;
     --shell)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; run_shell="$2"; shift 2 ;;
     --shell=*)      run_shell="${1#--shell=}"; [ -n "$run_shell" ] || booked_usage; shift ;;
     --)             sep=1; shift; break ;;
@@ -130,17 +148,12 @@ case "$kill_after" in
   '') : ;;
   *[!0-9]*|0) booked_usage ;;
 esac
-if [ "$unbooked" -eq 1 ]; then
-  [ -n "$kill_after" ] && [ "$quiet" -eq 0 ] || booked_usage
-else
-  [ "${BIONIC_QUIET:-}" = 1 ] && quiet=1
-fi
+[ "${BIONIC_QUIET:-}" = 1 ] && quiet=1
 cmd="$*"
 
 # ── the stamp, read before anything runs ─────────────────────────────────────
 stamp_file=""; stamp_head=""; stamp_dirty=""
-if [ "$unbooked" -eq 0 ] &&
-   [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] &&
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] &&
    stamp_head="$(git rev-parse --verify -q HEAD 2>/dev/null)" && [ -n "$stamp_head" ]; then
   stamp_file="$(git rev-parse --absolute-git-dir 2>/dev/null)/bionic-stamps"
   # The tree's own `.bionic` link (spawn-worktree plants it) is not a change to the tree,
@@ -172,7 +185,7 @@ booked_stamp() {  # <rc>
 }
 
 # ── running the command ──────────────────────────────────────────────────────
-CHILD=""; RUN_RC=0; STARTED=0; GROUP=0
+CHILD=""; RUN_RC=0; STARTED=0
 
 booked_tree() {  # <pid> — the pid and its descendants, each stopped so none can fork
   local c
@@ -183,13 +196,13 @@ booked_tree() {  # <pid> — the pid and its descendants, each stopped so none c
 
 booked_kill_tree() {  # <pid> — TERM the whole tree, then KILL whatever outlives two seconds
   local all p i=0 any
-  # A --kill-after command leads its own process group (booked_run), so the group is
-  # stopped first and signalled with the tree: a child whose parent already exited has
-  # left the tree `pgrep -P` walks, but not the group (wave-26 T9, A-T9.4).
-  [ "$GROUP" -eq 0 ] || kill -STOP -- "-$1" 2>/dev/null
+  # The command leads its own process group (booked_run), so the group is stopped first and
+  # signalled with the tree: a child whose parent already exited has left the tree `pgrep -P`
+  # walks, but not the group (wave-26 T9, A-T9.4; every spawn since T44).
+  kill -STOP -- "-$1" 2>/dev/null
   all="$(booked_tree "$1")"
   for p in $all; do kill -TERM "$p" 2>/dev/null; kill -CONT "$p" 2>/dev/null; done
-  [ "$GROUP" -eq 0 ] || { kill -TERM -- "-$1" 2>/dev/null; kill -CONT -- "-$1" 2>/dev/null; }
+  kill -TERM -- "-$1" 2>/dev/null; kill -CONT -- "-$1" 2>/dev/null
   while [ "$i" -lt 20 ]; do
     any=0
     for p in $all; do kill -0 "$p" 2>/dev/null && any=1; done
@@ -197,17 +210,23 @@ booked_kill_tree() {  # <pid> — TERM the whole tree, then KILL whatever outliv
     i=$((i + 1)); sleep 0.1
   done
   [ "$any" -eq 0 ] || for p in $all; do kill -KILL "$p" 2>/dev/null; done
-  [ "$GROUP" -eq 0 ] || kill -KILL -- "-$1" 2>/dev/null
+  kill -KILL -- "-$1" 2>/dev/null
   return 0
 }
 
+booked_over_limit() {  # the one line a command stopped at its short limit gets, run or not
+  printf 'booked: stopped after %ss — over the short limit; a longer command belongs in a subagent: dispatch it with the Agent tool, do not raise the timeout\n' \
+    "$kill_after" >&2
+}
+
 booked_run() {  # runs $cmd; sets RUN_RC
-  local start killed=0 q
+  local killed=0 q
   STARTED=1
-  # UNDER --kill-after THE COMMAND LEADS ITS OWN PROCESS GROUP (`set -m` around the one
-  # spawn), so the kill reaches every process it started, an orphan included. The group
-  # is never the shim's own, so the kill cannot reach the shim or its caller.
-  [ -z "$kill_after" ] || { GROUP=1; set -m; }
+  # THE COMMAND LEADS ITS OWN PROCESS GROUP (`set -m` around the one spawn; see the header):
+  # it starts with the signal dispositions it would have had unwrapped, and the kill reaches
+  # every process it started, an orphan included. The group is never the shim's own, so the
+  # kill cannot reach the shim or its caller.
+  set -m
   if [ -n "$run_shell" ]; then
     # `eval '<cmd>'`, quoted the one way every POSIX shell reads alike: a `'` becomes `'\''`.
     # Unquoted on purpose: bash 3.2 reads `\'` inside a double-quoted ${//} differently.
@@ -217,11 +236,11 @@ booked_run() {  # runs $cmd; sets RUN_RC
     bash -c "$cmd" 0<&0 &
   fi
   CHILD=$!
-  [ "$GROUP" -eq 0 ] || set +m
+  set +m
   if [ -n "$kill_after" ]; then
-    start=$SECONDS
+    # Timed from the shim's start (BOOKED_T0), so the wait for a place spends the limit too.
     while kill -0 "$CHILD" 2>/dev/null; do
-      if [ $((SECONDS - start)) -ge "$kill_after" ]; then
+      if [ $((SECONDS - BOOKED_T0)) -ge "$kill_after" ]; then
         booked_kill_tree "$CHILD"
         killed=1
         break
@@ -235,8 +254,7 @@ booked_run() {  # runs $cmd; sets RUN_RC
   CHILD=""
   if [ "$killed" -eq 1 ]; then
     RUN_RC=$BOOKED_KILLED_RC
-    printf 'booked: stopped after %ss — over the short limit; a longer command belongs in a subagent: dispatch it with the Agent tool, do not raise the timeout\n' \
-      "$kill_after" >&2
+    booked_over_limit
   fi
 }
 
@@ -254,7 +272,7 @@ trap 'slots_release "$$"; [ -z "${BOOKED_TIMES:-}" ] || rm -f "$BOOKED_TIMES"' E
 
 booked_settle() {  # wait for resources_settled under the shim's one ceiling (SLOTS_DEADLINE)
   local cores start max poll line deadline
-  cores="$(_res_cores)"; max="$(_slots_max_wait)"; poll="$(_slots_poll)"
+  cores="$(_res_cores)"; max="$BOOKED_MAX_WAIT"; poll="$(_slots_poll)"
   line="$(resources_settled_line "$cores")"
   deadline="$(_slots_deadline "$max")"; start=$((deadline - max)); _SLOTS_NOTED=-1
   while ! resources_settled "$cores"; do
@@ -285,18 +303,34 @@ booked_times() {
 # ── main ─────────────────────────────────────────────────────────────────────
 what="$(booked_one_line "$cmd" 60)"
 # One ceiling for every wait below: the place or marker, the drain, the settle, the retries.
-SLOTS_DEADLINE=$((SECONDS + $(_slots_max_wait)))
+# Under --kill-after it is the limit when that is shorter, and the kill counts from here (T44).
+BOOKED_T0=$SECONDS
+BOOKED_MAX_WAIT="$(_slots_max_wait)"; BOOKED_CUT=0
+if [ -n "$kill_after" ] && [ "$kill_after" -le "$BOOKED_MAX_WAIT" ]; then
+  BOOKED_MAX_WAIT=$kill_after; BOOKED_CUT=1
+fi
+SLOTS_DEADLINE=$((BOOKED_T0 + BOOKED_MAX_WAIT))
 
-if [ "$unbooked" -eq 1 ] || [ "${BIONIC_SLOT_QUIET:-}" = 1 ] ||
+booked_no_place() {  # the wait ran out before the command could start; it ran nothing
+  # At the short limit it is the same end as a run stopped there: its line, 124 (A-T44.3).
+  # At the ordinary ceiling it is the lib's line and 69, as without --kill-after.
+  [ "$BOOKED_CUT" -eq 1 ] || exit "$BOOKED_NOPLACE_RC"
+  booked_over_limit
+  exit "$BOOKED_KILLED_RC"
+}
+
+# The lib reads its ceiling from BIONIC_SLOTS_MAX_WAIT; each take is handed the shim's own for
+# that call only, so the command never sees the cut value.
+if [ "${BIONIC_SLOT_QUIET:-}" = 1 ] ||
    { [ "$quiet" -eq 0 ] && [ "${BIONIC_SLOT_HELD:-}" = 1 ]; }; then
   booked_run
 elif [ "$quiet" -eq 0 ]; then
-  slots_take "$$" "$what" >/dev/null; take_rc=$?
+  BIONIC_SLOTS_MAX_WAIT=$BOOKED_MAX_WAIT slots_take "$$" "$what" >/dev/null; take_rc=$?
   case "$take_rc" in
     0) export BIONIC_SLOT_HELD=1 BIONIC_SLOT_PLACE="$SLOTS_TAKEN" ;;
     2) printf 'booked: cannot write the store %s — this command runs unbooked, beside whatever else runs; fix: make it writable, or point BIONIC_SLOTS_DIR at a directory you can write\n' \
          "$(slots_dir)" >&2 ;;
-    *) exit "$BOOKED_NOPLACE_RC" ;;
+    *) booked_no_place ;;
   esac
   booked_run
 else
@@ -306,11 +340,12 @@ else
   tries=0
   BOOKED_TIMES="$(mktemp "${TMPDIR:-/tmp}/booked-times.XXXXXX" 2>/dev/null)"
   while :; do
-    if ! slots_take_all "$$" "$what" >/dev/null || ! booked_settle; then
-      [ "$tries" -gt 0 ] || exit "$BOOKED_NOPLACE_RC"
+    if ! BIONIC_SLOTS_MAX_WAIT=$BOOKED_MAX_WAIT slots_take_all "$$" "$what" >/dev/null ||
+       ! booked_settle; then
+      [ "$tries" -gt 0 ] || booked_no_place
       # A run already happened and was void; the ceiling ran out before another could start.
       printf 'booked: void — the ceiling of %ss ran out before a retry could start; a timing result from this machine now would not mean anything\n' \
-        "$(_slots_max_wait)" >&2
+        "$BOOKED_MAX_WAIT" >&2
       RUN_RC=$BOOKED_VOID_RC
       break
     fi
