@@ -91,6 +91,22 @@ run_hook() {
   return 0
 }
 
+# expect_wrap_only <label> <original command> — stdout is the booking wrap ALONE (wave-26 T7,
+# D8). An allowed suite command now comes back rewritten into payload/scripts/booked.sh, so a
+# row that read "silent" for this wall reads exactly this instead: no deny and no advisory on
+# stdout (the object holds nothing but the event name and updatedInput), and the updated
+# command is the shim around the ORIGINAL command, byte for byte.
+expect_wrap_only() {
+  local _cmd _s _r="'\\''"
+  expect_eq "$1: …no deny and no advisory beside the booking wrap" '["hookEventName","updatedInput"]' \
+    "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
+  _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
+  expect_regex "$1: …the updated command runs the booking shim" \
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)? -- " "$_cmd"
+  _s=${2//\'/$_r}
+  expect_eq "$1: …around the original command, byte for byte" "'$_s'" "${_cmd#* -- }"
+}
+
 # audit_file <project root> — the $HOME-rooted audit path the wall computes (incident
 # 0001: the stream must live where a consuming project cannot commit it). Derived by the
 # hook's own rule rather than hard-coded, so a change to the slug fails loudly here.
@@ -133,7 +149,8 @@ expect_empty "1a: …and nothing to stderr" "$ERR"
 # it moved the work to must not be nudged to move it again.
 run_hook "$(mk_payload "$ENGAGED" 'bash tests/run.sh' Bash implementor)"
 expect_status "1b: a subagent payload exits 0" 0 "$ST"
-expect_empty "1b: …writing nothing to stdout" "$OUT"
+# THIS WALL STAYS SILENT; the only stdout is the booking wrap every allowed suite carries.
+expect_wrap_only "1b" 'bash tests/run.sh'
 expect_empty "1b: …and nothing to stderr" "$ERR"
 
 # AN EMPTY COMMAND.
@@ -370,13 +387,15 @@ section "5 — the sanctioned override, and the config modes"
 EXTRA_ENV=""
 run_hook "$(mk_payload "$ENGAGED" 'FARM_OUT_ALLOW=1 bash tests/run.sh')"
 expect_status "5a: the override exits 0" 0 "$ST"
-expect_empty "5a: …with no deny on stdout" "$OUT"
+# THE OVERRIDE LIFTS THIS WALL'S DENY, NOT THE BOOKING (wave-26 T7): it sanctions running a
+# suite on the orchestrator thread, and that run still takes a place like any other.
+expect_wrap_only "5a" 'FARM_OUT_ALLOW=1 bash tests/run.sh'
 expect_contains "5b: …and is audited by name" "farm-out [override] class=user-sanctioned" "$ERR"
 
 # CHAIN-AWARE (W4's false fire): the token is honoured after a separator too, not only
 # in leading position.
 run_hook "$(mk_payload "$ENGAGED" 'cd /x && FARM_OUT_ALLOW=1 bash tests/run.sh')"
-expect_empty "5c: …honoured mid-chain as well" "$OUT"
+expect_wrap_only "5c honoured mid-chain as well" 'cd /x && FARM_OUT_ALLOW=1 bash tests/run.sh'
 
 # `farm-out-mode: advisory` DOWNGRADES a deny to a nudge.
 ADV="$(mk_repo advisory yes)"
@@ -393,7 +412,9 @@ OFFREPO="$(mk_repo off yes)"
 printf 'farm-out-mode: off\n' > "$OFFREPO/.bionic/config.yaml"
 run_hook "$(mk_payload "$OFFREPO" 'bash tests/run.sh')"
 expect_status "5g: under off mode the wall exits 0" 0 "$ST"
-expect_empty "5h: …saying nothing at all" "$OUT$ERR"
+# `off` silences THIS wall; the booking wrap is not farm-out's and rides the allowed call.
+expect_wrap_only "5h saying nothing at all" 'bash tests/run.sh'
+expect_empty "5h: …and nothing on stderr" "$ERR"
 
 # ---------------------------------------------------------------------------
 section "6 — the audit stream: outside the project, and carrying no command text"

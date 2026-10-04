@@ -2,12 +2,22 @@
 # booked.sh — RUN A COMMAND INSIDE A MACHINE-WIDE PLACE: stamp, book, run, record rc,
 # release (epic-23 wave-26-never-idle, D8, D14; REQ-6 AC-6.3, AC-6.4, REQ-4 AC-4.1).
 #
-#   bash <plugin-root>/scripts/booked.sh [--kill-after <seconds>] [--quiet] -- <command>
+#   bash <plugin-root>/scripts/booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>]
+#                                        -- <command>
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
 # books one of N places (lib/slots.sh) before it starts and waits when none is free. The
 # words after `--` are joined with single spaces and run by `bash -c`, exactly as given: a
 # caller that wants the command byte for byte passes it as one quoted word.
+#
+# --shell <path>: THE HARNESS'S OWN SHELL (wave-26 T7, A-T7.1). The harness runs a Bash call
+# as `<its shell> -c '… eval <command> < /dev/null'`, and under a zsh harness `bash -c` would
+# change what the command means (echo escapes, word splitting, `${pipestatus}`, an
+# unmatched glob). With `--shell` the command runs as `<path> -c "eval '<command>'"`: the
+# same shell, the same `eval`, so even the shell's own diagnostics read `(eval):1: …` as
+# they do unwrapped. What the shim cannot carry is the harness's shell snapshot (aliases,
+# functions, options) and a `cd` that should outlive the call; both fail loud, see the
+# T7 record. The stamp's `cmd=` is always the command as given, never this form.
 #
 # THE ORDER, AND WHY THE STAMP IS READ FIRST. Before booking, the head (`git rev-parse HEAD`)
 # and the dirty count (`git status --porcelain | wc -l`) of the tree the shim stands in are
@@ -72,16 +82,18 @@ BOOKED_KILLED_RC=124
 BOOKED_RETRIES=2
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--kill-after <seconds>] [--quiet] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--kill-after <seconds>] [--quiet] [--shell <path>] -- <command>\n' >&2
   exit 2
 }
 
-kill_after=""; quiet=0; sep=0
+kill_after=""; quiet=0; sep=0; run_shell=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --kill-after)   [ "$#" -ge 2 ] || booked_usage; kill_after="$2"; shift 2 ;;
     --kill-after=*) kill_after="${1#--kill-after=}"; shift ;;
     --quiet)        quiet=1; shift ;;
+    --shell)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; run_shell="$2"; shift 2 ;;
+    --shell=*)      run_shell="${1#--shell=}"; [ -n "$run_shell" ] || booked_usage; shift ;;
     --)             sep=1; shift; break ;;
     *)              booked_usage ;;
   esac
@@ -151,9 +163,16 @@ booked_kill_tree() {  # <pid> — TERM the whole tree, then KILL whatever outliv
 }
 
 booked_run() {  # runs $cmd; sets RUN_RC
-  local start killed=0
+  local start killed=0 q
   STARTED=1
-  bash -c "$cmd" 0<&0 &
+  if [ -n "$run_shell" ]; then
+    # `eval '<cmd>'`, quoted the one way every POSIX shell reads alike: a `'` becomes `'\''`.
+    # Unquoted on purpose: bash 3.2 reads `\'` inside a double-quoted ${//} differently.
+    q="'\\''"; q=${cmd//\'/$q}; q="'$q'"
+    "$run_shell" -c "eval $q" 0<&0 &
+  else
+    bash -c "$cmd" 0<&0 &
+  fi
   CHILD=$!
   if [ -n "$kill_after" ]; then
     start=$SECONDS
