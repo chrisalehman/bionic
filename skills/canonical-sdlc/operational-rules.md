@@ -322,12 +322,15 @@ mechanically: Step 6's duplication axis anchors on the owner column, and the agr
 column is the obligation the reviewer reads back. Shape:
 
 ```
-| concept | owning module (SSoT) | rendering surfaces | agreement test |
-|---|---|---|---|
-| version pin value | canonical-sdlc-evidence-gate.sh's `SUPPORTED_SDLC_VERSION` | both hooks · this file's version history · the two SVG diagrams | `tests/cross-gate-agreement.test.sh` §V pins all five renderings against the gate's value, with a mutation arm |
-| agreement-test exemplar + authoring rules | SKILL.md §Step 6 | SKILL.md §Step 6 · agents/critic.md AXIS block · this section | AXIS-marker rows in tests/agent-roles.test.sh — the pin covers two of the three surfaces; this section is the unpinned one |
+| concept | owning module (SSoT) | reuses | rendering surfaces | agreement test |
+|---|---|---|---|---|
+| version pin value | canonical-sdlc-evidence-gate.sh's `SUPPORTED_SDLC_VERSION` | none fits: no other file holds a version constant | both hooks · this file's version history · the two SVG diagrams | `tests/cross-gate-agreement.test.sh` §V pins all five renderings against the gate's value, with a mutation arm |
+| agreement-test exemplar + authoring rules | SKILL.md §Step 6 | the marker mechanism in tests/agent-roles.test.sh | SKILL.md §Step 6 · agents/critic.md AXIS block · this section | AXIS-marker rows in tests/agent-roles.test.sh — the pin covers two of the three surfaces; this section is the unpinned one |
 ```
 
+- **The `reuses` cell names the existing site the design reuses, or `none fits: <why>`.** Empty is
+  a finding: the design never looked. A writer's `reuse:` report line answers the same question
+  for each site the build added.
 - **One row per concept rendered at more than one surface.** A concept that exists in exactly
   one place has nothing to disagree with itself about, and listing it is padding. The table is a
   duplication ledger, not an inventory of the change.
@@ -578,3 +581,38 @@ only for what it can read in the call. It does not read code handed to an interp
 - **CORRECTED 2026-07-27 (epic-12 wave-01): the always-loaded project-notebook tier this rule described no longer exists.** The old rule ("memory sweep must be recursive — read `INDEX.md` AND every Deep Context pointer") named a load mechanism that epic-12 deleted. What survives is the lesson underneath it, which was never about recursion: **a catalogue entry is not the knowledge.** The 2026-04-16 dry-run that produced the original rule picked a stale design (SessionEnd option C) because the better approach lived one pointer deeper than the entry point that was read.
 
 - **Design-time memory check — the live form of that lesson.** Before approving a mechanism at Step 1/2, grep the mechanism's moving parts against the recorded operational record (`.bionic/docs/record/`, `.bionic/docs/ideas/`) and CLAUDE.md and `.claude/rules/`. Epic-06 shipped "run old playwright CLI under system node" while epic-04's hang lesson sat unread in the record — every downstream gate then verified a doomed design. For anything that executes external binaries, the Verification Matrix needs one live-execution row at Step 5, pre-merge: T2-with-stubbed-binaries cannot catch version-pair incompatibilities.
+
+## Diagrams: format policy and what pins them
+
+- **Format policy.** Composed SVG is the default for a diagram here, because it is the only format that is simultaneously the editable source, the shipped artifact, and a test surface. Excalidraw (`bionic:excalidraw-diagram`) is the backup, for a drawing whose layout is genuinely hand-arranged rather than composed; it ships an export beside its source and re-accepts the is-that-current relationship, so reach for it when the picture is worth that cost. Any other format is a judgment call, argued at the time against one question: what will pin this picture to the truth after its author has moved on.
+
+- **What pins the diagrams.** Because the text is greppable, `tests/cross-gate-agreement.test.sh` §V pins the four version renderings across both SVGs against the hooks' `SUPPORTED_SDLC_VERSION`, with a mutation arm that re-proves the pin against a doctored copy on each run. The six always-on entries against `hooks/hooks.json` and the ten steps and the armed hook set against this file are not pinned by anything yet.
+
+## History and rationale moved out of the capped doctrine (wave 27)
+
+Each line below was cut from a capped file and kept here verbatim; the rule it came from stays in the capped file in one sentence or less. Nothing loads this section.
+
+- **steps/5.md, the walk.** It runs first because it is the cheapest catcher and sits structurally outside the criteria frame, so it finds what nobody knew to look for, before effort is spent row by row.
+
+- **steps/5.md, walk-artifact paragraph.** The `current: 8b` sub-step hole is pre-existing; the walk arm inherits it rather than introduces it.
+
+- **steps/5.md, user-confirmed T4.** Reaching for the Waiver Protocol here records a waiver where nothing was waived, and the row then reads forever as a criterion that was let go.
+
+- **steps/5.md, design waiver.** It means *no design governs this artifact*, which is not the same claim as "the design lives elsewhere" — that one is the `design:` pointer, and reaching for the waiver instead throws away the path the approval display exists to show.
+
+- **steps/0.md, pre-flight.** `hooks/engage.sh` has already created `.bionic/tmp` and its `.gitignore`, so this `mkdir -p` is idempotent, never the first act to touch the tree.
+
+- **steps/0.md, confirmation layout.** **This layout is literal, and it is deliberately not marked unenforced.** No hook can check it — the display is conversational, never a file — so the template *is* the whole enforcement. Keep it as a block.
+
+- **steps/2.md, Design Interview.** Two shapes are refuted by dogfood — **batch presentation**, the design delivered whole as a wall of text with an ambiguous call to action, and **question-without-frame**, a fork posed before its terms exist.
+
+- **steps/9.md, terminal-disposition block.** that is what schedules cleanup waves by momentum. (Amended 2026-08-16 on Chris's catch: the original trigger-only form had no bin for legitimately deferred major work — the plugin conversion itself is the proof case.)
+
+- **dispatch.md, brief hygiene.** The four rules there were hand-fixed failures in an earlier wave: a reused artifact name overwrote a landed task's evidence log, and `BIONIC_TEST_TIMING=1` wrote the timing rows to a file named `1`.
+
+- **dispatch.md, Patrol hooks paragraph.** The engagement check runs before the run check, which used to be every hook's only gate.
+
+- **dispatch.md, why writers are never pinged.** The collision was observed as interleaved edits and checkout-reverts.
+
+- **dispatch.md, Patrol hooks paragraph.** Every hook is registered once in `hooks/hooks.json`, so a session continue, a `/clear`+resume and a `/reload-plugins` all leave them exactly where they were.
+
