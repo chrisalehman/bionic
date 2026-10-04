@@ -328,6 +328,40 @@ fresh_state
 run_hook "$(mk_payload "$ENGAGED" 'make "a && b && c"')"
 expect_contains "4y: quoted && do not make a chain — the whole command keeps its class" \
   "farm-out [deny] class=build" "$ERR"
+
+# wave-25 T12: A NAME IS READ THE WAY THE MACHINE RESOLVES IT. On a case-blind filesystem
+# `GIT clone` runs git and `BASH tests/run.sh` runs the suite, so each capitalised form is
+# the class its lower-case form is: the same nudge, the same deny, the same instrument line.
+# Each pair runs on a fresh state, the lower-case control first.
+for _fo12 in 'clone|git clone https://x/r.git|GIT clone https://x/r.git' \
+             'docker-run|docker run x|DOCKER run x' 'docker-run|docker pull x|Docker pull x' \
+             'pkg-exec|npx create-thing|NPX create-thing' 'pkg-exec|uvx tool|UVX tool' \
+             'pkg-exec|sudo npx create-thing|SUDO Npx create-thing' \
+             'pkg-exec|npx create-thing "a b"|NPX create-thing "a b"'; do
+  IFS='|' read -r _cls _lo _up <<< "$_fo12"
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$_lo")"
+  expect_contains "4z: control — [$_lo] nudges as $_cls" "farm-out [nudge] class=$_cls" "$ERR"
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$_up")"
+  expect_contains "4z: [$_up] nudges as $_cls, exactly as [$_lo]" "farm-out [nudge] class=$_cls" "$ERR"
+  expect_contains "4z: …on the context channel" "$_cls-class command" "$(ctx_of)"
+done
+for _fo12 in 'suite|bash tests/run.sh|BASH tests/run.sh' 'build|sudo make|SUDO MAKE' \
+             'install|npm install|NPM install' 'suite|env pytest|ENV Pytest'; do
+  IFS='|' read -r _cls _lo _up <<< "$_fo12"
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$_lo")"
+  expect_contains "4z2: control — [$_lo] denies as $_cls" "farm-out [deny] class=$_cls" "$ERR"
+  fresh_state
+  run_hook "$(mk_payload "$ENGAGED" "$_up")"
+  expect_eq "4z2: [$_up] denies, exactly as [$_lo]" "deny" "$(decision_of)"
+  expect_contains "4z2: …as class=$_cls" "farm-out [deny] class=$_cls" "$ERR"
+done
+# ONLY THE WORD FOLDS, and a longer word is its own program: GITK is not git.
+fresh_state
+run_hook "$(mk_payload "$ENGAGED" 'GITK clone x')"
+expect_empty "4z3: GITK clone draws no clone nudge (beside 4z's positive)" "$(ctx_of)"
 cp "$SANDBOX/.state.keep" "$FO_STATE"
 
 # ---------------------------------------------------------------------------

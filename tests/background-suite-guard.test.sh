@@ -939,4 +939,32 @@ expect_eq "B14h control: the same shape holding an on-budget suite is ALLOWED" "
 expect_empty "B14h …silently" "$OUT$ERR"
 
 
+section "B15 — wave-25 T12: a command NAME is read the way the machine resolves it"
+# On a case-blind filesystem `BASH` runs bash, `SUDO` sudo and `NOHUP` nohup, so a suite
+# reached through any of them is the run its lower-case form is: on the budget, off it, or
+# backgrounded. Before T12 the classifier left the capitalised word as argv[0] and read
+# class none, so an off-budget suite passed this arm in silence. R1's row is the budget.
+guarded "$R1" 'bash tests/alpha.test.sh'
+expect_eq "B15a control: an on-budget suite is allowed" "0" "$ST"
+guarded "$R1" 'BASH tests/alpha.test.sh'
+expect_eq "B15a …and so is its capitalised form" "0" "$ST"
+for sp in 'BASH tests/gamma.test.sh' 'SUDO bash tests/gamma.test.sh' 'Bash -c "bash tests/gamma.test.sh"' \
+          'ENV PIN=1 Bash tests/gamma.test.sh' 'cd /tmp && BASH tests/gamma.test.sh'; do
+  guarded "$R1" "$sp"
+  expect_eq "B15b off-budget through [$sp] is REFUSED" "2" "$ST"
+  expect_contains "B15b …naming the suite that was asked for [$sp]" "gamma.test.sh" "$VERR"
+done
+guarded "$R1" 'PYTEST'
+expect_eq "B15c a capitalised runner form outside the row's set is REFUSED, as pytest is" "2" "$ST"
+guarded "$R1" 'NOHUP bash tests/alpha.test.sh'
+expect_eq "B15d NOHUP backgrounds an on-budget suite: REFUSED, as nohup is" "2" "$ST"
+expect_contains "B15d …by the B-9 fact" "a backgrounded suite's result is never read" "$ERR"
+# WAIT is /usr/bin/WAIT, which collects no job of this shell: the suite is still backgrounded.
+guarded "$R1" 'bash tests/alpha.test.sh & WAIT'
+expect_eq "B15e WAIT is not wait: the backgrounded suite is REFUSED" "2" "$ST"
+expect_contains "B15e …by the B-9 fact" "a backgrounded suite's result is never read" "$ERR"
+# ONLY THE WORD FOLDS: an operand path keeps its case, beside B15a's positive.
+guarded "$R1" 'bash TESTS/GAMMA.TEST.SH'
+expect_eq "B15f an operand never folds: TESTS/GAMMA.TEST.SH is no suite file this arm budgets" "0" "$ST"
+
 finish
