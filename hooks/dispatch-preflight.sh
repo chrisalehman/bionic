@@ -835,8 +835,10 @@ if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$PLAN" ]; then
   # `approved-by:` IS READ BY THE FILL'S OWN READER (wave-26 T5; review 10 F2): `fill_plan_approved`
   # (lib/fill.sh), fence-aware and taking a bulleted `- approved-by:`, so the tick that FILLs a
   # row and this wall that admits its writer can never disagree about whether the plan is
-  # approved. fill.sh is sourced here, lazily, at the one arm that reads it; a library directory
-  # without the function says `not checked` for this arm rather than refusing every writer.
+  # approved. fill.sh is sourced here, lazily, at the one arm that reads it. A library directory
+  # without the function REFUSES the writer, naming the reader and the file (wave-26 T56; final
+  # review N2, ruled): before wave 26 the line was read inline and an unapproved plan refused,
+  # and an approval this hook cannot read is no approval. Read-only roles never reach here.
   # `current:` is read only to name the step in the refusal, fence-blind as before.
   DP_CURRENT=$(awk '
     /^## SDLC State/ { st = 1; next }
@@ -851,11 +853,23 @@ if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$PLAN" ]; then
   fi
   DP_APPROVED=""
   if ! declare -F fill_plan_approved >/dev/null 2>&1; then
-    dp_not_checked "plan approval" "fill_plan_approved (lib/fill.sh)"; DP_APPROVED=unknown
+    DP_APPROVED=unreadable
   elif fill_plan_approved "$PLAN"; then
     DP_APPROVED=yes
   fi
-  if [ -z "$DP_APPROVED" ]; then
+  if [ "$DP_APPROVED" = unreadable ]; then
+    dp_finding "the approval reader lib/fill.sh cannot be loaded" "reinstall the plugin" \
+      "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
+Plan: ${PLAN}
+Reader: fill_plan_approved, from ${BIONIC_LIB:-<no library directory>}/fill.sh — not there, or it
+        does not define the function, so whether this plan is approved cannot be read.
+
+A writer is admitted only on an approval this hook has read; one it cannot read is no approval.
+Before approval only a read-only role dispatches: ${ROLE_READONLY_SET}.
+
+Fix: reinstall the plugin (claude plugin install bionic@bionic) so its scripts/lib carries
+     fill.sh again, then retry the dispatch."
+  elif [ -z "$DP_APPROVED" ]; then
     dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \
       "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
 Plan: ${PLAN}

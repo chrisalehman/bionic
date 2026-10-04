@@ -1972,4 +1972,73 @@ expect_match "a locked tree merges and then its removal is refused" \
 expect_true "after worktree-remove-refused, the link resolves again" link_ok "$LUL"
 git -C "$LU" worktree unlock "$LUL"
 
+section "§LAND-SHIM: the real wall and the real shim, from the main checkout, into the land (wave-26 T56, final review B1, S3 row 6)"
+#
+# THE AGREEMENT THE ROWS ABOVE NEVER EXERCISE. Every stamp above is written by hand. Here the
+# writer is the one that ships: the Bash wall (hooks/bash-walls.sh, the real hook, on a
+# PreToolUse payload whose cwd is the MAIN checkout) hands back its wrapped command, the
+# command runs from the main checkout the way the harness runs a Bash call
+# (`<shell> -c 'eval <command> < /dev/null'`), and the land reads what the shim wrote. Before
+# T56 the stamp went to the main checkout's git dir and every one of these red trees LANDED.
+#
+# The shapes are the doctrine's: the cwd guard `cd <tree> || exit 1` on the whole command,
+# then either a bare suite or the evidence capture that keeps the suite's own exit code
+# (`…; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc`). A capture that swallows the code (a bare
+# trailing `echo "rc=$?"`) stamps rc=0 and is NOT pinned here: it lands, which is a limit
+# recorded in the T56 record, not a behaviour to keep.
+#
+# BOUNDED: a private slots store, a suite that exits at once, a fake HOME, no plugins dir.
+LS="$(new_repo "$TMP/land-shim")"
+LS_SID="t56shim-0000-0000-0000-000000000000"
+LS_HOOK="${REPO}/hooks/bash-walls.sh"
+LS_LOG="$TMP/land-shim-suite.log"
+mkdir -p "$LS/.bionic/tmp" "$TMP/land-shim-home"; : > "$LS/.bionic/tmp/engaged-${LS_SID}.state"
+expect_true "the wall's hook is on disk" test -f "$LS_HOOK"
+ls_wrap() {  # <command> — the command the real wall hands the harness, cwd = the main checkout
+  jq -nc --arg s "$LS_SID" --arg c "$LS" --arg cmd "$1" \
+    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c, permission_mode:"bypassPermissions",
+      hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:$cmd, timeout:600000},
+      tool_use_id:"toolu_t56shim", agent_id:"at56shim-0123456789abcdef", agent_type:"test-runner"}' |
+    env HOME="$TMP/land-shim-home" CLAUDE_CONFIG_DIR="$TMP/land-shim-home/.claude" \
+      CLAUDE_CODE_SESSION_ID="$LS_SID" CLAUDE_PROJECT_DIR= BIONIC_PLUGINS_DIR="$TMP/no-plugins" \
+      SHELL=/bin/bash CLAUDE_CODE_SHELL= bash "$LS_HOOK" 2>/dev/null |
+    jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null
+}
+ls_harness() {  # <command> — run as the harness runs a Bash call, standing in the main checkout
+  local q="'\\''" s; s="${1//\'/$q}"
+  ( cd "$LS" && env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
+      BIONIC_SLOTS_DIR="$TMP/land-shim-slots" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT=20 \
+      /bin/bash -c "eval '$s' < /dev/null" ) >/dev/null 2>&1
+}
+ls_tree() {  # <branch> <suite exit code> -> the tree, its suite committed, nothing else in it
+  local t; t="$(new_tree "$LS" "$1")"
+  mkdir -p "$t/tests"
+  printf '#!/bin/bash\necho "suite %s"\nexit %s\n' "$1" "$2" > "$t/tests/a.test.sh"
+  git -C "$t" add tests && git -C "$t" commit --quiet -m "$1 suite exits $2"
+  printf '%s' "$t"
+}
+LS_CAPTURE='set -o pipefail; bash tests/a.test.sh 2>&1 | tee "'"$LS_LOG"'"; rc=$?; echo "rc=$rc" >> "'"$LS_LOG"'"; exit $rc'
+ls_case() {  # <label> <branch> <suite rc> <command after the cd guard> <cd target as typed> <expected glob>
+  local t c w
+  t="$(ls_tree "$2" "$3")"
+  c="cd $5 || exit 1; $4"
+  w="$(ls_wrap "$c")"
+  expect_match "$1: the wall wraps it in the shim with the tree as the stamp dir" \
+    "bash *booked.sh --shell /bin/bash --stamp-dir $t -- *" "$w"
+  ls_harness "$w"
+  expect_match "$1: the shim stamped the TREE's git dir, at its head, with the suite's own code" \
+    "stamp/v1|head=$(git -C "$t" rev-parse HEAD)|dirty=0|rc=$3|*" "$(tail -n 1 "$(stamp_file "$t")" 2>/dev/null)"
+  expect_false "$1: …and nothing in the main checkout's" test -e "$(stamp_file "$LS")"
+  expect_match "$1: the land reads it" "$6" "$(worktree_land "$t" wave/fixture)"
+}
+ls_case "(i) cd <abs tree>, bare suite, red" shim-red-bare 1 'bash tests/a.test.sh' \
+  "$LS/.worktrees/shim-red-bare" "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 *"
+ls_case "(ii) cd <rel tree>, the doctrine's capture, red" shim-red-capture 1 "$LS_CAPTURE" \
+  ".worktrees/shim-red-capture" "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 *"
+expect_match "(ii) the capture logged the suite's own code" "*rc=1" "$(tail -n 1 "$LS_LOG" 2>/dev/null)"
+ls_case "(iii) cd <abs tree>, bare suite, green" shim-green-bare 0 'bash tests/a.test.sh' \
+  "$LS/.worktrees/shim-green-bare" "spawn-worktree: LANDED branch=shim-green-bare onto=wave/fixture *"
+ls_case "(iii) cd <rel tree>, the doctrine's capture, green" shim-green-capture 0 "$LS_CAPTURE" \
+  ".worktrees/shim-green-capture" "spawn-worktree: LANDED branch=shim-green-capture onto=wave/fixture *"
+
 finish
