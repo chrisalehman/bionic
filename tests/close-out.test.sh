@@ -760,7 +760,7 @@ expect_eq "0q5: …wt/07-z survives — a foreign wave's tree is not this run's 
   "$(branch_exists "$P0Q" "wt/07-z")"
 
 # ============================================================
-section "0r — C7: a column-less plan whose working-branch is not wave/<digits>-<slug> shaped refuses, as 1.8.3 did"
+section "0r — C7: a column-less WAVE-scale plan whose working-branch is not wave/<digits>-<slug> shaped refuses, as 1.8.3 did"
 # ============================================================
 #
 # 1.8.3 derived its ENTIRE census (there was no register) from `working-branch:`'s shape
@@ -769,7 +769,9 @@ section "0r — C7: a column-less plan whose working-branch is not wave/<digits>
 # retired that refusal for the register path (a `worktree` column names its own trees, no
 # wave number needed), but a column-less plan has no register to fall back on — it is
 # exactly 1.8.3's shape, and it must refuse exactly as 1.8.3 did rather than silently
-# reach for an unscoped repo-wide census (C7's own finding).
+# reach for an unscoped repo-wide census (C7's own finding). That refusal is kept for a
+# `scale: wave` plan (this fixture's own scale — every fixture here is wave-scale); a
+# task-scale plan has no wave number to want, and §ANY-BRANCH below pins it closing.
 
 P0R="$(mk_census_fixture_nowt p0r "topic/not-a-wave-branch" "$ROWS_NOWT")"
 run_close "$P0R" check
@@ -788,6 +790,41 @@ ROWS_WT_SHAPED="| T1 | 4 | build | fixture writer one | implementor | — | 10 |
 P0S="$(mk_census_fixture p0s "topic/not-a-wave-branch" "$ROWS_WT_SHAPED")"
 run_close "$P0S" check
 expect_eq "0s1: a registered table with the same branch shape is never refused for it" "0" "$CO_RC"
+
+# ============================================================
+section "ANY-BRANCH — T11 (AC-9.2): a column-less TASK-scale plan closes on any working-branch"
+# ============================================================
+#
+# A small late fix lives on a branch like `fixit/x`, never `wave/<digits>-<slug>`. A task-
+# scale plan owns no wave, so there is no `wt/<NN>-*` to census and no wave number to
+# refuse for lacking: the shape refusal is a wave-scale rule only. `wt_unreached` finds no
+# branch to report and says nothing about a `wt/-*` glob.
+
+mk_task_scale_fixture() {
+  local name="$1" working="$2" p
+  p="$(mk_census_fixture_nowt "$name" "$working" "$ROWS_NOWT")"
+  sed -i.bak 's/^scale: wave$/scale: task/' "$p/$PLAN_REL" && rm -f "$p/$PLAN_REL.bak"
+  (
+    in_fixture "$p" || exit 1
+    git checkout -q -b "$working"
+    printf 'late fix\n' >> file.txt
+    git commit -q -am "late fix" >/dev/null 2>&1
+    git checkout -q main
+    git merge -q --no-ff -m "merge fix" "$working" >/dev/null 2>&1
+  )
+  printf '%s\n' "$p"
+}
+
+PAB="$(mk_task_scale_fixture pab "fixit/x")"
+expect_eq "AB0: the fixture really is task-scale (so a pass here is not the wave refusal's absence)" "yes" \
+  "$(grep -q '^scale: task$' "$PAB/$PLAN_REL" && echo yes || echo no)"
+run_close "$PAB" check
+expect_eq "AB1: check on fixit/x is not refused" "0" "$CO_RC"
+expect_eq "AB2: …prints no shape refusal" "no" "$(contains "$CO_OUT" "is not wave/<digits>-<slug> shaped")"
+expect_eq "AB3: …and announces no wt/-* census fallback" "no" "$(contains "$CO_OUT" "wt/-*")"
+run_close "$PAB" run
+expect_eq "AB4: run on fixit/x closes with rc 0" "0" "$CO_RC"
+expect_eq "AB5: …prints no shape refusal" "no" "$(contains "$CO_OUT" "is not wave/<digits>-<slug> shaped")"
 
 # ============================================================
 section "1 — AC-4.1: run performs the tail and the gate allows the commit"
