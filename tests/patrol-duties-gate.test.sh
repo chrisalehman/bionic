@@ -1682,7 +1682,21 @@ expect_contains "L1b: AC-5.5 Stop 1 appended a fill-ledger/v1 line" "fill-ledger
 expect_eq "L1c: …keyed by the turn's prompt" "u-turn-0001" "$(led_field "$L1" turn)"
 expect_eq "L1d: …launched names the turn's Agent call" "W-T2" "$(led_field "$L1" launched)"
 expect_eq "L1e: …and nothing was missed" "0" "$(led_field "$L1" missed)"
-expect_eq "L1f: …with fourteen fields, schema first" "14" "$(printf '%s' "$L1" | awk -F'|' '{ print NF }')"
+# A RELATION, NOT A COUNT (wave-26 T15; D18): the line leads with its schema and carries each
+# field this section reads by name. A writer that adds a field (T16's idle= and room=) leaves it
+# true; one that drops or renames a field breaks it.
+led_missing_keys() {  # <line> <key>... -> the keys the line does not carry, space-joined
+  local l="$1" k out=""; shift
+  for k in "$@"; do
+    case "|${l#*|}|" in *"|$k="*) : ;; *) out="${out}${out:+ }$k" ;; esac
+  done
+  printf '%s' "$out"
+}
+expect_contains "L1f precondition: the line leads with its schema" "fill-ledger/v1|" "${L1%%|*}|"
+expect_eq "L1f: …and carries every field this section reads, by name" "" \
+  "$(led_missing_keys "$L1" at session turn current state ceiling width open free ready launched declined missed)"
+expect_eq "L1f2: …and the reader names a field the line lacks (the empty answer above is a reading)" \
+  "nosuchfield" "$(led_missing_keys "$L1" turn nosuchfield)"
 expect_eq "L1g: …the session it belongs to" "$SID" "$(led_field "$L1" session)"
 
 # Stop 2: T2 has landed, T3 is ready, the turn sends nothing -> refused, and recorded missed.
@@ -1825,7 +1839,12 @@ led_user "$d" "u-turn-0007" "2026-09-23T11:00:00.000Z" "carry on"
 a_text "$d" "fill-declined: the head is mid-merge | back in ten"
 fire "$d"; expect_allow "L7a: the declined turn ends"
 expect_contains "L7b: …and its reason is on the ledger line" "the head is mid-merge" "$(led_field "$(led_line "$d" 1)" declined)"
-expect_eq "L7c: …with the line still fourteen fields" "14" "$(led_line "$d" 1 | awk -F'|' '{ print NF }')"
+# The squash keeps the fields: the words after the reason's pipe stay inside declined=, and the
+# fields that follow it are still read by name (a relation, not a count; wave-26 T15, D18).
+expect_contains "L7c: …the text after the reason's pipe stays in declined=" "back in ten" \
+  "$(led_field "$(led_line "$d" 1)" declined)"
+expect_eq "L7c2: …and missed= after it still reads by name" "" \
+  "$(led_missing_keys "$(led_line "$d" 1)" declined missed)"
 
 # ============================================================
 section "Section 5f: a Patrol marker turn that ran no tick is refused once (wave-20 REQ-6, AC-6.2; D6)"
