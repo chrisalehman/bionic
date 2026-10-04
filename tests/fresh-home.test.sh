@@ -602,7 +602,7 @@ run_payload() {  # <script> [args...] — stdin carries the answers
     BIONIC_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
     CLAUDE_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
     BIONIC_PLAYWRIGHT_CACHE="${HOME_FIX}/.cache/ms-playwright" \
-    BIONIC_DOCTOR_PROBE_SECONDS=5 \
+    BIONIC_DOCTOR_PROBE_SECONDS=15 \
     bash "$script" "$@" 2>&1
 }
 
