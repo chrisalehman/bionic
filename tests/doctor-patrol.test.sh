@@ -262,8 +262,51 @@ plant_agent_dispatch() {  # <transcript> <tool_use_id>
     >> "$t"
 }
 
+# ---------- the tool directory: the fixture's, not the machine's ----------
+
+# A WHOLE RUN USED TO SHELL OUT TO WHATEVER THIS MACHINE HAD INSTALLED. Doctor asks `claude plugin list`,
+# `claude mcp get`, `npm list -g`, `pnpm store path`, `uv --version` and `notebooklm --version`, and every
+# launch here inherited the runner's PATH, so each of them ran the real tool (a traced whole run on a laptop
+# that has all six reached ten of those calls and took 13 s; under the directory below, 5 s). A hermetic
+# suite must not read the machine it runs on: what the page prints would then depend on what the developer
+# has installed, and each launch pays for those tools' start-up. The two sister suites (doctor-version,
+# doctor-reads) already launch the doctor on a PATH replaced by a fixture directory; this is the same.
+#
+# WHAT IS IN IT. Only programs doctor itself RUNS (and the ones this suite's fixtures rely on under it),
+# symlinked from the real ones, the list the sister suites carry. NOTHING doctor only ASKS ABOUT is in it:
+# not `claude`, `npm`, `brew`, `notebooklm`, `pnpm`, `uv`, and no stub for them either. Every one is simply
+# absent, which is a state doctor renders (a missing dependency, "claude CLI is not on PATH"), and which no
+# row below reads except T37. PATH is REPLACED, never prepended: a prefixed PATH still finds the real tools
+# for anything the directory lacks.
+_TOOLS_REAL="bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail
+sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf true false
+sleep dirname basename realpath id ps df sysctl vm_stat git strings"
+_HOST_TOOLS="claude npm brew notebooklm pnpm uv"
+
+BIN="${TMP}/toolbox"
+_TOOLS_MISSING=""
+mkdir -p "$BIN"
+for _t in $_TOOLS_REAL; do
+  if _p="$(command -v "$_t" 2>/dev/null)"; then ln -sf "$_p" "${BIN}/${_t}"
+  else _TOOLS_MISSING="${_TOOLS_MISSING}${_TOOLS_MISSING:+ }${_t}"; fi
+done
+
+# THE SHELL RC AND HOME ARE FIXTURES, NOT THE MACHINE'S. PATH is already the tool directory; HOME and the rc
+# were still the host's, so the page printed host-derived lines (the shell proxy row, the renderer and browser
+# rows) that no row here reads. An empty rc, as the sister suites carry.
+FIXTURE_RC="${TMP}/dot.zshrc"
+: > "$FIXTURE_RC"
+
 # ---------- driving doctor ----------
 
+# THE PROBE BOUND IS 15 SECONDS, THE DOCTOR'S OWN DEFAULT, ON EVERY LAUNCH. It was 3, and no row here is
+# about a probe that hangs: `_patrol_scan` (lib/patrol.sh) runs its jq over the session's transcript under
+# `detect_bounded` at this bound, and a scan cut short returns nothing, so the session has no Patrol job and
+# the page drops it whole. On a busy machine a jq that took over 3 s therefore decided a row about idle time
+# (row 81 went red once under load, 82 stayed green). A fixture's bound must not decide a row that is not
+# about the bound, and `detect_bounded` returns within a tenth of a second of the probe ending, so a
+# generous bound costs a fast probe nothing.
+#
 # DOCTOR IS ALWAYS RUN FROM INSIDE THE PROJECT IT IS DIAGNOSING, because that is
 # the only thing that makes its answer addressable: `project_root "$PWD"` is
 # doctor's `DOCTOR_ROOT`, and the Patrol section reports on the sessions belonging
@@ -274,7 +317,8 @@ plant_agent_dispatch() {  # <transcript> <tool_use_id>
 # here. The cwd is now an argument, and it is the fixture repo the session under
 # test actually lives in.
 run_doctor() {  # <claude-home> <project-cwd>
-  ( cd "$2" && BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+  ( cd "$2" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=15 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
@@ -282,6 +326,29 @@ run_doctor() {  # <claude-home> <project-cwd>
 # where the default (no --updates) run ends.
 patrol_block() {  # <full-output>
   printf '%s\n' "$1" | awk '/^PATROL$/{f=1} f'
+}
+
+# THE FILTERED RUN (BIONIC_DOCTOR_ONLY, doctor.sh's test seam). Same fixture, same environment, but the
+# doctor gathers and prints only the sections this suite reads: the "→" fix lines the Patrol and project
+# gathers raise, PATROL, and PROJECT. It skips the dependency sweep and the CLI's plugin listing, which
+# are most of a whole run (measured at about 7 s of 12) and read nothing from the project.
+#
+# A ROW MAY USE IT ONLY IF every line it asserts on is one of those three. The header verdict and its
+# problem count, the three tables, RESOURCES and the "Nothing to do" line are NOT printed by a filtered
+# run, so a row on any of them (57-78's count and attestation rows, 67-71) runs the whole doctor. A row
+# that asserts a fix line ABSENT may use it only because that line has one producer in doctor.sh, a single
+# `fix` call; a line a filtered run could not produce would turn the absence into a pass over air. Section
+# 9 below checks the other half: that the filtered page's PATROL..end block is the whole page's.
+#
+# EVERY SECTION KEEPS A WHOLE RUN, `run_doctor`, because a defect at the doctor's entry point (option
+# parsing, the library sourcing, the address resolution) is only seen by a row that executes the real
+# page: Sections 1-11 and 16 run it for every fixture; in 12 the first of three, in 13 the first of
+# three, in 14 the first of three, in 15 the first of four and in 17 the first of five do, and the rest of
+# each use this.
+run_doctor_only() {  # <claude-home> <project-cwd>
+  ( cd "$2" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_DOCTOR_ONLY="PATROL,PROJECT,FIXES" \
+      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+      BIONIC_DOCTOR_PROBE_SECONDS=15 bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
 section "Section 1: no live Patrol anywhere"
@@ -293,6 +360,32 @@ PB1="$(patrol_block "$OUT1")"
 
 expect_match    "1: the fallback line prints" "*none running*" "$PB1"
 expect_no_match "2: no session line prints alongside the fallback" "*session*" "$PB1"
+
+# T37: THE POINT OF THE TOOL DIRECTORY ABOVE. OUT1 is a whole run, so it ran the dependency sweep and the
+# CLI's plugin listing, the part that asks the six host tools. It is read for each tool's absence rather than
+# its presence: a tool reached through the host's PATH prints as installed (a version, `present`), a tool the
+# directory withholds prints as absent or as the PATH cause doctor names. `brew` is asked only by the
+# `--updates` page, so it is read from the directory itself, as the sister suites' T0b reads it. The row is
+# built so that it cannot pass over air: a directory missing a real program it must carry, or a page with no
+# THIRD PARTY table to read, is itself a leak.
+_dep_row() {  # <name> <page> — the THIRD PARTY row that names it
+  printf '%s\n' "$2" | awk -v n="$1" '$2 == n'
+}
+_T37_LEAK=""
+[ -z "$_TOOLS_MISSING" ] || _T37_LEAK="${_T37_LEAK} missing:${_TOOLS_MISSING// /,}"
+[ -e "${BIN}/jq" ] || _T37_LEAK="${_T37_LEAK} no-jq-in-directory"
+[[ "$OUT1" == *"THIRD PARTY"* ]] || _T37_LEAK="${_T37_LEAK} no-third-party-table"
+for _t in $_HOST_TOOLS; do
+  [ -e "${BIN}/${_t}" ] && _T37_LEAK="${_T37_LEAK} ${_t}(in-directory)"
+done
+[[ "$OUT1" == *"the claude CLI is not on PATH"* ]] || _T37_LEAK="${_T37_LEAK} claude(page)"
+[[ "$OUT1" == *"npm is not on PATH"* ]]            || _T37_LEAK="${_T37_LEAK} npm(page)"
+for _t in pnpm uv notebooklm; do
+  _row="$(_dep_row "$_t" "$OUT1")"
+  [[ "$_row" == *"not installed"* ]] || _T37_LEAK="${_T37_LEAK} ${_t}(page: '${_row}')"
+done
+expect_eq "T37: a whole run reaches none of claude, npm, brew, notebooklm, pnpm, uv outside the tool directory" \
+  "" "${_T37_LEAK# }"
 
 section "Section 2: one live Patrol, one open dispatch (singular)"
 
@@ -593,6 +686,38 @@ else
      "$(bionic_cols "$WIDE") columns: ${WIDE}"
 fi
 
+# THE FILTER SEAM, KEPT HONEST (BIONIC_DOCTOR_ONLY; see `run_doctor_only` above). The rows that use it
+# are only as good as the claim that a filtered page carries the same lines as the whole one, so the
+# claim is a row here, on a fixture that has a fix line, a Patrol row and a project section (Section 7's).
+# The whole page's PATROL..end block and its launches-unrostered line are the control: each filtered
+# assertion below sits beside the same assertion on the whole page.
+ONLY7="$(run_doctor_only "$HOME7" "$REPO7")"
+expect_nonempty "36b: the filtered run prints a PATROL block (the equality below is not over air)" \
+  "$(patrol_block "$ONLY7")"
+expect_eq "36c: …and it is the whole page's PATROL..end block, line for line" \
+  "$PB7" "$(patrol_block "$ONLY7")"
+expect_eq "36d: …and its fix line is the whole page's, line for line" \
+  "$(lines_matching "$OUT7" '*launches unrostered*')" "$(lines_matching "$ONLY7" '*launches unrostered*')"
+expect_match "36e: the whole page has the tables the filtered page leaves out" "*THIRD PARTY*" "$OUT7"
+expect_no_match "36f: …and the filtered page has neither a table nor the header" "*THIRD PARTY*" "$ONLY7"
+expect_no_match "36g: …nor the verdict line" "*→ * problem*" "$ONLY7"
+
+# AN UNKNOWN SECTION NAME IS REFUSED BEFORE ANYTHING IS GATHERED: one line on stderr, status 2, nothing
+# on stdout. Beside it, the same call with the known names succeeds (36b above), so a refusal that
+# fired on every name would not pass.
+KNOWN_OUT="$( cd "$EMPTY_PROJ" && PATH="$BIN" BIONIC_DOCTOR_ONLY="PATROL" BIONIC_CLAUDE_HOME="$EMPTY_HOME" \
+  BIONIC_PLUGIN_ROOT="$PAYLOAD" bash "$DOCTOR_SH" 2>/dev/null < /dev/null )"
+expect_match "36g2: the same call with only a known name prints that section" "*none running*" "$KNOWN_OUT"
+UNK_ERR="$( cd "$EMPTY_PROJ" && PATH="$BIN" BIONIC_DOCTOR_ONLY="PATROL,NOPE" BIONIC_CLAUDE_HOME="$EMPTY_HOME" \
+  BIONIC_PLUGIN_ROOT="$PAYLOAD" bash "$DOCTOR_SH" 2>&1 >/dev/null < /dev/null )"
+UNK_RC=$?
+UNK_OUT="$( cd "$EMPTY_PROJ" && PATH="$BIN" BIONIC_DOCTOR_ONLY="PATROL,NOPE" BIONIC_CLAUDE_HOME="$EMPTY_HOME" \
+  BIONIC_PLUGIN_ROOT="$PAYLOAD" bash "$DOCTOR_SH" 2>/dev/null < /dev/null )"
+expect_eq "36h: an unknown section name exits 2" "2" "$UNK_RC"
+expect_match "36i: …with one line on stderr naming the section" "doctor.sh: unknown section 'NOPE'*" "$UNK_ERR"
+expect_eq "36j: …exactly one line" "1" "$(printf '%s\n' "$UNK_ERR" | grep -c .)"
+expect_eq "36k: …and nothing on stdout" "" "$UNK_OUT"
+
 section "Section 10: a firing Patrol with NO roster file and NOTHING dispatched"
 
 # THE HEALTHY HALF OF `present=no`, and the reason Section 7's row is gated on a
@@ -797,7 +922,7 @@ plant_agent_dispatch_at "$TR12B" "toolu_w2b" "$(iso_ago 0)"   # NOT rostered
 plant_agent_dispatch_at "$TR12B" "toolu_w2c" "$(iso_ago 0)"   # NOT rostered
 plant_patrol_stamp "$REPO12B" "$SID12B"
 
-OUT12B="$(run_doctor "$HOME12B" "$REPO12B")"
+OUT12B="$(run_doctor_only "$HOME12B" "$REPO12B")"
 PB12B="$(patrol_block "$OUT12B")"
 
 expect_match "77: …and a wall that missed a dispatch INSIDE the window is still caught" \
@@ -817,7 +942,7 @@ plant_agent_dispatch "$TR12C" "toolu_c1"
 plant_agent_dispatch "$TR12C" "toolu_c2"
 plant_patrol_stamp "$REPO12C" "$SID12C"
 
-OUT12C="$(run_doctor "$HOME12C" "$REPO12C")"
+OUT12C="$(run_doctor_only "$HOME12C" "$REPO12C")"
 PB12C="$(patrol_block "$OUT12C")"
 
 expect_match "79: no roster to scope a window by — the row still says the record is absent" \
@@ -887,7 +1012,7 @@ TR13B="$(transcript_of "$HOME13B" "$SID13B")"
 plant_patrol_job "$TR13B" "toolu_13b" "fff13132"
 plant_patrol_stamp "$GITROOT13B" "$SID13B"
 
-OUT13B="$(run_doctor "$HOME13B" "$GITROOT13B")"
+OUT13B="$(run_doctor_only "$HOME13B" "$GITROOT13B")"
 PB13B="$(patrol_block "$OUT13B")"
 
 expect_match "47: control — .bionic AT the git root still resolves" \
@@ -896,7 +1021,7 @@ expect_match "47: control — .bionic AT the git root still resolves" \
 # THE CONTROL, so 41-43 are not three negatives over an empty section. Pointed at
 # project B, the same claude-home, the same two sessions, doctor answers about B
 # and says nothing about A.
-OUT12="$(run_doctor "$HOME_AB" "$REPO_B")"
+OUT12="$(run_doctor_only "$HOME_AB" "$REPO_B")"
 PB12="$(patrol_block "$OUT12")"
 
 expect_match "44: pointed at the other project, that project's session prints" \
@@ -944,7 +1069,7 @@ plant_patrol_job "$TR15" "toolu_15" "eee15151"
 plant_patrol_stamp "$REPO15" "$SID15"
 BEFORE15="$(find "$REPO15/.bionic" | sort)"
 
-OUT15="$(run_doctor "$HOME15" "$REPO15")"
+OUT15="$(run_doctor_only "$HOME15" "$REPO15")"
 PB15="$(patrol_block "$OUT15")"
 
 expect_match "50: a session with no marker reads not engaged" \
@@ -966,7 +1091,7 @@ plant_patrol_job "$TR16" "toolu_16" "eee16161"
 plant_agent_dispatch "$TR16" "toolu_a16"
 plant_patrol_stamp "$REPO16" "$SID16"
 
-OUT16="$(run_doctor "$HOME16" "$REPO16")"
+OUT16="$(run_doctor_only "$HOME16" "$REPO16")"
 PB16="$(patrol_block "$OUT16")"
 
 expect_match "52: the roster-absent row carries the field too" \
@@ -1024,7 +1149,7 @@ expect_no_match "55: …and the acked MET row beside it is still closed (the cou
 # landing seen, not an agent gone. So the flip leaves the count where it was.
 sed 's/|name=unmet-row|agent_id=a000|state=UNMET$/|name=unmet-row|agent_id=a000|state=MET/' \
   "$ROSTER17" > "$ROSTER17.met" && mv "$ROSTER17.met" "$ROSTER17"
-OUT17B="$(run_doctor "$HOME17" "$REPO17")"
+OUT17B="$(run_doctor_only "$HOME17" "$REPO17")"
 PB17B="$(patrol_block "$OUT17B")"
 expect_match "56 (T17: was '…flipping that same marker to MET closes it'): a MET marker with no ack closes nothing — still one open dispatch" \
   "*✓ session ${SHORT17} · 1 open dispatch*" "$PB17B"
@@ -1033,7 +1158,7 @@ expect_match "56 (T17: was '…flipping that same marker to MET closes it'): a M
 # after the row's launch takes the count to zero, so "1 open" above is not a reader that has
 # stopped closing rows at all.
 ack_write "$REPO17/.bionic/tmp/sweeper-${SID17}.state" 2026-09-02T01:00:00Z "$SID17" unmet-row
-OUT17C="$(run_doctor "$HOME17" "$REPO17")"
+OUT17C="$(run_doctor_only "$HOME17" "$REPO17")"
 PB17C="$(patrol_block "$OUT17C")"
 expect_match "56b …and an ack after its launch closes it (56 discriminates)" \
   "*✓ session ${SHORT17} · 0 open dispatches*" "$PB17C"
@@ -1042,7 +1167,7 @@ expect_match "56b …and an ack after its launch closes it (56 discriminates)" \
 # is open work again — the case a MET latch used to hide for the rest of the session.
 roster_row_fixture status=intended session="$SID17" name=unmet-row launched_at=2026-09-02T02:00:00Z \
   >> "$ROSTER17"
-OUT17D="$(run_doctor "$HOME17" "$REPO17")"
+OUT17D="$(run_doctor_only "$HOME17" "$REPO17")"
 PB17D="$(patrol_block "$OUT17D")"
 expect_match "56c …and dispatching it again after that ack opens it again" \
   "*✓ session ${SHORT17} · 1 open dispatch*" "$PB17D"
@@ -1254,7 +1379,7 @@ dp_user "$TR17B" 1 "carry on"
 plant_patrol_stamp "$REPO17B" "$SID17B"
 dp_backdate "$REPO17B/.bionic/tmp/patrol-$SID17B.state" 1500
 
-OUT17B="$(run_doctor "$HOME17B" "$REPO17B")"
+OUT17B="$(run_doctor_only "$HOME17B" "$REPO17B")"
 PB17B="$(patrol_block "$OUT17B")"
 
 expect_match "81: an idle gap of a full fire window since the stamp, with no tick, is not firing" \
@@ -1284,7 +1409,7 @@ dp_assistant "$TR17C" 30
 plant_patrol_stamp "$REPO17C" "$SID17C"
 dp_backdate "$REPO17C/.bionic/tmp/patrol-$SID17C.state" 1900
 
-OUT17C="$(run_doctor "$HOME17C" "$REPO17C")"
+OUT17C="$(run_doctor_only "$HOME17C" "$REPO17C")"
 PB17C="$(patrol_block "$OUT17C")"
 
 expect_match "83: a marker turn its tick stamped after, then busy work — the row prints" \
@@ -1306,7 +1431,7 @@ dp_user "$TR17E" 60 "bionic-patrol session=${SID17E} — patrol tick"
 dp_assistant "$TR17E" 30
 plant_patrol_stamp "$REPO17E" "$SID17E" 3
 
-OUT17E="$(run_doctor "$HOME17E" "$REPO17E")"
+OUT17E="$(run_doctor_only "$HOME17E" "$REPO17E")"
 expect_match "84b: AC-6.3 a marker turn after a stale stamp, with no tick, is armed but not firing" \
   "*session ${SHORT17E}: the Patrol is armed but not firing*" "$OUT17E"
 
@@ -1327,7 +1452,7 @@ TR17D="$(transcript_of "$HOME17D" "$SID17D")"
 plant_patrol_job "$TR17D" "toolu_1" "abc12345"
 plant_patrol_stamp "$REPO17D" "$SID17D" 3
 
-OUT17D="$(run_doctor "$HOME17D" "$REPO17D")"
+OUT17D="$(run_doctor_only "$HOME17D" "$REPO17D")"
 PB17D="$(patrol_block "$OUT17D")"
 
 expect_match "85: a stale stamp over an undatable transcript is reported, not graded" \

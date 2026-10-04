@@ -186,14 +186,46 @@ _wt_cwd_in_project() {  # <path> <main-root> [target-checkout]
   return 1
 }
 
+# THE RUNNER'S OWN SCRIPT, from its command line as `ps` prints it, one word per argument.
+# A process IS the runner only when it runs the script: argv[0] ends in `tests/run.sh`, or
+# argv[0] is an interpreter and its first word past the options does. A `-c` (or `-s`)
+# among those options means the words that follow are a command string or positional
+# arguments, never a script, so a shell whose command text merely MENTIONS the runner — the
+# harness wraps every Bash call in `zsh -c '…'`, wait loops and progress notes included — is
+# not one (T31). Prints the script word and returns 0, or returns 1.
+#
+# The options are walked as bash reads them (review 7 F7): a `-` or `+` cluster is one word,
+# and EACH `o` or `O` in it takes the next word as its argument, so `-euo pipefail` and
+# `-oo pipefail errexit` skip theirs. A `c` or `s` anywhere in a cluster, `+c` included, makes
+# it a command string or stdin. `-` and `--` end the options; of the long ones only
+# `--rcfile` and `--init-file` take an argument. zsh reads these forms the same way.
+_wt_runner_script() {  # <argv word>...
+  local takes
+  case "${1:-}" in *tests/run.sh) printf '%s' "$1"; return 0 ;; esac
+  [ "$#" -gt 1 ] || return 1
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -|--) shift; break ;;
+      --rcfile|--init-file) shift 2 || return 1 ;;
+      --*) shift ;;
+      [-+]*[cs]*) return 1 ;;
+      [-+]*) takes="${1//[!oO]/}"; shift $((1 + ${#takes})) || return 1 ;;
+      *) break ;;
+    esac
+  done
+  case "${1:-}" in *tests/run.sh) printf '%s' "$1"; return 0 ;; esac
+  return 1
+}
+
 # The D1 predicate. Prints `pid=<pid> cwd=<cwd> script=<path>` for the first runner that
-# satisfies it and returns 0; returns 1 when none does. A field that could not be read
-# prints `unreadable`. The script path is the first command-line word ending in
-# `tests/run.sh`, taken against the working directory when it is relative, with its
-# directory made physical when that directory exists, so a symlinked spelling (`/tmp` for
-# `/private/tmp`) still compares.
+# satisfies it and returns 0; returns 1 when none does. A working directory that could not
+# be read prints `unreadable`. The script is `_wt_runner_script`'s word, taken against the
+# working directory when it is relative, with its directory made physical, so a symlinked
+# spelling (`/tmp` for `/private/tmp`) still compares. A candidate whose script cannot be
+# resolved to a file is not a runner: no opinion, as for an unreadable process.
 _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=...
-  local root="${1:-}" co="${2:-}" pids cwds pid cmd cwd script dir tok
+  local root="${1:-}" co="${2:-}" pids cwds pid cmd cwd script dir
   local -a words
   [ -n "$root" ] || return 1
   pids="$(_wt_suite_pids)"
@@ -207,21 +239,17 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
     # reused, since pgrep answered.
     case "$cmd" in *tests/run.sh*) : ;; *) continue ;; esac
     cwd="$(printf '%s\n' "$cwds" | awk -v p="$pid" '$1 == p { sub(/^[^ ]* /, ""); print; exit }')"
-    script=""
     read -r -a words <<< "$cmd"
-    for tok in "${words[@]}"; do
-      case "$tok" in *tests/run.sh) script="$tok"; break ;; esac
-    done
+    script="$(_wt_runner_script "${words[@]}")" || continue
     case "$script" in
-      '') : ;;
       /*) : ;;
-      *) if [ -n "$cwd" ]; then script="${cwd}/${script}"; else script=""; fi ;;
+      *) [ -n "$cwd" ] || continue; script="${cwd}/${script}" ;;
     esac
-    if [ -n "$script" ]; then
-      dir="$(cd "${script%/*}" 2>/dev/null && pwd -P)" && script="${dir}/${script##*/}"
-    fi
+    dir="$(cd "${script%/*}" 2>/dev/null && pwd -P)" || continue
+    script="${dir}/${script##*/}"
+    [ -f "$script" ] || continue
     if _wt_cwd_in_project "$script" "$root" "$co" || _wt_cwd_in_project "$cwd" "$root" "$co"; then
-      printf 'pid=%s cwd=%s script=%s' "$pid" "${cwd:-unreadable}" "${script:-unreadable}"
+      printf 'pid=%s cwd=%s script=%s' "$pid" "${cwd:-unreadable}" "$script"
       return 0
     fi
   done
@@ -247,9 +275,25 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 #
 # EVERY REFUSAL BEFORE THE MERGE. The order is cheapest-and-most-local first,
 # and every one of them is checked before anything is changed, so a refused land
-# leaves the repository exactly as it found it — with the single, deliberate
-# exception of a legacy `.bionic` link, which is deleted on the way in because
-# C2 retires it whatever the verdict.
+# leaves the repository exactly as it found it — the tree's `.bionic` record link
+# included (wave-26 D19). The link is dropped only just before `git worktree
+# remove`, the one act that needs it gone, and put back if git refuses that.
+# Two refusals can only be known after the merge, `onto-moved` and `branch-moved`
+# (review 7 F8, F9); each undoes the merge first, so it leaves the same state. The
+# exception is a refusal that says `undo=failed` (review 11 S1): the undo declined, because
+# a commit sits on the merge or a change in the checkout touches a file the merge brought,
+# so the merge stands on <onto>, the tree is kept, and the line prints the one fix that
+# removes nothing but the merge.
+#
+# THE LANDING RULE (wave-26 D7, as ruled in A-orch-26). A tree lands on its own
+# green run. It must first contain what landed since it branched only where that
+# landed work touches a file the tree also changed: `not-current` names those
+# files (`_wt_not_current`). `stale-proof` unless, for every suite stamped at the
+# tree's head in its stamp file (`<git-dir>/bionic-stamps`, written by the booking
+# shim), the newest stamp of that suite is green on a clean tree (T61; see
+# `_wt_stale_proof`). No stamp file at all means no suite-class command ever ran
+# in the tree, and is not refused. The head of <onto> is read
+# again just before the merge, and a moved head is judged again (review 2 F7).
 #
 # TWO BOUNDS ON THE POWER (security review F1). This function merges into a
 # branch and deletes a worktree; both of those are irreversible enough that
@@ -270,8 +314,8 @@ _wt_busy_suite() {  # <main-root> [target-checkout] -> pid=... cwd=... script=..
 #   names. Any other linked worktree is somebody else's and is refused rather
 #   than merged and removed.
 #
-# Both are checked before the legacy-link deletion above, so the deliberate
-# exception applies only to a tree this lease is actually entitled to touch.
+# Both are checked before anything else is read in the tree, so even the link
+# drop at removal applies only to a tree this lease is actually entitled to touch.
 #
 # A CONSEQUENCE, stated rather than hidden: `spawn-worktree.sh create` honours
 # an absolute parent directory outside the checkout, and a tree created that way
@@ -329,8 +373,260 @@ EOF
   printf '%s' "$abs"
 }
 
+# THE STALE-PROOF READ (wave-26 D7; T61, critic F1). Reads EVERY line of the tree's stamp file,
+# `stamp/v1|head=<40-hex>|dirty=<count>|rc=<n>|at=<ISO-UTC>[|suites=<names>]|cmd=<...>`, appended
+# by the booking shim to `<the tree's git dir>/bionic-stamps`, one line per suite-class command.
+# Prints the reason and the fix and returns 0 when the tree's runs are not proof for <head>.
+# Returns 1 when they are — and when there is no stamp file, which means no suite-class command
+# ever ran in the tree.
+#
+# THE RULE: for EVERY suite stamped at <head>, the NEWEST stamp of that suite is green proof (rc 0
+# on a clean tree). The doctrine runs a brief's suites one call each, so one head collects one line
+# per suite; before T61 only the last line was read, and suite a red then suite b green LANDED.
+#   - `suites=` names the basenames a line ran, comma-joined (the wall's names, booked.sh). A line
+#     naming two suites has one exit code, so it speaks for both: red, both are red; green, both
+#     are green.
+#   - A line with no `suites=` (an older shim's) or a `?` in it is a run the land cannot keep apart
+#     from any suite. A red or dirty one at <head> refuses, and NO later run at <head> clears it:
+#     the fix is a commit, then the suites again. A green one asks nothing.
+#   - Lines on another head are history. A file with lines and none at <head> is `why=head`, naming
+#     the newest line's head.
+#   - The NEWEST line must be readable, as before: an empty file, or a last line that is no stamp,
+#     is `why=unreadable`. An unreadable line before it is no run's record (the shim writes none)
+#     and is skipped.
+# Failures are named in the order the suites first appear at <head>, dirty before red.
+#
+# `cmd=` is the last field and free text, so each line's read STOPS there (review 2 F2): what
+# follows is the command, whatever it contains, and a `|rc=0` in it never speaks for the run.
+# Before `cmd=`, each of head, dirty and rc appears exactly once and suites at most once; a line
+# giving one twice is no line the shim writes. ONE awk over the file, whatever its length.
+_wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
+  local wt="${1:-}" head="${2:-}" gd file verdict what n s
+  local again="re-run the tree's suites at its head, land again"
+  gd="$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null)"
+  [ -n "$gd" ] || { printf 'why=unreadable stamps=%s/<no git dir> — %s' "$wt" "$again"; return 0; }
+  file="${gd}/bionic-stamps"
+  [ -e "$file" ] || [ -L "$file" ] || return 1
+  verdict="$(awk -v want="$head" '
+    { last_ok = 0 }
+    substr($0, 1, 9) != "stamp/v1|" { next }
+    {
+      nf = split($0, f, "|"); h = d = r = s = ""; nh = nd = nr = ns = 0
+      for (i = 2; i <= nf; i++) {
+        if (substr(f[i], 1, 4) == "cmd=") break
+        if (substr(f[i], 1, 5) == "head=")        { h = substr(f[i], 6); nh++ }
+        else if (substr(f[i], 1, 6) == "dirty=")  { d = substr(f[i], 7); nd++ }
+        else if (substr(f[i], 1, 3) == "rc=")     { r = substr(f[i], 4); nr++ }
+        else if (substr(f[i], 1, 7) == "suites=") { s = substr(f[i], 8); ns++ }
+      }
+      if (nh != 1 || nd != 1 || nr != 1 || ns > 1) next
+      if (h == "" || d == "" || r == "" || (h d r) ~ /[^0-9a-f]/) next
+      last_ok = 1; last_head = h
+      if (h != want) next
+      at_head++
+      proof = (d == "0" && r == "0")
+      if (s == "") s = "?"
+      m = split(s, names, ",")
+      for (j = 1; j <= m; j++) {
+        x = names[j]; if (x == "") x = "?"
+        if (!(x in seen)) { seen[x] = 1; order[++no] = x }
+        if (x == "?") { if (!proof && !(x in state)) state[x] = d " " r }
+        else state[x] = d " " r
+      }
+    }
+    END {
+      if (NR == 0 || !last_ok) { print "unreadable"; exit }
+      if (at_head == 0) { print "head " last_head; exit }
+      for (k = 1; k <= no; k++) {
+        x = order[k]
+        if (!(x in state)) continue
+        split(state[x], v, " ")
+        if (v[1] != "0") { print "dirty " v[1] " " x; exit }
+        if (v[2] != "0") { print "red " v[2] " " x; exit }
+      }
+      print "proof"
+    }' "$file" 2>/dev/null)"
+  what="${verdict%% *}"; n="${verdict#* }"; s="${n#* }"; n="${n%% *}"
+  local fix_dirty="commit or clean the tree, $again" fix_red="make the suites green, $again"
+  if [ "$s" = "?" ]; then
+    fix_dirty="this run names no suite, so no later run at this head clears it: commit, then re-run the tree's suites at the new head, land again"
+    fix_red="$fix_dirty"
+  fi
+  case "$what" in
+    proof) return 1 ;;
+    head)  printf 'why=head stamp_head=%s head=%s — %s' "$n" "$head" "$again" ;;
+    dirty) printf 'why=dirty dirty=%s suite=%s head=%s — %s' "$n" "$s" "$head" "$fix_dirty" ;;
+    red)   printf 'why=red rc=%s suite=%s head=%s — %s' "$n" "$s" "$head" "$fix_red" ;;
+    *)     printf 'why=unreadable stamps=%s — %s' "$file" "$again" ;;
+  esac
+  return 0
+}
+
+# THE NOT-CURRENT READ (wave-26 D7, as ruled in A-orch-26). Where landed work the tree lacks
+# touches a file the tree also changed, the merge would combine two changes to one file that
+# no green run has seen together. Prints `files=<the overlap>` and returns 0 when the tree must
+# merge <onto> first; returns 1 when it may land as it is — it contains <onto head>, or nothing
+# it lacks touches a file it changed. Anything git cannot answer is printed as
+# `files=<unreadable>` and refused, never landed.
+#
+# Both sides are read from the merge base, as the merge itself reads them: the tree's side is
+# what it changed since, the landed side what the merge would bring in from <onto head>. That
+# holds a merge commit's own resolution, and leaves out a landed change that a later landed
+# commit reverted, which the merge never brings. Renames are OFF whatever the user's diff
+# config says: a rename is its old path deleted and its new path added, so a rename on either
+# side of an edit on the other overlaps on the old path.
+_wt_not_current() {  # <root> <onto head> <tree head> -> files=... | nothing
+  local root="${1:-}" onto_head="${2:-}" head="${3:-}" mine landed f hits="" n=0 nl='
+'
+  case "${onto_head}:${head}" in
+    :*|*:|*[!0-9a-f:]*) printf 'files=<unreadable>'; return 0 ;;
+  esac
+  git -C "$root" merge-base --is-ancestor "$onto_head" "$head" 2>/dev/null
+  case $? in
+    0) return 1 ;;
+    1) : ;;
+    *) printf 'files=<unreadable>'; return 0 ;;
+  esac
+  mine="$(git -C "$root" diff --no-renames --name-only "${onto_head}...${head}" 2>/dev/null)" \
+    && landed="$(git -C "$root" diff --no-renames --name-only "${head}...${onto_head}" 2>/dev/null)" \
+    || { printf 'files=<unreadable>'; return 0; }
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "${nl}${landed}${nl}" in
+      *"${nl}${f}${nl}"*)
+        n=$((n + 1))
+        if [ "$n" -le 5 ]; then hits="${hits:+${hits},}${f}"; fi ;;
+    esac
+  done <<EOF
+$mine
+EOF
+  [ "$n" -gt 0 ] || return 1
+  if [ "$n" -gt 5 ]; then hits="${hits},+$((n - 5))-more"; fi
+  printf 'files=%s' "$hits"
+}
+
+_wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
+  _wt_refuse "not-current branch=${1} onto=${2} onto_head=${3:-<none>} ${4} — merge ${2} into the tree, re-run its suites, land again"
+}
+
+# THE UNDO OF A MERGE A LAND MUST NOT KEEP (review 7 F8, F9; review 11 B1). Only the land's own
+# merge is undone (its second parent is the head the land merged), and <onto> moves back by
+# compare-and-swap: `update-ref <ref> <first parent> <merge>` moves it only if it still holds the
+# merge, in one locked step, so a commit made on top of the merge at any instant stays on the
+# branch and the undo declines. The checkout then follows with a two-tree `read-tree -m -u`, which
+# keeps every uncommitted change, a staged one staged, and refuses rather than overwrite a file
+# the merge touched and someone changed since; on that refusal the swap is reversed, again only
+# if nothing moved the branch meanwhile. Returns 1, the merge left standing, when any step declines.
+# A COMMIT MADE DURING THE UNDO (review 15 F1). Between the swap and the checkout's `read-tree`
+# the checkout still holds the merge's tree while its branch sits on the first parent, so a
+# commit made there carries the task's changes onto <onto>, unjudged. The branch is read once
+# more on the way out, after the checkout followed and after a reverse swap that failed; a head
+# that is not where the undo left it is printed, with 3 (the checkout followed, so its index has
+# the task's changes taken out again) or 4 (it did not). A commit made after the checkout
+# followed, which changes no file the merge changed, carries nothing of the task: the undo stands.
+# A BRANCH NO CHECKOUT HOLDS (review 16 S1). When the checkout left <onto> after the merge and no
+# other checkout holds it, its tree is nobody's working files: the compare-and-swap alone is the
+# undo. A branch some other checkout holds is never moved under it; the undo declines.
+_wt_undo_merge() {  # <checkout> <onto> <merge sha> <first parent> <head merged> -> [arrived sha]
+  local ref="refs/heads/${2:-}" at held nl='
+'
+  [ -n "${2:-}" ] && [ -n "${3:-}" ] && [ -n "${4:-}" ] && [ -n "${5:-}" ] || return 1
+  [ "$(git -C "$1" rev-parse --verify --quiet "${3}^2" 2>/dev/null)" = "$5" ] || return 1
+  if [ "$(git -C "$1" symbolic-ref --quiet HEAD 2>/dev/null)" != "$ref" ]; then
+    held="$(_wt_checkouts "$1")" || return 1
+    case "${nl}${held}" in *"${nl}${ref}"$'\t'*) return 1 ;; esac
+    git -C "$1" update-ref -m "land: undo ${3}" "$ref" "$4" "$3" >/dev/null 2>&1 || return 1
+    return 0
+  fi
+  git -C "$1" update-ref -m "land: undo ${3}" "$ref" "$4" "$3" >/dev/null 2>&1 || return 1
+  git -C "$1" update-index -q --refresh >/dev/null 2>&1
+  if git -C "$1" read-tree -m -u "$3" "$4" >/dev/null 2>&1; then
+    at="$(git -C "$1" rev-parse --verify --quiet "$ref" 2>/dev/null)"
+    [ "$at" = "$4" ] && return 0
+    [ -n "$at" ] && ! _wt_shares_a_file "$1" "$4" "$3" "$at" && return 0
+    printf '%s' "${at:-<none>}"; return 3
+  fi
+  git -C "$1" update-ref -m "land: undo refused, ${3} restored" "$ref" "$3" "$4" >/dev/null 2>&1 && return 1
+  at="$(git -C "$1" rev-parse --verify --quiet "$ref" 2>/dev/null)"
+  case "$at" in "$3"|"$4") return 1 ;; esac
+  printf '%s' "${at:-<none>}"; return 4
+}
+
+# Whether <b> and <c> each change, against <base>, a file in common. Unreadable reads as yes.
+_wt_shares_a_file() {  # <checkout> <base> <b> <c>
+  local nl='
+' one two f
+  one="$(git -C "$1" diff --no-renames --name-only "$2" "$3" 2>/dev/null)" \
+    && two="$(git -C "$1" diff --no-renames --name-only "$2" "$4" 2>/dev/null)" || return 0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "${nl}${two}${nl}" in *"${nl}${f}${nl}"*) return 0 ;; esac
+  done <<EOF
+$one
+EOF
+  return 1
+}
+
+# THE LAND'S OWN MERGE (review 11 S1; review 16 B1). Bounded by what the land itself saw, never a
+# search of history for a likely merge: <ref> is what the checkout's HEAD named just before
+# `git merge`, <pre> the commit it held then, and the caller looks only when `git merge` said it
+# made a merge. The land's merge is the newest first-parent commit of <ref> past <pre> whose
+# second parent is the head merged: a commit another writer made on top in the instant after
+# leaves it found, and a merge of that head someone else made earlier is never past <pre>.
+# Prints the merge and its first parent; empty when <ref> holds none.
+_wt_own_merge() {  # <checkout> <ref> <pre> <head merged> -> "<sha> <first parent>"
+  local c p1 p2 more
+  while read -r c p1 p2 more; do
+    [ "$p2" = "$4" ] && [ -z "$more" ] && { printf '%s %s' "$c" "$p1"; return 0; }
+  done <<EOF
+$(git -C "$1" rev-list --first-parent --parents "${3}..${2}" 2>/dev/null)
+EOF
+  return 1
+}
+
+# WHAT TO DO WHEN THE UNDO DECLINED (review 11 S1): a reset only while <onto> still sits on the
+# land's merge, since then it removes that merge and nothing else; under a later commit, the revert
+# that takes the merge's changes out and keeps that commit; never a reset past another writer's work.
+# THE RESET ONLY WHERE IT MOVES <onto> (review 15 F2): typed in a checkout that is detached or on
+# another branch, a reset moves that instead, so there the advice moves <onto> itself, by the same
+# compare-and-swap the undo uses, and names the checkout's state.
+_wt_undo_failed_fix() {  # <checkout> <onto> <merge sha or empty> <first parent>
+  local at on
+  at="$(git -C "$1" rev-parse --verify --quiet "refs/heads/${2}" 2>/dev/null)"
+  if [ -n "$3" ] && [ "$at" = "$3" ]; then
+    on="$(git -C "$1" symbolic-ref --quiet HEAD 2>/dev/null)"
+    if [ "$on" = "refs/heads/${2}" ]; then
+      printf 'the merge stands: reset %s to %s in %s by hand' "$2" "${4:-its first parent}" "$1"
+    else
+      if [ -n "$on" ]; then on="on ${on#refs/heads/}"; else on="detached"; fi
+      printf 'the merge stands and %s is %s, not on %s, so move the branch itself: git -C %s update-ref refs/heads/%s %s %s' \
+        "$1" "$on" "$2" "$1" "$2" "${4:-<first parent>}" "$3"
+    fi
+  elif [ -n "$3" ] && git -C "$1" merge-base --is-ancestor "$3" "refs/heads/${2}" 2>/dev/null; then
+    printf 'the merge stands under a later commit: git -C %s revert -m 1 %s' "$1" "$3"
+  else
+    printf 'the merge is not on %s any more: nothing to undo' "$2"
+  fi
+}
+
+# WHAT TO SAY WHEN A COMMIT ARRIVED DURING THE UNDO (review 15 F1): the commit, that it may carry
+# the task's changes unjudged, and the way to take them out: the checkout's own staged change when
+# it followed the branch back, the reverse of the merge's changes otherwise.
+_wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrived sha> <3|4>
+  printf 'commit %s arrived on %s during the undo, made while %s held merge %s, so it may carry the task'"'"'s changes, unjudged; ' \
+    "$5" "$2" "$1" "$3"
+  if [ "$6" = 3 ]; then
+    printf '%s has them taken out, staged: review git -C %s diff --cached and commit it, or re-judge %s at %s' "$1" "$1" "$2" "$5"
+  else
+    printf 'take them out (git -C %s diff %s %s is that change) or re-judge %s at %s' "$1" "$3" "$4" "$2" "$5"
+  fi
+}
+
 worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
+  local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
+  local pre pre_ref was said held now_ref nl='
+'
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -372,11 +668,12 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null)"
   [ -n "$branch" ] && [ "$branch" != "HEAD" ] || { _wt_refuse "worktree-head-unreadable path=${wt_abs}"; return 2; }
 
-  # C2's retirement, taken on the way in: a legacy link is untracked work as far
-  # as git is concerned and would refuse the removal below over it.
-  _wt_drop_legacy_link "$wt_abs" || :
-
-  if [ -n "$(git -C "$wt_abs" status --porcelain 2>/dev/null)" ]; then
+  # The record link is not work. In a project that ignores `.bionic` only in its
+  # directory shape, or not at all, git reads the link as `?? .bionic`; that one
+  # entry is passed here and the link itself is dropped just before the removal.
+  dirt="$(git -C "$wt_abs" status --porcelain 2>/dev/null)"
+  [ -L "${wt_abs}/.bionic" ] && dirt="$(printf '%s\n' "$dirt" | grep -vxF '?? .bionic')"
+  if [ -n "$dirt" ]; then
     _wt_refuse "dirty-tree path=${wt_abs} branch=${branch}"; return 2
   fi
 
@@ -385,6 +682,18 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   if [ "$ahead" -eq 0 ]; then
     _wt_refuse "nothing-to-land branch=${branch} onto=${onto}"; return 2
   fi
+
+  # NOT CURRENT: what landed since the tree branched must be in it wherever it
+  # touches a file the tree also changed, so no file the merge combines is untested.
+  onto_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${onto}" 2>/dev/null)"
+  head="$(git -C "$wt_abs" rev-parse --verify --quiet HEAD 2>/dev/null)"
+  overlap="$(_wt_not_current "$root" "$onto_head" "$head")" && {
+    _wt_refuse_not_current "$branch" "$onto" "$onto_head" "$overlap"; return 2
+  }
+
+  why="$(_wt_stale_proof "$wt_abs" "$head")" && {
+    _wt_refuse "stale-proof ${why}"; return 2
+  }
 
   # THE TARGET CHECKOUT IS CLEAN IN WHAT GIT TRACKS. A merge into a checkout
   # holding staged or modified tracked files mixes somebody's unfinished work
@@ -398,18 +707,118 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     _wt_refuse "suite-running ${busy}"; return 2
   }
 
+  # THE HEAD IS READ AGAIN JUST BEFORE THE MERGE (review 2 F7). Another land onto
+  # <onto> may have gone through since the read above; if the head moved, the
+  # not-current decision is taken again against the head the merge will meet.
+  # A move after this read is caught once the merge is made, below.
+  now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${onto}" 2>/dev/null)"
+  if [ "$now" != "$onto_head" ]; then
+    onto_head="$now"
+    overlap="$(_wt_not_current "$root" "$onto_head" "$head")" && {
+      _wt_refuse_not_current "$branch" "$onto" "$onto_head" "$overlap"; return 2
+    }
+  fi
+
+  # WHAT THE CHECKOUT HOLDS AS `git merge` RUNS (review 16 B1, S1): the commit and the ref its HEAD
+  # names, in one read just before the merge. The land's merge is looked for on that ref past that
+  # commit (_wt_own_merge), and is undone there, whatever the checkout does after.
+  pre="$(git -C "$co" rev-parse HEAD --symbolic-full-name HEAD 2>/dev/null)"
+  pre_ref="${pre#*"$nl"}"; pre="${pre%%"$nl"*}"
+  case "${pre}:${pre_ref}" in
+    *[!0-9a-f]*:*|:*) was="" ;;
+    *:HEAD) was="<detached>" ;;
+    *:refs/heads/?*) was="${pre_ref#refs/heads/}" ;;
+    *) was="" ;;
+  esac
+  [ -n "$was" ] || { _wt_refuse "onto-checkout-unreadable checkout=${co} branch=${onto}"; return 2; }
+
   # --no-ff ALWAYS: a fast-forward would erase the fact that this was a task,
-  # and the merge commit is what the ledger row points at.
-  if ! git -C "$co" merge --no-ff -m "merge ${branch} (land)" "$branch" >/dev/null 2>&1; then
+  # and the merge commit is what the ledger row points at. The head merged is
+  # the one judged above, not whatever the branch holds by now. `git merge` says
+  # so when it had nothing to do (the C locale fixes the words): then it made no
+  # commit, and none is looked for.
+  if ! said="$(LC_ALL=C git -C "$co" merge --no-ff -m "merge ${branch} (land)" "$head" 2>/dev/null)"; then
     git -C "$co" merge --abort >/dev/null 2>&1
     _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co}"; return 2
   fi
-  merge_sha="$(git -C "$co" rev-parse HEAD 2>/dev/null)"
+  merge_sha=""
+  case "$said" in "Already up"*) : ;; *) merge_sha="$(_wt_own_merge "$co" "$pre_ref" "$pre" "$head")" ;; esac
+  parent="${merge_sha#* }"; merge_sha="${merge_sha%% *}"
+
+  # NO MERGE THIS LAND CAN PROVE ITS OWN (review 16 B1). `git merge` had nothing to do, or merged
+  # somewhere other than the ref the checkout named just before it. Either way a merge of <head>
+  # that now stands anywhere is not provably this land's, so nothing is undone, and the line says
+  # what the checkout held and what it holds now.
+  if [ -z "$merge_sha" ]; then
+    case "$said" in "Already up"*)
+      if [ "$was" = "$onto" ]; then fix="land again"; else fix="check out ${onto} in ${co}, land again"; fi
+      _wt_refuse "merge-unproven branch=${branch} onto=${onto} checkout=${co} was_on=${was} was_at=${pre} — ${co}'s HEAD already held ${head} when git merge ran, so it made no merge, and nothing is undone; ${fix}"; return 2 ;;
+    esac
+    if [ "$was" = "<detached>" ]; then held="${co}'s HEAD"; else held="$was"; fi
+    now="$(git -C "$co" rev-parse HEAD --symbolic-full-name HEAD 2>/dev/null)"
+    now_ref="${now#*"$nl"}"; now="${now%%"$nl"*}"
+    case "${now}:${now_ref}" in
+      *[!0-9a-f]*:*|:*) now="<unreadable>"; now_ref="<unreadable>" ;;
+      *:refs/heads/?*) now_ref="${now_ref#refs/heads/}" ;;
+      *) now_ref="<detached>" ;;
+    esac
+    if [ "$now_ref" = "$onto" ]; then fix="land again"; else fix="check out ${onto} in ${co}, land again"; fi
+    _wt_refuse "merge-unproven branch=${branch} onto=${onto} checkout=${co} was_on=${was} was_at=${pre} now_on=${now_ref} now_at=${now} — ${held} holds no merge of ${head} made past ${pre}, where ${co} stood just before git merge, so no merge git made is provably this land's, and nothing is undone; if ${now} holds ${head}, that merge is unjudged: take it out by hand, then ${fix}"; return 2
+  fi
+
+  # A DETACHED CHECKOUT (review 16 S1): the merge is on a HEAD no branch holds, so there is no
+  # branch to move back and nothing is undone; once the checkout is on <onto> the merge is no
+  # branch's commit.
+  if [ "$was" = "<detached>" ]; then
+    _wt_refuse "onto-detached branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} — the merge is on ${co}'s detached HEAD and no branch holds it, so nothing is undone; check out ${onto} in ${co} (the merge then belongs to no branch), land again"; return 2
+  fi
+
+  # THE MERGE WENT WHERE THE CHECKOUT WAS (review 15 F3). `git merge` merges onto the checkout's
+  # HEAD, so a checkout switched to another branch after the clean check takes the merge there,
+  # and it is undone there.
+  undo_on="$was"
+
+  # THE MERGE IS CHECKED AGAINST WHAT WAS JUDGED (review 7 F8, F9). `git merge` reads the
+  # head of <onto> for itself, after the read above, and merges onto whatever it finds: a land
+  # onto the same branch that completed in between is merged onto unjudged, with rc 0. So the
+  # merge commit's first parent must be the onto head that was judged. And the tree's branch
+  # must still hold the head that was merged: a commit its writer added since would be left
+  # unlanded on a branch whose tree is about to go. Either way this land's merge is undone,
+  # which moves <onto> back to the head another writer gave it, and the tree is kept.
+  tip="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${branch}" 2>/dev/null)"
+  moved=""
+  if [ "$undo_on" != "$onto" ]; then
+    moved="onto-switched branch=${branch} onto=${onto} checkout=${co} merged_into=${undo_on}"
+    fix="check out ${onto} in ${co}, land again"
+  elif [ "$parent" != "$onto_head" ]; then
+    moved="onto-moved branch=${branch} onto=${onto} judged=${onto_head} merged_onto=${parent:-<none>}"
+    fix="land again to judge the head ${onto} holds now"
+  elif [ "$tip" != "$head" ]; then
+    moved="branch-moved branch=${branch} judged=${head} branch_head=${tip:-<none>}"
+    fix="re-run the tree's suites at its head, land again"
+  fi
+  if [ -n "$moved" ]; then
+    arrived="$(_wt_undo_merge "$co" "$undo_on" "$merge_sha" "$parent" "$head")"; rc=$?
+    case $rc in
+      0)
+        if [ "$undo_on" != "$onto" ]; then
+          _wt_refuse "${moved} merge=${merge_sha} — the merge is undone on ${undo_on} and the tree kept; ${fix}"; return 2
+        fi
+        _wt_refuse "${moved} — the merge is undone and the tree kept; ${fix}"; return 2 ;;
+      3|4)
+        _wt_refuse "${moved} merge=${merge_sha} undo=failed arrived=${arrived} — $(_wt_undo_arrival_fix "$co" "$undo_on" "$merge_sha" "$parent" "$arrived" "$rc"), then ${fix}"; return 2 ;;
+    esac
+    _wt_refuse "${moved} merge=${merge_sha:-<none>} undo=failed — $(_wt_undo_failed_fix "$co" "$undo_on" "$merge_sha" "$parent"), then ${fix}"; return 2
+  fi
 
   # No --force here either. If git refuses now, the merge has landed and the
   # tree has not gone; the line says both so the operator is not left guessing
-  # which half happened.
+  # which half happened. The record link goes only now — git would refuse the
+  # removal over an unignored one — and comes back if the removal is refused.
+  link_to="$(readlink "${wt_abs}/.bionic" 2>/dev/null)"
+  _wt_drop_legacy_link "$wt_abs" || :
   if ! git -C "$root" worktree remove "$wt_abs" >/dev/null 2>&1; then
+    [ -n "$link_to" ] && [ ! -e "${wt_abs}/.bionic" ] && ln -s "$link_to" "${wt_abs}/.bionic" 2>/dev/null
     _wt_refuse "worktree-remove-refused path=${wt_abs} merged=${merge_sha}"; return 2
   fi
   git -C "$root" worktree prune >/dev/null 2>&1
@@ -700,4 +1109,29 @@ workspace_for_name() {  # <root> <sid> <name> -> the last tree recorded for <nam
 
 workspaces_of_session() {  # <root> <sid> -> every tree recorded, one per line; 1 none, 2 refused
   _wt_workspace_paths "${1:-}" "${2:-}" "" 1
+}
+
+# The tree and base recorded for <name>, `<tree><TAB><base>`, by the rule above (wave-26 T40).
+# The launch recorder fills a plan row's worktree and base cells from this record, so it asks
+# the same witness: the tree is the one `workspace_for_name` answers, and the base is the one on
+# the last line naming that tree. 1 none, 2 refused.
+workspace_record_for_name() {  # <root> <sid> <name> -> tree TAB base
+  local tree f rc
+  tree="$(workspace_for_name "${1:-}" "${2:-}" "${3:-}")" || { rc=$?; return "$rc"; }
+  f="$(_wt_workspaces_file "$1" "$2")" || return 2
+  WT_SID="$2" WT_NAME="$3" WT_TREE="$tree" awk -F'|' -v schema="$WORKSPACE_SCHEMA" '
+    BEGIN { sid = ENVIRON["WT_SID"]; want = ENVIRON["WT_NAME"]; tree = ENVIRON["WT_TREE"]; b = "" }
+    { sub(/\r$/, "") }
+    $1 != schema { next }
+    {
+      s = ""; n = ""; p = ""; v = ""; hn = 0
+      for (i = 2; i <= NF; i++) {
+        if (index($i, "session=") == 1) s = substr($i, 9)
+        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
+        else if (index($i, "path=") == 1) p = substr($i, 6)
+        else if (index($i, "base=") == 1) v = substr($i, 6)
+      }
+      if (s == sid && hn && n == want && p == tree) b = v
+    }
+    END { printf "%s\t%s\n", tree, b }' "$f" 2>/dev/null || return 2
 }

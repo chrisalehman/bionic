@@ -9,7 +9,9 @@
 #                       own look now (ADR-028, REQ-2) and that record is deleted.
 #   PostToolUse|Agent — the ROSTER arm. When a dispatch has actually spawned, the
 #                       session roster's `intended` row is completed with the
-#                       full agent id and status `confirmed`.
+#                       full agent id and status `confirmed`; a launch whose name
+#                       maps to a pending `## Tasks` row of the bound plan then sets
+#                       that row `active` and adds its ledger line (wave-26 T12, D4).
 #   SubagentStart     — the IDENTIFICATION arm (epic-16 wave-01; re-keyed in
 #                       wave-03). When the agent itself starts, its TRANSCRIPT-form
 #                       id is joined BY THAT ID onto the roster as an `identified`
@@ -480,6 +482,54 @@ latest_launch_for_agent() {  # <agent-id> -> latest launched_at for that id this
 }
 
 # ============================================================
+# THE PLAN ROW MOVES WITH THE LAUNCH (wave-26 T12, D4, AC-1.4; T32).
+# ============================================================
+#
+# A dispatch used to cost the orchestrator two more calls after it: `task-set <id>
+# status=active agent=<name>` and `ledger-add`, copying into the plan what this arm had just
+# confirmed on the roster. The confirmation now moves the row, through ONE transaction:
+# `session-poker.sh launch-sync`, which writes every open launch of this session the bound plan
+# lacks, its row and its ledger line, in one validated, dry-committed write. Its rules (which
+# launch maps to which row, the tree cells, a re-dispatch, a launch with no tree of its own) are
+# written beside it, in session-poker.sh.
+#
+# THIS HOOK STARTS IT AND DOES NOT WAIT (T32). Through T12 the hook ran two verb transactions
+# itself, about a second each, under the 10 s limit hooks.json gives it, so a batch of launches
+# outran it and the later ones printed a busy refusal for the orchestrator to finish by hand. The
+# call is now detached: its own process group (`set -m`), no terminal, every stream on /dev/null,
+# so the hook returns at once and the harness has nothing of it to wait for. It takes `--wait`,
+# so it queues behind another launch's transaction rather than giving up.
+#
+# A FAILURE STILL SURFACES. The detached call prints to nowhere, and that is safe only because
+# it is not the only caller: the Patrol tick and the turn-end wall (payload/scripts/lib/stop.sh)
+# run the same transaction, and whichever runs next prints what it could not record and the
+# commands to run by hand. A kill of the detached call cannot leave half a launch: the row and
+# its line are one write, by one rename.
+#
+# NO RUN PREDICATE HERE (T32; tests/hook-adoption.test.sh §4). This hook is the roster
+# lifecycle and reads nothing out of the plan; the verb asks whose run the session is in, and
+# exits silently when there is none, as it does before Step 4 and without a roster.
+#
+# BIONIC_LAUNCH_SYNC_INLINE=1 runs the call in the foreground, still silent, so a test can read
+# the plan the moment the hook returns. Nothing in a session sets it.
+POKER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-poker.sh"
+
+launch_sync_start() {  # -> 0 always; starts this session's launch-sync and does not wait for it
+  [ -f "$POKER" ] || return 0
+  if [ "${BIONIC_LAUNCH_SYNC_INLINE:-}" = 1 ]; then
+    ( cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" \
+        "${BASH:-bash}" "$POKER" launch-sync --wait ) </dev/null >/dev/null 2>&1
+    return 0
+  fi
+  ( set -m
+    cd "$BIONIC_ROOT" 2>/dev/null || exit 0
+    CLAUDE_CODE_SESSION_ID="$BIONIC_SID" nohup "${BASH:-bash}" "$POKER" launch-sync --wait \
+      </dev/null >/dev/null 2>&1 &
+  ) </dev/null >/dev/null 2>&1
+  return 0
+}
+
+# ============================================================
 # ARM 2 — the ROSTER (PostToolUse|Agent).
 # ============================================================
 #
@@ -614,7 +664,12 @@ if [ "$TOOL_NAME" = "Agent" ]; then
       printf "%s%s", (NR > 1 ? "|" : ""), f
     }
     END { if (tid != "" && !seen) printf "|teammate_id=%s", tid }')
-  printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null
+  printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null || exit 0
+
+  # THE PLAN ROW MOVES WITH THE CONFIRMATION (wave-26 T12, D4), only once the roster row is
+  # written: the launch is the record, and the plan follows it. See `launch_sync_start` above.
+  # A dispatch with no name maps to no row, so it starts nothing.
+  [ -n "$(line_field "$COMPLETED" name)" ] && launch_sync_start
 
   # NO BOUND ON THE ROSTER, deliberately (Step-6 critic F-1, reproduced end to end in
   # record/w3-critic-repro-cap.sh). The observation record this reasoning contrasted the

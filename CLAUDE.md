@@ -12,8 +12,11 @@ Standing instructions for every agent working in this repo.
   tears the footprint back down. The bootstrap installer and its reset script were
   deleted at epic-17 W5 — a change to a hook or a skill is not live for a session until
   the plugin the CLI resolved carries it.
-- Test suite: `bash tests/run.sh` — runs every hermetic suite. Must be green before any
-  commit.
+- Test suite: `bash tests/run.sh` — runs every hermetic suite. Before a commit, the suites the
+  change affects are green. The full suite runs once, on the head being released; after that
+  pass a later change is proved by its affected suites, and a second full run is needed only
+  when the change cannot be bounded: a merge from outside the run, or a changed file the
+  file-to-suite map answers with every suite or with none.
 
 ## SDLC
 

@@ -6,24 +6,32 @@
 # at Steps 3–9 — and the three questions asked of it. Pure functions of a file; nothing here
 # writes, and nothing here runs at source time:
 #
-#   units_rows <plan>          one TSV line per row, the twelve fields in the FIXED order
-#                              id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base,
-#                              in TABLE order. Exit 1 and silent when the plan carries no
-#                              `## Tasks` table.
-#   units_ready <plan> <step>  the ids of rows whose status is `pending` and whose every
-#                              dependency has landed, whatever their step; a row of kind
-#                              `integrate` or `close`, or a `doc` row at Step 7 or later (the
-#                              release), also waits until <step> reaches its own (wave-20 Δ1,
-#                              Δ6, T10b). One per line, table order. <step> is a
-#                              number (wave scale) or `T<n>` (task scale, where the rows
-#                              carry no step cell and a dependency is satisfied by `done`).
-#                              Exit 2 on anything else.
+#   units_rows <plan>          one TSV line per row, the thirteen fields in the FIXED order
+#                              id·step·kind·task·agent·deps·size·serves·Files·status·worktree·
+#                              base·reads, in TABLE order. Exit 1 and silent when the plan
+#                              carries no `## Tasks` table.
+#   units_ready <plan> <step> [<roster> [<ack ledger> [<session id>]]]
+#                              the ids of rows whose status is `pending` and whose every read
+#                              is satisfied, whatever their step (wave-26 T2, D1: what a row
+#                              reads is its `reads` cell or kind default, or in a table
+#                              without that column its `deps` ids); a row of kind `integrate`
+#                              or `close`, or a `doc` row at Step 7 or later (the release),
+#                              also waits until <step> reaches its own (wave-20 Δ6, T10b); a
+#                              row open on <roster> is left out (D9). One per line, table
+#                              order. <step> is a number (wave scale) or `T<n>` (task scale,
+#                              where the rows carry no step cell and a dependency is satisfied
+#                              by `done`). Exit 2 on anything else.
 #   units_held <plan> <step>   one line per row held for its step (would be ready but for
 #                              it): `<id>: step <n> <kind> row waits for current: <n>`, and
-#                              one per row held by an external prerequisite (every task
-#                              dependency landed, one or more `ext:<slug>` tokens left):
+#                              one per row held by an external prerequisite (every other read
+#                              satisfied, one or more `ext:<slug>` tokens left):
 #                              `<id>: held by ext:<a> [ext:<b> ...]`. A report, never an
 #                              invariant (wave-20 T10b; wave-21 T4).
+#   units_waiting <plan> <step>
+#                              `<id><TAB><unmet read><TAB><writer id or -><TAB><writer status
+#                              or ->` for every pending row that is not ready (wave-26 T2, D9).
+#   units_edges <plan>         `<from id><TAB><to id><TAB><the read that joins them>`, one per
+#                              wait between two open rows (wave-26 T2, D1).
 #   units_validate <plan>      one line per broken invariant, each naming the offending id
 #                              and the rule. Exit 1 if any line was printed, else 0.
 #   units_findings <plan> <roster>
@@ -33,7 +41,7 @@
 #                              if any line was printed, else 0.
 #   units_unlined <plan>       the T-ids with no non-empty `- <id>:` line under
 #                              `## SDLC State`, whatever their status (wave-21 T5).
-#   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>
+#   units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]
 #                              the WHOLE plan with one row added, on stdout; the file is
 #                              not written (wave-20 REQ-5, AC-5.3). `task-add` is its caller.
 #
@@ -102,7 +110,8 @@
 # scheduled, which is a fault, while a table missing `worktree` is a table nobody dispatched
 # into trees.
 #
-# THE RECORD IS ALWAYS ELEVEN FIELDS WIDE even when the column is absent, because a record
+# THE RECORD IS ALWAYS THIRTEEN FIELDS WIDE (`worktree`, `base` and, since wave-26 T2, `reads`
+# are the three optional slots) even when a column is absent, because a record
 # whose width depended on the table's shape would put every caller back to counting cells.
 #
 # A CELL MAY CONTAIN A PIPE, AND MARKDOWN SPELLS IT `\|` (critic Issue 1, A-84). The
@@ -155,7 +164,8 @@ _units_read() {
       disp[1] = "id";    disp[2] = "step";   disp[3] = "kind";   disp[4] = "task"
       disp[5] = "agent"; disp[6] = "deps";   disp[7] = "size";   disp[8] = "serves"
       disp[9] = "Files"; disp[10] = "status"; disp[11] = "worktree"; disp[12] = "base"
-      for (k = 1; k <= 12; k++) want[k] = tolower(disp[k])
+      disp[13] = "reads"
+      for (k = 1; k <= 13; k++) want[k] = tolower(disp[k])
       alt[3] = "rigor"   # slot 3 as the task-scale ledger spells it
       state = 0   # 0 before the section · 1 in it, header not yet seen · 2 in the table · 3 done
     }
@@ -182,7 +192,7 @@ _units_read() {
       for (i = 1; i <= n; i++) {
         t = tolower(trim(c[i]))
         if (t == "") continue
-        for (k = 1; k <= 12; k++) if ((t == want[k] || t == alt[k]) && col[k] == 0) col[k] = i
+        for (k = 1; k <= 13; k++) if ((t == want[k] || t == alt[k]) && col[k] == 0) col[k] = i
       }
       if (col[1] == 0) next          # no `id` cell — not the header row
       found = 1
@@ -206,7 +216,7 @@ _units_read() {
       # trailing empty field, both sides the same way, so the two numbers compare.
       if (hdrn > 0 && n > hdrn) over = (over == "" ? "" : over " ") id "=" (n - 1)
       line = ""
-      for (k = 1; k <= 12; k++) {
+      for (k = 1; k <= 13; k++) {
         f = (col[k] > 0 && col[k] <= n) ? trim(c[col[k]]) : ""
         line = (k == 1) ? f : line "\t" f
       }
@@ -218,7 +228,7 @@ _units_read() {
     END {
       if (!found) exit 1
       missing = ""
-      # THE LOOP STOPS AT 10, NOT 12: slots 11 (`worktree`) and 12 (`base`) are optional,
+      # THE LOOP STOPS AT 10, NOT 13: slots 11 (`worktree`), 12 (`base`) and 13 (`reads`) are optional,
       # and an absent optional column is not a fault to report.
       for (k = 1; k <= 10; k++) if (col[k] == 0) missing = (missing == "") ? disp[k] : missing " " disp[k]
       # FIELD 4 NAMES WHAT THE HEADER CARRIES — every contract column present, including
@@ -229,7 +239,7 @@ _units_read() {
       # from "no row names this tree" to `units_rows` alone (wave-16 REQ-3, AC-3.2).
       # NO APOSTROPHE ON ANY LINE INSIDE THIS awk PROGRAM: it is single-quoted, and one
       # would close the quote and hand the rest of the parser to bash.
-      for (k = 1; k <= 12; k++) if (col[k] > 0) present = (present == "") ? disp[k] : present " " disp[k]
+      for (k = 1; k <= 13; k++) if (col[k] > 0) present = (present == "") ? disp[k] : present " " disp[k]
       # THE CONTROL LINE IS TAB-SEPARATED: <missing columns> · <header width> · <id=width …>
       # · <columns present>. `units_rows` drops this line whole, so no caller outside this
       # file sees it; `units_validate` reads fields 2-3 and `units_has_column` field 4.
@@ -266,17 +276,28 @@ _units_table() {
 # `fill_ready_set`, or `units_findings` — runs the inner command on the outer parse rather than
 # reading the table a second time. The outer command is still running, so the answer is the
 # same read the outer command already holds.
+#
+# THE FLOOR STATE IS THE COMMAND'S TOO (wave-26 T64). `_UNITS_MEMO_FLOOR` names a file, written
+# the first time a question inside the command needs `proof_state` and read by every later one,
+# subshells included; it is removed when the command returns. A command that never needs the
+# state never writes it. A caller that already names one (the tick, for its whole run) keeps it,
+# and removes it itself.
 units_memoised() {  # <plan> <command> [args...]
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "${1:-}" ]; then
     shift
     "$@"
     return
   fi
-  local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1
+  local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1 _UNITS_MEMO_FLOOR="${_UNITS_MEMO_FLOOR:-}" own="" rc
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
   _UNITS_MEMO_PLAN="${1:-}"
+  if [ -z "$_UNITS_MEMO_FLOOR" ]; then
+    _UNITS_MEMO_FLOOR="${TMPDIR:-/tmp}/bionic-units-floor-$$-${RANDOM}${RANDOM}"; own=1
+  fi
   shift
-  "$@"
+  "$@"; rc=$?
+  [ -z "$own" ] || [ ! -e "$_UNITS_MEMO_FLOOR" ] || rm -f "$_UNITS_MEMO_FLOOR"
+  return "$rc"
 }
 
 # ── THE THREE VERBS, AND THE ONE ACCESSOR ────────────────────────────────────
@@ -334,7 +355,7 @@ units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on 
   case "${2:-}" in
     id) n=1 ;;    step) n=2 ;;   kind|rigor) n=3 ;; task) n=4 ;;  agent) n=5 ;;
     deps) n=6 ;;  size) n=7 ;;   serves) n=8 ;;     Files) n=9 ;;  status) n=10 ;;
-    worktree) n=11 ;; base) n=12 ;;
+    worktree) n=11 ;; base) n=12 ;; reads) n=13 ;;
     *) return 1 ;;
   esac
   while [ "$n" -gt 1 ]; do
@@ -348,7 +369,7 @@ units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on 
 }
 
 
-# units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base,
+# units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base·reads,
 #                      tab-separated, one line per row, in TABLE order. Exit 1 when there is
 #                      no table.
 #
@@ -364,77 +385,203 @@ units_rows() {
   return 0
 }
 
-# units_ready <plan> <step> -> the ids that may be dispatched now, one per line, table order.
+# units_ready <plan> <step> [<roster> [<ack ledger> [<session id>]]]
+#   -> the ids that may be dispatched now, one per line, table order.
 #
-# READY = status `pending` and EVERY dependency `landed` — whatever the row's step (wave-20
-# REQ-5, Δ1; ADR-036). Through 1.8.6 the row's step also had to EQUAL <step>, and that one
-# comparison is why a Step-6 review whose deps had landed sat unfilled while Verify ran, and
-# why a Step-4 row added during Step 5 never filled at all. Order is the prerequisite graph's
-# job now; the validator below is what guards a forgotten edge.
+# READY = status `pending` and EVERY READ SATISFIED (wave-26 T2; D1, ADR-043) — whatever the
+# row's step. What a row reads depends on the table's shape:
 #
-# <step> STILL DECIDES THE GATE ACTS (Δ6). A row of kind `integrate` or `close`, or a `doc`
-# row at Step 7 or later (the release; T10b), is ready only once <step> has reached its own
-# step: its real prerequisite is a gate passing (Verify
-# CONFIRMED), not a task landing, and without this a merge writer could be named the moment
-# its deps landed, before any auditor had spoken. The signature is unchanged, so every caller
-# (fill.sh's `_fill_ready_rows`, which passes the plan's `current:`) is untouched.
+#   - A TABLE WITH A `reads` COLUMN. The row reads its `reads` cell, comma-separated: a path in
+#     the `Files` grammar · `head` · `record` · `proof:<kind>` · `approval:<name>` ·
+#     `ext:<slug>`, or `live:<artifact>`. An EMPTY cell takes the row's kind default, never
+#     "nothing": build `approval:plan` · verify and test `approval:plan, head` · review
+#     `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:floor,
+#     proof:review, head` · close `merge` (the integrate row's merge) · prototype `approval:plan`.
+#     A doc row at Step 7 or later is the release and names an `approval:` read; one that names
+#     none reads `approval:release` besides (`units_validate` refuses it; wave-26 T62, K2-F3).
+#     Its `deps` cell may carry `ext:<slug>` and nothing else (`units_validate` refuses an id).
+#   - A TABLE WITHOUT ONE. Each `deps` id reads as "wait for that task to land", exactly as
+#     through 1.10, and no kind default applies: a plan written before the column schedules as
+#     it always did. `ext:<slug>` is valid there too.
 #
-# TWO TABLE SHAPES, ONE ANSWER (wave-18 REQ-3, AC-3.3; ADR-033 decision 2). <step> is the
-# plan's `current:`, and this repo writes it two ways: a WAVE plan numbers its steps, a TASK
-# plan names the unit it is on — `T<n>`. Passed a `T<n>`, this reads the six-column
-# task-scale table (`id · intent · rigor · description · status · worktree`), whose rows
-# carry neither a `step` cell nor a `deps` cell, so READY is `pending` alone. Anything that
-# is neither a number nor `T<n>` is still a caller fault and still exits 2.
+# A SETTLED READ waits for every open (`pending` or `active`) row that writes what it names,
+# the row itself never counted:
+#   - a path: every open row with a `Files` entry that covers it or that it covers — exact,
+#     directory prefix, glob or path suffix, the `in_files` rule of brief.sh, never string
+#     equality alone;
+#   - `head`: every open row with a `Files` path outside the record, EXCEPT a row that itself
+#     reads the settled `head`: such a row is downstream of the head, and counting it a writer
+#     would make the walk wait for the release and the release for the walk (A-T2.4);
+#   - `record`: the same over paths in the record (`.bionic/…`, or `record/…` spelled from the
+#     docs root), excepting rows that read `record`;
+#   - `merge`: every open integrate row;
+#   - a task id (a table without `reads`): that row, until it lands;
+#   - `proof:<kind>`: a `proved: kind=<kind>` line inside `## SDLC State`; until one exists the
+#     open rows that would write it — verify and test rows for `floor`, review rows for
+#     `review` — are named as its writers. A pending row whose `live:head` waits because
+#     nothing landed past the review proof writes no newer proof, so it is not one (wave-26
+#     T62; K2-F4): the last review of a run returns its row to pending, and integrate would
+#     otherwise wait on it for ever. A FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64;
+#     REQ-3 AC-3.4): with no open writer, `proof:floor` is satisfied when lib/proof.sh
+#     `proof_state` answers `covered` or `bounded`, and waits on `unbounded` — a merge from
+#     outside the run, a change the map answers with every suite or a file it answers with none,
+#     or a state that cannot be computed — saying `proof:floor: the head moved past the floor
+#     proof at <12 hex> in a way the map cannot bound (<its reason>); take the full run on this
+#     head and record it with proof-add floor`. The state is asked only when a pending row's
+#     answer turns on it, a row held for its step is judged without it, and inside
+#     `units_memoised` it is asked once;
+#   - `approval:<name>`: its line inside `## SDLC State` — `approved-by:` for `plan`,
+#     `approved: <name> …` otherwise. No row writes one; the user's act does.
+#   - `ext:<slug>`: never, until its owner removes it from the cell.
+# A writer that has LANDED or been DROPPED satisfies the read: a dropped row writes nothing
+# (through 1.10 a dependency on a dropped row held its dependents for ever; A-T2.3). A token
+# that names none of these is never satisfied — the cautious direction, the one `slice_ready`
+# documented: a row held back costs a batch, a row dispatched early costs a writer's run.
 #
-# THE ROW'S STEP CELL DECIDES WHICH ARM JUDGES IT, not the argument by itself: at task scale
-# a row that CARRIES a step is a wave row and is never ready. That is what keeps the shape
-# the tick's approval gate closed — a wave table sitting at `current: T1`, which used to fall
-# through to the readiness checks and fill (tests/session-poker.test.sh §22g) — from
-# re-opening through this door. A wave table asked at `T<n>` answers nothing, and says it
-# with success rather than with the step-refusal status: the table is legible, it simply has
-# no task-scale row in it.
+# A LIVE READ, `live:<artifact>`, is satisfied by what exists and waits for nobody: the record
+# always exists, a proof or an approval once its line is written, a path unless only open rows
+# write it. A token that names none of these (`live:foo`, `live:ext:ci`, `live:T9`) is never
+# satisfied (review 5 F4). `live:head` IS A REVIEW THAT FOLLOWS THE BUILD (wave-26 T14; D10):
+# it is satisfied when landed work exists that the last `proved: kind=review` line has not read,
+# and no other row of the same kind is open — none active, and no pending `live:head` row of
+# that kind above it, so one pass runs at a time and the first goes first. "Past the last proof"
+# compares the proof line's `head=` with THE WORKING BRANCH'S HEAD NOW, which this program does
+# not fetch: the caller sets UNITS_LIVE_HEAD (the Patrol tick reads it from git; the stop wall
+# sets none). A plan with no review proof yet needs no head: the first review is ready once a
+# row writing outside the record has landed. With a proof and no head handed in, nothing past
+# the proof can be seen, so the row waits (the cautious direction, as below). Each wait names
+# why after the read: `live:head: nothing has landed yet`, `…: nothing landed past the review
+# proof at <12 hex>`, `…: the head past the review proof at <12 hex> is not known here`,
+# `…: review T5 is open (active)`, `…: review T3 goes first`. `units_live_range` prints the
+# difference a ready review reads; `units_live_rows` the rows `proof-add review` returns to
+# `pending`.
 #
-# AND THE DEPENDENCY WORD IS `done` AT TASK SCALE. `done` is the one terminal word a
-# task-scale ledger writes (ADR-033 decision 1); `landed` is a word that table never carries,
-# and reading it as satisfaction would schedule a row against a status nobody wrote. The
-# shipped six-column table has no `deps` column at all, so the arm is reached only by a table
-# that grows one — it is here because the fill direction has to be stated once, not twice.
+# AN UNMERGEABLE PATH HOLDS A ROW (D11). Rows that write one file run side by side and reconcile
+# on landing; a `Files` entry ending in `!` cannot be reconciled, so a pending row is held while
+# another open row declares an overlapping path and either side marks it: by an active row
+# always, by a pending row only one above it in table order — two pending rows never hold each
+# other for ever, and the first goes first.
 #
-# A dependency cell is a comma-separated list of ids, or an em dash / hyphen / empty cell for
-# "none" — all three spellings are recognised as "no alphanumeric character", which keeps a
-# Unicode literal out of a bash 3.2 awk program for no gain.
+# <step> STILL DECIDES THE GATE ACTS (wave-20 Δ6, T10b). A row of kind `integrate` or `close`,
+# or — in a table WITHOUT the `reads` column — a `doc` row at Step 7 or later (the release), is
+# ready only once <step> has reached its own step. In a table with the column a doc row waits for
+# its reads like any row, the release for `approval:release` (wave-26 T13; D3, A-T13.1). TWO TABLE SHAPES, ONE ANSWER (wave-18 REQ-3, AC-3.3; ADR-033): passed `T<n>`, only
+# task-scale rows (no step cell) are judged and a task dependency is satisfied by `done`. Any
+# other <step> is a caller fault and exits 2; no table exits 1.
 #
-# AN ID THIS TABLE DOES NOT CARRY IS NOT READY. An unresolvable dependency is one this reader
-# cannot confirm landed, and the fill direction is the cautious one, exactly as `slice_ready`
-# documented: a row held back costs a batch, a row dispatched onto an unlanded dependency
-# costs the writer's whole run.
-#
-# ONE PASS TO REMEMBER, ONE TO DECIDE. A dependency may be named before or after the row that
-# depends on it, so nothing is answerable until the whole table has been read.
-units_ready() { _units_readiness ready "$@"; }
+# ROWS OPEN ON THE ROSTER ARE NOT READY (D9). The launch recorder moves a launched row to
+# `active`, but a table read between the launch and that write still says `pending`. Given a
+# <roster>, the ids it holds open are subtracted: the open names are `roster_open_names`', and
+# an id is open when `fill_row_launched` says a name is that row's — the one id-to-name rule the
+# stop wall and the launch recorder already share. Both live beside this file and are sourced on
+# first use; a caller that passes no roster is answered from the table alone.
+units_ready() {
+  local out rc open="" nm id
+  out="$(_units_sched ready "${1:-}" "${2:-}")"; rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  [ -n "$out" ] || return 0
+  if [ -n "${3:-}" ] && _units_roster_libs; then
+    while IFS= read -r nm; do
+      [ -n "$nm" ] && open="${open:+$open,}$nm"
+    done <<UNITS_OPEN
+$(roster_open_names "$3" "${4:-}" "${5:-}")
+UNITS_OPEN
+  fi
+  [ -n "$open" ] || { printf '%s\n' "$out"; return 0; }
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    fill_row_launched "$id" "$open" && continue
+    printf '%s\n' "$id"
+  done <<UNITS_READY
+$out
+UNITS_READY
+  return 0
+}
 
-# units_held <plan> <step> -> one line per row HELD FOR ITS STEP, table order (wave-20 T10b;
-# critic C3, Δ6): `<id>: step <n> <kind> row waits for current: <n>`.
-#
-# A HOLD IS A ROW THAT WOULD BE READY BUT FOR ITS STEP: pending, every dependency landed, and
-# a gate act (below) whose step <step> has not reached. A row still waiting on a dependency is
-# not named — the graph already says why it is not ready. This is a REPORT, not an invariant:
-# `units_validate` never prints it, because a plan holding its release for Step 7 is the plan
-# working, and `task-add` refuses on any validator output. The tick prints these lines on its
-# no-FILL line, so "nothing is ready" and "the release waits for Step 7" read differently.
-# Same argument rules as `units_ready`; at task scale nothing is ever held FOR ITS STEP (rows
-# carry no step).
-#
-# AND A ROW HELD BY THE WORLD (wave-21 T4; REQ-3, D3, ADR-037 decision 2): pending, every TASK
-# dependency landed, and one or more `ext:<slug>` tokens left in its deps cell —
-# `<id>: held by ext:<a> ext:<b>`, the tokens in cell order on one line. The token is a
-# prerequisite nothing mechanical satisfies (CI, a rig, a triage); its owner removes it from
-# the cell when the world moves, and the row is ready again. `units_ready` needs nothing for
-# this: a token is never a row id, so it never carries the satisfied status. A row held both
-# ways prints both lines, the step line first. The tick prints the ext lines as
-# `poker: HELD <id> ext:<slug>`, and the stop wall, computing the same ready set, never counts
-# the row as a missed fill.
-units_held() { _units_readiness held "$@"; }
+# _units_roster_libs -> 0 once `roster_open_names` and `fill_row_launched` are defined, sourcing
+# roster.sh and fill.sh from this file's own directory when they are not. fill.sh sources this
+# file only when `units_ready` is undefined, so the pair cannot loop.
+_units_roster_libs() {
+  local d
+  declare -F roster_open_names >/dev/null 2>&1 && declare -F fill_row_launched >/dev/null 2>&1 && return 0
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || return 1
+  if ! declare -F roster_open_names >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$d/roster.sh" >/dev/null 2>&1 || return 1
+  fi
+  if ! declare -F fill_row_launched >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$d/fill.sh" >/dev/null 2>&1 || return 1
+  fi
+  declare -F roster_open_names >/dev/null 2>&1 && declare -F fill_row_launched >/dev/null 2>&1
+}
+
+# units_held <plan> <step> -> one line per row HELD FOR ITS STEP or BY THE WORLD, table order
+# (wave-20 T10b; wave-21 T4): `<id>: step <n> <kind> row waits for current: <n>` for a gate act
+# that would be ready but for its step, and `<id>: held by ext:<a> [ext:<b> …]` for a row whose
+# every other read is satisfied and one or more `ext:` tokens remain. A row waiting on anything
+# else is not named here — `units_waiting` says why. A REPORT, never an invariant; the tick
+# prints these as `HELD` lines and the stop wall never counts the row as a missed fill.
+units_held() { _units_sched held "$@"; }
+
+# units_waiting <plan> <step> -> `<id><TAB><unmet read><TAB><writer id or -><TAB><writer status
+# or ->`, one line per unmet read and writer, for every pending row that is not ready (D9).
+# A read with several open writers prints one line per writer; one nobody in the table writes
+# (an approval, `ext:`, a proof with no open writer, an unknown token) prints `-` for both. A
+# gate act held for its step prints `step:<n>` first; an unmergeable hold prints the marked path
+# (`lib/x.sh!`) with its holder. Same <step> rules as `units_ready`; a row open on the roster is
+# not subtracted here (the verb takes no roster).
+# A live read that waits on no row prints why after the read: `live:head: <why>` (wave-26 T14).
+units_waiting() { _units_sched waiting "$@"; }
+
+# units_edges <plan> -> `<from id><TAB><to id><TAB><the read that joins them>`, one per line,
+# table order of <to>: every place an open row waits on another open row — a settled read the
+# writer has not yet satisfied, or an unmergeable hold. Never stored; computed on every read of
+# the table (D1). A live read is never an edge, a gate act's step hold is not one, and a landed
+# or dropped row is at neither end: what has landed holds nobody, so the graph is the work that
+# remains — the shape `units_chain` takes.
+units_edges() { _units_sched edges "${1:-}" ""; }
+
+# units_live_range <plan> -> `<last review proof head>..<UNITS_LIVE_HEAD>`, the difference a
+# `live:head` review reads (wave-26 T14; AC-6.5): only what landed past the last review, never
+# the whole diff again. Nothing when the plan has no review proof yet (the first review reads
+# all the landed work, from the wave's base), when no head is handed in, or when the head has
+# not moved past the proof.
+units_live_range() { _units_sched range "${1:-}" ""; }
+
+# units_live_rows <plan> [<path>...] -> `<id><TAB><kind><TAB><status>` for every row reading
+# `live:head`, an empty cell's kind default included, table order (wave-26 T14). Handed paths, only
+# the rows whose `Files` cover one of them (the overlap rule a read uses): `proof-add review` hands
+# its evidence, in both spellings, and returns that row alone to `pending` — the proof of another
+# review (the final one, settled on the head) moves no live row mid-pass (wave-26 T46; review 10 F3).
+units_live_rows() { local plan="${1:-}"; shift; _UNITS_EVIDENCE="$*" _units_sched liverows "$plan" ""; }
+
+# units_floor_holds <plan> [<id>] -> `<id><TAB><step><TAB><status>`, table order, for each row the
+# FLOOR waits on that has not landed (or been dropped) and writes a tracked file (wave-26 T52;
+# review 14 B1, ruling R1). The floor is row <id>; with no id, every open verify or test row, the
+# rows `proof:floor` names as its writers. "Waits on" is the ready set's own judgment of each of
+# the floor's reads and deps (`judge` below), so a row downstream of the floor — the release,
+# which waits FOR the floor — never holds it; "writes a tracked file" is `writes_head`, so a row
+# whose Files are all record paths never does. The dispatch wall asks this before it admits a
+# full run: a run now proves a head these rows are about to move.
+units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
+
+# units_approval_names <plan> -> each name an OPEN row reads as `approval:<name>` or
+# `live:approval:<name>`, once, sorted (wave-26 T46; review 10 F6). `approve` records only these:
+# a name no row reads would be recorded once while the row it was meant for waits. A name read
+# only by a landed or dropped row satisfies nothing either, so it is not one of them (T52; review
+# 14 N4). The match is exact, case included, as the readiness program keys it. `plan` is a read
+# like any other here.
+units_approval_names() {
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '{
+    s = tolower($10); if (s != "pending" && s != "active") next
+    m = split($13, a, ",")
+    for (k = 1; k <= m; k++) {
+      t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); sub(/^live:/, "", t)
+      if (t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) print substr(t, 10)
+    }
+  }' | sort -u
+}
 
 # _units_ext_re -> the shape of an external prerequisite token, as an awk ERE (wave-21 T4; D3).
 # ONE SPELLING for the validator that admits it and the readiness program that reports it, so
@@ -443,174 +590,567 @@ units_held() { _units_readiness held "$@"; }
 # validator refuses them the way it refuses any id the table does not carry.
 _units_ext_re() { printf '%s' '^ext:[A-Za-z0-9][A-Za-z0-9._-]*$'; }
 
-# _units_readiness <ready|held> <plan> <step> — the ONE readiness program behind both verbs, so
-# the gate-act rule is spelled once and the two answers cannot drift apart.
-#
-# A GATE ACT (Δ6, accepted reading: "the step governs gate acts only"). Its real prerequisite is
-# a gate passing — Verify CONFIRMED, Review's verdict — which no dependency cell can name:
-#   - kind `integrate` or `close`, at any step (the merge and the close-out; Δ6 verbatim);
-#   - kind `doc` at Step 7 or later: the Document step's release — version surfaces, CHANGELOG,
-#     manifest — which records what Verify and Review passed (wave-20 T10b, critic C3). Through
-#     T10 it filled the moment its Step-5 dependency landed, and the stop wall pressed for the
-#     release before any auditor or critic verdict — the very case Δ6 rejected literal Δ1 for.
-# Every other row ahead of <step> — build, test, verify, review, prototype, and a `doc` row
-# before Step 7 — is a WORK row and stays ready on its graph alone (D5 part 1).
-_units_readiness() {
-  local mode="${1:-}" plan="${2:-}" step="${3:-}" rows scale=wave
-  case "$step" in
-    ''|*[!0-9]*)
-      # The task-scale step token, and nothing else: a literal `T` followed by digits.
-      case "$step" in
-        T*) case "${step#T}" in ''|*[!0-9]*) return 2 ;; *) scale=task ;; esac ;;
-        *) return 2 ;;
-      esac ;;
-  esac
-  rows="$(units_rows "$plan")" || return 1
+# _units_proof_awk -> proof.sh's `proof_awk`, the one reading of a proof line (wave-26 T14;
+# review 7 F6). proof.sh is sourced from this file's own directory once, when this file is
+# loaded (below), not per question: readiness is asked inside command substitutions, where a
+# lazy source would be paid again on every call. If it cannot be loaded, a function that reads
+# no line as a proof: no proof is the cautious answer for a settled read.
+_units_proof_lib() {
+  local d
+  declare -F proof_awk >/dev/null 2>&1 && return 0
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  [ -n "$d" ] && [ -f "$d/proof.sh" ] && . "$d/proof.sh" >/dev/null 2>&1
+  return 0
+}
+_units_proof_lib
+_units_proof_awk() {
+  if declare -F proof_awk >/dev/null 2>&1; then
+    proof_awk
+  else
+    printf '%s' ' function proof_fields(s) { PROOF_KIND = ""; PROOF_HEAD = ""; return 0 } '
+  fi
+}
+
+# _units_sched <ready|held|waiting|edges> <plan> <step> — THE ONE PROGRAM behind the four verbs,
+# so a row the ready set leaves out is the row `units_waiting` explains and the edge
+# `units_edges` prints. One stream: the rows (`units_rows`, so a memoised caller pays no second
+# parse), then the plan's text, from which `## SDLC State`'s approval and proof lines are read
+# fence-aware, the `_units_ledger` way.
+# ONE VALUE FROM OUTSIDE THE PLAN (wave-26 T14; review 5 F8): UNITS_LIVE_HEAD, the working
+# branch's head as the caller read it, which `live:head` compares with the last review proof's
+# `head=`. Unset, a plan with a review proof cannot see past it, and its live review waits.
+# `holds` (units_floor_holds) takes the floor row's id, or nothing, in the <step> slot.
+_units_sched() {
+  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i fst rc
+  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ]; then
+    case "$step" in
+      ''|*[!0-9]*)
+        case "$step" in
+          T*) case "${step#T}" in ''|*[!0-9]*) return 2 ;; *) scale=task ;; esac ;;
+          *) return 2 ;;
+        esac ;;
+    esac
+  fi
+  out="$(_units_table "$plan")" || return 1
+  case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; *) rows="" ;; esac
   [ -n "$rows" ] || return 0
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$step" -v scale="$scale" -v mode="$mode" \
-    -v extre="$(_units_ext_re)" '
-    $1 == "" { next }
-    { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; st[$1] = $10 }
-    END {
-      # The word a dependency has to carry, by scale. One assignment, so the two arms
-      # below differ in exactly the thing they are supposed to differ in.
-      satisfied = (scale == "task") ? "done" : "landed"
-      for (i = 1; i <= n; i++) {
-        if (st[id[i]] != "pending") continue
-        held = 0
-        if (scale == "task") {
-          if (stp[i] != "") continue
-        } else {
-          # A WAVE ROW CARRIES A NUMERIC STEP, and that is all the step still decides for a
-          # work row (wave-20 Δ1): the step is a label, and readiness is the graph below.
-          if (stp[i] !~ /^[0-9]+$/) continue
-          # A GATE ACT WAITS FOR ITS STEP (Δ6; T10b). Ready only once the run has REACHED
-          # its step — reached, not equalled: a gate act the run has passed is still due.
-          gate = (knd[i] == "integrate" || knd[i] == "close" || (knd[i] == "doc" && stp[i] + 0 >= 7))
-          if (gate && stp[i] + 0 > want + 0) held = 1
+  # THE CONTROL LINE'S FOURTH FIELD names the columns the header carries (`units_has_column`'s
+  # reading, taken here from the parse already in hand).
+  ctl="${out%%$'\n'*}"
+  for i in 1 2 3; do ctl="${ctl#*$'\t'}"; done
+  ctl="${ctl%%$'\t'*}"
+  case " $ctl " in *" reads "*) hasreads=1 ;; esac
+  # THE FLOOR STATE IS ASKED ONLY WHEN AN ANSWER TURNS ON IT (wave-26 T64; REQ-3 AC-3.4). The
+  # program runs without it; when a pending row it judges reads a `proof:floor` that a proof line
+  # and no open writer would satisfy, it prints nothing and exits 3, and only then is
+  # `proof_state` run (once per memoised command, `_units_floor_state`) and the program run again
+  # with the answer. Every other plan, and every other moment of this one, runs no git here.
+  fst="$(_units_floor_kept "$plan")"
+  _units_sched_run "$mode" "$plan" "$step" "$scale" "$hasreads" "$rows" "$fst"; rc=$?
+  if [ "$rc" -eq 3 ] && [ -z "$fst" ]; then
+    fst="$(_units_floor_state "$plan")"
+    _units_sched_run "$mode" "$plan" "$step" "$scale" "$hasreads" "$rows" "$fst"; rc=$?
+  fi
+  return "$rc"
+}
+
+# _units_sched_run <mode> <plan> <step> <scale> <hasreads> <rows> <floor state> -> the program's
+# answer and its status: 3, with nothing printed, when the answer needs a floor state not handed in.
+_units_sched_run() {
+  {
+    printf '\034rows\n'; printf '%s\n' "$6"
+    printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
+  } | _UNITS_FLOOR_ST="$7" awk -F'\t' -v mode="$1" -v want="$3" -v scale="$4" -v hasreads="$5" \
+      -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
+      -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_sched_awk)"
+}
+
+# _units_floor_state <plan> -> what lib/proof.sh `proof_state` says of the change since the plan's
+# last floor proof: `covered…`, `bounded…` or `unbounded<TAB><reason>`, one line. The tree it asks
+# is the project root the plan sits under (`<root>/.bionic/…`), or the plan's own directory, whose
+# repository git finds. Inside `units_memoised` the answer is kept in a file for the rest of the
+# command, so the tick's three questions and its ready set run `proof_state` once between them.
+# WHEN THE STATE CANNOT BE COMPUTED, THE READ IS NOT SATISFIED (the fail direction): proof.sh not
+# loadable, no git, no checkout, a map that fails or overruns all answer `unbounded` with the
+# reason, and a floor proof at the head is always the way out, because `covered` asks no map.
+_units_floor_state() {
+  local plan="${1:-}" tree st=""
+  st="$(_units_floor_kept "$plan")"
+  [ -z "$st" ] || { printf '%s\n' "$st"; return 0; }
+  case "$plan" in
+    */.bionic/*) tree="${plan%%/.bionic/*}" ;;
+    .bionic/*) tree=. ;;
+    */*) tree="${plan%/*}" ;;
+    *) tree=. ;;
+  esac
+  if declare -F proof_state >/dev/null 2>&1; then
+    st="$(proof_state "$plan" "$tree" 2>/dev/null | awk 'NR == 1')"
+  fi
+  case "$st" in
+    covered*|bounded*|unbounded*) ;;
+    *) st="$(printf 'unbounded\tthe proof state cannot be computed here (lib/proof.sh)')" ;;
+  esac
+  [ -z "${_UNITS_MEMO_FLOOR:-}" ] || printf '%s\n%s\n' "$plan" "$st" > "$_UNITS_MEMO_FLOOR" 2>/dev/null
+  printf '%s\n' "$st"
+}
+
+# _units_floor_kept <plan> -> the state the memo file keeps for <plan>, or nothing: the file's
+# first line is the plan it was asked for, the second the state. Read with the shell alone.
+_units_floor_kept() {
+  local p="" st=""
+  [ -n "${_UNITS_MEMO_FLOOR:-}" ] && [ -f "$_UNITS_MEMO_FLOOR" ] || return 0
+  { IFS= read -r p; IFS= read -r st; } < "$_UNITS_MEMO_FLOOR" 2>/dev/null
+  [ "$p" = "${1:-}" ] && printf '%s' "$st"
+  return 0
+}
+
+# _units_files_awk -> the awk functions `in_docs(entry)` and `writes_head(cell)`. `in_docs` is 1
+# when a `Files` path entry is the record, not the tracked tree: under `.bionic/`, or spelled from
+# the docs root as `record/…` (the spelling proof lines and older plans use; review 10 F4).
+# `writes_head` is 1 when a `Files` cell names a path that is not, the tracked tree a writer
+# commits to the head; 0 when every path entry is the record, or the cell names no path at all (a
+# bare word or a dash declares nothing).
+# ONE PREDICATE, THREE READERS (wave-26 T32, T46): the scheduler asks it which rows write the head
+# a floor proves and which landed rows a first live review reads, `units_validate` which active
+# rows owe a tree of their own, and fill.sh `fill_readonly_ids` which verify or review rows take
+# no writer slot; the scheduler asks `in_docs` which rows write what a `record` read waits on.
+# Prepended to each program; NO APOSTROPHE inside it (it is single-quoted).
+_units_files_awk() {
+  printf '%s' '
+    function in_docs(e) { return (index(e, ".bionic/") == 1 || index(e, "record/") == 1) }
+    function writes_head(cell,   a, m, k, e) {
+      m = split(cell, a, ",")
+      for (k = 1; k <= m; k++) {
+        e = a[k]; sub(/^[ \t]+/, "", e); sub(/[ \t]+$/, "", e); sub(/^\.\//, "", e)
+        if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
+        if (!in_docs(e)) return 1
+      }
+      return 0
+    }
+'
+}
+
+# units_writes_head <Files cell> -> 0 when the cell names a path outside the record, 1 when not:
+# the same predicate, for a shell caller (session-poker.sh launch-sync).
+units_writes_head() {
+  printf '%s\n' "${1:-}" | awk "$(_units_files_awk)"'{ exit !writes_head($0) }'
+}
+
+# _units_sched_awk -> the awk program `_units_sched` runs. Printed by a function so the comments
+# can sit beside the code; NO APOSTROPHE anywhere inside it (it is single-quoted).
+_units_sched_awk() {
+  printf '%s' '
+    $0 == SUBSEP "rows" { part = 1; next }
+    $0 == SUBSEP "plan" { part = 2; next }
+    part == 1 {
+      if ($1 == "") next
+      n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = $13
+      at[$1] = n
+      next
+    }
+    # THE PLAN TEXT: approval and proof lines inside `## SDLC State`, fences skipped.
+    part == 2 {
+      if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
+      if (fence) next
+      if ($0 ~ /^## SDLC State/) { insec = 1; next }
+      if ($0 ~ /^## /) insec = 0
+      if (!insec) next
+      l = $0; sub(/^[ \t]*-?[ \t]*/, "", l)
+      if (l ~ /^approved-by[ \t]*:/) {
+        v = l; sub(/^approved-by[ \t]*:[ \t]*/, "", v)
+        if (v ~ /[^ \t]/) appr["plan"] = 1
+      } else if (l ~ /^approved[ \t]*:/) {
+        v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
+        if (aw[1] != "") appr[aw[1]] = 1
+      } else if (proof_fields($0)) {
+        # ONE READING OF A PROOF LINE, proof.sh `proof_fields` (wave-26 T14; review 7 F6), the one
+        # `proof_last` reads through. THE HEAD IS KEPT (review 5 F8): the last line of a kind is
+        # the newest, the order the writer appends in, so `live:head` compares against it.
+        proved[PROOF_KIND] = 1; prvh[PROOF_KIND] = PROOF_HEAD
+      }
+      next
+    }
+
+    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+    function isopen(j) { return (st[j] == "pending" || st[j] == "active") }
+    function isglob(e) { return (index(e, "*") > 0 || index(e, "?") > 0) }
+    # glob_re(g): the glob as an anchored ERE, built once per entry. The grammar globs with * and
+    # ? only, so a bracket is a character like any other: `[` is escaped with the rest, and a
+    # `Files` entry carrying one can never become a broken regex that stops every verb (T35 F5;
+    # `units_validate` refuses the entry, naming its row). A `]` outside a class is literal already.
+    function glob_re(g,   o) {
+      if (g in gre) return gre[g]
+      o = g
+      gsub(/[.+^$(){}|\\]/, "\\\\&", g); gsub(/\[/, "\\\\&", g); gsub(/\*/, ".*", g); gsub(/\?/, ".", g)
+      gre[o] = "^" g "$"
+      return gre[o]
+    }
+    # covers(e, p): the Files entry e covers the path p (brief.sh `in_files`, one pair).
+    function covers(e, p,   ls, lp) {
+      if (e == p) return 1
+      if (isglob(e)) return (p ~ glob_re(e))
+      if (substr(e, length(e)) == "/" && index(p, e) == 1) return 1
+      if (index(p, e "/") == 1) return 1
+      ls = length(e); lp = length(p)
+      if (ls > lp && substr(e, ls - lp) == "/" p) return 1
+      if (lp > ls && substr(p, lp - ls) == "/" e) return 1
+      return 0
+    }
+    # overlap(a, b): either covers the other; two globs overlap when one literal prefix is a
+    # prefix of the other (the fail-safe reading: a pair that might collide is held).
+    function overlap(a, b,   pa, pb) {
+      if (covers(a, b) || covers(b, a)) return 1
+      if (isglob(a) && isglob(b)) {
+        pa = a; sub(/[*?].*$/, "", pa); pb = b; sub(/[*?].*$/, "", pb)
+        return (index(pa, pb) == 1 || index(pb, pa) == 1)
+      }
+      return 0
+    }
+    function writes(j, p,   k) {
+      for (k = 1; k <= nfe[j]; k++) if (overlap(fe[j, k], p)) return 1
+      return 0
+    }
+
+    # THE PATH INDEX (T35 F7): every Files entry of an open row, filed once per parse under the keys
+    # a literal path can reach it by, so a read or an unmergeable hold asks a handful of keys
+    # instead of every entry of every row. For a literal entry e and a literal path t, covers(e, t)
+    # or covers(t, e) holds exactly when one of these does — `E:` e itself, which t reaches as
+    # itself, as a prefix ending at a slash or just before one, or as a tail after a slash; `P:` each
+    # prefix of e ending at a slash, which t reaches when t (or t plus a slash) is one; `S:` each
+    # tail of e after a slash, which t reaches as itself. A glob entry is listed, not filed (gl*
+    # every glob, gm* the marked ones), and a glob t falls back to the scan.
+    function ixput(key, j, k) { ixn[key]++; ixj[key, ixn[key]] = j; ixk[key, ixn[key]] = k }
+    function ixadd(j, k,   e, l, p) {
+      e = fe[j, k]
+      if (isglob(e)) {
+        ngl++; glj[ngl] = j; glk[ngl] = k
+        if (bg[j, k]) { ngm++; gmj[ngm] = j; gmk[ngm] = k }
+        return
+      }
+      ixput("E:" e, j, k)
+      l = length(e)
+      for (p = 1; p <= l; p++) {
+        if (substr(e, p, 1) != "/") continue
+        ixput("P:" substr(e, 1, p), j, k)
+        if (p < l) ixput("S:" substr(e, p + 1), j, k)
+      }
+    }
+    function ixlk(key, mk,   q) {
+      for (q = 1; q <= ixn[key]; q++) {
+        if (mk && !bg[ixj[key, q], ixk[key, q]]) continue
+        nc++; cj[nc] = ixj[key, q]; ck[nc] = ixk[key, q]
+      }
+    }
+    # entries(t, mk) -> every (row, entry) pair of an open row whose entry overlaps t, in
+    # cj[1..nc] / ck[1..nc], unordered and possibly repeated; only marked entries when mk is set.
+    function entries(t, mk,   l, p, q, j, k) {
+      nc = 0
+      if (isglob(t)) {
+        for (j = 1; j <= n; j++) {
+          if (!isopen(j)) continue
+          for (k = 1; k <= nfe[j]; k++)
+            if ((!mk || bg[j, k]) && overlap(fe[j, k], t)) { nc++; cj[nc] = j; ck[nc] = k }
         }
-        if (mode == "ready" && held) continue
-        d = dep[i]
-        gsub(/[ \t]/, "", d)
-        ready = 1
-        ext = ""
-        if (d ~ /[A-Za-z0-9]/) {
-          m = split(d, a, ",")
-          for (j = 1; j <= m; j++) {
-            if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
-            # AN EXTERNAL PREREQUISITE IS SET ASIDE ONLY TO BE REPORTED (wave-21 T4; D3). The
-            # ready arm never takes this branch: a token is never a row id, so the comparison
-            # below already finds it unsatisfied and the row stays out of the ready set.
-            if (mode == "held" && a[j] ~ extre) { ext = ext (ext == "" ? "" : " ") a[j]; continue }
-            if (st[a[j]] != satisfied) { ready = 0; break }
+        return
+      }
+      ixlk("E:" t, mk)
+      l = length(t)
+      for (p = 1; p <= l; p++) {
+        if (substr(t, p, 1) != "/") continue
+        ixlk("E:" substr(t, 1, p), mk)
+        if (p > 1) ixlk("E:" substr(t, 1, p - 1), mk)
+        if (p < l) ixlk("E:" substr(t, p + 1), mk)
+      }
+      if (substr(t, l) == "/") ixlk("P:" t, mk)
+      ixlk("P:" t "/", mk)
+      ixlk("S:" t, mk)
+      if (mk) { for (q = 1; q <= ngm; q++) if (overlap(fe[gmj[q], gmk[q]], t)) { nc++; cj[nc] = gmj[q]; ck[nc] = gmk[q] } }
+      else    { for (q = 1; q <= ngl; q++) if (overlap(fe[glj[q], glk[q]], t)) { nc++; cj[nc] = glj[q]; ck[nc] = glk[q] } }
+    }
+    # open_writers(t) -> the open rows writing the path t, ascending, in ow[1..now]; worked out
+    # once per path and kept, since the answer does not depend on who asks.
+    function open_writers(t,   c, j, s, x) {
+      if (!(t in owc)) {
+        entries(t, 0); s = ""
+        for (c = 1; c <= nc; c++) x[cj[c]] = 1
+        for (j = 1; j <= n; j++) if (j in x) s = s " " j
+        owc[t] = s
+      }
+      now = split(owc[t], ow, " ")
+    }
+    function kdef(k) {
+      if (k == "verify" || k == "test" || k == "doc") return "approval:plan, head"
+      if (k == "review") return "approval:plan, live:head"
+      if (k == "integrate") return "proof:floor, proof:review, head"
+      if (k == "close") return "merge"
+      return "approval:plan"
+    }
+    function addtok(i, t) {
+      t = trim(t)
+      if (t == "" || t !~ /[A-Za-z0-9]/) return
+      ntk[i]++; tk[i, ntk[i]] = t
+      if (t == "head") rhead[i] = 1
+      if (t == "record") rrec[i] = 1
+      if (t == "live:head") rlive[i] = 1
+    }
+
+    # LIVE: a live read is satisfied when its artifact exists: the record always does; a proof or
+    # an approval when its line is written; a path unless the only rows that write it are still
+    # open (none has landed it). Anything else names no artifact and is never satisfied (review 5
+    # F4: `live:foo`, `live:ext:ci`, `live:T9` fell into the path arm and read as ready). `head`
+    # is live_head below.
+    function live_sat(i, a,   j, lw, ow) {
+      if (a == "head") return live_head(i)
+      if (a == "record") return 1
+      if (substr(a, 1, 6) == "proof:") return (substr(a, 7) in proved)
+      if (substr(a, 1, 9) == "approval:") return (substr(a, 10) in appr)
+      if (a !~ /[\/.*?]/ || a ~ /[ \t:!]/) return 0
+      lw = 0; ow = 0
+      for (j = 1; j <= n; j++) {
+        if (j == i || st[j] == "dropped" || !writes(j, a)) continue
+        if (st[j] == "landed") lw = 1; else if (isopen(j)) ow = 1
+      }
+      return (lw || !ow)
+    }
+    # live_head(i) -> 1 when row i may read the moving head now (wave-26 T14; D10): no other row
+    # of its kind open, and landed work past the last review proof — any landed row writing
+    # outside .bionic/ while there is no proof, the head handed in (livehead) differing from the
+    # proof head once there is one. The head is compared, not its ancestry: the range the review
+    # reads, proof..head, is the work on the head that the proof never saw, rewritten history
+    # included (A-T14.1). A wait sets lwhy, which units_waiting prints after the read.
+    function live_head(i,   j, h) {
+      for (j = 1; j <= n; j++) {
+        if (j == i || knd[j] != knd[i]) continue
+        if (st[j] == "active") { lwhy = knd[i] " " id[j] " is open (active)"; return 0 }
+        if (st[j] == "pending" && rlive[j] && j < i) { lwhy = knd[i] " " id[j] " goes first"; return 0 }
+      }
+      if (!("review" in prvh)) {
+        for (j = 1; j <= n; j++) if (j != i && st[j] == satisfied && code[j]) return 1
+        lwhy = "nothing has landed yet"; return 0
+      }
+      h = prvh["review"]
+      if (livehead == "") { lwhy = "the head past the review proof at " substr(h, 1, 12) " is not known here"; return 0 }
+      if (livehead == h) { lwhy = "nothing landed past the review proof at " substr(h, 1, 12); return 0 }
+      return 1
+    }
+
+    # live_idle() -> 1 when a live:head read waits because nothing landed past the review proof:
+    # the head handed in is the one the proof names. A pending row whose live read is idle writes
+    # no newer proof until something lands (wave-26 T62; K2-F4); with the head unknown it may.
+    function live_idle() { return (("review" in prvh) && livehead != "" && livehead == prvh["review"]) }
+
+    # judge(i, t) -> 1 when row i read t is satisfied; otherwise 0, with the rows named as its
+    # writers in wj[1..nw] (those still open, plus a task-id row in any unsatisfied state), and
+    # for a live read that waits on no row, why in lwhy.
+    function judge(i, t,   j, a, q) {
+      nw = 0; lwhy = ""
+      if (t ~ extre) return 0
+      if (substr(t, 1, 9) == "approval:") return (substr(t, 10) in appr)
+      if (substr(t, 1, 5) == "live:") return live_sat(i, substr(t, 6))
+      # A PROOF IS SETTLED ONLY WHEN NOTHING OPEN WILL WRITE A NEWER ONE (T35 F2): a re-floor row
+      # added after the floor was proved makes that line stale, so the open writers are asked
+      # first and the line counts only when there are none.
+      if (substr(t, 1, 6) == "proof:") {
+        a = substr(t, 7)
+        for (j = 1; j <= n; j++) {
+          if (j == i || !isopen(j)) continue
+          if ((a == "floor" && (knd[j] == "verify" || knd[j] == "test")) || (a == "review" && knd[j] == "review"))
+            if (!(st[j] == "pending" && rlive[j] && live_idle())) wj[++nw] = j
+        }
+        # THE FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A line
+        # with no open writer satisfies the read when the change since its head is covered or
+        # bounded; unbounded, or a state that could not be computed, is a wait naming the way
+        # out. Unknown here (floorst empty) is reported through needfloor, and the shell runs
+        # this program again with the state; a row held for its step is judged without it.
+        if (nw == 0 && a == "floor" && (a in proved) && !skipfloor) {
+          if (floorst == "") needfloor = 1
+          else if (floorst !~ /^(covered|bounded)/) {
+            fr = floorst; sub(/^[^\t]*\t?/, "", fr)
+            if (fr == "") fr = "the proof state could not be computed"
+            lwhy = "the head moved past the floor proof at " substr(prvh["floor"], 1, 12) \
+              " in a way the map cannot bound (" fr "); take the full run on this head and record it with proof-add floor"
+            return 0
           }
         }
-        if (!ready) continue
-        if (mode == "held") {
+        return (nw == 0 && (a in proved))
+      }
+      # A ROW THAT READS THE SETTLED head STILL WRITES IT FOR A ROW AT A LATER STEP (T35 F1). The
+      # exception A-T2.4 made is kept between equals and toward earlier steps — the walk does not
+      # wait for the release — but a test, doc or build row at Step 4 that reads head and writes
+      # code holds the Step-5 floor. `record` takes the same rule over record paths.
+      if (t == "head" || t == "record") {
+        for (j = 1; j <= n; j++) {
+          if (j == i || !isopen(j)) continue
+          q = (t == "head") ? rhead[j] : rrec[j]
+          if ((t == "head" ? code[j] : docs[j]) && (!q || stp[j] + 0 < stp[i] + 0)) wj[++nw] = j
+        }
+        return (nw == 0)
+      }
+      if (t == "merge") {
+        for (j = 1; j <= n; j++) if (j != i && isopen(j) && knd[j] == "integrate") wj[++nw] = j
+        return (nw == 0)
+      }
+      if (t in at) {
+        j = at[t]
+        if (st[j] == satisfied || st[j] == "dropped") return 1
+        wj[++nw] = j
+        return 0
+      }
+      if (t ~ /^T[0-9]+$/) return 0
+      if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
+        open_writers(t)
+        for (q = 1; q <= now; q++) if (ow[q] != i) wj[++nw] = ow[q]
+        return (nw == 0)
+      }
+      return 0
+    }
+
+    # bang(i) -> the rows holding row i on an unmergeable path, in hb[1..nh] with the marked path
+    # in hp[1..nh]: open rows declaring an overlapping path either side marked, that are active,
+    # or pending and above row i. Per holder, the first of row i entries that meets it, and for an
+    # unmarked entry the holder first marked one — the pair the walk over every pair found first,
+    # now found through the index (T35 F7), and not looked for at all in a table with no mark.
+    function bang(i,   j, k, m, c) {
+      nh = 0
+      if (!nbg) return 0
+      bgen++
+      for (k = 1; k <= nfe[i]; k++) {
+        entries(fe[i, k], !bg[i, k])
+        for (c = 1; c <= nc; c++) {
+          j = cj[c]; m = ck[c]
+          if (j == i || !(st[j] == "active" || j < i)) continue
+          if (hgen[j] != bgen) { hgen[j] = bgen; hk[j] = k; hm[j] = m }
+          else if (hk[j] == k && m < hm[j]) hm[j] = m
+        }
+      }
+      for (j = 1; j <= n; j++) {
+        if (hgen[j] != bgen) continue
+        nh++; hb[nh] = j; hp[nh] = (bg[i, hk[j]] ? fe[i, hk[j]] : fe[j, hm[j]]) "!"
+      }
+      return nh
+    }
+
+    # rowheld(i) -> 2 when this answer does not judge pending row i at all, 1 when it is a gate
+    # act held for its step, 0 otherwise. A WAVE ROW CARRIES A NUMERIC STEP, and that is all the
+    # step still decides for a work row (wave-20 Δ1). A GATE ACT WAITS FOR ITS STEP (Δ6; T10b):
+    # ready only once the run has REACHED its step, reached and not equalled. A DOC ROW WAITS FOR
+    # ITS READS (wave-26 T13; D3): in a table with the reads column the release reads
+    # approval:release and nothing about it is a step. A table without the column has no approval
+    # to read, so its Step-7 doc row keeps the hold (A-T13.1).
+    function rowheld(i,   gate) {
+      if (scale == "task") return (stp[i] != "") ? 2 : 0
+      if (stp[i] !~ /^[0-9]+$/) return 2
+      gate = (knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7))
+      return (gate && stp[i] + 0 > want + 0) ? 1 : 0
+    }
+
+    END {
+      satisfied = (scale == "task") ? "done" : "landed"
+      floorst = ENVIRON["_UNITS_FLOOR_ST"]
+      for (i = 1; i <= n; i++) {
+        # THE FILES CELL: path entries only (a bare word or a dash declares nothing), the mark
+        # taken off and remembered; code[] and docs[] say which side of the record it writes.
+        m = split(fil[i], a, ",")
+        for (k = 1; k <= m; k++) {
+          e = trim(a[k]); sub(/^\.\//, "", e)
+          if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
+          mark = (substr(e, length(e)) == "!")
+          if (mark) e = substr(e, 1, length(e) - 1)
+          nfe[i]++; fe[i, nfe[i]] = e; bg[i, nfe[i]] = mark; nbg += mark
+          if (in_docs(e)) docs[i] = 1
+          if (isopen(i)) ixadd(i, nfe[i])
+        }
+        code[i] = writes_head(fil[i])
+        r = rd[i]
+        if (hasreads && r !~ /[A-Za-z0-9]/) r = kdef(knd[i])
+        if (hasreads) { m = split(r, a, ","); for (k = 1; k <= m; k++) addtok(i, a[k]) }
+        # THE RELEASE READS ITS APPROVAL (wave-26 T62; K2-F3; D3). A doc row at Step 7 or later
+        # whose own cell names no approval (the kind default names only the plan) would be ready
+        # beside the floor; the validator refuses it, and a plan that got past the validator
+        # still never offers it before approved: release.
+        if (hasreads && knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && rd[i] !~ /(^|[ \t,:])approval:[A-Za-z0-9]/) addtok(i, "approval:release")
+        m = split(dep[i], a, ",")
+        for (k = 1; k <= m; k++) addtok(i, a[k])
+      }
+      if (mode == "range") {
+        if (("review" in prvh) && livehead != "" && livehead != prvh["review"]) print prvh["review"] ".." livehead
+        exit
+      }
+      if (mode == "liverows") {
+        ne = split(evid, ev, " ")
+        for (i = 1; i <= n; i++) {
+          if (!rlive[i]) continue
+          if (ne) { for (k = 1; k <= ne; k++) if (writes(i, ev[k])) break; if (k > ne) continue }
+          printf "%s\t%s\t%s\n", id[i], knd[i], st[i]
+        }
+        exit
+      }
+      # THE FLOOR HOLDS (T52; review 14 B1, R1): every writer the floor row (want, or each open
+      # verify or test row when want is empty) waits on through judge, kept when it has not
+      # landed and writes the tracked tree. judge never names a row downstream of the floor.
+      if (mode == "holds") {
+        for (i = 1; i <= n; i++) {
+          if (want != "") { if (id[i] != want) continue }
+          else if (!(isopen(i) && (knd[i] == "verify" || knd[i] == "test"))) continue
+          for (k = 1; k <= ntk[i]; k++) {
+            if (judge(i, tk[i, k])) continue
+            for (w = 1; w <= nw; w++) {
+              j = wj[w]
+              if (code[j] && st[j] != satisfied && st[j] != "dropped") hold[j] = 1
+            }
+          }
+        }
+        for (j = 1; j <= n; j++) if (j in hold) printf "%s\t%s\t%s\n", id[j], stp[j], st[j]
+        exit
+      }
+      # THE FLOOR STATE, ASKED BEFORE ANYTHING IS PRINTED (wave-26 T64). A pending row this answer
+      # judges, not held for its step, whose proof:floor read a proof line and no open writer would
+      # satisfy needs the state; without it the program prints nothing and exits 3 (_units_sched).
+      if ((mode == "ready" || mode == "held" || mode == "waiting") && floorst == "") {
+        for (i = 1; i <= n; i++) {
+          if (st[i] != "pending" || rowheld(i) != 0) continue
+          for (k = 1; k <= ntk[i]; k++) if (tk[i, k] == "proof:floor") { judge(i, tk[i, k]); if (needfloor) exit 3 }
+        }
+      }
+      for (i = 1; i <= n; i++) {
+        if (mode == "edges") {
+          if (!isopen(i)) continue
+          for (k = 1; k <= ntk[i]; k++) {
+            if (judge(i, tk[i, k])) continue
+            for (w = 1; w <= nw; w++) if (isopen(wj[w])) printf "%s\t%s\t%s\n", id[wj[w]], id[i], tk[i, k]
+          }
+          if (st[i] == "pending" && bang(i) > 0) for (h = 1; h <= nh; h++) printf "%s\t%s\t%s\n", id[hb[h]], id[i], hp[h]
+          continue
+        }
+        if (st[i] != "pending") continue
+        held = rowheld(i)
+        if (held == 2) continue
+        skipfloor = held
+        if (mode == "waiting" && held) printf "%s\tstep:%s\t-\t-\n", id[i], stp[i]
+        # THE READY AND HELD ANSWERS STOP AT THE FIRST READ THAT DECIDES THEM (T35 F7): ready needs
+        # one unmet read to say no, held one unmet read that is not ext:. Waiting names them all.
+        unmet = 0; other = 0; ext = ""
+        for (k = 1; k <= ntk[i]; k++) {
+          if ((mode == "ready" && unmet) || (mode == "held" && other)) break
+          t = tk[i, k]
+          if (judge(i, t)) continue
+          unmet++
+          if (t ~ extre) ext = ext (ext == "" ? "" : " ") t; else other++
+          if (mode != "waiting") continue
+          if (nw == 0) printf "%s\t%s\t-\t-\n", id[i], (lwhy == "" ? t : t ": " lwhy)
+          for (w = 1; w <= nw; w++) printf "%s\t%s\t%s\t%s\n", id[i], t, id[wj[w]], st[wj[w]]
+        }
+        if ((mode == "ready" && unmet) || (mode == "held" && other)) continue
+        if (bang(i) > 0) {
+          unmet++; other++
+          if (mode == "waiting") for (h = 1; h <= nh; h++) printf "%s\t%s\t%s\t%s\n", id[i], hp[h], id[hb[h]], st[hb[h]]
+        }
+        if (mode == "ready" && !held && unmet == 0) print id[i]
+        if (mode == "held" && other == 0) {
           if (held) printf "%s: step %s %s row waits for current: %s\n", id[i], stp[i], knd[i], stp[i]
           if (ext != "") printf "%s: held by %s\n", id[i], ext
         }
-        else print id[i]
       }
-    }'
-}
-
-# _units_graph_awk -> the awk functions that decide the transitive rule, printed for a caller
-# to put in front of its own program (wave-20 REQ-5, AC-5.2, AC-5.3).
-#
-# ONE DEFINITION, TWO CALLERS. `units_validate` asks it which rows break the rule and prints a
-# line per row; `units_add_row` asks it which rows a new Step-4 row must be threaded into. The
-# two questions are the same question — "which rows owe this id, and which of them is the
-# edit" — so they are answered by one program, and the row-add verb cannot thread a plan the
-# validator would then refuse.
-#
-# THE CALLER'S PROGRAM FILLS THE ARRAYS: `n`, and per row `id[]`, `stp[]`, `dep[]`, `sta[]`,
-# with `skip[id]` set for a row the raw-pipe rule has already named (its cells cannot be
-# trusted to accuse anyone). Then:
-#
-#   units_graph()      the CANDIDATES — rows with a numeric step of 5 or more whose status is
-#                      neither `landed` nor `dropped` (`cand[1..nc]`, table order) — each with
-#                      its transitive closure `R[i, <id>]`, and `M[i, k]` for every Step-4 row
-#                      k that candidate i does not reach.
-#   units_frontier(i)  the Step-4 ids row i must add itself (FR_IDS, comma-joined, table order;
-#                      FR_CNT; FR_LIST[k]), and the candidates that reach them through it
-#                      (FR_FOLD). Returns FR_CNT.
-#
-# LANDED AND DROPPED ROWS ARE NOT CANDIDATES (research D1 T-2). The rule is a scheduling
-# invariant, and a terminal row can no longer be scheduled: a fixup Step-4 row added during
-# Verify would otherwise force an edge onto the already-landed audit row, and that edge would
-# record something false. They still carry edges, so a candidate reaches THROUGH them.
-#
-# THE FRONTIER (triage-C claim 3). Candidate i is FOLDED for Step-4 row k when it reaches
-# another candidate j that also misses k, and j does not reach i: adding k to j repairs i, so
-# i owes no edit of its own for k and its line would be a second instruction for one fix. The
-# "j does not reach i" half is what keeps a dependency CYCLE from folding both of its rows into
-# each other and printing nothing — every missing edge is still named somewhere.
-_units_graph_awk() {
-  printf '%s' '
-    function units_graph(   i, k, m, j, d, dd, a, b, h, qn, cur, x) {
-      nc = 0
-      split("", R); split("", M); split("", alld)
-      for (i = 1; i <= n; i++) {
-        d = dep[i]; gsub(/[ \t]/, "", d)
-        alld[id[i]] = alld[id[i]] "," d
-      }
-      for (i = 1; i <= n; i++) {
-        if (id[i] in skip) continue
-        if (stp[i] !~ /^[0-9]+$/ || stp[i] + 0 < 5) continue
-        if (sta[i] == "landed" || sta[i] == "dropped") continue
-        cand[++nc] = i
-        # BREADTH-FIRST over the dependency edges. The reachable set is reset per row: a rule
-        # decided once for the whole table is a different rule (tests/units.test.sh 6b), and a
-        # cycle terminates because an id is enqueued once.
-        split("", reach)
-        qn = 0
-        d = dep[i]; gsub(/[ \t]/, "", d)
-        m = split(d, a, ",")
-        for (j = 1; j <= m; j++)
-          if (a[j] != "" && a[j] ~ /[A-Za-z0-9]/ && !(a[j] in reach)) { reach[a[j]] = 1; q[++qn] = a[j] }
-        h = 1
-        while (h <= qn) {
-          cur = q[h++]
-          dd = alld[cur]
-          m = split(dd, b, ",")
-          for (j = 1; j <= m; j++)
-            if (b[j] != "" && b[j] ~ /[A-Za-z0-9]/ && !(b[j] in reach)) { reach[b[j]] = 1; q[++qn] = b[j] }
-        }
-        for (x in reach) R[i, x] = 1
-        for (k = 1; k <= n; k++) {
-          if (id[k] in skip) continue
-          if (stp[k] + 0 != 4) continue
-          if ((i, id[k]) in R) continue
-          M[i, k] = 1
-        }
-      }
-    }
-    function units_frontier(i,   k, e, j, fold, hit) {
-      FR_IDS = ""; FR_CNT = 0; FR_FOLD = ""
-      split("", FR_LIST)
-      for (k = 1; k <= n; k++) {
-        if (!((i, k) in M)) continue
-        fold = 0
-        for (e = 1; e <= nc; e++) {
-          j = cand[e]
-          if (j == i || !((j, k) in M)) continue
-          if (((i, id[j]) in R) && !((j, id[i]) in R)) { fold = 1; break }
-        }
-        if (fold) continue
-        # COLLECT ONE MISSING PREREQUISITE (tests/units.test.sh 14.7 plants a break after the next line)
-        FR_IDS = FR_IDS (FR_IDS == "" ? "" : ", ") id[k]; FR_CNT++; FR_LIST[k] = 1
-      }
-      if (FR_CNT == 0) return 0
-      for (e = 1; e <= nc; e++) {
-        j = cand[e]
-        if (j == i) continue
-        if (!((j, id[i]) in R) || ((i, id[j]) in R)) continue
-        hit = 0
-        for (k in FR_LIST) if ((j, k) in M) { hit = 1; break }
-        if (hit) FR_FOLD = FR_FOLD (FR_FOLD == "" ? "" : ", ") id[j]
-      }
-      return FR_CNT
     }
   '
 }
@@ -628,34 +1168,27 @@ _units_graph_awk() {
 # THE INVARIANTS (spec Design §1 "Task", verbatim): id unique and matching `^T[0-9]+$`; step
 # in 3–9; kind in build · test · verify · review · doc · integrate · close · prototype;
 # status in pending · active · landed · dropped; every dep naming an id present in the table
-# or an external prerequisite `ext:<slug>` (wave-21 T4; `_units_ext_re` is its one shape);
-# and a Step-N row with N ≥ 5 depending TRANSITIVELY on every Step-4 row.
+# or an external prerequisite `ext:<slug>` (wave-21 T4; `_units_ext_re` is its one shape).
+# A TABLE WITH A `reads` COLUMN (wave-26 T2; D1) adds two: its deps cells carry `ext:<slug>`
+# and nothing else — a task id there is refused, because the row waits on what it reads — and
+# each read names a path in the `Files` grammar, `head`, `record`, `merge`, `proof:<floor|
+# review|task>`, `approval:<name>`, `ext:<slug>`, or `live:` before one of the artifacts or a
+# path.
+#
+# NO ORDERING RULE (wave-26 T2; D2). Through 1.10 a Step-N row with N ≥ 5 had to depend,
+# transitively, on every Step-4 row, and a mid-run build row re-barriered every later row
+# (research R3 B4, B6). A row now waits for what it reads; the validator has nothing to say
+# about which rows precede which.
 #
 # EVERY LINE NAMES THE OFFENDING ID AND THE RULE, because the Step-3 wall prints these back
 # to whoever tried to write the plan and "the table is invalid" is not a thing anyone can act
 # on. Table-level faults — an absent section, a missing column — are named against
 # `## Tasks`, since there is no row to blame.
 #
-# THE TRANSITIVE RULE reports EVERY Step-4 row, in table order, that the row fails to reach
-# (wave-17 REQ-5, AC-5.2). It used to stop at the first, which made an unthreaded row cost
-# one refused commit per missing edge — wave-16's A-orch-59 is the ten-edge specimen — and
-# made this arm the one exception to the paragraph below. A row is a Step-4 row by its
-# `step` cell alone: a row whose id is also malformed is still one, and naming it is more
-# useful than silently exempting it. Reachability is keyed on the ID, so a duplicated id
-# that the row reaches is reached in both of its rows.
-#
-# ONE LINE PER OFFENDING ROW, NOT PER MISSING EDGE (wave-20 REQ-5, AC-5.2; triage-C claim 3).
-# `<id>: step <n> is missing <count> step-4 prerequisite(s): <ids>` — through 1.8.6 a row
-# missing forty edges printed forty lines, and one mid-run row on a large table buried a
-# one-edge fix under N×M of them. Only FRONTIER rows get a line: a row that reaches another
-# offending row missing the same id is folded into that row's line, `(<rows> reach it through
-# <id>)`, so the line count is the number of edits the author owes. `landed` and `dropped`
-# rows are exempt. The closures and the fold are `_units_graph_awk`'s, above.
-#
 # EVERY FAULT IS REPORTED, not just the first. A writer fixing one line at a time against a
 # wall that stops at the first complaint pays a round trip per fault.
 units_validate() {
-  local plan="${1:-}" out rc ctl missing cols over rows violations _c _o found=0 haswt
+  local plan="${1:-}" out rc ctl missing cols over rows violations cycles _c _o found=0 haswt hasreads
 
   out="$(_units_table "$plan")"; rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -692,14 +1225,16 @@ units_validate() {
   # the loop because it is a fact about the table, not about a row.
   haswt=0
   if units_has_column "$plan" worktree; then haswt=1; fi
+  hasreads=0
+  if units_has_column "$plan" reads; then hasreads=1; fi
 
   rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
   if [ -n "$rows" ]; then
-    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" \
-      -v extre="$(_units_ext_re)" "$(_units_graph_awk)"'
+    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
+      -v extre="$(_units_ext_re)" "$(_units_files_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
-        # accuse: its step cell cannot be trusted to make it a Step-4 row others must reach.
+        # accuse: none of its cells can be trusted to name what it breaks.
         # It stays a legal dependency TARGET — slot 1 is before any shift, so its id is the
         # one cell a raw pipe cannot move.
         m0 = split(over, o0, " ")
@@ -710,8 +1245,8 @@ units_validate() {
         for (i in ss) states[ss[i]] = 1
       }
       $1 == "" { next }
-      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; sta[n] = $10; wtc[n] = $11
-        bsc[n] = $12; count[$1]++ }
+      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; fil[n] = $9; sta[n] = $10; wtc[n] = $11
+        bsc[n] = $12; rd[n] = $13; count[$1]++ }
       END {
         for (i = 1; i <= n; i++) {
           if (id[i] in skip) continue
@@ -751,7 +1286,12 @@ units_validate() {
           # would refuse the ordinary end state of every wave.
           # NO APOSTROPHE ANYWHERE ABOVE: this comment is inside the single-quoted awk
           # program, and one would close the quote (the header note says so).
-          if (haswt == 1 && sta[i] == "active" && wtc[i] !~ /[A-Za-z0-9]/)
+          #
+          # ONLY A ROW THAT WRITES THE HEAD (wave-26 T32). A row whose Files cell names no
+          # tracked path (a verify, a review, a doc record under the docs root) commits nothing
+          # a gate must attribute, so it runs active with no tree of its own; writes_head is
+          # the predicate the scheduler asks of the same cell.
+          if (haswt == 1 && sta[i] == "active" && wtc[i] !~ /[A-Za-z0-9]/ && writes_head(fil[i]))
             printf "%s: active row names no worktree\n", id[i]
 
           # THE ORIGIN IS DECLARED BESIDE THE IDENTITY (wave-17 REQ-2, AC-2.1, D3, ADR-032).
@@ -785,31 +1325,120 @@ units_validate() {
             for (j = 1; j <= m; j++) {
               gsub(/^[ \t]+|[ \t]+$/, "", a[j])
               if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
-              if (a[j] ~ /[ \t]/) { printf "%s: dep %s names no row in the table\n", id[i], a[j]; continue }
               # AN EXTERNAL PREREQUISITE NAMES NO ROW BY DESIGN (wave-21 T4; D3, ADR-037
-              # decision 2): `ext:<slug>` in its one shape is admitted beside the task ids.
-              # Any other id the table does not carry, a malformed token included, is still
-              # refused here.
+              # decision 2): `ext:<slug>` in its one shape is admitted in either table shape.
               if (a[j] ~ extre) continue
+              # A TABLE WITH A reads COLUMN TAKES NOTHING ELSE IN deps (wave-26 T2; D1): a row
+              # there waits for what it reads, and a task id beside the column is the hand-kept
+              # edge the column exists to retire.
+              if (hasreads) { printf "%s: dep %s is not ext:<slug>; a table with a reads column waits on what a row reads, never on a task id\n", id[i], a[j]; continue }
+              if (a[j] ~ /[ \t]/) { printf "%s: dep %s names no row in the table\n", id[i], a[j]; continue }
+              # Any other id the table does not carry, a malformed token included, is refused.
               if (!(a[j] in count)) printf "%s: dep %s names no row in the table\n", id[i], a[j]
             }
           }
-        }
 
-        # THE TRANSITIVE RULE, ONE LINE PER OFFENDING ROW (wave-20 REQ-5, AC-5.2). The
-        # closures and the frontier are `_units_graph_awk`s, the one definition this verb
-        # and `units_add_row` share; this loop only prints what they found.
-        units_graph()
-        for (c = 1; c <= nc; c++) {
-          i = cand[c]
-          if (units_frontier(i) == 0) continue
-          printf "%s: step %s is missing %d step-4 prerequisite%s: %s%s\n", id[i], stp[i], \
-            FR_CNT, (FR_CNT == 1 ? "" : "s"), FR_IDS, \
-            (FR_FOLD == "" ? "" : " (" FR_FOLD " reach " (FR_CNT == 1 ? "it" : "them") " through " id[i] ")")
+          # A READ NAMES SOMETHING (wave-26 T2; D1): a path in the Files grammar, a named
+          # artifact, `ext:<slug>`, or `live:` before an artifact or a path. A token naming
+          # none of them is refused here, and the readiness program never reads it satisfied.
+          ap = 0
+          r = rd[i]
+          if (hasreads && r ~ /[A-Za-z0-9]/) {
+            m = split(r, a, ",")
+            for (j = 1; j <= m; j++) {
+              gsub(/^[ \t]+|[ \t]+$/, "", a[j])
+              if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
+              t = a[j]
+              if (t ~ extre) continue
+              if (substr(t, 1, 5) == "live:") t = substr(t, 6)
+              if (t ~ /^approval:[A-Za-z0-9]/) ap = 1
+              if (t == "head" || t == "record" || t == "merge") continue
+              if (t ~ /^proof:(floor|review|task)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
+              if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
+                if (index(t, "[") || index(t, "]")) printf "%s: read %s has a bracket; paths glob with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
+                continue
+              }
+              printf "%s: read %s names no artifact\n", id[i], a[j]
+            }
+          }
+
+          # THE RELEASE READS ITS APPROVAL (wave-26 T62; critic 2 K2-F3; D3). A doc row at Step 7
+          # or later is the release, the row the hold of a table without the column names so; on
+          # its kind default it would be ready beside the floor with no approval at all. An open
+          # one names the approval it waits for, approval:release, or approval:plan for a
+          # document that needs no release.
+          if (hasreads && !ap && knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && (sta[i] == "pending" || sta[i] == "active"))
+            printf "%s: a doc row at step 7 or later is the release and must read the approval it waits for; add approval:release to its reads (approval:plan for a document that needs no release)\n", id[i]
+
+          # A BRACKET IN A Files ENTRY CANNOT BE COMPILED AS WRITTEN (wave-26 T35; review 5 F5). The
+          # grammar globs with * and ? only; the readiness program reads a bracket as itself, so an
+          # author who wrote a class would get a literal match. Entries are taken the way the
+          # readiness program takes them: a bare word, a dash or an entry with a blank declares
+          # nothing, and the unmergeable mark is not part of the path.
+          m = split(fil[i], a, ",")
+          for (j = 1; j <= m; j++) {
+            gsub(/^[ \t]+|[ \t]+$/, "", a[j]); sub(/^\.\//, "", a[j])
+            if (a[j] == "" || a[j] !~ /[\/.*?]/ || a[j] ~ /[ \t]/) continue
+            sub(/!$/, "", a[j])
+            if (index(a[j], "[") || index(a[j], "]")) printf "%s: Files entry %s has a bracket; Files globs with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
+          }
         }
       }')"
     if [ -n "$violations" ]; then
       printf '%s\n' "$violations"
+      found=1
+    fi
+
+    # A CYCLE OF WAITS IS A DEADLOCK NOTHING ELSE REPORTS (wave-26 T35; review 5 F3). Each row on
+    # it is waiting, each names the other as its writer, and a wall built on "nothing ready, all
+    # waiting" sees an ordinary wait. The edges are `units_edges`' own, so the check sees every
+    # wait the scheduler acts on: a settled read, a task-id dep, and the unmergeable hold, which
+    # closes a loop as surely as a read (`lib/x.sh!` held by one row that reads what the other
+    # writes). Only PENDING rows can be stuck: an active row is already running and lands, and
+    # the wait clears, so a loop through one is no deadlock. One line per cycle, named against
+    # its first row in table order; a row that merely waits behind a cycle is not on it.
+    cycles="$({ printf '%s\n' "$rows"; printf '\034edges\n'; _units_sched edges "$plan" "" 2>/dev/null; } \
+      | awk -F'\t' '
+      $0 == SUBSEP "edges" { part = 1; next }
+      !part { if ($1 != "") { n++; id[n] = $1; at[$1] = n; if ($10 == "pending") pend[n] = 1 }; next }
+      {
+        f = at[$1]; t = at[$2]
+        if (!f || !t || !pend[f] || !pend[t] || ((f, t) in e)) next
+        e[f, t] = 1; nout[f]++; out[f, nout[f]] = t; nin[t]++; inn[t, nin[t]] = f
+      }
+      END {
+        # PRUNE what cannot be on a cycle: a row nothing waits on, or that waits on nothing left.
+        for (i = 1; i <= n; i++) if (pend[i]) { live[i] = 1; din[i] = nin[i]; dout[i] = nout[i] }
+        do {
+          gone = 0
+          for (i = 1; i <= n; i++) {
+            if (!live[i] || (din[i] && dout[i])) continue
+            live[i] = 0; gone = 1
+            for (k = 1; k <= nout[i]; k++) din[out[i, k]]--
+            for (k = 1; k <= nin[i]; k++) dout[inn[i, k]]--
+          }
+        } while (gone)
+        # WHAT IS LEFT lies on a cycle or between two; a cycle is a set of rows each reaching the
+        # others, so each left row is grouped with the rows it reaches and is reached by.
+        for (i = 1; i <= n; i++) {
+          if (!live[i] || grp[i]) continue
+          split("", fw); split("", bw); fw[i] = 1; bw[i] = 1
+          do { more = 0
+            for (a = 1; a <= n; a++) {
+              if (!live[a]) continue
+              if (fw[a]) for (k = 1; k <= nout[a]; k++) if (live[out[a, k]] && !fw[out[a, k]]) { fw[out[a, k]] = 1; more = 1 }
+              if (bw[a]) for (k = 1; k <= nin[a]; k++) if (live[inn[a, k]] && !bw[inn[a, k]]) { bw[inn[a, k]] = 1; more = 1 }
+            }
+          } while (more)
+          s = ""; c = 0
+          for (a = 1; a <= n; a++) if (fw[a] && bw[a]) { grp[a] = 1; s = s (c++ ? ", " : "") id[a] }
+          # A ROW THAT WAITS ON ITSELF is a cycle of one (wave-26 T32; review 7 F5): its group
+          # holds only itself, so the count alone never named it, and it was never ready.
+          if (c > 1 || ((i, i) in e)) printf "%s: read cycle through %s; each waits on the next, so none can ever be ready\n", id[i], s
+        }
+      }')"
+    if [ -n "$cycles" ]; then
+      printf '%s\n' "$cycles"
       found=1
     fi
   fi
@@ -952,69 +1581,54 @@ _units_ledger() {
     }'
 }
 
-# units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files>
+# units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]
 #   -> the WHOLE plan with one `## Tasks` row added, on stdout; exit 1 and silent when the plan
 #      carries no `## Tasks` table or no `## SDLC State` section. Nothing is written.
 #
-# THE PROJECTOR UNDER `task-add` (wave-20 REQ-5, AC-5.3; Δ5). A mid-run row needs three edits
-# to pass the two walls that read the table: the commit gate refuses any commit while a task row
-# has no `- T<n>:` line under `## SDLC State`, and `units_validate` refuses while a Step-5+ row
-# does not depend, transitively, on every Step-4 row. Both refuse the WRITER, not the author of
-# the row, so a hand edit that forgets one stalls every writer in the wave at its next commit:
+# THE PROJECTOR UNDER `task-add` (wave-20 REQ-5, AC-5.3; Δ5). A mid-run row needs two edits to
+# pass the commit gate, which refuses any commit while a task row has no `- T<n>:` line under
+# `## SDLC State` — and it refuses the WRITER, not the author of the row, so a hand edit that
+# forgets the line stalls every writer in the wave at its next commit:
 #
 #   1. THE ROW, as the table's last data row, cells placed by the HEADER's column order (the
 #      table is header-keyed, so the projection follows whatever order this plan carries);
-#      status `pending`, and `—` for `worktree`, `base` and any column this library does not
-#      read. A `|` inside a value is written `\|`, the one escape a GFM cell defines.
+#      status `pending`, `reads` from the optional eleventh operand (a table without the column
+#      drops it, as it drops any value it has no column for), and `—` for `worktree`, `base`
+#      and any column this library does not read. A `|` inside a value is written `\|`, the
+#      one escape a GFM cell defines.
 #   2. ITS `- <id>:` LINE under `## SDLC State`, after the last `- T<n>:` line and that line's
 #      indented continuation — or at the end of the section when the plan carries none yet.
 #      `pending dispatch — added by task-add at <iso>` is not a placeholder to the evidence
 #      gate (`is_placeholder_value` refuses only the bare words).
-#   3. FOR A STEP-4 ROW, THE THREADING: the id appended to the `deps` cell of every FRONTIER
-#      row that owes it — `_units_graph_awk`'s answer, the same one `units_validate` prints —
-#      so the projection is threaded exactly as far as the validator demands and no further.
-#      A row at any other step threads nothing: the only ordering rule is Step-5+ reaching
-#      every Step-4 row.
+#
+# NO OTHER ROW IS EDITED IN A TABLE WITH reads (wave-26 T2; D2): its rows wait on what they read,
+# the floor on `head`, so a new row changes nothing but itself and its line. A TABLE WITHOUT THE
+# COLUMN KEEPS 1.10's THREADING (wave-26 T62; critic 2 K2-F1): there the deps are the only thing
+# that holds the floor, so a Step-4 id is appended to the deps of every open Step-5+ row on the
+# frontier — those that do not reach it, less any that reaches another of them which does not
+# reach it back. The validator no longer demands the edge; the floor needs it.
 #
 # PURE, AS EVERY VERB HERE IS: it prints and never writes, so `task-add` can judge the
 # projection (the validator, then a dry commit through the real gate) before anything is
 # swapped in, and a refusal leaves the plan byte-identical. Fence-aware like `_units_read`:
 # a table or a state line inside a ``` example is documentation and is never edited.
 units_add_row() {
-  local plan="${1:-}" nid="${2:-}" nstep="${3:-}" thread="" now
+  local plan="${1:-}" nid="${2:-}" nstep="${3:-}" now
   [ -n "$plan" ] && [ -f "$plan" ] || return 1
   _units_table "$plan" >/dev/null 2>&1 || return 1
-  if [ "$nstep" = 4 ]; then
-    thread="$( { units_rows "$plan"; printf '%s\t%s\t\t\t\t%s\t\t\t\tpending\t\t\n' "$nid" "$nstep" "${7:-}"; } \
-      | UA_NEWID="$nid" awk -F'\t' "$(_units_graph_awk)"'
-        BEGIN { newid = ENVIRON["UA_NEWID"] }
-        $1 == "" { next }
-        { n++; id[n] = $1; stp[n] = $2; dep[n] = $6; sta[n] = $10 }
-        END {
-          units_graph()
-          kx = 0
-          for (k = 1; k <= n; k++) if (id[k] == newid) kx = k
-          if (kx == 0) exit 0
-          for (c = 1; c <= nc; c++) {
-            i = cand[c]
-            units_frontier(i)
-            if (kx in FR_LIST) printf "%s ", id[i]
-          }
-        }')"
-  fi
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   # EVERY OPERAND REACHES awk THROUGH ENVIRON, NEVER -v (wave-20 T10b, review R6). `-v`
   # interprets backslash escapes, so `C:\new\table` arrived as `C:<newline>ew<tab>able` and a
   # `\t` in a serves cell became a space. ENVIRON hands awk the bytes the author typed — the
   # rule roster.sh's docblock already states for file paths.
   UA_NID="$nid" UA_NSTEP="$nstep" UA_NKIND="${4:-}" UA_NTASK="${5:-}" UA_NAGENT="${6:-}" \
-  UA_NDEPS="${7:-}" UA_NSIZE="${8:-}" UA_NSERVES="${9:-}" UA_NFILES="${10:-}" \
-  UA_THREAD=" $thread " UA_NOW="$now" awk '
+  UA_NDEPS="${7:-}" UA_NSIZE="${8:-}" UA_NSERVES="${9:-}" UA_NFILES="${10:-}" UA_NREADS="${11:-}" \
+  UA_NOW="$now" awk '
     BEGIN {
       nid = ENVIRON["UA_NID"]; nstep = ENVIRON["UA_NSTEP"]; nkind = ENVIRON["UA_NKIND"]
       ntask = ENVIRON["UA_NTASK"]; nagent = ENVIRON["UA_NAGENT"]; ndeps = ENVIRON["UA_NDEPS"]
       nsize = ENVIRON["UA_NSIZE"]; nserves = ENVIRON["UA_NSERVES"]; nfiles = ENVIRON["UA_NFILES"]
-      thread = ENVIRON["UA_THREAD"]; now = ENVIRON["UA_NOW"]
+      nreads = ENVIRON["UA_NREADS"]; now = ENVIRON["UA_NOW"]
     }
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     # A VALUE BECOMES A CELL: tabs and line breaks to spaces, every RAW `|` escaped by
@@ -1037,6 +1651,18 @@ units_add_row() {
       m = split(v, parts, SUBSEP); out = parts[1]
       for (i = 2; i <= m; i++) out = out "\\" "|" parts[i]
       return out
+    }
+    # reach(s, c) -> R[c, <id>] for every id candidate c reaches through deps from row s,
+    # breadth-first; an id is queued once, so a cycle ends.
+    function reach(s, c,   q, h, qn, k, n2, b) {
+      qn = 0; split("", seen)
+      n2 = split(adj[s], b, ",")
+      for (k = 1; k <= n2; k++) if (b[k] ~ /[A-Za-z0-9]/ && !(b[k] in seen)) { seen[b[k]] = 1; q[++qn] = b[k] }
+      for (h = 1; h <= qn; h++) {
+        R[c, q[h]] = 1
+        n2 = split(adj[q[h]], b, ",")
+        for (k = 1; k <= n2; k++) if (b[k] ~ /[A-Za-z0-9]/ && !(b[k] in seen)) { seen[b[k]] = 1; q[++qn] = b[k] }
+      }
     }
     { L[++nl] = $0 }
     END {
@@ -1071,21 +1697,42 @@ units_add_row() {
         if (tstate == 2) {
           if (line !~ /^[ \t]*\|/) { tstate = 3; continue }
           lastrow = i                   # the separator counts: an empty table takes its first row
-          m = split(esc(line), f, "|")
-          rid = trim(f[col["id"]])
+          if (nstep != "4" || ("reads" in col) || !("deps" in col)) continue
+          split(esc(line), f, "|"); rid = trim(f[col["id"]])
           if (rid == "" || rid ~ /^[-: ]+$/) continue
-          if (("deps" in col) && index(thread, " " rid " ") > 0) {
-            dc = col["deps"]; d = trim(f[dc])
-            f[dc] = " " ((d ~ /[A-Za-z0-9]/) ? d ", " nid : nid) " "
-            out = f[1]; for (c = 2; c <= m; c++) out = out "|" f[c]
-            L[i] = unesc(out)
-          }
+          nr++; rl[nr] = i; rid_[nr] = rid; rstp[nr] = trim(f[col["step"]]); rsta[nr] = trim(f[col["status"]])
+          d = f[col["deps"]]; gsub(/[ \t]/, "", d); adj[rid] = d
         }
       }
       if (!lastrow || !seensdlc) exit 1
+      # A TABLE WITHOUT reads KEEPS 1.10 THREADING (wave-26 T62; critic 2 K2-F1). With no head
+      # read, a mid-run Step-4 row holds the floor only through deps, so its id goes into every
+      # open Step-5+ row that does not reach it, except one that reaches another such row that
+      # does not reach it back: that row repairs it (the frontier of c81d865e units_add_row).
+      if (nr) {
+        adj[nid] = ndeps; gsub(/[ \t]/, "", adj[nid])
+        nc = 0
+        for (r = 1; r <= nr; r++) {
+          if (rstp[r] !~ /^[0-9]+$/ || rstp[r] + 0 < 5 || rsta[r] == "landed" || rsta[r] == "dropped") continue
+          cr[++nc] = r; reach(rid_[r], nc)
+        }
+        for (c = 1; c <= nc; c++) {
+          if ((c, nid) in R) continue
+          fold = 0
+          for (e = 1; e <= nc && !fold; e++)
+            if (e != c && !((e, nid) in R) && ((c, rid_[cr[e]]) in R) && !((e, rid_[cr[c]]) in R)) fold = 1
+          if (!fold) thread[rl[cr[c]]] = 1
+        }
+        for (r in thread) {
+          m = split(esc(L[r]), f, "|"); dc = col["deps"]; d = trim(f[dc])
+          f[dc] = " " ((d ~ /[A-Za-z0-9]/) ? d ", " nid : nid) " "
+          out = f[1]; for (c = 2; c <= m; c++) out = out "|" f[c]
+          L[r] = unesc(out)
+        }
+      }
       val["id"] = nid; val["step"] = nstep; val["kind"] = nkind; val["rigor"] = nkind
       val["task"] = ntask; val["agent"] = nagent; val["deps"] = ndeps; val["size"] = nsize
-      val["serves"] = nserves; val["files"] = nfiles; val["status"] = "pending"
+      val["serves"] = nserves; val["files"] = nfiles; val["status"] = "pending"; val["reads"] = nreads
       row = "|"
       for (c = 2; c < nh; c++) row = row " " ((name[c] in val) ? cellv(val[name[c]]) : "—") " |"
       at = (tline ? tline : sdlc_last)
@@ -1353,4 +2000,99 @@ units_step_fields() {
         if (i == endb) for (p = 1; p <= nk; p++) if (!has[p]) print "  " key[p] ": " val[p]
       }
     }' "$plan"
+}
+
+# units_chain <writer ceiling> — the longest chain of dependent work and the widest the plan can
+# run (wave-26 T3, REQ-7). Pure over stdin; it reads no plan, so the card hands it the nodes and
+# the edges it already holds:
+#
+#   N<TAB><id><TAB><minutes>     a unit of work
+#   E<TAB><from><TAB><to>        `to` cannot start before `from` ends
+#
+# Prints `chain<TAB><id>,<id>…<TAB><minutes>` — the path with the largest sum of minutes, every
+# node on it counted, a tie going to the path whose ids come first in input order — and
+# `width<TAB><n>`: every node scheduled at its earliest start (the latest end among the nodes it
+# waits for, 0 with none), at most <writer ceiling> running at once, ready nodes taken in input
+# order when more are ready than there is room; the width is the largest number running at one
+# instant. A cycle, an edge naming an unknown id or a minutes value that is not a whole number
+# prints one line on stderr and returns 2 with nothing on stdout.
+units_chain() {
+  awk -F'\t' -v ceil="${1-}" '
+    function die(msg) { print "units_chain: " msg > "/dev/stderr"; bad = 1; exit 2 }
+    BEGIN {
+      if (ceil !~ /^[0-9]+$/ || ceil + 0 < 1) die("writer ceiling is not a whole number of at least 1: \"" ceil "\"")
+    }
+    { sub(/\r$/, "") }
+    $0 ~ /^[ \t]*$/ { next }
+    $1 == "N" {
+      if (NF != 3 || $2 == "") die("malformed node line: " $0)
+      if ($3 !~ /^[0-9]+$/) die("minutes of " $2 " is not a whole number: \"" $3 "\"")
+      if ($2 in at) die("node " $2 " is declared twice")
+      n++; id[n] = $2; at[$2] = n; mins[n] = $3 + 0
+      next
+    }
+    $1 == "E" {
+      if (NF != 3) die("malformed edge line: " $0)
+      ne++; ef[ne] = $2; et[ne] = $3
+      next
+    }
+    { die("unknown line kind \"" $1 "\": " $0) }
+    END {
+      if (bad) exit 2
+      for (k = 1; k <= ne; k++) {
+        if (!(ef[k] in at)) die("edge " ef[k] " -> " et[k] " names unknown id " ef[k])
+        if (!(et[k] in at)) die("edge " ef[k] " -> " et[k] " names unknown id " et[k])
+        a = at[ef[k]]; b = at[et[k]]
+        out[a] = out[a] " " b; indeg[b]++
+      }
+      # Kahn: a topological order, or the nodes a cycle keeps from one.
+      for (i = 1; i <= n; i++) { rem[i] = indeg[i] + 0; if (rem[i] == 0) q[++qt] = i }
+      for (qh = 1; qh <= qt; qh++) {
+        m = split(out[q[qh]], s, " ")
+        for (j = 1; j <= m; j++) if (--rem[s[j]] == 0) q[++qt] = s[j]
+      }
+      if (qt < n) {
+        for (i = 1; i <= n; i++) if (rem[i] > 0) members = members (members == "" ? "" : " ") id[i]
+        die("cycle among: " members)
+      }
+      # Longest chain: f[i] is the heaviest path that starts at i; the best successor is the
+      # heaviest, the lowest input position on a tie, which makes the whole path the one whose
+      # ids come first. Sources only start a chain.
+      for (qh = n; qh >= 1; qh--) {
+        i = q[qh]; best = 0; nx[i] = 0
+        m = split(out[i], s, " ")
+        for (j = 1; j <= m; j++) {
+          c = s[j]
+          if (nx[i] == 0 || f[c] > best || (f[c] == best && c < nx[i])) { best = f[c]; nx[i] = c }
+        }
+        f[i] = mins[i] + best
+      }
+      start = 0
+      for (i = 1; i <= n; i++) if (indeg[i] + 0 == 0 && (start == 0 || f[i] > f[start])) start = i
+      path = ""
+      for (i = start; i != 0; i = nx[i]) path = path (path == "" ? "" : ",") id[i]
+      # Width: an earliest-start schedule under the ceiling. Waiting is the count of a node'"'"'s
+      # unfinished predecessor edges; time moves to the next end once nothing more can start.
+      for (i = 1; i <= n; i++) wait[i] = indeg[i] + 0
+      t = 0; done = 0; run = 0; peak = 0
+      while (done < n) {
+        do {
+          moved = 0
+          for (i = 1; i <= n; i++) if (running[i] && fin[i] <= t) {
+            running[i] = 0; run--; done++; moved = 1
+            m = split(out[i], s, " ")
+            for (j = 1; j <= m; j++) wait[s[j]]--
+          }
+          for (i = 1; i <= n && run < ceil; i++) if (!began[i] && wait[i] == 0) {
+            began[i] = 1; running[i] = 1; run++; fin[i] = t + mins[i]; moved = 1
+          }
+        } while (moved)
+        if (run > peak) peak = run
+        nextt = -1
+        for (i = 1; i <= n; i++) if (running[i] && (nextt < 0 || fin[i] < nextt)) nextt = fin[i]
+        if (nextt < 0) break
+        t = nextt
+      }
+      printf "chain\t%s\t%d\nwidth\t%d\n", path, f[start], peak
+    }'
 }

@@ -723,10 +723,39 @@ F10_BANNED="$(printf '| %s -q' grep)"
 F10_CODE="$(grep -v '^[[:space:]]*#' "$FRAMEWORK")"
 expect_eq "10: no producer-into-grep -q in the framework's code" "0" \
   "$(printf '%s\n' "$F10_CODE" | grep -c -- "$F10_BANNED" | tr -d ' ')"
-expect_eq "10: …and the ban is still stated in its docblocks" "3" \
-  "$(grep -c -- "$F10_BANNED" "$FRAMEWORK" | tr -d ' ')"
+# f10_stated <file> -> yes when the file states the ban at least once. The code census above
+# is vacuous over a file that never names the idiom; this row says the ban is still written
+# down. How many comment lines say it is not asked.
+f10_stated() {
+  [ "$(grep -c -- "$F10_BANNED" "$1" | tr -d ' ')" -ge 1 ] && echo yes || echo no
+}
+# f10_code_hits <file> -> the number of banned spellings in the file's non-comment lines
+f10_code_hits() {
+  grep -v '^[[:space:]]*#' "$1" | grep -c -- "$F10_BANNED" | tr -d ' '
+}
+expect_eq "10: …and the ban is still stated in at least one docblock" "yes" "$(f10_stated "$FRAMEWORK")"
 expect_eq "10: …and the census can see one in code when there is one (not vacuous)" "1" \
   "$(printf 'echo "$x" %s -- "$y"\n' "$F10_BANNED" | grep -v '^[[:space:]]*#' | grep -c -- "$F10_BANNED" | tr -d ' ')"
+
+# ============================================================
+section "PIN-REL: a pin on the shipped tree is a relation, not a count (wave-26 T21, AC-8.1)"
+# ============================================================
+#
+# The census above (no banned spelling in code) and its docblock row are exercised on COPIES of
+# assert.sh under the sandbox: one with a fourth mention planted in a comment, one with every
+# mention removed. The shipped file is never touched.
+PR_PLUS="$SB/pin-rel-plus.sh"; PR_NONE="$SB/pin-rel-none.sh"
+{ cat "$FRAMEWORK"; printf '# a fourth mention: %s\n' "$F10_BANNED"; } > "$PR_PLUS"
+grep -v -- "$F10_BANNED" "$FRAMEWORK" > "$PR_NONE"
+expect_nonempty "PIN-REL the shipped file states the ban (the row reads something)" \
+  "$(grep -- "$F10_BANNED" "$FRAMEWORK")"
+expect_eq "PIN-REL the planted copy really carries one more mention than the shipped file" \
+  "$(($(grep -c -- "$F10_BANNED" "$FRAMEWORK") + 1))" "$(grep -c -- "$F10_BANNED" "$PR_PLUS")"
+expect_eq "PIN-REL the emptied copy still parses and carries no mention" "0 yes" \
+  "$(grep -c -- "$F10_BANNED" "$PR_NONE") $(bash -n "$PR_NONE" 2>/dev/null && echo yes || echo no)"
+expect_eq "PIN-REL a fourth mention: the docblock row stays green" "yes" "$(f10_stated "$PR_PLUS")"
+expect_eq "PIN-REL …and the code census stays green" "0" "$(f10_code_hits "$PR_PLUS")"
+expect_eq "PIN-REL no mention at all: the docblock row is red" "no" "$(f10_stated "$PR_NONE")"
 
 # ============================================================
 section "11: anchor — the precondition of a mutation (AC-29, AC-31, S19)"

@@ -7,10 +7,10 @@
 # predicate for "is this run's ledger live". Three verbs, all pure functions of the plan
 # file (and, for the third, of the session's roster):
 #
-#   fill_ledger_live <plan>            0 when the plan's `current:` is numeric and >= 4
-#                                      (wave scale) or matches `^T[0-9]+$` (task scale);
-#                                      1 otherwise. The cheap gate a caller asks BEFORE
-#                                      paying for a table read.
+#   fill_ledger_live <plan>            0 when the plan's `## SDLC State` carries a non-blank
+#                                      `approved-by:` line (wave-26 T13; D3), 1 otherwise.
+#                                      The cheap gate a caller asks BEFORE paying for a
+#                                      table read.
 #   fill_step_token <plan>             the step the ready set is asked at: the numeric
 #                                      `current:` with its sub-step letter stripped, or
 #                                      `T<n>` when the table is task-shaped. Empty when the
@@ -18,10 +18,12 @@
 #                                      scale it decides only the gate acts (integrate,
 #                                      close); a work row is ready at any step (wave-20 Δ1).
 #   fill_ready_set <plan> <rung> <open>
-#                                      the ready ids, one per line, in TABLE order, trimmed
-#                                      to <rung> - <open>. Empty and silent whenever the
-#                                      ledger is not live, the gap is closed, or the table
-#                                      carries no ready row.
+#                                      the ready ids, one per line, in TABLE order, the
+#                                      writers trimmed to <rung> - <open> and the rows that
+#                                      take no writer slot offered whatever the gap. Empty
+#                                      and silent whenever the ledger is not live or the
+#                                      table carries no ready row.
+#   fill_readonly_ids <plan>           the ids of the rows that take no writer slot.
 #   fill_name <roster> <task id>       the agent NAME to dispatch that id under, which is the
 #                                      id itself until this session has already spent it.
 #   fill_row_launched <task id> <names>
@@ -55,9 +57,9 @@
 #
 # READINESS IS THE PREREQUISITE GRAPH (wave-20 REQ-5, Δ1, Δ6; ADR-036). The set this library
 # returns stopped being "this step's ready rows": a pending row whose prerequisites have all
-# landed is ready whatever its step, once the run is past Step-3 approval (`fill_ledger_live`,
-# unchanged), and only an `integrate` or `close` row still waits for `current:` to reach its
-# step. The rule is `units_ready`'s; this file passes it the step token and trims the answer,
+# landed is ready whatever its step, once the plan carries its approval (`fill_ledger_live`, the
+# `approved-by:` line since wave-26 T13), and only an `integrate` or `close` row — and, in a
+# table without the `reads` column, the release — still waits for `current:` to reach its step. The rule is `units_ready`'s; this file passes it the step token and trims the answer,
 # so the tick, the wall and the card inherit it with no change of their own.
 #
 # SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME. Every caller reads a verb through
@@ -123,34 +125,51 @@ fi
 # that rewrites a plan it has read through this file forgets it after the write. A path that
 # is not a file is answered "" and never memoised, so a plan created later in the same process
 # is still read. Sourcing this file resets the memo.
+#
+# AND THE APPROVAL, IN THE SAME PASS (wave-26 T13; D3, AC-6.2). The ledger is live on the plan's
+# `approved-by:` line, which only the user's act writes, so the one read of `## SDLC State` that
+# finds `current:` finds that line too: `_FILL_APPROVED` is 1 when a non-blank `approved-by:`
+# sits in the section, the reading `units.sh` takes for `approval:plan`.
 _FILL_CURRENT_PLAN=""
 _FILL_CURRENT_VALUE=""
+_FILL_APPROVED=0
 fill_current_forget() {  # -> drops the memo; the next reader parses whatever path it names
   _FILL_CURRENT_PLAN=""
   _FILL_CURRENT_VALUE=""
+  _FILL_APPROVED=0
 }
-_fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE for it; parses at most once
-  local plan="${1:-}"
+_fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE and _FILL_APPROVED; parses at most once
+  local plan="${1:-}" got
   if [ -n "$plan" ] && [ "$plan" = "$_FILL_CURRENT_PLAN" ]; then
     return 0
   fi
   if [ -z "$plan" ] || [ ! -f "$plan" ]; then
     _FILL_CURRENT_VALUE=""
+    _FILL_APPROVED=0
     _FILL_CURRENT_PLAN=""
     return 0
   fi
-  _FILL_CURRENT_VALUE="$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null | awk '
+  got="$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
-    fence || got { next }
+    fence { next }
     /^## SDLC State/ { flag = 1; next }
     /^## / { flag = 0 }
-    flag && /^[[:space:]]*current[[:space:]]*:/ {
+    flag && !got && /^[[:space:]]*current[[:space:]]*:/ {
       v = $0
       sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, "", v)
       gsub(/[[:space:]]/, "", v)
-      printf "%s", v
+      cur = v
       got = 1
-    }')"
+    }
+    flag && /^[[:space:]]*-?[[:space:]]*approved-by[[:space:]]*:/ {
+      v = $0
+      sub(/^[[:space:]]*-?[[:space:]]*approved-by[[:space:]]*:/, "", v)
+      if (v ~ /[^[:space:]]/) appr = 1
+    }
+    END { printf "%s\037%d", cur, appr }')"
+  _FILL_CURRENT_VALUE="${got%$'\037'*}"
+  _FILL_APPROVED="${got##*$'\037'}"
+  case "$_FILL_APPROVED" in 1) : ;; *) _FILL_APPROVED=0 ;; esac
   _FILL_CURRENT_PLAN="$plan"
 }
 _fill_current_field() {  # <plan path> -> the raw current: value, or ""
@@ -162,34 +181,25 @@ _fill_current_field() {  # <plan path> -> the raw current: value, or ""
 #
 # fill_ledger_live <plan> -> 0 when this run has a schedule to fill from, 1 when it does not.
 #
-# LIVE MEANS "PAST THE APPROVAL GATE". At wave scale that is `current:` numeric and >= 4:
-# Steps 0-3 are research, spec, plan and REVIEW, and dispatching into a task table nobody has
-# ratified sends a writer against a plan that may not survive its own review (the 2026-09-05
-# incident the tick's approval gate closed). At task scale there is no numbered step to
-# compare — the field names the UNIT the run is on, `T<n>` — and a run on a unit is a run
-# past its plan.
+# LIVE MEANS "PAST THE APPROVAL GATE", AND THE GATE IS THE USER'S ACT (wave-26 T13; D3,
+# AC-6.2). Dispatching into a task table nobody has ratified sends a writer against a plan that
+# may not survive its own review (the 2026-09-05 incident the tick's approval gate closed).
+# Through 1.10 this asked `current: >= 4` (or a task-scale `T<n>`), a field the orchestrator
+# writes itself; it now asks the plan's `approved-by:` line, written on the user's literal
+# approval and the one fact `hooks/dispatch-preflight.sh` already refuses a writer without. The
+# two readers of "may a writer start" agree, and a plan approved before `current:` moves fills.
 #
-# THE SUB-STEP LETTER IS THIS REPO'S OWN GRAMMAR (`current: 4b`), stripped before the digits
-# are tested, exactly as `run_open` and the tick's reader strip it.
-#
-# IT ASKS THE FIELD AND NOTHING ELSE. Whether the table AGREES with the field is
+# IT ASKS THE LINE AND NOTHING ELSE. Whether `current:` reads against the table is
 # `fill_step_token`'s question, and whether there is ROOM is the caller's: this is the cheap
 # gate a caller asks before paying for a table read.
 fill_ledger_live() {  # <plan> -> 0 live · 1 not
-  local raw step
+  fill_plan_approved "${1:-}"
+}
+
+# fill_plan_approved <plan> -> 0 when `## SDLC State` carries a non-blank `approved-by:` line.
+fill_plan_approved() {
   _fill_current_load "${1:-}"
-  raw="$_FILL_CURRENT_VALUE"
-  [ -n "$raw" ] || return 1
-  step="${raw%[ab]}"
-  case "$step" in
-    ''|*[!0-9]*) : ;;
-    *) [ "$step" -ge 4 ] 2>/dev/null && return 0
-       return 1 ;;
-  esac
-  case "$raw" in
-    T*) case "${raw#T}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac ;;
-  esac
-  return 1
+  [ "$_FILL_APPROVED" = 1 ]
 }
 
 # ── WHICH STEP IS THE READY SET ASKED AT? ─────────────────────────────────────
@@ -270,38 +280,80 @@ fill_step_token() {  # <plan> -> a numeric step, a `T<n>`, or ""
 # fourth operand is the standing decline's ids (`fill_standing_decline`, below): those rows are
 # skipped and do not take a slot, so the gap goes to the next ready row in table order — the
 # rows the stop wall names when it refuses a turn for the rows the decline did not answer.
+#
+# A ROW THAT TAKES NO WRITER SLOT IS OFFERED OUTSIDE THE GAP (wave-26 T13; D9). The gap is the
+# writer budget; a verify or review row runs a read-only role (`fill_readonly_ids`, below), so a
+# full budget is no reason to hold it. Those rows are printed whenever they are ready, in their
+# table place, and only the writers are trimmed, in table order — so a closed gap still prints
+# the read-only rows, and the gate on the gap is the writers' alone.
 fill_ready_set() {  # <plan> <rung> <open> [<answered ids, space-joined>] -> ready ids, one per line
   local plan="${1:-}" rung="${2:-}" open="${3:-}" gap
   fill_ledger_live "$plan" || return 0
   case "$rung" in ''|*[!0-9]*) return 0 ;; esac
   case "$open" in ''|*[!0-9]*) open=0 ;; esac
   gap=$(( rung - open ))
-  [ "$gap" -gt 0 ] || return 0
+  [ "$gap" -gt 0 ] || gap=0
   units_memoised "$plan" _fill_ready_rows "$plan" "$gap" "${4:-}"
 }
 
-# _fill_ready_rows <plan> <gap> -> the step token's ready ids, trimmed to <gap>. The body of
-# `fill_ready_set` past its cheap gates, run under `units_memoised` so the header questions
-# `fill_step_token` asks at task scale and the rows `units_ready` reads are ONE parse of the
-# table (wave-19 REQ-6, D7; AC-6.2). The gates above ask only `current:` (already read once
-# per process) and arithmetic, so a closed gap or a ledger that is not live still reads no
-# table at all; which gate refuses first changes nothing, since each of them prints nothing.
-_fill_ready_rows() {  # <plan> <gap> [<answered ids>]
-  local plan="${1:-}" gap="${2:-0}" skip=" ${3:-} " step ready id n=0
+# _fill_ready_rows <plan> <gap> -> the step token's ready ids, the writers trimmed to <gap>. The
+# body of `fill_ready_set` past its cheap gates, run under `units_memoised` so the header
+# questions `fill_step_token` asks at task scale, the rows `units_ready` reads and the kinds
+# `fill_readonly_ids` reads are ONE parse of the table (wave-19 REQ-6, D7; AC-6.2). The gates
+# above ask only the approval line (read once per process with `current:`) and arithmetic, so a
+# ledger that is not live still reads no table at all.
+_fill_ready_rows() {  # <plan> <gap> [<answered ids> [tagged]]
+  local plan="${1:-}" gap="${2:-0}" skip=" ${3:-} " tag="${4:-}" step ready id n=0 ro tab=$'\t'
   step="$(fill_step_token "$plan")"
   [ -n "$step" ] || return 0
   ready="$(units_ready "$plan" "$step")" || return 0
   [ -n "$ready" ] || return 0
+  ro=" $(fill_readonly_ids "$plan") "
   while IFS= read -r id; do
     [ -n "$id" ] || continue
     case "$skip" in *" $id "*) continue ;; esac
-    [ "$n" -lt "$gap" ] || break
-    printf '%s\n' "$id"
+    case "$ro" in *" $id "*) printf '%s%s\n' "$id" "${tag:+${tab}r}"; continue ;; esac
+    [ "$n" -lt "$gap" ] || continue
+    printf '%s%s\n' "$id" "${tag:+${tab}w}"
     n=$((n + 1))
   done <<FILL_READY_ROWS
 $ready
 FILL_READY_ROWS
   return 0
+}
+
+# fill_ready_tagged <plan> -> every ready id, untrimmed, as `<id><TAB>w` (takes a writer slot) or
+# `<id><TAB>r` (does not), table order. The stop wall's reading: it trims the writers to its own
+# free slots and owes every read-only row, from the one parse `_fill_ready_rows` takes.
+fill_ready_tagged() {  # <plan>
+  local plan="${1:-}"
+  fill_ledger_live "$plan" || return 0
+  units_memoised "$plan" _fill_ready_rows "$plan" 99999 "" tagged
+}
+
+# ── THE ROWS THAT TAKE NO WRITER SLOT (wave-26 T13; D9) ───────────────────────
+#
+# fill_readonly_ids <plan> -> the ids, space-joined, of the rows whose kind is `verify` or
+# `review` and whose `Files` cell names no tracked path, in table order.
+#
+# THE RULE IS THE KIND, BECAUSE THE KIND IS WHAT THE TABLE CARRIES (A-T13.2). A writer slot is a
+# writer's: an agent that edits a worktree. The dispatch wall knows the role it is launching
+# (`role_is_readonly`, lib/roster.sh), but a plan row names no role — its `agent` cell is a NAME
+# (`w26-T4`, `implementor`, `auditor`, whatever the author wrote), and reading a role out of
+# free text would make the budget depend on spelling. The kind is an enum the validator holds:
+# a `verify` row runs the floor and the walk, a `review` row reads a diff, and both write only
+# their own record. Every other kind — build, test, doc, prototype, integrate, close — edits the
+# tree and is trimmed to the gap. A verify row's suite run takes a place of its own (D8's
+# booking), not a writer slot, so offering it outside the gap overcommits nothing the gap counts.
+#
+# …WHILE ITS FILES SAY SO (wave-26 T46; review 10 answer b). Nothing holds a verify or review row
+# to the record: one whose Files name tracked code was offered whatever the gap, demanded by the
+# wall, and refused by the dispatch budget, which counts the writer role it runs under. Such a
+# row takes a writer place like any writer and, at a full budget, waits with the budget reason;
+# the test is units.sh `writes_head`, the predicate that decides which rows owe a tree.
+fill_readonly_ids() {  # <plan> -> ids, space-joined
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' "$(_units_files_awk)"'
+    ($3 == "verify" || $3 == "review") && !writes_head($9) { printf "%s%s", (n++ ? " " : ""), $1 }'
 }
 
 # ── THE NAME A ROW IS DISPATCHED UNDER ────────────────────────────────────────
@@ -374,9 +426,10 @@ fill_row_launched() {  # <task id> <names, comma-joined> -> 0 launched · 1 not
 # still holds next turn ("T7 waits on T6's merge") used to have to be written again on every
 # turn end. The fill ledger keeps each Stop's ready set, `current:` and decline, so the
 # session's latest declined line is the standing answer: the ids it answered are its ready set
-# less the rows that turn launched, and it stands while `current:` reads as it did then. A row
-# it never saw, or a moved `current:`, is unanswered. Another session's line is not this
-# conversation's answer.
+# less the rows that turn launched. A row it never saw is unanswered. A move of `current:` alone
+# re-asks nothing (wave-26 T15, AC-4.6; D16): the decline stands until the READY SET gains a row
+# it did not answer. The third operand is kept so neither caller changes. Another session's
+# line is not this conversation's answer.
 #
 # ONE READER, TWO PROCESSES (Step-6 review C2/U1). The stop wall's collector refuses a turn
 # only for the rows this does not answer, and the tick prints it and leaves those rows out of
@@ -405,7 +458,6 @@ fill_standing_decline() {  # <ledger path> <session id> <current: as read now>
     END { if (last != "") print last }')"
   [ -n "$line" ] || return 0
   IFS=$'\037' read -r at st_cur ready launched reason <<< "$line"
-  [ "$st_cur" = "$cur" ] || return 0
   for id in ${ready//,/ }; do
     fill_row_launched "$id" "$launched" && continue
     ids="${ids}${ids:+ }${id}"

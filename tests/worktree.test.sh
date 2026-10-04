@@ -117,6 +117,8 @@ bind_plan() {  # <repo> <sid> <working-branch or empty> -> echoes the plan path
 # Every ref and its object, one line each: a refused land changes NONE of them, which is
 # "no merge commit anywhere" read off git rather than off the refusal line.
 refs_of() { git -C "$1" for-each-ref --format='%(refname) %(objectname)'; }
+# Every worktree, its path and its branch, without the heads: what a land removes or keeps.
+trees_of() { git -C "$1" worktree list --porcelain | grep -v '^HEAD '; }
 
 # shellcheck source=/dev/null
 . "$LIB" 2>/dev/null || { echo "FAIL: the library does not source ($LIB)"; exit 1; }
@@ -210,8 +212,9 @@ section "Group 3b: worktree_land — §land-with-alias (D7)"
 # D7 plants the alias `create` now leaves in every spawned tree. A tree whose
 # ONLY untracked entry is that alias must land exactly as it always did — the
 # dirty-tree check reads `.gitignore:43`'s `.bionic` entry, unaffected by
-# whether it names a directory or a symlink — and `_wt_drop_legacy_link`
-# already deletes the link on the way in, before the dirty check runs.
+# whether it names a directory or a symlink — and the link is deleted just
+# before `git worktree remove` (wave-26 D19; §LAND-KEEP covers a project that
+# does not ignore the symlink shape).
 
 LA="$(new_repo "$TMP/land-alias")"
 LAT="$(new_tree "$LA" withalias)"
@@ -559,6 +562,118 @@ expect_match "…nor with the lander's session id" \
 stop_runner
 
 rm -f "$CLAUDE_HOME/sessions/$$.json"
+
+# Arm 10 — A COMMAND THAT ONLY MENTIONS THE RUNNER IS NOT THE RUNNER (T31, found live in
+# wave 26). The harness runs every Bash call as `zsh -c '… <the whole command text>'`, so a
+# wait loop or a progress note naming `tests/run.sh` is a process in the project whose command
+# line holds that text. Only a process that RUNS the script counts: its interpreter's script
+# word, or its argv[0], ends in `tests/run.sh`, and that path resolves to a file.
+MENTION_PID=""
+start_mention() {  # <cwd> <shell> <-c text> -> MENTION_PID, once ps shows the text
+  ( cd "$1" && exec "$2" -c "$3" ) >/dev/null 2>&1 &
+  MENTION_PID=$!
+  local i=0
+  while [ $i -lt 100 ]; do
+    case "$(ps -o command= -p "$MENTION_PID" 2>/dev/null)" in *tests/run.sh*) return 0 ;; esac
+    i=$((i+1)); sleep 0.05
+  done
+  return 1
+}
+stop_mention() {
+  [ -n "$MENTION_PID" ] || return 0
+  kill "$MENTION_PID" 2>/dev/null; wait "$MENTION_PID" 2>/dev/null
+  MENTION_PID=""
+}
+trap 'stop_runner; stop_mention; rm -rf "$TMP"' EXIT
+BT10="$(new_tree "$S" mention-arm)"
+expect_true "a shell started in the root whose -c text names the runner bare" \
+  start_mention "$S" bash 'while :; do sleep 1; done # bash tests/run.sh'
+expect_match "a shell whose -c text names tests/run.sh does not refuse the land" \
+  "spawn-worktree: LANDED branch=mention-arm *" "$(worktree_land "$BT10" wave/fixture)"
+stop_mention
+BT11="$(new_tree "$S" quoted-mention-arm)"
+expect_true "a shell started in the root whose -c text quotes the runner, as the harness's wait loops do" \
+  start_mention "$S" bash "while :; do sleep 1; done; until ! pgrep -f 'tests/run.sh'; do sleep 30; done"
+expect_match "a quoted mention does not refuse either (it once printed script=unreadable)" \
+  "spawn-worktree: LANDED branch=quoted-mention-arm *" "$(worktree_land "$BT11" wave/fixture)"
+# The same world with the real runner started beside the mention: the runner refuses, and the
+# refusal names the runner, not the mention.
+BT12="$(new_tree "$S" mention-and-runner-arm)"
+expect_true "the mention is still running" kill -0 "$MENTION_PID"
+expect_true "a stand-in runner started beside it (relative, cwd the root)" start_runner "$S" "tests/run.sh"
+OUTB12="$(worktree_land "$BT12" wave/fixture)"; RCB12=$?
+expect_match "a real bash tests/run.sh in the root still refuses, naming the runner" \
+  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} cwd=${S} script=${S}/tests/run.sh" "$OUTB12"
+expect_eq    "that refusal exits 2" "2" "$RCB12"
+stop_runner
+stop_mention
+# A -c string whose FIRST word is a runner path is still a command string: here bash tries a
+# non-executable `tests/run.sh` in a directory of the root, fails, and loops.
+mkdir -p "$S/sub/tests"; printf 'not a runner\n' > "$S/sub/tests/run.sh"
+expect_true "a shell started whose -c string opens with a tests/run.sh that resolves in the root" \
+  start_mention "$S/sub" bash 'tests/run.sh 2>/dev/null; while :; do sleep 1; done'
+expect_match "a -c string is never a script, whatever its first word" \
+  "spawn-worktree: LANDED branch=mention-and-runner-arm *" "$(worktree_land "$BT12" wave/fixture)"
+stop_mention
+rm -rf "$S/sub"
+BT12="$(new_tree "$S" runner-shapes-arm)"
+# An interpreter option before the script, and the script as argv[0], are runners too.
+start_runner_argv() {  # <cwd> <glob> <argv>... -> RUNNER_PID, once ps shows a command matching <glob>
+  local d="$1" g="$2"; shift 2
+  ( cd "$d" && exec "$@" ) >/dev/null 2>&1 &
+  RUNNER_PID=$!
+  local i=0
+  while [ $i -lt 100 ]; do
+    [[ "$(ps -o command= -p "$RUNNER_PID" 2>/dev/null)" == $g ]] && return 0
+    i=$((i+1)); sleep 0.05
+  done
+  return 1
+}
+expect_true "a stand-in runner started as bash -o pipefail tests/run.sh" \
+  start_runner_argv "$S" "*bash -o pipefail tests/run.sh" bash -o pipefail tests/run.sh
+expect_match "a runner behind an interpreter option refuses" \
+  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} *script=${S}/tests/run.sh" \
+  "$(worktree_land "$BT12" wave/fixture)"
+stop_runner
+# BUNDLED OPTIONS (review 7 F7). Each `o` or `O` in a cluster takes the next word, as bash reads
+# it, so the common `bash -euo pipefail <runner>` is the runner, not `pipefail`.
+expect_true "a stand-in runner started as bash -euo pipefail tests/run.sh" \
+  start_runner_argv "$S" "*bash -euo pipefail tests/run.sh" bash -euo pipefail tests/run.sh
+expect_match "a runner behind a bundled -euo pipefail refuses" \
+  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} *script=${S}/tests/run.sh" \
+  "$(worktree_land "$BT12" wave/fixture)"
+stop_runner
+# The walk itself, one argv per row, as `ps` would print it. Runners first, then the command
+# strings and stdin the same walk must never take for a script.
+for argv in "bash tests/run.sh" "bash -e tests/run.sh" "bash -o pipefail tests/run.sh" \
+            "bash -euo pipefail tests/run.sh" "bash -eo pipefail tests/run.sh" \
+            "bash +euo pipefail tests/run.sh" "bash -oo pipefail errexit tests/run.sh" \
+            "bash -eO extglob tests/run.sh" "bash - tests/run.sh" "bash -- tests/run.sh" \
+            "bash + tests/run.sh" "bash --rcfile /dev/null tests/run.sh" "zsh -euo pipefail tests/run.sh"; do
+  # shellcheck disable=SC2086  # one argv word per word, as ps prints it
+  expect_eq "the walk finds the runner in: ${argv}" "tests/run.sh" "$(_wt_runner_script $argv)"
+done
+for argv in "bash -c tests/run.sh" "bash -ec tests/run.sh" "bash -euo pipefail -c tests/run.sh" \
+            "bash -co pipefail tests/run.sh" "bash +c tests/run.sh" "bash -s tests/run.sh" \
+            "bash -o pipefail" "bash -euo"; do
+  # shellcheck disable=SC2086
+  expect_false "the walk finds no runner in: ${argv}" _wt_runner_script $argv
+done
+expect_true "a process started with the root's tests/run.sh as its argv[0]" \
+  start_runner_argv "$ELSE" "$S/tests/run.sh 30" bash -c "exec -a '$S/tests/run.sh' sleep 30"
+expect_match "a process whose argv[0] is the runner's script refuses" \
+  "spawn-worktree: REFUSED reason=suite-running pid=${RUNNER_PID} *script=${S}/tests/run.sh" \
+  "$(worktree_land "$BT12" wave/fixture)"
+stop_runner
+# A runner path that resolves to no file is not a runner: the directory is the root's, the
+# script is not there.
+mkdir -p "$S/empty/tests"
+expect_true "a process started with a missing tests/run.sh in the root as its argv[0]" \
+  start_runner_argv "$ELSE" "$S/empty/tests/run.sh 30" bash -c "exec -a '$S/empty/tests/run.sh' sleep 30"
+expect_match "a runner path that resolves to no file does not refuse" \
+  "spawn-worktree: LANDED branch=runner-shapes-arm *" "$(worktree_land "$BT12" wave/fixture)"
+stop_runner
+rmdir "$S/empty/tests" "$S/empty"
 
 section "Group 6: worktree_land — the legacy link, and the branch, and prune"
 
@@ -908,7 +1023,6 @@ WKT="$TMP/ws-reader-tmplink"; mkdir -p "$WKT/.bionic"
 ln -s "$WK/.bionic/tmp" "$WKT/.bionic/tmp"
 expect_eq "a symlinked .bionic/tmp is refused" "rc=2" "$(wk workspace_for_name "$WKT" "$WKSID" a)"
 
-
 section "Group 11b: a recorded path counts only when git lists it as a linked worktree (wave-25 T18, critic C1, A-orch-36)"
 #
 # The record file sits in `.bionic/tmp`, and a script the permission hook never sees can append
@@ -1023,5 +1137,1180 @@ WGBROKEN="$TMP/ws-git-broken"; mkdir -p "$WGBROKEN"
 printf '#!/bin/bash\nexit 1\n' > "$WGBROKEN/git"; chmod +x "$WGBROKEN/git"
 expect_eq "with a git that fails, the reader refuses too (rc 2)" "rc=2" \
   "$(PATH="$WGBROKEN:$PATH" wk workspace_for_name "$WG" "$WGSID" f)"
+
+# THE LAUNCH RECORDER'S READER (wave-26 T40). The launch recorder fills a plan row's worktree and
+# base cells from this record, so it asks the same rule: the tree is the one workspace_for_name
+# answers, and the base is the one on the last line naming that tree.
+expect_true "workspace_record_for_name is defined" declare -F workspace_record_for_name
+wg_line_b() {  # <name> <path> <base>
+  printf 'workspace/v1|session=%s|name=%s|path=%s|branch=wt/x|base=%s|plan=none|at=2026-10-04T00:00:00Z\n' "$WGSID" "$1" "$2" "$3"
+}
+{ wg_line_b f "$WGT" aaaaaaaa; wg_line_b f "$WG" bbbbbbbb; } > "$WGF"
+expect_eq "record: a forged line naming the main checkout is skipped, the true tree and its base answer" \
+  "$(printf '%s\taaaaaaaa\nrc=0' "$WGT")" "$(wk workspace_record_for_name "$WG" "$WGSID" f)"
+{ wg_line_b f "$WGIN" cccccccc; wg_line_b f "$WGT" dddddddd; } > "$WGF"
+expect_eq "record: the last true line answers, with its own base" \
+  "$(printf '%s\tdddddddd\nrc=0' "$WGT")" "$(wk workspace_record_for_name "$WG" "$WGSID" f)"
+{ wg_line_b f "$WGT" eeeeeeee; wg_line_b g "$WGIN" ffffffff; wg_line_b f "$WGPLAIN" 99999999; } > "$WGF"
+expect_eq "record: another name's line and an untrue line leave the true tree's base" \
+  "$(printf '%s\teeeeeeee\nrc=0' "$WGT")" "$(wk workspace_record_for_name "$WG" "$WGSID" f)"
+{ wg_line_b u "$WG" 11111111; wg_line_b u "$WGPLAIN" 22222222; } > "$WGF"
+expect_eq "record: only untrue lines: none (rc 1)" "rc=1" "$(wk workspace_record_for_name "$WG" "$WGSID" u)"
+expect_eq "record: under a root git cannot read, refused (rc 2)" "rc=2" "$(wk workspace_record_for_name "$WGNR" "$WGSID" f)"
+
+# ---------------------------------------------------------------------------
+# THE LANDING RULE (wave-26 T10, T31, D7, D19, T61). A tree lands when, for every suite stamped at
+# its current head, the NEWEST stamp of that suite is green on a clean tree — and it must first contain what
+# landed since only when that landed work touches a file the tree also changed (A-orch-26).
+# The stamp is one line per suite-class run, appended to the tree's own git directory by the
+# booking shim (T6); these arms write the lines by hand, in exactly the interface's shape: since
+# T61 the shim names the suite a run was for (`suites=`, before `cmd=`), and these lines stand for
+# runs of one suite, tests/one.test.sh, so they name it as the shim now does. A line with no
+# `suites=` (an older shim's) is §LAND-SUITES's row (g).
+stamp_file() { printf '%s/bionic-stamps' "$(git -C "$1" rev-parse --absolute-git-dir)"; }
+stamp() {  # <tree> <head> <dirty> <rc>
+  printf 'stamp/v1|head=%s|dirty=%s|rc=%s|at=2026-10-03T00:00:00Z|suites=one.test.sh|cmd=bash tests/one.test.sh\n' \
+    "$2" "$3" "$4" >> "$(stamp_file "$1")"
+}
+green_stamp() { stamp "$1" "$(git -C "$1" rev-parse HEAD)" 0 0; }
+# A file six lines long that two branches can each change on a different line and still merge
+# cleanly, so what refuses an overlap is the landing rule and never a conflict.
+shared_file() {  # <checkout> — commits shared.txt on the branch it sits on
+  printf 'l1\nl2\nl3\nl4\nl5\nl6\n' > "$1/shared.txt"
+  git -C "$1" add shared.txt && git -C "$1" commit --quiet -m "shared file"
+}
+set_line() {  # <checkout> <file> <line no> <text> — rewrites one line and commits it
+  awk -v n="$3" -v t="$4" 'NR == n { $0 = t } { print }' "$1/$2" > "$1/$2.new" && mv "$1/$2.new" "$1/$2"
+  git -C "$1" commit --quiet -am "$2 line $3"
+}
+# The record link resolves: a symlink at <tree>/.bionic that reaches the main root's state.
+link_ok() { test -L "$1/.bionic" && test -f "$1/.bionic/docs/note.md"; }
+
+section "§LAND-GREEN: a tree whose stamped run at its head is green lands, no full run asked (AC-3.1)"
+
+LG="$(new_repo "$TMP/land-green")"
+LGT="$(new_tree "$LG" green-arm)"
+# The extractor is proved on real output before anything reads through it: the stamp file is
+# the tree's PRIVATE git directory, not the shared one, and a written line reads back.
+expect_match "the stamp file sits in the tree's own git directory" \
+  "${LG}/.git/worktrees/green-arm/bionic-stamps" "$(stamp_file "$LGT")"
+stamp "$LGT" "0000000000000000000000000000000000000000" 0 1
+green_stamp "$LGT"
+expect_match "the last stamp line reads back in the interface's shape" \
+  "stamp/v1|head=$(git -C "$LGT" rev-parse HEAD)|dirty=0|rc=0|at=*|suites=one.test.sh|cmd=bash tests/one.test.sh" \
+  "$(tail -n 1 "$(stamp_file "$LGT")")"
+OUTLG="$(worktree_land "$LGT" wave/fixture)"; RCLG=$?
+expect_match "a green run of one suite at the tree's head lands (an earlier red line is history)" \
+  "spawn-worktree: LANDED branch=green-arm onto=wave/fixture *" "$OUTLG"
+expect_eq "that land exits 0" "0" "$RCLG"
+
+# A tree whose contract runs no suite has no stamp file at all, and needs none.
+LGD="$(new_tree "$LG" docs-arm)"
+expect_false "a docs-only tree has no stamp file" test -e "$(stamp_file "$LGD")"
+expect_match "and it lands without one" \
+  "spawn-worktree: LANDED branch=docs-arm onto=wave/fixture *" "$(worktree_land "$LGD" wave/fixture)"
+
+section "§LAND-CURRENT: behind on a file it also changed is not-current, behind only on other files lands; a stale green run, stale-proof (AC-5.3)"
+
+LC="$(new_repo "$TMP/land-current")"
+shared_file "$LC"
+
+# BEHIND ONLY ON OTHER FILES. Two trees side by side; the first's landing touches first.txt,
+# which the second never changed, so the second lands on its own green run without merging.
+LCA="$(new_tree "$LC" first)"
+LCN="$(new_tree "$LC" apart)"
+green_stamp "$LCA"; green_stamp "$LCN"
+expect_match "the first of two side-by-side trees lands" \
+  "spawn-worktree: LANDED branch=first *" "$(worktree_land "$LCA" wave/fixture)"
+expect_eq "fixture: the second now lacks the head it lands onto" "1" \
+  "$(git -C "$LCN" merge-base --is-ancestor wave/fixture HEAD; echo $?)"
+OUTLN="$(worktree_land "$LCN" wave/fixture)"; RCLN=$?
+expect_match "a tree lacking only a commit that touches other files lands" \
+  "spawn-worktree: LANDED branch=apart onto=wave/fixture *" "$OUTLN"
+expect_eq "that land exits 0" "0" "$RCLN"
+
+# BEHIND ON A FILE IT ALSO CHANGED. Both trees change shared.txt, on lines far apart: the merge
+# would go through cleanly and produce a shared.txt neither tree's green run ever saw.
+LCC="$(new_tree "$LC" third)";  set_line "$LCC" shared.txt 1 "third"
+LCB="$(new_tree "$LC" second)"; set_line "$LCB" shared.txt 6 "second"
+green_stamp "$LCC"; green_stamp "$LCB"
+expect_match "a tree changing shared.txt lands" \
+  "spawn-worktree: LANDED branch=third *" "$(worktree_land "$LCC" wave/fixture)"
+LCREFS="$(refs_of "$LC")"
+OUTLC="$(worktree_land "$LCB" wave/fixture)"; RCLC=$?
+expect_match "the second, green but lacking a landed commit on a file it changed, is refused not-current" \
+  "spawn-worktree: REFUSED reason=not-current branch=second onto=wave/fixture *" "$OUTLC"
+expect_match "the refusal names the file both changed" "* files=shared.txt *" "$OUTLC"
+expect_no_match "and not the file only the tree changed" "*second.txt*" "$OUTLC"
+expect_match "the refusal names the head it lacks" "*onto_head=$(git -C "$LC" rev-parse wave/fixture) *" "$OUTLC"
+expect_match "and names the fix in one line" \
+  "*merge wave/fixture into the tree, re-run its suites, land again" "$OUTLC"
+expect_eq   "that refusal exits 2" "2" "$RCLC"
+expect_eq   "no ref moved" "$LCREFS" "$(refs_of "$LC")"
+expect_true "the tree survives" test -d "$LCB"
+
+# The fix, step one: merge the landed branch in. The tree is now current, but its green run
+# was on the head before the merge.
+git -C "$LCB" merge --quiet --no-edit wave/fixture >/dev/null 2>&1
+expect_eq "the tree now contains the branch it lands onto" "0" \
+  "$(git -C "$LCB" merge-base --is-ancestor wave/fixture HEAD; echo $?)"
+LCREFS="$(refs_of "$LC")"   # the merge moved the tree's own branch; nothing moves from here
+OUTLH="$(worktree_land "$LCB" wave/fixture)"; RCLH=$?
+expect_match "a green run on an earlier head is refused stale-proof, naming the head" \
+  "spawn-worktree: REFUSED reason=stale-proof why=head *" "$OUTLH"
+expect_match "naming both heads" \
+  "*stamp_head=*head=$(git -C "$LCB" rev-parse HEAD)*" "$OUTLH"
+expect_match "and the fix" "*re-run the tree's suites at its head, land again" "$OUTLH"
+expect_eq   "that refusal exits 2" "2" "$RCLH"
+expect_eq   "no ref moved" "$LCREFS" "$(refs_of "$LC")"
+
+# On a dirty tree.
+stamp "$LCB" "$(git -C "$LCB" rev-parse HEAD)" 2 0
+expect_match "a green run at the head on a dirty tree is refused stale-proof, naming dirt" \
+  "spawn-worktree: REFUSED reason=stale-proof why=dirty dirty=2 *" "$(worktree_land "$LCB" wave/fixture)"
+# Red.
+stamp "$LCB" "$(git -C "$LCB" rev-parse HEAD)" 0 1
+expect_match "a red run at the head on a clean tree is refused stale-proof, naming red" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 *" "$(worktree_land "$LCB" wave/fixture)"
+# A last line that is not a stamp at all is not proof either.
+printf 'garbage\n' >> "$(stamp_file "$LCB")"
+expect_match "a last line that is no stamp is refused stale-proof, unreadable" \
+  "spawn-worktree: REFUSED reason=stale-proof why=unreadable *" "$(worktree_land "$LCB" wave/fixture)"
+: > "$(stamp_file "$LCB")"
+expect_match "an empty stamp file is refused stale-proof, unreadable" \
+  "spawn-worktree: REFUSED reason=stale-proof why=unreadable *" "$(worktree_land "$LCB" wave/fixture)"
+
+# THE COMMAND'S TEXT NEVER SPEAKS FOR THE RUN (review 2 F2). `cmd=` is the last field and free
+# text; the reader stops at it, whatever follows. The first line is the review's probe input.
+LCH="$(git -C "$LCB" rev-parse HEAD)"
+printf 'stamp/v1|head=%s|dirty=0|rc=1|at=t|suites=one.test.sh|cmd=a|rc=0\n' "$LCH" >> "$(stamp_file "$LCB")"
+expect_eq "fixture: the last line carries rc=0 after cmd=" "cmd=a|rc=0" \
+  "$(tail -n 1 "$(stamp_file "$LCB")" | sed 's/.*|cmd=/cmd=/')"
+expect_match "a red run whose command text carries |rc=0 is refused stale-proof, red" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 *" "$(worktree_land "$LCB" wave/fixture)"
+printf 'stamp/v1|head=%s|dirty=3|rc=0|at=t|suites=one.test.sh|cmd=a|dirty=0\n' "$LCH" >> "$(stamp_file "$LCB")"
+expect_match "a dirty run whose command text carries |dirty=0 is refused stale-proof, dirty" \
+  "spawn-worktree: REFUSED reason=stale-proof why=dirty dirty=3 *" "$(worktree_land "$LCB" wave/fixture)"
+# Since T61 every line at the head is read, so this row needs a file holding none: a line on
+# another head is history beside a line at the head, and only a file with NO line at the head is
+# refused why=head.
+: > "$(stamp_file "$LCB")"
+printf 'stamp/v1|head=%s|dirty=0|rc=0|at=t|suites=one.test.sh|cmd=a|head=%s\n' "0000000000000000000000000000000000000000" "$LCH" \
+  >> "$(stamp_file "$LCB")"
+expect_match "a run on another head whose command text carries the tree's head is refused stale-proof, head" \
+  "spawn-worktree: REFUSED reason=stale-proof why=head stamp_head=0000000000000000000000000000000000000000 *" \
+  "$(worktree_land "$LCB" wave/fixture)"
+# A key twice BEFORE cmd= is no line the shim writes: which one holds is not a guess to make.
+printf 'stamp/v1|head=%s|dirty=0|rc=1|rc=0|at=t|suites=one.test.sh|cmd=a\n' "$LCH" >> "$(stamp_file "$LCB")"
+expect_match "a key given twice before cmd= is refused stale-proof, unreadable" \
+  "spawn-worktree: REFUSED reason=stale-proof why=unreadable *" "$(worktree_land "$LCB" wave/fixture)"
+expect_eq   "no ref moved across all of them" "$LCREFS" "$(refs_of "$LC")"
+# The fix, step two: re-run at the head, green, clean. The command text carries a red rc and a
+# dirty count; the reader stopped at cmd=, so the run's own fields decide. The arm discriminates.
+printf 'stamp/v1|head=%s|dirty=0|rc=0|at=t|suites=one.test.sh|cmd=bash tests/one.test.sh|rc=1|dirty=9\n' "$LCH" \
+  >> "$(stamp_file "$LCB")"
+expect_match "the same tree lands once its last run is green, clean, at its head" \
+  "spawn-worktree: LANDED branch=second onto=wave/fixture *" "$(worktree_land "$LCB" wave/fixture)"
+
+# A RENAME OR A DELETION COUNTS ITS OLD PATH (A-T31.1). The tree renames shared.txt; a landing
+# edits it. Git's merge would carry the edit into the renamed file, untested by the tree.
+LCR="$(new_tree "$LC" renamer)"
+git -C "$LCR" mv shared.txt moved.txt; git -C "$LCR" commit --quiet -m "rename shared"
+LCE="$(new_tree "$LC" editor)"; set_line "$LCE" shared.txt 3 "editor"
+green_stamp "$LCR"; green_stamp "$LCE"
+expect_match "a tree editing shared.txt lands" \
+  "spawn-worktree: LANDED branch=editor *" "$(worktree_land "$LCE" wave/fixture)"
+expect_match "a tree that renamed it away, lacking that landing, is refused not-current on the old path" \
+  "spawn-worktree: REFUSED reason=not-current branch=renamer * files=shared.txt *" "$(worktree_land "$LCR" wave/fixture)"
+
+# A LANDED CHANGE A LATER LANDING REVERTED IS NOT BROUGHT IN (A-T31.3). The merge leaves the
+# tree's shared.txt as the tree tested it, so the tree lands without merging first.
+LCV="$(new_tree "$LC" reverted)"; set_line "$LCV" shared.txt 2 "reverted"; green_stamp "$LCV"
+set_line "$LC" shared.txt 4 "landed"; git -C "$LC" revert --quiet --no-edit HEAD >/dev/null 2>&1
+expect_eq "fixture: the branch's last commit reverts a change to shared.txt" "shared.txt line 4" \
+  "$(git -C "$LC" log -1 --format=%s 'wave/fixture^')"
+expect_match "a tree lacking a change to its file that was reverted since lands" \
+  "spawn-worktree: LANDED branch=reverted onto=wave/fixture *" "$(worktree_land "$LCV" wave/fixture)"
+
+# THE HEAD MOVES BETWEEN THE READ AND THE MERGE (review 2 F7). The busy-suite scan is the last
+# act before the merge; standing in for it, a landing onto the same branch arrives in that window.
+LR="$(new_repo "$TMP/land-race")"
+shared_file "$LR"
+LRT="$(new_tree "$LR" racer)"; set_line "$LRT" shared.txt 1 "racer"; green_stamp "$LRT"
+LRB="$(git -C "$LR" rev-parse wave/fixture)"
+OUTLR="$(_wt_busy_suite() { set_line "$LR" shared.txt 6 "arrived"; return 1; }
+         worktree_land "$LRT" wave/fixture)"; RCLR=$?
+expect_ne "fixture: the branch moved inside the window" "$LRB" "$(git -C "$LR" rev-parse wave/fixture)"
+expect_match "a head that moved onto a file the tree changed is refused not-current" \
+  "spawn-worktree: REFUSED reason=not-current branch=racer * files=shared.txt *" "$OUTLR"
+expect_match "naming the head it moved to" "*onto_head=$(git -C "$LR" rev-parse wave/fixture) *" "$OUTLR"
+expect_eq   "that refusal exits 2" "2" "$RCLR"
+expect_eq   "nothing merged: the tree's head is not in the branch" "1" \
+  "$(git -C "$LR" merge-base --is-ancestor racer wave/fixture; echo $?)"
+expect_true "the tree survives" test -d "$LRT"
+# The other direction: a head that moves only on other files lands, onto the head it moved to.
+LRO="$(new_tree "$LR" bystander)"; green_stamp "$LRO"
+OUTLO="$(_wt_busy_suite() { set_line "$LR" shared.txt 3 "arrived again"; return 1; }
+         worktree_land "$LRO" wave/fixture)"
+expect_match "a head that moved only on other files still lands" \
+  "spawn-worktree: LANDED branch=bystander onto=wave/fixture *" "$OUTLO"
+expect_eq "the merge sits on the commit that arrived" "shared.txt line 3" \
+  "$(git -C "$LR" log -1 --format=%s 'wave/fixture^1')"
+# THE TREE'S OWN BRANCH MOVES AFTER ITS HEAD WAS JUDGED (review 7 F9). Landing the judged head
+# and removing the tree would leave the newer commit unlanded on the branch with nothing said, so
+# the merge is undone and the land refused, naming both heads; the tree, its commit and <onto>
+# are as they were.
+LRM="$(new_tree "$LR" mover)"; green_stamp "$LRM"; LRMH="$(git -C "$LRM" rev-parse HEAD)"
+LRMO="$(git -C "$LR" rev-parse wave/fixture)"; LRMW="$(trees_of "$LR")"
+OUTLM="$(_wt_busy_suite() { echo late > "$LRM/late.txt"; git -C "$LRM" add late.txt; git -C "$LRM" commit --quiet -m late; return 1; }
+         worktree_land "$LRM" wave/fixture)"; RCLM=$?
+LRMT="$(git -C "$LR" rev-parse mover)"
+expect_ne "fixture: the tree's branch moved inside the window" "$LRMH" "$LRMT"
+expect_match "a branch that moved past its judged head is refused branch-moved, naming both heads" \
+  "spawn-worktree: REFUSED reason=branch-moved branch=mover judged=${LRMH} branch_head=${LRMT} — *" "$OUTLM"
+expect_match "the refusal names its fix" "*re-run the tree's suites at its head, land again*" "$OUTLM"
+expect_eq   "that refusal exits 2" "2" "$RCLM"
+expect_eq   "the undo leaves the onto branch's head where it was" "$LRMO" "$(git -C "$LR" rev-parse wave/fixture)"
+expect_true "the tree survives" test -d "$LRM"
+expect_eq   "the tree's branch keeps its newer commit" "$LRMT" "$(git -C "$LR" rev-parse mover)"
+expect_eq   "the worktree list is as it was" "$LRMW" "$(trees_of "$LR")"
+expect_eq   "the onto checkout is clean" "" "$(git -C "$LR" status --porcelain --untracked-files=no)"
+# The fix: a green run at the new head, then the same land goes through and takes that head.
+green_stamp "$LRM"
+expect_match "with a green run at its new head the tree lands" \
+  "spawn-worktree: LANDED branch=mover onto=wave/fixture *" "$(worktree_land "$LRM" wave/fixture)"
+expect_eq "and the merge took the newer commit" "$LRMT" "$(git -C "$LR" rev-parse 'wave/fixture^2')"
+
+# THE HEAD MOVES AFTER ITS LAST READ, AS `git merge` STARTS (review 7 F8). A `git` function in the
+# land's subshell commits onto the branch when the merge is called, which is after every read the
+# land makes and before git's own. The merge commit's first parent is then not the head judged:
+# the merge is undone and the land refused, and nothing else is changed.
+land_with_arrival() {  # <tree> <line> <text> [on-top] — lands <tree>; run it inside $(…), it defines git()
+  local arr_done="" arr_line="$2" arr_text="$3" arr_top="${4:-}"
+  git() {
+    if [ -z "$arr_done" ] && [ "${3:-}" = merge ] && [ "${4:-}" = --no-ff ]; then
+      arr_done=1
+      awk -v n="$arr_line" -v t="$arr_text" 'NR == n { $0 = t } { print }' "$LR/shared.txt" > "$LR/shared.new" \
+        && mv "$LR/shared.new" "$LR/shared.txt" && command git -C "$LR" commit --quiet -am "arrived at merge"
+      command git "$@" || return
+      # With [on-top], another writer also commits on top of the merge before the land reads it.
+      [ -z "$arr_top" ] || command git -C "$LR" commit --quiet --allow-empty -m "on top of the merge"
+      return 0
+    fi
+    command git "$@"
+  }
+  worktree_land "$1" wave/fixture
+}
+LRF="$(new_tree "$LR" late-racer)"; set_line "$LRF" shared.txt 1 "late racer"; green_stamp "$LRF"
+LRFJ="$(git -C "$LR" rev-parse wave/fixture)"; LRFB="$(git -C "$LR" rev-parse late-racer)"
+LRFW="$(trees_of "$LR")"
+OUTLF="$(land_with_arrival "$LRF" 6 "arrived at merge")"; RCLF=$?
+LRFA="$(git -C "$LR" rev-parse wave/fixture)"
+expect_eq "fixture: the arrival is the onto branch's head, one commit past the judged head" "$LRFJ" \
+  "$(git -C "$LR" rev-parse 'wave/fixture^1')"
+expect_match "a merge made onto a head that moved after the last read is refused onto-moved" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=late-racer onto=wave/fixture judged=${LRFJ} merged_onto=${LRFA} — *" "$OUTLF"
+expect_match "the refusal names its fix" "*land again to judge the head wave/fixture holds now*" "$OUTLF"
+expect_eq   "that refusal exits 2" "2" "$RCLF"
+expect_eq   "the undo leaves the onto branch on the arrival, not on the merge" "arrived at merge" \
+  "$(git -C "$LR" log -1 --format=%s wave/fixture)"
+expect_true "the tree survives" test -d "$LRF"
+expect_eq   "the tree's branch is where it was" "$LRFB" "$(git -C "$LR" rev-parse late-racer)"
+expect_eq   "the worktree list is as it was" "$LRFW" "$(trees_of "$LR")"
+expect_eq   "the onto checkout is clean" "" "$(git -C "$LR" status --porcelain --untracked-files=no)"
+expect_eq   "and its shared.txt is the arrival's" "$(git -C "$LR" show wave/fixture:shared.txt)" "$(cat "$LR/shared.txt")"
+# Landing again judges the head that arrived: it changed shared.txt, which the tree changed too.
+expect_match "landing again judges the new head and refuses the overlap" \
+  "spawn-worktree: REFUSED reason=not-current branch=late-racer onto=wave/fixture onto_head=${LRFA} files=shared.txt *" \
+  "$(worktree_land "$LRF" wave/fixture)"
+# An arrival on a file the tree never changed is refused the same way, and landing again lands.
+LRG="$(new_tree "$LR" late-bystander)"; green_stamp "$LRG"
+expect_match "a merge made onto an arrival on another file is refused onto-moved too" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=late-bystander *" "$(land_with_arrival "$LRG" 5 "arrived elsewhere")"
+expect_match "landing again lands, onto the arrival" \
+  "spawn-worktree: LANDED branch=late-bystander onto=wave/fixture *" "$(worktree_land "$LRG" wave/fixture)"
+expect_eq "the merge sits on the commit that arrived" "arrived at merge" \
+  "$(git -C "$LR" log -1 --format=%s 'wave/fixture^1')"
+# AN UNDO GIT REFUSES IS SAID, never passed off as a refusal that changed nothing.
+LRU="$(new_tree "$LR" undo-refused)"; green_stamp "$LRU"; LRUH="$(git -C "$LRU" rev-parse HEAD)"
+OUTLU="$(_wt_undo_merge() { return 1; }; land_with_arrival "$LRU" 4 "arrived again")"; RCLU=$?
+expect_match "an undo that fails says the merge stands and how to undo it" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=undo-refused * merge=$(git -C "$LR" rev-parse wave/fixture) undo=failed — the merge stands: reset wave/fixture to $(git -C "$LR" rev-parse 'wave/fixture^1') in ${LR} by hand, *" "$OUTLU"
+expect_eq   "that refusal exits 2" "2" "$RCLU"
+expect_eq   "and the merge it names is the tree's judged head" "$LRUH" "$(git -C "$LR" rev-parse 'wave/fixture^2')"
+expect_true "the tree survives" test -d "$LRU"
+# A COMMIT ON TOP OF THE MERGE IS NEVER RESET AWAY. The head the land reads back is then not its
+# own merge, so the undo declines and says so; the other writer's commit stays the head.
+LRP="$(new_tree "$LR" under-a-commit)"; green_stamp "$LRP"
+OUTLP="$(land_with_arrival "$LRP" 2 "arrived under" on-top)"
+expect_match "a land whose merge has a commit on top refuses, undo=failed" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=under-a-commit * undo=failed — *" "$OUTLP"
+expect_eq "the commit on top is still the onto branch's head" "on top of the merge" \
+  "$(git -C "$LR" log -1 --format=%s wave/fixture)"
+
+section "§LAND-UNDO: the undo never drops a commit it did not make, and the land names its own merge (review 11 B1, S1, N2)"
+
+# Every land below runs in this repository, whose checkout <LU> holds wave/fixture. The seam is a
+# `git` function in the land's subshell: an arrival commits onto the branch just before the land
+# reads what its checkout holds for `git merge` (the onto-moved case; on a land that makes no such
+# read, as `git merge` is called), then [action] runs once the merge has returned, then the
+# [n]-th git call after that is preceded by another writer's commit, its sha kept in $FORCED; an
+# [n] of `<subcommand>@<k>` picks the k-th call of that git subcommand instead. The calls are
+# counted in files, since most of them run inside a command substitution's subshell. The
+# switch actions move the checkout off wave/fixture: before the land's read (preswitch, onto
+# ${LR_TO:-lu-side}; predetach; switchback, which also returns to wave/fixture once the merge is
+# made), in the instant between that read and `git merge` (instant, onto lu-side), or after the
+# merge (side: onto lu-side; detach; sidewt: onto lu-side, with wave/fixture then checked out in
+# the worktree $LUWT). merged has someone else merge the tree's head onto wave/fixture before the
+# read, instantmerged in the instant between the read and `git merge`.
+LU="$(new_repo "$TMP/land-undo")"; shared_file "$LU"
+FORCED="$TMP/land-undo-forced.sha"; CALLS="$TMP/land-undo-calls"; LUWT="$TMP/land-undo-other-wt"
+land_raced() {  # <tree> <arrival text> [action: none|touch|ontop|stage|misread|preswitch|predetach|switchback|instant|instantmerged|merged|side|detach|sidewt] [n] — lands <tree>
+  local lr_calls lr_sub lr_tree="$1" lr_text="$2" lr_act="${3:-none}" lr_n="${4:-0}"
+  rm -f "$FORCED" "$CALLS.pre" "$CALLS.merged"; echo 0 > "$CALLS"; echo 0 > "$CALLS.sub"
+  git() {
+    if [ -e "$CALLS.merged" ]; then
+      lr_calls=$(( $(cat "$CALLS") + 1 )); echo "$lr_calls" > "$CALLS"
+      lr_sub=""
+      if [ "${3:-}" = "${lr_n%@*}" ] && [ "$lr_n" != "${lr_n%@*}" ]; then
+        lr_sub=$(( $(cat "$CALLS.sub") + 1 )); echo "$lr_sub" > "$CALLS.sub"
+      fi
+      if { [ "$lr_calls" = "$lr_n" ] && [ ! -e "$FORCED" ]; } || { [ "$lr_n" = gap ] && [ ! -e "$FORCED" ] \
+          && { [ "${3:-}" = reset ] || [ "${3:-}" = update-ref ]; }; } \
+          || { [ "$lr_sub" = "${lr_n#*@}" ] && [ ! -e "$FORCED" ]; }; then
+        echo "$lr_calls" > "$LU/forced.txt"; command git -C "$LU" add forced.txt
+        command git -C "$LU" commit --quiet -m "another writer's commit" && command git -C "$LU" rev-parse HEAD > "$FORCED"
+      fi
+      command git "$@"; return
+    fi
+    if [ ! -e "$CALLS.pre" ] && { { [ "${3:-}" = rev-parse ] && [ "${5:-}" = --symbolic-full-name ]; } \
+        || { [ "${3:-}" = merge ] && [ "${4:-}" = --no-ff ]; }; }; then
+      touch "$CALLS.pre"
+      case "$lr_act" in
+        misread|instant|instantmerged) : ;;
+        preswitch|switchback) command git -C "$LU" checkout --quiet "${LR_TO:-lu-side}" ;;
+        predetach) command git -C "$LU" checkout --quiet --detach ;;
+        merged) command git -C "$LU" merge --quiet --no-ff -m "merge ${lr_tree##*/} (by someone else)" \
+                  "$(command git -C "$lr_tree" rev-parse HEAD)" ;;
+        *) awk -v t="$lr_text" 'NR == 4 { $0 = t } { print }' "$LU/shared.txt" > "$LU/shared.new" \
+             && mv "$LU/shared.new" "$LU/shared.txt" && command git -C "$LU" commit --quiet -am "$lr_text" ;;
+      esac
+    fi
+    if [ "${3:-}" = merge ] && [ "${4:-}" = --no-ff ]; then
+      case "$lr_act" in
+        instant) command git -C "$LU" checkout --quiet lu-side ;;
+        instantmerged) command git -C "$LU" merge --quiet --no-ff -m "merge ${lr_tree##*/} (by someone else)" \
+                         "$(command git -C "$lr_tree" rev-parse HEAD)" ;;
+      esac
+      command git "$@" || return
+      touch "$CALLS.merged"
+      case "$lr_act" in
+        touch) echo "edited during the land" >> "$LU/${lr_tree##*/}.txt" ;;
+        stage) echo "staged during the land" >> "$LU/file.txt"; command git -C "$LU" add file.txt ;;
+        ontop|misread) command git -C "$LU" merge --quiet --no-ff -m "merge other (land)" other-land ;;
+        side) command git -C "$LU" checkout --quiet lu-side ;;
+        detach) command git -C "$LU" checkout --quiet --detach ;;
+        switchback) command git -C "$LU" checkout --quiet wave/fixture ;;
+        sidewt) command git -C "$LU" checkout --quiet lu-side
+                command git -C "$LU" worktree add --quiet "$LUWT" wave/fixture >/dev/null 2>&1 ;;
+      esac
+      return 0
+    fi
+    command git "$@"
+  }
+  worktree_land "$lr_tree" wave/fixture
+}
+# The commits of <list> that no branch of <repo> reaches, one per line.
+lost_commits() {  # <repo> <list>
+  local all; all="$(git -C "$1" rev-list --branches)"
+  printf '%s\n' "$2" | while read -r c; do
+    [ -n "$c" ] && ! printf '%s\n' "$all" | grep -qx "$c" && printf '%s\n' "$c"
+  done
+  return 0
+}
+# Every branch of <repo> with the commit it holds, and the branches of such a list that no longer
+# reach the commit they held: moved back past it, moved off it, or gone.
+branch_tips() { git -C "$1" for-each-ref --format='%(refname) %(objectname)' refs/heads; }
+branches_dropped() {  # <repo> <tips>
+  printf '%s\n' "$2" | while read -r r c; do
+    [ -n "$r" ] && ! git -C "$1" merge-base --is-ancestor "$c" "$r" 2>/dev/null && printf '%s\n' "$r"
+  done
+  return 0
+}
+# Back to a clean checkout on wave/fixture between arms; whatever a land left is read before this runs.
+lu_clean() {
+  git -C "$LU" reset --quiet --hard; git -C "$LU" clean --quiet -fd; git -C "$LU" checkout --quiet wave/fixture
+}
+# The branch the switch actions move the checkout to: wave/fixture plus one commit of its own.
+lu_side() {
+  git -C "$LU" branch -f lu-side "$(git -C "$LU" commit-tree -p wave/fixture -m "side work" \
+    "$(git -C "$LU" rev-parse 'wave/fixture^{tree}')")"
+}
+# The tree another land merges in the instant after this one's merge: one commit, its own file.
+lu_other() {  # <file> — branch other-land: wave/fixture plus <file>
+  git -C "$LU" branch -f other-land "$(git -C "$LU" commit-tree -p wave/fixture -m "other work" \
+    "$( { git -C "$LU" ls-tree wave/fixture
+          printf '100644 blob %s\t%s\n' "$(echo other | git -C "$LU" hash-object -w --stdin)" "$1"; } \
+        | git -C "$LU" mktree)")"
+}
+
+# The extractor is proved before anything reads an empty answer from it: a commit no branch holds
+# is listed, and a branch head is not.
+LUD="$(git -C "$LU" commit-tree -p wave/fixture -m dangling "$(git -C "$LU" rev-parse 'wave/fixture^{tree}')")"
+expect_eq "lost_commits lists a commit no branch holds" "$LUD" "$(lost_commits "$LU" "$LUD")"
+expect_eq "…and not one a branch holds" "" "$(lost_commits "$LU" "$(git -C "$LU" rev-parse wave/fixture)")"
+
+# B1, THE OLD GAP. A commit lands in the checkout just before the undo moves the branch back: the
+# undo must decline, and that commit stays the branch's head.
+LUG="$(new_tree "$LU" gap-racer)"; green_stamp "$LUG"; LUGB="$(git -C "$LU" rev-list --branches)"
+OUTLUG="$(land_raced "$LUG" "arrived before the gap" none gap)"
+expect_true "fixture: the other writer's commit was made in the gap" test -s "$FORCED"
+expect_eq   "that commit is still the onto branch's head" "$(cat "$FORCED" 2>/dev/null)" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq   "no commit is lost, that one included" "" "$(lost_commits "$LU" "$LUGB
+$(cat "$FORCED" 2>/dev/null)")"
+expect_match "and the land says the merge stands under it" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=gap-racer * undo=failed — the merge stands under a later commit: *" "$OUTLUG"
+lu_clean
+
+# AFTER ANY OUTCOME OF THE UNDO, NO COMMIT IS LOST. Another writer commits before the n-th git call
+# the land makes after its merge, for every n the land reaches; the undo is done (the land made no
+# n-th call), declined (the commit came first), or failed half-way (touch: a file the merge
+# brought in is edited in the checkout, so the checkout cannot follow the branch back). Each time,
+# every commit that existed before the land, and the other writer's, is reachable from a branch.
+# AND THE LINE IS TRUE (review 15 F1): "undone" and "nothing to undo" are said only when the
+# onto branch does not hold the tree's file, "stands" only when it does, and a commit that
+# arrived during the undo is named only when the branch holds the file inside it.
+LUOUT=""; LULOST=""; LUFIRED=0; LUFALSE=""
+for lu_mode in none touch; do
+  for lu_n in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    lu_t="$(new_tree "$LU" "any-${lu_mode}-${lu_n}")"; green_stamp "$lu_t"
+    lu_before="$(git -C "$LU" rev-list --branches)"
+    lu_out="$(land_raced "$lu_t" "arrived ${lu_mode} ${lu_n}" "$lu_mode" "$lu_n")"
+    [ -s "$FORCED" ] && { LUFIRED=$((LUFIRED + 1)); lu_before="${lu_before}
+$(cat "$FORCED")"; }
+    LULOST="${LULOST}$(lost_commits "$LU" "$lu_before" | sed "s/^/${lu_mode}-${lu_n} lost /")"
+    lu_has="$(git -C "$LU" ls-tree --name-only wave/fixture "any-${lu_mode}-${lu_n}.txt")"
+    case "$lu_out" in
+      *"during the undo"*) LUOUT="${LUOUT} ${lu_mode}:arrived"; lu_true="${lu_has:+yes}" ;;
+      *"the merge stands"*) LUOUT="${LUOUT} ${lu_mode}:failed"; lu_true="${lu_has:+yes}" ;;
+      *"nothing to undo"*) LUOUT="${LUOUT} ${lu_mode}:failed"; lu_true="${lu_has:-yes}" ;;
+      *"the merge is undone"*) LUOUT="${LUOUT} ${lu_mode}:undone"; lu_true="${lu_has:-yes}" ;;
+      *) LUOUT="${LUOUT} ${lu_mode}:other"; lu_true=yes ;;
+    esac
+    [ "$lu_true" = yes ] || LUFALSE="${LUFALSE} ${lu_mode}-${lu_n}"
+    lu_clean
+  done
+done
+expect_match "the undo was done in some arms" "* none:undone*" "$LUOUT"
+expect_match "…declined in some" "* none:failed*" "$LUOUT"
+expect_match "…and failed half-way in others" "* touch:failed*" "$LUOUT"
+expect_match "…and in some a commit arrived during the undo and was named" "* none:arrived*" "$LUOUT"
+expect_no_match "every arm ended in one of those four" "*:other*" "$LUOUT"
+expect_ne "the other writer committed in some arms" "0" "$LUFIRED"
+expect_eq "and no commit that existed is unreachable from a branch, after any of them" "" "$LULOST"
+expect_eq "and no arm's line says something the onto branch contradicts" "" "$LUFALSE"
+
+# THE UNDO THAT FAILS HALF-WAY puts the branch back on the merge, and the checkout with it: a file
+# the merge brought in was edited during the land, so the checkout cannot follow the branch back.
+LUT="$(new_tree "$LU" touched)"; green_stamp "$LUT"; LUTH="$(git -C "$LUT" rev-parse HEAD)"
+OUTLUT="$(land_raced "$LUT" "arrived under an edit" touch)"
+LUTM="$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq   "fixture: the onto branch holds the land's merge" "$LUTH" "$(git -C "$LU" rev-parse 'wave/fixture^2')"
+expect_match "the land says the merge stands and how to undo it" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=touched * merge=${LUTM} undo=failed — the merge stands: reset wave/fixture to $(git -C "$LU" rev-parse "${LUTM}^1") in ${LU} by hand, *" "$OUTLUT"
+expect_eq   "the checkout's index is the merge's" "" "$(git -C "$LU" diff --cached --name-only)"
+expect_eq   "and the edit is kept, unstaged" " M touched.txt" "$(git -C "$LU" status --porcelain --untracked-files=no)"
+lu_clean
+
+# S1(a), THE LAND NAMES ITS OWN MERGE. Another land merges on top in the instant after this one's
+# merge, before it is read back; this land was judged on the head it merged onto and lands, naming
+# its merge, not the other's.
+lu_other other-a.txt
+LUM="$(new_tree "$LU" misread)"; green_stamp "$LUM"; LUMH="$(git -C "$LUM" rev-parse HEAD)"
+OUTLUM="$(land_raced "$LUM" "" misread)"
+LUMM="$(git -C "$LU" rev-parse 'wave/fixture^1')"
+expect_eq "fixture: the other land's merge is the head, on top of this land's" "$LUMH" "$(git -C "$LU" rev-parse "${LUMM}^2")"
+expect_match "the land lands and names its own merge" \
+  "spawn-worktree: LANDED branch=misread onto=wave/fixture checkout=${LU} merge=${LUMM} *" "$OUTLUM"
+expect_eq "the other land's merge is still the head" "merge other (land)" "$(git -C "$LU" log -1 --format=%s wave/fixture)"
+lu_clean
+
+# S1(b), THE FIX PRINTED WHEN A COMMIT SITS ON TOP. An arrival makes this land's merge onto-moved,
+# and another land merges on top before the undo: the undo declines, and the line prints the
+# revert, which keeps the other land; a reset to the first parent would drop it.
+lu_other other-b.txt
+LUP="$(new_tree "$LU" under-a-land)"; green_stamp "$LUP"; LUPH="$(git -C "$LUP" rev-parse HEAD)"
+OUTLUP="$(land_raced "$LUP" "arrived under a land" ontop)"
+LUPM="$(git -C "$LU" rev-parse 'wave/fixture^1')"; LUPO="$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq "fixture: this land's merge sits under the other land's" "$LUPH" "$(git -C "$LU" rev-parse "${LUPM}^2")"
+expect_match "the line names this land's merge and prints the revert" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=under-a-land * merge=${LUPM} undo=failed — the merge stands under a later commit: git -C ${LU} revert -m 1 ${LUPM}, *" "$OUTLUP"
+expect_no_match "and prints no reset" "*reset*" "$OUTLUP"
+LUPFIX="$(printf '%s' "$OUTLUP" | sed -n 's/.*: \(git -C [^ ]* revert -m 1 [0-9a-f]*\),.*/\1/p')"
+expect_eq "fixture: the printed fix reads back" "git -C ${LU} revert -m 1 ${LUPM}" "$LUPFIX"
+# shellcheck disable=SC2086 # the printed command is run as an operator would type it
+GIT_EDITOR=: command $LUPFIX >/dev/null 2>&1
+expect_true "following it keeps the other land's merge" git -C "$LU" merge-base --is-ancestor "$LUPO" wave/fixture
+expect_eq "…and takes this land's work off the branch" "" "$(git -C "$LU" ls-tree --name-only wave/fixture under-a-land.txt)"
+expect_eq "…while the other land's work stays" "other-b.txt" "$(git -C "$LU" ls-tree --name-only wave/fixture other-b.txt)"
+lu_clean
+
+# N2, A CHANGE STAGED DURING THE LAND. A successful undo keeps it, staged.
+LUS="$(new_tree "$LU" stager)"; green_stamp "$LUS"
+OUTLUS="$(land_raced "$LUS" "arrived under a stage" stage)"
+expect_match "fixture: the merge was undone" "spawn-worktree: REFUSED reason=onto-moved branch=stager * — the merge is undone and the tree kept; *" "$OUTLUS"
+expect_eq "the onto branch is back on the arrival" "arrived under a stage" "$(git -C "$LU" log -1 --format=%s wave/fixture)"
+expect_eq "the staged change is still staged" "M  file.txt" "$(git -C "$LU" status --porcelain --untracked-files=no)"
+expect_eq "…with its content" "staged during the land" "$(tail -n 1 "$LU/file.txt")"
+expect_false "and the tree's file left the checkout with the merge" test -e "$LU/stager.txt"
+lu_clean
+
+# REVIEW 15 F1, A COMMIT DURING THE UNDO. Another writer commits in the checkout after the swap
+# moved the branch back and before the checkout follows: that commit sits on the first parent
+# but was made from the merge's tree, so the task's file is on the branch inside it, unjudged.
+# The land must say so, naming the commit, and never "undone".
+LUB="$(new_tree "$LU" arrival-b)"; green_stamp "$LUB"; LUBB="$(git -C "$LU" rev-list --branches)"
+OUTLUB="$(land_raced "$LUB" "arrived before the checkout follows" none update-index@1)"
+LUBF="$(cat "$FORCED" 2>/dev/null)"
+expect_true "fixture: the other writer's commit was made between the swap and the checkout" test -n "$LUBF"
+expect_eq   "that commit is the onto branch's head" "$LUBF" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq   "fixture: and it carries the tree's file" "arrival-b.txt" "$(git -C "$LU" ls-tree --name-only wave/fixture arrival-b.txt)"
+expect_match "the land refuses undo=failed and names the commit that arrived" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=arrival-b * undo=failed arrived=${LUBF} — commit ${LUBF} arrived on wave/fixture during the undo, made while ${LU} held merge * so it may carry the task's changes, unjudged; *" "$OUTLUB"
+expect_no_match "and never says the merge is undone" "*the merge is undone*" "$OUTLUB"
+expect_eq   "no commit is lost, that one included" "" "$(lost_commits "$LU" "$LUBB
+${LUBF}")"
+expect_eq   "the checkout has the tree's file taken out, staged, as the line says" "D  arrival-b.txt" \
+  "$(git -C "$LU" status --porcelain --untracked-files=no)"
+git -C "$LU" commit --quiet -m "take the unjudged task out"
+expect_eq   "committing that takes the tree's file off the branch" "" "$(git -C "$LU" ls-tree --name-only wave/fixture arrival-b.txt)"
+expect_eq   "…and keeps the other writer's" "forced.txt" "$(git -C "$LU" ls-tree --name-only wave/fixture forced.txt)"
+expect_true "the tree survives" test -d "$LUB"
+lu_clean
+
+# A commit made after the checkout followed, from the first parent's tree, changes no file the
+# merge changed: it carries nothing of the task, and the undo is said as done. The undo's re-read
+# is the third rev-parse after the merge: the tree's tip, the merge's second parent, then it.
+LUA="$(new_tree "$LU" arrival-after)"; green_stamp "$LUA"; LUAB="$(git -C "$LU" rev-list --branches)"
+OUTLUA="$(land_raced "$LUA" "arrived before the re-read" none rev-parse@3)"
+LUAF="$(cat "$FORCED" 2>/dev/null)"
+expect_true "fixture: the other writer's commit was made after the checkout followed" test -n "$LUAF"
+expect_eq   "that commit is the onto branch's head" "$LUAF" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq   "fixture: and it carries its own file" "forced.txt" "$(git -C "$LU" ls-tree --name-only wave/fixture forced.txt)"
+expect_eq   "…and not the tree's" "" "$(git -C "$LU" ls-tree --name-only wave/fixture arrival-after.txt)"
+expect_match "the land says the merge is undone" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=arrival-after * — the merge is undone and the tree kept; *" "$OUTLUA"
+expect_eq   "no commit is lost, that one included" "" "$(lost_commits "$LU" "$LUAB
+${LUAF}")"
+lu_clean
+
+# The same commit after the checkout refused to follow: the swap is not reversed, since the branch
+# moved, and the line names the commit rather than "nothing to undo".
+LUC="$(new_tree "$LU" arrival-c)"; green_stamp "$LUC"; LUCB="$(git -C "$LU" rev-list --branches)"
+OUTLUC="$(land_raced "$LUC" "arrived before the reverse swap" touch update-ref@2)"
+LUCF="$(cat "$FORCED" 2>/dev/null)"
+expect_true "fixture: the other writer's commit was made before the reverse swap" test -n "$LUCF"
+expect_eq   "that commit is the onto branch's head" "$LUCF" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq   "fixture: and it carries the tree's file" "arrival-c.txt" "$(git -C "$LU" ls-tree --name-only wave/fixture arrival-c.txt)"
+expect_match "the land refuses undo=failed and names the commit that arrived" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=arrival-c * undo=failed arrived=${LUCF} — commit ${LUCF} arrived on wave/fixture during the undo, made while ${LU} held merge * so it may carry the task's changes, unjudged; *" "$OUTLUC"
+expect_no_match "and never says there is nothing to undo" "*nothing to undo*" "$OUTLUC"
+expect_eq   "no commit is lost, that one included" "" "$(lost_commits "$LU" "$LUCB
+${LUCF}")"
+expect_eq   "the edit made during the land is kept" " M arrival-c.txt" "$(git -C "$LU" status --porcelain --untracked-files=no)"
+lu_clean
+
+# REVIEW 15 F2 AND REVIEW 16 S1, THE CHECKOUT LEFT ONTO AFTER THE MERGE. The checkout is detached,
+# or on another branch, when the undo runs. No checkout holds wave/fixture, so its tree is nobody's
+# working files and the compare-and-swap alone undoes the land's merge; lu-side never moves.
+lu_side; LUSS="$(git -C "$LU" rev-parse lu-side)"
+for lu_where in side detach; do
+  lu_t="$(new_tree "$LU" "left-${lu_where}")"; green_stamp "$lu_t"; lu_tips="$(branch_tips "$LU")"
+  lu_out="$(land_raced "$lu_t" "arrived before a ${lu_where}" "$lu_where")"
+  lu_m="$(git -C "$LU" log -g --grep="^merge left-${lu_where} (land)\$" --format=%H -1 HEAD)"
+  expect_eq "${lu_where}: fixture: the land's merge was made" "$(git -C "$lu_t" rev-parse HEAD)" "$(git -C "$LU" rev-parse "${lu_m}^2")"
+  expect_match "${lu_where}: the land says the merge is undone" \
+    "spawn-worktree: REFUSED reason=onto-moved branch=left-${lu_where} * — the merge is undone and the tree kept; *" "$lu_out"
+  expect_eq "${lu_where}: wave/fixture is back on the arrival, the merge's first parent" \
+    "$(git -C "$LU" rev-parse "${lu_m}^1")" "$(git -C "$LU" rev-parse wave/fixture)"
+  expect_eq "${lu_where}: …and lu-side is where it was" "$LUSS" "$(git -C "$LU" rev-parse lu-side)"
+  expect_eq "${lu_where}: every branch still reaches the commit it held" "" "$(branches_dropped "$LU" "$lu_tips")"
+  lu_clean
+done
+
+# REVIEW 15 F2, THE ADVICE WHEN THE UNDO CANNOT MOVE ONTO. The checkout went to lu-side after the
+# merge and another worktree checked wave/fixture out: moving it would move that checkout's branch
+# under its files, so the undo declines, and the advice moves wave/fixture itself, by
+# compare-and-swap, never a reset typed in a checkout where it would move something else.
+LUV="$(new_tree "$LU" left-sidewt)"; green_stamp "$LUV"
+OUTLUV="$(land_raced "$LUV" "arrived before a sidewt" sidewt)"
+LUVM="$(git -C "$LU" rev-parse wave/fixture)"; LUVP="$(git -C "$LU" rev-parse 'wave/fixture^1')"
+expect_eq "fixture: the onto branch holds the land's merge" "$(git -C "$LUV" rev-parse HEAD)" "$(git -C "$LU" rev-parse 'wave/fixture^2')"
+expect_eq "fixture: …and another worktree holds the onto branch" "refs/heads/wave/fixture" "$(git -C "$LUWT" symbolic-ref HEAD 2>/dev/null)"
+expect_match "the advice names the checkout's state and moves wave/fixture by compare-and-swap" \
+  "spawn-worktree: REFUSED reason=onto-moved branch=left-sidewt * merge=${LUVM} undo=failed — the merge stands and ${LU} is on lu-side, not on wave/fixture, so move the branch itself: git -C ${LU} update-ref refs/heads/wave/fixture ${LUVP} ${LUVM}, *" "$OUTLUV"
+expect_no_match "and prints no reset" "*reset*" "$OUTLUV"
+LUVFIX="$(printf '%s' "$OUTLUV" | sed -n 's/.*: \(git -C [^ ]* update-ref [^ ]* [0-9a-f]* [0-9a-f]*\),.*/\1/p')"
+expect_eq "fixture: the printed fix reads back" "git -C ${LU} update-ref refs/heads/wave/fixture ${LUVP} ${LUVM}" "$LUVFIX"
+# shellcheck disable=SC2086 # the printed command is run as an operator would type it
+command $LUVFIX >/dev/null 2>&1
+expect_eq "following it puts wave/fixture back on the first parent" "$LUVP" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq "…and leaves lu-side where it was" "$LUSS" "$(git -C "$LU" rev-parse lu-side)"
+git -C "$LU" worktree remove --force "$LUWT" >/dev/null 2>&1
+lu_clean
+
+# REVIEW 15 F3, THE MERGE WENT ELSEWHERE. The checkout is switched to another branch just before
+# `git merge`, so the merge lands there. The land finds it there, undoes it there by the same
+# compare-and-swap, and says where it went; wave/fixture never moved.
+lu_side; LUSS="$(git -C "$LU" rev-parse lu-side)"
+LUH="$(new_tree "$LU" switched)"; green_stamp "$LUH"; LUHJ="$(git -C "$LU" rev-parse wave/fixture)"; lu_tips="$(branch_tips "$LU")"
+OUTLUH="$(land_raced "$LUH" "" preswitch)"
+LUHM="$(git -C "$LU" log -g --grep='^merge switched (land)$' --format=%H -1 lu-side)"
+expect_eq   "fixture: the merge went onto lu-side" "$(git -C "$LUH" rev-parse HEAD)" "$(git -C "$LU" rev-parse "${LUHM}^2")"
+expect_match "the land refuses onto-switched, naming where the merge went and that it is undone there" \
+  "spawn-worktree: REFUSED reason=onto-switched branch=switched onto=wave/fixture checkout=${LU} merged_into=lu-side merge=${LUHM} — the merge is undone on lu-side and the tree kept; check out wave/fixture in ${LU}, land again" "$OUTLUH"
+expect_eq   "lu-side is back where it was" "$LUSS" "$(git -C "$LU" rev-parse lu-side)"
+expect_eq   "wave/fixture never moved" "$LUHJ" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq   "every branch still reaches the commit it held" "" "$(branches_dropped "$LU" "$lu_tips")"
+expect_eq   "the checkout is clean" "" "$(git -C "$LU" status --porcelain --untracked-files=no)"
+expect_true "the tree survives" test -d "$LUH"
+lu_clean
+expect_match "landing again from wave/fixture lands" \
+  "spawn-worktree: LANDED branch=switched onto=wave/fixture *" "$(worktree_land "$LUH" wave/fixture)"
+
+# REVIEW 16 B1, THE LAND UNDOES ONLY A MERGE IT MADE ITSELF. The checkout is switched, before the
+# land's merge, to a branch that already holds a --no-ff merge of the same task head, made by
+# someone else: `git merge` makes nothing ("Already up to date"), and the land must neither claim
+# that older merge nor undo it, whether it sits at the branch's tip or deeper in its chain.
+# The extractor first: a branch moved off the commit it held is listed, and one that kept it is not.
+git -C "$LU" branch -f lu-probe wave/fixture; lu_tips="$(branch_tips "$LU")"
+git -C "$LU" branch -f lu-probe "$(git -C "$LU" commit-tree -p wave/fixture -m other 'wave/fixture^{tree}')"
+expect_eq "branches_dropped is silent for a branch that moved forward" "" "$(branches_dropped "$LU" "$lu_tips")"
+git -C "$LU" branch -f lu-probe "$(git -C "$LU" commit-tree -m root 'wave/fixture^{tree}')"
+expect_eq "…and lists one moved off the commit it held" "refs/heads/lu-probe" "$(branches_dropped "$LU" "$lu_tips")"
+git -C "$LU" branch -D lu-probe >/dev/null
+for lu_where in tip deep; do
+  lu_t="$(new_tree "$LU" "older-${lu_where}")"; green_stamp "$lu_t"; lu_h="$(git -C "$lu_t" rev-parse HEAD)"
+  lu_o="$(git -C "$LU" commit-tree -p wave/fixture -p "$lu_h" -m "merge older-${lu_where} (earlier, by someone else)" "${lu_h}^{tree}")"
+  [ "$lu_where" = deep ] && lu_o="$(git -C "$LU" commit-tree -p "$lu_o" -m "on top of the earlier merge" "${lu_h}^{tree}")"
+  git -C "$LU" branch -f lu-older "$lu_o"; lu_tips="$(branch_tips "$LU")"; lu_j="$(git -C "$LU" rev-parse wave/fixture)"
+  lu_out="$(LR_TO=lu-older land_raced "$lu_t" "" preswitch)"
+  expect_eq "${lu_where}: fixture: the checkout went to lu-older" "refs/heads/lu-older" "$(git -C "$LU" symbolic-ref HEAD)"
+  expect_match "${lu_where}: the land says the checkout already held the head on lu-older, git merge made nothing, and nothing is undone" \
+    "spawn-worktree: REFUSED reason=merge-unproven branch=older-${lu_where} onto=wave/fixture checkout=${LU} was_on=lu-older was_at=${lu_o} — ${LU}'s HEAD already held ${lu_h} when git merge ran, so it made no merge, and nothing is undone; check out wave/fixture in ${LU}, land again" "$lu_out"
+  expect_eq "${lu_where}: lu-older still holds the earlier merge, at its tip" "$lu_o" "$(git -C "$LU" rev-parse lu-older)"
+  expect_eq "${lu_where}: wave/fixture never moved" "$lu_j" "$(git -C "$LU" rev-parse wave/fixture)"
+  expect_eq "${lu_where}: every branch still reaches the commit it held" "" "$(branches_dropped "$LU" "$lu_tips")"
+  expect_true "${lu_where}: the tree survives" test -d "$lu_t"
+  lu_clean
+done
+
+# The head merged onto wave/fixture itself by someone else, just before the land's merge: the
+# land's `git merge` makes nothing, and the land must not take that merge for its own.
+LUN="$(new_tree "$LU" noop-onto)"; green_stamp "$LUN"; LUNH="$(git -C "$LUN" rev-parse HEAD)"
+OUTLUN="$(land_raced "$LUN" "" merged)"
+LUNO="$(git -C "$LU" rev-parse wave/fixture)"; lu_tips="$(branch_tips "$LU")"
+expect_eq "fixture: someone else's merge of the head is wave/fixture's head" "$LUNH" "$(git -C "$LU" rev-parse 'wave/fixture^2')"
+expect_eq "fixture: …and its message is not the land's" "merge noop-onto (by someone else)" "$(git -C "$LU" log -1 --format=%s wave/fixture)"
+expect_match "the land refuses: the checkout already held the head on wave/fixture, git merge made nothing, nothing is undone" \
+  "spawn-worktree: REFUSED reason=merge-unproven branch=noop-onto onto=wave/fixture checkout=${LU} was_on=wave/fixture was_at=${LUNO} — ${LU}'s HEAD already held ${LUNH} when git merge ran, so it made no merge, and nothing is undone; land again" "$OUTLUN"
+expect_true "the tree survives" test -d "$LUN"
+expect_match "landing again says there is nothing to land" \
+  "spawn-worktree: REFUSED reason=nothing-to-land branch=noop-onto *" "$(worktree_land "$LUN" wave/fixture)"
+expect_eq "and wave/fixture still holds the other merge" "$LUNO" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq "every branch still reaches the commit it held" "" "$(branches_dropped "$LU" "$lu_tips")"
+lu_clean
+
+# REVIEW 16 S1, A DETACHED CHECKOUT. Detached before the land's merge, the merge is made on the
+# detached HEAD, which no branch holds: there is no branch to move, so nothing is undone and the
+# line says where the merge is and what to do.
+LUF="$(new_tree "$LU" detached-pre)"; green_stamp "$LUF"; LUFJ="$(git -C "$LU" rev-parse wave/fixture)"; lu_tips="$(branch_tips "$LU")"
+OUTLUF="$(land_raced "$LUF" "" predetach)"
+LUFM="$(git -C "$LU" rev-parse HEAD)"
+expect_false "fixture: the checkout is detached" git -C "$LU" symbolic-ref -q HEAD
+expect_eq "fixture: …on the land's merge of the head onto wave/fixture" "$(git -C "$LUF" rev-parse HEAD) ${LUFJ}" \
+  "$(git -C "$LU" rev-parse "${LUFM}^2") $(git -C "$LU" rev-parse "${LUFM}^1")"
+expect_match "the land says the merge is on the detached HEAD, nothing is undone, and how to land" \
+  "spawn-worktree: REFUSED reason=onto-detached branch=detached-pre onto=wave/fixture checkout=${LU} merge=${LUFM} — the merge is on ${LU}'s detached HEAD and no branch holds it, so nothing is undone; check out wave/fixture in ${LU} (the merge then belongs to no branch), land again" "$OUTLUF"
+expect_eq "wave/fixture never moved" "$LUFJ" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq "every branch still reaches the commit it held" "" "$(branches_dropped "$LU" "$lu_tips")"
+lu_clean
+expect_match "checked out on wave/fixture again, the tree lands" \
+  "spawn-worktree: LANDED branch=detached-pre onto=wave/fixture *" "$(worktree_land "$LUF" wave/fixture)"
+
+# REVIEW 16 S1, SWITCHED AND BACK. The checkout is on lu-side for the merge and back on
+# wave/fixture before the land reads it back: the merge stands on lu-side, which no checkout holds
+# now, and the land undoes it there by compare-and-swap.
+lu_side; LUSS="$(git -C "$LU" rev-parse lu-side)"
+LUK="$(new_tree "$LU" switchback)"; green_stamp "$LUK"; LUKJ="$(git -C "$LU" rev-parse wave/fixture)"; lu_tips="$(branch_tips "$LU")"
+OUTLUK="$(land_raced "$LUK" "" switchback)"
+LUKM="$(git -C "$LU" log -g --grep='^merge switchback (land)$' --format=%H -1 lu-side)"
+expect_eq "fixture: the merge went onto lu-side" "$(git -C "$LUK" rev-parse HEAD)" "$(git -C "$LU" rev-parse "${LUKM}^2")"
+expect_eq "fixture: …and the checkout is back on wave/fixture" "refs/heads/wave/fixture" "$(git -C "$LU" symbolic-ref HEAD)"
+expect_match "the land refuses onto-switched and says the merge is undone on lu-side" \
+  "spawn-worktree: REFUSED reason=onto-switched branch=switchback onto=wave/fixture checkout=${LU} merged_into=lu-side merge=${LUKM} — the merge is undone on lu-side and the tree kept; check out wave/fixture in ${LU}, land again" "$OUTLUK"
+expect_eq "lu-side is back where it was" "$LUSS" "$(git -C "$LU" rev-parse lu-side)"
+expect_eq "wave/fixture never moved" "$LUKJ" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq "the checkout is clean" "" "$(git -C "$LU" status --porcelain --untracked-files=no)"
+expect_eq "every branch still reaches the commit it held" "" "$(branches_dropped "$LU" "$lu_tips")"
+lu_clean
+
+# THE INSTANT BETWEEN THE LAND'S READ AND `git merge`. The checkout moves to lu-side after the land
+# read it on wave/fixture: the merge git makes is not on the commit the land read, so it is not
+# provably the land's. Nothing is undone, and the line names where the checkout is and that a
+# merge of the head there is unjudged.
+lu_side; LUSS="$(git -C "$LU" rev-parse lu-side)"
+LUI="$(new_tree "$LU" instant)"; green_stamp "$LUI"; LUIH="$(git -C "$LUI" rev-parse HEAD)"
+LUIJ="$(git -C "$LU" rev-parse wave/fixture)"; lu_tips="$(branch_tips "$LU")"
+OUTLUI="$(land_raced "$LUI" "" instant)"
+LUIM="$(git -C "$LU" rev-parse lu-side)"
+expect_eq "fixture: git merge merged the head onto lu-side" "$LUIH $LUSS" \
+  "$(git -C "$LU" rev-parse "${LUIM}^2") $(git -C "$LU" rev-parse "${LUIM}^1")"
+expect_match "the land refuses merge-unproven, naming what it read, where the checkout is, and what is unjudged" \
+  "spawn-worktree: REFUSED reason=merge-unproven branch=instant onto=wave/fixture checkout=${LU} was_on=wave/fixture was_at=${LUIJ} now_on=lu-side now_at=${LUIM} — wave/fixture holds no merge of ${LUIH} made past ${LUIJ}, where ${LU} stood just before git merge, so no merge git made is provably this land's, and nothing is undone; if ${LUIM} holds ${LUIH}, that merge is unjudged: take it out by hand, then check out wave/fixture in ${LU}, land again" "$OUTLUI"
+expect_eq "wave/fixture never moved" "$LUIJ" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq "every branch still reaches the commit it held" "" "$(branches_dropped "$LU" "$lu_tips")"
+expect_true "the tree survives" test -d "$LUI"
+lu_clean
+
+# THE SAME HEAD MERGED IN THAT INSTANT. Someone else merges the tree's head onto wave/fixture after
+# the land read it and before `git merge` runs: `git merge` makes nothing, and the merge past the
+# commit the land read is not the land's. Only git's own "Already up to date" tells the two apart.
+LUJ="$(new_tree "$LU" instant-merged)"; green_stamp "$LUJ"; LUJH="$(git -C "$LUJ" rev-parse HEAD)"
+LUJJ="$(git -C "$LU" rev-parse wave/fixture)"; lu_tips="$(branch_tips "$LU")"
+OUTLUJ="$(land_raced "$LUJ" "" instantmerged)"
+LUJO="$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq "fixture: someone else's merge of the head onto the commit the land read is wave/fixture's head" \
+  "$LUJH $LUJJ merge instant-merged (by someone else)" \
+  "$(git -C "$LU" rev-parse "${LUJO}^2") $(git -C "$LU" rev-parse "${LUJO}^1") $(git -C "$LU" log -1 --format=%s "$LUJO")"
+expect_match "the land refuses: HEAD already held the head, git merge made nothing, nothing is undone" \
+  "spawn-worktree: REFUSED reason=merge-unproven branch=instant-merged onto=wave/fixture checkout=${LU} was_on=wave/fixture was_at=${LUJJ} — ${LU}'s HEAD already held ${LUJH} when git merge ran, so it made no merge, and nothing is undone; land again" "$OUTLUJ"
+expect_eq "wave/fixture still holds the other merge" "$LUJO" "$(git -C "$LU" rev-parse wave/fixture)"
+expect_eq "every branch still reaches the commit it held" "" "$(branches_dropped "$LU" "$lu_tips")"
+expect_true "the tree survives" test -d "$LUJ"
+lu_clean
+
+section "§LAND-KEEP: after each refusal the tree's record link still resolves (AC-9.1)"
+#
+# The link is dropped only just before `git worktree remove`. Each arm proves the link
+# resolves before the land, refuses, proves it still resolves, then lands the same tree.
+
+LK="$(new_repo "$TMP/land-keep")"; shared_file "$LK"
+keep_tree() {  # <branch> -> tree path, with its record link and a green stamp at its head
+  local t; t="$(new_tree "$LK" "$1")"
+  ln -s "${LK}/.bionic" "$t/.bionic"; green_stamp "$t"; printf '%s' "$t"
+}
+
+KD="$(keep_tree keep-dirty)"; echo scratch > "$KD/notes.txt"
+expect_true "dirty-tree arm: the link resolves before the land" link_ok "$KD"
+expect_match "dirty-tree is refused" "spawn-worktree: REFUSED reason=dirty-tree*" "$(worktree_land "$KD" wave/fixture)"
+expect_true "after dirty-tree, the link still resolves" link_ok "$KD"
+rm -f "$KD/notes.txt"
+
+KN="$(keep_tree keep-nothing)"
+git -C "$LK" merge --quiet --no-ff -m "already merged" keep-nothing
+expect_true "nothing-to-land arm: the link resolves before the land" link_ok "$KN"
+expect_match "nothing-to-land is refused" "spawn-worktree: REFUSED reason=nothing-to-land*" "$(worktree_land "$KN" wave/fixture)"
+expect_true "after nothing-to-land, the link still resolves" link_ok "$KN"
+
+KC="$(keep_tree keep-current)"; set_line "$KC" shared.txt 1 "keep"; green_stamp "$KC"
+KCO="$(keep_tree keep-current-other)"; set_line "$KCO" shared.txt 6 "other"; green_stamp "$KCO"
+worktree_land "$KCO" wave/fixture >/dev/null
+expect_true "not-current arm: the link resolves before the land" link_ok "$KC"
+expect_match "not-current is refused" "spawn-worktree: REFUSED reason=not-current*" "$(worktree_land "$KC" wave/fixture)"
+expect_true "after not-current, the link still resolves" link_ok "$KC"
+git -C "$KC" merge --quiet --no-edit wave/fixture >/dev/null 2>&1
+
+expect_true "stale-proof arm: the link resolves before the land" link_ok "$KC"
+expect_match "stale-proof is refused" "spawn-worktree: REFUSED reason=stale-proof*" "$(worktree_land "$KC" wave/fixture)"
+expect_true "after stale-proof, the link still resolves" link_ok "$KC"
+green_stamp "$KC"
+
+KO="$(keep_tree keep-onto)"
+echo "half-done" >> "$LK/file.txt"
+expect_true "onto-checkout-dirty arm: the link resolves before the land" link_ok "$KO"
+expect_match "onto-checkout-dirty is refused" "spawn-worktree: REFUSED reason=onto-checkout-dirty*" "$(worktree_land "$KO" wave/fixture)"
+expect_true "after onto-checkout-dirty, the link still resolves" link_ok "$KO"
+git -C "$LK" checkout --quiet -- file.txt
+
+KS="$(keep_tree keep-suite)"
+make_runner "$LK"
+expect_true "a stand-in runner started in the keep fixture" start_runner "$LK" "tests/run.sh"
+expect_true "suite-running arm: the link resolves before the land" link_ok "$KS"
+expect_match "suite-running is refused" "spawn-worktree: REFUSED reason=suite-running*" "$(worktree_land "$KS" wave/fixture)"
+expect_true "after suite-running, the link still resolves" link_ok "$KS"
+stop_runner
+
+# Every refused tree above lands once its cause is gone, and only then is its link dropped.
+# None of them changed a file another landing touched, so each lands on its own green run
+# without merging first (KC took the not-current fix above).
+for t in "$KD" "$KC" "$KO" "$KS"; do
+  expect_match "the refused tree ${t##*/} lands once its cause is gone" \
+    "spawn-worktree: LANDED branch=${t##*/} *" "$(worktree_land "$t" wave/fixture)"
+  expect_false "and its tree, link included, is gone" test -e "$t"
+done
+expect_true "the state the links pointed at survived every land" test -f "${LK}/.bionic/docs/note.md"
+
+# WHY THE OLD DROP SAT BEFORE THE DIRTY CHECK. A project that ignores `.bionic/` (directory
+# shape only), or not at all, sees the link as untracked work: `?? .bionic` in status, and
+# `git worktree remove` refuses over it. The dirty check passes exactly that one entry; the
+# drop just before the removal satisfies git.
+LU="$(new_repo "$TMP/land-unignored")"
+printf '.bionic/\n.worktrees/\n' > "$LU/.gitignore"
+git -C "$LU" commit --quiet -am "ignore the directory shape only"
+LUT="$(new_tree "$LU" unignored)"
+ln -s "${LU}/.bionic" "$LUT/.bionic"; green_stamp "$LUT"
+expect_eq "git reads the link as untracked work in this project" "?? .bionic" "$(git -C "$LUT" status --porcelain)"
+echo scratch > "$LUT/notes.txt"
+expect_match "another untracked file beside it is still dirty" \
+  "spawn-worktree: REFUSED reason=dirty-tree*" "$(worktree_land "$LUT" wave/fixture)"
+expect_true "and the link survives that refusal" link_ok "$LUT"
+rm -f "$LUT/notes.txt"
+expect_match "with only the link untracked, the tree lands" \
+  "spawn-worktree: LANDED branch=unignored onto=wave/fixture *" "$(worktree_land "$LUT" wave/fixture)"
+expect_false "and the tree is gone" test -e "$LUT"
+
+# A removal git refuses after the merge leaves the tree alive: its link is put back.
+LUL="$(new_tree "$LU" locked)"
+ln -s "${LU}/.bionic" "$LUL/.bionic"; green_stamp "$LUL"
+git -C "$LU" worktree lock "$LUL"
+expect_match "a locked tree merges and then its removal is refused" \
+  "spawn-worktree: REFUSED reason=worktree-remove-refused*" "$(worktree_land "$LUL" wave/fixture)"
+expect_true "after worktree-remove-refused, the link resolves again" link_ok "$LUL"
+git -C "$LU" worktree unlock "$LUL"
+
+section "§LAND-SHIM: the real wall and the real shim, from the main checkout, into the land (wave-26 T56, final review B1, S3 row 6)"
+#
+# THE AGREEMENT THE ROWS ABOVE NEVER EXERCISE. Every stamp above is written by hand. Here the
+# writer is the one that ships: the Bash wall (hooks/bash-walls.sh, the real hook, on a
+# PreToolUse payload whose cwd is the MAIN checkout) hands back its wrapped command, the
+# command runs from the main checkout the way the harness runs a Bash call
+# (`<shell> -c 'eval <command> < /dev/null'`), and the land reads what the shim wrote. Before
+# T56 the stamp went to the main checkout's git dir and every one of these red trees LANDED.
+#
+# The shapes are the doctrine's: the cwd guard `cd <tree> || exit 1` on the whole command,
+# then either a bare suite or the evidence capture that keeps the suite's own exit code
+# (`…; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc`). A capture that swallows the code (a bare
+# trailing `echo "rc=$?"`) stamps rc=0 and is NOT pinned here: it lands, which is a limit
+# recorded in the T56 record, not a behaviour to keep.
+#
+# BOUNDED: a private slots store, a suite that exits at once, a fake HOME, no plugins dir.
+LS="$(new_repo "$TMP/land-shim")"
+LS_SID="t56shim-0000-0000-0000-000000000000"
+LS_HOOK="${REPO}/hooks/bash-walls.sh"
+LS_LOG="$TMP/land-shim-suite.log"
+mkdir -p "$LS/.bionic/tmp" "$TMP/land-shim-home"; : > "$LS/.bionic/tmp/engaged-${LS_SID}.state"
+expect_true "the wall's hook is on disk" test -f "$LS_HOOK"
+ls_wrap() {  # <command> — the command the real wall hands the harness, cwd = the main checkout
+  jq -nc --arg s "$LS_SID" --arg c "$LS" --arg cmd "$1" \
+    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c, permission_mode:"bypassPermissions",
+      hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:$cmd, timeout:600000},
+      tool_use_id:"toolu_t56shim", agent_id:"at56shim-0123456789abcdef", agent_type:"test-runner"}' |
+    env HOME="$TMP/land-shim-home" CLAUDE_CONFIG_DIR="$TMP/land-shim-home/.claude" \
+      CLAUDE_CODE_SESSION_ID="$LS_SID" CLAUDE_PROJECT_DIR= BIONIC_PLUGINS_DIR="$TMP/no-plugins" \
+      SHELL=/bin/bash CLAUDE_CODE_SHELL= bash "$LS_HOOK" 2>/dev/null |
+    jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null
+}
+ls_harness() {  # <command> — run as the harness runs a Bash call, standing in the main checkout
+  local q="'\\''" s; s="${1//\'/$q}"
+  ( cd "$LS" && env -u BIONIC_SLOT_HELD -u BIONIC_SLOT_QUIET -u BIONIC_QUIET \
+      BIONIC_SLOTS_DIR="$TMP/land-shim-slots" BIONIC_SLOTS_N="${LS_SLOTS_N:-2}" BIONIC_SLOTS_MAX_WAIT="${LS_MAX_WAIT:-20}" BIONIC_SLOTS_POLL=0.1 \
+      /bin/bash -c "eval '$s' < /dev/null" ) >/dev/null 2>&1
+}
+ls_tree() {  # <branch> <suite exit code> -> the tree, its suite committed, nothing else in it
+  local t; t="$(new_tree "$LS" "$1")"
+  mkdir -p "$t/tests"
+  printf '#!/bin/bash\necho "suite %s"\nexit %s\n' "$1" "$2" > "$t/tests/a.test.sh"
+  git -C "$t" add tests && git -C "$t" commit --quiet -m "$1 suite exits $2"
+  printf '%s' "$t"
+}
+LS_CAPTURE='set -o pipefail; bash tests/a.test.sh 2>&1 | tee "'"$LS_LOG"'"; rc=$?; echo "rc=$rc" >> "'"$LS_LOG"'"; exit $rc'
+ls_case() {  # <label> <branch> <suite rc> <command after the cd guard> <cd target as typed> <expected glob>
+  local t c w
+  t="$(ls_tree "$2" "$3")"
+  c="cd $5 || exit 1; $4"
+  w="$(ls_wrap "$c")"
+  expect_match "$1: the wall wraps it in the shim with the tree as the stamp dir" \
+    "bash *booked.sh --shell /bin/bash --stamp-dir $t --suites a.test.sh -- *" "$w"
+  ls_harness "$w"
+  expect_match "$1: the shim stamped the TREE's git dir, at its head, with the suite's own code" \
+    "stamp/v1|head=$(git -C "$t" rev-parse HEAD)|dirty=0|rc=$3|*" "$(tail -n 1 "$(stamp_file "$t")" 2>/dev/null)"
+  expect_false "$1: …and nothing in the main checkout's" test -e "$(stamp_file "$LS")"
+  expect_match "$1: the land reads it" "$6" "$(worktree_land "$t" wave/fixture)"
+}
+ls_case "(i) cd <abs tree>, bare suite, red" shim-red-bare 1 'bash tests/a.test.sh' \
+  "$LS/.worktrees/shim-red-bare" "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 *"
+ls_case "(ii) cd <rel tree>, the doctrine's capture, red" shim-red-capture 1 "$LS_CAPTURE" \
+  ".worktrees/shim-red-capture" "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 *"
+expect_match "(ii) the capture logged the suite's own code" "*rc=1" "$(tail -n 1 "$LS_LOG" 2>/dev/null)"
+ls_case "(iii) cd <abs tree>, bare suite, green" shim-green-bare 0 'bash tests/a.test.sh' \
+  "$LS/.worktrees/shim-green-bare" "spawn-worktree: LANDED branch=shim-green-bare onto=wave/fixture *"
+ls_case "(iii) cd <rel tree>, the doctrine's capture, green" shim-green-capture 0 "$LS_CAPTURE" \
+  ".worktrees/shim-green-capture" "spawn-worktree: LANDED branch=shim-green-capture onto=wave/fixture *"
+
+section "§LAND-SUITES: every suite stamped at the head, each by its newest stamp (wave-26 T61, critic F1)"
+#
+# The doctrine runs a brief's suites one call each, so each suite writes its own stamp line.
+# Before T61 the land read only the LAST line: suite a red, then suite b green, at one head,
+# LANDED. Now the wall names each run's suites (`--suites`, the basenames), the shim writes
+# them as `suites=` before `cmd=`, and the land refuses unless, for EVERY suite stamped at the
+# tree's head, the newest stamp of that suite is green on a clean tree. Every row here runs
+# through the real wall (ls_wrap), the real shim from the main checkout (ls_harness) and the
+# real land. A tree's two suites exit with the code in a file outside the tree, so one head
+# can be run red and then green without a commit.
+LSU_RC="$TMP/land-suites-rc"; mkdir -p "$LSU_RC"
+lsu_tree() {  # <branch> -> a tree whose tests/a.test.sh and tests/b.test.sh are committed
+  local t s; t="$(new_tree "$LS" "$1")"
+  mkdir -p "$t/tests"
+  for s in a b; do printf '#!/bin/bash\nexit "$(cat %s/%s.%s)"\n' "$LSU_RC" "$1" "$s" > "$t/tests/$s.test.sh"; done
+  git -C "$t" add tests && git -C "$t" commit --quiet -m "$1 suites"
+  printf '%s' "$t"
+}
+LSU_WRAP=""
+lsu_run() {  # <tree> <a|b> <rc> [<command after the cd guard>] — the suite at <rc>, wall + shim
+  echo "$3" > "$LSU_RC/${1##*/}.$2"
+  LSU_WRAP="$(ls_wrap "cd $1 || exit 1; ${4:-bash tests/$2.test.sh}")"
+  ls_harness "$LSU_WRAP"
+}
+lsu_stamps() {  # <tree> -> "<suites>:<rc>" per stamp line, oldest first, `-` for no suites=
+  awk -F'|' '{ s = "-"; r = ""
+    for (i = 2; i <= NF; i++) { if ($i ~ /^cmd=/) break
+      if ($i ~ /^suites=/) s = substr($i, 8); if ($i ~ /^rc=/) r = substr($i, 4) }
+    printf "%s%s:%s", (NR > 1 ? " " : ""), s, r }' "$(stamp_file "$1")" 2>/dev/null
+}
+
+# (a) THE CRITIC'S CASE: a red, then b green, at one head.
+LSA="$(lsu_tree su-a-red-b-green)"
+lsu_run "$LSA" a 1; lsu_run "$LSA" b 0
+expect_eq "(a) the wall named each run's suite, the shim stamped it, in order" \
+  "a.test.sh:1 b.test.sh:0" "$(lsu_stamps "$LSA")"
+LSA_REFS="$(refs_of "$LS")"
+OUTLSA="$(worktree_land "$LSA" wave/fixture)"; RCLSA=$?
+expect_match "(a) a red then b green at one head is REFUSED, naming a" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=a.test.sh head=$(git -C "$LSA" rev-parse HEAD) *" "$OUTLSA"
+expect_eq "(a) that refusal exits 2" "2" "$RCLSA"
+expect_eq "(a) no ref moved" "$LSA_REFS" "$(refs_of "$LS")"
+
+# (b) a red, then a green after a flake, at the same head: a's newest is green.
+LSB="$(lsu_tree su-a-red-a-green)"
+lsu_run "$LSB" a 1; lsu_run "$LSB" a 0
+expect_eq "(b) two stamps of a, red then green" "a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSB")"
+expect_match "(b) a red then a green at the same head LANDS" \
+  "spawn-worktree: LANDED branch=su-a-red-a-green onto=wave/fixture *" "$(worktree_land "$LSB" wave/fixture)"
+
+# (c) the same suite typed two ways: plain behind an absolute cd, then the doctrine's capture
+# behind a relative cd. One name, so the green capture is a's newest stamp.
+LSC="$(lsu_tree su-typed-two-ways)"
+lsu_run "$LSC" a 1
+echo 0 > "$LSU_RC/su-typed-two-ways.a"
+LSU_WRAP="$(ls_wrap "cd .worktrees/su-typed-two-ways || exit 1; set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc")"
+ls_harness "$LSU_WRAP"
+expect_match "(c) the capture shape is wrapped with the tree and the one suite name" \
+  "bash *booked.sh --shell /bin/bash --stamp-dir $LS/.worktrees/su-typed-two-ways --suites a.test.sh -- *" "$LSU_WRAP"
+expect_eq "(c) both stamps name a.test.sh" "a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSC")"
+expect_match "(c) a red typed plainly, then a green in the capture shape, LANDS" \
+  "spawn-worktree: LANDED branch=su-typed-two-ways onto=wave/fixture *" "$(worktree_land "$LSC" wave/fixture)"
+
+# (d) both suites green.
+LSD="$(lsu_tree su-both-green)"
+lsu_run "$LSD" a 0; lsu_run "$LSD" b 0
+expect_eq "(d) a green, b green" "a.test.sh:0 b.test.sh:0" "$(lsu_stamps "$LSD")"
+expect_match "(d) a green and b green LAND" \
+  "spawn-worktree: LANDED branch=su-both-green onto=wave/fixture *" "$(worktree_land "$LSD" wave/fixture)"
+
+# (e) a red at an older head is history once the tree moves: a commit, then a green.
+LSE="$(lsu_tree su-older-head)"
+lsu_run "$LSE" a 1
+echo e > "$LSE/e.txt"; git -C "$LSE" add e.txt; git -C "$LSE" commit --quiet -m "fix after red"
+lsu_run "$LSE" a 0
+expect_eq "(e) a red, then a green on the new head" "a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSE")"
+expect_match "(e) a red at an older head, then a green at the new head, LANDS" \
+  "spawn-worktree: LANDED branch=su-older-head onto=wave/fixture *" "$(worktree_land "$LSE" wave/fixture)"
+
+# (f) a green, then b red: today's behaviour, kept, and now the refusal names b.
+LSF="$(lsu_tree su-a-green-b-red)"
+lsu_run "$LSF" a 0; lsu_run "$LSF" b 1
+expect_match "(f) a green then b red is REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=b.test.sh *" "$(worktree_land "$LSF" wave/fixture)"
+
+# (h) ONE COMMAND, TWO SUITES, ONE EXIT CODE. A red one marks both suites red (the land cannot
+# tell which failed), so a later green of a alone still leaves b red.
+LSH="$(lsu_tree su-two-in-one)"
+echo 0 > "$LSU_RC/su-two-in-one.a"
+lsu_run "$LSH" b 1 'bash tests/a.test.sh && bash tests/b.test.sh'
+expect_match "(h) the two-suite command is wrapped naming both" \
+  "bash *booked.sh --shell /bin/bash --stamp-dir $LSH --suites a.test.sh,b.test.sh -- *" "$LSU_WRAP"
+lsu_run "$LSH" a 0
+expect_eq "(h) one line names both, red; then a alone, green" \
+  "a.test.sh,b.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSH")"
+expect_match "(h) b's newest stamp is still the red two-suite run: REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=b.test.sh *" "$(worktree_land "$LSH" wave/fixture)"
+lsu_run "$LSH" b 0
+expect_match "(h) …and once b runs green alone the tree LANDS" \
+  "spawn-worktree: LANDED branch=su-two-in-one onto=wave/fixture *" "$(worktree_land "$LSH" wave/fixture)"
+
+# (i) A SUITE THAT NEVER GOT A PLACE (critic 3 S5). a runs green; b waits for the one place, which
+# another run holds, and gives up (69). Its line names b, so the land refuses on it; once b runs
+# green the tree lands.
+LSI="$(lsu_tree su-b-no-place)"
+lsu_run "$LSI" a 0
+sleep 60 & LSI_H=$!
+mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSI_H" > "$TMP/land-shim-slots/place.1/pid"
+export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsu_run "$LSI" b 0; unset LS_SLOTS_N LS_MAX_WAIT
+kill "$LSI_H" 2>/dev/null; wait "$LSI_H" 2>/dev/null
+expect_eq "(i) a green, then b's no-place end stamped with its suite and 69" \
+  "a.test.sh:0 b.test.sh:69" "$(lsu_stamps "$LSI")"
+expect_match "(i) a green then b out of places at one head is REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=69 suite=b.test.sh *" "$(worktree_land "$LSI" wave/fixture)"
+lsu_run "$LSI" b 0
+expect_match "(i) …and once b runs green the tree LANDS" \
+  "spawn-worktree: LANDED branch=su-b-no-place onto=wave/fixture *" "$(worktree_land "$LSI" wave/fixture)"
+
+# (g) A LINE THAT NAMES NO SUITE: an older shim's (no `suites=`), or `?` for a run the wall could
+# not name. It could be ANY suite, so no later run at that head can clear a red or dirty one;
+# the fix is a commit, then the suites again. A green one asks nothing.
+LSG="$(lsu_tree su-older-shim)"
+echo 1 > "$LSU_RC/su-older-shim.a"
+LSU_WRAP="$(ls_wrap "cd $LSG || exit 1; bash tests/a.test.sh")"
+LSG_OLD="${LSU_WRAP/ --suites a.test.sh/}"
+expect_ne "(g) fixture: the older wall's wrap is the real one without --suites" "$LSU_WRAP" "$LSG_OLD"
+ls_harness "$LSG_OLD"
+echo 0 > "$LSU_RC/su-older-shim.a"; ls_harness "$LSG_OLD"
+lsu_run "$LSG" a 0
+expect_eq "(g) two older-shim lines (red, green), then a named green" "-:1 -:0 a.test.sh:0" "$(lsu_stamps "$LSG")"
+OUTLSG="$(worktree_land "$LSG" wave/fixture)"
+expect_match "(g) an older-shim red line at the head is REFUSED, naming no suite, whatever ran after" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=? head=$(git -C "$LSG" rev-parse HEAD) — *" "$OUTLSG"
+expect_match "(g) …and the fix is a commit, not a re-run" "*commit, then re-run the tree's suites at the new head, land again" "$OUTLSG"
+echo g > "$LSG/g.txt"; git -C "$LSG" add g.txt; git -C "$LSG" commit --quiet -m "new head"
+ls_harness "$LSG_OLD"
+expect_match "(g) an older-shim GREEN line at the head LANDS: it asks nothing" \
+  "spawn-worktree: LANDED branch=su-older-shim onto=wave/fixture *" "$(worktree_land "$LSG" wave/fixture)"
+# The wall's own `?`: a suite named through a variable from the environment.
+LSQ="$(lsu_tree su-unnamed)"
+echo 1 > "$LSU_RC/su-unnamed.a"
+LSU_WRAP="$(ls_wrap "cd $LSQ || exit 1; bash tests/\$LSU_X.test.sh")"
+expect_match "(g) a suite the wall cannot name is wrapped as ?" "bash *booked.sh * --suites '?' -- *" "$LSU_WRAP"
+export LSU_X=a; ls_harness "$LSU_WRAP"; unset LSU_X
+lsu_run "$LSQ" a 0
+expect_eq "(g) the unnamed red, then a named green" "?:1 a.test.sh:0" "$(lsu_stamps "$LSQ")"
+expect_match "(g) the unnamed red run is REFUSED, naming ?" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=? *" "$(worktree_land "$LSQ" wave/fixture)"
+
+
+section "§LAND-NAMES: a run is named by what it is — a runner by its text, a file by its place (wave-26 T63, critic K4-S1/N1/N2)"
+#
+# T61 named a suite FILE by its basename and everything else `?`, and a red `?` at the head is
+# cleared only by a commit. So a project that runs its tests with a runner (`npm test`,
+# `pytest`) had EVERY run named `?`: one red run, a run that never got a place, or an
+# interrupted run, and the tree could not land until an empty commit. Now a runner is named by
+# its own text (`npm_test`), a suite file by its basename only when it is this tree's own
+# `tests/<basename>` (the budget's rule, cmd_claim_scope), any other file by its run, and two
+# suite runs joined by anything but `&&` are `?`. Every row runs through the real wall, the
+# real shim and the real land. The runners are stand-ins on a private PATH; nothing is
+# installed. They exit with the code in a file outside the tree, as lsu_tree's suites do.
+LSN_BIN="$TMP/land-names-bin"; mkdir -p "$LSN_BIN"
+for _r in npm pytest; do
+  printf '#!/bin/bash\nexit "$(cat %s/%s.rc)"\n' "$LSU_RC" "$_r" > "$LSN_BIN/$_r"; chmod +x "$LSN_BIN/$_r"
+done
+lsn_run() {  # <tree> <runner> <rc> [<command after the cd guard>] — the runner at <rc>, wall + shim
+  echo "$3" > "$LSU_RC/$2.rc"
+  LSU_WRAP="$(ls_wrap "cd $1 || exit 1; ${4:-$2 test}")"
+  PATH="$LSN_BIN:$PATH" ls_harness "$LSU_WRAP"
+}
+
+# (n1) THE CRITIC'S CASE: npm test red, then npm test green, at one head.
+LSN1="$(lsu_tree sn-npm-retry)"
+lsn_run "$LSN1" npm 1
+expect_match "(n1) npm test is wrapped naming its own text" \
+  "bash *booked.sh --shell /bin/bash --stamp-dir $LSN1 --suites npm_test -- *" "$LSU_WRAP"
+lsn_run "$LSN1" npm 0
+expect_eq "(n1) two stamps of npm_test, red then green" "npm_test:1 npm_test:0" "$(lsu_stamps "$LSN1")"
+expect_match "(n1) npm test red then npm test green at one head LANDS" \
+  "spawn-worktree: LANDED branch=sn-npm-retry onto=wave/fixture *" "$(worktree_land "$LSN1" wave/fixture)"
+
+# (n2) A different runner is a different suite: npm test red, then pytest green.
+LSN2="$(lsu_tree sn-npm-then-pytest)"
+lsn_run "$LSN2" npm 1; lsn_run "$LSN2" pytest 0 pytest
+expect_eq "(n2) npm_test red, then pytest green" "npm_test:1 pytest:0" "$(lsu_stamps "$LSN2")"
+OUTLSN2="$(worktree_land "$LSN2" wave/fixture)"
+expect_match "(n2) npm test red then pytest green at one head is REFUSED, naming npm_test" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=npm_test head=$(git -C "$LSN2" rev-parse HEAD) — make the suites green, *" "$OUTLSN2"
+
+# (n3) A runner that never got a place, then the same runner green.
+LSN3="$(lsu_tree sn-npm-no-place)"
+sleep 60 & LSN3_H=$!
+mkdir -p "$TMP/land-shim-slots/place.1"; printf '%s\n' "$LSN3_H" > "$TMP/land-shim-slots/place.1/pid"
+export LS_SLOTS_N=1 LS_MAX_WAIT=1; lsn_run "$LSN3" npm 0; unset LS_SLOTS_N LS_MAX_WAIT
+kill "$LSN3_H" 2>/dev/null; wait "$LSN3_H" 2>/dev/null
+lsn_run "$LSN3" npm 0
+expect_eq "(n3) npm_test out of places (69), then npm_test green" "npm_test:69 npm_test:0" "$(lsu_stamps "$LSN3")"
+expect_match "(n3) a runner that never got a place, then the same runner green, LANDS" \
+  "spawn-worktree: LANDED branch=sn-npm-no-place onto=wave/fixture *" "$(worktree_land "$LSN3" wave/fixture)"
+
+# (n4) A TRUE `?` STILL STICKS: a runner whose text the reading cannot resolve (a `$`).
+LSN4="$(lsu_tree sn-unresolved)"
+export LSN_ARG=x
+lsn_run "$LSN4" pytest 1 'pytest "$LSN_ARG"'
+expect_match "(n4) a runner with a \$ in its text is wrapped as ?" "bash *booked.sh * --suites '?' -- *" "$LSU_WRAP"
+lsn_run "$LSN4" pytest 0 'pytest "$LSN_ARG"'
+expect_eq "(n4) the unnamed red, then the unnamed green" "?:1 ?:0" "$(lsu_stamps "$LSN4")"
+OUTLSN4="$(worktree_land "$LSN4" wave/fixture)"
+expect_match "(n4) a red ? at the head is REFUSED whatever ran after, naming ?" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=? *" "$OUTLSN4"
+expect_match "(n4) …and the fix is a commit, not a re-run" "*commit, then re-run the tree's suites at the new head, land again" "$OUTLSN4"
+echo n4 > "$LSN4/n4.txt"; git -C "$LSN4" add n4.txt; git -C "$LSN4" commit --quiet -m "new head"
+lsn_run "$LSN4" pytest 0 'pytest "$LSN_ARG"'
+unset LSN_ARG
+expect_match "(n4) …after a commit, the green ? LANDS" \
+  "spawn-worktree: LANDED branch=sn-unresolved onto=wave/fixture *" "$(worktree_land "$LSN4" wave/fixture)"
+
+# (n5) TWO FILES, TWO SUITES (K4-N2): tests/a.test.sh red, then other/a.test.sh green.
+LSN5="$(lsu_tree sn-other-a)"
+mkdir -p "$LSN5/other"; printf '#!/bin/bash\nexit 0\n' > "$LSN5/other/a.test.sh"
+git -C "$LSN5" add other && git -C "$LSN5" commit --quiet -m "another a.test.sh"
+lsu_run "$LSN5" a 1; lsu_run "$LSN5" a 0 'bash other/a.test.sh'
+expect_eq "(n5) the suite of this tree is a.test.sh, the other file is named by its run" \
+  "a.test.sh:1 bash_other_a.test.sh:0" "$(lsu_stamps "$LSN5")"
+expect_match "(n5) tests/a red then other/a green at one head is REFUSED, naming a" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=a.test.sh *" "$(worktree_land "$LSN5" wave/fixture)"
+
+# (n6) ONE FILE, FOUR SPELLINGS, ONE SUITE: relative, absolute, `./`, and inside the capture.
+LSN6="$(lsu_tree sn-one-file)"
+lsu_run "$LSN6" a 1
+lsu_run "$LSN6" a 1 "bash $LSN6/tests/a.test.sh"
+expect_match "(n6) the absolute path behind the cd is wrapped as a.test.sh" \
+  "bash *booked.sh --shell /bin/bash --stamp-dir $LSN6 --suites a.test.sh -- *" "$LSU_WRAP"
+lsu_run "$LSN6" a 1 'bash ./tests/a.test.sh'
+lsu_run "$LSN6" a 0 "set -o pipefail; bash tests/a.test.sh 2>&1 | tee \"$LS_LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"$LS_LOG\"; exit \$rc"
+expect_eq "(n6) four stamps, one name" "a.test.sh:1 a.test.sh:1 a.test.sh:1 a.test.sh:0" "$(lsu_stamps "$LSN6")"
+expect_match "(n6) red three ways, then green in the capture, LANDS" \
+  "spawn-worktree: LANDED branch=sn-one-file onto=wave/fixture *" "$(worktree_land "$LSN6" wave/fixture)"
+
+# (n7) A GREEN THAT DOES NOT SPEAK FOR EVERY SUITE (K4-N1): b red, then `a || b` with a green.
+# b never ran, so the line is `?`, and its green asks nothing: b is still red.
+LSN7="$(lsu_tree sn-or-short)"
+lsu_run "$LSN7" b 1
+echo 0 > "$LSU_RC/sn-or-short.a"
+lsu_run "$LSN7" b 1 'bash tests/a.test.sh || bash tests/b.test.sh'
+expect_match "(n7) a || b is wrapped as ?" "bash *booked.sh --shell /bin/bash --stamp-dir $LSN7 --suites '?' -- *" "$LSU_WRAP"
+expect_eq "(n7) b red, then the a || b line green as ?" "b.test.sh:1 ?:0" "$(lsu_stamps "$LSN7")"
+expect_match "(n7) b red then a || b green at one head is REFUSED, naming b" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=b.test.sh *" "$(worktree_land "$LSN7" wave/fixture)"
+
+# (n8) A LINE THE EARLIER WALL WROTE IS READ BY ITS OWN GRAMMAR. Before this change the wall
+# named npm test `?`; the stamp token is still stamp/v1 and the land reads that line as a `?`:
+# red at the head, it sticks even after a green npm_test line.
+LSN8="$(lsu_tree sn-earlier-wall)"
+echo 1 > "$LSU_RC/npm.rc"
+LSU_WRAP="$(ls_wrap "cd $LSN8 || exit 1; npm test")"
+LSN8_Q="'?'"; LSN8_OLD="${LSU_WRAP/ --suites npm_test/ --suites $LSN8_Q}"
+expect_ne "(n8) fixture: the earlier wall's wrap is the real one with --suites '?'" "$LSU_WRAP" "$LSN8_OLD"
+PATH="$LSN_BIN:$PATH" ls_harness "$LSN8_OLD"
+lsn_run "$LSN8" npm 0
+expect_eq "(n8) the earlier wall's ? red, then a named green" "?:1 npm_test:0" "$(lsu_stamps "$LSN8")"
+expect_match "(n8) the stamp is still stamp/v1" "stamp/v1|*" "$(head -n 1 "$(stamp_file "$LSN8")")"
+expect_match "(n8) the earlier wall's red ? at the head is REFUSED, naming ?" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=? *" "$(worktree_land "$LSN8" wave/fixture)"
 
 finish

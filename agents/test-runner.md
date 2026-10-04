@@ -14,9 +14,10 @@ Mechanical test-suite execution and full result reporting.
 
 <!-- REPORT-CONTRACT-BEGIN -->
 Every factual claim in your report — a test result, a file's existence, a command's
-outcome — carries the command that proves it and that command's output, or the explicit
-label `unverified`. An `unverified` claim obligates the orchestrator to re-check before
-acting; a claim with neither proof nor label is a contract violation.
+outcome — carries the command that proves it and either its output or the path of a saved log
+holding that output, or the explicit label `unverified`. The orchestrator re-checks an
+`unverified` claim only when it acts on that claim; a claim with neither proof nor label is a
+contract violation.
 
 **Deliver the report with the SendMessage tool**, naming your artifact's path, to whoever
 dispatched you (`to: "main"` unless your brief says otherwise). Completion is signaled,
@@ -25,7 +26,7 @@ never inferred: plain final text and going idle reach no one. Send it, then stop
 
 ## Bounds
 
-- Run the named suite command(s) exactly as given.
+- Run the named suite command(s) exactly as given. Run only the suites the brief's `Suites:` names. `cd <tree> || exit 1` guards the WHOLE command, so a failed `cd` cannot run the rest of it against the wrong tree.
 - Report full counts and verbatim failures — never summarize away a failure.
 - Never edit files. Never commit: bash-walls refuses it. Never retry-to-green. Never reinterpret a failure as environmental without evidence.
 
@@ -39,21 +40,15 @@ never inferred: plain final text and going idle reach no one. Send it, then stop
 
 ## Logging
 
-- Run every suite through a log: `<suite command> 2>&1 | tee "$LOG"` — stdout stays live, the log persists.
 - Log path: `.bionic/tmp/test-runner-<suite>-<timestamp>.log` when the project has `.bionic/tmp/`; otherwise `mktemp -t test-runner-<suite>`.
 - Always name every log path in your report — the log is your named output artifact, so the orchestrator or the user can tail results even if your report is delayed or lost.
-- Capture exit codes as `{ cmd; echo "rc=$?"; } > log 2>&1`, never PIPESTATUS — the per-stage array is shell-specific (`${PIPESTATUS[0]}` in bash, `${pipestatus[1]}` in zsh) and a wrong index reports the tee's success instead of the suite's failure. The `rc=` line is what your report quotes; `set -o pipefail` keeps the pipe honest, it does not tell you which stage failed.
-
-## Evidence defaults
-
-In force unless your brief overrides them. Suites run FOREGROUND with the Bash tool `timeout` parameter set to 600000 ms, never `run_in_background`, never a timeout binary. Run only the suites the brief's `Suites:` names. `cd <tree> || exit 1` guards the WHOLE command, so a failed `cd` cannot run the rest of it against the wrong tree.
 
 <!-- BRIEF-SCAFFOLD-READER-BEGIN -->
 ### Your brief
 Expected duration: your time budget.
 Expected artifact: the one path that makes you done.
-Progress artifact: append to it at least every Cadence.
-Cadence: that interval.
+Progress artifact: append to it at least every Cadence (tasks of 15 min or more).
+Cadence: that interval (tasks of 15 min or more).
 Done marker: write it after your report.
 Subprocess claim: the backgrounded process main will look for.
 Files: the only paths you may write.

@@ -10,6 +10,265 @@ Versioning follows semver from 1.9.0 on:
   or an upgrade step.
 - **PATCH** for a fix within existing behaviour.
 
+## 1.11.0 — 2026-10-04
+
+A run that does each necessary thing once, and as many things at once as the machine carries.
+Work now starts when what it reads exists, not when a step number allows it; the full suite runs
+once, on the head being released; the design is approved once; and a suite run books a place on
+the machine as it starts instead of being counted when an agent is handed out. This is a minor
+release: it adds verbs, an optional plan column and behaviour you will notice, refuses some actions
+that were not refused before, and asks one upgrade step of a plan already past Step 4. Nothing a
+project already relies on is removed, and `canonical_sdlc_version` stays 14.
+
+What you will notice:
+
+- **Work starts when what it reads exists.** A plan's `## Tasks` table may carry an optional
+  `reads` column, found by its header name anywhere in the header. A row lists what it must have
+  before it is ready, comma-separated: a path in the `Files` grammar, `head`, `record`,
+  `proof:<kind>`, `approval:<name>` or `ext:<slug>`, and `live:<artifact>` for a read that is
+  satisfied by what exists now. An empty cell takes the kind's default: build `approval:plan`;
+  verify and doc `approval:plan, head`; review `approval:plan, live:head`; integrate
+  `proof:floor, proof:review, head`, so integrate also waits for any open build. A document row at
+  Step 7 or later is the release and must name the approval it waits for (`approval:release`, or
+  `approval:plan` for a document that needs no release): the validator refuses it otherwise, and it
+  is never offered before that approval exists. The edges between rows are computed from these cells and never
+  written: in a table with `reads`, the `deps` cell holds only `ext:` tokens. The rule that every
+  verify, review and doc row waits for every build row is gone, so a review that reads only the diff
+  no longer waits for verification. Two rows that write one file run side by side and reconcile on
+  landing; a `Files` entry ending in `!` marks a file that cannot be merged, and a second writer of
+  it waits for the first to land. `task-add` takes the cell as an optional last operand, and
+  `task-set <id> reads=<…>` sets it on a row later; a `reads` operand for a table with no `reads`
+  column is refused, with a line that says so. A table without the column reads each `deps` id as
+  "wait for that task to land", as before, and a build added mid-run still holds the full run, as in
+  1.10.0.
+- **Your approvals are the only step barriers.** No row is ready until the plan's `approved-by:`
+  line exists. Any other approval a row reads, such as `approval:release`, is recorded with
+  `session-poker.sh approve <name> '<reply>'`, your reply quoted verbatim, as an
+  `approved: <name> by <who> <ISO-UTC> "<reply>"` line under `## SDLC State`. Only the
+  orchestrator can run it, and it refuses a name no open row reads, a second recording of one name,
+  and `plan`, which is the `approved-by:` line.
+- **The Patrol says why each row waits.** For every pending row it did not offer, the tick prints
+  `poker: WAIT <id> — <reason>`: the unmet read and the row that writes it, the `ext:` token, or the
+  approval. `poker: CHAIN <id>→<id>… (<n> min)` names the longest remaining chain, and
+  `poker: RANGE <id> <range>` names the commits an offered review reads. With every agent busy and
+  nothing ready it prints `poker: WAITING — <n> running, nothing ready`, and a turn that sees only
+  that line, or `unchanged`, owes nothing more. A task-list refresh is owed only when a row's status
+  or the ready set changed, and the tick says so on a `poker: RECONCILE` line. A read-only row (a
+  review, a research pass) no longer takes a writer place. A fill or stand-down decline stands until
+  the set it answered changes. The first tick of a run, before anything is dispatched, names the
+  ready work and prints the same lines, and when it names work it ends in `FILL`, as every later
+  tick does. The Patrol prompt moves to version 5, and a Patrol started with an older prompt is told
+  once to re-arm.
+- **A launch moves its own plan row.** When bionic records the launch of a named agent, it sets that
+  agent's plan row `active` and adds the row's dispatch-ledger line itself, one write for a batch of
+  launches. The doctrine no longer asks for `task-set` and `ledger-add` by hand at dispatch.
+- **Reviews follow the build.** A review row with the default `live:head` read is offered as soon as
+  landed work exists past the last review proof and no review is open, and it reads only that
+  difference. Recording the review with `session-poker.sh proof-add review <record>` returns the row
+  to pending, so the next landing offers a review of the new difference alone. A final review that
+  reads the settled `head` covers problems across tasks. `proof-add review` refuses a record whose
+  `reviewed: <a>..<b>` range starts at no commit, starts at a commit that is not on the history of
+  its end, or starts past the last review proof (or, for the first review, past the plan's base), so
+  that what landed in between is unread; each line names the range to read instead. When a review
+  is idle, with nothing landed past its proof, it no longer holds integrate back.
+- **A proof names the head it read, and the full suite runs once.**
+  `session-poker.sh proof-add <floor|review|task> <evidence under record/>` writes
+  `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<path>` under `## SDLC State`. The head
+  is the one the evidence names, a run log's `head=` header or the end of a review's
+  `reviewed: <a>..<b>` line, and is never typed. Step 5 runs the full suite once, on the head being
+  released, and records it with `proof-add floor <log>`. After that a later change is proved by the
+  suites your file-to-suite map (`impact-command:` in `.bionic/config.yaml`) names for it, and a
+  full-run dispatch goes ahead only when the change cannot be bounded: a commit from outside the
+  run, a changed file the map answers with every suite or with none, a change to the full-suite
+  runner or the shared test library, or no floor proof yet. Integration waits for that run: while
+  the change past the last floor proof cannot be bounded, the integrate row is not ready, and the
+  tick's `WAIT` line gives the reason and asks for a full run on the head, recorded with
+  `proof-add floor`. A project with no `impact-command:` gets every full run it asks for, as before,
+  and its integration waits for a full run on the head whenever anything changed past the last one.
+  The `regression-cause:` line is no longer asked for or read.
+- **A task lands on its own green run.** `spawn-worktree.sh land` no longer needs a full run. It
+  reads the stamps the booking shim (next bullet) leaves in the tree's own git directory, and refuses
+  a tree whose stamped suite run was at another head, on a dirty tree, or red, and a tree that
+  lacks a landed commit touching a file it also changed; a tree that lacks only commits to other
+  files lands. After the merge it checks that neither branch moved and that the merge is its own.
+  If one did move, it undoes only the merge it made and keeps the tree. If it cannot prove the merge
+  is its own, it undoes nothing. Either way the refusal says where the checkout stood.
+- **A red suite stays red at the land.** A stamp names the suites its command ran. The land takes
+  the newest stamp of every suite at the tree's head, and each must be green on a clean tree, so a
+  red suite followed by another suite's green run is refused, and the refusal names the suite
+  (`suite=<name>`). A suite that never got to run (no place, stopped at its limit, signalled while
+  it waited) stamps the end it reached, so the land refuses the tree until that suite is run green.
+- **A suite run books a place on the machine.** The Bash wall runs every suite-class command, on any
+  thread, through `scripts/booked.sh`. The shim takes one of N machine-wide places (the store is
+  `~/.claude/bionic/slots`, or `BIONIC_SLOTS_DIR`; N is the suite count bionic's machine probe gives,
+  or `BIONIC_SLOTS_N`). When none is free it waits and names the holders, and it gives up after
+  `BIONIC_SLOTS_MAX_WAIT` with exit 69. It stamps the head, the dirty count and the exit code, and
+  releases the place on every exit. The stamp goes into the git directory of the tree the suite ran
+  in when the command leads with a literal `cd <tree>`, which is how a task tree is run from the
+  main checkout (the wall passes the shim `--stamp-dir <tree>`); any other command is stamped where
+  the call started. A run inside a booked run books nothing. A timing check
+  (`BIONIC_QUIET=1`, or `# runner: solo` in a suite's first 30 lines) takes the whole machine,
+  starts on a settled load, and is retried up to twice and reported `void` when the load rose; a
+  void over a failing run is still a failure. Dispatch no longer counts suite runs when it hands an
+  agent out, and a read-only agent asks for no worktree. A wrapped suite runs in a child shell, so
+  its `cd`, aliases and functions do not carry to the next call; prefix `BIONIC_SLOT_HELD=1` to run
+  one exactly as typed, unbooked and unstamped.
+- **A short command stays on your thread.** The farm-out wall lets a suite- or build-class command
+  run on the orchestrator's thread when the Bash call's own `timeout` is at most the short limit:
+  120000 ms by default, `farm-out-short-ms:` in `.bionic/config.yaml`, where `0` turns the pass off.
+  A short suite needs at least 6000 ms and is stopped at the limit, the wait for a place included,
+  with a line that says it belongs in a subagent (exit 124); a short build runs as typed. A longer
+  or untimed command is refused as before, and the refusal's first fix is now the timeout. The
+  advisory printed for every `npx` and `uvx` one-liner is retired.
+- **The design is approved once.** The interview closes on the Step-2 card, whose approval is the
+  one approval of the design. It opens with the Goal, Approach and "Worth your eye" (each call with
+  its risk), prints each decision's label once, names the spec, every ADR, the design ledger and the
+  requirements by path, and shows the ownership table only on `show ownership`
+  (`card.sh step2 <spec> ownership`, and `card.sh step2 <spec> evals <REQ-id>` for one
+  requirement). The Step-3 card approves the plan and the matrix only: it cites the design by path,
+  lists each task with the requirements it serves, and shows the longest chain with its minutes and
+  the peak width where the eval counts and the purpose used to be.
+- **Each thing is ordered once.** The auditor runs one pass. One reviewer takes all six review axes,
+  and a security or performance flag adds one reviewer each. The critic no longer carries the
+  reviewer's duplication axis or the auditor's evidence check. The doctrine no longer orders a skill
+  re-invocation on resume, a hand dry-run before a step advance, or a reconcile at every turn end.
+  Step 3 tells the planner to split the longest chain where it can, and names the five events that
+  cause a re-plan: a finding, a red test, an approved scope change, a task overrunning its size, and
+  a report that names follow-up work. A re-plan is done with `task-add` and `task-set`.
+- **Shorter evidence and briefs.** A report may cite the path of a saved log in place of pasted
+  output. A brief's progress-file and cadence lines are marked as needed only for tasks of 15
+  minutes or more. The doctrine shows the one-line landed-task evidence line the commit gate
+  accepts, and the Step-0 template no longer repeats `parallel-budget` or `integration-branch`. The
+  suite capture shape is now
+  `set -o pipefail; <command> 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc`, so the
+  command exits with the suite's own code, which is what `land` reads from the stamp.
+- **The run reports its idle time.** `session-poker.sh fill-report` adds `idle minutes:` (minutes a
+  ready row waited while there was room for it) and `peak width:`, both from times the fill ledger
+  and the roster wrote, never from plan text.
+
+Newly refused:
+
+- A commit judged against Step-5 evidence that carries no `head:` line, or a `head:` that is not a
+  commit, or one the release head does not contain. The fix is `head: <sha>`, the commit the tests
+  floor ran on.
+- A full-run dispatch on a head that already has a floor proof (`head <sha> is already proved`:
+  run nothing); after a bounded change (`bounded: <suites>`: the refusal prints the `Suites:` line
+  to dispatch instead); and while a row the floor waits on is not landed and writes tracked files
+  (`rows write tracked files: <ids>`: land them, then dispatch it).
+- A writer dispatch for a row that reads an approval nobody gave (`row <id> waits for
+  approval:<name>`). Once you have replied, `session-poker.sh approve <name> '<reply>'` records it.
+- `spawn-worktree.sh land`, with these reason words and fixes: `not-current` (merge the branch it
+  lands onto into the tree, re-run its suites, land again); `stale-proof why=head|dirty|red|unreadable`
+  (re-run the tree's suites at its head, land again); `onto-moved`, `branch-moved` and `onto-switched`
+  (the merge is undone and the tree kept; land again); `merge-unproven` and `onto-detached` (nothing
+  is undone; the line says what to check out). An undo that could not finish says `undo=failed` and
+  prints the step to take by hand.
+- A writer dispatch when the plan's approval cannot be read, because the library that reads it
+  cannot be loaded (`the approval reader lib/fill.sh cannot be loaded`). Reinstall the plugin.
+- A turn end, once, when the launch record could not write a launch into the plan ("a launch is not
+  recorded in the plan": run the commands `session-poker.sh launch-sync` prints), and when a ready
+  read-only row has room to run.
+- In a table with a `reads` column: a task id in `deps`, a cycle of reads, an open document row at
+  Step 7 or later that reads no approval (the line names the fix: `approval:release`, or
+  `approval:plan` for a document that needs no release), and a `reads` operand to `task-add` on a
+  table that has no such column.
+- `session-poker.sh proof-add review` for a record whose `reviewed: <a>..<b>` range starts at no
+  commit, at a commit that is not on the history of `<b>`, or past the last review proof so that
+  what landed in between is unread. The line names the range to review.
+- A land of a tree whose newest stamp of any suite at its head is red, is dirty, or is the end of a
+  suite that never ran; the refusal names the suite.
+- `session-poker.sh approve` and `proof-add` from a subagent: like the other plan verbs, they are the
+  orchestrator's. `proof-add` also refuses evidence that is a symbolic link, is outside `record/`, or
+  does not exist.
+
+Upgrade, for a plan already in flight:
+
+- Before the plan's next commit that is judged against Step-5 evidence, add `head: <sha>` to that
+  evidence: the commit its tests floor ran on. After the full run, record it with
+  `session-poker.sh proof-add floor <log>`, or every later full run is still admitted.
+- Re-arm the Patrol when the tick asks.
+- You may leave alone: a `## Tasks` table without `reads` (its `deps` keep their meaning), any
+  `regression-cause:` lines (no longer read), and the `suites=` field of `parallel-budget:`.
+
+Fixes:
+
+- A refused `spawn-worktree.sh land` no longer removes the tree's `.bionic` link before it refuses
+  (the limit 1.9.0 carried); the link is dropped just before the tree is removed.
+- Close-out accepts a task-scale plan on a branch of any shape, such as `fixit/x`; every other scale
+  keeps the `wave/<digits>-<slug>` rule.
+- `land`'s busy-suite check matches a running test runner, even behind combined shell options, and
+  no longer a command whose text merely mentions it.
+- A suite on a new line after a command chain no longer passes the farm-out wall unseen.
+- Creating a task tree no longer leaves the main checkout reading as dirty. When nothing ignores the
+  tree's parent directory, `spawn-worktree.sh create` writes it into the repository's local,
+  untracked exclude file (`.git/info/exclude`), once; it never edits `.gitignore` or a tracked
+  file. A full run could not be recorded as the floor while the checkout read as dirty. `remove`
+  leaves that one line, which hides a directory that is empty or gone.
+- A bounded probe looks ten times in its first second instead of once, so a probe that answers at
+  once no longer costs a second of every doctor run and session start.
+
+Known limits, carried to the next release:
+
+- A suite command that swallows its own exit code (one ending in `; echo done`, or `|| true`) exits
+  0, so its stamp records a pass and `land` lets the tree through. Use the capture shape above.
+  Two suites in one command have one exit code between them: non-zero marks both red, and in
+  `a; b` the code of `a` is lost.
+- A green full run does not clear an earlier red stamp of a single suite; that suite must be run
+  green by itself. A runner command is named by its own text, so `pytest` and `pytest -q` are two
+  suites, and only a re-run spelled the same way clears its red. A command the wall cannot name (its
+  text holds a `$`, or runs past 100 characters) or whose suites are joined by anything but `&&`
+  (`a || b`, `a; b`, a pipe) stamps no suite, and such a stamp, red or dirty at the head, is cleared
+  only by a new commit and a re-run.
+- A `cd` the wall cannot read as a literal (a variable, `pushd`, a subshell or a pipe ahead of the
+  suite) stamps the checkout the call started in, and a run under `BIONIC_SLOT_HELD=1` stamps
+  nothing, so both leave the task tree without a stamp. `land` reads a tree with no stamp as a tree
+  where no suite ran, and lands it.
+- A suite that was red at an older head and never run again at the tree's head is not seen by the
+  land, which reads the stamps at the head.
+- A row that reads something it did not declare can start too early. Its work may be wasted, but it
+  cannot land wrongly, because the land checks the combined state.
+- `proof-add floor` accepts only a log in the shape bionic's own test runner writes (a
+  `head=<sha> dirty=<n>` header, a `Gating: <n> passed, <m> failed` verdict) from a whole run of
+  `tests/*.test.sh`, and it refuses a run when a suite file there is gitignored. Without a floor
+  proof, every full run is admitted.
+- "The full suite runs once" takes effect only where the project's runner writes the log header the
+  proof verb reads and the project names an `impact-command:` in `.bionic/config.yaml`; elsewhere
+  every full run is admitted, and integration waits for a full run on the head whenever anything
+  changed past the last one, which costs time and never a missed run.
+- A change that merges a branch which was deleted afterwards reads as part of the run, so it is
+  bounded where it should not be. Any tag inside the proved range draws a full run.
+- The ready set reads a bulleted `- approved-by:` line as the plan's approval, and the commit gate
+  does not. Write the line unbulleted.
+- A tick digest written by hand under the project's state can make the turn-end wall skip a review
+  it owes.
+- An agent name freed and dispatched again within the same minute as its earlier ledger line can be
+  read as already recorded, so its row is not set `active`.
+- `land`'s busy-suite check does not see a test runner whose path holds a space.
+- When the newest stamp of a suite is a passing run reported `void`, or the end of a suite that
+  never got to run, `land` refuses it as `why=red` and says "make the suites green": the refusal is
+  right, and its words are not.
+- `BIONIC_SLOT_HELD=1` with no place lets a whole-machine timing run start while another agent
+  holds a place.
+- The shim may wait for a place longer than the Bash call's own timeout, which moves the call to
+  the background on a busy machine.
+- A suite marked `# runner: solo`, run by a writer on a machine that never settles, exits 69 where
+  the full runner would run it once and report it `void`.
+- A review row that is idle at a run's end stays pending, on the WAIT and CHAIN lines, until you set
+  it landed or dropped.
+- The full-suite runner must be dispatched in the background, as every dispatch must. Dispatched in
+  the foreground, its own full run is refused with "no set was recorded for this agent", because a
+  launch is recorded only when the dispatch call returns; 1.10.0 behaves the same.
+- Each Bash call forks one more process than in 1.10.0, each tick and each turn end spends about
+  0.4 s recording launches, and the plan-row verbs take 0.75 to 0.87 s on a loaded machine
+  against a one-second budget; `proof-add review` takes 48 to 99 ms more for its range check.
+- The limits listed for 1.10.0 still hold, and of those listed for 1.9.0 only the one about a
+  refused land is closed.
+
+One rule for what may start (ADR-043): work is scheduled by what it reads, and a proof names the
+code state it read. A unit is ready when what it reads exists; your approval is an input only your
+reply writes; what is unproved is the difference since the head a proof names; capacity is booked
+when it is used; and tasks that share a file run side by side and reconcile on landing.
+
 ## 1.10.0 — 2026-10-04
 
 A run that is never left waiting on a dialog. In a session engaged with a bionic run, in bypass and

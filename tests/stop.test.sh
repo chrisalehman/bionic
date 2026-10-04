@@ -477,7 +477,7 @@ s7_fixture() {  # -> project dir on stdout
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|\n'
@@ -646,7 +646,7 @@ s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -699,6 +699,17 @@ s7_fire "$S9_D0" "$S9_TX0"
 expect_contains "9h: a turn that launched nothing reads 0 of 2" "launched 0 of 2" "$(s9_headline)"
 expect_contains "9i: …and names both rows" "not launched: T13 T14" "$(s9_headline)"
 
+# T16 (wave-26, D17): the ledger line ends with `idle=` and `room=`, the ready rows no launch and no
+# decline covered while a slot was free, and the free slots at that moment. Positive on the same
+# line first: the launched row is out of idle, the unlaunched one is in, and room is the line's own free.
+S9_LED0="$S9_D0/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
+S9_FREE="$(sed -n 's/.*|free=\([0-9]*\)|.*/\1/p' "$S9_LED" 2>/dev/null)"
+expect_true "9n: T16 the ledger line carries a free count to compare room against" test -n "$S9_FREE"
+expect_contains "9o: T16 the row this turn did not launch is idle, the one it launched is not" \
+  "|idle=T14|room=$S9_FREE" "$(cat "$S9_LED" 2>/dev/null)"
+expect_contains "9p: T16 a turn that launched nothing leaves both ready rows idle" \
+  "|idle=T13,T14|room=" "$(cat "$S9_LED0" 2>/dev/null)"
+
 # THE LINE BUDGET (found while implementing, not at RED): the user line is width.sh's 100
 # columns and refuse.sh refuses a longer one, which would turn this refusal into a refuse-call
 # error. Eight ready rows, nothing launched: the headline names what fits and counts the rest,
@@ -737,7 +748,7 @@ ub_world() {  # -> the root on stdout; p1 newest, p2 older
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-ub"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# p1\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf -- '---\n\n# p1\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -816,7 +827,7 @@ sd_fixture() {  # -> project dir; T7 pending, writers=8, current: 4
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -870,17 +881,8 @@ expect_absent "SD3c: …and not T7, which the decline answered" "T7" "$(printf '
 expect_eq "SD3d: …and the refused turn's line carries no decline, so the standing set does not grow" \
   "" "$(sd_field "$(sd_led "$SD_D" | tail -1)" declined)"
 
-# SD4: `current:` moved. The decline answered a step that is over, so it no longer stands.
-SD_D4="$(sd_fixture)"
-SD_P4="$SD_D4/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
-sd_turn "$SD_TX" u-sd4-1 "fill-declined: T7 waits on the T6 merge"
-s7_fire "$SD_D4" "$SD_TX"
-expect_eq "SD4 precondition: the declining turn ends" "" "$(sd_decision)"
-sed -i.bak 's/^current: 4$/current: 4b/' "$SD_P4"
-sd_turn "$SD_TX" u-sd4-2
-s7_fire "$SD_D4" "$SD_TX"
-expect_eq "SD4: AC-4.7 current: moved — the same ready set is refused" "block" "$(sd_decision)"
-expect_contains "SD4b: …naming T7" "not launched: T7" "$STOP_ERR"
+# SD4 (the `current:` move) is §DECLINE's D2 now: since wave-26 T15 (D16) a move of `current:`
+# alone no longer voids a standing decline, so the row that pinned the refusal was inverted there.
 
 # SD5: an empty `fill-declined:` is not an answer, in its own turn or the next.
 SD_D5="$(sd_fixture)"
@@ -994,6 +996,60 @@ expect_contains "SDR4b: …a hold older than this turn's tick does not answer th
 rm -rf "$SDR_CFG"
 
 # ─────────────────────────────────────────────────────────────────────────────
+section "DECLINE: a decline stands until the set it answered changes (wave-26 T15, REQ-4, AC-4.6; D16)"
+
+# THE DEFECT (research-R2 §3, P1 and P3). A `fill-declined:` stood until a new row was ready
+# or `current:` moved, so a run whose author wanted serial execution wrote a fresh decline after
+# every step move over the same ready set. A `standdown-declined:` stood for its own turn only,
+# so the next tick ordered the same unchanged agent down again and the turn had to decline it
+# again. Now a fill decline stands until the READY SET gains a row it did not answer. A
+# stand-down decline is written to the roster as `hold` writes it, so it stands until the
+# agent's launch, deliverable or messages move. The tick reads that check (hold_fingerprint).
+# The end-to-end proof, through the real tick, is tests/session-poker.test.sh §41 DECLINE-tick.
+export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
+
+# D1/D2: the fill decline. Turn one declines ready {T7}. `current:` moves and the ready set does
+# not: the second turn, with no text, is not refused.
+DC_D="$(sd_fixture)"
+DC_P="$DC_D/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+sd_turn "$SD_TX" u-dc-1 "fill-declined: T7 waits on the T6 merge"
+s7_fire "$DC_D" "$SD_TX"
+expect_eq "D1 precondition: the declining turn ends" "" "$(sd_decision)"
+sed -i.bak 's/^current: 4$/current: 4b/' "$DC_P"
+expect_contains "D1 precondition: current: moved" "current: 4b" "$(cat "$DC_P")"
+sd_turn "$SD_TX" u-dc-2
+s7_fire "$DC_D" "$SD_TX"
+expect_eq "D2: AC-4.6 current: moved over the same ready set — the decline stands, not refused" "" "$(sd_decision)"
+expect_contains "D2b: …and the turn's ledger line carries the standing reason" \
+  "T7 waits on the T6 merge" "$(sd_field "$(sd_led "$DC_D" | tail -1)" declined)"
+# D3: the ready set changes. Refused, naming the row the decline never saw.
+printf '| T8 | 4 | build | a row nobody declined | implementor | — | 15m | REQ-x | b.sh | pending | — |\n' >> "$DC_P"
+sd_turn "$SD_TX" u-dc-3
+s7_fire "$DC_D" "$SD_TX"
+expect_eq "D3: AC-4.6 a changed ready set is refused" "block" "$(sd_decision)"
+expect_contains "D3b: …naming the new row" "not launched: T8" "$STOP_ERR"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# D4: the stand-down decline is written where hold writes. The tick turn that declines W-SDR with
+# a reason ends, and the roster's latest W-SDR row now carries `held=<at> <reason> fp=…`, the
+# answer the tick reads on every later tick.
+DC_D4="$(sdr_fixture)"
+DC_CFG="$(mktemp -d)"
+DC_ROWS="$(grep -c '|name=W-SDR|' "$DC_D4/.bionic/tmp/roster-$SID.state")"
+sdr_turn "$SDR_TX" "standdown-declined: W-SDR is writing its record, one more cadence"
+CLAUDE_CONFIG_DIR="$DC_CFG" s7_fire "$DC_D4" "$SDR_TX"
+expect_eq "D4 precondition: the declining tick turn ends" "" "$(sd_decision)"
+DC_ROW="$(grep -F '|name=W-SDR|' "$DC_D4/.bionic/tmp/roster-$SID.state" | tail -1)"
+expect_regex "D4: AC-4.6 the decline is written as a hold, with its reason and the fingerprint" \
+  '\|held=[0-9TZ:-]+ is writing its record, one more cadence fp=[^|]+\|' "$DC_ROW"
+expect_eq "D4b: …one row added" "$((DC_ROWS + 1))" "$(grep -c '|name=W-SDR|' "$DC_D4/.bionic/tmp/roster-$SID.state")"
+# D5: the re-entered Stop of the same turn writes no second hold.
+CLAUDE_CONFIG_DIR="$DC_CFG" s7_fire "$DC_D4" "$SDR_TX"
+expect_eq "D5 precondition: the same turn's Stop again ends" "" "$(sd_decision)"
+expect_eq "D5: …and adds no second held row" "$((DC_ROWS + 1))" "$(grep -c '|name=W-SDR|' "$DC_D4/.bionic/tmp/roster-$SID.state")"
+rm -rf "$DC_CFG"
+
+# ─────────────────────────────────────────────────────────────────────────────
 section "FO: the stop wall's occupancy is the tick's — a read-only row holds no writer slot (wave-24 T13, D11)"
 
 # THE THIRD READER ON THE OLD NUMBER (A-T10.3, A-orch-32). The dispatch wall and the tick count
@@ -1007,7 +1063,7 @@ fo_fixture() {  # <subagent_type of the one open row> -> project dir; writers=1,
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
     printf '## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
@@ -1049,5 +1105,400 @@ s7_fire "$FO_DW" "$FO_TX"
 expect_absent "FO2b: …and the stop wall asks for no fill" "Fillable gap" "$(reason_of)$STOP_ERR"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
+# ============================================================
+section "FILL-WALL: the wall's set is the tick's — a ready read-only row refuses the turn once, a waiting row is never demanded (wave-26 T13; REQ-6 AC-6.7; D9)"
+# ============================================================
+#
+# ONE READY SET, READ-ONLY ROWS INCLUDED. writers=1 and a writer open, so no writer slot is free.
+# T1 is a ready build row the closed gap holds back; T5 is a ready verify row, which takes no
+# writer slot and is therefore owed whatever the gap; T6 waits on T1, which has not landed. The
+# tick offers T5 alone, and the wall refuses a turn that left it undispatched — naming T5, and
+# never T6. The differential lands T5: nothing ready is left that a slot could take, so the same
+# wall asks for nothing.
+fw_fixture() {  # <status of T5> -> project dir
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n'
+    printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | a ready writer, no slot free | implementor | — | 15m | REQ-x | a.sh | pending | — |\n'
+    printf '| T5 | 5 | verify | the ready read-only row | auditor | — | 15m | REQ-x | — | %s | — |\n' "$1"
+    printf '| T6 | 5 | verify | waits on T1 | auditor | T1 | 15m | REQ-x | — | pending | — |\n'
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-26-fw.plan.md"
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-26-fw.plan.md"
+  roster_header > "$d/.bionic/tmp/roster-$SID.state"
+  roster_row_fixture status=intended session="$SID" name=FW-ONE agent_id=aFW00000000000001 \
+    deliverable= "subagent_type=implementor" >> "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+require_helpers fw_fixture
+
+FW_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$FW_RING"
+export BIONIC_PRESSURE_RING="$FW_RING" BIONIC_NOW_EPOCH=1700000000
+FW_TX="$(mktemp)"
+
+FW_D="$(fw_fixture pending)"
+FW_TICK="$(fo_tick "$FW_D")"
+expect_contains "FW0: the tick offers the read-only row with no writer slot free" "poker: FILL T5" "$FW_TICK"
+sd_turn "$FW_TX" u-fw-1
+s7_fire "$FW_D" "$FW_TX"
+expect_contains "FW1: AC-6.7 a ready read-only row left undispatched refuses the turn end" \
+  "Fillable gap at turn end" "$(reason_of)"
+expect_contains "FW1b: …naming it" "T5" "$(reason_of)"
+expect_absent "FW1c: …and never the row that waits on an unlanded read" "T6" "$(reason_of)"
+expect_absent "FW1d: …nor the writer the closed gap holds back" "T1" "$(reason_of)"
+expect_contains "FW1e: the refusal asks for the dispatch" "Dispatch each named row" "$(reason_of)"
+expect_absent "FW1f: …and no longer for a hand edit of the row: the launch recorder ledgers it" \
+  "ledger it active" "$(reason_of)"
+
+FW_DL="$(fw_fixture landed)"
+sd_turn "$FW_TX" u-fw-2
+s7_fire "$FW_DL" "$FW_TX"
+expect_absent "FW2: the differential — with T5 landed, only a waiting row and a slotless writer remain, and nothing is demanded" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+expect_contains "FW2b: …while the tick on that fixture still names the waiting row" \
+  "poker: WAIT T6 — waits for T1 (pending)" "$(fo_tick "$FW_DL")"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "FLOOR-WALL: the turn-end wall never demands an integrate row whose floor proof the change has outrun (wave-26 T64; REQ-3 AC-3.4)"
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# THE WALL'S READY SET IS THE TICK'S (lib/units.sh), so the rule that integrate's `proof:floor`
+# stands only while proof_state answers covered or bounded reaches the turn end too. The fixture
+# is a git repository on `wave/99-fl` with no `impact-command:`, so any change past the floor
+# proof is unbounded; writers=1 and no writer open, so a ready integrate row is a fillable gap.
+# Each proof line is written by lib/proof.sh's own writer pair at the head the checkout is at.
+# A new file lands past the proof: the wall demands nothing, while the tick says why the row
+# waits. The differential records a floor proof at the new head: the same wall refuses the turn,
+# naming T3.
+fl_git() { git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid "${@:2}"; }
+fl_prove() {  # <project> <kind> -> a proof line at the checkout's head, by proof_line + proof_add_line
+  local p="$1/.bionic/docs/plans/epic-99-fixture/wave-99-fl.plan.md" out
+  out="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh" >/dev/null 2>&1
+          proof_add_line "$p" "$(proof_line "$2" "$(fl_git "$1" rev-parse HEAD)" 2026-10-04T12:00:00Z "record/fl/$2.txt")")" \
+    && printf '%s\n' "$out" > "$p"
+}
+fl_fixture() {  # -> project dir: proofs at the base, then a new file past them
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  fl_git "$d" init -q 2>/dev/null; fl_git "$d" checkout -q -b wave/99-fl 2>/dev/null
+  printf '.bionic/\n' > "$d/.gitignore"; fl_git "$d" add .gitignore; fl_git "$d" commit -qm base
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=1 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 8\nworking-branch: wave/99-fl\n'
+    printf 'approved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 8: in progress\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the build | implementor | — | 15m | REQ-x | a.sh | landed |  |\n'
+    printf '| T5 | 5 | verify | the floor | test-runner | — | 15m | REQ-x | .bionic/docs/record/fl/floor.txt | landed |  |\n'
+    printf '| T2 | 6 | review | the review | critic | — | 15m | REQ-x | .bionic/docs/record/fl/review.md | landed |  |\n'
+    printf '| T3 | 8 | integrate | merge to main | implementor | — | 15m | REQ-x | — | pending |  |\n'
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-99-fl.plan.md"
+  fl_prove "$d" floor; fl_prove "$d" review
+  mkdir -p "$d/newdir"; printf 'new\n' > "$d/newdir/x.sh"; fl_git "$d" add newdir; fl_git "$d" commit -qm 'a new file'
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-99-fl.plan.md"
+  roster_header > "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+require_helpers fl_fixture
+
+FL_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$FL_RING"
+export BIONIC_PRESSURE_RING="$FL_RING" BIONIC_NOW_EPOCH=1700000000
+FL_TX="$(mktemp)"
+FL_D="$(fl_fixture)"
+expect_contains "FL0: the tick on the fixture says integrate waits for a full run (the ready set's reason)" \
+  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at" "$(fo_tick "$FL_D")"
+sd_turn "$FL_TX" u-fl-1
+s7_fire "$FL_D" "$FL_TX"
+expect_absent "FL1: AC-3.4 the turn-end wall does not demand integrate while the change past the floor proof is unbounded" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+fl_prove "$FL_D" floor
+rm -f "$FL_D/.bionic/tmp/tick-digest-$SID.state"
+expect_contains "FL2 precondition: with a floor proof at the head the tick offers integrate" "poker: FILL T3" "$(fo_tick "$FL_D")"
+sd_turn "$FL_TX" u-fl-2
+s7_fire "$FL_D" "$FL_TX"
+expect_contains "FL2: the differential — the same wall refuses the turn that left the merge undispatched" \
+  "Fillable gap at turn end" "$(reason_of)"
+expect_contains "FL2b: …naming T3" "T3" "$(reason_of)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "LS: the turn-end wall records the launches the plan lacks, and refuses on one it cannot (wave-26 T32, D4; review-3 F2)"
+
+# The launch recorder starts `session-poker.sh launch-sync` and does not wait for it, so its
+# failure has to surface somewhere a model reads. The turn-end wall runs the same transaction:
+# a launch it records is silent, and one it cannot record refuses the turn once, naming the
+# commands to run by hand. The fixture is a plan the real commit gate admits (the shape
+# tests/execution-recorder.test.sh §17 builds), because the transaction dry-commits through it.
+ls_world() {  # -> project dir; T3 and T4 pending build rows, T2 active, the session bound
+  local d p
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture" "$d/.bionic/docs/specs/epic-99-fixture"
+  git -C "$d" init -q 2>/dev/null
+  git -C "$d" config user.email t@example.com; git -C "$d" config user.name T
+  echo seed > "$d/README.md"; git -C "$d" add README.md; git -C "$d" commit -qm seed 2>/dev/null
+  printf '# requirements\n' > "$d/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '# spec\n' > "$d/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+  p="$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: audited\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\n'
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: abc1234\n  branch: wave/01-fixture\n'
+    printf -- '- T1: landed at record/T1.md\n- T2: dispatched to w1-T2\n'
+    printf -- '- T3: pending dispatch\n- T4: pending dispatch\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+    printf '| T2 | 4 | build | the second build | w1-T2 | — | 30 | REQ-1 | b.sh | 01-T2 | abc1234 | active |\n'
+    printf '| T3 | 4 | build | the third build | — | — | 30 | REQ-1 | c.sh | — | — | pending |\n'
+    printf '| T4 | 4 | build | the fourth build | — | — | 30 | REQ-1 | d.sh | — | — | pending |\n\n'
+    printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
+    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
+    printf '|---|---|---|---|---|---|---|\n| T2 | implementor (w1-T2) | 2026-10-04T03:00Z | 30 min | record/T2.md | — | batch 1 |\n'
+  } > "$p"
+  ( cd "$d" && git add -f "$p" .bionic/docs/specs && git commit -qm plan ) >/dev/null 2>&1
+  bound_marker "$d" "$SID" "$p"
+  { roster_header
+    roster_row_fixture status=confirmed session="$SID" name=w1-T2 agent_id=aLS2000000000001 \
+      launched_at=2026-10-04T03:00:00Z subagent_type=bionic:implementor tool_use_id=toolu_LS2
+  } > "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+ls_plan() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md' "$1"; }
+ls_launch() {  # <project> <name> [tree basename] -> a confirmed launch, and its tree record when named
+  roster_row_fixture status=confirmed session="$SID" name="$2" agent_id="aLS$(printf '%s' "$2" | tr -dc 'A-Za-z0-9')000" \
+    launched_at=2026-10-04T03:37:00Z subagent_type=bionic:implementor deliverable=.bionic/docs/record/w1/r.md \
+    duration='45 minutes' tool_use_id="toolu_LS$2" >> "$1/.bionic/tmp/roster-$SID.state"
+  [ -n "${3:-}" ] || return 0
+  # A real linked worktree, its path as git lists it: the record counts nothing else (wave-26 T40).
+  local t; t="$(cd "$1" && pwd -P)/.worktrees/$3"
+  git -C "$1" worktree add -q -b "wt/$3" "$t" >/dev/null 2>&1
+  printf 'workspace/v1|session=%s|name=%s|path=%s|branch=wt/%s|base=0123456789abcdef0123456789abcdef01234567|plan=%s|at=2026-10-04T03:36:00Z\n' \
+    "$SID" "$2" "$t" "$3" "$(ls_plan "$1")" >> "$1/.bionic/tmp/workspaces-$SID.state"
+}
+require_helpers ls_world ls_plan ls_launch
+LS_TX="$(mktemp)"
+
+# LS1: a launch the detached call never recorded is recorded by the turn-end wall, silently.
+LS_D="$(ls_world)"
+ls_launch "$LS_D" w1-T3 01-T3
+expect_contains "LS1 precondition: row T3 starts pending" "| c.sh | — | — | pending |" "$(cat "$(ls_plan "$LS_D")")"
+sd_turn "$LS_TX" u-ls-1 "fill-declined: T4 waits on the T3 merge"
+s7_fire "$LS_D" "$LS_TX"
+expect_contains "LS1: the turn-end wall records the launch: row T3 active in its tree" \
+  "| w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | 01234567 | active |" "$(cat "$(ls_plan "$LS_D")")"
+expect_contains "LS1b: …with its ledger line" "| T3 | implementor (w1-T3) |" "$(cat "$(ls_plan "$LS_D")")"
+expect_absent "LS1c: …and says nothing of it" "NOT-RECORDED" "$STOP_OUT$STOP_ERR"
+
+# LS2: a launch it cannot record (a build row with no tree) refuses the turn, once, naming it.
+ls_launch "$LS_D" w1-T4
+sd_turn "$LS_TX" u-ls-2
+s7_fire "$LS_D" "$LS_TX"
+expect_eq "LS2: a launch the plan cannot record refuses the turn" "block" "$(sd_decision)"
+expect_contains "LS2b: …naming the launch the transaction printed" "poker: NOT-RECORDED T4 w1-T4" "$(reason_of)"
+expect_contains "LS2c: …with the command to run by hand" "task-set T4 status=active agent=w1-T4" "$(reason_of)"
+expect_contains "LS2d: …row T4 is still pending" "| d.sh | — | — | pending |" "$(cat "$(ls_plan "$LS_D")")"
+LS_HOME=$(cd "$(mktemp -d)" && pwd -P)
+STOP_OUT=$(env HOME="$LS_HOME" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" \
+  bash "$HOOK" <<< "$(jq -nc --arg c "$LS_D" --arg t "$LS_TX" --arg s "$SID" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:true,background_tasks:[]}')" 2>/dev/null)
+expect_eq "LS2e: …once: the re-entered Stop passes" "" "$(sd_decision)"
+
+
+# A BOUND ON THE WALL, AND WHAT IT LEFT RUNNING (wave-26 T51; review 13 F1, F6). `ls_fire_bg`
+# starts the Stop hook in a process group of its own; `ls_fire_end` waits for it a fixed number
+# of times, then kills that group whole and reads 124. A transaction runs in the fixture's
+# project, so every bash process whose working directory is under it was started by the row.
+LS_BG=""; LS_BGDIR="$(mktemp -d)"
+ls_fire_bg() {  # <project> <transcript> -> LS_BG, the pid and process group of the Stop hook
+  local home payload
+  home=$(cd "$(mktemp -d)" && pwd -P)
+  payload=$(jq -nc --arg c "$1" --arg t "$2" --arg s "$SID" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}')
+  rm -f "$LS_BGDIR/rc" "$LS_BGDIR/out" "$LS_BGDIR/err"
+  LS_BG="$( set -m
+    ( env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" \
+        BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+        bash "$HOOK" <<< "$payload" > "$LS_BGDIR/out" 2> "$LS_BGDIR/err"
+      echo "$?" > "$LS_BGDIR/rc" ) </dev/null >/dev/null 2>&1 &
+    echo "$!" )"
+}
+ls_fire_end() {  # <seconds> -> STOP_OUT, STOP_ERR, STOP_RC; 124, the group killed, past the bound
+  local i=0 n=$(( $1 * 10 ))
+  while [ ! -s "$LS_BGDIR/rc" ] && [ "$i" -lt "$n" ]; do sleep 0.1; i=$((i + 1)); done
+  if [ -s "$LS_BGDIR/rc" ]; then STOP_RC="$(cat "$LS_BGDIR/rc")"; else kill -9 -- "-$LS_BG" 2>/dev/null; STOP_RC=124; fi
+  STOP_OUT="$(cat "$LS_BGDIR/out" 2>/dev/null)"; STOP_ERR="$(cat "$LS_BGDIR/err" 2>/dev/null)"
+}
+ls_procs() {  # <dir> -> the pids of bash processes whose working directory is <dir> or below it
+  local d
+  d="$(cd "$1" 2>/dev/null && pwd -P)" || return 0
+  lsof -a -c bash -d cwd -Fpn 2>/dev/null | awk -v d="$d" '
+    /^p/ { p = substr($0, 2); next }
+    /^n/ { n = substr($0, 2); if (n == d || index(n, d "/") == 1) print p }'
+}
+require_helpers ls_fire_bg ls_fire_end ls_procs
+command -v lsof >/dev/null 2>&1 || { echo "stop: lsof absent — the LS rows that find what they left running cannot read"; exit 1; }
+
+# LS3 (review 13 F1): the lock cannot be made — .bionic/tmp is not writable. Through T32 the
+# transaction looped without its bound and the turn end never returned.
+LS_E="$(ls_world)"
+ls_launch "$LS_E" w1-T3 01-T3
+( cd "$LS_E" && while :; do sleep 1; done ) & LS_PLANT=$!
+sleep 0.5
+expect_contains "LS3 precondition: a process the row starts in the project is found by its working directory" \
+  " $LS_PLANT " " $(ls_procs "$LS_E" | tr '\n' ' ')"
+kill "$LS_PLANT" 2>/dev/null; wait "$LS_PLANT" 2>/dev/null
+sd_turn "$LS_TX" u-ls-3 "fill-declined: T4 waits on the T3 merge"
+chmod a-w "$LS_E/.bionic/tmp"
+ls_fire_bg "$LS_E" "$LS_TX"; ls_fire_end 20
+chmod u+w "$LS_E/.bionic/tmp"
+expect_ne "LS3: §F1 the turn end returns when the launch lock cannot be made (rc $STOP_RC; 124 is the bound)" "124" "$STOP_RC"
+expect_eq "LS3b: …and leaves nothing running" "" "$(ls_procs "$LS_E")"
+expect_contains "LS3c: …and names the lock it could not make" "cannot be made" "$(reason_of)"
+sd_turn "$LS_TX" u-ls-3b "fill-declined: T4 waits on the T3 merge"
+s7_fire "$LS_E" "$LS_TX"
+expect_contains "LS3d: …and once it can, the next turn end records the launch" \
+  "| w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | 01234567 | active |" "$(cat "$(ls_plan "$LS_E")")"
+
+# LS4 (review 13 F6): another writer replaces the plan while the transaction judges its copy. That
+# is a retryable refusal (exit 75): the turn end is not refused for it, and the next caller
+# applies the launch. A refusal no retry repairs (LS4d) still refuses it, on the same extractor.
+LS_R="$(ls_world)"
+ls_launch "$LS_R" w1-T3 01-T3
+sd_turn "$LS_TX" u-ls-4 "fill-declined: T4 waits on the T3 merge"
+ls_fire_bg "$LS_R" "$LS_TX"
+LS_SEEN=""; LS_END=$(( $(date +%s) + 30 ))
+while [ -z "$LS_SEEN" ] && [ "$(date +%s)" -lt "$LS_END" ] && [ ! -s "$LS_BGDIR/rc" ]; do
+  for LS_F in "$(ls_plan "$LS_R")".launch-sync.*; do [ -e "$LS_F" ] && LS_SEEN="$LS_F"; done
+  [ -n "$LS_SEEN" ] || sleep 0.02
+done
+printf '\n<!-- another writer -->\n' >> "$(ls_plan "$LS_R")"
+ls_fire_end 30
+expect_nonempty "LS4 precondition: the other writer landed while the judged copy existed" "$LS_SEEN"
+expect_contains "LS4 precondition: …so the transaction wrote nothing: T3 still pending" "| c.sh | — | — | pending |" \
+  "$(grep '^| T3 |' "$(ls_plan "$LS_R")")"
+expect_absent "LS4: §F6 a plan replaced under the transaction does not refuse the turn" \
+  "Launches not recorded" "$(reason_of)$STOP_ERR"
+sd_turn "$LS_TX" u-ls-4b "fill-declined: T4 waits on the T3 merge"
+s7_fire "$LS_R" "$LS_TX"
+expect_contains "LS4b: …and the next turn end records the launch" \
+  "| w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | 01234567 | active |" "$(cat "$(ls_plan "$LS_R")")"
+expect_contains "LS4c: …keeping the other writer's change" "<!-- another writer -->" "$(cat "$(ls_plan "$LS_R")")"
+ls_launch "$LS_R" w1-T4
+sd_turn "$LS_TX" u-ls-4d
+s7_fire "$LS_R" "$LS_TX"
+expect_contains "LS4d: …while a launch the plan cannot record still refuses the turn" "Launches not recorded" "$(reason_of)"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "LH: on a tick's turn the wall judges live:head against the tick's head (wave-26 T32; A-T14.2)"
+
+# After the first review proof a `live:head` review is ready only when the working branch's head
+# has moved past the proof's head, and the head lives in git. The tick reads it; the wall reads
+# no git, so through T14 it handed the ready set no head and never owed a follow-up review the
+# tick had offered. The tick now writes the head it judged against into its digest (`head=`),
+# and on that tick's turn the wall hands the same head in. The digest here is written as the
+# tick writes it, fresh for the turn; the control is the same digest naming the proof's head.
+LH_A="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+LH_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+lh_fixture() {  # -> project dir; T1 landed (writes lib/a.sh), T2 a review proved at LH_A
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n'
+    printf 'proved: kind=review head=%s at=2026-10-04T00:00:00Z evidence=record/r.txt\n\n- Step 4: in progress\n\n' "$LH_A"
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | reads | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the build | implementor | — | 15m | REQ-x | lib/a.sh |  | landed |\n'
+    printf '| T2 | 6 | review | the review | critic | — | 15m | REQ-x | — |  | pending |\n'
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+    > "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+lh_digest() {  # <project> <head> [at] -> the tick digest, as the tick writes it, after the turn's marker (at: now)
+  printf 'patrol-digest/v1\nprompt_version=5\ndigest=1-1\nsince=2026-10-04T00:00:00Z\ndecision=FILL\nduty=none\nat=%s\nhead=%s\n' \
+    "${3:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$2" > "$1/.bionic/tmp/tick-digest-$SID.state"
+}
+require_helpers lh_fixture lh_digest
+LH_D="$(lh_fixture)"
+LH_TX="$(mktemp)"
+s7_transcript "$LH_TX" "poker: FILL T2"
+lh_digest "$LH_D" "$LH_B"
+s7_fire "$LH_D" "$LH_TX"
+expect_contains "LH1: with the tick's head past the proof, the wall owes the follow-up review" \
+  "Fillable gap at turn end" "$(reason_of)"
+expect_contains "LH1b: …naming it" "T2" "$(reason_of)"
+lh_digest "$LH_D" "$LH_A"
+s7_fire "$LH_D" "$LH_TX"
+expect_absent "LH2: at the proof's own head the review waits, and the wall owes nothing" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+# LH3 (review 10): the tick wrote head=B, then `proof-add review` recorded a proof at B in the
+# same turn, and the digest is still fresh. The wall compares the digest's head with the plan's
+# CURRENT last review proof, so B against B is nothing landed past it: no review of nothing.
+lh_digest "$LH_D" "$LH_B"
+sed -i.bak "s/^\(proved: kind=review head=$LH_A at=2026-10-04T00:00:00Z evidence=record\/r.txt\)\$/\1\\
+proved: kind=review head=$LH_B at=2026-10-04T00:10:00Z evidence=record\/r2.txt/" \
+  "$LH_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+expect_contains "LH3 precondition: the plan now carries a later review proof at B" "head=$LH_B" \
+  "$(grep '^proved: kind=review' "$LH_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md")"
+s7_fire "$LH_D" "$LH_TX"
+expect_absent "LH3: a proof at the digest's head, added after the tick, leaves nothing for the wall to owe" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+
+# LH4 (review 13 F3; review 10 (a)'s guard): the tick wrote head=B, then a landing moved the head
+# to C and `proof-add review` recorded a proof at C, after the tick. The digest is still fresh for
+# the turn, but its head is older than the newest proof: handed in, B against C reads as a
+# landing past the proof and the wall owes a review of nothing. The wall hands the digest's head
+# in only when its `at=` is not older than the newest review proof's `at=`. The control is the
+# same plan with the proof at C made before the tick: then B is the tick's head past the proof.
+LH_C="cccccccccccccccccccccccccccccccccccccccc"
+LH_P="$LH_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+sed -i.bak "s/^\(proved: kind=review head=$LH_B at=2026-10-04T00:10:00Z evidence=record\/r2.txt\)\$/\1\\
+proved: kind=review head=$LH_C at=2026-10-04T00:30:00Z evidence=record\/r3.txt/" "$LH_P"
+expect_contains "LH4 precondition: the newest review proof is at C" "head=$LH_C at=2026-10-04T00:30:00Z" \
+  "$(grep '^proved: kind=review' "$LH_P" | tail -1)"
+lh_digest "$LH_D" "$LH_B" 2026-10-04T01:00:00Z
+s7_fire "$LH_D" "$LH_TX"
+expect_contains "LH4 control: a tick after the proof at C, at head B, owes the review" "Fillable gap at turn end" "$(reason_of)"
+sed -i.bak "s/head=$LH_C at=2026-10-04T00:30:00Z/head=$LH_C at=2026-10-04T02:00:00Z/" "$LH_P"
+expect_contains "LH4 precondition: the proof at C is now newer than the tick" "head=$LH_C at=2026-10-04T02:00:00Z" \
+  "$(grep '^proved: kind=review' "$LH_P" | tail -1)"
+s7_fire "$LH_D" "$LH_TX"
+expect_absent "LH4: §F3 a proof newer than the tick's digest leaves its head out: no review of nothing" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
+# LH5 (wave-26 T54; review 17 N4): the proof at C made in the tick's own second. A proof in the
+# same second as the digest cannot be ordered against it, and keeping the head owed a review of
+# nothing once; a tie now hands in no head, and the review waits for the next tick. LH4's control,
+# on this fixture, is the positive: a proof older than the digest still owes it.
+sed -i.bak "s/head=$LH_C at=2026-10-04T02:00:00Z/head=$LH_C at=2026-10-04T01:00:00Z/" "$LH_P"
+expect_contains "LH5 precondition: the proof at C carries the digest's own second" "head=$LH_C at=2026-10-04T01:00:00Z" \
+  "$(grep '^proved: kind=review' "$LH_P" | tail -1)"
+s7_fire "$LH_D" "$LH_TX"
+expect_absent "LH5: §N4 a proof in the digest's own second leaves its head out: no review of nothing" \
+  "Fillable gap" "$(reason_of)$STOP_ERR"
 
 finish

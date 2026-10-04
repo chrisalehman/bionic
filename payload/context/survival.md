@@ -22,9 +22,11 @@ about doing the job well; they are about still being alive to report it.
 - **Your suite budget is on your roster row, and it is a wall.** Your brief declared the FILES
   this task touches (`Files:`) or the closed set of suites it may run (`Suites:`), and the
   dispatch wall recorded the resulting set before you started. A `bash tests/<x>.test.sh`
-  outside that set is REFUSED, and so is `tests/run.sh` unless your own row carries it — one
-  full-tree regression per run belongs to the Step-5 runner, not to a writer proving its work
-  twice. **Spell each suite as a literal path and call it once per suite** — the wall reads
+  outside that set is REFUSED, and so is `tests/run.sh` unless your own row carries it. A task
+  lands on the suites its change affects. The full suite runs once, on the head being released;
+  after that pass a later change is proved by its affected suites, and a second full run is
+  needed only when the change cannot be bounded: a merge from outside the run, or a changed
+  file the file-to-suite map answers with every suite or with none. **Spell each suite as a literal path and call it once per suite** — the wall reads
   your command text before the shell expands it, so `for s in a b; do bash "tests/$s.test.sh";
   done` is refused by the unexpanded name `$s.test.sh`, whatever the loop would have run.
   `FARM_OUT_ALLOW=1` does not widen it: that override is the orchestrator's escape from
@@ -37,8 +39,9 @@ about doing the job well; they are about still being alive to report it.
   sanctioned, audited `FARM_OUT_ALLOW=1` prefix. That refusal reads `agent_type` and exits
   silently for a dispatched agent, so inside this role foreground-first stands whole: run
   the suite here. Add the prefix only when your brief tells you to.
-- **Suite output always goes to a file, with `set -o pipefail`.** `<command> 2>&1 | tee "$LOG"`;
-  validate the FILE, name every log path in your report. **`run_in_background` and `Monitor` are
+- **Suite output always goes to a file, with its exit code.**
+  `set -o pipefail; <command> 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc` (the command must exit with the suite's code, because `land` reads that code from the stamp) — never `PIPESTATUS`,
+  which the tool shell leaves empty; validate the FILE, name every log path in your report. **`run_in_background` and `Monitor` are
   forbidden for evidence-producing commands** — a suite, a build, a drill — even under the
   fallback below: the harness's background-Bash output file is ephemeral and can vanish before
   you read it back, which is what cost a finished run's totals once already. These always run
@@ -51,9 +54,7 @@ about doing the job well; they are about still being alive to report it.
   delivery-by-exit — and shape the command so the log ends with its own status line:
   `<cmd> > "$LOG" 2>&1; echo "EXIT=$?" >> "$LOG"`. Nothing else writes that line, so a launch
   without it is a Monitor that never fires. Then print the path and stop; the orchestrator arms
-  a Monitor on the file's `EXIT=` line. **Otherwise stay in the foreground and do not stop** — a
-  foreground agent's final response ENDS the command, so the fallback would kill the work it
-  exists to protect. Never arm a watcher and go idle yourself.
+  a Monitor on the file's `EXIT=` line.
 - **You do not set your test width.** `tests/run.sh` samples the machine and reads its own
   width off the pressure rung at suite start, so there is nothing here for you to compute,
   export, or call — `pressure_level` is a shell function in a sourced library, not a command

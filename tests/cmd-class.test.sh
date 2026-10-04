@@ -362,7 +362,7 @@ expect_contains "R-1 farm-out DENIES a suite command with NO plan on disk (nudge
 expect_eq "R-1 …exiting 0" "0" "$ST"
 
 # The tier-2 nudge, same world: no plan, engaged, still spoken.
-run_hook "$(mk_bash_payload "$FARM_NORUN" 'npx create-react-app x')" "$FARM_OUT"
+run_hook "$(mk_bash_payload "$FARM_NORUN" 'docker run x')" "$FARM_OUT"
 expect_contains "R-1 …the tier-2 nudge also fires with no plan on disk" \
   'additionalContext' "$OUT"
 
@@ -440,10 +440,24 @@ for sc in "${SUPERSET_SUITES[@]}"; do
 done
 
 # --- behaviour the library must not have changed ---
-expect_empty "the sanctioned override still silences the wall" \
-  "$(farm_decision 'FARM_OUT_ALLOW=1 bash tests/run.sh')"
-expect_empty "…including as an env prefix mid-chain" \
-  "$(farm_decision 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh')"
+# THE OVERRIDE SILENCES FARM-OUT'S DENY, NOT THE BOOKING (wave-26 T7, D8): the allowed call
+# comes back as the booking wrap alone — no deny, no advisory — around the original command.
+expect_wrap_only() {  # <label> <original command> <the shim options after --shell/--quiet, as a regex> — reads $OUT
+  local _cmd _s _r="'\\''"
+  expect_eq "$1 (no deny and no advisory beside the booking wrap)" '["hookEventName","updatedInput"]' \
+    "$(printf '%s' "$OUT" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)"
+  _cmd=$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
+  expect_regex "$1 (the updated command runs the booking shim)" \
+    "^bash [^ ]+/scripts/booked\\.sh( --shell [^ ]+)?( --quiet)?$3 -- " "$_cmd"
+  _s=${2//\'/$_r}
+  expect_eq "$1 (around the original command, byte for byte)" "'$_s'" "${_cmd#* -- }"
+}
+run_hook "$(mk_bash_payload "$FARM_REPO" 'FARM_OUT_ALLOW=1 bash tests/run.sh')" "$FARM_OUT"
+expect_wrap_only "the sanctioned override still silences the wall" 'FARM_OUT_ALLOW=1 bash tests/run.sh' \
+  ' --suites run\.sh'
+run_hook "$(mk_bash_payload "$FARM_REPO" 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh')" "$FARM_OUT"
+expect_wrap_only "…including as an env prefix mid-chain" 'cd x && FARM_OUT_ALLOW=1 bash tests/run.sh' \
+  " --stamp-dir $FARM_REPO/x --suites run\\.sh"
 expect_empty "a subagent payload leaves farm-out silent (agent_type non-empty)" \
   "$(printf '%s' "$(mk_bash_payload "$FARM_REPO" 'bash tests/run.sh')" \
      | jq '. + {agent_type:"general-purpose"}' \
@@ -459,17 +473,17 @@ D=$(farm_decision 'bash claude-bootstrap.sh')
 expect_contains "a bootstrap-class command still denies" '"deny"' "$D"
 
 # --- B-4a: tier-2 reads the library, so its wrappers come off too ---
-# `npx`/`uvx`/`git clone`/`docker run` are the NUDGE tier. Before the sed twins
+# `git clone`/`docker run` are the NUDGE tier (the npx/uvx nudge retired at wave-26 T9). Before the sed twins
 # were deleted, only env/nohup/timeout/FARM_OUT_*= came off, so a sudo- or
 # assignment-wrapped tier-2 command reached the matcher with the wrapper still
 # at argv[0] and nudged nobody.
-expect_contains "B-4a tier-2 still nudges a bare npx" 'additionalContext' \
-  "$(farm_decision 'npx create-thing')"
+expect_contains "B-4a tier-2 still nudges a bare docker run" 'additionalContext' \
+  "$(farm_decision 'docker run x')"
 # A DIFFERENT class, because nudge_once suppresses a repeat of the same one.
 expect_contains "B-4a …and now through sudo" 'additionalContext' \
   "$(farm_decision 'sudo git clone https://example.invalid/r.git')"
-expect_empty "B-4a …but prose naming npx still says nothing" \
-  "$(farm_decision 'echo run npx create-thing first')"
+expect_empty "B-4a …but prose naming docker run still says nothing" \
+  "$(farm_decision 'echo run docker run x first')"
 
 # --- advisory mode still downgrades a deny to a nudge ---
 printf 'farm-out-mode: advisory\n' > "$FARM_REPO/.bionic/config.yaml"
@@ -813,7 +827,7 @@ expect_empty "AC-6 farm-out is SILENT on a suite command in an unengaged session
 expect_empty "AC-6 …and says nothing on stderr either" "$ERR"
 expect_eq "AC-6 …exiting 0" "0" "$ST"
 
-run_hook "$(mk_bash_payload "$FARM_REPO" 'npx create-react-app x')" "$FARM_OUT"
+run_hook "$(mk_bash_payload "$FARM_REPO" 'docker run x')" "$FARM_OUT"
 expect_empty "AC-6 …the tier-2 nudge is silent too" "$OUT$ERR"
 
 # THE OVERRIDE IS NOT CONSULTED, because there is nothing to override: an audit line
@@ -2208,5 +2222,76 @@ FOLD_MUT_OUT="$(fold_sh "$FOLD_GA_MUT")"
 expect_contains "§FOLDAGREE mutant still folds RM (the mutant runs)" "RM${T}rm" "$FOLD_MUT_OUT"
 expect_contains "§FOLDAGREE mutant: the two folds now disagree on WAIT — the defect" "WAIT${T}wait" \
   "$(diff <(printf '%s\n' "$FOLD_MUT_OUT") <(printf '%s\n' "$FOLD_AWK_OUT"))"
+
+section "§PICK — wave-26 T40: the class priority is read in one place, by cmd_class and the wall alike"
+# `cmd_class` and walls.sh's `_wall_class_read` (T39) both pick the whole command's class from
+# `cmd_class_lines` by priority. The pick is `cmd_class_pick`, and it sets CMD_CLASS_PICKED in
+# the caller's shell, so the wall pays no fork for it (tests/hook-latency.test.sh §5 counts).
+# THE OWNER IS PROVEN BY REPLACING IT: with cmd_class_pick swapped for a stub, both readers
+# answer the stub's word. A copy of the loop in either one would still answer the real class.
+pick() { bash -c '. "$1" || exit 1; cmd_class_pick "$2"; printf "%s" "$CMD_CLASS_PICKED"' _ "$LIB" "$1" 2>&1; }
+expect_eq "§PICK suite outranks build, wherever it sits" "suite" "$(pick "build${T}make"$'\n'"suite${T}bash tests/a.test.sh")"
+expect_eq "§PICK install outranks build" "install" "$(pick "build${T}make"$'\n'"install${T}npm ci")"
+expect_eq "§PICK a class word alone on its line counts" "bootstrap" "$(pick "none${T}ls"$'\n'"bootstrap")"
+expect_eq "§PICK a field that only contains a class word is not it" "none" "$(pick "not-suite${T}x"$'\n'"suites${T}y")"
+expect_eq "§PICK no lines: none" "none" "$(pick "")"
+PICK_WALL_FN="$(sed -n '/^_wall_class_read() {/,/^}/p' "$(dirname "$LIB")/walls.sh")"
+expect_true "§PICK the wall's reader is found in walls.sh" test -n "$PICK_WALL_FN"
+# shellcheck disable=SC2016  # expanded by the inner bash
+PICK_BOTH='. "$1" || exit 1; eval "$2"
+  _WALL_CLASS_READ=0; _WALL_CLASS_TEXT=""
+  [ "$3" = stub ] && cmd_class_pick() { CMD_CLASS_PICKED=picked-by-the-owner; }
+  _wall_class_read "bash tests/a.test.sh"
+  printf "cmd_class=%s wall=%s" "$(cmd_class "bash tests/a.test.sh")" "$_WALL_CLASS"'
+expect_eq "§PICK control: both read a suite as suite" "cmd_class=suite wall=suite" \
+  "$(bash -c "$PICK_BOTH" _ "$LIB" "$PICK_WALL_FN" real 2>&1)"
+expect_eq "§PICK with the owner replaced, both answer the owner's word" \
+  "cmd_class=picked-by-the-owner wall=picked-by-the-owner" "$(bash -c "$PICK_BOTH" _ "$LIB" "$PICK_WALL_FN" stub 2>&1)"
+
+section "§SCOPE — wave-26 T63 (critic K4-N1, K4-N2): one scoping rule, and the reading says when one exit code is split"
+#
+# THE SCOPING RULE HAS ONE SPELLING, cmd_claim_scope, and two readers: the budget
+# (cmd_suite_claims, here) and the stamp's suite names (payload/scripts/lib/walls.sh
+# `_bsg_suites`). rc 0 is <root>'s own tests/<basename>; 1 is a path elsewhere; 2 is a path
+# nothing can place (a `$`, a backtick, the bare basename a `cd` licensed). The budget keeps
+# 0 and 2 and drops 1, exactly as before the rule moved.
+scope_rc() {  # <root> <basename> <path> -> the rc
+  bash -c '. "$1" || exit 9; cmd_claim_scope "$2" "$3" "$4"; echo $?' _ "$LIB" "$@" 2>&1
+}
+expect_eq "§SCOPE tests/a.test.sh is the root's own" "0" "$(scope_rc /r a.test.sh tests/a.test.sh)"
+expect_eq "§SCOPE ./tests/a.test.sh is the root's own" "0" "$(scope_rc /r a.test.sh ./tests/a.test.sh)"
+expect_eq "§SCOPE /r/tests/a.test.sh is the root's own" "0" "$(scope_rc /r a.test.sh /r/tests/a.test.sh)"
+expect_eq "§SCOPE other/a.test.sh leads elsewhere" "1" "$(scope_rc /r a.test.sh other/a.test.sh)"
+expect_eq "§SCOPE /x/tests/a.test.sh leads elsewhere" "1" "$(scope_rc /r a.test.sh /x/tests/a.test.sh)"
+expect_eq "§SCOPE a \$ cannot be placed" "2" "$(scope_rc /r a.test.sh '$T/tests/a.test.sh')"
+expect_eq "§SCOPE a bare basename cannot be placed" "2" "$(scope_rc /r a.test.sh a.test.sh)"
+expect_eq "§SCOPE the budget keeps rc 0 and rc 2 and drops rc 1" \
+  "a.test.sh|b.test.sh|c.test.sh" \
+  "$(bash -c '. "$1" || exit 9; cmd_suite_targets "bash tests/a.test.sh && bash other/x.test.sh && bash \$T/tests/b.test.sh && cd t && bash c.test.sh" /r' _ "$LIB" 2>&1 | paste -sd'|' -)"
+
+# THE SPLIT LINE. The targets reading closes with one `split` line when two suite runs are
+# joined by anything but `&&` (or the parentheses of a subshell), because then one exit code
+# may not speak for both. It is the stamp's fact, so the budget's claims never carry it.
+split_of() {  # <command> -> the reading's kind column, one per line, `|`-joined
+  printf '%s' "$1" | bash -c '. "$1" || exit 9; _cmd_class_awk targets' _ "$LIB" 2>&1 | awk -F'\t' '{ print $1 }' | paste -sd'|' -
+}
+expect_eq "§SCOPE a && b: two claims, no split" "file|file" "$(split_of 'bash tests/a.test.sh && bash tests/b.test.sh')"
+expect_eq "§SCOPE (a) && b: a subshell is no split" "file|file" "$(split_of '(bash tests/a.test.sh) && bash tests/b.test.sh')"
+expect_eq "§SCOPE a capture shape is one claim, no split" "file" \
+  "$(split_of 'set -o pipefail; bash tests/a.test.sh 2>&1 | tee "$L"; rc=$?; echo "rc=$rc" >> "$L"; exit $rc')"
+expect_eq "§SCOPE a || b: split" "file|file|split" "$(split_of 'bash tests/a.test.sh || bash tests/b.test.sh')"
+expect_eq "§SCOPE a; b: split" "file|file|split" "$(split_of 'bash tests/a.test.sh; bash tests/b.test.sh')"
+expect_eq "§SCOPE a newline b: split" "file|file|split" "$(split_of "bash tests/a.test.sh
+bash tests/b.test.sh")"
+expect_eq "§SCOPE a | tee && b: the pipe splits" "file|file|split" \
+  "$(split_of 'bash tests/a.test.sh | tee l && bash tests/b.test.sh')"
+expect_eq "§SCOPE a; a: the same suite twice is split too" "file|split" "$(split_of 'bash tests/a.test.sh; bash tests/a.test.sh')"
+expect_eq "§SCOPE a loop over two suites: split" "file|file|split" "$(split_of 'for s in a b; do bash tests/$s.test.sh; done')"
+expect_eq "§SCOPE make test || bash tests/a.test.sh: a runner counts" "run|file|split" \
+  "$(split_of 'make test || bash tests/a.test.sh')"
+expect_eq "§SCOPE cd x || exit 1; a: the cd guard ahead of one suite is no split" "file" \
+  "$(split_of 'cd x || exit 1; bash tests/a.test.sh')"
+expect_eq "§SCOPE the budget's claims never carry the split line" "file|file" \
+  "$(claim_kinds_of 'bash tests/a.test.sh || bash tests/b.test.sh' | paste -sd'|' -)"
 
 finish

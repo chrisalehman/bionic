@@ -59,7 +59,10 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `refuse exit2 commit "this wave plan has no '## Tasks' ledger" "add a '## Tasks' section" "$_eg_detail"` — evidence gate — none: an evidence-gate commit refusal; the fix is a line of plan text the detail names, and no command can write the reader's evidence for them
 - `refuse exit2 commit "that dispatched task's row is invalid" "fix the row the detail names" "$_eg_detail"` — evidence gate — none: an evidence-gate commit refusal; the fix is a line of plan text the detail names, and no command can write the reader's evidence for them
 - `refuse exit2 commit "the dispatched task's evidence is a placeholder" "replace it with evidence" "$_eg_detail"` — evidence gate — none: an evidence-gate commit refusal; the fix is a line of plan text the detail names, and no command can write the reader's evidence for them
-- `fold_block deny run "this command belongs in a subagent" "dispatch it with the Agent tool" \` — farm-out, main-thread suite or build — none: the fix is an Agent tool call, which no shell line can stand in for
+- `refuse exit2 commit "this step's evidence names no head" "add head: <sha the run read>" "$_eg_detail"` — evidence gate, proof head — none: an evidence-gate commit refusal; the fix is a line of plan text the detail names, and no command can write the reader's evidence for them
+- `refuse exit2 commit "the Step-5 head: is not a commit here" "record the sha the run read" "$_eg_detail"` — evidence gate, proof head — none: an evidence-gate commit refusal; the fix is a line of plan text the detail names, and no command can write the reader's evidence for them
+- `refuse exit2 commit "the release head does not contain head:" "re-run the floor on release head" "$_eg_detail"` — evidence gate, proof head — none: an evidence-gate commit refusal; the fix is a line of plan text the detail names, and no command can write the reader's evidence for them
+- `fold_block deny run "this command belongs in a subagent" "$_fix" \` — farm-out, main-thread suite or build that is not short — none: the fix is the Bash call's own `timeout` parameter (at most `farm-out-short-ms:`) or an Agent tool call, and no shell line can stand in for either
 - `fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \` — read-only role commit — none: the fix is a SendMessage report, a tool call, not a command
 - `fold_block exit2 "$_WALL_POKER_VERB" \` — subagent poker verb — none: the verb is the orchestrator's alone, so the fix is a message to it
 - `fold_block exit2 suite-run "a backgrounded suite's result is never read" "run it in the foreground" \` — backgrounded suite — fix: the same command run in the foreground, printed from the refused text (`_bg_fix`)
@@ -78,6 +81,7 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `fold_block block stop "a FILL and a STANDDOWN went unanswered" \` — patrol duties, fill and stand-down — fix: `bash <hooks>/session-poker.sh hold NAME 'why it stays up'`, one per stood-down name in NAME, for the stand-down half; the fill half is an Agent dispatch or a `fill-declined:` line, neither a command
 - `fold_block block stop "$FILL_FACT" "$FILL_FIX" \` — patrol duties, fill alone — none: the fix is an Agent dispatch of the named rows or a `fill-declined:` line, neither a shell command
 - `fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \` — patrol duties, stand-down — fix: `bash <hooks>/session-poker.sh hold NAME 'why it stays up'`, one per stood-down name in NAME (STANDDOWN_REASON)
+- `fold_block block stop "a launch is not recorded in the plan" "run the commands it prints" \` — patrol duties, a launch the plan lacks — fix: the task-set and ledger-add commands that `session-poker.sh launch-sync` prints (LAUNCH_REASON)
 - `fold_block block stop "a Patrol marker turn ran no tick" "run the tick, then stop again" \` — patrol duties, marker turn ran no tick — fix: `bash <hooks>/session-poker.sh tick` (NOTICK_REASON)
 - `fold_block block stop "$FACT" "$FIX" "$REASON"` — patrol duties, verdict forwarder — none: a forwarder; FACT/FIX/REASON come from the duty that was missed (a TaskList or ListAgents call, tool calls)
 - `fold_block block stop "the Patrol fires but never ticks" "run the tick; replace the job" \` — patrol revive, fires but never ticks — fix: `bash <hooks>/session-poker.sh tick`, and the job replaced with `session-poker.sh prompt`'s text
@@ -91,14 +95,15 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `refuse exit2 dispatch "the environment check ran and did not pass" "fix what the probe named" \` — probe ran and failed — fix: `${PREFLIGHT_CMD}` once the named failure is fixed
 - `dp_finding "$fact" "$fix" "${reasons}` — Patrol stamp forwarder — fix: `bash <hooks>/session-poker.sh arm` or the CronCreate steps, from the arm that called it
 - `dp_finding "the Patrol fires but never ticks" "run the tick; replace the job" \` — Patrol fires but never ticks — fix: `bash ${POKER_SCRIPT} tick`, then the job replaced
+- `dp_finding "the approval reader lib/fill.sh cannot be loaded" "reinstall the plugin" \` — plan approval unreadable (wave-26 T56, final review N2) — fix: `claude plugin install bionic@bionic`, named in the detail
 - `dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \` — unapproved plan — none: approval is the user's literal word, which no command supplies
 - `dp_finding "this session is bound to no run" "bind it, or write its plan" \` — session bound to no run — none: the run to bind is the reader's choice among open runs; `session-poker.sh bind <plan>` needs that plan
+- `dp_finding "row ${DP_AW_ID} waits for approval:${DP_AW_NAME}" \` — row reads an approval nobody gave — none: the approval is the user's reply, which no command supplies; once given, `session-poker.sh approve <name> '<reply>'` records it
 - `dp_finding "a subagent may launch only read-only roles" "ask the orchestrator" \` — subagent dispatching a writer — none: only the orchestrator dispatches writers, so the fix is a message to it
 - `dp_finding "this dispatch came from a worktree" "dispatch from the main checkout" \` — dispatch from a worktree — none: the fix is to dispatch from the main checkout, a change of where, not a command
 - `dp_finding "$1" "land or stand down a row" \` — budget_deny forwarder — fix: `bash ${HOOK_DIR}/stop-orders.sh standdown`, rooted at the real hooks directory
 - `[ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && budget_deny \` — writer budget — fix: each counted open row with `bash <hooks>/session-sweeper.sh ack '<name>'` (`budget_writer_rows`)
-- `[ $(( BUDGET_CLAIMED + 1 )) -gt "$B_SUITES" ] && budget_deny \` — suite budget — fix: `bash ${HOOK_DIR}/stop-orders.sh standdown`, through budget_deny
-- `[ $(( BUDGET_LIVE + 1 )) -gt "$B_TREES" ] && budget_deny \` — worktree budget — fix: `bash ${HOOK_DIR}/stop-orders.sh standdown`, through budget_deny
+- `[ $(( BUDGET_LIVE + BUDGET_TREE_ASK )) -gt "$B_TREES" ] && budget_deny \` — worktree budget — fix: `bash ${HOOK_DIR}/stop-orders.sh standdown`, through budget_deny
 - `dp_finding "that name is in flight" "use the FILL line's name" \` — name in flight — none: the fix is the name the tick's FILL line printed, which only that tick output carries
 - `refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"` — single-finding refusal — none: a forwarder; the fix is the one finding's own
 - `refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \` — several-finding refusal — none: a forwarder; one line per fault, and the marked scaffold only when a line is missing
@@ -106,8 +111,9 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `dp_finding "the deliverable is outside this repository" "name a path inside the repo" "$_dp_detail"` — deliverable outside the repo — none: the in-repo path is the author's choice
 - `dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"` — no deliverable — none: the artifact path is the author's choice
 - `finding) dp_finding "$2" "$3" "$4" ;;` — brief.sh sink forwarder — none: a forwarder; brief.sh findings carry their own fix (the impact timeout names Suites:/Files:)
-- `dp_finding "this run already ran the full tree" "record the cause on the plan" "$_dp_detail"` — full tree already ran — none: the fix is a cause recorded on the plan, text only the orchestrator has
-- `dp_finding "Step-4 rows open: ${_floor_ids}" "land them, or state the cause" "$_dp_detail"` — Step-4 rows open at the floor — none: the fix is landing those rows or stating a cause, acts not commands
+- `dp_finding "head ${_fr_short} is already proved" "keep the floor proof; run nothing" "$_dp_detail" ;;` — full run on the proved head — none: the head is proved and there is nothing to run; the detail names the proof line and its evidence
+- `dp_finding "bounded: ${_fr_names}" "run those suites, not the tree" "$_dp_detail" ;;` — full run over a bounded change — fix: `Suites: tests/<suite> …`, printed whole in the detail, every suite the map named
+- `dp_finding "rows write tracked files: ${_fr_ids}" "land them, then dispatch it" "$_dp_detail"` — full run while rows write the head — none: the fix is landing or dropping those rows, acts not commands
 
 ## hooks/stop-guard.sh
 
