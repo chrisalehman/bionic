@@ -19,10 +19,12 @@
 #      any exit that has not printed a decision prints a DENY naming the failure.
 #   3. Facts: who asked (the payload's agent_id through this session's roster; none means
 #      the lead), its class (lead, unbound, writer, reader), its roots, and the main root.
-#   4. Effects: what the action writes or deletes, from the command reader for Bash and from
-#      the tool's own path for the file tools; anything else is unknown.
-#   5. grant_reserved, then grant_decide. One answer. One answer line. For a reserved denial,
-#      one gate line for the lead.
+#   4. Effects: what the action writes, deletes and reads, from the command reader for Bash
+#      (resolved in one process, and none past PA_EFFECTS_MAX) and from the tool's own path
+#      for the file tools; anything else is unknown.
+#   5. grant_reserved over the spelling, then over the place (every path, typed and
+#      resolved), then grant_decide. One answer. One answer line. For a reserved denial, one
+#      gate line for the lead.
 #
 # THE FAIL DIRECTION DIFFERS FROM EVERY OTHER HOOK'S, ON PURPOSE (spec D8; the sanctioned
 # difference is recorded in tests/hook-adoption.test.sh). The fleet either steps aside
@@ -348,7 +350,7 @@ else
   case "$?" in
     0) PA_CLASS=writer ;;
     1) PA_CLASS=reader; PA_OWN="" ;;
-    *) _pa_fail "the workspace record for this session could not be read (a symlink, or a file that cannot be opened)" ;;
+    *) _pa_fail "the workspace record for this session could not be read (a symlink, a file that cannot be opened, or git could not be asked which trees are its linked worktrees)" ;;
   esac
 fi
 
@@ -386,7 +388,7 @@ case "$PA_CLASS" in
     case "$?" in
       0) while IFS= read -r PA_T; do _pa_root tree "$PA_T"; done <<< "$PA_TREES" ;;
       1) : ;;
-      *) _pa_fail "the workspace record for this session could not be read (a symlink, or a file that cannot be opened)" ;;
+      *) _pa_fail "the workspace record for this session could not be read (a symlink, a file that cannot be opened, or git could not be asked which trees are its linked worktrees)" ;;
     esac
     _pa_root record "$(_pa_record_dir "$PA_PLAN")"
     _pa_root plan "$PA_PLAN"
@@ -404,12 +406,18 @@ case "$PA_CLASS" in
     [ "$PA_BOUND" = 1 ] && _pa_root record "$(_pa_record_dir "$BIONIC_RUN_PLAN")"
     ;;
   reader)
+    # The record directory is handed as the fact the report is bounded by (the grant decides
+    # whether the report lies inside it or the scratch); a report that names a directory is
+    # not a file and is handed nothing (wave-25 T17, review S1).
+    [ "$PA_BOUND" = 1 ] && _pa_root record "$(_pa_record_dir "$BIONIC_RUN_PLAN")"
     PA_REPORT="$(_pa_row_field "$PA_ROW" deliverable)"
     case "$PA_REPORT" in
       ''|/*) ;;
       *) PA_REPORT="$BIONIC_ROOT/$PA_REPORT" ;;
     esac
-    _pa_root report "$PA_REPORT"
+    if [ -n "$PA_REPORT" ] && PA_REPORT_R="$(grant_resolve "$PA_REPORT")" && [ ! -d "$PA_REPORT_R" ]; then
+      PA_FACTS[${#PA_FACTS[@]}]="report=$PA_REPORT_R"
+    fi
     ;;
 esac
 grant_roots "$PA_CLASS" "${PA_FACTS[@]}" 2>/dev/null \
@@ -417,39 +425,47 @@ grant_roots "$PA_CLASS" "${PA_FACTS[@]}" 2>/dev/null \
 
 # ---------- what the action does ----------
 #
-# Bash: the command reader, every W and D path resolved except the five device sinks, which
-# the grant matches by their literal names (on Linux /dev/stdout resolves into /proc). A path
-# grant_resolve cannot resolve is passed on with its mark, which the decision reads as
-# outside every root. The file tools: one W for the tool's own path. Read: no effect. Any
-# other tool: unknown.
+# Bash: the command reader in its `reads` mode, so a pure reader's reads come back as R and
+# RR lines beside the W, D and ? lines, and every path is resolved in ONE process by
+# grant_resolve_lines (a device sink is passed through by its literal name: on Linux
+# /dev/stdout resolves into /proc). A path that cannot be resolved is passed on with its mark,
+# which the decision reads as outside every root. PAST PA_EFFECTS_MAX LINES NOTHING IS
+# RESOLVED: the answer is one `?` and a denial, because the platform kills this hook at its
+# 10 s registration and a killed hook leaves the stock dialog, the halt it exists to remove
+# (wave-25 review S3: 2000 operands took 18 s at one fork per path). The file tools: one W for
+# the tool's own path, resolved. Read: no effect. Any other tool: unknown.
+#
+# THE NUMBER, 200 lines. Measured at load 17 (T17, recorded in record/wave-25-never-paused/
+# T17-place-not-spelling.md): resolving, the reserved table and the decision took 0.8 s for
+# 200 effects and 2.2 s for 500, and 2.5 s for 200 effects that are each a symlink (one
+# readlink fork apiece). 200 keeps that worst case inside the 10 s registration with room for
+# a machine loaded several times harder; a command with more targets is denied with the fix
+# to put it in a script file.
+PA_EFFECTS_MAX=200
 _pa_bytes() {  # <text> -> its length in bytes
   local LC_ALL=C
   printf '%s' "${#1}"
 }
 
-_pa_resolve_effects() {  # stdin: effect lines -> the same lines, every path resolved
-  local line kind path
+# _pa_more_than <lines> <n> — rc 0 when the text holds more than <n> lines. It reads at most
+# n+1 of them in this process, so a small question pays no fork for the count. Read, not cut
+# off the front by expansion: under bash 3.2 each `${v#*<newline>}` copies and rescans the
+# whole remainder, which on 2000 lines cost seconds (measured).
+_pa_more_than() {
+  local line n=0
   while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    kind="${line%%"$PA_TAB"*}"
-    case "$kind" in
-      W|D)
-        path="${line#*"$PA_TAB"}"
-        case "$path" in
-          /dev/null|/dev/stdout|/dev/stderr|/dev/tty) printf '%s\n' "$line" ;;
-          /dev/fd/*[!0-9]*|/dev/fd/) printf '%s\t%s\n' "$kind" "$(grant_resolve "$path")" ;;
-          /dev/fd/*) printf '%s\n' "$line" ;;
-          *) printf '%s\t%s\n' "$kind" "$(grant_resolve "$path")" ;;
-        esac
-        ;;
-      *) printf '%s\n' "$line" ;;
-    esac
-  done
+    n=$((n + 1))
+    [ "$n" -gt "$2" ] && return 0
+  done <<< "$1"
+  return 1
 }
 
 PA_STAGE="reading what the action does"
 PA_BIG=0
+PA_MANY=0
+PA_RAW=""
 PA_EFFECTS=""
+PA_RESOLVED_PATH=""
 case "$PA_TOOL" in
   Bash)
     if [ -z "$PA_CMD" ]; then
@@ -458,33 +474,69 @@ case "$PA_TOOL" in
       PA_BIG=1
       PA_EFFECTS="?${PA_TAB}command too large to read${PA_TAB}$(_pa_clean "$PA_CMD" 200)"
     else
-      PA_RAW="$(cmd_effects "$PA_CMD" "$PA_CWD" 2>/dev/null)" \
+      PA_RAW="$(cmd_effects "$PA_CMD" "$PA_CWD" reads 2>/dev/null)" \
         || _pa_fail "the command reader failed (cmd_effects rc $?)"
-      PA_EFFECTS="$(printf '%s\n' "$PA_RAW" | _pa_resolve_effects)"
+      if [ -n "$PA_RAW" ] && _pa_more_than "$PA_RAW" "$PA_EFFECTS_MAX"; then
+        PA_MANY=1
+        PA_N="$(printf '%s\n' "$PA_RAW" | awk 'END { print NR }')"
+        PA_EFFECTS="?${PA_TAB}too many targets to read: $PA_N, past the $PA_EFFECTS_MAX bionic reads${PA_TAB}$(_pa_clean "$PA_CMD" 200)"
+      else
+        PA_EFFECTS="$(grant_resolve_lines "$PA_RAW")"
+      fi
     fi
     ;;
   Write|Edit|MultiEdit|NotebookEdit)
     if [ -z "$PA_PATH" ]; then
       PA_EFFECTS="?${PA_TAB}the tool names no file${PA_TAB}$PA_TOOL"
     else
-      PA_EFFECTS="W${PA_TAB}$(grant_resolve "$PA_PATH")"
+      PA_RESOLVED_PATH="$(grant_resolve "$PA_PATH")"
+      PA_EFFECTS="W${PA_TAB}$PA_RESOLVED_PATH"
     fi
     ;;
   Read)
     # A read has no effect; one that names no file is a question bionic cannot read.
-    [ -n "$PA_PATH" ] || PA_EFFECTS="?${PA_TAB}the tool names no file${PA_TAB}$PA_TOOL"
+    if [ -z "$PA_PATH" ]; then
+      PA_EFFECTS="?${PA_TAB}the tool names no file${PA_TAB}$PA_TOOL"
+    else
+      PA_RESOLVED_PATH="$(grant_resolve "$PA_PATH")"
+    fi
     ;;
   *) PA_EFFECTS="?${PA_TAB}bionic cannot read what this tool does${PA_TAB}$PA_TOOL" ;;
 esac
 
 # ---------- the verdict ----------
+#
+# The reserved table is asked about the PLACE as well as the spelling (wave-25 T17, review
+# B3): a file tool's path typed and resolved, and for Bash, after the command's own words,
+# every path line the reader printed, typed and resolved, with the home directory handed in
+# as a fact (a recursive read of it reaches every credential store). Either spelling matching
+# is the category. A command past PA_EFFECTS_MAX is denied whatever the table says, so its
+# lines are not read again here.
 PA_STAGE="checking the reserved table"
 PA_CAT=""
 if [ "$PA_BIG" = 0 ]; then
   case "$PA_TOOL" in
-    Bash) PA_CAT="$(grant_reserved Bash "$PA_CMD")" || _pa_fail "the reserved table failed (grant_reserved rc $?)" ;;
+    Bash)
+      PA_CAT="$(grant_reserved Bash "$PA_CMD")" || _pa_fail "the reserved table failed (grant_reserved rc $?)"
+      if [ -z "$PA_CAT" ] && [ "$PA_MANY" = 0 ] && [ -n "$PA_RAW" ]; then
+        # The home directory is the fact an RR line is judged against; resolved only when
+        # the reader printed one, so no other question pays for it.
+        PA_HOME=""
+        case "$PA_NL$PA_RAW" in
+          *"${PA_NL}RR$PA_TAB"*)
+            [ -z "${HOME:-}" ] || PA_HOME="$(grant_resolve "$HOME")" || PA_HOME="" ;;
+        esac
+        PA_CAT="$(grant_reserved_effects "$PA_HOME" "$PA_RAW$PA_NL$PA_EFFECTS")" \
+          || _pa_fail "the reserved table failed (grant_reserved_effects rc $?)"
+      fi
+      ;;
     Write|Edit|MultiEdit|NotebookEdit|Read)
-      PA_CAT="$(grant_reserved "$PA_TOOL" "$PA_PATH")" || _pa_fail "the reserved table failed (grant_reserved rc $?)" ;;
+      PA_CAT="$(grant_reserved "$PA_TOOL" "$PA_PATH")" || _pa_fail "the reserved table failed (grant_reserved rc $?)"
+      if [ -z "$PA_CAT" ] && [ -n "$PA_RESOLVED_PATH" ] && [ "$PA_RESOLVED_PATH" != "$PA_PATH" ]; then
+        PA_CAT="$(grant_reserved "$PA_TOOL" "${PA_RESOLVED_PATH#\?"$PA_TAB"}")" \
+          || _pa_fail "the reserved table failed (grant_reserved rc $?)"
+      fi
+      ;;
   esac
 fi
 
@@ -515,11 +567,11 @@ PA_KIND="${PA_VERDICT%%"$PA_TAB"*}"
 PA_REST="${PA_VERDICT#*"$PA_TAB"}"
 case "$PA_KIND" in
   allow)
-    if [ -z "$PA_EFFECTS" ]; then
-      _pa_finish allow "no effect: nothing is written or deleted"
-    else
-      _pa_finish allow "every effect is inside the workspace"
-    fi
+    # A read is no effect: only a W or D line makes this an allow of effects.
+    case "$PA_NL$PA_EFFECTS" in
+      *"${PA_NL}W$PA_TAB"*|*"${PA_NL}D$PA_TAB"*) _pa_finish allow "every effect is inside the workspace" ;;
+      *) _pa_finish allow "no effect: nothing is written or deleted" ;;
+    esac
     ;;
   deny-fix)
     # The reason may carry a resolver's mark (a TAB); the fix never does, so it is the last field.
