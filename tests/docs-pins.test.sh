@@ -4594,4 +4594,27 @@ for _w26_iface in \
     "$(w26_hits "$_w26_iface" "$OPRULES")"
 done
 
+# ============================================================
+# W26-15 (wave-26 T21, AC-8.2): the rule for test authors — no exact count of things in the
+# shipped tree — is written in the test-harness rules file, with both allowed forms.
+# ============================================================
+W26_15_RULES="${REPO}/.claude/rules/test-harness.md"
+W26_15_SENTENCE='No test pins an exact count of things in the shipped tree.'
+W26_15_REL='**A relation.**'
+W26_15_CEIL='**A ceiling.**'
+W26_15_OWN='exact number is fine when the number IS the behaviour'
+expect_nonempty "W26-15 precondition: the extractor reads the rules file (it carries its Anti-vacuity heading)" \
+  "$(w26_hits '## Anti-vacuity' "$W26_15_RULES")"
+expect_nonempty "W26-15: AC-8.2 — test-harness.md states the rule" \
+  "$(w26_hits "$W26_15_SENTENCE" "$W26_15_RULES")"
+expect_nonempty "W26-15b: …and names the relation form" "$(w26_hits "$W26_15_REL" "$W26_15_RULES")"
+expect_nonempty "W26-15c: …and names the ceiling form" "$(w26_hits "$W26_15_CEIL" "$W26_15_RULES")"
+expect_nonempty "W26-15d: …and says when an exact number stands" "$(w26_hits "$W26_15_OWN" "$W26_15_RULES")"
+W26_15_D="$TMP/w26-15-no-ceiling.md"
+grep -vF -- "$W26_15_CEIL" "$W26_15_RULES" > "$W26_15_D" 2>/dev/null
+expect_nonempty "W26-15m precondition: the doctored copy keeps the rule's sentence" \
+  "$(w26_hits "$W26_15_SENTENCE" "$W26_15_D")"
+expect_eq "W26-15m: …and a rules file naming no ceiling form is caught" "" \
+  "$(w26_hits "$W26_15_CEIL" "$W26_15_D")"
+
 finish
