@@ -1695,8 +1695,9 @@ expect_eq "17.17 …with no edge out of the late row T11" "" \
 #
 # `units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]`
 # prints the WHOLE plan with the row added: the row as the last table row, status `pending`,
-# and its `- <id>:` line under `## SDLC State`. It writes nothing, and since wave-26 T2 (D2) it
-# threads nothing: no other row's deps cell changes.
+# and its `- <id>:` line under `## SDLC State`. It writes nothing. This table has no reads column, so a
+# Step-4 row is threaded into the open frontier rows as 1.10 did (wave-26 T62; critic 2 K2-F1):
+# with no head read, those deps are what holds the floor.
 cat > "$SANDBOX/add.md" <<'ADD_EOF'
 ---
 current: 5
@@ -1742,10 +1743,12 @@ expect_eq "17.24 …the new row is the table's last row, pending, header-keyed (
 expect_eq "17.25 …its - T6: line sits after the last - T<n>: line and its continuation" \
   "  base: abc1234|- T4: pending dispatch — .worktrees/T4|- T6: pending dispatch — added by task-add" \
   "$(printf '%s\n' "$ADD_OUT" | grep -B2 '^- T6:' | sed -E 's/ at [0-9TZ:-]+$//' | tr '\n' '|' | sed 's/|$//')"
-expect_eq "17.26 a Step-4 row threads nothing (D2): every row already in the table is byte-identical" \
-  "$(grep '^| T[0-9]' "$SANDBOX/add.md")" "$(printf '%s\n' "$ADD_OUT" | grep '^| T[0-9]' | grep -v '^| T6 ')"
-expect_contains "17.27 …the Step-5 floor keeps the deps its author wrote" \
-  "| T3 | 5 | verify | the floor | test-runner | T1 |" "$ADD_OUT"
+expect_contains "17.26 …the Step-4 id is threaded into the frontier Step-5 row T3 (K2-F1: a table without reads)" \
+  "| T3 | 5 | verify | the floor | test-runner | T1, T6 |" "$ADD_OUT"
+expect_contains "17.27 …but not into T4, which reaches it through T3" \
+  "| T4 | 6 | review | after the floor | critic | T3 |" "$ADD_OUT"
+expect_contains "17.27b …nor into the landed T5" \
+  "| T5 | 7 | doc | a landed doc | implementor | T1 |" "$ADD_OUT"
 # THE reads OPERAND (optional, eleventh): placed by the header like every cell, and dropped
 # without a word by a table that carries no reads column — exactly as an unread column is.
 cat > "$SANDBOX/add-reads.md" <<'ADDR_EOF'
@@ -1769,7 +1772,7 @@ expect_contains "17.29 …and an escaped pipe in another row's cell survives the
   'the build \| with a pipe' "$ADD_OUT"
 expect_eq "17.30 …and the projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/add-projected.md")"
 
-# A LATER-STEP ROW THREADS NOTHING EITHER: no row is ever threaded (D2).
+# A LATER-STEP ROW THREADS NOTHING, in either table shape (1.10 threaded only a Step-4 row).
 ADD_OUT6="$(call units_add_row "$SANDBOX/add.md" T7 6 review 'a second review' critic 'T3' 30 REQ-5 '—')"
 expect_eq "17.31 a Step-6 row threads nothing: every other row is byte-identical" \
   "$(grep '^| T[0-9]' "$SANDBOX/add.md")" "$(printf '%s\n' "$ADD_OUT6" | grep '^| T[0-9]' | grep -v '^| T7 ')"
@@ -1859,8 +1862,8 @@ R6_OUT4="$(call units_add_row "$SANDBOX/add.md" T9 4 build 'raw a|b and \n' 'bio
 expect_eq "17b.11 …and through a Step-4 add as well" \
   '| T9 | 4 | build | raw a\|b and \n | bionic:implementor | — | 30 | REQ-5 | b.sh | — | — | pending |' \
   "$(printf '%s\n' "$R6_OUT4" | grep '^| T9 ')"
-expect_contains "17b.12 …which threads nothing: the Step-5 row keeps the deps its author wrote (D2)" \
-  "| T3 | 5 | verify | the floor | test-runner | T1 |" "$R6_OUT4"
+expect_contains "17b.12 …and threads the Step-5 row as 1.10 did, this table having no reads column (K2-F1)" \
+  "| T3 | 5 | verify | the floor | test-runner | T1, T9 |" "$R6_OUT4"
 printf '%s\n' "$R6_OUT" > "$SANDBOX/r6-projected.md"
 expect_eq "17b.13 …and the projection validates clean" "0" "$(call_rc units_validate "$SANDBOX/r6-projected.md")"
 
@@ -2316,6 +2319,9 @@ awk -F'|' -v OFS='|' '
   { print }' "$SANDBOX/replay-legacy.md" > "$SANDBOX/replay.md"
 printf '| T32 | 4 | build | a record-only write-up (fixture row) | w24-T32 | — | 20 | REQ-1 | .bionic/docs/record/wave-24-fixit-1811/T32-notes.md | .worktrees/24-T32 | c0d6ab04 | active |  |\n' \
   >> "$SANDBOX/replay.md"
+# THE RELEASE NAMES ITS APPROVAL (wave-26 T62; K2-F3): a Step-7 doc row reads approval:release, and
+# head as its default does, so it is the one cell the transform does not leave empty.
+sed '/^| T18 | 7 | doc /s/  |$/ approval:release, head |/' "$SANDBOX/replay.md" > "$SANDBOX/replay.tmp" && mv "$SANDBOX/replay.tmp" "$SANDBOX/replay.md"
 
 expect_eq "EDGES.0 the reads replay carries the column and validates clean" "0 0" \
   "$(call_rc units_has_column "$SANDBOX/replay.md" reads) $(call_rc units_validate "$SANDBOX/replay.md")"
@@ -3167,5 +3173,148 @@ expect_eq "APPROVAL-NAMES.1 the names open rows read are listed (pending live:, 
   "$(has_line "$AN" release) $(has_line "$AN" ship)"
 expect_eq "APPROVAL-NAMES.1b …and a name read only by a landed or dropped row is not" "no no" \
   "$(has_line "$AN" landedonly) $(has_line "$AN" droppedonly)"
+
+# ============================================================
+section "RUN-EDGES — wave-26 T62: the graph holds at a run's edges (critic 2, K2-F1 F3 F4 F5)"
+# ============================================================
+#
+# The second critic's probes (record/wave-26-never-idle/critic-2-scheduling-and-proof.md), each
+# turned into rows on the plan it ran. edges_plan writes a plan with the state lines given and the
+# header given, then the rows.
+edges_plan() {  # <file> <current> <state lines> <header> <rows...>
+  local f="$1" cur="$2" st="$3" hd="$4" cols; shift 4
+  cols="$(printf '%s\n' "$hd" | awk -F'|' '{ s = "|"; for (i = 2; i < NF; i++) s = s "---|"; print s }')"
+  { printf '## SDLC State\n\ncurrent: %s\napproved-by: fixture 2026-10-04T10:00:00Z "approved"\n%s\n- T1: landed abc\n\n## Tasks\n\n%s\n%s\n' \
+      "$cur" "$st" "$hd" "$cols"
+    for r in "$@"; do printf '%s\n' "$r"; done; } > "$f"
+}
+E_LEG='| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |'
+E_RDS='| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |'
+E_H=8d7216ce2835456ae38b03d6a7d30a50400cf30f
+E_H2=1111111111111111111111111111111111111111
+E_PROOFS="proved: kind=floor head=$E_H at=2026-10-04T11:00:00Z evidence=record/x/floor.log
+proved: kind=review head=$E_H at=2026-10-04T11:05:00Z evidence=record/x/review-1.md"
+
+# K2-F1 — A TABLE WITHOUT reads KEEPS 1.10 THREADING. Every plan written before 1.11 has no reads
+# column, so no `head` read holds its floor; the only thing that did was the id task-add threaded
+# into the deps of the open Step-5+ rows. A Step-4 row added mid-run is threaded into the frontier
+# exactly as c81d865e did: the floor gets it, the integrate row that reaches it through the floor
+# does not.
+edges_plan "$SANDBOX/e1-leg.md" 5 "" "$E_LEG" \
+  '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed |' \
+  '| T2 | 5 | verify | floor | w-T2 | T1 | 10 | REQ-1 | .bionic/docs/record/x/T2.md | — | — | pending |' \
+  '| T3 | 8 | integrate | merge | — | T2 | 10 | REQ-1 | — | — | — | pending |'
+call units_add_row "$SANDBOX/e1-leg.md" T4 4 build 'late fix' w-T4 '—' 10 REQ-1 'lib/b.sh' > "$SANDBOX/e1-leg-add.md"
+expect_eq "RUN-EDGES.F1 precondition: the add projects (exit 0) and the new row is in it" "0 yes" \
+  "$CALL_RC $(has_line "$(grep '^| T4 ' "$SANDBOX/e1-leg-add.md")" '| T4 | 4 | build | late fix | w-T4 | — | 10 | REQ-1 | lib/b.sh | — | — | pending |')"
+expect_eq "RUN-EDGES.F1a a mid-run build row on a table without reads is threaded into the floor's deps" \
+  '| T2 | 5 | verify | floor | w-T2 | T1, T4 | 10 | REQ-1 | .bionic/docs/record/x/T2.md | — | — | pending |' \
+  "$(grep '^| T2 ' "$SANDBOX/e1-leg-add.md")"
+expect_eq "RUN-EDGES.F1b …and not into the integrate row, which reaches it through the floor (1.10's frontier)" \
+  '| T3 | 8 | integrate | merge | — | T2 | 10 | REQ-1 | — | — | — | pending |' \
+  "$(grep '^| T3 ' "$SANDBOX/e1-leg-add.md")"
+expect_eq "RUN-EDGES.F1c at current: 5 the late build is ready and the floor is not (1.10 read T4 here)" "T4" \
+  "$(call units_ready "$SANDBOX/e1-leg-add.md" 5)"
+expect_eq "RUN-EDGES.F1d …so the full-run wall has the row to hold the run with" "T4${TAB}4${TAB}pending" \
+  "$(call units_floor_holds "$SANDBOX/e1-leg-add.md" T2)"
+expect_eq "RUN-EDGES.F1e …and the projection validates" "0" "$(call_rc units_validate "$SANDBOX/e1-leg-add.md")"
+call units_add_row "$SANDBOX/e1-leg.md" T4 6 build 'a Step-6 row' w-T4 '—' 10 REQ-1 'lib/b.sh' > "$SANDBOX/e1-leg-add6.md"
+expect_eq "RUN-EDGES.F1f a row at any other step threads nothing, as in 1.10 (the floor keeps T1)" \
+  '| T2 | 5 | verify | floor | w-T2 | T1 | 10 | REQ-1 | .bionic/docs/record/x/T2.md | — | — | pending |' \
+  "$(grep '^| T2 ' "$SANDBOX/e1-leg-add6.md")"
+# A LANDED OR DROPPED ROW IS NOT THREADED, and a row that already names the id is not threaded twice.
+edges_plan "$SANDBOX/e1-leg2.md" 5 "" "$E_LEG" \
+  '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed |' \
+  '| T2 | 5 | verify | floor | w-T2 | T1 | 10 | REQ-1 | .bionic/docs/record/x/T2.md | — | — | landed |' \
+  '| T5 | 5 | verify | re-floor | w-T5 | T1, T4 | 10 | REQ-1 | .bionic/docs/record/x/T5.md | — | — | pending |' \
+  '| T6 | 6 | review | final | w-T6 | T1 | 10 | REQ-1 | .bionic/docs/record/x/T6.md | — | — | pending |'
+call units_add_row "$SANDBOX/e1-leg2.md" T4 4 build 'late fix' w-T4 '—' 10 REQ-1 'lib/b.sh' > "$SANDBOX/e1-leg2-add.md"
+expect_eq "RUN-EDGES.F1g the open review that misses it is threaded, the landed floor and the row naming it already are not" \
+  "T1, T4|T1|T1, T4" \
+  "$(for r in T6 T2 T5; do grep "^| $r " "$SANDBOX/e1-leg2-add.md" | awk -F'|' '{ gsub(/^ +| +$/, "", $7); printf "%s|", $7 }'; done | sed 's/|$//')"
+# THE CONTROL: the same plan WITH the reads column. The floor waits on what it reads (head), so
+# nothing is appended to any row (D2; T59's ADD-READS pins the verb's half).
+edges_plan "$SANDBOX/e1-rds.md" 5 "" "$E_RDS" \
+  '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |' \
+  '| T2 | 5 | verify | floor | w-T2 | — | 10 | REQ-1 | .bionic/docs/record/x/T2.md | — | — | pending | — |' \
+  '| T3 | 8 | integrate | merge | — | — | 10 | REQ-1 | — | — | — | pending | — |'
+call units_add_row "$SANDBOX/e1-rds.md" T4 4 build 'late fix' w-T4 '—' 10 REQ-1 'lib/b.sh' > "$SANDBOX/e1-rds-add.md"
+expect_eq "RUN-EDGES.F1h in a table with reads every row already there is byte-identical after the add" \
+  "$(grep '^| T[0-9]' "$SANDBOX/e1-rds.md")" "$(grep '^| T[0-9]' "$SANDBOX/e1-rds-add.md" | grep -v '^| T4 ')"
+expect_eq "RUN-EDGES.F1i …and its floor is held by the late build through head all the same" "T4${TAB}4${TAB}pending" \
+  "$(call units_floor_holds "$SANDBOX/e1-rds-add.md" T2)"
+
+# K2-F3 — THE RELEASE READS ITS APPROVAL. In a reads table a doc row at Step 7 or later is the
+# release (the hold a table without the column keeps names it so), and D3 says it reads
+# approval:release. The validator refuses one that names no approval, and readiness never offers
+# one that slipped past it (a hand edit) before approved: release exists.
+edges_plan "$SANDBOX/e3.md" 4 "" "$E_RDS" \
+  '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |' \
+  '| T2 | 5 | verify | floor | w-T2 | — | 10 | REQ-1 | .bionic/docs/record/x/T2.md | — | — | pending | — |' \
+  '| T3 | 7 | doc | release 1.2.0: CHANGELOG, version | w-T3 | — | 10 | REQ-1 | CHANGELOG.md, plugin.json | — | — | pending | — |' \
+  '| T4 | 8 | integrate | merge | — | — | 10 | REQ-1 | — | — | — | pending | — |'
+expect_eq "RUN-EDGES.F3a a Step-7 doc row with an empty reads cell is refused, naming the read to write" \
+  "T3: a doc row at step 7 or later is the release and must read the approval it waits for; add approval:release to its reads (approval:plan for a document that needs no release)" \
+  "$(call units_validate "$SANDBOX/e3.md")"
+expect_eq "RUN-EDGES.F3a2 …exit 1" "1" "$(call_rc units_validate "$SANDBOX/e3.md")"
+expect_eq "RUN-EDGES.F3b readiness at current: 4 offers the floor and never the release (the probe read T2 T3)" "T2" \
+  "$(call units_ready "$SANDBOX/e3.md" 4)"
+expect_eq "RUN-EDGES.F3c …which waits for approval:release" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/e3.md" 4)" "T3${TAB}approval:release${TAB}-${TAB}-")"
+sed '/^| T3 /s/| pending | — |$/| pending | head |/' "$SANDBOX/e3.md" > "$SANDBOX/e3-head.md"
+expect_eq "RUN-EDGES.F3d a release whose reads name no approval (head alone) is refused the same way" "yes" \
+  "$(has_line "$(call units_validate "$SANDBOX/e3-head.md")" "T3: a doc row at step 7 or later is the release and must read the approval it waits for; add approval:release to its reads (approval:plan for a document that needs no release)")"
+sed '/^| T3 /s/| pending | — |$/| pending | approval:release |/' "$SANDBOX/e3.md" > "$SANDBOX/e3-ok.md"
+expect_eq "RUN-EDGES.F3e the release that reads approval:release validates" "0" "$(call_rc units_validate "$SANDBOX/e3-ok.md")"
+awk '{ print } /^approved-by:/ { print "approved: release by fixture 2026-10-04T12:00:00Z \"ship it\"" }' "$SANDBOX/e3.md" > "$SANDBOX/e3-appr.md"
+expect_eq "RUN-EDGES.F3f once approved: release is written the release is ready" "yes" \
+  "$(has_line "$(call units_ready "$SANDBOX/e3-appr.md" 4)" T3)"
+# A PLAIN DOC ROW WORKS AS TODAY: on its kind default before Step 7, or reading approval:plan at
+# Step 7 (HOLD.1), it validates and is ready.
+edges_plan "$SANDBOX/e3-plain.md" 4 "" "$E_RDS" \
+  '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |' \
+  '| T2 | 4 | doc | the guide | w-T2 | — | 10 | REQ-1 | skills/x/SKILL.md | — | — | pending | — |' \
+  '| T3 | 7 | doc | the notes | w-T3 | — | 10 | REQ-1 | .bionic/docs/record/x/notes.md | — | — | pending | approval:plan |'
+expect_eq "RUN-EDGES.F3g a plain doc row on its default and a Step-7 notes row reading approval:plan validate" "0" \
+  "$(call_rc units_validate "$SANDBOX/e3-plain.md")"
+expect_eq "RUN-EDGES.F3h …and both are ready at current: 4" "$(printf 'T2\nT3')" "$(call units_ready "$SANDBOX/e3-plain.md" 4)"
+
+# K2-F4 — THE END OF A RUN ON DEFAULTS. The live review row went back to pending on the last
+# review proof and nothing landed after it; it will write no newer proof, so integrate's
+# proof:review does not wait on it. Every row reads its kind default.
+edges_plan "$SANDBOX/e4.md" 8 "$E_PROOFS" "$E_RDS" \
+  '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |' \
+  '| T2 | 6 | review | review each landing | — | — | 10 | REQ-1 | .bionic/docs/record/x/review-1.md | — | — | pending | — |' \
+  '| T5 | 5 | verify | floor | w-T5 | — | 10 | REQ-1 | .bionic/docs/record/x/floor.log | — | — | landed | — |' \
+  '| T3 | 8 | integrate | merge | — | — | 10 | REQ-1 | — | — | — | pending | — |' \
+  '| T4 | 9 | close | close | — | — | 10 | REQ-1 | — | — | — | pending | — |'
+expect_eq "RUN-EDGES.F4a at the head both proofs name, integrate is ready (the probe read nothing)" "T3" \
+  "$(live_call "$E_H" units_ready "$SANDBOX/e4.md" 8)"
+E4W="$(live_call "$E_H" units_waiting "$SANDBOX/e4.md" 8)"
+expect_eq "RUN-EDGES.F4b …the idle review row is no writer of proof:review" "no" \
+  "$(has_line "$E4W" "T3${TAB}proof:review${TAB}T2${TAB}pending")"
+expect_eq "RUN-EDGES.F4b2 …while the waiting extractor reads real lines: the review waits on the world" "yes" \
+  "$(has_line "$E4W" "T2${TAB}live:head: nothing landed past the review proof at ${E_H:0:12}${TAB}-${TAB}-")"
+expect_eq "RUN-EDGES.F4c past the proof (something landed), the review is ready and integrate waits on it" \
+  "T2|yes" \
+  "$(live_call "$E_H2" units_ready "$SANDBOX/e4.md" 8)|$(has_line "$(live_call "$E_H2" units_waiting "$SANDBOX/e4.md" 8)" "T3${TAB}proof:review${TAB}T2${TAB}pending")"
+expect_eq "RUN-EDGES.F4d with the head unknown, the review may still write: integrate waits on it" \
+  "yes" "$(has_line "$(live_call "" units_waiting "$SANDBOX/e4.md" 8)" "T3${TAB}proof:review${TAB}T2${TAB}pending")"
+
+# K2-F5 — INTEGRATE WAITS FOR AN OPEN BUILD. Its default reads head (proof:floor, proof:review,
+# head), so a late fix still active holds the merge, and the WAIT line names it.
+edges_plan "$SANDBOX/e5.md" 8 "$E_PROOFS" "$E_RDS" \
+  '| T1 | 4 | build | a | w-T1 | — | 10 | REQ-1 | lib/a.sh | — | — | landed | — |' \
+  '| T2 | 6 | review | final review | w-T2 | — | 10 | REQ-1 | .bionic/docs/record/x/review-1.md | — | — | landed | — |' \
+  '| T5 | 5 | verify | floor | w-T5 | — | 10 | REQ-1 | .bionic/docs/record/x/floor.log | — | — | landed | — |' \
+  '| T6 | 6 | build | late fix from the review | w-T6 | — | 10 | REQ-1 | lib/a.sh | .worktrees/T6 | abcdef12 | active | — |' \
+  '| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-1 | — | — | — | pending | — |'
+expect_eq "RUN-EDGES.F5a a late build active: nothing is ready at current: 8 (the probe read T3)" "" \
+  "$(live_call "$E_H" units_ready "$SANDBOX/e5.md" 8)"
+expect_eq "RUN-EDGES.F5b …integrate waits on head, written by the build" "yes" \
+  "$(has_line "$(live_call "$E_H" units_waiting "$SANDBOX/e5.md" 8)" "T3${TAB}head${TAB}T6${TAB}active")"
+sed '/^| T6 /s/| active | — |$/| landed | — |/' "$SANDBOX/e5.md" > "$SANDBOX/e5-landed.md"
+expect_eq "RUN-EDGES.F5c the build landed and both proofs at the head: integrate is ready" "T3" \
+  "$(live_call "$E_H" units_ready "$SANDBOX/e5-landed.md" 8)"
 
 finish
