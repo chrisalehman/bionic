@@ -4651,6 +4651,11 @@ expect_nonempty "W26-8r precondition: the resume ritual still runs adopt" \
   "$(w26_hits 'session-poker.sh adopt` before its first dispatch' "$DISPATCH_MD")"
 expect_eq "W26-8r: …and orders no second hand ledger of what adopt prints" "" \
   "$(w26_hits 'Ledger every row it prints' "$DISPATCH_MD")"
+# The patrol prompt's last bullet continues the run only when something is ready or changed.
+expect_nonempty "W26-8w: dispatch.md says a WAITING or unchanged tick owes nothing" \
+  "$(w26_hits 'A `poker: WAITING` or unchanged tick owes nothing' "$DISPATCH_MD")"
+expect_eq "W26-8x: …and no longer continues after every tick unconditionally" "" \
+  "$(w26_hits 'Then continue toward the goal until a wall.' "$DISPATCH_MD")"
 
 # W26-9 (AC-3.6): one moment, the same words, in every place that names the full run.
 for _w26_f in "$W26_STEP5" "$W26_SURV" "$DISPATCH_MD" "$W26_CLAUDE"; do
