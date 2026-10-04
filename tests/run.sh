@@ -172,6 +172,15 @@ else
 fi
 unset BIONIC_TEST_PROGRESS
 
+# ── THE TIMING KNOB, READ ONCE, HERE TOO (wave-26 T26; D20) ──────────────────
+# Same trade, same reason: a nested run inheriting `BIONIC_TEST_TIMING` wrote its fixture
+# labels into the real run's file (60 of 135 rows of one floor run). Unlike progress, only
+# this process writes a timing row — both modes write them from here, the default mode off
+# the workers' .sec files — so the private name is a plain shell variable and is never
+# exported: a nested run sees neither name, and sets its own only when its caller does.
+_TEST_TIMING_FILE="${BIONIC_TEST_TIMING:-}"
+unset BIONIC_TEST_TIMING
+
 # ── argv ─────────────────────────────────────────────────────────────────────
 # Refused, not ignored. Before this task the runner read no argv at all, so
 # `bash tests/run.sh --serial` ran the whole roster and looked like it had
@@ -517,9 +526,9 @@ void=0; voided=""
 # finding (c) had to answer "which suite is the long pole" with a line-count
 # proxy), and a gating run's output must not change just because someone wanted
 # the numbers.
-_timing() {  # _timing <label> <seconds>
-  [ -n "${BIONIC_TEST_TIMING:-}" ] || return 0
-  printf '%s\t%s\n' "$1" "$2" >>"$BIONIC_TEST_TIMING"
+_timing() {  # _timing <label> <seconds> — to the file the knob named (read at the top)
+  [ -n "$_TEST_TIMING_FILE" ] || return 0
+  printf '%s\t%s\n' "$1" "$2" >>"$_TEST_TIMING_FILE"
 }
 
 _label() { printf '  %-36s ' "$1"; }
@@ -685,13 +694,24 @@ if [ "$SERIAL" -eq 0 ]; then
   # the held ones to drain, then a settled load (`resources_settled`: the load now,
   # not the ring's median). The hold is this process's, given back after the suite.
   #
-  # VOID, NOT FAILED. The load is read again after the suite. If it rose above the
-  # settled line, something disturbed the drive and its timing rows measured that:
-  # the suite runs again, up to SOLO_RETRIES more times, and if every try was
-  # disturbed it is reported VOID (see _verdict). A take or a settle that gave up at
-  # the maximum wait is a disturbance too; the suite still runs once, so its output
-  # is there to read, but it is not retried — waiting the whole ceiling again would
-  # only say the same thing.
+  # VOID, NOT FAILED. The load is read again after the suite, less the suite's own share
+  # of it (`resources_own_load`, from the CPU its worker used; wave-26 T26, review 4 F4).
+  # If what is left rose above the settled line, something else disturbed the drive and
+  # its timing rows measured that: the suite runs again, up to SOLO_RETRIES more times,
+  # and if every try was disturbed it is reported VOID (see _verdict). A take or a settle
+  # that gave up at the ceiling is a disturbance too; the suite still runs once, so its
+  # output is there to read, but it is not retried — waiting the whole ceiling again
+  # would only say the same thing.
+  #
+  # ONE CEILING PER SUITE (wave-26 T26, review 4 F3). The take, the settle and every
+  # retry of one solo suite give up at one deadline, SLOTS_DEADLINE, set once before its
+  # first take, as payload/scripts/booked.sh sets it: slots_take_all reads it, and so does
+  # _solo_settle. A retry the ceiling has no room for is not started, and the suite is not
+  # run again unbooked either — its disturbed run already left its output.
+  #
+  # A STORE THAT CANNOT BE WRITTEN (review 4 F5) refuses a whole-machine take at once
+  # (slots_take_all returns 2 and names the store); the suite runs once, unbooked, and its
+  # VOID says that, not that some place did not drain.
   #
   # NESTING (the lending rule, lib/slots.sh). A run started inside a booked command
   # inherits BIONIC_SLOT_HELD=1 and its parent's place: the whole-machine take then
@@ -709,14 +729,28 @@ if [ "$SERIAL" -eq 0 ]; then
   # A TREE WITHOUT THE LIBRARY (a scratch copy of this runner) runs its solo suites
   # unbooked, as before, and says so once.
   SOLO_RETRIES=2
-  _solo_settle() {  # <cores> — wait for a settled load, under the place wait's ceiling
-    local start=$SECONDS
+  _solo_settle() {  # <cores> — wait for a settled load, until the suite's one ceiling
+    local deadline
+    deadline="$(_slots_deadline "$(_slots_max_wait)")"
     _SLOTS_NOTED=-1
     while ! resources_settled "$1"; do
-      [ $((SECONDS - start)) -lt "$(_slots_max_wait)" ] || return 1
+      [ "$SECONDS" -lt "$deadline" ] || return 1
       _slots_note "holding the whole machine, waiting for the load ($(_res_load_now)) to settle at or below $(resources_settled_line "$1")"
       sleep "$(_slots_poll)"
     done
+  }
+  # _solo_cpu — sets _SOLO_CPU to the CPU seconds this shell's finished children have used:
+  # the second line of `times`. Called directly, never in `$( )`, which has no children. The
+  # `--one` worker is such a child and waits for its suite, so the suite's CPU lands here
+  # when the worker is reaped.
+  _SOLO_CPU=0
+  _solo_cpu() {
+    _SOLO_CPU=0
+    times >"$TMP/solo.times" 2>/dev/null || return 0
+    _SOLO_CPU="$(awk '
+      function sec(x, a) { sub(/s$/, "", x); gsub(",", ".", x); split(x, a, "m"); return a[1] * 60 + a[2] }
+      NR == 2 { printf "%.3f\n", sec($1) + sec($2) }' "$TMP/solo.times" 2>/dev/null)"
+    [ -n "$_SOLO_CPU" ] || _SOLO_CPU=0
   }
   # HELD TRAVELS WITH ITS PLACE (wave-26 T8, booking review). The lending rule reads
   # BIONIC_SLOT_PLACE to know which place is the caller's own; HELD without it makes a nested
@@ -734,34 +768,49 @@ if [ "$SERIAL" -eq 0 ]; then
     done
     return 0
   }
-  _solo_run() {  # <label> — one solo suite; leaves <label>.void when every try was disturbed
-    local label="$1" tries=0 why cores
+  _solo_run() {  # <label> — one solo suite; leaves <label>.void when it was never measured
+    local label="$1" tries=0 why last="" cores max take cpu0 t0 own
     rm -f "$TMP/${label}.void"
     if [ "$_SOLO_BOOK" != yes ]; then
       bash "$SELF" --one "$label" </dev/null
       return 0
     fi
-    cores="$(_res_cores)"
+    cores="$(_res_cores)"; max="$(_slots_max_wait)"
+    SLOTS_DEADLINE=$((SECONDS + max))
     while :; do
       why=""
-      if ! slots_take_all "$$" "tests/run.sh solo ${label}" >/dev/null; then
-        why="the other places did not drain within $(_slots_max_wait)s"
-      elif ! _solo_settle "$cores"; then
-        why="the load ($(_res_load_now)) never settled at or below $(resources_settled_line "$cores") within $(_slots_max_wait)s"
-      fi
+      slots_take_all "$$" "tests/run.sh solo ${label}" >/dev/null; take=$?
+      case "$take" in
+        0) _solo_settle "$cores" || \
+             why="the load ($(_res_load_now)) never settled at or below $(resources_settled_line "$cores") within the ceiling of ${max}s" ;;
+        2) why="the store $(slots_dir) could not be written, so the whole machine was not taken" ;;
+        *) why="the other places did not drain within the ceiling of ${max}s" ;;
+      esac
       if [ -n "$why" ]; then
         slots_release "$$"
+        if [ "$tries" -gt 0 ]; then
+          # Its disturbed run already left its output; there is no room for another.
+          [ "$take" = 2 ] || why="the ceiling of ${max}s ran out before a retry could start"
+          printf '%s; %s\n' "$last" "$why" >"$TMP/${label}.void"
+          echo "tests/run.sh: void — ${label}: ${last}; ${why}" >&2
+          return 0
+        fi
         bash "$SELF" --one "$label" </dev/null
         printf '%s\n' "$why" >"$TMP/${label}.void"
         echo "tests/run.sh: void — ${label}: ${why}; it ran unbooked and is not retried" >&2
         return 0
       fi
+      _solo_cpu; cpu0=$_SOLO_CPU; t0=$SECONDS
       BIONIC_SLOT_HELD=1 BIONIC_SLOT_QUIET=1 BIONIC_SLOT_PLACE="$(_solo_place)" \
         bash "$SELF" --one "$label" </dev/null
-      resources_settled "$cores" || \
-        why="the load rose to $(_res_load_now) during the run, above the settled line $(resources_settled_line "$cores")"
+      _solo_cpu
+      own="$(resources_own_load "$(awk -v a="$cpu0" -v b="$_SOLO_CPU" 'BEGIN { d = b - a; printf "%.3f\n", (d > 0 ? d : 0) }')" "$((SECONDS - t0))")"
+      [ -n "$own" ] || own=0
+      resources_undisturbed "$cores" "$own" || \
+        why="the load rose to $(_res_load_now) during the run (about ${own} of it the suite's own), above the settled line $(resources_settled_line "$cores")"
       slots_release "$$"
       [ -n "$why" ] || return 0
+      last="$why"
       tries=$((tries + 1))
       if [ "$tries" -gt "$SOLO_RETRIES" ]; then
         printf '%s, on every try\n' "$why" >"$TMP/${label}.void"
@@ -835,8 +884,9 @@ echo "Gating: ${pass} passed, ${fail} failed"
 [ -n "$_advisory" ] && echo "$_advisory"
 # VOID IS SAID, AND IT IS NOT A FAILURE (wave-26 T8). Its own line, like `Advisory:`, so the
 # `Gating:` line above keeps its shape; and the run exits on its failures alone. What it does
-# not do is call itself all green: a void suite's timing was never measured.
-[ "$void" -ne 0 ] && echo -e "Void: ${void} — disturbed on every try, so not timed; advisory, not a failure:${voided}"
+# not do is call itself all green: a void suite's timing was never measured. Each entry says
+# why, since a disturbance is only one of the causes (wave-26 T26).
+[ "$void" -ne 0 ] && echo -e "Void: ${void} — not timed, each for the reason given; advisory, not a failure:${voided}"
 echo "$ENV_STAMP"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
