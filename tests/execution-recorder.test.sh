@@ -2523,6 +2523,28 @@ expect_contains "17o2 a plan with no dispatch ledger still gets its row active" 
   "| .worktrees/01-T3 | 01234567 | active |" "$(act_row "$ACT_O" T3)"
 act_sync "$ACT_O"
 expect_eq "17o3 …and owes no line it has no table for" "0:" "$SYNC_RC:$SYNC_OUT"
+
+# ---------- 17p: a row put back to pending is not re-activated by the launch already ledgered ----------
+# A review row returns to `pending` on its proof (wave-26 T14) while its reviewer may still be
+# open on the roster. That launch was recorded once, row and line; the transaction must not
+# re-apply it. The next pass is its own launch, which is applied.
+ACT_P="$(act_world putback 4)"
+act_intended "$ACT_P" w1-T3 toolu_01ACTP
+act_workspace "$ACT_P" w1-T3 01-T3
+act_launch "$ACT_P" w1-T3 a17p000000000001 toolu_01ACTP
+expect_contains "17p precondition: the launch made row T3 active" "| .worktrees/01-T3 | 01234567 | active |" "$(act_row "$ACT_P" T3)"
+sed -i.bak 's/^| T3 | 4 | build | the third build | w1-T3 | — | 30 | REQ-1 | c.sh | .worktrees\/01-T3 | 01234567 | active |$/| T3 | 4 | build | the third build | — | — | 30 | REQ-1 | c.sh | — | — | pending |/' "$(act_plan "$ACT_P")"
+expect_contains "17p precondition: the row is put back to pending, its cells cleared" "| c.sh | — | — | pending |" "$(act_row "$ACT_P" T3)"
+cp "$(act_plan "$ACT_P")" "$SANDBOX/act-p-before"
+act_sync "$ACT_P"
+expect_eq "17p the launch already ledgered is not applied again" "0:" "$SYNC_RC:$SYNC_OUT"
+expect_true "17p2 …the plan byte-identical" cmp -s "$SANDBOX/act-p-before" "$(act_plan "$ACT_P")"
+act_workspace "$ACT_P" w1-T3-r1 01-T3b
+unset BIONIC_LAUNCH_SYNC_INLINE
+act_confirmed "$ACT_P" w1-T3-r1
+act_sync "$ACT_P"
+expect_contains "17p3 …while the next pass, its own launch, is applied" "poker: LAUNCHED T3 w1-T3-r1" "$SYNC_OUT"
+expect_contains "17p4 …with its own ledger line" "| T3r1 | implementor (w1-T3-r1) |" "$(act_ledger_row "$ACT_P" T3r1)"
 unset BIONIC_LAUNCH_SYNC_INLINE
 
 finish
