@@ -88,8 +88,8 @@ Fixes:
   table above it lists the same wave (the limit 1.8.10 carried), and fills the row's ADR cell from
   the wave spec.
 - `ledger-add` checks its id as well as its values, so an id carrying a newline can no longer
-  write a forged plan line; a hold with a blank reason is refused; fix lines print the plugin
-  root quoted.
+  write a forged plan line, and the plan-row verbs accept plain ASCII ids only, under any locale;
+  a hold with a blank reason is refused; fix lines print the plugin root quoted.
 - The doctor-reads suite no longer depends on the `claude` and `npm` found on the runner's PATH.
 
 Known limits, carried to the next release:

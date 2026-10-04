@@ -7658,6 +7658,16 @@ poke "$R42" ledger-add 'T9|x' agent=y
 s42_unchanged "42d15d §VERB-bad C1 ledger-add of an id carrying a pipe" 1 "$P42"
 poke "$R42" ledger-add 'T9 x' agent=y
 s42_unchanged "42d15e §VERB-bad C1 ledger-add of an id of two words" 1 "$P42"
+# THE GRAMMAR IS ASCII UNDER ANY LOCALE (wave-24 T29; critic addendum A3). `[A-Za-z]` is a
+# collation range, and /bin/bash 3.2 under a UTF-8 locale let é, ö, ß and a fullwidth Ｔ
+# through, so `Ｔ9` keyed a row that reads as T9. Driven by /bin/bash itself under UTF-8.
+s42_u8() {  # <verb args...> -> sets OUT, RC; /bin/bash 3.2, a UTF-8 locale
+  OUT="$( cd "$R42" && env LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 CLAUDE_CODE_SESSION_ID="$SID" /bin/bash "$POKER" "$@" 2>&1 )"; RC=$?
+}
+for _s42_id in 'é9' 'Tö' 'Ｔ9' 'T9ß'; do
+  s42_u8 ledger-add "$_s42_id" agent=y
+  s42_unchanged "42d15i §VERB-bad A3 ledger-add of the non-ASCII id $_s42_id under /bin/bash and UTF-8" 1 "$P42"
+done
 poke "$R42" ledger-set 'T1|x' notes=y
 s42_unchanged "42d15f §VERB-bad C1 ledger-set of an id carrying a pipe" 1 "$P42"
 poke "$R42" task-set "T5
@@ -7790,6 +7800,9 @@ s42_snap "$R42" "$P42"
 poke "$R42" ledger-add T2-critic agent=critic
 expect_eq "42g15b §VERB-line ledger-add of a suffixed id (T2-critic) exits 0" "0" "$RC"
 expect_eq "42g15c …one row added" "1 0;" "$(s42_numstat "$R42")"
+# A3's positive, same driver as 42d15i: an ASCII id under /bin/bash and UTF-8 is admitted.
+s42_u8 ledger-add T2-u8 agent=critic
+expect_eq "42g15d …and the same /bin/bash UTF-8 driver admits an ASCII id (T2-u8)" "0" "$RC"
 s34_gate "$R42"
 expect_eq "42g16 …and after all five verbs the next commit is admitted" "0" "$GATE_RC"
 
@@ -7852,6 +7865,64 @@ expect_contains "43d precondition: the row was adopted onto this session's roste
   "$(s43_last "$R43A" adopted-writer)"
 expect_eq "43d2 adopt carries the Done marker onto the adopted row" "$R43A/adopted-writer.done" \
   "$(s43_done "$(s43_last "$R43A" adopted-writer)")"
+unset CLAUDE_CONFIG_DIR
+
+# ============================================================
+section "Section 44: the lines a reader pastes keep a plugin root with a space as one word (wave-24 T29; critic I2, A-T27.8)"
+# ============================================================
+#
+# The Patrol prompt, the tick's STANDDOWN line and its re-arm note print the poker's own path
+# for a reader to paste. They printed `${HOOK_DIR}` bare, so a plugin root with a space (a
+# `--plugin-dir` checkout under `~/My Projects/`) split in two at the paste. The poker here
+# runs from a COPY of the payload under `<tmp>/my plugin/`, the layout an installed plugin has.
+# Each printed command is parsed the way a pasting shell reads it (`eval set --`, nothing run)
+# and the script path must come back as ONE argument naming the real file.
+# fails-when: a printed poker path splits at the space.
+s44_args() { eval "set -- $1"; printf '%s\n' "$@"; }  # <command text> -> its words, one per line
+s44_word() { printf '%s\n' "$1" | sed -n "${2}p"; }    # <words> <n> -> the n-th
+S44_ROOT="$TMPROOT/my plugin"
+cp -RL "$(cd "$(dirname "$POKER")/../payload" && pwd -P)" "$S44_ROOT"
+S44_POKER_SAVED="$POKER"; POKER="$S44_ROOT/hooks/session-poker.sh"
+expect_true "44 precondition: the poker under test is the copy under a root with a space" test -f "$POKER"
+S44_CFG="$(fake_config_dir s44-root)"
+export CLAUDE_CONFIG_DIR="$S44_CFG"
+S41_TR="$S44_CFG/projects/-fixture-project/$SID.jsonl"
+
+R44P="$(make_repo s44-prompt)"
+poke "$R44P" prompt
+S44_TICK="$(printf '%s\n' "$OUT" | sed -n 's/.*then run: \(bash .*\) tick — the tick decides.*/\1 tick/p')"
+expect_nonempty "44a the prompt names the tick command" "$S44_TICK"
+S44_W="$(s44_args "$S44_TICK")"
+expect_eq "44a2 …which parses as bash, the script and tick" "3" "$(printf '%s\n' "$S44_W" | grep -c '')"
+expect_contains "44a3 …its script path one argument, space and all" "my plugin/hooks/session-poker.sh" "$(s44_word "$S44_W" 2)"
+expect_true "44a4 …naming the real file" test -f "$(s44_word "$S44_W" 2)"
+S44_HOLD="$(printf '%s\n' "$OUT" | sed -n "s/.*the hold line it prints: \(bash .* hold NAME 'why it stays up'\),.*/\1/p")"
+expect_nonempty "44b the prompt names the hold command" "$S44_HOLD"
+S44_W="$(s44_args "$S44_HOLD")"
+expect_eq "44b2 …which parses as bash, the script, hold, NAME and the reason" "5" "$(printf '%s\n' "$S44_W" | grep -c '')"
+expect_true "44b3 …its script path one argument naming the real file" test -f "$(s44_word "$S44_W" 2)"
+
+R44S="$(s41_world s44-standdown)"
+s41_transcript 1 "w-1:idle"
+poke "$R44S" tick
+S44_SD="$(printf '%s\n' "$OUT" | grep -F 'poker: STANDDOWN w-1' | sed -n 's/.*keep it up with: //p')"
+expect_nonempty "44c the tick's STANDDOWN line prints its hold command" "$S44_SD"
+S44_W="$(s44_args "$S44_SD")"
+expect_eq "44c2 …which parses as bash, the script, hold, the name and the reason" "5" "$(printf '%s\n' "$S44_W" | grep -c '')"
+expect_true "44c3 …its script path one argument naming the real file" test -f "$(s44_word "$S44_W" 2)"
+expect_eq "44c4 …and the name is the row's" "w-1" "$(s44_word "$S44_W" 4)"
+
+R44V="$(make_repo s44-pver)"; new_roster "$R44V"
+add_row "$R44V" name=busy deliverable="$R44V/never-written.md" duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+poke "$R44V" tick
+S44_RA="$(printf '%s\n' "$OUT" | grep -F 're-arm the Patrol')"
+expect_nonempty "44d the tick prints its re-arm note" "$S44_RA"
+S44_ARM="$(printf '%s\n' "$S44_RA" | sed -n 's/.*then run `\(bash [^`]*\)`.*/\1/p')"
+S44_W="$(s44_args "$S44_ARM")"
+expect_eq "44d2 …whose arm command parses as bash, the script and arm" "3" "$(printf '%s\n' "$S44_W" | grep -c '')"
+expect_true "44d3 …its script path one argument naming the real file" test -f "$(s44_word "$S44_W" 2)"
+POKER="$S44_POKER_SAVED"
 unset CLAUDE_CONFIG_DIR
 
 finish

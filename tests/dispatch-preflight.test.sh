@@ -8920,5 +8920,44 @@ DL_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_contains "DL5 a brief naming no Done marker writes its launch row" "status=intended" "$DL_ROW"
 expect_absent "DL5b …with no done= key on it" "|done=" "$DL_ROW"
 
+# ============================================================================
+section "§ROOT — a printed fix line under a plugin root with a space pastes as one argument per word (wave-24 T29; critic I2; AC-6.5)"
+# ============================================================================
+#
+# The writer-budget refusal's ack line and the advisory's amend line printed the hooks path
+# bare, so a plugin root with a space (a `--plugin-dir` checkout under `~/My Projects/`, a
+# config dir with a space) split into two words when pasted. The gate here runs from a COPY of
+# the payload under `<sandbox>/my plugin/`, the layout an installed plugin has, so the root the
+# lines print is one with a space in it. Each line is parsed the way a pasting shell reads it
+# (`eval set --`, nothing executed) and the script path must come back as ONE argument.
+# fails-when: the printed script path splits at the space.
+root_args() { eval "set -- $1"; printf '%s\n' "$@"; }  # <command text> -> its words, one per line
+ROOT_SP="$SANDBOX/my plugin"
+cp -RL "${BIONIC_SCRIPTS_DIR}/payload" "$ROOT_SP"
+ROOT_GATE_SAVED="$GATE"; GATE="$ROOT_SP/hooks/dispatch-preflight.sh"
+expect_true "root0 the gate under test is the copy under a root with a space" test -f "$GATE"
+
+REPO=$(ro_budget_repo root1 "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "root1-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "root1 one open writer against writers=1 → REFUSED" "deny" "$GATE_VERDICT"
+ROOT1_LINE="$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -F 'W-ONE' | /usr/bin/grep -m1 -F 'session-sweeper.sh' || true)"
+expect_true "root1 …the reason carries the ack line" test -n "$ROOT1_LINE"
+ROOT1_ARGS="$(root_args "${ROOT1_LINE#*close it: }")"
+expect_eq "root1 …which parses as bash, the script, ack and the name" "4" "$(printf '%s\n' "$ROOT1_ARGS" | /usr/bin/grep -c '')"
+expect_contains "root1 …its script path is one argument, space and all" "my plugin/hooks/session-sweeper.sh" "$(printf '%s\n' "$ROOT1_ARGS" | sed -n 2p)"
+expect_true "root1 …naming the real file" test -f "$(printf '%s\n' "$ROOT1_ARGS" | sed -n 2p)"
+
+REPO=$(make_repo rootadv yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief 'When the seam is in, run `bash tests/foo.test.sh` and report the count.')" "w99-adv")"
+ROOT2_LINE="$(adv_ctx | /usr/bin/grep -m1 -F -- '--suites+ foo.test.sh' || true)"
+expect_true "root2 the advisory prints the amend line" test -n "$ROOT2_LINE"
+ROOT2_ARGS="$(root_args "${ROOT2_LINE#*to declare it: }")"
+expect_eq "root2 …which parses as bash, the script, amend, the name, the flag, the suite, --reason, why" "8" "$(printf '%s\n' "$ROOT2_ARGS" | /usr/bin/grep -c '')"
+expect_contains "root2 …its script path is one argument, space and all" "my plugin/hooks/session-poker.sh" "$(printf '%s\n' "$ROOT2_ARGS" | sed -n 2p)"
+expect_true "root2 …naming the real file" test -f "$(printf '%s\n' "$ROOT2_ARGS" | sed -n 2p)"
+GATE="$ROOT_GATE_SAVED"
+
 
 finish
