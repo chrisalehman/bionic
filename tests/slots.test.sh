@@ -9,12 +9,18 @@
 #                places, and proceeds when one is released; a dead holder's place is
 #                reclaimed; a killed command gives its place back; two takers racing for
 #                one place produce exactly one winner; every wait has a ceiling; and
-#                `--kill-after` stops a command past its limit with exit 124.
+#                `--kill-after` stops a command past its limit with exit 124. Review 4
+#                (T36): a stale reap lock never gives two winners (B9); a reused pid does
+#                not hold a place and a dead place is reaped on every take (B10, B11); an
+#                unwritable store runs a shared command unbooked at once and refuses a
+#                whole-machine take at once (B12); several words after `--` are refused,
+#                never re-parsed (B13).
 #   §QUIET       a whole-machine take waits for the held places to drain, blocks new takes
 #                while it holds, does not start above the settled load, and prints `void`
 #                (retrying twice, then exit 75) when the load rose during the run. Taken
 #                from inside a held place it waits for the OTHER places only, and two such
-#                takes do not deadlock each other.
+#                takes do not deadlock each other. Review 4 (T36): every wait of one call
+#                shares one ceiling (Q8), and the run's own load is not a disturbance (Q9).
 #   §STAMP       a `stamp/v1` line goes into the git directory of the tree the command ran
 #                in, with the head and dirty count read BEFORE the command and its rc after;
 #                the tree's own `.bionic` link is not counted dirty; `cmd=` is one line with
@@ -51,6 +57,9 @@
 #     race row with the claim's `mkdir` made non-exclusive (more than one winner), and the
 #     whole-machine block with the quiet-marker check removed (the shared take proceeds).
 #     Each anchors its mutation first and proves the mutant still runs.
+#   * The stale-lock row (B9) slows the takers' liveness check by 50 ms, in the takers
+#     only, to widen the window it tests; against the library before T36 it gave two or
+#     more winners in 7 to 9 rounds of 10 (T36 record). Its pass is structural, not timing.
 #
 # Usage: bash tests/slots.test.sh
 
@@ -339,6 +348,139 @@ expect_status "B8.1 no -- is a usage error (exit 2)" 2 "$B8_RC"
 expect_contains "B8.2 …that says what the usage is" "--" "$B8_OUT"
 expect_false "B8.3 …and runs nothing" test -e "$ROW/u.ran"
 
+# B9. A stale reap lock cannot give two winners (review 4 F1). One place and the `.reap`
+# lock are both left by a dead pid, so every taker must first steal the lock. Before T36 two
+# stealers that both read the dead pid could each drop the lock, the second dropping the
+# first's fresh one, and both then reclaimed the place. The takers' liveness check is slowed
+# by 50 ms (the window between reading the lock's pid and acting on it), which made the old
+# library give two or more winners in 7 and 9 of 10 rounds in two runs; on a library
+# that steals the lock one stealer at a time, the count is one whatever the timing.
+cat > "$TMPROOT/stealer.sh" <<'STEALER'
+. "$1"
+_slots_alive() { sleep 0.05; [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+while [ ! -f "$2/start" ]; do :; done
+if slots_take >/dev/null 2>&1; then
+  echo WIN > "$2/res.$$"
+  n=0; while [ ! -f "$2/go" ] && [ $n -lt 400 ]; do n=$((n + 1)); sleep 0.05; done
+  slots_release
+else
+  echo LOSE > "$2/res.$$"
+fi
+STEALER
+B9_K=8; B9_R=10
+steal_round() {  # <dir> — B9_K takers, one place and the lock left by a dead pid; prints winners
+  local d="$1" i n=0 pids="" dead
+  mkdir -p "$d/store/place.1" "$d/store/.reap"
+  dead="$(dead_pid)"
+  printf '%s\n' "$dead" > "$d/store/place.1/pid"; printf '%s\n' "$dead" > "$d/store/.reap/pid"
+  i=0
+  while [ "$i" -lt "$B9_K" ]; do
+    env BIONIC_SLOTS_DIR="$d/store" BIONIC_SLOTS_N=1 BIONIC_SLOTS_MAX_WAIT=0 \
+      BIONIC_SLOTS_POLL=0.05 "$BASH" "$TMPROOT/stealer.sh" "$SLOTS" "$d" 2>/dev/null &
+    pids="$pids $!"; BG="$BG $!"; i=$((i + 1))
+  done
+  sleep 0.2; touch "$d/start"
+  while [ "$(ls "$d"/res.* 2>/dev/null | wc -l | tr -d ' ')" -lt "$B9_K" ] && [ "$n" -lt 600 ]; do
+    n=$((n + 1)); sleep 0.05
+  done
+  grep -l WIN "$d"/res.* 2>/dev/null | wc -l | tr -d ' '
+  touch "$d/go"
+  for i in $pids; do wait "$i" 2>/dev/null; done
+}
+B9_BAD=""; B9_SEEN=""; _r=1
+while [ "$_r" -le "$B9_R" ]; do
+  _w="$(steal_round "$TMPROOT/b9/r$_r")"
+  B9_SEEN="$B9_SEEN $_w"
+  [ "$_w" = "1" ] || B9_BAD="$B9_BAD round$_r=$_w"
+  _r=$((_r + 1))
+done
+expect_eq "B9.1 a stale reap lock never gives two winners: $B9_R rounds of $B9_K takers (saw:$B9_SEEN)" \
+  "" "$B9_BAD"
+expect_regex "B9.2 …and every round ran (one count per round)" "^( [0-9]+){$B9_R}\$" "$B9_SEEN"
+
+# B10. A holder is the process that claimed the place, not just its pid (review 4 F2). A
+# place whose pid now belongs to a different, live process (the pid was reused) is free.
+newrow b10
+SN=1; MW=2
+sleep 60 & B10_LIVE=$!; BG="$BG $!"
+mkdir -p "$ST/place.1"
+printf 'Thu Jan 1 00:00:00 2015\n' > "$ST/place.1/since"
+printf '%s\n' "$B10_LIVE" > "$ST/place.1/pid"
+expect_true "B10.1 the planted pid is a live process" kill -0 "$B10_LIVE"
+B10_OUT="$(bk -- 'echo ran' 2>&1)"; B10_RC=$?
+expect_status "B10.2 a place held by a reused pid is taken" 0 "$B10_RC"
+expect_contains "B10.3 …and the command ran" "ran" "$B10_OUT"
+expect_absent "B10.4 …without waiting" "waiting" "$B10_OUT"
+# The claim records the holder's start, and a live holder whose start matches still holds.
+newrow b10b
+SN=1; MW=2
+bk -- "$(gate h)" > "$ROW/h.out" 2>&1 & BG="$BG $!"; B10_H=$!
+wait_file "$ROW/h.started"
+B10_HOLDER="$(held_pids)"; B10_HOLDER="${B10_HOLDER% }"
+B10_SINCE="$(cat "$ST/place.1/since" 2>/dev/null)"
+expect_nonempty "B10.5 a claim records its holder's start time" "$B10_SINCE"
+B10_PS="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$B10_HOLDER" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')"
+expect_eq "B10.6 …as the process's own start time" "$B10_PS" "$B10_SINCE"
+MW=1
+B10_OUT="$(bk -- "touch $ROW/w.ran" 2>&1)"; B10_RC=$?
+expect_status "B10.7 that live holder still holds the place (the take runs out)" 69 "$B10_RC"
+expect_false "B10.8 …and its command did not run" test -e "$ROW/w.ran"
+touch "$ROW/h.go"; wait "$B10_H" 2>/dev/null
+
+# B11. A dead place is reaped on every take, not only when a take finds no place free (F2).
+newrow b11
+SN=3; MW=5
+mkdir -p "$ST/place.3"; printf '%s\n' "$(dead_pid)" > "$ST/place.3/pid"
+B11_OUT="$(bk -- "ls $ST" 2>&1)"; B11_RC=$?
+expect_status "B11.1 a take with a free place proceeds" 0 "$B11_RC"
+expect_contains "B11.2 …holding place.1 while its command runs" "place.1" "$B11_OUT"
+expect_absent "B11.3 …and the dead holder's place.3 is gone by then" "place.3" "$B11_OUT"
+
+# B12. A store that cannot be written (review 4 F5). Booking manages throughput, it is not a
+# guard: a shared take runs its command UNBOOKED at once, with one line naming the store. A
+# whole-machine take does not run, because a timing result taken without the machine is
+# worth nothing: it refuses at once, naming the store.
+newrow b12
+SN=2; MW=6
+mkdir -p "$ST"; chmod 555 "$ST"
+B12_T0=$SECONDS
+B12_OUT="$(bk -- 'echo ran-unbooked; exit 3' 2>&1)"; B12_RC=$?
+B12_DT=$((SECONDS - B12_T0))
+expect_status "B12.1 an unwritable store: a shared take runs its command anyway" 3 "$B12_RC"
+expect_contains "B12.2 …which ran" "ran-unbooked" "$B12_OUT"
+expect_true "B12.3 …at once, not after the wait (took ${B12_DT}s, ceiling ${MW}s)" test "$B12_DT" -le 2
+B12_LINE="$(printf '%s\n' "$B12_OUT" | grep -F "$ST")"
+expect_nonempty "B12.4 one line names the store" "$B12_LINE"
+expect_contains "B12.5 …and says the command ran unbooked" "unbooked" "$B12_LINE"
+expect_eq "B12.6 …and it is the only line about it" 1 "$(printf '%s\n' "$B12_OUT" | grep -c -F "$ST")"
+B12_T0=$SECONDS
+B12_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; B12_RC=$?
+B12_DT=$((SECONDS - B12_T0))
+expect_status "B12.7 a whole-machine take on the same store refuses (69)" 69 "$B12_RC"
+expect_false "B12.8 …and its command never ran" test -e "$ROW/q.ran"
+expect_true "B12.9 …at once (took ${B12_DT}s, ceiling ${MW}s)" test "$B12_DT" -le 2
+expect_contains "B12.10 …naming the store" "$ST" "$B12_OUT"
+# tests/run.sh calls the lib directly for a solo suite and reports any non-zero take as VOID.
+B12_T0=$SECONDS
+( . "$SLOTS"; BIONIC_SLOTS_DIR="$ST" BIONIC_SLOTS_N=2 BIONIC_SLOTS_MAX_WAIT="$MW" \
+    slots_take_all "$$" runner >/dev/null 2>&1 ); B12_RC=$?
+B12_DT=$((SECONDS - B12_T0))
+expect_ne "B12.11 slots_take_all itself answers non-zero on that store" 0 "$B12_RC"
+expect_true "B12.12 …at once (took ${B12_DT}s)" test "$B12_DT" -le 2
+chmod 755 "$ST"
+
+# B13. Words after `--` are never re-parsed as shell (review 4 F6). The one meaning is one
+# word, the whole command line, as the Bash wall passes it; several words are refused.
+newrow b13
+B13_OUT="$(bk -- printf '%s\n' 'one-literal-argument; echo SECOND-COMMAND-RAN' 2>&1)"; B13_RC=$?
+expect_status "B13.1 several words after -- are a usage error (exit 2)" 2 "$B13_RC"
+expect_absent "B13.2 …and nothing in them ran as a command" "SECOND-COMMAND-RAN" "$B13_OUT"
+expect_contains "B13.3 …and the line says to pass one word" "one word" "$B13_OUT"
+B13_OUT="$(bk -- "printf '%s\n' 'one-literal-argument; echo SECOND-COMMAND-RAN'" 2>&1)"; B13_RC=$?
+expect_status "B13.4 the same command as one word runs" 0 "$B13_RC"
+expect_eq "B13.5 …with its quoted argument kept literal" \
+  "one-literal-argument; echo SECOND-COMMAND-RAN" "$B13_OUT"
+
 # ═══════════════════════════════════════════════════════════════════ §QUIET
 section "QUIET — the whole machine: drain, block, settle, re-read, void"
 
@@ -462,6 +604,63 @@ MW=5
 Q7_OUT="$(bk --quiet -- "bash $BOOKED --quiet -- 'echo nested-quiet'" 2>&1)"; Q7_RC=$?
 expect_status "Q7.1 a whole-machine take nested in one completes" 0 "$Q7_RC"
 expect_contains "Q7.2 …and runs" "nested-quiet" "$Q7_OUT"
+
+# Q8. One ceiling covers every wait of one call (review 4 F3): the drain, the settle and
+# every void retry share BIONIC_SLOTS_MAX_WAIT. Before T36 each wait got the whole ceiling.
+newrow q8
+MW=4
+bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; Q8_A=$!
+wait_file "$ROW/a.started"
+( sleep 4; touch "$ROW/a.go" ) >/dev/null 2>&1 & BG="$BG $!"
+printf '99.0\n' > "$LOADF"
+Q8_T0=$SECONDS
+Q8_OUT="$(bk --quiet -- "touch $ROW/q.ran" 2>&1)"; Q8_RC=$?
+Q8_DT=$((SECONDS - Q8_T0))
+expect_status "Q8.1 a drain then a load that never settles gives up (69)" 69 "$Q8_RC"
+expect_false "Q8.2 …without running its command" test -e "$ROW/q.ran"
+expect_contains "Q8.3 …after waiting for the drain" "drain" "$Q8_OUT"
+expect_true "Q8.4 …within one ceiling for both waits (took ${Q8_DT}s, ceiling ${MW}s)" \
+  test "$Q8_DT" -le $((MW + 2))
+wait "$Q8_A" 2>/dev/null
+# The void retries share it too: each run raises the load for 2.5 s, so a retry has to wait.
+newrow q8b
+MW=4
+Q8B_CMD="echo run >> $ROW/runs; printf '99.0\n' > $LOADF; ( sleep 2.5; printf '0.00\n' > $LOADF ) >/dev/null 2>&1 &"
+Q8B_T0=$SECONDS
+Q8B_OUT="$(bk --quiet -- "$Q8B_CMD" 2>&1)"; Q8B_RC=$?
+Q8B_DT=$((SECONDS - Q8B_T0))
+Q8B_RUNS="$(wc -l < "$ROW/runs" 2>/dev/null | tr -d ' ')"
+expect_regex "Q8.5 the command ran at least once" '^[1-9]' "${Q8B_RUNS:-0}"
+expect_true "Q8.6 …but the retries stopped at the ceiling: at most 2 runs (saw ${Q8B_RUNS:-0})" \
+  test "${Q8B_RUNS:-0}" -le 2
+expect_status "Q8.7 …and the result is void (75), never the command's own code" 75 "$Q8B_RC"
+expect_true "Q8.8 …within one ceiling (took ${Q8B_DT}s, ceiling ${MW}s)" test "$Q8B_DT" -le $((MW + 2))
+
+# Q9. The void check does not count the command's own load (review 4 F4). The command burns
+# CPU, then sets the load after the run to the settled line plus HALF of its own share of
+# the one-minute average (from its own `times`). A disturbance by others would have raised
+# it past its own share; this run's own load alone must not void it.
+newrow q9
+MW=4
+Q9_LINE="$( cd "$ROW" && . "$REPO_ROOT/payload/scripts/lib/resources.sh" && resources_settled_line "$(_res_cores)" )"
+expect_regex "Q9.1 the settled line is read" '^[0-9]+\.[0-9]+$' "$Q9_LINE"
+cat > "$ROW/burn.sh" <<'BURN'
+s=$SECONDS; while [ $((SECONDS - s)) -lt 2 ]; do :; done
+w=$((SECONDS - s)); times > "$1/t"
+echo run >> "$1/runs"
+awk -v line="$2" -v w="$w" '
+  function sec(x, a) { sub(/s$/, "", x); gsub(",", ".", x); split(x, a, "m"); return a[1] * 60 + a[2] }
+  NR == 1 { cpu = sec($1) + sec($2); own = (cpu / w) * (1 - exp(-w / 60)); printf "%.6f\n", line + own / 2 }
+' "$1/t" > "$1/load.next"
+cat "$1/load.next" > "$3"
+BURN
+Q9_OUT="$(bk --quiet -- "bash $ROW/burn.sh $ROW $Q9_LINE $LOADF" 2>&1)"; Q9_RC=$?
+Q9_AFTER="$(cat "$ROW/load.next" 2>/dev/null)"
+expect_true "Q9.2 the load after the run is above the settled line (${Q9_AFTER:-?} > $Q9_LINE)" \
+  awk -v a="${Q9_AFTER:-0}" -v l="$Q9_LINE" 'BEGIN { exit !(a + 0 > l + 0) }'
+expect_status "Q9.3 …yet the run is not void: its own load is not a disturbance" 0 "$Q9_RC"
+expect_eq "Q9.4 …and it ran once" 1 "$(wc -l < "$ROW/runs" | tr -d ' ')"
+expect_absent "Q9.5 …with no void line" "void" "$Q9_OUT"
 
 # ═══════════════════════════════════════════════════════════════════ §STAMP
 section "STAMP — stamp/v1 in the tree's own git dir: head and dirty before, rc after"
