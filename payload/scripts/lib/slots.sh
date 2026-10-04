@@ -42,9 +42,11 @@
 #
 # NESTING. `BIONIC_SLOT_HELD=1` marks a command already inside a place: `slots_take` takes
 # nothing for it, so a run never waits on its own parent. `slots_take_all` from inside a
-# held place waits for the OTHER places only — the parent's (`BIONIC_SLOT_PLACE`, or, when
-# that is not set, any one place) is left alone. Two such nested takes would each wait for
-# the other's parent place forever, and a plain whole-machine take would wait forever for
+# held place waits for the OTHER places only — the parent's, `BIONIC_SLOT_PLACE`, is left
+# alone. HELD WITHOUT A VALID PLACE IS NOT NESTED (wave-27 T6, critic 3 S1): every nested path
+# the shim and the runner make exports the place with HELD, so HELD alone is the opt-out a
+# user typed, and its whole-machine take waits for every place. Two nested takes would each
+# wait for the other's parent place forever, and a plain whole-machine take would wait for
 # a parent whose child is queued behind its marker; so a nested take, WHILE IT WAITS FOR THE
 # MARKER, LENDS its parent's place (`lent` holds its pid) and a drain counts a place lent by
 # a live pid as drained. The lender is idle while it waits, so the machine really is quiet.
@@ -391,7 +393,7 @@ slots_take() {
 }
 
 slots_take_all() {
-  local pid="${1:-$$}" what="${2:-}" d n i f place start poll max deadline own='' allow=0 left who
+  local pid="${1:-$$}" what="${2:-}" d n i f place start poll max deadline own='' left who
   SLOTS_TAKEN=""
   [ "${BIONIC_SLOT_QUIET:-}" = 1 ] && return 0
   d="$(slots_dir)"
@@ -404,7 +406,6 @@ slots_take_all() {
   if [ "${BIONIC_SLOT_HELD:-}" = 1 ]; then
     own="${BIONIC_SLOT_PLACE:-}"
     case "$own" in "$d"/place.*) [ -d "$own" ] || own='' ;; *) own='' ;; esac
-    [ -n "$own" ] || allow=1
   fi
   deadline="$(_slots_deadline "$max")"; start=$((deadline - max)); _SLOTS_NOTED=-1
 
@@ -443,7 +444,7 @@ slots_take_all() {
       left=$((left + 1))
       who="${who:+$who, }$(_slots_who "$f")"
     done
-    if [ "$left" -le "$allow" ]; then
+    if [ "$left" -eq 0 ]; then
       SLOTS_TAKEN="$d/quiet"
       printf '%s\n' "$d/quiet"
       return 0
