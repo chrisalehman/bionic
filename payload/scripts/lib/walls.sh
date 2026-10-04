@@ -5005,7 +5005,12 @@ emit_deny() {  # $1=class $2=role
   # JSON verdict needs. Under the fold the object is STAGED and `bionic_fold` makes the
   # one `refuse` call, so the mode, the words and the wire are unchanged and only the
   # moment of rendering moved (A-53).
-  fold_block deny run "this command belongs in a subagent" "dispatch it with the Agent tool" \
+  # THE FIRST FIX NAMES THE SHORT LIMIT (wave-26 T9, D14): a short run stays on the thread,
+  # so the cheapest repair is the call's own timeout. Under `farm-out-short-ms: 0` no call is
+  # short and the fix is dispatch alone.
+  local _fix="dispatch it with the Agent tool"
+  [ "$_FO_SHORT_MS" -eq 0 ] || _fix="timeout ≤${_FO_SHORT_MS} ms, or dispatch it"
+  fold_block deny run "this command belongs in a subagent" "$_fix" \
     "$(deny_reason "$1" "$2")"
   return 2
 }
@@ -5032,8 +5037,59 @@ scrub_secrets() {  # stdin → stdout
 deny_reason() {  # $1=class $2=role
   # Scrub BEFORE truncating: truncating first can split a hex run below the
   # 32-char threshold and leak a prefix.
-  local safe; safe=$(printf '%s' "$FLAT" | scrub_secrets | cut -c1-120)
-  printf '%s' "farm-out checkpoint: this $1-class command doesn't belong on the orchestrator thread (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Fix: dispatch it — Agent(subagent_type: $2, prompt carrying the command from this tool call): $safe — scrubbed and truncated for the log; the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
+  local safe lead=""; safe=$(printf '%s' "$FLAT" | scrub_secrets | cut -c1-120)
+  # THE FIRST FIX IS THE SHORT ONE (wave-26 T9, D14), unless the call was already short and
+  # something else kept the shim from stopping it at the limit; then that is the fix.
+  case "$_FO_SHORT_WHY" in
+    held)       lead="drop the BIONIC_SLOT_HELD=1 prefix, which keeps this short call out of the shim that stops it at its limit" ;;
+    background) lead="run it in the foreground, without the trailing &: a command the shell backgrounds escapes the shim that stops a short call at its limit" ;;
+    *) [ "$_FO_SHORT_MS" -eq 0 ] ||
+         lead="give this Bash call a timeout of at most $_FO_SHORT_MS ms; it then runs here and is stopped at that limit" ;;
+  esac
+  [ -z "$lead" ] || lead="$lead — a run that needs longer belongs in a subagent: "
+  printf '%s' "farm-out checkpoint: this $1-class command doesn't belong on the orchestrator thread unless it is short (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Fix: ${lead}dispatch it — Agent(subagent_type: $2, prompt carrying the command from this tool call): $safe — scrubbed and truncated for the log; the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
+}
+
+_fo_short_limit() {  # -> sets _FO_SHORT_MS from `farm-out-short-ms:`, default 120000
+  # READ WHERE farm-out-mode IS READ, the same project file, in this shell with no fork.
+  # The first such line decides. A value that is not a whole number of at most nine
+  # digits is the default, never "off": a typo must not widen what passes (A-T9.6).
+  # `0` is a valid value and means no call is short.
+  local _l _v _f="$BIONIC_ROOT/.bionic/config.yaml"
+  _FO_SHORT_MS=120000
+  [ -f "$_f" ] || return 0
+  while IFS= read -r _l || [ -n "$_l" ]; do
+    case "$_l" in
+      farm-out-short-ms:*)
+        _v="${_l#farm-out-short-ms:}"; _v="${_v//$'\r'/}"
+        _v="${_v#"${_v%%[![:space:]]*}"}"; _v="${_v%"${_v##*[![:space:]]}"}"
+        case "$_v" in
+          ''|*[!0-9]*) : ;;
+          *) [ "${#_v}" -gt 9 ] || _FO_SHORT_MS=$((10#$_v)) ;;
+        esac
+        return 0 ;;
+    esac
+  done < "$_f"
+  return 0
+}
+
+_fo_short_pass() {  # -> 0 when this call is short and its wrap will stop it at the limit
+  local _t _s
+  WALL_SHORT_KILL_AFTER=""
+  _t="$(bionic_jq .tool_input.timeout)"
+  case "$_t" in ''|*[!0-9]*) return 1 ;; esac
+  [ "${#_t}" -le 9 ] || return 1
+  _t=$((10#$_t))
+  [ "$_t" -gt 0 ] && [ "$_t" -le "$_FO_SHORT_MS" ] || return 1
+  _s=$((_t / 1000 - 5)); [ "$_s" -ge 1 ] || _s=1
+  # THE ONE BUILDER DECIDES (T7's seam): the pass holds only if the wrap the suite guard
+  # will stage can carry the kill. The text built here is discarded; that wall builds it
+  # again from the same inputs and stages it, because only one rewrite reaches the fold.
+  WALL_SHORT_KILL_AFTER="$_s"
+  _bsg_wrap_text no && return 0
+  WALL_SHORT_KILL_AFTER=""
+  _FO_SHORT_WHY="$_BSG_WRAP_WHY"
+  return 1
 }
 
 # ── classification (B-5: argv positions, read by scripts/lib/cmd-class.sh) ───────
@@ -5086,14 +5142,18 @@ classify_tier2() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
   # and now costs nothing. The head arrives with its command word already folded to
   # lower case (`cmd_unwrap_head`, wave-25 T12), so `GIT clone` is matched here as
   # `git clone` and these anchors stay lower-case names.
+  #
+  # THE PKG-EXEC NUDGE IS RETIRED (wave-26 T9, D14, AC-4.1). It fired on every `npx`/`uvx`
+  # one-liner — `npx tsc --noEmit`, `uvx ruff check .` — and called each one production-shaped
+  # work for a subagent. One that runs a suite is tier 1 already (cmd_class reads past the
+  # runner), so what the nudge alone caught was the cheap tool call.
   local c="$1"
   case "$c" in
-    git*|docker*|npx*|uvx*) : ;;
+    git*|docker*) : ;;
     *) return 1 ;;
   esac
   if grep -qE '^git +clone([;&| ]|$)' <<< "$c"; then CLASS="clone"; ROLE="implementor"; return 0; fi
   if grep -qE '^docker +(run|pull)([;&| ]|$)' <<< "$c"; then CLASS="docker-run"; ROLE="implementor"; return 0; fi
-  if grep -qE '^(npx|uvx) +' <<< "$c"; then CLASS="pkg-exec"; ROLE="implementor"; return 0; fi
   return 1
 }
 
@@ -5125,6 +5185,27 @@ case "$FLAT" in
     fi
     ;;
 esac
+
+# ── THE SHORT PASS (wave-26 T9, D14, AC-4.1) ──────────────────────────────────
+# A SHORT COMMAND STAYS ON THE THREAD, and it is known by the time limit its own Bash call
+# declares, never by its name: a one-file suite and a whole-tree run are the same words to a
+# classifier, while the `timeout` is the caller's own promise of how long the thread waits.
+# A call whose `timeout` is at most the short limit passes, and the booking wrap
+# (`_bsg_wrap_text`, staged by background-suite-guard after this wall) carries
+# `--kill-after <s>` so the shim stops it there. A short timeout the shim cannot enforce is
+# not short: the opt-out prefix and a shell-backgrounded command both run outside the shim,
+# so they fall to the refusal below with the reason named (A-T9.5).
+#
+# THE TIMEOUT comes from the cached tool input (lib/context.sh), never a fetch of its own.
+# Absent, zero, negative, fractional, non-numeric or longer than nine digits is not short;
+# the Bash tool's field is a whole number of milliseconds (A-T9.3).
+#
+# THE KILL LIMIT is the timeout in whole seconds less five, at least one (A-T9.2): the shim
+# must stop the command, and say why, before the harness's own timeout moves it to the
+# background, where nobody reads the line.
+_FO_SHORT_WHY=""
+_fo_short_limit
+if _fo_short_pass; then return 0; fi
 
 # THE HEREDOC-FREE FORM, THE TIER-2 HEAD AND THE CHAIN SEGMENTS, IN ONE FILL
 # (epic-23 wave-14 T17, REQ-4; T4 §5 / A-T4.2). Chain segmentation and the tier-2
@@ -5380,33 +5461,56 @@ wall_booked_argv() {
 }
 
 # _bsg_wrap_text <suite already established: yes|no> — sets _BSG_WRAP_TEXT to the wrapped
-# command; rc 1 when this command is left alone (see the header above for which).
-_BSG_WRAP_TEXT=""
+# command; rc 1 when this command is left alone (see the header above for which), naming
+# why in _BSG_WRAP_WHY: shim, class, background, held or noshim.
+#
+# A SHORT CALL (wave-26 T9, D14): when farm-out-reminder has set WALL_SHORT_KILL_AFTER, any
+# tier-1 class is wrapped, not only a suite, and the shim gets `--kill-after <s>`. The wrap
+# is what stops a short call at its limit, so a short build that went unwrapped would be a
+# pass with no limit at all. The opt-out is then read on every tier-1 segment. A short
+# command with no suite segment is wrapped `--unbooked`: the kill and its line only.
+_BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
+WALL_SHORT_KILL_AFTER=""
 _bsg_wrap_text() {
-  local _c _w _lines _cls _seg _quiet=0
-  _BSG_WRAP_TEXT=""
+  local _c _w _lines _cls _seg _quiet=0 _suite=0 _k="${WALL_SHORT_KILL_AFTER:-}"
+  _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
   _c="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
   case "$_c" in
     bash[[:space:]]*)
       _w="${_c#bash}"; _w="${_w#"${_w%%[![:space:]]*}"}"; _w="${_w%%[[:space:]]*}"
-      case "$_w" in */booked.sh|*/booked.sh\'|*/booked.sh\") return 1 ;; esac ;;
+      case "$_w" in */booked.sh|*/booked.sh\'|*/booked.sh\") _BSG_WRAP_WHY=shim; return 1 ;; esac ;;
   esac
   if [ "$1" != yes ]; then
     # SILENT WHEN THE CLASSIFIER IS MISSING: the walls that need it already say so, and the
     # wrap is no wall — on the main thread it would add a line to every Bash call.
+    _BSG_WRAP_WHY=class
     [ -r "$BIONIC_LIB/cmd-class.sh" ] || return 1
     wall_libs background-suite-guard cmd-class.sh || return 1
-    [ "$(cmd_class "$COMMAND")" = "suite" ] || return 1
+    _cls="$(cmd_class "$COMMAND")"
+    if [ -n "$_k" ]; then [ "$_cls" != none ] || return 1
+    else [ "$_cls" = suite ] || return 1; fi
+    _BSG_WRAP_WHY=background
     ! cmd_backgrounded "$COMMAND" || return 1
+    _BSG_WRAP_WHY=""
   fi
   _lines="$(cmd_class_lines "$COMMAND")"
   while IFS=$'\t' read -r _cls _seg; do
-    [ "$_cls" = suite ] || continue
-    ! _wall_prefix_sets "$_seg" BIONIC_SLOT_HELD 1 || return 1
-    ! _wall_prefix_sets "$_seg" BIONIC_QUIET 1 || _quiet=1
+    [ "$_cls" != suite ] || _suite=1
+    case "$_cls" in suite) : ;; none|'') continue ;; *) [ -n "$_k" ] || continue ;; esac
+    ! _wall_prefix_sets "$_seg" BIONIC_SLOT_HELD 1 || { _BSG_WRAP_WHY=held; return 1; }
+    [ "$_cls" != suite ] || ! _wall_prefix_sets "$_seg" BIONIC_QUIET 1 || _quiet=1
   done <<< "$_lines"
-  [ "$_quiet" = 1 ] || ! _bsg_solo_target "$_lines" || _quiet=1
-  wall_booked_argv "$COMMAND" "$_quiet" || return 1
+  [ "$_quiet" = 1 ] || [ "$_suite" = 0 ] || ! _bsg_solo_target "$_lines" || _quiet=1
+  # NO SUITE SEGMENT, NO PLACE AND NO STAMP (the lead's ruling, A-T9.1): a short build goes
+  # through the shim for its limit only. A stamp is a suite's proof, and the landing rule
+  # reads the last one in a tree, so a stamped `make` would stand in for the suite before it.
+  if [ -n "$_k" ] && [ "$_suite" = 0 ]; then
+    wall_booked_argv "$COMMAND" 0 --unbooked --kill-after "$_k" || { _BSG_WRAP_WHY=noshim; return 1; }
+  elif [ -n "$_k" ]; then
+    wall_booked_argv "$COMMAND" "$_quiet" --kill-after "$_k" || { _BSG_WRAP_WHY=noshim; return 1; }
+  else
+    wall_booked_argv "$COMMAND" "$_quiet" || { _BSG_WRAP_WHY=noshim; return 1; }
+  fi
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
     _wall_sh_word "$_w"
     _BSG_WRAP_TEXT="${_BSG_WRAP_TEXT:+$_BSG_WRAP_TEXT }$_WALL_WORD"
@@ -6219,10 +6323,9 @@ done <<< "$_CLAIMS"
 # partition is untouched. An ON-BUDGET call with an absent or too-small `timeout` is repaired
 # exactly as it was — reaching here is now proof the budget arm had nothing to say.
 #
-# `.tool_input.timeout` IS READ RAW, not through the small cache table `bionic_jq` answers
-# from memory (context.sh:240-257) — this key is not one of the cached ones, so the call
-# falls through to that function's generic `jq -r '<path> // empty'` arm, same as any other
-# not-yet-cached field. ABSENT, NON-NUMERIC AND UNDER THE MAX ALL REPAIR THE SAME WAY: a
+# `.tool_input.timeout` IS SERVED FROM THE CACHE `bionic_jq` answers from memory (lib/
+# context.sh; added at wave-26 T9 for farm-out's short pass), with the same `// empty`
+# reading the generic `jq -r '<path> // empty'` arm gives. ABSENT, NON-NUMERIC AND UNDER THE MAX ALL REPAIR THE SAME WAY: a
 # caller that named no ceiling and one that named a low one are both a worker about to be
 # killed before its suite finishes, and the fix is identical either way.
 local _BSG_MAX _BSG_TIMEOUT
