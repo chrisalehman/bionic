@@ -832,4 +832,134 @@ WOUT11="$(ws_create "$WSID" "$WRL" "$(sha_of "$WRL")" wt/25-T11 --for w25-T11)"
 expect_eq "a symlinked .bionic/tmp is refused too" \
   "$(printf 'spawn-worktree: FAIL reason=workspace-file-symlinked\nrc=2')" "$WOUT11"
 
+
+section "§XC: create keeps the main checkout clean without touching the project's ignore files (wave-26 T60)"
+#
+# FIXTURE FIDELITY. Every other fixture in this suite (new_repo above) plants an ignore line
+# for `.worktrees/`, which is exactly the condition under which the defect cannot show: git
+# already hides the tree directory. The fixtures below are built WITHOUT that line, the shape
+# of a project whose .gitignore never heard of the directory. xc_repo is SYNTHESIZED from the
+# measured case (a clone with no ignore rule: `git status --porcelain` printed
+# `?? .worktrees/` after one create).
+#
+# ANTI-VACUITY. Each "stays untouched" row sits beside a positive row on the same fixture
+# family, and the first row proves the status extractor can see the dirt at all: the same
+# repository, one create with the exclude line removed again, reads dirty.
+xc_repo() {  # <dir> [gitignore-content] -> physical path; NO ignore rule for .worktrees/ by default
+  local d="$1" gi="${2-.bionic
+.bionic/
+}"
+  mkdir -p "$d"
+  git -C "$d" init --quiet 2>/dev/null
+  git -C "$d" symbolic-ref HEAD refs/heads/main
+  mkdir -p "$d/.bionic/docs"
+  echo "state" > "$d/.bionic/docs/note.md"
+  printf '%s' "$gi" > "$d/.gitignore"
+  echo "one" > "$d/file.txt"
+  git -C "$d" add .gitignore file.txt
+  git -C "$d" commit --quiet -m "c1"
+  ( cd "$d" && pwd -P )
+}
+xc_sum() {  # <repo> -> checksum of info/exclude, or "none"
+  if [ -f "$1/.git/info/exclude" ]; then cksum < "$1/.git/info/exclude"; else echo none; fi
+}
+xc_lines() {  # <repo> <line> -> how many times the exclude file holds exactly that line
+  local f="$1/.git/info/exclude"
+  if [ -f "$f" ]; then grep -cxF -- "$2" "$f" || true; else echo 0; fi
+}
+
+XC1="$(xc_repo "$TMP/xc1")"
+XC1_SHA="$(sha_of "$XC1")"
+XC1_OUT="$(spawn_out "$XC1" create "$XC1_SHA" xc-a)"
+expect_match "(the create under test succeeded)" "spawn-worktree: OK path=*" "$XC1_OUT"
+expect_true  "(the tree exists)" test -d "${XC1}/.worktrees/xc-a"
+expect_empty "after create, the main checkout reads clean" "$(git -C "$XC1" status --porcelain)"
+expect_eq    "info/exclude holds the anchored parent line once" "1" "$(xc_lines "$XC1" "/.worktrees/")"
+expect_eq    "the project's .gitignore is untouched" ".bionic
+.bionic/" "$(cat "$XC1/.gitignore")"
+expect_empty "no tracked file changed" "$(git -C "$XC1" status --porcelain --untracked-files=no)"
+XC1_OUT2="$(spawn_out "$XC1" create "$XC1_SHA" xc-b)"
+expect_match "(the second create succeeded)" "spawn-worktree: OK path=*" "$XC1_OUT2"
+expect_eq    "a second create adds nothing: still once" "1" "$(xc_lines "$XC1" "/.worktrees/")"
+expect_empty "…and the checkout still reads clean with two trees" "$(git -C "$XC1" status --porcelain)"
+# the extractor can see the dirt: take the line away again and the same repository reads dirty
+: > "$XC1/.git/info/exclude"
+expect_eq    "(control) without the exclude line the same checkout reads dirty" "?? .worktrees/" "$(git -C "$XC1" status --porcelain)"
+# remove and land leave the line: a later tree needs it
+spawn_out "$XC1" create "$XC1_SHA" xc-c >/dev/null
+expect_eq    "(control) a create restores the line" "1" "$(xc_lines "$XC1" "/.worktrees/")"
+spawn_out "$XC1" remove "${XC1}/.worktrees/xc-c" >/dev/null
+expect_false "(the removed tree is gone)" test -e "${XC1}/.worktrees/xc-c"
+expect_eq    "remove leaves the exclude line in place" "1" "$(xc_lines "$XC1" "/.worktrees/")"
+
+# a parent already ignored by the project's own rule: the exclude file is not touched
+XC2="$(xc_repo "$TMP/xc2" ".bionic
+.worktrees/
+")"
+XC2_SUM="$(xc_sum "$XC2")"
+XC2_OUT="$(spawn_out "$XC2" create "$(sha_of "$XC2")" xc-d)"
+expect_match "(ignored-parent create succeeded)" "spawn-worktree: OK path=*" "$XC2_OUT"
+expect_true  "(…and its tree exists)" test -d "${XC2}/.worktrees/xc-d"
+expect_eq    "a parent already ignored adds no exclude line" "0" "$(xc_lines "$XC2" "/.worktrees/")"
+expect_eq    "…and the exclude file is byte-for-byte what it was" "$XC2_SUM" "$(xc_sum "$XC2")"
+
+# a parent already ignored by the exclude file itself under another spelling
+XC3="$(xc_repo "$TMP/xc3")"
+mkdir -p "$XC3/.git/info"; printf '.worktrees\n' > "$XC3/.git/info/exclude"
+spawn_out "$XC3" create "$(sha_of "$XC3")" xc-e >/dev/null
+expect_true  "(exclude-spelled create made its tree)" test -d "${XC3}/.worktrees/xc-e"
+expect_eq    "a parent the exclude file already ignores is left alone" ".worktrees" "$(cat "$XC3/.git/info/exclude")"
+
+# a parent outside the checkout: nothing to exclude
+XC4="$(xc_repo "$TMP/xc4")"
+mkdir -p "$TMP/xc4-outside"
+XC4_SUM="$(xc_sum "$XC4")"
+XC4_OUT="$(spawn_out "$XC4" create "$(sha_of "$XC4")" xc-f "$TMP/xc4-outside")"
+expect_match "(outside-parent create succeeded)" "spawn-worktree: OK path=*" "$XC4_OUT"
+expect_true  "(…and its tree is outside the checkout)" test -d "$TMP/xc4-outside/xc-f"
+expect_eq    "an outside parent adds no exclude line" "0" "$(xc_lines "$XC4" "/xc4-outside/")"
+expect_eq    "…and the exclude file is byte-for-byte what it was" "$XC4_SUM" "$(xc_sum "$XC4")"
+
+# a custom relative parent inside the checkout gets its own anchored line
+XC5="$(xc_repo "$TMP/xc5")"
+spawn_out "$XC5" create "$(sha_of "$XC5")" xc-g trees/here >/dev/null
+expect_true  "(custom-parent tree exists)" test -d "${XC5}/trees/here/xc-g"
+expect_eq    "a custom inside parent is excluded, anchored to the root" "1" "$(xc_lines "$XC5" "/trees/here/")"
+expect_empty "…and that checkout reads clean" "$(git -C "$XC5" status --porcelain)"
+
+# an unwritable info/ directory: the create still succeeds, stderr says the checkout reads dirty
+XC6="$(xc_repo "$TMP/xc6")"
+mkdir -p "$XC6/.git/info"; chmod 444 "$XC6/.git/info/exclude" 2>/dev/null; chmod 555 "$XC6/.git/info"
+XC6_ERR="$TMP/xc6.err"
+XC6_OUT="$( cd "$XC6" && bash "$SPAWN" create "$(sha_of "$XC6")" xc-h 2>"$XC6_ERR" )"; XC6_RC=$?
+chmod 755 "$XC6/.git/info"; chmod 644 "$XC6/.git/info/exclude" 2>/dev/null
+expect_eq    "an unwritable info/ does not fail the create" "0" "$XC6_RC"
+expect_match "…and the attestation is still printed" "spawn-worktree: OK path=*" "$XC6_OUT"
+expect_true  "…and the tree exists" test -d "${XC6}/.worktrees/xc-h"
+expect_eq    "…and stderr carries exactly one line" "1" "$(wc -l < "$XC6_ERR" | tr -d ' ')"
+expect_contains "…saying the checkout will read as dirty" "dirty" "$(cat "$XC6_ERR")"
+expect_contains "…and naming the line to ignore by hand" "/.worktrees/" "$(cat "$XC6_ERR")"
+# the success path is silent on stderr (the warning above is not noise that always appears)
+XC7_ERR="$TMP/xc7.err"
+( cd "$XC1" && bash "$SPAWN" create "$XC1_SHA" xc-i >/dev/null 2>"$XC7_ERR" )
+expect_empty "a create that excludes cleanly says nothing on stderr" "$(cat "$XC7_ERR")"
+
+# a parent whose name carries a space and a glob character: the line means that directory only
+XC8="$(xc_repo "$TMP/xc8")"
+spawn_out "$XC8" create "$(sha_of "$XC8")" xc-j 'my trees[1]' >/dev/null
+expect_true  "(odd-name tree exists)" test -d "${XC8}/my trees[1]/xc-j"
+expect_eq    "an odd directory name is escaped in the line" "1" "$(xc_lines "$XC8" '/my\ trees\[1\]/')"
+expect_empty "…and that checkout reads clean" "$(git -C "$XC8" status --porcelain)"
+
+# mutation: the exclude call removed. The verifier reports the checkout's status after a create.
+verify_clean_checkout() {  # <script> -> clean | dirty
+  local script="$1" rr; rr="$(xc_repo "$TMP/xcm-$RANDOM")"
+  spawn_out_with "$script" "$rr" create "$(sha_of "$rr")" xcm >/dev/null
+  if [ -z "$(git -C "$rr" status --porcelain)" ]; then echo clean; else echo dirty; fi
+}
+expect_eq "live build: the checkout reads clean after a create" "clean" "$(verify_clean_checkout "$SPAWN")"
+mutate_check "mutation: the exclude call removed is caught" \
+  's|^  exclude_tree_parent "\$main_root" "\$parent_abs" "\$wt"$|  :|' \
+  verify_clean_checkout "dirty"
+
 finish
