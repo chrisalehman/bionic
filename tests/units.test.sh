@@ -3092,4 +3092,80 @@ expect_eq "CHAIN.12b a node line with an empty id is refused with status 2" "2" 
 expect_empty "CHAIN.12c …printing nothing on stdout" "$out"
 expect_contains "CHAIN.12d …and saying the node line is malformed" "malformed node line" "$(cat "$SANDBOX/.err")"
 
+# ============================================================
+section "FLOOR-HOLDS — wave-26 T52: only the rows the floor waits on hold a full run (review 14 B1, N4; ruling R1)"
+# ============================================================
+#
+# units_floor_holds <plan> [<id>] -> `id<TAB>step<TAB>status` for each row the floor row waits on
+# (its deps and its reads, judged by the ready set's own program) that has not landed and writes
+# a tracked file (`writes_head`). A row downstream of the floor never holds it: through T5 the
+# dispatch wall counted every open row, so the release, which waits on the floor, held the floor.
+# SYNTHESIZED tables, in the review's shapes (V14-hold.sh).
+hard_plan "$SANDBOX/fh-reads.md" "" \
+  '| T1 | 4 | build | a | implementor | — | 30 | REQ-x | lib/a.sh | | active |' \
+  '| T3 | 4 | test | t | implementor | — | 30 | REQ-x | tests/t.test.sh | | pending |' \
+  '| T4 | 4 | build | notes | implementor | — | 30 | REQ-x | record/w/T4.md | | active |' \
+  '| T2 | 5 | verify | floor | test-runner | — | 30 | REQ-x | .bionic/docs/record/w/floor.txt | | pending |' \
+  '| T5 | 7 | doc | release | implementor | — | 30 | REQ-x | CHANGELOG.md | approval:release, head | pending |'
+FH="$(call units_floor_holds "$SANDBOX/fh-reads.md" T2)"
+expect_eq "FLOOR-HOLDS.1 the floor is held by the active build row it reads head from" "yes" \
+  "$(has_line "$FH" "T1${TAB}4${TAB}active")"
+expect_eq "FLOOR-HOLDS.1b …and by the step-4 test row that reads head and writes code (T35 F1)" "yes" \
+  "$(has_line "$FH" "T3${TAB}4${TAB}pending")"
+expect_eq "FLOOR-HOLDS.1c …never by the release, which reads head at a later step" "no" \
+  "$(has_line "$FH" "T5${TAB}7${TAB}pending")"
+expect_eq "FLOOR-HOLDS.1d …nor by a row whose only Files are record/… (writes_head says no)" "no" \
+  "$(has_line "$FH" "T4${TAB}4${TAB}active")"
+expect_eq "FLOOR-HOLDS.1e …and the call succeeds" "0" "$(call_rc units_floor_holds "$SANDBOX/fh-reads.md" T2)"
+# NO ROW NAMED: the floor is every open verify or test row, the rows proof:floor names as its
+# writers, so the answer is what they wait on together.
+FH0="$(call units_floor_holds "$SANDBOX/fh-reads.md")"
+expect_eq "FLOOR-HOLDS.2 with no row named, the open verify row stands for the floor: T1 holds it" "yes" \
+  "$(has_line "$FH0" "T1${TAB}4${TAB}active")"
+expect_eq "FLOOR-HOLDS.2b …and the release still does not" "no" "$(has_line "$FH0" "T5${TAB}7${TAB}pending")"
+# A TABLE WITHOUT reads (this wave's own plan): the floor waits on its deps until they land.
+{ printf '## SDLC State\n\ncurrent: 5\napproved-by: fixture 2026-10-03T00:00Z "approved"\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | a | x | — | 30 | R | lib/a.sh | landed |\n'
+  printf '| T2 | 4 | build | b | x | — | 30 | R | lib/b.sh | landed |\n'
+  printf '| T6 | 4 | build | n | x | — | 30 | R | record/w/T6.md | active |\n'
+  printf '| T27 | 5 | verify | floor | x | T1, T2, T6 | 30 | R | .bionic/docs/record/w/floor.txt | pending |\n'
+  printf '| T28 | 6 | review | final | x | T1, T2, T6 | 30 | R | .bionic/docs/record/w/review.md | pending |\n'
+  printf '| T29 | 7 | doc | release | x | T27, T28 | 30 | R | CHANGELOG.md, tests/docs-pins.test.sh | pending |\n'
+  printf '| T31 | 4 | build | c | x | — | 30 | R | lib/c.sh | active |\n'
+  printf '| T30 | 5 | verify | other floor | x | T31 | 30 | R | .bionic/docs/record/w/floor2.txt | pending |\n'
+} > "$SANDBOX/fh-wave.md"
+expect_eq "FLOOR-HOLDS.3a control, same table: a floor that depends on the active T31 is held by it" \
+  "T31${TAB}4${TAB}active" "$(call units_floor_holds "$SANDBOX/fh-wave.md" T30)"
+FH="$(call units_floor_holds "$SANDBOX/fh-wave.md" T27)"
+expect_eq "FLOOR-HOLDS.3 this wave's shape: every build row landed, the release pending on the floor — nothing holds it" \
+  "" "$FH"
+expect_eq "FLOOR-HOLDS.3b …and the call succeeds" "0" "$(call_rc units_floor_holds "$SANDBOX/fh-wave.md" T27)"
+{ printf '## SDLC State\n\ncurrent: 5\napproved-by: fixture 2026-10-03T00:00Z "approved"\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | a | x | — | 30 | R | lib/a.sh | landed |\n'
+  printf '| T2 | 4 | build | b | x | — | 30 | R | lib/b.sh | active |\n'
+  printf '| T6 | 4 | build | n | x | — | 30 | R | record/w/T6.md | active |\n'
+  printf '| T27 | 5 | verify | floor | x | T1, T2, T6 | 30 | R | .bionic/docs/record/w/floor.txt | pending |\n'
+  printf '| T29 | 7 | doc | release | x | T27 | 30 | R | CHANGELOG.md | pending |\n'
+} > "$SANDBOX/fh-wave2.md"
+FH="$(call units_floor_holds "$SANDBOX/fh-wave2.md" T27)"
+expect_eq "FLOOR-HOLDS.4 a build row the floor depends on, still active, holds it — and only it" \
+  "T2${TAB}4${TAB}active" "$FH"
+
+# N4: `approve` records only a name an OPEN row reads. A name read only by a landed or dropped
+# row satisfies nothing, so it is not offered.
+hard_plan "$SANDBOX/ap-names.md" "" \
+  '| T1 | 4 | build | a | x | — | 30 | R | lib/a.sh | approval:landedonly | landed |' \
+  '| T2 | 4 | build | b | x | — | 30 | R | lib/b.sh | approval:droppedonly | dropped |' \
+  '| T3 | 7 | doc | c | x | — | 30 | R | CHANGELOG.md | live:approval:release | pending |' \
+  '| T4 | 4 | build | d | x | — | 30 | R | lib/d.sh | approval:ship | active |'
+AN="$(call units_approval_names "$SANDBOX/ap-names.md")"
+expect_eq "APPROVAL-NAMES.1 the names open rows read are listed (pending live:, active)" "yes yes" \
+  "$(has_line "$AN" release) $(has_line "$AN" ship)"
+expect_eq "APPROVAL-NAMES.1b …and a name read only by a landed or dropped row is not" "no no" \
+  "$(has_line "$AN" landedonly) $(has_line "$AN" droppedonly)"
+
 finish
