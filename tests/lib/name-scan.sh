@@ -9,8 +9,13 @@ set +x +v
 # will use it: a leading byte-order mark is removed, leading and trailing spaces, tabs and
 # carriage returns are stripped, and a line empty after that is skipped (counted, not an entry).
 # Entries are fixed strings, matched case-insensitively: both sides are decoded as UTF-8 (a
-# malformed byte becomes U+FFFD) and Unicode case-folded, whatever the caller's locale. The
-# scan runs in the checkout it is started from.
+# malformed byte becomes U+FFFD) and Unicode case-folded, whatever the caller's locale. The one
+# exception is an entry's own white space (A-orch-91): each run of it inside an entry matches
+# any run of white space holding at most ONE line break (spaces, tabs, CR LF, the Unicode
+# spaces), and after that break one comment leader may stand (`#`s, `//`s, `*`, `>`s, `--`,
+# `;`s); so a name of two words is found where prose, a comment or a commit body wraps between
+# them, and not across a blank line. White space is never optional: the words run together are
+# another entry. The scan runs in the checkout it is started from.
 #
 # WHAT IT READS is what a push of <base>..<head> would publish, never the working files:
 #   - every blob in the tree at the head, as bytes (a binary file, a file marked `-diff` or
@@ -19,33 +24,44 @@ set +x +v
 #     among them) and each path name a commit adds, changes or deletes;
 #   - each commit in the range: its message, and its author's and committer's name and email;
 #   - every tag that points at a commit in the range or at the head: its name, and for an
-#     annotated tag its message and its tagger.
+#     annotated tag its message and its tagger, and those of every tag object a nested tag
+#     passes through on its way to the commit.
+# Objects are read as a push sends them: GIT_NO_REPLACE_OBJECTS is set, so a commit or a blob
+# "fixed" locally by `git replace` is read as the original.
 # BIONIC_CHECK_BASE and BIONIC_CHECK_HEAD pick the range; the head defaults to HEAD and the
 # base to the newest tag reachable from the head that does not point at the head itself, so a
 # release already tagged is scanned as <previous tag>..<head> (no such tag: the whole history).
 # NOTHING IS SKIPPED: an object the scan cannot read refuses the run (exit 2).
 #
-# ONE PASS. Everything above is read once, by one matcher (MATCHER, a perl program: macOS awk
-# ends a string at a NUL byte and stops on a malformed UTF-8 one, and BSD grep misses a folded
-# match after a NUL). A record is tested against every entry at once; only a record that holds
-# one is searched entry by entry to name it, in the same folded text, for the same literal.
+# ONE PASS. Everything above is read once, by one matcher (MATCHER, a program for the perl the
+# PATH names, which the power check proves able: macOS awk ends a string at a NUL byte and stops
+# on a malformed UTF-8 one, and BSD grep misses a folded match after a NUL). A record is tested
+# against every entry at once; only a record that holds one is searched entry by entry to name
+# it, in the same folded text, for the same pattern.
+#
+# WHAT IS STILL MISSED: text not in UTF-8, in file contents as in messages (a UTF-16 file, a
+# Latin-1 non-ASCII name, a commit with another `encoding`), compressed or otherwise encoded
+# text, an NFD form of an NFC entry, `mergetag` and `gpgsig` headers, notes and branch names,
+# and a name broken deliberately (inside a word, by a zero-width character).
 #
 # A CLEAN RESULT MUST HAVE POWER. Before the real scan, the same function runs over a
 # throwaway repository built with git's plumbing, which holds every entry at every site the
 # scan reads: a text blob (in upper case), a binary blob, a symlink target and a path name at
-# the head; a path and a blob (in lower case) that exist only inside the range; a commit
-# message; an author name, an author email, a committer name and a committer email; a tag name
-# and a tag message. An entry not found at any of them refuses the run (exit 2). An entry git
-# cannot hold at a site is not planted there: one with a byte no ref name may hold (a space,
-# `~^:?*[\`, a control byte, `..`, `@{`, `//`, `/.`, `./`, `.lock/`) at the tag name, and one
-# holding `<` or `>` at the four people sites; such a site cannot publish that entry either.
+# the head, and a text blob holding each entry wrapped (each run of white space inside it a
+# tab, CR LF, blanks and a `#` leader); a path and a blob (in lower case) that exist only
+# inside the range; a commit message; an author name, an author email, a committer name and a
+# committer email; a tag name and a tag message. An entry not found at any of them refuses the
+# run (exit 2). An entry git cannot hold at a site is not planted there: one with a byte no ref
+# name may hold (a space, `~^:?*[\`, a control byte, `..`, `@{`, `//`, `/.`, `./`, `.lock/`)
+# at the tag name, and one holding `<` or `>` at the four people sites; such a site cannot
+# publish that entry either.
 #
 # NO ENTRY IS EVER PRINTED OR WRITTEN, and none is a word of any command line or a variable
 # of any child's environment: entries reach the matcher and git by file descriptor or stdin,
 # written by the builtin printf. A hit is `HIT entry=<line number> at <where>`, and <where> is
 # numbers and object ids alone, never text from the repository:
-#   blob <sha12> line <n>     <n> is the count of newlines before the match plus one, in a
-#                             binary blob as in a text one
+#   blob <sha12> line <n>     <n> is the count of newlines before the match plus one (the line
+#                             the match starts on), in a binary blob as in a text one
 #   path #<n>                 the path's 1-based position in `git ls-tree -r --name-only` order
 #                             at the head
 #   path in commit <sha12>    a path only the range holds, at the first commit that names it
@@ -53,7 +69,8 @@ set +x +v
 #   tag <sha12>               the tag object, or the commit a lightweight tag names
 # Records are split on NUL or by length, never on a byte a path or a message can hold. The
 # first command turns tracing off; BASH_ENV and ENV are unset so nothing this starts reads
-# them, and every git trace variable is unset as a second line of defence. The throwaway
+# them, every git trace variable is unset as a second line of defence, and so are the perl
+# variables that would load a debugger or a module into the matcher. The throwaway
 # lives in a temp directory removed on exit. Exit 0 clean (an empty list prints `entries=0`),
 # 1 a hit, 2 a refusal.
 #
@@ -65,6 +82,10 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CEILING_DIRECTORIES GIT_DISCOVERY
 # second line of defence: no entry is in any argv, but a trace file the caller's environment names
 # would still record what git does see (a ref name the power check plants, for one)
 for v in $(compgen -e); do case "$v" in GIT_TRACE*) unset "$v" ;; esac; done
+# a caller's perl debugger or module path would run inside the matcher, which holds every entry
+unset PERL5OPT PERL5LIB PERLLIB PERL5DB PERLDB_OPTS
+# read what a push sends: a push never sends a local `git replace` of an object
+export GIT_NO_REPLACE_OBJECTS=1
 export LC_ALL=C
 
 refuse() { echo "name-scan: $*" >&2; exit 2; }
@@ -87,22 +108,35 @@ sub slurp {
 sub fold { fc(Encode::decode("UTF-8", $_[0])) }
 my ($listf, $pathsf, $logf, $tagsf, $want) = @ARGV;
 my @kv = split /\0/, slurp($listf, "the list");
-my (@num, @fe);
-while (@kv) { push @num, shift @kv; push @fe, fold(shift @kv) }
-my $any = join "|", map { quotemeta } @fe;
+# an entry is its words, each literal, and between two of them a run of white space holding at
+# most one line break, after which one comment leader may stand; the batch pattern and the
+# attribution pattern are both built from these
+my $ws = qr{\h+|\h*\R\h*(?:(?:#+|//+|\*|>+|--|;+)\h*)?};
+my (@num, @fp);
+while (@kv) {
+  push @num, shift @kv;
+  push @fp, join $ws, map { quotemeta } split /\s+/, fold(shift @kv);
+}
+my $any = join "|", @fp;
 $any = qr/$any/;
+my @fe = map { qr/$_/ } @fp;
 my ($hits, %seen) = (0);
 sub hit { return if $seen{"$_[0] $_[1]"}++; print "HIT entry=$_[0] at $_[1]\n"; $hits++ }
-# look <bytes> <where> <lines>: all entries at once first; the entry and line only after a find
+# look <bytes> <where> <lines>: all entries at once first; the entry and line only after a find.
+# A line is counted on from the previous match, over the text between the two and the match
+# itself, never from an offset: an offset into decoded text is found by walking from its start,
+# which made many matches in one blob cost their square.
 sub look {
   my ($t, $where, $lines) = (fold($_[0]), $_[1], $_[2]);
   return unless $t =~ $any;
   for my $i (0 .. $#fe) {
-    my $f = $fe[$i];
+    if (!$lines) { hit($num[$i], $where) if $t =~ $fe[$i]; next }
+    my $line = 1;
     pos($t) = undef;
-    while ($t =~ /\Q$f\E/g) {
-      if (!$lines) { hit($num[$i], $where); last }
-      hit($num[$i], "$where line " . (1 + (substr($t, 0, $-[0]) =~ tr/\n//)));
+    while ($t =~ /\G(.*?)($fe[$i])/gs) {
+      $line += ($1 =~ tr/\n//);
+      hit($num[$i], "$where line $line");
+      $line += ($2 =~ tr/\n//);
     }
   }
 }
@@ -210,12 +244,16 @@ scan_repo() {
        { p = ($1 == "tag") ? $4 : $2; if (p in c) print $2, $1, $3 }' "$w/commits" "$w/refs" > "$w/tags" || return 2
   # the objects: every blob at the head, every commit and blob the range introduces (the type
   # filter drops every commit but the tip, so the commits come from the range list), every tag
-  # object in the tag list
+  # object in the tag list and every tag object a nested one names on its way to the commit
+  # (rev-list lists each tag of the chain; every commit it reaches is the head's, so `--not`
+  # the head leaves the tags alone)
   { git -C "$repo" ls-tree -r --format='%(objectmode) %(objecttype) %(objectname)' "$head" 2>/dev/null \
       | awk '$2 == "blob" { print $3 }' &&
     git -C "$repo" rev-list --objects --no-object-names --filter=object:type=blob "$head" ${base:+"^$base"} 2>/dev/null &&
     cat "$w/range" &&
-    awk '$2 == "tag" { print $1 }' "$w/tags"; } | sort -u > "$w/objects" || return 2
+    { awk '$2 == "tag" { print $1 }' "$w/tags" && printf -- '--not\n%s\n' "$head"; } \
+      | git -C "$repo" rev-list --objects --no-object-names --stdin 2>/dev/null; } \
+    | sort -u > "$w/objects" || return 2
   n="$(wc -l < "$w/objects" | tr -d ' ')"
   git -C "$repo" cat-file --batch --buffer < "$w/objects" 2>/dev/null \
     | perl -e "$MATCHER" <(entries_stream) "$w/paths" "$w/log" "$w/tags" "$n"
@@ -245,8 +283,22 @@ ref_ok() {
 # ident_ok <entry> — can a name or an email hold it? (git refuses `<` and `>` there)
 ident_ok() { case "$1" in *[\<\>]*) return 1 ;; esac; return 0; }
 
+# wrapped_entries — `power wrap` and each entry on its own line, every run of blanks inside it
+# made a tab, CR LF, two blanks and a `#` leader: a scan that matched an entry's white space as
+# one literal space would miss it (the builtin printf; no entry is a word of any command)
+wrapped_entries() {
+  local i=0 e sp=' ' br=$'\t\r\n  # '
+  printf 'power wrap\n'
+  while [ "$i" -lt "${#ENTRIES[@]}" ]; do
+    e="${ENTRIES[$i]//$'\t'/$sp}"
+    while :; do case "$e" in *"$sp$sp"*) e="${e//$sp$sp/$sp}" ;; *) break ;; esac; done
+    printf '%s\n' "${e//$sp/$br}"; i=$((i + 1))
+  done
+}
+
 prove_power() {
-  local w="$1" i e n tab empty b_text b_bin b_link b_gone tree0 tree1 c0 c1 c2 c3 c4 c5 tg people msg miss rc
+  local w="$1" i e n tab empty b_text b_wrap b_bin b_link b_gone tree0 tree1 c0 c1 c2 c3 c4 c5
+  local tg people msg miss rc
   PW="$w/power.git"
   mkdir -p "$w" && git init -q --bare --template= "$PW" >/dev/null 2>&1 \
     || refuse "cannot build the power check under ${TMPDIR:-/tmp}"
@@ -254,12 +306,14 @@ prove_power() {
   empty="$(pg hash-object -w --stdin < /dev/null)" &&
   b_text="$( { printf 'power text\n'; printf '%s\n' "${ENTRIES[@]}" | tr '[:lower:]' '[:upper:]'; } \
     | pg hash-object -w --stdin)" &&
+  b_wrap="$(wrapped_entries | pg hash-object -w --stdin)" &&
   b_bin="$( { printf 'power\0binary\0'; printf '%s\0' "${ENTRIES[@]}"; } | pg hash-object -w --stdin)" &&
   b_link="$(printf '../%s\n' "${ENTRIES[@]}" | pg hash-object -w --stdin)" &&
   b_gone="$( { printf 'power gone\n'; printf '%s\n' "${ENTRIES[@]}" | tr '[:upper:]' '[:lower:]'; } \
     | pg hash-object -w --stdin)" || refuse "cannot build the power check"
   # the base tree holds the head's plants, so only the head's tree reaches them: a path per entry
   { printf '100644 %s\t%s\0' "$b_text" power/text.txt
+    printf '100644 %s\t%s\0' "$b_wrap" power/wrap.txt
     printf '100644 %s\t%s\0' "$b_bin" power/data.bin
     printf '120000 %s\t%s\0' "$b_link" power/link
     i=0
@@ -309,6 +363,7 @@ prove_power() {
   while [ "$i" -lt "${#ENTRIES[@]}" ]; do
     e="${ENTRIES[$i]}"; n="${NUMS[$i]}"
     printf 'entry=%s at blob %.12s\ttext blob\n' "$n" "$b_text"
+    printf 'entry=%s at blob %.12s\twrapped text\n' "$n" "$b_wrap"
     printf 'entry=%s at blob %.12s\tbinary blob\n' "$n" "$b_bin"
     printf 'entry=%s at blob %.12s\tsymlink target\n' "$n" "$b_link"
     printf 'entry=%s at path #\tpath name\n' "$n"
@@ -362,16 +417,16 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < "$LIST"
 if [ "${#ENTRIES[@]}" -eq 0 ]; then echo "entries=0"; exit 0; fi
 
-# the scan decides the locale: a UTF-8 one for itself (the tools that fold case in the power
-# check read it); with none on the machine, only an ASCII-only list can be scanned
+# the scan decides the locale: a UTF-8 one for itself, so the power check's upper-case plant
+# changes the case of a non-ASCII letter too and the plant proves the matcher folds it. The
+# matcher folds without a locale, so a machine with none is scanned all the same; there the
+# upper-case plant proves the fold of ASCII letters only.
 utf8=""
 for l in C.UTF-8 en_US.UTF-8 $(locale -a 2>/dev/null | grep -i -E 'utf-?8$'); do
   [ "$(LC_ALL="$l" locale charmap 2>/dev/null)" = UTF-8 ] && { utf8="$l"; break; }
 done
 if [ -n "$utf8" ]; then
   export LC_ALL="$utf8"
-elif [ "$(printf '%s' "${ENTRIES[@]}" | tr -d '\000-\177' | wc -c | tr -d ' ')" != 0 ]; then
-  refuse "no UTF-8 locale is available on this machine and the list holds a non-ASCII entry; its case cannot be folded"
 fi
 
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || refuse "not run inside a git checkout"
