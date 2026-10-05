@@ -8437,6 +8437,15 @@ q_rigor() {  # <repo> <rigor> — the bound plan's frontmatter rigor, rewritten 
 q_brief() {  # <tag> [<questions line>] — a reader brief with one declared suite
   printf 'Your task: read the wave-99 change for the questions below.\nExpected artifact: .bionic/docs/record/wq-%s.md\nExpected duration: ~30 minutes.\nSuites: tests/widget.test.sh' "$1"
   [ -n "${2:-}" ] && printf '\n%s' "$2"
+  # A reader names a record for each question it is dealt (wave-27 T49): beside a set of several
+  # questions the brief carries a Files: line holding the artifact and one more record apiece.
+  local _qb_n _qb_i _qb_f
+  _qb_n=$(( $(printf '%s' "${2:-}" | tr -cd ',' | wc -c) + 1 ))
+  if [ -n "${2:-}" ] && [ "$_qb_n" -gt 1 ]; then
+    _qb_f=".bionic/docs/record/wq-$1.md"
+    for ((_qb_i = 2; _qb_i <= _qb_n; _qb_i++)); do _qb_f="$_qb_f, .bionic/docs/record/wq-$1-$_qb_i.md"; done
+    printf '\nFiles: %s' "$_qb_f"
+  fi
   return 0
 }
 q_row() { roster_nth_row "$(roster_path "$1" "$SID_A")" 1; }
@@ -8555,6 +8564,7 @@ q_gate "$REPO" q10 bionic:critic "Your task: read the wave-99 change.
 Expected artifact: .bionic/docs/record/wq-q10.md
 Expected duration: ~30 minutes.
 Questions: evidence, adversarial, structure
+Files: .bionic/docs/record/wq-q10.md, .bionic/docs/record/wq-q10-2.md, .bionic/docs/record/wq-q10-3.md
 ${Q_FOUR}"
 expect_eq "Q10 tested: a critic holding evidence with four suite runs is refused" "deny" "$GATE_VERDICT"
 expect_contains "Q10 …on the cap of three, as an auditor's is" "exceeds the 3-run cap" "$GATE_ERR"
@@ -8564,6 +8574,7 @@ q_gate "$REPO" q11 bionic:critic "Your task: read the wave-99 change.
 Expected artifact: .bionic/docs/record/wq-q11.md
 Expected duration: ~30 minutes.
 Questions: evidence, adversarial, structure
+Files: .bionic/docs/record/wq-q11.md, .bionic/docs/record/wq-q11-2.md, .bionic/docs/record/wq-q11-3.md
 Suites: none"
 expect_eq "Q11 tested: the same critic waiving every suite with no run is refused" "deny" "$GATE_VERDICT"
 expect_contains "Q11 …as an auditor's is: it names no suites" "names no suites" "$GATE_ERR"
@@ -8674,7 +8685,7 @@ expect_contains "T49-Q6 …and a critic holding evidence is held the same" "find
 # q_hits <brief> <role> -> the row's questions=, or `deny:<first refusal line>`.
 q49_gate() {  # <tag> <role> <rigor> <brief>
   local repo; repo=$(make_repo "rq49-$1" yes); write_attestation "$repo" "$SID_A"; q_rigor "$repo" "$3"
-  q_gate "$repo" "q49-$1" "$2" "$4"
+  REPO="$repo"; q_gate "$repo" "q49-$1" "$2" "$4"
   if [ "$GATE_VERDICT" = allow ]; then R="allow:$(roster_field "$(q_row "$repo")" questions)"
   else R="deny:$(printf "%s\n" "$GATE_ERR" | /usr/bin/grep -m1 "bionic: dispatch refused")"; fi
 }
@@ -8686,7 +8697,8 @@ q49_gate c1 bionic:auditor audited "$Q49_HEAD
 Questions: evidence  # the auditor's"
 expect_eq "T49-Q7 a trailing comment is stripped: Questions: evidence  # the auditor's is evidence" "allow:evidence" "$R"
 q49_gate c2 bionic:critic peer-reviewed "$Q49_HEAD
-Questions: structure, adversarial # both"
+Questions: structure, adversarial # both
+Files: .bionic/docs/record/wq-q49.md, .bionic/docs/record/wq-q49-2.md"
 expect_eq "T49-Q7 …a comment after a set, too" "allow:adversarial,structure" "$R"
 q49_gate c3 bionic:auditor audited "$Q49_HEAD
 Questions: evidence
@@ -9982,5 +9994,69 @@ expect_contains "FILES-LIST25 a backtick pair is the one pair: what is inside it
 "
 expect_eq "FILES-ENTRY a quoted path answers 0, as the reader records it" "lib/a.sh rc=0" "$(fe '"lib/a.sh"')"
 expect_eq "FILES-ENTRY …and a path with a trailing ; likewise" "lib/a.sh rc=0" "$(fe 'lib/a.sh;')"
+
+# --- T49-B1: a reader writes one record per question, so its brief names a record for each (wave-27
+# T49, A-orch-83; review pass 28 B1). `proof-add review` takes a record only if it is the reader's
+# own row deliverable= or one of its files=, so the wall counts the DISTINCT paths of the Expected
+# artifact: and the Files: line (a quoted path as its stripped form, a leading ./ aside) against the
+# questions the Questions: line names, and refuses fewer.
+B1_DIR=.bionic/docs/record/w
+B1_ADV="$B1_DIR/crit-adversarial.md"; B1_STR="$B1_DIR/crit-structure.md"; B1_EVI="$B1_DIR/crit-evidence.md"
+b1_brief() {  # <artifact> <questions> [<files line>] -> a read-only reader brief
+  printf 'Your task: read the wave-99 change.\nExpected artifact: %s\nExpected duration: ~30 minutes.\nSuites: %s\nQuestions: %s' "$1" "${B1_SUITES:-tests/widget.test.sh}" "$2"
+  [ -n "${3:-}" ] && printf '\n%s' "$3"
+  return 0
+}
+q49_gate b1a bionic:auditor audited "$(b1_brief "$B1_EVI" evidence)"
+expect_eq "T49-B1 audited: an auditor with one question and one Expected artifact, no Files:, is admitted" "allow:evidence" "$R"
+q49_gate b1b bionic:critic peer-reviewed "$(b1_brief "$B1_ADV" 'adversarial, structure')"
+expect_contains "T49-B1 peer-reviewed: a critic dealt two questions with one record and no Files: is refused" "deny:" "$R"
+expect_contains "T49-B1 …the first line says it is dealt 2 questions and names 1 record" "dealt 2 questions, names 1 record" "$R"
+expect_contains "T49-B1 …and its fix lists one record per question under Files:" "one Files: record per question" "$R"
+B1_DETAIL="$GATE_VERR"
+expect_contains "T49-B1 …the detail says a reader writes one record per question" "one record per question" "$B1_DETAIL"
+expect_contains "T49-B1 …and that the fact verb takes a record only from the reader's own row" "proof-add" "$B1_DETAIL"
+q49_gate b1c bionic:critic peer-reviewed "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: $B1_ADV, $B1_STR")"
+expect_eq "T49-B1 …the same with Files: naming both records (the artifact repeated counts once) is admitted" "allow:adversarial,structure" "$R"
+expect_eq "T49-B1 …and the row records deliverable= and files= as today" "$B1_ADV|$B1_ADV,$B1_STR" \
+  "$(roster_field "$(q_row "$REPO")" deliverable)|$(roster_field "$(q_row "$REPO")" files)"
+q49_gate b1d bionic:critic tested "$(b1_brief "$B1_ADV" 'evidence, adversarial, structure' "Files: $B1_ADV, $B1_STR, $B1_EVI")"
+expect_eq "T49-B1 tested: three questions and three distinct record paths are admitted" "allow:evidence,adversarial,structure" "$R"
+q49_gate b1e bionic:critic tested "$(b1_brief "$B1_ADV" 'evidence, adversarial, structure' "Files: $B1_ADV, $B1_STR")"
+expect_contains "T49-B1 …two of three is refused" "dealt 3 questions, names 2 records" "$R"
+q49_gate b1f bionic:critic peer-reviewed "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: \"$B1_ADV\", [$B1_STR]")"
+expect_eq "T49-B1 a quoted and a bracketed path count as their stripped forms" "allow:adversarial,structure" "$R"
+expect_eq "T49-B1 …and the row holds the stripped paths" "$B1_ADV,$B1_STR" "$(roster_field "$(q_row "$REPO")" files)"
+q49_gate b1g bionic:critic peer-reviewed "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: ./$B1_ADV")"
+expect_contains "T49-B1 the artifact repeated with a leading ./ is the same path: refused" "dealt 2 questions, names 1 record" "$R"
+# no bound plan: the label is required and the set is not checked, but the count needs no dealing
+REPO=$(q_unbound rb1h)
+q_gate "$REPO" b1h bionic:critic "$(b1_brief "$B1_ADV" 'adversarial, structure')"
+expect_eq "T49-B1 no bound plan: two questions and one record are refused too" "deny" "$GATE_VERDICT"
+expect_contains "T49-B1 …saying so" "dealt 2 questions, names 1 record" "$GATE_ERR"
+REPO=$(q_unbound rb1i)
+q_gate "$REPO" b1i bionic:critic "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: $B1_STR")"
+expect_eq "T49-B1 …and with a Files: record for the second it is admitted" "allow" "$GATE_VERDICT"
+# the longest role and three questions: the first line fits the budget
+REPO=$(q_unbound rb1j)
+q_gate "$REPO" b1j bionic:reviewer "$(b1_brief "$B1_ADV" 'evidence, adversarial, structure')"
+B1_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')
+expect_contains "T49-B1 bionic:reviewer with three questions and one record is refused" "dealt 3 questions, names 1 record" "$B1_LINE"
+expect_eq "T49-B1 …its first line fits 100 columns" "ok" "$([ "$(bionic_cols "$B1_LINE")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$B1_LINE")")"
+# every other role is untouched
+REPO=$(make_repo rb1k yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" b1k bionic:implementor "$(b1_brief "$B1_ADV" 'adversarial, structure')"
+expect_eq "T49-B1 a writer carrying two questions and one record is not judged by the count" "allow" "$GATE_VERDICT"
+# a Files: line on a read-only role changes nothing else: no writer slot, no worktree demand, no derivation
+REPO=$(ro_budget_repo rb1l "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe")
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(B1_SUITES=none b1_brief "$B1_ADV" 'adversarial' "Files: $B1_ADV")" "b1l-r" "claude-sonnet-5" "$RO_NONE" "bionic:critic")"
+expect_eq "T49-B1 a critic with a Files: line is admitted" "allow" "$GATE_VERDICT"
+B1_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "T49-B1 …its row holds the record in files=" "$B1_ADV" "$(roster_field "$B1_ROW" files)"
+expect_eq "T49-B1 …and a waived budget, nothing derived from Files:" "none" "$(roster_field "$B1_ROW" suites_allowed)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "b1l-w" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "T49-B1 …it holds no writer slot: a writer is admitted beside it at writers=1" "allow" "$GATE_VERDICT"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "b1l-w2" "claude-sonnet-5" "$RO_NONE" "implementor")"
+expect_eq "T49-B1 …and a second writer is refused (the control: the slot is the writer's)" "deny" "$GATE_VERDICT"
 
 finish
