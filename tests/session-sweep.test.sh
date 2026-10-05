@@ -363,7 +363,7 @@ section "5. every session-keyed class, and only those"
 # =============================================================================
 #
 # The six classes are the verb's whole reach. A session that left only ONE of them behind
-# is swept for that one — which is the shape the defect's own herd-app tmp had (six rosters,
+# is swept for that one — which is the shape the defect's own consumer-project tmp had (six rosters,
 # six preflights, five engaged markers: the counts do not line up, so no class may depend on
 # another being present).
 

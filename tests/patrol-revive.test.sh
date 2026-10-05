@@ -890,14 +890,14 @@ esac
 # 43: a symlinked second stamp is not a stamp, same posture as this session's own
 # (never followed — a hostile repo can close this arm and never open one).
 D=$(make_env 1m); write_stamp "$D" "$SID"
-OTHERD=$(make_env 1m); write_stamp "$OTHERD" "$OTHER_SID"
-ln -s "$(stamp_path "$OTHERD" "$OTHER_SID")" "$(stamp_path "$D" "$OTHER_SID")"
+OTHER_DIR=$(make_env 1m); write_stamp "$OTHER_DIR" "$OTHER_SID"
+ln -s "$(stamp_path "$OTHER_DIR" "$OTHER_SID")" "$(stamp_path "$D" "$OTHER_SID")"
 fire_stderr "$D"
 case "$HOOK_ERR" in
   *"$FINDING_TEXT"*) no "43: a symlinked second stamp wrongly produced the finding" "$HOOK_ERR" ;;
   *) ok "43: a symlinked second stamp is silent, never followed" ;;
 esac
-rm -rf "$OTHERD"
+rm -rf "$OTHER_DIR"
 
 # ---------- Group 12: THE ENGAGEMENT SWITCH (AC-8) ----------
 #
