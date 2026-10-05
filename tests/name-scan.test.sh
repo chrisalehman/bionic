@@ -39,15 +39,20 @@
 #           its time ceiling (T52 finding 13); 20,000 matching lines in one blob inside 5
 #           seconds (T56 N8).
 #   §WRAP   between two words of an entry: horizontal white space on one line, or ONE line break
-#           with white space, at most 24 symbols and at most three tags on each side; never
-#           none, never a blank line, never symbols on one line (T56 B1, T61 B1).
+#           with white space, at most 24 symbols and at most three tags on each side, read any
+#           way that fits (a `<` may be a symbol), a word's own symbols never counted; never
+#           none, never a blank line, never symbols on one line (T56 B1, T61 B1, T65 B1 B2).
 #   §PUSHED the objects a push sends: a commit or blob "fixed" by `git replace` is read as the
 #           original, and a nested tag's inner message is read (T56 N1, N3).
 #   §PERLDB a caller's perl debugger or module variables print no entry, each of the five with
 #           a row a copy that keeps it fails (T56 N4, T61 S2).
 #   §INERT  the locale pick and the BASH_ENV unset each have a row that fails without them
 #           (T56 N6, N7).
-#   §SIGNAL TERM and HUP at a random moment leave no temporary tree (T61 note).
+#   §SIGNAL TERM and HUP to the scan, and TERM, INT and HUP to its process group, at a random
+#           moment or aimed at the removal itself, leave no temporary tree (T61 note, T65 S2).
+#   §ORACLE the scan agrees, case by case and in both directions, with a reference matcher
+#           written from the rule (tests/fixtures/name-scan-oracle.pl) over a generated corpus
+#           of at least 5,000 wraps (tests/fixtures/name-scan-gen.pl, seed 65) (T65).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): every
 # repository is a real `git init` under a mktemp directory, with real commits, real
@@ -782,12 +787,15 @@ committer name|look($name, "commit $sha $who", 0);|look($name, "commit $sha $who
 committer email|look($mail, "commit $sha $who", 0);|look($mail, "commit $sha $who", 0) if $who ne "committer";
 tag name|look($ref, "tag $s", 0);|look("", "tag $s", 0);
 tag message|look($msg, "tag $sha", 0);|look("", "tag $sha", 0);
-wrapped text|join $ws, map|join " ", map
-text blob|(?<ws>\h++|(?<ws>(?!)
-wrapped text|my $run = qr{\h*+(?:$sym\h*+){0,24}};|my $run = qr{(?:$sym){0,24}};
-wrapped text|(?>$side)\R$side|(?>$side)\n$side
-symbol-wrapped text|my $sym = qr{(?!$tag)[^\p{L}\p{Nd}\s]};|my $sym = qr{(?!)};
+wrapped text|join "(?&ws)", map|join " ", map
+text blob|my $gap = qr{(?:\h++|my $gap = qr{(?:(?!)
+wrapped text|my $before = qr{(?:\h*+$item){0,27}+\h*+};|my $before = qr{(?:$item){0,27}+};
+wrapped text|my $wrap = qr{$before\R$after};|my $wrap = qr{$before\n$after};
+symbol-wrapped text|my $sym = qr{[^\p{L}\p{Nd}\s]};|my $sym = qr{(?!)};
 tag-wrapped text|my $tag = qr{<[^<>\v]{0,200}+>};|my $tag = qr{(?!)};
+angle-wrapped text|\h*+$inside};|\h*+};
+symbol-tag-wrapped text|splice(@w, 0, 3 - $need);|splice(@w, 0, 0);
+symbol-tag-wrapped text|@w = sort { $b <=> $a } @w;|@w = sort { $a <=> $b } @w;
 SITES
 
 section "§COST — one pass for the whole list, inside the time ceiling (T52 finding 13)"
@@ -976,6 +984,16 @@ printf 'x mxv9<a><b><c>\n<d><e><f>plover\n' > "$W/tags3.html"
 printf 'zqtri\nwenlo daspy\n' > "$W/tri-gap1.txt"
 printf 'zqtri wenlo\n# daspy\n' > "$W/tri-gap2.txt"
 printf 'zqtri "\n" wenlo</b>\n  <b>daspy\n' > "$W/tri-both.txt"
+# T65 B1: a `<` after the break is a symbol when that reading fits, whatever `>` follows later on
+# the line; the second and third are shaped like two wraps this repository's own files hold
+printf 'see mxv9\n<plover x> here\n' > "$W/angle.md"
+printf '# goes into the local mxv9\n# <plover common dir>/info/exclude here\n' > "$W/angle-comment.sh"
+printf -- '- a wait is a declared `mxv9\n  <plover pattern>`, named in the skill\n' > "$W/angle-quote.md"
+# T65 B2: a word's own symbols are the word's: 24 symbols then `(1)`, and a word of symbols alone
+# followed by 23 more on its line
+printf 'zq.v+\n%s(1)\n' "$(printf '%024d' 0 | tr 0 '-')" > "$W/lead24.txt"
+printf 'see zqplu\n++%s\n' "$(printf '%023d' 0 | tr 0 '-')" > "$W/symword.txt"
+printf 'zq.v+\n%s(1)\n' "$(printf '%025d' 0 | tr 0 '-')" > "$W/lead25.txt"
 # not found: symbols between two words on ONE line, a blank line, symbols over the bound, a
 # letter at the break, four tags on one side
 printf 'see mxv9, plover here\n' > "$W/comma-one-line.txt"
@@ -985,12 +1003,13 @@ printf 'see mxv9\nx plover\n' > "$W/letter.txt"
 printf 'x mxv9<a><b><c><d>\nplover\n' > "$W/tags4.html"
 git -C "$R" add -A
 git -C "$R" commit -q -m "$(printf 'docs: where the scan came from\n\nIt was first written for the mxv9\nplover project.')"
-L="$(fx_list wrap1 "$E3" "$EW1" "$EW2" "zqtri wenlo daspy")"
+L="$(fx_list wrap1 "$E3" "$EW1" "$EW2" "zqtri wenlo daspy" "zqplu ++")"
 scan "$R" "$L"
 expect_status "WRAP: a tree and a commit body holding the wrapped entry exit 1" 1 "$RC"
 wb() { s12 "$R" "HEAD:w/$1"; }
 for f in 'md.md|2' 'two-spaces.txt|1' 'tab.txt|1' 'crlf.txt|1' 'hash.sh|1' 'slashes.c|1' 'doc-slashes.rs|1' 'block.c|2' 'quote.md|1' 'dashes.sql|1' 'semi.ini|1' \
-  'sh-args.sh|1' 'text.svg|1' 'change.patch|2' 'array.json|1' 'br.html|1' 'hash2.md|1' 'quote2.md|1' 'semi2.el|1' 'nbsp.txt|1' 'sym24.txt|1' 'tags3.html|1'; do
+  'sh-args.sh|1' 'text.svg|1' 'change.patch|2' 'array.json|1' 'br.html|1' 'hash2.md|1' 'quote2.md|1' 'semi2.el|1' 'nbsp.txt|1' 'sym24.txt|1' 'tags3.html|1' \
+  'angle.md|1' 'angle-comment.sh|1' 'angle-quote.md|1'; do
   expect_eq "WRAP: ${f%%|*} — the entry is found once, on the line its match starts on" \
     "HIT entry=1 at blob $(wb "${f%%|*}") line ${f#*|}" "$(hits | grep -F "blob $(wb "${f%%|*}") ")"
 done
@@ -1007,6 +1026,12 @@ expect_eq "WRAP: a one-word entry matches exactly as before — its one-line for
   "HIT entry=2 at blob $(wb one-word.txt) line 1" "$(hits | grep -F "blob $(wb one-word.txt) ")"
 expect_eq "WRAP: an entry with regex metacharacters is literal, and wraps at its space" \
   "HIT entry=3 at blob $(wb meta.txt) line 1" "$(hits | grep -F "blob $(wb meta.txt) ")"
+expect_eq "WRAP: lead24.txt — 24 symbols then a word that begins with \`(\`: the word's own symbol is not counted (T65 B2)" \
+  "HIT entry=3 at blob $(wb lead24.txt) line 1" "$(hits | grep -F "blob $(wb lead24.txt) ")"
+expect_eq "WRAP: symword.txt — a word of symbols alone is matched as itself; what follows it is not counted (T65 B2)" \
+  "HIT entry=5 at blob $(wb symword.txt) line 1" "$(hits | grep -F "blob $(wb symword.txt) ")"
+expect_nonempty "WRAP: lead25.txt has a blob id (extractor non-empty)" "$(wb lead25.txt)"
+expect_no_regex "WRAP: lead25.txt — 25 symbols before \`(1)\` are over the bound, not a hit (same output)" "blob $(wb lead25.txt)" "$(hits)"
 expect_eq "WRAP: the scan's whole output holds the two-word entry's words zero times" "0" "$(count_in "$OUT" plover)"
 # the not-found forms alone scan clean (rc=0), and one wrapped form added to them is a hit
 R2="$TMP/wrap2"; fx_repo "$R2"; mkdir -p "$R2/w"
@@ -1168,5 +1193,99 @@ for sig in TERM HUP; do
   expect_ne "SIGNAL: $sig — some of the 50 runs ended by the signal (positive)" "0" "$killed"
   expect_eq "SIGNAL: $sig — no run of the 50 left a tree under its TMPDIR" "0" "$left"
 done
+# T65 S2: a Ctrl-C or a hangup signals the whole PROCESS GROUP, the EXIT trap's `rm` with it. Each
+# run starts the scan in a group of its own with the three signals at their defaults (a background
+# job of a script ignores INT, and a shell that starts with a signal ignored cannot trap it) and
+# signals the group; a tree left behind names the entries in its paths, so it is a leak
+# pg_scan <TMPDIR> [VAR=val ...] — the scan of $R with $L in the background, in its own group; sets p
+pg_scan() {
+  local st="$1"; shift
+  ( cd "$R" && exec perl -e '$SIG{$_} = "DEFAULT" for qw(INT TERM HUP); setpgrp(0, 0); exec @ARGV or exit 127' \
+      env TMPDIR="$st" "$@" bash "$SCAN" "$L" >/dev/null 2>&1 ) & p=$!
+}
+left_trees() { ls -A "$1" | grep -c '^name-scan\.' || true; }
+for sig in TERM INT HUP; do
+  killed=0; left=0
+  for k in $(seq 1 50); do
+    d="$(perl -e 'printf "%.3f", rand($ARGV[0] - $ARGV[1])' "$T1" "$T0")"
+    pg_scan "$ST"
+    sleep "$d"; kill -"$sig" -- -"$p" 2>/dev/null; wait "$p"; rc=$?
+    [ "$rc" -gt 128 ] && killed=$((killed + 1))
+    sleep 0.2
+    [ "$(left_trees "$ST")" -eq 0 ] || left=$((left + 1))
+    rm -rf "${ST:?}"/* 2>/dev/null
+  done
+  echo "SIGNAL: $sig to the group — 50 runs, $killed ended by the signal, $left left a tree"
+  expect_ne "SIGNAL: $sig to the group — some of the 50 runs ended by the signal (positive)" "0" "$killed"
+  expect_eq "SIGNAL: $sig to the group — no run of the 50 left a name-scan.* tree" "0" "$left"
+done
+# the same, aimed: an `rm` on the scan's PATH that marks its start and waits a second before the
+# real one, so the group's signal lands while the EXIT trap removes the tree, every time
+RMS="$TMP/rm-shim"; mkdir -p "$RMS"
+printf '#!/bin/bash\n: > "%s"\nsleep 1\nexec /bin/rm "$@"\n' "$TMP/rm-started" > "$RMS/rm"; chmod +x "$RMS/rm"
+for sig in TERM INT HUP; do
+  rm -f "$TMP/rm-started"
+  pg_scan "$ST" PATH="$RMS:$PATH"
+  k=0; while [ ! -e "$TMP/rm-started" ] && [ "$k" -lt 600 ]; do sleep 0.05; k=$((k + 1)); done
+  expect_true "SIGNAL: $sig aimed — the EXIT trap reached its rm (positive)" [ -e "$TMP/rm-started" ]
+  kill -"$sig" -- -"$p" 2>/dev/null; wait "$p"
+  sleep 1.2
+  expect_eq "SIGNAL: $sig aimed at the group while the tree is removed — no name-scan.* tree is left" "0" "$(left_trees "$ST")"
+  rm -rf "${ST:?}"/* 2>/dev/null
+done
+
+section "§ORACLE — the scan agrees with a reference matcher written from THE RULE (T65)"
+
+# the generated corpus (seed 65): one blob per case in ONE throwaway repository. The scan runs
+# once over it, the oracle once over the same files, and every case and entry is compared both
+# ways: found by one and not the other, or found on another line. Only numbers are printed.
+ORACLE="$BIONIC_SCRIPTS_DIR/tests/fixtures/name-scan-oracle.pl"
+GEN="$BIONIC_SCRIPTS_DIR/tests/fixtures/name-scan-gen.pl"
+R="$TMP/oracle"; fx_repo "$R"
+perl "$GEN" 65 "$R/c" "$TMP/lists/oracle" "$TMP/oracle-manifest" >/dev/null
+perl "$GEN" 65 "$TMP/oracle-again" "$TMP/lists/oracle-again" "$TMP/oracle-manifest-again" >/dev/null
+NC="$(ls "$R/c" | wc -l | tr -d ' ')"
+expect_true "ORACLE: (fixture) the corpus holds at least 5,000 cases (it holds $NC)" [ "$NC" -ge 5000 ]
+expect_true "ORACLE: (fixture) the same seed writes the same corpus" diff -r -q "$R/c" "$TMP/oracle-again"
+fx_commit "$R" "the corpus"
+T0="$(date +%s)"; scan "$R" "$TMP/lists/oracle"; EL_S=$(( $(date +%s) - T0 ))
+echo "ORACLE: the scan of $NC cases took ${EL_S}s"
+expect_status "ORACLE: the scan reads the corpus and finds wraps in it — exit 1" 1 "$RC"
+printf '%s\n' "$OUT" > "$TMP/oracle-scan.out"
+perl "$ORACLE" "$TMP/lists/oracle" "$R/c" > "$TMP/oracle.out"; ORC=$?
+expect_status "ORACLE: the oracle reads every case" 0 "$ORC"
+NF="$(cut -d' ' -f1 "$TMP/oracle.out" | sort -u | wc -l | tr -d ' ')"
+expect_true "ORACLE: the oracle finds an entry in some cases and none in others ($NF of $NC)" [ "$NF" -gt 0 -a "$NF" -lt "$NC" ]
+git -C "$R" ls-tree HEAD c/ > "$TMP/oracle-tree"
+# compare <scan output> — one line per disagreement, then the totals; case and entry numbers only
+compare() {
+  perl -e '
+    my ($treef, $scanf, $orf, $manf) = @ARGV; my (%blob, %class, %scan, %or, %ent, %n, %by);
+    open(my $t, "<", $treef) or die; while (<$t>) { chomp; my ($m, $p) = split /\t/; $p =~ s{.*/}{}; $blob{$p} = substr((split / /, $m)[2], 0, 12) }
+    open(my $m, "<", $manf) or die; while (<$m>) { chomp; my ($c, $k) = split / /; $class{"$c.txt"} = $k }
+    open(my $s, "<", $scanf) or die; while (<$s>) { next unless /^HIT entry=(\d+) at blob ([0-9a-f]{12}) line (\d+)$/; my $k = "$2 $1"; $ent{$1} = 1; $scan{$k} = $3 if !defined $scan{$k} || $3 < $scan{$k} }
+    open(my $o, "<", $orf) or die; while (<$o>) { /^(\S+) entry=(\d+) line=(\d+)$/ or die; $or{"$1 $2"} = $3; $ent{$2} = 1 }
+    my $pairs = 0;
+    for my $f (sort keys %blob) { for my $e (sort { $a <=> $b } keys %ent) {
+      $pairs++; my ($ol, $sl) = ($or{"$f $e"}, $scan{"$blob{$f} $e"});
+      next if !defined $ol && !defined $sl; next if defined $ol && defined $sl && $ol == $sl;
+      my $kind = !defined $sl ? "miss" : !defined $ol ? "extra" : "line";
+      (my $c = $f) =~ s/\.txt$//; $n{$kind}++; $by{"$kind/$class{$f}"}++;
+      print "$kind $c entry=$e class=$class{$f} oracle=", $ol // "none", " scan=", $sl // "none", "\n";
+    } }
+    print "compared=$pairs by-class=", join(",", map { "$_:$by{$_}" } sort keys %by), "\n";
+    printf "disagreements=%d miss=%d extra=%d line=%d\n", ($n{miss} // 0) + ($n{extra} // 0) + ($n{line} // 0), $n{miss} // 0, $n{extra} // 0, $n{line} // 0;
+  ' "$TMP/oracle-tree" "$1" "$TMP/oracle.out" "$TMP/oracle-manifest"
+}
+CMP="$(compare "$TMP/oracle-scan.out")"
+printf '%s\n' "$CMP" | grep -v '^miss \|^extra \|^line ' | sed 's/^/ORACLE: /'
+printf '%s\n' "$CMP" | grep '^miss \|^extra \|^line ' | head -20 | sed 's/^/ORACLE: /'
+expect_regex "ORACLE: (extractor) the comparison read the scan's hits and every case" "^compared=[1-9]" "$CMP"
+expect_eq "ORACLE: the scan and the oracle agree on every case, in both directions" \
+  "disagreements=0 miss=0 extra=0 line=0" "$(printf '%s\n' "$CMP" | grep '^disagreements=')"
+# the comparison can fail: the scan's output with its first hit dropped is one miss
+awk 'BEGIN { d = 0 } /^HIT / && !d { d = 1; next } { print }' "$TMP/oracle-scan.out" > "$TMP/oracle-scan-less.out"
+expect_regex "ORACLE: (control) one hit fewer is a disagreement the row sees" "^disagreements=[1-9]" "$(compare "$TMP/oracle-scan-less.out")"
+expect_eq "ORACLE: the scan's output holds the corpus's words zero times" "0" "$(count_in "$OUT" plover)"
 
 finish
