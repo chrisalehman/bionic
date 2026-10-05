@@ -467,7 +467,7 @@ dp_not_checked() {  # <arm> <what it needs>
 }
 
 # ==================================================== THE COMBINED PREFLIGHT
-# (epic-16 wave-02, R5/AC-4; Synthesis field report §3.)
+# (epic-16 wave-02, R5/AC-4; a field report §3.)
 #
 # WHAT THIS REPLACED. Every branch above used to end in `deny`, and the fix it
 # named was a command the operator ran by hand: refused, run the probe, retry,
@@ -508,7 +508,7 @@ if ! attested; then
   fi
 
   # Run it AT THE PINNED ROOT and with THIS dispatch's session key, rather than
-  # letting it inherit the shell. Both are the Synthesis field case read directly:
+  # letting it inherit the shell. Both are the field case read directly:
   # the attestation that had to be redone was taken against a root derived from the
   # working directory, and an attestation keyed to anything but the session whose
   # dispatch this is would be one this gate then refuses to read.
