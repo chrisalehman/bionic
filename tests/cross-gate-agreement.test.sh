@@ -13763,6 +13763,32 @@ SD_RM=$(sd_world mut R1,R2)
 SD_MUT_TICK=$(sd_tick "$SD_RM" "$SD_MUT/hooks/session-poker.sh")
 expect_eq "SD5 mutation: the tick that never asks the reader fills both rows (it ran)" "R1 R2 " "$SD_MUT_TICK"
 expect_ne "SD5b …and the agreement pin goes red on it" "$(sd_wall "$SD_RM")" "$SD_MUT_TICK"
+# THE VERB'S TWIN ROWS (wave-27 T34; REQ-15 AC-15.1; D24). The same worlds with the decline recorded
+# by `session-poker.sh decline` and no ledger line written by hand: the verb writes the line the
+# reply form's turn leaves, so the tick and the wall read it by the one rule and owe the same rows.
+sd_world_verb() {  # <label> <ids to decline, comma-joined> -> repo
+  local r
+  r=$(new_repo "sdv-$1")
+  roster_header > "$r/.bionic/tmp/roster-$SID_A.state"
+  cgc_plan "$r/.bionic/docs/plans/epic-99/sd.plan.md" \
+    'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe' 2
+  s4_bind "$r" "$SID_A" "$r/.bionic/docs/plans/epic-99/sd.plan.md"
+  s4_attest "$r" "$SID_A"
+  ( cd "$r" && sd_env bash "$CGSD_POKER" decline "$2" 'R1 waits on the base merge' ) > "$r/sd-decline.out" 2>&1
+  jq -nc '{type:"user",uuid:"u-sd-1",isSidechain:false,timestamp:"2026-10-03T09:05:00Z",message:{role:"user",content:"carry on"}}' \
+    > "$r/sd-turn.jsonl"
+  printf '%s' "$r"
+}
+SDV_R=$(sd_world_verb some R1)
+expect_contains "SDV precondition: the verb recorded the decline" "decline — " "$(cat "$SDV_R/sd-decline.out")"
+SDV_TICK=$(sd_tick "$SDV_R" "$CGSD_POKER")
+expect_contains "SDV0 the tick prints the verb's decline as standing, in the reply form's words" \
+  "— R1 waits on the base merge" "$(/usr/bin/grep '^poker: fill-declined standing since ' "$SDV_R/sd-tick.out")"
+expect_eq "SDV1 the tick fills the row the verb did not name" "R2 " "$SDV_TICK"
+expect_eq "SDV2 …and the stop wall refuses the silent turn for exactly that row" "$SDV_TICK" "$(sd_wall "$SDV_R")"
+SDV_RA=$(sd_world_verb all R1,R2)
+expect_eq "SDV3 a verb decline naming both: the tick fills nothing" "" "$(sd_tick "$SDV_RA" "$CGSD_POKER")"
+expect_eq "SDV4 …and the stop wall owes nothing either" "" "$(sd_wall "$SDV_RA")"
 
 # ============================================================
 section "RPL — the hold's reply count and the sweeper's reply reader are one envelope grammar (wave-24 T27; Step-6 review U2; D3)"

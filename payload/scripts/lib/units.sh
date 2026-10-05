@@ -655,6 +655,13 @@ units_rows_in_range() {
   _units_landed inrange "${1:-}" "${2:-}" "${3:-}"
 }
 
+# units_unrecorded <plan> <record> -> each commit on stdin (one per line: the range's first-parent
+# commits, the caller's one `git rev-list`) that is the `merge=` of no header naming a row of the
+# plan, in the order given (wave-27 T34; review pass 30 should-fix 1 and 2, A-orch-86). A header
+# with `row=—` or an id the table lacks names no row; a merge of 7 to 40 hex names the commit it is
+# a prefix of. The tick prints the MOVED list only when this prints nothing.
+units_unrecorded() { _units_landed unrecorded "${1:-}" "" "${2:-}"; }
+
 # _units_landed <landings|inrange> <plan> <range> <record> — the one program behind the two verbs:
 # the rows (`units_rows`), the record's header lines, the plan's matrix, then stdin's merges.
 _units_landed() {
@@ -664,7 +671,7 @@ _units_landed() {
     printf '\034rows\n'; printf '%s\n' "$rows"
     printf '\034rec\n'; [ -f "$rec" ] && awk '{ sub(/\r$/, ""); print }' "$rec" 2>/dev/null
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$plan" 2>/dev/null
-    printf '\034in\n'; [ "$mode" = inrange ] && cat
+    printf '\034in\n'; [ "$mode" = landings ] || cat
   } | awk -F'\t' -v mode="$mode" '
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     $0 == "\034rows" { part = 1; next }
@@ -681,6 +688,7 @@ _units_landed() {
       }
       if (!(r in at)) next
       lm[r] = (m ~ /^[0-9a-f]+$/ && length(m) >= 7 && length(m) <= 40) ? m : "-"
+      if (lm[r] != "-") rm[lm[r]] = 1
       next
     }
     part == 3 {
@@ -692,8 +700,19 @@ _units_landed() {
       crit[q] = (q in crit) ? crit[q] ", " ac : ac
       next
     }
-    part == 4 { v = tolower(trim($0)); if (v != "") inr[v] = 1; next }
+    part == 4 { v = tolower(trim($0)); if (v != "") { inr[v] = 1; ord[++no] = v }; next }
+    # A recorded merge names a commit it is a prefix of: the record may hold 7 to 40 hex, the
+    # caller full commits.
+    function named(mg, set,   v) { for (v in set) if (index(v, mg) == 1) return 1; return 0 }
     END {
+      if (mode == "unrecorded") {
+        for (x = 1; x <= no; x++) {
+          hit = 0
+          for (mg in rm) if (index(ord[x], mg) == 1) { hit = 1; break }
+          if (!hit) print ord[x]
+        }
+        exit
+      }
       for (i = 1; i <= n; i++) {
         owed = (knd[i] == "build" && (st[i] == "landed" || st[i] == "done"))
         if (mode == "landings") {
@@ -701,7 +720,7 @@ _units_landed() {
           else if (owed) printf "%s\t-\towed\n", id[i]
           continue
         }
-        if (!(id[i] in lm) || !(lm[id[i]] in inr)) continue
+        if (!(id[i] in lm) || lm[id[i]] == "-" || !named(lm[id[i]], inr)) continue
         cr = ""; ns = split(srv[i], sv, ",")
         for (k = 1; k <= ns; k++) {
           q = trim(sv[k]); if (q !~ /^REQ-[0-9]+$/) continue
