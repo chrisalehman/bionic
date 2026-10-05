@@ -234,7 +234,10 @@ RM_ENV_END='# ─── bionic:env:end ───'
 # 8582861.
 RM_ENV_KEYS='CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS CLAUDE_CODE_DISABLE_AUTO_MEMORY'
 RM_ENV_UNSET_JQ='if has("env") then (.env |= del(.[$k])) | (if (.env | length) == 0 then del(.env) else . end) else . end'
-RM_LEGACY_ALIAS_RE='alias claude=.*dangerously-skip-permissions'
+# from detect.sh, under its own name: any line that MENTIONS the retired alias.
+# Which of those lines bionic wrote is `bionic_legacy_alias_ours` below, detect.sh's
+# list copied whole; tests/rc-item.test.sh §T55 pins both (wave-27 T55).
+BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
 # from detect.sh: the substring that puts a managed-hook entry on the legacy channel
 RM_LEGACY_HOOK_SUBSTR='.claude/hooks/'
 # from detect.sh (DETECT_LEGACY_SKILL_NAME): the one skill the retired installer rendered
@@ -509,6 +512,71 @@ _rm_file_has_line_matching() {  # <file> <ere>
   return 1
 }
 
+# THE BARE ALIAS LINE BIONIC WROTE, AND ONLY THAT LINE (wave-27 T55, review pass 32
+# F1). The standalone door's copies of detect.sh's list, its scan and its number
+# words, and of markers.sh's line walk, under the same names and line for line, so
+# the payload door's library and this file cannot come to disagree about which
+# line is bionic's: tests/rc-item.test.sh §T55 pins all four, with a mutant.
+bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
+  local l="$1" p
+  l="${l#"${l%%[![:blank:]]*}"}"
+  l="${l%"${l##*[![:blank:]]}"}"
+  l="${l%$'\r'}"
+  l="${l%"${l##*[![:blank:]]}"}"
+  case "$l" in
+    # claude-bootstrap.sh 6e953055 (2026-03-22), bare, `printf '\n%s\n' "$ALIAS_LINE"`,
+    # until e012f966 (2026-03-28) wrote the same line inside the markers.
+    "alias claude='claude --dangerously-skip-permissions'") return 0 ;;
+    # claude-bootstrap.sh e178aecc (2026-03-14) until 6e953055, the same append with
+    # `CLAUDE_BIN="$(command -v claude)"` as <P>: that machine's path to claude, or
+    # empty where none was on PATH. One template (A-orch-93): P empty, or absolute
+    # with `claude` as its last component, holding no white space, quote, `$`,
+    # backquote or `;`.
+    "alias claude='"*" --dangerously-skip-permissions'")
+      p="${l#"alias claude='"}"; p="${p%" --dangerously-skip-permissions'"}"
+      [ -z "$p" ] && return 0
+      case "$p" in /claude|/*/claude) ;; *) return 1 ;; esac
+      case "$p" in *[[:space:]]*|*\'*|*\"*|*\$*|*\`*|*\;*) return 1 ;; esac
+      return 0 ;;
+  esac
+  return 1
+}
+
+bionic_legacy_alias_lines() {  # <file>
+  local file="$1" line n=0 ours="" theirs=""
+  if [ -f "$file" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      n=$((n + 1))
+      if bionic_legacy_alias_ours "$line"; then ours="${ours}${ours:+,}${n}"
+      elif [[ "$line" =~ $BIONIC_LEGACY_ALIAS_PATTERN ]]; then theirs="${theirs}${theirs:+,}${n}"; fi
+    done < "$file"
+  fi
+  printf 'ours=%s theirs=%s\n' "$ours" "$theirs"
+}
+
+bionic_line_numbers_words() {  # <n>,<n>…
+  case "$1" in
+    *,*) printf 'lines %s\n' "${1//,/, }" ;;
+    *)   printf 'line %s\n' "$1" ;;
+  esac
+}
+
+bionic_drop_lines_walk() {  # <file> <predicate> <n>,<n> — the lines that stay, to stdout; rc 2 when the sets differ
+  local file="$1" pred="$2" want=",$3," line n=0 nl dropped=""
+  while :; do
+    nl=1
+    IFS= read -r line || { [ -n "$line" ] || break; nl=0; }
+    n=$((n + 1))
+    if "$pred" "$line"; then
+      case "$want" in *",${n},"*) dropped="${dropped}${dropped:+,}${n}"; continue ;; esac
+    fi
+    printf '%s' "$line" || return 1
+    if [ "$nl" = "1" ]; then printf '\n' || return 1; fi
+  done < "$file"
+  [ ",${dropped}," = "$want" ] || return 2
+  return 0
+}
+
 # THE MODE TRAVELS WITH THE CONTENT (critic F2). Both rewriters below stage the
 # new file beside the old one and `mv` it into place, and `mv` replaces the inode:
 # without this, a shell rc the user deliberately kept at 0600 comes back at
@@ -700,6 +768,33 @@ _rm_strip_marker_block() {  # <file> <start-line> <end-line> [keep]
   return 0
 }
 
+# The copy of markers.sh `markers_drop_lines` (wave-27 T55), with the strip's exit
+# codes, so a read-only rc is refused here in the marked step's words (review pass
+# 32 F4: the filter this replaced wrote through it).
+_rm_drop_lines() {  # <file> <predicate> <n>,<n>
+  local file="$1" target tmp rc
+  _rm_regular "$file" >/dev/null || return 4
+  [ -f "$file" ] || return 2
+  target="$(bionic_link_target "$file")"
+  if [ -e "$target" ] && [ ! -w "$target" ]; then return 3; fi
+  tmp="${target}.bionic.tmp"
+  _rm_stage_tmp "$tmp" || return 1
+  bionic_drop_lines_walk "$file" "$2" "$3" >> "$tmp"; rc=$?
+  [ "$rc" = "0" ] || { rm -f "$tmp"; return "$rc"; }
+  _rm_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# A line that mentions the retired alias and is not one bionic wrote: named once,
+# by number in the file as it is now, never by its text, and left.
+_rm_legacy_alias_not_ours() {  # <rc>
+  local scan theirs
+  scan="$(bionic_legacy_alias_lines "$1")"; theirs="${scan#* theirs=}"
+  [ -n "$theirs" ] || return 1
+  echo "  $(bionic_line_numbers_words "$theirs") of ${1} is not in a form bionic wrote: it mentions the retired alias and is left as it is — edit it by hand if you want it gone"
+  return 0
+}
+
 # Why a marker strip refused, as the first half of a leftover line. The file is
 # as it was in every case.
 _rm_strip_why() {  # <rc> <file>
@@ -855,7 +950,16 @@ _rm_item_ids() {
 # of that item they get before they answer.
 _rm_item_verb() {  # <id>
   case "${1:-}" in
-    legacy-alias)          echo "remove the retired shell alias block from ${RC_FILE}" ;;
+    legacy-alias)
+      # The page takes the consent, so an unmarked line is named by number, as
+      # the item's own question names it (wave-27 T55).
+      local la_ours
+      la_ours="$(bionic_legacy_alias_lines "$RC_FILE")"; la_ours="${la_ours#ours=}"; la_ours="${la_ours%% *}"
+      if ! _rm_file_has_marker "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END" && [ -n "$la_ours" ]; then
+        echo "remove $(bionic_line_numbers_words "$la_ours") of ${RC_FILE}, the retired alias line bionic wrote"
+      else
+        echo "remove the retired shell alias block from ${RC_FILE}"
+      fi ;;
     environment)           echo "delete bionic's environment settings from ${RM_SETTINGS}" ;;
     legacy-hooks)          echo "remove the retired hook entries from ${RM_SETTINGS}" ;;
     legacy-skill-copy)     echo "remove the pre-plugin skill copy at ${RM_LEGACY_SKILL_DIR}" ;;
@@ -909,12 +1013,18 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
   case "$id" in
     # An rc or CLAUDE.md that is not a text file bionic can read (`_rm_regular`)
     # has nothing on the page: its item says why instead (wave-27 T51, F5, F7).
+    # A retired block whose markers do not pair up is left off, as setup's page
+    # leaves it; its item still refuses it by name (wave-27 T55, review pass 32
+    # note 8). An unmarked line is on the page only when bionic wrote it.
     legacy-alias)
       [ -f "$RC_FILE" ] || return 1
       _rm_regular "$RC_FILE" >/dev/null || return 1
-      _rm_file_has_marker "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END" && return 0
-      _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE" && return 0
-      return 1 ;;
+      if _rm_file_has_marker "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"; then
+        _rm_marker_faults "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END" >/dev/null
+        return
+      fi
+      present="$(bionic_legacy_alias_lines "$RC_FILE")"; present="${present#ours=}"
+      [ -n "${present%% *}" ] ;;
     environment)
       keys="$(_rm_env_keys_present)" || keys=""
       [ -n "$keys" ] && return 0
@@ -1135,10 +1245,12 @@ _rm_item_legacy_alias() {
     echo ""
     return 0
   fi
+  rm_alias_ours=""
   if [ -f "$RC_FILE" ]; then
+    rm_alias_ours="$(bionic_legacy_alias_lines "$RC_FILE")"; rm_alias_ours="${rm_alias_ours#ours=}"; rm_alias_ours="${rm_alias_ours%% *}"
     if _rm_file_has_marker "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"; then
       rc_variant=marked
-    elif _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE"; then
+    elif [ -n "$rm_alias_ours" ]; then
       rc_variant=legacy
     fi
   fi
@@ -1147,6 +1259,7 @@ _rm_item_legacy_alias() {
   case "$rc_variant" in
     none)
       _rm_clean "legacy alias block in ${RC_FILE}"
+      _rm_legacy_alias_not_ours "$RC_FILE"
       ;;
     marked)
       # The walk's own refusal, before the question (wave-27 T46, review pass 14
@@ -1173,16 +1286,23 @@ _rm_item_legacy_alias() {
       fi
       ;;
     legacy)
-      echo "  ${RC_FILE} carries an unmarked legacy alias line; bionic would delete that line."
-      if _rm_consent "Remove the legacy alias line from ${RC_FILE}?"; then
-        if _rm_filter_out_lines "$RC_FILE" "$RM_LEGACY_ALIAS_RE"; then
-          _rm_removed "legacy alias line in ${RC_FILE}"
-        else
-          _rm_leftover "could not rewrite ${RC_FILE} — the legacy alias line is still there"
-        fi
+      # ONLY THE LINE BIONIC WROTE (wave-27 T55, review pass 32 F1 and F4): named by
+      # number in the question, taken out by `_rm_drop_lines`, which refuses as the
+      # marked strip does; a line that only mentions the alias is named and left.
+      rm_alias_words="$(bionic_line_numbers_words "$rm_alias_ours")"
+      echo "  ${RC_FILE} carries the alias line bionic wrote before its markers; bionic would delete ${rm_alias_words} and nothing else."
+      if _rm_consent "Remove ${rm_alias_words} of ${RC_FILE}, the retired alias line bionic wrote?"; then
+        _rm_drop_lines "$RC_FILE" bionic_legacy_alias_ours "$rm_alias_ours"; rm_alias_rc=$?
+        case "$rm_alias_rc" in
+          0) _rm_removed "legacy alias ${rm_alias_words} in ${RC_FILE} (the unmarked spelling)" ;;
+          2) _rm_leftover "${RC_FILE} changed while remove ran — it is as it was, and the alias line is still there" ;;
+          *) rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
+             _rm_leftover "$(_rm_strip_why "$rm_alias_rc" "$RC_FILE") — the alias block is still there" ;;
+        esac
       else
-        _rm_skipped "$?" legacy-alias "legacy alias line in ${RC_FILE}"
+        _rm_skipped "$?" legacy-alias "legacy alias ${rm_alias_words} in ${RC_FILE}"
       fi
+      _rm_legacy_alias_not_ours "$RC_FILE"
       ;;
   esac
   echo ""
@@ -2276,6 +2396,8 @@ if [ "$rm_all" = "1" ]; then
   # reads its inherited stdin eats the one `y` this run is about to ask for.
   # Nothing here needs stdin, so nothing here gets it.
   if ! _rm_print_plan < /dev/null; then
+    # No item runs, so the line the alias item would name is named here (wave-27 T55).
+    [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null && _rm_legacy_alias_not_ours "$RC_FILE"
     echo "  nothing to remove — this machine is already clean."
     echo ""
     exit 0

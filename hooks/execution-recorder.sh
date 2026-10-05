@@ -487,6 +487,56 @@ latest_launch_for_agent() {  # <agent-id> -> latest launched_at for that id this
   return 0
 }
 
+# ---- BEGIN an amend by id survives the placing (wave-27 T59; review pass 36 N1) ----
+# `session-poker.sh amend <id>` records a set for an agent its start did not place as a row of
+# its own: `status=unplaced`, named by the id. When the agent IS placed later, by the launch
+# call's return (ARM 2) or by a later start (ARM 3), the placing row is appended after it and
+# becomes the id's last row, which is the row the budget wall reads (`roster_row_for_id`), so the
+# unplaced row no longer speaks for the id. That is enough for the reading and too much for the
+# set: the placing row carried the launch's own set only, and the suite the orchestrator granted
+# was refused again. So the placing row takes the id's latest unplaced row's `suites_allowed=`
+# and `re_executes=` as well as its own: the union, its own first, `none` read as no suite (as
+# the verb reads it), each run as its marked text. A row that has no such field gains it.
+unplaced_carry() {  # <the placing row> <agent id> -> that row, carrying the id's amended set
+  local _uc_up
+  [ -n "$2" ] && [ -f "$ROSTER_FILE" ] || { printf '%s' "$1"; return 0; }
+  _uc_up=$(awk -v id="$2" -v sid="$BIONIC_SID" -v pre="roster-state/${ROSTER_VERSION}|" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    index($0, pre) == 1 && kv($0, "agent_id") == id && kv($0, "session") == sid && kv($0, "status") == "unplaced" { row = $0 }
+    END { if (row != "") print row }' "$ROSTER_FILE" 2>/dev/null)
+  [ -n "$_uc_up" ] || { printf '%s' "$1"; return 0; }
+  printf '%s' "$1" | UC_SA="$(line_field "$_uc_up" suites_allowed)" UC_RX="$(line_field "$_uc_up" re_executes)" awk '
+    function suites(own,   n, i, a, out, seen) {
+      n = split(own " " ENVIRON["UC_SA"], a, /[ ,]+/)
+      for (i = 1; i <= n; i++) if (a[i] != "" && a[i] != "none" && !(a[i] in seen)) { seen[a[i]] = 1; out = out (out == "" ? "" : " ") a[i] }
+      return out
+    }
+    function runs(own,   n, i, k, a, out, seen, src) {
+      src[1] = own; src[2] = ENVIRON["UC_RX"]
+      for (k = 1; k <= 2; k++) {
+        n = split(src[k], a, "`")
+        for (i = 2; i <= n; i += 2) if (a[i] != "" && !(a[i] in seen)) { seen[a[i]] = 1; out = out (out == "" ? "" : " ") "`" a[i] "`" }
+      }
+      return out
+    }
+    BEGIN { RS = "|"; ORS = ""; sseen = 0; rseen = 0 }
+    {
+      f = $0
+      if (!sseen && f ~ /^suites_allowed=/) { sseen = 1; v = suites(substr(f, 16)); if (v != "") f = "suites_allowed=" v }
+      if (!rseen && f ~ /^re_executes=/)    { rseen = 1; v = runs(substr(f, 13));   if (v != "") f = "re_executes=" v }
+      printf "%s%s", (NR > 1 ? "|" : ""), f
+    }
+    END {
+      if (!sseen) { v = suites(""); if (v != "") printf "|suites_allowed=%s", v }
+      if (!rseen) { v = runs("");   if (v != "") printf "|re_executes=%s", v }
+    }'
+}
+# ---- END an amend by id survives the placing ----
+
 # ============================================================
 # THE PLAN ROW MOVES WITH THE LAUNCH (wave-26 T12, D4, AC-1.4; T32).
 # ============================================================
@@ -670,6 +720,8 @@ if [ "$TOOL_NAME" = "Agent" ]; then
       printf "%s%s", (NR > 1 ? "|" : ""), f
     }
     END { if (tid != "" && !seen) printf "|teammate_id=%s", tid }')
+  # The set an amend by id recorded for this agent rides the placing row (T59; `unplaced_carry`).
+  [ -n "$ROW_AGENT_ID" ] && COMPLETED=$(unplaced_carry "$COMPLETED" "$ROW_AGENT_ID")
   printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null || exit 0
 
   # THE PLAN ROW MOVES WITH THE CONFIRMATION (wave-26 T12, D4), only once the roster row is
@@ -870,22 +922,68 @@ if [ -n "$IS_START" ]; then
   #     stamps it (`session_plan`, `none` when unbound; an empty `plan=` reads `none` too);
   #   - NOT ACKED: no ack of its name later than its launch, read off the sweeper's ledger by the
   #     roster's own discharge rule (`_roster_discharged`, `_roster_occupied_at`), per launch;
-  #   - IN THE WINDOW: launched at most START_JOIN_WINDOW_S seconds ago. A start follows its
-  #     launch row by the dispatch wall's own hook (15 s at most, hooks/hooks.json), a permission
-  #     prompt a person may answer, and the spawn. A launch older than that, or one whose stamp
-  #     cannot be read, is not a start this event can be.
+  #   - READABLE: a launch whose stamp cannot be read is not a start this event can be.
+  # THE WINDOW IS A TIE-BREAK, NEVER A FILTER (wave-27 T59; review pass 36 S2, A-orch-100). The
+  # dispatch wall writes the launch row BEFORE the harness asks the user to permit the dispatch, so
+  # a plain foreground start follows its launch by however long that prompt stood, and while the
+  # orchestrator is held in that agent's call the refusal's `amend` line cannot be run. So among
+  # the launches above, one launched at most START_JOIN_WINDOW_S seconds ago is preferred to one
+  # launched earlier; when NONE is inside the window the newest is the candidate (launches tied at
+  # that stamp are all candidates, which is two a start cannot tell apart). A launch that never
+  # spawned still blocks nothing: the next dispatch of its type writes a newer launch, which is
+  # inside the window and taken. A stamp later than now reads as now (N4), so a clock stepped
+  # back cannot keep one launch fresher than every real one for good.
   START_JOIN_WINDOW_S=300
+  # ONE START, ONE CLOCK (T59; review pass 36 N6). One start runs four registrations (the terms and
+  # one per question), four processes. Each judging the window by its own `date` could place the
+  # start on one launch and push the checks of two, or the reverse, when they straddle a second at
+  # the window's edge. So the first of them to judge writes its reading to a file named by the
+  # session and the agent id, linked into place whole (`ln` fails when the file is there), and
+  # every other one reads it. A reading more than START_CLOCK_SHARE_S seconds from the reader's own
+  # clock is another start's (the registrations of one start run together, each bounded by its
+  # 10-second timeout) and is replaced. `BIONIC_NOW_EPOCH` pins the reading, the libraries' idiom,
+  # so a suite can put a launch exactly at the edge. Files older than ten minutes are swept.
+  START_CLOCK_SHARE_S=10
+  START_NOW=""
+  clock_share() {  # <a reading> -> 0 when it is this start's: within START_CLOCK_SHARE_S of START_NOW
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$((START_NOW - $1))" -le "$START_CLOCK_SHARE_S" ] && [ "$(($1 - START_NOW))" -le "$START_CLOCK_SHARE_S" ]
+  }
+  start_clock() {  # -> START_NOW, epoch seconds: one reading per start, shared by its registrations
+    [ -z "$START_NOW" ] || return 0
+    local _sc_f _sc_was _sc_tmp
+    START_NOW="${BIONIC_NOW_EPOCH:-}"
+    case "$START_NOW" in ''|*[!0-9]*) START_NOW=$(date -u +%s) ;; esac
+    case "$START_ID" in ''|*[!A-Za-z0-9._@-]*) return 0 ;; esac
+    _sc_f="$STATE_DIR/start-clock-${BIONIC_SID}-${START_ID}.state"
+    { [ -d "$STATE_DIR" ] && [ ! -L "$STATE_DIR" ] && [ ! -L "$_sc_f" ]; } || return 0
+    _sc_was=$(head -c 20 "$_sc_f" 2>/dev/null | tr -d '\n')
+    if clock_share "$_sc_was"; then START_NOW="$_sc_was"; return 0; fi
+    _sc_tmp=$(mktemp "$STATE_DIR/.start-clock.XXXXXX" 2>/dev/null) || return 0
+    printf '%s\n' "$START_NOW" > "$_sc_tmp"
+    if ln "$_sc_tmp" "$_sc_f" 2>/dev/null; then
+      rm -f "$_sc_tmp"
+      find "$STATE_DIR" -maxdepth 1 -type f -name "start-clock-${BIONIC_SID}-*.state" -mmin +10 -delete 2>/dev/null
+      return 0
+    fi
+    _sc_was=$(head -c 20 "$_sc_f" 2>/dev/null | tr -d '\n')
+    if clock_share "$_sc_was"; then START_NOW="$_sc_was"; rm -f "$_sc_tmp"; return 0; fi
+    mv -f "$_sc_tmp" "$_sc_f" 2>/dev/null || rm -f "$_sc_tmp"
+    return 0
+  }
   type_join_candidates() {  # <subagent type> -> the candidate count, then each candidate's row
-    local _tj_plan _tj_now _tj_from _tj_ledger="$STATE_DIR/sweeper-${BIONIC_SID}.state"
+    local _tj_plan _tj_nowiso _tj_from _tj_ledger="$STATE_DIR/sweeper-${BIONIC_SID}.state"
     roster_sh_load
     _tj_plan=$(sanitize "$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" 400)
     [ -n "$_tj_plan" ] || _tj_plan="none"
-    _tj_now=$(date -u +%s)
-    _tj_from=$(date -u -r "$((_tj_now - START_JOIN_WINDOW_S))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-      || date -u -d "@$((_tj_now - START_JOIN_WINDOW_S))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
+    start_clock
+    _tj_nowiso=$(date -u -r "$START_NOW" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+      || date -u -d "@$START_NOW" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
+    _tj_from=$(date -u -r "$((START_NOW - START_JOIN_WINDOW_S))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+      || date -u -d "@$((START_NOW - START_JOIN_WINDOW_S))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
     { [ -f "$_tj_ledger" ] && [ ! -L "$_tj_ledger" ] && [ -r "$_tj_ledger" ]; } || _tj_ledger=""
     TJ_LEDGER="$_tj_ledger" \
-    awk -v sid="$BIONIC_SID" -v ty="$1" -v plan="$_tj_plan" -v from="$_tj_from" \
+    awk -v sid="$BIONIC_SID" -v ty="$1" -v plan="$_tj_plan" -v from="$_tj_from" -v now="$_tj_nowiso" \
         -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
       BEGIN { _roster_acks(ENVIRON["TJ_LEDGER"], ACK) }
       index($0, pre) == 1 {
@@ -896,7 +994,7 @@ if [ -n "$IS_START" ]; then
         if (_roster_kv($0, "agent_id") != "" || _roster_kv($0, "teammate_id") != "") claimed[u] = 1
       }
       END {
-        c = 0
+        c = 0; o = 0; best = ""
         for (i = 1; i <= n; i++) {
           u = order[i]
           if (u in claimed) continue
@@ -908,9 +1006,13 @@ if [ -n "$IS_START" ]; then
           nm = _roster_kv(last[u], "name"); if (nm == "") nm = "(unnamed)"
           at = _roster_occupied_at(last[u])
           if ((nm in ACK) && _roster_discharged(at, ACK[nm])) continue
-          if (!_roster_stamp_ok(at) || !_roster_stamp_ok(from) || at "" < from "") continue
-          pick[++c] = last[u]
+          if (!_roster_stamp_ok(at)) continue
+          if (_roster_stamp_ok(now) && at "" > now "") at = now
+          if (_roster_stamp_ok(from) && at "" >= from "") { pick[++c] = last[u]; continue }
+          if (at "" > best "") { best = at; o = 0 }
+          if (at "" == best "") late[++o] = last[u]
         }
+        if (c == 0) { c = o; for (i = 1; i <= o; i++) pick[i] = late[i] }
         print c
         for (i = 1; i <= c; i++) print pick[i]
       }' "$ROSTER_FILE" 2>/dev/null
@@ -1251,7 +1353,7 @@ if [ -n "$IS_START" ]; then
   # of this session and this type that no row has yet given an id or a `teammate_id=`: a
   # teammate is joined by the name join above, and a launch that already has an id belongs to
   # an agent that already started, and it must still be one a start can follow (this plan's, not
-  # acked, launched inside the window: T38, in `type_join_candidates`). Two candidates are two
+  # acked, inside the window before outside it: T38, T59, in `type_join_candidates`). Two candidates are two
   # launches this event cannot tell apart
   # — the name the start carries is the only tie-break, and the name join above already spent
   # it — so both are left to ARM 2's tool_use_id join and one line says so. A third-party type
@@ -1296,6 +1398,8 @@ if [ -n "$IS_START" ]; then
     case "$ROW" in *"|teammate_id="*) : ;; *) [ -n "$RA_TID" ] && ROW="$ROW|teammate_id=$RA_TID" ;; esac
   fi
   [ -n "$ROW" ] || exit 0
+  # The set an amend by id recorded for this agent rides the placing row (T59; `unplaced_carry`).
+  ROW=$(unplaced_carry "$ROW" "$START_ID")
 
   # THE TEAMMATE'S TERMS, decided on the row the joins above found (wave-24 T6, D8), and every
   # owed delivery made here (wave-27 T15; the checks are the question registrations', T30).

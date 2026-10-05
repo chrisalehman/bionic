@@ -530,4 +530,22 @@ expect_contains "R13c …while the same plain row does carry plan= (the positive
 lib roster_row "${R5_BASE[@]}" "question=evidence" >/dev/null
 expect_status "R13d a near-miss key is still refused" "2" "$?"
 
+# ---------------------------------------------------------------------------------------
+section "R14 — a declared debt is two row keys (wave-27 T31; REQ-14 AC-14.1, AC-14.2, D23)"
+# The dispatch wall records a brief's `Lands-red: <suite> until <token>` and `Red-evidence: <path>`
+# as `lands_red=` and `red_evidence=`, and `land` honours exactly what the row carried at dispatch.
+# PRESENT-IF-PASSED, trailing `questions=`: a row that names neither is the plain row, byte for byte.
+R14_R="$(lib roster_row "${R5_BASE[@]}" "questions=evidence" "lands_red=widget.test.sh until approval:release" \
+  "red_evidence=.bionic/docs/record/wave-01-fixture/T9-red.md")"
+expect_eq "R14a lands_red= and red_evidence= are written when passed, after questions=" \
+  "${R5_PLAIN}|questions=evidence|lands_red=widget.test.sh until approval:release|red_evidence=.bionic/docs/record/wave-01-fixture/T9-red.md" "$R14_R"
+expect_eq "R14b …lands_red read back by key, its blanks kept" "widget.test.sh until approval:release" \
+  "$(field_of_row "$R14_R" lands_red)"
+expect_eq "R14c …red_evidence read back by key" ".bionic/docs/record/wave-01-fixture/T9-red.md" \
+  "$(field_of_row "$R14_R" red_evidence)"
+expect_absent "R14d a row that names neither carries neither" "lands_red=" "$R5_PLAIN"
+expect_absent "R14d2 …nor red_evidence=" "red_evidence=" "$R5_PLAIN"
+lib roster_row "${R5_BASE[@]}" "lands-red=widget.test.sh until approval:release" >/dev/null
+expect_status "R14e the label's own spelling is not a key" "2" "$?"
+
 finish
