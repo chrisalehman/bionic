@@ -422,8 +422,13 @@ section "Section 11: the scaffold's Files: comment and its optional claim line r
 # claim line.
 for _sc_f in skills/canonical-sdlc/SKILL.md skills/canonical-sdlc/dispatch.md; do
   _sc_body=$(cat "$REPO/$_sc_f" 2>/dev/null)
-  expect_true "11a: $_sc_f says a read-only brief keeps Suites: none" \
-    bash -c 'case "$1" in *"# writers; a read-only brief omits this and keeps Suites: none"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
+  # RE-POINTED (wave-27 T53, review pass 28 B1): a reader lists its records on Files: (the fact
+  # verb takes a record only from the reader's own row), so the comment no longer has a
+  # read-only brief omit the line; only a researcher or test-runner does.
+  expect_true "11a: $_sc_f has a reader list its records on Files: and a researcher or test-runner omit it" \
+    bash -c 'case "$1" in *"# a reader lists its records here, one per question, its artifact among them; a researcher or test-runner omits it"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
+  expect_true "11a2: …and no longer says a read-only brief omits it" \
+    bash -c 'case "$1" in *"a read-only brief omits this"*) exit 1 ;; esac; exit 0' _ "$_sc_body"
   expect_true "11b: …and no longer says to omit the line" \
     bash -c 'case "$1" in *"omit for a read-only brief"*) exit 1 ;; esac; exit 0' _ "$_sc_body"
   expect_true "11c: …and carries the optional Subprocess claim: line" \
