@@ -418,9 +418,15 @@ expect_contains "B4e4 …printing the amend line for its id" "session-poker.sh a
 # The agent's transcript is on disk, as it is for any agent that has run a command.
 mkdir -p "$FAKE_HOME/.claude/projects/-sandbox/$SID/subagents"
 : > "$FAKE_HOME/.claude/projects/-sandbox/$SID/subagents/agent-$ACTOR.jsonl"
-B4E_OUT=$( cd "$R4E" && env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
-  BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
-  bash -c "$B4E_CMD" 2>&1 ); B4E_RC=$?
+# With NO remedy line printed there is nothing to run, and `bash -c ""` exits 0, so the row would
+# pass on the very defect it pins (wave-27 T59; review pass 36 S3): no line is a failure here.
+if [ -n "$B4E_FIX" ]; then
+  B4E_OUT=$( cd "$R4E" && env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
+    BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+    bash -c "$B4E_CMD" 2>&1 ); B4E_RC=$?
+else
+  B4E_OUT=""; B4E_RC="no remedy line was printed"
+fi
 expect_eq "B4e5 the printed line, run as printed by the orchestrator, exits 0" "0" "$B4E_RC"
 expect_contains "B4e6 …saying it recorded the set for that id" "poker: amended — $ACTOR" "$B4E_OUT"
 guarded "$R4E" 'bash tests/alpha.test.sh'
