@@ -3025,9 +3025,12 @@ EOF
 # THE DRY RUN IS BOUND TO THE COPY, NEVER TO THE PLAN: its own engagement marker for a
 # synthetic session whose `plan=` names the dry copy, removed after (close-out.sh's pattern).
 # Both copies sit beside the plan under names that do not end in `.md`, so no plan walk can
-# read one as a run. The judged copy is a WRITER's commit (task-add's rule): past Step 4 the
-# dry copy carries `current: 4`, because a main-root commit during Verify is held to the
-# Step-5 block the run is still writing. `current` is the one exception — what it asks is
+# read one as a run. The marker also names the plan the copy was made from (`dry_of=`), and
+# goes with it: the commit gate reads that plan's landing record for its declared debts, since
+# the copy's name names none (wave-27 T76; lib/proof.sh `proof_debt_origin`). The judged copy
+# is a WRITER's commit (task-add's rule): past Step 4 the dry copy carries `current: 4`,
+# because a main-root commit during Verify is held to the Step-5 block the run is still
+# writing. `current` is the one exception — what it asks is
 # whether the run can commit at the step it moves to, so its copy is judged as it stands.
 #
 # MAIN THREAD ONLY is the Bash wall's to enforce (payload/scripts/lib/walls.sh, the
@@ -3102,7 +3105,7 @@ plan_verb_dry() {
     exit 2
   fi
   mkdir -p "${PV_MARK%/*}" 2>/dev/null
-  printf 'plan=%s\nengaged_at=%s\n' "$PV_DRY" "$(iso_now)" > "$PV_MARK"
+  printf 'plan=%s\ndry_of=%s\nengaged_at=%s\n' "$PV_DRY" "$PV_PLAN" "$(iso_now)" > "$PV_MARK"
   err="$(cd "$PV_REPO" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$PV_SID" BIONIC_WALL_VERBOSE=1 \
     bash "$HOOK_DIR/bash-walls.sh" 2>&1 >/dev/null <<< "$(jq -n --arg s "$PV_SID" --arg cwd "$PV_REPO" --arg v "$verb" \
       '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
@@ -5968,13 +5971,14 @@ EOF
     # refused instead unless lib/proof.sh `facts_state` says every fact the run owes holds at the
     # working head: the floor, and each reading its rigor and scale deal. Each line that does not
     # hold is printed as the judge gave it.
-    PV_DRY=as-is; PV_HOW="dry-committed at that step first"
+    # The mode has a name of its own: PV_DRY is the dry copy's PATH (wave-27 T76; A-orch-171).
+    PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
     case "$PV_KEY" in
       8|8a|8b)
         cur8_judge
-        PV_DRY=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
+        PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
     esac
-    plan_verb_swap current "current: $PV_KEY" "$PV_DRY"
+    plan_verb_swap current "current: $PV_KEY" "$PV_DRYMODE"
     say "current — current: $PV_KEY in $PV_PLAN (was ${PV_CUR:-none})$PV_FILLED; $PV_HOW."
     exit 0
     ;;

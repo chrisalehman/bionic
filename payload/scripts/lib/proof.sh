@@ -729,6 +729,33 @@ proof_debt_record() {
   printf '%s/record/%s/landing-proofs.log' "$(docs_root "$tree")" "$slug"
 }
 
+# proof_debt_origin <sid> <marker> <bound plan> -> the plan whose landing record holds the debts a
+# commit bound to <bound plan> owes (wave-27 T76; review pass 60 P0-1; A-orch-170, A-orch-171). A
+# plan verb proves its change by a dry commit of a COPY, `<plan>.<verb>-dry.<pid>`, under a session
+# `planverb-<pid>` whose marker it writes with `dry_of=<plan>` beside `plan=<copy>` (hooks/
+# session-poker.sh `plan_verb_dry`); the copy's own name names no record, so the dry commit reads the
+# record of the plan it was made from. The field is honoured only when all three hold: the session
+# is a plan verb's (`planverb-<pid>`), the marker says `dry_of=`, and the bound file is named
+# `<dry_of>.<verb>-dry.<pid>`, the same pid.
+# A real session bound to a real plan names no such file, so it reads exactly its own plan's record,
+# whatever a marker line says. No fork: the marker is two or three lines, read here.
+proof_debt_origin() {
+  local sid="${1:-}" marker="${2:-}" plan="${3:-}" line from="" verb pid=""
+  case "$sid" in planverb-*) pid="${sid#planverb-}" ;; esac
+  case "$pid" in ''|*[!0-9]*) printf '%s' "$plan"; return 0 ;; esac
+  if [ -f "$marker" ] && [ ! -L "$marker" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in dry_of=?*) from="${line#dry_of=}"; break ;; esac
+    done < "$marker"
+  fi
+  verb=""
+  case "$from" in ?*) case "$plan" in "$from".?*-dry."$pid") verb="${plan#"$from".}"; verb="${verb%-dry."$pid"}" ;; esac ;; esac
+  case "$verb" in
+    ''|*[!a-z-]*) printf '%s' "$plan" ;;
+    *) printf '%s' "$from" ;;
+  esac
+}
+
 # proof_debts_read <record> -> `<suite><TAB><token><TAB><time>` once per suite and token with a
 # `debt:` line no `void:` line names, the time the NEWEST of those lines' `at=` (wave-27 T67; review
 # pass 46 B2): each red landing is a debt of its own, and two on one suite and token are both covered
