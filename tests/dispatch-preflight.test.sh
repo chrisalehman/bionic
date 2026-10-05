@@ -8946,6 +8946,66 @@ expect_eq "§scaffold-walk …the SAME brief with Suites: none and no Re-execute
 expect_contains "§scaffold-walk …because the evidence reader declares nothing to re-execute (T57's words)" \
   "the critic declares nothing to re-execute" "$GATE_ERR $GATE_REASON"
 
+# ---- an evidence reader whose runner is not a shell suite (wave-27 T60; review pass 38 B1) ----
+# The text says one thing whatever the runner: suites under `Suites:`, any other runner under
+# `Re-executes:`, one to three in all, and `Suites: none` beside a `Re-executes:` that names a
+# run is right. So a pytest reader fills the scaffold's own `Re-executes:` line and EITHER keeps
+# `Suites: none` (shape A) OR drops the `Suites:` line (shape B). make_repo configures NO impact
+# command, the shipped default, which is where pass 38 found the reader refused. Shape B is
+# admitted only with T57's wall half (a reader's `Files:` asks for no derivation) on the head.
+WALK_RUN='pytest tests/'
+walk_fill_re() {  # <questions> <records> <A|B> -> walk_fill's brief with the scaffold's Re-executes: filled
+  local re
+  re="$(scaffold_raw_line "$DISPATCH_FILE" Re-executes)"
+  re="${re%%<*}${WALK_RUN}${re##*>}"
+  walk_fill "$1" "$2" none | /usr/bin/awk -v re="$re" -v shape="$3" '
+    /^Suites:/ { if (shape == "A") print; print re; next } { print }'
+}
+WALK_ER="$(walk_fill_re evidence "$WALK_REC/T3-evidence.md" A)"
+expect_contains "§scaffold-walk precondition: the scaffold's Re-executes: line is filled with the run" \
+  "Re-executes: \`$WALK_RUN\`" "$WALK_ER"
+expect_contains "§scaffold-walk precondition: …shape A keeps Suites: none, its comment kept" \
+  "Suites: none  # " "$WALK_ER"
+expect_contains "§scaffold-walk precondition: …and Files: lists the record" "Files: $WALK_REC/T3-evidence.md" "$WALK_ER"
+expect_absent "§scaffold-walk precondition: …and no placeholder is left" "<" "$WALK_ER"
+WALK_ERB="$(walk_fill_re evidence "$WALK_REC/T3-evidence.md" B)"
+expect_contains "§scaffold-walk precondition: shape B carries the same run" "Re-executes: \`$WALK_RUN\`" "$WALK_ERB"
+expect_absent "§scaffold-walk precondition: …and no Suites: line" "Suites:" "$WALK_ERB"
+REPO=$(walk_repo rwalk5 audited)
+expect_nonempty "§scaffold-walk precondition: the walk repo's .bionic holds its bound plan" \
+  "$(/usr/bin/grep -rls '^rigor: audited' "$REPO/.bionic")"
+expect_eq "§scaffold-walk precondition: …and configures no impact command anywhere" "" \
+  "$(/usr/bin/grep -rls 'impact-command' "$REPO/.bionic")"
+q_gate "$REPO" walk5 bionic:auditor "$WALK_ER"
+expect_eq "§scaffold-walk audited: the auditor, Suites: none beside its pytest run, is ADMITTED" "allow" "$GATE_VERDICT"
+expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
+expect_eq "§scaffold-walk …and its record" "$WALK_REC/T3-evidence.md" "$(roster_field "$(q_row "$REPO")" files)"
+walk_start "$REPO" wq-walk5
+walk_register "$REPO" "$WALK_REC/T3-evidence.md" evidence wq-walk5
+expect_eq "§scaffold-walk …and the evidence record registers" "0" "$WALK_RC"
+REPO=$(walk_repo rwalk6 audited)
+# walk_verdict -> the gate's verdict, and on a refusal its reason, so a red row says why.
+walk_verdict() { [ "$GATE_VERDICT" = allow ] && printf allow || printf '%s: %s' "$GATE_VERDICT" "${GATE_REASON:0:240}"; }
+q_gate "$REPO" walk6 bionic:auditor "$WALK_ERB"
+expect_eq "§scaffold-walk audited: the auditor with no Suites: line and its pytest run is ADMITTED (needs T57)" \
+  "allow" "$(walk_verdict)"
+expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
+WALK_TRECS="$WALK_REC/T3-evidence.md, $WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md"
+REPO=$(walk_repo rwalk7 tested)
+q_gate "$REPO" walk7 bionic:critic "$(walk_fill_re "evidence, adversarial, structure" "$WALK_TRECS" A)"
+expect_eq "§scaffold-walk tested: the critic, Suites: none beside its pytest run, is ADMITTED" "allow" "$GATE_VERDICT"
+expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
+walk_start "$REPO" wq-walk7
+for _wq in evidence adversarial structure; do
+  walk_register "$REPO" "$WALK_REC/T3-${_wq}.md" "$_wq" wq-walk7
+  expect_eq "§scaffold-walk …the ${_wq} record registers" "0" "$WALK_RC"
+done
+REPO=$(walk_repo rwalk8 tested)
+q_gate "$REPO" walk8 bionic:critic "$(walk_fill_re "evidence, adversarial, structure" "$WALK_TRECS" B)"
+expect_eq "§scaffold-walk tested: the critic with no Suites: line and its pytest run is ADMITTED (needs T57)" \
+  "allow" "$(walk_verdict)"
+expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
+
 section "AC-E1.3/E1.5 — every refusal this gate makes is one line, in the shape"
 
 # fails-when: a refusal reaches the user as more than one line, or in any shape but
