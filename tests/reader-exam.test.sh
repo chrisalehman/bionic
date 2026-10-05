@@ -4,7 +4,8 @@
 # THE EXAM ITSELF IS NOT RUN HERE. A sitting dispatches live readers (README.md in
 # tests/reader-exam/), and no hermetic suite can. What this suite owns is what a machine can
 # hold the exam to: the checks files the readers were examined on are the ones that ship, and
-# the latest sitting had readers behind it who met every sample. Six sections:
+# the latest sitting had readers behind it who met every sample, and the recipe a sitter follows
+# is in the tree. Seven sections:
 #
 #   §PIN      `exam_pin` on planted sittings: the latest sitting, by file order, has the
 #             three `sha256` lines equal to the files' digests, a `result` line for every
@@ -13,8 +14,10 @@
 #             gives it and the one-mind critic) and none for a question the key does not
 #             name, no `missed`, no two lines for one sample and question that disagree, and
 #             no `met` line whose reached result its sample's key does not admit; a `##` line
-#             that is not a sitting header is red wherever it is. Otherwise the verdict is red and names why. A
-#             checks file edited after its sitting turns it red.
+#             that is not a sitting header is red wherever it is; a file with no sitting in it,
+#             whether empty or holding a sitting's lines under no header, is red for that.
+#             Otherwise the verdict is red and names why. A checks file edited after its sitting
+#             turns it red.
 #   §KEY      `exam_key` on planted keys: three lines for `clean`, four for every other
 #             sample, the fourth a `names:` line, whose alternatives are separated by ` | `.
 #   §SCORE    `exam_score` (tests/reader-exam/score.sh, README step 5) on the real keys: a
@@ -29,6 +32,12 @@
 #             record path the README hands a reader holds a sample's name; the exclude that
 #             keeps `.bionic/` out of the built sample's status is read through a record
 #             written there, and against a materialize.sh without it.
+#   §RECIPE   what README step 3 hands a sitter: the rule that finds a session's transcript
+#             directory, read from the README and applied to a made-up path; run-session.sh run
+#             against a fake CLI binary (the call it makes, the variables it clears, the binary
+#             and not a function of the same name, no widening flag); gen-prompt.sh on made-up
+#             briefs; neither helper nor any prompt it writes names a sample or the exam. No
+#             session is started.
 #   §SHIPPED  the shipped `sittings.md` against the shipped checks files.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): §PIN runs
@@ -41,7 +50,10 @@
 # §SAMPLES runs the same `exam_key` on the real ones. §SCORE plants reader records against
 # the REAL keys, through the same score.sh a sitting sources; the one-mind records of SC5 are
 # review pass 18's planted records, copied. §DEST and §SAMPLES run the real samples through
-# the real materialize.sh into real git repositories.
+# the real materialize.sh into real git repositories. §RECIPE runs the real helpers; SYNTHESIZED
+# there: the CLI binary (a script on PATH that records its argv, working directory and
+# environment, with a shell function of the same name exported beside it), the parent session's
+# variables, and the briefs. The shipped README is read, not copied.
 #
 # ANTI-VACUITY (declared, per the same file, "Anti-vacuity"): every red verdict sits beside a
 # green one from the same function on a fixture one edit away; the digest function is proved
@@ -447,6 +459,22 @@ expect_eq "P17: a dealt role on a question that is not its own is red and names 
 pin_call "$TMP/second-reviewer.md" "$ROOT"
 expect_eq "P17: a second line from the dealt role on its own question is pinned" "pinned" "$PIN_OUT"
 
+# A file with no sitting in it has one answer, whatever else it holds: the sha256 and result lines
+# of a sitting under no `##` header belong to no sitting, and an empty file holds none.
+grep -v '^## ' "$TMP/right.md" > "$TMP/no-header.md"
+expect_eq "P18: the fixture sitting with its header left off still holds its three sha256 lines" "3" \
+  "$(grep -c '^sha256 ' "$TMP/no-header.md")"
+expect_eq "P18: …and its result lines" "$(grep -c '^result ' "$TMP/right.md")" "$(grep -c '^result ' "$TMP/no-header.md")"
+expect_eq "P18: …and no header line" "0" "$(grep -c '^##' "$TMP/no-header.md")"
+pin_call "$TMP/no-header.md" "$ROOT"
+expect_eq "P18: a sittings file that has lost its header is red, as one with no sitting" \
+  "red: no sitting is recorded" "$PIN_OUT"
+expect_status "P18: rc 1" 1 "$PIN_RC"
+: > "$TMP/empty-sittings.md"
+pin_call "$TMP/empty-sittings.md" "$ROOT"
+expect_eq "P18: an empty sittings file is red by the same line" "red: no sitting is recorded" "$PIN_OUT"
+expect_status "P18: rc 1" 1 "$PIN_RC"
+
 section "§KEY — an answer key names its defect"
 
 K="$TMP/keys"
@@ -783,6 +811,138 @@ expect_contains "S4: a README whose record-path example holds a sample's name is
   "red-then-green-one-mind-" "$(exam_named_path "$NAMED_PATH_PROBE" "$REPO")"
 expect_contains "S4: …in any case" "RED-THEN-GREEN-one-mind-" \
   "$(sed 's|red-then-green-one-mind-|RED-THEN-GREEN-one-mind-|' "$NAMED_PATH_PROBE" > "$NAMED_PATH_PROBE.upper"; exam_named_path "$NAMED_PATH_PROBE.upper" "$REPO")"
+
+section "§RECIPE — a sitting can be repeated from the tree"
+
+# README step 3 gives the rule that finds a session's transcripts: the physical working directory
+# with every character that is not an ASCII letter or digit written `-`. The row takes the rule
+# from the README's own text and applies it to a made-up path holding `_`, `.` and a space.
+RULE_CMD="$(grep -o "sed '[^']*'" "$EXAM/README.md" | head -n 1)"
+RULE="${RULE_CMD#sed \'}"; RULE="${RULE%\'}"
+expect_nonempty "R1: the README carries the transcript directory rule as a sed command" "$RULE"
+expect_contains "R1: …and says it is read from the physical working directory" "pwd -P" "$(cat "$EXAM/README.md")"
+expect_eq "R1: the rule writes a path holding _, . and a space as the harness's directory name" \
+  "-tmp-x-y-a-b-c-s1" "$(printf '%s' '/tmp/x_y/a.b c/s1' | sed "$RULE")"
+expect_eq "R1: …and the README's own worked path as the name it gives" \
+  "-private-var-folders-x-y-T-tmp-AbC-s1" "$(printf '%s' '/private/var/folders/x_y/T/tmp.AbC/s1' | sed "$RULE")"
+expect_contains "R1: …which the README writes out" "-private-var-folders-x-y-T-tmp-AbC-s1" "$(cat "$EXAM/README.md")"
+
+RUN="$EXAM/run-session.sh"
+GEN="$EXAM/gen-prompt.sh"
+for h in "$RUN" "$GEN"; do
+  expect_true "R2: ${h##*/} is executable" test -x "$h"
+  expect_true "R2: ${h##*/} parses" bash -n "$h"
+done
+
+# The README's step 3 names both helpers and keeps the interactive command beside them.
+STEP3="$(awk '/^3\. \*\*Open an engaged session/ { f = 1 } /^4\. \*\*Dispatch the readers/ { f = 0 } f' "$EXAM/README.md")"
+expect_contains "R3: step 3 names run-session.sh" "tests/reader-exam/run-session.sh" "$STEP3"
+expect_contains "R3: step 3 names gen-prompt.sh" "tests/reader-exam/gen-prompt.sh" "$STEP3"
+expect_contains "R3: step 3 keeps the interactive command" 'claude --plugin-dir' "$STEP3"
+
+# run-session.sh adds no flag that widens what a session may do. The file is read for the flags
+# it does pass, then for the ones it must not.
+RUN_TEXT="$(cat "$RUN")"
+expect_contains "R4: run-session.sh passes -p" '"$claude_bin" -p --plugin-dir "$plugin" --output-format json' "$RUN_TEXT"
+expect_empty "R4: …and no permission, settings, directory or tool flag" \
+  "$(grep -nE -- '--(dangerously|allow|permission|settings|setting-sources|add-dir|tools|disallowed|mcp-config|bare)' "$RUN")"
+expect_contains "R4: a denied tool is reported to the user and not worked round, in its header" "reported to the user" "$RUN_TEXT"
+expect_contains "R4: …and never worked round" "never worked round" "$RUN_TEXT"
+
+# Run against a fake CLI binary on PATH, with a shell function of the same name exported beside it
+# and the parent session's variables set: what the fake sees is what a real session would.
+RV="$TMP/recipe"
+mkdir -p "$RV/bin" "$RV/dest" "$RV/plugin"
+cat > "$RV/bin/claude" <<'FAKE'
+#!/bin/bash
+{
+  printf 'argv:'; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'
+  printf 'cwd: %s\n' "$(pwd -P)"
+  env | grep -E '^(CLAUDECODE|CLAUDE_[A-Z_]*)=' | sort
+} > "$FAKE_LOG"
+echo '{"session_id":"fake"}'
+echo "fake stderr" >&2
+FAKE
+chmod +x "$RV/bin/claude"
+printf 'a prompt with "quotes", a $dollar and\ntwo lines\n' > "$RV/prompt.txt"
+PARENT_VARS="CLAUDECODE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_PID CLAUDE_PLUGIN_DATA CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_EFFORT"
+parent_env=""
+for v in $PARENT_VARS; do parent_env="$parent_env $v=parent-$v"; done
+# shellcheck disable=SC2086
+out="$(cd "$TMP" && env $parent_env CLAUDE_CONFIG_DIR=/kept/config FAKE_LOG="$RV/fake.log" PATH="$RV/bin:$PATH" \
+  bash -c 'claude() { echo FUNCTION > "$FAKE_LOG.function"; }; export -f claude; exec bash "$0" "$@"' \
+  "$RUN" "$RV/dest" "$RV/plugin" "$RV/prompt.txt" "$RV/out.json" 2>&1)"; rc=$?
+expect_status "R5: run-session.sh exits with the CLI's status" 0 "$rc"
+expect_contains "R5: the fake CLI saw the call" "argv:" "$(cat "$RV/fake.log" 2>/dev/null)"
+expect_eq "R5: it runs the CLI binary, and the shell function of the same name never ran" "no" \
+  "$([ -e "$RV/fake.log.function" ] && echo yes || echo no)"
+expect_eq "R5: it passes -p, --plugin-dir, --output-format json and the prompt, and nothing else" \
+  "argv: [-p] [--plugin-dir] [$RV/plugin] [--output-format] [json] [a prompt with \"quotes\", a \$dollar and
+two lines]" "$(sed -n '1,2p' "$RV/fake.log")"
+expect_eq "R5: it runs in the built project's physical directory" "cwd: $(cd "$RV/dest" && pwd -P)" "$(sed -n '3p' "$RV/fake.log")"
+for v in $PARENT_VARS; do
+  expect_empty "R5: the parent's $v is not handed down" "$(grep "^$v=" "$RV/fake.log")"
+  expect_contains "R6: run-session.sh names $v in a comment" "$v" "$(grep '^#' "$RUN" | grep -w "$v")"
+done
+expect_eq "R5: …while the config directory is left as it was" "CLAUDE_CONFIG_DIR=/kept/config" "$(grep '^CLAUDE_CONFIG_DIR=' "$RV/fake.log")"
+expect_eq "R5: the session's result lands in <output file>" '{"session_id":"fake"}' "$(cat "$RV/out.json")"
+expect_eq "R5: …its stderr in <output file>.err" "fake stderr" "$(cat "$RV/out.json.err")"
+expect_regex "R5: …and its times in <output file>.time" '^end=.* rc=0$' "$(tail -n 1 "$RV/out.json.time")"
+bash "$RUN" "$RV/dest" "$RV/missing-plugin" "$RV/prompt.txt" "$RV/out2.json" > /dev/null 2>&1; rc=$?
+expect_status "R5: a missing plugin copy is refused with status 2" 2 "$rc"
+expect_false "R5: …and nothing is written" test -e "$RV/out2.json"
+
+# gen-prompt.sh: a prompt for made-up briefs. Its words are the instruction's own; what a brief
+# says is the brief's.
+printf 'subagent_type: bionic:critic\nQuestions: structure\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-critic-structure.md\n\nRead /tmp/q/s1 over a..b.\n' > "$RV/brief-1.txt"
+printf 'subagent_type: bionic:reviewer\nQuestions: evidence\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-reviewer-evidence.md\nno final newline' > "$RV/brief-2.txt"
+bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt" > "$RV/prompt-1.txt"; rc=$?
+P="$(cat "$RV/prompt-1.txt")"
+expect_status "R7: gen-prompt.sh writes a prompt for two briefs" 0 "$rc"
+expect_eq "R7: the prompt opens with /bionic:canonical-sdlc" "/bionic:canonical-sdlc" "$(head -n 1 "$RV/prompt-1.txt" | cut -d ' ' -f 1)"
+expect_contains "R7: each brief goes to the agent type its first line names" "=== Brief 1 — subagent_type: bionic:critic ===" "$P"
+expect_contains "R7: …the second to its own" "=== Brief 2 — subagent_type: bionic:reviewer ===" "$P"
+for n in 1 2; do
+  expect_eq "R7: brief $n is dispatched verbatim, its first line left off and nothing else" \
+    "$(tail -n +2 "$RV/brief-$n.txt"; [ -z "$(tail -c 1 "$RV/brief-$n.txt")" ] || echo)" \
+    "$(awk -v n="$n" '$0 ~ "^=== Brief " n " " { f = 1; next } f && $0 == "END" { exit } f && $0 != "BEGIN" { print }' "$RV/prompt-1.txt")"
+done
+expect_contains "R7: the briefs given to one call go together, in one message" "together, in one message" "$P"
+expect_absent "R7: …and never one after another, which lets the second reader read the first's record" "after another" "$P"
+printf 'subagent_type: bionic:auditor\nQuestions: evidence\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-auditor-evidence.md\n' > "$RV/brief-3.txt"
+P3="$(bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt" "$RV/brief-3.txt")"
+expect_contains "R7: three briefs are told to go together, in one message" "Dispatch the 3 briefs below together, in one message" "$P3"
+expect_contains "R7: …each under its own agent type" "=== Brief 3 — subagent_type: bionic:auditor ===" "$P3"
+P1="$(bash "$GEN" "$RV/brief-1.txt")"
+expect_contains "R7: one brief is one dispatch" "Dispatch the brief below." "$P1"
+expect_absent "R7: …with no word of a message of several" "together" "$P1"
+expect_contains "R7: …not in the background" "do not run it in the background" "$P"
+expect_contains "R7: a refusal stops the session and is never retried" "do not try again" "$P"
+expect_contains "R7: a record a reader returned is saved unchanged at the path its brief names" "save the record exactly as the reader returned it at that path" "$P"
+expect_contains "R7: the session replies with each record's path and whether it exists" "whether that file exists" "$P"
+expect_contains "R7: TOGETHER is not a switch: set to 0 it changes nothing" "together, in one message" \
+  "$(TOGETHER=0 bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt")"
+expect_contains "R7: STEP_ZERO=1 adds the description quote" "quoting each one's description exactly" \
+  "$(STEP_ZERO=1 bash "$GEN" "$RV/brief-1.txt")"
+printf 'bionic:critic\nQuestions: structure\n' > "$RV/brief-bad.txt"
+out="$(bash "$GEN" "$RV/brief-bad.txt" 2>/dev/null)"; rc=$?
+expect_status "R7: a brief with no agent type on its first line is refused" 2 "$rc"
+expect_empty "R7: …and no prompt is written" "$out"
+
+# Nothing in either helper, or in a prompt it writes, names a sample or says what the sitting is.
+# The grep is proved live on a brief that does name a sample, through the same extractor.
+SAMPLE_NAMES="$(exam_samples "$REPO" | paste -sd'|' -)"
+expect_nonempty "R8: the real samples are listed" "$SAMPLE_NAMES"
+NAMED_RE="exam|sample|planted|defect|key|$SAMPLE_NAMES"
+printf 'subagent_type: bionic:critic\nRead the dup-counter sample.\n' > "$RV/brief-named.txt"
+expect_nonempty "R8: the extractor finds a sample's name in a prompt written for a brief that holds one" \
+  "$(bash "$GEN" "$RV/brief-named.txt" | grep -ioE "$NAMED_RE")"
+expect_empty "R8: the prompt for made-up briefs holds none of the five sample names, nor exam, sample, planted, defect or key" \
+  "$(grep -ioE "$NAMED_RE" "$RV/prompt-1.txt")"
+for h in "$RUN" "$GEN"; do
+  expect_nonempty "R8: ${h##*/} is read" "$(head -n 1 "$h")"
+  expect_empty "R8: ${h##*/} holds none of them either" "$(grep -inE "$NAMED_RE" "$h")"
+done
 
 section "§SHIPPED — the shipped sittings against the shipped checks files"
 
