@@ -3008,9 +3008,9 @@ plan_verb_swap() {
 # the working head (the head of the checkout holding the plan's `working-branch:`, the head `waive`
 # and `proof-add` record), with that head in PV_HEAD8; otherwise refuses `current 8`, exit 1, the
 # plan unchanged, printing each owed line that does not hold (wave-27 T14; D3). The judge's rc 2, a
-# plan whose rigor and scale cannot be dealt, refuses too and says so.
+# plan it cannot deal, refuses too, printing whatever the judge printed, whatever the reason.
 cur8_judge() {
-  local wb out rc
+  local wb out rc err
   if ! { declare -F facts_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F facts_state >/dev/null 2>&1; then
     die "REFUSED — current: 8 is admitted on the facts the run owes, and the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
@@ -3024,10 +3024,13 @@ cur8_judge() {
       die "REFUSED — current: 8 is admitted on the facts the run owes at the working head, and no checkout of $PV_REPO has the plan's working-branch ${wb:-(none named)} checked out; the plan is unchanged."
       exit 1 ;;
   esac
-  out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>/dev/null)"; rc=$?
+  out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
+  err="$(cat "$PV_NEW.judge" 2>/dev/null)"; rm -f "$PV_NEW.judge"
   [ "$rc" -eq 0 ] && return 0
   if [ "$rc" -eq 2 ]; then
-    die "REFUSED — current: 8 is admitted on the facts the run owes, and the plan's rigor and scale could not be read to deal them (rigor: $(plan_frontmatter_get "$PV_PLAN" rigor 2>/dev/null || true), scale: $(plan_frontmatter_get "$PV_PLAN" scale 2>/dev/null || true)); the plan is unchanged."
+    die "REFUSED — current: 8 is admitted on the facts the run owes, and the judge could not deal this plan (facts_state exit 2); the plan is unchanged. The judge said:"
+    [ -z "$err" ] || printf '%s\n' "$err" >&2
+    [ -z "$out" ] || printf '%s\n' "$out" >&2
     exit 1
   fi
   die "REFUSED — current: 8 is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"

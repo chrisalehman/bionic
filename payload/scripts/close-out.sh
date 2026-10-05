@@ -936,7 +936,7 @@ presence_missing() {
 # FACTS_HEAD the head judged, FACTS_LINES the owed lines that do not hold, FACTS_WHY the sentence.
 FACTS_RC=9; FACTS_HEAD=""; FACTS_LINES=""; FACTS_WHY=""
 facts_judge() {
-  local out
+  local out err
   if ! declare -F facts_state >/dev/null 2>&1; then
     FACTS_WHY="the proof record (lib/proof.sh) cannot be loaded from $CO_LIB, so the facts the run owes cannot be judged"
     return 0
@@ -946,10 +946,12 @@ facts_judge() {
     FACTS_WHY="the plan's working-branch '$WORKING' is not a branch in $ROOT, so there is no head to judge the facts the run owes at"
     return 0
   fi
-  out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>/dev/null)"; FACTS_RC=$?
+  out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>"$TMP_DIR/.facts-judge.$$")"; FACTS_RC=$?
+  err="$(cat "$TMP_DIR/.facts-judge.$$" 2>/dev/null)"; rm -f "$TMP_DIR/.facts-judge.$$"
   case "$FACTS_RC" in
     0) FACTS_WHY="" ;;
-    2) FACTS_WHY="the plan's rigor and scale could not be read to deal the facts the run owes (rigor: $(plan_frontmatter_get "$PLAN" rigor), scale: $(plan_frontmatter_get "$PLAN" scale))" ;;
+    2) FACTS_LINES="$(printf '%s\n%s' "$err" "$out" | awk 'NF')"
+       FACTS_WHY="the judge could not deal this plan (facts_state exit 2), so the facts the run owes cannot be judged; what the judge said is printed with this line" ;;
     *) FACTS_RC=1
        FACTS_LINES="$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')"
        FACTS_WHY="the facts the run owes do not all hold at the working head $FACTS_HEAD (facts_state); record each with proof-add, or have the user waive a question" ;;

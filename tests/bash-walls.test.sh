@@ -2238,7 +2238,7 @@ eg6_plan() {  # <current> <scale> <lines> [<Step 6 line>] -> an audited plan the
   printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: %s\n' "$2"
   printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
   printf 'current: %s\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
-  printf -- '- Step 4: dispatched, record/w27/dispatch.md\n  worktree: .\n  base-sha: abc1234\n  branch: feature/t23\n'
+  printf -- '- Step 4: dispatched, record/w27/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: feature/t23\n' "$H_EG6"
   printf -- '- Step 5: floor green, record/w27/floor.log\n'
   [ -n "${4:-}" ] && printf -- '%s\n' "$4"
   [ -n "$3" ] && printf '%s\n' "$3"
