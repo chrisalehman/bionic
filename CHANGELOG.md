@@ -20,8 +20,9 @@ byte one bionic wrote. Bionic's `claude()` block now opens with
 `unalias claude 2>/dev/null || true`. An alias named `claude` above the block, bionic's own
 retired line or yours, made every shell start print a syntax error at the function's line: under
 zsh nothing of the rc after that line ran, and bash defined no function and ran the lines that
-follow. An existing install whose block holds exactly the old one-line body is offered the
-`claude()` item again at its next setup, and taking it rewrites the block.
+follow. An existing install whose block holds exactly an earlier body of bionic's is offered the
+`claude()` item again at its next setup, and taking it rewrites the block where it stands. A block
+you changed is never rewritten.
 
 Every run that ships code is now read by an independent reader, at every rigor. The rigor sets
 how many readers there are, not which questions are asked: each run answers the same three
@@ -98,8 +99,16 @@ What you will notice:
   written. A CR LF rc keeps its CRs, and an rc with no final newline gets none.
 - **The `claude()` block** in your rc now opens with `unalias claude 2>/dev/null || true`, as the
   upgrade note says. An alias of your own named `claude`, defined above bionic's block, stops having
-  effect while the block is there. An alias defined below the block still wins.
-  <!-- claude() block, after the go: the changed-block sentence and its door line, and the rewrite in place -->
+  effect while the block is there. An alias defined below the block still wins. A block holding
+  an earlier body of bionic's is rewritten where it stands, so your lines below it stay below. A
+  `claude()` block you changed is never rewritten: it is left and named by its lines, and a block
+  holding bionic's lines beside your own reads as already in. For a changed block setup asks
+  nothing and writes nothing; it prints `bionic's block, left: lines A to B of <rc>`, then
+  `it changed since bionic wrote it, so bionic leaves it as it is; bionic's lines are:` with the
+  two lines for you to copy, and its summary says
+  `edit lines A to B of <rc> by hand — bionic's block, changed since bionic wrote it`. Doctor shows
+  a neutral row with no route to setup:
+  `– claude() shell proxy  changed  lines A to B of <rc> — edit it by hand`.
 - **Each dispatched agent has a scratch directory of its own,**
   `.bionic/tmp/scratch/<session>/<name>/`, named at start. Its start push is one string per file,
   each held under 9,500 characters so the harness never cuts it to a preview.
@@ -258,8 +267,17 @@ Known limits, carried to the next release:
 - Names of other projects in comments and test identifiers are gone from the tree at this release.
   Older versions of those files, in the history and in the tags of 1.11.0 and earlier, still carry
   them.
-- The limits listed for 1.11.0 still hold, but for the three the booking fix closes, and those
-  listed for 1.10.0 and 1.9.0 stand as 1.11.0 left them.
+- Carried to the next release: a suite call's stated `--max-wait` is not clamped to the longest
+  wait the harness grants, so a wait above that limit can be cut short by the harness rather than
+  by bionic; and a `BIONIC_SLOT_PLACE` named by another live process is trusted. Neither loses a
+  result: a cut-short run is reported as such.
+- Carried to the next release: a suite run through a `for` loop over test files, or by
+  `bash "$f"` with the script in a variable, is not recognised as a suite run, so the reader's
+  suite cap and the budget arm do not see it. The cap is enforced on commands written plainly, as
+  the doctrine asks.
+- The limits listed for 1.11.0 still hold, but for the three on booking, which 1.12.0 closes as
+  far as the limit above on `--max-wait` says, and those listed for 1.10.0 and 1.9.0 stand as
+  1.11.0 left them.
 
 One rule for review (ADR-044): rigor is the number of independent minds. Every run that ships code
 is read for the same three questions; the rigor decides how many readers share them; each answer is
