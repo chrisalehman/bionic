@@ -5736,9 +5736,9 @@ EOF
     # A READING CARRIES ITS QUESTION, ITS RESULT AND ITS SCOPE (wave-27 T2; D1, AC-2.1). The record's
     # own flush-left lines say them, and for `structure` it answers every check id the shipped
     # checks file names, the file resolved through this hook's own lib root, as execution-recorder
-    # resolves survival.md (lib/proof.sh `proof_reading`). Only the record's first pass is read,
-    # each value whole, and a structure result is one its checks bear out (T41; review pass 10 F1,
-    # F2, F6); the start of its range comes back too, for the whole-read check below.
+    # resolves survival.md (lib/proof.sh `proof_reading`). A reading record holds exactly one pass and
+    # a second is refused (T45), each value whole, and a structure result is one its checks bear out
+    # (T41; review pass 10 F1, F2, F6); the start of its range comes back too, for the whole-read check below.
     PF_RESULT=""; PF_SCOPE=""; PF_FROM=""; PF_ROLE=""
     if [ -n "$PF_QUESTION" ]; then
       if ! PF_RS="$(proof_reading "$PF_REAL" "$PF_QUESTION" "$BIONIC_LIB/../../context/checks-structure.md")"; then
@@ -5819,9 +5819,17 @@ PF_OWN_LIST
       # its own, so a record that another roster row also names as its deliverable= or among its
       # files= could be registered under either name; it is refused, naming that row, whichever
       # reader is typed. Each entry is compared by real path, as above.
+      # ONLY A ROW THAT CAN STILL WRITE IT COUNTS (wave-27 T14; review pass 20 F3): a row of a
+      # DIFFERENT name, past `intended` (confirmed or identified) and still open by the one reader
+      # of "is this name closed" (`roster_open_names`, its roster's ack ledger beside it). An
+      # `intended` launch read nothing, a closed or acked one reads no more, and a row of the
+      # reader's own name is its own relaunch, so a reader dispatched again to the record of an
+      # earlier launch can register what it read.
       PF_OTHER=""
       for _pf_rf in "$PV_REPO/.bionic/tmp"/roster-*.state; do
         [ -f "$_pf_rf" ] && [ ! -L "$_pf_rf" ] && [ -z "$PF_OTHER" ] || continue
+        _pf_rs="${_pf_rf##*/roster-}"; _pf_rs="${_pf_rs%.state}"
+        _pf_open=" $(roster_open_names "$_pf_rf" "${_pf_rf%/*}/sweeper-${_pf_rs}.state" 2>/dev/null | tr '\n' ' ')"
         while IFS=$'\037' read -r _pf_on _pf_ot _pf_c; do
           case "$_pf_c" in '') continue ;; /*) _pf_p="$_pf_c" ;; *) _pf_p="$PV_REPO/${_pf_c#./}" ;; esac
           [ -f "$_pf_p" ] || continue
@@ -5829,8 +5837,10 @@ PF_OWN_LIST
             PF_OTHER="$_pf_on (${_pf_ot:-no subagent_type})"; break
           fi
         done <<PF_OTHER_LIST
-$(PF_WANT="$PF_READER" awk "$_ROSTER_OPEN_AWK"'
-  index($0, "roster-state/") == 1 && (_roster_kv($0, "name") "") != (ENVIRON["PF_WANT"] "") {
+$(PF_WANT="$PF_READER" PF_OPEN="$_pf_open" awk "$_ROSTER_OPEN_AWK"'
+  index($0, "roster-state/") == 1 && (_roster_kv($0, "name") "") != (ENVIRON["PF_WANT"] "") &&
+    (_roster_kv($0, "status") == "confirmed" || _roster_kv($0, "status") == "identified") &&
+    index(ENVIRON["PF_OPEN"], " " _roster_kv($0, "name") " ") {
     o = _roster_kv($0, "name") "\037" _roster_kv($0, "subagent_type") "\037"
     m = split(_roster_kv($0, "deliverable") "," _roster_kv($0, "files"), e, ",")
     for (i = 1; i <= m; i++) if (e[i] != "") print o e[i] }' "$_pf_rf" 2>/dev/null)
@@ -5871,9 +5881,14 @@ PF_OTHER_LIST
     # of it (proof_attested has already resolved the start, so here it is a commit).
     if [ "$PF_SCOPE" = whole ]; then
       PF_BASE="$(proof_plan_base "$PV_PLAN")"; PF_BASEH=""
-      [ -n "$PF_BASE" ] && PF_BASEH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_BASE^{commit}" 2>/dev/null)"
+      proof_base_id "$PF_BASE" && PF_BASEH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_BASE^{commit}" 2>/dev/null)"
       if [ -z "$PF_BASEH" ]; then
-        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but the plan names no base-sha: that is a commit here ('$(clean "$PF_BASE")'), so nothing shows it read from the start of the run; write the base under ## SDLC State, or scope: piece. The plan is unchanged."
+        # THE SAME PLACE THE FIRST-READING REFUSAL NAMES (wave-27 T14; review pass 20 F4), and a word
+        # such as HEAD is said to be no commit id (F1).
+        PF_BASEWHY="it names no base-sha:"
+        if [ -n "$PF_BASE" ] && ! proof_base_id "$PF_BASE"; then PF_BASEWHY="its base-sha: $(clean "$PF_BASE") is not a commit id"
+        elif [ -n "$PF_BASE" ]; then PF_BASEWHY="its base-sha: $(clean "$PF_BASE") is no commit here"; fi
+        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but $PF_BASEWHY, so nothing shows it read from the start of the run; add base-sha: <the commit the work started from> to the frontmatter of $PV_PLAN, or write scope: piece. The plan is unchanged."
         exit 1
       fi
       PF_FROMH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_FROM^{commit}" 2>/dev/null)"
