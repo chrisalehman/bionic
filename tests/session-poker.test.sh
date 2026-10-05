@@ -9582,8 +9582,8 @@ expect_contains "RPa3 precondition: the digest records the plan's current: and i
 sRP_plan 4
 poke_pressure "$RRP" 8192 1.0 tick
 expect_contains "RPb AC-11.3 current: moves from 3 to 4: the tick prints the RECONCILE line" "poker: RECONCILE — " "$OUT"
-expect_contains "RPb2 …in the wording the status-change path already prints" \
-  "poker: RECONCILE — a ## Tasks status or the ready set changed since the last tick: TaskList, and bring the task list in line with the plan" "$OUT"
+expect_contains "RPb2 …saying the plan moved into Step 4 and naming the rebuild (wave-27 T37)" \
+  "poker: RECONCILE — the plan moved from approval into Step 4 since the last tick: TaskList, and rebuild the task list in execution order (delete every pending entry and recreate them)" "$OUT"
 expect_eq "RPb3 …once" "1" "$(count_lines_matching 'poker: RECONCILE' "$OUT")"
 expect_contains "RPb4 …and the digest owes the duty" "duty=owed" "$(cat "$(digest_of "$RRP")" 2>/dev/null)"
 poke_pressure "$RRP" 8192 1.0 tick
@@ -11730,5 +11730,56 @@ poke_pressure "$R66E" 8192 1.0 tick
 expect_absent "66e3 the next tick does not say it again" "started without its checks" "$OUT"
 expect_contains "66e4 …while it still reads the roster (the positive on the same tick)" "poker:" "$OUT"
 unset CLAUDE_CONFIG_DIR
+
+# ============================================================
+section "Section 67 §RECON-WHY §NOTIFY-WHOLE §AMEND-PLACED §AMEND-CAP §BUDGET-LOWERS §DECLINE-SLOT: T37 (review passes 8 F2, 36 S1 N2, 42 N1 N2; T49's open cap; A-orch-38, 96, 100, 112)"
+# ============================================================
+#
+# §RECON-WHY (review pass 8 F2). When the reconcile is owed because the plan MOVED, the RECONCILE
+# line said a status or the ready set changed, which is untrue there, and never asked for the
+# rebuild steps/3.md wants. It now says which move it was and names the rebuild, and the digest
+# carries the cause as `reconcile=` for the turn-end wall's refusal. RPb2 (section 55) pins the
+# Step-4 reason; the grown table and the status control are here. The grown table waits on the
+# world as section 55 does, so the tick is QUIET and the plan move alone prints the line.
+# fails-when: a grown table prints the status-changed reason, or a status change prints a move.
+R67="$(make_repo s67-recon-grew)"
+s67_rd() { sed -n 's/^reconcile=//p' "$(digest_of "$1")" 2>/dev/null; }
+require_helpers s67_rd
+poke "$R67" arm
+sp_plan_at_step "$R67" 4 "$SRP_ROW1" >/dev/null
+poke_pressure "$R67" 8192 1.0 tick
+expect_absent "67a0 precondition: the first tick, current 4 and one row, asks no reconcile" "poker: RECONCILE" "$OUT"
+sp_plan_at_step "$R67" 4 "$SRP_ROW1" "$SRP_ROW2" >/dev/null
+poke_pressure "$R67" 8192 1.0 tick
+expect_contains "67a1 §RECON-WHY a grown table: the line says the table grew and names the rebuild" \
+  "poker: RECONCILE — the ## Tasks table grew since the last tick: TaskList, and rebuild the task list in execution order (delete the pending entries after the new row and recreate them)" "$OUT"
+expect_eq "67a2 …once" "1" "$(count_lines_matching 'poker: RECONCILE' "$OUT")"
+expect_eq "67a3 …and the digest carries the cause for the turn-end wall" "grew" "$(s67_rd "$R67")"
+R67S="$(make_repo s67-recon-step4)"
+poke "$R67S" arm
+sp_plan_at_step "$R67S" 3 "$SRP_ROW1" >/dev/null
+poke_pressure "$R67S" 8192 1.0 tick
+sp_plan_at_step "$R67S" 4 "$SRP_ROW1" >/dev/null
+poke_pressure "$R67S" 8192 1.0 tick
+expect_contains "67a4 precondition: current: 3 to 4 prints the Step-4 reason (RPb2's)" "the plan moved from approval into Step 4" "$OUT"
+expect_eq "67a5 …and the digest carries its cause" "step4" "$(s67_rd "$R67S")"
+sp_plan_at_step "$R67S" 5 "$SRP_ROW1" >/dev/null
+poke_pressure "$R67S" 8192 1.0 tick
+expect_eq "67a6 a tick over no move writes no cause (4 to 5)" "" "$(s67_rd "$R67S")"
+expect_contains "67a6b …while that digest is read (the positive on the same file)" "plan_current=5" "$(cat "$(digest_of "$R67S")")"
+R67C="$(make_repo s67-recon-status)"; new_roster "$R67C"
+S67C_ROW1="| T1 | 4 | build | one ready build | implementor | — | 15m | REQ-x | a.sh | pending |"
+S67C_ROW2="| T2 | 4 | build | another ready build | implementor | — | 15m | REQ-x | b.sh | pending |"
+poke "$R67C" arm
+sp_plan_at_step "$R67C" 4 "$S67C_ROW1" "$S67C_ROW2" >/dev/null
+poke_pressure "$R67C" 8192 1.0 tick
+expect_contains "67b0 precondition: the control's first tick fills both rows" "poker: FILL T1 T2" "$OUT"
+sp_plan_at_step "$R67C" 4 "$S67C_ROW1" "${S67C_ROW2/| pending |/| dropped |}" >/dev/null
+poke_pressure "$R67C" 8192 1.0 tick
+expect_contains "67b1 control: a status change alone prints the status-changed reason, byte for byte" \
+  "poker: RECONCILE — a ## Tasks status or the ready set changed since the last tick: TaskList, and bring the task list in line with the plan" "$OUT"
+expect_absent "67b2 …and no move" "rebuild the task list" "$OUT"
+expect_eq "67b3 …and the digest carries no cause" "" "$(s67_rd "$R67C")"
+expect_contains "67b4 …while the digest owes the duty (the positive on the same file)" "duty=owed" "$(cat "$(digest_of "$R67C")")"
 
 finish
