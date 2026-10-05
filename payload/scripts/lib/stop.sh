@@ -1873,8 +1873,12 @@ elif [ "$FILL_SRC" = "GAP" ]; then
   # THE INVARIANT'S OWN WORDING, and the only one left: what is true of every refused turn is
   # the state — the ledger is live, these rows are ready, slots are free after this turn's
   # launches — whether or not a tick fired in it.
-  FILL_REASON="Fillable gap at turn end: the run's ledger is live, ${_ST_FREE} writer slot(s) are free after this turn's launches (a verify or review row takes none), and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row (the launch recorder sets it active; the wall reads the plan and the roster, never the Agent call's words), or write \"fill-declined: <reason>\" at the start of a line of your own reply, then stop again — this gate blocks once."
-  [ -n "$_ST_STANDING" ] && FILL_REASON="${FILL_REASON} The fill-declined from an earlier turn still stands for the rows it answered; these were not among them."
+  # THE DECLINE IS A VERB (wave-27 T34; REQ-15, D24): the refusal hands the one command that records
+  # it on disk, its rows comma-joined and its reason the poker's quoted placeholder, and asks for no
+  # line in the reply, which the user would read on every turn. A reply line is still read.
+  _fd_poker="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
+  FILL_REASON="Fillable gap at turn end: the run's ledger is live, ${_ST_FREE} writer slot(s) are free after this turn's launches (a verify or review row takes none), and these rows are ready to dispatch — ${FILL_MISSING} — and this turn neither dispatched nor declined them. Dispatch each named row (the launch recorder sets it active; the wall reads the plan and the roster, never the Agent call's words), or record why they wait: bash ${_fd_poker} decline ${FILL_MISSING// /,} 'why they wait' — it stands for those rows until a row it did not name is ready. Then stop again — this gate blocks once."
+  [ -n "$_ST_STANDING" ] && FILL_REASON="${FILL_REASON} The decline recorded earlier still stands for the rows it answered; these were not among them."
   # THE HEADLINE COUNTS AND NAMES (wave-20 T11b; Step-6 review R4). "dispatched none" was false
   # beside a ledger line that named the turn's launches. It now says how many of the plan's
   # ready rows the turn launched and names the ones it did not — never a row it launched. The
@@ -2070,7 +2074,7 @@ if [ -n "$STANDDOWN_MISSING" ]; then
   for _sd_hold in $STANDDOWN_MISSING; do
     STANDDOWN_HOLDS="${STANDDOWN_HOLDS}${STANDDOWN_HOLDS:+; }bash ${_sd_poker} hold ${_sd_hold} 'why it stays up'"
   done
-  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped, held nor declined them. TaskStop each. To keep an idle agent up, run: ${STANDDOWN_HOLDS} — the tick then stops ordering it while nothing about it changes. Or write a line \"standdown-declined: <name> <reason>\": it is kept as that hold. Then stop again — this gate blocks once."
+  STANDDOWN_REASON="Patrol stand-down unanswered: the tick stood down ${STANDDOWN_MISSING} (contract MET, the agent still on the panel, the stop order written) and this turn neither stopped, held nor declined them. TaskStop each. To keep an idle agent up, run: ${STANDDOWN_HOLDS} — the tick then stops ordering it while nothing about it changes. Then stop again — this gate blocks once."
 else
   STANDDOWN_REASON=""
 fi
