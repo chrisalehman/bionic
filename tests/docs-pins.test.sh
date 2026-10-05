@@ -5504,8 +5504,9 @@ expect_eq "W27-T17-8b: operational-rules.md no longer says moved lines were all 
 # names its runs. Each sentence is a positive beside the absence of the line it replaced, on the
 # same extractor and file. The walk that drives the shipped scaffold through the real wall and
 # the real verb is §scaffold-walk in tests/dispatch-preflight.test.sh, which holds the harness.
-W27T53_FILES='Files: <every path the task may create or edit>  # a reader lists its records here, one per question, its artifact among them; a researcher or test-runner omits it'
-W27T53_SUITES='Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names its runs, at most 3, never none'
+# Spaced as _flatten reads them: a run of white space is one space.
+W27T53_FILES='Files: <every path the task may create or edit> # a reader lists its records here, one per question, its artifact among them; a researcher or test-runner omits it'
+W27T53_SUITES='Suites: none # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names its runs, at most 3, never none'
 for _f in "$SKILL_MD" "$DISPATCH_MD"; do
   expect_nonempty "W27-T53-B1a: ${_f##*/} — the scaffold's Files: comment has a reader list its records" \
     "$(w26_hits "$W27T53_FILES" "$_f")"
@@ -5523,7 +5524,7 @@ expect_nonempty "W27-T53-B1d: steps/6.md says one record per question, every one
 expect_nonempty "W27-T53-B3b: steps/6.md has the evidence reader, whichever role, declare its runs" \
   "$(w26_hits 'The reader dealt `evidence`, whichever role holds it at the run'"'"'s rigor, declares what it re-executes (`Suites:` naming suites, or `Re-executes:`), at most three runs; `Suites: none` is for a reader not dealt `evidence`.' "$STEP6_MD")"
 expect_nonempty "W27-T53-B3c: steps/5.md says the same of the evidence reader, not the auditor alone" \
-  "$(w26_hits 'The reader dealt `evidence`, whichever role holds it, declares its re-executions, at most three' "$STEP5_MD")"
+  "$(w26_hits 'The reader dealt `evidence`, whichever role holds it, declares its re-executions under `Suites:` or `Re-executes:`, at most three.' "$STEP5_MD")"
 expect_eq "W27-T53-B3c2: …and no longer that an auditor brief declares them" "" \
   "$(w26_hits 'An auditor brief declares its re-executions' "$STEP5_MD")"
 # S5: a reader writes a record per question, not one file.
