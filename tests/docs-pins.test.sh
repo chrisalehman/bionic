@@ -5516,4 +5516,97 @@ expect_nonempty "W27-152m: a dispatch.md that still asks for the line is caught"
   "$(w26_hits 'fill-declined' "$(w26_doctor "$DISPATCH_MD" 'or one `fill-declined: <reason>` line.')")"
 rm -f "$W27152_PROMPT_F"
 
+# ============================================================
+# §W27-T53 — the doctrine tells a reader what the walls accept (review pass 28, A-orch-83)
+# ============================================================
+# B1: the dispatch wall admits a reader only with exactly its dealt set, and `proof-add review`
+# takes a record only from the reader's own row (`deliverable=` or `files=`), so a reader dealt
+# two or three questions lists every record on `Files:`. B3: whichever role holds `evidence`
+# names its runs. Each sentence is a positive beside the absence of the line it replaced, on the
+# same extractor and file. The walk that drives the shipped scaffold through the real wall and
+# the real verb is §scaffold-walk in tests/dispatch-preflight.test.sh, which holds the harness.
+# Spaced as _flatten reads them: a run of white space is one space.
+W27T53_FILES='Files: <every path the task may create or edit> # a reader lists its records here, one per question, its artifact among them; a researcher or test-runner omits it'
+W27T53_SUITES='Suites: none # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names its runs, at most 3, never none'
+for _f in "$SKILL_MD" "$DISPATCH_MD"; do
+  expect_nonempty "W27-T53-B1a: ${_f##*/} — the scaffold's Files: comment has a reader list its records" \
+    "$(w26_hits "$W27T53_FILES" "$_f")"
+  expect_eq "W27-T53-B1a2: …and no longer says a read-only brief omits the line" "" \
+    "$(w26_hits 'a read-only brief omits this' "$_f")"
+  expect_nonempty "W27-T53-B3a: ${_f##*/} — the scaffold's Suites: comment has the evidence reader name its runs" \
+    "$(w26_hits "$W27T53_SUITES" "$_f")"
+done
+expect_nonempty "W27-T53-B1b: dispatch.md says a reader's brief lists one record per question on Files:" \
+  "$(w26_hits 'A reader'"'"'s brief lists one record per question it is dealt on `Files:`, `Expected artifact:` naming one.' "$DISPATCH_MD")"
+expect_nonempty "W27-T53-B1c: steps/5.md's whole-read batch lists every record on the brief's Files:" \
+  "$(w26_hits 'one record per question it is dealt, every record listed on its brief'"'"'s `Files:` line and `Expected artifact:` naming one' "$STEP5_MD")"
+expect_nonempty "W27-T53-B1d: steps/6.md says one record per question, every one on Files:" \
+  "$(w26_hits 'It writes one record per question it is dealt, and its brief lists every record on `Files:`, `Expected artifact:` naming one of them.' "$STEP6_MD")"
+expect_nonempty "W27-T53-B3b: steps/6.md has the evidence reader, whichever role, declare its runs" \
+  "$(w26_hits 'The reader dealt `evidence`, whichever role holds it at the run'"'"'s rigor, declares what it re-executes (`Suites:` naming suites, or `Re-executes:`), at most three runs; `Suites: none` is for a reader not dealt `evidence`.' "$STEP6_MD")"
+expect_nonempty "W27-T53-B3c: steps/5.md says the same of the evidence reader, not the auditor alone" \
+  "$(w26_hits 'The reader dealt `evidence`, whichever role holds it, declares its re-executions under `Suites:` or `Re-executes:`, at most three.' "$STEP5_MD")"
+expect_eq "W27-T53-B3c2: …and no longer that an auditor brief declares them" "" \
+  "$(w26_hits 'An auditor brief declares its re-executions' "$STEP5_MD")"
+# S5: a reader writes a record per question, not one file.
+expect_nonempty "W27-T53-S5: steps/6.md says each record is a file under record/" \
+  "$(w26_hits 'Each record is a file under `record/` with flush-left lines' "$STEP6_MD")"
+expect_eq "W27-T53-S5b: …and no longer that a reader writes one file" "" \
+  "$(w26_hits 'A reader writes one file under' "$STEP6_MD")"
+# S1: the task-scale author writes working-branch: beside base-sha:, in under 150 bytes.
+W27T53_WB=' Beside it the author writes `working-branch: <the branch the work is built on>`: without it `proof-add`, `waive` and `current 8` refuse.'
+expect_nonempty "W27-T53-S1: steps/3.md has the task-scale author write working-branch:" \
+  "$(w26_hits "${W27T53_WB# }" "$STEP3_MD")"
+expect_eq "W27-T53-S1b: …in under 150 bytes" "yes" \
+  "$([ "$(printf '%s' "$W27T53_WB" | wc -c | tr -d ' ')" -lt 150 ] && echo yes || echo no)"
+# S2: the task-scale ledger owes readings, not the auditor's and critic's verdicts.
+expect_nonempty "W27-T53-S2: operational-rules.md says a done row owes the readings its rigor deals" \
+  "$(w26_hits 'the readings its rigor deals are owed from Step 6' "$W27D_OPS")"
+expect_eq "W27-T53-S2b: …and no longer the auditor and critic verdicts" "" \
+  "$(w26_hits 'the auditor and critic verdicts it owes' "$W27D_OPS")"
+# S4: README counts the role files and says what a reader may write.
+W27T53_N="$(ls "${REPO}"/agents/*.md 2>/dev/null | wc -l | tr -d ' ')"
+case "$W27T53_N" in 6) W27T53_W=six ;; 7) W27T53_W=seven ;; 8) W27T53_W=eight ;; 9) W27T53_W=nine ;; *) W27T53_W="$W27T53_N" ;; esac
+expect_nonempty "W27-T53-S4 precondition: agents/ holds role files" "$([ "$W27T53_N" -gt 0 ] && echo yes)"
+expect_nonempty "W27-T53-S4: README names as many subagent roles as agents/ holds ($W27T53_W)" \
+  "$(w26_hits "$W27T53_W subagent roles" "${REPO}/README.md")"
+for _r in auditor critic reviewer; do
+  _row="$(/usr/bin/grep -m1 "^| \`${_r}\` |" "${REPO}/README.md")"
+  expect_contains "W27-T53-S4b: README's ${_r} row says it writes its own record" \
+    'Read-only on tracked files; writes its own record through the shell.' "$_row"
+  expect_absent "W27-T53-S4c: …and no longer that it cannot write" 'Cannot write.' "$_row"
+done
+# S3: the diagrams. lifecycle.svg's Step-6 box and rigor note; hook-chain.svg's commit-wall
+# ladder and its census, the census as a relation on hooks/hooks.json.
+W27T53_LC="${SKILL_DIR}/diagrams/lifecycle.svg"
+W27T53_HC="${SKILL_DIR}/diagrams/hook-chain.svg"
+expect_nonempty "W27-T53-S3a: lifecycle.svg's Step-6 box names the three questions" \
+  "$(w26_hits '>· questions: evidence,</text>' "$W27T53_LC")"
+expect_nonempty "W27-T53-S3a1: …all three of them" "$(w26_hits '>adversarial, structure</text>' "$W27T53_LC")"
+expect_nonempty "W27-T53-S3a2: …and one fact per question" "$(w26_hits '>· one fact each, or waived</text>' "$W27T53_LC")"
+for _p in 'six axes' 'duplication reads the design' 'independent critic (audited)' 'adds the independent critic at Step 6'; do
+  expect_eq "W27-T53-S3b: lifecycle.svg no longer says '$_p'" "" "$(w26_hits "$_p" "$W27T53_LC")"
+done
+expect_nonempty "W27-T53-S3c: lifecycle.svg's rigor note says every tier reads the three questions" \
+  "$(w26_hits 'Step 6 reads three questions' "$W27T53_LC")"
+expect_nonempty "W27-T53-S3d: hook-chain.svg's commit-wall ladder starts at the bound plan" \
+  "$(w26_hits 'the plan this session is bound to' "$W27T53_HC")"
+expect_eq "W27-T53-S3d2: …and no longer at the newest plan under the plan dirs" "" \
+  "$(w26_hits 'newest plan under the plan dirs' "$W27T53_HC")"
+expect_nonempty "W27-T53-S3e: …and has a Step-6 readings arm" \
+  "$(w26_hits 'from current: 6 onward — one fact per owed question' "$W27T53_HC")"
+# w27t53_census <svg> -> the data-hook chips, sorted unique; w27t53_registered -> hooks.json's scripts.
+w27t53_census() { /usr/bin/grep -o 'data-hook="[^"]*"' "$1" 2>/dev/null | sed 's/data-hook="//; s/"$//' | LC_ALL=C sort -u; }
+w27t53_registered() {
+  jq -r '.hooks[][] | .hooks[] | .command' "${REPO}/hooks/hooks.json" 2>/dev/null \
+    | /usr/bin/grep -o 'hooks/[a-z-]*\.sh' | sed 's#hooks/##' | LC_ALL=C sort -u
+}
+expect_nonempty "W27-T53-S3f precondition: hooks.json registers scripts" "$(w27t53_registered)"
+expect_eq "W27-T53-S3f: hook-chain.svg's census is the scripts hooks.json registers" \
+  "$(w27t53_registered | tr '\n' ' ')" "$(w27t53_census "$W27T53_HC" | tr '\n' ' ')"
+W27T53_HCD="$TMP/w27t53-census.svg"
+{ cat "$W27T53_HC"; printf '<text class="hook-entry" data-hook="protect-main.sh">x</text>\n'; } > "$W27T53_HCD" 2>/dev/null
+expect_ne "W27-T53-S3f2: …a census still drawing a retired script is caught" \
+  "$(w27t53_registered | tr '\n' ' ')" "$(w27t53_census "$W27T53_HCD" | tr '\n' ' ')"
+
 finish
