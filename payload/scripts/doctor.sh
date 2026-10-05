@@ -2150,9 +2150,9 @@ fi
 [ "$RC_PROXY_STATE" = "malformed" ] && \
   fix "bionic's claude() markers do not pair up in $(_doctor_tilde "$(rc_file)") → fix them by hand"
 [ "$RC_PROXY_STATE" = "not-a-file" ] && \
-  fix "the shell rc is not a file: $(_doctor_tilde "$(rc_file)") is $(markers_regular "$(rc_file)") → change it by hand; bionic writes only to a regular file"
+  fix "$(_doctor_tilde "$(rc_file)") is $(markers_regular "$(rc_file)"), not a file → fix it by hand"
 [ "$PRINCIPLES_STATE" = "not-a-file" ] && \
-  fix "the working-principles file is not a file: $(_doctor_tilde "$(principles_file)") is $(markers_regular "$(principles_file)") → change it by hand; bionic writes only to a regular file"
+  fix "$(_doctor_tilde "$(principles_file)") is $(markers_regular "$(principles_file)"), not a file → fix it by hand"
 
 [ "$LEGACY_ALIAS_FIRES" = "yes" ] && fix "the legacy .zshrc alias block is still there → run $(bionic_check_hint legacy-alias)"
 if [ "$LEGACY_HOOKS_FIRES" = "yes" ]; then
