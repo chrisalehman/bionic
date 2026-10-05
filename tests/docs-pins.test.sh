@@ -5652,7 +5652,7 @@ expect_nonempty "W27-T53-S3d: hook-chain.svg's commit-wall ladder starts at the 
 expect_eq "W27-T53-S3d2: …and no longer at the newest plan under the plan dirs" "" \
   "$(w26_hits 'newest plan under the plan dirs' "$W27T53_HC")"
 expect_nonempty "W27-T53-S3e: …and has a Step-6 readings arm" \
-  "$(w26_hits 'from current: 6 onward — one fact per owed question' "$W27T53_HC")"
+  "$(w26_hits 'from current: 6 onward — each owed question has a reading' "$W27T53_HC")"
 # RE-POINTED (wave-27 T60, review pass 38 N2): the relation compared the SET of script names, so
 # a chip moved to another event, or one of a script's several registrations left undrawn, stayed
 # green. It compares each script WITH its registration now, as a list: one
