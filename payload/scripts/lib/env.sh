@@ -345,25 +345,37 @@ rc_file() {
 #                  `claude` in a non-interactive shell is unaffected: the rc is
 #                  never sourced there, so the function does not exist and the
 #                  binary is reached directly.
-rc_default() {  # <item> — prints the line, exit 1 if the item is not bionic's
+#                  THE FIRST LINE CLEARS THE NAME (wave-27 T75, A-orch-185). An
+#                  alias named `claude` standing above the block (bionic's own
+#                  retired bare alias, which no door removes, or the user's) is
+#                  expanded by zsh and interactive bash into the function's
+#                  definition line: a syntax error at every shell start, nothing
+#                  after it run, and the alias still in force. `-n` does not see
+#                  it, because no alias is expanded under `-n`. So the body opens
+#                  with `unalias claude`, which the shell runs before it reads the
+#                  next line; `2>/dev/null || true` keeps it silent and at status
+#                  zero where no alias stands, so it cannot fail an rc under
+#                  `set -e`. An alias defined BELOW the block still wins when
+#                  `claude` is typed: an alias is looked up before a function.
+rc_default() {  # <item> — prints the body, one line per line, exit 1 if the item is not bionic's
   case "${1:-}" in
-    claude-proxy) printf '%s\n' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    claude-proxy) printf '%s\n' 'unalias claude 2>/dev/null || true' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
     *)            return 1 ;;
   esac
   return 0
 }
 
-# Is the item's line INSIDE bionic's markers. The two halves both matter: a line
-# that is not there, and a line that is there but outside the block, are both
-# "bionic has not written this" — the second because it is somebody else's line.
+# Is the item's body INSIDE bionic's markers, and nothing else there. All three halves
+# matter: a body that is not there, one that is there but outside the block (somebody
+# else's lines), and a block holding anything other than exactly the body are each
+# "bionic has not written this" (wave-27 T75, A-orch-185): a block with the old
+# one-line body is offered again, and `rc_set` rewrites it whole.
 rc_get() {  # <item>
-  local item="${1:-}" want file line
+  local item="${1:-}" want file got
   want="$(rc_default "$item")" || return 1
   file="$(rc_file)" || return 1
-  while IFS= read -r line; do
-    [ "$line" = "$want" ] && return 0
-  done < <(markers_get "$file" "$RC_START" "$RC_END")
-  return 1
+  got="$(markers_get "$file" "$RC_START" "$RC_END")" || return 1
+  [ "$got" = "$want" ]
 }
 
 # ─── The rc writer ───────────────────────────────────────────────────────────

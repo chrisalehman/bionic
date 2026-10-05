@@ -115,6 +115,7 @@ FIXTURE_RC="${TMP}/${LONGSEG}/${LONGSEG}/dot.zshrc"
 mkdir -p "$(dirname "$FIXTURE_RC")"
 {
   echo '# ─── bionic:rc:start ───'
+  echo 'unalias claude 2>/dev/null || true'
   echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
   echo '# ─── bionic:rc:end ───'
 } > "$FIXTURE_RC"
@@ -412,6 +413,7 @@ expect_all_lines_fit "18: git feed, missing manifest, long path — every line f
 HALF_RC="${TMP}/${LONGSEG}/half.zshrc"
 {
   echo '# ─── bionic:rc:start ───'
+  echo 'unalias claude 2>/dev/null || true'
   echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
   echo '# ─── bionic:rc:end ───'
   echo 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=1'

@@ -1186,7 +1186,7 @@ setup_claude_proxy() {
 
   say "   ${rc} does not carry bionic's claude() shell function:"
   for item_name in $missing; do
-    say "   $(rc_default "$item_name")"
+    while IFS= read -r _setup_rc_line; do say "   ${_setup_rc_line}"; done <<< "$(rc_default "$item_name")"
     say "   — $(_setup_rc_why "$item_name")"
   done
   consent "   Add it to ${rc}?"; _setup_consent_rc=$?
