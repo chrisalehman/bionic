@@ -16,11 +16,12 @@ Versioning follows semver from 1.9.0 on:
 remove can delete lines of your shell rc that are not bionic's, in four ways. 1.12.0 fixes all
 four, and 1.11.x gets no patch. From 1.12.0 no door removes a line of your rc that stands outside
 a pair of bionic's markers; a marked block is removed as one unit only when its body is byte for
-byte one bionic wrote. Bionic's `claude()` block now opens with `unalias claude 2>/dev/null ||
-true`: an alias named `claude` above the block, bionic's own retired line or yours, made zsh and
-bash print a syntax error at every shell start and skip the rest of the rc. An existing install
-whose block holds exactly the old one-line body is offered the `claude()` item again at its next
-setup, and taking it rewrites the block.
+byte one bionic wrote. Bionic's `claude()` block now opens with
+`unalias claude 2>/dev/null || true`. An alias named `claude` above the block, bionic's own
+retired line or yours, made every shell start print a syntax error at the function's line: under
+zsh nothing of the rc after that line ran, and bash defined no function and ran the lines that
+follow. An existing install whose block holds exactly the old one-line body is offered the
+`claude()` item again at its next setup, and taking it rewrites the block.
 
 Every run that ships code is now read by an independent reader, at every rigor. The rigor sets
 how many readers there are, not which questions are asked: each run answers the same three
@@ -98,7 +99,7 @@ What you will notice:
 - **The `claude()` block** in your rc now opens with `unalias claude 2>/dev/null || true`, as the
   upgrade note says. An alias of your own named `claude`, defined above bionic's block, stops having
   effect while the block is there. An alias defined below the block still wins.
-  <!-- changed claude() block: its sentence and door line are filled here after the go -->
+  <!-- claude() block, after the go: the changed-block sentence and its door line, and the rewrite in place -->
 - **Each dispatched agent has a scratch directory of its own,**
   `.bionic/tmp/scratch/<session>/<name>/`, named at start. Its start push is one string per file,
   each held under 9,500 characters so the harness never cuts it to a preview.
@@ -226,6 +227,11 @@ Known limits, carried to the next release:
   backslash, after a zsh short loop head (`for i (…)`, `repeat N`) with no body, or inside your own
   here-document or string, is removed if the result still parses, and your surrounding code then
   reads differently.
+- The `claude()` block's first line does not help where the block has been moved inside your own
+  `if` or function, where `unalias` is itself aliased, or under bash where `claude` is a readonly
+  function: the start-up error stays, as it did with the old body.
+- An rc whose every line ends in CRLF is read as holding no block, and setup appends a second one;
+  convert the file to LF line ends first. This is older than this release.
 - The verbs only the main session may run are guarded by a reader of the command's text, so a
   path to the hook held in a shell variable steps round that guard.
 - The landing record is not for a network filesystem: its one-write append assumes a local disk.
