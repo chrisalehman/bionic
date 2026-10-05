@@ -2404,7 +2404,14 @@ fi
 # honours a red last run of exactly that suite only on a row that carries them (lib/worktree.sh).
 # It refuses a declaration with no evidence line, a suite outside the set this row may run (the
 # set the contract checks above derived, so it sits below them), and a token of any other shape.
-# A PREDICATE OVER WHAT IT IS HANDED: the lift and the suite set, no git, no roster, no plan.
+# A PREDICATE OVER WHAT IT IS HANDED: the lift, the suite set and the bound plan's `## Tasks` (read
+# by units.sh, as the approval and floor walls above read it); no git, no roster.
+#
+# AND (wave-27 T67; review pass 46 B4, S1, S4, N1, N2, N3): one declaration per brief; one suite
+# FILE, `<name>.test.sh`, never the full-suite runner however it is spelled; an `approval:<name>`
+# token only when a row of the bound plan reads it (the names `approve` accepts) and no integrate row
+# waits on it, for a debt must clear before integration; and evidence that is a file under the run's
+# record root, placed as the fact verb places a record.
 DP_LANDS_RED=""; DP_RED_EVIDENCE=""
 _lr_line="$(brief_field "$LIFTED" lands_red)"
 if [ -n "$_lr_line" ]; then
@@ -2412,7 +2419,48 @@ if [ -n "$_lr_line" ]; then
   read -r _lr_suite _lr_until _lr_tok _lr_more <<DP_LR
 $_lr_line
 DP_LR
-  _lr_suite="${_lr_suite##*/}"
+  _lr_suite="${_lr_suite##*/}"; _lr_ap=""
+  _lr_n="$(brief_field "$LIFTED" lands_red_n)"
+  if [ -n "$_lr_n" ]; then
+    dp_finding "the brief has ${_lr_n} Lands-red: lines" "keep one Lands-red: line" \
+      "A row lands red on ONE suite until ONE blocker clears, and this brief declares ${_lr_n}:
+    First: Lands-red: ${_lr_line}
+
+Only one line could be honoured, and which one would be a guess, so none is.
+
+Fix: keep one Lands-red: line; plan a second red as a row of its own.
+
+Then retry the dispatch."
+  fi
+  _lr_runner=""
+  for _lr_w in $_lr_line; do
+    [ "$_lr_w" = until ] && break
+    [ "${_lr_w##*/}" = run.sh ] && _lr_runner=1
+  done
+  if [ -n "$_lr_runner" ]; then
+    dp_finding "Lands-red: names the full-suite runner" "name one <name>.test.sh" \
+      "The Lands-red: line names run.sh, and the full-suite runner is never a declared red:
+    Given: Lands-red: ${_lr_line}
+
+Its run speaks for every suite at once, so one declaration would land the whole floor red.
+A row may land red on one suite file only.
+
+Fix: name the one suite that is red by design —
+    Lands-red: <name>.test.sh until <token>
+
+Then retry the dispatch."
+  elif case "$_lr_suite" in ?*.test.sh) false ;; *) true ;; esac; then
+    dp_finding "Lands-red: names no <name>.test.sh" "name one <name>.test.sh" \
+      "The Lands-red: line names no suite file:
+    Given: Lands-red: ${_lr_line}
+
+A row may land red on one suite FILE, <name>.test.sh, and nothing else.
+
+Fix: write the line as —
+    Lands-red: <name>.test.sh until <token>
+
+Then retry the dispatch."
+  fi
   _lr_tok_ok=""
   if [ "$_lr_until" = until ] && [ -n "$_lr_tok" ] && [ -z "$_lr_more" ]; then
     _lr_ext_re="$(_units_ext_re)"; _lr_ap_re='^approval:[A-Za-z0-9][A-Za-z0-9._-]*$'
@@ -2420,7 +2468,46 @@ DP_LR
       _lr_tok_ok=1
     fi
   fi
-  if [ -z "$_lr_tok_ok" ]; then
+  # AN APPROVAL A DEBT CAN WAIT FOR (wave-27 T67; review pass 46 S4, N1). `approve` records only a
+  # name an open row reads (units.sh `units_approval_names`), so a name no row reads can never clear;
+  # and an approval an integrate row reads comes after the judgment the debt must clear before.
+  case "$_lr_tok_ok:$_lr_tok" in
+    1:approval:?*)
+      _lr_ap="${_lr_tok#approval:}"
+      _lr_names="$( { [ -n "$PLAN" ] && units_approval_names "$PLAN"; } 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+      _lr_integ="$( { [ -n "$PLAN" ] && units_rows "$PLAN"; } 2>/dev/null | awk -F'\t' -v n="$_lr_ap" '
+        $3 == "integrate" { m = split($13, a, ","); for (k = 1; k <= m; k++) { t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); sub(/^live:/, "", t); if (t == "approval:" n) { print $1; exit } } }')"
+      if [ -n "$_lr_integ" ]; then
+        _lr_tok_ok=""
+        dp_finding "approval:$(bionic_trunc "$_lr_ap" 18) is read at integration" "pick an earlier token" \
+          "The Lands-red: line waits on an approval the integrate row reads:
+    Given:     Lands-red: ${_lr_line}
+    Integrate: ${_lr_integ} reads approval:${_lr_ap}
+
+A declared debt must be cleared before integration is admitted, and this approval
+comes after the step a debt must clear before: the debt could be covered only after the
+judgment it must precede.
+
+Fix: wait on an approval a row before integration reads, or on an ext:<slug> token.
+
+Then retry the dispatch."
+      elif case " $_lr_names " in *" $_lr_ap "*) false ;; *) true ;; esac; then
+        _lr_tok_ok=""
+        dp_finding "approval:$(bionic_trunc "$_lr_ap" 25) is read by no row" "name one a row reads" \
+          "The Lands-red: line waits on an approval no row of the bound plan reads:
+    Given:     Lands-red: ${_lr_line}
+    Rows read: ${_lr_names:-(no named approval)}
+
+session-poker.sh approve records only a name a row reads, so this one could never be recorded
+and the debt could never clear.
+
+Fix: name one of the approvals the rows read, or add a row that reads this one.
+
+Then retry the dispatch."
+      fi ;;
+  esac
+  # A line naming the runner is told that, once: its suite and token are not judged besides.
+  if [ -z "$_lr_tok_ok" ] && [ -z "${_lr_ap:-}" ] && [ -z "$_lr_runner" ]; then
     dp_finding "Lands-red: names no blocker token" "use ext:<slug> or approval:<name>" \
       "The Lands-red: line does not read <suite> until <token>, its token one of two forms:
     Given: Lands-red: ${_lr_line}
@@ -2450,8 +2537,10 @@ Then retry the dispatch."
   fi
   _lr_in=""
   case "$_lr_suite" in ''|*[[:space:]]*) : ;; *) case " $SUITES_ALLOWED " in *" $_lr_suite "*) _lr_in=1 ;; esac ;; esac
-  if [ -z "$_lr_in" ]; then
-    dp_finding "Lands-red: $(bionic_trunc "${_lr_suite:-<none>}" 24) is outside Suites:" "name a suite the row runs" \
+  if [ -z "$_lr_in" ] && [ -z "$_lr_runner" ]; then
+    # The name rides in the fact, cut to what the 100-column line leaves it (wave-27 T67; review pass
+    # 46 S1): `bionic: dispatch refused — `, the fixed words and ` (<fix>)` take 85.
+    dp_finding "Lands-red: $(bionic_trunc "${_lr_suite:-<none>}" 15) is outside Suites:" "name a suite the row runs" \
       "A row may land red only on a suite it runs, and this one's suite set does not hold it:
     Given:  Lands-red: ${_lr_line}
     Suites: ${SUITES_ALLOWED:-(none)}
@@ -2461,7 +2550,52 @@ Suites: or Files: line so the row runs it.
 
 Then retry the dispatch."
   fi
-  if [ -n "$_lr_tok_ok" ] && [ -n "$_lr_ev" ] && [ -n "$_lr_in" ]; then
+  # THE EVIDENCE IS A FILE UNDER THE RUN'S RECORD ROOT (wave-27 T67; review pass 46 N3), placed as
+  # the fact verb places a record: a `record/…` path from the docs root, any other relative path from
+  # the project root, an absolute one as given; the longest existing directory read physically, the
+  # rest in the text with `.` and `..` resolved; the record root read the same way.
+  _lr_ev_ok=""
+  if [ -n "$_lr_ev" ]; then
+    _lr_docs="$BIONIC_ROOT/.bionic/docs"
+    if declare -F docs_root >/dev/null 2>&1; then
+      _lr_d="$(docs_root "$BIONIC_ROOT" 2>/dev/null)"; [ -n "$_lr_d" ] && _lr_docs="$_lr_d"
+    fi
+    _lr_place() {  # <absolute path> -> its longest existing directory physical, the rest resolved in the text
+      local p="$1" d rest phys
+      d="${p%/*}"; rest="${p##*/}"
+      while [ -n "$d" ] && [ ! -d "$d" ]; do rest="${d##*/}/$rest"; d="${d%/*}"; done
+      phys="$(cd "${d:-/}" 2>/dev/null && pwd -P)" && p="${phys%/}/$rest"
+      printf '%s\n' "$p" | awk '{ n = split($0, s, "/"); k = 0
+        for (i = 1; i <= n; i++) { if (s[i] == "" || s[i] == ".") continue; if (s[i] == "..") { if (k > 0) k--; continue } o[++k] = s[i] }
+        p = ""; for (i = 1; i <= k; i++) p = p "/" o[i]; print (p == "" ? "/" : p) }'
+    }
+    case "$_lr_ev" in
+      /*) _lr_abs="$_lr_ev" ;;
+      record/*) _lr_abs="$_lr_docs/$_lr_ev" ;;
+      *) _lr_abs="$BIONIC_ROOT/${_lr_ev#./}" ;;
+    esac
+    _lr_rr="$(_lr_place "$_lr_docs/record/x")"; _lr_rr="${_lr_rr%/x}"
+    case "$_lr_ev" in */) _lr_at="" ;; *) _lr_at="$(_lr_place "$_lr_abs")" ;; esac
+    case "$_lr_at" in "$_lr_rr"/?*) _lr_ev_ok=1 ;; esac
+    if [ -z "$_lr_ev_ok" ]; then
+      dp_finding "Red-evidence: is not under record/" "put the file under record/" \
+        "The Red-evidence: path is not a file under the run's record root:
+    Given:   Red-evidence: ${_lr_ev}
+    Read as: ${_lr_at:-(a directory)}
+    Root:    ${_lr_rr}/
+
+The evidence is the run's record of why the row is red at its head, so it lives where the run's
+records live, read as the fact verb reads one: a record/... path from the docs root, any other
+relative path from the project root, an absolute one as given.
+
+Fix: write the evidence under record/ and name it there —
+    Red-evidence: record/<wave>/<row>-red.md
+
+Then retry the dispatch."
+    fi
+  fi
+  if [ -n "$_lr_tok_ok" ] && [ -n "$_lr_ev" ] && [ -n "$_lr_ev_ok" ] && [ -n "$_lr_in" ] && [ -z "$_lr_n" ] \
+     && [ -z "$_lr_runner" ] && case "$_lr_suite" in ?*.test.sh) true ;; *) false ;; esac; then
     DP_LANDS_RED="$_lr_suite until $_lr_tok"; DP_RED_EVIDENCE="$_lr_ev"
   fi
 fi

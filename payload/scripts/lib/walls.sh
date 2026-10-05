@@ -2337,11 +2337,12 @@ Fix: replace the '- ${id}:' evidence with the actual command invocation and resu
 # `absent<TAB><q>`, or `failing<TAB><q><TAB><evidence>`; `unreadable` when lib/proof.sh is not
 # loaded (units.sh loads it). Nothing when every question is answered.
 #
-# AND ONE LINE PER OPEN DECLARED DEBT (wave-27 T31; REQ-14 AC-14.3, D23), `debt<TAB><suite><TAB>
-# <token>`: a state line recording `landed red: <suite> until <token>` with no `proved: kind=floor`
-# or `kind=task` line whose `at=` is later than the token's clearing, read off the same section by
-# lib/proof.sh `proof_debts_open`, the text half of the judge's own rule. A proof.sh that predates
-# the debt has no such reader, and no state line it could have written either.
+# AND ONE LINE PER OPEN DECLARED DEBT (wave-27 T31, T67; REQ-14 AC-14.3, D23; A-orch-121),
+# `debt<TAB><suite><TAB><token>`: a debt `land` wrote to the landing record, HANDED to this wall by
+# its collector (hooks/bash-walls.sh: `BIONIC_DEBTS_OPEN`, read for `BIONIC_DEBTS_PLAN`), with no
+# `proved: kind=floor` or `kind=task` line in the section dated after its threshold (lib/proof.sh
+# `proof_debts_open`, the text half of the judge's own rule). A `landed red:` line in the plan is not
+# read. Debts handed for another plan than the one judged here are not this plan's, and are not read.
 _eg_reading_gaps() {
   local qs
   if ! declare -F facts_owed >/dev/null 2>&1 || ! declare -F proof_awk >/dev/null 2>&1; then
@@ -2373,8 +2374,9 @@ _eg_reading_gaps() {
         else if (t[q] == "fact" && r[q] == "fail") print "failing\t" q "\t" e[q]
       }
     }'
-  if declare -F proof_debts_open >/dev/null 2>&1; then
-    printf '%s\n' "$SECTION" | proof_debts_open
+  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "${BIONIC_DEBTS_PLAN:-}" = "$PLAN" ] \
+     && declare -F proof_debts_open >/dev/null 2>&1; then
+    printf '%s\n' "$SECTION" | proof_debts_open "$BIONIC_DEBTS_OPEN"
   fi
 }
 
@@ -4274,7 +4276,7 @@ validate_matrix() {
       # (the 6..9 prefix check), mirroring the CONFIRMED rule. This is what
       # gives a mid-walk corrective commit an honest home at current: 5.
       UNDISCHARGED=1
-    elif [ "$task9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
+    elif [ "$task9" = "1" ] && [ "${CURRENT%[ab]}" -lt 9 ] 2>/dev/null \
          && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
       # Close-out row before Step 9 — see the `task: 9` note above. Sits
       # BELOW the current: 5 arm on purpose: at the Verify gate the existing
@@ -4403,10 +4405,10 @@ validate_matrix() {
     # because the attribution is correct and sending the user to rewrite it
     # would point them at the one thing that is not broken.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    if [ "$CURRENT" -gt 5 ] 2>/dev/null && matrix_auditor_required; then
+    if [ "${CURRENT%[ab]}" -gt 5 ] 2>/dev/null && matrix_auditor_required; then
       if [ "$status" = "waived" ] || [ "$row_is_waived" = "1" ]; then
         :
-      elif [ "$task9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
+      elif [ "$task9" = "1" ] && [ "${CURRENT%[ab]}" -lt 9 ] 2>/dev/null \
            && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
         # The second of the `task: 9` tag's two arms. An auditor cannot
         # CONFIRM a row whose evidence Step 9 has not produced; demanding it
@@ -4512,7 +4514,7 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_walk_artifact() {
   local discharged b5 raw abs
-  case "$CURRENT" in 5|6|7|8|9) : ;; *) return 0 ;; esac
+  case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   [ "$(walk_mode)" = required ] || return 0
   # Reuses the $MATRIX cache validate_matrix() fills. It runs immediately before
   # this arm at both call sites (validate_verify_step, dispatch's 6..9 case) and
@@ -4642,7 +4644,7 @@ log_finding_quiet() {  # $1=check-id  $2=detail
 validate_environments() {
   local raw entries name desc cure covered_names fog_names fog_missing_cure
   local b5 covered_line covered_norm missing claimed_fog claimed_undeclared
-  case "$CURRENT" in 5|6|7|8|9) : ;; *) return 0 ;; esac
+  case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   raw=$(frontmatter_get environments)
   if [ -z "$raw" ]; then
     log_finding_quiet environments "no 'environments:' declared in frontmatter — the covered/fog check is a no-op"
@@ -4986,8 +4988,10 @@ dispatch() {
   # The walk artifact is a durable prefix condition alongside it (A5): deleting
   # the narration after the Verify gate blocks every later commit. The
   # environments claim (S3, AC-4) is the same shape: covered ⊆ declared and
-  # every fog entry's cure stay true across the whole post-Verify span.
-  case "$CURRENT" in
+  # every fog entry's cure stay true across the whole post-Verify span. A lettered step is its step
+  # here, in the walk and environments arms and in the matrix's own step tests (wave-27 T67; review
+  # pass 46 N10): `6a` binds as 6.
+  case "${CURRENT%[ab]}" in
     6|7|8|9) validate_matrix; validate_walk_artifact; validate_environments ;;
   esac
   # Log-only epic merge-target check at the integrate step.
