@@ -2869,6 +2869,7 @@ lk_verdict() {  # <record> <lines per block> -> "OK headers=<n> lines=<n>" or th
       split($0, f, "|"); t = f[2]; sub(/^tag=/, "", t); k = f[3]; sub(/^n=/, "", k)
       if (t != tag || k + 0 != n + 1) { bad = "line " NR " is " t "/" k " under " tag "/" n + 1; exit }
       n++; want--; lines++; next }
+    /^$/ { if (want) { bad = "a blank line inside a block at line " NR; exit } next }
     { bad = "a line that is neither at line " NR; exit }
     END { if (bad) print "BAD " bad; else if (want) print "BAD last block short"; else print "OK headers=" hdr " lines=" lines }' "$1"
 }
@@ -2900,7 +2901,7 @@ expect_eq "(T69-c8) /bin/bash ${C8_SYS}: eight writers, 1,200 blocks of 20 KB, e
   "OK headers=1200 lines=24000||landing-proofs.log" "$(c8_run /bin/bash "$TMP/c8-sys/landing-proofs.log")"
 expect_eq "(T69-c8b) the PATH's bash ${C8_PATH}: the same" \
   "OK headers=1200 lines=24000||landing-proofs.log" "$(c8_run bash "$TMP/c8-path/landing-proofs.log")"
-expect_true "(T69-c8-pre) fixture: each block is over twenty thousand bytes" \
+expect_true "(T69-c8-pre) fixture: each block is over twenty thousand bytes (blank lines between blocks, from the cut-line look: $(cat "$TMP"/c8-*/landing-proofs.log | grep -c '^$'))" \
   test "$(awk 'NR <= 21' "$TMP/c8-sys/landing-proofs.log" | wc -c)" -gt 20000
 printf 'landed: row=RX\nstamp/v1|tag=Y|n=1\n' > "$TMP/lk-bad.log"
 expect_match "(T50-s1d) the verdict can fail: a block with a line under the wrong header is reported" "BAD *" "$(lk_verdict "$TMP/lk-bad.log" 1)"
