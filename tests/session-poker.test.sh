@@ -9611,8 +9611,8 @@ poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence -
 s42_unchanged "56b19 …and so is a flag the verb does not take" 2 "$P56"
 
 # A FLAGGED OR FAILING READING IS A FACT TOO: the verb records what the reader found; whether it
-# holds is the judge's question (row T9).
-s56_rec ev-fail.md "$S56_C2" "$S56_C3" evidence fail whole
+# holds is the judge's question (row T9). A whole reading starts at the plan's base (T41, F5).
+s56_rec ev-fail.md "${S56_B:0:10}" "$S56_C3" evidence fail whole
 s42_snap "$R56" "$P56"
 poke "$R56" proof-add review record/wave-01-fixture/ev-fail.md --question evidence --reader w-aud
 expect_eq "56c a failing reading registers (exit 0)" "0" "$RC"
