@@ -786,20 +786,44 @@ if [ -n "$IS_START" ]; then
   # dispatch declared; `terms_for_row` asks it the same `bionic:*` question once the join
   # has run, and prints at most once (`TERMS_DELIVERED`). Delivery still never depends on a
   # row existing: the `agent_type` test here is first and unchanged.
+  #
+  # A READER'S CHECKS RIDE THE SAME DELIVERY (wave-27 T15; REQ-5, D5). After `survival.md` come
+  # `context/checks-<q>.md` for each question on the JOINED row's `questions=`, in the order
+  # evidence, adversarial, structure, in the one additionalContext — so the delivery waits for
+  # the joins below. A start the `agent_type` test marks bionic OWES the terms (`TERMS_OWED`):
+  # the joins deliver them with the row's questions, and a start that exits before any row is
+  # joined is delivered survival.md alone on its way out (the EXIT trap), as it was before. A
+  # row with no `questions=`, every writer's, delivers exactly what it did. A checks file the row
+  # names and the disk lacks is logged here, in this hook's own voice, and the rest delivered.
   TERMS_DELIVERED=""
-  deliver_terms() {
+  TERMS_OWED=""
+  deliver_terms() {  # [<questions, comma-joined>]
+    local _dt_files="" _dt_q _dt_f
     SURVIVAL_FILE="$BIONIC_LIB/../../context/survival.md"
     if [ -r "$SURVIVAL_FILE" ]; then
-      jq -cn --rawfile _sf_c "$SURVIVAL_FILE" \
-        '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$_sf_c}}' \
-        2>/dev/null && TERMS_DELIVERED=1
+      _dt_files="$SURVIVAL_FILE"
     else
       echo "execution-recorder: survival terms not found at $SURVIVAL_FILE — printing nothing" >&2
     fi
+    for _dt_q in evidence adversarial structure; do
+      case ",${1-}," in *",${_dt_q},"*) : ;; *) continue ;; esac
+      _dt_f="$BIONIC_LIB/../../context/checks-${_dt_q}.md"
+      if [ -r "$_dt_f" ]; then
+        _dt_files="${_dt_files:+$_dt_files
+}$_dt_f"
+      else
+        echo "execution-recorder: checks file not found at $_dt_f — delivering the rest" >&2
+      fi
+    done
+    [ -n "$_dt_files" ] || return 0
+    while IFS= read -r _dt_f; do cat "$_dt_f"; done <<< "$_dt_files" \
+      | jq -Rsc '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:.}}' \
+        2>/dev/null && TERMS_DELIVERED=1
   }
   case "$(sanitize "$START_TYPE" 200)" in
-    bionic:*) deliver_terms ;;
+    bionic:*) TERMS_OWED=1 ;;
   esac
+  trap '[ -n "$TERMS_OWED" ] && [ -z "$TERMS_DELIVERED" ] && deliver_terms' EXIT
 
   [ -f "$ROSTER_FILE" ] || exit 0
   [ -L "$ROSTER_FILE" ] && exit 0
@@ -1090,10 +1114,12 @@ if [ -n "$IS_START" ]; then
   fi
   [ -n "$ROW" ] || exit 0
 
-  # THE TEAMMATE'S TERMS, decided on the row the joins above found (wave-24 T6, D8).
+  # THE TEAMMATE'S TERMS, decided on the row the joins above found (wave-24 T6, D8), and every
+  # owed delivery made here with the row's questions (wave-27 T15).
   case "$(line_field "$ROW" subagent_type)" in
-    bionic:*) [ -n "$TERMS_DELIVERED" ] || deliver_terms ;;
+    bionic:*) TERMS_OWED=1 ;;
   esac
+  [ -n "$TERMS_OWED" ] && [ -z "$TERMS_DELIVERED" ] && deliver_terms "$(line_field "$ROW" questions)"
   TERMS_AT=""
   [ -n "$TERMS_DELIVERED" ] && TERMS_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 

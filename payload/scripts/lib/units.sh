@@ -429,7 +429,9 @@ units_rows() {
 #     proof at <12 hex> in a way the map cannot bound (<its reason>); take the full run on this
 #     head and record it with proof-add floor`. The state is asked only when a pending row's
 #     answer turns on it, a row held for its step is judged without it, and inside
-#     `units_memoised` it is asked once;
+#     `units_memoised` it is asked once; `proof:review`, with no open writer, is satisfied only
+#     when the UNITS_FACTS_STATE handed in reads `covered` (wave-27 T14; D3): a reading line, a
+#     failing one included, is not enough;
 #   - `approval:<name>`: its line inside `## SDLC State` — `approved-by:` for `plan`,
 #     `approved: <name> …` otherwise. No row writes one; the user's act does.
 #   - `ext:<slug>`: never, until its owner removes it from the cell.
@@ -773,6 +775,9 @@ _units_proof_awk() {
 # ONE VALUE FROM OUTSIDE THE PLAN (wave-26 T14; review 5 F8): UNITS_LIVE_HEAD, the working
 # branch's head as the caller read it, which `live:head` compares with the last review proof's
 # `head=`. Unset, a plan with a review proof cannot see past it, and its live review waits.
+# AND ONE ANSWER (wave-27 T14; D3): UNITS_FACTS_STATE, `covered` when lib/proof.sh `facts_state`
+# holds the plan at that head, else the lines that do not hold; `proof:review` is met only by
+# `covered`. The tick computes it once (session-poker.sh `sched_facts_state`); unset, it waits.
 # `holds` (units_floor_holds) takes the floor row's id, or nothing, in the <step> slot.
 _units_sched() {
   local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i fst rc
@@ -814,7 +819,7 @@ _units_sched_run() {
   {
     printf '\034rows\n'; printf '%s\n' "$6"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
-  } | _UNITS_FLOOR_ST="$7" awk -F'\t' -v mode="$1" -v want="$3" -v scale="$4" -v hasreads="$5" \
+  } | _UNITS_FLOOR_ST="$7" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v scale="$4" -v hasreads="$5" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
       -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" \
       -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_sched_awk)"
@@ -1196,6 +1201,18 @@ _units_sched_awk() {
           if ((a == "floor" && (knd[j] == "verify" || knd[j] == "test")) || (a == "review" && knd[j] == "review"))
             if (!(st[j] == "pending" && rlive[j] && live_idle(j))) wj[++nw] = j
         }
+        # THE REVIEW IS MET BY THE JUDGE, NOT BY A LINE (wave-27 T14; D3, D4). A `proved: kind=review`
+        # line was enough here, a `result=fail` reading among them (A-orch-40). Now the read is met
+        # only when lib/proof.sh `facts_state` answered covered for the plan at the working head:
+        # the tick asks it once and hands the answer in (factsst), as it hands the floor state in.
+        # Not handed in, it is not known here, and the row waits saying so (the cautious direction).
+        if (a == "review") {
+          if (nw) return 0
+          if (factsst == "covered") return 1
+          if (factsst == "") lwhy = "the facts the run owes are judged by the tick (facts_state) and are not known here"
+          else lwhy = "the facts the run owes do not hold (facts_state): " factsst
+          return 0
+        }
         # THE FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A line
         # with no open writer satisfies the read when the change since its head is covered or
         # bounded; unbounded, or a state that could not be computed, is a wait naming the way
@@ -1286,6 +1303,7 @@ _units_sched_awk() {
     END {
       satisfied = (scale == "task") ? "done" : "landed"
       floorst = ENVIRON["_UNITS_FLOOR_ST"]
+      factsst = ENVIRON["_UNITS_FACTS_ST"]
       for (i = 1; i <= n; i++) {
         # THE FILES CELL: path entries only (a bare word or a dash declares nothing), the mark
         # taken off and remembered; code[] and docs[] say which side of the record it writes.
@@ -1445,7 +1463,7 @@ _units_sched_awk() {
 # A TABLE WITH A `reads` COLUMN (wave-26 T2; D1) adds two: its deps cells carry `ext:<slug>`
 # and nothing else — a task id there is refused, because the row waits on what it reads — and
 # each read names a path in the `Files` grammar, `head`, `record`, `merge`, `proof:<floor|
-# review|task>`, `approval:<name>`, `ext:<slug>`, or `live:` before one of the artifacts or a
+# review|task|check>` (`check` wave-27 T16), `approval:<name>`, `ext:<slug>`, or `live:` before one of the artifacts or a
 # path; on a review row, `live:head:<q>[+<q>]` too, each question one of lib/proof.sh
 # PROOF_QUESTIONS (wave-27 T10; D4).
 #
@@ -1636,7 +1654,7 @@ units_validate() {
               if (substr(t, 1, 5) == "live:") t = substr(t, 6)
               if (t ~ /^approval:[A-Za-z0-9]/) ap = 1
               if (t == "head" || t == "record" || t == "merge") continue
-              if (t ~ /^proof:(floor|review|task)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
+              if (t ~ /^proof:(floor|review|task|check)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
               if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
                 if (index(t, "[") || index(t, "]")) printf "%s: read %s has a bracket; paths glob with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
                 continue
