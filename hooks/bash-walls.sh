@@ -268,6 +268,26 @@ if [ "$_bw_mem" = 1 ] && wall_libs memory-store cmd-class.sh; then
   BIONIC_MEM_PROJECTS="$_bw_ch/projects"
 fi
 
+# THE DECLARED DEBTS `land` WROTE, gathered for the evidence gate (wave-27 T67; A-orch-121). From
+# Step 6 the gate holds a commit while a debt is open, and a wall reads only what it is handed: so
+# this block reads the landing record of the plan the gate will judge (the same `session_run`
+# verdict the gate takes, `active_plan` when unbound with no open run) into ONE fact, its open
+# debts as lib/proof.sh `proof_debts_read` prints them, beside the plan they belong to. Only for a
+# call that holds a commit (the word, no fork otherwise), so no other call pays for the read.
+BIONIC_DEBTS_PLAN=""; BIONIC_DEBTS_OPEN=""
+case "$COMMAND" in
+  *commit*)
+    _bw_run="$(session_run "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)"
+    case "$_bw_run" in
+      bound-open\ ?*|bound-closed\ ?*) BIONIC_DEBTS_PLAN="${_bw_run#* }" ;;
+      none) BIONIC_DEBTS_PLAN="$(active_plan "$BIONIC_ROOT" 2>/dev/null)" ;;
+    esac
+    if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_debt_record >/dev/null 2>&1 \
+       && _bw_rec="$(proof_debt_record "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT")"; then
+      BIONIC_DEBTS_OPEN="$(proof_debts_read "$_bw_rec")"
+    fi ;;
+esac
+
 bionic_fold "$EVENT" \
   wall_protect_main \
   wall_protect_database \

@@ -2337,6 +2337,25 @@ for eg6c in 5 5b; do
   expect_status "EG6m-${eg6c} F1 at current: ${eg6c}, below Step 6, with no reading at all: admitted (nothing new binds)" 0 "$ST"
 done
 
+# THE OLDER ARMS BIND THE LETTERED STEPS TOO (wave-27 T67; review pass 46 N10). The matrix is a
+# prefix contract from the Verify gate on: a REFUTED auditor cell refuses a commit at 6, and at each
+# lettered step past it the same, every reading present so nothing else refuses. The walk arm binds
+# from 5 the same way: a plan that owes a walk and narrates none is refused at 6a as at 6.
+EG6_REFUTED() { eg6_plan "$1" wave "$EG6_ALL" "- Step 6: review record/w27/review.md
+- Step ${1}: done record/generic-evidence.md" | sed 's/| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |/| AC-1 | T1 | discharged | see AC-1 | REFUTED |/'; }
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL")"
+expect_status "EG6n0 control: at current: 6 every reading present and the auditor CONFIRMED, admitted" 0 "$ST"
+for eg6c in 6 6a 7a 8a 8b; do
+  eg6_gate "$(EG6_REFUTED "$eg6c")"
+  expect_status "EG6n-${eg6c} N10 at current: ${eg6c} a REFUTED auditor cell refuses the commit, as at 6" 2 "$ST"
+  expect_contains "EG6n-${eg6c}b …the matrix naming the row" "AC-1" "$ERR"
+done
+for eg6c in 6 6a 8b; do
+  eg6_gate "$(eg6_plan "$eg6c" wave "$EG6_ALL" "- Step 6: review record/w27/review.md
+- Step ${eg6c}: done record/generic-evidence.md" | sed 's/^walk: exempt$/walk: required/')"
+  expect_status "EG6w-${eg6c} N10 at current: ${eg6c} a plan that owes a walk and narrates none is refused" 2 "$ST"
+done
+
 # THE WALL AND THE JUDGE READ ONE TEXT ONE WAY (the agreement row). The same section through the
 # real gate and through lib/proof.sh `facts_state` at the head every line names: the questions the
 # gate names are exactly the questions whose piece line the judge does not hold. evidence holds;
@@ -2382,53 +2401,90 @@ $(eg6_reading "$H_EG6T" structure pass)")" > "$R_EG6T/.bionic/docs/plans/active.
 run_hook "$(mk_payload "$R_EG6T/.worktrees/27-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_EG6T"
 expect_status "EG6j …and admitted once the section holds a reading of each question" 0 "$ST"
 
-# THE DECLARED DEBT (wave-27 T31; REQ-14 AC-14.3, D23), the Step-5 row. A state line recording
-# `landed red: <suite> until <token>` holds every commit from Step 6 until a `proved: kind=floor` or
-# `kind=task` line carries an `at=` later than the token's clearing (an `approval:` token clears at
-# its `approved:` line's time): plan text alone, the same section, beside the reading arm. The
-# proof and approval lines are written in their production writers' shape.
+# THE DECLARED DEBT (wave-27 T31, T67; REQ-14 AC-14.3, D23; A-orch-121), the Step-5 row. A debt
+# `land` wrote to the run's landing record holds every commit from Step 6 until a `proved:
+# kind=floor` or `kind=task` line carries an `at=` later than its threshold: the red landing, and for
+# an `approval:` token also its `approved:` line. The hook's collector reads the record into one fact
+# the gate judges beside the section; a `landed red:` line in the plan changes nothing. FIXTURE
+# FIDELITY: each debt is written by `land`'s own writer (lib/worktree.sh `_wt_debt_write`), into the
+# record `land` names for this plan; the proof and approval lines in their production writers' shape.
 eg6_floor_at() {  # <at> -> one floor proof line at that time
   bash -c '. "$1" && proof_line floor "$2" "$3" record/w27/floor-late.log' _ "$EG6_LIB" "$H_EG6" "$1"
 }
-EG6_DEBT="- T9: landed at record/w27/T9.md, landed red: widget.test.sh until approval:release at 2026-10-04T11:00:00Z"
+EG6_WTLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/worktree.sh"
+EG6_REC="$R_EG6/.bionic/docs/record/active.md/landing-proofs.log"
+eg6_debt() {  # <token> <at> -> the record holds exactly this one debt on widget.test.sh
+  rm -f "$EG6_REC"; mkdir -p "${EG6_REC%/*}"
+  bash -c '. "$1" && _wt_debt_write "$2" "d$RANDOM" T9 wt/27-T9 "$3" widget.test.sh "$4" "$5"' _ "$EG6_WTLIB" "$EG6_REC" "$H_EG6" "$1" "$2"
+}
+EG6_NOTE="- T9: landed at record/w27/T9.md, landed red: widget.test.sh until approval:release at 2026-10-04T11:00:00Z"
 EG6_APPROVED='approved: release by Dana Fixture 2026-10-04T13:00:00Z "ship it"'
-eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
-$EG6_DEBT")"
-expect_status "EG6k AC-14.3 every reading held, and a landed red: line with no proof after its token cleared: refused" 2 "$ST"
+eg6_debt approval:release 2026-10-04T11:00:00Z
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL")"
+expect_status "EG6k AC-14.3 every reading held, and a debt land wrote with no proof after its token cleared: refused" 2 "$ST"
 expect_contains "EG6k2 …in its own words" "a declared red is still owed" "$ERR"
 expect_contains "EG6k3 …naming the suite and its token" "- widget.test.sh: landed red until approval:release" "$ERR"
 eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
-$EG6_DEBT
 $(eg6_floor_at 2026-10-04T12:30:00Z)
 $EG6_APPROVED")"
 expect_status "EG6k4 …a floor proof dated BEFORE the approval does not cover it: refused" 2 "$ST"
 expect_contains "EG6k5 …naming it still" "- widget.test.sh: landed red until approval:release" "$ERR"
 eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
-$EG6_DEBT
 $EG6_APPROVED
 $(eg6_floor_at 2026-10-04T14:00:00Z)")"
 expect_status "EG6k6 …and a floor proof after the approval clears it: admitted" 0 "$ST"
 eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
-$EG6_DEBT
 $(eg6_floor_at 2026-10-04T14:00:00Z)")"
 expect_status "EG6k7 …while with no approved: line the same late proof clears nothing: refused" 2 "$ST"
+eg6_debt approval:release sometime
 eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
-${EG6_DEBT% at *}
 $EG6_APPROVED
 $(eg6_floor_at 2026-10-04T14:00:00Z)")"
-expect_status "EG6k8 a landed red: line with no at <ISO-UTC> is never cleared: refused though approved and proved after" 2 "$ST"
-# An ext: debt: the gate holds the ## SDLC State section alone, so it reads only the dated proof
-# after the red landing's own time; whether the slug is still in a ## Tasks cell is the judge's.
-EG6_EXT="- T9: landed at record/w27/T9.md, landed red: widget.test.sh until ext:vendor-key at 2026-10-05T04:00:00Z"
+expect_status "EG6k8 a debt whose at= is no <ISO-UTC> is never cleared: refused though approved and proved after" 2 "$ST"
+# An ext: debt: the gate holds the ## SDLC State section, so it reads only the dated proof after the
+# red landing's own time; whether the slug is still in a ## Tasks cell is the judge's.
+eg6_debt ext:vendor-key 2026-10-05T04:00:00Z
 eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
-$EG6_EXT
 $(eg6_floor_at 2026-10-05T03:00:00Z)")"
 expect_status "EG6k9 an ext: debt whose only proof is dated before the red landing: refused" 2 "$ST"
 expect_contains "EG6k9b …naming it" "- widget.test.sh: landed red until ext:vendor-key" "$ERR"
 eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
-$EG6_EXT
 $(eg6_floor_at 2026-10-05T05:00:00Z)")"
 expect_status "EG6k10 …and with a floor proof after it the gate admits (the slug test is the judge's)" 0 "$ST"
+# B1 at the gate (wave-27 T67): approval, green, red. And the note changes nothing either way.
+eg6_debt approval:release 2026-10-04T15:00:00Z
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+$EG6_APPROVED
+$(eg6_floor_at 2026-10-04T14:00:00Z)")"
+expect_status "EG6k11 B1 approval 13:00, green 14:00, red landing 15:00: refused" 2 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+$EG6_APPROVED
+$(eg6_floor_at 2026-10-04T15:00:00Z)")"
+expect_status "EG6k12 …a green floor at the landing's own second: refused" 2 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+$EG6_APPROVED
+$(eg6_floor_at 2026-10-04T15:00:01Z)")"
+expect_status "EG6k13 …one second after it: admitted" 0 "$ST"
+rm -f "$EG6_REC"
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+$EG6_NOTE")"
+expect_status "EG6k14 B3 a hand-written landed red: note with no debt in the record changes nothing: admitted" 0 "$ST"
+eg6_debt approval:release 2026-10-04T11:00:00Z
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL")"
+expect_status "EG6k15 …and the record's debt with no note anywhere is refused (the same gate, the positive)" 2 "$ST"
+# THE READ'S COST (A-orch-121): a record of 5,000 lines, every debt covered, adds at most a second to
+# three commits through the hook. The lines are the writer's own shape, one written by it.
+eg6_debt ext:vendor-key 2026-10-05T04:00:00Z
+awk -v l="$(cat "$EG6_REC")" 'BEGIN { for (i = 1; i < 5000; i++) { x = l; sub(/id=[^ ]*/, "id=bulk" i, x); print x } }' >> "$EG6_REC"
+expect_eq "EG6k16 precondition: the record holds 5,000 lines" "5000" "$(awk 'END { print NR }' "$EG6_REC")"
+EG6_COV="$(eg6_plan 6 wave "$EG6_ALL
+$(eg6_floor_at 2026-10-05T05:00:00Z)")"
+EG6_T0=$SECONDS; for eg6i in 1 2 3; do eg6_gate "$EG6_COV"; done; EG6_TBIG=$((SECONDS - EG6_T0))
+expect_status "EG6k16b …the covered commit is admitted through it" 0 "$ST"
+rm -f "$EG6_REC"
+EG6_T0=$SECONDS; for eg6i in 1 2 3; do eg6_gate "$EG6_COV"; done; EG6_TNONE=$((SECONDS - EG6_T0))
+expect_true "EG6k16c …and three commits with it take at most a second more than without (${EG6_TBIG}s, ${EG6_TNONE}s)" \
+  test "$EG6_TBIG" -le $((EG6_TNONE + 1))
 
 # ---------------------------------------------------------------------------
 section "§EG-OPEN — an open 1.11.0-shaped plan continues untouched until Step 6 (wave-27 T14; REQ-10 AC-10.3, D19)"

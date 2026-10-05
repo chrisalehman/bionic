@@ -2842,6 +2842,88 @@ LJ2="$(lr_tree wt/27-J2 27-J2 w27-J2)"; lr_stamp "$LJ2" 0 widget.test.sh
 expect_match "(j-none) …and a land with no bound plan lands as today, whatever a plan on disk says" \
   "spawn-worktree: LANDED branch=wt/27-J2 onto=wave/fixture * proofs=none" "$(worktree_land "$LJ2" wave/fixture)"
 lj_current 4
+section "§LAND-DEBT: land writes the declared debt to the landing record before the merge (wave-27 T67; review pass 46 B3, B4; A-orch-120)"
+#
+# A debt is owed because `land` WROTE it: for a declared-red landing, one line
+# `debt: id=<id> row=<row|—> branch=<b> head=<40-hex> suite=<s> token=<t> at=<the landing's time>`
+# is appended to the landing record under its lock BEFORE `git merge`. A line that cannot be written
+# refuses the landing with nothing merged; a merge that then fails is followed by
+# `void: id=<id> …`; a void that cannot be written leaves the debt standing, and the refusal says so.
+# No declaration lands the full-suite runner red. FIXTURE FIDELITY: §LAND-RED's repository, bound
+# plan, launch rows and stamps; the merge is made to fail by a pre-merge-commit hook, git's own.
+LD_REC="$LR/.bionic/docs/record/wave-lr/landing-proofs.log"
+LD_DECL=("lands_red=widget.test.sh until ext:vendor-key" "red_evidence=.bionic/docs/record/wave-lr/T9-red.md")
+ld_tree() {  # <n> -> a tree declared red on widget, its stamps and evidence at its head
+  local t; t="$(lr_tree "wt/27-D$1" "27-D$1" "w27-D$1")"
+  lr_launch "w27-D$1" "${LD_DECL[@]}"
+  lr_stamp "$t" 1 widget.test.sh; lr_stamp "$t" 0 other.test.sh
+  printf 'head: %s\n' "$(git -C "$t" rev-parse HEAD)" > "$LR_EV"
+  printf '%s' "$t"
+}
+# (d1) THE WORKED ANSWER: the debt line, at the LANDED line's landed-red-at=, ahead of the landing's header.
+LD1="$(ld_tree 1)"; LD1_H="$(git -C "$LD1" rev-parse HEAD)"
+OUTLD1="$(worktree_land_for_session "$LD1" "$LR" "$LR_SID")"
+LD1_AT="$(printf '%s' "$OUTLD1" | sed -n 's/.* landed-red-at=\([^ ]*\) .*/\1/p')"
+expect_match "(d1) precondition: the declared red lands, landed-red= as before" "spawn-worktree: LANDED branch=wt/27-D1 * landed-red=widget.test.sh landed-red-at=* proofs=*" "$OUTLD1"
+expect_match "(d1a) B3 land wrote the debt: suite, token, the landing's branch, head and time" \
+  "debt: id=?* row=— branch=wt/27-D1 head=${LD1_H} suite=widget.test.sh token=ext:vendor-key at=${LD1_AT}" \
+  "$(grep '^debt: .* branch=wt/27-D1 ' "$LD_REC" 2>/dev/null)"
+expect_eq "(d1b) …one line, written before the landing's header" "1 before" \
+  "$(awk '/^debt: .* branch=wt\/27-D1 / { n++; d = NR } /^landed: .* branch=wt\/27-D1 / { h = NR } END { print n + 0, (d && h && d < h ? "before" : "after") }' "$LD_REC" 2>/dev/null)"
+expect_eq "(d1c) …and no void line names it" "" "$(grep '^void: ' "$LD_REC" 2>/dev/null)"
+# (d2) THE DEBT CANNOT BE WRITTEN: refused before the merge, nothing merged, the tree and its stamps
+# kept, no debt line. The record's directory read-only is refused by the writability proof; the
+# writer itself failing, after that proof, is driven through a stand-in for the one writer (no
+# act of a landing reaches that branch on demand), the real writer put back after.
+LD2="$(ld_tree 2)"; LD2_ST="$(cat "$(stamp_file "$LD2")")"; LD2_RECB="$(cat "$LD_REC")"
+chmod 555 "${LD_REC%/*}"
+lr_refused "(d2r) the record's directory read-only: refused before the merge" "$LD2" \
+  "spawn-worktree: REFUSED reason=record-unwritable why=proofs-unwritable * — *nothing is merged*"
+chmod 755 "${LD_REC%/*}"
+LD_SAVED="$(declare -f _wt_debt_write)"
+_wt_debt_write() { return 1; }
+lr_refused "(d2) B3 a debt the writer cannot write refuses the landing, before the merge" "$LD2" \
+  "spawn-worktree: REFUSED reason=debt-unwritten why=proofs-unwritable suite=widget.test.sh * — *nothing is merged*"
+eval "$LD_SAVED"
+expect_eq "(d2b) …the stamps kept and the record as it was" "$LD2_ST|$LD2_RECB" "$(cat "$(stamp_file "$LD2")")|$(cat "$LD_REC")"
+expect_match "(d2c) control: the same tree, the real writer back, lands red" \
+  "spawn-worktree: LANDED branch=wt/27-D2 * landed-red=widget.test.sh *" "$(worktree_land_for_session "$LD2" "$LR" "$LR_SID")"
+# (d3) THE MERGE FAILS AFTER THE DEBT WAS WRITTEN: a void line naming its id follows it.
+LD_HOOKS="$TMP/ld-hooks"; mkdir -p "$LD_HOOKS"
+printf '#!/bin/sh\nexit 1\n' > "$LD_HOOKS/pre-merge-commit"; chmod +x "$LD_HOOKS/pre-merge-commit"
+git -C "$LR" config core.hooksPath "$LD_HOOKS"
+LD3="$(ld_tree 3)"
+lr_refused "(d3) a merge that fails after the debt was written is refused merge-failed" "$LD3" \
+  "spawn-worktree: REFUSED reason=merge-failed branch=wt/27-D3 *"
+LD3_ID="$(sed -n 's/^debt: id=\([^ ]*\) .* branch=wt\/27-D3 .*/\1/p' "$LD_REC")"
+expect_regex "(d3a) …the debt line was written first" '^[^ ]+$' "$LD3_ID"
+expect_match "(d3b) …and a void line names its id" "void: id=${LD3_ID} branch=wt/27-D3 at=* why=merge-failed" \
+  "$(grep "^void: id=${LD3_ID} " "$LD_REC" 2>/dev/null)"
+# (d4) THE VOID CANNOT BE WRITTEN: the hook puts a directory at the record's path as the merge
+# fails, so the void's append answers unwritten. The debt stands, and the refusal says it was written
+# and not voided, and what clears it. The record is put back after.
+printf '#!/bin/sh\nmv "%s" "%s.aside" && mkdir "%s"\nexit 1\n' "$LD_REC" "$LD_REC" "$LD_REC" > "$LD_HOOKS/pre-merge-commit"
+LD4="$(ld_tree 4)"
+lr_refused "(d4) a void that cannot be written: the debt stands, and the refusal says so and how to clear it" "$LD4" \
+  "spawn-worktree: REFUSED reason=merge-failed branch=wt/27-D4 * debt=unvoided * — *was written and not voided*green run of widget.test.sh*"
+rmdir "$LD_REC" 2>/dev/null; mv "${LD_REC}.aside" "$LD_REC" 2>/dev/null
+LD4_ID="$(sed -n 's/^debt: id=\([^ ]*\) .* branch=wt\/27-D4 .*/\1/p' "$LD_REC")"
+expect_eq "(d4b) …the debt line is there and no void names it" "1|0" \
+  "$([ -n "$LD4_ID" ] && echo 1 || echo 0)|$(grep -c "^void: id=${LD4_ID:-none} " "$LD_REC")"
+git -C "$LR" config --unset core.hooksPath
+# (d5) B4 THE RUNNER IS NEVER A DECLARED RED: a doctored launch row naming run.sh, a red run.sh stamp.
+LD5="$(lr_tree wt/27-D5 27-D5 w27-D5)"; LD5_H="$(git -C "$LD5" rev-parse HEAD)"
+lr_launch w27-D5 "lands_red=run.sh until ext:x" "red_evidence=.bionic/docs/record/wave-lr/T9-red.md"
+lr_stamp "$LD5" 1 run.sh; printf 'head: %s\n' "$LD5_H" > "$LR_EV"
+lr_refused "(d5) B4 a red stamp of the full-suite runner handed to land as a declared red is refused as a red" "$LD5" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=run.sh head=${LD5_H} — *"
+# (d6) NO BOUND PLAN, NO RECORD: a declared red with nowhere to write its debt is refused.
+LD6="$(ld_tree 6)"; LD6_H="$(git -C "$LD6" rev-parse HEAD)"
+LD6_B="$(refs_of "$LR")"
+OUTLD6="$(worktree_land "$LD6" wave/fixture "" "widget.test.sh until ext:vendor-key" "$LR_EV")"; RCLD6=$?
+expect_match "(d6) a declared red with no bound plan is refused: its debt has no record to go in" \
+  "spawn-worktree: REFUSED reason=debt-unwritten why=no-bound-plan suite=widget.test.sh * — *nothing is merged*" "$OUTLD6"
+expect_eq "(d6b) …exit 2, no ref moved" "2 yes" "$RCLD6 $([ "$(refs_of "$LR")" = "$LD6_B" ] && echo yes || echo no)"
 section "§LAND-RECORD-HARDENING: the record is appended under a lock and read as a regular file (wave-27 T50; review pass 27 S1, N1, N2, N4)"
 #
 # S1. Appends to the record are serialized by a lock directory beside it (`<record>.lock`, made
