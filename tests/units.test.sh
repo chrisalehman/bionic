@@ -2252,6 +2252,15 @@ for _bad in nonsense proof:bogus foo:bar 'lib/a b.sh'; do
   expect_eq "READS.13b …and the row is not ready on it: '$_bad'" "no" \
     "$(has_line "$(call units_ready "$SANDBOX/reads-bad.md" 4)" T5)"
 done
+# proof:check (wave-27 T16; D12): the release's declared check is a fact the validator admits as a
+# read, and the row waits on it until a `proved: kind=check` line exists.
+sed "s#| lib/old.sh, approval:plan |#| lib/old.sh, proof:check |#" "$SANDBOX/reads.md" > "$SANDBOX/reads-check.md"
+expect_eq "READS.13c proof:check is a read the validator admits" "0" "$(call_rc units_validate "$SANDBOX/reads-check.md")"
+expect_eq "READS.13e …and T5 waits on it while no check fact exists" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/reads-check.md" 4)" "T5${TAB}proof:check${TAB}-${TAB}-")"
+awk '{ print } /^approved-by: / { print "proved: kind=check head=0123456789abcdef0123456789abcdef01234567 at=2026-10-04T00:00:00Z evidence=record/w/release-check.log" }' \
+  "$SANDBOX/reads-check.md" > "$SANDBOX/reads-checked.md"
+expect_eq "READS.13f …and is ready once one does" "yes" "$(has_line "$(call units_ready "$SANDBOX/reads-checked.md" 4)" T5)"
 
 # A TABLE WITHOUT reads STILL PARSES, and a deps id still means "wait for that task to land".
 # Nothing defaults there: a verify row with an empty deps cell waits for nobody, as before.

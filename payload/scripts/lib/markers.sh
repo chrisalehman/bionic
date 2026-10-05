@@ -16,10 +16,12 @@
 #   markers_check <file> <start> <end>              rc 2 and `line <n>: …` per fault
 #   markers_only  <file> <start> <end>              rc 0 when the block is all the file holds
 #   markers_writable <file>                         rc 1 when the user made it read-only
+#   markers_regular  <file>                         rc 4, and what it is, when it is no file
 #
 # THE WRITERS' EXIT CODES ARE THE REASON (wave-27 T40, review pass 9 findings 1,
-# 2 and 8). 0 written; 1 a write failed; 2 the markers do not pair up; 3 the file
-# is read-only. On every non-zero the target is byte-identical to what it was.
+# 2 and 8; T46). 0 written; 1 a write failed; 2 the markers do not pair up; 3 the
+# file is read-only; 4 the path is not a regular file. On every non-zero the
+# target is byte-identical to what it was.
 #
 # THE MARKERS ARE THE ONLY THING MATCHED. Whole-line equality, in bash, never a
 # pattern — the rc markers carry box-drawing dashes, and a fuzzy match would be a
@@ -81,6 +83,20 @@ markers_writable() {  # <file>
   local target
   target="$(bionic_link_target "$1")"
   [ ! -e "$target" ] || [ -w "$target" ]
+}
+
+# A TARGET IS A REGULAR FILE, A LINK TO ONE, OR NOTHING YET (wave-27 T46, review
+# pass 14 finding 6). A directory at the path took the staged copy INTO itself
+# on the rename and reported a write; a dangling link had its target created
+# somewhere the user never named. Anything else is refused with rc 4 before a
+# byte is staged, and this prints what the path is, for the line that says so.
+markers_regular() {  # <file>
+  if [ -L "$1" ] && [ ! -e "$1" ]; then printf 'a link that points nowhere\n'; return 4; fi
+  if [ ! -e "$1" ] || [ -f "$1" ]; then return 0; fi
+  if [ -d "$1" ] && [ -L "$1" ]; then printf 'a link to a directory\n'
+  elif [ -d "$1" ]; then printf 'a directory\n'
+  else printf 'not a regular file\n'; fi
+  return 4
 }
 
 # A BLOCK IS ONE START LINE, THEN ONE END LINE, ONCE (wave-27 T40, review pass 9
@@ -205,6 +221,7 @@ markers_get() {  # <file> <start> <end>
 markers_set() {  # <file> <start> <end> <body file>
   local file="$1" start="$2" end="$3" body="$4" target tmp last rc
   [ -f "$body" ] || return 1
+  markers_regular "$file" >/dev/null || return 4
   markers_writable "$file" || return 3
   target="$(bionic_link_target "$file")"
   tmp="${target}.bionic.tmp"
@@ -230,6 +247,7 @@ markers_set() {  # <file> <start> <end> <body file>
 # principles item takes back a CLAUDE.md that held nothing else).
 markers_strip() {  # <file> <start> <end>
   local file="$1" start="$2" end="$3" target tmp rc
+  markers_regular "$file" >/dev/null || return 4
   [ -f "$file" ] || return 0
   markers_writable "$file" || return 3
   target="$(bionic_link_target "$file")"

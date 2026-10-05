@@ -2313,4 +2313,72 @@ expect_match "(n8) the stamp is still stamp/v1" "stamp/v1|*" "$(head -n 1 "$(sta
 expect_match "(n8) the earlier wall's red ? at the head is REFUSED, naming ?" \
   "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=? *" "$(worktree_land "$LSN8" wave/fixture)"
 
+section "§LAND-RC: a project's declared release check runs over each landing's range (wave-27 T16; REQ-6 AC-6.2; D12)"
+#
+# `.bionic/config.yaml` may name `release-check: <command>`. When it does, `land` runs it before
+# the merge, in the task's tree, with BIONIC_CHECK_BASE at the working branch's head and
+# BIONIC_CHECK_HEAD at the task's head; a non-zero exit refuses the landing `why=release-check`
+# and changes nothing: the tree, its branch, every ref and the record link are as they were.
+# With no key the land runs nothing for it and prints nothing more.
+#
+# FIXTURE FIDELITY. The declared command is a script this section writes, never this repository's
+# scan: it records the two variables and its directory, so a row reads the range it was given, and
+# its exit is read from a file the rows set. Every tree is new_tree's, with its record link and a
+# green stamp at its head (keep_tree's shape), so the release check is the only refusal in play.
+LR="$(new_repo "$TMP/land-rc")"
+LR_SEEN="$TMP/lr-seen"; LR_RCF="$TMP/lr-rc"; echo 0 > "$LR_RCF"
+LR_CHK="$TMP/lr-check.sh"
+cat > "$LR_CHK" <<LR_EOF
+#!/bin/bash
+printf 'base=%s head=%s cwd=%s\n' "\${BIONIC_CHECK_BASE:-}" "\${BIONIC_CHECK_HEAD:-}" "\$(pwd -P)" >> "$LR_SEEN"
+rc="\$(cat "$LR_RCF")"
+[ "\$rc" = 0 ] || echo 'HIT entry 2 in the landing range'
+exit "\$rc"
+LR_EOF
+lr_runs() { [ -f "$LR_SEEN" ] && awk 'END { print NR + 0 }' "$LR_SEEN" || echo 0; }
+rc_tree() {  # <branch> -> tree path, with its record link and a green stamp at its head
+  local t; t="$(new_tree "$LR" "$1")"
+  ln -s "${LR}/.bionic" "$t/.bionic"; green_stamp "$t"; printf '%s' "$t"
+}
+
+# NO KEY: the land is as before, and the command never runs.
+LR1="$(rc_tree rc-nokey)"
+OUTLR1="$(worktree_land "$LR1" wave/fixture 2>"$TMP/lr-err1")"
+expect_match "(rc1) with no release-check: key the tree lands" "spawn-worktree: LANDED branch=rc-nokey onto=wave/fixture *" "$OUTLR1"
+expect_eq "(rc1b) …printing the LANDED line alone" "1" "$(printf '%s\n' "$OUTLR1" | awk 'END { print NR }')"
+expect_eq "(rc1c) …nothing on stderr" "" "$(cat "$TMP/lr-err1")"
+expect_eq "(rc1d) …and the command never ran" "0" "$(lr_runs)"
+
+# THE KEY SET, A PASSING COMMAND: it runs over the landing range, and the tree lands.
+printf 'release-check: bash %s\n' "$LR_CHK" > "$LR/.bionic/config.yaml"
+LR2="$(rc_tree rc-pass)"
+LR2_HEAD="$(git -C "$LR2" rev-parse HEAD)"; LR2_BASE="$(git -C "$LR" rev-parse refs/heads/wave/fixture)"
+LR2_CWD="$(cd "$LR2" && pwd -P)"
+expect_match "(rc2) with the key set and a passing command the tree lands" \
+  "spawn-worktree: LANDED branch=rc-pass onto=wave/fixture *" "$(worktree_land "$LR2" wave/fixture)"
+expect_eq "(rc2b) …the command ran once, in the task's tree, from the working branch's head to the task's head" \
+  "1 base=${LR2_BASE} head=${LR2_HEAD} cwd=${LR2_CWD}" "$(lr_runs) $(tail -n 1 "$LR_SEEN" 2>/dev/null)"
+
+# THE KEY SET, A FAILING COMMAND: refused why=release-check, and nothing moved.
+echo 1 > "$LR_RCF"
+LR3="$(rc_tree rc-fail)"
+LR3_HEAD="$(git -C "$LR3" rev-parse HEAD)"; LR3_BASE="$(git -C "$LR" rev-parse refs/heads/wave/fixture)"
+LR3_REFS="$(refs_of "$LR")"; LR3_TREES="$(trees_of "$LR")"
+expect_true "(rc3-pre) the link resolves before the land" link_ok "$LR3"
+OUTLR3="$(worktree_land "$LR3" wave/fixture 2>"$TMP/lr-err3")"; RCLR3=$?
+expect_match "(rc3) a failing declared command refuses the landing why=release-check" \
+  "spawn-worktree: REFUSED reason=* why=release-check *" "$OUTLR3"
+expect_eq "(rc3b) …exit 2" "2" "$RCLR3"
+expect_eq "(rc3c) …it ran over the landing range" "base=${LR3_BASE} head=${LR3_HEAD}" \
+  "$(tail -n 1 "$LR_SEEN" 2>/dev/null | awk '{ print $1, $2 }')"
+expect_contains "(rc3d) …and its output is shown" "HIT entry 2 in the landing range" "$(cat "$TMP/lr-err3")"
+expect_eq "(rc3e) every ref is as before the call: no merge, the branch where it was" "$LR3_REFS" "$(refs_of "$LR")"
+expect_eq "(rc3f) every worktree is as before the call: the tree stands" "$LR3_TREES" "$(trees_of "$LR")"
+expect_eq "(rc3g) the tree's head is the one judged, its status clean" "${LR3_HEAD}|" \
+  "$(git -C "$LR3" rev-parse HEAD)|$(git -C "$LR3" status --porcelain)"
+expect_true "(rc3h) the link to the record still resolves" link_ok "$LR3"
+echo 0 > "$LR_RCF"
+expect_match "(rc3i) the same tree lands once the command passes" \
+  "spawn-worktree: LANDED branch=rc-fail onto=wave/fixture *" "$(worktree_land "$LR3" wave/fixture)"
+
 finish
