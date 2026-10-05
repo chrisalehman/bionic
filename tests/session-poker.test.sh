@@ -11892,6 +11892,17 @@ S67Q_SUM="$(s67_sum "$R67Q")"
 poke "$R67Q" amend crit --reexec+ 'rm -rf x & pytest' --reason 'a run behind &'
 expect_eq "67e7 a fourth hidden as rm -rf x & pytest is refused (exit 1; T57's construction)" "1" "$RC"
 expect_eq "67e8 …and nothing is written" "$S67Q_SUM" "$(s67_sum "$R67Q")"
+# A fourth by --suites+ on a critic dealt evidence that holds three suites and no run: the
+# wall's own cap counts suites and runs together once T57 is on the head (A-orch-123), and the
+# door refuses what it refuses. Red until then, for that reason alone.
+roster_row_fixture status=identified "session=$SID" name=crs "agent_id=a67-crs-0000000000001" \
+  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" subagent_type=bionic:critic tool_use_id=toolu_crs \
+  files= "suites_allowed=a.test.sh b.test.sh c.test.sh" suites_source=declared questions=evidence \
+  >> "$(roster_of "$R67Q")"
+S67Q_SUM="$(s67_sum "$R67Q")"
+poke "$R67Q" amend crs --suites+ tests/d.test.sh --reason 'a fourth suite'
+expect_eq "67e13 a fourth by --suites+ beside three suites is refused (exit 1; T57's count of suites and runs)" "1" "$RC"
+expect_eq "67e14 …and nothing is written" "$S67Q_SUM" "$(s67_sum "$R67Q")"
 poke "$R67Q" amend rev --reexec+ 'pytest tests/c' --reexec+ 'pytest tests/d' --reason 'two more'
 expect_eq "67e9 a reviewer not dealt evidence takes a fourth, as today (exit 0)" "0" "$RC"
 expect_eq "67e10 …and holds four" "4" "$(s67_runs "$R67Q" rev)"
