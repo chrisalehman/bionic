@@ -1072,11 +1072,12 @@ for T55_SHAPE in comment shared in-if; do
     expect_contains "${T55_L}: the run reached the machine (the rows below are not vacuous)" "bionic" "$T55_OUT"
     expect_same_bytes "${T55_L}: answered yes, the rc is byte-identical" "$TMP/t55-before" "$SB_T55/.zshrc"
     expect_eq "${T55_L}: …and keeps its inode" "$T55_INODE" "$(t51_inode "$SB_T55/.zshrc")"
-    expect_eq "${T55_L}: the line is named as not bionic's, once" "1" "$(t55_count "$T55_OUT" "not bionic's:")"
-    expect_contains "${T55_L}: …by its number" "line 2 of" "$(report_row "$T55_OUT" "not bionic's:")"
+    expect_eq "${T55_L}: the line is named as not in a form bionic wrote, once" "1" "$(t55_count "$T55_OUT" "not in a form bionic wrote")"
+    expect_contains "${T55_L}: …by its number" "line 2 of" "$(report_row "$T55_OUT" "not in a form bionic wrote")"
     expect_absent "${T55_L}: …and never by its text" "my note" "$T55_OUT"
     expect_absent "${T55_L}: …nor the text of a line it shares" "MYTOKEN" "$T55_OUT"
     expect_absent "${T55_L}: …nor the user's own flags" "--model opus" "$T55_OUT"
+    expect_absent "${T55_L}: …and never called not bionic's" "not bionic's:" "$T55_OUT"
     expect_absent "${T55_L}: no page offers a removal for it" "retired alias line" "$T55_OUT"
     expect_absent "${T55_L}: …nothing says it was removed" "(the unmarked spelling)" "$T55_OUT"
     case "$T55_DOOR" in setup-only|rm-payload|rm-standalone)
@@ -1093,12 +1094,12 @@ expect_true "T55 in-if: …and still parses after setup answered yes" bash -n "$
 for T55_SHAPE in comment shared in-if; do
   SB_T55D="$(new_sandbox)"; t55_plant "$SB_T55D/.zshrc" "$T55_SHAPE" setup-only
   T55_DOC="$(t51_doctor "$SB_T55D")"
-  T55_DROW="$(report_row "$T55_DOC" "not bionic's:")"
-  expect_contains "T55 ${T55_SHAPE} (doctor): a row names the line as not bionic's" "line 2 of" "$T55_DROW"
+  T55_DROW="$(report_row "$T55_DOC" "not in a form bionic wrote")"
+  expect_contains "T55 ${T55_SHAPE} (doctor): a row names the line as not in a form bionic wrote" "line 2 of" "$T55_DROW"
   expect_contains "T55 ${T55_SHAPE} (doctor): …and the file it is in, whole" "line 2 of ~/.zshrc" "$T55_DROW"
   expect_contains "T55 ${T55_SHAPE} (doctor): …and says to edit it by hand" "by hand" "$T55_DROW"
   expect_absent "T55 ${T55_SHAPE} (doctor): …with no route to setup" "/bionic:setup" "$T55_DROW"
-  expect_eq "T55 ${T55_SHAPE} (doctor): said once" "1" "$(t55_count "$T55_DOC" "not bionic's:")"
+  expect_eq "T55 ${T55_SHAPE} (doctor): said once" "1" "$(t55_count "$T55_DOC" "not in a form bionic wrote")"
   expect_absent "T55 ${T55_SHAPE} (doctor): the alias row does not call it present" "present →" "$(report_row "$T55_DOC" "legacy .zshrc alias block")"
   expect_absent "T55 ${T55_SHAPE} (doctor): …and the line's text is not printed" "MYTOKEN" "$T55_DOC"
 done
@@ -1127,7 +1128,7 @@ for T55_SHAPE in line7 indented crlf nofinal lastline; do
     expect_diff_bytes "${T55_L}: answered no, the line is still there" "$TMP/t55x-expected" "$SB_T55X/.zshrc"
     T55_YES="$(t55_door "$SB_T55X" "$T55_DOOR" y)"
     expect_same_bytes "${T55_L}: answered yes, that line goes and every other byte is as it was" "$TMP/t55x-expected" "$SB_T55X/.zshrc"
-    expect_absent "${T55_L}: …and nothing is called not bionic's" "not bionic's:" "$T55_YES"
+    expect_absent "${T55_L}: …and nothing is called not in a form bionic wrote" "not in a form bionic wrote" "$T55_YES"
   done
 done
 # setup --all over the exact line: the page names it, and yes takes exactly it.
@@ -1153,7 +1154,7 @@ for T55_DOOR in setup-only setup-all rm-payload rm-standalone rm-all; do
   fi
   T55M_OUT="$(t55_door "$SB_T55M" "$T55_DOOR" y)"
   expect_same_bytes "T55 both kinds (${T55_DOOR}): the exact line goes, the user's stays, byte for byte" "$TMP/t55m-expected" "$SB_T55M/.zshrc"
-  expect_contains "T55 both kinds (${T55_DOOR}): the user's line is named as left, by its number" "line 3 of" "$(report_row "$T55M_OUT" "not bionic's:")"
+  expect_contains "T55 both kinds (${T55_DOOR}): the user's line is named as left, by its number" "line 3 of" "$(report_row "$T55M_OUT" "not in a form bionic wrote")"
   expect_absent "T55 both kinds (${T55_DOOR}): …never by its text" "MYTOKEN" "$T55M_OUT"
 done
 
@@ -1172,6 +1173,43 @@ for T55_DOOR in setup-only rm-payload rm-standalone rm-all; do
                   "is read-only, and bionic leaves a file you made read-only alone — the alias block is still there" "$T55R_OUT" ;;
   esac
   expect_absent "T55 read-only (${T55_DOOR}): …never removed" "(the unmarked spelling)" "$T55R_OUT"
+done
+
+# THE FIRST INSTALLER'S LINE (A-orch-93): e178aecc wrote `alias claude='<P> …'` with
+# P the path `command -v claude` gave on that machine, or empty. One template holds
+# it: P empty, or absolute, ending in the component `claude`, holding no white
+# space, quote, `$`, backquote or `;`. Anything else in its shape is left and named.
+t55_tpl() {  # <shape> — the line at line 2
+  case "$1" in
+    homebrew)  printf '%s' "alias claude='/opt/homebrew/bin/claude --dangerously-skip-permissions'" ;;
+    empty-p)   printf '%s' "alias claude=' --dangerously-skip-permissions'" ;;
+    space)     printf '%s' "alias claude='/Users/a b/bin/claude --dangerously-skip-permissions'" ;;
+    relative)  printf '%s' "alias claude='bin/claude --dangerously-skip-permissions'" ;;
+    claude2)   printf '%s' "alias claude='/usr/local/bin/claude2 --dangerously-skip-permissions'" ;;
+    dir-slash) printf '%s' "alias claude='/usr/local/bin/claude/ --dangerously-skip-permissions'" ;;
+    dollar)    printf '%s' "alias claude='\$HOME/.local/bin/claude --dangerously-skip-permissions'" ;;
+    flag)      printf '%s' "alias claude='/opt/homebrew/bin/claude --model opus --dangerously-skip-permissions'" ;;
+    trailing)  printf '%s' "alias claude='/opt/homebrew/bin/claude --dangerously-skip-permissions' # mine" ;;
+    dquote)    printf '%s' 'alias claude="/opt/homebrew/bin/claude --dangerously-skip-permissions"' ;;
+  esac
+}
+for T55_SHAPE in homebrew empty-p space relative claude2 dir-slash dollar flag trailing dquote; do
+  for T55_DOOR in setup-only rm-payload rm-standalone; do
+    SB_T55T="$(new_sandbox)"
+    printf '%s\n' 'export A=1' "$(t55_tpl "$T55_SHAPE")" 'export B=2' > "$SB_T55T/.zshrc"
+    cp "$SB_T55T/.zshrc" "$TMP/t55t-before"; printf '%s\n' 'export A=1' 'export B=2' > "$TMP/t55t-removed"
+    T55T_OUT="$(t55_door "$SB_T55T" "$T55_DOOR" y)"
+    T55_L="T55 template ${T55_SHAPE} (${T55_DOOR})"
+    case "$T55_SHAPE" in
+      homebrew|empty-p)
+        expect_contains "${T55_L}: asked about by line number" "Remove line 2 of ${SB_T55T}/.zshrc" "$T55T_OUT"
+        expect_same_bytes "${T55_L}: bionic's line goes, every other byte kept" "$TMP/t55t-removed" "$SB_T55T/.zshrc" ;;
+      *)
+        expect_same_bytes "${T55_L}: not a form bionic wrote, left byte for byte" "$TMP/t55t-before" "$SB_T55T/.zshrc"
+        expect_contains "${T55_L}: …named by its number" "line 2 of" "$(report_row "$T55T_OUT" "not in a form bionic wrote")"
+        expect_absent "${T55_L}: …and nothing asked" "[y/N]" "$T55T_OUT" ;;
+    esac
+  done
 done
 
 # THE LIST AND ITS STANDALONE COPY (F1): remove.sh carries detect.sh's functions

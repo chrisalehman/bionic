@@ -518,7 +518,7 @@ _rm_file_has_line_matching() {  # <file> <ere>
 # the payload door's library and this file cannot come to disagree about which
 # line is bionic's: tests/rc-item.test.sh §T55 pins all four, with a mutant.
 bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
-  local l="$1"
+  local l="$1" p
   l="${l#"${l%%[![:blank:]]*}"}"
   l="${l%"${l##*[![:blank:]]}"}"
   l="${l%$'\r'}"
@@ -527,6 +527,17 @@ bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
     # claude-bootstrap.sh 6e953055 (2026-03-22), bare, `printf '\n%s\n' "$ALIAS_LINE"`,
     # until e012f966 (2026-03-28) wrote the same line inside the markers.
     "alias claude='claude --dangerously-skip-permissions'") return 0 ;;
+    # claude-bootstrap.sh e178aecc (2026-03-14) until 6e953055, the same append with
+    # `CLAUDE_BIN="$(command -v claude)"` as <P>: that machine's path to claude, or
+    # empty where none was on PATH. One template (A-orch-93): P empty, or absolute
+    # with `claude` as its last component, holding no white space, quote, `$`,
+    # backquote or `;`.
+    "alias claude='"*" --dangerously-skip-permissions'")
+      p="${l#"alias claude='"}"; p="${p%" --dangerously-skip-permissions'"}"
+      [ -z "$p" ] && return 0
+      case "$p" in /claude|/*/claude) ;; *) return 1 ;; esac
+      case "$p" in *[[:space:]]*|*\'*|*\"*|*\$*|*\`*|*\;*) return 1 ;; esac
+      return 0 ;;
   esac
   return 1
 }
@@ -780,7 +791,7 @@ _rm_legacy_alias_not_ours() {  # <rc>
   local scan theirs
   scan="$(bionic_legacy_alias_lines "$1")"; theirs="${scan#* theirs=}"
   [ -n "$theirs" ] || return 1
-  echo "  not bionic's: $(bionic_line_numbers_words "$theirs") of ${1} mentions the retired alias and is left as it is — edit it by hand if you want it gone"
+  echo "  $(bionic_line_numbers_words "$theirs") of ${1} is not in a form bionic wrote: it mentions the retired alias and is left as it is — edit it by hand if you want it gone"
   return 0
 }
 

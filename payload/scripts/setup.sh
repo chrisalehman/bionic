@@ -1351,7 +1351,7 @@ _setup_legacy_alias_not_ours() {  # <rc>
   scan="$(bionic_legacy_alias_lines "$1")"; theirs="${scan#* theirs=}"
   [ -n "$theirs" ] || return 1
   words="$(bionic_line_numbers_words "$theirs")"
-  item "$SETUP_NIL" "legacy alias" "not bionic's: ${words} of ${1} — left as it is"
+  item "$SETUP_NIL" "legacy alias" "not in a form bionic wrote: ${words} of ${1} — left as it is"
   action "edit ${words} of ${1} by hand if you want the retired alias gone — bionic removes only the line it wrote"
   return 0
 }
