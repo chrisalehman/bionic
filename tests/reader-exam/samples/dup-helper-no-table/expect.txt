@@ -1,3 +1,4 @@
 question: structure
 result: fail
 token: check: reuse FAIL
+names: proof_field
