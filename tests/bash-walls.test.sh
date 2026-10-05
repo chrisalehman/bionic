@@ -2295,7 +2295,8 @@ expect_status "EG6f the word critic on a line is not a reading: refused" 2 "$ST"
 expect_contains "EG6f2 …naming adversarial" "- adversarial: no reading, and no waiver" "$ERR"
 eg6_gate "$(eg6_plan 7 wave "$(eg6_reading "$H_EG6" evidence pass)
 $(eg6_reading "$H_EG6" structure pass)" "- Step 6: review at record/w27/review.md
-- Step 7: CLOSED — n/a: no ADR owed")"
+- Step 7:
+  n/a: no ADR owed by a fixture")"
 expect_status "EG6g the predicate is a prefix condition: at current: 7 the same lack is refused" 2 "$ST"
 expect_contains "EG6g2 …naming adversarial" "- adversarial: no reading, and no waiver" "$ERR"
 
