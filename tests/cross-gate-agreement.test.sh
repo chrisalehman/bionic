@@ -1827,9 +1827,9 @@ F4_BEFORE=$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$F4_ROSTER" 2>/dev/null || echo 0)
 # event that used to rewrite the file. The live agent's row is the OLDEST in it,
 # which is exactly the position eviction-by-recency takes first.
 mk_agent_payload "$SID_A" "$IREPO" \
-  | jq '.tool_input.name = "w99-other" | .tool_use_id = "toolu_OTHERDISPATCH"' \
+  | jq '.tool_input.name = "w99-other" | .tool_use_id = "toolu_OTHER_DISPATCH"' \
   | bash "$PARTY_DP" >/dev/null 2>&1
-mk_agent_post "$SID_A" "$ITR" "$IREPO" "toolu_OTHERDISPATCH" "w99-other" \
+mk_agent_post "$SID_A" "$ITR" "$IREPO" "toolu_OTHER_DISPATCH" "w99-other" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 expect_contains "the other dispatch's completion is journalled" \
   "agent_id=a26bd30bf8616411b" "$(grep 'status=confirmed|.*name=w99-other|' "$F4_ROSTER" 2>/dev/null)"

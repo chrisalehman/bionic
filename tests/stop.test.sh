@@ -462,7 +462,7 @@ section "7: the real tick's turn, judged by the wall's own ready set (REQ-10 AC-
 # nowhere — and nothing between them would have said so.
 #
 # THE FILL LINE IS THE REAL TICK'S, not a literal. tests/patrol-duties-gate.test.sh drives
-# every arm of the wall against synthesised text, which is right for a suite about the wall
+# every arm of the wall against synthesized text, which is right for a suite about the wall
 # and cannot see a tick that stopped printing the line. So this section RUNS the poker into a
 # fixture wave and feeds the wall exactly what came back — the whole channel, notes, rung
 # report, decision line and all.
