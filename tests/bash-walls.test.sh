@@ -1871,6 +1871,21 @@ am_admitted "19j5: proof-add from the main thread" \
 am_admitted "19j6: approve from the main thread" "bash $AM_POKER approve release 'approved'" ""
 am_admitted "19j7: waive from the main thread" "bash $AM_POKER waive adversarial 'ship it'" ""
 am_admitted "19j8: release-check from the main thread" "bash $AM_POKER release-check" ""
+
+# EVERY VERB ON THE LIST, READ FROM THE LIST (wave-27 T16; team-lead ruling). The refusal line is
+# `bionic: <verb> refused — <fact> (<fix>)`, capped at 100 columns by refuse.sh, and a verb long
+# enough to overflow it is still refused, but by refuse.sh's own self-refusal, which names no rule.
+# `release-check` overflowed it first (103 columns before the fix field was shortened). So each
+# verb in `_wall_poker_contract_verb`'s case arm, read from walls.sh rather than retyped, must be
+# refused from a subagent with exit 2 AND name the rule: the next verb added that overflows fails here.
+AM_VERBS="$(awk '/^_wall_poker_contract_verb\(\)/ { f = 1 } f && /^}/ { exit }
+  f && /^[[:space:]]*[a-z-]+(\|[a-z-]+)+\)[[:space:]]*$/ { s = $0; gsub(/[[:space:]\)]/, "", s); gsub(/\|/, " ", s); print s; exit }' \
+  "$WALLS_LIB/walls.sh")"
+expect_contains "19x0 precondition: the verb list is read from walls.sh's case arm (it names amend)" "amend" "$AM_VERBS"
+expect_contains "19x0b …and the last verb added, release-check" "release-check" "$AM_VERBS"
+for _am_v in $AM_VERBS; do
+  am_refused "19x: every listed verb — $_am_v" "bash $AM_POKER $_am_v"
+done
 am_admitted "19k: a subagent's tick" "bash $AM_POKER tick"
 am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
 am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"

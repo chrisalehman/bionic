@@ -5911,7 +5911,7 @@ the tree as it is and send the report; the orchestrator lands the work."
     *session-poker*)
       if _wall_poker_contract_verb "$COMMAND"; then
         fold_block exit2 "$_WALL_POKER_VERB" \
-          "a subagent may not change a contract or the plan" "ask the orchestrator" \
+          "a subagent may not change a contract or the plan" "ask orchestrator" \
           "\`session-poker.sh $_WALL_POKER_VERB\` changes a roster contract or the bound plan, and
 only the orchestrator does that: a dispatched agent that could would widen its own budget or
 schedule its own work. Send the orchestrator what you need — the files, suites or runs to
