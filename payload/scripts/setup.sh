@@ -244,16 +244,12 @@ SETUP_PLUGIN_ID="$(dep_plugin_id)"
 # two literals outright — a copy here would be a marker nothing writes, kept in
 # step with nothing.
 
-# The retired alias block's markers, verbatim from claude-bootstrap.sh —
-# box-drawing dashes included, because they are what makes the block
-# addressable. `BIONIC_LEGACY_ALIAS_PATTERN` is the pre-marker spelling the installer
-# itself still migrates (claude-bootstrap.sh's do_install_shell_alias), and it
-# is a separate case because a machine that stopped bootstrapping before markers
-# existed has the alias with no markers around it at all.
-SETUP_ALIAS_START='# ─── bionic:start ───'
-SETUP_ALIAS_END='# ─── bionic:end ───'
-# The spelling itself now lives in lib/checks.sh as BIONIC_LEGACY_ALIAS_PATTERN,
-# because the predicate that reads it does; this file uses that one name.
+# The retired alias block's markers are detect.sh's `BIONIC_ALIAS_START` and
+# `BIONIC_ALIAS_END` (wave-27 T51): the detector that reads the block's state and
+# this step that strips it name one pair. `BIONIC_LEGACY_ALIAS_PATTERN` is the
+# pre-marker spelling, a separate case because a machine that stopped
+# bootstrapping before markers existed has the alias with no markers around it at
+# all; it lives in lib/checks.sh, because the predicate that reads it does.
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
 #
@@ -552,8 +548,10 @@ _setup_say_declined() {  # <rc> <tail sentence, already worded for "declined —
 # not — step 4 writes to the same file, and a setup that can delete a user's
 # shell rc is a setup nobody should run.
 
-# THE MODE TRAVELS WITH THE CONTENT (critic F2). Both rc rewriters in this script
-# stage the new file beside the old one and `mv` it into place, and `mv` replaces
+# THE MODE TRAVELS WITH THE CONTENT (critic F2). The rc rewriter in this script
+# (the unmarked alias line's; the marked block goes through markers.sh's
+# `markers_strip`, which keeps the same order) stages the new file beside the old
+# one and `mv`s it into place, and `mv` replaces
 # the inode: without this, a shell rc the user deliberately kept at 0600 comes
 # back at whatever the umask says, because setup answered one question about a
 # retired alias block. That is the same defect `_dep_settings_write_jq` guards for
@@ -620,25 +618,6 @@ _setup_publish_tmp() {  # <tmp> <file>
   mode="$(_setup_file_mode "$file")"
   [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$file"
-}
-
-_setup_rc_strip_block() {  # <file> <start-marker> <end-marker>
-  local file="${1:-}" start="${2:-}" end="${3:-}" tmp target
-  [ -f "$file" ] || return 0
-  grep -qF "$start" "$file" 2>/dev/null || return 0
-  target="$(bionic_link_target "$file")"
-  tmp="${target}.bionic.tmp"
-  if _setup_stage_tmp "$tmp" \
-     && awk -v start="$start" -v end="$end" '
-        $0 == start { skip=1; next }
-        $0 == end   { skip=0; next }
-        !skip { print }
-      ' "$file" > "$tmp" \
-     && _setup_publish_tmp "$tmp" "$target"; then
-    return 0
-  fi
-  rm -f "$tmp"
-  return 1
 }
 
 # ─── Step 1 — the native plugin install (tier 2 ⊃ tier 1) ────────────────────
@@ -1233,23 +1212,28 @@ setup_claude_proxy() {
 
 # The rc's markers do not pair up: what markers_check found and where, and the
 # hand fix. One spelling for the refusal before the question and the writer's
-# rc 2 after it.
-_setup_rc_say_malformed() {  # <rc>
-  item "$SETUP_BAD" "claude() function" "markers do not pair up — nothing written"
+# rc 2 after it, for the live claude() block and the retired alias block alike
+# (wave-27 T51): the item label and the marker pair are the caller's.
+_setup_rc_say_malformed() {  # <rc> [<item label> <start> <end>]
+  local label="${2:-claude() function}" start="${3:-$RC_START}" end="${4:-$RC_END}"
+  item "$SETUP_BAD" "$label" "markers do not pair up — nothing written"
   say "     in ${1}:"
-  markers_check "$1" "$RC_START" "$RC_END" | while IFS= read -r _setup_where_line; do say "     ${_setup_where_line}"; done
+  markers_check "$1" "$start" "$end" | while IFS= read -r _setup_where_line; do say "     ${_setup_where_line}"; done
   action "fix bionic's markers in ${1} by hand"
 }
 
-# A target that is no file (markers.sh `markers_regular`, wave-27 T46): the item
-# fails, the path and what it is go on a line of their own beneath it (the cell
-# is truncated, A-T40.11), and the other items still run.
+# A target bionic cannot read as text (markers.sh `markers_regular`, wave-27 T46,
+# T51): a directory, a dangling link (and where it points), a file holding a NUL
+# byte, an unreadable file. The item fails, the path and what it is go on a line
+# of their own beneath it (the cell is truncated, A-T40.11), and the other items
+# still run. Two items can name the same rc; its hand fix is listed once.
 _setup_say_not_a_file() {  # <item label> <path>
-  local what
+  local what fix
   what="$(markers_regular "$2")"
-  item "$SETUP_BAD" "$1" "not a file — nothing written"
-  say "     ${2} is ${what:-not a regular file}; bionic writes only to a regular file."
-  action "${2} is yours to change by hand — bionic writes nothing inside it or beside it"
+  item "$SETUP_BAD" "$1" "$(markers_regular_cell "$what") — nothing written"
+  say "     ${2} is ${what:-not a regular file}; bionic reads and writes only a regular text file it can read."
+  fix="${2} is yours to change by hand — bionic writes nothing inside it or beside it"
+  case "$SETUP_ACTIONS" in *"$fix"*) ;; *) action "$fix" ;; esac
 }
 
 # What each rc item is for, in the words the user reads. Beside the step for
@@ -1280,6 +1264,18 @@ setup_legacy_alias() {
   rc="$(_detect_shell_rc)"
   line="$(detect_zshrc_legacy_block)"; present="${line#*present=}"
 
+  # THE ONE READER AND THE ONE WALK (wave-27 T51, review pass 21 F1, the blocker).
+  # This step had its own awk walk, which skipped from a start marker until an end
+  # marker: a start with no end deleted every line after it, and "✓ removed" was
+  # printed over the loss. The state is detect.sh's, read by markers.sh's
+  # `markers_check`; a fault is refused here, before anything is asked, with the
+  # line it is on; and the strip is markers.sh's `markers_strip`, whose refusals
+  # leave the rc byte-identical and are printed as what they are.
+  case "$present" in
+    not-a-file) _setup_say_not_a_file "legacy alias block" "$rc"; return 0 ;;
+    malformed)  _setup_rc_say_malformed "$rc" "legacy alias block" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END"; return 0 ;;
+  esac
+
   if [ "$present" = "yes" ]; then
     say "   ${rc} carries the retired bionic alias block — auto mode is the safer equivalent now."
     consent "   Remove the legacy alias block from ${rc}?"; _setup_consent_rc=$?
@@ -1288,13 +1284,16 @@ setup_legacy_alias() {
       action "remove the legacy bionic alias block from ${rc} — $(_setup_answer_yes legacy-alias)"
       return 0
     fi
-    _setup_rc_strip_block "$rc" "$SETUP_ALIAS_START" "$SETUP_ALIAS_END"
-    if grep -qF "$SETUP_ALIAS_START" "$rc" 2>/dev/null; then
-      item "$SETUP_BAD" "legacy alias block" "could not be removed"
-      action "remove the legacy bionic alias block from ${rc} by hand"
-    else
-      item "$SETUP_OK" "legacy alias block" "removed"
-    fi
+    markers_strip "$rc" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END"; _setup_strip_rc=$?
+    case "$_setup_strip_rc" in
+      0) item "$SETUP_OK" "legacy alias block" "removed" ;;
+      2) _setup_rc_say_malformed "$rc" "legacy alias block" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END" ;;
+      3) item "$SETUP_NIL" "legacy alias block" "read-only — not changed"
+         action "make ${rc} writable to remove the retired alias block — bionic does not write a read-only file" ;;
+      4) _setup_say_not_a_file "legacy alias block" "$rc" ;;
+      *) item "$SETUP_BAD" "legacy alias block" "could not write ${rc} — it is as it was"
+         action "remove the legacy bionic alias block from ${rc} by hand (bionic could not write the file)" ;;
+    esac
     return 0
   fi
 
@@ -1308,10 +1307,11 @@ setup_legacy_alias() {
     fi
     rc_target="$(bionic_link_target "$rc")"
     tmp="${rc_target}.bionic.tmp"
-    # Same discipline as _setup_rc_strip_block above, and for the same file — the
-    # same two helpers too, so there is one staging order in this script rather
-    # than a second one that has to be kept in step by hand, and one place that
-    # decides a symlinked rc is rewritten rather than detached.
+    # The staging pair above (`_setup_stage_tmp` / `_setup_publish_tmp`): one
+    # staging order in this script, and one place that decides a symlinked rc is
+    # rewritten rather than detached. An rc that is not text never reaches here
+    # (`not-a-file` above): `grep -v` over a file holding a NUL byte reports a
+    # binary match instead of printing the user's lines.
     if _setup_stage_tmp "$tmp" \
        && grep -vE "$BIONIC_LEGACY_ALIAS_PATTERN" "$rc" > "$tmp" \
        && _setup_publish_tmp "$tmp" "$rc_target"; then

@@ -754,4 +754,260 @@ for RETIRED in legacy-alias environment; do
   expect_eq "T46 ${RETIRED}: …and goes" "0" "$(count_lines_equal "$SB_RW/.zshrc" "$R_START")"
 done
 
+# ---------------------------------------------------------------------------
+section "wave-27 T51: setup's retired alias step reads markers_check and strips with markers_strip"
+# ---------------------------------------------------------------------------
+#
+# Review pass 21 F1 (blocker): setup's own awk walk started skipping at the
+# retired start marker and stopped only at an end marker, so an rc holding a
+# start with no end lost every line after it and setup printed "✓ removed".
+# F2: the detector matched the marker as a substring, so a marker quoted in a
+# comment was offered as a block. Every run here is under `env -i` with HOME,
+# ZDOTDIR, CLAUDE_CONFIG_DIR and BIONIC_CLAUDE_HOME inside the sandbox, and a
+# PATH that holds the claude stub and the system directories only: `setup --all`
+# answered yes acts on every item, and nothing it can reach may leave $TMP.
+
+T51_PATH="$TMP/bin:/usr/bin:/bin"
+command -v jq >/dev/null 2>&1 && T51_PATH="${T51_PATH}:$(dirname "$(command -v jq)")"
+t51_env() {  # <sandbox> <command...> — the one environment every T51 run gets
+  local sb="$1"; shift
+  mkdir -p "$sb/.tmp"
+  env -i HOME="$sb" ZDOTDIR="$sb" CLAUDE_CONFIG_DIR="$sb/.claude" BIONIC_CLAUDE_HOME="$sb/.claude" \
+    SHELL=/bin/zsh PATH="$T51_PATH" TMPDIR="$sb/.tmp" TERM=dumb BIONIC_DOCTOR_PROBE_SECONDS=15 "$@"
+}
+t51_setup() {  # <sandbox> <--only item | --all> <answer>
+  local sb="$1" mode="$2" answer="$3"
+  if [ "$mode" = "--all" ]; then
+    printf '%s\n' "$answer" | t51_env "$sb" bash "$SETUP_SH" --all 2>&1
+  else
+    printf '%s\n' "$answer" | t51_env "$sb" bash "$SETUP_SH" --only "$mode" 2>&1
+  fi
+}
+t51_doctor() { t51_env "$1" bash "$DOCTOR_SH" </dev/null 2>&1; }
+t51_inode() { ls -i "$1" 2>/dev/null | { read -r n _; printf '%s' "$n"; }; }
+# One `name=value` line out of `env`'s output.
+t51_env_var() {  # <env output> <name>
+  local line
+  while IFS= read -r line; do
+    case "$line" in "$2="*) printf '%s' "${line#*=}"; return 0 ;; esac
+  done <<< "$1"
+  return 0
+}
+
+# THE FIXTURE CANNOT REACH THE REAL HOME. Read back out of `env` as the scripts
+# see it: each of the four roots is inside $TMP (the positive) and none is the
+# home this suite was started from (the negative, on the same extractor).
+SB_T51E="$(new_sandbox)"
+T51_ENV_OUT="$(t51_env "$SB_T51E" env)"
+for T51_VAR in HOME ZDOTDIR CLAUDE_CONFIG_DIR BIONIC_CLAUDE_HOME; do
+  T51_VAL="$(t51_env_var "$T51_ENV_OUT" "$T51_VAR")"
+  expect_nonempty "T51 fixture: ${T51_VAR} is set in the run's environment" "$T51_VAL"
+  case "$T51_VAL" in "$TMP"/*) ok "T51 fixture: ${T51_VAR} is inside the throwaway home" ;;
+    *) no "T51 fixture: ${T51_VAR} is inside the throwaway home" "got '${T51_VAL}'" ;; esac
+  expect_ne "T51 fixture: ${T51_VAR} is not the real home" "$HOME" "$T51_VAL"
+  expect_ne "T51 fixture: ${T51_VAR} is not the real claude home" "$HOME/.claude" "$T51_VAL"
+done
+
+# ONE PAIR OF RETIRED MARKERS. detect.sh's pair is what doctor and setup read;
+# remove.sh's standalone copy must equal it, as the live rc markers are pinned.
+DETECT_ALIAS_START="$(const_from "$DETECT_SH" BIONIC_ALIAS_START)" || DETECT_ALIAS_START=""
+DETECT_ALIAS_END="$(const_from "$DETECT_SH" BIONIC_ALIAS_END)"     || DETECT_ALIAS_END=""
+expect_nonempty "T51: detect.sh carries the retired alias markers" "${DETECT_ALIAS_START}${DETECT_ALIAS_END}"
+expect_eq "T51: remove.sh's RM_ALIAS_START is detect.sh's BIONIC_ALIAS_START" "$DETECT_ALIAS_START" "$ALIAS_START"
+expect_eq "T51: remove.sh's RM_ALIAS_END is detect.sh's BIONIC_ALIAS_END"     "$DETECT_ALIAS_END"   "$ALIAS_END"
+
+# The review's rc: five lines, a retired start marker on line 2, no end marker.
+plant_t51_five() {  # <file>
+  printf '%s\n' 'export MINE_BEFORE=1' "$ALIAS_START" "alias claude='claude --dangerously-skip-permissions'" \
+    'export MINE_AFTER=1' 'alias ll="ls -l"' > "$1"
+}
+T51_FAULT='line 2: a start marker with no end marker after it'
+
+# setup --only legacy-alias, answered yes.
+SB_T51="$(new_sandbox)"; plant_t51_five "$SB_T51/.zshrc"
+cp "$SB_T51/.zshrc" "$TMP/t51-five.before"
+T51_INODE="$(t51_inode "$SB_T51/.zshrc")"
+expect_nonempty "T51 five-line rc: the inode extractor reads a number" "$T51_INODE"
+# doctor first, on the rc as planted; its rows are read below.
+T51_DOC="$(t51_doctor "$SB_T51")"
+T51_SET="$(t51_setup "$SB_T51" legacy-alias y)"
+expect_same_bytes "T51 five-line rc: setup --only legacy-alias answered yes leaves it byte-identical" \
+  "$TMP/t51-five.before" "$SB_T51/.zshrc"
+expect_eq "T51 five-line rc: …the user's last line is still there" "1" "$(count_lines_equal "$SB_T51/.zshrc" 'alias ll="ls -l"')"
+expect_eq "T51 five-line rc: …and the same inode (nothing was renamed over it)" "$T51_INODE" "$(t51_inode "$SB_T51/.zshrc")"
+expect_contains "T51 five-line rc: setup prints the fault with its line" "$T51_FAULT" "$T51_SET"
+expect_absent "T51 five-line rc: setup refuses before it asks" "[y/N]" "$T51_SET"
+expect_absent "T51 five-line rc: …and never says the block was removed" "removed" "$T51_SET"
+expect_contains "T51 five-line rc: …the item is marked refused" "✗ legacy alias block" "$T51_SET"
+
+# doctor read the same rc before setup ran (above): malformed with the line, a
+# hand fix, no route to setup.
+T51_ROW="$(report_row "$T51_DOC" "legacy .zshrc alias block")"
+expect_nonempty "T51 five-line rc: doctor renders a retired-alias row" "$T51_ROW"
+expect_contains "T51 five-line rc: doctor's row says malformed" "malformed" "$T51_ROW"
+expect_contains "T51 five-line rc: …and names the line" "line 2:" "$T51_ROW"
+expect_absent "T51 five-line rc: …and does not send the user to setup" "/bionic:setup" "$T51_ROW"
+T51_FIX="$(report_row "$T51_DOC" "retired alias block")"
+expect_contains "T51 five-line rc: doctor's fix line says to fix the markers by hand" "fix them by hand" "$T51_FIX"
+expect_absent "T51 five-line rc: …the fix line does not route to setup either" "/bionic:setup" "$T51_FIX"
+
+# setup --all, answered yes. The rc already carries bionic's own claude() block,
+# so the one item on the page that would write this rc has nothing to do and the
+# whole file can be compared (A-T51.3); the bare five lines follow.
+SB_T51A="$(new_sandbox)"; plant_t51_five "$SB_T51A/.zshrc"
+printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$SB_T51A/.zshrc"
+cp "$SB_T51A/.zshrc" "$TMP/t51-all.before"
+T51A_INODE="$(t51_inode "$SB_T51A/.zshrc")"
+T51A_SET="$(t51_setup "$SB_T51A" --all y)"
+expect_contains "T51 setup --all: the run reached the retired-alias step" "Legacy shell alias" "$T51A_SET"
+expect_same_bytes "T51 setup --all answered yes: the rc is byte-identical" "$TMP/t51-all.before" "$SB_T51A/.zshrc"
+expect_eq "T51 setup --all: …and the same inode" "$T51A_INODE" "$(t51_inode "$SB_T51A/.zshrc")"
+expect_contains "T51 setup --all: the fault is printed with its line" "$T51_FAULT" "$T51A_SET"
+expect_absent "T51 setup --all: …and nothing says the block was removed" "✓ legacy alias block" "$T51A_SET"
+expect_absent "T51 setup --all: the page does not offer the retired-alias step" "remove the retired shell alias block" "$T51A_SET"
+SB_T51B="$(new_sandbox)"; plant_t51_five "$SB_T51B/.zshrc"
+T51B_SET="$(t51_setup "$SB_T51B" --all y)"
+expect_eq "T51 setup --all, the bare five lines: every line of the user's is still there, in order" \
+  "$(rc_nonblock_lines "$TMP/t51-five.before")" "$(rc_nonblock_lines "$SB_T51B/.zshrc")"
+expect_contains "T51 setup --all, the bare five lines: the fault is printed" "$T51_FAULT" "$T51B_SET"
+
+# The four malformed shapes of the retired alias block, through setup and doctor.
+plant_t51_shape() {  # <file> <start> <end> <shape>
+  plant_rc "$1"
+  case "$4" in
+    start-only) printf '%s\n' "$2" 'alias claude=x' 'export MINE=1' >> "$1" ;;
+    end-only)   printf '%s\n' "$3" 'export MINE=1' >> "$1" ;;
+    two-starts) printf '%s\n' "$2" 'alias claude=x' "$2" 'alias claude=x' "$3" >> "$1" ;;
+    two-blocks) printf '%s\n' "$2" 'alias claude=x' "$3" 'export MINE=1' "$2" 'alias claude=x' "$3" >> "$1" ;;
+  esac
+}
+for T51_SHAPE in start-only end-only two-starts two-blocks; do
+  SB_T51S="$(new_sandbox)"; plant_t51_shape "$SB_T51S/.zshrc" "$ALIAS_START" "$ALIAS_END" "$T51_SHAPE"
+  cp "$SB_T51S/.zshrc" "$TMP/t51s-before.zshrc"
+  L="$(rc_shape_line "$T51_SHAPE")"
+  T51S_DOC="$(t51_doctor "$SB_T51S")"
+  T51S_SET="$(t51_setup "$SB_T51S" legacy-alias y)"
+  expect_same_bytes "T51 alias ${T51_SHAPE}: setup answered yes writes nothing" "$TMP/t51s-before.zshrc" "$SB_T51S/.zshrc"
+  expect_contains "T51 alias ${T51_SHAPE}: setup prints the fault with its line" "line ${L}:" "$T51S_SET"
+  expect_absent "T51 alias ${T51_SHAPE}: setup refuses before it asks" "[y/N]" "$T51S_SET"
+  T51S_ROW="$(report_row "$T51S_DOC" "legacy .zshrc alias block")"
+  expect_contains "T51 alias ${T51_SHAPE}: doctor's row says malformed" "malformed" "$T51S_ROW"
+  expect_contains "T51 alias ${T51_SHAPE}: …and names the line" "line ${L}:" "$T51S_ROW"
+  expect_absent "T51 alias ${T51_SHAPE}: …and no route to setup" "/bionic:setup" "$T51S_ROW"
+done
+
+# The same four shapes of the retired ENVIRONMENT block, through the door that
+# handles it: setup and doctor have no environment-block step (A-T51.1), remove
+# does, and refuses every shape byte-identically with the line.
+for T51_SHAPE in start-only end-only two-starts two-blocks; do
+  SB_T51V="$(new_sandbox)"; plant_t51_shape "$SB_T51V/.zshrc" "$ENVB_START" "$ENVB_END" "$T51_SHAPE"
+  cp "$SB_T51V/.zshrc" "$TMP/t51v-before.zshrc"
+  L="$(rc_shape_line "$T51_SHAPE")"
+  T51V_OUT="$(printf 'y\n' | t51_env "$SB_T51V" bash "$REMOVE_SH" --only environment 2>&1)"
+  expect_same_bytes "T51 environment ${T51_SHAPE}: remove answered yes writes nothing" "$TMP/t51v-before.zshrc" "$SB_T51V/.zshrc"
+  expect_contains "T51 environment ${T51_SHAPE}: remove names the line" "line ${L}:" "$T51V_OUT"
+  T51V_SET="$(t51_setup "$SB_T51V" legacy-alias y)"
+  expect_same_bytes "T51 environment ${T51_SHAPE}: setup's retired-alias step leaves it alone" "$TMP/t51v-before.zshrc" "$SB_T51V/.zshrc"
+done
+
+# A WELL-FORMED retired block goes exactly as it did: every other line, the blank
+# lines that separated the block from the user's text included, byte for byte.
+SB_T51W="$(new_sandbox)"
+printf '%s\n' 'export MINE_BEFORE=1' '' "$ALIAS_START" "alias claude='claude --dangerously-skip-permissions'" \
+  "$ALIAS_END" '' 'export MINE_AFTER=1' > "$SB_T51W/.zshrc"
+printf '%s\n' 'export MINE_BEFORE=1' '' '' 'export MINE_AFTER=1' > "$TMP/t51w-expected"
+T51W_SET="$(t51_setup "$SB_T51W" legacy-alias y)"
+expect_contains "T51 well-formed block: setup asks (the twin of the refusals)" "[y/N]" "$T51W_SET"
+expect_contains "T51 well-formed block: …and says it removed it" "removed" "$T51W_SET"
+expect_same_bytes "T51 well-formed block: the user's lines come back byte for byte" "$TMP/t51w-expected" "$SB_T51W/.zshrc"
+T51W_ROW="$(report_row "$(t51_doctor "$SB_T51W")" "legacy .zshrc alias block")"
+expect_empty "T51 well-formed block: after the strip doctor has no retired-alias row" "$T51W_ROW"
+
+# A MARKER QUOTED IN A COMMENT IS NOT A BLOCK (F2): doctor reports none, setup
+# offers nothing, the rc keeps its bytes and its inode. The twin is the whole
+# block above, on the same extractors: a row, a question, a page line.
+SB_T51Q="$(new_sandbox)"; printf '%s\n' "# old installs wrote a '${ALIAS_START}' line here" >> "$SB_T51Q/.zshrc"
+cp "$SB_T51Q/.zshrc" "$TMP/t51q-before.zshrc"
+T51Q_INODE="$(t51_inode "$SB_T51Q/.zshrc")"
+SB_T51QT="$(new_sandbox)"; printf '%s\n' "$ALIAS_START" "alias claude=x" "$ALIAS_END" >> "$SB_T51QT/.zshrc"
+expect_contains "T51 quoted-marker twin: doctor reports a whole block" "present" \
+  "$(report_row "$(t51_doctor "$SB_T51QT")" "legacy .zshrc alias block")"
+expect_empty "T51 quoted marker: doctor reports no retired block" \
+  "$(report_row "$(t51_doctor "$SB_T51Q")" "legacy .zshrc alias block")"
+expect_contains "T51 quoted-marker twin: setup --all's page offers the step" "remove the retired shell alias block" \
+  "$(t51_setup "$SB_T51QT" --all n)"
+T51Q_PAGE="$(t51_setup "$SB_T51Q" --all n)"
+expect_contains "T51 quoted marker: setup --all printed its page" "Do all of the above?" "$T51Q_PAGE"
+expect_absent "T51 quoted marker: …and the page does not offer the step" "remove the retired shell alias block" "$T51Q_PAGE"
+T51Q_SET="$(t51_setup "$SB_T51Q" legacy-alias y)"
+expect_contains "T51 quoted marker: setup --only says there is none" "legacy alias block     none in" "$T51Q_SET"
+expect_absent "T51 quoted marker: …and asks nothing" "[y/N]" "$T51Q_SET"
+expect_same_bytes "T51 quoted marker: the rc is byte-identical" "$TMP/t51q-before.zshrc" "$SB_T51Q/.zshrc"
+expect_eq "T51 quoted marker: …and keeps its inode" "$T51Q_INODE" "$(t51_inode "$SB_T51Q/.zshrc")"
+
+# A NUL BYTE IN THE RC (F5): the rc is not text, and every door says so and
+# writes nothing, under /bin/bash and under the bash on PATH. Two rcs: a whole
+# retired block, and the unmarked alias line — each with a NUL in a user's line.
+t51_has_nul() { if LC_ALL=C tr -d '\000' < "$1" | cmp -s - "$1"; then printf 'no'; else printf 'yes'; fi; }
+for T51_SH in /bin/bash "$(command -v bash)"; do
+  for T51_NSHAPE in block unmarked; do
+    SB_T51N="$(new_sandbox)"
+    case "$T51_NSHAPE" in
+      block)    printf '%s\n' "$ALIAS_START" "alias claude=x" "$ALIAS_END" >> "$SB_T51N/.zshrc" ;;
+      unmarked) printf '%s\n' "alias claude='claude --dangerously-skip-permissions'" >> "$SB_T51N/.zshrc" ;;
+    esac
+    printf 'export MINE=1\000tail\n' >> "$SB_T51N/.zshrc"
+    cp "$SB_T51N/.zshrc" "$TMP/t51n-before"
+    expect_eq "T51 NUL rc ${T51_NSHAPE} (${T51_SH}): the fixture holds a NUL" "yes" "$(t51_has_nul "$SB_T51N/.zshrc")"
+    T51N_SET="$(printf 'y\n' | t51_env "$SB_T51N" "$T51_SH" "$SETUP_SH" --only legacy-alias 2>&1)"
+    expect_same_bytes "T51 NUL rc ${T51_NSHAPE} (${T51_SH}): setup's retired-alias step writes nothing" "$TMP/t51n-before" "$SB_T51N/.zshrc"
+    expect_contains "T51 NUL rc ${T51_NSHAPE} (${T51_SH}): …and says the rc is not text" "is not text: it holds a NUL byte" "$T51N_SET"
+    expect_absent "T51 NUL rc ${T51_NSHAPE} (${T51_SH}): …before it asks" "[y/N]" "$T51N_SET"
+    T51N_PX="$(printf 'y\n' | t51_env "$SB_T51N" "$T51_SH" "$SETUP_SH" --only claude-proxy 2>&1)"
+    expect_same_bytes "T51 NUL rc ${T51_NSHAPE} (${T51_SH}): setup's claude() step writes nothing" "$TMP/t51n-before" "$SB_T51N/.zshrc"
+    expect_contains "T51 NUL rc ${T51_NSHAPE} (${T51_SH}): …and says why" "is not text: it holds a NUL byte" "$T51N_PX"
+    for T51_RITEM in legacy-alias environment claude-proxy; do
+      T51N_RM="$(printf 'y\n' | t51_env "$SB_T51N" "$T51_SH" "$REMOVE_SH" --only "$T51_RITEM" 2>&1)"
+      expect_same_bytes "T51 NUL rc ${T51_NSHAPE} (${T51_SH}): remove ${T51_RITEM} writes nothing" "$TMP/t51n-before" "$SB_T51N/.zshrc"
+      expect_contains "T51 NUL rc ${T51_NSHAPE} (${T51_SH}): remove ${T51_RITEM} says why" "is not text: it holds a NUL byte" "$T51N_RM"
+    done
+  done
+  T51N_ROW="$(report_row "$(t51_env "$SB_T51N" "$T51_SH" "$DOCTOR_SH" </dev/null 2>&1)" "$DOCTOR_ROW_LABEL")"
+  expect_contains "T51 NUL rc (${T51_SH}): doctor's claude() row says not text" "not text" "$T51N_ROW"
+done
+# The twin: the same unmarked rc without the NUL is rewritten as before.
+SB_T51NT="$(new_sandbox)"; printf '%s\n' "alias claude='claude --dangerously-skip-permissions'" 'export MINE=1' >> "$SB_T51NT/.zshrc"
+T51NT_SET="$(t51_setup "$SB_T51NT" legacy-alias y)"
+expect_contains "T51 NUL twin: the unmarked line with no NUL is removed" "removed (the unmarked spelling)" "$T51NT_SET"
+expect_eq "T51 NUL twin: …and the user's line after it stays" "1" "$(count_lines_equal "$SB_T51NT/.zshrc" 'export MINE=1')"
+
+# A DANGLING RC LINK names where it points (F3).
+SB_T51L="$(new_sandbox)"; rm -f "$SB_T51L/.zshrc"; ln -s "$SB_T51L/dotfiles/zshrc" "$SB_T51L/.zshrc"
+T51L_SET="$(t51_setup "$SB_T51L" claude-proxy y)"
+expect_contains "T51 dangling rc: setup names where the link points" "a link to ${SB_T51L}/dotfiles/zshrc, which does not exist" "$T51L_SET"
+expect_eq "T51 dangling rc: …and creates nothing there" "no" "$( [ -e "$SB_T51L/dotfiles/zshrc" ] && echo yes || echo no)"
+
+# AN RC THAT IS NO FILE, UNDER remove --all (F7): the two retired-block items do
+# not call it "already clean"; they say it was not checked, and why.
+t51_item_lines() {  # <output> <item header> — the item's lines, header to the blank line after it
+  local line inside=0
+  while IFS= read -r line; do
+    if [ "$inside" = "0" ]; then [ "$line" = "$2" ] && inside=1; continue; fi
+    [ -z "$line" ] && return 0
+    printf '%s\n' "$line"
+  done <<< "$1"
+}
+SB_T51D="$(new_sandbox)"; rm -f "$SB_T51D/.zshrc"; mkdir "$SB_T51D/.zshrc"
+T51D_ALL="$(printf 'y\n' | t51_env "$SB_T51D" bash "$REMOVE_SH" --all 2>&1)"
+for T51_HDR in "legacy shell alias block:" "bionic's environment settings:"; do
+  T51D_ITEM="$(t51_item_lines "$T51D_ALL" "$T51_HDR")"
+  expect_nonempty "T51 rc a directory, remove --all: the '${T51_HDR}' item printed lines" "$T51D_ITEM"
+  expect_contains "T51 rc a directory, remove --all: '${T51_HDR}' says the rc was not checked" "not checked" "$T51D_ITEM"
+  expect_absent "T51 rc a directory, remove --all: '${T51_HDR}' does not call it already clean" "already clean" "$T51D_ITEM"
+done
+# The twin: a regular rc with neither block is already clean, on the same extractor.
+SB_T51DT="$(new_sandbox)"
+T51DT_ITEM="$(t51_item_lines "$(printf 'y\n' | t51_env "$SB_T51DT" bash "$REMOVE_SH" --all 2>&1)" "legacy shell alias block:")"
+expect_contains "T51 rc a regular file, remove --all: the retired-alias item is already clean (the twin)" "already clean" "$T51DT_ITEM"
+
 finish
