@@ -36,7 +36,15 @@
 #   §SITES  the power check plants every entry at every site; each site blinded on a doctored
 #           copy refuses the run (T52, the power check).
 #   §COST   one pass for the whole list, and a 500-entry clean scan of this repository inside
-#           its time ceiling (T52 finding 13).
+#           its time ceiling (T52 finding 13); 20,000 matching lines in one blob inside 5
+#           seconds (T56 N8).
+#   §WRAP   white space inside an entry matches any run of white space holding at most one line
+#           break, and one comment leader after the break; never none (T56 B1).
+#   §PUSHED the objects a push sends: a commit or blob "fixed" by `git replace` is read as the
+#           original, and a nested tag's inner message is read (T56 N1, N3).
+#   §PERLDB a caller's perl debugger variables print no entry (T56 N4).
+#   §INERT  the locale pick and the BASH_ENV unset each have a row that fails without them
+#           (T56 N6, N7).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): every
 # repository is a real `git init` under a mktemp directory, with real commits, real
@@ -127,9 +135,11 @@ SH
 # doctor <name> <from> <to> — a copy of the scan with the first literal <from> replaced by <to>
 # (cut and joined by hand: a pattern substitution's replacement keeps its quotes in some bashes);
 # prints its path
-doctor() {
-  local f="$TMP/doctored/$1.sh" src; mkdir -p "$TMP/doctored"
-  src="$(cat "$SCAN")"
+doctor() { doctor_from "$SCAN" "$@"; }
+# doctor_from <source> <name> <from> <to> — the same, from another (already doctored) copy
+doctor_from() {
+  local f="$TMP/doctored/$2.sh" src; mkdir -p "$TMP/doctored"
+  src="$(cat "$1")"; shift
   case "$src" in *"$2"*) src="${src%%"$2"*}$3${src#*"$2"}" ;; esac
   printf '%s\n' "$src" > "$f"; printf '%s' "$f"
 }
@@ -680,12 +690,14 @@ printf 'see ZQ%sRBIX-8812 here\n' "$OU" > "$R/n.txt"; fx_commit "$R" "$(printf '
 scan "$R" "$(fx_list case2 "$EU")" LC_ALL=C
 expect_contains "CASE2: caller LC_ALL=C — upper-case non-ASCII contents are a hit" "HIT entry=1 at blob $(s12 "$R" HEAD:n.txt) line 1" "$(hits)"
 expect_contains "CASE2: caller LC_ALL=C — and the message" "HIT entry=1 at commit $(s12 "$R" HEAD) message" "$(hits)"
-# CASE3 no UTF-8 locale on the machine: a non-ASCII entry refuses, an ASCII list still runs
+# CASE3 no UTF-8 locale on the machine: the matcher folds without one, so a non-ASCII entry is
+# scanned and found, not refused (T56 N6: the refusal refused a run that works)
 NOLOC="$TMP/shim-nolocale"; mkdir -p "$NOLOC"
 printf '#!/bin/bash\ncase "${1:-}" in -a) printf "C\\nPOSIX\\n" ;; *) echo US-ASCII ;; esac\n' > "$NOLOC/locale"; chmod +x "$NOLOC/locale"
 scan "$R" "$(fx_list case3 "$EU")" PATH="$NOLOC:$PATH"
-expect_status "CASE3: no UTF-8 locale and a non-ASCII entry — refused, exit 2" 2 "$RC"
-expect_contains "CASE3: the refusal says why" "UTF-8" "$OUT"
+expect_status "CASE3: no UTF-8 locale and a non-ASCII entry — scanned, and the upper-case contents found, exit 1" 1 "$RC"
+expect_contains "CASE3: (same run) the hit is the upper-case contents, by blob" "HIT entry=1 at blob $(s12 "$R" HEAD:n.txt) line 1" "$(hits)"
+expect_absent "CASE3: (same run) the entry is not printed" "rbix" "$OUT"
 printf 'see %s\n' "$E1" > "$R/m.txt"; fx_commit "$R" "ascii"
 scan "$R" "$(fx_list case3b "$E1")" PATH="$NOLOC:$PATH"
 expect_status "CASE3: the same machine with an ASCII-only list runs, and finds (control)" 1 "$RC"
@@ -742,6 +754,7 @@ committer name|look($name, "commit $sha $who", 0);|look($name, "commit $sha $who
 committer email|look($mail, "commit $sha $who", 0);|look($mail, "commit $sha $who", 0) if $who ne "committer";
 tag name|look($ref, "tag $s", 0);|look("", "tag $s", 0);
 tag message|look($msg, "tag $sha", 0);|look("", "tag $sha", 0);
+wrapped text|join $ws, map|join " ", map
 SITES
 
 section "§COST — one pass for the whole list, inside the time ceiling (T52 finding 13)"
@@ -775,6 +788,20 @@ if git -C "$BIONIC_SCRIPTS_DIR" rev-parse --verify -q HEAD >/dev/null 2>&1; then
 else
   echo "SKIP: $BIONIC_SCRIPTS_DIR is not a git checkout; the 500-entry timing row did not run"
 fi
+# a hit's line is counted on from the previous hit (T56 N8): 20,000 matching lines in one blob,
+# a two-word entry on each, inside 5 seconds measured here
+EN="mxv9 plover"
+R="$TMP/cost20k"; fx_repo "$R"
+yes "see $EN here" | head -n 20000 > "$R/many.txt"; fx_commit "$R" "many"
+expect_eq "COST: the fixture blob has 20,000 lines (fixture)" "20000" "$(wc -l < "$R/many.txt" | tr -d ' ')"
+T0="$(date +%s)"
+scan "$R" "$(fx_list cost20k "$EN")"
+EL_S=$(( $(date +%s) - T0 ))
+echo "COST: a scan with 20,000 matching lines took ${EL_S}s"
+expect_status "COST: 20,000 matching lines — exit 1" 1 "$RC"
+expect_eq "COST: (same run) one hit per line" "20000" "$(hits | grep -c '^HIT ')"
+expect_contains "COST: (same run) the last hit names line 20000" "HIT entry=1 at blob $(s12 "$R" HEAD:many.txt) line 20000" "$(hits)"
+expect_true "COST: and took under 5 seconds (took ${EL_S}s)" [ "$EL_S" -lt 5 ]
 
 section "§QUIET — no entry is printed or recorded"
 
@@ -833,5 +860,132 @@ expect_false "QUIET4: the doctored copy (git's stderr let through) differs from 
 scanx "$LOUD" "$R" "$L"
 expect_contains "QUIET4: the doctored copy still runs (positive)" "entries=1" "$OUT"
 expect_ne "QUIET4: and with git's stderr let through the ref name DOES leak (the row can fail)" "0" "$(count_in "$OUT" "$EK")"
+
+section "§WRAP — white space inside an entry is any run of white space (T56 B1)"
+
+# one file per form, so each hit names its own blob; E3 is the two-word entry `mxv9 plover`,
+# EW1 a one-word entry, EW2 an entry with regex metacharacters and a space
+EW1="zq-wrap-6630"; EW2="zq.v+ (1)"
+R="$TMP/wrap1"; fx_repo "$R"
+W="$R/w"; mkdir -p "$W"
+printf 'The scan was\nwritten for the mxv9\nplover project.\n' > "$W/md.md"
+printf 'see mxv9  plover here\n' > "$W/two-spaces.txt"
+printf 'see mxv9\tplover here\n' > "$W/tab.txt"
+printf 'see the mxv9\r\nplover case\r\n' > "$W/crlf.txt"
+printf '# written for the mxv9\n# plover project\n' > "$W/hash.sh"
+printf '// the mxv9\n// plover case\n' > "$W/slashes.c"
+printf '/*\n * the mxv9\n * plover case\n */\n' > "$W/block.c"
+printf '> the mxv9\n> plover case\n' > "$W/quote.md"
+printf -- '-- mxv9\n-- plover\n' > "$W/dashes.sql"
+printf '; the mxv9\n; plover case\n' > "$W/semi.ini"
+printf 'see mxv9plover here\n' > "$W/run-together.txt"
+printf 'see mxv9 # plover here\n' > "$W/leader-one-line.txt"
+printf 'see mxv9\n\n\nplover here\n' > "$W/blank-lines.txt"
+printf 'see ZQ-WRAP-6630 here\nand zq-wrap\n6630 there\n' > "$W/one-word.txt"
+printf 'see ZQ.V+\n(1) here\n' > "$W/meta.txt"
+printf 'see zqXvv (1) here\n' > "$W/meta-not.txt"
+git -C "$R" add -A
+git -C "$R" commit -q -m "$(printf 'docs: where the scan came from\n\nIt was first written for the mxv9\nplover project.')"
+L="$(fx_list wrap1 "$E3" "$EW1" "$EW2")"
+scan "$R" "$L"
+expect_status "WRAP: a tree and a commit body holding the wrapped entry exit 1" 1 "$RC"
+wb() { s12 "$R" "HEAD:w/$1"; }
+for f in 'md.md|2' 'two-spaces.txt|1' 'tab.txt|1' 'crlf.txt|1' 'hash.sh|1' 'slashes.c|1' 'block.c|2' 'quote.md|1' 'dashes.sql|1' 'semi.ini|1'; do
+  expect_eq "WRAP: ${f%%|*} — the entry is found once, on the line its match starts on" \
+    "HIT entry=1 at blob $(wb "${f%%|*}") line ${f#*|}" "$(hits | grep -F "blob $(wb "${f%%|*}") ")"
+done
+expect_contains "WRAP: a commit body wrapped between the words is a hit" "HIT entry=1 at commit $(s12 "$R" HEAD) message" "$(hits)"
+for f in run-together.txt leader-one-line.txt blank-lines.txt meta-not.txt; do
+  expect_nonempty "WRAP: $f has a blob id (extractor non-empty)" "$(wb "$f")"
+  expect_no_regex "WRAP: $f — not a hit (same output)" "blob $(wb "$f")" "$(hits)"
+done
+expect_eq "WRAP: a one-word entry matches exactly as before — its one-line form only" \
+  "HIT entry=2 at blob $(wb one-word.txt) line 1" "$(hits | grep -F "blob $(wb one-word.txt) ")"
+expect_eq "WRAP: an entry with regex metacharacters is literal, and wraps at its space" \
+  "HIT entry=3 at blob $(wb meta.txt) line 1" "$(hits | grep -F "blob $(wb meta.txt) ")"
+expect_eq "WRAP: the scan's whole output holds the two-word entry's words zero times" "0" "$(count_in "$OUT" plover)"
+
+section "§PUSHED — the objects a push sends, not a local replacement (T56 N1, N3)"
+
+ER="zq-replaced-4410"
+# PSH1 a commit whose message holds the entry, replaced locally by a clean one
+R="$TMP/psh1"; fx_repo "$R"
+printf 'y\n' > "$R/f.txt"; fx_commit "$R" "fix for $ER"
+ORIG="$(git -C "$R" rev-parse HEAD)"
+NEWC="$(git -C "$R" cat-file commit HEAD | sed "s/fix for $ER/fix/" | git -C "$R" hash-object -t commit -w --stdin)"
+git -C "$R" replace "$ORIG" "$NEWC"
+expect_eq "PSH1: the fixture's log shows the replacement (fixture)" "fix" "$(git -C "$R" log -1 --format=%s)"
+scan "$R" "$(fx_list psh1 "$ER")"
+expect_status "PSH1: a commit message replaced by a clean one is read as the push sends it — exit 1" 1 "$RC"
+expect_eq "PSH1: the hit is the original commit's message" "HIT entry=1 at commit ${ORIG:0:12} message" "$(hits)"
+# PSH2 a blob holding the entry, replaced locally by a clean one
+R="$TMP/psh2"; fx_repo "$R"
+printf 'see %s\n' "$ER" > "$R/g.txt"; fx_commit "$R" "add g"
+OB="$(git -C "$R" rev-parse HEAD:g.txt)"
+git -C "$R" replace "$OB" "$(printf 'clean\n' | git -C "$R" hash-object -w --stdin)"
+expect_eq "PSH2: the fixture reads the replacement (fixture)" "clean" "$(git -C "$R" cat-file -p HEAD:g.txt)"
+scan "$R" "$(fx_list psh2 "$ER")"
+expect_status "PSH2: a blob replaced by a clean one is read as the push sends it — exit 1" 1 "$RC"
+expect_eq "PSH2: the hit is the original blob" "HIT entry=1 at blob ${OB:0:12} line 1" "$(hits)"
+# PSH3 tag A annotated on tag B annotated on a commit, the entry only in B's message, B's ref gone
+ETN="zq-innertag-5182"
+R="$TMP/psh3"; fx_repo "$R"
+fx_commit "$R" "mid"
+git -C "$R" tag -a inner -m "inner $ETN"
+INNER="$(s12 "$R" inner)"
+git -C "$R" -c advice.nestedTag=false tag -a outer -m "outer" inner
+git -C "$R" tag -d inner >/dev/null
+expect_eq "PSH3: the outer tag names the inner tag object (fixture)" "tag" "$(git -C "$R" cat-file -p outer | sed -n 's/^type //p')"
+scan "$R" "$(fx_list psh3 "$ETN")" BIONIC_CHECK_BASE=v0.1
+expect_status "PSH3: a nested tag's inner message is read — exit 1" 1 "$RC"
+expect_eq "PSH3: the hit is the inner tag object" "HIT entry=1 at tag $INNER" "$(hits)"
+
+section "§PERLDB — a caller's perl debugger prints no entry (T56 N4)"
+
+EPD="zq-perldb-7314"
+R="$TMP/perldb"; fx_repo "$R"
+printf '%s\n' "$EPD" > "$R/b.txt"; fx_commit "$R" "add b"
+scan "$R" "$(fx_list perldb "$EPD")" PERL5OPT=-d PERLDB_OPTS='NonStop=1 frame=6 LineInfo=/dev/stderr'
+expect_status "PERLDB: with the debugger in the caller's environment the run still exits 1" 1 "$RC"
+expect_eq "PERLDB: (same run) it prints the hit" "HIT entry=1 at blob $(s12 "$R" HEAD:b.txt) line 1" "$(hits)"
+expect_eq "PERLDB: (same run) stdout and stderr hold the entry zero times" "0" "$(count_in "$OUT" "$EPD")"
+
+section "§INERT — the locale pick and the BASH_ENV unset each do something (T56 N6, N7)"
+
+# INERT1 the locale pick lets the power check's upper-case plant prove the fold of a non-ASCII
+# letter: a matcher that folds ASCII only is refused for a non-ASCII entry
+R="$TMP/inert1"; fx_repo "$R"
+ASCIIFOLD="$(doctor asciifold 'sub fold { fc(Encode::decode("UTF-8", $_[0])) }' 'sub fold { lc($_[0]) }')"
+expect_false "INERT1: the ASCII-fold copy differs from the scan" cmp -s "$SCAN" "$ASCIIFOLD"
+expect_true "INERT1: the ASCII-fold copy parses" bash -n "$ASCIIFOLD"
+scanx "$ASCIIFOLD" "$R" "$(fx_list inert1a "$E1")"
+expect_status "INERT1: the ASCII-fold copy with an ASCII list runs clean (control)" 0 "$RC"
+scanx "$ASCIIFOLD" "$R" "$(fx_list inert1 "$EU")"
+expect_status "INERT1: the ASCII-fold copy with a non-ASCII entry — no power, exit 2" 2 "$RC"
+expect_contains "INERT1: the refusal names the upper-case plant" "at its text blob in the throwaway" "$OUT"
+NOPICK="$(doctor_from "$ASCIIFOLD" nopick 'export LC_ALL="$utf8"' ':')"
+expect_false "INERT1: the copy without the pick differs from the ASCII-fold copy" cmp -s "$ASCIIFOLD" "$NOPICK"
+scanx "$NOPICK" "$R" "$(fx_list inert1b "$EU")"
+expect_status "INERT1: without the locale pick the same blind matcher passes the power check (the row can fail)" 0 "$RC"
+# INERT2 a caller's BASH_ENV does not reach a bash the scan starts (a git wrapper on PATH)
+R="$TMP/inert2"; fx_repo "$R"
+printf '%s\n' "$E1" > "$R/b.txt"; fx_commit "$R" "add b"
+# the BASH_ENV file logs each bash that reads it: the scan's own interpreter reads it before
+# line 1 (A-T52.8), so the log holds exactly one line when no bash the scan starts reads it
+BENV="$TMP/bashenv-ran.log"
+printf 'echo ran >> "%s"\n' "$BENV" > "$TMP/bashenv.sh"
+BLOG="$TMP/bashenv-shim.log"; : > "$BLOG"; : > "$BENV"
+WRAPGIT="$(shim bashenv --never-an-argument)"
+scan "$R" "$(fx_list inert2 "$E1")" PATH="$WRAPGIT:$PATH" BASH_ENV="$TMP/bashenv.sh" SHIM_LOG="$BLOG"
+expect_status "INERT2: a caller's BASH_ENV and a bash git wrapper — the scan runs, exit 1" 1 "$RC"
+expect_eq "INERT2: (same run) it prints the hit" "HIT entry=1 at blob $(s12 "$R" HEAD:b.txt) line 1" "$(hits)"
+expect_nonempty "INERT2: (same run) the git calls went through the bash wrapper" "$(cat "$BLOG")"
+expect_eq "INERT2: (same run) BASH_ENV was read once, by the scan's own bash, never by the wrapper" "1" "$(wc -l < "$BENV" | tr -d ' ')"
+NOBASHENV="$(doctor nobashenv 'unset BASH_ENV ENV' ':')"
+expect_false "INERT2: the copy without the unset differs from the scan" cmp -s "$SCAN" "$NOBASHENV"
+: > "$BENV"
+scanx "$NOBASHENV" "$R" "$(fx_list inert2b "$E1")" PATH="$WRAPGIT:$PATH" BASH_ENV="$TMP/bashenv.sh"
+expect_status "INERT2: the copy without the unset still runs (positive)" 1 "$RC"
+expect_ne "INERT2: and without the unset every bash wrapper reads BASH_ENV (the row can fail)" "1" "$(wc -l < "$BENV" | tr -d ' ')"
 
 finish
