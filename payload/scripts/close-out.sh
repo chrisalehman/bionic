@@ -914,9 +914,46 @@ step9_present() {
 # asked for is one `session-poker.sh step-line 9` refuses as close-out's to write, so a run
 # closed by its tools alone could never get past here. Phase 8 writes it (write_plan_blocks).
 presence_missing() {
+  # A RELEASE THAT WOULD SPLIT A CELL (wave-27 T14; A-orch-28). The epic row carries `release:` in
+  # its version cell, and a `|` in it gives the row a cell more than its header, so it is refused
+  # here, before any act, as the plan verbs refuse a pipe in a cell.
+  case "$RELEASE" in
+    *'|'*) printf 'the release: field of the plan holds a | (%s), which would split the version cell of the epic row; write the release without one' "$RELEASE"; return 0 ;;
+  esac
   if [ -f "$EPIC_PLAN" ] && [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
     printf 'no | wave | table with a shipped column in %s for the wave %s row to be written into' "${EPIC_PLAN##*/}" "$WAVE_NUM"
   fi
+  return 0
+}
+
+# ─── The facts the run owes ──────────────────────────────────────────────────
+#
+# THE RUN IS CLOSED ON THE JUDGE (wave-27 T14; D3, AC-7.1). `session-poker.sh current 8` admits
+# Step 8 only when lib/proof.sh `facts_state` says every fact the run owes holds at the working
+# head; `run` and `check` ask the same function of the same head, the working branch's, and refuse
+# the same way, so a fix landed after `current 8` is read before the tail runs. FACTS_RC is the
+# judge's rc (0 covered, 1 not, 2 the plan cannot be dealt, 9 the judge could not be asked),
+# FACTS_HEAD the head judged, FACTS_LINES the owed lines that do not hold, FACTS_WHY the sentence.
+FACTS_RC=9; FACTS_HEAD=""; FACTS_LINES=""; FACTS_WHY=""
+facts_judge() {
+  local out
+  if ! declare -F facts_state >/dev/null 2>&1; then
+    FACTS_WHY="the proof record (lib/proof.sh) cannot be loaded from $CO_LIB, so the facts the run owes cannot be judged"
+    return 0
+  fi
+  FACTS_HEAD="$(git -C "$ROOT" rev-parse --verify -q "${WORKING}^{commit}" 2>/dev/null)"
+  if [ -z "$FACTS_HEAD" ]; then
+    FACTS_WHY="the plan's working-branch '$WORKING' is not a branch in $ROOT, so there is no head to judge the facts the run owes at"
+    return 0
+  fi
+  out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>/dev/null)"; FACTS_RC=$?
+  case "$FACTS_RC" in
+    0) FACTS_WHY="" ;;
+    2) FACTS_WHY="the plan's rigor and scale could not be read to deal the facts the run owes (rigor: $(plan_frontmatter_get "$PLAN" rigor), scale: $(plan_frontmatter_get "$PLAN" scale))" ;;
+    *) FACTS_RC=1
+       FACTS_LINES="$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')"
+       FACTS_WHY="the facts the run owes do not all hold at the working head $FACTS_HEAD (facts_state); record each with proof-add, or have the user waive a question" ;;
+  esac
   return 0
 }
 
@@ -1010,6 +1047,13 @@ do_check() {
   fi
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || say "presence: WOULD REFUSE — $MISSING"
+  facts_judge
+  if [ "$FACTS_RC" -eq 0 ]; then
+    say "facts: every fact the run owes holds at $FACTS_HEAD"
+  else
+    say "facts: WOULD REFUSE — $FACTS_WHY"
+    [ -z "$FACTS_LINES" ] || printf '%s\n' "$FACTS_LINES" | sed 's/^/  /'
+  fi
   step9_present "$PLAN" || say 'step9: no Step 9 line in ## SDLC State — run writes `- Step 9: (pending)` with the Step-8 block'
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
@@ -1105,15 +1149,22 @@ do_check() {
 # ─── run ─────────────────────────────────────────────────────────────────────
 
 do_run() {
-  # NOTHING IS TOUCHED UNTIL ALL FIVE OF THESE PASS (critic3 P-1, P-3), in this order: the
-  # step `run` closes, the presence check (a `| wave |` table), the merge verdict (act 1 is a readback and touches nothing), the
-  # branch census, and the gate's answer about the plan `run` will write. Any refusal leaves
+  # NOTHING IS TOUCHED UNTIL ALL SIX OF THESE PASS (critic3 P-1, P-3), in this order: the
+  # step `run` closes, the presence check (a `| wave |` table, a release with no `|`), the merge
+  # verdict (act 1 is a readback and touches nothing), the
+  # branch census, the facts the run owes (`facts_judge`, wave-27 T14), and the gate's answer about
+  # the plan `run` will write. Any refusal leaves
   # every branch, every tmp entry, the plan and the epic plan exactly as they were.
   [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || _co_refuse "$MISSING — nothing was done"
   act_merge
   refuse_unreached
+  facts_judge
+  if [ "$FACTS_RC" -ne 0 ]; then
+    [ -n "$FACTS_LINES" ] && printf '%s\n' "$FACTS_LINES"
+    _co_refuse "$FACTS_WHY — nothing was done"
+  fi
   gate_preflight
   [ "$PREFLIGHT_RC" -eq 9 ] && _co_refuse "$PREFLIGHT_LINE — nothing was done"
   if [ "$PREFLIGHT_RC" -ne 0 ]; then

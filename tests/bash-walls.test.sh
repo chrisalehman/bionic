@@ -2216,4 +2216,162 @@ expect_eq "WC12: …and no --max-wait beside it (beside WC4 on the same reader)"
 run_hook "$(mk_payload "$R_WC" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" BASH_MAX_TIMEOUT_MS=5000
 expect_eq "WC13: a call staged at 5000 ms carries --max-wait 1, never 0 or less" "1" "$(wait_ceiling_of)"
 
+
+# ---------------------------------------------------------------------------
+section "§EG-6 — from current: 6 a commit is admitted on the readings the run owes, not on a Step 6 line or a word (wave-27 T14; REQ-2 AC-2.2, D3)"
+# ---------------------------------------------------------------------------
+# The evidence gate, from `current: 6`, reads the section it already holds: for each question
+# lib/proof.sh `facts_owed` deals at the plan's rigor, a `proved: kind=review … question=<q>` line
+# whose newest is not `result=fail`, or a `waived: question=<q>` line later than it. The Step-6
+# pointer line no longer answers for it, at either scale, and nothing new binds below Step 6.
+# The reading lines here are written in the production writer's shape (lib/proof.sh `proof_line`,
+# `proof_waiver_line`); the gate reads plan text whatever wrote it.
+EG6_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
+eg6_reading() {  # <head> <question> <result> [<evidence>] -> one reading line
+  bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" piece' \
+    _ "$EG6_LIB" "$1" "${4:-record/w27/$2-$3.md}" "$2" "$3"
+}
+eg6_waiver() {  # <head> <question>
+  bash -c '. "$1" && proof_waiver_line "$2" "$3" "T" 2026-10-04T12:00:00Z "ship it"' _ "$EG6_LIB" "$2" "$1"
+}
+eg6_plan() {  # <current> <scale> <lines> [<Step 6 line>] -> an audited plan the gate admits at Step 6 bar the readings
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: %s\n' "$2"
+  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
+  printf 'current: %s\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
+  printf -- '- Step 4: dispatched, record/w27/dispatch.md\n  worktree: .\n  base-sha: abc1234\n  branch: feature/t23\n'
+  printf -- '- Step 5: floor green, record/w27/floor.log\n'
+  [ -n "${4:-}" ] && printf -- '%s\n' "$4"
+  [ -n "$3" ] && printf '%s\n' "$3"
+  printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+  printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
+  printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
+  printf '  tier-run: bash tests/x.test.sh\n  readback: the line it wrote\n'
+}
+R_EG6="$(mk_repo eg6)"
+H_EG6="$(git -C "$R_EG6" rev-parse HEAD)"
+eg6_gate() {  # <plan text> -> ST, ERR of a main-checkout commit
+  printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"
+  bw_bind "$R_EG6"
+  run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')"
+}
+EG6_ALL="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" adversarial flag)
+$(eg6_reading "$H_EG6" structure pass)"
+
+eg6_gate "$(eg6_plan 6 wave "" "- Step 6: review at record/w27/review.md")"
+expect_status "EG6a AC-2.2: a wave plan at current: 6 with a Step 6 line and no fact is refused" 2 "$ST"
+expect_contains "EG6a2 …in the gate's words, naming the refusal" "a reading question is unanswered" "$ERR"
+expect_contains "EG6a3 …and each question it lacks" "- adversarial: no reading, and no waiver" "$ERR"
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL")"
+expect_status "EG6b worked answer 1: a reading for each question, the newest pass or flag, no Step 6 line: admitted" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" adversarial pass)
+$(eg6_reading "$H_EG6" structure pass record/w27/structure-old.md)
+$(eg6_reading "$H_EG6" structure fail record/w27/structure-new.md)")"
+expect_status "EG6c worked answer 2: the newest structure reading is result=fail, an older one pass: refused" 2 "$ST"
+expect_contains "EG6c2 …naming structure and the failing line's evidence" \
+  "- structure: the newest reading is result=fail (evidence=record/w27/structure-new.md), and no waiver is newer" "$ERR"
+expect_absent "EG6c3 …and not the questions that hold (beside EG6c2 on the same refusal)" "- evidence:" "$ERR"
+eg6_gate "$(eg6_plan 6 wave "$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" adversarial pass)
+$(eg6_reading "$H_EG6" structure pass record/w27/structure-old.md)
+$(eg6_reading "$H_EG6" structure fail record/w27/structure-new.md)
+$(eg6_waiver "$H_EG6" structure)")"
+expect_status "EG6d worked answer 3: a waived: question=structure line later than the failing reading: admitted" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$(eg6_waiver "$H_EG6" structure)
+$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" adversarial pass)
+$(eg6_reading "$H_EG6" structure fail record/w27/structure-new.md)")"
+expect_status "EG6d2 …a waiver EARLIER than the failing reading does not: refused" 2 "$ST"
+expect_contains "EG6d3 …naming structure" "- structure: the newest reading is result=fail" "$ERR"
+eg6_gate "$(eg6_plan 6 wave "$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)")"
+expect_status "EG6e worked answer 4: no adversarial reading and no waiver: refused" 2 "$ST"
+expect_contains "EG6e2 …naming adversarial" "- adversarial: no reading, and no waiver" "$ERR"
+eg6_gate "$(eg6_plan 6 wave "- adversarial: critic CONFIRMED
+$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)" "- Step 6: critic CONFIRMED, auditor CONFIRMED")"
+expect_status "EG6f the word critic on a line is not a reading: refused" 2 "$ST"
+expect_contains "EG6f2 …naming adversarial" "- adversarial: no reading, and no waiver" "$ERR"
+eg6_gate "$(eg6_plan 7 wave "$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" structure pass)" "- Step 6: review at record/w27/review.md
+- Step 7: CLOSED — n/a: no ADR owed")"
+expect_status "EG6g the predicate is a prefix condition: at current: 7 the same lack is refused" 2 "$ST"
+expect_contains "EG6g2 …naming adversarial" "- adversarial: no reading, and no waiver" "$ERR"
+
+# THE WALL AND THE JUDGE READ ONE TEXT ONE WAY (the agreement row). The same section through the
+# real gate and through lib/proof.sh `facts_state` at the head every line names: the questions the
+# gate names are exactly the questions whose piece line the judge does not hold. evidence holds;
+# adversarial failed and was then waived; structure passed and then failed.
+EG6_AGREE="$(eg6_reading "$H_EG6" evidence pass)
+$(eg6_reading "$H_EG6" adversarial fail)
+$(eg6_waiver "$H_EG6" adversarial)
+$(eg6_reading "$H_EG6" structure pass)
+$(eg6_reading "$H_EG6" structure fail)"
+eg6_gate "$(eg6_plan 6 task "$EG6_AGREE")"
+EG6_WALL="$(printf '%s\n' "$ERR" | sed -n 's/^- \([a-z]*\): .*/\1/p' | tr '\n' ' ')"
+EG6_JUDGE="$(bash -c '. "$1" && facts_state "$2" "$3"' _ "$EG6_LIB" "$R_EG6/.bionic/docs/plans/active.md" "$H_EG6" 2>/dev/null \
+  | awk -F'\t' '$1 == "review" && $4 == "piece" && $5 != "covered" { printf "%s ", $2 }')"
+expect_eq "EG6h precondition: the judge reads the fixture (its evidence line covered)" "covered" \
+  "$(bash -c '. "$1" && facts_state "$2" "$3"' _ "$EG6_LIB" "$R_EG6/.bionic/docs/plans/active.md" "$H_EG6" 2>/dev/null \
+    | awk -F'\t' '$2 == "evidence" && $4 == "piece" { print $5 }')"
+expect_eq "EG6h2 §EG-6 agreement: the gate names structure alone" "structure " "$EG6_WALL"
+expect_eq "EG6h3 …and the judge holds every question but structure, on the same text" "$EG6_WALL" "$EG6_JUDGE"
+
+# THE TASK LANE (AC-2.2's second half): a task-scale row carrying only the word `critic`, from its
+# own tree, at current: 6, is refused the same way, by the row.
+R_EG6T="$(mk_repo eg6t)"
+git -C "$R_EG6T" worktree add -q "$R_EG6T/.worktrees/27-T1" -b wt/27-T1 2>/dev/null
+eg6_task_plan() {  # <lines> -> a task plan at current: 6 whose T1 row is done, its line carrying the words
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: task\n'
+  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
+  printf 'current: 6\napproved-by: fixture 2026-09-22T00:00Z approved\n'
+  printf -- '- T1: bash tests/x.test.sh 12/12, auditor CONFIRMED, critic CONFIRMED\n'
+  [ -n "$1" ] && printf '%s\n' "$1"
+  printf '\n## Tasks\n\n| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n'
+  printf '| T1 | build | audited | the work | done | 27-T1 |\n'
+}
+printf '%s\n' "$(eg6_task_plan "")" > "$R_EG6T/.bionic/docs/plans/active.md"
+bw_bind "$R_EG6T"
+run_hook "$(mk_payload "$R_EG6T/.worktrees/27-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_EG6T"
+expect_status "EG6i AC-2.2: a task row carrying only the words auditor and critic is refused at current: 6" 2 "$ST"
+expect_contains "EG6i2 …naming the row" "canonical-sdlc task T1 is at current: 6" "$ERR"
+expect_contains "EG6i3 …and the question it lacks" "- adversarial: no reading, and no waiver" "$ERR"
+H_EG6T="$(git -C "$R_EG6T" rev-parse HEAD)"
+printf '%s\n' "$(eg6_task_plan "$(eg6_reading "$H_EG6T" evidence pass)
+$(eg6_reading "$H_EG6T" adversarial pass)
+$(eg6_reading "$H_EG6T" structure pass)")" > "$R_EG6T/.bionic/docs/plans/active.md"
+run_hook "$(mk_payload "$R_EG6T/.worktrees/27-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_EG6T"
+expect_status "EG6j …and admitted once the section holds a reading of each question" 0 "$ST"
+
+# ---------------------------------------------------------------------------
+section "§EG-OPEN — an open 1.11.0-shaped plan continues untouched until Step 6 (wave-27 T14; REQ-10 AC-10.3, D19)"
+# ---------------------------------------------------------------------------
+# A plan written under 1.11.0 carries no reading line, no waiver and no new field. At `current: 4`
+# and `current: 5` its commits are admitted as they were; the new arm binds from Step 6 alone.
+eg6_open() {  # <current> <step lines> -> a 1.11.0-shaped audited wave plan
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: wave\n'
+  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
+  printf 'current: %s\napproved-by: fixture 2026-09-22T00:00Z approved\n%s\n' "$1" "$2"
+  printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+  printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
+  printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
+  printf '  tier-run: bash tests/x.test.sh\n  readback: the line it wrote\n'
+}
+eg6_gate "$(eg6_open 4 '- Step 4: dispatched, record/w27/dispatch.md')"
+expect_status "EGO1 AC-10.3: a 1.11.0-shaped plan commits at current: 4 with no new field" 0 "$ST"
+eg6_gate "$(eg6_open 5 "- Step 4: dispatched, record/w27/dispatch.md
+- Step 5:
+  cmd: bash tests/run.sh
+  pass: 10
+  total: 10
+  output: record/generic-evidence.md
+  head: $H_EG6
+  auditor: record/generic-evidence.md")"
+expect_status "EGO2 AC-10.3: …and at current: 5" 0 "$ST"
+eg6_gate "$(eg6_open 6 '- Step 4: dispatched, record/w27/dispatch.md
+- Step 5: floor green, record/w27/floor.log
+- Step 6: review at record/w27/review.md')"
+expect_status "EGO4 …and the same plan at current: 6 is refused for lacking a reading (D19's boundary)" 2 "$ST"
+
 finish
