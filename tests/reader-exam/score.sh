@@ -1,7 +1,7 @@
 #!/bin/bash
-# tests/reader-exam/score.sh — README step 5 as code. Sourced, it defines two functions and
-# does nothing else: tests/reader-exam.test.sh holds the real keys to them, and a sitting
-# scores its records with them.
+# tests/reader-exam/score.sh — README step 5 as code. Sourced, it defines three functions
+# (exam_meets, exam_field, exam_score) and does nothing else: tests/reader-exam.test.sh holds
+# the real keys to them, and a sitting scores its records with them.
 #
 #   . tests/reader-exam/score.sh
 #   exam_score tests/reader-exam/samples/<name>/expect.txt <record>      # prints met or missed

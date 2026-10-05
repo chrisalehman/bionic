@@ -10106,7 +10106,8 @@ expect_eq "FILES-LIST18 a prose item of 55 characters is refused by a deny" "den
 FL_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
 expect_contains "FILES-LIST18 …whose first line names it, cut" "Files: this list covers every file the task may … is not a path (drop it)" "$FL_LINE"
 
-# =====================================================================section "§LR — a declared debt is recorded at dispatch, and only a well-formed one (wave-27 T31; REQ-14 AC-14.1, AC-14.2, D23)"
+# ============================================================================
+section "§LR — a declared debt is recorded at dispatch, and only a well-formed one (wave-27 T31; REQ-14 AC-14.1, AC-14.2, D23)"
 # ============================================================================
 #
 # A brief may carry `Lands-red: <suite> until <ext:slug | approval:name>` and `Red-evidence: <path
@@ -10168,7 +10169,6 @@ Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md  # with Lands-red:'
 expect_eq "LR7 the two lines filled with the scaffold's comments kept: admitted, the comments off the values" \
   "allow|widget.test.sh until approval:release|.bionic/docs/record/wave-01-test/T9-red.md" \
   "$GATE_VERDICT|$(roster_field "$LR_ROW" lands_red)|$(roster_field "$LR_ROW" red_evidence)"
-=======
 # --- FILES-LIST19..: one pair of punctuation around a path, and a trailing `;` (wave-27 T49; review
 # pass 19 should-fix 1). The reader strips from an item ONE surrounding pair of double quotes, single
 # quotes, parentheses, square brackets or backticks, and a trailing `;`; what is left is judged as any

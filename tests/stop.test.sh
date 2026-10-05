@@ -1090,6 +1090,163 @@ expect_eq "D5: …and adds no second held row" "$((DC_ROWS + 1))" "$(grep -c '|n
 rm -rf "$DC_CFG"
 
 # ─────────────────────────────────────────────────────────────────────────────
+section "DECLINE-VERB: a decline is recorded by a verb, and the wall reads it there (wave-27 T34; REQ-15 AC-15.1, AC-15.5; D24)"
+
+# THE DEFECT (design ledger Δ9). The fill wall read its answer out of the reply, so the
+# orchestrator answered it with a `fill-declined:` line the user read on every turn, for hours,
+# and that said nothing to a person. `session-poker.sh decline <id>[,<id>] '<reason>'` records
+# the decline on disk: one line in the run's fill ledger, the line the reply form's turn leaves
+# there, so `fill_standing_decline` reads both forms by one rule. The turn that recorded it
+# carries no decline in its text and ends; a row it did not name is still owed; the rows it
+# named stay answered.
+DV_POKER="$(dirname "$HOOK")/session-poker.sh"
+dv_fixture() {  # -> project dir; T7 and T9 pending and ready, T10 active, writers=8, current: 4
+  local d p
+  d="$(sd_fixture)"
+  p="$d/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+  printf '| T9 | 4 | build | a second row behind the merge | implementor | — | 15m | REQ-x | c.sh | pending | — |\n' >> "$p"
+  printf '| T10 | 4 | build | a row already running | implementor | — | 15m | REQ-x | d.sh | active | 24-T10 |\n' >> "$p"
+  printf '%s' "$d"
+}
+dv_poke() {  # <project> <verb args...> -> sets DV_OUT, DV_RC
+  local d="$1"; shift
+  DV_OUT=$( cd "$d" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="" \
+    BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+    bash "$DV_POKER" "$@" 2>&1 ); DV_RC=$?
+}
+dv_lines() { sd_led "$1" | /usr/bin/grep -c '^fill-ledger/v1|' || true; }
+require_helpers dv_fixture dv_poke dv_lines
+export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
+
+DV_D="$(dv_fixture)"
+DV_P="$DV_D/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+dv_poke "$DV_D" decline T7,T9 'the machine is saturated'
+expect_eq "DV0 precondition: the verb records the decline (exit 0)" "0" "$DV_RC"
+DV_LINE="$(sd_led "$DV_D" | tail -1)"
+expect_eq "DV1 AC-15.5 the run's fill ledger gains the decline's line, naming its ids" "T7,T9" "$(sd_field "$DV_LINE" named)"
+expect_eq "DV1b …its reason" "the machine is saturated" "$(sd_field "$DV_LINE" declined)"
+expect_regex "DV1c …and its time" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$(sd_field "$DV_LINE" at)"
+expect_eq "DV1d …for this session" "$SID" "$(sd_field "$DV_LINE" session)"
+sd_turn "$SD_TX" u-dv-1
+s7_fire "$DV_D" "$SD_TX"
+expect_eq "DV2 AC-15.1 the turn ends with no decline line in its reply, and the wall does not refuse it" "" "$(sd_decision)"
+expect_contains "DV2b …and that turn's ledger line carries the recorded reason" \
+  "the machine is saturated" "$(sd_field "$(sd_led "$DV_D" | tail -1)" declined)"
+sd_turn "$SD_TX" u-dv-2
+s7_fire "$DV_D" "$SD_TX"
+expect_eq "DV2c …and it stands on the next turn too" "" "$(sd_decision)"
+printf '| T11 | 4 | build | a row the decline never named | implementor | — | 15m | REQ-x | e.sh | pending | — |\n' >> "$DV_P"
+sd_turn "$SD_TX" u-dv-3
+s7_fire "$DV_D" "$SD_TX"
+expect_eq "DV3 a row the decline did not name is ready: the silent turn is refused" "block" "$(sd_decision)"
+DV_HEAD="$(printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "DV3b …naming T11" "not launched: T11" "$DV_HEAD"
+expect_absent "DV3c …and not T7 or T9, which the decline named" "T7" "$DV_HEAD"
+expect_absent "DV3d …nor T9" "T9" "$DV_HEAD"
+expect_contains "DV3e the refusal names the verb, with the rows it owes" "session-poker.sh decline T11 '" "$(reason_of)"
+expect_absent "DV3f …and asks for no decline line in the reply" 'write "fill-declined:' "$(reason_of)"
+# THE REFUSALS. Each names what it refused, and writes nothing.
+DV_N="$(dv_lines "$DV_D")"
+expect_ne "DV4 precondition: the ledger has lines to count" "0" "$DV_N"
+dv_poke "$DV_D" decline T8 'no such row'
+expect_eq "DV4b an id that is no plan row is refused (exit 1)" "1" "$DV_RC"
+expect_contains "DV4c …saying which" "T8" "$DV_OUT"
+dv_poke "$DV_D" decline T10 'it is running'
+expect_eq "DV4d a plan row that is not ready is refused (exit 1)" "1" "$DV_RC"
+expect_contains "DV4e …saying which" "T10" "$DV_OUT"
+dv_poke "$DV_D" decline T11 '   '
+expect_eq "DV4f an empty reason is refused (exit 2)" "2" "$DV_RC"
+dv_poke "$DV_D" decline 'the machine is saturated'
+expect_eq "DV4g no ids is refused: there is no decline-everything form (exit 2)" "2" "$DV_RC"
+dv_poke "$DV_D" decline ',' 'the machine is saturated'
+expect_eq "DV4h ids that are only separators are refused (exit 2)" "2" "$DV_RC"
+expect_eq "DV4i …and no refusal wrote a ledger line" "$DV_N" "$(dv_lines "$DV_D")"
+# A SECOND DECLINE KEEPS THE FIRST'S ROWS. Declining T11 by itself leaves T7 and T9 answered.
+dv_poke "$DV_D" decline T11 'T11 waits for the same merge'
+expect_eq "DV5 precondition: the second decline is recorded (exit 0)" "0" "$DV_RC"
+expect_eq "DV5b …and it is one more line" "$((DV_N + 1))" "$(dv_lines "$DV_D")"
+sd_turn "$SD_TX" u-dv-4
+s7_fire "$DV_D" "$SD_TX"
+expect_eq "DV5c the rows the first decline named stay answered beside the second's" "" "$(sd_decision)"
+# THE TWO FORMS GIVE ONE ANSWER. One world declines T7 and T9 in its reply, the other by the
+# verb; a row neither named becomes ready in both; the wall owes the same rows in each.
+dv_owed() {  # <project> -> the first refusal line's not-launched rows
+  printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ' | sed -n 's/.*not launched:\(.*\) (.*/\1/p'
+}
+DV_TA="$(dv_fixture)"; DV_TB="$(dv_fixture)"
+sd_turn "$SD_TX" u-dvt-1 "fill-declined: the machine is saturated"
+s7_fire "$DV_TA" "$SD_TX"
+expect_eq "DV6 precondition: the reply form's turn ends" "" "$(sd_decision)"
+dv_poke "$DV_TB" decline T7,T9 'the machine is saturated'
+for _dv_t in "$DV_TA" "$DV_TB"; do
+  printf '| T11 | 4 | build | a row neither form named | implementor | — | 15m | REQ-x | e.sh | pending | — |\n' \
+    >> "$_dv_t/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+done
+sd_turn "$SD_TX" u-dvt-2
+s7_fire "$DV_TA" "$SD_TX"; DV_OWED_A="$(dv_owed)"
+s7_fire "$DV_TB" "$SD_TX"; DV_OWED_B="$(dv_owed)"
+expect_eq "DV6b precondition: the reply form owes T11" " T11" "$DV_OWED_A"
+expect_eq "DV6c the verb form owes the same rows as the reply form" "$DV_OWED_A" "$DV_OWED_B"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "DECLINE-TEXT: a run in flight that still writes the old line is not refused for it (wave-27 T34; REQ-15 AC-15.3; D24)"
+
+# The reply form is still read, row for row as §SD and §DECLINE pin it: a turn whose reply holds
+# `fill-declined: <reason>` and ran no verb ends, and its reason stands; a `standdown-declined:`
+# line is still kept as a hold (§DECLINE D4).
+export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
+DT_D="$(dv_fixture)"
+sd_turn "$SD_TX" u-dt-1 "fill-declined: T7 and T9 wait on the T6 merge"
+s7_fire "$DT_D" "$SD_TX"
+expect_eq "DT1 AC-15.3 a reply carrying the old line, and no verb, is admitted" "" "$(sd_decision)"
+expect_eq "DT1b …its line records the reason against the rows it saw" \
+  "T7 and T9 wait on the T6 merge" "$(sd_field "$(sd_led "$DT_D" | tail -1)" declined)"
+sd_turn "$SD_TX" u-dt-2
+s7_fire "$DT_D" "$SD_TX"
+expect_eq "DT2 …and it stands on the next turn, as before" "" "$(sd_decision)"
+DT_D2="$(dv_fixture)"
+sd_turn "$SD_TX" u-dt-3
+s7_fire "$DT_D2" "$SD_TX"
+expect_eq "DT3 control: the same fixture with neither form is refused" "block" "$(sd_decision)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "BUDGET-USER: a user's writer cap is a fact in the header the wall already reads (wave-27 T34; REQ-15 AC-15.4; D24)"
+
+# `session-poker.sh budget writers=<n> '<reply>'` rewrites the header's `writers=` with
+# `source=user` and adds `budget-override:` (tests/session-poker.test.sh §BUDGET-USER drives the
+# verb). The wall reads the header it always read: with the user's cap reached it asks for
+# nothing, and no decline is recorded or written. The control is the probe's header over the same
+# roster, which owes the ready row.
+export BIONIC_PRESSURE_RING="$SD_RING" BIONIC_NOW_EPOCH=1700000000
+bu_fixture() {  # <budget line> -> project dir; three writers open, T7 ready
+  local d p
+  d="$(sd_fixture)"
+  p="$d/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md"
+  BU_B="$1" awk '/^parallel-budget:/ { print ENVIRON["BU_B"]; next } { print }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  for _bu_n in 1 2 3; do
+    roster_row_fixture status=intended session="$SID" name="BU-$_bu_n" agent_id="aBU0000000000000$_bu_n" \
+      deliverable= subagent_type=implementor >> "$d/.bionic/tmp/roster-$SID.state"
+  done
+  printf '%s' "$d"
+}
+require_helpers bu_fixture
+BU_C="$(bu_fixture 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe')"
+sd_turn "$SD_TX" u-bu-1
+s7_fire "$BU_C" "$SD_TX"
+expect_eq "BU1 control: the probe's eight writers with three open owe the ready row" "block" "$(sd_decision)"
+BU_D="$(bu_fixture "$(printf 'parallel-budget: writers=3 suites=2 worktrees=8 test_jobs=8 source=user\nbudget-override: Dana Fixture 2026-10-04 derived=8 chosen=3')")"
+expect_contains "BU2 precondition: the header carries the user's cap" "writers=3 suites=2 worktrees=8 test_jobs=8 source=user" \
+  "$(cat "$BU_D/.bionic/docs/plans/epic-99-fixture/wave-24-sd.plan.md")"
+s7_fire "$BU_D" "$SD_TX"
+expect_eq "BU2b AC-15.4 the user's cap of three reached: the wall asks for nothing" "" "$(sd_decision)"
+BU_LINE="$(sd_led "$BU_D" | tail -1)"
+expect_eq "BU2c …the turn's ledger line reads the cap" "3" "$(sd_field "$BU_LINE" ceiling)"
+expect_eq "BU2d …and records no decline" "" "$(sd_field "$BU_LINE" declined)"
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# ─────────────────────────────────────────────────────────────────────────────
 section "FO: the stop wall's occupancy is the tick's — a read-only row holds no writer slot (wave-24 T13, D11)"
 
 # THE THIRD READER ON THE OLD NUMBER (A-T10.3, A-orch-32). The dispatch wall and the tick count
