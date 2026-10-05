@@ -98,7 +98,8 @@ exam_dealt_role() {
 #                          none for any other, a line on each question its sample's key names
 #                          from the role the audited dealing gives that question and from
 #                          `one-mind` (the critic holding all three), and none on a question
-#                          the key does not name, no two lines for one sample and question
+#                          the key does not name or from a role that is neither `one-mind` nor
+#                          the one dealt its own question, no two lines for one sample and question
 #                          that disagree, every `result` line reads `met`, and each reached
 #                          result is one its sample's key admits (exam_meets, score.sh)
 #   owed                   no sitting and the owed line (RE-AUTHORED BY T22: this arm goes
@@ -107,7 +108,7 @@ exam_dealt_role() {
 # A sitting is a section headed `## <YYYY-MM-DD>…`; the latest is the last in the file, by
 # file order and not by date. Any other line opening with `##` is red wherever it is.
 exam_pin() {
-  local file="$1" root="$2" sittings owed latest f lines want have s samples bad results line kqs q r
+  local file="$1" root="$2" sittings owed latest f lines want have s samples bad results line kqs q r dealt
   [ -r "$file" ] || { echo "red: $file cannot be read"; return 1; }
   # A block under a malformed header would fold into the sitting above it, or count as none.
   bad="$(grep -nE '^##' "$file" | grep -vE '^[0-9]+:## [0-9]{4}-[0-9]{2}-[0-9]{2}( |$)' | head -n 1)"
@@ -151,9 +152,21 @@ exam_pin() {
       BEGIN { n = split(kq, a, ","); for (i = 1; i <= n; i++) ok[a[i]] = 1 }
       $2 == s && !($3 in ok) { print; exit }')"
     [ -z "$bad" ] || { echo "red: the latest sitting's line '$bad' is for a question $s's key does not name ($kqs)"; return 1; }
-    for q in ${kqs//,/ }; do
+    dealt=""
+    for q in evidence adversarial structure; do
       r="$(exam_dealt_role "$q")"
       [ -n "$r" ] || { echo "red: the audited dealing gives $q to no role"; return 1; }
+      dealt="${dealt:+$dealt,}$q=$r"
+    done
+    bad="$(printf '%s\n' "$results" | awk -v s="$s" -v dt="$dealt" '
+      BEGIN { n = split(dt, a, ","); for (i = 1; i <= n; i++) { split(a[i], p, "="); role[p[1]] = p[2] } }
+      $2 == s && $4 != "one-mind" && $4 != role[$3] { print; exit }')"
+    if [ -n "$bad" ]; then
+      set -f; set -- $bad; set +f
+      echo "red: the latest sitting's line '$bad' is from a role that is neither the $(exam_dealt_role "$3") dealt $3 nor one-mind"; return 1
+    fi
+    for q in ${kqs//,/ }; do
+      r="$(exam_dealt_role "$q")"
       for r in "$r" one-mind; do
         printf '%s\n' "$results" | awk -v s="$s" -v q="$q" -v r="$r" '$2 == s && $3 == q && $4 == r { f = 1 } END { exit !f }' \
           || { echo "red: the latest sitting has no line for $s from the $r on $q"; return 1; }
@@ -365,10 +378,10 @@ expect_eq "P10: a result line for a sample that does not exist is red and names 
   "red: the latest sitting has a result line for no-such-sample, and no such sample is under $ROOT" "$PIN_OUT"
 expect_status "P10: rc 1" 1 "$PIN_RC"
 
-{ cat "$TMP/right.md"; printf 'result dup-counter structure critic fail met h\n'; } > "$TMP/agree.md"
+{ cat "$TMP/right.md"; printf 'result dup-counter structure one-mind fail met h\n'; } > "$TMP/agree.md"
 pin_call "$TMP/agree.md" "$ROOT"
 expect_eq "P11: two lines for one sample and question that agree are pinned" "pinned" "$PIN_OUT"
-{ cat "$TMP/right.md"; printf 'result dup-counter structure critic fail missed h\n'; } > "$TMP/disagree.md"
+{ cat "$TMP/right.md"; printf 'result dup-counter structure one-mind fail missed h\n'; } > "$TMP/disagree.md"
 pin_call "$TMP/disagree.md" "$ROOT"
 expect_eq "P11: two lines for one sample and question that disagree are red and name the pair" \
   "red: the latest sitting's lines for dup-counter structure disagree, met and missed" "$PIN_OUT"
@@ -427,6 +440,22 @@ grep -v '^result clean adversarial one-mind ' "$TMP/right.md" > "$TMP/clean-one-
 pin_call "$TMP/clean-one-mind-q.md" "$ROOT"
 expect_eq "P16: a clean sample whose one-mind critic left a question off is red, naming the question" \
   "red: the latest sitting has no line for clean from the one-mind on adversarial" "$PIN_OUT"
+
+# A role field is one of auditor, critic, reviewer or one-mind, and a dealt role is on the
+# question it is dealt: a line from any other role, or from a role on a question that is not its
+# own, is red. A line from the one-mind critic is on any keyed question.
+{ cat "$TMP/right.md"; printf 'result dup-counter structure nobody fail met h\n'; } > "$TMP/stray-role.md"
+pin_call "$TMP/stray-role.md" "$ROOT"
+expect_eq "P17: a line whose role is outside auditor, critic, reviewer and one-mind is red and names the line" \
+  "red: the latest sitting's line 'result dup-counter structure nobody fail met h' is from a role that is neither the reviewer dealt structure nor one-mind" "$PIN_OUT"
+expect_status "P17: rc 1" 1 "$PIN_RC"
+{ cat "$TMP/right.md"; printf 'result dup-counter structure critic fail met h\n'; } > "$TMP/mismatch-role.md"
+pin_call "$TMP/mismatch-role.md" "$ROOT"
+expect_eq "P17: a dealt role on a question that is not its own is red and names the line" \
+  "red: the latest sitting's line 'result dup-counter structure critic fail met h' is from a role that is neither the reviewer dealt structure nor one-mind" "$PIN_OUT"
+{ cat "$TMP/right.md"; printf 'result dup-counter structure reviewer fail met h\n'; } > "$TMP/second-reviewer.md"
+pin_call "$TMP/second-reviewer.md" "$ROOT"
+expect_eq "P17: a second line from the dealt role on its own question is pinned" "pinned" "$PIN_OUT"
 
 section "§OWED — before the first sitting"
 
