@@ -5328,6 +5328,15 @@ EOF
     fi
     DC_WHY="$(printf '%s' "$DC_REASON" | tr '|\n\r\t' '    ')"
     DC_WHY="${DC_WHY:0:200}"
+    # THE PRINTED PLACEHOLDER IS NO REASON (wave-27 T37; review pass 42 N1, A-orch-112): the wall's
+    # refusal prints this verb with DECLINE_REASON_SLOT where the reason goes, and the line run as
+    # printed recorded the placeholder as the reason.
+    DC_SLOT="${DECLINE_REASON_SLOT//\'/}"
+    DC_TRIM="$(printf '%s' "$DC_WHY" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    if [ "$DC_TRIM" = "$DC_SLOT" ]; then
+      die "REFUSED — '$DC_SLOT' is the placeholder the refusal prints, not a reason: put the reason in its place; nothing was recorded."
+      exit 1
+    fi
     case "$DC_WHY" in
       *[[:alnum:]]*) : ;;
       *)
@@ -5367,10 +5376,13 @@ EOF
   # `writers=` becomes the user's and its `source=` reads `user`; the frontmatter gains
   # `budget-override: <git user.name> <date> derived=<n> chosen=<n>`, the sibling of
   # `rigor-override:`. `derived=` is the probe's value, read from an override already there so a
-  # second cap keeps it, and the one override line is rewritten, never doubled. A value above the
-  # derived one is recorded too: the user's call, and the dispatch wall then holds the run to it.
+  # second cap keeps it, and the one override line is rewritten, never doubled.
+  # THE VERB ONLY LOWERS (wave-27 T37; review pass 42 N2, A-orch-112). It takes a reply nothing can
+  # verify, so it must not be a way for a model to raise its own cap: a value above the derived
+  # ceiling is refused, and raising it is the user's own edit of the plan's `parallel-budget:` line.
   # It goes through the plan transaction every plan verb takes. REFUSED: a value that is not a
-  # whole number, or 0 (1); a reply with a line break (1); a plan with no budget line to cap (1).
+  # whole number, or 0 (1); one above the derived ceiling (1); a reply with a line break (1); a
+  # plan with no budget line to cap (1).
   budget)
     case "$BG_N" in
       ''|*[!0-9]*)
@@ -5404,6 +5416,11 @@ EOF
         for (i = 2; i <= NF; i++) if ($i ~ /^derived=[0-9]+$/) { print substr($i, 9); exit }
       }' "$PV_PLAN")"
     [ -n "$BG_DERIVED" ] || BG_DERIVED="$BG_HAVE"
+    if [ "$BG_N" -gt "$BG_DERIVED" ] 2>/dev/null; then
+      die "REFUSED — writers=$BG_N is above the derived ceiling of $BG_DERIVED: budget only lowers it."
+      die "Raising it is the user's own edit of the plan's parallel-budget: line in $PV_PLAN; the plan is unchanged."
+      exit 1
+    fi
     BG_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
     if [ -z "$BG_WHO" ] || ! plan_verb_value_ok "$BG_WHO"; then
       die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who capped it; the plan is unchanged."
@@ -5436,10 +5453,7 @@ EOF
       exit 1
     fi
     plan_verb_swap budget "writers=$BG_N (source=user)" writer
-    BG_NOTE=""
-    [ "$BG_N" -gt "$BG_DERIVED" ] \
-      && BG_NOTE=" That is above the probe's derived $BG_DERIVED: the dispatch wall holds the run to $BG_N, and the tick and the turn-end wall size each fill by the pressure rung under it."
-    say "budget — writers=$BG_N source=user and $BG_OVR written to $PV_PLAN; dry-committed first. The dispatch wall, the tick and the turn-end wall read it from the header.$BG_NOTE"
+    say "budget — writers=$BG_N source=user and $BG_OVR written to $PV_PLAN; dry-committed first. The dispatch wall, the tick and the turn-end wall read it from the header."
     exit 0
     ;;
 
