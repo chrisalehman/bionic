@@ -2885,4 +2885,193 @@ worktree_land_for_session "$LPB2" "$LP" "$LP_SID" >/dev/null 2>&1
 expect_match "(T50-n4d) the arm discriminates: the same tree under an id without a blank is row=T7" "landed: row=T7 branch=wt/27-T7 head=*" \
   "$(tail -n 2 "$LP_LOG" | head -n 1)"
 
+section "§LAND-RECORD-LOCK: the lock covers the cleanup, the wait and the proof; a check leaves nothing it changed (wave-27 T58; review pass 34)"
+#
+# B1. A refused landing removes the empty record its proof created only under the record's lock,
+# the test and the delete together; a lock it cannot take inside the wait leaves the file. S1. The
+# wait is ten seconds by the clock, not a count of tries. S2. The proof covers the lock: a record
+# directory that cannot be written, or anything but a directory at `<record>.lock`, refuses before
+# the merge. N4. The record's type is tested again under the lock: a FIFO swapped in after the
+# proof is never opened. N5. After the declared check the target's HEAD is where it was and the
+# piece's checkout is as clean as it was, or the landing is refused `check-dirtied`; a check that
+# fails and dirties names the dirt on its `check-failed` refusal.
+#
+# FIXTURE FIDELITY. The race and the cleanup rows run the real `worktree_land`, `_wt_proofs_prove`,
+# `_wt_proofs_lock` and `_wt_proofs_append` in child shells; only `_wt_land` is a stub that proves
+# the record and is refused, as a landing refused after its proof is (review pass 34 `p3-wrap.sh`).
+# Every other row is a whole landing through `worktree_land_for_session` or `worktree_land`, over
+# the fixtures above.
+
+# (b1) THE REVIEW'S SHAPE: landing A proves the record (creating it), waits 30 ms and is refused;
+# landing B appends its block 20 to 60 ms after A's proof. B's block is in the record afterwards, in
+# every one of 300 trials.
+T58_REC="$TMP/t58-race/landing-proofs.log"; mkdir -p "${T58_REC%/*}"
+cat > "$TMP/t58-a.sh" <<'T58_EOF'
+. "$1" || exit 9
+REC="$2"; _WT_PROOFS_LOCK_WAIT="${3:-10}"
+_wt_land() { _wt_proofs_prove "$REC" || return 9; : > "$REC.proved"; sleep 0.03; return 2; }
+worktree_land x y z >/dev/null 2>&1; echo "rc=$?"
+T58_EOF
+cat > "$TMP/t58-b.sh" <<'T58_EOF'
+. "$1" || exit 9
+REC="$2"
+while [ ! -e "$REC.proved" ]; do sleep 0.002; done
+sleep "$3"
+_wt_proofs_append "$REC" T2 wt/b bbbb mmmm "stamp/v1|head=bbbb|rc=0" || echo FAILED
+T58_EOF
+T58_LOST=0; T58_KEPT=0; T58_REF=0; T58_BFAIL=0
+for _k in $(seq 1 300); do
+  rm -f "$T58_REC" "$T58_REC.proved"; rm -rf "$T58_REC.lock"
+  _d="$(printf '0.%03d' $((20 + RANDOM % 41)))"
+  bash "$TMP/t58-a.sh" "$LIB" "$T58_REC" > "$TMP/t58-a.out" 2>&1 &
+  _pa=$!
+  bash "$TMP/t58-b.sh" "$LIB" "$T58_REC" "$_d" > "$TMP/t58-b.out" 2>&1 &
+  _pb=$!
+  wait "$_pa" "$_pb"
+  [ "$(cat "$TMP/t58-a.out")" = "rc=2" ] && T58_REF=$((T58_REF + 1))
+  [ -s "$TMP/t58-b.out" ] && T58_BFAIL=$((T58_BFAIL + 1))
+  if [ -f "$T58_REC" ] && grep -q '^landed: row=T2 ' "$T58_REC"; then T58_KEPT=$((T58_KEPT + 1)); else T58_LOST=$((T58_LOST + 1)); fi
+done
+expect_eq "(T58-b1-pre) fixture: landing A was refused in every trial, and B never failed its append" "300|0" "$T58_REF|$T58_BFAIL"
+expect_eq "(T58-b1) 300 trials of a refused landing's cleanup racing an append: B's block is kept in every one" \
+  "kept=300 lost=0" "kept=$T58_KEPT lost=$T58_LOST"
+expect_false "(T58-b1b) …and no lock directory is left behind" test -e "$T58_REC.lock"
+
+# (b2) THE CLEANUP NEVER DELETES WITHOUT THE LOCK: with the lock held by a live process for longer
+# than the wait (one second here), the refused landing leaves the empty record it made. The arm:
+# with no lock held, the same landing removes it.
+rm -f "$T58_REC" "$T58_REC.proved"; rm -rf "$T58_REC.lock"
+sleep 120 & T58_LIVE=$!
+mkdir "$T58_REC.lock"; echo "$T58_LIVE" > "$T58_REC.lock/pid"
+expect_eq "(T58-b2-pre) fixture: the stub landing is refused" "rc=2" "$(bash "$TMP/t58-a.sh" "$LIB" "$T58_REC" 1 2>&1)"
+expect_true "(T58-b2) a lock held by another landing throughout: the refused landing leaves the record its proof made" \
+  test -f "$T58_REC"
+expect_eq "(T58-b2b) …and the holder's lock is still its own" "$T58_LIVE" "$(cat "$T58_REC.lock/pid" 2>/dev/null)"
+kill "$T58_LIVE" 2>/dev/null; wait "$T58_LIVE" 2>/dev/null
+rm -rf "$T58_REC.lock"; rm -f "$T58_REC" "$T58_REC.proved"
+expect_eq "(T58-b2c) the arm: with no lock held the stub landing is refused…" "rc=2" "$(bash "$TMP/t58-a.sh" "$LIB" "$T58_REC" 1 2>&1)"
+expect_false "(T58-b2d) …and the empty record its proof made is gone" test -e "$T58_REC"
+expect_false "(T58-b2e) …and so is the lock it took for the delete" test -e "$T58_REC.lock"
+
+# (s1) THE WAIT IS TEN SECONDS BY THE CLOCK, the default, with a live holder: at least 9 and at most
+# 13 (a busy machine), where a count of tries took 19.64 s.
+expect_eq "(T58-s1-pre) fixture: the wait is the default, ten" "10" "$_WT_PROOFS_LOCK_WAIT"
+T58_F="$TMP/t58-wait.log"; echo "earlier" > "$T58_F"
+sleep 120 & T58_LIVE=$!
+mkdir "$T58_F.lock"; echo "$T58_LIVE" > "$T58_F.lock/pid"
+T58_T0=$SECONDS
+_wt_proofs_append "$T58_F" R9 br 1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 "stamp/v1|x"; T58_RC=$?
+T58_DT=$((SECONDS - T58_T0))
+kill "$T58_LIVE" 2>/dev/null; wait "$T58_LIVE" 2>/dev/null; rm -rf "$T58_F.lock"
+expect_true "(T58-s1) a live holder's lock: the append gives up (rc ${T58_RC})" test "$T58_RC" -ne 0
+expect_true "(T58-s1b) …after at least 9 seconds (took ${T58_DT}s)" test "$T58_DT" -ge 9
+expect_true "(T58-s1c) …and at most 13 (took ${T58_DT}s)" test "$T58_DT" -le 13
+expect_eq "(T58-s1d) …the record untouched" "earlier" "$(cat "$T58_F")"
+
+# (s2) THE PROOF COVERS THE LOCK. A read-only record directory holding a writable record, and a
+# regular file at `<record>.lock`, each refuse BEFORE the merge; a stale lock directory (its holder
+# gone) does not, it is taken over and the landing records.
+lp_bind '| T7 | 4 | build | seven | .worktrees/27-T7 | active |'
+T58_T="$(lp_tree wt/27-T7 27-T7)"; green_stamp "$T58_T"
+T58_LOGB="$(cat "$LP_LOG")"
+t58_refused() {  # <label> — lands T58_T with the record as the caller left it: refused before the merge
+  local l="$1" out rc tgt trees st
+  tgt="$(git -C "$LP" rev-parse refs/heads/wave/fixture)"; trees="$(trees_of "$LP")"; st="$(cat "$(stamp_file "$T58_T")")"
+  out="$(worktree_land_for_session "$T58_T" "$LP" "$LP_SID" 2>&1)"; rc=$?
+  expect_match "(T58-$l) refused why=proofs-unwritable before the merge, naming the record" \
+    "spawn-worktree: REFUSED reason=record-unwritable why=proofs-unwritable path=${LP_LOG} branch=wt/27-T7 — *" "$out"
+  expect_eq "(T58-$l-b) …exit 2, the target's head, every worktree and the stamp file as before" \
+    "2|$tgt|$trees|$st" "$rc|$(git -C "$LP" rev-parse refs/heads/wave/fixture)|$(trees_of "$LP")|$(cat "$(stamp_file "$T58_T")")"
+}
+expect_true "(T58-s2-pre) fixture: the record is a writable regular file" test -f "$LP_LOG" -a -w "$LP_LOG"
+chmod 555 "${LP_LOG%/*}"; t58_refused s2-readonly-dir; chmod 755 "${LP_LOG%/*}"
+: > "${LP_LOG}.lock"; t58_refused s2-lock-file; rm -f "${LP_LOG}.lock"
+true & T58_DEAD=$!; wait "$T58_DEAD"
+mkdir "${LP_LOG}.lock"; echo "$T58_DEAD" > "${LP_LOG}.lock/pid"
+expect_match "(T58-s2-stale) a stale lock directory is no refusal: the landing records" \
+  "spawn-worktree: LANDED branch=wt/27-T7 * removed=${T58_T} proofs=${LP_LOG}" "$(worktree_land_for_session "$T58_T" "$LP" "$LP_SID" 2>&1)"
+expect_false "(T58-s2-stale-b) …and no lock is left" test -e "${LP_LOG}.lock"
+expect_eq "(T58-s2-stale-c) …and its block follows the record as it was" "$T58_LOGB" "$(head -n "$(printf '%s\n' "$T58_LOGB" | awk 'END { print NR }')" "$LP_LOG")"
+
+# (n4) A FIFO SWAPPED IN BY A POST-MERGE HOOK, after the proof and before the append. Nothing reads
+# it, so an open would block for good: the landing returns inside twenty seconds, proofs=unwritten,
+# the tree kept, no lock left, the FIFO still there.
+T58_T="$(lp_tree wt/27-T7 27-T7)"; green_stamp "$T58_T"
+cp "$LP_LOG" "$TMP/t58-log.keep"
+LP_HOOK="$(git -C "$LP" rev-parse --absolute-git-dir)/hooks/post-merge"
+mkdir -p "${LP_HOOK%/*}"; printf '#!/bin/sh\nrm -f "%s"; mkfifo "%s"\n' "$LP_LOG" "$LP_LOG" > "$LP_HOOK"; chmod +x "$LP_HOOK"
+( worktree_land_for_session "$T58_T" "$LP" "$LP_SID" > "$TMP/t58-fifo.out" 2>&1; echo "rc=$?" >> "$TMP/t58-fifo.out" ) &
+T58_P=$!; T58_T0=$SECONDS
+while kill -0 "$T58_P" 2>/dev/null && [ $((SECONDS - T58_T0)) -lt 20 ]; do sleep 0.1; done
+T58_HUNG=no
+if kill -0 "$T58_P" 2>/dev/null; then T58_HUNG=yes; kill -KILL "$T58_P" 2>/dev/null; fi
+wait "$T58_P" 2>/dev/null
+T58_ISFIFO=no; [ -p "$LP_LOG" ] && T58_ISFIFO=yes
+T58_LOCKLEFT=no; [ -e "${LP_LOG}.lock" ] && T58_LOCKLEFT=yes
+rm -f "$LP_HOOK" "$LP_LOG"; rm -rf "${LP_LOG}.lock"; cp "$TMP/t58-log.keep" "$LP_LOG"
+T58_FM="$(git -C "$LP" rev-parse refs/heads/wave/fixture)"
+expect_eq "(T58-n4) the landing returns inside twenty seconds: the FIFO was never opened" "no" "$T58_HUNG"
+expect_match "(T58-n4b) …LANDED, the merge standing, proofs=unwritten, the tree kept" \
+  "spawn-worktree: LANDED branch=wt/27-T7 onto=wave/fixture checkout=${LP} merge=${T58_FM} kept=${T58_T} proofs=unwritten *" \
+  "$(head -n 1 "$TMP/t58-fifo.out")"
+expect_eq "(T58-n4c) …exit 0" "rc=0" "$(tail -n 1 "$TMP/t58-fifo.out")"
+expect_eq "(T58-n4d) …the hook did swap a FIFO in, and no lock is left" "yes|no" "$T58_ISFIFO|$T58_LOCKLEFT"
+rm -f "$T58_T/.bionic"; git -C "$LP" worktree remove --force "$T58_T" >/dev/null 2>&1
+
+# (n5) WHAT THE DECLARED CHECK MAY LEAVE. A check that commits on the target, one that writes a
+# tracked file in the piece's checkout, and one that fails and writes a tracked file in the target.
+LN="$(new_repo "$TMP/land-n5")"
+LN_MODE="$TMP/ln-mode"; echo none > "$LN_MODE"
+cat > "$TMP/ln-check.sh" <<LN_EOF
+#!/bin/bash
+case "\$(cat "$LN_MODE")" in
+  commit) echo c >> file.txt; git commit --quiet -am "made by the check" ;;
+  piece) echo w >> "\$BIONIC_CHECK_TREE/file.txt" ;;
+  fail-dirty) echo x >> file.txt; exit 1 ;;
+esac
+exit 0
+LN_EOF
+printf 'release-check: bash %s\n' "$TMP/ln-check.sh" > "$LN/.bionic/config.yaml"
+ln_tree() {  # <branch> -> tree path, with its record link and a green stamp at its head
+  local t; t="$(new_tree "$LN" "$1")"; ln -s "${LN}/.bionic" "$t/.bionic"; green_stamp "$t"; printf '%s' "$t"
+}
+
+echo commit > "$LN_MODE"
+LN1="$(ln_tree chk-commit)"; LN1_H="$(git -C "$LN1" rev-parse HEAD)"
+LN1_WAS="$(git -C "$LN" rev-parse --short HEAD)"; LN1_ST="$(cat "$(stamp_file "$LN1")")"
+OUTLN1="$(worktree_land "$LN1" wave/fixture 2>/dev/null)"; RCLN1=$?
+LN1_NOW="$(git -C "$LN" rev-parse --short HEAD)"
+expect_eq "(T58-n5-pre) fixture: the check made a commit on the target" "made by the check" "$(git -C "$LN" log -1 --format=%s)"
+expect_match "(T58-n5) a check that commits on the target refuses the landing check-dirtied, naming both short ids" \
+  "spawn-worktree: REFUSED reason=check-dirtied why=release-check checkout=${LN} head_was=${LN1_WAS} head_now=${LN1_NOW} branch=chk-commit — *moved the target checkout's HEAD*" "$OUTLN1"
+expect_eq "(T58-n5b) …exit 2" "2" "$RCLN1"
+expect_false "(T58-n5c) …nothing is merged: the tree's head is not on the target" \
+  git -C "$LN" merge-base --is-ancestor "$LN1_H" refs/heads/wave/fixture
+expect_eq "(T58-n5d) …the target left as the check left it, the tree and its stamps kept" \
+  "made by the check|yes|$LN1_ST" "$(git -C "$LN" log -1 --format=%s)|$([ -d "$LN1" ] && echo yes)|$(cat "$(stamp_file "$LN1")")"
+git -C "$LN" reset --quiet --hard HEAD~1
+
+echo piece > "$LN_MODE"
+LN2="$(ln_tree chk-piece)"; LN2_REFS="$(refs_of "$LN")"
+OUTLN2="$(worktree_land "$LN2" wave/fixture 2>/dev/null)"; RCLN2=$?
+expect_match "(T58-n5e) a check that writes a tracked file in the piece's checkout refuses check-dirtied, naming the path" \
+  "spawn-worktree: REFUSED reason=check-dirtied why=release-check checkout=${LN} piece_paths=file.txt branch=chk-piece — *changed the piece's checkout ${LN2}*" "$OUTLN2"
+expect_eq "(T58-n5f) …exit 2, no ref moved" "2|$LN2_REFS" "$RCLN2|$(refs_of "$LN")"
+expect_eq "(T58-n5g) …the piece left as the check left it, the tree standing" " M file.txt|yes" \
+  "$(git -C "$LN2" status --porcelain --untracked-files=no)|$([ -d "$LN2" ] && echo yes)"
+
+echo fail-dirty > "$LN_MODE"
+LN3="$(ln_tree chk-faildirty)"; LN3_REFS="$(refs_of "$LN")"
+OUTLN3="$(worktree_land "$LN3" wave/fixture 2>/dev/null)"; RCLN3=$?
+expect_match "(T58-n5h) a check that fails and dirties the target is refused for the failure, naming the path" \
+  "spawn-worktree: REFUSED reason=check-failed why=release-check rc=1 branch=chk-faildirty base=* head=* paths=file.txt — *" "$OUTLN3"
+expect_eq "(T58-n5i) …exit 2, no ref moved, the target left as the check left it" "2|$LN3_REFS| M file.txt" \
+  "$RCLN3|$(refs_of "$LN")|$(git -C "$LN" status --porcelain --untracked-files=no)"
+git -C "$LN" checkout --quiet -- file.txt
+
+echo none > "$LN_MODE"
+git -C "$LN2" checkout --quiet -- file.txt
+expect_match "(T58-n5j) the arm discriminates: the piece lands once it is clean and the check changes nothing" \
+  "spawn-worktree: LANDED branch=chk-piece onto=wave/fixture *" "$(worktree_land "$LN2" wave/fixture 2>/dev/null)"
+
 finish
