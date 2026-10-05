@@ -9185,20 +9185,40 @@ s52_plan() {  # <repo> <T6 status> -> the plan path
     "| T6 | 6 | build | late fix from the review | implementor | — | 20 | REQ-x | payload/x.sh | $2 | |" \
     "| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-x | — | pending | |")"
   awk -v h="$h" -v b="$b" '
-    /^current: / { print "current: 8"; print "working-branch: " b; next }
+    /^governing-skill: / && !fm { print; print "rigor: tested"; print "scale: wave"; fm = 1; next }
+    /^current: / { print "current: 8"; print "working-branch: " b; print "base-sha: " h; next }
     { print }
     /^approved-by: / { print "proved: kind=floor head=" h " at=2026-10-04T11:00:00Z evidence=record/floor.log"
                        print "proved: kind=review head=" h " at=2026-10-04T11:05:00Z evidence=record/review.md" }' \
     "$f" > "$f.tmp" && mv "$f.tmp" "$f"
   printf '%s' "$f"
 }
-R52="$(make_repo s52-open-build)"; new_roster "$R52"; s52_plan "$R52" active >/dev/null
+# THE READINGS THE RUN OWES, HELD AT THE HEAD (wave-27 T14; D3). From T14 integrate's proof:review
+# is met only when lib/proof.sh `facts_state` holds the plan at the working head, which the tick
+# asks once and hands in. These sections are about the build and the floor, so the plan is handed
+# what a run at Step 8 has: every reading `facts_owed` deals its rigor and scale, `result=pass`, at
+# <head>, written by the product's pair (`proof_line` placed by `proof_add_line`).
+owed_readings() {  # <plan> <head> -> the readings appended to the plan
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    facts_owed "$(plan_frontmatter_get "$2" rigor)" "$(plan_frontmatter_get "$2" scale)" \
+      | while IFS="	" read -r k q role scope; do
+          [ "$k" = review ] || continue
+          proof_add_line "$2" "$(proof_line review "$3" 2026-10-04T12:00:00Z "record/$q-$scope.md" "$q" w-read pass "$scope")" > "$2.or" \
+            && mv "$2.or" "$2"
+        done' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$1" "$2"
+}
+R52="$(make_repo s52-open-build)"; new_roster "$R52"; S52_P="$(s52_plan "$R52" active)"
+owed_readings "$S52_P" "$(git -C "$R52" rev-parse HEAD)"
+expect_eq "52a0 precondition: the plan (tested, wave) holds its five readings at the head: facts_state reads each covered" "5" \
+  "$(bash -c '. "$1/proof.sh" && facts_state "$2" "$3"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$S52_P" "$(git -C "$R52" rev-parse HEAD)" 2>/dev/null \
+     | awk -F'\t' '$1 == "review" && $NF == "covered"' | wc -l | tr -d ' ')"
 add_row "$R52" name=w-T6 deliverable=T6.md duration="1 hour" launched_at="$(iso_ago 10)"
 poke_pressure "$R52" 8192 1.0 tick
 expect_nonempty "52a precondition: the tick prints WAIT lines (the extractor reads real output)" "$(s47_lines WAIT)"
 expect_contains "52a2 K2-F5 integrate waits on head, and its WAIT line names the late build" \
   "poker: WAIT T3 — reads head, written by T6 (active)" "$OUT"
-R52L="$(make_repo s52-landed)"; new_roster "$R52L"; s52_plan "$R52L" landed >/dev/null
+R52L="$(make_repo s52-landed)"; new_roster "$R52L"; S52_PL="$(s52_plan "$R52L" landed)"
+owed_readings "$S52_PL" "$(git -C "$R52L" rev-parse HEAD)"
 poke_pressure "$R52L" 8192 1.0 tick
 expect_contains "52b the build landed, both proofs in: the merge is offered" "poker: FILL T3" "$OUT"
 
@@ -9308,7 +9328,11 @@ printf 'one\n' > "$R54/lib/one.sh"; printf 'every\n' > "$R54/lib/every.sh"
 printf '.bionic/\n.worktrees/\n' > "$R54/.gitignore"
 ( cd "$R54" && git add .gitignore tests payload lib && git commit -qm base ) >/dev/null 2>&1
 S54_BASE="$(git -C "$R54" rev-parse HEAD 2>/dev/null)"
-P54="$(s42_plan "$R54" 4)"
+# A REAL BASE (wave-27 T14, on the T45 ruling): the judge deals no reading on a plan whose
+# base-sha names no commit, so the Step-4 block names the commit the working branch is cut from.
+P54="$(s42_plan "$R54" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${S54_BASE}
+  branch: wave/01-fixture")"
 awk '
   /^current: / && !wb { print; print "working-branch: wave/01-fixture"; wb = 1; next }
   /^- T5: / { print; print "- T3: integrate at Step 8"; next }
@@ -9347,8 +9371,11 @@ s54_floor() { s54_full "$1"; poke "$R54" proof-add floor "record/wave-01-fixture
 # s54_tick -> the tick at current: 8 (proof-add runs at current: 4, where the fixture plan's gate
 # admits it; the tick reads current: 8, where integrate is no longer held for its step). The
 # digest is cleared first, so each tick prints its whole reading rather than "unchanged" (as 48).
+# FROM wave-27 T14 the review half is held at each tick's head (`owed_readings`, §52): this
+# section is about the floor, so a reading of each question is taken on whatever landed.
 s54_tick() {
   rm -f "$(digest_of "$R54")"
+  owed_readings "$P54" "$(git -C "$S54_WT" rev-parse HEAD)"
   sed 's/^current: 4$/current: 8/' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
   poke_pressure "$R54" 8192 1.0 tick
   sed 's/^current: 8$/current: 4/' "$P54" > "$P54.tmp" && mv "$P54.tmp" "$P54"
@@ -9379,7 +9406,7 @@ S54_W1="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
 expect_nonempty "54b1 precondition: the tick prints a WAIT line for integrate (the extractor reads real output)" "$(s54_wait)"
 expect_eq "54b AC-3.4 integrate WAITS: the head moved past the floor proof in a way the map cannot bound, and the line names the way out" \
-  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor" \
+  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the floor holds" \
   "$(s54_wait)"
 expect_absent "54b2 …and the merge is not offered" "poker: FILL T3" "$OUT"
 # THE COST: one tick runs proof_state once, though its schedule and its change fingerprint each
@@ -10420,6 +10447,149 @@ expect_absent "59e3 …and the idle row has no RANGE line" "poker: RANGE T3" "$O
 POKE_BOUND="$S59_BOUND_WAS"
 
 # ============================================================
+section "Section 61 §CUR8 §CUR8-fail §CUR8-rigor: current 8 is admitted on the judge, not on the Step-8 block (wave-27 T14; REQ-2 AC-2.3 AC-2.4, REQ-3 AC-3.1, REQ-7 AC-7.1; D3, D14)"
+# ============================================================
+#
+# `session-poker.sh current 8` no longer dry-commits the plan at Step 8, where the gate asked for
+# the Step-8 block close-out writes. It asks lib/proof.sh `facts_state <plan> <working head>` and
+# is refused, the plan byte-identical, unless every fact the run owes holds: each line that does
+# not is printed as the judge gave it. rc 2 from the judge (a rigor or scale the dealing does not
+# know) refuses too, saying so.
+#
+# FIXTURE FIDELITY. §57's: a plan bound to this session, its working branch checked out in a
+# linked worktree, real commits on it. The fact lines are the production writer's (proof.sh
+# `proof_line`, `proof_waiver_line`, placed by `proof_add_line`); §56 holds the verb that writes
+# readings, and the judge reads plan text whatever wrote it. The plan sits at `current: 7` with no
+# Step 8 line and no Step 9 line, the state a run is in before its tools close it.
+S61_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S61_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
+R61="$(make_repo s61-cur8)"; ( cd "$R61" && git commit -q --allow-empty -m init )
+git -C "$R61" config user.name "Dana Fixture"
+S61_B="$(git -C "$R61" rev-parse HEAD)"
+P61="$(s42_plan "$R61" 7 "  worktree: .worktrees/01-fixture
+  base-sha: ${S61_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P61" > "$P61.tmp" && mv "$P61.tmp" "$P61"
+( cd "$R61" && git add -f "$P61" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$R61/.worktrees/01-fixture" "$S61_B" ) >/dev/null 2>&1
+S61_WT="$R61/.worktrees/01-fixture"
+S61_C1="$(s57_commit "$S61_WT" lib/a.sh C1)"
+s61_add() {  # <line> -> the line placed in P61 by the production placer
+  bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S61_LIB" "$P61" "$1" > "$P61.new" && mv "$P61.new" "$P61"
+}
+s61_fact() {  # <question> <head> <result> <scope>
+  s61_add "$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" "$6"' \
+    _ "$S61_LIB" "$2" "record/wave-01-fixture/$1-$3-$4.md" "$1" "$3" "$4")"
+}
+s61_floor() { s61_add "$(bash -c '. "$1" && proof_line floor "$2" 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log' _ "$S61_LIB" "$1")"; }
+s61_waiver() { s61_add "$(bash -c '. "$1" && proof_waiver_line "$2" "$3" "Dana Fixture" 2026-10-04T12:00:00Z "ship it"' _ "$S61_LIB" "$1" "$2")"; }
+s61_owed() {  # <head> [<question> to leave out] -> the floor and every reading the plan owes, at <head>
+  local q
+  s61_floor "$1"
+  for q in evidence adversarial structure; do [ "$q" = "${2:-}" ] || s61_fact "$q" "$1" pass piece; done
+  for q in adversarial structure; do [ "$q" = "${2:-}" ] || s61_fact "$q" "$1" pass whole; done
+}
+cp "$P61" "$TMPROOT/s61-clean"
+s61_reset() { cp "$TMPROOT/s61-clean" "$P61"; }
+s61_rigor() { sed "s/^rigor: .*/rigor: $1/" "$P61" > "$P61.tmp" && mv "$P61.tmp" "$P61"; }
+s61_cur() { sed -n 's/^current: //p' "$P61"; }
+expect_eq "61a0 precondition: the fixture sits at current: 7 with no Step 8 or Step 9 line" "7/0" \
+  "$(s61_cur)/$(/usr/bin/grep -cE '^- Step (8|9):' "$P61")"
+expect_regex "61a0b precondition: the working branch's head is C1, a 40-hex commit" '^[0-9a-f]{40}$' "$S61_C1"
+
+# ---------- §CUR8 (AC-2.3, AC-7.1): every fact at the head admits; code past a reading refuses ----------
+s61_reset; s61_owed "$S61_C1"
+poke "$R61" current 8
+expect_eq "61a §CUR8 AC-7.1 with every owed fact at the working head, current 8 exits 0 (no Step-8 block asked)" "0" "$RC"
+expect_eq "61a2 …and the plan reads current: 8" "8" "$(s61_cur)"
+expect_contains "61a3 …saying what admitted it" "every fact the run owes holds at $S61_C1" "$OUT"
+expect_eq "61a4 …and no Step 8 line was asked for or written" "0" "$(/usr/bin/grep -cE '^- Step 8:' "$P61")"
+S61_C2="$(s57_commit "$S61_WT" lib/b.sh C2)"
+s61_reset; s61_owed "$S61_C1"
+s42_snap "$R61" "$P61"
+poke "$R61" current 8
+s42_unchanged "61b §CUR8 AC-2.3 a commit to a tracked file past the last adversarial and structure heads" 1 "$P61"
+expect_contains "61b2 …naming the adversarial range nobody read" \
+  "$(printf 'review\tadversarial\tbionic:critic\tpiece\tuncovered\t%s..%s' "$S61_C1" "$S61_C2")" "$OUT"
+expect_contains "61b3 …and the structure range" \
+  "$(printf 'review\tstructure\tbionic:reviewer\tpiece\tuncovered\t%s..%s' "$S61_C1" "$S61_C2")" "$OUT"
+expect_contains "61b4 …saying it is the judge's answer at the working head" \
+  "holds at the working head $S61_C2, and these do not (facts_state)" "$OUT"
+expect_absent "61b5 …and printing no line that holds (beside 61b2 on the same output)" "	covered" "$OUT"
+s61_reset; s61_owed "$S61_C2"
+poke "$R61" current 8
+expect_eq "61b6 …the readings taken again over the fix: current 8 is admitted" "0" "$RC"
+
+# ---------- §CUR8-fail (AC-2.4): the newest failing reading holds the run ----------
+s61_reset; s61_owed "$S61_C2"; s61_fact structure "$S61_C2" fail piece
+s42_snap "$R61" "$P61"
+poke "$R61" current 8
+s42_unchanged "61c §CUR8-fail AC-2.4 the newest structure reading is result=fail" 1 "$P61"
+expect_contains "61c2 …naming it failing, with its evidence" \
+  "$(printf 'review\tstructure\tbionic:reviewer\tpiece\tfailing\trecord/wave-01-fixture/structure-fail-piece.md')" "$OUT"
+s61_fact structure "$S61_C2" pass piece
+poke "$R61" current 8
+expect_eq "61c3 …a later pass over the fix admits it" "0" "$RC"
+s61_reset; s61_owed "$S61_C2"; s61_fact structure "$S61_C2" fail piece; s61_waiver structure "$S61_C2"
+poke "$R61" current 8
+expect_eq "61c4 …and so does a waived: line newer than the failing reading" "0" "$RC"
+s61_reset; s61_owed "$S61_C2"; s61_fact adversarial "$S61_C2" fail whole
+s42_snap "$R61" "$P61"
+poke "$R61" current 8
+s42_unchanged "61c5 …a failing whole read holds the run too" 1 "$P61"
+expect_contains "61c6 …naming the whole line" \
+  "$(printf 'review\tadversarial\tbionic:critic\twhole\tfailing\trecord/wave-01-fixture/adversarial-fail-whole.md')" "$OUT"
+
+# ---------- §CUR8-rigor (AC-3.1): the critic at every rigor ----------
+for s61r in tested peer-reviewed audited; do
+  s61_reset; s61_rigor "$s61r"; s61_owed "$S61_C2" adversarial
+  s42_snap "$R61" "$P61"
+  poke "$R61" current 8
+  s42_unchanged "61d §CUR8-rigor AC-3.1 at $s61r, current 8 with no adversarial fact" 1 "$P61"
+  expect_contains "61d2 …at $s61r, naming the critic's adversarial question absent" \
+    "$(printf 'review\tadversarial\tbionic:critic\tpiece\tabsent')" "$OUT"
+  s61_fact adversarial "$S61_C2" pass piece; s61_fact adversarial "$S61_C2" pass whole
+  poke "$R61" current 8
+  expect_eq "61d3 …at $s61r, the same plan with it is admitted" "0" "$RC"
+done
+s61_reset; s61_rigor bogus; s61_owed "$S61_C2"
+s42_snap "$R61" "$P61"
+poke "$R61" current 8
+s42_unchanged "61e a plan whose rigor the dealing does not know (the judge's rc 2)" 1 "$P61"
+expect_contains "61e2 …saying the judge could not deal the plan" "the judge could not deal this plan (facts_state exit 2)" "$OUT"
+expect_contains "61e3 …and printing what the judge said, whatever the reason" "declares no rigor and scale the dealing knows (rigor: bogus, scale: wave)" "$OUT"
+s61_reset; s61_owed "$S61_C2"
+s42_snap "$R61" "$P61"
+poke "$R61" current 6
+s42_unchanged "61f a move to another step is still dry-committed at that step (the matrix is pending at Step 6)" 1 "$P61"
+expect_contains "61f2 …in the gate's own words" "bionic: commit refused" "$OUT"
+
+# ---------- §CUR8-check (AC-6.1, last half; T16's check fact on the merged tree) ----------
+# With `release-check:` set in the project's config, the judge owes `check` too (facts_owed's third
+# operand, the tree), so `current 8` is refused, naming the check line absent, until the verb
+# `release-check` records a passing run at the working head; then it is admitted. The declared
+# command is a script this row writes that exits 0.
+printf '#!/bin/bash
+echo "scan: entries=0 hits=0"
+exit 0
+' > "$TMPROOT/s61-check.sh"
+cp "$R61/.bionic/config.yaml" "$TMPROOT/s61-config" 2>/dev/null || : > "$TMPROOT/s61-config"
+printf 'release-check: bash %s\n' "$TMPROOT/s61-check.sh" >> "$R61/.bionic/config.yaml"
+s61_reset; s61_owed "$S61_C2"
+s42_snap "$R61" "$P61"
+poke "$R61" current 8
+s42_unchanged "61g AC-6.1 with release-check: set and every reading at the head, current 8 with no check fact" 1 "$P61"
+expect_contains "61g2 …naming the check line absent" "$(printf 'check\tabsent')" "$OUT"
+poke "$R61" release-check
+expect_eq "61g3 release-check runs the declared command and records the pass (exit 0)" "0" "$RC"
+expect_eq "61g4 …a kind=check fact at the working head" "1" "$(/usr/bin/grep -c "^proved: kind=check head=${S61_C2} " "$P61")"
+poke "$R61" current 8
+expect_eq "61g5 AC-6.1 …and current 8 is then admitted (exit 0)" "0" "$RC"
+expect_eq "61g6 …the plan reads current: 8" "8" "$(s61_cur)"
+cp "$TMPROOT/s61-config" "$R61/.bionic/config.yaml"
+POKE_BOUND="$S61_BOUND_WAS"
+
+# ============================================================
 section "Section 62 §RC: a declared release check is owed, run by its verb over the release range, and recorded as a check fact (wave-27 T16; REQ-6 AC-6.1; D12)"
 # ============================================================
 #
@@ -10953,6 +11123,101 @@ expect_contains "63r19 the shipped proof_reading refuses multi.md for its passes
 expect_contains "63r20 mutation: the doctored copy still reads a one-pass record (it runs)" "pass piece ${S58_C1} rc=0" \
   "$(s63_read "$S63_M_ONE" "$S58_REC/rc-pass-na.md")"
 expect_contains "63r21 …and admits multi.md, so 63r9 can fail" "pass piece ${S58_C1} rc=0" "$(s63_read "$S63_M_ONE" "$S58_REC/multi.md")"
+
+# ---------- §BASE-WORD, §BASE-FIRST, §RETRY (review pass 20 F1, F4, F3; wave-27 T14, A-orch-72) ----------
+# F1: a `base-sha:` is a base only when it is 7 to 40 hex AND names a commit, so `HEAD` or a branch
+# name, which resolve to wherever the checkout is, is no base, as `deadbeef` is not; the refusal
+# says the value is not a commit id. F4: the base is the first of the places proof_plan_base reads
+# (`## SDLC State`, then the frontmatter) whose value is 7 to 40 hex, so an empty or placeholder
+# Step-4 value no longer hides a real frontmatter one; both refusals that send the user to add a
+# base name the frontmatter. F3: the one-reader rule counts only a DIFFERENT name's row that is past
+# `intended` and still open. On §BASE's plan (its readings registered from the base, above) and on
+# §58's repository and rows.
+s63x_sdlc() {  # <plan> <line> -> the line written under `working-branch:` inside ## SDLC State
+  L="$2" awk '{ print } /^working-branch: / && !d { print ENVIRON["L"]; d = 1 }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+# The judge's rows plant at the head the working checkout is at NOW (S63X_H): §FLOOR-HEAD answers the
+# floor line for that head alone, and the sections above have moved the checkout past S63_H.
+S63X_H="$(git -C "$S63_WT" rev-parse HEAD)"
+s63x_planted() {  # <copy> <frontmatter base or ""> [<SDLC line>] -> the no-base plan with its readings planted at S63X_H
+  cp "$TMPROOT/s63-nobase" "$1"
+  [ -z "$2" ] || s63_base "$1" "$2"
+  [ -z "${3:-}" ] || s63x_sdlc "$1" "$3"
+  for s63q in evidence adversarial structure; do s57_fact "$s63q" "$S63X_H" pass piece "$1"; done
+  s57_floor "$S63X_H" "$1"
+}
+# The whole read first, on the plan as §BASE left it (three readings from the base registered).
+cp "$P63" "$TMPROOT/s63x-registered"
+sed "s/^base-sha: ${S63_I}\$/base-sha: HEAD/" "$P63" > "$P63.tmp" && mv "$P63.tmp" "$P63"
+printf 'reviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: whole\n\nthe whole branch\n' "$S63_I" "$S63_H" > "$S63_REC/adversarial.md"
+expect_eq "63x0 precondition: the plan's base reads HEAD, and its adversarial chain already has a reading" "1 yes" \
+  "$(/usr/bin/grep -c '^base-sha: HEAD$' "$P63") $([ "$(/usr/bin/grep -c 'question=adversarial' "$P63")" -ge 1 ] && echo yes)"
+s42_snap "$R63" "$P63"
+poke "$R63" proof-add review "record/task-01-fixture/adversarial.md" --question adversarial --reader w-tcrit
+s42_unchanged "63x F1 a whole read on a plan whose base-sha: is HEAD" 1 "$P63"
+expect_contains "63x2 F4 …the whole-read refusal names the frontmatter, the place the other refusal names" "to the frontmatter of" "$OUT"
+expect_contains "63x3 F1 …and says HEAD is not a commit id" "HEAD is not a commit id" "$OUT"
+# A first reading on a plan whose base is HEAD, then a branch name.
+cp "$TMPROOT/s63-nobase" "$P63"; s63_base "$P63" HEAD; s42_snap "$R63" "$P63"
+poke "$R63" proof-add review "record/task-01-fixture/evidence.md" --question evidence --reader w-tcrit
+s42_unchanged "63x4 F1 with base-sha: HEAD, a first reading over the whole branch" 1 "$P63"
+expect_contains "63x5 …its first line naming the frontmatter line to add, and HEAD as no commit id" \
+  "its base-sha: HEAD is not a commit id" "$(printf '%s\n' "$OUT" | head -1)"
+cp "$TMPROOT/s63-nobase" "$P63"; s63_base "$P63" task/01-fixture; s42_snap "$R63" "$P63"
+poke "$R63" proof-add review "record/task-01-fixture/evidence.md" --question evidence --reader w-tcrit
+s42_unchanged "63x6 F1 with base-sha: task/01-fixture (the working branch), the same" 1 "$P63"
+s63x_planted "$R63/.bionic/tmp/x-head.plan.md" HEAD
+s57_state "$R63/.bionic/tmp/x-head.plan.md" "$S63X_H"
+expect_eq "63x7 F1 facts_state on base-sha: HEAD exits 2, as on deadbeef (63b2b), printing nothing" "2 " "$S57_RC $S57_OUT"
+s63x_planted "$R63/.bionic/tmp/x-branch.plan.md" task/01-fixture
+s57_state "$R63/.bionic/tmp/x-branch.plan.md" "$S63X_H"
+expect_eq "63x8 F1 …and on a branch name" "2 " "$S57_RC $S57_OUT"
+s63x_planted "$R63/.bionic/tmp/x-abbr.plan.md" "${S63_I:0:7}"
+s57_state "$R63/.bionic/tmp/x-abbr.plan.md" "$S63X_H"
+expect_eq "63x9 F1 control: seven hex abbreviating a real commit is a base, every line covered" "0 $(s63_task_all covered covered)" "$S57_RC $S57_OUT"
+# F4: a real frontmatter base beside a placeholder or empty Step-4 one.
+s63x_planted "$R63/.bionic/tmp/x-tbd.plan.md" "$S63_I" "base-sha: TBD"
+s57_state "$R63/.bionic/tmp/x-tbd.plan.md" "$S63X_H"
+expect_eq "63x10 F4 frontmatter base real, ## SDLC State base-sha: TBD: judged against the frontmatter's, rc 0" \
+  "0 $(s63_task_all covered covered)" "$S57_RC $S57_OUT"
+s63x_planted "$R63/.bionic/tmp/x-empty.plan.md" "$S63_I" "base-sha:"
+s57_state "$R63/.bionic/tmp/x-empty.plan.md" "$S63X_H"
+expect_eq "63x11 F4 …and beside an empty one" "0 $(s63_task_all covered covered)" "$S57_RC $S57_OUT"
+cp "$TMPROOT/s63-nobase" "$P63"; s63_base "$P63" "$S63_I"; s63x_sdlc "$P63" "base-sha: TBD"; s42_snap "$R63" "$P63"
+poke "$R63" proof-add review "record/task-01-fixture/evidence.md" --question evidence --reader w-tcrit
+expect_eq "63x12 F4 the verb on that plan: a first reading from the frontmatter base registers (exit 0)" "0" "$RC"
+cp "$TMPROOT/s63x-registered" "$P63"
+# F3: a reader dispatched again to the record of an earlier launch.
+s58_row r-re1 bionic:auditor confirmed evidence "$S58_REL/retry1.md" ""
+s58_row r-re0 bionic:auditor intended evidence "$S58_REL/retry1.md" ""
+s58_row r-re2 bionic:auditor confirmed evidence "$S58_REL/retry2.md" ""
+s58_row r-re0c bionic:auditor closed evidence "$S58_REL/retry2.md" ""
+s58_row r-re3 bionic:auditor confirmed evidence "$S58_REL/retry3.md" ""
+s58_row r-re3o bionic:auditor confirmed evidence "$S58_REL/retry3.md" ""
+s58_row r-re4 bionic:auditor confirmed evidence "$S58_REL/retry4.md" ""
+s58_row r-re4 bionic:auditor confirmed evidence "$S58_REL/retry4.md" ""
+for s63n in 1 2 3 4; do
+  s58_rec "retry$s63n.md" "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result: pass" "scope: piece"
+done
+expect_eq "63x13 precondition: retry1.md is named by r-re1 (confirmed) and by r-re0 (intended)" "2" \
+  "$(/usr/bin/grep -c 'retry1\.md' "$S58_RS")"
+s42_snap "$R58" "$P58"
+poke "$R58" proof-add review record/wave-01-fixture/retry1.md --question evidence --reader r-re1
+expect_eq "63x14 F3 another name's row that is only intended is not counted: r-re1 registers (exit 0)" "0" "$RC"
+poke "$R58" proof-add review record/wave-01-fixture/retry2.md --question evidence --reader r-re2
+expect_eq "63x15 F3 …nor one that is closed: r-re2 registers (exit 0)" "0" "$RC"
+s42_snap "$R58" "$P58"
+poke "$R58" proof-add review record/wave-01-fixture/retry3.md --question evidence --reader r-re3
+s42_unchanged "63x16 F3 another name's row launched and open still refuses, as today" 1 "$P58"
+expect_contains "63x17 …naming it" "named by the roster row r-re3o (bionic:auditor)" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/retry4.md --question evidence --reader r-re4
+expect_eq "63x18 F3 two rows of the reader's own name (a relaunch) register (exit 0)" "0" "$RC"
+s58_row r-re5 bionic:auditor confirmed evidence "$S58_REL/retry5.md" ""
+s58_row r-re5a bionic:auditor confirmed evidence "$S58_REL/retry5.md" ""
+s58_rec retry5.md "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result: pass" "scope: piece"
+printf 'sweeper-ledger/v1|event=ack|name=r-re5a|at=2026-10-04T00:00:00Z|reason=landed\n' >> "$R58/.bionic/tmp/sweeper-$SID.state"
+poke "$R58" proof-add review record/wave-01-fixture/retry5.md --question evidence --reader r-re5
+expect_eq "63x19 F3 …nor another name's confirmed row acked after its launch: r-re5 registers (exit 0)" "0" "$RC"
 POKE_BOUND="$S63_BOUND_WAS"
 
 finish

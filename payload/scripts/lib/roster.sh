@@ -70,15 +70,22 @@
 # copied by `hold` and `amend`, whose row is the same contract, and dropped by `extend`, whose
 # re-opened row is new work (`row_copy_args` in hooks/session-poker.sh, `drop-done`).
 #
+# A READER'S QUESTIONS (wave-27 T15; REQ-5, D5). `questions=<q>[,<q>]` is the dispatch wall's
+# record of a reader brief's `Questions:` line, in the order evidence, adversarial, structure;
+# `hooks/execution-recorder.sh` pushes the checks file of each at agent start, and `proof-add
+# review` reads it to hold a reading to the question its reader was dealt. Present-if-passed, and
+# it TRAILS `plan=`: a row that names none is byte-identical to the rows before it.
+#
 # THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
 # REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
 # `re_executes=` say how wide the dispatched agent's instrument may be: the files its brief
 # declared, the suite basenames it may run, whether that set was DERIVED from the tree by the
 # configured impact command or DECLARED by the brief, and — for a repository whose tests are
 # not shell suites at all — the author-marked commands the brief declared it will re-run,
-# marks kept, space-joined, capped per role since T4 (wave-20, REQ-7) — three for an
-# auditor, DP_SUITES_MAX for every other role (hooks/dispatch-preflight.sh lifts them from the
-# brief text under `Re-executes:`). `re_executes=` is the LAST of the four and TRAILS them,
+# marks kept, space-joined, capped per brief since T4 (wave-20, REQ-7) — three suite runs for
+# a reader of the evidence question, DP_SUITES_MAX for every other (dp_runs_cap in lib/brief.sh;
+# hooks/dispatch-preflight.sh lifts them from the brief text under `Re-executes:`).
+# `re_executes=` is the LAST of the four and TRAILS them,
 # so a row written before the field existed reproduces byte for byte through this writer. They are present-if-passed rather than always-emitted so that the captured
 # rows in `tests/fixtures/roster-row.captured` — real rows written before this task
 # existed — still reproduce byte for byte through this writer. A row from before the wall
@@ -250,9 +257,9 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
   local files="" suites_allowed="" suites_source="" re_executes="" amended="" extended=""
-  local held="" done_marker=""
+  local held="" done_marker="" questions=""
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
-  local has_held=0 has_done=0
+  local has_held=0 has_done=0 has_questions=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
@@ -298,6 +305,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       extended)      extended="$val";     has_extended=1 ;;
       held)          held="$val";         has_held=1 ;;
       done)          done_marker="$val";  has_done=1 ;;
+      questions)     questions="$val";    has_questions=1 ;;
       files)          files="$val";          has_files=1 ;;
       suites_allowed) suites_allowed="$val"; has_suites_allowed=1 ;;
       suites_source)  suites_source="$val";  has_suites_source=1 ;;
@@ -323,6 +331,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_held" -eq 1 ]; then     out="$out|held=$held"; fi
   if [ "$has_done" -eq 1 ]; then     out="$out|done=$done_marker"; fi
   out="$out|tool_use_id=$tool_use_id|plan=$plan"
+  if [ "$has_questions" -eq 1 ]; then out="$out|questions=$questions"; fi
   printf '%s\n' "$out"
   return 0
 }

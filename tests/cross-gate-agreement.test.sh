@@ -5852,6 +5852,11 @@ s_eg_read() {  # <repo> [sid] -> "<plan path>|<current>", or "none"
   [ "$st" -eq 0 ] && { echo none; return; }
   plan=$(printf '%s\n' "$out" | sed -n 's/^Plan: //p' | head -1)
   cur=$(printf '%s\n' "$out" | sed -n "s/.*has no 'Step \([^']*\):' line.*/\1/p" | head -1)
+  # FROM STEP 6 THE GATE ASKS FOR READINGS, NOT A STEP LINE (wave-27 T14; D3), so a plan there
+  # meets another arm first; the step is the one its detail head names, "canonical-sdlc step N —",
+  # or the reading refusal's "is at current: N,".
+  [ -n "$cur" ] || cur=$(printf '%s\n' "$out" | sed -n -e 's/^canonical-sdlc step \([0-9][0-9ab]*\) — .*/\1/p' \
+    -e 's/^canonical-sdlc .* is at current: \([^,]*\), and from Step 6 .*/\1/p' | head -1)
   if [ -z "$plan" ] || [ -z "$cur" ]; then echo "other:$(printf '%s' "$out" | head -1 | cut -c1-60)"; return; fi
   printf '%s|%s\n' "$plan" "$cur"
 }
