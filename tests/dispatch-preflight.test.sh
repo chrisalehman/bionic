@@ -6361,11 +6361,12 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # LOWERED 18 -> 17 (wave-26 T5, REQ-3 D6): the one-regression and floor-once arms became ONE
 # full-run arm, so a brief with no suite set leaves one wall unable to answer, not two. The
 # variable part is one extra fault plus two not-checked lines; the fixed part is unmoved.
-# RAISED 17 -> 19 (wave-27 T31, D23): the scaffold gained `Lands-red:` and `Red-evidence:`; the FIXED part is sixteen, TWELVE scaffold lines.
-expect_eq "§combined meta: the shipped scaffold is twelve lines, the count both caps are built on" \
-  "12" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
-expect_status "§combined …the wire is at most 19 lines (16 + 1 extra fault + 2 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 19 ] && echo 0 || echo 1)"
+# RAISED 17 -> 18 (wave-27 T17, D5): the scaffold gained the readers' `Questions:` line; the FIXED part is fifteen, ELEVEN scaffold lines.
+# RAISED 18 -> 20 (wave-27 T31, D23): the scaffold gained `Lands-red:` and `Red-evidence:`; the FIXED part is seventeen, THIRTEEN scaffold lines.
+expect_eq "§combined meta: the shipped scaffold is thirteen lines, the count both caps are built on" \
+  "13" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
+expect_status "§combined …the wire is at most 20 lines (17 + 1 extra fault + 2 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 20 ] && echo 0 || echo 1)"
 expect_contains "§combined …and the fixed line that grew it is the prompt-only sentence" \
   "The wall reads the prompt text only." "$GATE_REASON"
 # AND THE FULL-RUN WALL'S LINE IS NAMED — a cap without saying which line fills it is a
@@ -7349,8 +7350,8 @@ expect_contains "§three-arms …and the brief-shape fault" \
 # optional `Subprocess claim:` (§combined holds the nine). Three faults: thirteen plus two.
 # The fixed part is FOURTEEN since wave-24 T9 (AC-4.8): the scaffold's tenth line is the
 # optional `Done marker:` (§combined holds the ten). Three faults: fourteen plus two.
-expect_status "§three-arms …and the wire is at most 18 lines (16 + one per additional fault)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 18 ] && echo 0 || echo 1)"
+expect_status "§three-arms …and the wire is at most 19 lines (17 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 19 ] && echo 0 || echo 1)"
 # NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
 # MOVED WITH THE FIXED PART (wave-21 T7; again at wave-24 T9): a wire that grew by nothing is

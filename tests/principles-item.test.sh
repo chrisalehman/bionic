@@ -689,7 +689,7 @@ DOC_DIR="$(doctor_run "$SB_DIR")"
 ROW_DIR="$(report_row "$DOC_DIR" "$DOCTOR_ROW_LABEL")"
 expect_nonempty "NOT-A-FILE: doctor renders a row" "$ROW_DIR"
 expect_contains "NOT-A-FILE: doctor's fix line keeps the fault whole on the page" \
-  "~/.claude/CLAUDE.md is a directory, not a file → fix it by hand" "$DOC_DIR"
+  "~/.claude/CLAUDE.md is a directory → fix it by hand" "$DOC_DIR"
 expect_contains "NOT-A-FILE: doctor's row is a fault" "✗" "$ROW_DIR"
 expect_contains "NOT-A-FILE: doctor's row says it is not a file" "not a file" "$ROW_DIR"
 expect_absent "NOT-A-FILE: doctor suggests no setup run that would write" "/bionic:setup" "$ROW_DIR"
@@ -706,11 +706,11 @@ expect_eq "NOT-A-FILE: …or beside it" "$LD_TOP" "$(ls -A "$SB_LD")"
 # A dangling link: refused, its target not created, the link left as it was.
 SB_DL="$(new_bare_home)"; ln -s ../nowhere.md "$SB_DL/.claude/CLAUDE.md"
 DL_SET="$(setup_run "$SB_DL" $'y\ny\n')"
-expect_contains "NOT-A-FILE: a dangling link is refused by setup" "is a link that points nowhere" "$DL_SET"
+expect_contains "NOT-A-FILE: a dangling link is refused by setup, naming where it points (T51 F3)" "is a link to ${SB_DL}/.claude/../nowhere.md, which does not exist" "$DL_SET"
 expect_eq "NOT-A-FILE: …its target is not created" "no" "$(path_exists "$SB_DL/nowhere.md")"
 expect_true "NOT-A-FILE: …and the link is still a link" test -L "$SB_DL/.claude/CLAUDE.md"
 DL_RM="$(remove_run "$SB_DL" y)"
-expect_contains "NOT-A-FILE: remove refuses a dangling link too" "is a link that points nowhere" "$DL_RM"
+expect_contains "NOT-A-FILE: remove refuses a dangling link too, naming where it points" "is a link to ${SB_DL}/.claude/../nowhere.md, which does not exist" "$DL_RM"
 
 # The twin: a link to a regular file is followed, as before.
 SB_LF="$(new_bare_home)"; printf 'mine\n' > "$SB_LF/real.md"; ln -s ../real.md "$SB_LF/.claude/CLAUDE.md"
@@ -768,5 +768,182 @@ cp "$SB_CS/.claude/CLAUDE.md" "$TMP/cs-b2.md"; edit_block "$TMP/cs-b2.md" '- a l
 CS_OUT="$(remove_changed_at_question "$SB_CS" "$TMP/cs-b2.md" y "$TMP/standalone/remove.sh")"
 expect_same_bytes "SHOWN: the standalone door writes nothing over a changed block either" "$TMP/cs-b2.md" "$SB_CS/.claude/CLAUDE.md"
 expect_contains "SHOWN: …and says so" "changed since it was shown" "$CS_OUT"
+
+# ---------------------------------------------------------------------------
+section "§T51-NUL: a file holding a NUL byte is not text, and nothing reads it as the block alone"
+# ---------------------------------------------------------------------------
+#
+# Review pass 21 F5: `/bin/bash` 3.2's `read` cuts a line at a NUL byte, so
+# `<end marker>\0mine` read as the end marker alone, the file as "the unedited
+# block and nothing else", and remove deleted it with the user's `mine` in it.
+# Every row runs under `/bin/bash` explicitly AND under the bash on PATH. Every
+# run is under `env -i`, HOME, ZDOTDIR, CLAUDE_CONFIG_DIR and BIONIC_CLAUDE_HOME
+# in the sandbox, PATH the stub and the system directories. The NUL is made with
+# `printf '\000'`, never typed.
+
+T51_BASHES="/bin/bash $(command -v bash)"
+t51_run() {  # <bash> <home> <script> [args...] — answers on stdin
+  local sh="$1" home="$2"; shift 2
+  env -i HOME="$home" ZDOTDIR="$home" SHELL=/bin/zsh PATH="$TMP/allbin:/usr/bin:/bin" TMPDIR="$TMP" \
+    CLAUDE_CONFIG_DIR="$home/.claude" BIONIC_CLAUDE_HOME="$home/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+    BIONIC_DOCTOR_PROBE_SECONDS=15 "$sh" "$@" 2>&1
+}
+# The fixture's bytes, read with a tool that sees a NUL under any bash.
+has_nul() {  # <file> -> yes|no
+  if LC_ALL=C tr -d '\000' < "$1" | cmp -s - "$1"; then printf 'no'; else printf 'yes'; fi
+}
+# The unedited block alone, setup's own bytes, then the end line followed on the
+# same line by <tail> (a NUL and `mine`, or `mine` alone for the twin).
+plant_block_then() {  # <home> <tail printf format>
+  local f="$1/.claude/CLAUDE.md"
+  setup_run "$1" $'y\n' >/dev/null 2>&1
+  { sed '$d' "$f"; printf '%s' "$END_LIT"; printf "$2"; } > "$f.t51"; mv "$f.t51" "$f"
+}
+
+SB_NT="$(new_bare_home)"; plant_block_then "$SB_NT" '\000mine\n'
+SB_NTW="$(new_bare_home)"; setup_run "$SB_NTW" $'y\n' >/dev/null 2>&1
+expect_eq "NUL: the extractor sees the NUL in the fixture" "yes" "$(has_nul "$SB_NT/.claude/CLAUDE.md")"
+expect_eq "NUL: …and none in the block-alone twin" "no" "$(has_nul "$SB_NTW/.claude/CLAUDE.md")"
+
+for T51_SH in $T51_BASHES; do
+  T51_TAG="${T51_SH}"
+  # remove --only, the payload door
+  SB_N="$(new_bare_home)"; plant_block_then "$SB_N" '\000mine\n'; N_F="$SB_N/.claude/CLAUDE.md"; cp "$N_F" "$TMP/n-before"
+  N_OUT="$(printf 'y\n' | t51_run "$T51_SH" "$SB_N" "$REMOVE_SH" --only "$ITEM")"
+  expect_eq "NUL (${T51_TAG}): remove --only keeps the file" "yes" "$(path_exists "$N_F")"
+  expect_same_bytes "NUL (${T51_TAG}): …byte-identical" "$TMP/n-before" "$N_F"
+  expect_contains "NUL (${T51_TAG}): …and says it is not text" "${N_F} is not text: it holds a NUL byte" "$N_OUT"
+  expect_absent "NUL (${T51_TAG}): …and deletes nothing" "✓ deleted" "$N_OUT"
+  # the standalone door
+  N_SA="$(printf 'y\n' | t51_run "$T51_SH" "$SB_N" "$TMP/standalone/remove.sh" --only "$ITEM")"
+  expect_same_bytes "NUL (${T51_TAG}): the standalone door leaves it byte-identical" "$TMP/n-before" "$N_F"
+  expect_contains "NUL (${T51_TAG}): …and says it is not text" "is not text: it holds a NUL byte" "$N_SA"
+  # remove --all
+  N_ALL="$(printf 'y\n' | t51_run "$T51_SH" "$SB_N" "$REMOVE_SH" --all)"
+  expect_eq "NUL (${T51_TAG}): remove --all keeps the file" "yes" "$(path_exists "$N_F")"
+  expect_same_bytes "NUL (${T51_TAG}): …byte-identical" "$TMP/n-before" "$N_F"
+  expect_contains "NUL (${T51_TAG}): …and says it is not text" "is not text: it holds a NUL byte" "$N_ALL"
+  expect_absent "NUL (${T51_TAG}): …and deletes nothing" "✓ deleted ${N_F}" "$N_ALL"
+  # setup
+  N_SET="$(printf 'y\ny\n' | t51_run "$T51_SH" "$SB_N" "$SETUP_SH" --only "$ITEM")"
+  expect_same_bytes "NUL (${T51_TAG}): setup answered yes writes nothing into it" "$TMP/n-before" "$N_F"
+  expect_contains "NUL (${T51_TAG}): …and says it is not text" "is not text: it holds a NUL byte" "$N_SET"
+  expect_contains "NUL (${T51_TAG}): …as a fault" "✗" "$(report_row "$N_SET" "working principles")"
+  # doctor
+  N_DOC="$(t51_run "$T51_SH" "$SB_N" "$DOCTOR_SH" </dev/null)"
+  N_ROW="$(report_row "$N_DOC" "$DOCTOR_ROW_LABEL")"
+  expect_contains "NUL (${T51_TAG}): doctor's row says not text" "not text" "$N_ROW"
+  expect_absent "NUL (${T51_TAG}): …and routes to no setup run" "/bionic:setup" "$N_ROW"
+  expect_contains "NUL (${T51_TAG}): doctor's fix line names why" \
+    "~/.claude/CLAUDE.md is not text: it holds a NUL byte → fix it by hand" "$N_DOC"
+  # The twin: the same shape with no NUL, under the same bash, is deleted as today.
+  SB_NW="$(new_bare_home)"; setup_run "$SB_NW" $'y\n' >/dev/null 2>&1
+  NW_OUT="$(printf 'y\n' | t51_run "$T51_SH" "$SB_NW" "$REMOVE_SH" --only "$ITEM")"
+  expect_eq "NUL (${T51_TAG}): the block alone with no NUL is deleted as before (the twin)" "no" \
+    "$(path_exists "$SB_NW/.claude/CLAUDE.md")"
+  expect_contains "NUL (${T51_TAG}): …and says so" "✓ deleted" "$NW_OUT"
+  # A NUL anywhere else: the first byte; inside the user's text far from the block.
+  for N_WHERE in first-byte user-text; do
+    # The block first, setup's own bytes; then the NUL, so no writer ever saw it.
+    SB_NE="$(new_home)"; NE_F="$SB_NE/.claude/CLAUDE.md"
+    setup_run "$SB_NE" $'y\n' >/dev/null 2>&1
+    case "$N_WHERE" in
+      first-byte) { printf '\000'; cat "$NE_F"; } > "$NE_F.t" ;;
+      user-text)  { printf '# My own notes\n\n- prefer \000small commits\n\n'; sed '1,4d' "$NE_F"; } > "$NE_F.t" ;;
+    esac
+    mv "$NE_F.t" "$NE_F"
+    expect_eq "NUL ${N_WHERE} (${T51_TAG}): the fixture still holds the block" "1" "$(count_lines_equal "$NE_F" "$START_LIT")"
+    cp "$NE_F" "$TMP/ne-before"
+    expect_eq "NUL ${N_WHERE} (${T51_TAG}): the fixture holds a NUL" "yes" "$(has_nul "$NE_F")"
+    NE_OUT="$(printf 'y\n' | t51_run "$T51_SH" "$SB_NE" "$REMOVE_SH" --only "$ITEM")"
+    expect_same_bytes "NUL ${N_WHERE} (${T51_TAG}): remove leaves it byte-identical" "$TMP/ne-before" "$NE_F"
+    expect_contains "NUL ${N_WHERE} (${T51_TAG}): …and says it is not text" "is not text: it holds a NUL byte" "$NE_OUT"
+  done
+done
+
+# ---------------------------------------------------------------------------
+section "§T51-COPIES: remove.sh's standalone copies are the library's, body for body"
+# ---------------------------------------------------------------------------
+
+# The body of a top-level function: every line after its `name() {` line up to
+# the first line that is `}` alone. The signature line is left out, because its
+# trailing comment names the copy.
+fn_body() {  # <file> <name>
+  local line inside=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$inside" = "0" ]; then
+      case "$line" in "$2() {"*) inside=1 ;; esac
+      continue
+    fi
+    [ "$line" = "}" ] && return 0
+    printf '%s\n' "$line"
+  done < "$1"
+  return 0
+}
+MARKERS_SH="${PAYLOAD}/scripts/lib/markers.sh"
+LIB_REG="$(fn_body "$MARKERS_SH" markers_regular)"; RM_REG="$(fn_body "$REMOVE_SH" _rm_regular)"
+LIB_CHK="$(fn_body "$MARKERS_SH" markers_check)";  RM_CHK="$(fn_body "$REMOVE_SH" _rm_marker_faults)"
+expect_nonempty "COPIES: markers_regular's body reads out of markers.sh" "$LIB_REG"
+expect_nonempty "COPIES: markers_check's body reads out of markers.sh" "$LIB_CHK"
+expect_eq "COPIES: _rm_regular's body is markers_regular's" "$LIB_REG" "$RM_REG"
+expect_eq "COPIES: _rm_marker_faults' body is markers_check's" "$LIB_CHK" "$RM_CHK"
+# The pin can fail: one changed line in a copy of remove.sh moves it.
+sed 's/a directory/a folder/' "$REMOVE_SH" > "$TMP/remove-mutant.sh"
+expect_true "COPIES: the mutant copy still parses" bash -n "$TMP/remove-mutant.sh"
+expect_ne "COPIES: …and its _rm_regular no longer matches (the pin can go red)" \
+  "$LIB_REG" "$(fn_body "$TMP/remove-mutant.sh" _rm_regular)"
+
+# ---------------------------------------------------------------------------
+section "§T51-UNREADABLE: a regular file the user cannot read is reported as unreadable (F4)"
+# ---------------------------------------------------------------------------
+
+SB_UR="$(new_home)"; setup_run "$SB_UR" $'y\n' >/dev/null 2>&1; UR_F="$SB_UR/.claude/CLAUDE.md"
+cp "$UR_F" "$TMP/ur-before"; chmod 200 "$UR_F"
+UR_DOC="$(doctor_run "$SB_UR")"; UR_ROW="$(report_row "$UR_DOC" "$DOCTOR_ROW_LABEL")"
+expect_nonempty "UNREADABLE: doctor renders the row" "$UR_ROW"
+expect_contains "UNREADABLE: doctor's row says unreadable" "unreadable" "$UR_ROW"
+expect_absent "UNREADABLE: …and does not send the user to a setup that would fail" "/bionic:setup" "$UR_ROW"
+UR_SET="$(setup_run "$SB_UR" $'y\ny\n')"
+expect_contains "UNREADABLE: setup says unreadable" "${UR_F} is unreadable" "$UR_SET"
+UR_RM="$(remove_run "$SB_UR" y)"
+expect_contains "UNREADABLE: remove says unreadable" "${UR_F} is unreadable" "$UR_RM"
+expect_absent "UNREADABLE: …and does not call it clean" "— already clean" "$UR_RM"
+chmod 644 "$UR_F"
+expect_same_bytes "UNREADABLE: the file is byte-identical afterwards" "$TMP/ur-before" "$UR_F"
+UR_ROW2="$(report_row "$(doctor_run "$SB_UR")" "$DOCTOR_ROW_LABEL")"
+expect_absent "UNREADABLE: the same file made readable is not unreadable (the twin)" "unreadable" "$UR_ROW2"
+expect_contains "UNREADABLE: …and reads as a working row" "✓" "$UR_ROW2"
+
+# ---------------------------------------------------------------------------
+section "§T51-PAGE: the --all page line says the file will be deleted, when it will be (F6)"
+# ---------------------------------------------------------------------------
+
+remove_page() {  # <home> — the `remove --all` page, answered no: printed, nothing done
+  printf 'n\n' | env -i HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/allbin:/usr/bin:/bin" TMPDIR="$TMP" \
+    CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+    bash "$REMOVE_SH" --all 2>&1
+}
+SB_P1="$(new_bare_home)"; setup_run "$SB_P1" $'y\n' >/dev/null 2>&1
+P1_PAGE="$(remove_page "$SB_P1")"
+P1_LINE="$(report_row "$P1_PAGE" "bionic's working principles")"
+expect_nonempty "PAGE: the page carries a working-principles line" "$P1_LINE"
+expect_contains "PAGE: the block alone — the line says the file will be deleted" \
+  "delete the file ${SB_P1}/.claude/CLAUDE.md" "$P1_LINE"
+expect_eq "PAGE: …and answering no deletes nothing" "yes" "$(path_exists "$SB_P1/.claude/CLAUDE.md")"
+SB_P2="$(new_home)"; setup_run "$SB_P2" $'y\n' >/dev/null 2>&1
+P2_LINE="$(report_row "$(remove_page "$SB_P2")" "bionic's working principles")"
+expect_nonempty "PAGE: the user's text beside it — the page carries the line" "$P2_LINE"
+expect_absent "PAGE: …and it announces no deletion of the file (the twin)" "delete the file" "$P2_LINE"
+
+# ---------------------------------------------------------------------------
+section "§T51-FIFO: a FIFO says \"not a regular file\" once (F7)"
+# ---------------------------------------------------------------------------
+
+SB_FF="$(new_bare_home)"; mkfifo "$SB_FF/.claude/CLAUDE.md"
+FF_DOC="$(doctor_run "$SB_FF")"
+FF_FIX="$(printf '%s\n' "$FF_DOC" | grep -F '~/.claude/CLAUDE.md is' | grep -F 'fix it by hand')"
+expect_nonempty "FIFO: doctor prints a fix line for it" "$FF_FIX"
+expect_contains "FIFO: doctor's fix line says it is not a regular file" "not a regular file" "$FF_FIX"
+expect_absent "FIFO: …and does not say it twice" "not a regular file, not a file" "$FF_FIX"
 
 finish

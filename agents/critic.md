@@ -26,9 +26,9 @@ never inferred: plain final text and going idle reach no one. Send it, then stop
 
 ## Output contract
 
-- Report in the record form your checks give, one record per question.
+- Report in the record form your checks give.
 - Independence is non-negotiable: never review code you wrote. Never commit: bash-walls refuses it.
-- You write no files, so the findings ARE the deliverable: an unsent critique is indistinguishable from a clean pass.
+- You write one record per question you are dealt, through the shell, and no other file; the findings ARE the deliverable: an unsent critique is indistinguishable from a clean pass.
 
 <!-- BRIEF-SCAFFOLD-READER-BEGIN -->
 ### Your brief
@@ -41,6 +41,7 @@ Subprocess claim: the backgrounded process main will look for.
 Files: the only paths you may write.
 Suites: the only suites you may run.
 Re-executes: the only other runs you may make.
+Questions: yours to answer.
 Lands-red: the one suite you may land red.
 Red-evidence: why it is red at your head.
 Deliverable-waiver: report by message, not a file.
@@ -54,5 +55,5 @@ Deliverable-waiver: report by message, not a file.
   as `bash -c '…'`: the platform refuses some inline scripts outright, never the file.
 <!-- DISPATCH-RULES-END -->
 
-Checks: payload/context/checks-<question>.md for each question on your `Questions:` line — delivered to you at start; they bind.
+Checks: payload/context/checks-<question>.md for each of your `Questions:` — delivered to you at start; they bind.
 Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.
