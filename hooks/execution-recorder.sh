@@ -61,6 +61,12 @@ case "$TOOL_NAME" in
   Bash|Agent) : ;;
   *) [ "$(_jq '.hook_event_name')" = "SubagentStart" ] || exit 0; IS_START=1 ;;
 esac
+# ONE REGISTRATION PER QUESTION (wave-27 T30). hooks/hooks.json registers this script on
+# SubagentStart once bare (the terms, the join, every roster write) and once per reading question,
+# the question its one argument. The argument means nothing on any other event, so a registration
+# carrying one does no work there. See "ONE STRING PER FILE" in ARM 3.
+START_QUESTION="${1-}"
+[ -z "$START_QUESTION" ] || [ -n "$IS_START" ] || exit 0
 
 # ---------- portable file facts ----------
 # DELIBERATELY DUPLICATED from hooks/stop-check.sh and hooks/stop-guard.sh, byte
@@ -787,38 +793,191 @@ if [ -n "$IS_START" ]; then
   # has run, and prints at most once (`TERMS_DELIVERED`). Delivery still never depends on a
   # row existing: the `agent_type` test here is first and unchanged.
   #
-  # A READER'S CHECKS RIDE THE SAME DELIVERY (wave-27 T15; REQ-5, D5). After `survival.md` come
-  # `context/checks-<q>.md` for each question on the JOINED row's `questions=`, in the order
-  # evidence, adversarial, structure, in the one additionalContext — so the delivery waits for
-  # the joins below. A start the `agent_type` test marks bionic OWES the terms (`TERMS_OWED`):
-  # the joins deliver them with the row's questions, and a start that exits before any row is
-  # joined is delivered survival.md alone on its way out (the EXIT trap), as it was before. A
-  # row with no `questions=`, every writer's, delivers exactly what it did. A checks file the row
-  # names and the disk lacks is logged here, in this hook's own voice, and the rest delivered.
+  # A READER'S CHECKS ARE PUSHED AT START (wave-27 T15; REQ-5, D5): `context/checks-<q>.md` for
+  # each question on the reader's roster row (`questions=`, written by the dispatch wall).
+  #
+  # ---- BEGIN one string per file (wave-27 T30; review pass 24's blocker, A-orch-77) ----
+  # THE HARNESS HANDS A HOOK'S additionalContext TO THE MODEL WHOLE ONLY UP TO 10,000 CHARACTERS,
+  # each hook's string measured on its own; past that it saves the string to a file, passes the
+  # path and a 2,000-character preview, and does not ask the model to read it (Claude Code hooks
+  # reference). T15 pushed survival.md and the checks as ONE string, and three of the six deals
+  # went over: those readers started without their checks and with part of the terms. So the push
+  # is split, one string per file, one registration per string (hooks/hooks.json):
+  #   - the bare registration pushes survival.md, and it alone joins, writes `agent_id`,
+  #     `terms-delivered` and the duplicate-start row, so four hooks on one start are one start;
+  #   - one registration per question (`$START_QUESTION`, its argument) pushes `bionic checks: <q>`
+  #     and that question's file when the agent's row carries the question, and nothing otherwise.
+  #     It reads the roster and writes nothing. The four may run at once and in any order, and no
+  #     string depends on another having arrived: each checks string names itself on line one.
+  # THE CAP. Every string is counted here, in UTF-16 code units (what the harness's string length
+  # counts; a multi-byte character is one, never its bytes), and one over BIONIC_START_PUSH_MAX is
+  # NOT printed: in its place goes one line naming the file to read, and stderr says so. The agent
+  # starts either way: a SubagentStart hook cannot block, and this one never tries.
+  BIONIC_START_PUSH_MAX=9500
+  START_CONTEXT_DIR=$(cd "$BIONIC_LIB/../../context" 2>/dev/null && pwd) \
+    || START_CONTEXT_DIR="$BIONIC_LIB/../../context"
+  push_string() {  # <the file the string came from> — the string on stdin; prints one line
+    local _ps_json _ps_n
+    _ps_json=$(jq -Rsc --argjson max "$BIONIC_START_PUSH_MAX" '
+      ([explode[] | if . > 65535 then 2 else 1 end] | add // 0) as $n
+      | if $n <= $max then {hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:.}}
+        else {over:$n} end' 2>/dev/null) || return 1
+    case "$_ps_json" in
+      '{"over":'*)
+        _ps_n="${_ps_json#\{\"over\":}"; _ps_n="${_ps_n%\}}"
+        echo "execution-recorder: the start push of $1 is $_ps_n characters, over BIONIC_START_PUSH_MAX=$BIONIC_START_PUSH_MAX — pushed one line naming the file instead" >&2
+        jq -nc --arg p "$1" \
+          '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:("Read this file before anything else: " + $p)}}' \
+          2>/dev/null ;;
+      *) printf '%s\n' "$_ps_json" ;;
+    esac
+  }
+  deliver_checks() {  # <question>
+    local _dc_f="$START_CONTEXT_DIR/checks-$1.md"
+    if [ ! -r "$_dc_f" ]; then
+      echo "execution-recorder: checks file not found at $_dc_f — nothing pushed for $1" >&2
+      return 0
+    fi
+    { printf 'bionic checks: %s\n' "$1"; cat "$_dc_f"; } | push_string "$_dc_f"
+  }
+  # THE JOINS, ONE COPY EACH, asked by the terms registration (which writes what they find) and by
+  # a question registration (which only reads it), so the two cannot place one start on two rows.
+  name_join_row() {  # <name> -> the last intended|confirmed row of this session carrying that name
+    local _nj_line _nj_row=""
+    while IFS= read -r _nj_line; do
+      case "$_nj_line" in '#'*|'') continue ;; esac
+      case "$_nj_line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+      # Superset prefilter, exactly as the id join below: in-shell, quoted so glob
+      # metacharacters stay literal, and matching both the mid-row and end-of-row
+      # forms rather than assuming the writer field order (checklist A6).
+      case "$_nj_line" in
+        *"|name=$1"|*"|name=$1|"*) : ;;
+        *) continue ;;
+      esac
+      [ "$(line_field "$_nj_line" name)" = "$1" ] || continue
+      case "$(line_field "$_nj_line" status)" in intended|confirmed) : ;; *) continue ;; esac
+      [ "$(line_field "$_nj_line" session)" = "$BIONIC_SID" ] || continue
+      _nj_row="$_nj_line"
+    done < "$ROSTER_FILE"
+    [ -z "$_nj_row" ] || printf '%s\n' "$_nj_row"
+  }
+  type_join_candidates() {  # <subagent type> -> the candidate count, then each candidate's row
+    roster_sh_load
+    awk -v sid="$BIONIC_SID" -v ty="$1" -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
+      index($0, pre) == 1 {
+        if (_roster_kv($0, "session") != sid) next
+        u = _roster_kv($0, "tool_use_id"); if (u == "") next
+        if (!(u in last)) order[++n] = u
+        last[u] = $0
+        if (_roster_kv($0, "agent_id") != "" || _roster_kv($0, "teammate_id") != "") claimed[u] = 1
+      }
+      END {
+        c = 0
+        for (i = 1; i <= n; i++) {
+          u = order[i]
+          if (u in claimed) continue
+          st = _roster_kv(last[u], "status")
+          if (st != "intended" && st != "confirmed") continue
+          if (_roster_kv(last[u], "subagent_type") != ty) continue
+          pick[++c] = last[u]
+        }
+        print c
+        for (i = 1; i <= c; i++) print pick[i]
+      }' "$ROSTER_FILE" 2>/dev/null
+  }
+
+  # A QUESTION REGISTRATION: read the agent's row, push one checks file or nothing, write nothing.
+  # THE ROW, in this order, which is why it agrees with the terms registration whichever ran first:
+  #   1. the last row of this session carrying this agent's id, whatever its status. After the
+  #      terms registration has joined, that is its `identified` row, a copy of the joined row with
+  #      `questions=` carried forward; on a resumed copy it is the `identified` or
+  #      `duplicate-start` row, so the copy is pushed what the first start was; and a launch whose
+  #      call already returned carries the id on its `confirmed` row.
+  #   2. otherwise the joins the terms registration is about to make, by name and then by type,
+  #      through the same functions: same candidates, same answer, nothing written.
+  # A START THAT CANNOT BE PLACED (several unclaimed launches of its type, none named): when every
+  # candidate carries the same `questions=` that set is pushed; when they differ nothing is, and a
+  # registration whose question one of them carries says so, naming the candidates.
+  if [ -n "$START_QUESTION" ]; then
+    case "$START_QUESTION" in evidence|adversarial|structure) : ;; *) exit 0 ;; esac
+    [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ] || exit 0
+    START_ID=$(sanitize "$START_ID" 200)
+    START_TYPE=$(sanitize "$START_TYPE" 200)
+    [ -n "$START_ID" ] || exit 0
+    roster_sh_load
+    Q_ROW=$(awk -v id="$START_ID" -v sid="$BIONIC_SID" -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
+      index($0, pre) == 1 && _roster_kv($0, "agent_id") == id && _roster_kv($0, "session") == sid { row = $0 }
+      END { if (row != "") print row }' "$ROSTER_FILE" 2>/dev/null)
+    [ -n "$Q_ROW" ] || [ -z "$START_TYPE" ] || Q_ROW=$(name_join_row "$START_TYPE")
+    Q_SET=""
+    if [ -n "$Q_ROW" ]; then
+      Q_SET=$(line_field "$Q_ROW" questions)
+    else
+      case "$START_TYPE" in
+        bionic:*)
+          Q_PICK=$(type_join_candidates "$START_TYPE")
+          Q_N="${Q_PICK%%$'\n'*}"
+          if [ "${Q_N:-0}" -ge 1 ] 2>/dev/null; then
+            Q_CANDS="${Q_PICK#*$'\n'}"
+            Q_SETS=$(while IFS= read -r _q_l; do printf '%s\n' "$(line_field "$_q_l" questions)"; done <<< "$Q_CANDS" | sort -u)
+            if [ "$(printf '%s\n' "$Q_SETS" | grep -c '')" = 1 ]; then
+              Q_SET="$Q_SETS"
+            else
+              case ",$(printf '%s' "$Q_SETS" | tr '\n' ','),"  in
+                *",$START_QUESTION,"*)
+                  Q_NAMES=$(while IFS= read -r _q_l; do printf ' %s=%s' "$(line_field "$_q_l" name)" "$(line_field "$_q_l" questions)"; done <<< "$Q_CANDS")
+                  echo "execution-recorder: agent $START_ID cannot be placed on one of the $Q_N launches of $START_TYPE, and they carry different questions= (name=questions:$Q_NAMES) — checks-$START_QUESTION.md not pushed" >&2 ;;
+              esac
+            fi
+          fi
+          ;;
+      esac
+    fi
+    case ",$Q_SET," in *",$START_QUESTION,"*) deliver_checks "$START_QUESTION" ;; esac
+    exit 0
+  fi
+  # ---- END one string per file ----
+
+  # THE TERMS (wave-11 1c-b; T15; T30). A start the `agent_type` test marks bionic OWES the terms
+  # (`TERMS_OWED`): the joins below deliver them once a row is found, and a start that exits before
+  # any row is joined is delivered them on its way out (the EXIT trap). survival.md alone: a
+  # reader's checks are its question registrations' strings, never this one's.
   TERMS_DELIVERED=""
   TERMS_OWED=""
-  deliver_terms() {  # [<questions, comma-joined>]
-    local _dt_files="" _dt_q _dt_f
-    SURVIVAL_FILE="$BIONIC_LIB/../../context/survival.md"
-    if [ -r "$SURVIVAL_FILE" ]; then
-      _dt_files="$SURVIVAL_FILE"
-    else
-      echo "execution-recorder: survival terms not found at $SURVIVAL_FILE — printing nothing" >&2
+  # ---- BEGIN scratch space per agent (wave-27 T30 part two; REQ-13, D22) ----
+  # The terms string closes with one line naming `<project root>/.bionic/tmp/scratch/<session>/<roster
+  # name>/`, made here, as the agent's own scratch directory. `TERMS_NAME` is the joined row's name,
+  # set where a row is found; with none the directory is named by the agent id. The line counts
+  # toward the cap like the rest of the string. A directory that cannot be made, or a name that
+  # is not one path segment, is logged and the line left out. The agent starts either way. The
+  # symlink tests are the state directory's own (A2/A3 above): a hostile repo's link is not
+  # followed out of the tree.
+  TERMS_NAME=""
+  scratch_line() {  # -> the scratch line, its directory made; nothing when it cannot be
+    local _sl_leaf="${TERMS_NAME:-$(sanitize "$START_ID" 200)}" _sl_dir
+    _sl_dir="$STATE_DIR/scratch/$BIONIC_SID/$_sl_leaf"
+    case "$_sl_leaf" in
+      ''|.|..|*/*)
+        echo "execution-recorder: [$_sl_leaf] is not one directory name — no scratch directory pushed to agent $START_ID" >&2
+        return 0 ;;
+    esac
+    if [ -L "$STATE_DIR/scratch" ] || [ -L "$STATE_DIR/scratch/$BIONIC_SID" ] || [ -L "$_sl_dir" ] \
+       || ! mkdir -p "$_sl_dir" 2>/dev/null || [ ! -d "$_sl_dir" ]; then
+      echo "execution-recorder: scratch directory $_sl_dir could not be made — the scratch line is left out" >&2
+      return 0
     fi
-    for _dt_q in evidence adversarial structure; do
-      case ",${1-}," in *",${_dt_q},"*) : ;; *) continue ;; esac
-      _dt_f="$BIONIC_LIB/../../context/checks-${_dt_q}.md"
-      if [ -r "$_dt_f" ]; then
-        _dt_files="${_dt_files:+$_dt_files
-}$_dt_f"
-      else
-        echo "execution-recorder: checks file not found at $_dt_f — delivering the rest" >&2
-      fi
-    done
-    [ -n "$_dt_files" ] || return 0
-    while IFS= read -r _dt_f; do cat "$_dt_f"; done <<< "$_dt_files" \
-      | jq -Rsc '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:.}}' \
-        2>/dev/null && TERMS_DELIVERED=1
+    printf 'Your scratch directory is %s/ — nothing outside it is yours to write as scratch.\n' "$_sl_dir"
+  }
+  # ---- END scratch space per agent ----
+  deliver_terms() {
+    local _dt_f="$START_CONTEXT_DIR/survival.md" _dt_line
+    if [ ! -r "$_dt_f" ]; then
+      echo "execution-recorder: survival terms not found at $_dt_f — printing nothing" >&2
+      return 0
+    fi
+    _dt_line=$(scratch_line)
+    { cat "$_dt_f"; [ -z "$_dt_line" ] || printf '%s\n' "$_dt_line"; } \
+      | push_string "$_dt_f" && TERMS_DELIVERED=1
   }
   case "$(sanitize "$START_TYPE" 200)" in
     bionic:*) TERMS_OWED=1 ;;
@@ -941,6 +1100,8 @@ if [ -n "$IS_START" ]; then
         if (f ~ /^status=/) f = "status=duplicate-start"
         printf "%s%s", (NR > 1 ? "|" : ""), f }
       END { printf "\n" }' >> "$ROSTER_FILE" 2>/dev/null
+    # The copy's terms (the EXIT trap) name the scratch directory the first start was given (T30).
+    TERMS_NAME=$(line_field "$DUP_PRIOR" name)
     exit 0
   fi
 
@@ -1022,22 +1183,9 @@ if [ -n "$IS_START" ]; then
   # writer stored: the roster holds sanitized names, so an unsanitized needle would
   # miss a row it should match rather than merely failing safe.
   START_TYPE=$(sanitize "$START_TYPE" 200)
+  # The loop itself is `name_join_row` above (T30), which a question registration asks too.
   if [ -z "$ROW" ] && [ -n "$START_TYPE" ]; then
-    while IFS= read -r line; do
-      case "$line" in '#'*|'') continue ;; esac
-      case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
-      # Superset prefilter, exactly as the id join above: in-shell, quoted so glob
-      # metacharacters stay literal, and matching both the mid-row and end-of-row
-      # forms rather than assuming the writer field order (checklist A6).
-      case "$line" in
-        *"|name=$START_TYPE"|*"|name=$START_TYPE|"*) : ;;
-        *) continue ;;
-      esac
-      [ "$(line_field "$line" name)" = "$START_TYPE" ] || continue
-      case "$(line_field "$line" status)" in intended|confirmed) : ;; *) continue ;; esac
-      [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
-      ROW="$line"
-    done < "$ROSTER_FILE"
+    ROW=$(name_join_row "$START_TYPE")
   fi
   # THE TYPE JOIN (wave-27 T5, D15, AC-8.1; walk-triage-3). Reached when neither join above
   # found a row, which for a plain dispatch whose launch call has not returned is every time:
@@ -1059,30 +1207,10 @@ if [ -n "$IS_START" ]; then
   if [ -z "$ROW" ] && [ -z "${RESTART_AFTER_ACK:-}" ]; then
     case "$START_TYPE" in
       bionic:*)
-        # The field reader is roster.sh's own (`_roster_kv`), loaded lazily as the duplicate-start
-        # check above loads it: only a start both joins missed ever pays for it.
-        roster_sh_load
-        TYPE_PICK=$(awk -v sid="$BIONIC_SID" -v ty="$START_TYPE" -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
-          index($0, pre) == 1 {
-            if (_roster_kv($0, "session") != sid) next
-            u = _roster_kv($0, "tool_use_id"); if (u == "") next
-            if (!(u in last)) order[++n] = u
-            last[u] = $0
-            if (_roster_kv($0, "agent_id") != "" || _roster_kv($0, "teammate_id") != "") claimed[u] = 1
-          }
-          END {
-            c = 0
-            for (i = 1; i <= n; i++) {
-              u = order[i]
-              if (u in claimed) continue
-              st = _roster_kv(last[u], "status")
-              if (st != "intended" && st != "confirmed") continue
-              if (_roster_kv(last[u], "subagent_type") != ty) continue
-              c++; pick = last[u]
-            }
-            print c
-            if (c == 1) print pick
-          }' "$ROSTER_FILE" 2>/dev/null)
+        # The candidate filter is `type_join_candidates` above (T30), which a question registration
+        # asks too; it loads roster.sh's field reader (`_roster_kv`) lazily, so only a start both
+        # joins missed ever pays for it. One candidate is the row; several are left.
+        TYPE_PICK=$(type_join_candidates "$START_TYPE")
         case "${TYPE_PICK%%$'\n'*}" in
           1) ROW="${TYPE_PICK#*$'\n'}" ;;
           0|'') : ;;
@@ -1115,11 +1243,12 @@ if [ -n "$IS_START" ]; then
   [ -n "$ROW" ] || exit 0
 
   # THE TEAMMATE'S TERMS, decided on the row the joins above found (wave-24 T6, D8), and every
-  # owed delivery made here with the row's questions (wave-27 T15).
+  # owed delivery made here (wave-27 T15; the checks are the question registrations', T30).
   case "$(line_field "$ROW" subagent_type)" in
     bionic:*) TERMS_OWED=1 ;;
   esac
-  [ -n "$TERMS_OWED" ] && [ -z "$TERMS_DELIVERED" ] && deliver_terms "$(line_field "$ROW" questions)"
+  TERMS_NAME=$(line_field "$ROW" name)
+  [ -n "$TERMS_OWED" ] && [ -z "$TERMS_DELIVERED" ] && deliver_terms
   TERMS_AT=""
   [ -n "$TERMS_DELIVERED" ] && TERMS_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
