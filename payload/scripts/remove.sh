@@ -216,9 +216,6 @@ RM_RC_END='# ─── bionic:rc:end ───'
 # PRINCIPLES_START / PRINCIPLES_END.
 RM_PRINCIPLES_START='<!-- bionic:principles:start -->'
 RM_PRINCIPLES_END='<!-- bionic:principles:end -->'
-# from env.sh (PRINCIPLES_CREATED_SUFFIX): the note setup leaves beside a CLAUDE.md
-# it CREATED, without which no door deletes the file. Pinned the same way.
-RM_PRINCIPLES_CREATED_SUFFIX='.bionic-created'
 RM_TODO_EXPORT_RE='^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
 # The retired env block's markers. NOT a copy of a live constant — setup.sh
 # stopped writing this block at W7 (the names live in settings.json now), so
@@ -1671,10 +1668,10 @@ _rm_item_permission_mode() {
 #   edited    — the difference from bionic's text is printed and the strip waits
 #               for a yes typed at THAT question, under `--all` too, as setup's
 #               replacement does.
-#   present   — the block goes. The FILE goes too only when setup created it (its
-#               note is there), the block is unedited, and nothing else is in the
-#               file — and then the question says so. Any other file stays,
-#               emptied or not. A symlinked file never goes.
+#   present   — the block goes. The FILE goes too only when nothing else is in
+#               it — and then the question says so: it holds no text of the
+#               user's. An edited block's emptied file stays, a file with no
+#               block is never touched, and a symlinked file never goes.
 #
 # TWO DOORS. Payload mode calls the owner, env.sh (`principles_*`). Standalone
 # has no shipped text to compare against, so it cannot tell present from edited:
@@ -1682,16 +1679,12 @@ _rm_item_permission_mode() {
 # copied markers (`keep`: setup writes no separator line before this block), and
 # never deletes the file. The two doors agree byte for byte on what stays.
 
-_rm_principles_created() { echo "${RM_PRINCIPLES_FILE}${RM_PRINCIPLES_CREATED_SUFFIX}"; }
-
 _rm_principles_unset() {
   if [ "$RM_MODE" = "payload" ] && declare -F principles_unset >/dev/null 2>&1; then
     principles_unset
     return $?
   fi
-  _rm_strip_marker_block "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" keep || return $?
-  rm -f "$(_rm_principles_created)"
-  return 0
+  _rm_strip_marker_block "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" keep
 }
 
 _rm_item_working_principles() {
@@ -1726,7 +1719,7 @@ _rm_item_working_principles() {
   case "$state" in
     present)
       if [ "$deletes" = "yes" ]; then
-        echo "  ${RM_PRINCIPLES_FILE} holds bionic's working principles and nothing else; setup created it."
+        echo "  ${RM_PRINCIPLES_FILE} holds bionic's working principles and nothing else."
         echo "  bionic would delete the block and delete the file, which holds nothing else."
         _rm_consent "Remove bionic's working principles and delete the file ${RM_PRINCIPLES_FILE}?"; rm_wp_consent_rc=$?
       else

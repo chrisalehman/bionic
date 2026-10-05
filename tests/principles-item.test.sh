@@ -340,10 +340,6 @@ expect_eq "REMOVE: env.sh's start marker is the interface's literal" "$START_LIT
 expect_eq "REMOVE: env.sh's end marker is the interface's literal" "$END_LIT" "$ENV_END"
 expect_eq "REMOVE: remove.sh's start copy equals the library's" "$ENV_START" "$RM_START"
 expect_eq "REMOVE: remove.sh's end copy equals the library's" "$ENV_END" "$RM_END"
-ENV_NOTE="$(const_from "$ENV_SH" PRINCIPLES_CREATED_SUFFIX)" || ENV_NOTE=""
-RM_NOTE="$(const_from "$REMOVE_SH" RM_PRINCIPLES_CREATED_SUFFIX)" || RM_NOTE=""
-expect_nonempty "REMOVE: env.sh carries the created-file note's suffix" "$ENV_NOTE"
-expect_eq "REMOVE: remove.sh's copy of the note's suffix equals the library's" "$ENV_NOTE" "$RM_NOTE"
 
 SB_R="$(new_home)"
 setup_run "$SB_R" $'y\n' >/dev/null 2>&1
@@ -541,28 +537,46 @@ expect_contains "REMOVE-EDITED: the standalone door shows the block's lines befo
 expect_same_bytes "REMOVE-EDITED: …and a no keeps them" "$TMP/res-before.md" "$SB_RES/.claude/CLAUDE.md"
 
 # ---------------------------------------------------------------------------
-section "§DELETE: the file goes only when setup made it and it holds the shipped block alone"
+section "§DELETE: the file goes only when it held the unedited block and nothing else"
 # ---------------------------------------------------------------------------
+#
+# The rule (wave-27 T40, the orchestrator's ruling on A-T40.2): remove deletes
+# CLAUDE.md when, and only when, the strip succeeded, the block was `present`,
+# and nothing else is left. Who created the file is not asked. A file with no
+# block is never touched; an edited block's emptied file stays; the standalone
+# door, which cannot prove `present`, keeps an emptied file (§REMOVE above).
 
+# 1. A file setup created, holding the unedited block alone: gone, and announced.
 SB_D1="$(new_bare_home)"; setup_run "$SB_D1" $'y\n' >/dev/null 2>&1
 D1_OUT="$(remove_run "$SB_D1" y)"
 expect_contains "DELETE: the question says the file will be deleted" "delete the file" "$D1_OUT"
-expect_eq "DELETE: a created file holding the shipped block alone is gone" "no" "$(path_exists "$SB_D1/.claude/CLAUDE.md")"
+expect_eq "DELETE: a file holding the unedited block alone is gone" "no" "$(path_exists "$SB_D1/.claude/CLAUDE.md")"
 
-SB_D2="$(new_bare_home)"; setup_run "$SB_D2" $'y\n' >/dev/null 2>&1
-edit_block "$SB_D2/.claude/CLAUDE.md" 'MY OWN RULES'
-D2_OUT="$(remove_run "$SB_D2" y)"
-expect_absent "DELETE: an edited block alone is not announced as a file deletion" "delete the file" "$D2_OUT"
-expect_eq "DELETE: …and the file stays" "yes" "$(path_exists "$SB_D2/.claude/CLAUDE.md")"
-expect_eq "DELETE: …with the block stripped" "0" "$(count_lines_equal "$SB_D2/.claude/CLAUDE.md" "$START_LIT")"
-
+# 1b. A 0-byte file the user made BEFORE setup, then the block: the same bytes as
+# case 1, so the same answer — restored to absent, which loses nothing.
 SB_D3="$(new_bare_home)"; : > "$SB_D3/.claude/CLAUDE.md"; setup_run "$SB_D3" $'y\n' >/dev/null 2>&1
 expect_eq "DELETE: setup wrote into the user's 0-byte file" "1" "$(count_lines_equal "$SB_D3/.claude/CLAUDE.md" "$START_LIT")"
 D3_OUT="$(remove_run "$SB_D3" y)"
-expect_absent "DELETE: a 0-byte file the user made is not announced as a deletion" "delete the file" "$D3_OUT"
-expect_eq "DELETE: …and it stays" "yes" "$(path_exists "$SB_D3/.claude/CLAUDE.md")"
-expect_eq "DELETE: …back at 0 bytes" "0" "$(wc -c < "$SB_D3/.claude/CLAUDE.md" 2>/dev/null | tr -d ' ')"
+expect_contains "DELETE: a once-empty file holding the unedited block alone is announced as a deletion" "delete the file" "$D3_OUT"
+expect_eq "DELETE: …and is gone" "no" "$(path_exists "$SB_D3/.claude/CLAUDE.md")"
 
+# 2. A file with NO block, 0 bytes (review probe-lib case 12): never touched.
+SB_D0="$(new_bare_home)"; : > "$SB_D0/.claude/CLAUDE.md"
+D0_OUT="$(remove_run "$SB_D0" y)"
+expect_absent "DELETE: a 0-byte file with no block is not asked about" "[y/N]" "$D0_OUT"
+expect_eq "DELETE: …and stays, at 0 bytes" "yes 0" \
+  "$(path_exists "$SB_D0/.claude/CLAUDE.md") $(wc -c < "$SB_D0/.claude/CLAUDE.md" 2>/dev/null | tr -d ' ')"
+
+# 3. An EDITED block alone: the difference is shown, a yes strips it, the file stays.
+SB_D2="$(new_bare_home)"; setup_run "$SB_D2" $'y\n' >/dev/null 2>&1
+edit_block "$SB_D2/.claude/CLAUDE.md" 'MY OWN RULES'
+D2_OUT="$(remove_run "$SB_D2" y)"
+expect_contains "DELETE: an edited block alone shows its difference first" "MY OWN RULES" "$D2_OUT"
+expect_absent "DELETE: …is not announced as a file deletion" "delete the file" "$D2_OUT"
+expect_eq "DELETE: …and the emptied file stays" "yes 0" \
+  "$(path_exists "$SB_D2/.claude/CLAUDE.md") $(wc -c < "$SB_D2/.claude/CLAUDE.md" 2>/dev/null | tr -d ' ')"
+
+# 4. The user's text besides the block: their bytes come back, the file stays.
 SB_D4="$(new_home)"; setup_run "$SB_D4" $'y\n' >/dev/null 2>&1
 D4_OUT="$(remove_run "$SB_D4" y)"
 expect_absent "DELETE: a file with the user's text besides the block is not announced as a deletion" "delete the file" "$D4_OUT"
