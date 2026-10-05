@@ -3053,4 +3053,77 @@ expect_eq "SJ-d5 a start that carries a name takes the row of that name" "D2" \
   "$(sj_field "$(grep 'status=identified' "$SJD_ROSTER")" name)"
 expect_eq "SJ-d6 …with its id" "aD2-0000000000sjd2" "$(sj_field "$(grep 'status=identified' "$SJD_ROSTER")" agent_id)"
 
+# ============================================================
+section "Section 19: §CHECKS — a reader's checks are pushed at start, after survival.md (wave-27 T15; REQ-5 AC-5.1, D5)"
+# ============================================================
+#
+# The dispatch wall records a reader brief's `Questions:` as `questions=<q>[,<q>]` on the launch
+# row. At agent start the recorder pushes `survival.md` and then `context/checks-<q>.md` for each
+# question on the JOINED row, in the order evidence, adversarial, structure, in the one
+# additionalContext. A writer's row carries no `questions=`, and its delivery is survival.md byte
+# for byte, as Section 15 pins. A checks file the row names and the disk lacks does not stop the
+# start: what exists is delivered and the missing name is logged in the recorder's own voice.
+#
+# FIXTURE FIDELITY: every row is the dispatch wall's launch shape, built through the production
+# writer (`sj_intended` → `roster_row`), `status=intended`, `agent_id=` empty, `questions=` as the
+# wall writes it. The want is the shipped files' own bytes, concatenated in the delivery order.
+#
+# fails-when: a reader starts with survival.md alone; a file it was not dealt rides along; the
+# order follows the row instead of the table; a writer's delivery changes; a missing file stops
+# the delivery or goes unsaid.
+CK_CTX="$(dirname "$HERE")/payload/context"
+for _ck_q in evidence adversarial structure; do
+  expect_nonempty "CK0 the shipped checks-${_ck_q}.md is non-empty (a non-vacuous byte pin)" \
+    "$(cat "$CK_CTX/checks-${_ck_q}.md" 2>/dev/null)"
+done
+ck_ctx() { printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null; }
+
+# ---- CK-a: an auditor dealt evidence, a plain dispatch joined by type ----
+IFS='|' read -r CKA_REPO CKA_TR CKA_SUB CKA_CFG <<< "$(make_world checksaud yes)"
+sj_intended "$CKA_REPO" T24 toolu_01CKA bionic:auditor suites_allowed=none questions=evidence
+run_rec "$(mk_subagent_start "$SID_A" "$CKA_TR" "$CKA_REPO" bionic:auditor "a0000000000ckaud")"
+expect_eq "CK-a1 an auditor's start prints one line" "1" "$(printf '%s\n' "$REC_OUT" | grep -c .)"
+expect_eq "CK-a2 …survival.md, then checks-evidence.md, and nothing else" \
+  "$(cat "$CK_CTX/survival.md" "$CK_CTX/checks-evidence.md")" "$(ck_ctx)"
+expect_contains "CK-a3 …and the joined row records the delivery" "|terms-delivered=20" \
+  "$(grep 'status=identified' "$CKA_REPO/.bionic/tmp/roster-${SID_A}.state")"
+
+# ---- CK-b: a critic dealt adversarial and structure, a teammate joined by name ----
+IFS='|' read -r CKB_REPO CKB_TR CKB_SUB CKB_CFG <<< "$(make_world checkscrit yes)"
+sj_intended "$CKB_REPO" w-crit toolu_01CKB bionic:critic suites_allowed=none questions=adversarial,structure
+run_rec "$(mk_subagent_start "$SID_A" "$CKB_TR" "$CKB_REPO" w-crit "a0000000000ckcrt")"
+expect_eq "CK-b1 a critic teammate is pushed the two files, in the table's order" \
+  "$(cat "$CK_CTX/survival.md" "$CK_CTX/checks-adversarial.md" "$CK_CTX/checks-structure.md")" "$(ck_ctx)"
+expect_eq "CK-b2 …in one line" "1" "$(printf '%s\n' "$REC_OUT" | grep -c .)"
+
+# ---- CK-c: a writer's row carries no questions=, and its delivery is unchanged ----
+IFS='|' read -r CKC_REPO CKC_TR CKC_SUB CKC_CFG <<< "$(make_world checkswriter yes)"
+sj_intended "$CKC_REPO" T5 toolu_01CKC bionic:implementor suites_allowed=widget.test.sh
+run_rec "$(mk_subagent_start "$SID_A" "$CKC_TR" "$CKC_REPO" bionic:implementor "a0000000000ckwrt")"
+expect_eq "CK-c1 a writer's delivery is survival.md byte for byte" "$S15_WANT" "$(ck_ctx)"
+expect_eq "CK-c2 …and it was joined (the positive on the roster)" "T5" \
+  "$(sj_field "$(grep 'status=identified' "$CKC_REPO/.bionic/tmp/roster-${SID_A}.state")" name)"
+
+# ---- CK-d: a checks file the row names and the disk lacks ----
+# A COPY OF THE PLUGIN'S SHAPE: the hook beside `scripts/lib`, so the loader settles on the copy's
+# library and `context/` is the copy's, where one file is withheld.
+CKD_PLUG="$SANDBOX/ck-plugin"
+mkdir -p "$CKD_PLUG/hooks" "$CKD_PLUG/scripts" "$CKD_PLUG/context"
+cp "$REC" "$CKD_PLUG/hooks/execution-recorder.sh"
+cp -R "$(dirname "$HERE")/payload/scripts/lib" "$CKD_PLUG/scripts/lib"
+cp "$CK_CTX/survival.md" "$CK_CTX/checks-structure.md" "$CKD_PLUG/context/"
+IFS='|' read -r CKD_REPO CKD_TR CKD_SUB CKD_CFG <<< "$(make_world checksmissing yes)"
+sj_intended "$CKD_REPO" w-crit2 toolu_01CKD bionic:critic suites_allowed=none questions=adversarial,structure
+CKD_REC_SAVED="$REC"; REC="$CKD_PLUG/hooks/execution-recorder.sh"
+run_rec "$(mk_subagent_start "$SID_A" "$CKD_TR" "$CKD_REPO" w-crit2 "a0000000000ckmis")"
+REC="$CKD_REC_SAVED"
+expect_eq "CK-d1 a missing checks file stops nothing: the start exits 0" "0" "$REC_ST"
+expect_eq "CK-d2 …what exists is delivered, in order" \
+  "$(cat "$CK_CTX/survival.md" "$CK_CTX/checks-structure.md")" "$(ck_ctx)"
+expect_contains "CK-d3 …and the missing name is logged in the recorder's voice" \
+  "execution-recorder: checks file not found" "$REC_ERR"
+expect_contains "CK-d4 …naming the file" "checks-adversarial.md" "$REC_ERR"
+expect_eq "CK-d5 …the row is still identified" "w-crit2" \
+  "$(sj_field "$(grep 'status=identified' "$CKD_REPO/.bionic/tmp/roster-${SID_A}.state")" name)"
+
 finish
