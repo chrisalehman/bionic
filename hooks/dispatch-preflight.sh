@@ -1647,10 +1647,9 @@ agent is gone, frees the name — a landing marker alone does not."
 fi
 
 # THE ROLE GOES IN WITH THE BRIEF (wave-20 T4; REQ-7, Δ3, Δ9): it decides the run cap, which
-# `brief_validate_fields` reads off the same role below. THE ROOT FILES GO IN TOO (wave-27 T29;
-# REQ-12, D21): the one Files: reader reads a bare name as a path when a file of that name is at
-# the project root, and this hook is what hands it that fact.
-LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT" "$(brief_root_files "$BIONIC_ROOT")")
+# `brief_validate_fields` reads off the same role below. Nothing else goes in: the Files: reader
+# reads an item by its own text, and this hook lists no directory for it (wave-27 T42, A-orch-46).
+LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
 
 field_of() {  # <kind>
   printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-

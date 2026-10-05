@@ -646,4 +646,112 @@ remove_run "$SB_T40BS" y "$TMP/standalone/remove.sh" >/dev/null 2>&1
 expect_same_bytes "T40: the payload door keeps a blank line the user had above the block" "$TMP/t40b-planted.zshrc" "$SB_T40B/.zshrc"
 expect_same_bytes "T40: …and so does the standalone door" "$TMP/t40b-planted.zshrc" "$SB_T40BS/.zshrc"
 
+# ---------------------------------------------------------------------------
+section "wave-27 T46: a malformed rc block is read by markers_check, and called malformed"
+# ---------------------------------------------------------------------------
+#
+# Review pass 14 F2: the detector read `stale` from a substring of the start
+# marker, so doctor sent a malformed rc to a setup that refuses it. Each shape is
+# the user's rc (plant_rc's three lines first); the number is the line of the
+# first fault markers_check names.
+
+plant_rc_shape() {  # <file> <shape>
+  plant_rc "$1"
+  case "$2" in
+    start-only) printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" 'export MINE=1' >> "$1" ;;
+    end-only)   printf '%s\n' "$RC_END_LIT" 'export MINE=1' >> "$1" ;;
+    two-starts) printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$1" ;;
+    two-blocks) printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" 'export MINE=1' \
+                  "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$1" ;;
+  esac
+}
+rc_shape_line() {
+  case "$1" in start-only) echo 4 ;; end-only) echo 4 ;; two-starts) echo 6 ;; two-blocks) echo 8 ;; esac
+}
+
+# The twin first: on a well-formed rc with no block, setup asks.
+SB_T46Q="$(new_sandbox)"
+expect_contains "T46: setup asks on an rc with no block (the twin of the refusals below)" "[y/N]" "$(setup_run "$SB_T46Q" n)"
+
+for RC_SHAPE in start-only end-only two-starts two-blocks; do
+  SB_T46="$(new_sandbox)"; plant_rc_shape "$SB_T46/.zshrc" "$RC_SHAPE"
+  cp "$SB_T46/.zshrc" "$TMP/t46-before.zshrc"
+  L="$(rc_shape_line "$RC_SHAPE")"
+  expect_eq "T46 ${RC_SHAPE}: detect reads it as malformed" \
+    "env:rc-claude-proxy present=malformed" "$(detect_run "$SB_T46")"
+  T46_DOC="$(doctor_run "$SB_T46")"
+  T46_ROW="$(report_row "$T46_DOC" "$DOCTOR_ROW_LABEL")"
+  expect_nonempty "T46 ${RC_SHAPE}: doctor renders a proxy row" "$T46_ROW"
+  expect_contains "T46 ${RC_SHAPE}: doctor's row says malformed" "malformed" "$T46_ROW"
+  expect_contains "T46 ${RC_SHAPE}: …and names the line" "line ${L}:" "$T46_ROW"
+  expect_absent "T46 ${RC_SHAPE}: …never stale, sending it to a setup that refuses" "rewrites it" "$T46_ROW"
+  expect_absent "T46 ${RC_SHAPE}: …never not set" "not set" "$T46_ROW"
+  expect_contains "T46 ${RC_SHAPE}: doctor's fix line says to fix the markers by hand" "do not pair up" "$T46_DOC"
+  T46_SET="$(setup_run "$SB_T46" y)"
+  expect_same_bytes "T46 ${RC_SHAPE}: setup answered yes writes nothing" "$TMP/t46-before.zshrc" "$SB_T46/.zshrc"
+  expect_contains "T46 ${RC_SHAPE}: setup prints the refusal with the line" "line ${L}:" "$T46_SET"
+  expect_absent "T46 ${RC_SHAPE}: setup refuses before it asks" "[y/N]" "$T46_SET"
+done
+
+# A path that is no file: refused by setup, reported by doctor, nothing made in it.
+SB_T46D="$(new_sandbox)"; rm -f "$SB_T46D/.zshrc"; mkdir "$SB_T46D/.zshrc"; printf 'mine\n' > "$SB_T46D/.zshrc/keep"
+T46D_LS="$(ls -A "$SB_T46D/.zshrc")"
+expect_nonempty "T46: the listing extractor reads the directory's contents" "$T46D_LS"
+expect_eq "T46: detect reads an rc that is a directory as not-a-file" \
+  "env:rc-claude-proxy present=not-a-file" "$(detect_run "$SB_T46D")"
+T46D_SET="$(setup_run "$SB_T46D" y)"
+expect_contains "T46: setup names the rc and that it is a directory" "${SB_T46D}/.zshrc is a directory" "$T46D_SET"
+expect_eq "T46: …and makes nothing inside it" "$T46D_LS" "$(ls -A "$SB_T46D/.zshrc")"
+T46D_ROW="$(report_row "$(doctor_run "$SB_T46D")" "$DOCTOR_ROW_LABEL")"
+expect_contains "T46: doctor's row says the rc is not a file" "not a file" "$T46D_ROW"
+expect_absent "T46: …and does not offer setup" "/bionic:setup" "$T46D_ROW"
+
+# ---------------------------------------------------------------------------
+section "wave-27 T46: the retired rc blocks read the same state, and say their refusal"
+# ---------------------------------------------------------------------------
+#
+# Review pass 14 F3: a retired block with unpaired markers was refused with the
+# generic "could not rewrite" line, and its pending test was a substring, so a
+# marker quoted in a comment got "removed" with the rc unchanged.
+
+remove_item() {  # <sandbox> <item> <answer> [script]
+  local sb="$1" item="$2" answer="$3" script="${4:-$REMOVE_SH}"
+  printf '%s\n' "$answer" | HOME="$sb" ZDOTDIR="$sb" SHELL=/bin/zsh \
+    PATH="$TMP/bin:$PATH" BIONIC_CLAUDE_HOME="$sb/.claude" \
+    bash "$script" --only "$item" 2>&1
+}
+ALIAS_START="$(const_from "$REMOVE_SH" RM_ALIAS_START)"; ALIAS_END="$(const_from "$REMOVE_SH" RM_ALIAS_END)"
+ENVB_START="$(const_from "$REMOVE_SH" RM_ENV_START)";    ENVB_END="$(const_from "$REMOVE_SH" RM_ENV_END)"
+expect_nonempty "T46: the retired alias markers read out of remove.sh" "${ALIAS_START}${ALIAS_END}"
+expect_nonempty "T46: the retired env markers read out of remove.sh" "${ENVB_START}${ENVB_END}"
+
+for RETIRED in legacy-alias environment; do
+  case "$RETIRED" in
+    legacy-alias) R_START="$ALIAS_START"; R_END="$ALIAS_END" ;;
+    environment)  R_START="$ENVB_START";  R_END="$ENVB_END" ;;
+  esac
+  # A start with no end: refused, with the refusal's own line, by both doors.
+  SB_R="$(new_sandbox)"; printf '%s\n' "$R_START" 'export RETIRED=1' 'export MINE=1' >> "$SB_R/.zshrc"
+  cp "$SB_R/.zshrc" "$TMP/r-before.zshrc"
+  for R_DOOR in payload standalone; do
+    if [ "$R_DOOR" = "payload" ]; then R_OUT="$(remove_item "$SB_R" "$RETIRED" y)"
+    else R_OUT="$(remove_item "$SB_R" "$RETIRED" y "$TMP/standalone/remove.sh")"; fi
+    expect_same_bytes "T46 ${RETIRED} (${R_DOOR}): a start with no end is left byte-identical" "$TMP/r-before.zshrc" "$SB_R/.zshrc"
+    expect_contains "T46 ${RETIRED} (${R_DOOR}): …and remove names the line" "line 4:" "$R_OUT"
+    expect_contains "T46 ${RETIRED} (${R_DOOR}): …says the markers do not pair up" "do not pair up" "$R_OUT"
+    expect_absent "T46 ${RETIRED} (${R_DOOR}): …and not that it could not rewrite" "could not rewrite" "$R_OUT"
+  done
+  # A marker quoted inside a comment is not a marker: nothing pending.
+  SB_RQ="$(new_sandbox)"; printf '%s\n' "# see the ${R_START} line" >> "$SB_RQ/.zshrc"
+  cp "$SB_RQ/.zshrc" "$TMP/rq-before.zshrc"
+  RQ_OUT="$(remove_item "$SB_RQ" "$RETIRED" y)"
+  expect_absent "T46 ${RETIRED}: a quoted marker is not asked about" "[y/N]" "$RQ_OUT"
+  expect_same_bytes "T46 ${RETIRED}: …and the rc is byte-identical" "$TMP/rq-before.zshrc" "$SB_RQ/.zshrc"
+  # The twin: a whole, paired block is asked about and goes.
+  SB_RW="$(new_sandbox)"; printf '%s\n' "$R_START" 'export RETIRED=1' "$R_END" >> "$SB_RW/.zshrc"
+  RW_OUT="$(remove_item "$SB_RW" "$RETIRED" y)"
+  expect_contains "T46 ${RETIRED}: a whole block is asked about (the twin)" "[y/N]" "$RW_OUT"
+  expect_eq "T46 ${RETIRED}: …and goes" "0" "$(count_lines_equal "$SB_RW/.zshrc" "$R_START")"
+done
+
 finish
