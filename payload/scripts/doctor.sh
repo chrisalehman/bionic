@@ -2629,6 +2629,17 @@ if [ "$LEGACY_ALIAS_STATE" = "malformed" ]; then
   _legacy_alias_where="$(markers_check "$(_detect_shell_rc)" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")"
   _doctor_env_row "$DOCTOR_BAD" "$(bionic_check_label legacy-alias)" "malformed — ${_legacy_alias_where%%$'\n'*}"
 fi
+# A line that mentions the retired alias and is not one bionic wrote (wave-27 T55):
+# no step removes it, so it is named once, by number and never by its text, as the
+# user's to edit — not a fault, and not routed to setup.
+if [ "$LEGACY_ALIAS_STATE" != "not-a-file" ]; then
+  _legacy_alias_theirs="$(bionic_legacy_alias_lines "$(_detect_shell_rc)")"; _legacy_alias_theirs="${_legacy_alias_theirs#* theirs=}"
+  # The label carries the finding and the cell the place: both fit their columns
+  # whole, where one sentence in the cell lost the file name to the cut.
+  [ -n "$_legacy_alias_theirs" ] && \
+    _doctor_env_row "$DOCTOR_NIL" "retired alias, not in a form bionic wrote" \
+      "$(bionic_line_numbers_words "$_legacy_alias_theirs") of $(_doctor_tilde "$(_detect_shell_rc)")" " → edit it by hand"
+fi
 if [ "$LEGACY_HOOKS_FIRES" = "yes" ]; then
   _doctor_env_row "$DOCTOR_BAD" "$(bionic_check_label legacy-hooks)" \
     "${LEGACY_HOOK_COUNT} in settings.json → $(bionic_check_hint legacy-hooks)"

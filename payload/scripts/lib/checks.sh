@@ -354,15 +354,13 @@ bionic_check_working_principles() {  # <row id>
   [ "$(principles_state)" = "absent" ]
 }
 
-# THE PRE-MARKER SPELLING, and the one place it is written down. setup.sh carried
-# it as `SETUP_ALIAS_PATTERN` until 1.5.1; the predicate that reads it lives here
-# now, and setup's removal step reads this same name rather than a second copy.
-# Declared BEFORE the function that uses it, so a caller who sources this file
-# under `set -u` and reaches the removal step first still finds it.
-BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
-
+# THE PRE-MARKER SPELLING is detect.sh's list, `bionic_legacy_alias_ours`, the
+# one place it is written down (wave-27 T55). This predicate fires on a line the
+# list holds and on nothing else: a line that only mentions the alias is the
+# user's, no step removes it, and a row that fired on it would offer a removal
+# that does nothing, forever.
 bionic_check_legacy_alias() {  # <row id>
-  local line settings
+  local line
   line="$(detect_zshrc_legacy_block)"
   # A block whose markers do not pair up, or an rc bionic cannot read as text, is
   # no step setup can take (wave-27 T51): doctor names the fault and a hand fix,
@@ -371,9 +369,8 @@ bionic_check_legacy_alias() {  # <row id>
     yes) return 0 ;;
     malformed|not-a-file) return 1 ;;
   esac
-  settings="$(_detect_shell_rc)"
-  [ -f "$settings" ] && grep -qE "$BIONIC_LEGACY_ALIAS_PATTERN" "$settings" 2>/dev/null && return 0
-  return 1
+  line="$(bionic_legacy_alias_lines "$(_detect_shell_rc)")"; line="${line#ours=}"
+  [ -n "${line%% *}" ]
 }
 
 bionic_check_legacy_hooks() {  # <row id>
