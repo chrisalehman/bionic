@@ -16,12 +16,14 @@
 #   markers_check <file> <start> <end>              rc 2 and `line <n>: …` per fault
 #   markers_only  <file> <start> <end>              rc 0 when the block is all the file holds
 #   markers_writable <file>                         rc 1 when the user made it read-only
-#   markers_regular  <file>                         rc 4, and what it is, when it is no file
+#   markers_regular  <file>                         rc 4, and what it is, when it is not text bionic can read
+#   markers_regular_cell <what>                     the status cell for markers_regular's answer
 #
 # THE WRITERS' EXIT CODES ARE THE REASON (wave-27 T40, review pass 9 findings 1,
 # 2 and 8; T46). 0 written; 1 a write failed; 2 the markers do not pair up; 3 the
-# file is read-only; 4 the path is not a regular file. On every non-zero the
-# target is byte-identical to what it was.
+# file is read-only; 4 the path is not a regular text file bionic can read
+# (`markers_regular` says which). On every non-zero the target is byte-identical
+# to what it was.
 #
 # THE MARKERS ARE THE ONLY THING MATCHED. Whole-line equality, in bash, never a
 # pattern — the rc markers carry box-drawing dashes, and a fuzzy match would be a
@@ -89,14 +91,40 @@ markers_writable() {  # <file>
 # pass 14 finding 6). A directory at the path took the staged copy INTO itself
 # on the rename and reported a write; a dangling link had its target created
 # somewhere the user never named. Anything else is refused with rc 4 before a
-# byte is staged, and this prints what the path is, for the line that says so.
+# byte is staged, and this prints what the path is, for the line that says so —
+# for a dangling link, where it points, which is what tells a user their
+# dotfiles are not checked out (wave-27 T51, review pass 21 F3).
+#
+# AND THE FILE IS TEXT BIONIC CAN READ (T51, F4 and F5). Every walk here reads
+# lines with bash `read`, and `/bin/bash` 3.2's `read` cuts a line at a NUL byte:
+# `<end marker>\0mine` read as the end marker alone, the file as "the block and
+# nothing else", and remove deleted it with the user's text in it. So a file
+# holding a NUL is not text and is refused like a directory, the test made on the
+# file's bytes by `tr`, which sees a NUL under any bash. A file the user cannot
+# read read as "no block", and doctor sent them to a setup step that then failed;
+# it is refused the same way, and called unreadable.
 markers_regular() {  # <file>
-  if [ -L "$1" ] && [ ! -e "$1" ]; then printf 'a link that points nowhere\n'; return 4; fi
-  if [ ! -e "$1" ] || [ -f "$1" ]; then return 0; fi
+  if [ -L "$1" ] && [ ! -e "$1" ]; then printf 'a link to %s, which does not exist\n' "$(bionic_link_target "$1")"; return 4; fi
+  [ -e "$1" ] || return 0
+  if [ -f "$1" ]; then
+    if [ ! -r "$1" ]; then printf 'unreadable: bionic has no permission to read it\n'; return 4; fi
+    if ! LC_ALL=C tr -d '\000' < "$1" | cmp -s - "$1"; then printf 'not text: it holds a NUL byte\n'; return 4; fi
+    return 0
+  fi
   if [ -d "$1" ] && [ -L "$1" ]; then printf 'a link to a directory\n'
   elif [ -d "$1" ]; then printf 'a directory\n'
   else printf 'not a regular file\n'; fi
   return 4
+}
+
+# The few words a status cell has room for, read off `markers_regular`'s answer,
+# so setup's item and doctor's row name the same fault the same way.
+markers_regular_cell() {  # <what markers_regular printed>
+  case "$1" in
+    "not text:"*)   printf 'not text\n' ;;
+    "unreadable:"*) printf 'unreadable\n' ;;
+    *)              printf 'not a file\n' ;;
+  esac
 }
 
 # A BLOCK IS ONE START LINE, THEN ONE END LINE, ONCE (wave-27 T40, review pass 9
