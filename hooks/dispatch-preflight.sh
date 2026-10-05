@@ -2276,21 +2276,43 @@ Then retry the dispatch."
     # Files: (a scratch file) and is not a record.
     #
     # AN ABSOLUTE PATH IS PLACED AS THE FACT VERB PLACES IT (A-orch-101). `proof-add review` reads a
-    # record's directory with `cd -P`, so the reader exam's `/var/…/s1/.bionic/docs/record/…`
-    # is its project's `/private/var/…` record. Here an absolute path's longest existing directory
-    # is resolved physically and the rest in the text, and the record root the same way, so the
-    # wall and the verb give one answer for one path: a symlinked directory that lands outside
-    # the root is no record, and a record directory the reader has not made yet still is. ONE RULE
-    # FOR EVERY PATH (the A-T57.11 ruling): a relative path is anchored at the project root first
-    # and then placed the same way, so a link under record/ that leads out of it is no record
-    # whichever way the path is spelt.
+    # record's directory with a logical `cd` and then `pwd -P`, so `..` is folded in the text before
+    # the physical read, and the reader exam's `/var/…/s1/.bionic/docs/record/…` is its project's
+    # `/private/var/…` record. Here a path's longest existing directory is read the same way and
+    # the rest stays text, and the record root the same way, so the wall and the verb give one
+    # answer for one path: a symlinked directory that lands outside the root is no record, and a
+    # record directory the reader has not made yet still is. ONE RULE FOR EVERY PATH (the A-T57.11
+    # ruling): a relative path is anchored at the project root first and then placed the same way,
+    # so a link under record/ that leads out of it is no record whichever way the path is spelt.
+    #
+    # LINEAR IN THE PATH (wave-27 T72; review pass 49 S2). The walk goes forward from `/` and stops
+    # at the first segment that is not a directory, since no longer prefix can be one, so a missing
+    # segment costs nothing: walking back from the end cost a test and a copy per missing segment,
+    # and twenty paths of 2,500 took a reader's dispatch to 17 s, past this hook's 15 s
+    # registration. A directory the wall cannot enter places nothing, and the path is no record.
     _dp_rec_place() {  # <path> -> the path anchored at the root, its longest existing directory physical
-      local p="$1" d rest phys
+      local p="$1" d="" rest seg phys
       case "$p" in /*) : ;; *) p="$BIONIC_ROOT/$p" ;; esac
-      d="${p%/*}"; rest="${p##*/}"
-      while [ -n "$d" ] && [ ! -d "$d" ]; do rest="${d##*/}/$rest"; d="${d%/*}"; done
-      phys="$(cd "${d:-/}" 2>/dev/null && pwd -P)" && p="${phys%/}/$rest"
-      printf '%s\n' "$p"
+      rest="${p#/}"
+      while :; do
+        case "$rest" in */*) seg="${rest%%/*}" ;; *) break ;; esac
+        [ -d "$d/$seg" ] || break
+        d="$d/$seg"; rest="${rest#*/}"
+      done
+      phys="$(cd "${d:-/}" 2>/dev/null && pwd -P)" || return 1
+      printf '%s\n' "${phys%/}/$rest"
+    }
+    # A RECORD IS A REGULAR FILE, OR A PATH NOT THERE YET (wave-27 T72; review pass 49 S1). The verb
+    # takes only a regular file that is not a link, so a path that exists at dispatch as a
+    # directory named without its slash, a symlink, a FIFO or a device is no record, and neither is
+    # a path over 1,024 bytes, measured as bytes. A path that does not exist yet still is one.
+    _dp_rec_candidate() {  # <path> -> its placing when it may be a record, nothing when it is not
+      local p="$1" a LC_ALL=C
+      [ "${#p}" -le 1024 ] || return 0
+      case "$p" in /*) a="$p" ;; *) a="$BIONIC_ROOT/$p" ;; esac
+      [ -L "$a" ] && return 0
+      [ -e "$a" ] && [ ! -f "$a" ] && return 0
+      _dp_rec_place "$p"
     }
     if [ -n "${_q_admitted:-}" ]; then
       _q_nq="$(printf '%s' "$_q_set" | awk -F, '{ print NF }')"
@@ -2299,7 +2321,7 @@ Then retry the dispatch."
         _q_dr="$(docs_root "$BIONIC_ROOT" 2>/dev/null)"; [ -n "$_q_dr" ] && _q_rroot="$_q_dr/record"
       fi
       _q_nr="$(printf '%s\n%s\n' "$(brief_field "$LIFTED" deliverable)" "$(brief_field "$LIFTED" files | tr ',' '\n')" \
-        | while IFS= read -r _q_p; do [ -n "$_q_p" ] && _dp_rec_place "$_q_p"; done \
+        | while IFS= read -r _q_p; do [ -n "$_q_p" ] && _dp_rec_candidate "$_q_p"; done \
         | awk -v root="$BIONIC_ROOT" -v rr="$(_dp_rec_place "$_q_rroot")" '
           function resolve(p,   n, i, seg, out, k, dir) {
             if (p !~ /^\//) p = root "/" p
