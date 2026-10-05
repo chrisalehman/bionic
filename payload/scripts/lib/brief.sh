@@ -1286,6 +1286,17 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
         gsub(/[ \t\r]+/, " ", v); sub(/^ /, "", v); sub(/ $/, "", v)
         if (v != "" && !istemplate(v)) print "lands_red=" v
       }
+      # ONE DECLARATION (wave-27 T67; review pass 46 N2): the lift reads the first line, so a second
+      # filled Lands-red: line would be dropped without a word. Their count prints as `lands_red_n=`
+      # for the dispatch wall to refuse; an unfilled scaffold slot or an example is not counted.
+      nlr = split(allhits("lands_red"), LRH, " "); clr = 0
+      for (j = 1; j <= nlr; j++) {
+        v = spanof(LRH[j]); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
+        if (match(v, /(^|[ \t])#/)) v = substr(v, 1, RSTART - 1)
+        gsub(/[ \t\r]+/, " ", v); sub(/^ /, "", v); sub(/ $/, "", v)
+        if (v != "" && !istemplate(v)) clr++
+      }
+      if (clr > 1) print "lands_red_n=" clr
       h = firsthit("red_evidence")
       if (h > 0) {
         v = spanof(h); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)

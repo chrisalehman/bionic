@@ -1347,8 +1347,23 @@ s7_fire "$FW_D" "$FW_TX"
 expect_contains "FW1: AC-6.7 a ready read-only row left undispatched refuses the turn end" \
   "Fillable gap at turn end" "$(reason_of)"
 expect_contains "FW1b: …naming it" "T5" "$(reason_of)"
-expect_absent "FW1c: …and never the row that waits on an unlanded read" "T6" "$(reason_of)"
-expect_absent "FW1d: …nor the writer the closed gap holds back" "T1" "$(reason_of)"
+# THE ROW LIST, NOT THE TEXT (wave-27 T67; A-orch-140): the refusal prints the hook's absolute
+# path, which may hold any id (this row's own tree is 27-T67), so a must-not reads the ids the
+# printed decline names, as a word, the shape tests/patrol-duties-gate.test.sh uses.
+fw_rows() {  # -> the ids the refusal's printed decline names, space-joined
+  reason_of | /usr/bin/grep -o "session-poker\.sh'\{0,1\} decline [A-Za-z0-9_.,-]*" | head -1 \
+    | sed 's/.* decline //' | tr ',' ' '
+}
+fw_rows_unnamed() {  # <label> <id the refusal's row list must not hold>
+  local rows; rows="$(fw_rows)"
+  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
+  case " $rows " in *" $2 "*) no "$1" "the row list <$rows> names <$2>"; return ;; esac
+  ok "$1"
+}
+require_helpers fw_rows fw_rows_unnamed
+expect_eq "FW1c0 precondition: the refusal's row list is read, and it is T5" "T5" "$(fw_rows)"
+fw_rows_unnamed "FW1c: …and never the row that waits on an unlanded read" "T6"
+fw_rows_unnamed "FW1d: …nor the writer the closed gap holds back" "T1"
 expect_contains "FW1e: the refusal asks for the dispatch" "Dispatch each named row" "$(reason_of)"
 expect_absent "FW1f: …and no longer for a hand edit of the row: the launch recorder ledgers it" \
   "ledger it active" "$(reason_of)"
