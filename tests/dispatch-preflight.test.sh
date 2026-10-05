@@ -6040,7 +6040,10 @@ for _role in bionic:researcher bionic:test-runner bionic:critic; do
   REPO=$(make_repo "r31e-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_task_plan "$REPO" T1 ""
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" tested)" "w31e" "claude-sonnet-5" \
+  # A tested critic is dealt three questions, so it names three records (wave-27 T49's rule).
+  _e31=""; [ "$_role" = bionic:critic ] && _e31="
+Files: .bionic/docs/record/w99-widget.txt, .bionic/docs/record/w99-adv.md, .bionic/docs/record/w99-str.md"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" tested)$_e31" "w31e" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
   # REBUILT (wave-27 T31; A-orch-43), as 30e: the verdict and the recorded row, not the exit.
   expect_eq "31e a ${_role} dispatch against the SAME unapproved task-scale plan is admitted" "allow" "$GATE_VERDICT"
@@ -10160,6 +10163,11 @@ Red-evidence: <path under record/>'
 expect_eq "LR6 the scaffold's two slots pasted unfilled declare nothing: admitted" "allow" "$GATE_VERDICT"
 expect_contains "LR6b …its row is written" "status=intended" "$LR_ROW"
 expect_absent "LR6c …with no lands_red= on it" "lands_red=" "$LR_ROW"
+lr_gate lr7 'Lands-red: widget.test.sh until approval:release  # optional
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md  # with Lands-red:'
+expect_eq "LR7 the two lines filled with the scaffold's comments kept: admitted, the comments off the values" \
+  "allow|widget.test.sh until approval:release|.bionic/docs/record/wave-01-test/T9-red.md" \
+  "$GATE_VERDICT|$(roster_field "$LR_ROW" lands_red)|$(roster_field "$LR_ROW" red_evidence)"
 =======
 # --- FILES-LIST19..: one pair of punctuation around a path, and a trailing `;` (wave-27 T49; review
 # pass 19 should-fix 1). The reader strips from an item ONE surrounding pair of double quotes, single

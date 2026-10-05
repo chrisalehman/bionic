@@ -1266,16 +1266,20 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       }
       # THE DECLARED DEBT (wave-27 T31; REQ-14, D23): the rest of the line each label opens, blanks
       # folded; `Red-evidence:` is its first word. The dispatch wall judges the shape; the lift only
-      # reads, and an unfilled scaffold slot declares nothing.
+      # reads, and an unfilled scaffold slot declares nothing. A trailing ` # ...` comment comes off
+      # the line, as on Questions: and Files:, so the scaffold line filled with its comment kept, or
+      # left with only its comment, declares only what precedes the comment.
       h = firsthit("lands_red")
       if (h > 0) {
         v = spanof(h); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
+        if (match(v, /(^|[ \t])#/)) v = substr(v, 1, RSTART - 1)
         gsub(/[ \t\r]+/, " ", v); sub(/^ /, "", v); sub(/ $/, "", v)
         if (v != "" && !istemplate(v)) print "lands_red=" v
       }
       h = firsthit("red_evidence")
       if (h > 0) {
         v = spanof(h); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
+        if (match(v, /(^|[ \t])#/)) v = substr(v, 1, RSTART - 1)
         if (istemplate(v)) v = ""
         split(v, RW, /[ \t\r]+/); v = ""
         for (i = 1; i in RW; i++) if (RW[i] != "") { v = trimtok(RW[i]); break }
