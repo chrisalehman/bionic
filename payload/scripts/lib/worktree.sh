@@ -378,7 +378,9 @@ EOF
 # by the booking shim to `<the tree's git dir>/bionic-stamps`, one line per suite-class command.
 # Prints the reason and the fix and returns 0 when the tree's runs are not proof for <head>.
 # Returns 1 when they are — and when there is no stamp file, which means no suite-class command
-# ever ran in the tree.
+# ever ran in the tree. On 1 it prints, byte for byte from this one read, the stamp lines at <head>
+# it judged (none without a file): the land keeps those, and not a second read of a file a suite
+# may append to in between (wave-27 T44).
 #
 # THE RULE: for EVERY suite stamped at <head>, the NEWEST stamp of that suite is green proof (rc 0
 # on a clean tree). The doctrine runs a brief's suites one call each, so one head collects one line
@@ -390,7 +392,7 @@ EOF
 #     from any suite. A red or dirty one at <head> refuses, and NO later run at <head> clears it:
 #     the fix is a commit, then the suites again. A green one asks nothing.
 #   - Lines on another head are history. A file with lines and none at <head> is `why=head`, naming
-#     the newest line's head.
+#     the newest line's head, the head looked for and the stamp file read (A-orch-55).
 #   - The NEWEST line must be readable, as before: an empty file, or a last line that is no stamp,
 #     is `why=unreadable`. An unreadable line before it is no run's record (the shim writes none)
 #     and is skipped.
@@ -400,8 +402,9 @@ EOF
 # follows is the command, whatever it contains, and a `|rc=0` in it never speaks for the run.
 # Before `cmd=`, each of head, dirty and rc appears exactly once and suites at most once; a line
 # giving one twice is no line the shim writes. ONE awk over the file, whatever its length.
-_wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
-  local wt="${1:-}" head="${2:-}" gd file verdict what n s
+_wt_stale_proof() {  # <worktree abs> <head> -> why=... | the judged lines
+  local wt="${1:-}" head="${2:-}" gd file verdict what n s judged nl='
+'
   local again="re-run the tree's suites at its head, land again"
   gd="$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null)"
   [ -n "$gd" ] || { printf 'why=unreadable stamps=%s/<no git dir> — %s' "$wt" "$again"; return 0; }
@@ -424,6 +427,7 @@ _wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
       last_ok = 1; last_head = h
       if (h != want) next
       at_head++
+      judged = judged $0 "\n"
       proof = (d == "0" && r == "0")
       if (s == "") s = "?"
       m = split(s, names, ",")
@@ -444,8 +448,10 @@ _wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
         if (v[1] != "0") { print "dirty " v[1] " " x; exit }
         if (v[2] != "0") { print "red " v[2] " " x; exit }
       }
-      print "proof"
+      printf "proof\n%s", judged
     }' "$file" 2>/dev/null)"
+  judged=""
+  case "$verdict" in *"$nl"*) judged="${verdict#*"$nl"}"; verdict="${verdict%%"$nl"*}" ;; esac
   what="${verdict%% *}"; n="${verdict#* }"; s="${n#* }"; n="${n%% *}"
   local fix_dirty="commit or clean the tree, $again" fix_red="make the suites green, $again"
   if [ "$s" = "?" ]; then
@@ -453,8 +459,8 @@ _wt_stale_proof() {  # <worktree abs> <head> -> why=... | nothing
     fix_red="$fix_dirty"
   fi
   case "$what" in
-    proof) return 1 ;;
-    head)  printf 'why=head stamp_head=%s head=%s — %s' "$n" "$head" "$again" ;;
+    proof) [ -z "$judged" ] || printf '%s\n' "$judged"; return 1 ;;
+    head)  printf 'why=head stamp_head=%s head=%s stamps=%s — %s' "$n" "$head" "$file" "$again" ;;
     dirty) printf 'why=dirty dirty=%s suite=%s head=%s — %s' "$n" "$s" "$head" "$fix_dirty" ;;
     red)   printf 'why=red rc=%s suite=%s head=%s — %s' "$n" "$s" "$head" "$fix_red" ;;
     *)     printf 'why=unreadable stamps=%s — %s' "$file" "$again" ;;
@@ -622,11 +628,12 @@ _wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrive
   fi
 }
 
-worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
+worktree_land() {  # <worktree path> <onto> [<bound plan>] -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
   local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
   local pre pre_ref was said held now_ref check_cmd check_out nl='
 '
+  local plan="${3:-}" judged proofs proofs_row
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -694,6 +701,7 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   why="$(_wt_stale_proof "$wt_abs" "$head")" && {
     _wt_refuse "stale-proof ${why}"; return 2
   }
+  judged="$why"
 
   # THE TARGET CHECKOUT IS CLEAN IN WHAT GIT TRACKS. A merge into a checkout
   # holding staged or modified tracked files mixes somebody's unfinished work
@@ -709,13 +717,16 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
 
   # THE PROJECT'S DECLARED CHECK (wave-27 T16; D12). When `.bionic/config.yaml` names
   # `release-check: <command>`, the command runs over this landing's range before anything is
-  # touched: in the task's tree, with BIONIC_CHECK_BASE at the working branch's head and
-  # BIONIC_CHECK_HEAD at the task's head, its words split on blanks with globbing off, as
+  # touched: in the TARGET checkout as it stands before the merge, never the task's tree (review
+  # pass 22 B1; A-orch-75), so a command naming its script relatively runs the target's copy and a
+  # piece cannot rewrite the check that judges it; the task's commits are read from the shared
+  # object store. BIONIC_CHECK_BASE is the working branch's head and BIONIC_CHECK_HEAD the task's
+  # head, its words split on blanks with globbing off, as
   # `impact-command:` is run (proof.sh `_proof_map`). A non-zero exit refuses the landing and
   # shows the command's output on stderr. With no key nothing runs and nothing prints.
   check_cmd="$(config_value "$root" release-check "" 2>/dev/null)"
   if [ -n "$check_cmd" ]; then
-    check_out="$(cd "$wt_abs" 2>/dev/null || exit 1
+    check_out="$(cd "$co" 2>/dev/null || exit 1
       set -f
       export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head"
       # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
@@ -724,6 +735,19 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
       [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
       _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head} — the project's declared release-check (${check_cmd}) fails over this landing's range; fix what it names on ${branch}, re-run its suites, land again"; return 2
     fi
+  fi
+
+  # THE LANDING RECORD IS PROVED WRITABLE BEFORE THE MERGE (wave-27 T44; D15). With a bound plan,
+  # the run's `landing-proofs.log` is created or opened for append here, and a record that cannot
+  # be is refused with nothing changed. The row is the plan's `## Tasks` row whose `worktree` cell
+  # names this tree. Both are written once the merge is made (_wt_proofs_append, below).
+  proofs="none"; proofs_row=""
+  if [ -n "$plan" ]; then
+    proofs="$(_wt_proofs_path "$root" "$plan")" && mkdir -p "${proofs%/*}" 2>/dev/null \
+      && { : >> "$proofs"; } 2>/dev/null || {
+      _wt_refuse "record-unwritable why=proofs-unwritable path=${proofs:-<none>} branch=${branch} — the landing record cannot be written, so nothing is merged; make it writable, land again"; return 2
+    }
+    proofs_row="$(_wt_proofs_row "$root" "$plan" "$wt_abs")"
   fi
 
   # THE HEAD IS READ AGAIN JUST BEFORE THE MERGE (review 2 F7). Another land onto
@@ -830,6 +854,14 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
     _wt_refuse "${moved} merge=${merge_sha:-<none>} undo=failed — $(_wt_undo_failed_fix "$co" "$undo_on" "$merge_sha" "$parent"), then ${fix}"; return 2
   fi
 
+  # THE LANDING KEEPS THE PROOF IT READ (wave-27 T44; D15): the header and the stamp lines judged
+  # at <head>, appended before the tree and its stamps go. The merge is not undone if the append
+  # fails; the tree is kept instead, so its stamp file still holds the proof.
+  if [ "$proofs" != none ] && ! _wt_proofs_append "$proofs" "$proofs_row" "$branch" "$head" "$merge_sha" "$judged"; then
+    _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} kept=${wt_abs} proofs=unwritten — ${proofs} could not be appended after the merge, so the tree and its stamp file are kept; append the landing to it by hand, then remove the tree"
+    return 0
+  fi
+
   # No --force here either. If git refuses now, the merge has landed and the
   # tree has not gone; the line says both so the operator is not left guessing
   # which half happened. The record link goes only now — git would refuse the
@@ -842,8 +874,52 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   fi
   git -C "$root" worktree prune >/dev/null 2>&1
 
-  _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} removed=${wt_abs}"
+  _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} removed=${wt_abs} proofs=${proofs}"
   return 0
+}
+
+# THE LANDING RECORD (wave-27 T44; D15; the Interfaces row "landing record").
+# `<docs-root>/record/<the bound plan's name less .plan.md>/landing-proofs.log`, appended, never
+# rewritten: one header line per landing, `landed: row=<id|—> branch=<b> head=<40-hex>
+# merge=<40-hex> at=<ISO-UTC>`, then the stamp lines `_wt_stale_proof` judged at <head>, as the
+# stamp file holds them. A row's landing is the `merge=` of the last header carrying its `row=`
+# (the tick reads it, T43). The path is derived as fill_ledger_path (lib/patrol.sh) derives its
+# own, in the project's docs tree, never in the tree being removed.
+_wt_proofs_path() {  # <root> <plan> -> the record's path
+  local slug="${2##*/}"
+  slug="${slug%.plan.md}"
+  [ -n "$slug" ] || return 1
+  printf '%s/record/%s/landing-proofs.log' "$(docs_root "$1")" "$slug"
+}
+
+# The id of the first `## Tasks` row, in table order, whose `worktree` cell names <tree>; a
+# relative cell is read from <root>. Nothing when none does, or when lib/units.sh, the table's
+# one reader, cannot be loaded (it is loaded lazily, as run.sh is below).
+_wt_proofs_row() {  # <root> <plan> <tree abs> -> <row id> | nothing
+  local rec cell lib
+  if ! declare -F units_rows >/dev/null 2>&1; then
+    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/units.sh"
+    # shellcheck source=/dev/null
+    [ -r "$lib" ] && . "$lib" 2>/dev/null
+    declare -F units_rows >/dev/null 2>&1 || return 1
+  fi
+  while IFS= read -r rec; do
+    cell="$(units_field "$rec" worktree)"; cell="${cell#./}"; cell="${cell%/}"
+    case "$cell" in ''|-|—) continue ;; /*) : ;; *) cell="${1}/${cell}" ;; esac
+    [ "$cell" = "$3" ] && { units_field "$rec" id; return 0; }
+  done <<EOF
+$(units_rows "$2" 2>/dev/null)
+EOF
+  return 1
+}
+
+# One write, its status returned: the header and the judged lines under it.
+_wt_proofs_append() {  # <file> <row> <branch> <head> <merge> <judged lines>
+  local block
+  block="landed: row=${2:-—} branch=${3} head=${4} merge=${5} at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  [ -z "${6:-}" ] || block="${block}
+${6}"
+  { printf '%s\n' "$block" >> "$1"; } 2>/dev/null
 }
 
 # THE ONE PATH FROM A SESSION TO A LAND (wave-20 T8, REQ-1, D1). `spawn-worktree.sh
@@ -860,7 +936,7 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
 # to change, and a caller that already sourced it pays nothing. A run.sh that
 # cannot be loaded is a refusal, never a land onto a guessed branch.
 worktree_land_for_session() {  # <worktree path> <root> <sid> -> LANDED | REFUSED
-  local target="${1:-}" root="${2:-}" sid="${3:-}" lib onto
+  local target="${1:-}" root="${2:-}" sid="${3:-}" lib onto plan
   [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
   if ! declare -f session_working_branch >/dev/null 2>&1; then
     lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/run.sh"
@@ -870,7 +946,10 @@ worktree_land_for_session() {  # <worktree path> <root> <sid> -> LANDED | REFUSE
       || { _wt_refuse "run-library-unloadable path=${lib}"; return 2; }
   fi
   onto="$(session_working_branch "$root" "$sid")" || { _wt_refuse "${onto:-no-bound-plan}"; return 2; }
-  worktree_land "$target" "$onto"
+  # The plan that branch was read from: the marker's `plan=`, the one session_working_branch's
+  # verdict answered with (wave-27 T44). The landing record is written under its name.
+  plan="$(session_plan "$root" "$sid")" || plan=""
+  worktree_land "$target" "$onto" "$plan"
 }
 
 # ---------------------------------------------------------------------------
