@@ -2142,7 +2142,7 @@ case "$DP_SUBAGENT" in
     _q_set="$(brief_field "$LIFTED" questions)"
     _q_bad="$(brief_field "$LIFTED" questions_bad)"
     _q_dup="$(brief_field "$LIFTED" questions_dup)"
-    _q_rigor=""; _q_scale=""; _q_owed=""; _q_dealt=""; _q_dealable=""
+    _q_rigor=""; _q_scale=""; _q_owed=""; _q_dealt=""; _q_dealable=""; _q_admitted=""
     if [ -n "$PLAN" ]; then
       if ! declare -F facts_owed >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
         # shellcheck source=/dev/null
@@ -2249,7 +2249,38 @@ Fix: write the dealt set, on a line of its own —
 
 Then retry the dispatch."
     else
-      DP_QUESTIONS="$_q_set"
+      DP_QUESTIONS="$_q_set"; _q_admitted=1
+    fi
+    # A READER NAMES A RECORD FOR EACH QUESTION IT IS DEALT (wave-27 T49, A-orch-83; review pass 28
+    # B1). It writes one record per question, and `proof-add review` takes a record only if it is
+    # the reader's own roster row `deliverable=` or one of its `files=`. A critic dealt two
+    # questions with one Expected artifact: and no Files: was admitted here and then could not
+    # register its second reading. So the DISTINCT paths of the artifact and the Files: line
+    # (a quoted path as its stripped form, a leading ./ aside) must number at least the questions.
+    # The count needs no dealing, so it holds with no bound plan too. It is judged once the set
+    # itself is admitted, so a brief with a wrong set is told that first and not twice. The row is
+    # unchanged.
+    if [ -n "${_q_admitted:-}" ]; then
+      _q_nq="$(printf '%s' "$_q_set" | awk -F, '{ print NF }')"
+      _q_nr="$(printf '%s\n%s\n' "$(brief_field "$LIFTED" deliverable)" "$(brief_field "$LIFTED" files | tr ',' '\n')" \
+        | awk '{ sub(/^\.\//, "") } $0 != "" && !seen[$0]++ { n++ } END { print n + 0 }')"
+      if [ "$_q_nr" -lt "$_q_nq" ]; then
+        _q_pl="s"; [ "$_q_nr" -eq 1 ] && _q_pl=""
+        dp_finding "dealt ${_q_nq} questions, names ${_q_nr} record${_q_pl}" "one Files: record per question" \
+          "A reader writes one record per question it is dealt, and this brief names fewer records:
+    Role:      ${DP_SUBAGENT}
+    Questions: ${_q_set//,/, }
+    Records:   ${_q_nr} (the Expected artifact: and every path on the Files: line, each counted once)
+
+The fact verb (proof-add review) takes a record only from the reader's own roster row: its
+deliverable= or one of its files=. A record the brief never named is one the reader cannot
+register, and amend cannot add it once the reader has closed.
+
+Fix: list one record per question under Files:, the Expected artifact: among them —
+    Files: path/one.md, path/two.md
+
+Then retry the dispatch."
+      fi
     fi
     ;;
 esac
