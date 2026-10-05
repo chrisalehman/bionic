@@ -69,6 +69,7 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `fold_block exit2 suite-run \` — budget arm, unexpanded suite name — fix: the loop header's words as `bash tests/<w>.test.sh` lines, from `cmd_suite_loop_lines`; none when the text gives no literal list, or when a loop's body reassigns its variable so the header is not what runs (T26), and the detail says so
 - `fold_block exit2 suite-run \` — budget arm, suite or run off the budget — fix: `bash <root>/hooks/session-poker.sh amend <name> --suites+ <suite> --reason '<why>'` (`_budget_remedy_line`)
 - `fold_block exit2 suite-run \` — budget arm, the full tree — fix: `bash tests/<first budgeted suite>`
+- `fold_block exit2 suite-run "no suite set is recorded for this agent" "send main the suites you need" \` — budget arm, no suite set recorded for the agent — fix: `bash <root>/hooks/session-poker.sh amend <name> --suites+ <suite> --reason '<why>'` (`_budget_remedy_line`) when a roster row carries the agent; none when no row carries its id, because there is nothing to widen until the orchestrator records one
 - `fold_block exit2 write "this writes the memory store" "use record/<wave>/assumptions.md" \` — memory wall — none: the fix is to write record/<wave>/assumptions.md or a rule proposal instead, content only the writer has
 
 ## payload/scripts/lib/stop.sh
