@@ -7851,9 +7851,18 @@ expect_status "33e a Files: tests/brand-new.test.sh (absent) brief is ADMITTED" 
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_contains "33e …and the roster row's suites_allowed carries the new suite's self edge" \
   "brand-new.test.sh" "$(roster_field "$ROW" suites_allowed)"
-expect_status "33e …the derived set is exactly the real tree's answer (self + 3 dir-refs)" \
-  "brand-new.test.sh cross-gate-agreement.test.sh docs-pins.test.sh seam-resolution.test.sh" \
-  "$(roster_field "$ROW" suites_allowed)"
+# THE ANSWER IS ASKED, NOT WRITTEN DOWN (wave-27 T72; A-orch-146). A fixed list went red on every
+# tree that gained a suite naming tests/: the real impact command is asked at run time, as the
+# wall asks it (the same command and cache setting, in the fixture's root), and joined as the row
+# joins it, so the row follows the tree and still goes red when the wall derives anything else.
+S33E_WANT=$(cd "$REPO" && env BIONIC_IMPACT_CACHE_DIR= bash "${BIONIC_SCRIPTS_DIR}/tests/lib/impact.sh" \
+  tests/brand-new.test.sh 2>/dev/null | awk -F'\t' '$1 != "" { print $1 }' | sort -u | tr '\n' ' ')
+S33E_WANT="${S33E_WANT% }"
+expect_contains "33e …the real impact command's answer holds the new suite's self edge" "brand-new.test.sh" "$S33E_WANT"
+expect_eq "33e …and at least one other suite beside it" "ok" \
+  "$([ "$(printf '%s\n' $S33E_WANT | /usr/bin/grep -vcx 'brand-new.test.sh')" -ge 1 ] && echo ok || echo "only: $S33E_WANT")"
+expect_status "33e …the derived set is exactly the real tree's answer" \
+  "$S33E_WANT" "$(roster_field "$ROW" suites_allowed)"
 expect_status "33e …and the row says the set was DERIVED, not declared" \
   "derived" "$(roster_field "$ROW" suites_source)"
 
@@ -10238,15 +10247,21 @@ section "§LR — a declared debt is recorded at dispatch, and only a well-forme
 # widget.test.sh), on make_repo's approved, bound plan. SYNTHESIZED.
 # fails-when: a well-formed declaration is refused or not recorded; one of the three faults is
 # admitted; a brief with no declaration, or the scaffold's unfilled slots, records a key.
-lr_gate() {  # <repo tag> <body lines> -> GATE_*, LR_ROW
+# (wave-27 T67) The bound plan carries a `## Tasks` table with a reads column: a Step-4 row reads
+# approval:design and the integrate row approval:release, so an approval: token is judged against
+# the names the approve verb accepts (S4). SYNTHESIZED, in units.sh's twelve-column shape plus reads.
+lr_gate() {  # <repo tag> <body lines> [<brief>] -> GATE_*, LR_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief "$2")" "w99-$1")"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T3 | 4 | build | the design | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | approval:design |\n| T8 | 8 | integrate | integrate | implementor | T3 | 30 | REQ-1 | — | — | — | pending | approval:release |\n' \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  local lr_b="${3:-$(adv_brief "$2")}"; lr_b="${lr_b//@ROOT@/$(cd "$REPO" && pwd -P)}"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$lr_b" "w99-$1")"
   LR_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
-lr_gate lr1 'Lands-red: widget.test.sh until approval:release
+lr_gate lr1 'Lands-red: widget.test.sh until approval:design
 Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
-expect_eq "LR1 a Lands-red: on the row's own suite, with its evidence and an approval: token, is admitted" "allow" "$GATE_VERDICT"
-expect_eq "LR1b …the row carries lands_red=<suite> until <token>" "widget.test.sh until approval:release" \
+expect_eq "LR1 a Lands-red: on the row's own suite, with its evidence and an approval: token a Step-4 row reads, is admitted" "allow" "$GATE_VERDICT"
+expect_eq "LR1b …the row carries lands_red=<suite> until <token>" "widget.test.sh until approval:design" \
   "$(roster_field "$LR_ROW" lands_red)"
 expect_eq "LR1c …and red_evidence=<path>" ".bionic/docs/record/wave-01-test/T9-red.md" "$(roster_field "$LR_ROW" red_evidence)"
 lr_gate lr1x 'Lands-red: tests/widget.test.sh until ext:vendor-fix
@@ -10254,13 +10269,13 @@ Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
 expect_eq "LR1x an ext:<slug> token is admitted too, the suite recorded by its basename" "allow widget.test.sh until ext:vendor-fix" \
   "$GATE_VERDICT $(roster_field "$LR_ROW" lands_red)"
 
-lr_gate lr2 'Lands-red: widget.test.sh until approval:release'
+lr_gate lr2 'Lands-red: widget.test.sh until approval:design'
 expect_eq "LR2 a Lands-red: with no Red-evidence: is refused" "deny" "$GATE_VERDICT"
 expect_contains "LR2b …the line names the missing label" "Lands-red: with no Red-evidence: line" "$GATE_ERR"
 expect_contains "LR2c …and the detail the line to add" "    Red-evidence: <path under record/>" "$GATE_VERR"
 expect_eq "LR2d …and no row is written" "" "$LR_ROW"
 
-lr_gate lr3 'Lands-red: other.test.sh until approval:release
+lr_gate lr3 'Lands-red: other.test.sh until approval:design
 Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
 expect_eq "LR3 a Lands-red: on a suite outside the row's suite set is refused" "deny" "$GATE_VERDICT"
 expect_contains "LR3b …naming the suite" "Lands-red: other.test.sh is outside Suites:" "$GATE_ERR"
@@ -10283,11 +10298,74 @@ Red-evidence: <path under record/>'
 expect_eq "LR6 the scaffold's two slots pasted unfilled declare nothing: admitted" "allow" "$GATE_VERDICT"
 expect_contains "LR6b …its row is written" "status=intended" "$LR_ROW"
 expect_absent "LR6c …with no lands_red= on it" "lands_red=" "$LR_ROW"
-lr_gate lr7 'Lands-red: widget.test.sh until approval:release  # optional
+lr_gate lr7 'Lands-red: widget.test.sh until approval:design  # optional
 Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md  # with Lands-red:'
 expect_eq "LR7 the two lines filled with the scaffold's comments kept: admitted, the comments off the values" \
-  "allow|widget.test.sh until approval:release|.bionic/docs/record/wave-01-test/T9-red.md" \
+  "allow|widget.test.sh until approval:design|.bionic/docs/record/wave-01-test/T9-red.md" \
   "$GATE_VERDICT|$(roster_field "$LR_ROW" lands_red)|$(roster_field "$LR_ROW" red_evidence)"
+
+# --- wave-27 T67 (review pass 46 B4, S1, S4, N1, N2, N3): what the wall refuses besides.
+LR_EV_OK='Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
+lr_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
+# B4: the full-suite runner is never a declared red, however it is spelled.
+lr_k=0
+for lr_sp in 'run.sh' 'tests/run.sh' './tests/run.sh' 'bash tests/run.sh'; do
+  lr_k=$((lr_k + 1))
+  lr_gate "lr8-$lr_k" "Lands-red: ${lr_sp} until ext:x
+${LR_EV_OK}" "$(adv_brief "Lands-red: ${lr_sp} until ext:x
+${LR_EV_OK}" | sed 's#^Suites: tests/widget.test.sh$#Suites: tests/run.sh#')"
+  expect_eq "LR8 B4 Suites: tests/run.sh with Lands-red: ${lr_sp} until ext:x is refused" "deny" "$GATE_VERDICT"
+  expect_contains "LR8b …the line naming the runner (${lr_sp})" "Lands-red: names the full-suite runner" "$(lr_first)"
+  expect_contains "LR8c …the detail saying it is never a declared red (${lr_sp})" "the full-suite runner is never a declared red" "$GATE_VERR"
+  expect_eq "LR8d …and no row is written (${lr_sp})" "" "$LR_ROW"
+done
+lr_gate lr8e "Lands-red: widget.sh until ext:x
+${LR_EV_OK}"
+expect_contains "LR8e a Lands-red: naming no <name>.test.sh file is refused, saying so" "Lands-red: names no <name>.test.sh" "$(lr_first)"
+# S4, N1: an approval: token is one a row reads, and not one the integrate row waits on.
+lr_gate lr9 "Lands-red: widget.test.sh until approval:release
+${LR_EV_OK}"
+expect_eq "LR9 S4 until approval:release, the approval the integrate row reads, is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR9b …the line naming the approval" "approval:release is read at integration" "$(lr_first)"
+expect_contains "LR9c …the detail saying it comes after the step a debt must clear before" "comes after the step a debt must clear before" "$GATE_VERR"
+lr_gate lr9n "Lands-red: widget.test.sh until approval:nobody
+${LR_EV_OK}"
+expect_eq "LR9n until approval:nobody, a name no row reads, is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR9n2 …the line saying no row reads it" "approval:nobody is read by no row" "$(lr_first)"
+expect_contains "LR9n3 …the detail naming the names the rows read" "design" "$GATE_VERR"
+# N2: one declaration.
+lr_gate lr10 "Lands-red: widget.test.sh until ext:x
+Lands-red: widget.test.sh until ext:y
+${LR_EV_OK}"
+expect_eq "LR10 N2 a brief with two Lands-red: lines is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR10b …the line counting them" "the brief has 2 Lands-red: lines" "$(lr_first)"
+expect_eq "LR10c …and no row is written" "" "$LR_ROW"
+# N3: the evidence is a file under the run's record root.
+lr_k=0
+for lr_ev in /tmp/x.md ../x.md .bionic/tmp/scratch/w99/x.md .bionic/docs/record/../tmp/x.md; do
+  lr_k=$((lr_k + 1))
+  lr_gate "lr11-$lr_k" "Lands-red: widget.test.sh until ext:x
+Red-evidence: ${lr_ev}"
+  expect_eq "LR11 N3 Red-evidence: ${lr_ev} is refused" "deny" "$GATE_VERDICT"
+  expect_contains "LR11b …the line saying where it must be (${lr_ev})" "Red-evidence: is not under record/" "$(lr_first)"
+done
+lr_gate lr11r "Lands-red: widget.test.sh until ext:x
+Red-evidence: record/wave-01-test/T9-red.md"
+expect_eq "LR11r a record/… path, read from the docs root as the fact verb reads one, is admitted" \
+  "allow|record/wave-01-test/T9-red.md" "$GATE_VERDICT|$(roster_field "$LR_ROW" red_evidence)"
+lr_gate lr11a "Lands-red: widget.test.sh until ext:x
+Red-evidence: @ROOT@/.bionic/docs/record/wave-01-test/T9-red.md"
+expect_eq "LR11a …an absolute path under the record root, its directories read physically, is admitted" \
+  "allow" "$GATE_VERDICT"
+# S1: a long suite name outside Suites: is cut in the fact, and the line keeps its fix.
+LR12_S="a-suite-name-of-sixty-characters-long-enough-to-wrap.test.sh"
+lr_gate lr12 "Lands-red: ${LR12_S} until ext:x
+${LR_EV_OK}"
+expect_eq "LR12 precondition: the name is sixty characters" "60" "${#LR12_S}"
+expect_eq "LR12a S1 a sixty-character suite outside Suites: is refused by a deny" "deny" "$GATE_VERDICT"
+expect_eq "LR12b …its first line at most 100 columns" "ok" "$([ "$(bionic_cols "$(lr_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(lr_first)")")"
+expect_contains "LR12c …naming the suite, cut by the library" "Lands-red: a-suite-name" "$(lr_first)"
+expect_contains "LR12d …with its fix" "(name a suite the row runs)" "$(lr_first)"
 # --- FILES-LIST19..: one pair of punctuation around a path, and a trailing `;` (wave-27 T49; review
 # pass 19 should-fix 1). The reader strips from an item ONE surrounding pair of double quotes, single
 # quotes, parentheses, square brackets or backticks, and a trailing `;`; what is left is judged as any
@@ -10658,5 +10736,262 @@ Files: $T57_REC/e.md
 $T57_PY")
 expect_contains "T57-D …while an auditor's records derive nothing: its set is the waiver" "suites=none" "$BV"
 expect_contains "T57-D …and it is admitted" "rc=0" "$BV"
+
+
+# ============================================================================
+section "§T72 — a reader's suites are its Suites: tokens, and a record is a regular file (wave-27 T72; review pass 49 B1, S1, S2)"
+# THE ROLE DECIDES (B1). T49 and T57 each closed the states of a reader's `Suites:` line they
+# listed, and review pass 49 found the one neither listed: a line that is all comment. The
+# shipped scaffold's line with `none` removed and its comment kept IS that line, and the reader
+# was given the writer's derivation (eight suites beside its run) or refused for the missing
+# impact command. Each reader below is driven at the real wall WITH an impact command that
+# answers eight suites and WITHOUT one; a writer with the same lines is the control.
+T72_REC=.bionic/docs/record/w
+T72_SCAF="$(scaffold_raw_line "$DISPATCH_FILE" Suites)"
+T72_CMT="Suites:${T72_SCAF#Suites: none}"
+T72_HASH="Suites: #"
+T72_RUN="Re-executes: ${RL_BT}pytest tests/unit${RL_BT}"
+expect_contains "T72 precondition: the shipped scaffold's Suites: line is the waiver and a comment" "Suites: none  # " "$T72_SCAF"
+expect_eq "T72 …and with none removed it is a label, a comment and no token" "Suites:  # " "${T72_CMT:0:11}"
+t72_impact() {  # <repo> -> an impact command that answers eight suites for any path
+  mkdir -p "$1/.bionic"
+  printf 'for s in a b c d e f g h; do printf "%%s.test.sh\\t%%s\\n" "$s" "$1"; done\n' > "$1/t72-impact.sh"
+  printf 'impact-command: bash %s/t72-impact.sh\n' "$1" > "$1/.bionic/config.yaml"
+}
+t72_repo() {  # <role key: aud|crit|rev|wr> <on|off> -> the repo that role is dispatched in
+  local repo
+  case "$1" in
+    rev) repo=$(q_unbound "rt72-$1-$2") ;;
+    *)   repo=$(make_repo "rt72-$1-$2" yes); write_attestation "$repo" "$SID_A"
+         [ "$1" = crit ] && q_rigor "$repo" tested ;;
+  esac
+  [ "$2" = on ] && t72_impact "$repo"
+  printf '%s' "$repo"
+}
+t72_brief() {  # <role key> <tag> <suites line> [<runs line>] -> that role's brief
+  local q f
+  case "$1" in
+    crit) q='evidence, adversarial, structure'; f="$T72_REC/$2-e.md, $T72_REC/$2-a.md, $T72_REC/$2-s.md" ;;
+    wr)   q=''; f='lib/a.sh' ;;
+    *)    q=evidence; f="$T72_REC/$2-e.md" ;;
+  esac
+  printf 'Your task: re-run the evidence.\nExpected artifact: %s/%s-e.md\nExpected duration: ~30 minutes.\n' "$T72_REC" "$2"
+  [ -n "$q" ] && printf 'Questions: %s\n' "$q"
+  printf 'Files: %s\n%s' "$f" "$3"
+  [ -n "${4:-}" ] && printf '\n%s' "$4"
+  return 0
+}
+t72_gate() {  # <repo> <tag> <role> <brief> -> R: allow:<suites_allowed>|<suites_source>|<re_executes>, or deny:<first line>
+  local row
+  q_gate "$1" "t72-$2" "$3" "$4"
+  if [ "$GATE_VERDICT" = allow ]; then
+    row=$(/usr/bin/grep -F "|name=wq-t72-$2|" "$(roster_path "$1" "$SID_A")" | head -1)
+    R="allow:$(roster_field "$row" suites_allowed)|$(roster_field "$row" suites_source)|$(roster_field "$row" re_executes)"
+  else R="deny:$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')"; fi
+}
+T72_N=0
+for T72_IMP in on off; do
+  for T72_K in "aud bionic:auditor auditor" "crit bionic:critic critic" "rev bionic:reviewer reviewer"; do
+    set -- $T72_K; T72_KEY=$1; T72_ROLE=$2; T72_WORD=$3
+    T72_R=$(t72_repo "$T72_KEY" "$T72_IMP")
+    for T72_L in cmt hash; do
+      case "$T72_L" in cmt) T72_LINE="$T72_CMT"; T72_SAY="the scaffold line with none removed" ;;
+                       *)   T72_LINE="$T72_HASH"; T72_SAY="Suites: #" ;; esac
+      T72_N=$((T72_N + 1))
+      t72_gate "$T72_R" "$T72_N" "$T72_ROLE" "$(t72_brief "$T72_KEY" "r$T72_N" "$T72_LINE" "$T72_RUN")"
+      expect_eq "T72-B1 $T72_ROLE, impact command $T72_IMP, $T72_SAY and one run: admitted, Suites: none, the one run" \
+        "allow:none|declared|${RL_BT}pytest tests/unit${RL_BT}" "$R"
+      T72_N=$((T72_N + 1))
+      t72_gate "$T72_R" "$T72_N" "$T72_ROLE" "$(t72_brief "$T72_KEY" "r$T72_N" "$T72_LINE")"
+      expect_contains "T72-B1 $T72_ROLE, impact command $T72_IMP, $T72_SAY and no run: refused, nothing to re-execute" \
+        "the $T72_WORD declares nothing to re-execute" "$R"
+      expect_contains "T72-B1 …the reason the wall hands back names it" "declares nothing to re-execute" "$GATE_REASON"
+      expect_absent "T72-B1 …and no second fault: never the impact-command refusal" "no impact command" "$GATE_REASON"
+      # the lines a brief may hold beside it, through the same library the wall reads
+      BV=$(brief_verdict "$T72_ROLE" "$T72_R" "$(t72_brief "$T72_KEY" "v$T72_N" "$T72_LINE" 'Re-executes: none')")
+      expect_contains "T72-B1 $T72_ROLE, impact command $T72_IMP, $T72_SAY and Re-executes: none: nothing to re-execute" \
+        "finding: the $T72_WORD declares nothing to re-execute" "$BV"
+      expect_contains "T72-B1 …and its set is the waiver, nothing derived" "suites=none" "$BV"
+      BV=$(brief_verdict "$T72_ROLE" "$T72_R" "$(t72_brief "$T72_KEY" "v$T72_N" "$T72_LINE" \
+        "Re-executes: ${RL_BT}pytest a${RL_BT}, ${RL_BT}pytest b${RL_BT}, ${RL_BT}pytest c${RL_BT}, ${RL_BT}pytest d${RL_BT}")")
+      expect_contains "T72-B1 $T72_ROLE, impact command $T72_IMP, $T72_SAY and four runs: refused on the total" \
+        "finding: the total of 4 runs exceeds the 3-run cap" "$BV"
+    done
+    BV=$(brief_verdict "$T72_ROLE" "$T72_R" "$(t72_brief "$T72_KEY" "v$T72_N" 'Suites: a.test.sh  # note' \
+      "Re-executes: ${RL_BT}pytest a${RL_BT}, ${RL_BT}pytest b${RL_BT}, ${RL_BT}pytest c${RL_BT}")")
+    expect_contains "T72-B1 $T72_ROLE, impact command $T72_IMP: a named token beside its comment still counts, four in total" \
+      "finding: the total of 4 runs exceeds the 3-run cap" "$BV"
+  done
+  # a writer is untouched: its Files: derive with an impact command, and are refused without one
+  T72_R=$(t72_repo wr "$T72_IMP")
+  for T72_L in cmt hash; do
+    case "$T72_L" in cmt) T72_LINE="$T72_CMT"; T72_SAY="the scaffold line with none removed" ;;
+                     *)   T72_LINE="$T72_HASH"; T72_SAY="Suites: #" ;; esac
+    T72_N=$((T72_N + 1))
+    t72_gate "$T72_R" "$T72_N" bionic:implementor "$(t72_brief wr "r$T72_N" "$T72_LINE" "$T72_RUN")"
+    if [ "$T72_IMP" = on ]; then
+      expect_eq "T72-B1 a writer, impact command on, $T72_SAY: derived, as the base does" \
+        "allow:a.test.sh b.test.sh c.test.sh d.test.sh e.test.sh f.test.sh g.test.sh h.test.sh|derived|${RL_BT}pytest tests/unit${RL_BT}" "$R"
+    else
+      expect_contains "T72-B1 a writer, no impact command, $T72_SAY: refused for it, as the base does" \
+        "no impact command is configured here" "$R"
+    fi
+  done
+done
+
+# A RECORD IS A REGULAR FILE, OR A PATH NOT THERE YET (S1). ONE row: for every shape the wall's
+# count of the path beside the fact verb's answer for it once it exists, red on any disagreement.
+# The shapes are review pass 49's (its d5 and d6 tables) and the four of the plan's S1 that a
+# test can make: a directory named without its slash, a symlink, a FIFO, a path under a directory
+# of mode 000. A device needs root to make under record/, and a name holding a comma is two
+# Files: entries before the wall sees it, so neither is a row here.
+T72_D=$(walk_repo rt72-diff audited)
+T72_OUT="$SANDBOX/t72-outside"; mkdir -p "$T72_OUT/sub"
+T72_LNK="$SANDBOX/t72-link"; ln -s "$SANDBOX" "$T72_LNK"
+T72_DR="$T72_D/$T72_REC"
+mkdir -p "$T72_DR/dirx" "$T72_DR/locked" "$T72_D/.bionic/tmp/scr"
+ln -s "$T72_OUT" "$T72_DR/out"; ln -s "$T72_DR" "$T72_D/.bionic/tmp/scr/in"; ln -s "$T72_OUT/sub" "$T72_DR/lout"
+t72_record() {  # <file> -> a reading record the verb takes, for the differential repo
+  printf 'reviewed: %s..%s\nquestion: evidence\nresult: pass\nscope: piece\n\nfound\n' \
+    "$(git -C "$T72_D" rev-list --max-parents=0 HEAD)" "$(git -C "$T72_D" rev-parse HEAD)" > "$1"
+}
+t72_record "$T72_DR/sl-target.md"; ln -s "$T72_DR/sl-target.md" "$T72_DR/sl.md"
+t72_record "$T72_DR/hard-src.md"; ln "$T72_DR/hard-src.md" "$T72_DR/hard.md"
+mkfifo "$T72_DR/ff"
+t72_record "$T72_DR/locked/p-locked.md"; chmod 000 "$T72_DR/locked"
+T72_AB="$T72_D"; T72_AL="$T72_LNK${T72_D#"$SANDBOX"}"
+T72_DIFF=""; T72_SEEN=0; T72_TOOK=0
+while IFS='|' read -r T72_TAG T72_P; do
+  [ -n "$T72_TAG" ] || continue
+  T72_P="${T72_P//@R@/$T72_AB}"; T72_P="${T72_P//@L@/$T72_AL}"
+  T72_BR="Your task: read.
+Expected artifact: .bionic/tmp/scr/out.md
+Expected duration: 30 minutes.
+Files: %s
+Suites: tests/a.test.sh
+Questions: evidence"
+  t72_gate "$T72_D" "d-$T72_TAG" bionic:auditor "$(printf "$T72_BR" "$T72_P")"
+  case "$R" in
+    allow:*) T72_WALL=1; T72_READER="wq-t72-d-$T72_TAG" ;;
+    *'dealt 1 question, names 0 records'*) T72_WALL=0
+      t72_gate "$T72_D" "v-$T72_TAG" bionic:auditor "$(printf "$T72_BR" "$T72_REC/zz-$T72_TAG.md, $T72_P")"
+      T72_READER="wq-t72-v-$T72_TAG" ;;
+    *) T72_WALL="?"; T72_READER="" ;;
+  esac
+  T72_VERB="?"
+  if [ -n "$T72_READER" ] && [ "${R%%:*}" = allow ]; then
+    walk_start "$T72_D" "$T72_READER"
+    case "$T72_P" in /*) T72_K="$T72_P" ;; *) T72_K="$T72_D/$T72_P" ;; esac
+    # the path exists when the verb reads it: a missing file is written where the kernel puts
+    # it, and also where a logical cd places it, so the answer is the placing's and not the content's
+    if [ ! -e "$T72_K" ] && [ ! -L "$T72_K" ] && [ "${T72_K%/}" = "$T72_K" ]; then
+      mkdir -p "$(dirname "$T72_K")" 2>/dev/null && t72_record "$T72_K" 2>/dev/null
+      T72_LOG="$(cd "$(dirname "$T72_K")" 2>/dev/null && pwd -P)" && [ -d "$T72_LOG" ] \
+        && [ ! -e "$T72_LOG/$(basename "$T72_K")" ] && t72_record "$T72_LOG/$(basename "$T72_K")" 2>/dev/null
+    fi
+    if (cd "$T72_D" && env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SID_A" bash "${BIONIC_HOOKS_DIR}/session-poker.sh" \
+          proof-add review "$T72_K" --question evidence --reader "$T72_READER" >/dev/null 2>&1); then T72_VERB=1; else T72_VERB=0; fi
+  fi
+  T72_SEEN=$((T72_SEEN + 1)); [ "$T72_VERB" = 1 ] && T72_TOOK=$((T72_TOOK + 1))
+  printf '  T72-S1 shape %-10s wall=%s verb=%s  %s\n' "$T72_TAG" "$T72_WALL" "$T72_VERB" "$T72_P"
+  [ "$T72_WALL" = "$T72_VERB" ] || T72_DIFF="$T72_DIFF $T72_TAG(wall=$T72_WALL,verb=$T72_VERB)"
+done <<T72_SHAPES
+plain|$T72_REC/p-plain.md
+abs|@R@/$T72_REC/p-abs.md
+abslink|@L@/$T72_REC/p-abslink.md
+outlink|$T72_REC/out/p-out.md
+outlinkA|@R@/$T72_REC/out/p-outA.md
+inlink|.bionic/tmp/scr/in/p-in.md
+inlinkL|@L@/.bionic/tmp/scr/in/p-inL.md
+dotdotin|$T72_REC/../w/p-dd.md
+dotdotout|$T72_REC/../../plans/p-ddo.md
+newpar|$T72_REC/newdir/p-new.md
+newparL|@L@/$T72_REC/newdir2/deeper/p-newL.md
+slash|$T72_REC/dirx/
+dirnoslash|$T72_REC/dirx
+quote|$T72_REC/it's.md
+dotslash|./$T72_REC/p-ds.md
+dblslash|@R@/.bionic//docs/./record/w/p-dbl.md
+nopedotdot|$T72_REC/nope/../p-nope.md
+loutdotdot|$T72_REC/lout/../p-lout.md
+symfile|$T72_REC/sl.md
+hardlink|$T72_REC/hard.md
+case|.bionic/docs/RECORD/w/p-case.md
+docsrel|record/w/p-docsrel.md
+locked|$T72_REC/locked/p-locked.md
+tilde|~/p-tilde.md
+fifo|$T72_REC/ff
+T72_SHAPES
+chmod 755 "$T72_DR/locked"
+expect_eq "T72-S1 the differential ran every shape" "25" "$T72_SEEN"
+expect_eq "T72-S1 …the verb took fourteen of them, so both answers are in the table" "14" "$T72_TOOK"
+expect_eq "T72-S1 for every shape the wall counts a record exactly when the fact verb takes it" "" "$T72_DIFF"
+
+# THE COST OF PLACING (S2): linear in a path's length, and a path over 1,024 bytes is no record.
+t72_len() {  # <bytes> -> a path under the record root of exactly that many bytes, its directories missing
+  local p="$T72_REC/n" n
+  while [ "$(( ${#p} + 5 ))" -le "$1" ]; do p="$p/a"; done
+  p="$p.md"; n=$(( $1 - ${#p} )); while [ "$n" -gt 0 ]; do p="${p%.md}x.md"; n=$((n - 1)); done
+  printf '%s' "$p"
+}
+T72_R=$(make_repo rt72-len yes); write_attestation "$T72_R" "$SID_A"
+T72_P1024=$(t72_len 1024); T72_P1025=$(t72_len 1025)
+expect_eq "T72-S2 precondition: the two paths are 1,024 and 1,025 bytes" "1024 1025" \
+  "$(printf '%s' "$T72_P1024" | wc -c | tr -d ' ') $(printf '%s' "$T72_P1025" | wc -c | tr -d ' ')"
+t72_gate "$T72_R" len1024 bionic:auditor "$(t72_brief aud x 'Suites: tests/a.test.sh' | sed "s|^Files: .*|Files: $T72_P1024|; s|^Expected artifact: .*|Expected artifact: .bionic/tmp/scr/out.md|")"
+expect_contains "T72-S2 a record path of 1,024 bytes is a record" "allow:" "$R"
+t72_gate "$T72_R" len1025 bionic:auditor "$(t72_brief aud x 'Suites: tests/a.test.sh' | sed "s|^Files: .*|Files: $T72_P1025|; s|^Expected artifact: .*|Expected artifact: .bionic/tmp/scr/out.md|")"
+expect_contains "T72-S2 a record path of 1,025 bytes is no record" "dealt 1 question, names 0 records" "$R"
+# twenty paths of 2,500 missing segments: a reader's dispatch within one second of a writer's
+# same line, under /bin/bash 3.2 (the best of two each, so one busy moment is not the verdict)
+T72_DEEP=""; for T72_I in $(seq 1 2500); do T72_DEEP="${T72_DEEP}a/"; done
+T72_F20=""; for T72_I in $(seq 1 20); do T72_F20="${T72_F20:+$T72_F20, }$T72_REC/c$T72_I/${T72_DEEP}x.md"; done
+T72_BEST_W=999999; T72_BEST_A=999999
+for T72_I in 1 2; do
+  for T72_K in "w bionic:implementor" "a bionic:auditor"; do
+    set -- $T72_K
+    PATH="/bin:$PATH" GATE_HIRES=1 q_gate "$T72_R" "t72-cost$1$T72_I" "$2" "Your task: read.
+Expected artifact: .bionic/tmp/scr/out.md
+Expected duration: 30 minutes.
+Files: $T72_F20
+Suites: tests/a.test.sh
+Questions: evidence"
+    [ "$1" = w ] && T72_WV="$GATE_VERDICT"
+    if [ "$1" = w ]; then [ "${GATE_TIME_CS:-999999}" -lt "$T72_BEST_W" ] && T72_BEST_W="$GATE_TIME_CS"
+    else [ "${GATE_TIME_CS:-999999}" -lt "$T72_BEST_A" ] && T72_BEST_A="$GATE_TIME_CS"; fi
+  done
+done
+expect_eq "T72-S2 the writer's dispatch with twenty deep paths is admitted (the control runs)" "allow" "$T72_WV"
+printf '  T72-S2 best of two: writer %s cs, reader %s cs\n' "$T72_BEST_W" "$T72_BEST_A"
+expect_eq "T72-S2 twenty paths of 2,500 missing segments cost a reader at most one second over a writer" "ok" \
+  "$([ "$T72_BEST_A" -le $((T72_BEST_W + 100)) ] && echo ok || echo "reader ${T72_BEST_A} cs, writer ${T72_BEST_W} cs")"
+# the placing alone, under /bin/bash 3.2: twenty paths of 1,000 bytes cost what twenty short ones do
+T72_PLACE=$(/usr/bin/sed -n '/^    _dp_rec_place() {/,/^    }/p' "$GATE")
+expect_contains "T72-S2 precondition: the placing is lifted out of the wall" "_dp_rec_place() {" "$T72_PLACE"
+T72_COST=$(/bin/bash -c '
+  eval "$1"; BIONIC_ROOT="$2"
+  cs() { python3 -c "import time; print(int(time.time()*100))"; }
+  long="'"$T72_REC"'/n"; while [ "${#long}" -lt 990 ]; do long="$long/a"; done
+  t0=$(cs); for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do _dp_rec_place "$long/x$i.md" >/dev/null; done; t1=$(cs)
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do _dp_rec_place "'"$T72_REC"'/s$i/x.md" >/dev/null; done; t2=$(cs)
+  printf "%s %s %s" "$(_dp_rec_place "'"$T72_REC"'/s1/x.md")" "$((t1 - t0))" "$((t2 - t1))"
+' _ "$T72_PLACE" "$T72_R" 2>&1)
+expect_contains "T72-S2 the lifted placing runs and places a short path" "$T72_REC/s1/x.md" "$T72_COST"
+set -- $T72_COST
+expect_eq "T72-S2 placing twenty 1,000-byte paths costs at most half a second over twenty short ones" "ok" \
+  "$([ "${2:-999999}" -le $(( ${3:-0} + 50 )) ] && echo ok || echo "long ${2:-?} cs, short ${3:-?} cs")"
+
+# TWO SENTENCES (S3, S4) say what the code does.
+BV=$(brief_detail bionic:auditor "$BRIEF_NOCONF" "Questions: evidence
+Suites: tests/a.test.sh, tests/b.test.sh, tests/c.test.sh, tests/d.test.sh")
+expect_contains "T72-S4 the over-cap detail is printed for four suites" "finding: the total of 4 runs exceeds the 3-run cap" "$BV"
+expect_contains "T72-S4 …and names the characters that make housekeeping a run, as the cap's comment does" \
+  'counts nothing unless it holds one of ; & | ` $( <( >( or a' "$BV"
+expect_absent "T72-S4 …never \"a shell operator\", which a redirection is and a quoted ; is not" "a shell operator" "$BV"
+T72_S3=$(/usr/bin/grep -n "AN ABSOLUTE PATH IS PLACED AS THE FACT VERB PLACES IT" -A3 "$GATE")
+expect_contains "T72-S3 the placing's comment is found in the wall" "PLACES IT" "$T72_S3"
+expect_contains "T72-S3 …and says the verb reads with a logical cd, so .. is folded in the text first" \
+  'a logical `cd` and then `pwd -P`, so `..` is folded in the text before' "$T72_S3"
+expect_absent "T72-S3 …never that the verb reads with cd -P" 'with `cd -P`' "$T72_S3"
 
 finish

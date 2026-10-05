@@ -1347,8 +1347,23 @@ s7_fire "$FW_D" "$FW_TX"
 expect_contains "FW1: AC-6.7 a ready read-only row left undispatched refuses the turn end" \
   "Fillable gap at turn end" "$(reason_of)"
 expect_contains "FW1b: …naming it" "T5" "$(reason_of)"
-expect_absent "FW1c: …and never the row that waits on an unlanded read" "T6" "$(reason_of)"
-expect_absent "FW1d: …nor the writer the closed gap holds back" "T1" "$(reason_of)"
+# THE ROW LIST, NOT THE TEXT (wave-27 T67; A-orch-140): the refusal prints the hook's absolute
+# path, which may hold any id (this row's own tree is 27-T67), so a must-not reads the ids the
+# printed decline names, as a word, the shape tests/patrol-duties-gate.test.sh uses.
+fw_rows() {  # -> the ids the refusal's printed decline names, space-joined
+  reason_of | /usr/bin/grep -o "session-poker\.sh'\{0,1\} decline [A-Za-z0-9_.,-]*" | head -1 \
+    | sed 's/.* decline //' | tr ',' ' '
+}
+fw_rows_unnamed() {  # <label> <id the refusal's row list must not hold>
+  local rows; rows="$(fw_rows)"
+  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
+  case " $rows " in *" $2 "*) no "$1" "the row list <$rows> names <$2>"; return ;; esac
+  ok "$1"
+}
+require_helpers fw_rows fw_rows_unnamed
+expect_eq "FW1c0 precondition: the refusal's row list is read, and it is T5" "T5" "$(fw_rows)"
+fw_rows_unnamed "FW1c: …and never the row that waits on an unlanded read" "T6"
+fw_rows_unnamed "FW1d: …nor the writer the closed gap holds back" "T1"
 expect_contains "FW1e: the refusal asks for the dispatch" "Dispatch each named row" "$(reason_of)"
 expect_absent "FW1f: …and no longer for a hand edit of the row: the launch recorder ledgers it" \
   "ledger it active" "$(reason_of)"
@@ -1864,5 +1879,23 @@ rw_digest "$RW_D" step4 2026-09-18T00:00:00Z
 s7_fire "$RW_D" "$RW_TX"
 expect_contains "RW4 a digest older than the turn's tick gives no cause: the refusal is today's" \
   'which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed)' "$(reason_of)"
+
+# THE FIX NAMES WHAT THE WALL COUNTS (wave-27 T74; review pass 53 S1). The wall's predicate is a
+# TaskList call or a write naming the plan; the delete-and-recreate it asked for (TaskUpdate,
+# TaskCreate) is never counted, so the fix read `rebuild it` and dropped the one act that
+# discharges it. Now the fix names TaskList first and the detail keeps "or a plan-ledger write",
+# the fallback where the task tools are absent. The first line keeps to 100 columns.
+# fails-when: a plan-moved refusal's fix leaves out TaskList, or its detail the plan-ledger write.
+rw_first() { reason_of | head -1; }
+require_helpers rw_first
+for rw_cause in step4 grew; do
+  rw_digest "$RW_D" "$rw_cause"
+  s7_fire "$RW_D" "$RW_TX"
+  expect_contains "RW5 ($rw_cause) the first line's fix names TaskList first" \
+    "no task-list refresh since this tick (TaskList, rebuild it, then stop again)" "$(rw_first)"
+  expect_contains "RW5b ($rw_cause) …the detail keeps the plan-ledger write" "or a plan-ledger write" "$(reason_of)"
+  expect_true "RW5c ($rw_cause) …and the first line keeps to 100 columns" \
+    test "$(rw_first | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
+done
 
 finish

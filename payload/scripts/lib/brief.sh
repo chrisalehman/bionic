@@ -1286,6 +1286,17 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
         gsub(/[ \t\r]+/, " ", v); sub(/^ /, "", v); sub(/ $/, "", v)
         if (v != "" && !istemplate(v)) print "lands_red=" v
       }
+      # ONE DECLARATION (wave-27 T67; review pass 46 N2): the lift reads the first line, so a second
+      # filled Lands-red: line would be dropped without a word. Their count prints as `lands_red_n=`
+      # for the dispatch wall to refuse; an unfilled scaffold slot or an example is not counted.
+      nlr = split(allhits("lands_red"), LRH, " "); clr = 0
+      for (j = 1; j <= nlr; j++) {
+        v = spanof(LRH[j]); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
+        if (match(v, /(^|[ \t])#/)) v = substr(v, 1, RSTART - 1)
+        gsub(/[ \t\r]+/, " ", v); sub(/^ /, "", v); sub(/ $/, "", v)
+        if (v != "" && !istemplate(v)) clr++
+      }
+      if (clr > 1) print "lands_red_n=" clr
       h = firsthit("red_evidence")
       if (h > 0) {
         v = spanof(h); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
@@ -1533,14 +1544,6 @@ brief_validate_fields() {
   files_unread=$(brief_field "$lifted" files_unread)
   files_bad=$(brief_field "$lifted" files_bad)
   questions=$(brief_field "$lifted" questions)
-  # A READER'S Files: ASKS FOR NO DERIVATION (wave-27 T57; review pass 38 B1, A-orch-105). A
-  # reader's Files: line lists its records, and a reader edits no tracked file, so nothing is
-  # derived from it and "no impact command is configured" is never its answer: with no Suites:
-  # line it is read as `Suites: none`, and the evidence rules below judge the runs it declares.
-  # A Suites: line whose tokens were refused, dropped or all comment is not "no Suites: line".
-  if dp_is_reader "$role" && [ -n "$files" ] && [ -z "$suites$suites_bad$suites_dropped$suites_commented" ]; then
-    suites="none"
-  fi
   # THE ROLE AND ITS QUESTIONS DECIDE THE RUN CAP (wave-20 T4; wave-27 T15, F4), and the refusal
   # texts print the number the lift applied, from the same function.
   cap=$(dp_runs_cap "$role" "$questions")
@@ -1680,7 +1683,8 @@ were dropped:
 The cap of three is the evidence question's, from payload/context/checks-evidence.md
 (\"cap 3 total\"), and binds whichever reader holds that question. Each suite named under
 Suites: and each run under Re-executes: is one re-execution of it; file housekeeping
-(${DP_HOUSEKEEPING_WORDS}) counts nothing unless it holds a shell operator.
+(${DP_HOUSEKEEPING_WORDS}) counts nothing unless it holds one of ; & | \` \$( <( >( or a
+line break, quoted or not.
 
 Fix: name at most three in all, across Suites: and Re-executes: —
     Suites: tests/one.test.sh, tests/two.test.sh
@@ -1926,7 +1930,17 @@ Then retry the dispatch."
   impact_cmd=$(config_value "$root" "impact-command" "")
   BRIEF_SUITES_ALLOWED=""
   BRIEF_SUITES_SOURCE=""
-  if [ -n "$suites" ]; then
+  # A READER'S SUITES ARE THE TOKENS ITS Suites: LINE NAMES (wave-27 T72; review pass 49 B1,
+  # A-orch-134). A reader's Files: line lists its records and a reader edits no tracked file, so
+  # nothing is derived from it and "no impact command is configured" is never its answer. The
+  # ROLE decides, here, ahead of the derivation: a line that is all comment, `#` alone, blank or
+  # absent names no token, and that is `Suites: none`. T57 tested which fields were empty instead,
+  # and left the line that is all comment to the writer's derivation (eight suites beside a run).
+  # The evidence rules above have already judged the runs, and a refused or dropped token above.
+  if dp_is_reader "$role"; then
+    BRIEF_SUITES_ALLOWED="${suites:-none}"
+    BRIEF_SUITES_SOURCE="declared"
+  elif [ -n "$suites" ]; then
     BRIEF_SUITES_ALLOWED="$suites"
     BRIEF_SUITES_SOURCE="declared"
   elif [ -z "$files" ]; then
