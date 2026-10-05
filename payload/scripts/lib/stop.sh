@@ -1302,12 +1302,12 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
         # (wave-24 T13, D10): that list is space-joined for reading, so a path holding a
         # space would come back as two. Each path is one quoted `--files+` word here.
         #
-        # EACH IN THE SPELLING amend ACCEPTS (wave-27 T29; REQ-12 AC-12.3, D21). A path at the
-        # root carries no `/`, and the amend this line printed for one was refused by amend
-        # itself. `brief_files_entry` is the Files: reader amend reads with, handed the same
-        # root fact amend hands it, so a bare name it would not read comes out as `./<name>`.
-        # Without lib/brief.sh the path is printed as the diff spells it, as before.
-        LG_FIX_FILES=""; LG_ROOTS=""; LG_ROOTS_READ=""
+        # EACH IN THE SPELLING amend ACCEPTS (wave-27 T29, T42; REQ-12 AC-12.3, D21). A path at
+        # the root carries no `/`, and the amend this line printed for one was refused by amend
+        # itself. `brief_files_entry` is the Files: reader amend reads with, so a bare name it
+        # would not record comes out as `./<name>`; it lists no directory. Without lib/brief.sh
+        # the path is printed as the diff spells it, as before.
+        LG_FIX_FILES=""
         while IFS= read -r LG_DF; do
           [ -n "$LG_DF" ] || continue
           _lg_path_declared "$LG_DF" "$CFILES" && continue
@@ -1316,8 +1316,7 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
           declare -F brief_files_entry >/dev/null 2>&1 \
             || . "$_STOP_LIB_DIR/brief.sh" >/dev/null 2>&1
           if declare -F brief_files_entry >/dev/null 2>&1; then
-            [ -n "$LG_ROOTS_READ" ] || { LG_ROOTS="$(brief_root_files "$BIONIC_ROOT")"; LG_ROOTS_READ=1; }
-            LG_SPELT="$(brief_files_entry "$LG_DF" "$LG_ROOTS")"
+            LG_SPELT="$(brief_files_entry "$LG_DF")"
           fi
           LG_FIX_FILES="${LG_FIX_FILES} --files+ $(refuse_quote "$LG_SPELT")"
         done <<LGDIFF
@@ -2396,6 +2395,11 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     # A TIE HANDS IN NO HEAD (wave-26 T54; review 17 N4): a proof in the tick's own second cannot
     # be ordered against it, and the soft side is a review that waits one tick, not one owed for
     # nothing.
+    # PER QUESTION, THE READY SET JUDGES; THIS RULE STAYS GLOBAL (wave-27 T10; D4). The head goes
+    # into units.sh, which keys each read row's last proof by its own questions, so the wall owes
+    # what the tick offered row by row. Which head goes in is still decided against the newest
+    # review proof of ANY question, a reading included: a reading newer than the digest withholds
+    # the head from every row, never owes one, and costs one tick's wait.
     if [ -n "$at" ] && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
       _ST_LIVE_HEAD="$(tick_digest_field "$digest" head)"
       if [ -n "$_ST_LIVE_HEAD" ] && [ -n "$_ST_PLAN" ]; then

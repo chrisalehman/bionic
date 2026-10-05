@@ -472,7 +472,12 @@ _impact_answer() {
 # of its own — 13 of 18 s at the main checkout. The prune also makes the graph a
 # function of the key's path listing, which has never included `.bionic`: before
 # it, a bed appearing changed the graph without changing the key.
-LIBDIRS="$(find "$ROOT" \( -path "$ROOT/.git" -o -path "$ROOT/.worktrees" -o -path "$ROOT/.bionic" \) \
+# `tests/reader-exam/samples` is pruned for the same reason (wave-27 T36): each sample is a
+# small made-up project with its own lib/, which nothing bionic runs ever sources, so a
+# sample library sharing a real one's basename would tie it to every suite whose hook
+# sources the real one.
+LIBDIRS="$(find "$ROOT" \( -path "$ROOT/.git" -o -path "$ROOT/.worktrees" -o -path "$ROOT/.bionic" \
+  -o -path "$ROOT/tests/reader-exam/samples" \) \
   -prune -o -type d -name lib -print 2>/dev/null \
   | sed "s|^$ROOT/||" | sort -u | tr '\n' ' ')"
 

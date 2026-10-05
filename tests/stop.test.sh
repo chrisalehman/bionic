@@ -1501,6 +1501,52 @@ s7_fire "$LH_D" "$LH_TX"
 expect_absent "LH5: §N4 a proof in the digest's own second leaves its head out: no review of nothing" \
   "Fillable gap" "$(reason_of)$STOP_ERR"
 
+# LH-Q (wave-27 T10; D4): THE WALL OWES EACH READ ROW BY ITS OWN QUESTIONS. Two read rows, T2
+# `live:head:evidence` and T3 `live:head:adversarial`, each question last read at A. The wall
+# hands the tick's head to the same ready set the tick asks, and that set keys the last proof by
+# question, so the wall owes what the tick offered: at B both rows, at A neither; and once the
+# evidence reading has moved to B (before the tick), at B only the adversarial row. The rule for
+# WHICH head goes in is unchanged and global: a reading of any question newer than the digest
+# leaves the head out (LH4), the soft side, one tick's wait. SYNTHESIZED, as LH.
+lhq_fixture() {  # -> project dir; T1 landed, T2 and T3 read rows, both questions read at LH_A
+  local d p
+  d="$(lh_fixture)"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  awk -v a="$LH_A" '
+    /^proved: kind=review / {
+      print "proved: kind=review head=" a " at=2026-10-04T00:00:00Z evidence=record/ev.md question=evidence reader=w-aud result=pass scope=piece"
+      print "proved: kind=review head=" a " at=2026-10-04T00:01:00Z evidence=record/adv.md question=adversarial reader=w-crit result=pass scope=piece"
+      next }
+    /^\| T2 \| 6 \| review / {
+      print "| T2 | 6 | review | the evidence read | auditor | — | 15m | REQ-x | — | approval:plan, live:head:evidence | pending |"
+      print "| T3 | 6 | review | the adversarial read | critic | — | 15m | REQ-x | — | approval:plan, live:head:adversarial | pending |"
+      next }
+    { print }' "$p" > "$p.new" && mv "$p.new" "$p"
+  printf '%s' "$d"
+}
+lhq_owed() {  # -> the ids the wall's reason names as ready to dispatch, space-joined
+  reason_of | sed -n 's/.*these rows are ready to dispatch — \(.*\) — and this turn neither.*/\1/p' | tr -c 'A-Za-z0-9\n' ' ' \
+    | tr ' ' '\n' | /usr/bin/grep -E '^T[0-9]+$' | sort | tr '\n' ' ' | sed 's/ $//'
+}
+require_helpers lhq_fixture lhq_owed
+LHQ_D="$(lhq_fixture)"
+LHQ_P="$LHQ_D/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+expect_eq "LH-Q0 precondition: two readings, one per question, and two read rows" "2 2" \
+  "$(grep -c '^proved: kind=review .* question=' "$LHQ_P") $(grep -c 'live:head:' "$LHQ_P")"
+s7_transcript "$LH_TX" "poker: FILL T2 T3"
+lh_digest "$LHQ_D" "$LH_B"
+s7_fire "$LHQ_D" "$LH_TX"
+expect_eq "LH-Q1: with the tick's head past both readings, the wall owes both read rows" "T2 T3" "$(lhq_owed)"
+lh_digest "$LHQ_D" "$LH_A"
+s7_fire "$LHQ_D" "$LH_TX"
+expect_absent "LH-Q2: at the readings' own head neither row is owed" "Fillable gap" "$(reason_of)$STOP_ERR"
+sed -i.bak "s/^\(proved: kind=review head=\)$LH_A\( at=2026-10-04T00:00:00Z evidence=record\/ev.md question=evidence\)/\1$LH_B\2/" "$LHQ_P"
+expect_contains "LH-Q3 precondition: the evidence reading is now at B, the adversarial one still at A" \
+  "head=$LH_B at=2026-10-04T00:00:00Z evidence=record/ev.md question=evidence" "$(grep '^proved: kind=review' "$LHQ_P")"
+s7_transcript "$LH_TX" "poker: FILL T3"
+lh_digest "$LHQ_D" "$LH_B"
+s7_fire "$LHQ_D" "$LH_TX"
+expect_eq "LH-Q3: at B the wall owes the adversarial row alone; the evidence row read B already" "T3" "$(lhq_owed)"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "FILES-REMEDY: the amend the landing refusal prints is one amend accepts, run as printed (wave-27 T29; REQ-12 AC-12.3, D21)"
@@ -1509,16 +1555,19 @@ section "FILES-REMEDY: the amend the landing refusal prints is one amend accepts
 # refused the stop, and the remedy it printed — `amend <name> --files+ 'CONTEXT.md'` — was
 # itself refused by amend, which read a Files: entry as a path only when it carried a `/`.
 # The remedy is now spelled by the one reader in brief.sh that amend reads with: a root file
-# with an extension as written, and a bare name with no file behind it at the root as
-# `./<name>`. The fixture touches one of each, and the printed line is run exactly as printed.
+# with an extension as written, and a bare name as `./<name>`. The fixture touches one of each,
+# and the printed line is run exactly as printed. The bare name, Widgetfile, is in the main
+# checkout's base commit too (wave-27 T42): T29's reader admitted a bare name by listing the
+# project root, and with the file there it printed `--files+ 'Widgetfile'`; no wall lists the
+# root now, so the spelling is `./Widgetfile` whatever the root holds.
 fr_fixture() {  # -> a git project whose writer tree committed two root files outside Files:
   local d wt
   d=$(mkfix)
   git -C "$d" init -q 2>/dev/null
   git -C "$d" symbolic-ref HEAD refs/heads/main
   git -C "$d" config user.email t@example.invalid; git -C "$d" config user.name T
-  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"; echo base > "$d/base.txt"
-  git -C "$d" add .gitignore base.txt; git -C "$d" commit -qm base
+  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"; echo base > "$d/base.txt"; echo base > "$d/Widgetfile"
+  git -C "$d" add .gitignore base.txt Widgetfile; git -C "$d" commit -qm base
   wt="$d/.worktrees/fr-writer"
   git -C "$d" worktree add -q "$wt" -b wt/fr-writer >/dev/null 2>&1
   git -C "$wt" config user.email t@example.invalid; git -C "$wt" config user.name T
@@ -1541,7 +1590,7 @@ expect_status "FR1 the control — root files outside Files: refuse the stop" "2
 FR_FIXLINE="$(printf '%s\n' "$STOP_ERR$(reason_of)" | /usr/bin/grep -m1 'session-poker.sh.* amend ' | sed 's/^[[:space:]]*//')"
 expect_contains "FR1 precondition: the refusal prints its amend line" "amend 'fr-writer'" "$FR_FIXLINE"
 expect_contains "FR2 the line spells the root file with an extension as written" "--files+ 'CONTEXT.md'" "$FR_FIXLINE"
-expect_contains "FR3 …and the bare name with no file at the root as ./<name>" "--files+ './Widgetfile'" "$FR_FIXLINE"
+expect_contains "FR3 …and the extensionless root file, present at the root, as ./<name>" "--files+ './Widgetfile'" "$FR_FIXLINE"
 # A fresh fixture for the amend and the second stop, as section 8 does: the first stop has
 # already judged its row, so a second stop over the same fixture never reaches the landing check.
 D=$(fr_fixture)
