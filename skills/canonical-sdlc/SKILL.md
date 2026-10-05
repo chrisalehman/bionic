@@ -11,7 +11,6 @@ needs:
   - agent-skills:incremental-implementation
   - browser-verify
   - agent-skills:browser-testing-with-devtools
-  - agent-skills:code-review-and-quality
   - agent-skills:security-and-hardening
   - agent-skills:performance-optimization
   - agent-skills:git-workflow-and-versioning
@@ -70,13 +69,17 @@ plan mode serves them better than any row in this table, `spike` included: it sh
 any rigor, but its writeup is a timeboxed research artifact, not a general document-production
 mode.
 
-**rigor** — how hard the evidence tries to lie. Cumulative.
+**rigor** — how many independent minds answer the questions. Cumulative.
 
-| Rigor | What you get | What you skip |
+Every run that ships code answers four questions, at every rigor. The first, does it do what was asked, is answered by TDD RED→GREEN, the matrix discharged at each row's tier and the tests floor `pass == total`. `evidence`: is the proof honest. `adversarial`: what is wrong that nobody asked about. `structure`: is it built from what exists, and shaped well. Rigor sets how many independent readers hold the last three.
+
+| Rigor | Independent readers | Who holds which question |
 |---|---|---|
-| `tested` | TDD RED→GREEN; matrix discharged at each row's tier; tests floor `pass == total`; 6-axis self-review. | Both independent assurance roles. |
-| `peer-reviewed` | + a separate spec, + the INDEPENDENT Step-5 verification auditor on the evidence. At `scale: task` a ledger row must be proof-shaped and, once `done`, name an `auditor` verdict from Step 6. | The mandatory adversarial critic. |
-| `audited` | + the INDEPENDENT Step-6 adversarial critic, per-step checkpoint commits, expanded stop-and-wake. At `scale: task` a `done` row also names a `critic` verdict; at `scale: wave` an audited multi-agent plan must carry a `## Tasks` section at all. | Nothing. |
+| `tested` | one | critic holds all three |
+| `peer-reviewed` | two; + a separate spec, and at `scale: task` a proof-shaped ledger row | auditor `evidence`, critic `adversarial` and `structure` |
+| `audited` | three; + per-step checkpoint commits, expanded stop-and-wake, and at `scale: wave` a `## Tasks` section in a multi-agent plan | auditor `evidence`, critic `adversarial`, reviewer `structure` |
+
+At `scale: wave` each code question (`adversarial`, `structure`) also owes `scope=whole`. `steps/6.md` turns a reading into a fact.
 
 **scale** — the decomposition unit.
 
@@ -130,7 +133,7 @@ of the three opens with a `## Goal` section — one concise paragraph, first aft
 write whose first section is not Goal, or whose Goal section is empty.
 
 **Anything the matrix cites as evidence goes in `record/`, never `tmp/`.** Auditor reports,
-critic findings, review-axis artifacts, test-run captures — the matrix names them by path, so
+reading records, test-run captures — the matrix names them by path, so
 they must outlive the run that produced them. `tmp/` is wiped at Step 8 and takes its contents
 with it — everything, that is, except a live session's own keyed state, which the wipe spares
 by owner liveness, not file name. Give an agent a `record/` path in its brief.
@@ -149,7 +152,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 3 Plan | `steps/3.md` | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; matrix locked; tasks tagged; user approved; writes `wave-NN-<slug>.plan.md` — tasks, sequencing, and the verification matrix rendered from Step 2's Eval design |
 | 4 Implement | `steps/4.md` | `agent-skills:incremental-implementation` | Every task RED before GREEN; assumptions logged |
 | 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; tests floor green; every matrix row discharged at tier or waived; auditor CONFIRMED |
-| 6 Review | `steps/6.md` | `agent-skills:code-review-and-quality` | Every axis has a verdict; independent critic attached |
+| 6 Review | `steps/6.md` | `canonical-sdlc` | One fact per owed question at the head, or its waiver |
 | 7 Document | `steps/7.md` | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |
 | 8 Integrate | `steps/8.md` | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp ephemera wiped |
 | 9 Close-out | `steps/9.md` | `agent-skills:shipping-and-launch` | Checklist + rollback; `continuation.md` written |
@@ -168,6 +171,7 @@ Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watc
 Files: <every path the task may create or edit>  # writers; a read-only brief omits this and keeps Suites: none
 Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:
 Re-executes: `<cmd>`
+Questions: <q>[, <q>]  # reader roles only
 Deliverable-waiver: <reason>  # only for a report returned by message
 ```
 <!-- BRIEF-SCAFFOLD-END -->
@@ -190,7 +194,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 | 1, 2, 3 | pointer (presence only) |
 | 4 | pointer; plus `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` |
 | 5 | `head:`/`cmd:`/`pass:`/`total:`/`output:` with `pass == total`, a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
-| 6 | pointer to the 6-axis body + critic findings; matrix re-validated here |
+| 6 | one fact per owed question (`proved: kind=review`), or its `waived:` line; matrix re-validated here |
 | 7 | `adr:` OR `rca:` OR `n/a:` |
 | 8 | `merge:`, `worktree-removed:`, and (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) |
 | 9 | `delivered:` always, ON the `Step 9:` line itself — the run-closure predicate (`lib/run.sh`) greps that one line, so a `delivered:` written on a continuation line leaves the run open forever; `archived:` always, naming what `archive_run` moved or why nothing moved; plus `deployed:`, `verified:`, `monitored:` exactly when `deploy_target` names a live surface |
@@ -205,7 +209,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 
 **`canonical-sdlc-governing-skill.sh`** (`PreToolUse|Write,Edit`) blocks any artifact under `<docs-root>/{specs,plans,adrs,incidents}/` lacking `governing-skill:` frontmatter, and blocks a `mode:` line, a missing or non-enum triple, a missing flag or `model_plan`, a `walk:` value outside `required|exempt`, or a missing `## Verification Matrix` at `sdlc-step ≥ 3`. On a **spec** artifact at `scale: wave` or `scale: epic` it also blocks a write satisfying no arm of the three-way design rule: no flush-left `## Design` in place, no `design:` pointer resolving to a real file that itself carries a flush-left `## Design` (a dangling path, a target without the section, and a `..` component each fail the arm), and no `design-waived:` token. A `design:` pointer that is present is validated on the unwaived path whether or not the spec also carries its own section. On the same wave/epic **spec** it also blocks, from `sdlc-step ≥ 3` only, an `adrs:` frontmatter line naming a path (or several, joined by ` · `) that does not resolve to a real file — the momentous-ADR pointer D6 requires; below `sdlc-step 3` the arm is silent, since the ADR is drafted alongside the spec that names it. Plans and every task-scale artifact are untouched by it. Floor-consistency checks are log-only, and log `user-overridden` in place of a floor violation when frontmatter carries `rigor-override:` — presence only; the marker's fields are never validated, and it does not quiet a malformed `rigor-floor:` value in `config.yaml`.
 
-**Known holes — do not mistake these for enforcement.** Flag *values* are never checked, only presence. The evidence gate reads the plan file's text, so an `Edit` that writes evidence for tests never run passes unseen. Proof-shape is a heuristic: a digit plus a `/` satisfies it. Task-scale ledgers have no write-time check. An `active` row whose agent the session's roster names needs no evidence line; with no roster, an agent-named one still does.
+**Known holes — do not mistake these for enforcement.** Flag *values* are never checked, only presence. The evidence gate reads the plan file's text, so an `Edit` that writes evidence for tests never run passes unseen. Proof-shape is a heuristic: a digit plus a `/` satisfies it. Task-scale ledgers have no write-time check. An `active` row whose agent the session's roster names needs no evidence line; with no roster, an agent-named one still does. The fact gate knows who answered which question about which code, never that the answer is right, and a hand-typed `git merge` meets no gate: only the step advance, the integrate row and close-out ask it.
 
 ## Diagrams
 

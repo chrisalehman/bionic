@@ -428,6 +428,9 @@ for _sc_f in skills/canonical-sdlc/SKILL.md skills/canonical-sdlc/dispatch.md; d
     bash -c 'case "$1" in *"omit for a read-only brief"*) exit 1 ;; esac; exit 0' _ "$_sc_body"
   expect_true "11c: …and carries the optional Subprocess claim: line" \
     bash -c 'case "$1" in *"Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watch — optional"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
+  # wave-27 T17 (D5): a reader's brief names its questions; the line is the Interfaces table's.
+  expect_true "11d: …and carries the readers' Questions: line" \
+    bash -c 'case "$1" in *"Questions: <q>[, <q>]  # reader roles only"*) exit 0 ;; esac; exit 1' _ "$_sc_body"
 done
 
 section "Section 12: every role file carries the dispatch-rules block (wave-24 T6, D8, AC-6.2)"
