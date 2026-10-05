@@ -2890,6 +2890,88 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
   printf '%s' "$1" | awk -F'`' '{ for (i = 2; i <= NF; i += 2) if ($i != "") print $i }'
 }
 
+# ---- BEGIN the set of an agent its start did not place (wave-27 T38; review pass 8 F3) ----
+# `amend <agent id>` for an id no named row carries: see the verb. The row is the budget wall's
+# alone. Its name is the id, so it shadows no other name's latest row; `status=unplaced` is no
+# status a reader of live rows counts; the waiver keeps the verdict from judging a deliverable
+# nobody owes. The additions are judged by the dispatch grammar, as every amend's are, with no
+# role (none is known). The set is the union of the id's current one and the additions.
+amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the verb's exit status
+  local aid="$1" prior="$2" tr sub old_sa="" old_runs="" decl lift rc=0 sa new_runs r row pick
+  case "$aid" in
+    ''|*[!A-Za-z0-9._@-]*)
+      die "REFUSED — no row is named $(clean "$aid"), and it is not an agent id; nothing was written."
+      return 1 ;;
+  esac
+  if [ -z "$prior" ]; then
+    tr="$(session_transcript "$SESSION_ID")" || tr=""
+    if [ -z "$tr" ]; then
+      die "REFUSED — no row is named or carries the agent id $aid, and this session's transcript cannot be found to check it is one of its agents; nothing was written."
+      return 1
+    fi
+    sub="${tr%.jsonl}/subagents/agent-${aid}.jsonl"
+    if [ ! -f "$sub" ] || [ -L "$sub" ]; then
+      die "REFUSED — no row is named or carries the agent id $aid, and no agent $aid ran in this session (no transcript at $sub); nothing was written."
+      return 1
+    fi
+  fi
+  if [ -n "$AMEND_FILES" ]; then
+    die "REFUSED — $aid is an agent its start did not place, and a Files: contract belongs to its dispatched row; add suites or runs here, or amend that row by name. Nothing was written."
+    return 1
+  fi
+  if ! poker_brief_load; then
+    die "REFUSED — the contract grammar (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
+    return 2
+  fi
+  if [ -n "$prior" ]; then
+    old_sa="$(line_field "$prior" suites_allowed)"
+    row_has_key "$prior" re_executes && old_runs="$(clean "$(line_field "$prior" re_executes)" re_executes)"
+  fi
+  [ "$old_sa" = none ] && old_sa=""
+  decl="$(poker_union ' ' "$old_sa" "$(printf '%s' "$AMEND_SUITES" | tr '\n,' '  ')")"
+  lift="$(lift_contract_fields "$(poker_brief_span "" "$decl" "$old_runs" "$AMEND_RUNS")" "")"
+  POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
+  brief_validate_fields "$lift" "" "$REPO_REAL" poker_brief_sink || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    die "REFUSED — a dispatch carrying these additions for $aid would be refused; nothing was written:"
+    printf '%s' "$POKER_BRIEF_WORDS" >&2
+    return 1
+  fi
+  sa="${BRIEF_SUITES_ALLOWED:-$old_sa}"
+  new_runs="$old_runs"
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    grep -qxF -- "$r" <<< "$(poker_marked_runs "$old_runs")" && continue
+    new_runs="${new_runs:+$new_runs }\`${r}\`"
+  done <<EOF
+$(poker_marked_runs "$(brief_field "$lift" re_executes)")
+EOF
+  if [ "$sa" = "$old_sa" ] && [ "$new_runs" = "$old_runs" ]; then
+    die "REFUSED — this amend changes nothing: every addition is already on the set recorded for $aid, or is not a suite or run the dispatch grammar reads. Nothing was written."
+    return 1
+  fi
+  row="$(roster_row status=unplaced "session=$SESSION_ID" "name=$aid" "agent_id=$aid" \
+    "launched_at=$(iso_now)" "waiver=the suite set of an agent its start did not place; no contract" \
+    "suites_allowed=$sa" suites_source=declared ${new_runs:+"re_executes=$new_runs"} \
+    "amended=$(iso_now) $(clean "$AMEND_REASON")")" || row=""
+  if [ -z "$row" ]; then
+    die "REFUSED — could not build the row for $aid."
+    return 2
+  fi
+  printf '%s\n' "$row" >> "$ROSTER_FILE" 2>/dev/null || {
+    die "REFUSED — could not write to $ROSTER_FILE."
+    return 2
+  }
+  pick="$(roster_row_for_id "$ROSTER_FILE" "$aid")" || pick=""
+  if [ "$pick" != "$row" ]; then
+    die "amend written, but the budget wall reads another row for $aid — a later row carrying that id was written after it"
+    return 1
+  fi
+  say "amended — $aid, an agent its start did not place: suites=${sa:-(none)}${new_runs:+ runs=$new_runs}; the budget wall reads this row from now on."
+  return 0
+}
+# ---- END the set of an agent its start did not place ----
+
 # ---------------------------------------------------------------- the plan transaction
 #
 # ONE TRANSACTION, SIX DOORS (wave-24 T15; REQ-9, D14). `task-add` (wave-20 Δ5) was the one
@@ -5160,8 +5242,11 @@ EOF
   # declared (the old set plus the added suites); a DERIVED one is re-derived from the
   # merged files by the configured impact command, and the old set is kept beside it.
   #
+  # THE TARGET is a name, or an agent id (wave-27 T38): an id a named row carries amends that
+  # row; an id no row carries, of an agent of this session, is recorded by `amend_unplaced`.
+  #
   # REFUSED: no session key (3), an unengaged session (decides nothing, 0), no row of the
-  # name, a CLOSED row — `roster_open_names`, the one close predicate: an ack later than the
+  # name and no agent of the id, a CLOSED row — `roster_open_names`, the one close predicate: an ack later than the
   # latest launch — and a change the row already carries (1), and anything the grammar
   # refuses (1). A subagent cannot reach this verb at all: the Bash wall refuses `amend`,
   # `extend` and `task-add` in any payload carrying an `agent_id` (payload/scripts/lib/walls.sh).
@@ -5190,6 +5275,29 @@ EOF
     # Any `roster-state/` row, as `identity_args` reads (wave-22 T13; critic-3598752 I4).
     AM_ROW="$(grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null \
       | grep -F "|name=${AMEND_NAME}|" | tail -1)"
+    # ---- BEGIN amend by agent id (wave-27 T38; review pass 8 F3) ----
+    # THE TARGET A BUDGET REFUSAL PRINTS FOR AN AGENT NO ROW CARRIES is its agent id: a start the
+    # recorder could not place (two launches of its type, or a type that is not a bionic: role) has
+    # no row until its launch call returns, and a foreground call returns when it has finished. So
+    # `amend` reads its target as a name first and as an agent id second. An id a named row carries
+    # amends that row. An id no row carries, that ran as an agent of this session (its transcript
+    # is on disk), gets a row of its own: `status=unplaced`, named by the id, carrying the added
+    # suites and runs and no contract (a waiver says so, so no verdict judges it, and no reader of
+    # live rows counts it). The budget wall keys on the id, so it reads that row from the next call.
+    # An id that is neither is refused, saying why; this verb never exits 0 having changed nothing.
+    if [ -z "$AM_ROW" ] || [ "$(line_field "$AM_ROW" status)" = unplaced ]; then
+      AM_IDROW="$(roster_row_for_id "$ROSTER_FILE" "$AMEND_NAME")" || AM_IDROW=""
+      AM_IDNAME="$(line_field "$AM_IDROW" name)"
+      if [ -z "$AM_ROW" ] && [ -n "$AM_IDNAME" ] && [ "$(line_field "$AM_IDROW" status)" != unplaced ]; then
+        AMEND_NAME="$AM_IDNAME"
+        AM_ROW="$(grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null \
+          | grep -F "|name=${AMEND_NAME}|" | tail -1)"
+      else
+        amend_unplaced "$AMEND_NAME" "$AM_IDROW"
+        exit $?
+      fi
+    fi
+    # ---- END amend by agent id ----
     if [ -z "$AM_ROW" ]; then
       die "REFUSED — no row named $AMEND_NAME on this session's roster ($ROSTER_FILE)."
       exit 1
@@ -5298,8 +5406,11 @@ EOF
     # reads for this agent's id. No id yet: no wall keys on this agent before it is
     # identified (the budget arm's actor is the transcript id), and the recorder's
     # `identified` row inherits this successor whole, so the line says when, not now.
+    # AN ID-LESS ROW (wave-27 T38): the set is recorded, on the row the identification copies — the
+    # recorder's start join, or its launch call's return (ARM 2 copies the launch's last row). An
+    # agent of it already running unplaced is not that row's until then; its refusal prints its id.
     if [ -z "$POKER_ID" ]; then
-      say "amended — the walls read this row once $AMEND_NAME is identified"
+      say "amended — the walls read this row once $AMEND_NAME is identified, at its start or its launch call's return; an agent already running unplaced is amended by the agent id its refusal prints"
       exit 0
     fi
     AM_PICK="$(roster_row_for_id "$ROSTER_FILE" "$POKER_ID")" || AM_PICK=""
@@ -6385,7 +6496,7 @@ PF_OTHER_LIST
           awk '
             $1 != "poker:" { next }
             $2 == "note:" { print $3, $4, $5; next }
-            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE)$/ { print $2, $3, $4 }
+            $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE|NOTIFY)$/ { print $2, $3, $4 }
           ' "$TICK_BUF" | LC_ALL=C sort
         } | cksum | awk '{ print $1 "-" $2 }' )"
       fi
@@ -6951,6 +7062,28 @@ EOF
       fi
     fi
     [ "$DUP_START_NAMES" = "|" ] && DUP_START_NAMES=""
+
+    # ---- BEGIN a reader started without its checks (wave-27 T38; review pass 31 F2) ----
+    # hooks/execution-recorder.sh appends `start-unchecked/v1|event=start|…` to the roster when a
+    # reader's start could not be placed and its candidates carry different `questions=`: no
+    # checks file was pushed, and its own log line is stderr nobody reads. The tick says so ONCE
+    # per agent id and writes `event=told` beside it, so the orchestrator stops that reader and
+    # dispatches it again. Nothing else: no stop, no ack. The line enters the decision hash under
+    # its kind (`NOTIFY`), so an otherwise unchanged tick still prints it.
+    if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
+      US_TOLD="$(grep -F 'start-unchecked/v1|event=told|' "$ROSTER_FILE" 2>/dev/null)"
+      while IFS= read -r US_LINE; do
+        case "$US_LINE" in "start-unchecked/v1|event=start|"*) : ;; *) continue ;; esac
+        US_AID="$(line_field "$US_LINE" agent_id)"
+        [ -n "$US_AID" ] || continue
+        case "$US_TOLD" in *"|agent_id=${US_AID}|"*|*"|agent_id=${US_AID}") continue ;; esac
+        say "NOTIFY — a $(clean "$(line_field "$US_LINE" role)") started without its checks: candidates $(clean "$(line_field "$US_LINE" candidates)" | sed 's/,/, /g')"
+        printf 'start-unchecked/v1|event=told|at=%s|session=%s|agent_id=%s\n' "$(iso_now)" "$SESSION_ID" "$US_AID" \
+          >> "$ROSTER_FILE" 2>/dev/null
+        US_TOLD="${US_TOLD}|agent_id=${US_AID}|"
+      done < <(grep -F 'start-unchecked/v1|event=start|' "$ROSTER_FILE" 2>/dev/null)
+    fi
+    # ---- END a reader started without its checks ----
 
     # ---------- THE STAND-DOWN: the tick names it, and writes the order (T1; D1, D2) ------
     #
