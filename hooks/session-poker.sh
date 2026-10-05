@@ -5713,6 +5713,31 @@ PF_OWN_LIST
         die "REFUSED — the record $(clean "$PF_REL") was not written by the reader $(clean "$PF_READER"): no roster row of that reader names it as its deliverable= or among its files=, and a reading is the record its reader was dispatched to write; register it under the reader whose row names it. The plan is unchanged."
         exit 1
       fi
+      # A RECORD IS ONE READER'S (wave-27 T45; review pass 16 finding 2). A pass carries no reader of
+      # its own, so a record that another roster row also names as its deliverable= or among its
+      # files= could be registered under either name; it is refused, naming that row, whichever
+      # reader is typed. Each entry is compared by real path, as above.
+      PF_OTHER=""
+      for _pf_rf in "$PV_REPO/.bionic/tmp"/roster-*.state; do
+        [ -f "$_pf_rf" ] && [ ! -L "$_pf_rf" ] && [ -z "$PF_OTHER" ] || continue
+        while IFS=$'\037' read -r _pf_on _pf_ot _pf_c; do
+          case "$_pf_c" in '') continue ;; /*) _pf_p="$_pf_c" ;; *) _pf_p="$PV_REPO/${_pf_c#./}" ;; esac
+          [ -f "$_pf_p" ] || continue
+          if [ "$(cd "$(dirname "$_pf_p")" 2>/dev/null && pwd -P)/$(basename "$_pf_p")" = "$PF_REAL" ]; then
+            PF_OTHER="$_pf_on (${_pf_ot:-no subagent_type})"; break
+          fi
+        done <<PF_OTHER_LIST
+$(PF_WANT="$PF_READER" awk "$_ROSTER_OPEN_AWK"'
+  index($0, "roster-state/") == 1 && (_roster_kv($0, "name") "") != (ENVIRON["PF_WANT"] "") {
+    o = _roster_kv($0, "name") "\037" _roster_kv($0, "subagent_type") "\037"
+    m = split(_roster_kv($0, "deliverable") "," _roster_kv($0, "files"), e, ",")
+    for (i = 1; i <= m; i++) if (e[i] != "") print o e[i] }' "$_pf_rf" 2>/dev/null)
+PF_OTHER_LIST
+      done
+      if [ -n "$PF_OTHER" ]; then
+        die "REFUSED — the record $(clean "$PF_REL") is also named by the roster row $(clean "$PF_OTHER") as its deliverable= or among its files=; a reading record is one reader's, so each reader writes a record of its own. The plan is unchanged."
+        exit 1
+      fi
       PF_ROLE="${PF_ROLE#*	}"; PF_READER="${PF_ROLE#*	}"; PF_ROLE="${PF_ROLE%%	*}"
     fi
     PF_WB="$(proof_working_branch "$PV_PLAN")"
@@ -5752,6 +5777,18 @@ PF_OWN_LIST
       PF_FROMH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_FROM^{commit}" 2>/dev/null)"
       if [ -z "$PF_FROMH" ] || ! git -C "$PF_CO" merge-base --is-ancestor "$PF_FROMH" "$PF_BASEH" 2>/dev/null; then
         die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but its range starts at $(clean "$(printf '%s' "${PF_FROMH:-$PF_FROM}" | cut -c1-12)"), past the plan's base ${PF_BASEH:0:12}; a whole reading reads from the base, so write reviewed: ${PF_BASEH:0:12}..<b>, or scope: piece. The plan is unchanged."
+        exit 1
+      fi
+    fi
+    # A WHOLE READ WAITS FOR THE LAST BUILD PIECE (wave-27 T45; review pass 13 F2; D10). The judge
+    # covers a whole line with any whole reading whatever its head, so its time is held here, on the
+    # plan text the verb already holds: refused while a `## Tasks` row of kind build is pending or
+    # active, naming them. A plan with no `## Tasks` table is not held to it.
+    if [ "$PF_SCOPE" = whole ]; then
+      PF_OPEN="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' '
+        $3 == "build" && ($10 == "pending" || $10 == "active") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $10 }')"
+      if [ -n "$PF_OPEN" ]; then
+        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but build rows are still open: $(clean "$PF_OPEN"); a whole read is taken once the last build piece has landed (D10), so register it after they land, or scope: piece. The plan is unchanged."
         exit 1
       fi
     fi
