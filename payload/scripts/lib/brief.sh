@@ -32,13 +32,12 @@
 #
 # THE INTERFACE.
 #
-#   lift_contract_fields <brief text> [<subagent_type>] [<root files>]   -> `kind=value` lines,
+#   lift_contract_fields <brief text> [<subagent_type>]   -> `kind=value` lines,
 #       `questions=` among them: a reader's `Questions:` set (wave-27 T15)
 #   dp_runs_cap <subagent_type> [<questions>] -> the suite runs a Re-executes: may declare
-#   brief_root_files <root>            -> the names of the regular files at the root, the one
-#                                         fact a door hands the lift for its Files: reader
-#   brief_files_entry <entry> [<root files>] -> the spelling a Files: line stores for <entry>
-#       (wave-27 T29, D21): as written when the one reader reads it as a path, else `./<entry>`
+#   brief_files_entry <entry>          -> the spelling a Files: line stores for <entry>
+#       (wave-27 T29, T42; D21): as written when the one reader records it, else `./<entry>`
+#       when that is recorded, else nothing it can be spelt as (rc 2)
 #   brief_field <lifted> <kind>        -> one kind's value, bounded as the roster row stores it
 #   brief_validate_fields <lifted> <subagent_type> <root> <sink>
 #       -> rc 0: no finding · rc 1: at least one · rc 2: the derivation overran its bound, so
@@ -248,16 +247,11 @@ _brief_cap_suite_runs() {
     END { if (dropped != "") print "re_executes_dropped=" dropped }'
 }
 
-# <root files> is a FACT THE DOOR HANDS IN (wave-27 T29; REQ-12, D21): `brief_root_files <root>`'s
-# answer, the names of the regular files at the project root, one per line. The lift never looks
-# at the disk itself (the freeze, .claude/rules/hook-authoring.md). Without it a bare Files: entry
-# is a path only by its `/` or its extension.
-#
 # THE RUN CAP IS APPLIED IN TWO PASSES (wave-27 T15). The awk lift bounds `Re-executes:` at
 # SUITES_MAX for every brief, the row field's width. Whether the cap of three binds depends on
 # the brief's own `Questions:` line, which only the lift reads, so it is applied after the awk
 # pass, counting suite runs alone (`dp_runs_cap`, `_brief_cap_suite_runs` above).
-lift_contract_fields() {  # <brief text> [<subagent_type>] [<root files>] -> `kind=value` lines, absent kinds omitted
+lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines, absent kinds omitted
   local _lifted _cap
   _lifted="$(_brief_lift_awk "$@")"
   _cap="$(dp_runs_cap "${2-}" "$(printf '%s\n' "$_lifted" | sed -n 's/^questions=//p' | head -1)")"
@@ -267,8 +261,8 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] [<root files>] -> `ki
     printf '%s\n' "$_lifted"
   fi
 }
-_brief_lift_awk() {  # <brief text> [<subagent_type>] [<root files>] -> the awk pass of the lift
-  printf '%s' "$1" | BRIEF_ROOT_FILES="${3-}" \
+_brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lift
+  printf '%s' "$1" | \
     awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" \
     -v RUNS_CAP="$DP_SUITES_MAX" -v SUITES_CAP="$DP_SUITES_MAX" "$CMD_RUN_NORM_AWK"'
     # <sep> is the regex between the label and its value; the default is the
@@ -346,27 +340,56 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] [<root files>] -> the awk 
       return 1
     }
     function ispath(t) { return (pathshaped(t) && !istemplate(t)) }
-    # THE ONE READER OF A Files: ENTRY (wave-27 T29; REQ-12, D21). The dispatch wall, `amend`,
-    # `task-add` and the stop wall remedy all read an entry here: the lift for a span, and
-    # `brief_files_entry` below for one entry. Until this reader a Files: entry was a path only
-    # when it carried a `/` (`ispath`), so `Files: CONTEXT.md, a/b.ts` recorded `a/b.ts` alone,
-    # in silence, and the writer was refused at its stop for editing the file its brief named.
+    # THE ONE READER OF A Files: SPAN (wave-27 T29, T42; REQ-12, D21 as amended by A-orch-46).
+    # The dispatch wall, `amend`, `task-add` and the stop wall remedy all read Files: here: the
+    # lift for a span, and `brief_files_entry` below for one entry. Until T29 an entry was a path
+    # only when it carried a `/` (`ispath`), so `Files: CONTEXT.md, a/b.ts` recorded `a/b.ts`
+    # alone, in silence, and the writer was refused at its stop for editing the file its brief
+    # named. Until T42 the span split on white space, so the trailing comment the scaffold
+    # ships and any prose in the span were read word by word, each word refused with advice to
+    # spell it `./<word>`, which then recorded the word as a path (review pass 11 F1).
     #
-    # <r> is the token as the span split it. The answer is
-    #   2  a path, stored as written: it carries a `/`, or an extension, or names a file at the
-    #      project root (ROOTFILES, handed in by the door)
-    #   1  an entry that is not a path: the dispatch is refused, naming `./<entry>`
-    #   0  not an entry at all: an unfilled slot, which is guidance, or a token with no letter
-    #      and no digit, such as a dash between two entries
-    # Every other path field keeps `ispath`: a progress path or a deliverable is one the
-    # walls stat, and none of them was ever a root file read by its name alone.
-    function files_entry(r,   t) {
-      t = trimtok(r)
-      if (istemplate(r) || istemplate(t)) return 0
-      if (t !~ /[A-Za-z0-9]/)             return 0
-      if (index(t, "/") > 0)              return 2
-      if (t ~ /[^.]\.[A-Za-z0-9]+$/)      return 2
-      if (index("\n" ROOTFILES "\n", "\n" t "\n") > 0) return 2
+    # files_split <span> <arr> -> the items, in order, empties dropped. THE SPAN IS A LIST: split
+    # on commas and on line ends (a list one item per line). A trailing ` # …` comment comes off
+    # each line first, as `claimpat` takes it off `Subprocess claim:`, then a leading list marker
+    # (`- `, `* `, `1. `) and a surrounding pair of backticks off each item.
+    function files_split(s, arr,   nl, lines, i, j, line, np, parts, it, n) {
+      n = 0
+      nl = split(s, lines, "\n")
+      for (i = 1; i <= nl; i++) {
+        line = lines[i]
+        if (match(line, /(^|[ \t])#/)) line = substr(line, 1, RSTART - 1)
+        np = split(line, parts, ",")
+        for (j = 1; j <= np; j++) {
+          it = parts[j]
+          gsub(/^[ \t\r]+|[ \t\r]+$/, "", it)
+          sub(/^([-*]|[0-9]+\.)[ \t]+/, "", it)
+          if (it ~ /^`[^`]*`$/) { it = substr(it, 2, length(it) - 2); gsub(/^[ \t]+|[ \t]+$/, "", it) }
+          if (it != "") arr[++n] = it
+        }
+      }
+      return n
+    }
+    # files_entry <item> -> what the item is. The answer is
+    #   2  a path, stored as written: it carries a `/`, or an extension, a final dot followed by
+    #      a letter-led run of letters and digits on a stem that holds a letter (`CONTEXT.md`,
+    #      never `v1.2`, `1.11.0` or `.gitignore`)
+    #   1  a bare word: refused, naming `./<item>`, which carries a `/` and so is read
+    #   3  not a path in any spelling: an item holding white space is prose, and one ending in
+    #      `.` or holding no letter or digit names no file. Refused with no spelling advice
+    #   0  not an item: a one-token unfilled slot (`<paths>`), which is guidance
+    # Nothing here reads the disk. The third arm T29 wrote, "names a file at the project root",
+    # made two walls list the root, the fetch the hook-authoring freeze forbids; `./Makefile`
+    # says the same with no listing (A-orch-46). Every other path field keeps `ispath`.
+    function files_entry(t,   stem) {
+      if (t ~ /[ \t]/)                       return 3
+      if (istemplate(t))                     return 0
+      if (t !~ /[A-Za-z0-9]/ || t ~ /\.$/)   return 3
+      if (index(t, "/") > 0)                 return 2
+      if (t ~ /\.[A-Za-z][A-Za-z0-9]*$/) {
+        stem = t; sub(/\.[A-Za-z][A-Za-z0-9]*$/, "", stem)
+        if (stem ~ /[A-Za-z]/)               return 2
+      }
       return 1
     }
     # ONE COLLAPSE, TWO STRENGTHS, BOTH OUT OF payload/scripts/lib/cmd-class.sh (wave-20 T4;
@@ -881,16 +904,23 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] [<root files>] -> the awk 
       MRout = out; MRc = c; MRdropped = dropped
       return out
     }
-    # <files> set: the span is a Files: span, read entry by entry by `files_entry`, and an entry
-    # that is not a path prints as `files_unread=` for `brief_validate_fields` to refuse.
-    function paths(s, maxn, warnlabel, files,   n, arr, i, t, k, out, seen, c, dropped, unread) {
-      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""; unread = ""
+    # <files> set: the span is a Files: span, split into items by `files_split` and read item by
+    # item by `files_entry`. `none` alone is no files. A bare word prints as `files_unread=`
+    # (space-joined) and an item that is no path in any spelling as `files_bad=` (comma-joined,
+    # since an item holds no comma), for `brief_validate_fields` to refuse.
+    function paths(s, maxn, warnlabel, files,   n, arr, i, t, k, out, seen, c, dropped, unread, bad) {
+      out = ""; c = 0; dropped = ""; unread = ""; bad = ""
+      if (files) {
+        n = files_split(s, arr)
+        if (n == 1 && tolower(arr[1]) == "none") return ""
+      } else n = split(s, arr, /[ \t\r\n]+/)
       for (i = 1; i <= n; i++) {
-        t = trimtok(arr[i])
-        k = (files ? files_entry(arr[i]) : 2 * ispath(t))
+        t = (files ? arr[i] : trimtok(arr[i]))
+        k = (files ? files_entry(t) : 2 * ispath(t))
         if (k == 0 || seen[t]) continue
         seen[t] = 1
         if (k == 1) { unread = (unread == "" ? t : unread " " t); continue }
+        if (k == 3) { bad = (bad == "" ? t : bad "," t); continue }
         if (c < maxn) { out = (out == "" ? t : out "," t); c++ }
         else if (warnlabel != "") { dropped = (dropped == "" ? t : dropped " " t) }
       }
@@ -898,13 +928,11 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] [<root files>] -> the awk 
         print "files_capwarn=" warnlabel " line exceeds the " maxn "-path cap — dropped: " dropped
       }
       if (unread != "") print "files_unread=" unread
+      if (bad != "") print "files_bad=" bad
       return out
     }
     BEGIN {
       NL = 0
-      # The root files `files_entry` reads, through the environment so no character of a
-      # file name is read as an awk escape.
-      ROOTFILES = ENVIRON["BRIEF_ROOT_FILES"]
       # How many candidate paths a deliverable span reports before it stops counting.
       # One is the contract; anything above one is refused, and the number only has to
       # be large enough for the refusal to show the author what it saw.
@@ -1195,8 +1223,8 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] [<root files>] -> the awk 
 #   re_executes_bad              one command, keeping its `|` (T5): the fault it names is
 #                                often the pipe, and the evidence must show the character
 #   suites_bad, suites_dropped,  the exact token the lift refused or dropped (T3, T5,
-#   re_executes_dropped,         REQ-8; wave-27 T29), so the refusal can name it
-#   files_unread
+#   re_executes_dropped,         REQ-8; wave-27 T29, T42), so the refusal can name it
+#   files_unread, files_bad
 #   suites_commented             a Suites: span that was entirely a comment (T35, critic C9)
 #   questions, questions_bad     a reader's questions, comma-joined in the table's order, and
 #                                the words outside the three (wave-27 T15)
@@ -1211,43 +1239,31 @@ brief_field() {
     suites)           sanitize "$v" 900 suites_allowed ;;
     re_executes)      sanitize "$v" 900 re_executes ;;
     re_executes_bad)  sanitize "$v" 300 re_executes ;;
-    suites_bad|suites_dropped|re_executes_dropped|files_unread) sanitize "$v" 300 ;;
+    suites_bad|suites_dropped|re_executes_dropped|files_unread|files_bad) sanitize "$v" 300 ;;
     suites_commented) sanitize "$v" 8 ;;
     *)                printf '%s' "$v" ;;
   esac
 }
 
-# brief_root_files <root> -> the names of the regular files at the project root, one per line
-# (wave-27 T29; REQ-12, D21). THE COLLECTOR of the one fact `files_entry` reads off the disk: a
-# door calls it and hands the answer to `lift_contract_fields`, so the reader stays a predicate
-# over what it is handed. Dotfiles count; directories do not. No root, no names.
-brief_root_files() {
-  local root="${1-}" f had_f=0
-  [ -n "$root" ] && [ -d "$root" ] || return 0
-  case "$-" in *f*) had_f=1; set +f ;; esac
-  for f in "$root"/* "$root"/.[!.]* "$root"/..?*; do
-    [ -f "$f" ] && printf '%s\n' "${f##*/}"
-  done
-  [ "$had_f" = 1 ] && set -f
-  return 0
-}
-
-# brief_files_entry <entry> [<root files>] -> the spelling of <entry> that a Files: line, a
-# dispatch or `amend --files+`, stores (wave-27 T29; REQ-12, D21). It asks the lift, so it is
-# the one reader, `files_entry`, and never a second copy of its rule.
-#   rc 0  read as a path: prints <entry> as written
-#   rc 1  not read as a path: prints `./<entry>`, the spelling the reader accepts
-#   rc 2  not one entry at all (empty, or holding whitespace the span would split): prints
-#         <entry> as written, since no spelling of it is read whole
+# brief_files_entry <entry> -> the spelling of <entry> that a Files: line, a dispatch or
+# `amend --files+`, stores (wave-27 T29, T42; REQ-12, D21). It asks the lift, so it is the one
+# reader, `files_entry`, and never a second copy of its rule. The answer is decided by what the
+# lift RECORDED, never by what it left unread (review pass 11 F6):
+#   rc 0  the lift records <entry> itself: prints <entry> as written
+#   rc 1  the lift records `./<entry>`: prints that spelling
+#   rc 2  neither (white space, a comma, a trailing `.`, no letter or digit, a slot): prints
+#         <entry> as written, since no spelling of it is recorded whole
 brief_files_entry() {
-  local entry="${1-}" lifted
-  case "$entry" in ''|*[[:space:]]*) printf '%s' "$entry"; return 2 ;; esac
-  lifted=$(lift_contract_fields "Files: $entry" "" "${2-}")
-  if [ -n "$(brief_field "$lifted" files_unread)" ]; then
+  local entry="${1-}"
+  case "$entry" in ''|*[[:space:]]*|*,*) printf '%s' "$entry"; return 2 ;; esac
+  if [ "$(brief_field "$(lift_contract_fields "Files: $entry")" files)" = "$entry" ]; then
+    printf '%s' "$entry"; return 0
+  fi
+  if [ "$(brief_field "$(lift_contract_fields "Files: ./$entry")" files)" = "./$entry" ]; then
     printf './%s' "$entry"; return 1
   fi
   printf '%s' "$entry"
-  return 0
+  return 2
 }
 
 # brief_body_advisories <brief text> <name> <files> <suites-allowed> <re-executes> <poker>
@@ -1392,7 +1408,7 @@ brief_body_advisories() {
 brief_validate_fields() {
   local lifted="${1-}" role="${2-}" root="${3-}" sink="${4-}"
   local files suites re_executes runs_bad suites_bad suites_dropped runs_dropped suites_commented
-  local files_unread entry questions reader
+  local files_unread files_bad entry fact fix questions reader
   local cap capw detail suites_comment impact_cmd found=0
   local _impact_out _impact_tmp _impact_pid _impact_overran _impact_rc _old_ifs
   files=$(brief_field "$lifted" files)
@@ -1404,36 +1420,68 @@ brief_validate_fields() {
   runs_dropped=$(brief_field "$lifted" re_executes_dropped)
   suites_commented=$(brief_field "$lifted" suites_commented)
   files_unread=$(brief_field "$lifted" files_unread)
+  files_bad=$(brief_field "$lifted" files_bad)
   questions=$(brief_field "$lifted" questions)
   # THE ROLE AND ITS QUESTIONS DECIDE THE RUN CAP (wave-20 T4; wave-27 T15, F4), and the refusal
   # texts print the number the lift applied, from the same function.
   cap=$(dp_runs_cap "$role" "$questions")
   capw=$(dp_runs_cap_words "$role" "$questions")
 
-  # ===================================== A Files: ENTRY IS A PATH OR A REFUSAL (wave-27 T29)
-  # (REQ-12 AC-12.2, D21.)
+  # ===================================== A Files: ITEM IS A PATH OR A REFUSAL (wave-27 T29, T42)
+  # (REQ-12 AC-12.2, D21 as amended by A-orch-46.)
   #
-  # NEVER DROPPED. The lift reads each Files: entry with `files_entry`, and an entry that is not
-  # a path, with no `/`, no extension and no file of its name at the project root, comes here
-  # by name. Until this arm it fell off the row in silence: `Files: CONTEXT.md, a/b.ts` recorded
-  # `a/b.ts` alone, and the writer was refused at its stop for editing the file its brief named.
-  # One finding per entry, so each refusal line names its entry and the spelling accepted.
+  # NEVER DROPPED. The lift reads each Files: item with `files_entry`, and an item that is not a
+  # path comes here by name. Until T29 it fell off the row in silence: `Files: CONTEXT.md, a/b.ts`
+  # recorded `a/b.ts` alone, and the writer was refused at its stop for editing the file its
+  # brief named. One finding per item, so each refusal line names its item. A bare word is told
+  # the spelling `./<word>`; an item no spelling reads (prose, a trailing `.`, no letter or
+  # digit) is told to go, since advice to respell it would record it (review pass 11 F1).
+  #
+  # THE FIRST LINE FITS refuse.sh's BUDGETS: a fix of at most six words and 40 columns, a line of
+  # 100. A word of up to 16 characters is named in full and in its `./` spelling; a longer one is
+  # cut to 15 and `…` and told the prefix; an item no spelling reads is cut past 42 the same way,
+  # the cut the loader makes of a hook name. The detail carries the whole item either way. Past those lengths refuse.sh refused its own call,
+  # and the dispatch wall exited 2 with no refusal line (found at T42 GREEN).
   while IFS= read -r entry; do
     [ -n "$entry" ] || continue
-    detail="The Files: span offered this entry, and it is not read as a path:
+    if [ "${#entry}" -le 16 ]; then
+      fact="Files: names ${entry}, not a path"; fix="spell it ./${entry}"
+    else
+      fact="Files: names ${entry:0:15}…, not a path"; fix="spell it with a leading ./"
+    fi
+    detail="The Files: line offered this word, and it is not read as a path:
     ${entry}
 
-A Files: entry is a path when it carries a /, or an extension, or names a file that exists
-at the project root. This one does none of those, and a word the row does not hold is a file
-the writer is refused for at its stop, for editing exactly what its brief named.
+A Files: item is a path when it carries a /, or an extension (a final dot and a run of
+letters and digits that starts with a letter, as in .md or .sh). This one does neither, and
+a file the row does not hold is one the writer is refused for at its stop.
 
-Fix: spell a file at the root with ./ —
+Fix: if it is a file, spell it with ./ —
     Files: ./${entry}
+If it is not a file, remove it from the Files: line.
 
 Then retry the dispatch."
-    found=1; "$sink" finding "Files: names ${entry}, not a path" "spell it ./${entry}" "$detail"
+    found=1; "$sink" finding "$fact" "$fix" "$detail"
   done <<EOF
 $(printf '%s' "$files_unread" | tr ' ' '\n')
+EOF
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    fact="Files: ${entry} is not a path"
+    [ "${#entry}" -le 42 ] || fact="Files: ${entry:0:41}… is not a path"
+    detail="The Files: line offered this item, and no spelling of it is read as a path:
+    ${entry}
+
+A Files: line is a comma-separated list of paths. An item holding a space is prose, and an
+item ending in . or holding no letter or digit names no file. A note about the files goes
+after a trailing # on the line, or outside the Files: line.
+
+Fix: remove the item, or replace it with the paths it means, comma-separated.
+
+Then retry the dispatch."
+    found=1; "$sink" finding "$fact" "drop it" "$detail"
+  done <<EOF
+$(printf '%s' "$files_bad" | tr ',' '\n')
 EOF
 
   # ===================================== A DECLARATION IS LITERAL TEXT (REQ-1 AC-1.4)
@@ -1604,7 +1652,7 @@ Then retry the dispatch."
   # faults, the second false (triage-B §4.2).
   if [ -z "$files" ] && [ -z "$suites" ] && [ -z "$re_executes" ] && \
      [ -z "$suites_dropped" ] && [ -z "$suites_bad" ] && \
-     [ -z "$runs_bad" ] && [ -z "$runs_dropped" ] && [ -z "$files_unread" ]; then
+     [ -z "$runs_bad" ] && [ -z "$runs_dropped" ] && [ -z "$files_unread" ] && [ -z "$files_bad" ]; then
     # THE CLAUSE GOES FIRST, NOT LAST (critic C9). refuse.sh folds a detail to twelve lines on
     # the channel that hands it to a reader who did not ask for it, and this detail is already
     # longer than that, so a sentence appended at the end is bytes nobody sees. One clause, at
