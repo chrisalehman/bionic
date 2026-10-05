@@ -327,11 +327,18 @@ bionic_drop_lines_walk() {  # <file> <predicate> <n>,<n> — the lines that stay
 # its start marker replaced by `)` and the rest left out for (b), all of them left
 # out for (c). remove.sh carries these functions under the same names, pinned by
 # tests/rc-item.test.sh §T66.
-bionic_rc_candidates() {  # <file> <predicate> <ere> — `cand=<n>,<n> theirs=<n>,<n>`
-  local LC_ALL=C file="$1" pred="$2" ere="$3" line n=0 cand="" theirs=""
+# Lines from a <start> marker to its <end> are a marked block's, decided as one unit
+# (`markers_block_alone`), and are not read as bare lines.
+bionic_rc_candidates() {  # <file> <predicate> <ere> [<start> <end>] — `cand=<n>,<n> theirs=<n>,<n>`
+  local LC_ALL=C file="$1" pred="$2" ere="$3" start="${4:-}" end="${5:-}" line n=0 cand="" theirs="" inside=0
   if [ -f "$file" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       n=$((n + 1))
+      if [ -n "$start" ]; then
+        if [ "$line" = "$start" ]; then inside=1; continue; fi
+        if [ "$line" = "$end" ]; then inside=0; continue; fi
+        [ "$inside" = "1" ] && continue
+      fi
       if "$pred" "$line"; then cand="${cand}${cand:+,}${n}"
       elif [ -n "$ere" ] && [[ "$line" =~ $ere ]]; then theirs="${theirs}${theirs:+,}${n}"; fi
     done < "$file"
@@ -339,9 +346,9 @@ bionic_rc_candidates() {  # <file> <predicate> <ere> — `cand=<n>,<n> theirs=<n
   printf 'cand=%s theirs=%s\n' "$cand" "$theirs"
 }
 
-bionic_rc_lines() {  # <file> <predicate> <ere> — `ours=<n>,<n> bound=<n>,<n> why=<w> theirs=<n>,<n>`
+bionic_rc_lines() {  # <file> <predicate> <ere> [<start> <end>] — `ours=<n>,<n> bound=<n>,<n> why=<w> theirs=<n>,<n>`
   local scan cand
-  scan="$(bionic_rc_candidates "$1" "$2" "$3")"
+  scan="$(bionic_rc_candidates "$1" "$2" "$3" "${4:-}" "${5:-}")"
   cand="${scan#cand=}"; cand="${cand%% *}"
   printf '%s theirs=%s\n' "$(bionic_rc_alone "$1" "$cand")" "${scan#* theirs=}"
 }
@@ -402,6 +409,22 @@ bionic_rc_block_alone() {  # <file> <first> <last> — `alone=<yes|no> why=<ok|n
   fi
   rm -rf "$dir"
   printf 'alone=%s why=ok\n' "$alone"
+}
+
+# The block between <start> and <end> (the first pair; a caller has already refused
+# markers that do not pair up) and `bionic_rc_block_alone`'s answer for it: the one
+# function the retired alias block and the retired env block are both decided by
+# (A-orch-119 (3)). `alone=<yes|no> why=<…> first=<n> last=<n>`. remove.sh's
+# `_rm_block_alone` is this body, pinned by tests/rc-item.test.sh §T66.
+markers_block_alone() {  # <file> <start> <end>
+  local line n=0 first="" last=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if [ -z "$first" ] && [ "$line" = "$2" ]; then first="$n"
+    elif [ -n "$first" ] && [ -z "$last" ] && [ "$line" = "$3" ]; then last="$n"; fi
+  done < "$1"
+  if [ -z "$first" ] || [ -z "$last" ]; then printf 'alone=no why=ok first= last=\n'; return 0; fi
+  printf '%s first=%s last=%s\n' "$(bionic_rc_block_alone "$1" "$first" "$last")" "$first" "$last"
 }
 
 # One staged copy of <file> — the lines <drop> names left out, line <probe> replaced

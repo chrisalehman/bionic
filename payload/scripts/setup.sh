@@ -1293,6 +1293,13 @@ setup_legacy_alias() {
     return 0
   fi
 
+  # THE BLOCK IS ONE UNIT (wave-27 T66, A-orch-119 (3)): a block that, taken out,
+  # would leave the user's own code changed is named and not asked about.
+  if [ "$present" = "yes" ] && ! _setup_legacy_alias_block_alone "$rc"; then
+    _setup_legacy_alias_left "$rc"
+    return 0
+  fi
+
   if [ "$present" = "yes" ]; then
     say "   ${rc} carries the retired bionic alias block — auto mode is the safer equivalent now."
     consent "   Remove the legacy alias block from ${rc}?"; _setup_consent_rc=$?
@@ -1301,9 +1308,17 @@ setup_legacy_alias() {
       action "remove the legacy bionic alias block from ${rc} — $(_setup_answer_yes legacy-alias)"
       return 0
     fi
-    markers_strip "$rc" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END"; _setup_strip_rc=$?
+    # Decided again on the file as it is now: an rc changed under the question so
+    # that the block no longer stands alone is not written.
+    if markers_check "$rc" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END" >/dev/null && ! _setup_legacy_alias_block_alone "$rc"; then
+      _setup_strip_rc=5
+    else
+      markers_strip "$rc" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END"; _setup_strip_rc=$?
+    fi
     case "$_setup_strip_rc" in
       0) item "$SETUP_OK" "legacy alias block" "removed" ;;
+      5) item "$SETUP_BAD" "legacy alias block" "changed while setup ran, so nothing was written: ${rc}"
+         action "${rc} changed while setup ran; remove the retired alias block — $(_setup_answer_yes legacy-alias)" ;;
       2) _setup_rc_say_malformed "$rc" "legacy alias block" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END" ;;
       3) item "$SETUP_NIL" "legacy alias block" "read-only — not changed"
          action "make ${rc} writable to remove the retired alias block — bionic does not write a read-only file" ;;
@@ -1365,16 +1380,30 @@ _setup_legacy_alias_read_only() {  # <rc>
   [ -n "${scan%% *}" ]
 }
 
+# The retired alias block stands as commands of their own, as one unit (markers.sh
+# `markers_block_alone`, the one function remove's marked branch asks too).
+_setup_legacy_alias_block_alone() {  # <rc>
+  case "$(markers_block_alone "$1" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")" in alone=yes*) return 0 ;; esac
+  return 1
+}
+
 # What the step leaves in the rc, each named once by number in the file as it is
 # now and never by its text: a read-only rc's block or line (the marked step's
 # words); bionic's own line where removing it would change the user's code, or
 # where that could not be checked (wave-27 T66, B1); and a line that mentions the
 # retired alias and is not one bionic wrote (T55). rc 1 when there is none.
 _setup_legacy_alias_left() {  # <rc>
-  local scan bound why theirs words said=1
+  local scan bound why theirs words said=1 alone
   if _setup_legacy_alias_read_only "$1"; then
     item "$SETUP_NIL" "legacy alias block" "read-only — not changed"
     action "make ${1} writable to remove the retired alias block — bionic does not write a read-only file"
+    said=0
+  elif [ "$(detect_zshrc_legacy_block)" = "env:zshrc-legacy present=yes" ] && ! _setup_legacy_alias_block_alone "$1"; then
+    alone="$(markers_block_alone "$1" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")"
+    why="${alone#* why=}"; why="${why%% *}"
+    words="${alone#* first=}"; words="lines ${words%% *} to ${alone##* last=}"
+    item "$SETUP_NIL" "legacy alias block" "bionic's block, left: ${words} of ${1}"
+    action "edit ${words} of ${1} by hand if you want the retired alias gone — bionic's block, $(bionic_rc_left_reason "$why" "$1")"
     said=0
   fi
   scan="$(bionic_legacy_alias_lines "$1")"

@@ -521,12 +521,13 @@ BIONIC_TODO_EXPORT_PATTERN='export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS'
 
 # Which lines of <file> are bionic's and may go, which are bionic's and stay, and
 # which only mention it: `ours=<n>,<n> bound=<n>,<n> why=<…> theirs=<n>`, line
-# numbers, never a line's text (an rc line can hold a secret). `bound` is bionic's
+# numbers, never a line's text (an rc line can hold a secret); the lines of the
+# retired alias block are the block's, not bare lines. `bound` is bionic's
 # line where taking it out would change the user's own code, and `why` says how
 # that was decided (markers.sh `bionic_rc_lines`). A file that is not there answers
 # all of them empty.
 bionic_legacy_alias_lines() {  # <file>
-  bionic_rc_lines "$1" bionic_legacy_alias_ours "$BIONIC_LEGACY_ALIAS_PATTERN"
+  bionic_rc_lines "$1" bionic_legacy_alias_ours "$BIONIC_LEGACY_ALIAS_PATTERN" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END"
 }
 
 # A file with no env markers: `cand=<n>,<n>` the lines of bionic's text, outside the
