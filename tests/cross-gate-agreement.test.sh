@@ -11514,7 +11514,9 @@ SV_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
 SV_DISPATCH="$BIONIC_SKILLS_DIR/canonical-sdlc/dispatch.md"
 # The column padding before the comment was cut to two spaces at wave-24 T9 (A-T9.9), the
 # bytes paying for the scaffold's Done marker: line; the words are unchanged.
-SV_SUITES_LINE='Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:'
+# RE-POINTED (wave-27 T53, review pass 28 B3): the comment now tells the reader dealt `evidence`
+# to name its runs, since a `Suites: none` evidence reader is refused at dispatch.
+SV_SUITES_LINE='Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names its runs, at most 3, never none'
 
 sv_suites_line() {  # <file> -> the scaffold's Suites: line, or empty
   awk '/^Suites: none/ { print; exit }' "$1" 2>/dev/null
@@ -11566,8 +11568,8 @@ expect_eq "SV …and neither author surface still carries the retired 'on its ow
 # with the shared constant — proving the equality pin above is load-bearing rather than
 # comparing an empty string to itself.
 SV_MUT="$SANDBOX/skill-stale-scaffold.md"
-anchor -E "$SV_SKILL" 'other runners: Re-executes:$' 1
-sed 's/other runners: Re-executes:$/other runners: Re-executes:, on its own paragraph/' \
+anchor -E "$SV_SKILL" 'at most 3, never none$' 1
+sed 's/at most 3, never none$/at most 3, never none, on its own paragraph/' \
   "$SV_SKILL" > "$SV_MUT" 2>/dev/null
 SV_MUT_LINE="$(sv_suites_line "$SV_MUT")"
 expect_eq "SV MUTANT a doctored copy with the old comment reinstated no longer matches the shared line" \
