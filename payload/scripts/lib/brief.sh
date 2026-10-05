@@ -32,7 +32,11 @@
 #
 # THE INTERFACE.
 #
-#   lift_contract_fields <brief text> [<subagent_type>]   -> `kind=value` lines
+#   lift_contract_fields <brief text> [<subagent_type>] [<root files>]   -> `kind=value` lines
+#   brief_root_files <root>            -> the names of the regular files at the root, the one
+#                                         fact a door hands the lift for its Files: reader
+#   brief_files_entry <entry> [<root files>] -> the spelling a Files: line stores for <entry>
+#       (wave-27 T29, D21): as written when the one reader reads it as a path, else `./<entry>`
 #   brief_field <lifted> <kind>        -> one kind's value, bounded as the roster row stores it
 #   brief_validate_fields <lifted> <subagent_type> <root> <sink>
 #       -> rc 0: no finding · rc 1: at least one · rc 2: the derivation overran its bound, so
@@ -201,8 +205,13 @@ dp_runs_cap_words() {
   esac
 }
 
-lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines, absent kinds omitted
-  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" \
+# <root files> is a FACT THE DOOR HANDS IN (wave-27 T29; REQ-12, D21): `brief_root_files <root>`'s
+# answer, the names of the regular files at the project root, one per line. The lift never looks
+# at the disk itself (the freeze, .claude/rules/hook-authoring.md). Without it a bare Files: entry
+# is a path only by its `/` or its extension.
+lift_contract_fields() {  # <brief text> [<subagent_type>] [<root files>] -> `kind=value` lines, absent kinds omitted
+  printf '%s' "$1" | BRIEF_ROOT_FILES="${3-}" \
+    awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" \
     -v RUNS_CAP="$(dp_runs_cap "${2-}")" -v SUITES_CAP="$DP_SUITES_MAX" "$CMD_RUN_NORM_AWK"'
     # <sep> is the regex between the label and its value; the default is the
     # colon every labeled brief field uses. <bol> marks a label that only counts
@@ -279,6 +288,29 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       return 1
     }
     function ispath(t) { return (pathshaped(t) && !istemplate(t)) }
+    # THE ONE READER OF A Files: ENTRY (wave-27 T29; REQ-12, D21). The dispatch wall, `amend`,
+    # `task-add` and the stop wall remedy all read an entry here: the lift for a span, and
+    # `brief_files_entry` below for one entry. Until this reader a Files: entry was a path only
+    # when it carried a `/` (`ispath`), so `Files: CONTEXT.md, a/b.ts` recorded `a/b.ts` alone,
+    # in silence, and the writer was refused at its stop for editing the file its brief named.
+    #
+    # <r> is the token as the span split it. The answer is
+    #   2  a path, stored as written: it carries a `/`, or an extension, or names a file at the
+    #      project root (ROOTFILES, handed in by the door)
+    #   1  an entry that is not a path: the dispatch is refused, naming `./<entry>`
+    #   0  not an entry at all: an unfilled slot, which is guidance, or a token with no letter
+    #      and no digit, such as a dash between two entries
+    # Every other path field keeps `ispath`: a progress path or a deliverable is one the
+    # walls stat, and none of them was ever a root file read by its name alone.
+    function files_entry(r,   t) {
+      t = trimtok(r)
+      if (istemplate(r) || istemplate(t)) return 0
+      if (t !~ /[A-Za-z0-9]/)             return 0
+      if (index(t, "/") > 0)              return 2
+      if (t ~ /[^.]\.[A-Za-z0-9]+$/)      return 2
+      if (index("\n" ROOTFILES "\n", "\n" t "\n") > 0) return 2
+      return 1
+    }
     # ONE COLLAPSE, TWO STRENGTHS, BOTH OUT OF payload/scripts/lib/cmd-class.sh (wave-20 T4;
     # REQ-7, D7). Every caller but one wants whitespace collapsed and nothing else — a
     # waiver reason, a claim pattern, a deliverable. The one that stores a DECLARED RUN
@@ -791,22 +823,30 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       MRout = out; MRc = c; MRdropped = dropped
       return out
     }
-    function paths(s, maxn, warnlabel,   n, arr, i, t, out, seen, c, dropped) {
-      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""
+    # <files> set: the span is a Files: span, read entry by entry by `files_entry`, and an entry
+    # that is not a path prints as `files_unread=` for `brief_validate_fields` to refuse.
+    function paths(s, maxn, warnlabel, files,   n, arr, i, t, k, out, seen, c, dropped, unread) {
+      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""; unread = ""
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
-        if (!ispath(t) || seen[t]) continue
+        k = (files ? files_entry(arr[i]) : 2 * ispath(t))
+        if (k == 0 || seen[t]) continue
         seen[t] = 1
+        if (k == 1) { unread = (unread == "" ? t : unread " " t); continue }
         if (c < maxn) { out = (out == "" ? t : out "," t); c++ }
         else if (warnlabel != "") { dropped = (dropped == "" ? t : dropped " " t) }
       }
       if (warnlabel != "" && dropped != "") {
         print "files_capwarn=" warnlabel " line exceeds the " maxn "-path cap — dropped: " dropped
       }
+      if (unread != "") print "files_unread=" unread
       return out
     }
     BEGIN {
       NL = 0
+      # The root files `files_entry` reads, through the environment so no character of a
+      # file name is read as an awk escape.
+      ROOTFILES = ENVIRON["BRIEF_ROOT_FILES"]
       # How many candidate paths a deliverable span reports before it stops counting.
       # One is the contract; anything above one is refused, and the number only has to
       # be large enough for the refusal to show the author what it saw.
@@ -1034,7 +1074,7 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       # ambiguity: a task touches a set, and the wall does not have to choose
       # among them, it hands the whole set to the impact command.
       h = firsthit("files")
-      if (h > 0) { v = paths(spanof(h), FILES_MAX, "Files:"); if (v != "") print "files=" v }
+      if (h > 0) { v = paths(spanof(h), FILES_MAX, "Files:", 1); if (v != "") print "files=" v }
       # THE SUITES THE BRIEF DECLARES, NORMALISED TO BASENAMES at the moment they
       # are lifted, so the declared spelling and the derived one are the same
       # spelling on the row and the writer-side guard compares one alphabet. The
@@ -1071,7 +1111,8 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
 #   re_executes_bad              one command, keeping its `|` (T5): the fault it names is
 #                                often the pipe, and the evidence must show the character
 #   suites_bad, suites_dropped,  the exact token the lift refused or dropped (T3, T5,
-#   re_executes_dropped          REQ-8), so the refusal can name it
+#   re_executes_dropped,         REQ-8; wave-27 T29), so the refusal can name it
+#   files_unread
 #   suites_commented             a Suites: span that was entirely a comment (T35, critic C9)
 #   anything else                the raw value
 brief_field() {
@@ -1082,10 +1123,43 @@ brief_field() {
     suites)           sanitize "$v" 900 suites_allowed ;;
     re_executes)      sanitize "$v" 900 re_executes ;;
     re_executes_bad)  sanitize "$v" 300 re_executes ;;
-    suites_bad|suites_dropped|re_executes_dropped) sanitize "$v" 300 ;;
+    suites_bad|suites_dropped|re_executes_dropped|files_unread) sanitize "$v" 300 ;;
     suites_commented) sanitize "$v" 8 ;;
     *)                printf '%s' "$v" ;;
   esac
+}
+
+# brief_root_files <root> -> the names of the regular files at the project root, one per line
+# (wave-27 T29; REQ-12, D21). THE COLLECTOR of the one fact `files_entry` reads off the disk: a
+# door calls it and hands the answer to `lift_contract_fields`, so the reader stays a predicate
+# over what it is handed. Dotfiles count; directories do not. No root, no names.
+brief_root_files() {
+  local root="${1-}" f had_f=0
+  [ -n "$root" ] && [ -d "$root" ] || return 0
+  case "$-" in *f*) had_f=1; set +f ;; esac
+  for f in "$root"/* "$root"/.[!.]* "$root"/..?*; do
+    [ -f "$f" ] && printf '%s\n' "${f##*/}"
+  done
+  [ "$had_f" = 1 ] && set -f
+  return 0
+}
+
+# brief_files_entry <entry> [<root files>] -> the spelling of <entry> that a Files: line, a
+# dispatch or `amend --files+`, stores (wave-27 T29; REQ-12, D21). It asks the lift, so it is
+# the one reader, `files_entry`, and never a second copy of its rule.
+#   rc 0  read as a path: prints <entry> as written
+#   rc 1  not read as a path: prints `./<entry>`, the spelling the reader accepts
+#   rc 2  not one entry at all (empty, or holding whitespace the span would split): prints
+#         <entry> as written, since no spelling of it is read whole
+brief_files_entry() {
+  local entry="${1-}" lifted
+  case "$entry" in ''|*[[:space:]]*) printf '%s' "$entry"; return 2 ;; esac
+  lifted=$(lift_contract_fields "Files: $entry" "" "${2-}")
+  if [ -n "$(brief_field "$lifted" files_unread)" ]; then
+    printf './%s' "$entry"; return 1
+  fi
+  printf '%s' "$entry"
+  return 0
 }
 
 # brief_body_advisories <brief text> <name> <files> <suites-allowed> <re-executes> <poker>
@@ -1230,6 +1304,7 @@ brief_body_advisories() {
 brief_validate_fields() {
   local lifted="${1-}" role="${2-}" root="${3-}" sink="${4-}"
   local files suites re_executes runs_bad suites_bad suites_dropped runs_dropped suites_commented
+  local files_unread entry
   local cap capw detail suites_comment impact_cmd found=0
   local _impact_out _impact_tmp _impact_pid _impact_overran _impact_rc _old_ifs
   files=$(brief_field "$lifted" files)
@@ -1240,10 +1315,37 @@ brief_validate_fields() {
   suites_dropped=$(brief_field "$lifted" suites_dropped)
   runs_dropped=$(brief_field "$lifted" re_executes_dropped)
   suites_commented=$(brief_field "$lifted" suites_commented)
+  files_unread=$(brief_field "$lifted" files_unread)
   # THE ROLE DECIDES THE RUN CAP (wave-20 T4; REQ-7, Δ3, Δ9), and the refusal texts print the
   # number the lift applied, from the same function.
   cap=$(dp_runs_cap "$role")
   capw=$(dp_runs_cap_words "$role")
+
+  # ===================================== A Files: ENTRY IS A PATH OR A REFUSAL (wave-27 T29)
+  # (REQ-12 AC-12.2, D21.)
+  #
+  # NEVER DROPPED. The lift reads each Files: entry with `files_entry`, and an entry that is not
+  # a path, with no `/`, no extension and no file of its name at the project root, comes here
+  # by name. Until this arm it fell off the row in silence: `Files: CONTEXT.md, a/b.ts` recorded
+  # `a/b.ts` alone, and the writer was refused at its stop for editing the file its brief named.
+  # One finding per entry, so each refusal line names its entry and the spelling accepted.
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    detail="The Files: span offered this entry, and it is not read as a path:
+    ${entry}
+
+A Files: entry is a path when it carries a /, or an extension, or names a file that exists
+at the project root. This one does none of those, and a word the row does not hold is a file
+the writer is refused for at its stop, for editing exactly what its brief named.
+
+Fix: spell a file at the root with ./ —
+    Files: ./${entry}
+
+Then retry the dispatch."
+    found=1; "$sink" finding "Files: names ${entry}, not a path" "spell it ./${entry}" "$detail"
+  done <<EOF
+$(printf '%s' "$files_unread" | tr ' ' '\n')
+EOF
 
   # ===================================== A DECLARATION IS LITERAL TEXT (REQ-1 AC-1.4)
   # (epic-23 wave-16, D1/D3, ADR-029.)
@@ -1411,7 +1513,7 @@ Then retry the dispatch."
   # faults, the second false (triage-B §4.2).
   if [ -z "$files" ] && [ -z "$suites" ] && [ -z "$re_executes" ] && \
      [ -z "$suites_dropped" ] && [ -z "$suites_bad" ] && \
-     [ -z "$runs_bad" ] && [ -z "$runs_dropped" ]; then
+     [ -z "$runs_bad" ] && [ -z "$runs_dropped" ] && [ -z "$files_unread" ]; then
     # THE CLAUSE GOES FIRST, NOT LAST (critic C9). refuse.sh folds a detail to twelve lines on
     # the channel that hands it to a reader who did not ask for it, and this detail is already
     # longer than that, so a sentence appended at the end is bytes nobody sees. One clause, at
