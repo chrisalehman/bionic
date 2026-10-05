@@ -108,7 +108,7 @@
   <rect x="566" y="543" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
   <text x="629" y="557" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
   <text x="706" y="552" font-size="10.5" fill="#3a424c">A dispatch with no this-session environment attestation or no live Patrol, or whose brief breaks its contract: no single</text>
-  <text x="706" y="568" font-size="10.5" fill="#3a424c">Expected artifact: path, neither Files: nor Suites:, or a reader whose Questions: is not the set its rigor deals. It also</text>
+  <text x="706" y="568" font-size="10.5" fill="#3a424c">Expected artifact: path, no Files:, Suites: or Re-executes:, or a reader whose Questions: is not the set its rigor deals. It also</text>
   <text x="706" y="584" font-size="10.5" fill="#3a424c">writes the session roster row a launch is judged by.</text>
 
   <!-- 6 · execution-recorder.sh -->
@@ -197,7 +197,7 @@
   <text x="58" y="1202" font-size="10.5" fill="#175cd3">LOG-ONLY: rigor-floor consistency — and it logs user-overridden rather than a</text>
   <text x="58" y="1216" font-size="10.5" fill="#175cd3">violation when rigor-override: is present. Plans and task-scale artifacts are untouched.</text>
 
-  <rect x="710" y="930" width="650" height="300" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <rect x="710" y="930" width="650" height="314" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
   <text x="728" y="954" font-size="12.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#16191d">bash-walls.sh</text>
   <text x="728" y="971" font-size="10.5" font-style="italic" fill="#626b76">PreToolUse · Bash — the commit wall, on real git commit segments only</text>
   <text x="728" y="996" font-size="10.5" font-weight="700" fill="#3a424c">1</text>
@@ -218,10 +218,11 @@
   <text x="746" y="1136" font-size="10.5" fill="#3a424c">from current: 5 onward — walk-artifact: resolves to a real file under</text>
   <text x="746" y="1152" font-size="10.5" fill="#3a424c">&lt;docs-root&gt;/record/ and names the AC (unless walk: exempt)</text>
   <text x="728" y="1168" font-size="10.5" font-weight="700" fill="#3a424c">8</text>
-  <text x="746" y="1168" font-size="10.5" fill="#3a424c">from current: 6 onward — one fact per owed question present, or its waived: line</text>
-  <text x="728" y="1186" font-size="10.5" fill="#16191d">Valid → the commit proceeds. Otherwise → exit 2, and git never runs.</text>
-  <text x="728" y="1202" font-size="10.5" fill="#175cd3">LOG-ONLY: the epic merge-target check, and the intent-scoped Step-5 keys for</text>
-  <text x="728" y="1216" font-size="10.5" fill="#175cd3">refactor (behavior-preservation · compat-matrix · revert-plan) and tune (baseline · target · re-measure).</text>
+  <text x="746" y="1168" font-size="10.5" fill="#3a424c">from current: 6 onward — each owed question has a reading whose newest is not result=fail, or a newer</text>
+  <text x="746" y="1184" font-size="10.5" fill="#3a424c">waived: line; and no declared red is still owed</text>
+  <text x="728" y="1202" font-size="10.5" fill="#16191d">Valid → the commit proceeds. Otherwise → exit 2, and git never runs.</text>
+  <text x="728" y="1218" font-size="10.5" fill="#175cd3">LOG-ONLY: the epic merge-target check, and the intent-scoped Step-5 keys for</text>
+  <text x="728" y="1232" font-size="10.5" fill="#175cd3">refactor (behavior-preservation · compat-matrix · revert-plan) and tune (baseline · target · re-measure).</text>
 
   <!-- ============================ closing callouts ============================ -->
   <rect x="40" y="1256" width="426" height="88" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>

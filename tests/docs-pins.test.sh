@@ -5652,7 +5652,7 @@ expect_nonempty "W27-T53-S3d: hook-chain.svg's commit-wall ladder starts at the 
 expect_eq "W27-T53-S3d2: …and no longer at the newest plan under the plan dirs" "" \
   "$(w26_hits 'newest plan under the plan dirs' "$W27T53_HC")"
 expect_nonempty "W27-T53-S3e: …and has a Step-6 readings arm" \
-  "$(w26_hits 'from current: 6 onward — one fact per owed question' "$W27T53_HC")"
+  "$(w26_hits 'from current: 6 onward — each owed question has a reading' "$W27T53_HC")"
 # RE-POINTED (wave-27 T60, review pass 38 N2): the relation compared the SET of script names, so
 # a chip moved to another event, or one of a script's several registrations left undrawn, stayed
 # green. It compares each script WITH its registration now, as a list: one
@@ -5702,9 +5702,18 @@ expect_ne "W27-T53-S3f4: …a registration left undrawn is caught, though its sc
 # shellcheck disable=SC2086  # word-split on purpose: one path per line, none with spaces
 expect_nonempty "W27-T60-B1 precondition: the doctrine set carries the evidence reader's rule" \
   "$(w26_hits 'suites under `Suites:` and other runners under `Re-executes:`' $W26_DOCTRINE)"
+# The absence also reads the checks files a reader is pushed at start and the README (review
+# pass 51 S3); they go on this row's list, not on W26_DOCTRINE, which other rows use.
+W27T60_B1SET="$W26_DOCTRINE
+$(ls "${REPO}"/payload/context/checks-*.md 2>/dev/null)
+${REPO}/README.md"
+expect_contains "W27-T60-B1 precondition: the absence set holds the checks files" "payload/context/checks-structure.md" "$W27T60_B1SET"
 # shellcheck disable=SC2086
-expect_eq "W27-T60-B1: …and no doctrine file says 'never none' or that Suites: none is for a reader not dealt evidence" "" \
-  "$(w26_hits 'never none' $W26_DOCTRINE; w26_hits '`Suites: none` is for a reader not dealt' $W26_DOCTRINE)"
+expect_eq "W27-T60-B1: …and no doctrine file, checks file or README says 'never none' or that Suites: none is for a reader not dealt evidence" "" \
+  "$(w26_hits 'never none' $W27T60_B1SET; w26_hits '`Suites: none` is for a reader not dealt' $W27T60_B1SET)"
+W27T60_B1CK="$TMP/checks-evidence.md"
+sed 's/^/never none /' "${REPO}/payload/context/checks-evidence.md" > "$W27T60_B1CK" 2>/dev/null
+expect_nonempty "W27-T60-B1m: …and a checks file given the old clause is caught" "$(w26_hits 'never none' "$W27T60_B1CK")"
 # S1: hook-chain.svg's header says each timeout hooks.json registers. The sentence names the
 # common timeout and every script registered with another one, and no timeout the file lacks.
 # w27t60_timeout_gaps <svg> <hooks.json> -> one line per disagreement, empty when they agree.
@@ -5738,15 +5747,72 @@ jq '(.hooks[][] | .hooks[] | select(.command | test("dispatch-preflight")) | .ti
 expect_contains "W27-T60-S1n: …and so is a hooks.json that no longer registers the 15 the header says" \
   "timeout 15 said, none registered" "$(w27t60_timeout_gaps "$W27T53_HC" "$W27T60_HJD")"
 # S2: the commit wall reads no head (walls.sh _eg_reading_gaps); which head a fact covers is
-# current 8's to judge.
-expect_nonempty "W27-T60-S2: hook-chain.svg's Step-6 arm says the wall wants a fact present per owed question" \
-  "$(w26_hits 'from current: 6 onward — one fact per owed question present, or its waived: line' "$W27T53_HC")"
+# current 8's to judge. It refuses a newest failing reading and an open declared red too
+# (walls.sh, the two Step-6 refusals; review pass 51 S1).
+# The arm is two <text> lines, so each line is pinned whole.
+expect_nonempty "W27-T60-S2: hook-chain.svg's Step-6 arm says the wall wants each owed question's newest reading not failing, or a newer waiver" \
+  "$(w26_hits '>from current: 6 onward — each owed question has a reading whose newest is not result=fail, or a newer</text>' "$W27T53_HC")"
+expect_nonempty "W27-T60-S2a: …and no declared red still owed" \
+  "$(w26_hits '>waived: line; and no declared red is still owed</text>' "$W27T53_HC")"
 expect_eq "W27-T60-S2b: …and no longer that the commit wall reads it at the head" "" \
   "$(w26_hits 'one fact per owed question at the head' "$W27T53_HC")"
+expect_eq "W27-T60-S2c: …and no longer that a fact present per question is all it wants" "" \
+  "$(w26_hits 'one fact per owed question present, or its waived: line' "$W27T53_HC")"
+# S2 of pass 51: the dispatch wall refuses a brief only when Files:, Suites: and Re-executes: are
+# all empty (brief.sh, "THE THIRD WAY THROUGH").
+expect_nonempty "W27-T60-S3: hook-chain.svg's dispatch arm names Re-executes: beside Files: and Suites:" \
+  "$(w26_hits 'path, no Files:, Suites: or Re-executes:, or a reader' "$W27T53_HC")"
+expect_eq "W27-T60-S3b: …and no longer that neither Files: nor Suites: is refused" "" \
+  "$(w26_hits 'neither Files: nor Suites:' "$W27T53_HC")"
 # The README's auditor row says where the auditor reads at this version.
 W27T60_AUD="$(/usr/bin/grep -m1 '^| `auditor` |' "${REPO}/README.md")"
 expect_contains "W27-T60-R: README's auditor row reads at the verify gate and at Step 6 where its rigor deals it a question" \
   'At the verify gate and, at the rigors that deal it `evidence`, at Step 6' "$W27T60_AUD"
 expect_absent "W27-T60-Rb: …and no longer at the verify gate alone" 'At the verify gate, tries' "$W27T60_AUD"
+
+# ============================================================
+# §W27-R — the 1.12.0 release entry (REQ-10 AC-10.1; D19)
+# ============================================================
+# Relations, not text: the entry is the newest, is a minor release that keeps the contract
+# version, opens with the upgrade note, names what AC-10.1 lists, quotes each newly refused
+# action by a first line whose fix the code at this head still prints, and carries none of the
+# run's own process words. The version itself is SEMVER-6's.
+# w27r_entry <changelog> -> the body of the 1.12.0 entry, heading excluded.
+w27r_entry() { awk '/^## 1\.12\.0 /{ p = 1; next } p && /^## [0-9]/{ exit } p' "$1" 2>/dev/null; }
+# w27r_fixes <entry text> -> the fix of each `bionic: <verb> refused — <fact> (<fix>)` line quoted
+# in the entry's "Newly refused" section, one per line.
+w27r_fixes() {
+  printf '%s\n' "$1" | awk '/^Newly refused/{ p = 1; next } p && /^[A-Z][^ ]*[^:]*:$/{ exit } p' \
+    | /usr/bin/grep -o '`bionic: [a-z-]* refused — [^`]*)`' | sed -E 's/.*\(([^()]*)\)`$/\1/'
+}
+# w27r_fix_gaps <entry text> -> each quoted fix no shipped script prints as a literal, one per line.
+# A fix holding a `<placeholder>` is matched on its text up to the placeholder, where the code
+# puts a value (`spell it ./<e>` against "spell it ./${entry}").
+w27r_fix_gaps() {
+  local fix needle
+  w27r_fixes "$1" | while IFS= read -r fix; do
+    case "$fix" in *"<"*) needle="\"${fix%%<*}" ;; *) needle="\"$fix\"" ;; esac
+    /usr/bin/grep -rqF -- "$needle" "${REPO}/hooks" "${REPO}/payload/scripts" || echo "not printed by the code: $fix"
+  done
+}
+W27R_E="$(w27r_entry "${REPO}/CHANGELOG.md")"
+expect_nonempty "W27-R1 precondition: CHANGELOG.md carries a 1.12.0 entry" "$W27R_E"
+expect_eq "W27-R1: …and it is the newest entry" "1.12.0" "$(changelog_head_version "${REPO}/CHANGELOG.md")"
+expect_contains "W27-R2: the entry says it is a minor release" "This is a minor release" "$W27R_E"
+expect_contains "W27-R2b: …and that the contract version stays 14" '`canonical_sdlc_version` stays 14' "$W27R_E"
+expect_regex "W27-R3: the entry opens with the upgrade note on setup and remove" \
+  '^\*\*Upgrade before you run `/bionic:setup` or `/bionic:remove` again' "$(printf '%s\n' "$W27R_E" | awk 'NF { print; exit }')"
+for _w27r in 'Step 6' '`release-check:`' '`release:`' 'working principles' 'Newly refused:' 'Known limits'; do
+  expect_contains "W27-R4: the entry names $_w27r (AC-10.1)" "$_w27r" "$W27R_E"
+done
+expect_nonempty "W27-R5 precondition: the entry quotes refusal first lines with their fixes" "$(w27r_fixes "$W27R_E")"
+expect_eq "W27-R5: every quoted fix is one the code at this head prints" "" "$(w27r_fix_gaps "$W27R_E")"
+W27R_DOC="$(printf '%s\n' "$W27R_E" | sed 's/(add the Questions: line)`/(add a questions line)`/')"
+expect_contains "W27-R5m: …and a quoted fix the code does not print is caught" \
+  "not printed by the code: add a questions line" "$(w27r_fix_gaps "$W27R_DOC")"
+expect_no_regex "W27-R6: the entry names no run row, ruling id, review pass or grade" \
+  '(^|[^A-Za-z0-9])(T[0-9]{1,2}|P[0-3])([^A-Za-z0-9]|$)|A-orch|review pass' "$W27R_E"
+expect_regex "W27-R6m: …and the same pattern finds a row id planted in the entry" \
+  '(^|[^A-Za-z0-9])(T[0-9]{1,2}|P[0-3])([^A-Za-z0-9]|$)|A-orch|review pass' "$W27R_E (T19)"
 
 finish
