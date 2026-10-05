@@ -5810,11 +5810,17 @@ PF_OTHER_LIST
     # its own launch — the launch recorder sets it active again and adds that pass's ledger line,
     # so the ledger is not touched here (A-T14.4). The next landing past this proof makes it
     # ready again (units.sh `live_head`).
-    PF_BACK=""
+    # A READ ROW RETURNS ONLY TO ITS OWN READER, AND ONLY WHOLE (wave-27 T43; review pass 17 F3):
+    # handed --reader, `units_live_rows` names a read row only when its agent cell is this reader
+    # and every question it carries now has a reading at this head; until then it stays active and
+    # is not offered, and PF_HELD names it. A row abandoned part-way is returned by task-set.
+    PF_BACK=""; PF_HELD=""
     if [ "$PF_KIND" = review ]; then
       PF_DOCREL="$(docs_root "$PV_REPO")"
       case "$PF_DOCREL" in "$PV_REPO"/*) PF_DOCREL="${PF_DOCREL#"$PV_REPO"/}/$PF_REL" ;; *) PF_DOCREL="" ;; esac
-      for _pf_id in $(units_live_rows "$PV_NEW" ${PF_QUESTION:+--question "$PF_QUESTION"} "$PF_REL" $PF_DOCREL 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { print $1 }'); do
+      [ -z "$PF_QUESTION" ] || PF_HELD="$(units_live_rows "$PV_NEW" --question "$PF_QUESTION" 2>/dev/null \
+        | awk -F'\t' '$2 == "review" && $3 == "active" { printf "%s%s", (n++ ? " " : ""), $1 }')"
+      for _pf_id in $(units_live_rows "$PV_NEW" ${PF_QUESTION:+--question "$PF_QUESTION" --reader "$PF_READER"} "$PF_REL" $PF_DOCREL 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { print $1 }'); do
         _pf_cells=(status=pending agent=—)
         units_has_column "$PV_NEW" worktree && _pf_cells+=(worktree=—)
         units_has_column "$PV_NEW" base && _pf_cells+=(base=—)
@@ -5825,7 +5831,10 @@ PF_OTHER_LIST
         fi
         mv "$PV_NEW.back" "$PV_NEW"
         PF_BACK="${PF_BACK:+$PF_BACK }$_pf_id"
+        PF_HELD=" $PF_HELD "; PF_HELD="${PF_HELD/ $_pf_id / }"; PF_HELD="${PF_HELD# }"; PF_HELD="${PF_HELD% }"
       done
+      [ -z "$PF_HELD" ] || PF_HELD="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' -v ids=" $PF_HELD " -v r="$PF_READER" \
+        'index(ids, " " $1 " ") && $5 == r { printf "%s%s", (n++ ? " " : ""), $1 }')"
     fi
     # A REVIEW PROOF THAT RETURNS NO LIVE ROW WHILE ONE IS ACTIVE SAYS SO (wave-26 T51; review 14
     # S4). The record of a live pass written under another name than its row's Files returns
@@ -5834,7 +5843,7 @@ PF_OTHER_LIST
     # is seen at once. None is reset: a proof moves only the row whose Files hold it (T46, review
     # 10 F3), and the final review's proof is one such. With no live review active it says nothing.
     PF_NONE=""
-    if [ "$PF_KIND" = review ] && [ -z "$PF_BACK" ]; then
+    if [ "$PF_KIND" = review ] && [ -z "$PF_BACK" ] && [ -z "$PF_HELD" ]; then
       _pf_live=" $(units_live_rows "$PV_NEW" 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { printf "%s ", $1 }')"
       [ "$_pf_live" = " " ] || PF_NONE="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' -v ids="$_pf_live" '
         index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
@@ -5842,6 +5851,7 @@ PF_OTHER_LIST
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
+    [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that reading."
     [ -n "$PF_NONE" ] && say "proof-add — no active live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
     exit 0
     ;;
