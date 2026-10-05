@@ -618,6 +618,24 @@ _over="$(too_wide "$OUT6")"
 if [ -z "$_over" ]; then ok "15: every line of the fullest run fits 100 columns"
 else no "15: a line exceeds 100 columns" "$_over"; fi
 
+# A claude() block the user changed (wave-27 T77) at an rc path far longer than the row:
+# the row names the lines and keeps its instruction, and still fits. The path is what
+# the cut takes.
+_T77_SAVED_RC="$FIXTURE_RC"
+FIXTURE_RC="${TMP}/$(printf 'd%.0s' {1..70})/$(printf 'e%.0s' {1..70})/dot.zshrc"
+mkdir -p "$(dirname "$FIXTURE_RC")"
+printf '%s\n' 'export V1=1' '# ─── bionic:rc:start ───' \
+  'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' 'export V9=9' \
+  '# ─── bionic:rc:end ───' > "$FIXTURE_RC"
+OUT_T77="$(run_doctor)"
+FIXTURE_RC="$_T77_SAVED_RC"
+ROW_T77="$(printf '%s\n' "$OUT_T77" | grep -F 'claude() shell proxy')"
+expect_nonempty "15b: the changed claude() block has its row" "$ROW_T77"
+expect_contains "15b: …which says changed" " changed " "$ROW_T77"
+expect_contains "15b: …and names its lines" "lines 2 to 5 of ~/ddd" "$ROW_T77"
+expect_contains "15b: …and keeps its instruction" " — edit it by hand" "$ROW_T77"
+expect_eq "15b: …and fits 100 columns with that path" "" "$(too_wide "$ROW_T77")"
+
 
 section "Section 9: the claude CLI absent, and present, on one fixture (AC-7)"
 

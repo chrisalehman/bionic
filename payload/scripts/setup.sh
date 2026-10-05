@@ -1148,15 +1148,20 @@ _setup_env_why() {  # <key>
 # writes nothing at all — not an empty block, not a commented line.
 #
 # THE ROSTER AND THE WRITE ARE ENV.SH'S. This step loops `RC_ITEMS`, asks
-# `rc_default` for the line and `rc_get` whether it is already there, and writes
+# `rc_default` for the line and `rc_state` what the block holds, and writes
 # through `rc_set`. A second item added to that roster arrives here with no edit,
 # and nothing in this file matches the rc itself.
+#
+# A BLOCK THE USER CHANGED IS NEVER ASKED ABOUT (wave-27 T77, review pass 64). Its
+# lines are named by number, never printed, bionic's own lines are printed for the
+# user's hand, and nothing is written, on `--only`, on `--all` and on the page that
+# says nothing is left to do.
 
 setup_claude_proxy() {
   _setup_wants claude-proxy || return 0
   say ""
   say "6. Shell function"
-  local rc item_name missing="" wrote=0
+  local rc item_name missing="" changed="" wrote=0
 
   # A shell bionic has no rc name for is reported, never guessed at: writing a
   # bash function into a fish rc would break the shell it was meant to help.
@@ -1174,15 +1179,18 @@ setup_claude_proxy() {
 
   for item_name in $RC_ITEMS; do
     rc_default "$item_name" >/dev/null 2>&1 || continue
-    rc_get "$item_name" && continue
+    case "$(rc_state "$item_name")" in
+      written) continue ;;
+      changed) _setup_rc_say_changed "$rc" "$item_name"; changed=1; continue ;;
+    esac
     missing="${missing}${missing:+ }${item_name}"
   done
 
   # ONE LINE, ON PURPOSE — the same discipline step 5's gates carry, and for the
   # same reason: tests prove a gate load-bearing by DELETING its line from a copy
   # of this file, and a gate spread over an if/fi pair cannot be deleted that way
-  # without turning the copy into a parse error.
-  [ -n "$missing" ] || { item "$SETUP_OK" "claude() function" "already in ${rc} — nothing to do"; return 0; }  # idempotence guard: rc item
+  # without turning the copy into a parse error. A changed block has said its own line.
+  [ -n "$missing" ] || { [ -n "$changed" ] || item "$SETUP_OK" "claude() function" "already in ${rc} — nothing to do"; return 0; }  # idempotence guard: rc item
 
   say "   ${rc} does not carry bionic's claude() shell function:"
   for item_name in $missing; do
@@ -1202,6 +1210,7 @@ setup_claude_proxy() {
       3) item "$SETUP_NIL" "claude() function" "read-only — not written"
          action "make ${rc} writable to add bionic's claude() shell function — bionic does not write a read-only file" ;;
       4) _setup_say_not_a_file "claude() function" "$rc" ;;
+      5) _setup_rc_say_changed "$rc" "$item_name" ;;
       *) item "$SETUP_BAD" "claude() function" "could not write ${rc} — it is as it was"
          action "add bionic's claude() shell function to ${rc} (bionic could not write the file)" ;;
     esac
@@ -1211,6 +1220,33 @@ setup_claude_proxy() {
   # is in the next terminal and not in the one running this.
   item "$SETUP_OK" "claude() function" "added to ${rc} — takes effect in a new shell"
   return 0
+}
+
+# A block the user changed since bionic wrote it (env.sh `rc_state`, wave-27 T77): named
+# by its lines, left as it is, and bionic's own lines printed for the user's hand. The
+# summary line is bounded like a row, so the line numbers and the instruction survive
+# the longest path.
+_setup_rc_say_changed() {  # <rc> <item>
+  local range words line a
+  range="$(rc_block_range)"
+  words="lines ${range% *} to ${range#* }"
+  item "$SETUP_NIL" "claude() function" "bionic's block, left: ${words} of ${1}"
+  say "     it changed since bionic wrote it, so bionic leaves it as it is; bionic's lines are:"
+  while IFS= read -r line; do say "     ${line}"; done <<< "$(rc_default "$2")"
+  a="$(bionic_line "   - " "edit ${words} of ${1}" " by hand — bionic's block, changed since bionic wrote it")"
+  action "${a#   - }"
+}
+
+# Every rc item whose block the user changed, said as the step says it: what the page
+# that finds nothing left to do still names (wave-27 T77). rc 1 when there is none.
+_setup_rc_changed_left() {
+  local rc item_name said=1
+  rc="$(rc_file 2>/dev/null)" || return 1
+  for item_name in $RC_ITEMS; do
+    [ "$(rc_state "$item_name" 2>/dev/null)" = "changed" ] || continue
+    _setup_rc_say_changed "$rc" "$item_name"; said=0
+  done
+  return "$said"
 }
 
 # The rc's markers do not pair up: what markers_check found and where, and the
@@ -1952,8 +1988,12 @@ if [ "$setup_all" = "1" ]; then
   # reads its inherited stdin eats the one `y` this run is about to ask for.
   # Nothing here needs stdin, so nothing here gets it.
   if ! _setup_print_plan < /dev/null; then
-    # No step runs, so what step 7 would name is named here (wave-27 T55, T66).
-    if _setup_legacy_alias_left "$(_detect_shell_rc)"; then setup_summary; exit 0; fi
+    # No step runs, so what step 6 and step 7 would name is named here (wave-27 T55,
+    # T66, T77).
+    _setup_left=1
+    _setup_rc_changed_left && _setup_left=0
+    _setup_legacy_alias_left "$(_detect_shell_rc)" && _setup_left=0
+    if [ "$_setup_left" = "0" ]; then setup_summary; exit 0; fi
     say "   nothing left to do — this machine is set up."
     exit 0
   fi
