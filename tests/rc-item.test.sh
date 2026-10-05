@@ -727,8 +727,8 @@ expect_nonempty "T46: the retired env markers read out of remove.sh" "${ENVB_STA
 
 for RETIRED in legacy-alias environment; do
   case "$RETIRED" in
-    legacy-alias) R_START="$ALIAS_START"; R_END="$ALIAS_END" ;;
-    environment)  R_START="$ENVB_START";  R_END="$ENVB_END" ;;
+    legacy-alias) R_START="$ALIAS_START"; R_END="$ALIAS_END"; R_BODY="alias claude='claude --dangerously-skip-permissions'" ;;
+    environment)  R_START="$ENVB_START";  R_END="$ENVB_END"; R_BODY="export CLAUDE_CODE_ENABLE_TODO_TOOLS=1" ;;
   esac
   # A start with no end: refused, with the refusal's own line, by both doors.
   SB_R="$(new_sandbox)"; printf '%s\n' "$R_START" 'export RETIRED=1' 'export MINE=1' >> "$SB_R/.zshrc"
@@ -747,8 +747,8 @@ for RETIRED in legacy-alias environment; do
   RQ_OUT="$(remove_item "$SB_RQ" "$RETIRED" y)"
   expect_absent "T46 ${RETIRED}: a quoted marker is not asked about" "[y/N]" "$RQ_OUT"
   expect_same_bytes "T46 ${RETIRED}: …and the rc is byte-identical" "$TMP/rq-before.zshrc" "$SB_RQ/.zshrc"
-  # The twin: a whole, paired block is asked about and goes.
-  SB_RW="$(new_sandbox)"; printf '%s\n' "$R_START" 'export RETIRED=1' "$R_END" >> "$SB_RW/.zshrc"
+  # The twin: a whole, paired block of what bionic wrote is asked about and goes.
+  SB_RW="$(new_sandbox)"; printf '%s\n' "$R_START" "$R_BODY" "$R_END" >> "$SB_RW/.zshrc"
   RW_OUT="$(remove_item "$SB_RW" "$RETIRED" y)"
   expect_contains "T46 ${RETIRED}: a whole block is asked about (the twin)" "[y/N]" "$RW_OUT"
   expect_eq "T46 ${RETIRED}: …and goes" "0" "$(count_lines_equal "$SB_RW/.zshrc" "$R_START")"
@@ -929,7 +929,7 @@ expect_empty "T51 well-formed block: after the strip doctor has no retired-alias
 SB_T51Q="$(new_sandbox)"; printf '%s\n' "# old installs wrote a '${ALIAS_START}' line here" >> "$SB_T51Q/.zshrc"
 cp "$SB_T51Q/.zshrc" "$TMP/t51q-before.zshrc"
 T51Q_INODE="$(t51_inode "$SB_T51Q/.zshrc")"
-SB_T51QT="$(new_sandbox)"; printf '%s\n' "$ALIAS_START" "alias claude=x" "$ALIAS_END" >> "$SB_T51QT/.zshrc"
+SB_T51QT="$(new_sandbox)"; printf '%s\n' "$ALIAS_START" "alias claude='claude --dangerously-skip-permissions'" "$ALIAS_END" >> "$SB_T51QT/.zshrc"
 expect_contains "T51 quoted-marker twin: doctor reports a whole block" "present" \
   "$(report_row "$(t51_doctor "$SB_T51QT")" "legacy .zshrc alias block")"
 expect_empty "T51 quoted marker: doctor reports no retired block" \
@@ -975,10 +975,11 @@ for T51_SH in /bin/bash "$(command -v bash)"; do
   T51N_ROW="$(report_row "$(t51_env "$SB_T51N" "$T51_SH" "$DOCTOR_SH" </dev/null 2>&1)" "$DOCTOR_ROW_LABEL")"
   expect_contains "T51 NUL rc (${T51_SH}): doctor's claude() row says not text" "not text" "$T51N_ROW"
 done
-# The twin: the same unmarked rc without the NUL is rewritten as before.
+# The twin: the same rc without the NUL is read, and bionic's line in it named (T75: a
+# bare line is never taken out).
 SB_T51NT="$(new_sandbox)"; printf '%s\n' "alias claude='claude --dangerously-skip-permissions'" 'export MINE=1' >> "$SB_T51NT/.zshrc"
 T51NT_SET="$(t51_setup "$SB_T51NT" legacy-alias y)"
-expect_contains "T51 NUL twin: the unmarked line with no NUL is removed" "removed (the unmarked spelling)" "$T51NT_SET"
+expect_contains "T51 NUL twin: the line with no NUL is read and named as bionic's" "outside bionic's markers" "$T51NT_SET"
 expect_eq "T51 NUL twin: …and the user's line after it stays" "1" "$(count_lines_equal "$SB_T51NT/.zshrc" 'export MINE=1')"
 
 # A DANGLING RC LINK names where it points (F3).
@@ -1104,9 +1105,10 @@ for T55_SHAPE in comment shared in-if; do
   expect_absent "T55 ${T55_SHAPE} (doctor): …and the line's text is not printed" "MYTOKEN" "$T55_DOC"
 done
 
-# THE EXACT LINE, in each shape bionic's own line can take on disk, through every
-# door that takes one question: offered by line number, and on yes exactly that
-# line's bytes go. <expected> is built by hand, byte for byte.
+# THE EXACT LINE, in each shape bionic's own line can take on disk, through every door:
+# never taken out (wave-27 T75, A-orch-162: the markers are the whole rule). Answered
+# yes, the rc is byte-identical and the line is named by its number as bionic's line
+# outside its markers, never by its text, and nothing is asked.
 t55_exact() {  # <file> <expected> <shape>
   case "$3" in
     line7)    printf '%s\n' 'export A=1' 'export B=2' '# three' 'export C=3' '' 'export D=4' "$T55_EXACT" 'export E=5' > "$1"
@@ -1119,47 +1121,44 @@ t55_exact() {  # <file> <expected> <shape>
 }
 t55_exact_line() { case "$1" in line7) echo 7 ;; lastline) echo 2 ;; indented|crlf) echo 2 ;; nofinal) echo 1 ;; esac; }
 for T55_SHAPE in line7 indented crlf nofinal lastline; do
-  for T55_DOOR in setup-only rm-payload rm-standalone rm-all; do
-    SB_T55X="$(new_sandbox)"; t55_exact "$SB_T55X/.zshrc" "$TMP/t55x-expected" "$T55_SHAPE"
+  for T55_DOOR in setup-only setup-all rm-payload rm-standalone rm-all; do
+    # setup --all appends its claude() block; on an rc with no final newline the
+    # fixture's own append would fuse with bionic's line, so that pair is not a shape.
+    [ "$T55_SHAPE:$T55_DOOR" = "lastline:setup-all" ] && continue
+    SB_T55X="$(new_sandbox)"; t55_exact "$SB_T55X/.zshrc" "$TMP/t55x-unused" "$T55_SHAPE"
+    [ "$T55_DOOR" = "setup-all" ] && printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$SB_T55X/.zshrc"
+    cp "$SB_T55X/.zshrc" "$TMP/t55x-before"; T55_INODE="$(t51_inode "$SB_T55X/.zshrc")"
     T55_N="$(t55_exact_line "$T55_SHAPE")"
     T55_L="T55 exact ${T55_SHAPE} (${T55_DOOR})"
-    T55_NO="$(t55_door "$SB_T55X" "$T55_DOOR" n)"
-    expect_contains "${T55_L}: the question (or the page) names line ${T55_N}" "line ${T55_N} of ${SB_T55X}/.zshrc" "$T55_NO"
-    expect_diff_bytes "${T55_L}: answered no, the line is still there" "$TMP/t55x-expected" "$SB_T55X/.zshrc"
     T55_YES="$(t55_door "$SB_T55X" "$T55_DOOR" y)"
-    expect_same_bytes "${T55_L}: answered yes, that line goes and every other byte is as it was" "$TMP/t55x-expected" "$SB_T55X/.zshrc"
-    expect_absent "${T55_L}: …and nothing is called not in a form bionic wrote" "not in a form bionic wrote" "$T55_YES"
+    expect_contains "${T55_L}: the run reached the machine" "bionic" "$T55_YES"
+    expect_same_bytes "${T55_L}: answered yes, bionic's bare line stays and the rc is byte-identical" "$TMP/t55x-before" "$SB_T55X/.zshrc"
+    expect_eq "${T55_L}: …and keeps its inode" "$T55_INODE" "$(t51_inode "$SB_T55X/.zshrc")"
+    expect_eq "${T55_L}: the line is named as bionic's, outside its markers, once" "1" "$(t55_count "$T55_YES" "outside bionic's markers")"
+    expect_contains "${T55_L}: …by its number" "line ${T55_N} of" "$(report_row "$T55_YES" "outside bionic's markers")"
+    expect_absent "${T55_L}: …nothing offers to remove it" "retired alias line" "$T55_YES"
+    expect_absent "${T55_L}: …nothing says it was removed" "(the unmarked spelling)" "$T55_YES"
+    case "$T55_DOOR" in setup-only|rm-payload|rm-standalone) expect_absent "${T55_L}: …and nothing is asked" "[y/N]" "$T55_YES" ;; esac
   done
 done
-# setup --all over the exact line: the page names it, and yes takes exactly it.
-SB_T55XA="$(new_sandbox)"; t55_exact "$SB_T55XA/.zshrc" "$TMP/t55xa-expected" line7
-printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" | tee -a "$SB_T55XA/.zshrc" >> "$TMP/t55xa-expected"
-T55XA_OUT="$(t55_door "$SB_T55XA" setup-all y)"
-# setup's page lines are cut at the column budget like every page line, and the
-# sandbox path is long, so the row reads the number and the start of the path.
-expect_contains "T55 exact (setup-all): the page names the line" "remove line 7 of /" "$T55XA_OUT"
-expect_same_bytes "T55 exact (setup-all): answered yes, that line goes and nothing else moves" "$TMP/t55xa-expected" "$SB_T55XA/.zshrc"
-# The page twin of the three shapes above: the remove --all page offers the exact line.
-SB_T55XR="$(new_sandbox)"; t55_exact "$SB_T55XR/.zshrc" "$TMP/t55xr-expected" line7
-expect_contains "T55 exact (rm-all): the page offers the line by number (the twin)" "retired alias line" "$(t55_door "$SB_T55XR" rm-all n)"
 
-# A FILE HOLDING BOTH: the exact line goes; the user's line stays and is named,
-# by its number in the file as it is left.
+# A FILE HOLDING BOTH: both stay, each named by its number and in its own words.
 for T55_DOOR in setup-only setup-all rm-payload rm-standalone rm-all; do
   SB_T55M="$(new_sandbox)"
   printf '%s\n' 'export A=1' "$T55_EXACT" 'export B=2' "${T55_EXACT}; export MYTOKEN=abc" > "$SB_T55M/.zshrc"
-  printf '%s\n' 'export A=1' 'export B=2' "${T55_EXACT}; export MYTOKEN=abc" > "$TMP/t55m-expected"
+  cp "$SB_T55M/.zshrc" "$TMP/t55m-expected"
   if [ "$T55_DOOR" = "setup-all" ]; then
     printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" | tee -a "$SB_T55M/.zshrc" >> "$TMP/t55m-expected"
   fi
   T55M_OUT="$(t55_door "$SB_T55M" "$T55_DOOR" y)"
-  expect_same_bytes "T55 both kinds (${T55_DOOR}): the exact line goes, the user's stays, byte for byte" "$TMP/t55m-expected" "$SB_T55M/.zshrc"
-  expect_contains "T55 both kinds (${T55_DOOR}): the user's line is named as left, by its number" "line 3 of" "$(report_row "$T55M_OUT" "not in a form bionic wrote")"
+  expect_same_bytes "T55 both kinds (${T55_DOOR}): both lines stay, byte for byte" "$TMP/t55m-expected" "$SB_T55M/.zshrc"
+  expect_contains "T55 both kinds (${T55_DOOR}): bionic's line is named by its number" "line 2 of" "$(report_row "$T55M_OUT" "outside bionic's markers")"
+  expect_contains "T55 both kinds (${T55_DOOR}): the user's line is named as left, by its number" "line 4 of" "$(report_row "$T55M_OUT" "not in a form bionic wrote")"
   expect_absent "T55 both kinds (${T55_DOOR}): …never by its text" "MYTOKEN" "$T55M_OUT"
 done
 
-# A READ-ONLY RC (F4): refused in the marked step's words, nothing written, the
-# inode kept. The twin is the writable rc above, removed.
+# A READ-ONLY RC: bionic's bare line is never taken out, so there is nothing to refuse:
+# nothing written, the inode kept, the line named as on a writable rc (T75).
 for T55_DOOR in setup-only rm-payload rm-standalone rm-all; do
   SB_T55R="$(new_sandbox)"; t55_exact "$SB_T55R/.zshrc" "$TMP/t55r-unused" line7
   cp "$SB_T55R/.zshrc" "$TMP/t55r-before"; chmod 444 "$SB_T55R/.zshrc"; T55R_INODE="$(t51_inode "$SB_T55R/.zshrc")"
@@ -1167,11 +1166,7 @@ for T55_DOOR in setup-only rm-payload rm-standalone rm-all; do
   chmod 644 "$SB_T55R/.zshrc"
   expect_same_bytes "T55 read-only (${T55_DOOR}): nothing written" "$TMP/t55r-before" "$SB_T55R/.zshrc"
   expect_eq "T55 read-only (${T55_DOOR}): …the same inode" "$T55R_INODE" "$(t51_inode "$SB_T55R/.zshrc")"
-  case "$T55_DOOR" in
-    setup-only) expect_contains "T55 read-only (setup): the marked step's words" "legacy alias block     read-only — not changed" "$T55R_OUT" ;;
-    *)          expect_contains "T55 read-only (${T55_DOOR}): the marked step's words" \
-                  "is read-only, and bionic leaves a file you made read-only alone — the alias block is still there" "$T55R_OUT" ;;
-  esac
+  expect_contains "T55 read-only (${T55_DOOR}): the line is named by its number" "line 7 of" "$(report_row "$T55R_OUT" "outside bionic's markers")"
   expect_absent "T55 read-only (${T55_DOOR}): …never removed" "(the unmarked spelling)" "$T55R_OUT"
 done
 
@@ -1202,8 +1197,9 @@ for T55_SHAPE in homebrew empty-p space relative claude2 dir-slash dollar flag t
     T55_L="T55 template ${T55_SHAPE} (${T55_DOOR})"
     case "$T55_SHAPE" in
       homebrew|empty-p)
-        expect_contains "${T55_L}: asked about by line number" "Remove line 2 of ${SB_T55T}/.zshrc" "$T55T_OUT"
-        expect_same_bytes "${T55_L}: bionic's line goes, every other byte kept" "$TMP/t55t-removed" "$SB_T55T/.zshrc" ;;
+        expect_same_bytes "${T55_L}: bionic's line, left byte for byte (T75: never taken out)" "$TMP/t55t-before" "$SB_T55T/.zshrc"
+        expect_contains "${T55_L}: …named as bionic's line, by its number" "line 2 of" "$(report_row "$T55T_OUT" "outside bionic's markers")"
+        expect_absent "${T55_L}: …and nothing asked" "[y/N]" "$T55T_OUT" ;;
       *)
         expect_same_bytes "${T55_L}: not a form bionic wrote, left byte for byte" "$TMP/t55t-before" "$SB_T55T/.zshrc"
         expect_contains "${T55_L}: …named by its number" "line 2 of" "$(report_row "$T55T_OUT" "not in a form bionic wrote")"
@@ -1229,8 +1225,8 @@ fn_text() {  # <file> <name> — the function's lines, `name() {` through the fi
   printf '%s' "$text"
   return 0
 }
-for T55_FN in bionic_legacy_alias_ours bionic_legacy_alias_lines bionic_line_numbers_words bionic_drop_lines_walk; do
-  case "$T55_FN" in bionic_drop_lines_walk) T55_LIB="${REPO}/payload/scripts/lib/markers.sh" ;; *) T55_LIB="$DETECT_SH" ;; esac
+for T55_FN in bionic_legacy_alias_ours bionic_legacy_alias_lines bionic_line_numbers_words; do
+  T55_LIB="$DETECT_SH"
   T55_A="$(fn_text "$T55_LIB" "$T55_FN")"
   expect_nonempty "T55 copies: ${T55_FN} reads out of its library" "$T55_A"
   expect_eq "T55 copies: remove.sh's ${T55_FN} is the library's, line for line" "$T55_A" "$(fn_text "$REMOVE_SH" "$T55_FN")"
@@ -1248,7 +1244,7 @@ expect_ne "T55 copies: …and its list no longer matches the library's (the pin 
 SB_T55P="$(new_sandbox)"; printf '%s\n' "$ALIAS_START" 'export MINE=1' >> "$SB_T55P/.zshrc"
 T55P_OUT="$(t55_door "$SB_T55P" rm-all n)"
 expect_absent "T55 page: an unpaired retired block is not on remove --all's page" "remove the retired shell alias block" "$T55P_OUT"
-SB_T55PT="$(new_sandbox)"; printf '%s\n' "$ALIAS_START" 'export MINE=1' "$ALIAS_END" >> "$SB_T55PT/.zshrc"
+SB_T55PT="$(new_sandbox)"; printf '%s\n' "$ALIAS_START" "$T55_EXACT" "$ALIAS_END" >> "$SB_T55PT/.zshrc"
 expect_contains "T55 page: …a whole one is (the twin)" "remove the retired shell alias block" "$(t55_door "$SB_T55PT" rm-all n)"
 expect_contains "T55 page: --only still refuses the unpaired block, naming why" "do not pair up" "$(t55_door "$SB_T55P" rm-payload y)"
 
@@ -1293,7 +1289,7 @@ t66_door() {  # <sandbox> <door> <answer> [item]
   esac
 }
 # The phrase each door names a line of bionic's that stays with (said once per door).
-t66_phrase() { case "$1" in doctor) printf '%s' "in your own code" ;; *) printf '%s' "where removing it would change your own code" ;; esac; }
+t66_phrase() { case "$1" in doctor) printf '%s' "bionic's old line" ;; *) printf '%s' "outside bionic's markers" ;; esac; }
 
 # THE FIXTURE CANNOT REACH THE REAL HOME, with this section's SHELL.
 SB_T66E="$(new_sandbox)"
@@ -1324,8 +1320,7 @@ t66_plant() {  # <file> <expected> <shape> <line> [verdict]
     no-parse)   printf '%s\n' 'export SECRETTOKEN=1' "$L" 'fi' > "$1" ;;
     two-in-if)  printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' '  export A=1' "$L" 'fi' > "$1"
                 printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' '  export A=1' 'fi' > "$2"; return 0 ;;
-    top-and-if) printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' "$L" 'fi' "$L" > "$1"
-                printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' "$L" 'fi' > "$2"; return 0 ;;
+    top-and-if) printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' "$L" 'fi' "$L" > "$1" ;;
     top)        printf '%s\n' 'export SECRETTOKEN=1' "$L" 'export B=2' > "$1"
                 printf '%s\n' 'export SECRETTOKEN=1' 'export B=2' > "$2"; return 0 ;;
   esac
@@ -1371,15 +1366,16 @@ t66_b1() {  # <shell> <shape> <verdict>
   done
 }
 for T66_SHAPE in if-only for-only fn-only heredoc dquote backslash andand; do t66_b1 /bin/bash "$T66_SHAPE" left; done
-# A-orch-119 (2): the backslash is read on the last line of CODE before, comment lines
-# skipped, so a comment between does not end the continuation's reach.
+# T75 (A-orch-162): the markers are the whole rule. Bionic's bare line is never taken out,
+# wherever it stands and under either shell: each door leaves the rc byte-identical and
+# names the line by number, as bionic's line outside its markers, for the user's hand.
 T66_LINE=3 t66_b1 /bin/bash bs-comment left
-t66_b1 /bin/bash two-in-if removed
-# A-orch-119 (1): an empty `case` arm parses in bash and in zsh (`bash -n`, `zsh -n`:
-# both 0), so the shell's answer is that the line goes from one.
-t66_b1 /bin/bash case-arm removed
-t66_b1 /bin/zsh case-arm removed
-for T66_SHAPE in if-only for-only fn-only; do t66_b1 /bin/zsh "$T66_SHAPE" removed; done
+t66_b1 /bin/bash top left
+t66_b1 /bin/zsh top left
+T66_LINE=3 t66_b1 /bin/bash two-in-if left
+T66_LINE=3 t66_b1 /bin/bash case-arm left
+T66_LINE=3 t66_b1 /bin/zsh case-arm left
+for T66_SHAPE in if-only for-only fn-only; do t66_b1 /bin/zsh "$T66_SHAPE" left; done
 for T66_SHAPE in heredoc dquote backslash andand; do t66_b1 /bin/zsh "$T66_SHAPE" left; done
 
 # The line at top level in a file that also holds it inside an `if`: the top one goes,
@@ -1390,27 +1386,33 @@ for T66_DOOR in setup-only setup-all rm-payload rm-standalone rm-all; do
   t66_plant "$T66_RC" "$TMP/t66t-expected" top-and-if "$T66_ALIAS"
   [ "$T66_DOOR" = "setup-all" ] && t66_pageblock | tee -a "$T66_RC" >> "$TMP/t66t-expected"
   T66T_OUT="$(t66_door "$SB_T66T" "$T66_DOOR" y)"
-  expect_same_bytes "T66 B1 top-and-if (${T66_DOOR}): the top-level line goes, the one inside the if stays" "$TMP/t66t-expected" "$T66_RC"
-  expect_contains "T66 B1 top-and-if (${T66_DOOR}): the one left is named by number" "line 2 of" "$(report_row "$T66T_OUT" "$(t66_phrase "$T66_DOOR")")"
+  expect_same_bytes "T66 B1 top-and-if (${T66_DOOR}): both bare lines stay, the one inside the if and the one at the top" "$TMP/t66t-expected" "$T66_RC"
+  expect_contains "T66 B1 top-and-if (${T66_DOOR}): …both named by number" "lines 2, 4 of" "$(report_row "$T66T_OUT" "$(t66_phrase "$T66_DOOR")")"
   expect_true "T66 B1 top-and-if (${T66_DOOR}): the rc parses after" t66_parses "$T66_RC"
 done
 
-# The reason a line stays is said in each door's words: an rc that did not parse
-# before, and an rc whose shell is not installed.
+# The reason a block stays is said in each door's words: an rc that did not parse
+# before, and an rc whose shell is not installed (T75: a bare line is never asked about).
+t75_npblock() {  # <file> <shape>
+  case "$2" in
+    no-parse) printf '%s\n' 'export SECRETTOKEN=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'fi' > "$1" ;;
+    top)      printf '%s\n' 'export SECRETTOKEN=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'export B=2' > "$1" ;;
+  esac
+}
 T66_SHELL=/bin/bash
 for T66_DOOR in setup-only setup-all rm-payload rm-standalone rm-all doctor; do
   SB_T66NP="$(new_sandbox)"; T66_RC="$(t66_rc "$SB_T66NP")"
-  t66_plant "$T66_RC" "$TMP/t66np-unused" no-parse "$T66_ALIAS"
+  t75_npblock "$T66_RC" no-parse
   [ "$T66_DOOR" = "setup-all" ] && t66_pageblock >> "$T66_RC"
   cp "$T66_RC" "$TMP/t66np-before"
   expect_false "T66 no-parse (${T66_DOOR}): the planted rc does not parse (the fixture holds)" t66_parses "$T66_RC"
   T66NP_OUT="$(t66_door "$SB_T66NP" "$T66_DOOR" y)"
-  expect_same_bytes "T66 no-parse (${T66_DOOR}): bionic's line stays, the rc byte-identical" "$TMP/t66np-before" "$T66_RC"
-  expect_contains "T66 no-parse (${T66_DOOR}): the door says the file does not parse, naming the line" "line 2 of" "$(report_row "$T66NP_OUT" "does not parse")"
+  expect_same_bytes "T66 no-parse (${T66_DOOR}): bionic's block stays, the rc byte-identical" "$TMP/t66np-before" "$T66_RC"
+  expect_contains "T66 no-parse (${T66_DOOR}): the door says the file does not parse, naming the block" "lines 2 to 4 of" "$(report_row "$T66NP_OUT" "does not parse")"
   expect_absent "T66 no-parse (${T66_DOOR}): …and nothing says it was removed" "(the unmarked spelling)" "$T66NP_OUT"
 done
 
-# NO zsh ON THE PATH, a .zshrc: every candidate stays and the door says the shell that
+# NO zsh ON THE PATH, a .zshrc: bionic's block stays and the door says the shell that
 # reads that file is not installed. The PATH is the system's with zsh taken out.
 mkdir -p "$TMP/nozsh"
 for T66_D in /bin /usr/bin "$(dirname "$(command -v jq)")"; do
@@ -1423,20 +1425,20 @@ T66_SHELL=/bin/zsh; T66_PATH="$TMP/bin:$TMP/nozsh"
 expect_false "T66 no-zsh: the PATH holds no zsh (the fixture holds)" env -i PATH="$T66_PATH" /bin/bash -c 'command -v zsh'
 expect_true "T66 no-zsh: …and does hold bash (its twin)" env -i PATH="$T66_PATH" /bin/bash -c 'command -v bash'
 for T66_DOOR in setup-only setup-all rm-payload rm-standalone rm-all doctor; do
-  SB_T66Z="$(new_sandbox)"; t66_plant "$SB_T66Z/.zshrc" "$TMP/t66z-unused" top "$T66_ALIAS"
+  SB_T66Z="$(new_sandbox)"; t75_npblock "$SB_T66Z/.zshrc" top
   [ "$T66_DOOR" = "setup-all" ] && t66_pageblock >> "$SB_T66Z/.zshrc"
   cp "$SB_T66Z/.zshrc" "$TMP/t66z-before"
   T66Z_OUT="$(t66_door "$SB_T66Z" "$T66_DOOR" y)"
-  expect_same_bytes "T66 no-zsh (${T66_DOOR}): bionic's top-level line stays, the rc byte-identical" "$TMP/t66z-before" "$SB_T66Z/.zshrc"
+  expect_same_bytes "T66 no-zsh (${T66_DOOR}): bionic's block stays, the rc byte-identical" "$TMP/t66z-before" "$SB_T66Z/.zshrc"
   case "$T66_DOOR" in doctor) T66_NEEDLE="zsh is not installed" ;; *) T66_NEEDLE="zsh, the shell that reads that file, is not installed" ;; esac
   expect_contains "T66 no-zsh (${T66_DOOR}): the door says the shell that reads it is not installed" "$T66_NEEDLE" "$T66Z_OUT"
-  expect_contains "T66 no-zsh (${T66_DOOR}): …naming the line by number" "line 2 of" "$(report_row "$T66Z_OUT" "$T66_NEEDLE")"
+  expect_contains "T66 no-zsh (${T66_DOOR}): …naming the block by its lines" "lines 2 to 4 of" "$(report_row "$T66Z_OUT" "$T66_NEEDLE")"
 done
 T66_PATH="$T51_PATH"
 # Its twin: the same rc with zsh on the PATH, removed.
-SB_T66ZT="$(new_sandbox)"; t66_plant "$SB_T66ZT/.zshrc" "$TMP/t66zt-expected" top "$T66_ALIAS"
+SB_T66ZT="$(new_sandbox)"; t75_npblock "$SB_T66ZT/.zshrc" top; printf '%s\n' 'export SECRETTOKEN=1' 'export B=2' > "$TMP/t66zt-expected"
 t66_door "$SB_T66ZT" rm-payload y >/dev/null
-expect_same_bytes "T66 no-zsh twin: with zsh there, the same line goes" "$TMP/t66zt-expected" "$SB_T66ZT/.zshrc"
+expect_same_bytes "T66 no-zsh twin: with zsh there, the same block goes" "$TMP/t66zt-expected" "$SB_T66ZT/.zshrc"
 
 # doctor over each shape: one `–` row in its own words, by number, no route to setup.
 T66_SHELL=/bin/bash
@@ -1444,15 +1446,15 @@ for T66_SHAPE in if-only heredoc backslash; do
   SB_T66D="$(new_sandbox)"; t66_plant "$(t66_rc "$SB_T66D")" "$TMP/t66d-unused" "$T66_SHAPE" "$T66_ALIAS"
   cp "$(t66_rc "$SB_T66D")" "$TMP/t66d-before"
   T66_DOC="$(t66_door "$SB_T66D" doctor "")"
-  T66_DROW="$(report_row "$T66_DOC" "in your own code")"
-  expect_contains "T66 B1 ${T66_SHAPE} (doctor): a row names bionic's line inside your own code" "line 2 of ~/.bashrc" "$T66_DROW"
+  T66_DROW="$(report_row "$T66_DOC" "bionic's old line")"
+  expect_contains "T66 B1 ${T66_SHAPE} (doctor): a row names bionic's old line" "line 2 of ~/.bashrc" "$T66_DROW"
   expect_contains "T66 B1 ${T66_SHAPE} (doctor): …to edit by hand" "by hand" "$T66_DROW"
   expect_absent "T66 B1 ${T66_SHAPE} (doctor): …with no route to setup" "/bionic:setup" "$T66_DROW"
   expect_absent "T66 B1 ${T66_SHAPE} (doctor): the alias row does not call it present" "present →" "$(report_row "$T66_DOC" "legacy .zshrc alias block")"
   expect_same_bytes "T66 B1 ${T66_SHAPE} (doctor): doctor changes nothing" "$TMP/t66d-before" "$(t66_rc "$SB_T66D")"
 done
-SB_T66DT="$(new_sandbox)"; t66_plant "$(t66_rc "$SB_T66DT")" "$TMP/t66dt-unused" two-in-if "$T66_ALIAS"
-expect_contains "T66 B1 two-in-if (doctor): a removable line is present → setup (the twin)" "present →" "$(report_row "$(t66_door "$SB_T66DT" doctor "")" "legacy .zshrc alias block")"
+SB_T66DT="$(new_sandbox)"; t75_npblock "$(t66_rc "$SB_T66DT")" top
+expect_contains "T66 B1 block top (doctor): bionic's whole block is present → setup (the twin)" "present →" "$(report_row "$(t66_door "$SB_T66DT" doctor "")" "legacy .zshrc alias block")"
 
 # THE RETIRED ALIAS BLOCK IS ONE UNIT (A-orch-119 (3)): setup's strip and remove's
 # marked branch take it out only when, as a unit, it stands as commands of their own
@@ -1490,7 +1492,7 @@ t66_ablock_doors() {  # <shell> <shape> <verdict>
   done
 }
 t66_ablock_doors /bin/bash in-if left
-t66_ablock_doors /bin/bash heredoc left
+t66_ablock_doors /bin/bash heredoc removed
 t66_ablock_doors /bin/bash top removed
 t66_ablock_doors /bin/zsh in-if removed
 T66_SHELL=/bin/bash
@@ -1522,8 +1524,10 @@ t66_env_plant() {  # <file> <expected> <shape>
     block-two-if)  printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' '  export A=1' "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'fi' > "$1"
                    printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' '  export A=1' 'fi' > "$2"; return 0 ;;
     block-if)      printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'fi' > "$1" ;;
-    block-heredoc) printf '%s\n' "cat > /dev/null <<'EOF'" "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'EOF' 'export SECRETTOKEN=1' > "$1" ;;
-    block-andand)  printf '%s\n' 'test -n "$SECRETTOKEN" &&' "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'export A=1' > "$1" ;;
+    block-heredoc) printf '%s\n' "cat > /dev/null <<'EOF'" "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'EOF' 'export SECRETTOKEN=1' > "$1"
+                   printf '%s\n' "cat > /dev/null <<'EOF'" 'EOF' 'export SECRETTOKEN=1' > "$2"; return 0 ;;
+    block-andand)  printf '%s\n' 'test -n "$SECRETTOKEN" &&' "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'export A=1' > "$1"
+                   printf '%s\n' 'test -n "$SECRETTOKEN" &&' 'export A=1' > "$2"; return 0 ;;
   esac
   cp "$1" "$2"
 }
@@ -1543,7 +1547,9 @@ for T66_SHAPE in exact nofinal crlf if-only shared ten suffix comment block-top 
     expect_same_bytes "${T66_L}: answered yes, the rc is as the rule says, byte for byte" "$TMP/t66v-expected" "$T66_RC"
     expect_absent "${T66_L}: the user's text is never printed" "SECRETTOKEN" "$T66V_OUT"
     case "$T66_SHAPE" in
-      block-top|block-two-if)
+      block-top|block-two-if|block-heredoc|block-andand)
+        # T75 (A-orch-162): bionic's whole block goes wherever it stands, the rc's own
+        # shell's parse its only veto (the known limit, in the record).
         expect_contains "${T66_L}: the block goes as a unit" "retired environment block in" "$T66V_OUT" ;;
       block-*)
         expect_eq "${T66_L}: …and keeps its inode" "$T66_INODE" "$(t51_inode "$T66_RC")"
@@ -1609,8 +1615,9 @@ for T66_SHAPE in pipe amp lt gt lparen rparen brew utf8 punct; do
     T66_L="T66 B3 template ${T66_SHAPE} (${T66_DOOR})"
     case "$T66_SHAPE" in
       brew|utf8|punct)
-        expect_contains "${T66_L}: asked about by line number" "Remove line 2 of ${SB_T66B}/.zshrc" "$T66B_OUT"
-        expect_same_bytes "${T66_L}: bionic's form, the line goes and every other byte stays" "$TMP/t66b-removed" "$SB_T66B/.zshrc" ;;
+        expect_same_bytes "${T66_L}: bionic's form, left byte for byte (T75: never taken out)" "$TMP/t66b-before" "$SB_T66B/.zshrc"
+        expect_contains "${T66_L}: …named as bionic's line, by its number" "line 2 of" "$(report_row "$T66B_OUT" "outside bionic's markers")"
+        expect_absent "${T66_L}: …and nothing asked" "[y/N]" "$T66B_OUT" ;;
       *)
         expect_same_bytes "${T66_L}: not a form bionic wrote, left byte for byte" "$TMP/t66b-before" "$SB_T66B/.zshrc"
         expect_contains "${T66_L}: …named by its number" "line 2 of" "$(report_row "$T66B_OUT" "not in a form bionic wrote")"
@@ -1656,21 +1663,6 @@ t66_race() {  # <sandbox> <door> <item> [above|wrap] — the run's output; the r
   wait "$pid"
   cat "$out"
 }
-T66_SHELL=/bin/zsh
-for T66_DOOR in setup-only rm-payload rm-standalone; do
-  SB_T66R="$(new_sandbox)"; t66_plant "$SB_T66R/.zshrc" "$TMP/t66r-unused" top "$T66_ALIAS"
-  T66R_OUT="$(t66_race "$SB_T66R" "$T66_DOOR" legacy-alias)"
-  expect_contains "T66 S1 race (${T66_DOOR}): the question was asked (the positive)" "Remove line 2 of" "$T66R_OUT"
-  expect_same_bytes "T66 S1 race (${T66_DOOR}): nothing written, the user's newer file kept" "$SB_T66R/.mutated" "$SB_T66R/.zshrc"
-  case "$T66_DOOR" in
-    setup-only)
-      expect_contains "T66 S2 race (setup): the item line says the reason, before the long path" "changed while setup ran" "$(report_row "$T66R_OUT" "legacy alias  ")"
-      expect_contains "T66 S2 race (setup): the action is a sentence that says how to answer yes" "remove bionic's retired alias line — answer yes to legacy-alias with:" "$T66R_OUT"
-      expect_absent "T66 S2 race (setup): …never 'run answer yes'" "run answer yes" "$T66R_OUT" ;;
-    *)
-      expect_contains "T66 S1 race (${T66_DOOR}): the reason comes first" "⚠ changed while remove ran" "$T66R_OUT" ;;
-  esac
-done
 T66_SHELL=/bin/bash
 for T66_DOOR in setup-only rm-payload rm-standalone; do
   SB_T66RB="$(new_sandbox)"; printf '%s\n' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" > "$(t66_rc "$SB_T66RB")"
@@ -1692,9 +1684,9 @@ done
 
 # S3 — A TEMP FILE THIS RUN DID NOT STAGE IS NOT REMOVE'S TO DELETE. A read-only rc and
 # the user's own file at `<rc>.bionic.tmp`: refused, and the user's file kept, through
-# the unmarked and the marked branch. The twin: setup leaves it too.
+# the marked branch (T75: no bare line is ever written). The twin: setup leaves it too.
 T66_SHELL=/bin/zsh
-for T66_KIND in unmarked marked; do
+for T66_KIND in marked; do
   for T66_DOOR in rm-payload rm-standalone setup-only; do
     SB_T66S="$(new_sandbox)"
     case "$T66_KIND" in
@@ -1711,10 +1703,11 @@ for T66_KIND in unmarked marked; do
 done
 
 # S5 — A READ-ONLY RC IS NOT OFFERED. setup's and remove's --all pages leave the
-# removal off (unmarked and marked) and say the rc is read-only; doctor's row says so
-# and sends no one to setup. The twins: the writable rc is offered (T55's page rows).
+# block off and say the rc is read-only; doctor's row says so and sends no one to setup
+# (T75: a bare line is never offered, read-only or not). The twin: the writable rc is
+# offered.
 T66_SHELL=/bin/zsh
-for T66_KIND in unmarked marked; do
+for T66_KIND in marked; do
   for T66_DOOR in setup-all rm-all doctor; do
     SB_T66P="$(new_sandbox)"
     case "$T66_KIND" in
@@ -1743,17 +1736,14 @@ SB_T66PT="$(new_sandbox)"
 printf '%s\n' 'export A=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" > "$SB_T66PT/.zshrc"; t66_pageblock >> "$SB_T66PT/.zshrc"
 expect_contains "T66 S5 marked writable (setup-all): the page offers the block (the twin)" "remove the retired shell alias block" "$(t66_door "$SB_T66PT" setup-all n)"
 
-# S4 — ONE MORE COPY, AND A LATE DEFINITION. `_rm_drop_lines` is `markers_drop_lines`
-# with remove.sh's own helper names; and a second definition appended to remove.sh
-# turns every pin of that name red.
+# S4 — A LATE DEFINITION. A second definition appended to remove.sh turns every pin of
+# that name red. (T75: `_rm_drop_lines` and `markers_drop_lines` are gone with the
+# bare-line removal they served.)
 t66_rm_names() {  # remove.sh's helper names, read as the library's
   sed -e 's/_rm_drop_lines/markers_drop_lines/g' -e 's/_rm_regular/markers_regular/g' \
       -e 's/_rm_stage_tmp/_markers_stage_tmp/g' -e 's/_rm_publish_tmp/_markers_publish_tmp/g' \
       -e 's/_rm_block_alone/markers_block_alone/g'
 }
-T66_A="$(fn_text "${REPO}/payload/scripts/lib/markers.sh" markers_drop_lines)"
-expect_nonempty "T66 S4: markers_drop_lines reads out of markers.sh" "$T66_A"
-expect_eq "T66 S4: remove.sh's _rm_drop_lines is markers_drop_lines, body for body" "$T66_A" "$(fn_text "$REMOVE_SH" _rm_drop_lines | t66_rm_names)"
 T66_A="$(fn_text "${REPO}/payload/scripts/lib/markers.sh" markers_block_alone)"
 expect_nonempty "T66 copies: markers_block_alone reads out of markers.sh" "$T66_A"
 expect_eq "T66 copies: remove.sh's _rm_block_alone is markers_block_alone, body for body" "$T66_A" "$(fn_text "$REMOVE_SH" _rm_block_alone | t66_rm_names)"
@@ -1765,9 +1755,9 @@ expect_ne "T66 S4: …and the pin on bionic_legacy_alias_ours goes red on it" \
 
 # THE NEW COPIES remove.sh carries for its standalone door, each pinned to its one
 # library, and the environment line's loose pattern.
-for T66_FN in bionic_rc_line_bare bionic_todo_export_ours bionic_todo_export_lines bionic_rc_left_reason bionic_rc_candidates bionic_rc_lines bionic_rc_alone bionic_rc_continued bionic_rc_block_alone bionic_rc_try bionic_rc_shell; do
+for T66_FN in bionic_rc_line_bare bionic_todo_export_ours bionic_todo_export_lines bionic_rc_left_reason bionic_rc_candidates bionic_rc_lines bionic_rc_staged bionic_rc_block_alone bionic_rc_block_staged bionic_rc_try bionic_rc_parses bionic_block_body bionic_rc_shell; do
   case "$T66_FN" in
-    bionic_rc_candidates|bionic_rc_lines|bionic_rc_alone|bionic_rc_continued|bionic_rc_block_alone|bionic_rc_try) T66_LIB="${REPO}/payload/scripts/lib/markers.sh" ;;
+    bionic_rc_candidates|bionic_rc_lines|bionic_rc_staged|bionic_rc_block_alone|bionic_rc_block_staged|bionic_rc_try|bionic_rc_parses) T66_LIB="${REPO}/payload/scripts/lib/markers.sh" ;;
     bionic_rc_shell) T66_LIB="${REPO}/payload/scripts/lib/shell.sh" ;;
     *) T66_LIB="$DETECT_SH" ;;
   esac
@@ -1789,11 +1779,284 @@ for T66_LOC in en_US.UTF-8 C; do
   T66_T0="$(date +%s)"
   T66_SCAN="$(LC_ALL="$T66_LOC" SHELL=/bin/bash HOME="$TMP" bash -c '. "$1" >/dev/null 2>&1; bionic_legacy_alias_lines "$2"; bionic_todo_export_lines "$2"' _ "$DETECT_SH" "$TMP/t66-long.rc")"
   T66_T1="$(date +%s)"
-  expect_contains "T66 N1 (LC_ALL=${T66_LOC}): the long line in bionic's form is bionic's" "ours=1 " "$T66_SCAN"
+  expect_contains "T66 N1 (LC_ALL=${T66_LOC}): the long line in bionic's form is bionic's" "bound=1 " "$T66_SCAN"
   expect_contains "T66 N1 (LC_ALL=${T66_LOC}): …and the export with trailing blanks is too" "cand=3 " "$T66_SCAN"
   T66_SECS=$((T66_T1 - T66_T0))
   if [ "$T66_SECS" -le 4 ]; then ok "T66 N1 (LC_ALL=${T66_LOC}): both scans over the 200,000-character lines inside 4 s"
   else no "T66 N1 (LC_ALL=${T66_LOC}): both scans over the 200,000-character lines inside 4 s" "took ${T66_SECS} s"; fi
 done
+
+# ---------------------------------------------------------------------------
+section "wave-27 T75: the markers are the whole rule, proven by bytes"
+# ---------------------------------------------------------------------------
+#
+# Review pass 54 on T66 found four blockers, each a change to what the user's own shell
+# does, after four rows (T7, T51, T55, T66) that each said from the TEXT around bionic's
+# bare alias line when taking it out was safe. A-orch-162 (Chris's ruling) ends that: the
+# markers are the whole rule. No door takes a line outside a marker pair out of an rc;
+# bionic's own bare line is named by number for the user's hand. A marked block goes as
+# one unit only when its body is, byte for byte, the one bionic wrote, and only when the
+# rc's own shell says (`-n` on a staged copy) the rc parsed before and still parses
+# without it. THE GATE IS BYTES: the generator (tests/fixtures/rc-gen.pl) writes rc files
+# out of this suite's own lines, with bionic's line or block in every position of review
+# pass 54's 422 shapes, and writes beside each what every door must leave; every writing
+# door is run on each in a throwaway home and the rc it leaves must be exactly that file.
+# No rc is executed by the gate row (the one-time execution measurement is the record's).
+
+T75_GEN="${REPO}/tests/fixtures/rc-gen.pl"
+T75_CASES="$TMP/t75-cases"
+perl "$T75_GEN" 75 "$T75_CASES"
+T75_SAMPLE="${T75_SAMPLE:-6}"
+# The named shapes, always in the sample: B1 to B4 and S3 of review pass 54, and the
+# brief's worked answers.
+T75_CORE=" a-andcomment-only a-pipecomment-only a-zshfn-only a-zshforshort-only a-hdcmdsub-only ab-hdcmdsub-only \
+eb-hdcmdsub-only ab-andcomment-only a-top-sev a-if-sev x-two-if a-case-only k-ab-top k-ab-userline k-ab-useronly \
+k-eb-ten k-eb-userline k-ab-nofinal k-eb-nofinal x-nofinal a-banglast-only a-bangtrue-only a-bang-only a-bslash-only \
+a-bsthencomment-only a-bangthenours-only ab-banglast-only ab-if-only ab-if-sev ab-top-only eb-top-sev k-both \
+k-both-nested k-ab-and-bare x-crlf x-three "
+
+t75_exec() {  # <home> <shell> <rc> — the state the rc leaves when the rc's own shell runs it (S2's positive only)
+  local h="$1"
+  case "$h" in "$TMP"/home-*) ;; *) echo "T75 GUARD: home '$h' is not under this suite's throwaway root" >&2; exit 1 ;; esac
+  rm -f "$h/log"
+  case "$2" in
+    zsh) env -i HOME="$h" PATH=/usr/bin:/bin /bin/zsh -f -c '. "$1" </dev/null >/dev/null 2>&1; env' t75 "$3" ;;
+    *)   env -i HOME="$h" PATH=/usr/bin:/bin /bin/bash --norc --noprofile -c '. "$1" </dev/null >/dev/null 2>&1; env' t75 "$3" ;;
+  esac 2>/dev/null | LC_ALL=C grep -a '^V[0-9]*=' | LC_ALL=C sort
+  printf 'log:'; cat "$h/log" 2>/dev/null; rm -f "$h/log"
+}
+# The rc the door left is the expected file byte for byte; for setup --all, the
+# claude() block it appends (bionic's other item) is set aside first, and with it the
+# one newline it adds above that block where the rc ended without one. `ok` or what moved.
+t75_same() {  # <expected> <after> <setup-all?>
+  perl -e '
+    my ($ef, $af, $all, $rs, $re) = @ARGV;
+    local $/; open my $e, "<:raw", $ef or die; my $E = <$e>; open my $a, "<:raw", $af or die; my $A = <$a>;
+    if ($all eq "yes") { my $i = index($A, "$rs\n");
+      if ($i >= 0) { my $j = index($A, "$re\n", $i); $j = $j < 0 ? length($A) : $j + length("$re\n");
+        substr($A, $i, $j - $i) = ""; $A =~ s/\n\z// if $E !~ /\n\z/ && $A eq "$E\n"; } }
+    if ($A eq $E) { print "ok\n"; exit 0; }
+    my $n = 0; $n++ while $n < length($A) && $n < length($E) && substr($A, $n, 1) eq substr($E, $n, 1);
+    my $line = 1 + (substr($E, 0, $n) =~ tr/\n//);
+    printf "the rc differs from what the rule leaves at byte %d (line %d): %d bytes left, %d expected\n", $n, $line, length($A), length($E);' \
+    "$1" "$2" "$3" "$RC_START_LIT" "$RC_END_LIT"
+}
+t75_doors() {  # <family> — `<door> <item> <kind>` for each writing door that family goes through
+  case "$1" in
+    alias) printf '%s\n' "setup-only legacy-alias setup" "setup-all legacy-alias setup" "rm-payload legacy-alias rmalias" \
+             "rm-standalone legacy-alias rmalias" "rm-all legacy-alias rmall" ;;
+    env)   printf '%s\n' "rm-payload environment rmenv" "rm-standalone environment rmenv" "rm-all environment rmall" ;;
+    both)  printf '%s\n' "setup-only legacy-alias setup" "setup-all legacy-alias setup" "rm-payload legacy-alias rmalias" \
+             "rm-payload environment rmenv" "rm-standalone legacy-alias rmalias" "rm-all legacy-alias rmall" ;;
+  esac
+}
+
+bionic_line_numbers_words_t75() { case "$1" in *,*) printf 'lines %s\n' "${1//,/, }" ;; *) printf 'line %s\n' "$1" ;; esac; }
+T75_T0="$(date +%s)"; T75_RCS=0; T75_RUNS=0; T75_BAD=0; T75_N=0
+: > "$TMP/t75-sample"
+while read -r T75_ID T75_FAM T75_SH T75_BARE T75_BARE_RM; do
+  T75_N=$((T75_N + 1))
+  case "$T75_CORE" in *" $T75_ID "*) ;; *) [ "$T75_SAMPLE" = "all" ] || [ "$T75_N" -le "$T75_SAMPLE" ] || continue ;; esac
+  printf '%s %s %s %s %s\n' "$T75_ID" "$T75_FAM" "$T75_SH" "$T75_BARE" "$T75_BARE_RM" >> "$TMP/t75-sample"
+done < "$T75_CASES/index"
+while read -r T75_ID T75_FAM T75_SH T75_BARE_SETUP T75_BARE_RM; do
+  T75_RCS=$((T75_RCS + 1))
+  T66_SHELL="/bin/$T75_SH"
+  while read -r T75_DOOR T75_ITEM T75_KIND; do
+    T75_RUNS=$((T75_RUNS + 1))
+    T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+    case "$T75_SB" in "$TMP"/home-*) ;; *) echo "T75 GUARD: HOME '$T75_SB' is not under the throwaway root" >&2; exit 1 ;; esac
+    cp "$T75_CASES/$T75_ID.rc" "$T75_RC"
+    T75_OUT="$(t66_door "$T75_SB" "$T75_DOOR" y "$T75_ITEM")"
+    T75_L="T75 bytes ${T75_ID} (${T75_SH}, ${T75_DOOR} ${T75_ITEM})"
+    T75_WHY="$(t75_same "$T75_CASES/$T75_ID.$T75_SH.$T75_KIND" "$T75_RC" "$( [ "$T75_DOOR" = setup-all ] && echo yes || echo no )")"
+    [ "$T75_WHY" = "ok" ] && T75_WHY=""
+    case "$T75_KIND" in setup) T75_BARE="$T75_BARE_SETUP" ;; *) T75_BARE="$T75_BARE_RM" ;; esac
+    if [ -z "$T75_WHY" ] && [ "$T75_BARE" != "-" ] && [ "$T75_ITEM" = "legacy-alias" ]; then
+      case "$T75_OUT" in *"$(bionic_line_numbers_words_t75 "$T75_BARE") of "*) ;;
+        *) T75_WHY="bionic's bare line(s) ${T75_BARE} not named by number" ;; esac
+    fi
+    if [ -z "$T75_WHY" ]; then ok "$T75_L"; else no "$T75_L" "$T75_WHY"; T75_BAD=$((T75_BAD + 1)); fi
+    rm -rf "$T75_SB"
+  done < <(t75_doors "$T75_FAM")
+done < "$TMP/t75-sample"
+T75_SECS=$(( $(date +%s) - T75_T0 ))
+echo "T75 bytes: $(wc -l < "$T75_CASES/index" | tr -d ' ') rc files generated, ${T75_RCS} driven (sample ${T75_SAMPLE}, seed 75, and the named shapes), ${T75_RUNS} door runs, ${T75_BAD} red, ${T75_SECS} s"
+# The positives beside the counts: the gate ran, and its expectation moves.
+expect_true "T75 bytes: at least 400 rc files are generated" test "$(wc -l < "$T75_CASES/index")" -ge 400
+expect_true "T75 bytes: the drive ran doors" test "$T75_RUNS" -gt 0
+expect_diff_bytes "T75 bytes: the rule takes an intact block out (k-ab-top's expected file is not the rc)" \
+  "$T75_CASES/k-ab-top.rc" "$T75_CASES/k-ab-top.bash.setup"
+expect_same_bytes "T75 bytes: …and leaves a bare line (a-top-sev's expected file is the rc)" \
+  "$T75_CASES/a-top-sev.rc" "$T75_CASES/a-top-sev.bash.setup"
+
+# B3 — A BLOCK IS BIONIC'S ONLY WHEN ITS BODY IS. The user's line between the alias
+# markers, the env block with its value changed, a block holding only the user's line:
+# left whole on every door, named by its lines as changed since bionic wrote it, never
+# asked about, never on a page. The twin is k-ab-top in the oracle above (goes).
+t75_b3_plant() {  # <file> <shape>
+  case "$2" in
+    userline) printf '%s\n' 'export A=1' "$ALIAS_START" "$T66_ALIAS" 'export SECRETTOKEN=x' "$ALIAS_END" 'export B=2' > "$1" ;;
+    useronly) printf '%s\n' 'export A=1' "$ALIAS_START" 'export SECRETTOKEN=x' "$ALIAS_END" 'export B=2' > "$1" ;;
+    envten)   printf '%s\n' 'export A=1' "$ENVB_START" 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=10' "$ENVB_END" 'export SECRETTOKEN=1' > "$1" ;;
+  esac
+}
+for T75_SHAPE in userline useronly envten; do
+  case "$T75_SHAPE" in envten) T75_DL="rm-payload:environment rm-standalone:environment rm-all:environment" ;;
+    *) T75_DL="setup-only:legacy-alias setup-all:legacy-alias rm-payload:legacy-alias rm-standalone:legacy-alias rm-all:legacy-alias" ;; esac
+  for T75_SH in bash zsh; do
+    T66_SHELL="/bin/$T75_SH"
+    for T75_D in $T75_DL; do
+      T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+      t75_b3_plant "$T75_RC" "$T75_SHAPE"
+      [ "${T75_D%%:*}" = "setup-all" ] && t66_pageblock >> "$T75_RC"
+      cp "$T75_RC" "$TMP/t75b3-before"
+      T75_OUT="$(t66_door "$T75_SB" "${T75_D%%:*}" y "${T75_D#*:}")"
+      T75_L="T75 B3 ${T75_SHAPE} (${T75_SH}, ${T75_D%%:*})"
+      expect_contains "${T75_L}: the run reached the machine" "bionic" "$T75_OUT"
+      expect_same_bytes "${T75_L}: answered yes, the block is left whole, the rc byte-identical" "$TMP/t75b3-before" "$T75_RC"
+      case "$T75_SHAPE" in userline) T75_LINES="lines 2 to 5 of" ;; *) T75_LINES="lines 2 to 4 of" ;; esac
+      expect_contains "${T75_L}: …named by its lines as changed since bionic wrote it" "$T75_LINES" "$(report_row "$T75_OUT" "changed since bionic wrote it")"
+      expect_absent "${T75_L}: …the user's text is never printed" "SECRETTOKEN" "$T75_OUT"
+      case "${T75_D%%:*}" in
+        setup-all) expect_absent "${T75_L}: …and the page does not offer it" "remove the retired shell alias block" "$T75_OUT" ;;
+        rm-all) expect_absent "${T75_L}: …and the page does not offer it" "remove the retired shell alias block" "$T75_OUT" ;;
+        *) expect_absent "${T75_L}: …and nothing is asked" "[y/N]" "$T75_OUT" ;;
+      esac
+    done
+  done
+done
+T66_SHELL=/bin/bash
+SB_T75DB="$(new_sandbox)"; t75_b3_plant "$(t66_rc "$SB_T75DB")" userline
+T75_DOC="$(t66_door "$SB_T75DB" doctor "")"
+expect_contains "T75 B3 userline (doctor): a row names the block's lines, changed since bionic wrote it" "lines 2 to 5 of ~/.bashrc" "$(report_row "$T75_DOC" "changed since written")"
+expect_absent "T75 B3 userline (doctor): …and the alias row does not call it present" "present →" "$(report_row "$T75_DOC" "legacy .zshrc alias block")"
+expect_eq "T75 B3: detect.sh lists the alias block's body" "alias claude='claude --dangerously-skip-permissions'" \
+  "$(SHELL=/bin/bash HOME="$TMP" bash -c '. "$1" >/dev/null 2>&1; bionic_block_body "$BIONIC_ALIAS_START"' _ "$DETECT_SH")"
+expect_eq "T75 B3: …and nothing for any other marker" "" \
+  "$(SHELL=/bin/bash HOME="$TMP" bash -c '. "$1" >/dev/null 2>&1; bionic_block_body "# not a marker"' _ "$DETECT_SH")"
+
+# S3 — "PARSES" NEVER DEPENDS ON THE RC'S LAST STATUS. zsh's -n exits 1 after a negated
+# last pipeline with nothing on stderr. A .zshrc whose last line is `! true`, bionic's
+# block above it: removed by setup --only AND --all (one answer), and never called an
+# rc that does not parse.
+T66_SHELL=/bin/zsh
+for T75_D in setup-only setup-all; do
+  T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+  printf '%s\n' 'export SECRETTOKEN=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" '! true' > "$T75_RC"
+  printf '%s\n' 'export SECRETTOKEN=1' '! true' > "$TMP/t75s3-expected"
+  [ "$T75_D" = "setup-all" ] && t66_pageblock | tee -a "$T75_RC" >> "$TMP/t75s3-expected"
+  T75_OUT="$(t66_door "$T75_SB" "$T75_D" y)"
+  expect_same_bytes "T75 S3 bang-last (zsh, ${T75_D}): bionic's block goes, every other byte stays" "$TMP/t75s3-expected" "$T75_RC"
+  expect_absent "T75 S3 bang-last (zsh, ${T75_D}): …and the rc is never called one that does not parse" "does not parse" "$T75_OUT"
+done
+
+# S1 — THE STAGED COPY. A spy `bash` and `zsh` first on PATH records, for every `-n`
+# call a decision makes, the staged copy's mode and its directory's; and sleeps, so a
+# signal can reach the door mid-decision. Every copy is 0600 in a 0700 directory, and
+# on HUP, INT and TERM sent to the door's process group nothing is left in TMPDIR.
+mkdir -p "$TMP/spy"
+for T75_S in bash zsh; do
+  printf '#!/bin/bash\nfor a in "$@"; do f="$a"; done\ncase " $* " in *" -n "*) printf "%%s %%s\\n" "$(stat -f %%Lp "$f")" "$(stat -f %%Lp "${f%%/*}")" >> "${SPY_LOG:-%s}"; [ -n "${SPY_SLEEP:-}" ] && { : > "${SPY_LOG:-%s}.sleeping"; sleep "$SPY_SLEEP"; } ;; esac\nexec /bin/%s "$@"\n' "$TMP/spy.log" "$TMP/spy.log" "$T75_S" > "$TMP/spy/$T75_S"
+  chmod +x "$TMP/spy/$T75_S"
+done
+T66_SHELL=/bin/bash
+T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+printf '%s\n' 'export A=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'export B=2' > "$T75_RC"
+: > "$TMP/spy.log"
+T66_PATH="$TMP/spy:$T51_PATH" SPY_LOG="$TMP/spy.log" t66_door "$T75_SB" setup-only y >/dev/null
+T66_PATH="$T51_PATH"
+expect_nonempty "T75 S1: the spy saw the decision's -n calls" "$(cat "$TMP/spy.log")"
+expect_eq "T75 S1: every staged copy is 0600 in a 0700 directory" "600 700" "$(sort -u "$TMP/spy.log")"
+expect_eq "T75 S1: …bionic's block went (the decision ran to its end)" "0" "$(count_lines_equal "$T75_RC" "$T66_ALIAS")"
+expect_empty "T75 S1: …and nothing is left in TMPDIR" "$(find "$T75_SB/.tmp" -name 'bionic-rc.*' 2>/dev/null)"
+for T75_SIG in HUP INT TERM; do
+  T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"; mkdir -p "$T75_SB/.tmp"
+  printf '%s\n' 'export A=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'export B=2' > "$T75_RC"
+  rm -f "$TMP/spy.log" "$TMP/spy.log.sleeping"
+  set -m
+  ( printf 'y\n' | env -i HOME="$T75_SB" ZDOTDIR="$T75_SB" CLAUDE_CONFIG_DIR="$T75_SB/.claude" BIONIC_CLAUDE_HOME="$T75_SB/.claude" \
+      SHELL=/bin/bash PATH="$TMP/spy:$T51_PATH" TMPDIR="$T75_SB/.tmp" TERM=dumb SPY_LOG="$TMP/spy.log" SPY_SLEEP=20 \
+      bash "$SETUP_SH" --only legacy-alias >/dev/null 2>&1 ) &
+  T75_PID=$!
+  set +m
+  T75_W=0; while [ ! -e "$TMP/spy.log.sleeping" ] && [ "$T75_W" -lt 1200 ]; do sleep 0.1; T75_W=$((T75_W + 1)); done
+  expect_true "T75 S1 ${T75_SIG}: the door was stopped inside a decision (the spy was asleep)" test -e "$TMP/spy.log.sleeping"
+  expect_nonempty "T75 S1 ${T75_SIG}: …with a staged copy in TMPDIR at that moment" "$(find "$T75_SB/.tmp" -name 'bionic-rc.*' 2>/dev/null)"
+  kill -"$T75_SIG" -- "-$T75_PID" 2>/dev/null
+  wait "$T75_PID" 2>/dev/null
+  sleep 1
+  expect_empty "T75 S1 ${T75_SIG}: after the signal nothing is left in TMPDIR" "$(find "$T75_SB/.tmp" -name 'bionic-rc.*' 2>/dev/null)"
+done
+
+# S2 — ROWS THAT CAN FAIL if a door ever ran an rc, kept a staged copy, dropped zsh's
+# `-f` or the emptied BASH_ENV/ENV, or asked the wrong shell. A home whose every startup
+# file, and a BASH_ENV and ENV, plant a marker; an rc whose first line plants one; each
+# door run in it under its own shell; then no marker exists. The positive beside it:
+# executing that rc (the oracle's executor) does plant the rc's marker. And a .zshrc with
+# zsh's own syntax after bionic's block: zsh parses it, so the block goes; bash, the
+# wrong shell, would call the rc unparseable and leave it.
+t75_markers() {  # <home> — plant a marker in every file a shell could read at start
+  local f
+  mkdir -p "$1/zd"
+  for f in .zshenv .zprofile .zlogin .bash_profile .profile .bash_login zd/.zshenv zd/.zshrc mark-benv.sh mark-env.sh; do
+    # A BASH_ENV or ENV file is read by the door's own bash too: it plants its marker
+    # only when the shell reading it was started on a staged copy.
+    case "$f" in mark-*) printf 'case "$0" in *bionic-rc.*) touch "%s/MARK-%s" ;; esac\n' "$1" "$f" > "$1/$f" ;;
+      *) printf 'touch "%s/MARK-%s"\n' "$1" "${f//\//_}" > "$1/$f" ;; esac
+  done
+}
+for T75_SH in bash zsh; do
+  T66_SHELL="/bin/$T75_SH"
+  for T75_D in setup-only rm-payload doctor; do
+    T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"; t75_markers "$T75_SB"; mkdir -p "$T75_SB/.tmp"
+    printf '%s\n' 'touch "$HOME/MARK-rc"' 'export A=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'export B=2' > "$T75_RC"
+    case "$T75_D" in
+      setup-only) T75_IN=y; T75_CMD=("$SETUP_SH" --only legacy-alias) ;;
+      rm-payload) T75_IN=y; T75_CMD=("$REMOVE_SH" --only legacy-alias) ;;
+      doctor)     T75_IN=""; T75_CMD=("$DOCTOR_SH") ;;
+    esac
+    printf '%s\n' "$T75_IN" | env -i HOME="$T75_SB" ZDOTDIR="$T75_SB/zd" CLAUDE_CONFIG_DIR="$T75_SB/.claude" BIONIC_CLAUDE_HOME="$T75_SB/.claude" \
+      SHELL="/bin/$T75_SH" PATH="$T51_PATH" TMPDIR="$T75_SB/.tmp" TERM=dumb BASH_ENV="$T75_SB/mark-benv.sh" ENV="$T75_SB/mark-env.sh" \
+      BIONIC_DOCTOR_PROBE_SECONDS=15 bash "${T75_CMD[@]}" > "$TMP/t75s2-out" 2>&1
+    T75_L="T75 S2 (${T75_SH}, ${T75_D})"
+    case "$T75_D" in
+      doctor) expect_contains "${T75_L}: the door ran (its rows)" "legacy" "$(cat "$TMP/t75s2-out")" ;;
+      *) expect_eq "${T75_L}: the door decided and removed bionic's block" "0" "$(count_lines_equal "$T75_RC" "$T66_ALIAS")" ;;
+    esac
+    expect_empty "${T75_L}: no line of the rc and no startup file ran (no marker)" "$(cd "$T75_SB" && ls MARK-* 2>/dev/null)"
+    expect_empty "${T75_L}: …and no staged copy is left" "$(find "$T75_SB/.tmp" -name 'bionic-rc.*' 2>/dev/null)"
+  done
+  T75_SB="$(new_sandbox)"; printf '%s\n' 'touch "$HOME/MARK-rc"' > "$T75_SB/probe.rc"
+  t75_exec "$T75_SB" "$T75_SH" "$T75_SB/probe.rc" >/dev/null
+  expect_true "T75 S2 (${T75_SH}): executing the rc does plant its marker (the positive)" test -e "$T75_SB/MARK-rc"
+done
+T66_SHELL=/bin/zsh
+T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+printf '%s\n' 'export A=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'for i (a b) export V$i=1' > "$T75_RC"
+printf '%s\n' 'export A=1' 'for i (a b) export V$i=1' > "$TMP/t75ws-expected"
+expect_false "T75 S2 wrong shell: bash cannot parse that .zshrc (the fixture holds)" bash -n "$T75_RC"
+t66_door "$T75_SB" setup-only y >/dev/null
+expect_same_bytes "T75 S2 wrong shell: zsh, the rc's own shell, decides, and bionic's block goes" "$TMP/t75ws-expected" "$T75_RC"
+
+# S4 — a read-only rc holding the env block: remove --all's page does not offer it.
+T66_SHELL=/bin/bash
+T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+printf '%s\n' 'export A=1' "$ENVB_START" "$T66_TODO" "$ENVB_END" > "$T75_RC"; chmod 444 "$T75_RC"
+T75_OUT="$(t66_door "$T75_SB" rm-all n)"
+expect_contains "T75 S4: remove --all printed its page" "Do all of the above?" "$T75_OUT"
+expect_absent "T75 S4: …and a read-only rc's env block is not on it" "delete bionic's environment settings" "$T75_OUT"
+T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+printf '%s\n' 'export A=1' "$ENVB_START" "$T66_TODO" "$ENVB_END" > "$T75_RC"
+expect_contains "T75 S4: …a writable one's is (the twin)" "delete bionic's environment settings" "$(t66_door "$T75_SB" rm-all n)"
+
+# S5 — the claude() item refused on a read-only rc keeps a `<rc>.bionic.tmp` it did
+# not stage.
+T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+{ printf '%s\n' 'export A=1'; t66_pageblock; } > "$T75_RC"; chmod 444 "$T75_RC"
+printf 'mine\n' > "$T75_RC.bionic.tmp"
+T75_OUT="$(t66_door "$T75_SB" rm-payload y claude-proxy)"
+expect_contains "T75 S5: the claude() item refused the read-only rc" "read-only" "$T75_OUT"
+expect_eq "T75 S5: …and the user's own <rc>.bionic.tmp is kept" "mine" "$(cat "$T75_RC.bionic.tmp" 2>/dev/null)"
 
 finish
