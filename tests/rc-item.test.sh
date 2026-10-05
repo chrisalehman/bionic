@@ -603,4 +603,47 @@ remove_run "$SB_ST3" y "$TMP/standalone/remove.sh" >/dev/null 2>&1
 expect_same_bytes "the standalone door strips a stale block to the same bytes" \
   "$TMP/stale-after-remove.zshrc" "$SB_ST3/.zshrc"
 
+# ---------------------------------------------------------------------------
+section "wave-27 T40: a cut-short write, an unwritable TMPDIR, the blank line above"
+# ---------------------------------------------------------------------------
+#
+# New rows only; every row above is unchanged. Each sandbox here is pointed at
+# by CLAUDE_CONFIG_DIR as well as HOME, so nothing can resolve a real home.
+
+t40_env() {  # <sandbox> <snippet> — env.sh sourced against the sandbox, then <snippet>
+  HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" \
+    CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" \
+    bash -c '. "$1" || exit 90; eval "$2"' _ "$ENV_SH" "$2" 2>&1
+}
+
+# A cut-short strip: `ulimit -f` with SIGXFSZ ignored, an rc larger than the limit.
+SB_T40W="$(new_sandbox)"
+for _i in $(seq 1 300); do printf 'export MY_VAR_%s=mine\n' "$_i"; done >> "$SB_T40W/.zshrc"
+setup_run "$SB_T40W" y >/dev/null 2>&1
+expect_nonempty "T40: the cut-short fixture holds the block" "$(rc_block_lines "$SB_T40W/.zshrc")"
+cp "$SB_T40W/.zshrc" "$TMP/t40w-before.zshrc"
+T40W_OUT="$(t40_env "$SB_T40W" 'trap "" XFSZ; ulimit -f 2; rc_unset claude-proxy; echo "rc=$?"')"
+expect_contains "T40: rc_unset cut short reports the failed write" "rc=1" "$T40W_OUT"
+expect_same_bytes "T40: …and the rc is byte-identical to before it" "$TMP/t40w-before.zshrc" "$SB_T40W/.zshrc"
+T40W_RM="$(trap '' XFSZ; ulimit -f 2; remove_run "$SB_T40W" y "$TMP/standalone/remove.sh")"
+expect_same_bytes "T40: the standalone door cut short leaves the rc byte-identical" "$TMP/t40w-before.zshrc" "$SB_T40W/.zshrc"
+t40_env "$SB_T40W" 'rc_unset claude-proxy' >/dev/null
+expect_empty "T40: with room to write, the same strip does take the block (the twin)" "$(rc_block_lines "$SB_T40W/.zshrc")"
+
+# rc_set needs no writable TMPDIR: its body is staged beside the rc.
+SB_T40T="$(new_sandbox)"
+T40T_OUT="$(TMPDIR="$TMP/no-such-dir/x" t40_env "$SB_T40T" 'rc_set claude-proxy; echo "rc=$?"')"
+expect_contains "T40: rc_set with an unwritable TMPDIR succeeds" "rc=0" "$T40T_OUT"
+expect_contains "T40: …and the block holds the proxy line" "$PROXY_LINE" "$(rc_block_lines "$SB_T40T/.zshrc")"
+
+# The blank line above the block: both doors give back the rc the user had.
+SB_T40B="$(new_sandbox)"; printf '\n' >> "$SB_T40B/.zshrc"; cp "$SB_T40B/.zshrc" "$TMP/t40b-planted.zshrc"
+SB_T40BS="$(new_sandbox)"; printf '\n' >> "$SB_T40BS/.zshrc"
+setup_run "$SB_T40B" y >/dev/null 2>&1; setup_run "$SB_T40BS" y >/dev/null 2>&1
+expect_nonempty "T40: the blank-line fixture holds the block" "$(rc_block_lines "$SB_T40BS/.zshrc")"
+remove_run "$SB_T40B" y >/dev/null 2>&1
+remove_run "$SB_T40BS" y "$TMP/standalone/remove.sh" >/dev/null 2>&1
+expect_same_bytes "T40: the payload door keeps a blank line the user had above the block" "$TMP/t40b-planted.zshrc" "$SB_T40B/.zshrc"
+expect_same_bytes "T40: …and so does the standalone door" "$TMP/t40b-planted.zshrc" "$SB_T40BS/.zshrc"
+
 finish
