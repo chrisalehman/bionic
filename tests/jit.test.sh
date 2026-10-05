@@ -385,7 +385,7 @@ section "Group 13: README roster table agrees with agents/*.md frontmatter (epic
 README="${REPO}/README.md"
 AGENTS_DIR="${REPO}/agents"
 
-for role in researcher test-runner implementor senior-implementor auditor critic reviewer; do
+for role in $JIT_ROLES; do
   role_file="${AGENTS_DIR}/${role}.md"
   model_raw="$(awk -F': *' '/^model:/ { print $2; exit }' "$role_file")"
   model_title="$(printf '%s' "$model_raw" | awk '{ print toupper(substr($0,1,1)) substr($0,2) }')"

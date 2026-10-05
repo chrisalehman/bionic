@@ -3076,6 +3076,9 @@ PreToolUse|Write|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill
 PostToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
 PostToolUse|Bash|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
 SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh evidence|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh adversarial|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh structure|10
 Stop||${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh|10
 PreToolUse|Skill|${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
 UserPromptExpansion||${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
@@ -14072,6 +14075,38 @@ expect_eq "DEAL mutation: the doctored copy still deals one role per question (i
   "$(deal audited task "$DEAL_MUT" | awk -F'\t' '$1 == "review"' | awk 'END { print NR }')"
 expect_ne "DEAL mutation: …and splits from the table, so the audited row goes red" \
   "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:reviewer" "$(deal_roles audited task "$DEAL_MUT")"
+
+# THE RENDERED TABLE IS THE DEALING (wave-27 T17; AC-1.2 rendered half, A-T9.17). SKILL.md's rigor
+# table names, per rigor, who holds which question, in the Interfaces table's words: `<role> holds
+# all three`, or `<role> \`<q>\`[ and \`<q>\`]` joined by `, `. Each row must read back as exactly
+# what `facts_owed` deals that rigor, so the table and the code cannot drift. A doctored copy whose
+# audited row hands structure to the critic must split from the dealing.
+DEAL_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
+deal_table() {  # <rigor> [<SKILL.md>] -> `<question>=bionic:<role>` per question, in PROOF_QUESTIONS order
+  QS="$DEAL_QS" awk -F'|' -v r="$1" '
+    $2 ~ "^ *`" r "` *$" {
+      nq = split(ENVIRON["QS"], qs, " "); nseg = split($4, seg, ", ")
+      for (i = 1; i <= nseg; i++) {
+        s = seg[i]; sub(/^ +/, "", s); role = s; sub(/ .*/, "", role)
+        if (s ~ /holds all three/) { for (j = 1; j <= nq; j++) held[qs[j]] = role; continue }
+        while (match(s, /`[a-z]+`/)) { held[substr(s, RSTART + 1, RLENGTH - 2)] = role; s = substr(s, RSTART + RLENGTH) }
+      }
+      for (j = 1; j <= nq; j++) if (held[qs[j]] != "") printf "%s%s=bionic:%s", (n++ ? " " : ""), qs[j], held[qs[j]]
+      exit
+    }' "${2:-$DEAL_SKILL}" 2>/dev/null
+}
+for deal_r in tested peer-reviewed audited; do
+  expect_nonempty "DEAL table precondition: SKILL.md's rigor table has a $deal_r row the reader parses" \
+    "$(deal_table "$deal_r")"
+  expect_eq "DEAL table $deal_r: the rendered row equals what facts_owed deals" \
+    "$(deal_roles "$deal_r" task)" "$(deal_table "$deal_r")"
+done
+DEAL_SKILL_MUT="$SANDBOX/fx/deal-skill.md.mut"
+anchor "$DEAL_SKILL" 'reviewer `structure`' 1
+sed 's/reviewer `structure`/critic `structure`/' "$DEAL_SKILL" > "$DEAL_SKILL_MUT"
+expect_nonempty "DEAL table mutation: the doctored audited row still parses" "$(deal_table audited "$DEAL_SKILL_MUT")"
+expect_ne "DEAL table mutation: …and splits from the dealing, so the row goes red" \
+  "$(deal_roles audited task)" "$(deal_table audited "$DEAL_SKILL_MUT")"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"

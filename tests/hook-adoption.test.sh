@@ -1168,18 +1168,45 @@ expect_contains "…and the loader's one line names the library" "library" "$DRV
 # `Permission denied` on every event it is registered for, and the wall it was is
 # silently gone. FIX-GATE's rewrite of patrol-duties-gate.sh dropped the bit
 # (100755 → 100644 at 24d0ddd) and nothing here noticed until a live drive did.
+#
+# THE FILE IS THE COMMAND'S FIRST WORD, never its last (wave-27 T30). A registration may carry an
+# argument — the start push registers `…/execution-recorder.sh evidence`, one per question — and
+# reading the last word checked a file named after the argument. The first word, once
+# `${CLAUDE_PLUGIN_ROOT}` is resolved, is what the CLI executes; a later word that is itself a path
+# under the plugin root is a hook the first one runs (the SubagentStop guard's inner hook), and it is
+# checked too, as the last-word read used to check it.
 section "§EXEC — every hooks.json command file carries the exec bit"
-EXEC_MISSING=""
-EXEC_N=0
-while IFS= read -r cmdpath; do
-  [ -n "$cmdpath" ] || continue
-  EXEC_N=$((EXEC_N + 1))
-  f="$HOOKS/$(basename "$cmdpath")"
-  [ -x "$f" ] || EXEC_MISSING="$EXEC_MISSING $(basename "$cmdpath")"
-done <<EOF_CMDS
-$(grep -o '"command": *"[^"]*"' "$REPO/hooks/hooks.json" | sed 's/.*"command": *"//; s/"$//' | awk '{print $NF}' | sort -u)
-EOF_CMDS
+exec_cmds() { jq -r '.hooks[][]?.hooks[]?.command' "$1" 2>/dev/null; }  # <hooks.json>
+exec_missing() {  # <hooks.json> <plugin root> -> each registered command file that is not executable
+  local cmd i
+  local -a w
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    read -r -a w <<< "${cmd//\$\{CLAUDE_PLUGIN_ROOT\}/$2}"
+    [ -x "${w[0]}" ] || printf '%s\n' "${w[0]##*/}"
+    for ((i = 1; i < ${#w[@]}; i++)); do
+      case "${w[i]}" in "$2"/*) [ -x "${w[i]}" ] || printf '%s\n' "${w[i]##*/}" ;; esac
+    done
+  done <<< "$(exec_cmds "$1")"
+}
+EXEC_N=$(exec_cmds "$REPO/hooks/hooks.json" | grep -c .)
+EXEC_MISSING=$(exec_missing "$REPO/hooks/hooks.json" "$(dirname "$HOOKS")" | sort -u | tr '\n' ' ')
 expect_eq "hooks.json registers a non-empty command set" "1" "$([ "$EXEC_N" -gt 0 ] && echo 1 || echo 0)"
-expect_empty "every registered command file is executable (missing:$EXEC_MISSING)" "$EXEC_MISSING"
+expect_empty "every registered command file is executable (missing: $EXEC_MISSING)" "$EXEC_MISSING"
+# A COMMAND WITH AN ARGUMENT IS CHECKED BY ITS FILE: a planted manifest whose two registrations carry
+# an argument, one naming an executable hook and one a hook that is not there.
+EXEC_FX="$SANDBOX/exec-fx"
+mkdir -p "$EXEC_FX/hooks"
+printf '#!/bin/bash\nexit 0\n' > "$EXEC_FX/hooks/present.sh"
+chmod +x "$EXEC_FX/hooks/present.sh"
+cat > "$EXEC_FX/hooks/hooks.json" <<'EXEC_FX_EOF'
+{"hooks": {"SubagentStart": [{"hooks": [
+  {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/present.sh evidence", "timeout": 10},
+  {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/absent.sh evidence", "timeout": 10}
+]}]}}
+EXEC_FX_EOF
+EXEC_FX_MISSING=$(exec_missing "$EXEC_FX/hooks/hooks.json" "$EXEC_FX" | sort -u | tr '\n' ' ')
+expect_eq "…a registration with an argument is checked by its file: the missing hook is named, and only it" \
+  "absent.sh " "$EXEC_FX_MISSING"
 
 finish
