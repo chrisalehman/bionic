@@ -649,15 +649,226 @@ expect_status "11f: control — the same silent drive with nothing planted also 
 expect_eq "11g: …having forked no rm at all (the cleanup is guarded now)" "0" \
   "$(grep -c 'bionic-gate' "$RMLOG" 2>/dev/null || true)"
 
-# --- (e) AND THE REFUSING PATH STILL CLEANS UP AFTER ITSELF. A guard that skipped the
-# cleanup everywhere would pass (d) and leak a directory per refusal. ---
+# --- (e) AND THE REFUSING PATH LEAVES NOTHING EITHER. A guard that skipped the cleanup
+# everywhere would pass (d) and leak a directory per refusal. Since wave-27 T71 the refusal
+# reaches the parent on the subshell's own stdout and no stage is made at all, so there is
+# no directory to remove: 11i reads that no `rm` was asked to remove one. ---
 : > "$RMLOG"
 tmp_drive 20260915 ':' "$REFUSING_STUB"
 expect_status "11h: a refusal still exits 2" 2 "$TD_ST"
-expect_eq "11i: …and still removes the directory it made" "yes" \
-  "$([ "$(grep -c 'bionic-gate' "$RMLOG" 2>/dev/null || true)" -ge 1 ] && echo yes || echo no)"
+expect_eq "11i: …and forks no rm on a stage, because it made none" "0" \
+  "$(grep -c 'bionic-gate' "$RMLOG" 2>/dev/null || true)"
 expect_eq "11j: …leaving nothing behind under its own TMPDIR" "0" \
   "$(ls "$TD_TMPDIR" 2>/dev/null | grep -c 'bionic-gate' || true)"
+
+# ---------------------------------------------------------------------------
+section "§STAGE — a refusal keeps its words whatever the temp directory holds (wave-27 T71; diagnosis EG6l)"
+#
+# WHAT THIS OWNS. Until T71 the gate staged its refusal in `$TMPDIR/bionic-gate-$$`, a name
+# made from the hook's pid alone. A hook killed between the `mkdir` and the `rm -rf` left the
+# directory behind; the next refusing hook at that pid could not stage, and printed "the
+# evidence gate's own refusal is malformed" with nothing above it. One row of §EG-6 lost its
+# words that way in a landing run. A temp directory that cannot be written lost every
+# refusal's words, of every wall, because `fold_block` sent the renderer's stderr (the user's
+# line) to /dev/null when it could not make its capture file.
+#
+# HOW THE PID IS HELD. The driver plants at `$TMPDIR/bionic-gate-$$` and then runs the gate in
+# its own shell, so the gate's `$$` is the planting process's (the diagnosis's instrument.sh).
+# STAGE-e holds the REAL hook's pid the same way: `bash -c` plants, then `exec`s the hook,
+# and exec keeps the pid.
+#
+# FIXTURE FIDELITY: the planted shapes are the four a dead 1.11.0 hook or a local user can
+# leave at that name (a full five-file stage, a regular file, a FIFO, a dangling symlink),
+# SYNTHESIZED; the refusing stub carries §EG-6's own fact and fix.
+
+ST_OUT=""; ST_ERR=""; ST_RC=0; ST_TMP=""; ST_DIR=""
+st_drive() {  # <name> <before the gate> <stub> [<after the gate>] — sets ST_OUT/ST_ERR/ST_RC
+  ST_DIR="$SANDBOX/stage-$1"; ST_TMP="$ST_DIR/tmp"; mkdir -p "$ST_TMP"
+  {
+    printf '%s\n' '#!/bin/bash' 'set -uo pipefail'
+    printf 'export TMPDIR=%s\n' "$ST_TMP"
+    printf '. "%s/refuse.sh"\n. "%s/fold.sh"\n. "%s/walls.sh"\n' "$WALLS_LIB" "$WALLS_LIB" "$WALLS_LIB"
+    printf '%s\n' "$3"
+    printf '%s\n' 'COMMAND="git commit -m x"' 'OLD="$TMPDIR/bionic-gate-$$"'
+    # The planted thing's identity: inode, type, mode, size, link target, and what it holds.
+    printf '%s\n' 'sig() { /bin/ls -ldin "$OLD" 2>&1; if [ -d "$OLD" ] && [ ! -L "$OLD" ]; then /bin/ls -A "$OLD"; for f in "$OLD"/*; do [ -f "$f" ] && /bin/cat "$f"; done; elif [ -f "$OLD" ] && [ ! -L "$OLD" ]; then /bin/cat "$OLD"; fi; }'
+    printf '%s\n' "$2"
+    printf '%s\n' 'bionic_fold PreToolUse wall_evidence_gate; ST_GATE=$?'
+    printf '%s\n' "${4:-:}"
+    printf '%s\n' 'exit $ST_GATE'
+  } > "$ST_DIR/drive.sh"
+  ST_OUT=$(bash ${ST_X:-} "$ST_DIR/drive.sh" 2>"$ST_DIR/err"); ST_RC=$?
+  ST_ERR=$(cat "$ST_DIR/err" 2>/dev/null)
+}
+st_first() { printf '%s\n' "$ST_ERR" | awk 'NF { print; exit }'; }
+
+ST_FACT="the step-6 readings are not all held"
+ST_FIX="record the missing reading"
+ST_LINE="bionic: commit refused — $ST_FACT ($ST_FIX)"
+ST_REFUSING="_eg_body() { refuse exit2 commit \"$ST_FACT\" \"$ST_FIX\" \"- adversarial: no reading, and no waiver\"; }"
+ST_SILENT='_eg_body() { exit 0; }'
+ST_BEFORE='sig > "$TMPDIR/../before"'
+ST_AFTER='sig > "$TMPDIR/../after"; [ -z "${ST_WD:-}" ] || kill "$ST_WD" 2>/dev/null'
+
+# st_planted <tag> <shape> <plant> — one row set per shape left at the old name.
+st_planted() {
+  st_drive "$1" "$3
+$ST_BEFORE" "$ST_REFUSING" "$ST_AFTER"
+  expect_status "STAGE-$1a: $2 at bionic-gate-<this pid>: the commit is still refused" 2 "$ST_RC"
+  expect_eq "STAGE-$1b: …and its first line is the refusal's own fact and fix" "$ST_LINE" "$(st_first)"
+  expect_absent "STAGE-$1c: …never the malformed line" "own refusal is malformed" "$ST_ERR"
+  expect_absent "STAGE-$1d: …and nothing planted there is read" "PLANTED" "$ST_OUT$ST_ERR"
+  expect_contains "STAGE-$1e: the planted thing was there before the gate" "bionic-gate-" \
+    "$(cat "$ST_DIR/before" 2>/dev/null)"
+  expect_eq "STAGE-$1f: …and is exactly as it was after it (not removed, not followed)" \
+    "$(cat "$ST_DIR/before" 2>/dev/null)" "$(cat "$ST_DIR/after" 2>/dev/null)"
+}
+
+# (a) A dead hook's full stage, the shape bionic-gate-99905 had on disk.
+st_planted dir "a full five-file stage" \
+  'mkdir -m 700 "$OLD"; for i in 1 2 3 4 5; do printf "PLANTED$i" > "$OLD/$i"; done'
+# (b) A regular file.
+st_planted file "a regular file" 'printf PLANTED-FILE > "$OLD"'
+# (c) A FIFO: opening it would block, so a watchdog ends a hung drive at 30 s (a red row,
+# never a hung suite). Its fds go to /dev/null so it holds no pipe of this suite's.
+st_planted fifo "a FIFO" \
+  'mkfifo "$OLD"; { sleep 30; kill -9 $$; } >/dev/null 2>&1 </dev/null & ST_WD=$!'
+# (d) A dangling symlink.
+st_planted link "a dangling symlink" 'ln -s "$TMPDIR/nowhere" "$OLD"'
+
+# (e) THE ROW THAT FAILED ONCE, MADE DETERMINISTIC, through the real hook: §EG-6's own
+# commit refusal with a stage already sitting at the hook's pid.
+ST_HT="$SANDBOX/stage-hook"; mkdir -p "$ST_HT"
+OUT=$(printf '%s' "$(mk_payload "$R_COMMIT" 'git commit -m "step 5"')" | env HOME="$FAKE_HOME" \
+        BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" \
+        CLAUDE_PROJECT_DIR= TMPDIR="$ST_HT" \
+        bash -c 'mkdir -m 700 "$TMPDIR/bionic-gate-$$" || exit 99; printf PLANTED > "$TMPDIR/bionic-gate-$$/1"; exec bash "$0"' "$HOOK" \
+        2>"$SANDBOX/.err")
+ST=$?; ERR=$(cat "$SANDBOX/.err")
+expect_status "STAGE-e1: the real hook, a stage already at its pid: the commit is refused" 2 "$ST"
+expect_contains "STAGE-e2: …in the evidence gate's own words" "this step's evidence line is a placeholder" "$ERR"
+expect_absent "STAGE-e3: …never the malformed line" "own refusal is malformed" "$ERR"
+expect_eq "STAGE-e4: …and the stage it found is still there, untouched" "PLANTED" \
+  "$(cat "$ST_HT"/bionic-gate-*/1 2>/dev/null)"
+
+# (f) A GATE KILLED MID-STAGE, then a refusing gate at the same pid. On its first call the
+# `cat` shim SIGKILLs the shell running the gate (`$KILL_PID`, that subshell's own pid; the
+# diagnosis's E5): in 1.11.0 that call was the gate's first `$(cat <stage>/1)`, with the
+# stage on disk.
+ST_KSHIM="$SANDBOX/killshim"; mkdir -p "$ST_KSHIM"
+printf '%s\n' '#!/bin/bash' \
+  'if [ -n "${KILL_FLAG:-}" ] && [ ! -e "$KILL_FLAG" ]; then : > "$KILL_FLAG"; kill -9 "$KILL_PID"; sleep 1; fi' \
+  'exec /bin/cat "$@"' > "$ST_KSHIM/cat"
+chmod +x "$ST_KSHIM/cat"
+st_drive kill "{ ( export KILL_PID=\$BASHPID; PATH=\"$ST_KSHIM:\$PATH\" KILL_FLAG=\"\$TMPDIR/../killflag\" bionic_fold PreToolUse wall_evidence_gate ); echo \"\$?\" > \"\$TMPDIR/../killed\"; } >/dev/null 2>&1" \
+  "$ST_REFUSING"
+expect_eq "STAGE-k1: control — the first gate really was killed (KILL, 137)" "137" \
+  "$(cat "$ST_DIR/killed" 2>/dev/null)"
+expect_status "STAGE-k2: the next refusing gate at the same pid refuses" 2 "$ST_RC"
+expect_eq "STAGE-k3: …in its own words" "$ST_LINE" "$(st_first)"
+expect_absent "STAGE-k4: …never the malformed line" "own refusal is malformed" "$ST_ERR"
+
+# (g) TEN REFUSING GATES IN A ROW leave nothing of theirs in the temp directory. The planted
+# `keep.me` is the positive on the same listing: the listing reads the directory.
+st_drive ten ': > "$TMPDIR/keep.me"; for i in 1 2 3 4 5 6 7 8 9; do bionic_fold PreToolUse wall_evidence_gate 2>/dev/null; echo "$?" >> "$TMPDIR/../rcs"; done' \
+  "$ST_REFUSING" '/bin/ls -A "$TMPDIR" > "$TMPDIR/../left"'
+expect_eq "STAGE-t1: ten refusing gates each exit 2" "2 2 2 2 2 2 2 2 2 2" \
+  "$(tr '\n' ' ' < "$ST_DIR/rcs" 2>/dev/null)$ST_RC"
+expect_eq "STAGE-t2: …and the temp directory holds only what was there before" "keep.me" \
+  "$(cat "$ST_DIR/left" 2>/dev/null)"
+
+# (h) A TEMP DIRECTORY THAT CANNOT BE WRITTEN, and (i) one that does not exist (S1).
+st_drive ro 'chmod 500 "$TMPDIR"' "$ST_REFUSING" 'chmod 700 "$TMPDIR"'
+expect_status "STAGE-h1: TMPDIR of mode 500: the commit is refused" 2 "$ST_RC"
+expect_eq "STAGE-h2: …with its own first line" "$ST_LINE" "$(st_first)"
+st_drive gone 'export TMPDIR=/nonexistent/x' "$ST_REFUSING"
+expect_status "STAGE-i1: TMPDIR=/nonexistent/x: the commit is refused" 2 "$ST_RC"
+expect_eq "STAGE-i2: …with its own first line" "$ST_LINE" "$(st_first)"
+
+# The same two through the real hook, for two walls that render through `fold_block`: an
+# exit2 wall (protect-main) and the dispatch-voice deny wall (farm-out-reminder, exit 0 on
+# its own channel with JSON on stdout). The deny row compares its stdout with the same
+# call's under a writable TMPDIR, byte for byte.
+run_hook "$(mk_payload "$R_QUIET" 'bash tests/run.sh')"
+ST_DENY_OK="$OUT"
+for ST_BAD in ro gone; do
+  if [ "$ST_BAD" = ro ]; then ST_T="$SANDBOX/stage-hook-ro"; mkdir -p "$ST_T"; chmod 500 "$ST_T"
+  else ST_T=/nonexistent/x; fi
+  run_hook "$(mk_payload "$R_QUIET" 'git push origin main')" TMPDIR="$ST_T"
+  expect_status "STAGE-$ST_BAD-p1: protect-main still refuses a push to main" 2 "$ST"
+  expect_eq "STAGE-$ST_BAD-p2: …with its first line on stderr" \
+    "bionic: push refused — main is a protected branch here (push from your own terminal)" \
+    "$(printf '%s\n' "$ERR" | awk 'NF { print; exit }')"
+  run_hook "$(mk_payload "$R_COMMIT" 'git commit -m "step 5"')" TMPDIR="$ST_T"
+  expect_status "STAGE-$ST_BAD-g1: the evidence gate still refuses the commit" 2 "$ST"
+  expect_contains "STAGE-$ST_BAD-g2: …in its own words" "this step's evidence line is a placeholder" "$ERR"
+  run_hook "$(mk_payload "$R_QUIET" 'bash tests/run.sh')" TMPDIR="$ST_T"
+  expect_status "STAGE-$ST_BAD-d1: farm-out-reminder still denies on its own channel" 0 "$ST"
+  expect_nonempty "STAGE-$ST_BAD-d2: …its JSON is on stdout" "$OUT"
+  expect_eq "STAGE-$ST_BAD-d3: …byte for byte what a writable TMPDIR gets" "$ST_DENY_OK" "$OUT"
+  expect_contains "STAGE-$ST_BAD-d4: …and its user line is on stderr" \
+    "bionic: run refused — this command belongs in a subagent" "$ERR"
+  [ "$ST_BAD" = ro ] && chmod 700 "$ST_T"
+done
+
+# (j) WHEN THE REFUSAL STILL CANNOT REACH THE PARENT, the line says so and where. The stub
+# closes its own stdout, the pipe the refusal travels on, and then refuses.
+st_drive pipe ':' "_eg_body() { exec 1>&-; refuse exit2 commit \"$ST_FACT\" \"$ST_FIX\" \"detail\"; }"
+ST_FALLBACK="bionic: commit refused — the evidence gate could not stage its refusal on its pipe (commit again)"
+expect_status "STAGE-j1: a refusal that cannot be staged still refuses the commit" 2 "$ST_RC"
+expect_eq "STAGE-j2: …and its line says the gate could not stage it, and where" "$ST_FALLBACK" \
+  "$(printf '%s\n' "$ST_ERR" | grep -F 'bionic: commit refused')"
+expect_absent "STAGE-j3: …it does not say malformed" "malformed" "$ST_ERR"
+expect_absent "STAGE-j4: …and does not send the user to doctor" "doctor" "$ST_ERR"
+expect_true "STAGE-j5: …in at most 100 columns" \
+  test "$(printf '%s' "$ST_FALLBACK" | LC_ALL=en_US.UTF-8 awk '{ print length($0) }')" -le 100
+
+# (k) THE MALFORMED LINE KEEPS THE ONE CASE IT NAMES: the library refused the gate's own
+# refusal (four arguments), and its complaint is on the stream above the line.
+st_drive arity ':' "_eg_body() { refuse exit2 commit \"$ST_FACT\" \"$ST_FIX\"; }"
+expect_status "STAGE-m1: a refusal with four arguments still refuses the commit" 2 "$ST_RC"
+expect_eq "STAGE-m2: …the library's complaint comes first" \
+  "bionic: refuse-call refused — refuse takes 5 arguments and got 4 (pass mode verb fact fix detail)" \
+  "$(st_first)"
+expect_contains "STAGE-m3: …and the malformed line follows it" \
+  "bionic: commit refused — the evidence gate's own refusal is malformed" "$ST_ERR"
+
+# (n) THE RECORD'S OWN SHAPE (A-orch-141). The five fields travel as `\036` then the fields
+# with `\037` between them. A field holding either byte shows it as `?` and moves no other
+# field; a field ending in line breaks loses them, as `$(cat <stage>/N)` did; and what the
+# body prints on stdout for another reader reaches the hook's stdout, refusal or not.
+st_drive sep ':' "_eg_body() { refuse exit2 commit \$'the \\037fact\\036 here' \$'fix\\037 it' \$'a \\036detail\\037 line'; }"
+expect_status "STAGE-n1: a refusal whose fields hold the separators still refuses" 2 "$ST_RC"
+expect_eq "STAGE-n2: …each separator byte shows as ?, and no field moves into another" \
+  "bionic: commit refused — the ?fact? here (fix? it)" "$(st_first)"
+expect_contains "STAGE-n3: …the detail keeps its words too" "a ?detail? line" "$ST_ERR"
+st_drive nl ':' "_eg_body() { refuse exit2 commit \$'$ST_FACT\\n\\n' \$'$ST_FIX\\n' \$'the detail\\n\\n\\n'; }"
+expect_status "STAGE-n4: fields ending in line breaks still refuse" 2 "$ST_RC"
+expect_eq "STAGE-n5: …and lose them, as the files did" "$ST_LINE" "$(st_first)"
+expect_eq "STAGE-n6: …the detail too: it is the last line on the stream" "the detail" \
+  "$(printf '%s\n' "$ST_ERR" | awk 'NF { l = $0 } END { print l }')"
+st_drive out ':' "_eg_body() { printf 'BODY-LINE-1\\nBODY-LINE-2\\n'; refuse exit2 commit \"$ST_FACT\" \"$ST_FIX\" \"d\"; }"
+expect_status "STAGE-n7: a body that prints on stdout and then refuses still refuses" 2 "$ST_RC"
+expect_eq "STAGE-n8: …and what it printed is on the hook's stdout, whole" \
+  "BODY-LINE-1
+BODY-LINE-2" "$ST_OUT"
+expect_eq "STAGE-n9: …beside its refusal on stderr" "$ST_LINE" "$(st_first)"
+st_drive outq ':' "_eg_body() { printf 'BODY-QUIET\\n'; exit 0; }"
+expect_status "STAGE-n10: a body that prints on stdout and refuses nothing exits 0" 0 "$ST_RC"
+expect_eq "STAGE-n11: …and what it printed is on the hook's stdout" "BODY-QUIET" "$ST_OUT"
+
+# (l) THE PATH THAT REFUSES NOTHING forks no external command and leaves no file, counted the
+# way tests/hook-latency.test.sh counts (`bash -x`, one `+` line per external command). The
+# refusing drive is the positive on the same counter: it forks at least the fold's `mktemp`.
+ST_EXT='^\++ (jq|grep|awk|sed|cut|tr|git|date|stat|find|sort|uniq|head|tail|wc|mkdir|rm|mktemp|cat|ls|mv|cp|ln)( |$)'
+ST_X=-x st_drive quiet ': > "$TMPDIR/keep.me"' "$ST_SILENT" '/bin/ls -A "$TMPDIR" > "$TMPDIR/../left"'
+expect_status "STAGE-q1: the silent gate exits 0" 0 "$ST_RC"
+expect_eq "STAGE-q2: …forking no external command" "0" \
+  "$(printf '%s\n' "$ST_ERR" | grep -cE "$ST_EXT" || true)"
+expect_eq "STAGE-q3: …and leaving no file" "keep.me" "$(cat "$ST_DIR/left" 2>/dev/null)"
+ST_X=-x st_drive quietpos ':' "$ST_REFUSING"
+expect_true "STAGE-q4: control — the same counter sees the refusing gate's forks" \
+  test "$(printf '%s\n' "$ST_ERR" | grep -cE "$ST_EXT" || true)" -ge 1
 
 # ---------------------------------------------------------------------------
 section "12 — the two-repos day: a CLAUDE_PROJECT_DIR that is no project may not disarm the walls (critic Issue 2, A-85)"
