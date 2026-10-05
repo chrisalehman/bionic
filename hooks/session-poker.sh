@@ -975,7 +975,7 @@ tick_digest_file() {  # <session-id> -> absolute path, or empty
 # so a re-arm does not raise them a second time. `change=` is the fingerprint of the plan's
 # `## Tasks` statuses and its ready set (wave-26 T15; D16): the task-list duty is owed only when
 # it moved, so `arm` does not carry it and the first tick after an arm compares against nothing.
-write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows> [<facts state>]]]]]] -> 0 written, 1 not
+write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows> [<facts state> [<reconcile cause>]]]]]]] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
   [ -n "$f" ] || return 1
@@ -1014,6 +1014,11 @@ write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <du
     # `proof:review` the same answer on this tick's turn, as it hands the head above. One line.
     if [ -n "${12:-}" ]; then
       printf 'facts_state=%s\n' "$(printf '%s' "${12}" | tr '\n' ' ')"
+    fi
+    # WHY THE RECONCILE IS OWED, when the plan moved (wave-27 T37): `step4` or `grew`, read by the
+    # turn-end wall (lib/stop.sh `stop_turn_facts`) so its refusal gives the tick's own cause.
+    if [ -n "${13:-}" ]; then
+      printf 'reconcile=%s\n' "${13}"
     fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
@@ -6641,7 +6646,7 @@ PF_OTHER_LIST
       fi
       rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
-        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" \
+        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
       exit "$rc"
@@ -6673,10 +6678,10 @@ PF_OTHER_LIST
     # band or a roster row's liveness prints in full and owes nothing. `TICK_CHANGE` is that
     # fingerprint, kept in the digest as `change=` beside the whole-decision hash and entered
     # into it too, so a tick that says `unchanged` has, by construction, nothing to reconcile.
-    # A QUIET tick owes nothing either way: with a row open it prints WAITING, which asks for
-    # nothing, and with none open there is nothing running to reconcile against (A-orch-4). The
-    # stop wall's collector reads this line, so a turn is not refused for a chore with nothing
-    # behind it.
+    # A QUIET tick owes no reconcile for a status move: with a row open it prints WAITING, which
+    # asks for nothing, and with none open there is nothing running to reconcile against
+    # (A-orch-4). It does owe one when the plan MOVED (`tick_plan_moved`, below). The stop wall's
+    # collector reads this line, so a turn is not refused for a chore with nothing behind it.
     tick_change_rows() {  # -> the plan's id|status lines in table order, then its ready set
       units_rows "$SCHED_PLAN" 2>/dev/null | awk -F'\t' 'NF { print $1 "|" $10 }'
       printf 'ready=%s\n' "$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
@@ -6685,13 +6690,20 @@ PF_OTHER_LIST
     # task list, so this line is the only wall the rule has: the duty is also owed when the
     # plan's `current:` was 3 at the last digest and is 4 now, or its row count has grown, and
     # it is owed on a QUIET tick too (a plan at approval has nothing open yet).
+    # WHICH MOVE IT WAS (wave-27 T37; review pass 8 F2) is TICK_RECONCILE, `step4` or `grew`: the
+    # RECONCILE line says it and names the rebuild, and the digest keeps it as `reconcile=` so
+    # the turn-end wall's refusal gives the same cause. A move into Step 4 is named first when
+    # the table also grew: the rebuild it asks for covers the new rows.
+    TICK_RECONCILE=""
     tick_plan_moved() {  # -> 0 when the digest's last reading of the plan is behind this one
       local pc pr
+      TICK_RECONCILE=""
       pc="$(tick_digest_field "$TICK_DIGEST_FILE" plan_current)"
       pr="$(tick_digest_field "$TICK_DIGEST_FILE" plan_rows)"
-      { [ "$pc" = 3 ] && [ "$TICK_PLAN_CUR" = 4 ]; } && return 0
+      if [ "$pc" = 3 ] && [ "$TICK_PLAN_CUR" = 4 ]; then TICK_RECONCILE=step4; return 0; fi
       case "$pr" in ''|*[!0-9]*) return 1 ;; esac
-      [ -n "$TICK_PLAN_ROWS" ] && [ "$TICK_PLAN_ROWS" -gt "$pr" ]
+      [ -n "$TICK_PLAN_ROWS" ] && [ "$TICK_PLAN_ROWS" -gt "$pr" ] || return 1
+      TICK_RECONCILE=grew
     }
     tick_conclude() {  # <decision before the gate>
       local cur="" prev=""
@@ -6754,12 +6766,18 @@ PF_OTHER_LIST
       fi
       TICK_SINCE="$(iso_now)"
       TICK_DUTY=none
-      if { [ "$TICK_DECIDED" != QUIET ] && [ "$TICK_CHANGE" != "$(tick_digest_field "$TICK_DIGEST_FILE" change)" ]; } \
-         || tick_plan_moved; then
+      # THE DUTY IS PRINTED (wave-26 T32; review-6 F2). It used to live only in the digest
+      # file, so the Patrol prompt asked for the refresh on a change the model could not see.
+      # The prompt and the stop wall's refusal both name this line. A plan move is asked first,
+      # in its own words (wave-27 T37): a status change beside it is covered by the rebuild.
+      if tick_plan_moved; then
         TICK_DUTY=owed
-        # THE DUTY IS PRINTED (wave-26 T32; review-6 F2). It used to live only in the digest
-        # file, so the Patrol prompt asked for the refresh on a change the model could not see.
-        # The prompt and the stop wall's refusal both name this line.
+        case "$TICK_RECONCILE" in
+          step4) say "RECONCILE — the plan moved from approval into Step 4 since the last tick: TaskList, and rebuild the task list in execution order (delete every pending entry and recreate them)" ;;
+          *)     say "RECONCILE — the ## Tasks table grew since the last tick: TaskList, and rebuild the task list in execution order (delete the pending entries after the new row and recreate them)" ;;
+        esac
+      elif [ "$TICK_DECIDED" != QUIET ] && [ "$TICK_CHANGE" != "$(tick_digest_field "$TICK_DIGEST_FILE" change)" ]; then
+        TICK_DUTY=owed
         say "RECONCILE — a ## Tasks status or the ready set changed since the last tick: TaskList, and bring the task list in line with the plan"
       fi
       tick_write_orders
