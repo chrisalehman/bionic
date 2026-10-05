@@ -7,8 +7,10 @@
     the picture is composed text, which is what lets tests/cross-gate-agreement.test.sh §V read it.
     Pinned there against the code it draws:
       * the three class="version-pin" renderings == hooks' SUPPORTED_SDLC_VERSION
-    and by tests/docs-pins.test.sh W27-T53-S3f:
-      * the class="hook-entry" chips' data-hook set == the scripts hooks/hooks.json registers
+    and by tests/docs-pins.test.sh W27-T53-S3f and W27-T60-S1:
+      * one class="hook-entry" chip per script a registration runs, on its event, matcher and
+        argument (data-event, data-matcher, data-hook, data-arg) == hooks/hooks.json
+      * the header's timeouts == the timeouts hooks/hooks.json registers
 
     GROUPING CONTRACT (revised 2026-08-18). The page used to be split into an
     ALWAYS ON lane and an ARMED BY THE SKILL lane. That split named the registration
@@ -24,7 +26,7 @@
 
   <!-- ============================ header ============================ -->
   <text x="40" y="52" font-size="26" font-weight="700" fill="#16191d">Hook chain — what runs, what it stops, and what makes it inert</text>
-  <text x="40" y="78" font-size="14" fill="#626b76">Ten scripts, every one registered in hooks/hooks.json. Every entry is rooted at <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">${CLAUDE_PLUGIN_ROOT}</tspan> and runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 10</tspan>.</text>
+  <text x="40" y="78" font-size="14" fill="#626b76">Ten scripts, every one registered in hooks/hooks.json. Every entry is rooted at <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">${CLAUDE_PLUGIN_ROOT}</tspan> and runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 10</tspan>; <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">dispatch-preflight.sh</tspan> runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 15</tspan>.</text>
   <line x1="40" y1="96" x2="1360" y2="96" stroke="#dde1e6" stroke-width="1"/>
 
   <!-- ============================ the grouping criterion ============================ -->
@@ -216,7 +218,7 @@
   <text x="746" y="1136" font-size="10.5" fill="#3a424c">from current: 5 onward — walk-artifact: resolves to a real file under</text>
   <text x="746" y="1152" font-size="10.5" fill="#3a424c">&lt;docs-root&gt;/record/ and names the AC (unless walk: exempt)</text>
   <text x="728" y="1168" font-size="10.5" font-weight="700" fill="#3a424c">8</text>
-  <text x="746" y="1168" font-size="10.5" fill="#3a424c">from current: 6 onward — one fact per owed question at the head, or its waived: line</text>
+  <text x="746" y="1168" font-size="10.5" fill="#3a424c">from current: 6 onward — one fact per owed question present, or its waived: line</text>
   <text x="728" y="1186" font-size="10.5" fill="#16191d">Valid → the commit proceeds. Otherwise → exit 2, and git never runs.</text>
   <text x="728" y="1202" font-size="10.5" fill="#175cd3">LOG-ONLY: the epic merge-target check, and the intent-scoped Step-5 keys for</text>
   <text x="728" y="1216" font-size="10.5" fill="#175cd3">refactor (behavior-preservation · compat-matrix · revert-plan) and tune (baseline · target · re-measure).</text>

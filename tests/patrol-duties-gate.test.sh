@@ -272,6 +272,27 @@ expect_block() {  # <label> <must-contain> [must-not-contain]
   ok "$1"
 }
 
+# THE ROW LIST, NOT THE WHOLE TEXT (wave-27 T37; review pass 42 S1, A-orch-112). The fill refusal
+# prints `bash <hooks dir>/session-poker.sh decline <ids> …`, so a must-not over the whole reason
+# also reads the checkout's path, and a tree whose path holds `T20` turned 69c red. A row that says
+# an id is NOT named reads the ids of the refusal's `decline` operand and matches one as a whole
+# word there. The list must be non-empty, so the absence is read off a real list.
+refusal_rows() {  # -> the ids the fill refusal's decline operand names, space-joined
+  reason_of | /usr/bin/grep -o "session-poker\.sh'\{0,1\} decline [A-Za-z0-9_.,-]*" | head -1 \
+    | sed 's/.* decline //' | tr ',' ' '
+}
+expect_block_unnamed() {  # <label> <id the refusal's row list must not hold>
+  local d rows; d=$(decision_of); rows=$(refusal_rows)
+  if [ "$HOOK_RC" -ne 0 ] || [ "$d" != "block" ]; then
+    no "$1" "rc=$HOOK_RC decision=<$d> expected a block; stdout=<$HOOK_OUT>"; return
+  fi
+  if [ -z "$rows" ]; then no "$1" "the refusal names no decline row list: $(reason_of)"; return; fi
+  case " $rows " in
+    *" $2 "*) no "$1" "the row list <$rows> names <$2>"; return ;;
+  esac
+  ok "$1"
+}
+
 LA_MISSING="ListAgents"
 TL_MISSING="TaskList or a plan-ledger write"
 
@@ -1384,6 +1405,16 @@ u_tick "$d"; both_duties "$d"; sd_stood "$d" W-BETA; u_tick_out "$d" "$(sd_line 
 fire "$d"; expect_block "58c: a gap and a stand-down together name the row" "T2"
 fire "$d"; expect_block "58d: …and the agent, in the same refusal" "W-BETA"
 
+# THE ROWS' OWN SHAPE FROM A PATH THAT HOLDS THEIR IDS (wave-27 T37; review pass 42 S1). A copy of
+# this tree's hooks and library under a directory named for T20, T8 and T13, fired as `fire` does.
+PD_IDDIR="$(mktemp -d)/w27-T20-T8-T13"
+mkdir -p "$PD_IDDIR/payload"
+cp -R "$BIONIC_HOOKS_DIR" "$PD_IDDIR/hooks" && cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$PD_IDDIR/payload/scripts"
+pd_idhook_fire() {  # <project> — `fire` with the copied hook
+  local keep="$HOOK"; HOOK="$PD_IDDIR/hooks/stop.sh"; fire "$1"; HOOK="$keep"
+}
+require_helpers refusal_rows expect_block_unnamed pd_idhook_fire
+
 # 69: THE RUNG, NOT THE CEILING (Step-6 review R1, wave-18 T2b). Three rows are ready
 # (T2, T3, T20) against a declared ceiling of 8 — the pre-fix wall would have named all
 # three. LOADED_RING pins a critical-band sample (free_pct=10, inside [0, 12)) against
@@ -1396,7 +1427,9 @@ u_prompt "$d" "anything else ready?"
 export BIONIC_PRESSURE_RING="$LOADED_RING" BIONIC_NOW_EPOCH="1700000000"
 fire "$d"; expect_block "69a: a rung pinned below the ceiling caps the refusal at rung - open" "T2"
 fire "$d"; expect_block "69b: …and the second row, at the rung's width" "T3"
-fire "$d"; expect_block "69c: …and never the ceiling's wider count — T20 stays unnamed" "session-poker.sh decline " "T20"
+fire "$d"; expect_block_unnamed "69c: …and never the ceiling's wider count — T20 stays unnamed" "T20"
+pd_idhook_fire "$d"; expect_block_unnamed "69c2: …the same, fired from a hooks directory whose path holds T20, T8 and T13" "T20"
+expect_contains "69c3: …whose refusal carries that path (so a whole-text must-not would read T20)" "$PD_IDDIR" "$(reason_of)"
 export BIONIC_PRESSURE_RING="$CLEAR_RING" BIONIC_NOW_EPOCH="1700000000"
 
 # 69d: THE PAIRED CASE, rung = ceiling. The same three-ready-row table, back on the clear
@@ -1415,7 +1448,8 @@ LEDGER_INTEGRATE_8='| T8 | 8 | integrate | the merge, a gate act | implementor |
 d=$(make_env_ledger 5 "$LEDGER_LANDED" "$LEDGER_REVIEW_6" "$LEDGER_INTEGRATE_8")
 u_prompt "$d" "how is Verify going?"
 fire "$d"; expect_block "69e: AC-5.1 at current: 5 a ready Step-6 row left undispatched is refused, naming it" "T6"
-fire "$d"; expect_block "69f: Δ6 …and the Step-8 integrate row is never named at Step 5" "session-poker.sh decline " "T8"
+fire "$d"; expect_block_unnamed "69f: Δ6 …and the Step-8 integrate row is never named at Step 5" "T8"
+pd_idhook_fire "$d"; expect_block_unnamed "69f2: …the same, fired from the hooks directory whose path holds T8" "T8"
 d=$(make_env_ledger 5 "$LEDGER_LANDED" "$LEDGER_INTEGRATE_8")
 u_prompt "$d" "how is Verify going?"
 fire "$d"; expect_allow "69g: Δ6 a ledger whose only pending row is a gate act ahead of its step is not a gap"
@@ -1496,7 +1530,8 @@ fire "$d"; expect_allow "69h: C3 at current: 5 a ledger whose only pending row i
 d=$(make_env_ledger 5 "$LEDGER_LANDED" "$LEDGER_BED_5" "$LEDGER_REVIEW_6" "$LEDGER_RELEASE_7")
 u_prompt "$d" "how is Verify going?"
 fire "$d"; expect_block "69i: …beside a ready Step-6 review the duty names the review" "T6"
-fire "$d"; expect_block "69j: …and never the held release" "session-poker.sh decline " "T13"
+fire "$d"; expect_block_unnamed "69j: …and never the held release" "T13"
+pd_idhook_fire "$d"; expect_block_unnamed "69j2: …the same, fired from the hooks directory whose path holds T13" "T13"
 d=$(make_env_ledger 7 "$LEDGER_LANDED" "$LEDGER_BED_5" "$LEDGER_RELEASE_7")
 u_prompt "$d" "where are we?"
 fire "$d"; expect_block "69k: at current: 7 the release is due, and an undispatched release is refused, naming it" "T13"
