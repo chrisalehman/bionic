@@ -87,7 +87,8 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
      `adversarial`, the reviewer for `structure`;
    - and the one-mind case, the critic holding all three questions, on every sample. It is
      named `one-mind` wherever a reader's role is written below (record paths, headings, result
-     lines), so it is never taken for the critic the dealing gives `adversarial`.
+     lines), so it is never taken for the critic the dealing gives `adversarial`. The agent
+     dispatched is still `bionic:critic`: `one-mind` is only how the sitting names that dispatch.
 
    For `clean`, each of the three roles takes its own question, and the one-mind critic takes
    all three.
@@ -165,7 +166,8 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    hashes from step 1. A line opening with `##` that is not a header of that form is red
    wherever it is in the file. The suite reads the last section, by file order: it is red
    unless that section's hashes match the shipped files, every sample has a `result` line and
-   no other name has one, every sample has a line from each role dealt on each question its key
+   no other name has one, every line's role is `one-mind` or the role dealt its own question,
+   every sample has a line from each role dealt on each question its key
    names (the red line names the sample and the role missing; the one-mind critic's line alone
    does not complete a sample), no line is for a question its sample's key does not name,
    every `result` line reads `met`, no two lines for one sample and question disagree, and
