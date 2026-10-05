@@ -1,9 +1,10 @@
 #!/bin/bash
-# Tests for tests/lib/name-scan.sh — this project's name scan (wave-27 T3; spec D13,
+# Tests for tests/lib/name-scan.sh — this project's name scan (wave-27 T3; spec D13 as amended,
 # AC-6.3, AC-6.4, AC-6.5).
 #
-# THE SCAN READS WHAT A PUSH WOULD PUBLISH: the files as committed at the head, the commit
-# messages in base..head, and the message of an annotated tag at the head. Three sections:
+# THE SCAN READS WHAT A PUSH WOULD PUBLISH: every blob and path at the head, every blob and path
+# the range introduces, each range commit's message, author and committer, and every tag that
+# points into the range. A hit is located by numbers and object ids only. Sections:
 #
 #   §PUB    a string planted in a committed file, a commit message or an annotated tag is a
 #           hit; one in the dirty working tree only is not read (AC-6.3).
@@ -16,21 +17,41 @@
 #           position, never by the path (T32 finding 1).
 #   §BASE   at a head that carries the newest tag the default base is the tag before it
 #           (T32 finding 2).
-#   §LIST   a list line is stripped of edge blanks, a CR and a BOM before use (T32 finding 3).
-#   §TRACE  an inherited GIT_TRACE* file never receives an entry (T32 finding 4).
+#   §LIST   a list line is stripped of edge blanks, a CR and a BOM before use (T32 finding 3,
+#           T52 finding 9).
+#   §TRACE  an inherited GIT_TRACE* file never receives an entry (T32 finding 4, T52 finding 11).
 #   §BASH32 the whole scan under /bin/bash (3.2) prints the lines the PATH bash prints.
 #   §ARGV   no entry is a word of any command line, and git config tracing records none.
+#   §BYTES  a binary blob, a `-diff`/`binary` file and a symlink's target are read; an object
+#           that cannot be read is a refusal (T52 finding 1).
+#   §RANGE  a blob or path only inside the range, each commit's author and committer, and every
+#           tag name and message pointing into the range are read (T52 finding 2).
+#   §SEP    a path or message holding a control byte, a newline, a tab or a colon is read whole,
+#           located, and never printed (T52 findings 3, 4).
+#   §CASE   a non-ASCII entry is found in any case under any caller's locale, and never printed;
+#           no UTF-8 locale with a non-ASCII entry is a refusal (T52 finding 5).
+#   §XTRACE `bash -x` on the scan prints no entry (T52 finding 6).
+#   §CEIL   the caller's git discovery variables cannot let a list inside a checkout through
+#           (T52 finding 10).
+#   §SITES  the power check plants every entry at every site; each site blinded on a doctored
+#           copy refuses the run (T52, the power check).
+#   §COST   one pass for the whole list, and a 500-entry clean scan of this repository inside
+#           its time ceiling (T52 finding 13).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): every
 # repository is a real `git init` under a mktemp directory, with real commits, real
-# lightweight and annotated tags and a real dirty working tree — nothing is a mock of git.
-# The one seam is a `git` shim on PATH that execs the real git and swallows ONE subcommand's
-# output; it exists to make a scan site blind on purpose, so the power check has something to
-# refuse. The entries are made-up strings; no real list is read. SYNTHESIZED: the strings.
+# lightweight and annotated tags, real symlinks, binary files and a real dirty working tree —
+# nothing is a mock of git. Two seams: a `git` shim on PATH that execs the real git and
+# swallows ONE subcommand's output (it makes a scan site blind on purpose, so the power check
+# has something to refuse), and a `locale` shim that reports no UTF-8 locale. §SITES and
+# §TRACE run doctored COPIES of the scan in a temp directory, never the tracked file. §COST
+# reads this repository itself, read-only. The entries are made-up strings; no real list is
+# read. SYNTHESIZED: the strings.
 #
 # ANTI-VACUITY (declared, per the same file, "Anti-vacuity"): every absence row sits beside a
 # positive row on the SAME run and the SAME extractor (the HIT lines of one output); the
-# blind-site rows are paired with the same fixture run through a pass-through shim.
+# blind-site rows are paired with the same fixture run through a pass-through shim or the
+# undoctored copy, and every doctored copy is shown to differ from the scan and to parse.
 #
 # Usage: bash tests/name-scan.test.sh
 
@@ -63,7 +84,7 @@ expect_false "setup: the list directory is outside every checkout" git -C "$TMP/
 
 # fx_repo <dir> — a repository with one commit, tagged v0.1 (lightweight)
 fx_repo() {
-  mkdir -p "$1" && git -C "$1" init -q --template= && 
+  mkdir -p "$1" && git -C "$1" init -q --template= &&
   git -C "$1" config commit.gpgsign false && git -C "$1" config tag.gpgsign false &&
   printf 'base\n' > "$1/a.txt" && git -C "$1" add -A && git -C "$1" commit -q -m "first" &&
   git -C "$1" tag v0.1
@@ -72,12 +93,26 @@ fx_repo() {
 fx_commit() { git -C "$1" add -A && git -C "$1" commit -q --allow-empty -m "$2"; }
 # fx_list <name> <line>... — a list file outside every checkout; prints its path
 fx_list() { local f="$TMP/lists/$1"; shift; printf '%s\n' "$@" > "$f"; printf '%s' "$f"; }
-# scan <repo> <list> [VAR=val ...] — sets OUT (stdout+stderr) and RC
-scan() {
-  local repo="$1" list="$2"; shift 2
-  OUT="$(cd "$repo" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD "$@" bash "$SCAN" "$list" 2>&1)"; RC=$?
+# scanx <script> <repo> <list> [VAR=val ...] — sets OUT (stdout+stderr) and RC
+scanx() {
+  local script="$1" repo="$2" list="$3"; shift 3
+  OUT="$(cd "$repo" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD "$@" bash "$script" "$list" 2>&1)"; RC=$?
 }
+# scan <repo> <list> [VAR=val ...] — the tracked scan
+scan() { scanx "$SCAN" "$@"; }
 hits() { printf '%s\n' "$OUT" | grep '^HIT ' || true; }
+# s12 <repo> <rev> — the first 12 hex digits of an object id
+s12() { git -C "$1" rev-parse "$2" | cut -c1-12; }
+# pos_of <repo> <substring> — the 1-based position, in `git ls-tree -r -z --name-only HEAD`
+# order, of the first path holding <substring> as committed (records split on NUL)
+pos_of() {
+  local p n=0
+  while IFS= read -r -d '' p; do
+    n=$((n + 1)); case "$p" in *"$2"*) printf '%s' "$n"; return 0 ;; esac
+  done < <(git -C "$1" ls-tree -r -z --name-only HEAD)
+}
+# count_in <text> <needle> — lines of <text> holding <needle>, case-insensitively
+count_in() { printf '%s\n' "$1" | grep -c -i -F -- "$2" || true; }
 # shim <name> <arg> — a git on PATH that swallows every call carrying <arg> as an argument
 shim() {
   local d="$TMP/shim-$1"; mkdir -p "$d"
@@ -89,6 +124,15 @@ exec $(command -v git) "\$@"
 SH
   chmod +x "$d/git"; printf '%s' "$d"
 }
+# doctor <name> <from> <to> — a copy of the scan with the first literal <from> replaced by <to>
+# (cut and joined by hand: a pattern substitution's replacement keeps its quotes in some bashes);
+# prints its path
+doctor() {
+  local f="$TMP/doctored/$1.sh" src; mkdir -p "$TMP/doctored"
+  src="$(cat "$SCAN")"
+  case "$src" in *"$2"*) src="${src%%"$2"*}$3${src#*"$2"}" ;; esac
+  printf '%s\n' "$src" > "$f"; printf '%s' "$f"
+}
 
 section "§PUB — what a push would publish"
 
@@ -98,8 +142,8 @@ printf 'x\nsee ZQ-ALPHA-7731 here\n' > "$R/notes.txt"; fx_commit "$R" "add notes
 L="$(fx_list pub1 '# a comment' '' "$E1" "$E4")"
 scan "$R" "$L"
 expect_status "PUB1: a committed file with an entry exits 1" 1 "$RC"
-expect_regex "PUB1: the hit names the entry's line in the list and the file:line" \
-  '^HIT entry=3 at file notes\.txt:2$' "$(hits)"
+expect_eq "PUB1: the hit names the entry's line in the list and the blob and line" \
+  "HIT entry=3 at blob $(s12 "$R" HEAD:notes.txt) line 2" "$(hits)"
 expect_no_regex "PUB1: an entry that is nowhere is not a hit (same output)" 'entry=4' "$(hits)"
 
 # PUB2 a commit message inside base..head, and one before base
@@ -107,20 +151,20 @@ R="$TMP/pub2"; fx_repo "$R"
 git -C "$R" commit -q --allow-empty -m "old note $E2"
 git -C "$R" tag -f v0.2 >/dev/null 2>&1
 fx_commit "$R" "later note $E3"
-SHA="$(git -C "$R" rev-parse HEAD | cut -c1-12)"
+SHA="$(s12 "$R" HEAD)"
 L="$(fx_list pub2 "$E2" "$E3")"
 scan "$R" "$L"
 expect_status "PUB2: an in-range message exits 1" 1 "$RC"
-expect_contains "PUB2: the in-range message is a hit, at its commit" "HIT entry=2 at message $SHA" "$(hits)"
+expect_contains "PUB2: the in-range message is a hit, at its commit" "HIT entry=2 at commit $SHA message" "$(hits)"
 expect_no_regex "PUB2: a message older than the newest tag is not read (same output)" 'entry=1' "$(hits)"
 
 # PUB3 the default base is the newest tag reachable from the head; with no tag, all history
 scan "$R" "$L" BIONIC_CHECK_BASE=v0.1
-expect_regex "PUB3: an explicit base widens the range, and the older message is a hit" 'entry=1 at message' "$(hits)"
+expect_regex "PUB3: an explicit base widens the range, and the older message is a hit" 'entry=1 at commit [0-9a-f]{12} message' "$(hits)"
 R="$TMP/pub3"; mkdir -p "$R"; git -C "$R" init -q --template=; git -C "$R" config commit.gpgsign false
 git -C "$R" commit -q --allow-empty -m "root $E2"
 scan "$R" "$(fx_list pub3 "$E2")"
-expect_regex "PUB3: with no tag at all, the whole history is in range" 'entry=1 at message' "$(hits)"
+expect_regex "PUB3: with no tag at all, the whole history is in range" 'entry=1 at commit [0-9a-f]{12} message' "$(hits)"
 
 # PUB4 an annotated tag at the head, and one elsewhere
 R="$TMP/pub4"; fx_repo "$R"
@@ -130,8 +174,8 @@ git -C "$R" tag -a v0.2 -m "release $E1"
 L="$(fx_list pub4 "$E1" "$E2")"
 scan "$R" "$L" BIONIC_CHECK_BASE=v0.1
 expect_status "PUB4: an annotated tag at the head exits 1" 1 "$RC"
-expect_regex "PUB4: its message is a hit" '^HIT entry=1 at tag-message' "$(hits)"
-expect_no_regex "PUB4: a tag message elsewhere is not read (same output)" 'entry=2' "$(hits)"
+expect_eq "PUB4: its message is a hit, at the tag object" "HIT entry=1 at tag $(s12 "$R" v0.2)" "$(hits)"
+expect_no_regex "PUB4: a tag message outside the range is not read (same output)" 'entry=2' "$(hits)"
 
 # PUB5 the dirty working tree is not read
 R="$TMP/pub5"; fx_repo "$R"
@@ -139,7 +183,7 @@ printf 'committed %s\n' "$E2" > "$R/c.txt"; fx_commit "$R" "add c"
 printf 'dirty %s\n' "$E1" >> "$R/a.txt"; printf 'new %s\n' "$E1" > "$R/untracked.txt"
 L="$(fx_list pub5 "$E1" "$E2")"
 scan "$R" "$L"
-expect_regex "PUB5: the committed entry is a hit" '^HIT entry=2 at file c\.txt:1$' "$(hits)"
+expect_eq "PUB5: the committed entry is a hit" "HIT entry=2 at blob $(s12 "$R" HEAD:c.txt) line 1" "$(hits)"
 expect_no_regex "PUB5: an entry only in the working tree is not read (same output)" 'entry=1' "$(hits)"
 
 # PUB6 BIONIC_CHECK_HEAD picks the tree
@@ -151,16 +195,16 @@ expect_status "PUB6: at the default head the entry is found" 1 "$RC"
 scan "$R" "$L" BIONIC_CHECK_HEAD=HEAD~1
 expect_status "PUB6: at the earlier head, whose tree lacks it, the scan is clean" 0 "$RC"
 
-# PUB7 a file it cannot read as text is named, an empty file is not
+# PUB7 a binary file is read like any other, and an empty file is no hit
 R="$TMP/pub7"; fx_repo "$R"
 printf 'bin\0%s\n' "$E1" > "$R/blob.bin"; : > "$R/empty.txt"; printf '%s\n' "$E2" > "$R/t.txt"
 fx_commit "$R" "files"
 L="$(fx_list pub7 "$E1" "$E2")"
 scan "$R" "$L"
-expect_regex "PUB7: the text file's entry is a hit" '^HIT entry=2 at file t\.txt:1$' "$(hits)"
-expect_contains "PUB7: the binary file is named as unread" "UNREAD blob.bin" "$OUT"
-expect_absent "PUB7: an empty file is not named as unread" "UNREAD empty.txt" "$OUT"
-expect_no_regex "PUB7: nothing is claimed about the entry in the binary file" 'entry=1' "$(hits)"
+expect_contains "PUB7: the text file's entry is a hit" "HIT entry=2 at blob $(s12 "$R" HEAD:t.txt) line 1" "$(hits)"
+expect_contains "PUB7: the binary file's entry is a hit too" "HIT entry=1 at blob $(s12 "$R" HEAD:blob.bin) line 1" "$(hits)"
+expect_absent "PUB7: no file is set aside as unread" "UNREAD" "$OUT"
+expect_contains "PUB7: (same run) the tally is printed" "entries=2 hits=2" "$OUT"
 
 section "§POWER — refusals, none, and a clean result that has power"
 
@@ -196,21 +240,24 @@ expect_status "POW3: and entries found nowhere in the repository exit 0" 0 "$RC"
 # POW4 outside a repository
 scan "$TMP/scratch" "$(fx_list pow4 "$E1")"
 expect_status "POW4: run outside any repository is refused" 2 "$RC"
-# POW5 a blind scan site means no power
+# POW5 a blind git call means no power: each shim swallows one of the scan's git calls
 L="$(fx_list pow5 "$E4" "$E3")"
 PASS_SHIM="$(shim pass "--never-an-argument")"
 scan "$R" "$L" PATH="$PASS_SHIM:$PATH"
 expect_status "POW5: through a pass-through shim the clean scan exits 0 (control)" 0 "$RC"
-GREP_BLIND="$(shim grep grep)"
-scan "$R" "$L" PATH="$GREP_BLIND:$PATH" SHIM_RC=1
-expect_status "POW5: blind file scan — no power, exit 2, not a clean 0" 2 "$RC"
+CAT_BLIND="$(shim catfile cat-file)"
+scan "$R" "$L" PATH="$CAT_BLIND:$PATH"
+expect_status "POW5: blind object reader (cat-file) — exit 2, not a clean 0" 2 "$RC"
 LOG_BLIND="$(shim log log)"
 scan "$R" "$L" PATH="$LOG_BLIND:$PATH"
-expect_status "POW5: blind message scan — no power, exit 2" 2 "$RC"
-TAG_BLIND="$(shim tag --points-at)"
-scan "$R" "$L" PATH="$TAG_BLIND:$PATH"
-expect_status "POW5: blind tag scan — no power, exit 2" 2 "$RC"
-scan "$R" "$(fx_list pow5b "$E1" "$E4")" PATH="$GREP_BLIND:$PATH" SHIM_RC=1
+expect_status "POW5: blind range path reader (log) — no power, exit 2" 2 "$RC"
+REV_BLIND="$(shim revlist rev-list)"
+scan "$R" "$L" PATH="$REV_BLIND:$PATH"
+expect_status "POW5: blind range object list (rev-list) — no power, exit 2" 2 "$RC"
+REF_BLIND="$(shim refs for-each-ref)"
+scan "$R" "$L" PATH="$REF_BLIND:$PATH"
+expect_status "POW5: blind tag list (for-each-ref) — no power, exit 2" 2 "$RC"
+scan "$R" "$(fx_list pow5b "$E1" "$E4")" PATH="$CAT_BLIND:$PATH" SHIM_RC=1
 expect_status "POW5: a hit does not outrank a blind scan — exit 2 (the power check runs first)" 2 "$RC"
 
 section "§PATH — a path name is published too (T32 finding 1)"
@@ -252,15 +299,15 @@ scan "$R" "$L"
 expect_regex "PATH3: the committed path is a hit" '^HIT entry=1 at path #[0-9]+$' "$(hits)"
 expect_no_regex "PATH3: a path only in the working tree is not read (same output)" 'entry=2' "$(hits)"
 
-# PATH4 the power check plants an entry in a file NAME; a path scan that cannot find it refuses
+# PATH4 the power check plants an entry in a file NAME; a path list that cannot find it refuses
 R="$TMP/path4"; fx_repo "$R"
 L="$(fx_list path4 "$E4" "$E3")"
-LS_BLIND="$(shim lstree ls-tree)"
+LS_BLIND="$(shim lstree --name-only)"
 scan "$R" "$L" PATH="$PASS_SHIM:$PATH"
 expect_status "PATH4: through a pass-through shim the clean scan exits 0 (control)" 0 "$RC"
 scan "$R" "$L" PATH="$LS_BLIND:$PATH"
-expect_status "PATH4: blind path scan — no power, exit 2, not a clean 0" 2 "$RC"
-expect_contains "PATH4: and the refusal names the paths scan" "the paths scan" "$OUT"
+expect_status "PATH4: blind path list — no power, exit 2, not a clean 0" 2 "$RC"
+expect_contains "PATH4: and the refusal names the path name site" "at its path name" "$OUT"
 
 section "§BASE — the default base at a tagged head (T32 finding 2)"
 
@@ -273,11 +320,11 @@ fx_commit "$R" "inside the release $EB"
 fx_commit "$R" "more"
 git -C "$R" tag -a v2.0.0 -m "release"
 PREV="$(git -C "$R" rev-parse --short=12 'v1.9.0^{commit}')"
-SHA="$(git -C "$R" rev-parse HEAD~1 | cut -c1-12)"
+SHA="$(s12 "$R" HEAD~1)"
 L="$(fx_list base1 "$EB" "$EO")"
 scan "$R" "$L"
 expect_status "BASE1: a message between the previous tag and a tagged head exits 1" 1 "$RC"
-expect_contains "BASE1: the in-release message is a hit, at its commit" "HIT entry=1 at message $SHA" "$(hits)"
+expect_contains "BASE1: the in-release message is a hit, at its commit" "HIT entry=1 at commit $SHA message" "$(hits)"
 expect_no_regex "BASE1: a message before the previous tag is not read (same output)" 'entry=2' "$(hits)"
 expect_contains "BASE1: the tally's base is the previous tag" "base=$PREV" "$OUT"
 
@@ -297,7 +344,7 @@ git -C "$R" tag v1.0.0
 L="$(fx_list base3 "$EB")"
 scan "$R" "$L"
 expect_status "BASE3: the only tag at the head — the whole history is read, exit 1" 1 "$RC"
-expect_regex "BASE3: the root message is a hit" 'entry=1 at message' "$(hits)"
+expect_regex "BASE3: the root message is a hit" 'entry=1 at commit [0-9a-f]{12} message' "$(hits)"
 expect_contains "BASE3: and the tally has no base" "base=none" "$OUT"
 
 # BASE4 two tags at the head: both are skipped, the one before them is the base
@@ -306,47 +353,47 @@ fx_commit "$R" "in range $EB"
 git -C "$R" tag v0.2; git -C "$R" tag -a v0.2-rc -m "rc"
 L="$(fx_list base4 "$EB" "$EO")"
 scan "$R" "$L"
-expect_regex "BASE4: with two tags at the head the earlier release is the base, the message is a hit" 'entry=1 at message' "$(hits)"
+expect_regex "BASE4: with two tags at the head the earlier release is the base, the message is a hit" 'entry=1 at commit [0-9a-f]{12} message' "$(hits)"
 expect_contains "BASE4: base is v0.1's commit" "base=$(git -C "$R" rev-parse --short=12 'v0.1^{commit}')" "$OUT"
 
 # BASE5 BIONIC_CHECK_BASE still wins at a tagged head
 R="$TMP/base1"
 FIRST="$(git -C "$R" rev-list --max-parents=0 HEAD)"
 scan "$R" "$(fx_list base5 "$EO")" BIONIC_CHECK_BASE="$FIRST"
-expect_regex "BASE5: an explicit base wider than the previous tag reads the older message" 'entry=1 at message' "$(hits)"
+expect_regex "BASE5: an explicit base wider than the previous tag reads the older message" 'entry=1 at commit [0-9a-f]{12} message' "$(hits)"
 scan "$R" "$(fx_list base5b "$EO")"
 expect_status "BASE5: the same entry with the default base is clean (differential)" 0 "$RC"
 
-section "§LIST — a list line is read as the scan will use it (T32 finding 3)"
+section "§LIST — a list line is read as the scan will use it (T32 finding 3, T52 finding 9)"
 
 EL="zq-trail-8821"; EM="mxv9 plover"
 R="$TMP/list1"; fx_repo "$R"
 printf 'see %s.\nand %s.\n' "$EL" "$EM" > "$R/notes.txt"; fx_commit "$R" "add notes"
+NB="$(s12 "$R" HEAD:notes.txt)"
 # lraw <name> <printf format> — a list file written with printf escapes; prints its path
 lraw() { local f="$TMP/lists/$1"; printf "$2" "$EL" > "$f"; printf '%s' "$f"; }
 scan "$R" "$(lraw lst0 '%s\n')"
 expect_status "LIST: the clean line is a hit (control)" 1 "$RC"
 expect_contains "LIST: and counts one entry" "entries=1" "$OUT"
-for v in 'trailing space|%s \n' 'trailing tab|%s\t\n' 'trailing spaces and tab|%s \t \n' 'CR LF|%s\r\n' 'trailing space then CR LF|%s \r\n' 'BOM|\357\273\277%s\n' 'BOM and CR LF|\357\273\277%s\r\n' 'no final newline, trailing space|%s '; do
+for v in 'trailing space|%s \n' 'trailing tab|%s\t\n' 'trailing spaces and tab|%s \t \n' 'CR LF|%s\r\n' 'trailing space then CR LF|%s \r\n' 'BOM|\357\273\277%s\n' 'BOM and CR LF|\357\273\277%s\r\n' 'no final newline, trailing space|%s ' 'leading spaces|  %s\n' 'leading tab|\t%s\n' 'leading and trailing blanks|  \t%s \t\n'; do
   scan "$R" "$(lraw lstv "${v#*|}")"
-  expect_regex "LIST: ${v%%|*} — read as the entry and found" '^HIT entry=1 at file notes\.txt:1$' "$(hits)"
+  expect_eq "LIST: ${v%%|*} — read as the entry and found" "HIT entry=1 at blob $NB line 1" "$(hits)"
   expect_contains "LIST: ${v%%|*} — one entry" "entries=1" "$OUT"
 done
-# an entry with an inner space keeps it; a leading space is part of the entry
+# an entry with an inner space keeps it
 scan "$R" "$(fx_list lst1 "$EM ")"
-expect_regex "LIST: an entry with an inner space and a trailing space is found" '^HIT entry=1 at file notes\.txt:2$' "$(hits)"
+expect_eq "LIST: an entry with an inner space and a trailing space is found" "HIT entry=1 at blob $NB line 2" "$(hits)"
+# a LEADING blank is stripped as a trailing one is (T52 finding 9): `<sp><sp>entry` is `entry`
 EV="zq-lead-3390"
 printf 'x%s\n' "$EV" > "$R/lead.txt"; fx_commit "$R" "add lead"
-scan "$R" "$(fx_list lst2 " $EV")"
-expect_status "LIST: a LEADING space stays part of the entry — no match against 'x<entry>', and the power check passes" 0 "$RC"
-expect_contains "LIST: (same run) the entry was read" "entries=1" "$OUT"
-printf 'x %s\n' "$EV" > "$R/lead2.txt"; fx_commit "$R" "add lead2"
-scan "$R" "$(fx_list lst2b " $EV")"
-expect_regex "LIST: and with a file that has the space before it, the entry is a hit" '^HIT entry=1 at file lead2\.txt:1$' "$(hits)"
+scan "$R" "$(fx_list lst2 "  $EV")"
+expect_status "LIST: a list line with two leading spaces is read as the entry — found inside 'x<entry>'" 1 "$RC"
+expect_eq "LIST: (same run) the hit is the file that has no space before it" "HIT entry=1 at blob $(s12 "$R" HEAD:lead.txt) line 1" "$(hits)"
+expect_contains "LIST: (same run) one entry" "entries=1" "$OUT"
 # blank-after-stripping lines are skipped and still counted
 printf ' \n\t\n\r\n%s \n' "$EL" > "$TMP/lists/lst3"
 scan "$R" "$TMP/lists/lst3"
-expect_regex "LIST: lines blank after stripping are skipped but counted — the entry is line 4" '^HIT entry=4 at file notes\.txt:1$' "$(hits)"
+expect_eq "LIST: lines blank after stripping are skipped but counted — the entry is line 4" "HIT entry=4 at blob $NB line 1" "$(hits)"
 expect_contains "LIST: and they are not entries" "entries=1" "$OUT"
 printf ' \n\t\n\r\n\357\273\277\n' > "$TMP/lists/lst4"
 scan "$R" "$TMP/lists/lst4"
@@ -354,10 +401,10 @@ expect_status "LIST: a list of only blank lines exits 0" 0 "$RC"
 expect_contains "LIST: and prints entries=0" "entries=0" "$OUT"
 printf '\357\273\277# a comment\n%s\n' "$EL" > "$TMP/lists/lst5"
 scan "$R" "$TMP/lists/lst5"
-expect_regex "LIST: a comment behind a BOM is skipped and counted — the entry is line 2" '^HIT entry=2 at file notes\.txt:1$' "$(hits)"
+expect_eq "LIST: a comment behind a BOM is skipped and counted — the entry is line 2" "HIT entry=2 at blob $NB line 1" "$(hits)"
 expect_contains "LIST: one entry" "entries=1" "$OUT"
 
-section "§TRACE — an inherited git trace file does not record an entry (T32 finding 4)"
+section "§TRACE — an inherited git trace file does not record an entry (T32 finding 4, T52 finding 11)"
 
 R="$TMP/trace1"; fx_repo "$R"
 printf '%s\n' "$E1" > "$R/b.txt"; fx_commit "$R" "add b"
@@ -366,11 +413,21 @@ mkdir -p "$TMP/trace"
 # control: the trace mechanism records the entry when git is called directly with the variable set
 GIT_TRACE="$TMP/trace/ctl" git -C "$R" grep -n -i -F -e "$E1" HEAD >/dev/null 2>&1
 expect_true "TRACE: control — a direct git call with GIT_TRACE set records the entry" grep -q -F -- "$E1" "$TMP/trace/ctl"
-scan "$R" "$L" GIT_TRACE="$TMP/trace/t1" GIT_TRACE2="$TMP/trace/t2" GIT_TRACE2_EVENT="$TMP/trace/t3" GIT_TRACE2_PERF="$TMP/trace/t4" GIT_TRACE_PACKET="$TMP/trace/t5" GIT_TRACE_SETUP="$TMP/trace/t6"
+TRACES=(GIT_TRACE="$TMP/trace/t1" GIT_TRACE2="$TMP/trace/t2" GIT_TRACE2_EVENT="$TMP/trace/t3" GIT_TRACE2_PERF="$TMP/trace/t4" GIT_TRACE_PACKET="$TMP/trace/t5" GIT_TRACE_SETUP="$TMP/trace/t6" GIT_TRACE_REFS="$TMP/trace/t7")
+scan "$R" "$L" "${TRACES[@]}"
 expect_status "TRACE: the run still finds the hit" 1 "$RC"
-expect_regex "TRACE: and prints it (positive on the same run)" '^HIT entry=1 at file b\.txt:1$' "$(hits)"
-TRACED="$(cat "$TMP"/trace/t[1-6] 2>/dev/null | grep -c -i -F -- "$E1" || true)"
+expect_eq "TRACE: and prints it (positive on the same run)" "HIT entry=1 at blob $(s12 "$R" HEAD:b.txt) line 1" "$(hits)"
+TRACED="$(cat "$TMP"/trace/t[1-7] 2>/dev/null | grep -c -i -F -- "$E1" || true)"
 expect_eq "TRACE: no trace file the run was pointed at holds the entry" "0" "$TRACED"
+# the row has teeth: the same run through a copy with the unset loop removed writes the entry
+# to the ref trace (the power check plants every entry in a tag name)
+NOUNSET="$(doctor nounset 'for v in $(compgen -e); do case "$v" in GIT_TRACE*) unset "$v" ;; esac; done' ':')"
+expect_false "TRACE: the doctored copy differs from the scan" cmp -s "$SCAN" "$NOUNSET"
+rm -f "$TMP"/trace/t[1-7]
+scanx "$NOUNSET" "$R" "$L" "${TRACES[@]}"
+expect_eq "TRACE: the doctored copy still runs and finds the hit (positive)" "HIT entry=1 at blob $(s12 "$R" HEAD:b.txt) line 1" "$(hits)"
+TRACED="$(cat "$TMP"/trace/t[1-7] 2>/dev/null | grep -c -i -F -- "$E1" || true)"
+expect_ne "TRACE: without the unset loop a trace file DOES hold the entry (the row can fail)" "0" "$TRACED"
 
 section "§BASH32 — the whole scan under /bin/bash, the plugin's interpreter (T32 round 2)"
 
@@ -383,7 +440,7 @@ mkdir -p "$R/$B2"; printf 'plain\n' > "$R/$B2/f.txt"; printf 'see %s.\nmore\n' "
 fx_commit "$R" "release $B3"
 git -C "$R" tag -a v2.0.0 -m "release $B4"
 printf '\357\273\277%s \r\n%s\r\n%s \t\n%s\n' "$B1" "$B2" "$B3" "$B4" > "$TMP/lists/b32"
-SHA="$(git -C "$R" rev-parse HEAD | cut -c1-12)"
+SHA="$(s12 "$R" HEAD)"
 WANT="$(git -C "$R" ls-tree -r --name-only HEAD | grep -n -i -F -- "$B2" | cut -d: -f1)"
 expect_nonempty "BASH32: the fixture's directory path sits at a position in tree order (extractor non-empty)" "$WANT"
 scan "$R" "$TMP/lists/b32"
@@ -392,10 +449,10 @@ expect_status "BASH32: under the PATH bash the fixture is a hit run (control)" 1
 if [ -x /bin/bash ]; then
   OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD /bin/bash "$SCAN" "$TMP/lists/b32" 2>&1)"; RC=$?
   expect_status "BASH32: /bin/bash — the run exits 1" 1 "$RC"
-  expect_eq "BASH32: /bin/bash — a content hit, through a BOM, CR LF and trailing-blank line" "HIT entry=1 at file notes.txt:1" "$(hits | sed -n 1p)"
+  expect_contains "BASH32: /bin/bash — a content hit, through a BOM, CR LF and trailing-blank line" "HIT entry=1 at blob $(s12 "$R" HEAD:notes.txt) line 1" "$(hits)"
   expect_contains "BASH32: /bin/bash — a path hit" "HIT entry=2 at path #$WANT" "$(hits)"
-  expect_contains "BASH32: /bin/bash — a message hit at a tagged head (range is v1.9.0..head)" "HIT entry=3 at message $SHA" "$(hits)"
-  expect_contains "BASH32: /bin/bash — a tag-message hit" "HIT entry=4 at tag-message" "$(hits)"
+  expect_contains "BASH32: /bin/bash — a message hit at a tagged head (range is v1.9.0..head)" "HIT entry=3 at commit $SHA message" "$(hits)"
+  expect_contains "BASH32: /bin/bash — a tag-message hit" "HIT entry=4 at tag $(s12 "$R" v2.0.0)" "$(hits)"
   expect_contains "BASH32: /bin/bash — four entries read" "entries=4 hits=4" "$OUT"
   expect_eq "BASH32: /bin/bash prints exactly what the PATH bash prints (the whole output)" "$OUT_DEFAULT" "$OUT"
 else
@@ -422,7 +479,7 @@ argv_shim() {
   done
 }
 ALOG="$TMP/argv.log"; : > "$ALOG"
-argv_shim "$TMP/argv-shim" "$ALOG" git grep awk sed tr cut dirname mktemp rm cat head tail wc sort uniq touch env
+argv_shim "$TMP/argv-shim" "$ALOG" git grep awk sed tr cut dirname mktemp rm cat head tail wc sort uniq touch env perl locale mkdir
 # control: the shim records a pattern given the way the old scan gave it
 PATH="$TMP/argv-shim:$PATH" git -C "$R" grep -n -F -e "$A1" HEAD >/dev/null 2>&1
 expect_true "ARGV: control — the shim log records an entry passed as a word" grep -q -F -- "$A1" "$ALOG"
@@ -430,14 +487,14 @@ expect_true "ARGV: control — the shim log records an entry passed as a word" g
 scan "$R" "$L"
 BASE_OUT="$OUT"
 expect_status "ARGV: without the shims the run is a hit run" 1 "$RC"
-expect_contains "ARGV: content hit" "HIT entry=1 at file c.txt:2" "$BASE_OUT"
+expect_contains "ARGV: content hit" "HIT entry=1 at blob $(s12 "$R" HEAD:c.txt) line 2" "$BASE_OUT"
 expect_regex "ARGV: path hit" 'HIT entry=2 at path #[0-9]+' "$BASE_OUT"
-expect_contains "ARGV: message hit" "HIT entry=3 at message" "$BASE_OUT"
-expect_contains "ARGV: tag-message hit" "HIT entry=3 at tag-message" "$BASE_OUT"
+expect_contains "ARGV: message hit" "HIT entry=3 at commit $(s12 "$R" HEAD) message" "$BASE_OUT"
+expect_contains "ARGV: tag-message hit" "HIT entry=3 at tag $(s12 "$R" v0.2)" "$BASE_OUT"
 scan "$R" "$L" PATH="$TMP/argv-shim:$PATH"
 expect_eq "ARGV: through the logging shims the output is unchanged" "$BASE_OUT" "$OUT"
-expect_contains "ARGV: the shims saw the scan's git calls (positive on the same log)" "ls-tree" "$(cat "$ALOG")"
-expect_contains "ARGV: and its awk calls" "awk" "$(cat "$ALOG")"
+expect_contains "ARGV: the shims saw the scan's git calls (positive on the same log)" "cat-file" "$(cat "$ALOG")"
+expect_contains "ARGV: and its matcher" "perl" "$(cat "$ALOG")"
 for e in "$A1" "$A2" "$A3"; do
   expect_eq "ARGV: the argv log holds no trace of the entry on its list line $(printf '%s\n' "$A1" "$A2" "$A3" | grep -n -F -x -- "$e" | cut -d: -f1)" "0" "$(grep -c -i -F -- "$e" "$ALOG")"
 done
@@ -456,6 +513,268 @@ expect_true "ARGV: the scan's own git calls were traced (positive on the same fi
 for e in "$A1" "$A2" "$A3"; do
   expect_eq "ARGV: the config trace file holds no trace of entry '${e:0:6}…'" "0" "$(grep -c -i -F -- "$e" "$CT")"
 done
+
+section "§BYTES — every blob is read as bytes (T52 finding 1)"
+
+EY="zq-bytes-4471"
+# BYT1 a PNG-like blob holding the entry after a NUL; the line is newlines before the match + 1
+R="$TMP/byt1"; fx_repo "$R"
+printf '\211PNG\r\n\032\n\0\0%s\0tail\n' "$EY" > "$R/img.png"; fx_commit "$R" "add image"
+L="$(fx_list byt1 "$EY")"
+scan "$R" "$L"
+expect_status "BYT1: a binary blob holding an entry exits 1" 1 "$RC"
+expect_eq "BYT1: the hit is the blob, on line 3 (two newlines precede the match)" "HIT entry=1 at blob $(s12 "$R" HEAD:img.png) line 3" "$(hits)"
+# BYT2 a file marked -diff, and one marked binary, in .gitattributes
+R="$TMP/byt2"; fx_repo "$R"
+printf '*.dat -diff\n*.raw binary\n' > "$R/.gitattributes"
+printf 'see %s here\n' "$EY" > "$R/secret.dat"; printf 'plain\nsee %s\n' "$E1" > "$R/other.raw"
+fx_commit "$R" "attrs"
+L="$(fx_list byt2 "$EY" "$E1")"
+scan "$R" "$L"
+expect_status "BYT2: files marked -diff and binary exit 1" 1 "$RC"
+expect_contains "BYT2: the -diff file is a hit" "HIT entry=1 at blob $(s12 "$R" HEAD:secret.dat) line 1" "$(hits)"
+expect_contains "BYT2: the binary-marked file is a hit" "HIT entry=2 at blob $(s12 "$R" HEAD:other.raw) line 2" "$(hits)"
+# BYT3 a symlink whose target holds the entry
+R="$TMP/byt3"; fx_repo "$R"
+ln -s "../$EY/x" "$R/link"; fx_commit "$R" "add link"
+L="$(fx_list byt3 "$EY")"
+scan "$R" "$L"
+expect_status "BYT3: a symlink whose target holds an entry exits 1" 1 "$RC"
+expect_eq "BYT3: the hit is the link's blob" "HIT entry=1 at blob $(s12 "$R" HEAD:link) line 1" "$(hits)"
+# BYT4 an object the scan cannot read is a refusal, never a clean 0
+R="$TMP/byt4"; fx_repo "$R"
+printf 'plain\n' > "$R/gone.txt"; fx_commit "$R" "add"
+L="$(fx_list byt4 "$E4")"
+scan "$R" "$L"
+expect_status "BYT4: before the object is removed the clean scan exits 0 (control)" 0 "$RC"
+OID="$(git -C "$R" rev-parse HEAD:gone.txt)"
+rm -f "$R/.git/objects/${OID:0:2}/${OID:2}"
+expect_false "BYT4: the blob is gone from the object store (fixture)" git -C "$R" cat-file -e "$OID"
+scan "$R" "$L"
+expect_status "BYT4: a blob the range introduces that cannot be read refuses the run, exit 2" 2 "$RC"
+expect_contains "BYT4: the refusal says the scan could not read what the push publishes" "could not read everything" "$OUT"
+# the same blob reached through the head's tree alone (an empty range): the matcher names it
+scan "$R" "$L" BIONIC_CHECK_BASE=HEAD
+expect_status "BYT4: a blob at the head that cannot be read refuses the run, exit 2" 2 "$RC"
+expect_contains "BYT4: the refusal names the object by its id" "object ${OID:0:12} cannot be read" "$OUT"
+
+section "§RANGE — every object, person and tag the push publishes (T52 finding 2)"
+
+# RNG1 a file added in commit 2 of the range and deleted in commit 3: its blob is still sent
+EG="zq-gone-6402"
+R="$TMP/rng1"; fx_repo "$R"
+printf '%s\n' "$EG" > "$R/notes.txt"; fx_commit "$R" "add notes"
+GONE="$(s12 "$R" HEAD:notes.txt)"
+git -C "$R" rm -q notes.txt; fx_commit "$R" "remove notes"
+L="$(fx_list rng1 "$EG")"
+scan "$R" "$L"
+expect_status "RNG1: a blob added and deleted inside the range exits 1" 1 "$RC"
+expect_eq "RNG1: the hit is the deleted blob" "HIT entry=1 at blob $GONE line 1" "$(hits)"
+# RNG2 a PATH that exists only inside the range
+EGP="zq-gonepath-7720"
+R="$TMP/rng2"; fx_repo "$R"
+printf 'plain\n' > "$R/$EGP.txt"; fx_commit "$R" "add named"
+ADDED="$(s12 "$R" HEAD)"
+git -C "$R" rm -q "$EGP.txt"; fx_commit "$R" "remove named"
+L="$(fx_list rng2 "$EGP")"
+scan "$R" "$L"
+expect_status "RNG2: a path added and deleted inside the range exits 1" 1 "$RC"
+expect_eq "RNG2: the hit is the path in the commit that added it" "HIT entry=1 at path in commit $ADDED" "$(hits)"
+expect_absent "RNG2: the path is not printed" ".txt" "$OUT"
+# RNG3 a commit's author name and email, and one before the base that is not read
+EA="zqauthor-5521"; EAO="zqoldauthor-1187"
+R="$TMP/rng3"; fx_repo "$R"
+GIT_AUTHOR_NAME="Zqoldauthor-1187" git -C "$R" commit -q --allow-empty -m "before"
+git -C "$R" tag v0.2
+GIT_AUTHOR_NAME="Zqauthor-5521 Dev" GIT_AUTHOR_EMAIL="dev@zqauthor-5521.invalid" git -C "$R" commit -q --allow-empty -m "by someone"
+L="$(fx_list rng3 "$EA" "$EAO")"
+scan "$R" "$L"
+expect_status "RNG3: an author holding an entry exits 1" 1 "$RC"
+expect_eq "RNG3: name and email in one author give ONE author line" "HIT entry=1 at commit $(s12 "$R" HEAD) author" "$(hits)"
+expect_no_regex "RNG3: an author before the base is not read (same output)" 'entry=2' "$(hits)"
+# RNG4 a committer's email only
+EC="zqcommit-6610"
+R="$TMP/rng4"; fx_repo "$R"
+GIT_COMMITTER_EMAIL="ci@zqcommit-6610.invalid" git -C "$R" commit -q --allow-empty -m "landed"
+L="$(fx_list rng4 "$EC")"
+scan "$R" "$L"
+expect_eq "RNG4: a committer email holding an entry is a committer hit" "HIT entry=1 at commit $(s12 "$R" HEAD) committer" "$(hits)"
+# RNG5 a lightweight tag NAMED after an entry on the head
+ET="zq-tagname-3301"
+R="$TMP/rng5"; fx_repo "$R"
+fx_commit "$R" "release"
+git -C "$R" tag "$ET-rc1"
+L="$(fx_list rng5 "$ET")"
+scan "$R" "$L"
+expect_status "RNG5: a tag named after an entry exits 1" 1 "$RC"
+expect_eq "RNG5: the hit is the tag, by its commit" "HIT entry=1 at tag $(s12 "$R" HEAD)" "$(hits)"
+expect_absent "RNG5: the tag name is not printed" "rc1" "$OUT"
+# RNG6 an annotated tag inside the range, not at the head, and one before the range
+ETM="zq-tagmsg-2275"
+R="$TMP/rng6"; fx_repo "$R"
+git -C "$R" tag -a v0.1-old -m "old $E2" v0.1
+fx_commit "$R" "mid"
+git -C "$R" tag -a mid-1 -m "mid $ETM"
+fx_commit "$R" "head"
+L="$(fx_list rng6 "$ETM" "$E2")"
+scan "$R" "$L" BIONIC_CHECK_BASE=v0.1
+expect_eq "RNG6: an annotated tag on a commit inside the range is read" "HIT entry=1 at tag $(s12 "$R" mid-1)" "$(hits)"
+expect_no_regex "RNG6: a tag on the base is not (same output)" 'entry=2' "$(hits)"
+
+section "§SEP — no byte a path or message can hold splits a record (T52 findings 3, 4)"
+
+S1="zq-soh-1101"; S2="zq-newline-2202"; S3="zq-tab-3303"; S4="zq-colon-4404"
+R="$TMP/sep1"; fx_repo "$R"
+printf 'see %s\n' "$S1" > "$R/$(printf 'x\001%s.txt' "$S1")"
+printf 'plain\n' > "$R/$(printf 'n\n%s.txt' "$S2")"
+printf 'plain\n' > "$R/$(printf 't\t%s.txt' "$S3")"
+printf 'plain\n' > "$R/$(printf 'c:%s.txt' "$S4")"
+fx_commit "$R" "odd names"
+L="$(fx_list sep1 "$S1" "$S2" "$S3" "$S4")"
+scan "$R" "$L"
+expect_status "SEP1: paths holding SOH, newline, tab and colon exit 1" 1 "$RC"
+k=0
+for e in "$S1" "$S2" "$S3" "$S4"; do
+  k=$((k + 1))
+  P="$(pos_of "$R" "$e")"
+  expect_nonempty "SEP1: entry $k's path sits at a position in tree order (extractor non-empty)" "$P"
+  expect_contains "SEP1: entry $k is a hit at its path's position" "HIT entry=$k at path #$P" "$(hits)"
+  expect_eq "SEP1: the scan's whole output holds entry $k zero times" "0" "$(count_in "$OUT" "$e")"
+done
+expect_contains "SEP1: the SOH file's contents are a hit, at its blob" "HIT entry=1 at blob $(git -C "$R" ls-tree -r HEAD | awk -v e="$S1" 'index($0, e) { print substr($3, 1, 12) }') line 1" "$(hits)"
+expect_eq "SEP1: five hits in all (one per path, one content), none split" "5" "$(hits | grep -c '^HIT ')"
+expect_absent "SEP1: no part of any path is printed" ".txt" "$OUT"
+# SEP2 a commit message holding a SOH byte before the entry
+SM="zq-sohmsg-5505"
+R="$TMP/sep2"; fx_repo "$R"
+git -C "$R" commit -q --allow-empty --cleanup=verbatim -m "$(printf 'fix\001 %s leak' "$SM")"
+L="$(fx_list sep2 "$SM")"
+scan "$R" "$L"
+expect_status "SEP2: a message with SOH before the entry exits 1" 1 "$RC"
+expect_eq "SEP2: the hit is the commit's message" "HIT entry=1 at commit $(s12 "$R" HEAD) message" "$(hits)"
+expect_absent "SEP2: the subject is not printed" "leak" "$OUT"
+
+section "§CASE — the scan decides the locale, and folds case for any letter (T52 finding 5)"
+
+OU=$'\303\226'; ou=$'\303\266'   # O and o with diaeresis, as UTF-8 bytes
+EU="zq${ou}rbix-8812"            # the list entry, lower case
+R="$TMP/case1"; fx_repo "$R"
+# the file under the upper-case directory holds the entry too: its content hit must not name the path
+mkdir -p "$R/ZQ${OU}RBIX-8812-dir"; printf '%s\n' "$EU" > "$R/ZQ${OU}RBIX-8812-dir/x.txt"; fx_commit "$R" "upper dir"
+L="$(fx_list case1 "$EU")"
+P="$(pos_of "$R" "ZQ${OU}RBIX")"
+expect_nonempty "CASE1: the upper-case path sits at a position in tree order (extractor non-empty)" "$P"
+XB="$(git -C "$R" ls-tree -r HEAD | awk '/x\.txt/ { print substr($3, 1, 12) }')"
+expect_nonempty "CASE1: the file's blob id (extractor non-empty)" "$XB"
+for loc in C en_US.UTF-8; do
+  scan "$R" "$L" LC_ALL="$loc"
+  expect_status "CASE1: caller LC_ALL=$loc — an upper-case non-ASCII path exits 1" 1 "$RC"
+  expect_contains "CASE1: caller LC_ALL=$loc — the hit is the path's position" "HIT entry=1 at path #$P" "$(hits)"
+  expect_contains "CASE1: caller LC_ALL=$loc — and the file's contents, by blob" "HIT entry=1 at blob $XB line 1" "$(hits)"
+  expect_absent "CASE1: caller LC_ALL=$loc — the path is not printed" "RBIX" "$OUT"
+  expect_absent "CASE1: caller LC_ALL=$loc — nor the entry" "rbix" "$OUT"
+done
+# CASE2 contents and a message in another case, under a C caller
+R="$TMP/case2"; fx_repo "$R"
+printf 'see ZQ%sRBIX-8812 here\n' "$OU" > "$R/n.txt"; fx_commit "$R" "$(printf 'mention ZQ%sRBIX-8812' "$OU")"
+scan "$R" "$(fx_list case2 "$EU")" LC_ALL=C
+expect_contains "CASE2: caller LC_ALL=C — upper-case non-ASCII contents are a hit" "HIT entry=1 at blob $(s12 "$R" HEAD:n.txt) line 1" "$(hits)"
+expect_contains "CASE2: caller LC_ALL=C — and the message" "HIT entry=1 at commit $(s12 "$R" HEAD) message" "$(hits)"
+# CASE3 no UTF-8 locale on the machine: a non-ASCII entry refuses, an ASCII list still runs
+NOLOC="$TMP/shim-nolocale"; mkdir -p "$NOLOC"
+printf '#!/bin/bash\ncase "${1:-}" in -a) printf "C\\nPOSIX\\n" ;; *) echo US-ASCII ;; esac\n' > "$NOLOC/locale"; chmod +x "$NOLOC/locale"
+scan "$R" "$(fx_list case3 "$EU")" PATH="$NOLOC:$PATH"
+expect_status "CASE3: no UTF-8 locale and a non-ASCII entry — refused, exit 2" 2 "$RC"
+expect_contains "CASE3: the refusal says why" "UTF-8" "$OUT"
+printf 'see %s\n' "$E1" > "$R/m.txt"; fx_commit "$R" "ascii"
+scan "$R" "$(fx_list case3b "$E1")" PATH="$NOLOC:$PATH"
+expect_status "CASE3: the same machine with an ASCII-only list runs, and finds (control)" 1 "$RC"
+
+section "§XTRACE — a caller's trace prints no entry (T52 finding 6)"
+
+EX="zq-xtrace-9093"
+R="$TMP/xt1"; fx_repo "$R"
+printf '%s\n' "$EX" > "$R/b.txt"; fx_commit "$R" "add b"
+L="$(fx_list xt1 "$EX")"
+OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD bash -x "$SCAN" "$L" 2>&1)"; RC=$?
+expect_status "XTRACE: bash -x — the run still exits 1" 1 "$RC"
+expect_contains "XTRACE: bash -x — it prints the hit (positive on the same output)" "HIT entry=1 at blob" "$OUT"
+expect_eq "XTRACE: bash -x — stdout and stderr hold the entry zero times" "0" "$(count_in "$OUT" "$EX")"
+
+section "§CEIL — a caller's discovery variables cannot pass a list inside a checkout (T52 finding 10)"
+
+R="$TMP/ceil1"; fx_repo "$R"
+mkdir -p "$R/sub/dir"; printf '%s\n' "$E4" > "$R/sub/dir/list.txt"
+scan "$R" "$R/sub/dir/list.txt" GIT_CEILING_DIRECTORIES="$R"
+expect_status "CEIL: GIT_CEILING_DIRECTORIES set to the checkout — the list inside it is still refused" 2 "$RC"
+expect_contains "CEIL: and the refusal says where the list is" "inside a git checkout" "$OUT"
+scan "$R" "$(fx_list ceil1 "$E4")" GIT_CEILING_DIRECTORIES="$R"
+expect_status "CEIL: the same variable with a list outside every checkout runs clean (control)" 0 "$RC"
+
+section "§SITES — the power check plants every entry at every site (T52 power check)"
+
+# a clean fixture, so a doctored copy's refusal is the power check's and nothing else's
+R="$TMP/sites"; fx_repo "$R"
+L="$(fx_list sites "$E4" "$E3")"
+CTRL="$(doctor control 'no such span' 'no such span')"
+scanx "$CTRL" "$R" "$L"
+expect_status "SITES: the undoctored copy, run from the same place, is clean (control)" 0 "$RC"
+# site|from|to — each blinds ONE site; the refusal must name that site
+while IFS='|' read -r site from to; do
+  [ -n "$site" ] || continue
+  D="$(doctor "blind-${site// /-}" "$from" "$to")"
+  expect_false "SITES: $site — the doctored copy differs from the scan" cmp -s "$SCAN" "$D"
+  expect_true "SITES: $site — the doctored copy parses" bash -n "$D"
+  scanx "$D" "$R" "$L"
+  expect_status "SITES: $site blinded — no power, exit 2, not a clean 0" 2 "$RC"
+  expect_contains "SITES: $site blinded — the refusal names the site" "at its $site in the throwaway" "$OUT"
+done <<'SITES'
+text blob|look($d, "blob $sha", 1); }|look($d, "blob $sha", 1) if $d =~ /\0/; }
+binary blob|look($d, "blob $sha", 1); }|look($d, "blob $sha", 1) if $d !~ /\0/; }
+symlink target|$2 == "blob" { print $3 }|$2 == "blob" && $1 != "120000" { print $3 }
+path name|look($p, "path #$n", 0);|look("", "path #$n", 0);
+range-only path|look($p, "path in commit $c", 0);|look("", "path in commit $c", 0);
+range-only blob|--filter=object:type=blob|--filter=blob:none
+message|look($msg, "commit $sha message", 0);|look("", "commit $sha message", 0);
+author name|look($name, "commit $sha $who", 0);|look($name, "commit $sha $who", 0) if $who ne "author";
+author email|look($mail, "commit $sha $who", 0);|look($mail, "commit $sha $who", 0) if $who ne "author";
+committer name|look($name, "commit $sha $who", 0);|look($name, "commit $sha $who", 0) if $who ne "committer";
+committer email|look($mail, "commit $sha $who", 0);|look($mail, "commit $sha $who", 0) if $who ne "committer";
+tag name|look($ref, "tag $s", 0);|look("", "tag $s", 0);
+tag message|look($msg, "tag $sha", 0);|look("", "tag $sha", 0);
+SITES
+
+section "§COST — one pass for the whole list, inside the time ceiling (T52 finding 13)"
+
+# the number of processes a scan starts does not grow with the list: one pass per site
+R="$TMP/cost1"; fx_repo "$R"
+printf 'plain\n' > "$R/b.txt"; fx_commit "$R" "more"
+CLOG="$TMP/cost.log"
+cshim="$TMP/count-shim"; mkdir -p "$cshim"
+for n in git perl; do
+  printf '#!/bin/bash\necho %s >> "%s"\nexec "%s" "$@"\n' "$n" "$CLOG" "$(type -P "$n")" > "$cshim/$n"; chmod +x "$cshim/$n"
+done
+: > "$CLOG"; scan "$R" "$(fx_list cost1 "$E4")" PATH="$cshim:$PATH"
+ONE="$(wc -l < "$CLOG" | tr -d ' ')"
+expect_status "COST: a one-entry list scans clean through the counting shim (control)" 0 "$RC"
+expect_ne "COST: the counting shim saw the scan's calls (positive)" "0" "$ONE"
+: > "$CLOG"; scan "$R" "$(fx_list cost6 "$E4" "$E3" "zq-c3-1" "zq-c4-2" "zq-c5-3" "zq-c6-4")" PATH="$cshim:$PATH"
+expect_eq "COST: a six-entry list starts exactly as many git and perl processes as a one-entry list" "$ONE" "$(wc -l < "$CLOG" | tr -d ' ')"
+expect_eq "COST: and runs the matcher twice (the power check and the scan), whatever the list's length" "2" "$(grep -c '^perl$' "$CLOG")"
+# a clean 500-entry scan of this repository, read-only, under the 20-second ceiling
+if git -C "$BIONIC_SCRIPTS_DIR" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+  i=0; : > "$TMP/lists/cost500"
+  while [ "$i" -lt 500 ]; do printf 'zqtm-%04d-xv\n' "$i" >> "$TMP/lists/cost500"; i=$((i + 1)); done
+  T0="$(date +%s)"
+  scan "$BIONIC_SCRIPTS_DIR" "$TMP/lists/cost500"
+  EL_S=$(( $(date +%s) - T0 ))
+  echo "COST: a clean 500-entry scan of this repository took ${EL_S}s"
+  expect_status "COST: the 500-entry scan of this repository is clean" 0 "$RC"
+  expect_contains "COST: (same run) it read 500 entries" "entries=500 hits=0" "$OUT"
+  expect_true "COST: and took at most 20 seconds (took ${EL_S}s)" [ "$EL_S" -le 20 ]
+else
+  echo "SKIP: $BIONIC_SCRIPTS_DIR is not a git checkout; the 500-entry timing row did not run"
+fi
 
 section "§QUIET — no entry is printed or recorded"
 
@@ -477,7 +796,7 @@ LOGSHIM="$(shim log --never-an-argument)"
 scan "$R" "$L" BIONIC_CHECK_BASE=v0.1 PATH="$LOGSHIM:$PATH" TMPDIR="$TMP/scratch" SHIM_LOG="$SLOG"
 expect_status "QUIET1: the hit run exits 1" 1 "$RC"
 expect_regex "QUIET1: it prints hit lines (positive on the same output)" '^HIT entry=[0-9]+ at ' "$(hits)"
-expect_contains "QUIET1: including a hit in a path that carries an entry, with the path withheld" "HIT entry=2 at file" "$(hits)"
+expect_contains "QUIET1: including a hit in a path that carries an entry, by position" "HIT entry=2 at path #" "$(hits)"
 no_entry "QUIET1: nothing printed holds an entry, even where the path itself does" "$OUT"
 expect_contains "QUIET1: the throwaway repository was built under TMPDIR (control)" "$TMP/scratch/" "$(cat "$SLOG")"
 expect_empty "QUIET1: and nothing is left behind in TMPDIR" "$(ls -A "$TMP/scratch")"
@@ -498,5 +817,21 @@ scan "$R" "$R/inside.txt"
 expect_status "QUIET3: the inside-checkout refusal is a refusal" 2 "$RC"
 expect_nonempty "QUIET3: it says something (positive)" "$OUT"
 no_entry "QUIET3: and the list's contents are not in it" "$OUT"
+
+# QUIET4 git's own complaints name what it read: a ref git calls broken is named in its warning
+EK="zq-brokenref-8150"
+R="$TMP/q4"; fx_repo "$R"
+mkdir -p "$R/.git/refs/tags"; git -C "$R" rev-parse HEAD > "$R/.git/refs/tags/$EK..x"
+L="$(fx_list q4 "$EK")"
+scan "$R" "$L"
+expect_contains "QUIET4: a repository holding a broken ref name scans (positive on the same output)" "entries=1" "$OUT"
+expect_eq "QUIET4: and git's warning about it does not reach the output" "0" "$(count_in "$OUT" "$EK")"
+LOUD="$(doctor loudrefs "refs/tags \\
+    2>/dev/null >" "refs/tags \\
+    >")"
+expect_false "QUIET4: the doctored copy (git's stderr let through) differs from the scan" cmp -s "$SCAN" "$LOUD"
+scanx "$LOUD" "$R" "$L"
+expect_contains "QUIET4: the doctored copy still runs (positive)" "entries=1" "$OUT"
+expect_ne "QUIET4: and with git's stderr let through the ref name DOES leak (the row can fail)" "0" "$(count_in "$OUT" "$EK")"
 
 finish
