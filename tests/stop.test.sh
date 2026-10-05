@@ -631,6 +631,46 @@ expect_absent "8d: AC-4.1 after the amend the same diff is inside Files: — no 
   "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
 expect_status "8e: …and the stop is admitted" "0" "$STOP_RC"
 
+# 8f (wave-27 T49; review pass 19 should-fix 1): a Files: path written in quotes is recorded without
+# them, so the stop wall counts the file INSIDE the contract. The row's files= is built by the real
+# reader (lib/brief.sh) from `Files: "lib/a.sh"`; the control carries the value the reader used to
+# record, quotes and all, and refuses the same diff.
+s8f_fixture() {  # <files= value> -> a project whose delivered tree touched only lib/a.sh
+  local d wt
+  d=$(mkfix)
+  git -C "$d" init -q 2>/dev/null
+  git -C "$d" symbolic-ref HEAD refs/heads/main
+  git -C "$d" config user.email t@example.invalid; git -C "$d" config user.name T
+  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"; echo base > "$d/base.txt"
+  git -C "$d" add .gitignore base.txt; git -C "$d" commit -qm base
+  wt="$d/.worktrees/s8f-writer"
+  git -C "$d" worktree add -q "$wt" -b wt/s8f-writer >/dev/null 2>&1
+  git -C "$wt" config user.email t@example.invalid; git -C "$wt" config user.name T
+  mkdir -p "$wt/lib"; echo one > "$wt/lib/a.sh"
+  git -C "$wt" add -A; git -C "$wt" commit -qm work
+  {
+    roster_header
+    roster_row_fixture status=identified session="$SID" name=s8f-writer agent_id="$AID" \
+      deliverable=.bionic/docs/record/s8f.md launched_at=2026-09-01T00:00:00Z \
+      subagent_type=bionic:implementor files="$1" suites_allowed=none suites_source=declared \
+      tool_use_id=toolu_S8F
+  } > "$d/.bionic/tmp/roster-$SID.state"
+  mkdir -p "$d/.bionic/docs/record"; echo done > "$d/.bionic/docs/record/s8f.md"
+  printf '%s' "$d"
+}
+S8F_FILES=$(bash -c '. "$1" || exit 9; brief_field "$(lift_contract_fields "$2" bionic:implementor)" files' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 'Files: "lib/a.sh"')
+expect_eq "8f precondition: the reader records Files: \"lib/a.sh\" as lib/a.sh" "lib/a.sh" "$S8F_FILES"
+D=$(s8f_fixture '"lib/a.sh"')
+fire "$D"
+expect_status "8f0: the control — the quoted value the reader used to record refuses the diff" "2" "$STOP_RC"
+expect_contains "8f0: …naming lib/a.sh" "lib/a.sh" "$STOP_ERR$(reason_of)"
+D=$(s8f_fixture "$S8F_FILES")
+fire "$D"
+expect_absent "8f: the stop wall counts lib/a.sh inside a contract declared as \"lib/a.sh\"" \
+  "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
+expect_status "8f: …and the stop is admitted" "0" "$STOP_RC"
+
 # ─────────────────────────────────────────────────────────────────────────────
 section "9: the fill refusal's headline counts the turn's launches and names only the rows left out (wave-20 T11b; review R4)"
 

@@ -34,7 +34,7 @@
 #
 #   lift_contract_fields <brief text> [<subagent_type>]   -> `kind=value` lines,
 #       `questions=` among them: a reader's `Questions:` set (wave-27 T15)
-#   dp_runs_cap <subagent_type> [<questions>] -> the suite runs a Re-executes: may declare
+#   dp_runs_cap <subagent_type> [<questions>] -> the runs a Re-executes: may declare, housekeeping aside
 #   brief_files_entry <entry>          -> the spelling a Files: line stores for <entry>
 #       (wave-27 T29, T42; D21): as written when the one reader records it, else `./<entry>`
 #       when that is recorded, else nothing it can be spelt as (rc 2)
@@ -193,14 +193,40 @@ QUOTE_CHARS="\`\"$(printf '\047')"
 # checked, and an auditor brief keeps today's rule there. The role is matched whole, in the
 # prefixed name the harness sends and the bare word a hand-written brief uses.
 #
-# THE CAP COUNTS SUITE RUNS (a field report against 1.11.0). A declared run the classifier
-# (lib/cmd-class.sh `cmd_class`) calls a suite run, the class the booking wraps, counts; any
-# other declared command, such as clearing a stale build directory first, is recorded and does
-# not count. `lift_contract_fields` applies it after its awk pass, so every door that lifts a
-# contract — a dispatch, `amend`, `task-add` — counts the same way, and the refusal texts read
-# these same functions, so the number a refusal prints is the number the lift applied.
+# THE CAP COUNTS EVERY DECLARED RUN BUT FILE HOUSEKEEPING (a field report against 1.11.0; wave-27
+# T49, review pass 24). It first counted only the runs the classifier (lib/cmd-class.sh
+# `cmd_class`) calls a suite run, so a test runner the classifier does not know, such as
+# `python -m pytest`, was recorded and counted nothing: six of them passed an auditor's cap of three.
+# Every declared command counts except one that only clears or stages files, so the cleanup of a
+# stale build directory is recorded and counts nothing: no `;`, `&&`, `|`, backquote or `$(` in
+# it, and its first WORD one of `DP_HOUSEKEEPING_WORDS`. The list lives here, once; `rm` is
+# matched as a whole word, so `rmx` and `./rm` count as runs. `lift_contract_fields` applies the
+# cap after its awk pass, so every door that lifts a contract — a dispatch, `amend`, `task-add` —
+# counts the same way, and the refusal texts read these same functions, so the number a refusal
+# prints is the number the lift applied.
 DP_AUDITOR_RUNS_MAX=3
 DP_SUITES_MAX=200
+DP_HOUSEKEEPING_WORDS="rm rmdir mkdir touch cp mv"
+dp_run_counts() {  # <one declared run, unmarked> -> 0 when it counts against the cap, 1 when it is housekeeping
+  local run="${1-}" first w
+  case "$run" in *';'*|*'&&'*|*'|'*|*'`'*|*'$('*) return 0 ;; esac
+  run="${run#"${run%%[![:space:]]*}"}"
+  first="${run%%[[:space:]]*}"
+  for w in $DP_HOUSEKEEPING_WORDS; do
+    [ "$first" = "$w" ] && return 1
+  done
+  return 0
+}
+# dp_counted_runs <the re_executes field, runs marked with backticks> -> how many of them count.
+dp_counted_runs() {
+  local rest="${1-}" run n=0
+  while :; do
+    case "$rest" in *'`'*'`'*) : ;; *) break ;; esac
+    rest="${rest#*\`}"; run="${rest%%\`*}"; rest="${rest#*\`}"
+    dp_run_counts "$run" && n=$((n + 1))
+  done
+  printf '%s' "$n"
+}
 dp_reads_evidence() {  # <subagent_type> [<questions, comma-joined>] -> 0 when the cap of three binds
   case "${1-}" in
     bionic:auditor|auditor) return 0 ;;
@@ -219,8 +245,8 @@ dp_runs_cap_words() {
   else printf '%s' "$DP_SUITES_MAX"; fi
 }
 # _brief_cap_suite_runs <cap> — the lift's lines on stdin, the same lines out with the
-# `re_executes=` runs past the <cap>th suite run moved to `re_executes_dropped=`. A run the
-# classifier does not call a suite run stays where the author put it and counts nothing.
+# `re_executes=` runs past the <cap>th counted run moved to `re_executes_dropped=`. A housekeeping
+# command (`dp_run_counts`) stays where the author put it and counts nothing.
 _brief_cap_suite_runs() {
   local cap="$1" lines runs dropped="" kept="" n=0 rest run tok
   lines="$(cat)"
@@ -232,7 +258,7 @@ _brief_cap_suite_runs() {
     case "$rest" in *'`'*'`'*) : ;; *) break ;; esac
     rest="${rest#*\`}"; run="${rest%%\`*}"; rest="${rest#*\`}"
     tok="\`${run}\`"
-    if [ "$(cmd_class "$run")" = suite ]; then
+    if dp_run_counts "$run"; then
       n=$((n + 1))
       if [ "$n" -gt "$cap" ]; then dropped="${dropped:+$dropped }$tok"; continue; fi
     fi
@@ -250,7 +276,7 @@ _brief_cap_suite_runs() {
 # THE RUN CAP IS APPLIED IN TWO PASSES (wave-27 T15). The awk lift bounds `Re-executes:` at
 # SUITES_MAX for every brief, the row field's width. Whether the cap of three binds depends on
 # the brief's own `Questions:` line, which only the lift reads, so it is applied after the awk
-# pass, counting suite runs alone (`dp_runs_cap`, `_brief_cap_suite_runs` above).
+# pass, counting every run but housekeeping (`dp_runs_cap`, `_brief_cap_suite_runs` above).
 lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines, absent kinds omitted
   local _lifted _cap
   _lifted="$(_brief_lift_awk "$@")"
@@ -352,7 +378,19 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
     # files_split <span> <arr> -> the items, in order, empties dropped. THE SPAN IS A LIST: split
     # on commas and on line ends (a list one item per line). A trailing ` # …` comment comes off
     # each line first, as `claimpat` takes it off `Subprocess claim:`, then a leading list marker
-    # (`- `, `* `, `1. `) and a surrounding pair of backticks off each item.
+    # (`- `, `* `, `1. `), a trailing `;` and ONE surrounding pair of backticks, double quotes,
+    # single quotes, parentheses or square brackets off each item (wave-27 T49; review pass 19
+    # should-fix 1: `Files: "lib/a.sh"` recorded the quotes as part of the path). What is left is
+    # judged as any item, so an unmatched mark stays on the item and `(("a/b"))` loses its outer
+    # pair only; a pair around prose is stripped and the prose is still refused as prose.
+    function strip_pair(t,   n, a, b) {
+      n = length(t)
+      if (n < 2) return t
+      a = substr(t, 1, 1); b = substr(t, n, 1)
+      if ((a == DQ && b == DQ) || (a == SQ && b == SQ) || (a == "(" && b == ")") || (a == "[" && b == "]"))
+        return substr(t, 2, n - 2)
+      return t
+    }
     function files_split(s, arr,   nl, lines, i, j, line, np, parts, it, n) {
       n = 0
       nl = split(s, lines, "\n")
@@ -364,7 +402,10 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
           it = parts[j]
           gsub(/^[ \t\r]+|[ \t\r]+$/, "", it)
           sub(/^([-*]|[0-9]+\.)[ \t]+/, "", it)
-          if (it ~ /^`[^`]*`$/) { it = substr(it, 2, length(it) - 2); gsub(/^[ \t]+|[ \t]+$/, "", it) }
+          sub(/;+[ \t]*$/, "", it)
+          if (it ~ /^`[^`]*`$/) it = substr(it, 2, length(it) - 2)
+          else it = strip_pair(it)
+          gsub(/^[ \t]+|[ \t]+$/, "", it)
           if (it != "") arr[++n] = it
         }
       }
@@ -435,7 +476,10 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
     # only showed. The callers of firsthit are untouched.
     # A FENCE IS ``` OR ~~~, AND ONLY ITS OWN CHARACTER CLOSES IT (wave-22 T13; critic-3598752
     # I2b): a ``` line inside a ~~~ block is content of that block, as in CommonMark.
-    function in_code_block(p,   pre, n, i, ls, fence, k, w, ch, t) {
+    # `fonly` (wave-27 T49): a nonzero second argument asks about a fence alone, so an indented
+    # line is not a code block. The Questions: reader asks it that way, since a reader brief
+    # indented whole still declares its questions.
+    function in_code_block(p, fonly,   pre, n, i, ls, fence, k, w, ch, t) {
       pre = substr(lc, 1, p - 1); n = split(pre, ls, "\n"); fence = ""
       for (i = 1; i < n; i++) {
         t = ls[i]; sub(/^[ \t]*/, "", t)
@@ -443,6 +487,7 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
         else if (fence != "" && index(t, fence) == 1) fence = ""
       }
       if (fence != "") return 1
+      if (fonly) return 0
       w = 0
       for (k = length(ls[n]); k >= 1; k--) {
         ch = substr(ls[n], k, 1)
@@ -952,7 +997,7 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       # HOW MANY RUNS A `Re-executes:` SPAN DECLARES (D3; REQ-1 AC-1.6; wave-20 T4, Δ3, Δ9).
       # Here, SUITES_MAX for every brief. The cap of three a reader of the evidence question is
       # held to (payload/context/checks-evidence.md, "cap 3 total") is applied on the bash side
-      # after this pass, counting suite runs only (`dp_runs_cap`, wave-27 T15). Either way it is
+      # after this pass, counting all but housekeeping (`dp_runs_cap`, wave-27 T49). Either way it is
       # the ceiling of the declaration itself, not only the width of a row field, so hitting it
       # is a fact about the brief, and loud: see marked_runs() above. A caller that passes no
       # cap gets SUITES_MAX, never an unbounded lift.
@@ -1178,9 +1223,28 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
       # outside the three prints as `questions_bad=` for the dispatch wall to refuse by name. An
       # unfilled slot is guidance and declares nothing. Which roles must carry it, and the set
       # each may carry, the dispatch wall judges; the lift only reads.
-      h = firsthit("questions")
+      #
+      # THE LABEL IS READ AS THE OTHER LABELS ARE (wave-27 T49; review pass 24): a Questions: line
+      # inside a fenced block is an example and not the label, so a brief whose only line is fenced
+      # has none (while the fences are unbalanced no line can be told from an example, and every
+      # line counts, as for Re-executes:); a trailing ` # ...` comment comes off the line, as on
+      # Files:; and the label is given ONCE. A second line is not read: it prints its line number
+      # beside the first as `questions_dup=` for the dispatch wall to refuse by name.
+      nqh = 0; split("", QH)
+      for (j = 1; j <= nh; j++)
+        if (HK[j] == "questions" && (fences_unbalanced() || !in_code_block(HLS[j], 1))) QH[++nqh] = j
+      h = (nqh > 0 ? QH[1] : 0)
+      if (nqh > 1) {
+        qdup = ""
+        for (j = 1; j <= nqh; j++) {
+          v = substr(text, 1, HLS[QH[j]] - 1)
+          qdup = (qdup == "" ? "" : qdup " ") (gsub(/\n/, "\n", v) + 1)
+        }
+        print "questions_dup=" qdup
+      }
       if (h > 0) {
         v = spanof(h); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
+        if (match(v, /(^|[ \t])#/)) v = substr(v, 1, RSTART - 1)
         nq = split(tolower(v), QW, /[ \t\r,]+/); qbad = ""; split("", QS)
         for (i = 1; i <= nq; i++) {
           if (istemplate(QW[i])) continue
@@ -1227,7 +1291,8 @@ _brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lif
 #   files_unread, files_bad
 #   suites_commented             a Suites: span that was entirely a comment (T35, critic C9)
 #   questions, questions_bad     a reader's questions, comma-joined in the table's order, and
-#                                the words outside the three (wave-27 T15)
+#                                the words outside the three (wave-27 T15); questions_dup, the
+#                                line numbers of a Questions: label given more than once (T49)
 #   anything else                the raw value
 brief_field() {
   local v
@@ -1235,6 +1300,7 @@ brief_field() {
   case "$2" in
     questions)        sanitize "$v" 40 ;;
     questions_bad)    sanitize "$v" 300 ;;
+    questions_dup)    sanitize "$v" 40 ;;
     files)            sanitize "$v" 900 files ;;
     suites)           sanitize "$v" 900 suites_allowed ;;
     re_executes)      sanitize "$v" 900 re_executes ;;
@@ -1249,16 +1315,19 @@ brief_field() {
 # `amend --files+`, stores (wave-27 T29, T42; REQ-12, D21). It asks the lift, so it is the one
 # reader, `files_entry`, and never a second copy of its rule. The answer is decided by what the
 # lift RECORDED, never by what it left unread (review pass 11 F6):
-#   rc 0  the lift records <entry> itself: prints <entry> as written
+#   rc 0  the lift records <entry> itself: prints <entry> as written (or as recorded, where the
+#         reader strips a surrounding pair of quotes or brackets or a trailing `;`)
 #   rc 1  the lift records `./<entry>`: prints that spelling
 #   rc 2  neither (white space, a comma, a trailing `.`, no letter or digit, a slot): prints
 #         <entry> as written, since no spelling of it is recorded whole
 brief_files_entry() {
-  local entry="${1-}"
+  local entry="${1-}" rec
   case "$entry" in ''|*[[:space:]]*|*,*) printf '%s' "$entry"; return 2 ;; esac
-  if [ "$(brief_field "$(lift_contract_fields "Files: $entry")" files)" = "$entry" ]; then
-    printf '%s' "$entry"; return 0
-  fi
+  # THE ENTRY AS THE LIFT RECORDS IT, which is the entry itself except where the reader strips
+  # punctuation (wave-27 T49): `"lib/a.sh"` and `lib/a.sh;` are stored as `lib/a.sh`, and `./` in
+  # front of the quoted spelling would record the quotes.
+  rec="$(brief_field "$(lift_contract_fields "Files: $entry")" files)"
+  case "$rec" in ''|*,*) : ;; *) printf '%s' "$rec"; return 0 ;; esac
   if [ "$(brief_field "$(lift_contract_fields "Files: ./$entry")" files)" = "./$entry" ]; then
     printf './%s' "$entry"; return 1
   fi
@@ -1544,9 +1613,9 @@ agent's own command against exactly that set — a run dropped here is a command
 be refused there 40 minutes later, for running exactly what its own brief had named.
 
 The cap of three is the evidence question's, from payload/context/checks-evidence.md
-(\"cap 3 total\"), and binds whichever reader holds that question; it counts suite runs
-only, so a housekeeping command beside them does not count. Every other brief may declare
-as many runs as a Suites: line may name suites (${DP_SUITES_MAX}).
+(\"cap 3 total\"), and binds whichever reader holds that question; it counts every run
+but file housekeeping (${DP_HOUSEKEEPING_WORDS}), so a cleanup beside them is free.
+Every other brief may declare as many runs as a Suites: line may name suites (${DP_SUITES_MAX}).
 
 Fix: mark at most ${capw} runs with backticks, across all your Re-executes: lines —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`, \`go test ./...\`
@@ -1722,7 +1791,9 @@ Then retry the dispatch."
       # which is the whole of what this arm exists to require.
       reader="an auditor"
       case "$role" in bionic:auditor|auditor) : ;; *) reader="a ${role#bionic:} reading evidence" ;; esac
-      if [ "$suites" = "none" ] && [ -z "$re_executes" ]; then
+      # A RUN THAT ONLY CLEARS OR STAGES FILES IS NO RUN (wave-27 T49, review pass 24): `rm -rf dist`
+      # beside `Suites: none` gave the reader nothing to re-execute and was admitted as one.
+      if [ "$suites" = "none" ] && [ "$(dp_counted_runs "$re_executes")" -eq 0 ]; then
         found=1; "$sink" finding "${reader} names no suites" "name the suites to re-execute" \
           "Role: ${role}${questions:+ (Questions: ${questions})}
 
