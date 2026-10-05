@@ -10356,6 +10356,15 @@ expect_contains "63a2 …the refusal's first line names the frontmatter line to 
 poke "$R63" proof-add review "record/task-01-fixture/evidence.md" --question evidence --reader w-tcrit
 s42_unchanged "63a3 F1 with no base, a first reading over the whole branch is refused too: its start cannot be held" 1 "$P63"
 expect_contains "63a4 …naming the same line" "base-sha: <the commit the work started from>" "$(printf '%s\n' "$OUT" | head -1)"
+# A base-sha: that names no commit is no base (review pass 16, probe3): the same refusal, saying which.
+cp "$P63" "$TMPROOT/s63-nobase"; s63_base "$P63" deadbeef; s42_snap "$R63" "$P63"
+poke "$R63" proof-add review "record/task-01-fixture/tail.md" --question evidence --reader w-tcrit
+s42_unchanged "63a5 with base-sha: deadbeef, which is no commit, a first reading over the tail" 1 "$P63"
+expect_contains "63a6 …its first line naming the line to add" "add base-sha: <the commit the work started from> to the frontmatter of " \
+  "$(printf '%s\n' "$OUT" | head -1)"
+expect_contains "63a7 …and saying the base it names is no commit" "its base-sha: deadbeef is no commit here" \
+  "$(printf '%s\n' "$OUT" | head -1)"
+cp "$TMPROOT/s63-nobase" "$P63"; s42_snap "$R63" "$P63"
 # The judge on the same plan text with its readings planted at the head (exp6.sh): no base, exit 2.
 mkdir -p "$R63/.bionic/tmp"; S63_PP="$R63/.bionic/tmp/planted.plan.md"; cp "$P63" "$S63_PP"
 for s63q in evidence adversarial structure; do s57_fact "$s63q" "$S63_H" pass piece "$S63_PP"; done
@@ -10363,6 +10372,9 @@ s57_floor "$S63_H" "$S63_PP"
 s57_state "$S63_PP" "$S63_H"
 expect_eq "63b F1 facts_state on a plan with no base that owes readings: exit 2" "2" "$S57_RC"
 expect_eq "63b2 …printing nothing" "" "$S57_OUT"
+cp "$S63_PP" "$R63/.bionic/tmp/badbase.plan.md"; s63_base "$R63/.bionic/tmp/badbase.plan.md" deadbeef
+s57_state "$R63/.bionic/tmp/badbase.plan.md" "$S63_H"
+expect_eq "63b2b with base-sha: deadbeef, which is no commit, the judge exits 2 and prints nothing" "2 " "$S57_RC $S57_OUT"
 s63_base "$S63_PP" "$S63_I"
 s57_state "$S63_PP" "$S63_H"
 expect_eq "63b3 control: the same planted lines with the base in the frontmatter are judged, every line covered" \
