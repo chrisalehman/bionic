@@ -6370,7 +6370,7 @@ expect_eq "31b the turn is refused — the ledger is live and two rows are ready
   "block" "$(s31_decision)"
 expect_contains "31b2 …naming T2, the first ready row" "T2" "$(s31_reason)"
 expect_contains "31b3 …and T3, the second — named, not counted" "T3" "$(s31_reason)"
-expect_contains "31b4 …and saying what answers it" "fill-declined:" "$(s31_reason)"
+expect_contains "31b4 …and saying what answers it: the decline verb (wave-27 T34)" "session-poker.sh decline T2,T3 'why they wait'" "$(s31_reason)"
 
 # ---------- 31c: the same turn, with the rows dispatched, ends in silence ----------
 #
@@ -7116,7 +7116,7 @@ case "$OUT" in
 esac
 expect_contains "36c …and carries the tick command, by this poker's absolute path" "bash $POKER tick" "$OUT"
 expect_eq "36d …on one line (a CronCreate prompt)" "1" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
-expect_contains "36e …and names the fill answer" "fill-declined:" "$OUT"
+expect_contains "36e …and names the fill answer, the decline verb (wave-27 T34)" "session-poker.sh decline IDS" "$OUT"
 OUT="$( cd "$R36" && CLAUDE_CODE_SESSION_ID="" bash "$POKER" prompt 2>&1 )"; RC=$?
 expect_eq "36f with no session key there is no marker to print (exit 3)" "3" "$RC"
 poke "$R36" prompt extra
@@ -7444,7 +7444,7 @@ expect_contains "41a2 …the fill answer is asked only when a FILL line printed"
   'only if a "poker: FILL" line printed' "$S41_PROMPT"
 expect_contains "41a3 …the stand-down answer only when a STANDDOWN line printed" \
   'only if a "poker: STANDDOWN" line printed' "$S41_PROMPT"
-expect_contains "41a4 …and the fill answer is still named" 'fill-declined: <reason>' "$S41_PROMPT"
+expect_contains "41a4 …and the fill answer is still named: the decline verb (wave-27 T34)" 'decline IDS' "$S41_PROMPT"
 expect_contains "41a5 AC-4.12 …the stand-down answer names hold, its reason a quoted placeholder" "session-poker.sh hold NAME 'why it stays up'" "$S41_PROMPT"
 expect_contains "41a6 AC-4.13 …ListAgents only when the roster has an open row" \
   "ListAgents only when the roster has an open row" "$S41_PROMPT"
@@ -9518,6 +9518,44 @@ poke "$RAD" amend w1 --suites+ tests/c.test.sh --reason 'one more suite'
 expect_eq "AMEND-ROOT7 a derived row holding two files takes a suite (exit 0)" "0" "$RC"
 expect_contains "AMEND-ROOT7 …and the suite is on the row" "c.test.sh" \
   "$(s30_field "$(s30_last "$RAD")" suites_allowed)"
+# EACH --files+ VALUE IS READ ON ITS OWN (wave-27 T34; review pass 19 should-fix 2, A-orch-70): the
+# values used to be joined into one Files: line, so a ` #` note in one hid every later one and the
+# call exited 0. A quoted value records the bare path, as the dispatch wall's reader reads one line.
+RAC="$(make_repo amend-comment)"; new_roster "$RAC"; s30_row "$RAC"
+poke "$RAC" amend w1 --files+ 'lib/x.sh # the hook' --files+ lib/y.sh --reason 'a note on the first'
+expect_eq "AMEND-ROOT8 a note after the first value: both values recorded (exit 0)" "0" "$RC"
+expect_eq "AMEND-ROOT8 …files= holds lib/x.sh and lib/y.sh" "hooks/a.sh,lib/x.sh,lib/y.sh" \
+  "$(s30_field "$(s30_last "$RAC")" files)"
+poke "$RAC" amend w1 --files+ '"lib/q.sh"' --reason 'a quoted path'
+expect_eq "AMEND-ROOT9 a quoted value records the bare path (exit 0)" "0" "$RC"
+expect_eq "AMEND-ROOT9 …files= gains lib/q.sh, no quote" "hooks/a.sh,lib/x.sh,lib/y.sh,lib/q.sh" \
+  "$(s30_field "$(s30_last "$RAC")" files)"
+# THE ROW'S QUESTIONS REACH THE CAP (wave-27 T34; T15's report items 1 and 2, A-orch-73): a critic
+# holding `evidence` is held to three runs as an auditor is; one holding `adversarial` is not.
+RAQ="$(make_repo amend-questions)"; new_roster "$RAQ"
+s30_row "$RAQ" subagent_type=bionic:critic suites_allowed=none questions=evidence \
+  're_executes=`npm test` `pytest tests/unit` `go test ./...`'
+RAQ_SUM="$(cksum < "$(roster_of "$RAQ")")"
+poke "$RAQ" amend w1 --reexec+ 'cargo test' --reason 'a fourth run'
+expect_eq "AMEND-Q1 a critic holding evidence: a fourth run is REFUSED (exit 1)" "1" "$RC"
+expect_contains "AMEND-Q1b …by the three-run cap" "3-run cap" "$OUT"
+expect_eq "AMEND-Q1c …and the roster is unchanged" "$RAQ_SUM" "$(cksum < "$(roster_of "$RAQ")")"
+RAQ2="$(make_repo amend-questions-adv)"; new_roster "$RAQ2"
+s30_row "$RAQ2" subagent_type=bionic:critic suites_allowed=none questions=adversarial \
+  're_executes=`npm test` `pytest tests/unit` `go test ./...`'
+poke "$RAQ2" amend w1 --reexec+ 'cargo test' --reason 'a fourth run'
+expect_eq "AMEND-Q2 control: a critic holding adversarial takes a fourth run (exit 0)" "0" "$RC"
+expect_eq "AMEND-Q3 the amended row carries questions= from the row it copied" "adversarial" \
+  "$(s30_field "$(s30_last "$RAQ2")" questions)"
+poke "$RAQ2" extend w1 'more to read'
+expect_eq "AMEND-Q4 extend's row carries questions= too (exit 0)" "0|adversarial" \
+  "$RC|$(s30_field "$(s30_last "$RAQ2")" questions)"
+R41Q="$(s41_world s41-hold-questions)"
+s41_transcript 1 "w-1:idle"
+printf '%s|questions=evidence\n' "$(grep -F '|name=w-1|' "$(roster_of "$R41Q")" | tail -1)" >> "$(roster_of "$R41Q")"
+poke "$R41Q" hold w-1 'kept for a second pass'
+expect_eq "AMEND-Q5 hold's row carries questions= too (exit 0)" "0|evidence" \
+  "$RC|$(s30_field "$(grep -F '|name=w-1|' "$(roster_of "$R41Q")" | tail -1)" questions)"
 
 # ============================================================
 section "Section 55 §RECON-PLAN: the tick asks for a task-list reconcile when current: moves 3 to 4 and when the table grows (wave-27 T13; REQ-11 AC-11.3; D20)"
@@ -10580,16 +10618,16 @@ expect_eq "60a2 two fixes in one range: a MOVED line for T7 and one for T8, each
 s60_world s60-one @A whole
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S60_INIT"
 s60_tick
-expect_eq "60b one fix after the whole read: T7 alone; a row landed before the range is not named" \
-  "poker: MOVED T7 — AC-2.1, AC-2.2" "$(s60_moved)"
+expect_eq "60b one fix after the whole read, the other landed before it: C is a commit no header names, so one MOVED unknown line (re-pinned, wave-27 T34)" \
+  "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
 # A docs-only tail: the whole reading at C, every row landed by C, and one commit past C no row landed.
 s60_world s60-tail @C whole
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
 git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "a docs-only tail" >/dev/null 2>&1
 S60_D="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 s60_tick
-expect_eq "60c a docs-only tail: RANGE C..D, and MOVED none" \
-  "poker: RANGE T3 ${S59W_C}..${S60_D} $S60_RANGE_TAIL|poker: MOVED none" \
+expect_eq "60c a tail made straight on the working branch: RANGE C..D, and MOVED unknown, never none (re-pinned, wave-27 T34)" \
+  "poker: RANGE T3 ${S59W_C}..${S60_D} $S60_RANGE_TAIL|poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T3 ')|$(s60_moved)"
 # No whole fact yet: the structure reading at A is a piece read. The range prints, and no MOVED line.
 s60_world s60-nowhole @A piece
@@ -10603,13 +10641,66 @@ expect_eq "60d no whole fact for the question: the RANGE line prints and no MOVE
 s60_world s60-unknown @A whole
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"
 s60_tick
-expect_eq "60e a landed build row with no landing record: one MOVED unknown line, in place of T7's" \
-  "poker: MOVED unknown — T8 carry no landing record" "$(s60_moved)"
+expect_eq "60e a landed build row with no landing record: one MOVED unknown line, in place of T7's (re-pinned, wave-27 T34)" \
+  "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
 s60_world s60-nocommit @A whole
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 s60_tick
-expect_eq "60f a merge that is no commit here is no landing record: MOVED unknown names T8" \
-  "poker: MOVED unknown — T8 carry no landing record" "$(s60_moved)"
+expect_eq "60f a merge that is no commit here is no landing record: C is unrecorded (re-pinned, wave-27 T34)" \
+  "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
+# EVERY COMMIT OF THE RANGE IS A RECORDED LANDING, OR NO LIST (wave-27 T34; review pass 30 should-fix
+# 1 and 2, A-orch-86). A header with row=—, and a commit made by hand past landings that all have
+# headers, each make the one MOVED unknown line; the read is then the whole range.
+s60_world s60-dash @A whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land — "$S59W_C"
+s60_tick
+expect_eq "60g a landing whose header says row=— is no recorded landing of a row: MOVED unknown" \
+  "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
+s60_world s60-hand @A whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
+s60_tick
+expect_eq "60h precondition: every commit of A..C recorded, the rows are named" \
+  "poker: MOVED T7 — AC-2.1, AC-2.2|poker: MOVED T8 — AC-4.1, AC-5.1" "$(s60_moved)"
+git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "made by hand on the working branch" >/dev/null 2>&1
+s60_tick
+expect_eq "60h2 one more commit made by hand: MOVED unknown, in place of both lines" \
+  "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
+# THE COST: one `git rev-list` per offered row, and no git process per landing. A shim logs every
+# git the tick runs; fifty landings cost the tick the same git calls as two.
+S60_SHIM="$TMPROOT/s60-shim"; S60_GITLOG="$TMPROOT/s60-git.log"; mkdir -p "$S60_SHIM"
+printf '#!/bin/bash
+printf "%%s\\n" "$*" >> %q
+exec %q "$@"
+' "$S60_GITLOG" "$(command -v git)" > "$S60_SHIM/git"
+chmod +x "$S60_SHIM/git"
+s60_counted_tick() {  # -> S60_ALL (git calls), S60_RL (rev-list calls) of one tick
+  local was="$PATH"
+  : > "$S60_GITLOG"; export PATH="$S60_SHIM:$PATH"; s60_tick; export PATH="$was"
+  S60_ALL="$(awk 'END { print NR + 0 }' "$S60_GITLOG")"
+  S60_RL="$(/usr/bin/grep -c 'rev-list --first-parent ' "$S60_GITLOG" | tr -d ' ')"
+}
+s60_world s60-cost @A whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
+s60_counted_tick
+expect_eq "60i precondition: the shim saw the tick's git calls, and the rows are named" \
+  "poker: MOVED T7 — AC-2.1, AC-2.2|poker: MOVED T8 — AC-4.1, AC-5.1" "$(s60_moved)"
+expect_ne "60i0 …through the shim" "0" "$S60_ALL"
+expect_eq "60i2 two landings in the range: one rev-list for the one offered row" "1" "$S60_RL"
+S60_ALL2="$S60_ALL"
+# Forty-eight more landed rows, each its own landing, so a cost per landing would show.
+awk '{ print } /^\| T8 \| 4 \| build \|/ { for (i = 10; i < 58; i++) printf "| T%d | 4 | build | landing %d | implementor | — | 30 | REQ-1 | x%d.sh | — | — | landed |  |\n", i, i, i }' \
+  "$P59W" > "$P59W.tmp" && mv "$P59W.tmp" "$P59W"
+for s60n in $(seq 10 57); do
+  git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "landing $s60n" >/dev/null 2>&1
+  s60_land "T$s60n" "$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD)"
+done
+expect_eq "60i3 precondition: fifty landings in the record's range" "50" \
+  "$(git -C "$R59W" rev-list --first-parent "${S59W_A}..$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD)" | awk 'END { print NR }')"
+s60_counted_tick
+expect_eq "60i4 fifty landings: still one rev-list" "1" "$S60_RL"
+expect_eq "60i5 …and the same git calls as two landings: none per landing" "$S60_ALL2" "$S60_ALL"
+expect_contains "60i6 …and the rows are named, T7 and T8 first" "poker: MOVED T7 — AC-2.1, AC-2.2|poker: MOVED T8 — AC-4.1, AC-5.1|poker: MOVED T10 — AC-1.1" "$(s60_moved)"
+expect_contains "60i7 …through the last of the fifty" "poker: MOVED T57 — AC-1.1" "$(s60_moved)"
 POKE_BOUND="$S60_BOUND_WAS"
 
 # ============================================================
@@ -11008,6 +11099,18 @@ expect_eq "62x16 …while lib/a.sh, named but not changed by the range, is on no
   "$(/usr/bin/grep -c '^check-changed: ' "$S62_REC/release-check-${S62_W4}.log" 2>/dev/null) $(printf '%s\n' "$OUT" | /usr/bin/grep -c 'check-changed: lib/a.sh')"
 s57_state "$P62" "$S62_W4"
 expect_eq "62x17 …and the fact is still written: the judge says covered at W4" "covered" "$(s57_of check)"
+# THE WORKING TREE IS HANDED TO THE CHECK (wave-27 T34; T50's record, S3): BIONIC_CHECK_TREE, the
+# absolute path of the working checkout, beside BIONIC_CHECK_BASE and BIONIC_CHECK_HEAD.
+S62_TREE_SEEN="$TMPROOT/s62-tree-seen"
+printf '#!/bin/bash
+printf "%%s\\n" "${BIONIC_CHECK_TREE:-unset}" > %q
+' "$S62_TREE_SEEN" > "$TMPROOT/s62-tree.sh"
+printf 'release-check: bash %s\n' "$TMPROOT/s62-tree.sh" > "$R62/.bionic/config.yaml"
+s57_commit "$S62_WT" lib/t.sh W5 >/dev/null
+poke "$R62" release-check
+expect_eq "62t release-check with a check that reads the tree exits 0" "0" "$RC"
+expect_eq "62t2 BIONIC_CHECK_TREE is the working checkout's absolute path" "$(cd "$S62_WT" && pwd -P)" \
+  "$(cat "$S62_TREE_SEEN" 2>/dev/null)"
 POKE_BOUND="$S62_BOUND_WAS"
 
 # ============================================================
@@ -11507,7 +11610,8 @@ expect_contains "63y4 both places hex and neither a commit: no base, the judge e
 expect_contains "63y5 …naming the value it found and that it is no commit here" "its base-sha: deadbeef is no commit here" "$S63Y_ERR"
 POKE_BOUND="$S63_BOUND_WAS"
 
-# =====================================================section "Section 64 §DEBT: a declared red that landed is a fact the run owes until a green run after its token cleared (wave-27 T31; REQ-14 AC-14.3, AC-14.2; D23)"
+# ============================================================
+section "Section 64 §DEBT: a declared red that landed is a fact the run owes until a green run after its token cleared (wave-27 T31; REQ-14 AC-14.3, AC-14.2; D23)"
 # ============================================================
 #
 # `land` prints `landed-red=<suite>` for a row that declared its red at dispatch, and the
@@ -11654,7 +11758,125 @@ s64_proof floor 2026-10-05T03:00:00Z record/wave-01-fixture/floor-03.log
 s57_state "$P64" "$S64_H"
 expect_eq "64j3 the slug removed and the only green proof dated 03:00Z, before the red landing: absent" "absent" "$(s57_of "$S64_EXT")"
 POKE_BOUND="$S64_BOUND_WAS"
-=======
+# ============================================================
+section "Section 65 §DECLINE-VERB §DECLINE-LOG §BUDGET-USER: a wall is never answered on the console (wave-27 T34; REQ-15 AC-15.1, AC-15.4, AC-15.5; D24)"
+# ============================================================
+#
+# THE DEFECT (design ledger Δ9, Δ10). The turn-end fill wall was answered by a `fill-declined:`
+# line in the orchestrator's reply, which the user read on every turn and which said nothing to a
+# person. `decline <id>[,<id>] '<reason>'` records the decline as one line in the run's fill
+# ledger, the line a reply-form turn leaves there, so the tick and the wall read it by the rule
+# they already apply (`fill_standing_decline`): it answers the rows it names and stands until a
+# row it did not name is ready. A user's cap on writers is no decline at all: `budget
+# writers=<n> '<reply>'` writes it into the plan header every reader of the ceiling reads.
+S65_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R65="$(make_repo s65-decline)"; new_roster "$R65"
+P65="$(s31_task_plan "$R65" T1)"
+bind_marker "$R65" "$P65"
+add_row "$R65" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
+s65_led() { cat "$1/.bionic/docs/record/${2:-task-01-fixture}/fill-ledger.log" 2>/dev/null; }
+s65_field() {  # <ledger line> <key>
+  printf '%s\n' "$1" | awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) print substr($i, length(k) + 2) }'
+}
+s65_count() { s65_led "$@" | /usr/bin/grep -c '^fill-ledger/v1|' | tr -d ' '; }
+require_helpers s65_led s65_field s65_count
+poke_pressure "$R65" 8192 1.0 tick
+expect_contains "65a precondition: the tick fills the two ready rows" "poker: FILL T2 T3" "$OUT"
+poke "$R65" decline T2,T3 'the machine is saturated'
+expect_eq "65b §DECLINE-VERB the verb records the decline (exit 0)" "0" "$RC"
+S65_LINE="$(s65_led "$R65" | tail -1)"
+expect_eq "65b2 §DECLINE-LOG AC-15.5 the run's fill ledger gains one line naming its ids" "T2,T3" "$(s65_field "$S65_LINE" named)"
+expect_eq "65b3 …its reason" "the machine is saturated" "$(s65_field "$S65_LINE" declined)"
+S65_AT="$(s65_field "$S65_LINE" at)"
+expect_regex "65b4 …and its time" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$S65_AT"
+poke_pressure "$R65" 8192 1.0 tick
+expect_contains "65c AC-15.1 the next tick prints the standing decline, its time and its reason, in the reply form's words" \
+  "poker: fill-declined standing since ${S65_AT} — the machine is saturated" "$OUT"
+expect_absent "65c2 …and no FILL for the rows it named" "poker: FILL" "$OUT"
+printf '| T4 | bugfix | standard | a unit nobody declined | pending | — |\n' >> "$P65"
+poke_pressure "$R65" 8192 1.0 tick
+expect_eq "65d a row the decline did not name is ready: the tick fills it alone" "poker: FILL T4" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T')"
+S65_TR="$(s31_transcript "$R65" "carry on")"
+s31_stop "$R65" "$S65_TR"
+expect_eq "65e …and the wall refuses the silent turn" "block" "$(s31_decision)"
+expect_contains "65e2 …naming T4 in the verb it prints" "session-poker.sh decline T4 'why they wait'" "$(s31_reason)"
+expect_absent "65e3 …and asking for no line in the reply" 'write "fill-declined:' "$(s31_reason)"
+S65_N="$(s65_count "$R65")"
+poke "$R65" decline T9 'no such row'
+expect_eq "65f an id that is no plan row is refused (exit 1)" "1" "$RC"
+expect_contains "65f2 …saying which" "T9" "$OUT"
+poke "$R65" decline T1 'it is running'
+expect_eq "65g a row that is not ready is refused (exit 1)" "1" "$RC"
+expect_contains "65g2 …saying which" "T1" "$OUT"
+poke "$R65" decline T4 ''
+expect_eq "65h an empty reason is refused (exit 2)" "2" "$RC"
+poke "$R65" decline
+expect_eq "65i no ids is refused: there is no decline-everything form (exit 2)" "2" "$RC"
+expect_eq "65j …and no refusal wrote a ledger line" "$S65_N" "$(s65_count "$R65")"
+expect_ne "65j2 precondition: the count is of real lines" "0" "$S65_N"
+poke "$R65" decline T4 'T4 waits for the same machine'
+expect_eq "65k §DECLINE-LOG each decline is one more line" "$((S65_N + 1))" "$(s65_count "$R65")"
+poke_pressure "$R65" 8192 1.0 tick
+expect_absent "65k2 …and the rows the first decline named stay answered beside the second's" "poker: FILL" "$OUT"
+expect_contains "65k3 …the newer reason standing" "— T4 waits for the same machine" "$OUT"
+
+# ---------- §BUDGET-USER (AC-15.4): the user's cap is written into the header ----------
+R65B="$(make_repo s65-budget)"; ( cd "$R65B" && git commit -q --allow-empty -m init )
+git -C "$R65B" config user.name "Dana Fixture"
+P65B="$(s42_plan "$R65B" 4)"
+awk '{ print } /^\| T5 \| 5 \| verify \|/ { print "| T6 | 4 | build | a ready build | implementor | — | 30 | REQ-1 | c.sh | — | — | pending |" }' \
+  "$P65B" > "$P65B.tmp" && mv "$P65B.tmp" "$P65B"
+s42_snap "$R65B" "$P65B"
+s34_gate "$R65B"
+expect_eq "65m0 precondition: the fixture with a ready build row is admitted by the real commit gate" "0" "$GATE_RC"
+new_roster "$R65B"
+for s65w in w-a w-b w-c; do
+  add_row "$R65B" name="$s65w" deliverable="$s65w.md" duration="4 hours" launched_at="$(iso_ago 60)"
+done
+poke_pressure "$R65B" 8192 1.0 tick
+expect_contains "65m control: the probe's eight writers with three open offer the ready row" "poker: FILL T6" "$OUT"
+poke "$R65B" budget writers=3 'keep it at three'
+expect_eq "65n AC-15.4 budget writers=3 exits 0" "0" "$RC"
+expect_eq "65n2 …the header's writers value is the user's, with source=user" \
+  "parallel-budget: writers=3 suites=4 worktrees=32 test_jobs=8 source=user" "$(/usr/bin/grep '^parallel-budget:' "$P65B")"
+expect_regex "65n3 …and the frontmatter carries budget-override: <user> <date> derived=<n> chosen=<n>" \
+  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=3$' "$(/usr/bin/grep '^budget-override:' "$P65B")"
+expect_eq "65n4 …inside the frontmatter, after the budget line" "parallel-budget" \
+  "$(awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f && /^budget-override:/ { print prev; exit } f { split($0, a, ":"); prev = a[1] }' "$P65B")"
+# The gate is asked with the three writers' roster set aside: the plan is what is judged here.
+mv "$(roster_of "$R65B")" "$TMPROOT/s65-roster"
+s34_gate "$R65B"
+mv "$TMPROOT/s65-roster" "$(roster_of "$R65B")"
+expect_eq "65n5 …and the commit gate admits the plan" "0" "$GATE_RC"
+S65B_LINES="$(s65_count "$R65B" wave-01-fixture)"
+poke_pressure "$R65B" 8192 1.0 tick
+expect_absent "65o with the user's cap reached the tick offers no writer row" "poker: FILL" "$OUT"
+expect_contains "65o2 …saying the budget is full at the user's three" "of writers=3" "$OUT"
+S65B_TR="$(s31_transcript "$R65B" "carry on")"
+s31_stop "$R65B" "$S65B_TR"
+expect_eq "65p …and the turn-end wall asks for nothing" "" "$(s31_decision)"
+expect_eq "65p2 …with no decline recorded" "" "$(s65_field "$(s65_led "$R65B" wave-01-fixture | tail -1)" declined)"
+expect_eq "65p3 precondition: the wall wrote its turn's line" "$((S65B_LINES + 1))" "$(s65_count "$R65B" wave-01-fixture)"
+s42_snap "$R65B" "$P65B"
+poke "$R65B" budget writers=0 'stop everything'
+s42_unchanged "65q writers=0" 1 "$P65B"
+expect_contains "65q2 …saying a cap of none is no budget" "writers=0" "$OUT"
+poke "$R65B" budget writers=six 'six'
+s42_unchanged "65q3 a value that is not a number" 1 "$P65B"
+poke "$R65B" budget suites=3 'three suites'
+s42_unchanged "65q4 a field other than writers" 2 "$P65B"
+poke "$R65B" budget writers=3
+s42_unchanged "65q5 no reply" 2 "$P65B"
+poke "$R65B" budget writers=12 'go wide'
+expect_eq "65r a value above the probe's derived ceiling is the user's, recorded (exit 0)" "0" "$RC"
+expect_contains "65r2 …the header reads writers=12" "parallel-budget: writers=12 suites=4" "$(cat "$P65B")"
+expect_regex "65r3 …and derived= is still the probe's eight" \
+  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=12$' "$(/usr/bin/grep '^budget-override:' "$P65B")"
+expect_eq "65r4 …one override line, rewritten" "1" "$(/usr/bin/grep -c '^budget-override:' "$P65B" | tr -d ' ')"
+expect_contains "65r5 …and the verb says what the dispatch wall then holds the run to" "the dispatch wall holds the run to 12" "$OUT"
+POKE_BOUND="$S65_BOUND_WAS"
+
 
 # ============================================================
 section "Section 66 §AMEND-ID §UNCHECKED: amend records a set for an agent its start did not place, and the tick says a reader started without its checks (wave-27 T38; review pass 8 F3, pass 31 F2)"

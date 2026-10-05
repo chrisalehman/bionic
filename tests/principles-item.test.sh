@@ -892,6 +892,32 @@ sed 's/a directory/a folder/' "$REMOVE_SH" > "$TMP/remove-mutant.sh"
 expect_true "COPIES: the mutant copy still parses" bash -n "$TMP/remove-mutant.sh"
 expect_ne "COPIES: …and its _rm_regular no longer matches (the pin can go red)" \
   "$LIB_REG" "$(fn_body "$TMP/remove-mutant.sh" _rm_regular)"
+# The _rm_marker_faults pin gets its own mutant (wave-27 T55, review pass 32 F6).
+sed 's/a second block (the first/a second marker block (the first/' "$REMOVE_SH" > "$TMP/remove-mutant-chk.sh"
+expect_true "COPIES: the faults mutant still parses" bash -n "$TMP/remove-mutant-chk.sh"
+expect_ne "COPIES: …and its _rm_marker_faults no longer matches (the pin can go red)" \
+  "$LIB_CHK" "$(fn_body "$TMP/remove-mutant-chk.sh" _rm_marker_faults)"
+# The link resolver `_rm_regular` calls is deps.sh's, body for body (T55, F6).
+LIB_LNK="$(fn_body "${PAYLOAD}/scripts/lib/deps.sh" bionic_link_target)"; RM_LNK="$(fn_body "$REMOVE_SH" bionic_link_target)"
+expect_nonempty "COPIES: bionic_link_target's body reads out of deps.sh" "$LIB_LNK"
+expect_eq "COPIES: remove.sh's bionic_link_target is deps.sh's" "$LIB_LNK" "$RM_LNK"
+sed 's/"\$n" -lt 40/"$n" -lt 41/' "$REMOVE_SH" > "$TMP/remove-mutant-lnk.sh"
+expect_true "COPIES: the resolver mutant still parses" bash -n "$TMP/remove-mutant-lnk.sh"
+expect_ne "COPIES: …and its bionic_link_target no longer matches (the pin can go red)" \
+  "$LIB_LNK" "$(fn_body "$TMP/remove-mutant-lnk.sh" bionic_link_target)"
+# The NUL test, the one line both copies refuse a NUL byte with, held to the
+# library's line by itself, so a mutant on that line alone moves it (T55, F6).
+nul_line() {  # <body> — the line of a body that tests for a NUL byte
+  local line
+  while IFS= read -r line; do case "$line" in *"tr -d '\\000'"*) printf '%s' "$line"; return 0 ;; esac; done <<< "$1"
+}
+LIB_NUL="$(nul_line "$LIB_REG")"
+expect_nonempty "COPIES: the library's NUL test reads out of markers_regular" "$LIB_NUL"
+expect_eq "COPIES: remove.sh's NUL test is the library's" "$LIB_NUL" "$(nul_line "$RM_REG")"
+sed "s/tr -d '\\\\000' < \"\$1\" | cmp -s - \"\$1\"/tr -d '\\\\000' < \"\$1\" | cmp - \"\$1\"/" "$REMOVE_SH" > "$TMP/remove-mutant-nul.sh"
+expect_true "COPIES: the NUL mutant still parses" bash -n "$TMP/remove-mutant-nul.sh"
+expect_ne "COPIES: …and its NUL test no longer matches (the pin can go red)" \
+  "$LIB_NUL" "$(nul_line "$(fn_body "$TMP/remove-mutant-nul.sh" _rm_regular)")"
 
 # ---------------------------------------------------------------------------
 section "§T51-UNREADABLE: a regular file the user cannot read is reported as unreadable (F4)"
