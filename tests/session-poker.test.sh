@@ -10936,6 +10936,101 @@ expect_contains "63r19 the shipped proof_reading refuses multi.md for its passes
 expect_contains "63r20 mutation: the doctored copy still reads a one-pass record (it runs)" "pass piece ${S58_C1} rc=0" \
   "$(s63_read "$S63_M_ONE" "$S58_REC/rc-pass-na.md")"
 expect_contains "63r21 …and admits multi.md, so 63r9 can fail" "pass piece ${S58_C1} rc=0" "$(s63_read "$S63_M_ONE" "$S58_REC/multi.md")"
+
+# ---------- §BASE-WORD, §BASE-FIRST, §RETRY (review pass 20 F1, F4, F3; wave-27 T14, A-orch-72) ----------
+# F1: a `base-sha:` is a base only when it is 7 to 40 hex AND names a commit, so `HEAD` or a branch
+# name, which resolve to wherever the checkout is, is no base, as `deadbeef` is not; the refusal
+# says the value is not a commit id. F4: the base is the first of the places proof_plan_base reads
+# (`## SDLC State`, then the frontmatter) whose value is 7 to 40 hex, so an empty or placeholder
+# Step-4 value no longer hides a real frontmatter one; both refusals that send the user to add a
+# base name the frontmatter. F3: the one-reader rule counts only a DIFFERENT name's row that is past
+# `intended` and still open. On §BASE's plan (its readings registered from the base, above) and on
+# §58's repository and rows.
+s63x_sdlc() {  # <plan> <line> -> the line written under `working-branch:` inside ## SDLC State
+  L="$2" awk '{ print } /^working-branch: / && !d { print ENVIRON["L"]; d = 1 }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+# The judge's rows plant at the head the working checkout is at NOW (S63X_H): §FLOOR-HEAD answers the
+# floor line for that head alone, and the sections above have moved the checkout past S63_H.
+S63X_H="$(git -C "$S63_WT" rev-parse HEAD)"
+s63x_planted() {  # <copy> <frontmatter base or ""> [<SDLC line>] -> the no-base plan with its readings planted at S63X_H
+  cp "$TMPROOT/s63-nobase" "$1"
+  [ -z "$2" ] || s63_base "$1" "$2"
+  [ -z "${3:-}" ] || s63x_sdlc "$1" "$3"
+  for s63q in evidence adversarial structure; do s57_fact "$s63q" "$S63X_H" pass piece "$1"; done
+  s57_floor "$S63X_H" "$1"
+}
+# The whole read first, on the plan as §BASE left it (three readings from the base registered).
+cp "$P63" "$TMPROOT/s63x-registered"
+sed "s/^base-sha: ${S63_I}\$/base-sha: HEAD/" "$P63" > "$P63.tmp" && mv "$P63.tmp" "$P63"
+printf 'reviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: whole\n\nthe whole branch\n' "$S63_I" "$S63_H" > "$S63_REC/adversarial.md"
+expect_eq "63x0 precondition: the plan's base reads HEAD, and its adversarial chain already has a reading" "1 yes" \
+  "$(/usr/bin/grep -c '^base-sha: HEAD$' "$P63") $([ "$(/usr/bin/grep -c 'question=adversarial' "$P63")" -ge 1 ] && echo yes)"
+s42_snap "$R63" "$P63"
+poke "$R63" proof-add review "record/task-01-fixture/adversarial.md" --question adversarial --reader w-tcrit
+s42_unchanged "63x F1 a whole read on a plan whose base-sha: is HEAD" 1 "$P63"
+expect_contains "63x2 F4 …the whole-read refusal names the frontmatter, the place the other refusal names" "to the frontmatter of" "$OUT"
+expect_contains "63x3 F1 …and says HEAD is not a commit id" "HEAD is not a commit id" "$OUT"
+# A first reading on a plan whose base is HEAD, then a branch name.
+cp "$TMPROOT/s63-nobase" "$P63"; s63_base "$P63" HEAD; s42_snap "$R63" "$P63"
+poke "$R63" proof-add review "record/task-01-fixture/evidence.md" --question evidence --reader w-tcrit
+s42_unchanged "63x4 F1 with base-sha: HEAD, a first reading over the whole branch" 1 "$P63"
+expect_contains "63x5 …its first line naming the frontmatter line to add, and HEAD as no commit id" \
+  "its base-sha: HEAD is not a commit id" "$(printf '%s\n' "$OUT" | head -1)"
+cp "$TMPROOT/s63-nobase" "$P63"; s63_base "$P63" task/01-fixture; s42_snap "$R63" "$P63"
+poke "$R63" proof-add review "record/task-01-fixture/evidence.md" --question evidence --reader w-tcrit
+s42_unchanged "63x6 F1 with base-sha: task/01-fixture (the working branch), the same" 1 "$P63"
+s63x_planted "$R63/.bionic/tmp/x-head.plan.md" HEAD
+s57_state "$R63/.bionic/tmp/x-head.plan.md" "$S63X_H"
+expect_eq "63x7 F1 facts_state on base-sha: HEAD exits 2, as on deadbeef (63b2b), printing nothing" "2 " "$S57_RC $S57_OUT"
+s63x_planted "$R63/.bionic/tmp/x-branch.plan.md" task/01-fixture
+s57_state "$R63/.bionic/tmp/x-branch.plan.md" "$S63X_H"
+expect_eq "63x8 F1 …and on a branch name" "2 " "$S57_RC $S57_OUT"
+s63x_planted "$R63/.bionic/tmp/x-abbr.plan.md" "${S63_I:0:7}"
+s57_state "$R63/.bionic/tmp/x-abbr.plan.md" "$S63X_H"
+expect_eq "63x9 F1 control: seven hex abbreviating a real commit is a base, every line covered" "0 $(s63_task_all covered covered)" "$S57_RC $S57_OUT"
+# F4: a real frontmatter base beside a placeholder or empty Step-4 one.
+s63x_planted "$R63/.bionic/tmp/x-tbd.plan.md" "$S63_I" "base-sha: TBD"
+s57_state "$R63/.bionic/tmp/x-tbd.plan.md" "$S63X_H"
+expect_eq "63x10 F4 frontmatter base real, ## SDLC State base-sha: TBD: judged against the frontmatter's, rc 0" \
+  "0 $(s63_task_all covered covered)" "$S57_RC $S57_OUT"
+s63x_planted "$R63/.bionic/tmp/x-empty.plan.md" "$S63_I" "base-sha:"
+s57_state "$R63/.bionic/tmp/x-empty.plan.md" "$S63X_H"
+expect_eq "63x11 F4 …and beside an empty one" "0 $(s63_task_all covered covered)" "$S57_RC $S57_OUT"
+cp "$TMPROOT/s63-nobase" "$P63"; s63_base "$P63" "$S63_I"; s63x_sdlc "$P63" "base-sha: TBD"; s42_snap "$R63" "$P63"
+poke "$R63" proof-add review "record/task-01-fixture/evidence.md" --question evidence --reader w-tcrit
+expect_eq "63x12 F4 the verb on that plan: a first reading from the frontmatter base registers (exit 0)" "0" "$RC"
+cp "$TMPROOT/s63x-registered" "$P63"
+# F3: a reader dispatched again to the record of an earlier launch.
+s58_row r-re1 bionic:auditor confirmed evidence "$S58_REL/retry1.md" ""
+s58_row r-re0 bionic:auditor intended evidence "$S58_REL/retry1.md" ""
+s58_row r-re2 bionic:auditor confirmed evidence "$S58_REL/retry2.md" ""
+s58_row r-re0c bionic:auditor closed evidence "$S58_REL/retry2.md" ""
+s58_row r-re3 bionic:auditor confirmed evidence "$S58_REL/retry3.md" ""
+s58_row r-re3o bionic:auditor confirmed evidence "$S58_REL/retry3.md" ""
+s58_row r-re4 bionic:auditor confirmed evidence "$S58_REL/retry4.md" ""
+s58_row r-re4 bionic:auditor confirmed evidence "$S58_REL/retry4.md" ""
+for s63n in 1 2 3 4; do
+  s58_rec "retry$s63n.md" "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result: pass" "scope: piece"
+done
+expect_eq "63x13 precondition: retry1.md is named by r-re1 (confirmed) and by r-re0 (intended)" "2" \
+  "$(/usr/bin/grep -c 'retry1\.md' "$S58_RS")"
+s42_snap "$R58" "$P58"
+poke "$R58" proof-add review record/wave-01-fixture/retry1.md --question evidence --reader r-re1
+expect_eq "63x14 F3 another name's row that is only intended is not counted: r-re1 registers (exit 0)" "0" "$RC"
+poke "$R58" proof-add review record/wave-01-fixture/retry2.md --question evidence --reader r-re2
+expect_eq "63x15 F3 …nor one that is closed: r-re2 registers (exit 0)" "0" "$RC"
+s42_snap "$R58" "$P58"
+poke "$R58" proof-add review record/wave-01-fixture/retry3.md --question evidence --reader r-re3
+s42_unchanged "63x16 F3 another name's row launched and open still refuses, as today" 1 "$P58"
+expect_contains "63x17 …naming it" "named by the roster row r-re3o (bionic:auditor)" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/retry4.md --question evidence --reader r-re4
+expect_eq "63x18 F3 two rows of the reader's own name (a relaunch) register (exit 0)" "0" "$RC"
+s58_row r-re5 bionic:auditor confirmed evidence "$S58_REL/retry5.md" ""
+s58_row r-re5a bionic:auditor confirmed evidence "$S58_REL/retry5.md" ""
+s58_rec retry5.md "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result: pass" "scope: piece"
+printf 'sweeper-ledger/v1|event=ack|name=r-re5a|at=2026-10-04T00:00:00Z|reason=landed\n' >> "$R58/.bionic/tmp/sweeper-$SID.state"
+poke "$R58" proof-add review record/wave-01-fixture/retry5.md --question evidence --reader r-re5
+expect_eq "63x19 F3 …nor another name's confirmed row acked after its launch: r-re5 registers (exit 0)" "0" "$RC"
 POKE_BOUND="$S63_BOUND_WAS"
 
 finish
