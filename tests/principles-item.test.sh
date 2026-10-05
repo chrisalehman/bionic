@@ -173,21 +173,29 @@ path_exists() {  # <path> -> yes|no
 # Drivers
 # ---------------------------------------------------------------------------
 
+# BOTH homes point at the sandbox in every driver: HOME, and CLAUDE_CONFIG_DIR as
+# well as BIONIC_CLAUDE_HOME, so no resolution order can reach a real CLAUDE.md.
 setup_run() {  # <home> <stdin text> — one narrowed setup, answers on stdin
   printf '%s' "$2" | HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" \
-    BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+    CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
     bash "$SETUP_SH" --only "$ITEM" 2>&1
 }
 
 setup_closed() {  # <home> — the same, with the answer channel closed
   HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" \
-    BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+    CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
     bash "$SETUP_SH" --only "$ITEM" </dev/null 2>&1
+}
+
+setup_plan() {  # <home> — the `--all` page, answer channel closed: printed, nothing done
+  HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" \
+    CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+    bash "$SETUP_SH" --all </dev/null 2>&1
 }
 
 doctor_run() {  # <home>
   HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" \
-    BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+    CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
     BIONIC_DOCTOR_PROBE_SECONDS=15 \
     bash "$DOCTOR_SH" </dev/null 2>&1
 }
@@ -195,14 +203,22 @@ doctor_run() {  # <home>
 remove_run() {  # <home> <answer> [script]
   local script="${3:-$REMOVE_SH}"
   printf '%s\n' "$2" | HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" \
-    BIONIC_CLAUDE_HOME="$1/.claude" \
+    CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" \
     bash "$script" --only "$ITEM" 2>&1
 }
 
 detect_run() {  # <home> -> the detector's one fact line
-  HOME="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" BIONIC_CLAUDE_HOME="$1/.claude" \
-    BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+  HOME="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" \
+    CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
     bash -c '. "$1" && detect_working_principles' _ "$DETECT_SH" 2>&1
+}
+
+# env.sh sourced against the sandbox, then <snippet>. The snippet runs AFTER the
+# source, so a `ulimit` in it limits the walk and not the read of the library.
+lib_run() {  # <home> <snippet>
+  HOME="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" \
+    CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+    bash -c '. "$1"; eval "$2"' _ "$ENV_SH" "$2" 2>&1
 }
 
 # The memory file with <line> added as the last line INSIDE the markers.
@@ -324,6 +340,10 @@ expect_eq "REMOVE: env.sh's start marker is the interface's literal" "$START_LIT
 expect_eq "REMOVE: env.sh's end marker is the interface's literal" "$END_LIT" "$ENV_END"
 expect_eq "REMOVE: remove.sh's start copy equals the library's" "$ENV_START" "$RM_START"
 expect_eq "REMOVE: remove.sh's end copy equals the library's" "$ENV_END" "$RM_END"
+ENV_NOTE="$(const_from "$ENV_SH" PRINCIPLES_CREATED_SUFFIX)" || ENV_NOTE=""
+RM_NOTE="$(const_from "$REMOVE_SH" RM_PRINCIPLES_CREATED_SUFFIX)" || RM_NOTE=""
+expect_nonempty "REMOVE: env.sh carries the created-file note's suffix" "$ENV_NOTE"
+expect_eq "REMOVE: remove.sh's copy of the note's suffix equals the library's" "$ENV_NOTE" "$RM_NOTE"
 
 SB_R="$(new_home)"
 setup_run "$SB_R" $'y\n' >/dev/null 2>&1
@@ -354,8 +374,10 @@ remove_run "$SB_RB" y >/dev/null 2>&1
 remove_run "$SB_RBS" y "$TMP/standalone/remove.sh" >/dev/null 2>&1
 expect_eq "REMOVE: a CLAUDE.md that held only the block is gone after remove" "no" \
   "$(path_exists "$SB_RB/.claude/CLAUDE.md")"
-expect_eq "REMOVE: …and after the standalone door's remove" "no" \
-  "$(path_exists "$SB_RBS/.claude/CLAUDE.md")"
+# The standalone door has no shipped text, so it cannot tell the block is
+# unedited, and the deletion rule needs that (wave-27 T40): the file stays, empty.
+expect_eq "REMOVE: …while the standalone door leaves it in place, emptied" "yes 0" \
+  "$(path_exists "$SB_RBS/.claude/CLAUDE.md") $(wc -c < "$SB_RBS/.claude/CLAUDE.md" 2>/dev/null | tr -d ' ')"
 expect_eq "REMOVE: the claude home itself survives" "yes" "$(path_exists "$SB_RB/.claude")"
 
 # ---------------------------------------------------------------------------
@@ -382,5 +404,210 @@ block_to "$SB_E/.claude/CLAUDE.md" "$TMP/e-block"
 expect_same_bytes "EDITED: a yes replaces the block with the shipped text" "$TMP/shipped-block" "$TMP/e-block"
 nonblock_to "$SB_E/.claude/CLAUDE.md" "$TMP/e-outside"
 expect_same_bytes "EDITED: …and leaves every line outside it as it was" "$TMP/planted.md" "$TMP/e-outside"
+
+# ---------------------------------------------------------------------------
+section "§CUT-SHORT: a write that fails partway changes nothing (wave-27 T40)"
+# ---------------------------------------------------------------------------
+#
+# `ulimit -f` in the child, with SIGXFSZ ignored so the write FAILS rather than
+# killing the process: the shape a full disk takes. The user's file is larger
+# than the limit, so the staged copy is cut short partway through it.
+
+plant_big() {  # <file> — 300 lines of the user's own, about 4 KB
+  local i
+  mkdir -p "${1%/*}"
+  for i in $(seq 1 300); do printf 'user line %s of my own notes\n' "$i"; done > "$1"
+}
+
+SB_W="$(new_bare_home)"; plant_big "$SB_W/.claude/CLAUDE.md"
+setup_run "$SB_W" $'y\n' >/dev/null 2>&1
+expect_eq "CUT-SHORT: the fixture holds the block" "1" "$(count_lines_equal "$SB_W/.claude/CLAUDE.md" "$START_LIT")"
+cp "$SB_W/.claude/CLAUDE.md" "$TMP/w-before.md"
+W_LIB="$(lib_run "$SB_W" 'trap "" XFSZ; ulimit -f 2; principles_unset; echo "rc=$?"')"
+expect_contains "CUT-SHORT: the library's strip reports the failed write" "rc=1" "$W_LIB"
+expect_same_bytes "CUT-SHORT: …and the file is byte-identical to before it" "$TMP/w-before.md" "$SB_W/.claude/CLAUDE.md"
+expect_eq "CUT-SHORT: …and no staged copy is left beside it" "no" \
+  "$(path_exists "$SB_W/.claude/CLAUDE.md.bionic.tmp")"
+W_RM="$(trap '' XFSZ; ulimit -f 2; remove_run "$SB_W" y)"
+expect_same_bytes "CUT-SHORT: remove's payload door leaves the file byte-identical" "$TMP/w-before.md" "$SB_W/.claude/CLAUDE.md"
+expect_contains "CUT-SHORT: …and says it could not" "could not" "$W_RM"
+mkdir -p "$TMP/standalone"; cp "$REMOVE_SH" "$TMP/standalone/remove.sh"
+W_RS="$(trap '' XFSZ; ulimit -f 2; remove_run "$SB_W" y "$TMP/standalone/remove.sh")"
+expect_same_bytes "CUT-SHORT: the standalone door leaves the file byte-identical" "$TMP/w-before.md" "$SB_W/.claude/CLAUDE.md"
+expect_contains "CUT-SHORT: …and says it could not" "could not" "$W_RS"
+remove_run "$SB_W" y >/dev/null 2>&1
+expect_eq "CUT-SHORT: the same remove with room to write does strip the block (the twin)" "0" \
+  "$(count_lines_equal "$SB_W/.claude/CLAUDE.md" "$START_LIT")"
+
+SB_WS="$(new_bare_home)"; plant_big "$SB_WS/.claude/CLAUDE.md"; cp "$SB_WS/.claude/CLAUDE.md" "$TMP/ws-before.md"
+WS_OUT="$(trap '' XFSZ; ulimit -f 2; setup_run "$SB_WS" $'y\n')"
+expect_same_bytes "CUT-SHORT: a setup write cut short leaves the file byte-identical" "$TMP/ws-before.md" "$SB_WS/.claude/CLAUDE.md"
+expect_contains "CUT-SHORT: …and setup says it could not write it" "could not write" "$WS_OUT"
+
+# ---------------------------------------------------------------------------
+section "§MALFORMED: markers that do not pair up are refused by every door (wave-27 T40)"
+# ---------------------------------------------------------------------------
+#
+# Each shape is the user's file; each door is answered yes; each must write
+# nothing and name the line it found. Probe shapes from review pass 9 (probe-lib
+# cases 3, 4, 5, 6).
+
+plant_shape() {  # <file> <shape>
+  mkdir -p "${1%/*}"
+  case "$2" in
+    start-only)   printf '%s\n' 'top' "$START_LIT" 'my body' '## My own notes' 'keep me' > "$1" ;;
+    end-only)     printf '%s\n' 'top' "$END_LIT" 'mine after it' > "$1" ;;
+    out-of-order) printf '%s\n' 'top' "$END_LIT" 'middle mine' "$START_LIT" 'bottom mine' > "$1" ;;
+    two-blocks)   { printf '%s\n' 'top'; cat "$TMP/expected-block"; printf '%s\n' 'between mine'; cat "$TMP/expected-block"; printf '%s\n' 'bottom mine'; } > "$1" ;;
+    fenced-start) printf '%s\n' '# notes' '```' "$START_LIT" '```' 'after fence mine' > "$1" ;;
+  esac
+}
+# The line each shape's first fault is on.
+shape_line() {
+  case "$1" in
+    start-only) echo 2 ;; end-only) echo 2 ;; out-of-order) echo 2 ;; fenced-start) echo 3 ;;
+    two-blocks) echo "$(( $(wc -l < "$TMP/expected-block") + 3 ))" ;;  # top, the block, a line, then the second start
+  esac
+}
+
+for SHAPE in start-only end-only out-of-order two-blocks fenced-start; do
+  SB_M="$(new_bare_home)"; plant_shape "$SB_M/.claude/CLAUDE.md" "$SHAPE"
+  cp "$SB_M/.claude/CLAUDE.md" "$TMP/m-before.md"
+  L="$(shape_line "$SHAPE")"
+  expect_eq "MALFORMED ${SHAPE}: detect reads it as malformed" \
+    "env:working-principles state=malformed" "$(detect_run "$SB_M")"
+  M_SET="$(setup_run "$SB_M" $'y\ny\n')"
+  expect_same_bytes "MALFORMED ${SHAPE}: setup answered yes writes nothing" "$TMP/m-before.md" "$SB_M/.claude/CLAUDE.md"
+  expect_contains "MALFORMED ${SHAPE}: setup names the line it found" "line ${L}:" "$M_SET"
+  M_RM="$(remove_run "$SB_M" y)"
+  expect_same_bytes "MALFORMED ${SHAPE}: remove answered yes writes nothing" "$TMP/m-before.md" "$SB_M/.claude/CLAUDE.md"
+  expect_contains "MALFORMED ${SHAPE}: remove names the line it found" "line ${L}:" "$M_RM"
+  # The library's walk (setup) and remove.sh's copy name the same faults, word for word.
+  M_SET_F="$(printf '%s\n' "$M_SET" | sed -n 's/^ *\(line [0-9][0-9]*: \)/\1/p')"
+  M_RM_F="$(printf '%s\n' "$M_RM" | sed -n 's/^ *\(line [0-9][0-9]*: \)/\1/p')"
+  expect_nonempty "MALFORMED ${SHAPE}: the fault extractor reads setup's lines" "$M_SET_F"
+  expect_eq "MALFORMED ${SHAPE}: remove.sh's copy of the walk names the same faults as the library" "$M_SET_F" "$M_RM_F"
+  M_RS="$(remove_run "$SB_M" y "$TMP/standalone/remove.sh")"
+  expect_same_bytes "MALFORMED ${SHAPE}: the standalone door writes nothing" "$TMP/m-before.md" "$SB_M/.claude/CLAUDE.md"
+  expect_contains "MALFORMED ${SHAPE}: the standalone door names the line it found" "line ${L}:" "$M_RS"
+done
+
+SB_MD="$(new_bare_home)"; plant_shape "$SB_MD/.claude/CLAUDE.md" start-only
+ROW_M="$(report_row "$(doctor_run "$SB_MD")" "$DOCTOR_ROW_LABEL")"
+expect_nonempty "MALFORMED: doctor renders a row" "$ROW_M"
+expect_contains "MALFORMED: doctor's row is a fault" "✗" "$ROW_M"
+expect_contains "MALFORMED: doctor's row says malformed" "malformed" "$ROW_M"
+
+# A marker QUOTED in prose is not a marker: only a whole line is.
+SB_Q="$(new_bare_home)"
+printf '%s\n' "Mark it with \`${START_LIT}\` and an end line." 'more of mine' > "$SB_Q/.claude/CLAUDE.md"
+cp "$SB_Q/.claude/CLAUDE.md" "$TMP/q-before.md"
+expect_eq "QUOTED: a marker quoted in prose reads as no block" \
+  "env:working-principles state=absent" "$(detect_run "$SB_Q")"
+Q_RM="$(remove_run "$SB_Q" y)"
+expect_absent "QUOTED: remove does not ask about a quoted marker" "[y/N]" "$Q_RM"
+expect_same_bytes "QUOTED: …and leaves the file byte-identical" "$TMP/q-before.md" "$SB_Q/.claude/CLAUDE.md"
+setup_run "$SB_Q" $'y\n' >/dev/null 2>&1
+Q_RM2="$(remove_run "$SB_Q" n)"
+expect_contains "QUOTED: with a real block beside it, remove does ask (the twin)" "[y/N]" "$Q_RM2"
+nonblock_to "$SB_Q/.claude/CLAUDE.md" "$TMP/q-outside"
+expect_same_bytes "QUOTED: setup kept the quoting line as the user's own" "$TMP/q-before.md" "$TMP/q-outside"
+
+# A well-formed pair inside a code fence IS a block, like any other.
+SB_F="$(new_bare_home)"
+printf '%s\n' '```' "$START_LIT" 'an example body' "$END_LIT" '```' > "$SB_F/.claude/CLAUDE.md"
+expect_eq "FENCED: a whole pair inside a fence reads as a block (edited)" \
+  "env:working-principles state=edited" "$(detect_run "$SB_F")"
+
+# ---------------------------------------------------------------------------
+section "§REMOVE-EDITED: remove shows an edit and deletes it only on a yes (AC-9.4)"
+# ---------------------------------------------------------------------------
+
+SB_RE="$(new_home)"; setup_run "$SB_RE" $'y\n' >/dev/null 2>&1
+edit_block "$SB_RE/.claude/CLAUDE.md" '- my own rule'
+cp "$SB_RE/.claude/CLAUDE.md" "$TMP/re-before.md"
+RE_NO="$(remove_run "$SB_RE" n)"
+expect_contains "REMOVE-EDITED: remove prints the difference as a unified diff" "@@" "$RE_NO"
+expect_contains "REMOVE-EDITED: …naming the user's own line" "my own rule" "$RE_NO"
+expect_same_bytes "REMOVE-EDITED: a no keeps the edit, byte for byte" "$TMP/re-before.md" "$SB_RE/.claude/CLAUDE.md"
+RE_YES="$(remove_run "$SB_RE" y)"
+expect_contains "REMOVE-EDITED: the yes arm showed the difference too" "my own rule" "$RE_YES"
+expect_same_bytes "REMOVE-EDITED: a yes strips the edited block and keeps the rest" "$TMP/planted.md" "$SB_RE/.claude/CLAUDE.md"
+SB_RES="$(new_home)"; setup_run "$SB_RES" $'y\n' >/dev/null 2>&1
+edit_block "$SB_RES/.claude/CLAUDE.md" '- my own rule'
+cp "$SB_RES/.claude/CLAUDE.md" "$TMP/res-before.md"
+RES_NO="$(remove_run "$SB_RES" n "$TMP/standalone/remove.sh")"
+expect_contains "REMOVE-EDITED: the standalone door shows the block's lines before asking" "my own rule" "$RES_NO"
+expect_same_bytes "REMOVE-EDITED: …and a no keeps them" "$TMP/res-before.md" "$SB_RES/.claude/CLAUDE.md"
+
+# ---------------------------------------------------------------------------
+section "§DELETE: the file goes only when setup made it and it holds the shipped block alone"
+# ---------------------------------------------------------------------------
+
+SB_D1="$(new_bare_home)"; setup_run "$SB_D1" $'y\n' >/dev/null 2>&1
+D1_OUT="$(remove_run "$SB_D1" y)"
+expect_contains "DELETE: the question says the file will be deleted" "delete the file" "$D1_OUT"
+expect_eq "DELETE: a created file holding the shipped block alone is gone" "no" "$(path_exists "$SB_D1/.claude/CLAUDE.md")"
+
+SB_D2="$(new_bare_home)"; setup_run "$SB_D2" $'y\n' >/dev/null 2>&1
+edit_block "$SB_D2/.claude/CLAUDE.md" 'MY OWN RULES'
+D2_OUT="$(remove_run "$SB_D2" y)"
+expect_absent "DELETE: an edited block alone is not announced as a file deletion" "delete the file" "$D2_OUT"
+expect_eq "DELETE: …and the file stays" "yes" "$(path_exists "$SB_D2/.claude/CLAUDE.md")"
+expect_eq "DELETE: …with the block stripped" "0" "$(count_lines_equal "$SB_D2/.claude/CLAUDE.md" "$START_LIT")"
+
+SB_D3="$(new_bare_home)"; : > "$SB_D3/.claude/CLAUDE.md"; setup_run "$SB_D3" $'y\n' >/dev/null 2>&1
+expect_eq "DELETE: setup wrote into the user's 0-byte file" "1" "$(count_lines_equal "$SB_D3/.claude/CLAUDE.md" "$START_LIT")"
+D3_OUT="$(remove_run "$SB_D3" y)"
+expect_absent "DELETE: a 0-byte file the user made is not announced as a deletion" "delete the file" "$D3_OUT"
+expect_eq "DELETE: …and it stays" "yes" "$(path_exists "$SB_D3/.claude/CLAUDE.md")"
+expect_eq "DELETE: …back at 0 bytes" "0" "$(wc -c < "$SB_D3/.claude/CLAUDE.md" 2>/dev/null | tr -d ' ')"
+
+SB_D4="$(new_home)"; setup_run "$SB_D4" $'y\n' >/dev/null 2>&1
+D4_OUT="$(remove_run "$SB_D4" y)"
+expect_absent "DELETE: a file with the user's text besides the block is not announced as a deletion" "delete the file" "$D4_OUT"
+expect_same_bytes "DELETE: …and comes back as the user's bytes" "$TMP/planted.md" "$SB_D4/.claude/CLAUDE.md"
+
+# ---------------------------------------------------------------------------
+section "§READ-ONLY: a file the user made read-only is refused, never overwritten"
+# ---------------------------------------------------------------------------
+
+SB_RO="$(new_home)"; chmod 444 "$SB_RO/.claude/CLAUDE.md"
+RO_OUT="$(setup_run "$SB_RO" $'y\n')"
+expect_same_bytes "READ-ONLY: setup answered yes leaves the file byte-identical" "$TMP/planted.md" "$SB_RO/.claude/CLAUDE.md"
+expect_contains "READ-ONLY: …and says why" "read-only" "$RO_OUT"
+chmod 644 "$SB_RO/.claude/CLAUDE.md"; setup_run "$SB_RO" $'y\n' >/dev/null 2>&1
+expect_eq "READ-ONLY: the same yes on a writable file writes (the twin)" "1" "$(count_lines_equal "$SB_RO/.claude/CLAUDE.md" "$START_LIT")"
+cp "$SB_RO/.claude/CLAUDE.md" "$TMP/ro-before.md"; chmod 444 "$SB_RO/.claude/CLAUDE.md"
+RO_RM="$(remove_run "$SB_RO" y)"
+expect_same_bytes "READ-ONLY: remove answered yes leaves it byte-identical" "$TMP/ro-before.md" "$SB_RO/.claude/CLAUDE.md"
+expect_contains "READ-ONLY: …and says why" "read-only" "$RO_RM"
+chmod 644 "$SB_RO/.claude/CLAUDE.md"
+
+# ---------------------------------------------------------------------------
+section "§EDITED-IS-THE-USER'S: an edit is a state, not a finding"
+# ---------------------------------------------------------------------------
+
+expect_absent "EDITED-STATE: doctor's edited row is not a fault" "✗" "$ROW_E"
+expect_absent "EDITED-STATE: doctor's edited row does not call the difference the user's own edit" "your own edit" "$ROW_E"
+PLAN_E="$(setup_plan "$SB_DE")"
+PLAN_A="$(setup_plan "$SB_DA")"
+expect_contains "EDITED-STATE: the --all page offers the principles on an absent block" "working principles" "$PLAN_A"
+expect_absent "EDITED-STATE: the --all page leaves an edited block off" "working principles" "$PLAN_E"
+
+# ---------------------------------------------------------------------------
+section "§CONSENT: the path and the full text are on screen before the question"
+# ---------------------------------------------------------------------------
+
+C_OUT="$(setup_run "$(new_home)" $'n\n')"
+# The screen folds the text to the page's width at spaces, keeping each space, so
+# the printed lines joined back up are the shipped text joined up, byte for byte.
+C_TEXT="$(printf '%s\n' "$C_OUT" | sed -n '/between its markers:/,/seven short rules/p' | sed '1d;$d' | sed 's/^     //' | tr -d '\n')"
+C_WANT="$(tr -d '\n' < "$TMP/shipped-block")"
+expect_nonempty "CONSENT: the screen's text extractor reads something" "$C_TEXT"
+expect_eq "CONSENT: the full shipped text is printed before the question" "$C_WANT" "$C_TEXT"
+expect_contains "CONSENT: the summary names the rule that lets an agent act without asking" "without asking" "$C_OUT"
+C_BEFORE_Q="${C_OUT%%\[y/N\]*}"
+expect_contains "CONSENT: the text is printed BEFORE the question, not after" "Decide what is yours" "$C_BEFORE_Q"
 
 finish

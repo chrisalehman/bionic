@@ -381,12 +381,18 @@ rc_get() {  # <item>
 # half-written by an interrupted run is repaired rather than appended beside. The
 # day `RC_ITEMS` grows a second entry, both items are written from the roster
 # here; nothing inside bionic's own markers is salvaged out of the file.
+#
+# THE BODY IS STAGED BESIDE THE RC, not in `$TMPDIR` (wave-27 T40, review pass 9
+# note 11): the rc's own directory is the one place this write already needs, so
+# a full or unwritable `$TMPDIR` cannot fail it. markers_set's exit code is the
+# reason when it refuses (lib/markers.sh's header).
 rc_set() {  # <item>
   local item="${1:-}" want file body rc
   want="$(rc_default "$item")" || return 1
   file="$(rc_file)" || return 1
-  body="$(mktemp "${TMPDIR:-/tmp}/bionic-rc-body.XXXXXX")" || return 1
-  printf '%s\n' "$want" > "$body"
+  body="$(bionic_link_target "$file").bionic.body"
+  rm -f "$body"
+  (umask 077; printf '%s\n' "$want" > "$body") || { rm -f "$body"; return 1; }
   markers_set "$file" "$RC_START" "$RC_END" "$body"; rc=$?
   rm -f "$body"
   return "$rc"
@@ -423,30 +429,58 @@ rc_unset() {  # <item>
 # and no parser for the render's do-not-edit header. Doctor's three states are a
 # comparison of those two reads.
 #
-#   present — the user's block is byte-for-byte the shipped text
-#   edited  — a block is there and differs: the user's own edit, or an older text
-#   absent  — no block
+#   present   — the user's block is byte-for-byte the shipped text
+#   edited    — a block is there and differs. The user's to keep: doctor shows it
+#               as a state and setup leaves it alone unless the item is asked for
+#               by name. It cannot yet be told from an OLDER shipped text, and
+#               needs no telling until a release changes the text (wave-27 T40).
+#   absent    — no block
+#   malformed — the markers do not pair up (markers.sh `markers_check`); every
+#               door says what it found and where, and writes nothing
 #
 # AN EDIT IS NEVER DISCARDED SILENTLY. `markers_set` rebuilds a block whole, so
 # setup on an `edited` block prints the difference and writes only on a second,
-# live yes (setup.sh `setup_working_principles`).
+# live yes (setup.sh `setup_working_principles`), and remove does the same.
+#
+# THE FILE GOES ONLY IF SETUP MADE IT (wave-27 T40, review pass 9 finding 4). A
+# CLAUDE.md that held nothing before setup and a 0-byte one the user made hold
+# the same bytes once the block is in, so setup leaves a note beside a file it
+# CREATED (`principles_created_file`), and remove deletes the file only when that
+# note is there, the block is the shipped text unedited, and nothing else is in
+# the file. Any other file stays, emptied or not.
 #
 # Verbatim. remove.sh's standalone door carries byte-equal copies
-# (RM_PRINCIPLES_START / RM_PRINCIPLES_END) because it cannot source this file;
-# tests/principles-item.test.sh §REMOVE pins them equal.
+# (RM_PRINCIPLES_START / RM_PRINCIPLES_END / RM_PRINCIPLES_CREATED_SUFFIX) because
+# it cannot source this file; tests/principles-item.test.sh §REMOVE pins them equal.
 PRINCIPLES_START='<!-- bionic:principles:start -->'
 PRINCIPLES_END='<!-- bionic:principles:end -->'
+PRINCIPLES_CREATED_SUFFIX='.bionic-created'
 
 principles_file()      { printf '%s/CLAUDE.md\n' "$(claude_home)"; }
 principles_text_file() { printf '%s/context/working-principles.md\n' "$(plugin_root)"; }
+principles_created_file() { printf '%s%s\n' "$(principles_file)" "$PRINCIPLES_CREATED_SUFFIX"; }
 
-# present | edited | absent. A shipped file that cannot be read leaves a block
-# reading `edited`, never `present`: nothing can be said to match a text that is
-# not there.
+# The shipped text, the body setup would write: what the consent screen shows.
+principles_text() {
+  markers_get "$(principles_text_file)" "$PRINCIPLES_START" "$PRINCIPLES_END"
+}
+
+# What `malformed` found, one `line <n>: …` per fault; nothing when well formed.
+principles_where() {
+  markers_check "$(principles_file)" "$PRINCIPLES_START" "$PRINCIPLES_END"
+  return 0
+}
+
+# present | edited | absent | malformed. A shipped file that cannot be read leaves
+# a block reading `edited`, never `present`: nothing can be said to match a text
+# that is not there.
 principles_state() {
   local mine shipped
   mine="$(markers_get "$(principles_file)" "$PRINCIPLES_START" "$PRINCIPLES_END"; printf '%s' "rc=$?")"
-  case "$mine" in *rc=1) printf 'absent\n'; return 0 ;; esac
+  case "$mine" in
+    *rc=1) printf 'absent\n'; return 0 ;;
+    *rc=2) printf 'malformed\n'; return 0 ;;
+  esac
   shipped="$(markers_get "$(principles_text_file)" "$PRINCIPLES_START" "$PRINCIPLES_END"; printf '%s' "rc=$?")"
   if [ "$mine" = "$shipped" ]; then printf 'present\n'; else printf 'edited\n'; fi
   return 0
@@ -467,29 +501,51 @@ principles_diff() {
 
 # Writes the shipped text between the markers, creating the claude home and the
 # file if neither is there: the caller asked first. Refuses when the payload's
-# text cannot be read, rather than writing an empty block.
+# text cannot be read, rather than writing an empty block. The body is staged
+# beside the target, as rc_set's is. Exit codes are markers_set's.
 principles_set() {
-  local file body rc
+  local file body rc created=no
   file="$(principles_file)"
-  body="$(mktemp "${TMPDIR:-/tmp}/bionic-principles-body.XXXXXX")" || return 1
-  if ! markers_get "$(principles_text_file)" "$PRINCIPLES_START" "$PRINCIPLES_END" > "$body" || \
-     [ ! -s "$body" ]; then
+  mkdir -p "${file%/*}" || return 1
+  [ -e "$file" ] || [ -L "$file" ] || created=yes
+  body="$(bionic_link_target "$file").bionic.body"
+  rm -f "$body"
+  if ! (umask 077; principles_text > "$body") || [ ! -s "$body" ]; then
     rm -f "$body"; return 1
   fi
-  mkdir -p "${file%/*}" || { rm -f "$body"; return 1; }
   markers_set "$file" "$PRINCIPLES_START" "$PRINCIPLES_END" "$body"; rc=$?
   rm -f "$body"
+  # The note is best effort: without it remove keeps the file, the safe side.
+  if [ "$rc" = "0" ] && [ "$created" = "yes" ]; then
+    (umask 077; printf '%s\n' "bionic setup created CLAUDE.md beside this note. /bionic:remove deletes that file again only if it still holds bionic's working principles and nothing else." \
+      > "$(principles_created_file)") 2>/dev/null
+  fi
   return "$rc"
 }
 
-# Strips the block. A CLAUDE.md left EMPTY by the strip held nothing but bionic's
-# block, so it is taken back off too — a file setup created comes back as no
-# file, which is what the machine had before. A symlinked file is never deleted:
-# its target belongs to whatever manages the link.
-principles_unset() {
+# Would `principles_unset` delete the file: setup created it, the block is the
+# shipped text unedited, and nothing else is in it. A symlink never goes: its
+# target belongs to whatever manages the link. Asked before the question, so
+# the question can say so.
+principles_unset_deletes() {
   local file
   file="$(principles_file)"
-  markers_strip "$file" "$PRINCIPLES_START" "$PRINCIPLES_END" || return 1
-  if [ -f "$file" ] && [ ! -L "$file" ] && [ ! -s "$file" ]; then rm -f "$file"; fi
+  [ -f "$(principles_created_file)" ] || return 1
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  [ "$(principles_state)" = "present" ] || return 1
+  markers_only "$file" "$PRINCIPLES_START" "$PRINCIPLES_END"
+}
+
+# Strips the block, and deletes the file when `principles_unset_deletes` said so
+# before the strip. Exit codes are markers_strip's; on any non-zero nothing was
+# changed. The note setup left goes with a successful strip either way.
+principles_unset() {
+  local file deletes=no rc
+  file="$(principles_file)"
+  principles_unset_deletes && deletes=yes
+  markers_strip "$file" "$PRINCIPLES_START" "$PRINCIPLES_END"; rc=$?
+  [ "$rc" = "0" ] || return "$rc"
+  if [ "$deletes" = "yes" ] && [ -f "$file" ] && [ ! -s "$file" ]; then rm -f "$file"; fi
+  rm -f "$(principles_created_file)"
   return 0
 }
