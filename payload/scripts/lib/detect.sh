@@ -311,15 +311,18 @@ detect_dep() {  # <name>
 
 # ─── Environment class ───────────────────────────────────────────────────────
 
-# The flag current CLI builds need for the native task tools, as the line bionic
-# wrote (`bionic_todo_export_ours`, wave-27 T66): the fact half-uninstalled counts
-# as bionic's footprint, so it is the line remove takes out and no other. A
-# commented-out copy, another value or a line that goes on is the user's.
+# The flag current CLI builds need for the native task tools, as bionic wrote it:
+# between its env markers (wave-27 T66, A-orch-119 (3)). Half-uninstalled counts it
+# as bionic's footprint, so it is what remove takes out and nothing else: a line of
+# the same text outside the markers, a commented copy or another value is the user's.
 detect_env_todo_tools() {
-  local rc present=no scan
+  local rc present=no line
   rc="$(_detect_shell_rc)"
-  scan="$(bionic_rc_candidates "$rc" bionic_todo_export_ours "")"; scan="${scan#cand=}"
-  [ -n "${scan%% *}" ] && present=yes
+  if [ -f "$rc" ] && markers_regular "$rc" >/dev/null; then
+    while IFS= read -r line; do
+      bionic_todo_export_ours "$line" && present=yes
+    done < <(markers_get "$rc" "$BIONIC_ENV_START" "$BIONIC_ENV_END" 2>/dev/null)
+  fi
   echo "env:todo-tools present=${present}"
   return 0
 }
@@ -492,14 +495,21 @@ bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
 # by number and leaves for the user's hand when `bionic_legacy_alias_ours` says no.
 BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
 
-# THE ENVIRONMENT LINE BIONIC WROTE, AND THE ONE PLACE IT IS LISTED (wave-27 T66,
-# review pass 40 B2). remove's environment item took out every line its filter
-# matched from the start: a user's `…=1; export TOKEN=…`, a different variable with
-# the same prefix, a commented copy. One spelling was ever written, never varying by
-# machine (`git log --all -S CLAUDE_CODE_ENABLE_TODO_TOOLS`): setup.sh 3e00ec84
-# (2026-08-17) until ba36f32c (2026-08-21) appended it between the retired env
-# markers. Whole line, as the alias list above.
-bionic_todo_export_ours() {  # <line> — rc 0 when bionic wrote it
+# THE ENVIRONMENT LINE BIONIC WROTE, AND ONLY BETWEEN ITS MARKERS (wave-27 T66,
+# review pass 40 B2; A-orch-119 (3)). remove's environment item took out every line
+# its filter matched from the start: a user's `…=1; export TOKEN=…`, a different
+# variable with the same prefix, a commented copy. One spelling was ever written,
+# never varying by machine (`git log --all -S CLAUDE_CODE_ENABLE_TODO_TOOLS`):
+# setup.sh 3e00ec84 (2026-08-17) until ba36f32c (2026-08-21) appended it between the
+# retired env markers below, and nowhere else. So bionic wrote no bare line: this
+# predicate says whether a line is that text (blanks at either end and one trailing
+# CR aside), and a line of that text OUTSIDE the markers is the user's, named by
+# number and left; the block between the markers is what remove takes, as a unit.
+# remove.sh carries the markers (`RM_ENV_*`), pinned equal to these.
+BIONIC_ENV_START='# ─── bionic:env:start ───'
+BIONIC_ENV_END='# ─── bionic:env:end ───'
+
+bionic_todo_export_ours() {  # <line> — rc 0 when it is the text bionic wrote
   case "$1" in *CLAUDE_CODE_ENABLE_TODO_TOOLS*) ;; *) return 1 ;; esac
   local LC_ALL=C
   bionic_rc_line_bare "$1"
@@ -519,18 +529,20 @@ bionic_legacy_alias_lines() {  # <file>
   bionic_rc_lines "$1" bionic_legacy_alias_ours "$BIONIC_LEGACY_ALIAS_PATTERN"
 }
 
+# A file with no env markers: `cand=<n>,<n>` the lines of bionic's text, outside the
+# markers and so the user's, and `theirs=<n>,<n>` the other lines that mention it.
 bionic_todo_export_lines() {  # <file>
-  bionic_rc_lines "$1" bionic_todo_export_ours "$BIONIC_TODO_EXPORT_PATTERN"
+  bionic_rc_candidates "$1" bionic_todo_export_ours "$BIONIC_TODO_EXPORT_PATTERN"
 }
 
 # Why bionic's own line stays, in the words every door uses after the line number
 # (wave-27 T66). <why> is `bionic_rc_lines`' answer.
 bionic_rc_left_reason() {  # <why> <rc>
   case "$1" in
-    ok)       printf "bionic's line, where removing it would change your own code\n" ;;
-    no-shell) printf "bionic's line, left: %s, the shell that reads that file, is not installed, so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
-    no-parse) printf "bionic's line, left: the file does not parse as it is (%s -n), so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
-    *)        printf "bionic's line, left: bionic could not stage a copy to check\n" ;;
+    ok)       printf "where removing it would change your own code\n" ;;
+    no-shell) printf "left: %s, the shell that reads that file, is not installed, so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
+    no-parse) printf "left: the file does not parse as it is (%s -n), so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
+    *)        printf "left: bionic could not stage a copy to check\n" ;;
   esac
 }
 

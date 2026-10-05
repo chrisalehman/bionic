@@ -1384,7 +1384,7 @@ _setup_legacy_alias_left() {  # <rc>
   if [ -n "$bound" ]; then
     words="$(bionic_line_numbers_words "$bound")"
     item "$SETUP_NIL" "legacy alias" "bionic's line, left: ${words} of ${1}"
-    action "edit ${words} of ${1} by hand if you want the retired alias gone — $(bionic_rc_left_reason "$why" "$1")"
+    action "edit ${words} of ${1} by hand if you want the retired alias gone — bionic's line, $(bionic_rc_left_reason "$why" "$1")"
     said=0
   fi
   if [ -n "$theirs" ]; then
