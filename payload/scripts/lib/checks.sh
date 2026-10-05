@@ -364,7 +364,13 @@ BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
 bionic_check_legacy_alias() {  # <row id>
   local line settings
   line="$(detect_zshrc_legacy_block)"
-  [ "${line#*present=}" = "yes" ] && return 0
+  # A block whose markers do not pair up, or an rc bionic cannot read as text, is
+  # no step setup can take (wave-27 T51): doctor names the fault and a hand fix,
+  # and the page does not offer a removal that would only refuse.
+  case "${line#*present=}" in
+    yes) return 0 ;;
+    malformed|not-a-file) return 1 ;;
+  esac
   settings="$(_detect_shell_rc)"
   [ -f "$settings" ] && grep -qE "$BIONIC_LEGACY_ALIAS_PATTERN" "$settings" 2>/dev/null && return 0
   return 1
