@@ -635,33 +635,7 @@ _wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrive
   fi
 }
 
-# A REFUSED LANDING LEAVES NO RECORD FILE THE PROOF MADE (wave-27 T50; review pass 27 N1). The
-# writability proof (`_wt_proofs_prove`, below) creates an empty record when there was none, and
-# a refusal after it, whichever block makes it, would leave that file behind. The body is
-# `_wt_land`; this wrapper takes the one look at the end that covers every refusal: a landing that
-# is refused, with the record the proof created still empty, removes it. A record that already
-# held landings, or was there empty before the proof, is never touched. The directories the proof
-# made stay.
-#
-# THE TEST AND THE DELETE ARE ONE CRITICAL SECTION UNDER THE RECORD'S LOCK (wave-27 T58; review pass
-# 34 B1). Another landing appends under that lock, so a test-then-delete outside it could remove a
-# block appended in between, after that landing had printed LANDED and removed its tree. A lock not
-# taken inside the wait leaves the file: an empty record left behind is harmless, a deleted block
-# is not. THE CLEANUP TAKES NOTHING OVER (wave-27 T63; review pass 43 B1): a stale lock in its way
-# leaves the file too, and it deletes only while the lock's line is its own.
 worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence>] -> LANDED | REFUSED
-  local rc made
-  _WT_PROOFS_MADE=""
-  _wt_land "$@"; rc=$?
-  made="$_WT_PROOFS_MADE"; _WT_PROOFS_MADE=""
-  if [ "$rc" -ne 0 ] && [ -n "$made" ] && _wt_proofs_lock "$made" keep; then
-    if _wt_proofs_mine "$made" && [ -f "$made" ] && [ ! -s "$made" ] && [ ! -L "$made" ]; then rm -f "$made" 2>/dev/null; fi
-    _wt_proofs_unlock "$made"
-  fi
-  return "$rc"
-}
-
-_wt_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence>] -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
   local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
   local pre pre_ref was said held now_ref check_cmd check_out check_was left nl='
@@ -837,9 +811,10 @@ _wt_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence
   fi
 
   # THE LANDING RECORD IS PROVED WRITABLE BEFORE THE MERGE (wave-27 T44; D15). With a bound plan,
-  # the run's `landing-proofs.log` is created or opened for append here, and a record that cannot
-  # be is refused with nothing changed: a path that is a symlink, a FIFO, a device or a directory is
-  # refused unopened (wave-27 T50, N1 N2; `_wt_proofs_prove`). The row is the plan's `## Tasks` row
+  # the run's `landing-proofs.log` is proved writable here, and created by nothing but the append
+  # (wave-27 T69); a record that cannot be written is refused with nothing changed: a path that is a
+  # symlink, a FIFO, a device or a directory is refused unopened (wave-27 T50, N1 N2;
+  # `_wt_proofs_prove`). The row is the plan's `## Tasks` row
   # whose `worktree` cell names this tree. Both are written once the merge is made
   # (_wt_proofs_append, below).
   proofs="none"; proofs_row=""
@@ -962,7 +937,7 @@ _wt_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence
   landed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   red_said=""; [ -z "$landed_red" ] || red_said=" landed-red=${landed_red} landed-red-at=${landed_at}"
   if [ "$proofs" != none ] && ! _wt_proofs_append "$proofs" "$proofs_row" "$branch" "$head" "$merge_sha" "$judged" "$landed_at"; then
-    _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} kept=${wt_abs}${red_said} proofs=unwritten — ${proofs} could not be appended after the merge, so the tree and its stamp file are kept; append the landing to it by hand, then remove the tree"
+    _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} kept=${wt_abs}${red_said} proofs=unwritten — ${proofs} could not be appended after the merge (${_WT_PROOFS_SAW:-the append failed}), so the tree and its stamp file are kept; append the landing to it by hand, then remove the tree"
     return 0
   fi
 
@@ -1028,211 +1003,76 @@ EOF
 # THE RECORD PATH IS A REGULAR FILE OR ABSENT, AND IS PROVED WRITABLE (wave-27 T44, T50; review pass
 # 27 N1, N2). A symlink (a link to `/dev/null` silently loses the record; a link to a file outside the
 # docs tree appends there), a FIFO (opening one for append blocks the landing for good), a device or a
-# directory at the path is refused before anything is opened. Otherwise the directory is made and the
-# file created or opened for append. When this call created the file, `_WT_PROOFS_MADE` names it, and
-# `worktree_land` removes it again if the landing is then refused.
+# directory at the path is refused before anything is opened. A record that is there must be one this
+# process may write.
 #
-# THE PROOF COVERS THE LOCK (wave-27 T58; review pass 34 S2). The append takes `<record>.lock` with
-# `mkdir` in the record's directory, so a directory that cannot be written, or anything but a
-# directory at the lock's path (a file, a link), would merge and then fail the append. Both refuse
-# here, before the merge. A lock DIRECTORY is not a refusal, live or stale: the append waits for it,
-# or takes it over.
-#
-# A BUSY LOCK IS NOT A REFUSAL (wave-27 T63; review pass 43 B2). A lock released between two looks
-# at its path read as "something that is not a directory" (36 of 40,000 proofs). The path is looked
-# at once (`_wt_proofs_lock_other`); "absent" and "a directory" are both fine; "something else" is
-# looked at once more after a twentieth of a second, and only a second "something else" refuses.
+# THE PROOF CREATES NOTHING AT THE RECORD'S PATH (wave-27 T69; review pass 48). The directory is made
+# if it is missing, and is proved writable by a file of the proof's own (`_wt_proofs_private`) made and
+# removed again there. The record itself is tested and never opened, so a landing refused after the
+# proof has nothing to clean up, and no path of `land` removes or truncates the record.
 _wt_proofs_prove() {  # <record path> -> 0 writable, 1 not
-  local made="" lk="${1}.lock"
+  local mine
   [ ! -L "$1" ] || return 1
-  if [ -e "$1" ]; then [ -f "$1" ] || return 1; else made="$1"; fi
-  if _wt_proofs_lock_other "$lk"; then sleep 0.05; ! _wt_proofs_lock_other "$lk" || return 1; fi
-  mkdir -p "${1%/*}" 2>/dev/null && [ -w "${1%/*}" ] && [ -x "${1%/*}" ] && { : >> "$1"; } 2>/dev/null || return 1
-  _WT_PROOFS_MADE="$made"
+  if [ -e "$1" ]; then [ -f "$1" ] && [ -w "$1" ] || return 1; fi
+  mkdir -p "${1%/*}" 2>/dev/null || return 1
+  mine="$(_wt_proofs_private "$1")" || return 1
+  rm -f "$mine"
 }
 
-# The lock's path is something other than absent or a directory: a link, or anything not a directory.
-_wt_proofs_lock_other() {  # <lock path> -> 0 something else, 1 absent or a directory
-  [ -L "$1" ] && return 0
-  [ -d "$1" ] && return 1
-  [ -e "$1" ]
+# A private file beside the record, made by `mktemp` (exclusive, so never another's):
+# `.<record's name>.<this process's pid>.<random>`. One a killed append left is never read again.
+_wt_proofs_private() {  # <record path> -> the new file's path
+  local me
+  me="$(exec sh -c 'echo "$PPID"')"   # this process's own pid, which `$$` is not inside a subshell
+  mktemp "${1%/*}/.${1##*/}.${me}.XXXXXX" 2>/dev/null
 }
 
-# THE APPEND IS SERIALIZED (wave-27 T50; review pass 27 S1). Two landings appending at once wrote
-# their blocks line by line into each other, so a stamp line sat under the other landing's header.
-# The lock is a directory beside the record, `<record>.lock`, taken with `mkdir` as every lock in
-# this tree is (lib/slots.sh, hooks/session-poker.sh `launch_sync_lock`: no `flock` on macOS), and
-# removed by `_wt_proofs_append` on every path out of it. A landing waits for it _WT_PROOFS_LOCK_WAIT
-# seconds BY THE CLOCK (wave-27 T58; review pass 34 S1: a count of tries, each forking `stat` and
-# `sleep`, took 19.64 s for ten), then fails the append: the `proofs=unwritten` case, the merge
-# standing and the tree and its stamps kept. A lock a killed landing left behind is taken over, and must not stop every later
-# landing: it is stale when the pid it records is gone, or when the directory is older than
-# _WT_PROOFS_LOCK_STALE seconds (an append takes microseconds, so a minute is a holder that is
-# not coming back).
-#
-# THE LOCK HAS ONE HOLDER (wave-27 T63; review pass 43 B1). The takeover was `rm -rf` then `mkdir`, two
-# acts: two takers that both found the lock stale could both hold it, and a refused landing's cleanup
-# holding it so deleted a block another landing had just appended. Every act that changes who holds
-# the lock is now ONE `mkdir` or ONE rename (the states and their acts: the T63 record):
-#   - a take is `mkdir <record>.lock`, then its line `<$$> <real pid>` written only if no line is there;
-#   - a takeover is `_wt_proofs_takeover`, one taker at a time: the line judged stale read again, the
-#     stale directory renamed aside to the taker's own name (one taker wins), the line looked for in
-#     the renamed directory, and only then is it removed and a fresh lock made by `mkdir`;
-#   - a holder writes and releases only while the lock's line is its own (`_wt_proofs_mine`), so a
-#     holder whose lock was lost writes nothing and removes nothing that is not its own.
-# The cleanup of a refused landing passes `keep`: it never takes a lock over (B1).
-_WT_PROOFS_LOCK_WAIT="${_WT_PROOFS_LOCK_WAIT:-10}"
-_WT_PROOFS_LOCK_STALE="${_WT_PROOFS_LOCK_STALE:-60}"
-_wt_proofs_lock() {  # <record path> [keep] -> 0 held, 1 not taken in time (keep: or met a stale lock)
-  local lk="${1}.lock" bare=0 line="" pid="" mt="" me
-  local t0="$SECONDS"
-  # `$$` is the parent's pid inside a subshell; the line carries the process's own pid as well, so two
-  # subshells of one shell never read each other's line as their own.
-  me="$$ $(exec sh -c 'echo "$PPID"')"
-  while :; do
-    if mkdir "$lk" 2>/dev/null; then
-      if ( set -C; printf '%s\n' "$me" > "$lk/pid" ) 2>/dev/null; then
-        _WT_PROOFS_ME="$me"
-        return 0
-      fi
-      # Gone, or a line already in it, between the mkdir and the write: a taker took this directory
-      # over (its own act, by rename or a fresh `mkdir`). Not ours; nothing to remove.
-      continue
-    fi
-    if [ ! -d "$lk" ]; then
-      # mkdir failed and nothing is there to wait for: the directory cannot be written. One miss
-      # is a holder releasing between the mkdir and this look; three are not.
-      bare=$((bare + 1))
-      [ "$bare" -lt 3 ] || return 1
-    else
-      bare=0
-      line=""; { read -r line < "$lk/pid"; } 2>/dev/null
-      # Our own line: our directory, renamed aside by a taker and put back home. Ours still.
-      if [ "$line" = "$me" ]; then _WT_PROOFS_ME="$me"; return 0; fi
-      pid="${line%% *}"
-      mt="$(stat -f %m "$lk" 2>/dev/null || stat -c %Y "$lk" 2>/dev/null)"
-      case "$mt" in ''|*[!0-9]*) mt="" ;; esac
-      if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } \
-        || { [ -n "$mt" ] && [ $(( $(date +%s) - mt )) -gt "$_WT_PROOFS_LOCK_STALE" ]; }; then
-        [ "${2:-}" != keep ] || return 1
-        _wt_proofs_takeover "$lk" "$line" "${me##* }" && continue
-      fi
-    fi
-    # Whole seconds by the shell's own clock: past the wait (more than it, never less), not taken.
-    [ $(( SECONDS - t0 )) -le "$_WT_PROOFS_LOCK_WAIT" ] || return 1
-    sleep 0.02
-  done
-}
-
-# A stale lock taken over by ONE rename (wave-27 T63; review pass 43 B1). Takeovers are one at a time
-# under `<lock>.taking` (`_wt_proofs_taking`), and, holding it, the taker reads the lock's line again:
-# only the line it judged stale is taken over, so a lock made fresh between the look and the rename is
-# never renamed (A-T63.1, A-T63.2). The directory is renamed aside to `<lock>.stale.<taker's pid>`
-# (the source gone: another taker won, and this one waits like any other), the line is read once more
-# in the renamed directory, and only then is it removed and the path left free for a `mkdir`. Should
-# the renamed directory hold another line (a holder that came back after the stale age), it goes home
-# by rename while the path is free, and is otherwise lost to its holder, which then finds another's
-# line and writes nothing.
-_wt_proofs_takeover() {  # <lock path> <line judged stale> [<taker pid>] -> 0 taken over, 1 not
-  local me="${3:-$$}" aside="${1}.stale.${3:-$$}" tk="${1}.taking" line=""
-  _wt_proofs_taking "$tk" "$me" "$1" || return 1
-  { read -r line < "$1/pid"; } 2>/dev/null
-  if [ ! -d "$1" ] || [ -L "$1" ] || [ "$line" != "$2" ]; then _wt_proofs_untaking "$tk" "$me"; return 1; fi
-  rm -rf "$aside" 2>/dev/null  # only a dead process with this pid can have left one
-  mv "$1" "$aside" 2>/dev/null || { _wt_proofs_untaking "$tk" "$me"; return 1; }
-  line=""; { read -r line < "$aside/pid"; } 2>/dev/null
-  if [ "$line" != "$2" ]; then
-    # Only a directory with a line goes home. One with none is a take whose line is not written yet;
-    # put back, it could be left with no holder at all. Removed, its maker's line write fails (or
-    # lands in the next taker's directory first) and the maker goes round the wait.
-    [ -z "$line" ] || [ -e "$1" ] || mv "$aside" "$1" 2>/dev/null
-    rm -rf "$aside" "${1}/${aside##*/}" 2>/dev/null
-    _wt_proofs_untaking "$tk" "$me"
-    return 1
-  fi
-  rm -rf "$aside" 2>/dev/null
-  _wt_proofs_untaking "$tk" "$me"
-}
-
-# THE TAKEOVER'S OWN LOCK, AND WHAT FREES IT WHEN ITS HOLDER DIES (wave-27 T63, A-T63.10). `.taking` is
-# held by `mkdir` AND the holder's file `h.<its pid>` in it, the only one there: a taker whose `mkdir`
-# succeeded but whose file is not alone (another wrote into a directory made after its own was
-# removed) takes its file out and does not hold it. Nothing frees a `.taking` by remove-and-retry:
-# - a `.taking` holding a DEAD holder's file is freed by unlinking that file, which one process wins;
-#   that process alone then `rmdir`s it (only an EMPTY directory goes) and removes the dead holder's
-#   renamed-aside `<lock>.stale.<its pid>`, which only that holder could otherwise have removed;
-# - an EMPTY `.taking` (a taker killed between its `mkdir` and its file) is freed by one `rmdir` once
-#   older than _WT_PROOFS_TAKING_STALE seconds (2); a held `.taking` is never empty, so an `rmdir`
-#   aimed at an old one never removes a held one;
-# - a `.taking` whose holder lives is never freed: a takeover holds it for milliseconds.
-_WT_PROOFS_TAKING_STALE="${_WT_PROOFS_TAKING_STALE:-2}"
-_wt_proofs_taking() {  # <taking dir> <taker pid> <lock path> -> 0 held, 1 not (a dead holder's freed)
-  local h p n=0 mt
-  if mkdir "$1" 2>/dev/null; then
-    { : > "$1/h.$2"; } 2>/dev/null || return 1
-    for h in "$1"/h.*; do [ -e "$h" ] && n=$((n + 1)); done
-    [ "$n" -eq 1 ] && return 0
-    rm -f "$1/h.$2" 2>/dev/null
-    return 1
-  fi
-  for h in "$1"/h.*; do
-    [ -e "$h" ] || continue
-    n=$((n + 1)); p="${h##*/h.}"
-    case "$p" in ''|*[!0-9]*) continue ;; esac
-    if ! kill -0 "$p" 2>/dev/null && rm "$h" 2>/dev/null; then
-      rmdir "$1" 2>/dev/null
-      rm -rf "${3}.stale.${p}" 2>/dev/null
-    fi
-  done
-  if [ "$n" -eq 0 ]; then
-    mt="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null)"
-    case "$mt" in ''|*[!0-9]*) ;; *) [ $(( $(date +%s) - mt )) -le "$_WT_PROOFS_TAKING_STALE" ] || rmdir "$1" 2>/dev/null ;; esac
-  fi
-  return 1
-}
-
-_wt_proofs_untaking() {  # <taking dir> <taker pid>
-  rm -f "$1/h.$2" 2>/dev/null
-  rmdir "$1" 2>/dev/null
-}
-
-# The lock's line is this holder's own.
-_wt_proofs_mine() {  # <record path> -> 0 the lock is this holder's, 1 not
-  local line=""
-  { read -r line < "${1}.lock/pid"; } 2>/dev/null
-  [ -n "$line" ] && [ "$line" = "${_WT_PROOFS_ME:-}" ]
-}
-
-# The holder releases its own lock, and nothing that is not its own.
-_wt_proofs_unlock() {  # <record path>
-  ! _wt_proofs_mine "$1" || rm -rf "${1}.lock" 2>/dev/null
-}
-
-# The header and the judged lines under it, appended whole while the record's lock is held, its
-# status returned. The block is built before the lock is taken, and the lock is released on every
-# path out. A holder that finds another's line in the lock has written nothing and goes round the
-# same wait (wave-27 T63).
+# THE APPEND IS ONE WRITE (wave-27 T69; review pass 48; A-orch-124, A-orch-132). The record had a
+# lock, and four rows on it (T50, T58, T63) each closed one race and exposed the next: a lock made of a
+# directory has states a killed process leaves behind, and every rule for clearing them is itself a
+# race. The record needs none. The block (the header and the judged lines under it) is written whole
+# to a private file, and `dd` with one block size copies it to the record in one read and ONE
+# write(2), on a descriptor the shell opened for append. A local filesystem puts each such write at the
+# end of the file whole, so two landings' blocks never interleave and neither is lost, with no
+# cooperation between writers. A network filesystem gives no such guarantee, and is not supported.
+#   - the record's type is tested before it is read and again immediately before the append: anything
+#     but a regular file or absent is not opened (a FIFO swapped in would block the open for good);
+#   - a block over one mebibyte, dd's one block, is not written;
+#   - the append is good when dd says so: exit 0 and, under `LC_ALL=C`, exactly one record out and
+#     the line `<the block's size> bytes …` (BSD's and GNU's dd both open it so). And the record
+#     must be at least as long as before plus the block, true under any interleaving of appends.
+#   - a record that does not end in a line break (a write a full disk cut short, never truncated
+#     away) gets one in front of the block, so the block's header is a line of its own.
+# Each failure is the `proofs=unwritten` case, and `_WT_PROOFS_SAW` says what was seen. A process
+# killed mid-append leaves the record without its block or with it whole, and at most its private
+# file beside it.
+_WT_PROOFS_SAW=""
 _wt_proofs_append() {  # <file> <row> <branch> <head> <merge> <judged lines> [<at>]
-  local block rc t0="$SECONDS"
+  local block priv size before after said rc lead="" nl='
+'
+  _WT_PROOFS_SAW=""
   block="landed: row=${2:-—} branch=${3} head=${4} merge=${5} at=${7:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
   [ -z "${6:-}" ] || block="${block}
 ${6}"
-  while _wt_proofs_lock "$1"; do
-    if _wt_proofs_mine "$1"; then
-      # THE RECORD'S TYPE IS TESTED AGAIN UNDER THE LOCK (wave-27 T58; review pass 34 N4): a path
-      # swapped after the proof, to a FIFO that would block the open for good while the lock is held,
-      # or to a link, is not opened; the append fails, the `proofs=unwritten` case.
-      if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then
-        _wt_proofs_unlock "$1"
-        return 1
-      fi
-      { printf '%s\n' "$block" >> "$1"; } 2>/dev/null; rc=$?
-      _wt_proofs_unlock "$1"
-      return "$rc"
-    fi
-    [ $(( SECONDS - t0 )) -le "$_WT_PROOFS_LOCK_WAIT" ] || return 1
-    sleep 0.02
-  done
+  if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then _WT_PROOFS_SAW="the record's path is not a regular file"; return 1; fi
+  [ -s "$1" ] && [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] && lead="$nl"
+  priv="$(_wt_proofs_private "$1")" || { _WT_PROOFS_SAW="no private file could be made beside the record"; return 1; }
+  { printf '%s%s\n' "$lead" "$block" > "$priv"; } 2>/dev/null || { rm -f "$priv"; _WT_PROOFS_SAW="the private file could not be written"; return 1; }
+  size="$(wc -c < "$priv" 2>/dev/null)"; size="${size//[!0-9]/}"
+  before=0; [ ! -e "$1" ] || { before="$(wc -c < "$1" 2>/dev/null)"; before="${before//[!0-9]/}"; }
+  if [ -z "$size" ] || [ -z "$before" ]; then rm -f "$priv"; _WT_PROOFS_SAW="the block or the record could not be measured"; return 1; fi
+  if [ "$size" -gt 1048576 ]; then rm -f "$priv"; _WT_PROOFS_SAW="the block is ${size} bytes, over the one write of 1048576"; return 1; fi
+  if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then rm -f "$priv"; _WT_PROOFS_SAW="the record's path is not a regular file"; return 1; fi
+  said="$(LC_ALL=C dd if="$priv" bs=1048576 2>&1 >> "$1")"; rc=$?
+  after="$(wc -c < "$1" 2>/dev/null)"; after="${after//[!0-9]/}"
+  rm -f "$priv"
+  [ "$rc" -eq 0 ] || { _WT_PROOFS_SAW="dd exit ${rc}: ${said//${nl}/; }"; return 1; }
+  case "$said" in
+    *"${nl}0+1 records out${nl}${size} bytes"*|*"${nl}1+0 records out${nl}${size} bytes"*)
+      [ "${after:-0}" -ge $((before + size)) ] && return 0
+      _WT_PROOFS_SAW="the record is ${after:-0} bytes after the append, short of ${before} plus the block's ${size} bytes"; return 1 ;;
+  esac
+  _WT_PROOFS_SAW="dd: ${said//${nl}/; }"
   return 1
 }
 
