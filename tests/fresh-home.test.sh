@@ -1363,6 +1363,12 @@ expect_contains "remove --all: before it acts, the principles item says the bloc
   "will delete the block and the file ${GLOBAL_MEMORY}" "$REMOVE_TEXT"
 expect_contains "remove --all: …and its result line says the file was deleted" \
   "✓ deleted ${GLOBAL_MEMORY}" "$REMOVE_TEXT"
+# The page that takes the consent says it too (wave-27 T51, review pass 21 F6):
+# the line is read from the page alone, everything before its question.
+REMOVE_PAGE="${REMOVE_TEXT%%Do all of the above?*}"
+expect_ne "remove --all: the page is on the output, ahead of its question" "$REMOVE_TEXT" "$REMOVE_PAGE"
+expect_contains "remove --all: the page line for the principles says the file will be deleted" \
+  "remove bionic's working principles and delete the file ${GLOBAL_MEMORY}" "$REMOVE_PAGE"
 
 
 # ---------------------------------------------------------------------------

@@ -716,6 +716,7 @@ AGENT_CAUSE="${AGENT_FACT##*cause=}"
 TODO_FACT="$(detect_env_todo_tools)";        TODO_STATE="${TODO_FACT##*present=}"
 RC_PROXY_FACT="$(detect_rc_claude_proxy)";   RC_PROXY_STATE="${RC_PROXY_FACT##*present=}"
 PRINCIPLES_FACT="$(detect_working_principles)"; PRINCIPLES_STATE="${PRINCIPLES_FACT##*state=}"
+LEGACY_ALIAS_FACT="$(detect_zshrc_legacy_block)"; LEGACY_ALIAS_STATE="${LEGACY_ALIAS_FACT##*present=}"
 LEGACY_HOOK_FACT="$(detect_legacy_channel_hooks)"; LEGACY_HOOK_COUNT="${LEGACY_HOOK_FACT##*count=}"
 SKILL_COPY_FACT="$(detect_legacy_skill_copy)"
 SKILL_COPY_PATH="${SKILL_COPY_FACT##*path=}"
@@ -2149,10 +2150,16 @@ fi
 # line names a hand fix and never a setup run.
 [ "$RC_PROXY_STATE" = "malformed" ] && \
   fix "bionic's claude() markers do not pair up in $(_doctor_tilde "$(rc_file)") → fix them by hand"
+# What the path is says what is wrong with it — a directory, a link to nothing,
+# not text, unreadable — so the line says it once (wave-27 T51, review pass 21 F7).
 [ "$RC_PROXY_STATE" = "not-a-file" ] && \
-  fix "$(_doctor_tilde "$(rc_file)") is $(markers_regular "$(rc_file)"), not a file → fix it by hand"
+  fix "$(_doctor_tilde "$(rc_file)") is $(markers_regular "$(rc_file)") → fix it by hand"
 [ "$PRINCIPLES_STATE" = "not-a-file" ] && \
-  fix "$(_doctor_tilde "$(principles_file)") is $(markers_regular "$(principles_file)"), not a file → fix it by hand"
+  fix "$(_doctor_tilde "$(principles_file)") is $(markers_regular "$(principles_file)") → fix it by hand"
+# The retired alias block's markers, read by the same reader (wave-27 T51, review
+# pass 21 F1): a block setup would refuse is a hand fix, never a setup run.
+[ "$LEGACY_ALIAS_STATE" = "malformed" ] && \
+  fix "the retired alias block's markers do not pair up in $(_doctor_tilde "$(_detect_shell_rc)") → fix them by hand"
 
 [ "$LEGACY_ALIAS_FIRES" = "yes" ] && fix "the legacy .zshrc alias block is still there → run $(bionic_check_hint legacy-alias)"
 if [ "$LEGACY_HOOKS_FIRES" = "yes" ]; then
@@ -2577,7 +2584,8 @@ elif [ "$RC_PROXY_STATE" = "malformed" ]; then
   _rc_proxy_where="$(markers_check "$(rc_file)" "$RC_START" "$RC_END")"
   _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "malformed" "${_rc_proxy_where%%$'\n'*}"
 elif [ "$RC_PROXY_STATE" = "not-a-file" ]; then
-  _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "not a file" "$(_doctor_tilde "$(rc_file)") is $(markers_regular "$(rc_file)")"
+  _rc_proxy_what="$(markers_regular "$(rc_file)")"
+  _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "$(markers_regular_cell "$_rc_proxy_what")" "$(_doctor_tilde "$(rc_file)") is ${_rc_proxy_what}"
 else
   _doctor_env3 "$DOCTOR_NIL" "$_rc_proxy_label" "—" "not set — ${_rc_proxy_hint} offers it"
 fi
@@ -2596,8 +2604,9 @@ case "$PRINCIPLES_STATE" in
   edited)    _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "edited" "differs from bionic's text — kept as it is" ;;
   malformed) _principles_where="$(principles_where)"
              _doctor_env3 "$DOCTOR_BAD" "$_principles_label" "malformed" "${_principles_where%%$'\n'*}" ;;
-  not-a-file) _doctor_env3 "$DOCTOR_BAD" "$_principles_label" "not a file" \
-               "$(_doctor_tilde "$(principles_file)") is $(markers_regular "$(principles_file)")" ;;
+  not-a-file) _principles_what="$(markers_regular "$(principles_file)")"
+              _doctor_env3 "$DOCTOR_BAD" "$_principles_label" "$(markers_regular_cell "$_principles_what")" \
+               "$(_doctor_tilde "$(principles_file)") is ${_principles_what}" ;;
   *)         _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "—"      "not set — ${_principles_hint} offers it" ;;
 esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
@@ -2613,6 +2622,13 @@ esac
 [ "$LEGACY_ALIAS_FIRES" = "yes" ] && \
   _doctor_env_row "$DOCTOR_BAD" "$(bionic_check_label legacy-alias)" \
     "present → $(bionic_check_hint legacy-alias)"
+# A retired block whose markers do not pair up is not one setup removes: the
+# fault and its line, and the fix line gathered above (wave-27 T51, F1). An rc
+# that is no file is the claude() row's to say, once.
+if [ "$LEGACY_ALIAS_STATE" = "malformed" ]; then
+  _legacy_alias_where="$(markers_check "$(_detect_shell_rc)" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")"
+  _doctor_env_row "$DOCTOR_BAD" "$(bionic_check_label legacy-alias)" "malformed — ${_legacy_alias_where%%$'\n'*}"
+fi
 if [ "$LEGACY_HOOKS_FIRES" = "yes" ]; then
   _doctor_env_row "$DOCTOR_BAD" "$(bionic_check_label legacy-hooks)" \
     "${LEGACY_HOOK_COUNT} in settings.json → $(bionic_check_hint legacy-hooks)"

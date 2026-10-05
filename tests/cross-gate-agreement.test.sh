@@ -3076,6 +3076,9 @@ PreToolUse|Write|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill
 PostToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
 PostToolUse|Bash|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
 SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh evidence|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh adversarial|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh structure|10
 Stop||${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh|10
 PreToolUse|Skill|${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
 UserPromptExpansion||${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10

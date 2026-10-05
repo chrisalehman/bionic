@@ -921,6 +921,98 @@ DRV_STRICT=""; drive "$M_FIRST" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAI
 expect_regex "T47-i3 MUTANT without the fact in the detail the line is still cut (the mutant runs)" "$USER_LINE_RE" "$DRV_ERR_1"
 expect_absent "T47-i4 MUTANT …but the whole fact is nowhere on the wire (the first-line rows discriminate)" "$T47_ONE" "$DRV_ERR"
 
+section "§T50 — the cut costs the line's width, not the value's length (wave-27 T50; review pass 29)"
+# `bionic_trunc` drops one character at a time and re-measures the whole string each time, so
+# cutting a 20,000-character fact took 43 seconds against a hook's timeout of 10. `refuse` now
+# shortens the fact by BYTES, to at most four times the room it has, walking back to a whole
+# character, before the cut; the whole fact is still the detail's first line. Four bytes is the
+# most one character takes, so every character the cut keeps is still there: the printed line is
+# what the unbounded cut would print.
+#
+# fails-when: a 20,000-character fact takes 5 seconds or more; the printed line differs from the
+# unbounded cut's; the whole fact is not the detail's first line; the byte cut ends inside a
+# character, under either locale or either shell; a fact that fits is changed; the strict setting
+# no longer refuses an over-wide line, quickly.
+T50_ROOM=54   # 100 columns less `bionic: run-arm refused — ` (26) and ` (add it to Suites:)` (20)
+t50_bytes() { head -c "$1" /dev/zero | tr '\0' 'o'; }
+T50_LONG="$(t50_bytes 20000)"
+T50_PREFIX="$(t50_bytes 2000)"
+expect_eq "T50-a0 fixture: the long fact is 20,000 characters" "20000" "${#T50_LONG}"
+
+# --- (a) THE TIME, measured by the row; 5 seconds is generous, the bound was 43 seconds ---
+T50_T0=$SECONDS
+t47_drive "" "" exit2 "$FX_VERB" "$T50_LONG" "$FX_FIX" "$FX_DETAIL"
+T50_DT=$((SECONDS - T50_T0))
+expect_status "T50-a1 a 20,000-character fact is refused on its own verb, strict off" "2" "$DRV_RC"
+expect_regex "T50-a2 …cut to a line in the criterion's shape" "$USER_LINE_RE" "$DRV_ERR_1"
+expect_true "T50-a3 …in under 5 seconds (took ${T50_DT}s)" test "$T50_DT" -lt 5
+expect_eq "T50-a4 …and the detail's first line is the whole 20,000 characters, uncut" \
+  "$T50_LONG" "$(sed -n '3p' "$SANDBOX/.err")"
+
+# --- (b) THE SAME FIRST LINE AS THE UNBOUNDED CUT, on a fact where that cut is still fast ---
+T50_UNB="$(bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$LIB_DIR/width.sh" "$T50_PREFIX" "$T50_ROOM")"
+expect_eq "T50-b0 fixture: the unbounded cut is 54 columns, ellipsis last (the reference is not empty)" \
+  "54" "$(t47_line_cols "$T50_UNB")"
+t47_drive "" "" exit2 "$FX_VERB" "$T50_PREFIX" "$FX_FIX" "$FX_DETAIL"
+expect_eq "T50-b1 a 2,000-character fact prints byte for byte what the unbounded cut prints" \
+  "bionic: run-arm refused — $T50_UNB (add it to Suites:)" "$DRV_ERR_1"
+t47_drive "" "" exit2 "$FX_VERB" "$T47_FIT" "$FX_FIX" "$FX_DETAIL"
+expect_eq "T50-b2 a fact that fits is untouched" "bionic: run-arm refused — $T47_FIT (add it to Suites:)" "$DRV_ERR_1"
+
+# --- (c) THE BYTE CUT NEVER ENDS INSIDE A CHARACTER: _refuse_bytecut, driven directly ---
+# The fact is narrow characters, then `é` (2 bytes), `日` (3) and `😀` (4) in turn; every byte limit
+# from 40 to 47 puts the cut at a different offset in them, so some limit lands inside a
+# character of each width. The child prints one verdict per limit: the result is a prefix of the
+# fact, at most the limit in bytes and less than four bytes short of it, and decodes as UTF-8.
+T50_MB="$(printf 'x%.0s' $(seq 1 38))é日😀é日😀é日😀é日😀"
+cat > "$SANDBOX/t50-bytecut.sh" <<'T50_EOF'
+. "$1" || exit 9
+fact="$2"
+for n in 40 41 42 43 44 45 46 47; do
+  r="$(_refuse_bytecut "$fact" "$n")"
+  b="$(printf '%s' "$r" | LC_ALL=C wc -c | tr -d ' ')"
+  verdict=OK
+  [ "$b" -le "$n" ] && [ "$b" -gt $((n - 4)) ] || verdict="BAD(bytes=$b)"
+  case "$fact" in "$r"*) ;; *) verdict="BAD(not a prefix)" ;; esac
+  printf '%s' "$r" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || verdict="BAD(not UTF-8)"
+  echo "n=$n $verdict"
+done
+T50_EOF
+expect_true "T50-c0 fixture: the multi-byte fact decodes (the check can pass)" \
+  bash -c 'printf "%s" "$1" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1' _ "$T50_MB"
+expect_false "T50-c0b …and a half character does not (the check can fail)" \
+  bash -c 'printf "a\360\237" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1'
+for _sh in /bin/bash bash; do
+  for _lc in "$T47_UTF8" C; do
+    T50_OUT="$(env LC_ALL="$_lc" "$_sh" "$SANDBOX/t50-bytecut.sh" "$LIB" "$T50_MB" 2>&1)"
+    expect_eq "T50-c1 [$_sh, $_lc] eight limits answered (the child ran)" "8" \
+      "$(printf '%s\n' "$T50_OUT" | grep -c '^n=[0-9]* OK$')"
+    expect_absent "T50-c2 [$_sh, $_lc] …and none is short, long, off the prefix or inside a character" "BAD" "$T50_OUT"
+  done
+done
+
+# --- (d) THE MULTI-BYTE FACT THROUGH THE WHOLE REFUSAL, both locales: fast, whole, decodable ---
+T50_MBLONG="$(printf 'é日%.0s' $(seq 1 4000))"
+for _lc in "$T47_UTF8" C; do
+  T50_T0=$SECONDS
+  t47_drive "" "$_lc" exit2 "$FX_VERB" "$T50_MBLONG" "$FX_FIX" "$FX_DETAIL"
+  T50_DT=$((SECONDS - T50_T0))
+  expect_regex "T50-d1 [$_lc] an 8,000-character multi-byte fact is cut to a line in the criterion's shape" "$USER_LINE_RE" "$DRV_ERR_1"
+  expect_true "T50-d2 [$_lc] …in under 5 seconds (took ${T50_DT}s)" test "$T50_DT" -lt 5
+  expect_true "T50-d3 [$_lc] …the printed line decodes as UTF-8" \
+    bash -c 'printf "%s\n" "$1" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1' _ "$DRV_ERR_1"
+  expect_eq "T50-d4 [$_lc] …and the whole fact is the detail's first line" "$T50_MBLONG" "$(sed -n '3p' "$SANDBOX/.err")"
+done
+
+# --- (e) THE STRICT SETTING: nothing changes, and the refusal is quick ---
+T50_T0=$SECONDS
+t47_drive 1 "" exit2 "$FX_VERB" "$T50_LONG" "$FX_FIX" "$FX_DETAIL"
+T50_DT=$((SECONDS - T50_T0))
+expect_eq "T50-e1 strict on: a 20,000-character fact refuses the call, the same text as before" \
+  "bionic: refuse-call refused — the user line is 20046 columns, max 100 (shorten the fact)" "$DRV_ERR_1"
+expect_status "T50-e2 …same exit (2)" "2" "$DRV_RC"
+expect_true "T50-e3 …in under 5 seconds (took ${T50_DT}s)" test "$T50_DT" -lt 5
+
 section "§ROOT — the fix line's pieces live beside the renderer (wave-24 T13, D10)"
 # Moved from lib/walls.sh so the landing refusal in lib/stop.sh prints the same root and the
 # same quoting the budget arm does. Each answer is read through a fresh shell that sources
