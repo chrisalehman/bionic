@@ -9582,8 +9582,8 @@ expect_contains "RPa3 precondition: the digest records the plan's current: and i
 sRP_plan 4
 poke_pressure "$RRP" 8192 1.0 tick
 expect_contains "RPb AC-11.3 current: moves from 3 to 4: the tick prints the RECONCILE line" "poker: RECONCILE — " "$OUT"
-expect_contains "RPb2 …in the wording the status-change path already prints" \
-  "poker: RECONCILE — a ## Tasks status or the ready set changed since the last tick: TaskList, and bring the task list in line with the plan" "$OUT"
+expect_contains "RPb2 …saying the plan moved into Step 4 and naming the rebuild (wave-27 T37)" \
+  "poker: RECONCILE — the plan moved from approval into Step 4 since the last tick: TaskList, and rebuild the task list in execution order (delete every pending entry and recreate them)" "$OUT"
 expect_eq "RPb3 …once" "1" "$(count_lines_matching 'poker: RECONCILE' "$OUT")"
 expect_contains "RPb4 …and the digest owes the duty" "duty=owed" "$(cat "$(digest_of "$RRP")" 2>/dev/null)"
 poke_pressure "$RRP" 8192 1.0 tick
@@ -11877,13 +11877,14 @@ poke "$R65B" budget suites=3 'three suites'
 s42_unchanged "65q4 a field other than writers" 2 "$P65B"
 poke "$R65B" budget writers=3
 s42_unchanged "65q5 no reply" 2 "$P65B"
+# 65r re-pinned by wave-27 T37 (review pass 42 N2, A-orch-112): the verb only lowers; a value above
+# the derived ceiling is refused (section 67 §BUDGET-LOWERS), so 65r reads the refusal.
 poke "$R65B" budget writers=12 'go wide'
-expect_eq "65r a value above the probe's derived ceiling is the user's, recorded (exit 0)" "0" "$RC"
-expect_contains "65r2 …the header reads writers=12" "parallel-budget: writers=12 suites=4" "$(cat "$P65B")"
+s42_unchanged "65r a value above the probe's derived ceiling is refused: budget only lowers" 1 "$P65B"
+expect_contains "65r2 …the header still reads the user's three" "parallel-budget: writers=3 suites=4" "$(cat "$P65B")"
 expect_regex "65r3 …and derived= is still the probe's eight" \
-  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=12$' "$(/usr/bin/grep '^budget-override:' "$P65B")"
-expect_eq "65r4 …one override line, rewritten" "1" "$(/usr/bin/grep -c '^budget-override:' "$P65B" | tr -d ' ')"
-expect_contains "65r5 …and the verb says what the dispatch wall then holds the run to" "the dispatch wall holds the run to 12" "$OUT"
+  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=3$' "$(/usr/bin/grep '^budget-override:' "$P65B")"
+expect_eq "65r4 …one override line" "1" "$(/usr/bin/grep -c '^budget-override:' "$P65B" | tr -d ' ')"
 POKE_BOUND="$S65_BOUND_WAS"
 
 
@@ -12008,6 +12009,238 @@ poke_pressure "$R66E" 8192 1.0 tick
 expect_absent "66e3 the next tick does not say it again" "started without its checks" "$OUT"
 expect_contains "66e4 …while it still reads the roster (the positive on the same tick)" "poker:" "$OUT"
 unset CLAUDE_CONFIG_DIR
+
+# ============================================================
+section "Section 67 §RECON-WHY §NOTIFY-WHOLE §AMEND-PLACED §AMEND-CAP §BUDGET-LOWERS §DECLINE-SLOT: T37 (review passes 8 F2, 36 S1 N2, 42 N1 N2; T49's open cap; A-orch-38, 96, 100, 112)"
+# ============================================================
+#
+# §RECON-WHY (review pass 8 F2). When the reconcile is owed because the plan MOVED, the RECONCILE
+# line said a status or the ready set changed, which is untrue there, and never asked for the
+# rebuild steps/3.md wants. It now says which move it was and names the rebuild, and the digest
+# carries the cause as `reconcile=` for the turn-end wall's refusal. RPb2 (section 55) pins the
+# Step-4 reason; the grown table and the status control are here. The grown table waits on the
+# world as section 55 does, so the tick is QUIET and the plan move alone prints the line.
+# fails-when: a grown table prints the status-changed reason, or a status change prints a move.
+R67="$(make_repo s67-recon-grew)"
+s67_rd() { sed -n 's/^reconcile=//p' "$(digest_of "$1")" 2>/dev/null; }
+require_helpers s67_rd
+poke "$R67" arm
+sp_plan_at_step "$R67" 4 "$SRP_ROW1" >/dev/null
+poke_pressure "$R67" 8192 1.0 tick
+expect_absent "67a0 precondition: the first tick, current 4 and one row, asks no reconcile" "poker: RECONCILE" "$OUT"
+sp_plan_at_step "$R67" 4 "$SRP_ROW1" "$SRP_ROW2" >/dev/null
+poke_pressure "$R67" 8192 1.0 tick
+expect_contains "67a1 §RECON-WHY a grown table: the line says the table grew and names the rebuild" \
+  "poker: RECONCILE — the ## Tasks table grew since the last tick: TaskList, and rebuild the task list in execution order (delete the pending entries after the new row and recreate them)" "$OUT"
+expect_eq "67a2 …once" "1" "$(count_lines_matching 'poker: RECONCILE' "$OUT")"
+expect_eq "67a3 …and the digest carries the cause for the turn-end wall" "grew" "$(s67_rd "$R67")"
+R67S="$(make_repo s67-recon-step4)"
+poke "$R67S" arm
+sp_plan_at_step "$R67S" 3 "$SRP_ROW1" >/dev/null
+poke_pressure "$R67S" 8192 1.0 tick
+sp_plan_at_step "$R67S" 4 "$SRP_ROW1" >/dev/null
+poke_pressure "$R67S" 8192 1.0 tick
+expect_contains "67a4 precondition: current: 3 to 4 prints the Step-4 reason (RPb2's)" "the plan moved from approval into Step 4" "$OUT"
+expect_eq "67a5 …and the digest carries its cause" "step4" "$(s67_rd "$R67S")"
+sp_plan_at_step "$R67S" 5 "$SRP_ROW1" >/dev/null
+poke_pressure "$R67S" 8192 1.0 tick
+expect_eq "67a6 a tick over no move writes no cause (4 to 5)" "" "$(s67_rd "$R67S")"
+expect_contains "67a6b …while that digest is read (the positive on the same file)" "plan_current=5" "$(cat "$(digest_of "$R67S")")"
+R67C="$(make_repo s67-recon-status)"; new_roster "$R67C"
+S67C_ROW1="| T1 | 4 | build | one ready build | implementor | — | 15m | REQ-x | a.sh | pending |"
+S67C_ROW2="| T2 | 4 | build | another ready build | implementor | — | 15m | REQ-x | b.sh | pending |"
+poke "$R67C" arm
+sp_plan_at_step "$R67C" 4 "$S67C_ROW1" "$S67C_ROW2" >/dev/null
+poke_pressure "$R67C" 8192 1.0 tick
+expect_contains "67b0 precondition: the control's first tick fills both rows" "poker: FILL T1 T2" "$OUT"
+sp_plan_at_step "$R67C" 4 "$S67C_ROW1" "${S67C_ROW2/| pending |/| dropped |}" >/dev/null
+poke_pressure "$R67C" 8192 1.0 tick
+expect_contains "67b1 control: a status change alone prints the status-changed reason, byte for byte" \
+  "poker: RECONCILE — a ## Tasks status or the ready set changed since the last tick: TaskList, and bring the task list in line with the plan" "$OUT"
+expect_absent "67b2 …and no move" "rebuild the task list" "$OUT"
+expect_eq "67b3 …and the digest carries no cause" "" "$(s67_rd "$R67C")"
+expect_contains "67b4 …while the digest owes the duty (the positive on the same file)" "duty=owed" "$(cat "$(digest_of "$R67C")")"
+
+# §NOTIFY-WHOLE (review pass 36 S1). Every `started without its checks` line hashed as the same
+# text (`NOTIFY — a`), so a second reader's line on a later tick left the hash unchanged: the tick
+# printed `unchanged`, dropped the line, and still wrote `event=told` for it. The line now enters
+# the hash whole, with the agent id beside it (two readers of one role and one candidate set print
+# the same words), and `event=told` is written only when the tick's buffer is printed. The lines
+# are the recorder's shape (66e). fails-when: the second or third reader is never named, or is
+# named twice.
+export CLAUDE_CONFIG_DIR="$S66_CFG"
+R67N="$(make_repo s67-notify)"; new_roster "$R67N"
+add_row "$R67N" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s67_unchecked() {  # <repo> <agent id> <role> <candidates>
+  printf 'start-unchecked/v1|event=start|at=%s|session=%s|agent_id=%s|role=%s|candidates=%s\n' \
+    "$(iso_ago 30)" "$SID" "$2" "$3" "$4" >> "$(roster_of "$1")"
+}
+s67_told() { /usr/bin/grep -c "^start-unchecked/v1|event=told|.*|agent_id=$2\$" "$(roster_of "$1")" | tr -d ' '; }
+require_helpers s67_unchecked s67_told
+plant_answer "$S66_TR" none
+s67_unchecked "$R67N" ac67-6700000000000001 bionic:critic H1,H2
+poke_pressure "$R67N" 8192 1.0 tick
+expect_contains "67c0 precondition: the first reader is named" \
+  "poker: NOTIFY — a bionic:critic started without its checks: candidates H1, H2" "$OUT"
+s67_unchecked "$R67N" ar67-6700000000000002 bionic:reviewer H3,H4
+poke_pressure "$R67N" 8192 1.0 tick
+expect_contains "67c1 §NOTIFY-WHOLE a second reader on a later tick is named" \
+  "poker: NOTIFY — a bionic:reviewer started without its checks: candidates H3, H4" "$OUT"
+expect_eq "67c2 …once, and the first is not named again" "1" "$(count_lines_matching 'started without its checks' "$OUT")"
+expect_eq "67c3 …and it is marked told once, by the tick that printed it" "1" "$(s67_told "$R67N" ar67-6700000000000002)"
+s67_unchecked "$R67N" ac67-6700000000000003 bionic:critic H1,H2
+poke_pressure "$R67N" 8192 1.0 tick
+expect_contains "67c4 a third reader whose line reads as the first one's is named too" \
+  "poker: NOTIFY — a bionic:critic started without its checks: candidates H1, H2" "$OUT"
+expect_eq "67c5 …and told once" "1" "$(s67_told "$R67N" ac67-6700000000000003)"
+poke_pressure "$R67N" 8192 1.0 tick
+expect_absent "67c6 the next tick names none of them" "started without its checks" "$OUT"
+expect_contains "67c7 …while it still prints (the positive on the same tick)" "poker:" "$OUT"
+expect_eq "67c8 …and each start is told exactly once" "1 1 1" \
+  "$(s67_told "$R67N" ac67-6700000000000001) $(s67_told "$R67N" ar67-6700000000000002) $(s67_told "$R67N" ac67-6700000000000003)"
+
+# §AMEND-PLACED (review pass 36 N2). An agent amended by its id while unplaced, then placed (its
+# launch call's return writes the row that carries its id: SYNTHESIZED here through
+# `roster_row_fixture`, the dispatch wall's shape, status=confirmed), then amended by its id again:
+# the amend goes to the placed row, which holds the unplaced set and the new one, and no second
+# unplaced row is written to shadow it. fails-when: the wall's pick for the id is an unplaced row.
+R67P="$(make_repo s67-amend-placed)"; new_roster "$R67P"
+s66_launch "$R67P" p1 toolu_p1 bionic:test-runner
+s66_launch "$R67P" p2 toolu_p2 bionic:test-runner
+S67P_ID="ap67-6700000000000004"
+s66_start "$R67P" bionic:test-runner "$S67P_ID"
+s66_ran "$S67P_ID"
+poke "$R67P" amend "$S67P_ID" --suites+ tests/c.test.sh --reason 'its refusal asked'
+expect_eq "67d0 precondition: the unplaced agent's set is recorded on its own row" "unplaced|c.test.sh" \
+  "$(s30_field "$(s66_pick "$R67P" "$S67P_ID")" status)|$(s30_field "$(s66_pick "$R67P" "$S67P_ID")" suites_allowed)"
+roster_row_fixture status=confirmed "session=$SID" name=p1 "agent_id=$S67P_ID" \
+  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" subagent_type=bionic:test-runner tool_use_id=toolu_p1 \
+  files= suites_allowed=a.test.sh suites_source=declared >> "$(roster_of "$R67P")"
+expect_eq "67d1 precondition: once placed, the wall's pick for the id is the placed row" "p1" \
+  "$(s30_field "$(s66_pick "$R67P" "$S67P_ID")" name)"
+poke "$R67P" amend "$S67P_ID" --suites+ tests/d.test.sh --reason 'one more'
+expect_eq "67d2 §AMEND-PLACED an amend by id after the placing exits 0" "0" "$RC"
+expect_contains "67d3 …and amends the placed row, by its name" "poker: amended — p1:" "$OUT"
+S67P_PICK="$(s66_pick "$R67P" "$S67P_ID")"
+expect_eq "67d4 …which the wall still picks for the id" "p1|confirmed" "$(s30_field "$S67P_PICK" name)|$(s30_field "$S67P_PICK" status)"
+expect_eq "67d5 …holding its own set, the unplaced set and the new one" "a.test.sh c.test.sh d.test.sh" \
+  "$(s30_field "$S67P_PICK" suites_allowed | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "67d6 …and no second unplaced row was written" "1" \
+  "$(/usr/bin/grep -c "|status=unplaced|.*|name=$S67P_ID|" "$(roster_of "$R67P")" | tr -d ' ')"
+unset CLAUDE_CONFIG_DIR
+
+# §AMEND-CAP (left open by T49; A-orch-96). The amend door counted the added runs with no
+# `Questions:` line, so a critic or reviewer holding `evidence` got the writer's cap of 200. An
+# amend on a row whose `questions=` holds `evidence` is now held to the dispatch wall's cap of
+# three, counted over the row's runs after the amend, housekeeping excepted, and a fourth is
+# refused naming the cap. The rows are the dispatch wall's shape (`roster_row_fixture`). The
+# fourth hidden as `rm -rf x & pytest` reads T57's construction through lib/brief.sh: until T57
+# is on this head that row is red for that reason alone.
+# fails-when: a fourth run is recorded on an evidence reader's row, or a reader not dealt
+# `evidence`, or a writer, is refused a fourth.
+R67Q="$(make_repo s67-amend-cap)"; new_roster "$R67Q"
+s67_reader() {  # <repo> <name> <type> <questions or ""> — a live row with two runs declared
+  roster_row_fixture status=identified "session=$SID" "name=$2" "agent_id=a67-$2-0000000000001" \
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "subagent_type=$3" "tool_use_id=toolu_$2" \
+    files= suites_allowed=none suites_source=declared 're_executes=`pytest tests/a` `pytest tests/b`' \
+    ${4:+"questions=$4"} >> "$(roster_of "$1")"
+}
+s67_runs() {  # <repo> <name> -> the marked runs on the name's last row that are not housekeeping
+  s30_field "$(grep -F "|name=$2|" "$(roster_of "$1")" | tail -1)" re_executes \
+    | awk -F'`' '{ for (i = 2; i <= NF; i += 2) if ($i != "" && $i !~ /^(rm|rmdir|mkdir|touch|cp|mv) /) n++ } END { print n + 0 }'
+}
+s67_sum() { cksum < "$(roster_of "$1")"; }
+require_helpers s67_reader s67_runs s67_sum
+s67_reader "$R67Q" crit bionic:critic evidence
+s67_reader "$R67Q" rev bionic:reviewer adversarial
+s67_reader "$R67Q" wri bionic:implementor ""
+expect_eq "67e0 precondition: each row declares two counted runs" "2 2 2" \
+  "$(s67_runs "$R67Q" crit) $(s67_runs "$R67Q" rev) $(s67_runs "$R67Q" wri)"
+poke "$R67Q" amend crit --reexec+ 'pytest tests/c' --reason 'a third'
+expect_eq "67e1 §AMEND-CAP a tested critic dealt evidence amended to a third run: admitted (exit 0)" "0" "$RC"
+expect_eq "67e2 …and the row holds three" "3" "$(s67_runs "$R67Q" crit)"
+S67Q_SUM="$(s67_sum "$R67Q")"
+poke "$R67Q" amend crit --reexec+ 'pytest tests/d' --reason 'a fourth'
+expect_eq "67e3 …a fourth is refused (exit 1)" "1" "$RC"
+expect_contains "67e4 …naming the cap" "three" "$OUT"
+expect_eq "67e5 …and nothing is written" "$S67Q_SUM" "$(s67_sum "$R67Q")"
+poke "$R67Q" amend crit --reexec+ 'rm -rf build' --reason 'a cleanup'
+expect_eq "67e6 a housekeeping command beside the three is free (exit 0)" "0" "$RC"
+S67Q_SUM="$(s67_sum "$R67Q")"
+poke "$R67Q" amend crit --reexec+ 'rm -rf x & pytest' --reason 'a run behind &'
+expect_eq "67e7 a fourth hidden as rm -rf x & pytest is refused (exit 1; T57's construction)" "1" "$RC"
+expect_eq "67e8 …and nothing is written" "$S67Q_SUM" "$(s67_sum "$R67Q")"
+# A fourth by --suites+ on a critic dealt evidence that holds three suites and no run: the
+# wall's own cap counts suites and runs together once T57 is on the head (A-orch-123), and the
+# door refuses what it refuses. Red until then, for that reason alone.
+roster_row_fixture status=identified "session=$SID" name=crs "agent_id=a67-crs-0000000000001" \
+  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" subagent_type=bionic:critic tool_use_id=toolu_crs \
+  files= "suites_allowed=a.test.sh b.test.sh c.test.sh" suites_source=declared questions=evidence \
+  >> "$(roster_of "$R67Q")"
+S67Q_SUM="$(s67_sum "$R67Q")"
+poke "$R67Q" amend crs --suites+ tests/d.test.sh --reason 'a fourth suite'
+expect_eq "67e13 a fourth by --suites+ beside three suites is refused (exit 1; T57's count of suites and runs)" "1" "$RC"
+expect_eq "67e14 …and nothing is written" "$S67Q_SUM" "$(s67_sum "$R67Q")"
+poke "$R67Q" amend rev --reexec+ 'pytest tests/c' --reexec+ 'pytest tests/d' --reason 'two more'
+expect_eq "67e9 a reviewer not dealt evidence takes a fourth, as today (exit 0)" "0" "$RC"
+expect_eq "67e10 …and holds four" "4" "$(s67_runs "$R67Q" rev)"
+poke "$R67Q" amend wri --reexec+ 'pytest tests/c' --reexec+ 'pytest tests/d' --reason 'two more'
+expect_eq "67e11 a writer's row takes a fourth, as today (exit 0)" "0" "$RC"
+expect_eq "67e12 …and holds four" "4" "$(s67_runs "$R67Q" wri)"
+
+# §BUDGET-LOWERS (review pass 42 N2; A-orch-112). `budget` took a reply nothing verifies and
+# raised the cap as readily as it lowered it, so a model could raise its own ceiling. It now
+# records a cap at or below the ceiling the machine derives; a number above it is refused, saying
+# that raising the ceiling is the user's own edit of the plan's `parallel-budget:` line. The
+# fixture is 65's (the probe's eight). fails-when: writers=99 is recorded, or 8 or 3 is refused.
+R67B="$(make_repo s67-budget)"; ( cd "$R67B" && git commit -q --allow-empty -m init )
+git -C "$R67B" config user.name "Dana Fixture"
+P67B="$(s42_plan "$R67B" 4)"
+s42_snap "$R67B" "$P67B"
+poke "$R67B" budget writers=99 'go wide'
+s42_unchanged "67f1 §BUDGET-LOWERS writers=99 over a derived 8" 1 "$P67B"
+expect_contains "67f2 …the refusal says the verb only lowers" "only lowers" "$OUT"
+expect_contains "67f3 …and that raising it is the user's own edit of the parallel-budget: line" \
+  "Raising it is the user's own edit of the plan's parallel-budget: line" "$OUT"
+poke "$R67B" budget writers=8 'the derived width'
+expect_eq "67f4 writers=8, the derived ceiling itself, is recorded (exit 0)" "0" "$RC"
+expect_contains "67f5 …the header reads it" "parallel-budget: writers=8 " "$(cat "$P67B")"
+poke "$R67B" budget writers=3 'keep it at three'
+expect_eq "67f6 writers=3 is recorded (exit 0)" "0" "$RC"
+expect_regex "67f7 …and derived= is still the probe's eight" \
+  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=3$' "$(/usr/bin/grep '^budget-override:' "$P67B")"
+s42_snap "$R67B" "$P67B"
+poke "$R67B" budget writers=9 'one over'
+s42_unchanged "67f8 writers=9, one over the derived 8 (the user's cap of 3 stands)" 1 "$P67B"
+
+# §DECLINE-SLOT (review pass 42 N1; A-orch-112). The wall's refusal prints `decline <ids> 'why
+# they wait'`, and that command run exactly as printed recorded the placeholder as the reason. It
+# is refused now, saying to put the reason in its place; the same command with a real reason is
+# recorded. The fixture is 65's: the tick fills, the wall refuses the silent turn, and its line is
+# taken from the refusal and run as printed. fails-when: the printed line writes a ledger line.
+S67D_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R67D="$(make_repo s67-decline-slot)"; new_roster "$R67D"
+P67D="$(s31_task_plan "$R67D" T1)"
+bind_marker "$R67D" "$P67D"
+add_row "$R67D" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R67D" 8192 1.0 tick
+expect_contains "67g0 precondition: the tick fills the two ready rows" "poker: FILL T2 T3" "$OUT"
+s31_stop "$R67D" "$(s31_transcript "$R67D" "carry on")"
+S67D_LINE="$(s31_reason | /usr/bin/grep -o "bash [^ ]*session-poker.sh'\{0,1\} decline [A-Za-z0-9_.,-]* 'why they wait'" | head -1)"
+expect_contains "67g1 precondition: the wall's refusal prints the decline line with its placeholder" \
+  "decline T2,T3 'why they wait'" "$S67D_LINE"
+S67D_N="$(s65_count "$R67D")"
+S67D_OUT="$( cd "$R67D" && CLAUDE_CODE_SESSION_ID="$SID" bash -c "$S67D_LINE" 2>&1 )"; S67D_RC=$?
+expect_eq "67g2 §DECLINE-SLOT the printed command run verbatim is refused (exit 1)" "1" "$S67D_RC"
+expect_contains "67g3 …saying the placeholder is no reason, and to put the reason in its place" \
+  "put the reason in its place" "$S67D_OUT"
+expect_eq "67g4 …and no ledger line is written" "$S67D_N" "$(s65_count "$R67D")"
+S67D_REAL="$(printf '%s' "$S67D_LINE" | sed "s/'why they wait'\$/'the machine is saturated'/")"
+S67D_OUT="$( cd "$R67D" && CLAUDE_CODE_SESSION_ID="$SID" bash -c "$S67D_REAL" 2>&1 )"; S67D_RC=$?
+expect_eq "67g5 the same command with a real reason is recorded (exit 0)" "0" "$S67D_RC"
+expect_eq "67g6 …one ledger line, carrying that reason" "$((S67D_N + 1))|the machine is saturated" \
+  "$(s65_count "$R67D")|$(s65_field "$(s65_led "$R67D" | tail -1)" declined)"
+POKE_BOUND="$S67D_BOUND_WAS"
 
 # ============================================================
 section "Section 68 §DEBT-OWED: a debt is owed because land wrote it, and covered only by a green run after the red landing (wave-27 T67; review pass 46 B1, B2, B3, N5, S3; REQ-14 AC-14.3; D23 as amended, A-orch-120)"

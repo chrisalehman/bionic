@@ -647,15 +647,16 @@ _wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrive
 # 34 B1). Another landing appends under that lock, so a test-then-delete outside it could remove a
 # block appended in between, after that landing had printed LANDED and removed its tree. A lock not
 # taken inside the wait leaves the file: an empty record left behind is harmless, a deleted block
-# is not.
+# is not. THE CLEANUP TAKES NOTHING OVER (wave-27 T63; review pass 43 B1): a stale lock in its way
+# leaves the file too, and it deletes only while the lock's line is its own.
 worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence>] -> LANDED | REFUSED
   local rc made
   _WT_PROOFS_MADE=""
   _wt_land "$@"; rc=$?
   made="$_WT_PROOFS_MADE"; _WT_PROOFS_MADE=""
-  if [ "$rc" -ne 0 ] && [ -n "$made" ] && _wt_proofs_lock "$made"; then
-    if [ -f "$made" ] && [ ! -s "$made" ] && [ ! -L "$made" ]; then rm -f "$made" 2>/dev/null; fi
-    rm -rf "${made}.lock" 2>/dev/null
+  if [ "$rc" -ne 0 ] && [ -n "$made" ] && _wt_proofs_lock "$made" keep; then
+    if _wt_proofs_mine "$made" && [ -f "$made" ] && [ ! -s "$made" ] && [ ! -L "$made" ]; then rm -f "$made" 2>/dev/null; fi
+    _wt_proofs_unlock "$made"
   fi
   return "$rc"
 }
@@ -819,11 +820,23 @@ _wt_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence
       _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} — the project's declared release-check (${check_cmd}) fails over this landing's range${left:+ and left changes, named before this dash}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
     fi
     if [ -n "$left" ]; then
-      said=""
-      case " $left" in *" head_was="*) said="moved the target checkout's HEAD (git -C ${co} reflog -2)" ;; esac
-      case " $left" in *" paths="*) said="${said:+${said}; }left tracked files changed in the target checkout (git -C ${co} status)" ;; esac
+      # WHO MOVED THE HEAD (wave-27 T63; review pass 43 S1). A head that moved while the check ran was
+      # moved by the check or by another landing into the same branch, and the tool cannot tell which:
+      # the line says that, and does not tell the user to put back what may be a landed merge.
+      said=""; moved=""; fix=""
+      case " $left" in *" head_was="*)
+        moved="${left#*head_was=}"; moved="${moved%% *}"; said="${left#*head_now=}"; said="${said%% *}"
+        moved="the target checkout's HEAD moved from ${moved} to ${said} while the project's declared release-check (${check_cmd}) ran, by the check or by another landing into ${onto} (git -C ${co} reflog -2)"
+        said=""
+        fix="if the move is another landing's merge, land again; if it is the check's own commit, take it off the target, make the check change nothing, land again" ;;
+      esac
+      case " $left" in *" paths="*) said="left tracked files changed in the target checkout (git -C ${co} status)" ;; esac
       case " $left" in *" piece_paths="*) said="${said:+${said}; }changed the piece's checkout ${wt_abs} (git -C ${wt_abs} status)" ;; esac
-      _wt_refuse "check-dirtied why=release-check checkout=${co} ${left} branch=${branch} — the project's declared release-check (${check_cmd}) ${said}, and nothing is merged; put back what it changed, make the check change nothing, land again"; return 2
+      if [ -n "$said" ]; then
+        said="the project's declared release-check (${check_cmd}) ${said}"
+        fix="put back what it changed, make the check change nothing, land again${fix:+ (for the HEAD: ${fix})}"
+      fi
+      _wt_refuse "check-dirtied why=release-check checkout=${co} ${left} branch=${branch} — ${moved}${moved:+${said:+; }}${said}, and nothing is merged; ${fix}"; return 2
     fi
   fi
 
@@ -1055,13 +1068,25 @@ EOF
 # directory at the lock's path (a file, a link), would merge and then fail the append. Both refuse
 # here, before the merge. A lock DIRECTORY is not a refusal, live or stale: the append waits for it,
 # or takes it over.
+#
+# A BUSY LOCK IS NOT A REFUSAL (wave-27 T63; review pass 43 B2). A lock released between two looks
+# at its path read as "something that is not a directory" (36 of 40,000 proofs). The path is looked
+# at once (`_wt_proofs_lock_other`); "absent" and "a directory" are both fine; "something else" is
+# looked at once more after a twentieth of a second, and only a second "something else" refuses.
 _wt_proofs_prove() {  # <record path> -> 0 writable, 1 not
   local made="" lk="${1}.lock"
   [ ! -L "$1" ] || return 1
   if [ -e "$1" ]; then [ -f "$1" ] || return 1; else made="$1"; fi
-  if [ -L "$lk" ] || { [ -e "$lk" ] && [ ! -d "$lk" ]; }; then return 1; fi
+  if _wt_proofs_lock_other "$lk"; then sleep 0.05; ! _wt_proofs_lock_other "$lk" || return 1; fi
   mkdir -p "${1%/*}" 2>/dev/null && [ -w "${1%/*}" ] && [ -x "${1%/*}" ] && { : >> "$1"; } 2>/dev/null || return 1
   _WT_PROOFS_MADE="$made"
+}
+
+# The lock's path is something other than absent or a directory: a link, or anything not a directory.
+_wt_proofs_lock_other() {  # <lock path> -> 0 something else, 1 absent or a directory
+  [ -L "$1" ] && return 0
+  [ -d "$1" ] && return 1
+  [ -e "$1" ]
 }
 
 # THE APPEND IS SERIALIZED (wave-27 T50; review pass 27 S1). Two landings appending at once wrote
@@ -1074,18 +1099,36 @@ _wt_proofs_prove() {  # <record path> -> 0 writable, 1 not
 # standing and the tree and its stamps kept. A lock a killed landing left behind is taken over, and must not stop every later
 # landing: it is stale when the pid it records is gone, or when the directory is older than
 # _WT_PROOFS_LOCK_STALE seconds (an append takes microseconds, so a minute is a holder that is
-# not coming back). Two landings that both find one stale can race to take it over, which needs a
-# killed landing and two more in the same instant; the worst case is one interleaved block, the
-# fault this lock removes in every other case.
+# not coming back).
+#
+# THE LOCK HAS ONE HOLDER (wave-27 T63; review pass 43 B1). The takeover was `rm -rf` then `mkdir`, two
+# acts: two takers that both found the lock stale could both hold it, and a refused landing's cleanup
+# holding it so deleted a block another landing had just appended. Every act that changes who holds
+# the lock is now ONE `mkdir` or ONE rename (the states and their acts: the T63 record):
+#   - a take is `mkdir <record>.lock`, then its line `<$$> <real pid>` written only if no line is there;
+#   - a takeover is `_wt_proofs_takeover`, one taker at a time: the line judged stale read again, the
+#     stale directory renamed aside to the taker's own name (one taker wins), the line looked for in
+#     the renamed directory, and only then is it removed and a fresh lock made by `mkdir`;
+#   - a holder writes and releases only while the lock's line is its own (`_wt_proofs_mine`), so a
+#     holder whose lock was lost writes nothing and removes nothing that is not its own.
+# The cleanup of a refused landing passes `keep`: it never takes a lock over (B1).
 _WT_PROOFS_LOCK_WAIT="${_WT_PROOFS_LOCK_WAIT:-10}"
 _WT_PROOFS_LOCK_STALE="${_WT_PROOFS_LOCK_STALE:-60}"
-_wt_proofs_lock() {  # <record path> -> 0 held, 1 not taken in time
-  local lk="${1}.lock" bare=0 pid="" mt=""
+_wt_proofs_lock() {  # <record path> [keep] -> 0 held, 1 not taken in time (keep: or met a stale lock)
+  local lk="${1}.lock" bare=0 line="" pid="" mt="" me
   local t0="$SECONDS"
+  # `$$` is the parent's pid inside a subshell; the line carries the process's own pid as well, so two
+  # subshells of one shell never read each other's line as their own.
+  me="$$ $(exec sh -c 'echo "$PPID"')"
   while :; do
     if mkdir "$lk" 2>/dev/null; then
-      printf '%s\n' "$$" > "$lk/pid" 2>/dev/null
-      return 0
+      if ( set -C; printf '%s\n' "$me" > "$lk/pid" ) 2>/dev/null; then
+        _WT_PROOFS_ME="$me"
+        return 0
+      fi
+      # Gone, or a line already in it, between the mkdir and the write: a taker took this directory
+      # over (its own act, by rename or a fresh `mkdir`). Not ours; nothing to remove.
+      continue
     fi
     if [ ! -d "$lk" ]; then
       # mkdir failed and nothing is there to wait for: the directory cannot be written. One miss
@@ -1094,13 +1137,16 @@ _wt_proofs_lock() {  # <record path> -> 0 held, 1 not taken in time
       [ "$bare" -lt 3 ] || return 1
     else
       bare=0
-      pid=""; { read -r pid < "$lk/pid"; } 2>/dev/null
+      line=""; { read -r line < "$lk/pid"; } 2>/dev/null
+      # Our own line: our directory, renamed aside by a taker and put back home. Ours still.
+      if [ "$line" = "$me" ]; then _WT_PROOFS_ME="$me"; return 0; fi
+      pid="${line%% *}"
       mt="$(stat -f %m "$lk" 2>/dev/null || stat -c %Y "$lk" 2>/dev/null)"
       case "$mt" in ''|*[!0-9]*) mt="" ;; esac
       if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } \
         || { [ -n "$mt" ] && [ $(( $(date +%s) - mt )) -gt "$_WT_PROOFS_LOCK_STALE" ]; }; then
-        rm -rf "$lk" 2>/dev/null
-        continue
+        [ "${2:-}" != keep ] || return 1
+        _wt_proofs_takeover "$lk" "$line" "${me##* }" && continue
       fi
     fi
     # Whole seconds by the shell's own clock: past the wait (more than it, never less), not taken.
@@ -1109,25 +1155,116 @@ _wt_proofs_lock() {  # <record path> -> 0 held, 1 not taken in time
   done
 }
 
+# A stale lock taken over by ONE rename (wave-27 T63; review pass 43 B1). Takeovers are one at a time
+# under `<lock>.taking` (`_wt_proofs_taking`), and, holding it, the taker reads the lock's line again:
+# only the line it judged stale is taken over, so a lock made fresh between the look and the rename is
+# never renamed (A-T63.1, A-T63.2). The directory is renamed aside to `<lock>.stale.<taker's pid>`
+# (the source gone: another taker won, and this one waits like any other), the line is read once more
+# in the renamed directory, and only then is it removed and the path left free for a `mkdir`. Should
+# the renamed directory hold another line (a holder that came back after the stale age), it goes home
+# by rename while the path is free, and is otherwise lost to its holder, which then finds another's
+# line and writes nothing.
+_wt_proofs_takeover() {  # <lock path> <line judged stale> [<taker pid>] -> 0 taken over, 1 not
+  local me="${3:-$$}" aside="${1}.stale.${3:-$$}" tk="${1}.taking" line=""
+  _wt_proofs_taking "$tk" "$me" "$1" || return 1
+  { read -r line < "$1/pid"; } 2>/dev/null
+  if [ ! -d "$1" ] || [ -L "$1" ] || [ "$line" != "$2" ]; then _wt_proofs_untaking "$tk" "$me"; return 1; fi
+  rm -rf "$aside" 2>/dev/null  # only a dead process with this pid can have left one
+  mv "$1" "$aside" 2>/dev/null || { _wt_proofs_untaking "$tk" "$me"; return 1; }
+  line=""; { read -r line < "$aside/pid"; } 2>/dev/null
+  if [ "$line" != "$2" ]; then
+    # Only a directory with a line goes home. One with none is a take whose line is not written yet;
+    # put back, it could be left with no holder at all. Removed, its maker's line write fails (or
+    # lands in the next taker's directory first) and the maker goes round the wait.
+    [ -z "$line" ] || [ -e "$1" ] || mv "$aside" "$1" 2>/dev/null
+    rm -rf "$aside" "${1}/${aside##*/}" 2>/dev/null
+    _wt_proofs_untaking "$tk" "$me"
+    return 1
+  fi
+  rm -rf "$aside" 2>/dev/null
+  _wt_proofs_untaking "$tk" "$me"
+}
+
+# THE TAKEOVER'S OWN LOCK, AND WHAT FREES IT WHEN ITS HOLDER DIES (wave-27 T63, A-T63.10). `.taking` is
+# held by `mkdir` AND the holder's file `h.<its pid>` in it, the only one there: a taker whose `mkdir`
+# succeeded but whose file is not alone (another wrote into a directory made after its own was
+# removed) takes its file out and does not hold it. Nothing frees a `.taking` by remove-and-retry:
+# - a `.taking` holding a DEAD holder's file is freed by unlinking that file, which one process wins;
+#   that process alone then `rmdir`s it (only an EMPTY directory goes) and removes the dead holder's
+#   renamed-aside `<lock>.stale.<its pid>`, which only that holder could otherwise have removed;
+# - an EMPTY `.taking` (a taker killed between its `mkdir` and its file) is freed by one `rmdir` once
+#   older than _WT_PROOFS_TAKING_STALE seconds (2); a held `.taking` is never empty, so an `rmdir`
+#   aimed at an old one never removes a held one;
+# - a `.taking` whose holder lives is never freed: a takeover holds it for milliseconds.
+_WT_PROOFS_TAKING_STALE="${_WT_PROOFS_TAKING_STALE:-2}"
+_wt_proofs_taking() {  # <taking dir> <taker pid> <lock path> -> 0 held, 1 not (a dead holder's freed)
+  local h p n=0 mt
+  if mkdir "$1" 2>/dev/null; then
+    { : > "$1/h.$2"; } 2>/dev/null || return 1
+    for h in "$1"/h.*; do [ -e "$h" ] && n=$((n + 1)); done
+    [ "$n" -eq 1 ] && return 0
+    rm -f "$1/h.$2" 2>/dev/null
+    return 1
+  fi
+  for h in "$1"/h.*; do
+    [ -e "$h" ] || continue
+    n=$((n + 1)); p="${h##*/h.}"
+    case "$p" in ''|*[!0-9]*) continue ;; esac
+    if ! kill -0 "$p" 2>/dev/null && rm "$h" 2>/dev/null; then
+      rmdir "$1" 2>/dev/null
+      rm -rf "${3}.stale.${p}" 2>/dev/null
+    fi
+  done
+  if [ "$n" -eq 0 ]; then
+    mt="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null)"
+    case "$mt" in ''|*[!0-9]*) ;; *) [ $(( $(date +%s) - mt )) -le "$_WT_PROOFS_TAKING_STALE" ] || rmdir "$1" 2>/dev/null ;; esac
+  fi
+  return 1
+}
+
+_wt_proofs_untaking() {  # <taking dir> <taker pid>
+  rm -f "$1/h.$2" 2>/dev/null
+  rmdir "$1" 2>/dev/null
+}
+
+# The lock's line is this holder's own.
+_wt_proofs_mine() {  # <record path> -> 0 the lock is this holder's, 1 not
+  local line=""
+  { read -r line < "${1}.lock/pid"; } 2>/dev/null
+  [ -n "$line" ] && [ "$line" = "${_WT_PROOFS_ME:-}" ]
+}
+
+# The holder releases its own lock, and nothing that is not its own.
+_wt_proofs_unlock() {  # <record path>
+  ! _wt_proofs_mine "$1" || rm -rf "${1}.lock" 2>/dev/null
+}
+
 # The header and the judged lines under it, appended whole while the record's lock is held, its
 # status returned. The block is built before the lock is taken, and the lock is released on every
-# path out.
+# path out. A holder that finds another's line in the lock has written nothing and goes round the
+# same wait (wave-27 T63).
 _wt_proofs_append() {  # <file> <row> <branch> <head> <merge> <judged lines> [<at>]
-  local block rc
+  local block rc t0="$SECONDS"
   block="landed: row=${2:-—} branch=${3} head=${4} merge=${5} at=${7:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
   [ -z "${6:-}" ] || block="${block}
 ${6}"
-  _wt_proofs_lock "$1" || return 1
-  # THE RECORD'S TYPE IS TESTED AGAIN UNDER THE LOCK (wave-27 T58; review pass 34 N4): a path swapped
-  # after the proof, to a FIFO that would block the open for good while the lock is held, or to a
-  # link, is not opened; the append fails, the `proofs=unwritten` case.
-  if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then
-    rm -rf "${1}.lock" 2>/dev/null
-    return 1
-  fi
-  { printf '%s\n' "$block" >> "$1"; } 2>/dev/null; rc=$?
-  rm -rf "${1}.lock" 2>/dev/null
-  return "$rc"
+  while _wt_proofs_lock "$1"; do
+    if _wt_proofs_mine "$1"; then
+      # THE RECORD'S TYPE IS TESTED AGAIN UNDER THE LOCK (wave-27 T58; review pass 34 N4): a path
+      # swapped after the proof, to a FIFO that would block the open for good while the lock is held,
+      # or to a link, is not opened; the append fails, the `proofs=unwritten` case.
+      if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then
+        _wt_proofs_unlock "$1"
+        return 1
+      fi
+      { printf '%s\n' "$block" >> "$1"; } 2>/dev/null; rc=$?
+      _wt_proofs_unlock "$1"
+      return "$rc"
+    fi
+    [ $(( SECONDS - t0 )) -le "$_WT_PROOFS_LOCK_WAIT" ] || return 1
+    sleep 0.02
+  done
+  return 1
 }
 
 # THE DEBT'S ONE WRITER (wave-27 T67; review pass 46 B3; A-orch-120). A declared red is owed because
@@ -1145,16 +1282,22 @@ _wt_debt_void() {  # <record> <id> <branch> <why> -> 0 written, 1 not
   _wt_proofs_put "$1" "void: id=${2} branch=${3} at=$(date -u +%Y-%m-%dT%H:%M:%SZ) why=${4}"
 }
 _wt_proofs_put() {  # <record> <line> -> 0 appended under the record's lock, 1 not
-  local rc
+  local rc t0="$SECONDS"
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
-  _wt_proofs_lock "$1" || return 1
-  if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then
-    rm -rf "${1}.lock" 2>/dev/null
-    return 1
-  fi
-  { printf '%s\n' "$2" >> "$1"; } 2>/dev/null; rc=$?
-  rm -rf "${1}.lock" 2>/dev/null
-  return "$rc"
+  while _wt_proofs_lock "$1"; do
+    if _wt_proofs_mine "$1"; then
+      if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then
+        _wt_proofs_unlock "$1"
+        return 1
+      fi
+      { printf '%s\n' "$2" >> "$1"; } 2>/dev/null; rc=$?
+      _wt_proofs_unlock "$1"
+      return "$rc"
+    fi
+    [ $(( SECONDS - t0 )) -le "$_WT_PROOFS_LOCK_WAIT" ] || return 1
+    sleep 0.02
+  done
+  return 1
 }
 
 # A piece's checkout as `land`'s dirty-tree test reads it: every porcelain line, untracked files
