@@ -23,6 +23,7 @@
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
+#     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -422,6 +423,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
+  die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -639,6 +641,15 @@ case "$VERB" in
     if [ -n "$PF_QUESTION$PF_READER" ]; then
       { [ -n "$PF_QUESTION" ] && [ -n "$PF_READER" ] && [ "$PF_KIND" = review ]; } || usage "$PF_USAGE"
     fi
+    ;;
+  # THE WAIVER VERB (wave-27 T9; D2). Two operands, both required: the reading question and the
+  # user's reply, verbatim. The question's membership and the reply's shape are the verb's own
+  # refusals (1), as proof-add's question is; a missing or blank operand is the usage error.
+  waive)
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "waive takes exactly two arguments: the question (evidence, adversarial or structure) and the user's reply, verbatim."
+    fi
+    WV_Q="$1"; WV_REPLY="$2"
     ;;
   # ONE OPTIONAL FLAG (wave-26 T32; D4): `--wait` waits for another writer's lock, which only the
   # launch recorder's detached call can afford; the tick and the turn-end wall leave a held lock
@@ -5094,7 +5105,10 @@ EOF
     row_has_key "$AM_ROW" re_executes && AM_OLD_RUNS="$(clean "$(line_field "$AM_ROW" re_executes)" re_executes)"
 
     # THE ADDITIONS AS THE GRAMMAR READS THEM, alone: what each flag contributes once lifted.
-    AM_ADD="$(lift_contract_fields "$(poker_brief_span "$AMEND_FILES" "$AMEND_SUITES" "" "$AMEND_RUNS")" "$AM_ROLE")"
+    # The root files are the fact the one Files: reader reads a bare name by (wave-27 T29;
+    # REQ-12, D21), so `--files+ CONTEXT.md` is the path a dispatch would have recorded.
+    AM_ROOTS="$(brief_root_files "$REPO_REAL")"
+    AM_ADD="$(lift_contract_fields "$(poker_brief_span "$AMEND_FILES" "$AMEND_SUITES" "" "$AMEND_RUNS")" "$AM_ROLE" "$AM_ROOTS")"
     AM_NEW_FILES="$(poker_union , "$AM_OLD_FILES" "$(brief_field "$AM_ADD" files)")"
 
     # THE DECLARED HALF OF THE BUDGET. A declared (or unlabelled) budget carries its old set
@@ -5109,8 +5123,10 @@ EOF
                   AM_DECL="${AM_DECL% }" ;;
     esac
 
-    AM_SPAN="$(poker_brief_span "$(printf '%s' "$AM_NEW_FILES" | tr ',' '\n')" "$AM_DECL" "$AM_OLD_RUNS" "$AMEND_RUNS")"
-    AM_LIFT="$(lift_contract_fields "$AM_SPAN" "$AM_ROLE")"
+    # The additions go into the span as typed, beside the merged set, so an entry the reader
+    # does not read as a path reaches the grammar and is refused by name, never dropped.
+    AM_SPAN="$(poker_brief_span "$(printf '%s' "$AM_NEW_FILES" | tr ',' '\n')"$'\n'"$AMEND_FILES" "$AM_DECL" "$AM_OLD_RUNS" "$AMEND_RUNS")"
+    AM_LIFT="$(lift_contract_fields "$AM_SPAN" "$AM_ROLE" "$AM_ROOTS")"
     POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
     AM_RC=0
     brief_validate_fields "$AM_LIFT" "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
@@ -5118,7 +5134,7 @@ EOF
     # A derived budget with suites added too: the span declared, so nothing was derived — ask
     # the impact command for the merged files on their own.
     if [ "$AM_RC" -eq 0 ] && [ "$AM_OLD_SRC" = derived ] && [ -n "$AM_DECL" ] && [ -n "$AM_NEW_FILES" ]; then
-      brief_validate_fields "$(lift_contract_fields "Files: ${AM_NEW_FILES//,/ }" "$AM_ROLE")" \
+      brief_validate_fields "$(lift_contract_fields "Files: ${AM_NEW_FILES//,/ }" "$AM_ROLE" "$AM_ROOTS")" \
         "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
       AM_SA="$(poker_union ' ' "$AM_SA" "$BRIEF_SUITES_ALLOWED")"
     fi
@@ -5145,7 +5161,7 @@ EOF
 
     if [ "$AM_NEW_FILES" = "$AM_OLD_FILES" ] && [ "$AM_SA" = "$AM_OLD_SA" ] \
        && [ "$AM_NEW_RUNS" = "$AM_OLD_RUNS" ]; then
-      die "REFUSED — this amend changes nothing: every addition is already on $AMEND_NAME's row, or is not a path, suite or run the dispatch grammar reads (a Files: path carries a /). Nothing was written."
+      die "REFUSED — this amend changes nothing: every addition is already on $AMEND_NAME's row, or is not a path, suite or run the dispatch grammar reads. Nothing was written."
       exit 1
     fi
 
@@ -5265,7 +5281,7 @@ EOF
           exit 2
         fi
         POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
-        brief_validate_fields "$(lift_contract_fields "Files: $TA_FILES" "$TA_AGENT")" \
+        brief_validate_fields "$(lift_contract_fields "Files: $TA_FILES" "$TA_AGENT" "$(brief_root_files "$REPO_REAL")")" \
           "$TA_AGENT" "$REPO_REAL" poker_brief_sink || :
         TA_CELL_FACTS=""
         while IFS= read -r TA_FACT; do
@@ -5783,6 +5799,52 @@ PF_OWN_LIST
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
     [ -n "$PF_NONE" ] && say "proof-add — no active live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
+    exit 0
+    ;;
+
+  # THE WAIVER (wave-27 T9; D2). The user's act, on their reply: one line under `## SDLC State`,
+  #
+  #   waived: question=<q> head=<working head> by <git user.name> <ISO-UTC> "<reply>"
+  #
+  # covering that question up to the head of the plan's working-branch checkout, the head the judge
+  # (lib/proof.sh `facts_state`) is asked about. It goes in through the plan transaction, placed
+  # with the proof lines by `proof_add_line`, so a fact written after it is newer than it.
+  waive)
+    if ! { declare -F proof_waiver_line >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_waiver_line >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    if ! proof_question_ok "$WV_Q"; then
+      die "REFUSED — '$(clean "$WV_Q")' is not a reading question: name evidence, adversarial or structure. The plan is unchanged."
+      exit 1
+    fi
+    case "$WV_REPLY" in
+      *$'\n'*|*$'\r'*)
+        die "REFUSED — a waiver line is one line, and the reply carries a line break; the plan is unchanged."
+        exit 1 ;;
+    esac
+    plan_verb_open waive
+    WV_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
+    if [ -z "$WV_WHO" ] || ! plan_verb_value_ok "$WV_WHO"; then
+      die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who waived; the plan is unchanged."
+      exit 1
+    fi
+    WV_WB="$(proof_working_branch "$PV_PLAN")"
+    WV_HEAD=""; [ -z "$WV_WB" ] || WV_HEAD="$(proof_head "$PV_REPO" "$WV_WB")" || WV_HEAD=""
+    case "$WV_HEAD" in
+      [0-9a-f]*) : ;;
+      *)
+        die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${WV_WB:-(none named)} checked out, so there is no head to waive at; the plan is unchanged."
+        exit 1 ;;
+    esac
+    WV_LINE="$(proof_waiver_line "$WV_Q" "$WV_HEAD" "$WV_WHO" "$(iso_now)" "$WV_REPLY")"
+    if ! proof_add_line "$PV_PLAN" "$WV_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+      die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the waiver; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_swap waive "the $WV_Q waiver at $WV_HEAD" writer
+    say "waive — question=$WV_Q head=$WV_HEAD by $WV_WHO: written to $PV_PLAN; dry-committed first."
     exit 0
     ;;
 
