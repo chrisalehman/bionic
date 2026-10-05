@@ -9,9 +9,11 @@
 # `subagent_type: bionic:critic`. Every line after it is the brief, which the session dispatches
 # exactly as written: that first line is for this script and is not part of it.
 #
+# The briefs given to one call are readers that share one build, so they go TOGETHER, all in one
+# message and in the foreground: started one after another, the second would read the first's
+# record. One brief is one dispatch. Readers that must not share a build get a call each.
+#
 # Environment:
-#   TOGETHER=1   dispatch all the briefs in ONE message. Unset, the session dispatches them one
-#                after another, the next only when the one before has finished.
 #   STEP_ZERO=1  before any dispatch, the session lists the Agent tool's descriptions of
 #                bionic:reviewer and bionic:critic, quoted exactly as the tool gives them.
 #
@@ -30,10 +32,8 @@ if [ "${STEP_ZERO:-}" = 1 ]; then
   printf '%s\n\n' "0. Before any dispatch, list every agent type the Agent tool offers whose name is bionic:reviewer or bionic:critic, quoting each one's description exactly as the tool gives it."
 fi
 n=$#
-if [ "$n" -gt 1 ] && [ "${TOGETHER:-}" = 1 ]; then
+if [ "$n" -gt 1 ]; then
   how="Dispatch the $n briefs below together, in one message."
-elif [ "$n" -gt 1 ]; then
-  how="Dispatch the $n briefs below one after another: start the next only when the one before has finished."
 else
   how="Dispatch the brief below."
 fi
