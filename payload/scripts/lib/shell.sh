@@ -28,3 +28,18 @@ shell_rc_file() {
     *)   echo "$HOME/.bashrc" ;;
   esac
 }
+
+# THE SHELL THAT READS AN RC, the one `shell_rc_file` chose the file for (wave-27
+# T66): a `.zshrc` is zsh's and a `.bashrc` bash's, and any other name (the
+# BIONIC_SHELL_RC override) goes by $SHELL exactly as the resolver above does. It
+# is the shell asked, with `-n` on a staged copy, whether the rc still parses when
+# bionic takes a line out (markers.sh `bionic_rc_alone`). remove.sh carries it
+# under the same name, pinned by tests/rc-item.test.sh §T66.
+bionic_rc_shell() {  # <rc> — zsh or bash
+  local shell_name="${SHELL:-/bin/bash}"
+  case "${1##*/}" in
+    .zshrc)  echo zsh ;;
+    .bashrc) echo bash ;;
+    *) case "${shell_name##*/}" in zsh) echo zsh ;; *) echo bash ;; esac ;;
+  esac
+}
