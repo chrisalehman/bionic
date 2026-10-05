@@ -6370,7 +6370,7 @@ expect_eq "31b the turn is refused — the ledger is live and two rows are ready
   "block" "$(s31_decision)"
 expect_contains "31b2 …naming T2, the first ready row" "T2" "$(s31_reason)"
 expect_contains "31b3 …and T3, the second — named, not counted" "T3" "$(s31_reason)"
-expect_contains "31b4 …and saying what answers it" "fill-declined:" "$(s31_reason)"
+expect_contains "31b4 …and saying what answers it: the decline verb (wave-27 T34)" "session-poker.sh decline T2,T3 'why they wait'" "$(s31_reason)"
 
 # ---------- 31c: the same turn, with the rows dispatched, ends in silence ----------
 #
@@ -7116,7 +7116,7 @@ case "$OUT" in
 esac
 expect_contains "36c …and carries the tick command, by this poker's absolute path" "bash $POKER tick" "$OUT"
 expect_eq "36d …on one line (a CronCreate prompt)" "1" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
-expect_contains "36e …and names the fill answer" "fill-declined:" "$OUT"
+expect_contains "36e …and names the fill answer, the decline verb (wave-27 T34)" "session-poker.sh decline IDS" "$OUT"
 OUT="$( cd "$R36" && CLAUDE_CODE_SESSION_ID="" bash "$POKER" prompt 2>&1 )"; RC=$?
 expect_eq "36f with no session key there is no marker to print (exit 3)" "3" "$RC"
 poke "$R36" prompt extra
@@ -7444,7 +7444,7 @@ expect_contains "41a2 …the fill answer is asked only when a FILL line printed"
   'only if a "poker: FILL" line printed' "$S41_PROMPT"
 expect_contains "41a3 …the stand-down answer only when a STANDDOWN line printed" \
   'only if a "poker: STANDDOWN" line printed' "$S41_PROMPT"
-expect_contains "41a4 …and the fill answer is still named" 'fill-declined: <reason>' "$S41_PROMPT"
+expect_contains "41a4 …and the fill answer is still named: the decline verb (wave-27 T34)" 'decline IDS' "$S41_PROMPT"
 expect_contains "41a5 AC-4.12 …the stand-down answer names hold, its reason a quoted placeholder" "session-poker.sh hold NAME 'why it stays up'" "$S41_PROMPT"
 expect_contains "41a6 AC-4.13 …ListAgents only when the roster has an open row" \
   "ListAgents only when the roster has an open row" "$S41_PROMPT"
@@ -11385,5 +11385,124 @@ printf 'sweeper-ledger/v1|event=ack|name=r-re5a|at=2026-10-04T00:00:00Z|reason=l
 poke "$R58" proof-add review record/wave-01-fixture/retry5.md --question evidence --reader r-re5
 expect_eq "63x19 F3 …nor another name's confirmed row acked after its launch: r-re5 registers (exit 0)" "0" "$RC"
 POKE_BOUND="$S63_BOUND_WAS"
+
+# ============================================================
+section "Section 65 §DECLINE-VERB §DECLINE-LOG §BUDGET-USER: a wall is never answered on the console (wave-27 T34; REQ-15 AC-15.1, AC-15.4, AC-15.5; D24)"
+# ============================================================
+#
+# THE DEFECT (design ledger Δ9, Δ10). The turn-end fill wall was answered by a `fill-declined:`
+# line in the orchestrator's reply, which the user read on every turn and which said nothing to a
+# person. `decline <id>[,<id>] '<reason>'` records the decline as one line in the run's fill
+# ledger, the line a reply-form turn leaves there, so the tick and the wall read it by the rule
+# they already apply (`fill_standing_decline`): it answers the rows it names and stands until a
+# row it did not name is ready. A user's cap on writers is no decline at all: `budget
+# writers=<n> '<reply>'` writes it into the plan header every reader of the ceiling reads.
+S65_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R65="$(make_repo s65-decline)"; new_roster "$R65"
+P65="$(s31_task_plan "$R65" T1)"
+bind_marker "$R65" "$P65"
+add_row "$R65" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
+s65_led() { cat "$1/.bionic/docs/record/${2:-task-01-fixture}/fill-ledger.log" 2>/dev/null; }
+s65_field() {  # <ledger line> <key>
+  printf '%s\n' "$1" | awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) print substr($i, length(k) + 2) }'
+}
+s65_count() { s65_led "$@" | /usr/bin/grep -c '^fill-ledger/v1|' | tr -d ' '; }
+require_helpers s65_led s65_field s65_count
+poke_pressure "$R65" 8192 1.0 tick
+expect_contains "65a precondition: the tick fills the two ready rows" "poker: FILL T2 T3" "$OUT"
+poke "$R65" decline T2,T3 'the machine is saturated'
+expect_eq "65b §DECLINE-VERB the verb records the decline (exit 0)" "0" "$RC"
+S65_LINE="$(s65_led "$R65" | tail -1)"
+expect_eq "65b2 §DECLINE-LOG AC-15.5 the run's fill ledger gains one line naming its ids" "T2,T3" "$(s65_field "$S65_LINE" named)"
+expect_eq "65b3 …its reason" "the machine is saturated" "$(s65_field "$S65_LINE" declined)"
+S65_AT="$(s65_field "$S65_LINE" at)"
+expect_regex "65b4 …and its time" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$S65_AT"
+poke_pressure "$R65" 8192 1.0 tick
+expect_contains "65c AC-15.1 the next tick prints the standing decline, its time and its reason, in the reply form's words" \
+  "poker: fill-declined standing since ${S65_AT} — the machine is saturated" "$OUT"
+expect_absent "65c2 …and no FILL for the rows it named" "poker: FILL" "$OUT"
+printf '| T4 | bugfix | standard | a unit nobody declined | pending | — |\n' >> "$P65"
+poke_pressure "$R65" 8192 1.0 tick
+expect_eq "65d a row the decline did not name is ready: the tick fills it alone" "poker: FILL T4" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T')"
+S65_TR="$(s31_transcript "$R65" "carry on")"
+s31_stop "$R65" "$S65_TR"
+expect_eq "65e …and the wall refuses the silent turn" "block" "$(s31_decision)"
+expect_contains "65e2 …naming T4 in the verb it prints" "session-poker.sh decline T4 'why they wait'" "$(s31_reason)"
+expect_absent "65e3 …and asking for no line in the reply" 'write "fill-declined:' "$(s31_reason)"
+S65_N="$(s65_count "$R65")"
+poke "$R65" decline T9 'no such row'
+expect_eq "65f an id that is no plan row is refused (exit 1)" "1" "$RC"
+expect_contains "65f2 …saying which" "T9" "$OUT"
+poke "$R65" decline T1 'it is running'
+expect_eq "65g a row that is not ready is refused (exit 1)" "1" "$RC"
+expect_contains "65g2 …saying which" "T1" "$OUT"
+poke "$R65" decline T4 ''
+expect_eq "65h an empty reason is refused (exit 2)" "2" "$RC"
+poke "$R65" decline
+expect_eq "65i no ids is refused: there is no decline-everything form (exit 2)" "2" "$RC"
+expect_eq "65j …and no refusal wrote a ledger line" "$S65_N" "$(s65_count "$R65")"
+expect_ne "65j2 precondition: the count is of real lines" "0" "$S65_N"
+poke "$R65" decline T4 'T4 waits for the same machine'
+expect_eq "65k §DECLINE-LOG each decline is one more line" "$((S65_N + 1))" "$(s65_count "$R65")"
+poke_pressure "$R65" 8192 1.0 tick
+expect_absent "65k2 …and the rows the first decline named stay answered beside the second's" "poker: FILL" "$OUT"
+expect_contains "65k3 …the newer reason standing" "— T4 waits for the same machine" "$OUT"
+
+# ---------- §BUDGET-USER (AC-15.4): the user's cap is written into the header ----------
+R65B="$(make_repo s65-budget)"; ( cd "$R65B" && git commit -q --allow-empty -m init )
+git -C "$R65B" config user.name "Dana Fixture"
+P65B="$(s42_plan "$R65B" 4)"
+awk '{ print } /^\| T5 \| 5 \| verify \|/ { print "| T6 | 4 | build | a ready build | implementor | — | 30 | REQ-1 | c.sh | — | — | pending |" }' \
+  "$P65B" > "$P65B.tmp" && mv "$P65B.tmp" "$P65B"
+s42_snap "$R65B" "$P65B"
+s34_gate "$R65B"
+expect_eq "65m0 precondition: the fixture with a ready build row is admitted by the real commit gate" "0" "$GATE_RC"
+new_roster "$R65B"
+for s65w in w-a w-b w-c; do
+  add_row "$R65B" name="$s65w" deliverable="$s65w.md" duration="4 hours" launched_at="$(iso_ago 60)"
+done
+poke_pressure "$R65B" 8192 1.0 tick
+expect_contains "65m control: the probe's eight writers with three open offer the ready row" "poker: FILL T6" "$OUT"
+poke "$R65B" budget writers=3 'keep it at three'
+expect_eq "65n AC-15.4 budget writers=3 exits 0" "0" "$RC"
+expect_eq "65n2 …the header's writers value is the user's, with source=user" \
+  "parallel-budget: writers=3 suites=4 worktrees=32 test_jobs=8 source=user" "$(/usr/bin/grep '^parallel-budget:' "$P65B")"
+expect_regex "65n3 …and the frontmatter carries budget-override: <user> <date> derived=<n> chosen=<n>" \
+  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=3$' "$(/usr/bin/grep '^budget-override:' "$P65B")"
+expect_eq "65n4 …inside the frontmatter, after the budget line" "parallel-budget" \
+  "$(awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f && /^budget-override:/ { print prev; exit } f { split($0, a, ":"); prev = a[1] }' "$P65B")"
+# The gate is asked with the three writers' roster set aside: the plan is what is judged here.
+mv "$(roster_of "$R65B")" "$TMPROOT/s65-roster"
+s34_gate "$R65B"
+mv "$TMPROOT/s65-roster" "$(roster_of "$R65B")"
+expect_eq "65n5 …and the commit gate admits the plan" "0" "$GATE_RC"
+S65B_LINES="$(s65_count "$R65B" wave-01-fixture)"
+poke_pressure "$R65B" 8192 1.0 tick
+expect_absent "65o with the user's cap reached the tick offers no writer row" "poker: FILL" "$OUT"
+expect_contains "65o2 …saying the budget is full at the user's three" "of writers=3" "$OUT"
+S65B_TR="$(s31_transcript "$R65B" "carry on")"
+s31_stop "$R65B" "$S65B_TR"
+expect_eq "65p …and the turn-end wall asks for nothing" "" "$(s31_decision)"
+expect_eq "65p2 …with no decline recorded" "" "$(s65_field "$(s65_led "$R65B" wave-01-fixture | tail -1)" declined)"
+expect_eq "65p3 precondition: the wall wrote its turn's line" "$((S65B_LINES + 1))" "$(s65_count "$R65B" wave-01-fixture)"
+s42_snap "$R65B" "$P65B"
+poke "$R65B" budget writers=0 'stop everything'
+s42_unchanged "65q writers=0" 1 "$P65B"
+expect_contains "65q2 …saying a cap of none is no budget" "writers=0" "$OUT"
+poke "$R65B" budget writers=six 'six'
+s42_unchanged "65q3 a value that is not a number" 1 "$P65B"
+poke "$R65B" budget suites=3 'three suites'
+s42_unchanged "65q4 a field other than writers" 2 "$P65B"
+poke "$R65B" budget writers=3
+s42_unchanged "65q5 no reply" 2 "$P65B"
+poke "$R65B" budget writers=12 'go wide'
+expect_eq "65r a value above the probe's derived ceiling is the user's, recorded (exit 0)" "0" "$RC"
+expect_contains "65r2 …the header reads writers=12" "parallel-budget: writers=12 suites=4" "$(cat "$P65B")"
+expect_regex "65r3 …and derived= is still the probe's eight" \
+  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=12$' "$(/usr/bin/grep '^budget-override:' "$P65B")"
+expect_eq "65r4 …one override line, rewritten" "1" "$(/usr/bin/grep -c '^budget-override:' "$P65B" | tr -d ' ')"
+expect_contains "65r5 …and the verb says what the dispatch wall then holds the run to" "the dispatch wall holds the run to 12" "$OUT"
+POKE_BOUND="$S65_BOUND_WAS"
 
 finish

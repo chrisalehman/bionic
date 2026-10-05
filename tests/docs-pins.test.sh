@@ -577,7 +577,7 @@ fi
 # list at S10 (S8's report: "docs-pins.test.sh:327 still pins the token in SKILL.md and is
 # S10's to retire" — NARROW is gone from hooks/session-poker.sh entirely).
 PINS_RUNGS_MISSING=""
-for token in 'EMERGENCY' 'HOLD' 'rung=<n>/<ceiling>' 'FILL <ids>' 'fill-declined: <reason>' 'approval:<name>'; do
+for token in 'EMERGENCY' 'HOLD' 'rung=<n>/<ceiling>' 'FILL <ids>' 'session-poker.sh decline' 'approval:<name>'; do
   has_pin "$DISPATCH_MD" "$token" || PINS_RUNGS_MISSING="${PINS_RUNGS_MISSING} ${token}"
 done
 if [ -z "$PINS_RUNGS_MISSING" ]; then
@@ -5494,5 +5494,26 @@ expect_eq "W27-T17-8: no surface under skills/ names the deleted canonical-sdlc-
   "$(/usr/bin/grep -rl 'canonical-sdlc-evidence-gate\.sh' "${REPO}/skills" "${REPO}/agents" 2>/dev/null)"
 expect_eq "W27-T17-8b: operational-rules.md no longer says moved lines were all kept verbatim" "" \
   "$(w26_hits 'kept here verbatim;' "$W27D_OPS")"
+
+# §W27-152 (wave-27 T34; REQ-15 AC-15.2; D24): no shipped instruction tells the model to write a
+# decline line in its reply. dispatch.md and the Patrol prompt `session-poker.sh prompt` prints name
+# the verb that records the decline on disk; neither names the reply form at all, so neither can
+# tell a model to write it. Each absence sits beside a positive on the same extractor and file.
+W27152_PROMPT_F="$(mktemp)"
+( cd "$REPO" && CLAUDE_CODE_SESSION_ID=00000000-0000-4000-8000-000000000152 bash "$REPO/hooks/session-poker.sh" prompt ) \
+  > "$W27152_PROMPT_F" 2>/dev/null
+expect_nonempty "W27-152 precondition: the Patrol prompt printed, and names the decline verb" \
+  "$(w26_hits "session-poker.sh decline IDS 'why they wait'" "$W27152_PROMPT_F")"
+expect_nonempty "W27-152a precondition: dispatch.md names the decline verb" \
+  "$(w26_hits 'session-poker.sh decline <id>[,<id>]' "$DISPATCH_MD")"
+for _w152 in 'fill-declined' 'standdown-declined'; do
+  expect_eq "W27-152b: AC-15.2 dispatch.md names no \`${_w152}:\` line" "" "$(w26_hits "$_w152" "$DISPATCH_MD")"
+  expect_eq "W27-152c: AC-15.2 the Patrol prompt names no \`${_w152}:\` line" "" "$(w26_hits "$_w152" "$W27152_PROMPT_F")"
+done
+expect_nonempty "W27-152d: dispatch.md says the stand-down answer is the hold verb" \
+  "$(w26_hits 'session-poker.sh hold' "$DISPATCH_MD")"
+expect_nonempty "W27-152m: a dispatch.md that still asks for the line is caught" \
+  "$(w26_hits 'fill-declined' "$(w26_doctor "$DISPATCH_MD" 'or one `fill-declined: <reason>` line.')")"
+rm -f "$W27152_PROMPT_F"
 
 finish
