@@ -2146,11 +2146,15 @@ case "$VERDICT" in
     REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed) — TaskList or a plan-ledger write. Do one, then stop again — this gate blocks once.'
     # THE PLAN MOVED (wave-27 T37; review pass 8 F2): the tick's own cause, from its digest, and
     # the rebuild steps/3.md asks for, where the sentence above would name a change that is not it.
+    # THE FIX NAMES WHAT THE WALL COUNTS (wave-27 T74; review pass 53 S1): a TaskList call or a
+    # plan-ledger write discharges the duty, and the rebuild alone (TaskUpdate, TaskCreate) does
+    # not, so TaskList comes first and the detail keeps the plan-ledger write, the fallback where
+    # the task tools are absent.
     case "$_ST_RECONCILE" in
-      step4) FIX='rebuild it, then stop again'
-             REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the plan moved from approval into Step 4 (its "poker: RECONCILE" line says so), so TaskList, and rebuild the task list in execution order: delete every pending entry and recreate them. Do it, then stop again — this gate blocks once.' ;;
-      grew)  FIX='rebuild it, then stop again'
-             REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the ## Tasks table grew (its "poker: RECONCILE" line says so), so TaskList, and rebuild the task list in execution order: delete the pending entries after the new row and recreate them. Do it, then stop again — this gate blocks once.' ;;
+      step4) FIX='TaskList, rebuild it, then stop again'
+             REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the plan moved from approval into Step 4 (its "poker: RECONCILE" line says so), so TaskList (or a plan-ledger write), and rebuild the task list in execution order: delete every pending entry and recreate them. Do it, then stop again — this gate blocks once.' ;;
+      grew)  FIX='TaskList, rebuild it, then stop again'
+             REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the ## Tasks table grew (its "poker: RECONCILE" line says so), so TaskList (or a plan-ledger write), and rebuild the task list in execution order: delete the pending entries after the new row and recreate them. Do it, then stop again — this gate blocks once.' ;;
     esac ;;
   *)
     return "$_adv" ;;
