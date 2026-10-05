@@ -183,7 +183,7 @@ fi
 # expression that errors on this shape of input — the cache is marked `bad` and
 # every read falls through to the per-call fork above. The cache can therefore
 # only ever be a speed-up: it is consulted when it is known-good and ignored
-# otherwise, and no value is ever synthesised.
+# otherwise, and no value is ever synthesized.
 #
 # THE ROSTER DELIBERATELY OMITS `.tool_input.command`. It is the one payload
 # field that routinely carries newlines (a heredoc, a multi-line pipeline), and
