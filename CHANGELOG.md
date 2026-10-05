@@ -10,6 +10,254 @@ Versioning follows semver from 1.9.0 on:
   or an upgrade step.
 - **PATCH** for a fix within existing behaviour.
 
+## 1.12.0 — 2026-10-05
+
+**Upgrade before you run `/bionic:setup` or `/bionic:remove` again.** In 1.11.0, setup and
+remove can delete lines of your shell rc that are not bionic's, in four ways. 1.12.0 fixes all
+four, and 1.11.x gets no patch. From 1.12.0 no door removes a line of your rc that stands outside
+a pair of bionic's markers; a marked block is removed as one unit only when its body is byte for
+byte one bionic wrote. Bionic's `claude()` block now opens with `unalias claude 2>/dev/null ||
+true`: an alias named `claude` above the block, bionic's own retired line or yours, made zsh and
+bash print a syntax error at every shell start and skip the rest of the rc. An existing install
+whose block holds exactly the old one-line body is offered the `claude()` item again at its next
+setup, and taking it rewrites the block.
+
+Every run that ships code is now read by an independent reader, at every rigor. The rigor sets
+how many readers there are, not which questions are asked: each run answers the same three
+reading questions, `evidence` (is the proof real), `adversarial` (try to break it) and `structure`
+(reuse, one site per concept, the five SOLID principles), and each answer is a recorded fact that
+the gates read. A release also owes any check its project declares, and setup offers a short set
+of working principles. This is a minor release: it adds a role, verbs, a configuration key and a
+plan field, refuses actions that were not refused before, and asks the upgrade step above. Nothing
+a project already relies on is removed, and `canonical_sdlc_version` stays 14.
+
+What you will notice:
+
+- **Rigor is the number of readers.** At `tested` one critic answers all three questions; at
+  `peer-reviewed` an auditor answers `evidence` and a critic answers `adversarial` and
+  `structure`; at `audited` an auditor, a critic and a reviewer take one question each. At
+  `scale: wave` the two code questions are also read once over the whole run, after its last build
+  piece lands. A reader's brief carries a `Questions:` line naming the set its rigor deals it, and
+  the checks for each question (`payload/context/checks-<question>.md`) are pushed to the reader
+  at start; a brief carries no checks of its own.
+- **A new role, `bionic:reviewer`,** answers `structure`. It answers each check PASS, FLAG, FAIL or
+  `n/a` with a reason. Writers search for an existing site before they add one and say so on a
+  `reuse:` line, and the Step-2 ownership table may carry a `reuses` column, which the Step-2 card
+  prints.
+- **A reading is a fact.** A reader's record holds one pass, with flush-left `reviewed: <a>..<b>`,
+  `question:`, `result: <pass|flag|fail>` and `scope: <piece|whole>` lines, and a `check:` line per
+  check for `structure`. `session-poker.sh proof-add review <record> --question <q> --reader <name>`
+  registers it, spelled `record/…` from the docs root or as an absolute path, and writes
+  `question=`, `reader=`, `result=` and `scope=` on the proof line. The reader must be the one
+  dealt that question, and the record must be named on its roster row. `session-poker.sh waive
+  <question> '<reply>'` records your waiver of a question, your reply quoted. A proof line without
+  the new fields reads as it did.
+- **Each question has its own chain.** A review row may read `live:head:<q>[+<q>]`, so it is
+  offered as soon as work lands past the last reading of its own questions, and the tick's
+  `RANGE` line names that range. A plain `live:head` row reads as in 1.11.0.
+- **From Step 6 the gates read the readings.** The commit gate wants, for each question the
+  rigor deals, a reading whose newest is not `result=fail`, or a newer waiver, and no declared red
+  still owed. `current 8`, `close-out` and the integrate row ask one judge, which also wants each
+  owed reading to cover the working head, the floor run and, when the project declares one, a
+  passing release check at that head. A task row no longer closes on the word `critic` alone.
+- **A release owes the checks your project declares.** `release-check: <command>` in
+  `.bionic/config.yaml` declares one. `session-poker.sh release-check` runs it in the working
+  checkout over the range since the nearest release tag (else the plan's `base-sha:`), with
+  `BIONIC_CHECK_BASE` and `BIONIC_CHECK_HEAD` set, keeps its log under `record/`, and writes a
+  `kind=check` fact, with `result=fail` when the command fails. `land` runs the same check over
+  each landing's range and hands it `BIONIC_CHECK_TREE`, the piece's checkout. A project that
+  declares nothing runs nothing and is asked nothing.
+- **Close-out writes its own Step 9 line,** and the plan's optional `release: <version>` field is
+  the version written on the delivered line, the epic row and the continuation header. With no
+  field no version is written; the tool's own version stays on `attested-by:`.
+- **Work that is red by design can land, and the release waits for it.** A writer's brief may
+  declare `Lands-red: <name>.test.sh until <ext:slug|approval:name>` with `Red-evidence: <path
+  under record/>`. `land` then admits that one suite red, and writes the debt to the run's landing
+  record before the merge; a merge that fails or is undone voids it. The debt is covered only by a
+  green floor or task proof dated after the red landing (and after the approval, for
+  `approval:`). While it is owed, the commit gate refuses from Step 6, and `current` refuses to
+  close Step 5 or later, as a real commit at that step would be refused.
+- **Each landing keeps the proof it read.** With a bound plan, `land` appends a
+  `landed: row=… branch=… head=… merge=… at=…` header and the stamp lines it judged to
+  `record/<plan>/landing-proofs.log`, in one write, before it removes the tree. No path of `land`
+  removes or truncates that record.
+- **Setup offers working principles.** `/bionic:setup` offers a short, general set of working
+  principles as one item, shows you the file and the whole text, and on your yes writes it between
+  `bionic:principles` markers into your global `CLAUDE.md`. Doctor reports the block as present,
+  absent, edited or malformed and changes nothing. Setup never replaces a block you edited without
+  showing the difference and asking. Remove takes the block out by its markers, and deletes the file
+  only when it holds nothing else.
+- **Your shell rc: the markers are the whole rule.** Bionic's retired bare alias line is no longer
+  removed by any door: setup, remove and doctor name it by line number, as bionic's old line
+  outside its markers, for you to delete. A retired block is removed wherever it stands, unless the
+  rc would not parse without it, as checked by the rc's own shell on a private copy; nothing in the
+  rc is run. A block whose body you changed is left whole and named "changed since bionic wrote
+  it". A file that holds a NUL byte, cannot be read, or is a dangling link is named and never
+  written. A CR LF rc keeps its CRs, and an rc with no final newline gets none.
+- **The `claude()` block** in your rc now opens with `unalias claude 2>/dev/null || true`, as the
+  upgrade note says. An alias of your own named `claude`, defined above bionic's block, stops having
+  effect while the block is there. An alias defined below the block still wins.
+  <!-- changed claude() block: its sentence and door line are filled here after the go -->
+- **Each dispatched agent has a scratch directory of its own,**
+  `.bionic/tmp/scratch/<session>/<name>/`, named at start. Its start push is one string per file,
+  each held under 9,500 characters so the harness never cuts it to a preview.
+- **A `Files:` entry is a path or a refusal, never dropped.** A file at the repository root is
+  spelled `./NAME`. Quotes, brackets or a trailing `;` around a path are read as the path, and a
+  note goes after a trailing `#`. An entry that is not a path is refused with the spelling that is
+  accepted.
+- **An agent start that cannot be placed is not stuck.** A start is joined to its launch by its
+  type when its id and name miss. An agent whose start could not be placed is refused a suite with
+  a `session-poker.sh amend <agent id> --suites+ <suite> --reason '<why>'` line that runs as
+  printed, and `amend` now takes an agent id. A start that comes late, after a permission prompt
+  answered more than five minutes after the dispatch, is still placed on its launch, and is no
+  longer placed on another late launch. The Patrol names a reader that started without its checks.
+- **A wall is answered by a verb, not a line in your reply.**
+  `session-poker.sh decline <id>[,<id>] '<reason>'` records why ready rows wait, in the run's fill
+  ledger, which the turn-end wall and the tick read, and the fill refusal prints that command.
+  `session-poker.sh budget writers=<n> '<reply>'` records your writer cap once in the plan, with
+  your name; it only lowers the cap in force. The Patrol prompt moves to version 6. A turn that
+  still writes the old `fill-declined:` line is not refused for it.
+- **The task list is rebuilt at plan approval.** The doctrine says how, and the tick asks for it
+  with `poker: RECONCILE — the plan moved from approval into Step 4 since the last tick: …` or
+  `poker: RECONCILE — the ## Tasks table grew since the last tick: …`.
+- **A suite's wait for a place fits its call.** `booked.sh --max-wait <s>` caps the wait, and the
+  wall sets it from the call's stated timeout, less ten seconds. `BIONIC_SLOT_HELD=1` with no place
+  named no longer lets a whole-machine run start beside another holder. A whole-machine suite that cannot
+  settle runs once unbooked and reports `void`, whoever runs it, as the full runner does.
+- **Refusals keep their words.** A refusal's first line over 100 columns has its fact cut to fit,
+  ending in `…`. Every refusal prints, even when the temp directory is missing or cannot be
+  written, and the evidence gate no longer writes files to stage its refusal.
+- **The doctrine is rewritten inside its byte caps.** It states the three questions and the rigor
+  table once, and says what each reader's walls accept.
+
+Newly refused:
+
+- A reader dispatch (`bionic:auditor`, `bionic:critic`, `bionic:reviewer`) with no `Questions:`
+  line: `bionic: dispatch refused — bionic:<role> names no Questions: line (add the Questions: line)`.
+- A `Questions:` set the plan's rigor does not deal that reader:
+  `bionic: dispatch refused — <rigor> deals bionic:<role>: <set> (use that set)`; a reader the rigor
+  deals nothing: `bionic: dispatch refused — <rigor> deals bionic:<role>: nothing (dispatch its holder)`;
+  an unknown word: `bionic: dispatch refused — unknown question: <word> (use evidence/adversarial/structure)`;
+  the line given twice: `bionic: dispatch refused — bionic:<role> has <n> Questions: lines (keep one Questions: line)`.
+- A reader dealt more questions than its `Files:` line names records under `record/`:
+  `bionic: dispatch refused — dealt <n> questions, names <m> records (one Files: record per question)`.
+- A reader dealt `evidence` that declares more than three runs, its `Suites:` and its counted
+  `Re-executes:` runs together:
+  `bionic: dispatch refused — the total of <n> runs exceeds the 3-run cap (declare three at most)`;
+  or one that declares nothing to run:
+  `bionic: dispatch refused — the <role> declares nothing to re-execute (name one suite or run)`.
+  Any `&`, `<(`, `>(` or line break in a declared command makes it a run, and file housekeeping
+  alone is not one.
+- A reader that named only a run and no suite, running a suite:
+  `bionic: suite-run refused — allowed: none (run only the budgeted suites)`.
+- A dispatched agent's suite when no suite set is recorded for it:
+  `bionic: suite-run refused — no suite set is recorded for this agent (send main the suites you need)`.
+- A `Files:` entry that is not a path: `bionic: dispatch refused — Files: names <e>, not a path (spell it ./<e>)`
+  for a bare root file, and `bionic: dispatch refused — Files: <e> is not a path (drop it)` otherwise.
+- A commit from Step 6 on while a question the rigor deals has no reading, or its newest failed
+  with no newer waiver: `bionic: commit refused — a reading question is unanswered (record or waive each reading)`;
+  and while a declared red is owed: `bionic: commit refused — a declared red is still owed (record a green run once cleared)`.
+  When the gate's own check was killed or could not hand its refusal back, the commit is still
+  refused: `bionic: commit refused — the evidence gate could not stage its refusal on its pipe (commit again)`.
+- `current 8` while a fact the run owes does not hold at the working head:
+  `poker: REFUSED — current: 8 is admitted only when every fact the run owes holds at the working head <head>, and these do not (facts_state):`,
+  then each owed line. Close-out the same:
+  `bionic: close-out refused — the facts the run owes do not all hold at the working head <head> (facts_state); record each with proof-add, or have the user waive a question — nothing was done`.
+- `proof-add review` with `--question` for a record that is not one pass by the reader dealt that
+  question, is named by another reader's row, says `scope: whole` while build rows are open or
+  without reading from the plan's base, or for a plan with no `base-sha:` that is a commit. Each
+  line names what to add or fix, and the plan is unchanged.
+- A brief's `Lands-red:` line naming no blocker
+  (`bionic: dispatch refused — Lands-red: names no blocker token (use ext:<slug> or approval:<name>)`),
+  with no evidence (`bionic: dispatch refused — Lands-red: with no Red-evidence: line (add the Red-evidence: line)`),
+  on a suite the row does not run
+  (`bionic: dispatch refused — Lands-red: <suite> is outside Suites: (name a suite the row runs)`),
+  given twice (`bionic: dispatch refused — the brief has <n> Lands-red: lines (keep one Lands-red: line)`),
+  naming the full-suite runner
+  (`bionic: dispatch refused — Lands-red: names the full-suite runner (name one <name>.test.sh)`),
+  waiting on an approval the integrate row reads or no row reads
+  (`bionic: dispatch refused — approval:<name> is read at integration (pick an earlier token)`,
+  `bionic: dispatch refused — approval:<name> is read by no row (name one a row reads)`), or with
+  evidence outside the record root
+  (`bionic: dispatch refused — Red-evidence: is not under record/ (put the file under record/)`).
+- `spawn-worktree.sh land` when the declared check fails over the landing's range
+  (`reason=check-failed why=release-check`), when the check moved the target's head or left a
+  tracked file changed (`reason=check-dirtied`), when the landing record cannot be written
+  (`reason=record-unwritable why=proofs-unwritable`, before the merge), and when a declared red's
+  debt cannot be written (`reason=debt-unwritten`). The full-suite runner is never honoured as a
+  declared red.
+- `session-poker.sh release-check` on a checkout with uncommitted changes, with no start for the
+  release range or an empty one, and from a dispatched agent; `session-poker.sh proof-add check`
+  (only `release-check` writes a check fact). A failing check prints its output and its log path.
+- `session-poker.sh budget` above the cap in force
+  (`poker: REFUSED — writers=<n> is above the cap in force (<cap>): budget only lowers it.`), and
+  `decline` for a row that is not ready, with a blank reason, or with the placeholder the refusal
+  prints in place of a reason.
+- `session-poker.sh amend` that would change nothing.
+- A shell rc or `CLAUDE.md` that holds a NUL byte, under setup, remove and doctor:
+  `<path> is not text: it holds a NUL byte`.
+
+Upgrade, for a plan already in flight:
+
+- Upgrade the plugin before you run setup or remove again (the note at the top), and take the
+  `claude()` item if setup offers it.
+- An open plan needs no edit until its Step 6. There it meets the readings: dispatch each reader
+  with its `Questions:` line, register each reading with `proof-add review … --question <q>
+  --reader <name>`, or record your waiver with `waive`. Give the plan a `base-sha:` that is a commit
+  if it has none, or its first reading of each question is refused.
+- Re-arm the Patrol when the tick asks.
+- You may add `release: <version>` to the plan's frontmatter, and `release-check:` to
+  `.bionic/config.yaml`. You no longer write a Step 9 line by hand.
+
+Fixes:
+
+- `BIONIC_SLOT_HELD=1` with no place, the shim's wait, and a whole-machine suite run by a writer
+  now behave as the booking bullet above says; these were three of 1.11.0's known limits.
+- A commit refused by the evidence gate always prints its own reason, even when a hook killed
+  earlier left a `bionic-gate-<pid>` entry in the temp directory. Such an entry left by 1.11.0 is
+  inert now and can be deleted.
+
+Known limits, carried to the next release:
+
+- No door removes a line of your rc that stands outside a pair of bionic's markers, the retired
+  bare alias included: it stays until you delete it, and doctor goes on naming it by line number.
+- An intact block you moved to stand right after your own line ending in `&&`, `||`, `|` or a
+  backslash, after a zsh short loop head (`for i (…)`, `repeat N`) with no body, or inside your own
+  here-document or string, is removed if the result still parses, and your surrounding code then
+  reads differently.
+- The verbs only the main session may run are guarded by a reader of the command's text, so a
+  path to the hook held in a shell variable steps round that guard.
+- The landing record is not for a network filesystem: its one-write append assumes a local disk.
+- The landing record is believed as it is read: a record made unreadable, a landing killed between
+  git's publish and its exit, or a disk filling at one instant can hide a declared debt. The commit
+  gate's debt check is coarser than the judge's, as `operational-rules.md` says, and integration
+  waits on the judge: `close-out check` can print "gate: ok" beside the judge's "WOULD REFUSE"
+  while a declared debt is open. The judge's line is the one that holds, and `close-out run`
+  refuses.
+- Two landings started into one checkout at the same moment can leave that checkout dirty or both
+  be refused; nothing is lost. Land one tree at a time. The repair is `git -C <checkout> reset
+  --hard` (or removing the one untracked file), then land again. This is older than this release.
+- The dispatch wall can count as a reader's record a path the fact verb then refuses: a path at
+  the system's length limit, one that holds a space, or one that opens with two slashes. The verb's
+  refusal names it.
+- A reader whose start could not be placed is held to three suites and runs only when that start
+  recorded its role; with no candidate launch, or candidates all dealt the same questions, it is
+  counted as a writer until it is placed.
+- A late start that arrives while a fresh launch of its type is waiting is joined to that fresh
+  launch.
+- This repository's own release check, a scan for names of other projects, has open items for its
+  next revision, and an entry of four or more words costs steeply (about 18 s for four words over a
+  megabyte).
+- Names of other projects in comments and test identifiers are gone from the tree at this release.
+  Older versions of those files, in the history and in the tags of 1.11.0 and earlier, still carry
+  them.
+- The limits listed for 1.11.0 still hold, but for the three the booking fix closes, and those
+  listed for 1.10.0 and 1.9.0 stand as 1.11.0 left them.
+
+One rule for review (ADR-044): rigor is the number of independent minds. Every run that ships code
+is read for the same three questions; the rigor decides how many readers share them; each answer is
+a fact a gate reads; and a release waits for the checks its project declares.
+
 ## 1.11.0 — 2026-10-04
 
 A run that does each necessary thing once, and as many things at once as the machine carries.
@@ -248,11 +496,13 @@ Known limits, carried to the next release:
   never got to run, `land` refuses it as `why=red` and says "make the suites green": the refusal is
   right, and its words are not.
 - `BIONIC_SLOT_HELD=1` with no place lets a whole-machine timing run start while another agent
-  holds a place.
+  holds a place. (Fixed in 1.12.0 for a run that names no place.)
 - The shim may wait for a place longer than the Bash call's own timeout, which moves the call to
-  the background on a busy machine.
+  the background on a busy machine. (Fixed in 1.12.0: the wait is capped from the call's stated
+  timeout.)
 - A suite marked `# runner: solo`, run by a writer on a machine that never settles, exits 69 where
-  the full runner would run it once and report it `void`.
+  the full runner would run it once and report it `void`. (Fixed in 1.12.0: the writer runs it once
+  and reports it `void` too.)
 - A review row that is idle at a run's end stays pending, on the WAIT and CHAIN lines, until you set
   it landed or dropped.
 - The full-suite runner must be dispatched in the background, as every dispatch must. Dispatched in
