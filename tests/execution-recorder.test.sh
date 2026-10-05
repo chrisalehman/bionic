@@ -2941,13 +2941,19 @@ SJ_AID="ad19bee2f6be298d1"
 SJ_HOME="$SANDBOX/sj-home"
 mkdir -p "$SJ_HOME"
 
+# LAUNCHED NOW, as the dispatch wall stamps it (T38): a start joins only a launch inside the window
+# it can follow, so a fixture launch carries the moment it was written; a key given after the four
+# arguments (`launched_at=…`) overrides it, as `roster_row` takes the last value given.
 sj_intended() {  # <repo> <name> <tool_use_id> <subagent_type> [key=value...] — the dispatch wall's launch row
   local repo="$1" name="$2" tuid="$3" type="$4"; shift 4
   local f="$repo/.bionic/tmp/roster-${SID_A}.state"
   [ -f "$f" ] || roster_header > "$f"
   roster_row_fixture status=intended session="$SID_A" "name=$name" agent_id= \
-    launched_at=2026-10-04T12:00:00Z "subagent_type=$type" tool_use_id="$tuid" \
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "subagent_type=$type" tool_use_id="$tuid" \
     files= suites_source=declared "$@" >> "$f"
+}
+sj_ago() {  # <seconds ago> -> the launched_at stamp of that moment
+  date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ
 }
 SJ_ST=0; SJ_OUT=""; SJ_ERR=""
 sj_walls() {  # <repo> <command> <agent-id> — the agent's own Bash call through the shipped walls
@@ -3060,6 +3066,79 @@ run_rec "$(mk_subagent_start "$SID_A" "$SJD_TR" "$SJD_REPO" D2 "aD2-0000000000sj
 expect_eq "SJ-d5 a start that carries a name takes the row of that name" "D2" \
   "$(sj_field "$(grep 'status=identified' "$SJD_ROSTER")" name)"
 expect_eq "SJ-d6 …with its id" "aD2-0000000000sjd2" "$(sj_field "$(grep 'status=identified' "$SJD_ROSTER")" agent_id)"
+
+# ---------- SJ-e: a launch no start can follow is no candidate (wave-27 T38; review pass 8 F3, F4) ----------
+# A dispatch that never spawned stays `intended` with no id. Under T5's filter one such row made
+# every later start of its type two candidates, so none was placed (F3), and alone beside a missing
+# launch row it would take the start (F4). A candidate is now this plan's, not acked after its
+# launch, and launched inside the window a start can follow. Each world holds one live launch and
+# one launch that fails one of the three; the start is joined to the live one as if the other
+# were not there. Each SJ-e row is red on T5's filter, which counts both and joins neither.
+#
+# fails-when: a stale, acked or other-plan launch is still a candidate, so the live start is not
+# placed; or the filter drops the live launch too.
+sj_e_world() {  # <label> -> the repo, its roster holding the live launch `live` of $SJ_TYPE
+  local repo
+  IFS='|' read -r repo _ _ _ <<< "$(make_world "$1" yes)"
+  sj_intended "$repo" live "toolu_01SJE${1}L" "$SJ_TYPE" suites_allowed=beta.test.sh
+  printf '%s' "$repo"
+}
+sj_e_joined() {  # <repo> -> "<name>:<agent id>" of the one identified row, or the count when not one
+  local r="$1/.bionic/tmp/roster-${SID_A}.state" n
+  n=$(grep -c 'status=identified' "$r")
+  if [ "$n" = 1 ]; then
+    printf '%s:%s' "$(sj_field "$(grep 'status=identified' "$r")" name)" "$(sj_field "$(grep 'status=identified' "$r")" agent_id)"
+  else printf '%s identified rows' "$n"; fi
+}
+SJE_TR="$SANDBOX/sj-e.jsonl"
+
+# SJ-e1 a launch older than the window (an hour ago), never spawned.
+SJE1=$(sj_e_world stale)
+sj_intended "$SJE1" stale toolu_01SJEstaleS "$SJ_TYPE" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 3600)"
+run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$SJE1" "$SJ_TYPE" "a0000000000sje1")"
+expect_eq "SJ-e1 a launch an hour old is no candidate: the start joins the live launch" "live:a0000000000sje1" "$(sj_e_joined "$SJE1")"
+expect_eq "SJ-e1b …and the stale launch is left as it was" "1" "$(grep -c '|name=stale|' "$SJE1/.bionic/tmp/roster-${SID_A}.state")"
+
+# SJ-e2 a launch inside the window, acked after it launched.
+SJE2=$(sj_e_world acked)
+sj_intended "$SJE2" acked toolu_01SJEackedA "$SJ_TYPE" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 120)"
+ack_write "$SJE2" "$SID_A" "$(sj_ago 60)" acked
+run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$SJE2" "$SJ_TYPE" "a0000000000sje2")"
+expect_eq "SJ-e2 an acked launch is no candidate: the start joins the live launch" "live:a0000000000sje2" "$(sj_e_joined "$SJE2")"
+
+# SJ-e3 a launch bound to another plan than the one this session is bound to now.
+SJE3=$(sj_e_world otherplan)
+sj_intended "$SJE3" elsewhere toolu_01SJEotherO "$SJ_TYPE" suites_allowed=alpha.test.sh \
+  "plan=$SJE3/.bionic/docs/plans/epic-99-test/wave-02-other.plan.md"
+run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$SJE3" "$SJ_TYPE" "a0000000000sje3")"
+expect_eq "SJ-e3 another plan's launch is no candidate: the start joins the live launch" "live:a0000000000sje3" "$(sj_e_joined "$SJE3")"
+
+# SJ-e4 the bound case: the session's marker names a plan, the live launch carries it, and a launch
+# stamped `none` (dispatched before the bind) is another plan's.
+SJE4=$(sj_e_world bound)
+SJE4_PLAN="$SJE4/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+printf 'plan=%s\n' "$SJE4_PLAN" > "$SJE4/.bionic/tmp/engaged-$SID_A.state"
+roster_header > "$SJE4/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$SJE4" unbound toolu_01SJEboundU "$SJ_TYPE" suites_allowed=alpha.test.sh plan=none
+sj_intended "$SJE4" live toolu_01SJEboundL "$SJ_TYPE" suites_allowed=beta.test.sh "plan=$SJE4_PLAN"
+run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$SJE4" "$SJ_TYPE" "a0000000000sje4")"
+expect_eq "SJ-e4 bound to a plan: the launch carrying it is joined, the unbound one is not a candidate" \
+  "live:a0000000000sje4" "$(sj_e_joined "$SJE4")"
+
+# SJ-e5 THE CONTROL: two live launches, both inside the window, both this plan's, neither acked,
+# are still two candidates (SJ-d): the filter drops what no start can follow, and nothing else.
+SJE5=$(sj_e_world twolive)
+sj_intended "$SJE5" live2 toolu_01SJEtwoL2 "$SJ_TYPE" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 120)"
+run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$SJE5" "$SJ_TYPE" "a0000000000sje5")"
+expect_eq "SJ-e5 control: two launches a start can follow are still not chosen between" "0 identified rows" "$(sj_e_joined "$SJE5")"
+
+# SJ-e6 a stale launch ALONE takes no start (F4: it used to be the one candidate, and the agent
+# ran under its name, budget and plan).
+IFS='|' read -r SJE6 _ _ _ <<< "$(make_world stalealone yes)"
+sj_intended "$SJE6" stale toolu_01SJEaloneS "$SJ_TYPE" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 3600)"
+run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$SJE6" "$SJ_TYPE" "a0000000000sje6")"
+expect_eq "SJ-e6 a stale launch alone is no candidate: the start is joined to nothing" "0 identified rows" "$(sj_e_joined "$SJE6")"
+expect_eq "SJ-e6b …and the start still exits 0" "0" "$REC_ST"
 
 # ============================================================
 section "Section 19: §CHECKS — one string per file: a reader's checks ride their own registrations (wave-27 T15, T30; REQ-5 AC-5.1, D5)"
@@ -3240,6 +3319,35 @@ expect_contains "CK-f4 …and the log line says so, naming the first candidate" 
 expect_contains "CK-f5 …and the second" "F2" "$PC_ERR_adversarial"
 expect_contains "CK-f6 …in the recorder's voice, naming the agent" "a0000000000ckfdf" "$PC_ERR_adversarial"
 expect_eq "CK-f7 …and no question registration wrote to the roster" "2" "$(grep -c '^roster-state' "$CKF_ROSTER")"
+
+# ---- CK-h: a reader started without its checks is written down, by the terms registration alone ----
+# (wave-27 T38; review pass 31 F2.) The differing case above leaves the reader with its terms and no
+# checks, and the only trace was the question registrations' stderr. The terms registration now
+# appends one `start-unchecked/v1|event=start|…` line to the roster (time, role, candidate names),
+# which `session-poker.sh tick` prints once (tests/session-poker.test.sh §66). A start whose
+# candidates agree writes none, and a question registration writes nothing at all.
+# fails-when: the differing start leaves no line; an agreeing start writes one; a question
+# registration writes the roster.
+IFS='|' read -r CKH_REPO CKH_TR CKH_SUB CKH_CFG <<< "$(make_world checksunchecked yes)"
+CKH_ROSTER="$CKH_REPO/.bionic/tmp/roster-${SID_A}.state"
+ck_h_lines() { grep -c '^start-unchecked/v1|event=start|' "$CKH_ROSTER"; }
+sj_intended "$CKH_REPO" H1 toolu_01CKH1 bionic:critic suites_allowed=none questions=adversarial,structure
+sj_intended "$CKH_REPO" H2 toolu_01CKH2 bionic:critic suites_allowed=none questions=adversarial,structure
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKH_TR" "$CKH_REPO" bionic:critic "a0000000000ckhaa")"
+sj_intended "$CKH_REPO" H3 toolu_01CKH3 bionic:critic suites_allowed=none questions=evidence
+CKH_PAY="$(mk_subagent_start "$SID_A" "$CKH_TR" "$CKH_REPO" bionic:critic "a0000000000ckhbb")"
+CKH_BEFORE=$(cat "$CKH_ROSTER")
+pc_start "$PC_REPO_ROOT" "$CKH_PAY" evidence adversarial structure
+expect_eq "CK-h1 the differing start's question registrations write nothing (the roster, byte for byte)" \
+  "$CKH_BEFORE" "$(cat "$CKH_ROSTER")"
+pc_start "$PC_REPO_ROOT" "$CKH_PAY" terms
+CKH_LINE=$(grep '^start-unchecked/v1|event=start|' "$CKH_ROSTER")
+expect_eq "CK-h2 its terms registration writes exactly one line: the agreeing start before it wrote none" "1" "$(ck_h_lines)"
+expect_eq "CK-h3 …for this agent" "a0000000000ckhbb" "$(sj_field "$CKH_LINE" agent_id)"
+expect_eq "CK-h4 …naming the role" "bionic:critic" "$(sj_field "$CKH_LINE" role)"
+expect_eq "CK-h5 …and every candidate's roster name" "H1,H2,H3" "$(sj_field "$CKH_LINE" candidates)"
+expect_regex "CK-h6 …and the time" '^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$' "$(sj_field "$CKH_LINE" at)"
+expect_eq "CK-h7 …and the terms are still delivered" "$S15_WANT" "$(terms_body "$(pc_ctx terms)")"
 
 # ---- CK-g: a resumed copy is pushed the same checks files as the first start ----
 # A plain dispatch (the start carries the TYPE), so the terms registration owes the terms on the
@@ -3516,5 +3624,59 @@ expect_contains "SC-d1 the second start is a duplicate start" "status=duplicate-
   "$(cat "$SCD_REPO/.bionic/tmp/roster-${SID_A}.state")"
 expect_nonempty "SC-d2 …the first start named a directory" "$SCD_D1"
 expect_eq "SC-d3 …and the copy is pushed the same one" "$SCD_D1" "$(sc_dir "$(sc_line)")"
+
+# ---- SC-e: every guard on the path holds, and each is proven by a copy that lacks it ----
+# (wave-27 T38; review pass 31 F1.) The roster name comes from a brief, so the scratch path is a
+# write path built from a value the repository supplies. A name that is `.`, `..` or holds a `/`
+# is not one directory name; a `scratch/`, `scratch/<session>` or leaf that is a symlink would
+# carry the write out of the tree. Each makes NO directory, leaves the line out (the terms are
+# survival.md byte for byte) and is logged; the agent starts. Each guard is then removed from a
+# plugin-shaped COPY of the hook (`ck_plugin`, one sed, one line changed) and the same start on a
+# fresh world pushes the line: the row can fail.
+# fails-when: a guard is dropped (its mutant row would then match the real hook's).
+sc_world() {  # <label> <name> -> repo; the launch `name` of bionic:implementor on its roster
+  local repo
+  IFS='|' read -r repo _ _ _ <<< "$(make_world "$1" yes)"
+  sj_intended "$repo" "$2" "toolu_01SC$1" bionic:implementor suites_allowed=widget.test.sh
+  printf '%s' "$repo"
+}
+sc_link() {  # <repo> <which: scratch|session|leaf> <name> <outside dir> — plants the symlink
+  local s="$1/.bionic/tmp/scratch"
+  mkdir -p "$4"
+  case "$2" in
+    scratch) ln -s "$4" "$s" ;;
+    session) mkdir -p "$s" && ln -s "$4" "$s/$SID_A" ;;
+    leaf)    mkdir -p "$s/$SID_A" && ln -s "$4" "$s/$SID_A/$3" ;;
+  esac
+}
+sc_guard() {  # <id> <label> <name> <link: none|scratch|session|leaf> <sed expression> <what the guard refuses>
+  local id="$1" label="$2" name="$3" link="$4" sedx="$5" what="$6" repo out plug
+  repo=$(sc_world "scg$label" "$name"); out="$SANDBOX/sc-out-$label"
+  [ "$link" = none ] || sc_link "$repo" "$link" "$name" "$out"
+  pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$SCA_TR" "$repo" bionic:implementor "a00000000scg$label")" terms
+  expect_eq "$id $what: the terms are survival.md with no scratch line" "$S15_WANT" "$(pc_ctx terms)"
+  expect_eq "$id …the start exits 0" "0" "$PC_ST_terms"
+  expect_contains "$id …and is logged in the recorder's voice" "execution-recorder:" "$PC_ERR_terms"
+  if [ "$link" = none ]; then
+    expect_true "$id …and no scratch directory is made at all" test ! -e "$repo/.bionic/tmp/scratch"
+  else
+    expect_eq "$id …and nothing is made through the link" "0" "$(ls -A "$out" | wc -l | tr -d ' ')"
+  fi
+  plug="$SANDBOX/sc-mut-$label"
+  ck_plugin "$plug"
+  sed "$sedx" "$REC" > "$plug/hooks/execution-recorder.sh"
+  expect_eq "$id control: the copy lacks exactly that guard (one line differs)" "1" \
+    "$(diff "$REC" "$plug/hooks/execution-recorder.sh" | /usr/bin/grep -c '^<')"
+  repo=$(sc_world "scm$label" "$name"); out="$SANDBOX/sc-mout-$label"
+  [ "$link" = none ] || sc_link "$repo" "$link" "$name" "$out"
+  pc_start "$plug" "$(mk_subagent_start "$SID_A" "$SCA_TR" "$repo" bionic:implementor "a00000000scm$label")" terms
+  expect_nonempty "$id control: …and without it the same start pushes a scratch line" "$(sc_dir "$(sc_line)")"
+}
+sc_guard SC-e1 dot  .    none    "s/''|\\.|\\.\\.|\\*\\/\\*)/''|..|*\\/*)/" "a roster name that is ."
+sc_guard SC-e2 dots ..   none    "s/''|\\.|\\.\\.|\\*\\/\\*)/''|.|*\\/*)/"  "a roster name that is .."
+sc_guard SC-e3 slash a/b none    "s/''|\\.|\\.\\.|\\*\\/\\*)/''|.|..)/"     "a roster name that holds a /"
+sc_guard SC-e4 lscr  sc-l1 scratch 's/\[ -L "\$STATE_DIR\/scratch" \] || //'              "a scratch/ that is a symlink"
+sc_guard SC-e5 lses  sc-l2 session 's/\[ -L "\$STATE_DIR\/scratch\/\$BIONIC_SID" \] || //' "a scratch/<session> that is a symlink"
+sc_guard SC-e6 lleaf sc-l3 leaf    's/ || \[ -L "\$_sl_dir" \]//'                         "a leaf that is a symlink"
 
 finish

@@ -5950,6 +5950,11 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
         case "$_bsg_seg" in subagent_type=*) _bsg_role="${_bsg_seg#subagent_type=}"; break ;; esac
       done
     fi
+    # AN UNPLACED ROW NAMES NO ROLE (wave-27 T38): the row `session-poker.sh amend <agent id>`
+    # writes for an agent its start could not place carries a suite set and no type, so the
+    # payload's own `agent_type` answers, as it does for an agent with no row. Any other row with
+    # an empty role keeps §17g's reading (admitted).
+    case "$_bsg_pick" in *"|status=unplaced|"*) [ -n "$_bsg_role" ] || _bsg_row=0 ;; esac
     if [ "$_bsg_row" -eq 1 ]; then
       _bsg_whence="Your roster row names you $_bsg_role"
     else
@@ -6216,6 +6221,19 @@ fi
 # this id at all. `budget_unrecorded` below prints it.
 _BUDGET_UNSET_WHY="your roster row records no suite set"
 [ -n "${_BUDGET_ROW:-}" ] || _BUDGET_UNSET_WHY="no roster row carries your agent id $ACTOR"
+# ---- BEGIN an unplaced agent is told why, and how its set is recorded (wave-27 T38; F3) ----
+# A TYPE THAT IS NOT A bionic: ROLE is never placed at its start: the recorder's type join takes
+# bionic roles only, because `general-purpose` is also a name a teammate can carry. Until its launch
+# call returns it has no row, and a foreground call returns when it has finished; 1.11.0 let its
+# named suites run unbudgeted and unstamped. The reason is said, and the remedy is the one every
+# unplaced agent gets: `amend <its agent id>`, which records a set for that id (session-poker.sh).
+if [ -z "${_BUDGET_ROW:-}" ]; then
+  case "$(bionic_jq .agent_type)" in
+    bionic:*|'') : ;;
+    *) _BUDGET_UNSET_WHY="$_BUDGET_UNSET_WHY: your type $(bionic_jq .agent_type) is not a bionic: role, and its start is never placed on a row" ;;
+  esac
+fi
+# ---- END an unplaced agent is told why ----
 
 # `none` is a STATED empty set and reads as one: nothing is on the budget, so the loop
 # below refuses every target it is handed.
@@ -6456,10 +6474,12 @@ $(_budget_remedy_line "$1")"
 # showed the cost (walk-triage-3 §1): a foreground runner had no row, was refused its full run,
 # and any suite it named would have run unbudgeted. The id now reaches the row at agent start
 # (hooks/execution-recorder.sh, the type join), so a missing set is a fault to name, never a run
-# to spend. The remedy names the row when there is one to widen.
+# to spend. The remedy names the row when there is one to widen, and the agent's own id when no
+# row carries it: `amend <id>` records a set for an agent its start could not place (wave-27
+# T38). It used to say "nothing to widen until the orchestrator records one", an act no verb did.
 budget_unrecorded() {  # <the refused suite or run>
-  local _how="With no row there is nothing to widen until the orchestrator records one."
-  [ -z "${_BUDGET_ROW:-}" ] || _how="$(_budget_remedy_line "$1")"
+  local _how
+  _how="$(_budget_remedy_line "$1")"
   fold_block exit2 suite-run "no suite set is recorded for this agent" "send main the suites you need" \
     "${_BUDGET_UNSET_WHY}, so this BUDGET arm cannot tell a budgeted run
 from an extra one, and it refuses rather than run the suite unbudgeted and unstamped.
@@ -6495,9 +6515,11 @@ _budget_remedy_line() {  # <the refused suite or run>
   # THE SCRIPT PATH IS ONE WORD (wave-24 T28; critic I2): a plugin root holding a space split
   # into two arguments when the line was pasted, so the whole path goes through
   # `refuse_shell_word`, the same quoting the row name gets.
+  # THE TARGET IS ONE `amend` READS (wave-27 T38): the row's name, or this agent's id when no row
+  # carries it or the row has no name. `<name>` was printed for both, and no row is named that.
   printf "widen it: bash %s amend %s %s --reason '<why>' (main runs it)" \
     "$(refuse_shell_word "$(refuse_plugin_root)/hooks/session-poker.sh")" \
-    "$(refuse_shell_word "${_BUDGET_ROW_NAME:-}" '<name>')" "$_widen"
+    "$(refuse_shell_word "${_BUDGET_ROW_NAME:-$ACTOR}" '<name>')" "$_widen"
 }
 
 # THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named
