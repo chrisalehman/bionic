@@ -1,161 +1,337 @@
 #!/bin/bash
-# tests/lib/name-scan.sh <list path> — this project's release-time name scan (wave-27 D13).
+set +x +v
+# tests/lib/name-scan.sh <list path> — this project's release-time name scan (wave-27 D13, as
+# amended at A-orch-81).
 #
 # <list path> is a private list, one entry per line, kept OUTSIDE every git checkout (a list in
 # a checkout would itself ship). Blank lines and lines starting with `#` are skipped but still
 # counted, so an entry is named by its line number in the list. Each line is read as the scan
-# will use it: a trailing space, tab or carriage return and a leading byte-order mark are
-# stripped, and a line empty after that is skipped (counted, not an entry). Entries are fixed
-# strings, matched case-insensitively. The scan runs in the checkout it is started from.
+# will use it: a leading byte-order mark is removed, leading and trailing spaces, tabs and
+# carriage returns are stripped, and a line empty after that is skipped (counted, not an entry).
+# Entries are fixed strings, matched case-insensitively: both sides are decoded as UTF-8 (a
+# malformed byte becomes U+FFFD) and Unicode case-folded, whatever the caller's locale. The
+# scan runs in the checkout it is started from.
 #
-# WHAT IT READS is what a push would publish, never the working files:
-#   - the files as committed at the head (`git grep` on the commit),
-#   - the path names in the tree at the head (each file's full path, so a directory name too),
-#   - the commit messages in base..head (`git log --grep`),
-#   - the message of any annotated tag that points at the head.
+# WHAT IT READS is what a push of <base>..<head> would publish, never the working files:
+#   - every blob in the tree at the head, as bytes (a binary file, a file marked `-diff` or
+#     `binary`, and a symlink, whose blob is its target text), and every path name there;
+#   - every object the range introduces: each blob (a file added and deleted inside the range
+#     among them) and each path name a commit adds, changes or deletes;
+#   - each commit in the range: its message, and its author's and committer's name and email;
+#   - every tag that points at a commit in the range or at the head: its name, and for an
+#     annotated tag its message and its tagger.
 # BIONIC_CHECK_BASE and BIONIC_CHECK_HEAD pick the range; the head defaults to HEAD and the
 # base to the newest tag reachable from the head that does not point at the head itself, so a
 # release already tagged is scanned as <previous tag>..<head> (no such tag: the whole history).
-# A file it could not read as text (binary, a symlink) is named `UNREAD <path>`.
+# NOTHING IS SKIPPED: an object the scan cannot read refuses the run (exit 2).
 #
-# A CLEAN RESULT MUST HAVE POWER. Before the real scan, the same four functions run over a
-# throwaway repository whose one commit carries every entry in a file, in a file NAME, in its
-# message and in an annotated tag message; an entry any of them cannot find there refuses the
-# run (exit 2).
+# ONE PASS. Everything above is read once, by one matcher (MATCHER, a perl program: macOS awk
+# ends a string at a NUL byte and stops on a malformed UTF-8 one, and BSD grep misses a folded
+# match after a NUL). A record is tested against every entry at once; only a record that holds
+# one is searched entry by entry to name it, in the same folded text, for the same literal.
 #
-# NO ENTRY IS EVER PRINTED OR WRITTEN, and none is a word of any command line the scan runs
-# (a pattern goes by file descriptor; the power check writes with builtins and reads the
-# planted path from stdin). A hit is `HIT entry=<line number> at <where>`; a path
-# that itself carries an entry is withheld, and a path hit is named `path #<n>`, the path's
-# 1-based position in `git ls-tree -r --name-only` order. Every git trace variable is unset as
-# a second line of defence. The throwaway lives in a temp directory removed on
-# exit. Exit 0 clean (an empty list prints `entries=0`), 1 a hit, 2 a refusal.
+# A CLEAN RESULT MUST HAVE POWER. Before the real scan, the same function runs over a
+# throwaway repository built with git's plumbing, which holds every entry at every site the
+# scan reads: a text blob (in upper case), a binary blob, a symlink target and a path name at
+# the head; a path and a blob (in lower case) that exist only inside the range; a commit
+# message; an author name, an author email, a committer name and a committer email; a tag name
+# and a tag message. An entry not found at any of them refuses the run (exit 2). An entry git
+# cannot hold at a site is not planted there: one with a byte no ref name may hold (a space,
+# `~^:?*[\`, a control byte, `..`, `@{`, `//`, `/.`, `./`, `.lock/`) at the tag name, and one
+# holding `<` or `>` at the four people sites; such a site cannot publish that entry either.
 #
-# bash 3.2 (ADR-001). Not part of the shipped plugin.
-set -u
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+# NO ENTRY IS EVER PRINTED OR WRITTEN, and none is a word of any command line or a variable
+# of any child's environment: entries reach the matcher and git by file descriptor or stdin,
+# written by the builtin printf. A hit is `HIT entry=<line number> at <where>`, and <where> is
+# numbers and object ids alone, never text from the repository:
+#   blob <sha12> line <n>     <n> is the count of newlines before the match plus one, in a
+#                             binary blob as in a text one
+#   path #<n>                 the path's 1-based position in `git ls-tree -r --name-only` order
+#                             at the head
+#   path in commit <sha12>    a path only the range holds, at the first commit that names it
+#   commit <sha12> message | author | committer
+#   tag <sha12>               the tag object, or the commit a lightweight tag names
+# Records are split on NUL or by length, never on a byte a path or a message can hold. The
+# first command turns tracing off; BASH_ENV and ENV are unset so nothing this starts reads
+# them, and every git trace variable is unset as a second line of defence. The throwaway
+# lives in a temp directory removed on exit. Exit 0 clean (an empty list prints `entries=0`),
+# 1 a hit, 2 a refusal.
+#
+# bash 3.2 (ADR-001) and the perl macOS ships. Not part of the shipped plugin.
+unset BASH_ENV ENV
+set -u -o pipefail
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM \
+  GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
 # second line of defence: no entry is in any argv, but a trace file the caller's environment names
-# would still record what git does see
+# would still record what git does see (a ref name the power check plants, for one)
 for v in $(compgen -e); do case "$v" in GIT_TRACE*) unset "$v" ;; esac; done
+export LC_ALL=C
 
 refuse() { echo "name-scan: $*" >&2; exit 2; }
 
-# ---- the four scan sites: each prints one <where> line per place <entry> is found -----------
+# ---- the matcher ------------------------------------------------------------------------------
 #
-# NO ENTRY IS A WORD OF ANY COMMAND LINE. A pattern reaches git by a file descriptor
-# (`-f <(printf ...)`, printf being a builtin) and reaches awk the same way: the program reads
-# its pattern from the first operand, a process substitution, before it reads the data on stdin.
+# perl -e "$MATCHER" <list fd> <head paths> <range log> <tags> <object count>, objects on stdin
+# from `git cat-file --batch`. The list fd holds `<line number>\0<entry>\0` pairs. Prints one
+# HIT line per entry per place; exit 0 none, 1 found, 2 something could not be read whole.
+MATCHER='
+use strict; use feature "fc"; use Encode ();
+$SIG{__WARN__} = sub { print STDERR "name-scan: the matcher warned\n" };
+$SIG{__DIE__} = sub { return if $^S; print STDERR "name-scan: the matcher failed\n"; exit 2 };
+sub bail { print STDERR "name-scan: $_[0]\n"; exit 2 }
+sub slurp {
+  open(my $h, "<:raw", $_[0]) or bail("cannot read $_[1]");
+  local $/; my $d = <$h>; close($h) or bail("cannot read $_[1]");
+  defined $d ? $d : "";
+}
+sub fold { fc(Encode::decode("UTF-8", $_[0])) }
+my ($listf, $pathsf, $logf, $tagsf, $want) = @ARGV;
+my @kv = split /\0/, slurp($listf, "the list");
+my (@num, @fe);
+while (@kv) { push @num, shift @kv; push @fe, fold(shift @kv) }
+my $any = join "|", map { quotemeta } @fe;
+$any = qr/$any/;
+my ($hits, %seen) = (0);
+sub hit { return if $seen{"$_[0] $_[1]"}++; print "HIT entry=$_[0] at $_[1]\n"; $hits++ }
+# look <bytes> <where> <lines>: all entries at once first; the entry and line only after a find
+sub look {
+  my ($t, $where, $lines) = (fold($_[0]), $_[1], $_[2]);
+  return unless $t =~ $any;
+  for my $i (0 .. $#fe) {
+    my $f = $fe[$i];
+    pos($t) = undef;
+    while ($t =~ /\Q$f\E/g) {
+      if (!$lines) { hit($num[$i], $where); last }
+      hit($num[$i], "$where line " . (1 + (substr($t, 0, $-[0]) =~ tr/\n//)));
+    }
+  }
+}
+# split an object at its first blank line: header, body
+sub parts { my $k = index($_[0], "\n\n"); $k < 0 ? ($_[0], "") : (substr($_[0], 0, $k), substr($_[0], $k + 2)) }
 
-# scan_files <repo> <head sha> <entry> -> `file <path>:<line>`
-scan_files() {
-  local repo="$1" head="$2" entry="$3" out rc rec path line
-  # awk prints `<line>:<path>`: no control byte joins them, because bash 3.2 mishandles \001 in IFS
-  out="$(set -o pipefail
-    git -C "$repo" grep -n -z -i -F -I -f <(printf '%s\n' "$entry") "$head" -- 2>/dev/null \
-      | tr '\0' '\001' | awk -F'\001' -v p="${#head}" '{ print $2 ":" substr($1, p + 2) }')"
-  rc=$?
-  [ "$rc" -le 1 ] || return 2
-  [ -n "$out" ] || return 0
-  while IFS= read -r rec; do
-    line="${rec%%:*}"; path="${rec#*:}"
-    printf 'file %s:%s\n' "$(path_label "$path")" "$line"
-  done <<EOF
-$out
-EOF
+my %path;
+my $n = 0;
+for my $p (split /\0/, slurp($pathsf, "the path list")) {
+  $n++; $path{$p} = 1;
+  look($p, "path #$n", 0);
 }
 
-# scan_paths <repo> <head sha> <entry> -> `path #<n>`: n is the 1-based position, in
-# `git ls-tree -r --name-only` order, of each path that carries the entry. The path is never
-# printed.
-scan_paths() {
-  local repo="$1" head="$2" entry="$3" out rc
-  out="$(set -o pipefail
-    git -C "$repo" ls-tree -r --name-only -z "$head" 2>/dev/null | tr '\0' '\001' \
-      | awk 'BEGIN { getline e < ARGV[1]; close(ARGV[1]); ARGV[1] = ""; e = tolower(e); RS = "\001" }
-             index(tolower($0), e) { print "path #" NR }' <(printf '%s\n' "$entry") -)"
-  rc=$?
-  [ "$rc" -eq 0 ] || return 2
-  [ -z "$out" ] || printf '%s\n' "$out"
+my @t = split /\0/, slurp($logf, "the range path list");
+my ($c, $i) = ("", 0);
+while ($i < @t) {
+  my $tok = $t[$i++];
+  $tok =~ s/^\n//;
+  if ($tok =~ /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/) { $c = substr($tok, 0, 12); next }
+  bail("the range path list cannot be parsed")
+    unless $c ne "" && $i < @t && $tok =~ /^:[0-7]+ [0-7]+ [0-9a-f]+ [0-9a-f]+ [ADMTUX]$/;
+  my $p = $t[$i++];
+  next if $path{$p}++;
+  look($p, "path in commit $c", 0);
 }
 
-# scan_messages <repo> <base sha or ""> <head sha> <entry> -> `message <sha12>`
-# Each commit is one NUL-terminated record, `<sha>\n<message>`; only the message is searched.
-scan_messages() {
-  local repo="$1" base="$2" head="$3" entry="$4" range="$3"
-  [ -n "$base" ] && range="$base..$head"
-  git -C "$repo" log -z --format='%H%n%B' "$range" 2>/dev/null | tr '\0' '\001' \
-    | awk 'BEGIN { getline e < ARGV[1]; close(ARGV[1]); ARGV[1] = ""; e = tolower(e); RS = "\001" }
-           { nl = index($0, "\n")
-             if (nl && index(tolower(substr($0, nl + 1)), e)) print "message " substr($0, 1, 12) }' \
-        <(printf '%s\n' "$entry") -
+for my $l (split /\n/, slurp($tagsf, "the tag list")) {
+  my ($sha, $type, $ref) = split / /, $l, 3;
+  bail("the tag list cannot be parsed") unless defined $ref && $ref =~ s{^refs/tags/}{};
+  my $s = substr($sha, 0, 12);
+  look($ref, "tag $s", 0);
 }
 
-# scan_tags <repo> <head sha> <entry> -> `tag-message`, once per annotated tag at the head
-scan_tags() {
-  local repo="$1" head="$2" entry="$3" tag
-  git -C "$repo" tag --points-at "$head" 2>/dev/null | while read -r tag; do
-    [ "$(git -C "$repo" for-each-ref --format='%(objecttype)' "refs/tags/$tag" 2>/dev/null)" = tag ] || continue
-    git -C "$repo" for-each-ref --format='%(contents)' "refs/tags/$tag" 2>/dev/null \
-      | awk 'BEGIN { getline e < ARGV[1]; close(ARGV[1]); ARGV[1] = ""; e = tolower(e) }
-             index(tolower($0), e) { f = 1 } END { exit f ? 0 : 1 }' <(printf '%s\n' "$entry") - \
-      && echo "tag-message"
-  done
+binmode STDIN;
+my $got = 0;
+while (defined(my $h = <STDIN>)) {
+  chomp $h;
+  if ($h !~ /^([0-9a-f]{40}(?:[0-9a-f]{24})?) (blob|commit|tag|tree) ([0-9]+)$/) {
+    bail($h =~ /^([0-9a-f]{12})[0-9a-f]{28}(?:[0-9a-f]{24})? missing$/ ? "object $1 cannot be read" : "an object cannot be read");
+  }
+  my ($sha, $type, $size) = (substr($1, 0, 12), $2, $3);
+  my $d = "";
+  my $r = $size ? read(STDIN, $d, $size) : 0;
+  bail("object $sha cannot be read whole") unless defined $r && $r == $size;
+  my $nl = "";
+  bail("object $sha cannot be read whole") unless read(STDIN, $nl, 1) == 1 && $nl eq "\n";
+  $got++;
+  if ($type eq "blob") { look($d, "blob $sha", 1); }
+  elsif ($type eq "commit") {
+    my ($hd, $msg) = parts($d);
+    look($msg, "commit $sha message", 0);
+    for my $l (split /\n/, $hd) {
+      next unless $l =~ /^(author|committer) (.*)$/;
+      my ($who, $v) = ($1, $2);
+      if ($v =~ /^(.*) <([^<>]*)> [0-9]+ [-+][0-9]{4}$/) {
+        my ($name, $mail) = ($1, $2);
+        look($name, "commit $sha $who", 0);
+        look($mail, "commit $sha $who", 0);
+      } else { look($v, "commit $sha $who", 0) }
+    }
+  }
+  elsif ($type eq "tag") {
+    my ($hd, $msg) = parts($d);
+    look($msg, "tag $sha", 0);
+    for my $l (split /\n/, $hd) {
+      if ($l =~ /^tag (.*)$/) { my $v = $1; look($v, "tag $sha", 0) }
+      elsif ($l =~ /^tagger (.*)$/) {
+        my $v = $1;
+        if ($v =~ /^(.*) <([^<>]*)> [0-9]+ [-+][0-9]{4}$/) { my ($tn, $tm) = ($1, $2); look($tn, "tag $sha", 0); look($tm, "tag $sha", 0) }
+        else { look($v, "tag $sha", 0) }
+      }
+    }
+  }
+}
+bail("read $got of $want objects") unless $got == $want;
+exit($hits ? 1 : 0);
+'
+
+# entries_stream — `<line number>\0<entry>\0` for every entry, by the builtin printf
+entries_stream() {
+  local i=0
+  while [ "$i" -lt "${#ENTRIES[@]}" ]; do printf '%s\0%s\0' "${NUMS[$i]}" "${ENTRIES[$i]}"; i=$((i + 1)); done
 }
 
-# ---- paths are labels, not entries: one that carries an entry is withheld --------------------
-
-path_label() {
-  local lc i
-  lc="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
-  i=0
-  while [ "$i" -lt "${#LC_ENTRIES[@]}" ]; do
-    case "$lc" in *"${LC_ENTRIES[$i]}"*) printf '[path withheld]'; return 0 ;; esac
-    i=$((i + 1))
-  done
-  printf '%s' "$1"
+# ---- the one scan: everything a push of <base>..<head> publishes, in one matcher pass --------
+#
+# scan_repo <repo> <base sha or ""> <head sha> <work dir> — prints the HIT lines; exit 0 none,
+# 1 found, 2 a refusal (the matcher says what it could not read). The work dir holds only what
+# git printed (ids, paths, ref names), never an entry.
+scan_repo() {
+  local repo="$1" base="$2" head="$3" w="$4" n
+  mkdir -p "$w" || return 2
+  git -C "$repo" ls-tree -r -z --name-only "$head" 2>/dev/null > "$w/paths" || return 2
+  # every path a range commit adds, changes or deletes, oldest commit first, merges against
+  # each parent; `-z --raw` gives `<sha>\0` then `:<modes ids status>\0<path>\0` pairs
+  git -C "$repo" -c log.showSignature=false log -z --raw --no-abbrev --no-color --format=%H \
+    --diff-merges=separate --root --no-renames --reverse "$head" ${base:+"^$base"} -- 2>/dev/null > "$w/log" || return 2
+  git -C "$repo" rev-list "$head" ${base:+"^$base"} 2>/dev/null > "$w/range" || return 2
+  { cat "$w/range" && printf '%s\n' "$head"; } > "$w/commits" || return 2
+  # every tag that points at a commit in the range or at the head: `<sha> <type> <ref>`; a ref
+  # name holds no space or newline (git check-ref-format)
+  git -C "$repo" for-each-ref --format='%(objecttype) %(objectname) %(refname) %(*objectname)' refs/tags \
+    2>/dev/null > "$w/refs" || return 2
+  awk 'FILENAME == ARGV[1] { c[$1] = 1; next }
+       { p = ($1 == "tag") ? $4 : $2; if (p in c) print $2, $1, $3 }' "$w/commits" "$w/refs" > "$w/tags" || return 2
+  # the objects: every blob at the head, every commit and blob the range introduces (the type
+  # filter drops every commit but the tip, so the commits come from the range list), every tag
+  # object in the tag list
+  { git -C "$repo" ls-tree -r --format='%(objectmode) %(objecttype) %(objectname)' "$head" 2>/dev/null \
+      | awk '$2 == "blob" { print $3 }' &&
+    git -C "$repo" rev-list --objects --no-object-names --filter=object:type=blob "$head" ${base:+"^$base"} 2>/dev/null &&
+    cat "$w/range" &&
+    awk '$2 == "tag" { print $1 }' "$w/tags"; } | sort -u > "$w/objects" || return 2
+  n="$(wc -l < "$w/objects" | tr -d ' ')"
+  git -C "$repo" cat-file --batch --buffer < "$w/objects" 2>/dev/null \
+    | perl -e "$MATCHER" <(entries_stream) "$w/paths" "$w/log" "$w/tags" "$n"
+  set -- "${PIPESTATUS[@]}"
+  [ "$1" -eq 0 ] || return 2
+  return "$2"
 }
 
-# ---- the throwaway: every entry in a file, a commit message and an annotated tag -------------
+# ---- the throwaway: every entry at every site, built with git's plumbing ---------------------
+
+# pg <args> — git on the throwaway, with no hook to run
+pg() { git -C "$PW" -c core.hooksPath=/dev/null "$@" 2>/dev/null; }
+# pg_commit <tree> <parent or ""> <author name> <author email> <committer name> <committer email>
+# <message> — writes a commit object from stdin (builtin printf); prints its id
+pg_commit() {
+  { printf 'tree %s\n' "$1"; [ -z "$2" ] || printf 'parent %s\n' "$2"
+    printf 'author %s <%s> 0 +0000\ncommitter %s <%s> 0 +0000\n\n%s\n' "$3" "$4" "$5" "$6" "$7"
+  } | pg hash-object -t commit -w --stdin
+}
+# ref_ok <entry> — can a tag name hold this entry? (git check-ref-format, inside `tn<n>-...-tn`)
+ref_ok() {
+  case "$1" in
+    *[[:cntrl:]' ~^:?*[\']*|*..*|*'@{'*|*//*|*/.*|*./*|*.lock/*) return 1 ;;
+  esac
+  return 0
+}
+# ident_ok <entry> — can a name or an email hold it? (git refuses `<` and `>` there)
+ident_ok() { case "$1" in *[\<\>]*) return 1 ;; esac; return 0; }
 
 prove_power() {
-  local tmp="$1" repo msg i head site found blob
-  repo="$tmp/power"; msg="$tmp/power-msg"
-  mkdir -p "$repo" || refuse "cannot build the power check under ${TMPDIR:-/tmp}"
-  git -C "$repo" init -q --template= >/dev/null 2>&1 || refuse "cannot build the power check"
-  : > "$msg"
-  blob="$(git -C "$repo" hash-object -w --stdin </dev/null 2>/dev/null)" || refuse "cannot build the power check"
-  i=0
-  while [ "$i" -lt "${#ENTRIES[@]}" ]; do
-    printf '%s\n' "${ENTRIES[$i]}" >> "$repo/entries.txt"
-    printf '%s\n' "${ENTRIES[$i]}" >> "$msg"
-    # the entry in a file NAME, planted in the index from stdin (a builtin printf), so it is no
-    # word of a command line and the filesystem's naming rules do not apply
-    printf '100644 %s\t%s\0' "$blob" "pn${NUMS[$i]}-${ENTRIES[$i]}-pn" \
-        | git -C "$repo" update-index -z --index-info >/dev/null 2>&1 \
-      || refuse "the entry on line ${NUMS[$i]} of the list cannot be planted in a path name; the path scan cannot be shown to have power"
-    i=$((i + 1))
-  done
-  git -C "$repo" -c user.name=power -c user.email=power@example.invalid -c commit.gpgsign=false \
-      -c core.hooksPath=/dev/null add entries.txt >/dev/null 2>&1 \
-    && git -C "$repo" -c user.name=power -c user.email=power@example.invalid -c commit.gpgsign=false \
-      -c core.hooksPath=/dev/null commit -q --cleanup=verbatim -F "$msg" >/dev/null 2>&1 \
-    && git -C "$repo" -c user.name=power -c user.email=power@example.invalid -c tag.gpgsign=false \
-      tag -a --cleanup=verbatim -F "$msg" power >/dev/null 2>&1 \
-    || refuse "cannot build the power check"
-  head="$(git -C "$repo" rev-parse --verify -q 'HEAD^{commit}')" || refuse "cannot build the power check"
-  i=0
-  while [ "$i" -lt "${#ENTRIES[@]}" ]; do
-    for site in files paths messages tags; do
-      case "$site" in
-        files)    found="$(scan_files "$repo" "$head" "${ENTRIES[$i]}")" ;;
-        paths)    found="$(scan_paths "$repo" "$head" "${ENTRIES[$i]}")" ;;
-        messages) found="$(scan_messages "$repo" "" "$head" "${ENTRIES[$i]}")" ;;
-        tags)     found="$(scan_tags "$repo" "$head" "${ENTRIES[$i]}")" ;;
-      esac
-      [ -n "$found" ] || refuse "the entry on line ${NUMS[$i]} of the list is not found by the $site scan in the throwaway commit; the scan has no power"
+  local w="$1" i e n tab empty b_text b_bin b_link b_gone tree0 tree1 c0 c1 c2 c3 c4 c5 tg people msg miss rc
+  PW="$w/power.git"
+  mkdir -p "$w" && git init -q --bare --template= "$PW" >/dev/null 2>&1 \
+    || refuse "cannot build the power check under ${TMPDIR:-/tmp}"
+  # the blobs: text in upper case, binary, a symlink target, and (range only) lower case
+  empty="$(pg hash-object -w --stdin < /dev/null)" &&
+  b_text="$( { printf 'power text\n'; printf '%s\n' "${ENTRIES[@]}" | tr '[:lower:]' '[:upper:]'; } \
+    | pg hash-object -w --stdin)" &&
+  b_bin="$( { printf 'power\0binary\0'; printf '%s\0' "${ENTRIES[@]}"; } | pg hash-object -w --stdin)" &&
+  b_link="$(printf '../%s\n' "${ENTRIES[@]}" | pg hash-object -w --stdin)" &&
+  b_gone="$( { printf 'power gone\n'; printf '%s\n' "${ENTRIES[@]}" | tr '[:upper:]' '[:lower:]'; } \
+    | pg hash-object -w --stdin)" || refuse "cannot build the power check"
+  # the base tree holds the head's plants, so only the head's tree reaches them: a path per entry
+  { printf '100644 %s\t%s\0' "$b_text" power/text.txt
+    printf '100644 %s\t%s\0' "$b_bin" power/data.bin
+    printf '120000 %s\t%s\0' "$b_link" power/link
+    i=0
+    while [ "$i" -lt "${#ENTRIES[@]}" ]; do
+      printf '100644 %s\t%s\0' "$empty" "pn${NUMS[$i]}-${ENTRIES[$i]}-pn"; i=$((i + 1))
     done
-    i=$((i + 1))
+  } | GIT_INDEX_FILE="$w/index" pg update-index -z --index-info >/dev/null 2>&1 &&
+  tree0="$(GIT_INDEX_FILE="$w/index" pg write-tree)" || refuse "cannot build the power check"
+  # the range's first commit adds a blob and a path per entry that the next one removes
+  { printf '100644 %s\t%s\0' "$b_gone" power/gone.txt
+    i=0
+    while [ "$i" -lt "${#ENTRIES[@]}" ]; do
+      printf '100644 %s\t%s\0' "$empty" "rg${NUMS[$i]}-${ENTRIES[$i]}-rg"; i=$((i + 1))
+    done
+  } | GIT_INDEX_FILE="$w/index" pg update-index -z --index-info >/dev/null 2>&1 &&
+  tree1="$(GIT_INDEX_FILE="$w/index" pg write-tree)" || refuse "cannot build the power check"
+  people="power"; i=0
+  while [ "$i" -lt "${#ENTRIES[@]}" ]; do
+    ident_ok "${ENTRIES[$i]}" && people="$people|${ENTRIES[$i]}"; i=$((i + 1))
   done
+  people="$people|power"
+  msg="$(printf 'power message\n\n'; printf '%s\n' "${ENTRIES[@]}")"
+  c0="$(pg_commit "$tree0" "" power power@example.invalid power power@example.invalid "power base")" &&
+  c1="$(pg_commit "$tree1" "$c0" power power@example.invalid power power@example.invalid "$msg")" &&
+  c2="$(pg_commit "$tree0" "$c1" "$people" power@example.invalid power power@example.invalid "power")" &&
+  c3="$(pg_commit "$tree0" "$c2" power "$people" power power@example.invalid "power")" &&
+  c4="$(pg_commit "$tree0" "$c3" power power@example.invalid "$people" power@example.invalid "power")" &&
+  c5="$(pg_commit "$tree0" "$c4" power power@example.invalid power "$people" "power")" &&
+  tg="$( { printf 'object %s\ntype commit\ntag power-tag\ntagger power <power@example.invalid> 0 +0000\n\npower tag\n' "$c1"
+           printf '%s\n' "${ENTRIES[@]}"; } | pg hash-object -t tag -w --stdin)" \
+    || refuse "cannot build the power check"
+  # a tag named after each entry on a commit inside the range (not the head), and the annotated tag
+  { printf 'create refs/tags/power-tag\0%s\0' "$tg"
+    i=0
+    while [ "$i" -lt "${#ENTRIES[@]}" ]; do
+      ref_ok "${ENTRIES[$i]}" && printf 'create refs/tags/tn%s-%s-tn\0%s\0' "${NUMS[$i]}" "${ENTRIES[$i]}" "$c3"
+      i=$((i + 1))
+    done
+  } | pg update-ref -z --stdin >/dev/null 2>&1 || refuse "cannot build the power check: git refused a tag name"
+
+  # the same scan, over the range c0..c5
+  scan_repo "$PW" "$c0" "$c5" "$w/run" > "$w/found"; rc=$?
+  [ "$rc" -le 1 ] || refuse "the power check cannot read its own throwaway; the scan has no power"
+
+  # what it must have found: `entry=<n> at <where>` and the site's name, numbers and ids only
+  i=0
+  while [ "$i" -lt "${#ENTRIES[@]}" ]; do
+    e="${ENTRIES[$i]}"; n="${NUMS[$i]}"
+    printf 'entry=%s at blob %.12s\ttext blob\n' "$n" "$b_text"
+    printf 'entry=%s at blob %.12s\tbinary blob\n' "$n" "$b_bin"
+    printf 'entry=%s at blob %.12s\tsymlink target\n' "$n" "$b_link"
+    printf 'entry=%s at path #\tpath name\n' "$n"
+    printf 'entry=%s at path in commit %.12s\trange-only path\n' "$n" "$c1"
+    printf 'entry=%s at blob %.12s\trange-only blob\n' "$n" "$b_gone"
+    printf 'entry=%s at commit %.12s message\tmessage\n' "$n" "$c1"
+    if ident_ok "$e"; then
+      printf 'entry=%s at commit %.12s author\tauthor name\n' "$n" "$c2"
+      printf 'entry=%s at commit %.12s author\tauthor email\n' "$n" "$c3"
+      printf 'entry=%s at commit %.12s committer\tcommitter name\n' "$n" "$c4"
+      printf 'entry=%s at commit %.12s committer\tcommitter email\n' "$n" "$c5"
+    fi
+    ref_ok "$e" && printf 'entry=%s at tag %.12s\ttag name\n' "$n" "$c3"
+    printf 'entry=%s at tag %.12s\ttag message\n' "$n" "$tg"
+    i=$((i + 1))
+  done > "$w/expected"
+  sed -e 's/^HIT //' -e 's/ line [0-9]*$//' -e 's/ #[0-9]*$/ #/' "$w/found" > "$w/found-sites" \
+    || refuse "cannot check the power check"
+  miss="$(awk -F'\t' 'FILENAME == ARGV[1] { f[$0] = 1; next } !($1 in f) { print $1 "\t" $2; exit }' \
+    "$w/found-sites" "$w/expected")" || refuse "cannot check the power check"
+  [ -z "$miss" ] && return 0
+  n="${miss#entry=}"; n="${n%% *}"; tab=$'\t'
+  refuse "the entry on line $n of the list is not found at its ${miss##*$tab} in the throwaway; the scan has no power"
 }
 
 # ---- main ------------------------------------------------------------------------------------
@@ -168,20 +344,35 @@ if git -C "$LISTDIR" rev-parse --show-toplevel >/dev/null 2>&1 || git -C "$LISTD
   refuse "the list is inside a git checkout; keep it outside every checkout"
 fi
 
-ENTRIES=(); LC_ENTRIES=(); NUMS=()
+ENTRIES=(); NUMS=()
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
   n=$((n + 1))
   line="${line#$'\357\273\277'}"
   while :; do
-    case "$line" in *' '|*$'\t'|*$'\r') line="${line%?}" ;; *) break ;; esac
+    case "$line" in
+      ' '*|$'\t'*|$'\r'*) line="${line#?}" ;;
+      *' '|*$'\t'|*$'\r') line="${line%?}" ;;
+      *) break ;;
+    esac
   done
   case "$line" in ''|'#'*) continue ;; esac
   ENTRIES[${#ENTRIES[@]}]="$line"
-  LC_ENTRIES[${#LC_ENTRIES[@]}]="$(printf '%s' "$line" | tr 'A-Z' 'a-z')"
   NUMS[${#NUMS[@]}]="$n"
 done < "$LIST"
 if [ "${#ENTRIES[@]}" -eq 0 ]; then echo "entries=0"; exit 0; fi
+
+# the scan decides the locale: a UTF-8 one for itself (the tools that fold case in the power
+# check read it); with none on the machine, only an ASCII-only list can be scanned
+utf8=""
+for l in C.UTF-8 en_US.UTF-8 $(locale -a 2>/dev/null | grep -i -E 'utf-?8$'); do
+  [ "$(LC_ALL="$l" locale charmap 2>/dev/null)" = UTF-8 ] && { utf8="$l"; break; }
+done
+if [ -n "$utf8" ]; then
+  export LC_ALL="$utf8"
+elif [ "$(printf '%s' "${ENTRIES[@]}" | tr -d '\000-\177' | wc -c | tr -d ' ')" != 0 ]; then
+  refuse "no UTF-8 locale is available on this machine and the list holds a non-ASCII entry; its case cannot be folded"
+fi
 
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || refuse "not run inside a git checkout"
 HEAD_SHA="$(git -C "$REPO" rev-parse --verify -q "${BIONIC_CHECK_HEAD:-HEAD}^{commit}")" \
@@ -201,45 +392,11 @@ fi
 TMP_SCAN="$(mktemp -d "${TMPDIR:-/tmp}/name-scan.XXXXXX")" || refuse "cannot make a temp directory"
 trap 'rm -rf "$TMP_SCAN"' EXIT
 
-prove_power "$TMP_SCAN"
+prove_power "$TMP_SCAN/power"
 
-hits=0; i=0
-while [ "$i" -lt "${#ENTRIES[@]}" ]; do
-  where="$( { scan_files "$REPO" "$HEAD_SHA" "${ENTRIES[$i]}"; echo "rc=$?"; } )"
-  case "$where" in *"rc=2") refuse "the file scan failed" ;; esac
-  paths="$( { scan_paths "$REPO" "$HEAD_SHA" "${ENTRIES[$i]}"; echo "rc=$?"; } )"
-  case "$paths" in *"rc=2") refuse "the path scan failed" ;; esac
-  where="$(printf '%s\n%s\n' "$where" "$paths"
-           scan_messages "$REPO" "$BASE_SHA" "$HEAD_SHA" "${ENTRIES[$i]}"
-           scan_tags "$REPO" "$HEAD_SHA" "${ENTRIES[$i]}")"
-  while IFS= read -r w; do
-    case "$w" in ''|rc=*) continue ;; esac
-    hits=$((hits + 1))
-    printf 'HIT entry=%s at %s\n' "${NUMS[$i]}" "$w"
-  done <<EOF
-$where
-EOF
-  i=$((i + 1))
-done
-
-# files the text scan could not read: binary files and symlinks (an empty file has nothing to read)
-unread=0
-texts="$(git -C "$REPO" grep -I -l -z -e '' "$HEAD_SHA" -- 2>/dev/null | tr '\0' '\n' | cut -c$((${#HEAD_SHA} + 2))-)"
-cands="$(git -C "$REPO" ls-tree -r -l -z "$HEAD_SHA" 2>/dev/null | tr '\0' '\n')"
-unreadable="$({ printf '%s\n' "$texts" | sed 's/^/T /'; printf '%s\n' "$cands" | sed 's/^/C /'; } | awk '
-  substr($0, 1, 2) == "T " { text[substr($0, 3)] = 1; next }
-  substr($0, 1, 2) == "C " {
-    rest = substr($0, 3); tab = index(rest, "\t"); if (!tab) next
-    split(substr(rest, 1, tab - 1), m, " "); p = substr(rest, tab + 1)
-    if (m[2] == "blob" && m[4] != 0 && !(p in text)) print p
-  }')"
-while IFS= read -r u; do
-  [ -n "$u" ] || continue
-  unread=$((unread + 1))
-  printf 'UNREAD %s\n' "$(path_label "$u")"
-done <<EOF
-$unreadable
-EOF
-
-echo "entries=${#ENTRIES[@]} hits=$hits unread=$unread head=$(printf '%s' "$HEAD_SHA" | cut -c1-12) base=${BASE_SHA:-none}"
+scan_repo "$REPO" "$BASE_SHA" "$HEAD_SHA" "$TMP_SCAN/scan" > "$TMP_SCAN/hits"; rc=$?
+[ "$rc" -le 1 ] || refuse "the scan could not read everything the push would publish"
+cat "$TMP_SCAN/hits"
+hits="$(grep -c '^HIT ' "$TMP_SCAN/hits")"
+echo "entries=${#ENTRIES[@]} hits=$hits objects=$(wc -l < "$TMP_SCAN/scan/objects" | tr -d ' ') head=$(printf '%.12s' "$HEAD_SHA") base=${BASE_SHA:-none}"
 [ "$hits" -eq 0 ]
