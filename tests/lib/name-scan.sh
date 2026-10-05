@@ -23,31 +23,41 @@
 # message and in an annotated tag message; an entry any of them cannot find there refuses the
 # run (exit 2).
 #
-# NO ENTRY IS EVER PRINTED OR WRITTEN. A hit is `HIT entry=<line number> at <where>`; a path
+# NO ENTRY IS EVER PRINTED OR WRITTEN, and none is a word of any command line the scan runs
+# (a pattern goes by file descriptor; the power check writes with builtins and reads the
+# planted path from stdin). A hit is `HIT entry=<line number> at <where>`; a path
 # that itself carries an entry is withheld, and a path hit is named `path #<n>`, the path's
-# 1-based position in `git ls-tree -r --name-only` order. Every git trace variable is unset
-# because an entry travels in git's argv. The throwaway lives in a temp directory removed on
+# 1-based position in `git ls-tree -r --name-only` order. Every git trace variable is unset as
+# a second line of defence. The throwaway lives in a temp directory removed on
 # exit. Exit 0 clean (an empty list prints `entries=0`), 1 a hit, 2 a refusal.
 #
 # bash 3.2 (ADR-001). Not part of the shipped plugin.
 set -u
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+# second line of defence: no entry is in any argv, but a trace file the caller's environment names
+# would still record what git does see
 for v in $(compgen -e); do case "$v" in GIT_TRACE*) unset "$v" ;; esac; done
 
 refuse() { echo "name-scan: $*" >&2; exit 2; }
 
-# ---- the three scan sites: each prints one <where> line per place <entry> is found ----------
+# ---- the four scan sites: each prints one <where> line per place <entry> is found -----------
+#
+# NO ENTRY IS A WORD OF ANY COMMAND LINE. A pattern reaches git by a file descriptor
+# (`-f <(printf ...)`, printf being a builtin) and reaches awk the same way: the program reads
+# its pattern from the first operand, a process substitution, before it reads the data on stdin.
 
 # scan_files <repo> <head sha> <entry> -> `file <path>:<line>`
 scan_files() {
-  local repo="$1" head="$2" entry="$3" out rc path line
+  local repo="$1" head="$2" entry="$3" out rc rec path line
+  # awk prints `<line>:<path>`: no control byte joins them, because bash 3.2 mishandles \001 in IFS
   out="$(set -o pipefail
-    git -C "$repo" grep -n -z -i -F -I -e "$entry" "$head" -- 2>/dev/null \
-      | tr '\0' '\001' | awk -F'\001' -v p="${#head}" '{ print substr($1, p + 2) "\001" $2 }')"
+    git -C "$repo" grep -n -z -i -F -I -f <(printf '%s\n' "$entry") "$head" -- 2>/dev/null \
+      | tr '\0' '\001' | awk -F'\001' -v p="${#head}" '{ print $2 ":" substr($1, p + 2) }')"
   rc=$?
   [ "$rc" -le 1 ] || return 2
   [ -n "$out" ] || return 0
-  while IFS=$'\001' read -r path line; do
+  while IFS= read -r rec; do
+    line="${rec%%:*}"; path="${rec#*:}"
     printf 'file %s:%s\n' "$(path_label "$path")" "$line"
   done <<EOF
 $out
@@ -56,25 +66,28 @@ EOF
 
 # scan_paths <repo> <head sha> <entry> -> `path #<n>`: n is the 1-based position, in
 # `git ls-tree -r --name-only` order, of each path that carries the entry. The path is never
-# printed, and the entry reaches awk through the environment, not its argv.
+# printed.
 scan_paths() {
   local repo="$1" head="$2" entry="$3" out rc
   out="$(set -o pipefail
     git -C "$repo" ls-tree -r --name-only -z "$head" 2>/dev/null | tr '\0' '\001' \
-      | NS_ENTRY="$entry" awk 'BEGIN { RS = "\001"; e = tolower(ENVIRON["NS_ENTRY"]) }
-          index(tolower($0), e) { print "path #" NR }')"
+      | awk 'BEGIN { getline e < ARGV[1]; close(ARGV[1]); ARGV[1] = ""; e = tolower(e); RS = "\001" }
+             index(tolower($0), e) { print "path #" NR }' <(printf '%s\n' "$entry") -)"
   rc=$?
   [ "$rc" -eq 0 ] || return 2
   [ -z "$out" ] || printf '%s\n' "$out"
 }
 
 # scan_messages <repo> <base sha or ""> <head sha> <entry> -> `message <sha12>`
+# Each commit is one NUL-terminated record, `<sha>\n<message>`; only the message is searched.
 scan_messages() {
-  local repo="$1" base="$2" head="$3" entry="$4" range="$3" sha
+  local repo="$1" base="$2" head="$3" entry="$4" range="$3"
   [ -n "$base" ] && range="$base..$head"
-  git -C "$repo" log -i -F --grep="$entry" --format=%H "$range" 2>/dev/null | while read -r sha; do
-    printf 'message %s\n' "$(printf '%s' "$sha" | cut -c1-12)"
-  done
+  git -C "$repo" log -z --format='%H%n%B' "$range" 2>/dev/null | tr '\0' '\001' \
+    | awk 'BEGIN { getline e < ARGV[1]; close(ARGV[1]); ARGV[1] = ""; e = tolower(e); RS = "\001" }
+           { nl = index($0, "\n")
+             if (nl && index(tolower(substr($0, nl + 1)), e)) print "message " substr($0, 1, 12) }' \
+        <(printf '%s\n' "$entry") -
 }
 
 # scan_tags <repo> <head sha> <entry> -> `tag-message`, once per annotated tag at the head
@@ -83,7 +96,9 @@ scan_tags() {
   git -C "$repo" tag --points-at "$head" 2>/dev/null | while read -r tag; do
     [ "$(git -C "$repo" for-each-ref --format='%(objecttype)' "refs/tags/$tag" 2>/dev/null)" = tag ] || continue
     git -C "$repo" for-each-ref --format='%(contents)' "refs/tags/$tag" 2>/dev/null \
-      | grep -q -i -F -e "$entry" && echo "tag-message"
+      | awk 'BEGIN { getline e < ARGV[1]; close(ARGV[1]); ARGV[1] = ""; e = tolower(e) }
+             index(tolower($0), e) { f = 1 } END { exit f ? 0 : 1 }' <(printf '%s\n' "$entry") - \
+      && echo "tag-message"
   done
 }
 
@@ -113,8 +128,10 @@ prove_power() {
   while [ "$i" -lt "${#ENTRIES[@]}" ]; do
     printf '%s\n' "${ENTRIES[$i]}" >> "$repo/entries.txt"
     printf '%s\n' "${ENTRIES[$i]}" >> "$msg"
-    # the entry in a file NAME, planted in the index so the filesystem's naming rules do not apply
-    git -C "$repo" update-index --add --cacheinfo 100644 "$blob" "pn${NUMS[$i]}-${ENTRIES[$i]}-pn" >/dev/null 2>&1 \
+    # the entry in a file NAME, planted in the index from stdin (a builtin printf), so it is no
+    # word of a command line and the filesystem's naming rules do not apply
+    printf '100644 %s\t%s\0' "$blob" "pn${NUMS[$i]}-${ENTRIES[$i]}-pn" \
+        | git -C "$repo" update-index -z --index-info >/dev/null 2>&1 \
       || refuse "the entry on line ${NUMS[$i]} of the list cannot be planted in a path name; the path scan cannot be shown to have power"
     i=$((i + 1))
   done
