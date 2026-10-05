@@ -411,6 +411,9 @@ refuse() {
     fi
     fact_whole="$fact"
     fact="$(bionic_trunc "$(_refuse_bytecut "$fact" $((room * 4)))" "$room")"
+    # A fact the pre-cut's walk-back empties (continuation bytes with no lead byte, wave-27 T58) was
+    # still cut: the line shows the ellipsis where it stood, never an empty fact.
+    [ -n "$fact" ] || fact="…"
     line="bionic: $verb refused — $fact ($fix)"
     line_cols="$(bionic_cols "$line")"
     if [ "$line_cols" -gt "$BIONIC_LINE_WIDTH" ]; then
