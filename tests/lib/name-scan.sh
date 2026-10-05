@@ -3,28 +3,36 @@
 #
 # <list path> is a private list, one entry per line, kept OUTSIDE every git checkout (a list in
 # a checkout would itself ship). Blank lines and lines starting with `#` are skipped but still
-# counted, so an entry is named by its line number in the list. Entries are fixed strings,
-# matched case-insensitively. The scan runs in the checkout it is started from.
+# counted, so an entry is named by its line number in the list. Each line is read as the scan
+# will use it: a trailing space, tab or carriage return and a leading byte-order mark are
+# stripped, and a line empty after that is skipped (counted, not an entry). Entries are fixed
+# strings, matched case-insensitively. The scan runs in the checkout it is started from.
 #
 # WHAT IT READS is what a push would publish, never the working files:
 #   - the files as committed at the head (`git grep` on the commit),
+#   - the path names in the tree at the head (each file's full path, so a directory name too),
 #   - the commit messages in base..head (`git log --grep`),
 #   - the message of any annotated tag that points at the head.
 # BIONIC_CHECK_BASE and BIONIC_CHECK_HEAD pick the range; the head defaults to HEAD and the
-# base to the newest tag reachable from the head (no tag at all: the whole history).
+# base to the newest tag reachable from the head that does not point at the head itself, so a
+# release already tagged is scanned as <previous tag>..<head> (no such tag: the whole history).
 # A file it could not read as text (binary, a symlink) is named `UNREAD <path>`.
 #
-# A CLEAN RESULT MUST HAVE POWER. Before the real scan, the same three functions run over a
-# throwaway repository whose one commit carries every entry in a file, in its message and in
-# an annotated tag message; an entry any of them cannot find there refuses the run (exit 2).
+# A CLEAN RESULT MUST HAVE POWER. Before the real scan, the same four functions run over a
+# throwaway repository whose one commit carries every entry in a file, in a file NAME, in its
+# message and in an annotated tag message; an entry any of them cannot find there refuses the
+# run (exit 2).
 #
 # NO ENTRY IS EVER PRINTED OR WRITTEN. A hit is `HIT entry=<line number> at <where>`; a path
-# that itself carries an entry is withheld. The throwaway lives in a temp directory removed on
+# that itself carries an entry is withheld, and a path hit is named `path #<n>`, the path's
+# 1-based position in `git ls-tree -r --name-only` order. Every git trace variable is unset
+# because an entry travels in git's argv. The throwaway lives in a temp directory removed on
 # exit. Exit 0 clean (an empty list prints `entries=0`), 1 a hit, 2 a refusal.
 #
 # bash 3.2 (ADR-001). Not part of the shipped plugin.
 set -u
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+for v in $(compgen -e); do case "$v" in GIT_TRACE*) unset "$v" ;; esac; done
 
 refuse() { echo "name-scan: $*" >&2; exit 2; }
 
@@ -44,6 +52,20 @@ scan_files() {
   done <<EOF
 $out
 EOF
+}
+
+# scan_paths <repo> <head sha> <entry> -> `path #<n>`: n is the 1-based position, in
+# `git ls-tree -r --name-only` order, of each path that carries the entry. The path is never
+# printed, and the entry reaches awk through the environment, not its argv.
+scan_paths() {
+  local repo="$1" head="$2" entry="$3" out rc
+  out="$(set -o pipefail
+    git -C "$repo" ls-tree -r --name-only -z "$head" 2>/dev/null | tr '\0' '\001' \
+      | NS_ENTRY="$entry" awk 'BEGIN { RS = "\001"; e = tolower(ENVIRON["NS_ENTRY"]) }
+          index(tolower($0), e) { print "path #" NR }')"
+  rc=$?
+  [ "$rc" -eq 0 ] || return 2
+  [ -z "$out" ] || printf '%s\n' "$out"
 }
 
 # scan_messages <repo> <base sha or ""> <head sha> <entry> -> `message <sha12>`
@@ -81,15 +103,19 @@ path_label() {
 # ---- the throwaway: every entry in a file, a commit message and an annotated tag -------------
 
 prove_power() {
-  local tmp="$1" repo msg i head site found
+  local tmp="$1" repo msg i head site found blob
   repo="$tmp/power"; msg="$tmp/power-msg"
   mkdir -p "$repo" || refuse "cannot build the power check under ${TMPDIR:-/tmp}"
   git -C "$repo" init -q --template= >/dev/null 2>&1 || refuse "cannot build the power check"
   : > "$msg"
+  blob="$(git -C "$repo" hash-object -w --stdin </dev/null 2>/dev/null)" || refuse "cannot build the power check"
   i=0
   while [ "$i" -lt "${#ENTRIES[@]}" ]; do
     printf '%s\n' "${ENTRIES[$i]}" >> "$repo/entries.txt"
     printf '%s\n' "${ENTRIES[$i]}" >> "$msg"
+    # the entry in a file NAME, planted in the index so the filesystem's naming rules do not apply
+    git -C "$repo" update-index --add --cacheinfo 100644 "$blob" "pn${NUMS[$i]}-${ENTRIES[$i]}-pn" >/dev/null 2>&1 \
+      || refuse "the entry on line ${NUMS[$i]} of the list cannot be planted in a path name; the path scan cannot be shown to have power"
     i=$((i + 1))
   done
   git -C "$repo" -c user.name=power -c user.email=power@example.invalid -c commit.gpgsign=false \
@@ -102,9 +128,10 @@ prove_power() {
   head="$(git -C "$repo" rev-parse --verify -q 'HEAD^{commit}')" || refuse "cannot build the power check"
   i=0
   while [ "$i" -lt "${#ENTRIES[@]}" ]; do
-    for site in files messages tags; do
+    for site in files paths messages tags; do
       case "$site" in
         files)    found="$(scan_files "$repo" "$head" "${ENTRIES[$i]}")" ;;
+        paths)    found="$(scan_paths "$repo" "$head" "${ENTRIES[$i]}")" ;;
         messages) found="$(scan_messages "$repo" "" "$head" "${ENTRIES[$i]}")" ;;
         tags)     found="$(scan_tags "$repo" "$head" "${ENTRIES[$i]}")" ;;
       esac
@@ -128,7 +155,10 @@ ENTRIES=(); LC_ENTRIES=(); NUMS=()
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
   n=$((n + 1))
-  line="${line%$'\r'}"
+  line="${line#$'\357\273\277'}"
+  while :; do
+    case "$line" in *' '|*$'\t'|*$'\r') line="${line%?}" ;; *) break ;; esac
+  done
   case "$line" in ''|'#'*) continue ;; esac
   ENTRIES[${#ENTRIES[@]}]="$line"
   LC_ENTRIES[${#LC_ENTRIES[@]}]="$(printf '%s' "$line" | tr 'A-Z' 'a-z')"
@@ -143,7 +173,10 @@ if [ -n "${BIONIC_CHECK_BASE:-}" ]; then
   BASE_SHA="$(git -C "$REPO" rev-parse --verify -q "${BIONIC_CHECK_BASE}^{commit}")" \
     || refuse "the base does not resolve to a commit"
 else
-  BASE_TAG="$(git -C "$REPO" describe --tags --abbrev=0 "$HEAD_SHA" 2>/dev/null)" || BASE_TAG=""
+  # the newest tag below the head: a tag that points at the head itself is the release being cut
+  EXCL=()
+  for t in $(git -C "$REPO" tag --points-at "$HEAD_SHA" 2>/dev/null); do EXCL[${#EXCL[@]}]="--exclude=$t"; done
+  BASE_TAG="$(git -C "$REPO" describe --tags --abbrev=0 ${EXCL[@]+"${EXCL[@]}"} "$HEAD_SHA" 2>/dev/null)" || BASE_TAG=""
   BASE_SHA=""
   [ -z "$BASE_TAG" ] || BASE_SHA="$(git -C "$REPO" rev-parse --verify -q "refs/tags/$BASE_TAG^{commit}")"
 fi
@@ -157,7 +190,9 @@ hits=0; i=0
 while [ "$i" -lt "${#ENTRIES[@]}" ]; do
   where="$( { scan_files "$REPO" "$HEAD_SHA" "${ENTRIES[$i]}"; echo "rc=$?"; } )"
   case "$where" in *"rc=2") refuse "the file scan failed" ;; esac
-  where="$(printf '%s\n' "$where"
+  paths="$( { scan_paths "$REPO" "$HEAD_SHA" "${ENTRIES[$i]}"; echo "rc=$?"; } )"
+  case "$paths" in *"rc=2") refuse "the path scan failed" ;; esac
+  where="$(printf '%s\n%s\n' "$where" "$paths"
            scan_messages "$REPO" "$BASE_SHA" "$HEAD_SHA" "${ENTRIES[$i]}"
            scan_tags "$REPO" "$HEAD_SHA" "${ENTRIES[$i]}")"
   while IFS= read -r w; do
