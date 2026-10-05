@@ -439,6 +439,57 @@ detect_zshrc_legacy_block() {
   return 0
 }
 
+# THE LINES BIONIC ITSELF WROTE BARE, AND THE ONE PLACE THEY ARE LISTED (wave-27
+# T55, review pass 32 F1, the blocker). Before the markers, claude-bootstrap.sh
+# appended the alias with nothing around it, and the step that takes it back out
+# deleted every line `alias claude=.*dangerously-skip-permissions` matched — a
+# user's comment, a second command sharing the line, the user's own alias inside an
+# `if`. A line is bionic's only when the WHOLE line, blanks at either end and one
+# trailing CR aside, is one of the spellings below, each found in this repository's
+# history with the commit that wrote it. remove.sh carries this function, the scan
+# and the number words under the same names, pinned line for line by
+# tests/rc-item.test.sh §T55.
+bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
+  local l="$1"
+  l="${l#"${l%%[![:blank:]]*}"}"
+  l="${l%"${l##*[![:blank:]]}"}"
+  l="${l%$'\r'}"
+  l="${l%"${l##*[![:blank:]]}"}"
+  case "$l" in
+    # claude-bootstrap.sh 6e953055 (2026-03-22), bare, `printf '\n%s\n' "$ALIAS_LINE"`,
+    # until e012f966 (2026-03-28) wrote the same line inside the markers.
+    "alias claude='claude --dangerously-skip-permissions'") return 0 ;;
+  esac
+  return 1
+}
+
+# Any line that MENTIONS the retired alias, bionic's or not: what the step names
+# by number and leaves for the user's hand when `bionic_legacy_alias_ours` says no.
+BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
+
+# Which lines of <file> are bionic's bare alias and which only mention it:
+# `ours=<n>,<n> theirs=<n>`, line numbers, never a line's text (an rc line can hold
+# a secret). A file that is not there answers both empty.
+bionic_legacy_alias_lines() {  # <file>
+  local file="$1" line n=0 ours="" theirs=""
+  if [ -f "$file" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      n=$((n + 1))
+      if bionic_legacy_alias_ours "$line"; then ours="${ours}${ours:+,}${n}"
+      elif [[ "$line" =~ $BIONIC_LEGACY_ALIAS_PATTERN ]]; then theirs="${theirs}${theirs:+,}${n}"; fi
+    done < "$file"
+  fi
+  printf 'ours=%s theirs=%s\n' "$ours" "$theirs"
+}
+
+# `3` → `line 3`; `3,7` → `lines 3, 7`.
+bionic_line_numbers_words() {  # <n>,<n>…
+  case "$1" in
+    *,*) printf 'lines %s\n' "${1//,/, }" ;;
+    *)   printf 'line %s\n' "$1" ;;
+  esac
+}
+
 # Managed-hook entries in USER settings.json that still point at the
 # pre-plugin copies under ~/.claude/hooks/. The plugin channel registers hooks
 # through the payload's own hooks.json using ${CLAUDE_PLUGIN_ROOT}, so any
