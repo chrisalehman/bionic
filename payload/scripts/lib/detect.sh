@@ -311,16 +311,15 @@ detect_dep() {  # <name>
 
 # ─── Environment class ───────────────────────────────────────────────────────
 
-# The flag current CLI builds need for the native task tools. A commented-out
-# line does not count: it is the state a user lands in after commenting the
-# export out, and reporting it as present would make setup skip the very
-# repair that is wanted.
+# The flag current CLI builds need for the native task tools, as the line bionic
+# wrote (`bionic_todo_export_ours`, wave-27 T66): the fact half-uninstalled counts
+# as bionic's footprint, so it is the line remove takes out and no other. A
+# commented-out copy, another value or a line that goes on is the user's.
 detect_env_todo_tools() {
-  local rc present=no
+  local rc present=no scan
   rc="$(_detect_shell_rc)"
-  if [ -f "$rc" ] && grep -qE '^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1' "$rc" 2>/dev/null; then
-    present=yes
-  fi
+  scan="$(bionic_rc_candidates "$rc" bionic_todo_export_ours "")"; scan="${scan#cand=}"
+  [ -n "${scan%% *}" ] && present=yes
   echo "env:todo-tools present=${present}"
   return 0
 }
@@ -448,27 +447,42 @@ detect_zshrc_legacy_block() {
 # trailing CR aside, is one of the spellings below, each found in this repository's
 # history with the commit that wrote it. remove.sh carries this function, the scan
 # and the number words under the same names, pinned line for line by
-# tests/rc-item.test.sh §T55.
-bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
-  local l="$1" p
+# tests/rc-item.test.sh §T55 and §T66.
+#
+# LINEAR IN THE LINE, UNDER EVERY LOCALE (wave-27 T66, review pass 40 N1). Bash's
+# suffix and prefix trims are quadratic in a line's length under a UTF-8 locale (a
+# 200,000-character line took 8 s here), so every list below decides in the C
+# locale, `local` to the call, and a line that cannot hold the spelling is turned
+# away before that. Bytes are bytes: the answer is the same under any locale.
+bionic_rc_line_bare() {  # <line> — sets BIONIC_RC_BARE: blanks at either end and one trailing CR dropped
+  local LC_ALL=C l="$1"
   l="${l#"${l%%[![:blank:]]*}"}"
   l="${l%"${l##*[![:blank:]]}"}"
   l="${l%$'\r'}"
   l="${l%"${l##*[![:blank:]]}"}"
+  BIONIC_RC_BARE="$l"
+}
+
+bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
+  case "$1" in *"--dangerously-skip-permissions'"*) ;; *) return 1 ;; esac
+  local LC_ALL=C l p hi=$'\200'-$'\377'
+  bionic_rc_line_bare "$1"; l="$BIONIC_RC_BARE"
   case "$l" in
     # claude-bootstrap.sh 6e953055 (2026-03-22), bare, `printf '\n%s\n' "$ALIAS_LINE"`,
     # until e012f966 (2026-03-28) wrote the same line inside the markers.
     "alias claude='claude --dangerously-skip-permissions'") return 0 ;;
     # claude-bootstrap.sh e178aecc (2026-03-14) until 6e953055, the same append with
     # `CLAUDE_BIN="$(command -v claude)"` as <P>: that machine's path to claude, or
-    # empty where none was on PATH. One template (A-orch-93): P empty, or absolute
-    # with `claude` as its last component, holding no white space, quote, `$`,
-    # backquote or `;`.
+    # empty where none was on PATH. One template (A-orch-93, amended by A-orch-117):
+    # P empty, or absolute with `claude` as its last component, every character a
+    # letter, a digit or one of `/ . _ - + @ % , : = ~`. A byte above 0x7f counts as
+    # a letter (no shell metacharacter is one); a pipe, `&`, `<`, `>`, a parenthesis,
+    # white space, a quote, `$`, a backquote or `;` is not a path bionic wrote.
     "alias claude='"*" --dangerously-skip-permissions'")
       p="${l#"alias claude='"}"; p="${p%" --dangerously-skip-permissions'"}"
       [ -z "$p" ] && return 0
       case "$p" in /claude|/*/claude) ;; *) return 1 ;; esac
-      case "$p" in *[[:space:]]*|*\'*|*\"*|*\$*|*\`*|*\;*) return 1 ;; esac
+      case "$p" in *[!A-Za-z0-9/._+@%,:=~${hi}-]*) return 1 ;; esac
       return 0 ;;
   esac
   return 1
@@ -478,19 +492,46 @@ bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
 # by number and leaves for the user's hand when `bionic_legacy_alias_ours` says no.
 BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
 
-# Which lines of <file> are bionic's bare alias and which only mention it:
-# `ours=<n>,<n> theirs=<n>`, line numbers, never a line's text (an rc line can hold
-# a secret). A file that is not there answers both empty.
+# THE ENVIRONMENT LINE BIONIC WROTE, AND THE ONE PLACE IT IS LISTED (wave-27 T66,
+# review pass 40 B2). remove's environment item took out every line its filter
+# matched from the start: a user's `…=1; export TOKEN=…`, a different variable with
+# the same prefix, a commented copy. One spelling was ever written, never varying by
+# machine (`git log --all -S CLAUDE_CODE_ENABLE_TODO_TOOLS`): setup.sh 3e00ec84
+# (2026-08-17) until ba36f32c (2026-08-21) appended it between the retired env
+# markers. Whole line, as the alias list above.
+bionic_todo_export_ours() {  # <line> — rc 0 when bionic wrote it
+  case "$1" in *CLAUDE_CODE_ENABLE_TODO_TOOLS*) ;; *) return 1 ;; esac
+  local LC_ALL=C
+  bionic_rc_line_bare "$1"
+  [ "$BIONIC_RC_BARE" = "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1" ]
+}
+
+# Any line that mentions the export, bionic's or not: named by number and left.
+BIONIC_TODO_EXPORT_PATTERN='export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS'
+
+# Which lines of <file> are bionic's and may go, which are bionic's and stay, and
+# which only mention it: `ours=<n>,<n> bound=<n>,<n> why=<…> theirs=<n>`, line
+# numbers, never a line's text (an rc line can hold a secret). `bound` is bionic's
+# line where taking it out would change the user's own code, and `why` says how
+# that was decided (markers.sh `bionic_rc_lines`). A file that is not there answers
+# all of them empty.
 bionic_legacy_alias_lines() {  # <file>
-  local file="$1" line n=0 ours="" theirs=""
-  if [ -f "$file" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      n=$((n + 1))
-      if bionic_legacy_alias_ours "$line"; then ours="${ours}${ours:+,}${n}"
-      elif [[ "$line" =~ $BIONIC_LEGACY_ALIAS_PATTERN ]]; then theirs="${theirs}${theirs:+,}${n}"; fi
-    done < "$file"
-  fi
-  printf 'ours=%s theirs=%s\n' "$ours" "$theirs"
+  bionic_rc_lines "$1" bionic_legacy_alias_ours "$BIONIC_LEGACY_ALIAS_PATTERN"
+}
+
+bionic_todo_export_lines() {  # <file>
+  bionic_rc_lines "$1" bionic_todo_export_ours "$BIONIC_TODO_EXPORT_PATTERN"
+}
+
+# Why bionic's own line stays, in the words every door uses after the line number
+# (wave-27 T66). <why> is `bionic_rc_lines`' answer.
+bionic_rc_left_reason() {  # <why> <rc>
+  case "$1" in
+    ok)       printf "bionic's line, where removing it would change your own code\n" ;;
+    no-shell) printf "bionic's line, left: %s, the shell that reads that file, is not installed, so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
+    no-parse) printf "bionic's line, left: the file does not parse as it is (%s -n), so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
+    *)        printf "bionic's line, left: bionic could not stage a copy to check\n" ;;
+  esac
 }
 
 # `3` → `line 3`; `3,7` → `lines 3, 7`.
