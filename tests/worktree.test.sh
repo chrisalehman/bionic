@@ -2712,6 +2712,136 @@ expect_match "(p9) why=head names the stamp file and the head it looked for" \
   "spawn-worktree: REFUSED reason=stale-proof why=head stamp_head=0000000000000000000000000000000000000000 head=${LP9_H} stamps=$(stamp_file "$LP9") — *" \
   "$(worktree_land "$LP9" wave/fixture)"
 
+section "§LAND-RED: a row that declared its red at dispatch lands with exactly that suite red (wave-27 T31; REQ-14 AC-14.1; D23)"
+#
+# A brief may declare `Lands-red: <suite> until <token>` with `Red-evidence: <path>`; the dispatch
+# wall records both on the launch row (`lands_red=`, `red_evidence=`). In `land`'s stale-proof rule a
+# red newest run at the head is then accepted for EXACTLY that suite, when the evidence file exists
+# and holds a line `head: <the tree's head>` and every other suite stamped at the head is green. The
+# LANDED line carries `landed-red=<suite>` after `removed=` and before `proofs=`, and the landing
+# record copies the red stamp line like any other.
+#
+# FIXTURE FIDELITY. Every land goes through `worktree_land_for_session`, the path both real callers
+# take, on a plan bound as bind_plan binds one. The tree's owner is written by the production writer
+# of the workspace record (`worktree_record_workspace`), its roster rows by the production writer of
+# the row (`roster_row`, through roster_row_fixture), and its stamps in the shim's shape (lp_stamp).
+LR="$(new_repo "$TMP/land-red")"
+LR_SID="land-red-session-01"
+LR_PLAN="$LR/.bionic/docs/plans/epic-x/wave-lr.plan.md"
+LR_EV="$LR/.bionic/docs/record/wave-lr/T9-red.md"
+mkdir -p "${LR_PLAN%/*}" "$LR/.bionic/tmp" "${LR_EV%/*}"
+printf -- '---\nworking-branch: wave/fixture\n---\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n| id | step | kind | task | worktree | status |\n|---|---|---|---|---|---|\n| T9 | 4 | build | nine | .worktrees/27-T9 | active |\n' > "$LR_PLAN"
+printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LR_PLAN" > "$LR/.bionic/tmp/engaged-${LR_SID}.state"
+LR_ROSTER="$LR/.bionic/tmp/roster-${LR_SID}.state"
+lr_tree() {  # <branch> <dir> <agent name> -> a tree a commit ahead, its owner recorded, its record link
+  local d="$LR/.worktrees/$2"
+  git -C "$LR" worktree add --quiet -b "$1" "$d" HEAD >/dev/null 2>&1
+  echo "$RANDOM$RANDOM" >> "$d/$2.txt"; git -C "$d" add -A >/dev/null 2>&1; git -C "$d" commit --quiet -m "$1 work"
+  ln -s "$LR/.bionic" "$d/.bionic"
+  worktree_record_workspace "$LR" "$LR_SID" "$3" "$(cd "$d" && pwd -P)" "$1" "$(git -C "$LR" rev-parse HEAD)" >/dev/null
+  printf '%s' "$(cd "$d" && pwd -P)"
+}
+lr_launch() {  # <agent name> [<extra key=value>...] — the dispatch wall's launch row
+  local n="$1"; shift
+  roster_row_fixture status=intended "session=${LR_SID}" "name=$n" agent_id= subagent_type=bionic:implementor \
+    "suites_allowed=widget.test.sh other.test.sh" "$@" >> "$LR_ROSTER"
+}
+lr_stamp() {  # <tree> <rc> <suite> — one stamp line at the tree's head, the shim's shape
+  printf 'stamp/v1|head=%s|dirty=0|rc=%s|at=2026-10-05T01:02:03Z|suites=%s|cmd=bash tests/%s\n' \
+    "$(git -C "$1" rev-parse HEAD)" "$2" "$3" "$3" >> "$(stamp_file "$1")"
+}
+LR_DECL=("lands_red=widget.test.sh until approval:release" "red_evidence=.bionic/docs/record/wave-lr/T9-red.md")
+
+# (r1) THE WORKED ANSWER: widget red, other green, evidence naming the head -> LANDED, landed-red=.
+LR1="$(lr_tree wt/27-T9 27-T9 w27-T9)"; LR1_H="$(git -C "$LR1" rev-parse HEAD)"
+lr_launch w27-T9 "${LR_DECL[@]}"
+lr_stamp "$LR1" 1 widget.test.sh; lr_stamp "$LR1" 0 other.test.sh
+printf '# why T9 is red\nhead: %s\nthe owner step is outside the run\n' "$LR1_H" > "$LR_EV"
+expect_eq "(r1) fixture: the workspace record answers the tree for its agent" "$LR1" "$(workspace_for_name "$LR" "$LR_SID" w27-T9)"
+OUTLR1="$(worktree_land_for_session "$LR1" "$LR" "$LR_SID")"; RCLR1=$?
+LR1_M="$(git -C "$LR" rev-parse refs/heads/wave/fixture)"
+LR1_AT="$(printf '%s' "$OUTLR1" | sed -n 's/.* landed-red-at=\([^ ]*\) .*/\1/p')"
+expect_match "(r1a) the LANDED line's landed-red-at= is UTC, YYYY-MM-DDTHH:MM:SSZ" "$LP_ISO" "$LR1_AT"
+expect_eq "(r1b) AC-14.1 the declared red lands: the LANDED line carries landed-red= and landed-red-at= after removed= and before proofs=" \
+  "spawn-worktree: LANDED branch=wt/27-T9 onto=wave/fixture checkout=${LR} merge=${LR1_M} removed=${LR1} landed-red=widget.test.sh landed-red-at=${LR1_AT} proofs=${LR}/.bionic/docs/record/wave-lr/landing-proofs.log" "$OUTLR1"
+expect_contains "(r1b2) …the same instant the landing record's header carries in at=" \
+  "landed: row=T9 branch=wt/27-T9 head=${LR1_H} merge=${LR1_M} at=${LR1_AT}" "$(cat "$LR/.bionic/docs/record/wave-lr/landing-proofs.log" 2>/dev/null)"
+expect_eq "(r1c) …exit 0" "0" "$RCLR1"
+expect_contains "(r1d) …and the landing record copies the red stamp line like any other" \
+  "|rc=1|at=2026-10-05T01:02:03Z|suites=widget.test.sh|" "$(cat "$LR/.bionic/docs/record/wave-lr/landing-proofs.log" 2>/dev/null)"
+
+section "§LAND-RED-NO: an undeclared red, a second red, or a declaration not carried from dispatch is refused (wave-27 T31; REQ-14 AC-14.2; D23)"
+#
+# The same fixture. A second suite red at the head is refused as an undeclared red is today
+# (`stale-proof why=red`); evidence that is missing or names another head is refused, naming the file
+# and the head it wanted; a row whose launch line carries no declaration is refused as today, and so
+# is one whose keys reached the roster on a later row (by amend, which cannot write them, or by hand):
+# the dispatch wall is the keys' one writer, and land reads the launch line alone.
+lr_refused() {  # <label> <tree> <want, a glob> — the land refuses, the target does not move, the tree stays
+  local before out rc; before="$(refs_of "$LR")"
+  out="$(worktree_land_for_session "$2" "$LR" "$LR_SID")"; rc=$?
+  expect_match "$1" "$3" "$out"
+  expect_eq "$1 — …exit 2, no ref moved, the tree stands" "2 yes yes" \
+    "$rc $([ "$(refs_of "$LR")" = "$before" ] && echo yes || echo no) $([ -d "$2" ] && echo yes || echo no)"
+}
+# (n1) a SECOND suite red at the head.
+LN1="$(lr_tree wt/27-N1 27-N1 w27-N1)"; LN1_H="$(git -C "$LN1" rev-parse HEAD)"
+lr_launch w27-N1 "${LR_DECL[@]}"
+lr_stamp "$LN1" 1 widget.test.sh; lr_stamp "$LN1" 1 other.test.sh
+printf 'head: %s\n' "$LN1_H" > "$LR_EV"
+lr_refused "(n1) AC-14.2 a second suite also red is refused as an undeclared red, naming it" "$LN1" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=other.test.sh head=${LN1_H} — *"
+# (n2) the evidence file missing.
+LN2="$(lr_tree wt/27-N2 27-N2 w27-N2)"; LN2_H="$(git -C "$LN2" rev-parse HEAD)"
+lr_launch w27-N2 "${LR_DECL[@]}"
+lr_stamp "$LN2" 1 widget.test.sh; lr_stamp "$LN2" 0 other.test.sh
+rm -f "$LR_EV"
+lr_refused "(n2) the evidence file missing is refused, naming the file and the head it wanted" "$LN2" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red-evidence suite=widget.test.sh head=${LN2_H} evidence=${LR_EV} — *missing*"
+# (n3) the evidence naming another commit.
+printf 'head: %s\n' "$LR1_H" > "$LR_EV"
+lr_refused "(n3) evidence whose head: names another commit is refused, naming the file, the head it wanted and the one it found" "$LN2" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red-evidence suite=widget.test.sh head=${LN2_H} evidence=${LR_EV} found=${LR1_H} — *"
+printf 'head: %s\n' "$LN2_H" > "$LR_EV"
+expect_match "(n3b) control: the same tree with the evidence naming its head lands" \
+  "spawn-worktree: LANDED branch=wt/27-N2 * landed-red=widget.test.sh landed-red-at=* proofs=*" "$(worktree_land_for_session "$LN2" "$LR" "$LR_SID")"
+# (n4) the same tree shape with NO declaration on its launch row.
+LN4="$(lr_tree wt/27-N4 27-N4 w27-N4)"; LN4_H="$(git -C "$LN4" rev-parse HEAD)"
+lr_launch w27-N4
+lr_stamp "$LN4" 1 widget.test.sh; lr_stamp "$LN4" 0 other.test.sh
+printf 'head: %s\n' "$LN4_H" > "$LR_EV"
+lr_refused "(n4) AC-14.2 no declaration on the launch row: refused as today" "$LN4" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=widget.test.sh head=${LN4_H} — *"
+# (n5) the keys on a row written after the launch: an amended copy, then a later started row.
+lr_launch w27-N4 "amended=2026-10-05T00:00:00Z widen" "${LR_DECL[@]}"
+roster_row_fixture status=identified "session=${LR_SID}" name=w27-N4 agent_id=a-n4 "${LR_DECL[@]}" >> "$LR_ROSTER"
+lr_refused "(n5) AC-14.2 a declaration that reached the roster after the launch line is not honoured" "$LN4" \
+  "spawn-worktree: REFUSED reason=stale-proof why=red rc=1 suite=widget.test.sh head=${LN4_H} — *"
+expect_contains "(n5b) fixture: the roster does carry the keys, on the later rows" \
+  "|name=w27-N4|" "$(grep -F 'lands_red=widget.test.sh' "$LR_ROSTER")"
+
+section "§LAND-JUDGED: no landing after the run was judged for integration (wave-27 T31; review pass 25 F3)"
+#
+# `current 8` judges the working head; a landing after it would move the working branch past the
+# head that was judged, with nothing judging it again. So `land` refuses while the bound plan's
+# `current:` is 8 or later, its letter dropped: `reason=past-judgment why=current-<value>`, nothing
+# merged, nothing removed. At `current: 7` it lands; with no bound plan it lands as today.
+# FIXTURE FIDELITY: §LAND-RED's repository and bound plan, its `current:` line rewritten in place.
+lj_current() { sed "s/^current: .*/current: $1/" "$LR_PLAN" > "$LR_PLAN.tmp" && mv "$LR_PLAN.tmp" "$LR_PLAN"; }
+LJ1="$(lr_tree wt/27-J1 27-J1 w27-J1)"; lr_launch w27-J1; lr_stamp "$LJ1" 0 widget.test.sh
+for lj in 8 8a 8b; do
+  lj_current "$lj"
+  lr_refused "(j-$lj) F3 at current: $lj a ready tree is refused past-judgment" "$LJ1" \
+    "spawn-worktree: REFUSED reason=past-judgment why=current-${lj} * — *judged for integration*"
+done
+lj_current 7
+expect_match "(j-7) …at current: 7 the same tree lands" \
+  "spawn-worktree: LANDED branch=wt/27-J1 onto=wave/fixture *" "$(worktree_land_for_session "$LJ1" "$LR" "$LR_SID")"
+lj_current 8
+LJ2="$(lr_tree wt/27-J2 27-J2 w27-J2)"; lr_stamp "$LJ2" 0 widget.test.sh
+expect_match "(j-none) …and a land with no bound plan lands as today, whatever a plan on disk says" \
+  "spawn-worktree: LANDED branch=wt/27-J2 onto=wave/fixture * proofs=none" "$(worktree_land "$LJ2" wave/fixture)"
+lj_current 4
 section "§LAND-RECORD-HARDENING: the record is appended under a lock and read as a regular file (wave-27 T50; review pass 27 S1, N1, N2, N4)"
 #
 # S1. Appends to the record are serialized by a lock directory beside it (`<record>.lock`, made
@@ -3043,7 +3173,7 @@ OUTLN1="$(worktree_land "$LN1" wave/fixture 2>/dev/null)"; RCLN1=$?
 LN1_NOW="$(git -C "$LN" rev-parse --short HEAD)"
 expect_eq "(T58-n5-pre) fixture: the check made a commit on the target" "made by the check" "$(git -C "$LN" log -1 --format=%s)"
 expect_match "(T58-n5) a check that commits on the target refuses the landing check-dirtied, naming both short ids" \
-  "spawn-worktree: REFUSED reason=check-dirtied why=release-check checkout=${LN} head_was=${LN1_WAS} head_now=${LN1_NOW} branch=chk-commit — *moved the target checkout's HEAD*" "$OUTLN1"
+  "spawn-worktree: REFUSED reason=check-dirtied why=release-check checkout=${LN} head_was=${LN1_WAS} head_now=${LN1_NOW} branch=chk-commit — the target checkout's HEAD moved from ${LN1_WAS} to ${LN1_NOW} while the project's declared release-check (*) ran, by the check or by another landing into wave/fixture *" "$OUTLN1"
 expect_eq "(T58-n5b) …exit 2" "2" "$RCLN1"
 expect_false "(T58-n5c) …nothing is merged: the tree's head is not on the target" \
   git -C "$LN" merge-base --is-ancestor "$LN1_H" refs/heads/wave/fixture
@@ -3073,5 +3203,205 @@ echo none > "$LN_MODE"
 git -C "$LN2" checkout --quiet -- file.txt
 expect_match "(T58-n5j) the arm discriminates: the piece lands once it is clean and the check changes nothing" \
   "spawn-worktree: LANDED branch=chk-piece onto=wave/fixture *" "$(worktree_land "$LN2" wave/fixture 2>/dev/null)"
+
+section "§LAND-LOCK-ONE-HOLDER: a stale lock is taken over by one rename; the cleanup never takes over; the proof does not refuse a busy lock; a moved head is not blamed on the check (wave-27 T63; review pass 43)"
+#
+# B1. A dead holder's lock is renamed aside to `<record>.lock.stale.<pid>` by ONE taker (a rename one
+# process wins), judged again on the renamed directory, and only then removed and a fresh lock made;
+# a renamed directory whose holder turns out to be live is renamed home. A holder writes and releases
+# only while `<record>.lock/pid` is its own line. The refused landing's cleanup takes nothing over.
+# B2. The proof looks at the lock's path once; "something else" is looked at again after a pause,
+# and only a second "something else" refuses. S1. A head moved while the check ran is reported as
+# that, by the check or by another landing, with nothing merged and "land again".
+#
+# FIXTURE FIDELITY. The race rows run the real `worktree_land`, `_wt_proofs_prove`, `_wt_proofs_lock`
+# and `_wt_proofs_append` in child shells (review pass 43 `q10-stale.sh`, `q1b-which.sh`); only
+# `_wt_land` is a stub that proves and is refused. The dead holder is a pid that has exited. S1 is two
+# whole landings through `worktree_land` into one target (review pass 43 `q6-two.sh`).
+true & T63_DEAD=$!; wait "$T63_DEAD"
+expect_false "(T63-pre) fixture: the planted holder's pid is dead" kill -0 "$T63_DEAD"
+
+# (b1) THE REVIEW'S q10 SHAPE: a dead holder's lock; landing A proves (creating the record) and is
+# refused; landing B appends the instant A's cleanup starts. B's block is kept in every one of 300.
+T63_REC="$TMP/t63-stale/landing-proofs.log"; mkdir -p "${T63_REC%/*}"
+cat > "$TMP/t63-a.sh" <<'T63_EOF'
+. "$1" || exit 9; REC="$2"
+_wt_land() { _wt_proofs_prove "$REC" || return 9; : > "$REC.go"; return 2; }
+worktree_land x y z >/dev/null 2>&1; echo "rc=$?"
+T63_EOF
+cat > "$TMP/t63-b.sh" <<'T63_EOF'
+. "$1" || exit 9; REC="$2"
+while [ ! -e "$REC.go" ]; do :; done
+_wt_proofs_append "$REC" T2 wt/b bbbb mmmm "stamp/v1|head=bbbb|rc=0" || echo FAILED
+T63_EOF
+T63_KEPT=0; T63_LOST=0; T63_REF=0; T63_BFAIL=0; T63_LEFT=0
+for _k in $(seq 1 300); do
+  rm -f "$T63_REC" "$T63_REC.go"; rm -rf "$T63_REC.lock"; mkdir "$T63_REC.lock"; echo "$T63_DEAD" > "$T63_REC.lock/pid"
+  bash "$TMP/t63-b.sh" "$LIB" "$T63_REC" > "$TMP/t63-b.out" 2>&1 & _pb=$!
+  bash "$TMP/t63-a.sh" "$LIB" "$T63_REC" > "$TMP/t63-a.out" 2>&1 & _pa=$!
+  wait "$_pa" "$_pb"
+  [ "$(cat "$TMP/t63-a.out")" = "rc=2" ] && T63_REF=$((T63_REF + 1))
+  [ -s "$TMP/t63-b.out" ] && T63_BFAIL=$((T63_BFAIL + 1))
+  if [ -f "$T63_REC" ] && grep -q '^landed: row=T2 ' "$T63_REC"; then T63_KEPT=$((T63_KEPT + 1)); else T63_LOST=$((T63_LOST + 1)); fi
+  for _x in "$T63_REC".lock*; do [ -e "$_x" ] && T63_LEFT=$((T63_LEFT + 1)); done
+done
+expect_eq "(T63-b1-pre) fixture: landing A was refused in every trial, and B never failed its append" "300|0" "$T63_REF|$T63_BFAIL"
+expect_eq "(T63-b1) 300 trials of a dead holder's lock, a refused landing's cleanup and an append: B's block is kept in every one" \
+  "kept=300 lost=0" "kept=$T63_KEPT lost=$T63_LOST"
+expect_eq "(T63-b1b) …and no lock or renamed-aside directory is left after any trial" "0" "$T63_LEFT"
+
+# (b2) FOUR TAKERS MEET ONE DEAD HOLDER'S LOCK, 200 trials. Each holds the real lock, writes `enter`
+# and, 10 ms later, `leave` to a shared log, then appends a block of twenty stamp lines through the
+# real append. Two holders at once show as two `enter` lines without a `leave` between them.
+T63_R4="$TMP/t63-four/landing-proofs.log"; mkdir -p "${T63_R4%/*}"
+cat > "$TMP/t63-take.sh" <<'T63_EOF'
+. "$1" || exit 9; REC="$2"; n="$3"
+while [ ! -e "$REC.go" ]; do :; done
+if _wt_proofs_lock "$REC"; then
+  echo "enter $n" >> "$REC.holders"; sleep 0.01; echo "leave $n" >> "$REC.holders"
+  if declare -f _wt_proofs_unlock >/dev/null; then _wt_proofs_unlock "$REC"; else rm -rf "${REC}.lock"; fi
+else echo "nolock $n" >> "$REC.holders"; fi
+lines=""; for i in $(seq 1 20); do lines="${lines:+${lines}
+}stamp/v1|n=${n}|i=${i}"; done
+_wt_proofs_append "$REC" "T$n" "wt/$n" hhhh mmmm "$lines" || echo "FAILED $n"
+T63_EOF
+T63_DOUBLE=0; T63_BAD=0; T63_LEFT=0; T63_FAIL=0
+for _k in $(seq 1 200); do
+  rm -f "$T63_R4" "$T63_R4.go" "$T63_R4.holders"; rm -rf "$T63_R4".lock*; mkdir "$T63_R4.lock"; echo "$T63_DEAD" > "$T63_R4.lock/pid"
+  for _n in 1 2 3 4; do bash "$TMP/t63-take.sh" "$LIB" "$T63_R4" "$_n" > "$TMP/t63-take$_n.out" 2>&1 & done
+  : > "$T63_R4.go"; wait
+  [ "$(awk '/^enter/ { if (held) d++; held = 1 } /^leave/ { held = 0 } END { print d + 0 }' "$T63_R4.holders")" = 0 ] || T63_DOUBLE=$((T63_DOUBLE + 1))
+  [ "$(grep -c '^enter' "$T63_R4.holders")" = 4 ] || T63_DOUBLE=$((T63_DOUBLE + 1))
+  [ "$(awk '/^landed: row=T/ { if (cur != "" && c != 20) b++; cur = substr($2, 6); c = 0; h++; next }
+    { split($0, f, "|"); if (f[2] != "n=" cur) b++; c++ } END { if (c != 20) b++; print (h == 4 ? b + 0 : "h" h) }' "$T63_R4")" = 0 ] || T63_BAD=$((T63_BAD + 1))
+  cat "$TMP"/t63-take?.out | grep -q . && T63_FAIL=$((T63_FAIL + 1))
+  for _x in "$T63_R4".lock*; do [ -e "$_x" ] && T63_LEFT=$((T63_LEFT + 1)); done
+done
+expect_eq "(T63-b2) 200 trials of four takers at one dead holder's lock: never two holders, every taker held it once" "0" "$T63_DOUBLE"
+expect_eq "(T63-b2b) …four blocks of twenty lines each, none interleaved, every append returned 0" "0|0" "$T63_BAD|$T63_FAIL"
+expect_eq "(T63-b2c) …and no lock or renamed-aside directory is left" "0" "$T63_LEFT"
+
+# (b6) A DEAD `.taking`: a landing killed mid-takeover leaves `<lock>.taking` holding `h.<its pid>`,
+# its renamed-aside directory `<lock>.stale.<its pid>`, and a dead holder's lock. Four takers meet it,
+# 200 trials: exactly one unlinks the dead file (an unlink one process wins) and alone `rmdir`s the
+# now-empty `.taking` and removes the dead taker's renamed directory; no two ever hold the record's
+# lock, all four blocks are written, nothing is left. The loop stops at the first bad trial.
+T63_B6_N=0; T63_B6_BAD=0
+for _k in $(seq 1 200); do
+  rm -f "$T63_R4" "$T63_R4.go" "$T63_R4.holders"; rm -rf "$T63_R4".lock*
+  mkdir "$T63_R4.lock" "$T63_R4.lock.taking" "$T63_R4.lock.stale.$T63_DEAD"; echo "$T63_DEAD" > "$T63_R4.lock/pid"
+  : > "$T63_R4.lock.taking/h.$T63_DEAD"; echo "$T63_DEAD x" > "$T63_R4.lock.stale.$T63_DEAD/pid"
+  for _n in 1 2 3 4; do bash "$TMP/t63-take.sh" "$LIB" "$T63_R4" "$_n" > "$TMP/t63-take$_n.out" 2>&1 & done
+  : > "$T63_R4.go"; wait
+  T63_B6_N=$((T63_B6_N + 1))
+  _bad=""
+  [ "$(awk '/^enter/ { if (held) d++; held = 1 } /^leave/ { held = 0 } END { print d + 0 }' "$T63_R4.holders")|$(grep -c '^enter' "$T63_R4.holders")" = "0|4" ] || _bad="holders"
+  [ "$(grep -c '^landed: row=T' "$T63_R4" 2>/dev/null)" = 4 ] || _bad="${_bad} blocks"
+  cat "$TMP"/t63-take?.out | grep -q . && _bad="${_bad} failed"
+  for _x in "$T63_R4".lock*; do [ -e "$_x" ] && _bad="${_bad} left:${_x##*/}"; done
+  if [ -n "$_bad" ]; then T63_B6_BAD=$((T63_B6_BAD + 1)); T63_B6_WHY="$_bad"; break; fi
+done
+expect_eq "(T63-b6) 200 trials of four takers at a dead .taking: one frees it, never two holders, four blocks, nothing left (${T63_B6_WHY:-})" \
+  "200|0" "$T63_B6_N|$T63_B6_BAD"
+
+# (b6b) AN EMPTY `.taking` (a taker killed between its mkdir and its file) is freed by one `rmdir` once
+# older than two seconds; a held one (its holder's file in it) is never removed by an `rmdir`.
+rm -f "$T63_R4"; rm -rf "$T63_R4".lock*; mkdir "$T63_R4.lock" "$T63_R4.lock.taking"; echo "$T63_DEAD" > "$T63_R4.lock/pid"
+touch -t 202001010000 "$T63_R4.lock.taking"
+expect_eq "(T63-b6b) an empty .taking past two seconds: the append takes the dead lock over, nothing left" "0|1|" \
+  "$(_wt_proofs_append "$T63_R4" T6 wt/f ffff mmmm "stamp/v1|f"; echo "$?")|$(grep -c '^landed: row=T6 ' "$T63_R4")|$(ls -d "$T63_R4".lock* 2>/dev/null)"
+sleep 120 & T63_LIVE=$!
+mkdir "$T63_R4.lock.taking"; : > "$T63_R4.lock.taking/h.$T63_LIVE"; touch -t 202001010000 "$T63_R4.lock.taking"
+mkdir "$T63_R4.lock"; echo "$T63_DEAD" > "$T63_R4.lock/pid"
+T63_HELD="$(_WT_PROOFS_LOCK_WAIT=1; _wt_proofs_append "$T63_R4" T7 wt/g gggg mmmm "stamp/v1|g"; echo "$?")"
+expect_eq "(T63-b6c) a .taking whose holder lives, however old, is left: the append waits and fails, the .taking kept" \
+  "1|yes" "$T63_HELD|$([ -e "$T63_R4.lock.taking/h.$T63_LIVE" ] && echo yes)"
+kill "$T63_LIVE" 2>/dev/null; wait "$T63_LIVE" 2>/dev/null; rm -rf "$T63_R4".lock*
+
+# (b3) THE CLEANUP TAKES NOTHING OVER: with a dead holder's lock in its way, the refused landing leaves
+# the empty record its proof made, and the dead lock where it was. The arm: an append takes it over.
+rm -f "$T63_REC" "$T63_REC.go"; rm -rf "$T63_REC".lock*; mkdir "$T63_REC.lock"; echo "$T63_DEAD" > "$T63_REC.lock/pid"
+expect_eq "(T63-b3-pre) fixture: the stub landing is refused" "rc=2" "$(bash "$TMP/t63-a.sh" "$LIB" "$T63_REC" 2>&1)"
+expect_true "(T63-b3) a dead holder's lock: the refused landing's cleanup leaves the empty record" test -f "$T63_REC" -a ! -s "$T63_REC"
+expect_eq "(T63-b3b) …and the dead holder's lock untouched" "$T63_DEAD" "$(cat "$T63_REC.lock/pid" 2>/dev/null)"
+expect_eq "(T63-b3c) the arm: an append takes the same lock over and writes, leaving no lock" "0|1|no" \
+  "$(_wt_proofs_append "$T63_REC" T3 wt/c cccc mmmm "stamp/v1|c"; echo "$?")|$(grep -c '^landed: row=T3 ' "$T63_REC")|$([ -e "$T63_REC.lock" ] && echo yes || echo no)"
+
+# (b4) A LOCK RETAKEN SINCE THE LOOK IS NOT TAKEN OVER. The taker judged a dead holder's line; by its
+# takeover a live holder has the lock (a faster taker made it). Holding `<lock>.taking`, the taker
+# reads the line again: another line, so that directory stays where it is, the same directory, and
+# nothing is renamed aside or left. The arm: the line judged is the line found, and it is taken over.
+T63_LK="$TMP/t63-home/landing-proofs.log.lock"; mkdir -p "${T63_LK%/*}"
+sleep 120 & T63_LIVE=$!
+mkdir "$T63_LK"; echo "$T63_LIVE 1" > "$T63_LK/pid"; : > "$T63_LK/mark"
+_wt_proofs_takeover "$T63_LK" "$T63_DEAD"; T63_RC=$?
+expect_eq "(T63-b4) a lock whose line is not the one judged stale is not taken: the same directory, its line, nothing aside" \
+  "1|$T63_LIVE 1|yes|no" "$T63_RC|$(cat "$T63_LK/pid" 2>/dev/null)|$([ -e "$T63_LK/mark" ] && echo yes)|$(ls -d "$T63_LK".stale.* 2>/dev/null | grep -c . | sed 's/^0$/no/')"
+_wt_proofs_takeover "$T63_LK" "$T63_LIVE 1"; T63_RC=$?
+expect_eq "(T63-b4b) the arm: the line judged is the line found, so it is taken over: the path free, nothing aside" \
+  "0|no|no" "$T63_RC|$([ -e "$T63_LK" ] && echo yes || echo no)|$(ls -d "$T63_LK".stale.* 2>/dev/null | grep -c . | sed 's/^0$/no/')"
+kill "$T63_LIVE" 2>/dev/null; wait "$T63_LIVE" 2>/dev/null
+
+# (b5) A HOLDER RELEASES ONLY ITS OWN LOCK, and a holder whose lock was lost writes nothing. A lock
+# whose line is another's is left; one the caller took is removed. An append whose every take ends with
+# another's line in the lock (a stub lock) returns 1 with the record untouched.
+T63_U="$TMP/t63-unlock.log"; mkdir "$T63_U.lock"; echo "$T63_DEAD other" > "$T63_U.lock/pid"
+_wt_proofs_unlock "$T63_U"
+expect_eq "(T63-b5) a lock whose line is not the caller's is not removed by its release" "$T63_DEAD other" "$(cat "$T63_U.lock/pid" 2>/dev/null)"
+rm -rf "$T63_U.lock"
+_wt_proofs_lock "$T63_U"; _wt_proofs_unlock "$T63_U"
+expect_false "(T63-b5b) the arm: the caller's own lock is removed by its release" test -e "$T63_U.lock"
+echo earlier > "$T63_U"
+T63_LOST_OUT="$(_WT_PROOFS_LOCK_WAIT=1; _wt_proofs_lock() { mkdir "${1}.lock" 2>/dev/null; echo "$T63_DEAD stolen" > "${1}.lock/pid"; return 0; }
+  _wt_proofs_append "$T63_U" T5 wt/e eeee mmmm "stamp/v1|e"; echo "rc=$?")"
+expect_eq "(T63-b5c) a holder that finds another's line in the lock writes nothing: rc 1, the record untouched" "rc=1|earlier" "$T63_LOST_OUT|$(cat "$T63_U")"
+rm -rf "$T63_U.lock"
+
+# (p) THE PROOF DOES NOT REFUSE A BUSY LOCK: 40,000 proofs while an append churns (each take and
+# release of the lock) refuse none. A regular file at the lock's path that is gone 20 ms later is
+# not refused either; one that stays is (T58-s2-lock-file).
+T63_P="$TMP/t63-prove/landing-proofs.log"; mkdir -p "${T63_P%/*}"; : > "$T63_P"
+( while [ ! -e "$T63_P.stop" ]; do _wt_proofs_append "$T63_P" T1 wt/c cccc mmmm "stamp/v1|x"; done ) & T63_CH=$!
+T63_PREF=0
+for _i in $(seq 1 40000); do _wt_proofs_prove "$T63_P" || T63_PREF=$((T63_PREF + 1)); done
+: > "$T63_P.stop"; wait "$T63_CH"
+expect_true "(T63-p-pre) fixture: the churner appended while the proofs ran" test "$(grep -c '^landed:' "$T63_P")" -gt 100
+expect_eq "(T63-p) 40,000 proofs against a churning append: none refused" "0" "$T63_PREF"
+: > "$T63_P.lock"; ( sleep 0.02; rm -f "$T63_P.lock" ) & T63_RMP=$!
+_wt_proofs_prove "$T63_P"; T63_RC=$?; wait "$T63_RMP"
+expect_eq "(T63-p2) a file at the lock's path gone 20 ms later is not refused: the proof looks again" "0" "$T63_RC"
+: > "$T63_P.lock"
+expect_false "(T63-p2b) the arm: a file that stays at the lock's path is refused" _wt_proofs_prove "$T63_P"
+rm -f "$T63_P.lock"
+
+# (s1) WHO MOVED THE HEAD. Landing A's check takes three seconds; landing B lands into the same target
+# meanwhile. A is refused check-dirtied with the line the rule gives: the head moved while the check
+# ran, by the check or by another landing, both short ids, nothing merged, land again, and no "put
+# back what it changed". Run again, A lands.
+echo slow > "$LN_MODE"
+cat > "$TMP/ln-check.sh" <<LN_EOF
+#!/bin/bash
+case "\$(cat "$LN_MODE")" in
+  commit) echo c >> file.txt; git commit --quiet -am "made by the check" ;;
+  piece) echo w >> "\$BIONIC_CHECK_TREE/file.txt" ;;
+  fail-dirty) echo x >> file.txt; exit 1 ;;
+  slow) case "\$BIONIC_CHECK_TREE" in */chk-slow) sleep 3 ;; esac ;;
+esac
+exit 0
+LN_EOF
+LN4="$(ln_tree chk-slow)"; LN5="$(ln_tree chk-fast)"; LN4_H="$(git -C "$LN4" rev-parse HEAD)"
+LN4_WAS="$(git -C "$LN" rev-parse --short HEAD)"
+( worktree_land "$LN4" wave/fixture > "$TMP/ln4.out" 2>/dev/null; echo "rc=$?" >> "$TMP/ln4.out" ) & T63_PA=$!
+sleep 1
+OUTLN5="$(worktree_land "$LN5" wave/fixture 2>/dev/null)"
+wait "$T63_PA"
+LN4_NOW="$(git -C "$LN" rev-parse --short HEAD)"; OUTLN4="$(head -n 1 "$TMP/ln4.out")"
+expect_match "(T63-s1-pre) fixture: landing B landed into the target while A's check ran" "spawn-worktree: LANDED branch=chk-fast onto=wave/fixture *" "$OUTLN5"
+expect_match "(T63-s1) A is refused: the head moved while the check ran, by the check or by another landing; nothing merged; land again" \
+  "spawn-worktree: REFUSED reason=check-dirtied why=release-check checkout=${LN} head_was=${LN4_WAS} head_now=${LN4_NOW} branch=chk-slow — the target checkout's HEAD moved from ${LN4_WAS} to ${LN4_NOW} while the project's declared release-check (bash ${TMP}/ln-check.sh) ran, by the check or by another landing into wave/fixture (git -C ${LN} reflog -2), and nothing is merged; if the move is another landing's merge, land again*" "$OUTLN4"
+expect_eq "(T63-s1b) …exit 2, and the line does not say to put back what it changed" "rc=2|0" "$(tail -n 1 "$TMP/ln4.out")|$(printf '%s' "$OUTLN4" | grep -c 'put back what it changed')"
+expect_match "(T63-s1c) the arm: A run again lands" "spawn-worktree: LANDED branch=chk-slow onto=wave/fixture *" "$(worktree_land "$LN4" wave/fixture 2>/dev/null)"
+expect_true "(T63-s1d) …and its head is now on the target" git -C "$LN" merge-base --is-ancestor "$LN4_H" refs/heads/wave/fixture
+echo none > "$LN_MODE"
 
 finish

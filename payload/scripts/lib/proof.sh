@@ -220,15 +220,16 @@ proof_head() {
 #          or one that names no commit here is refused, naming the frontmatter line to add
 #          (wave-27 T45; review pass 13 F1; T14, review pass 20 F1).
 #   task   whichever of the two the evidence carries, the run header first (A-T14.9).
-#   check  the release-check verb's log (wave-27 T16; D12): its FIRST line is `head=<40-hex> rc=0`,
-#          which the verb writes only when the declared command passed, and <sha> must be the
-#          checkout's HEAD: the command ran in that checkout at that head.
+#   check  the release-check verb's log (wave-27 T16; D12): its FIRST line after any `check-changed:
+#          <path>` lines (T31; review pass 22 B1) is `head=<40-hex> rc=0`, which says the declared
+#          command passed, and <sha> must be the checkout's HEAD: the command ran in that checkout
+#          at that head.
 proof_attested() {
   local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster
   head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
   if [ "$kind" = check ]; then
-    sha="$(awk 'NR == 1 { if ($0 ~ /^head=[0-9a-f]+ rc=0$/) { sub(/^head=/, ""); sub(/ rc=0$/, ""); print } exit }' "$ev" 2>/dev/null)"
+    sha="$(awk '/^check-changed: / { next } { if ($0 ~ /^head=[0-9a-f]+ rc=0$/) { sub(/^head=/, ""); sub(/ rc=0$/, ""); print } exit }' "$ev" 2>/dev/null)"
     if [ "${#sha}" -ne 40 ]; then
       printf 'the evidence %s does not open with head=<40-hex> rc=0, the line release-check writes on a pass; run release-check' "$ev"; return 1
     fi
@@ -333,7 +334,7 @@ proof_attested() {
     fi
     if [ -n "$plan" ] && [ "$kind" = review ]; then
       since="$(proof_last "$plan" review "$q")"; what="the last ${q:-review} proof"
-      [ -n "$since" ] || { since="$(proof_plan_base "$plan")"; what="the plan's base"; }
+      [ -n "$since" ] || { since="$(proof_plan_base "$plan" "$co")"; what="the plan's base"; }
       sh=""
       if [ -n "$since" ] && { [ "$what" != "the plan's base" ] || proof_base_id "$since"; }; then
         sh="$(git -C "$co" rev-parse --verify -q "$since^{commit}" 2>/dev/null)"
@@ -362,17 +363,30 @@ proof_attested() {
   return 1
 }
 
-# proof_plan_base <plan> -> the commit the plan's run started from, as written, or nothing. The places
+# proof_plan_base <plan> [<repo>] -> the commit the plan's run started from, or nothing. The places
 # are read in this order: the first `base-sha:` inside its unfenced `## SDLC State` (the Step-4 block
-# `current 4` fills), then the frontmatter key of the same name; the base is the first whose value is
+# `current 4` fills), then the frontmatter key of the same name. The base is the first value that is
 # a commit id, 7 to 40 hex (`proof_base_id`), so an empty or placeholder value in one place never
-# hides a real one in the other (wave-27 T14; review pass 20 F4). With no commit id in either, the
-# first non-empty value is printed as written, so a refusal can name it. The first review proof
-# starts at or before the base (K2-F2).
+# hides a real one in the other (wave-27 T14; review pass 20 F4). With a <repo>, it is the first such
+# value that ALSO names a commit there: a hex word that names none (`deadbeef`, forty zeros, a base
+# rebased away) is passed over as a non-hex word is (T31; review pass 25 F2). Every caller holds a
+# repository and passes it (proof_attested, facts_state, proof-add, release-check); the form with no
+# <repo> reads text alone, for a caller that may not read git. With no place answering, the first
+# non-empty value is printed as written, so a refusal can name it. The first review proof starts at
+# or before the base (K2-F2).
 proof_plan_base() {
+  local c first="" got=""
   [ -f "$1" ] || return 0
-  awk '
-    function id(v) { return (v ~ /^[0-9a-fA-F]+$/ && length(v) >= 7 && length(v) <= 40) }
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    [ -n "$first" ] || first="$c"
+    proof_base_id "$c" || continue
+    if [ -n "${2:-}" ]; then
+      git -C "$2" rev-parse --verify -q "$c^{commit}" >/dev/null 2>&1 || continue
+    fi
+    got="$c"; break
+  done <<PROOF_BASES
+$(awk '
     function val(s) { sub(/^[ \t]*base-sha[ \t]*:[ \t]*/, "", s); sub(/[ \t].*$/, "", s); gsub(/["\047]/, "", s); return s }
     NR == 1 && $0 == "---" { fm = 1; next }
     fm && $0 == "---" { fm = 0; next }
@@ -381,12 +395,9 @@ proof_plan_base() {
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     insdlc && /^[ \t]*base-sha[ \t]*:/ { if (!hs) { hs = 1; v = val($0) } }
-    END {
-      if (hs && id(v)) print v
-      else if (hf && id(f)) print f
-      else if (hs && v != "") print v
-      else if (hf && f != "") print f
-    }' "$1"
+    END { if (hs) print v; if (hf) print f }' "$1")
+PROOF_BASES
+  printf '%s' "${got:-$first}"
 }
 
 # proof_base_id <value> -> 0 when <value> has the shape of a commit id, 7 to 40 hex. A word that git
@@ -644,14 +655,17 @@ PROOF_FILES
   printf 'bounded\t%s\n' "$(printf '%s\n' "$ans" | tr '\n' ' ' | sed 's/ $//')"
 }
 
-# facts_owed <rigor> <scale> [<tree>] -> one line per fact a run owes, exit 0; nothing and exit 1
-# when <rigor> is not one PROOF_DEALING knows or <scale> is not task, wave or epic (wave-27 T9; D2):
+# facts_owed <rigor> <scale> [<tree>] [<plan>] -> one line per fact a run owes, exit 0; nothing and
+# exit 1 when <rigor> is not one PROOF_DEALING knows or <scale> is not task, wave or epic (wave-27
+# T9; D2):
 #
 #     floor                                          the full run, proof_state's question
 #     review<TAB><question><TAB><role><TAB>piece     each question, for the role the rigor deals it
 #     review<TAB><question><TAB><role><TAB>whole     at scale: wave, one more per code question (D10)
 #     check                                          when <tree>'s .bionic/config.yaml names a
 #                                                    release-check: command (wave-27 T16; D12)
+#     debt<TAB><suite><TAB><token>                   one per state line of <plan> recording
+#                                                    `landed red: <suite> until <token>` (T31; D23)
 #
 # THE ONE DEALING. The judge below reads it, and the dispatch wall (row T15) reads it for the
 # questions a reader's brief may name; neither restates the table. The check is the project's, not
@@ -679,7 +693,67 @@ facts_owed() {
     . "$d/roots.sh" >/dev/null 2>&1
   fi
   [ -z "$(config_value "$3" release-check "" 2>/dev/null)" ] || printf 'check\n'
+  [ -z "${4:-}" ] || proof_debts "$4"
   return 0
+}
+
+# proof_debts <plan> -> `debt<TAB><suite><TAB><token>` for each unfenced `## SDLC State` state line
+# (`- T<n>: …`) that records `landed red: <suite> until <token>`, in plan order, once each (wave-27
+# T31; D23). The orchestrator writes that line when `land` prints `landed-red=<suite>`.
+proof_debts() {
+  [ -f "${1:-}" ] || return 0
+  awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc' "$1" | proof_debts_open all
+}
+
+# proof_debts_open [all|at] < <section text> -> the debts the `## SDLC State` text on stdin records, as
+# `debt<TAB><suite><TAB><token>`; with no operand only those the TEXT leaves open; with `at`, each as
+# `<suite><TAB><token><TAB><its landed time or nothing>` (wave-27 T31; D23; A-orch-85). A state line
+# reads `landed red: <suite> until <token> at <ISO-UTC>`, the time the landing's own (`land` prints
+# it as `landed-red-at=`); a line with no time is a debt nothing can cover. In the text an
+# `approval:<name>` debt stays open until a `proved: kind=floor` or `kind=task` line carries an `at=`
+# later than the time on the first `approved: <name> by <who> <ISO-UTC> …` line; an `ext:<slug>` debt
+# until such a line is later than the red landing itself, for nothing dates the slug leaving the
+# `## Tasks` cells, and whether it left is the judge's to read (`_facts_debt`), not this text's. This
+# is the commit gate's predicate (lib/walls.sh `_eg_reading_gaps`), plan text alone; the judge also
+# holds a task proof to a log that shows the suite green.
+proof_debts_open() {
+  awk -v mode="${1:-}" '
+    BEGIN { iso = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$" }
+    /^[[:space:]]*-[[:space:]]+T[0-9]+:/ && match($0, /landed red:[ \t]+[^ \t]+[ \t]+until[ \t]+[^ \t]+([ \t]+at[ \t]+[^ \t]+)?/) {
+      n = split(substr($0, RSTART, RLENGTH), w, /[ \t]+/); sub(/[,;)]+$/, "", w[5])
+      t = ""; if (n >= 7 && w[6] == "at") { t = w[7]; sub(/[,;)]+$/, "", t); if (t !~ iso) t = "" }
+      d = "debt\t" w[3] "\t" w[5]
+      if (!(d in seen)) { seen[d] = 1; tok[++nd] = w[5]; line[nd] = d; su[nd] = w[3]; when[nd] = t }
+      next
+    }
+    /^approved:[ \t]/ {
+      m = split($0, w, /[ \t]+/)
+      if (m >= 3 && w[3] == "by" && !(w[2] in ap)) for (i = 4; i <= m; i++) if (w[i] ~ iso) { ap[w[2]] = w[i]; break }
+      next
+    }
+    /^proved:[ \t]/ {
+      m = split($0, w, /[ \t]+/); k = ""; at = ""
+      for (i = 2; i <= m; i++) { if (w[i] ~ /^kind=/) k = substr(w[i], 6); else if (w[i] ~ /^at=/) at = substr(w[i], 4) }
+      if ((k == "floor" || k == "task") && at ~ iso && at > latest) latest = at
+    }
+    END {
+      for (i = 1; i <= nd; i++) {
+        if (mode == "at") { print su[i] "\t" tok[i] "\t" when[i]; continue }
+        if (mode == "") {
+          t = tok[i]; c = ""
+          if (when[i] != "") {
+            if (t ~ /^approval:./ && (substr(t, 10) in ap)) c = ap[substr(t, 10)]
+            else if (t ~ /^ext:./) c = when[i]
+          }
+          if (c != "" && latest > c) continue
+        }
+        print line[i]
+      }
+    }'
 }
 
 # facts_state <plan> <head> -> one line per fact `facts_owed` deals the plan's frontmatter rigor and
@@ -693,10 +767,15 @@ facts_owed() {
 #     absent                   no fact of that kind, and no waiver
 #
 # THE DECLARED CHECK (wave-27 T16; D12) is owed when the plan's repository declares `release-check:`
-# (facts_owed's <tree> is the plan's checkout root). It is covered by a `kind=check` line at <head>,
-# uncovered from the newest one's head when every one is older, and absent with none. A failed run
-# writes no line, so it is never failing; and it is a command run at a head, so a docs-only tail
-# does not carry it.
+# (facts_owed's <tree> is the plan's checkout root). The LAST `kind=check` line at <head> decides it:
+# covered, or failing with that line's evidence when it carries `result=fail`, the line a failed run
+# writes (T31; review pass 22 S3), so a later failure at one head is never hidden by an earlier pass.
+# With no line at <head>, uncovered from the newest one's head, and absent with none. It is a command
+# run at a head, so a docs-only tail does not carry it.
+# A DECLARED DEBT (wave-27 T31; D23), one per `landed red: <suite> until <token>` state line, is
+# covered by a green run of that suite, or a floor proof, recorded after the token cleared, and
+# absent otherwise (`_facts_debt`); so `current 8`, close-out and the tick's integrate row, which
+# all ask this judge, refuse while a debt is open.
 #
 # A QUESTION IS ONE CHAIN (D4). Its links are its readings (`proved: kind=review … question=<q>`,
 # either scope) and its waivers (`waived: question=<q> head=<sha> …`), in section order, which is the
@@ -735,7 +814,7 @@ facts_state() {
   rigor="$(plan_frontmatter_get "$plan" rigor 2>/dev/null)"
   scale="$(plan_frontmatter_get "$plan" scale 2>/dev/null)"
   tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
-  owed="$(facts_owed "$rigor" "$scale" "$tree")" || {
+  owed="$(facts_owed "$rigor" "$scale" "$tree" "$plan")" || {
     printf 'facts_state: %s declares no rigor and scale the dealing knows (rigor: %s, scale: %s)\n' \
       "$plan" "${rigor:-none}" "${scale:-none}" >&2
     return 2
@@ -747,10 +826,11 @@ facts_state() {
   case "$owed" in
     review"	"*|*"
 review	"*)
-      x="$(proof_plan_base "$plan")"
+      x="$(proof_plan_base "$plan" "$tree")"
       if ! proof_base_id "$x" || ! git -C "$tree" rev-parse --verify -q "$x^{commit}" >/dev/null 2>&1; then
         printf 'facts_state: %s names no base-sha: that is a commit here%s, so where its chains start cannot be held\n' "$plan" \
-          "$(if [ -n "$x" ] && ! proof_base_id "$x"; then printf ' (its base-sha: %s is not a commit id)' "$x"; fi)" >&2
+          "$(if [ -n "$x" ] && ! proof_base_id "$x"; then printf ' (its base-sha: %s is not a commit id)' "$x"
+             elif [ -n "$x" ]; then printf ' (its base-sha: %s is no commit here)' "$x"; fi)" >&2
         return 2
       fi ;;
   esac
@@ -818,16 +898,26 @@ PROOF_CHAIN
       check)
         x=""; [ -z "$tree" ] || x="$(git -C "$tree" rev-parse --verify -q "$head^{commit}" 2>/dev/null)"
         x="$(awk -v h="$head" -v hh="${x:-$head}" "$(proof_awk)"'
+          function evid(s,   f, m, i) { m = split(s, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) return substr(f[i], 10); return "" }
           /^[[:space:]]*```/ { fence = !fence; next }
           fence { next }
           /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-          insdlc && proof_fields($0) && PROOF_KIND == "check" { last = PROOF_HEAD; if (last == h || last == hh) at = 1 }
-          END { if (at) print "covered"; else print last }' "$plan")"
+          insdlc && proof_fields($0) && PROOF_KIND == "check" {
+            last = PROOF_HEAD
+            if (last == h || last == hh) { at = 1; fail = (PROOF_RESULT == "fail"); ev = evid($0) }
+          }
+          END { if (at && fail) print "failing\t" ev; else if (at) print "covered"; else print last }' "$plan")"
         case "$x" in
           covered) st=covered ;;
+          failing"	"*) st="$x" ;;
           '') st=absent ;;
           *) st="uncovered	$x..$head" ;;
         esac ;;
+      debt"	"*)
+        IFS='	' read -r kind q x <<PROOF_DEBT
+$fact
+PROOF_DEBT
+        st="$(_facts_debt "$plan" "$tree" "$q" "$x")" ;;
       *) st=absent ;;
     esac
     printf '%s\t%s\n' "$fact" "$st"
@@ -836,6 +926,82 @@ PROOF_CHAIN
 $owed
 PROOF_FACTS
   return "$rc"
+}
+
+# _facts_debt <plan> <tree> <suite> <token> -> `covered`, or `absent` with any reason after a tab, for
+# one declared debt (wave-27 T31; D23; A-orch-85). Covered only when a floor proof, or a task proof
+# whose log shows <suite> green, carries an `at=` later than the debt's threshold:
+#   - its `landed red:` line carries no `at <ISO-UTC>`: no threshold, never covered, and it says so;
+#   - `approval:<name>`: the time on the first `approved: <name> by <who> <ISO-UTC> …` line of the
+#     plan's `## SDLC State`; until that line is written, absent;
+#   - `ext:<slug>`: absent while any `## Tasks` cell still names `ext:<slug>` (the owner removing it
+#     is the statement that the blocker cleared); then the red landing's own time. Nothing dates a
+#     clearing, so the green run is held to be later than the red landing, not later than the
+#     clearing;
+#   - any other token: absent.
+# A log shows <suite> green by the runner's `<suite> … PASS` line or the suite's own
+# `<suite>: <n>/<n> passed, 0 failed` tally.
+_facts_debt() {
+  local plan="$1" tree="$2" suite="$3" tok="$4" clear landed droot ev x
+  landed="$(awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc' "$plan" | proof_debts_open at | awk -F'\t' -v s="$suite" -v t="$tok" '$1 == s && $2 == t { print $3; exit }')"
+  if [ -z "$landed" ]; then
+    printf 'absent\tits landed red: line carries no at <ISO-UTC>, so no green run can be dated after the red landing'
+    return 0
+  fi
+  case "$tok" in
+    approval:?*)
+      clear="$(awk -v n="${tok#approval:}" '
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+        insdlc && /^approved:[ \t]/ {
+          m = split($0, w, /[ \t]+/)
+          if (m < 3 || w[2] != n || w[3] != "by") next
+          for (i = 4; i <= m; i++) if (w[i] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) { print w[i]; exit }
+        }' "$plan")" ;;
+    ext:?*)
+      x="$(awk -v want="$tok" '
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^##[[:space:]]/ { intasks = ($0 ~ /^##[[:space:]]+Tasks[[:space:]]*$/); next }
+        intasks && /^[[:space:]]*\|/ {
+          n = split($0, c, "|")
+          for (i = 1; i <= n; i++) { m = split(c[i], w, /[ \t,]+/); for (j = 1; j <= m; j++) if (w[j] == want) { print "held"; exit } }
+        }' "$plan")"
+      if [ -n "$x" ]; then clear=""; else clear="$landed"; fi ;;
+    *) clear="" ;;
+  esac
+  [ -n "$clear" ] || { printf 'absent'; return 0; }
+  droot=""; [ -z "$tree" ] || ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
+  while IFS='	' read -r x ev; do
+    case "$x" in
+      floor) printf 'covered'; return 0 ;;
+      task)
+        case "$ev" in /*) : ;; *) [ -n "$droot" ] || continue; ev="$droot/$ev" ;; esac
+        [ -f "$ev" ] || continue
+        if awk -v s="$suite" '
+          $1 == s && $NF == "PASS" { ok = 1; exit }
+          $1 == s ":" && $4 == "0" && $5 == "failed" { split($2, c, "/"); if (c[1] == c[2] && c[1] + 0 > 0) { ok = 1; exit } }
+          END { exit !ok }' "$ev" 2>/dev/null; then
+          printf 'covered'; return 0
+        fi ;;
+    esac
+  done <<PROOF_LATER
+$(awk -v t="$clear" "$(proof_awk)"'
+  /^[[:space:]]*```/ { fence = !fence; next }
+  fence { next }
+  /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+  insdlc && proof_fields($0) && (PROOF_KIND == "floor" || PROOF_KIND == "task") {
+    m = split($0, f, /[ \t]+/); at = ""; ev = ""
+    for (i = 2; i <= m; i++) { if (f[i] ~ /^at=/) at = substr(f[i], 4); else if (f[i] ~ /^evidence=/) ev = substr(f[i], 10) }
+    if (at > t) print PROOF_KIND "\t" ev
+  }' "$plan")
+PROOF_LATER
+  printf 'absent'
 }
 
 # _facts_holds <tree> <docs prefix> <last head> <head> -> 0 when <head> is <last head>, or <last
