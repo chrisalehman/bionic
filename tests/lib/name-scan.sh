@@ -6,16 +6,20 @@ set +x +v
 # <list path> is a private list, one entry per line, kept OUTSIDE every git checkout (a list in
 # a checkout would itself ship). Blank lines and lines starting with `#` are skipped but still
 # counted, so an entry is named by its line number in the list. Each line is read as the scan
-# will use it: a leading byte-order mark is removed, leading and trailing spaces, tabs and
-# carriage returns are stripped, and a line empty after that is skipped (counted, not an entry).
-# Entries are fixed strings, matched case-insensitively: both sides are decoded as UTF-8 (a
-# malformed byte becomes U+FFFD) and Unicode case-folded, whatever the caller's locale. The one
-# exception is an entry's own white space (A-orch-91): each run of it inside an entry matches
-# any run of white space holding at most ONE line break (spaces, tabs, CR LF, the Unicode
-# spaces), and after that break one comment leader may stand (`#`s, `//`s, `*`, `>`s, `--`,
-# `;`s); so a name of two words is found where prose, a comment or a commit body wraps between
-# them, and not across a blank line. White space is never optional: the words run together are
-# another entry. The scan runs in the checkout it is started from.
+# will use it: a leading byte-order mark is removed, every white space character perl's \s
+# knows (a space, a tab, a carriage return, a Unicode space) is stripped at both ends, and a
+# line empty after that is skipped (counted, not an entry). Entries are fixed strings, matched
+# case-insensitively: both sides are decoded as UTF-8 (a malformed byte becomes U+FFFD) and Unicode case-folded, whatever the
+# caller's locale. The one exception is an entry's own white space (A-orch-91, A-orch-106):
+# between two of its words the text may hold EITHER horizontal white space on one line (spaces,
+# tabs, the Unicode spaces) OR exactly ONE line break with, on each side of it, any mix of
+# horizontal white space, at most 24 symbols (a character that is neither a letter, a digit nor
+# white space: quotes, a backslash, `+`, `#`, `/`, `*`, `>`, `-`, `;`, brackets and the rest)
+# and at most three markup tags. So a name of two words is found where prose, a comment, a
+# commit body, a string continued on the next line, a quoted patch line or markup wraps between
+# them. White space is never optional (the words run together are another entry), a blank line
+# between the words is no wrap, and symbols between two words on ONE line are no match. The
+# scan runs in the checkout it is started from.
 #
 # WHAT IT READS is what a push of <base>..<head> would publish, never the working files:
 #   - every blob in the tree at the head, as bytes (a binary file, a file marked `-diff` or
@@ -42,13 +46,17 @@ set +x +v
 # WHAT IS STILL MISSED: text not in UTF-8, in file contents as in messages (a UTF-16 file, a
 # Latin-1 non-ASCII name, a commit with another `encoding`), compressed or otherwise encoded
 # text, an NFD form of an NFC entry, `mergetag` and `gpgsig` headers, notes and branch names,
-# and a name broken deliberately (inside a word, by a zero-width character).
+# and a name broken deliberately (inside a word, by a zero-width character). At a wrap: a blank
+# line (a paragraph, a git subject and its body), a hyphen breaking a word, more than 24
+# symbols or more than three tags on one side of the break, a letter or a digit there (`rem`, a
+# JSON `\n` escape, `&nbsp;`), and symbols with no line break (`mxv9, plover` on one line).
 #
 # A CLEAN RESULT MUST HAVE POWER. Before the real scan, the same function runs over a
 # throwaway repository built with git's plumbing, which holds every entry at every site the
 # scan reads: a text blob (in upper case), a binary blob, a symlink target and a path name at
-# the head, and a text blob holding each entry wrapped (each run of white space inside it a
-# tab, CR LF, blanks and a `#` leader); a path and a blob (in lower case) that exist only
+# the head, and three text blobs holding each entry wrapped, one per branch of the construction
+# (each run of white space inside it a tab, CR LF and blanks; symbols around a line break; a
+# tag on each side of one); a path and a blob (in lower case) that exist only
 # inside the range; a commit message; an author name, an author email, a committer name and a
 # committer email; a tag name and a tag message. An entry not found at any of them refuses the
 # run (exit 2). An entry git cannot hold at a site is not planted there: one with a byte no ref
@@ -71,7 +79,8 @@ set +x +v
 # first command turns tracing off; BASH_ENV and ENV are unset so nothing this starts reads
 # them, every git trace variable is unset as a second line of defence, and so are the perl
 # variables that would load a debugger or a module into the matcher. The throwaway
-# lives in a temp directory removed on exit. Exit 0 clean (an empty list prints `entries=0`),
+# lives in a temp directory removed on exit; HUP, INT and TERM end the run once the command then
+# running has finished, so no child writes into the tree after it is removed. Exit 0 clean (an empty list prints `entries=0`),
 # 1 a hit, 2 a refusal.
 #
 # bash 3.2 (ADR-001) and the perl macOS ships. Not part of the shipped plugin.
@@ -88,7 +97,11 @@ unset PERL5OPT PERL5LIB PERLLIB PERL5DB PERLDB_OPTS
 export GIT_NO_REPLACE_OBJECTS=1
 export LC_ALL=C
 
-refuse() { echo "name-scan: $*" >&2; exit 2; }
+# stop is the status a caught HUP, INT or TERM leaves; the run ends at the next checkpoint, after
+# the command running then (and every child it started) has finished
+stop=""
+checkpoint() { [ -z "$stop" ] || exit "$stop"; }
+refuse() { checkpoint; echo "name-scan: $*" >&2; exit 2; }
 
 # ---- the matcher ------------------------------------------------------------------------------
 #
@@ -108,18 +121,31 @@ sub slurp {
 sub fold { fc(Encode::decode("UTF-8", $_[0])) }
 my ($listf, $pathsf, $logf, $tagsf, $want) = @ARGV;
 my @kv = split /\0/, slurp($listf, "the list");
-# an entry is its words, each literal, and between two of them a run of white space holding at
-# most one line break, after which one comment leader may stand; the batch pattern and the
-# attribution pattern are both built from these
-my $ws = qr{\h+|\h*\R\h*(?:(?:#+|//+|\*|>+|--|;+)\h*)?};
+# an entry is its words, each literal; between two of them, EITHER horizontal white space on one
+# line, OR exactly one line break with, on each side of it, any mix of horizontal white space, at
+# most 24 symbols (a character that is neither a letter, a digit nor white space) and at most
+# three tags (`<`, at most 200 characters with no `<`, `>` or line break, `>`). The batch pattern
+# and the attribution pattern are both built from this one construction. It cannot backtrack
+# without bound: every white-space run is possessive, the tag body is possessive and counted, the
+# walk of the cap never gives anything back, the side before the break is atomic, and the side after
+# it can give back at most its 24 symbols (a word may begin with one). It is written ONCE, as the
+# named group `ws` every gap calls: written into each gap, 500 entries made a pattern of 580 KB
+# that the engine could no longer search by its first words (13 s on 2 MB of text, against 0.01).
+my $tag = qr{<[^<>\v]{0,200}+>};
+my $sym = qr{(?!$tag)[^\p{L}\p{Nd}\s]};
+my $cap = qr{(?=\h*+(?:$tag\h*+){0,3}+(?:$sym\h*+(?:$tag\h*+){0,3}+){0,24}+(?!$sym))};
+my $run = qr{\h*+(?:$sym\h*+){0,24}};
+my $side = qr{$cap$run(?:$tag$run){0,3}};
+my $def = qr{(?(DEFINE)(?<ws>\h++|(?>$side)\R$side))};
+my $ws = "(?&ws)";
 my (@num, @fp);
 while (@kv) {
   push @num, shift @kv;
   push @fp, join $ws, map { quotemeta } split /\s+/, fold(shift @kv);
 }
 my $any = join "|", @fp;
-$any = qr/$any/;
-my @fe = map { qr/$_/ } @fp;
+$any = qr/(?:$any)$def/;
+my @fe = map { qr/$_$def/ } @fp;
 my ($hits, %seen) = (0);
 sub hit { return if $seen{"$_[0] $_[1]"}++; print "HIT entry=$_[0] at $_[1]\n"; $hits++ }
 # look <bytes> <where> <lines>: all entries at once first; the entry and line only after a find.
@@ -283,12 +309,12 @@ ref_ok() {
 # ident_ok <entry> — can a name or an email hold it? (git refuses `<` and `>` there)
 ident_ok() { case "$1" in *[\<\>]*) return 1 ;; esac; return 0; }
 
-# wrapped_entries — `power wrap` and each entry on its own line, every run of blanks inside it
-# made a tab, CR LF, two blanks and a `#` leader: a scan that matched an entry's white space as
-# one literal space would miss it (the builtin printf; no entry is a word of any command)
+# wrapped_entries <title> <break> — <title> and each entry on its own line, every run of blanks
+# inside it made <break>: a scan that lost the branch of the construction <break> needs would
+# miss it (the builtin printf; no entry is a word of any command)
 wrapped_entries() {
-  local i=0 e sp=' ' br=$'\t\r\n  # '
-  printf 'power wrap\n'
+  local i=0 e sp=' ' br="$2"
+  printf '%s\n' "$1"
   while [ "$i" -lt "${#ENTRIES[@]}" ]; do
     e="${ENTRIES[$i]//$'\t'/$sp}"
     while :; do case "$e" in *"$sp$sp"*) e="${e//$sp$sp/$sp}" ;; *) break ;; esac; done
@@ -297,7 +323,7 @@ wrapped_entries() {
 }
 
 prove_power() {
-  local w="$1" i e n tab empty b_text b_wrap b_bin b_link b_gone tree0 tree1 c0 c1 c2 c3 c4 c5
+  local w="$1" i e n tab empty b_text b_wrap b_wsym b_wtag b_bin b_link b_gone tree0 tree1 c0 c1 c2 c3 c4 c5
   local tg people msg miss rc
   PW="$w/power.git"
   mkdir -p "$w" && git init -q --bare --template= "$PW" >/dev/null 2>&1 \
@@ -306,7 +332,10 @@ prove_power() {
   empty="$(pg hash-object -w --stdin < /dev/null)" &&
   b_text="$( { printf 'power text\n'; printf '%s\n' "${ENTRIES[@]}" | tr '[:lower:]' '[:upper:]'; } \
     | pg hash-object -w --stdin)" &&
-  b_wrap="$(wrapped_entries | pg hash-object -w --stdin)" &&
+  # one wrapped plant per branch of the construction: white space only, symbols, tags
+  b_wrap="$(wrapped_entries 'power wrap' $'\t\r\n  ' | pg hash-object -w --stdin)" &&
+  b_wsym="$(wrapped_entries 'power wrap symbols' $' " \\\n +# "' | pg hash-object -w --stdin)" &&
+  b_wtag="$(wrapped_entries 'power wrap tags' $'</t>\n<t x="1">' | pg hash-object -w --stdin)" &&
   b_bin="$( { printf 'power\0binary\0'; printf '%s\0' "${ENTRIES[@]}"; } | pg hash-object -w --stdin)" &&
   b_link="$(printf '../%s\n' "${ENTRIES[@]}" | pg hash-object -w --stdin)" &&
   b_gone="$( { printf 'power gone\n'; printf '%s\n' "${ENTRIES[@]}" | tr '[:upper:]' '[:lower:]'; } \
@@ -314,6 +343,8 @@ prove_power() {
   # the base tree holds the head's plants, so only the head's tree reaches them: a path per entry
   { printf '100644 %s\t%s\0' "$b_text" power/text.txt
     printf '100644 %s\t%s\0' "$b_wrap" power/wrap.txt
+    printf '100644 %s\t%s\0' "$b_wsym" power/wrap-symbols.txt
+    printf '100644 %s\t%s\0' "$b_wtag" power/wrap-tags.txt
     printf '100644 %s\t%s\0' "$b_bin" power/data.bin
     printf '120000 %s\t%s\0' "$b_link" power/link
     i=0
@@ -364,6 +395,8 @@ prove_power() {
     e="${ENTRIES[$i]}"; n="${NUMS[$i]}"
     printf 'entry=%s at blob %.12s\ttext blob\n' "$n" "$b_text"
     printf 'entry=%s at blob %.12s\twrapped text\n' "$n" "$b_wrap"
+    printf 'entry=%s at blob %.12s\tsymbol-wrapped text\n' "$n" "$b_wsym"
+    printf 'entry=%s at blob %.12s\ttag-wrapped text\n' "$n" "$b_wtag"
     printf 'entry=%s at blob %.12s\tbinary blob\n' "$n" "$b_bin"
     printf 'entry=%s at blob %.12s\tsymlink target\n' "$n" "$b_link"
     printf 'entry=%s at path #\tpath name\n' "$n"
@@ -399,17 +432,22 @@ if git -C "$LISTDIR" rev-parse --show-toplevel >/dev/null 2>&1 || git -C "$LISTD
   refuse "the list is inside a git checkout; keep it outside every checkout"
 fi
 
+# every character the matcher's \s knows, as UTF-8 bytes (LC_ALL=C here): a list line is trimmed
+# of each at both ends, so no entry begins with an empty word (one that did was missed at the
+# start of a text, and cost the square of a blank run's length)
+SPACES=(' ' $'\t' $'\r' $'\v' $'\f' $'\302\205' $'\302\240' $'\341\232\200' $'\342\200\200'
+  $'\342\200\201' $'\342\200\202' $'\342\200\203' $'\342\200\204' $'\342\200\205' $'\342\200\206'
+  $'\342\200\207' $'\342\200\210' $'\342\200\211' $'\342\200\212' $'\342\200\250' $'\342\200\251'
+  $'\342\200\257' $'\342\201\237' $'\343\200\200')
 ENTRIES=(); NUMS=()
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
   n=$((n + 1))
   line="${line#$'\357\273\277'}"
   while :; do
-    case "$line" in
-      ' '*|$'\t'*|$'\r'*) line="${line#?}" ;;
-      *' '|*$'\t'|*$'\r') line="${line%?}" ;;
-      *) break ;;
-    esac
+    was="$line"
+    for s in "${SPACES[@]}"; do line="${line#"$s"}"; line="${line%"$s"}"; done
+    [ "$line" = "$was" ] && break
   done
   case "$line" in ''|'#'*) continue ;; esac
   ENTRIES[${#ENTRIES[@]}]="$line"
@@ -444,12 +482,21 @@ else
   [ -z "$BASE_TAG" ] || BASE_SHA="$(git -C "$REPO" rev-parse --verify -q "refs/tags/$BASE_TAG^{commit}")"
 fi
 
+# a signal never ends the run while a child can still write into the temp tree: an exit straight
+# from the signal let the EXIT trap remove the tree while a `git hash-object -w` inside a command
+# substitution was still running, and git made the object's directories again (T61: 5 runs in 50
+# left one). The traps only record the signal; the run ends at a checkpoint.
+TMP_SCAN=""
+trap '[ -z "$TMP_SCAN" ] || rm -rf "$TMP_SCAN"' EXIT
+trap 'stop=129' HUP; trap 'stop=130' INT; trap 'stop=143' TERM
 TMP_SCAN="$(mktemp -d "${TMPDIR:-/tmp}/name-scan.XXXXXX")" || refuse "cannot make a temp directory"
-trap 'rm -rf "$TMP_SCAN"' EXIT
+checkpoint
 
 prove_power "$TMP_SCAN/power"
+checkpoint
 
 scan_repo "$REPO" "$BASE_SHA" "$HEAD_SHA" "$TMP_SCAN/scan" > "$TMP_SCAN/hits"; rc=$?
+checkpoint
 [ "$rc" -le 1 ] || refuse "the scan could not read everything the push would publish"
 cat "$TMP_SCAN/hits"
 hits="$(grep -c '^HIT ' "$TMP_SCAN/hits")"
