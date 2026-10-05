@@ -542,19 +542,29 @@ units_waiting() { _units_sched waiting "$@"; }
 # remains — the shape `units_chain` takes.
 units_edges() { _units_sched edges "${1:-}" ""; }
 
-# units_live_range <plan> -> `<last review proof head>..<UNITS_LIVE_HEAD>`, the difference a
-# `live:head` review reads (wave-26 T14; AC-6.5): only what landed past the last review, never
-# the whole diff again. Nothing when the plan has no review proof yet (the first review reads
-# all the landed work, from the wave's base), when no head is handed in, or when the head has
-# not moved past the proof.
-units_live_range() { _units_sched range "${1:-}" ""; }
+# units_live_range <plan> [<row id>] -> `<last review proof head>..<UNITS_LIVE_HEAD>`, the
+# difference a `live:head` review reads (wave-26 T14; AC-6.5): only what landed past the last
+# review, never the whole diff again. Nothing when the plan has no review proof yet (the first
+# review reads all the landed work, from the wave's base), when no head is handed in, or when the
+# head has not moved past the proof. GIVEN A READ ROW (wave-27 T10; D4), one reading
+# `live:head:<q>[+<q>]`, the range is that row's: from the oldest last reading among its own
+# questions past which the head has moved, and nothing while one of them has no reading yet (it
+# reads from the base). A bare `live:head` row, an unknown id or none gets the one range above.
+units_live_range() { _units_sched range "${1:-}" "${2:-}"; }
 
-# units_live_rows <plan> [<path>...] -> `<id><TAB><kind><TAB><status>` for every row reading
-# `live:head`, an empty cell's kind default included, table order (wave-26 T14). Handed paths, only
-# the rows whose `Files` cover one of them (the overlap rule a read uses): `proof-add review` hands
-# its evidence, in both spellings, and returns that row alone to `pending` — the proof of another
-# review (the final one, settled on the head) moves no live row mid-pass (wave-26 T46; review 10 F3).
-units_live_rows() { local plan="${1:-}"; shift; _UNITS_EVIDENCE="$*" _units_sched liverows "$plan" ""; }
+# units_live_rows <plan> [--question <q>] [<path>...] -> `<id><TAB><kind><TAB><status>` for every
+# row reading `live:head`, an empty cell's kind default and `live:head:<q>[+<q>]` included, table
+# order (wave-26 T14). Handed paths, only the rows whose `Files` cover one of them (the overlap rule
+# a read uses): `proof-add review` hands its evidence, in both spellings, and returns that row alone
+# to `pending` — the proof of another review (the final one, settled on the head) moves no live row
+# mid-pass (wave-26 T46; review 10 F3). HANDED A QUESTION (wave-27 T10; D4), a read row is named
+# when it carries that question, whatever its `Files` say, and not otherwise; a row naming no
+# question is still matched by its `Files`.
+units_live_rows() {
+  local plan="${1:-}" q=""; shift
+  if [ "${1:-}" = --question ]; then q="${2:-}"; shift 2 2>/dev/null || shift; fi
+  _UNITS_EVIDENCE="$*" _UNITS_QUESTION="$q" _units_sched liverows "$plan" ""
+}
 
 # units_floor_holds <plan> [<id>] -> `<id><TAB><step><TAB><status>`, table order, for each row the
 # FLOOR waits on that has not landed (or been dropped) and writes a tracked file (wave-26 T52;
@@ -662,6 +672,7 @@ _units_sched_run() {
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
   } | _UNITS_FLOOR_ST="$7" awk -F'\t' -v mode="$1" -v want="$3" -v scale="$4" -v hasreads="$5" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
+      -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" \
       -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_sched_awk)"
 }
 
@@ -740,6 +751,7 @@ units_writes_head() {
 # can sit beside the code; NO APOSTROPHE anywhere inside it (it is single-quoted).
 _units_sched_awk() {
   printf '%s' '
+    BEGIN { nqk = split(pq, qkl, " "); for (k = 1; k <= nqk; k++) qok[qkl[k]] = 1 }
     $0 == SUBSEP "rows" { part = 1; next }
     $0 == SUBSEP "plan" { part = 2; next }
     part == 1 {
@@ -767,6 +779,11 @@ _units_sched_awk() {
         # `proof_last` reads through. THE HEAD IS KEPT (review 5 F8): the last line of a kind is
         # the newest, the order the writer appends in, so `live:head` compares against it.
         proved[PROOF_KIND] = 1; prvh[PROOF_KIND] = PROOF_HEAD
+        # A CHAIN PER QUESTION (wave-27 T10; D4): a reading is also the last proof of its own
+        # question, kept with its place among the proof lines, the order that says which is older.
+        # A line with no question (1.11.0) is the last proof of no question (A-T2.4).
+        pn++
+        if (PROOF_KIND == "review" && PROOF_QUESTION != "") { prvq[PROOF_QUESTION] = PROOF_HEAD; prvn[PROOF_QUESTION] = pn }
       }
       next
     }
@@ -892,6 +909,42 @@ _units_sched_awk() {
       if (t == "head") rhead[i] = 1
       if (t == "record") rrec[i] = 1
       if (t == "live:head") rlive[i] = 1
+      else if (substr(t, 1, 10) == "live:head:") { rlive[i] = 1; addq(i, substr(t, 11)) }
+    }
+    # addq(i, s) -> the questions of a read row, `<q>[+<q>]` (wave-27 T10; D4), in rq[i, 1..nq[i]]
+    # and hasq[i, q]. A question outside the set, an empty one, or a read row that is not a review
+    # marks the row rbadq: the validator refuses it, and its live read is never satisfied.
+    function addq(i, s,   m, k, qa) {
+      if (knd[i] != "review") rbadq[i] = 1
+      m = split(s, qa, "+")
+      if (m == 0) rbadq[i] = 1
+      for (k = 1; k <= m; k++) {
+        if (!(qa[k] in qok)) { rbadq[i] = 1; continue }
+        if ((i, qa[k]) in hasq) continue
+        hasq[i, qa[k]] = 1; nq[i]++; rq[i, nq[i]] = qa[k]
+        qlab[i] = (nq[i] > 1 ? qlab[i] "+" : "") qa[k]
+      }
+    }
+    # qshare(i, j) -> 1 when rows i and j read a question in common. A review row naming no
+    # question (a bare live:head, a settled head read) shares every one: it holds and is held as
+    # through 1.11.0, the cautious direction.
+    function qshare(i, j,   k) {
+      if (!nq[i] || !nq[j]) return 1
+      for (k = 1; k <= nq[i]; k++) if ((j, rq[i, k]) in hasq) return 1
+      return 0
+    }
+    # live_oldest(i, past) -> of row i questions, the one whose last reading is the oldest line,
+    # only among those whose head is not the head handed in when past is set; nothing when one of
+    # them has no reading yet (that question reads from the base) or none qualifies.
+    function live_oldest(i, past,   k, q, o) {
+      o = ""
+      for (k = 1; k <= nq[i]; k++) {
+        q = rq[i, k]
+        if (!(q in prvq)) return ""
+        if (past && prvq[q] == livehead) continue
+        if (o == "" || prvn[q] < prvn[o]) o = q
+      }
+      return o
     }
 
     # LIVE: a live read is satisfied when its artifact exists: the record always does; a proof or
@@ -900,7 +953,7 @@ _units_sched_awk() {
     # F4: `live:foo`, `live:ext:ci`, `live:T9` fell into the path arm and read as ready). `head`
     # is live_head below.
     function live_sat(i, a,   j, lw, ow) {
-      if (a == "head") return live_head(i)
+      if (a == "head" || substr(a, 1, 5) == "head:") return live_head(i)
       if (a == "record") return 1
       if (substr(a, 1, 6) == "proof:") return (substr(a, 7) in proved)
       if (substr(a, 1, 9) == "approval:") return (substr(a, 10) in appr)
@@ -918,11 +971,28 @@ _units_sched_awk() {
     # proof head once there is one. The head is compared, not its ancestry: the range the review
     # reads, proof..head, is the work on the head that the proof never saw, rewritten history
     # included (A-T14.1). A wait sets lwhy, which units_waiting prints after the read.
-    function live_head(i,   j, h) {
+    # A READ ROW IS JUDGED PER QUESTION (wave-27 T10; D4): only a row sharing one of its questions
+    # holds it, a pending read row above that has nothing to read holds no read row below it, and
+    # past the proof means past the last reading of one of its own questions. A question with no
+    # reading yet reads from the base, so the row is ready once work has landed, as a first review.
+    function live_head(i,   j, h, k, o) {
+      if (rbadq[i]) { lwhy = "the read names a question outside " pq " or sits on a row that is not a review"; return 0 }
       for (j = 1; j <= n; j++) {
-        if (j == i || knd[j] != knd[i]) continue
+        if (j == i || knd[j] != knd[i] || !qshare(i, j)) continue
         if (st[j] == "active") { lwhy = knd[i] " " id[j] " is open (active)"; return 0 }
-        if (st[j] == "pending" && rlive[j] && j < i) { lwhy = knd[i] " " id[j] " goes first"; return 0 }
+        if (st[j] == "pending" && rlive[j] && j < i && !(nq[i] && nq[j] && live_idle(j))) { lwhy = knd[i] " " id[j] " goes first"; return 0 }
+      }
+      if (nq[i]) {
+        for (k = 1; k <= nq[i]; k++) if (!(rq[i, k] in prvq)) {
+          for (j = 1; j <= n; j++) if (j != i && st[j] == satisfied && code[j]) return 1
+          lwhy = "nothing has landed yet"; return 0
+        }
+        if (livehead == "") {
+          o = live_oldest(i, 0)
+          lwhy = "the head past the " o " review proof at " substr(prvq[o], 1, 12) " is not known here"; return 0
+        }
+        if (live_oldest(i, 1) == "") { lwhy = "nothing landed past the " qlab[i] " review proof at " substr(livehead, 1, 12); return 0 }
+        return 1
       }
       if (!("review" in prvh)) {
         for (j = 1; j <= n; j++) if (j != i && st[j] == satisfied && code[j]) return 1
@@ -934,10 +1004,16 @@ _units_sched_awk() {
       return 1
     }
 
-    # live_idle() -> 1 when a live:head read waits because nothing landed past the review proof:
+    # live_idle(j) -> 1 when row j live:head read waits because nothing landed past the review proof:
     # the head handed in is the one the proof names. A pending row whose live read is idle writes
-    # no newer proof until something lands (wave-26 T62; K2-F4); with the head unknown it may.
-    function live_idle() { return (("review" in prvh) && livehead != "" && livehead == prvh["review"]) }
+    # no newer proof until something lands (wave-26 T62; K2-F4); with the head unknown it may. A
+    # read row is idle when every one of its questions was last read at that head (wave-27 T10).
+    function live_idle(j,   k) {
+      if (!nq[j]) return (("review" in prvh) && livehead != "" && livehead == prvh["review"])
+      if (livehead == "") return 0
+      for (k = 1; k <= nq[j]; k++) if (!(rq[j, k] in prvq) || prvq[rq[j, k]] != livehead) return 0
+      return 1
+    }
 
     # judge(i, t) -> 1 when row i read t is satisfied; otherwise 0, with the rows named as its
     # writers in wj[1..nw] (those still open, plus a task-id row in any unsatisfied state), and
@@ -955,7 +1031,7 @@ _units_sched_awk() {
         for (j = 1; j <= n; j++) {
           if (j == i || !isopen(j)) continue
           if ((a == "floor" && (knd[j] == "verify" || knd[j] == "test")) || (a == "review" && knd[j] == "review"))
-            if (!(st[j] == "pending" && rlive[j] && live_idle())) wj[++nw] = j
+            if (!(st[j] == "pending" && rlive[j] && live_idle(j))) wj[++nw] = j
         }
         # THE FLOOR PROOF STANDS ONLY WHILE THE PASS DOES (wave-26 T64; REQ-3 AC-3.4). A line
         # with no open writer satisfies the read when the change since its head is covered or
@@ -1072,15 +1148,26 @@ _units_sched_awk() {
         m = split(dep[i], a, ",")
         for (k = 1; k <= m; k++) addtok(i, a[k])
       }
+      # THE RANGE OF ONE READ ROW (wave-27 T10; D4) starts at the oldest last reading among its
+      # questions; a bare row, an unknown id, or no id at all is answered as through 1.11.0.
       if (mode == "range") {
+        if ((want in at) && nq[at[want]]) {
+          i = at[want]
+          if (!rbadq[i] && livehead != "") { o = live_oldest(i, 1); if (o != "") print prvq[o] ".." livehead }
+          exit
+        }
         if (("review" in prvh) && livehead != "" && livehead != prvh["review"]) print prvh["review"] ".." livehead
         exit
       }
+      # Handed a question (wave-27 T10), the read rows are matched by it, never by their Files: a
+      # pass is the row carrying the question it read, whatever its record is called. A row with
+      # no question is matched by its Files, as before.
       if (mode == "liverows") {
         ne = split(evid, ev, " ")
         for (i = 1; i <= n; i++) {
           if (!rlive[i]) continue
-          if (ne) { for (k = 1; k <= ne; k++) if (writes(i, ev[k])) break; if (k > ne) continue }
+          if (liveq != "" && nq[i]) { if (!((i, liveq) in hasq)) continue }
+          else if (ne) { for (k = 1; k <= ne; k++) if (writes(i, ev[k])) break; if (k > ne) continue }
           printf "%s\t%s\t%s\n", id[i], knd[i], st[i]
         }
         exit
@@ -1173,7 +1260,8 @@ _units_sched_awk() {
 # and nothing else — a task id there is refused, because the row waits on what it reads — and
 # each read names a path in the `Files` grammar, `head`, `record`, `merge`, `proof:<floor|
 # review|task|check>` (`check` wave-27 T16), `approval:<name>`, `ext:<slug>`, or `live:` before one of the artifacts or a
-# path.
+# path; on a review row, `live:head:<q>[+<q>]` too, each question one of lib/proof.sh
+# PROOF_QUESTIONS (wave-27 T10; D4).
 #
 # NO ORDERING RULE (wave-26 T2; D2). Through 1.10 a Step-N row with N ≥ 5 had to depend,
 # transitively, on every Step-4 row, and a mid-run build row re-barriered every later row
@@ -1231,7 +1319,7 @@ units_validate() {
   rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" "$(_units_files_awk)"'
+      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_files_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: none of its cells can be trusted to name what it breaks.
@@ -1350,6 +1438,15 @@ units_validate() {
               if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
               t = a[j]
               if (t ~ extre) continue
+              # A READ ROW NAMES ITS QUESTIONS (wave-27 T10; D4): `live:head:<q>[+<q>]`, each one
+              # of lib/proof.sh PROOF_QUESTIONS, on a review row and nowhere else.
+              if (substr(t, 1, 10) == "live:head:") {
+                if (knd[i] != "review") { printf "%s: read %s names questions; only a review row reads them\n", id[i], a[j]; continue }
+                nqa = split(substr(t, 11), qa, "+"); qbad = (nqa == 0)
+                for (k = 1; k <= nqa; k++) if (index(" " pq " ", " " qa[k] " ") == 0 || qa[k] == "") qbad = 1
+                if (qbad) printf "%s: read %s names a question outside %s\n", id[i], a[j], pq
+                continue
+              }
               if (substr(t, 1, 5) == "live:") t = substr(t, 6)
               if (t ~ /^approval:[A-Za-z0-9]/) ap = 1
               if (t == "head" || t == "record" || t == "merge") continue
