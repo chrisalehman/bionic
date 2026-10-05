@@ -717,13 +717,16 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] -> LANDED | REFUSED
 
   # THE PROJECT'S DECLARED CHECK (wave-27 T16; D12). When `.bionic/config.yaml` names
   # `release-check: <command>`, the command runs over this landing's range before anything is
-  # touched: in the task's tree, with BIONIC_CHECK_BASE at the working branch's head and
-  # BIONIC_CHECK_HEAD at the task's head, its words split on blanks with globbing off, as
+  # touched: in the TARGET checkout as it stands before the merge, never the task's tree (review
+  # pass 22 B1; A-orch-75), so a command naming its script relatively runs the target's copy and a
+  # piece cannot rewrite the check that judges it; the task's commits are read from the shared
+  # object store. BIONIC_CHECK_BASE is the working branch's head and BIONIC_CHECK_HEAD the task's
+  # head, its words split on blanks with globbing off, as
   # `impact-command:` is run (proof.sh `_proof_map`). A non-zero exit refuses the landing and
   # shows the command's output on stderr. With no key nothing runs and nothing prints.
   check_cmd="$(config_value "$root" release-check "" 2>/dev/null)"
   if [ -n "$check_cmd" ]; then
-    check_out="$(cd "$wt_abs" 2>/dev/null || exit 1
+    check_out="$(cd "$co" 2>/dev/null || exit 1
       set -f
       export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head"
       # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does

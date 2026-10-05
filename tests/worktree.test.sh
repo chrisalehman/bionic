@@ -2353,10 +2353,10 @@ expect_eq "(rc1d) …and the command never ran" "0" "$(lr_runs)"
 printf 'release-check: bash %s\n' "$LR_CHK" > "$LR/.bionic/config.yaml"
 LR2="$(rc_tree rc-pass)"
 LR2_HEAD="$(git -C "$LR2" rev-parse HEAD)"; LR2_BASE="$(git -C "$LR" rev-parse refs/heads/wave/fixture)"
-LR2_CWD="$(cd "$LR2" && pwd -P)"
+LR2_CWD="$LR"   # the target checkout, which holds wave/fixture (review pass 22 B1): never the piece's tree
 expect_match "(rc2) with the key set and a passing command the tree lands" \
   "spawn-worktree: LANDED branch=rc-pass onto=wave/fixture *" "$(worktree_land "$LR2" wave/fixture)"
-expect_eq "(rc2b) …the command ran once, in the task's tree, from the working branch's head to the task's head" \
+expect_eq "(rc2b) …the command ran once, in the target checkout, from the working branch's head to the task's head" \
   "1 base=${LR2_BASE} head=${LR2_HEAD} cwd=${LR2_CWD}" "$(lr_runs) $(tail -n 1 "$LR_SEEN" 2>/dev/null)"
 
 # THE KEY SET, A FAILING COMMAND: refused why=release-check, and nothing moved.
@@ -2380,6 +2380,62 @@ expect_true "(rc3h) the link to the record still resolves" link_ok "$LR3"
 echo 0 > "$LR_RCF"
 expect_match "(rc3i) the same tree lands once the command passes" \
   "spawn-worktree: LANDED branch=rc-fail onto=wave/fixture *" "$(worktree_land "$LR3" wave/fixture)"
+
+# A PIECE NEVER REWRITES ITS JUDGE (review pass 22 B1; A-orch-75). The declared command runs in the
+# TARGET checkout as it stands before the merge, never in the piece's tree, so a command that names
+# its script relatively (`release-check: bash scan.sh`) runs the script as the target holds it. The
+# range is unchanged: the piece's commits are in the same object store, so the scan reads them from
+# there. FIXTURE FIDELITY: the review's p5 probe, as rows. scan.sh is TRACKED on the working branch
+# and fails when any file at BIONIC_CHECK_HEAD holds the forbidden word; it records where it ran.
+LS5="$(new_repo "$TMP/land-rc-self")"
+LS5_SEEN="$TMP/ls5-seen"
+cat > "$LS5/scan.sh" <<LS5_EOF
+#!/bin/bash
+pwd -P >> "$LS5_SEEN"
+if git grep -q FORBIDDEN "\$BIONIC_CHECK_HEAD" -- . ':!scan.sh'; then echo HIT; exit 1; fi
+exit 0
+LS5_EOF
+git -C "$LS5" add scan.sh && git -C "$LS5" commit --quiet -m "the project's scan"
+printf 'release-check: bash scan.sh\n' > "$LS5/.bionic/config.yaml"
+ls5_tree() {  # <branch> -> a tree a commit ahead, with its record link and a green stamp at its head
+  local t; t="$(new_tree "$LS5" "$1")"; ln -s "${LS5}/.bionic" "$t/.bionic"; printf '%s' "$t"
+}
+ls5_commit() {  # <tree> <message> — commits what the row wrote, then stamps the head green
+  git -C "$1" add -A >/dev/null 2>&1; git -C "$1" commit --quiet -m "$2"; green_stamp "$1"
+}
+
+# (rc4) PLANTS THE WORD AND REWRITES THE SCAN TO PASS: refused, and nothing moved.
+LS5A="$(ls5_tree rc-self-rewrite)"
+echo FORBIDDEN > "$LS5A/b.txt"; printf '#!/bin/bash\nexit 0\n' > "$LS5A/scan.sh"
+ls5_commit "$LS5A" "plant and tidy the scan"
+LS5A_TGT="$(git -C "$LS5" rev-parse refs/heads/wave/fixture)"; LS5A_TREES="$(trees_of "$LS5")"
+LS5A_ST="$(cat "$(stamp_file "$LS5A")")"
+OUTLS5A="$(worktree_land "$LS5A" wave/fixture 2>/dev/null)"; RCLS5A=$?
+expect_match "(rc4) a piece that plants the word and rewrites scan.sh to exit 0 is refused why=release-check" \
+  "spawn-worktree: REFUSED reason=check-failed why=release-check rc=1 branch=rc-self-rewrite *" "$OUTLS5A"
+expect_eq "(rc4b) …exit 2" "2" "$RCLS5A"
+expect_eq "(rc4c) …the scan ran in the target checkout, not the piece's tree" "$LS5" "$(tail -n 1 "$LS5_SEEN" 2>/dev/null)"
+expect_eq "(rc4d) the target's head is as before" "$LS5A_TGT" "$(git -C "$LS5" rev-parse refs/heads/wave/fixture)"
+expect_eq "(rc4e) every worktree is as before: the tree stands" "$LS5A_TREES" "$(trees_of "$LS5")"
+expect_eq "(rc4f) the tree's stamps are as before" "$LS5A_ST" "$(cat "$(stamp_file "$LS5A")")"
+
+# (rc6) PLANTS THE WORD AND LEAVES THE SCAN ALONE: refused, as before this fix.
+LS5C="$(ls5_tree rc-self-plant)"
+echo FORBIDDEN > "$LS5C/c.txt"; ls5_commit "$LS5C" "plant"
+expect_match "(rc6) a piece that plants the word and leaves scan.sh alone is refused why=release-check" \
+  "spawn-worktree: REFUSED reason=check-failed why=release-check rc=1 branch=rc-self-plant *" \
+  "$(worktree_land "$LS5C" wave/fixture 2>/dev/null)"
+
+# (rc5) CHANGES ONLY THE SCAN, PLANTS NOTHING: judged by the target's scan, and lands. The piece's
+# scan exits 1 whatever it reads, so a landing here is the target's scan having judged.
+LS5B="$(ls5_tree rc-self-improve)"
+printf '#!/bin/bash\necho piece-scan-ran; exit 1\n' > "$LS5B/scan.sh"; ls5_commit "$LS5B" "a stricter scan"
+OUTLS5B="$(worktree_land "$LS5B" wave/fixture 2>"$TMP/ls5-err")"
+expect_match "(rc5) a piece that only changes scan.sh is judged by the target's scan and lands" \
+  "spawn-worktree: LANDED branch=rc-self-improve onto=wave/fixture *" "$OUTLS5B"
+expect_eq "(rc5b) …the scan ran in the target checkout" "$LS5" "$(tail -n 1 "$LS5_SEEN" 2>/dev/null)"
+expect_absent "(rc5c) …and the piece's scan never ran" "piece-scan-ran" "$OUTLS5B$(cat "$TMP/ls5-err")"
+expect_contains "(rc5d) …though the target now carries it" "piece-scan-ran" "$(cat "$LS5/scan.sh")"
 
 section "§LAND-PROOFS: a landing keeps the proof it read (wave-27 T44; REQ-2 AC-2.1, REQ-8; D15)"
 #
