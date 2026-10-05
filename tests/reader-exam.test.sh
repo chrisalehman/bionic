@@ -907,14 +907,21 @@ for n in 1 2; do
     "$(tail -n +2 "$RV/brief-$n.txt"; [ -z "$(tail -c 1 "$RV/brief-$n.txt")" ] || echo)" \
     "$(awk -v n="$n" '$0 ~ "^=== Brief " n " " { f = 1; next } f && $0 == "END" { exit } f && $0 != "BEGIN" { print }' "$RV/prompt-1.txt")"
 done
-expect_contains "R7: the briefs go in the foreground, one after another" "one after another" "$P"
+expect_contains "R7: the briefs given to one call go together, in one message" "together, in one message" "$P"
+expect_absent "R7: …and never one after another, which lets the second reader read the first's record" "after another" "$P"
+printf 'subagent_type: bionic:auditor\nQuestions: evidence\nFiles: /tmp/q/s1/.bionic/docs/record/w/s1-auditor-evidence.md\n' > "$RV/brief-3.txt"
+P3="$(bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt" "$RV/brief-3.txt")"
+expect_contains "R7: three briefs are told to go together, in one message" "Dispatch the 3 briefs below together, in one message" "$P3"
+expect_contains "R7: …each under its own agent type" "=== Brief 3 — subagent_type: bionic:auditor ===" "$P3"
+P1="$(bash "$GEN" "$RV/brief-1.txt")"
+expect_contains "R7: one brief is one dispatch" "Dispatch the brief below." "$P1"
+expect_absent "R7: …with no word of a message of several" "together" "$P1"
 expect_contains "R7: …not in the background" "do not run it in the background" "$P"
 expect_contains "R7: a refusal stops the session and is never retried" "do not try again" "$P"
 expect_contains "R7: a record a reader returned is saved unchanged at the path its brief names" "save the record exactly as the reader returned it at that path" "$P"
 expect_contains "R7: the session replies with each record's path and whether it exists" "whether that file exists" "$P"
-expect_contains "R7: TOGETHER=1 sends the briefs in one message" "together, in one message" \
-  "$(TOGETHER=1 bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt")"
-expect_absent "R7: …and only then" "together, in one message" "$P"
+expect_contains "R7: TOGETHER is not a switch: set to 0 it changes nothing" "together, in one message" \
+  "$(TOGETHER=0 bash "$GEN" "$RV/brief-1.txt" "$RV/brief-2.txt")"
 expect_contains "R7: STEP_ZERO=1 adds the description quote" "quoting each one's description exactly" \
   "$(STEP_ZERO=1 bash "$GEN" "$RV/brief-1.txt")"
 printf 'bionic:critic\nQuestions: structure\n' > "$RV/brief-bad.txt"

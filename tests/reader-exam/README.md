@@ -104,9 +104,9 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
      refusal, to stop and never retry; to save any record a reader returned as text, unchanged,
      at the path its brief names; and to reply with each record's path and whether it exists.
      Each `<brief file>` is the line `subagent_type: <agent type>` and then the brief of
-     step 4, which is dispatched without that first line. The briefs go one after another;
-     `TOGETHER=1` sends them in one message (readers of different types in one build, step 2),
-     and `STEP_ZERO=1` has the session quote the agent descriptions first, as below.
+     step 4, which is dispatched without that first line. The briefs given to one call are the
+     readers that share a build (step 2), so the prompt sends them together, in one message;
+     `STEP_ZERO=1` has the session quote the agent descriptions first, as below.
    - **Loading the built roles.** `--plugin-dir "$PLUGIN"` loads the copy's roles and hooks in
      place of the installed plugin's for that session. The first sitting (wave-27 T22) ran each
      session headless, as `run-session.sh` does, with the prompt opening with
