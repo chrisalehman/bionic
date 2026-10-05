@@ -113,6 +113,29 @@ eg_head_plant() {  # <dir> <plan content> — a plan naming the fixture head get
   return 0
 }
 
+# THE READINGS A RUN AT STEP 6 OR LATER OWES (wave-27 T14; D3, D19). From `current: 6` the gate
+# admits a commit only when the section holds, for each reading question the dealing owes, a
+# `proved: kind=review … question=<q>` line whose newest is not `result=fail`, or a later waiver.
+# Every fixture in this suite at Step 6..9 is about something else, so the two plan writers below
+# hand it what a run there has: one passing reading of each question, in the product writer's
+# shape (lib/proof.sh `proof_line`), placed after `current:`. A plan that already carries a
+# `proved:` or `waived:` line, or one below Step 6, is written as given; EG_NO_READINGS=1 writes
+# every plan as given, for the rows about the readings themselves (25gT, and bash-walls §EG-6).
+eg_readings() {  # <plan content> -> the content, with the readings a Step-6+ run owes
+  if [ -n "${EG_NO_READINGS:-}" ] || printf '%s\n' "$1" | grep -qE '^(proved|waived):'; then
+    printf '%s' "$1"; return 0
+  fi
+  printf '%s' "$1" | EG_H="$EG_HEAD" awk '
+    { print }
+    !done && /^[[:space:]]*current[[:space:]]*:[[:space:]]*[6-9][ab]?[[:space:]]*$/ {
+      for (i = 1; i <= 3; i++) {
+        q = (i == 1 ? "evidence" : (i == 2 ? "adversarial" : "structure"))
+        printf "proved: kind=review head=%s at=2026-10-04T12:00:00Z evidence=record/w27/%s.md question=%s reader=w-read result=pass scope=piece\n", ENVIRON["EG_H"], q, q
+      }
+      done = 1
+    }'
+}
+
 # ---------- engagement (task-engaged-session, AC-6) ----------
 #
 # Since 2026-09-03 this gate asks one question before it asks anything else: did this
@@ -177,7 +200,7 @@ write_project_plan() {
   local project_dir="$1" content="$2" name="${3:-active.md}"
   local path="$project_dir/.bionic/docs/plans/$name"
   eg_head_plant "$project_dir" "$content"
-  printf '%s\n' "$content" > "$path"
+  printf '%s\n' "$(eg_readings "$content")" > "$path"
   touch "$path"
   echo "$path"
 }
@@ -190,7 +213,7 @@ write_plan() {
   local home_dir="$1" content="$2" name="${3:-active.md}"
   local path="$home_dir/.bionic/docs/plans/$name"
   eg_head_plant "$home_dir" "$content"
-  printf '%s\n' "$content" > "$path"
+  printf '%s\n' "$(eg_readings "$content")" > "$path"
   # Ensure mtime > any prior plan in this test by nudging forward.
   touch "$path"
   echo "$path"
@@ -5259,6 +5282,7 @@ s25t_plan() {
   printf '## SDLC State\n\ncurrent: %s\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
   printf 'Step 5:\n  cmd: bash tests/run.sh\n  pass: 331\n  total: 332\n  output: .bionic/docs/plans/task-01-x.plan.md#step-5\n  auditor: 1 row CONFIRMED — report .bionic/tmp/audit.md\n'
   if [ -n "${3:-}" ]; then printf -- '\n- T1: %s\n' "$3"; fi
+  if [ -n "${6:-}" ]; then printf '%s\n' "$6"; fi
 }
 s25t_write() { s25t_plan "$@" > "$s25t_main/.bionic/docs/plans/task-01-x.plan.md"; }
 
@@ -5299,34 +5323,49 @@ else
     "expected a silent allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# --- 25gT(e) / AC-1.3: at current: 6 a `done` row owes its auditor verdict -----------------
+# --- 25gT(e)-(g) / AC-1.3, REWRITTEN BY wave-27 T14 (REQ-2 AC-2.2, D3): at current: 6 a
+# `done` row owes the READINGS, not the words. The two `grep -Ewq` arms that took `auditor` and
+# `critic` on the row's own line as the verdicts are gone; the lane is the evidence gate's one
+# predicate over the section (walls.sh `_eg_refuse_readings`): for each question `facts_owed`
+# deals at the row's effective rigor, a `proved: kind=review … question=<q>` line whose newest is
+# not `result=fail`, or a later `waived:` line. The reading lines are the product writer's
+# shape (lib/proof.sh `proof_line`), at the fixture's head.
+s25t_head="$(git -C "$s25t_main" rev-parse HEAD)"
+s25t_reading() {  # <question> <result> -> one reading line at the fixture head
+  printf 'proved: kind=review head=%s at=2026-10-04T12:00:00Z evidence=record/w27/%s-%s.md question=%s reader=w-read result=%s scope=piece' \
+    "$s25t_head" "$1" "$2" "$1" "$2"
+}
+S25T_READ="$(s25t_reading evidence pass)
+$(s25t_reading adversarial pass)
+$(s25t_reading structure flag)"
 s25t_write 6 done 'bash tests/run.sh 31/31 green'
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "T1" <<<"$HOOK_VSTDERR" && grep -q "auditor" <<<"$HOOK_VSTDERR"; then
-  ok "25gT(e) AC-1.3 the same done row, at current: 6, is refused naming T1 and the auditor lane"
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "task T1 is at current: 6" <<<"$HOOK_VSTDERR" \
+   && grep -q -- "- adversarial: no reading, and no waiver" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(e) AC-1.3 the same done row, at current: 6, with no reading is refused naming T1 and the question"
 else
-  no "25gT(e) AC-1.3 the same done row, at current: 6, is refused naming T1 and the auditor lane" \
-    "expected a block naming T1 + auditor; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25gT(e) AC-1.3 the same done row, at current: 6, with no reading is refused naming T1 and the question" \
+    "expected a block naming T1 + adversarial; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# --- 25gT(f) / AC-1.3: audited demands the critic verdict too ------------------------------
-s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED'
-run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "critic" <<<"$HOOK_VSTDERR"; then
-  ok "25gT(f) AC-1.3 with the auditor verdict but no critic, the audited lane still refuses at current: 6"
-else
-  no "25gT(f) AC-1.3 with the auditor verdict but no critic, the audited lane still refuses at current: 6" \
-    "expected a block naming critic; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
-fi
-
-# --- 25gT(g) / AC-1.3: with both verdicts the same commit is admitted ----------------------
+# --- 25gT(f) / AC-2.2: the words on the row's line are no reading ----------------------------
 s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED, critic no-blocking'
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q -- "- evidence: no reading, and no waiver" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(f) AC-2.2 a line carrying the words auditor and critic, and no reading, is refused at current: 6"
+else
+  no "25gT(f) AC-2.2 a line carrying the words auditor and critic, and no reading, is refused at current: 6" \
+    "expected a block naming evidence; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25gT(g) / AC-1.3: with a reading of each question the same commit is admitted ----------
+s25t_write 6 done 'bash tests/run.sh 31/31 green' audited audited "$S25T_READ"
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] \
    && [ "$HOOK_STDERR" = "evidence-gate: judged by row T1's task arms (run at current: 6)" ]; then
-  ok "25gT(g) AC-1.3 with both verdicts on the line the commit is admitted, and the note names the run's step"
+  ok "25gT(g) AC-1.3 with a reading of each question the commit is admitted, and the note names the run's step"
 else
-  no "25gT(g) AC-1.3 with both verdicts on the line the commit is admitted, and the note names the run's step" \
+  no "25gT(g) AC-1.3 with a reading of each question the commit is admitted, and the note names the run's step" \
     "expected allow + the note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
@@ -5340,59 +5379,57 @@ else
     "expected a block naming T1; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# --- 25gT(i)-(l): THE LANE'S OWN DISCRIMINATIONS, AT THE STEP THE LANE FIRES ---------------
+# --- 25gT(i)-(l), REWRITTEN BY wave-27 T14 (D3): THE LANE AT THE ROW'S EFFECTIVE RIGOR -------
 #
-# Step-gating changed WHEN the verdict arms run, not WHICH verdict each rigor owes nor how a
-# token is matched. Four pins carried those facts at `current: T<n>` before ADR-033 — 22b3
-# and 32k (a peer-reviewed lane, however it is reached, owes an auditor), 22b5 and 22d5b (an
-# audited lane owes a critic on top), 22f7a (`critical` embeds `critic` and is not it) — and
-# at `current: T<n>` there is nothing left for them to assert, so each of those rows is
-# re-authored as the timing control it has become and the fact it carried is pinned here
-# instead, on the same six-column shape, at `current: 6`.
+# What these pinned before wave-27 (a peer-reviewed lane owes an auditor word, an audited lane a
+# critic word, `critical` is not `critic`) went with the word match. What stands is that the lane
+# is keyed to the row's EFFECTIVE rigor and judged on readings: the refusal names that rigor, a
+# reading of each question admits, and the newest reading decides, a later waiver over it.
 
 # (i) THE CELL DRIVES THE LANE, NOT THE FRONTMATTER (22b3, 32k): a `tested` plan whose row
-# RAISES itself to peer-reviewed owes the auditor verdict — the lane is keyed to the
-# EFFECTIVE rigor, never to the frontmatter alone.
-s25t_write 6 done 'bash tests/run.sh 31/31 green' peer-reviewed tested
-run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "auditor" <<<"$HOOK_VSTDERR"; then
-  ok "25gT(i) a tested plan's row RAISED to peer-reviewed owes the auditor verdict at current: 6"
-else
-  no "25gT(i) a tested plan's row RAISED to peer-reviewed owes the auditor verdict at current: 6" \
-    "expected a block naming auditor; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
-fi
-
-# (j) …and peer-reviewed owes the auditor ALONE (22b4's discrimination): the critic arm is
-# the audited lane's, so the same row with an auditor verdict and no critic is admitted.
+# RAISES itself to peer-reviewed is judged at peer-reviewed.
 s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED' peer-reviewed tested
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 0 ]; then
-  ok "25gT(j) …and with the auditor verdict it is admitted — the critic arm is the audited lane's alone"
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "at rigor 'peer-reviewed'" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(i) a tested plan's row RAISED to peer-reviewed is judged at peer-reviewed, and with no reading refused at current: 6"
 else
-  no "25gT(j) …and with the auditor verdict it is admitted — the critic arm is the audited lane's alone" \
+  no "25gT(i) a tested plan's row RAISED to peer-reviewed is judged at peer-reviewed, and with no reading refused at current: 6" \
+    "expected a block naming peer-reviewed; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# (j) …and with a reading of each question it is admitted.
+s25t_write 6 done 'bash tests/run.sh 31/31 green' peer-reviewed tested "$S25T_READ"
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ]; then
+  ok "25gT(j) …and with a reading of each question it is admitted"
+else
+  no "25gT(j) …and with a reading of each question it is admitted" \
     "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# (k) THE CRITIC TOKEN IS A WHOLE WORD (22f7a, F3): `critical` embeds the substring and is
-# not the verdict. The cell raises a tested plan's row to audited, so this carries 22d5b's
-# fact in the same breath — the CELL's audited lane is what demands the critic.
-s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED, fixed a critical path bug' audited tested
+# (k) THE NEWEST READING DECIDES: a structure reading that fails after one that flagged refuses,
+# naming structure and the failing line's evidence.
+s25t_write 6 done 'bash tests/run.sh 31/31 green' audited tested "$S25T_READ
+$(s25t_reading structure fail)"
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "critic" <<<"$HOOK_VSTDERR"; then
-  ok "25gT(k) 'critical' is not a critic verdict — the audited cell's lane still refuses at current: 6"
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && grep -q -- "- structure: the newest reading is result=fail (evidence=record/w27/structure-fail.md)" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(k) the newest structure reading is result=fail: the audited cell's lane refuses at current: 6, naming it"
 else
-  no "25gT(k) 'critical' is not a critic verdict — the audited cell's lane still refuses at current: 6" \
-    "expected a block naming critic; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25gT(k) the newest structure reading is result=fail: the audited cell's lane refuses at current: 6, naming it" \
+    "expected a block naming structure; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# (l) …and the standalone token satisfies it (22f7b's twin), so (k) is a word-boundary pin
-# and not a fixture that refuses everything.
-s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED, critic no-blocking' audited tested
+# (l) …and a waiver later than it admits, so (k) is the order and not a fixture that refuses
+# everything.
+s25t_write 6 done 'bash tests/run.sh 31/31 green' audited tested "$S25T_READ
+$(s25t_reading structure fail)
+waived: question=structure head=$s25t_head by fixture 2026-10-04T13:00:00Z \"ship it\""
 run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ]; then
-  ok "25gT(l) …and a standalone 'critic' token on the same line is admitted"
+  ok "25gT(l) …and a waived: line for structure later than it is admitted"
 else
-  no "25gT(l) …and a standalone 'critic' token on the same line is admitted" \
+  no "25gT(l) …and a waived: line for structure later than it is admitted" \
     "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
@@ -6753,9 +6790,14 @@ s35_unbind() {  # <root> <sid> [empty|none|nofield]
 # evidence — the one variable this section turns. Sets S35_A and S35_B.
 s35_two_plans() {  # <root> <a|b: which plan carries the evidence>
   local root="$1" with="$2" a_body="" b_body=""
+  # FROM wave-27 T14 (D3) A STEP-6 COMMIT IS ADMITTED ON READINGS, not on the Step 6 line, so the
+  # plan that "carries its evidence" carries the readings the run owes as well (eg_readings'
+  # shape), and the other plan carries neither: still one variable, the plan's evidence.
   case "$with" in
-    a) a_body="$step6_body" ;;
-    b) b_body="$step6_body" ;;
+    a) a_body="$step6_body
+$(eg_readings 'current: 6' | sed 1d)" ;;
+    b) b_body="$step6_body
+$(eg_readings 'current: 6' | sed 1d)" ;;
   esac
   S35_A="$root/.bionic/docs/plans/wave-a.plan.md"
   S35_B="$root/.bionic/docs/plans/wave-b.plan.md"
