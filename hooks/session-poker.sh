@@ -1599,7 +1599,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
   fst="$(_units_floor_state "$SCHED_PLAN" 2>/dev/null)"
   case "$fst" in
     covered*|bounded*) : ;;
-    *) UNITS_FACTS_STATE="floor uncovered: the floor proof does not hold at the working head (${fst#*	})"; return 0 ;;
+    *) UNITS_FACTS_STATE="the readings are judged once the floor holds"; return 0 ;;
   esac
   if ! declare -F facts_state >/dev/null 2>&1; then
     [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
