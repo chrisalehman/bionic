@@ -140,6 +140,13 @@
 # caller's last line and never the fact. The fix is never cut, and nor is the verb: a fix over
 # its budget, or a verb that leaves no column for any fact, is refused as before.
 #
+# THE CUT'S COST IS THE LINE'S, NOT THE VALUE'S (wave-27 T50, A-orch-84). `bionic_trunc` re-measures
+# the whole string for every character it drops, so cutting a 20,000-character fact took 43
+# seconds against a hook's timeout of 10. The fact is first shortened by bytes to four times the
+# room it has (`_refuse_bytecut`, to a whole character; four bytes is the most one character
+# takes), so the printed line is the one the unbounded cut prints. The detail still gets the
+# whole fact.
+#
 # THE AUTHOR'S GUARD IS ONE ENVIRONMENT VARIABLE, BIONIC_REFUSE_STRICT. Cutting is right for a
 # value an author could not know and wrong for a literal the author typed too long: that is a
 # defect to find, not to paper over. Set to `1`, the variable makes an over-wide line refuse the
@@ -314,6 +321,32 @@ _refuse_selfrefuse() {
   exit 2
 }
 
+# _refuse_bytecut <string> <bytes> — the string cut to at most <bytes> bytes, and to a whole
+# character: a cut that lands inside one drops that character, lead byte and all. This is the
+# cheap first cut that keeps `bionic_trunc`, which re-measures the whole string for every
+# character it drops, off a value of any length (wave-27 T50): the caller hands it four times
+# the room it has, and four bytes is the most one character takes. The locale is this
+# function's own, as in `bionic_trunc` (width.sh): bytes under either caller locale.
+_refuse_bytecut() {
+  local s="${1:-}" n="${2:-0}" next last
+  local LC_ALL=C
+  [ "${#s}" -gt "$n" ] || { printf '%s' "$s"; return 0; }
+  next="${s:n:1}"
+  s="${s:0:n}"
+  case "$next" in
+    [$'\200'-$'\277'])   # the byte after the cut continues a character: it is not whole
+      while [ -n "$s" ]; do
+        last="${s:${#s}-1}"
+        s="${s%?}"
+        case "$last" in
+          [$'\200'-$'\277']) ;;
+          *) break ;;
+        esac
+      done ;;
+  esac
+  printf '%s' "$s"
+}
+
 # refuse <mode> <verb> <fact> <fix> <detail> — the whole interface. Exits.
 refuse() {
   if [ "$#" -ne 5 ]; then
@@ -377,7 +410,7 @@ refuse() {
       _refuse_selfrefuse "the user line is $line_cols columns, max $BIONIC_LINE_WIDTH" "shorten the fact"
     fi
     fact_whole="$fact"
-    fact="$(bionic_trunc "$fact" "$room")"
+    fact="$(bionic_trunc "$(_refuse_bytecut "$fact" $((room * 4)))" "$room")"
     line="bionic: $verb refused — $fact ($fix)"
     line_cols="$(bionic_cols "$line")"
     if [ "$line_cols" -gt "$BIONIC_LINE_WIDTH" ]; then
