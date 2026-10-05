@@ -353,24 +353,35 @@ detect_env_todo_tools() {
 #   no     — no markers at all. Never asked, or asked and declined — a correctly
 #            configured machine either way.
 #
+# AND TWO FAULTS NO SETUP STEP REPAIRS (wave-27 T46, review pass 14 F2), read
+# before either of the above so neither can be mistaken for them:
+#
+#   malformed  — the markers do not pair up (markers.sh `markers_check`, the one
+#                reader). Setup refuses such a file, so calling it `stale` sent
+#                the reader to a command certain to refuse, and an end marker
+#                alone read `no`.
+#   not-a-file — the rc path is a directory or a dangling link
+#                (markers.sh `markers_regular`); every writer refuses it.
+#
 # The `no`/`stale` split is why the marker test survives at all: it is no longer
-# the predicate, it is what tells a stale block from an absent one. A `claude()`
-# function a user wrote for themselves sits outside the markers and is none of
-# these — not claimed here, not removed by /bionic:remove.
+# the predicate, it is what tells a stale block from an absent one — and it is
+# `markers_get`'s answer, a whole-line block, never a substring of the start
+# marker. A `claude()` function a user wrote for themselves sits outside the
+# markers and is none of these — not claimed here, not removed by /bionic:remove.
 detect_rc_claude_proxy() {
   local rc present=no
-  if rc_get claude-proxy 2>/dev/null; then
+  # The file `rc_get` looks in, so every half of this answer is about one file.
+  # Unresolvable (a shell bionic writes no rc for) leaves it empty and the
+  # answer `no`, which is the truth: there is no file that could hold the block.
+  rc="$(rc_file 2>/dev/null)" || rc=""
+  if [ -n "$rc" ] && ! markers_regular "$rc" >/dev/null; then
+    present=not-a-file
+  elif [ -n "$rc" ] && ! markers_check "$rc" "$RC_START" "$RC_END" >/dev/null; then
+    present=malformed
+  elif rc_get claude-proxy 2>/dev/null; then
     present=yes
-  else
-    # The file `rc_get` just looked in, so the two halves of this answer cannot
-    # come to be about two different files. Unresolvable (a shell bionic writes
-    # no rc for) leaves it empty and the answer `no`, which is the truth: there
-    # is no file that could hold bionic's block.
-    rc="$(rc_file 2>/dev/null)" || rc=""
-    if [ -n "$rc" ] && [ -n "${RC_START:-}" ] && [ -f "$rc" ] && \
-       grep -qF "$RC_START" "$rc" 2>/dev/null; then
-      present=stale
-    fi
+  elif [ -n "$rc" ] && markers_get "$rc" "$RC_START" "$RC_END" >/dev/null; then
+    present=stale
   fi
   echo "env:rc-claude-proxy present=${present}"
   return 0

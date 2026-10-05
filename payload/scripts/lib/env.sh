@@ -390,6 +390,7 @@ rc_set() {  # <item>
   local item="${1:-}" want file body rc
   want="$(rc_default "$item")" || return 1
   file="$(rc_file)" || return 1
+  markers_regular "$file" >/dev/null || return 4
   body="$(bionic_link_target "$file").bionic.body"
   rm -f "$body"
   (umask 077; printf '%s\n' "$want" > "$body") || { rm -f "$body"; return 1; }
@@ -437,6 +438,10 @@ rc_unset() {  # <item>
 #   absent    — no block
 #   malformed — the markers do not pair up (markers.sh `markers_check`); every
 #               door says what it found and where, and writes nothing
+#   not-a-file — the path is a directory, a dangling link, or anything else that
+#               is not a regular file or a link to one (markers.sh
+#               `markers_regular`, wave-27 T46); every door says what it is, and
+#               nothing is created in it or beside it
 #
 # AN EDIT IS NEVER DISCARDED SILENTLY. `markers_set` rebuilds a block whole, so
 # setup on an `edited` block prints the difference and writes only on a second,
@@ -469,11 +474,12 @@ principles_where() {
   return 0
 }
 
-# present | edited | absent | malformed. A shipped file that cannot be read leaves
-# a block reading `edited`, never `present`: nothing can be said to match a text
-# that is not there.
+# present | edited | absent | malformed | not-a-file. A shipped file that cannot
+# be read leaves a block reading `edited`, never `present`: nothing can be said
+# to match a text that is not there.
 principles_state() {
   local mine shipped
+  markers_regular "$(principles_file)" >/dev/null || { printf 'not-a-file\n'; return 0; }
   mine="$(markers_get "$(principles_file)" "$PRINCIPLES_START" "$PRINCIPLES_END"; printf '%s' "rc=$?")"
   case "$mine" in
     *rc=1) printf 'absent\n'; return 0 ;;
@@ -504,6 +510,7 @@ principles_diff() {
 principles_set() {
   local file body rc
   file="$(principles_file)"
+  markers_regular "$file" >/dev/null || return 4
   mkdir -p "${file%/*}" || return 1
   body="$(bionic_link_target "$file").bionic.body"
   rm -f "$body"
