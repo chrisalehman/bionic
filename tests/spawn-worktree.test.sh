@@ -585,7 +585,7 @@ expect_true "the tree survives" test -d "$LTREE"
 
 LOUT="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$LTREE" 2>/dev/null )"; LRC=$?
 expect_match "land from the bound session names the working branch and its checkout" \
-  "spawn-worktree: LANDED branch=wt/20-T1 onto=wave/20-demo checkout=${LWAVE} merge=* removed=${LTREE}" "$LOUT"
+  "spawn-worktree: LANDED branch=wt/20-T1 onto=wave/20-demo checkout=${LWAVE} merge=* removed=${LTREE} proofs=${LR}/.bionic/docs/record/wave-x/landing-proofs.log" "$LOUT"
 expect_eq   "it exits 0" "0" "$LRC"
 expect_eq   "the feature branch did not move" "$LFEAT0" "$(sha_of "$LR" feature/human)"
 expect_eq   "the main checkout is still on the feature branch" "feature/human" \

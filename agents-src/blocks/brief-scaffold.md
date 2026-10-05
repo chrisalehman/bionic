@@ -10,5 +10,6 @@ Subprocess claim: <process pattern>   # a backgrounded watcher, e.g. gh run watc
 Files: <every path the task may create or edit>  # writers; a read-only brief omits this and keeps Suites: none
 Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:
 Re-executes: `<cmd>`
+Questions: <q>[, <q>]  # reader roles only
 Deliverable-waiver: <reason>  # only for a report returned by message
 ```
