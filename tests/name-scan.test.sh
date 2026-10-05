@@ -12,6 +12,12 @@
 #           by the same functions (AC-6.4).
 #   §QUIET  on a hit and on a clean run, neither the output nor the record holds any entry
 #           (AC-6.5).
+#   §PATH   a committed file or directory whose path holds an entry is a hit, named by its
+#           position, never by the path (T32 finding 1).
+#   §BASE   at a head that carries the newest tag the default base is the tag before it
+#           (T32 finding 2).
+#   §LIST   a list line is stripped of edge blanks, a CR and a BOM before use (T32 finding 3).
+#   §TRACE  an inherited GIT_TRACE* file never receives an entry (T32 finding 4).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): every
 # repository is a real `git init` under a mktemp directory, with real commits, real
@@ -204,6 +210,165 @@ scan "$R" "$L" PATH="$TAG_BLIND:$PATH"
 expect_status "POW5: blind tag scan — no power, exit 2" 2 "$RC"
 scan "$R" "$(fx_list pow5b "$E1" "$E4")" PATH="$GREP_BLIND:$PATH" SHIM_RC=1
 expect_status "POW5: a hit does not outrank a blind scan — exit 2 (the power check runs first)" 2 "$RC"
+
+section "§PATH — a path name is published too (T32 finding 1)"
+
+# made-up strings for the T32 rows
+EP="zq-pathname-5512"
+ED="Quilldirname-2204"
+
+# PATH1 a file NAMED after an entry, contents clean: a hit that names the path's position
+R="$TMP/path1"; fx_repo "$R"
+printf 'plain\n' > "$R/b.txt"; mkdir -p "$R/docs"; printf 'plain\n' > "$R/docs/$EP-notes.md"
+printf 'plain\n' > "$R/z.txt"; fx_commit "$R" "add files"
+L="$(fx_list path1 "$EP")"
+scan "$R" "$L"
+WANT="$(git -C "$R" ls-tree -r --name-only HEAD | grep -n -i -F -- "$EP" | cut -d: -f1)"
+expect_nonempty "PATH1: the fixture's path sits at a position in tree order (extractor non-empty)" "$WANT"
+expect_status "PATH1: a file named after an entry, contents clean, exits 1" 1 "$RC"
+expect_eq "PATH1: the hit names the path by its position in git ls-tree order" "HIT entry=1 at path #$WANT" "$(hits)"
+expect_absent "PATH1: neither the entry nor the path is in the output" "$EP" "$OUT"
+expect_absent "PATH1: nor the path's other half" "notes.md" "$OUT"
+
+# PATH2 a DIRECTORY named after an entry, case-insensitively
+R="$TMP/path2"; fx_repo "$R"
+mkdir -p "$R/$(printf '%s' "$ED" | tr 'A-Z' 'a-z')/inner"; printf 'plain\n' > "$R/$(printf '%s' "$ED" | tr 'A-Z' 'a-z')/inner/f.txt"
+printf 'plain\n' > "$R/other.txt"; fx_commit "$R" "add dir"
+L="$(fx_list path2 "$ED" "$EP")"
+scan "$R" "$L"
+expect_status "PATH2: a directory named after an entry exits 1" 1 "$RC"
+expect_regex "PATH2: the hit is the directory's file, entry 1, by position" '^HIT entry=1 at path #[0-9]+$' "$(hits)"
+expect_no_regex "PATH2: an entry in no path is not a hit (same output)" 'entry=2' "$(hits)"
+expect_absent "PATH2: the directory name is not printed" "inner" "$OUT"
+
+# PATH3 only the committed tree is read: an untracked file named after an entry is not a hit
+R="$TMP/path3"; fx_repo "$R"
+printf 'plain\n' > "$R/$EP.txt"; fx_commit "$R" "add named"
+printf 'plain\n' > "$R/$ED.txt"
+L="$(fx_list path3 "$EP" "$ED")"
+scan "$R" "$L"
+expect_regex "PATH3: the committed path is a hit" '^HIT entry=1 at path #[0-9]+$' "$(hits)"
+expect_no_regex "PATH3: a path only in the working tree is not read (same output)" 'entry=2' "$(hits)"
+
+# PATH4 the power check plants an entry in a file NAME; a path scan that cannot find it refuses
+R="$TMP/path4"; fx_repo "$R"
+L="$(fx_list path4 "$E4" "$E3")"
+LS_BLIND="$(shim lstree ls-tree)"
+scan "$R" "$L" PATH="$PASS_SHIM:$PATH"
+expect_status "PATH4: through a pass-through shim the clean scan exits 0 (control)" 0 "$RC"
+scan "$R" "$L" PATH="$LS_BLIND:$PATH"
+expect_status "PATH4: blind path scan — no power, exit 2, not a clean 0" 2 "$RC"
+expect_contains "PATH4: and the refusal names the paths scan" "the paths scan" "$OUT"
+
+section "§BASE — the default base at a tagged head (T32 finding 2)"
+
+EB="zq-rangemsg-9034"; EO="Quilloldmsg-6618"
+# BASE1 head carries the newest tag (annotated) and there is an earlier one: the range is prev..head
+R="$TMP/base1"; fx_repo "$R"
+git -C "$R" commit -q --allow-empty -m "before the previous tag $EO"
+git -C "$R" tag -a v1.9.0 -m "previous"
+fx_commit "$R" "inside the release $EB"
+fx_commit "$R" "more"
+git -C "$R" tag -a v2.0.0 -m "release"
+PREV="$(git -C "$R" rev-parse --short=12 'v1.9.0^{commit}')"
+SHA="$(git -C "$R" rev-parse HEAD~1 | cut -c1-12)"
+L="$(fx_list base1 "$EB" "$EO")"
+scan "$R" "$L"
+expect_status "BASE1: a message between the previous tag and a tagged head exits 1" 1 "$RC"
+expect_contains "BASE1: the in-release message is a hit, at its commit" "HIT entry=1 at message $SHA" "$(hits)"
+expect_no_regex "BASE1: a message before the previous tag is not read (same output)" 'entry=2' "$(hits)"
+expect_contains "BASE1: the tally's base is the previous tag" "base=$PREV" "$OUT"
+
+# BASE2 a lightweight tag at the head, a lightweight tag before it: the same
+R="$TMP/base2"; fx_repo "$R"
+fx_commit "$R" "in range $EB"
+git -C "$R" tag v0.2
+L="$(fx_list base2 "$EB")"
+scan "$R" "$L"
+expect_status "BASE2: lightweight tags — the message after v0.1 and under a tagged v0.2 head is found" 1 "$RC"
+
+# BASE3 the only tag there is sits at the head: the range is the whole history
+R="$TMP/base3"; mkdir -p "$R"; git -C "$R" init -q --template=; git -C "$R" config commit.gpgsign false
+git -C "$R" commit -q --allow-empty -m "root $EB"
+git -C "$R" commit -q --allow-empty -m "second"
+git -C "$R" tag v1.0.0
+L="$(fx_list base3 "$EB")"
+scan "$R" "$L"
+expect_status "BASE3: the only tag at the head — the whole history is read, exit 1" 1 "$RC"
+expect_regex "BASE3: the root message is a hit" 'entry=1 at message' "$(hits)"
+expect_contains "BASE3: and the tally has no base" "base=none" "$OUT"
+
+# BASE4 two tags at the head: both are skipped, the one before them is the base
+R="$TMP/base4"; fx_repo "$R"
+fx_commit "$R" "in range $EB"
+git -C "$R" tag v0.2; git -C "$R" tag -a v0.2-rc -m "rc"
+L="$(fx_list base4 "$EB" "$EO")"
+scan "$R" "$L"
+expect_regex "BASE4: with two tags at the head the earlier release is the base, the message is a hit" 'entry=1 at message' "$(hits)"
+expect_contains "BASE4: base is v0.1's commit" "base=$(git -C "$R" rev-parse --short=12 'v0.1^{commit}')" "$OUT"
+
+# BASE5 BIONIC_CHECK_BASE still wins at a tagged head
+R="$TMP/base1"
+FIRST="$(git -C "$R" rev-list --max-parents=0 HEAD)"
+scan "$R" "$(fx_list base5 "$EO")" BIONIC_CHECK_BASE="$FIRST"
+expect_regex "BASE5: an explicit base wider than the previous tag reads the older message" 'entry=1 at message' "$(hits)"
+scan "$R" "$(fx_list base5b "$EO")"
+expect_status "BASE5: the same entry with the default base is clean (differential)" 0 "$RC"
+
+section "§LIST — a list line is read as the scan will use it (T32 finding 3)"
+
+EL="zq-trail-8821"; EM="mxv9 plover"
+R="$TMP/list1"; fx_repo "$R"
+printf 'see %s.\nand %s.\n' "$EL" "$EM" > "$R/notes.txt"; fx_commit "$R" "add notes"
+# lraw <name> <printf format> — a list file written with printf escapes; prints its path
+lraw() { local f="$TMP/lists/$1"; printf "$2" "$EL" > "$f"; printf '%s' "$f"; }
+scan "$R" "$(lraw lst0 '%s\n')"
+expect_status "LIST: the clean line is a hit (control)" 1 "$RC"
+expect_contains "LIST: and counts one entry" "entries=1" "$OUT"
+for v in 'trailing space|%s \n' 'trailing tab|%s\t\n' 'trailing spaces and tab|%s \t \n' 'CR LF|%s\r\n' 'trailing space then CR LF|%s \r\n' 'BOM|\357\273\277%s\n' 'BOM and CR LF|\357\273\277%s\r\n' 'no final newline, trailing space|%s '; do
+  scan "$R" "$(lraw lstv "${v#*|}")"
+  expect_regex "LIST: ${v%%|*} — read as the entry and found" '^HIT entry=1 at file notes\.txt:1$' "$(hits)"
+  expect_contains "LIST: ${v%%|*} — one entry" "entries=1" "$OUT"
+done
+# an entry with an inner space keeps it; a leading space is part of the entry
+scan "$R" "$(fx_list lst1 "$EM ")"
+expect_regex "LIST: an entry with an inner space and a trailing space is found" '^HIT entry=1 at file notes\.txt:2$' "$(hits)"
+EV="zq-lead-3390"
+printf 'x%s\n' "$EV" > "$R/lead.txt"; fx_commit "$R" "add lead"
+scan "$R" "$(fx_list lst2 " $EV")"
+expect_status "LIST: a LEADING space stays part of the entry — no match against 'x<entry>', and the power check passes" 0 "$RC"
+expect_contains "LIST: (same run) the entry was read" "entries=1" "$OUT"
+printf 'x %s\n' "$EV" > "$R/lead2.txt"; fx_commit "$R" "add lead2"
+scan "$R" "$(fx_list lst2b " $EV")"
+expect_regex "LIST: and with a file that has the space before it, the entry is a hit" '^HIT entry=1 at file lead2\.txt:1$' "$(hits)"
+# blank-after-stripping lines are skipped and still counted
+printf ' \n\t\n\r\n%s \n' "$EL" > "$TMP/lists/lst3"
+scan "$R" "$TMP/lists/lst3"
+expect_regex "LIST: lines blank after stripping are skipped but counted — the entry is line 4" '^HIT entry=4 at file notes\.txt:1$' "$(hits)"
+expect_contains "LIST: and they are not entries" "entries=1" "$OUT"
+printf ' \n\t\n\r\n\357\273\277\n' > "$TMP/lists/lst4"
+scan "$R" "$TMP/lists/lst4"
+expect_status "LIST: a list of only blank lines exits 0" 0 "$RC"
+expect_contains "LIST: and prints entries=0" "entries=0" "$OUT"
+printf '\357\273\277# a comment\n%s\n' "$EL" > "$TMP/lists/lst5"
+scan "$R" "$TMP/lists/lst5"
+expect_regex "LIST: a comment behind a BOM is skipped and counted — the entry is line 2" '^HIT entry=2 at file notes\.txt:1$' "$(hits)"
+expect_contains "LIST: one entry" "entries=1" "$OUT"
+
+section "§TRACE — an inherited git trace file does not record an entry (T32 finding 4)"
+
+R="$TMP/trace1"; fx_repo "$R"
+printf '%s\n' "$E1" > "$R/b.txt"; fx_commit "$R" "add b"
+L="$(fx_list trace1 "$E1")"
+mkdir -p "$TMP/trace"
+# control: the trace mechanism records the entry when git is called directly with the variable set
+GIT_TRACE="$TMP/trace/ctl" git -C "$R" grep -n -i -F -e "$E1" HEAD >/dev/null 2>&1
+expect_true "TRACE: control — a direct git call with GIT_TRACE set records the entry" grep -q -F -- "$E1" "$TMP/trace/ctl"
+scan "$R" "$L" GIT_TRACE="$TMP/trace/t1" GIT_TRACE2="$TMP/trace/t2" GIT_TRACE2_EVENT="$TMP/trace/t3" GIT_TRACE2_PERF="$TMP/trace/t4" GIT_TRACE_PACKET="$TMP/trace/t5" GIT_TRACE_SETUP="$TMP/trace/t6"
+expect_status "TRACE: the run still finds the hit" 1 "$RC"
+expect_regex "TRACE: and prints it (positive on the same run)" '^HIT entry=1 at file b\.txt:1$' "$(hits)"
+TRACED="$(cat "$TMP"/trace/t[1-6] 2>/dev/null | grep -c -i -F -- "$E1" || true)"
+expect_eq "TRACE: no trace file the run was pointed at holds the entry" "0" "$TRACED"
 
 section "§QUIET — no entry is printed or recorded"
 
