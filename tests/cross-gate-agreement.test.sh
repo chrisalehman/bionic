@@ -14037,6 +14037,23 @@ for deal_r in tested peer-reviewed audited; do
 done
 expect_eq "DEAL every reader role is dealt a question at some rigor" "$DEAL_ROLES" \
   "$(for deal_r in tested peer-reviewed audited; do deal "$deal_r" task; done | awk -F'\t' '$1 == "review" { print $3 }' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+# THE READER ROLES ARE READ-ONLY ROLES (wave-27 T45; review pass 13 F8). PROOF_READER_ROLES is the
+# set the fact verb admits a reader under; roster.sh's ROLE_READONLY_SET is the set the walls run
+# as readers. A reader role outside it would be dealt a question and walled as a writer, so every
+# member of the first is a member of the second. A doctored roster.sh without bionic:reviewer splits.
+DEAL_ROSTER="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
+deal_outside() {  # <roster.sh> -> each reader role its ROLE_READONLY_SET lacks, one per line
+  RO="$(bash -c '. "$1" >/dev/null 2>&1; printf "%s" "$ROLE_READONLY_SET"' _ "$1")" ROLES="$DEAL_ROLES" awk 'BEGIN {
+    n = split(ENVIRON["ROLES"], r, " "); for (i = 1; i <= n; i++) if (index(" " ENVIRON["RO"] " ", " " r[i] " ") == 0) print r[i] }'
+}
+expect_ne "DEAL roles precondition: roster.sh's read-only set is read" "" \
+  "$(bash -c '. "$1" >/dev/null 2>&1; printf "%s" "$ROLE_READONLY_SET"' _ "$DEAL_ROSTER")"
+expect_eq "DEAL every reader role (PROOF_READER_ROLES) is inside roster.sh's read-only set" "" "$(deal_outside "$DEAL_ROSTER")"
+DEAL_RO_MUT="$SANDBOX/fx/deal-roster.sh.mut"; mkdir -p "$SANDBOX/fx"
+anchor "$DEAL_ROSTER" 'bionic:critic bionic:reviewer Explore' 1
+sed 's/bionic:critic bionic:reviewer Explore/bionic:critic Explore/' "$DEAL_ROSTER" > "$DEAL_RO_MUT"
+expect_eq "DEAL roles mutation: a roster.sh whose read-only set lacks bionic:reviewer splits from the reader roles" \
+  "bionic:reviewer" "$(deal_outside "$DEAL_RO_MUT")"
 expect_eq "DEAL a rigor outside the three deals nothing" "" "$(deal standard task)"
 expect_ne "DEAL …and says so by its exit" "0" "$(bash -c '. "$1" && facts_owed standard task >/dev/null 2>&1; echo $?' _ "$DEAL_LIB")"
 # THE DOCTORED SITE: a copy whose audited dealing gives structure to the critic.
