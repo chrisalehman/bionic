@@ -157,7 +157,7 @@
   <!-- ============================ commit rhythm ============================ -->
   <rect x="40" y="518" width="1320" height="48" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
   <text x="58" y="540" font-size="11.5" font-weight="700" letter-spacing="1.2" fill="#16191d">COMMIT RHYTHM</text>
-  <text x="196" y="538" font-size="11" fill="#3a424c">Roughly one checkpoint commit per step, and every one of them passes canonical-sdlc-evidence-gate.sh. Not a numbered step — a rhythm the length of the row above.</text>
+  <text x="196" y="538" font-size="11" fill="#3a424c">Roughly one checkpoint commit per step, and every one of them passes bash-walls.sh. Not a numbered step — a rhythm the length of the row above.</text>
   <text x="196" y="556" font-size="11" fill="#3a424c">Update <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">## SDLC State</tspan> BEFORE staging: the gate reads the file on disk, never the diff. There is no <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">commit:</tspan> field to fill in — the SHA lives in git.</text>
 
   <!-- ============================ shape modifiers ============================ -->

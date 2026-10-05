@@ -87,9 +87,10 @@ and what it leaves behind.
 - `intent` is what the deliverable is: `build`, `bugfix`, `refactor`, `tune`, `spike`, or
   `incident-response`.
 - `rigor` is how hard the evidence has to try to lie. `tested` means test-driven, red before
-  green, closing with a six-axis self-review. `peer-reviewed` adds a separate spec and an
-  independent auditor over the evidence. `audited` adds an independent critic over the code.
-  Each level contains the one below it.
+  green, with one independent critic reading the evidence, the code and its structure.
+  `peer-reviewed` adds a separate spec and gives the evidence to an independent auditor.
+  `audited` gives the structure to an independent reviewer. Each level contains the one below
+  it.
 - `scale` is the unit of decomposition: `task` for several small pieces inside one session,
   `wave` for a change with its own spec, plan and branch, `epic` for work that carves waves
   and runs only the first four steps itself.
