@@ -10318,7 +10318,7 @@ expect_eq "T57-N6 a made fixture leaves nothing lost (the positive)" "|ok" "$FIX
 # macOS /var/…), while the project root the wall reads is the physical one (/private/var/…).
 t57_abs_gate() {  # <tag> <role> <rigor> <artifact> [<files line>] -> R, as q49_gate's
   local repo; repo=$(make_repo "rt57-$1" yes); write_attestation "$repo" "$SID_A"; q_rigor "$repo" "$3"
-  mkdir -p "$repo/.bionic/docs/record/w" "$SANDBOX/rt57-$1-elsewhere"
+  mkdir -p "$repo/.bionic/docs/record/w/real" "$SANDBOX/rt57-$1-elsewhere"
   ln -s "$SANDBOX/rt57-$1-elsewhere" "$repo/.bionic/docs/record/w/out"
   local brief="Your task: read.
 Expected artifact: ${4//@R@/$repo}
@@ -10340,6 +10340,12 @@ expect_contains "T57-N1 an absolute path through a symlinked directory that land
 T57_QS='adversarial, structure' t57_abs_gate abs4 bionic:critic peer-reviewed "@R@/.bionic/docs/record/w/a.md" "Files: @R@/.bionic/docs/record/new/deep/b.md"
 expect_eq "T57-N1 a path whose directories do not exist yet under a real record root is counted" "allow:adversarial,structure" "$R"
 expect_eq "T57-N1 …and the fixture really has no such directory" "absent" "$([ -e "$REPO/.bionic/docs/record/new" ] && echo present || echo absent)"
+# one rule for every path (A-T57.11 ruling): a RELATIVE path is anchored at the project root and
+# then placed as an absolute one is, so the wall never counts a record the fact verb would refuse
+T57_QS='adversarial, structure' t57_abs_gate rel1 bionic:critic peer-reviewed ".bionic/docs/record/w/a.md" "Files: .bionic/docs/record/w/out/b.md"
+expect_contains "T57-N1 a relative path through a symlinked directory that lands outside the record root is no record" "dealt 2 questions, names 1 record" "$R"
+T57_QS='adversarial, structure' t57_abs_gate rel2 bionic:critic peer-reviewed ".bionic/docs/record/w/a.md" "Files: .bionic/docs/record/w/real/b.md"
+expect_eq "T57-N1 …while the same path through a real directory is counted (the control)" "allow:adversarial,structure" "$R"
 
 # a reader's Files: asks for no derivation (review pass 38 B1, A-orch-105). These fixtures have no
 # impact-command:, the shipped default.

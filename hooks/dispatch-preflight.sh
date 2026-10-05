@@ -2271,7 +2271,7 @@ Then retry the dispatch."
     # outside the tree or the artifact spelled again (`x/../a.md`, `//`), each of which the fact
     # verb refuses. So a path counts only when it sits under `<docs-root>/record/` (lib/roots.sh
     # `docs_root`, the one the fact verb resolves, loaded through run.sh) after `.`, `..` and
-    # doubled slashes are resolved in the text, a relative path read from the project root; it
+    # doubled slashes are resolved, a relative path read from the project root; it
     # does not end in `/`; and it is compared in that resolved form. Any other path may stay on
     # Files: (a scratch file) and is not a record.
     #
@@ -2280,15 +2280,16 @@ Then retry the dispatch."
     # is its project's `/private/var/…` record. Here an absolute path's longest existing directory
     # is resolved physically and the rest in the text, and the record root the same way, so the
     # wall and the verb give one answer for one path: a symlinked directory that lands outside
-    # the root is no record, and a record directory the reader has not made yet still is. A
-    # relative path stays text, read from the project root.
-    _dp_rec_place() {  # <path> -> the path with an absolute one's longest existing directory physical
+    # the root is no record, and a record directory the reader has not made yet still is. ONE RULE
+    # FOR EVERY PATH (the A-T57.11 ruling): a relative path is anchored at the project root first
+    # and then placed the same way, so a link under record/ that leads out of it is no record
+    # whichever way the path is spelt.
+    _dp_rec_place() {  # <path> -> the path anchored at the root, its longest existing directory physical
       local p="$1" d rest phys
-      case "$p" in
-        /*) d="${p%/*}"; rest="${p##*/}"
-            while [ -n "$d" ] && [ ! -d "$d" ]; do rest="${d##*/}/$rest"; d="${d%/*}"; done
-            phys="$(cd "${d:-/}" 2>/dev/null && pwd -P)" && p="${phys%/}/$rest" ;;
-      esac
+      case "$p" in /*) : ;; *) p="$BIONIC_ROOT/$p" ;; esac
+      d="${p%/*}"; rest="${p##*/}"
+      while [ -n "$d" ] && [ ! -d "$d" ]; do rest="${d##*/}/$rest"; d="${d%/*}"; done
+      phys="$(cd "${d:-/}" 2>/dev/null && pwd -P)" && p="${phys%/}/$rest"
       printf '%s\n' "$p"
     }
     if [ -n "${_q_admitted:-}" ]; then
