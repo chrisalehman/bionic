@@ -331,6 +331,7 @@ detect_env_todo_tools() {
 # `claude()` proxy setup writes, inside its own marker pair:
 #
 #     # ─── bionic:rc:start ───
+#     unalias claude 2>/dev/null || true
 #     claude() { command claude --allow-dangerously-skip-permissions "$@"; }
 #     # ─── bionic:rc:end ───
 #

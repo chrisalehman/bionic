@@ -78,6 +78,10 @@ command -v jq  >/dev/null 2>&1 || { echo "rc-item.test.sh: jq is required"; exit
 RC_START_LIT='# ─── bionic:rc:start ───'
 RC_END_LIT='# ─── bionic:rc:end ───'
 PROXY_LINE='claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
+# The block's first line clears an alias named `claude`, which would otherwise expand
+# into the function's definition line (wave-27 T75, A-orch-185). The body is both.
+PROXY_UNALIAS='unalias claude 2>/dev/null || true'
+PROXY_BODY="$(printf '%s\n%s' "$PROXY_UNALIAS" "$PROXY_LINE")"
 DOCTOR_ROW_LABEL='claude() shell proxy'
 
 # ---------------------------------------------------------------------------
@@ -289,8 +293,8 @@ expect_nonempty "env.sh carries an RC_END constant"   "$ENV_RC_END"
 expect_eq "env.sh RC_START is the spec's literal" "$RC_START_LIT" "$ENV_RC_START"
 expect_eq "env.sh RC_END is the spec's literal"   "$RC_END_LIT"   "$ENV_RC_END"
 
-expect_eq "rc_default claude-proxy is the proxy function, exactly" \
-  "$PROXY_LINE" "$(env_run "$SB_A" /bin/zsh -- rc_default claude-proxy)"
+expect_eq "rc_default claude-proxy is the unalias line and the proxy function, exactly" \
+  "$PROXY_BODY" "$(env_run "$SB_A" /bin/zsh -- rc_default claude-proxy)"
 expect_empty "rc_default refuses a name that is not bionic's" \
   "$(env_run "$SB_A" /bin/zsh -- rc_default not-an-item 2>/dev/null)"
 
@@ -321,7 +325,7 @@ BLOCK_AFTER="$(rc_block_lines "$SB_YES/.zshrc")"
 TYPE_AFTER="$(type_claude "$SB_YES")"
 
 expect_nonempty "after a consented setup the marker block holds a line" "$BLOCK_AFTER"
-expect_eq "the block holds exactly the proxy function" "$PROXY_LINE" "$BLOCK_AFTER"
+expect_eq "the block holds exactly the unalias line and the proxy function" "$PROXY_BODY" "$BLOCK_AFTER"
 expect_empty  "before setup the same file has no marker block" "$BLOCK_BEFORE"
 
 expect_contains "after setup the shell reports claude as a function" "shell function" "$TYPE_AFTER"
@@ -333,6 +337,7 @@ expect_contains "setup states the why before it asks" "bypass" "$SETUP_OUT"
 # planted file, byte for byte.
 {
   printf '%s\n' "$RC_START_LIT"
+  printf '%s\n' "$PROXY_UNALIAS"
   printf '%s\n' "$PROXY_LINE"
   printf '%s\n' "$RC_END_LIT"
 } > "$TMP/expected-block"
@@ -555,8 +560,8 @@ STALE_GET_AFTER=$?
 expect_eq "a consented setup over a stale block leaves the rc well-formed" \
   "ok" "$(zsh_syntax_rc "$SB_ST1/.zshrc")"
 expect_nonempty "the stale fixture had a block before setup" "$STALE_BLOCK_BEFORE"
-expect_eq "after setup the block holds exactly the proxy function" \
-  "$PROXY_LINE" "$(rc_block_lines "$SB_ST1/.zshrc")"
+expect_eq "after setup the block holds exactly the unalias line and the proxy function" \
+  "$PROXY_BODY" "$(rc_block_lines "$SB_ST1/.zshrc")"
 expect_eq "after setup the proxy line appears exactly once" "1" \
   "$(count_lines_equal "$SB_ST1/.zshrc" "$PROXY_LINE")"
 expect_eq "after setup the stale line is gone" "0" \
@@ -660,9 +665,9 @@ plant_rc_shape() {  # <file> <shape>
   case "$2" in
     start-only) printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" 'export MINE=1' >> "$1" ;;
     end-only)   printf '%s\n' "$RC_END_LIT" 'export MINE=1' >> "$1" ;;
-    two-starts) printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$1" ;;
-    two-blocks) printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" 'export MINE=1' \
-                  "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$1" ;;
+    two-starts) printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" >> "$1" ;;
+    two-blocks) printf '%s\n' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" 'export MINE=1' \
+                  "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" >> "$1" ;;
   esac
 }
 rc_shape_line() {
@@ -855,7 +860,7 @@ expect_absent "T51 five-line rc: …the fix line does not route to setup either"
 # so the one item on the page that would write this rc has nothing to do and the
 # whole file can be compared (A-T51.3); the bare five lines follow.
 SB_T51A="$(new_sandbox)"; plant_t51_five "$SB_T51A/.zshrc"
-printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$SB_T51A/.zshrc"
+printf '%s\n' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" >> "$SB_T51A/.zshrc"
 cp "$SB_T51A/.zshrc" "$TMP/t51-all.before"
 T51A_INODE="$(t51_inode "$SB_T51A/.zshrc")"
 T51A_SET="$(t51_setup "$SB_T51A" --all y)"
@@ -1058,7 +1063,7 @@ t55_plant() {  # <file> <shape> <door>
     shared)  printf '%s\n' 'export A=1' "${T55_EXACT}; export MYTOKEN=abc" > "$1" ;;
     in-if)   printf '%s\n' 'if [ -n "$WORK" ]; then' "  alias claude='claude --dangerously-skip-permissions --model opus'" 'fi' > "$1" ;;
   esac
-  [ "$3" = "setup-all" ] && printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$1"
+  [ "$3" = "setup-all" ] && printf '%s\n' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" >> "$1"
   return 0
 }
 
@@ -1126,7 +1131,7 @@ for T55_SHAPE in line7 indented crlf nofinal lastline; do
     # fixture's own append would fuse with bionic's line, so that pair is not a shape.
     [ "$T55_SHAPE:$T55_DOOR" = "lastline:setup-all" ] && continue
     SB_T55X="$(new_sandbox)"; t55_exact "$SB_T55X/.zshrc" "$TMP/t55x-unused" "$T55_SHAPE"
-    [ "$T55_DOOR" = "setup-all" ] && printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" >> "$SB_T55X/.zshrc"
+    [ "$T55_DOOR" = "setup-all" ] && printf '%s\n' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" >> "$SB_T55X/.zshrc"
     cp "$SB_T55X/.zshrc" "$TMP/t55x-before"; T55_INODE="$(t51_inode "$SB_T55X/.zshrc")"
     T55_N="$(t55_exact_line "$T55_SHAPE")"
     T55_L="T55 exact ${T55_SHAPE} (${T55_DOOR})"
@@ -1148,7 +1153,7 @@ for T55_DOOR in setup-only setup-all rm-payload rm-standalone rm-all; do
   printf '%s\n' 'export A=1' "$T55_EXACT" 'export B=2' "${T55_EXACT}; export MYTOKEN=abc" > "$SB_T55M/.zshrc"
   cp "$SB_T55M/.zshrc" "$TMP/t55m-expected"
   if [ "$T55_DOOR" = "setup-all" ]; then
-    printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" | tee -a "$SB_T55M/.zshrc" >> "$TMP/t55m-expected"
+    printf '%s\n' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" | tee -a "$SB_T55M/.zshrc" >> "$TMP/t55m-expected"
   fi
   T55M_OUT="$(t55_door "$SB_T55M" "$T55_DOOR" y)"
   expect_same_bytes "T55 both kinds (${T55_DOOR}): both lines stay, byte for byte" "$TMP/t55m-expected" "$SB_T55M/.zshrc"
@@ -1326,7 +1331,7 @@ t66_plant() {  # <file> <expected> <shape> <line> [verdict]
   esac
   if [ "${5:-left}" = "removed" ]; then awk -v l="$L" '$0 != l' "$1" > "$2"; else cp "$1" "$2"; fi
 }
-t66_pageblock() { printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT"; }
+t66_pageblock() { printf '%s\n' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT"; }
 
 # B1 THROUGH EVERY DOOR. <verdict> is what the rc's own shell rules: `left` keeps the
 # rc byte for byte and names line 2 once by number; `removed` takes bionic's line and
@@ -2086,5 +2091,88 @@ printf 'mine\n' > "$T75_RC.bionic.tmp"
 T75_OUT="$(t66_door "$T75_SB" rm-payload y claude-proxy)"
 expect_contains "T75 S5: the claude() item refused the read-only rc" "read-only" "$T75_OUT"
 expect_eq "T75 S5: …and the user's own <rc>.bionic.tmp is kept" "mine" "$(cat "$T75_RC.bionic.tmp" 2>/dev/null)"
+
+
+# ---------------------------------------------------------------------------
+section "wave-27 T75: bionic's claude() block clears the name it defines (A-orch-185)"
+# ---------------------------------------------------------------------------
+#
+# With an alias named `claude` standing above the block (bionic's retired bare alias,
+# which no door removes any more, or the user's own), zsh and interactive bash expand
+# the alias into the function's definition line: a syntax error at every shell start,
+# nothing of the rc after it run, the alias still in force. `-n` cannot see it: no
+# alias is expanded under `-n`. So the block's body opens with a line that clears the
+# name and can never fail the rc, then the function line as before. BEHAVIOUR here is
+# the rc SOURCED as each shell reads it, in a throwaway home, on the suite's own lines:
+# zsh, and /bin/bash 3.2 interactive (`-i`, where aliases expand).
+t75p_source() {  # <shell> <home> <rc> — `AFTER=<v> TYPE=<t>|ERR=<what the rc said on stderr>`
+  local out err
+  case "$2" in "$TMP"/home-*) ;; *) echo "T75 GUARD: home '$2' is not under the throwaway root" >&2; exit 1 ;; esac
+  case "$1" in
+    zsh) out="$(env -i HOME="$2" PATH=/usr/bin:/bin /bin/zsh -f -c '. "$1"; echo "AFTER=${AFTER:-}"; echo "TYPE=$(whence -w claude)"' t "$3" 2>"$2/.t75p-err" </dev/null)" ;;
+    *)   out="$(env -i HOME="$2" PATH=/usr/bin:/bin /bin/bash --norc --noprofile -i -c '. "$1"; echo "AFTER=${AFTER:-}"; echo "TYPE=$(type -t claude)"' t "$3" 2>"$2/.t75p-err" </dev/null)" ;;
+  esac
+  # bash -i with no terminal says it has no job control: the harness's line, not the rc's.
+  err="$(grep -v 'no job control in this shell' "$2/.t75p-err")"
+  printf '%s|ERR=%s' "$(printf '%s' "$out" | tr '\n' ' ')" "$err"
+}
+for T75_SH in zsh bash; do
+  T66_SHELL="/bin/$T75_SH"
+  for T75_V in alias noalias sete-alias sete-noalias; do
+    T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+    {
+      case "$T75_V" in sete-*) printf '%s\n' 'set -e' ;; esac
+      case "$T75_V" in *noalias) ;; *) printf '%s\n' "alias claude='echo ALIAS'" ;; esac
+      printf '%s\n' 'export BEFORE=1'
+    } > "$T75_RC"
+    T75_OUT="$(t66_door "$T75_SB" setup-only y claude-proxy)"
+    printf '%s\n' 'export AFTER=1' >> "$T75_RC"
+    T75_L="T75 claude() (${T75_SH}, ${T75_V})"
+    expect_contains "${T75_L}: setup wrote the block (the rows below are not vacuous)" "$PROXY_BODY" "$(rc_block_lines "$T75_RC")"
+    T75_ST="$(t75p_source "$T75_SH" "$T75_SB" "$T75_RC")"
+    expect_contains "${T75_L}: the line after the block runs" "AFTER=1 " "$T75_ST"
+    expect_contains "${T75_L}: …and claude is the function" "function" "${T75_ST%%|*}"
+    expect_eq "${T75_L}: …and the rc says nothing on stderr" "ERR=" "${T75_ST#*|}"
+  done
+  # The old one-line body under the same alias: the error this row exists for (kept as
+  # its mutant, so the rows above can fail).
+  T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+  printf '%s\n' "alias claude='echo ALIAS'" "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" 'export AFTER=1' > "$T75_RC"
+  T75_ST="$(t75p_source "$T75_SH" "$T75_SB" "$T75_RC")"
+  expect_absent "T75 claude() (${T75_SH}, old body under an alias): the line after the block does not run" "AFTER=1 " "$T75_ST"
+  expect_ne "T75 claude() (${T75_SH}, old body under an alias): …and the rc errors on stderr" "ERR=" "${T75_ST#*|}"
+done
+
+# BYTES. Setup on an rc holding the old block (where setup wrote it, at the end) writes
+# exactly the new block and no other byte; setup twice is the same bytes; remove leaves
+# the rc as it was before setup.
+T66_SHELL=/bin/zsh
+T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+printf '%s\n' 'export A=1' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT" > "$T75_RC"
+printf '%s\n' 'export A=1' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" > "$TMP/t75p-new"
+T75_OUT="$(t66_door "$T75_SB" setup-only y claude-proxy)"
+expect_contains "T75 claude() bytes: an old block is offered again (not written)" "[y/N]" "$T75_OUT"
+expect_same_bytes "T75 claude() bytes: …and the yes writes exactly the new block, no other byte" "$TMP/t75p-new" "$T75_RC"
+T75_OUT="$(t66_door "$T75_SB" setup-only y claude-proxy)"
+expect_same_bytes "T75 claude() bytes: setup a second time is the same bytes" "$TMP/t75p-new" "$T75_RC"
+expect_absent "T75 claude() bytes: …and asks nothing" "[y/N]" "$T75_OUT"
+T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"
+printf '%s\n' 'export A=1' 'alias ll=x' > "$T75_RC"; cp "$T75_RC" "$TMP/t75p-before"
+t66_door "$T75_SB" setup-only y claude-proxy >/dev/null
+expect_diff_bytes "T75 claude() bytes: setup on a fresh rc wrote the block (the twin)" "$TMP/t75p-before" "$T75_RC"
+t66_door "$T75_SB" rm-payload y claude-proxy >/dev/null
+expect_same_bytes "T75 claude() bytes: …and remove leaves the rc as it was before setup" "$TMP/t75p-before" "$T75_RC"
+
+# THE ONE OWNER OF "IS IT WRITTEN". rc_get answers done for exactly the two lines.
+t75p_get() {  # <body line…> — rc_get's answer on a block holding those lines
+  local sb; sb="$(new_sandbox)"
+  { printf '%s\n' "$RC_START_LIT"; printf '%s\n' "$@"; printf '%s\n' "$RC_END_LIT"; } > "$sb/.zshrc"
+  if env_run "$sb" /bin/zsh -- rc_get claude-proxy >/dev/null 2>&1; then echo written; else echo not; fi
+}
+expect_eq "T75 rc_get: the new body is written" "written" "$(t75p_get "$PROXY_UNALIAS" "$PROXY_LINE")"
+expect_eq "T75 rc_get: the old one-line body is not" "not" "$(t75p_get "$PROXY_LINE")"
+expect_eq "T75 rc_get: the new body's lines swapped are not" "not" "$(t75p_get "$PROXY_LINE" "$PROXY_UNALIAS")"
+expect_eq "T75 rc_get: the new body plus a user's line is not" "not" "$(t75p_get "$PROXY_UNALIAS" "$PROXY_LINE" 'export MINE=1')"
+T66_SHELL=/bin/bash
 
 finish
