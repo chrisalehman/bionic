@@ -4977,8 +4977,9 @@ dispatch() {
       ;;
   esac
   # THE READINGS THE RUN OWES are a prefix condition from Step 6 (wave-27 T14; D3, D19), asked
-  # last, after each step's own evidence: the Step-6 pointer line no longer answers for them.
-  case "$CURRENT" in
+  # last, after each step's own evidence: the Step-6 pointer line no longer answers for them. A
+  # lettered step is its step (T31; review pass 25 F1): `6a` binds as 6, `5b` as 5.
+  case "${CURRENT%[ab]}" in
     6|7|8|9) _eg_refuse_readings "the run" "$RIGOR" ;;
   esac
 }

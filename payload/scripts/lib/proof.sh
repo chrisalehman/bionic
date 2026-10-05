@@ -220,15 +220,16 @@ proof_head() {
 #          or one that names no commit here is refused, naming the frontmatter line to add
 #          (wave-27 T45; review pass 13 F1; T14, review pass 20 F1).
 #   task   whichever of the two the evidence carries, the run header first (A-T14.9).
-#   check  the release-check verb's log (wave-27 T16; D12): its FIRST line is `head=<40-hex> rc=0`,
-#          which the verb writes only when the declared command passed, and <sha> must be the
-#          checkout's HEAD: the command ran in that checkout at that head.
+#   check  the release-check verb's log (wave-27 T16; D12): its FIRST line after any `check-changed:
+#          <path>` lines (T31; review pass 22 B1) is `head=<40-hex> rc=0`, which says the declared
+#          command passed, and <sha> must be the checkout's HEAD: the command ran in that checkout
+#          at that head.
 proof_attested() {
   local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster
   head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
   if [ "$kind" = check ]; then
-    sha="$(awk 'NR == 1 { if ($0 ~ /^head=[0-9a-f]+ rc=0$/) { sub(/^head=/, ""); sub(/ rc=0$/, ""); print } exit }' "$ev" 2>/dev/null)"
+    sha="$(awk '/^check-changed: / { next } { if ($0 ~ /^head=[0-9a-f]+ rc=0$/) { sub(/^head=/, ""); sub(/ rc=0$/, ""); print } exit }' "$ev" 2>/dev/null)"
     if [ "${#sha}" -ne 40 ]; then
       printf 'the evidence %s does not open with head=<40-hex> rc=0, the line release-check writes on a pass; run release-check' "$ev"; return 1
     fi
@@ -333,7 +334,7 @@ proof_attested() {
     fi
     if [ -n "$plan" ] && [ "$kind" = review ]; then
       since="$(proof_last "$plan" review "$q")"; what="the last ${q:-review} proof"
-      [ -n "$since" ] || { since="$(proof_plan_base "$plan")"; what="the plan's base"; }
+      [ -n "$since" ] || { since="$(proof_plan_base "$plan" "$co")"; what="the plan's base"; }
       sh=""
       if [ -n "$since" ] && { [ "$what" != "the plan's base" ] || proof_base_id "$since"; }; then
         sh="$(git -C "$co" rev-parse --verify -q "$since^{commit}" 2>/dev/null)"
@@ -362,17 +363,30 @@ proof_attested() {
   return 1
 }
 
-# proof_plan_base <plan> -> the commit the plan's run started from, as written, or nothing. The places
+# proof_plan_base <plan> [<repo>] -> the commit the plan's run started from, or nothing. The places
 # are read in this order: the first `base-sha:` inside its unfenced `## SDLC State` (the Step-4 block
-# `current 4` fills), then the frontmatter key of the same name; the base is the first whose value is
+# `current 4` fills), then the frontmatter key of the same name. The base is the first value that is
 # a commit id, 7 to 40 hex (`proof_base_id`), so an empty or placeholder value in one place never
-# hides a real one in the other (wave-27 T14; review pass 20 F4). With no commit id in either, the
-# first non-empty value is printed as written, so a refusal can name it. The first review proof
-# starts at or before the base (K2-F2).
+# hides a real one in the other (wave-27 T14; review pass 20 F4). With a <repo>, it is the first such
+# value that ALSO names a commit there: a hex word that names none (`deadbeef`, forty zeros, a base
+# rebased away) is passed over as a non-hex word is (T31; review pass 25 F2). Every caller holds a
+# repository and passes it (proof_attested, facts_state, proof-add, release-check); the form with no
+# <repo> reads text alone, for a caller that may not read git. With no place answering, the first
+# non-empty value is printed as written, so a refusal can name it. The first review proof starts at
+# or before the base (K2-F2).
 proof_plan_base() {
+  local c first="" got=""
   [ -f "$1" ] || return 0
-  awk '
-    function id(v) { return (v ~ /^[0-9a-fA-F]+$/ && length(v) >= 7 && length(v) <= 40) }
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    [ -n "$first" ] || first="$c"
+    proof_base_id "$c" || continue
+    if [ -n "${2:-}" ]; then
+      git -C "$2" rev-parse --verify -q "$c^{commit}" >/dev/null 2>&1 || continue
+    fi
+    got="$c"; break
+  done <<PROOF_BASES
+$(awk '
     function val(s) { sub(/^[ \t]*base-sha[ \t]*:[ \t]*/, "", s); sub(/[ \t].*$/, "", s); gsub(/["\047]/, "", s); return s }
     NR == 1 && $0 == "---" { fm = 1; next }
     fm && $0 == "---" { fm = 0; next }
@@ -381,12 +395,9 @@ proof_plan_base() {
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     insdlc && /^[ \t]*base-sha[ \t]*:/ { if (!hs) { hs = 1; v = val($0) } }
-    END {
-      if (hs && id(v)) print v
-      else if (hf && id(f)) print f
-      else if (hs && v != "") print v
-      else if (hf && f != "") print f
-    }' "$1"
+    END { if (hs) print v; if (hf) print f }' "$1")
+PROOF_BASES
+  printf '%s' "${got:-$first}"
 }
 
 # proof_base_id <value> -> 0 when <value> has the shape of a commit id, 7 to 40 hex. A word that git
@@ -693,10 +704,11 @@ facts_owed() {
 #     absent                   no fact of that kind, and no waiver
 #
 # THE DECLARED CHECK (wave-27 T16; D12) is owed when the plan's repository declares `release-check:`
-# (facts_owed's <tree> is the plan's checkout root). It is covered by a `kind=check` line at <head>,
-# uncovered from the newest one's head when every one is older, and absent with none. A failed run
-# writes no line, so it is never failing; and it is a command run at a head, so a docs-only tail
-# does not carry it.
+# (facts_owed's <tree> is the plan's checkout root). The LAST `kind=check` line at <head> decides it:
+# covered, or failing with that line's evidence when it carries `result=fail`, the line a failed run
+# writes (T31; review pass 22 S3), so a later failure at one head is never hidden by an earlier pass.
+# With no line at <head>, uncovered from the newest one's head, and absent with none. It is a command
+# run at a head, so a docs-only tail does not carry it.
 #
 # A QUESTION IS ONE CHAIN (D4). Its links are its readings (`proved: kind=review … question=<q>`,
 # either scope) and its waivers (`waived: question=<q> head=<sha> …`), in section order, which is the
@@ -747,10 +759,11 @@ facts_state() {
   case "$owed" in
     review"	"*|*"
 review	"*)
-      x="$(proof_plan_base "$plan")"
+      x="$(proof_plan_base "$plan" "$tree")"
       if ! proof_base_id "$x" || ! git -C "$tree" rev-parse --verify -q "$x^{commit}" >/dev/null 2>&1; then
         printf 'facts_state: %s names no base-sha: that is a commit here%s, so where its chains start cannot be held\n' "$plan" \
-          "$(if [ -n "$x" ] && ! proof_base_id "$x"; then printf ' (its base-sha: %s is not a commit id)' "$x"; fi)" >&2
+          "$(if [ -n "$x" ] && ! proof_base_id "$x"; then printf ' (its base-sha: %s is not a commit id)' "$x"
+             elif [ -n "$x" ]; then printf ' (its base-sha: %s is no commit here)' "$x"; fi)" >&2
         return 2
       fi ;;
   esac
@@ -818,13 +831,18 @@ PROOF_CHAIN
       check)
         x=""; [ -z "$tree" ] || x="$(git -C "$tree" rev-parse --verify -q "$head^{commit}" 2>/dev/null)"
         x="$(awk -v h="$head" -v hh="${x:-$head}" "$(proof_awk)"'
+          function evid(s,   f, m, i) { m = split(s, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) return substr(f[i], 10); return "" }
           /^[[:space:]]*```/ { fence = !fence; next }
           fence { next }
           /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-          insdlc && proof_fields($0) && PROOF_KIND == "check" { last = PROOF_HEAD; if (last == h || last == hh) at = 1 }
-          END { if (at) print "covered"; else print last }' "$plan")"
+          insdlc && proof_fields($0) && PROOF_KIND == "check" {
+            last = PROOF_HEAD
+            if (last == h || last == hh) { at = 1; fail = (PROOF_RESULT == "fail"); ev = evid($0) }
+          }
+          END { if (at && fail) print "failing\t" ev; else if (at) print "covered"; else print last }' "$plan")"
         case "$x" in
           covered) st=covered ;;
+          failing"	"*) st="$x" ;;
           '') st=absent ;;
           *) st="uncovered	$x..$head" ;;
         esac ;;
