@@ -7824,8 +7824,8 @@ RG_RING="$SANDBOX/rg/pressure.ring"
 mkdir -p "$SANDBOX/rg"
 # CLEAR and CRITICAL as the sensors see them: 80 % free is above every band threshold;
 # 8 % free is below BAND_FREE_CRITICAL_PCT (12) and above BAND_FREE_EMERGENCY_PCT (5).
-RG_CLEAR_ENV="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1"
-RG_CRIT_ENV="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1"
+RG_CLEAR_ENV="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
+RG_CRIT_ENV="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
 
 # ONE CLEAR READING, WRITTEN BY THE REAL WRITER — not a hand-built ring file. The line's
 # shape is `pressure_sample`'s to own, and a fixture that wrote it by hand would keep passing
@@ -11678,7 +11678,7 @@ printf '1700000000|80|0|0.1|16\n' > "$CGC_RING"
 # other suites, so an unpinned sample reads the runner's real load and a later median lands
 # in the warning band, halving the width for a reason that is not the fixture (§RG's pins).
 CGC_ENV=(BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_NOW_EPOCH=1700000000
-         BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1)
+         BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192)
 cgc_ring() { printf '1700000000|80|0|0.1|16\n' > "$CGC_RING"; }
 
 cgc_ack() {  # <ledger> <at> <name> — the sweeper ledger's ack line, in its writer's shape
@@ -12447,7 +12447,7 @@ CGSD_CFG="$SANDBOX/cgsd-config"; mkdir -p "$CGSD_CFG/projects/-cgsd"
 cgc_ring
 CGSD_TICK=$( cd "$CGSD_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CGSD_CFG" \
   BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
-  BIONIC_PROBE_LOAD_1M=0.1 bash "$CGSD_POKER" tick 2>&1 )
+  BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 bash "$CGSD_POKER" tick 2>&1 )
 CGSD_PRINTED=$(printf '%s\n' "$CGSD_TICK" | sed -n 's/^poker: STANDDOWN \([A-Za-z0-9_.-]*\) .*/\1/p' | LC_ALL=C sort -u | tr '\n' ' ')
 expect_eq "CG-standdown precondition: the real tick stood down exactly the two listed MET rows" \
   "sd-a sd-b " "$CGSD_PRINTED"
@@ -12466,7 +12466,7 @@ CGSD_TR="$CGSD_R/cgsd-transcript.jsonl"
 cgc_ring
 CGSD_OUT=$(s4_stop_payload "$CGSD_R" "$SID_A" "$CGSD_TR" \
   | env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 \
-      BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 bash "$CGSD_STOP" 2>/dev/null)
+      BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 bash "$CGSD_STOP" 2>/dev/null)
 CGSD_REASON=$(printf '%s' "$CGSD_OUT" | jq -r '.reason // ""' 2>/dev/null)
 CGSD_WALL=""
 for _cgsd_n in sd-a sd-b sd-gone sd-open; do
@@ -12512,7 +12512,7 @@ HD_CFG="$SANDBOX/hd-config"; mkdir -p "$HD_CFG/projects/-hd"
 } > "$HD_CFG/projects/-hd/$SID_A.jsonl"
 hd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$HD_CFG" \
   BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
-  BIONIC_PROBE_LOAD_1M=0.1 "$@"; }
+  BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 "$@"; }
 HD_HOLD=$( cd "$HD_R" && hd_env bash "$CGSD_POKER" hold sd-a "kept for a second pass" 2>&1 ); HD_HOLD_RC=$?
 expect_eq "HD precondition: the hold verb took sd-a (rc 0)" "0" "$HD_HOLD_RC"
 cgc_ring
@@ -12570,7 +12570,7 @@ s4_bind "$OCC_R" "$SID_A" "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md"
 s4_attest "$OCC_R" "$SID_A"
 occ_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
   BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
-  BIONIC_PROBE_LOAD_1M=0.1 "$@"; }
+  BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 "$@"; }
 OCC_PF=$( cd "$OCC_R" && mk_agent_payload "$SID_A" "$OCC_R" | occ_env bash "$PARTY_DP" 2>&1 )
 OCC_PF_N=$(printf '%s\n' "$OCC_PF" | sed -n 's/.*writers: budget=1 open=\([0-9][0-9]*\) with-this-dispatch=.*/\1/p' | head -1)
 cgc_ring
@@ -12644,7 +12644,7 @@ cgt_stop() {  # <stop_hook_active true|false>
   jq -nc --arg c "$CGT_R" --arg s "$SID_A" --arg t "$CGT_TR" --argjson a "$1" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:$a}' \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 \
-        BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 bash "$CGT_STOP" 2>/dev/null
+        BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 bash "$CGT_STOP" 2>/dev/null
 }
 jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:"dispatch the batch"}}' > "$CGT_TR"
 cgt_agent toolu_01CGTA1 W-R1

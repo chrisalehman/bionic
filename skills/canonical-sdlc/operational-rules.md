@@ -116,6 +116,7 @@ A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale
   |---|---|
   | reads cell | comma-separated: a path in the `Files` grammar · `head` · `record` · `proof:<kind>` · `approval:<name>` · `ext:<slug>`; a live read is `live:<artifact>`; empty takes the kind default |
   | kind defaults | build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head`, and at Step 7 or later an `approval:` read written out (`approval:release` for the release) · integrate `proof:floor, proof:review, head` · close the integrate row's merge |
+  | read row | a `review` row whose `reads` carries `live:head:<q>[+<q>]`, each `<q>` one of `evidence` · `adversarial` · `structure`; exclusivity, range and return-to-pending are per question: only a row sharing a question holds it, its range (the tick's `RANGE` line) starts at the oldest last reading among its questions, and `proof-add review --question <q>` returns the active row carrying `<q>`. A bare `live:head` keeps one range from the last review proof of any question |
 
 - **`size`** — the row's expected duration in minutes.
 - **`serves`** — the requirement id(s) this row discharges.
