@@ -10247,15 +10247,21 @@ section "§LR — a declared debt is recorded at dispatch, and only a well-forme
 # widget.test.sh), on make_repo's approved, bound plan. SYNTHESIZED.
 # fails-when: a well-formed declaration is refused or not recorded; one of the three faults is
 # admitted; a brief with no declaration, or the scaffold's unfilled slots, records a key.
-lr_gate() {  # <repo tag> <body lines> -> GATE_*, LR_ROW
+# (wave-27 T67) The bound plan carries a `## Tasks` table with a reads column: a Step-4 row reads
+# approval:design and the integrate row approval:release, so an approval: token is judged against
+# the names the approve verb accepts (S4). SYNTHESIZED, in units.sh's twelve-column shape plus reads.
+lr_gate() {  # <repo tag> <body lines> [<brief>] -> GATE_*, LR_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief "$2")" "w99-$1")"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T3 | 4 | build | the design | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | approval:design |\n| T8 | 8 | integrate | integrate | implementor | T3 | 30 | REQ-1 | — | — | — | pending | approval:release |\n' \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  local lr_b="${3:-$(adv_brief "$2")}"; lr_b="${lr_b//@ROOT@/$(cd "$REPO" && pwd -P)}"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$lr_b" "w99-$1")"
   LR_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
-lr_gate lr1 'Lands-red: widget.test.sh until approval:release
+lr_gate lr1 'Lands-red: widget.test.sh until approval:design
 Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
-expect_eq "LR1 a Lands-red: on the row's own suite, with its evidence and an approval: token, is admitted" "allow" "$GATE_VERDICT"
-expect_eq "LR1b …the row carries lands_red=<suite> until <token>" "widget.test.sh until approval:release" \
+expect_eq "LR1 a Lands-red: on the row's own suite, with its evidence and an approval: token a Step-4 row reads, is admitted" "allow" "$GATE_VERDICT"
+expect_eq "LR1b …the row carries lands_red=<suite> until <token>" "widget.test.sh until approval:design" \
   "$(roster_field "$LR_ROW" lands_red)"
 expect_eq "LR1c …and red_evidence=<path>" ".bionic/docs/record/wave-01-test/T9-red.md" "$(roster_field "$LR_ROW" red_evidence)"
 lr_gate lr1x 'Lands-red: tests/widget.test.sh until ext:vendor-fix
@@ -10263,13 +10269,13 @@ Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
 expect_eq "LR1x an ext:<slug> token is admitted too, the suite recorded by its basename" "allow widget.test.sh until ext:vendor-fix" \
   "$GATE_VERDICT $(roster_field "$LR_ROW" lands_red)"
 
-lr_gate lr2 'Lands-red: widget.test.sh until approval:release'
+lr_gate lr2 'Lands-red: widget.test.sh until approval:design'
 expect_eq "LR2 a Lands-red: with no Red-evidence: is refused" "deny" "$GATE_VERDICT"
 expect_contains "LR2b …the line names the missing label" "Lands-red: with no Red-evidence: line" "$GATE_ERR"
 expect_contains "LR2c …and the detail the line to add" "    Red-evidence: <path under record/>" "$GATE_VERR"
 expect_eq "LR2d …and no row is written" "" "$LR_ROW"
 
-lr_gate lr3 'Lands-red: other.test.sh until approval:release
+lr_gate lr3 'Lands-red: other.test.sh until approval:design
 Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
 expect_eq "LR3 a Lands-red: on a suite outside the row's suite set is refused" "deny" "$GATE_VERDICT"
 expect_contains "LR3b …naming the suite" "Lands-red: other.test.sh is outside Suites:" "$GATE_ERR"
@@ -10292,11 +10298,74 @@ Red-evidence: <path under record/>'
 expect_eq "LR6 the scaffold's two slots pasted unfilled declare nothing: admitted" "allow" "$GATE_VERDICT"
 expect_contains "LR6b …its row is written" "status=intended" "$LR_ROW"
 expect_absent "LR6c …with no lands_red= on it" "lands_red=" "$LR_ROW"
-lr_gate lr7 'Lands-red: widget.test.sh until approval:release  # optional
+lr_gate lr7 'Lands-red: widget.test.sh until approval:design  # optional
 Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md  # with Lands-red:'
 expect_eq "LR7 the two lines filled with the scaffold's comments kept: admitted, the comments off the values" \
-  "allow|widget.test.sh until approval:release|.bionic/docs/record/wave-01-test/T9-red.md" \
+  "allow|widget.test.sh until approval:design|.bionic/docs/record/wave-01-test/T9-red.md" \
   "$GATE_VERDICT|$(roster_field "$LR_ROW" lands_red)|$(roster_field "$LR_ROW" red_evidence)"
+
+# --- wave-27 T67 (review pass 46 B4, S1, S4, N1, N2, N3): what the wall refuses besides.
+LR_EV_OK='Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
+lr_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
+# B4: the full-suite runner is never a declared red, however it is spelled.
+lr_k=0
+for lr_sp in 'run.sh' 'tests/run.sh' './tests/run.sh' 'bash tests/run.sh'; do
+  lr_k=$((lr_k + 1))
+  lr_gate "lr8-$lr_k" "Lands-red: ${lr_sp} until ext:x
+${LR_EV_OK}" "$(adv_brief "Lands-red: ${lr_sp} until ext:x
+${LR_EV_OK}" | sed 's#^Suites: tests/widget.test.sh$#Suites: tests/run.sh#')"
+  expect_eq "LR8 B4 Suites: tests/run.sh with Lands-red: ${lr_sp} until ext:x is refused" "deny" "$GATE_VERDICT"
+  expect_contains "LR8b …the line naming the runner (${lr_sp})" "Lands-red: names the full-suite runner" "$(lr_first)"
+  expect_contains "LR8c …the detail saying it is never a declared red (${lr_sp})" "the full-suite runner is never a declared red" "$GATE_VERR"
+  expect_eq "LR8d …and no row is written (${lr_sp})" "" "$LR_ROW"
+done
+lr_gate lr8e "Lands-red: widget.sh until ext:x
+${LR_EV_OK}"
+expect_contains "LR8e a Lands-red: naming no <name>.test.sh file is refused, saying so" "Lands-red: names no <name>.test.sh" "$(lr_first)"
+# S4, N1: an approval: token is one a row reads, and not one the integrate row waits on.
+lr_gate lr9 "Lands-red: widget.test.sh until approval:release
+${LR_EV_OK}"
+expect_eq "LR9 S4 until approval:release, the approval the integrate row reads, is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR9b …the line naming the approval" "approval:release is read at integration" "$(lr_first)"
+expect_contains "LR9c …the detail saying it comes after the step a debt must clear before" "comes after the step a debt must clear before" "$GATE_VERR"
+lr_gate lr9n "Lands-red: widget.test.sh until approval:nobody
+${LR_EV_OK}"
+expect_eq "LR9n until approval:nobody, a name no row reads, is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR9n2 …the line saying no row reads it" "approval:nobody is read by no row" "$(lr_first)"
+expect_contains "LR9n3 …the detail naming the names the rows read" "design" "$GATE_VERR"
+# N2: one declaration.
+lr_gate lr10 "Lands-red: widget.test.sh until ext:x
+Lands-red: widget.test.sh until ext:y
+${LR_EV_OK}"
+expect_eq "LR10 N2 a brief with two Lands-red: lines is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR10b …the line counting them" "the brief has 2 Lands-red: lines" "$(lr_first)"
+expect_eq "LR10c …and no row is written" "" "$LR_ROW"
+# N3: the evidence is a file under the run's record root.
+lr_k=0
+for lr_ev in /tmp/x.md ../x.md .bionic/tmp/scratch/w99/x.md .bionic/docs/record/../tmp/x.md; do
+  lr_k=$((lr_k + 1))
+  lr_gate "lr11-$lr_k" "Lands-red: widget.test.sh until ext:x
+Red-evidence: ${lr_ev}"
+  expect_eq "LR11 N3 Red-evidence: ${lr_ev} is refused" "deny" "$GATE_VERDICT"
+  expect_contains "LR11b …the line saying where it must be (${lr_ev})" "Red-evidence: is not under record/" "$(lr_first)"
+done
+lr_gate lr11r "Lands-red: widget.test.sh until ext:x
+Red-evidence: record/wave-01-test/T9-red.md"
+expect_eq "LR11r a record/… path, read from the docs root as the fact verb reads one, is admitted" \
+  "allow|record/wave-01-test/T9-red.md" "$GATE_VERDICT|$(roster_field "$LR_ROW" red_evidence)"
+lr_gate lr11a "Lands-red: widget.test.sh until ext:x
+Red-evidence: @ROOT@/.bionic/docs/record/wave-01-test/T9-red.md"
+expect_eq "LR11a …an absolute path under the record root, its directories read physically, is admitted" \
+  "allow" "$GATE_VERDICT"
+# S1: a long suite name outside Suites: is cut in the fact, and the line keeps its fix.
+LR12_S="a-suite-name-of-sixty-characters-long-enough-to-wrap.test.sh"
+lr_gate lr12 "Lands-red: ${LR12_S} until ext:x
+${LR_EV_OK}"
+expect_eq "LR12 precondition: the name is sixty characters" "60" "${#LR12_S}"
+expect_eq "LR12a S1 a sixty-character suite outside Suites: is refused by a deny" "deny" "$GATE_VERDICT"
+expect_eq "LR12b …its first line at most 100 columns" "ok" "$([ "$(bionic_cols "$(lr_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(lr_first)")")"
+expect_contains "LR12c …naming the suite, cut by the library" "Lands-red: a-suite-name" "$(lr_first)"
+expect_contains "LR12d …with its fix" "(name a suite the row runs)" "$(lr_first)"
 # --- FILES-LIST19..: one pair of punctuation around a path, and a trailing `;` (wave-27 T49; review
 # pass 19 should-fix 1). The reader strips from an item ONE surrounding pair of double quotes, single
 # quotes, parentheses, square brackets or backticks, and a trailing `;`; what is left is judged as any
