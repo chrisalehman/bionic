@@ -13835,7 +13835,7 @@ expect_ne "MEMROOT mutation: …and on the brace spelling the agreement pin goes
   "$(mr_bw "$PARTY_EG" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')" \
   "$(mr_gs "$MR_MUT_HOOKS/canonical-sdlc-governing-skill.sh" "$MR_H/ccd/projects/-x/memory/a.md" BIONIC_CLAUDE_HOME= 'CLAUDE_CONFIG_DIR=${HOME}/ccd')"
 
-section "PRF — the proof line: one writer, every reader gives its kind, head and time back (wave-26 T56; final review S3 row 4)"
+section "FACT — the proof line: one writer, every reader gives its kind, head and time back, and a reading its question (wave-26 T56 as §PRF; widened by wave-27 T2, REQ-2 AC-2.5)"
 # THE ROW THE OWNERSHIP TABLE NAMED AND NOBODY WROTE. A proof line is written by one writer,
 # proof.sh `proof_line` placed by `proof_add_line` (what `session-poker.sh proof-add` runs), and
 # read by four readers: `proof_last` / `proof_last_line` (proof.sh), the readiness program's
@@ -13845,8 +13845,9 @@ section "PRF — the proof line: one writer, every reader gives its kind, head a
 # functions, so they are run here as the files carry them: each is cut out of its file by its
 # own text (the needle below, anchored once in each), never by a line number.
 #
-# The fixture is written ONLY through the writer, then doctored around: two review proofs, then
-# a floor proof with the NEWEST time, so a reader blind to the kind answers the floor's time; a
+# The fixture is written ONLY through the writer, then doctored around: three review proofs (a
+# 1.11.0 line, then two readings, each carrying question, reader, result and scope), then a floor
+# proof with the NEWEST time, so a reader blind to the kind answers the floor's time; a
 # fenced proof line and one under another heading, each newer still, so a reader blind to the
 # fence or the section answers theirs. Every reader must answer the last review line the writer
 # wrote: kind review, its head, its time.
@@ -13860,6 +13861,7 @@ PRF_A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 PRF_B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 PRF_C=cccccccccccccccccccccccccccccccccccccccc
 PRF_LIVE=dddddddddddddddddddddddddddddddddddddddd
+PRF_E=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 # prf_cut <file> — the single-quoted awk program whose text holds PRF_NEEDLE: from the `awk '`
 # that opens it to the `' "$` that closes it. Nothing when either end is missing.
 prf_cut() {
@@ -13899,23 +13901,24 @@ prf_at() {
   # shellcheck source=/dev/null
   . "$PRF_LIB/proof.sh" || exit 1
   for _l in "$(proof_line review "$PRF_A" 2026-10-04T10:00:00Z record/w/r1.md)" \
-            "$(proof_line review "$PRF_B" 2026-10-04T11:00:00Z record/w/r2.md)" \
+            "$(proof_line review "$PRF_E" 2026-10-04T10:30:00Z record/w/adv.md adversarial w-crit flag whole)" \
+            "$(proof_line review "$PRF_B" 2026-10-04T11:00:00Z record/w/r2.md evidence w-aud pass piece)" \
             "$(proof_line floor "$PRF_C" 2026-10-04T12:00:00Z record/w/floor.txt)"; do
     proof_add_line "$PRF_PLAN" "$_l" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN" || exit 1
   done
 )
-expect_eq "PRF fixture: the writer placed three proof lines inside ## SDLC State" "3" \
+expect_eq "PRF fixture: the writer placed four proof lines inside ## SDLC State" "4" \
   "$(awk '/^## /{s=($0 ~ /SDLC State/)} s && /^proved: /' "$PRF_PLAN" | grep -c .)"
 # The decoys, each newer than every real line: a fenced proof inside the section, and one under
 # another heading. No reader may answer either.
-awk '{ print } /^current: 4$/ { print "```"; print "proved: kind=review head=" h " at=2026-10-04T13:00:00Z evidence=record/w/fenced.md"; print "```" }' \
+awk '{ print } /^current: 4$/ { print "```"; print "proved: kind=review head=" h " at=2026-10-04T13:00:00Z evidence=record/w/fenced.md question=adversarial reader=w-crit result=pass scope=piece"; print "```" }' \
   h="$PRF_C" "$PRF_PLAN" > "$PRF_PLAN.new" && mv "$PRF_PLAN.new" "$PRF_PLAN"
-printf '\n## Notes\n\nproved: kind=review head=%s at=2026-10-04T14:00:00Z evidence=record/w/elsewhere.md\n' "$PRF_C" >> "$PRF_PLAN"
+printf '\n## Notes\n\nproved: kind=review head=%s at=2026-10-04T14:00:00Z evidence=record/w/elsewhere.md question=adversarial reader=w-crit result=pass scope=piece\n' "$PRF_C" >> "$PRF_PLAN"
 expect_eq "PRF fixture: the two decoys are in (one fenced, one under ## Notes)" "2" \
   "$(grep -c 'evidence=record/w/\(fenced\|elsewhere\)\.md' "$PRF_PLAN")"
 PRF_LINE="$(. "$PRF_LIB/proof.sh" && proof_last_line "$PRF_PLAN" review)"
-expect_eq "PRF proof_last_line: the last review line, as the writer wrote it" \
-  "proved: kind=review head=$PRF_B at=2026-10-04T11:00:00Z evidence=record/w/r2.md" "$PRF_LINE"
+expect_eq "PRF proof_last_line: the last review line, as the writer wrote it, its reading fields last" \
+  "proved: kind=review head=$PRF_B at=2026-10-04T11:00:00Z evidence=record/w/r2.md question=evidence reader=w-aud result=pass scope=piece" "$PRF_LINE"
 expect_eq "PRF proof_last (review): its head" "$PRF_B" \
   "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review)"
 expect_eq "PRF proof_last (floor): the floor line is a different kind, with its own head" "$PRF_C" \
@@ -13944,6 +13947,109 @@ expect_nonempty "PRF mutation: …and still yields a reader that runs" "$(prf_at
 expect_ne "PRF mutation: …which answers another line's time, so the agreement row goes red" \
   "$PRF_AT" "$(prf_at "$PRF_MUT")"
 PRF_NEEDLE="$PRF_NEEDLE_SAVED"
+
+# §FACT (wave-27 T2; REQ-2 AC-2.5 verb half, D1). THE READING FIELDS RIDE THE SAME LINE. The
+# writer above put an adversarial reading (head E) before the evidence reading (head B), so a
+# reader keyed by kind alone answers B for every question. The one reading of a line,
+# `proof_fields`, gives the four fields back as the writer wrote them; `proof_last` and
+# `proof_last_line` keyed by a question answer that question's last line and nothing for a
+# question never read; the decoys (fenced, under ## Notes, both adversarial and newer) stay unread.
+expect_eq "FACT proof_fields: the evidence line's kind, head and four reading fields" \
+  "review $PRF_B evidence w-aud pass piece" \
+  "$(awk "$(. "$PRF_LIB/proof.sh" && proof_awk)"'
+    proof_fields($0) && PROOF_HEAD == h { print PROOF_KIND, PROOF_HEAD, PROOF_QUESTION, PROOF_READER, PROOF_RESULT, PROOF_SCOPE }' \
+    h="$PRF_B" "$PRF_PLAN")"
+expect_eq "FACT proof_fields: …and a 1.11.0 line reads with its reading fields empty" "review|$PRF_A||||" \
+  "$(awk "$(. "$PRF_LIB/proof.sh" && proof_awk)"'
+    proof_fields($0) && PROOF_HEAD == h { print PROOF_KIND "|" PROOF_HEAD "|" PROOF_QUESTION "|" PROOF_READER "|" PROOF_RESULT "|" PROOF_SCOPE }' \
+    h="$PRF_A" "$PRF_PLAN")"
+expect_eq "FACT proof_last (review evidence): that question's head" "$PRF_B" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review evidence)"
+expect_eq "FACT proof_last (review adversarial): its own head, not the newer evidence line's, nor a decoy's" "$PRF_E" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review adversarial)"
+expect_eq "FACT proof_last_line (review adversarial): the line as the writer wrote it" \
+  "proved: kind=review head=$PRF_E at=2026-10-04T10:30:00Z evidence=record/w/adv.md question=adversarial reader=w-crit result=flag scope=whole" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last_line "$PRF_PLAN" review adversarial)"
+expect_eq "FACT proof_last (review structure): a question never read answers nothing" "" \
+  "$(. "$PRF_LIB/proof.sh" && proof_last "$PRF_PLAN" review structure)"
+# THE DOCTORED SITE. A copy of proof.sh whose last-proof reader has lost its question test (a
+# reader keyed by kind alone, 1.11.0's) must answer the evidence head for the adversarial question.
+FACT_NEEDLE='PROOF_KIND == k && (q == "" || PROOF_QUESTION == q)'
+FACT_MUT_TEXT='PROOF_KIND == k'
+FACT_MUT="$PRF_D/proof.sh.mut"
+anchor "$PRF_LIB/proof.sh" "$FACT_NEEDLE" 1
+FACT_N="$FACT_NEEDLE" FACT_R="$FACT_MUT_TEXT" awk '
+  BEGIN { n = ENVIRON["FACT_N"]; r = ENVIRON["FACT_R"] }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$PRF_LIB/proof.sh" > "$FACT_MUT"
+expect_eq "FACT mutation: the doctored copy lost exactly the question test" "0" \
+  "$(grep -cF -- "$FACT_NEEDLE" "$FACT_MUT")"
+expect_eq "FACT mutation: …and still reads the evidence question's head (it runs)" "$PRF_B" \
+  "$(. "$FACT_MUT" && proof_last "$PRF_PLAN" review evidence)"
+expect_ne "FACT mutation: …which answers the adversarial question with another line's head, so the agreement row goes red" \
+  "$PRF_E" "$(. "$FACT_MUT" && proof_last "$PRF_PLAN" review adversarial)"
+
+# ============================================================
+section "DEAL — the dealing: at every rigor each reading question has exactly one role, and the roles are the reader roles (wave-27 T9; REQ-1 AC-1.2; D2, D6)"
+# ============================================================
+# ONE FUNCTION SAYS WHAT A RUN OWES. proof.sh `facts_owed <rigor> <scale>` prints the floor and one
+# `review<TAB><question><TAB><role><TAB><scope>` line per owed reading; the judge (`facts_state`)
+# and, from row T15, the dispatch wall both read it, so the dealing has one site. Pinned here: at
+# each rigor and scale each question is dealt to exactly one role; the table is the Interfaces
+# table's (`tested` the critic holds all three; `peer-reviewed` the auditor evidence and the critic
+# the other two; `audited` the auditor, the critic and the reviewer, one each); every dealt role is
+# one of PROOF_READER_ROLES, the set the fact verb admits a reader under, and every such role is
+# dealt somewhere; at wave scale each code question owes a whole read by the same role. The
+# rendered rigor table's half of AC-1.2 is row T17's (the doctrine rewrite). A doctored copy whose
+# `audited` dealing hands structure to the critic must split from the table.
+DEAL_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/proof.sh"
+deal() {  # <rigor> <scale> [<proof.sh>] -> facts_owed's lines
+  bash -c '. "$1" && facts_owed "$2" "$3"' _ "${3:-$DEAL_LIB}" "$1" "$2" 2>/dev/null
+}
+deal_roles() {  # <rigor> <scale> [<proof.sh>] -> `<question>=<role>` per piece read, in table order
+  deal "$@" | awk -F'\t' '$1 == "review" && $4 == "piece" { printf "%s%s=%s", (n++ ? " " : ""), $2, $3 }'
+}
+DEAL_QS="$(bash -c '. "$1" && printf "%s" "$PROOF_QUESTIONS"' _ "$DEAL_LIB")"
+DEAL_ROLES="$(bash -c '. "$1" && printf "%s" "$PROOF_READER_ROLES"' _ "$DEAL_LIB")"
+expect_eq "DEAL precondition: the questions are the Interfaces table's three" "evidence adversarial structure" "$DEAL_QS"
+for deal_r in tested peer-reviewed audited; do
+  for deal_s in task wave; do
+    for deal_q in $DEAL_QS; do
+      expect_eq "DEAL $deal_r $deal_s: $deal_q is dealt to exactly one role" "1" \
+        "$(deal "$deal_r" "$deal_s" | awk -F'\t' -v q="$deal_q" '$1 == "review" && $2 == q && $4 == "piece"' | awk 'END { print NR }')"
+    done
+    expect_eq "DEAL $deal_r $deal_s: the floor is owed, once" "1" "$(deal "$deal_r" "$deal_s" | /usr/bin/grep -cx floor)"
+    expect_eq "DEAL $deal_r $deal_s: every dealt role is a reader role the fact verb admits" "" \
+      "$(deal "$deal_r" "$deal_s" | ROLES="$DEAL_ROLES" awk -F'\t' '$1 == "review" && index(" " ENVIRON["ROLES"] " ", " " $3 " ") == 0 { print $3 }')"
+  done
+done
+expect_eq "DEAL tested: the critic holds all three" \
+  "evidence=bionic:critic adversarial=bionic:critic structure=bionic:critic" "$(deal_roles tested task)"
+expect_eq "DEAL peer-reviewed: the auditor evidence, the critic adversarial and structure" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:critic" "$(deal_roles peer-reviewed task)"
+expect_eq "DEAL audited: the auditor evidence, the critic adversarial, the reviewer structure" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:reviewer" "$(deal_roles audited task)"
+for deal_r in tested peer-reviewed audited; do
+  expect_eq "DEAL $deal_r: the dealing does not change with scale" "$(deal_roles "$deal_r" task)" "$(deal_roles "$deal_r" wave)"
+  expect_eq "DEAL $deal_r wave: each code question owes one whole read, by its piece reader; evidence none" \
+    "$(deal_roles "$deal_r" wave | tr ' ' '\n' | /usr/bin/grep -v '^evidence=' | tr '\n' ' ' | sed 's/ $//')" \
+    "$(deal "$deal_r" wave | awk -F'\t' '$1 == "review" && $4 == "whole" { printf "%s%s=%s", (n++ ? " " : ""), $2, $3 }')"
+  expect_eq "DEAL $deal_r task: no whole read is owed" "0" "$(deal "$deal_r" task | /usr/bin/grep -c 'whole$')"
+done
+expect_eq "DEAL every reader role is dealt a question at some rigor" "$DEAL_ROLES" \
+  "$(for deal_r in tested peer-reviewed audited; do deal "$deal_r" task; done | awk -F'\t' '$1 == "review" { print $3 }' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "DEAL a rigor outside the three deals nothing" "" "$(deal standard task)"
+expect_ne "DEAL …and says so by its exit" "0" "$(bash -c '. "$1" && facts_owed standard task >/dev/null 2>&1; echo $?' _ "$DEAL_LIB")"
+# THE DOCTORED SITE: a copy whose audited dealing gives structure to the critic.
+DEAL_NEEDLE='audited=bionic:auditor,bionic:critic,bionic:reviewer'
+DEAL_MUT="$SANDBOX/fx/deal-proof.sh.mut"; mkdir -p "$SANDBOX/fx"
+anchor "$DEAL_LIB" "$DEAL_NEEDLE" 1
+DEAL_N="$DEAL_NEEDLE" awk '
+  BEGIN { n = ENVIRON["DEAL_N"]; r = "audited=bionic:auditor,bionic:critic,bionic:critic" }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$DEAL_LIB" > "$DEAL_MUT"
+expect_eq "DEAL mutation: the doctored copy still deals one role per question (it runs)" "3" \
+  "$(deal audited task "$DEAL_MUT" | awk -F'\t' '$1 == "review"' | awk 'END { print NR }')"
+expect_ne "DEAL mutation: …and splits from the table, so the audited row goes red" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:reviewer" "$(deal_roles audited task "$DEAL_MUT")"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"

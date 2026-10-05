@@ -7,7 +7,10 @@
 #     proved: kind=<floor|review|task> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>
 #
 # written only by `session-poker.sh proof-add <kind> <evidence>` through the plan verbs'
-# transaction, and read by `proof_last`. What is unproved is the difference since the head a
+# transaction, and read by `proof_last`. A READING (wave-27 T2; D1) is a review proof that adds
+# four fields, ` question=<q> reader=<roster name> result=<pass|flag|fail> scope=<piece|whole>`,
+# written by `proof-add review <record> --question <q> --reader <name>`; every reader keyed by
+# kind alone reads it as the review proof it is. What is unproved is the difference since the head a
 # proof names; `proof_state` (T5, beside these) is the reader that judges that difference.
 #
 # THE HEAD IS NEVER AN OPERAND, AND IT IS THE HEAD THE EVIDENCE READ (wave-26 T14; review 7 F1).
@@ -22,15 +25,95 @@
 # bash 3.2: no associative arrays, no `${var,,}`.
 
 PROOF_KINDS="floor review task"
+# The questions a reading answers, the values its result and scope take, and the answers a
+# structure check takes (the Interfaces table of wave-27).
+PROOF_QUESTIONS="evidence adversarial structure"
+PROOF_RESULTS="pass flag fail"
+PROOF_SCOPES="piece whole"
+PROOF_CHECK_ANSWERS="PASS FLAG FAIL n/a"
+# The roles a reading may be registered for: a reader's roster row carries one of these as its
+# `subagent_type=`, never a writer's (D7).
+PROOF_READER_ROLES="bionic:auditor bionic:critic bionic:reviewer"
+# THE DEALING (wave-27 T9; D2, D6): the reader role that answers each question at each rigor, one
+# role per question, in PROOF_QUESTIONS' order, `<rigor>=<evidence>,<adversarial>,<structure>`.
+# `facts_owed` is its one reader.
+PROOF_DEALING="tested=bionic:critic,bionic:critic,bionic:critic peer-reviewed=bionic:auditor,bionic:critic,bionic:critic audited=bionic:auditor,bionic:critic,bionic:reviewer"
+# The questions that read the code; at wave scale each also owes one read of the whole (D10).
+PROOF_CODE_QUESTIONS="adversarial structure"
 
 # proof_kind_ok <kind> -> 0 when <kind> is one of PROOF_KINDS.
 proof_kind_ok() {
   case " $PROOF_KINDS " in *" ${1:-} "*) [ -n "${1:-}" ] ;; *) return 1 ;; esac
 }
 
-# proof_line <kind> <head> <at> <evidence> -> the one proof line, newline-terminated.
+# proof_question_ok <question> -> 0 when <question> is one of PROOF_QUESTIONS.
+proof_question_ok() {
+  case " $PROOF_QUESTIONS " in *" ${1:-} "*) [ -n "${1:-}" ] ;; *) return 1 ;; esac
+}
+
+# proof_line <kind> <head> <at> <evidence> [<question> <reader> <result> <scope>] -> the one proof
+# line, newline-terminated; a reading's four fields follow the evidence when a question is given.
 proof_line() {
-  printf 'proved: kind=%s head=%s at=%s evidence=%s\n' "$1" "$2" "$3" "$4"
+  if [ -n "${5:-}" ]; then
+    printf 'proved: kind=%s head=%s at=%s evidence=%s question=%s reader=%s result=%s scope=%s\n' \
+      "$1" "$2" "$3" "$4" "$5" "${6:-}" "${7:-}" "${8:-}"
+  else
+    printf 'proved: kind=%s head=%s at=%s evidence=%s\n' "$1" "$2" "$3" "$4"
+  fi
+}
+
+# proof_waiver_line <question> <head> <who> <at> <reason> -> the one waiver line, newline-terminated:
+# the user's act, covering <question> up to <head> (wave-27 T9; written by `session-poker.sh waive`).
+proof_waiver_line() {
+  printf 'waived: question=%s head=%s by %s %s "%s"\n' "$1" "$2" "$3" "$4" "$5"
+}
+
+# proof_reading <record> <question> [<checks file>] -> `<result> <scope>` read from a reading
+# record, exit 0; or exit 1 with one sentence saying what the record lacks and what to write (the
+# verb's refusal). The record's flush-left lines, the first of each: `reviewed: <a>..<b>` (its
+# range is proof_attested's to judge), `question: <q>` equal to <question>, `result:` one of
+# PROOF_RESULTS, `scope:` one of PROOF_SCOPES. For `structure`, <checks file> names the check ids
+# as `- **<id>**` items, and the record answers each with `check: <id> <answer> <reason>`, the
+# answer one of PROOF_CHECK_ANSWERS: a checks file that cannot be read, or names no id, refuses.
+proof_reading() {
+  local rec="$1" q="$2" ck="${3:-}" got rq rr rs ids miss
+  got="$(awk '
+    function val(s) { sub(/^[a-z]+:[ \t]*/, "", s); sub(/[ \t]+$/, "", s); return s }
+    /^reviewed:[ \t]/ { rv = "y" }
+    /^question:/ && q == "" { q = val($0) }
+    /^result:/ && r == "" { r = val($0) }
+    /^scope:/ && s == "" { s = val($0) }
+    END { printf "%s|%s|%s|%s", rv, q, r, s }' "$rec" 2>/dev/null)"
+  IFS='|' read -r got rq rr rs <<PROOF_READING
+$got
+PROOF_READING
+  [ "$got" = y ] || { printf 'the reading %s carries no reviewed: <a>..<b> line; write the range it read' "$rec"; return 1; }
+  [ -n "$rq" ] || { printf 'the reading %s carries no question: <q> line; write question: %s' "$rec" "$q"; return 1; }
+  [ "$rq" = "$q" ] \
+    || { printf 'the reading %s says question: %s, but the proof is for %s; register it under the question it answers' "$rec" "$rq" "$q"; return 1; }
+  [ -n "$rr" ] || { printf 'the reading %s carries no result: line; write result: pass, flag or fail' "$rec"; return 1; }
+  case " $PROOF_RESULTS " in *" $rr "*) : ;; *)
+    printf 'the reading %s says result: '"'"'%s'"'"', which is not one of pass, flag or fail; write the result the reader gave' "$rec" "$rr"; return 1 ;;
+  esac
+  [ -n "$rs" ] || { printf 'the reading %s carries no scope: line; write scope: piece or whole' "$rec"; return 1; }
+  case " $PROOF_SCOPES " in *" $rs "*) : ;; *)
+    printf 'the reading %s says scope: '"'"'%s'"'"', which is not one of piece or whole; write the scope the reader read' "$rec" "$rs"; return 1 ;;
+  esac
+  if [ "$q" = structure ]; then
+    [ -n "$ck" ] && [ -f "$ck" ] && [ -r "$ck" ] \
+      || { printf 'the structure checks file %s cannot be read, so the check ids a structure reading answers are unknown; reinstall the plugin' "$ck"; return 1; }
+    ids="$(awk '/^- \*\*[a-z][a-z-]*\*\*/ { s = $0; sub(/^- \*\*/, "", s); sub(/\*\*.*$/, "", s); print s }' "$ck" 2>/dev/null)"
+    [ -n "$ids" ] \
+      || { printf 'the structure checks file %s names no check id (a - **<id>** item); reinstall the plugin' "$ck"; return 1; }
+    miss="$(PROOF_IDS="$ids" PROOF_ANS="$PROOF_CHECK_ANSWERS" awk '
+      BEGIN { n = split(ENVIRON["PROOF_ANS"], a, " "); for (i = 1; i <= n; i++) ok[a[i]] = 1
+              w = split(ENVIRON["PROOF_IDS"], want, "\n") }
+      /^check:[ \t]/ { m = split($0, f, /[ \t]+/); if (m >= 4 && (f[3] in ok)) done[f[2]] = 1 }
+      END { for (i = 1; i <= w; i++) if (want[i] != "" && !(want[i] in done)) printf "%s%s", (c++ ? " " : ""), want[i] }' "$rec" 2>/dev/null)"
+    [ -z "$miss" ] \
+      || { printf 'the structure reading %s leaves %s unanswered; write one line check: <id> <answer> <reason> for each, the answer PASS, FLAG, FAIL or n/a' "$rec" "$miss"; return 1; }
+  fi
+  printf '%s %s' "$rr" "$rs"
 }
 
 # proof_working_branch <plan> -> the plan's `working-branch:`, or nothing. The `## SDLC State`
@@ -76,7 +159,7 @@ proof_head() {
   git -C "$wt" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null
 }
 
-# proof_attested <kind> <evidence file> <checkout> [<plan>] -> the 40-hex head the evidence attests, exit
+# proof_attested <kind> <evidence file> <checkout> [<plan>] [<question>] -> the 40-hex head the evidence attests, exit
 # 0; or exit 1 with one sentence on stdout saying why not and what to do (the verb's refusal).
 #   floor  a full run's log: its LAST `head=<sha> dirty=<n>` line, the header the suite runner
 #          prints before any suite, so the last run in the log is the one judged (T52). <sha>
@@ -90,10 +173,12 @@ proof_head() {
 #          read (a review proof only): its last review proof's head, or with none its base, so no
 #          commit between two review proofs goes unread (wave-26 T62; critic 2 K2-F2). With no
 #          <plan>, or a plan whose base names no commit here, the first review is held to the
-#          other checks alone.
+#          other checks alone. With a <question>, the last review proof is that question's own
+#          (wave-27 T2; D1): each question is its own chain, so a reader of one question is never
+#          held to where another question's reading ended.
 #   task   whichever of the two the evidence carries, the run header first (A-T14.9).
 proof_attested() {
-  local kind="$1" ev="$2" co="$3" plan="${4:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster
+  local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster
   head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
   stamp="$(awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { s = $0 } END { if (s != "") print s }' "$ev" 2>/dev/null)"
@@ -190,7 +275,7 @@ proof_attested() {
         "$ev" "$(printf '%s' "$ah" | cut -c1-12)" "$(printf '%s' "$bh" | cut -c1-12)"; return 1
     fi
     if [ -n "$plan" ] && [ "$kind" = review ]; then
-      since="$(proof_last "$plan" review)"; what="the last review proof"
+      since="$(proof_last "$plan" review "$q")"; what="the last ${q:-review} proof"
       [ -n "$since" ] || { since="$(proof_plan_base "$plan")"; what="the plan's base"; }
       sh=""; [ -n "$since" ] && sh="$(git -C "$co" rev-parse --verify -q "$since^{commit}" 2>/dev/null)"
       if [ -n "$sh" ] && ! git -C "$co" merge-base --is-ancestor "$ah" "$sh" 2>/dev/null; then
@@ -226,7 +311,9 @@ proof_plan_base() {
 }
 
 # proof_awk -> the awk function `proof_fields(s)`, THE ONE READING OF A PROOF LINE (wave-26 T14;
-# review 7 F6): 1 when <s> is a proof line, its kind in PROOF_KIND and its head in PROOF_HEAD.
+# review 7 F6): 1 when <s> is a proof line, its kind in PROOF_KIND and its head in PROOF_HEAD; a
+# reading's four fields in PROOF_QUESTION, PROOF_READER, PROOF_RESULT and PROOF_SCOPE, each empty
+# on a line that carries none (wave-27 T2).
 # A proof line starts `proved:` at the first column (a bulleted `- proved:` is prose, not the
 # line the writer writes), and carries `kind=<lower-case word>` and `head=<7 to 40 lower-case
 # hex>` among its space-separated fields (`head=none` is no head). `proof_last` and the
@@ -234,54 +321,65 @@ proof_plan_base() {
 proof_awk() {
   printf '%s' '
     function proof_fields(s,   f, m, i) {
-      PROOF_KIND = ""; PROOF_HEAD = ""
+      PROOF_KIND = ""; PROOF_HEAD = ""; PROOF_QUESTION = ""; PROOF_READER = ""; PROOF_RESULT = ""; PROOF_SCOPE = ""
       if (s !~ /^proved:[ \t]/) return 0
       m = split(s, f, /[ \t]+/)
       for (i = 2; i <= m; i++) {
         if (f[i] ~ /^kind=/) PROOF_KIND = substr(f[i], 6)
         else if (f[i] ~ /^head=/) PROOF_HEAD = substr(f[i], 6)
+        else if (f[i] ~ /^question=/) PROOF_QUESTION = substr(f[i], 10)
+        else if (f[i] ~ /^reader=/) PROOF_READER = substr(f[i], 8)
+        else if (f[i] ~ /^result=/) PROOF_RESULT = substr(f[i], 8)
+        else if (f[i] ~ /^scope=/) PROOF_SCOPE = substr(f[i], 7)
       }
       return (PROOF_KIND ~ /^[a-z]+$/ && PROOF_HEAD ~ /^[0-9a-f]+$/ && length(PROOF_HEAD) >= 7 && length(PROOF_HEAD) <= 40)
     }
   '
 }
 
-# proof_last <plan> <kind> -> the head of the LAST `proved:` line of <kind> inside the plan's
-# unfenced `## SDLC State`, or nothing. Later lines are newer: the writer only appends.
+# proof_last <plan> <kind> [<question>] -> the head of the LAST `proved:` line of <kind> inside
+# the plan's unfenced `## SDLC State`, or nothing. Later lines are newer: the writer only appends.
+# With a <question>, the last line of that kind carrying `question=<question>` (wave-27 T2); with
+# none, the last line of the kind whatever its question, 1.11.0's reading.
 proof_last() {
-  _proof_last_read "$1" "$2" head
+  _proof_last_read "$1" "$2" head "${3:-}"
 }
 
-# proof_last_line <plan> <kind> -> that same last line, whole, or nothing: what a refusal quotes
-# when it names the proof it read (head and evidence), so no caller parses the plan itself.
+# proof_last_line <plan> <kind> [<question>] -> that same last line, whole, or nothing: what a
+# refusal quotes when it names the proof it read (head and evidence), so no caller parses the plan.
 proof_last_line() {
-  _proof_last_read "$1" "$2" line
+  _proof_last_read "$1" "$2" line "${3:-}"
 }
 
-# _proof_last_read <plan> <kind> <head|line> -> the one reader behind the two above.
+# _proof_last_read <plan> <kind> <head|line> [<question>] -> the one reader behind the two above.
 _proof_last_read() {
-  local plan="$1" kind="$2" what="$3"
+  local plan="$1" kind="$2" what="$3" q="${4:-}"
   [ -f "$plan" ] || return 0
-  awk -v k="$kind" -v what="$what" "$(proof_awk)"'
+  awk -v k="$kind" -v what="$what" -v q="$q" "$(proof_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_fields($0) && PROOF_KIND == k { last = PROOF_HEAD; lastline = $0 }
+    insdlc && proof_fields($0) && PROOF_KIND == k && (q == "" || PROOF_QUESTION == q) { last = PROOF_HEAD; lastline = $0 }
     END { if (last != "") print (what == "line" ? lastline : last) }' "$plan"
 }
 
 # proof_add_line <plan> <line> -> the plan with <line> placed inside `## SDLC State`: after the
-# section's last `proved:` line, or, before the first proof, after the section's last
+# section's last `proved:` or `waived:` line, or, before the first, after the section's last
 # non-blank line. Exit 1 (nothing printed) when the plan has no unfenced `## SDLC State`.
+# Facts and waivers share the one block, so a line's place is its age (wave-27 T9): `facts_state`
+# reads "newer" as "later in the section".
 proof_add_line() {
   local plan="$1" line="$2"
   [ -f "$plan" ] || return 1
-  awk -v L="$line" '
+  # THE LINE GOES IN THROUGH THE ENVIRONMENT, not `-v`, which reads a backslash as an escape: a
+  # waiver carries the user's reply verbatim (wave-27 T9).
+  PROOF_L="$line" awk '
+    BEGIN { L = ENVIRON["PROOF_L"] }
     { row[NR] = $0 }
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); if (insdlc) { seen = 1; lastn = NR }; next }
-    insdlc && /^proved:[[:space:]]/ { lastp = NR }
+    insdlc && /^(proved|waived):[[:space:]]/ { lastp = NR }
     insdlc && /[^[:space:]]/ { lastn = NR }
     END {
       if (!seen) exit 1
@@ -457,6 +555,158 @@ PROOF_FILES
     printf 'unbounded\tthe map answers the change with every suite (%s of %s)\n' "$s" "$roster"; return 0
   fi
   printf 'bounded\t%s\n' "$(printf '%s\n' "$ans" | tr '\n' ' ' | sed 's/ $//')"
+}
+
+# facts_owed <rigor> <scale> -> one line per fact a run owes, exit 0; nothing and exit 1 when
+# <rigor> is not one PROOF_DEALING knows or <scale> is not task, wave or epic (wave-27 T9; D2):
+#
+#     floor                                          the full run, proof_state's question
+#     review<TAB><question><TAB><role><TAB>piece     each question, for the role the rigor deals it
+#     review<TAB><question><TAB><role><TAB>whole     at scale: wave, one more per code question (D10)
+#
+# THE ONE DEALING. The judge below reads it, and the dispatch wall (row T15) reads it for the
+# questions a reader's brief may name; neither restates the table.
+facts_owed() {
+  PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="${1:-}" -v s="${2:-}" '
+    BEGIN {
+      if (s != "task" && s != "wave" && s != "epic") exit 1
+      n = split(ENVIRON["PROOF_D"], d, " ")
+      for (i = 1; i <= n; i++) if (r != "" && index(d[i], r "=") == 1) roles = substr(d[i], length(r) + 2)
+      if (roles == "") exit 1
+      m = split(ENVIRON["PROOF_Q"], q, " "); split(roles, role, ",")
+      print "floor"
+      for (i = 1; i <= m; i++) print "review\t" q[i] "\t" role[i] "\tpiece"
+      if (s == "wave")
+        for (i = 1; i <= m; i++) if (index(" " ENVIRON["PROOF_C"] " ", " " q[i] " ")) print "review\t" q[i] "\t" role[i] "\twhole"
+    }'
+}
+
+# facts_state <plan> <head> -> one line per fact `facts_owed` deals the plan's frontmatter rigor and
+# scale, in its order: the owed line, a tab, its state. Exit 0 only when every line is covered, 1
+# otherwise, 2 (nothing printed, one sentence on stderr) when the plan cannot be dealt (wave-27 T9; D2):
+#
+#     covered                  the fact holds at <head>
+#     uncovered<TAB><a>..<b>   code landed past <a>, the last head the fact reached, to <b> = <head>
+#     failing<TAB><evidence>   the question's newest fact is result=fail, and no waiver is newer
+#     absent                   no fact of that kind, and no waiver
+#
+# A QUESTION IS ONE CHAIN (D4). Its links are its readings (`proved: kind=review … question=<q>`,
+# either scope) and its waivers (`waived: question=<q> head=<sha> …`), in section order, which is the
+# order they were written (`proof_add_line`). `proof_attested` held each reading, when the verb wrote
+# it, to start at or before its question's last head, the first at or before the plan's base, so
+# the chain holds at <head> when its newest link is no failing reading and that link's head is
+# <head>, or every commit past it touches only the docs root (covered code is every tracked path
+# outside it). A waiver covers its question up to its own head.
+# Every line of the question counts, failing ones included: a later reading may start at a failing
+# reading's head, so the chain is not rebuilt by skipping them, and only the newest decides failing.
+# THE WHOLE READ (D10), owed once per code question at wave scale, is covered by a non-failing
+# `scope=whole` reading, or a waiver newer than the newest such reading. Code landed after it is the
+# piece chain's to cover, so a whole line is covered, failing or absent, never uncovered. A proof
+# line carries no range start, so what a whole reading read is the verb's to hold: it refuses one
+# whose range starts after the plan's base-sha (row T41), and the judge takes the line as written.
+# THE FLOOR is proof_state's answer, unchanged: `covered` or `bounded` is covered; with no floor
+# proof it is absent; anything else is uncovered from the floor proof's head.
+# An owed line this judge has no rule for answers absent (the safe direction).
+# IT READS GIT, so a verb, the tick and close-out call it, never a wall: a wall is handed its answer
+# (the freeze, .claude/rules/hook-authoring.md).
+facts_state() {
+  local plan="${1:-}" head="${2:-}" d rigor scale owed tree droot pfx chains fact kind q role scope st rc=0
+  local x pt pr ph pe wt wr we
+  [ -f "$plan" ] || { printf 'facts_state: %s is not a plan file\n' "$plan" >&2; return 2; }
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  if ! declare -F plan_frontmatter_get >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$d/run.sh" >/dev/null 2>&1
+  fi
+  rigor="$(plan_frontmatter_get "$plan" rigor 2>/dev/null)"
+  scale="$(plan_frontmatter_get "$plan" scale 2>/dev/null)"
+  owed="$(facts_owed "$rigor" "$scale")" || {
+    printf 'facts_state: %s declares no rigor and scale the dealing knows (rigor: %s, scale: %s)\n' \
+      "$plan" "${rigor:-none}" "${scale:-none}" >&2
+    return 2
+  }
+  tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
+  pfx=""
+  if [ -n "$tree" ] && declare -F docs_root >/dev/null 2>&1; then
+    droot="$(docs_root "$tree" 2>/dev/null)"
+    case "$droot" in "$tree"/?*) pfx="${droot#"$tree"/}"; pfx="${pfx%/}/" ;; esac
+  fi
+  chains="$(awk -v qs="$PROOF_QUESTIONS" "$(proof_awk)"'
+    function evid(s,   f, m, i) { m = split(s, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) return substr(f[i], 10); return "" }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    !insdlc { next }
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      q = PROOF_QUESTION; pt[q] = "fact"; pr[q] = PROOF_RESULT; ph[q] = PROOF_HEAD; pe[q] = evid($0)
+      if (PROOF_SCOPE == "whole") { wt[q] = "fact"; wr[q] = PROOF_RESULT; we[q] = pe[q] }
+      next
+    }
+    /^waived:[ \t]/ {
+      m = split($0, w, /[ \t]+/); q = ""; h = ""
+      for (i = 2; i <= m && w[i] != "by"; i++) {
+        if (w[i] ~ /^question=/) q = substr(w[i], 10)
+        else if (w[i] ~ /^head=/) h = substr(w[i], 6)
+      }
+      if (q == "" || h !~ /^[0-9a-f]+$/ || length(h) < 7 || length(h) > 40) next
+      pt[q] = "waiver"; pr[q] = ""; ph[q] = h; pe[q] = ""; wt[q] = "waiver"; wr[q] = ""; we[q] = ""
+    }
+    END {
+      n = split(qs, Q, " ")
+      for (i = 1; i <= n; i++) { q = Q[i]; printf "%s|%s|%s|%s|%s|%s|%s|%s\n", q, pt[q], pr[q], ph[q], pe[q], wt[q], wr[q], we[q] }
+    }' "$plan")"
+  while IFS= read -r fact; do
+    [ -n "$fact" ] || continue
+    case "$fact" in
+      floor)
+        st="$(proof_state "$plan" "$tree" 2>/dev/null | awk 'NR == 1 { print $1 }')"
+        case "$st" in
+          covered|bounded) st=covered ;;
+          *) x="$(proof_last "$plan" floor)"
+             if [ -z "$x" ]; then st=absent; else st="uncovered	$x..$head"; fi ;;
+        esac ;;
+      review"	"*)
+        IFS='	' read -r kind q role scope <<PROOF_OWED
+$fact
+PROOF_OWED
+        x="$(printf '%s\n' "$chains" | awk -F'|' -v q="$q" '$1 == q')"
+        IFS='|' read -r x pt pr ph pe wt wr we <<PROOF_CHAIN
+$x
+PROOF_CHAIN
+        if [ "$scope" = whole ]; then
+          if [ -z "$wt" ]; then st=absent
+          elif [ "$wt" = fact ] && [ "$wr" = fail ]; then st="failing	$we"
+          else st=covered; fi
+        elif [ -z "$pt" ]; then st=absent
+        elif [ "$pt" = fact ] && [ "$pr" = fail ]; then st="failing	$pe"
+        elif _facts_holds "$tree" "$pfx" "$ph" "$head"; then st=covered
+        else st="uncovered	$ph..$head"
+        fi ;;
+      *) st=absent ;;
+    esac
+    printf '%s\t%s\n' "$fact" "$st"
+    [ "$st" = covered ] || rc=1
+  done <<PROOF_FACTS
+$owed
+PROOF_FACTS
+  return "$rc"
+}
+
+# _facts_holds <tree> <docs prefix> <last head> <head> -> 0 when <head> is <last head>, or <last
+# head> is on its history and every commit past it on <head>'s first-parent line (a merge as what it
+# brought in) touches only paths under <docs prefix>, a rename as both its paths. 1 otherwise, and
+# whenever git cannot answer: uncovered is the safe direction.
+_facts_holds() {
+  local tree="$1" pfx="$2" lh hh files
+  [ "$3" = "$4" ] && return 0
+  [ -n "$tree" ] || return 1
+  lh="$(git -C "$tree" rev-parse --verify -q "$3^{commit}" 2>/dev/null)" || return 1
+  hh="$(git -C "$tree" rev-parse --verify -q "$4^{commit}" 2>/dev/null)" || return 1
+  [ "$lh" != "$hh" ] || return 0
+  [ -n "$pfx" ] || return 1
+  git -C "$tree" merge-base --is-ancestor "$lh" "$hh" 2>/dev/null || return 1
+  files="$(git -C "$tree" log --first-parent -m --no-renames --name-only --format= "$lh..$hh" 2>/dev/null)" || return 1
+  printf '%s\n' "$files" | awk -v p="$pfx" 'NF && index($0, p) != 1 { bad = 1; exit } END { exit bad }'
 }
 
 # _proof_named <roster file> <answer file> -> each file the answer names on a line for a suite
