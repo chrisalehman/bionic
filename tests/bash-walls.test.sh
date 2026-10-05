@@ -2320,6 +2320,23 @@ $(eg6_reading "$H_EG6" structure pass)" "- Step 6: review at record/w27/review.m
 expect_status "EG6g the predicate is a prefix condition: at current: 7 the same lack is refused" 2 "$ST"
 expect_contains "EG6g2 …naming adversarial" "- adversarial: no reading, and no waiver" "$ERR"
 
+# A LETTERED STEP IS ITS STEP (wave-27 T31; review pass 25 F1). The gate admits `current: <N>[ab]`,
+# and the readings bind from 6 whatever the letter: each lettered value at or past 6 is refused as
+# its step is, and 5 and 5b, below 6, owe nothing new.
+for eg6c in 6a 6b 7a 8a 8b; do
+  eg6_gate "$(eg6_plan "$eg6c" wave "" "- Step 6: review record/w27/review.md
+- Step ${eg6c}: done record/generic-evidence.md")"
+  expect_status "EG6l-${eg6c} F1 at current: ${eg6c} with no reading, the commit is refused as at its step" 2 "$ST"
+  expect_contains "EG6l-${eg6c}b …naming the question it lacks" "- adversarial: no reading, and no waiver" "$ERR"
+done
+for eg6c in 5 5b; do
+  eg6_gate "$(eg6_plan "$eg6c" wave "" | awk -v h="$H_EG6" '/^- Step 5: floor green/ {
+    print "- Step 5:"; print "  cmd: bash tests/run.sh"; print "  pass: 10"; print "  total: 10"
+    print "  output: record/generic-evidence.md"; print "  head: " h; print "  auditor: record/generic-evidence.md"
+    if (c ~ /[ab]$/) print "- Step " c ": done record/generic-evidence.md"; next } { print }' c="$eg6c")"
+  expect_status "EG6m-${eg6c} F1 at current: ${eg6c}, below Step 6, with no reading at all: admitted (nothing new binds)" 0 "$ST"
+done
+
 # THE WALL AND THE JUDGE READ ONE TEXT ONE WAY (the agreement row). The same section through the
 # real gate and through lib/proof.sh `facts_state` at the head every line names: the questions the
 # gate names are exactly the questions whose piece line the judge does not hold. evidence holds;
@@ -2364,6 +2381,54 @@ $(eg6_reading "$H_EG6T" adversarial pass)
 $(eg6_reading "$H_EG6T" structure pass)")" > "$R_EG6T/.bionic/docs/plans/active.md"
 run_hook "$(mk_payload "$R_EG6T/.worktrees/27-T1" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_EG6T"
 expect_status "EG6j …and admitted once the section holds a reading of each question" 0 "$ST"
+
+# THE DECLARED DEBT (wave-27 T31; REQ-14 AC-14.3, D23), the Step-5 row. A state line recording
+# `landed red: <suite> until <token>` holds every commit from Step 6 until a `proved: kind=floor` or
+# `kind=task` line carries an `at=` later than the token's clearing (an `approval:` token clears at
+# its `approved:` line's time): plan text alone, the same section, beside the reading arm. The
+# proof and approval lines are written in their production writers' shape.
+eg6_floor_at() {  # <at> -> one floor proof line at that time
+  bash -c '. "$1" && proof_line floor "$2" "$3" record/w27/floor-late.log' _ "$EG6_LIB" "$H_EG6" "$1"
+}
+EG6_DEBT="- T9: landed at record/w27/T9.md, landed red: widget.test.sh until approval:release at 2026-10-04T11:00:00Z"
+EG6_APPROVED='approved: release by Dana Fixture 2026-10-04T13:00:00Z "ship it"'
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+$EG6_DEBT")"
+expect_status "EG6k AC-14.3 every reading held, and a landed red: line with no proof after its token cleared: refused" 2 "$ST"
+expect_contains "EG6k2 …in its own words" "a declared red is still owed" "$ERR"
+expect_contains "EG6k3 …naming the suite and its token" "- widget.test.sh: landed red until approval:release" "$ERR"
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+$EG6_DEBT
+$(eg6_floor_at 2026-10-04T12:30:00Z)
+$EG6_APPROVED")"
+expect_status "EG6k4 …a floor proof dated BEFORE the approval does not cover it: refused" 2 "$ST"
+expect_contains "EG6k5 …naming it still" "- widget.test.sh: landed red until approval:release" "$ERR"
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+$EG6_DEBT
+$EG6_APPROVED
+$(eg6_floor_at 2026-10-04T14:00:00Z)")"
+expect_status "EG6k6 …and a floor proof after the approval clears it: admitted" 0 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+$EG6_DEBT
+$(eg6_floor_at 2026-10-04T14:00:00Z)")"
+expect_status "EG6k7 …while with no approved: line the same late proof clears nothing: refused" 2 "$ST"
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+${EG6_DEBT% at *}
+$EG6_APPROVED
+$(eg6_floor_at 2026-10-04T14:00:00Z)")"
+expect_status "EG6k8 a landed red: line with no at <ISO-UTC> is never cleared: refused though approved and proved after" 2 "$ST"
+# An ext: debt: the gate holds the ## SDLC State section alone, so it reads only the dated proof
+# after the red landing's own time; whether the slug is still in a ## Tasks cell is the judge's.
+EG6_EXT="- T9: landed at record/w27/T9.md, landed red: widget.test.sh until ext:vendor-key at 2026-10-05T04:00:00Z"
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+$EG6_EXT
+$(eg6_floor_at 2026-10-05T03:00:00Z)")"
+expect_status "EG6k9 an ext: debt whose only proof is dated before the red landing: refused" 2 "$ST"
+expect_contains "EG6k9b …naming it" "- widget.test.sh: landed red until ext:vendor-key" "$ERR"
+eg6_gate "$(eg6_plan 6 wave "$EG6_ALL
+$EG6_EXT
+$(eg6_floor_at 2026-10-05T05:00:00Z)")"
+expect_status "EG6k10 …and with a floor proof after it the gate admits (the slug test is the judge's)" 0 "$ST"
 
 # ---------------------------------------------------------------------------
 section "§EG-OPEN — an open 1.11.0-shaped plan continues untouched until Step 6 (wave-27 T14; REQ-10 AC-10.3, D19)"
