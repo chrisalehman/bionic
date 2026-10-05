@@ -12,6 +12,7 @@
 #
 #   markers_get   <file> <start> <end>              the lines inside, rc 1 if no block
 #   markers_set   <file> <start> <end> <body file>  the block, rewritten whole
+#   markers_replace <file> <start> <end> <body file> the block's body, rewritten where it stands
 #   markers_strip <file> <start> <end>              the block, markers and all, gone
 #   markers_check <file> <start> <end>              rc 2 and `line <n>: …` per fault
 #   markers_only  <file> <start> <end>              rc 0 when the block is all the file holds
@@ -209,17 +210,31 @@ markers_only() {  # <file> <start> <end>
 # an unpaired start to mean "the block runs to the end of the file" deleted the
 # rest of it (finding 2). So: rc 2 before a byte is staged when the markers do not
 # pair up, rc 1 the moment a write fails, and the caller publishes only on 0.
-_markers_rewrite() {  # <file> <tmp> <start> <end> — <tmp> gets every line of <file> outside the block
-  local file="$1" tmp="$2" start="$3" end="$4"
-  local line inside=0 nl
+#
+# WITH A <body file>, THE BLOCK STAYS WHERE IT STOOD (wave-27 T77, A-orch-193): its two
+# marker lines are reproduced like every other line, and what stood between them is
+# replaced by the body (a last line with no newline gets one, or it would fuse with the
+# end marker). `markers_replace` is the one caller; without it the walk is unchanged.
+_markers_rewrite() {  # <file> <tmp> <start> <end> [<body file>] — <tmp> gets every line of <file> outside the block
+  local file="$1" tmp="$2" start="$3" end="$4" body="${5:-}"
+  local line inside=0 nl last=""
   [ -r "$file" ] || return 1
   markers_check "$file" "$start" "$end" >/dev/null || return 2
+  [ -z "$body" ] || last="$(tail -c 1 "$body" 2>/dev/null)"
   {
     while :; do
       nl=1
       IFS= read -r line || { [ -n "$line" ] || break; nl=0; }
-      if [ "$line" = "$start" ]; then inside=1; continue; fi
-      if [ "$line" = "$end" ];   then inside=0; continue; fi
+      if [ "$line" = "$start" ]; then
+        inside=1
+        [ -n "$body" ] || continue
+        { printf '%s\n' "$line" && cat "$body" && { [ -z "$last" ] || printf '\n'; }; } || return 1
+        continue
+      fi
+      if [ "$line" = "$end" ]; then
+        inside=0
+        [ -n "$body" ] || continue
+      fi
       [ "$inside" = "1" ] && continue
       # Outside the block, the file is reproduced line for line, each line with its
       # own terminator: a last line with no newline gets none added (wave-27 T75,
@@ -275,6 +290,30 @@ markers_set() {  # <file> <start> <end> <body file>
   {
     printf '%s\n' "$start" && cat "$body" && { [ -z "$last" ] || printf '\n'; } && printf '%s\n' "$end"
   } >> "$tmp" || { rm -f "$tmp"; return 1; }
+  _markers_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# THE BLOCK'S BODY REWRITTEN WHERE IT STANDS (wave-27 T77, A-orch-193). `markers_set`
+# takes the block out and appends it at the end of the file, so a block that was not
+# the file's last lines would move past the owner's lines below it. This writes <body>
+# between the markers at the place the block stood: the file is the old file with
+# exactly the block's body replaced, and no other byte or line order changes. The same
+# walk, staging, refusals and exit codes as `markers_set`; markers that do not pair up,
+# or a second block, are rc 2, and a file with no block is rc 1 with nothing written
+# (appending one is `markers_set`'s).
+markers_replace() {  # <file> <start> <end> <body file>
+  local file="$1" start="$2" end="$3" body="$4" target tmp rc
+  [ -f "$body" ] || return 1
+  markers_regular "$file" >/dev/null || return 4
+  markers_writable "$file" || return 3
+  markers_check "$file" "$start" "$end" >/dev/null || return 2
+  markers_get "$file" "$start" "$end" >/dev/null || return 1
+  target="$(bionic_link_target "$file")"
+  tmp="${target}.bionic.tmp"
+  _markers_stage_tmp "$tmp" || return 1
+  _markers_rewrite "$file" "$tmp" "$start" "$end" "$body"; rc=$?
+  [ "$rc" = "0" ] || { rm -f "$tmp"; return "$rc"; }
   _markers_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
   return 0
 }
