@@ -11608,4 +11608,127 @@ expect_eq "65r4 …one override line, rewritten" "1" "$(/usr/bin/grep -c '^budge
 expect_contains "65r5 …and the verb says what the dispatch wall then holds the run to" "the dispatch wall holds the run to 12" "$OUT"
 POKE_BOUND="$S65_BOUND_WAS"
 
+
+# ============================================================
+section "Section 66 §AMEND-ID §UNCHECKED: amend records a set for an agent its start did not place, and the tick says a reader started without its checks (wave-27 T38; review pass 8 F3, pass 31 F2)"
+# ============================================================
+#
+# THE DEFECT (review pass 8 F3). An agent the recorder's start join cannot place (two launches of
+# its type, or a type that is not a bionic: role) has no roster row until its launch call returns,
+# and a foreground call returns when it has finished, so the budget wall refused every suite it
+# named for its whole life. The refusal's remedy named an act no verb performed, and `amend` on
+# an id-less row exited 0 whether or not anything would ever read what it wrote. Now the refusal
+# prints `amend <agent id>`; `amend` reads its target as a name, then as an agent id: an id a named
+# row carries amends that row, and an id no row carries that ran as an agent of this session
+# gets a row of its own (`status=unplaced`, the suite set alone, no contract). Anything else is
+# refused saying why, and nothing is written.
+#
+# AND REVIEW PASS 31 F2. A reader whose start could not be placed among candidates carrying
+# different `questions=` started with no checks, and only stderr said so. The recorder now appends
+# `start-unchecked/v1|event=start|…`; the tick prints it ONCE, as a NOTIFY line, and writes
+# `event=told` beside it.
+#
+# FIXTURE FIDELITY: launch rows through `roster_row_fixture` → `roster_row`, the dispatch wall's
+# shape, launched now; the agent's start through the real hooks/execution-recorder.sh; the agent's
+# transcript where the harness writes it, `<config>/projects/<dir>/<session>/subagents/agent-<id>.jsonl`
+# (record/epic-15-kill-interception-experiment.md §2.5). The start-unchecked line is the one the
+# recorder writes, its shape pinned in tests/execution-recorder.test.sh CK-h.
+#
+# fails-when: an id-less row's amend says nothing of an agent already running unplaced; an id no row
+# carries is refused although it ran here, or recorded although it did not; an amend that changes
+# nothing exits 0; the NOTIFY line is missing, or printed twice.
+S66_CFG="$TMPROOT/s66-config"
+S66_TR="$S66_CFG/projects/-s66/$SID.jsonl"
+mkdir -p "$S66_CFG/projects/-s66/$SID/subagents"; : > "$S66_TR"
+export CLAUDE_CONFIG_DIR="$S66_CFG"
+S66_REC="$(dirname "$POKER")/execution-recorder.sh"
+s66_launch() {  # <repo> <name> <tool_use_id> <subagent_type> [key=value...] — the dispatch wall's launch row
+  local repo="$1" name="$2" tu="$3" ty="$4"; shift 4
+  roster_row_fixture status=intended "session=$SID" "name=$name" agent_id= \
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "subagent_type=$ty" "tool_use_id=$tu" \
+    files= suites_allowed=a.test.sh suites_source=declared "$@" >> "$(roster_of "$repo")"
+}
+s66_start() {  # <repo> <agent type> <agent id> — the agent's own start, through the recorder
+  jq -n --arg s "$SID" --arg t "$S66_TR" --arg c "$1" --arg at "$2" --arg a "$3" \
+    '{session_id:$s, transcript_path:$t, cwd:$c, agent_id:$a, agent_type:$at, hook_event_name:"SubagentStart"}' \
+    | ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$S66_REC" >/dev/null 2>&1 )
+}
+s66_ran() { : > "$S66_CFG/projects/-s66/$SID/subagents/agent-$1.jsonl"; }  # <agent id> — its transcript, on disk
+s66_pick() { roster_row_for_id "$(roster_of "$1")" "$2" 2>/dev/null; }
+
+# ---------- 66a: an id-less row by name records the set, and the identification carries it ----------
+R66A="$(make_repo s66-idless)"; new_roster "$R66A"
+s66_launch "$R66A" w66 toolu_w66 bionic:implementor
+poke "$R66A" amend w66 --suites+ tests/b.test.sh --reason 'before it starts'
+expect_eq "66a1 amend on an id-less row exits 0: the set is recorded on its successor" "0" "$RC"
+expect_contains "66a2 …and says when the walls read it: at its start or its launch call's return" \
+  "once w66 is identified, at its start or its launch call's return" "$OUT"
+expect_contains "66a3 …and how an agent already running unplaced is amended: by its agent id" \
+  "amended by the agent id its refusal prints" "$OUT"
+s66_start "$R66A" bionic:implementor aw66-6600000000000001
+expect_eq "66a4 the start's identified row carries the amended set (the identification copied it)" "a.test.sh b.test.sh" \
+  "$(s30_field "$(s66_pick "$R66A" aw66-6600000000000001)" suites_allowed)"
+
+# ---------- 66b: an agent by id that no row carries, whose transcript is on disk ----------
+# Two launches of one type and a nameless start: the start is placed on neither.
+R66B="$(make_repo s66-byid)"; new_roster "$R66B"
+s66_launch "$R66B" u1 toolu_u1 bionic:test-runner
+s66_launch "$R66B" u2 toolu_u2 bionic:test-runner
+S66B_ID="au66-6600000000000002"
+s66_start "$R66B" bionic:test-runner "$S66B_ID"
+expect_empty "66b0 precondition: no row carries the unplaced agent's id" "$(s66_pick "$R66B" "$S66B_ID")"
+expect_contains "66b0 precondition: …while both launches are on the roster" "|name=u2|" "$(cat "$(roster_of "$R66B")")"
+s66_ran "$S66B_ID"
+poke "$R66B" amend "$S66B_ID" --suites+ tests/c.test.sh --reason 'its refusal asked'
+expect_eq "66b1 amend <agent id> for an agent no row carries exits 0" "0" "$RC"
+expect_contains "66b2 …saying it recorded the set for that id" "poker: amended — $S66B_ID, an agent its start did not place: suites=c.test.sh" "$OUT"
+S66B_ROW="$(s66_pick "$R66B" "$S66B_ID")"
+expect_eq "66b3 the budget wall's pick for the id is the row amend wrote" "unplaced" "$(s30_field "$S66B_ROW" status)"
+expect_eq "66b4 …carrying the set" "c.test.sh" "$(s30_field "$S66B_ROW" suites_allowed)"
+expect_eq "66b5 …named by the id, so it shadows no other name" "$S66B_ID" "$(s30_field "$S66B_ROW" name)"
+expect_nonempty "66b6 …and waived: it holds no contract a verdict would judge" "$(s30_field "$S66B_ROW" waiver)"
+expect_contains "66b7 …and says why it was written" "its refusal asked" "$(s30_field "$S66B_ROW" amended)"
+poke "$R66B" amend "$S66B_ID" --suites+ tests/d.test.sh --reason 'one more'
+expect_eq "66b8 a second amend by the same id exits 0" "0" "$RC"
+expect_eq "66b9 …and widens the set it recorded, old members first" "c.test.sh d.test.sh" \
+  "$(s30_field "$(s66_pick "$R66B" "$S66B_ID")" suites_allowed)"
+
+# ---------- 66c: a no-op is refused, and nothing is written ----------
+S66C_SUM="$(cksum < "$(roster_of "$R66B")")"
+poke "$R66B" amend "$S66B_ID" --suites+ tests/d.test.sh --reason 'again'
+expect_eq "66c1 an amend by id that adds nothing it lacks is refused (exit 1)" "1" "$RC"
+expect_contains "66c2 …saying it changes nothing" "this amend changes nothing" "$OUT"
+expect_eq "66c3 …and the roster is unchanged" "$S66C_SUM" "$(cksum < "$(roster_of "$R66B")")"
+poke "$R66B" amend aw66-nosuchagent0000 --suites+ tests/c.test.sh --reason 'a typo'
+expect_eq "66c4 an id that no row carries and that never ran here is refused (exit 1)" "1" "$RC"
+expect_contains "66c5 …saying why: no agent of that id ran in this session" "no agent aw66-nosuchagent0000 ran in this session" "$OUT"
+expect_eq "66c6 …and nothing is written" "$S66C_SUM" "$(cksum < "$(roster_of "$R66B")")"
+poke "$R66B" amend "$S66B_ID" --files+ hooks/a.sh --reason 'files'
+expect_eq "66c7 --files+ for an agent its start did not place is refused (exit 1)" "1" "$RC"
+expect_contains "66c8 …saying a Files: contract belongs to its dispatched row" "a Files: contract belongs to its dispatched row" "$OUT"
+expect_eq "66c9 …and nothing is written" "$S66C_SUM" "$(cksum < "$(roster_of "$R66B")")"
+
+# ---------- 66d: an id a named row carries amends that row ----------
+R66D="$(make_repo s66-namedid)"; new_roster "$R66D"; s30_row "$R66D"
+poke "$R66D" amend aw1-3000000000000001 --suites+ tests/e.test.sh --reason 'by its id'
+expect_eq "66d1 amend <agent id> for an id a named row carries exits 0" "0" "$RC"
+expect_contains "66d2 …and amends that row, by its name" "poker: amended — w1:" "$OUT"
+expect_eq "66d3 …whose set the wall now reads" "a.test.sh e.test.sh" \
+  "$(s30_field "$(s66_pick "$R66D" aw1-3000000000000001)" suites_allowed)"
+
+# ---------- 66e: the tick says a reader started without its checks, once ----------
+R66E="$(make_repo s66-unchecked)"; new_roster "$R66E"
+add_row "$R66E" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+printf 'start-unchecked/v1|event=start|at=%s|session=%s|agent_id=%s|role=%s|candidates=%s\n' \
+  "$(iso_ago 30)" "$SID" ac66-6600000000000005 bionic:critic H1,H2 >> "$(roster_of "$R66E")"
+plant_answer "$S66_TR" none
+poke_pressure "$R66E" 8192 1.0 tick
+expect_contains "66e1 the tick names the reader that started without its checks, and its candidates" \
+  "poker: NOTIFY — a bionic:critic started without its checks: candidates H1, H2" "$OUT"
+expect_contains "66e2 …and writes that it told" "start-unchecked/v1|event=told|" "$(cat "$(roster_of "$R66E")")"
+poke_pressure "$R66E" 8192 1.0 tick
+expect_absent "66e3 the next tick does not say it again" "started without its checks" "$OUT"
+expect_contains "66e4 …while it still reads the roster (the positive on the same tick)" "poker:" "$OUT"
+unset CLAUDE_CONFIG_DIR
+
 finish
