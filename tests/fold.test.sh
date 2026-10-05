@@ -604,4 +604,37 @@ expect_eq "14d: …and the capture the fold made for itself is cleaned up" "0" \
   "$(ls "$T20_TMPC" 2>/dev/null | /usr/bin/grep -c 'bionic-fold\.' || true)"
 rm -rf "$T20_TMPC"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "15: no capture file, no lost line — the user line reaches stderr when mktemp cannot run (wave-27 T71, S1)"
+#
+# §14's private capture needs a writable TMPDIR. When `mktemp` fails the fold used to point
+# the renderer's stderr at /dev/null, and on `exit2` that stderr IS the user's line: every
+# refusal of every wall exited 2 with nothing printed. A TMPDIR that does not exist and one of
+# mode 500 are the two ways a machine gets there. The deny stub is the JSON-wire half: its
+# stdout under a broken TMPDIR is compared byte for byte with the same fold's under a good one.
+
+STUB_DENY='denyD() {
+  fold_block deny dispatch "the t71 deny fact" "fix the t71 deny" "the t71 deny detail"
+  return 2
+}'
+drive "$STUB_DENY" PreToolUse denyD
+T71_DENY_OUT="$FOLD_OUT"
+T71_RO="$(mktemp -d "${TMPDIR:-/tmp}/fold-t71.XXXXXX")"; chmod 500 "$T71_RO"
+for T71_T in /nonexistent/x "$T71_RO"; do
+  drive "export TMPDIR='$T71_T'
+$STUB_BLOCK_EXIT2" PreToolUse blockE
+  expect_eq "15a: TMPDIR=$T71_T — an exit2 refusal still exits 2" "2" "$FOLD_RC"
+  expect_eq "15b: …with its user line on stderr" \
+    "bionic: stop refused — the exit2 fact (fix the exit2)" \
+    "$(printf '%s\n' "$FOLD_ERR" | awk 'NF { print; exit }')"
+  drive "export TMPDIR='$T71_T'
+$STUB_DENY" PreToolUse denyD
+  expect_eq "15c: TMPDIR=$T71_T — a deny keeps its own exit status" "0" "$FOLD_RC"
+  expect_nonempty "15d: …its JSON is on stdout" "$FOLD_OUT"
+  expect_eq "15e: …byte for byte what a writable TMPDIR gets" "$T71_DENY_OUT" "$FOLD_OUT"
+  expect_contains "15f: …and its user line is on stderr" \
+    "bionic: dispatch refused — the t71 deny fact (fix the t71 deny)" "$FOLD_ERR"
+done
+chmod 700 "$T71_RO"; rm -rf "$T71_RO"
+
 finish
