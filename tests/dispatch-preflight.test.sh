@@ -8418,15 +8418,16 @@ section "§Q — a reader's brief names its questions, held to the dealing (wave
 #
 # THE TWO EVIDENCE RULES FOLLOW THE QUESTION (review pass 15, F4). The three-run cap and the
 # refusal of a brief that names no suite and no run used to key on the auditor; `tested` deals
-# `evidence` to the critic, which escaped both. And the cap counts only runs the classifier calls
-# a suite run: a housekeeping command beside three runs is recorded and does not count.
+# `evidence` to the critic, which escaped both. And the cap counts every declared run but file
+# housekeeping (wave-27 T49): a cleanup beside three runs is recorded and does not count.
 #
 # FIXTURES: make_repo's plan is `rigor: audited`, `scale: wave`, approved and bound; `q_rigor`
 # rewrites its rigor line. The briefs are SYNTHESIZED and write their own `Questions:` line.
 #
 # fails-when: a reader brief with no line, a wrong set or an unknown word is admitted; an admitted
 # reader's row lacks `questions=` or holds it unordered; a writer's brief meets the label at all; a
-# critic holding `evidence` escapes the cap or the no-suite refusal; a housekeeping run counts.
+# critic holding `evidence` escapes the cap or the no-suite refusal; a housekeeping run counts; an
+# unknown runner escapes the cap; a Questions: comment, repeat or fenced example is misread.
 q_rigor() {  # <repo> <rigor> — the bound plan's frontmatter rigor, rewritten in place
   local p="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
   awk -v r="$2" '/^rigor:/ && !done { print "rigor: " r; done = 1; next } { print }' "$p" > "$p.tmp" \
@@ -8574,7 +8575,7 @@ Questions: adversarial
 Suites: none"
 expect_eq "Q12 audited: a critic with Questions: adversarial and Suites: none is admitted" "allow" "$GATE_VERDICT"
 
-# ---- the cap counts suite runs; a housekeeping command is recorded and does not count ----
+# ---- the cap counts every run but housekeeping; a cleanup is recorded and does not count ----
 REPO=$(make_repo rq13 yes); write_attestation "$REPO" "$SID_A"
 q_gate "$REPO" q13 bionic:auditor "Your task: re-run the evidence.
 Expected artifact: .bionic/docs/record/wq-q13.md
@@ -8615,6 +8616,115 @@ expect_absent "Q15 …with no finding" "finding:" "$Q15"
 Q15B=$(q_lib_verdict bionic:auditor "$Q_SPAN ${RL_BT}cargo test${RL_BT}")
 expect_contains "Q15b …and a fourth suite run is refused there as at dispatch" \
   "finding: Re-executes: line exceeds the 3-run cap" "$Q15B"
+
+# ---- T49 (review passes 19 and 24): the cap counts EVERY declared run but file housekeeping ----
+# The classifier does not know `python -m pytest`, so under "suite runs only" six of them were
+# admitted beside an auditor's cap of three. The cap now counts every declared command except one
+# with no `;`, `&&`, `|`, backquote or `$(` whose first WORD is rm, rmdir, mkdir, touch, cp or mv
+# (`dp_housekeeping_words`, beside the cap). Identical runs are one run (the union), so the six
+# below differ in their argument.
+# q_span <questions> <suites> <run>... -> a brief span: the Questions: and Suites: lines, then one
+# Re-executes: line per run, each run marked with backticks.
+q_span() {
+  local q="$1" s="$2" r; shift 2
+  printf 'Questions: %s\nSuites: %s' "$q" "$s"
+  for r in "$@"; do printf '\nRe-executes: %s%s%s' "$RL_BT" "$r" "$RL_BT"; done
+}
+q_lift() {  # <role> <span> <field> -> that field of the lift, as the row stores it
+  bash -c '. "$1" || exit 9; brief_field "$(lift_contract_fields "$3" "$2")" "$4"' _ "$Q_LIB" "$1" "$2" "$3" 2>&1
+}
+Q49_PY=(); for _q49 in a b c d e f; do Q49_PY+=("python -m pytest tests/$_q49"); done
+for Q49_ROLE in bionic:auditor bionic:critic bionic:reviewer; do
+  V=$(q_lib_verdict "$Q49_ROLE" "$(q_span evidence none "${Q49_PY[@]}")")
+  expect_contains "T49-Q1 $Q49_ROLE: six python -m pytest runs are refused on the cap of three" \
+    "finding: Re-executes: line exceeds the 3-run cap" "$V"
+  V=$(q_lib_verdict "$Q49_ROLE" "$(q_span evidence none "${Q49_PY[@]:0:3}")")
+  expect_contains "T49-Q1 …while three of them are admitted (the positive beside it)" "rc=0" "$V"
+  expect_absent "T49-Q1 …with no finding" "finding:" "$V"
+done
+V=$(q_lib_verdict implementor "$(q_span evidence none "${Q49_PY[@]}")")
+expect_contains "T49-Q1 a writer holding no cap declares the six" "rc=0" "$V"
+
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'bash tests/x.test.sh' 'bash tests/y.test.sh' 'bash tests/z.test.sh' 'rm -rf dist/cache')")
+expect_contains "T49-Q2 three runs and one rm -rf dist/cache are admitted" "rc=0" "$V"
+expect_eq "T49-Q2 …with four recorded" \
+  "${RL_BT}bash tests/x.test.sh${RL_BT} ${RL_BT}bash tests/y.test.sh${RL_BT} ${RL_BT}bash tests/z.test.sh${RL_BT} ${RL_BT}rm -rf dist/cache${RL_BT}" \
+  "$(q_lift bionic:auditor "$(q_span evidence none 'bash tests/x.test.sh' 'bash tests/y.test.sh' 'bash tests/z.test.sh' 'rm -rf dist/cache')" re_executes)"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'bash tests/x.test.sh' 'bash tests/y.test.sh' 'bash tests/z.test.sh' 'rm -rf dist && bash tests/w.test.sh')")
+expect_contains "T49-Q3 three runs and rm -rf dist && bash tests/w.test.sh: the && makes it a run, four" \
+  "finding: Re-executes: line exceeds the 3-run cap" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'bash tests/x.test.sh' 'bash tests/y.test.sh' 'bash tests/z.test.sh' 'mkdir -p out' 'cp a b' 'touch f' 'mv a b' 'rmdir d')")
+expect_contains "T49-Q4 mkdir, cp, touch, mv and rmdir do not count" "rc=0" "$V"
+for Q49_RUN in 'rmx -rf dist' './rm -rf dist' 'rm -rf dist; true' 'rm -rf $(pwd)/dist'; do
+  V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'bash tests/x.test.sh' 'bash tests/y.test.sh' 'bash tests/z.test.sh' "$Q49_RUN")")
+  expect_contains "T49-Q5 '$Q49_RUN' is a fourth run, not housekeeping: refused on the cap" \
+    "finding: Re-executes: line exceeds the 3-run cap" "$V"
+done
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'rm -rf dist')")
+expect_contains "T49-Q6 a reader with Suites: none and only rm -rf dist is refused" "finding: an auditor names no suites" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'rm -rf dist' 'mkdir out')")
+expect_contains "T49-Q6 …two housekeeping commands are no run either" "finding: an auditor names no suites" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'rm -rf dist' 'bash tests/x.test.sh')")
+expect_contains "T49-Q6 …while one run beside the housekeeping admits it (the positive)" "rc=0" "$V"
+V=$(q_lib_verdict bionic:critic "$(q_span evidence none 'rm -rf dist')")
+expect_contains "T49-Q6 …and a critic holding evidence is held the same" "finding: a critic reading evidence names no suites" "$V"
+
+# ---- T49: the Questions: label is read as the other labels are ----
+# q_hits <brief> <role> -> the row's questions=, or `deny:<first refusal line>`.
+q49_gate() {  # <tag> <role> <rigor> <brief>
+  local repo; repo=$(make_repo "rq49-$1" yes); write_attestation "$repo" "$SID_A"; q_rigor "$repo" "$3"
+  q_gate "$repo" "q49-$1" "$2" "$4"
+  if [ "$GATE_VERDICT" = allow ]; then R="allow:$(roster_field "$(q_row "$repo")" questions)"
+  else R="deny:$(printf "%s\n" "$GATE_ERR" | /usr/bin/grep -m1 "bionic: dispatch refused")"; fi
+}
+Q49_HEAD='Your task: read the wave-99 change.
+Expected artifact: .bionic/docs/record/wq-q49.md
+Expected duration: ~30 minutes.
+Suites: tests/widget.test.sh'
+q49_gate c1 bionic:auditor audited "$Q49_HEAD
+Questions: evidence  # the auditor's"
+expect_eq "T49-Q7 a trailing comment is stripped: Questions: evidence  # the auditor's is evidence" "allow:evidence" "$R"
+q49_gate c2 bionic:critic peer-reviewed "$Q49_HEAD
+Questions: structure, adversarial # both"
+expect_eq "T49-Q7 …a comment after a set, too" "allow:adversarial,structure" "$R"
+q49_gate c3 bionic:auditor audited "$Q49_HEAD
+Questions: evidence
+Questions: evidence"
+expect_contains "T49-Q8 two Questions: lines, even with the same set, are refused" "deny:" "$R"
+expect_contains "T49-Q8 …the first line naming the count" "bionic:auditor has 2 Questions: lines" "$R"
+Q49_REFUSAL=$(printf '%s\n' "$GATE_VERR")
+expect_contains "T49-Q8 …and the detail naming both lines by number" "lines 5 and 6" "$Q49_REFUSAL"
+q49_gate c4 bionic:auditor audited "$Q49_HEAD
+Questions: evidence
+Questions: structure"
+expect_contains "T49-Q8 …two different sets are refused the same" "has 2 Questions: lines" "$R"
+for Q49_C in "bionic:reviewer audited structure" "bionic:critic tested evidence,adversarial,structure"; do
+  set -- $Q49_C
+  q49_gate "c5-${1#bionic:}" "$1" "$2" "$Q49_HEAD
+Questions: ${3//,/, }
+Questions: ${3//,/, }"
+  Q49_LINE="${R#deny:}"
+  expect_contains "T49-Q8 $1 at $2 with $3 given twice is refused" "has 2 Questions: lines" "$R"
+  expect_eq "T49-Q8 …its first line fits the 100-column budget" "ok" "$([ "$(bionic_cols "$Q49_LINE")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$Q49_LINE")")"
+done
+set --
+q49_gate c6 bionic:auditor audited "Your task: read the wave-99 change.
+Expected artifact: .bionic/docs/record/wq-q49.md
+Expected duration: ~30 minutes.
+Suites: tests/widget.test.sh
+${RL_BT}${RL_BT}${RL_BT}
+Questions: structure, adversarial
+${RL_BT}${RL_BT}${RL_BT}
+Questions: evidence"
+expect_eq "T49-Q9 a Questions: line inside a fenced block is an example: the real line below it is the label" "allow:evidence" "$R"
+q49_gate c7 bionic:auditor audited "Your task: read the wave-99 change.
+Expected artifact: .bionic/docs/record/wq-q49.md
+Expected duration: ~30 minutes.
+Suites: tests/widget.test.sh
+${RL_BT}${RL_BT}${RL_BT}
+Questions: evidence
+${RL_BT}${RL_BT}${RL_BT}"
+expect_contains "T49-Q9 a brief whose only Questions: line is inside a fence has no label: refused" "bionic:auditor names no Questions: line" "$R"
 
 section "AC-E1.3/E1.5 — every refusal this gate makes is one line, in the shape"
 
@@ -9833,5 +9943,43 @@ Suites: tests/one.test.sh' "w-fileslong")"
 expect_eq "FILES-LIST18 a prose item of 55 characters is refused by a deny" "deny" "$GATE_VERDICT"
 FL_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
 expect_contains "FILES-LIST18 …whose first line names it, cut" "Files: this list covers every file the task may … is not a path (drop it)" "$FL_LINE"
+
+# --- FILES-LIST19..: one pair of punctuation around a path, and a trailing `;` (wave-27 T49; review
+# pass 19 should-fix 1). The reader strips from an item ONE surrounding pair of double quotes, single
+# quotes, parentheses, square brackets or backticks, and a trailing `;`; what is left is judged as any
+# item. An unmatched mark is no pair and stays on the item.
+FL=$(fl_read 'Files: "lib/a.sh", (lib/b.sh), [lib/c.sh], '"'lib/d.sh'"', lib/e.sh;')
+expect_contains "FILES-LIST19 five wrapped or terminated paths record the five bare paths" \
+  "files=lib/a.sh,lib/b.sh,lib/c.sh,lib/d.sh,lib/e.sh
+" "$FL
+"
+expect_contains "FILES-LIST19 …rc=0" "rc=0" "$FL"
+expect_eq "FILES-LIST19 …with no finding" "0" "$(fl_findings "$FL")"
+FL=$(fl_read 'Files: "lib/a.sh')
+expect_contains "FILES-LIST20 an unmatched mark is no pair: the item keeps its quote and, with a /, is still a path (as before)" \
+  'files="lib/a.sh
+' "$FL
+"
+FL=$(fl_read 'Files: (("lib/a.sh"))')
+expect_contains "FILES-LIST21 only ONE pair is stripped: the outer parentheses go, the rest is judged" \
+  'files=("lib/a.sh")
+' "$FL
+"
+FL=$(fl_read 'Files: (the usual files)')
+expect_eq "FILES-LIST22 a pair around prose is stripped and the prose is still refused, once" "1" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST22 …naming the prose bare" "finding: Files: the usual files is not a path" "$FL"
+FL=$(fl_read 'Files: "Makefile", (README)')
+expect_contains "FILES-LIST23 a wrapped bare word is named bare, with its ./ spelling" \
+  "finding: Files: names Makefile, not a path | spell it ./Makefile" "$FL"
+FL=$(fl_read 'Files: lib/a.sh;  # one file')
+expect_contains "FILES-LIST24 a trailing ; before a comment is stripped too" "files=lib/a.sh
+" "$FL
+"
+FL=$(fl_read 'Files: `"lib/a.sh"`')
+expect_contains "FILES-LIST25 a backtick pair is the one pair: what is inside it is judged as it stands" 'files="lib/a.sh"
+' "$FL
+"
+expect_eq "FILES-ENTRY a quoted path answers 0, as the reader records it" "lib/a.sh rc=0" "$(fe '"lib/a.sh"')"
+expect_eq "FILES-ENTRY …and a path with a trailing ; likewise" "lib/a.sh rc=0" "$(fe 'lib/a.sh;')"
 
 finish

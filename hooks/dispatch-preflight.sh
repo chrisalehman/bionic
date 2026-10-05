@@ -2141,6 +2141,7 @@ case "$DP_SUBAGENT" in
   bionic:auditor|bionic:critic|bionic:reviewer)
     _q_set="$(brief_field "$LIFTED" questions)"
     _q_bad="$(brief_field "$LIFTED" questions_bad)"
+    _q_dup="$(brief_field "$LIFTED" questions_dup)"
     _q_rigor=""; _q_scale=""; _q_owed=""; _q_dealt=""; _q_dealable=""
     if [ -n "$PLAN" ]; then
       if ! declare -F facts_owed >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
@@ -2167,6 +2168,29 @@ case "$DP_SUBAGENT" in
     done
     _q_fixline="Questions: <q>[, <q>]"
     [ -n "$_q_dealt" ] && _q_fixline="Questions: ${_q_dealt//,/, }"
+    # THE LABEL IS GIVEN ONCE (wave-27 T49; review pass 24). Two lines, even with the same set,
+    # are refused naming both, since the second would otherwise be dropped in silence.
+    if [ -n "$_q_dup" ]; then
+      read -r -a _q_arr <<< "$_q_dup"
+      _q_n=${#_q_arr[@]}; _q_nums=""
+      for _q_i in "${!_q_arr[@]}"; do
+        if [ "$_q_i" -eq 0 ]; then _q_nums="${_q_arr[0]}"
+        elif [ "$_q_i" -eq $((_q_n - 1)) ]; then _q_nums="${_q_nums} and ${_q_arr[$_q_i]}"
+        else _q_nums="${_q_nums}, ${_q_arr[$_q_i]}"; fi
+      done
+      dp_finding "${DP_SUBAGENT} has ${_q_n} Questions: lines" "keep one Questions: line" \
+        "The brief carries the Questions: label more than once, on lines ${_q_nums}:
+    Role: ${DP_SUBAGENT}
+
+A reader's questions are one set, read off one line. A second line is not merged into the
+first and not ignored, so the brief is refused rather than guessed at. A line inside a
+fenced block is an example, and does not count.
+
+Fix: keep one line, on a line of its own —
+    ${_q_fixline}
+
+Then retry the dispatch."
+    fi
     if [ -n "$_q_bad" ]; then
       dp_finding "unknown question: $(bionic_trunc "${_q_bad%% *}" 16)" "use evidence/adversarial/structure" \
         "The Questions: line names a word that is not a reading question:
