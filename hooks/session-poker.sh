@@ -5587,9 +5587,12 @@ EOF
       die "REFUSED — '$(clean "$PF_QUESTION")' is not a reading question: name evidence, adversarial or structure. The plan is unchanged."
       exit 1
     fi
+    # THE READER'S NAME IS MATCHED AS TYPED (wave-27 T41; review pass 10 F3): letters, digits, `_`
+    # and `-`, spelled out (PV_ID_ALNUM: a range is a collation range under a UTF-8 locale), so no
+    # escape a reader of it might decode, and no character the space-separated line cannot hold.
     case "$PF_READER" in
-      *[[:space:]]*|*'|'*|*=*)
-        die "REFUSED — the reader name '$(clean "$PF_READER")' carries a space, a |, or an =, which the space-separated proof line cannot hold; name the reader as its roster row does. The plan is unchanged."
+      *[!"$PV_ID_ALNUM"_-]*)
+        die "REFUSED — the reader name '$(clean "$PF_READER")' carries a character outside A-Z, a-z, 0-9, _ and -, and a reader name is matched byte for byte against its roster row; name the reader as its roster row does. The plan is unchanged."
         exit 1 ;;
     esac
     plan_verb_open proof-add
@@ -5627,51 +5630,86 @@ EOF
     # A READING CARRIES ITS QUESTION, ITS RESULT AND ITS SCOPE (wave-27 T2; D1, AC-2.1). The record's
     # own flush-left lines say them, and for `structure` it answers every check id the shipped
     # checks file names, the file resolved through this hook's own lib root, as execution-recorder
-    # resolves survival.md (lib/proof.sh `proof_reading`).
-    PF_RESULT=""; PF_SCOPE=""; PF_ROLE=""
+    # resolves survival.md (lib/proof.sh `proof_reading`). Only the record's first pass is read,
+    # each value whole, and a structure result is one its checks bear out (T41; review pass 10 F1,
+    # F2, F6); the start of its range comes back too, for the whole-read check below.
+    PF_RESULT=""; PF_SCOPE=""; PF_FROM=""; PF_ROLE=""
     if [ -n "$PF_QUESTION" ]; then
       if ! PF_RS="$(proof_reading "$PF_REAL" "$PF_QUESTION" "$BIONIC_LIB/../../context/checks-structure.md")"; then
         die "REFUSED — $(clean "$PF_RS"). The plan is unchanged."
         exit 1
       fi
-      PF_RESULT="${PF_RS%% *}"; PF_SCOPE="${PF_RS#* }"
+      PF_RESULT="${PF_RS%% *}"; PF_FROM="${PF_RS#* }"; PF_SCOPE="${PF_FROM%% *}"; PF_FROM="${PF_FROM#* }"
       # THE READER IS A ROW THE DISPATCH RECORDED (wave-27 T2; D7, AC-1.4). Every roster of this
       # project is read, every session's, for a reader whose session has ended still has its row
       # there until close-out; each row naming the reader must be a reader role, and one of them
       # must have been dealt the question (`questions=`). A name no row carries is refused, so the
       # orchestrator cannot register a reading in a reader's name, and a name any writer row
-      # carries is refused, so a writer cannot read its own code under it.
+      # carries is refused, so a writer cannot read its own code under it. The name is compared
+      # byte for byte, handed to awk through its environment, never `-v`, which decodes escapes
+      # (T41; review pass 10 F3).
+      # THE RECORD IS THE READER'S OWN (T41; review pass 10 F4). A row dealt the question that got
+      # past `intended` (its agent started) must name this record as its `deliverable=` or among its
+      # `files=`, each entry read from the project root unless absolute and compared by its real
+      # path, so no record is registered under the name of a reader that never wrote it. The roster
+      # files themselves take any write; that residual is the walls' known one (walls.sh, "habit,
+      # not an adversary").
       PF_ROWS=""
       for _pf_rf in "$PV_REPO/.bionic/tmp"/roster-*.state; do
         [ -f "$_pf_rf" ] && [ ! -L "$_pf_rf" ] || continue
-        PF_ROWS="$PF_ROWS$(awk -v want="$PF_READER" "$_ROSTER_OPEN_AWK"'
-          index($0, "roster-state/") == 1 && _roster_kv($0, "name") == want {
+        PF_ROWS="$PF_ROWS$(PF_WANT="$PF_READER" awk "$_ROSTER_OPEN_AWK"'
+          index($0, "roster-state/") == 1 && (_roster_kv($0, "name") "") == (ENVIRON["PF_WANT"] "") {
             t = _roster_kv($0, "subagent_type"); if (t == "") t = "(none)"
-            print t "\t" _roster_kv($0, "questions") }' "$_pf_rf" 2>/dev/null)
+            print t "\t" _roster_kv($0, "questions") "\t" _roster_kv($0, "status") "\t" _roster_kv($0, "deliverable") "\t" _roster_kv($0, "files") "\t" _roster_kv($0, "name") }' "$_pf_rf" 2>/dev/null)
 "
       done
-      PF_ROLE="$(printf '%s' "$PF_ROWS" | PROOF_ROLES="$PROOF_READER_ROLES" awk -F'\t' -v q="$PF_QUESTION" '
-        BEGIN { n = split(ENVIRON["PROOF_ROLES"], r, " "); for (i = 1; i <= n; i++) ok[r[i]] = 1 }
+      PF_LOOK="$(printf '%s' "$PF_ROWS" | PROOF_ROLES="$PROOF_READER_ROLES" PF_Q="$PF_QUESTION" awk -F'\t' '
+        BEGIN { n = split(ENVIRON["PROOF_ROLES"], r, " "); for (i = 1; i <= n; i++) ok[r[i]] = 1; q = ENVIRON["PF_Q"] }
         NF { rows++
              if (!($1 in ok)) { if (bad == "") bad = $1; next }
-             m = split($2, qs, ","); for (i = 1; i <= m; i++) if (qs[i] == q) { dealt = 1; role = $1 } }
+             d = 0; m = split($2, qs, ","); for (i = 1; i <= m; i++) if (qs[i] == q) d = 1
+             if (!d) next
+             dealt = 1; role = $1; name = $6
+             if ($3 == "" || $3 == "intended") next
+             past = 1
+             if ($4 != "" && !($4 in seen)) { seen[$4] = 1; own[++c] = $4 }
+             m = split($5, fs, ","); for (i = 1; i <= m; i++) if (fs[i] != "" && !(fs[i] in seen)) { seen[fs[i]] = 1; own[++c] = fs[i] } }
         END {
           if (!rows) { print "none"; exit }
           if (bad != "") { print "writer\t" bad; exit }
           if (!dealt) { print "undealt"; exit }
-          print "ok\t" role }')"
+          if (!past) { print "intended"; exit }
+          print "ok\t" role "\t" name
+          for (i = 1; i <= c; i++) print own[i] }')"
+      PF_ROLE="${PF_LOOK%%
+*}"
       case "$PF_ROLE" in
         none)
           die "REFUSED — no roster row on this machine names the reader $(clean "$PF_READER"), so nothing records it as a reader; register a reading under the name its dispatch recorded. The plan is unchanged."
           exit 1 ;;
         writer*)
-          die "REFUSED — the reader $(clean "$PF_READER") has a roster row of role ${PF_ROLE#*	}, which is not a reader role ($PROOF_READER_ROLES); a reading is registered for a reader, never a writer. The plan is unchanged."
+          die "REFUSED — the reader $(clean "$PF_READER") has a roster row of role $(clean "${PF_ROLE#*	}"), which is not a reader role ($PROOF_READER_ROLES); a reading is registered for a reader, never a writer. The plan is unchanged."
           exit 1 ;;
         undealt)
           die "REFUSED — the reader $(clean "$PF_READER") was not dealt the $PF_QUESTION question (the questions= of its roster row does not name it); register the reading for the reader dealt it. The plan is unchanged."
           exit 1 ;;
+        intended)
+          die "REFUSED — the reader $(clean "$PF_READER") dealt the $PF_QUESTION question has no roster row past status=intended: its launch was recorded and never started, so it read nothing; register the reading once its agent has run. The plan is unchanged."
+          exit 1 ;;
       esac
-      PF_ROLE="${PF_ROLE#*	}"
+      PF_OWN=""
+      while IFS= read -r _pf_c; do
+        case "$_pf_c" in '') continue ;; /*) _pf_p="$_pf_c" ;; *) _pf_p="$PV_REPO/${_pf_c#./}" ;; esac
+        [ -f "$_pf_p" ] || continue
+        if [ "$(cd "$(dirname "$_pf_p")" 2>/dev/null && pwd -P)/$(basename "$_pf_p")" = "$PF_REAL" ]; then PF_OWN=1; break; fi
+      done <<PF_OWN_LIST
+$(printf '%s\n' "$PF_LOOK" | sed 1d)
+PF_OWN_LIST
+      if [ -z "$PF_OWN" ]; then
+        die "REFUSED — the record $(clean "$PF_REL") was not written by the reader $(clean "$PF_READER"): no roster row of that reader names it as its deliverable= or among its files=, and a reading is the record its reader was dispatched to write; register it under the reader whose row names it. The plan is unchanged."
+        exit 1
+      fi
+      PF_ROLE="${PF_ROLE#*	}"; PF_READER="${PF_ROLE#*	}"; PF_ROLE="${PF_ROLE%%	*}"
     fi
     PF_WB="$(proof_working_branch "$PV_PLAN")"
     if [ -z "$PF_WB" ]; then
@@ -5691,9 +5729,27 @@ EOF
     # `proof_attested`). A task landed between the run and this verb is not proved by it.
     # The plan goes too: a review's range must start at or before its last review proof (T62).
     # A reading's range starts at or before the last proof of its own question (wave-27 T2; D1).
-    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$(proof_checkout "$PV_REPO" "$PF_WB")" "$PV_PLAN" "$PF_QUESTION")"; then
+    PF_CO="$(proof_checkout "$PV_REPO" "$PF_WB")"
+    if ! PF_HEAD="$(proof_attested "$PF_KIND" "$PF_REAL" "$PF_CO" "$PV_PLAN" "$PF_QUESTION")"; then
       die "REFUSED — $(clean "$PF_HEAD"). The plan is unchanged."
       exit 1
+    fi
+    # A WHOLE READ STARTS AT THE RUN'S BASE (wave-27 T41; review pass 10 F5). The line carries the
+    # head and not the start, so `scope: whole` over a tail would read to the judge as a read of
+    # everything; it is accepted only when the range starts at the plan's base-sha: or an ancestor
+    # of it (proof_attested has already resolved the start, so here it is a commit).
+    if [ "$PF_SCOPE" = whole ]; then
+      PF_BASE="$(proof_plan_base "$PV_PLAN")"; PF_BASEH=""
+      [ -n "$PF_BASE" ] && PF_BASEH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_BASE^{commit}" 2>/dev/null)"
+      if [ -z "$PF_BASEH" ]; then
+        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but the plan names no base-sha: that is a commit here ('$(clean "$PF_BASE")'), so nothing shows it read from the start of the run; write the base under ## SDLC State, or scope: piece. The plan is unchanged."
+        exit 1
+      fi
+      PF_FROMH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_FROM^{commit}" 2>/dev/null)"
+      if [ -z "$PF_FROMH" ] || ! git -C "$PF_CO" merge-base --is-ancestor "$PF_FROMH" "$PF_BASEH" 2>/dev/null; then
+        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but its range starts at $(clean "$(printf '%s' "${PF_FROMH:-$PF_FROM}" | cut -c1-12)"), past the plan's base ${PF_BASEH:0:12}; a whole reading reads from the base, so write reviewed: ${PF_BASEH:0:12}..<b>, or scope: piece. The plan is unchanged."
+        exit 1
+      fi
     fi
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_QUESTION" "$PF_READER" "$PF_RESULT" "$PF_SCOPE")"
     if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
