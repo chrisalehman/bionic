@@ -11022,7 +11022,7 @@ expect_eq "62p5 …and so is a log whose first line is not the header" "1" "$PA_
 # S4: a tracked file touched, its content unchanged, is not dirt.
 S62_N="$(s62_runs)"
 touch -t 203001010000 "$S62_WT/lib/b.sh"
-expect_eq "62x precondition: touch left lib/b.sh's content as the head has it" "0" \
+expect_eq "62x0p precondition: touch left lib/b.sh's content as the head has it" "0" \
   "$(git -C "$S62_WT" show HEAD:lib/b.sh | cmp -s - "$S62_WT/lib/b.sh"; echo $?)"
 expect_eq "62x0 precondition: …while an unrefreshed index calls it changed" "1" \
   "$(git -C "$S62_WT" diff-index --quiet HEAD -- >/dev/null 2>&1; echo $?)"
@@ -11626,7 +11626,8 @@ section "Section 64 §DEBT: a declared red that landed is a fact the run owes un
 # in a linked worktree, every reading and the floor at the head written by the production writers
 # (s61-style, proof_line placed by proof_add_line, at 2026-10-04T12:00:00Z), and §47's reads
 # column so `approve release` (the verb that writes the approved: line) has a row reading it. The
-# state line is written as the orchestrator writes a state line, by hand, because no verb writes it.
+# debt is written to the run's landing record by `land`'s own writer (lib/worktree.sh
+# `_wt_debt_write`, wave-27 T67; A-orch-120), never as a plan line: the judge reads the record.
 S64_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R64="$(make_repo s64-debt)"; ( cd "$R64" && git commit -q --allow-empty -m init )
 git -C "$R64" config user.name "Dana Fixture"
@@ -11636,7 +11637,6 @@ P64="$(s42_plan "$R64" 7 "  worktree: .worktrees/01-fixture
   branch: wave/01-fixture")"
 awk '
   /^current: / && !d { print; print "working-branch: wave/01-fixture"; d = 1; next }
-  /^- T1: landed at record\/T1.md/ { print; print "- T9: landed at record/T9.md, landed red: widget.test.sh until approval:release at 2026-10-04T11:00:00Z"; next }
   /^\| id \| step \|/ { print $0 " reads |"; next }
   /^\|---\|/ { print $0 "---|"; next }
   /^\| T5 \|/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " approval:release |"; next }
@@ -11667,11 +11667,19 @@ s64_owed() {  # the floor and every reading owed at the head, all at 2026-10-04T
 }
 s64_owed
 cp "$P64" "$TMPROOT/s64-clean"
+S64_WTLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/worktree.sh"
+S64_LOG="$S64_REC/landing-proofs.log"
+s64_debt() {  # <suite> <token> <at> [<id>] -> one debt line appended by land's own writer
+  bash -c '. "$1" && _wt_debt_write "$2" "$3" T9 wt/27-T9 "$4" "$5" "$6" "$7"' _ "$S64_WTLIB" "$S64_LOG" \
+    "${4:-d$RANDOM$RANDOM}" "$S64_H" "$1" "$2" "$3"
+}
+s64_debt_reset() { rm -f "$S64_LOG"; }
+s64_debt widget.test.sh approval:release 2026-10-04T11:00:00Z
 s64_reset() { cp "$TMPROOT/s64-clean" "$P64"; }
 S64_DEBT="$(printf 'debt\twidget.test.sh\tapproval:release')"
 
 # ---------- the dealing ----------
-expect_eq "64a §DEBT facts_owed with the plan deals one debt line per landed red: state line" "$S64_DEBT" \
+expect_eq "64a §DEBT facts_owed with the plan deals one debt line per debt land wrote to the landing record" "$S64_DEBT" \
   "$(bash -c '. "$1" && facts_owed audited wave "$2" "$3"' _ "$S61_LIB" "$R64" "$P64" | /usr/bin/grep '^debt')"
 expect_eq "64a2 …and the dealing of a rigor alone carries none (the positive above is the same function)" "" \
   "$(bash -c '. "$1" && facts_owed audited wave "$2"' _ "$S61_LIB" "$R64" | /usr/bin/grep '^debt')"
@@ -11727,20 +11735,21 @@ expect_contains "64h2 …naming the argument" "unknown argument for amend: --lan
 poke "$R64" amend w1 --red-evidence+ record/wave-01-fixture/T9-red.md --reason 'land it red'
 expect_eq "64h3 …and so is --red-evidence+" "2" "$RC"
 
-# ---------- the line's own time (A-orch-85): no `at <ISO-UTC>`, never covered ----------
+# ---------- the debt's own time (A-orch-85): a debt line whose at= is no <ISO-UTC>, never covered ----------
 cp "$TMPROOT/s64-approved" "$P64"
-sed 's/ until approval:release at 2026-10-04T11:00:00Z/ until approval:release/' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+s64_debt_reset; s64_debt widget.test.sh approval:release sometime
 s64_proof floor 2099-01-01T00:00:00Z record/wave-01-fixture/floor-late.log
 s57_state "$P64" "$S64_H"
-expect_regex "64i a landed red: line with no at <ISO-UTC> is never covered: absent, the judge naming the missing time" \
-  '^absent	.*at <ISO-UTC>' "$(s57_of "$S64_DEBT")"
+expect_regex "64i a debt whose at= is no <ISO-UTC> is never covered: absent, the judge naming the missing time" \
+  '^absent	.*at=<ISO-UTC>' "$(s57_of "$S64_DEBT")"
+s64_debt_reset; s64_debt widget.test.sh approval:release 2026-10-04T11:00:00Z
 
 # ---------- an ext: debt (A-orch-85): the slug gone from every ## Tasks cell, and a green run after the red landing ----------
 S64_EXT="$(printf 'debt\twidget.test.sh\text:vendor-key')"
-s64_ext_plan() {  # <slug still in T2's deps cell: yes|no> -> P64 with an ext: state line in place of the approval one
+s64_ext_plan() {  # <slug still in T2's deps cell: yes|no> -> P64 clean, the record holding one ext: debt in place of the approval one
   cp "$TMPROOT/s64-clean" "$P64"
+  s64_debt_reset; s64_debt widget.test.sh ext:vendor-key 2026-10-05T04:00:00Z
   awk -v keep="$1" '
-    /landed red: widget.test.sh until approval:release/ { sub(/until approval:release at 2026-10-04T11:00:00Z/, "until ext:vendor-key at 2026-10-05T04:00:00Z") }
     keep == "yes" && /^\| T2 \|/ { sub(/\| — \| 30 \|/, "| ext:vendor-key | 30 |") }
     { print }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
 }
@@ -11999,5 +12008,133 @@ poke_pressure "$R66E" 8192 1.0 tick
 expect_absent "66e3 the next tick does not say it again" "started without its checks" "$OUT"
 expect_contains "66e4 …while it still reads the roster (the positive on the same tick)" "poker:" "$OUT"
 unset CLAUDE_CONFIG_DIR
+
+# ============================================================
+section "Section 68 §DEBT-OWED: a debt is owed because land wrote it, and covered only by a green run after the red landing (wave-27 T67; review pass 46 B1, B2, B3, N5, S3; REQ-14 AC-14.3; D23 as amended, A-orch-120)"
+# ============================================================
+#
+# The judge reads debts from the run's landing record (`landing-proofs.log`), every `debt:` line no
+# `void:` line names, and never from a `landed red:` plan line, which may stay as a note and changes
+# nothing. Either kind of debt is covered only by a green floor or task proof dated strictly after the
+# red landing; an `approval:` debt also after the approval. Two red landings on one suite and token
+# are two debts, both covered only after the later. An `ext:` slug is held while any `## Tasks` cell
+# holds it as a whole token, whatever punctuation stands around it.
+#
+# FIXTURE FIDELITY. §64's repository, bound plan, head and proof placer (`proof_add_line`); each debt
+# written by `land`'s own writer (`_wt_debt_write`) and each void by `_wt_debt_void`; an `approved:`
+# line in the shape the approve verb writes, at a time the row chooses.
+S68_AP="$(printf 'debt\twidget.test.sh\tapproval:design')"
+S68_EXT="$(printf 'debt\twidget.test.sh\text:vendor-key')"
+s68_plan() { cp "$TMPROOT/s64-clean" "$P64"; s64_debt_reset; }
+s68_approve() { s64_add "approved: $1 by Dana Fixture $2 \"ok\""; }
+s68_owed() { bash -c '. "$1" && facts_owed audited wave "$2" "$3"' _ "$S61_LIB" "$R64" "$P64" | /usr/bin/grep '^debt'; }
+s68_cell() {  # <the T2 deps cell> -> P64's T2 row holding it
+  S68_C="$1" awk '/^\| T2 \|/ { sub(/\| — \| 30 \|/, "| " ENVIRON["S68_C"] " | 30 |") } { print }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+}
+
+# ---------- B3: the record makes the debt, the plan line does not ----------
+s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T04:00:00Z
+expect_eq "68a B3 a debt land wrote is dealt with no landed red: line anywhere in the plan" "$S68_EXT" "$(s68_owed)"
+s57_state "$P64" "$S64_H"
+expect_eq "68a1 …and the judge says it absent (no green run after 04:00Z)" "absent" "$(s57_of "$S68_EXT")"
+for s68v in "landed red: widget.test.sh until ext:vendor-key" \
+            "landed red: widget.test.sh until ext:vendor-key at 2026-10-04T00:00:00Z" \
+            "landed red: other.test.sh until ext:vendor-key at 2026-10-05T04:00:00Z"; do
+  cp "$TMPROOT/s64-clean" "$P64"
+  awk -v l="- T9: landed at record/T9.md, $s68v" '{ print } /^- T1: landed at record\/T1.md/ { print l }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+  s57_state "$P64" "$S64_H"
+  expect_eq "68a2 a hand-edited plan line ($s68v) changes nothing: the one debt, absent" "$S68_EXT|absent" "$(s68_owed)|$(s57_of "$S68_EXT")"
+done
+s64_debt_reset
+expect_eq "68a3 …and with no debt in the record, the same plan line owes nothing" "" "$(s68_owed)"
+expect_contains "68a4 …while the plan still carries it (the line is a note)" "landed red: other.test.sh" "$(cat "$P64")"
+
+# ---------- B1: approval, green, red; the same second; one second after ----------
+s68_plan; s68_approve design 2026-10-05T01:00:00Z
+s64_proof floor 2026-10-05T01:30:00Z record/wave-01-fixture/floor-0130.log
+s64_debt widget.test.sh approval:design 2026-10-05T02:00:00Z
+s57_state "$P64" "$S64_H"
+expect_eq "68b B1 approval 01:00, green floor 01:30, red landing 02:00: absent" "absent" "$(s57_of "$S68_AP")"
+s64_proof floor 2026-10-05T02:00:00Z record/wave-01-fixture/floor-0200.log
+s57_state "$P64" "$S64_H"
+expect_eq "68b2 …a green floor at 02:00:00, the landing's own second: absent" "absent" "$(s57_of "$S68_AP")"
+s64_proof floor 2026-10-05T02:00:01Z record/wave-01-fixture/floor-020001.log
+s57_state "$P64" "$S64_H"
+expect_eq "68b3 …at 02:00:01: covered" "covered" "$(s57_of "$S68_AP")"
+s68_plan; s64_debt widget.test.sh approval:design 2026-10-05T02:00:00Z
+s64_proof floor 2026-10-05T02:30:00Z record/wave-01-fixture/floor-0230.log
+s68_approve design 2026-10-05T03:00:00Z
+s57_state "$P64" "$S64_H"
+expect_eq "68b4 red 02:00, green 02:30, approval 03:00: absent (the green is before the approval)" "absent" "$(s57_of "$S68_AP")"
+s64_proof task 2026-10-05T03:00:01Z record/wave-01-fixture/widget-green.log
+s57_state "$P64" "$S64_H"
+expect_eq "68b5 …a task proof showing widget green at 03:00:01: covered" "covered" "$(s57_of "$S68_AP")"
+s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:00:00Z
+s64_proof floor 2026-10-05T02:00:00Z record/wave-01-fixture/floor-0200.log
+s57_state "$P64" "$S64_H"
+expect_eq "68b6 an ext: debt and a green floor at the landing's own second: absent" "absent" "$(s57_of "$S68_EXT")"
+
+# ---------- B2: red, green, red ----------
+s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:00:00Z
+s64_proof floor 2026-10-05T02:30:00Z record/wave-01-fixture/floor-0230.log
+s57_state "$P64" "$S64_H"
+expect_eq "68c0 control: one red landing at 02:00, a green floor at 02:30: covered" "covered" "$(s57_of "$S68_EXT")"
+s64_debt widget.test.sh ext:vendor-key 2026-10-05T03:00:00Z
+s57_state "$P64" "$S64_H"
+expect_eq "68c B2 a second red landing on the same suite and token at 03:00: absent" "absent" "$(s57_of "$S68_EXT")"
+expect_eq "68c2 …the two debt lines dealt as one owed line" "$S68_EXT" "$(s68_owed)"
+s64_proof floor 2026-10-05T03:30:00Z record/wave-01-fixture/floor-0330.log
+s57_state "$P64" "$S64_H"
+expect_eq "68c3 …a green floor after the later one: covered" "covered" "$(s57_of "$S68_EXT")"
+
+# ---------- a merge that failed: its debt is voided ----------
+s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:00:00Z d68void
+expect_eq "68d0 control: the debt before its void is dealt" "$S68_EXT" "$(s68_owed)"
+bash -c '. "$1" && _wt_debt_void "$2" d68void wt/27-T9 merge-failed' _ "$S64_WTLIB" "$S64_LOG"
+expect_eq "68d a debt whose id a void line names is owed by nothing" "" "$(s68_owed)"
+s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:10:00Z
+expect_eq "68d2 …and a later debt on the same suite is owed by itself" "$S68_EXT" "$(s68_owed)"
+
+# ---------- N5: the slug in a cell whatever stands around it ----------
+for s68c in '`ext:vendor-key`' '(ext:vendor-key)' 'ext:vendor-key.' 'ext:vendor-key, T1'; do
+  s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:00:00Z
+  s64_proof floor 2026-10-05T03:00:00Z record/wave-01-fixture/floor-0300.log
+  s68_cell "$s68c"
+  s57_state "$P64" "$S64_H"
+  expect_eq "68e N5 the slug in a cell as $s68c is still owed: absent" "absent" "$(s57_of "$S68_EXT")"
+done
+s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:00:00Z
+s64_proof floor 2026-10-05T03:00:00Z record/wave-01-fixture/floor-0300.log
+s68_cell 'ext:vendor-key-2'
+s57_state "$P64" "$S64_H"
+expect_eq "68e2 …ext:vendor-key-2 in a cell does not keep ext:vendor-key owed: covered" "covered" "$(s57_of "$S68_EXT")"
+
+# ---------- N7: the release-check verb looks again at the head and the tree after the command ----------
+# §62's repository, plan and working checkout; the declared command is a script this row writes, which
+# commits, or writes a tracked file, or does nothing, as a mode file says.
+S68_MODE="$TMPROOT/s68-rc-mode"; S68_CHK="$TMPROOT/s68-check.sh"
+cat > "$S68_CHK" <<'S68_EOF'
+#!/bin/bash
+case "$(cat "$1")" in
+  commit) git commit -q --allow-empty -m 'the check committed' ;;
+  dirty) echo dirt >> lib/a.sh ;;
+esac
+exit 0
+S68_EOF
+printf 'release-check: bash %s %s\n' "$S68_CHK" "$S68_MODE" > "$R62/.bionic/config.yaml"
+S68_H0="$(git -C "$S62_WT" rev-parse HEAD)"
+echo none > "$S68_MODE"
+poke "$R62" release-check
+expect_eq "68f0 control: a declared check that changes nothing passes (exit 0)" "0" "$RC"
+for s68m in commit dirty; do
+  echo "$s68m" > "$S68_MODE"
+  poke "$R62" release-check
+  expect_eq "68f-${s68m} N7 a declared check that ${s68m}s is refused as land refuses it (exit 1)" "1" "$RC"
+  expect_contains "68f-${s68m}b …naming what it left" "check-dirtied" "$OUT"
+  expect_regex "68f-${s68m}c …and a result=fail check fact is written at the head it ran on" \
+    "^proved: kind=check head=${S68_H0} .*result=fail" "$(/usr/bin/grep '^proved: kind=check' "$P62" | tail -1)"
+  git -C "$S62_WT" reset -q --hard "$S68_H0"
+done
+rm -f "$R62/.bionic/config.yaml"
 
 finish

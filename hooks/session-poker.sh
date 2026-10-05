@@ -6469,6 +6469,15 @@ RC_TAGS
       export BIONIC_CHECK_BASE="$RC_BASE" BIONIC_CHECK_HEAD="$RC_HEAD" BIONIC_CHECK_TREE="$(pwd -P)"
       # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
       exec $RC_CMD </dev/null 2>&1)"; RC_RC=$?
+    # WHAT THE CHECK LEFT (wave-27 T67; review pass 46 N7), looked at as `land` looks after its own run
+    # (lib/worktree.sh `_wt_check_left`): the checkout's HEAD where it was, and no tracked file changed
+    # (the index refreshed first). A check that moved either is refused as a failing check is: its log,
+    # and a result=fail check fact at the head it ran on.
+    git -C "$RC_CO" update-index -q --refresh >/dev/null 2>&1
+    RC_LEFT=""; RC_NOW="$(git -C "$RC_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
+    [ "$RC_NOW" = "$RC_HEAD" ] || RC_LEFT="moved the head of $RC_CO from ${RC_HEAD:0:12} to ${RC_NOW:-<none>}"
+    git -C "$RC_CO" diff-index --quiet HEAD -- 2>/dev/null \
+      || RC_LEFT="${RC_LEFT:+$RC_LEFT and }left tracked files changed in $RC_CO (git -C $RC_CO status)"
     RC_WAVE="${PV_PLAN##*/}"; RC_WAVE="${RC_WAVE%.plan.md}"
     RC_DOCS="$(docs_root "$PV_REPO")"
     RC_REL="record/$RC_WAVE/release-check-$RC_HEAD.log"; RC_NTH=1
@@ -6480,17 +6489,23 @@ RC_TAGS
     fi
     if ! mkdir -p "${RC_LOG%/*}" 2>/dev/null \
        || ! { [ -z "$RC_CHG" ] || printf '%s\n' "$RC_CHG"
-              printf 'head=%s rc=%s\nbase=%s (%s)\ncommand: %s\n\n' "$RC_HEAD" "$RC_RC" "$RC_BASE" "$RC_FROM" "$RC_CMD"
+              printf 'head=%s rc=%s\nbase=%s (%s)\ncommand: %s\n' "$RC_HEAD" "$RC_RC" "$RC_BASE" "$RC_FROM" "$RC_CMD"
+              [ -z "$RC_LEFT" ] || printf 'check-dirtied: the check %s\n' "$RC_LEFT"
+              printf '\n'
               [ -z "$RC_OUT" ] || printf '%s\n' "$RC_OUT"; } > "$RC_LOG" 2>/dev/null; then
       die "REFUSED — the check exited $RC_RC, but its log $RC_LOG cannot be written; the plan is unchanged.$RC_SAID"
       exit 1
     fi
-    if [ "$RC_RC" -ne 0 ]; then
+    if [ "$RC_RC" -ne 0 ] || [ -n "$RC_LEFT" ]; then
       if ! proof_add_line "$PV_PLAN" "$(proof_line check "$RC_HEAD" "$(iso_now)" "$RC_REL") result=fail" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
         die "REFUSED — the declared release-check ($(clean "$RC_CMD")) exited $RC_RC over ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM), and $PV_PLAN carries no ## SDLC State section to hold its failing fact; its log is $RC_LOG.$RC_SAID"
         exit 1
       fi
       plan_verb_swap release-check "the failing check at $RC_HEAD" writer
+      if [ -n "$RC_LEFT" ]; then
+        die "REFUSED — check-dirtied: the declared release-check ($(clean "$RC_CMD")) $RC_LEFT, as land refuses a check that does; its log $RC_REL and a result=fail check fact at ${RC_HEAD:0:12} were written. Put back what it changed, make the check change nothing, and run release-check again.$RC_SAID"
+        exit 1
+      fi
       die "REFUSED — the declared release-check ($(clean "$RC_CMD")) exited $RC_RC over ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM); its log $RC_REL and a result=fail check fact at that head were written. Fix what it names, commit, and run release-check again.$RC_SAID"
       exit 1
     fi

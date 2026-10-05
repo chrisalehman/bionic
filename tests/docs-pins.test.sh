@@ -5345,7 +5345,7 @@ expect_nonempty "W27-T33-7m precondition: the doctored duty still names a list" 
 expect_eq "W27-T33-7m: a writer duty that drops a kind is caught as a second list" "2" \
   "$(w27t33_kinds "$W27T33_DOC7" ${BLOCK_DIR}/checks-structure.md | wc -l | tr -d ' ')"
 
-# ── §W27-144 (wave-27 T31; REQ-14 AC-14.4, D23): the planning rule for a red by design, and its two labels ──
+section "§W27-144 (wave-27 T31; REQ-14 AC-14.4, D23; a section of its own, wave-27 T67, review pass 46 N6): the planning rule for a red by design, and its two labels"
 # AC-14.4: dispatch.md tells a planner to put a proof that needs an owner-gated or external step in a
 # row of its own behind that step's token. The brief scaffold carries the two labels a row declares
 # its red with; the scaffold's own line, pasted unfilled, declares nothing, while a filled one is
@@ -5367,6 +5367,21 @@ expect_nonempty "W27-144e0 precondition: the scaffold's Lands-red: line is extra
   "$(_flatten "$DISPATCH_MD" | grep -o 'Lands-red: <suite> until <ext:slug | approval:name>')"
 expect_eq "W27-144e: …and the scaffold's own line, pasted unfilled, lifts nothing" "" \
   "$(W27_144_LIFT "$(_flatten "$DISPATCH_MD" | grep -o 'Lands-red: <suite> until <ext:slug | approval:name>')")"
+# S2 (wave-27 T67; review pass 46): the doctrine says who writes the debt, what the orchestrator does
+# not do, and that the evidence names the head. Each pin is a literal span on its own file.
+W27_144_WRITER='`land` writes the debt, the orchestrator copies nothing'
+expect_nonempty "W27-144f: S2 dispatch.md says land writes the debt and the orchestrator copies nothing" \
+  "$(w26_hits "$W27_144_WRITER" "$DISPATCH_MD")"
+expect_nonempty "W27-144g: …and operational-rules.md says the same" "$(w26_hits "$W27_144_WRITER" "$OPRULES")"
+expect_nonempty "W27-144h: …operational-rules.md says the evidence holds head: <40-hex>" \
+  "$(w26_hits 'holds a line `head: <40-hex>`' "$OPRULES")"
+for _w144r in "${REPO}"/agents/*.md; do
+  case "$(_flatten "$_w144r")" in *'Lands-red: the one suite you may land red.'*) : ;; *) continue ;; esac
+  expect_nonempty "W27-144i: …the reader scaffold in ${_w144r##*/} says the evidence holds head: <40-hex>" \
+    "$(w26_hits 'Red-evidence: a file holding head: <40-hex>' "$_w144r")"
+done
+expect_nonempty "W27-144i0 precondition: a role file carries the reader scaffold's debt lines" \
+  "$(grep -l 'Lands-red: the one suite you may land red.' "${REPO}"/agents/*.md)"
 section "Section W27-T17: wave-27 T17 — the doctrine says the dealing, inside its caps (REQ-1 AC-1.1, REQ-5 AC-5.2/AC-5.4, REQ-10 AC-10.2; D17, D18, D19)"
 #
 # WHAT THIS OWNS. The shipped doctrine teaches what the code deals: four questions, three read by
