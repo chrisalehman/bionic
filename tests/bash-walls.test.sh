@@ -2437,8 +2437,13 @@ expect_contains "UP4 …printing the amend line for its id" "session-poker.sh am
 mkdir -p "$FAKE_HOME/.claude/projects/-unplaced/$SID/subagents"
 : > "$FAKE_HOME/.claude/projects/-unplaced/$SID.jsonl"
 : > "$FAKE_HOME/.claude/projects/-unplaced/$SID/subagents/agent-$ACTOR.jsonl"
-UP_OUT=$( cd "$RU" && env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
-  CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash -c "$UP_CMD" 2>&1 ); UP_RC=$?
+# No remedy line printed is a failure, not an empty command run (`bash -c ""` exits 0): T59, pass 36 S3.
+if [ -n "$UP_FIX" ]; then
+  UP_OUT=$( cd "$RU" && env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
+    CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash -c "$UP_CMD" 2>&1 ); UP_RC=$?
+else
+  UP_OUT=""; UP_RC=1
+fi
 expect_status "UP5 the line, run as printed by the orchestrator, exits 0" 0 "$UP_RC"
 expect_contains "UP6 …and says it recorded the set" "poker: amended — $ACTOR" "$UP_OUT"
 run_hook "$(mk_payload "$RU" 'bash tests/alpha.test.sh' "$ACTOR" "" Bash bionic:test-runner 600000)"
