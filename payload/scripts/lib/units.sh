@@ -549,10 +549,61 @@ units_edges() { _units_sched edges "${1:-}" ""; }
 # review, never the whole diff again. Nothing when the plan has no review proof yet (the first
 # review reads all the landed work, from the wave's base), when no head is handed in, or when the
 # head has not moved past the proof. GIVEN A READ ROW (wave-27 T10; D4), one reading
-# `live:head:<q>[+<q>]`, the range is that row's: from the oldest last reading among its own
-# questions past which the head has moved, and nothing while one of them has no reading yet (it
-# reads from the base). A bare `live:head` row, an unknown id or none gets the one range above.
-units_live_range() { _units_sched range "${1:-}" "${2:-}"; }
+# `live:head:<q>[+<q>]`, the range is that row's, and nothing while one of its questions has no
+# reading yet (it reads from the base). A bare `live:head` row, an unknown id or none gets the one
+# range above.
+# A READ ROW'S START IS THE OLDEST BY COMMIT ANCESTRY (wave-27 T43; review pass 17 F2), never by
+# line order: of the last heads of its questions not read at the head asked, the one that is an
+# ancestor of every other. A last head that is no ancestor of the head asked, or names no commit,
+# counts as no reading, and so do heads on two lines of history with no such start: no range, the
+# row reads from the base. A reversed range is never printed. The program hands those last heads
+# out (`range` mode) and `_units_live_start` asks git, here and not in the program, which stays a
+# function of the plan (A-T10.1); only a caller that already reads git asks for a row id.
+units_live_range() {
+  local out
+  out="$(_units_sched range "${1:-}" "${2:-}")" || return $?
+  case "$out" in
+    '') return 0 ;;
+    *..*) printf '%s\n' "$out" ;;
+    *) _units_live_start "$(_units_plan_tree "${1:-}")" "$out" ;;
+  esac
+}
+
+# _units_live_start <tree> <last heads, one per line> -> `<start>..<UNITS_LIVE_HEAD>`, or nothing:
+# the start is the head that is an ancestor of every other, each an ancestor of the head handed
+# in and not that head. Any git that cannot answer is no reading: no range (the cautious side).
+_units_live_start() {
+  local tree="$1" h c d s="" ok n=0
+  h="$(git -C "$tree" rev-parse --verify -q "${UNITS_LIVE_HEAD:-}^{commit}" 2>/dev/null)" || return 0
+  for c in $2; do
+    d="$(git -C "$tree" rev-parse --verify -q "$c^{commit}" 2>/dev/null)" || return 0
+    [ "$d" = "$h" ] && continue
+    git -C "$tree" merge-base --is-ancestor "$d" "$h" 2>/dev/null || return 0
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || return 0
+  for c in $2; do
+    [ "$(git -C "$tree" rev-parse --verify -q "$c^{commit}" 2>/dev/null)" = "$h" ] && continue
+    ok=1
+    for d in $2; do git -C "$tree" merge-base --is-ancestor "$c" "$d" 2>/dev/null || { ok=0; break; }; done
+    [ "$ok" = 1 ] && { s="$c"; break; }
+  done
+  [ -n "$s" ] && printf '%s..%s\n' "$s" "$(printf '%s' "$UNITS_LIVE_HEAD" | tr 'A-F' 'a-f')"
+  return 0
+}
+
+# _units_plan_tree <plan> -> the tree a plan's git questions are put to: the project root it sits
+# under (`<root>/.bionic/…`), or the plan's own directory, whose repository git finds. The root is
+# the one nearest the plan: a project kept under another one's `.bionic/` (a scratch fixture) is
+# its own repository, not the outer one (wave-27 T43).
+_units_plan_tree() {
+  case "${1:-}" in
+    */.bionic/*) printf '%s' "${1%/.bionic/*}" ;;
+    .bionic/*) printf '.' ;;
+    */*) printf '%s' "${1%/*}" ;;
+    *) printf '.' ;;
+  esac
+}
 
 # units_live_rows <plan> [--question <q>] [<path>...] -> `<id><TAB><kind><TAB><status>` for every
 # row reading `live:head`, an empty cell's kind default and `live:head:<q>[+<q>]` included, table
@@ -561,11 +612,104 @@ units_live_range() { _units_sched range "${1:-}" "${2:-}"; }
 # to `pending` — the proof of another review (the final one, settled on the head) moves no live row
 # mid-pass (wave-26 T46; review 10 F3). HANDED A QUESTION (wave-27 T10; D4), a read row is named
 # when it carries that question, whatever its `Files` say, and not otherwise; a row naming no
-# question is still matched by its `Files`.
+# question is still matched by its `Files`. AND A READER (wave-27 T43; review pass 17 F3), the
+# rows that reader's reading returns: a read row only when its `agent` cell is that reader and
+# every question it carries was last read at the head of this question's last reading, so a row
+# with two questions returns on the second; a bare row by its `Files`, as before.
 units_live_rows() {
-  local plan="${1:-}" q=""; shift
+  local plan="${1:-}" q="" r=""; shift
   if [ "${1:-}" = --question ]; then q="${2:-}"; shift 2 2>/dev/null || shift; fi
-  _UNITS_EVIDENCE="$*" _UNITS_QUESTION="$q" _units_sched liverows "$plan" ""
+  if [ "${1:-}" = --reader ]; then r="${2:-}"; shift 2 2>/dev/null || shift; fi
+  _UNITS_EVIDENCE="$*" _UNITS_QUESTION="$q" _UNITS_READER="$r" _units_sched liverows "$plan" ""
+}
+
+# A READ AFTER A FIX IS TOLD WHAT MOVED (wave-27 T43; D10; A-orch-48, A-orch-71). Once a question has
+# its `scope=whole` reading, a later read of it covers the fixes that landed past that reading, and
+# the tick names them beside the RANGE line. A row's landing is read from the run's LANDING RECORD,
+# `<docs-root>/record/<plan name>/landing-proofs.log`, which `land` appends (T44): one header line
+# per landing, `landed: row=<id|—> branch=<b> head=<40-hex> merge=<40-hex> at=<ISO-UTC>`, with
+# `stamp/v1|…` lines under it. A row's landing is the `merge=` of the LAST header carrying its row.
+# Never the prose of a state line, and never git: which merges lie inside a range is the caller's
+# answer (the tick's, which already reads git), handed in on stdin.
+#
+# units_whole_read <plan> <row id> -> exit 0 when the row reads `live:head:<q>[+<q>]` and every one
+# of its questions has a `scope=whole` reading; 1 otherwise, a bare row included (it names none).
+units_whole_read() {
+  [ "$(_units_sched whole "${1:-}" "${2:-}" 2>/dev/null)" = whole ]
+}
+
+# units_landings <plan> <record> -> `<row id><TAB><merge or -><TAB><owed or ->`, table order: each
+# `## Tasks` row the record names, with its last merge, and each `build` row that is `landed` or
+# `done` with none, as `-`. `owed` marks a landed or done build row: it must carry a landing, so the
+# caller counts it unknown when the record has none or its merge is no commit. A header whose
+# `row=` is `—` or an id the table lacks names no row; a merge that is not hex is no landing.
+units_landings() { _units_landed landings "${1:-}" "" "${2:-}" < /dev/null; }
+
+# units_rows_in_range <plan> <a>..<b> <record> -> `<row id><TAB><serves><TAB><criteria>` for each
+# row whose landing is one of the merges on stdin (one per line: those the caller found inside
+# <a>..<b>), table order; criteria are the `## Verification Matrix` rows of each requirement it
+# serves, `AC-<n>.<m>` for `REQ-<n>`, comma-joined. Nothing, exit 0, when none is; exit 2 when the
+# range is not `<a>..<b>`.
+units_rows_in_range() {
+  case "${2:-}" in ?*..?*) ;; *) return 2 ;; esac
+  _units_landed inrange "${1:-}" "${2:-}" "${3:-}"
+}
+
+# _units_landed <landings|inrange> <plan> <range> <record> — the one program behind the two verbs:
+# the rows (`units_rows`), the record's header lines, the plan's matrix, then stdin's merges.
+_units_landed() {
+  local mode="$1" plan="$2" rec="$4" rows
+  rows="$(units_rows "$plan" 2>/dev/null)" || return 1
+  {
+    printf '\034rows\n'; printf '%s\n' "$rows"
+    printf '\034rec\n'; [ -f "$rec" ] && awk '{ sub(/\r$/, ""); print }' "$rec" 2>/dev/null
+    printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$plan" 2>/dev/null
+    printf '\034in\n'; [ "$mode" = inrange ] && cat
+  } | awk -F'\t' -v mode="$mode" '
+    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+    $0 == "\034rows" { part = 1; next }
+    $0 == "\034rec" { part = 2; next }
+    $0 == "\034plan" { part = 3; next }
+    $0 == "\034in" { part = 4; next }
+    part == 1 { if ($1 == "") next; n++; id[n] = $1; knd[n] = $3; srv[n] = $8; st[n] = $10; at[$1] = n; next }
+    part == 2 {
+      if ($0 !~ /^landed:[ \t]/) next
+      r = ""; m = ""; nf = split($0, f, /[ \t]+/)
+      for (k = 2; k <= nf; k++) {
+        if (f[k] ~ /^row=/) r = substr(f[k], 5)
+        else if (f[k] ~ /^merge=/) m = tolower(substr(f[k], 7))
+      }
+      if (!(r in at)) next
+      lm[r] = (m ~ /^[0-9a-f]+$/ && length(m) >= 7 && length(m) <= 40) ? m : "-"
+      next
+    }
+    part == 3 {
+      if ($0 ~ /^[ \t]*```/) { fence = !fence; next }
+      if (fence) next
+      if ($0 ~ /^## /) { inm = ($0 ~ /^## Verification Matrix/); next }
+      if (!inm || $0 !~ /^\|[ \t]*AC-[0-9]+\./) next
+      split($0, c, "|"); ac = trim(c[2]); q = ac; sub(/^AC-/, "", q); sub(/\..*$/, "", q)
+      crit[q] = (q in crit) ? crit[q] ", " ac : ac
+      next
+    }
+    part == 4 { v = tolower(trim($0)); if (v != "") inr[v] = 1; next }
+    END {
+      for (i = 1; i <= n; i++) {
+        owed = (knd[i] == "build" && (st[i] == "landed" || st[i] == "done"))
+        if (mode == "landings") {
+          if (id[i] in lm) printf "%s\t%s\t%s\n", id[i], lm[id[i]], (owed ? "owed" : "-")
+          else if (owed) printf "%s\t-\towed\n", id[i]
+          continue
+        }
+        if (!(id[i] in lm) || !(lm[id[i]] in inr)) continue
+        cr = ""; ns = split(srv[i], sv, ",")
+        for (k = 1; k <= ns; k++) {
+          q = trim(sv[k]); if (q !~ /^REQ-[0-9]+$/) continue
+          q = substr(q, 5); if (q in crit) cr = cr (cr == "" ? "" : ", ") crit[q]
+        }
+        printf "%s\t%s\t%s\n", id[i], srv[i], cr
+      }
+    }'
 }
 
 # units_floor_holds <plan> [<id>] -> `<id><TAB><step><TAB><status>`, table order, for each row the
@@ -637,7 +781,7 @@ _units_proof_awk() {
 # `holds` (units_floor_holds) takes the floor row's id, or nothing, in the <step> slot.
 _units_sched() {
   local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i fst rc
-  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ]; then
+  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ]; then
     case "$step" in
       ''|*[!0-9]*)
         case "$step" in
@@ -693,12 +837,7 @@ _units_floor_state() {
   local plan="${1:-}" tree st=""
   st="$(_units_floor_kept "$plan")"
   [ -z "$st" ] || { printf '%s\n' "$st"; return 0; }
-  case "$plan" in
-    */.bionic/*) tree="${plan%%/.bionic/*}" ;;
-    .bionic/*) tree=. ;;
-    */*) tree="${plan%/*}" ;;
-    *) tree=. ;;
-  esac
+  tree="$(_units_plan_tree "$plan")"
   if declare -F proof_state >/dev/null 2>&1; then
     st="$(proof_state "$plan" "$tree" 2>/dev/null | awk 'NR == 1')"
   fi
@@ -752,16 +891,33 @@ units_writes_head() {
   printf '%s\n' "${1:-}" | awk "$(_units_files_awk)"'{ exit !writes_head($0) }'
 }
 
-# _units_sched_awk -> the awk program `_units_sched` runs. Printed by a function so the comments
-# can sit beside the code; NO APOSTROPHE anywhere inside it (it is single-quoted).
-_units_sched_awk() {
+# _units_questions_awk -> the awk function `isq(q)`: 1 when q is exactly one of lib/proof.sh
+# PROOF_QUESTIONS, handed in as `pq`. ONE TEST, TWO READERS (wave-27 T43; review pass 17 F4): the
+# readiness program and `units_validate` both ask it of each `+` part of `live:head:<q>[+<q>]`, so
+# a token the validator admits is a token the scheduler can satisfy. Whole words only: a part
+# holding a blank, a dot or nothing is no question.
+_units_questions_awk() {
   printf '%s' '
-    BEGIN { nqk = split(pq, qkl, " "); for (k = 1; k <= nqk; k++) qok[qkl[k]] = 1 }
+    function isq(q,   a, m, k) {
+      if (q == "") return 0
+      m = split(pq, a, " ")
+      for (k = 1; k <= m; k++) if (a[k] == q) return 1
+      return 0
+    }
+'
+}
+
+# _units_sched_awk -> the awk program `_units_sched` runs. Printed by a function so the comments
+# can sit beside the code; NO APOSTROPHE anywhere inside it (it is single-quoted). It opens with
+# the question test it shares with the validator.
+_units_sched_awk() {
+  _units_questions_awk
+  printf '%s' '
     $0 == SUBSEP "rows" { part = 1; next }
     $0 == SUBSEP "plan" { part = 2; next }
     part == 1 {
       if ($1 == "") next
-      n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = $13
+      n++; id[n] = $1; stp[n] = $2; knd[n] = $3; agt[n] = $5; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = $13
       at[$1] = n
       next
     }
@@ -789,6 +945,8 @@ _units_sched_awk() {
         # A line with no question (1.11.0) is the last proof of no question (A-T2.4).
         pn++
         if (PROOF_KIND == "review" && PROOF_QUESTION != "") { prvq[PROOF_QUESTION] = PROOF_HEAD; prvn[PROOF_QUESTION] = pn }
+        # A WHOLE READING (wave-27 T43; D10) is remembered per question: units_whole_read asks it.
+        if (PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_SCOPE == "whole") wholeq[PROOF_QUESTION] = 1
       }
       next
     }
@@ -924,7 +1082,7 @@ _units_sched_awk() {
       m = split(s, qa, "+")
       if (m == 0) rbadq[i] = 1
       for (k = 1; k <= m; k++) {
-        if (!(qa[k] in qok)) { rbadq[i] = 1; continue }
+        if (!isq(qa[k])) { rbadq[i] = 1; continue }
         if ((i, qa[k]) in hasq) continue
         hasq[i, qa[k]] = 1; nq[i]++; rq[i, nq[i]] = qa[k]
         qlab[i] = (nq[i] > 1 ? qlab[i] "+" : "") qa[k]
@@ -940,7 +1098,9 @@ _units_sched_awk() {
     }
     # live_oldest(i, past) -> of row i questions, the one whose last reading is the oldest line,
     # only among those whose head is not the head handed in when past is set; nothing when one of
-    # them has no reading yet (that question reads from the base) or none qualifies.
+    # them has no reading yet (that question reads from the base) or none qualifies. It answers
+    # whether the head is past the row reading and which question a wait names; where a range
+    # starts is decided by ancestry, outside this program (units_live_range; T43, review 17 F2).
     function live_oldest(i, past,   k, q, o) {
       o = ""
       for (k = 1; k <= nq[i]; k++) {
@@ -977,15 +1137,18 @@ _units_sched_awk() {
     # reads, proof..head, is the work on the head that the proof never saw, rewritten history
     # included (A-T14.1). A wait sets lwhy, which units_waiting prints after the read.
     # A READ ROW IS JUDGED PER QUESTION (wave-27 T10; D4): only a row sharing one of its questions
-    # holds it, a pending read row above that has nothing to read holds no read row below it, and
+    # holds it, a pending row above that has nothing to read holds no read row below it, and
     # past the proof means past the last reading of one of its own questions. A question with no
     # reading yet reads from the base, so the row is ready once work has landed, as a first review.
+    # THE IDLE ROW ABOVE MAY BE BARE (wave-27 T43; review pass 17 F1): only the row below need name
+    # a question. A bare row is idle after every pass, and a bare row above that held for good would
+    # hold the read row, and the integrate row through it. Between two bare rows 1.11.0 holds.
     function live_head(i,   j, h, k, o) {
       if (rbadq[i]) { lwhy = "the read names a question outside " pq " or sits on a row that is not a review"; return 0 }
       for (j = 1; j <= n; j++) {
         if (j == i || knd[j] != knd[i] || !qshare(i, j)) continue
         if (st[j] == "active") { lwhy = knd[i] " " id[j] " is open (active)"; return 0 }
-        if (st[j] == "pending" && rlive[j] && j < i && !(nq[i] && nq[j] && live_idle(j))) { lwhy = knd[i] " " id[j] " goes first"; return 0 }
+        if (st[j] == "pending" && rlive[j] && j < i && !(nq[i] && live_idle(j))) { lwhy = knd[i] " " id[j] " goes first"; return 0 }
       }
       if (nq[i]) {
         for (k = 1; k <= nq[i]; k++) if (!(rq[i, k] in prvq)) {
@@ -1166,12 +1329,26 @@ _units_sched_awk() {
         m = split(dep[i], a, ",")
         for (k = 1; k <= m; k++) addtok(i, a[k])
       }
-      # THE RANGE OF ONE READ ROW (wave-27 T10; D4) starts at the oldest last reading among its
-      # questions; a bare row, an unknown id, or no id at all is answered as through 1.11.0.
+      # THE RANGE OF ONE READ ROW (wave-27 T10; D4): the last heads of its questions not read at the
+      # head handed in, one per line, and nothing while one has no reading; units_live_range picks
+      # the start among them by ancestry (T43; review pass 17 F2). A bare row, an unknown id, or no
+      # id at all is answered here, as through 1.11.0.
+      # THE WHOLE READ OF ONE READ ROW (wave-27 T43): every question it carries has a whole reading.
+      if (mode == "whole") {
+        if (!(want in at) || !nq[at[want]] || rbadq[at[want]]) exit
+        i = at[want]
+        for (k = 1; k <= nq[i]; k++) if (!(rq[i, k] in wholeq)) exit
+        print "whole"
+        exit
+      }
       if (mode == "range") {
         if ((want in at) && nq[at[want]]) {
           i = at[want]
-          if (!rbadq[i] && livehead != "") { o = live_oldest(i, 1); if (o != "") print prvq[o] ".." livehead }
+          if (rbadq[i] || livehead == "" || live_oldest(i, 1) == "") exit
+          for (k = 1; k <= nq[i]; k++) {
+            h = prvq[rq[i, k]]
+            if (h != livehead && !(h in pst)) { pst[h] = 1; print h }
+          }
           exit
         }
         if (("review" in prvh) && livehead != "" && livehead != prvh["review"]) print prvh["review"] ".." livehead
@@ -1180,11 +1357,20 @@ _units_sched_awk() {
       # Handed a question (wave-27 T10), the read rows are matched by it, never by their Files: a
       # pass is the row carrying the question it read, whatever its record is called. A row with
       # no question is matched by its Files, as before.
+      # Handed a reader too (T43; review pass 17 F3), a read row is returned only as that reader
+      # own row, once every question it carries was last read at the head this question just was.
       if (mode == "liverows") {
-        ne = split(evid, ev, " ")
+        ne = split(evid, ev, " "); liver = ENVIRON["_UNITS_READER"]
         for (i = 1; i <= n; i++) {
           if (!rlive[i]) continue
-          if (liveq != "" && nq[i]) { if (!((i, liveq) in hasq)) continue }
+          if (liveq != "" && nq[i]) {
+            if (!((i, liveq) in hasq)) continue
+            if (liver != "") {
+              if (agt[i] != liver || !(liveq in prvq)) continue
+              for (k = 1; k <= nq[i]; k++) if (!(rq[i, k] in prvq) || prvq[rq[i, k]] != prvq[liveq]) break
+              if (k <= nq[i]) continue
+            }
+          }
           else if (ne) { for (k = 1; k <= ne; k++) if (writes(i, ev[k])) break; if (k > ne) continue }
           printf "%s\t%s\t%s\n", id[i], knd[i], st[i]
         }
@@ -1242,7 +1428,7 @@ _units_sched_awk() {
           unmet++
           if (t ~ extre) ext = ext (ext == "" ? "" : " ") t; else other++
           if (mode != "waiting") continue
-          if (nw == 0) printf "%s\t%s\t-\t-\n", id[i], (lwhy == "" ? t : t ": " lwhy)
+          if (nw == 0) printf "%s\t%s\t-\t-\n", id[i], (lwhy == "" ? t : t (t ~ /:$/ ? " " : ": ") lwhy)
           for (w = 1; w <= nw; w++) printf "%s\t%s\t%s\t%s\n", id[i], t, id[wj[w]], st[wj[w]]
         }
         if ((mode == "ready" && unmet) || (mode == "held" && other)) continue
@@ -1337,7 +1523,7 @@ units_validate() {
   rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
   if [ -n "$rows" ]; then
     violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
-      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_files_awk)"'
+      -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: none of its cells can be trusted to name what it breaks.
@@ -1461,7 +1647,7 @@ units_validate() {
               if (substr(t, 1, 10) == "live:head:") {
                 if (knd[i] != "review") { printf "%s: read %s names questions; only a review row reads them\n", id[i], a[j]; continue }
                 nqa = split(substr(t, 11), qa, "+"); qbad = (nqa == 0)
-                for (k = 1; k <= nqa; k++) if (index(" " pq " ", " " qa[k] " ") == 0 || qa[k] == "") qbad = 1
+                for (k = 1; k <= nqa; k++) if (!isq(qa[k])) qbad = 1
                 if (qbad) printf "%s: read %s names a question outside %s\n", id[i], a[j], pq
                 continue
               }
