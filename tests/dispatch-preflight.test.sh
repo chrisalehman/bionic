@@ -8943,8 +8943,8 @@ q_gate "$REPO" walk4 bionic:critic "$(walk_fill "evidence, adversarial, structur
 expect_eq "§scaffold-walk …the SAME brief with Suites: none and no Re-executes: is refused" "deny" "$GATE_VERDICT"
 # The user stream leads with the first fault; the model's wire names every one (several faults
 # before T49 strips the Questions: comment, one after), so the two are read together.
-expect_contains "§scaffold-walk …because the evidence reader names no suites" \
-  "a critic reading evidence names no suites" "$GATE_ERR $GATE_REASON"
+expect_contains "§scaffold-walk …because the evidence reader declares nothing to re-execute (T57's words)" \
+  "the critic declares nothing to re-execute" "$GATE_ERR $GATE_REASON"
 
 section "AC-E1.3/E1.5 — every refusal this gate makes is one line, in the shape"
 
