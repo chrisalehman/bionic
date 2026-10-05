@@ -1377,12 +1377,16 @@ same_everywhere 68 "the auditor mandate is one text in the block and the skill's
   "${BLOCK_DIR}/auditor-mandate.md" "AUDITOR-MANDATE" "$STEP5_MD"
 expect_absent "68d: …and agents/auditor.md no longer carries an injected copy of it" \
   "AUDITOR-MANDATE-BEGIN" "$(cat "${REPO}/agents/auditor.md")"
-expect_contains "68e: …it points at the dispatch brief instead" \
-  "Your mandate arrives verbatim in the dispatch brief and is authoritative." \
+# RE-POINTED (wave-27 T11, D5): the evidence checks are pushed at start, so the role file
+# points at the checks file, no longer at the dispatch brief.
+expect_contains "68e: …it points at the checks delivered at start instead" \
+  "Checks: payload/context/checks-<question>.md" \
   "$(cat "${REPO}/agents/auditor.md")"
 
-same_everywhere 69 "the critic prompt template is one text in the block, the skill file and agents/critic.md" \
-  "${BLOCK_DIR}/critic-template.md" "CRITIC-TEMPLATE" "$STEP6_MD" "${REPO}/agents/critic.md"
+# RE-POINTED (wave-27 T11, D5): agents/critic.md no longer carries the template; its checks are
+# pushed at start, and §W27-T11 pins the absence against a mutant render.
+same_everywhere 69 "the critic prompt template is one text in the block and the skill file" \
+  "${BLOCK_DIR}/critic-template.md" "CRITIC-TEMPLATE" "$STEP6_MD"
 
 # RE-POINTED (wave-26 T1, AC-1.3): the axis is the Stance-1 reviewer's, so agents/critic.md
 # stopped injecting it; §W26-3 pins the absence against a mutant render.
@@ -2240,8 +2244,32 @@ for _rf in "${REPO}"/agents/*.md; do
 done
 
 # The set arm first: a glob that matched nothing would make every cap below true for free.
-expect_eq "111a: the role-file set is the six roles (the cap arms have something to measure)" \
-  "6" "$ROLE_COUNT"
+# RE-POINTED (wave-27 T11, D6): was `"6" = $ROLE_COUNT`, which a seventh role turned red for
+# no defect. A relation now, naming no count (.claude/rules/test-harness.md): the role files
+# are exactly the roles render.sh renders, and that set is not empty.
+# role_files_are_roles <agents dir> <roles> -> yes when the dir's *.md basenames are the roles.
+role_files_are_roles() {
+  local _have _want _f
+  _have="$(for _f in "$1"/*.md; do [ -f "$_f" ] && basename "$_f" .md; done | LC_ALL=C sort | tr '\n' ' ')"
+  _want="$(printf '%s\n' $2 | /usr/bin/grep -v '^$' | LC_ALL=C sort | tr '\n' ' ')"
+  [ -n "$_want" ] && [ "$_have" = "$_want" ] && echo yes || echo no
+}
+ROLES_DECLARED="$(sed -n 's/^ROLES="\(.*\)"$/\1/p' "$RENDER_SH")"
+expect_nonempty "111a precondition: render.sh declares its ROLES" "$ROLES_DECLARED"
+expect_eq "111a: the role files are the roles render.sh renders (the cap arms have something to measure)" \
+  "yes" "$(role_files_are_roles "${REPO}/agents" "$ROLES_DECLARED")"
+mkdir -p "$TMP/111a-plus" "$TMP/111a-stray"
+cp "${REPO}"/agents/*.md "$TMP/111a-plus/" 2>/dev/null
+cp "${REPO}"/agents/*.md "$TMP/111a-stray/" 2>/dev/null
+cp "${REPO}/agents/researcher.md" "$TMP/111a-plus/planted.md" 2>/dev/null
+cp "${REPO}/agents/researcher.md" "$TMP/111a-stray/planted.md" 2>/dev/null
+expect_eq "111a-m1: a planted role in ROLES with its file stays green (no count is pinned)" \
+  "yes" "$(role_files_are_roles "$TMP/111a-plus" "$ROLES_DECLARED planted")"
+expect_eq "111a-m2: a role file render.sh does not declare is caught" \
+  "no" "$(role_files_are_roles "$TMP/111a-stray" "$ROLES_DECLARED")"
+mkdir -p "$TMP/111a-none"
+expect_eq "111a-m3: no role and no role file reads as red, not as an empty match" \
+  "no" "$(role_files_are_roles "$TMP/111a-none" "")"
 if [ -z "$ROLE_OVER" ]; then
   ok "111b: AC-1c.1 — every agents/*.md is at or under ${ROLE_CAP} B"
 else
@@ -2249,9 +2277,9 @@ else
      "over cap:${ROLE_OVER} — the survival block renders once now; a role file this large is carrying a copy of something shared"
 fi
 if [ "$ROLE_TOTAL" -le "$ROLE_TOTAL_CAP" ]; then
-  ok "111c: AC-1c.2 — the six role files total ${ROLE_TOTAL} B, at or under ${ROLE_TOTAL_CAP} B"
+  ok "111c: AC-1c.2 — the role files total ${ROLE_TOTAL} B, at or under ${ROLE_TOTAL_CAP} B"
 else
-  no "111c: AC-1c.2 — the six role files total ${ROLE_TOTAL} B, at or under ${ROLE_TOTAL_CAP} B" \
+  no "111c: AC-1c.2 — the role files total ${ROLE_TOTAL} B, at or under ${ROLE_TOTAL_CAP} B" \
      "total=${ROLE_TOTAL} — was 57013 before wave-11 1c"
 fi
 
@@ -4358,7 +4386,9 @@ for _rf in "${REPO}"/agents/*.md; do
   PB_ROLES=$((PB_ROLES + 1))
   grep -qF -- "$PB_RULE" "$_rf" || PB_ROLE_MISS="${PB_ROLE_MISS} ${_rf##*/}"
 done
-expect_eq "PB-b precondition: the role-file set is the six roles" "6" "$PB_ROLES"
+# RE-POINTED (wave-27 T11): was `"6" = $PB_ROLES`; 111a's relation, which names no count.
+expect_eq "PB-b precondition: the role files are the roles render.sh renders (the loop read them all)" \
+  "yes" "$(role_files_are_roles "${REPO}/agents" "$ROLES_DECLARED")"
 expect_eq "PB-b: AC-3.4 — every role file carries the script-in-a-file rule (missing in:${PB_ROLE_MISS:- none})" \
   "" "$PB_ROLE_MISS"
 expect_eq "PB-b2: AC-3.4 — the rule lives once in the shared role block" \
@@ -4447,8 +4477,8 @@ expect_nonempty "W26-2m: a steps/6.md that keeps \"Run the axes in parallel\" is
 # evidence check. The mutant is a real render: a clone whose critic template injects the block
 # again, so the arm proves it reads what the renderer writes, not a hand-made copy.
 W26_CRITIC="${REPO}/agents/critic.md"
-expect_nonempty "W26-3 precondition: agents/critic.md carries its prompt template" \
-  "$(w26_hits 'CRITIC-TEMPLATE-BEGIN' "$W26_CRITIC")"
+expect_nonempty "W26-3 precondition: agents/critic.md carries its checks pointer" \
+  "$(w26_hits 'Checks: payload/context/checks-<question>.md' "$W26_CRITIC")"
 expect_eq "W26-3: AC-1.3 — agents/critic.md carries no duplication axis" "" \
   "$(w26_hits 'Duplication axis' "$W26_CRITIC")"
 expect_eq "W26-3b: …and no fabricated-evidence check" "" \
@@ -4458,7 +4488,7 @@ if clone_render_tree "$W26_CLONE" \
    && printf '\n<!-- INJECT: duplication-axis -->\n' >> "$W26_CLONE/agents-src/templates/critic.md.tmpl" \
    && bash "$W26_CLONE/agents-src/render.sh" >/dev/null 2>&1; then
   expect_nonempty "W26-3m precondition: the mutant render wrote a critic role file" \
-    "$(w26_hits 'CRITIC-TEMPLATE-BEGIN' "$W26_CLONE/agents/critic.md")"
+    "$(w26_hits 'Checks: payload/context/checks-<question>.md' "$W26_CLONE/agents/critic.md")"
   expect_nonempty "W26-3m: a critic template that still injects the duplication block is caught" \
     "$(w26_hits 'Duplication axis' "$W26_CLONE/agents/critic.md")"
 else
@@ -5088,6 +5118,57 @@ expect_nonempty "W27-T8k3: …and tells the reader it sees no other reader's ver
 W27_ADV_NOTES="$(w26_doctor "$W27_ADV" 'You have the 6-axis self-review notes.')"
 expect_nonempty "W27-T8k2m: a checks-adversarial.md that hands over the notes again is caught" \
   "$(w26_hits '6-axis self-review notes' "$W27_ADV_NOTES")"
+
+
+# ── §W27-T11 (wave-27 T11; REQ-3 AC-3.2 role half, REQ-5 AC-5.1 role half, D5, D6) ──
+#
+# WHAT THIS OWNS. The reader role files carry stance and output form; their checks are the files
+# pushed at start (§W27-T8). Pinned here: each reader role file points at its checks and carries
+# none of their text (the role-file half of §W27-32); each injects the three shared reader blocks
+# and disallows Write, Edit, NotebookEdit and Agent. The absence sits beside the pointer on the
+# same file, and a real render of a critic template that injects a checks block again goes red.
+W27_READERS="auditor critic reviewer"
+W27_POINTER='Checks: payload/context/checks-<question>.md'
+# w27_check_text_in <file> -> what of a check list the file carries, one item per line: a checks
+# or critic-template marker, a checks file's opening sentence, or a structure check line.
+w27_check_text_in() {
+  local id
+  /usr/bin/grep -oE '<!-- (CHECKS-[A-Z]+|CRITIC-TEMPLATE)-BEGIN -->' "$1" 2>/dev/null
+  has_pin "$1" 'Your job is to find what went wrong in this change.' && echo 'adversarial opening'
+  has_pin "$1" "Your job is to falsify the claim that this wave's requirements" && echo 'evidence opening'
+  for id in $W27_IDS; do [ -n "$(w27_check_line "$1" "$id")" ] && echo "check line $id"; done
+  return 0
+}
+# The extractor reads each checks file's own text: a role file copying any of them is visible.
+for _q in $W27_QUESTIONS; do
+  expect_nonempty "W27-T11 precondition: the extractor finds checks-${_q}.md's own check text" \
+    "$(w27_check_text_in "${W27_CHECKS_DIR}/checks-${_q}.md")"
+done
+for _r in $W27_READERS; do
+  _rf="${REPO}/agents/${_r}.md"
+  expect_nonempty "W27-T11a: AC-5.1 — agents/${_r}.md points at the checks delivered at start" \
+    "$(w26_hits "$W27_POINTER" "$_rf")"
+  expect_eq "W27-32: AC-3.2 — agents/${_r}.md carries no check list" "" "$(w27_check_text_in "$_rf")"
+  for _m in REPORT-CONTRACT BRIEF-SCAFFOLD-READER DISPATCH-RULES; do
+    expect_nonempty "W27-T11b: agents/${_r}.md injects ${_m}" "$(w26_hits "<!-- ${_m}-BEGIN -->" "$_rf")"
+  done
+  _dis="$(/usr/bin/awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { exit }
+                       fm && /^disallowedTools:/ { sub(/^disallowedTools:[ \t]*/, ""); print }' "$_rf" 2>/dev/null)"
+  expect_eq "W27-T11c: agents/${_r}.md is a reader: it disallows Write, Edit, NotebookEdit and Agent" \
+    "Write, Edit, NotebookEdit, Agent" "$_dis"
+done
+W27_CLONE="$TMP/w27-t11-clone"
+if clone_render_tree "$W27_CLONE" \
+   && printf '\n<!-- INJECT: checks-adversarial -->\n' >> "$W27_CLONE/agents-src/templates/critic.md.tmpl" \
+   && bash "$W27_CLONE/agents-src/render.sh" >/dev/null 2>&1; then
+  expect_nonempty "W27-32m precondition: the mutant render wrote a critic role file with its pointer" \
+    "$(w26_hits "$W27_POINTER" "$W27_CLONE/agents/critic.md")"
+  expect_nonempty "W27-32m: a critic template that injects its checks again is caught" \
+    "$(w27_check_text_in "$W27_CLONE/agents/critic.md")"
+else
+  no "W27-32m: a critic template that injects its checks again is caught" \
+     "the mutant clone did not render: $W27_CLONE"
+fi
 
 section "Section W27P: wave-27 T7 — the working principles: one source, capped, general (REQ-9, AC-9.5/AC-9.6; D16)"
 #

@@ -2139,6 +2139,11 @@ fi
 # declined the offer. Ruling A-T6-2 — upheld by the Step-6 recheck for this site,
 # and overturned for the other five, which the block above now decides once each.
 [ "$RC_PROXY_STATE" = "stale" ] && fix "the claude() shell proxy is an older line → run $(bionic_check_hint claude-proxy)"
+# Malformed working-principles markers are a fault no setup step repairs: setup,
+# remove and this row all refuse to guess which lines are bionic's. The ✗ below
+# stands for this line (wave-27 T40, review pass 9 finding 2).
+[ "$PRINCIPLES_STATE" = "malformed" ] && \
+  fix "bionic's working-principles markers in $(_doctor_tilde "$(principles_file)") do not pair up → fix them by hand"
 
 [ "$LEGACY_ALIAS_FIRES" = "yes" ] && fix "the legacy .zshrc alias block is still there → run $(bionic_check_hint legacy-alias)"
 if [ "$LEGACY_HOOKS_FIRES" = "yes" ]; then
@@ -2562,17 +2567,22 @@ elif [ "$RC_PROXY_STATE" = "stale" ]; then
 else
   _doctor_env3 "$DOCTOR_NIL" "$_rc_proxy_label" "—" "not set — ${_rc_proxy_hint} offers it"
 fi
-# THE WORKING PRINCIPLES, AN OFFER LIKE THE ROW ABOVE, IN THREE STATES (wave-27
-# D16). Absent is an offer nobody took; edited is the user's own change to their
-# own file, which setup will show and never overwrite without a second yes. So
-# neither is `✗`, and neither earns a fix line: both are `–` with the route, and
-# only `present` is `✓`. The state is env.sh's `principles_state`, through detect.sh.
+# THE WORKING PRINCIPLES, AN OFFER LIKE THE ROW ABOVE, IN FOUR STATES (wave-27
+# D16, T40). Absent is an offer nobody took: `–` with the route. Edited is a
+# STATE, not a finding — the block differs from bionic's text and is kept as it
+# is; it is not called "your edit", because an older shipped text reads the same
+# way until a release changes the text. Malformed is the one fault: the markers
+# do not pair up, nothing can read or write the block, and the fix line gathered
+# above stands for the `✗`. The state is env.sh's `principles_state`, through
+# detect.sh.
 _principles_label="$(bionic_check_label working-principles)"
 _principles_hint="$(bionic_check_hint working-principles)"
 case "$PRINCIPLES_STATE" in
-  present) _doctor_env3 "$DOCTOR_OK"  "$_principles_label" "on"     "in $(_doctor_tilde "$(principles_file)")" ;;
-  edited)  _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "edited" "your own edit — ${_principles_hint} shows the difference" ;;
-  *)       _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "—"      "not set — ${_principles_hint} offers it" ;;
+  present)   _doctor_env3 "$DOCTOR_OK"  "$_principles_label" "on"     "in $(_doctor_tilde "$(principles_file)")" ;;
+  edited)    _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "edited" "differs from bionic's text — kept as it is" ;;
+  malformed) _principles_where="$(principles_where)"
+             _doctor_env3 "$DOCTOR_BAD" "$_principles_label" "malformed" "${_principles_where%%$'\n'*}" ;;
+  *)         _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "—"      "not set — ${_principles_hint} offers it" ;;
 esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
 # question — did the retired installer leave something behind — and on a machine
