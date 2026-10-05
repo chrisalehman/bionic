@@ -11341,4 +11341,153 @@ expect_contains "63y4 both places hex and neither a commit: no base, the judge e
 expect_contains "63y5 …naming the value it found and that it is no commit here" "its base-sha: deadbeef is no commit here" "$S63Y_ERR"
 POKE_BOUND="$S63_BOUND_WAS"
 
+# ============================================================
+section "Section 64 §DEBT: a declared red that landed is a fact the run owes until a green run after its token cleared (wave-27 T31; REQ-14 AC-14.3, AC-14.2; D23)"
+# ============================================================
+#
+# `land` prints `landed-red=<suite>` for a row that declared its red at dispatch, and the
+# orchestrator's state line for the row records `landed red: <suite> until <token>`.
+# `facts_owed <rigor> <scale> <tree> <plan>` then deals one `debt<TAB><suite><TAB><token>` per such
+# line, and `facts_state` answers it `covered` only when a floor proof, or a task proof whose log
+# shows that suite green, carries an `at=` later than the token's clearing (an `approval:` token
+# clears at its `approved:` line), `absent` otherwise; `current 8`, which asks the judge, refuses
+# while it is open. `amend` has no way to add the declaration.
+#
+# FIXTURE FIDELITY. §61's shape: a plan bound to this session at `current: 7`, its working branch
+# in a linked worktree, every reading and the floor at the head written by the production writers
+# (s61-style, proof_line placed by proof_add_line, at 2026-10-04T12:00:00Z), and §47's reads
+# column so `approve release` (the verb that writes the approved: line) has a row reading it. The
+# state line is written as the orchestrator writes a state line, by hand, because no verb writes it.
+S64_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R64="$(make_repo s64-debt)"; ( cd "$R64" && git commit -q --allow-empty -m init )
+git -C "$R64" config user.name "Dana Fixture"
+S64_B="$(git -C "$R64" rev-parse HEAD)"
+P64="$(s42_plan "$R64" 7 "  worktree: .worktrees/01-fixture
+  base-sha: ${S64_B:0:8}
+  branch: wave/01-fixture")"
+awk '
+  /^current: / && !d { print; print "working-branch: wave/01-fixture"; d = 1; next }
+  /^- T1: landed at record\/T1.md/ { print; print "- T9: landed at record/T9.md, landed red: widget.test.sh until approval:release at 2026-10-04T11:00:00Z"; next }
+  /^\| id \| step \|/ { print $0 " reads |"; next }
+  /^\|---\|/ { print $0 "---|"; next }
+  /^\| T5 \|/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " approval:release |"; next }
+  /^\| T[0-9]+ \|/ { print $0 "  |"; next }
+  { print }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+( cd "$R64" && git add -f "$P64" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$R64/.worktrees/01-fixture" "$S64_B" ) >/dev/null 2>&1
+S64_WT="$R64/.worktrees/01-fixture"
+S64_H="$(s57_commit "$S64_WT" lib/a.sh C1)"
+S64_REC="$R64/.bionic/docs/record/wave-01-fixture"; mkdir -p "$S64_REC"
+s64_add() {  # <line> -> placed in P64 by the production placer
+  bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S61_LIB" "$P64" "$1" > "$P64.new" && mv "$P64.new" "$P64"
+}
+s64_proof() {  # <kind> <at> <evidence under record/>
+  s64_add "$(bash -c '. "$1" && proof_line "$2" "$3" "$4" "$5"' _ "$S61_LIB" "$1" "$S64_H" "$2" "$3")"
+}
+s64_owed() {  # the floor and every reading owed at the head, all at 2026-10-04T12:00:00Z
+  local q
+  s64_proof floor 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log
+  for q in evidence adversarial structure; do
+    s64_add "$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" piece' \
+      _ "$S61_LIB" "$S64_H" "record/wave-01-fixture/$q.md" "$q" pass)"
+  done
+  for q in adversarial structure; do
+    s64_add "$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" whole' \
+      _ "$S61_LIB" "$S64_H" "record/wave-01-fixture/$q-whole.md" "$q" pass)"
+  done
+}
+s64_owed
+cp "$P64" "$TMPROOT/s64-clean"
+s64_reset() { cp "$TMPROOT/s64-clean" "$P64"; }
+S64_DEBT="$(printf 'debt\twidget.test.sh\tapproval:release')"
+
+# ---------- the dealing ----------
+expect_eq "64a §DEBT facts_owed with the plan deals one debt line per landed red: state line" "$S64_DEBT" \
+  "$(bash -c '. "$1" && facts_owed audited wave "$2" "$3"' _ "$S61_LIB" "$R64" "$P64" | /usr/bin/grep '^debt')"
+expect_eq "64a2 …and the dealing of a rigor alone carries none (the positive above is the same function)" "" \
+  "$(bash -c '. "$1" && facts_owed audited wave "$2"' _ "$S61_LIB" "$R64" | /usr/bin/grep '^debt')"
+
+# ---------- open: absent, and current 8 refused ----------
+s57_state "$P64" "$S64_H"
+expect_eq "64b AC-14.3 the judge says the debt absent while its token has not cleared" "absent" "$(s57_of "$S64_DEBT")"
+expect_eq "64b2 …so the run does not hold (rc 1)" "1" "$S57_RC"
+expect_eq "64b3 …while the floor at the head is covered" "covered" "$(s57_of floor)"
+s42_snap "$R64" "$P64"
+poke "$R64" current 8
+s42_unchanged "64c AC-14.3 current 8 with the debt open" 1 "$P64"
+expect_contains "64c2 …printing the judge's line for it" "$(printf 'debt\twidget.test.sh\tapproval:release\tabsent')" "$OUT"
+
+# ---------- the token clears; a green proof dated before it does not cover ----------
+poke "$R64" approve release 'Ship it.'
+expect_eq "64d0 precondition: approve release wrote the approved: line" "0" "$RC"
+S64_AP="$(sed -n 's/^approved: release by Dana Fixture \([^ ]*\) .*/\1/p' "$P64")"
+expect_regex "64d0b …at a UTC time later than the fixture's proofs" '^20[0-9]{2}-' "$S64_AP"
+s57_state "$P64" "$S64_H"
+expect_eq "64d …with only the floor proof dated BEFORE the approval, the debt is still absent" "absent" "$(s57_of "$S64_DEBT")"
+cp "$P64" "$TMPROOT/s64-approved"
+
+# ---------- a floor proof after the clearing covers it, and current 8 is admitted ----------
+s64_proof floor 2099-01-01T00:00:00Z record/wave-01-fixture/floor-late.log
+s57_state "$P64" "$S64_H"
+expect_eq "64e a floor proof whose at= is later than the approval covers the debt" "covered" "$(s57_of "$S64_DEBT")"
+expect_eq "64e2 …and the run holds (rc 0)" "0" "$S57_RC"
+s42_snap "$R64" "$P64"
+poke "$R64" current 8
+expect_eq "64f …and current 8 is admitted" "0" "$RC"
+
+# ---------- a task proof covers it only when its log shows that suite green ----------
+cp "$TMPROOT/s64-approved" "$P64"
+printf 'widget.test.sh: 12/12 passed, 0 failed\nrc=0\n' > "$S64_REC/widget-green.log"
+printf 'other.test.sh: 9/9 passed, 0 failed\nrc=0\n' > "$S64_REC/other-green.log"
+s64_proof task 2099-01-01T00:00:00Z record/wave-01-fixture/other-green.log
+s57_state "$P64" "$S64_H"
+expect_eq "64g a later task proof whose log shows another suite green does not cover it" "absent" "$(s57_of "$S64_DEBT")"
+s64_proof task 2099-01-01T00:00:01Z record/wave-01-fixture/widget-green.log
+s57_state "$P64" "$S64_H"
+expect_eq "64g2 …one whose log shows widget.test.sh green does" "covered" "$(s57_of "$S64_DEBT")"
+cp "$TMPROOT/s64-approved" "$P64"
+printf 'widget.test.sh: 11/12 passed, 1 failed\nrc=1\n' > "$S64_REC/widget-red.log"
+s64_proof task 2099-01-01T00:00:00Z record/wave-01-fixture/widget-red.log
+s57_state "$P64" "$S64_H"
+expect_eq "64g3 …and one whose log shows it red does not" "absent" "$(s57_of "$S64_DEBT")"
+
+# ---------- amend cannot add the declaration ----------
+poke "$R64" amend w1 --lands-red+ 'widget.test.sh until approval:release' --reason 'land it red'
+expect_eq "64h AC-14.2 amend has no way to add a declaration: --lands-red+ is a usage refusal (exit 2)" "2" "$RC"
+expect_contains "64h2 …naming the argument" "unknown argument for amend: --lands-red+" "$OUT"
+poke "$R64" amend w1 --red-evidence+ record/wave-01-fixture/T9-red.md --reason 'land it red'
+expect_eq "64h3 …and so is --red-evidence+" "2" "$RC"
+
+# ---------- the line's own time (A-orch-85): no `at <ISO-UTC>`, never covered ----------
+cp "$TMPROOT/s64-approved" "$P64"
+sed 's/ until approval:release at 2026-10-04T11:00:00Z/ until approval:release/' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+s64_proof floor 2099-01-01T00:00:00Z record/wave-01-fixture/floor-late.log
+s57_state "$P64" "$S64_H"
+expect_regex "64i a landed red: line with no at <ISO-UTC> is never covered: absent, the judge naming the missing time" \
+  '^absent	.*at <ISO-UTC>' "$(s57_of "$S64_DEBT")"
+
+# ---------- an ext: debt (A-orch-85): the slug gone from every ## Tasks cell, and a green run after the red landing ----------
+S64_EXT="$(printf 'debt\twidget.test.sh\text:vendor-key')"
+s64_ext_plan() {  # <slug still in T2's deps cell: yes|no> -> P64 with an ext: state line in place of the approval one
+  cp "$TMPROOT/s64-clean" "$P64"
+  awk -v keep="$1" '
+    /landed red: widget.test.sh until approval:release/ { sub(/until approval:release at 2026-10-04T11:00:00Z/, "until ext:vendor-key at 2026-10-05T04:00:00Z") }
+    keep == "yes" && /^\| T2 \|/ { sub(/\| — \| 30 \|/, "| ext:vendor-key | 30 |") }
+    { print }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+}
+s64_ext_plan yes
+expect_eq "64j0 precondition: the slug sits in T2's deps cell" "1" "$(/usr/bin/grep -c '^| T2 |.*ext:vendor-key' "$P64")"
+s64_proof floor 2026-10-05T05:00:00Z record/wave-01-fixture/floor-05.log
+s57_state "$P64" "$S64_H"
+expect_eq "64j the slug still in a cell, a floor proof at 05:00Z after the 04:00Z red landing: absent" "absent" "$(s57_of "$S64_EXT")"
+s64_ext_plan no
+s64_proof floor 2026-10-05T05:00:00Z record/wave-01-fixture/floor-05.log
+s57_state "$P64" "$S64_H"
+expect_eq "64j2 the slug removed from every cell, the same floor proof: covered" "covered" "$(s57_of "$S64_EXT")"
+s64_ext_plan no
+s64_proof floor 2026-10-05T03:00:00Z record/wave-01-fixture/floor-03.log
+s57_state "$P64" "$S64_H"
+expect_eq "64j3 the slug removed and the only green proof dated 03:00Z, before the red landing: absent" "absent" "$(s57_of "$S64_EXT")"
+POKE_BOUND="$S64_BOUND_WAS"
+
 finish

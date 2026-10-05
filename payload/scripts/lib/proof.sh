@@ -655,14 +655,17 @@ PROOF_FILES
   printf 'bounded\t%s\n' "$(printf '%s\n' "$ans" | tr '\n' ' ' | sed 's/ $//')"
 }
 
-# facts_owed <rigor> <scale> [<tree>] -> one line per fact a run owes, exit 0; nothing and exit 1
-# when <rigor> is not one PROOF_DEALING knows or <scale> is not task, wave or epic (wave-27 T9; D2):
+# facts_owed <rigor> <scale> [<tree>] [<plan>] -> one line per fact a run owes, exit 0; nothing and
+# exit 1 when <rigor> is not one PROOF_DEALING knows or <scale> is not task, wave or epic (wave-27
+# T9; D2):
 #
 #     floor                                          the full run, proof_state's question
 #     review<TAB><question><TAB><role><TAB>piece     each question, for the role the rigor deals it
 #     review<TAB><question><TAB><role><TAB>whole     at scale: wave, one more per code question (D10)
 #     check                                          when <tree>'s .bionic/config.yaml names a
 #                                                    release-check: command (wave-27 T16; D12)
+#     debt<TAB><suite><TAB><token>                   one per state line of <plan> recording
+#                                                    `landed red: <suite> until <token>` (T31; D23)
 #
 # THE ONE DEALING. The judge below reads it, and the dispatch wall (row T15) reads it for the
 # questions a reader's brief may name; neither restates the table. The check is the project's, not
@@ -690,7 +693,67 @@ facts_owed() {
     . "$d/roots.sh" >/dev/null 2>&1
   fi
   [ -z "$(config_value "$3" release-check "" 2>/dev/null)" ] || printf 'check\n'
+  [ -z "${4:-}" ] || proof_debts "$4"
   return 0
+}
+
+# proof_debts <plan> -> `debt<TAB><suite><TAB><token>` for each unfenced `## SDLC State` state line
+# (`- T<n>: …`) that records `landed red: <suite> until <token>`, in plan order, once each (wave-27
+# T31; D23). The orchestrator writes that line when `land` prints `landed-red=<suite>`.
+proof_debts() {
+  [ -f "${1:-}" ] || return 0
+  awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc' "$1" | proof_debts_open all
+}
+
+# proof_debts_open [all|at] < <section text> -> the debts the `## SDLC State` text on stdin records, as
+# `debt<TAB><suite><TAB><token>`; with no operand only those the TEXT leaves open; with `at`, each as
+# `<suite><TAB><token><TAB><its landed time or nothing>` (wave-27 T31; D23; A-orch-85). A state line
+# reads `landed red: <suite> until <token> at <ISO-UTC>`, the time the landing's own (`land` prints
+# it as `landed-red-at=`); a line with no time is a debt nothing can cover. In the text an
+# `approval:<name>` debt stays open until a `proved: kind=floor` or `kind=task` line carries an `at=`
+# later than the time on the first `approved: <name> by <who> <ISO-UTC> …` line; an `ext:<slug>` debt
+# until such a line is later than the red landing itself, for nothing dates the slug leaving the
+# `## Tasks` cells, and whether it left is the judge's to read (`_facts_debt`), not this text's. This
+# is the commit gate's predicate (lib/walls.sh `_eg_reading_gaps`), plan text alone; the judge also
+# holds a task proof to a log that shows the suite green.
+proof_debts_open() {
+  awk -v mode="${1:-}" '
+    BEGIN { iso = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$" }
+    /^[[:space:]]*-[[:space:]]+T[0-9]+:/ && match($0, /landed red:[ \t]+[^ \t]+[ \t]+until[ \t]+[^ \t]+([ \t]+at[ \t]+[^ \t]+)?/) {
+      n = split(substr($0, RSTART, RLENGTH), w, /[ \t]+/); sub(/[,;)]+$/, "", w[5])
+      t = ""; if (n >= 7 && w[6] == "at") { t = w[7]; sub(/[,;)]+$/, "", t); if (t !~ iso) t = "" }
+      d = "debt\t" w[3] "\t" w[5]
+      if (!(d in seen)) { seen[d] = 1; tok[++nd] = w[5]; line[nd] = d; su[nd] = w[3]; when[nd] = t }
+      next
+    }
+    /^approved:[ \t]/ {
+      m = split($0, w, /[ \t]+/)
+      if (m >= 3 && w[3] == "by" && !(w[2] in ap)) for (i = 4; i <= m; i++) if (w[i] ~ iso) { ap[w[2]] = w[i]; break }
+      next
+    }
+    /^proved:[ \t]/ {
+      m = split($0, w, /[ \t]+/); k = ""; at = ""
+      for (i = 2; i <= m; i++) { if (w[i] ~ /^kind=/) k = substr(w[i], 6); else if (w[i] ~ /^at=/) at = substr(w[i], 4) }
+      if ((k == "floor" || k == "task") && at ~ iso && at > latest) latest = at
+    }
+    END {
+      for (i = 1; i <= nd; i++) {
+        if (mode == "at") { print su[i] "\t" tok[i] "\t" when[i]; continue }
+        if (mode == "") {
+          t = tok[i]; c = ""
+          if (when[i] != "") {
+            if (t ~ /^approval:./ && (substr(t, 10) in ap)) c = ap[substr(t, 10)]
+            else if (t ~ /^ext:./) c = when[i]
+          }
+          if (c != "" && latest > c) continue
+        }
+        print line[i]
+      }
+    }'
 }
 
 # facts_state <plan> <head> -> one line per fact `facts_owed` deals the plan's frontmatter rigor and
@@ -709,6 +772,10 @@ facts_owed() {
 # writes (T31; review pass 22 S3), so a later failure at one head is never hidden by an earlier pass.
 # With no line at <head>, uncovered from the newest one's head, and absent with none. It is a command
 # run at a head, so a docs-only tail does not carry it.
+# A DECLARED DEBT (wave-27 T31; D23), one per `landed red: <suite> until <token>` state line, is
+# covered by a green run of that suite, or a floor proof, recorded after the token cleared, and
+# absent otherwise (`_facts_debt`); so `current 8`, close-out and the tick's integrate row, which
+# all ask this judge, refuse while a debt is open.
 #
 # A QUESTION IS ONE CHAIN (D4). Its links are its readings (`proved: kind=review … question=<q>`,
 # either scope) and its waivers (`waived: question=<q> head=<sha> …`), in section order, which is the
@@ -747,7 +814,7 @@ facts_state() {
   rigor="$(plan_frontmatter_get "$plan" rigor 2>/dev/null)"
   scale="$(plan_frontmatter_get "$plan" scale 2>/dev/null)"
   tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
-  owed="$(facts_owed "$rigor" "$scale" "$tree")" || {
+  owed="$(facts_owed "$rigor" "$scale" "$tree" "$plan")" || {
     printf 'facts_state: %s declares no rigor and scale the dealing knows (rigor: %s, scale: %s)\n' \
       "$plan" "${rigor:-none}" "${scale:-none}" >&2
     return 2
@@ -846,6 +913,11 @@ PROOF_CHAIN
           '') st=absent ;;
           *) st="uncovered	$x..$head" ;;
         esac ;;
+      debt"	"*)
+        IFS='	' read -r kind q x <<PROOF_DEBT
+$fact
+PROOF_DEBT
+        st="$(_facts_debt "$plan" "$tree" "$q" "$x")" ;;
       *) st=absent ;;
     esac
     printf '%s\t%s\n' "$fact" "$st"
@@ -854,6 +926,82 @@ PROOF_CHAIN
 $owed
 PROOF_FACTS
   return "$rc"
+}
+
+# _facts_debt <plan> <tree> <suite> <token> -> `covered`, or `absent` with any reason after a tab, for
+# one declared debt (wave-27 T31; D23; A-orch-85). Covered only when a floor proof, or a task proof
+# whose log shows <suite> green, carries an `at=` later than the debt's threshold:
+#   - its `landed red:` line carries no `at <ISO-UTC>`: no threshold, never covered, and it says so;
+#   - `approval:<name>`: the time on the first `approved: <name> by <who> <ISO-UTC> …` line of the
+#     plan's `## SDLC State`; until that line is written, absent;
+#   - `ext:<slug>`: absent while any `## Tasks` cell still names `ext:<slug>` (the owner removing it
+#     is the statement that the blocker cleared); then the red landing's own time. Nothing dates a
+#     clearing, so the green run is held to be later than the red landing, not later than the
+#     clearing;
+#   - any other token: absent.
+# A log shows <suite> green by the runner's `<suite> … PASS` line or the suite's own
+# `<suite>: <n>/<n> passed, 0 failed` tally.
+_facts_debt() {
+  local plan="$1" tree="$2" suite="$3" tok="$4" clear landed droot ev x
+  landed="$(awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc' "$plan" | proof_debts_open at | awk -F'\t' -v s="$suite" -v t="$tok" '$1 == s && $2 == t { print $3; exit }')"
+  if [ -z "$landed" ]; then
+    printf 'absent\tits landed red: line carries no at <ISO-UTC>, so no green run can be dated after the red landing'
+    return 0
+  fi
+  case "$tok" in
+    approval:?*)
+      clear="$(awk -v n="${tok#approval:}" '
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+        insdlc && /^approved:[ \t]/ {
+          m = split($0, w, /[ \t]+/)
+          if (m < 3 || w[2] != n || w[3] != "by") next
+          for (i = 4; i <= m; i++) if (w[i] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) { print w[i]; exit }
+        }' "$plan")" ;;
+    ext:?*)
+      x="$(awk -v want="$tok" '
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^##[[:space:]]/ { intasks = ($0 ~ /^##[[:space:]]+Tasks[[:space:]]*$/); next }
+        intasks && /^[[:space:]]*\|/ {
+          n = split($0, c, "|")
+          for (i = 1; i <= n; i++) { m = split(c[i], w, /[ \t,]+/); for (j = 1; j <= m; j++) if (w[j] == want) { print "held"; exit } }
+        }' "$plan")"
+      if [ -n "$x" ]; then clear=""; else clear="$landed"; fi ;;
+    *) clear="" ;;
+  esac
+  [ -n "$clear" ] || { printf 'absent'; return 0; }
+  droot=""; [ -z "$tree" ] || ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
+  while IFS='	' read -r x ev; do
+    case "$x" in
+      floor) printf 'covered'; return 0 ;;
+      task)
+        case "$ev" in /*) : ;; *) [ -n "$droot" ] || continue; ev="$droot/$ev" ;; esac
+        [ -f "$ev" ] || continue
+        if awk -v s="$suite" '
+          $1 == s && $NF == "PASS" { ok = 1; exit }
+          $1 == s ":" && $4 == "0" && $5 == "failed" { split($2, c, "/"); if (c[1] == c[2] && c[1] + 0 > 0) { ok = 1; exit } }
+          END { exit !ok }' "$ev" 2>/dev/null; then
+          printf 'covered'; return 0
+        fi ;;
+    esac
+  done <<PROOF_LATER
+$(awk -v t="$clear" "$(proof_awk)"'
+  /^[[:space:]]*```/ { fence = !fence; next }
+  fence { next }
+  /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+  insdlc && proof_fields($0) && (PROOF_KIND == "floor" || PROOF_KIND == "task") {
+    m = split($0, f, /[ \t]+/); at = ""; ev = ""
+    for (i = 2; i <= m; i++) { if (f[i] ~ /^at=/) at = substr(f[i], 4); else if (f[i] ~ /^evidence=/) ev = substr(f[i], 10) }
+    if (at > t) print PROOF_KIND "\t" ev
+  }' "$plan")
+PROOF_LATER
+  printf 'absent'
 }
 
 # _facts_holds <tree> <docs prefix> <last head> <head> -> 0 when <head> is <last head>, or <last
