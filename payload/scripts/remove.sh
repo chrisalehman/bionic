@@ -669,11 +669,17 @@ _rm_strip_walk() {  # <file> <start> <end> <keep> — the lines that stay, to st
   return 0
 }
 
-# The copy of markers.sh `markers_regular` (wave-27 T46): rc 4, and what the
-# path is, when it is not a regular file, a link to one, or nothing at all.
+# The copy of markers.sh `markers_regular` (wave-27 T46, T51): rc 4, and what
+# the path is, when it is not a regular text file bionic can read, a link to one,
+# or nothing at all. tests/principles-item.test.sh §T51-COPIES pins the body.
 _rm_regular() {  # <file>
-  if [ -L "$1" ] && [ ! -e "$1" ]; then printf 'a link that points nowhere\n'; return 4; fi
-  if [ ! -e "$1" ] || [ -f "$1" ]; then return 0; fi
+  if [ -L "$1" ] && [ ! -e "$1" ]; then printf 'a link to %s, which does not exist\n' "$(bionic_link_target "$1")"; return 4; fi
+  [ -e "$1" ] || return 0
+  if [ -f "$1" ]; then
+    if [ ! -r "$1" ]; then printf 'unreadable: bionic has no permission to read it\n'; return 4; fi
+    if ! LC_ALL=C tr -d '\000' < "$1" | cmp -s - "$1"; then printf 'not text: it holds a NUL byte\n'; return 4; fi
+    return 0
+  fi
   if [ -d "$1" ] && [ -L "$1" ]; then printf 'a link to a directory\n'
   elif [ -d "$1" ]; then printf 'a directory\n'
   else printf 'not a regular file\n'; fi
@@ -700,7 +706,7 @@ _rm_strip_why() {  # <rc> <file>
   case "${1:-}" in
     2) echo "bionic's markers in ${2} do not pair up, so bionic cannot tell which lines are its own — fix them by hand" ;;
     3) echo "${2} is read-only, and bionic leaves a file you made read-only alone" ;;
-    4) echo "${2} is $(_rm_regular "$2"), and bionic writes only to a regular file" ;;
+    4) echo "${2} is $(_rm_regular "$2"); bionic reads and writes only a regular text file it can read" ;;
     *) echo "could not rewrite ${2}" ;;
   esac
 }
@@ -867,7 +873,15 @@ _rm_item_verb() {  # <id>
     legacy-permission-block) echo "remove bionic's retired permission block from ${RM_SETTINGS}" ;;
     permission-mode)       echo "reset Claude Code's default permission mode" ;;
     claude-proxy)          echo "remove bionic's claude() shell function from ${RC_FILE}" ;;
-    working-principles)    echo "remove bionic's working principles from ${RM_PRINCIPLES_FILE}" ;;
+    working-principles)
+      # The page takes the consent, so it says the file goes when it will
+      # (wave-27 T51, review pass 21 F6) — the item's own test, asked here.
+      if [ "$RM_MODE" = "payload" ] && declare -F principles_unset_deletes >/dev/null 2>&1 \
+         && principles_unset_deletes; then
+        echo "remove bionic's working principles and delete the file ${RM_PRINCIPLES_FILE}, which holds nothing else"
+      else
+        echo "remove bionic's working principles from ${RM_PRINCIPLES_FILE}"
+      fi ;;
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
     orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
@@ -893,20 +907,26 @@ _rm_item_verb() {  # <id>
 _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
   local id="${1:-}" count keys present behavior
   case "$id" in
+    # An rc or CLAUDE.md that is not a text file bionic can read (`_rm_regular`)
+    # has nothing on the page: its item says why instead (wave-27 T51, F5, F7).
     legacy-alias)
       [ -f "$RC_FILE" ] || return 1
+      _rm_regular "$RC_FILE" >/dev/null || return 1
       _rm_file_has_marker "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END" && return 0
       _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE" && return 0
       return 1 ;;
     environment)
       keys="$(_rm_env_keys_present)" || keys=""
       [ -n "$keys" ] && return 0
+      _rm_regular "$RC_FILE" >/dev/null || return 1
       _rm_file_has_marker "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" && return 0
       _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE" && return 0
       return 1 ;;
     claude-proxy)
+      _rm_regular "$RC_FILE" >/dev/null || return 1
       _rm_file_has_marker "$RC_FILE" "$RM_RC_START" "$RM_RC_END" ;;
     working-principles)
+      _rm_regular "$RM_PRINCIPLES_FILE" >/dev/null || return 1
       _rm_file_has_marker "$RM_PRINCIPLES_FILE" "$RM_PRINCIPLES_START" "$RM_PRINCIPLES_END" ;;
     legacy-hooks)
       [ -f "$RM_SETTINGS" ] || return 1
@@ -1106,6 +1126,15 @@ echo ""
 _rm_item_legacy_alias() {
   _rm_wants legacy-alias || return 0
   rc_variant=none
+  # An rc that is not a text file bionic can read was not looked inside, so it
+  # is not "already clean" (wave-27 T51, review pass 21 F7): the claude() item
+  # carries the refusal, and this one says it did not check.
+  if ! _rm_regular "$RC_FILE" >/dev/null; then
+    echo "legacy shell alias block:"
+    _rm_not_checked "legacy alias block in ${RC_FILE}" "${RC_FILE} is $(_rm_regular "$RC_FILE")"
+    echo ""
+    return 0
+  fi
   if [ -f "$RC_FILE" ]; then
     if _rm_file_has_marker "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"; then
       rc_variant=marked
@@ -1225,7 +1254,13 @@ _rm_item_environment() {
 
   local keys block=no bare=no question="" jq_missing=no consent_rc=0
   if ! keys="$(_rm_env_keys_present)"; then jq_missing=yes; keys=""; fi
-  _rm_file_has_marker "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" && block=yes
+  # The rc half is not looked at when the rc is not a text file bionic can read
+  # (wave-27 T51, F7): said once, and the settings half still runs.
+  if ! _rm_regular "$RC_FILE" >/dev/null; then
+    _rm_not_checked "the retired environment block in ${RC_FILE}" "${RC_FILE} is $(_rm_regular "$RC_FILE")"
+    block=unchecked
+  fi
+  [ "$block" = "no" ] && _rm_file_has_marker "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" && block=yes
   # A block whose markers do not pair up is reported, and left out of the
   # question (wave-27 T46, review pass 14 F3).
   if [ "$block" = "yes" ] && ! _rm_marker_faults "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" >/dev/null; then
@@ -1243,7 +1278,7 @@ _rm_item_environment() {
   fi
 
   if [ -z "$keys" ] && [ "$block" != "yes" ] && [ "$bare" = "no" ]; then
-    [ "$block" = "malformed" ] || _rm_clean "bionic's environment settings"
+    [ "$block" = "no" ] && _rm_clean "bionic's environment settings"
     echo ""
     return 0
   fi

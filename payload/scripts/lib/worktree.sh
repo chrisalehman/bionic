@@ -628,7 +628,25 @@ _wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrive
   fi
 }
 
+# A REFUSED LANDING LEAVES NO RECORD FILE THE PROOF MADE (wave-27 T50; review pass 27 N1). The
+# writability proof (`_wt_proofs_prove`, below) creates an empty record when there was none, and
+# a refusal after it, whichever block makes it, would leave that file behind. The body is
+# `_wt_land`; this wrapper takes the one look at the end that covers every refusal: a landing that
+# is refused, with the record the proof created still empty, removes it. A record that already
+# held landings, or was there empty before the proof, is never touched. The directories the proof
+# made stay.
 worktree_land() {  # <worktree path> <onto> [<bound plan>] -> LANDED | REFUSED
+  local rc made
+  _WT_PROOFS_MADE=""
+  _wt_land "$@"; rc=$?
+  made="$_WT_PROOFS_MADE"; _WT_PROOFS_MADE=""
+  if [ "$rc" -ne 0 ] && [ -n "$made" ] && [ -f "$made" ] && [ ! -s "$made" ] && [ ! -L "$made" ]; then
+    rm -f "$made" 2>/dev/null
+  fi
+  return "$rc"
+}
+
+_wt_land() {  # <worktree path> <onto> [<bound plan>] -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
   local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
   local pre pre_ref was said held now_ref check_cmd check_out nl='
@@ -728,23 +746,34 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] -> LANDED | REFUSED
   if [ -n "$check_cmd" ]; then
     check_out="$(cd "$co" 2>/dev/null || exit 1
       set -f
-      export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head"
+      export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head" BIONIC_CHECK_TREE="$wt_abs"
       # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
       exec $check_cmd </dev/null 2>&1)"; rc=$?
     if [ "$rc" -ne 0 ]; then
       [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
       _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head} — the project's declared release-check (${check_cmd}) fails over this landing's range; fix what it names on ${branch}, re-run its suites, land again"; return 2
     fi
+    # THE TARGET IS CLEAN AFTER THE CHECK AS WELL (wave-27 T50; review pass 27 S2). The command runs
+    # in the shared target, so one that writes a tracked file there would leave it dirty after the
+    # clean test above had passed, and the next landing would be refused for it. The same test, taken
+    # again (tracked files only: an untracked file is not counted, here as above), refuses this landing
+    # with the paths named, nothing merged. `land` does not clean the target: the user sees what the
+    # check did.
+    dirt="$(git -C "$co" status --porcelain --untracked-files=no 2>/dev/null)"
+    if [ -n "$dirt" ]; then
+      _wt_refuse "check-dirtied why=release-check checkout=${co} paths=$(_wt_dirty_paths "$dirt") branch=${branch} — the project's declared release-check (${check_cmd}) left tracked files changed in the target checkout, and nothing is merged; restore them (git -C ${co} status), make the check write nothing tracked, land again"; return 2
+    fi
   fi
 
   # THE LANDING RECORD IS PROVED WRITABLE BEFORE THE MERGE (wave-27 T44; D15). With a bound plan,
   # the run's `landing-proofs.log` is created or opened for append here, and a record that cannot
-  # be is refused with nothing changed. The row is the plan's `## Tasks` row whose `worktree` cell
-  # names this tree. Both are written once the merge is made (_wt_proofs_append, below).
+  # be is refused with nothing changed: a path that is a symlink, a FIFO, a device or a directory is
+  # refused unopened (wave-27 T50, N1 N2; `_wt_proofs_prove`). The row is the plan's `## Tasks` row
+  # whose `worktree` cell names this tree. Both are written once the merge is made
+  # (_wt_proofs_append, below).
   proofs="none"; proofs_row=""
   if [ -n "$plan" ]; then
-    proofs="$(_wt_proofs_path "$root" "$plan")" && mkdir -p "${proofs%/*}" 2>/dev/null \
-      && { : >> "$proofs"; } 2>/dev/null || {
+    proofs="$(_wt_proofs_path "$root" "$plan")" && _wt_proofs_prove "$proofs" || {
       _wt_refuse "record-unwritable why=proofs-unwritable path=${proofs:-<none>} branch=${branch} — the landing record cannot be written, so nothing is merged; make it writable, land again"; return 2
     }
     proofs_row="$(_wt_proofs_row "$root" "$plan" "$wt_abs")"
@@ -896,7 +925,7 @@ _wt_proofs_path() {  # <root> <plan> -> the record's path
 # relative cell is read from <root>. Nothing when none does, or when lib/units.sh, the table's
 # one reader, cannot be loaded (it is loaded lazily, as run.sh is below).
 _wt_proofs_row() {  # <root> <plan> <tree abs> -> <row id> | nothing
-  local rec cell lib
+  local rec cell lib id
   if ! declare -F units_rows >/dev/null 2>&1; then
     lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/units.sh"
     # shellcheck source=/dev/null
@@ -904,22 +933,100 @@ _wt_proofs_row() {  # <root> <plan> <tree abs> -> <row id> | nothing
     declare -F units_rows >/dev/null 2>&1 || return 1
   fi
   while IFS= read -r rec; do
-    cell="$(units_field "$rec" worktree)"; cell="${cell#./}"; cell="${cell%/}"
+    cell="$(units_field "$rec" worktree)"
+    while :; do   # a leading `./` and any trailing slashes are not part of the name (wave-27 T50, N4)
+      case "$cell" in ./*) cell="${cell#./}" ;; */) cell="${cell%/}" ;; *) break ;; esac
+    done
     case "$cell" in ''|-|—) continue ;; /*) : ;; *) cell="${1}/${cell}" ;; esac
-    [ "$cell" = "$3" ] && { units_field "$rec" id; return 0; }
+    if [ "$cell" = "$3" ]; then
+      # An id holding white space would break the header's `key=value` grammar: no row (`—`).
+      id="$(units_field "$rec" id)"
+      case "$id" in *[[:space:]]*) return 1 ;; esac
+      printf '%s\n' "$id"; return 0
+    fi
   done <<EOF
 $(units_rows "$2" 2>/dev/null)
 EOF
   return 1
 }
 
-# One write, its status returned: the header and the judged lines under it.
+# THE RECORD PATH IS A REGULAR FILE OR ABSENT, AND IS PROVED WRITABLE (wave-27 T44, T50; review pass
+# 27 N1, N2). A symlink (a link to `/dev/null` silently loses the record; a link to a file outside the
+# docs tree appends there), a FIFO (opening one for append blocks the landing for good), a device or a
+# directory at the path is refused before anything is opened. Otherwise the directory is made and the
+# file created or opened for append. When this call created the file, `_WT_PROOFS_MADE` names it, and
+# `worktree_land` removes it again if the landing is then refused.
+_wt_proofs_prove() {  # <record path> -> 0 writable, 1 not
+  local made=""
+  [ ! -L "$1" ] || return 1
+  if [ -e "$1" ]; then [ -f "$1" ] || return 1; else made="$1"; fi
+  mkdir -p "${1%/*}" 2>/dev/null && { : >> "$1"; } 2>/dev/null || return 1
+  _WT_PROOFS_MADE="$made"
+}
+
+# THE APPEND IS SERIALIZED (wave-27 T50; review pass 27 S1). Two landings appending at once wrote
+# their blocks line by line into each other, so a stamp line sat under the other landing's header.
+# The lock is a directory beside the record, `<record>.lock`, taken with `mkdir` as every lock in
+# this tree is (lib/slots.sh, hooks/session-poker.sh `launch_sync_lock`: no `flock` on macOS), and
+# removed by `_wt_proofs_append` on every path out of it. A landing waits for it _WT_PROOFS_LOCK_WAIT
+# seconds, then fails the append: the `proofs=unwritten` case, the merge standing and the tree and
+# its stamps kept. A lock a killed landing left behind is taken over, and must not stop every later
+# landing: it is stale when the pid it records is gone, or when the directory is older than
+# _WT_PROOFS_LOCK_STALE seconds (an append takes microseconds, so a minute is a holder that is
+# not coming back). Two landings that both find one stale can race to take it over, which needs a
+# killed landing and two more in the same instant; the worst case is one interleaved block, the
+# fault this lock removes in every other case.
+_WT_PROOFS_LOCK_WAIT="${_WT_PROOFS_LOCK_WAIT:-10}"
+_WT_PROOFS_LOCK_STALE="${_WT_PROOFS_LOCK_STALE:-60}"
+_wt_proofs_lock() {  # <record path> -> 0 held, 1 not taken in time
+  local lk="${1}.lock" tries=0 bare=0 pid="" mt=""
+  local max=$(( _WT_PROOFS_LOCK_WAIT * 50 ))
+  while :; do
+    if mkdir "$lk" 2>/dev/null; then
+      printf '%s\n' "$$" > "$lk/pid" 2>/dev/null
+      return 0
+    fi
+    if [ ! -d "$lk" ]; then
+      # mkdir failed and nothing is there to wait for: the directory cannot be written. One miss
+      # is a holder releasing between the mkdir and this look; three are not.
+      bare=$((bare + 1))
+      [ "$bare" -lt 3 ] || return 1
+    else
+      bare=0
+      pid=""; { read -r pid < "$lk/pid"; } 2>/dev/null
+      mt="$(stat -f %m "$lk" 2>/dev/null || stat -c %Y "$lk" 2>/dev/null)"
+      case "$mt" in ''|*[!0-9]*) mt="" ;; esac
+      if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } \
+        || { [ -n "$mt" ] && [ $(( $(date +%s) - mt )) -gt "$_WT_PROOFS_LOCK_STALE" ]; }; then
+        rm -rf "$lk" 2>/dev/null
+        continue
+      fi
+    fi
+    tries=$((tries + 1))
+    [ "$tries" -lt "$max" ] || return 1
+    sleep 0.02
+  done
+}
+
+# The header and the judged lines under it, appended whole while the record's lock is held, its
+# status returned. The block is built before the lock is taken, and the lock is released on every
+# path out.
 _wt_proofs_append() {  # <file> <row> <branch> <head> <merge> <judged lines>
-  local block
+  local block rc
   block="landed: row=${2:-—} branch=${3} head=${4} merge=${5} at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   [ -z "${6:-}" ] || block="${block}
 ${6}"
-  { printf '%s\n' "$block" >> "$1"; } 2>/dev/null
+  _wt_proofs_lock "$1" || return 1
+  { printf '%s\n' "$block" >> "$1"; } 2>/dev/null; rc=$?
+  rm -rf "${1}.lock" 2>/dev/null
+  return "$rc"
+}
+
+# The paths of a `git status --porcelain` listing, comma-joined, the first five and a count of the
+# rest: what a refusal names.
+_wt_dirty_paths() {  # <porcelain lines>
+  printf '%s\n' "$1" | awk 'NF { n++; if (n <= 5) out = out (n > 1 ? "," : "") substr($0, 4) }
+    END { printf "%s", out; if (n > 5) printf ",+%d more", n - 5 }'
 }
 
 # THE ONE PATH FROM A SESSION TO A LAND (wave-20 T8, REQ-1, D1). `spawn-worktree.sh

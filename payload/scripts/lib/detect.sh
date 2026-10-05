@@ -21,7 +21,7 @@
 #   dep:<name> lane=<3a|3b> present=<yes|no|unknown> version=<v|unknown> constraint=<c> verdict=<ok|violation|unknown>
 #   env:todo-tools present=<yes|no>
 #   env:rc-claude-proxy present=<yes|no|stale>
-#   env:zshrc-legacy present=<yes|no>
+#   env:zshrc-legacy present=<yes|no|malformed|not-a-file>
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
 #   env:auto-memory override=<file|none|unknown> dir=<path|none> files=<n>
@@ -409,10 +409,30 @@ detect_working_principles() {
 # Auto mode is the default now and the safer equivalent, so the block is
 # retired footprint that setup removes. The markers are matched verbatim,
 # box-drawing dashes included — they are what makes the block addressable.
+# remove.sh's standalone door carries its own copy of the pair (`RM_ALIAS_*`),
+# pinned equal to these by tests/rc-item.test.sh.
+BIONIC_ALIAS_START='# ─── bionic:start ───'
+BIONIC_ALIAS_END='# ─── bionic:end ───'
+
+# THE BLOCK'S STATE IS markers.sh's, THE ONE READER (wave-27 T51, review pass 21
+# F1 and F2). This was a substring `grep` for the start marker: a marker quoted in
+# a comment read as a block, and a start with no end read as a block setup's own
+# walk then deleted to the end of the file. Now whole lines only, and the same two
+# faults the live rc block has, read first so neither is mistaken for a block:
+#
+#   yes        — one well-formed block; setup removes it with `markers_strip`
+#   no         — no marker line at all (a quoted marker is no marker)
+#   malformed  — the markers do not pair up (`markers_check`); setup refuses,
+#                doctor names the line and a hand fix
+#   not-a-file — the rc is not a text file bionic can read (`markers_regular`)
 detect_zshrc_legacy_block() {
   local rc present=no
   rc="$(_detect_shell_rc)"
-  if [ -f "$rc" ] && grep -qF '# ─── bionic:start ───' "$rc" 2>/dev/null; then
+  if [ -n "$rc" ] && ! markers_regular "$rc" >/dev/null; then
+    present=not-a-file
+  elif [ -n "$rc" ] && ! markers_check "$rc" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END" >/dev/null; then
+    present=malformed
+  elif [ -n "$rc" ] && markers_get "$rc" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END" >/dev/null; then
     present=yes
   fi
   echo "env:zshrc-legacy present=${present}"
@@ -1982,7 +2002,8 @@ detect_half_uninstalled() {
   esac
 
   if [ "$registered" = "no" ]; then
-    line="$(detect_zshrc_legacy_block)";   [ "$line" = "env:zshrc-legacy present=yes" ] && footprint=yes
+    line="$(detect_zshrc_legacy_block)"
+    case "$line" in *present=yes|*present=malformed) footprint=yes ;; esac
     line="$(detect_env_todo_tools)";       [ "$line" = "env:todo-tools present=yes" ] && footprint=yes
     line="$(detect_legacy_channel_hooks)"
     case "$line" in *"count=0"|*"count=unknown") ;; *) footprint=yes ;; esac
