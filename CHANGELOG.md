@@ -108,7 +108,11 @@ What you will notice:
   two lines for you to copy, and its summary says
   `edit lines A to B of <rc> by hand — bionic's block, changed since bionic wrote it`. Doctor shows
   a neutral row with no route to setup:
-  `– claude() shell proxy  changed  lines A to B of <rc> — edit it by hand`.
+  `– claude() shell proxy  changed  lines A to B of <rc> — edit it by hand`. Remove, on both
+  doors and under `--all`, leaves a changed block too: it asks nothing, keeps the block off
+  `--all`'s page and names it `lines A to B of <rc> are bionic's claude() block, changed since
+  bionic wrote it:`. It takes the block out only when its body is byte for byte one bionic wrote,
+  or empty, and says before it asks that the block holds only bionic's lines.
 - **Each dispatched agent has a scratch directory of its own,**
   `.bionic/tmp/scratch/<session>/<name>/`, named at start. Its start push is one string per file,
   each held under 9,500 characters so the harness never cuts it to a preview.
@@ -239,6 +243,10 @@ Known limits, carried to the next release:
 - The `claude()` block's first line does not help where the block has been moved inside your own
   `if` or function, where `unalias` is itself aliased, or under bash where `claude` is a readonly
   function: the start-up error stays, as it did with the old body.
+- A `claude()` block you changed is removed by no door: it is yours to edit by hand. While an
+  alias named `claude` stands above it, every shell start keeps printing the error until you do.
+- Nothing judges a `git merge` you type by hand into the integration branch. The documented
+  merge comes after `current 8` has asked the judge, and close-out asks it again after any merge.
 - An rc whose every line ends in CRLF is read as holding no block, and setup appends a second one;
   convert the file to LF line ends first. This is older than this release.
 - The verbs only the main session may run are guarded by a reader of the command's text, so a
