@@ -3456,7 +3456,7 @@ section "Section 21: §SCRATCH — each agent is pushed a scratch directory of i
 # not named by the roster name (or the id, with none); an unmakeable directory stops the start or
 # leaves a line naming nothing.
 SC_TAIL=" — nothing outside it is yours to write as scratch."
-sc_line() { pc_ctx terms | tail -1; }
+sc_line() { local c; c="$(pc_ctx terms)"; printf '%s' "${c##*$'\n'}"; }  # the string's last line
 sc_dir() {  # <line> -> the directory it names, without the trailing slash
   case "$1" in "Your scratch directory is "*"/$SC_TAIL") : ;; *) return 0 ;; esac
   local d="${1#Your scratch directory is }"
