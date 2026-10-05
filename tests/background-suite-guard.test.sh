@@ -111,11 +111,23 @@ add_row() {
 REC="$PAYLOAD_HOOKS/execution-recorder.sh"
 BSG_TYPE="bionic:senior-implementor"
 BSG_TUID=0
+# LAUNCHED NOW (wave-27 T38): the start joins only a launch inside the window it can follow, so the
+# launch row carries the moment the dispatch wall would have stamped. `launched=` writes the row
+# alone and `started` drives the start alone, for a case that needs them apart.
+launched() {  # <repo> <key=value>... — the launch row the dispatch wall writes, nothing else
+  local repo="$1"; shift
+  BSG_TUID=$((BSG_TUID + 1))
+  add_row "$repo" status=intended agent_id= "subagent_type=$BSG_TYPE" "tool_use_id=toolu_01bsgdisp$BSG_TUID" \
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$@"
+}
 dispatched() {
   local repo="$1" aid="$2"; shift 2
-  BSG_TUID=$((BSG_TUID + 1))
-  add_row "$repo" status=intended agent_id= "subagent_type=$BSG_TYPE" "tool_use_id=toolu_01bsgdisp$BSG_TUID" "$@"
-  jq -n --arg s "$SID" --arg c "$repo" --arg a "$aid" --arg t "$BSG_TYPE" \
+  launched "$repo" "$@"
+  started "$repo" "$aid"
+}
+started() {  # <repo> <agent id> [agent type] — the agent's own start, through the recorder
+  local repo="$1" aid="$2"
+  jq -n --arg s "$SID" --arg c "$repo" --arg a "$aid" --arg t "${3:-$BSG_TYPE}" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
       prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
       agent_id:$a, agent_type:$t, hook_event_name:"SubagentStart"}' \
@@ -358,7 +370,13 @@ guarded "$R4D" 'bash tests/alpha.test.sh'
 expect_eq "B4d no row for this agent refuses a named suite" "2" "$ST"
 expect_contains "B4d …saying no set is recorded" "no suite set is recorded for this agent" "$ERR"
 expect_contains "B4d …and why: no row carries its id" "no roster row carries your agent id $ACTOR" "$VERR"
-expect_absent "B4d …never another agent's set as its budget" "On the budget: alpha.test.sh" "$VERR"
+# REBUILT SO IT CAN FAIL (wave-27 T38; review pass 8 note 6). It asserted that `On the budget:
+# alpha.test.sh` was absent, and the no-set refusal never prints `On the budget:` at all. The claim
+# is that another agent's row is never this agent's: so the remedy line, read out of the refusal,
+# names THIS agent by its own id, and never the one row on the roster, which is someone else's.
+B4D_FIX=$(printf '%s\n' "$VERR" | grep -F 'widen it: ' | head -1)
+expect_contains "B4d …and the remedy records a set for this agent, by its own id" "amend $ACTOR --suites+ alpha.test.sh" "$B4D_FIX"
+expect_absent "B4d …never the other agent's row, whose set is not its budget" "someone-else" "$B4D_FIX"
 guarded "$R4D" 'bash tests/run.sh'
 expect_eq "B4d …and still refuses the full tree" "2" "$ST"
 # A NAME THE HOOK CANNOT EXPAND, from an agent with no set: refused for the missing set.
@@ -372,6 +390,46 @@ expect_eq "B4d control: the other agent's own budgeted suite is admitted" "0" "$
 guarded "$R4D" 'bash tests/gamma.test.sh' "$OTHER"
 expect_eq "B4d control: …and its off-budget suite refused by its own set" "2" "$ST"
 expect_contains "B4d control: …the set its start joined" "alpha.test.sh" "$VERR"
+
+# B4e — AN AGENT ITS START COULD NOT PLACE IS NOT REFUSED FOR LIFE (wave-27 T38; review pass 8 F3).
+# A type that is not a bionic: role is never joined at its start (the recorder takes bionic roles
+# only), so until its launch call returns it has no row, and a foreground call returns when the
+# agent has finished. 1.11.0 let its named suites run unbudgeted; T5 refused them with a remedy
+# that named an act no verb performed. The refusal now says why, and prints an `amend` line for the
+# agent's id. The orchestrator runs that line EXACTLY AS PRINTED, and the suite then runs.
+# fails-when: the reason is missing; the printed line does not run; it runs and the suite is still
+# refused; the set it records reaches past the suite it named.
+R4E=$(mk_repo b4e)
+BSG_TYPE_WAS="$BSG_TYPE"; BSG_TYPE=test-runner
+launched "$R4E" name=w-b4e suites_allowed=alpha.test.sh suites_source=declared files=
+started "$R4E" "$ACTOR"
+BSG_TYPE="$BSG_TYPE_WAS"
+expect_absent "B4e precondition: the start of a test-runner joined no row (no row carries the id)" \
+  "agent_id=$ACTOR" "$(cat "$R4E/.bionic/tmp/roster-$SID.state")"
+expect_contains "B4e precondition: …while its launch row is there" "|name=w-b4e|" "$(cat "$R4E/.bionic/tmp/roster-$SID.state")"
+guarded "$R4E" 'bash tests/alpha.test.sh'
+expect_eq "B4e1 the unplaced agent's suite is refused" "2" "$ST"
+expect_contains "B4e2 …saying no set is recorded" "no suite set is recorded for this agent" "$ERR"
+expect_contains "B4e3 …and why: its type is not a bionic: role, so its start is never placed" \
+  "your type test-runner is not a bionic: role, and its start is never placed on a row" "$VERR"
+B4E_FIX=$(printf '%s\n' "$VERR" | grep -F 'widen it: ' | head -1)
+B4E_CMD="${B4E_FIX#*widen it: }"; B4E_CMD="${B4E_CMD% (main runs it)}"
+expect_contains "B4e4 …printing the amend line for its id" "session-poker.sh amend $ACTOR --suites+ alpha.test.sh --reason" "$B4E_CMD"
+# The agent's transcript is on disk, as it is for any agent that has run a command.
+mkdir -p "$FAKE_HOME/.claude/projects/-sandbox/$SID/subagents"
+: > "$FAKE_HOME/.claude/projects/-sandbox/$SID/subagents/agent-$ACTOR.jsonl"
+B4E_OUT=$( cd "$R4E" && env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
+  BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+  bash -c "$B4E_CMD" 2>&1 ); B4E_RC=$?
+expect_eq "B4e5 the printed line, run as printed by the orchestrator, exits 0" "0" "$B4E_RC"
+expect_contains "B4e6 …saying it recorded the set for that id" "poker: amended — $ACTOR" "$B4E_OUT"
+guarded "$R4E" 'bash tests/alpha.test.sh'
+expect_eq "B4e7 …and the suite it named now runs" "0" "$ST"
+expect_nonempty "B4e8 …wrapped in the booking shim" "$WRAP"
+guarded "$R4E" 'bash tests/gamma.test.sh'
+expect_eq "B4e9 a suite it did not name is still refused" "2" "$ST"
+expect_contains "B4e10 …against the set it recorded" "alpha.test.sh" "$VERR"
+expect_contains "B4e11 …and its remedy names the same id" "amend $ACTOR --suites+ gamma.test.sh" "$VERR"
 
 section "B5 — the LAST row carrying this id wins"
 # One dispatch becomes several rows: the launch row, hooks/execution-recorder.sh's
