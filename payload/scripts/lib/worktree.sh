@@ -625,7 +625,7 @@ _wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrive
 worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
   local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
-  local pre pre_ref was said held now_ref nl='
+  local pre pre_ref was said held now_ref check_cmd check_out nl='
 '
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
@@ -706,6 +706,25 @@ worktree_land() {  # <worktree path> <onto> -> LANDED | REFUSED
   busy="$(_wt_busy_suite "$root" "$co")" && {
     _wt_refuse "suite-running ${busy}"; return 2
   }
+
+  # THE PROJECT'S DECLARED CHECK (wave-27 T16; D12). When `.bionic/config.yaml` names
+  # `release-check: <command>`, the command runs over this landing's range before anything is
+  # touched: in the task's tree, with BIONIC_CHECK_BASE at the working branch's head and
+  # BIONIC_CHECK_HEAD at the task's head, its words split on blanks with globbing off, as
+  # `impact-command:` is run (proof.sh `_proof_map`). A non-zero exit refuses the landing and
+  # shows the command's output on stderr. With no key nothing runs and nothing prints.
+  check_cmd="$(config_value "$root" release-check "" 2>/dev/null)"
+  if [ -n "$check_cmd" ]; then
+    check_out="$(cd "$wt_abs" 2>/dev/null || exit 1
+      set -f
+      export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head"
+      # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
+      exec $check_cmd </dev/null 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+      [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
+      _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head} — the project's declared release-check (${check_cmd}) fails over this landing's range; fix what it names on ${branch}, re-run its suites, land again"; return 2
+    fi
+  fi
 
   # THE HEAD IS READ AGAIN JUST BEFORE THE MERGE (review 2 F7). Another land onto
   # <onto> may have gone through since the read above; if the head moved, the
