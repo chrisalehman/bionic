@@ -275,12 +275,22 @@ fi
 # run verdict) into ONE fact, its open debts as lib/proof.sh `proof_debts_read` prints them, beside
 # the plan they belong to. The gate reads it only when that is the plan it judges. Only for a call
 # that holds a commit (the word, no fork otherwise), so no other call pays for the read.
+#
+# A PLAN VERB'S DRY COMMIT IS BOUND TO A COPY of the plan (wave-27 T76; review pass 60 P0-1): the
+# copy keeps `BIONIC_DEBTS_PLAN`, the plan the gate judges, and the record is the one of the plan the
+# copy was made from, which the verb wrote into its marker as `dry_of=` (lib/proof.sh
+# `proof_debt_origin`, which honours it for a plan verb's session and copy alone). So a dry commit
+# and a real commit of the same plan text at the same step get the same answer from the debt arm.
 BIONIC_DEBTS_PLAN=""; BIONIC_DEBTS_OPEN=""
 case "$COMMAND" in
   *commit*)
     BIONIC_DEBTS_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_DEBTS_PLAN=""
-    if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_debt_record >/dev/null 2>&1 \
-       && _bw_rec="$(proof_debt_record "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT")"; then
+    _bw_from="$BIONIC_DEBTS_PLAN"
+    if [ -n "$_bw_from" ] && declare -F proof_debt_origin >/dev/null 2>&1; then
+      _bw_from="$(proof_debt_origin "$BIONIC_SID" "$(engaged_marker_path "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" "$_bw_from")"
+    fi
+    if [ -n "$_bw_from" ] && declare -F proof_debt_record >/dev/null 2>&1 \
+       && _bw_rec="$(proof_debt_record "$_bw_from" "$BIONIC_ROOT")"; then
       BIONIC_DEBTS_OPEN="$(proof_debts_read "$_bw_rec")"
     fi ;;
 esac
