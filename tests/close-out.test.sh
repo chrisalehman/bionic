@@ -277,6 +277,11 @@ plant_facts() {
   case "$p" in "$SANDBOX"/*) : ;; *) echo "plant_facts: refusing outside the sandbox: '$p'" >&2; return 1 ;; esac
   wb="$(sed -n 's/^working-branch: //p' "$plan" | head -1)"
   h="$(fixture_git "$p" rev-parse --verify -q "refs/heads/${wb}^{commit}" 2>/dev/null)" || return 0
+  # A REAL BASE (the T45 ruling): the judge deals no reading on a plan with no base-sha naming a
+  # commit, so the run's base, the root commit the working branch grew from, is written first.
+  /usr/bin/grep -q '^base-sha:' "$plan" || {
+    sed "s/^working-branch: .*/&\\
+base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)/" "$plan" > "$plan.b" && mv "$plan.b" "$plan"; }
   fixture_git "$p" worktree list --porcelain 2>/dev/null | grep -qxF "branch refs/heads/$wb" \
     || fixture_git "$p" worktree add -q "$p-wave" "$wb" >/dev/null 2>&1
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
@@ -1326,6 +1331,8 @@ expect_eq "E2E0: precondition: the fixture is at current: 7 with no Step 8 block
   "$(sed -n 's/^current: //p' "$PE/$PLAN_REL")/$(step_lines "$PE/$PLAN_REL" 9)"
 expect_eq "E2E0b: precondition: it carries the six facts the tested wave run owes" "6" \
   "$(/usr/bin/grep -c '^proved: ' "$PE/$PLAN_REL" | tr -d ' ')"
+expect_eq "E2E0c: precondition: …and a base-sha naming a commit at or before the readings' head" "yes" \
+  "$(b="$(sed -n 's/^base-sha: //p' "$PE/$PLAN_REL")"; [ -n "$b" ] && fixture_git "$PE" merge-base --is-ancestor "$b" wave/01-fixture && echo yes || echo no)"
 ( in_fixture "$PE" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PE" "$E2E_SID" "$PE/$PLAN_REL" )
 ( in_fixture "$PE" || exit 9
   HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \

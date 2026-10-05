@@ -9180,7 +9180,7 @@ s52_plan() {  # <repo> <T6 status> -> the plan path
     "| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-x | — | pending | |")"
   awk -v h="$h" -v b="$b" '
     /^governing-skill: / && !fm { print; print "rigor: tested"; print "scale: wave"; fm = 1; next }
-    /^current: / { print "current: 8"; print "working-branch: " b; next }
+    /^current: / { print "current: 8"; print "working-branch: " b; print "base-sha: " h; next }
     { print }
     /^approved-by: / { print "proved: kind=floor head=" h " at=2026-10-04T11:00:00Z evidence=record/floor.log"
                        print "proved: kind=review head=" h " at=2026-10-04T11:05:00Z evidence=record/review.md" }' \
@@ -9322,7 +9322,11 @@ printf 'one\n' > "$R54/lib/one.sh"; printf 'every\n' > "$R54/lib/every.sh"
 printf '.bionic/\n.worktrees/\n' > "$R54/.gitignore"
 ( cd "$R54" && git add .gitignore tests payload lib && git commit -qm base ) >/dev/null 2>&1
 S54_BASE="$(git -C "$R54" rev-parse HEAD 2>/dev/null)"
-P54="$(s42_plan "$R54" 4)"
+# A REAL BASE (wave-27 T14, on the T45 ruling): the judge deals no reading on a plan whose
+# base-sha names no commit, so the Step-4 block names the commit the working branch is cut from.
+P54="$(s42_plan "$R54" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${S54_BASE}
+  branch: wave/01-fixture")"
 awk '
   /^current: / && !wb { print; print "working-branch: wave/01-fixture"; wb = 1; next }
   /^- T5: / { print; print "- T3: integrate at Step 8"; next }
@@ -10158,7 +10162,8 @@ s61_reset; s61_rigor bogus; s61_owed "$S61_C2"
 s42_snap "$R61" "$P61"
 poke "$R61" current 8
 s42_unchanged "61e a plan whose rigor the dealing does not know (the judge's rc 2)" 1 "$P61"
-expect_contains "61e2 …saying its rigor and scale could not be read" "the plan's rigor and scale could not be read to deal them (rigor: bogus, scale: wave)" "$OUT"
+expect_contains "61e2 …saying the judge could not deal the plan" "the judge could not deal this plan (facts_state exit 2)" "$OUT"
+expect_contains "61e3 …and printing what the judge said, whatever the reason" "declares no rigor and scale the dealing knows (rigor: bogus, scale: wave)" "$OUT"
 s61_reset; s61_owed "$S61_C2"
 s42_snap "$R61" "$P61"
 poke "$R61" current 6
