@@ -77,9 +77,24 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    **The first thing a sitting checks** is that this worked: a reader dispatched there holds
    the pushed files, and its role is the copy's, not the installed plugin's. A sitting whose
    readers held no checks files is not recorded.
-   - **Loading the built roles.** *Written by wave-27 T22, once T15 lands: how the session
-     gets the roles this checkout builds rather than the installed ones, and how that is
-     shown.*
+   - **Loading the built roles.** `--plugin-dir "$PLUGIN"` loads the copy's roles and hooks in
+     place of the installed plugin's for that session. The first sitting (wave-27 T22) ran each
+     session headless, `cd <dest> && claude -p --plugin-dir "$PLUGIN" --output-format json
+     "<prompt>"`, with the prompt opening with `/bionic:canonical-sdlc` and no flag or setting
+     that widens what a session may do. The slash command is all the engagement needs
+     (`hooks/engage.sh` writes `<dest>/.bionic/tmp/engaged-<session>.state`). After it the
+     session only dispatches: the dispatch wall writes each reader's row, with its
+     `questions=`, to `<dest>/.bionic/tmp/roster-<session>.state`, and the start push reads
+     that row. To show the roles are the copy's, ask the session before its first dispatch to
+     quote the Agent tool's description of `bionic:critic` and `bionic:reviewer`. Each must be
+     listed once, with the `description:` line of `$PLUGIN/agents/<role>.md`. (At the first
+     sitting the installed 1.11.0 plugin had no reviewer and another critic description.) Then
+     read each reader's transcript,
+     `~/.claude/projects/<dest, each / and . written ->/<session>/subagents/agent-<id>.jsonl`.
+     Its `.meta.json` names the `agentType`. Its `hook_success` attachments name each
+     `SubagentStart` command that ran: one bare `execution-recorder.sh`, and
+     `execution-recorder.sh <question>` for each question dealt, a registration only the copy's
+     `hooks/hooks.json` carries.
 4. **Dispatch the readers** in that session, through the ordinary dispatch path, one dispatch
    per sample and question:
    - the role the audited dealing gives the sample's question (`facts_owed audited wave` in
@@ -124,8 +139,21 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    unchanged at its path. No reader can dispatch a test-runner, so the evidence reader's
    revert-and-watch cannot be done: it will say so, likely as UNVERIFIABLE. That is a `flag`,
    which meets `clean` and does not change a defect sample's `fail`.
-   - **Checking what the readers held.** *Written by wave-27 T22, once T15 lands: how the
-     checks files pushed to each reader at start are shown to equal the hashes from step 1.*
+   - **Checking what the readers held.** In the same transcript, the `hook_additional_context`
+     attachment of `SubagentStart` holds every string pushed at start, as its `content` list.
+     One string is the terms (`context/survival.md` and the scratch line), and one per question
+     dealt opens with `bionic checks: <q>`, followed by that checks file's bytes. Drop that
+     first line and hash the rest; the hash must equal step 1's hash for that file:
+     `jq -j 'select(.attachment.type=="hook_additional_context") | .attachment.content[<k>]'
+     <agent>.jsonl | tail -n +2 | shasum -a 256`. A reader also holds no checks string for a
+     question it was not dealt. At the first sitting each of the twelve readers held exactly
+     the files dealt it, each whole. The model receives each string raw: the reviewer's
+     `structure` string is 4,497 characters, and its hook printed it as 4,627 characters of
+     JSON. The strings of one start are joined into one system `<system-reminder>` (10,978
+     characters for a reviewer, 17,565 for the one-mind critic), and none was cut to a
+     preview. The harness's 10,000-character limit is therefore applied to each hook's string,
+     not to the joined text. Whether that limit counts the raw string or its JSON form is not
+     shown, because every string here is under 10,000 either way.
 5. **Score each record** on the question the sample's key names, and only that record: on a
    defect sample, the record at that question's path from the role dealt it and the one from
    the one-mind critic; on `clean`, each of the three roles' records on its own question and the
@@ -175,11 +203,6 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
 8. **A miss is sent back.** A reader that misses a sample sends its checks file to a fix row.
    The sitting is recorded as it went, so the suite is red from then until the fixed file is
    sat again and that sitting is appended below it.
-
-The first sitting is owed by wave-27 T22. Until it is recorded, `sittings.md` holds the one line
-`first-sitting: owed by wave-27 T22`, and the suite passes on a single row labelled
-"RE-AUTHORED BY T22". The sitting that replaces that line also removes that row's arm from
-`tests/reader-exam.test.sh`.
 
 ## Adding a sample
 
