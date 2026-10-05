@@ -1061,4 +1061,20 @@ else
      "${BED_NOISY_MS:-no timing} ms (quiet root ${BED_QUIET_MS:-no timing} ms) — the library walk still enters .bionic"
 fi
 
+# ── §SAMPLE-LIB a reader-exam sample's lib/ is not a library directory ───────
+# WHY (wave-27 T36, review pass 7 note 8). The reader exam's samples are small made-up
+# projects under tests/reader-exam/samples/<name>/tree/, each with its own lib/. Nothing
+# bionic runs sources them, but the `$BIONIC_LIB` candidate walk offered every lib/ in the
+# tree, so a sample library sharing a basename with a real one became a `source` edge of
+# every suite whose hook sources the real one. The fixture is the bed root with no beds and
+# one sample whose lib/l7.sh shares the real payload/scripts/lib/l7.sh's name.
+SAMPLE_ROOT="$TMP/sample-lib"
+mk_bed_root "$SAMPLE_ROOT" 0
+mkdir -p "$SAMPLE_ROOT/tests/reader-exam/samples/s/tree/lib"
+printf '#!/bin/bash\necho sample\n' >"$SAMPLE_ROOT/tests/reader-exam/samples/s/tree/lib/l7.sh"
+expect_contains "sample-lib: the real payload/scripts/lib/l7.sh still reaches s7 through h7" \
+  "s7.test.sh" "$(BIONIC_IMPACT_CACHE_DIR="" oneline "$SAMPLE_ROOT" payload/scripts/lib/l7.sh)"
+expect_eq "sample-lib: a sample's lib/l7.sh, same name, pulls no suite" \
+  "" "$(BIONIC_IMPACT_CACHE_DIR="" suites "$SAMPLE_ROOT" tests/reader-exam/samples/s/tree/lib/l7.sh)"
+
 finish
