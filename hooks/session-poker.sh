@@ -2932,10 +2932,17 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 # `amend <agent id>` for an id no named row carries: see the verb. The row is the budget wall's
 # alone. Its name is the id, so it shadows no other name's latest row; `status=unplaced` is no
 # status a reader of live rows counts; the waiver keeps the verdict from judging a deliverable
-# nobody owes. The additions are judged by the dispatch grammar, as every amend's are, with no
-# role (none is known). The set is the union of the id's current one and the additions.
+# nobody owes. The additions are judged by the dispatch grammar, as every amend's are. The set is
+# the union of the id's current one and the additions.
+# A READER IS HELD TO THREE (wave-27 T74; review pass 53 B1). The role is the one the agent's start
+# recorded: the `role=` of the id's last `start-unchecked/v1|event=start|` line, the line the tick's
+# NOTIFY is built from. A reader there (auditor, critic, reviewer: `dp_is_reader`) is judged with
+# its role and `Questions: evidence`, so the dispatch wall's own count in brief.sh holds it to three
+# in total, suites and runs together: the door cannot know which candidate launch was the agent's,
+# so it takes the strict side. A start that recorded no role is judged with none, as before.
 amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the verb's exit status
   local aid="$1" prior="$2" tr sub old_sa="" old_runs="" decl lift rc=0 sa new_runs r row pick
+  local role="" span us
   case "$aid" in
     ''|*[!A-Za-z0-9._@-]*)
       die "REFUSED — no row is named $(clean "$aid"), and it is not an agent id; nothing was written."
@@ -2967,12 +2974,21 @@ amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the ver
   fi
   [ "$old_sa" = none ] && old_sa=""
   decl="$(poker_union ' ' "$old_sa" "$(printf '%s' "$AMEND_SUITES" | tr '\n,' '  ')")"
-  lift="$(lift_contract_fields "$(poker_brief_span "" "$decl" "$old_runs" "$AMEND_RUNS")" "")"
+  us="$(grep -F 'start-unchecked/v1|event=start|' "$ROSTER_FILE" 2>/dev/null | grep -F "|agent_id=${aid}|" | tail -1)"
+  [ -n "$us" ] && role="$(clean "$(line_field "$us" role)")"
+  span="$(poker_brief_span "" "$decl" "$old_runs" "$AMEND_RUNS")"
+  dp_is_reader "$role" && span="${span}"$'\n'"Questions: evidence"
+  lift="$(lift_contract_fields "$span" "$role")"
   POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
-  brief_validate_fields "$lift" "" "$REPO_REAL" poker_brief_sink || rc=$?
+  brief_validate_fields "$lift" "$role" "$REPO_REAL" poker_brief_sink || rc=$?
   if [ "$rc" -ne 0 ]; then
     die "REFUSED — a dispatch carrying these additions for $aid would be refused; nothing was written:"
     printf '%s' "$POKER_BRIEF_WORDS" >&2
+    case "$POKER_BRIEF_FACTS" in
+      *-run\ cap*) dp_is_reader "$role" \
+        && die "A reader its start did not place is held to three in all: stop it and dispatch it again." \
+        && die "($aid started as $role; the NOTIFY line asks the same.)" ;;
+    esac
     return 1
   fi
   sa="${BRIEF_SUITES_ALLOWED:-$old_sa}"
@@ -5380,9 +5396,11 @@ EOF
   # THE VERB ONLY LOWERS (wave-27 T37; review pass 42 N2, A-orch-112). It takes a reply nothing can
   # verify, so it must not be a way for a model to raise its own cap: a value above the derived
   # ceiling is refused, and raising it is the user's own edit of the plan's `parallel-budget:` line.
+  # (T74 narrowed "the derived ceiling" to the cap in force; see below.)
   # It goes through the plan transaction every plan verb takes. REFUSED: a value that is not a
-  # whole number, or 0 (1); one above the derived ceiling (1); a reply with a line break (1); a
-  # plan with no budget line to cap (1).
+  # whole number, or 0 (1); one above the cap in force (1); a reply with a line break (1); a
+  # plan with no budget line to cap, or a `writers=`/`derived=` there that is not 1 to 4 digits (1).
+  # The cap in force asked again is the plan transaction's no-op: "already reads so" (0).
   budget)
     case "$BG_N" in
       ''|*[!0-9]*)
@@ -5404,20 +5422,44 @@ EOF
         exit 1 ;;
     esac
     plan_verb_open budget
-    BG_HAVE="$(budget_field "$(plan_budget_line "$PV_PLAN")" writers)"
+    # THE CAP IN FORCE IS THE PLAN'S OWN (wave-27 T74; review pass 53 N4 ruled, A-orch-145). "At or
+    # below the ceiling the machine derived" let a reply undo the user's 3 back up to the probe's 8.
+    # The verb now records n only at or below the cap the plan states NOW: the `parallel-budget:`
+    # line's `writers=`, the one value every reader of the ceiling reads, which the verb's own
+    # override writes and a user's hand edit sets. A raise, by any amount, is the user's own edit.
+    # A CEILING THAT IS NOT A NUMBER REFUSES (N5): each `writers=` and `derived=` the verb reads off
+    # the frontmatter is one to four digits, or the verb names the line and records nothing; it
+    # never compares as "not greater". `derived=` is the probe's value, carried as a record.
+    BG_LINES="$(awk '
+      NR == 1 && $0 == "---" { f = 1; next }
+      f && $0 == "---" { exit }
+      f && /^(parallel-budget|budget-override):/ { print }' "$PV_PLAN")"
+    BG_HAVE=""; BG_DERIVED=""
+    for BG_KF in parallel-budget:writers budget-override:derived; do
+      BG_K="${BG_KF%%:*}"; BG_F="${BG_KF#*:}"
+      BG_L="$(printf '%s\n' "$BG_LINES" | grep -m1 "^${BG_K}:")" || BG_L=""
+      [ -n "$BG_L" ] || continue
+      BG_S=" ${BG_L#*:} "; BG_S="${BG_S//$'\t'/ }"
+      case "$BG_S" in
+        *" ${BG_F}="*) BG_V="${BG_S#* "${BG_F}"=}"; BG_V="${BG_V%% *}" ;;
+        *) continue ;;
+      esac
+      case "$BG_V" in
+        [0-9]|[0-9][0-9]|[0-9][0-9][0-9]|[0-9][0-9][0-9][0-9]) : ;;
+        *)
+          die "REFUSED — the plan's ${BG_K}: line holds a ${BG_F}= that is not one to four digits."
+          die "Nothing was recorded; the plan is unchanged. The line: $(clean "$BG_L" | cut -c1-160) (in $PV_PLAN)"
+          exit 1 ;;
+      esac
+      if [ "$BG_F" = writers ]; then BG_HAVE=$((10#$BG_V)); else BG_DERIVED=$((10#$BG_V)); fi
+    done
     if [ -z "$BG_HAVE" ]; then
       die "REFUSED — $PV_PLAN carries no parallel-budget: writers=<n> in its frontmatter to cap; Step 0 writes it. The plan is unchanged."
       exit 1
     fi
-    BG_DERIVED="$(awk '
-      NR == 1 && $0 == "---" { f = 1; next }
-      f && $0 == "---" { exit }
-      f && /^budget-override:/ {
-        for (i = 2; i <= NF; i++) if ($i ~ /^derived=[0-9]+$/) { print substr($i, 9); exit }
-      }' "$PV_PLAN")"
     [ -n "$BG_DERIVED" ] || BG_DERIVED="$BG_HAVE"
-    if [ "$BG_N" -gt "$BG_DERIVED" ] 2>/dev/null; then
-      die "REFUSED — writers=$BG_N is above the derived ceiling of $BG_DERIVED: budget only lowers it."
+    if [ "$BG_N" -gt "$BG_HAVE" ]; then
+      die "REFUSED — writers=$BG_N is above the cap in force ($BG_HAVE): budget only lowers it."
       die "Raising it is the user's own edit of the plan's parallel-budget: line in $PV_PLAN; the plan is unchanged."
       exit 1
     fi
