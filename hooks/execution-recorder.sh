@@ -944,13 +944,40 @@ if [ -n "$IS_START" ]; then
   # reader's checks are its question registrations' strings, never this one's.
   TERMS_DELIVERED=""
   TERMS_OWED=""
+  # ---- BEGIN scratch space per agent (wave-27 T30 part two; REQ-13, D22) ----
+  # The terms string closes with one line naming `<project root>/.bionic/tmp/scratch/<session>/<roster
+  # name>/`, made here, as the agent's own scratch directory. `TERMS_NAME` is the joined row's name,
+  # set where a row is found; with none the directory is named by the agent id. The line counts
+  # toward the cap like the rest of the string. A directory that cannot be made, or a name that
+  # is not one path segment, is logged and the line left out. The agent starts either way. The
+  # symlink tests are the state directory's own (A2/A3 above): a hostile repo's link is not
+  # followed out of the tree.
+  TERMS_NAME=""
+  scratch_line() {  # -> the scratch line, its directory made; nothing when it cannot be
+    local _sl_leaf="${TERMS_NAME:-$(sanitize "$START_ID" 200)}" _sl_dir
+    _sl_dir="$STATE_DIR/scratch/$BIONIC_SID/$_sl_leaf"
+    case "$_sl_leaf" in
+      ''|.|..|*/*)
+        echo "execution-recorder: [$_sl_leaf] is not one directory name — no scratch directory pushed to agent $START_ID" >&2
+        return 0 ;;
+    esac
+    if [ -L "$STATE_DIR/scratch" ] || [ -L "$STATE_DIR/scratch/$BIONIC_SID" ] || [ -L "$_sl_dir" ] \
+       || ! mkdir -p "$_sl_dir" 2>/dev/null || [ ! -d "$_sl_dir" ]; then
+      echo "execution-recorder: scratch directory $_sl_dir could not be made — the scratch line is left out" >&2
+      return 0
+    fi
+    printf 'Your scratch directory is %s/ — nothing outside it is yours to write as scratch.\n' "$_sl_dir"
+  }
+  # ---- END scratch space per agent ----
   deliver_terms() {
-    local _dt_f="$START_CONTEXT_DIR/survival.md"
+    local _dt_f="$START_CONTEXT_DIR/survival.md" _dt_line
     if [ ! -r "$_dt_f" ]; then
       echo "execution-recorder: survival terms not found at $_dt_f — printing nothing" >&2
       return 0
     fi
-    push_string "$_dt_f" < "$_dt_f" && TERMS_DELIVERED=1
+    _dt_line=$(scratch_line)
+    { cat "$_dt_f"; [ -z "$_dt_line" ] || printf '%s\n' "$_dt_line"; } \
+      | push_string "$_dt_f" && TERMS_DELIVERED=1
   }
   case "$(sanitize "$START_TYPE" 200)" in
     bionic:*) TERMS_OWED=1 ;;
@@ -1073,6 +1100,8 @@ if [ -n "$IS_START" ]; then
         if (f ~ /^status=/) f = "status=duplicate-start"
         printf "%s%s", (NR > 1 ? "|" : ""), f }
       END { printf "\n" }' >> "$ROSTER_FILE" 2>/dev/null
+    # The copy's terms (the EXIT trap) name the scratch directory the first start was given (T30).
+    TERMS_NAME=$(line_field "$DUP_PRIOR" name)
     exit 0
   fi
 
@@ -1218,6 +1247,7 @@ if [ -n "$IS_START" ]; then
   case "$(line_field "$ROW" subagent_type)" in
     bionic:*) TERMS_OWED=1 ;;
   esac
+  TERMS_NAME=$(line_field "$ROW" name)
   [ -n "$TERMS_OWED" ] && [ -z "$TERMS_DELIVERED" ] && deliver_terms
   TERMS_AT=""
   [ -n "$TERMS_DELIVERED" ] && TERMS_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
