@@ -11850,4 +11850,52 @@ expect_eq "67d6 …and no second unplaced row was written" "1" \
   "$(/usr/bin/grep -c "|status=unplaced|.*|name=$S67P_ID|" "$(roster_of "$R67P")" | tr -d ' ')"
 unset CLAUDE_CONFIG_DIR
 
+# §AMEND-CAP (left open by T49; A-orch-96). The amend door counted the added runs with no
+# `Questions:` line, so a critic or reviewer holding `evidence` got the writer's cap of 200. An
+# amend on a row whose `questions=` holds `evidence` is now held to the dispatch wall's cap of
+# three, counted over the row's runs after the amend, housekeeping excepted, and a fourth is
+# refused naming the cap. The rows are the dispatch wall's shape (`roster_row_fixture`). The
+# fourth hidden as `rm -rf x & pytest` reads T57's construction through lib/brief.sh: until T57
+# is on this head that row is red for that reason alone.
+# fails-when: a fourth run is recorded on an evidence reader's row, or a reader not dealt
+# `evidence`, or a writer, is refused a fourth.
+R67Q="$(make_repo s67-amend-cap)"; new_roster "$R67Q"
+s67_reader() {  # <repo> <name> <type> <questions or ""> — a live row with two runs declared
+  roster_row_fixture status=identified "session=$SID" "name=$2" "agent_id=a67-$2-0000000000001" \
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "subagent_type=$3" "tool_use_id=toolu_$2" \
+    files= suites_allowed=none suites_source=declared 're_executes=`pytest tests/a` `pytest tests/b`' \
+    ${4:+"questions=$4"} >> "$(roster_of "$1")"
+}
+s67_runs() {  # <repo> <name> -> the marked runs on the name's last row that are not housekeeping
+  s30_field "$(grep -F "|name=$2|" "$(roster_of "$1")" | tail -1)" re_executes \
+    | awk -F'`' '{ for (i = 2; i <= NF; i += 2) if ($i != "" && $i !~ /^(rm|rmdir|mkdir|touch|cp|mv) /) n++ } END { print n + 0 }'
+}
+s67_sum() { cksum < "$(roster_of "$1")"; }
+require_helpers s67_reader s67_runs s67_sum
+s67_reader "$R67Q" crit bionic:critic evidence
+s67_reader "$R67Q" rev bionic:reviewer adversarial
+s67_reader "$R67Q" wri bionic:implementor ""
+expect_eq "67e0 precondition: each row declares two counted runs" "2 2 2" \
+  "$(s67_runs "$R67Q" crit) $(s67_runs "$R67Q" rev) $(s67_runs "$R67Q" wri)"
+poke "$R67Q" amend crit --reexec+ 'pytest tests/c' --reason 'a third'
+expect_eq "67e1 §AMEND-CAP a tested critic dealt evidence amended to a third run: admitted (exit 0)" "0" "$RC"
+expect_eq "67e2 …and the row holds three" "3" "$(s67_runs "$R67Q" crit)"
+S67Q_SUM="$(s67_sum "$R67Q")"
+poke "$R67Q" amend crit --reexec+ 'pytest tests/d' --reason 'a fourth'
+expect_eq "67e3 …a fourth is refused (exit 1)" "1" "$RC"
+expect_contains "67e4 …naming the cap" "three" "$OUT"
+expect_eq "67e5 …and nothing is written" "$S67Q_SUM" "$(s67_sum "$R67Q")"
+poke "$R67Q" amend crit --reexec+ 'rm -rf build' --reason 'a cleanup'
+expect_eq "67e6 a housekeeping command beside the three is free (exit 0)" "0" "$RC"
+S67Q_SUM="$(s67_sum "$R67Q")"
+poke "$R67Q" amend crit --reexec+ 'rm -rf x & pytest' --reason 'a run behind &'
+expect_eq "67e7 a fourth hidden as rm -rf x & pytest is refused (exit 1; T57's construction)" "1" "$RC"
+expect_eq "67e8 …and nothing is written" "$S67Q_SUM" "$(s67_sum "$R67Q")"
+poke "$R67Q" amend rev --reexec+ 'pytest tests/c' --reexec+ 'pytest tests/d' --reason 'two more'
+expect_eq "67e9 a reviewer not dealt evidence takes a fourth, as today (exit 0)" "0" "$RC"
+expect_eq "67e10 …and holds four" "4" "$(s67_runs "$R67Q" rev)"
+poke "$R67Q" amend wri --reexec+ 'pytest tests/c' --reexec+ 'pytest tests/d' --reason 'two more'
+expect_eq "67e11 a writer's row takes a fourth, as today (exit 0)" "0" "$RC"
+expect_eq "67e12 …and holds four" "4" "$(s67_runs "$R67Q" wri)"
+
 finish
