@@ -2252,6 +2252,15 @@ for _bad in nonsense proof:bogus foo:bar 'lib/a b.sh'; do
   expect_eq "READS.13b …and the row is not ready on it: '$_bad'" "no" \
     "$(has_line "$(call units_ready "$SANDBOX/reads-bad.md" 4)" T5)"
 done
+# proof:check (wave-27 T16; D12): the release's declared check is a fact the validator admits as a
+# read, and the row waits on it until a `proved: kind=check` line exists.
+sed "s#| lib/old.sh, approval:plan |#| lib/old.sh, proof:check |#" "$SANDBOX/reads.md" > "$SANDBOX/reads-check.md"
+expect_eq "READS.13c proof:check is a read the validator admits" "0" "$(call_rc units_validate "$SANDBOX/reads-check.md")"
+expect_eq "READS.13e …and T5 waits on it while no check fact exists" "yes" \
+  "$(has_line "$(call units_waiting "$SANDBOX/reads-check.md" 4)" "T5${TAB}proof:check${TAB}-${TAB}-")"
+awk '{ print } /^approved-by: / { print "proved: kind=check head=0123456789abcdef0123456789abcdef01234567 at=2026-10-04T00:00:00Z evidence=record/w/release-check.log" }' \
+  "$SANDBOX/reads-check.md" > "$SANDBOX/reads-checked.md"
+expect_eq "READS.13f …and is ready once one does" "yes" "$(has_line "$(call units_ready "$SANDBOX/reads-checked.md" 4)" T5)"
 
 # A TABLE WITHOUT reads STILL PARSES, and a deps id still means "wait for that task to land".
 # Nothing defaults there: a verify row with an empty deps cell waits for nobody, as before.
@@ -3200,8 +3209,10 @@ expect_eq "HARDEN.F2b …and integrate waits on proof:floor, naming the open ver
 sed 's/record\/w\/floor2.txt |  | pending |/record\/w\/floor2.txt |  | landed |/' \
   "$SANDBOX/f2.md" > "$SANDBOX/f2-landed.md"
 floor_at_head "$SANDBOX/f2-landed.md" "$FLOOR_REPO/f2-landed.md"
+# REWRITTEN BY wave-27 T14 (D3): integrate's proof:review is met by the facts state the tick hands
+# in, not by the review line; this row is about the floor, so the review half is handed in covered.
 expect_eq "HARDEN.F2c once the re-floor lands, the proof line satisfies integrate (the proof at the head)" "yes" \
-  "$(has_line "$(call units_ready "$FLOOR_REPO/f2-landed.md" 8)" T2)"
+  "$(has_line "$(UNITS_FACTS_STATE=covered call units_ready "$FLOOR_REPO/f2-landed.md" 8)" T2)"
 
 # F3 — A READ CYCLE IS REFUSED AT VALIDATION, NAMING THE ROWS ON IT. Through two path reads, or
 # one path read closed by an unmergeable hold. A row that merely waits behind the cycle is not
@@ -3702,8 +3713,10 @@ edges_plan "$SANDBOX/e4.md" 8 "$E_PROOFS" "$E_RDS" \
   '| T3 | 8 | integrate | merge | — | — | 10 | REQ-1 | — | — | — | pending | — |' \
   '| T4 | 9 | close | close | — | — | 10 | REQ-1 | — | — | — | pending | — |'
 floor_at_head "$SANDBOX/e4.md" "$FLOOR_REPO/e4.md"
+# REWRITTEN BY wave-27 T14 (D3): the facts state handed in covered, as the tick hands it when the
+# readings hold at the head (§INTEGRATE-JUDGE below drives the other answers).
 expect_eq "RUN-EDGES.F4a at the head both proofs name, integrate is ready (the probe read nothing)" "T3" \
-  "$(live_call "$E_H" units_ready "$FLOOR_REPO/e4.md" 8)"
+  "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e4.md" 8)"
 E4W="$(live_call "$E_H" units_waiting "$SANDBOX/e4.md" 8)"
 expect_eq "RUN-EDGES.F4b …the idle review row is no writer of proof:review" "no" \
   "$(has_line "$E4W" "T3${TAB}proof:review${TAB}T2${TAB}pending")"
@@ -3729,8 +3742,8 @@ expect_eq "RUN-EDGES.F5b …integrate waits on head, written by the build" "yes"
   "$(has_line "$(live_call "$E_H" units_waiting "$SANDBOX/e5.md" 8)" "T3${TAB}head${TAB}T6${TAB}active")"
 sed '/^| T6 /s/| active | — |$/| landed | — |/' "$SANDBOX/e5.md" > "$SANDBOX/e5-landed.md"
 floor_at_head "$SANDBOX/e5-landed.md" "$FLOOR_REPO/e5-landed.md"
-expect_eq "RUN-EDGES.F5c the build landed and both proofs at the head: integrate is ready" "T3" \
-  "$(live_call "$E_H" units_ready "$FLOOR_REPO/e5-landed.md" 8)"
+expect_eq "RUN-EDGES.F5c the build landed and both proofs at the head: integrate is ready (facts handed in covered, T14)" "T3" \
+  "$(UNITS_FACTS_STATE=covered live_call "$E_H" units_ready "$FLOOR_REPO/e5-landed.md" 8)"
 
 # ============================================================
 section "§FLOOR-STANDS — integrate waits for a full run when the change past the floor proof cannot be bounded (wave-26 T64; REQ-3 AC-3.3, AC-3.4)"
@@ -3798,6 +3811,10 @@ fs_count() { awk 'END { print NR + 0 }' "$FS_COUNT" 2>/dev/null; }
 fs_why() {  # -> integrate's proof:floor wait reason, or nothing
   call units_waiting "$FS_PLAN" 8 | awk -F'\t' '$1 == "T3" && index($2, "proof:floor") == 1 { print $2 }'
 }
+# THE REVIEW HALF IS HANDED IN COVERED (wave-27 T14; D3). integrate's proof:review is met only by
+# the facts state the tick hands in (UNITS_FACTS_STATE); every row here is about the floor, so the
+# state is the one the tick hands when the readings hold. §INTEGRATE-JUDGE drives the others.
+export UNITS_FACTS_STATE=covered
 : > "$FS_COUNT"
 fs_plan 8 pending; fs_prove floor; fs_prove review
 FS_H0="$(fs_git rev-parse HEAD)"
@@ -3919,5 +3936,44 @@ expect_contains "FS.14 a detached checkout: no checkout holds the working branch
   "(no checkout holds the working branch wave/99-fs)" "$(fs_why)"
 fs_git checkout -q wave/99-fs 2>/dev/null
 expect_eq "FS.14b …and back on the branch, the floor proof at its head stands" "T3" "$(call units_ready "$FS_PLAN" 8)"
+
+unset UNITS_FACTS_STATE
+
+# ============================================================
+section "§INTEGRATE-JUDGE — integrate's proof:review is met only by the judge's covered (wave-27 T14; REQ-2 AC-2.3 AC-2.4, D3; A-orch-40)"
+# ============================================================
+# Through T13 the read was met by any `proved: kind=review` line, a `result=fail` reading among
+# them (A-orch-40). The tick now asks lib/proof.sh `facts_state` once and hands the answer in
+# through UNITS_FACTS_STATE, as it hands the floor state in: `covered`, or the owed lines that do
+# not hold. Only `covered` meets the read; anything else is a wait naming the answer, and an answer
+# not handed in (the stop wall, the card, the dispatch wall) is a wait saying so.
+# The plan is §FLOOR-STANDS's, at a head the floor proof names (covered), with one reading of the
+# product's writer whose result is fail.
+fs_plan 8 pending; fs_prove floor
+IJ_H="$(fs_git rev-parse HEAD)"
+out="$(call proof_add_line "$FS_PLAN" "$(call proof_line review "$IJ_H" 2026-10-04T12:00:00Z record/fs/structure.md structure w-read fail piece)")" \
+  && printf '%s\n' "$out" > "$FS_PLAN"
+ij_why() {  # -> integrate's proof:review wait, or nothing
+  awk -F'\t' '$1 == "T3" && index($2, "proof:review") == 1 { print $2 }'
+}
+expect_eq "IJ.0 precondition: the plan's only review line is a result=fail reading" "1" \
+  "$(/usr/bin/grep -c 'kind=review .* result=fail ' "$FS_PLAN" | tr -d ' ')"
+expect_eq "IJ.0b precondition: the floor holds at the head (proof_state covered)" "covered" \
+  "$(call proof_state "$FS_PLAN" "$FS_REPO" | cut -f1)"
+IJ_FAILING="review structure bionic:critic piece failing record/fs/structure.md"
+expect_eq "IJ.1 A-orch-40 a failing reading handed in as the facts state: integrate is NOT ready" "" \
+  "$(UNITS_FACTS_STATE="$IJ_FAILING" call units_ready "$FS_PLAN" 8)"
+expect_eq "IJ.1b …and its wait names the judge's answer" \
+  "proof:review: the facts the run owes do not hold (facts_state): $IJ_FAILING" \
+  "$(UNITS_FACTS_STATE="$IJ_FAILING" call units_waiting "$FS_PLAN" 8 | ij_why)"
+expect_eq "IJ.2 with no facts state handed in, the review line alone does not meet it: integrate waits" "" \
+  "$(call units_ready "$FS_PLAN" 8)"
+expect_eq "IJ.2b …saying the facts are not known here" \
+  "proof:review: the facts the run owes are judged by the tick (facts_state) and are not known here" \
+  "$(call units_waiting "$FS_PLAN" 8 | ij_why)"
+expect_eq "IJ.3 the judge's covered handed in: integrate is ready" "T3" \
+  "$(UNITS_FACTS_STATE=covered call units_ready "$FS_PLAN" 8)"
+expect_eq "IJ.3b …and nothing is waited on for proof:review (the extractor read IJ.1b's line on the same plan)" "" \
+  "$(UNITS_FACTS_STATE=covered call units_waiting "$FS_PLAN" 8 | ij_why)"
 
 finish
