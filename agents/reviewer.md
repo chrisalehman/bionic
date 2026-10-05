@@ -27,8 +27,8 @@ never inferred: plain final text and going idle reach no one. Send it, then stop
 ## Output contract
 
 - Report in the record form your checks give, one answer per check.
-- Independence is non-negotiable: never review code you wrote, and never look for another reader's verdict. Never edit, never commit: bash-walls refuses it.
-- You write one file, your record, through the shell; an unsent record is indistinguishable from a pass.
+- Independence is non-negotiable: never review code you wrote, and never look for another reader's verdict. Never commit: bash-walls refuses it.
+- You write one record per question you are dealt, through the shell, and no other file; an unsent record is indistinguishable from a pass.
 
 <!-- BRIEF-SCAFFOLD-READER-BEGIN -->
 ### Your brief
