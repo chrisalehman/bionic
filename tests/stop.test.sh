@@ -462,7 +462,7 @@ section "7: the real tick's turn, judged by the wall's own ready set (REQ-10 AC-
 # nowhere — and nothing between them would have said so.
 #
 # THE FILL LINE IS THE REAL TICK'S, not a literal. tests/patrol-duties-gate.test.sh drives
-# every arm of the wall against synthesised text, which is right for a suite about the wall
+# every arm of the wall against synthesized text, which is right for a suite about the wall
 # and cannot see a tick that stopped printing the line. So this section RUNS the poker into a
 # fixture wave and feeds the wall exactly what came back — the whole channel, notes, rung
 # report, decision line and all.
@@ -1879,5 +1879,23 @@ rw_digest "$RW_D" step4 2026-09-18T00:00:00Z
 s7_fire "$RW_D" "$RW_TX"
 expect_contains "RW4 a digest older than the turn's tick gives no cause: the refusal is today's" \
   'which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed)' "$(reason_of)"
+
+# THE FIX NAMES WHAT THE WALL COUNTS (wave-27 T74; review pass 53 S1). The wall's predicate is a
+# TaskList call or a write naming the plan; the delete-and-recreate it asked for (TaskUpdate,
+# TaskCreate) is never counted, so the fix read `rebuild it` and dropped the one act that
+# discharges it. Now the fix names TaskList first and the detail keeps "or a plan-ledger write",
+# the fallback where the task tools are absent. The first line keeps to 100 columns.
+# fails-when: a plan-moved refusal's fix leaves out TaskList, or its detail the plan-ledger write.
+rw_first() { reason_of | head -1; }
+require_helpers rw_first
+for rw_cause in step4 grew; do
+  rw_digest "$RW_D" "$rw_cause"
+  s7_fire "$RW_D" "$RW_TX"
+  expect_contains "RW5 ($rw_cause) the first line's fix names TaskList first" \
+    "no task-list refresh since this tick (TaskList, rebuild it, then stop again)" "$(rw_first)"
+  expect_contains "RW5b ($rw_cause) …the detail keeps the plan-ledger write" "or a plan-ledger write" "$(reason_of)"
+  expect_true "RW5c ($rw_cause) …and the first line keeps to 100 columns" \
+    test "$(rw_first | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
+done
 
 finish

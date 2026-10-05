@@ -728,7 +728,7 @@ expect_empty "missing session_id produces no stderr" "$GATE_ERR"
 section "S5 — active wave + no attestation on disk -> AUTO-PROBE, then pass (AC-2 / AC-4)"
 #
 # THE DIRECTION REVERSED IN EPIC-16 WAVE-02 (R5). Through wave-01 this refused and named
-# a command for the operator to run by hand — and the Synthesis field report measured
+# a command for the operator to run by hand — and a field report measured
 # what that cost: five serialized minutes between deciding to dispatch and the agent
 # existing, paid again after every /clear, which re-fires the this-session demand
 # mid-wave although nothing about the machine has changed.
@@ -2211,7 +2211,7 @@ expect_status "AC-3: …recorded declared, because a label yielded it" \
 
 section "S16 — the combined preflight: a missing attestation AUTO-RUNS the probe (epic-16 w2 S5, AC-4)"
 #
-# Synthesis §3, the five serialized minutes between order and spawn: the operator was
+# A field report §3, the five serialized minutes between order and spawn: the operator was
 # refused, ran the probe by hand, retried, and only then dispatched. R5 makes the
 # attestation a FACT the gate takes for itself — the probe is run inline, once, and the
 # dispatch proceeds. Blocking survives in exactly one place on this path: the probe
@@ -2234,7 +2234,7 @@ expect_absent "AC-4: …with no refusal anywhere in it" "BLOCKED" "$GATE_ERR"
 expect_status "AC-4: …the dispatch is journalled exactly once (one invocation, one row)" "1" \
   "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 # The probe roots from the PINNED root, so the record it writes describes the repo the
-# gate is guarding — the Synthesis field case (attestation redone because the root came
+# gate is guarding — the field case (attestation redone because the root came
 # from the shell's working directory) read the other way round.
 # Compared PHYSICALLY on both sides. The sandbox lives under the platform temp dir,
 # which is reached through a symlink on macOS (/var -> /private/var), so a string compare
@@ -3944,7 +3944,7 @@ expect_contains "…by the budget arm, not by the staleness" \
 expect_contains "…counting the row the stale answer could not speak for" \
   "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
 
-# (e) THE REAL ANSWER, byte-verbatim. Everything above is synthesised from the harness's
+# (e) THE REAL ANSWER, byte-verbatim. Everything above is synthesized from the harness's
 # shape; this arm drives the shipped hook against a body captured from this project's own
 # orchestrator session at 2026-09-05T03:07:41.801Z — `s6-stop-resolution` idle beside
 # `s5-dispatch-budget` running, the moment S6 had delivered its report and had not yet
