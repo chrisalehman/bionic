@@ -12,7 +12,7 @@ set +x +v
 # malformed byte becomes U+FFFD) and Unicode case-folded, whatever the caller's locale. The one
 # exception is an entry's own white space (A-orch-91): each run of it inside an entry matches
 # any run of white space holding at most ONE line break (spaces, tabs, CR LF, the Unicode
-# spaces), and after that break one comment leader may stand (`#`s, `//`, `*`, `>`s, `--`,
+# spaces), and after that break one comment leader may stand (`#`s, `//`s, `*`, `>`s, `--`,
 # `;`s); so a name of two words is found where prose, a comment or a commit body wraps between
 # them, and not across a blank line. White space is never optional: the words run together are
 # another entry. The scan runs in the checkout it is started from.
@@ -111,7 +111,7 @@ my @kv = split /\0/, slurp($listf, "the list");
 # an entry is its words, each literal, and between two of them a run of white space holding at
 # most one line break, after which one comment leader may stand; the batch pattern and the
 # attribution pattern are both built from these
-my $ws = qr{\h+|\h*\R\h*(?:(?:#+|//|\*|>+|--|;+)\h*)?};
+my $ws = qr{\h+|\h*\R\h*(?:(?:#+|//+|\*|>+|--|;+)\h*)?};
 my (@num, @fp);
 while (@kv) {
   push @num, shift @kv;
