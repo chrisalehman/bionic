@@ -28,7 +28,7 @@
 # EVERY BODY THIS FILE EMITS IS A CORPUS LINE, VERBATIM. The self line, the ref suffix
 # and every status word come from `live_answer_content`, never from a literal typed here.
 # Only the ENVELOPE around a body — the assistant tool_use entry, the user tool_result
-# entry, an optional trailing prompt entry — is synthesised, because the corpus itself
+# entry, an optional trailing prompt entry — is synthesized, because the corpus itself
 # records only `{ts, tool_use_id, content}` per answer, not a full transcript. Envelope
 # timestamps that do not come from the corpus (the STALE wrapper's trailing prompt) are
 # mechanical scaffolding, not an invented answer.
