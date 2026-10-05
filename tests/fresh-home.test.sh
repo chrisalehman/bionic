@@ -1233,31 +1233,34 @@ expect_no_match "4c setup --all: does not offer to install ccstatusline again" \
   '*install ccstatusline*' "$(cat "$SETUP_OUT_C")"
 
 # ---------------------------------------------------------------------------
-# Group 4d — an edited principles block under --all (wave-27 D16, AC-9.4).
+# Group 4d — an edited principles block is the user's (wave-27 D16, AC-9.4; T40).
 #
-# `--all`'s one yes is given over a page, before any difference is on screen, and
-# it answers every other question in the run. An edited block must not be one of
-# them: setup shows the difference and replaces the block only on a yes typed at
-# THAT question. So the run is fed one `y` for the page and nothing but `n` after
-# it — whichever read reaches the principles question gets a no — and the edit
-# must survive; the twin, fed only `y`, must replace it. Same machine as Group 5,
-# which then removes a present block.
+# An edited block is a state, not something left to do: `--all` neither lists it
+# nor shows its difference, even fed nothing but yes, and the edit survives it.
+# The difference and the question that could replace the block come only when
+# the item is asked for by name — and there a no keeps it and a yes replaces it.
+# Same machine as Group 5, which then removes a present block.
 # ---------------------------------------------------------------------------
 
-section "Group 4d: --all asks again, live, before replacing an edited principles block"
+section "Group 4d: --all leaves an edited principles block alone; --only asks before replacing it"
 
 { printf '%s\n' "$PRINCIPLES_START_LIT"; cat "$TMP/principles-body"; printf '%s\n' '- my own rule'
   printf '%s\n' "$PRINCIPLES_END_LIT"; } > "$GLOBAL_MEMORY"
 cp "$GLOBAL_MEMORY" "$TMP/principles-edited.md"
 expect_false "4d precondition: the edited block is not the shipped one" \
   cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
-SETUP_OUT_D="$TMP/setup-edited-no.txt"
-{ printf 'y\n'; for _ in $(seq 1 79); do printf 'n\n'; done; } | run_payload "$SETUP_SH" --all > "$SETUP_OUT_D" 2>&1
-expect_match "4d: setup --all printed the difference, the user's line included" \
-  '*my own rule*' "$(cat "$SETUP_OUT_D")"
-expect_true "4d: a no at the live question keeps the edit, byte for byte" \
+SETUP_OUT_D="$TMP/setup-edited-all.txt"
+printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$SETUP_OUT_D" 2>&1
+expect_true "4d: setup --all fed only yes keeps the edit, byte for byte" \
   cmp -s "$TMP/principles-edited.md" "$GLOBAL_MEMORY"
-printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$TMP/setup-edited-yes.txt" 2>&1
+expect_no_match "4d: …and shows no difference for it" '*my own rule*' "$(cat "$SETUP_OUT_D")"
+SETUP_OUT_DN="$TMP/setup-edited-only-no.txt"
+printf 'n\n' | run_payload "$SETUP_SH" --only working-principles > "$SETUP_OUT_DN" 2>&1
+expect_match "4d: asked for by name, setup prints the difference, the user's line included" \
+  '*my own rule*' "$(cat "$SETUP_OUT_DN")"
+expect_true "4d: a no at that question keeps the edit, byte for byte" \
+  cmp -s "$TMP/principles-edited.md" "$GLOBAL_MEMORY"
+printf 'y\n' | run_payload "$SETUP_SH" --only working-principles > "$TMP/setup-edited-yes.txt" 2>&1
 expect_true "4d: a yes at the same question replaces the block with the shipped text" \
   cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
 

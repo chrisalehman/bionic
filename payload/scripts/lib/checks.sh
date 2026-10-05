@@ -339,11 +339,13 @@ bionic_check_claude_proxy() {  # <row id>
   return 0
 }
 
-# Fires on `absent` (an offer) and on `edited` (setup shows the difference and
-# asks again); `present` is done. Neither firing state is a fault, so doctor
-# renders both as `–`, never `✗`.
+# Fires on `absent` only: an offer nobody has taken. `edited` is the user's own
+# text and not a finding, so `setup --all` can come back clean with it in place
+# (wave-27 T40, review pass 9 finding 5); `malformed` is a fault no setup step
+# can repair, so doctor reports it with its own fix line and setup's plan does
+# not offer a step that would only refuse.
 bionic_check_working_principles() {  # <row id>
-  [ "$(principles_state)" != "present" ]
+  [ "$(principles_state)" = "absent" ]
 }
 
 # THE PRE-MARKER SPELLING, and the one place it is written down. setup.sh carried
