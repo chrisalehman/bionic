@@ -1,4 +1,4 @@
 question: adversarial
 result: fail
 token: land_check
-names: tail -n 1
+names: tail -n 1 | tail -n1 | tail -1
