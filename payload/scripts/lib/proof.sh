@@ -597,9 +597,13 @@ facts_owed() {
 # the chain holds at <head> when its newest link is no failing reading and that link's head is
 # <head>, or every commit past it touches only the docs root (covered code is every tracked path
 # outside it). A waiver covers its question up to its own head.
+# Every line of the question counts, failing ones included: a later reading may start at a failing
+# reading's head, so the chain is not rebuilt by skipping them, and only the newest decides failing.
 # THE WHOLE READ (D10), owed once per code question at wave scale, is covered by a non-failing
 # `scope=whole` reading, or a waiver newer than the newest such reading. Code landed after it is the
-# piece chain's to cover, so a whole line is covered, failing or absent, never uncovered.
+# piece chain's to cover, so a whole line is covered, failing or absent, never uncovered. A proof
+# line carries no range start, so what a whole reading read is the verb's to hold: it refuses one
+# whose range starts after the plan's base-sha (row T41), and the judge takes the line as written.
 # THE FLOOR is proof_state's answer, unchanged: `covered` or `bounded` is covered; with no floor
 # proof it is absent; anything else is uncovered from the floor proof's head.
 # An owed line this judge has no rule for answers absent (the safe direction).

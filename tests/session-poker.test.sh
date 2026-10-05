@@ -9879,6 +9879,9 @@ expect_eq "57f6 a plan whose rigor cannot be read is judged nothing: rc 2" "2" "
 expect_eq "57f7 …and no line is printed for it" "" "$S57_OUT"
 
 # ---------- §WHOLE (AC-1.6): piece facts alone do not hold a wave ----------
+# A proof line carries no range start, so the judge cannot see what a `scope=whole` reading read:
+# it takes the line as the verb wrote it, and relies on the verb (row T41) refusing a whole read
+# whose range starts after the plan's base-sha. 57w8 pins the answer on a planted whole line.
 s57_reset; s57_floor "$S57_C4"
 for s57q in evidence adversarial structure; do s57_fact "$s57q" "$S57_C4" pass piece; done
 s57_state "$P57" "$S57_C4"
@@ -9898,6 +9901,10 @@ s57_fact adversarial "$S57_C2" pass whole; s57_fact adversarial "$S57_C4" pass p
 s57_state "$P57" "$S57_C4"
 expect_eq "57w6 D10 a fix landed after the whole read is covered by a piece read" "covered covered" \
   "$(s57_of "$S57_AD") $(s57_of "$S57_ADW")"
+s57_reset; s57_fact structure "$S57_C4" pass whole
+s57_state "$P57" "$S57_C4"
+expect_eq "57w8 a planted scope=whole line, whatever range its record read, is taken as written: the whole read and the piece chain both covered at its head" \
+  "covered covered" "$(s57_of "$S57_STW") $(s57_of "$S57_ST")"
 expect_eq "57w7 a task-scale dealing owes no whole read" "" \
   "$(bash -c '. "$1" && facts_owed audited task' _ "$S57_LIB" | /usr/bin/grep -F whole)"
 
