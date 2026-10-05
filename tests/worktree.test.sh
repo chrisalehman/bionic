@@ -184,7 +184,7 @@ OUTH="$(worktree_land "$HT" wave/fixture)"
 RCH=$?
 
 expect_match "land reports LANDED with branch, target, checkout, merge and path" \
-  "spawn-worktree: LANDED branch=alpha onto=wave/fixture checkout=${H} merge=* removed=${HT}" "$OUTH"
+  "spawn-worktree: LANDED branch=alpha onto=wave/fixture checkout=${H} merge=* removed=${HT} proofs=none" "$OUTH"
 expect_eq   "land exits 0"                       "0" "$RCH"
 expect_false "the worktree directory is gone"    test -d "$HT"
 expect_eq   "git's registry no longer lists it"  "1" "$(git -C "$H" worktree list | grep -c .)"
@@ -224,7 +224,7 @@ expect_eq "the tree is clean despite the alias (gitignored either shape)" \
   "" "$(git -C "$LAT" status --porcelain)"
 OUTLA="$(worktree_land "$LAT" wave/fixture)"
 expect_match "a tree whose only untracked entry is the alias lands" \
-  "spawn-worktree: LANDED branch=withalias onto=wave/fixture checkout=${LA} merge=* removed=${LAT}" "$OUTLA"
+  "spawn-worktree: LANDED branch=withalias onto=wave/fixture checkout=${LA} merge=* removed=${LAT} proofs=none" "$OUTLA"
 expect_false "the tree — alias included — is gone after landing" test -e "$LAT"
 expect_true "the state directory the alias pointed at survived" \
   test -f "${LA}/.bionic/docs/note.md"
@@ -854,7 +854,7 @@ WAVE0="$(git -C "$W" rev-parse wave/20-demo)"
 
 OUTW="$(worktree_land "$WT1" wave/20-demo)"; RCW=$?
 expect_match "the land names the target and the checkout that holds it" \
-  "spawn-worktree: LANDED branch=wt/20-T1 onto=wave/20-demo checkout=${WWAVE} merge=* removed=${WT1}" "$OUTW"
+  "spawn-worktree: LANDED branch=wt/20-T1 onto=wave/20-demo checkout=${WWAVE} merge=* removed=${WT1} proofs=none" "$OUTW"
 expect_eq   "it exits 0" "0" "$RCW"
 expect_eq   "the feature branch did not move" "$FEAT0" "$(git -C "$W" rev-parse feature/human)"
 expect_eq   "the main checkout is still on the feature branch" "feature/human" \
@@ -2380,5 +2380,181 @@ expect_true "(rc3h) the link to the record still resolves" link_ok "$LR3"
 echo 0 > "$LR_RCF"
 expect_match "(rc3i) the same tree lands once the command passes" \
   "spawn-worktree: LANDED branch=rc-fail onto=wave/fixture *" "$(worktree_land "$LR3" wave/fixture)"
+
+section "§LAND-PROOFS: a landing keeps the proof it read (wave-27 T44; REQ-2 AC-2.1, REQ-8; D15)"
+#
+# `land` appends to `<docs-root>/record/<the bound plan's name less .plan.md>/landing-proofs.log`
+# one header line per landing, `landed: row=<id|—> branch=<b> head=<40-hex> merge=<40-hex>
+# at=<ISO-UTC>`, and under it every stamp line at the landed head exactly as the stamp file holds
+# it. The record is proved writable before the merge (`why=proofs-unwritable`, nothing changed),
+# written after it and before the tree goes; the LANDED line names it as `proofs=<path>`, and a
+# land with no bound plan prints `proofs=none`.
+#
+# FIXTURE FIDELITY. Every land here goes through `worktree_land_for_session`, the path both real
+# callers take, over a plan bound the way bind_plan binds one, whose `## Tasks` table carries a
+# `worktree` column. Stamp lines are written in the shim's shape, and the record is read back
+# whole: each row compares the file, never a grep of it.
+LP="$(new_repo "$TMP/land-proofs")"
+LP_SID="land-proofs-session-01"
+LP_PLAN="$LP/.bionic/docs/plans/epic-x/wave-lp.plan.md"
+LP_LOG="$LP/.bionic/docs/record/wave-lp/landing-proofs.log"
+lp_bind() {  # <table rows, one `| id | worktree |` pair per line> — binds LP_SID to LP_PLAN
+  mkdir -p "${LP_PLAN%/*}" "$LP/.bionic/tmp"
+  {
+    printf -- '---\nworking-branch: wave/fixture\n---\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | worktree | status |\n|---|---|---|---|---|---|\n'
+    printf '%s\n' "$1"
+    printf '\n## Task detail\n'
+  } > "$LP_PLAN"
+  printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LP_PLAN" > "$LP/.bionic/tmp/engaged-${LP_SID}.state"
+}
+lp_tree() {  # <branch> <dir under .worktrees> -> tree path, a commit ahead, its record link
+  local d="$LP/.worktrees/$2"
+  if git -C "$LP" show-ref --verify --quiet "refs/heads/$1"; then
+    git -C "$LP" worktree add --quiet "$d" "$1" >/dev/null 2>&1
+  else
+    git -C "$LP" worktree add --quiet -b "$1" "$d" HEAD >/dev/null 2>&1
+  fi
+  echo "$RANDOM$RANDOM$RANDOM" >> "$d/$2.txt"; git -C "$d" add -A >/dev/null 2>&1; git -C "$d" commit --quiet -m "$1 work"
+  ln -s "$LP/.bionic" "$d/.bionic"; printf '%s' "$d"
+}
+lp_stamp() {  # <tree> <head> <rc> <suites> <cmd> — one stamp line, the shim's shape
+  printf 'stamp/v1|head=%s|dirty=0|rc=%s|at=2026-10-05T01:02:03Z|suites=%s|cmd=%s\n' "$2" "$3" "$4" "$5" \
+    >> "$(stamp_file "$1")"
+}
+lp_at() { printf '%s' "$1" | sed -n 's/^landed: .* at=\([^ ]*\)$/\1/p' | tail -n 1; }
+LP_ISO='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z'
+lp_bind '| T7 | 4 | build | seven | .worktrees/27-T7 | active |
+| T8 | 4 | build | eight | .worktrees/27-T8 | active |
+| T9 | 4 | build | nine | — | pending |'
+
+# (p1) ONE SUITE, A NAMED TREE: the header names the row, and the one judged line follows it.
+LP1="$(lp_tree wt/27-T7 27-T7)"; LP1_H="$(git -C "$LP1" rev-parse HEAD)"
+lp_stamp "$LP1" "$LP1_H" 0 one.test.sh "bash tests/one.test.sh"
+LP1_LINE="$(tail -n 1 "$(stamp_file "$LP1")")"
+OUTLP1="$(worktree_land_for_session "$LP1" "$LP" "$LP_SID")"; RCLP1=$?
+LP1_M="$(git -C "$LP" rev-parse refs/heads/wave/fixture)"
+expect_eq "(p1) the land exits 0" "0" "$RCLP1"
+expect_eq "(p1b) the LANDED line ends proofs=<the record's path>" \
+  "spawn-worktree: LANDED branch=wt/27-T7 onto=wave/fixture checkout=${LP} merge=${LP1_M} removed=${LP1} proofs=${LP_LOG}" "$OUTLP1"
+LP1_AT="$(lp_at "$(cat "$LP_LOG" 2>/dev/null)")"
+expect_match "(p1c) at= is UTC, YYYY-MM-DDTHH:MM:SSZ" "$LP_ISO" "$LP1_AT"
+expect_eq "(p1d) the record is the header and the one stamp line at the head, byte for byte" \
+  "landed: row=T7 branch=wt/27-T7 head=${LP1_H} merge=${LP1_M} at=${LP1_AT}
+${LP1_LINE}" "$(cat "$LP_LOG" 2>/dev/null)"
+expect_eq "(p1e) merge= is the merge the land made: the target's head, whose second parent is head=" \
+  "$LP1_H" "$(git -C "$LP" rev-parse "${LP1_M}^2")"
+
+# (p2) THREE SUITES AT THE HEAD, ONE AT AN OLDER HEAD, A SECOND LANDING: the three lines are
+# appended byte for byte, a `cmd=` holding `|` and quotes included; the older head's line is not
+# copied; the first landing's block is kept above.
+LP2="$(lp_tree wt/27-T8 27-T8)"; LP2_OLD="$(git -C "$LP2" rev-parse HEAD)"
+lp_stamp "$LP2" "$LP2_OLD" 0 a.test.sh "bash tests/a.test.sh"
+echo "$RANDOM$RANDOM$RANDOM" >> "$LP2/27-T8.txt"; git -C "$LP2" commit --quiet -am "T8 second"
+LP2_H="$(git -C "$LP2" rev-parse HEAD)"
+lp_stamp "$LP2" "$LP2_H" 0 a.test.sh "bash tests/a.test.sh"
+lp_stamp "$LP2" "$LP2_H" 0 b.test.sh "LOG=x; set -o pipefail; bash tests/b.test.sh 2>&1 | tee \"\$LOG\"; echo 'rc'"
+lp_stamp "$LP2" "$LP2_H" 0 c.test.sh "bash tests/c.test.sh|cat"
+LP2_LINES="$(tail -n 3 "$(stamp_file "$LP2")")"
+LP2_OLDLINE="$(head -n 1 "$(stamp_file "$LP2")")"
+LP_BEFORE2="$(cat "$LP_LOG" 2>/dev/null)"
+OUTLP2="$(worktree_land_for_session "$LP2" "$LP" "$LP_SID")"
+LP2_M="$(git -C "$LP" rev-parse refs/heads/wave/fixture)"
+expect_match "(p2) the second tree lands, naming the same record" "spawn-worktree: LANDED branch=wt/27-T8 * proofs=${LP_LOG}" "$OUTLP2"
+LP2_AT="$(lp_at "$(cat "$LP_LOG" 2>/dev/null)")"
+expect_eq "(p2b) the record is the first block, kept, then the new header and the three lines at the head" \
+  "${LP_BEFORE2}
+landed: row=T8 branch=wt/27-T8 head=${LP2_H} merge=${LP2_M} at=${LP2_AT}
+${LP2_LINES}" "$(cat "$LP_LOG" 2>/dev/null)"
+expect_contains "(p2c) fixture: the older head's line exists in the stamp file" "head=${LP2_OLD}|" "$LP2_OLDLINE"
+expect_absent "(p2d) …and is not copied" "head=${LP2_OLD}|" "$(cat "$LP_LOG" 2>/dev/null)"
+expect_contains "(p2e) the cmd= with | and quotes is kept whole" \
+  "|cmd=LOG=x; set -o pipefail; bash tests/b.test.sh 2>&1 | tee \"\$LOG\"; echo 'rc'" "$(cat "$LP_LOG" 2>/dev/null)"
+
+# (p3) A ROW LANDED TWICE: a second landing of the same branch from a new tree appends a second
+# header for T7 and keeps the first.
+LP3="$(lp_tree wt/27-T7 27-T7)"; LP3_H="$(git -C "$LP3" rev-parse HEAD)"
+lp_stamp "$LP3" "$LP3_H" 0 one.test.sh "bash tests/one.test.sh"
+expect_match "(p3) the same row's branch lands a second time" "spawn-worktree: LANDED branch=wt/27-T7 * proofs=${LP_LOG}" \
+  "$(worktree_land_for_session "$LP3" "$LP" "$LP_SID")"
+LP3_M="$(git -C "$LP" rev-parse refs/heads/wave/fixture)"
+expect_eq "(p3b) two T7 headers, the first landing's and this one's, in order" \
+  "landed: row=T7 branch=wt/27-T7 head=${LP1_H} merge=${LP1_M}
+landed: row=T7 branch=wt/27-T7 head=${LP3_H} merge=${LP3_M}" \
+  "$(grep '^landed: row=T7 ' "$LP_LOG" | sed 's/ at=.*//')"
+
+# (p4) A TREE NO ROW NAMES: row=—.
+LP4="$(lp_tree wt/27-T99 27-T99)"; green_stamp "$LP4"
+expect_match "(p4) a tree no row names lands" "spawn-worktree: LANDED branch=wt/27-T99 * proofs=${LP_LOG}" \
+  "$(worktree_land_for_session "$LP4" "$LP" "$LP_SID")"
+expect_eq "(p4b) its header carries row=—" "landed: row=— branch=wt/27-T99" \
+  "$(tail -n 2 "$LP_LOG" | head -n 1 | sed 's/ head=.*//')"
+
+# (p5) TWO ROWS NAMING ONE TREE: the first in table order.
+lp_bind '| T20 | 4 | build | twenty | .worktrees/27-T20 | active |
+| T21 | 4 | build | twenty-one | .worktrees/27-T20 | active |'
+LP5="$(lp_tree wt/27-T20 27-T20)"; green_stamp "$LP5"
+worktree_land_for_session "$LP5" "$LP" "$LP_SID" >/dev/null
+expect_eq "(p5) two rows name the tree: the header carries the first, T20" "landed: row=T20 branch=wt/27-T20" \
+  "$(tail -n 2 "$LP_LOG" | head -n 1 | sed 's/ head=.*//')"
+lp_bind '| T7 | 4 | build | seven | .worktrees/27-T7 | active |'
+
+# (p6) THE RECORD CANNOT BE WRITTEN: refused why=proofs-unwritable before the merge, and the
+# target's head, the tree and its stamp file are as they were. The arm discriminates: the same
+# tree lands once the record can be written.
+LP6="$(lp_tree wt/27-T7 27-T7)"; green_stamp "$LP6"
+LP6_LOGB="$(cat "$LP_LOG")"; LP6_TGT="$(git -C "$LP" rev-parse refs/heads/wave/fixture)"
+LP6_TREES="$(trees_of "$LP")"; LP6_ST="$(cat "$(stamp_file "$LP6")")"
+chmod 444 "$LP_LOG"
+OUTLP6="$(worktree_land_for_session "$LP6" "$LP" "$LP_SID")"; RCLP6=$?
+chmod 644 "$LP_LOG"
+expect_match "(p6) an unwritable record refuses the landing why=proofs-unwritable, naming it" \
+  "spawn-worktree: REFUSED reason=record-unwritable why=proofs-unwritable path=${LP_LOG} branch=wt/27-T7 — *" "$OUTLP6"
+expect_eq "(p6b) …exit 2" "2" "$RCLP6"
+expect_eq "(p6c) the target branch's head is as before" "$LP6_TGT" "$(git -C "$LP" rev-parse refs/heads/wave/fixture)"
+expect_eq "(p6d) every worktree is as before: the tree stands" "$LP6_TREES" "$(trees_of "$LP")"
+expect_eq "(p6e) the stamp file is as before" "$LP6_ST" "$(cat "$(stamp_file "$LP6")")"
+expect_eq "(p6f) the record is as before" "$LP6_LOGB" "$(cat "$LP_LOG")"
+expect_true "(p6g) the link to the record still resolves" link_ok "$LP6"
+expect_match "(p6h) the same tree lands once the record is writable" \
+  "spawn-worktree: LANDED branch=wt/27-T7 * proofs=${LP_LOG}" "$(worktree_land_for_session "$LP6" "$LP" "$LP_SID")"
+
+# (p7) THE APPEND FAILS AFTER THE MERGE: a post-merge hook makes the record read-only once the
+# merge is made. The merge stands, the LANDED line says proofs=unwritten, and the tree and its
+# stamp file are kept so the proof is not lost.
+LP7="$(lp_tree wt/27-T7 27-T7)"; green_stamp "$LP7"
+LP7_ST="$(cat "$(stamp_file "$LP7")")"; LP7_LOGB="$(cat "$LP_LOG")"
+LP_HOOK="$(git -C "$LP" rev-parse --absolute-git-dir)/hooks/post-merge"   # LP is the main checkout: its git dir is the common one
+expect_match "(p7-pre) fixture: the hook path is absolute, inside the fixture" "${LP}/.git/hooks/post-merge" "$LP_HOOK"
+mkdir -p "${LP_HOOK%/*}"; printf '#!/bin/sh\nchmod 444 "%s"\n' "$LP_LOG" > "$LP_HOOK"; chmod +x "$LP_HOOK"
+OUTLP7="$(worktree_land_for_session "$LP7" "$LP" "$LP_SID")"; RCLP7=$?
+rm -f "$LP_HOOK"; chmod 644 "$LP_LOG"
+LP7_M="$(git -C "$LP" rev-parse refs/heads/wave/fixture)"
+expect_eq "(p7) fixture: the hook made the merge, then the record read-only" "$(git -C "$LP7" rev-parse HEAD)" \
+  "$(git -C "$LP" rev-parse "${LP7_M}^2")"
+expect_match "(p7b) the LANDED line says proofs=unwritten and keeps the tree" \
+  "spawn-worktree: LANDED branch=wt/27-T7 onto=wave/fixture checkout=${LP} merge=${LP7_M} kept=${LP7} proofs=unwritten *" "$OUTLP7"
+expect_eq "(p7c) …exit 0: the landing is made" "0" "$RCLP7"
+expect_true "(p7d) the tree stands" test -d "$LP7"
+expect_eq "(p7e) its stamp file is whole" "$LP7_ST" "$(cat "$(stamp_file "$LP7")")"
+expect_eq "(p7f) the record is unchanged" "$LP7_LOGB" "$(cat "$LP_LOG")"
+rm -f "$LP7/.bionic"; git -C "$LP" worktree remove "$LP7" >/dev/null 2>&1
+
+# (p8) NO BOUND PLAN: `worktree_land` called with no plan prints proofs=none and writes no record.
+LP8R="$(new_repo "$TMP/land-proofs-none")"
+LP8="$(new_tree "$LP8R" wt/none)"; green_stamp "$LP8"
+OUTLP8="$(worktree_land "$LP8" wave/fixture)"
+expect_match "(p8) a landing with no bound plan prints proofs=none" \
+  "spawn-worktree: LANDED branch=wt/none onto=wave/fixture checkout=${LP8R} merge=* removed=${LP8} proofs=none" "$OUTLP8"
+expect_eq "(p8b) fixture: the finder sees the bound plan's record" "$LP_LOG" "$(find "$LP/.bionic" -name landing-proofs.log)"
+expect_eq "(p8c) …and no landing record is written without a plan" "" "$(find "$LP8R/.bionic" -name landing-proofs.log)"
+
+# (p9) THE why=head REFUSAL NAMES WHERE IT LOOKED: the stamp file's path and the head.
+LP9="$(new_tree "$LP8R" wt/elsewhere)"
+stamp "$LP9" 0000000000000000000000000000000000000000 0 0
+LP9_H="$(git -C "$LP9" rev-parse HEAD)"
+expect_match "(p9) why=head names the stamp file and the head it looked for" \
+  "spawn-worktree: REFUSED reason=stale-proof why=head stamp_head=0000000000000000000000000000000000000000 head=${LP9_H} stamps=$(stamp_file "$LP9") — *" \
+  "$(worktree_land "$LP9" wave/fixture)"
 
 finish
