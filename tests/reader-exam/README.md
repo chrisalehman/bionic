@@ -85,9 +85,22 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    - the role the audited dealing gives the sample's question (`facts_owed audited wave` in
      `payload/scripts/lib/proof.sh`): the auditor for `evidence`, the critic for
      `adversarial`, the reviewer for `structure`;
-   - and the one-mind case, the critic holding all three questions, on every sample.
+   - and the one-mind case, the critic holding all three questions, on every sample. It is
+     named `one-mind` wherever a reader's role is written below (record paths, headings, result
+     lines), so it is never taken for the critic the dealing gives `adversarial`. The agent
+     dispatched is still `bionic:critic`: `one-mind` is only how the sitting names that dispatch.
 
-   For `clean`, each of the three roles takes its own question, and the critic takes all three.
+   For `clean`, each of the three roles takes its own question, and the one-mind critic takes
+   all three.
+
+   The sitting's session binds no plan: the built sample's `docs/plan.md` is read by the
+   readers and is not a plan the session has registered. The dispatch wall therefore requires
+   each reader's `Questions:` line and does not hold it to a dealing, so it would not refuse a
+   set that no rigor deals that role. The orchestrator checks that by hand before each dispatch:
+   the brief's set is the one this step names for that role (`evidence` for the auditor,
+   `adversarial` for the critic, `structure` for the reviewer, all three for the one-mind
+   critic).
+
    The brief says nothing about an exam, the sample's name, or what to look for. It carries:
    - `Questions: <q>` on a line of its own (`Questions: evidence, adversarial, structure` for
      the one-mind case);
@@ -96,11 +109,12 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    - one record path per question it is dealt, under the record root
      `<dest>/.bionic/docs/record/`, in the directory named for the sitting's wave:
      `<dest>/.bionic/docs/record/<wave>/<label>-<role>-<question>.md`, where `<label>` is
-     the last component of `<dest>` (`s1`), never the sample's name; the orchestrator maps
-     the label back to its sample when it keeps the record (step 6). The one-mind critic gets
-     three paths, for example `…/wave-27-review-across-rigor/s1-critic-evidence.md`,
-     `…/s1-critic-adversarial.md` and `…/s1-critic-structure.md`, and writes each question's
-     pass to its own path;
+     the last component of `<dest>` (`s1`), never the sample's name, and `<role>` is the role
+     dealt the question or `one-mind`; the orchestrator maps the label back to its sample when
+     it keeps the record (step 6). The one-mind critic gets three paths, for example
+     `…/wave-27-review-across-rigor/s1-one-mind-evidence.md`, `…/s1-one-mind-adversarial.md`
+     and `…/s1-one-mind-structure.md`, and writes each question's pass to its own path, so its
+     records never share a path with the critic dealt `adversarial`;
    - `Suites:` naming each `tests/*.test.sh` of the built repository, one per suite (for
      example `Suites: tests/land.test.sh, tests/stamp.test.sh`), so a reader can re-execute
      the writers' evidence;
@@ -112,18 +126,25 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    which meets `clean` and does not change a defect sample's `fail`.
    - **Checking what the readers held.** *Written by wave-27 T22, once T15 lands: how the
      checks files pushed to each reader at start are shown to equal the hashes from step 1.*
-5. **Score each record** on the key's question: the record at that question's path (on
-   `clean`, the record at each of the three). In this checkout:
+5. **Score each record** on the question the sample's key names, and only that record: on a
+   defect sample, the record at that question's path from the role dealt it and the one from
+   the one-mind critic; on `clean`, each of the three roles' records on its own question and the
+   one-mind critic's record on each of the three. In this checkout:
 
    ```
    . tests/reader-exam/score.sh
    exam_score tests/reader-exam/samples/<name>/expect.txt <record>
    ```
 
-   It prints `met` or `missed`. A reader passes the exam when every record it wrote is met.
+   It prints `met` or `missed`. A reader passes the exam when its record for each question the
+   key names is met. The one-mind critic's records for the questions the key does not name are
+   kept (step 6) and not scored, and get no `result` line: on a defect sample they were never
+   asked to find that defect. The scorer reads a record's `question:` line and not its path, so
+   a `missed` on a record without one is a record to check before anything goes to a fix row.
 6. **Keep the records.** Copy each record unchanged into the sitting's wave record in this
    checkout, `.bionic/docs/record/<the sitting's wave>/exam-sitting.md`, under a heading per
-   record that names the sample, the role and the question.
+   record that names the sample, the role (`one-mind` for the one-mind critic) and the
+   question, the unscored ones included.
 7. **Record the sitting** by appending a section to `sittings.md`, below every earlier one:
 
    ```
@@ -136,13 +157,21 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    result <sample> <question> <role> <reached result> <met|missed> <record heading>
    ```
 
-   one `result` line per sample, question and role, `<sample>` being the sample's name; the
+   one `result` line per sample, per question its key names, per role dealt that question:
+   `<sample>` is the sample's name and `<role>` is `auditor`, `critic` or `reviewer` (the role
+   the audited dealing gives the question) or `one-mind`. A defect sample holds two lines, the
+   dealt role's and the one-mind critic's, both on its keyed question; `clean` holds six, the
+   three roles each on their own question and the one-mind critic on each of the three. The
    record heading names the record's section in `exam-sitting.md`. The `sha256` lines are the
    hashes from step 1. A line opening with `##` that is not a header of that form is red
    wherever it is in the file. The suite reads the last section, by file order: it is red
    unless that section's hashes match the shipped files, every sample has a `result` line and
-   no other name has one, every `result` line reads `met`, no two lines for one sample and
-   question disagree, and every reached result is one its sample's key admits.
+   no other name has one, every line's role is `one-mind` or the role dealt its own question,
+   every sample has a line from each role dealt on each question its key
+   names (the red line names the sample and the role missing; the one-mind critic's line alone
+   does not complete a sample), no line is for a question its sample's key does not name,
+   every `result` line reads `met`, no two lines for one sample and question disagree, and
+   every reached result is one its sample's key admits.
 8. **A miss is sent back.** A reader that misses a sample sends its checks file to a fix row.
    The sitting is recorded as it went, so the suite is red from then until the fixed file is
    sat again and that sitting is appended below it.
