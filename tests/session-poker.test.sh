@@ -9518,6 +9518,44 @@ poke "$RAD" amend w1 --suites+ tests/c.test.sh --reason 'one more suite'
 expect_eq "AMEND-ROOT7 a derived row holding two files takes a suite (exit 0)" "0" "$RC"
 expect_contains "AMEND-ROOT7 …and the suite is on the row" "c.test.sh" \
   "$(s30_field "$(s30_last "$RAD")" suites_allowed)"
+# EACH --files+ VALUE IS READ ON ITS OWN (wave-27 T34; review pass 19 should-fix 2, A-orch-70): the
+# values used to be joined into one Files: line, so a ` #` note in one hid every later one and the
+# call exited 0. A quoted value records the bare path, as the dispatch wall's reader reads one line.
+RAC="$(make_repo amend-comment)"; new_roster "$RAC"; s30_row "$RAC"
+poke "$RAC" amend w1 --files+ 'lib/x.sh # the hook' --files+ lib/y.sh --reason 'a note on the first'
+expect_eq "AMEND-ROOT8 a note after the first value: both values recorded (exit 0)" "0" "$RC"
+expect_eq "AMEND-ROOT8 …files= holds lib/x.sh and lib/y.sh" "hooks/a.sh,lib/x.sh,lib/y.sh" \
+  "$(s30_field "$(s30_last "$RAC")" files)"
+poke "$RAC" amend w1 --files+ '"lib/q.sh"' --reason 'a quoted path'
+expect_eq "AMEND-ROOT9 a quoted value records the bare path (exit 0)" "0" "$RC"
+expect_eq "AMEND-ROOT9 …files= gains lib/q.sh, no quote" "hooks/a.sh,lib/x.sh,lib/y.sh,lib/q.sh" \
+  "$(s30_field "$(s30_last "$RAC")" files)"
+# THE ROW'S QUESTIONS REACH THE CAP (wave-27 T34; T15's report items 1 and 2, A-orch-73): a critic
+# holding `evidence` is held to three runs as an auditor is; one holding `adversarial` is not.
+RAQ="$(make_repo amend-questions)"; new_roster "$RAQ"
+s30_row "$RAQ" subagent_type=bionic:critic suites_allowed=none questions=evidence \
+  're_executes=`npm test` `pytest tests/unit` `go test ./...`'
+RAQ_SUM="$(cksum < "$(roster_of "$RAQ")")"
+poke "$RAQ" amend w1 --reexec+ 'cargo test' --reason 'a fourth run'
+expect_eq "AMEND-Q1 a critic holding evidence: a fourth run is REFUSED (exit 1)" "1" "$RC"
+expect_contains "AMEND-Q1b …by the three-run cap" "3-run cap" "$OUT"
+expect_eq "AMEND-Q1c …and the roster is unchanged" "$RAQ_SUM" "$(cksum < "$(roster_of "$RAQ")")"
+RAQ2="$(make_repo amend-questions-adv)"; new_roster "$RAQ2"
+s30_row "$RAQ2" subagent_type=bionic:critic suites_allowed=none questions=adversarial \
+  're_executes=`npm test` `pytest tests/unit` `go test ./...`'
+poke "$RAQ2" amend w1 --reexec+ 'cargo test' --reason 'a fourth run'
+expect_eq "AMEND-Q2 control: a critic holding adversarial takes a fourth run (exit 0)" "0" "$RC"
+expect_eq "AMEND-Q3 the amended row carries questions= from the row it copied" "adversarial" \
+  "$(s30_field "$(s30_last "$RAQ2")" questions)"
+poke "$RAQ2" extend w1 'more to read'
+expect_eq "AMEND-Q4 extend's row carries questions= too (exit 0)" "0|adversarial" \
+  "$RC|$(s30_field "$(s30_last "$RAQ2")" questions)"
+R41Q="$(s41_world s41-hold-questions)"
+s41_transcript 1 "w-1:idle"
+printf '%s|questions=evidence\n' "$(grep -F '|name=w-1|' "$(roster_of "$R41Q")" | tail -1)" >> "$(roster_of "$R41Q")"
+poke "$R41Q" hold w-1 'kept for a second pass'
+expect_eq "AMEND-Q5 hold's row carries questions= too (exit 0)" "0|evidence" \
+  "$RC|$(s30_field "$(grep -F '|name=w-1|' "$(roster_of "$R41Q")" | tail -1)" questions)"
 
 # ============================================================
 section "Section 55 §RECON-PLAN: the tick asks for a task-list reconcile when current: moves 3 to 4 and when the table grows (wave-27 T13; REQ-11 AC-11.3; D20)"
@@ -10580,16 +10618,16 @@ expect_eq "60a2 two fixes in one range: a MOVED line for T7 and one for T8, each
 s60_world s60-one @A whole
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S60_INIT"
 s60_tick
-expect_eq "60b one fix after the whole read: T7 alone; a row landed before the range is not named" \
-  "poker: MOVED T7 — AC-2.1, AC-2.2" "$(s60_moved)"
+expect_eq "60b one fix after the whole read, the other landed before it: C is a commit no header names, so one MOVED unknown line (re-pinned, wave-27 T34)" \
+  "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
 # A docs-only tail: the whole reading at C, every row landed by C, and one commit past C no row landed.
 s60_world s60-tail @C whole
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
 git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "a docs-only tail" >/dev/null 2>&1
 S60_D="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 s60_tick
-expect_eq "60c a docs-only tail: RANGE C..D, and MOVED none" \
-  "poker: RANGE T3 ${S59W_C}..${S60_D} $S60_RANGE_TAIL|poker: MOVED none" \
+expect_eq "60c a tail made straight on the working branch: RANGE C..D, and MOVED unknown, never none (re-pinned, wave-27 T34)" \
+  "poker: RANGE T3 ${S59W_C}..${S60_D} $S60_RANGE_TAIL|poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T3 ')|$(s60_moved)"
 # No whole fact yet: the structure reading at A is a piece read. The range prints, and no MOVED line.
 s60_world s60-nowhole @A piece
@@ -10603,13 +10641,66 @@ expect_eq "60d no whole fact for the question: the RANGE line prints and no MOVE
 s60_world s60-unknown @A whole
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"
 s60_tick
-expect_eq "60e a landed build row with no landing record: one MOVED unknown line, in place of T7's" \
-  "poker: MOVED unknown — T8 carry no landing record" "$(s60_moved)"
+expect_eq "60e a landed build row with no landing record: one MOVED unknown line, in place of T7's (re-pinned, wave-27 T34)" \
+  "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
 s60_world s60-nocommit @A whole
 s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 s60_tick
-expect_eq "60f a merge that is no commit here is no landing record: MOVED unknown names T8" \
-  "poker: MOVED unknown — T8 carry no landing record" "$(s60_moved)"
+expect_eq "60f a merge that is no commit here is no landing record: C is unrecorded (re-pinned, wave-27 T34)" \
+  "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
+# EVERY COMMIT OF THE RANGE IS A RECORDED LANDING, OR NO LIST (wave-27 T34; review pass 30 should-fix
+# 1 and 2, A-orch-86). A header with row=—, and a commit made by hand past landings that all have
+# headers, each make the one MOVED unknown line; the read is then the whole range.
+s60_world s60-dash @A whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land — "$S59W_C"
+s60_tick
+expect_eq "60g a landing whose header says row=— is no recorded landing of a row: MOVED unknown" \
+  "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
+s60_world s60-hand @A whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
+s60_tick
+expect_eq "60h precondition: every commit of A..C recorded, the rows are named" \
+  "poker: MOVED T7 — AC-2.1, AC-2.2|poker: MOVED T8 — AC-4.1, AC-5.1" "$(s60_moved)"
+git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "made by hand on the working branch" >/dev/null 2>&1
+s60_tick
+expect_eq "60h2 one more commit made by hand: MOVED unknown, in place of both lines" \
+  "poker: MOVED unknown — 1 commit(s) in the range are no recorded landing" "$(s60_moved)"
+# THE COST: one `git rev-list` per offered row, and no git process per landing. A shim logs every
+# git the tick runs; fifty landings cost the tick the same git calls as two.
+S60_SHIM="$TMPROOT/s60-shim"; S60_GITLOG="$TMPROOT/s60-git.log"; mkdir -p "$S60_SHIM"
+printf '#!/bin/bash
+printf "%%s\\n" "$*" >> %q
+exec %q "$@"
+' "$S60_GITLOG" "$(command -v git)" > "$S60_SHIM/git"
+chmod +x "$S60_SHIM/git"
+s60_counted_tick() {  # -> S60_ALL (git calls), S60_RL (rev-list calls) of one tick
+  local was="$PATH"
+  : > "$S60_GITLOG"; export PATH="$S60_SHIM:$PATH"; s60_tick; export PATH="$was"
+  S60_ALL="$(awk 'END { print NR + 0 }' "$S60_GITLOG")"
+  S60_RL="$(/usr/bin/grep -c 'rev-list --first-parent ' "$S60_GITLOG" | tr -d ' ')"
+}
+s60_world s60-cost @A whole
+s60_land T1 "$S60_INIT"; s60_land T7 "$S59W_B"; s60_land T8 "$S59W_C"
+s60_counted_tick
+expect_eq "60i precondition: the shim saw the tick's git calls, and the rows are named" \
+  "poker: MOVED T7 — AC-2.1, AC-2.2|poker: MOVED T8 — AC-4.1, AC-5.1" "$(s60_moved)"
+expect_ne "60i0 …through the shim" "0" "$S60_ALL"
+expect_eq "60i2 two landings in the range: one rev-list for the one offered row" "1" "$S60_RL"
+S60_ALL2="$S60_ALL"
+# Forty-eight more landed rows, each its own landing, so a cost per landing would show.
+awk '{ print } /^\| T8 \| 4 \| build \|/ { for (i = 10; i < 58; i++) printf "| T%d | 4 | build | landing %d | implementor | — | 30 | REQ-1 | x%d.sh | — | — | landed |  |\n", i, i, i }' \
+  "$P59W" > "$P59W.tmp" && mv "$P59W.tmp" "$P59W"
+for s60n in $(seq 10 57); do
+  git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "landing $s60n" >/dev/null 2>&1
+  s60_land "T$s60n" "$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD)"
+done
+expect_eq "60i3 precondition: fifty landings in the record's range" "50" \
+  "$(git -C "$R59W" rev-list --first-parent "${S59W_A}..$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD)" | awk 'END { print NR }')"
+s60_counted_tick
+expect_eq "60i4 fifty landings: still one rev-list" "1" "$S60_RL"
+expect_eq "60i5 …and the same git calls as two landings: none per landing" "$S60_ALL2" "$S60_ALL"
+expect_contains "60i6 …and the rows are named, T7 and T8 first" "poker: MOVED T7 — AC-2.1, AC-2.2|poker: MOVED T8 — AC-4.1, AC-5.1|poker: MOVED T10 — AC-1.1" "$(s60_moved)"
+expect_contains "60i7 …through the last of the fifty" "poker: MOVED T57 — AC-1.1" "$(s60_moved)"
 POKE_BOUND="$S60_BOUND_WAS"
 
 # ============================================================
@@ -10916,6 +11007,18 @@ expect_eq "62p4 …a log opening rc=1 is refused" "1" "$PA_RC"
 printf 'scan\nhead=%s rc=0\n' "$S62_W3" > "$S62_REC/late.log"
 s62_att "$S62_REC/late.log"
 expect_eq "62p5 …and so is a log whose first line is not the header" "1" "$PA_RC"
+# THE WORKING TREE IS HANDED TO THE CHECK (wave-27 T34; T50's record, S3): BIONIC_CHECK_TREE, the
+# absolute path of the working checkout, beside BIONIC_CHECK_BASE and BIONIC_CHECK_HEAD.
+S62_TREE_SEEN="$TMPROOT/s62-tree-seen"
+printf '#!/bin/bash
+printf "%%s\\n" "${BIONIC_CHECK_TREE:-unset}" > %q
+' "$S62_TREE_SEEN" > "$TMPROOT/s62-tree.sh"
+printf 'release-check: bash %s\n' "$TMPROOT/s62-tree.sh" > "$R62/.bionic/config.yaml"
+s57_commit "$S62_WT" lib/t.sh W5 >/dev/null
+poke "$R62" release-check
+expect_eq "62t release-check with a check that reads the tree exits 0" "0" "$RC"
+expect_eq "62t2 BIONIC_CHECK_TREE is the working checkout's absolute path" "$(cd "$S62_WT" && pwd -P)" \
+  "$(cat "$S62_TREE_SEEN" 2>/dev/null)"
 POKE_BOUND="$S62_BOUND_WAS"
 
 # ============================================================

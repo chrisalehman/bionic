@@ -3086,6 +3086,44 @@ expect_eq "MOVED.6b …the re-landed T7 is named by its last merge, not its firs
 expect_eq "MOVED.6c no record file at all: every landed build row is owed one, none has a merge" \
   "T1${TAB}-${TAB}owed|T7${TAB}-${TAB}owed|T8${TAB}-${TAB}owed" \
   "$(call units_landings "$SANDBOX/mv.md" "$SANDBOX/no-such-landings.log" | tr '\n' '|' | sed 's/|$//')"
+# EVERY COMMIT OF THE RANGE IS A RECORDED LANDING, OR THE LIST IS NOT PRINTED (wave-27 T34; review
+# pass 30 should-fix 1 and 2, A-orch-86). The tick hands `units_unrecorded` the range's first-parent
+# commits, from one `git rev-list` per offered row, and the library says which are the merge= of no
+# header naming a row of the plan: a header with `row=—`, an id the table lacks, a commit made
+# straight on the working branch, a landed row of any kind that left no header. Any one of them makes
+# the tick print one `MOVED unknown` line. A header's merge may be short; it names the commit it is a
+# prefix of. Still no git: the commits are the caller's.
+MV_Z=5555555555555555555555555555555555555555
+mv_unrec() {  # <commits, one per line> <record> -> units_unrecorded's answer, |-joined
+  call units_unrecorded "$SANDBOX/mv.md" "$2" <<< "$1" | tr '\n' '|' | sed 's/|$//'
+}
+expect_eq "MOVED.7 a commit no header names is unrecorded; the rows' merges are not" "$MV_Z" \
+  "$(mv_unrec "$MV_X
+$MV_Z
+$MV_Y" "$SANDBOX/mv-landings.log")"
+expect_eq "MOVED.7b …every commit recorded: nothing, exit 0" "|0" \
+  "$(call units_unrecorded "$SANDBOX/mv.md" "$SANDBOX/mv-landings.log" <<< "$MV_X
+$MV_Y"; printf '|%s' "$CALL_RC")"
+{ mv_head T7 "$MV_X"; mv_head — "$MV_Y"; mv_head T99 "$MV_Y"; } > "$SANDBOX/mv-nameless.log"
+expect_eq "MOVED.7c a merge named only by row=— or by an id the table lacks is unrecorded" "$MV_Y" \
+  "$(mv_unrec "$MV_X
+$MV_Y" "$SANDBOX/mv-nameless.log")"
+expect_eq "MOVED.7d no record file: every commit of the range is unrecorded, in the order given" "$MV_X|$MV_Y" \
+  "$(mv_unrec "$MV_X
+$MV_Y" "$SANDBOX/no-such-landings.log")"
+mv_plan "$SANDBOX/mv-doc.md" "$MV_WHOLE" "$MV_T1" "$MV_T7" \
+  "| T9 | 4 | doc | the changelog | implementor | — | 30 | REQ-12 | CHANGELOG.md |  | landed |" "$MV_T3"
+{ mv_head T7 "${MV_X:0:7}"; mv_head T9 "$MV_Z"; } > "$SANDBOX/mv-doc.log"
+expect_eq "MOVED.7e a landed doc row with a header is a recorded landing, and a short merge names its commit" "" \
+  "$(call units_unrecorded "$SANDBOX/mv-doc.md" "$SANDBOX/mv-doc.log" <<< "$MV_X
+$MV_Z")"
+expect_eq "MOVED.7f …so both rows are named, the doc row with its criteria" \
+  "T7${TAB}REQ-2${TAB}AC-2.1, AC-2.2|T9${TAB}REQ-12${TAB}AC-12.1" \
+  "$(call units_rows_in_range "$SANDBOX/mv-doc.md" "${MV_W}..${MV_Z}" "$SANDBOX/mv-doc.log" <<< "$MV_X
+$MV_Z" | tr '\n' '|' | sed 's/|$//')"
+expect_eq "MOVED.7g control: the same doc row with no header leaves its merge unrecorded" "$MV_Z" \
+  "$(call units_unrecorded "$SANDBOX/mv-doc.md" "$SANDBOX/mv-landings.log" <<< "$MV_X
+$MV_Z" | /usr/bin/grep -x "$MV_Z")"
 
 # ============================================================
 section "HOLD — wave-26 T13: a doc row waits for its reads, not its step, in a table that declares reads (REQ-6, AC-6.1, AC-6.2; D3)"

@@ -2735,7 +2735,9 @@ row_copy_args() {  # <row> <session id> [drop-done] -> sets ROW_COPY_ARGS
            progress claims cadence absent waiver tool_use_id plan; do
     ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
   done
-  for k in files suites_allowed suites_source teammate_id adopted_from; do
+  # `questions=` too (wave-27 T34; T15's report item 2, A-orch-73): a reader's questions are part
+  # of its contract, so the amend, hold and extend rows keep them.
+  for k in files suites_allowed suites_source teammate_id adopted_from questions; do
     row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
   done
   if [ "${3-}" != drop-done ] && row_has_key "$row" done; then
@@ -5369,8 +5371,9 @@ EOF
   #
   # THE MERGED FIELDS ARE JUDGED BY THE DISPATCH WALL'S GRAMMAR (Δ10). The verb builds the
   # span a brief carrying the merged contract would hold — `Files:`, `Suites:`,
-  # `Re-executes:` — and hands it to `brief_validate_fields` with the row's own role, so the
-  # auditor's three-run cap binds here as it does at dispatch. A declared budget stays
+  # `Re-executes:` — and hands it to `brief_validate_fields` with the row's own role and its
+  # `questions=` as a `Questions:` line, so the three-run cap binds a reader holding the
+  # `evidence` question here as it does at dispatch (`dp_reads_evidence`, lib/brief.sh). A declared budget stays
   # declared (the old set plus the added suites); a DERIVED one is re-derived from the
   # merged files by the configured impact command, and the old set is kept beside it.
   #
@@ -5428,8 +5431,20 @@ EOF
     # THE ADDITIONS AS THE GRAMMAR READS THEM, alone: what each flag contributes once lifted.
     # The Files: reader is the dispatch wall's (wave-27 T29, T42; REQ-12, D21), so
     # `--files+ CONTEXT.md` is the path a dispatch would have recorded.
-    AM_ADD="$(lift_contract_fields "$(poker_brief_span "$AMEND_FILES" "$AMEND_SUITES" "" "$AMEND_RUNS")" "$AM_ROLE")"
-    AM_NEW_FILES="$(poker_union , "$AM_OLD_FILES" "$(brief_field "$AM_ADD" files)")"
+    # EACH --files+ VALUE ON ITS OWN (wave-27 T34; review pass 19 should-fix 2, A-orch-70), as the
+    # dispatch wall reads one line: joined into one Files: line, a ` #` note in one value hid every
+    # later one. A value the reader records nothing from goes to the grammar as typed, below.
+    AM_ADD="$(lift_contract_fields "$(poker_brief_span "" "$AMEND_SUITES" "" "$AMEND_RUNS")" "$AM_ROLE")"
+    AM_ADD_FILES=""; AM_TYPED=""
+    while IFS= read -r AM_F; do
+      [ -n "$AM_F" ] || continue
+      AM_FL="$(brief_field "$(lift_contract_fields "Files: $AM_F" "$AM_ROLE")" files)"
+      AM_ADD_FILES="$(poker_union , "$AM_ADD_FILES" "$AM_FL")"
+      if [ -n "$AM_FL" ]; then AM_TYPED="${AM_TYPED}$(printf '%s' "$AM_FL" | tr ',' '\n')"$'\n'
+      else AM_TYPED="${AM_TYPED}${AM_F}"$'\n'; fi
+    done <<< "$AMEND_FILES"
+    AM_NEW_FILES="$(poker_union , "$AM_OLD_FILES" "$AM_ADD_FILES")"
+    AM_Q="$(line_field "$AM_ROW" questions)"
 
     # THE DECLARED HALF OF THE BUDGET. A declared (or unlabelled) budget carries its old set
     # into the span; a derived one is not a declaration and is re-derived below. `none` is a
@@ -5445,7 +5460,10 @@ EOF
 
     # The additions go into the span as typed, beside the merged set, so an entry the reader
     # does not read as a path reaches the grammar and is refused by name, never dropped.
-    AM_SPAN="$(poker_brief_span "$(printf '%s' "$AM_NEW_FILES" | tr ',' '\n')"$'\n'"$AMEND_FILES" "$AM_DECL" "$AM_OLD_RUNS" "$AMEND_RUNS")"
+    AM_SPAN="$(poker_brief_span "$(printf '%s' "$AM_NEW_FILES" | tr ',' '\n')"$'\n'"$AM_TYPED" "$AM_DECL" "$AM_OLD_RUNS" "$AMEND_RUNS")"
+    # THE ROW'S QUESTIONS GO WITH IT (wave-27 T34; T15's report item 1, A-orch-73), so a reader
+    # holding `evidence` meets the cap a dispatch of it would.
+    [ -n "$AM_Q" ] && AM_SPAN="${AM_SPAN}"$'\n'"Questions: ${AM_Q//,/, }"
     AM_LIFT="$(lift_contract_fields "$AM_SPAN" "$AM_ROLE")"
     POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
     AM_RC=0
@@ -6305,7 +6323,7 @@ PF_OTHER_LIST
     fi
     RC_OUT="$(cd "$RC_CO" 2>/dev/null || exit 1
       set -f
-      export BIONIC_CHECK_BASE="$RC_BASE" BIONIC_CHECK_HEAD="$RC_HEAD"
+      export BIONIC_CHECK_BASE="$RC_BASE" BIONIC_CHECK_HEAD="$RC_HEAD" BIONIC_CHECK_TREE="$(pwd -P)"
       # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
       exec $RC_CMD </dev/null 2>&1)"; RC_RC=$?
     if [ "$RC_RC" -ne 0 ]; then
@@ -7653,14 +7671,16 @@ EOF
             # a bare `live:head` row's is the one range 1.11.0 printed.
             # WHAT MOVED INSIDE IT (wave-27 T43; D10; A-orch-48, A-orch-71): once every question
             # the row reads has its whole reading, a `MOVED` line names each plan row whose landing
-            # lies inside the range, with the matrix criteria it serves, so a read after a fix
-            # reads those rows and no others. A landing is the merge the run's landing record
-            # (`landing-proofs.log`, written by land) gives the row (`units_landings`); this
-            # tick, which already reads git, says which of those merges lie inside a..b (a an
-            # ancestor of the merge and not it, the merge an ancestor of b) and hands them to
-            # `units_rows_in_range` on stdin. A landed build row the record does not name, or
-            # names with a merge that is no commit, is unknown: one `MOVED unknown` line stands
-            # in place of every other, and the read is the whole range.
+            # lies inside the range, with the matrix criteria it serves. A landing is a merge the
+            # run's landing record (`landing-proofs.log`, written by land) gives a row.
+            # THE LIST IS PRINTED ONLY WHEN IT IS THE WHOLE RANGE (wave-27 T34; review pass 30
+            # should-fix 1 and 2, A-orch-86): this tick lists the range's first-parent commits with
+            # ONE `git rev-list` per offered row and hands them to the library, which runs no git.
+            # When every one is the merge of a header naming a row (`units_unrecorded` prints
+            # none), the rows are named (`units_rows_in_range`); otherwise one `MOVED unknown` line
+            # says how many are not, in place of every other, and the read is the whole range. A
+            # header with `row=—`, a commit made straight on the working branch and a landed row
+            # of any kind that left no header are all that case. `MOVED none` is an empty range.
             while IFS="$(printf '\t')" read -r LR_ID _; do
               [ -n "$LR_ID" ] || continue
               case "$SCHED_OFFERED " in *" $LR_ID "*) ;; *) continue ;; esac
@@ -7668,27 +7688,21 @@ EOF
               [ -n "$SCHED_RANGE" ] && say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more"
               [ -n "$SCHED_RANGE" ] && units_whole_read "$SCHED_PLAN" "$LR_ID" || continue
               LR_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(basename "$SCHED_PLAN" .plan.md)/landing-proofs.log"
-              LR_A="${SCHED_RANGE%%..*}"; LR_B="${SCHED_RANGE#*..}"; LR_IN=""; LR_UNK=""
-              while IFS="$(printf '\t')" read -r LM_ID LM_MERGE LM_OWED; do
-                [ -n "$LM_ID" ] || continue
-                if [ "$LM_MERGE" = - ] || ! git -C "$REPO_REAL" cat-file -e "$LM_MERGE^{commit}" 2>/dev/null; then
-                  [ "$LM_OWED" = owed ] && LR_UNK="${LR_UNK:+$LR_UNK }$LM_ID"
-                  continue
-                fi
-                [ "$(git -C "$REPO_REAL" rev-parse -q --verify "$LM_MERGE^{commit}" 2>/dev/null)" != "$(git -C "$REPO_REAL" rev-parse -q --verify "$LR_A^{commit}" 2>/dev/null)" ] \
-                  && git -C "$REPO_REAL" merge-base --is-ancestor "$LR_A" "$LM_MERGE" 2>/dev/null \
-                  && git -C "$REPO_REAL" merge-base --is-ancestor "$LM_MERGE" "$LR_B" 2>/dev/null \
-                  && LR_IN="${LR_IN}${LM_MERGE}
-"
-              done <<EOF_LM
-$(units_landings "$SCHED_PLAN" "$LR_REC" 2>/dev/null)
-EOF_LM
-              if [ -n "$LR_UNK" ]; then
-                say "MOVED unknown — $LR_UNK carry no landing record"
+              if ! LR_IN="$(git -C "$REPO_REAL" rev-list --first-parent "$SCHED_RANGE" 2>/dev/null)"; then
+                say "MOVED unknown — the range's commits cannot be listed"
                 continue
               fi
-              LR_MOVED="$(printf '%s' "$LR_IN" | units_rows_in_range "$SCHED_PLAN" "$SCHED_RANGE" "$LR_REC" 2>/dev/null)"
-              [ -n "$LR_MOVED" ] || { say "MOVED none"; continue; }
+              [ -n "$LR_IN" ] || { say "MOVED none"; continue; }
+              LR_UNK="$(printf '%s\n' "$LR_IN" | units_unrecorded "$SCHED_PLAN" "$LR_REC" 2>/dev/null | awk 'NF { n++ } END { print n + 0 }')"
+              LR_MOVED=""
+              [ "$LR_UNK" = 0 ] && LR_MOVED="$(printf '%s\n' "$LR_IN" | units_rows_in_range "$SCHED_PLAN" "$SCHED_RANGE" "$LR_REC" 2>/dev/null)"
+              if [ -z "$LR_MOVED" ]; then
+                # A range every commit of which a header names, and no row's last landing among
+                # them, cannot be listed whole either: said as the same one line.
+                [ "$LR_UNK" = 0 ] && LR_UNK="$(printf '%s\n' "$LR_IN" | awk 'NF { n++ } END { print n + 0 }')"
+                say "MOVED unknown — ${LR_UNK} commit(s) in the range are no recorded landing"
+                continue
+              fi
               while IFS="$(printf '\t')" read -r LM_ID _ LM_CRIT; do
                 [ -n "$LM_ID" ] && say "MOVED $LM_ID — ${LM_CRIT:-no criterion in the matrix}"
               done <<EOF_MV
