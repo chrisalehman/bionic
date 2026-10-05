@@ -3132,12 +3132,15 @@ sj_intended "$SJE5" live2 toolu_01SJEtwoL2 "$SJ_TYPE" suites_allowed=alpha.test.
 run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$SJE5" "$SJ_TYPE" "a0000000000sje5")"
 expect_eq "SJ-e5 control: two launches a start can follow are still not chosen between" "0 identified rows" "$(sj_e_joined "$SJE5")"
 
-# SJ-e6 a stale launch ALONE takes no start (F4: it used to be the one candidate, and the agent
-# ran under its name, budget and plan).
+# SJ-e6 a launch outside the window ALONE is still the candidate (wave-27 T59; review pass 36 S2,
+# A-orch-100): the window is a tie-break between launches, never a filter that leaves a start with
+# none. A foreground dispatch whose permission prompt is answered after five minutes starts late,
+# and its printed remedy cannot run while the orchestrator is held in its call. T38's reading (F4:
+# joined to nothing) is undone; F3 stays closed by SJ-e1, as a later dispatch writes a newer launch.
 IFS='|' read -r SJE6 _ _ _ <<< "$(make_world stalealone yes)"
 sj_intended "$SJE6" stale toolu_01SJEaloneS "$SJ_TYPE" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 3600)"
 run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$SJE6" "$SJ_TYPE" "a0000000000sje6")"
-expect_eq "SJ-e6 a stale launch alone is no candidate: the start is joined to nothing" "0 identified rows" "$(sj_e_joined "$SJE6")"
+expect_eq "SJ-e6 a launch an hour old, alone, is the candidate: the start joins it" "stale:a0000000000sje6" "$(sj_e_joined "$SJE6")"
 expect_eq "SJ-e6b …and the start still exits 0" "0" "$REC_ST"
 
 # ============================================================
@@ -3678,5 +3681,178 @@ sc_guard SC-e3 slash a/b none    "s/''|\\.|\\.\\.|\\*\\/\\*)/''|.|..)/"     "a r
 sc_guard SC-e4 lscr  sc-l1 scratch 's/\[ -L "\$STATE_DIR\/scratch" \] || //'              "a scratch/ that is a symlink"
 sc_guard SC-e5 lses  sc-l2 session 's/\[ -L "\$STATE_DIR\/scratch\/\$BIONIC_SID" \] || //' "a scratch/<session> that is a symlink"
 sc_guard SC-e6 lleaf sc-l3 leaf    's/ || \[ -L "\$_sl_dir" \]//'                         "a leaf that is a symlink"
+
+# ============================================================
+section "Section 22: §WINDOW — the start join's window is a tie-break, never a refusal (wave-27 T59; review pass 36 S2, N1, N4, N6)"
+# ============================================================
+#
+# The dispatch wall writes the launch row BEFORE the harness asks the user to permit the dispatch, so
+# a plain foreground start can come any time after it. Among the launches a start can follow (this
+# session's, this plan's, not acked, unclaimed), one inside the window is preferred to one outside
+# it; with none inside, the newest is the candidate. A stamp later than now reads as now. The four
+# registrations of one start judge the window against ONE reading of the clock. A set recorded for
+# an agent's id (`amend <id>`, a row of its own, `status=unplaced`) is carried onto the row that
+# later places that agent, by its start or by its launch call's return.
+#
+# FIXTURE FIDELITY: launch rows through `sj_intended` → `roster_row`, in the dispatch wall's shape;
+# starts through `mk_subagent_start` and the manifest's own registrations (`pc_start`); the amend
+# through the shipped hooks/session-poker.sh, against the world's own transcript; the return in the
+# sync shape SJ-a uses. The clock is pinned with `BIONIC_NOW_EPOCH`, the libraries' own idiom, at a
+# moment in the past, so a recorder that ignores the pin reads every launch as an hour stale.
+#
+# fails-when: a lone late launch, or the newer of two late ones, is not joined; a future stamp beats
+# a real launch; two registrations of one start disagree at the window's edge; the set an amend by
+# id recorded is lost when the agent is placed.
+WN_IMP=bionic:implementor
+wn_world() {  # <label> -> "<repo>|<transcript>|<config dir>", its tests/ holding three suites
+  local repo tr sub cfg
+  IFS='|' read -r repo tr sub cfg <<< "$(make_world "$1" yes)"
+  mkdir -p "$repo/tests"
+  for _wn_s in alpha beta gamma; do printf '#!/bin/bash\n' > "$repo/tests/${_wn_s}.test.sh"; done
+  printf '%s|%s|%s' "$repo" "$tr" "$cfg"
+}
+wn_walls() {  # <repo> <command> <agent id> <type> — sj_walls with the agent's own type
+  local was="$SJ_TYPE"; SJ_TYPE="$4"; sj_walls "$1" "$2" "$3"; SJ_TYPE="$was"
+}
+wn_iso() {  # <epoch> -> its ISO stamp
+  date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ
+}
+wn_last_for_id() {  # <repo> <agent id> -> the last row carrying that id (the budget wall's pick)
+  grep -F "|agent_id=$2|" "$1/.bionic/tmp/roster-${SID_A}.state" | tail -1
+}
+wn_return() {  # <repo> <transcript> <tool_use_id> <agent id> <type> <name> — the launch call's return (sync shape)
+  run_rec "$(jq -n --arg s "$SID_A" --arg t "$2" --arg c "$1" --arg u "$3" --arg a "$4" --arg ty "$5" --arg n "$6" \
+    '{session_id:$s, transcript_path:$t, cwd:$c, permission_mode:"bypassPermissions",
+      hook_event_name:"PostToolUse", tool_name:"Agent",
+      tool_input:{description:"d", prompt:"go", subagent_type:$ty, run_in_background:false, name:$n},
+      tool_response:{status:"completed", prompt:"go", agentId:$a, agentType:$ty,
+                     content:[{type:"text",text:"DONE"}], totalDurationMs:10},
+      tool_use_id:$u, duration_ms:12}')"
+}
+WN_POKE_OUT=""; WN_POKE_ST=0
+wn_amend() {  # <repo> <transcript> <config dir> <agent id> <suite> — `amend <id> --suites+`, as main runs it
+  mkdir -p "${2%.jsonl}/subagents"; : > "${2%.jsonl}/subagents/agent-$4.jsonl"
+  WN_POKE_OUT=$( cd "$1" && env HOME="$(dirname "$3")" CLAUDE_CONFIG_DIR="$3" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
+    CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_PROJECT_DIR= bash "$HERE/session-poker.sh" amend "$4" --suites+ "$5" --reason t59 2>&1 )
+  WN_POKE_ST=$?
+}
+
+# ---- WN-a: a lone launch outside the window is joined (S2) ----
+for _wn in 301 3600; do
+  IFS='|' read -r WNA_REPO WNA_TR WNA_CFG <<< "$(wn_world "wnlone$_wn")"
+  sj_intended "$WNA_REPO" "w$_wn" "toolu_01WNA$_wn" "$WN_IMP" suites_allowed=alpha.test.sh "launched_at=$(sj_ago "$_wn")"
+  run_rec "$(mk_subagent_start "$SID_A" "$WNA_TR" "$WNA_REPO" "$WN_IMP" "a00000000wna$_wn")"
+  expect_eq "WN-a1 ($_wn s) a lone launch outside the window is joined" "w$_wn:a00000000wna$_wn" "$(sj_e_joined "$WNA_REPO")"
+  wn_walls "$WNA_REPO" 'bash tests/alpha.test.sh' "a00000000wna$_wn" "$WN_IMP"
+  expect_eq "WN-a2 ($_wn s) …and the writer's suite is admitted" "0" "$SJ_ST"
+  expect_nonempty "WN-a3 ($_wn s) …wrapped in the booking shim" "$(sj_wrap)"
+done
+
+# ---- WN-b: a reader whose lone launch is outside the window gets its checks (S2) ----
+IFS='|' read -r WNB_REPO WNB_TR WNB_CFG <<< "$(wn_world wnreader)"
+sj_intended "$WNB_REPO" w-late-crit toolu_01WNB bionic:critic suites_allowed=none questions=adversarial "launched_at=$(sj_ago 301)"
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$WNB_TR" "$WNB_REPO" bionic:critic "a00000000wnbcrt")"
+expect_eq "WN-b1 a critic launched 301 s ago is joined" "w-late-crit:a00000000wnbcrt" "$(sj_e_joined "$WNB_REPO")"
+expect_eq "WN-b2 …and its adversarial checks are pushed, as for a fresh launch" \
+  "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
+expect_empty "WN-b3 …and nothing it was not dealt (beside the positive above)" "$PC_OUT_structure"
+
+# ---- WN-c: two launches, both outside the window: the newer is taken (S2) ----
+IFS='|' read -r WNC_REPO WNC_TR WNC_CFG <<< "$(wn_world wntwolate)"
+sj_intended "$WNC_REPO" w900 toolu_01WNC900 "$WN_IMP" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 900)"
+sj_intended "$WNC_REPO" w400 toolu_01WNC400 "$WN_IMP" suites_allowed=beta.test.sh "launched_at=$(sj_ago 400)"
+run_rec "$(mk_subagent_start "$SID_A" "$WNC_TR" "$WNC_REPO" "$WN_IMP" "a00000000wnctwo")"
+expect_eq "WN-c1 two launches outside the window: the newer (400 s) is joined" "w400:a00000000wnctwo" "$(sj_e_joined "$WNC_REPO")"
+expect_eq "WN-c2 …and the older is left as it was" "1" "$(grep -c '|name=w900|' "$WNC_REPO/.bionic/tmp/roster-${SID_A}.state")"
+
+# ---- WN-d: a launch stamped an hour ahead reads as now (N4) ----
+# Beside a real launch 10 s old, both are fresh, and two fresh launches of one type are not chosen
+# between (SJ-e5): neither is joined and one line says so.
+IFS='|' read -r WND_REPO WND_TR WND_CFG <<< "$(wn_world wnfuture)"
+sj_intended "$WND_REPO" wfut toolu_01WNDF "$WN_IMP" suites_allowed=alpha.test.sh "launched_at=$(date -u -v+3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+3600 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+sj_intended "$WND_REPO" wreal toolu_01WNDR "$WN_IMP" suites_allowed=beta.test.sh "launched_at=$(sj_ago 10)"
+run_rec "$(mk_subagent_start "$SID_A" "$WND_TR" "$WND_REPO" "$WN_IMP" "a00000000wndfut")"
+expect_eq "WN-d1 a future stamp beside a real launch: two fresh launches, neither joined" "0 identified rows" "$(sj_e_joined "$WND_REPO")"
+expect_contains "WN-d2 …and the line says two launches could not be told apart (the positive)" \
+  "2 launches of $WN_IMP" "$REC_ERR"
+
+# ---- WN-e: one start reads the clock once (N6) ----
+# A at T-300 (inside the window at T, outside at T+1), B at T-10, carrying different questions. At
+# T both are candidates and differ, so no checks file is pushed; at T+1 only B is, and its checks
+# would be. One registration runs at T and the other at T+1; with one reading both judge at the
+# first one's clock. The control runs the T+1 registration alone, in a world of its own.
+WN_T=1767225600   # 2026-01-01T00:00:00Z
+wn_edge_world() {  # <label> -> repo|transcript|config, holding A (structure) and B (adversarial)
+  local w; w=$(wn_world "$1")
+  sj_intended "${w%%|*}" wedgeA "toolu_01WNE${1}A" bionic:critic suites_allowed=none questions=structure "launched_at=$(wn_iso $((WN_T - 300)))"
+  sj_intended "${w%%|*}" wedgeB "toolu_01WNE${1}B" bionic:critic suites_allowed=none questions=adversarial "launched_at=$(wn_iso $((WN_T - 10)))"
+  printf '%s' "$w"
+}
+IFS='|' read -r WNE_REPO WNE_TR WNE_CFG <<< "$(wn_edge_world wnclk1)"
+WNE_PAY="$(mk_subagent_start "$SID_A" "$WNE_TR" "$WNE_REPO" bionic:critic a00000000wneclk)"
+export BIONIC_NOW_EPOCH="$WN_T"; pc_start "$PC_REPO_ROOT" "$WNE_PAY" terms
+export BIONIC_NOW_EPOCH=$((WN_T + 1)); pc_start "$PC_REPO_ROOT" "$WNE_PAY" adversarial
+unset BIONIC_NOW_EPOCH
+expect_eq "WN-e1 terms at T, adversarial at T+1: the terms place the start on neither launch" "0 identified rows" "$(sj_e_joined "$WNE_REPO")"
+expect_contains "WN-e2 …and the adversarial registration, judging at T too, names both candidates" \
+  "wedgeA=structure" "$PC_ERR_adversarial"
+expect_empty "WN-e3 …and pushes no checks file (beside the line above)" "$PC_OUT_adversarial"
+IFS='|' read -r WNF_REPO WNF_TR WNF_CFG <<< "$(wn_edge_world wnclk2)"
+WNF_PAY="$(mk_subagent_start "$SID_A" "$WNF_TR" "$WNF_REPO" bionic:critic a00000000wnfclk)"
+export BIONIC_NOW_EPOCH="$WN_T"; pc_start "$PC_REPO_ROOT" "$WNF_PAY" adversarial
+WNF_ERR="$PC_ERR_adversarial"   # pc_start clears every registration's output on its next call
+export BIONIC_NOW_EPOCH=$((WN_T + 1)); pc_start "$PC_REPO_ROOT" "$WNF_PAY" terms
+unset BIONIC_NOW_EPOCH
+expect_contains "WN-e4 adversarial at T, terms at T+1: the question registration names both candidates" \
+  "wedgeB=adversarial" "$WNF_ERR"
+expect_eq "WN-e5 …and the terms, judging at T too, place the start on neither" "0 identified rows" "$(sj_e_joined "$WNF_REPO")"
+IFS='|' read -r WNG_REPO WNG_TR WNG_CFG <<< "$(wn_edge_world wnclk3)"
+export BIONIC_NOW_EPOCH=$((WN_T + 1))
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$WNG_TR" "$WNG_REPO" bionic:critic a00000000wngclk)" adversarial
+unset BIONIC_NOW_EPOCH
+expect_eq "WN-e6 control: the T+1 registration alone pushes B's checks (the edge is real)" \
+  "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
+
+# ---- WN-f: the set an amend by id recorded survives the placing (N1) ----
+# Two fresh launches of one type: the start is placed on neither, `amend <id>` records gamma for the
+# id, and then the launch call RETURNS (f) or a later start of the same id is placed (g).
+IFS='|' read -r WNH_REPO WNH_TR WNH_CFG <<< "$(wn_world wnamendret)"
+WNH_A=a00000000wnhamd
+sj_intended "$WNH_REPO" wL1 toolu_01WNHL1 "$WN_IMP" suites_allowed=alpha.test.sh
+sj_intended "$WNH_REPO" wL2 toolu_01WNHL2 "$WN_IMP" suites_allowed=beta.test.sh
+run_rec "$(mk_subagent_start "$SID_A" "$WNH_TR" "$WNH_REPO" "$WN_IMP" "$WNH_A")"
+expect_eq "WN-f precondition: the start was placed on neither launch" "0 identified rows" "$(sj_e_joined "$WNH_REPO")"
+wn_amend "$WNH_REPO" "$WNH_TR" "$WNH_CFG" "$WNH_A" gamma.test.sh
+expect_contains "WN-f precondition: amend by id recorded the set (rc=$WN_POKE_ST)" "poker: amended — $WNH_A" "$WN_POKE_OUT"
+wn_walls "$WNH_REPO" 'bash tests/gamma.test.sh' "$WNH_A" "$WN_IMP"
+expect_eq "WN-f precondition: …and gamma runs" "0" "$SJ_ST"
+wn_return "$WNH_REPO" "$WNH_TR" toolu_01WNHL1 "$WNH_A" "$WN_IMP" wL1
+WNH_LAST=$(wn_last_for_id "$WNH_REPO" "$WNH_A")
+expect_eq "WN-f1 the launch call's return places the agent: the last row for its id is the confirmed one" \
+  "confirmed:wL1" "$(sj_field "$WNH_LAST" status):$(sj_field "$WNH_LAST" name)"
+wn_walls "$WNH_REPO" 'bash tests/gamma.test.sh' "$WNH_A" "$WN_IMP"
+expect_eq "WN-f2 …and the suite the amend recorded is still admitted" "0" "$SJ_ST"
+wn_walls "$WNH_REPO" 'bash tests/alpha.test.sh' "$WNH_A" "$WN_IMP"
+expect_eq "WN-f3 …beside the launch's own set" "0" "$SJ_ST"
+wn_walls "$WNH_REPO" 'bash tests/beta.test.sh' "$WNH_A" "$WN_IMP"
+expect_eq "WN-f4 …while the other launch's suite is still refused" "2" "$SJ_ST"
+
+IFS='|' read -r WNI_REPO WNI_TR WNI_CFG <<< "$(wn_world wnamendstart)"
+WNI_A=a00000000wniamd
+sj_intended "$WNI_REPO" wM1 toolu_01WNIM1 "$WN_IMP" suites_allowed=alpha.test.sh
+sj_intended "$WNI_REPO" wM2 toolu_01WNIM2 "$WN_IMP" suites_allowed=beta.test.sh
+run_rec "$(mk_subagent_start "$SID_A" "$WNI_TR" "$WNI_REPO" "$WN_IMP" "$WNI_A")"
+wn_amend "$WNI_REPO" "$WNI_TR" "$WNI_CFG" "$WNI_A" gamma.test.sh
+expect_contains "WN-g precondition: amend by id recorded the set" "poker: amended — $WNI_A" "$WN_POKE_OUT"
+# wM2's own agent returns, so wM2 is claimed and the next start of WNI_A has one candidate.
+wn_return "$WNI_REPO" "$WNI_TR" toolu_01WNIM2 a00000000wniothr "$WN_IMP" wM2
+run_rec "$(mk_subagent_start "$SID_A" "$WNI_TR" "$WNI_REPO" "$WN_IMP" "$WNI_A")"
+WNI_LAST=$(wn_last_for_id "$WNI_REPO" "$WNI_A")
+expect_eq "WN-g1 a later start places the agent: the last row for its id is the identified one" \
+  "identified:wM1" "$(sj_field "$WNI_LAST" status):$(sj_field "$WNI_LAST" name)"
+wn_walls "$WNI_REPO" 'bash tests/gamma.test.sh' "$WNI_A" "$WN_IMP"
+expect_eq "WN-g2 …and the suite the amend recorded is still admitted" "0" "$SJ_ST"
+wn_walls "$WNI_REPO" 'bash tests/alpha.test.sh' "$WNI_A" "$WN_IMP"
+expect_eq "WN-g3 …beside the launch's own set" "0" "$SJ_ST"
 
 finish
