@@ -19,7 +19,7 @@ Is the change built from what already exists, and shaped well? Read the code in 
 
 ## A whole read
 
-When the range is the whole run (`scope: whole`), read only what the pieces duplicate between them; this is not a second read of each piece. Ask each check across pieces, such as two pieces that each added a site for one concept. A check no cross-piece case can reach is `n/a`. How the pieces interact is the adversarial reader's.
+When the range is the whole run (`scope: whole`), read only what the pieces duplicate between them; this is not a second read of each piece. Ask each check across pieces: `reuse` and `one-site` when two pieces each added a site for one concept. A check no cross-piece case can reach is `n/a`. How the pieces interact is the adversarial reader's.
 
 ## The record
 
