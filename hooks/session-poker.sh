@@ -24,6 +24,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; on a pass, its check fact (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -424,6 +425,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
+  die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; on exit 0 record its log and a kind=check proof line"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -650,6 +652,11 @@ case "$VERB" in
       usage "waive takes exactly two arguments: the question (evidence, adversarial or structure) and the user's reply, verbatim."
     fi
     WV_Q="$1"; WV_REPLY="$2"
+    ;;
+  # NO OPERAND (wave-27 T16; D12): the range is the verb's own, from the last release to the working
+  # head, so a base typed on the command line is the usage error, as a head is for proof-add.
+  release-check)
+    [ $# -eq 0 ] || usage "release-check takes no arguments: it runs from the newest tag reachable from the plan's integration-branch (else its base-sha) to the working head."
     ;;
   # ONE OPTIONAL FLAG (wave-26 T32; D4): `--wait` waits for another writer's lock, which only the
   # launch recorder's detached call can afford; the tick and the turn-end wall leave a held lock
@@ -5587,6 +5594,12 @@ EOF
       die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name floor, review or task. The plan is unchanged."
       exit 1
     fi
+    # A CHECK FACT IS WRITTEN BY THE VERB THAT RAN THE CHECK (wave-27 T16; D12): a log handed in
+    # here was written by nobody's run.
+    if [ "$PF_KIND" = check ]; then
+      die "REFUSED — a check proof is written by release-check, which runs the project's declared command and keeps its log; run release-check. The plan is unchanged."
+      exit 1
+    fi
     if [ -n "$PF_QUESTION" ] && ! proof_question_ok "$PF_QUESTION"; then
       die "REFUSED — '$(clean "$PF_QUESTION")' is not a reading question: name evidence, adversarial or structure. The plan is unchanged."
       exit 1
@@ -5889,6 +5902,89 @@ PF_OTHER_LIST
     fi
     plan_verb_swap waive "the $WV_Q waiver at $WV_HEAD" writer
     say "waive — question=$WV_Q head=$WV_HEAD by $WV_WHO: written to $PV_PLAN; dry-committed first."
+    exit 0
+    ;;
+
+  # THE RELEASE CHECK (wave-27 T16; D12). A project may name one command in `.bionic/config.yaml`
+  # under `release-check:`. This verb runs it in the checkout of the plan's working branch, with
+  # BIONIC_CHECK_BASE at the last release and BIONIC_CHECK_HEAD at the working head, its words
+  # split on blanks with globbing off as `impact-command:` is run (lib/proof.sh `_proof_map`).
+  # THE LAST RELEASE is the newest tag reachable from the plan's `integration-branch:`: the verb
+  # runs before the release is tagged, so that tag is the previous release (A-orch-17); with none,
+  # the plan's `base-sha:`. On exit 0 it writes `record/<wave>/release-check-<head>.log`, opening
+  # `head=<40-hex> rc=0`, and the `kind=check` proof line naming it (lib/proof.sh
+  # `proof_attested` holds the log against the checkout). On any other exit it prints the
+  # command's output and writes nothing. With no key it runs, writes and prints nothing.
+  release-check)
+    RC_CMD="$(config_value "$(project_root "$PWD")" release-check "" 2>/dev/null)"
+    [ -n "$RC_CMD" ] || exit 0
+    if ! { declare -F proof_line >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_add_line >/dev/null 2>&1; then
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run and the plan is unchanged."
+      exit 2
+    fi
+    plan_verb_open release-check
+    RC_WB="$(proof_working_branch "$PV_PLAN")"
+    RC_CO=""; [ -z "$RC_WB" ] || RC_CO="$(proof_checkout "$PV_REPO" "$RC_WB")" || RC_CO=""
+    RC_HEAD=""; [ -z "$RC_CO" ] || RC_HEAD="$(git -C "$RC_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
+    case "$RC_HEAD" in
+      [0-9a-f]*) : ;;
+      *)
+        die "REFUSED — no checkout of $PV_REPO has the plan's working-branch ${RC_WB:-(none named)} checked out, so there is no head to check; nothing was run and the plan is unchanged."
+        exit 1 ;;
+    esac
+    # THE COMMAND RUNS ON THE HEAD ALONE: the log says it ran at that head, and a command that reads
+    # the working files would read uncommitted changes as the head's.
+    if ! git -C "$RC_CO" diff-index --quiet HEAD -- 2>/dev/null \
+       || [ -n "$(git -C "$RC_CO" ls-files --others --exclude-standard 2>/dev/null)" ]; then
+      die "REFUSED — the working checkout $RC_CO has uncommitted changes, so the check would not read the head $RC_HEAD alone; commit them and run release-check again. Nothing was run and the plan is unchanged."
+      exit 1
+    fi
+    RC_IB="$(plan_frontmatter_get "$PV_PLAN" integration-branch 2>/dev/null)"
+    RC_BASE=""; RC_FROM=""
+    if [ -n "$RC_IB" ]; then
+      RC_TAG="$(git -C "$RC_CO" describe --tags --abbrev=0 "refs/heads/$RC_IB" 2>/dev/null)" || RC_TAG=""
+      [ -z "$RC_TAG" ] || RC_BASE="$(git -C "$RC_CO" rev-parse --verify -q "refs/tags/$RC_TAG^{commit}" 2>/dev/null)"
+      [ -z "$RC_BASE" ] || RC_FROM="tag $RC_TAG on $RC_IB"
+    fi
+    if [ -z "$RC_BASE" ]; then
+      RC_BS="$(proof_plan_base "$PV_PLAN")"
+      [ -z "$RC_BS" ] || RC_BASE="$(git -C "$RC_CO" rev-parse --verify -q "$RC_BS^{commit}" 2>/dev/null)"
+      RC_FROM="base-sha $RC_BS"
+    fi
+    if [ -z "$RC_BASE" ]; then
+      die "REFUSED — no tag is reachable from the plan's integration-branch (${RC_IB:-none named}) and its base-sha (${RC_BS:-none}) is no commit here, so the release range has no start; nothing was run and the plan is unchanged."
+      exit 1
+    fi
+    RC_OUT="$(cd "$RC_CO" 2>/dev/null || exit 1
+      set -f
+      export BIONIC_CHECK_BASE="$RC_BASE" BIONIC_CHECK_HEAD="$RC_HEAD"
+      # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
+      exec $RC_CMD </dev/null 2>&1)"; RC_RC=$?
+    if [ "$RC_RC" -ne 0 ]; then
+      [ -z "$RC_OUT" ] || printf '%s\n' "$RC_OUT"
+      die "REFUSED — the declared release-check ($(clean "$RC_CMD")) exited $RC_RC over ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM); nothing was written. Fix what it names, commit, and run release-check again."
+      exit 1
+    fi
+    RC_WAVE="${PV_PLAN##*/}"; RC_WAVE="${RC_WAVE%.plan.md}"
+    RC_REL="record/$RC_WAVE/release-check-$RC_HEAD.log"
+    RC_LOG="$(docs_root "$PV_REPO")/$RC_REL"
+    if ! mkdir -p "${RC_LOG%/*}" 2>/dev/null \
+       || ! { printf 'head=%s rc=0\nbase=%s (%s)\ncommand: %s\n\n' "$RC_HEAD" "$RC_BASE" "$RC_FROM" "$RC_CMD"
+              [ -z "$RC_OUT" ] || printf '%s\n' "$RC_OUT"; } > "$RC_LOG" 2>/dev/null; then
+      die "REFUSED — the check passed, but its log $RC_LOG cannot be written; the plan is unchanged."
+      exit 1
+    fi
+    if ! RC_AT="$(proof_attested check "$RC_LOG" "$RC_CO")"; then
+      die "REFUSED — $(clean "$RC_AT"). The plan is unchanged."
+      exit 1
+    fi
+    if ! proof_add_line "$PV_PLAN" "$(proof_line check "$RC_AT" "$(iso_now)" "$RC_REL")" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+      die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the check proof; the plan is unchanged."
+      exit 1
+    fi
+    plan_verb_swap release-check "the check proof at $RC_AT" writer
+    say "release-check — kind=check head=$RC_AT base=$RC_BASE ($RC_FROM) evidence=$RC_REL: written to $PV_PLAN; dry-committed first."
     exit 0
     ;;
 
