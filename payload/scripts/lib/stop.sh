@@ -1786,9 +1786,10 @@ TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 # refuses.
 #
 # AND ONLY WHEN THE TICK SAID SOMETHING (wave-24 T8; D5, AC-4.13). A tick that printed
-# `unchanged`, or decided QUIET with no open row, left nothing for the ledger to catch up on,
-# and a refusal there asked the model for a chore with nothing behind it. The tick writes that
-# fact as `duty=none` beside its digest, and `stop_turn_facts` hands it here as `_ST_TICK_DUTY`.
+# `unchanged` left nothing for the ledger to catch up on, nor did a QUIET one whose plan did not
+# move (a QUIET tick owes the reconcile when the plan moved into Step 4 or its table grew, wave-27
+# T13), and a refusal there asked the model for a chore with nothing behind it. The tick writes
+# that fact as `duty=none` beside its digest, and `stop_turn_facts` hands it here as `_ST_TICK_DUTY`.
 VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TICK_MARK" -v duty="$_ST_TICK_DUTY" '
   $1 == "USER" {
     t = $2; sub(/^[ \t]+/, "", t)
@@ -2142,7 +2143,15 @@ fi
 case "$VERDICT" in
   tasklist)
     FACT='no task-list refresh since this tick'; FIX='refresh it, then stop again'
-    REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed) — TaskList or a plan-ledger write. Do one, then stop again — this gate blocks once.' ;;
+    REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed) — TaskList or a plan-ledger write. Do one, then stop again — this gate blocks once.'
+    # THE PLAN MOVED (wave-27 T37; review pass 8 F2): the tick's own cause, from its digest, and
+    # the rebuild steps/3.md asks for, where the sentence above would name a change that is not it.
+    case "$_ST_RECONCILE" in
+      step4) FIX='rebuild it, then stop again'
+             REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the plan moved from approval into Step 4 (its "poker: RECONCILE" line says so), so TaskList, and rebuild the task list in execution order: delete every pending entry and recreate them. Do it, then stop again — this gate blocks once.' ;;
+      grew)  FIX='rebuild it, then stop again'
+             REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick, which owes one: the ## Tasks table grew (its "poker: RECONCILE" line says so), so TaskList, and rebuild the task list in execution order: delete the pending entries after the new row and recreate them. Do it, then stop again — this gate blocks once.' ;;
+    esac ;;
   *)
     return "$_adv" ;;
 esac
@@ -2194,6 +2203,8 @@ return 2
 #   _ST_NO_BUDGET   1 when a live ledger has no readable writers= and a row is ready
 #   _ST_TICK_DUTY   on a tick turn, `none` when the tick's digest file says `duty=none`, else
 #                   `owed` — the task-list duty's one input from the tick (wave-24 T8, D5)
+#   _ST_RECONCILE   on a tick turn with a fresh digest, its `reconcile=` (`step4` or `grew`): the
+#                   plan moved, and the refusal says so (wave-27 T37); empty otherwise
 # Return 0 when the turn could be read at all (a Stop, an engaged session, a transcript), 1
 # otherwise — and the caller then has nothing to judge and nothing to record.
 #
@@ -2253,6 +2264,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
   _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
   _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""; _ST_FACTS=""
+  _ST_RECONCILE=""
   local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
   local digest duty at rvat led standing gap rcount rgap slot
 
@@ -2363,7 +2375,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   case "$_ST_TICK" in 1) : ;; *) _ST_TICK=0 ;; esac
 
   # THE TICK'S DUTY LINE (wave-24 T8; D5, AC-4.13). The tick writes `duty=none` beside its
-  # digest when it printed `unchanged`, or decided QUIET with no open row
+  # digest when it printed `unchanged`, or owed no reconcile
   # (hooks/session-poker.sh `tick_conclude`). Only that line excuses a tick turn from the
   # task-list refresh. No file, a symlink, or any other value leaves the duty owed, which is
   # what every tick turn owed before the tick could say it was quiet. The path and the reader
@@ -2383,6 +2395,15 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
       if [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; then
         _ST_TICK_DUTY=none
       fi
+    fi
+    # WHY THE RECONCILE IS OWED (wave-27 T37; review pass 8 F2), from the same fresh digest: the
+    # tick writes `reconcile=step4|grew` when the plan moved, and the refusal gives that cause.
+    if [ "$duty" = owed ] && [ -n "$at" ] \
+       && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
+      case "$(tick_digest_field "$digest" reconcile)" in
+        step4) _ST_RECONCILE=step4 ;;
+        grew)  _ST_RECONCILE=grew ;;
+      esac
     fi
     # THE HEAD THE TICK JUDGED `live:head` AGAINST (wave-26 T32; A-T14.2), from the same fresh
     # digest: the wall reads no git, so on a tick's turn it hands the tick's head to the ready set
