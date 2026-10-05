@@ -865,7 +865,7 @@ expect_eq "the planted shell rc is the only thing in the fixture HOME" \
 # later row could tell from the truth.
 expect_ne "env.sh names a start marker" "" "$RC_START_LIT"
 expect_ne "env.sh names an end marker"  "" "$RC_END_LIT"
-expect_ne "env.sh names a line for the claude-proxy item" "" "$RC_PROXY_LINE"
+expect_ne "env.sh names a body for the claude-proxy item" "" "$RC_PROXY_LINE"
 
 # The verdict glyphs doctor's rows are read by, likewise: read out of doctor.sh,
 # proven present, and proven to be different characters — an `env_row_state` whose
@@ -1024,14 +1024,21 @@ expect_true "manifest: ~/.claude/CLAUDE.md is exactly bionic's marked principles
 expect_eq "manifest: the rc carried no bionic block before setup" "" "$RC_BLOCK_BEFORE"
 expect_ne "manifest: the rc carries a bionic block after setup" "" \
   "$(rc_block_lines "$RC_FILE_FIX")"
-expect_eq "manifest: the block holds exactly env.sh's claude-proxy line" \
+expect_eq "manifest: the block holds exactly env.sh's claude-proxy body" \
   "$RC_PROXY_LINE" "$(rc_block_lines "$RC_FILE_FIX")"
 expect_eq "manifest: no start marker was in the rc before setup" "0" "$RC_STARTS_BEFORE"
 RC_STARTS_AFTER_SETUP="$(count_lines_equal "$RC_FILE_FIX" "$RC_START_LIT")"
 expect_eq "manifest: the start marker appears exactly once after setup" "1" \
   "$RC_STARTS_AFTER_SETUP"
-expect_eq "manifest: the proxy line appears exactly once in the whole rc" "1" \
-  "$(count_lines_equal "$RC_FILE_FIX" "$RC_PROXY_LINE")"
+# Each line of the body, once: a second copy of bionic's body anywhere in the rc is
+# caught line by line (the body is two lines since wave-27 T75, A-orch-185).
+RC_BODY_ONCE=yes; RC_BODY_N=0
+while IFS= read -r rc_body_line; do
+  RC_BODY_N=$((RC_BODY_N + 1))
+  [ "$(count_lines_equal "$RC_FILE_FIX" "$rc_body_line")" = "1" ] || RC_BODY_ONCE="no: $rc_body_line"
+done <<< "$RC_PROXY_LINE"
+expect_true "manifest: the body's lines were read (the row below is not vacuous)" test "$RC_BODY_N" -ge 1
+expect_eq "manifest: each line of the body appears exactly once in the whole rc" "yes" "$RC_BODY_ONCE"
 
 # The user's own lines. First as a walk — both sides through the same extractor,
 # and the extractor proven to return the planted file's lines rather than nothing

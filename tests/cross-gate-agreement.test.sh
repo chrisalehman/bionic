@@ -8343,7 +8343,7 @@ mkdir -p "$DS_DIR"
 # nothing about the command; planting both is the pre-1.4.4 shape, where the ONLY thing
 # wrong is the recorded command. That is the state doctor's `statusLine command` row fires
 # on, so it is the state this scan has to see it in.
-ds_plant() {  # <home> <hooks:yes|no> <agents:yes|no> [alias:yes|no, default no]
+ds_plant() {  # <home> <hooks:yes|no> <agents:yes|no> [alias:changed|no, default no]
   local h="$1" want_hooks="$2" want_agents="$3" want_alias="${4:-no}" f n=0
   rm -rf "$h"; mkdir -p "$h/.claude"
   # AND ONE ENVIRONMENT NAME WRITTEN TO THE WRONG VALUE (Step-6 review B-1). The
@@ -8404,19 +8404,21 @@ DSREG
     DS_PLANTED_HOOKS="$n"
     printf '#!/bin/bash\n# the machine owner wrote this one\n' > "$h/.claude/hooks/not-bionics.sh"
   fi
-  # THE PRE-MARKER ALIAS, OFF BY DEFAULT (Step-6 recheck part 4, R-2). This is the
-  # one leftover whose two rules had genuinely drifted:
-  # `bionic_check_legacy_alias` fires on the marked `# ─── bionic:start ───`
-  # block OR on a bare `alias claude=…--dangerously-skip-permissions` line, which
-  # is the spelling bionic wrote before it wrapped its edits in markers; doctor's
-  # own test read the marker and nothing else. Planted here is the SECOND state
-  # only — the raw alias, no marker — which is the machine where the two answers
-  # differ. BOTH rc names are written because `shell_rc_file` picks between
-  # `$HOME/.zshrc` and `$HOME/.bashrc` off `$SHELL`, and the suite must not read
-  # the runner's shell. Default `no`, so every fixture planted before this arm
-  # existed is byte-identical to what it was.
-  if [ "$want_alias" = "yes" ]; then
-    printf '%s\n' "alias claude='claude --dangerously-skip-permissions'" > "$h/.zshrc"
+  # THE RETIRED ALIAS BLOCK, ITS BODY CHANGED, OFF BY DEFAULT (Step-6 recheck part 4,
+  # R-2; the state moved at wave-27 T75, A-orch-173). The one leftover whose two rules
+  # can still differ: `bionic_check_legacy_alias` fires only on bionic's own whole
+  # block, the body bionic wrote between its markers and free to go, while the raw fact
+  # `detect_zshrc_legacy_block` reads the markers and nothing else. Planted here is a
+  # marked block whose body the user changed: present to the raw fact, nothing to do to
+  # the table. (The state this arm first planted, the bare pre-marker line, is gone:
+  # under the markers rule no door takes a bare line out, and rc-item §T75 pins that it
+  # is named, never offered.) BOTH rc names are written because `shell_rc_file` picks
+  # between `$HOME/.zshrc` and `$HOME/.bashrc` off `$SHELL`, and the suite must not read
+  # the runner's shell. Default `no`, so every fixture planted before this arm existed
+  # is byte-identical to what it was.
+  if [ "$want_alias" = "changed" ]; then
+    printf '%s\n' '# ─── bionic:start ───' "alias claude='claude --dangerously-skip-permissions'" 'export MINE=1' \
+      '# ─── bionic:end ───' > "$h/.zshrc"
     cp "$h/.zshrc" "$h/.bashrc"
   fi
   # AND THE PROJECT THIS MACHINE IS ASKED ABOUT, CARRYING BOTH AUTO-MEMORY FACTS
@@ -8819,8 +8821,8 @@ DS_CLEAN_EARLY="$DS_DIR/clean-early"
 ds_plant "$DS_CLEAN_EARLY" no no
 DS_PENDING_ITEMS="$(ds_pending_items "$DS_HOME")"
 
-# THE WALK ITSELF, NAMED — because DS.12 below runs the very same comparison over
-# a doctored doctor and has to come out non-empty. Every item setup would offer,
+# THE WALK ITSELF, NAMED — DS.12 below runs its reverse (`ds_loud_items`) over a
+# doctored doctor and has to come out non-empty. Every item setup would offer,
 # whose table rows carry a label, must have one of those labels on the hinted
 # lines of doctor's page; what comes back is the items that went unsaid, and the
 # count of items the walk actually reached is left in `DS_STATE_SEEN` so a caller
@@ -9313,23 +9315,24 @@ expect_eq "DS.11 …while the shipped doctor leaves the same walk empty" \
 # Four of those five pairs agreed on every state a fixture can reach; the fifth
 # did not, and that is what this arm plants.
 #
-# THE STATE. `bionic_check_legacy_alias` fires on the marked block OR on the bare
-# pre-marker `alias claude=…--dangerously-skip-permissions` line. doctor's own
-# test read `detect_zshrc_legacy_block`, which knows only the marker. A machine
-# carrying the bare line is therefore one setup offers to clean and doctor said
-# nothing about — the 2026-09-05 field defect in its own shape, on a different
-# row. `ds_plant`'s fourth argument writes exactly that machine and nothing else.
+# THE STATE (wave-27 T75, A-orch-173). `bionic_check_legacy_alias` fires only on bionic's
+# whole block, free to go; `detect_zshrc_legacy_block` knows only the markers. A machine
+# carrying a marked block whose body the user changed is one the table says has nothing to
+# do and the raw fact calls present: a doctor that re-derived the row from the raw fact
+# would send the user to a setup step that removes nothing, the field defect's other
+# direction. `ds_plant`'s fourth argument `changed` writes exactly that machine and
+# nothing else.
 #
 # WHY ITS OWN HOME. Adding an rc file to the shared fixture would change what
 # `claude-proxy` answers there too (an rc that exists with no bionic block is a
 # different state from no rc at all), so the drift is planted where it is the only
 # thing that moved.
-DS_ALIAS_HOME="$DS_DIR/alias-premarker"
-ds_plant "$DS_ALIAS_HOME" no no yes
-expect_true "DS.12 the fixture carries the pre-marker alias line (the rows below are not vacuous)" \
-  grep -q 'alias claude=' "$DS_ALIAS_HOME/.zshrc"
-expect_false "DS.12 …and no marked bionic block, which is what makes the two rules disagree" \
+DS_ALIAS_HOME="$DS_DIR/alias-changed"
+ds_plant "$DS_ALIAS_HOME" no no changed
+expect_true "DS.12 the fixture carries bionic's alias markers (the rows below are not vacuous)" \
   grep -q 'bionic:start' "$DS_ALIAS_HOME/.zshrc"
+expect_true "DS.12 …around a body the user changed, which is what makes the two rules disagree" \
+  grep -q '^export MINE=1$' "$DS_ALIAS_HOME/.zshrc"
 
 DS_ALIAS_TABLE="$(ds_rows "$DS_ALIAS_HOME")"
 DS_ALIAS_PENDING="$(ds_pending_items "$DS_ALIAS_HOME")"
@@ -9342,10 +9345,14 @@ DS_ALIAS_LABEL="$(while IFS= read -r ds_r; do
     ds_field "$ds_r" 2
   done <<<"$DS_ALIAS_TABLE")"
 expect_true "DS.12 the table names a label for the row under test" test -n "$DS_ALIAS_LABEL"
-expect_true "DS.12 setup offers the removal on this machine" \
+expect_false "DS.12 setup offers no removal on this machine" \
   ds_listed_in "$DS_ALIAS_PENDING" legacy-alias
-expect_true "DS.12 …and setup's own narrowed run agrees it has something to do" \
-  ds_pending "$DS_ALIAS_HOME" legacy-alias
+# setup's own narrowed run names the changed block for the user's hand (so it does not
+# say "nothing left to do") and asks nothing: no removal is on offer.
+DS_ALIAS_ONLY="$(ds_setup "$DS_ALIAS_HOME" --only legacy-alias)"
+expect_contains "DS.12 …and setup's own narrowed run names the block for the user's hand" \
+  "changed since bionic wrote it" "$DS_ALIAS_ONLY"
+expect_absent "DS.12 …and asks nothing" "[y/N]" "$DS_ALIAS_ONLY"
 
 ds_alias_labels() {  # <report> -> the labels on that page's hinted lines
   local rep="$1" routes hinted
@@ -9354,15 +9361,42 @@ ds_alias_labels() {  # <report> -> the labels on that page's hinted lines
   while IFS= read -r l; do [ -n "$l" ] && ds_label_of "$l" && echo; done <<<"$hinted"
 }
 
+# THE REVERSE WALK: every item whose label doctor routes to setup must be one setup
+# would offer on the same machine. `<items routed>|<items routed that setup would not
+# offer>`, the count first for the same reason `ds_silent_items` gives it.
+ds_loud_items() {  # <pending items> <page labels> <table>
+  local pending="$1" labels="$2" table="$3" loud="" item labs hit r seen=0
+  while IFS= read -r item; do
+    [ -n "$item" ] || continue
+    labs="$(while IFS= read -r r; do
+        [ -n "$r" ] || continue
+        [ "$(ds_field "$r" 5)" = "$item" ] || continue
+        ds_field "$r" 2 && echo
+      done <<<"$table" | grep -v '^$')"
+    [ -n "$labs" ] || continue
+    hit=""
+    while IFS= read -r ds_l; do
+      [ -n "$ds_l" ] || continue
+      case "$labels" in *"$ds_l"*) hit=1; break ;; esac
+    done <<<"$labs"
+    [ -n "$hit" ] || continue
+    seen=$((seen + 1))
+    ds_listed_in "$pending" "$item" || loud="${loud}${loud:+, }${item}"
+  done <<<"$(while IFS= read -r r; do [ -n "$r" ] && ds_field "$r" 5 && echo; done <<<"$table" | grep -v '^$' | sort -u)"
+  printf '%s|%s' "$seen" "$loud"
+}
+
 DS_ALIAS_REPORT="$(ds_doctor "$DS_ALIAS_HOME")"
 DS_ALIAS_LABELS="$(ds_alias_labels "$DS_ALIAS_REPORT")"
-expect_contains "DS.12 the shipped doctor renders the row, because it asks the table" \
+expect_absent "DS.12 the shipped doctor routes no one to setup for it, because it asks the table" \
   "$DS_ALIAS_LABEL" "$DS_ALIAS_LABELS"
-DS_ALIAS_2C="$(ds_silent_items "$DS_ALIAS_PENDING" "$DS_ALIAS_LABELS" "$DS_ALIAS_TABLE")"
-expect_true "DS.12 …and the same-state walk reaches this machine's items at all" \
-  test "${DS_ALIAS_2C%%|*}" -ge 2
-expect_absent "DS.12 …so DS.2c's walk says nothing about it on the shipped doctor" \
-  "legacy-alias" "${DS_ALIAS_2C#*|}"
+expect_contains "DS.12 …and names the changed block for the user's hand instead" \
+  "changed since written" "$DS_ALIAS_REPORT"
+DS_ALIAS_LOUD="$(ds_loud_items "$DS_ALIAS_PENDING" "$DS_ALIAS_LABELS" "$DS_ALIAS_TABLE")"
+expect_true "DS.12 …and the reverse walk reaches this page's routed items at all" \
+  test "${DS_ALIAS_LOUD%%|*}" -ge 1
+expect_absent "DS.12 …so it names nothing setup would not offer, on the shipped doctor" \
+  "legacy-alias" "${DS_ALIAS_LOUD#*|}"
 
 # THE MUTANT: one line, doctor's own pre-1.5.1 rule put back where the table's
 # answer now goes. Everything else on the page is the shipped renderer.
@@ -9382,10 +9416,10 @@ expect_eq "DS.12 …and by exactly the one rule that replaced it" \
 DS_MUT_REPORT12="$( PARTY_DOCTOR="$DS_MUT_DOC12"; ds_doctor "$DS_ALIAS_HOME" )"
 expect_contains "DS.12 the doctored doctor still renders a page (the rows below are not vacuous)" \
   "ENVIRONMENT" "$DS_MUT_REPORT12"
-expect_absent "DS.12 …and its own rule cannot see the pre-marker line, so the row is gone" \
-  "$DS_ALIAS_LABEL" "$DS_MUT_REPORT12"
-expect_contains "DS.12 …so DS.2c's walk goes RED on it, by item name" \
-  "legacy-alias" "$(DS_M="$(ds_silent_items "$DS_ALIAS_PENDING" "$(ds_alias_labels "$DS_MUT_REPORT12")" "$DS_ALIAS_TABLE")"; printf '%s' "${DS_M#*|}")"
+expect_contains "DS.12 …and its own rule reads the markers alone, so the row routes to setup" \
+  "$DS_ALIAS_LABEL" "$(ds_alias_labels "$DS_MUT_REPORT12")"
+expect_contains "DS.12 …so the reverse walk goes RED on it, by item name" \
+  "legacy-alias" "$(DS_M="$(ds_loud_items "$DS_ALIAS_PENDING" "$(ds_alias_labels "$DS_MUT_REPORT12")" "$DS_ALIAS_TABLE")"; printf '%s' "${DS_M#*|}")"
 
 
 # ============================================================

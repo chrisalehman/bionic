@@ -331,6 +331,7 @@ detect_env_todo_tools() {
 # `claude()` proxy setup writes, inside its own marker pair:
 #
 #     # ─── bionic:rc:start ───
+#     unalias claude 2>/dev/null || true
 #     claude() { command claude --allow-dangerously-skip-permissions "$@"; }
 #     # ─── bionic:rc:end ───
 #
@@ -509,6 +510,19 @@ BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
 BIONIC_ENV_START='# ─── bionic:env:start ───'
 BIONIC_ENV_END='# ─── bionic:env:end ───'
 
+# WHAT BIONIC WROTE BETWEEN ITS RETIRED MARKERS, the one place it is listed (wave-27
+# T75, review pass 54 B3): one line each, never varying by machine — the fixed alias
+# line between the alias markers (e178aecc, 6e953055, e012f966) and the export between
+# the env markers (above). A block that holds anything else between its markers was
+# changed since bionic wrote it and is the user's to edit (markers.sh
+# `markers_block_alone`). remove.sh carries this function, pinned.
+bionic_block_body() {  # <start marker> — the body bionic wrote after it, empty for any other
+  case "$1" in
+    "$BIONIC_ALIAS_START") printf '%s\n' "alias claude='claude --dangerously-skip-permissions'" ;;
+    "$BIONIC_ENV_START")   printf '%s\n' "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1" ;;
+  esac
+}
+
 bionic_todo_export_ours() {  # <line> — rc 0 when it is the text bionic wrote
   case "$1" in *CLAUDE_CODE_ENABLE_TODO_TOOLS*) ;; *) return 1 ;; esac
   local LC_ALL=C
@@ -543,6 +557,8 @@ bionic_rc_left_reason() {  # <why> <rc>
     ok)       printf "where removing it would change your own code\n" ;;
     no-shell) printf "left: %s, the shell that reads that file, is not installed, so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
     no-parse) printf "left: the file does not parse as it is (%s -n), so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
+    hand)     printf "outside bionic's markers, and bionic takes out only what stands between them\n" ;;
+    changed)  printf "changed since bionic wrote it\n" ;;
     *)        printf "left: bionic could not stage a copy to check\n" ;;
   esac
 }

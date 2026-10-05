@@ -407,15 +407,9 @@ _setup_item_verb() {  # <name>
     environment)        say "write bionic's environment settings to $(_dep_settings_file)" ;;
     claude-proxy)       say "add bionic's claude() shell function to $(rc_file 2>/dev/null || echo 'the shell rc')" ;;
     legacy-alias)
-      # The page takes the consent, so an unmarked line is named by number here,
-      # as the step's own question names it (wave-27 T55).
-      _setup_verb_line="$(bionic_legacy_alias_lines "$(_detect_shell_rc)")"
-      _setup_verb_line="${_setup_verb_line#ours=}"; _setup_verb_line="${_setup_verb_line%% *}"
-      if [ "$(detect_zshrc_legacy_block)" != "env:zshrc-legacy present=yes" ] && [ -n "$_setup_verb_line" ]; then
-        say "remove $(bionic_line_numbers_words "$_setup_verb_line") of $(_detect_shell_rc), the retired alias line bionic wrote"
-      else
-        say "remove the retired shell alias block from $(_detect_shell_rc)"
-      fi ;;
+      # Only the block is ever offered: a bare line is named, never taken out
+      # (wave-27 T75, A-orch-162).
+      say "remove the retired shell alias block from $(_detect_shell_rc)" ;;
     legacy-hooks)       say "remove the retired hook entries from $(_dep_settings_file)" ;;
     legacy-skill-copy)  say "remove the pre-plugin skill copy at $(_setup_legacy_skill_dir)" ;;
     legacy-hook-files)
@@ -1192,7 +1186,7 @@ setup_claude_proxy() {
 
   say "   ${rc} does not carry bionic's claude() shell function:"
   for item_name in $missing; do
-    say "   $(rc_default "$item_name")"
+    while IFS= read -r _setup_rc_line; do say "   ${_setup_rc_line}"; done <<< "$(rc_default "$item_name")"
     say "   — $(_setup_rc_why "$item_name")"
   done
   consent "   Add it to ${rc}?"; _setup_consent_rc=$?
@@ -1269,7 +1263,7 @@ setup_legacy_alias() {
   _setup_wants legacy-alias || return 0
   say ""
   say "7. Legacy shell alias"
-  local rc line present scan ours words
+  local rc line present
   rc="$(_detect_shell_rc)"
   line="$(detect_zshrc_legacy_block)"; present="${line#*present=}"
 
@@ -1326,58 +1320,28 @@ setup_legacy_alias() {
       *) item "$SETUP_BAD" "legacy alias block" "could not write ${rc} — it is as it was"
          action "remove the legacy bionic alias block from ${rc} by hand (bionic could not write the file)" ;;
     esac
-    return 0
-  fi
-
-  # THE UNMARKED LINE, ONLY IF IT IS ONE BIONIC WROTE (wave-27 T55, review pass 32
-  # F1 and F4). This was `grep -vE` on the loose pattern: every line that mentioned
-  # the alias went, the user's own among them. Now detect.sh's list says which lines
-  # are bionic's, the question names them by number, `markers_drop_lines` takes out
-  # exactly those and refuses as `markers_strip` does, and a line that only
-  # mentions the alias is named by number and left. An rc that is not text never
-  # reaches here (`not-a-file` above).
-  scan="$(bionic_legacy_alias_lines "$rc")"; ours="${scan#ours=}"; ours="${ours%% *}"
-  if [ -n "$ours" ]; then
-    words="$(bionic_line_numbers_words "$ours")"
-    say "   ${rc} carries the alias line bionic wrote before its marker block: ${words}."
-    consent "   Remove ${words} of ${rc}, the retired alias line bionic wrote?"; _setup_consent_rc=$?
-    if [ "$_setup_consent_rc" -ne 0 ]; then
-      _setup_say_declined "$_setup_consent_rc" "the alias stays."
-      action "remove ${words} of ${rc}, bionic's retired alias — $(_setup_answer_yes legacy-alias)"
-    else
-      markers_drop_lines "$rc" bionic_legacy_alias_ours "$ours"; _setup_strip_rc=$?
-      case "$_setup_strip_rc" in
-        0) item "$SETUP_OK" "legacy alias" "removed (the unmarked spelling): ${words}" ;;
-        3) item "$SETUP_NIL" "legacy alias block" "read-only — not changed"
-           action "make ${rc} writable to remove the retired alias block — bionic does not write a read-only file" ;;
-        4) _setup_say_not_a_file "legacy alias block" "$rc" ;;
-        # The reason first and the path after, so a long home cannot cut the
-        # reason off the item line (wave-27 T66, review pass 40 S2).
-        2) item "$SETUP_BAD" "legacy alias" "changed while setup ran, so nothing was written: ${rc}"
-           action "${rc} changed while setup ran; remove bionic's retired alias line — $(_setup_answer_yes legacy-alias)" ;;
-        *) item "$SETUP_BAD" "legacy alias" "could not write the file, so it is as it was: ${rc}"
-           action "remove ${words} of ${rc}, bionic's retired alias, by hand (bionic could not write the file)" ;;
-      esac
-    fi
+    # Bionic's bare lines beside the block stay, named (wave-27 T75).
     _setup_legacy_alias_left "$rc"
     return 0
   fi
 
+  # A BARE LINE IS NEVER TAKEN OUT (wave-27 T75, A-orch-162): bionic's own retired
+  # line outside a marker pair is named by number for the user's hand, and so is a
+  # line that only mentions the alias; the step is not called done while either is
+  # there.
   _setup_legacy_alias_left "$rc" && return 0
   item "$SETUP_NIL" "legacy alias block" "none in ${rc} — nothing to remove"
   return 0
 }
 
-# The alias block or bionic's line is there and the rc is read-only (wave-27 T66,
-# review pass 40 S5): rc 0. The page leaves the step off and the step asks nothing.
+# The alias block is there and the rc is read-only (wave-27 T66, review pass 40
+# S5; a bare line is never taken out, T75): rc 0. The page leaves the step off and the step asks nothing.
 _setup_legacy_alias_read_only() {  # <rc>
-  local line scan
+  local line
   [ -f "$1" ] || return 1
   markers_writable "$1" && return 1
   line="$(detect_zshrc_legacy_block)"
-  [ "${line#*present=}" = "yes" ] && return 0
-  scan="$(bionic_legacy_alias_lines "$1")"; scan="${scan#ours=}"
-  [ -n "${scan%% *}" ]
+  [ "${line#*present=}" = "yes" ]
 }
 
 # The retired alias block stands as commands of their own, as one unit (markers.sh
@@ -1388,9 +1352,9 @@ _setup_legacy_alias_block_alone() {  # <rc>
 }
 
 # What the step leaves in the rc, each named once by number in the file as it is
-# now and never by its text: a read-only rc's block or line (the marked step's
-# words); bionic's own line where removing it would change the user's code, or
-# where that could not be checked (wave-27 T66, B1); and a line that mentions the
+# now and never by its text: a read-only rc's block (the marked step's words); a
+# block bionic would leave (T66) or the user changed (T75, B3); bionic's own bare
+# line, which no door takes out (T75, A-orch-162); and a line that mentions the
 # retired alias and is not one bionic wrote (T55). rc 1 when there is none.
 _setup_legacy_alias_left() {  # <rc>
   local scan bound why theirs words said=1 alone
@@ -1419,7 +1383,7 @@ _setup_legacy_alias_left() {  # <rc>
   if [ -n "$theirs" ]; then
     words="$(bionic_line_numbers_words "$theirs")"
     item "$SETUP_NIL" "legacy alias" "not in a form bionic wrote: ${words} of ${1} — left as it is"
-    action "edit ${words} of ${1} by hand if you want the retired alias gone — bionic removes only the line it wrote"
+    action "edit ${words} of ${1} by hand if you want the retired alias gone — bionic takes out only what stands between its markers"
     said=0
   fi
   return "$said"

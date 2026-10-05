@@ -115,6 +115,7 @@ FIXTURE_RC="${TMP}/${LONGSEG}/${LONGSEG}/dot.zshrc"
 mkdir -p "$(dirname "$FIXTURE_RC")"
 {
   echo '# ─── bionic:rc:start ───'
+  echo 'unalias claude 2>/dev/null || true'
   echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
   echo '# ─── bionic:rc:end ───'
 } > "$FIXTURE_RC"
@@ -412,9 +413,14 @@ expect_all_lines_fit "18: git feed, missing manifest, long path — every line f
 HALF_RC="${TMP}/${LONGSEG}/half.zshrc"
 {
   echo '# ─── bionic:rc:start ───'
+  echo 'unalias claude 2>/dev/null || true'
   echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
   echo '# ─── bionic:rc:end ───'
+  # The retired env block, between its markers: since wave-27 T66 a bare export of
+  # that name is the user's (A-orch-119 (3)), and only the block is bionic's footprint.
+  echo '# ─── bionic:env:start ───'
   echo 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
+  echo '# ─── bionic:env:end ───'
 } > "$HALF_RC"
 HOME6="$(make_registry_home)"
 write_empty_known_marketplaces "$HOME6"
