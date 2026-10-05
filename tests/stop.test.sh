@@ -1841,4 +1841,43 @@ fire "$D"
 expect_absent "FR5 …and the same diff now lands: no landing refusal" "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
 expect_status "FR5 …and the stop is admitted" "0" "$STOP_RC"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "RW: the reconcile refusal says the plan moved when that is why it is owed (wave-27 T37; review pass 8 F2)"
+
+# The tick writes `reconcile=step4` or `reconcile=grew` beside `duty=owed` when the reconcile is
+# owed because the plan moved (tests/session-poker.test.sh §RECON-WHY). A tick turn with no
+# task-list refresh is refused as before; the refusal now gives that cause and names the rebuild,
+# and with no cause in the digest, or a digest older than the turn's tick, it is today's words.
+# The fixture is LH's at the proof's own head, so no fill is owed, and its transcript is s7's
+# tick turn with the TaskList call taken out. SYNTHESIZED, as LH.
+rw_digest() {  # <project> <reconcile cause or ""> [at]
+  { printf 'patrol-digest/v1\nprompt_version=5\ndigest=1-1\nsince=2026-10-04T00:00:00Z\ndecision=QUIET\nduty=owed\nat=%s\nhead=%s\n' \
+      "${3:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$LH_A"
+    [ -z "$2" ] || printf 'reconcile=%s\n' "$2"
+  } > "$1/.bionic/tmp/tick-digest-$SID.state"
+}
+require_helpers rw_digest
+RW_D="$(lh_fixture)"
+RW_TX="$(mktemp)"
+s7_transcript "$RW_TX" "poker: RECONCILE"
+/usr/bin/grep -v '"name":"TaskList"' "$RW_TX" > "$RW_TX.n" && mv "$RW_TX.n" "$RW_TX"
+expect_eq "RW0 precondition: the turn holds no TaskList call" "0" "$(/usr/bin/grep -c '"TaskList"' "$RW_TX" | tr -d ' ')"
+rw_digest "$RW_D" ""
+s7_fire "$RW_D" "$RW_TX"
+expect_contains "RW1 control: with no cause the refusal is today's" \
+  'which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed)' "$(reason_of)"
+rw_digest "$RW_D" step4
+s7_fire "$RW_D" "$RW_TX"
+expect_contains "RW2 the plan moved into Step 4: the refusal says so" "the plan moved from approval into Step 4" "$(reason_of)"
+expect_contains "RW2b …and names the rebuild" "rebuild the task list in execution order: delete every pending entry and recreate them" "$(reason_of)"
+expect_absent "RW2c …and not the status-changed cause" "when a ## Tasks status or the ready set changed" "$(reason_of)"
+rw_digest "$RW_D" grew
+s7_fire "$RW_D" "$RW_TX"
+expect_contains "RW3 the table grew: the refusal says so" "the ## Tasks table grew" "$(reason_of)"
+expect_contains "RW3b …and names the rebuild" "delete the pending entries after the new row and recreate them" "$(reason_of)"
+rw_digest "$RW_D" step4 2026-09-18T00:00:00Z
+s7_fire "$RW_D" "$RW_TX"
+expect_contains "RW4 a digest older than the turn's tick gives no cause: the refusal is today's" \
+  'which owes one (it prints "poker: RECONCILE" when a ## Tasks status or the ready set changed)' "$(reason_of)"
+
 finish

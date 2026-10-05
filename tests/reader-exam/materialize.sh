@@ -8,13 +8,17 @@
 # a reader that sees `red-then-green` in its path has been told the answer, so a <dest> whose
 # path names the sample, in any component and in any case, is refused, both as written and
 # as the real path its existing part resolves to (a symlink leads somewhere). A relative
-# <dest> is read from where this is run, as the reader will see it. A refusal writes nothing.
+# <dest> is read from where this is run, as the reader will see it. A <dest> that is this
+# checkout or lies inside it (found from this file's own place, by physical path, and the same
+# real path as above) is refused too: a build there sits beside every answer key. A copy of this
+# file outside any checkout cannot know where it is, so it does not refuse on that ground. A
+# refusal writes nothing.
 set -uo pipefail
 
 src="${1:-}" dest="${2:-}"
 [ -d "$src/tree" ] && [ -r "$src/change.patch" ] || {
   echo "materialize: $src has no tree/ and change.patch" >&2; exit 2; }
-[ -n "$dest" ] && [ ! -e "$dest" ] || { echo "materialize: <dest> must be a new path" >&2; exit 2; }
+[ -n "$dest" ] || { echo "materialize: <dest> must be a new path" >&2; exit 2; }
 src="$(cd "$src" && pwd -P)" || exit 2
 name="$(basename "$src")"
 case "$dest" in /*) abs="$dest" ;; *) abs="$PWD/$dest" ;; esac
@@ -22,6 +26,17 @@ case "$dest" in /*) abs="$dest" ;; *) abs="$PWD/$dest" ;; esac
 up="$abs" rest=""
 while [ ! -d "$up" ]; do rest="/${up##*/}$rest"; up="${up%/*}"; up="${up:-/}"; done
 real="$(cd "$up" && pwd -P)$rest" || exit 2
+here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
+top="$(env -u GIT_DIR -u GIT_WORK_TREE git -C "$here" rev-parse --show-toplevel 2>/dev/null)" \
+  && top="$(cd -P "$top" && pwd -P)" || top=""
+if [ -n "$top" ]; then
+  case "$real/" in
+    "$top"/*) printf 'materialize: refused — a build never sits inside the checkout that holds the answers\n  %s is %s, which is this checkout (%s) or inside it\n' \
+                "$dest" "$real" "$top" >&2
+              exit 2 ;;
+  esac
+fi
+[ ! -e "$dest" ] || { echo "materialize: <dest> must be a new path" >&2; exit 2; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 for p in "$abs" "$real"; do
   case "$(lower "$p")" in

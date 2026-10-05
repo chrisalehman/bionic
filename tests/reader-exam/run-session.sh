@@ -7,12 +7,21 @@
 #   <output file>        the session's JSON result (stdout); it names the session id
 #   <output file>.err    the session's stderr
 #   <output file>.time   start and end times, seconds and the CLI's exit status
-# Exit status: the CLI's, or 2 when an input is missing.
+# Exit status: the CLI's, or 2 when an input is missing or the call is refused (below).
 #
 # THIS SCRIPT WIDENS NOTHING. The session is started with -p, --plugin-dir and --output-format
 # json and no other flag, and no setting is read or written. A session or a reader that is
 # denied a tool is reported to the user, who decides; it is never worked round, and nothing
 # here, or in a prompt, may be changed to get past a denial.
+#
+# THREE REFUSALS, each before anything runs and each writing nothing, status 2:
+#   - a fifth argument: nothing is passed through to the CLI.
+#   - a <dest> that is this checkout or lies inside it (found from this file's own place, by
+#     physical path): a session started there sits beside every answer. A copy of this file
+#     outside any checkout cannot know where it is, so it does not refuse on that ground.
+#   - a claude that is not an absolute path outside <dest>: a PATH holding `.`, an empty entry
+#     or any relative one answers a path the session's own directory can supply, and a file
+#     inside <dest> is the built project's, which is not trusted to supply the CLI.
 set -u
 dest="${1:-}" plugin="${2:-}" prompt="${3:-}" out="${4:-}"
 [ "$#" -eq 4 ] && [ -d "$dest" ] && [ -d "$plugin" ] && [ -r "$prompt" ] && [ -d "$(dirname "$out")" ] \
@@ -21,9 +30,47 @@ dest="${1:-}" plugin="${2:-}" prompt="${3:-}" out="${4:-}"
 for v in dest plugin prompt out; do
   case "${!v}" in /*) ;; *) printf -v "$v" '%s/%s' "$PWD" "${!v}" ;; esac
 done
+refuse() { printf 'run-session.sh: refused — %s\n  %s\n' "$1" "$2" >&2; exit 2; }
+# Where <dest> really is, and where this checkout is, both physical.
+dest_real="$(cd -P "$dest" && pwd -P)" || exit 2
+here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
+top="$(env -u GIT_DIR -u GIT_WORK_TREE git -C "$here" rev-parse --show-toplevel 2>/dev/null)" \
+  && top="$(cd -P "$top" && pwd -P)" || top=""
+if [ -n "$top" ]; then
+  case "$dest_real/" in
+    "$top"/*) refuse "a session never sits inside the checkout that holds the answers" \
+                     "$dest is $dest_real, which is this checkout ($top) or inside it" ;;
+  esac
+fi
 # The CLI binary on PATH, never a shell function of the same name: a login shell may define one
-# that adds flags, and `env` below runs only a program.
-claude_bin="$(type -P claude)" || { echo "run-session.sh: no claude binary on PATH" >&2; exit 2; }
+# that adds flags, and `env` below runs only a program. The lookup is made here, entry by entry
+# as the shell does, so that an entry which is not absolute (`.`, an empty one, a relative one)
+# is named and refused instead of being followed into the project.
+claude_bin="" rest="$PATH:"
+while [ -n "$rest" ]; do
+  entry="${rest%%:*}"; rest="${rest#*:}"
+  [ -f "${entry:-.}/claude" ] && [ -x "${entry:-.}/claude" ] || continue
+  case "$entry" in
+    /*) claude_bin="$entry/claude" ;;
+    "") refuse "an empty PATH entry gives claude a relative path" \
+                "a session's project is not trusted to supply the CLI; put an absolute directory first on PATH" ;;
+    *)  refuse "PATH entry '$entry' gives claude a relative path" \
+                "a session's project is not trusted to supply the CLI; put an absolute directory first on PATH" ;;
+  esac
+  break
+done
+[ -n "$claude_bin" ] || { echo "run-session.sh: no claude binary on PATH" >&2; exit 2; }
+# Its physical place, links followed: the file itself may be a link into <dest>.
+claude_real="$claude_bin"
+while [ -L "$claude_real" ]; do
+  link="$(readlink "$claude_real")"
+  case "$link" in /*) claude_real="$link" ;; *) claude_real="${claude_real%/*}/$link" ;; esac
+done
+claude_real="$(cd -P "${claude_real%/*}" && pwd -P)/${claude_real##*/}" || exit 2
+case "$claude_real" in
+  "$dest_real"/*) refuse "the claude on PATH is a file inside the built project" \
+                         "$claude_bin is inside $dest; the project is not trusted to supply the CLI" ;;
+esac
 
 start=$(date -u +%FT%TZ); s0=$(date +%s)
 echo "start=$start" > "$out.time"
