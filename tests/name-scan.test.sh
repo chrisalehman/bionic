@@ -874,6 +874,7 @@ printf 'see mxv9\tplover here\n' > "$W/tab.txt"
 printf 'see the mxv9\r\nplover case\r\n' > "$W/crlf.txt"
 printf '# written for the mxv9\n# plover project\n' > "$W/hash.sh"
 printf '// the mxv9\n// plover case\n' > "$W/slashes.c"
+printf '/// the mxv9\n/// plover case\n' > "$W/doc-slashes.rs"
 printf '/*\n * the mxv9\n * plover case\n */\n' > "$W/block.c"
 printf '> the mxv9\n> plover case\n' > "$W/quote.md"
 printf -- '-- mxv9\n-- plover\n' > "$W/dashes.sql"
@@ -890,7 +891,7 @@ L="$(fx_list wrap1 "$E3" "$EW1" "$EW2")"
 scan "$R" "$L"
 expect_status "WRAP: a tree and a commit body holding the wrapped entry exit 1" 1 "$RC"
 wb() { s12 "$R" "HEAD:w/$1"; }
-for f in 'md.md|2' 'two-spaces.txt|1' 'tab.txt|1' 'crlf.txt|1' 'hash.sh|1' 'slashes.c|1' 'block.c|2' 'quote.md|1' 'dashes.sql|1' 'semi.ini|1'; do
+for f in 'md.md|2' 'two-spaces.txt|1' 'tab.txt|1' 'crlf.txt|1' 'hash.sh|1' 'slashes.c|1' 'doc-slashes.rs|1' 'block.c|2' 'quote.md|1' 'dashes.sql|1' 'semi.ini|1'; do
   expect_eq "WRAP: ${f%%|*} — the entry is found once, on the line its match starts on" \
     "HIT entry=1 at blob $(wb "${f%%|*}") line ${f#*|}" "$(hits | grep -F "blob $(wb "${f%%|*}") ")"
 done
