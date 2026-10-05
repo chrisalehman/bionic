@@ -3281,6 +3281,43 @@ expect_eq "(T63-b2) 200 trials of four takers at one dead holder's lock: never t
 expect_eq "(T63-b2b) …four blocks of twenty lines each, none interleaved, every append returned 0" "0|0" "$T63_BAD|$T63_FAIL"
 expect_eq "(T63-b2c) …and no lock or renamed-aside directory is left" "0" "$T63_LEFT"
 
+# (b6) A DEAD `.taking`: a landing killed mid-takeover leaves `<lock>.taking` holding `h.<its pid>`,
+# its renamed-aside directory `<lock>.stale.<its pid>`, and a dead holder's lock. Four takers meet it,
+# 200 trials: exactly one unlinks the dead file (an unlink one process wins) and alone `rmdir`s the
+# now-empty `.taking` and removes the dead taker's renamed directory; no two ever hold the record's
+# lock, all four blocks are written, nothing is left. The loop stops at the first bad trial.
+T63_B6_N=0; T63_B6_BAD=0
+for _k in $(seq 1 200); do
+  rm -f "$T63_R4" "$T63_R4.go" "$T63_R4.holders"; rm -rf "$T63_R4".lock*
+  mkdir "$T63_R4.lock" "$T63_R4.lock.taking" "$T63_R4.lock.stale.$T63_DEAD"; echo "$T63_DEAD" > "$T63_R4.lock/pid"
+  : > "$T63_R4.lock.taking/h.$T63_DEAD"; echo "$T63_DEAD x" > "$T63_R4.lock.stale.$T63_DEAD/pid"
+  for _n in 1 2 3 4; do bash "$TMP/t63-take.sh" "$LIB" "$T63_R4" "$_n" > "$TMP/t63-take$_n.out" 2>&1 & done
+  : > "$T63_R4.go"; wait
+  T63_B6_N=$((T63_B6_N + 1))
+  _bad=""
+  [ "$(awk '/^enter/ { if (held) d++; held = 1 } /^leave/ { held = 0 } END { print d + 0 }' "$T63_R4.holders")|$(grep -c '^enter' "$T63_R4.holders")" = "0|4" ] || _bad="holders"
+  [ "$(grep -c '^landed: row=T' "$T63_R4" 2>/dev/null)" = 4 ] || _bad="${_bad} blocks"
+  cat "$TMP"/t63-take?.out | grep -q . && _bad="${_bad} failed"
+  for _x in "$T63_R4".lock*; do [ -e "$_x" ] && _bad="${_bad} left:${_x##*/}"; done
+  if [ -n "$_bad" ]; then T63_B6_BAD=$((T63_B6_BAD + 1)); T63_B6_WHY="$_bad"; break; fi
+done
+expect_eq "(T63-b6) 200 trials of four takers at a dead .taking: one frees it, never two holders, four blocks, nothing left (${T63_B6_WHY:-})" \
+  "200|0" "$T63_B6_N|$T63_B6_BAD"
+
+# (b6b) AN EMPTY `.taking` (a taker killed between its mkdir and its file) is freed by one `rmdir` once
+# older than two seconds; a held one (its holder's file in it) is never removed by an `rmdir`.
+rm -f "$T63_R4"; rm -rf "$T63_R4".lock*; mkdir "$T63_R4.lock" "$T63_R4.lock.taking"; echo "$T63_DEAD" > "$T63_R4.lock/pid"
+touch -t 202001010000 "$T63_R4.lock.taking"
+expect_eq "(T63-b6b) an empty .taking past two seconds: the append takes the dead lock over, nothing left" "0|1|" \
+  "$(_wt_proofs_append "$T63_R4" T6 wt/f ffff mmmm "stamp/v1|f"; echo "$?")|$(grep -c '^landed: row=T6 ' "$T63_R4")|$(ls -d "$T63_R4".lock* 2>/dev/null)"
+sleep 120 & T63_LIVE=$!
+mkdir "$T63_R4.lock.taking"; : > "$T63_R4.lock.taking/h.$T63_LIVE"; touch -t 202001010000 "$T63_R4.lock.taking"
+mkdir "$T63_R4.lock"; echo "$T63_DEAD" > "$T63_R4.lock/pid"
+T63_HELD="$(_WT_PROOFS_LOCK_WAIT=1; _wt_proofs_append "$T63_R4" T7 wt/g gggg mmmm "stamp/v1|g"; echo "$?")"
+expect_eq "(T63-b6c) a .taking whose holder lives, however old, is left: the append waits and fails, the .taking kept" \
+  "1|yes" "$T63_HELD|$([ -e "$T63_R4.lock.taking/h.$T63_LIVE" ] && echo yes)"
+kill "$T63_LIVE" 2>/dev/null; wait "$T63_LIVE" 2>/dev/null; rm -rf "$T63_R4".lock*
+
 # (b3) THE CLEANUP TAKES NOTHING OVER: with a dead holder's lock in its way, the refused landing leaves
 # the empty record its proof made, and the dead lock where it was. The arm: an append takes it over.
 rm -f "$T63_REC" "$T63_REC.go"; rm -rf "$T63_REC".lock*; mkdir "$T63_REC.lock"; echo "$T63_DEAD" > "$T63_REC.lock/pid"

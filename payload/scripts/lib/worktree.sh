@@ -1124,26 +1124,22 @@ _wt_proofs_lock() {  # <record path> [keep] -> 0 held, 1 not taken in time (keep
   done
 }
 
-# A stale lock taken over by ONE rename (wave-27 T63; review pass 43 B1). Takeovers are one at a time:
-# a taker first makes `<lock>.taking` (mkdir; one left by a killed taker is removed by `rmdir` once it
-# is two seconds old) and, holding it, reads the lock's line again. Only the line it judged stale is
-# taken over, so a lock made fresh between the look and the rename is never renamed (A-T63.1). The
-# directory is renamed aside to `<lock>.stale.<taker's pid>` (the source gone: another taker won, and
-# this one waits like any other), the line is read once more in the renamed directory, and only then
-# is it removed and the path left free for a `mkdir`. Should the renamed directory hold another line
-# (a holder that came back after the stale age), it goes home by rename while the path is free, and
-# is otherwise lost to its holder, which then finds another's line and writes nothing.
+# A stale lock taken over by ONE rename (wave-27 T63; review pass 43 B1). Takeovers are one at a time
+# under `<lock>.taking` (`_wt_proofs_taking`), and, holding it, the taker reads the lock's line again:
+# only the line it judged stale is taken over, so a lock made fresh between the look and the rename is
+# never renamed (A-T63.1, A-T63.2). The directory is renamed aside to `<lock>.stale.<taker's pid>`
+# (the source gone: another taker won, and this one waits like any other), the line is read once more
+# in the renamed directory, and only then is it removed and the path left free for a `mkdir`. Should
+# the renamed directory hold another line (a holder that came back after the stale age), it goes home
+# by rename while the path is free, and is otherwise lost to its holder, which then finds another's
+# line and writes nothing.
 _wt_proofs_takeover() {  # <lock path> <line judged stale> [<taker pid>] -> 0 taken over, 1 not
-  local aside="${1}.stale.${3:-$$}" tk="${1}.taking" line="" mt=""
-  if ! mkdir "$tk" 2>/dev/null; then
-    mt="$(stat -f %m "$tk" 2>/dev/null || stat -c %Y "$tk" 2>/dev/null)"
-    case "$mt" in ''|*[!0-9]*) ;; *) [ $(( $(date +%s) - mt )) -le 2 ] || rmdir "$tk" 2>/dev/null ;; esac
-    return 1
-  fi
+  local me="${3:-$$}" aside="${1}.stale.${3:-$$}" tk="${1}.taking" line=""
+  _wt_proofs_taking "$tk" "$me" "$1" || return 1
   { read -r line < "$1/pid"; } 2>/dev/null
-  if [ ! -d "$1" ] || [ -L "$1" ] || [ "$line" != "$2" ]; then rmdir "$tk" 2>/dev/null; return 1; fi
+  if [ ! -d "$1" ] || [ -L "$1" ] || [ "$line" != "$2" ]; then _wt_proofs_untaking "$tk" "$me"; return 1; fi
   rm -rf "$aside" 2>/dev/null  # only a dead process with this pid can have left one
-  mv "$1" "$aside" 2>/dev/null || { rmdir "$tk" 2>/dev/null; return 1; }
+  mv "$1" "$aside" 2>/dev/null || { _wt_proofs_untaking "$tk" "$me"; return 1; }
   line=""; { read -r line < "$aside/pid"; } 2>/dev/null
   if [ "$line" != "$2" ]; then
     # Only a directory with a line goes home. One with none is a take whose line is not written yet;
@@ -1151,11 +1147,53 @@ _wt_proofs_takeover() {  # <lock path> <line judged stale> [<taker pid>] -> 0 ta
     # lands in the next taker's directory first) and the maker goes round the wait.
     [ -z "$line" ] || [ -e "$1" ] || mv "$aside" "$1" 2>/dev/null
     rm -rf "$aside" "${1}/${aside##*/}" 2>/dev/null
-    rmdir "$tk" 2>/dev/null
+    _wt_proofs_untaking "$tk" "$me"
     return 1
   fi
   rm -rf "$aside" 2>/dev/null
-  rmdir "$tk" 2>/dev/null
+  _wt_proofs_untaking "$tk" "$me"
+}
+
+# THE TAKEOVER'S OWN LOCK, AND WHAT FREES IT WHEN ITS HOLDER DIES (wave-27 T63, A-T63.10). `.taking` is
+# held by `mkdir` AND the holder's file `h.<its pid>` in it, the only one there: a taker whose `mkdir`
+# succeeded but whose file is not alone (another wrote into a directory made after its own was
+# removed) takes its file out and does not hold it. Nothing frees a `.taking` by remove-and-retry:
+# - a `.taking` holding a DEAD holder's file is freed by unlinking that file, which one process wins;
+#   that process alone then `rmdir`s it (only an EMPTY directory goes) and removes the dead holder's
+#   renamed-aside `<lock>.stale.<its pid>`, which only that holder could otherwise have removed;
+# - an EMPTY `.taking` (a taker killed between its `mkdir` and its file) is freed by one `rmdir` once
+#   older than _WT_PROOFS_TAKING_STALE seconds (2); a held `.taking` is never empty, so an `rmdir`
+#   aimed at an old one never removes a held one;
+# - a `.taking` whose holder lives is never freed: a takeover holds it for milliseconds.
+_WT_PROOFS_TAKING_STALE="${_WT_PROOFS_TAKING_STALE:-2}"
+_wt_proofs_taking() {  # <taking dir> <taker pid> <lock path> -> 0 held, 1 not (a dead holder's freed)
+  local h p n=0 mt
+  if mkdir "$1" 2>/dev/null; then
+    : > "$1/h.$2" 2>/dev/null || return 1
+    for h in "$1"/h.*; do [ -e "$h" ] && n=$((n + 1)); done
+    [ "$n" -eq 1 ] && return 0
+    rm -f "$1/h.$2" 2>/dev/null
+    return 1
+  fi
+  for h in "$1"/h.*; do
+    [ -e "$h" ] || continue
+    n=$((n + 1)); p="${h##*/h.}"
+    case "$p" in ''|*[!0-9]*) continue ;; esac
+    if ! kill -0 "$p" 2>/dev/null && rm "$h" 2>/dev/null; then
+      rmdir "$1" 2>/dev/null
+      rm -rf "${3}.stale.${p}" 2>/dev/null
+    fi
+  done
+  if [ "$n" -eq 0 ]; then
+    mt="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null)"
+    case "$mt" in ''|*[!0-9]*) ;; *) [ $(( $(date +%s) - mt )) -le "$_WT_PROOFS_TAKING_STALE" ] || rmdir "$1" 2>/dev/null ;; esac
+  fi
+  return 1
+}
+
+_wt_proofs_untaking() {  # <taking dir> <taker pid>
+  rm -f "$1/h.$2" 2>/dev/null
+  rmdir "$1" 2>/dev/null
 }
 
 # The lock's line is this holder's own.
