@@ -2248,7 +2248,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   _ST_LAUNCHED=""; _ST_DECLINED=""; _ST_CURRENT=""; _ST_STATE=""; _ST_CEILING=""
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
   _ST_NO_BUDGET=0; _ST_READY_N=0; _ST_SENT=0
-  _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""
+  _ST_STANDING=""; _ST_STANDING_IDS=""; _ST_GAP=""; _ST_TICK_DUTY=owed; _ST_LIVE_HEAD=""; _ST_FACTS=""
   local tr fold mark rest rung ready count pressure cores FILL_ROSTER FILL_ACKS FILL_OPEN
   local digest duty at rvat led standing gap rcount rgap slot
 
@@ -2400,9 +2400,14 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     # what the tick offered row by row. Which head goes in is still decided against the newest
     # review proof of ANY question, a reading included: a reading newer than the digest withholds
     # the head from every row, never owes one, and costs one tick's wait.
+    # THE FACTS STATE THE TICK JUDGED (wave-27 T43; A-orch-82): the integrate row's `proof:review`
+    # is met only by the judge's `covered` (T14), and the wall runs no judge, so it hands in the
+    # digest's `facts_state=` under the same two tests as the head: a digest of this turn, and no
+    # review proof newer than it. Otherwise it hands nothing, and integrate waits, as off a tick.
     if [ -n "$at" ] && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
       _ST_LIVE_HEAD="$(tick_digest_field "$digest" head)"
-      if [ -n "$_ST_LIVE_HEAD" ] && [ -n "$_ST_PLAN" ]; then
+      _ST_FACTS="$(tick_digest_field "$digest" facts_state)"
+      if { [ -n "$_ST_LIVE_HEAD" ] || [ -n "$_ST_FACTS" ]; } && [ -n "$_ST_PLAN" ]; then
         rvat="$(awk '
           /^[ \t]*```/ { f = !f; next }
           f { next }
@@ -2410,7 +2415,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
           insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {
             a = substr($0, RSTART + 4, RLENGTH - 4); if (a > m) m = a }
           END { print m }' "$_ST_PLAN" 2>/dev/null)"
-        [ -n "$rvat" ] && ! [ "${rvat:0:19}" \< "${at:0:19}" ] && _ST_LIVE_HEAD=""
+        [ -n "$rvat" ] && ! [ "${rvat:0:19}" \< "${at:0:19}" ] && { _ST_LIVE_HEAD=""; _ST_FACTS=""; }
       fi
     fi
   fi
@@ -2490,7 +2495,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # wall owes it the same way: the writers are trimmed to the free slots, the read-only rows are
   # counted and named in full. A row that waits for a read is not in this set at all, so it is
   # never demanded.
-  ready="$(UNITS_LIVE_HEAD="$_ST_LIVE_HEAD" fill_ready_tagged "$_ST_PLAN" 2>/dev/null)"
+  ready="$(UNITS_LIVE_HEAD="$_ST_LIVE_HEAD" UNITS_FACTS_STATE="$_ST_FACTS" fill_ready_tagged "$_ST_PLAN" 2>/dev/null)"
   count=0; gap=0; rcount=0; rgap=0; _ST_READY=""; _ST_NAMED=""
   while IFS=$'\t' read -r rest slot; do
     [ -n "$rest" ] || continue
