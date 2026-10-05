@@ -295,6 +295,11 @@ dp_hires_cs_since() {
 
 run_gate() {  # <payload-json>
   local _sid _t0; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  # T57: no wall runs on a fixture that was never made (fixture_drive_ok, beside make_repo).
+  if ! fixture_drive_ok "$(printf '%s' "$1" | jq -r '.cwd // ""' 2>/dev/null)"; then
+    GATE_OUT=""; GATE_ERR="fixture lost: $FIXTURE_LOST"; GATE_VERR=""; GATE_REASON=""; GATE_DENY=""
+    GATE_ST=97; GATE_VERDICT="fixture-lost"; return 0
+  fi
   _t0=$(date +%s)
   # OPT-IN, AND ONLY OVER THE FIRST DRIVE. Set `GATE_HIRES=1` before a call to have
   # `$GATE_TIME_CS` measured to the hundredth; every other caller pays nothing, which
@@ -517,7 +522,50 @@ PLAN
       bound_marker "$repo" "$_psid" "$_pplan"
     done
   fi
+  # A repository with no commit is not the fixture asked for: answer nothing, and fail (T57).
+  git -C "$repo" rev-parse -q --verify HEAD >/dev/null 2>&1 || return 1
   printf '%s' "$repo"
+}
+
+# A FIXTURE WHOSE REPOSITORY WAS NOT MADE FAILS ITS ROWS BY NAME (wave-27 T57; review pass 35 N6).
+# Under fork pressure `REPO=$(make_repo …)` came back empty: the fixture then wrote toward `/`, the
+# wall ran inert and answered allow, and a row expecting allow passed having tested nothing. Three
+# parts, each in one place:
+#   - the take: an ERR trap catches any `<var>=$(make_repo …)` that failed (a dying subshell, or
+#     make_repo's own check above) and points <var> at a path under "$SANDBOX/.lost/", so every
+#     write the fixture goes on to make lands inside the sandbox;
+#   - the drive: run_gate refuses to run the wall on a payload whose cwd is under .lost, empty
+#     (unless the row sets GATE_CWD_FREE=1) or outside the sandbox, and names the fixture;
+#   - the rows: while a fixture is lost, `ok` fails each row by its own name, so no row passes
+#     on a wall that never ran. The next drive on a made fixture clears it.
+FIXTURE_LOST=""; FIXTURE_LOST_N=0
+SANDBOX_P="$(cd "$SANDBOX" && pwd -P)"
+fixture_lost_take() {
+  local v="${BASH_COMMAND%%=*}"
+  case "$BASH_COMMAND" in *'=$(make_repo '*) : ;; *) return 0 ;; esac
+  case "$v" in ''|*[!A-Za-z0-9_]*) return 0 ;; esac
+  FIXTURE_LOST_N=$((FIXTURE_LOST_N + 1))
+  printf -v "$v" '%s' "$SANDBOX/.lost/$v-$FIXTURE_LOST_N"
+  FIXTURE_LOST="$BASH_COMMAND"
+}
+set -o errtrace
+trap fixture_lost_take ERR
+fixture_drive_ok() {  # <payload cwd> -> 0 when the wall may run on it; else FIXTURE_LOST is named
+  case "$1" in
+    "$SANDBOX"/.lost/*) FIXTURE_LOST="${FIXTURE_LOST:-$1}" ;;
+    '') [ -n "${GATE_CWD_FREE:-}" ] && FIXTURE_LOST="" || FIXTURE_LOST="${FIXTURE_LOST:-a payload with no cwd}" ;;
+    "$SANDBOX"/*|"$SANDBOX_P"/*) FIXTURE_LOST="" ;;
+    *) FIXTURE_LOST="${FIXTURE_LOST:-$1, outside the sandbox}" ;;
+  esac
+  [ -z "$FIXTURE_LOST" ]
+}
+eval "_fixture_ok_unguarded() $(declare -f ok | sed 1d)"
+ok() {
+  if [ -n "$FIXTURE_LOST" ]; then
+    no "$1" "fixture lost: ${FIXTURE_LOST} made no repository, so this row tested nothing"
+    return 0
+  fi
+  _fixture_ok_unguarded "$@"
 }
 
 # write_attestation <repo> <session_id> [extra kv lines...]
@@ -591,7 +639,7 @@ fi
 
 section "S2 — ambiguity: repo unresolvable -> OPEN, silent"
 
-run_gate "$(mk_agent_payload "$SID_A" "")"
+GATE_CWD_FREE=1 run_gate "$(mk_agent_payload "$SID_A" "")"
 expect_status "empty cwd exits 0" "0" "$GATE_ST"
 expect_empty "empty cwd produces no stdout" "$GATE_OUT"
 expect_empty "empty cwd produces no stderr" "$GATE_ERR"
@@ -4991,7 +5039,7 @@ Suites: none    # *.test.sh names or a path-qualified run.sh; other runners: Re-
   "w27p-aud-bare" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
 expect_eq "27p3c …and the same line without runs still meets the AUDITOR arm" "deny" "$GATE_VERDICT"
 expect_contains "27p3c …named as an auditor that re-executes nothing" \
-  "an auditor names no suites" "$GATE_ERR"
+  "the auditor declares nothing to re-execute" "$GATE_ERR"
 expect_absent "27p3c …never the suite-drop refusal" \
   "Suites: names a file the shell runner cannot run" "$GATE_ERR$GATE_REASON"
 
@@ -7723,7 +7771,7 @@ expect_eq "33a a bionic:auditor brief with Suites: none is REFUSED" "deny" "$GAT
 expect_contains "33a …the one line names the fault" \
   "auditor" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
 expect_contains "33a …and the fix names what to declare" \
-  "name the suites" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+  "name one suite or run" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
 expect_status "33a …and no roster row was journalled for the refused dispatch" \
   "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 
@@ -8577,7 +8625,7 @@ Questions: evidence, adversarial, structure
 Files: .bionic/docs/record/wq-q11.md, .bionic/docs/record/wq-q11-2.md, .bionic/docs/record/wq-q11-3.md
 Suites: none"
 expect_eq "Q11 tested: the same critic waiving every suite with no run is refused" "deny" "$GATE_VERDICT"
-expect_contains "Q11 …as an auditor's is: it names no suites" "names no suites" "$GATE_ERR"
+expect_contains "Q11 …as an auditor's is: it declares nothing to re-execute" "declares nothing to re-execute" "$GATE_ERR"
 
 REPO=$(make_repo rq12 yes); write_attestation "$REPO" "$SID_A"
 q_gate "$REPO" q12 bionic:critic "Your task: read the wave-99 change.
@@ -8627,7 +8675,7 @@ expect_contains "Q15 the amend span: three suite runs and a cleanup pass the aud
 expect_absent "Q15 …with no finding" "finding:" "$Q15"
 Q15B=$(q_lib_verdict bionic:auditor "$Q_SPAN ${RL_BT}cargo test${RL_BT}")
 expect_contains "Q15b …and a fourth suite run is refused there as at dispatch" \
-  "finding: Re-executes: line exceeds the 3-run cap" "$Q15B"
+  "finding: the total of 4 runs exceeds the 3-run cap" "$Q15B"
 
 # ---- T49 (review passes 19 and 24): the cap counts EVERY declared run but file housekeeping ----
 # The classifier does not know `python -m pytest`, so under "suite runs only" six of them were
@@ -8649,7 +8697,7 @@ Q49_PY=(); for _q49 in a b c d e f; do Q49_PY+=("python -m pytest tests/$_q49");
 for Q49_ROLE in bionic:auditor bionic:critic bionic:reviewer; do
   V=$(q_lib_verdict "$Q49_ROLE" "$(q_span evidence none "${Q49_PY[@]}")")
   expect_contains "T49-Q1 $Q49_ROLE: six python -m pytest runs are refused on the cap of three" \
-    "finding: Re-executes: line exceeds the 3-run cap" "$V"
+    "finding: the total of 6 runs exceeds the 3-run cap" "$V"
   V=$(q_lib_verdict "$Q49_ROLE" "$(q_span evidence none "${Q49_PY[@]:0:3}")")
   expect_contains "T49-Q1 …while three of them are admitted (the positive beside it)" "rc=0" "$V"
   expect_absent "T49-Q1 …with no finding" "finding:" "$V"
@@ -8664,22 +8712,22 @@ expect_eq "T49-Q2 …with four recorded" \
   "$(q_lift bionic:auditor "$(q_span evidence none 'bash tests/x.test.sh' 'bash tests/y.test.sh' 'bash tests/z.test.sh' 'rm -rf dist/cache')" re_executes)"
 V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'bash tests/x.test.sh' 'bash tests/y.test.sh' 'bash tests/z.test.sh' 'rm -rf dist && bash tests/w.test.sh')")
 expect_contains "T49-Q3 three runs and rm -rf dist && bash tests/w.test.sh: the && makes it a run, four" \
-  "finding: Re-executes: line exceeds the 3-run cap" "$V"
+  "finding: the total of 4 runs exceeds the 3-run cap" "$V"
 V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'bash tests/x.test.sh' 'bash tests/y.test.sh' 'bash tests/z.test.sh' 'mkdir -p out' 'cp a b' 'touch f' 'mv a b' 'rmdir d')")
 expect_contains "T49-Q4 mkdir, cp, touch, mv and rmdir do not count" "rc=0" "$V"
 for Q49_RUN in 'rmx -rf dist' './rm -rf dist' 'rm -rf dist; true' 'rm -rf $(pwd)/dist'; do
   V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'bash tests/x.test.sh' 'bash tests/y.test.sh' 'bash tests/z.test.sh' "$Q49_RUN")")
   expect_contains "T49-Q5 '$Q49_RUN' is a fourth run, not housekeeping: refused on the cap" \
-    "finding: Re-executes: line exceeds the 3-run cap" "$V"
+    "finding: the total of 4 runs exceeds the 3-run cap" "$V"
 done
 V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'rm -rf dist')")
-expect_contains "T49-Q6 a reader with Suites: none and only rm -rf dist is refused" "finding: an auditor names no suites" "$V"
+expect_contains "T49-Q6 a reader with Suites: none and only rm -rf dist is refused" "finding: the auditor declares nothing to re-execute" "$V"
 V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'rm -rf dist' 'mkdir out')")
-expect_contains "T49-Q6 …two housekeeping commands are no run either" "finding: an auditor names no suites" "$V"
+expect_contains "T49-Q6 …two housekeeping commands are no run either" "finding: the auditor declares nothing to re-execute" "$V"
 V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'rm -rf dist' 'bash tests/x.test.sh')")
 expect_contains "T49-Q6 …while one run beside the housekeeping admits it (the positive)" "rc=0" "$V"
 V=$(q_lib_verdict bionic:critic "$(q_span evidence none 'rm -rf dist')")
-expect_contains "T49-Q6 …and a critic holding evidence is held the same" "finding: a critic reading evidence names no suites" "$V"
+expect_contains "T49-Q6 …and a critic holding evidence is held the same" "finding: the critic declares nothing to re-execute" "$V"
 
 # ---- T49: the Questions: label is read as the other labels are ----
 # q_hits <brief> <role> -> the row's questions=, or `deny:<first refusal line>`.
@@ -8853,12 +8901,12 @@ expect_contains "brief-lib a run with an unquoted pipe is refused" "finding: a d
 BV_FOUR="Re-executes: ${BT}go test ./a${BT}, ${BT}go test ./b${BT}, ${BT}go test ./c${BT}, ${BT}go test ./d${BT}"
 BV=$(brief_verdict bionic:auditor "$BRIEF_NOCONF" "$BV_FOUR")
 expect_contains "brief-lib an auditor's fourth run passes the auditor's cap of three" \
-  "finding: Re-executes: line exceeds the 3-run cap" "$BV"
+  "finding: the total of 4 runs exceeds the 3-run cap" "$BV"
 BV=$(brief_verdict implementor "$BRIEF_NOCONF" "$BV_FOUR")
 expect_contains "brief-lib …while the same four runs pass clean for a writer" "rc=0" "$BV"
 
 BV=$(brief_verdict bionic:auditor "$BRIEF_NOCONF" "Suites: none")
-expect_contains "brief-lib an auditor that waives every suite is refused" "finding: an auditor names no suites" "$BV"
+expect_contains "brief-lib an auditor that waives every suite is refused" "finding: the auditor declares nothing to re-execute" "$BV"
 
 BV=$(brief_verdict implementor "$BRIEF_NOCONF" "Expected duration: ~5 minutes.")
 expect_contains "brief-lib a brief with no instrument is refused" \
@@ -8900,7 +8948,7 @@ BV_FOURL="${BV_THREE}
 Re-executes: ${BT}go test ./d${BT}"
 BV=$(brief_verdict bionic:auditor "$BRIEF_NOCONF" "$BV_FOURL")
 expect_contains "brief-lib four one-command lines meet the cap over the union (AC-2.2)" \
-  "finding: Re-executes: line exceeds the 3-run cap" "$BV"
+  "finding: the total of 4 runs exceeds the 3-run cap" "$BV"
 expect_contains "brief-lib …naming the fourth run" "${BT}go test ./d${BT}" \
   "$(brief_detail bionic:auditor "$BRIEF_NOCONF" "$BV_FOURL")"
 BV_CAPD="$(brief_detail bionic:auditor "$BRIEF_NOCONF" "$BV_FOURL")"
@@ -10058,5 +10106,199 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "b1l-w" "claude-sonn
 expect_eq "T49-B1 …it holds no writer slot: a writer is admitted beside it at writers=1" "allow" "$GATE_VERDICT"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "b1l-w2" "claude-sonnet-5" "$RO_NONE" "implementor")"
 expect_eq "T49-B1 …and a second writer is refused (the control: the slot is the writer's)" "deny" "$GATE_VERDICT"
+
+# --- T57 (review pass 35, A-orch-97): the reader's run cap has no way round ----------------------
+# B1: housekeeping is a command holding none of `;`, `&`, `|`, backquote, `$(`, `<(`, `>(` or a line
+# break whose first word is on the list; anything else is a run, so a lone `&` no longer hides one.
+# N4: for a reader dealt evidence the cap of three is on the TOTAL, suites under Suites: plus counted
+# runs. N7: such a reader that declares nothing to re-execute is refused with its own reason. N1: a
+# reader's records are counted only among paths under the record root, in resolved form.
+t57_counts() {  # <run> -> 0 when the cap counts it, 1 when it is housekeeping (dp_run_counts)
+  bash -c '. "$1" || exit 9; dp_run_counts "$2"; echo $?' _ "$Q_LIB" "$1" 2>&1
+}
+expect_eq "T57-B1 rm -rf dist is housekeeping (the positive beside the rows below)" "1" "$(t57_counts 'rm -rf dist')"
+expect_eq "T57-B1 rm -rf dist & pytest is a run" "0" "$(t57_counts 'rm -rf dist & pytest')"
+expect_eq "T57-B1 a trailing & alone makes rm -rf dist & a run (the rule is the character)" "0" "$(t57_counts 'rm -rf dist &')"
+expect_eq "T57-B1 rm x <(pytest) is a run" "0" "$(t57_counts 'rm x <(pytest)')"
+expect_eq "T57-B1 rm x >(pytest) is a run" "0" "$(t57_counts 'rm x >(pytest)')"
+expect_eq "T57-B1 a command holding a line break is a run" "0" "$(t57_counts 'mv a b
+pytest')"
+T57_R3=('bash tests/a.test.sh' 'bash tests/b.test.sh' 'bash tests/c.test.sh')
+for T57_HIDE in 'rm -rf dist & pytest' 'mkdir -p x & bash tests/run.sh' 'cp a b & npm test' 'rm -rf dist &'; do
+  V=$(q_lib_verdict bionic:auditor "$(q_span evidence none "${T57_R3[@]}" "$T57_HIDE")")
+  expect_contains "T57-B1 three runs and '$T57_HIDE' are four: refused on the cap" "exceeds the 3-run cap" "$V"
+  expect_contains "T57-B1 …the first line naming the total" "the total of 4 runs" "$V"
+done
+V=$(q_lib_verdict bionic:critic "$(q_span 'evidence, adversarial, structure' none "${T57_R3[@]}" 'cp a b & npm test')")
+expect_contains "T57-B1 a critic holding evidence: cp a b & npm test as a fourth is refused on the cap" "the total of 4 runs exceeds the 3-run cap" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'rm -rf dist & pytest')")
+expect_contains "T57-B1 rm -rf dist & pytest alone is one run: admitted" "rc=0" "$V"
+expect_absent "T57-B1 …with no finding" "finding:" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'rm -rf a & pytest t1' 'rm -rf b & pytest t2' 'rm -rf c & pytest t3' 'rm -rf d & pytest t4' 'rm -rf e & pytest t5' 'rm -rf f & pytest t6')")
+expect_contains "T57-B1 six runs each behind & are refused on the cap" "the total of 6 runs exceeds the 3-run cap" "$V"
+expect_absent "T57-B1 …never as a reader with nothing to re-execute" "nothing to re-execute" "$V"
+expect_absent "T57-B1 …nor in the old words" "names no suites" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'rm -rf dist' 'mkdir -p out' 'cp a b' 'bash tests/a.test.sh' 'bash tests/b.test.sh' 'bash tests/c.test.sh')")
+expect_contains "T57-B1 housekeeping without & stays free: three runs and three cleanups are admitted" "rc=0" "$V"
+
+# the review's p8.sh briefs, end to end at the wall
+t57_brief() {  # <questions> <fourth run> [<extra line>]
+  printf 'Your task: re-run the evidence.\nExpected artifact: .bionic/docs/record/w/e.md\nExpected duration: ~30 minutes.\nQuestions: %s\nSuites: none\nRe-executes: %sbash tests/a.test.sh%s, %sbash tests/b.test.sh%s, %sbash tests/c.test.sh%s, %s%s%s' \
+    "$1" "$RL_BT" "$RL_BT" "$RL_BT" "$RL_BT" "$RL_BT" "$RL_BT" "$RL_BT" "$2" "$RL_BT"
+  [ -n "${3:-}" ] && printf '\n%s' "$3"
+  return 0
+}
+q49_gate t57a bionic:auditor audited "$(t57_brief evidence 'rm -rf dist & pytest')"
+expect_contains "T57-B1 audited auditor, fourth run rm -rf dist & pytest: refused at the wall" "deny:" "$R"
+expect_contains "T57-B1 …on the cap, naming the total" "the total of 4 runs exceeds the 3-run cap" "$R"
+q49_gate t57b bionic:auditor peer-reviewed "$(t57_brief evidence 'mkdir -p x & bash tests/run.sh')"
+expect_contains "T57-B1 peer-reviewed auditor, fourth run mkdir -p x & bash tests/run.sh: refused on the cap" "exceeds the 3-run cap" "$R"
+q49_gate t57c bionic:critic tested "$(t57_brief 'evidence, adversarial, structure' 'cp a b & npm test' 'Files: .bionic/docs/record/w/e.md, .bionic/docs/record/w/f.md, .bionic/docs/record/w/g.md')"
+expect_contains "T57-B1 tested critic holding evidence, fourth run cp a b & npm test: refused on the cap" "exceeds the 3-run cap" "$R"
+q49_gate t57d bionic:auditor audited "$(t57_brief evidence 'pytest')"
+expect_contains "T57-B1 …the control: a plain fourth run is refused the same way" "the total of 4 runs exceeds the 3-run cap" "$R"
+
+# N4: the total. Suites: names count toward the three.
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence 'tests/a.test.sh, tests/b.test.sh, tests/c.test.sh, tests/d.test.sh')")
+expect_contains "T57-N4 four suites and no Re-executes: are refused: the total is four" "the total of 4 runs exceeds the 3-run cap" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence 'tests/a.test.sh, tests/b.test.sh, tests/c.test.sh' 'pytest x')")
+expect_contains "T57-N4 three suites and one run are refused" "the total of 4 runs exceeds the 3-run cap" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence 'tests/a.test.sh, tests/b.test.sh, tests/c.test.sh' 'pytest x' 'pytest y' 'pytest z')")
+expect_contains "T57-N4 three suites and three runs name the total of six" "the total of 6 runs exceeds the 3-run cap" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence 'tests/a.test.sh, tests/b.test.sh' 'pytest x')")
+expect_contains "T57-N4 two suites and one run, three in total, are admitted" "rc=0" "$V"
+expect_absent "T57-N4 …with no finding" "finding:" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'pytest x' 'pytest y' 'pytest z')")
+expect_contains "T57-N4 three runs and Suites: none are admitted" "rc=0" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence 'tests/a.test.sh, tests/b.test.sh, tests/c.test.sh' 'rm -rf dist')")
+expect_contains "T57-N4 three suites and a housekeeping command are admitted: housekeeping is free" "rc=0" "$V"
+V=$(q_lib_verdict bionic:critic "$(q_span adversarial 'tests/a.test.sh, tests/b.test.sh, tests/c.test.sh, tests/d.test.sh' 'pytest x')")
+expect_contains "T57-N4 a critic not dealt evidence is not held to three" "rc=0" "$V"
+V=$(q_lib_verdict implementor "$(q_span evidence 'tests/a.test.sh, tests/b.test.sh, tests/c.test.sh, tests/d.test.sh' 'pytest x' 'pytest y' 'pytest z' 'rm -rf d & pytest')")
+expect_contains "T57 a writer is untouched by every rule here: four suites and four runs are admitted" "rc=0" "$V"
+expect_absent "T57 …with no finding" "finding:" "$V"
+REPO=$(q_unbound rt57w)
+q_gate "$REPO" t57w bionic:reviewer "Your task: re-run.
+Expected artifact: .bionic/docs/record/w/e.md
+Expected duration: ~30 minutes.
+Questions: evidence
+Suites: tests/a.test.sh, tests/b.test.sh, tests/c.test.sh, tests/d.test.sh"
+T57_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')
+expect_contains "T57-N4 at the wall: a reviewer reading evidence with four suites is refused on the total" "the total of 4 runs exceeds the 3-run cap" "$T57_LINE"
+# each further digit of the total is one column: 94 at one digit leaves room for a total of seven
+expect_eq "T57-N4 …its first line fits with room for six more digits" "ok" "$([ "$(bionic_cols "$T57_LINE")" -le 94 ] && echo ok || echo "wide:$(bionic_cols "$T57_LINE")")"
+
+# N7: a reader dealt evidence that declares nothing to re-execute
+V=$(q_lib_verdict bionic:auditor "Questions: evidence
+Re-executes: ${RL_BT}rm -rf dist${RL_BT}")
+expect_contains "T57-N7 an auditor with no Suites: line and only rm -rf dist is refused" "finding: the auditor declares nothing to re-execute" "$V"
+expect_absent "T57-N7 …not in the old words" "names no suites" "$V"
+V=$(q_lib_verdict bionic:auditor "$(q_span evidence none 'rm -rf dist')")
+expect_contains "T57-N7 the same brief with Suites: none: the same refusal" "finding: the auditor declares nothing to re-execute" "$V"
+V=$(q_lib_verdict bionic:critic "$(q_span 'evidence, adversarial, structure' none 'rm -rf dist')")
+expect_contains "T57-N7 a critic holding evidence is held the same" "finding: the critic declares nothing to re-execute" "$V"
+V=$(q_lib_verdict bionic:auditor "Questions: evidence
+Re-executes: ${RL_BT}pytest${RL_BT}")
+expect_contains "T57-N7 …while one run and no Suites: line admit it (the positive)" "rc=0" "$V"
+V=$(q_lib_verdict bionic:reviewer "$(q_span structure none)")
+expect_contains "T57-N7 a reader not dealt evidence with Suites: none and no runs is untouched" "rc=0" "$V"
+expect_absent "T57-N7 …with no finding" "finding:" "$V"
+V=$(q_lib_verdict implementor "$(q_span evidence none 'rm -rf dist')")
+expect_contains "T57-N7 a writer with Suites: none and only housekeeping is untouched" "rc=0" "$V"
+REPO=$(make_repo rt57n yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" t57n bionic:auditor "Your task: re-run.
+Expected artifact: .bionic/docs/record/w/e.md
+Expected duration: ~30 minutes.
+Questions: evidence
+Re-executes: ${RL_BT}rm -rf dist${RL_BT}"
+expect_eq "T57-N7 at the wall: the auditor with no Suites: line and only rm -rf dist is refused" "deny" "$GATE_VERDICT"
+expect_contains "T57-N7 …saying it declares nothing to re-execute" "the auditor declares nothing to re-execute" "$GATE_ERR"
+REPO=$(q_unbound rt57m)
+q_gate "$REPO" t57m bionic:reviewer "Your task: re-run.
+Expected artifact: .bionic/docs/record/w/e.md
+Expected duration: ~30 minutes.
+Questions: evidence
+Suites: none"
+T57_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')
+expect_contains "T57-N7 the longest role: a reviewer reading evidence with nothing to re-execute" "the reviewer declares nothing to re-execute" "$T57_LINE"
+expect_eq "T57-N7 …its first line fits 100 columns" "ok" "$([ "$(bionic_cols "$T57_LINE")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$T57_LINE")")"
+REPO=$(make_repo rt57r yes); write_attestation "$REPO" "$SID_A"
+q_gate "$REPO" t57r bionic:reviewer "Your task: read.
+Expected artifact: .bionic/docs/record/w/e.md
+Expected duration: ~30 minutes.
+Questions: structure
+Suites: none"
+expect_eq "T57-N7 at the wall: a reviewer at audited (not dealt evidence) with Suites: none is admitted" "allow" "$GATE_VERDICT"
+
+# N1: a record is a path under the record root, in resolved form
+T57_D=.bionic/docs/record/w
+for T57_F in .bionic/tmp/scratch/x/progress.md hooks/a.sh "$T57_D/" ../elsewhere/b.md /tmp/b.md "$T57_D/x/../a.md" .bionic//docs/record/w/a.md; do
+  q49_gate "t57-n1-$(printf '%s' "$T57_F" | tr -c 'a-z0-9' '_')" bionic:critic peer-reviewed "$(b1_brief "$T57_D/a.md" 'adversarial, structure' "Files: $T57_F")"
+  expect_contains "T57-N1 Files: $T57_F beside the artifact leaves one record: refused" "dealt 2 questions, names 1 record" "$R"
+done
+q49_gate t57-n1-real bionic:critic peer-reviewed "$(b1_brief "$T57_D/a.md" 'adversarial, structure' "Files: $T57_D/b.md")"
+expect_eq "T57-N1 Files: naming a second record under the root: two, admitted" "allow:adversarial,structure" "$R"
+q49_gate t57-n1-scr bionic:critic peer-reviewed "$(b1_brief "$T57_D/a.md" 'adversarial, structure' "Files: $T57_D/b.md, .bionic/tmp/scratch/x/progress.md")"
+expect_eq "T57-N1 a scratch file beside two real records is admitted" "allow:adversarial,structure" "$R"
+expect_eq "T57-N1 …and stays on the row's files=" "$T57_D/b.md,.bionic/tmp/scratch/x/progress.md" "$(roster_field "$(q_row "$REPO")" files)"
+q49_gate t57-n1-one bionic:auditor audited "$(b1_brief hooks/out.md evidence)"
+expect_contains "T57-N1 an artifact outside the record root is no record: one question, none named" "dealt 1 question, names 0 records" "$R"
+
+# S1, S2: two rows that could not fail
+q49_gate t57-s1 bionic:critic peer-reviewed "$(b1_brief "$B1_ADV" 'adversarial, structure' "Files: \"$B1_ADV\"")"
+expect_contains "T57-S1 the artifact repeated in quotes as the only Files: entry is one record: refused" "dealt 2 questions, names 1 record" "$R"
+q49_gate t57-s2 bionic:auditor audited "Your task: read the wave-99 change.
+Expected artifact: .bionic/docs/record/wq-s2.md
+Expected duration: ~30 minutes.
+Suites: tests/widget.test.sh
+
+    Questions: evidence"
+expect_eq "T57-S2 an indented Questions: line after a blank line is the label" "allow:evidence" "$R"
+q49_gate t57-s2b bionic:auditor audited "    Your task: read the wave-99 change.
+    Expected artifact: .bionic/docs/record/wq-s2b.md
+    Expected duration: ~30 minutes.
+    Suites: tests/widget.test.sh
+    Questions: evidence"
+expect_eq "T57-S2 …and so is one in a brief indented whole" "allow:evidence" "$R"
+
+# N2: twelve Questions: lines
+T57_DUP="Your task: read.
+Expected artifact: .bionic/docs/record/w/e.md
+Expected duration: ~30 minutes."
+for _t57 in $(seq 1 100); do T57_DUP="$T57_DUP
+filler line $_t57"; done
+T57_DUP="$T57_DUP
+Suites: none"
+for _t57 in $(seq 1 12); do T57_DUP="$T57_DUP
+Questions: structure"; done
+REPO=$(q_unbound rt57q)
+q_gate "$REPO" t57q bionic:reviewer "$T57_DUP"
+T57_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')
+expect_contains "T57-N2 twelve Questions: lines: the first line says twelve" "bionic:reviewer has 12 Questions: lines" "$T57_LINE"
+T57_NUMS=$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -m1 'on lines ' | sed 's/.*on lines //; s/:$//')
+expect_contains "T57-N2 …the detail lists the line numbers from the first" "105, 106" "$T57_NUMS"
+T57_BAD=""
+expect_contains "T57-N2 …and says how many more the cut list left out" "114 and 2 more" "$T57_NUMS"
+for _t57 in $(printf '%s' "$T57_NUMS" | sed 's/ and [0-9]* more$//' | tr ',' ' ' | sed 's/ and / /g'); do
+  case "$_t57" in [0-9]*) [ "$_t57" -ge 105 ] && [ "$_t57" -le 116 ] || T57_BAD="$T57_BAD $_t57" ;; *) : ;; esac
+done
+expect_eq "T57-N2 …and every number it prints is a whole line number of a Questions: line" "" "$T57_BAD"
+
+# N6: the fixture guard (beside make_repo). Driven in a subshell, so its lost state stays there.
+T57_G=$(make_repo() { return 1; }
+  X=$(make_repo rt57lost yes)
+  run_gate "$(mk_agent_payload "$SID_A" "$X")"
+  printf '%s|%s|%s' "$X" "$FIXTURE_LOST" "$GATE_VERDICT")
+expect_eq "T57-N6 a make_repo that made nothing hands its taker a path inside the sandbox, and the wall is not run" \
+  "$SANDBOX/.lost/X-1|X=\$(make_repo rt57lost yes)|fixture-lost" "$T57_G"
+T57_G=$(make_repo() { :; }
+  X=$(make_repo rt57empty yes)
+  run_gate "$(mk_agent_payload "$SID_A" "$X")"
+  printf '%s|%s|%s' "$X" "$FIXTURE_LOST" "$GATE_VERDICT")
+expect_eq "T57-N6 …and an empty answer is caught at the drive" "|a payload with no cwd|fixture-lost" "$T57_G"
+T57_G=$(FIXTURE_LOST="X=\$(make_repo gone yes)"; ok "a row after a lost fixture")
+expect_contains "T57-N6 …while a fixture is lost, a row that would pass fails by its own name" "FAIL: a row after a lost fixture" "$T57_G"
+REPO=$(make_repo rt57made yes)
+expect_eq "T57-N6 a made fixture leaves nothing lost (the positive)" "|ok" "$FIXTURE_LOST|$(git -C "$REPO" rev-parse -q --verify HEAD >/dev/null && echo ok)"
 
 finish

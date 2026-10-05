@@ -2171,13 +2171,18 @@ case "$DP_SUBAGENT" in
     # THE LABEL IS GIVEN ONCE (wave-27 T49; review pass 24). Two lines, even with the same set,
     # are refused naming both, since the second would otherwise be dropped in silence.
     if [ -n "$_q_dup" ]; then
+      # THE TRUE COUNT (wave-27 T57; review pass 35 N2): the field is cut at a whole number, so
+      # the count is the raw line's, and a list cut short says how many more it left out.
       read -r -a _q_arr <<< "$_q_dup"
-      _q_n=${#_q_arr[@]}; _q_nums=""
+      read -r -a _q_all <<< "$(printf '%s\n' "$LIFTED" | sed -n 's/^questions_dup=//p' | head -1)"
+      _q_n=${#_q_all[@]}; _q_k=${#_q_arr[@]}; _q_nums=""
+      [ "$_q_n" -ge "$_q_k" ] || _q_n=$_q_k
       for _q_i in "${!_q_arr[@]}"; do
         if [ "$_q_i" -eq 0 ]; then _q_nums="${_q_arr[0]}"
-        elif [ "$_q_i" -eq $((_q_n - 1)) ]; then _q_nums="${_q_nums} and ${_q_arr[$_q_i]}"
+        elif [ "$_q_k" -eq "$_q_n" ] && [ "$_q_i" -eq $((_q_k - 1)) ]; then _q_nums="${_q_nums} and ${_q_arr[$_q_i]}"
         else _q_nums="${_q_nums}, ${_q_arr[$_q_i]}"; fi
       done
+      [ "$_q_k" -lt "$_q_n" ] && _q_nums="${_q_nums} and $((_q_n - _q_k)) more"
       dp_finding "${DP_SUBAGENT} has ${_q_n} Questions: lines" "keep one Questions: line" \
         "The brief carries the Questions: label more than once, on lines ${_q_nums}:
     Role: ${DP_SUBAGENT}
@@ -2260,17 +2265,49 @@ Then retry the dispatch."
     # The count needs no dealing, so it holds with no bound plan too. It is judged once the set
     # itself is admitted, so a brief with a wrong set is told that first and not twice. The row is
     # unchanged.
+    #
+    # A RECORD IS A PATH UNDER THE RECORD ROOT (wave-27 T57; review pass 35 N1). Counting distinct
+    # strings admitted a brief whose second "record" was a scratch file, a directory, a path
+    # outside the tree or the artifact spelled again (`x/../a.md`, `//`), each of which the fact
+    # verb refuses. So a path counts only when it sits under `<docs-root>/record/` (lib/roots.sh
+    # `docs_root`, the one the fact verb resolves, loaded through run.sh) after `.`, `..` and
+    # doubled slashes are resolved in the text, a relative path read from the project root; it
+    # does not end in `/`; and it is compared in that resolved form. Any other path may stay on
+    # Files: (a scratch file) and is not a record. Text only: nothing is read off the disk.
     if [ -n "${_q_admitted:-}" ]; then
       _q_nq="$(printf '%s' "$_q_set" | awk -F, '{ print NF }')"
+      _q_rroot="$BIONIC_ROOT/.bionic/docs/record"
+      if declare -F docs_root >/dev/null 2>&1; then
+        _q_dr="$(docs_root "$BIONIC_ROOT" 2>/dev/null)"; [ -n "$_q_dr" ] && _q_rroot="$_q_dr/record"
+      fi
       _q_nr="$(printf '%s\n%s\n' "$(brief_field "$LIFTED" deliverable)" "$(brief_field "$LIFTED" files | tr ',' '\n')" \
-        | awk '{ sub(/^\.\//, "") } $0 != "" && !seen[$0]++ { n++ } END { print n + 0 }')"
+        | awk -v root="$BIONIC_ROOT" -v rr="$_q_rroot" '
+          function resolve(p,   n, i, seg, out, k, dir) {
+            if (p !~ /^\//) p = root "/" p
+            dir = (p ~ /\/(\.\.?)?$/)
+            n = split(p, seg, "/"); k = 0
+            for (i = 1; i <= n; i++) {
+              if (seg[i] == "" || seg[i] == ".") continue
+              if (seg[i] == "..") { if (k > 0) k--; continue }
+              out[++k] = seg[i]
+            }
+            p = ""; for (i = 1; i <= k; i++) p = p "/" out[i]
+            return (p == "" ? "/" : p) (dir ? "/" : "")
+          }
+          BEGIN { if (rr != "") rr = resolve(rr) }
+          $0 == "" || rr == "" { next }
+          { r = resolve($0) }
+          r ~ /\/$/ || index(r, rr "/") != 1 { next }
+          !seen[r]++ { n++ }
+          END { print n + 0 }')"
       if [ "$_q_nr" -lt "$_q_nq" ]; then
         _q_pl="s"; [ "$_q_nr" -eq 1 ] && _q_pl=""
-        dp_finding "dealt ${_q_nq} questions, names ${_q_nr} record${_q_pl}" "one Files: record per question" \
+        _q_ql="s"; [ "$_q_nq" -eq 1 ] && _q_ql=""
+        dp_finding "dealt ${_q_nq} question${_q_ql}, names ${_q_nr} record${_q_pl}" "one Files: record per question" \
           "A reader writes one record per question it is dealt, and this brief names fewer records:
     Role:      ${DP_SUBAGENT}
     Questions: ${_q_set//,/, }
-    Records:   ${_q_nr} (the Expected artifact: and every path on the Files: line, each counted once)
+    Records:   ${_q_nr} (each path under ${_q_rroot#"$BIONIC_ROOT"/}/, the Expected artifact: and the Files: line, counted once)
 
 The fact verb (proof-add review) takes a record only from the reader's own roster row: its
 deliverable= or one of its files=. A record the brief never named is one the reader cannot
