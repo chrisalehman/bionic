@@ -2395,6 +2395,11 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     # A TIE HANDS IN NO HEAD (wave-26 T54; review 17 N4): a proof in the tick's own second cannot
     # be ordered against it, and the soft side is a review that waits one tick, not one owed for
     # nothing.
+    # PER QUESTION, THE READY SET JUDGES; THIS RULE STAYS GLOBAL (wave-27 T10; D4). The head goes
+    # into units.sh, which keys each read row's last proof by its own questions, so the wall owes
+    # what the tick offered row by row. Which head goes in is still decided against the newest
+    # review proof of ANY question, a reading included: a reading newer than the digest withholds
+    # the head from every row, never owes one, and costs one tick's wait.
     if [ -n "$at" ] && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
       _ST_LIVE_HEAD="$(tick_digest_field "$digest" head)"
       if [ -n "$_ST_LIVE_HEAD" ] && [ -n "$_ST_PLAN" ]; then

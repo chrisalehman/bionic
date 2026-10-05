@@ -7824,8 +7824,8 @@ RG_RING="$SANDBOX/rg/pressure.ring"
 mkdir -p "$SANDBOX/rg"
 # CLEAR and CRITICAL as the sensors see them: 80 % free is above every band threshold;
 # 8 % free is below BAND_FREE_CRITICAL_PCT (12) and above BAND_FREE_EMERGENCY_PCT (5).
-RG_CLEAR_ENV="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1"
-RG_CRIT_ENV="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1"
+RG_CLEAR_ENV="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
+RG_CRIT_ENV="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192"
 
 # ONE CLEAR READING, WRITTEN BY THE REAL WRITER — not a hand-built ring file. The line's
 # shape is `pressure_sample`'s to own, and a fixture that wrote it by hand would keep passing
@@ -8691,8 +8691,12 @@ expect_contains "DS.1 …and it counts the payload-named files, not the whole di
   "$DS_PLANTED_HOOKS in ~/.claude/hooks" "$DS_REPORT"
 expect_true "DS.1 …over a non-empty plant (the count is not zero over zero)" \
   test "${DS_PLANTED_HOOKS:-0}" -ge 10
-expect_contains "DS.1 …and all six role files as drifted" \
-  "6/6 differ" "$DS_REPORT"
+# RE-POINTED (wave-27 T11): was a literal "6/6", which a seventh role turned red for no defect.
+# The fixture plants one stale copy per payload role file, so the expected figure is that plant.
+DS_ROLE_N="$(for ds_f in "$DS_PAYLOAD"/agents/*.md; do [ -f "$ds_f" ] && echo x; done | grep -c x)"
+expect_true "DS.1 …over a non-empty role plant" test "${DS_ROLE_N:-0}" -ge 1
+expect_contains "DS.1 …and every planted role file as drifted" \
+  "${DS_ROLE_N}/${DS_ROLE_N} differ" "$DS_REPORT"
 
 # ── DS.2a THE FIRST WAY: every row that fires renders, with its hint ─────────
 #
@@ -11527,15 +11531,20 @@ done
 expect_eq "SV both author surfaces (SKILL.md, dispatch.md) carry the shared scaffold's new Suites: line" \
   "2 " "$SV_COUNT $SV_DISAGREE"
 
+# RE-POINTED (wave-27 T11): was `"6 "`, a count a seventh role turned red. A relation now:
+# every role file read carries the reader view, over a set that is not empty.
 SV_ROLES=0
+SV_READER=0
 SV_NOREADER=""
 for _sv_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
   [ -f "$_sv_f" ] || continue
   SV_ROLES=$((SV_ROLES + 1))
-  /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_sv_f" || SV_NOREADER="${SV_NOREADER} ${_sv_f##*/}"
+  if /usr/bin/grep -qF '<!-- BRIEF-SCAFFOLD-READER-BEGIN -->' "$_sv_f"; then SV_READER=$((SV_READER + 1))
+  else SV_NOREADER="${SV_NOREADER} ${_sv_f##*/}"; fi
 done
-expect_eq "SV …and all six role files carry the reader view of the scaffold" \
-  "6 " "$SV_ROLES $SV_NOREADER"
+expect_true "SV …the role files were read (the relation below is not vacuous)" test "$SV_ROLES" -ge 1
+expect_eq "SV …and every role file carries the reader view of the scaffold" \
+  "$SV_ROLES " "$SV_READER $SV_NOREADER"
 
 # THE OLD LINE IS GONE, EVERYWHERE, NOT JUST REPLACED SOMEWHERE. A partial render (the
 # block updated in the source but only some templates re-rendered) would leave some copies
@@ -11669,7 +11678,7 @@ printf '1700000000|80|0|0.1|16\n' > "$CGC_RING"
 # other suites, so an unpinned sample reads the runner's real load and a later median lands
 # in the warning band, halving the width for a reason that is not the fixture (§RG's pins).
 CGC_ENV=(BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_NOW_EPOCH=1700000000
-         BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1)
+         BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192)
 cgc_ring() { printf '1700000000|80|0|0.1|16\n' > "$CGC_RING"; }
 
 cgc_ack() {  # <ledger> <at> <name> — the sweeper ledger's ack line, in its writer's shape
@@ -12438,7 +12447,7 @@ CGSD_CFG="$SANDBOX/cgsd-config"; mkdir -p "$CGSD_CFG/projects/-cgsd"
 cgc_ring
 CGSD_TICK=$( cd "$CGSD_R" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CGSD_CFG" \
   BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
-  BIONIC_PROBE_LOAD_1M=0.1 bash "$CGSD_POKER" tick 2>&1 )
+  BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 bash "$CGSD_POKER" tick 2>&1 )
 CGSD_PRINTED=$(printf '%s\n' "$CGSD_TICK" | sed -n 's/^poker: STANDDOWN \([A-Za-z0-9_.-]*\) .*/\1/p' | LC_ALL=C sort -u | tr '\n' ' ')
 expect_eq "CG-standdown precondition: the real tick stood down exactly the two listed MET rows" \
   "sd-a sd-b " "$CGSD_PRINTED"
@@ -12457,7 +12466,7 @@ CGSD_TR="$CGSD_R/cgsd-transcript.jsonl"
 cgc_ring
 CGSD_OUT=$(s4_stop_payload "$CGSD_R" "$SID_A" "$CGSD_TR" \
   | env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 \
-      BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 bash "$CGSD_STOP" 2>/dev/null)
+      BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 bash "$CGSD_STOP" 2>/dev/null)
 CGSD_REASON=$(printf '%s' "$CGSD_OUT" | jq -r '.reason // ""' 2>/dev/null)
 CGSD_WALL=""
 for _cgsd_n in sd-a sd-b sd-gone sd-open; do
@@ -12503,7 +12512,7 @@ HD_CFG="$SANDBOX/hd-config"; mkdir -p "$HD_CFG/projects/-hd"
 } > "$HD_CFG/projects/-hd/$SID_A.jsonl"
 hd_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$HD_CFG" \
   BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
-  BIONIC_PROBE_LOAD_1M=0.1 "$@"; }
+  BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 "$@"; }
 HD_HOLD=$( cd "$HD_R" && hd_env bash "$CGSD_POKER" hold sd-a "kept for a second pass" 2>&1 ); HD_HOLD_RC=$?
 expect_eq "HD precondition: the hold verb took sd-a (rc 0)" "0" "$HD_HOLD_RC"
 cgc_ring
@@ -12561,7 +12570,7 @@ s4_bind "$OCC_R" "$SID_A" "$OCC_R/.bionic/docs/plans/epic-99/occ.plan.md"
 s4_attest "$OCC_R" "$SID_A"
 occ_env() { env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
   BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
-  BIONIC_PROBE_LOAD_1M=0.1 "$@"; }
+  BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 "$@"; }
 OCC_PF=$( cd "$OCC_R" && mk_agent_payload "$SID_A" "$OCC_R" | occ_env bash "$PARTY_DP" 2>&1 )
 OCC_PF_N=$(printf '%s\n' "$OCC_PF" | sed -n 's/.*writers: budget=1 open=\([0-9][0-9]*\) with-this-dispatch=.*/\1/p' | head -1)
 cgc_ring
@@ -12635,7 +12644,7 @@ cgt_stop() {  # <stop_hook_active true|false>
   jq -nc --arg c "$CGT_R" --arg s "$SID_A" --arg t "$CGT_TR" --argjson a "$1" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:$a}' \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_PRESSURE_RING="$CGC_RING" BIONIC_PROBE_FREE_PCT=80 \
-        BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 bash "$CGT_STOP" 2>/dev/null
+        BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PROBE_FREE_MB=8192 bash "$CGT_STOP" 2>/dev/null
 }
 jq -nc '{type:"user",uuid:"u-cgt-A",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:"dispatch the batch"}}' > "$CGT_TR"
 cgt_agent toolu_01CGTA1 W-R1
@@ -13978,6 +13987,69 @@ expect_eq "FACT mutation: …and still reads the evidence question's head (it ru
   "$(. "$FACT_MUT" && proof_last "$PRF_PLAN" review evidence)"
 expect_ne "FACT mutation: …which answers the adversarial question with another line's head, so the agreement row goes red" \
   "$PRF_E" "$(. "$FACT_MUT" && proof_last "$PRF_PLAN" review adversarial)"
+
+# ============================================================
+section "DEAL — the dealing: at every rigor each reading question has exactly one role, and the roles are the reader roles (wave-27 T9; REQ-1 AC-1.2; D2, D6)"
+# ============================================================
+# ONE FUNCTION SAYS WHAT A RUN OWES. proof.sh `facts_owed <rigor> <scale>` prints the floor and one
+# `review<TAB><question><TAB><role><TAB><scope>` line per owed reading; the judge (`facts_state`)
+# and, from row T15, the dispatch wall both read it, so the dealing has one site. Pinned here: at
+# each rigor and scale each question is dealt to exactly one role; the table is the Interfaces
+# table's (`tested` the critic holds all three; `peer-reviewed` the auditor evidence and the critic
+# the other two; `audited` the auditor, the critic and the reviewer, one each); every dealt role is
+# one of PROOF_READER_ROLES, the set the fact verb admits a reader under, and every such role is
+# dealt somewhere; at wave scale each code question owes a whole read by the same role. The
+# rendered rigor table's half of AC-1.2 is row T17's (the doctrine rewrite). A doctored copy whose
+# `audited` dealing hands structure to the critic must split from the table.
+DEAL_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/proof.sh"
+deal() {  # <rigor> <scale> [<proof.sh>] -> facts_owed's lines
+  bash -c '. "$1" && facts_owed "$2" "$3"' _ "${3:-$DEAL_LIB}" "$1" "$2" 2>/dev/null
+}
+deal_roles() {  # <rigor> <scale> [<proof.sh>] -> `<question>=<role>` per piece read, in table order
+  deal "$@" | awk -F'\t' '$1 == "review" && $4 == "piece" { printf "%s%s=%s", (n++ ? " " : ""), $2, $3 }'
+}
+DEAL_QS="$(bash -c '. "$1" && printf "%s" "$PROOF_QUESTIONS"' _ "$DEAL_LIB")"
+DEAL_ROLES="$(bash -c '. "$1" && printf "%s" "$PROOF_READER_ROLES"' _ "$DEAL_LIB")"
+expect_eq "DEAL precondition: the questions are the Interfaces table's three" "evidence adversarial structure" "$DEAL_QS"
+for deal_r in tested peer-reviewed audited; do
+  for deal_s in task wave; do
+    for deal_q in $DEAL_QS; do
+      expect_eq "DEAL $deal_r $deal_s: $deal_q is dealt to exactly one role" "1" \
+        "$(deal "$deal_r" "$deal_s" | awk -F'\t' -v q="$deal_q" '$1 == "review" && $2 == q && $4 == "piece"' | awk 'END { print NR }')"
+    done
+    expect_eq "DEAL $deal_r $deal_s: the floor is owed, once" "1" "$(deal "$deal_r" "$deal_s" | /usr/bin/grep -cx floor)"
+    expect_eq "DEAL $deal_r $deal_s: every dealt role is a reader role the fact verb admits" "" \
+      "$(deal "$deal_r" "$deal_s" | ROLES="$DEAL_ROLES" awk -F'\t' '$1 == "review" && index(" " ENVIRON["ROLES"] " ", " " $3 " ") == 0 { print $3 }')"
+  done
+done
+expect_eq "DEAL tested: the critic holds all three" \
+  "evidence=bionic:critic adversarial=bionic:critic structure=bionic:critic" "$(deal_roles tested task)"
+expect_eq "DEAL peer-reviewed: the auditor evidence, the critic adversarial and structure" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:critic" "$(deal_roles peer-reviewed task)"
+expect_eq "DEAL audited: the auditor evidence, the critic adversarial, the reviewer structure" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:reviewer" "$(deal_roles audited task)"
+for deal_r in tested peer-reviewed audited; do
+  expect_eq "DEAL $deal_r: the dealing does not change with scale" "$(deal_roles "$deal_r" task)" "$(deal_roles "$deal_r" wave)"
+  expect_eq "DEAL $deal_r wave: each code question owes one whole read, by its piece reader; evidence none" \
+    "$(deal_roles "$deal_r" wave | tr ' ' '\n' | /usr/bin/grep -v '^evidence=' | tr '\n' ' ' | sed 's/ $//')" \
+    "$(deal "$deal_r" wave | awk -F'\t' '$1 == "review" && $4 == "whole" { printf "%s%s=%s", (n++ ? " " : ""), $2, $3 }')"
+  expect_eq "DEAL $deal_r task: no whole read is owed" "0" "$(deal "$deal_r" task | /usr/bin/grep -c 'whole$')"
+done
+expect_eq "DEAL every reader role is dealt a question at some rigor" "$DEAL_ROLES" \
+  "$(for deal_r in tested peer-reviewed audited; do deal "$deal_r" task; done | awk -F'\t' '$1 == "review" { print $3 }' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "DEAL a rigor outside the three deals nothing" "" "$(deal standard task)"
+expect_ne "DEAL …and says so by its exit" "0" "$(bash -c '. "$1" && facts_owed standard task >/dev/null 2>&1; echo $?' _ "$DEAL_LIB")"
+# THE DOCTORED SITE: a copy whose audited dealing gives structure to the critic.
+DEAL_NEEDLE='audited=bionic:auditor,bionic:critic,bionic:reviewer'
+DEAL_MUT="$SANDBOX/fx/deal-proof.sh.mut"; mkdir -p "$SANDBOX/fx"
+anchor "$DEAL_LIB" "$DEAL_NEEDLE" 1
+DEAL_N="$DEAL_NEEDLE" awk '
+  BEGIN { n = ENVIRON["DEAL_N"]; r = "audited=bionic:auditor,bionic:critic,bionic:critic" }
+  { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) r substr($0, i + length(n)); print }' "$DEAL_LIB" > "$DEAL_MUT"
+expect_eq "DEAL mutation: the doctored copy still deals one role per question (it runs)" "3" \
+  "$(deal audited task "$DEAL_MUT" | awk -F'\t' '$1 == "review"' | awk 'END { print NR }')"
+expect_ne "DEAL mutation: …and splits from the table, so the audited row goes red" \
+  "evidence=bionic:auditor adversarial=bionic:critic structure=bionic:reviewer" "$(deal_roles audited task "$DEAL_MUT")"
 
 # ============================================================
 section "NM — the stamp names a suite FILE exactly when the budget counts it as this tree's (wave-26 T63; critic K4-N2)"

@@ -13,6 +13,13 @@
 #   markers_get   <file> <start> <end>              the lines inside, rc 1 if no block
 #   markers_set   <file> <start> <end> <body file>  the block, rewritten whole
 #   markers_strip <file> <start> <end>              the block, markers and all, gone
+#   markers_check <file> <start> <end>              rc 2 and `line <n>: …` per fault
+#   markers_only  <file> <start> <end>              rc 0 when the block is all the file holds
+#   markers_writable <file>                         rc 1 when the user made it read-only
+#
+# THE WRITERS' EXIT CODES ARE THE REASON (wave-27 T40, review pass 9 findings 1,
+# 2 and 8). 0 written; 1 a write failed; 2 the markers do not pair up; 3 the file
+# is read-only. On every non-zero the target is byte-identical to what it was.
 #
 # THE MARKERS ARE THE ONLY THING MATCHED. Whole-line equality, in bash, never a
 # pattern — the rc markers carry box-drawing dashes, and a fuzzy match would be a
@@ -65,6 +72,69 @@ _markers_publish_tmp() {  # <tmp> <file> — <file> is the resolved target
   mv "$tmp" "$file"
 }
 
+# A FILE THE USER MADE READ-ONLY IS REFUSED, NEVER WRITTEN OVER (wave-27 T40,
+# review pass 9 finding 8). The rename would replace it anyway — `mv` needs the
+# directory writable, not the file — so the file's own bit is the user's only
+# way to say "keep tools out", and it is honoured here. An absent file is
+# writable: creating it is the caller's question, already asked.
+markers_writable() {  # <file>
+  local target
+  target="$(bionic_link_target "$1")"
+  [ ! -e "$target" ] || [ -w "$target" ]
+}
+
+# A BLOCK IS ONE START LINE, THEN ONE END LINE, ONCE (wave-27 T40, review pass 9
+# finding 2). A start with no end after it, an end with no start before it, the
+# two out of order, a start inside an open block, or a second block: the walk
+# cannot tell which lines are bionic's, so it says what it found and where, one
+# `line <n>: …` per fault, and every writer refuses with rc 2. A marker QUOTED in
+# a line of prose is not a marker (whole-line equality, above); a whole marker
+# line inside a code fence is, because a line is all the walk reads — so a quoted
+# start with no end after it is a fault, and a whole pair inside a fence is a
+# block like any other. An absent file has no markers and is well formed.
+markers_check() {  # <file> <start> <end>
+  local file="$1" start="$2" end="$3" line n=0 open=0 first=0 bad=0
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if [ "$line" = "$start" ]; then
+      if [ "$open" != "0" ]; then
+        printf 'line %s: a second start marker inside the block opened at line %s\n' "$n" "$open"; bad=1; continue
+      fi
+      if [ "$first" != "0" ]; then
+        printf 'line %s: a second block (the first starts at line %s)\n' "$n" "$first"; bad=1
+      else
+        first="$n"
+      fi
+      open="$n"
+    elif [ "$line" = "$end" ]; then
+      if [ "$open" = "0" ]; then
+        printf 'line %s: an end marker with no start marker before it\n' "$n"; bad=1; continue
+      fi
+      open=0
+    fi
+  done < "$file"
+  if [ "$open" != "0" ]; then
+    printf 'line %s: a start marker with no end marker after it\n' "$open"; bad=1
+  fi
+  [ "$bad" = "0" ] || return 2
+  return 0
+}
+
+# The file holds one well-formed block and not one other line, blank lines
+# included: what a file setup created and nobody else wrote into looks like.
+markers_only() {  # <file> <start> <end>
+  local file="$1" start="$2" end="$3" line inside=0 seen=1
+  [ -f "$file" ] || return 1
+  markers_check "$file" "$start" "$end" >/dev/null || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "$start" ]; then inside=1; seen=0; continue; fi
+    if [ "$line" = "$end" ];   then inside=0; continue; fi
+    [ "$inside" = "1" ] || return 1
+  done < "$file"
+  return "$seen"
+}
+
 # Everything the file holds EXCEPT the block. One walk, so `markers_set` and
 # `markers_strip` cannot come to disagree about what the block is.
 #
@@ -80,21 +150,32 @@ _markers_publish_tmp() {  # <tmp> <file> — <file> is the resolved target
 # invalid (epic-18 wave-03, critic F1/F2). A caller that must not discard an
 # edit inside the block asks first — the principles item shows the difference
 # and takes a second yes — and only then calls the writer.
+#
+# EVERY WRITE IS CHECKED, AND THE MARKERS FIRST (wave-27 T40). A walk that ignored
+# a failed `printf` handed a truncated copy to the rename and the user's file was
+# replaced by its first few kilobytes (review pass 9 finding 1); a walk that took
+# an unpaired start to mean "the block runs to the end of the file" deleted the
+# rest of it (finding 2). So: rc 2 before a byte is staged when the markers do not
+# pair up, rc 1 the moment a write fails, and the caller publishes only on 0.
 _markers_rewrite() {  # <file> <tmp> <start> <end> — <tmp> gets every line of <file> outside the block
   local file="$1" tmp="$2" start="$3" end="$4"
   local line inside=0 pending=0
-  while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$line" = "$start" ]; then inside=1; continue; fi
-    if [ "$line" = "$end" ];   then inside=0; continue; fi
-    [ "$inside" = "1" ] && continue
-    # Outside the block, the file is reproduced line for line. Blank lines are
-    # deferred so a run of them survives exactly as it was — the same shape
-    # remove.sh's `_rm_strip_marker_block` holds to.
-    if [ "$pending" = "1" ]; then printf '\n' >> "$tmp"; pending=0; fi
-    if [ -z "$line" ]; then pending=1; continue; fi
-    printf '%s\n' "$line" >> "$tmp"
-  done < "$file"
-  [ "$pending" = "1" ] && printf '\n' >> "$tmp"
+  [ -r "$file" ] || return 1
+  markers_check "$file" "$start" "$end" >/dev/null || return 2
+  {
+    while IFS= read -r line || [ -n "$line" ]; do
+      if [ "$line" = "$start" ]; then inside=1; continue; fi
+      if [ "$line" = "$end" ];   then inside=0; continue; fi
+      [ "$inside" = "1" ] && continue
+      # Outside the block, the file is reproduced line for line. Blank lines are
+      # deferred so a run of them survives exactly as it was — the same shape
+      # remove.sh's `_rm_strip_marker_block` holds to.
+      if [ "$pending" = "1" ]; then printf '\n' || return 1; pending=0; fi
+      if [ -z "$line" ]; then pending=1; continue; fi
+      printf '%s\n' "$line" || return 1
+    done < "$file"
+    if [ "$pending" = "1" ]; then printf '\n' || return 1; fi
+  } >> "$tmp" || return 1
   return 0
 }
 
@@ -102,14 +183,16 @@ _markers_rewrite() {  # <file> <tmp> <start> <end> — <tmp> gets every line of 
 # one block (a hand-pasted second copy) prints every block's lines, which is what
 # a caller comparing against one expected body needs to see as "not that body".
 # rc 1 when the file is absent or holds no start marker, so "no block" and "an
-# empty block" are two answers.
+# empty block" are two answers. rc 2, and nothing printed, when the markers do not
+# pair up (`markers_check`): there is no block to read, and no answer to compare.
 markers_get() {  # <file> <start> <end>
   local file="$1" start="$2" end="$3" line inside=0 seen=1
   [ -f "$file" ] || return 1
+  markers_check "$file" "$start" "$end" >/dev/null || return 2
   while IFS= read -r line || [ -n "$line" ]; do
     if [ "$line" = "$start" ]; then inside=1; seen=0; continue; fi
     if [ "$line" = "$end" ];   then inside=0; continue; fi
-    [ "$inside" = "1" ] && printf '%s\n' "$line"
+    if [ "$inside" = "1" ]; then printf '%s\n' "$line" || return 1; fi
   done < "$file"
   return "$seen"
 }
@@ -120,21 +203,21 @@ markers_get() {  # <file> <start> <end>
 # is repaired rather than appended beside. An absent file is created, under the
 # same 0600 staging: the caller has already asked whether it may be.
 markers_set() {  # <file> <start> <end> <body file>
-  local file="$1" start="$2" end="$3" body="$4" target tmp last
+  local file="$1" start="$2" end="$3" body="$4" target tmp last rc
   [ -f "$body" ] || return 1
+  markers_writable "$file" || return 3
   target="$(bionic_link_target "$file")"
   tmp="${target}.bionic.tmp"
   _markers_stage_tmp "$tmp" || return 1
   if [ -f "$file" ]; then
-    _markers_rewrite "$file" "$tmp" "$start" "$end" || { rm -f "$tmp"; return 1; }
+    _markers_rewrite "$file" "$tmp" "$start" "$end"; rc=$?
+    [ "$rc" = "0" ] || { rm -f "$tmp"; return "$rc"; }
   fi
+  # A body whose last line has no newline would fuse with the end marker.
+  last="$(tail -c 1 "$body" 2>/dev/null)"
+  # One chain, so the status of EVERY write reaches the test, not just the last.
   {
-    printf '%s\n' "$start"
-    cat "$body"
-    # A body whose last line has no newline would fuse with the end marker.
-    last="$(tail -c 1 "$body" 2>/dev/null)"
-    [ -z "$last" ] || printf '\n'
-    printf '%s\n' "$end"
+    printf '%s\n' "$start" && cat "$body" && { [ -z "$last" ] || printf '\n'; } && printf '%s\n' "$end"
   } >> "$tmp" || { rm -f "$tmp"; return 1; }
   _markers_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
   return 0
@@ -146,12 +229,14 @@ markers_set() {  # <file> <start> <end> <body file>
 # is the item's decision, not the walk's (the rc item keeps its rc; the
 # principles item takes back a CLAUDE.md that held nothing else).
 markers_strip() {  # <file> <start> <end>
-  local file="$1" start="$2" end="$3" target tmp
+  local file="$1" start="$2" end="$3" target tmp rc
   [ -f "$file" ] || return 0
+  markers_writable "$file" || return 3
   target="$(bionic_link_target "$file")"
   tmp="${target}.bionic.tmp"
   _markers_stage_tmp "$tmp" || return 1
-  _markers_rewrite "$file" "$tmp" "$start" "$end" || { rm -f "$tmp"; return 1; }
+  _markers_rewrite "$file" "$tmp" "$start" "$end"; rc=$?
+  [ "$rc" = "0" ] || { rm -f "$tmp"; return "$rc"; }
   _markers_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
   return 0
 }
