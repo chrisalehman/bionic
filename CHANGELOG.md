@@ -67,9 +67,10 @@ What you will notice:
   `kind=check` fact, with `result=fail` when the command fails. `land` runs the same check over
   each landing's range and hands it `BIONIC_CHECK_TREE`, the piece's checkout. A project that
   declares nothing runs nothing and is asked nothing.
-- **Close-out writes its own Step 9 line,** and the plan's optional `release: <version>` field is
-  the version written on the delivered line, the epic row and the continuation header. With no
-  field no version is written; the tool's own version stays on `attested-by:`.
+- **Close-out writes its own Step 9 line,** and the plan's optional `release:` field
+  (`release: <version>` in its frontmatter) is the version written on the delivered line, the epic
+  row and the continuation header. With no field no version is written; the tool's own version
+  stays on `attested-by:`.
 - **Work that is red by design can land, and the release waits for it.** A writer's brief may
   declare `Lands-red: <name>.test.sh until <ext:slug|approval:name>` with `Red-evidence: <path
   under record/>`. `land` then admits that one suite red, and writes the debt to the run's landing
