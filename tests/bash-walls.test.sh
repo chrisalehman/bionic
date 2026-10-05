@@ -1854,6 +1854,9 @@ am_refused "19v: bash session-poker.sh approve" "bash $AM_POKER approve release 
 # §ARM-A (waive) — wave-27 T9, D2: a waiver covers a reading question up to the working head, so
 # an agent that could write one would waive the read of its own code.
 am_refused "19v2: bash session-poker.sh waive" "bash $AM_POKER waive adversarial 'ship it'"
+# §ARM-A (release-check) — wave-27 T16, D12, A-orch-44: the verb writes the release's check fact,
+# so an agent that could run it could record the release check of its own head.
+am_refused "19v3: bash session-poker.sh release-check" "bash $AM_POKER release-check"
 
 # THE PAIRED POSITIVES. The same verbs from the main thread (no agent_id) are the
 # orchestrator's and pass this arm; a subagent's own read-only poker verbs pass; and a quoted
@@ -1867,6 +1870,7 @@ am_admitted "19j5: proof-add from the main thread" \
   "bash $AM_POKER proof-add floor record/wave-26-never-idle/floor.txt" ""
 am_admitted "19j6: approve from the main thread" "bash $AM_POKER approve release 'approved'" ""
 am_admitted "19j7: waive from the main thread" "bash $AM_POKER waive adversarial 'ship it'" ""
+am_admitted "19j8: release-check from the main thread" "bash $AM_POKER release-check" ""
 am_admitted "19k: a subagent's tick" "bash $AM_POKER tick"
 am_admitted "19l: a subagent's interval" "bash $AM_POKER interval"
 am_admitted "19m: a quoted mention" "echo 'bash $AM_POKER amend w20-sub'"
