@@ -2696,6 +2696,48 @@ rm -f "$EG6_REC"
 EG6_T0=$SECONDS; for eg6i in 1 2 3; do eg6_gate "$EG6_COV"; done; EG6_TNONE=$((SECONDS - EG6_T0))
 expect_true "EG6k16c …and three commits with it take at most a second more than without (${EG6_TBIG}s, ${EG6_TNONE}s)" \
   test "$EG6_TBIG" -le $((EG6_TNONE + 1))
+# A PLAN VERB'S DRY COMMIT (wave-27 T76; review pass 60 P0-1; A-orch-170, A-orch-171). The verb binds
+# a session `planverb-<pid>` to a COPY of the plan, `<plan>.<verb>-dry.<pid>`, with a marker naming the
+# plan it was made from (`dry_of=`; written here in hooks/session-poker.sh `plan_verb_dry`'s shape).
+# The collector reads that plan's record, and only for a plan verb's session and copy: a field in
+# any other marker, or beside a copy not named from it, changes nothing.
+EG6_P="$R_EG6/.bionic/docs/plans/active.md"
+EG6_O="$R_EG6/.bionic/docs/plans/other.md"
+EG6_OREC="$R_EG6/.bionic/docs/record/other.md/landing-proofs.log"
+eg6_dry() {  # <plan text> <sid> <copy path> [<dry_of>] -> ST, ERR of a commit bound to that copy of the text
+  local sid_was="$SID" m
+  printf '%s\n' "$1" > "$EG6_P"; cp "$EG6_P" "$3"
+  SID="$2"; m="$R_EG6/.bionic/tmp/engaged-$SID.state"
+  { printf 'plan=%s\n' "$3"; [ -n "${4:-}" ] && printf 'dry_of=%s\n' "$4"; printf 'engaged_at=2026-10-05T00:00:00Z\n'; } > "$m"
+  run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')"
+  rm -f "$3" "$m"; SID="$sid_was"
+}
+eg6_debt ext:vendor-key 2026-10-05T04:00:00Z
+EG6_OPEN="$(eg6_plan 6 wave "$EG6_ALL")"
+eg6_gate "$EG6_OPEN"
+expect_status "EG6k17 control: the real commit with the record's debt open is refused" 2 "$ST"
+eg6_dry "$EG6_OPEN" planverb-4242 "$EG6_P.current-dry.4242" "$EG6_P"
+expect_status "EG6k18 P0-1 the dry commit of the same text, bound to the copy, is refused as the real one" 2 "$ST"
+expect_contains "EG6k18b …in the debt arm's words" "- widget.test.sh: landed red until ext:vendor-key" "$ERR"
+eg6_dry "$EG6_OPEN" planverb-4242 "$EG6_P.current-dry.4242"
+expect_status "EG6k19 …a copy's marker with no dry_of= names no record (the field is what is read, not the name)" 0 "$ST"
+eg6_dry "$EG6_OPEN" planverb-4242 "$EG6_P.current-dry.9999" "$EG6_P"
+expect_status "EG6k20 …and a copy whose pid is not the session's is not honoured (beside EG6k18)" 0 "$ST"
+rm -f "$EG6_REC"; printf '# another plan\n' > "$EG6_O"; mkdir -p "${EG6_OREC%/*}"
+bash -c '. "$1" && _wt_debt_write "$2" d-other T9 wt/27-T9 "$3" widget.test.sh ext:vendor-key 2026-10-05T04:00:00Z' _ "$EG6_WTLIB" "$EG6_OREC" "$H_EG6"
+eg6_dry "$EG6_OPEN" planverb-4242 "$EG6_P.current-dry.4242" "$EG6_O"
+expect_status "EG6k21 a dry_of= naming a plan the copy was not made from reads nothing of it (another plan's debt)" 0 "$ST"
+eg6_dry "$EG6_OPEN" planverb-4242 "$EG6_O.current-dry.4242" "$EG6_O"
+expect_status "EG6k21b …while that plan's own copy reads it (the positive on the same record)" 2 "$ST"
+eg6_gate "$EG6_OPEN"
+printf 'dry_of=%s\n' "$EG6_O" >> "$R_EG6/.bionic/tmp/engaged-$SID.state"
+expect_contains "EG6k22 precondition: a real session's marker carries a planted dry_of=" "dry_of=$EG6_O" "$(cat "$R_EG6/.bionic/tmp/engaged-$SID.state")"
+rm -f "$EG6_OREC"; eg6_debt ext:vendor-key 2026-10-05T04:00:00Z
+mkdir -p "${EG6_OREC%/*}"; : > "$EG6_OREC"
+run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')"
+expect_status "EG6k22b …and its commit still reads its own plan's record: refused" 2 "$ST"
+expect_contains "EG6k22c …naming its own debt" "- widget.test.sh: landed red until ext:vendor-key" "$ERR"
+rm -f "$EG6_REC" "$EG6_OREC" "$EG6_O"
 
 # ---------------------------------------------------------------------------
 section "§EG-OPEN — an open 1.11.0-shaped plan continues untouched until Step 6 (wave-27 T14; REQ-10 AC-10.3, D19)"
