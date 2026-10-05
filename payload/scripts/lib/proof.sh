@@ -68,52 +68,77 @@ proof_waiver_line() {
   printf 'waived: question=%s head=%s by %s %s "%s"\n' "$1" "$2" "$3" "$4" "$5"
 }
 
-# proof_reading <record> <question> [<checks file>] -> `<result> <scope>` read from a reading
-# record, exit 0; or exit 1 with one sentence saying what the record lacks and what to write (the
-# verb's refusal). The record's flush-left lines, the first of each: `reviewed: <a>..<b>` (its
-# range is proof_attested's to judge), `question: <q>` equal to <question>, `result:` one of
-# PROOF_RESULTS, `scope:` one of PROOF_SCOPES. For `structure`, <checks file> names the check ids
-# as `- **<id>**` items, and the record answers each with `check: <id> <answer> <reason>`, the
-# answer one of PROOF_CHECK_ANSWERS: a checks file that cannot be read, or names no id, refuses.
+# proof_reading <record> <question> [<checks file>] -> `<result> <scope> <from>` read from a reading
+# record, exit 0, <from> the start of its range as written; or exit 1 with one sentence saying what
+# the record lacks and what to write (the verb's refusal). ONE PASS (wave-27 T41; review pass 10
+# F1): a record may stack several passes, newest first, so only the lines from its first
+# `reviewed: <a>..<b>` line up to the next one are read — the line proof_attested takes its range
+# from — and a key missing there refuses, whatever an older pass below it says. In that pass, the
+# first of each flush-left line: `question: <q>` equal to <question>, `result:` one of
+# PROOF_RESULTS, `scope:` one of PROOF_SCOPES, each value matched whole against its set (F2: a
+# value holding a space or a `|` is no word of the set, and never fills another field). For
+# `structure`, <checks file> names the check ids as `- **<id>**` items, and the pass answers each
+# with `check: <id> <answer> <reason>`, the answer one of PROOF_CHECK_ANSWERS: a checks file that
+# cannot be read, or names no id, refuses. Its result is one the checks bear out (F6): `pass`
+# beside no FLAG or FAIL check, `flag` beside no FAIL.
 proof_reading() {
-  local rec="$1" q="$2" ck="${3:-}" got rq rr rs ids miss
-  got="$(awk '
+  local rec="$1" q="$2" ck="${3:-}" span got rv rq rr rs ids miss worst
+  span="$(awk '/^reviewed:[ \t]/ { if (n++) exit } n' "$rec" 2>/dev/null)"
+  [ -n "$span" ] || { printf 'the reading %s carries no reviewed: <a>..<b> line; write the range it read' "$rec"; return 1; }
+  got="$(printf '%s\n' "$span" | awk '
     function val(s) { sub(/^[a-z]+:[ \t]*/, "", s); sub(/[ \t]+$/, "", s); return s }
-    /^reviewed:[ \t]/ { rv = "y" }
-    /^question:/ && q == "" { q = val($0) }
-    /^result:/ && r == "" { r = val($0) }
-    /^scope:/ && s == "" { s = val($0) }
-    END { printf "%s|%s|%s|%s", rv, q, r, s }' "$rec" 2>/dev/null)"
-  IFS='|' read -r got rq rr rs <<PROOF_READING
+    NR == 1 { rv = $0; sub(/^reviewed:[ \t]+/, "", rv); sub(/[ \t].*$/, "", rv); sub(/\.\..*$/, "", rv) }
+    /^question:/ && !hq { hq = 1; q = val($0) }
+    /^result:/ && !hr { hr = 1; r = val($0) }
+    /^scope:/ && !hs { hs = 1; s = val($0) }
+    END { printf "%s\n%s\n%s\n%s\n", rv, q, r, s }')"
+  { IFS= read -r rv; IFS= read -r rq; IFS= read -r rr; IFS= read -r rs; } <<PROOF_READING
 $got
 PROOF_READING
-  [ "$got" = y ] || { printf 'the reading %s carries no reviewed: <a>..<b> line; write the range it read' "$rec"; return 1; }
-  [ -n "$rq" ] || { printf 'the reading %s carries no question: <q> line; write question: %s' "$rec" "$q"; return 1; }
+  [ -n "$rq" ] || { printf 'the reading %s carries no question: <q> line; write question: %s (only its first pass is read, from its first reviewed: line to the next)' "$rec" "$q"; return 1; }
+  proof_word_in "$rq" "$PROOF_QUESTIONS" \
+    || { printf 'the reading %s says question: '"'"'%s'"'"', which is not one of evidence, adversarial or structure; write the question it answers' "$rec" "$rq"; return 1; }
   [ "$rq" = "$q" ] \
     || { printf 'the reading %s says question: %s, but the proof is for %s; register it under the question it answers' "$rec" "$rq" "$q"; return 1; }
-  [ -n "$rr" ] || { printf 'the reading %s carries no result: line; write result: pass, flag or fail' "$rec"; return 1; }
-  case " $PROOF_RESULTS " in *" $rr "*) : ;; *)
-    printf 'the reading %s says result: '"'"'%s'"'"', which is not one of pass, flag or fail; write the result the reader gave' "$rec" "$rr"; return 1 ;;
-  esac
-  [ -n "$rs" ] || { printf 'the reading %s carries no scope: line; write scope: piece or whole' "$rec"; return 1; }
-  case " $PROOF_SCOPES " in *" $rs "*) : ;; *)
-    printf 'the reading %s says scope: '"'"'%s'"'"', which is not one of piece or whole; write the scope the reader read' "$rec" "$rs"; return 1 ;;
-  esac
+  [ -n "$rr" ] || { printf 'the reading %s carries no result: line; write result: pass, flag or fail (only its first pass is read, from its first reviewed: line to the next)' "$rec"; return 1; }
+  proof_word_in "$rr" "$PROOF_RESULTS" \
+    || { printf 'the reading %s says result: '"'"'%s'"'"', which is not one of pass, flag or fail; write the result the reader gave' "$rec" "$rr"; return 1; }
+  [ -n "$rs" ] || { printf 'the reading %s carries no scope: line; write scope: piece or whole (only its first pass is read, from its first reviewed: line to the next)' "$rec"; return 1; }
+  proof_word_in "$rs" "$PROOF_SCOPES" \
+    || { printf 'the reading %s says scope: '"'"'%s'"'"', which is not one of piece or whole; write the scope the reader read' "$rec" "$rs"; return 1; }
   if [ "$q" = structure ]; then
     [ -n "$ck" ] && [ -f "$ck" ] && [ -r "$ck" ] \
       || { printf 'the structure checks file %s cannot be read, so the check ids a structure reading answers are unknown; reinstall the plugin' "$ck"; return 1; }
     ids="$(awk '/^- \*\*[a-z][a-z-]*\*\*/ { s = $0; sub(/^- \*\*/, "", s); sub(/\*\*.*$/, "", s); print s }' "$ck" 2>/dev/null)"
     [ -n "$ids" ] \
       || { printf 'the structure checks file %s names no check id (a - **<id>** item); reinstall the plugin' "$ck"; return 1; }
-    miss="$(PROOF_IDS="$ids" PROOF_ANS="$PROOF_CHECK_ANSWERS" awk '
+    miss="$(printf '%s\n' "$span" | PROOF_IDS="$ids" PROOF_ANS="$PROOF_CHECK_ANSWERS" awk '
       BEGIN { n = split(ENVIRON["PROOF_ANS"], a, " "); for (i = 1; i <= n; i++) ok[a[i]] = 1
               w = split(ENVIRON["PROOF_IDS"], want, "\n") }
       /^check:[ \t]/ { m = split($0, f, /[ \t]+/); if (m >= 4 && (f[3] in ok)) done[f[2]] = 1 }
-      END { for (i = 1; i <= w; i++) if (want[i] != "" && !(want[i] in done)) printf "%s%s", (c++ ? " " : ""), want[i] }' "$rec" 2>/dev/null)"
+      END { for (i = 1; i <= w; i++) if (want[i] != "" && !(want[i] in done)) printf "%s%s", (c++ ? " " : ""), want[i] }')"
     [ -z "$miss" ] \
       || { printf 'the structure reading %s leaves %s unanswered; write one line check: <id> <answer> <reason> for each, the answer PASS, FLAG, FAIL or n/a' "$rec" "$miss"; return 1; }
+    # The first check answering FAIL, else the first answering FLAG: the worst the pass found.
+    worst="$(printf '%s\n' "$span" | awk '
+      /^check:[ \t]/ { m = split($0, f, /[ \t]+/); if (m < 3) next
+                       if (f[3] == "FAIL" && fail == "") fail = f[2] " FAIL"
+                       if (f[3] == "FLAG" && flag == "") flag = f[2] " FLAG" }
+      END { if (fail != "") print fail; else if (flag != "") print flag }')"
+    case "$rr:$worst" in
+      pass:?*|flag:*' FAIL')
+        printf 'the structure reading %s says result: %s beside check: %s; a pass stands beside no FLAG or FAIL check and a flag beside no FAIL, so write the result its checks give' "$rec" "$rr" "$worst"; return 1 ;;
+    esac
   fi
-  printf '%s %s' "$rr" "$rs"
+  printf '%s %s %s' "$rr" "$rs" "$rv"
+}
+
+# proof_word_in <value> <set> -> 0 when <value> is one of the space-separated words of <set>,
+# whole: a value holding a space matches no word (wave-27 T41; review pass 10 F2).
+proof_word_in() {
+  local w
+  for w in $2; do [ "$1" = "$w" ] && return 0; done
+  return 1
 }
 
 # proof_working_branch <plan> -> the plan's `working-branch:`, or nothing. The `## SDLC State`
