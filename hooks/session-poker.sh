@@ -5751,6 +5751,18 @@ PF_OWN_LIST
         exit 1
       fi
     fi
+    # A WHOLE READ WAITS FOR THE LAST BUILD PIECE (wave-27 T45; review pass 13 F2; D10). The judge
+    # covers a whole line with any whole reading whatever its head, so its time is held here, on the
+    # plan text the verb already holds: refused while a `## Tasks` row of kind build is pending or
+    # active, naming them. A plan with no `## Tasks` table is not held to it.
+    if [ "$PF_SCOPE" = whole ]; then
+      PF_OPEN="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' '
+        $3 == "build" && ($10 == "pending" || $10 == "active") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $10 }')"
+      if [ -n "$PF_OPEN" ]; then
+        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but build rows are still open: $(clean "$PF_OPEN"); a whole read is taken once the last build piece has landed (D10), so register it after they land, or scope: piece. The plan is unchanged."
+        exit 1
+      fi
+    fi
     PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_QUESTION" "$PF_READER" "$PF_RESULT" "$PF_SCOPE")"
     if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the proof; the plan is unchanged."
