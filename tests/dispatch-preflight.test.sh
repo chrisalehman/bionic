@@ -9347,7 +9347,8 @@ expect_contains "GATES5b …naming the approval it waits for" "approval:release"
 # THE DEFECT, from a real run: `Files: CONTEXT.md, a/b.ts` recorded only `a/b.ts`, because the
 # grammar read an entry as a path only when it carried a `/`. The writer then edited the file
 # its brief named and its stop was refused for it. One reader in brief.sh now reads every entry:
-# a path carries a `/`, or an extension, or names a file that exists at the project root.
+# a path carries a `/`, or an extension (wave-27 T42 dropped the third arm, "names a file that
+# exists at the project root": no wall lists the root).
 REPO=$(make_repo rfilesroot yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
@@ -9359,18 +9360,32 @@ ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_contains "FILES-ROOT precondition: the dispatch wrote its row" "|name=w-filesroot|" "$ROW"
 expect_eq "FILES-ROOT AC-12.1 files= holds the root file and the nested one, as written" \
   "CONTEXT.md,a/b.ts" "$(roster_field "$ROW" files)"
-# A bare name with no extension is a path when the file exists at the root: make_repo has none
-# called Widgetfile, so this fixture plants one. FILES-DROP below is the same name, unplanted.
+# A BARE NAME IS REFUSED EVEN WHEN A FILE OF THAT NAME IS AT THE ROOT (wave-27 T42, A-orch-46):
+# T29's third arm admitted it by listing the root, the fetch the hook-authoring freeze forbids.
+# This fixture plants a Makefile, so the old arm would have admitted it; `./Makefile` is the
+# spelling, and it needs no listing. Worked answer: `Files: Makefile, src/a.c` refuses, first
+# line naming `Makefile` and `./Makefile`; `Files: ./Makefile, src/a.c` records both.
 REPO=$(make_repo rfilesroot2 yes)
 write_attestation "$REPO" "$SID_A"
-echo x > "$REPO/Widgetfile"
+echo x > "$REPO/Makefile"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
 Expected artifact: .bionic/docs/record/wfr2.md
-Files: Widgetfile, a/b.ts
+Files: Makefile, src/a.c
 Suites: tests/one.test.sh' "w-filesroot2")"
-expect_eq "FILES-ROOT2 a bare name that exists at the root is admitted" "allow" "$GATE_VERDICT"
+expect_eq "FILES-ROOT2 a bare name refuses though a file of that name is at the root" "deny" "$GATE_VERDICT"
+FR2_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
+expect_contains "FILES-ROOT2 precondition: the refusal line is read" "bionic: dispatch refused" "$FR2_LINE"
+expect_contains "FILES-ROOT2 …its first line names the word and the spelling ./Makefile" \
+  "Files: names Makefile, not a path" "$FR2_LINE"
+expect_contains "FILES-ROOT2 …and the accepted spelling" "./Makefile" "$FR2_LINE"
+expect_eq "FILES-ROOT2 …and no row was written" "" "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfr2.md
+Files: ./Makefile, src/a.c
+Suites: tests/one.test.sh' "w-filesroot2")"
+expect_eq "FILES-ROOT3 ./Makefile is admitted" "allow" "$GATE_VERDICT"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_eq "FILES-ROOT2 …and stored as written" "Widgetfile,a/b.ts" "$(roster_field "$ROW" files)"
+expect_eq "FILES-ROOT3 …and both are stored as written" "./Makefile,src/a.c" "$(roster_field "$ROW" files)"
 
 # --- FILES-DROP: an entry the reader does not read as a path refuses (REQ-12 AC-12.2, D21) ---
 REPO=$(make_repo rfilesdrop yes)
@@ -9394,7 +9409,9 @@ Suites: tests/one.test.sh' "w-filesdrop")"
 expect_eq "FILES-DROP2 the spelling it names is admitted" "allow" "$GATE_VERDICT"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_eq "FILES-DROP2 …and recorded" "./Widgetfile,a/b.ts" "$(roster_field "$ROW" files)"
-# An unfilled slot is guidance, not an entry: the scaffold line pasted as shipped refuses nothing.
+# A ONE-TOKEN SLOT IS GUIDANCE, NOT AN ENTRY: `<paths>` is skipped. This row does NOT test the
+# scaffold line as shipped (wave-27 T42, review pass 11 F2): the shipped slot holds white space,
+# and FILES-LIST below reads that line out of dispatch.md and shows it refused once, as prose.
 REPO=$(make_repo rfilesslot yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
@@ -9404,5 +9421,179 @@ Suites: tests/one.test.sh' "w-filesslot")"
 expect_eq "FILES-DROP3 an unfilled <slot> on a Files: line is not an entry, and admits" "allow" "$GATE_VERDICT"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_eq "FILES-DROP3 …and the row holds the real path alone" "a/b.ts" "$(roster_field "$ROW" files)"
+
+
+# --- FILES-LIST: a Files: span is a comma-separated list of paths (wave-27 T42; REQ-12, D21 as
+# amended by A-orch-46; review pass 11 F1, F3, F6) ---
+# The span is split on commas (and line ends, for a list one item per line); a trailing ` # …`
+# comment is stripped, as on `Subprocess claim:`; a leading `- `, `* ` or `1. ` and surrounding
+# backticks come off an item; `none` alone is no files. An item holding white space is prose,
+# refused once with no spelling advice. An item is a path when it carries a `/`, or an extension
+# (a final dot, then a letter-led run of letters and digits, on a stem holding a letter). Any
+# other word is refused naming `./<word>`; an item ending in `.` or holding no letter or digit
+# is refused with no advice, since no spelling of it is read as a path.
+#
+# fl_read <brief text> -> `files=<lifted>`, one `finding: <fact> | <fix>` per refusal, `rc=`.
+# Every brief carries a Suites: line, so no finding here is the impact command's.
+fl_read() {
+  bash -c '
+    . "$1" || exit 9
+    sink() { [ "$1" = finding ] && printf "finding: %s | %s\n" "$2" "$3"; return 0; }
+    l=$(lift_contract_fields "$2" implementor)
+    printf "files=%s\n" "$(brief_field "$l" files)"
+    rc=0; brief_validate_fields "$l" implementor "$3" sink || rc=$?
+    printf "rc=%s\n" "$rc"
+  ' _ "$BRIEF_LIB" "$1
+Suites: tests/one.test.sh" "$BRIEF_NOCONF" 2>&1
+}
+fl_findings() { printf '%s\n' "$1" | /usr/bin/grep -c '^finding: '; }
+
+# THE SCAFFOLD LINE, read out of the shipped dispatch.md, never retyped.
+FL_SCAFFOLD="$(scaffold_raw_line "$DISPATCH_FILE" "Files")"
+expect_contains "FILES-LIST meta: the shipped scaffold's Files: line was read, comment and all" \
+  "  # writers" "$FL_SCAFFOLD"
+FL_SLOT="$(printf '%s' "$FL_SCAFFOLD" | sed -e 's/^Files: //' -e 's/  #.*$//')"
+expect_contains "FILES-LIST meta: …and its slot is one item holding white space" "<every path" "$FL_SLOT"
+
+# Pasted as shipped: the slot is one item holding white space, prose, refused ONCE, naming the
+# item, with no ./ advice, and nothing recorded. A-T29.3 claimed this refused nothing.
+FL=$(fl_read "$FL_SCAFFOLD")
+expect_contains "FILES-LIST1 the scaffold line as shipped is refused" "rc=1" "$FL"
+expect_eq "FILES-LIST1 …once" "1" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST1 …naming the slot item whole" "finding: Files: ${FL_SLOT} is not a path" "$FL"
+expect_absent "FILES-LIST1 …with no ./ advice" "./" "$(printf '%s\n' "$FL" | grep '^finding: ')"
+expect_contains "FILES-LIST1 …and nothing recorded" "files=
+" "$FL
+"
+# Filled as a real brief fills it, comment kept byte for byte: exactly the two paths, no finding.
+FL_FILLED="$(printf '%s' "$FL_SCAFFOLD" | sed 's|<every path the task may create or edit>|src/a.c, tests/a.test.sh|')"
+expect_contains "FILES-LIST2 meta: the filled line keeps the shipped comment" "tests/a.test.sh  # writers" "$FL_FILLED"
+FL=$(fl_read "$FL_FILLED")
+expect_contains "FILES-LIST2 the filled scaffold line records exactly its two paths" "files=src/a.c,tests/a.test.sh
+" "$FL
+"
+expect_contains "FILES-LIST2 …and admits (rc=0)" "rc=0" "$FL"
+expect_eq "FILES-LIST2 …with no finding" "0" "$(fl_findings "$FL")"
+
+FL=$(fl_read "Files: CONTEXT.md, a/b.ts")
+expect_contains "FILES-LIST3 CONTEXT.md and a/b.ts are both recorded (T29's defect stays fixed)" "files=CONTEXT.md,a/b.ts" "$FL"
+expect_contains "FILES-LIST3 …rc=0" "rc=0" "$FL"
+FL=$(fl_read "Files: Makefile, src/a.c")
+expect_contains "FILES-LIST4 Makefile refuses" "rc=1" "$FL"
+expect_eq "FILES-LIST4 …once" "1" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST4 …naming it and ./Makefile" "finding: Files: names Makefile, not a path | spell it ./Makefile" "$FL"
+FL=$(fl_read "Files: ./Makefile, src/a.c")
+expect_contains "FILES-LIST5 ./Makefile records both" "files=./Makefile,src/a.c" "$FL"
+expect_contains "FILES-LIST5 …rc=0" "rc=0" "$FL"
+
+FL=$(fl_read "Files: none")
+expect_contains "FILES-LIST6 Files: none admits (rc=0)" "rc=0" "$FL"
+expect_eq "FILES-LIST6 …with no finding" "0" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST6 …and records nothing" "files=
+" "$FL
+"
+
+FL=$(fl_read "Files: src/a.c (new), and b.md")
+expect_eq "FILES-LIST7 a prose item refuses once per item: two" "2" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST7 …naming src/a.c (new)" "finding: Files: src/a.c (new) is not a path" "$FL"
+expect_contains "FILES-LIST7 …and and b.md" "finding: Files: and b.md is not a path" "$FL"
+expect_absent "FILES-LIST7 …with no ./ advice" "./" "$(printf '%s\n' "$FL" | grep '^finding: ')"
+FL=$(fl_read "Files: see e.g. the docs")
+expect_eq "FILES-LIST8 'see e.g. the docs' refuses once" "1" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST8 …naming the item whole" "finding: Files: see e.g. the docs is not a path" "$FL"
+expect_contains "FILES-LIST8 …and recording nothing" "files=
+" "$FL
+"
+FL=$(fl_read "Files: hooks/a.sh, fixed in v1.2 and 1.11.0")
+expect_eq "FILES-LIST9 v1.2 and 1.11.0 inside prose: the item refuses once" "1" "$(fl_findings "$FL")"
+expect_contains "FILES-LIST9 …and only the path is recorded" "files=hooks/a.sh
+" "$FL
+"
+for FL_W in v1.2 1.11.0 Fig.3; do
+  FL=$(fl_read "Files: hooks/a.sh, $FL_W")
+  expect_contains "FILES-LIST10 $FL_W alone is not a path: refused" "finding: Files: names $FL_W, not a path" "$FL"
+  expect_contains "FILES-LIST10 …$FL_W is not recorded" "files=hooks/a.sh
+" "$FL
+"
+done
+for FL_W in e.g. README. —; do
+  FL=$(fl_read "Files: hooks/a.sh, $FL_W")
+  expect_contains "FILES-LIST11 '$FL_W' (ends in . or holds no letter or digit) is refused" \
+    "finding: Files: $FL_W is not a path" "$FL"
+  expect_absent "FILES-LIST11 …with no ./ advice" "./" "$(printf '%s\n' "$FL" | grep '^finding: ')"
+  expect_contains "FILES-LIST11 …and is not recorded" "files=hooks/a.sh
+" "$FL
+"
+done
+
+FL=$(fl_read "Files:
+1. hooks/a.sh
+2. tests/b.test.sh")
+expect_contains "FILES-LIST12 a numbered list records its paths" "files=hooks/a.sh,tests/b.test.sh" "$FL"
+expect_contains "FILES-LIST12 …rc=0" "rc=0" "$FL"
+FL=$(fl_read "Files:
+- hooks/a.sh
+* tests/b.test.sh")
+expect_contains "FILES-LIST13 a bulleted list records its paths" "files=hooks/a.sh,tests/b.test.sh" "$FL"
+expect_contains "FILES-LIST13 …rc=0" "rc=0" "$FL"
+FL=$(fl_read "Files: ${BT}hooks/a.sh${BT}, ${BT}tests/b.test.sh${BT}")
+expect_contains "FILES-LIST14 backticked items record without their backticks" "files=hooks/a.sh,tests/b.test.sh
+" "$FL
+"
+FL=$(fl_read "Files: ${BT}hooks/a.sh${BT}, ${BT}Makefile${BT}")
+expect_contains "FILES-LIST14 …and a backticked bare word is named bare" \
+  "finding: Files: names Makefile, not a path | spell it ./Makefile" "$FL"
+
+# THE VERDICT (F6): `brief_files_entry` answers 0 only when the reader recorded the entry itself,
+# 1 with the `./` spelling when that is recorded, and 2 when no spelling is.
+fe() { bash -c '. "$1" || exit 9; brief_files_entry "$2"; echo " rc=$?"' _ "$BRIEF_LIB" "$1" 2>&1; }
+expect_eq "FILES-ENTRY a path answers 0, as written" "a/b.c rc=0" "$(fe a/b.c)"
+expect_eq "FILES-ENTRY a bare word answers 1, as ./<word>" "./Makefile rc=1" "$(fe Makefile)"
+expect_eq "FILES-ENTRY a dotfile answers 1, as ./<name>" "./.gitignore rc=1" "$(fe .gitignore)"
+expect_eq "FILES-ENTRY a name ending in . answers 2" "README. rc=2" "$(fe README.)"
+expect_eq "FILES-ENTRY a name with no letter or digit answers 2" "* rc=2" "$(fe '*')"
+expect_eq "FILES-ENTRY a name holding white space answers 2" "my notes.md rc=2" "$(fe 'my notes.md')"
+expect_eq "FILES-ENTRY a name holding a comma answers 2" "a,b.md rc=2" "$(fe 'a,b.md')"
+
+# Through the hook: the scaffold line as shipped refuses once, naming the item, and writes no row.
+REPO=$(make_repo rfileslist yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/wfl.md
+$FL_SCAFFOLD
+Suites: tests/one.test.sh" "w-fileslist")"
+expect_eq "FILES-LIST15 the hook refuses the scaffold line as shipped" "deny" "$GATE_VERDICT"
+FL_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
+expect_contains "FILES-LIST15 …its first line naming the slot item" "Files: ${FL_SLOT} is not a path" "$FL_LINE"
+expect_absent "FILES-LIST15 …with no ./ advice" "./" "$FL_LINE"
+expect_eq "FILES-LIST15 …and no row was written" "" "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/wfl.md
+$FL_FILLED
+Suites: tests/one.test.sh" "w-fileslist")"
+expect_eq "FILES-LIST16 the hook admits the filled scaffold line" "allow" "$GATE_VERDICT"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "FILES-LIST16 …and records exactly its two paths" "src/a.c,tests/a.test.sh" "$(roster_field "$ROW" files)"
+# A LONG WORD AND A LONG PROSE ITEM still draw a refusal line: refuse.sh holds a fix to six words
+# and 40 columns and a line to 100, and an item named in full past that made the wall refuse its
+# own call and exit 2 with no refusal line at all.
+REPO=$(make_repo rfileslong yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfl2.md
+Files: docker-compose-override, src/a.c
+Suites: tests/one.test.sh' "w-fileslong")"
+expect_eq "FILES-LIST17 a bare word of 23 characters is refused by a deny" "deny" "$GATE_VERDICT"
+FL_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
+expect_contains "FILES-LIST17 …whose first line names it, cut" "Files: names docker-compose-…, not a path" "$FL_LINE"
+expect_contains "FILES-LIST17 …and tells the prefix" "spell it with a leading ./" "$FL_LINE"
+expect_contains "FILES-LIST17 …and whose detail spells it whole" "Files: ./docker-compose-override" "$GATE_REASON"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfl2.md
+Files: src/a.c, this list covers every file the task may create or edit
+Suites: tests/one.test.sh' "w-fileslong")"
+expect_eq "FILES-LIST18 a prose item of 55 characters is refused by a deny" "deny" "$GATE_VERDICT"
+FL_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
+expect_contains "FILES-LIST18 …whose first line names it, cut" "Files: this list covers every file the task may … is not a path (drop it)" "$FL_LINE"
 
 finish
