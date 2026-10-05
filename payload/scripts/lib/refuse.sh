@@ -145,7 +145,7 @@
 # defect to find, not to paper over. Set to `1`, the variable makes an over-wide line refuse the
 # call exactly as before T47 (same text, same exit). tests/lib/resolve-roots.sh, which every
 # suite sources, sets it, so a suite run alone and a suite run by tests/run.sh both have it on;
-# nothing under hooks/ or payload/ sets it, so a hook as a user runs it cuts. It is read here
+# nothing under hooks/ or payload/ sets it, so a hook a real session runs never has it and cuts. It is read here
 # and nowhere else, and it only ever decides between two ways of still refusing, never
 # whether the wall blocks.
 #
