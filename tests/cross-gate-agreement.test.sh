@@ -8416,7 +8416,7 @@ DSREG
   # the runner's shell. Default `no`, so every fixture planted before this arm
   # existed is byte-identical to what it was.
   if [ "$want_alias" = "yes" ]; then
-    printf '%s\n' 'alias claude="claude --dangerously-skip-permissions"' > "$h/.zshrc"
+    printf '%s\n' "alias claude='claude --dangerously-skip-permissions'" > "$h/.zshrc"
     cp "$h/.zshrc" "$h/.bashrc"
   fi
   # AND THE PROJECT THIS MACHINE IS ASKED ABOUT, CARRYING BOTH AUTO-MEMORY FACTS
