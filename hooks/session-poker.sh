@@ -5835,7 +5835,8 @@ EOF
     esac
     # THE COMMAND RUNS ON THE HEAD ALONE: the log says it ran at that head, and a command that reads
     # the working files would read uncommitted changes as the head's.
-    if [ -n "$(git -C "$RC_CO" status --porcelain 2>/dev/null)" ]; then
+    if ! git -C "$RC_CO" diff-index --quiet HEAD -- 2>/dev/null \
+       || [ -n "$(git -C "$RC_CO" ls-files --others --exclude-standard 2>/dev/null)" ]; then
       die "REFUSED — the working checkout $RC_CO has uncommitted changes, so the check would not read the head $RC_HEAD alone; commit them and run release-check again. Nothing was run and the plan is unchanged."
       exit 1
     fi
