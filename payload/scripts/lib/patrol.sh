@@ -174,6 +174,16 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 #                                              `spawn-worktree.sh create` made (wave-25 T15)
 #   gate         hooks/permission-answer.sh    the reserved requests the tick escalates
 #                                              (wave-25 T15)
+#   start-clock  hooks/execution-recorder.sh   one clock reading per agent start, a file per
+#                                              start: `start-clock-<sid>.<agent id>.state`
+#                                              (wave-27 T68)
+#
+# THE OWNER IS THE NAME UP TO ITS FIRST DOT, FOR EVERY CLASS (wave-27 T68; review pass 47 S1,
+# A-orch-137). A session id holds no dot (lib/context.sh admits `[A-Za-z0-9_-]` only) and an
+# agent id may, so `<class>-<sid>.state`, its `.armed` sibling and a per-start
+# `<class>-<sid>.<key>.state` all name the session before the first dot. close-out.sh's wipe
+# reads a file's owner by the same rule. A per-start file is a regular file or nothing: a
+# directory or a link wearing that name is not one the hooks write, and is left alone.
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE UNREACHABLE THROUGH THESE FUNCTIONS,
 # and that is a property of the shape rather than a list anyone maintains:
@@ -181,7 +191,7 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 # so no id derived here can address one. A non-session file added later is safe on
 # arrival for the same reason. (`stop-check.state` was a third of these until
 # epic-23 wave-15 deleted the observation record itself — ADR-028.)
-PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate"
+PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate start-clock"
 PATROL_STATE_ARMED_SUFFIX=".armed"
 
 # EVERY SESSION ID WITH STATE HERE, each once, in class-then-name order. Symlinks
@@ -212,8 +222,10 @@ patrol_state_session_ids() {  # <root> -> one session id per line
       [ -e "$f" ] || [ -L "$f" ] || continue
       base="${f##*/}"
       sid="${base#"$c"-}"
-      sid="${sid%"$PATROL_STATE_ARMED_SUFFIX"}"
-      sid="${sid%.state}"
+      case "$sid" in
+        *.*.state) { [ -f "$f" ] && [ ! -L "$f" ]; } || continue ;;   # a per-start file
+      esac
+      sid="${sid%%.*}"
       [ -n "$sid" ] || continue
       case "$sid" in *"/"*|.|..) continue ;; esac
       ids="${ids}${sid}
@@ -224,16 +236,26 @@ patrol_state_session_ids() {  # <root> -> one session id per line
   printf '%s' "$ids" | sort -u
 }
 
-# ONE SESSION'S FILES, BY EXACT PATH AND NEVER BY GLOB. The ids come off the
-# filenames above, so building each candidate path back by concatenation means a
-# strange id can only ever address the file it was read from — there is no
-# pattern here for it to widen.
+# ONE SESSION'S FILES, BY EXACT PATH. The ids come off the filenames above, so
+# building each candidate path back by concatenation means a strange id can only
+# ever address the file it was read from — there is no pattern here for it to
+# widen. The one glob is a per-start file's (T68), taken only for an id of a
+# session id's own shape, so it widens to nothing but that session's names.
 patrol_session_state_files() {  # <root> <session id> -> one path per line
   local d sid="${2:-}" c f; d="$(tmp_root "${1:-}")"
   [ -n "$sid" ] || return 0
   for c in $PATROL_STATE_CLASSES; do
     for f in "$d/$c-$sid.state" "$d/$c-$sid.state$PATROL_STATE_ARMED_SUFFIX"; do
       [ -e "$f" ] || [ -L "$f" ] || continue
+      printf '%s\n' "$f"
+    done
+  done
+  # THE PER-START FILES (T68): `<class>-<sid>.<key>.state`, the one glob here, so the id must be
+  # a session id's shape before it joins a pattern; regular files only, never a link.
+  case "$sid" in *[!A-Za-z0-9_-]*) return 0 ;; esac
+  for c in $PATROL_STATE_CLASSES; do
+    for f in "$d/$c-$sid".*.state; do
+      [ -f "$f" ] && [ ! -L "$f" ] || continue
       printf '%s\n' "$f"
     done
   done

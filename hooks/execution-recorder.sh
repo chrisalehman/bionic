@@ -926,13 +926,19 @@ if [ -n "$IS_START" ]; then
   # THE WINDOW IS A TIE-BREAK, NEVER A FILTER (wave-27 T59; review pass 36 S2, A-orch-100). The
   # dispatch wall writes the launch row BEFORE the harness asks the user to permit the dispatch, so
   # a plain foreground start follows its launch by however long that prompt stood, and while the
-  # orchestrator is held in that agent's call the refusal's `amend` line cannot be run. So among
-  # the launches above, one launched at most START_JOIN_WINDOW_S seconds ago is preferred to one
-  # launched earlier; when NONE is inside the window the newest is the candidate (launches tied at
-  # that stamp are all candidates, which is two a start cannot tell apart). A launch that never
-  # spawned still blocks nothing: the next dispatch of its type writes a newer launch, which is
-  # inside the window and taken. A stamp later than now reads as now (N4), so a clock stepped
-  # back cannot keep one launch fresher than every real one for good.
+  # orchestrator is held in that agent's call the refusal's `amend` line cannot be run. A stamp
+  # later than now reads as now (N4), so a clock stepped back cannot keep one launch fresher than
+  # every real one for good.
+  # THE WINDOW CHOOSES A GROUP, AND ONE RULE JUDGES IT (wave-27 T68; review pass 47 B1, A-orch-122).
+  # The group is the launches above launched at most START_JOIN_WINDOW_S seconds ago, or all of them
+  # when none is. A group of one is joined, whatever its age. A group of several is launches a start
+  # cannot tell apart, fresh or late: none is joined and the terms registration says so, and the
+  # launch call's return places each agent by its `tool_use_id`. T59 took "the newest" of several
+  # late launches, and with two in flight the newest is not always the start's own, so each agent
+  # ran on the other's suites, files and checks. A launch that never spawned still blocks nothing
+  # for long: the next dispatch of its type writes a launch inside the window, which is a group of
+  # its own. What stays open is named in operational-rules.md (a start whose own dispatch wrote no
+  # launch row, beside ONE dead launch, is joined to it).
   START_JOIN_WINDOW_S=300
   # ONE START, ONE CLOCK (T59; review pass 36 N6). One start runs four registrations (the terms and
   # one per question), four processes. Each judging the window by its own `date` could place the
@@ -942,8 +948,32 @@ if [ -n "$IS_START" ]; then
   # every other one reads it. A reading more than START_CLOCK_SHARE_S seconds from the reader's own
   # clock is another start's (the registrations of one start run together, each bounded by its
   # 10-second timeout) and is replaced. `BIONIC_NOW_EPOCH` pins the reading, the libraries' idiom,
-  # so a suite can put a launch exactly at the edge. Files older than ten minutes are swept.
+  # so a suite can put a launch exactly at the edge.
+  # THE CLOCK FILES ARE A CLASS (wave-27 T68; review pass 47 S1, A-orch-137): `start-clock` in
+  # lib/patrol.sh's PATROL_STATE_CLASSES, named `start-clock-<session>.<agent id>.state`, so the
+  # session sweep, doctor and Step 8's wipe take a dead session's with its other state. A live
+  # session holds only the files of starts still inside START_CLOCK_KEEP_S: each new file sweeps
+  # the session's files whose reading no start of now can share, and a start that is placed
+  # removes its own (its question registrations read its row, not the clock).
   START_CLOCK_SHARE_S=10
+  START_CLOCK_KEEP_S=30
+  start_clock_path() {  # -> this start's clock file, or nothing when its id cannot name one
+    case "$START_ID" in ''|*[!A-Za-z0-9._@-]*) return 1 ;; esac
+    printf '%s/start-clock-%s.%s.state' "$STATE_DIR" "$BIONIC_SID" "$START_ID"
+  }
+  start_clock_sweep() {  # this session's clock files no start judging now can share are removed
+    local _cs_f _cs_r
+    for _cs_f in "$STATE_DIR/start-clock-${BIONIC_SID}".*.state; do
+      { [ -f "$_cs_f" ] && [ ! -L "$_cs_f" ]; } || continue
+      _cs_r=$(head -c 20 "$_cs_f" 2>/dev/null | tr -d '\n')
+      case "$_cs_r" in
+        ''|*[!0-9]*|0?*|?????????????*) rm -f "$_cs_f"; continue ;;
+      esac
+      [ "$((START_NOW - _cs_r))" -le "$START_CLOCK_KEEP_S" ] && [ "$((_cs_r - START_NOW))" -le "$START_CLOCK_KEEP_S" ] \
+        || rm -f "$_cs_f"
+    done
+    return 0
+  }
   START_NOW=""
   clock_share() {  # <a reading> -> 0 when it is this start's: within START_CLOCK_SHARE_S of START_NOW
     case "$1" in ''|*[!0-9]*) return 1 ;; esac
@@ -954,8 +984,7 @@ if [ -n "$IS_START" ]; then
     local _sc_f _sc_was _sc_tmp
     START_NOW="${BIONIC_NOW_EPOCH:-}"
     case "$START_NOW" in ''|*[!0-9]*) START_NOW=$(date -u +%s) ;; esac
-    case "$START_ID" in ''|*[!A-Za-z0-9._@-]*) return 0 ;; esac
-    _sc_f="$STATE_DIR/start-clock-${BIONIC_SID}-${START_ID}.state"
+    _sc_f=$(start_clock_path) || return 0
     { [ -d "$STATE_DIR" ] && [ ! -L "$STATE_DIR" ] && [ ! -L "$_sc_f" ]; } || return 0
     _sc_was=$(head -c 20 "$_sc_f" 2>/dev/null | tr -d '\n')
     if clock_share "$_sc_was"; then START_NOW="$_sc_was"; return 0; fi
@@ -963,7 +992,7 @@ if [ -n "$IS_START" ]; then
     printf '%s\n' "$START_NOW" > "$_sc_tmp"
     if ln "$_sc_tmp" "$_sc_f" 2>/dev/null; then
       rm -f "$_sc_tmp"
-      find "$STATE_DIR" -maxdepth 1 -type f -name "start-clock-${BIONIC_SID}-*.state" -mmin +10 -delete 2>/dev/null
+      start_clock_sweep
       return 0
     fi
     _sc_was=$(head -c 20 "$_sc_f" 2>/dev/null | tr -d '\n')
@@ -984,8 +1013,14 @@ if [ -n "$IS_START" ]; then
     { [ -f "$_tj_ledger" ] && [ ! -L "$_tj_ledger" ] && [ -r "$_tj_ledger" ]; } || _tj_ledger=""
     TJ_LEDGER="$_tj_ledger" \
     awk -v sid="$BIONIC_SID" -v ty="$1" -v plan="$_tj_plan" -v from="$_tj_from" -v now="$_tj_nowiso" \
-        -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
+        -v me="$START_ID" -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
       BEGIN { _roster_acks(ENVIRON["TJ_LEDGER"], ACK) }
+      index($0, "start-claim/v1|") == 1 {
+        if (_roster_kv($0, "session") != sid) next
+        cu = _roster_kv($0, "launch")
+        if (cu != "" && !(cu in claimer)) claimer[cu] = _roster_kv($0, "claimed_by")
+        next
+      }
       index($0, pre) == 1 {
         if (_roster_kv($0, "session") != sid) next
         u = _roster_kv($0, "tool_use_id"); if (u == "") next
@@ -994,7 +1029,7 @@ if [ -n "$IS_START" ]; then
         if (_roster_kv($0, "agent_id") != "" || _roster_kv($0, "teammate_id") != "") claimed[u] = 1
       }
       END {
-        c = 0; o = 0; best = ""
+        c = 0; o = 0; mine = ""
         for (i = 1; i <= n; i++) {
           u = order[i]
           if (u in claimed) continue
@@ -1007,15 +1042,53 @@ if [ -n "$IS_START" ]; then
           at = _roster_occupied_at(last[u])
           if ((nm in ACK) && _roster_discharged(at, ACK[nm])) continue
           if (!_roster_stamp_ok(at)) continue
+          if (u in claimer) {
+            if (claimer[u] == me) { mine = last[u] }
+            continue
+          }
           if (_roster_stamp_ok(now) && at "" > now "") at = now
           if (_roster_stamp_ok(from) && at "" >= from "") { pick[++c] = last[u]; continue }
-          if (at "" > best "") { best = at; o = 0 }
-          if (at "" == best "") late[++o] = last[u]
+          late[++o] = last[u]
         }
+        if (mine != "") { print "1 mine"; print mine; exit }
         if (c == 0) { c = o; for (i = 1; i <= o; i++) pick[i] = late[i] }
         print c
         for (i = 1; i <= c; i++) print pick[i]
       }' "$ROSTER_FILE" 2>/dev/null
+  }
+  # A LAUNCH IS CLAIMED BY ONE ATOMIC ACT (wave-27 T68; review pass 47 B1). Two starts judging at once
+  # each read the roster before either wrote its row, so both could join one launch. A start whose
+  # group is one launch claims it first: it appends one `start-claim/v1` line naming the launch and
+  # its own id to the roster, a single O_APPEND write as every roster row is, and the FIRST claim of
+  # a launch in file order is the one that holds (the roster's own serialisation: the file's order
+  # is the order of the writes). Then it judges again: a launch another start claimed is no
+  # candidate, the one it holds itself is its answer, so the start that lost the claim judges the
+  # candidates without that launch. Only the terms registration claims, as it is the one writer of
+  # the start's row; a question registration reads the claims (the launch its agent id claimed is its
+  # answer). A claim is never released; once the start's row is written the row says the same.
+  launch_claim() {  # <tool_use_id> -> one claim line for this start's agent id, appended to the roster
+    case "$1" in ''|*'|'*) return 0 ;; esac
+    printf 'start-claim/v1|at=%s|session=%s|launch=%s|claimed_by=%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BIONIC_SID" "$1" "$START_ID" >> "$ROSTER_FILE" 2>/dev/null
+    return 0
+  }
+  type_join_pick() {  # <subagent type> -> what type_join_candidates prints, a group of one claimed first
+    local _tp_out _tp_n _tp_u _tp_i=0
+    start_clock
+    while :; do
+      _tp_out=$(type_join_candidates "$1")
+      _tp_n="${_tp_out%%$'\n'*}"
+      case "$_tp_n" in
+        "1 mine") _tp_out="1${_tp_out#1 mine}"; break ;;
+        1) : ;;
+        *) break ;;
+      esac
+      _tp_u=$(line_field "${_tp_out#*$'\n'}" tool_use_id)
+      _tp_i=$((_tp_i + 1))
+      if [ -z "$_tp_u" ] || [ "$_tp_i" -gt 16 ]; then _tp_out=0; break; fi
+      launch_claim "$_tp_u"
+    done
+    printf '%s\n' "$_tp_out"
   }
   # A READER STARTED WITHOUT ITS CHECKS IS WRITTEN DOWN (wave-27 T38; review pass 31 F2,
   # A-orch-88). When a start cannot be placed and its candidates carry DIFFERENT `questions=`, no
@@ -1068,7 +1141,10 @@ if [ -n "$IS_START" ]; then
     else
       case "$START_TYPE" in
         bionic:*)
+          # A question registration claims nothing (it writes nothing, PC-f2); it reads the claims:
+          # the launch this agent id claimed is its answer, one another start claimed is no candidate.
           Q_PICK=$(type_join_candidates "$START_TYPE")
+          case "${Q_PICK%%$'\n'*}" in "1 mine") Q_PICK="1${Q_PICK#1 mine}" ;; esac
           Q_N="${Q_PICK%%$'\n'*}"
           if [ "${Q_N:-0}" -ge 1 ] 2>/dev/null; then
             Q_CANDS="${Q_PICK#*$'\n'}"
@@ -1366,7 +1442,7 @@ if [ -n "$IS_START" ]; then
         # The candidate filter is `type_join_candidates` above (T30), which a question registration
         # asks too; it loads roster.sh's field reader (`_roster_kv`) lazily, so only a start both
         # joins missed ever pays for it. One candidate is the row; several are left.
-        TYPE_PICK=$(type_join_candidates "$START_TYPE")
+        TYPE_PICK=$(type_join_pick "$START_TYPE")
         case "${TYPE_PICK%%$'\n'*}" in
           1) ROW="${TYPE_PICK#*$'\n'}" ;;
           0|'') : ;;
@@ -1467,6 +1543,9 @@ if [ -n "$IS_START" ]; then
           if (ra != "" && !rseen) printf "|restarted_at=%s", ra
           if (td != "" && !tseen) printf "|terms-delivered=%s", td }')
   printf '%s\n' "$IDENTIFIED" >> "$ROSTER_FILE" 2>/dev/null
+  # Placed, so its clock file has done its work (T68): the start's question registrations read
+  # the row above by its id.
+  START_CLOCK_F=$(start_clock_path) && [ ! -L "$START_CLOCK_F" ] && rm -f "$START_CLOCK_F"
 
   # NO BOUND ON THE ROSTER, for the reason ARM 2 gives above: a roster row is a
   # contract, not a look, and eviction by recency cannot tell a finished agent

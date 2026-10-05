@@ -3757,13 +3757,17 @@ expect_eq "WN-b2 …and its adversarial checks are pushed, as for a fresh launch
   "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
 expect_empty "WN-b3 …and nothing it was not dealt (beside the positive above)" "$PC_OUT_structure"
 
-# ---- WN-c: two launches, both outside the window: the newer is taken (S2) ----
+# ---- WN-c: two launches, both outside the window: neither is taken (T68 re-pin) ----
+# RE-PINNED by wave-27 T68 (review pass 47 B1, A-orch-122) from "the newer is taken": with two
+# launches of one type in flight and both late, the newer is not always the start's own, so each
+# agent ran on the other's suites and files. Two late launches are two a start cannot tell apart.
 IFS='|' read -r WNC_REPO WNC_TR WNC_CFG <<< "$(wn_world wntwolate)"
 sj_intended "$WNC_REPO" w900 toolu_01WNC900 "$WN_IMP" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 900)"
 sj_intended "$WNC_REPO" w400 toolu_01WNC400 "$WN_IMP" suites_allowed=beta.test.sh "launched_at=$(sj_ago 400)"
 run_rec "$(mk_subagent_start "$SID_A" "$WNC_TR" "$WNC_REPO" "$WN_IMP" "a00000000wnctwo")"
-expect_eq "WN-c1 two launches outside the window: the newer (400 s) is joined" "w400:a00000000wnctwo" "$(sj_e_joined "$WNC_REPO")"
-expect_eq "WN-c2 …and the older is left as it was" "1" "$(grep -c '|name=w900|' "$WNC_REPO/.bionic/tmp/roster-${SID_A}.state")"
+expect_eq "WN-c1 two launches outside the window: neither is joined (T68)" "0 identified rows" "$(sj_e_joined "$WNC_REPO")"
+expect_contains "WN-c2 …and the line says two launches could not be told apart (the positive)" \
+  "2 launches of $WN_IMP" "$REC_ERR"
 
 # ---- WN-d: a launch stamped an hour ahead reads as now (N4) ----
 # Beside a real launch 10 s old, both are fresh, and two fresh launches of one type are not chosen
@@ -3854,5 +3858,191 @@ wn_walls "$WNI_REPO" 'bash tests/gamma.test.sh' "$WNI_A" "$WN_IMP"
 expect_eq "WN-g2 …and the suite the amend recorded is still admitted" "0" "$SJ_ST"
 wn_walls "$WNI_REPO" 'bash tests/alpha.test.sh' "$WNI_A" "$WN_IMP"
 expect_eq "WN-g3 …beside the launch's own set" "0" "$SJ_ST"
+
+# ============================================================
+section "Section 23: §GROUP — the window chooses a group, one rule judges it, a claim is one act (wave-27 T68; review pass 47 B1, S1, S2)"
+# ============================================================
+#
+# The candidates of a start are the launches of its type that are this session's, this plan's, not
+# acked and not yet joined to an agent. The window chooses a GROUP: the candidates inside it, or all
+# of them when none is inside. A group of one is joined, whatever its age; a group of several is
+# judged as several fresh launches are (SJ-d, SJ-e5): neither joined, one line says so, and the
+# launch call's return places each agent by its `tool_use_id`. A launch is claimed by ONE atomic
+# act, so two starts never join one launch; the start that loses the claim judges again without it.
+#
+# FIXTURE FIDELITY: launch rows through `sj_intended` → `roster_row`; starts through the shipped
+# recorder (`run_rec`, or two at once in the background with `gr_bg`); the Bash call through the
+# shipped walls (`wn_walls`); the remedy run as printed, through the shipped session-poker.sh; the
+# return in the sync shape SJ-a uses.
+#
+# fails-when: a late start is joined to a launch when another launch of its type is in flight; two
+# starts arriving together are joined to one launch; a launch another plan wrote, an acked launch or
+# another session's launch is a candidate outside the window; the clock files of a session pile up.
+gr_bg() {  # <payload> <stderr file> — one terms registration in the background, as run_rec runs it
+  local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null)
+  ( printf '%s' "$1" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$REC" >/dev/null 2>"$2" ) &
+}
+gr_row_for() {  # <repo> <agent id> -> "<name>" of every identified row carrying the id, comma-joined
+  grep -F "|agent_id=$2|" "$1/.bionic/tmp/roster-${SID_A}.state" | grep -F 'status=identified' \
+    | while IFS= read -r _l; do printf '%s,' "$(sj_field "$_l" name)"; done
+}
+
+# ---- GR-a: two late launches with different contracts, two starts in order: neither joined (B1) ----
+IFS='|' read -r GRA_REPO GRA_TR GRA_CFG <<< "$(wn_world grlatepair)"
+sj_intended "$GRA_REPO" wa toolu_01GRAa "$WN_IMP" suites_allowed=alpha.test.sh files=src/a.sh "launched_at=$(sj_ago 900)"
+sj_intended "$GRA_REPO" wb toolu_01GRAb "$WN_IMP" suites_allowed=beta.test.sh files=src/b.sh "launched_at=$(sj_ago 400)"
+run_rec "$(mk_subagent_start "$SID_A" "$GRA_TR" "$GRA_REPO" "$WN_IMP" a00000000graaaa)"
+GRA_ERR_A="$REC_ERR"
+run_rec "$(mk_subagent_start "$SID_A" "$GRA_TR" "$GRA_REPO" "$WN_IMP" a00000000grabbb)"
+expect_eq "GR-a1 two late launches, A starts then B: neither start is joined" "0 identified rows" "$(sj_e_joined "$GRA_REPO")"
+expect_contains "GR-a2 …A is told what a start among several fresh launches is told" \
+  "2 launches of $WN_IMP on this session roster have no id and the start names none of them; agent a00000000graaaa is left to the return of its launch call" "$GRA_ERR_A"
+expect_contains "GR-a3 …and so is B" \
+  "2 launches of $WN_IMP on this session roster have no id and the start names none of them; agent a00000000grabbb is left to the return of its launch call" "$REC_ERR"
+wn_walls "$GRA_REPO" 'bash tests/beta.test.sh' a00000000graaaa "$WN_IMP"
+expect_eq "GR-a4 A cannot run B's suite" "2" "$SJ_ST"
+wn_walls "$GRA_REPO" 'bash tests/alpha.test.sh' a00000000graaaa "$WN_IMP"
+expect_eq "GR-a5 A's own suite is refused while it is unplaced" "2" "$SJ_ST"
+GRA_FIX=$(printf '%s\n' "$SJ_ERR" | grep -F 'widen it: ' | head -1)
+GRA_CMD="${GRA_FIX#*widen it: }"; GRA_CMD="${GRA_CMD% (main runs it)}"
+expect_contains "GR-a6 …and the refusal prints the amend line for A's id (T38's remedy)" \
+  "session-poker.sh amend a00000000graaaa --suites+ alpha.test.sh --reason" "$GRA_CMD"
+mkdir -p "${GRA_TR%.jsonl}/subagents"; : > "${GRA_TR%.jsonl}/subagents/agent-a00000000graaaa.jsonl"
+if [ -n "$GRA_FIX" ]; then
+  GRA_OUT=$( cd "$GRA_REPO" && env HOME="$(dirname "$GRA_CFG")" CLAUDE_CONFIG_DIR="$GRA_CFG" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
+    CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_PROJECT_DIR= bash -c "$GRA_CMD" 2>&1 ); GRA_RC=$?
+else GRA_OUT="no remedy line was printed"; GRA_RC=1; fi
+expect_eq "GR-a7 the line, run as printed by the orchestrator, exits 0 ($GRA_OUT)" "0" "$GRA_RC"
+wn_walls "$GRA_REPO" 'bash tests/alpha.test.sh' a00000000graaaa "$WN_IMP"
+expect_eq "GR-a8 …and A's own suite is then admitted" "0" "$SJ_ST"
+
+# ---- GR-b: the same, the two starts at once, ten pairs: no agent on the other's launch (B1) ----
+GRB_BAD=0; GRB_TOLD=0
+for _gr in 1 2 3 4 5 6 7 8 9 10; do
+  IFS='|' read -r GRB_REPO GRB_TR _ <<< "$(wn_world "grlateconc$_gr")"
+  sj_intended "$GRB_REPO" wa "toolu_01GRBa$_gr" "$WN_IMP" suites_allowed=alpha.test.sh files=src/a.sh "launched_at=$(sj_ago 401)"
+  sj_intended "$GRB_REPO" wb "toolu_01GRBb$_gr" "$WN_IMP" suites_allowed=beta.test.sh files=src/b.sh "launched_at=$(sj_ago 400)"
+  gr_bg "$(mk_subagent_start "$SID_A" "$GRB_TR" "$GRB_REPO" "$WN_IMP" "a0000000grba$_gr")" "$SANDBOX/.grb-a"
+  gr_bg "$(mk_subagent_start "$SID_A" "$GRB_TR" "$GRB_REPO" "$WN_IMP" "a0000000grbb$_gr")" "$SANDBOX/.grb-b"
+  wait
+  [ "$(sj_e_joined "$GRB_REPO")" = "0 identified rows" ] || GRB_BAD=$((GRB_BAD + 1))
+  grep -qF "2 launches of $WN_IMP" "$SANDBOX/.grb-a" && grep -qF "2 launches of $WN_IMP" "$SANDBOX/.grb-b" \
+    && GRB_TOLD=$((GRB_TOLD + 1))
+done
+expect_eq "GR-b1 two late launches, two starts at once: no pair of ten joins either start" "0" "$GRB_BAD"
+expect_eq "GR-b2 …and in ten of ten both starts are told the several-launches line" "10" "$GRB_TOLD"
+
+# ---- GR-c: two late launches with IDENTICAL contracts answer as two fresh identical ones ----
+# Today two fresh identical launches are neither joined, the same line says so, and a reader is
+# pushed the set both carry (A-T59.4). Two late identical ones get that answer, beside the control.
+for _gr in fresh late; do
+  IFS='|' read -r GRC_REPO GRC_TR _ <<< "$(wn_world "gridentical$_gr")"
+  if [ "$_gr" = late ]; then _gr_at="launched_at=$(sj_ago 900)"; _gr_bt="launched_at=$(sj_ago 400)"
+  else _gr_at="launched_at=$(sj_ago 20)"; _gr_bt="launched_at=$(sj_ago 10)"; fi
+  sj_intended "$GRC_REPO" c1 "toolu_01GRC1$_gr" bionic:critic suites_allowed=none questions=adversarial "$_gr_at"
+  sj_intended "$GRC_REPO" c2 "toolu_01GRC2$_gr" bionic:critic suites_allowed=none questions=adversarial "$_gr_bt"
+  pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$GRC_TR" "$GRC_REPO" bionic:critic "a000000grc$_gr")"
+  expect_eq "GR-c1 ($_gr) two identical launches: neither is joined" "0 identified rows" "$(sj_e_joined "$GRC_REPO")"
+  expect_contains "GR-c2 ($_gr) …the terms say two launches could not be told apart" "2 launches of bionic:critic" "$PC_ERR_terms"
+  expect_eq "GR-c3 ($_gr) …and the set both carry is pushed" "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
+done
+
+# ---- GR-d: two fresh identical launches, two starts at once, then the returns: one agent each ----
+GRD_BAD=0
+for _gr in 1 2 3 4 5 6 7 8 9 10; do
+  IFS='|' read -r GRD_REPO GRD_TR _ <<< "$(wn_world "grfreshconc$_gr")"
+  sj_intended "$GRD_REPO" wd1 "toolu_01GRD1x$_gr" "$WN_IMP" suites_allowed=alpha.test.sh
+  sj_intended "$GRD_REPO" wd2 "toolu_01GRD2x$_gr" "$WN_IMP" suites_allowed=alpha.test.sh
+  gr_bg "$(mk_subagent_start "$SID_A" "$GRD_TR" "$GRD_REPO" "$WN_IMP" "a0000000grd1$_gr")" "$SANDBOX/.grd-1"
+  gr_bg "$(mk_subagent_start "$SID_A" "$GRD_TR" "$GRD_REPO" "$WN_IMP" "a0000000grd2$_gr")" "$SANDBOX/.grd-2"
+  wait
+  wn_return "$GRD_REPO" "$GRD_TR" "toolu_01GRD1x$_gr" "a0000000grd1$_gr" "$WN_IMP" wd1
+  wn_return "$GRD_REPO" "$GRD_TR" "toolu_01GRD2x$_gr" "a0000000grd2$_gr" "$WN_IMP" wd2
+  _gr_1=$(sj_field "$(wn_last_for_id "$GRD_REPO" "a0000000grd1$_gr")" name)
+  _gr_2=$(sj_field "$(wn_last_for_id "$GRD_REPO" "a0000000grd2$_gr")" name)
+  [ "$_gr_1:$_gr_2" = "wd1:wd2" ] && [ -z "$(gr_row_for "$GRD_REPO" "a0000000grd1$_gr")$(gr_row_for "$GRD_REPO" "a0000000grd2$_gr")" ] \
+    || GRD_BAD=$((GRD_BAD + 1))
+done
+expect_eq "GR-d1 two fresh identical launches, two starts at once: in ten of ten each agent ends on its own launch" "0" "$GRD_BAD"
+
+# ---- GR-e: ONE launch, two starts at once: the claim is one act, so one start is joined (B1) ----
+# The second start has no launch row of its own (the residual's shape, GR-f), so each start sees one
+# candidate; the start that loses the claim judges again without that launch and is not placed.
+GRE_BAD=0; GRE_SEEN=""
+for _gr in 1 2 3 4 5 6 7 8 9 10; do
+  IFS='|' read -r GRE_REPO GRE_TR _ <<< "$(wn_world "grclaim$_gr")"
+  sj_intended "$GRE_REPO" we "toolu_01GREx$_gr" "$WN_IMP" suites_allowed=alpha.test.sh
+  gr_bg "$(mk_subagent_start "$SID_A" "$GRE_TR" "$GRE_REPO" "$WN_IMP" "a0000000gre1$_gr")" "$SANDBOX/.gre-1"
+  gr_bg "$(mk_subagent_start "$SID_A" "$GRE_TR" "$GRE_REPO" "$WN_IMP" "a0000000gre2$_gr")" "$SANDBOX/.gre-2"
+  wait
+  _gr_j=$(sj_e_joined "$GRE_REPO")
+  case "$_gr_j" in "we:a0000000gre1$_gr"|"we:a0000000gre2$_gr") GRE_SEEN="$_gr_j" ;; *) GRE_BAD=$((GRE_BAD + 1)) ;; esac
+done
+expect_eq "GR-e1 one launch, two starts at once: in ten of ten exactly one start is joined to it" "0" "$GRE_BAD"
+expect_contains "GR-e2 …and the joined row is the launch (the extractor reads it)" "we:a0000000gre" "$GRE_SEEN"
+
+# ---- GR-f: THE RESIDUAL, pinned as it stands (A-orch-122; operational-rules.md) ----
+# A start whose own dispatch left no launch row (the dispatch wall failed open) beside ONE dead
+# launch of its type (denied or abandoned at its prompt) is joined to it: nothing tells a hook that
+# a dispatch ended without spawning. For the next wave; un-pinning this is a design change.
+IFS='|' read -r GRF_REPO GRF_TR _ <<< "$(wn_world grresidual)"
+sj_intended "$GRF_REPO" dead toolu_01GRFdead "$WN_IMP" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 900)"
+run_rec "$(mk_subagent_start "$SID_A" "$GRF_TR" "$GRF_REPO" "$WN_IMP" a00000000grfnor)"
+expect_eq "GR-f1 the residual: a start with no launch of its own is joined to one dead launch" "dead:a00000000grfnor" "$(sj_e_joined "$GRF_REPO")"
+
+# ---- GR-g: the filters hold OUTSIDE the window too (S2) ----
+# Each excluded launch is ALONE and 900 s old, so the window cannot be what drops it.
+gr_g_world() {  # <label> -> repo
+  local repo; IFS='|' read -r repo _ _ <<< "$(wn_world "$1")"; printf '%s' "$repo"
+}
+GRG1=$(gr_g_world grgplan)
+sj_intended "$GRG1" elsewhere toolu_01GRGplan "$WN_IMP" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 900)" \
+  "plan=$GRG1/.bionic/docs/plans/epic-99-test/wave-02-other.plan.md"
+run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$GRG1" "$WN_IMP" a00000000grgpln)"
+expect_eq "GR-g1 a lone late launch of another plan is no candidate" "0 identified rows" "$(sj_e_joined "$GRG1")"
+GRG2=$(gr_g_world grgacked)
+sj_intended "$GRG2" acked toolu_01GRGack "$WN_IMP" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 900)"
+ack_write "$GRG2" "$SID_A" "$(sj_ago 600)" acked
+run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$GRG2" "$WN_IMP" a00000000grgack)"
+expect_eq "GR-g2 a lone late acked launch is no candidate" "0 identified rows" "$(sj_e_joined "$GRG2")"
+GRG3=$(gr_g_world grgsess)
+roster_header > "$GRG3/.bionic/tmp/roster-${SID_A}.state"
+roster_row_fixture status=intended session="$SID_B" name=theirs agent_id= "launched_at=$(sj_ago 900)" \
+  "subagent_type=$WN_IMP" tool_use_id=toolu_01GRGsess files= suites_source=declared suites_allowed=alpha.test.sh \
+  >> "$GRG3/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$GRG3" "$WN_IMP" a00000000grgses)"
+expect_eq "GR-g3 a lone late launch of another session is no candidate" "0 identified rows" "$(sj_e_joined "$GRG3")"
+# THE POSITIVE in the same shape: the same lone late launch, this plan's, not acked, this session's.
+GRG4=$(gr_g_world grgcontrol)
+sj_intended "$GRG4" mine toolu_01GRGmine "$WN_IMP" suites_allowed=alpha.test.sh "launched_at=$(sj_ago 900)"
+run_rec "$(mk_subagent_start "$SID_A" "$SJE_TR" "$GRG4" "$WN_IMP" a00000000grgmin)"
+expect_eq "GR-g4 control: the same lone late launch passing every filter is joined" "mine:a00000000grgmin" "$(sj_e_joined "$GRG4")"
+
+# ---- GR-h: a live session holds the clock files of starts still inside their window (S1) ----
+# 500 starts of one live session, a minute apart on the pinned clock, against a roster with no
+# launch (none is placed, so each start's clock file is left for the sweep): fewer than ten remain.
+IFS='|' read -r GRH_REPO GRH_TR _ <<< "$(wn_world grclocks)"
+roster_header > "$GRH_REPO/.bionic/tmp/roster-${SID_A}.state"
+grh_count() { find "$GRH_REPO/.bionic/tmp" -maxdepth 1 -name 'start-clock-*' | grep -c .; }
+export BIONIC_NOW_EPOCH="$WN_T"
+run_rec "$(mk_subagent_start "$SID_A" "$GRH_TR" "$GRH_REPO" "$WN_IMP" a0000000grh0)"
+expect_eq "GR-h1 one start leaves its one clock file, named by its session and its agent id" \
+  "start-clock-${SID_A}.a0000000grh0.state" "$(find "$GRH_REPO/.bionic/tmp" -maxdepth 1 -name 'start-clock-*' | sed 's|.*/||')"
+for _gr in $(seq 1 500); do
+  export BIONIC_NOW_EPOCH=$((WN_T + _gr * 60))
+  printf '%s' "$(mk_subagent_start "$SID_A" "$GRH_TR" "$GRH_REPO" "$WN_IMP" "a0000000grh$_gr")" \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$REC" >/dev/null 2>&1
+done
+unset BIONIC_NOW_EPOCH
+GRH_N=$(grh_count)
+expect_true "GR-h2 after 500 starts of one live session fewer than ten clock files remain ($GRH_N)" test "$GRH_N" -lt 10
+expect_true "GR-h3 …and the last start's is one of them" test -f "$GRH_REPO/.bionic/tmp/start-clock-${SID_A}.a0000000grh500.state"
+# A start that is placed takes its clock file with it: its question registrations read its row.
+IFS='|' read -r GRH2_REPO GRH2_TR _ <<< "$(wn_world grclockplaced)"
+sj_intended "$GRH2_REPO" placed toolu_01GRHp "$WN_IMP" suites_allowed=alpha.test.sh
+run_rec "$(mk_subagent_start "$SID_A" "$GRH2_TR" "$GRH2_REPO" "$WN_IMP" a0000000grhpl)"
+expect_eq "GR-h4 a placed start is joined (the positive)" "placed:a0000000grhpl" "$(sj_e_joined "$GRH2_REPO")"
+expect_eq "GR-h5 …and leaves no clock file behind" "0" \
+  "$(find "$GRH2_REPO/.bionic/tmp" -maxdepth 1 -name 'start-clock-*' | grep -c .)"
 
 finish
