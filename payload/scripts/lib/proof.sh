@@ -71,9 +71,10 @@ proof_waiver_line() {
 # proof_reading <record> <question> [<checks file>] -> `<result> <scope> <from>` read from a reading
 # record, exit 0, <from> the start of its range as written; or exit 1 with one sentence saying what
 # the record lacks and what to write (the verb's refusal). ONE PASS (wave-27 T41; review pass 10
-# F1): a record may stack several passes, newest first, so only the lines from its first
-# `reviewed: <a>..<b>` line up to the next one are read — the line proof_attested takes its range
-# from — and a key missing there refuses, whatever an older pass below it says. In that pass, the
+# F1; T45, review pass 16): a reading record holds one pass, from its `reviewed: <a>..<b>` line —
+# the line proof_attested takes its range from — to the end, and a record with a second flush-left
+# `reviewed:` line is refused; a key missing from the pass refuses, and a key given twice in it
+# refuses. (A plain review proof, read by proof_attested alone, keeps its first-line rule.) In that pass, the
 # first of each flush-left line: `question: <q>` equal to <question>, `result:` one of
 # PROOF_RESULTS, `scope:` one of PROOF_SCOPES, each value matched whole against its set (F2: a
 # value holding a space or a `|` is no word of the set, and never fills another field). For
@@ -85,6 +86,18 @@ proof_reading() {
   local rec="$1" q="$2" ck="${3:-}" span got rv rq rr rs ids miss worst
   span="$(awk '/^reviewed:[ \t]/ { if (n++) exit } n' "$rec" 2>/dev/null)"
   [ -n "$span" ] || { printf 'the reading %s carries no reviewed: <a>..<b> line; write the range it read' "$rec"; return 1; }
+  # A READING RECORD IS ONE PASS, AND A KEY IS GIVEN ONCE IN IT (wave-27 T45; review pass 16
+  # findings 1, 3). A second flush-left `reviewed:` line is a second pass, whatever it holds, so a
+  # record of two is refused rather than read from its top; and a pass that states question:,
+  # result:, scope: or one check id twice is refused, rather than taken at its first value.
+  got="$(awk '/^reviewed:[ \t]/ { n++ } END { print n + 0 }' "$rec" 2>/dev/null)"
+  [ "$got" -le 1 ] \
+    || { printf 'the reading %s holds %s passes (%s flush-left reviewed: lines); a reading record holds one pass, so write each pass as a record of its own' "$rec" "$got" "$got"; return 1; }
+  got="$(printf '%s\n' "$span" | awk '
+    /^(question|result|scope):/ { k = $0; sub(/:.*$/, ":", k); if (seen[k]++) { print k; exit } }
+    /^check:[ \t]/ { m = split($0, f, /[ \t]+/); if (m >= 2) { k = "check: " f[2]; if (seen[k]++) { print k; exit } } }')"
+  [ -z "$got" ] \
+    || { printf 'the reading %s gives %s twice in its pass; a key is given once, so keep the line the reader meant' "$rec" "$got"; return 1; }
   got="$(printf '%s\n' "$span" | awk '
     function val(s) { sub(/^[a-z]+:[ \t]*/, "", s); sub(/[ \t]+$/, "", s); return s }
     NR == 1 { rv = $0; sub(/^reviewed:[ \t]+/, "", rv); sub(/[ \t].*$/, "", rv); sub(/\.\..*$/, "", rv) }

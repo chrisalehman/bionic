@@ -9557,17 +9557,14 @@ s56_rec() {
 # THE ROSTERS: this session's, and a predecessor's the verb must scan too.
 S56_OSID="5f5f5f5f-0000-4000-8000-000000000055"
 new_roster "$R56"; roster_header > "$(roster_of "$R56" "$S56_OSID")"
-# A row dealt questions carries every record this section registers in its files= (wave-27 T41:
-# the record must be the reader's own), so each case here meets the rule it was written for.
-S56_FILES=""
-for s56n in ev1 no-reviewed no-question no-result no-scope fine partial other-q ev-fail adv-late adv1 \
-    ev-narrow ev2 adv2 st-all st-no-single st-maybe st-bare st-crit; do
-  S56_FILES="${S56_FILES:+$S56_FILES,}.bionic/docs/record/wave-01-fixture/$s56n.md"
-done
+# A row dealt questions carries, in its files=, the records this section registers under its name
+# (wave-27 T41: the record must be the reader's own), and no other: a record one roster row names is
+# that reader's alone (T45; review pass 16 finding 2). Each case here meets the rule it was written for.
+s56_files() { local o="" n; for n in "$@"; do o="${o:+$o,}.bionic/docs/record/wave-01-fixture/$n.md"; done; printf '%s' "$o"; }
 s56_row() {  # <roster> <name> <type> [<questions> [<files>]] -> one row appended; no questions key when none
   local r
   if [ $# -ge 4 ]; then
-    r="$(roster_row_fixture session="$SID" name="$2" agent_id="a-$2" subagent_type="$3" files="${5:-$S56_FILES}")"
+    r="$(roster_row_fixture session="$SID" name="$2" agent_id="a-$2" subagent_type="$3" files="${5-}")"
     printf '%s|questions=%s\n' "$r" "$4"
   else
     roster_row_fixture session="$SID" name="$2" agent_id="a-$2" subagent_type="$3"
@@ -9577,12 +9574,13 @@ S56_RS="$(roster_of "$R56")"; S56_RO="$(roster_of "$R56" "$S56_OSID")"
 # The plan's active T2 row names `implementor` as its agent, and with a roster present the commit
 # gate asks this session's roster for that name, so it carries the row the dispatch would have.
 s56_row "$S56_RS" implementor implementor
-s56_row "$S56_RS" w-aud bionic:auditor evidence
-s56_row "$S56_RS" w-crit bionic:critic adversarial,structure
-s56_row "$S56_RS" w-rev bionic:reviewer structure
+s56_row "$S56_RS" w-aud bionic:auditor evidence \
+  "$(s56_files ev1 no-reviewed no-question no-result no-scope fine partial other-q ev-fail ev-narrow ev2)"
+s56_row "$S56_RS" w-crit bionic:critic adversarial,structure "$(s56_files adv-late adv1 st-crit)"
+s56_row "$S56_RS" w-rev bionic:reviewer structure "$(s56_files st-all st-no-single st-maybe st-bare)"
 s56_row "$S56_RS" w-impl bionic:implementor evidence
 s56_row "$S56_RS" w-noq bionic:auditor
-s56_row "$S56_RO" w-old bionic:critic adversarial
+s56_row "$S56_RO" w-old bionic:critic adversarial "$(s56_files adv2)"
 s56_row "$S56_RS" w-two bionic:critic adversarial
 s56_row "$S56_RO" w-two bionic:implementor adversarial
 expect_regex "56a0 precondition: the working branch's head is C4, a 40-hex commit" '^[0-9a-f]{40}$' "$S56_C4"
@@ -10099,7 +10097,7 @@ s58_row() {  # <name> <type> <status> <questions> <deliverable> <files> -> one r
 }
 roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$S58_RS"
 S58_REV_FILES="$(s58_files stack.md rc-pass-flag.md rc-pass-fail.md rc-flag-fail.md rc-flag-flag.md rc-fail-fail.md rc-pass-na.md)"
-S58_CRIT_FILES="$(s58_files stack-ok.md w-tail.md w-base.md w-anc.md w-piece-tail.md)"
+S58_CRIT_FILES="$(s58_files stack-ok.md stack-one.md w-tail.md w-base.md w-anc.md w-piece-tail.md)"
 S58_AUD_FILES="$(s58_files above.md v-pipe.md v-two.md v-scope.md aud-files.md)"
 for s58st in intended confirmed; do
   s58_row r-rev bionic:reviewer "$s58st" structure "$S58_REC/rev.md" "$S58_REV_FILES"
@@ -10107,6 +10105,9 @@ for s58st in intended confirmed; do
   s58_row r-aud bionic:auditor "$s58st" evidence "$S58_REL/aud.md" "$S58_AUD_FILES"
 done
 s58_row r-int bionic:auditor intended evidence "$S58_REL/int.md" ""
+# A planted row whose name carries a dot, its own record, so 58c3 is refused for the character
+# alone: before T41 this name and record registered (review pass 16 note 4).
+s58_row r.aud bionic:auditor confirmed evidence "$S58_REL/dot.md" ""
 s58_row r-tint "$(printf 'bionic:impl\033[31mementor')" confirmed evidence "$S58_REL/tint.md" ""
 S58_ALL="$(s56_checks none)"
 s56_tree "$TMPROOT/s58-tree" "$S56_CHECKS"
@@ -10121,26 +10122,32 @@ expect_eq "58a0d precondition: …and its deliverable=" "$S58_REL/aud.md" \
 s34_gate "$R58"
 expect_eq "58a0e precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
 
-# ---------- §ONE-PASS (F1): only the first pass is read ----------
+# ---------- §ONE-PASS (F1): a reading record is one pass ----------
 # The reviewer's reproduction: the newest pass on top wrote no result, no scope and one FAIL
-# check; the older pass below it wrote result: pass, scope: piece and seven PASS checks.
+# check; the older pass below it wrote result: pass, scope: piece and seven PASS checks. From T45
+# (review pass 16) a reading record holds one pass, so a stacked record is refused whatever its
+# passes hold; T41's "the top pass is read" stays for a plain review proof alone.
 s58_rec stack.md "reviewed: ${S58_C1}..${S58_C4}" "question: structure" "check: reuse FAIL dup" "" \
   "reviewed: ${S58_C1}..${S58_C2}" "question: structure" "result: pass" "scope: piece" "$S58_ALL"
 s58_rec above.md "result: pass" "scope: piece" "" "reviewed: ${S58_C1}..${S58_C2}" "question: evidence"
 s58_rec stack-ok.md "reviewed: ${S58_C1}..${S58_C3}" "question: adversarial" "result: fail" "scope: piece" "" \
   "reviewed: ${S58_C1}..${S58_C2}" "question: adversarial" "result: pass" "scope: whole"
+s58_rec stack-one.md "reviewed: ${S58_C1}..${S58_C3}" "question: adversarial" "result: fail" "scope: piece"
 s42_snap "$R58" "$P58"
 POKER="$S58_POKER_TREE"
 poke "$R58" proof-add review record/wave-01-fixture/stack.md --question structure --reader r-rev
-s42_unchanged "58a F1 a top pass with no result: is not given the older pass's result" 1 "$P58"
-expect_contains "58a2 …naming the line its own pass lacks" "no result: line" "$OUT"
+s42_unchanged "58a F1 a top pass with no result: is not given the older pass's result: a stacked record is refused" 1 "$P58"
+expect_contains "58a2 …naming the count of its passes (T45)" "holds 2 passes" "$OUT"
 POKER="$S58_POKER_REAL"
 poke "$R58" proof-add review record/wave-01-fixture/above.md --question evidence --reader r-aud
 s42_unchanged "58a3 F1 a result: and scope: above the first reviewed: line are outside the pass" 1 "$P58"
 expect_contains "58a4 …naming the line" "no result: line" "$OUT"
 poke "$R58" proof-add review record/wave-01-fixture/stack-ok.md --question adversarial --reader r-crit
-expect_eq "58a5 control: a complete top pass over an older one registers (exit 0)" "0" "$RC"
-expect_contains "58a6 …with the top pass's head, result and scope, never the older pass's" \
+s42_unchanged "58a5 a complete top pass over an older one is refused too: a reading record is one pass (T45)" 1 "$P58"
+expect_contains "58a5b …naming the count" "holds 2 passes" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/stack-one.md --question adversarial --reader r-crit
+expect_eq "58a5c control: that top pass alone, one pass, registers (exit 0)" "0" "$RC"
+expect_contains "58a6 …with its head, result and scope" \
   "proved: kind=review head=${S58_C3} " "$(s46_proved "$P58" | tail -1)"
 expect_contains "58a7 …result=fail scope=piece" "reader=r-crit result=fail scope=piece" "$(s46_proved "$P58" | tail -1)"
 
@@ -10165,8 +10172,9 @@ s58_rec aud.md "reviewed: ${S58_C1}..${S58_C2}" "question: evidence" "result: pa
 poke "$R58" proof-add review record/wave-01-fixture/aud.md --question evidence --reader 'r\055aud'
 s42_unchanged "58c F3 an escaped name that awk would decode to r-aud" 1 "$P58"
 expect_contains "58c2 …naming the characters a reader name may carry" "A-Z, a-z, 0-9, _ and -" "$OUT"
-poke "$R58" proof-add review record/wave-01-fixture/aud.md --question evidence --reader 'r.aud'
-s42_unchanged "58c3 a name with a character outside the set" 1 "$P58"
+s58_rec dot.md "reviewed: ${S58_C1}..${S58_C2}" "question: evidence" "result: pass" "scope: piece"
+poke "$R58" proof-add review record/wave-01-fixture/dot.md --question evidence --reader 'r.aud'
+s42_unchanged "58c3 a name with a character outside the set, though a reader row carries it and names the record" 1 "$P58"
 expect_contains "58c4 …naming the characters" "A-Z, a-z, 0-9, _ and -" "$OUT"
 poke "$R58" proof-add review record/wave-01-fixture/aud.md --question evidence --reader r-aud
 expect_eq "58c5 control: the row's own name registers its deliverable (exit 0)" "0" "$RC"
@@ -10199,7 +10207,7 @@ expect_contains "58e2 …refused as a writer" "which is not a reader role" "$OUT
 expect_absent "58e3 …and the escape character never reaches the terminal" "$(printf '\033')" "$OUT"
 
 # ---------- §WHOLE-READ (F5): scope: whole starts at the plan's base or before it ----------
-# adversarial was read to C3 by stack-ok.md above, so C3..C4 continues its chain.
+# adversarial was read to C3 by stack-one.md above, so C3..C4 continues its chain.
 s58_rec w-tail.md "reviewed: ${S58_C3}..${S58_C4}" "question: adversarial" "result: pass" "scope: whole"
 s58_rec w-piece-tail.md "reviewed: ${S58_C3}..${S58_C4}" "question: adversarial" "result: pass" "scope: piece"
 s58_rec w-base.md "reviewed: ${S58_C1:0:10}..${S58_C4}" "question: adversarial" "result: pass" "scope: whole"
@@ -10576,6 +10584,74 @@ expect_eq "63v2 …the line's question and head, read before its first by as the
 s57_state "$P57" "$S57_C4"
 expect_eq "63v3 …so the judge covers adversarial and leaves structure absent" "covered absent" \
   "$(s57_of "$S57_AD") $(s57_of "$S57_ST")"
+
+# ---------- §ONE-READER (review pass 16 findings 1 to 3): one pass, each key once, one reader ----------
+# On section 58's repository and plan: its reader rows, its planted checks tree, its commits. New
+# rows are planted for new names, each naming the records its cases register (the shape T41 holds).
+s58_row r-dup bionic:auditor confirmed evidence "$S58_REL/dup-r.md" "$(s58_files dup-q.md dup-s.md dup-ok.md)"
+s58_row r-dupc bionic:reviewer confirmed structure "$S58_REL/dup-c.md" "$(s58_files multi.md)"
+s58_row r-sh1 bionic:auditor confirmed evidence "$S58_REL/shared.md" "$(s58_files solo.md)"
+s58_row r-sh2 bionic:auditor confirmed evidence "" "$(s58_files shared.md)"
+s58_rec dup-r.md "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result: pass" "result: fail" "scope: piece"
+s58_rec dup-q.md "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "question: adversarial" "result: pass" "scope: piece"
+s58_rec dup-s.md "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result: pass" "scope: piece" "scope: whole"
+s58_rec dup-c.md "reviewed: ${S58_C1}..${S58_C4}" "question: structure" "result: fail" "scope: piece" \
+  "$S58_ALL" "check: reuse FAIL a second copy"
+s58_rec dup-ok.md "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result: pass" "scope: piece"
+# The review's f1b record: a top pass whose checks leave out single-job, above a complete older pass.
+s58_rec multi.md "reviewed: ${S58_C1}..${S58_C4}" "question: structure" "result: pass" "scope: piece" \
+  "$(s56_checks single-job)" "" "reviewed: ${S58_C1}..${S58_C3}" "question: structure" "result: pass" "scope: piece" "$S58_ALL"
+s58_rec shared.md "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result: pass" "scope: piece"
+s58_rec solo.md "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result: flag" "scope: piece"
+expect_eq "63r0 precondition: multi.md holds two flush-left reviewed: lines, its top pass without single-job" "2 0" \
+  "$(/usr/bin/grep -c '^reviewed: ' "$S58_REC/multi.md") $(awk '/^reviewed: /{ n++ } n == 1 && /^check: single-job /' "$S58_REC/multi.md" | awk 'END { print NR }')"
+s42_snap "$R58" "$P58"
+POKER="$S58_POKER_TREE"
+poke "$R58" proof-add review record/wave-01-fixture/dup-r.md --question evidence --reader r-dup
+s42_unchanged "63r F1(16) result: pass then result: fail in one pass is not read as pass" 1 "$P58"
+expect_contains "63r2 …naming the key given twice" "gives result: twice" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/dup-q.md --question evidence --reader r-dup
+s42_unchanged "63r3 question: given twice" 1 "$P58"
+expect_contains "63r4 …naming it" "gives question: twice" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/dup-s.md --question evidence --reader r-dup
+s42_unchanged "63r5 scope: given twice" 1 "$P58"
+expect_contains "63r6 …naming it" "gives scope: twice" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/dup-c.md --question structure --reader r-dupc
+s42_unchanged "63r7 a check id answered twice (PASS, then FAIL)" 1 "$P58"
+expect_contains "63r8 …naming the check" "gives check: reuse twice" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/multi.md --question structure --reader r-dupc
+s42_unchanged "63r9 F3(16) a record of two passes whose top pass leaves single-job unanswered" 1 "$P58"
+expect_contains "63r10 …refused for its passes, whatever they hold" "holds 2 passes" "$OUT"
+POKER="$S58_POKER_REAL"
+poke "$R58" proof-add review record/wave-01-fixture/shared.md --question evidence --reader r-sh1
+s42_unchanged "63r11 F2(16) a record a second roster row also names, typed as the first reader" 1 "$P58"
+expect_contains "63r12 …naming the other row" "named by the roster row r-sh2 (bionic:auditor)" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/shared.md --question evidence --reader r-sh2
+s42_unchanged "63r13 …and typed as the second" 1 "$P58"
+expect_contains "63r14 …naming the first" "named by the roster row r-sh1 (bionic:auditor)" "$OUT"
+poke "$R58" proof-add review record/wave-01-fixture/solo.md --question evidence --reader r-sh1
+expect_eq "63r15 control: a record only that reader names registers (exit 0)" "0" "$RC"
+poke "$R58" proof-add review record/wave-01-fixture/dup-ok.md --question evidence --reader r-dup
+expect_eq "63r16 control: one pass, each key once, registers (exit 0)" "0" "$RC"
+expect_contains "63r17 …as that reader's pass" "evidence=record/wave-01-fixture/dup-ok.md question=evidence reader=r-dup result=pass scope=piece" \
+  "$(s46_proved "$P58" | tail -1)"
+# THE MUTATION: a proof.sh with the pass count switched off and the check scan reading the whole
+# file admits multi.md, so 63r9 can fail; the shipped one refuses it.
+S63_CK="$TMPROOT/s58-tree/context/checks-structure.md"
+S63_NEEDLE_NP='[ "$got" -le 1 ] \'
+S63_NEEDLE_MISS="miss=\"\$(printf '%s\\n' \"\$span\" | PROOF_IDS="
+expect_eq "63r18 precondition: both mutation sites are one line each of the shipped proof.sh" "1 1" \
+  "$(/usr/bin/grep -cF -- "$S63_NEEDLE_NP" "$S57_LIB") $(/usr/bin/grep -cF -- "$S63_NEEDLE_MISS" "$S57_LIB")"
+S63_M_ONE="$(s63_mut one "$S63_NEEDLE_NP" 'true \')"
+N="$S63_NEEDLE_MISS" R='miss="$(cat "$rec" | PROOF_IDS=' awk '{ i = index($0, ENVIRON["N"]); if (i) $0 = substr($0, 1, i - 1) ENVIRON["R"] substr($0, i + length(ENVIRON["N"])); print }' \
+  "$S63_M_ONE" > "$S63_M_ONE.tmp" && mv "$S63_M_ONE.tmp" "$S63_M_ONE"
+s63_read() {  # <proof.sh> <record> -> proof_reading's answer and exit, for structure
+  bash -c '. "$1" && proof_reading "$2" structure "$3"; echo " rc=$?"' _ "$1" "$2" "$S63_CK" 2>/dev/null
+}
+expect_contains "63r19 the shipped proof_reading refuses multi.md for its passes" "holds 2 passes" "$(s63_read "$S57_LIB" "$S58_REC/multi.md")"
+expect_contains "63r20 mutation: the doctored copy still reads a one-pass record (it runs)" "pass piece ${S58_C1} rc=0" \
+  "$(s63_read "$S63_M_ONE" "$S58_REC/rc-pass-na.md")"
+expect_contains "63r21 …and admits multi.md, so 63r9 can fail" "pass piece ${S58_C1} rc=0" "$(s63_read "$S63_M_ONE" "$S58_REC/multi.md")"
 POKE_BOUND="$S63_BOUND_WAS"
 
 finish
