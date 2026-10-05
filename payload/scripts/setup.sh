@@ -1183,6 +1183,13 @@ setup_claude_proxy() {
     return 0
   fi
 
+  # THE RC'S STATE IS markers.sh's, READ BEFORE ANYTHING IS ASKED (wave-27 T46,
+  # review pass 14 F2): a path that is no file, or markers that do not pair up,
+  # are refused here with the same lines the writer's refusal prints, rather
+  # than offered and then refused after the yes.
+  if ! markers_regular "$rc" >/dev/null; then _setup_say_not_a_file "claude() function" "$rc"; return 0; fi
+  if ! markers_check "$rc" "$RC_START" "$RC_END" >/dev/null; then _setup_rc_say_malformed "$rc"; return 0; fi
+
   for item_name in $RC_ITEMS; do
     rc_default "$item_name" >/dev/null 2>&1 || continue
     rc_get "$item_name" && continue
@@ -1209,12 +1216,10 @@ setup_claude_proxy() {
     rc_set "$item_name"; _setup_rc_set_rc=$?
     case "$_setup_rc_set_rc" in
       0) wrote=$((wrote + 1)); continue ;;
-      2) item "$SETUP_BAD" "claude() function" "markers do not pair up — nothing written"
-         say "     in ${rc}:"
-         markers_check "$rc" "$RC_START" "$RC_END" | while IFS= read -r _setup_where_line; do say "     ${_setup_where_line}"; done
-         action "fix bionic's markers in ${rc} by hand" ;;
+      2) _setup_rc_say_malformed "$rc" ;;
       3) item "$SETUP_NIL" "claude() function" "read-only — not written"
          action "make ${rc} writable to add bionic's claude() shell function — bionic does not write a read-only file" ;;
+      4) _setup_say_not_a_file "claude() function" "$rc" ;;
       *) item "$SETUP_BAD" "claude() function" "could not write ${rc} — it is as it was"
          action "add bionic's claude() shell function to ${rc} (bionic could not write the file)" ;;
     esac
@@ -1224,6 +1229,27 @@ setup_claude_proxy() {
   # is in the next terminal and not in the one running this.
   item "$SETUP_OK" "claude() function" "added to ${rc} — takes effect in a new shell"
   return 0
+}
+
+# The rc's markers do not pair up: what markers_check found and where, and the
+# hand fix. One spelling for the refusal before the question and the writer's
+# rc 2 after it.
+_setup_rc_say_malformed() {  # <rc>
+  item "$SETUP_BAD" "claude() function" "markers do not pair up — nothing written"
+  say "     in ${1}:"
+  markers_check "$1" "$RC_START" "$RC_END" | while IFS= read -r _setup_where_line; do say "     ${_setup_where_line}"; done
+  action "fix bionic's markers in ${1} by hand"
+}
+
+# A target that is no file (markers.sh `markers_regular`, wave-27 T46): the item
+# fails, the path and what it is go on a line of their own beneath it (the cell
+# is truncated, A-T40.11), and the other items still run.
+_setup_say_not_a_file() {  # <item label> <path>
+  local what
+  what="$(markers_regular "$2")"
+  item "$SETUP_BAD" "$1" "not a file — nothing written"
+  say "     ${2} is ${what:-not a regular file}; bionic writes only to a regular file."
+  action "${2} is yours to change by hand — bionic writes nothing inside it or beside it"
 }
 
 # What each rc item is for, in the words the user reads. Beside the step for
@@ -1699,6 +1725,10 @@ setup_working_principles() {
 
   [ "$state" != "present" ] || { item "$SETUP_OK" "working principles" "already in ${file} — nothing to do"; return 0; }  # idempotence guard: principles item
 
+  if [ "$state" = "not-a-file" ]; then
+    _setup_say_not_a_file "working principles" "$file"
+    return 0
+  fi
   if [ "$state" = "malformed" ]; then
     item "$SETUP_BAD" "working principles" "markers do not pair up — nothing written"
     say "     in ${file}:"
@@ -1748,6 +1778,7 @@ setup_working_principles() {
        action "fix bionic's working-principles markers in ${file} by hand" ;;
     3) item "$SETUP_NIL" "working principles" "read-only — not written"
        action "make ${file} writable to add bionic's working principles — bionic does not write a read-only file" ;;
+    4) _setup_say_not_a_file "working principles" "$file" ;;
     *) item "$SETUP_BAD" "working principles" "could not write ${file} — it is as it was"
        action "add bionic's working principles to ${file} (bionic could not write the file)" ;;
   esac

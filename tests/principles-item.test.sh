@@ -624,4 +624,146 @@ expect_contains "CONSENT: the summary names the rule that lets an agent act with
 C_BEFORE_Q="${C_OUT%%\[y/N\]*}"
 expect_contains "CONSENT: the text is printed BEFORE the question, not after" "Decide what is yours" "$C_BEFORE_Q"
 
+# ---------------------------------------------------------------------------
+section "§T46-ALL: under remove --all the item says what goes before and after (review pass 14 F1)"
+# ---------------------------------------------------------------------------
+#
+# `--all` is the consent and no question is added; the item's own line says,
+# BEFORE it acts, that the block and the file will be deleted, and its result
+# line says the file was. Run under `env -i` on a PATH holding only the stub and
+# the system directories, so no package manager a real machine has is in reach
+# of the teardown's tool rows.
+
+mkdir -p "$TMP/allbin"; cp "$TMP/bin/claude" "$TMP/allbin/claude"; ln -s "$BASH" "$TMP/allbin/bash"
+remove_all() {  # <home> — `remove --all`, the page answered yes, nothing else on stdin
+  printf 'y\n' | env -i HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/allbin:/usr/bin:/bin" TMPDIR="$TMP" \
+    CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+    bash "$REMOVE_SH" --all 2>&1
+}
+
+SB_A1="$(new_bare_home)"; setup_run "$SB_A1" $'y\n' >/dev/null 2>&1
+A1_PATH="$SB_A1/.claude/CLAUDE.md"
+expect_eq "ALL: the fixture holds the unedited block alone" "env:working-principles state=present" "$(detect_run "$SB_A1")"
+A1_OUT="$(remove_all "$SB_A1")"
+expect_contains "ALL: before it acts, the item says the block and the file will be deleted" \
+  "will delete the block and the file ${A1_PATH}" "$A1_OUT"
+expect_contains "ALL: its result line says the file was deleted" "✓ deleted ${A1_PATH}" "$A1_OUT"
+A1_BEFORE="${A1_OUT%%✓ deleted*}"
+expect_contains "ALL: …and the warning is printed before the result, not after" "will delete the block and the file" "$A1_BEFORE"
+expect_eq "ALL: the file is gone" "no" "$(path_exists "$A1_PATH")"
+expect_eq "ALL: no question is added — the page's is the only [y/N]" "1" \
+  "$(printf '%s\n' "$A1_OUT" | grep -c '\[y/N\]')"
+
+SB_A2="$(new_home)"; setup_run "$SB_A2" $'y\n' >/dev/null 2>&1
+A2_PATH="$SB_A2/.claude/CLAUDE.md"
+A2_OUT="$(remove_all "$SB_A2")"
+expect_contains "ALL: with the user's text beside it, the line says the block will be deleted and the rest stays" \
+  "will delete that block and leave the rest of the file as it is" "$A2_OUT"
+expect_absent "ALL: …no deletion of the file is announced" "✓ deleted ${A2_PATH}" "$A2_OUT"
+expect_same_bytes "ALL: …and the user's text is byte for byte what it was" "$TMP/planted.md" "$A2_PATH"
+
+# ---------------------------------------------------------------------------
+section "§T46-NOT-A-FILE: a path that is no file is refused, and nothing is made in it (F6)"
+# ---------------------------------------------------------------------------
+
+SB_DIR="$(new_bare_home)"; DIR_PATH="$SB_DIR/.claude/CLAUDE.md"
+mkdir "$DIR_PATH"; printf 'mine\n' > "$DIR_PATH/notes.txt"
+DIR_LS="$(ls -A "$DIR_PATH")"; DIR_HOME_LS="$(ls -A "$SB_DIR/.claude")"
+expect_nonempty "NOT-A-FILE: the listing extractor reads the directory's contents" "$DIR_LS"
+expect_eq "NOT-A-FILE: detect reads a directory as not-a-file" \
+  "env:working-principles state=not-a-file" "$(detect_run "$SB_DIR")"
+DIR_SET="$(setup_run "$SB_DIR" $'y\ny\n')"
+expect_contains "NOT-A-FILE: setup names the path and that it is a directory" "${DIR_PATH} is a directory" "$DIR_SET"
+expect_contains "NOT-A-FILE: …as a fault" "✗" "$(report_row "$DIR_SET" "working principles")"
+expect_absent "NOT-A-FILE: …and reports no write" "written to" "$DIR_SET"
+expect_eq "NOT-A-FILE: setup creates nothing inside the directory" "$DIR_LS" "$(ls -A "$DIR_PATH")"
+expect_eq "NOT-A-FILE: …and nothing beside it" "$DIR_HOME_LS" "$(ls -A "$SB_DIR/.claude")"
+DIR_RM="$(remove_run "$SB_DIR" y)"
+expect_contains "NOT-A-FILE: remove names the path and that it is a directory" "${DIR_PATH} is a directory" "$DIR_RM"
+expect_absent "NOT-A-FILE: …and does not call it clean" "— already clean" "$DIR_RM"
+expect_eq "NOT-A-FILE: remove changes nothing inside it" "$DIR_LS" "$(ls -A "$DIR_PATH")"
+DIR_RS="$(remove_run "$SB_DIR" y "$TMP/standalone/remove.sh")"
+expect_contains "NOT-A-FILE: the standalone door says the same" "${DIR_PATH} is a directory" "$DIR_RS"
+expect_eq "NOT-A-FILE: …and changes nothing inside it" "$DIR_LS" "$(ls -A "$DIR_PATH")"
+ROW_DIR="$(report_row "$(doctor_run "$SB_DIR")" "$DOCTOR_ROW_LABEL")"
+expect_nonempty "NOT-A-FILE: doctor renders a row" "$ROW_DIR"
+expect_contains "NOT-A-FILE: doctor's row is a fault" "✗" "$ROW_DIR"
+expect_contains "NOT-A-FILE: doctor's row says it is not a file" "not a file" "$ROW_DIR"
+expect_absent "NOT-A-FILE: doctor suggests no setup run that would write" "/bionic:setup" "$ROW_DIR"
+
+# A link to a directory: refused the same way; nothing in the directory or beside it.
+SB_LD="$(new_bare_home)"; mkdir "$SB_LD/elsewhere"; printf 'mine\n' > "$SB_LD/elsewhere/keep.txt"
+ln -s ../elsewhere "$SB_LD/.claude/CLAUDE.md"
+LD_LS="$(ls -A "$SB_LD/elsewhere")"; LD_TOP="$(ls -A "$SB_LD")"
+LD_SET="$(setup_run "$SB_LD" $'y\ny\n')"
+expect_contains "NOT-A-FILE: a link to a directory is refused by setup" "is a link to a directory" "$LD_SET"
+expect_eq "NOT-A-FILE: …nothing is made in the directory" "$LD_LS" "$(ls -A "$SB_LD/elsewhere")"
+expect_eq "NOT-A-FILE: …or beside it" "$LD_TOP" "$(ls -A "$SB_LD")"
+
+# A dangling link: refused, its target not created, the link left as it was.
+SB_DL="$(new_bare_home)"; ln -s ../nowhere.md "$SB_DL/.claude/CLAUDE.md"
+DL_SET="$(setup_run "$SB_DL" $'y\ny\n')"
+expect_contains "NOT-A-FILE: a dangling link is refused by setup" "is a link that points nowhere" "$DL_SET"
+expect_eq "NOT-A-FILE: …its target is not created" "no" "$(path_exists "$SB_DL/nowhere.md")"
+expect_true "NOT-A-FILE: …and the link is still a link" test -L "$SB_DL/.claude/CLAUDE.md"
+DL_RM="$(remove_run "$SB_DL" y)"
+expect_contains "NOT-A-FILE: remove refuses a dangling link too" "is a link that points nowhere" "$DL_RM"
+
+# The twin: a link to a regular file is followed, as before.
+SB_LF="$(new_bare_home)"; printf 'mine\n' > "$SB_LF/real.md"; ln -s ../real.md "$SB_LF/.claude/CLAUDE.md"
+setup_run "$SB_LF" $'y\n' >/dev/null 2>&1
+expect_eq "NOT-A-FILE: a link to a regular file is followed and written through (the twin)" "1" \
+  "$(count_lines_equal "$SB_LF/real.md" "$START_LIT")"
+expect_true "NOT-A-FILE: …and stays a link" test -L "$SB_LF/.claude/CLAUDE.md"
+
+# ---------------------------------------------------------------------------
+section "§T46-SHOWN: remove writes only the block its question showed (F5)"
+# ---------------------------------------------------------------------------
+#
+# The fixture reads remove's output up to the question's `[y/N]`, copies <next>
+# over the file while the question waits, and only then answers. No sleep: the
+# question on screen is the signal.
+
+remove_changed_at_question() {  # <home> <next file> <answer> [script]
+  local home="$1" next="$2" answer="$3" script="${4:-$REMOVE_SH}" in out chunk pid
+  in="$TMP/q-in.$RANDOM$RANDOM"; out="$TMP/q-out.$RANDOM$RANDOM"
+  mkfifo "$in" "$out"
+  HOME="$home" ZDOTDIR="$home" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" \
+    CLAUDE_CONFIG_DIR="$home/.claude" BIONIC_CLAUDE_HOME="$home/.claude" \
+    bash "$script" --only "$ITEM" < "$in" > "$out" 2>&1 &
+  pid=$!
+  exec 7> "$in"
+  exec 8< "$out"
+  while IFS= read -r -d ']' chunk <&8 || { printf '%s' "$chunk"; false; }; do
+    printf '%s]' "$chunk"
+    case "$chunk" in
+      *'[y/N') cp "$next" "$home/.claude/CLAUDE.md"; printf '%s\n' "$answer" >&7; break ;;
+    esac
+  done
+  cat <&8
+  exec 7>&- 8<&-
+  wait "$pid"
+  rm -f "$in" "$out"
+}
+
+SB_CB="$(new_home)"; setup_run "$SB_CB" $'y\n' >/dev/null 2>&1
+cp "$SB_CB/.claude/CLAUDE.md" "$TMP/cb-b2.md"; edit_block "$TMP/cb-b2.md" '- a line typed while the question waited'
+CB_OUT="$(remove_changed_at_question "$SB_CB" "$TMP/cb-b2.md" y)"
+expect_contains "SHOWN: the question was asked" "[y/N]" "$CB_OUT"
+expect_same_bytes "SHOWN: a block changed while the question waited is not written" "$TMP/cb-b2.md" "$SB_CB/.claude/CLAUDE.md"
+expect_contains "SHOWN: …and remove says the file changed since it was shown" "changed since it was shown" "$CB_OUT"
+CB_AGAIN="$(remove_run "$SB_CB" n)"
+expect_contains "SHOWN: a second run shows the block as it is now" "a line typed while the question waited" "$CB_AGAIN"
+
+SB_CT="$(new_home)"; setup_run "$SB_CT" $'y\n' >/dev/null 2>&1; cp "$SB_CT/.claude/CLAUDE.md" "$TMP/ct-same.md"
+CT_OUT="$(remove_changed_at_question "$SB_CT" "$TMP/ct-same.md" y)"
+expect_same_bytes "SHOWN: the same fixture, the block unchanged, strips it on the yes (the twin)" "$TMP/planted.md" "$SB_CT/.claude/CLAUDE.md"
+expect_absent "SHOWN: …and says nothing changed under it" "changed since it was shown" "$CT_OUT"
+
+SB_CS="$(new_home)"; setup_run "$SB_CS" $'y\n' >/dev/null 2>&1
+cp "$SB_CS/.claude/CLAUDE.md" "$TMP/cs-b2.md"; edit_block "$TMP/cs-b2.md" '- a line typed while the question waited'
+CS_OUT="$(remove_changed_at_question "$SB_CS" "$TMP/cs-b2.md" y "$TMP/standalone/remove.sh")"
+expect_same_bytes "SHOWN: the standalone door writes nothing over a changed block either" "$TMP/cs-b2.md" "$SB_CS/.claude/CLAUDE.md"
+expect_contains "SHOWN: …and says so" "changed since it was shown" "$CS_OUT"
+
 finish

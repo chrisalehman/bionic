@@ -2144,6 +2144,15 @@ fi
 # stands for this line (wave-27 T40, review pass 9 finding 2).
 [ "$PRINCIPLES_STATE" = "malformed" ] && \
   fix "bionic's working-principles markers in $(_doctor_tilde "$(principles_file)") do not pair up → fix them by hand"
+# The rc's markers, and either path being no file, are the same kind of fault
+# (wave-27 T46, review pass 14 F2 and F6): every writer refuses them, so the fix
+# line names a hand fix and never a setup run.
+[ "$RC_PROXY_STATE" = "malformed" ] && \
+  fix "bionic's claude() markers do not pair up in $(_doctor_tilde "$(rc_file)") → fix them by hand"
+[ "$RC_PROXY_STATE" = "not-a-file" ] && \
+  fix "the shell rc is not a file: $(_doctor_tilde "$(rc_file)") is $(markers_regular "$(rc_file)") → change it by hand; bionic writes only to a regular file"
+[ "$PRINCIPLES_STATE" = "not-a-file" ] && \
+  fix "the working-principles file is not a file: $(_doctor_tilde "$(principles_file)") is $(markers_regular "$(principles_file)") → change it by hand; bionic writes only to a regular file"
 
 [ "$LEGACY_ALIAS_FIRES" = "yes" ] && fix "the legacy .zshrc alias block is still there → run $(bionic_check_hint legacy-alias)"
 if [ "$LEGACY_HOOKS_FIRES" = "yes" ]; then
@@ -2564,6 +2573,11 @@ if [ "$RC_PROXY_STATE" = "yes" ]; then
 elif [ "$RC_PROXY_STATE" = "stale" ]; then
   _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "stale" \
     "in $(_detect_shell_rc)" " — ${_rc_proxy_hint} rewrites it"
+elif [ "$RC_PROXY_STATE" = "malformed" ]; then
+  _rc_proxy_where="$(markers_check "$(rc_file)" "$RC_START" "$RC_END")"
+  _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "malformed" "${_rc_proxy_where%%$'\n'*}"
+elif [ "$RC_PROXY_STATE" = "not-a-file" ]; then
+  _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "not a file" "$(_doctor_tilde "$(rc_file)") is $(markers_regular "$(rc_file)")"
 else
   _doctor_env3 "$DOCTOR_NIL" "$_rc_proxy_label" "—" "not set — ${_rc_proxy_hint} offers it"
 fi
@@ -2582,6 +2596,8 @@ case "$PRINCIPLES_STATE" in
   edited)    _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "edited" "differs from bionic's text — kept as it is" ;;
   malformed) _principles_where="$(principles_where)"
              _doctor_env3 "$DOCTOR_BAD" "$_principles_label" "malformed" "${_principles_where%%$'\n'*}" ;;
+  not-a-file) _doctor_env3 "$DOCTOR_BAD" "$_principles_label" "not a file" \
+               "$(_doctor_tilde "$(principles_file)") is $(markers_regular "$(principles_file)")" ;;
   *)         _doctor_env3 "$DOCTOR_NIL" "$_principles_label" "—"      "not set — ${_principles_hint} offers it" ;;
 esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
