@@ -478,24 +478,46 @@ record() { local f="$1" q="$2"; shift 2; printf '%s\n' "reviewed: aaa..bbb" "que
 R="$TMP/records"
 mkdir -p "$R"
 # score_act <score.sh> — what sourcing it does to a caller, as one line: `functions: <names>`
-# when it defines functions and moves nothing else (working directory, shell options,
-# variables) and prints nothing; otherwise the line names what moved, or says it ended the
-# shell. The act is read from the caller's side, in a shell of its own, so a file that exits
-# or changes directory is caught by what the caller sees afterwards, not by what it prints.
+# when it defines functions and moves nothing else and prints nothing; otherwise the line names
+# the first thing that moved, in this order: the working directory, the `$-` flags, the variable
+# names, a variable's value or attributes (`declare -p`), the `set -o` and `shopt` options, the
+# umask, the traps, the aliases; or it says the file ended the shell. The act is read from the
+# caller's side, in a shell of its own, from a snapshot taken before sourcing and one after, so a
+# file that exits or changes directory is caught by what the caller sees afterwards, not by what
+# it prints. The probe's own variables and the shell's moving ones (`_`, `BASH*`, `SHELLOPTS`,
+# `LINENO`, `RANDOM`, the clocks…) are left out of both snapshots.
 score_act() {
-  local out
+  local out snapdir
+  snapdir="$(mktemp -d "$TMP/act.XXXXXX")"
   out="$(cd "$TMP" && bash -c '
-    f0= v0= o0= p0= w= f1= v1= o1= p1=
-    f0="$(declare -F | sort)"; v0="$(compgen -v | sort)"; o0="$-"; p0="$PWD"
+    d="$2" w=
+    skip="_|BASH[A-Z_]*|SHELLOPTS|FUNCNAME|PIPESTATUS|LINENO|RANDOM|SRANDOM|SECONDS|EPOCHSECONDS|EPOCHREALTIME|d|w|skip|k"
+    snap() {
+      declare -F | sort > "$d/$1.functions"
+      compgen -v | grep -vxE "$skip" | sort > "$d/$1.names"
+      declare -p | grep -vE "^declare -[^ ]* ($skip)=" > "$d/$1.variables"
+      { set -o; shopt; } > "$d/$1.options"
+      umask > "$d/$1.umask"; trap -p > "$d/$1.traps"; alias > "$d/$1.aliases"
+      printf "%s\n" "$-" > "$d/$1.flags"; pwd > "$d/$1.pwd"
+    }
+    snap before
     w="$(. "$1" 2>&1)"
     [ -z "$w" ] || { echo "printed: $w"; exit 0; }
     . "$1"
-    f1="$(declare -F | sort)"; v1="$(compgen -v | sort)"; o1="$-"; p1="$PWD"
-    [ "$p0" = "$p1" ] || { echo "moved the working directory to $p1"; exit 0; }
-    [ "$o0" = "$o1" ] || { echo "changed the shell options from $o0 to $o1"; exit 0; }
-    [ "$v0" = "$v1" ] || { echo "defined variables: $(comm -13 <(echo "$v0") <(echo "$v1") | paste -sd" " -)"; exit 0; }
-    echo "functions: $(comm -13 <(echo "$f0") <(echo "$f1") | sed "s/^declare -f //" | paste -sd" " -)"
-  ' _ "$1" 2>&1)"
+    snap after
+    cmp -s "$d/before.pwd" "$d/after.pwd" || { echo "moved the working directory to $(cat "$d/after.pwd")"; exit 0; }
+    cmp -s "$d/before.flags" "$d/after.flags" || { echo "changed the shell options from $(cat "$d/before.flags") to $(cat "$d/after.flags")"; exit 0; }
+    cmp -s "$d/before.names" "$d/after.names" || { echo "defined variables: $(comm -13 "$d/before.names" "$d/after.names" | paste -sd" " -)"; exit 0; }
+    for k in variables options umask traps aliases; do
+      cmp -s "$d/before.$k" "$d/after.$k" && continue
+      case "$k" in
+        options) echo "changed the caller'"'"'s options: $(diff "$d/before.$k" "$d/after.$k" | sed -n "s/^> //p" | awk "NR == 1 { print \$1 }")" ;;
+        *) echo "changed the caller'"'"'s $k: $(diff "$d/before.$k" "$d/after.$k" | sed -n "s/^> //p" | head -n 1)" ;;
+      esac
+      exit 0
+    done
+    echo "functions: $(comm -13 "$d/before.functions" "$d/after.functions" | sed "s/^declare -f //" | paste -sd" " -)"
+  ' _ "$1" "$snapdir" 2>&1)"
   printf '%s\n' "${out:-ended the shell}"
 }
 expect_eq "SC0: sourcing score.sh defines its three functions and does nothing else" \
@@ -517,6 +539,13 @@ exit 0|ended the shell
 cd /|moved the working directory to /
 set -e|changed the shell options from
 EXAM_PROBE=1|defined variables: EXAM_PROBE
+IFS=,|changed the caller's variables: declare -- IFS=","
+set -o pipefail|changed the caller's options: pipefail
+shopt -s nullglob|changed the caller's options: nullglob
+umask 077|changed the caller's umask: 0077
+trap : EXIT|changed the caller's traps: trap -- ':' EXIT
+alias x=y|changed the caller's aliases: alias x='y'
+export HOME=/x|changed the caller's variables: declare -x HOME="/x"
 ACTS
 DC="$EXAM/samples/dup-counter/expect.txt"
 DC_NAMES="$(sed -n 's/^names: //p' "$DC")"

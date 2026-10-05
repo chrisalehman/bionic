@@ -69,6 +69,16 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    `"$(mktemp -d)/s1"`. `materialize.sh` refuses a `<dest>` whose path names the sample. Keep
    the printed range, and note which `<dest>` holds which sample: the readers see only
    `<dest>`.
+
+   Two readers of the same agent type never share a build. On a sample keyed `adversarial`,
+   and on `clean`, the critic dealt `adversarial` and the one-mind critic are both
+   `bionic:critic`. Started together, two critics with different question sets cannot be told
+   apart at start, and neither is pushed a checks file. Started one after the other, the second
+   reads the first's record in its own tree. So each of the two gets a build and a session of
+   its own. Readers of different types share their sample's build and are dispatched
+   together. That makes seven builds: `clean` twice (the auditor, the critic and the
+   reviewer, then the one-mind critic), `red-then-green` twice, and one for each other sample.
+   The first sitting used eight, because step 3's proof took a `clean` build for one reviewer.
 3. **Open an engaged session on the built sample.** `cd <dest> && claude --plugin-dir
    "$PLUGIN"`. The session's project is the built sample, so the readers' working directory,
    records and searches stay inside it. The built sample carries its own `.bionic/`, so it is
@@ -133,7 +143,13 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    - `Suites:` naming each `tests/*.test.sh` of the built repository, one per suite (for
      example `Suites: tests/land.test.sh, tests/stamp.test.sh`), so a reader can re-execute
      the writers' evidence;
-   - `Re-executes: none`.
+   - `Re-executes: none`;
+   - `Expected artifact:` naming one of its record paths, and `Files:` listing every one of
+     them, comma-separated, one per question. The dispatch wall refuses a reader's brief with
+     no `Expected artifact:` line ("this brief names no deliverable"), and one that names
+     fewer records than it is dealt questions ("one Files: record per question"). The first
+     sitting's briefs also carried `Expected duration: 30 minutes`; the wall does not require
+     it (an absent duration only warns).
 
    A reader that cannot write files returns its records, and the orchestrator saves each
    unchanged at its path. No reader can dispatch a test-runner, so the evidence reader's
