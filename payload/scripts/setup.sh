@@ -1726,8 +1726,8 @@ setup_working_principles() {
     SETUP_ALL=0 RM_ALL=0 consent "   Replace your changed block with bionic's text?"; _setup_consent_rc=$?
     if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "your block in ${file} is kept."; return 0; fi  # consent gate: principles edit
   else
-    say "   bionic's working principles are not in ${file}. This is the text bionic would add,"
-    say "   between its markers:"
+    say "   bionic's working principles are not in ${file}."
+    say "   This is the text bionic would add, between its markers:"
     say ""
     # Folded to the page's width (AC-15): the text's paragraphs are one line each.
     principles_text | fold -s -w 94 | while IFS= read -r _setup_text_line || [ -n "$_setup_text_line" ]; do
