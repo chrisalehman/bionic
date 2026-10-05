@@ -2298,26 +2298,82 @@ Fix: replace the '- ${id}:' evidence with the actual command invocation and resu
       fi
       ;;
   esac
+  # THE VERDICT IS A READING NOW, NOT A WORD (wave-27 T14; D3, AC-2.2). The two `grep -Ewq`
+  # arms that stood here took the words `auditor` and `critic` on the row's own line as the
+  # verdicts; a line could carry the word with no reading behind it. The row owes what every
+  # commit from Step 6 owes, at its own effective rigor: `_eg_refuse_readings`, below.
   if [ "$status" = "done" ] && _eg_verdicts_owed; then
-    case "$eff" in
-      peer-reviewed|audited)
-        if ! grep -Ewq 'auditor' <<< "$ev"; then
-          _eg_detail="canonical-sdlc task ${id} is done at rigor '${eff}' but its evidence has no 'auditor' verdict ('${ev}').
-Plan: $PLAN
-Fix: record the independent auditor's verdict in the '- ${id}:' evidence line before marking done."
-          refuse exit2 commit "that task is done with no auditor verdict" "record the auditor's verdict" "$_eg_detail"
-        fi
-        ;;
-    esac
-    if [ "$eff" = "audited" ]; then
-      if ! grep -Ewq 'critic' <<< "$ev"; then
-        _eg_detail="canonical-sdlc task ${id} is done at rigor 'audited' but its evidence has no 'critic' verdict ('${ev}').
-Plan: $PLAN
-Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line before marking done."
-        refuse exit2 commit "that task is done with no critic verdict" "record the critic's verdict" "$_eg_detail"
-      fi
-    fi
+    _eg_refuse_readings "task ${id}" "$eff"
   fi
+}
+
+# THE READINGS A RUN OWES, JUDGED ON THE SECTION IN HAND (wave-27 T14; REQ-2 AC-2.2, D3, D19).
+# From `current: 6` a commit is admitted only when, for each question `facts_owed` (lib/proof.sh)
+# deals at <rigor>, the section holds a reading of it (`proved: kind=review … question=<q>`) whose
+# newest is not `result=fail`, or a `waived: question=<q>` line newer than that reading. Newer is
+# later in the section, the order `proof_add_line` writes in, and a waiver's fields are those before
+# ` by `: the judge's own reading (`facts_state`), so the wall and the judge never answer one
+# section text two ways on a question both can see (bash-walls §EG-6).
+#
+# A PREDICATE OVER TEXT, AND NOTHING ELSE (the freeze, .claude/rules/hook-authoring.md). It reads
+# no git and no roster: whether a reading's head is still the working head, its range and its
+# scope are `facts_state`'s, asked at `current 8`, at close-out and by the tick. Below
+# `current: 6` it never runs (D19), so an open run is untouched until its Step 6.
+#
+# AN UNKNOWN RIGOR OWES EVERY QUESTION: the dealing names no questions for it, and a typo must not
+# become a bypass (`matrix_auditor_required`'s fail-closed rule).
+#
+# _eg_reading_gaps <rigor> -> one line per owed question the section does not answer:
+# `absent<TAB><q>`, or `failing<TAB><q><TAB><evidence>`; `unreadable` when lib/proof.sh is not
+# loaded (units.sh loads it). Nothing when every question is answered.
+_eg_reading_gaps() {
+  local qs
+  if ! declare -F facts_owed >/dev/null 2>&1 || ! declare -F proof_awk >/dev/null 2>&1; then
+    printf 'unreadable\n'
+    return 0
+  fi
+  qs="$(facts_owed "$1" task 2>/dev/null | awk -F'\t' '$1 == "review" { printf "%s ", $2 }')"
+  [ -n "$qs" ] || qs="$PROOF_QUESTIONS"
+  printf '%s\n' "$SECTION" | awk -v qs="$qs" "$(proof_awk)"'
+    function evid(s,   f, m, i) { m = split(s, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) return substr(f[i], 10); return "" }
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = PROOF_RESULT; e[PROOF_QUESTION] = evid($0)
+      next
+    }
+    /^waived:[ \t]/ {
+      m = split($0, w, /[ \t]+/); q = ""; h = ""
+      for (i = 2; i <= m && w[i] != "by"; i++) {
+        if (w[i] ~ /^question=/) q = substr(w[i], 10)
+        else if (w[i] ~ /^head=/) h = substr(w[i], 6)
+      }
+      if (q == "" || h !~ /^[0-9a-f]+$/ || length(h) < 7 || length(h) > 40) next
+      t[q] = "waiver"
+    }
+    END {
+      n = split(qs, Q, " ")
+      for (i = 1; i <= n; i++) {
+        q = Q[i]
+        if (!(q in t)) print "absent\t" q
+        else if (t[q] == "fact" && r[q] == "fail") print "failing\t" q "\t" e[q]
+      }
+    }'
+}
+
+# _eg_refuse_readings <subject> <rigor> -> returns when every owed question is answered; otherwise
+# refuses the commit, naming each question and what it lacks.
+_eg_refuse_readings() {
+  local gaps lines
+  gaps="$(_eg_reading_gaps "$2")"
+  [ -n "$gaps" ] || return 0
+  lines="$(printf '%s\n' "$gaps" | awk -F'\t' '
+    $1 == "unreadable" { print "- the reading record cannot be read here: lib/proof.sh is not loaded beside units.sh" }
+    $1 == "absent"     { print "- " $2 ": no reading, and no waiver" }
+    $1 == "failing"    { print "- " $2 ": the newest reading is result=fail (evidence=" $3 "), and no waiver is newer" }')"
+  _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at rigor '${2}' needs a reading whose newest is not result=fail, or a newer waiver:
+${lines}
+Plan: $PLAN
+Fix: register each reading with 'session-poker.sh proof-add review <record> --question <q> --reader <name>', or record the waiver the user gives with 'session-poker.sh waive <q> <reply>'."
+  refuse exit2 commit "a reading question is unanswered" "record or waive each reading" "$_eg_detail"
 }
 
 # Per-row rigor FLOOR check (task 4/8, A15 — user-ratified, momentous). The
@@ -3498,7 +3554,14 @@ LINE=$(echo "$SECTION" \
        | grep -E "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${CURRENT}[[:space:]]*:" \
        | head -1)
 
-if [ -z "$LINE" ]; then
+# STEP 6 OWES READINGS, NOT A POINTER (wave-27 T14; D3). A `Step 6:` line naming a review used to
+# be what this step's commits were admitted on; from wave-27 the readings themselves are, judged
+# in `dispatch` (`_eg_refuse_readings`), so at `current: 6` the line is neither demanded nor read
+# here. Every other step keeps its line.
+_EG_STEP_LINE_OWED=1
+[ "$CURRENT" = 6 ] && _EG_STEP_LINE_OWED=0
+
+if [ -z "$LINE" ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
   _eg_detail="canonical-sdlc plan file has no 'Step ${CURRENT}:' line in '## SDLC State'.
 Plan: $PLAN
 Fix: add the evidence artifact for step ${CURRENT} before committing."
@@ -3536,7 +3599,7 @@ ${CONTINUATION}"
 fi
 BLOCK_STRIPPED=$(echo "$BLOCK" | tr -d '[:space:]')
 
-if [ -z "$BLOCK_STRIPPED" ]; then
+if [ -z "$BLOCK_STRIPPED" ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
   _eg_detail="canonical-sdlc step ${CURRENT} evidence line is empty in '## SDLC State'.
 Plan: $PLAN
 Fix: record the evidence artifact (commit SHA, path, link) for step ${CURRENT} before committing."
@@ -3560,7 +3623,7 @@ is_r7_key() {
 # whole line when it has no colon (the single-line "Step N: <value>" case,
 # which arrives here as RAW_VALUE). ${_bline#*:} yields the after-colon text
 # on colon lines and the unchanged line otherwise.
-while IFS= read -r _bline; do
+[ "$_EG_STEP_LINE_OWED" = 1 ] && while IFS= read -r _bline; do
   _bkey=$(printf '%s' "$_bline" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*:.*$//')
   if is_r7_key "$_bkey"; then
     continue
@@ -4913,6 +4976,11 @@ dispatch() {
       fi
       ;;
   esac
+  # THE READINGS THE RUN OWES are a prefix condition from Step 6 (wave-27 T14; D3, D19), asked
+  # last, after each step's own evidence: the Step-6 pointer line no longer answers for them.
+  case "$CURRENT" in
+    6|7|8|9) _eg_refuse_readings "the run" "$RIGOR" ;;
+  esac
 }
 
 dispatch
@@ -5347,7 +5415,8 @@ return 0
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
 # `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `proof-add` and
-# `approve` — wave-26 T5, REQ-3 D5, REQ-1); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2); 1 otherwise (wave-20 T9,
+# REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
