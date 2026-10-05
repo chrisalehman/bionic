@@ -1319,6 +1319,8 @@ t66_plant() {  # <file> <expected> <shape> <line> [verdict]
     dquote)     printf '%s\n' 'export X="SECRETTOKEN' "$L" 'b"' > "$1" ;;
     backslash)  printf '%s\n' 'echo SECRETTOKEN \' "$L" 'echo two' > "$1" ;;
     andand)     printf '%s\n' 'test -n "$SECRETTOKEN" &&' "$L" 'export A=1' > "$1" ;;
+    bs-comment) printf '%s\n' 'echo SECRETTOKEN \' '# a comment line between' "$L" 'echo two' > "$1" ;;
+    case-arm)   printf '%s\n' 'case "$SECRETTOKEN" in' '  a)' "$L" '    ;;' 'esac' > "$1" ;;
     no-parse)   printf '%s\n' 'export SECRETTOKEN=1' "$L" 'fi' > "$1" ;;
     two-in-if)  printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' '  export A=1' "$L" 'fi' > "$1"
                 printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' '  export A=1' 'fi' > "$2"; return 0 ;;
@@ -1327,7 +1329,7 @@ t66_plant() {  # <file> <expected> <shape> <line> [verdict]
     top)        printf '%s\n' 'export SECRETTOKEN=1' "$L" 'export B=2' > "$1"
                 printf '%s\n' 'export SECRETTOKEN=1' 'export B=2' > "$2"; return 0 ;;
   esac
-  if [ "${5:-left}" = "removed" ]; then awk 'NR != 2' "$1" > "$2"; else cp "$1" "$2"; fi
+  if [ "${5:-left}" = "removed" ]; then awk -v l="$L" '$0 != l' "$1" > "$2"; else cp "$1" "$2"; fi
 }
 t66_pageblock() { printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT"; }
 
@@ -1355,7 +1357,7 @@ t66_b1() {  # <shell> <shape> <verdict>
         expect_same_bytes "${L}: answered yes, the rc is byte-identical" "$TMP/t66-before" "$rc"
         expect_eq "${L}: …and keeps its inode" "$T66_INODE" "$(t51_inode "$rc")"
         expect_eq "${L}: the line is named as bionic's, inside your own code, once" "1" "$(t55_count "$out" "$(t66_phrase "$door")")"
-        expect_contains "${L}: …by its number" "line 2 of" "$(report_row "$out" "$(t66_phrase "$door")")"
+        expect_contains "${L}: …by its number" "line ${T66_LINE:-2} of" "$(report_row "$out" "$(t66_phrase "$door")")"
         expect_absent "${L}: …and never by its text" "alias claude='claude" "$out"
         expect_absent "${L}: …nothing says it was removed" "(the unmarked spelling)" "$out"
         expect_absent "${L}: …no page offers it" "retired alias line" "$out"
@@ -1369,7 +1371,14 @@ t66_b1() {  # <shell> <shape> <verdict>
   done
 }
 for T66_SHAPE in if-only for-only fn-only heredoc dquote backslash andand; do t66_b1 /bin/bash "$T66_SHAPE" left; done
+# A-orch-119 (2): the backslash is read on the last line of CODE before, comment lines
+# skipped, so a comment between does not end the continuation's reach.
+T66_LINE=3 t66_b1 /bin/bash bs-comment left
 t66_b1 /bin/bash two-in-if removed
+# A-orch-119 (1): an empty `case` arm parses in bash and in zsh (`bash -n`, `zsh -n`:
+# both 0), so the shell's answer is that the line goes from one.
+t66_b1 /bin/bash case-arm removed
+t66_b1 /bin/zsh case-arm removed
 for T66_SHAPE in if-only for-only fn-only; do t66_b1 /bin/zsh "$T66_SHAPE" removed; done
 for T66_SHAPE in heredoc dquote backslash andand; do t66_b1 /bin/zsh "$T66_SHAPE" left; done
 
@@ -1445,25 +1454,38 @@ done
 SB_T66DT="$(new_sandbox)"; t66_plant "$(t66_rc "$SB_T66DT")" "$TMP/t66dt-unused" two-in-if "$T66_ALIAS"
 expect_contains "T66 B1 two-in-if (doctor): a removable line is present → setup (the twin)" "present →" "$(report_row "$(t66_door "$SB_T66DT" doctor "")" "legacy .zshrc alias block")"
 
-# B2 — REMOVE'S ENVIRONMENT LINE. The one spelling bionic wrote: `export
-# CLAUDE_CODE_ENABLE_TODO_TOOLS=1`, setup.sh 3e00ec84 (2026-08-17) until ba36f32c
-# (2026-08-21), inside the retired env markers. Whole line, as a command of its own;
-# everything else left byte for byte and named by number; read-only refused.
+# B2 — REMOVE'S ENVIRONMENT LINE (A-orch-119 (3)). bionic wrote `export
+# CLAUDE_CODE_ENABLE_TODO_TOOLS=1` ONLY between its `bionic:env` markers (setup.sh
+# 3e00ec84 until ba36f32c), so no bare line is bionic's: a line of that text outside
+# the markers is left byte for byte and named by number as outside bionic's markers,
+# every other mention as not in a form bionic wrote, and no page offers either. The
+# marked block is one unit and obeys B1 as a unit.
 t66_env_plant() {  # <file> <expected> <shape>
   case "$3" in
-    exact)   printf '%s\n' 'export A=1' "$T66_TODO" 'export B=2' > "$1"; printf '%s\n' 'export A=1' 'export B=2' > "$2" ;;
-    nofinal) printf 'export A=1\n%s' "$T66_TODO" > "$1"; printf 'export A=1\n' > "$2" ;;
-    crlf)    printf 'export A=1\r\n  %s\r\nexport B=2\r\n' "$T66_TODO" > "$1"; printf 'export A=1\r\nexport B=2\r\n' > "$2" ;;
-    shared)  printf '%s\n' 'export A=1' "${T66_TODO}; export SECRETTOKEN=abc" > "$1"; cp "$1" "$2" ;;
-    ten)     printf '%s\n' 'export A=1' 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=10' 'export SECRETTOKEN=1' > "$1"; cp "$1" "$2" ;;
-    suffix)  printf '%s\n' 'export A=1' 'export CLAUDE_CODE_ENABLE_TODO_TOOLS_X=1' 'export SECRETTOKEN=1' > "$1"; cp "$1" "$2" ;;
-    comment) printf '%s\n' 'export A=1' "# ${T66_TODO}  SECRETTOKEN" > "$1"; cp "$1" "$2" ;;
-    if-only) printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' "$T66_TODO" 'fi' > "$1"; cp "$1" "$2" ;;
-    heredoc) printf '%s\n' "cat > /dev/null <<'EOF'" "$T66_TODO" 'EOF' 'export SECRETTOKEN=1' > "$1"; cp "$1" "$2" ;;
+    exact)   printf '%s\n' 'export A=1' "$T66_TODO" 'export B=2' > "$1" ;;
+    nofinal) printf 'export A=1\n%s' "$T66_TODO" > "$1" ;;
+    crlf)    printf 'export A=1\r\n  %s\r\nexport B=2\r\n' "$T66_TODO" > "$1" ;;
+    if-only) printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' "$T66_TODO" 'fi' > "$1" ;;
+    shared)  printf '%s\n' 'export A=1' "${T66_TODO}; export SECRETTOKEN=abc" > "$1" ;;
+    ten)     printf '%s\n' 'export A=1' 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=10' 'export SECRETTOKEN=1' > "$1" ;;
+    suffix)  printf '%s\n' 'export A=1' 'export CLAUDE_CODE_ENABLE_TODO_TOOLS_X=1' 'export SECRETTOKEN=1' > "$1" ;;
+    comment) printf '%s\n' 'export A=1' "# ${T66_TODO}  SECRETTOKEN" > "$1" ;;
+    block-top)     printf '%s\n' 'export A=1' "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'export SECRETTOKEN=1' > "$1"
+                   printf '%s\n' 'export A=1' 'export SECRETTOKEN=1' > "$2"; return 0 ;;
+    block-two-if)  printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' '  export A=1' "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'fi' > "$1"
+                   printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' '  export A=1' 'fi' > "$2"; return 0 ;;
+    block-if)      printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'fi' > "$1" ;;
+    block-heredoc) printf '%s\n' "cat > /dev/null <<'EOF'" "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'EOF' 'export SECRETTOKEN=1' > "$1" ;;
+    block-andand)  printf '%s\n' 'test -n "$SECRETTOKEN" &&' "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" 'export A=1' > "$1" ;;
   esac
+  cp "$1" "$2"
 }
+T66_ENV_START="$(const_from "$REMOVE_SH" RM_ENV_START)"; T66_ENV_END="$(const_from "$REMOVE_SH" RM_ENV_END)"
+expect_nonempty "T66 B2: remove.sh carries the env start marker" "$T66_ENV_START"
+expect_eq "T66 B2: remove.sh's env start marker is detect.sh's" "$(const_from "$DETECT_SH" BIONIC_ENV_START)" "$T66_ENV_START"
+expect_eq "T66 B2: remove.sh's env end marker is detect.sh's" "$(const_from "$DETECT_SH" BIONIC_ENV_END)" "$T66_ENV_END"
 T66_SHELL=/bin/bash
-for T66_SHAPE in exact nofinal crlf shared ten suffix comment if-only heredoc; do
+for T66_SHAPE in exact nofinal crlf if-only shared ten suffix comment block-top block-two-if block-if block-heredoc block-andand; do
   for T66_DOOR in rm-payload rm-standalone rm-all; do
     SB_T66V="$(new_sandbox)"; T66_RC="$(t66_rc "$SB_T66V")"
     t66_env_plant "$T66_RC" "$TMP/t66v-expected" "$T66_SHAPE"
@@ -1474,11 +1496,18 @@ for T66_SHAPE in exact nofinal crlf shared ten suffix comment if-only heredoc; d
     expect_same_bytes "${T66_L}: answered yes, the rc is as the rule says, byte for byte" "$TMP/t66v-expected" "$T66_RC"
     expect_absent "${T66_L}: the user's text is never printed" "SECRETTOKEN" "$T66V_OUT"
     case "$T66_SHAPE" in
-      exact|nofinal|crlf)
-        expect_contains "${T66_L}: the line is named by number before it goes" "line 2 of" "$(report_row "$T66V_OUT" "CLAUDE_CODE_ENABLE_TODO_TOOLS=1")" ;;
-      if-only|heredoc)
+      block-top|block-two-if)
+        expect_contains "${T66_L}: the block goes as a unit" "retired environment block in" "$T66V_OUT" ;;
+      block-*)
         expect_eq "${T66_L}: …and keeps its inode" "$T66_INODE" "$(t51_inode "$T66_RC")"
-        expect_contains "${T66_L}: bionic's line is named as inside your own code, by number" "line 2 of" "$(report_row "$T66V_OUT" "where removing it would change your own code")" ;;
+        expect_contains "${T66_L}: the block is named as inside your own code, by its lines" "lines 2 to 4 of" \
+          "$(report_row "$T66V_OUT" "bionic's retired environment block, where removing it would change your own code")"
+        case "$T66_DOOR" in rm-payload|rm-standalone) expect_absent "${T66_L}: …and nothing is asked" "[y/N]" "$T66V_OUT" ;; esac ;;
+      exact|nofinal|crlf|if-only)
+        expect_eq "${T66_L}: …and keeps its inode" "$T66_INODE" "$(t51_inode "$T66_RC")"
+        expect_eq "${T66_L}: the line is named as outside bionic's markers, once" "1" "$(t55_count "$T66V_OUT" "outside bionic's markers")"
+        expect_contains "${T66_L}: …by its number" "line 2 of" "$(report_row "$T66V_OUT" "outside bionic's markers")"
+        case "$T66_DOOR" in rm-payload|rm-standalone) expect_absent "${T66_L}: …and nothing is asked" "[y/N]" "$T66V_OUT" ;; esac ;;
       *)
         expect_eq "${T66_L}: …and keeps its inode" "$T66_INODE" "$(t51_inode "$T66_RC")"
         expect_eq "${T66_L}: the line is named as not in a form bionic wrote, once" "1" "$(t55_count "$T66V_OUT" "not in a form bionic wrote")"
@@ -1490,7 +1519,7 @@ done
 T66_SHELL=/bin/bash
 for T66_DOOR in rm-payload rm-standalone; do
   SB_T66VR="$(new_sandbox)"; T66_RC="$(t66_rc "$SB_T66VR")"
-  t66_env_plant "$T66_RC" "$TMP/t66vr-unused" exact
+  t66_env_plant "$T66_RC" "$TMP/t66vr-unused" block-top
   cp "$T66_RC" "$TMP/t66vr-before"; chmod 444 "$T66_RC"; T66_INODE="$(t51_inode "$T66_RC")"
   T66VR_OUT="$(t66_door "$SB_T66VR" "$T66_DOOR" y environment)"
   chmod 644 "$T66_RC"
@@ -1499,6 +1528,14 @@ for T66_DOOR in rm-payload rm-standalone; do
   expect_contains "T66 B2 env read-only (${T66_DOOR}): the marked step's words" \
     "is read-only, and bionic leaves a file you made read-only alone — the environment block is still there" "$T66VR_OUT"
 done
+# Half-uninstalled counts the export as bionic's footprint only between the markers.
+t66_todo_fact() {  # <sandbox> — detect_env_todo_tools' line for that home
+  t66_env "$1" bash -c '. "$1" >/dev/null 2>&1; detect_env_todo_tools' _ "$DETECT_SH"
+}
+SB_T66F="$(new_sandbox)"; t66_env_plant "$(t66_rc "$SB_T66F")" "$TMP/t66f-unused" block-top
+expect_eq "T66 B2 footprint: the block's export is bionic's (the positive)" "env:todo-tools present=yes" "$(t66_todo_fact "$SB_T66F")"
+t66_env_plant "$(t66_rc "$SB_T66F")" "$TMP/t66f-unused" exact
+expect_eq "T66 B2 footprint: the same text outside the markers is not" "env:todo-tools present=no" "$(t66_todo_fact "$SB_T66F")"
 
 # B3 — THE TEMPLATE'S PATH IS A WHITELIST. The flag in these lines is data: nothing
 # here runs with it.
@@ -1547,7 +1584,7 @@ done
 # through a FIFO only after the rc is edited (a line inserted above), so the write meets
 # a file whose numbered line moved: nothing written, the user's newer file kept, the
 # reason printed before the path.
-t66_race() {  # <sandbox> <door> <item> — the run's output; the rc gets a line above first
+t66_race() {  # <sandbox> <door> <item> [above|wrap] — the run's output; the rc is edited under the question
   local sb="$1" fifo="$1/.answer" out="$1/.out" i=0 pid rc
   rc="$(t66_rc "$sb")"
   mkfifo "$fifo"
@@ -1562,7 +1599,11 @@ t66_race() {  # <sandbox> <door> <item> — the run's output; the rc gets a line
     case "$(cat "$out" 2>/dev/null)" in *"[y/N]"*) break ;; esac
     sleep 0.1; i=$((i + 1))
   done
-  { printf '%s\n' 'export NEW=1'; cat "$rc"; } > "$rc.edit" && cat "$rc.edit" > "$rc" && rm -f "$rc.edit"
+  case "${4:-above}" in
+    above) { printf '%s\n' 'export NEW=1'; cat "$rc"; } > "$rc.edit" ;;
+    wrap)  { printf '%s\n' 'if [ -n "$NEW" ]; then'; cat "$rc"; printf '%s\n' 'fi'; } > "$rc.edit" ;;
+  esac
+  cat "$rc.edit" > "$rc" && rm -f "$rc.edit"
   cp "$rc" "$sb/.mutated"
   printf 'y\n' >&7; exec 7>&-
   wait "$pid"
@@ -1585,8 +1626,8 @@ for T66_DOOR in setup-only rm-payload rm-standalone; do
 done
 T66_SHELL=/bin/bash
 for T66_DOOR in rm-payload rm-standalone; do
-  SB_T66RV="$(new_sandbox)"; t66_env_plant "$(t66_rc "$SB_T66RV")" "$TMP/t66rv-unused" exact
-  T66RV_OUT="$(t66_race "$SB_T66RV" "$T66_DOOR" environment)"
+  SB_T66RV="$(new_sandbox)"; printf '%s\n' "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" > "$(t66_rc "$SB_T66RV")"
+  T66RV_OUT="$(t66_race "$SB_T66RV" "$T66_DOOR" environment wrap)"
   expect_contains "T66 S1 race env (${T66_DOOR}): the question was asked (the positive)" "Remove bionic's environment settings?" "$T66RV_OUT"
   expect_same_bytes "T66 S1 race env (${T66_DOOR}): nothing written, the user's newer file kept" "$SB_T66RV/.mutated" "$(t66_rc "$SB_T66RV")"
   expect_contains "T66 S1 race env (${T66_DOOR}): the reason comes first" "⚠ changed while remove ran" "$T66RV_OUT"
@@ -1663,9 +1704,9 @@ expect_ne "T66 S4: …and the pin on bionic_legacy_alias_ours goes red on it" \
 
 # THE NEW COPIES remove.sh carries for its standalone door, each pinned to its one
 # library, and the environment line's loose pattern.
-for T66_FN in bionic_rc_line_bare bionic_todo_export_ours bionic_todo_export_lines bionic_rc_candidates bionic_rc_lines bionic_rc_alone bionic_rc_try bionic_rc_shell; do
+for T66_FN in bionic_rc_line_bare bionic_todo_export_ours bionic_todo_export_lines bionic_rc_left_reason bionic_rc_candidates bionic_rc_lines bionic_rc_alone bionic_rc_continued bionic_rc_block_alone bionic_rc_try bionic_rc_shell; do
   case "$T66_FN" in
-    bionic_rc_candidates|bionic_rc_lines|bionic_rc_alone|bionic_rc_try) T66_LIB="${REPO}/payload/scripts/lib/markers.sh" ;;
+    bionic_rc_candidates|bionic_rc_lines|bionic_rc_alone|bionic_rc_continued|bionic_rc_block_alone|bionic_rc_try) T66_LIB="${REPO}/payload/scripts/lib/markers.sh" ;;
     bionic_rc_shell) T66_LIB="${REPO}/payload/scripts/lib/shell.sh" ;;
     *) T66_LIB="$DETECT_SH" ;;
   esac
@@ -1688,7 +1729,7 @@ for T66_LOC in en_US.UTF-8 C; do
   T66_SCAN="$(LC_ALL="$T66_LOC" SHELL=/bin/bash HOME="$TMP" bash -c '. "$1" >/dev/null 2>&1; bionic_legacy_alias_lines "$2"; bionic_todo_export_lines "$2"' _ "$DETECT_SH" "$TMP/t66-long.rc")"
   T66_T1="$(date +%s)"
   expect_contains "T66 N1 (LC_ALL=${T66_LOC}): the long line in bionic's form is bionic's" "ours=1 " "$T66_SCAN"
-  expect_contains "T66 N1 (LC_ALL=${T66_LOC}): …and the export with trailing blanks is too" "ours=3 " "$T66_SCAN"
+  expect_contains "T66 N1 (LC_ALL=${T66_LOC}): …and the export with trailing blanks is too" "cand=3 " "$T66_SCAN"
   T66_SECS=$((T66_T1 - T66_T0))
   if [ "$T66_SECS" -le 4 ]; then ok "T66 N1 (LC_ALL=${T66_LOC}): both scans over the 200,000-character lines inside 4 s"
   else no "T66 N1 (LC_ALL=${T66_LOC}): both scans over the 200,000-character lines inside 4 s" "took ${T66_SECS} s"; fi

@@ -309,9 +309,9 @@ bionic_drop_lines_walk() {  # <file> <predicate> <n>,<n> — the lines that stay
 # A line <predicate> accepts is offered (`ours`) only when the rc's own shell
 # (shell.sh `bionic_rc_shell`) says, with `-n` on copies staged in a fresh temporary
 # directory, that
-#   (a) the line before does not continue onto it: no odd run of backslashes ends
-#       it, and the last line of code before it (blank and comment lines aside) does
-#       not end in `&&`, `||`, `|` or `|&`;
+#   (a) nothing before continues onto it: the last line of code before it (blank
+#       and comment lines skipped) does not end in a backslash, `&&`, `||`, `|` or
+#       `|&` (A-orch-119 (2));
 #   (b) it is a command and not data: with the line replaced by a line holding only
 #       `)` the rc no longer parses (inside a here-document or a string that spans
 #       lines `)` is text, the copy still parses, and the line is the user's data);
@@ -322,7 +322,10 @@ bionic_drop_lines_walk() {  # <file> <predicate> <n>,<n> — the lines that stay
 # rc's shell is not on the PATH and `no-parse` when the rc did not parse to begin
 # with — every candidate is bound then, because nothing could be checked. Nothing of
 # the rc is ever run or sourced: the shell gets `-n` and a staged copy only.
-# remove.sh carries these four functions under the same names, pinned by
+# A MARKED BLOCK IS ONE UNIT, AND OBEYS THE SAME RULE AS ONE (A-orch-119 (3)):
+# `bionic_rc_block_alone` asks (a), (b) and (c) of the block's lines together —
+# its start marker replaced by `)` and the rest left out for (b), all of them left
+# out for (c). remove.sh carries these functions under the same names, pinned by
 # tests/rc-item.test.sh §T66.
 bionic_rc_candidates() {  # <file> <predicate> <ere> — `cand=<n>,<n> theirs=<n>,<n>`
   local LC_ALL=C file="$1" pred="$2" ere="$3" line n=0 cand="" theirs=""
@@ -353,17 +356,7 @@ bionic_rc_alone() {  # <file> <n>,<n> — `ours=<n>,<n> bound=<n>,<n> why=<ok|no
   if ! bionic_rc_try "$bin" "$file" "$dir/rc" "" ""; then
     rm -rf "$dir"; printf 'ours= bound=%s why=no-parse\n' "$cand"; return 0
   fi
-  cont="$(LC_ALL=C awk -v want=",${cand}," '
-    index(want, "," NR ",") {
-      c = 0
-      if (match(prev, /\\+$/) && RLENGTH % 2 == 1) c = 1
-      t = code; sub(/[ \t\r]+$/, "", t)
-      if (t ~ /(&&|\|)$/ || t ~ /\|&$/) c = 1
-      if (c) out = out (out == "" ? "" : ",") NR
-    }
-    { prev = $0; s = $0; sub(/^[ \t]+/, "", s); sub(/\r$/, "", s)
-      if (s != "" && substr(s, 1, 1) != "#") code = $0 }
-    END { print out }' "$file")"
+  cont="$(bionic_rc_continued "$file" "$cand")"
   for n in ${cand//,/ }; do
     case ",${cont}," in *",${n},"*) bound="${bound}${bound:+,}${n}"; continue ;; esac
     if bionic_rc_try "$bin" "$file" "$dir/rc" "" "$n" \
@@ -375,6 +368,40 @@ bionic_rc_alone() {  # <file> <n>,<n> — `ours=<n>,<n> bound=<n>,<n> why=<ok|no
   done
   rm -rf "$dir"
   printf 'ours=%s bound=%s why=ok\n' "$ours" "$bound"
+}
+
+# Which of the lines <n>,<n> something before continues onto: the last line of code
+# above it (blank lines and comment lines skipped) ends in a backslash, `&&`, `||`,
+# `|` or `|&`, its trailing blanks and CR aside.
+bionic_rc_continued() {  # <file> <n>,<n> — those of them that are continued, <n>,<n>
+  LC_ALL=C awk -v want=",$2," '
+    index(want, "," NR ",") {
+      t = code; sub(/[ \t\r]+$/, "", t)
+      if (t ~ /(\\|&&|[|]|[|]&)$/) out = out (out == "" ? "" : ",") NR
+    }
+    { s = $0; sub(/^[ \t]+/, "", s); sub(/\r$/, "", s)
+      if (s != "" && substr(s, 1, 1) != "#") code = $0 }
+    END { print out }' "$1"
+}
+
+bionic_rc_block_alone() {  # <file> <first> <last> — `alone=<yes|no> why=<ok|no-shell|no-parse|no-stage>`
+  local file="$1" first="$2" last="$3" bin dir n rest="" alone=no
+  bin="$(command -v "$(bionic_rc_shell "$file")" 2>/dev/null)" || bin=""
+  if [ -z "$bin" ]; then printf 'alone=no why=no-shell\n'; return 0; fi
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/bionic-rc.XXXXXX" 2>/dev/null)" || dir=""
+  if [ -z "$dir" ]; then printf 'alone=no why=no-stage\n'; return 0; fi
+  if ! bionic_rc_try "$bin" "$file" "$dir/rc" "" ""; then
+    rm -rf "$dir"; printf 'alone=no why=no-parse\n'; return 0
+  fi
+  n=$((first + 1))
+  while [ "$n" -le "$last" ]; do rest="${rest}${rest:+,}${n}"; n=$((n + 1)); done
+  if [ -z "$(bionic_rc_continued "$file" "$first")" ] \
+     && ! bionic_rc_try "$bin" "$file" "$dir/rc" "$rest" "$first" \
+     && bionic_rc_try "$bin" "$file" "$dir/rc" "${first}${rest:+,}${rest}" ""; then
+    alone=yes
+  fi
+  rm -rf "$dir"
+  printf 'alone=%s why=ok\n' "$alone"
 }
 
 # One staged copy of <file> — the lines <drop> names left out, line <probe> replaced
