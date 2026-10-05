@@ -2789,7 +2789,9 @@ poker_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
 # run from. <runs, marked> is text already in that shape (a row's stored value).
 poker_brief_span() {  # <files lines> <suites lines> <runs, marked> <runs lines> -> brief text
   local f s r="$3" line
-  f="$(printf '%s' "$1" | tr '\n,' '  ')"
+  # Files: is a comma-separated list (wave-27 T42), so its lines join with commas: two
+  # additions joined by a space would read as one item holding white space, which is prose.
+  f="$(printf '%s\n' "$1" | awk 'NF { printf "%s%s", (n++ ? ", " : ""), $0 }')"
   s="$(printf '%s' "$2" | tr '\n,' '  ')"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
@@ -5094,10 +5096,9 @@ EOF
     row_has_key "$AM_ROW" re_executes && AM_OLD_RUNS="$(clean "$(line_field "$AM_ROW" re_executes)" re_executes)"
 
     # THE ADDITIONS AS THE GRAMMAR READS THEM, alone: what each flag contributes once lifted.
-    # The root files are the fact the one Files: reader reads a bare name by (wave-27 T29;
-    # REQ-12, D21), so `--files+ CONTEXT.md` is the path a dispatch would have recorded.
-    AM_ROOTS="$(brief_root_files "$REPO_REAL")"
-    AM_ADD="$(lift_contract_fields "$(poker_brief_span "$AMEND_FILES" "$AMEND_SUITES" "" "$AMEND_RUNS")" "$AM_ROLE" "$AM_ROOTS")"
+    # The Files: reader is the dispatch wall's (wave-27 T29, T42; REQ-12, D21), so
+    # `--files+ CONTEXT.md` is the path a dispatch would have recorded.
+    AM_ADD="$(lift_contract_fields "$(poker_brief_span "$AMEND_FILES" "$AMEND_SUITES" "" "$AMEND_RUNS")" "$AM_ROLE")"
     AM_NEW_FILES="$(poker_union , "$AM_OLD_FILES" "$(brief_field "$AM_ADD" files)")"
 
     # THE DECLARED HALF OF THE BUDGET. A declared (or unlabelled) budget carries its old set
@@ -5115,7 +5116,7 @@ EOF
     # The additions go into the span as typed, beside the merged set, so an entry the reader
     # does not read as a path reaches the grammar and is refused by name, never dropped.
     AM_SPAN="$(poker_brief_span "$(printf '%s' "$AM_NEW_FILES" | tr ',' '\n')"$'\n'"$AMEND_FILES" "$AM_DECL" "$AM_OLD_RUNS" "$AMEND_RUNS")"
-    AM_LIFT="$(lift_contract_fields "$AM_SPAN" "$AM_ROLE" "$AM_ROOTS")"
+    AM_LIFT="$(lift_contract_fields "$AM_SPAN" "$AM_ROLE")"
     POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
     AM_RC=0
     brief_validate_fields "$AM_LIFT" "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
@@ -5123,7 +5124,7 @@ EOF
     # A derived budget with suites added too: the span declared, so nothing was derived — ask
     # the impact command for the merged files on their own.
     if [ "$AM_RC" -eq 0 ] && [ "$AM_OLD_SRC" = derived ] && [ -n "$AM_DECL" ] && [ -n "$AM_NEW_FILES" ]; then
-      brief_validate_fields "$(lift_contract_fields "Files: ${AM_NEW_FILES//,/ }" "$AM_ROLE" "$AM_ROOTS")" \
+      brief_validate_fields "$(lift_contract_fields "Files: $AM_NEW_FILES" "$AM_ROLE")" \
         "$AM_ROLE" "$REPO_REAL" poker_brief_sink || AM_RC=$?
       AM_SA="$(poker_union ' ' "$AM_SA" "$BRIEF_SUITES_ALLOWED")"
     fi
@@ -5270,7 +5271,7 @@ EOF
           exit 2
         fi
         POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
-        brief_validate_fields "$(lift_contract_fields "Files: $TA_FILES" "$TA_AGENT" "$(brief_root_files "$REPO_REAL")")" \
+        brief_validate_fields "$(lift_contract_fields "Files: $TA_FILES" "$TA_AGENT")" \
           "$TA_AGENT" "$REPO_REAL" poker_brief_sink || :
         TA_CELL_FACTS=""
         while IFS= read -r TA_FACT; do

@@ -1302,12 +1302,12 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
         # (wave-24 T13, D10): that list is space-joined for reading, so a path holding a
         # space would come back as two. Each path is one quoted `--files+` word here.
         #
-        # EACH IN THE SPELLING amend ACCEPTS (wave-27 T29; REQ-12 AC-12.3, D21). A path at the
-        # root carries no `/`, and the amend this line printed for one was refused by amend
-        # itself. `brief_files_entry` is the Files: reader amend reads with, handed the same
-        # root fact amend hands it, so a bare name it would not read comes out as `./<name>`.
-        # Without lib/brief.sh the path is printed as the diff spells it, as before.
-        LG_FIX_FILES=""; LG_ROOTS=""; LG_ROOTS_READ=""
+        # EACH IN THE SPELLING amend ACCEPTS (wave-27 T29, T42; REQ-12 AC-12.3, D21). A path at
+        # the root carries no `/`, and the amend this line printed for one was refused by amend
+        # itself. `brief_files_entry` is the Files: reader amend reads with, so a bare name it
+        # would not record comes out as `./<name>`; it lists no directory. Without lib/brief.sh
+        # the path is printed as the diff spells it, as before.
+        LG_FIX_FILES=""
         while IFS= read -r LG_DF; do
           [ -n "$LG_DF" ] || continue
           _lg_path_declared "$LG_DF" "$CFILES" && continue
@@ -1316,8 +1316,7 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
           declare -F brief_files_entry >/dev/null 2>&1 \
             || . "$_STOP_LIB_DIR/brief.sh" >/dev/null 2>&1
           if declare -F brief_files_entry >/dev/null 2>&1; then
-            [ -n "$LG_ROOTS_READ" ] || { LG_ROOTS="$(brief_root_files "$BIONIC_ROOT")"; LG_ROOTS_READ=1; }
-            LG_SPELT="$(brief_files_entry "$LG_DF" "$LG_ROOTS")"
+            LG_SPELT="$(brief_files_entry "$LG_DF")"
           fi
           LG_FIX_FILES="${LG_FIX_FILES} --files+ $(refuse_quote "$LG_SPELT")"
         done <<LGDIFF
