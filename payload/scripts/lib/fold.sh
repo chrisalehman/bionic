@@ -393,18 +393,28 @@ $_BF_PEND_CONTEXT"
   # pid plus one `$RANDOM` draw — is 32,768 guesses per pid to a local attacker, and the
   # `2>` below creates through a symlink already sitting there, truncating its target. Every
   # composed refusal on the machine goes through this line. `mktemp` creates exclusively, at
-  # a name nobody can pre-create, mode 600. A machine that cannot make a temp file at all
-  # falls back to /dev/null: the render still happens and the user still gets the refusal —
-  # only the replay of the renderer's own stderr is lost, which is the small half.
-  # [WALL: tests/fold.test.sh §14]
-  _errf="$(mktemp "${TMPDIR:-/tmp}/bionic-fold.XXXXXX" 2>/dev/null)" || _errf=/dev/null
-  [ -n "$_errf" ] || _errf=/dev/null
-  _out=$(refuse "$BIONIC_FOLD_MODE" "$BIONIC_FOLD_VERB" "$BIONIC_FOLD_FACT" \
-                "$BIONIC_FOLD_FIX" "$BIONIC_FOLD_DETAIL" 2>"$_errf")
-  _rrc=$?
-  [ -n "$_out" ] && printf '%s\n' "$_out"
-  [ -s "$_errf" ] && cat "$_errf" >&2
-  [ "$_errf" = /dev/null ] || rm -f "$_errf" 2>/dev/null
+  # a name nobody can pre-create, mode 600.
+  #
+  # A MACHINE THAT CANNOT MAKE A TEMP FILE (no TMPDIR, or one that cannot be written) gets no
+  # capture: the renderer's stderr goes straight to this process's stderr, ahead of stdout's
+  # replay. That stderr is the user's line, so it must never be dropped (wave-27 T71: it was
+  # sent to /dev/null, and every refusal of every wall exited 2 with nothing printed). The
+  # JSON wire on stdout is captured and replayed as on the capture path, byte for byte.
+  # [WALL: tests/fold.test.sh §14, §15]
+  _errf="$(mktemp "${TMPDIR:-/tmp}/bionic-fold.XXXXXX" 2>/dev/null)" || _errf=""
+  if [ -n "$_errf" ]; then
+    _out=$(refuse "$BIONIC_FOLD_MODE" "$BIONIC_FOLD_VERB" "$BIONIC_FOLD_FACT" \
+                  "$BIONIC_FOLD_FIX" "$BIONIC_FOLD_DETAIL" 2>"$_errf")
+    _rrc=$?
+    [ -n "$_out" ] && printf '%s\n' "$_out"
+    [ -s "$_errf" ] && cat "$_errf" >&2
+    rm -f "$_errf" 2>/dev/null
+  else
+    _out=$(refuse "$BIONIC_FOLD_MODE" "$BIONIC_FOLD_VERB" "$BIONIC_FOLD_FACT" \
+                  "$BIONIC_FOLD_FIX" "$BIONIC_FOLD_DETAIL")
+    _rrc=$?
+    [ -n "$_out" ] && printf '%s\n' "$_out"
+  fi
 
   # ── THE OTHER BLOCKERS' LINES, WHERE NO STREAM AT ALL RECEIVED THEM ─────────
   #
