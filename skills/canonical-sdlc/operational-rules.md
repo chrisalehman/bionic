@@ -566,6 +566,10 @@ does not refuse instead. It does not contain what a script does once it runs: bi
 only for what it can read in the call. It does not read code handed to an interpreter (a
 `python -c` body, for one); such a call is denied with a fix.
 
+## The start join (`hooks/execution-recorder.sh`)
+
+An agent start carries its type and id, never its launch, so the start is joined to the one launch of its type the window leaves it (several are left to the launch call's return), and a hook is told nothing when a dispatch ends without spawning: a start whose own dispatch wrote no launch row, beside one launch that was denied or abandoned at its prompt, is joined to that dead launch (wave-27 T68, named and left for the next wave).
+
 ## Evidence gate
 
 - **Canonical-sdlc plan files must include a `## SDLC State` section** — `current: N` (or `T<n>` at task scale) and `Step N: <evidence>` lines. The commit gate, `hooks/bash-walls.sh` (`PreToolUse|Bash`), blocks `git commit` when the current step's evidence line is missing, empty, or a placeholder (TODO/pending/in progress/XXX/TBD/placeholder). Update `## SDLC State` *before* staging, not after.
