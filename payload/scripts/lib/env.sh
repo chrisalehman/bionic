@@ -365,17 +365,82 @@ rc_default() {  # <item> — prints the body, one line per line, exit 1 if the i
   return 0
 }
 
-# Is the item's body INSIDE bionic's markers, and nothing else there. All three halves
-# matter: a body that is not there, one that is there but outside the block (somebody
-# else's lines), and a block holding anything other than exactly the body are each
-# "bionic has not written this" (wave-27 T75, A-orch-185): a block with the old
-# one-line body is offered again, and `rc_set` rewrites it whole.
-rc_get() {  # <item>
-  local item="${1:-}" want file got
+# EVERY BODY AN EARLIER BIONIC WROTE BETWEEN THESE MARKERS, and the one place they are
+# listed (wave-27 T77, review pass 64): every spelling `rc_default` has printed, found
+# with `git log -p -G'claude-proxy\) *printf' -- payload/scripts/lib/env.sh`. <n>
+# counts from 1, oldest first; rc 1 past the last. When `rc_default` changes, the body
+# it printed until then is added here.
+rc_earlier() {  # <item> <n> — prints the nth earlier body, rc 1 when there is none
+  case "${1:-}:${2:-}" in
+    # 48b37383 (2026-08-22) until 40be1c30: the flag that started the session in bypass.
+    claude-proxy:1) printf '%s\n' 'claude() { command claude --dangerously-skip-permissions "$@"; }' ;;
+    # 40be1c30 (2026-08-27) until 484afee2 (wave-27 T75), which put `unalias` above it.
+    claude-proxy:2) printf '%s\n' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
+# A BLOCK IS BIONIC'S TO REWRITE ONLY WHEN ITS BODY IS BYTE FOR BYTE A BODY BIONIC
+# WROTE (wave-27 T77, review pass 64; the rule A-orch-162 gave the retired blocks). T75
+# read a block holding bionic's lines and a line of the user's as "not written", and a
+# yes rewrote it whole without that line. The one answer every door asks:
+#
+#   written    — every line of the current body, in order, with or without other
+#                lines among or around them: bionic's lines are in force, and the
+#                block is left as it is, the user's lines with it
+#   stale      — nothing between the markers, or byte for byte an earlier body
+#                (`rc_earlier`): bionic's own block out of date, rewritten on a yes
+#   changed    — anything else: the user's to edit by hand. Nothing asks about it,
+#                nothing writes it (`rc_set` refuses), every door names its lines
+#   no         — no block
+#   malformed  — the markers do not pair up (markers.sh `markers_check`)
+#   not-a-file — the rc is not a text file bionic can read (`markers_regular`)
+#
+# rc 1, and nothing printed, when the item is not bionic's or no rc can be named.
+rc_state() {  # <item>
+  local item="${1:-}" want file got line n=1 i=0 old
+  local -a lines=()
   want="$(rc_default "$item")" || return 1
   file="$(rc_file)" || return 1
-  got="$(markers_get "$file" "$RC_START" "$RC_END")" || return 1
-  [ "$got" = "$want" ]
+  markers_regular "$file" >/dev/null || { printf 'not-a-file\n'; return 0; }
+  got="$(markers_get "$file" "$RC_START" "$RC_END"; printf 'rc=%s' "$?")"
+  case "$got" in
+    *rc=1) printf 'no\n'; return 0 ;;
+    *rc=2) printf 'malformed\n'; return 0 ;;
+  esac
+  got="${got%rc=0}"
+  while IFS= read -r line; do lines[${#lines[@]}]="$line"; done <<< "$want"
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$i" -lt "${#lines[@]}" ] && [ "$line" = "${lines[$i]}" ] && i=$((i + 1))
+  done < <(printf '%s' "$got")
+  if [ "$i" = "${#lines[@]}" ]; then printf 'written\n'; return 0; fi
+  if [ -z "$got" ]; then printf 'stale\n'; return 0; fi
+  while old="$(rc_earlier "$item" "$n")"; do
+    if [ "$got" = "${old}"$'\n' ]; then printf 'stale\n'; return 0; fi
+    n=$((n + 1))
+  done
+  printf 'changed\n'
+  return 0
+}
+
+# The block's start and end marker lines, `<first> <last>`, for a door to name it by
+# number and never by its text. Nothing when the rc holds no block.
+rc_block_range() {
+  local file line n=0 first=""
+  file="$(rc_file 2>/dev/null)" || return 0
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if [ -z "$first" ] && [ "$line" = "$RC_START" ]; then first="$n"
+    elif [ -n "$first" ] && [ "$line" = "$RC_END" ]; then printf '%s %s\n' "$first" "$n"; return 0; fi
+  done < "$file"
+  return 0
+}
+
+# Are bionic's lines in force: `rc_state` says written.
+rc_get() {  # <item>
+  [ "$(rc_state "${1:-}" 2>/dev/null)" = "written" ]
 }
 
 # ─── The rc writer ───────────────────────────────────────────────────────────
@@ -388,25 +453,43 @@ rc_get() {  # <item>
 # wave-03 critic F1/F2). What stays here is what is the rc item's own: which file,
 # which markers, and which one line goes between them.
 
-# IDEMPOTENT BY CONSTRUCTION: `markers_set` removes and rewrites the block whole
-# on every call, so a second run produces the same bytes and a block left
-# half-written by an interrupted run is repaired rather than appended beside. The
-# day `RC_ITEMS` grows a second entry, both items are written from the roster
-# here; nothing inside bionic's own markers is salvaged out of the file.
+# THE WRITER ASKS `rc_state` FIRST, SO NO CALLER CAN LOSE A LINE (wave-27 T77). It
+# writes only where nothing of the user's can be between the markers:
+#
+#   no      — the block is appended by `markers_set`, as it always was
+#   stale   — the block's body is replaced WHERE IT STANDS, and no other byte of the
+#             rc changes (markers.sh `markers_replace`, A-orch-193): `markers_set`
+#             would move the block to the end of the file, past the user's own lines
+#   written — nothing is written: bionic's lines are in force, and rewriting would
+#             drop the user's lines beside them; rc 0
+#   changed — refused, rc 5, the rc byte for byte as it was
+#
+# The other exit codes are markers.sh's (its header): 1 a write failed, 2 the markers
+# do not pair up, 3 read-only, 4 not a regular text file. A second run produces the
+# same bytes: the first leaves the block written.
 #
 # THE BODY IS STAGED BESIDE THE RC, not in `$TMPDIR` (wave-27 T40, review pass 9
 # note 11): the rc's own directory is the one place this write already needs, so
-# a full or unwritable `$TMPDIR` cannot fail it. markers_set's exit code is the
-# reason when it refuses (lib/markers.sh's header).
+# a full or unwritable `$TMPDIR` cannot fail it.
 rc_set() {  # <item>
-  local item="${1:-}" want file body rc
+  local item="${1:-}" want file state body rc
   want="$(rc_default "$item")" || return 1
   file="$(rc_file)" || return 1
-  markers_regular "$file" >/dev/null || return 4
+  state="$(rc_state "$item")" || return 1
+  case "$state" in
+    not-a-file) return 4 ;;
+    malformed)  return 2 ;;
+    written)    return 0 ;;
+    changed)    return 5 ;;  # guard: a changed block is never written
+  esac
   body="$(bionic_link_target "$file").bionic.body"
   rm -f "$body"
   (umask 077; printf '%s\n' "$want" > "$body") || { rm -f "$body"; return 1; }
-  markers_set "$file" "$RC_START" "$RC_END" "$body"; rc=$?
+  if [ "$state" = "stale" ]; then
+    markers_replace "$file" "$RC_START" "$RC_END" "$body"; rc=$?
+  else
+    markers_set "$file" "$RC_START" "$RC_END" "$body"; rc=$?
+  fi
   rm -f "$body"
   return "$rc"
 }

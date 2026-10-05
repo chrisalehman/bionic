@@ -110,9 +110,10 @@ RC
 
 # THE STALE-BLOCK FIXTURE. bionic's markers around an OLDER payload's proxy
 # text, with non-bionic lines above AND below the block. Every install already
-# on disk takes this shape the day `rc_default claude-proxy`'s text changes, and
-# a user who hand-edits between the markers has it today.
-STALE_LINE='claude() { command claude --old-flavour "$@"; }'
+# on disk takes this shape the day `rc_default claude-proxy`'s text changes. The
+# line is one bionic really wrote (env.sh `rc_earlier`): since wave-27 T77 a block
+# holding a line bionic never wrote is the user's, changed, and left as it is.
+STALE_LINE='claude() { command claude --dangerously-skip-permissions "$@"; }'
 plant_stale_rc() {  # <file>
   {
     printf '%s\n' '# a line that was here before bionic'
@@ -2172,7 +2173,242 @@ t75p_get() {  # <body line…> — rc_get's answer on a block holding those line
 expect_eq "T75 rc_get: the new body is written" "written" "$(t75p_get "$PROXY_UNALIAS" "$PROXY_LINE")"
 expect_eq "T75 rc_get: the old one-line body is not" "not" "$(t75p_get "$PROXY_LINE")"
 expect_eq "T75 rc_get: the new body's lines swapped are not" "not" "$(t75p_get "$PROXY_LINE" "$PROXY_UNALIAS")"
-expect_eq "T75 rc_get: the new body plus a user's line is not" "not" "$(t75p_get "$PROXY_UNALIAS" "$PROXY_LINE" 'export MINE=1')"
+T75_SB="$(new_sandbox)"; printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$PROXY_UNALIAS" "$RC_END_LIT" > "$T75_SB/.zshrc"
+expect_eq "T75 rc_state: …they are the changed state, never offered (T77)" "changed" \
+  "$(env_run "$T75_SB" /bin/zsh -- rc_state claude-proxy 2>&1)"
+# A user's line beside the new body reads written since wave-27 T77 (review pass 64): the
+# block is left as it is, never rewritten without the user's line.
+expect_eq "T75 rc_get: the new body plus a user's line is written (T77)" "written" "$(t75p_get "$PROXY_UNALIAS" "$PROXY_LINE" 'export MINE=1')"
+T66_SHELL=/bin/bash
+
+# ---------------------------------------------------------------------------
+section "wave-27 T77: a claude() block the user changed is never rewritten (review pass 64)"
+# ---------------------------------------------------------------------------
+#
+# Since T75 a block holding bionic's lines AND a line of the user's read "not written",
+# and a yes rewrote it whole without the user's line. The rule now: a block is bionic's
+# to rewrite only when its body is byte for byte a body bionic wrote (the current one,
+# an earlier one, or nothing). The current lines in order with other lines among them
+# read written and are left; anything else is changed: nothing asked, nothing written,
+# named by its line range. Review pass 64's rows R1 to R12 are the model: every rc is
+# `export V1=1`, the block (from line 2), `export V2=2`, in a throwaway home, under zsh
+# and /bin/bash, through `--only` and `--all`.
+T77_U='export V9=9'
+T77_OLD1='claude() { command claude --dangerously-skip-permissions "$@"; }'
+T77_EDIT='claude() { command claude --allow-dangerously-skip-permissions --verbose "$@"; }'
+t77_body() {  # <shape> — the lines between the markers
+  case "$1" in
+    cur)         printf '%s\n' "$PROXY_UNALIAS" "$PROXY_LINE" ;;
+    u-above)     printf '%s\n' "$T77_U" "$PROXY_UNALIAS" "$PROXY_LINE" ;;
+    u-between)   printf '%s\n' "$PROXY_UNALIAS" "$T77_U" "$PROXY_LINE" ;;
+    u-below)     printf '%s\n' "$PROXY_UNALIAS" "$PROXY_LINE" "$T77_U" ;;
+    old2)        printf '%s\n' "$PROXY_LINE" ;;
+    old1)        printf '%s\n' "$T77_OLD1" ;;
+    empty)       ;;
+    old-u-below) printf '%s\n' "$PROXY_LINE" "$T77_U" ;;
+    old-u-above) printf '%s\n' "$T77_U" "$PROXY_LINE" ;;
+    swapped)     printf '%s\n' "$PROXY_LINE" "$PROXY_UNALIAS" ;;
+    edited)      printf '%s\n' "$PROXY_UNALIAS" "$T77_EDIT" ;;
+  esac
+}
+t77_plant() {  # <file> <shape> — `none` plants no markers
+  { printf '%s\n' 'export V1=1'
+    if [ "$2" != none ]; then printf '%s\n' "$RC_START_LIT"; t77_body "$2"; printf '%s\n' "$RC_END_LIT"; fi
+    printf '%s\n' 'export V2=2'; } > "$1"
+}
+# What a yes leaves: a stale block's body replaced where it stands, no other byte
+# changed; no block, bionic's appended.
+t77_after_yes() {  # <file> <shape>
+  case "$2" in
+    none) printf '%s\n' 'export V1=1' 'export V2=2' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" > "$1" ;;
+    *)    printf '%s\n' 'export V1=1' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT" 'export V2=2' > "$1" ;;
+  esac
+}
+t77_state() { case "$1" in cur|u-*) echo written ;; old1|old2|empty) echo stale ;; none) echo no ;; *) echo changed ;; esac; }
+t77_last() { local n; n="$(t77_body "$1" | wc -l)"; echo $(( 3 + ${n// /} )); }  # the end marker's line
+T77_ALL="cur u-above u-between u-below old2 old1 empty none old-u-below old-u-above swapped edited"
+
+# THE ONE OWNER. env.sh `rc_state` answers every shape, and the fixture's shapes are
+# what this section says they are (the extractor reads the block back non-empty).
+expect_eq "T77 fixture: the u-between block holds three lines" "3" "$(t66_rc_tmp="$TMP/t77-fx"; t77_plant "$t66_rc_tmp" u-between; rc_block_lines "$t66_rc_tmp" | wc -l | tr -d ' ')"
+expect_eq "T77 fixture: the swapped block ends at line 5" "5" "$(t77_last swapped)"
+for T77_S in $T77_ALL; do
+  T77_SB="$(new_sandbox)"; t77_plant "$T77_SB/.zshrc" "$T77_S"
+  expect_eq "T77 rc_state ${T77_S}: $(t77_state "$T77_S")" "$(t77_state "$T77_S")" \
+    "$(env_run "$T77_SB" /bin/zsh -- rc_state claude-proxy 2>&1)"
+done
+T77_SB="$(new_sandbox)"; t77_plant "$T77_SB/.zshrc" old-u-below
+expect_eq "T77 detect: a changed block is present=changed" "env:rc-claude-proxy present=changed" "$(detect_run "$T77_SB")"
+T77_SB="$(new_sandbox)"; t77_plant "$T77_SB/.zshrc" u-between
+expect_eq "T77 detect: the current lines beside a user's line are present=yes" "env:rc-claude-proxy present=yes" "$(detect_run "$T77_SB")"
+
+# SETUP, --only, every shape, both shells, answered yes.
+for T77_SH in zsh bash; do
+  T66_SHELL="/bin/$T77_SH"
+  for T77_S in $T77_ALL; do
+    T77_SB="$(new_sandbox)"; T77_RC="$(t66_rc "$T77_SB")"
+    t77_plant "$T77_RC" "$T77_S"; cp "$T77_RC" "$TMP/t77-before"
+    T77_OUT="$(t66_door "$T77_SB" setup-only y claude-proxy)"
+    T77_L="T77 setup --only (${T77_SH}, ${T77_S}, $(t77_state "$T77_S"))"
+    case "$(t77_state "$T77_S")" in
+      written)
+        expect_contains "${T77_L}: already in" "already in" "$T77_OUT"
+        expect_absent "${T77_L}: …nothing asked" "[y/N]" "$T77_OUT"
+        expect_same_bytes "${T77_L}: …the rc byte for byte as it was" "$TMP/t77-before" "$T77_RC" ;;
+      stale|no)
+        t77_after_yes "$TMP/t77-want" "$T77_S"
+        expect_contains "${T77_L}: offered" "[y/N]" "$T77_OUT"
+        expect_same_bytes "${T77_L}: …and the yes leaves exactly bionic's body, no other byte changed" "$TMP/t77-want" "$T77_RC" ;;
+      changed)
+        expect_contains "${T77_L}: named by its line range" "lines 2 to $(t77_last "$T77_S") of" "$T77_OUT"
+        expect_contains "${T77_L}: …with bionic's first line for the user's hand" "     ${PROXY_UNALIAS}" "$T77_OUT"
+        expect_contains "${T77_L}: …and bionic's second" "     ${PROXY_LINE}" "$T77_OUT"
+        expect_absent "${T77_L}: …nothing asked" "[y/N]" "$T77_OUT"
+        expect_absent "${T77_L}: …no user's line printed" "V9=9" "$T77_OUT"
+        expect_absent "${T77_L}: …nor the user's edit" "--verbose" "$T77_OUT"
+        expect_same_bytes "${T77_L}: …the rc byte for byte as it was" "$TMP/t77-before" "$T77_RC" ;;
+    esac
+  done
+done
+
+# SETUP, --all, the four states and the three changed shapes, both shells, answered yes.
+for T77_SH in zsh bash; do
+  T66_SHELL="/bin/$T77_SH"
+  for T77_S in cur u-between old2 old-u-below swapped edited; do
+    T77_SB="$(new_sandbox)"; T77_RC="$(t66_rc "$T77_SB")"
+    t77_plant "$T77_RC" "$T77_S"; cp "$T77_RC" "$TMP/t77-before"
+    T77_OUT="$(t66_door "$T77_SB" setup-all y)"
+    T77_L="T77 setup --all (${T77_SH}, ${T77_S}, $(t77_state "$T77_S"))"
+    expect_contains "${T77_L}: the page was printed" "Do all of the above?" "$T77_OUT"
+    case "$(t77_state "$T77_S")" in
+      stale)
+        t77_after_yes "$TMP/t77-want" "$T77_S"
+        expect_contains "${T77_L}: the page offers it" "add bionic's claude() shell function" "$T77_OUT"
+        expect_same_bytes "${T77_L}: …and the yes leaves exactly bionic's body, no other byte changed" "$TMP/t77-want" "$T77_RC" ;;
+      *)
+        expect_absent "${T77_L}: the page does not offer it" "add bionic's claude() shell function" "$T77_OUT"
+        expect_same_bytes "${T77_L}: …the rc byte for byte as it was" "$TMP/t77-before" "$T77_RC" ;;
+    esac
+    case "$(t77_state "$T77_S")" in
+      changed) expect_contains "${T77_L}: named by its line range" "lines 2 to $(t77_last "$T77_S") of" "$T77_OUT"
+               expect_absent "${T77_L}: …no user's line printed" "V9=9" "$T77_OUT" ;;
+      written) expect_contains "${T77_L}: already in" "already in" "$T77_OUT" ;;
+    esac
+  done
+done
+
+# THE WRITER REFUSES. rc_set on every changed shape: its own reason (not one of
+# markers.sh's 0 to 4), the rc byte for byte as it was. Beside it, the stale body is
+# written in place and the written block left as it is.
+for T77_S in old-u-below old-u-above swapped edited; do
+  T77_SB="$(new_sandbox)"; t77_plant "$T77_SB/.zshrc" "$T77_S"; cp "$T77_SB/.zshrc" "$TMP/t77-before"
+  env_run "$T77_SB" /bin/zsh -- rc_set claude-proxy >/dev/null 2>&1; T77_RCS=$?
+  expect_eq "T77 rc_set (${T77_S}): refused with its own reason" "5" "$T77_RCS"
+  expect_same_bytes "T77 rc_set (${T77_S}): …the rc byte for byte as it was" "$TMP/t77-before" "$T77_SB/.zshrc"
+done
+T77_SB="$(new_sandbox)"; t77_plant "$T77_SB/.zshrc" old1
+env_run "$T77_SB" /bin/zsh -- rc_set claude-proxy >/dev/null 2>&1; T77_RCS=$?
+t77_after_yes "$TMP/t77-want" old1
+expect_eq "T77 rc_set (old1): writes" "0" "$T77_RCS"
+expect_same_bytes "T77 rc_set (old1): …the old rc with exactly the block's body replaced" "$TMP/t77-want" "$T77_SB/.zshrc"
+T77_SB="$(new_sandbox)"; t77_plant "$T77_SB/.zshrc" u-between; cp "$T77_SB/.zshrc" "$TMP/t77-before"
+env_run "$T77_SB" /bin/zsh -- rc_set claude-proxy >/dev/null 2>&1; T77_RCS=$?
+expect_eq "T77 rc_set (u-between, written): succeeds" "0" "$T77_RCS"
+expect_same_bytes "T77 rc_set (u-between, written): …and changes no byte" "$TMP/t77-before" "$T77_SB/.zshrc"
+
+# A STALE BLOCK IS REPLACED WHERE IT STANDS (A-orch-193): `markers_set` would move it to
+# the end of the rc, past the user's lines below it. First in the rc, last in it, between
+# the user's lines, and with no final newline (after the end marker, or after the user's
+# last line): the rc is the old rc with exactly the block's body replaced.
+t77_place() {  # <file> <where> <body…> — the rc with that body at <where>
+  local f="$1" w="$2"; shift 2
+  case "$w" in
+    first)   { printf '%s\n' "$RC_START_LIT" "$@" "$RC_END_LIT" 'export V1=1' 'export V2=2'; } > "$f" ;;
+    last)    { printf '%s\n' 'export V1=1' 'export V2=2' "$RC_START_LIT" "$@" "$RC_END_LIT"; } > "$f" ;;
+    between) { printf '%s\n' 'export V1=1' "$RC_START_LIT" "$@" "$RC_END_LIT" 'export V2=2'; } > "$f" ;;
+    nonl)    { printf '%s\n' 'export V1=1' "$RC_START_LIT" "$@" "$RC_END_LIT"; printf '%s' 'export V2=2'; } > "$f" ;;
+    endnonl) { printf '%s\n' 'export V1=1' "$RC_START_LIT" "$@"; printf '%s' "$RC_END_LIT"; } > "$f" ;;
+  esac
+}
+for T77_SH in zsh bash; do
+  T66_SHELL="/bin/$T77_SH"
+  for T77_W in first last between nonl endnonl; do
+    T77_SB="$(new_sandbox)"; T77_RC="$(t66_rc "$T77_SB")"
+    t77_place "$T77_RC" "$T77_W" "$PROXY_LINE"
+    t77_place "$TMP/t77-want" "$T77_W" "$PROXY_UNALIAS" "$PROXY_LINE"
+    T77_OUT="$(t66_door "$T77_SB" setup-only y claude-proxy)"
+    expect_contains "T77 in place (${T77_SH}, ${T77_W}): the stale block was offered" "[y/N]" "$T77_OUT"
+    expect_same_bytes "T77 in place (${T77_SH}, ${T77_W}): …and the yes replaces its body where it stands, no other byte changed" \
+      "$TMP/t77-want" "$T77_RC"
+  done
+done
+T66_SHELL=/bin/zsh
+# A cut-short write stages nothing and leaves the rc as it was; with room, the same
+# call writes in place (the twin).
+T77_SB="$(new_sandbox)"
+{ for _i in $(seq 1 150); do printf 'export MY_VAR_%s=mine\n' "$_i"; done
+  printf '%s\n' "$RC_START_LIT" "$PROXY_LINE" "$RC_END_LIT"
+  for _i in $(seq 151 300); do printf 'export MY_VAR_%s=mine\n' "$_i"; done; } > "$T77_SB/.zshrc"
+cp "$T77_SB/.zshrc" "$TMP/t77-before"; T77_LS="$(ls -A "$T77_SB")"
+T77_OUT="$(t40_env "$T77_SB" 'trap "" XFSZ; ulimit -f 2; rc_set claude-proxy; echo "rc=$?"')"
+expect_contains "T77 in place, cut short: rc_set reports the failed write" "rc=1" "$T77_OUT"
+expect_same_bytes "T77 in place, cut short: …the rc byte for byte as it was" "$TMP/t77-before" "$T77_SB/.zshrc"
+expect_nonempty "T77 in place, cut short: the home's listing was read" "$T77_LS"
+expect_eq "T77 in place, cut short: …and nothing staged is left beside the rc" "$T77_LS" "$(ls -A "$T77_SB")"
+T77_OUT="$(t40_env "$T77_SB" 'rc_set claude-proxy; echo "rc=$?"')"
+expect_contains "T77 in place, with room: the same call writes" "rc=0" "$T77_OUT"
+expect_eq "T77 in place, with room: …the block where it stood, after the user's 150th line" \
+  "export MY_VAR_150=mine|${RC_START_LIT}|${PROXY_UNALIAS}" \
+  "$(sed -n '150p;151p;152p' "$T77_SB/.zshrc" | paste -sd '|' -)"
+
+# THE MUTANT. A copy of the library with the writer's guard line deleted loses the
+# user's line on the same call; the copy is proved to run (it writes the stale twin).
+rm -rf "$TMP/t77lib"; cp -R "$(dirname "$ENV_SH")" "$TMP/t77lib"
+T77_GUARD="$(grep -c 'guard: a changed block is never written' "$TMP/t77lib/env.sh")"
+expect_eq "T77 mutant: the guard line is in the library, once" "1" "$T77_GUARD"
+grep -v 'guard: a changed block is never written' "$TMP/t77lib/env.sh" > "$TMP/t77lib/env.sh.m" && mv "$TMP/t77lib/env.sh.m" "$TMP/t77lib/env.sh"
+t77_mut_set() {  # <sandbox>
+  HOME="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" BIONIC_CLAUDE_HOME="$1/.claude" \
+    bash -c '. "$1" || exit 90; rc_set claude-proxy' _ "$TMP/t77lib/env.sh" >/dev/null 2>&1
+}
+T77_SB="$(new_sandbox)"; t77_plant "$T77_SB/.zshrc" old2; t77_mut_set "$T77_SB"
+t77_after_yes "$TMP/t77-want" old2
+expect_same_bytes "T77 mutant: the guardless copy runs (it writes a stale block)" "$TMP/t77-want" "$T77_SB/.zshrc"
+T77_SB="$(new_sandbox)"; t77_plant "$T77_SB/.zshrc" old-u-below; cp "$T77_SB/.zshrc" "$TMP/t77-before"; t77_mut_set "$T77_SB"
+expect_diff_bytes "T77 mutant: …and without its guard rc_set rewrites a changed block" "$TMP/t77-before" "$T77_SB/.zshrc"
+expect_eq "T77 mutant: …losing the user's line" "0" "$(count_lines_equal "$T77_SB/.zshrc" "$T77_U")"
+
+# DOCTOR. A changed block is a row of its own, neutral, named by its line range, to edit
+# by hand and not routed to setup; written reads on; stale keeps its row and route.
+T66_SHELL=/bin/zsh
+for T77_S in u-between old2 old-u-below edited; do
+  T77_SB="$(new_sandbox)"; T77_RC="$(t66_rc "$T77_SB")"; t77_plant "$T77_RC" "$T77_S"
+  T77_DOC="$(t66_door "$T77_SB" doctor)"
+  T77_ROW="$(report_row "$T77_DOC" "$DOCTOR_ROW_LABEL")"
+  T77_L="T77 doctor (${T77_S}, $(t77_state "$T77_S"))"
+  expect_nonempty "${T77_L}: a proxy row" "$T77_ROW"
+  case "$(t77_state "$T77_S")" in
+    written) expect_contains "${T77_L}: on" " on " "$T77_ROW" ;;
+    stale)   expect_contains "${T77_L}: stale, routed to setup" "/bionic:setup rewrites it" "$T77_ROW" ;;
+    changed)
+      expect_contains "${T77_L}: neutral, says changed" "– ${DOCTOR_ROW_LABEL}" "$T77_ROW"
+      expect_contains "${T77_L}: …says changed" " changed " "$T77_ROW"
+      expect_contains "${T77_L}: …names the lines" "lines 2 to $(t77_last "$T77_S") of ~/.zshrc" "$T77_ROW"
+      expect_contains "${T77_L}: …to edit by hand" "edit it by hand" "$T77_ROW"
+      expect_absent "${T77_L}: …not routed to setup" "/bionic:setup" "$T77_ROW"
+      expect_absent "${T77_L}: …and no fix line for it" "claude() shell proxy is an older line" "$T77_DOC" ;;
+  esac
+done
+
+# REMOVE, unchanged: a changed block goes whole on a yes, after the warning that
+# everything between the markers goes, through both doors.
+for T77_D in rm-payload rm-standalone; do
+  T77_SB="$(new_sandbox)"; T77_RC="$(t66_rc "$T77_SB")"; t77_plant "$T77_RC" old-u-below
+  T77_OUT="$(t66_door "$T77_SB" "$T77_D" y claude-proxy)"
+  printf '%s\n' 'export V1=1' 'export V2=2' > "$TMP/t77-want"
+  expect_contains "T77 remove (${T77_D}, changed): warns that everything between the markers goes" "everything between its markers" "$T77_OUT"
+  expect_same_bytes "T77 remove (${T77_D}, changed): …and takes the block whole" "$TMP/t77-want" "$T77_RC"
+done
 T66_SHELL=/bin/bash
 
 finish
