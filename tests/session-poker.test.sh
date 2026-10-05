@@ -10337,7 +10337,8 @@ s59_row() {  # <name> <type> <status> <questions> <deliverable> <files> -> one r
 }
 for s59st in intended confirmed; do
   s59_row w-aud bionic:auditor "$s59st" evidence "$S59_REL/ev.md" ""
-  s59_row w-crit bionic:critic "$s59st" adversarial,structure "$S59_REL/adv.md" "$S59_REL/adv-2.md"
+  s59_row w-crit bionic:critic "$s59st" adversarial,structure "$S59_REL/adv.md" "$S59_REL/adv-2.md,$S59_REL/str-2.md"
+  s59_row w-rev bionic:reviewer "$s59st" structure "$S59_REL/str-rev.md" ""
 done
 P59="$(s42_plan "$R59" 4)"
 ( cd "$R59" && git worktree add -q -b wave/01-fixture "$R59/.worktrees/01-fixture" \
@@ -10396,11 +10397,30 @@ poke "$R59" proof-add review record/wave-01-fixture/adv-2.md --question adversar
 expect_eq "59c the adversarial reading registers (exit 0)" "0" "$RC"
 expect_contains "59c2 …with its question" "evidence=record/wave-01-fixture/adv-2.md question=adversarial reader=w-crit" \
   "$(s46_proved "$P59" | tail -1)"
-expect_eq "59c3 §RANGE-Q it returns T4, the row carrying adversarial, though its Files name another record" \
-  "pending|—" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
+# RE-PINNED BY T43 (review pass 17 F3): T4 carries adversarial AND structure, and structure was
+# last read at B, so the adversarial reading at C leaves T4 active under its reader, not offered;
+# its structure reading at C (59c6) returns it. Through T10 the first reading returned it at once.
+expect_eq "59c3 §RANGE-Q F3 the adversarial reading leaves T4, the row carrying it, active under w-crit while structure is unread at C" \
+  "active|w-crit" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
 expect_eq "59c4 …and leaves the evidence row T3 active under its reader" "active|w-aud" \
   "$(s48_row "$P59" T3 | awk -F'|' '{ print $12 "|" $5 }')"
-expect_contains "59c5 …and names the row it returned" "T4 back to pending" "$OUT"
+expect_contains "59c5 …and says T4 waits for its other questions" "T4 stays active until every question it carries is read at ${S59_C:0:12}" "$OUT"
+expect_absent "59c5b …and gives no Files advice for it" "its Files name another record" "$OUT"
+# A reading by a reader that is not the row's agent never moves it (F3): w-rev's structure reading
+# at C leaves T4 active under w-crit; only w-crit's own structure reading returns it.
+printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: pass\nscope: piece\n%s\n\nanother reader\n' "$S59_B" "$S59_C" "$S56_ALL" \
+  > "$R59/.bionic/docs/record/wave-01-fixture/str-rev.md"
+poke "$R59" proof-add review record/wave-01-fixture/str-rev.md --question structure --reader w-rev
+expect_eq "59c5c F3 w-rev's structure reading at C registers (exit 0)" "0" "$RC"
+expect_eq "59c5d F3 …and never moves T4, which carries structure: still active under w-crit" \
+  "active|w-crit" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
+printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: pass\nscope: piece\n%s\n\nthe structure pass\n' "$S59_B" "$S59_C" "$S56_ALL" \
+  > "$R59/.bionic/docs/record/wave-01-fixture/str-2.md"
+poke "$R59" proof-add review record/wave-01-fixture/str-2.md --question structure --reader w-crit
+expect_eq "59c6 F3 w-crit's structure reading at C registers (exit 0)" "0" "$RC"
+expect_eq "59c7 F3 …and with both its questions read at C, T4 returns to pending, its agent cleared" \
+  "pending|—" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
+expect_contains "59c8 …naming the row it returned" "T4 back to pending" "$OUT"
 printf '# reading\n\nreviewed: %s..%s\nquestion: evidence\nresult: pass\nscope: piece\n\nthe evidence pass\n' "$S59_B" "$S59_C" \
   > "$R59/.bionic/docs/record/wave-01-fixture/ev.md"
 poke "$R59" proof-add review record/wave-01-fixture/ev.md --question evidence --reader w-aud
@@ -10413,10 +10433,75 @@ poke_pressure "$R59" 8192 1.0 tick
 expect_eq "59e at C the evidence row waits, naming its own question's reading" \
   "poker: WAIT T3 — live:head:evidence: nothing landed past the evidence review proof at ${S59_C:0:12}" \
   "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 ')"
-expect_eq "59e2 …while the critic's row is offered, its structure question unread past B" \
-  "poker: RANGE T4 ${S59_B}..${S59_C} — the review reads what landed past the last review proof, and no more" \
-  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T4 ')"
-expect_absent "59e3 …and the idle row has no RANGE line" "poker: RANGE T3" "$OUT"
+# RE-PINNED BY T43 (review pass 17 F3): both of the critic's questions were read at C before it
+# went back to pending, so at C it is idle too, and is not offered the range it just read.
+expect_eq "59e2 F3 …and the critic's row waits, both its questions read at C" \
+  "poker: WAIT T4 — live:head:adversarial+structure: nothing landed past the adversarial+structure review proof at ${S59_C:0:12}" \
+  "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T4 ')"
+expect_absent "59e3 …and neither idle row has a RANGE line" "poker: RANGE T" "$OUT"
+
+# ---------- review pass 17 F1 (blocker) and F2 through the real tick (wave-27 T43) ----------
+# s59_world <label> <state lines, @A @B @C for the three commits> <rows...> -> R59W, P59W and
+# S59W_A/B/C: §59's repository shape, one plan, the rows given in a reads table.
+s59_world() {
+  local lab="$1" st="$2"; shift 2
+  R59W="$(make_repo "$lab")"; new_roster "$R59W"; ( cd "$R59W" && git commit -q --allow-empty -m init )
+  P59W="$(s42_plan "$R59W" 4)"
+  ( cd "$R59W" && git worktree add -q -b wave/01-fixture "$R59W/.worktrees/01-fixture" \
+    && for c in A B C; do git -C "$R59W/.worktrees/01-fixture" commit -q --allow-empty -m "landing $c"; done ) >/dev/null 2>&1
+  S59W_A="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD~2 2>/dev/null)"
+  S59W_B="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD~1 2>/dev/null)"
+  S59W_C="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
+  st="${st//@A/$S59W_A}"; st="${st//@B/$S59W_B}"; st="${st//@C/$S59W_C}"
+  printf '%s\n' "$@" > "$R59W.rows"; printf '%s\n' "$st" > "$R59W.st"
+  awk -v sf="$R59W.st" -v rf="$R59W.rows" '
+    /^current: / && !wb { print; print "working-branch: wave/01-fixture"; while ((getline l < sf) > 0) if (l != "") print l; wb = 1; next }
+    /^\| id \| step \|/ { intab = 1
+      print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
+      print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+      while ((getline l < rf) > 0) print l
+      next }
+    intab && /^\|/ { next }
+    { intab = 0; print }' "$P59W" > "$P59W.tmp" && mv "$P59W.tmp" "$P59W"
+  ( cd "$R59W" && git add -f "$P59W" && git commit -qm rows ) >/dev/null 2>&1
+  rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"
+}
+S59W_T1="| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |"
+S59W_T5="| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | — | — | — | pending |  |"
+S59W_BARE="| T3 | 6 | review | the bare pass, reads empty | critic | — | 30 | REQ-1 | $S59_REL/review.md | — | — | pending |  |"
+s59w_q() {  # <id> <questions> -> a read row
+  printf '| %s | 6 | review | the read row | critic | — | 30 | REQ-1 | %s/%s.md | — | — | pending | approval:plan, live:head:%s |' "$1" "$S59_REL" "$1" "$2"
+}
+s59w_bare() { printf 'proved: kind=review head=%s at=2026-10-04T09:00:00Z evidence=record/wave-01-fixture/review.md' "$1"; }
+# F1: the bare T3 above the adversarial row T4; adversarial read at A, the bare proof at C, head C.
+s59_world s59-f1 "$(s59_read adversarial @A 01 w-crit)
+$(s59w_bare @C)" "$S59W_T1" "$S59W_BARE" "$(s59w_q T4 adversarial)" "$S59W_T5"
+s34_gate "$R59W"
+expect_eq "59f0 precondition: the bare-above-read plan is admitted by the real commit gate" "0" "$GATE_RC"
+poke_pressure "$R59W" 8192 1.0 tick
+expect_nonempty "59f F1 the tick prints a FILL line (the extractor reads real output)" "$(s47_lines FILL)"
+expect_eq "59f2 F1 the idle bare T3 waits on nothing landed past its proof, in 1.11.0's words" \
+  "poker: WAIT T3 — live:head: nothing landed past the review proof at ${S59W_C:0:12}" \
+  "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T3 ')"
+expect_eq "59f3 F1 (blocker) …and no longer holds T4: T4 is offered, with its own range A..C" \
+  "yes|poker: RANGE T4 ${S59W_A}..${S59W_C} — the review reads what landed past the last review proof, and no more" \
+  "$(s48_fill_has T4)|$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T4 ')"
+expect_absent "59f4 F1 …and no WAIT line says T3 goes first" "review T3 goes first" "$(s47_lines WAIT)"
+# Two bare rows idle together keep 1.11.0's lines byte for byte.
+s59_world s59-f1-bare "$(s59w_bare @A)
+$(s59w_bare @C)" "$S59W_T1" "$S59W_BARE" \
+  "| T4 | 6 | review | a second bare pass | critic | — | 30 | REQ-1 | $S59_REL/r4.md | — | — | pending |  |" "$S59W_T5"
+poke_pressure "$R59W" 8192 1.0 tick
+expect_eq "59f5 F1 two bare rows idle at C: 1.11.0's two WAIT lines, unchanged" \
+  "poker: WAIT T3 — live:head: nothing landed past the review proof at ${S59W_C:0:12}|poker: WAIT T4 — live:head: review T3 goes first" \
+  "$(s47_lines WAIT | /usr/bin/grep '^poker: WAIT T[34] ' | tr '\n' '|' | sed 's/|$//')"
+# F2: structure read at B on the first line, adversarial at A on the second, head C: A..C.
+s59_world s59-f2 "$(s59_read structure @B 01 w-crit)
+$(s59_read adversarial @A 02 w-crit)" "$S59W_T1" "$(s59w_q T3 adversarial+structure)" "$S59W_T5"
+poke_pressure "$R59W" 8192 1.0 tick
+expect_eq "59f6 F2 the tick's range starts at the older commit, A, whatever the line order" \
+  "poker: RANGE T3 ${S59W_A}..${S59W_C} — the review reads what landed past the last review proof, and no more" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: RANGE T3 ')"
 POKE_BOUND="$S59_BOUND_WAS"
 
 # ============================================================
