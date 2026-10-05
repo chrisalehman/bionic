@@ -1562,6 +1562,7 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
   SCHED_WRITERS="$(budget_field "$SCHED_BUDGET" writers)"
   SCHED_JOBS="$(budget_field "$SCHED_BUDGET" test_jobs)"
   sched_live_head "$1"
+  sched_facts_state "$1"
 }
 
 # THE WORKING BRANCH'S HEAD, the one fact the readiness program cannot read from the plan
@@ -1582,6 +1583,50 @@ sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD, or clears it
   fi
   declare -F proof_head >/dev/null 2>&1 && declare -F proof_working_branch >/dev/null 2>&1 || return 0
   UNITS_LIVE_HEAD="$(proof_head "$1" "$(proof_working_branch "$SCHED_PLAN")" 2>/dev/null)" || UNITS_LIVE_HEAD=""
+  return 0
+}
+
+# THE FACTS THE RUN OWES, JUDGED ONCE PER TICK (wave-27 T14; D3). The integrate row's
+# `proof:review` is met only when lib/proof.sh `facts_state` holds the plan at the working head,
+# and that reads git, so the readiness program is handed the answer through UNITS_FACTS_STATE, as
+# it is handed the head: `covered`, or the owed lines that do not hold, `; `-joined. It is asked
+# only when the plan carries an open integrate row (no other read turns on it), and once per tick
+# (`rung_report` reads the budget a second time). Unset, the integrate row waits, saying so.
+# THE FLOOR IS ASKED FIRST, FROM THE TICK'S OWN MEMO (`_units_floor_state`, the one proof_state run
+# the schedule spends anyway): while it does not hold, integrate waits on proof:floor whatever the
+# readings say, so the judge, which would run proof_state again, is not asked.
+sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
+  local wb head out rc fst
+  [ "${SCHED_FACTS_PLAN:-}" = "${SCHED_PLAN:-}" ] && [ -n "${SCHED_FACTS_PLAN:-}" ] && return 0
+  SCHED_FACTS_PLAN="${SCHED_PLAN:-}"
+  UNITS_FACTS_STATE=""
+  [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
+  units_rows "$SCHED_PLAN" 2>/dev/null | awk -F'\t' '$3 == "integrate" && ($10 == "pending" || $10 == "active") { f = 1 } END { exit !f }' \
+    || return 0
+  fst="$(_units_floor_state "$SCHED_PLAN" 2>/dev/null)"
+  case "$fst" in
+    covered*|bounded*) : ;;
+    *) UNITS_FACTS_STATE="the readings are judged once the floor holds"; return 0 ;;
+  esac
+  if ! declare -F facts_state >/dev/null 2>&1; then
+    [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
+  fi
+  declare -F facts_state >/dev/null 2>&1 || return 0
+  head="${UNITS_LIVE_HEAD:-}"
+  if [ -z "$head" ]; then
+    wb="$(proof_working_branch "$SCHED_PLAN")"
+    [ -z "$wb" ] || head="$(proof_head "$1" "$wb" 2>/dev/null)" || head=""
+  fi
+  if [ -z "$head" ]; then
+    UNITS_FACTS_STATE="no checkout holds the working branch, so there is no head to judge them at"
+    return 0
+  fi
+  out="$(facts_state "$SCHED_PLAN" "$head" 2>/dev/null)"; rc=$?
+  case "$rc" in
+    0) UNITS_FACTS_STATE=covered ;;
+    2) UNITS_FACTS_STATE="the plan's rigor and scale cannot be dealt" ;;
+    *) UNITS_FACTS_STATE="$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered" { $1 = $1; printf "%s%s", (n++ ? "; " : ""), $0 }' OFS=' ')" ;;
+  esac
   return 0
 }
 
@@ -2907,19 +2952,15 @@ plan_verb_open() {
   trap 'rm -f "$PV_NEW" "$PV_NEW.2" "$PV_DRY" ${PV_MARK:+"$PV_MARK"}' EXIT
 }
 
-# plan_verb_swap <verb> <what changed> <dry: writer|as-is> -> judges $PV_NEW and moves it over
+# plan_verb_swap <verb> <what changed> <dry: writer|as-is|judged> -> judges $PV_NEW and moves it over
 # $PV_PLAN; exits 1 on a refusal, 2 when the dry commit cannot run. Returns 0 once swapped,
-# and exits 0 with nothing written when the projection IS the plan.
-plan_verb_swap() {
-  local verb="$1" what="$2" dry="$3" cur err rc
-  if cmp -s "$PV_NEW" "$PV_PLAN"; then
-    say "$verb — $what: the plan already reads so; nothing was written."
-    exit 0
-  fi
-  cur="${PV_CUR%[ab]}"
-  case "$cur" in
-    ''|*[!0-9]*) dry=as-is ;;
-  esac
+# and exits 0 with nothing written when the projection IS the plan. `judged` runs no dry commit:
+# the caller has judged the copy itself (`current 8`, on lib/proof.sh `facts_state`; wave-27 T14).
+# plan_verb_dry <verb> <what changed> <dry: writer|as-is> <current> -> the dry commit of $PV_NEW
+# through the real gate, at `current: 4` for a writer past Step 4 and as written otherwise; exits 1
+# on the gate's refusal, 2 when it cannot run. plan_verb_swap's, split out so `judged` can skip it.
+plan_verb_dry() {
+  local verb="$1" what="$2" dry="$3" cur="$4" err rc
   if [ "$dry" = writer ] && [ "$cur" -gt 4 ]; then
     awk '
       /^[[:space:]]*```/ { fence = !fence; print; next }
@@ -2948,6 +2989,19 @@ plan_verb_swap() {
     [ "$verb" = current ] && die "Write what that step owes first (step-line <N> <text>, and its block), then move current: again."
     exit 1
   fi
+}
+
+plan_verb_swap() {
+  local verb="$1" what="$2" dry="$3" cur
+  if cmp -s "$PV_NEW" "$PV_PLAN"; then
+    say "$verb — $what: the plan already reads so; nothing was written."
+    exit 0
+  fi
+  cur="${PV_CUR%[ab]}"
+  case "$cur" in
+    ''|*[!0-9]*) [ "$dry" = judged ] || dry=as-is ;;
+  esac
+  [ "$dry" = judged ] || plan_verb_dry "$verb" "$what" "$dry" "$cur"
   if [ "$(cksum < "$PV_PLAN" 2>/dev/null)" != "$PV_SUM" ]; then
     die "REFUSED — $PV_PLAN changed while the plan with $what was being judged; nothing was written. Run $verb again."
     exit "${PV_RACE_RC:-1}"
@@ -2957,6 +3011,41 @@ plan_verb_swap() {
     exit 2
   fi
   return 0
+}
+
+# cur8_judge -> returns when lib/proof.sh `facts_state` says every fact the bound plan owes holds at
+# the working head (the head of the checkout holding the plan's `working-branch:`, the head `waive`
+# and `proof-add` record), with that head in PV_HEAD8; otherwise refuses `current 8`, exit 1, the
+# plan unchanged, printing each owed line that does not hold (wave-27 T14; D3). The judge's rc 2, a
+# plan it cannot deal, refuses too, printing whatever the judge printed, whatever the reason.
+cur8_judge() {
+  local wb out rc err
+  if ! { declare -F facts_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+     || ! declare -F facts_state >/dev/null 2>&1; then
+    die "REFUSED — current: 8 is admitted on the facts the run owes, and the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    exit 2
+  fi
+  wb="$(proof_working_branch "$PV_PLAN")"
+  PV_HEAD8=""; [ -z "$wb" ] || PV_HEAD8="$(proof_head "$PV_REPO" "$wb")" || PV_HEAD8=""
+  case "$PV_HEAD8" in
+    [0-9a-f]*) : ;;
+    *)
+      die "REFUSED — current: 8 is admitted on the facts the run owes at the working head, and no checkout of $PV_REPO has the plan's working-branch ${wb:-(none named)} checked out; the plan is unchanged."
+      exit 1 ;;
+  esac
+  out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
+  err="$(cat "$PV_NEW.judge" 2>/dev/null)"; rm -f "$PV_NEW.judge"
+  [ "$rc" -eq 0 ] && return 0
+  if [ "$rc" -eq 2 ]; then
+    die "REFUSED — current: 8 is admitted on the facts the run owes, and the judge could not deal this plan (facts_state exit 2); the plan is unchanged. The judge said:"
+    [ -z "$err" ] || printf '%s\n' "$err" >&2
+    [ -z "$out" ] || printf '%s\n' "$out" >&2
+    exit 1
+  fi
+  die "REFUSED — current: 8 is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
+  printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' >&2
+  die "Take the reading or the floor run each line names and record it with proof-add, or have the user waive a question with waive <question> '<reply>'; the plan is unchanged."
+  exit 1
 }
 
 # A cell value the plan can hold: no pipe, tab or line break (AC-9.2). 0 when it can.
@@ -5491,8 +5580,21 @@ EOF
         fi
       fi
     fi
-    plan_verb_swap current "current: $PV_KEY" as-is
-    say "current — current: $PV_KEY in $PV_PLAN (was ${PV_CUR:-none})$PV_FILLED; dry-committed at that step first."
+    # STEP 8 IS ADMITTED ON THE JUDGE, NOT ON A DRY COMMIT (wave-27 T14; D3, D14, AC-2.3, AC-2.4,
+    # AC-3.1, AC-7.1). The dry commit at Step 8 asked for the Step-8 block, which close-out writes
+    # and judges through the gate itself (close-out.sh `gate_preflight`), so a run closed by its
+    # tools alone could never take this step. 8 is exempt from it as 9 is from this verb, and is
+    # refused instead unless lib/proof.sh `facts_state` says every fact the run owes holds at the
+    # working head: the floor, and each reading its rigor and scale deal. Each line that does not
+    # hold is printed as the judge gave it.
+    PV_DRY=as-is; PV_HOW="dry-committed at that step first"
+    case "$PV_KEY" in
+      8|8a|8b)
+        cur8_judge
+        PV_DRY=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
+    esac
+    plan_verb_swap current "current: $PV_KEY" "$PV_DRY"
+    say "current — current: $PV_KEY in $PV_PLAN (was ${PV_CUR:-none})$PV_FILLED; $PV_HOW."
     exit 0
     ;;
 
@@ -5647,9 +5749,9 @@ EOF
     # A READING CARRIES ITS QUESTION, ITS RESULT AND ITS SCOPE (wave-27 T2; D1, AC-2.1). The record's
     # own flush-left lines say them, and for `structure` it answers every check id the shipped
     # checks file names, the file resolved through this hook's own lib root, as execution-recorder
-    # resolves survival.md (lib/proof.sh `proof_reading`). Only the record's first pass is read,
-    # each value whole, and a structure result is one its checks bear out (T41; review pass 10 F1,
-    # F2, F6); the start of its range comes back too, for the whole-read check below.
+    # resolves survival.md (lib/proof.sh `proof_reading`). A reading record holds exactly one pass and
+    # a second is refused (T45), each value whole, and a structure result is one its checks bear out
+    # (T41; review pass 10 F1, F2, F6); the start of its range comes back too, for the whole-read check below.
     PF_RESULT=""; PF_SCOPE=""; PF_FROM=""; PF_ROLE=""
     if [ -n "$PF_QUESTION" ]; then
       if ! PF_RS="$(proof_reading "$PF_REAL" "$PF_QUESTION" "$BIONIC_LIB/../../context/checks-structure.md")"; then
@@ -5730,9 +5832,17 @@ PF_OWN_LIST
       # its own, so a record that another roster row also names as its deliverable= or among its
       # files= could be registered under either name; it is refused, naming that row, whichever
       # reader is typed. Each entry is compared by real path, as above.
+      # ONLY A ROW THAT CAN STILL WRITE IT COUNTS (wave-27 T14; review pass 20 F3): a row of a
+      # DIFFERENT name, past `intended` (confirmed or identified) and still open by the one reader
+      # of "is this name closed" (`roster_open_names`, its roster's ack ledger beside it). An
+      # `intended` launch read nothing, a closed or acked one reads no more, and a row of the
+      # reader's own name is its own relaunch, so a reader dispatched again to the record of an
+      # earlier launch can register what it read.
       PF_OTHER=""
       for _pf_rf in "$PV_REPO/.bionic/tmp"/roster-*.state; do
         [ -f "$_pf_rf" ] && [ ! -L "$_pf_rf" ] && [ -z "$PF_OTHER" ] || continue
+        _pf_rs="${_pf_rf##*/roster-}"; _pf_rs="${_pf_rs%.state}"
+        _pf_open=" $(roster_open_names "$_pf_rf" "${_pf_rf%/*}/sweeper-${_pf_rs}.state" 2>/dev/null | tr '\n' ' ')"
         while IFS=$'\037' read -r _pf_on _pf_ot _pf_c; do
           case "$_pf_c" in '') continue ;; /*) _pf_p="$_pf_c" ;; *) _pf_p="$PV_REPO/${_pf_c#./}" ;; esac
           [ -f "$_pf_p" ] || continue
@@ -5740,8 +5850,10 @@ PF_OWN_LIST
             PF_OTHER="$_pf_on (${_pf_ot:-no subagent_type})"; break
           fi
         done <<PF_OTHER_LIST
-$(PF_WANT="$PF_READER" awk "$_ROSTER_OPEN_AWK"'
-  index($0, "roster-state/") == 1 && (_roster_kv($0, "name") "") != (ENVIRON["PF_WANT"] "") {
+$(PF_WANT="$PF_READER" PF_OPEN="$_pf_open" awk "$_ROSTER_OPEN_AWK"'
+  index($0, "roster-state/") == 1 && (_roster_kv($0, "name") "") != (ENVIRON["PF_WANT"] "") &&
+    (_roster_kv($0, "status") == "confirmed" || _roster_kv($0, "status") == "identified") &&
+    index(ENVIRON["PF_OPEN"], " " _roster_kv($0, "name") " ") {
     o = _roster_kv($0, "name") "\037" _roster_kv($0, "subagent_type") "\037"
     m = split(_roster_kv($0, "deliverable") "," _roster_kv($0, "files"), e, ",")
     for (i = 1; i <= m; i++) if (e[i] != "") print o e[i] }' "$_pf_rf" 2>/dev/null)
@@ -5782,9 +5894,14 @@ PF_OTHER_LIST
     # of it (proof_attested has already resolved the start, so here it is a commit).
     if [ "$PF_SCOPE" = whole ]; then
       PF_BASE="$(proof_plan_base "$PV_PLAN")"; PF_BASEH=""
-      [ -n "$PF_BASE" ] && PF_BASEH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_BASE^{commit}" 2>/dev/null)"
+      proof_base_id "$PF_BASE" && PF_BASEH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_BASE^{commit}" 2>/dev/null)"
       if [ -z "$PF_BASEH" ]; then
-        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but the plan names no base-sha: that is a commit here ('$(clean "$PF_BASE")'), so nothing shows it read from the start of the run; write the base under ## SDLC State, or scope: piece. The plan is unchanged."
+        # THE SAME PLACE THE FIRST-READING REFUSAL NAMES (wave-27 T14; review pass 20 F4), and a word
+        # such as HEAD is said to be no commit id (F1).
+        PF_BASEWHY="it names no base-sha:"
+        if [ -n "$PF_BASE" ] && ! proof_base_id "$PF_BASE"; then PF_BASEWHY="its base-sha: $(clean "$PF_BASE") is not a commit id"
+        elif [ -n "$PF_BASE" ]; then PF_BASEWHY="its base-sha: $(clean "$PF_BASE") is no commit here"; fi
+        die "REFUSED — the reading $(clean "$PF_REL") says scope: whole, but $PF_BASEWHY, so nothing shows it read from the start of the run; add base-sha: <the commit the work started from> to the frontmatter of $PV_PLAN, or write scope: piece. The plan is unchanged."
         exit 1
       fi
       PF_FROMH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_FROM^{commit}" 2>/dev/null)"
