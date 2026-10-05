@@ -172,6 +172,8 @@ Files: <every path the task may create or edit>  # a reader lists its records he
 Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names its runs, at most 3, never none
 Re-executes: `<cmd>`
 Questions: <q>[, <q>]  # reader roles only
+Lands-red: <suite> until <ext:slug | approval:name>  # optional
+Red-evidence: <path under record/>  # with Lands-red:
 Deliverable-waiver: <reason>  # only for a report returned by message
 ```
 <!-- BRIEF-SCAFFOLD-END -->

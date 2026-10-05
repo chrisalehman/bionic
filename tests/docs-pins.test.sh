@@ -5345,6 +5345,28 @@ expect_nonempty "W27-T33-7m precondition: the doctored duty still names a list" 
 expect_eq "W27-T33-7m: a writer duty that drops a kind is caught as a second list" "2" \
   "$(w27t33_kinds "$W27T33_DOC7" ${BLOCK_DIR}/checks-structure.md | wc -l | tr -d ' ')"
 
+# ── §W27-144 (wave-27 T31; REQ-14 AC-14.4, D23): the planning rule for a red by design, and its two labels ──
+# AC-14.4: dispatch.md tells a planner to put a proof that needs an owner-gated or external step in a
+# row of its own behind that step's token. The brief scaffold carries the two labels a row declares
+# its red with; the scaffold's own line, pasted unfilled, declares nothing, while a filled one is
+# lifted (the label's behaviour, through the one lift).
+W27_144_RULE="A proof that needs an owner-gated or external step is planned as its own row behind that step's token."
+expect_nonempty "W27-144: AC-14.4 — dispatch.md carries the planning sentence" "$(w26_hits "$W27_144_RULE" "$DISPATCH_MD")"
+expect_nonempty "W27-144b: …and the scaffold the Lands-red: line" \
+  "$(w26_hits 'Lands-red: <suite> until <ext:slug | approval:name>' "$DISPATCH_MD")"
+expect_nonempty "W27-144c: …and the Red-evidence: line" "$(w26_hits 'Red-evidence: <path under record/>' "$DISPATCH_MD")"
+W27_144_DOC="$TMP/w27-144-norule.md"
+_flatten "$DISPATCH_MD" | sed "s/$W27_144_RULE//" > "$W27_144_DOC"
+expect_nonempty "W27-144m precondition: the doctored copy keeps the scaffold" \
+  "$(w26_hits 'Red-evidence: <path under record/>' "$W27_144_DOC")"
+expect_eq "W27-144m: …and a dispatch.md missing the sentence is caught" "" "$(w26_hits "$W27_144_RULE" "$W27_144_DOC")"
+W27_144_LIFT() { bash -c '. "$1/payload/scripts/lib/brief.sh" 2>/dev/null || exit 9; lift_contract_fields "$2" | grep "^lands_red="' _ "$REPO" "$1"; }
+expect_eq "W27-144d: a filled Lands-red: line lifts as the declaration" "lands_red=widget.test.sh until approval:release" \
+  "$(W27_144_LIFT 'Lands-red: widget.test.sh until approval:release')"
+expect_nonempty "W27-144e0 precondition: the scaffold's Lands-red: line is extracted from dispatch.md" \
+  "$(_flatten "$DISPATCH_MD" | grep -o 'Lands-red: <suite> until <ext:slug | approval:name>')"
+expect_eq "W27-144e: …and the scaffold's own line, pasted unfilled, lifts nothing" "" \
+  "$(W27_144_LIFT "$(_flatten "$DISPATCH_MD" | grep -o 'Lands-red: <suite> until <ext:slug | approval:name>')")"
 section "Section W27-T17: wave-27 T17 — the doctrine says the dealing, inside its caps (REQ-1 AC-1.1, REQ-5 AC-5.2/AC-5.4, REQ-10 AC-10.2; D17, D18, D19)"
 #
 # WHAT THIS OWNS. The shipped doctrine teaches what the code deals: four questions, three read by

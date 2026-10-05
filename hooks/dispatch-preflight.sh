@@ -2317,6 +2317,77 @@ if [ "$DP_BRIEF_RC" -eq 2 ]; then
   dp_refuse_findings
 fi
 
+# ============================================== A DECLARED DEBT (wave-27 T31; REQ-14, D23)
+#
+# A ROW MAY LAND RED BY DESIGN, ON ONE SUITE, UNTIL ONE NAMED BLOCKER CLEARS. A brief declares it
+# on two lines of their own, `Lands-red: <suite> until <ext:slug | approval:name>` and
+# `Red-evidence: <path under record/>`, and this arm is the declaration's ONE WRITER: it records
+# both on the row as `lands_red=` and `red_evidence=`, `amend` refuses to add either, and `land`
+# honours a red last run of exactly that suite only on a row that carries them (lib/worktree.sh).
+# It refuses a declaration with no evidence line, a suite outside the set this row may run (the
+# set the contract checks above derived, so it sits below them), and a token of any other shape.
+# A PREDICATE OVER WHAT IT IS HANDED: the lift and the suite set, no git, no roster, no plan.
+DP_LANDS_RED=""; DP_RED_EVIDENCE=""
+_lr_line="$(brief_field "$LIFTED" lands_red)"
+if [ -n "$_lr_line" ]; then
+  _lr_ev="$(brief_field "$LIFTED" red_evidence)"
+  read -r _lr_suite _lr_until _lr_tok _lr_more <<DP_LR
+$_lr_line
+DP_LR
+  _lr_suite="${_lr_suite##*/}"
+  _lr_tok_ok=""
+  if [ "$_lr_until" = until ] && [ -n "$_lr_tok" ] && [ -z "$_lr_more" ]; then
+    _lr_ext_re="$(_units_ext_re)"; _lr_ap_re='^approval:[A-Za-z0-9][A-Za-z0-9._-]*$'
+    if [[ "$_lr_tok" =~ $_lr_ext_re ]] || [[ "$_lr_tok" =~ $_lr_ap_re ]]; then
+      _lr_tok_ok=1
+    fi
+  fi
+  if [ -z "$_lr_tok_ok" ]; then
+    dp_finding "Lands-red: names no blocker token" "use ext:<slug> or approval:<name>" \
+      "The Lands-red: line does not read <suite> until <token>, its token one of two forms:
+    Given: Lands-red: ${_lr_line}
+
+A declared red lands until ONE named blocker clears, and the judge can only tell when a
+token of these two forms has cleared:
+    ext:<slug>        an external blocker, as the ## Tasks reads cells write it
+    approval:<name>   the user's act, written by session-poker.sh approve <name>
+
+Fix: write the line as —
+    Lands-red: ${_lr_suite:-<suite>} until approval:<name>
+
+Then retry the dispatch."
+  fi
+  if [ -z "$_lr_ev" ]; then
+    dp_finding "Lands-red: with no Red-evidence: line" "add the Red-evidence: line" \
+      "The brief declares a suite that lands red, and names no evidence of why:
+    Given: Lands-red: ${_lr_line}
+
+A red is honoured at land only beside an evidence file under record/ that names the head it
+was red at (a line head: <40-hex>), so the row can say why it is red by design.
+
+Fix: add this line to the brief, on a line of its own —
+    Red-evidence: <path under record/>
+
+Then retry the dispatch."
+  fi
+  _lr_in=""
+  case "$_lr_suite" in ''|*[[:space:]]*) : ;; *) case " $SUITES_ALLOWED " in *" $_lr_suite "*) _lr_in=1 ;; esac ;; esac
+  if [ -z "$_lr_in" ]; then
+    dp_finding "Lands-red: $(bionic_trunc "${_lr_suite:-<none>}" 24) is outside Suites:" "name a suite the row runs" \
+      "A row may land red only on a suite it runs, and this one's suite set does not hold it:
+    Given:  Lands-red: ${_lr_line}
+    Suites: ${SUITES_ALLOWED:-(none)}
+
+Fix: name one of the row's own suites on the Lands-red: line, or add the suite to the brief's
+Suites: or Files: line so the row runs it.
+
+Then retry the dispatch."
+  fi
+  if [ -n "$_lr_tok_ok" ] && [ -n "$_lr_ev" ] && [ -n "$_lr_in" ]; then
+    DP_LANDS_RED="$_lr_suite until $_lr_tok"; DP_RED_EVIDENCE="$_lr_ev"
+  fi
+fi
+
 # ===================================================== THE FULL-RUN WALL (wave-26 REQ-3, D6)
 # (replaces the one-regression wall, AC-24, and the floor-once wall, REQ-5 D7, of 1.10.)
 #
@@ -2681,7 +2752,9 @@ ROW=$(roster_row \
   ${C_DONE:+"done=${C_DONE}"} \
   "tool_use_id=${TOOL_USE_ID}" \
   "plan=${ROSTER_PLAN}" \
-  ${DP_QUESTIONS:+"questions=${DP_QUESTIONS}"}) || ROW=""
+  ${DP_QUESTIONS:+"questions=${DP_QUESTIONS}"} \
+  ${DP_LANDS_RED:+"lands_red=${DP_LANDS_RED}"} \
+  ${DP_RED_EVIDENCE:+"red_evidence=${DP_RED_EVIDENCE}"}) || ROW=""
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then
