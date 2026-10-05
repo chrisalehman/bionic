@@ -9179,6 +9179,7 @@ s52_plan() {  # <repo> <T6 status> -> the plan path
     "| T6 | 6 | build | late fix from the review | implementor | — | 20 | REQ-x | payload/x.sh | $2 | |" \
     "| T3 | 8 | integrate | merge to main | — | — | 10 | REQ-x | — | pending | |")"
   awk -v h="$h" -v b="$b" '
+    /^governing-skill: / && !fm { print; print "rigor: tested"; print "scale: wave"; fm = 1; next }
     /^current: / { print "current: 8"; print "working-branch: " b; next }
     { print }
     /^approved-by: / { print "proved: kind=floor head=" h " at=2026-10-04T11:00:00Z evidence=record/floor.log"
@@ -9202,9 +9203,9 @@ owed_readings() {  # <plan> <head> -> the readings appended to the plan
 }
 R52="$(make_repo s52-open-build)"; new_roster "$R52"; S52_P="$(s52_plan "$R52" active)"
 owed_readings "$S52_P" "$(git -C "$R52" rev-parse HEAD)"
-expect_eq "52a0 precondition: the plan holds a reading of each question at the head (facts_state's review lines covered)" "0" \
+expect_eq "52a0 precondition: the plan (tested, wave) holds its five readings at the head: facts_state reads each covered" "5" \
   "$(bash -c '. "$1/proof.sh" && facts_state "$2" "$3"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$S52_P" "$(git -C "$R52" rev-parse HEAD)" 2>/dev/null \
-     | awk -F'\t' '$1 == "review" && $NF != "covered"' | wc -l | tr -d ' ')"
+     | awk -F'\t' '$1 == "review" && $NF == "covered"' | wc -l | tr -d ' ')"
 add_row "$R52" name=w-T6 deliverable=T6.md duration="1 hour" launched_at="$(iso_ago 10)"
 poke_pressure "$R52" 8192 1.0 tick
 expect_nonempty "52a precondition: the tick prints WAIT lines (the extractor reads real output)" "$(s47_lines WAIT)"
@@ -9395,7 +9396,7 @@ S54_W1="$(git -C "$S54_WT" rev-parse HEAD 2>/dev/null)"
 s54_tick
 expect_nonempty "54b1 precondition: the tick prints a WAIT line for integrate (the extractor reads real output)" "$(s54_wait)"
 expect_eq "54b AC-3.4 integrate WAITS: the head moved past the floor proof in a way the map cannot bound, and the line names the way out" \
-  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor" \
+  "poker: WAIT T3 — proof:floor: the head moved past the floor proof at ${S54_W0:0:12} in a way the map cannot bound (the map answers newdir/x.sh with no suite); take the full run on this head and record it with proof-add floor; proof:review: the facts the run owes do not hold (facts_state): the readings are judged once the floor holds" \
   "$(s54_wait)"
 expect_absent "54b2 …and the merge is not offered" "poker: FILL T3" "$OUT"
 # THE COST: one tick runs proof_state once, though its schedule and its change fingerprint each
