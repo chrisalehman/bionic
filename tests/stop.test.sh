@@ -1509,16 +1509,19 @@ section "FILES-REMEDY: the amend the landing refusal prints is one amend accepts
 # refused the stop, and the remedy it printed — `amend <name> --files+ 'CONTEXT.md'` — was
 # itself refused by amend, which read a Files: entry as a path only when it carried a `/`.
 # The remedy is now spelled by the one reader in brief.sh that amend reads with: a root file
-# with an extension as written, and a bare name with no file behind it at the root as
-# `./<name>`. The fixture touches one of each, and the printed line is run exactly as printed.
+# with an extension as written, and a bare name as `./<name>`. The fixture touches one of each,
+# and the printed line is run exactly as printed. The bare name, Widgetfile, is in the main
+# checkout's base commit too (wave-27 T42): T29's reader admitted a bare name by listing the
+# project root, and with the file there it printed `--files+ 'Widgetfile'`; no wall lists the
+# root now, so the spelling is `./Widgetfile` whatever the root holds.
 fr_fixture() {  # -> a git project whose writer tree committed two root files outside Files:
   local d wt
   d=$(mkfix)
   git -C "$d" init -q 2>/dev/null
   git -C "$d" symbolic-ref HEAD refs/heads/main
   git -C "$d" config user.email t@example.invalid; git -C "$d" config user.name T
-  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"; echo base > "$d/base.txt"
-  git -C "$d" add .gitignore base.txt; git -C "$d" commit -qm base
+  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"; echo base > "$d/base.txt"; echo base > "$d/Widgetfile"
+  git -C "$d" add .gitignore base.txt Widgetfile; git -C "$d" commit -qm base
   wt="$d/.worktrees/fr-writer"
   git -C "$d" worktree add -q "$wt" -b wt/fr-writer >/dev/null 2>&1
   git -C "$wt" config user.email t@example.invalid; git -C "$wt" config user.name T
@@ -1541,7 +1544,7 @@ expect_status "FR1 the control — root files outside Files: refuse the stop" "2
 FR_FIXLINE="$(printf '%s\n' "$STOP_ERR$(reason_of)" | /usr/bin/grep -m1 'session-poker.sh.* amend ' | sed 's/^[[:space:]]*//')"
 expect_contains "FR1 precondition: the refusal prints its amend line" "amend 'fr-writer'" "$FR_FIXLINE"
 expect_contains "FR2 the line spells the root file with an extension as written" "--files+ 'CONTEXT.md'" "$FR_FIXLINE"
-expect_contains "FR3 …and the bare name with no file at the root as ./<name>" "--files+ './Widgetfile'" "$FR_FIXLINE"
+expect_contains "FR3 …and the extensionless root file, present at the root, as ./<name>" "--files+ './Widgetfile'" "$FR_FIXLINE"
 # A fresh fixture for the amend and the second stop, as section 8 does: the first stop has
 # already judged its row, so a second stop over the same fixture never reaches the landing check.
 D=$(fr_fixture)
