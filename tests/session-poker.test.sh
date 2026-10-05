@@ -12370,4 +12370,173 @@ for s68m in commit dirty; do
 done
 rm -f "$R62/.bionic/config.yaml"
 
+# ============================================================
+section "Section 69 §DRY-DEBT: a dry commit is judged on the plan it was copied from (wave-27 T76; review pass 60 P0-1; REQ-14 AC-14.3, D23; A-orch-170, A-orch-171, A-orch-172)"
+# ============================================================
+#
+# A plan verb proves its change by a dry commit of a COPY, `<plan>.<verb>-dry.<pid>`, bound to a
+# throwaway session. The commit gate's debt arm reads the landing record `land` wrote, and names it
+# from the bound plan; the copy's name names no record, so a dry commit was handed no debts and
+# `current 6` closed Step 5 with a declared red owed. Rule: a dry commit and a real commit of the
+# same plan text at the same step get the same answer from the debt arm; the verb's marker names
+# the plan the copy was made from (`dry_of=`). And the `current` arm's copy is the same shape as
+# every other verb's: its dry MODE is a variable of its own, so no file named `as-is` or `judged`
+# in the caller's working directory is written or removed.
+#
+# FIXTURE FIDELITY. The review's probe (r59 `cur6-probe.sh`): a project on a feature branch, an
+# audited wave plan bound to this session that the real gate admits at Steps 6 and 7 bar its debts,
+# every reading in the production writer's shape, each debt written by `land`'s own writer
+# (lib/worktree.sh `_wt_debt_write`) and each void by `_wt_debt_void`, into the record `land` names
+# for this plan. Every move is the real verb; every real commit is the real hook (§34's `s34_gate`).
+S69_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+S69_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+R69="$(make_repo s69-dry-debt)"
+git -C "$R69" config user.email t@example.com; git -C "$R69" config user.name "Dana Fixture"
+printf '.bionic\n' > "$R69/.gitignore"; printf 'seed\n' > "$R69/README.md"
+mkdir -p "$R69/tests" "$R69/.bionic/docs/plans" "$R69/.bionic/docs/record/w27"
+printf '#!/bin/bash\n' > "$R69/tests/a.test.sh"
+( cd "$R69" && git add README.md .gitignore tests && git commit -qm seed && git checkout -q -b feature/t23 ) >/dev/null 2>&1
+printf 'generic fixture proof\n' > "$R69/.bionic/docs/record/generic-evidence.md"
+S69_H="$(git -C "$R69" rev-parse HEAD)"
+P69="$R69/.bionic/docs/plans/wave-x.plan.md"
+S69_REC="$R69/.bionic/docs/record/wave-x/landing-proofs.log"
+s69_line() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$S69_LIB" "$@"; }
+S69_ALL="$(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/evidence.md evidence w-read pass piece)
+$(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/adversarial.md adversarial w-read flag piece)
+$(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/structure.md structure w-read pass piece)"
+s69_plan() {  # <current> <extra lines> [<step lines through>] -> P69, bound to this session
+  local through="${3:-$1}"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: wave\n'
+    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\nworking-branch: feature/t23\n---\n# plan\n\n## SDLC State\n\n'
+    printf 'current: %s\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
+    printf -- '- Step 4: dispatched, record/w27/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: feature/t23\n' "$S69_H"
+    printf -- '- Step 5: floor green, record/w27/floor.log\n'
+    [ "$through" -ge 6 ] && printf -- '- Step 6: review at record/w27/review.md\n'
+    [ "$through" -ge 7 ] && printf -- '- Step 7: documented at record/w27/docs.md\n  n/a: no decision this run\n'
+    printf '%s\n' "$S69_ALL"; [ -n "$2" ] && printf '%s\n' "$2"
+    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+    printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
+    printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
+    printf '  tier-run: bash tests/x.test.sh\n  readback: the line it wrote\n'
+  } > "$P69"
+  bind_marker "$R69" "$P69"
+}
+s69_debt() {  # <id> <suite> <token> <at>
+  mkdir -p "${S69_REC%/*}"
+  bash -c '. "$1/worktree.sh" && _wt_debt_write "$2" "$3" T9 wt/27-T9 "$4" "$5" "$6" "$7"' _ "$S69_LIB" "$S69_REC" "$1" "$S69_H" "$2" "$3" "$4"
+}
+s69_void() { bash -c '. "$1/worktree.sh" && _wt_debt_void "$2" "$3" wt/27-T9 merge-failed' _ "$S69_LIB" "$S69_REC" "$1"; }
+s69_floor() { s69_line floor "$S69_H" "$1" record/w27/floor-late.log; }
+s69_state() {  # <none|open|covered|voided|two> -> the record, and the plan's extra lines in S69_X
+  rm -f "$S69_REC"; S69_X=""
+  case "$1" in
+    open) s69_debt d1 widget.test.sh ext:vendor-key 2026-10-04T11:00:00Z ;;
+    covered) s69_debt d1 widget.test.sh ext:vendor-key 2026-10-04T11:00:00Z; S69_X="$(s69_floor 2026-10-04T11:30:00Z)" ;;
+    voided) s69_debt d1 widget.test.sh ext:vendor-key 2026-10-04T11:00:00Z; s69_void d1 ;;
+    two) s69_debt d1 widget.test.sh ext:vendor-key 2026-10-04T11:00:00Z
+         s69_debt d2 gadget.test.sh ext:other-key 2026-10-04T13:00:00Z
+         S69_X="$(s69_floor 2026-10-04T12:30:00Z)" ;;
+  esac
+}
+s69_verdict() {  # <rc> <words> -> admitted | debt | other
+  if [ "$1" -eq 0 ]; then printf 'admitted'
+  else case "$2" in *'a declared red is still owed'*) printf 'debt' ;; *) printf 'other' ;; esac; fi
+}
+s69_real() {  # <step> <state> -> the gate's answer to a real bound commit of the plan at <step>
+  s69_state "$2"; s69_plan "$1" "$S69_X"
+  s34_gate "$R69"; s69_verdict "$GATE_RC" "$GATE_ERR"
+}
+s69_move() {  # <step> <state> -> `current <step>` from the step before it: the answer, and the current: line after
+  s69_state "$2"; s69_plan "$(($1 - 1))" "$S69_X" "$1"
+  poke "$R69" current "$1"
+  printf '%s %s' "$(s69_verdict "$RC" "$OUT")" "$(/usr/bin/grep -m1 '^current:' "$P69")"
+}
+
+# ---------- the worked answers, through the verb ----------
+s69_real 6 none >/dev/null
+expect_eq "69a0 control: the fixture's real commit at current: 6 with no debt is admitted" "0" "$GATE_RC"
+s69_state open; s69_plan 5 "" 6; cp "$P69" "$TMPROOT/s69-before"
+poke "$R69" current 6
+expect_eq "69a P0-1 a debt open: current 6 is refused (exit 1)" "1" "$RC"
+expect_contains "69a2 …with the gate's own words for it" "a declared red is still owed" "$OUT"
+expect_contains "69a3 …naming the suite and its token" "- widget.test.sh: landed red until ext:vendor-key" "$OUT"
+expect_true "69a4 …and the plan is byte-identical, current: 5 kept (cmp)" cmp -s "$TMPROOT/s69-before" "$P69"
+expect_eq "69a5 …and current 7 from 6 the same" "debt current: 6" "$(s69_move 7 open)"
+expect_eq "69b the debt covered by a floor proof dated after the red landing: current 6 admitted" "admitted current: 6" "$(s69_move 6 covered)"
+expect_eq "69c the debt voided: admitted" "admitted current: 6" "$(s69_move 6 voided)"
+expect_eq "69d no landing record at all: admitted" "admitted current: 6" "$(s69_move 6 none)"
+expect_true "69d2 …and there is none (the state that row names)" test ! -e "$S69_REC"
+
+# ---------- proof-add of the covering floor proof, at a step the debt arm binds ----------
+# Every writer verb dry-commits its copy at `current: 4` past Step 4 (plan_verb_dry; A-orch-172),
+# and the debt arm binds from Step 6, so this row pins the writer rule, not the debt arm: with the
+# debt open, the real commit is refused and the proof that covers it is still recorded.
+expect_eq "69e0 control: at current: 6 with the debt open a real commit is refused" "debt" "$(s69_real 6 open)"
+poke "$R69" step-line T9 'landed red on widget.test.sh, owed'
+expect_eq "69e00 a writer verb at current: 6 with the debt open (step-line): admitted, its copy judged at current: 4" "0" "$RC"
+expect_contains "69e00b …and its line is written" "- T9: landed red on widget.test.sh, owed" "$(cat "$P69")"
+printf 'floor log\nenv: os=fixture\nhead=%s dirty=0\nall suites passed\nGating: 1 passed, 0 failed\n' "$S69_H" \
+  > "$R69/.bionic/docs/record/w27/floor-late.log"
+poke "$R69" proof-add floor record/w27/floor-late.log
+expect_eq "69e proof-add floor of the covering proof at current: 6, the debt open: admitted (exit 0)" "0" "$RC"
+expect_regex "69e2 …and the floor proof line is written at the fixture's head" "^proved: kind=floor head=${S69_H} " \
+  "$(/usr/bin/grep '^proved: kind=floor' "$P69" | tail -1)"
+s34_gate "$R69"
+expect_eq "69e3 …after which the real commit is admitted: the line covers the debt" "admitted" "$(s69_verdict "$GATE_RC" "$GATE_ERR")"
+# Each writer verb hands plan_verb_swap the `writer` mode, so its copy is judged at `current: 4`;
+# `current` alone dry-commits at the step it judges. A verb that changes its mode turns this red.
+S69_SWAPS="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
+S69_MODES="$(/usr/bin/grep -E '^[[:space:]]*plan_verb_swap ' "$POKER" | awk '$2 != "current" { print $NF }' | sort -u | tr '\n' ' ')"
+expect_eq "69e4 the verbs that dry-commit through plan_verb_swap (read from the script)" \
+  '"$VERB" approve budget current launch-sync proof-add release-check step-line task-add waive ' "$S69_SWAPS"
+expect_eq "69e5 …and every one but current names the writer mode" "writer " "$S69_MODES"
+
+# ---------- the invariant: a real commit and a dry commit of the same text at the same step ----------
+for s69n in 6 7; do
+  for s69s in none open covered voided two; do
+    s69r="$(s69_real "$s69n" "$s69s")"; s69d="$(s69_move "$s69n" "$s69s")"
+    expect_eq "69f-${s69n}-${s69s} the invariant at Step ${s69n}, ${s69s}: the dry commit of current ${s69n} answers as the real commit" \
+      "$s69r" "${s69d%% *}"
+  done
+done
+expect_eq "69f2 …and the table holds both answers (two debts, one covered, at Step 7)" "debt" "$(s69_real 7 two)"
+
+# ---------- the current verb's copy is its own file (A-orch-171) ----------
+# The caller's working directory holds the user's own files named `as-is` and `judged`; a move that
+# dry-commits and a current 8 (refused here by the judge) leave both byte for byte, and a directory
+# holding neither is left holding neither.
+S69_CWD="$R69/work"; S69_EMPTY="$R69/empty"; mkdir -p "$S69_CWD" "$S69_EMPTY"
+printf 'mine, as-is\n' > "$S69_CWD/as-is"; printf 'mine, judged\n' > "$S69_CWD/judged"
+cp "$S69_CWD/as-is" "$TMPROOT/s69-as-is"; cp "$S69_CWD/judged" "$TMPROOT/s69-judged"
+s69_cur() {  # <cwd> <step> -> RC, OUT of `current <step>` run from <cwd>
+  OUT="$( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" current "$2" 2>&1 )"; RC=$?
+}
+s69_state none; s69_plan 5 "" 6
+s69_cur "$S69_CWD" 6
+expect_eq "69g0 control: current 6 run from that directory is admitted" "0|current: 6" "$RC|$(/usr/bin/grep -m1 '^current:' "$P69")"
+expect_true "69g A-orch-171 …and the user's as-is file is byte for byte as it was" cmp -s "$TMPROOT/s69-as-is" "$S69_CWD/as-is"
+expect_true "69g2 …and so is judged" cmp -s "$TMPROOT/s69-judged" "$S69_CWD/judged"
+# current 8 both ways: refused by the judge (the mode still as-is when it refuses), then admitted
+# once every fact the run owes holds at the head (the mode then judged).
+s69_state none; s69_plan 7 "" 7
+s69_cur "$S69_CWD" 8
+expect_eq "69g3 control: current 8 run from there with no floor proof is refused by the judge (exit 1)" "1" "$RC"
+expect_contains "69g3b …in the judge's words" "current: 8 is admitted" "$OUT"
+expect_true "69g4 …and as-is is still byte for byte as it was" cmp -s "$TMPROOT/s69-as-is" "$S69_CWD/as-is"
+expect_true "69g5 …and judged" cmp -s "$TMPROOT/s69-judged" "$S69_CWD/judged"
+s69_plan 7 "$(s69_floor 2026-10-04T12:00:00Z)
+$(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/adversarial-whole.md adversarial w-read pass whole)
+$(s69_line review "$S69_H" 2026-10-04T12:00:00Z record/w27/structure-whole.md structure w-read pass whole)" 7
+s69_cur "$S69_CWD" 8
+expect_eq "69g5b control: with every owed fact at the head, current 8 from there is admitted" "0|current: 8" "$RC|$(/usr/bin/grep -m1 '^current:' "$P69")"
+expect_true "69g5c …and as-is is byte for byte as it was" cmp -s "$TMPROOT/s69-as-is" "$S69_CWD/as-is"
+expect_true "69g5d …and judged" cmp -s "$TMPROOT/s69-judged" "$S69_CWD/judged"
+s69_state none; s69_plan 5 "" 6
+s69_cur "$S69_EMPTY" 6
+expect_eq "69g6 control: current 6 from a directory holding neither name is admitted" "0" "$RC"
+expect_eq "69g7 …and leaves it holding nothing" "" "$(ls -A "$S69_EMPTY")"
+expect_eq "69g8 …while the plan's own directory holds no copy left behind" "wave-x.plan.md" "$(ls -A "${P69%/*}")"
+POKE_BOUND="$S69_BOUND_WAS"
+
 finish
