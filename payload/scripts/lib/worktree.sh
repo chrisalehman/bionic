@@ -1042,11 +1042,29 @@ _wt_proofs_private() {  # <record path> -> the new file's path
 #     the line `<the block's size> bytes …` (BSD's and GNU's dd both open it so). And the record
 #     must be at least as long as before plus the block, true under any interleaving of appends.
 #   - a record that does not end in a line break (a write a full disk cut short, never truncated
-#     away) gets one in front of the block, so the block's header is a line of its own.
+#     away) gets one in front of the block, so the block's header is a line of its own
+#     (`_wt_proofs_cut`).
 # Each failure is the `proofs=unwritten` case, and `_WT_PROOFS_SAW` says what was seen. A process
 # killed mid-append leaves the record without its block or with it whole, and at most its private
 # file beside it.
 _WT_PROOFS_SAW=""
+
+# THE RECORD ENDS IN A CUT LINE, and stays so (wave-27 T69; A-orch-132). A reader can see another
+# landing's append half done (measured here: 4 of 1,169 reads of the last byte during appends), so a
+# last byte that is not a line break is looked at again a twentieth of a second later: only a record
+# whose size has not moved and whose last byte is still not a line break is cut. A size that moved is
+# another append, and is looked at again, five times at most.
+_wt_proofs_cut() {  # <record path> -> 0 cut, 1 not
+  local n=0 a b
+  while [ "$n" -lt 5 ]; do
+    [ -s "$1" ] && [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 1
+    a="$(wc -c < "$1" 2>/dev/null)"; sleep 0.05; b="$(wc -c < "$1" 2>/dev/null)"
+    [ "$a" = "$b" ] && [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] && return 0
+    n=$((n + 1))
+  done
+  return 1
+}
+
 _wt_proofs_append() {  # <file> <row> <branch> <head> <merge> <judged lines> [<at>]
   local block priv size before after said rc lead="" nl='
 '
@@ -1055,7 +1073,7 @@ _wt_proofs_append() {  # <file> <row> <branch> <head> <merge> <judged lines> [<a
   [ -z "${6:-}" ] || block="${block}
 ${6}"
   if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then _WT_PROOFS_SAW="the record's path is not a regular file"; return 1; fi
-  [ -s "$1" ] && [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] && lead="$nl"
+  ! _wt_proofs_cut "$1" || lead="$nl"
   priv="$(_wt_proofs_private "$1")" || { _WT_PROOFS_SAW="no private file could be made beside the record"; return 1; }
   { printf '%s%s\n' "$lead" "$block" > "$priv"; } 2>/dev/null || { rm -f "$priv"; _WT_PROOFS_SAW="the private file could not be written"; return 1; }
   size="$(wc -c < "$priv" 2>/dev/null)"; size="${size//[!0-9]/}"
