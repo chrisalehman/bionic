@@ -642,13 +642,20 @@ _wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrive
 # is refused, with the record the proof created still empty, removes it. A record that already
 # held landings, or was there empty before the proof, is never touched. The directories the proof
 # made stay.
+#
+# THE TEST AND THE DELETE ARE ONE CRITICAL SECTION UNDER THE RECORD'S LOCK (wave-27 T58; review pass
+# 34 B1). Another landing appends under that lock, so a test-then-delete outside it could remove a
+# block appended in between, after that landing had printed LANDED and removed its tree. A lock not
+# taken inside the wait leaves the file: an empty record left behind is harmless, a deleted block
+# is not.
 worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence>] -> LANDED | REFUSED
   local rc made
   _WT_PROOFS_MADE=""
   _wt_land "$@"; rc=$?
   made="$_WT_PROOFS_MADE"; _WT_PROOFS_MADE=""
-  if [ "$rc" -ne 0 ] && [ -n "$made" ] && [ -f "$made" ] && [ ! -s "$made" ] && [ ! -L "$made" ]; then
-    rm -f "$made" 2>/dev/null
+  if [ "$rc" -ne 0 ] && [ -n "$made" ] && _wt_proofs_lock "$made"; then
+    if [ -f "$made" ] && [ ! -s "$made" ] && [ ! -L "$made" ]; then rm -f "$made" 2>/dev/null; fi
+    rm -rf "${made}.lock" 2>/dev/null
   fi
   return "$rc"
 }
@@ -656,7 +663,7 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
 _wt_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence>] -> LANDED | REFUSED
   local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
   local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
-  local pre pre_ref was said held now_ref check_cmd check_out nl='
+  local pre pre_ref was said held now_ref check_cmd check_out check_was left nl='
 '
   local plan="${3:-}" judged proofs proofs_row
   local lands_red="${4:-}" red_ev="${5:-}" landed_red="" ev_heads judged_cur landed_at red_said
@@ -716,8 +723,7 @@ _wt_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence
   # The record link is not work. In a project that ignores `.bionic` only in its
   # directory shape, or not at all, git reads the link as `?? .bionic`; that one
   # entry is passed here and the link itself is dropped just before the removal.
-  dirt="$(git -C "$wt_abs" status --porcelain 2>/dev/null)"
-  [ -L "${wt_abs}/.bionic" ] && dirt="$(printf '%s\n' "$dirt" | grep -vxF '?? .bionic')"
+  dirt="$(_wt_piece_dirt "$wt_abs")"
   if [ -n "$dirt" ]; then
     _wt_refuse "dirty-tree path=${wt_abs} branch=${branch}"; return 2
   fi
@@ -788,24 +794,32 @@ _wt_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence
   # shows the command's output on stderr. With no key nothing runs and nothing prints.
   check_cmd="$(config_value "$root" release-check "" 2>/dev/null)"
   if [ -n "$check_cmd" ]; then
+    check_was="$(git -C "$co" rev-parse --verify --quiet HEAD 2>/dev/null)"
     check_out="$(cd "$co" 2>/dev/null || exit 1
       set -f
       export BIONIC_CHECK_BASE="$onto_head" BIONIC_CHECK_HEAD="$head" BIONIC_CHECK_TREE="$wt_abs"
       # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
       exec $check_cmd </dev/null 2>&1)"; rc=$?
+    # WHAT THE CHECK LEFT (wave-27 T50, T58; review passes 27 S2, 34 N5). The command runs in the shared
+    # target, beside the piece. After it, and before the merge, the target's HEAD is the commit it was
+    # before the check, the target is clean in what git tracks (the test above, taken again), and the
+    # piece's checkout is as clean as it was (the dirty-tree test above, taken again). A check that
+    # committed on the target would have its commit merged onto unjudged; one that dirtied the piece
+    # would leave the merge standing and the tree unremovable. Either refuses this landing
+    # `reason=check-dirtied`, saying which, with nothing merged; a check that fails AND left something
+    # is refused for the failure, which names what it left. `land` restores nothing: the user sees
+    # what the check did.
+    left="$(_wt_check_left "$co" "$check_was" "$wt_abs")"
     if [ "$rc" -ne 0 ]; then
       [ -z "$check_out" ] || printf '%s\n' "$check_out" >&2
-      _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head} — the project's declared release-check (${check_cmd}) fails over this landing's range; fix what it names on ${branch}, re-run its suites, land again"; return 2
+      _wt_refuse "check-failed why=release-check rc=${rc} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} — the project's declared release-check (${check_cmd}) fails over this landing's range${left:+ and left changes, named before this dash}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
     fi
-    # THE TARGET IS CLEAN AFTER THE CHECK AS WELL (wave-27 T50; review pass 27 S2). The command runs
-    # in the shared target, so one that writes a tracked file there would leave it dirty after the
-    # clean test above had passed, and the next landing would be refused for it. The same test, taken
-    # again (tracked files only: an untracked file is not counted, here as above), refuses this landing
-    # with the paths named, nothing merged. `land` does not clean the target: the user sees what the
-    # check did.
-    dirt="$(git -C "$co" status --porcelain --untracked-files=no 2>/dev/null)"
-    if [ -n "$dirt" ]; then
-      _wt_refuse "check-dirtied why=release-check checkout=${co} paths=$(_wt_dirty_paths "$dirt") branch=${branch} — the project's declared release-check (${check_cmd}) left tracked files changed in the target checkout, and nothing is merged; restore them (git -C ${co} status), make the check write nothing tracked, land again"; return 2
+    if [ -n "$left" ]; then
+      said=""
+      case " $left" in *" head_was="*) said="moved the target checkout's HEAD (git -C ${co} reflog -2)" ;; esac
+      case " $left" in *" paths="*) said="${said:+${said}; }left tracked files changed in the target checkout (git -C ${co} status)" ;; esac
+      case " $left" in *" piece_paths="*) said="${said:+${said}; }changed the piece's checkout ${wt_abs} (git -C ${wt_abs} status)" ;; esac
+      _wt_refuse "check-dirtied why=release-check checkout=${co} ${left} branch=${branch} — the project's declared release-check (${check_cmd}) ${said}, and nothing is merged; put back what it changed, make the check change nothing, land again"; return 2
     fi
   fi
 
@@ -1004,11 +1018,18 @@ EOF
 # directory at the path is refused before anything is opened. Otherwise the directory is made and the
 # file created or opened for append. When this call created the file, `_WT_PROOFS_MADE` names it, and
 # `worktree_land` removes it again if the landing is then refused.
+#
+# THE PROOF COVERS THE LOCK (wave-27 T58; review pass 34 S2). The append takes `<record>.lock` with
+# `mkdir` in the record's directory, so a directory that cannot be written, or anything but a
+# directory at the lock's path (a file, a link), would merge and then fail the append. Both refuse
+# here, before the merge. A lock DIRECTORY is not a refusal, live or stale: the append waits for it,
+# or takes it over.
 _wt_proofs_prove() {  # <record path> -> 0 writable, 1 not
-  local made=""
+  local made="" lk="${1}.lock"
   [ ! -L "$1" ] || return 1
   if [ -e "$1" ]; then [ -f "$1" ] || return 1; else made="$1"; fi
-  mkdir -p "${1%/*}" 2>/dev/null && { : >> "$1"; } 2>/dev/null || return 1
+  if [ -L "$lk" ] || { [ -e "$lk" ] && [ ! -d "$lk" ]; }; then return 1; fi
+  mkdir -p "${1%/*}" 2>/dev/null && [ -w "${1%/*}" ] && [ -x "${1%/*}" ] && { : >> "$1"; } 2>/dev/null || return 1
   _WT_PROOFS_MADE="$made"
 }
 
@@ -1017,8 +1038,9 @@ _wt_proofs_prove() {  # <record path> -> 0 writable, 1 not
 # The lock is a directory beside the record, `<record>.lock`, taken with `mkdir` as every lock in
 # this tree is (lib/slots.sh, hooks/session-poker.sh `launch_sync_lock`: no `flock` on macOS), and
 # removed by `_wt_proofs_append` on every path out of it. A landing waits for it _WT_PROOFS_LOCK_WAIT
-# seconds, then fails the append: the `proofs=unwritten` case, the merge standing and the tree and
-# its stamps kept. A lock a killed landing left behind is taken over, and must not stop every later
+# seconds BY THE CLOCK (wave-27 T58; review pass 34 S1: a count of tries, each forking `stat` and
+# `sleep`, took 19.64 s for ten), then fails the append: the `proofs=unwritten` case, the merge
+# standing and the tree and its stamps kept. A lock a killed landing left behind is taken over, and must not stop every later
 # landing: it is stale when the pid it records is gone, or when the directory is older than
 # _WT_PROOFS_LOCK_STALE seconds (an append takes microseconds, so a minute is a holder that is
 # not coming back). Two landings that both find one stale can race to take it over, which needs a
@@ -1027,8 +1049,8 @@ _wt_proofs_prove() {  # <record path> -> 0 writable, 1 not
 _WT_PROOFS_LOCK_WAIT="${_WT_PROOFS_LOCK_WAIT:-10}"
 _WT_PROOFS_LOCK_STALE="${_WT_PROOFS_LOCK_STALE:-60}"
 _wt_proofs_lock() {  # <record path> -> 0 held, 1 not taken in time
-  local lk="${1}.lock" tries=0 bare=0 pid="" mt=""
-  local max=$(( _WT_PROOFS_LOCK_WAIT * 50 ))
+  local lk="${1}.lock" bare=0 pid="" mt=""
+  local t0="$SECONDS"
   while :; do
     if mkdir "$lk" 2>/dev/null; then
       printf '%s\n' "$$" > "$lk/pid" 2>/dev/null
@@ -1050,8 +1072,8 @@ _wt_proofs_lock() {  # <record path> -> 0 held, 1 not taken in time
         continue
       fi
     fi
-    tries=$((tries + 1))
-    [ "$tries" -lt "$max" ] || return 1
+    # Whole seconds by the shell's own clock: past the wait (more than it, never less), not taken.
+    [ $(( SECONDS - t0 )) -le "$_WT_PROOFS_LOCK_WAIT" ] || return 1
     sleep 0.02
   done
 }
@@ -1065,9 +1087,43 @@ _wt_proofs_append() {  # <file> <row> <branch> <head> <merge> <judged lines> [<a
   [ -z "${6:-}" ] || block="${block}
 ${6}"
   _wt_proofs_lock "$1" || return 1
+  # THE RECORD'S TYPE IS TESTED AGAIN UNDER THE LOCK (wave-27 T58; review pass 34 N4): a path swapped
+  # after the proof, to a FIFO that would block the open for good while the lock is held, or to a
+  # link, is not opened; the append fails, the `proofs=unwritten` case.
+  if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then
+    rm -rf "${1}.lock" 2>/dev/null
+    return 1
+  fi
   { printf '%s\n' "$block" >> "$1"; } 2>/dev/null; rc=$?
   rm -rf "${1}.lock" 2>/dev/null
   return "$rc"
+}
+
+# A piece's checkout as `land`'s dirty-tree test reads it: every porcelain line, untracked files
+# included, less the record link's `?? .bionic`, which is not work.
+_wt_piece_dirt() {  # <tree abs> -> porcelain lines | nothing
+  local d
+  d="$(git -C "$1" status --porcelain 2>/dev/null)"
+  [ -L "${1}/.bionic" ] && d="$(printf '%s\n' "$d" | grep -vxF '?? .bionic')"
+  printf '%s' "$d"
+}
+
+# What the declared check left that it found otherwise (wave-27 T58; review pass 34 N5), as the
+# refusal's fields: `head_was=<short> head_now=<short>` when the target's HEAD moved, `paths=<…>`
+# for tracked files changed in the target, `piece_paths=<…>` for the piece's checkout made dirty.
+# Nothing when it left all three as it found them.
+_wt_check_left() {  # <target checkout> <its HEAD before the check> <tree abs> -> fields | nothing
+  local now out="" d
+  now="$(git -C "$1" rev-parse --verify --quiet HEAD 2>/dev/null)"
+  if [ "$now" != "$2" ]; then
+    out="head_was=$(git -C "$1" rev-parse --short "$2" 2>/dev/null || printf '%s' "${2:-<none>}")"
+    out="${out} head_now=$(git -C "$1" rev-parse --short "$now" 2>/dev/null || printf '%s' "${now:-<none>}")"
+  fi
+  d="$(git -C "$1" status --porcelain --untracked-files=no 2>/dev/null)"
+  [ -z "$d" ] || out="${out:+${out} }paths=$(_wt_dirty_paths "$d")"
+  d="$(_wt_piece_dirt "$3")"
+  [ -z "$d" ] || out="${out:+${out} }piece_paths=$(_wt_dirty_paths "$d")"
+  printf '%s' "$out"
 }
 
 # The paths of a `git status --porcelain` listing, comma-joined, the first five and a count of the
