@@ -354,11 +354,10 @@ bionic_check_working_principles() {  # <row id>
   [ "$(principles_state)" = "absent" ]
 }
 
-# THE PRE-MARKER SPELLING is detect.sh's list, `bionic_legacy_alias_ours`, the
-# one place it is written down (wave-27 T55). This predicate fires on a line the
-# list holds and on nothing else: a line that only mentions the alias is the
-# user's, no step removes it, and a row that fired on it would offer a removal
-# that does nothing, forever.
+# THE RETIRED BLOCK, AND ONLY THE BLOCK (wave-27 T75, A-orch-162). This predicate fires
+# when setup has a removal it can take: bionic's whole block, writable, standing as
+# one unit. A bare line, bionic's own included, is never taken out by any door, and a
+# row that fired on it would offer a removal that does nothing, forever.
 bionic_check_legacy_alias() {  # <row id>
   local line
   line="$(detect_zshrc_legacy_block)"
@@ -375,9 +374,9 @@ bionic_check_legacy_alias() {  # <row id>
          return 1 ;;
     malformed|not-a-file) return 1 ;;
   esac
-  markers_writable "$(_detect_shell_rc)" || return 1
-  line="$(bionic_legacy_alias_lines "$(_detect_shell_rc)")"; line="${line#ours=}"
-  [ -n "${line%% *}" ]
+  # A bare line, bionic's or not, is no step setup can take (wave-27 T75, A-orch-162):
+  # doctor names it for the user's hand.
+  return 1
 }
 
 bionic_check_legacy_hooks() {  # <row id>
