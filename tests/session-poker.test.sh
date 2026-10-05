@@ -11599,13 +11599,14 @@ poke "$R65B" budget suites=3 'three suites'
 s42_unchanged "65q4 a field other than writers" 2 "$P65B"
 poke "$R65B" budget writers=3
 s42_unchanged "65q5 no reply" 2 "$P65B"
+# 65r re-pinned by wave-27 T37 (review pass 42 N2, A-orch-112): the verb only lowers; a value above
+# the derived ceiling is refused (section 67 §BUDGET-LOWERS), so 65r reads the refusal.
 poke "$R65B" budget writers=12 'go wide'
-expect_eq "65r a value above the probe's derived ceiling is the user's, recorded (exit 0)" "0" "$RC"
-expect_contains "65r2 …the header reads writers=12" "parallel-budget: writers=12 suites=4" "$(cat "$P65B")"
+s42_unchanged "65r a value above the probe's derived ceiling is refused: budget only lowers" 1 "$P65B"
+expect_contains "65r2 …the header still reads the user's three" "parallel-budget: writers=3 suites=4" "$(cat "$P65B")"
 expect_regex "65r3 …and derived= is still the probe's eight" \
-  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=12$' "$(/usr/bin/grep '^budget-override:' "$P65B")"
-expect_eq "65r4 …one override line, rewritten" "1" "$(/usr/bin/grep -c '^budget-override:' "$P65B" | tr -d ' ')"
-expect_contains "65r5 …and the verb says what the dispatch wall then holds the run to" "the dispatch wall holds the run to 12" "$OUT"
+  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=3$' "$(/usr/bin/grep '^budget-override:' "$P65B")"
+expect_eq "65r4 …one override line" "1" "$(/usr/bin/grep -c '^budget-override:' "$P65B" | tr -d ' ')"
 POKE_BOUND="$S65_BOUND_WAS"
 
 
@@ -11897,5 +11898,59 @@ expect_eq "67e10 …and holds four" "4" "$(s67_runs "$R67Q" rev)"
 poke "$R67Q" amend wri --reexec+ 'pytest tests/c' --reexec+ 'pytest tests/d' --reason 'two more'
 expect_eq "67e11 a writer's row takes a fourth, as today (exit 0)" "0" "$RC"
 expect_eq "67e12 …and holds four" "4" "$(s67_runs "$R67Q" wri)"
+
+# §BUDGET-LOWERS (review pass 42 N2; A-orch-112). `budget` took a reply nothing verifies and
+# raised the cap as readily as it lowered it, so a model could raise its own ceiling. It now
+# records a cap at or below the ceiling the machine derives; a number above it is refused, saying
+# that raising the ceiling is the user's own edit of the plan's `parallel-budget:` line. The
+# fixture is 65's (the probe's eight). fails-when: writers=99 is recorded, or 8 or 3 is refused.
+R67B="$(make_repo s67-budget)"; ( cd "$R67B" && git commit -q --allow-empty -m init )
+git -C "$R67B" config user.name "Dana Fixture"
+P67B="$(s42_plan "$R67B" 4)"
+s42_snap "$R67B" "$P67B"
+poke "$R67B" budget writers=99 'go wide'
+s42_unchanged "67f1 §BUDGET-LOWERS writers=99 over a derived 8" 1 "$P67B"
+expect_contains "67f2 …the refusal says the verb only lowers" "only lowers" "$OUT"
+expect_contains "67f3 …and that raising it is the user's own edit of the parallel-budget: line" \
+  "Raising it is the user's own edit of the plan's parallel-budget: line" "$OUT"
+poke "$R67B" budget writers=8 'the derived width'
+expect_eq "67f4 writers=8, the derived ceiling itself, is recorded (exit 0)" "0" "$RC"
+expect_contains "67f5 …the header reads it" "parallel-budget: writers=8 " "$(cat "$P67B")"
+poke "$R67B" budget writers=3 'keep it at three'
+expect_eq "67f6 writers=3 is recorded (exit 0)" "0" "$RC"
+expect_regex "67f7 …and derived= is still the probe's eight" \
+  '^budget-override: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} derived=8 chosen=3$' "$(/usr/bin/grep '^budget-override:' "$P67B")"
+s42_snap "$R67B" "$P67B"
+poke "$R67B" budget writers=9 'one over'
+s42_unchanged "67f8 writers=9, one over the derived 8 (the user's cap of 3 stands)" 1 "$P67B"
+
+# §DECLINE-SLOT (review pass 42 N1; A-orch-112). The wall's refusal prints `decline <ids> 'why
+# they wait'`, and that command run exactly as printed recorded the placeholder as the reason. It
+# is refused now, saying to put the reason in its place; the same command with a real reason is
+# recorded. The fixture is 65's: the tick fills, the wall refuses the silent turn, and its line is
+# taken from the refusal and run as printed. fails-when: the printed line writes a ledger line.
+S67D_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R67D="$(make_repo s67-decline-slot)"; new_roster "$R67D"
+P67D="$(s31_task_plan "$R67D" T1)"
+bind_marker "$R67D" "$P67D"
+add_row "$R67D" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R67D" 8192 1.0 tick
+expect_contains "67g0 precondition: the tick fills the two ready rows" "poker: FILL T2 T3" "$OUT"
+s31_stop "$R67D" "$(s31_transcript "$R67D" "carry on")"
+S67D_LINE="$(s31_reason | /usr/bin/grep -o "bash [^ ]*session-poker.sh'\{0,1\} decline [A-Za-z0-9_.,-]* 'why they wait'" | head -1)"
+expect_contains "67g1 precondition: the wall's refusal prints the decline line with its placeholder" \
+  "decline T2,T3 'why they wait'" "$S67D_LINE"
+S67D_N="$(s65_count "$R67D")"
+S67D_OUT="$( cd "$R67D" && CLAUDE_CODE_SESSION_ID="$SID" bash -c "$S67D_LINE" 2>&1 )"; S67D_RC=$?
+expect_eq "67g2 §DECLINE-SLOT the printed command run verbatim is refused (exit 1)" "1" "$S67D_RC"
+expect_contains "67g3 …saying the placeholder is no reason, and to put the reason in its place" \
+  "put the reason in its place" "$S67D_OUT"
+expect_eq "67g4 …and no ledger line is written" "$S67D_N" "$(s65_count "$R67D")"
+S67D_REAL="$(printf '%s' "$S67D_LINE" | sed "s/'why they wait'\$/'the machine is saturated'/")"
+S67D_OUT="$( cd "$R67D" && CLAUDE_CODE_SESSION_ID="$SID" bash -c "$S67D_REAL" 2>&1 )"; S67D_RC=$?
+expect_eq "67g5 the same command with a real reason is recorded (exit 0)" "0" "$S67D_RC"
+expect_eq "67g6 …one ledger line, carrying that reason" "$((S67D_N + 1))|the machine is saturated" \
+  "$(s65_count "$R67D")|$(s65_field "$(s65_led "$R67D" | tail -1)" declined)"
+POKE_BOUND="$S67D_BOUND_WAS"
 
 finish
