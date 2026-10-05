@@ -1013,6 +1013,64 @@ expect_eq "T50-e1 strict on: a 20,000-character fact refuses the call, the same 
 expect_status "T50-e2 …same exit (2)" "2" "$DRV_RC"
 expect_true "T50-e3 …in under 5 seconds (took ${T50_DT}s)" test "$T50_DT" -lt 5
 
+section "§T58 — the same first line on multi-byte facts, and a pre-cut that leaves nothing (wave-27 T58; review pass 34 S3, N1)"
+# The b rows above use a run of `o`, one byte a column, so a pre-cut of three times the room, or of
+# one byte past it, still hands the cut every character it keeps: those rows cannot fail on the
+# multiplier. A run of `—` (three bytes, one column) or of `é` (two bytes) can: the pre-cut must
+# leave more columns than the room, or the fact fits, prints whole and loses its ellipsis. And a
+# fact the walk-back empties (continuation bytes with no lead byte) prints the ellipsis where the
+# fact stood, never nothing; the whole fact is still the detail's first line.
+#
+# fails-when: a 2,000-character fact of `—` or of `é` prints a first line other than the unbounded
+# cut's; a copy with the multiplier three, or `room + 1`, prints the same line as the shipped
+# library (the rows could not fail); a run of continuation bytes prints an empty fact.
+T58_ELL='…'
+for _glyph in '—' 'é'; do
+  T58_FACT="$(printf "${_glyph}%.0s" $(seq 1 2000))"
+  T58_UNB="$(bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$LIB_DIR/width.sh" "$T58_FACT" "$T50_ROOM")"
+  expect_eq "T58-b0 [$_glyph] fixture: the unbounded cut is a cut (shorter than the fact), ellipsis last" "yes|yes" \
+    "$([ "${#T58_UNB}" -lt "${#T58_FACT}" ] && echo yes)|$([ "${T58_UNB%"$T58_ELL"}" != "$T58_UNB" ] && echo yes)"
+  t47_drive "" "" exit2 "$FX_VERB" "$T58_FACT" "$FX_FIX" "$FX_DETAIL"
+  expect_eq "T58-b1 [$_glyph] a 2,000-character fact prints byte for byte what the unbounded cut prints" \
+    "bionic: run-arm refused — $T58_UNB (add it to Suites:)" "$DRV_ERR_1"
+done
+
+# THE TWO DOCTORED MULTIPLIERS: each copy still refuses with a line in the criterion's shape, and
+# its line for the `—` fact is not the unbounded cut's, so T58-b1 [—] goes red on it; `room + 1`
+# also turns T58-b1 [é] red.
+T58_EM="$(printf '—%.0s' $(seq 1 2000))"; T58_E2="$(printf 'é%.0s' $(seq 1 2000))"
+T58_UNB_EM="$(bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$LIB_DIR/width.sh" "$T58_EM" "$T50_ROOM")"
+T58_UNB_E2="$(bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$LIB_DIR/width.sh" "$T58_E2" "$T50_ROOM")"
+mutant m-times3 's/\$\(\(room \* 4\)\)/$((room * 3))/' '$((room * 4))'
+M_TIMES3="$MUT_PATH"
+mutant m-plus1 's/\$\(\(room \* 4\)\)/$((room + 1))/' '$((room * 4))'
+M_PLUS1="$MUT_PATH"
+expect_true "T58-m0 the two mutants parse, and each holds its multiplier" \
+  bash -c 'bash -n "$1" && bash -n "$2" && grep -qF "\$((room * 3))" "$1" && grep -qF "\$((room + 1))" "$2"' _ "$M_TIMES3" "$M_PLUS1"
+DRV_STRICT=""; drive "$M_TIMES3" exit2 "$FX_VERB" "$T58_EM" "$FX_FIX" "$FX_DETAIL"; DRV_STRICT=1
+expect_regex "T58-m1 MUTANT ×3 the line is still a refusal line (the mutant runs)" "$USER_LINE_RE" "$DRV_ERR_1"
+expect_ne "T58-m2 MUTANT ×3 …but its — line is not the unbounded cut's (T58-b1 [—] discriminates)" \
+  "bionic: run-arm refused — $T58_UNB_EM (add it to Suites:)" "$DRV_ERR_1"
+DRV_STRICT=""; drive "$M_PLUS1" exit2 "$FX_VERB" "$T58_EM" "$FX_FIX" "$FX_DETAIL"; DRV_STRICT=1
+expect_regex "T58-m3 MUTANT +1 the line is still a refusal line (the mutant runs)" "$USER_LINE_RE" "$DRV_ERR_1"
+expect_ne "T58-m4 MUTANT +1 …but its — line is not the unbounded cut's (T58-b1 [—] discriminates)" \
+  "bionic: run-arm refused — $T58_UNB_EM (add it to Suites:)" "$DRV_ERR_1"
+DRV_STRICT=""; drive "$M_PLUS1" exit2 "$FX_VERB" "$T58_E2" "$FX_FIX" "$FX_DETAIL"; DRV_STRICT=1
+expect_regex "T58-m5 MUTANT +1 the é line is a refusal line too" "$USER_LINE_RE" "$DRV_ERR_1"
+expect_ne "T58-m6 MUTANT +1 …and not the unbounded cut's (T58-b1 [é] discriminates)" \
+  "bionic: run-arm refused — $T58_UNB_E2 (add it to Suites:)" "$DRV_ERR_1"
+
+# THE EMPTIED FACT: 400 continuation bytes, no lead byte, both locales.
+T58_CONT="$(printf '\200%.0s' $(seq 1 400))"
+expect_eq "T58-n0 fixture: the fact is 400 bytes, every one a continuation byte" "400|0" \
+  "$(printf '%s' "$T58_CONT" | LC_ALL=C wc -c | tr -d ' ')|$(printf '%s' "$T58_CONT" | LC_ALL=C tr -d '\200' | LC_ALL=C wc -c | tr -d ' ')"
+for _lc in C "$T47_UTF8"; do
+  t47_drive "" "$_lc" exit2 "$FX_VERB" "$T58_CONT" "$FX_FIX" "$FX_DETAIL"
+  expect_eq "T58-n1 [$_lc] a fact the pre-cut empties prints the ellipsis where the fact stood" \
+    "bionic: run-arm refused — … (add it to Suites:)" "$DRV_ERR_1"
+  expect_eq "T58-n2 [$_lc] …and the whole fact is still the detail's first line" "$T58_CONT" "$(sed -n '3p' "$SANDBOX/.err")"
+done
+
 section "§ROOT — the fix line's pieces live beside the renderer (wave-24 T13, D10)"
 # Moved from lib/walls.sh so the landing refusal in lib/stop.sh prints the same root and the
 # same quoting the budget arm does. Each answer is read through a fresh shell that sources
