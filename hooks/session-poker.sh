@@ -3219,7 +3219,7 @@ launch_sync_sweep() {  # <plan> <root>
 # row has a launch to judge.
 LS_PROOFS=""; LS_PROOFS_READ=no
 launch_sync_read() {  # <plan> <root> <row id> <launched_at> -> 0 when a review proof of that row is newer than the launch
-  local plan="$1" root="$2" id="$3" la="$4" at ev doc
+  local plan="$1" root="$2" id="$3" la="$4" at ev q doc
   [ -n "$la" ] || return 1
   if [ "$LS_PROOFS_READ" = no ]; then
     LS_PROOFS="$(awk '
@@ -3227,18 +3227,21 @@ launch_sync_read() {  # <plan> <root> <row id> <launched_at> -> 0 when a review 
       f { next }
       /^##[ \t]/ { insdlc = ($0 ~ /^##[ \t]+SDLC State/); next }
       insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {
-        a = substr($0, RSTART + 4, RLENGTH - 4)
-        if (match($0, / evidence=[^ ]+/)) print a "\t" substr($0, RSTART + 10, RLENGTH - 10)
+        a = substr($0, RSTART + 4, RLENGTH - 4); q = ""
+        if (match($0, / question=[^ ]+/)) q = substr($0, RSTART + 10, RLENGTH - 10)
+        if (match($0, / evidence=[^ ]+/)) print a "\t" substr($0, RSTART + 10, RLENGTH - 10) "\t" q
       }' "$plan" 2>/dev/null | sort -r)"
     LS_PROOFS_READ=yes
   fi
   [ -n "$LS_PROOFS" ] || return 1
   doc="$(docs_root "$root" 2>/dev/null)"
   case "$doc" in "$root"/*) doc="${doc#"$root"/}" ;; *) doc="" ;; esac
-  while IFS="$(printf '\t')" read -r at ev; do
+  # A READING IS ITS QUESTION'S ROW'S PROOF (wave-27 T10; D4): a proof carrying question= is
+  # matched to the read row carrying that question, as proof-add returned it, not by its Files.
+  while IFS="$(printf '\t')" read -r at ev q; do
     [ -n "$at" ] && [ -n "$ev" ] || continue
     [ "$la" \< "$at" ] || return 1
-    units_live_rows "$plan" "$ev" ${doc:+"$doc/$ev"} 2>/dev/null \
+    units_live_rows "$plan" ${q:+--question "$q"} "$ev" ${doc:+"$doc/$ev"} 2>/dev/null \
       | awk -F'\t' -v id="$id" '$1 == id && $2 == "review" { f = 1 } END { exit !f }' && return 0
   done <<EOF
 $LS_PROOFS
@@ -5693,7 +5696,10 @@ EOF
     # row reading `live:head` (`units_live_rows`, the kind default included) whose `Files` hold
     # this evidence returns to `pending` in the same write — that row alone: the proof of another
     # review, the settled final one among them, leaves a live pass still running where it is
-    # (wave-26 T46; review 10 F3). The evidence is handed in both spellings, from the docs root
+    # (wave-26 T46; review 10 F3). A READING RETURNS THE ROW CARRYING ITS QUESTION (wave-27 T10;
+    # D4): handed --question, `units_live_rows` finds a read row by the question it read, not by
+    # its Files, so a second pass written under a new name still returns its row, and that row
+    # alone; a bare row is still found by its Files. The evidence is handed in both spellings, from the docs root
     # (`record/…`) and from the repository, so a Files cell in either matches. It returns with
     # its agent, worktree and base cells cleared: the row is one row across every pass, each pass
     # its own launch — the launch recorder sets it active again and adds that pass's ledger line,
@@ -5703,7 +5709,7 @@ EOF
     if [ "$PF_KIND" = review ]; then
       PF_DOCREL="$(docs_root "$PV_REPO")"
       case "$PF_DOCREL" in "$PV_REPO"/*) PF_DOCREL="${PF_DOCREL#"$PV_REPO"/}/$PF_REL" ;; *) PF_DOCREL="" ;; esac
-      for _pf_id in $(units_live_rows "$PV_NEW" "$PF_REL" $PF_DOCREL 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { print $1 }'); do
+      for _pf_id in $(units_live_rows "$PV_NEW" ${PF_QUESTION:+--question "$PF_QUESTION"} "$PF_REL" $PF_DOCREL 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { print $1 }'); do
         _pf_cells=(status=pending agent=—)
         units_has_column "$PV_NEW" worktree && _pf_cells+=(worktree=—)
         units_has_column "$PV_NEW" base && _pf_cells+=(base=—)
@@ -7048,17 +7054,17 @@ EOF
             # row that reads `live:head`, naming the difference past the last review proof, from
             # the head this tick already read (UNITS_LIVE_HEAD; no git here). Before the first
             # review proof there is no range, and no line: the review reads all the landed work.
-            SCHED_RANGE="$(units_live_range "$SCHED_PLAN" 2>/dev/null)"
-            if [ -n "$SCHED_RANGE" ]; then
-              while IFS="$(printf '\t')" read -r LR_ID _; do
-                [ -n "$LR_ID" ] || continue
-                case "$SCHED_OFFERED " in
-                  *" $LR_ID "*) say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more" ;;
-                esac
-              done <<EOF
+            # THE RANGE IS THE ROW'S (wave-27 T10; D4): a read row's starts at the oldest last
+            # reading among its own questions, so two rows offered at once can print two ranges;
+            # a bare `live:head` row's is the one range 1.11.0 printed.
+            while IFS="$(printf '\t')" read -r LR_ID _; do
+              [ -n "$LR_ID" ] || continue
+              case "$SCHED_OFFERED " in *" $LR_ID "*) ;; *) continue ;; esac
+              SCHED_RANGE="$(units_live_range "$SCHED_PLAN" "$LR_ID" 2>/dev/null)"
+              [ -n "$SCHED_RANGE" ] && say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more"
+            done <<EOF
 $(units_live_rows "$SCHED_PLAN" 2>/dev/null)
 EOF
-            fi
           else
             # A READY ROW THE STANDING DECLINE ANSWERED IS NOT "NOT READY" (T27): the line says
             # which answer holds the rows, and the standing line above says why.
