@@ -531,25 +531,36 @@ PLAN
 # Under fork pressure `REPO=$(make_repo …)` came back empty: the fixture then wrote toward `/`, the
 # wall ran inert and answered allow, and a row expecting allow passed having tested nothing. Three
 # parts, each in one place:
-#   - the take: an ERR trap catches any `<var>=$(make_repo …)` that failed (a dying subshell, or
-#     make_repo's own check above) and points <var> at a path under "$SANDBOX/.lost/", so every
-#     write the fixture goes on to make lands inside the sandbox;
+#   - the take: the guard is on the VALUE. A DEBUG trap notes each `<var>=$(make_repo …)` and,
+#     before the next command at that subshell level ($BASH_SUBSHELL: the suite runs under
+#     /bin/bash 3.2, which has no BASHPID), reads <var>: empty, whatever make_repo exited
+#     with (a dying subshell, make_repo's own check above, or nothing printed at all), it points
+#     <var> at a path under "$SANDBOX/.lost/" before any word is expanded, so no path is ever
+#     built from an empty value and every write the fixture goes on to make lands in the sandbox;
 #   - the drive: run_gate refuses to run the wall on a payload whose cwd is under .lost, empty
 #     (unless the row sets GATE_CWD_FREE=1) or outside the sandbox, and names the fixture;
 #   - the rows: while a fixture is lost, `ok` fails each row by its own name, so no row passes
 #     on a wall that never ran. The next drive on a made fixture clears it.
 FIXTURE_LOST=""; FIXTURE_LOST_N=0
 SANDBOX_P="$(cd "$SANDBOX" && pwd -P)"
-fixture_lost_take() {
-  local v="${BASH_COMMAND%%=*}"
-  case "$BASH_COMMAND" in *'=$(make_repo '*) : ;; *) return 0 ;; esac
-  case "$v" in ''|*[!A-Za-z0-9_]*) return 0 ;; esac
-  FIXTURE_LOST_N=$((FIXTURE_LOST_N + 1))
-  printf -v "$v" '%s' "$SANDBOX/.lost/$v-$FIXTURE_LOST_N"
-  FIXTURE_LOST="$BASH_COMMAND"
+FIXTURE_TAKE=""; FIXTURE_TAKE_LEVEL=""; FIXTURE_TAKE_CMD=""
+fixture_take_guard() {
+  if [ -n "$FIXTURE_TAKE" ] && [ "$FIXTURE_TAKE_LEVEL" = "$BASH_SUBSHELL" ]; then
+    local v="$FIXTURE_TAKE"; FIXTURE_TAKE=""
+    if [ -z "${!v}" ]; then
+      FIXTURE_LOST_N=$((FIXTURE_LOST_N + 1))
+      printf -v "$v" '%s' "$SANDBOX/.lost/$v-$FIXTURE_LOST_N"
+      FIXTURE_LOST="$FIXTURE_TAKE_CMD"
+    fi
+  fi
+  case "$BASH_COMMAND" in
+    *'=$(make_repo '*)
+      case "${BASH_COMMAND%%=*}" in ''|*[!A-Za-z0-9_]*) return 0 ;; esac
+      FIXTURE_TAKE="${BASH_COMMAND%%=*}"; FIXTURE_TAKE_LEVEL="$BASH_SUBSHELL"; FIXTURE_TAKE_CMD="$BASH_COMMAND" ;;
+  esac
 }
-set -o errtrace
-trap fixture_lost_take ERR
+set -o functrace
+trap fixture_take_guard DEBUG
 fixture_drive_ok() {  # <payload cwd> -> 0 when the wall may run on it; else FIXTURE_LOST is named
   case "$1" in
     "$SANDBOX"/.lost/*) FIXTURE_LOST="${FIXTURE_LOST:-$1}" ;;
@@ -10295,10 +10306,79 @@ T57_G=$(make_repo() { :; }
   X=$(make_repo rt57empty yes)
   run_gate "$(mk_agent_payload "$SID_A" "$X")"
   printf '%s|%s|%s' "$X" "$FIXTURE_LOST" "$GATE_VERDICT")
-expect_eq "T57-N6 …and an empty answer is caught at the drive" "|a payload with no cwd|fixture-lost" "$T57_G"
+expect_eq "T57-N6 …and an empty answer that exits 0 is caught at the take, into the sandbox, too" \
+  "$SANDBOX/.lost/X-1|X=\$(make_repo rt57empty yes)|fixture-lost" "$T57_G"
 T57_G=$(FIXTURE_LOST="X=\$(make_repo gone yes)"; ok "a row after a lost fixture")
 expect_contains "T57-N6 …while a fixture is lost, a row that would pass fails by its own name" "FAIL: a row after a lost fixture" "$T57_G"
 REPO=$(make_repo rt57made yes)
 expect_eq "T57-N6 a made fixture leaves nothing lost (the positive)" "|ok" "$FIXTURE_LOST|$(git -C "$REPO" rev-parse -q --verify HEAD >/dev/null && echo ok)"
+
+# N1 (A-orch-101): an ABSOLUTE path is resolved as proof-add resolves it, its longest existing
+# directory physically and the rest in the text. The sandbox is spelt as the shell spells it (on
+# macOS /var/…), while the project root the wall reads is the physical one (/private/var/…).
+t57_abs_gate() {  # <tag> <role> <rigor> <artifact> [<files line>] -> R, as q49_gate's
+  local repo; repo=$(make_repo "rt57-$1" yes); write_attestation "$repo" "$SID_A"; q_rigor "$repo" "$3"
+  mkdir -p "$repo/.bionic/docs/record/w" "$SANDBOX/rt57-$1-elsewhere"
+  ln -s "$SANDBOX/rt57-$1-elsewhere" "$repo/.bionic/docs/record/w/out"
+  local brief="Your task: read.
+Expected artifact: ${4//@R@/$repo}
+Expected duration: ~30 minutes.
+Suites: tests/widget.test.sh
+Questions: ${T57_QS:-evidence}"
+  [ -n "${5:-}" ] && brief="$brief
+${5//@R@/$repo}"
+  REPO="$repo"; q_gate "$repo" "t57-$1" "$2" "$brief"
+  if [ "$GATE_VERDICT" = allow ]; then R="allow:$(roster_field "$(q_row "$repo")" questions)"
+  else R="deny:$(printf "%s\n" "$GATE_ERR" | /usr/bin/grep -m1 "bionic: dispatch refused")"; fi
+}
+t57_abs_gate abs1 bionic:auditor audited "@R@/.bionic/docs/record/w/a.md"
+expect_eq "T57-N1 the exam's shape: a record by its absolute path as the shell spells the project is counted" "allow:evidence" "$R"
+T57_QS='adversarial, structure' t57_abs_gate abs2 bionic:critic peer-reviewed "@R@/.bionic/docs/record/w/a.md" "Files: @R@/.bionic/docs/record/w/b.md"
+expect_eq "T57-N1 …and two such records are two" "allow:adversarial,structure" "$R"
+T57_QS='adversarial, structure' t57_abs_gate abs3 bionic:critic peer-reviewed "@R@/.bionic/docs/record/w/a.md" "Files: @R@/.bionic/docs/record/w/out/b.md"
+expect_contains "T57-N1 an absolute path through a symlinked directory that lands outside the record root is no record" "dealt 2 questions, names 1 record" "$R"
+T57_QS='adversarial, structure' t57_abs_gate abs4 bionic:critic peer-reviewed "@R@/.bionic/docs/record/w/a.md" "Files: @R@/.bionic/docs/record/new/deep/b.md"
+expect_eq "T57-N1 a path whose directories do not exist yet under a real record root is counted" "allow:adversarial,structure" "$R"
+expect_eq "T57-N1 …and the fixture really has no such directory" "absent" "$([ -e "$REPO/.bionic/docs/record/new" ] && echo present || echo absent)"
+
+# a reader's Files: asks for no derivation (review pass 38 B1, A-orch-105). These fixtures have no
+# impact-command:, the shipped default.
+T57_REC=.bionic/docs/record/w
+t57_rd() {  # <questions> <files line> [<suites line>] [<runs line>] -> a reader brief
+  printf 'Your task: re-run the evidence.\nExpected artifact: %s/e.md\nExpected duration: ~30 minutes.\nQuestions: %s\n%s' "$T57_REC" "$1" "$2"
+  [ -n "${3:-}" ] && printf '\n%s' "$3"
+  [ -n "${4:-}" ] && printf '\n%s' "$4"
+  return 0
+}
+T57_PY="Re-executes: ${RL_BT}pytest tests/${RL_BT}"
+q49_gate t57-d1 bionic:auditor audited "$(t57_rd evidence "Files: $T57_REC/e.md" '' "$T57_PY")"
+expect_eq "T57-D an auditor with Files: naming its record, no Suites: line and a pytest run is admitted" "allow:evidence" "$R"
+expect_eq "T57-D …its row reads the waiver: suites_allowed=none" "none" "$(roster_field "$(q_row "$REPO")" suites_allowed)"
+q49_gate t57-d2 bionic:critic tested "$(t57_rd 'evidence, adversarial, structure' "Files: $T57_REC/e.md, $T57_REC/f.md, $T57_REC/g.md" '' "$T57_PY")"
+expect_eq "T57-D a tested critic with its three records on Files: and a pytest run is admitted" "allow:evidence,adversarial,structure" "$R"
+q49_gate t57-d3 bionic:auditor audited "$(t57_rd evidence "Files: $T57_REC/e.md" 'Suites: none' "$T57_PY")"
+expect_eq "T57-D …the same with Suites: none beside the run, as today" "allow:evidence" "$R"
+q49_gate t57-d4 bionic:auditor audited "$(t57_rd evidence "Files: $T57_REC/e.md")"
+expect_contains "T57-D an auditor with Files: and no Suites: line and no run is refused: nothing to re-execute" "the auditor declares nothing to re-execute" "$R"
+expect_absent "T57-D …never the impact-command refusal" "no impact command" "$R"
+q49_gate t57-d5 bionic:reviewer audited "$(t57_rd structure "Files: $T57_REC/e.md")"
+expect_eq "T57-D a reviewer not dealt evidence with its record on Files: and no Suites: line is admitted" "allow:structure" "$R"
+REPO=$(make_repo rt57d6 yes); write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: write it.
+Expected artifact: $T57_REC/w.md
+Expected duration: ~30 minutes.
+Files: lib/a.sh" "t57-d6" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "implementor")"
+expect_eq "T57-D a writer with Files: and no Suites: line is refused as today (the control)" "deny" "$GATE_VERDICT"
+expect_contains "T57-D …on the impact-command refusal" "no impact command is configured here" "$GATE_ERR"
+T57_IMP="$SANDBOX/t57-impact"; mkdir -p "$T57_IMP/.bionic"
+printf 'printf "x.test.sh\\tlib/a.sh\\n"\n' > "$T57_IMP/impact-stub.sh"
+printf 'impact-command: bash %s/impact-stub.sh\n' "$T57_IMP" > "$T57_IMP/.bionic/config.yaml"
+BV=$(brief_verdict implementor "$T57_IMP" "Files: lib/a.sh")
+expect_contains "T57-D with an impact command, a writer's Files: derives its suites (the positive)" "suites=x.test.sh" "$BV"
+BV=$(brief_verdict bionic:auditor "$T57_IMP" "Questions: evidence
+Files: $T57_REC/e.md
+$T57_PY")
+expect_contains "T57-D …while an auditor's records derive nothing: its set is the waiver" "suites=none" "$BV"
+expect_contains "T57-D …and it is admitted" "rc=0" "$BV"
 
 finish

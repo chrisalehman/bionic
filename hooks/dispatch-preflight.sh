@@ -2273,7 +2273,24 @@ Then retry the dispatch."
     # `docs_root`, the one the fact verb resolves, loaded through run.sh) after `.`, `..` and
     # doubled slashes are resolved in the text, a relative path read from the project root; it
     # does not end in `/`; and it is compared in that resolved form. Any other path may stay on
-    # Files: (a scratch file) and is not a record. Text only: nothing is read off the disk.
+    # Files: (a scratch file) and is not a record.
+    #
+    # AN ABSOLUTE PATH IS PLACED AS THE FACT VERB PLACES IT (A-orch-101). `proof-add review` reads a
+    # record's directory with `cd -P`, so the reader exam's `/var/…/s1/.bionic/docs/record/…`
+    # is its project's `/private/var/…` record. Here an absolute path's longest existing directory
+    # is resolved physically and the rest in the text, and the record root the same way, so the
+    # wall and the verb give one answer for one path: a symlinked directory that lands outside
+    # the root is no record, and a record directory the reader has not made yet still is. A
+    # relative path stays text, read from the project root.
+    _dp_rec_place() {  # <path> -> the path with an absolute one's longest existing directory physical
+      local p="$1" d rest phys
+      case "$p" in
+        /*) d="${p%/*}"; rest="${p##*/}"
+            while [ -n "$d" ] && [ ! -d "$d" ]; do rest="${d##*/}/$rest"; d="${d%/*}"; done
+            phys="$(cd "${d:-/}" 2>/dev/null && pwd -P)" && p="${phys%/}/$rest" ;;
+      esac
+      printf '%s\n' "$p"
+    }
     if [ -n "${_q_admitted:-}" ]; then
       _q_nq="$(printf '%s' "$_q_set" | awk -F, '{ print NF }')"
       _q_rroot="$BIONIC_ROOT/.bionic/docs/record"
@@ -2281,7 +2298,8 @@ Then retry the dispatch."
         _q_dr="$(docs_root "$BIONIC_ROOT" 2>/dev/null)"; [ -n "$_q_dr" ] && _q_rroot="$_q_dr/record"
       fi
       _q_nr="$(printf '%s\n%s\n' "$(brief_field "$LIFTED" deliverable)" "$(brief_field "$LIFTED" files | tr ',' '\n')" \
-        | awk -v root="$BIONIC_ROOT" -v rr="$_q_rroot" '
+        | while IFS= read -r _q_p; do [ -n "$_q_p" ] && _dp_rec_place "$_q_p"; done \
+        | awk -v root="$BIONIC_ROOT" -v rr="$(_dp_rec_place "$_q_rroot")" '
           function resolve(p,   n, i, seg, out, k, dir) {
             if (p !~ /^\//) p = root "/" p
             dir = (p ~ /\/(\.\.?)?$/)

@@ -240,6 +240,11 @@ dp_reads_evidence() {  # <subagent_type> [<questions, comma-joined>] -> 0 when t
   esac
   return 1
 }
+# dp_is_reader <subagent_type> -> 0 for the three reader roles, prefixed or bare (wave-27 T57).
+dp_is_reader() {
+  case "${1-}" in bionic:auditor|auditor|bionic:critic|critic|bionic:reviewer|reviewer) return 0 ;; esac
+  return 1
+}
 dp_runs_cap() {  # <subagent_type> [<questions>] -> how many suite runs that brief's Re-executes: may declare
   if dp_reads_evidence "${1-}" "${2-}"; then printf '%s' "$DP_AUDITOR_RUNS_MAX"
   else printf '%s' "$DP_SUITES_MAX"; fi
@@ -1500,6 +1505,14 @@ brief_validate_fields() {
   files_unread=$(brief_field "$lifted" files_unread)
   files_bad=$(brief_field "$lifted" files_bad)
   questions=$(brief_field "$lifted" questions)
+  # A READER'S Files: ASKS FOR NO DERIVATION (wave-27 T57; review pass 38 B1, A-orch-105). A
+  # reader's Files: line lists its records, and a reader edits no tracked file, so nothing is
+  # derived from it and "no impact command is configured" is never its answer: with no Suites:
+  # line it is read as `Suites: none`, and the evidence rules below judge the runs it declares.
+  # A Suites: line whose tokens were refused, dropped or all comment is not "no Suites: line".
+  if dp_is_reader "$role" && [ -n "$files" ] && [ -z "$suites$suites_bad$suites_dropped$suites_commented" ]; then
+    suites="none"
+  fi
   # THE ROLE AND ITS QUESTIONS DECIDE THE RUN CAP (wave-20 T4; wave-27 T15, F4), and the refusal
   # texts print the number the lift applied, from the same function.
   cap=$(dp_runs_cap "$role" "$questions")
