@@ -9435,17 +9435,24 @@ section "AMEND-ROOT: amend reads a Files: entry with the dispatch wall's one rea
 # THE DEFECT, from a real run: the stop wall printed `amend <name> --files+ 'CONTEXT.md'` and
 # amend REFUSED it as a change of nothing, because the grammar read a Files: entry as a path
 # only when it carried a `/`. amend now reads each addition with the one reader in brief.sh,
-# the dispatch wall's own: a path carries a `/`, or an extension, or names a file at the root.
+# the dispatch wall's own: a path carries a `/`, or an extension. A bare word is refused naming
+# `./<word>`, whether or not a file of that name is at the root (wave-27 T42: no wall lists it).
 RAR="$(make_repo amend-root)"; new_roster "$RAR"; s30_row "$RAR"
 poke "$RAR" amend w1 --files+ 'CONTEXT.md' --reason 'the fix touches the root file'
 expect_eq "AMEND-ROOT AC-12.3 amend --files+ 'CONTEXT.md' succeeds" "0" "$RC"
 expect_eq "AMEND-ROOT …and files= holds the root file as written" "hooks/a.sh,CONTEXT.md" \
   "$(s30_field "$(s30_last "$RAR")" files)"
-# A bare name with no extension is a path when the file exists at the root.
+# A BARE WORD IS REFUSED THOUGH A FILE OF THAT NAME IS AT THE ROOT (wave-27 T42): T29's arm that
+# listed the root is gone, and `./Widgetfile` is the spelling, with no listing behind it.
 echo x > "$RAR/Widgetfile"
+RAR_SUM="$(cksum < "$(roster_of "$RAR")")"
 poke "$RAR" amend w1 --files+ Widgetfile --reason 'and the root build file'
-expect_eq "AMEND-ROOT2 a bare name that exists at the root is accepted" "0" "$RC"
-expect_eq "AMEND-ROOT2 …and stored as written" "hooks/a.sh,CONTEXT.md,Widgetfile" \
+expect_eq "AMEND-ROOT2 a bare word is REFUSED though the file is at the root (exit 1)" "1" "$RC"
+expect_contains "AMEND-ROOT2 …naming the word and ./Widgetfile" "Files: names Widgetfile, not a path — spell it ./Widgetfile" "$OUT"
+expect_eq "AMEND-ROOT2 …and writes nothing" "$RAR_SUM" "$(cksum < "$(roster_of "$RAR")")"
+poke "$RAR" amend w1 --files+ ./Widgetfile --reason 'the spelling it named'
+expect_eq "AMEND-ROOT2b its ./ spelling is accepted" "0" "$RC"
+expect_eq "AMEND-ROOT2b …and stored as written" "hooks/a.sh,CONTEXT.md,./Widgetfile" \
   "$(s30_field "$(s30_last "$RAR")" files)"
 # Any other entry refuses, naming the spelling that is accepted, and writes nothing.
 RAR_SUM="$(cksum < "$(roster_of "$RAR")")"
@@ -9455,8 +9462,29 @@ expect_contains "AMEND-ROOT3 …naming the entry and the accepted spelling" "./O
 expect_eq "AMEND-ROOT3 …and writes nothing" "$RAR_SUM" "$(cksum < "$(roster_of "$RAR")")"
 poke "$RAR" amend w1 --files+ ./Otherfile --reason 'the spelling it named'
 expect_eq "AMEND-ROOT4 the spelling the refusal names is accepted" "0" "$RC"
-expect_eq "AMEND-ROOT4 …and recorded" "hooks/a.sh,CONTEXT.md,Widgetfile,./Otherfile" \
+expect_eq "AMEND-ROOT4 …and recorded" "hooks/a.sh,CONTEXT.md,./Widgetfile,./Otherfile" \
   "$(s30_field "$(s30_last "$RAR")" files)"
+# TWO ADDITIONS IN ONE AMEND are two items of the list, never one item holding white space.
+poke "$RAR" amend w1 --files+ lib/x.sh --files+ lib/y.sh --reason 'two at once'
+expect_eq "AMEND-ROOT5 two --files+ in one amend succeed" "0" "$RC"
+expect_eq "AMEND-ROOT5 …and both are recorded" "hooks/a.sh,CONTEXT.md,./Widgetfile,./Otherfile,lib/x.sh,lib/y.sh" \
+  "$(s30_field "$(s30_last "$RAR")" files)"
+# A PROSE ADDITION is refused once, naming it, with no ./ advice.
+RAR_SUM="$(cksum < "$(roster_of "$RAR")")"
+poke "$RAR" amend w1 --files+ 'lib/z.sh (new)' --reason 'a note in the path'
+expect_eq "AMEND-ROOT6 an addition holding white space is REFUSED (exit 1)" "1" "$RC"
+expect_contains "AMEND-ROOT6 …naming it whole" "Files: lib/z.sh (new) is not a path" "$OUT"
+expect_absent "AMEND-ROOT6 …with no ./ advice" "./lib/z.sh" "$OUT"
+expect_eq "AMEND-ROOT6 …and writes nothing" "$RAR_SUM" "$(cksum < "$(roster_of "$RAR")")"
+# A DERIVED BUDGET with suites added re-derives the merged files: two of them are a list of two.
+RAD="$(make_repo amend-root-derived)"; new_roster "$RAD"
+printf '#!/bin/bash\necho tests/a.test.sh\n' > "$RAD/impact.sh"
+mkdir -p "$RAD/.bionic"; printf 'impact-command: bash impact.sh\n' > "$RAD/.bionic/config.yaml"
+s30_row "$RAD" files=hooks/a.sh,hooks/b.sh suites_source=derived
+poke "$RAD" amend w1 --suites+ tests/c.test.sh --reason 'one more suite'
+expect_eq "AMEND-ROOT7 a derived row holding two files takes a suite (exit 0)" "0" "$RC"
+expect_contains "AMEND-ROOT7 …and the suite is on the row" "c.test.sh" \
+  "$(s30_field "$(s30_last "$RAD")" suites_allowed)"
 
 # ============================================================
 section "Section 55 §RECON-PLAN: the tick asks for a task-list reconcile when current: moves 3 to 4 and when the table grows (wave-27 T13; REQ-11 AC-11.3; D20)"
