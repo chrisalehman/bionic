@@ -9342,4 +9342,67 @@ expect_eq "GATES5 a dispatch for a row reading live:approval:release before appr
 expect_contains "GATES5b …naming the approval it waits for" "approval:release" "$GATE_VERR"
 
 
+
+# --- FILES-ROOT: a root file on a Files: line is recorded (wave-27 T29; REQ-12 AC-12.1, D21) ---
+# THE DEFECT, from a real run: `Files: CONTEXT.md, a/b.ts` recorded only `a/b.ts`, because the
+# grammar read an entry as a path only when it carried a `/`. The writer then edited the file
+# its brief named and its stop was refused for it. One reader in brief.sh now reads every entry:
+# a path carries a `/`, or an extension, or names a file that exists at the project root.
+REPO=$(make_repo rfilesroot yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfr.md
+Files: CONTEXT.md, a/b.ts
+Suites: tests/one.test.sh' "w-filesroot")"
+expect_eq "FILES-ROOT a brief naming a root file beside a nested one is admitted" "allow" "$GATE_VERDICT"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_contains "FILES-ROOT precondition: the dispatch wrote its row" "|name=w-filesroot|" "$ROW"
+expect_eq "FILES-ROOT AC-12.1 files= holds the root file and the nested one, as written" \
+  "CONTEXT.md,a/b.ts" "$(roster_field "$ROW" files)"
+# A bare name with no extension is a path when the file exists at the root: make_repo has none
+# called Widgetfile, so this fixture plants one. FILES-DROP below is the same name, unplanted.
+REPO=$(make_repo rfilesroot2 yes)
+write_attestation "$REPO" "$SID_A"
+echo x > "$REPO/Widgetfile"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfr2.md
+Files: Widgetfile, a/b.ts
+Suites: tests/one.test.sh' "w-filesroot2")"
+expect_eq "FILES-ROOT2 a bare name that exists at the root is admitted" "allow" "$GATE_VERDICT"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "FILES-ROOT2 …and stored as written" "Widgetfile,a/b.ts" "$(roster_field "$ROW" files)"
+
+# --- FILES-DROP: an entry the reader does not read as a path refuses (REQ-12 AC-12.2, D21) ---
+REPO=$(make_repo rfilesdrop yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfd.md
+Files: Widgetfile, a/b.ts
+Suites: tests/one.test.sh' "w-filesdrop")"
+expect_eq "FILES-DROP AC-12.2 an entry with no slash, no extension and no file at the root refuses" \
+  "deny" "$GATE_VERDICT"
+FD_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
+expect_contains "FILES-DROP precondition: the refusal line is read" "bionic: dispatch refused" "$FD_LINE"
+expect_contains "FILES-DROP …its first line names the entry" "Widgetfile" "$FD_LINE"
+expect_contains "FILES-DROP …and the accepted spelling" "./Widgetfile" "$FD_LINE"
+expect_eq "FILES-DROP …and no row was written" "" "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+# The spelling the refusal names is one the wall admits, in the same repo.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfd.md
+Files: ./Widgetfile, a/b.ts
+Suites: tests/one.test.sh' "w-filesdrop")"
+expect_eq "FILES-DROP2 the spelling it names is admitted" "allow" "$GATE_VERDICT"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "FILES-DROP2 …and recorded" "./Widgetfile,a/b.ts" "$(roster_field "$ROW" files)"
+# An unfilled slot is guidance, not an entry: the scaffold line pasted as shipped refuses nothing.
+REPO=$(make_repo rfilesslot yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/wfs.md
+Files: <paths>, a/b.ts
+Suites: tests/one.test.sh' "w-filesslot")"
+expect_eq "FILES-DROP3 an unfilled <slot> on a Files: line is not an entry, and admits" "allow" "$GATE_VERDICT"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_eq "FILES-DROP3 …and the row holds the real path alone" "a/b.ts" "$(roster_field "$ROW" files)"
+
 finish
