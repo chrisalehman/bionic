@@ -9557,10 +9557,10 @@ for s56n in ev1 no-reviewed no-question no-result no-scope fine partial other-q 
     ev-narrow ev2 adv2 st-all st-no-single st-maybe st-bare st-crit; do
   S56_FILES="${S56_FILES:+$S56_FILES,}.bionic/docs/record/wave-01-fixture/$s56n.md"
 done
-s56_row() {  # <roster> <name> <type> [<questions>] -> one row appended; no questions key when none
+s56_row() {  # <roster> <name> <type> [<questions> [<files>]] -> one row appended; no questions key when none
   local r
   if [ $# -ge 4 ]; then
-    r="$(roster_row_fixture session="$SID" name="$2" agent_id="a-$2" subagent_type="$3" files="$S56_FILES")"
+    r="$(roster_row_fixture session="$SID" name="$2" agent_id="a-$2" subagent_type="$3" files="${5:-$S56_FILES}")"
     printf '%s|questions=%s\n' "$r" "$4"
   else
     roster_row_fixture session="$SID" name="$2" agent_id="a-$2" subagent_type="$3"
@@ -10006,7 +10006,8 @@ bound_marker "$R57T" "$SID" "$P57T" >/dev/null 2>&1
   && git worktree add -q -b task/01-fixture "$R57T/.worktrees/01-task" "$S57T_B" ) >/dev/null 2>&1
 S57T_C1="$(s57_commit "$R57T/.worktrees/01-task" lib/fix.sh C1)"
 new_roster "$R57T"
-s56_row "$(roster_of "$R57T")" w-tcrit bionic:critic evidence,adversarial,structure
+s56_row "$(roster_of "$R57T")" w-tcrit bionic:critic evidence,adversarial,structure \
+  .bionic/docs/record/task-01-fixture/evidence.md,.bionic/docs/record/task-01-fixture/adversarial.md,.bionic/docs/record/task-01-fixture/structure.md
 S57T_REC="$R57T/.bionic/docs/record/task-01-fixture"; mkdir -p "$S57T_REC"
 S57T_CHECKS="$(awk '/^- \*\*[a-z][a-z-]*\*\*/ { s = $0; sub(/^- \*\*/, "", s); sub(/\*\*.*$/, "", s); printf "check: %s PASS nothing to report\n", s }' \
   "${BIONIC_HOOKS_DIR}/../payload/context/checks-structure.md")"
