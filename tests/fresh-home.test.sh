@@ -1271,6 +1271,35 @@ printf 'y\n' | run_payload "$SETUP_SH" --only working-principles > "$TMP/setup-e
 expect_true "4d: a yes at the same question replaces the block with the shipped text" \
   cmp -s "$TMP/principles-expected.md" "$GLOBAL_MEMORY"
 
+# ---------------------------------------------------------------------------
+# Group 4e — a claude() block the user changed is theirs (wave-27 T77, review pass 64).
+#
+# On the machine setup built, a block holding bionic's earlier line and a line of the
+# user's is not on `--all`'s page, even fed nothing but yes; the step names it by its
+# lines, with bionic's lines for the user's hand, and no byte of the rc changes. The
+# rc is put back for Group 5.
+# ---------------------------------------------------------------------------
+
+section "Group 4e: --all leaves a changed claude() block alone and names it"
+
+cp "$RC_FILE_FIX" "$TMP/rc-before-4e"
+T77_FN="${RC_PROXY_LINE#*$'\n'}"
+T77_N="$(rc_nonblock_lines "$RC_FILE_FIX" | wc -l | tr -d ' ')"
+{ rc_nonblock_lines "$RC_FILE_FIX"
+  printf '%s\n' "$RC_START_LIT" "$T77_FN" 'export V9=9' "$RC_END_LIT"; } > "$TMP/rc-changed-4e"
+cp "$TMP/rc-changed-4e" "$RC_FILE_FIX"
+expect_ne "4e precondition: the earlier line is not the whole body" "$RC_PROXY_LINE" "$T77_FN"
+SETUP_OUT_E="$TMP/setup-changed-all.txt"
+printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$SETUP_OUT_E" 2>&1
+expect_contains "4e: the changed block is named by its lines" \
+  "lines $((T77_N + 1)) to $((T77_N + 4)) of" "$(cat "$SETUP_OUT_E")"
+expect_contains "4e: …with bionic's lines for the user's hand" "     ${T77_FN}" "$(cat "$SETUP_OUT_E")"
+expect_contains "4e: the page was printed (the row below is not vacuous)" "Do all of the above?" "$(cat "$SETUP_OUT_E")"
+expect_absent "4e: …and does not offer the claude() function" "add bionic's claude() shell function" "$(cat "$SETUP_OUT_E")"
+expect_absent "4e: …and the user's line is never printed" "V9=9" "$(cat "$SETUP_OUT_E")"
+expect_true "4e: the rc is byte for byte as it was" cmp -s "$TMP/rc-changed-4e" "$RC_FILE_FIX"
+cp "$TMP/rc-before-4e" "$RC_FILE_FIX"
+
 
 # ---------------------------------------------------------------------------
 # Group 5 — remove --all undoes the manifest (AC-10, the second half).
