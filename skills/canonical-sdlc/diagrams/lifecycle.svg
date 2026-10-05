@@ -114,11 +114,11 @@
   <rect x="484" y="350" width="200" height="146" rx="8" fill="#fff8f1" stroke="#c4520a" stroke-width="2.4"/>
   <text class="step" data-step="6" data-step-name="Review" x="500" y="376" font-size="16" fill="#16191d"><tspan font-weight="700">6</tspan><tspan dx="10" font-weight="600">Review</tspan></text>
   <text x="500" y="392" font-size="10.5" font-style="italic" fill="#c4520a">gate — is it well-made?</text>
-  <text x="500" y="412" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-skills:</text>
-  <text x="500" y="424" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">code-review-and-quality</text>
-  <text x="500" y="446" font-size="10.5" fill="#3a424c">· six axes, each PASS/FLAG/FAIL</text>
-  <text x="500" y="462" font-size="10.5" fill="#3a424c">· duplication reads the design</text>
-  <text x="500" y="478" font-size="10.5" fill="#3a424c">· independent critic (audited)</text>
+  <text x="500" y="412" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">bionic:</text>
+  <text x="500" y="424" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">canonical-sdlc</text>
+  <text x="500" y="446" font-size="10.5" fill="#3a424c">· questions: evidence,</text>
+  <text x="508" y="462" font-size="10.5" fill="#3a424c">adversarial, structure</text>
+  <text x="500" y="478" font-size="10.5" fill="#3a424c">· one fact each, or waived</text>
 
   <!-- step 7 -->
   <rect x="706" y="350" width="200" height="146" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
@@ -192,9 +192,9 @@
   <rect x="487" y="720" width="426" height="118" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
   <text x="505" y="744" font-size="13" font-weight="700" fill="#16191d">RIGOR — how much proof (cumulative)</text>
   <text x="505" y="766" font-size="10" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">tested &#8834; peer-reviewed &#8834; audited</text>
-  <text x="505" y="790" font-size="10.5" fill="#3a424c">Each tier contains the one before it. audited is the tier that</text>
-  <text x="505" y="805" font-size="10.5" fill="#3a424c">adds the independent critic at Step 6. Floors advise; they never</text>
-  <text x="505" y="820" font-size="10.5" fill="#3a424c">refuse — the user's lower value is taken, and recorded.</text>
+  <text x="505" y="790" font-size="10.5" fill="#3a424c">Each tier contains the one before it. Step 6 reads three questions</text>
+  <text x="505" y="805" font-size="10.5" fill="#3a424c">at every tier, dealt to 1, 2 or 3 readers by rigor. Floors advise;</text>
+  <text x="505" y="820" font-size="10.5" fill="#3a424c">they never refuse — the user's lower value is taken, and recorded.</text>
 
   <rect x="934" y="720" width="426" height="118" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
   <text x="952" y="744" font-size="13" font-weight="700" fill="#16191d">SCALE — how big</text>
