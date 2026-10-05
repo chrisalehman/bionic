@@ -69,9 +69,10 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
 2. **Materialize each sample** outside this checkout, under a path that says nothing:
    `bash tests/reader-exam/materialize.sh tests/reader-exam/samples/<name> <dest>`, where
    `<dest>` is a new directory under the machine's temporary directory, for example
-   `"$(mktemp -d)/s1"`. `materialize.sh` refuses a `<dest>` whose path names the sample. Keep
-   the printed range, and note which `<dest>` holds which sample: the readers see only
-   `<dest>`.
+   `"$(mktemp -d)/s1"`. `materialize.sh` refuses a `<dest>` whose path names the sample, and
+   one that is this checkout or lies inside it, since a build there sits beside every answer
+   key. Keep the printed range, and note which `<dest>` holds which sample: the readers see
+   only `<dest>`.
 
    Two readers of the same agent type never share a build. On a sample keyed `adversarial`,
    and on `clean`, the critic dealt `adversarial` and the one-mind critic are both
@@ -95,7 +96,9 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    - **The two helpers.** `run-session.sh` starts the session as `cd <dest> && claude -p
      --plugin-dir "$PLUGIN" --output-format json "<prompt>"`, with no other flag and no setting
      that widens what a session may do. It runs the CLI binary and not a shell function of the
-     same name, which may add flags, and it clears the parent session's identity variables, so
+     same name, which may add flags, and it refuses, before anything runs, a `<dest>` inside this
+     checkout, a `claude` on `PATH` that is a relative path (an entry `.`, an empty entry) or a file
+     inside `<dest>`, and a fifth argument. It clears the parent session's identity variables, so
      the session carries only its own. A session or a reader denied a tool is reported to the
      user and never worked round. It writes `<output file>` (the JSON result, which holds the
      session's id), `<output file>.err` and `<output file>.time`. `gen-prompt.sh` writes the
