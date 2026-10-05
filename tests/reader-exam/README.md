@@ -30,6 +30,9 @@ be sat again before the tree is green.
 - `materialize.sh <sample dir> <dest>`: builds the repository a reader is given, with an empty
   `.bionic/` of its own, and prints its range `<a>..<b>`. The key does not travel into it,
   and a `<dest>` whose path, as written or resolved, names the sample in any case is refused.
+- `run-session.sh <dest> <plugin copy> <prompt file> <output file>` and
+  `gen-prompt.sh <brief file>...`: the two helpers step 3 names. The first starts one
+  session headless, the second writes its prompt.
 - `sittings.md`: every sitting, newest last. The suite reads the last one in the file.
 
 ## The samples
@@ -69,25 +72,85 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    `"$(mktemp -d)/s1"`. `materialize.sh` refuses a `<dest>` whose path names the sample. Keep
    the printed range, and note which `<dest>` holds which sample: the readers see only
    `<dest>`.
+
+   Two readers of the same agent type never share a build. On a sample keyed `adversarial`,
+   and on `clean`, the critic dealt `adversarial` and the one-mind critic are both
+   `bionic:critic`. Started together, two critics with different question sets cannot be told
+   apart at start, and neither is pushed a checks file. Started one after the other, the second
+   reads the first's record in its own tree. So each of the two gets a build and a session of
+   its own. Readers of different types share their sample's build and are dispatched
+   together. That makes seven builds: `clean` twice (the auditor, the critic and the
+   reviewer, then the one-mind critic), `red-then-green` twice, and one for each other sample.
+   The first sitting used eight, because step 3's proof took a `clean` build for one reviewer.
 3. **Open an engaged session on the built sample.** `cd <dest> && claude --plugin-dir
-   "$PLUGIN"`. The session's project is the built sample, so the readers' working directory,
+   "$PLUGIN"`, or, headless as the first sitting ran it, `bash tests/reader-exam/gen-prompt.sh
+   <brief file>... > <prompt file>` and then `bash tests/reader-exam/run-session.sh <dest>
+   "$PLUGIN" <prompt file> <output file>`. The session's project is the built sample, so the readers' working directory,
    records and searches stay inside it. The built sample carries its own `.bionic/`, so it is
    a bionic root, and the session's first act is `/bionic:canonical-sdlc`, so it is engaged.
    bionic's start push reaches only the readers of an engaged session in a bionic root.
    **The first thing a sitting checks** is that this worked: a reader dispatched there holds
    the pushed files, and its role is the copy's, not the installed plugin's. A sitting whose
    readers held no checks files is not recorded.
-   - **Loading the built roles.** *Written by wave-27 T22, once T15 lands: how the session
-     gets the roles this checkout builds rather than the installed ones, and how that is
-     shown.*
+   - **The two helpers.** `run-session.sh` starts the session as `cd <dest> && claude -p
+     --plugin-dir "$PLUGIN" --output-format json "<prompt>"`, with no other flag and no setting
+     that widens what a session may do. It runs the CLI binary and not a shell function of the
+     same name, which may add flags, and it clears the parent session's identity variables, so
+     the session carries only its own. A session or a reader denied a tool is reported to the
+     user and never worked round. It writes `<output file>` (the JSON result, which holds the
+     session's id), `<output file>.err` and `<output file>.time`. `gen-prompt.sh` writes the
+     prompt on stdout: `/bionic:canonical-sdlc` first, then an instruction to dispatch each brief
+     exactly as written, to the agent type named on its first line, in the foreground, and, on a
+     refusal, to stop and never retry; to save any record a reader returned as text, unchanged,
+     at the path its brief names; and to reply with each record's path and whether it exists.
+     Each `<brief file>` is the line `subagent_type: <agent type>` and then the brief of
+     step 4, which is dispatched without that first line. The briefs given to one call are the
+     readers that share a build (step 2), so the prompt sends them together, in one message;
+     `STEP_ZERO=1` has the session quote the agent descriptions first, as below.
+   - **Loading the built roles.** `--plugin-dir "$PLUGIN"` loads the copy's roles and hooks in
+     place of the installed plugin's for that session. The first sitting (wave-27 T22) ran each
+     session headless, as `run-session.sh` does, with the prompt opening with
+     `/bionic:canonical-sdlc`. The slash command is all the engagement needs
+     (`hooks/engage.sh` writes `<dest>/.bionic/tmp/engaged-<session>.state`). After it the
+     session only dispatches: the dispatch wall writes each reader's row, with its
+     `questions=`, to `<dest>/.bionic/tmp/roster-<session>.state`, and the start push reads
+     that row. To show the roles are the copy's, ask the session before its first dispatch to
+     quote the Agent tool's description of `bionic:critic` and `bionic:reviewer`. Each must be
+     listed once, with the `description:` line of `$PLUGIN/agents/<role>.md`. (At the first
+     sitting the installed 1.11.0 plugin had no reviewer and another critic description.) Then
+     read each reader's transcript,
+     `~/.claude/projects/<name>/<session>/subagents/agent-<id>.jsonl`. `<name>` is the
+     session's physical working directory (`cd <dest> && pwd -P`, which on macOS turns `/var`
+     into `/private/var`) with every character that is not an ASCII letter or digit written
+     `-`: `sed 's/[^A-Za-z0-9]/-/g'`. So `/private/var/folders/x_y/T/tmp.AbC/s1` is
+     `-private-var-folders-x-y-T-tmp-AbC-s1`, and `_` and `.` are rewritten as well as `/`. The
+     session's own transcript is `~/.claude/projects/<name>/<session>.jsonl`, `<session>` being
+     the `session_id` in `<output file>`. The first sitting's eight directories all follow this
+     rule. A reader's `.meta.json` names the `agentType`, and its `hook_success` attachments
+     name each `SubagentStart` command that ran: one bare `execution-recorder.sh`, and
+     `execution-recorder.sh <question>` for each question dealt, a registration only the copy's
+     `hooks/hooks.json` carries.
 4. **Dispatch the readers** in that session, through the ordinary dispatch path, one dispatch
    per sample and question:
    - the role the audited dealing gives the sample's question (`facts_owed audited wave` in
      `payload/scripts/lib/proof.sh`): the auditor for `evidence`, the critic for
      `adversarial`, the reviewer for `structure`;
-   - and the one-mind case, the critic holding all three questions, on every sample.
+   - and the one-mind case, the critic holding all three questions, on every sample. It is
+     named `one-mind` wherever a reader's role is written below (record paths, headings, result
+     lines), so it is never taken for the critic the dealing gives `adversarial`. The agent
+     dispatched is still `bionic:critic`: `one-mind` is only how the sitting names that dispatch.
 
-   For `clean`, each of the three roles takes its own question, and the critic takes all three.
+   For `clean`, each of the three roles takes its own question, and the one-mind critic takes
+   all three.
+
+   The sitting's session binds no plan: the built sample's `docs/plan.md` is read by the
+   readers and is not a plan the session has registered. The dispatch wall therefore requires
+   each reader's `Questions:` line and does not hold it to a dealing, so it would not refuse a
+   set that no rigor deals that role. The orchestrator checks that by hand before each dispatch:
+   the brief's set is the one this step names for that role (`evidence` for the auditor,
+   `adversarial` for the critic, `structure` for the reviewer, all three for the one-mind
+   critic).
+
    The brief says nothing about an exam, the sample's name, or what to look for. It carries:
    - `Questions: <q>` on a line of its own (`Questions: evidence, adversarial, structure` for
      the one-mind case);
@@ -96,34 +159,61 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    - one record path per question it is dealt, under the record root
      `<dest>/.bionic/docs/record/`, in the directory named for the sitting's wave:
      `<dest>/.bionic/docs/record/<wave>/<label>-<role>-<question>.md`, where `<label>` is
-     the last component of `<dest>` (`s1`), never the sample's name; the orchestrator maps
-     the label back to its sample when it keeps the record (step 6). The one-mind critic gets
-     three paths, for example `…/wave-27-review-across-rigor/s1-critic-evidence.md`,
-     `…/s1-critic-adversarial.md` and `…/s1-critic-structure.md`, and writes each question's
-     pass to its own path;
+     the last component of `<dest>` (`s1`), never the sample's name, and `<role>` is the role
+     dealt the question or `one-mind`; the orchestrator maps the label back to its sample when
+     it keeps the record (step 6). The one-mind critic gets three paths, for example
+     `…/wave-27-review-across-rigor/s1-one-mind-evidence.md`, `…/s1-one-mind-adversarial.md`
+     and `…/s1-one-mind-structure.md`, and writes each question's pass to its own path, so its
+     records never share a path with the critic dealt `adversarial`;
    - `Suites:` naming each `tests/*.test.sh` of the built repository, one per suite (for
      example `Suites: tests/land.test.sh, tests/stamp.test.sh`), so a reader can re-execute
      the writers' evidence;
-   - `Re-executes: none`.
+   - `Re-executes: none`;
+   - `Expected artifact:` naming one of its record paths, and `Files:` listing every one of
+     them, comma-separated, one per question. The dispatch wall refuses a reader's brief with
+     no `Expected artifact:` line ("this brief names no deliverable"), and one that names
+     fewer records than it is dealt questions ("one Files: record per question"). The first
+     sitting's briefs also carried `Expected duration: 30 minutes`; the wall does not require
+     it (an absent duration only warns).
 
    A reader that cannot write files returns its records, and the orchestrator saves each
    unchanged at its path. No reader can dispatch a test-runner, so the evidence reader's
    revert-and-watch cannot be done: it will say so, likely as UNVERIFIABLE. That is a `flag`,
    which meets `clean` and does not change a defect sample's `fail`.
-   - **Checking what the readers held.** *Written by wave-27 T22, once T15 lands: how the
-     checks files pushed to each reader at start are shown to equal the hashes from step 1.*
-5. **Score each record** on the key's question: the record at that question's path (on
-   `clean`, the record at each of the three). In this checkout:
+   - **Checking what the readers held.** In the same transcript, the `hook_additional_context`
+     attachment of `SubagentStart` holds every string pushed at start, as its `content` list.
+     One string is the terms (`context/survival.md` and the scratch line), and one per question
+     dealt opens with `bionic checks: <q>`, followed by that checks file's bytes. Drop that
+     first line and hash the rest; the hash must equal step 1's hash for that file:
+     `jq -j 'select(.attachment.type=="hook_additional_context") | .attachment.content[<k>]'
+     <agent>.jsonl | tail -n +2 | shasum -a 256`. A reader also holds no checks string for a
+     question it was not dealt. At the first sitting each of the twelve readers held exactly
+     the files dealt it, each whole. The model receives each string raw: the reviewer's
+     `structure` string is 4,497 characters, and its hook printed it as 4,627 characters of
+     JSON. The strings of one start are joined into one system `<system-reminder>` (10,978
+     characters for a reviewer, 17,565 for the one-mind critic), and none was cut to a
+     preview. The harness's 10,000-character limit is therefore applied to each hook's string,
+     not to the joined text. Whether that limit counts the raw string or its JSON form is not
+     shown, because every string here is under 10,000 either way.
+5. **Score each record** on the question the sample's key names, and only that record: on a
+   defect sample, the record at that question's path from the role dealt it and the one from
+   the one-mind critic; on `clean`, each of the three roles' records on its own question and the
+   one-mind critic's record on each of the three. In this checkout:
 
    ```
    . tests/reader-exam/score.sh
    exam_score tests/reader-exam/samples/<name>/expect.txt <record>
    ```
 
-   It prints `met` or `missed`. A reader passes the exam when every record it wrote is met.
+   It prints `met` or `missed`. A reader passes the exam when its record for each question the
+   key names is met. The one-mind critic's records for the questions the key does not name are
+   kept (step 6) and not scored, and get no `result` line: on a defect sample they were never
+   asked to find that defect. The scorer reads a record's `question:` line and not its path, so
+   a `missed` on a record without one is a record to check before anything goes to a fix row.
 6. **Keep the records.** Copy each record unchanged into the sitting's wave record in this
    checkout, `.bionic/docs/record/<the sitting's wave>/exam-sitting.md`, under a heading per
-   record that names the sample, the role and the question.
+   record that names the sample, the role (`one-mind` for the one-mind critic) and the
+   question, the unscored ones included.
 7. **Record the sitting** by appending a section to `sittings.md`, below every earlier one:
 
    ```
@@ -136,21 +226,24 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    result <sample> <question> <role> <reached result> <met|missed> <record heading>
    ```
 
-   one `result` line per sample, question and role, `<sample>` being the sample's name; the
+   one `result` line per sample, per question its key names, per role dealt that question:
+   `<sample>` is the sample's name and `<role>` is `auditor`, `critic` or `reviewer` (the role
+   the audited dealing gives the question) or `one-mind`. A defect sample holds two lines, the
+   dealt role's and the one-mind critic's, both on its keyed question; `clean` holds six, the
+   three roles each on their own question and the one-mind critic on each of the three. The
    record heading names the record's section in `exam-sitting.md`. The `sha256` lines are the
    hashes from step 1. A line opening with `##` that is not a header of that form is red
    wherever it is in the file. The suite reads the last section, by file order: it is red
    unless that section's hashes match the shipped files, every sample has a `result` line and
-   no other name has one, every `result` line reads `met`, no two lines for one sample and
-   question disagree, and every reached result is one its sample's key admits.
+   no other name has one, every line's role is `one-mind` or the role dealt its own question,
+   every sample has a line from each role dealt on each question its key
+   names (the red line names the sample and the role missing; the one-mind critic's line alone
+   does not complete a sample), no line is for a question its sample's key does not name,
+   every `result` line reads `met`, no two lines for one sample and question disagree, and
+   every reached result is one its sample's key admits.
 8. **A miss is sent back.** A reader that misses a sample sends its checks file to a fix row.
    The sitting is recorded as it went, so the suite is red from then until the fixed file is
    sat again and that sitting is appended below it.
-
-The first sitting is owed by wave-27 T22. Until it is recorded, `sittings.md` holds the one line
-`first-sitting: owed by wave-27 T22`, and the suite passes on a single row labelled
-"RE-AUTHORED BY T22". The sitting that replaces that line also removes that row's arm from
-`tests/reader-exam.test.sh`.
 
 ## Adding a sample
 

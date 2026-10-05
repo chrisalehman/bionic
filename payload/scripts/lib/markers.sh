@@ -18,6 +18,7 @@
 #   markers_writable <file>                         rc 1 when the user made it read-only
 #   markers_regular  <file>                         rc 4, and what it is, when it is not text bionic can read
 #   markers_regular_cell <what>                     the status cell for markers_regular's answer
+#   markers_drop_lines <file> <predicate> <n>,<n>   those whole lines gone, every other byte kept
 #
 # THE WRITERS' EXIT CODES ARE THE REASON (wave-27 T40, review pass 9 findings 1,
 # 2 and 8; T46). 0 written; 1 a write failed; 2 the markers do not pair up; 3 the
@@ -264,6 +265,47 @@ markers_set() {  # <file> <start> <end> <body file>
   {
     printf '%s\n' "$start" && cat "$body" && { [ -z "$last" ] || printf '\n'; } && printf '%s\n' "$end"
   } >> "$tmp" || { rm -f "$tmp"; return 1; }
+  _markers_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# LINES WITH NO MARKERS AROUND THEM, TAKEN OUT ONE BY ONE (wave-27 T55, review pass
+# 32 F1). The retired bare alias has no block to address, so the caller names the
+# lines by number — the ones it asked about — and a line goes only when it is one of
+# those AND <predicate> still says it is bionic's; any difference between the two
+# sets (the file changed since it was read) is rc 2 with nothing written. Every
+# other byte is reproduced as it was: a line's own terminator stays with it, so a
+# CR LF file keeps its CRs and a file with no final newline gets none added (the
+# filter this replaced appended one). bionic_drop_lines_walk prints the lines that
+# stay; remove.sh carries it under the same name, pinned by tests/rc-item.test.sh.
+bionic_drop_lines_walk() {  # <file> <predicate> <n>,<n> — the lines that stay, to stdout; rc 2 when the sets differ
+  local file="$1" pred="$2" want=",$3," line n=0 nl dropped=""
+  while :; do
+    nl=1
+    IFS= read -r line || { [ -n "$line" ] || break; nl=0; }
+    n=$((n + 1))
+    if "$pred" "$line"; then
+      case "$want" in *",${n},"*) dropped="${dropped}${dropped:+,}${n}"; continue ;; esac
+    fi
+    printf '%s' "$line" || return 1
+    if [ "$nl" = "1" ]; then printf '\n' || return 1; fi
+  done < "$file"
+  [ ",${dropped}," = "$want" ] || return 2
+  return 0
+}
+
+# The writer: 0 removed; 1 a write failed; 2 the lines are not the ones named;
+# 3 read-only; 4 not a regular text file. On every non-zero the file is as it was.
+markers_drop_lines() {  # <file> <predicate> <n>,<n>
+  local file="$1" target tmp rc
+  markers_regular "$file" >/dev/null || return 4
+  [ -f "$file" ] || return 2
+  markers_writable "$file" || return 3
+  target="$(bionic_link_target "$file")"
+  tmp="${target}.bionic.tmp"
+  _markers_stage_tmp "$tmp" || return 1
+  bionic_drop_lines_walk "$file" "$2" "$3" >> "$tmp"; rc=$?
+  [ "$rc" = "0" ] || { rm -f "$tmp"; return "$rc"; }
   _markers_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
   return 0
 }

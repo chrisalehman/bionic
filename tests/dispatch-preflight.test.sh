@@ -5993,7 +5993,11 @@ for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic b
   k2_write_plan "$REPO" 4 ""
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" audited)" "w30e" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
-  expect_status "30e a ${_role} dispatch against the SAME unapproved plan passes" "0" "$GATE_ST"
+  # REBUILT (wave-27 T31; A-orch-43): a deny exits 0 too, so the exit said nothing. The verdict
+  # and the row the wall recorded do.
+  expect_eq "30e a ${_role} dispatch against the SAME unapproved plan is admitted" "allow" "$GATE_VERDICT"
+  expect_eq "30e2 …and the wall recorded its launch row, as that role" "intended ${_role}" \
+    "$(_r=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1); printf '%s %s' "$(roster_field "$_r" status)" "$(roster_field "$_r" subagent_type)")"
 done
 
 # --- 30f: below Step 4 the arm BINDS too (wave-20 T7, AC-9.1) ---
@@ -6095,9 +6099,15 @@ for _role in bionic:researcher bionic:test-runner bionic:critic; do
   REPO=$(make_repo "r31e-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_task_plan "$REPO" T1 ""
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" tested)" "w31e" "claude-sonnet-5" \
+  # A tested critic is dealt three questions, so it names three records (wave-27 T49's rule).
+  _e31=""; [ "$_role" = bionic:critic ] && _e31="
+Files: .bionic/docs/record/w99-widget.txt, .bionic/docs/record/w99-adv.md, .bionic/docs/record/w99-str.md"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" tested)$_e31" "w31e" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
-  expect_status "31e a ${_role} dispatch against the SAME unapproved task-scale plan passes" "0" "$GATE_ST"
+  # REBUILT (wave-27 T31; A-orch-43), as 30e: the verdict and the recorded row, not the exit.
+  expect_eq "31e a ${_role} dispatch against the SAME unapproved task-scale plan is admitted" "allow" "$GATE_VERDICT"
+  expect_eq "31e2 …and the wall recorded its launch row, as that role" "intended ${_role}" \
+    "$(_r=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1); printf '%s %s' "$(roster_field "$_r" status)" "$(roster_field "$_r" subagent_type)")"
 done
 
 # --- 31f: any n >= 1 binds, not only T1 ---
@@ -6414,10 +6424,11 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # full-run arm, so a brief with no suite set leaves one wall unable to answer, not two. The
 # variable part is one extra fault plus two not-checked lines; the fixed part is unmoved.
 # RAISED 17 -> 18 (wave-27 T17, D5): the scaffold gained the readers' `Questions:` line; the FIXED part is fifteen, ELEVEN scaffold lines.
-expect_eq "§combined meta: the shipped scaffold is eleven lines, the count both caps are built on" \
-  "11" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
-expect_status "§combined …the wire is at most 18 lines (15 + 1 extra fault + 2 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 18 ] && echo 0 || echo 1)"
+# RAISED 18 -> 20 (wave-27 T31, D23): the scaffold gained `Lands-red:` and `Red-evidence:`; the FIXED part is seventeen, THIRTEEN scaffold lines.
+expect_eq "§combined meta: the shipped scaffold is thirteen lines, the count both caps are built on" \
+  "13" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
+expect_status "§combined …the wire is at most 20 lines (17 + 1 extra fault + 2 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 20 ] && echo 0 || echo 1)"
 expect_contains "§combined …and the fixed line that grew it is the prompt-only sentence" \
   "The wall reads the prompt text only." "$GATE_REASON"
 # AND THE FULL-RUN WALL'S LINE IS NAMED — a cap without saying which line fills it is a
@@ -7401,8 +7412,8 @@ expect_contains "§three-arms …and the brief-shape fault" \
 # optional `Subprocess claim:` (§combined holds the nine). Three faults: thirteen plus two.
 # The fixed part is FOURTEEN since wave-24 T9 (AC-4.8): the scaffold's tenth line is the
 # optional `Done marker:` (§combined holds the ten). Three faults: fourteen plus two.
-expect_status "§three-arms …and the wire is at most 17 lines (15 + one per additional fault)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 17 ] && echo 0 || echo 1)"
+expect_status "§three-arms …and the wire is at most 19 lines (17 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 19 ] && echo 0 || echo 1)"
 # NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
 # MOVED WITH THE FIXED PART (wave-21 T7; again at wave-24 T9): a wire that grew by nothing is
@@ -8798,6 +8809,143 @@ Questions: evidence
 ${RL_BT}${RL_BT}${RL_BT}"
 expect_contains "T49-Q9 a brief whose only Questions: line is inside a fence has no label: refused" "bionic:auditor names no Questions: line" "$R"
 
+# ============================================================================
+section "§scaffold-walk — a reader filled from the shipped scaffold is admitted and every record it writes registers (wave-27 T53; review pass 28 B1, B2, B3)"
+# ============================================================================
+#
+# THE WALK A READER TAKES, END TO END. The scaffold is read out of the shipped dispatch.md
+# (never retyped) and filled as the text around it says for a reader: one record per question
+# dealt, every record on `Files:`, `Expected artifact:` naming one of them, the `Questions:` line
+# filled WITH its trailing comment kept, every other comment kept too, and `Suites:` naming a
+# suite only for the reader dealt `evidence`. That brief drives the REAL dispatch wall; the real
+# execution recorder starts the agent; the records are written in the checks files' form; and
+# each is registered with the REAL `session-poker.sh proof-add review`, which takes a record only
+# from the reader's own roster row. Section §Q holds the dealing itself; this holds the text.
+#
+# FIXTURES: make_repo's bound plan, its rigor rewritten (q_rigor), given the frontmatter
+# `base-sha:` and `working-branch:` a reading needs, and one commit past the base for the range.
+#
+# fails-when: the shipped scaffold, filled as the text says, is refused; a record it lists is
+# refused at registration; or a `tested` critic brief that declares no run is admitted.
+walk_fill() {  # <questions> <records, ", "-joined> <suites value|none> -> a reader brief
+  local qs="$1" recs="$2" suites="$3" line value
+  printf 'Your task: read T3 for the questions below.\n'
+  while IFS= read -r line; do
+    case "${line%%:*}" in
+      "Done marker"|"Subprocess claim"|"Deliverable-waiver"|"Re-executes") continue ;;
+      "Expected duration") value="30" ;;
+      "Expected artifact") value="${recs%%,*}" ;;
+      "Progress artifact") value=".bionic/docs/record/wave-01-test/T3-read.progress" ;;
+      "Cadence")           value="15" ;;
+      "Files")             value="$recs" ;;
+      # `<q>[, <q>]` holds a `>` before its `]`, so the span is cut at the `]`, comment kept.
+      "Questions") line="Questions: ${qs}${line#*\]}"; value="" ;;
+      "Suites") [ "$suites" = none ] || line="Suites: ${suites}${line#Suites: none}"; value="" ;;
+      *) value="" ;;
+    esac
+    case "$line" in *"<"*">"*) line="${line%%<*}${value}${line##*>}" ;; esac
+    printf '%s\n' "$line"
+  done < <(scaffold_block "$DISPATCH_FILE")
+}
+walk_repo() {  # <name> <rigor> -> a repo whose bound plan carries base-sha: and working-branch:
+  local repo plan base wb
+  repo=$(make_repo "$1" yes); write_attestation "$repo" "$SID_A"; q_rigor "$repo" "$2"
+  plan="$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  base="$(git -C "$repo" rev-parse HEAD)"; wb="$(git -C "$repo" rev-parse --abbrev-ref HEAD)"
+  awk -v b="$base" -v w="$wb" '/^rigor:/ { print; print "base-sha: " b; print "working-branch: " w; next } { print }' \
+    "$plan" > "$plan.tmp" && mv "$plan.tmp" "$plan"
+  echo c1 > "$repo/a.txt"; git -C "$repo" add a.txt; git -C "$repo" commit -qm c1
+  printf '%s' "$repo"
+}
+walk_start() {  # <repo> <name> -> the real execution recorder starts the dispatched agent
+  jq -n --arg s "$SID_A" --arg c "$1" --arg a "a-$2" --arg n "$2" \
+    '{session_id:$s, transcript_path:($c+"/t.jsonl"), cwd:$c, agent_id:$a, agent_type:$n,
+      hook_event_name:"SubagentStart"}' \
+    | ( cd "$1" && env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SID_A" \
+          bash "${BIONIC_HOOKS_DIR}/execution-recorder.sh" >/dev/null 2>&1 )
+}
+WALK_OUT=""; WALK_RC=0
+walk_register() {  # <repo> <record path> <question> <reader> -> writes the record, then proof-add
+  local repo="$1" rec="$2" q="$3" base head id
+  base="$(git -C "$repo" rev-list --max-parents=0 HEAD)"; head="$(git -C "$repo" rev-parse HEAD)"
+  mkdir -p "$(dirname "$repo/$rec")"
+  { printf 'reviewed: %s..%s\nquestion: %s\nresult: pass\nscope: piece\n' "$base" "$head" "$q"
+    if [ "$q" = structure ]; then
+      for id in reuse one-site single-job open-closed substitution narrow-interface dependency-direction; do
+        printf 'check: %s PASS nothing found\n' "$id"; done
+    fi
+    printf '\nwhat the reader found\n'; } > "$repo/$rec"
+  WALK_OUT=$(cd "$repo" && env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SID_A" \
+    bash "${BIONIC_HOOKS_DIR}/session-poker.sh" proof-add review "${rec#.bionic/docs/}" \
+      --question "$q" --reader "$4" 2>&1); WALK_RC=$?
+}
+WALK_REC=".bionic/docs/record/wave-01-test"
+
+# ---- peer-reviewed: the critic dealt adversarial and structure ----
+WALK_PR="$(walk_fill "adversarial, structure" "$WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md" none)"
+expect_contains "§scaffold-walk precondition: the filled Questions: line keeps the shipped comment" \
+  "Questions: adversarial, structure  # reader roles only" "$WALK_PR"
+expect_contains "§scaffold-walk precondition: …and Files: lists both records" \
+  "Files: $WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md" "$WALK_PR"
+expect_absent "§scaffold-walk precondition: …and no placeholder is left" "<" "$WALK_PR"
+REPO=$(walk_repo rwalk1 peer-reviewed)
+q_gate "$REPO" walk1 bionic:critic "$WALK_PR"
+expect_eq "§scaffold-walk peer-reviewed: the critic's brief, filled from the shipped scaffold, is ADMITTED" \
+  "allow" "$GATE_VERDICT"
+expect_eq "§scaffold-walk …its row carries both records" \
+  "$WALK_REC/T3-adversarial.md,$WALK_REC/T3-structure.md" "$(roster_field "$(q_row "$REPO")" files)"
+expect_eq "§scaffold-walk …and its dealt set" "adversarial,structure" "$(roster_field "$(q_row "$REPO")" questions)"
+walk_start "$REPO" wq-walk1
+walk_register "$REPO" "$WALK_REC/T3-adversarial.md" adversarial wq-walk1
+expect_eq "§scaffold-walk …the adversarial record registers with the real proof-add" "0" "$WALK_RC"
+expect_contains "§scaffold-walk …as a reading of that question by that reader" \
+  "question=adversarial reader=wq-walk1 result=pass" "$WALK_OUT"
+walk_register "$REPO" "$WALK_REC/T3-structure.md" structure wq-walk1
+expect_eq "§scaffold-walk …and so does the structure record" "0" "$WALK_RC"
+expect_contains "§scaffold-walk …as a reading of structure" "question=structure reader=wq-walk1 result=pass" "$WALK_OUT"
+
+# ---- the discriminator: the brief as the old text had it, one artifact and no Files: ----
+# Either the wall refuses it (T49: fewer paths than questions) or its second record is refused
+# at registration; the walk never completes. The first record's acceptance is the positive.
+REPO=$(walk_repo rwalk2 peer-reviewed)
+q_gate "$REPO" walk2 bionic:critic "$(printf '%s\n' "$WALK_PR" | /usr/bin/grep -v '^Files:')"
+WALK_OLD="refused-at-dispatch"
+if [ "$GATE_VERDICT" = allow ]; then
+  walk_start "$REPO" wq-walk2
+  walk_register "$REPO" "$WALK_REC/T3-adversarial.md" adversarial wq-walk2
+  expect_eq "§scaffold-walk …the old shape's one named record registers (the positive)" "0" "$WALK_RC"
+  walk_register "$REPO" "$WALK_REC/T3-structure.md" structure wq-walk2
+  WALK_OLD="registered rc=$WALK_RC"
+  [ "$WALK_RC" -ne 0 ] && WALK_OLD="refused-at-registration"
+fi
+expect_ne "§scaffold-walk …a brief with one artifact and no Files: never gets both records registered" \
+  "registered rc=0" "$WALK_OLD"
+
+# ---- tested: the critic holds all three questions, evidence among them ----
+WALK_T="$(walk_fill "evidence, adversarial, structure" \
+  "$WALK_REC/T3-evidence.md, $WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md" tests/widget.test.sh)"
+expect_contains "§scaffold-walk precondition: the tested brief names its suite, the comment kept" \
+  "Suites: tests/widget.test.sh  # " "$WALK_T"
+REPO=$(walk_repo rwalk3 tested)
+q_gate "$REPO" walk3 bionic:critic "$WALK_T"
+expect_eq "§scaffold-walk tested: the critic dealt evidence, naming its run, is ADMITTED" "allow" "$GATE_VERDICT"
+expect_eq "§scaffold-walk …its row carries the three records" \
+  "$WALK_REC/T3-evidence.md,$WALK_REC/T3-adversarial.md,$WALK_REC/T3-structure.md" \
+  "$(roster_field "$(q_row "$REPO")" files)"
+walk_start "$REPO" wq-walk3
+for _wq in evidence adversarial structure; do
+  walk_register "$REPO" "$WALK_REC/T3-${_wq}.md" "$_wq" wq-walk3
+  expect_eq "§scaffold-walk …the ${_wq} record registers" "0" "$WALK_RC"
+done
+REPO=$(walk_repo rwalk4 tested)
+q_gate "$REPO" walk4 bionic:critic "$(walk_fill "evidence, adversarial, structure" \
+  "$WALK_REC/T3-evidence.md, $WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md" none)"
+expect_eq "§scaffold-walk …the SAME brief with Suites: none and no Re-executes: is refused" "deny" "$GATE_VERDICT"
+# The user stream leads with the first fault; the model's wire names every one (several faults
+# before T49 strips the Questions: comment, one after), so the two are read together.
+expect_contains "§scaffold-walk …because the evidence reader names no suites" \
+  "a critic reading evidence names no suites" "$GATE_ERR $GATE_REASON"
+
 section "AC-E1.3/E1.5 — every refusal this gate makes is one line, in the shape"
 
 # fails-when: a refusal reaches the user as more than one line, or in any shape but
@@ -9870,8 +10018,9 @@ fl_findings() { printf '%s\n' "$1" | /usr/bin/grep -c '^finding: '; }
 
 # THE SCAFFOLD LINE, read out of the shipped dispatch.md, never retyped.
 FL_SCAFFOLD="$(scaffold_raw_line "$DISPATCH_FILE" "Files")"
+# RE-POINTED (wave-27 T53, review pass 28 B1): the comment now opens "a reader lists its records".
 expect_contains "FILES-LIST meta: the shipped scaffold's Files: line was read, comment and all" \
-  "  # writers" "$FL_SCAFFOLD"
+  "  # a reader lists" "$FL_SCAFFOLD"
 FL_SLOT="$(printf '%s' "$FL_SCAFFOLD" | sed -e 's/^Files: //' -e 's/  #.*$//')"
 expect_contains "FILES-LIST meta: …and its slot is one item holding white space" "<every path" "$FL_SLOT"
 
@@ -9887,7 +10036,7 @@ expect_contains "FILES-LIST1 …and nothing recorded" "files=
 "
 # Filled as a real brief fills it, comment kept byte for byte: exactly the two paths, no finding.
 FL_FILLED="$(printf '%s' "$FL_SCAFFOLD" | sed 's|<every path the task may create or edit>|src/a.c, tests/a.test.sh|')"
-expect_contains "FILES-LIST2 meta: the filled line keeps the shipped comment" "tests/a.test.sh  # writers" "$FL_FILLED"
+expect_contains "FILES-LIST2 meta: the filled line keeps the shipped comment" "tests/a.test.sh  # a reader lists" "$FL_FILLED"
 FL=$(fl_read "$FL_FILLED")
 expect_contains "FILES-LIST2 the filled scaffold line records exactly its two paths" "files=src/a.c,tests/a.test.sh
 " "$FL
@@ -10016,6 +10165,69 @@ expect_eq "FILES-LIST18 a prose item of 55 characters is refused by a deny" "den
 FL_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
 expect_contains "FILES-LIST18 …whose first line names it, cut" "Files: this list covers every file the task may … is not a path (drop it)" "$FL_LINE"
 
+# ============================================================================
+section "§LR — a declared debt is recorded at dispatch, and only a well-formed one (wave-27 T31; REQ-14 AC-14.1, AC-14.2, D23)"
+# ============================================================================
+#
+# A brief may carry `Lands-red: <suite> until <ext:slug | approval:name>` and `Red-evidence: <path
+# under record/>`, each on a line of its own. The wall records both on the launch row as
+# `lands_red=` and `red_evidence=`, and refuses a Lands-red: with no Red-evidence:, a suite outside
+# the row's suite set, and a token of any other shape. It is the keys' one writer: `land` honours
+# only what a row carried from its launch.
+# FIXTURES: adv_brief's writer contract (Suites: tests/widget.test.sh, so the row's set is
+# widget.test.sh), on make_repo's approved, bound plan. SYNTHESIZED.
+# fails-when: a well-formed declaration is refused or not recorded; one of the three faults is
+# admitted; a brief with no declaration, or the scaffold's unfilled slots, records a key.
+lr_gate() {  # <repo tag> <body lines> -> GATE_*, LR_ROW
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief "$2")" "w99-$1")"
+  LR_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+lr_gate lr1 'Lands-red: widget.test.sh until approval:release
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
+expect_eq "LR1 a Lands-red: on the row's own suite, with its evidence and an approval: token, is admitted" "allow" "$GATE_VERDICT"
+expect_eq "LR1b …the row carries lands_red=<suite> until <token>" "widget.test.sh until approval:release" \
+  "$(roster_field "$LR_ROW" lands_red)"
+expect_eq "LR1c …and red_evidence=<path>" ".bionic/docs/record/wave-01-test/T9-red.md" "$(roster_field "$LR_ROW" red_evidence)"
+lr_gate lr1x 'Lands-red: tests/widget.test.sh until ext:vendor-fix
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
+expect_eq "LR1x an ext:<slug> token is admitted too, the suite recorded by its basename" "allow widget.test.sh until ext:vendor-fix" \
+  "$GATE_VERDICT $(roster_field "$LR_ROW" lands_red)"
+
+lr_gate lr2 'Lands-red: widget.test.sh until approval:release'
+expect_eq "LR2 a Lands-red: with no Red-evidence: is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR2b …the line names the missing label" "Lands-red: with no Red-evidence: line" "$GATE_ERR"
+expect_contains "LR2c …and the detail the line to add" "    Red-evidence: <path under record/>" "$GATE_VERR"
+expect_eq "LR2d …and no row is written" "" "$LR_ROW"
+
+lr_gate lr3 'Lands-red: other.test.sh until approval:release
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
+expect_eq "LR3 a Lands-red: on a suite outside the row's suite set is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR3b …naming the suite" "Lands-red: other.test.sh is outside Suites:" "$GATE_ERR"
+expect_contains "LR3c …and the set it may name from" "Suites: widget.test.sh" "$GATE_VERR"
+
+lr_gate lr4 'Lands-red: widget.test.sh until someday
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
+expect_eq "LR4 a token that is neither ext:<slug> nor approval:<name> is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR4b …the line says so" "Lands-red: names no blocker token" "$GATE_ERR"
+expect_contains "LR4c …and the detail names the two forms" "ext:<slug>" "$GATE_VERR"
+expect_contains "LR4d …both of them" "approval:<name>" "$GATE_VERR"
+
+lr_gate lr5 'Scope constraint: touch only payload/scripts/lib/widget.sh.'
+expect_eq "LR5 a brief that declares no debt is admitted" "allow" "$GATE_VERDICT"
+expect_contains "LR5b …its row is written (the extractor reads a real row)" "status=intended" "$LR_ROW"
+expect_absent "LR5c …with no lands_red= on it" "lands_red=" "$LR_ROW"
+expect_absent "LR5d …nor red_evidence=" "red_evidence=" "$LR_ROW"
+lr_gate lr6 'Lands-red: <suite> until <ext:slug | approval:name>
+Red-evidence: <path under record/>'
+expect_eq "LR6 the scaffold's two slots pasted unfilled declare nothing: admitted" "allow" "$GATE_VERDICT"
+expect_contains "LR6b …its row is written" "status=intended" "$LR_ROW"
+expect_absent "LR6c …with no lands_red= on it" "lands_red=" "$LR_ROW"
+lr_gate lr7 'Lands-red: widget.test.sh until approval:release  # optional
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md  # with Lands-red:'
+expect_eq "LR7 the two lines filled with the scaffold's comments kept: admitted, the comments off the values" \
+  "allow|widget.test.sh until approval:release|.bionic/docs/record/wave-01-test/T9-red.md" \
+  "$GATE_VERDICT|$(roster_field "$LR_ROW" lands_red)|$(roster_field "$LR_ROW" red_evidence)"
 # --- FILES-LIST19..: one pair of punctuation around a path, and a trailing `;` (wave-27 T49; review
 # pass 19 should-fix 1). The reader strips from an item ONE surrounding pair of double quotes, single
 # quotes, parentheses, square brackets or backticks, and a trailing `;`; what is left is judged as any

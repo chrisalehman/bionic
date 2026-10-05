@@ -2326,6 +2326,12 @@ Fix: replace the '- ${id}:' evidence with the actual command invocation and resu
 # _eg_reading_gaps <rigor> -> one line per owed question the section does not answer:
 # `absent<TAB><q>`, or `failing<TAB><q><TAB><evidence>`; `unreadable` when lib/proof.sh is not
 # loaded (units.sh loads it). Nothing when every question is answered.
+#
+# AND ONE LINE PER OPEN DECLARED DEBT (wave-27 T31; REQ-14 AC-14.3, D23), `debt<TAB><suite><TAB>
+# <token>`: a state line recording `landed red: <suite> until <token>` with no `proved: kind=floor`
+# or `kind=task` line whose `at=` is later than the token's clearing, read off the same section by
+# lib/proof.sh `proof_debts_open`, the text half of the judge's own rule. A proof.sh that predates
+# the debt has no such reader, and no state line it could have written either.
 _eg_reading_gaps() {
   local qs
   if ! declare -F facts_owed >/dev/null 2>&1 || ! declare -F proof_awk >/dev/null 2>&1; then
@@ -2357,18 +2363,33 @@ _eg_reading_gaps() {
         else if (t[q] == "fact" && r[q] == "fail") print "failing\t" q "\t" e[q]
       }
     }'
+  if declare -F proof_debts_open >/dev/null 2>&1; then
+    printf '%s\n' "$SECTION" | proof_debts_open
+  fi
 }
 
 # _eg_refuse_readings <subject> <rigor> -> returns when every owed question is answered; otherwise
 # refuses the commit, naming each question and what it lacks.
 _eg_refuse_readings() {
-  local gaps lines
+  local gaps lines _eg_debts
   gaps="$(_eg_reading_gaps "$2")"
   [ -n "$gaps" ] || return 0
   lines="$(printf '%s\n' "$gaps" | awk -F'\t' '
     $1 == "unreadable" { print "- the reading record cannot be read here: lib/proof.sh is not loaded beside units.sh" }
     $1 == "absent"     { print "- " $2 ": no reading, and no waiver" }
     $1 == "failing"    { print "- " $2 ": the newest reading is result=fail (evidence=" $3 "), and no waiver is newer" }')"
+  # A DECLARED DEBT ALONE is not a reading (wave-27 T31; D23): its own fact and fix.
+  if [ -z "$(printf '%s\n' "$gaps" | awk -F'\t' '$1 != "debt"')" ]; then
+    lines="$(printf '%s\n' "$gaps" | awk -F'\t' '{ print "- " $2 ": landed red until " $3 ", and no floor or task proof is recorded after that cleared" }')"
+    _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and a suite a row landed red by declaration is still owed a green run taken after its blocker cleared:
+${lines}
+Plan: $PLAN
+Fix: once the blocker clears (an approval: token by 'session-poker.sh approve <name> <reply>'), run the suite and register the run with 'session-poker.sh proof-add task <log>', or the full run with 'session-poker.sh proof-add floor <log>'."
+    refuse exit2 commit "a declared red is still owed" "record a green run once cleared" "$_eg_detail"
+  fi
+  _eg_debts="$(printf '%s\n' "$gaps" | awk -F'\t' '$1 == "debt" { print "- " $2 ": landed red until " $3 ", and no floor or task proof is recorded after that cleared" }')"
+  [ -z "$_eg_debts" ] || lines="${lines}
+${_eg_debts}"
   _eg_detail="canonical-sdlc ${1} is at current: ${_EG_DECLARED_CURRENT}, and from Step 6 each question the dealing owes at rigor '${2}' needs a reading whose newest is not result=fail, or a newer waiver:
 ${lines}
 Plan: $PLAN
@@ -4977,8 +4998,9 @@ dispatch() {
       ;;
   esac
   # THE READINGS THE RUN OWES are a prefix condition from Step 6 (wave-27 T14; D3, D19), asked
-  # last, after each step's own evidence: the Step-6 pointer line no longer answers for them.
-  case "$CURRENT" in
+  # last, after each step's own evidence: the Step-6 pointer line no longer answers for them. A
+  # lettered step is its step (T31; review pass 25 F1): `6a` binds as 6, `5b` as 5.
+  case "${CURRENT%[ab]}" in
     6|7|8|9) _eg_refuse_readings "the run" "$RIGOR" ;;
   esac
 }
@@ -5415,8 +5437,8 @@ return 0
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
 # `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `proof-add` and
-# `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2); 1 otherwise (wave-20 T9,
-# REQ-4, AC-4.2).
+# `approve` — wave-26 T5, REQ-3 D5, REQ-1; `waive` — wave-27 T9, D2; `decline` and `budget` — wave-27
+# T34, D24); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5466,7 +5488,7 @@ _wall_poker_contract_verb() {  # <command> -> 0 a contract verb (sets _WALL_POKE
     shift
     _next="${1:-}"
     case "$_next" in
-      amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|proof-add|approve|waive|release-check)
+      amend|extend|task-add|hold|task-set|step-line|current|ledger-add|ledger-set|proof-add|approve|waive|release-check|decline|budget)
         _WALL_POKER_VERB="$_next"; return 0 ;;
     esac
   done <<< "$(git_argv_expand "$1")"

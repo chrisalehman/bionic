@@ -1,7 +1,7 @@
 # bionic
 
 Bionic is a Claude Code plugin that brings one engineering lifecycle into every project you
-open. It ships a governed SDLC skill, two technique skills, six subagent roles Claude hands
+open. It ships a governed SDLC skill, two technique skills, seven subagent roles Claude hands
 work to, and a small set of walls that refuse commands you would have regretted. It travels
 with you rather than with a repository: install it once and the same discipline applies
 wherever you open Claude Code.
@@ -215,9 +215,9 @@ own standing duties and model:
 | `test-runner` | Haiku | Runs suites and reports every result. Never fixes, never re-runs to green. |
 | `implementor` | Sonnet | Executes a slice mechanically. The plan is literal; ambiguity means stop and ask. |
 | `senior-implementor` | Opus | Executes slices that need judgment, and root-cause debugging. Logs every call it made. |
-| `auditor` | Opus | At the verify gate, tries to falsify the evidence, never the code. Cannot write. |
-| `critic` | Opus | At the review gate, tries to falsify the code and the claim it is ready to merge. Cannot write. |
-| `reviewer` | Opus | Holds the code to the structure checks (reuse, one site per concept, shape) and answers each one. Cannot write. |
+| `auditor` | Opus | At the verify gate, tries to falsify the evidence, never the code. Read-only on tracked files; writes its own record through the shell. |
+| `critic` | Opus | At the review gate, tries to falsify the code and the claim it is ready to merge. Read-only on tracked files; writes its own record through the shell. |
+| `reviewer` | Opus | Holds the code to the structure checks (reuse, one site per concept, shape) and answers each one. Read-only on tracked files; writes its own record through the shell. |
 
 Each of them owes a report where every factual claim carries the command that proves it or
 the word `unverified`.

@@ -1,7 +1,7 @@
 #!/bin/bash
-# tests/reader-exam/score.sh — README step 5 as code. Sourced, it defines two functions and
-# does nothing else: tests/reader-exam.test.sh holds the real keys to them, and a sitting
-# scores its records with them.
+# tests/reader-exam/score.sh — README step 5 as code. Sourced, it defines three functions
+# (exam_meets, exam_field, exam_score) and does nothing else: tests/reader-exam.test.sh holds
+# the real keys to them, and a sitting scores its records with them.
 #
 #   . tests/reader-exam/score.sh
 #   exam_score tests/reader-exam/samples/<name>/expect.txt <record>      # prints met or missed
@@ -32,7 +32,8 @@ exam_field() {
 # has: its first flush-left `result:` meeting the key's result (exam_meets); one of the key's
 # tokens; and, when the key has a `names:` line, one of its identifiers. Alternatives on a
 # `token:` or `names:` line are separated by ` | `. A CR before a line end, and blanks after a
-# value, are not part of it.
+# value, are not part of it. The scorer's own lines are read with an IFS of its own: a caller's
+# IFS (`,`, `:` or empty) is not the separator of what the awk below prints.
 exam_score() {
   local key="$1" rec="$2" kq kr kt kn passes r t n scored=0
   [ -r "$key" ] && [ -r "$rec" ] || { echo "missed"; return 1; }
@@ -56,7 +57,7 @@ exam_score() {
         if (opened[i] && (q[i] in keyed))
           printf "%d %d %s\n", any(ENVIRON["KT"], text[i]), any(ENVIRON["KN"], text[i]), r[i]
     }' "$rec")"
-  while read -r t n r; do
+  while IFS=' ' read -r t n r; do
     [ -n "$t" ] || continue
     scored=1
     exam_meets "$kr" "$r" && [ "$t" = 1 ] && [ "$n" = 1 ] || { echo "missed"; return 1; }
