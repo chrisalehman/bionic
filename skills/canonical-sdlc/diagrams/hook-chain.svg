@@ -141,11 +141,11 @@
   <text x="706" y="754" font-size="10.5" fill="#3a424c">own turn end on Stop, and from inside an agent on SubagentStop. It refuses the stop exactly once when one of those</text>
   <text x="706" y="770" font-size="10.5" fill="#3a424c">contracts named an artifact that is not on disk, then lets the next one through.</text>
 
-  <!-- 9 · canonical-sdlc-evidence-gate.sh -->
+  <!-- 9 · bash-walls.sh -->
   <rect x="40" y="782" width="1320" height="62" fill="#fafbfc"/>
-  <text x="54" y="804" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">canonical-sdlc-evidence-gate.sh</text>
+  <text x="54" y="804" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">bash-walls.sh</text>
   <text x="54" y="822" font-size="9.5" font-style="italic" fill="#8b949e">gate: a plan's ## SDLC State</text>
-  <text class="armed-entry" data-hook="canonical-sdlc-evidence-gate.sh" x="300" y="802" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">skill</tspan> PreToolUse · Bash</text>
+  <text class="armed-entry" data-hook="bash-walls.sh" x="300" y="802" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">skill</tspan> PreToolUse · Bash</text>
   <rect x="566" y="791" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
   <text x="629" y="805" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
   <text x="706" y="800" font-size="10.5" fill="#3a424c">The commit wall; its ladder is below. It fires only on a real git commit segment (quote-aware), so every other Bash</text>
@@ -224,7 +224,7 @@
   <text x="58" y="1398" font-size="10.5" fill="#175cd3">violation when rigor-override: is present. Plans and task-scale artifacts are untouched.</text>
 
   <rect x="710" y="1112" width="650" height="300" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
-  <text x="728" y="1136" font-size="12.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#16191d">canonical-sdlc-evidence-gate.sh</text>
+  <text x="728" y="1136" font-size="12.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#16191d">bash-walls.sh</text>
   <text x="728" y="1153" font-size="10.5" font-style="italic" fill="#626b76">PreToolUse · Bash — the commit wall, on real git commit segments only</text>
   <text x="728" y="1178" font-size="10.5" font-weight="700" fill="#3a424c">1</text>
   <text x="746" y="1178" font-size="10.5" fill="#3a424c">newest plan under the plan dirs → its ## SDLC State, fence-aware</text>
