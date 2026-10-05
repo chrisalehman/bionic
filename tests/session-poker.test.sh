@@ -11022,7 +11022,7 @@ expect_eq "62p5 …and so is a log whose first line is not the header" "1" "$PA_
 # S4: a tracked file touched, its content unchanged, is not dirt.
 S62_N="$(s62_runs)"
 touch -t 203001010000 "$S62_WT/lib/b.sh"
-expect_eq "62x precondition: touch left lib/b.sh's content as the head has it" "0" \
+expect_eq "62x0p precondition: touch left lib/b.sh's content as the head has it" "0" \
   "$(git -C "$S62_WT" show HEAD:lib/b.sh | cmp -s - "$S62_WT/lib/b.sh"; echo $?)"
 expect_eq "62x0 precondition: …while an unrefreshed index calls it changed" "1" \
   "$(git -C "$S62_WT" diff-index --quiet HEAD -- >/dev/null 2>&1; echo $?)"
@@ -11626,7 +11626,8 @@ section "Section 64 §DEBT: a declared red that landed is a fact the run owes un
 # in a linked worktree, every reading and the floor at the head written by the production writers
 # (s61-style, proof_line placed by proof_add_line, at 2026-10-04T12:00:00Z), and §47's reads
 # column so `approve release` (the verb that writes the approved: line) has a row reading it. The
-# state line is written as the orchestrator writes a state line, by hand, because no verb writes it.
+# debt is written to the run's landing record by `land`'s own writer (lib/worktree.sh
+# `_wt_debt_write`, wave-27 T67; A-orch-120), never as a plan line: the judge reads the record.
 S64_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R64="$(make_repo s64-debt)"; ( cd "$R64" && git commit -q --allow-empty -m init )
 git -C "$R64" config user.name "Dana Fixture"
@@ -11636,7 +11637,6 @@ P64="$(s42_plan "$R64" 7 "  worktree: .worktrees/01-fixture
   branch: wave/01-fixture")"
 awk '
   /^current: / && !d { print; print "working-branch: wave/01-fixture"; d = 1; next }
-  /^- T1: landed at record\/T1.md/ { print; print "- T9: landed at record/T9.md, landed red: widget.test.sh until approval:release at 2026-10-04T11:00:00Z"; next }
   /^\| id \| step \|/ { print $0 " reads |"; next }
   /^\|---\|/ { print $0 "---|"; next }
   /^\| T5 \|/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " approval:release |"; next }
@@ -11667,11 +11667,19 @@ s64_owed() {  # the floor and every reading owed at the head, all at 2026-10-04T
 }
 s64_owed
 cp "$P64" "$TMPROOT/s64-clean"
+S64_WTLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/worktree.sh"
+S64_LOG="$S64_REC/landing-proofs.log"
+s64_debt() {  # <suite> <token> <at> [<id>] -> one debt line appended by land's own writer
+  bash -c '. "$1" && _wt_debt_write "$2" "$3" T9 wt/27-T9 "$4" "$5" "$6" "$7"' _ "$S64_WTLIB" "$S64_LOG" \
+    "${4:-d$RANDOM$RANDOM}" "$S64_H" "$1" "$2" "$3"
+}
+s64_debt_reset() { rm -f "$S64_LOG"; }
+s64_debt widget.test.sh approval:release 2026-10-04T11:00:00Z
 s64_reset() { cp "$TMPROOT/s64-clean" "$P64"; }
 S64_DEBT="$(printf 'debt\twidget.test.sh\tapproval:release')"
 
 # ---------- the dealing ----------
-expect_eq "64a §DEBT facts_owed with the plan deals one debt line per landed red: state line" "$S64_DEBT" \
+expect_eq "64a §DEBT facts_owed with the plan deals one debt line per debt land wrote to the landing record" "$S64_DEBT" \
   "$(bash -c '. "$1" && facts_owed audited wave "$2" "$3"' _ "$S61_LIB" "$R64" "$P64" | /usr/bin/grep '^debt')"
 expect_eq "64a2 …and the dealing of a rigor alone carries none (the positive above is the same function)" "" \
   "$(bash -c '. "$1" && facts_owed audited wave "$2"' _ "$S61_LIB" "$R64" | /usr/bin/grep '^debt')"
@@ -11727,20 +11735,21 @@ expect_contains "64h2 …naming the argument" "unknown argument for amend: --lan
 poke "$R64" amend w1 --red-evidence+ record/wave-01-fixture/T9-red.md --reason 'land it red'
 expect_eq "64h3 …and so is --red-evidence+" "2" "$RC"
 
-# ---------- the line's own time (A-orch-85): no `at <ISO-UTC>`, never covered ----------
+# ---------- the debt's own time (A-orch-85): a debt line whose at= is no <ISO-UTC>, never covered ----------
 cp "$TMPROOT/s64-approved" "$P64"
-sed 's/ until approval:release at 2026-10-04T11:00:00Z/ until approval:release/' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+s64_debt_reset; s64_debt widget.test.sh approval:release sometime
 s64_proof floor 2099-01-01T00:00:00Z record/wave-01-fixture/floor-late.log
 s57_state "$P64" "$S64_H"
-expect_regex "64i a landed red: line with no at <ISO-UTC> is never covered: absent, the judge naming the missing time" \
-  '^absent	.*at <ISO-UTC>' "$(s57_of "$S64_DEBT")"
+expect_regex "64i a debt whose at= is no <ISO-UTC> is never covered: absent, the judge naming the missing time" \
+  '^absent	.*at=<ISO-UTC>' "$(s57_of "$S64_DEBT")"
+s64_debt_reset; s64_debt widget.test.sh approval:release 2026-10-04T11:00:00Z
 
 # ---------- an ext: debt (A-orch-85): the slug gone from every ## Tasks cell, and a green run after the red landing ----------
 S64_EXT="$(printf 'debt\twidget.test.sh\text:vendor-key')"
-s64_ext_plan() {  # <slug still in T2's deps cell: yes|no> -> P64 with an ext: state line in place of the approval one
+s64_ext_plan() {  # <slug still in T2's deps cell: yes|no> -> P64 clean, the record holding one ext: debt in place of the approval one
   cp "$TMPROOT/s64-clean" "$P64"
+  s64_debt_reset; s64_debt widget.test.sh ext:vendor-key 2026-10-05T04:00:00Z
   awk -v keep="$1" '
-    /landed red: widget.test.sh until approval:release/ { sub(/until approval:release at 2026-10-04T11:00:00Z/, "until ext:vendor-key at 2026-10-05T04:00:00Z") }
     keep == "yes" && /^\| T2 \|/ { sub(/\| — \| 30 \|/, "| ext:vendor-key | 30 |") }
     { print }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
 }
@@ -12232,5 +12241,316 @@ expect_eq "67g5 the same command with a real reason is recorded (exit 0)" "0" "$
 expect_eq "67g6 …one ledger line, carrying that reason" "$((S67D_N + 1))|the machine is saturated" \
   "$(s65_count "$R67D")|$(s65_field "$(s65_led "$R67D" | tail -1)" declined)"
 POKE_BOUND="$S67D_BOUND_WAS"
+
+# §AMEND-UNPLACED-READER (wave-27 T74; review pass 53 B1). `amend <agent id>` for an agent its start
+# did not place validated the additions with no role, so a reader there got the writer's cap and
+# the Bash wall's own printed remedy, followed four times, left an unplaced critic with four
+# suites. The door now reads the agent's role from the start it recorded (the `role=` of the id's
+# `start-unchecked/v1|event=start|` line, the line the NOTIFY is built from) and holds a reader to
+# three in total, suites and runs together, by the dispatch wall's own function in brief.sh, on
+# the strict side whatever its candidates were dealt; a fourth is refused naming the cap and
+# saying to dispatch it again. A writer's unplaced row is as before. The starts go through the
+# real recorder; two launches of one type with different `questions=` leave it unplaced.
+# fails-when: a fourth suite or run is recorded for an unplaced reader, or a writer is refused one.
+export CLAUDE_CONFIG_DIR="$S66_CFG"
+s74_total() {  # <repo> <agent id> -> suites plus counted runs on the row the budget wall picks for the id
+  local p sa n=0
+  p="$(s66_pick "$1" "$2")"; sa="$(s30_field "$p" suites_allowed)"
+  case "$sa" in ''|none) : ;; *) n=$(printf '%s\n' $sa | wc -l | tr -d ' ') ;; esac
+  printf '%s' "$(( n + $(s30_field "$p" re_executes \
+    | awk -F'`' '{ for (i = 2; i <= NF; i += 2) if ($i != "" && $i !~ /^(rm|rmdir|mkdir|touch|cp|mv) /) n++ } END { print n + 0 }') ))"
+}
+s74_unplaced() {  # <repo> <type> <tag> <questions of one launch> <questions of the other> — two launches, then starts
+  s66_launch "$1" "$3-a" "toolu_$3a" "$2" ${4:+"questions=$4"} suites_allowed=none
+  s66_launch "$1" "$3-b" "toolu_$3b" "$2" ${5:+"questions=$5"} suites_allowed=none
+}
+s74_start() { s66_start "$1" "$2" "$3"; s66_ran "$3"; }  # <repo> <type> <agent id>
+s74_line() { /usr/bin/grep -F "start-unchecked/v1|event=start|" "$(roster_of "$1")" | /usr/bin/grep -F "|agent_id=$2|"; }
+require_helpers s74_total s74_unplaced s74_start s74_line
+for s74_role in critic auditor reviewer; do
+  case "$s74_role" in
+    critic)   s74_q1=evidence,adversarial,structure; s74_q2=adversarial ;;
+    auditor)  s74_q1=evidence; s74_q2=evidence,structure ;;
+    reviewer) s74_q1=structure; s74_q2=adversarial ;;   # dealt no evidence: the strict side holds it all the same
+  esac
+  R74="$(make_repo "s74-$s74_role")"; new_roster "$R74"
+  s74_unplaced "$R74" "bionic:$s74_role" "u$s74_role" "$s74_q1" "$s74_q2"
+  S74_ID="a74-${s74_role}-000000000001"
+  s74_start "$R74" "bionic:$s74_role" "$S74_ID"
+  expect_contains "74a0 ($s74_role) precondition: the start is recorded unplaced, with its role" \
+    "|role=bionic:$s74_role|" "$(s74_line "$R74" "$S74_ID")"
+  expect_empty "74a0b ($s74_role) precondition: …and no row carries its id" "$(s66_pick "$R74" "$S74_ID")"
+  S74_RCS=""
+  for s74_n in n1 n2 n3; do
+    poke "$R74" amend "$S74_ID" --suites+ "tests/$s74_n.test.sh" --reason 'its refusal asked'
+    S74_RCS="$S74_RCS$RC"
+  done
+  expect_eq "74a1 ($s74_role) §AMEND-UNPLACED-READER three suites, one amend each, are recorded" "000" "$S74_RCS"
+  expect_eq "74a2 ($s74_role) …and the row holds three" "3" "$(s74_total "$R74" "$S74_ID")"
+  S74_SUM="$(cksum < "$(roster_of "$R74")")"
+  poke "$R74" amend "$S74_ID" --suites+ tests/n4.test.sh --reason 'its refusal asked'
+  expect_eq "74a3 ($s74_role) a fourth is refused (exit 1)" "1" "$RC"
+  expect_contains "74a4 ($s74_role) …naming the total and the cap, in the dispatch wall's words" \
+    "the total of 4 runs exceeds the 3-run cap" "$OUT"
+  expect_contains "74a5 ($s74_role) …and saying it should be dispatched again" "dispatch it again" "$OUT"
+  expect_eq "74a6 ($s74_role) …and nothing is written" "$S74_SUM" "$(cksum < "$(roster_of "$R74")")"
+  poke "$R74" amend "$S74_ID" --reexec+ 'rm -rf x & pytest' --reason 'a run behind &'
+  expect_eq "74a7 ($s74_role) a fourth hidden as rm -rf x & pytest is refused (exit 1)" "1" "$RC"
+  expect_eq "74a8 ($s74_role) …and the row still holds three" "3" "$(s74_total "$R74" "$S74_ID")"
+  S74_ID2="a74-${s74_role}-000000000002"
+  s74_start "$R74" "bionic:$s74_role" "$S74_ID2"
+  expect_contains "74b0 ($s74_role) precondition: a second unplaced start is recorded with its role" \
+    "|role=bionic:$s74_role|" "$(s74_line "$R74" "$S74_ID2")"
+  S74_SUM="$(cksum < "$(roster_of "$R74")")"
+  poke "$R74" amend "$S74_ID2" --suites+ tests/n1.test.sh --suites+ tests/n2.test.sh \
+    --suites+ tests/n3.test.sh --suites+ tests/n4.test.sh --reason 'four at once'
+  expect_eq "74b1 ($s74_role) one call adding four suites is refused whole (exit 1)" "1" "$RC"
+  poke "$R74" amend "$S74_ID2" --suites+ tests/n1.test.sh --suites+ tests/n2.test.sh \
+    --reexec+ 'pytest tests/x' --reexec+ 'pytest tests/y' --reason 'two and two'
+  expect_eq "74b2 ($s74_role) …and so is one adding two suites and two runs (exit 1)" "1" "$RC"
+  expect_eq "74b3 ($s74_role) …and neither wrote anything" "$S74_SUM" "$(cksum < "$(roster_of "$R74")")"
+  poke "$R74" amend "$S74_ID2" --suites+ tests/n1.test.sh --suites+ tests/n2.test.sh \
+    --reexec+ 'pytest tests/x' --reason 'two and one'
+  expect_eq "74b4 ($s74_role) two suites and one run in one call are recorded (exit 0)" "0" "$RC"
+  expect_eq "74b5 ($s74_role) …the row holding three" "3" "$(s74_total "$R74" "$S74_ID2")"
+done
+# THE NAMED LIMIT (A-orch-154, ruled at the writer's stop). The recorder writes the start-unchecked
+# line only when the candidates were dealt DIFFERENT questions, so in review pass 53's own drive
+# `a5` (three critic launches all dealt the same questions) no line names the agent and the door
+# has no role to read: the unplaced row is as before, four suites recorded, until T68 places the
+# agent at its launch call's return. This row pins that state; a recorder that records the role
+# for every unplaced start would turn it, and the ruling is what changes then.
+R74S="$(make_repo s74-same)"; new_roster "$R74S"
+for s74_c in sa sb sc; do
+  s66_launch "$R74S" "$s74_c" "toolu_$s74_c" bionic:critic questions=evidence,adversarial,structure suites_allowed=none
+done
+S74S_ID="a74-same-00000000000001"
+s74_start "$R74S" bionic:critic "$S74S_ID"
+expect_empty "74f0 precondition: candidates dealt the same questions leave no start-unchecked line for the id" \
+  "$(s74_line "$R74S" "$S74S_ID")"
+expect_empty "74f0b precondition: …and no row carries its id" "$(s66_pick "$R74S" "$S74S_ID")"
+S74_RCS=""
+for s74_n in n1 n2 n3 n4; do
+  poke "$R74S" amend "$S74S_ID" --suites+ "tests/$s74_n.test.sh" --reason 'its refusal asked'
+  S74_RCS="$S74_RCS$RC"
+done
+expect_eq "74f1 the limit A-orch-154 names: an unplaced critic with no recorded role takes a fourth, as before" "0000" "$S74_RCS"
+expect_eq "74f2 …and its row holds four" "4" "$(s74_total "$R74S" "$S74S_ID")"
+R74W="$(make_repo s74-writer)"; new_roster "$R74W"
+s74_unplaced "$R74W" bionic:implementor uwri "" ""
+S74W_ID="a74-writer-0000000000001"
+s74_start "$R74W" bionic:implementor "$S74W_ID"
+expect_empty "74c0 precondition: no row carries the unplaced writer's id" "$(s66_pick "$R74W" "$S74W_ID")"
+S74_RCS=""
+for s74_n in n1 n2 n3 n4; do
+  poke "$R74W" amend "$S74W_ID" --suites+ "tests/$s74_n.test.sh" --reason 'its refusal asked'
+  S74_RCS="$S74_RCS$RC"
+done
+expect_eq "74c1 a writer its start did not place takes a fourth suite, as before" "0000" "$S74_RCS"
+expect_eq "74c2 …and its row holds four" "4" "$(s74_total "$R74W" "$S74W_ID")"
+unset CLAUDE_CONFIG_DIR
+
+# §BUDGET-IN-FORCE (wave-27 T74; review pass 53 N4 ruled, N5, S2). The verb recorded any value at or
+# below the ceiling the machine derived, so after the user lowered the cap to 3 a reply nothing
+# verifies raised it to 5, then 8. It now records n only at or below the cap IN FORCE, the plan's
+# own `parallel-budget: writers=` (which the verb's override writes, and a user's hand edit sets):
+# a raise by any amount is the user's own edit of that line, and the refusal says so; a hand raise
+# is in force. A `writers=` or `derived=` in the plan that is not one to four digits refuses the
+# verb, naming the line, and nothing is recorded. After two writes the frontmatter holds ONE
+# override line (the verb rewrites it; S2: a copy without the rewrite holds two).
+# fails-when: a raise over the cap in force is recorded, a lowering under a hand raise is refused,
+# a ceiling that is not a number compares as "not greater", or the override line is doubled.
+R74B="$(make_repo s74-budget)"; ( cd "$R74B" && git commit -q --allow-empty -m init )
+git -C "$R74B" config user.name "Dana Fixture"
+P74B="$(s42_plan "$R74B" 4)"
+s74_hdr() { /usr/bin/grep '^parallel-budget:' "$1"; }
+s74_ovr() { /usr/bin/grep -c '^budget-override:' "$1" | tr -d ' '; }
+s74_set() {  # <plan> <line key> <field> <value> — a hand edit of one field of one frontmatter line
+  S74_K="$2" S74_F="$3" S74_V="$4" awk '
+    NR == 1 && $0 == "---" { f = 1; print; next }
+    f && $0 == "---" { f = 0 }
+    f && index($0, ENVIRON["S74_K"] ":") == 1 {
+      n = split($0, w, " "); out = w[1]
+      for (i = 2; i <= n; i++) { if (index(w[i], ENVIRON["S74_F"] "=") == 1) w[i] = ENVIRON["S74_F"] "=" ENVIRON["S74_V"]; out = out " " w[i] }
+      $0 = out
+    }
+    { print }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+require_helpers s74_hdr s74_ovr s74_set
+expect_contains "74d0 precondition: the probe's header, eight writers" "parallel-budget: writers=8 " "$(s74_hdr "$P74B")"
+poke "$R74B" budget writers=3 'keep it at three'
+expect_eq "74d1 §BUDGET-IN-FORCE writers=3 under the eight in force is recorded (exit 0)" "0" "$RC"
+s42_snap "$R74B" "$P74B"
+poke "$R74B" budget writers=5 'back to five'
+s42_unchanged "74d2 writers=5 over the user's 3 in force, under the derived 8" 1 "$P74B"
+expect_contains "74d3 …saying the cap in force is 3 and the verb only lowers it" \
+  "writers=5 is above the cap in force (3): budget only lowers it" "$OUT"
+expect_contains "74d4 …and that raising it is the user's own edit of the parallel-budget: line" \
+  "Raising it is the user's own edit of the plan's parallel-budget: line" "$OUT"
+poke "$R74B" budget writers=2 'two'
+expect_eq "74d5 writers=2 is recorded (exit 0)" "0" "$RC"
+expect_contains "74d6 …the header reads it" "parallel-budget: writers=2 " "$(s74_hdr "$P74B")"
+expect_eq "74d7 §OVERRIDE-ONE after two successful writes the frontmatter holds exactly one override line" \
+  "1" "$(s74_ovr "$P74B")"
+expect_regex "74d7b …the second write's" '^budget-override: Dana Fixture [0-9-]{10} derived=8 chosen=2$' \
+  "$(/usr/bin/grep '^budget-override:' "$P74B")"
+s74_set "$P74B" parallel-budget writers 12
+expect_contains "74d8 precondition: the user's hand raise to 12" "parallel-budget: writers=12 " "$(s74_hdr "$P74B")"
+s42_snap "$R74B" "$P74B"
+poke "$R74B" budget writers=10 'ten'
+expect_eq "74d9 writers=10 under the user's hand-raised 12 is recorded (exit 0): the hand edit is in force" "0" "$RC"
+expect_contains "74d10 …the header reads it" "parallel-budget: writers=10 " "$(s74_hdr "$P74B")"
+poke "$R74B" budget writers=10 'ten again'
+expect_eq "74d11 writers=10 at the 10 in force is a no-op (exit 0)" "0" "$RC"
+expect_contains "74d12 …that says so" "the plan already reads so; nothing was written" "$OUT"
+expect_eq "74d13 …and the override is still one line" "1" "$(s74_ovr "$P74B")"
+s42_snap "$R74B" "$P74B"
+cp "$P74B" "$TMPROOT/s74-good"
+for s74_case in "budget-override derived 99999999999999999999" "budget-override derived abc" \
+                "budget-override derived -3" "budget-override derived ''" \
+                "parallel-budget writers 99999999999999999999" "parallel-budget writers abc" \
+                "parallel-budget writers -3" "parallel-budget writers ''"; do
+  read -r s74_k s74_f s74_v <<< "$s74_case"; [ "$s74_v" = "''" ] && s74_v=""
+  cp "$TMPROOT/s74-good" "$P74B"; s74_set "$P74B" "$s74_k" "$s74_f" "$s74_v"
+  S74_E="$s74_k $s74_f=$s74_v"
+  expect_contains "74e0 ($S74_E) precondition: the edit is in the plan" " $s74_f=$s74_v" \
+    "$(/usr/bin/grep "^$s74_k:" "$P74B") "
+  s42_snap "$R74B" "$P74B"
+  poke "$R74B" budget writers=1 'one'
+  s42_unchanged "74e1 ($S74_E) §N5 a ceiling that is not one to four digits" 1 "$P74B"
+  expect_contains "74e2 ($S74_E) …naming the line" "the plan's $s74_k: line" "$OUT"
+  expect_contains "74e3 ($S74_E) …and saying why" "$s74_f= that is not one to four digits" "$OUT"
+done
+cp "$TMPROOT/s74-good" "$P74B"; s42_snap "$R74B" "$P74B"
+poke "$R74B" budget writers=1 'one'
+expect_eq "74e4 control: the same call on the plan restored is recorded (exit 0)" "0" "$RC"
+
+# ============================================================
+section "Section 68 §DEBT-OWED: a debt is owed because land wrote it, and covered only by a green run after the red landing (wave-27 T67; review pass 46 B1, B2, B3, N5, S3; REQ-14 AC-14.3; D23 as amended, A-orch-120)"
+# ============================================================
+#
+# The judge reads debts from the run's landing record (`landing-proofs.log`), every `debt:` line no
+# `void:` line names, and never from a `landed red:` plan line, which may stay as a note and changes
+# nothing. Either kind of debt is covered only by a green floor or task proof dated strictly after the
+# red landing; an `approval:` debt also after the approval. Two red landings on one suite and token
+# are two debts, both covered only after the later. An `ext:` slug is held while any `## Tasks` cell
+# holds it as a whole token, whatever punctuation stands around it.
+#
+# FIXTURE FIDELITY. §64's repository, bound plan, head and proof placer (`proof_add_line`); each debt
+# written by `land`'s own writer (`_wt_debt_write`) and each void by `_wt_debt_void`; an `approved:`
+# line in the shape the approve verb writes, at a time the row chooses.
+S68_AP="$(printf 'debt\twidget.test.sh\tapproval:design')"
+S68_EXT="$(printf 'debt\twidget.test.sh\text:vendor-key')"
+s68_plan() { cp "$TMPROOT/s64-clean" "$P64"; s64_debt_reset; }
+s68_approve() { s64_add "approved: $1 by Dana Fixture $2 \"ok\""; }
+s68_owed() { bash -c '. "$1" && facts_owed audited wave "$2" "$3"' _ "$S61_LIB" "$R64" "$P64" | /usr/bin/grep '^debt'; }
+s68_cell() {  # <the T2 deps cell> -> P64's T2 row holding it
+  S68_C="$1" awk '/^\| T2 \|/ { sub(/\| — \| 30 \|/, "| " ENVIRON["S68_C"] " | 30 |") } { print }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+}
+
+# ---------- B3: the record makes the debt, the plan line does not ----------
+s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T04:00:00Z
+expect_eq "68a B3 a debt land wrote is dealt with no landed red: line anywhere in the plan" "$S68_EXT" "$(s68_owed)"
+s57_state "$P64" "$S64_H"
+expect_eq "68a1 …and the judge says it absent (no green run after 04:00Z)" "absent" "$(s57_of "$S68_EXT")"
+for s68v in "landed red: widget.test.sh until ext:vendor-key" \
+            "landed red: widget.test.sh until ext:vendor-key at 2026-10-04T00:00:00Z" \
+            "landed red: other.test.sh until ext:vendor-key at 2026-10-05T04:00:00Z"; do
+  cp "$TMPROOT/s64-clean" "$P64"
+  awk -v l="- T9: landed at record/T9.md, $s68v" '{ print } /^- T1: landed at record\/T1.md/ { print l }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+  s57_state "$P64" "$S64_H"
+  expect_eq "68a2 a hand-edited plan line ($s68v) changes nothing: the one debt, absent" "$S68_EXT|absent" "$(s68_owed)|$(s57_of "$S68_EXT")"
+done
+s64_debt_reset
+expect_eq "68a3 …and with no debt in the record, the same plan line owes nothing" "" "$(s68_owed)"
+expect_contains "68a4 …while the plan still carries it (the line is a note)" "landed red: other.test.sh" "$(cat "$P64")"
+
+# ---------- B1: approval, green, red; the same second; one second after ----------
+s68_plan; s68_approve design 2026-10-05T01:00:00Z
+s64_proof floor 2026-10-05T01:30:00Z record/wave-01-fixture/floor-0130.log
+s64_debt widget.test.sh approval:design 2026-10-05T02:00:00Z
+s57_state "$P64" "$S64_H"
+expect_eq "68b B1 approval 01:00, green floor 01:30, red landing 02:00: absent" "absent" "$(s57_of "$S68_AP")"
+s64_proof floor 2026-10-05T02:00:00Z record/wave-01-fixture/floor-0200.log
+s57_state "$P64" "$S64_H"
+expect_eq "68b2 …a green floor at 02:00:00, the landing's own second: absent" "absent" "$(s57_of "$S68_AP")"
+s64_proof floor 2026-10-05T02:00:01Z record/wave-01-fixture/floor-020001.log
+s57_state "$P64" "$S64_H"
+expect_eq "68b3 …at 02:00:01: covered" "covered" "$(s57_of "$S68_AP")"
+s68_plan; s64_debt widget.test.sh approval:design 2026-10-05T02:00:00Z
+s64_proof floor 2026-10-05T02:30:00Z record/wave-01-fixture/floor-0230.log
+s68_approve design 2026-10-05T03:00:00Z
+s57_state "$P64" "$S64_H"
+expect_eq "68b4 red 02:00, green 02:30, approval 03:00: absent (the green is before the approval)" "absent" "$(s57_of "$S68_AP")"
+s64_proof task 2026-10-05T03:00:01Z record/wave-01-fixture/widget-green.log
+s57_state "$P64" "$S64_H"
+expect_eq "68b5 …a task proof showing widget green at 03:00:01: covered" "covered" "$(s57_of "$S68_AP")"
+s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:00:00Z
+s64_proof floor 2026-10-05T02:00:00Z record/wave-01-fixture/floor-0200.log
+s57_state "$P64" "$S64_H"
+expect_eq "68b6 an ext: debt and a green floor at the landing's own second: absent" "absent" "$(s57_of "$S68_EXT")"
+
+# ---------- B2: red, green, red ----------
+s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:00:00Z
+s64_proof floor 2026-10-05T02:30:00Z record/wave-01-fixture/floor-0230.log
+s57_state "$P64" "$S64_H"
+expect_eq "68c0 control: one red landing at 02:00, a green floor at 02:30: covered" "covered" "$(s57_of "$S68_EXT")"
+s64_debt widget.test.sh ext:vendor-key 2026-10-05T03:00:00Z
+s57_state "$P64" "$S64_H"
+expect_eq "68c B2 a second red landing on the same suite and token at 03:00: absent" "absent" "$(s57_of "$S68_EXT")"
+expect_eq "68c2 …the two debt lines dealt as one owed line" "$S68_EXT" "$(s68_owed)"
+s64_proof floor 2026-10-05T03:30:00Z record/wave-01-fixture/floor-0330.log
+s57_state "$P64" "$S64_H"
+expect_eq "68c3 …a green floor after the later one: covered" "covered" "$(s57_of "$S68_EXT")"
+
+# ---------- a merge that failed: its debt is voided ----------
+s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:00:00Z d68void
+expect_eq "68d0 control: the debt before its void is dealt" "$S68_EXT" "$(s68_owed)"
+bash -c '. "$1" && _wt_debt_void "$2" d68void wt/27-T9 merge-failed' _ "$S64_WTLIB" "$S64_LOG"
+expect_eq "68d a debt whose id a void line names is owed by nothing" "" "$(s68_owed)"
+s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:10:00Z
+expect_eq "68d2 …and a later debt on the same suite is owed by itself" "$S68_EXT" "$(s68_owed)"
+
+# ---------- N5: the slug in a cell whatever stands around it ----------
+for s68c in '`ext:vendor-key`' '(ext:vendor-key)' 'ext:vendor-key.' 'ext:vendor-key, T1'; do
+  s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:00:00Z
+  s64_proof floor 2026-10-05T03:00:00Z record/wave-01-fixture/floor-0300.log
+  s68_cell "$s68c"
+  s57_state "$P64" "$S64_H"
+  expect_eq "68e N5 the slug in a cell as $s68c is still owed: absent" "absent" "$(s57_of "$S68_EXT")"
+done
+s68_plan; s64_debt widget.test.sh ext:vendor-key 2026-10-05T02:00:00Z
+s64_proof floor 2026-10-05T03:00:00Z record/wave-01-fixture/floor-0300.log
+s68_cell 'ext:vendor-key-2'
+s57_state "$P64" "$S64_H"
+expect_eq "68e2 …ext:vendor-key-2 in a cell does not keep ext:vendor-key owed: covered" "covered" "$(s57_of "$S68_EXT")"
+
+# ---------- N7: the release-check verb looks again at the head and the tree after the command ----------
+# §62's repository, plan and working checkout; the declared command is a script this row writes, which
+# commits, or writes a tracked file, or does nothing, as a mode file says.
+S68_MODE="$TMPROOT/s68-rc-mode"; S68_CHK="$TMPROOT/s68-check.sh"
+cat > "$S68_CHK" <<'S68_EOF'
+#!/bin/bash
+case "$(cat "$1")" in
+  commit) git commit -q --allow-empty -m 'the check committed' ;;
+  dirty) echo dirt >> lib/a.sh ;;
+esac
+exit 0
+S68_EOF
+printf 'release-check: bash %s %s\n' "$S68_CHK" "$S68_MODE" > "$R62/.bionic/config.yaml"
+S68_H0="$(git -C "$S62_WT" rev-parse HEAD)"
+echo none > "$S68_MODE"
+poke "$R62" release-check
+expect_eq "68f0 control: a declared check that changes nothing passes (exit 0)" "0" "$RC"
+for s68m in commit dirty; do
+  echo "$s68m" > "$S68_MODE"
+  poke "$R62" release-check
+  expect_eq "68f-${s68m} N7 a declared check that ${s68m}s is refused as land refuses it (exit 1)" "1" "$RC"
+  expect_contains "68f-${s68m}b …naming what it left" "check-dirtied" "$OUT"
+  expect_regex "68f-${s68m}c …and a result=fail check fact is written at the head it ran on" \
+    "^proved: kind=check head=${S68_H0} .*result=fail" "$(/usr/bin/grep '^proved: kind=check' "$P62" | tail -1)"
+  git -C "$S62_WT" reset -q --hard "$S68_H0"
+done
+rm -f "$R62/.bionic/config.yaml"
 
 finish

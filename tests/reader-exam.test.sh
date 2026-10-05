@@ -5,7 +5,7 @@
 # tests/reader-exam/), and no hermetic suite can. What this suite owns is what a machine can
 # hold the exam to: the checks files the readers were examined on are the ones that ship, and
 # the latest sitting had readers behind it who met every sample, and the recipe a sitter follows
-# is in the tree. Eight sections:
+# is in the tree. Nine sections:
 #
 #   §PIN      `exam_pin` on planted sittings: the latest sitting, by file order, has the
 #             three `sha256` lines equal to the files' digests, a `result` line for every
@@ -44,6 +44,13 @@
 #             this checkout or inside it is refused by both helpers, and a copy outside any
 #             checkout does not refuse; a fifth argument is refused, and the same row is red on a
 #             doctored copy that passes it on; README steps 2 and 3 say each.
+#   §CALLERS  (T73) review pass 52's callers as ONE table, driven against copies of both
+#             helpers in a throwaway repository with three worktrees: for each, what ran and
+#             where, what is new or changed under the throwaway root, and the first line said.
+#             The helpers run on an environment they make, read the caller's PATH only for
+#             claude and refuse any entry that is not absolute, decide "inside" by identity,
+#             resolve each path once and use that, refuse a failed lookup of their worktrees,
+#             and keep a destination and an output file out of every worktree.
 #   §SHIPPED  the shipped `sittings.md` against the shipped checks files.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): §PIN runs
@@ -59,7 +66,10 @@
 # the real materialize.sh into real git repositories. §RECIPE runs the real helpers; SYNTHESIZED
 # there: the CLI binary (a script on PATH that records its argv, working directory and
 # environment, with a shell function of the same name exported beside it), the parent session's
-# variables, and the briefs. The shipped README is read, not copied.
+# variables, and the briefs. The shipped README is read, not copied. §CALLERS runs byte copies of
+# the real helpers in a model repository; SYNTHESIZED there: every program and environment a
+# caller supplies (its own block says which), and copies whose own PATH is a directory of
+# the fixture's (no git, or a git that answers nothing, two lines, or a foreign directory).
 #
 # ANTI-VACUITY (declared, per the same file, "Anti-vacuity"): every red verdict sits beside a
 # green one from the same function on a fixture one edit away; the digest function is proved
@@ -875,15 +885,15 @@ PARENT_VARS="CLAUDECODE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_BRIDGE_SESSION_ID CLA
 parent_env=""
 for v in $PARENT_VARS; do parent_env="$parent_env $v=parent-$v"; done
 # shellcheck disable=SC2086
-out="$(cd "$TMP" && env $parent_env CLAUDE_CONFIG_DIR=/kept/config FAKE_LOG="$RV/fake.log" PATH="$RV/bin:$PATH" \
+out="$(cd "$TMP" && env $parent_env CLAUDE_CONFIG_DIR=/kept/config FAKE_LOG="$RV/fake.log" PATH="$RV/bin:/usr/bin:/bin" \
   bash -c 'claude() { echo FUNCTION > "$FAKE_LOG.function"; }; export -f claude; exec bash "$0" "$@"' \
   "$RUN" "$RV/dest" "$RV/plugin" "$RV/prompt.txt" "$RV/out.json" 2>&1)"; rc=$?
 expect_status "R5: run-session.sh exits with the CLI's status" 0 "$rc"
 expect_contains "R5: the fake CLI saw the call" "argv:" "$(cat "$RV/fake.log" 2>/dev/null)"
 expect_eq "R5: it runs the CLI binary, and the shell function of the same name never ran" "no" \
   "$([ -e "$RV/fake.log.function" ] && echo yes || echo no)"
-expect_eq "R5: it passes -p, --plugin-dir, --output-format json and the prompt, and nothing else" \
-  "argv: [-p] [--plugin-dir] [$RV/plugin] [--output-format] [json] [a prompt with \"quotes\", a \$dollar and
+expect_eq "R5: it passes -p, --plugin-dir (resolved, physical), --output-format json and the prompt, and nothing else" \
+  "argv: [-p] [--plugin-dir] [$(cd "$RV/plugin" && pwd -P)] [--output-format] [json] [a prompt with \"quotes\", a \$dollar and
 two lines]" "$(sed -n '1,2p' "$RV/fake.log")"
 expect_eq "R5: it runs in the built project's physical directory" "cwd: $(cd "$RV/dest" && pwd -P)" "$(sed -n '3p' "$RV/fake.log")"
 for v in $PARENT_VARS; do
@@ -973,13 +983,14 @@ OKPATH="$RV/bin:/usr/bin:/bin"
 hs_reset
 out="$(hs "$CK/caller" ".:/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
 expect_status "H1: PATH holding . with a claude in the caller's directory is refused" 2 "$rc"
-expect_contains "H1: …naming the PATH entry that gave a relative answer" "PATH entry '.' gives claude a relative path" "$out"
+expect_contains "H1: …saying why" "run-session.sh: refused — PATH holds an entry that is not an absolute directory" "$out"
+expect_contains "H1: …and naming the entry" "PATH entry '.';" "$out"
 expect_false "H1: …and neither the caller's claude nor the project's ran" test -e "$CK/tags"
 expect_false "H1: …and nothing is written" test -e "$CK/out.json.time"
 hs_reset
 out="$(hs "$CK/caller" ":/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
 expect_status "H2: PATH holding an empty entry is refused" 2 "$rc"
-expect_contains "H2: …naming it" "an empty PATH entry gives claude a relative path" "$out"
+expect_contains "H2: …naming it" "PATH entry '' (empty, which is the working directory)" "$out"
 expect_false "H2: …and nothing ran" test -e "$CK/tags"
 hs_reset
 out="$(hs "$CK/caller" "/usr/bin:/bin:" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
@@ -987,17 +998,24 @@ expect_status "H2: a trailing empty entry is refused too" 2 "$rc"
 expect_false "H2: …and nothing ran" test -e "$CK/tags"
 hs_reset
 out="$(hs "$CK/caller" "rel:/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
-expect_status "H2: a relative entry that holds no claude gives no answer, and no claude is found" 2 "$rc"
+expect_status "H2: a relative entry that holds no claude is refused as well (T73)" 2 "$rc"
+expect_contains "H2: …naming it" "PATH entry 'rel';" "$out"
 mkdir -p "$CK/caller/rel"; tagfake rel "$CK/caller/rel/claude"
 out="$(hs "$CK/caller" "rel:/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
 expect_status "H2: a named relative entry that holds a claude is refused" 2 "$rc"
-expect_contains "H2: …naming it" "PATH entry 'rel' gives claude a relative path" "$out"
+expect_contains "H2: …naming it, whatever it holds" "PATH entry 'rel';" "$out"
 expect_false "H2: …and it never ran" test -e "$CK/tags"
 hs_reset
+# H3, re-pinned by T73. T64 passed this PATH because the first claude on it is absolute; review
+# pass 52 (B1) ran the built project's own env and cat under it, since the session and the
+# helper's later steps search the same PATH from the built project. A relative or empty entry is
+# now refused wherever it stands, and whether or not it holds a claude.
 out="$(hs "$CK/caller" "$RV/bin:.:/usr/bin:/bin:" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
-expect_status "H3: an absolute claude first runs, whatever relative entries follow it" 0 "$rc"
-expect_false "H3: …and the caller's claude never ran" test -e "$CK/tags"
-expect_eq "H3: …with the project as its working directory" "cwd: $(cd "$CK/dest" && pwd -P)" "$(sed -n '3p' "$CK/fake.log")"
+expect_status "H3: an absolute claude first is refused when a relative entry follows it" 2 "$rc"
+expect_contains "H3: …naming the entry" "PATH entry '.';" "$out"
+expect_false "H3: …and neither the absolute claude nor the caller's ran" test -e "$CK/fake.log"
+expect_false "H3: …nor any tagged fake" test -e "$CK/tags"
+expect_false "H3: …and nothing is written" test -e "$CK/out.json.time"
 hs_reset
 out="$(hs "$CK" "$CK/dest/bin:/usr/bin:/bin" "$RUN" "$CK/dest" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
 expect_status "H4: an absolute claude inside <dest> is refused" 2 "$rc"
@@ -1046,9 +1064,10 @@ expect_status "H7: a copied run-session.sh does not refuse a <dest> inside the c
 expect_absent "H7: …and says nothing of a checkout" "checkout" "$out"
 expect_true "H7: …and the fake ran" test -e "$CK/fake.log"
 # …and the row is live: a copy that refuses when it cannot find a checkout is refused here.
-anchor "$RUN" 'if [ -n "$top" ]; then' 1
-sed 's/if \[ -n "\$top" \]; then/if true; then/' "$RUN" > "$CK/copied/refuse-blind.sh"
-expect_eq "H7: the doctored copy refuses without a checkout to refuse for" "1" "$(grep -c 'if true; then' "$CK/copied/refuse-blind.sh")"
+anchor "$RUN" '[ -n "$git_at" ] || return 0' 1
+sed 's/\[ -n "\$git_at" \] || return 0/refuse "a session never sits inside the checkout that holds the answers" blind/' \
+  "$RUN" > "$CK/copied/refuse-blind.sh"
+expect_eq "H7: the doctored copy refuses without a checkout to refuse for" "1" "$(grep -c 'answers" blind$' "$CK/copied/refuse-blind.sh")"
 hs_reset
 out="$(hs "$CK" "$OKPATH" "$CK/copied/refuse-blind.sh" "$REPO" "$RV/plugin" "$RV/prompt.txt" "$CK/out.json")"; rc=$?
 expect_status "H7: …so on it the same row is red: it exits 2" 2 "$rc"
@@ -1091,19 +1110,316 @@ fifth() { # <script> — "refused" when it exits 2 and the fake never ran, "ran"
 expect_eq "H9: a fifth argument is refused and the fake never runs" "refused" "$(fifth "$RUN")"
 expect_false "H9: …and nothing is written" test -e "$CK/out.json.time"
 anchor "$RUN" '"$#" -eq 4' 1
-anchor "$RUN" '--output-format json "$(cat "$prompt")"' 1
-sed -e 's/"\$#" -eq 4/"$#" -ge 4/' -e 's/--output-format json "\$(cat "\$prompt")"/--output-format json "$(cat "$prompt")" "${@:5}"/' "$RUN" > "$CK/pass.sh"
+anchor "$RUN" '--output-format json "$prompt_text"' 1
+sed -e 's/"\$#" -eq 4/"$#" -ge 4/' -e 's/--output-format json "\$prompt_text"/--output-format json "$prompt_text" "${@:5}"/' "$RUN" > "$CK/pass.sh"
 expect_eq "H9: the doctored copy relaxes the count and passes the rest on" "2" "$(grep -cE '"\$#" -ge 4|\$\{@:5\}' "$CK/pass.sh")"
 expect_eq "H9: …and on it the same row is red: the fake ran" "ran" "$(fifth "$CK/pass.sh")"
 expect_contains "H9: …with the flag among its arguments" "[$FIFTH]" "$(cat "$CK/fake.log")"
 
 # The README says each refusal where a sitter meets the helper.
 STEP2="$(awk '/^2\. \*\*Materialize each sample/ { f = 1 } /^3\. \*\*Open an engaged session/ { f = 0 } f' "$EXAM/README.md")"
-expect_contains "H10: step 2 says materialize.sh refuses a destination that is this checkout or inside it" "is this checkout or lies inside it" "$STEP2"
+STEP2_FLAT="$(printf '%s' "$STEP2" | tr '\n' ' ' | tr -s ' ')"
+expect_contains "H10: step 2 says materialize.sh refuses a destination inside any worktree" "lies inside any worktree of this repository" "$STEP2_FLAT"
+expect_contains "H10: …that it builds where <dest> resolves to" "builds where that leads" "$STEP2_FLAT"
+expect_contains "H10: …and that a failed lookup of its worktrees refuses" "that lookup fails, it refuses" "$STEP2_FLAT"
 STEP3_FLAT="$(printf '%s' "$STEP3" | tr '\n' ' ' | tr -s ' ')"
-expect_contains "H10: step 3 says run-session.sh refuses one too" "inside this checkout" "$STEP3_FLAT"
-expect_contains "H10: …and a claude that is a relative path or a file inside <dest>" "relative path" "$STEP3_FLAT"
+expect_contains "H10: step 3 says run-session.sh refuses one too, and an output file there" "inside any worktree of this repository" "$STEP3_FLAT"
+expect_contains "H10: …and a PATH entry that is not absolute, whatever it holds" "any entry that is not an absolute directory" "$STEP3_FLAT"
+expect_contains "H10: …and when: before the CLI runs or anything is written" "before it runs the CLI or writes anything" "$STEP3_FLAT"
+expect_contains "H10: …and on what its own steps run" "PATH=/usr/bin:/bin" "$STEP3_FLAT"
 expect_contains "H10: …and a fifth argument" "fifth argument" "$STEP3_FLAT"
+
+section "§CALLERS — the reviewer's callers, one table (T73)"
+
+# Review pass 52 pictured 98 callers of the two helpers and drove each with a fake CLI. The
+# table below is those callers, each with its answer: what must have run (nothing, or the
+# absolute fake outside the built project, in the RESOLVED destination), what is new or
+# changed afterwards anywhere under the throwaway root, and the first line said on a refusal.
+# ONE row compares the whole table, red on any line that differs. It drives byte copies of the
+# helpers in a throwaway repository under this suite's $TMP (common rule 12: never a real
+# checkout), with a main checkout, a worktree under it, an external worktree and a tracked
+# link `payload/hooks -> ../hooks`, as the review's model had. SYNTHESIZED: every program a
+# caller can put first (a fake claude, and fakes named dirname, env, cat, git, date, readlink,
+# mkdir and cp in the caller's directory and in the built project), each logging its tag and
+# working directory; exported functions, BASH_ENV, CDPATH, IFS and GIT_CEILING_DIRECTORIES;
+# copies whose own PATH (the one `PATH=/usr/bin:/bin` assignment) names a directory
+# with no git, or a git that answers nothing, two lines, fails, or names a directory not theirs.
+B="$(cd -P "$TMP" && pwd -P)/t73"
+mkdir -p "$B"
+expect_false "HT0: the throwaway root lies in no git repository" git -C "$B" rev-parse --show-toplevel
+case "$B" in /private/var/*) BV="${B#/private}" ;; *) BV="$B" ;; esac
+[ "$BV" -ef "$B" ] || BV="$B"
+REC="$B/rec"; mkdir -p "$REC" "$B/home" "$B/plugin" "$B/outdir/adir" "$B/okdest" "$B/m" "$B/o/far"
+printf 'a prompt\n' > "$B/prompt.txt"; mkdir -p "$TMP/t73-out"
+# tfake <path> <tag> — a program that logs `<tag>@<its physical working directory>`.
+tfake() { mkdir -p "${1%/*}"; printf '#!/bin/bash\necho "%s@$(pwd -P)" >> "%s/log"\n' "$2" "$REC" > "$1"; chmod +x "$1"; }
+tfake "$B/fakebin/claude" GOOD
+tfake "$TMP/t73-bin/claude" OUTER
+for t in claude dirname env cat git date readlink mkdir cp; do tfake "$B/caller/$t" "CALLER-$t"; done
+for t in claude env cat git date; do tfake "$B/dest/$t" "DEST-$t"; done
+tfake "$B/dest/bin/claude" DESTBIN
+tfake "$B/d2/bin/claude" D2BIN
+tfake "$B/shim/date" SHIM-date
+mkdir -p "$B/cdir/claude" "$B/cnox" "$B/abs" "$B/chain"; printf '#!/bin/bash\n' > "$B/cnox/claude"
+ln -s "$B/dest/bin/claude" "$B/abs/claude"
+ln -s ../abs/claude "$B/chain/claude"
+ln -s "$B/o/far" "$B/d2/out"
+printf 'env() { echo BASHENV-env >> "%s/log"; }\ncd() { echo BASHENV-cd >> "%s/log"; }\n' "$REC" "$REC" > "$B/bashenv.sh"
+# The model repository: the helpers under test, a sample with an answer file, a tracked link.
+R="$B/repo" W="$B/repo/.worktrees/wt" X="$B/ext"
+SX="$R/tests/reader-exam/samples/alpha"
+mkdir -p "$SX/tree" "$R/hooks" "$R/payload"
+cp "$RUN" "$EXAM/materialize.sh" "$R/tests/reader-exam/"
+ln -s ../hooks "$R/payload/hooks"; echo h > "$R/hooks/h.sh"
+echo one > "$SX/tree/a.txt"; echo "verdict: flag" > "$SX/expect.txt"
+printf 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n one\n+two\n' > "$SX/change.patch"
+printf '.worktrees/\n' > "$R/.gitignore"
+expect_false "HT0: …and nor does the model repository before it is made one" git -C "$R" rev-parse --show-toplevel
+git -C "$R" init -q
+if [ "$(cd "$(git -C "$R" rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null && pwd -P)" = "$R" ]; then
+  ok "HT0: the model repository's top is the throwaway path, before anything is written there"
+  git -C "$R" add -A && git -C "$R" -c user.name=t -c user.email=t@example.invalid commit -q -m m
+  git -C "$R" worktree add -q "$W" 2>/dev/null; git -C "$R" worktree add -q "$X" 2>/dev/null
+else
+  no "HT0: the model repository's top is the throwaway path, before anything is written there" "it is not; nothing is committed"
+fi
+expect_eq "HT0: the model has a main checkout and two worktrees" "3" "$(git -C "$R" worktree list --porcelain | grep -c '^worktree ')"
+RUN_M="$R/tests/reader-exam/run-session.sh" MAT_M="$R/tests/reader-exam/materialize.sh"
+RUN_W="$W/tests/reader-exam/run-session.sh" MAT_W="$W/tests/reader-exam/materialize.sh"
+RUN_X="$X/tests/reader-exam/run-session.sh" MAT_X="$X/tests/reader-exam/materialize.sh"
+mkdir -p "$B/copied"; cp "$RUN" "$EXAM/materialize.sh" "$B/copied/"
+RUN_C="$B/copied/run-session.sh" MAT_C="$B/copied/materialize.sh"
+# Copies whose own PATH is a directory of the review's making. `nogit` holds every tool the
+# helpers use but git; the others hold that and a git with one bad answer.
+for d in nogit mute two fail far; do
+  mkdir -p "$B/own-$d"
+  for t in date cat readlink mkdir cp tr; do ln -s "$(command -v "$t")" "$B/own-$d/$t"; done
+done
+printf '#!/bin/bash\nexit 0\n' > "$B/own-mute/git"
+printf '#!/bin/bash\nprintf "%%s\\n%%s\\n" "%s" "%s"\n' "$R" "$R" > "$B/own-two/git"
+printf '#!/bin/bash\nexit 128\n' > "$B/own-fail/git"
+printf '#!/bin/bash\necho "%s"\n' "$B/okdest" > "$B/own-far/git"
+chmod +x "$B"/own-*/git 2>/dev/null
+for h in run-session materialize; do
+  anchor "$EXAM/$h.sh" 'PATH=/usr/bin:/bin ' 1
+  for d in nogit mute two fail far; do
+    sed "s#PATH=/usr/bin:/bin #PATH=$B/own-$d #" "$EXAM/$h.sh" > "$R/tests/reader-exam/$d-$h.sh"
+  done
+  sed "s#PATH=/usr/bin:/bin #PATH=$B/own-nogit #" "$EXAM/$h.sh" > "$B/copied/nogit-$h.sh"
+done
+for t in rlink:"$R" tlink:"$R/tests" plink:"$R/tests" olink:"$R/tests" nlink:"$B/Alpha-real" \
+         n2:"$B/alpha-deep/sub" dangle:"$R/nonexistent"; do
+  ln -s "${t#*:}" "$B/${t%%:*}"
+done
+mkdir -p "$B/Alpha-real" "$B/alpha-deep/sub"
+ln -s "$SX/expect.txt" "$B/outdir/lnk.json"
+ln -s "$SX/expect.txt" "$B/outdir/t.json.time"
+mkdir -p "$B/casecheck"
+CASE_BLIND=no; [ -d "$B/CASECHECK" ] && CASE_BLIND=yes
+
+# tsnap — every entry under the root but the fakes' log and .git, files with their checksum.
+tsnap() {
+  { find "$B" \( -path "$REC" -o -name .git \) -prune -o -type f -exec cksum {} +
+    find "$B" \( -path "$REC" -o -name .git \) -prune -o ! -type f -print | sed 's/^/L 0 /'
+  } | LC_ALL=C sort -k 3
+}
+# tsym — a text with the root written B, in either spelling.
+tsym() { local s="${1//"$B"/B}"; printf '%s' "${s//"$BV"/B}"; }
+# tdiff <before> <after> — new entries (topmost only), ~changed and -gone ones, comma-joined.
+tdiff() {
+  awk 'NR == FNR { a[$3] = $1 " " $2; next } { b[$3] = $1 " " $2 }
+       END { for (p in b) if (!(p in a)) print "+" p; else if (a[p] != b[p]) print "~" p
+             for (p in a) if (!(p in b)) print "-" p }' "$1" "$2" | LC_ALL=C sort -k 1.2 |
+    awk '/^\+/ { p = substr($0, 2); if (top != "" && index(p, top "/") == 1) next; top = p } { print }'
+}
+U_RS="usage: run-session.sh <dest> <plugin copy> <prompt file> <output file>"
+P_RS="run-session.sh: refused — PATH holds an entry that is not an absolute directory"
+N_RS="run-session.sh: no claude binary on PATH"
+L_RS="run-session.sh: refused — the lookup of this file's checkout failed"
+C_RS="run-session.sh: refused — a session never sits inside the checkout that holds the answers"
+O_RS="run-session.sh: refused — an output file never lies in a checkout or in the built project"
+F_RS="run-session.sh: refused — an output file exists and is not a regular file"
+I_RS="run-session.sh: refused — the claude on PATH is a file inside the built project"
+C_MA="materialize: refused — a build never sits inside the checkout that holds the answers"
+L_MA="materialize: refused — the lookup of this file's checkout failed"
+D_MA="materialize: refused — a part of <dest> that does not exist yet is . or .."
+E_MA="materialize: <dest> must be a new path"
+N_MA="names the sample alpha — a reader given it is told the answer; choose a neutral path"
+NO="rc=2 ran=- new=- said="
+RAN="new=+B/outdir/o.json,+B/outdir/o.json.err,+B/outdir/o.json.time said=-"
+OK="$B/fakebin:/usr/bin:/bin" T3="$B/plugin $B/prompt.txt $B/outdir/o.json" S="$SX"
+# id | flags (case: only where letter case is ignored; sh: run by /bin/sh) | helper | cwd |
+# PATH ('' empty, -unset- none) | environment | arguments ('' an empty one) | answer
+CALLERS="$(cat <<TABLE
+L1||$RUN_M|$B/caller|.:/usr/bin:/bin|-|$B/dest $T3|${NO}$P_RS
+L2||$RUN_M|$B/caller|:/usr/bin:/bin|-|$B/dest $T3|${NO}$P_RS
+L3||$RUN_M|$B/caller|/usr/bin::/bin|-|$B/dest $T3|${NO}$P_RS
+L4||$RUN_M|$B/caller|/usr/bin:/bin:|-|$B/dest $T3|${NO}$P_RS
+L5a||$RUN_M|$B/caller|./bin:/usr/bin:/bin|-|$B/dest $T3|${NO}$P_RS
+L5b||$RUN_M|$B/caller|bin:/usr/bin:/bin|-|$B/dest $T3|${NO}$P_RS
+L5c||$RUN_M|$B/caller|..:/usr/bin:/bin|-|$B/dest $T3|${NO}$P_RS
+L5d||$RUN_M|$B/caller|''|-|$B/dest $T3|${NO}$P_RS
+L6||$RUN_M|$B/caller|$B/dest/bin:/usr/bin:/bin|-|$B/dest $T3|${NO}$I_RS
+L7a||$RUN_M|$B/caller|$B/abs:/usr/bin:/bin|-|$B/dest $T3|${NO}$I_RS
+L7b||$RUN_M|$B/caller|$B/chain:/usr/bin:/bin|-|$B/dest $T3|${NO}$I_RS
+L8a||$RUN_M|$B/caller|$BV/dest/bin:/usr/bin:/bin|-|$B/dest $T3|${NO}$I_RS
+L8b||$RUN_M|$B/caller|$B/dest/bin:/usr/bin:/bin|-|$BV/dest $T3|${NO}$I_RS
+L9a|case|$RUN_M|$B/caller|$B/DEST/bin:/usr/bin:/bin|-|$B/dest $T3|${NO}$I_RS
+L9b|case|$RUN_M|$B/caller|$B/dest/bin:/usr/bin:/bin|-|$B/DEST $T3|${NO}$I_RS
+L10||$RUN_M|$B/caller|$B/cdir:$B/cnox:$OK|-|$B/dest $T3|rc=0 ran=GOOD@B/dest $RAN
+L11||$RUN_M|$B/caller|$B/shim:$OK|-|$B/dest $T3|rc=0 ran=GOOD@B/dest $RAN
+L12||$RUN_M|$B/caller|$B/fakebin:.:/usr/bin:/bin:|-|$B/dest $T3|${NO}$P_RS
+L14a||$RUN_M|$B/caller|$OK|fn:claude|$B/dest $T3|rc=0 ran=GOOD@B/dest $RAN
+L14b||$RUN_M|$B/caller|$OK|fn:env|$B/dest $T3|rc=0 ran=GOOD@B/dest $RAN
+L14c||$RUN_M|$B/caller|$OK|fn:command|$B/dest $T3|rc=0 ran=GOOD@B/dest $RAN
+L14d||$RUN_M|$B/caller|$OK|fn:git|$B/dest $T3|rc=0 ran=GOOD@B/dest $RAN
+L14e||$RUN_M|$B/caller|$OK|fn:cd|$B/dest $T3|rc=0 ran=GOOD@B/dest $RAN
+L16||$RUN_M|$B/caller|$OK|bashenv|$B/dest $T3|rc=0 ran=GOOD@B/dest $RAN
+L18||$RUN_M|$B/caller|$OK|ifs|$B/dest $T3|rc=0 ran=GOOD@B/dest $RAN
+L19||$RUN_M|$B/caller|-unset-|-|$B/dest $T3|${NO}$N_RS
+L21a|sh|$RUN_M|$B/caller|.:/usr/bin:/bin|-|$B/dest $T3|${NO}$P_RS
+L21b|sh|$RUN_M|$B/caller|$OK|-|$B/dest $T3|rc=0 ran=GOOD@B/dest $RAN
+L21c|sh|$RUN_M|$B/caller|$OK|-|$R $T3|${NO}$C_RS
+D1||$RUN_M|$R|$OK|-|. $T3|${NO}$C_RS
+D2||$RUN_M|$B/caller|$OK|-|$R $T3|${NO}$C_RS
+D3||$RUN_M|$B/caller|$OK|-|../repo/tests $T3|${NO}$C_RS
+D4||$RUN_M|$B/caller|$OK|-|$B/rlink $T3|${NO}$C_RS
+D5||$RUN_M|$B/caller|$OK|-|$BV/repo $T3|${NO}$C_RS
+D6||$RUN_M|$B/caller|$OK|-|$R/nope $T3|${NO}$U_RS
+D7a||$RUN_M|$B/caller|$OK|-|$R/tests/../tests $T3|${NO}$C_RS
+D7b||$RUN_M|$B/caller|$OK|-|$R/payload/hooks/../.. $T3|${NO}$O_RS
+D7c||$RUN_M|$R|$OK|-|payload/hooks/../.. $B/plugin $B/prompt.txt $TMP/t73-out/o.json|${NO}$I_RS
+D7e||$RUN_M|$R|$TMP/t73-bin:/usr/bin:/bin|-|payload/hooks/../.. $B/plugin $B/prompt.txt $TMP/t73-out/o.json|rc=0 ran=OUTER@B new=- said=-
+D7d||$RUN_M|$B/caller|$B/d2/bin:/usr/bin:/bin|-|$B/d2/out/.. $T3|rc=0 ran=D2BIN@B/o $RAN
+D8mm||$RUN_M|$B/caller|$OK|-|$R/tests $T3|${NO}$C_RS
+D8mw||$RUN_M|$B/caller|$OK|-|$W/tests $T3|${NO}$C_RS
+D8mx||$RUN_M|$B/caller|$OK|-|$X/tests $T3|${NO}$C_RS
+D8wm||$RUN_W|$B/caller|$OK|-|$R/tests $T3|${NO}$C_RS
+D8ww||$RUN_W|$B/caller|$OK|-|$W/tests $T3|${NO}$C_RS
+D8wx||$RUN_W|$B/caller|$OK|-|$X/tests $T3|${NO}$C_RS
+D8xm||$RUN_X|$B/caller|$OK|-|$R/tests $T3|${NO}$C_RS
+D8xw||$RUN_X|$B/caller|$OK|-|$W/tests $T3|${NO}$C_RS
+D8xx||$RUN_X|$B/caller|$OK|-|$X/tests $T3|${NO}$C_RS
+D9||$RUN_M|$B/caller|$OK|-|$B/tlink/reader-exam $T3|${NO}$C_RS
+D10a||$RUN_C|$B/caller|$OK|-|$R $T3|rc=0 ran=GOOD@B/repo $RAN
+D10b||$B/copied/nogit-run-session.sh|$B/caller|$OK|-|$R $T3|rc=0 ran=GOOD@B/repo $RAN
+D11a|case|$RUN_M|$B/caller|$OK|-|$B/REPO $T3|${NO}$C_RS
+D11b|case|$RUN_M|$B/REPO|$OK|-|. $T3|${NO}$C_RS
+D12a||tests/reader-exam/run-session.sh|$R|$OK|cdpath|. $T3|${NO}$C_RS
+D12b||tests/reader-exam/run-session.sh|$R|$OK|cdpathw|. $T3|${NO}$C_RS
+D13a||$RUN_M|$B/caller|$OK|fn:cd|$R $T3|${NO}$C_RS
+D13b||$RUN_M|$B/caller|$OK|fn:command|$R $T3|${NO}$C_RS
+D13c||$RUN_M|$B/caller|$OK|fn:git|$R $T3|${NO}$C_RS
+D13d||$RUN_M|$B/caller|$OK|bashenv|$R $T3|${NO}$C_RS
+D14||$RUN_M|$B/caller|$OK|ceiling|$R/tests $T3|${NO}$C_RS
+D15||$RUN_M|$B/caller|$OK|-|$B/okdest $T3|rc=0 ran=GOOD@B/okdest $RAN
+K1||$R/tests/reader-exam/nogit-run-session.sh|$B/caller|$OK|-|$B/okdest $T3|${NO}$L_RS
+K2||$R/tests/reader-exam/mute-run-session.sh|$B/caller|$OK|-|$B/okdest $T3|${NO}$L_RS
+K3||$R/tests/reader-exam/two-run-session.sh|$B/caller|$OK|-|$B/okdest $T3|${NO}$L_RS
+K4||$R/tests/reader-exam/fail-run-session.sh|$B/caller|$OK|-|$B/okdest $T3|${NO}$L_RS
+K5||$R/tests/reader-exam/far-run-session.sh|$B/caller|$OK|-|$B/okdest $T3|${NO}$L_RS
+K6||$R/tests/reader-exam/nogit-materialize.sh|$B/caller|$OK|-|$S $B/m/k6|${NO}$L_MA
+K7||$R/tests/reader-exam/mute-materialize.sh|$B/caller|$OK|-|$S $B/m/k7|${NO}$L_MA
+K8||$R/tests/reader-exam/two-materialize.sh|$B/caller|$OK|-|$S $B/m/k8|${NO}$L_MA
+O1||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt $SX/expect.txt|${NO}$O_RS
+O2||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt $W/o.json|${NO}$O_RS
+O3||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt $X/o.json|${NO}$O_RS
+O4||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt $B/dest/o.json|${NO}$O_RS
+O5||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt $B/olink/../o.json|${NO}$O_RS
+O6||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt $B/outdir/lnk.json|${NO}$F_RS
+O7||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt $B/outdir/adir|${NO}$F_RS
+O8||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt $B/outdir/t.json|${NO}$F_RS
+O9||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt ''|${NO}$U_RS
+O10||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt $B/outdir/|${NO}$U_RS
+O11||$RUN_M|$R|$OK|-|$B/dest $B/plugin $B/prompt.txt o.json|${NO}$O_RS
+A0||$RUN_M|$B/caller|$OK|-||${NO}$U_RS
+A1||$RUN_M|$B/caller|$OK|-|$B/dest|${NO}$U_RS
+A3||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin $B/prompt.txt|${NO}$U_RS
+A5||$RUN_M|$B/caller|$OK|-|$B/dest $T3 extra|${NO}$U_RS
+A6||$RUN_M|$B/caller|$OK|-|$B/dest $T3 extra more|${NO}$U_RS
+A7||$RUN_M|$B/caller|$OK|-|'' $T3|${NO}$U_RS
+A8||$RUN_M|$B/caller|$OK|-|$B/dest '' $B/prompt.txt $B/outdir/o.json|${NO}$U_RS
+A9||$RUN_M|$B/caller|$OK|-|$B/dest $B/plugin '' $B/outdir/o.json|${NO}$U_RS
+M1||$MAT_M|$R|$OK|-|$S .|${NO}$C_MA
+M2||$MAT_M|$B/caller|$OK|-|$S $R|${NO}$C_MA
+M3||$MAT_M|$R|$OK|-|$S build/s1|${NO}$C_MA
+M4||$MAT_M|$B/caller|$OK|-|$S $B/rlink/s1|${NO}$C_MA
+M5||$MAT_M|$B/caller|$OK|-|$S $BV/repo/s2|${NO}$C_MA
+M6|case|$MAT_M|$B/caller|$OK|-|$S $B/REPO/casebuild|${NO}$C_MA
+M7||$MAT_M|$B/caller|$OK|-|$S $B/plink/../dotbuild|${NO}$C_MA
+M8a||tests/reader-exam/materialize.sh|$R|$OK|cdpath|tests/reader-exam/samples/alpha cdbuild|${NO}$C_MA
+M8b||tests/reader-exam/materialize.sh|$R|$OK|cdpath|$S cdbuild|${NO}$C_MA
+M9||$MAT_M|$B/caller|$OK|-|$S $B/dangle/s1|${NO}$E_MA
+M10mm||$MAT_M|$B/caller|$OK|-|$S $R/m|${NO}$C_MA
+M10mw||$MAT_M|$B/caller|$OK|-|$S $W/m|${NO}$C_MA
+M10mx||$MAT_M|$B/caller|$OK|-|$S $X/m|${NO}$C_MA
+M10wm||$MAT_W|$B/caller|$OK|-|$S $R/m|${NO}$C_MA
+M10ww||$MAT_W|$B/caller|$OK|-|$S $W/m|${NO}$C_MA
+M10wx||$MAT_W|$B/caller|$OK|-|$S $X/m|${NO}$C_MA
+M10xm||$MAT_X|$B/caller|$OK|-|$S $R/m|${NO}$C_MA
+M10xw||$MAT_X|$B/caller|$OK|-|$S $W/m|${NO}$C_MA
+M10xx||$MAT_X|$B/caller|$OK|-|$S $X/m|${NO}$C_MA
+M11||$MAT_C|$B/caller|$OK|-|$S $R/m11|rc=0 ran=- new=+B/repo/m11 said=-
+M12a||$MAT_M|$B/caller|$OK|-|$S $B/alpha-x|${NO}materialize: B/alpha-x $N_MA
+M12b||$MAT_M|$B/caller|$OK|-|$S $B/nlink/s1|${NO}materialize: B/Alpha-real/s1 $N_MA
+M12c||$MAT_M|$B/caller|$OK|-|$S $B/n2/../s10|${NO}materialize: B/alpha-deep/s10 $N_MA
+M13a||$MAT_M|$B/caller|$OK|-|$S $B/none/../x|${NO}$D_MA
+M13b||$MAT_M|$B/caller|$OK|-|$S $B/none/./x|${NO}$D_MA
+M14||$MAT_M|$B/caller|$OK|fn:cd|$S $R/x|${NO}$C_MA
+M15||$MAT_M|$B/caller|$OK|fn:git|$S $B/m/s3|rc=0 ran=- new=+B/m/s3 said=-
+M16||$MAT_M|$B/caller|$OK|bashenv|$S $B/m/s4|rc=0 ran=- new=+B/m/s4 said=-
+M17||$MAT_M|$B/caller|.:/usr/bin:/bin|-|$S $B/m/s5|rc=0 ran=- new=+B/m/s5 said=-
+M18||$MAT_M|$B/caller|$OK|-|$S $B/m/s1|rc=0 ran=- new=+B/m/s1 said=-
+TABLE
+)"
+# tline <id> <flags> <helper> <cwd> <PATH> <environment> <arguments> — one caller's answer.
+tline() {
+  local id="$1" flags="$2" helper="$3" cwd="$4" pth="$5" ekey="$6" argl="$7" interp=/bin/bash
+  local -a envs=("HOME=$B/home") args=() words=()
+  case "$flags" in *sh*) interp=/bin/sh ;; esac
+  case "$pth" in -unset-) ;; "''") envs+=("PATH=") ;; *) envs+=("PATH=$pth") ;; esac
+  case "$ekey" in
+    fn:*) envs+=("BASH_FUNC_${ekey#fn:}%%=() { echo FUNC-${ekey#fn:} >> \"$REC/log\"; }") ;;
+    bashenv) envs+=("BASH_ENV=$B/bashenv.sh") ;;
+    cdpath) envs+=("CDPATH=.:$B/home") ;;
+    cdpathw) envs+=("CDPATH=$W") ;;
+    ceiling) envs+=("GIT_CEILING_DIRECTORIES=$R/tests") ;;
+    ifs) envs+=("IFS=/") ;;
+  esac
+  read -r -a words <<<"$argl"
+  for a in ${words[@]+"${words[@]}"}; do [ "$a" = "''" ] && args+=("") || args+=("$a"); done
+  rm -f "$REC/log"; tsnap > "$TMP/t73-before"
+  local out rc
+  out="$(cd "$cwd" && /usr/bin/env -i "${envs[@]}" "$interp" "$helper" ${args[@]+"${args[@]}"} 2>&1)"; rc=$?
+  tsnap > "$TMP/t73-after"
+  local ran new said=-
+  ran="$( [ -s "$REC/log" ] && paste -sd, - < "$REC/log" || echo -)"
+  new="$(tdiff "$TMP/t73-before" "$TMP/t73-after" | paste -sd, -)"
+  # what a line left behind is taken away, so the next line meets the same root
+  tdiff "$TMP/t73-before" "$TMP/t73-after" | sed -n 's/^+//p' | while IFS= read -r p; do
+    case "$p" in "$B"/?*) rm -rf "$p" ;; esac
+  done
+  [ "$rc" = 0 ] || said="$(printf '%s\n' "$out" | head -n 1)"
+  printf '%s|rc=%s ran=%s new=%s said=%s\n' "$id" "$rc" "$(tsym "$ran")" "$(tsym "${new:--}")" "$(tsym "$said")"
+}
+want="" got="" lines=0 skipped=0
+while IFS='|' read -r id flags helper cwd pth ekey argl answer; do
+  [ -n "$id" ] || continue
+  if [ "$flags" = case ] && [ "$CASE_BLIND" = no ]; then
+    echo "SKIP: $id — this volume tells letter case apart, so no other spelling of a path is the same one"
+    skipped=$((skipped + 1)); continue
+  fi
+  lines=$((lines + 1))
+  want="$want$id|$answer"$'\n'
+  got="$got$(tline "$id" "$flags" "$helper" "$cwd" "$pth" "$ekey" "$argl")"$'\n'
+done <<<"$CALLERS"
+expect_eq "HT1: the table drives every caller it holds, or names it skipped" \
+  "$(printf '%s\n' "$CALLERS" | grep -c '|')" "$((lines + skipped))"
+expect_contains "HT1: …and its readback is live: a caller that runs is seen, with what it wrote" \
+  "D15|rc=0 ran=GOOD@B/okdest new=+B/outdir/o.json," "$got"
+expect_eq "HT1: every caller meets its answer ($lines lines)" "$want" "$got"
+[ "$want" = "$got" ] || diff <(printf '%s' "$want") <(printf '%s' "$got") | sed 's/^/      /'
+rm -f "$TMP/t73-before" "$TMP/t73-after"
 
 section "§SHIPPED — the shipped sittings against the shipped checks files"
 

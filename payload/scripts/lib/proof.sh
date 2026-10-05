@@ -664,8 +664,9 @@ PROOF_FILES
 #     review<TAB><question><TAB><role><TAB>whole     at scale: wave, one more per code question (D10)
 #     check                                          when <tree>'s .bionic/config.yaml names a
 #                                                    release-check: command (wave-27 T16; D12)
-#     debt<TAB><suite><TAB><token>                   one per state line of <plan> recording
-#                                                    `landed red: <suite> until <token>` (T31; D23)
+#     debt<TAB><suite><TAB><token>                   one per suite and token the run's landing
+#                                                    record owes: a `debt:` line `land` wrote
+#                                                    that no `void:` line names (T31, T67; D23)
 #
 # THE ONE DEALING. The judge below reads it, and the dispatch wall (row T15) reads it for the
 # questions a reader's brief may name; neither restates the table. The check is the project's, not
@@ -693,42 +694,81 @@ facts_owed() {
     . "$d/roots.sh" >/dev/null 2>&1
   fi
   [ -z "$(config_value "$3" release-check "" 2>/dev/null)" ] || printf 'check\n'
-  [ -z "${4:-}" ] || proof_debts "$4"
+  [ -z "${4:-}" ] || proof_debts "$4" "$3"
   return 0
 }
 
-# proof_debts <plan> -> `debt<TAB><suite><TAB><token>` for each unfenced `## SDLC State` state line
-# (`- T<n>: …`) that records `landed red: <suite> until <token>`, in plan order, once each (wave-27
-# T31; D23). The orchestrator writes that line when `land` prints `landed-red=<suite>`.
+# proof_debts <plan> [<tree>] -> `debt<TAB><suite><TAB><token>` once per suite and token the run's
+# landing record owes, in the order the record first names them (wave-27 T31, T67; D23 as amended,
+# A-orch-120). A DEBT IS OWED BECAUSE `land` WROTE IT: the record's `debt:` lines (lib/worktree.sh
+# `_wt_debt_write`, before the merge) that no `void:` line names. A `landed red:` line in the plan is
+# not read: missing, misshapen or hand-edited, it changes nothing. <tree> is the plan's checkout
+# root, read from the plan's directory when not given.
 proof_debts() {
-  [ -f "${1:-}" ] || return 0
-  awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc' "$1" | proof_debts_open all
+  local rec
+  rec="$(proof_debt_record "${1:-}" "${2:-}")" || return 0
+  proof_debts_read "$rec" | awk -F'\t' '{ print "debt\t" $1 "\t" $2 }'
 }
 
-# proof_debts_open [all|at] < <section text> -> the debts the `## SDLC State` text on stdin records, as
-# `debt<TAB><suite><TAB><token>`; with no operand only those the TEXT leaves open; with `at`, each as
-# `<suite><TAB><token><TAB><its landed time or nothing>` (wave-27 T31; D23; A-orch-85). A state line
-# reads `landed red: <suite> until <token> at <ISO-UTC>`, the time the landing's own (`land` prints
-# it as `landed-red-at=`); a line with no time is a debt nothing can cover. In the text an
-# `approval:<name>` debt stays open until a `proved: kind=floor` or `kind=task` line carries an `at=`
-# later than the time on the first `approved: <name> by <who> <ISO-UTC> …` line; an `ext:<slug>` debt
-# until such a line is later than the red landing itself, for nothing dates the slug leaving the
-# `## Tasks` cells, and whether it left is the judge's to read (`_facts_debt`), not this text's. This
-# is the commit gate's predicate (lib/walls.sh `_eg_reading_gaps`), plan text alone; the judge also
-# holds a task proof to a log that shows the suite green.
+# proof_debt_record <plan> [<tree>] -> `<docs-root>/record/<the plan's name less .plan.md>/
+# landing-proofs.log`, the record `land` writes for that plan (lib/worktree.sh `_wt_proofs_path`, the
+# same rule: this file does not load worktree.sh). rc 1 when no path can be named.
+proof_debt_record() {
+  local plan="${1:-}" tree="${2:-}" slug d
+  [ -f "$plan" ] || return 1
+  slug="${plan##*/}"; slug="${slug%.plan.md}"
+  [ -n "$slug" ] || return 1
+  [ -n "$tree" ] || tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
+  [ -n "$tree" ] || return 1
+  if ! declare -F docs_root >/dev/null 2>&1; then
+    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+    # shellcheck source=/dev/null
+    . "$d/roots.sh" >/dev/null 2>&1
+    declare -F docs_root >/dev/null 2>&1 || return 1
+  fi
+  printf '%s/record/%s/landing-proofs.log' "$(docs_root "$tree")" "$slug"
+}
+
+# proof_debts_read <record> -> `<suite><TAB><token><TAB><time>` once per suite and token with a
+# `debt:` line no `void:` line names, the time the NEWEST of those lines' `at=` (wave-27 T67; review
+# pass 46 B2): each red landing is a debt of its own, and two on one suite and token are both covered
+# only by a green run after the later one. A line whose `at=` is no <ISO-UTC> leaves the time empty,
+# and an empty time is never covered.
+proof_debts_read() {
+  [ -f "${1:-}" ] || return 0
+  awk '
+    function fld(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    $1 == "void:" { v = fld("id"); if (v != "") voided[v] = 1; next }
+    $1 == "debt:" { n++; id[n] = fld("id"); su[n] = fld("suite"); tk[n] = fld("token"); at[n] = fld("at") }
+    END {
+      iso = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$"
+      for (i = 1; i <= n; i++) {
+        if (id[i] == "" || (id[i] in voided) || su[i] == "" || tk[i] == "") continue
+        k = su[i] "\t" tk[i]
+        if (!(k in when)) { when[k] = ""; ord[++no] = k }
+        if (at[i] !~ iso) bad[k] = 1
+        else if (at[i] > when[k]) when[k] = at[i]
+      }
+      for (j = 1; j <= no; j++) print ord[j] "\t" ((ord[j] in bad) ? "" : when[ord[j]])
+    }' "$1" 2>/dev/null
+}
+
+# proof_debts_open <debts> < <section text> -> `debt<TAB><suite><TAB><token>` for each of <debts>
+# (`proof_debts_read`'s lines, `<suite><TAB><token><TAB><time>`, what `land` wrote) that the `## SDLC
+# State` text on stdin leaves open (wave-27 T31, T67; D23; A-orch-85, A-orch-121). This is the commit
+# gate's predicate (lib/walls.sh `_eg_reading_gaps`), over two facts it is handed: the debts its
+# collector read from the landing record (hooks/bash-walls.sh) and the plan text; a `landed red:`
+# line in that text is not read. A debt stays open until a `proved: kind=floor` or `kind=task` line
+# carries an `at=` STRICTLY later than its threshold: the red landing's own time, and for an
+# `approval:<name>` debt the later of that and the first `approved: <name> by <who> <ISO-UTC> …`
+# line, with none of which it stays open. A debt with no time is never cleared. Whether an `ext:`
+# slug is still in a `## Tasks` cell, and whether a task log shows the suite green, is the judge's
+# to read (`_facts_debt`), not this text's.
 proof_debts_open() {
-  awk -v mode="${1:-}" '
-    BEGIN { iso = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$" }
-    /^[[:space:]]*-[[:space:]]+T[0-9]+:/ && match($0, /landed red:[ \t]+[^ \t]+[ \t]+until[ \t]+[^ \t]+([ \t]+at[ \t]+[^ \t]+)?/) {
-      n = split(substr($0, RSTART, RLENGTH), w, /[ \t]+/); sub(/[,;)]+$/, "", w[5])
-      t = ""; if (n >= 7 && w[6] == "at") { t = w[7]; sub(/[,;)]+$/, "", t); if (t !~ iso) t = "" }
-      d = "debt\t" w[3] "\t" w[5]
-      if (!(d in seen)) { seen[d] = 1; tok[++nd] = w[5]; line[nd] = d; su[nd] = w[3]; when[nd] = t }
-      next
+  PROOF_DEBTS="${1:-}" awk '
+    BEGIN {
+      iso = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$"
+      nd = split(ENVIRON["PROOF_DEBTS"], D, "\n")
     }
     /^approved:[ \t]/ {
       m = split($0, w, /[ \t]+/)
@@ -742,16 +782,12 @@ proof_debts_open() {
     }
     END {
       for (i = 1; i <= nd; i++) {
-        if (mode == "at") { print su[i] "\t" tok[i] "\t" when[i]; continue }
-        if (mode == "") {
-          t = tok[i]; c = ""
-          if (when[i] != "") {
-            if (t ~ /^approval:./ && (substr(t, 10) in ap)) c = ap[substr(t, 10)]
-            else if (t ~ /^ext:./) c = when[i]
-          }
-          if (c != "" && latest > c) continue
-        }
-        print line[i]
+        if (split(D[i], f, "\t") < 2 || f[1] == "" || f[2] == "") continue
+        t = f[2]; c = (f[3] ~ iso ? f[3] : "")
+        if (c != "" && t ~ /^approval:./) { n = substr(t, 10); c = (n in ap) ? (ap[n] > c ? ap[n] : c) : "" }
+        else if (c != "" && t !~ /^ext:./) c = ""
+        if (c != "" && latest > c) continue
+        print "debt\t" f[1] "\t" t
       }
     }'
 }
@@ -772,10 +808,11 @@ proof_debts_open() {
 # writes (T31; review pass 22 S3), so a later failure at one head is never hidden by an earlier pass.
 # With no line at <head>, uncovered from the newest one's head, and absent with none. It is a command
 # run at a head, so a docs-only tail does not carry it.
-# A DECLARED DEBT (wave-27 T31; D23), one per `landed red: <suite> until <token>` state line, is
-# covered by a green run of that suite, or a floor proof, recorded after the token cleared, and
-# absent otherwise (`_facts_debt`); so `current 8`, close-out and the tick's integrate row, which
-# all ask this judge, refuse while a debt is open.
+# A DECLARED DEBT (wave-27 T31, T67; D23 as amended), one per suite and token the run's landing record
+# owes (`proof_debts`: what `land` wrote, never a plan line), is covered by a green run of that suite,
+# or a floor proof, dated after the red landing and after the token cleared, and absent otherwise
+# (`_facts_debt`); so `current 8`, close-out and the tick's integrate row, which all ask this judge,
+# refuse while a debt is open.
 #
 # A QUESTION IS ONE CHAIN (D4). Its links are its readings (`proved: kind=review … question=<q>`,
 # either scope) and its waivers (`waived: question=<q> head=<sha> …`), in section order, which is the
@@ -929,11 +966,13 @@ PROOF_FACTS
 }
 
 # _facts_debt <plan> <tree> <suite> <token> -> `covered`, or `absent` with any reason after a tab, for
-# one declared debt (wave-27 T31; D23; A-orch-85). Covered only when a floor proof, or a task proof
-# whose log shows <suite> green, carries an `at=` later than the debt's threshold:
-#   - its `landed red:` line carries no `at <ISO-UTC>`: no threshold, never covered, and it says so;
-#   - `approval:<name>`: the time on the first `approved: <name> by <who> <ISO-UTC> …` line of the
-#     plan's `## SDLC State`; until that line is written, absent;
+# one declared debt (wave-27 T31, T67; D23; A-orch-85, A-orch-120). Covered only when a floor proof, or
+# a task proof whose log shows <suite> green, carries an `at=` STRICTLY later than the debt's
+# threshold, which is never earlier than the red landing (the newest debt line's `at=` in the
+# landing record, `proof_debts_read`):
+#   - no debt line of <suite> and <token> carries an <ISO-UTC> `at=`: never covered, and it says so;
+#   - `approval:<name>`: the later of the red landing and the time on the first `approved: <name> by
+#     <who> <ISO-UTC> …` line of the plan's `## SDLC State`; until that line is written, absent;
 #   - `ext:<slug>`: absent while any `## Tasks` cell still names `ext:<slug>` (the owner removing it
 #     is the statement that the blocker cleared); then the red landing's own time. Nothing dates a
 #     clearing, so the green run is held to be later than the red landing, not later than the
@@ -943,13 +982,10 @@ PROOF_FACTS
 # `<suite>: <n>/<n> passed, 0 failed` tally.
 _facts_debt() {
   local plan="$1" tree="$2" suite="$3" tok="$4" clear landed droot ev x
-  landed="$(awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc' "$plan" | proof_debts_open at | awk -F'\t' -v s="$suite" -v t="$tok" '$1 == s && $2 == t { print $3; exit }')"
+  x="$(proof_debt_record "$plan" "$tree")" || x=""
+  landed="$(proof_debts_read "$x" | awk -F'\t' -v s="$suite" -v t="$tok" '$1 == s && $2 == t { print $3; exit }')"
   if [ -z "$landed" ]; then
-    printf 'absent\tits landed red: line carries no at <ISO-UTC>, so no green run can be dated after the red landing'
+    printf 'absent\tits debt line in the landing record carries no at=<ISO-UTC>, so no green run can be dated after the red landing'
     return 0
   fi
   case "$tok" in
@@ -962,15 +998,24 @@ _facts_debt() {
           m = split($0, w, /[ \t]+/)
           if (m < 3 || w[2] != n || w[3] != "by") next
           for (i = 4; i <= m; i++) if (w[i] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) { print w[i]; exit }
-        }' "$plan")" ;;
+        }' "$plan")"
+      # The later of the approval and the red landing (wave-27 T67; review pass 46 B1).
+      if [ -n "$clear" ] && [[ "$landed" > "$clear" ]]; then clear="$landed"; fi ;;
     ext:?*)
       x="$(awk -v want="$tok" '
         /^[[:space:]]*```/ { fence = !fence; next }
         fence { next }
         /^##[[:space:]]/ { intasks = ($0 ~ /^##[[:space:]]+Tasks[[:space:]]*$/); next }
+        # THE SLUG AS A WHOLE TOKEN, whatever stands around it (wave-27 T67; review pass 46 N5): no
+        # slug character before it, and none after it but a `.` that ends the slug (a full stop).
         intasks && /^[[:space:]]*\|/ {
-          n = split($0, c, "|")
-          for (i = 1; i <= n; i++) { m = split(c[i], w, /[ \t,]+/); for (j = 1; j <= m; j++) if (w[j] == want) { print "held"; exit } }
+          l = $0
+          while ((p = index(l, want)) > 0) {
+            pre = (p > 1 ? substr(l, p - 1, 1) : ""); r = substr(l, p + length(want))
+            nx = substr(r, 1, 1)
+            if (pre !~ /[A-Za-z0-9._:-]/ && nx !~ /[A-Za-z0-9_-]/ && !(nx == "." && substr(r, 2, 1) ~ /[A-Za-z0-9._-]/)) { print "held"; exit }
+            l = substr(l, p + 1)
+          }
         }' "$plan")"
       if [ -n "$x" ]; then clear=""; else clear="$landed"; fi ;;
     *) clear="" ;;

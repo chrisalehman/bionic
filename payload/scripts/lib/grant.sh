@@ -314,7 +314,7 @@ _grant_unresolved() {
 # `.bionic/tmp`. Owned by payload/scripts/lib/patrol.sh's PATROL_STATE_CLASSES, which this
 # lib may not source (the freeze: the decision reads nothing), so it holds the same words and
 # tests/grant.test.sh §G19 fails the moment the two lists differ.
-GRANT_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate"
+GRANT_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate start-clock"
 
 # _grant_is_state <W|D> <path> — rc 0 when the path is one of bionic's own state files.
 # Case-blind: the directory by bracket patterns, the class under nocasematch, which is put
