@@ -641,7 +641,7 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   local pre pre_ref was said held now_ref check_cmd check_out check_was left nl='
 '
   local plan="${3:-}" judged proofs proofs_row
-  local lands_red="${4:-}" red_ev="${5:-}" landed_red="" ev_heads judged_cur landed_at red_said
+  local lands_red="${4:-}" red_ev="${5:-}" landed_red="" ev_heads judged_cur landed_at="" red_said debt_id=""
 
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -717,6 +717,10 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
     _wt_refuse_not_current "$branch" "$onto" "$onto_head" "$overlap"; return 2
   }
 
+  # THE RUNNER IS NEVER A DECLARED RED (wave-27 T67; review pass 46 B4): a declaration is honoured
+  # only for one suite FILE, `<name>.test.sh`; a red stamp of `run.sh`, which speaks for every suite,
+  # is refused as any red is, whatever a launch row says.
+  case "${lands_red%% until *}" in ?*.test.sh) : ;; *) lands_red="" ;; esac
   why="$(_wt_stale_proof "$wt_abs" "$head" "${lands_red%% until *}")" && {
     _wt_refuse "stale-proof ${why}"; return 2
   }
@@ -850,6 +854,24 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   esac
   [ -n "$was" ] || { _wt_refuse "onto-checkout-unreadable checkout=${co} branch=${onto}"; return 2; }
 
+  # THE DEBT IS WRITTEN BEFORE THE MERGE (wave-27 T67; review pass 46 B3; A-orch-120). A declared red
+  # is owed because `land` wrote it: one `debt:` line appended to the landing record, holding
+  # the landing's row, branch, head, suite, token and time, the `landed-red-at=` the LANDED line
+  # prints. A line that cannot be written, or a landing with no bound plan and so no record, is
+  # refused here with nothing merged: a declared red never lands without its debt written. A merge
+  # that then fails, or is undone, is followed by a `void:` line naming the debt's id (below).
+  debt_id=""
+  if [ -n "$landed_red" ]; then
+    landed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [ "$proofs" = none ]; then
+      _wt_refuse "debt-unwritten why=no-bound-plan suite=${landed_red} branch=${branch} — a declared red lands only with its debt written to the run's landing record, and this landing has no bound plan, so nothing is merged; land from the session bound to the run"; return 2
+    fi
+    debt_id="$$.${RANDOM}${RANDOM}"
+    if ! _wt_debt_write "$proofs" "$debt_id" "$proofs_row" "$branch" "$head" "$landed_red" "${lands_red#* until }" "$landed_at"; then
+      _wt_refuse "debt-unwritten why=proofs-unwritable suite=${landed_red} path=${proofs} branch=${branch} — the declared red's debt cannot be written to the landing record (${_WT_PROOFS_SAW:-the append failed}), so nothing is merged; make it writable, land again"; return 2
+    fi
+  fi
+
   # --no-ff ALWAYS: a fast-forward would erase the fact that this was a task,
   # and the merge commit is what the ledger row points at. The head merged is
   # the one judged above, not whatever the branch holds by now. `git merge` says
@@ -857,6 +879,9 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   # commit, and none is looked for.
   if ! said="$(LC_ALL=C git -C "$co" merge --no-ff -m "merge ${branch} (land)" "$head" 2>/dev/null)"; then
     git -C "$co" merge --abort >/dev/null 2>&1
+    if [ -n "$debt_id" ] && ! _wt_debt_void "$proofs" "$debt_id" "$branch" merge-failed; then
+      _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co} debt=unvoided path=${proofs} — the merge failed after the debt for ${landed_red} was written and not voided (its void's append answered proofs=unwritten: ${_WT_PROOFS_SAW:-the append failed}), so the run owes it: a green run of ${landed_red} after now covers it like any other; land again once the merge can be made"; return 2
+    fi
     _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co}"; return 2
   fi
   merge_sha=""
@@ -919,6 +944,12 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
     arrived="$(_wt_undo_merge "$co" "$undo_on" "$merge_sha" "$parent" "$head")"; rc=$?
     case $rc in
       0)
+        # The merge is undone, so the red never reached <onto>: its debt is voided, and a void that
+        # cannot be written leaves it standing (it over-owes), which the line says.
+        if [ -n "$debt_id" ] && ! _wt_debt_void "$proofs" "$debt_id" "$branch" merge-undone; then
+          moved="${moved} debt=unvoided"
+          fix="${fix} (the debt for ${landed_red} was written and not voided: a green run of it after now covers it)"
+        fi
         if [ "$undo_on" != "$onto" ]; then
           _wt_refuse "${moved} merge=${merge_sha} — the merge is undone on ${undo_on} and the tree kept; ${fix}"; return 2
         fi
@@ -933,8 +964,8 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   # at <head>, appended before the tree and its stamps go. The merge is not undone if the append
   # fails; the tree is kept instead, so its stamp file still holds the proof.
   # ONE INSTANT FOR THE LANDING (wave-27 T31; A-orch-85): the record's `at=` and, for a declared
-  # red, the `landed-red-at=` the orchestrator copies onto the `landed red: … at <ISO-UTC>` line.
-  landed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # red, the `landed-red-at=` its debt line carries (wave-27 T67: taken when the debt was written).
+  landed_at="${landed_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
   red_said=""; [ -z "$landed_red" ] || red_said=" landed-red=${landed_red} landed-red-at=${landed_at}"
   if [ "$proofs" != none ] && ! _wt_proofs_append "$proofs" "$proofs_row" "$branch" "$head" "$merge_sha" "$judged" "$landed_at"; then
     _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} kept=${wt_abs}${red_said} proofs=unwritten — ${proofs} could not be appended after the merge (${_WT_PROOFS_SAW:-the append failed}), so the tree and its stamp file are kept; append the landing to it by hand, then remove the tree"
@@ -1066,12 +1097,19 @@ _wt_proofs_cut() {  # <record path> -> 0 cut, 1 not
 }
 
 _wt_proofs_append() {  # <file> <row> <branch> <head> <merge> <judged lines> [<at>]
-  local block priv size before after said rc lead="" nl='
-'
-  _WT_PROOFS_SAW=""
+  local block
   block="landed: row=${2:-—} branch=${3} head=${4} merge=${5} at=${7:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
   [ -z "${6:-}" ] || block="${block}
 ${6}"
+  _wt_proofs_write "$1" "$block"
+}
+
+# The one write itself, for a landing's block and for the debt's lines alike (wave-27 T67): <text>
+# appended whole, as the rules above say, with `_WT_PROOFS_SAW` set on every failure.
+_wt_proofs_write() {  # <file> <text> -> 0 appended, 1 not (the proofs=unwritten case)
+  local block="$2" priv size before after said rc lead="" nl='
+'
+  _WT_PROOFS_SAW=""
   if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then _WT_PROOFS_SAW="the record's path is not a regular file"; return 1; fi
   ! _wt_proofs_cut "$1" || lead="$nl"
   priv="$(_wt_proofs_private "$1")" || { _WT_PROOFS_SAW="no private file could be made beside the record"; return 1; }
@@ -1092,6 +1130,26 @@ ${6}"
   esac
   _WT_PROOFS_SAW="dd: ${said//${nl}/; }"
   return 1
+}
+
+# THE DEBT'S ONE WRITER (wave-27 T67; review pass 46 B3; A-orch-120). A declared red is owed because
+# `land` wrote it here, never because a line was copied into the plan: the judge (lib/proof.sh
+# `proof_debts`) reads these lines and nothing else.
+#   debt: id=<id> row=<row|—> branch=<b> head=<40-hex> suite=<suite> token=<token> at=<ISO-UTC>
+#   void: id=<id> branch=<b> at=<ISO-UTC> why=<merge-failed|merge-undone>
+# Each is one whole line, appended by the one write a landing's block is appended by
+# (`_wt_proofs_write`), with no lock: a line that cannot be written is the append answering
+# `proofs=unwritten`. A debt is written before the merge; a void names the debt of a landing whose
+# merge failed or was undone.
+_wt_debt_write() {  # <record> <id> <row> <branch> <head> <suite> <token> <at> -> 0 written, 1 not
+  _wt_proofs_put "$1" "debt: id=${2} row=${3:-—} branch=${4} head=${5} suite=${6} token=${7} at=${8}"
+}
+_wt_debt_void() {  # <record> <id> <branch> <why> -> 0 written, 1 not
+  _wt_proofs_put "$1" "void: id=${2} branch=${3} at=$(date -u +%Y-%m-%dT%H:%M:%SZ) why=${4}"
+}
+_wt_proofs_put() {  # <record> <line> -> 0 appended, 1 not (proofs=unwritten)
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  _wt_proofs_write "$1" "$2"
 }
 
 # A piece's checkout as `land`'s dirty-tree test reads it: every porcelain line, untracked files
