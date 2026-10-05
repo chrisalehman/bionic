@@ -2657,6 +2657,22 @@ if [ "$LEGACY_ALIAS_STATE" != "not-a-file" ]; then
     _doctor_env_row "$DOCTOR_NIL" "$_legacy_alias_label" \
       "$(bionic_line_numbers_words "$_legacy_alias_bound") of $(_doctor_tilde "$(_detect_shell_rc)")" "$_legacy_alias_tail"
   fi
+  # The retired alias block where taking it out, as one unit, would change the
+  # user's own code (wave-27 T66, A-orch-119 (3)): the user's to edit, not routed.
+  if [ "$LEGACY_ALIAS_STATE" = "yes" ]; then
+    _legacy_alias_block="$(markers_block_alone "$(_detect_shell_rc)" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END")"
+    case "$_legacy_alias_block" in
+      alone=yes*) ;;
+      *) _legacy_alias_why="${_legacy_alias_block#* why=}"; _legacy_alias_why="${_legacy_alias_why%% *}"
+         _legacy_alias_first="${_legacy_alias_block#* first=}"; _legacy_alias_first="${_legacy_alias_first%% *}"
+         case "$_legacy_alias_why" in
+           ok) _legacy_alias_label="retired alias, bionic's, in your own code"; _legacy_alias_tail=" → edit it by hand" ;;
+           *)  _legacy_alias_label="retired alias, bionic cannot check it"; _legacy_alias_tail=" → edit it by hand" ;;
+         esac
+         _doctor_env_row "$DOCTOR_NIL" "$_legacy_alias_label" \
+           "lines ${_legacy_alias_first} to ${_legacy_alias_block##* last=} of $(_doctor_tilde "$(_detect_shell_rc)")" "$_legacy_alias_tail" ;;
+    esac
+  fi
   # A read-only rc: the row says so and sends no one to a setup step that would
   # only refuse (wave-27 T66, review pass 40 S5).
   if { [ "$LEGACY_ALIAS_STATE" = "yes" ] || [ -n "$_legacy_alias_ours" ]; } && ! markers_writable "$(_detect_shell_rc)"; then

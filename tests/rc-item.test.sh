@@ -1454,6 +1454,53 @@ done
 SB_T66DT="$(new_sandbox)"; t66_plant "$(t66_rc "$SB_T66DT")" "$TMP/t66dt-unused" two-in-if "$T66_ALIAS"
 expect_contains "T66 B1 two-in-if (doctor): a removable line is present → setup (the twin)" "present →" "$(report_row "$(t66_door "$SB_T66DT" doctor "")" "legacy .zshrc alias block")"
 
+# THE RETIRED ALIAS BLOCK IS ONE UNIT (A-orch-119 (3)): setup's strip and remove's
+# marked branch take it out only when, as a unit, it stands as commands of their own
+# (markers.sh `markers_block_alone`, the one function at both call sites).
+t66_ablock() {  # <file> <expected> <shape>
+  case "$3" in
+    top)     printf '%s\n' 'export SECRETTOKEN=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'export B=2' > "$1"
+             printf '%s\n' 'export SECRETTOKEN=1' 'export B=2' > "$2"; return 0 ;;
+    in-if)   printf '%s\n' 'if [ -n "$SECRETTOKEN" ]; then' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'fi' > "$1" ;;
+    heredoc) printf '%s\n' "cat > /dev/null <<'EOF'" "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'EOF' 'export SECRETTOKEN=1' > "$1" ;;
+  esac
+  if [ "${4:-left}" = "removed" ]; then awk -v a="$ALIAS_START" -v l="$T66_ALIAS" -v e="$ALIAS_END" 'index($0, a) != 1 && $0 != l && index($0, e) != 1' "$1" > "$2"; else cp "$1" "$2"; fi
+}
+t66_ablock_doors() {  # <shell> <shape> <verdict>
+  local door sb rc out L
+  T66_SHELL="$1"
+  for door in setup-only setup-all rm-payload rm-standalone rm-all; do
+    sb="$(new_sandbox)"; rc="$(t66_rc "$sb")"
+    t66_ablock "$rc" "$TMP/t66ab-expected" "$2" "$3"
+    [ "$door" = "setup-all" ] && t66_pageblock | tee -a "$rc" >> "$TMP/t66ab-expected"
+    cp "$rc" "$TMP/t66ab-before"
+    L="T66 alias block ${2} (${1##*/}, ${door})"
+    out="$(t66_door "$sb" "$door" y)"
+    expect_true "${L}: the rc still parses under its own shell" t66_parses "$rc"
+    expect_same_bytes "${L}: answered yes, the rc is as the rule says, byte for byte" "$TMP/t66ab-expected" "$rc"
+    expect_absent "${L}: the user's text is never printed" "SECRETTOKEN" "$out"
+    case "$3" in
+      left)
+        expect_eq "${L}: the block is named as inside your own code, once" "1" "$(t55_count "$out" "where removing it would change your own code")"
+        expect_contains "${L}: …by its lines" "lines 2 to 4 of" "$(report_row "$out" "where removing it would change your own code")"
+        case "$door" in setup-only|rm-payload|rm-standalone) expect_absent "${L}: …and nothing is asked" "[y/N]" "$out" ;; esac ;;
+      removed)
+        expect_absent "${L}: …and nothing is called inside your own code" "where removing it would change your own code" "$out" ;;
+    esac
+  done
+}
+t66_ablock_doors /bin/bash in-if left
+t66_ablock_doors /bin/bash heredoc left
+t66_ablock_doors /bin/bash top removed
+t66_ablock_doors /bin/zsh in-if removed
+T66_SHELL=/bin/bash
+SB_T66AD="$(new_sandbox)"; t66_ablock "$(t66_rc "$SB_T66AD")" "$TMP/t66ad-unused" in-if
+T66AD_OUT="$(t66_door "$SB_T66AD" doctor "")"
+expect_contains "T66 alias block in-if (doctor): a row names the block's lines inside your own code" "lines 2 to 4 of ~/.bashrc" "$(report_row "$T66AD_OUT" "in your own code")"
+expect_absent "T66 alias block in-if (doctor): the alias row does not call it present" "present →" "$(report_row "$T66AD_OUT" "legacy .zshrc alias block")"
+SB_T66ADT="$(new_sandbox)"; t66_ablock "$(t66_rc "$SB_T66ADT")" "$TMP/t66adt-unused" top
+expect_contains "T66 alias block top (doctor): a block that stands alone is present → setup (the twin)" "present →" "$(report_row "$(t66_door "$SB_T66ADT" doctor "")" "legacy .zshrc alias block")"
+
 # B2 — REMOVE'S ENVIRONMENT LINE (A-orch-119 (3)). bionic wrote `export
 # CLAUDE_CODE_ENABLE_TODO_TOOLS=1` ONLY between its `bionic:env` markers (setup.sh
 # 3e00ec84 until ba36f32c), so no bare line is bionic's: a line of that text outside
@@ -1625,6 +1672,16 @@ for T66_DOOR in setup-only rm-payload rm-standalone; do
   esac
 done
 T66_SHELL=/bin/bash
+for T66_DOOR in setup-only rm-payload rm-standalone; do
+  SB_T66RB="$(new_sandbox)"; printf '%s\n' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" > "$(t66_rc "$SB_T66RB")"
+  T66RB_OUT="$(t66_race "$SB_T66RB" "$T66_DOOR" legacy-alias wrap)"
+  expect_contains "T66 S1 race alias block (${T66_DOOR}): the question was asked (the positive)" "[y/N]" "$T66RB_OUT"
+  expect_same_bytes "T66 S1 race alias block (${T66_DOOR}): nothing written, the user's newer file kept" "$SB_T66RB/.mutated" "$(t66_rc "$SB_T66RB")"
+  case "$T66_DOOR" in
+    setup-only) expect_contains "T66 S1 race alias block (setup): the reason first" "changed while setup ran" "$(report_row "$T66RB_OUT" "legacy alias block  ")" ;;
+    *)          expect_contains "T66 S1 race alias block (${T66_DOOR}): the reason first" "⚠ changed while remove ran" "$T66RB_OUT" ;;
+  esac
+done
 for T66_DOOR in rm-payload rm-standalone; do
   SB_T66RV="$(new_sandbox)"; printf '%s\n' "$T66_ENV_START" "$T66_TODO" "$T66_ENV_END" > "$(t66_rc "$SB_T66RV")"
   T66RV_OUT="$(t66_race "$SB_T66RV" "$T66_DOOR" environment wrap)"
@@ -1691,11 +1748,15 @@ expect_contains "T66 S5 marked writable (setup-all): the page offers the block (
 # turns every pin of that name red.
 t66_rm_names() {  # remove.sh's helper names, read as the library's
   sed -e 's/_rm_drop_lines/markers_drop_lines/g' -e 's/_rm_regular/markers_regular/g' \
-      -e 's/_rm_stage_tmp/_markers_stage_tmp/g' -e 's/_rm_publish_tmp/_markers_publish_tmp/g'
+      -e 's/_rm_stage_tmp/_markers_stage_tmp/g' -e 's/_rm_publish_tmp/_markers_publish_tmp/g' \
+      -e 's/_rm_block_alone/markers_block_alone/g'
 }
 T66_A="$(fn_text "${REPO}/payload/scripts/lib/markers.sh" markers_drop_lines)"
 expect_nonempty "T66 S4: markers_drop_lines reads out of markers.sh" "$T66_A"
 expect_eq "T66 S4: remove.sh's _rm_drop_lines is markers_drop_lines, body for body" "$T66_A" "$(fn_text "$REMOVE_SH" _rm_drop_lines | t66_rm_names)"
+T66_A="$(fn_text "${REPO}/payload/scripts/lib/markers.sh" markers_block_alone)"
+expect_nonempty "T66 copies: markers_block_alone reads out of markers.sh" "$T66_A"
+expect_eq "T66 copies: remove.sh's _rm_block_alone is markers_block_alone, body for body" "$T66_A" "$(fn_text "$REMOVE_SH" _rm_block_alone | t66_rm_names)"
 cp "$REMOVE_SH" "$TMP/t66-late.sh"
 printf '%s\n' 'bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it' '  return 0' '}' >> "$TMP/t66-late.sh"
 expect_true "T66 S4: the late-definition mutant still parses" bash -n "$TMP/t66-late.sh"
