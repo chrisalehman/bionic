@@ -111,6 +111,10 @@ real plugin root or hooks directory in the printed line; the placeholders here o
 - `dp_finding "the deliverable label names several paths" "name exactly one deliverable" "$_dp_detail"` — deliverable names several paths — none: which path is the deliverable is the author's choice
 - `dp_finding "the deliverable is outside this repository" "name a path inside the repo" "$_dp_detail"` — deliverable outside the repo — none: the in-repo path is the author's choice
 - `dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"` — no deliverable — none: the artifact path is the author's choice
+- `dp_finding "unknown question: $(bionic_trunc "${_q_bad%% *}" 16)" "use evidence/adversarial/structure" \` — a Questions: word outside the three (wave-27 T15) — fix: `Questions: <the dealt set>`, printed whole in the detail
+- `dp_finding "${_q_rigor} deals ${DP_SUBAGENT}: nothing" "dispatch its holder" \` — the plan's rigor deals this reader nothing (wave-27 T15) — none: the fix is dispatching the role that holds the question, which the detail names; no line of this brief can answer it
+- `dp_finding "${DP_SUBAGENT} names no Questions: line" "add the Questions: line" \` — a reader brief with no Questions: line (wave-27 T15) — fix: `Questions: <the dealt set>`, printed whole in the detail
+- `dp_finding "${_q_rigor} deals ${DP_SUBAGENT}: ${_q_dealt}" "use that set" \` — a Questions: set the rigor does not deal this reader (wave-27 T15) — fix: `Questions: <the dealt set>`, printed whole in the detail
 - `finding) dp_finding "$2" "$3" "$4" ;;` — brief.sh sink forwarder — none: a forwarder; brief.sh findings carry their own fix (the impact timeout names Suites:/Files:)
 - `dp_finding "head ${_fr_short} is already proved" "keep the floor proof; run nothing" "$_dp_detail" ;;` — full run on the proved head — none: the head is proved and there is nothing to run; the detail names the proof line and its evidence
 - `dp_finding "bounded: ${_fr_names}" "run those suites, not the tree" "$_dp_detail" ;;` — full run over a bounded change — fix: `Suites: tests/<suite> …`, printed whole in the detail, every suite the map named
