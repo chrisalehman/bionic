@@ -447,6 +447,35 @@ for c in workspaces gate; do
     test -f "$(f_of "$R5F" "$c" "$SID_LIVE")"
 done
 
+# THE start-clock CLASS (wave-27 T68; review pass 47 S1, A-orch-137). hooks/execution-recorder.sh
+# writes one clock file per start, `start-clock-<sid>.<agent id>.state`; a dead session's go with
+# its other state, a live one's are kept, and a clock-named thing that is not a file the hook
+# writes (a directory, a link) is never the reason a sweep refuses or errors.
+R5G="$(make_repo r5g)"
+live_home 5g "$SID_LIVE"; H5G="$CLAUDE_HOME"
+plant_session "$R5G" "$SID_DEAD" roster
+for _ck in a1b2c3 a9.x; do
+  printf '1767225600\n' > "$R5G/.bionic/tmp/start-clock-$SID_DEAD.$_ck.state"
+  printf '1767225600\n' > "$R5G/.bionic/tmp/start-clock-$SID_LIVE.$_ck.state"
+done
+plant_session "$R5G" "$SID_DEAD2" roster
+printf '1767225600\n' > "$R5G/.bionic/tmp/start-clock-$SID_DEAD2.only.state"
+rm -f "$(f_of "$R5G" roster "$SID_DEAD2")"
+mkdir "$R5G/.bionic/tmp/start-clock-$SID_DEAD.adir.state"
+ln -s "$TMPROOT/decoy-outside-tmp.txt" "$R5G/.bionic/tmp/start-clock-$SID_DEAD.alink.state"
+poke "$R5G" "$H5G" "$SID_SELF" sweep
+expect_eq "5.21 a sweep over sessions holding clock files completes (exit 0)" "0" "$RC"
+expect_false "5.22 a dead session's clock files are swept with its other state" \
+  test -e "$R5G/.bionic/tmp/start-clock-$SID_DEAD.a1b2c3.state"
+expect_false "5.23 …its clock file whose agent id holds a dot too" test -e "$R5G/.bionic/tmp/start-clock-$SID_DEAD.a9.x.state"
+expect_false "5.24 …and its roster beside them" test -e "$(f_of "$R5G" roster "$SID_DEAD")"
+expect_false "5.25 a dead session holding only a clock file is swept" test -e "$R5G/.bionic/tmp/start-clock-$SID_DEAD2.only.state"
+expect_contains "5.26 …and both are counted dead, nothing refused" "|dead=2|" "$OUT"
+expect_true "5.27 a live session's clock files are kept" test -f "$R5G/.bionic/tmp/start-clock-$SID_LIVE.a1b2c3.state"
+expect_true "5.28 a directory named like a clock file is left alone" test -d "$R5G/.bionic/tmp/start-clock-$SID_DEAD.adir.state"
+expect_true "5.29 …and so is a link, not followed" test -L "$R5G/.bionic/tmp/start-clock-$SID_DEAD.alink.state"
+expect_absent "5.30 …and neither is counted a refusal" "refused (symlink" "$OUT"
+
 # =============================================================================
 section "6. the surface: one verb, one flag, no operand, no engagement gate"
 # =============================================================================

@@ -204,6 +204,10 @@ SETUP_ALL=0
 # exists to end.
 RM_ALIAS_START='# ─── bionic:start ───'
 RM_ALIAS_END='# ─── bionic:end ───'
+# The names detect.sh gives the same pair, which the copied scan below reads
+# (`bionic_legacy_alias_lines`): assigned from the copies above, not spelled again.
+BIONIC_ALIAS_START="$RM_ALIAS_START"
+BIONIC_ALIAS_END="$RM_ALIAS_END"
 # from env.sh: the LIVE rc item's markers — the block setup writes and this
 # script strips. Copies, like every literal here, because the standalone door
 # cannot source env.sh; tests/rc-item.test.sh pins them byte-equal to
@@ -216,7 +220,6 @@ RM_RC_END='# ─── bionic:rc:end ───'
 # PRINCIPLES_START / PRINCIPLES_END.
 RM_PRINCIPLES_START='<!-- bionic:principles:start -->'
 RM_PRINCIPLES_END='<!-- bionic:principles:end -->'
-RM_TODO_EXPORT_RE='^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
 # The retired env block's markers. NOT a copy of a live constant — setup.sh
 # stopped writing this block at W7 (the names live in settings.json now), so
 # this script is the only place they are still spelled, and it spells them
@@ -238,6 +241,9 @@ RM_ENV_UNSET_JQ='if has("env") then (.env |= del(.[$k])) | (if (.env | length) =
 # Which of those lines bionic wrote is `bionic_legacy_alias_ours` below, detect.sh's
 # list copied whole; tests/rc-item.test.sh §T55 pins both (wave-27 T55).
 BIONIC_LEGACY_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
+# from detect.sh, under its own name: any line that MENTIONS the environment export
+# (wave-27 T66); `bionic_todo_export_ours` below says which one bionic wrote.
+BIONIC_TODO_EXPORT_PATTERN='export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS'
 # from detect.sh: the substring that puts a managed-hook entry on the legacy channel
 RM_LEGACY_HOOK_SUBSTR='.claude/hooks/'
 # from detect.sh (DETECT_LEGACY_SKILL_NAME): the one skill the retired installer rendered
@@ -503,55 +509,72 @@ _rm_file_has_marker() {  # <file> <start> <end>
   _rm_file_has_line "$1" "$2" || _rm_file_has_line "$1" "$3"
 }
 
-_rm_file_has_line_matching() {  # <file> <ere>
-  local file="$1" ere="$2" line
-  [ -f "$file" ] || return 1
-  while IFS= read -r line || [ -n "$line" ]; do
-    [[ "$line" =~ $ere ]] && return 0
-  done < "$file"
-  return 1
-}
-
-# THE BARE ALIAS LINE BIONIC WROTE, AND ONLY THAT LINE (wave-27 T55, review pass 32
-# F1). The standalone door's copies of detect.sh's list, its scan and its number
-# words, and of markers.sh's line walk, under the same names and line for line, so
-# the payload door's library and this file cannot come to disagree about which
-# line is bionic's: tests/rc-item.test.sh §T55 pins all four, with a mutant.
-bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
-  local l="$1" p
+# THE BARE LINES BIONIC WROTE, AND ONLY THOSE LINES, AND ONLY AS A COMMAND OF THEIR
+# OWN (wave-27 T55, review pass 32 F1; T66, review pass 40 B1, B2, B3). The
+# standalone door's copies of detect.sh's two lists (the retired alias and the
+# CLAUDE_CODE_ENABLE_TODO_TOOLS export), their scans, the reason words and the
+# number words; of markers.sh's decision whether a line, or a marked block as one
+# unit, stands as commands of its own and of its line walk; and of shell.sh's answer to which shell reads an rc. Under
+# the same names and line for line, so the payload door's libraries and this file
+# cannot come to disagree about which line is bionic's or whether it may go:
+# tests/rc-item.test.sh §T55 and §T66 pin every one, and a second definition of any
+# of them turns its pin red.
+bionic_rc_line_bare() {  # <line> — sets BIONIC_RC_BARE: blanks at either end and one trailing CR dropped
+  local LC_ALL=C l="$1"
   l="${l#"${l%%[![:blank:]]*}"}"
   l="${l%"${l##*[![:blank:]]}"}"
   l="${l%$'\r'}"
   l="${l%"${l##*[![:blank:]]}"}"
+  BIONIC_RC_BARE="$l"
+}
+
+bionic_legacy_alias_ours() {  # <line> — rc 0 when bionic wrote it
+  case "$1" in *"--dangerously-skip-permissions'"*) ;; *) return 1 ;; esac
+  local LC_ALL=C l p hi=$'\200'-$'\377'
+  bionic_rc_line_bare "$1"; l="$BIONIC_RC_BARE"
   case "$l" in
     # claude-bootstrap.sh 6e953055 (2026-03-22), bare, `printf '\n%s\n' "$ALIAS_LINE"`,
     # until e012f966 (2026-03-28) wrote the same line inside the markers.
     "alias claude='claude --dangerously-skip-permissions'") return 0 ;;
     # claude-bootstrap.sh e178aecc (2026-03-14) until 6e953055, the same append with
     # `CLAUDE_BIN="$(command -v claude)"` as <P>: that machine's path to claude, or
-    # empty where none was on PATH. One template (A-orch-93): P empty, or absolute
-    # with `claude` as its last component, holding no white space, quote, `$`,
-    # backquote or `;`.
+    # empty where none was on PATH. One template (A-orch-93, amended by A-orch-117):
+    # P empty, or absolute with `claude` as its last component, every character a
+    # letter, a digit or one of `/ . _ - + @ % , : = ~`. A byte above 0x7f counts as
+    # a letter (no shell metacharacter is one); a pipe, `&`, `<`, `>`, a parenthesis,
+    # white space, a quote, `$`, a backquote or `;` is not a path bionic wrote.
     "alias claude='"*" --dangerously-skip-permissions'")
       p="${l#"alias claude='"}"; p="${p%" --dangerously-skip-permissions'"}"
       [ -z "$p" ] && return 0
       case "$p" in /claude|/*/claude) ;; *) return 1 ;; esac
-      case "$p" in *[[:space:]]*|*\'*|*\"*|*\$*|*\`*|*\;*) return 1 ;; esac
+      case "$p" in *[!A-Za-z0-9/._+@%,:=~${hi}-]*) return 1 ;; esac
       return 0 ;;
   esac
   return 1
 }
 
+bionic_todo_export_ours() {  # <line> — rc 0 when it is the text bionic wrote
+  case "$1" in *CLAUDE_CODE_ENABLE_TODO_TOOLS*) ;; *) return 1 ;; esac
+  local LC_ALL=C
+  bionic_rc_line_bare "$1"
+  [ "$BIONIC_RC_BARE" = "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1" ]
+}
+
 bionic_legacy_alias_lines() {  # <file>
-  local file="$1" line n=0 ours="" theirs=""
-  if [ -f "$file" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      n=$((n + 1))
-      if bionic_legacy_alias_ours "$line"; then ours="${ours}${ours:+,}${n}"
-      elif [[ "$line" =~ $BIONIC_LEGACY_ALIAS_PATTERN ]]; then theirs="${theirs}${theirs:+,}${n}"; fi
-    done < "$file"
-  fi
-  printf 'ours=%s theirs=%s\n' "$ours" "$theirs"
+  bionic_rc_lines "$1" bionic_legacy_alias_ours "$BIONIC_LEGACY_ALIAS_PATTERN" "$BIONIC_ALIAS_START" "$BIONIC_ALIAS_END"
+}
+
+bionic_todo_export_lines() {  # <file>
+  bionic_rc_candidates "$1" bionic_todo_export_ours "$BIONIC_TODO_EXPORT_PATTERN"
+}
+
+bionic_rc_left_reason() {  # <why> <rc>
+  case "$1" in
+    ok)       printf "where removing it would change your own code\n" ;;
+    no-shell) printf "left: %s, the shell that reads that file, is not installed, so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
+    no-parse) printf "left: the file does not parse as it is (%s -n), so bionic cannot check\n" "$(bionic_rc_shell "$2")" ;;
+    *)        printf "left: bionic could not stage a copy to check\n" ;;
+  esac
 }
 
 bionic_line_numbers_words() {  # <n>,<n>…
@@ -559,6 +582,105 @@ bionic_line_numbers_words() {  # <n>,<n>…
     *,*) printf 'lines %s\n' "${1//,/, }" ;;
     *)   printf 'line %s\n' "$1" ;;
   esac
+}
+
+bionic_rc_shell() {  # <rc> — zsh or bash
+  local shell_name="${SHELL:-/bin/bash}"
+  case "${1##*/}" in
+    .zshrc)  echo zsh ;;
+    .bashrc) echo bash ;;
+    *) case "${shell_name##*/}" in zsh) echo zsh ;; *) echo bash ;; esac ;;
+  esac
+}
+
+bionic_rc_candidates() {  # <file> <predicate> <ere> [<start> <end>] — `cand=<n>,<n> theirs=<n>,<n>`
+  local LC_ALL=C file="$1" pred="$2" ere="$3" start="${4:-}" end="${5:-}" line n=0 cand="" theirs="" inside=0
+  if [ -f "$file" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      n=$((n + 1))
+      if [ -n "$start" ]; then
+        if [ "$line" = "$start" ]; then inside=1; continue; fi
+        if [ "$line" = "$end" ]; then inside=0; continue; fi
+        [ "$inside" = "1" ] && continue
+      fi
+      if "$pred" "$line"; then cand="${cand}${cand:+,}${n}"
+      elif [ -n "$ere" ] && [[ "$line" =~ $ere ]]; then theirs="${theirs}${theirs:+,}${n}"; fi
+    done < "$file"
+  fi
+  printf 'cand=%s theirs=%s\n' "$cand" "$theirs"
+}
+
+bionic_rc_lines() {  # <file> <predicate> <ere> [<start> <end>] — `ours=<n>,<n> bound=<n>,<n> why=<w> theirs=<n>,<n>`
+  local scan cand
+  scan="$(bionic_rc_candidates "$1" "$2" "$3" "${4:-}" "${5:-}")"
+  cand="${scan#cand=}"; cand="${cand%% *}"
+  printf '%s theirs=%s\n' "$(bionic_rc_alone "$1" "$cand")" "${scan#* theirs=}"
+}
+
+bionic_rc_alone() {  # <file> <n>,<n> — `ours=<n>,<n> bound=<n>,<n> why=<ok|no-shell|no-parse|no-stage>`
+  local file="$1" cand="$2" bin dir n ours="" bound="" cont
+  if [ -z "$cand" ]; then printf 'ours= bound= why=ok\n'; return 0; fi
+  bin="$(command -v "$(bionic_rc_shell "$file")" 2>/dev/null)" || bin=""
+  if [ -z "$bin" ]; then printf 'ours= bound=%s why=no-shell\n' "$cand"; return 0; fi
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/bionic-rc.XXXXXX" 2>/dev/null)" || dir=""
+  if [ -z "$dir" ]; then printf 'ours= bound=%s why=no-stage\n' "$cand"; return 0; fi
+  if ! bionic_rc_try "$bin" "$file" "$dir/rc" "" ""; then
+    rm -rf "$dir"; printf 'ours= bound=%s why=no-parse\n' "$cand"; return 0
+  fi
+  cont="$(bionic_rc_continued "$file" "$cand")"
+  for n in ${cand//,/ }; do
+    case ",${cont}," in *",${n},"*) bound="${bound}${bound:+,}${n}"; continue ;; esac
+    if bionic_rc_try "$bin" "$file" "$dir/rc" "" "$n" \
+       || ! bionic_rc_try "$bin" "$file" "$dir/rc" "${ours}${ours:+,}${n}" ""; then
+      bound="${bound}${bound:+,}${n}"
+    else
+      ours="${ours}${ours:+,}${n}"
+    fi
+  done
+  rm -rf "$dir"
+  printf 'ours=%s bound=%s why=ok\n' "$ours" "$bound"
+}
+
+bionic_rc_continued() {  # <file> <n>,<n> — those of them that are continued, <n>,<n>
+  LC_ALL=C awk -v want=",$2," '
+    index(want, "," NR ",") {
+      t = code; sub(/[ \t\r]+$/, "", t)
+      if (t ~ /(\\|&&|[|]|[|]&)$/) out = out (out == "" ? "" : ",") NR
+    }
+    { s = $0; sub(/^[ \t]+/, "", s); sub(/\r$/, "", s)
+      if (s != "" && substr(s, 1, 1) != "#") code = $0 }
+    END { print out }' "$1"
+}
+
+bionic_rc_block_alone() {  # <file> <first> <last> — `alone=<yes|no> why=<ok|no-shell|no-parse|no-stage>`
+  local file="$1" first="$2" last="$3" bin dir n rest="" alone=no
+  bin="$(command -v "$(bionic_rc_shell "$file")" 2>/dev/null)" || bin=""
+  if [ -z "$bin" ]; then printf 'alone=no why=no-shell\n'; return 0; fi
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/bionic-rc.XXXXXX" 2>/dev/null)" || dir=""
+  if [ -z "$dir" ]; then printf 'alone=no why=no-stage\n'; return 0; fi
+  if ! bionic_rc_try "$bin" "$file" "$dir/rc" "" ""; then
+    rm -rf "$dir"; printf 'alone=no why=no-parse\n'; return 0
+  fi
+  n=$((first + 1))
+  while [ "$n" -le "$last" ]; do rest="${rest}${rest:+,}${n}"; n=$((n + 1)); done
+  if [ -z "$(bionic_rc_continued "$file" "$first")" ] \
+     && ! bionic_rc_try "$bin" "$file" "$dir/rc" "$rest" "$first" \
+     && bionic_rc_try "$bin" "$file" "$dir/rc" "${first}${rest:+,}${rest}" ""; then
+    alone=yes
+  fi
+  rm -rf "$dir"
+  printf 'alone=%s why=ok\n' "$alone"
+}
+
+bionic_rc_try() {  # <shell> <file> <staged> <drop n,n> <probe n> — rc 0 when the copy parses
+  LC_ALL=C awk -v drop=",$4," -v probe="$5" '
+    index(drop, "," NR ",") { next }
+    NR == probe { print ")"; next }
+    { print }' "$2" > "$3" 2>/dev/null || return 2
+  case "${1##*/}" in
+    zsh) BASH_ENV= ENV= "$1" -f -n "$3" ;;
+    *)   BASH_ENV= ENV= "$1" -n "$3" ;;
+  esac >/dev/null 2>&1 </dev/null
 }
 
 bionic_drop_lines_walk() {  # <file> <predicate> <n>,<n> — the lines that stay, to stdout; rc 2 when the sets differ
@@ -643,22 +765,6 @@ _rm_publish_tmp() {  # <tmp> <file>
   mode="$(_rm_mode_of "$file")"
   [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$file"
-}
-
-# Drops every line matching an ERE.
-_rm_filter_out_lines() {  # <file> <ere>
-  local file="$1"
-  local ere="$2"
-  local target
-  target="$(bionic_link_target "$file")"
-  local tmp="${target}.bionic.tmp"
-  local line
-  _rm_stage_tmp "$tmp" || return 1
-  while IFS= read -r line || [ -n "$line" ]; do
-    [[ "$line" =~ $ere ]] && continue
-    printf '%s\n' "$line" >> "$tmp"
-  done < "$file"
-  _rm_publish_tmp "$tmp" "$target"
 }
 
 # Drops a marker-delimited block, markers included. Line equality is exact —
@@ -768,15 +874,19 @@ _rm_strip_marker_block() {  # <file> <start-line> <end-line> [keep]
   return 0
 }
 
-# The copy of markers.sh `markers_drop_lines` (wave-27 T55), with the strip's exit
-# codes, so a read-only rc is refused here in the marked step's words (review pass
-# 32 F4: the filter this replaced wrote through it).
+# The copy of markers.sh `markers_drop_lines` (wave-27 T55, T66), body for body with
+# this file's helpers in place of the library's (`_rm_regular`, `_rm_stage_tmp`,
+# `_rm_publish_tmp`), pinned by tests/rc-item.test.sh §T66. The strip's exit codes,
+# so a read-only rc is refused here in the marked step's words (review pass 32 F4),
+# and the decision whether each line may go taken again on the file as it is now.
 _rm_drop_lines() {  # <file> <predicate> <n>,<n>
-  local file="$1" target tmp rc
+  local file="$1" target tmp rc scan
   _rm_regular "$file" >/dev/null || return 4
   [ -f "$file" ] || return 2
   target="$(bionic_link_target "$file")"
   if [ -e "$target" ] && [ ! -w "$target" ]; then return 3; fi
+  scan="$(bionic_rc_lines "$file" "$2" "")"; scan="${scan#ours=}"
+  [ "${scan%% *}" = "$3" ] || return 2
   tmp="${target}.bionic.tmp"
   _rm_stage_tmp "$tmp" || return 1
   bionic_drop_lines_walk "$file" "$2" "$3" >> "$tmp"; rc=$?
@@ -785,14 +895,111 @@ _rm_drop_lines() {  # <file> <predicate> <n>,<n>
   return 0
 }
 
-# A line that mentions the retired alias and is not one bionic wrote: named once,
-# by number in the file as it is now, never by its text, and left.
+# The lines of <rc> that mention <what> and stay (wave-27 T55, T66): bionic's own
+# line where taking it out would change the user's code, or where that could not be
+# checked (`bound`, with its reason), and a line not in a form bionic wrote
+# (`theirs`). Each kind is named once, by number in the file as it is now, never by
+# its text. rc 1 when there is none.
+_rm_rc_lines_left() {  # <rc> <scan> <what it mentions>
+  local bound why theirs words verb said=1
+  bound="${2#* bound=}"; bound="${bound%% *}"
+  why="${2#* why=}"; why="${why%% *}"
+  theirs="${2#* theirs=}"
+  if [ -n "$bound" ]; then
+    words="$(bionic_line_numbers_words "$bound")"
+    case "$words" in lines*) verb=are ;; *) verb=is ;; esac
+    echo "  ${words} of ${1} ${verb} bionic's line, $(bionic_rc_left_reason "$why" "$1"): it is left as it is — edit it by hand"
+    said=0
+  fi
+  if [ -n "$theirs" ]; then
+    words="$(bionic_line_numbers_words "$theirs")"
+    case "$words" in lines*) verb=are ;; *) verb=is ;; esac
+    echo "  ${words} of ${1} ${verb} not in a form bionic wrote: it mentions ${3} and is left as it is — edit it by hand if you want it gone"
+    said=0
+  fi
+  return "$said"
+}
+
+# A MARKED BLOCK IS ONE UNIT (wave-27 T66, A-orch-119 (3)): the retired alias block
+# and the retired env block are taken out only when, as a unit, they stand as
+# commands of their own (markers.sh `bionic_rc_block_alone`). The copy of markers.sh
+# `markers_block_alone`, pinned by tests/rc-item.test.sh §T66.
+_rm_block_alone() {  # <file> <start> <end>
+  local line n=0 first="" last=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if [ -z "$first" ] && [ "$line" = "$2" ]; then first="$n"
+    elif [ -n "$first" ] && [ -z "$last" ] && [ "$line" = "$3" ]; then last="$n"; fi
+  done < "$1"
+  if [ -z "$first" ] || [ -z "$last" ]; then printf 'alone=no why=ok first= last=\n'; return 0; fi
+  printf '%s first=%s last=%s\n' "$(bionic_rc_block_alone "$1" "$first" "$last")" "$first" "$last"
+}
+
+# The block a `_rm_block_alone` answer says stays, named by its lines with its
+# reason, never by its text.
+_rm_block_left() {  # <rc> <answer> <what the block is>
+  local why words
+  why="${2#* why=}"; why="${why%% *}"
+  words="${2#* first=}"; words="lines ${words%% *} to ${2##* last=}"
+  echo "  ${words} of ${1} are ${3}, $(bionic_rc_left_reason "$why" "$1"): it is left as it is — edit it by hand"
+}
+
+# What the environment item leaves in the rc, named by number, never by its text:
+# the block where taking it out would change the user's own code; or, with no
+# markers, a line of bionic's text outside them (bionic wrote it only between them,
+# so it is the user's: A-orch-119 (3)) and any other line that mentions the export.
+# rc 1 when there is none.
+_rm_env_left() {  # <rc>
+  local scan cand theirs words verb said=1 alone
+  [ -f "$1" ] || return 1
+  if _rm_file_has_marker "$1" "$RM_ENV_START" "$RM_ENV_END"; then
+    _rm_marker_faults "$1" "$RM_ENV_START" "$RM_ENV_END" >/dev/null || return 1
+    alone="$(_rm_block_alone "$1" "$RM_ENV_START" "$RM_ENV_END")"
+    case "$alone" in alone=yes*) return 1 ;; esac
+    _rm_block_left "$1" "$alone" "bionic's retired environment block"
+    return 0
+  fi
+  scan="$(bionic_todo_export_lines "$1")"
+  cand="${scan#cand=}"; cand="${cand%% *}"; theirs="${scan#* theirs=}"
+  if [ -n "$cand" ]; then
+    words="$(bionic_line_numbers_words "$cand")"
+    case "$words" in lines*) verb=are ;; *) verb=is ;; esac
+    echo "  ${words} of ${1} ${verb} the CLAUDE_CODE_ENABLE_TODO_TOOLS export outside bionic's markers: bionic wrote it only between them, so it is left as it is — edit it by hand if you want it gone"
+    said=0
+  fi
+  if [ -n "$theirs" ]; then
+    words="$(bionic_line_numbers_words "$theirs")"
+    case "$words" in lines*) verb=are ;; *) verb=is ;; esac
+    echo "  ${words} of ${1} ${verb} not in a form bionic wrote: it mentions CLAUDE_CODE_ENABLE_TODO_TOOLS and is left as it is — edit it by hand if you want it gone"
+    said=0
+  fi
+  return "$said"
+}
+
 _rm_legacy_alias_not_ours() {  # <rc>
-  local scan theirs
-  scan="$(bionic_legacy_alias_lines "$1")"; theirs="${scan#* theirs=}"
-  [ -n "$theirs" ] || return 1
-  echo "  $(bionic_line_numbers_words "$theirs") of ${1} is not in a form bionic wrote: it mentions the retired alias and is left as it is — edit it by hand if you want it gone"
-  return 0
+  local alone
+  if _rm_file_has_marker "$1" "$RM_ALIAS_START" "$RM_ALIAS_END" \
+     && _rm_marker_faults "$1" "$RM_ALIAS_START" "$RM_ALIAS_END" >/dev/null; then
+    alone="$(_rm_block_alone "$1" "$RM_ALIAS_START" "$RM_ALIAS_END")"
+    case "$alone" in alone=yes*) ;; *) _rm_block_left "$1" "$alone" "bionic's legacy alias block" ;; esac
+  fi
+  _rm_rc_lines_left "$1" "$(bionic_legacy_alias_lines "$1")" "the retired alias"
+}
+
+# A READ-ONLY RC IS NOT OFFERED (wave-27 T66, review pass 40 S5): the alias block
+# or bionic's line is there, and the file is read-only, so no removal can be taken.
+# rc 0 when that is so; the page and the item say it in the marked step's words.
+_rm_legacy_alias_read_only() {  # <rc>
+  local target scan
+  [ -f "$1" ] || return 1
+  target="$(bionic_link_target "$1")"
+  [ -e "$target" ] && [ ! -w "$target" ] || return 1
+  if _rm_file_has_marker "$1" "$RM_ALIAS_START" "$RM_ALIAS_END"; then
+    _rm_marker_faults "$1" "$RM_ALIAS_START" "$RM_ALIAS_END" >/dev/null
+    return
+  fi
+  scan="$(bionic_legacy_alias_lines "$1")"; scan="${scan#ours=}"
+  [ -n "${scan%% *}" ]
 }
 
 # Why a marker strip refused, as the first half of a leftover line. The file is
@@ -1019,9 +1226,13 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
     legacy-alias)
       [ -f "$RC_FILE" ] || return 1
       _rm_regular "$RC_FILE" >/dev/null || return 1
+      # A read-only rc is not on the page: the item would only refuse (wave-27 T66,
+      # review pass 40 S5); the page says so instead.
+      _rm_legacy_alias_read_only "$RC_FILE" && return 1
       if _rm_file_has_marker "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"; then
-        _rm_marker_faults "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END" >/dev/null
-        return
+        _rm_marker_faults "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END" >/dev/null || return 1
+        case "$(_rm_block_alone "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END")" in alone=yes*) return 0 ;; esac
+        return 1
       fi
       present="$(bionic_legacy_alias_lines "$RC_FILE")"; present="${present#ours=}"
       [ -n "${present%% *}" ] ;;
@@ -1029,8 +1240,11 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       keys="$(_rm_env_keys_present)" || keys=""
       [ -n "$keys" ] && return 0
       _rm_regular "$RC_FILE" >/dev/null || return 1
-      _rm_file_has_marker "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" && return 0
-      _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE" && return 0
+      _rm_file_has_marker "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" || return 1
+      # A block bionic would leave as a unit is not on the page (wave-27 T66); one
+      # whose markers do not pair up stays, and its item says why.
+      _rm_marker_faults "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" >/dev/null || return 0
+      case "$(_rm_block_alone "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END")" in alone=yes*) return 0 ;; esac
       return 1 ;;
     claude-proxy)
       _rm_regular "$RC_FILE" >/dev/null || return 1
@@ -1271,15 +1485,40 @@ _rm_item_legacy_alias() {
         echo ""
         return 0
       fi
+      # A read-only rc is not asked about: no answer could take the block out
+      # (wave-27 T66, review pass 40 S5).
+      if _rm_legacy_alias_read_only "$RC_FILE"; then
+        _rm_leftover "$(_rm_strip_why 3 "$RC_FILE") — the alias block is still there"
+        echo ""
+        return 0
+      fi
+      # The block as one unit (wave-27 T66, A-orch-119 (3)): one that would leave the
+      # user's own code changed is named and not asked about.
+      rm_alias_alone="$(_rm_block_alone "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END")"
+      case "$rm_alias_alone" in
+        alone=yes*) ;;
+        *) _rm_block_left "$RC_FILE" "$rm_alias_alone" "bionic's legacy alias block"
+           echo ""
+           return 0 ;;
+      esac
       echo "  ${RC_FILE} carries the bionic marker block; bionic would delete the block and everything between its markers."
       if _rm_consent "Remove the marker block from ${RC_FILE}?"; then
+        rm_alias_rc=0
+        if _rm_marker_faults "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END" >/dev/null; then
+          case "$(_rm_block_alone "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END")" in alone=yes*) ;; *) rm_alias_rc=5 ;; esac
+        fi
+        if [ "$rm_alias_rc" = "5" ]; then
+          _rm_leftover "changed while remove ran, so nothing was written: ${RC_FILE} is as you left it, and the alias block is still there"
+        else
         _rm_strip_marker_block "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"; rm_alias_rc=$?
         if [ "$rm_alias_rc" = "0" ]; then
           _rm_removed "legacy alias block in ${RC_FILE}"
         else
-          rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
+          # The strip removes the copy it staged on every failure; a file of that
+          # name it did not stage is the user's (wave-27 T66, review pass 40 S3).
           [ "$rm_alias_rc" = "2" ] && _rm_say_faults "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"
           _rm_leftover "$(_rm_strip_why "$rm_alias_rc" "$RC_FILE") — the alias block is still there"
+        fi
         fi
       else
         _rm_skipped "$?" legacy-alias "legacy alias block in ${RC_FILE}"
@@ -1290,14 +1529,20 @@ _rm_item_legacy_alias() {
       # number in the question, taken out by `_rm_drop_lines`, which refuses as the
       # marked strip does; a line that only mentions the alias is named and left.
       rm_alias_words="$(bionic_line_numbers_words "$rm_alias_ours")"
+      if _rm_legacy_alias_read_only "$RC_FILE"; then
+        _rm_leftover "$(_rm_strip_why 3 "$RC_FILE") — the alias block is still there"
+        _rm_legacy_alias_not_ours "$RC_FILE"
+        echo ""
+        return 0
+      fi
       echo "  ${RC_FILE} carries the alias line bionic wrote before its markers; bionic would delete ${rm_alias_words} and nothing else."
       if _rm_consent "Remove ${rm_alias_words} of ${RC_FILE}, the retired alias line bionic wrote?"; then
         _rm_drop_lines "$RC_FILE" bionic_legacy_alias_ours "$rm_alias_ours"; rm_alias_rc=$?
         case "$rm_alias_rc" in
           0) _rm_removed "legacy alias ${rm_alias_words} in ${RC_FILE} (the unmarked spelling)" ;;
-          2) _rm_leftover "${RC_FILE} changed while remove ran — it is as it was, and the alias line is still there" ;;
-          *) rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
-             _rm_leftover "$(_rm_strip_why "$rm_alias_rc" "$RC_FILE") — the alias block is still there" ;;
+          # The reason first, so a long path cannot push it off the line (S2).
+          2) _rm_leftover "changed while remove ran, so nothing was written: ${RC_FILE} is as you left it, and the alias line is still there" ;;
+          *) _rm_leftover "$(_rm_strip_why "$rm_alias_rc" "$RC_FILE") — the alias block is still there" ;;
         esac
       else
         _rm_skipped "$?" legacy-alias "legacy alias ${rm_alias_words} in ${RC_FILE}"
@@ -1372,7 +1617,7 @@ _rm_item_environment() {
   _rm_wants environment || return 0
   echo "bionic's environment settings:"
 
-  local keys block=no bare=no question="" jq_missing=no consent_rc=0
+  local keys block=no question="" jq_missing=no consent_rc=0
   if ! keys="$(_rm_env_keys_present)"; then jq_missing=yes; keys=""; fi
   # The rc half is not looked at when the rc is not a text file bionic can read
   # (wave-27 T51, F7): said once, and the settings half still runs.
@@ -1389,16 +1634,26 @@ _rm_item_environment() {
     _rm_leftover "$(_rm_strip_why 2 "$RC_FILE") — nothing in it was changed"
     block=malformed
   fi
-  if [ "$block" = "no" ] && _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE"; then bare=yes; fi
+  # THE BLOCK IS ONE UNIT, AND NO BARE LINE IS BIONIC'S (wave-27 T66, review pass 40
+  # B2, in 1.11.0; A-orch-119 (3)). This item also took out every line a filter
+  # anchored only at the line's start matched: a user's `…=1; export TOKEN=…`,
+  # `…=10`, a commented copy, a line inside their `if`, adding a final newline and
+  # writing through a read-only rc. bionic wrote the export only between its
+  # markers, so the filter is gone: the block goes as a unit when it stands as
+  # commands of their own, and any line outside it is named by number and left.
+  if [ "$block" = "yes" ]; then
+    case "$(_rm_block_alone "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END")" in alone=yes*) ;; *) block=bound ;; esac
+  fi
 
-  if [ "$jq_missing" = "yes" ] && [ "$block" != "yes" ] && [ "$bare" = "no" ]; then
+  if [ "$jq_missing" = "yes" ] && [ "$block" != "yes" ]; then
     _rm_leftover "cannot read ${RM_SETTINGS} without jq — bionic's environment settings were left as they are"
     echo ""
     return 0
   fi
 
-  if [ -z "$keys" ] && [ "$block" != "yes" ] && [ "$bare" = "no" ]; then
+  if [ -z "$keys" ] && [ "$block" != "yes" ]; then
     [ "$block" = "no" ] && _rm_clean "bionic's environment settings"
+    case "$block" in no|bound) _rm_env_left "$RC_FILE" ;; esac
     echo ""
     return 0
   fi
@@ -1410,8 +1665,6 @@ _rm_item_environment() {
   fi
   if [ "$block" = "yes" ]; then
     echo "  ${RC_FILE} carries a retired bionic environment block; bionic would delete the block and everything between its markers."
-  elif [ "$bare" = "yes" ]; then
-    echo "  ${RC_FILE} exports CLAUDE_CODE_ENABLE_TODO_TOOLS=1; bionic would delete that line."
   fi
 
   question="Remove bionic's environment settings?"
@@ -1436,23 +1689,25 @@ _rm_item_environment() {
   done
   [ -n "$failed" ] && _rm_leftover "could not rewrite ${RM_SETTINGS} — ${failed} is still there"
 
-  if [ "$block" = "yes" ]; then
+  # The unit is decided again on the file as it is now: an rc changed under the
+  # question so that the block no longer stands alone is not written.
+  if [ "$block" = "yes" ] && ! _rm_marker_faults "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END" >/dev/null; then
+    rm_env_rc=2
+  elif [ "$block" = "yes" ]; then
+    case "$(_rm_block_alone "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END")" in alone=yes*) rm_env_rc=0 ;; *) rm_env_rc=5 ;; esac
+  fi
+  if [ "$block" = "yes" ] && [ "$rm_env_rc" = "5" ]; then
+    _rm_leftover "changed while remove ran, so nothing was written: ${RC_FILE} is as you left it, and the environment block is still there"
+  elif [ "$block" = "yes" ]; then
     _rm_strip_marker_block "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END"; rm_env_rc=$?
     if [ "$rm_env_rc" = "0" ]; then
       _rm_removed "retired environment block in ${RC_FILE}"
     else
-      rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
       [ "$rm_env_rc" = "2" ] && _rm_say_faults "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END"
       _rm_leftover "$(_rm_strip_why "$rm_env_rc" "$RC_FILE") — the environment block is still there"
     fi
-  elif [ "$bare" = "yes" ]; then
-    if _rm_filter_out_lines "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
-      _rm_removed "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
-    else
-      rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
-      _rm_leftover "could not rewrite ${RC_FILE} — the export is still there"
-    fi
   fi
+  case "$block" in no|bound) _rm_env_left "$RC_FILE" ;; esac
   echo ""
 }
 
@@ -2395,9 +2650,19 @@ if [ "$rm_all" = "1" ]; then
   # shells out — the CLI's listing, the dependency probes — and a child that
   # reads its inherited stdin eats the one `y` this run is about to ask for.
   # Nothing here needs stdin, so nothing here gets it.
-  if ! _rm_print_plan < /dev/null; then
-    # No item runs, so the line the alias item would name is named here (wave-27 T55).
-    [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null && _rm_legacy_alias_not_ours "$RC_FILE"
+  rm_page=0; _rm_print_plan < /dev/null && rm_page=1
+  # A read-only rc keeps the alias off the page, and the page says why (wave-27
+  # T66, review pass 40 S5).
+  if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null && _rm_legacy_alias_read_only "$RC_FILE"; then
+    echo "  $(_rm_strip_why 3 "$RC_FILE") — the alias block is still there"
+  fi
+  if [ "$rm_page" = "0" ]; then
+    # No item runs, so the lines the alias and environment items would name are
+    # named here (wave-27 T55, T66).
+    if [ -f "$RC_FILE" ] && _rm_regular "$RC_FILE" >/dev/null; then
+      _rm_legacy_alias_not_ours "$RC_FILE"
+      _rm_env_left "$RC_FILE"
+    fi
     echo "  nothing to remove — this machine is already clean."
     echo ""
     exit 0
