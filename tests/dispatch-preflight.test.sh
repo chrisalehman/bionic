@@ -5911,7 +5911,7 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w30d" "claude-sonne
 expect_eq "30d an empty approved-by: value is not an approval" "deny" "$GATE_VERDICT"
 
 # --- 30e: the reading roles pass through the same refused plan ---
-for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic; do
+for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic bionic:reviewer; do
   REPO=$(make_repo "r30e-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_plan "$REPO" 4 ""
@@ -6012,7 +6012,7 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w31d" "claude-sonne
 expect_eq "31d an empty approved-by: value is not an approval, at task scale" "deny" "$GATE_VERDICT"
 
 # --- 31e: the reading roles pass through the same refused task-scale plan ---
-for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic; do
+for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic bionic:reviewer; do
   REPO=$(make_repo "r31e-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_task_plan "$REPO" T1 ""
@@ -6080,7 +6080,7 @@ for _role in fork general-purpose claude acme:helper "" researcher bionic:implem
 done
 
 # --- rc2: before approval, the read-only set dispatches ---
-for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic Explore Plan; do
+for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic bionic:reviewer Explore Plan; do
   REPO=$(make_repo "rrc2-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_plan "$REPO" 2 ""

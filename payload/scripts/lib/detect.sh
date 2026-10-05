@@ -380,9 +380,10 @@ detect_rc_claude_proxy() {
 # THE PREDICATE, for the reason just above: env.sh's `principles_state` compares
 # the block to the shipped text, and setup, doctor and this line all ask it.
 #
-#   present — the block is the shipped text, byte for byte
-#   edited  — a block is there and differs; the user's edit is theirs to keep
-#   absent  — no block: never asked, or asked and declined
+#   present   — the block is the shipped text, byte for byte
+#   edited    — a block is there and differs; the user's edit is theirs to keep
+#   absent    — no block: never asked, or asked and declined
+#   malformed — the markers do not pair up; nothing reads or writes the block
 detect_working_principles() {
   echo "env:working-principles state=$(principles_state)"
   return 0

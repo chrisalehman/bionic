@@ -387,7 +387,7 @@ rt_disallowed() {
                 fm && /^disallowedTools:/ { sub(/^disallowedTools:[ \t]*/, ""); print }' "$1" \
     | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | /usr/bin/grep -v '^$'
 }
-for _rt_role in researcher test-runner auditor critic; do
+for _rt_role in researcher test-runner auditor critic reviewer; do
   _rt_f="$REPO/agents/${_rt_role}.md"
   _rt_d=$(rt_disallowed "$_rt_f")
   expect_true "10a: agents/${_rt_role}.md disallows Agent" \
@@ -439,7 +439,7 @@ _dr_src="$REPO/agents-src/blocks/dispatch-rules.md"
 expect_true "12a: the block source exists" test -f "$_dr_src"
 expect_true "12b: …and is at most 600 bytes" \
   bash -c '[ "$(wc -c < "$1")" -gt 0 ] && [ "$(wc -c < "$1")" -le 600 ]' _ "$_dr_src"
-for _dr_role in auditor critic implementor researcher senior-implementor test-runner; do
+for _dr_role in auditor critic implementor researcher reviewer senior-implementor test-runner; do
   _dr_body=$(cat "$REPO/agents/$_dr_role.md" 2>/dev/null)
   expect_true "12c: agents/$_dr_role.md carries the DISPATCH-RULES markers" \
     bash -c 'case "$1" in *"<!-- DISPATCH-RULES-BEGIN -->"*"<!-- DISPATCH-RULES-END -->"*) exit 0 ;; esac; exit 1' _ "$_dr_body"

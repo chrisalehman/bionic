@@ -205,7 +205,7 @@ Every wall has a matching test suite. `bash tests/run.sh` runs all of them.
 ## The agents bionic dispatches
 
 During a lifecycle run your main session stays free. It keeps the shaping decisions and the
-approvals, and hands the work to fresh agents. Six roles ship with the plugin, each with its
+approvals, and hands the work to fresh agents. These roles ship with the plugin, each with its
 own standing duties and model:
 
 | Role | Model | What it does |
@@ -216,6 +216,7 @@ own standing duties and model:
 | `senior-implementor` | Opus | Executes slices that need judgment, and root-cause debugging. Logs every call it made. |
 | `auditor` | Opus | At the verify gate, tries to falsify the evidence, never the code. Cannot write. |
 | `critic` | Opus | At the review gate, tries to falsify the code and the claim it is ready to merge. Cannot write. |
+| `reviewer` | Opus | Holds the code to the structure checks (reuse, one site per concept, shape) and answers each one. Cannot write. |
 
 Each of them owes a report where every factual claim carries the command that proves it or
 the word `unverified`.
