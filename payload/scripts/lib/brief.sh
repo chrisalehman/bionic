@@ -32,7 +32,9 @@
 #
 # THE INTERFACE.
 #
-#   lift_contract_fields <brief text> [<subagent_type>]   -> `kind=value` lines
+#   lift_contract_fields <brief text> [<subagent_type>]   -> `kind=value` lines,
+#       `questions=` among them: a reader's `Questions:` set (wave-27 T15)
+#   dp_runs_cap <subagent_type> [<questions>] -> the suite runs a Re-executes: may declare
 #   brief_files_entry <entry>          -> the spelling a Files: line stores for <entry>
 #       (wave-27 T29, T42; D21): as written when the one reader records it, else `./<entry>`
 #       when that is recorded, else nothing it can be spelt as (rc 2)
@@ -174,40 +176,95 @@ LEAD_CHARS="(\"[<\`$(printf '\047')"
 TRAIL_CHARS=")\"]>\`,;:!?.$(printf '\047')"
 QUOTE_CHARS="\`\"$(printf '\047')"
 
-# ---------- the re-execution cap is the auditor's (wave-20 T4; REQ-7, Δ3, Δ9) ----------
+# ---------- the re-execution cap is the evidence question's (wave-20 T4; wave-27 T15, F4) ----------
 #
-# THREE IS THE AUDITOR'S NUMBER. Its source is the auditor mandate — "One auditor, one pass,
-# <=3 re-executions" (skills/canonical-sdlc/steps/5.md) — and it used to bind every role's
-# `Re-executes:`, so a test-runner re-running a jest, pytest and go floor split it into two
-# dispatches for a rule written about auditors (triage-B D3). Chris moved it (Δ3): the
-# auditor keeps three; every other role is bounded by SUITES_MAX (Δ9), the count that
-# already bounds `Suites:`, so the two spellings of one statement share one ceiling and no
-# new number exists.
+# THREE IS THE EVIDENCE QUESTION'S NUMBER. Its source is the evidence checks file —
+# "Re-execute at least one evidence command per tier used (cap 3 total)"
+# (payload/context/checks-evidence.md) — and it used to bind every role's `Re-executes:`, so a
+# test-runner re-running a jest, pytest and go floor split it into two dispatches for a rule
+# written about one reading (triage-B D3). Chris moved it (Δ3): the evidence reader keeps
+# three; every other brief is bounded by SUITES_MAX (Δ9), the count that already bounds
+# `Suites:`, so the two spellings of one statement share one ceiling and no new number exists.
 #
-# THE ROLE IS MATCHED WHOLE, as the auditor arm below matches it: the prefixed name the
-# harness sends and the bare word a hand-written brief uses. The answer is handed to the
-# lift's awk as `-v RUNS_CAP`; the refusal texts below read the same function, so the
-# number a refusal prints is the number the lift applied.
+# THE QUESTION DECIDES, NOT THE ROLE (wave-27 T15; review pass 15, F4). The rule was keyed to
+# `bionic:auditor`, and at `tested` the dealing gives `evidence` to the critic, which escaped it.
+# A reader role (auditor, critic, reviewer) whose brief's `Questions:` holds `evidence` is held
+# to it, and so is the auditor whatever its line says: with no bound plan the dealing is not
+# checked, and an auditor brief keeps today's rule there. The role is matched whole, in the
+# prefixed name the harness sends and the bare word a hand-written brief uses.
+#
+# THE CAP COUNTS SUITE RUNS (a field report against 1.11.0). A declared run the classifier
+# (lib/cmd-class.sh `cmd_class`) calls a suite run, the class the booking wraps, counts; any
+# other declared command, such as clearing a stale build directory first, is recorded and does
+# not count. `lift_contract_fields` applies it after its awk pass, so every door that lifts a
+# contract — a dispatch, `amend`, `task-add` — counts the same way, and the refusal texts read
+# these same functions, so the number a refusal prints is the number the lift applied.
 DP_AUDITOR_RUNS_MAX=3
 DP_SUITES_MAX=200
-dp_runs_cap() {  # <subagent_type> -> how many runs that role's Re-executes: may declare
+dp_reads_evidence() {  # <subagent_type> [<questions, comma-joined>] -> 0 when the cap of three binds
   case "${1-}" in
-    bionic:auditor|auditor) printf '%s' "$DP_AUDITOR_RUNS_MAX" ;;
-    *) printf '%s' "$DP_SUITES_MAX" ;;
+    bionic:auditor|auditor) return 0 ;;
+    bionic:critic|critic|bionic:reviewer|reviewer)
+      case ",${2-}," in *,evidence,*) return 0 ;; esac ;;
   esac
+  return 1
 }
-# dp_runs_cap_words <subagent_type> -> the cap as the refusal texts say it.
+dp_runs_cap() {  # <subagent_type> [<questions>] -> how many suite runs that brief's Re-executes: may declare
+  if dp_reads_evidence "${1-}" "${2-}"; then printf '%s' "$DP_AUDITOR_RUNS_MAX"
+  else printf '%s' "$DP_SUITES_MAX"; fi
+}
+# dp_runs_cap_words <subagent_type> [<questions>] -> the cap as the refusal texts say it.
 dp_runs_cap_words() {
-  case "${1-}" in
-    bionic:auditor|auditor) printf 'three' ;;
-    *) printf '%s' "$DP_SUITES_MAX" ;;
-  esac
+  if dp_reads_evidence "${1-}" "${2-}"; then printf 'three'
+  else printf '%s' "$DP_SUITES_MAX"; fi
+}
+# _brief_cap_suite_runs <cap> — the lift's lines on stdin, the same lines out with the
+# `re_executes=` runs past the <cap>th suite run moved to `re_executes_dropped=`. A run the
+# classifier does not call a suite run stays where the author put it and counts nothing.
+_brief_cap_suite_runs() {
+  local cap="$1" lines runs dropped="" kept="" n=0 rest run tok
+  lines="$(cat)"
+  runs="$(printf '%s\n' "$lines" | sed -n 's/^re_executes=//p' | head -1)"
+  if [ -z "$runs" ]; then printf '%s\n' "$lines"; return 0; fi
+  # A marked run holds no backtick (a backtick ends one), so the field splits on its marks.
+  rest="$runs"
+  while :; do
+    case "$rest" in *'`'*'`'*) : ;; *) break ;; esac
+    rest="${rest#*\`}"; run="${rest%%\`*}"; rest="${rest#*\`}"
+    tok="\`${run}\`"
+    if [ "$(cmd_class "$run")" = suite ]; then
+      n=$((n + 1))
+      if [ "$n" -gt "$cap" ]; then dropped="${dropped:+$dropped }$tok"; continue; fi
+    fi
+    kept="${kept:+$kept }$tok"
+  done
+  # Through the environment, so no backslash in a run is read as an awk escape.
+  printf '%s\n' "$lines" | BRIEF_KEPT="$kept" BRIEF_DROPPED="$dropped" awk '
+    BEGIN { kept = ENVIRON["BRIEF_KEPT"]; dropped = ENVIRON["BRIEF_DROPPED"] }
+    /^re_executes=/ { if (kept != "") print "re_executes=" kept; next }
+    /^re_executes_dropped=/ { if (dropped != "") { print $0 " " dropped; dropped = "" } else print; next }
+    { print }
+    END { if (dropped != "") print "re_executes_dropped=" dropped }'
 }
 
+# THE RUN CAP IS APPLIED IN TWO PASSES (wave-27 T15). The awk lift bounds `Re-executes:` at
+# SUITES_MAX for every brief, the row field's width. Whether the cap of three binds depends on
+# the brief's own `Questions:` line, which only the lift reads, so it is applied after the awk
+# pass, counting suite runs alone (`dp_runs_cap`, `_brief_cap_suite_runs` above).
 lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines, absent kinds omitted
+  local _lifted _cap
+  _lifted="$(_brief_lift_awk "$@")"
+  _cap="$(dp_runs_cap "${2-}" "$(printf '%s\n' "$_lifted" | sed -n 's/^questions=//p' | head -1)")"
+  if [ "$_cap" -lt "$DP_SUITES_MAX" ]; then
+    printf '%s\n' "$_lifted" | _brief_cap_suite_runs "$_cap"
+  elif [ -n "$_lifted" ]; then
+    printf '%s\n' "$_lifted"
+  fi
+}
+_brief_lift_awk() {  # <brief text> [<subagent_type>] -> the awk pass of the lift
   printf '%s' "$1" | \
     awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" \
-    -v RUNS_CAP="$(dp_runs_cap "${2-}")" -v SUITES_CAP="$DP_SUITES_MAX" "$CMD_RUN_NORM_AWK"'
+    -v RUNS_CAP="$DP_SUITES_MAX" -v SUITES_CAP="$DP_SUITES_MAX" "$CMD_RUN_NORM_AWK"'
     # <sep> is the regex between the label and its value; the default is the
     # colon every labeled brief field uses. <bol> marks a label that only counts
     # at the START of a line — see the waiver note in BEGIN.
@@ -893,12 +950,12 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       FILES_MAX = 200
       SUITES_MAX = SUITES_CAP + 0
       # HOW MANY RUNS A `Re-executes:` SPAN DECLARES (D3; REQ-1 AC-1.6; wave-20 T4, Δ3, Δ9).
-      # The ROLE decides, on the bash side (`dp_runs_cap`, above this function): three for an
-      # auditor, whose mandate states "<=3 re-executions" (skills/canonical-sdlc/steps/5.md),
-      # and SUITES_MAX for every other role. Unlike FILES_MAX/SUITES_MAX this is not a bound
-      # on the width of a row field — it is the ceiling of the declaration itself — so
-      # hitting it is a fact about the brief, and loud: see marked_runs() above. A caller that
-      # passes no cap gets SUITES_MAX, never an unbounded lift.
+      # Here, SUITES_MAX for every brief. The cap of three a reader of the evidence question is
+      # held to (payload/context/checks-evidence.md, "cap 3 total") is applied on the bash side
+      # after this pass, counting suite runs only (`dp_runs_cap`, wave-27 T15). Either way it is
+      # the ceiling of the declaration itself, not only the width of a row field, so hitting it
+      # is a fact about the brief, and loud: see marked_runs() above. A caller that passes no
+      # cap gets SUITES_MAX, never an unbounded lift.
       RUNS_MAX = RUNS_CAP + 0
       if (RUNS_MAX <= 0) RUNS_MAX = SUITES_MAX
       # THE MARK THE AUTHOR WRITES, NAMED RATHER THAN SPELT. This whole program is one single-quoted
@@ -1009,6 +1066,9 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       # such a repository could declare nothing true and the walls held nothing (research R1
       # section 9.1). It sits above `suites` because the table runs longest label first.
       addlabel("re-executes",        "runs",   "", 1)
+      # THE QUESTIONS OF A READER (wave-27 T15; REQ-5, D5), pinned to line start: the line is
+      # `Questions: <q>[, <q>]` on a line of its own, and the refusals quote it back.
+      addlabel("questions",          "questions", "", 1)
       addlabel("suites",             "suites", "", 1)
       addlabel("files",              "files",  "", 1)
       addlabel("scope",              "-")
@@ -1112,6 +1172,29 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
       # no budget at all, and refused by the guard for every suite.
       h = firsthit("suites")
       if (h > 0) { v = suite_names(spanof(h)); if (v != "") print "suites=" v }
+      # THE QUESTIONS A READER BRIEF NAMES (wave-27 T15; REQ-5, D5): a SET, read off the line the
+      # label opens, split on commas and blanks, so order and spacing do not matter. It prints in
+      # the one order the row and the recorder use, evidence, adversarial, structure, and a word
+      # outside the three prints as `questions_bad=` for the dispatch wall to refuse by name. An
+      # unfilled slot is guidance and declares nothing. Which roles must carry it, and the set
+      # each may carry, the dispatch wall judges; the lift only reads.
+      h = firsthit("questions")
+      if (h > 0) {
+        v = spanof(h); k = index(v, "\n"); if (k > 0) v = substr(v, 1, k - 1)
+        nq = split(tolower(v), QW, /[ \t\r,]+/); qbad = ""; split("", QS)
+        for (i = 1; i <= nq; i++) {
+          if (istemplate(QW[i])) continue
+          t = trimtok(QW[i]); if (t == "" || istemplate(t)) continue
+          if (t == "evidence" || t == "adversarial" || t == "structure") QS[t] = 1
+          else if (index(" " qbad " ", " " t " ") == 0) qbad = (qbad == "" ? t : qbad " " t)
+        }
+        v = ""
+        if ("evidence" in QS)    v = "evidence"
+        if ("adversarial" in QS) v = (v == "" ? "" : v ",") "adversarial"
+        if ("structure" in QS)   v = (v == "" ? "" : v ",") "structure"
+        if (v != "") print "questions=" v
+        if (qbad != "") print "questions_bad=" qbad
+      }
       # THE RUNS THE BRIEF DECLARES, MARKS AND ALL (REQ-1 AC-1.1/AC-1.6). List-valued and
       # self-delimiting: the value is the author-marked runs, space-joined, so the roster row
       # carries the same spelling the author wrote and the writer-side budget arm can compare
@@ -1143,11 +1226,15 @@ lift_contract_fields() {  # <brief text> [<subagent_type>] -> `kind=value` lines
 #   re_executes_dropped,         REQ-8; wave-27 T29, T42), so the refusal can name it
 #   files_unread, files_bad
 #   suites_commented             a Suites: span that was entirely a comment (T35, critic C9)
+#   questions, questions_bad     a reader's questions, comma-joined in the table's order, and
+#                                the words outside the three (wave-27 T15)
 #   anything else                the raw value
 brief_field() {
   local v
   v=$(printf '%s\n' "${1-}" | grep -m1 "^$2=" | cut -d= -f2-)
   case "$2" in
+    questions)        sanitize "$v" 40 ;;
+    questions_bad)    sanitize "$v" 300 ;;
     files)            sanitize "$v" 900 files ;;
     suites)           sanitize "$v" 900 suites_allowed ;;
     re_executes)      sanitize "$v" 900 re_executes ;;
@@ -1321,7 +1408,7 @@ brief_body_advisories() {
 brief_validate_fields() {
   local lifted="${1-}" role="${2-}" root="${3-}" sink="${4-}"
   local files suites re_executes runs_bad suites_bad suites_dropped runs_dropped suites_commented
-  local files_unread files_bad entry fact fix
+  local files_unread files_bad entry fact fix questions reader
   local cap capw detail suites_comment impact_cmd found=0
   local _impact_out _impact_tmp _impact_pid _impact_overran _impact_rc _old_ifs
   files=$(brief_field "$lifted" files)
@@ -1334,10 +1421,11 @@ brief_validate_fields() {
   suites_commented=$(brief_field "$lifted" suites_commented)
   files_unread=$(brief_field "$lifted" files_unread)
   files_bad=$(brief_field "$lifted" files_bad)
-  # THE ROLE DECIDES THE RUN CAP (wave-20 T4; REQ-7, Δ3, Δ9), and the refusal texts print the
-  # number the lift applied, from the same function.
-  cap=$(dp_runs_cap "$role")
-  capw=$(dp_runs_cap_words "$role")
+  questions=$(brief_field "$lifted" questions)
+  # THE ROLE AND ITS QUESTIONS DECIDE THE RUN CAP (wave-20 T4; wave-27 T15, F4), and the refusal
+  # texts print the number the lift applied, from the same function.
+  cap=$(dp_runs_cap "$role" "$questions")
+  capw=$(dp_runs_cap_words "$role" "$questions")
 
   # ===================================== A Files: ITEM IS A PATH OR A REFUSAL (wave-27 T29, T42)
   # (REQ-12 AC-12.2, D21 as amended by A-orch-46.)
@@ -1448,15 +1536,17 @@ Then retry the dispatch."
   # this arm.
   if [ -n "$runs_dropped" ]; then
     detail="The Re-executes: lines name more runs than the ${cap}-run cap admits for
-this role (${role:-unnamed}), and this one was dropped:
+this brief (${role:-unnamed}${questions:+, Questions: ${questions}}), and this one was dropped:
     ${runs_dropped}
 
 Every declared run goes on the roster row, and the writer-side budget arm compares the
 agent's own command against exactly that set — a run dropped here is a command that would
 be refused there 40 minutes later, for running exactly what its own brief had named.
 
-The cap of three is the auditor's, from its mandate's \"<=3 re-executions\"; every other
-role may declare as many runs as a Suites: line may name suites (${DP_SUITES_MAX}).
+The cap of three is the evidence question's, from payload/context/checks-evidence.md
+(\"cap 3 total\"), and binds whichever reader holds that question; it counts suite runs
+only, so a housekeeping command beside them does not count. Every other brief may declare
+as many runs as a Suites: line may name suites (${DP_SUITES_MAX}).
 
 Fix: mark at most ${capw} runs with backticks, across all your Re-executes: lines —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`, \`go test ./...\`
@@ -1618,8 +1708,11 @@ Then retry the dispatch."
   # literal token `none` for a whole-word waiver and nothing else ever equals it — a brief
   # that both waives and lists suites cannot reach this arm, because `Suites:` is a single
   # labelled span and its lift is one value, the waiver or the list, never both.
-  case "$role" in
-    bionic:auditor|auditor)
+  #
+  # KEYED TO THE EVIDENCE QUESTION (wave-27 T15; review pass 15, F4): `dp_reads_evidence`, the
+  # predicate the cap of three reads, so a critic dealt `evidence` at `tested` is held here as an
+  # auditor is. The auditor keeps its own words; another reader is named by its role.
+  if dp_reads_evidence "$role" "$questions"; then
       # THE PREDICATE IS NOW "NO SUITES AND NO DECLARED RUNS" (epic-23 wave-16, REQ-1 AC-1.2,
       # D1, ADR-029). An auditor in a jest, pytest or go repository has a real re-execution to
       # declare and no shell suite to name it with; refusing that brief was this arm asking for
@@ -1627,15 +1720,17 @@ Then retry the dispatch."
       # spelling that could not answer. `Suites: none` beside a non-empty `Re-executes:` is an
       # auditor that waived the shell-suite budget and declared what it will actually re-run,
       # which is the whole of what this arm exists to require.
+      reader="an auditor"
+      case "$role" in bionic:auditor|auditor) : ;; *) reader="a ${role#bionic:} reading evidence" ;; esac
       if [ "$suites" = "none" ] && [ -z "$re_executes" ]; then
-        found=1; "$sink" finding "an auditor names no suites" "name the suites to re-execute" \
-          "Role: ${role}
+        found=1; "$sink" finding "${reader} names no suites" "name the suites to re-execute" \
+          "Role: ${role}${questions:+ (Questions: ${questions})}
 
-An auditor's Step-5 verdict is a re-run of the evidence, not a read of it — a hermetic-tier
-row in the matrix is falsified by running the suite the row names, and a brief that waives
-every suite gives the auditor nothing to run.
+A verdict on the evidence question is a re-run of the evidence, not a read of it — a
+hermetic-tier row in the matrix is falsified by running the suite the row names, and a
+brief that waives every suite gives its reader nothing to run.
 
-Fix: name what the matrix binds this auditor to re-execute, on a line of its own. For
+Fix: name what the matrix binds this reader to re-execute, on a line of its own. For
 shell suites —
     Suites: tests/one.test.sh, tests/two.test.sh
 
@@ -1645,8 +1740,7 @@ shell suites —
 
 Then retry the dispatch."
       fi
-      ;;
-  esac
+  fi
 
   # ---------- the derivation ----------
   #
