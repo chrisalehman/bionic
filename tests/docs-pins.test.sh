@@ -4675,7 +4675,11 @@ for _w26_iface in \
   'session-poker.sh approve <name> '"'"'<reply>'"'"'' \
   'approved: <name> by <who> <ISO-UTC> "<reply>"' \
   'session-poker.sh proof-add <kind> <evidence path>' \
-  'proved: kind=<floor\|review\|task> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>' \
+  'proved: kind=<floor\|review\|task\|check> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>' \
+  '`release-check: <command>` in `.bionic/config.yaml`; run with `BIONIC_CHECK_BASE` and `BIONIC_CHECK_HEAD` in its environment; exit 0 passes' \
+  '`session-poker.sh release-check`' \
+  '`record/<wave>/release-check-<head>.log`, its first line `head=<40-hex> rc=0`' \
+  'refuses `why=release-check`' \
   'a reading adds ` question=<q> reader=<roster name> result=<pass\|flag\|fail> scope=<piece\|whole>`' \
   'session-poker.sh proof-add review <record> --question <q> --reader <name>' \
   'flush-left lines `reviewed: <a>..<b>`, `question: <q>`, `result: <pass\|flag\|fail>`, `scope: <piece\|whole>`; for `structure`, one line `check: <id> <PASS\|FLAG\|FAIL\|n/a> <reason>` per check id'; do

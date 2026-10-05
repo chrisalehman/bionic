@@ -4,10 +4,12 @@
 # WHAT IT OWNS. One fact per proof: which commit a test pass or a review read. A proof is a
 # line inside the plan's `## SDLC State`:
 #
-#     proved: kind=<floor|review|task> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>
+#     proved: kind=<floor|review|task|check> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>
 #
 # written only by `session-poker.sh proof-add <kind> <evidence>` through the plan verbs'
-# transaction, and read by `proof_last`. A READING (wave-27 T2; D1) is a review proof that adds
+# transaction, and read by `proof_last`. A `check` (wave-27 T16; D12) is the one exception: its line
+# is written only by `session-poker.sh release-check`, the verb that runs the project's declared
+# command, and its evidence is that verb's log. A READING (wave-27 T2; D1) is a review proof that adds
 # four fields, ` question=<q> reader=<roster name> result=<pass|flag|fail> scope=<piece|whole>`,
 # written by `proof-add review <record> --question <q> --reader <name>`; every reader keyed by
 # kind alone reads it as the review proof it is. What is unproved is the difference since the head a
@@ -24,7 +26,7 @@
 # Sourced, never executed. Defines functions and one constant; reads nothing at load time.
 # bash 3.2: no associative arrays, no `${var,,}`.
 
-PROOF_KINDS="floor review task"
+PROOF_KINDS="floor review task check"
 # The questions a reading answers, the values its result and scope take, and the answers a
 # structure check takes (the Interfaces table of wave-27).
 PROOF_QUESTIONS="evidence adversarial structure"
@@ -177,10 +179,24 @@ proof_head() {
 #          (wave-27 T2; D1): each question is its own chain, so a reader of one question is never
 #          held to where another question's reading ended.
 #   task   whichever of the two the evidence carries, the run header first (A-T14.9).
+#   check  the release-check verb's log (wave-27 T16; D12): its FIRST line is `head=<40-hex> rc=0`,
+#          which the verb writes only when the declared command passed, and <sha> must be the
+#          checkout's HEAD: the command ran in that checkout at that head.
 proof_attested() {
   local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" head stamp sha dirty rng a ah b bh since sh what verdict roster
   head="$(git -C "$co" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)" \
     || { printf 'the checkout %s has no head to hold the evidence against' "$co"; return 1; }
+  if [ "$kind" = check ]; then
+    sha="$(awk 'NR == 1 { if ($0 ~ /^head=[0-9a-f]+ rc=0$/) { sub(/^head=/, ""); sub(/ rc=0$/, ""); print } exit }' "$ev" 2>/dev/null)"
+    if [ "${#sha}" -ne 40 ]; then
+      printf 'the evidence %s does not open with head=<40-hex> rc=0, the line release-check writes on a pass; run release-check' "$ev"; return 1
+    fi
+    if [ "$sha" != "$head" ]; then
+      printf 'the check in %s ran at %s, but the working branch is at %s; run release-check again' \
+        "$ev" "$(printf '%s' "$sha" | cut -c1-12)" "$(printf '%s' "$head" | cut -c1-12)"; return 1
+    fi
+    printf '%s' "$head"; return 0
+  fi
   stamp="$(awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { s = $0 } END { if (s != "") print s }' "$ev" 2>/dev/null)"
   rng="$(awk '/^reviewed:[ \t]/ { sub(/^reviewed:[ \t]+/, ""); sub(/[ \t].*$/, ""); print; exit }' "$ev" 2>/dev/null)"
   case "$kind" in
@@ -557,17 +573,22 @@ PROOF_FILES
   printf 'bounded\t%s\n' "$(printf '%s\n' "$ans" | tr '\n' ' ' | sed 's/ $//')"
 }
 
-# facts_owed <rigor> <scale> -> one line per fact a run owes, exit 0; nothing and exit 1 when
-# <rigor> is not one PROOF_DEALING knows or <scale> is not task, wave or epic (wave-27 T9; D2):
+# facts_owed <rigor> <scale> [<tree>] -> one line per fact a run owes, exit 0; nothing and exit 1
+# when <rigor> is not one PROOF_DEALING knows or <scale> is not task, wave or epic (wave-27 T9; D2):
 #
 #     floor                                          the full run, proof_state's question
 #     review<TAB><question><TAB><role><TAB>piece     each question, for the role the rigor deals it
 #     review<TAB><question><TAB><role><TAB>whole     at scale: wave, one more per code question (D10)
+#     check                                          when <tree>'s .bionic/config.yaml names a
+#                                                    release-check: command (wave-27 T16; D12)
 #
 # THE ONE DEALING. The judge below reads it, and the dispatch wall (row T15) reads it for the
-# questions a reader's brief may name; neither restates the table.
+# questions a reader's brief may name; neither restates the table. The check is the project's, not
+# the rigor's: it is owed only when the caller names the project root whose configuration declares
+# it, as facts_state does, so the dealing of a rigor alone is the same in every project.
 facts_owed() {
-  PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="${1:-}" -v s="${2:-}" '
+  local owed d
+  owed="$(PROOF_D="$PROOF_DEALING" PROOF_Q="$PROOF_QUESTIONS" PROOF_C="$PROOF_CODE_QUESTIONS" awk -v r="${1:-}" -v s="${2:-}" '
     BEGIN {
       if (s != "task" && s != "wave" && s != "epic") exit 1
       n = split(ENVIRON["PROOF_D"], d, " ")
@@ -578,7 +599,16 @@ facts_owed() {
       for (i = 1; i <= m; i++) print "review\t" q[i] "\t" role[i] "\tpiece"
       if (s == "wave")
         for (i = 1; i <= m; i++) if (index(" " ENVIRON["PROOF_C"] " ", " " q[i] " ")) print "review\t" q[i] "\t" role[i] "\twhole"
-    }'
+    }')" || return 1
+  printf '%s\n' "$owed"
+  [ -n "${3:-}" ] || return 0
+  if ! declare -F config_value >/dev/null 2>&1; then
+    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+    # shellcheck source=/dev/null
+    . "$d/roots.sh" >/dev/null 2>&1
+  fi
+  [ -z "$(config_value "$3" release-check "" 2>/dev/null)" ] || printf 'check\n'
+  return 0
 }
 
 # facts_state <plan> <head> -> one line per fact `facts_owed` deals the plan's frontmatter rigor and
@@ -589,6 +619,12 @@ facts_owed() {
 #     uncovered<TAB><a>..<b>   code landed past <a>, the last head the fact reached, to <b> = <head>
 #     failing<TAB><evidence>   the question's newest fact is result=fail, and no waiver is newer
 #     absent                   no fact of that kind, and no waiver
+#
+# THE DECLARED CHECK (wave-27 T16; D12) is owed when the plan's repository declares `release-check:`
+# (facts_owed's <tree> is the plan's checkout root). It is covered by a `kind=check` line at <head>,
+# uncovered from the newest one's head when every one is older, and absent with none. A failed run
+# writes no line, so it is never failing; and it is a command run at a head, so a docs-only tail
+# does not carry it.
 #
 # A QUESTION IS ONE CHAIN (D4). Its links are its readings (`proved: kind=review … question=<q>`,
 # either scope) and its waivers (`waived: question=<q> head=<sha> …`), in section order, which is the
@@ -620,12 +656,12 @@ facts_state() {
   fi
   rigor="$(plan_frontmatter_get "$plan" rigor 2>/dev/null)"
   scale="$(plan_frontmatter_get "$plan" scale 2>/dev/null)"
-  owed="$(facts_owed "$rigor" "$scale")" || {
+  tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
+  owed="$(facts_owed "$rigor" "$scale" "$tree")" || {
     printf 'facts_state: %s declares no rigor and scale the dealing knows (rigor: %s, scale: %s)\n' \
       "$plan" "${rigor:-none}" "${scale:-none}" >&2
     return 2
   }
-  tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
   pfx=""
   if [ -n "$tree" ] && declare -F docs_root >/dev/null 2>&1; then
     droot="$(docs_root "$tree" 2>/dev/null)"
@@ -682,6 +718,19 @@ PROOF_CHAIN
         elif _facts_holds "$tree" "$pfx" "$ph" "$head"; then st=covered
         else st="uncovered	$ph..$head"
         fi ;;
+      check)
+        x=""; [ -z "$tree" ] || x="$(git -C "$tree" rev-parse --verify -q "$head^{commit}" 2>/dev/null)"
+        x="$(awk -v h="$head" -v hh="${x:-$head}" "$(proof_awk)"'
+          /^[[:space:]]*```/ { fence = !fence; next }
+          fence { next }
+          /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+          insdlc && proof_fields($0) && PROOF_KIND == "check" { last = PROOF_HEAD; if (last == h || last == hh) at = 1 }
+          END { if (at) print "covered"; else print last }' "$plan")"
+        case "$x" in
+          covered) st=covered ;;
+          '') st=absent ;;
+          *) st="uncovered	$x..$head" ;;
+        esac ;;
       *) st=absent ;;
     esac
     printf '%s\t%s\n' "$fact" "$st"
