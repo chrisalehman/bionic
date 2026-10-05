@@ -1356,6 +1356,13 @@ expect_eq "remove: the user's own shell rc survives the teardown" "yes" \
   "$(path_exists "$RC_FILE_FIX")"
 expect_eq "remove: ~/.claude/CLAUDE.md held only bionic's block, and is gone again with it" \
   "yes no" "${MEMORY_WAS} $(path_exists "$GLOBAL_MEMORY")"
+# `--all` is the consent and adds no question, so the item's own lines carry the
+# deletion (wave-27 T46, review pass 14 F1): said before the act, and after it.
+REMOVE_TEXT="$(cat "$REMOVE_OUT")"
+expect_contains "remove --all: before it acts, the principles item says the block and the file will be deleted" \
+  "will delete the block and the file ${GLOBAL_MEMORY}" "$REMOVE_TEXT"
+expect_contains "remove --all: …and its result line says the file was deleted" \
+  "✓ deleted ${GLOBAL_MEMORY}" "$REMOVE_TEXT"
 
 
 # ---------------------------------------------------------------------------

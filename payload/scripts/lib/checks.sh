@@ -332,10 +332,16 @@ bionic_check_env_unwritten() {  # <row id: env:<KEY>>
 }
 
 # A shell bionic writes no rc for is not a question: the step says so and changes
-# nothing, so nothing must name it either.
+# nothing, so nothing must name it either. Nor is an rc whose markers do not pair
+# up, or a path that is no file (wave-27 T46): no setup step can repair either,
+# so doctor reports them with a fix line of their own and setup's plan does not
+# offer a step that would only refuse — the principles row's rule, below.
 bionic_check_claude_proxy() {  # <row id>
-  rc_file >/dev/null 2>&1 || return 1
+  local rc
+  rc="$(rc_file 2>/dev/null)" || return 1
   rc_get claude-proxy && return 1
+  markers_regular "$rc" >/dev/null || return 1
+  markers_check "$rc" "$RC_START" "$RC_END" >/dev/null || return 1
   return 0
 }
 

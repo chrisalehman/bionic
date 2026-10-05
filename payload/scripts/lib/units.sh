@@ -1277,7 +1277,7 @@ _units_sched_awk() {
 # A TABLE WITH A `reads` COLUMN (wave-26 T2; D1) adds two: its deps cells carry `ext:<slug>`
 # and nothing else — a task id there is refused, because the row waits on what it reads — and
 # each read names a path in the `Files` grammar, `head`, `record`, `merge`, `proof:<floor|
-# review|task>`, `approval:<name>`, `ext:<slug>`, or `live:` before one of the artifacts or a
+# review|task|check>` (`check` wave-27 T16), `approval:<name>`, `ext:<slug>`, or `live:` before one of the artifacts or a
 # path; on a review row, `live:head:<q>[+<q>]` too, each question one of lib/proof.sh
 # PROOF_QUESTIONS (wave-27 T10; D4).
 #
@@ -1468,7 +1468,7 @@ units_validate() {
               if (substr(t, 1, 5) == "live:") t = substr(t, 6)
               if (t ~ /^approval:[A-Za-z0-9]/) ap = 1
               if (t == "head" || t == "record" || t == "merge") continue
-              if (t ~ /^proof:(floor|review|task)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
+              if (t ~ /^proof:(floor|review|task|check)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
               if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
                 if (index(t, "[") || index(t, "]")) printf "%s: read %s has a bracket; paths glob with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
                 continue
