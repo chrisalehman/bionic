@@ -24,7 +24,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a reading: that proof line with its question, reader, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh waive <question> '<reply>'   the user's waiver of a reading question at the working head (writes the plan)
-#     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; on a pass, its check fact (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #
@@ -432,7 +432,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <floor|review|task> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a reading: the review proof with the question, reader, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure> '<reply>'   record the user's waiver of that question at the working head, as a waived: line under ## SDLC State"
-  die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; on exit 0 record its log and a kind=check proof line"
+  die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
   die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
@@ -687,7 +687,7 @@ case "$VERB" in
   # NO OPERAND (wave-27 T16; D12): the range is the verb's own, from the last release to the working
   # head, so a base typed on the command line is the usage error, as a head is for proof-add.
   release-check)
-    [ $# -eq 0 ] || usage "release-check takes no arguments: it runs from the newest tag reachable from the plan's integration-branch (else its base-sha) to the working head."
+    [ $# -eq 0 ] || usage "release-check takes no arguments: it runs from the nearest tag reachable from the plan's integration-branch that is a proper ancestor of the working head (else its base-sha) to that head."
     ;;
   # ONE OPTIONAL FLAG (wave-26 T32; D4): `--wait` waits for another writer's lock, which only the
   # launch recorder's detached call can afford; the tick and the turn-end wall leave a held lock
@@ -6274,7 +6274,7 @@ PF_OTHER_LIST
     # everything; it is accepted only when the range starts at the plan's base-sha: or an ancestor
     # of it (proof_attested has already resolved the start, so here it is a commit).
     if [ "$PF_SCOPE" = whole ]; then
-      PF_BASE="$(proof_plan_base "$PV_PLAN")"; PF_BASEH=""
+      PF_BASE="$(proof_plan_base "$PV_PLAN" "$PF_CO")"; PF_BASEH=""
       proof_base_id "$PF_BASE" && PF_BASEH="$(git -C "$PF_CO" rev-parse --verify -q "$PF_BASE^{commit}" 2>/dev/null)"
       if [ -z "$PF_BASEH" ]; then
         # THE SAME PLACE THE FIRST-READING REFUSAL NAMES (wave-27 T14; review pass 20 F4), and a word
@@ -6417,12 +6417,19 @@ PF_OTHER_LIST
   # under `release-check:`. This verb runs it in the checkout of the plan's working branch, with
   # BIONIC_CHECK_BASE at the last release and BIONIC_CHECK_HEAD at the working head, its words
   # split on blanks with globbing off as `impact-command:` is run (lib/proof.sh `_proof_map`).
-  # THE LAST RELEASE is the newest tag reachable from the plan's `integration-branch:`: the verb
-  # runs before the release is tagged, so that tag is the previous release (A-orch-17); with none,
-  # the plan's `base-sha:`. On exit 0 it writes `record/<wave>/release-check-<head>.log`, opening
-  # `head=<40-hex> rc=0`, and the `kind=check` proof line naming it (lib/proof.sh
-  # `proof_attested` holds the log against the checkout). On any other exit it prints the
-  # command's output and writes nothing. With no key it runs, writes and prints nothing.
+  # THE LAST RELEASE is the nearest tag reachable from the plan's `integration-branch:` that is a
+  # PROPER ancestor of the working head (the fewest commits from it to the head): a tag on the head,
+  # or on a commit that is not on the head's history, is no base, for the range it opens would hold
+  # nothing or the wrong thing (wave-27 T31; review pass 22 S2). With none, the plan's `base-sha:`.
+  # A range holding no commit is refused, never judged.
+  # EVERY RUN KEEPS ITS LOG AND ITS FACT (T31; S3): `record/<wave>/release-check-<head>.log`, the
+  # n-th run at one head `release-check-<head>-<n>.log`, so no run overwrites another's; it opens
+  # with a `check-changed: <path>` line per tracked path the command names as a word and the range
+  # changes (B1: the check's own files are covered code, and the user is told when they moved), then
+  # `head=<40-hex> rc=<exit>`. On exit 0 the `kind=check` proof line names it (lib/proof.sh
+  # `proof_attested` holds the log against the checkout); on any other exit the command's output is
+  # printed and the line carries ` result=fail`, which the judge reads as the head's last word. With
+  # no key it runs, writes and prints nothing.
   release-check)
     RC_CMD="$(config_value "$(project_root "$PWD")" release-check "" 2>/dev/null)"
     [ -n "$RC_CMD" ] || exit 0
@@ -6442,45 +6449,81 @@ PF_OTHER_LIST
         exit 1 ;;
     esac
     # THE COMMAND RUNS ON THE HEAD ALONE: the log says it ran at that head, and a command that reads
-    # the working files would read uncommitted changes as the head's.
+    # the working files would read uncommitted changes as the head's. The index is refreshed first,
+    # so a file whose stat moved and whose content did not is not called a change (T31; S4).
+    git -C "$RC_CO" update-index -q --refresh >/dev/null 2>&1
     if ! git -C "$RC_CO" diff-index --quiet HEAD -- 2>/dev/null \
        || [ -n "$(git -C "$RC_CO" ls-files --others --exclude-standard 2>/dev/null)" ]; then
       die "REFUSED — the working checkout $RC_CO has uncommitted changes, so the check would not read the head $RC_HEAD alone; commit them and run release-check again. Nothing was run and the plan is unchanged."
       exit 1
     fi
     RC_IB="$(plan_frontmatter_get "$PV_PLAN" integration-branch 2>/dev/null)"
-    RC_BASE=""; RC_FROM=""
+    RC_BASE=""; RC_FROM=""; RC_BEST=""
     if [ -n "$RC_IB" ]; then
-      RC_TAG="$(git -C "$RC_CO" describe --tags --abbrev=0 "refs/heads/$RC_IB" 2>/dev/null)" || RC_TAG=""
-      [ -z "$RC_TAG" ] || RC_BASE="$(git -C "$RC_CO" rev-parse --verify -q "refs/tags/$RC_TAG^{commit}" 2>/dev/null)"
-      [ -z "$RC_BASE" ] || RC_FROM="tag $RC_TAG on $RC_IB"
+      while IFS= read -r RC_TAG; do
+        [ -n "$RC_TAG" ] || continue
+        RC_TC="$(git -C "$RC_CO" rev-parse --verify -q "refs/tags/$RC_TAG^{commit}" 2>/dev/null)" || continue
+        [ "$RC_TC" != "$RC_HEAD" ] || continue
+        git -C "$RC_CO" merge-base --is-ancestor "$RC_TC" "$RC_HEAD" 2>/dev/null || continue
+        RC_TN="$(git -C "$RC_CO" rev-list --count "$RC_TC..$RC_HEAD" 2>/dev/null)" || continue
+        if [ -z "$RC_BEST" ] || [ "$RC_TN" -lt "$RC_BEST" ]; then
+          RC_BEST="$RC_TN"; RC_BASE="$RC_TC"; RC_FROM="tag $RC_TAG on $RC_IB"
+        fi
+      done <<RC_TAGS
+$(git -C "$RC_CO" tag --merged "refs/heads/$RC_IB" 2>/dev/null)
+RC_TAGS
     fi
     if [ -z "$RC_BASE" ]; then
-      RC_BS="$(proof_plan_base "$PV_PLAN")"
+      RC_BS="$(proof_plan_base "$PV_PLAN" "$RC_CO")"
       [ -z "$RC_BS" ] || RC_BASE="$(git -C "$RC_CO" rev-parse --verify -q "$RC_BS^{commit}" 2>/dev/null)"
       RC_FROM="base-sha $RC_BS"
     fi
     if [ -z "$RC_BASE" ]; then
-      die "REFUSED — no tag is reachable from the plan's integration-branch (${RC_IB:-none named}) and its base-sha (${RC_BS:-none}) is no commit here, so the release range has no start; nothing was run and the plan is unchanged."
+      die "REFUSED — no tag reachable from the plan's integration-branch (${RC_IB:-none named}) is a proper ancestor of the working head and its base-sha (${RC_BS:-none}) is no commit here, so the release range has no start; nothing was run and the plan is unchanged."
       exit 1
     fi
+    if [ "$(git -C "$RC_CO" rev-list --count "$RC_BASE..$RC_HEAD" 2>/dev/null)" = 0 ]; then
+      die "REFUSED — the release range ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM) holds no commit, so there is nothing for the check to judge; name the last release as the plan's base-sha, or tag it. Nothing was run and the plan is unchanged."
+      exit 1
+    fi
+    # THE CHECK'S OWN FILES (T31; review pass 22 B1). Each word of the command that names one tracked
+    # file, read literally (no glob, no shell parsing), and that the range changes.
+    RC_CHG="$(set -f
+      for RC_W in $RC_CMD; do
+        RC_P="$(git --literal-pathspecs -C "$RC_CO" ls-files --full-name --error-unmatch -- "$RC_W" 2>/dev/null)" || continue
+        case "$RC_P" in ''|*"
+"*) continue ;; esac
+        git --literal-pathspecs -C "$RC_CO" diff --quiet "$RC_BASE" "$RC_HEAD" -- "$RC_P" >/dev/null 2>&1 \
+          || printf 'check-changed: %s\n' "$RC_P"
+      done | awk '!seen[$0]++')"
     RC_OUT="$(cd "$RC_CO" 2>/dev/null || exit 1
       set -f
       export BIONIC_CHECK_BASE="$RC_BASE" BIONIC_CHECK_HEAD="$RC_HEAD" BIONIC_CHECK_TREE="$(pwd -P)"
       # shellcheck disable=SC2086  # the configured command splits on blanks, as impact-command does
       exec $RC_CMD </dev/null 2>&1)"; RC_RC=$?
+    RC_WAVE="${PV_PLAN##*/}"; RC_WAVE="${RC_WAVE%.plan.md}"
+    RC_DOCS="$(docs_root "$PV_REPO")"
+    RC_REL="record/$RC_WAVE/release-check-$RC_HEAD.log"; RC_NTH=1
+    while [ -e "$RC_DOCS/$RC_REL" ]; do RC_NTH=$((RC_NTH + 1)); RC_REL="record/$RC_WAVE/release-check-$RC_HEAD-$RC_NTH.log"; done
+    RC_LOG="$RC_DOCS/$RC_REL"
+    RC_SAID=""; [ -z "$RC_CHG" ] || RC_SAID=" $(printf '%s\n' "$RC_CHG" | tr '\n' ' ' | sed 's/ $//')"
     if [ "$RC_RC" -ne 0 ]; then
       [ -z "$RC_OUT" ] || printf '%s\n' "$RC_OUT"
-      die "REFUSED — the declared release-check ($(clean "$RC_CMD")) exited $RC_RC over ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM); nothing was written. Fix what it names, commit, and run release-check again."
+    fi
+    if ! mkdir -p "${RC_LOG%/*}" 2>/dev/null \
+       || ! { [ -z "$RC_CHG" ] || printf '%s\n' "$RC_CHG"
+              printf 'head=%s rc=%s\nbase=%s (%s)\ncommand: %s\n\n' "$RC_HEAD" "$RC_RC" "$RC_BASE" "$RC_FROM" "$RC_CMD"
+              [ -z "$RC_OUT" ] || printf '%s\n' "$RC_OUT"; } > "$RC_LOG" 2>/dev/null; then
+      die "REFUSED — the check exited $RC_RC, but its log $RC_LOG cannot be written; the plan is unchanged.$RC_SAID"
       exit 1
     fi
-    RC_WAVE="${PV_PLAN##*/}"; RC_WAVE="${RC_WAVE%.plan.md}"
-    RC_REL="record/$RC_WAVE/release-check-$RC_HEAD.log"
-    RC_LOG="$(docs_root "$PV_REPO")/$RC_REL"
-    if ! mkdir -p "${RC_LOG%/*}" 2>/dev/null \
-       || ! { printf 'head=%s rc=0\nbase=%s (%s)\ncommand: %s\n\n' "$RC_HEAD" "$RC_BASE" "$RC_FROM" "$RC_CMD"
-              [ -z "$RC_OUT" ] || printf '%s\n' "$RC_OUT"; } > "$RC_LOG" 2>/dev/null; then
-      die "REFUSED — the check passed, but its log $RC_LOG cannot be written; the plan is unchanged."
+    if [ "$RC_RC" -ne 0 ]; then
+      if ! proof_add_line "$PV_PLAN" "$(proof_line check "$RC_HEAD" "$(iso_now)" "$RC_REL") result=fail" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+        die "REFUSED — the declared release-check ($(clean "$RC_CMD")) exited $RC_RC over ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM), and $PV_PLAN carries no ## SDLC State section to hold its failing fact; its log is $RC_LOG.$RC_SAID"
+        exit 1
+      fi
+      plan_verb_swap release-check "the failing check at $RC_HEAD" writer
+      die "REFUSED — the declared release-check ($(clean "$RC_CMD")) exited $RC_RC over ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM); its log $RC_REL and a result=fail check fact at that head were written. Fix what it names, commit, and run release-check again.$RC_SAID"
       exit 1
     fi
     if ! RC_AT="$(proof_attested check "$RC_LOG" "$RC_CO")"; then
@@ -6492,7 +6535,7 @@ PF_OTHER_LIST
       exit 1
     fi
     plan_verb_swap release-check "the check proof at $RC_AT" writer
-    say "release-check — kind=check head=$RC_AT base=$RC_BASE ($RC_FROM) evidence=$RC_REL: written to $PV_PLAN; dry-committed first."
+    say "release-check — kind=check head=$RC_AT base=$RC_BASE ($RC_FROM) evidence=$RC_REL: written to $PV_PLAN; dry-committed first.$RC_SAID"
     exit 0
     ;;
 
