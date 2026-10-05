@@ -416,7 +416,11 @@ HALF_RC="${TMP}/${LONGSEG}/half.zshrc"
   echo 'unalias claude 2>/dev/null || true'
   echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
   echo '# ─── bionic:rc:end ───'
+  # The retired env block, between its markers: since wave-27 T66 a bare export of
+  # that name is the user's (A-orch-119 (3)), and only the block is bionic's footprint.
+  echo '# ─── bionic:env:start ───'
   echo 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
+  echo '# ─── bionic:env:end ───'
 } > "$HALF_RC"
 HOME6="$(make_registry_home)"
 write_empty_known_marketplaces "$HOME6"
