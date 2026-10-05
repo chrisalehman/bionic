@@ -1970,6 +1970,34 @@ expect_nonempty "T75 S1: the spy saw the decision's -n calls" "$(cat "$TMP/spy.l
 expect_eq "T75 S1: every staged copy is 0600 in a 0700 directory" "600 700" "$(sort -u "$TMP/spy.log")"
 expect_eq "T75 S1: …bionic's block went (the decision ran to its end)" "0" "$(count_lines_equal "$T75_RC" "$T66_ALIAS")"
 expect_empty "T75 S1: …and nothing is left in TMPDIR" "$(find "$T75_SB/.tmp" -name 'bionic-rc.*' 2>/dev/null)"
+# S2's flag rows. Under `-n` neither shell runs a startup file, so a door that dropped
+# zsh's `-f` or the emptied BASH_ENV and ENV would leave no marker (both mutants were
+# run: .bionic/tmp/scratch/w27-T75/mut.log). So the spy reads the calls themselves:
+# with BASH_ENV and ENV set in the door's own environment, every zsh call carries
+# `-f`, and every decision shell gets BASH_ENV and ENV empty.
+mkdir -p "$TMP/spyargs"
+for T75_S in bash zsh; do
+  printf '#!/bin/bash\ncase " $* " in *" -n "*) printf "%%s %%s BASH_ENV=[%%s] ENV=[%%s]\\n" "%s" "$*" "${BASH_ENV-unset}" "${ENV-unset}" >> "%s" ;; esac\nexec /bin/%s "$@"\n' "$T75_S" "$TMP/spyargs.log" "$T75_S" > "$TMP/spyargs/$T75_S"
+  chmod +x "$TMP/spyargs/$T75_S"
+done
+for T75_SH in bash zsh; do
+  T66_SHELL="/bin/$T75_SH"
+  T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"; mkdir -p "$T75_SB/.tmp"
+  printf '%s\n' 'export A=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'export B=2' > "$T75_RC"
+  printf ':\n' > "$T75_SB/benv.sh"; : > "$TMP/spyargs.log"
+  printf 'y\n' | env -i HOME="$T75_SB" ZDOTDIR="$T75_SB" CLAUDE_CONFIG_DIR="$T75_SB/.claude" BIONIC_CLAUDE_HOME="$T75_SB/.claude" \
+    SHELL="/bin/$T75_SH" PATH="$TMP/spyargs:$T51_PATH" TMPDIR="$T75_SB/.tmp" TERM=dumb BASH_ENV="$T75_SB/benv.sh" ENV="$T75_SB/benv.sh" \
+    bash "$SETUP_SH" --only legacy-alias >/dev/null 2>&1
+  T75_CALLS="$(grep -c . "$TMP/spyargs.log")"
+  expect_true "T75 S2 flags (${T75_SH}): the spy saw the decision's ${T75_SH} -n calls" test "$(grep -c "^${T75_SH} " "$TMP/spyargs.log")" -gt 0
+  expect_eq "T75 S2 flags (${T75_SH}): every decision shell got BASH_ENV and ENV empty, with both set in the door's" \
+    "$T75_CALLS" "$(grep -c 'BASH_ENV=\[\] ENV=\[\]$' "$TMP/spyargs.log")"
+  case "$T75_SH" in zsh)
+    expect_eq "T75 S2 flags (zsh): every zsh call carries -f" "$(grep -c '^zsh ' "$TMP/spyargs.log")" "$(grep -c '^zsh -f -n ' "$TMP/spyargs.log")" ;;
+  esac
+done
+T66_SHELL=/bin/bash
+
 for T75_SIG in HUP INT TERM; do
   T75_SB="$(new_sandbox)"; T75_RC="$(t66_rc "$T75_SB")"; mkdir -p "$T75_SB/.tmp"
   printf '%s\n' 'export A=1' "$ALIAS_START" "$T66_ALIAS" "$ALIAS_END" 'export B=2' > "$T75_RC"
