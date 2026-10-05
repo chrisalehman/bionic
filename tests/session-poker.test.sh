@@ -11782,4 +11782,72 @@ expect_absent "67b2 …and no move" "rebuild the task list" "$OUT"
 expect_eq "67b3 …and the digest carries no cause" "" "$(s67_rd "$R67C")"
 expect_contains "67b4 …while the digest owes the duty (the positive on the same file)" "duty=owed" "$(cat "$(digest_of "$R67C")")"
 
+# §NOTIFY-WHOLE (review pass 36 S1). Every `started without its checks` line hashed as the same
+# text (`NOTIFY — a`), so a second reader's line on a later tick left the hash unchanged: the tick
+# printed `unchanged`, dropped the line, and still wrote `event=told` for it. The line now enters
+# the hash whole, with the agent id beside it (two readers of one role and one candidate set print
+# the same words), and `event=told` is written only when the tick's buffer is printed. The lines
+# are the recorder's shape (66e). fails-when: the second or third reader is never named, or is
+# named twice.
+export CLAUDE_CONFIG_DIR="$S66_CFG"
+R67N="$(make_repo s67-notify)"; new_roster "$R67N"
+add_row "$R67N" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s67_unchecked() {  # <repo> <agent id> <role> <candidates>
+  printf 'start-unchecked/v1|event=start|at=%s|session=%s|agent_id=%s|role=%s|candidates=%s\n' \
+    "$(iso_ago 30)" "$SID" "$2" "$3" "$4" >> "$(roster_of "$1")"
+}
+s67_told() { /usr/bin/grep -c "^start-unchecked/v1|event=told|.*|agent_id=$2\$" "$(roster_of "$1")" | tr -d ' '; }
+require_helpers s67_unchecked s67_told
+plant_answer "$S66_TR" none
+s67_unchecked "$R67N" ac67-6700000000000001 bionic:critic H1,H2
+poke_pressure "$R67N" 8192 1.0 tick
+expect_contains "67c0 precondition: the first reader is named" \
+  "poker: NOTIFY — a bionic:critic started without its checks: candidates H1, H2" "$OUT"
+s67_unchecked "$R67N" ar67-6700000000000002 bionic:reviewer H3,H4
+poke_pressure "$R67N" 8192 1.0 tick
+expect_contains "67c1 §NOTIFY-WHOLE a second reader on a later tick is named" \
+  "poker: NOTIFY — a bionic:reviewer started without its checks: candidates H3, H4" "$OUT"
+expect_eq "67c2 …once, and the first is not named again" "1" "$(count_lines_matching 'started without its checks' "$OUT")"
+expect_eq "67c3 …and it is marked told once, by the tick that printed it" "1" "$(s67_told "$R67N" ar67-6700000000000002)"
+s67_unchecked "$R67N" ac67-6700000000000003 bionic:critic H1,H2
+poke_pressure "$R67N" 8192 1.0 tick
+expect_contains "67c4 a third reader whose line reads as the first one's is named too" \
+  "poker: NOTIFY — a bionic:critic started without its checks: candidates H1, H2" "$OUT"
+expect_eq "67c5 …and told once" "1" "$(s67_told "$R67N" ac67-6700000000000003)"
+poke_pressure "$R67N" 8192 1.0 tick
+expect_absent "67c6 the next tick names none of them" "started without its checks" "$OUT"
+expect_contains "67c7 …while it still prints (the positive on the same tick)" "poker:" "$OUT"
+expect_eq "67c8 …and each start is told exactly once" "1 1 1" \
+  "$(s67_told "$R67N" ac67-6700000000000001) $(s67_told "$R67N" ar67-6700000000000002) $(s67_told "$R67N" ac67-6700000000000003)"
+
+# §AMEND-PLACED (review pass 36 N2). An agent amended by its id while unplaced, then placed (its
+# launch call's return writes the row that carries its id: SYNTHESIZED here through
+# `roster_row_fixture`, the dispatch wall's shape, status=confirmed), then amended by its id again:
+# the amend goes to the placed row, which holds the unplaced set and the new one, and no second
+# unplaced row is written to shadow it. fails-when: the wall's pick for the id is an unplaced row.
+R67P="$(make_repo s67-amend-placed)"; new_roster "$R67P"
+s66_launch "$R67P" p1 toolu_p1 bionic:test-runner
+s66_launch "$R67P" p2 toolu_p2 bionic:test-runner
+S67P_ID="ap67-6700000000000004"
+s66_start "$R67P" bionic:test-runner "$S67P_ID"
+s66_ran "$S67P_ID"
+poke "$R67P" amend "$S67P_ID" --suites+ tests/c.test.sh --reason 'its refusal asked'
+expect_eq "67d0 precondition: the unplaced agent's set is recorded on its own row" "unplaced|c.test.sh" \
+  "$(s30_field "$(s66_pick "$R67P" "$S67P_ID")" status)|$(s30_field "$(s66_pick "$R67P" "$S67P_ID")" suites_allowed)"
+roster_row_fixture status=confirmed "session=$SID" name=p1 "agent_id=$S67P_ID" \
+  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" subagent_type=bionic:test-runner tool_use_id=toolu_p1 \
+  files= suites_allowed=a.test.sh suites_source=declared >> "$(roster_of "$R67P")"
+expect_eq "67d1 precondition: once placed, the wall's pick for the id is the placed row" "p1" \
+  "$(s30_field "$(s66_pick "$R67P" "$S67P_ID")" name)"
+poke "$R67P" amend "$S67P_ID" --suites+ tests/d.test.sh --reason 'one more'
+expect_eq "67d2 §AMEND-PLACED an amend by id after the placing exits 0" "0" "$RC"
+expect_contains "67d3 …and amends the placed row, by its name" "poker: amended — p1:" "$OUT"
+S67P_PICK="$(s66_pick "$R67P" "$S67P_ID")"
+expect_eq "67d4 …which the wall still picks for the id" "p1|confirmed" "$(s30_field "$S67P_PICK" name)|$(s30_field "$S67P_PICK" status)"
+expect_eq "67d5 …holding its own set, the unplaced set and the new one" "a.test.sh c.test.sh d.test.sh" \
+  "$(s30_field "$S67P_PICK" suites_allowed | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "67d6 …and no second unplaced row was written" "1" \
+  "$(/usr/bin/grep -c "|status=unplaced|.*|name=$S67P_ID|" "$(roster_of "$R67P")" | tr -d ' ')"
+unset CLAUDE_CONFIG_DIR
+
 finish
