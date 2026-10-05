@@ -442,23 +442,21 @@ rc_unset() {  # <item>
 # setup on an `edited` block prints the difference and writes only on a second,
 # live yes (setup.sh `setup_working_principles`), and remove does the same.
 #
-# THE FILE GOES ONLY IF SETUP MADE IT (wave-27 T40, review pass 9 finding 4). A
-# CLAUDE.md that held nothing before setup and a 0-byte one the user made hold
-# the same bytes once the block is in, so setup leaves a note beside a file it
-# CREATED (`principles_created_file`), and remove deletes the file only when that
-# note is there, the block is the shipped text unedited, and nothing else is in
-# the file. Any other file stays, emptied or not.
+# THE FILE GOES ONLY WITH NOTHING OF THE USER'S IN IT (wave-27 T40, review pass 9
+# finding 4). Remove deletes CLAUDE.md only when the block is the shipped text
+# unedited and nothing else is in the file: there is then no text of the user's
+# to lose, and a file that was empty before setup comes back as absent, which
+# loses nothing either. An edited block leaves the emptied file in place, and a
+# file with no block is never touched, whatever its size.
 #
 # Verbatim. remove.sh's standalone door carries byte-equal copies
-# (RM_PRINCIPLES_START / RM_PRINCIPLES_END / RM_PRINCIPLES_CREATED_SUFFIX) because
+# (RM_PRINCIPLES_START / RM_PRINCIPLES_END) because
 # it cannot source this file; tests/principles-item.test.sh §REMOVE pins them equal.
 PRINCIPLES_START='<!-- bionic:principles:start -->'
 PRINCIPLES_END='<!-- bionic:principles:end -->'
-PRINCIPLES_CREATED_SUFFIX='.bionic-created'
 
 principles_file()      { printf '%s/CLAUDE.md\n' "$(claude_home)"; }
 principles_text_file() { printf '%s/context/working-principles.md\n' "$(plugin_root)"; }
-principles_created_file() { printf '%s%s\n' "$(principles_file)" "$PRINCIPLES_CREATED_SUFFIX"; }
 
 # The shipped text, the body setup would write: what the consent screen shows.
 principles_text() {
@@ -504,10 +502,9 @@ principles_diff() {
 # text cannot be read, rather than writing an empty block. The body is staged
 # beside the target, as rc_set's is. Exit codes are markers_set's.
 principles_set() {
-  local file body rc created=no
+  local file body rc
   file="$(principles_file)"
   mkdir -p "${file%/*}" || return 1
-  [ -e "$file" ] || [ -L "$file" ] || created=yes
   body="$(bionic_link_target "$file").bionic.body"
   rm -f "$body"
   if ! (umask 077; principles_text > "$body") || [ ! -s "$body" ]; then
@@ -515,22 +512,16 @@ principles_set() {
   fi
   markers_set "$file" "$PRINCIPLES_START" "$PRINCIPLES_END" "$body"; rc=$?
   rm -f "$body"
-  # The note is best effort: without it remove keeps the file, the safe side.
-  if [ "$rc" = "0" ] && [ "$created" = "yes" ]; then
-    (umask 077; printf '%s\n' "bionic setup created CLAUDE.md beside this note. /bionic:remove deletes that file again only if it still holds bionic's working principles and nothing else." \
-      > "$(principles_created_file)") 2>/dev/null
-  fi
   return "$rc"
 }
 
-# Would `principles_unset` delete the file: setup created it, the block is the
-# shipped text unedited, and nothing else is in it. A symlink never goes: its
+# Would `principles_unset` delete the file: the block is the shipped text
+# unedited, and nothing else is in it. A symlink never goes: its
 # target belongs to whatever manages the link. Asked before the question, so
 # the question can say so.
 principles_unset_deletes() {
   local file
   file="$(principles_file)"
-  [ -f "$(principles_created_file)" ] || return 1
   [ -f "$file" ] && [ ! -L "$file" ] || return 1
   [ "$(principles_state)" = "present" ] || return 1
   markers_only "$file" "$PRINCIPLES_START" "$PRINCIPLES_END"
@@ -538,7 +529,7 @@ principles_unset_deletes() {
 
 # Strips the block, and deletes the file when `principles_unset_deletes` said so
 # before the strip. Exit codes are markers_strip's; on any non-zero nothing was
-# changed. The note setup left goes with a successful strip either way.
+# changed.
 principles_unset() {
   local file deletes=no rc
   file="$(principles_file)"
@@ -546,6 +537,5 @@ principles_unset() {
   markers_strip "$file" "$PRINCIPLES_START" "$PRINCIPLES_END"; rc=$?
   [ "$rc" = "0" ] || return "$rc"
   if [ "$deletes" = "yes" ] && [ -f "$file" ] && [ ! -s "$file" ]; then rm -f "$file"; fi
-  rm -f "$(principles_created_file)"
   return 0
 }

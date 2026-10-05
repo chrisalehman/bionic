@@ -1736,10 +1736,7 @@ setup_working_principles() {
     say ""
     say "   — seven short rules for how a session works. One of them, \"Decide what is yours\", lets"
     say "     an agent make a call it can revert without asking you first."
-    if [ ! -e "$file" ]; then
-      say "   ${file} does not exist yet: bionic would create it, and the note"
-      say "   $(principles_created_file) so remove knows it may delete the file again."
-    fi
+    [ -e "$file" ] || say "   ${file} does not exist yet: bionic would create it."
     SETUP_ALL=0 RM_ALL=0 consent "   Add them to ${file}, between bionic's markers?"; _setup_consent_rc=$?
     if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${file} is unchanged."; action "add bionic's working principles to ${file} — $(_setup_answer_yes working-principles)"; return 0; fi  # consent gate: principles item
   fi
