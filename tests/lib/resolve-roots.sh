@@ -115,4 +115,10 @@ BIONIC_SKILLS_DIR="${BIONIC_SKILLS_DIR:-${_bionic_seam_repo}/skills}"
 BIONIC_SCRIPTS_DIR="${BIONIC_SCRIPTS_DIR:-${_bionic_seam_repo}}"
 export BIONIC_HOOKS_DIR BIONIC_SKILLS_DIR BIONIC_SCRIPTS_DIR
 
+# THE AUTHOR'S GUARD (wave-27 T47). Under `1` an over-wide refusal line refuses the call instead of
+# being cut, so a literal an author typed too long is found at test time. Every suite sources this
+# seam, so it is on for a suite run alone and for one run by tests/run.sh; a hook a real session runs
+# never has it. payload/scripts/lib/refuse.sh is its only reader and nothing under hooks/ or payload/ sets it.
+BIONIC_REFUSE_STRICT="${BIONIC_REFUSE_STRICT:-1}"; export BIONIC_REFUSE_STRICT
+
 unset _bionic_seam_repo
