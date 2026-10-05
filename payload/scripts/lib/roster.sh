@@ -107,7 +107,7 @@ ROSTER_SCHEMA_VERSION="v1"
 # type it had never heard of — `fork`, `general-purpose`, `claude`, a consumer's own agent —
 # was admitted as if it were a reader (triage-B D2a). Here the unknown answers "writer".
 #
-# THE MEMBERS: the four bionic roles whose role files disallow Write and Edit, plugin-qualified
+# THE MEMBERS: the bionic roles whose role files disallow Write and Edit, plugin-qualified
 # as the harness sends them, plus the harness's two no-write types `Explore` and `Plan`, bare
 # as the harness sends them. A bare `researcher` is NOT a member: a consumer's own agent of
 # that name may carry Write, and ARM C has always read the plugin-qualified spelling only.
@@ -115,7 +115,7 @@ ROSTER_SCHEMA_VERSION="v1"
 #
 # A CONSTANT, NOT A READ OF agents/*.md: ARM C runs on every Bash call in an agent context,
 # and a file read there would be paid by every command (research D3-7).
-ROLE_READONLY_SET="bionic:researcher bionic:test-runner bionic:auditor bionic:critic Explore Plan"
+ROLE_READONLY_SET="bionic:researcher bionic:test-runner bionic:auditor bionic:critic bionic:reviewer Explore Plan"
 
 # A WHOLE-WORD MATCH WITHOUT WORD SPLITTING: the callers include walls.sh, which moves IFS
 # around its argv readers, so a `for r in $SET` loop here would answer by whatever IFS it
