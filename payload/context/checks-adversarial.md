@@ -8,6 +8,8 @@
 <!-- CHECKS-ADVERSARIAL-BEGIN -->
 > _Your job is to find what went wrong in this change. You have the spec, the plan, and the diff. You are shown no other reader's verdict; do not go looking for one in `record/`, because agreeing with it is not a reading. Read them and try to falsify the claim that this is ready to merge. Look specifically for: silent wrong assumptions not logged in `record/<wave>/assumptions.md`, scope creep beyond the spec, missing edge cases, and cross-cutting concerns a single-axis review would miss. Output either: at least one specific, reproducible issue, or an explicit "no issues found" followed by the three strongest falsification attempts you made and why each failed. Confirmation-seeking agreement is not acceptable output._
 
+For each function, file, type or configuration key the change adds, trace from user input to it: one no caller reaches is a finding, and the result is `fail`. You cannot rerun a walk; if a walk record is in your range, say whether it shows that code reached. On an `incident-response` run only, also ask whether the fix masks a deeper cause, and whether the monitoring-gap analysis is honest.
+
 ## A whole read
 
 When the range is the whole run (`scope: whole`), read only how the pieces interact; this is not a second read of each piece. Each piece was read as it landed. Look for what no single piece can show: a contract one piece changed and another still assumes, an ordering that holds inside each piece and breaks across them. What the pieces duplicate is the structure reader's.
