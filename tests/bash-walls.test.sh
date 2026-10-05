@@ -140,7 +140,8 @@ bw_dispatched() {
   BW_TUID=$((BW_TUID + 1))
   roster_header > "$repo/.bionic/tmp/roster-$SID.state"
   roster_row_fixture "session=$SID" status=intended "name=$name" agent_id= \
-    subagent_type=bionic:test-runner "tool_use_id=toolu_01bwdisp$BW_TUID" "$@" \
+    subagent_type=bionic:test-runner "tool_use_id=toolu_01bwdisp$BW_TUID" \
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$@" \
     >> "$repo/.bionic/tmp/roster-$SID.state"
   jq -n --arg s "$SID" --arg c "$repo" --arg a "$ACTOR" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
@@ -2393,5 +2394,63 @@ eg6_gate "$(eg6_open 6 '- Step 4: dispatched, record/w27/dispatch.md
 - Step 5: floor green, record/w27/floor.log
 - Step 6: review at record/w27/review.md')"
 expect_status "EGO4 …and the same plan at current: 6 is refused for lacking a reading (D19's boundary)" 2 "$ST"
+
+
+# ============================================================
+section "§UNPLACED — an agent its start could not place runs the suite its printed remedy records (wave-27 T38; review pass 8 F3)"
+# ============================================================
+#
+# Two id-less launches of one bionic type and a start that names neither: the recorder cannot
+# choose, so no row carries the agent's id (SJ-d in tests/execution-recorder.test.sh), and until
+# T38 the refusal's remedy was "nothing to widen until the orchestrator records one", an act no
+# verb performed. The refusal now prints an `amend` line for the agent's id; the orchestrator runs
+# it EXACTLY AS PRINTED, and the agent's next call runs the suite, wrapped and stamped.
+#
+# FIXTURE FIDELITY: both launch rows through `roster_row_fixture` → `roster_row` in the dispatch
+# wall's shape, launched now; the start through the real hooks/execution-recorder.sh; the Bash
+# payload the agent-context shape `mk_payload` builds, `agent_type` the plain dispatch's TYPE.
+#
+# fails-when: the refusal prints no runnable line; the line refuses or records nothing; the suite
+# is still refused after it.
+RU="$(mk_repo unplaced)"
+roster_header > "$RU/.bionic/tmp/roster-$SID.state"
+for _ru in one:alpha two:beta; do
+  roster_row_fixture "session=$SID" status=intended "name=u-${_ru%%:*}" agent_id= \
+    subagent_type=bionic:test-runner "tool_use_id=toolu_01bwunpl${_ru%%:*}" \
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "suites_allowed=${_ru#*:}.test.sh" suites_source=declared \
+    >> "$RU/.bionic/tmp/roster-$SID.state"
+done
+jq -n --arg s "$SID" --arg c "$RU" --arg a "$ACTOR" \
+  '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c, agent_id:$a,
+    agent_type:"bionic:test-runner", hook_event_name:"SubagentStart"}' \
+  | env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
+      CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$REC_HOOK" >/dev/null 2>&1
+expect_absent "UP0 precondition: the start was placed on neither launch" "agent_id=$ACTOR" "$(cat "$RU/.bionic/tmp/roster-$SID.state")"
+expect_contains "UP0 precondition: …both launches are on the roster" "|name=u-two|" "$(cat "$RU/.bionic/tmp/roster-$SID.state")"
+run_hook "$(mk_payload "$RU" 'bash tests/alpha.test.sh' "$ACTOR" "" Bash bionic:test-runner 600000)" BIONIC_WALL_VERBOSE=1
+expect_status "UP1 the unplaced agent's suite is refused" 2 "$ST"
+expect_contains "UP2 …because no row carries its id" "no roster row carries your agent id $ACTOR" "$ERR"
+expect_absent "UP3 …a bionic type is not told its type is the reason" "is not a bionic: role" "$ERR"
+UP_FIX=$(printf '%s\n' "$ERR" | grep -F 'widen it: ' | head -1)
+UP_CMD="${UP_FIX#*widen it: }"; UP_CMD="${UP_CMD% (main runs it)}"
+expect_contains "UP4 …printing the amend line for its id" "session-poker.sh amend $ACTOR --suites+ alpha.test.sh --reason" "$UP_CMD"
+mkdir -p "$FAKE_HOME/.claude/projects/-unplaced/$SID/subagents"
+: > "$FAKE_HOME/.claude/projects/-unplaced/$SID.jsonl"
+: > "$FAKE_HOME/.claude/projects/-unplaced/$SID/subagents/agent-$ACTOR.jsonl"
+UP_OUT=$( cd "$RU" && env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
+  CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash -c "$UP_CMD" 2>&1 ); UP_RC=$?
+expect_status "UP5 the line, run as printed by the orchestrator, exits 0" 0 "$UP_RC"
+expect_contains "UP6 …and says it recorded the set" "poker: amended — $ACTOR" "$UP_OUT"
+run_hook "$(mk_payload "$RU" 'bash tests/alpha.test.sh' "$ACTOR" "" Bash bionic:test-runner 600000)"
+expect_status "UP7 …and the agent's next call runs the suite" 0 "$ST"
+expect_contains "UP8 …wrapped and stamped with that suite" "--suites alpha.test.sh" "$(updated_command_of)"
+run_hook "$(mk_payload "$RU" 'bash tests/beta.test.sh' "$ACTOR" "" Bash bionic:test-runner 600000)"
+expect_status "UP9 a suite the line did not name is still refused (beta is the other launch's)" 2 "$ST"
+# The row amend wrote names no role (none is known for an agent no launch was joined to), so the
+# read-only arm answers from the payload's own type, as for an agent with no row: a test-runner
+# still never commits. §17g's reading (an empty role on a dispatched row is admitted) stands.
+run_hook "$(mk_payload "$RU" 'git commit -m "x"' "$ACTOR" omit Bash bionic:test-runner)"
+expect_contains "UP10 the unplaced test-runner's commit is refused by its own type" \
+  "bionic:test-runner: a read-only role never commits" "$ERR"
 
 finish
