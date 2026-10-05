@@ -4,7 +4,7 @@
 # THE EXAM ITSELF IS NOT RUN HERE. A sitting dispatches live readers (README.md in
 # tests/reader-exam/), and no hermetic suite can. What this suite owns is what a machine can
 # hold the exam to: the checks files the readers were examined on are the ones that ship, and
-# the latest sitting had readers behind it who met every sample. Seven sections:
+# the latest sitting had readers behind it who met every sample. Six sections:
 #
 #   §PIN      `exam_pin` on planted sittings: the latest sitting, by file order, has the
 #             three `sha256` lines equal to the files' digests, a `result` line for every
@@ -15,8 +15,6 @@
 #             no `met` line whose reached result its sample's key does not admit; a `##` line
 #             that is not a sitting header is red wherever it is. Otherwise the verdict is red and names why. A
 #             checks file edited after its sitting turns it red.
-#   §OWED     until the first sitting, `sittings.md` carries the owed line; that line alone
-#             passes, neither it nor a sitting is red, and both together are red.
 #   §KEY      `exam_key` on planted keys: three lines for `clean`, four for every other
 #             sample, the fourth a `names:` line, whose alternatives are separated by ` | `.
 #   §SCORE    `exam_score` (tests/reader-exam/score.sh, README step 5) on the real keys: a
@@ -33,8 +31,8 @@
 #             written there, and against a materialize.sh without it.
 #   §SHIPPED  the shipped `sittings.md` against the shipped checks files.
 #
-# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): §PIN and
-# §OWED run the suite's own `exam_pin` — the same function §SHIPPED runs on the real files —
+# FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): §PIN runs
+# the suite's own `exam_pin` — the same function §SHIPPED runs on the real files —
 # over planted `sittings.md` files and a planted root holding three checks files of made-up
 # text and two sample directories. SYNTHESIZED: the checks text and the hashes written into
 # the planted sittings, which are taken by the same digest function the verdict uses, or
@@ -78,7 +76,6 @@ for f in "${REPO}/payload/context/checks-evidence.md" "${REPO}/payload/context/c
          "${REPO}/payload/context/checks-structure.md"; do
   EXAM_CHECKS="${EXAM_CHECKS:+$EXAM_CHECKS }${f#"$REPO"/}"
 done
-EXAM_OWED_LINE="first-sitting: owed by wave-27 T22"
 
 # exam_samples <root> — the sample names under <root>, one per line.
 exam_samples() {
@@ -102,24 +99,17 @@ exam_dealt_role() {
 #                          the one dealt its own question, no two lines for one sample and question
 #                          that disagree, every `result` line reads `met`, and each reached
 #                          result is one its sample's key admits (exam_meets, score.sh)
-#   owed                   no sitting and the owed line (RE-AUTHORED BY T22: this arm goes
-#                          when the first sitting is recorded)
 #   red <reason>           anything else
 # A sitting is a section headed `## <YYYY-MM-DD>…`; the latest is the last in the file, by
 # file order and not by date. Any other line opening with `##` is red wherever it is.
 exam_pin() {
-  local file="$1" root="$2" sittings owed latest f lines want have s samples bad results line kqs q r dealt
+  local file="$1" root="$2" sittings latest f lines want have s samples bad results line kqs q r dealt
   [ -r "$file" ] || { echo "red: $file cannot be read"; return 1; }
   # A block under a malformed header would fold into the sitting above it, or count as none.
   bad="$(grep -nE '^##' "$file" | grep -vE '^[0-9]+:## [0-9]{4}-[0-9]{2}-[0-9]{2}( |$)' | head -n 1)"
   [ -z "$bad" ] || { echo "red: line ${bad%%:*}, '${bad#*:}', is not a sitting header: a block under it belongs to no sitting"; return 1; }
   sittings="$(grep -cE '^## [0-9]{4}-[0-9]{2}-[0-9]{2}' "$file")"
-  owed="$(grep -cxF -- "$EXAM_OWED_LINE" "$file")"
-  if [ "$sittings" -eq 0 ]; then
-    [ "$owed" -gt 0 ] && { echo "owed"; return 0; }
-    echo "red: no sitting is recorded and no line says the first is owed"; return 1
-  fi
-  [ "$owed" -eq 0 ] || { echo "red: a sitting is recorded and the owed line still says none is"; return 1; }
+  [ "$sittings" -gt 0 ] || { echo "red: no sitting is recorded"; return 1; }
   latest="$(awk '/^## [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ { buf = "" } { buf = buf $0 "\n" } END { printf "%s", buf }' "$file")"
   for f in $EXAM_CHECKS; do
     lines="$(printf '%s' "$latest" | awk -v f="$f" '$1 == "sha256" && $2 == f { print $3 }')"
@@ -457,24 +447,6 @@ expect_eq "P17: a dealt role on a question that is not its own is red and names 
 pin_call "$TMP/second-reviewer.md" "$ROOT"
 expect_eq "P17: a second line from the dealt role on its own question is pinned" "pinned" "$PIN_OUT"
 
-section "§OWED — before the first sitting"
-
-printf '%s\n' "$EXAM_OWED_LINE" > "$TMP/owed.md"
-pin_call "$TMP/owed.md" "$ROOT"
-expect_eq "O1: the owed line and no sitting is owed" "owed" "$PIN_OUT"
-expect_status "O1: rc 0" 0 "$PIN_RC"
-
-: > "$TMP/neither.md"
-pin_call "$TMP/neither.md" "$ROOT"
-expect_eq "O2: neither the owed line nor a sitting is red" \
-  "red: no sitting is recorded and no line says the first is owed" "$PIN_OUT"
-expect_status "O2: rc 1" 1 "$PIN_RC"
-
-{ printf '%s\n\n' "$EXAM_OWED_LINE"; cat "$TMP/right.md"; } > "$TMP/both.md"
-pin_call "$TMP/both.md" "$ROOT"
-expect_eq "O3: a sitting beside the owed line is red" \
-  "red: a sitting is recorded and the owed line still says none is" "$PIN_OUT"
-
 section "§KEY — an answer key names its defect"
 
 K="$TMP/keys"
@@ -789,10 +761,6 @@ for f in $EXAM_CHECKS; do
   expect_regex "SH0: the digest reads $f" '^[0-9a-f]{64}$' "$(_detect_sha256 "$REPO/$f")"
 done
 pin_call "$EXAM/sittings.md" "$REPO"
-if [ "$PIN_OUT" = "owed" ]; then
-  ok "RE-AUTHORED BY T22: the first sitting is owed by wave-27 T22 (sittings.md carries the owed line and no sitting)"
-else
-  expect_eq "SH1: the latest sitting read the checks files that ship" "pinned" "$PIN_OUT"
-fi
+expect_eq "SH1: the latest sitting read the checks files that ship" "pinned" "$PIN_OUT"
 
 finish
