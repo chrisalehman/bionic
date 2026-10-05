@@ -5549,7 +5549,10 @@ rm -f "$W27152_PROMPT_F"
 # the real verb is §scaffold-walk in tests/dispatch-preflight.test.sh, which holds the harness.
 # Spaced as _flatten reads them: a run of white space is one space.
 W27T53_FILES='Files: <every path the task may create or edit> # a reader lists its records here, one per question, its artifact among them; a researcher or test-runner omits it'
-W27T53_SUITES='Suites: none # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names its runs, at most 3, never none'
+# RE-POINTED (wave-27 T60, review pass 38 B1): an evidence reader whose runner is not a shell
+# suite names its runs under Re-executes: beside `Suites: none`, so the comment no longer says
+# "never none"; it says one to three runs across the two labels.
+W27T53_SUITES='Suites: none # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names 1 to 3 runs across both labels'
 for _f in "$SKILL_MD" "$DISPATCH_MD"; do
   expect_nonempty "W27-T53-B1a: ${_f##*/} — the scaffold's Files: comment has a reader list its records" \
     "$(w26_hits "$W27T53_FILES" "$_f")"
@@ -5557,6 +5560,7 @@ for _f in "$SKILL_MD" "$DISPATCH_MD"; do
     "$(w26_hits 'a read-only brief omits this' "$_f")"
   expect_nonempty "W27-T53-B3a: ${_f##*/} — the scaffold's Suites: comment has the evidence reader name its runs" \
     "$(w26_hits "$W27T53_SUITES" "$_f")"
+  expect_eq "W27-T60-B1a: …and no longer forbids that reader Suites: none" "" "$(w26_hits 'never none' "$_f")"
 done
 expect_nonempty "W27-T53-B1b: dispatch.md says a reader's brief lists one record per question on Files:" \
   "$(w26_hits 'A reader'"'"'s brief lists one record per question it is dealt on `Files:`, `Expected artifact:` naming one.' "$DISPATCH_MD")"
@@ -5564,10 +5568,17 @@ expect_nonempty "W27-T53-B1c: steps/5.md's whole-read batch lists every record o
   "$(w26_hits 'one record per question it is dealt, every record listed on its brief'"'"'s `Files:` line and `Expected artifact:` naming one' "$STEP5_MD")"
 expect_nonempty "W27-T53-B1d: steps/6.md says one record per question, every one on Files:" \
   "$(w26_hits 'It writes one record per question it is dealt, and its brief lists every record on `Files:`, `Expected artifact:` naming one of them.' "$STEP6_MD")"
+# RE-POINTED (wave-27 T60, review pass 38 B1): one rule whatever the runner — suites under
+# `Suites:`, any other runner under `Re-executes:`, one to three in all — and `Suites: none` is
+# wrong only with nothing under `Re-executes:`.
 expect_nonempty "W27-T53-B3b: steps/6.md has the evidence reader, whichever role, declare its runs" \
-  "$(w26_hits 'The reader dealt `evidence`, whichever role holds it at the run'"'"'s rigor, declares what it re-executes (`Suites:` naming suites, or `Re-executes:`), at most three runs; `Suites: none` is for a reader not dealt `evidence`.' "$STEP6_MD")"
+  "$(w26_hits 'The reader dealt `evidence`, whichever role holds it, declares one to three runs in all, suites under `Suites:` and other runners under `Re-executes:`; `Suites: none` with no `Re-executes:` is for a reader not dealt `evidence`.' "$STEP6_MD")"
+expect_eq "W27-T60-B1b: …and no longer says Suites: none is for a reader not dealt evidence, whatever it runs" "" \
+  "$(w26_hits '`Suites: none` is for a reader not dealt' "$STEP6_MD")"
 expect_nonempty "W27-T53-B3c: steps/5.md says the same of the evidence reader, not the auditor alone" \
-  "$(w26_hits 'The reader dealt `evidence`, whichever role holds it, declares its re-executions under `Suites:` or `Re-executes:`, at most three.' "$STEP5_MD")"
+  "$(w26_hits 'The reader dealt `evidence`, whichever role holds it, declares one to three runs in all, suites under `Suites:` and other runners under `Re-executes:`.' "$STEP5_MD")"
+expect_eq "W27-T60-B1c: …and no longer the old either-label clause" "" \
+  "$(w26_hits 'declares its re-executions under `Suites:` or `Re-executes:`, at most three.' "$STEP5_MD")"
 expect_eq "W27-T53-B3c2: …and no longer that an auditor brief declares them" "" \
   "$(w26_hits 'An auditor brief declares its re-executions' "$STEP5_MD")"
 # S5: a reader writes a record per question, not one file.
@@ -5579,8 +5590,18 @@ expect_eq "W27-T53-S5b: …and no longer that a reader writes one file" "" \
 W27T53_WB=' Beside it the author writes `working-branch: <the branch the work is built on>`: without it `proof-add`, `waive` and `current 8` refuse.'
 expect_nonempty "W27-T53-S1: steps/3.md has the task-scale author write working-branch:" \
   "$(w26_hits "${W27T53_WB# }" "$STEP3_MD")"
+# RE-POINTED (wave-27 T60, review pass 38 N4): the row measured the test's own literal and could
+# go red only if the test was edited. It measures the sentence as steps/3.md carries it.
+w27t60_wb() { _flatten "$1" | /usr/bin/grep -o ' Beside it the author writes `working-branch:[^.]*\.' | head -1; }
+expect_nonempty "W27-T53-S1b precondition: the sentence is read out of steps/3.md" "$(w27t60_wb "$STEP3_MD")"
 expect_eq "W27-T53-S1b: …in under 150 bytes" "yes" \
-  "$([ "$(printf '%s' "$W27T53_WB" | wc -c | tr -d ' ')" -lt 150 ] && echo yes || echo no)"
+  "$([ "$(w27t60_wb "$STEP3_MD" | wc -c | tr -d ' ')" -lt 150 ] && echo yes || echo no)"
+W27T60_S3D="$TMP/w27t60-step3.md"
+sed 's/without it `proof-add`, `waive` and `current 8` refuse\./without it `proof-add`, `waive`, `current 8` and every later fact verb on the plan refuse./' \
+  "$STEP3_MD" > "$W27T60_S3D" 2>/dev/null
+expect_nonempty "W27-T53-S1b2 precondition: the doctored steps/3.md still carries the sentence" "$(w27t60_wb "$W27T60_S3D")"
+expect_eq "W27-T53-S1b2: …and a sentence grown past 150 bytes in the file is caught" "no" \
+  "$([ "$(w27t60_wb "$W27T60_S3D" | wc -c | tr -d ' ')" -lt 150 ] && echo yes || echo no)"
 # S2: the task-scale ledger owes readings, not the auditor's and critic's verdicts.
 expect_nonempty "W27-T53-S2: operational-rules.md says a done row owes the readings its rigor deals" \
   "$(w26_hits 'the readings its rigor deals are owed from Step 6' "$W27D_OPS")"
@@ -5617,11 +5638,24 @@ expect_eq "W27-T53-S3d2: …and no longer at the newest plan under the plan dirs
   "$(w26_hits 'newest plan under the plan dirs' "$W27T53_HC")"
 expect_nonempty "W27-T53-S3e: …and has a Step-6 readings arm" \
   "$(w26_hits 'from current: 6 onward — one fact per owed question' "$W27T53_HC")"
-# w27t53_census <svg> -> the data-hook chips, sorted unique; w27t53_registered -> hooks.json's scripts.
-w27t53_census() { /usr/bin/grep -o 'data-hook="[^"]*"' "$1" 2>/dev/null | sed 's/data-hook="//; s/"$//' | LC_ALL=C sort -u; }
+# RE-POINTED (wave-27 T60, review pass 38 N2): the relation compared the SET of script names, so
+# a chip moved to another event, or one of a script's several registrations left undrawn, stayed
+# green. It compares each script WITH its registration now, as a list: one
+# `event;matcher;script;argument` line per script a registration runs (the guard's registration
+# runs agent-context-guard.sh and stop.sh, so each has its chip), against the same line per chip.
+# w27t53_registered [<hooks.json>] -> those lines, sorted; w27t53_census <svg> -> the chips' lines.
 w27t53_registered() {
-  jq -r '.hooks[][] | .hooks[] | .command' "${REPO}/hooks/hooks.json" 2>/dev/null \
-    | /usr/bin/grep -o 'hooks/[a-z-]*\.sh' | sed 's#hooks/##' | LC_ALL=C sort -u
+  jq -r '.hooks | to_entries[] | .key as $e | .value[] | (.matcher // "") as $m | .hooks[] | [$e, $m, .command] | @tsv' \
+    "${1:-${REPO}/hooks/hooks.json}" 2>/dev/null \
+    | /usr/bin/awk -F'\t' '{ n = split($3, w, " "); arg = ""
+        for (i = 1; i <= n; i++) if (w[i] !~ /\//) arg = arg (arg == "" ? "" : " ") w[i]
+        for (i = 1; i <= n; i++) if (w[i] ~ /hooks\/[a-z-]*\.sh$/) { s = w[i]; sub(/.*\//, "", s); print $1 ";" $2 ";" s ";" arg } }' \
+    | LC_ALL=C sort
+}
+w27t53_census() {
+  /usr/bin/grep -o '<text class="hook-entry"[^>]*>' "$1" 2>/dev/null | /usr/bin/awk '
+    function at(k,   r) { r = ""; if (match($0, " " k "=\"[^\"]*\"")) r = substr($0, RSTART + length(k) + 3, RLENGTH - length(k) - 4); return r }
+    { print at("data-event") ";" at("data-matcher") ";" at("data-hook") ";" at("data-arg") }' | LC_ALL=C sort
 }
 expect_nonempty "W27-T53-S3f precondition: hooks.json registers scripts" "$(w27t53_registered)"
 expect_eq "W27-T53-S3f: hook-chain.svg's census is the scripts hooks.json registers" \
@@ -5630,5 +5664,74 @@ W27T53_HCD="$TMP/w27t53-census.svg"
 { cat "$W27T53_HC"; printf '<text class="hook-entry" data-hook="protect-main.sh">x</text>\n'; } > "$W27T53_HCD" 2>/dev/null
 expect_ne "W27-T53-S3f2: …a census still drawing a retired script is caught" \
   "$(w27t53_registered | tr '\n' ' ')" "$(w27t53_census "$W27T53_HCD" | tr '\n' ' ')"
+W27T60_HCM="$TMP/w27t60-census-moved.svg"
+sed '/data-hook="dispatch-preflight.sh"/s/data-event="PreToolUse"/data-event="PostToolUse"/' "$W27T53_HC" > "$W27T60_HCM" 2>/dev/null
+expect_contains "W27-T53-S3f3 precondition: the doctored copy draws dispatch-preflight.sh on PostToolUse" \
+  "PostToolUse;Agent;dispatch-preflight.sh;" "$(w27t53_census "$W27T60_HCM")"
+expect_ne "W27-T53-S3f3: …a chip moved to another event is caught" \
+  "$(w27t53_registered | tr '\n' ' ')" "$(w27t53_census "$W27T60_HCM" | tr '\n' ' ')"
+W27T60_HCX="$TMP/w27t60-census-dropped.svg"
+/usr/bin/grep -v 'data-arg="adversarial"' "$W27T53_HC" > "$W27T60_HCX" 2>/dev/null
+expect_contains "W27-T53-S3f4 precondition: the doctored copy keeps the other SubagentStart chips" \
+  "SubagentStart;;execution-recorder.sh;structure" "$(w27t53_census "$W27T60_HCX")"
+expect_ne "W27-T53-S3f4: …a registration left undrawn is caught, though its script is drawn elsewhere" \
+  "$(w27t53_registered | tr '\n' ' ')" "$(w27t53_census "$W27T60_HCX" | tr '\n' ' ')"
+
+# ============================================================
+# §W27-T60 — the doctrine says one thing about an evidence reader's runs (review pass 38, A-orch-105)
+# ============================================================
+# B1 is re-pointed in §W27-T53 above (B3a, B3b, B3c, each with an absence beside it); the walk
+# through the real wall is §scaffold-walk in tests/dispatch-preflight.test.sh. Here: no copy of
+# either old clause survives on any shipped doctrine surface; the hook diagram's timeout sentence
+# and commit-wall arm say what the code does; the README says where the auditor reads.
+# shellcheck disable=SC2086  # word-split on purpose: one path per line, none with spaces
+expect_nonempty "W27-T60-B1 precondition: the doctrine set carries the evidence reader's rule" \
+  "$(w26_hits 'suites under `Suites:` and other runners under `Re-executes:`' $W26_DOCTRINE)"
+# shellcheck disable=SC2086
+expect_eq "W27-T60-B1: …and no doctrine file says 'never none' or that Suites: none is for a reader not dealt evidence" "" \
+  "$(w26_hits 'never none' $W26_DOCTRINE; w26_hits '`Suites: none` is for a reader not dealt' $W26_DOCTRINE)"
+# S1: hook-chain.svg's header says each timeout hooks.json registers. The sentence names the
+# common timeout and every script registered with another one, and no timeout the file lacks.
+# w27t60_timeout_gaps <svg> <hooks.json> -> one line per disagreement, empty when they agree.
+w27t60_timeout_gaps() {
+  local head reg common
+  head="$(/usr/bin/grep -m1 'Every entry is rooted at' "$1" 2>/dev/null | sed 's/<[^>]*>//g')"
+  reg="$(jq -r '.hooks[][] | .hooks[] | "\(.command | split(" ")[0] | split("/")[-1]) \(.timeout)"' "$2" 2>/dev/null)"
+  [ -n "$head" ] && [ -n "$reg" ] || { echo "unread: header or hooks.json"; return; }
+  common="$(printf '%s\n' "$reg" | awk '{ print $2 }' | sort | uniq -c | sort -rn | awk 'NR == 1 { print $2 }')"
+  case "$head" in *"and runs with timeout: $common"*) ;; *) echo "common timeout $common not said" ;; esac
+  printf '%s\n' "$reg" | awk -v c="$common" '$2 != c' | sort -u | while read -r _s _t; do
+    case "$head" in *"$_s runs with timeout: $_t"*) ;; *) echo "$_s timeout $_t not said" ;; esac
+  done
+  printf '%s\n' "$head" | /usr/bin/grep -o 'timeout: [0-9]*' | awk '{ print $2 }' | sort -u | while read -r _t; do
+    printf '%s\n' "$reg" | awk -v t="$_t" '$2 == t { f = 1 } END { exit !f }' || echo "timeout $_t said, none registered"
+  done
+}
+W27T60_HJ="${REPO}/hooks/hooks.json"
+expect_nonempty "W27-T60-S1 precondition: hooks.json registers more than one timeout (the sentence has an exception to name)" \
+  "$(jq -r '[.hooks[][] | .hooks[] | .timeout] | unique | select(length > 1) | length' "$W27T60_HJ" 2>/dev/null)"
+expect_eq "W27-T60-S1: hook-chain.svg's header says each timeout hooks.json registers" "" \
+  "$(w27t60_timeout_gaps "$W27T53_HC" "$W27T60_HJ")"
+W27T60_HCT="$TMP/w27t60-timeout.svg"
+sed 's/; <tspan[^>]*>dispatch-preflight\.sh<\/tspan> runs with <tspan[^>]*>timeout: 15<\/tspan>//' "$W27T53_HC" > "$W27T60_HCT" 2>/dev/null
+expect_nonempty "W27-T60-S1m precondition: the doctored header still reads" \
+  "$(/usr/bin/grep -m1 'Every entry is rooted at' "$W27T60_HCT")"
+expect_contains "W27-T60-S1m: …and a header that says every entry runs with 10 is caught" \
+  "dispatch-preflight.sh timeout 15 not said" "$(w27t60_timeout_gaps "$W27T60_HCT" "$W27T60_HJ")"
+W27T60_HJD="$TMP/w27t60-hooks.json"
+jq '(.hooks[][] | .hooks[] | select(.command | test("dispatch-preflight")) | .timeout) |= 10' "$W27T60_HJ" > "$W27T60_HJD" 2>/dev/null
+expect_contains "W27-T60-S1n: …and so is a hooks.json that no longer registers the 15 the header says" \
+  "timeout 15 said, none registered" "$(w27t60_timeout_gaps "$W27T53_HC" "$W27T60_HJD")"
+# S2: the commit wall reads no head (walls.sh _eg_reading_gaps); which head a fact covers is
+# current 8's to judge.
+expect_nonempty "W27-T60-S2: hook-chain.svg's Step-6 arm says the wall wants a fact present per owed question" \
+  "$(w26_hits 'from current: 6 onward — one fact per owed question present, or its waived: line' "$W27T53_HC")"
+expect_eq "W27-T60-S2b: …and no longer that the commit wall reads it at the head" "" \
+  "$(w26_hits 'one fact per owed question at the head' "$W27T53_HC")"
+# The README's auditor row says where the auditor reads at this version.
+W27T60_AUD="$(/usr/bin/grep -m1 '^| `auditor` |' "${REPO}/README.md")"
+expect_contains "W27-T60-R: README's auditor row reads at the verify gate and at Step 6 where its rigor deals it a question" \
+  'At the verify gate and, at the rigors that deal it `evidence`, at Step 6' "$W27T60_AUD"
+expect_absent "W27-T60-Rb: …and no longer at the verify gate alone" 'At the verify gate, tries' "$W27T60_AUD"
 
 finish
