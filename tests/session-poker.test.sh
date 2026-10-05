@@ -10852,13 +10852,14 @@ section "Section 62 §RC: a declared release check is owed, run by its verb over
 #
 # A project may name one command in `.bionic/config.yaml` under `release-check:`. With the key set,
 # `facts_owed <rigor> <scale> <tree>` adds the line `check`, and `facts_state` answers it: covered
-# when a `kind=check` line names the head asked about, uncovered from the newest one's head, absent
-# with none (a failed run writes no line, so there is no failing answer). `session-poker.sh
+# when the last `kind=check` line at the head asked about is a pass, failing when it carries
+# `result=fail`, uncovered from the newest one's head, absent with none. `session-poker.sh
 # release-check` runs the command in the working branch's checkout with BIONIC_CHECK_BASE (the
-# newest tag reachable from the plan's integration branch, else its base-sha) and BIONIC_CHECK_HEAD
-# (the working head), writes `record/<wave>/release-check-<head>.log` opening `head=<40-hex> rc=0`,
-# and the fact; on a non-zero exit it prints the command's output and writes nothing. With no key,
-# nothing is owed, run or printed.
+# nearest tag reachable from the plan's integration branch that is a proper ancestor of the working
+# head, else its base-sha) and BIONIC_CHECK_HEAD (the working head), writes
+# `record/<wave>/release-check-<head>.log` opening `head=<40-hex> rc=<exit>`, and the fact; on a
+# non-zero exit it prints the command's output too and the fact carries `result=fail` (T31). With
+# no key, nothing is owed, run or printed.
 #
 # FIXTURE FIDELITY. The declared command is a script this section writes, never this repository's
 # own scan: it records the two variables, its directory and its arguments in a file, so a row reads
@@ -10955,18 +10956,24 @@ S62_W3="$(s57_commit "$S62_WT" lib/b.sh W3)"
 s57_state "$P62" "$S62_W3"
 expect_eq "62e code past the check: uncovered from the check's head" "uncovered	${S62_W2}..${S62_W3}" "$(s57_of check)"
 
-# ---------- a failing command: its output printed, nothing written ----------
+# ---------- a failing command: its output printed, its log and a result=fail fact written ----------
+# (wave-27 T31, review pass 22 S3, which replaces "a failing command writes nothing": 62f, 62f4 and
+# 62f5 assert the new rule in place, under their old ids.)
 echo 1 > "$S62_RCF"; s42_snap "$R62" "$P62"
 poke "$R62" release-check
 S62_FAIL_OUT="$OUT"
-s42_unchanged "62f a failing declared command" 1 "$P62"
+expect_eq "62f a failing declared command is refused (exit 1)" "1" "$RC"
 expect_contains "62f2 …prints the command's output" "HIT entry 2 in lib/b.sh" "$S62_FAIL_OUT"
 expect_contains "62f2b …its standard error too" "scan: entries=3 hits=1" "$S62_FAIL_OUT"
 expect_eq "62f3 …ran at the new head" "head=${S62_W3}" "$(s62_seen | awk '{ print $2 }')"
-expect_true "62f4 …writes no log at that head (the passing head's log stands)" \
-  test ! -e "$S62_REC/release-check-${S62_W3}.log" -a -f "$S62_LOG2"
+expect_eq "62f4 …writes its log at that head, opening head=<head> rc=1" "head=${S62_W3} rc=1" \
+  "$(head -n 1 "$S62_REC/release-check-${S62_W3}.log" 2>/dev/null)"
+expect_true "62f4b …and the passing head's log stands" test -f "$S62_LOG2"
+expect_regex "62f6 …and the plan carries a check fact at that head with result=fail" \
+  "^proved: kind=check head=${S62_W3} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/release-check-${S62_W3}\.log result=fail$" \
+  "$(/usr/bin/grep -E "^proved: kind=check head=${S62_W3} " "$P62" | tail -n 1)"
 s57_state "$P62" "$S62_W3"
-expect_eq "62f5 …and the judge still says uncovered: a failed run is no fact" "uncovered	${S62_W2}..${S62_W3}" "$(s57_of check)"
+expect_eq "62f5 …and the judge says failing, naming that log" "failing	record/wave-01-fixture/release-check-${S62_W3}.log" "$(s57_of check)"
 
 # ---------- refusals before the command runs ----------
 echo 0 > "$S62_RCF"
@@ -10996,7 +11003,7 @@ expect_eq "62g3 …and the judge: check covered at the new head" "covered" "$(s5
 s62_att() {  # <log> -> PA_OUT, PA_RC
   PA_OUT="$(bash -c '. "$1" && proof_attested check "$2" "$3"' _ "$S57_LIB" "$1" "$S62_WT" 2>/dev/null)"; PA_RC=$?
 }
-s62_att "$S62_REC/release-check-${S62_W3}.log"
+s62_att "$S62_REC/release-check-${S62_W3}-2.log"
 expect_eq "62p proof_attested check: a log opening head=<checkout head> rc=0 attests that head" "0 ${S62_W3}" "$PA_RC $PA_OUT"
 s62_att "$S62_LOG2"
 expect_eq "62p2 …a log of an older head is refused" "1" "$PA_RC"
@@ -11007,6 +11014,91 @@ expect_eq "62p4 …a log opening rc=1 is refused" "1" "$PA_RC"
 printf 'scan\nhead=%s rc=0\n' "$S62_W3" > "$S62_REC/late.log"
 s62_att "$S62_REC/late.log"
 expect_eq "62p5 …and so is a log whose first line is not the header" "1" "$PA_RC"
+
+# ---------- T31: review pass 22's S2, S3, S4 and B1's verb half (wave-27 T31; A-orch-75) ----------
+# Rows 62x…, each red on T16's verb. Logs at one head are numbered: the first run's is
+# release-check-<head>.log, the n-th's release-check-<head>-<n>.log, so no run overwrites another's.
+# At this point W3 holds three logs: 62f's fail (the first), 62g's pass (-2).
+# S4: a tracked file touched, its content unchanged, is not dirt.
+S62_N="$(s62_runs)"
+touch -t 203001010000 "$S62_WT/lib/b.sh"
+expect_eq "62x precondition: touch left lib/b.sh's content as the head has it" "0" \
+  "$(git -C "$S62_WT" show HEAD:lib/b.sh | cmp -s - "$S62_WT/lib/b.sh"; echo $?)"
+expect_eq "62x0 precondition: …while an unrefreshed index calls it changed" "1" \
+  "$(git -C "$S62_WT" diff-index --quiet HEAD -- >/dev/null 2>&1; echo $?)"
+s42_snap "$R62" "$P62"
+poke "$R62" release-check
+expect_eq "62x S4 a touched file with unchanged content is not dirt: the verb runs and passes (exit 0)" "0" "$RC"
+expect_eq "62x2 …and the command ran" "$((S62_N + 1))" "$(s62_runs)"
+git -C "$S62_WT" update-index -q --refresh >/dev/null 2>&1  # the rows below never ride on S4's answer
+# S3: a pass at H, then the same command exiting 1 at H, then a pass.
+echo 1 > "$S62_RCF"
+poke "$R62" release-check
+expect_eq "62x3 S3 a pass at H, then the same command exiting 1 at H: refused (exit 1)" "1" "$RC"
+s57_state "$P62" "$S62_W3"
+expect_eq "62x4 …and the judge says failing, naming the second run's log" \
+  "failing	record/wave-01-fixture/release-check-${S62_W3}-4.log" "$(s57_of check)"
+expect_eq "62x4b …so the run does not hold (rc 1)" "1" "$S57_RC"
+expect_eq "62x5 …the later log does not overwrite the earlier: the third run's log opens rc=0, the fourth's rc=1" \
+  "head=${S62_W3} rc=0|head=${S62_W3} rc=1" \
+  "$(head -n 1 "$S62_REC/release-check-${S62_W3}-3.log" 2>/dev/null)|$(head -n 1 "$S62_REC/release-check-${S62_W3}-4.log" 2>/dev/null)"
+echo 0 > "$S62_RCF"
+poke "$R62" release-check
+s57_state "$P62" "$S62_W3"
+expect_eq "62x6 …and a run after it that passes: covered" "covered" "$(s57_of check)"
+
+# S2: the base is the nearest release tag that is a PROPER ancestor of the working head. The working
+# branch is merged into main, so tags on it are reachable from the integration branch; v9-wip (W1)
+# becomes one too.
+( cd "$R62" && git merge -q --no-edit -m 'release merge' wave/01-fixture ) >/dev/null 2>&1
+S62_M="$(git -C "$R62" rev-parse main)"
+expect_eq "62x7 precondition: the working head W3 is on main, and main's tip is past it" "yes no" \
+  "$(git -C "$R62" merge-base --is-ancestor "$S62_W3" main && echo yes || echo no) $([ "$S62_M" = "$S62_W3" ] && echo yes || echo no)"
+git -C "$R62" tag v62-a "$S62_W2"; git -C "$R62" tag v62-b "$S62_W3"
+poke "$R62" release-check
+expect_eq "62x8 S2 v62-a on an ancestor and v62-b on the head: the base is v62-a, the nearer of v62-a and v9-wip" \
+  "0 base=${S62_W2} head=${S62_W3}" "$RC $(s62_seen | awk '{ print $1, $2 }')"
+git -C "$R62" tag -d v62-a v9-wip >/dev/null 2>&1
+poke "$R62" release-check
+expect_eq "62x9 …only v62-b, on the head, and a base-sha: the base is the base-sha" \
+  "0 base=${S62_C0} head=${S62_W3}" "$RC $(s62_seen | awk '{ print $1, $2 }')"
+git -C "$R62" tag v62-c "$S62_M"
+poke "$R62" release-check
+expect_eq "62x10 …and a tag on a commit that is not an ancestor of the head (main's tip) is no base either" \
+  "0 base=${S62_C0} head=${S62_W3}" "$RC $(s62_seen | awk '{ print $1, $2 }')"
+cp "$P62" "$TMPROOT/s62-with-base"
+awk '!/^  base-sha: /' "$TMPROOT/s62-with-base" > "$P62"
+s42_snap "$R62" "$P62"; S62_N="$(s62_runs)"
+poke "$R62" release-check
+s42_unchanged "62x11 only v62-b on the head and no base-sha" 1 "$P62"
+expect_contains "62x11b …refused as a range with no start" "so the release range has no start" "$OUT"
+expect_eq "62x11c …and the command did not run" "$S62_N" "$(s62_runs)"
+awk -v h="$S62_W3" '/^  base-sha: / { $0 = "  base-sha: " h } { print }' "$TMPROOT/s62-with-base" > "$P62"
+s42_snap "$R62" "$P62"
+poke "$R62" release-check
+s42_unchanged "62x12 a base-sha at the head itself and no tag a proper ancestor: a range holding no commit" 1 "$P62"
+expect_contains "62x12b …is refused, never judged" "holds no commit" "$OUT"
+expect_eq "62x12c …and the command did not run" "$S62_N" "$(s62_runs)"
+cp "$TMPROOT/s62-with-base" "$P62"; s42_snap "$R62" "$P62"
+
+# B1, the verb's half: a range that changes a tracked path the declared command names as a word.
+printf '#!/bin/bash\nexec bash %s "$@"\n' "$S62_CHK" > "$S62_WT/scan.sh"
+( cd "$S62_WT" && git add scan.sh && git commit -qm W4 ) >/dev/null 2>&1
+S62_W4="$(git -C "$S62_WT" rev-parse HEAD)"
+printf 'release-check: bash scan.sh lib/a.sh\n' > "$R62/.bionic/config.yaml"
+expect_eq "62x13 precondition: both words name tracked paths at W4" "lib/a.sh scan.sh" \
+  "$(git -C "$S62_WT" ls-files -- scan.sh lib/a.sh | sort | tr '\n' ' ' | sed 's/ $//')"
+poke "$R62" release-check
+S62_B1_OK="$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'release-check — kind=check')"
+expect_eq "62x14 B1 a range (v62-b..W4) that changes scan.sh, which the command names: the check runs over it and passes" \
+  "0 base=${S62_W3} head=${S62_W4}" "$RC $(s62_seen | awk '{ print $1, $2 }')"
+expect_contains "62x15 …and the success line carries check-changed: scan.sh" "check-changed: scan.sh" "$S62_B1_OK"
+expect_eq "62x15b …and so does the log's first line" "check-changed: scan.sh" \
+  "$(head -n 1 "$S62_REC/release-check-${S62_W4}.log" 2>/dev/null)"
+expect_eq "62x16 …while lib/a.sh, named but not changed by the range, is on no such line (the log holds one)" "1 0" \
+  "$(/usr/bin/grep -c '^check-changed: ' "$S62_REC/release-check-${S62_W4}.log" 2>/dev/null) $(printf '%s\n' "$OUT" | /usr/bin/grep -c 'check-changed: lib/a.sh')"
+s57_state "$P62" "$S62_W4"
+expect_eq "62x17 …and the fact is still written: the judge says covered at W4" "covered" "$(s57_of check)"
 # THE WORKING TREE IS HANDED TO THE CHECK (wave-27 T34; T50's record, S3): BIONIC_CHECK_TREE, the
 # absolute path of the working checkout, beside BIONIC_CHECK_BASE and BIONIC_CHECK_HEAD.
 S62_TREE_SEEN="$TMPROOT/s62-tree-seen"
@@ -11487,8 +11579,185 @@ s58_rec retry5.md "reviewed: ${S58_C1}..${S58_C4}" "question: evidence" "result:
 printf 'sweeper-ledger/v1|event=ack|name=r-re5a|at=2026-10-04T00:00:00Z|reason=landed\n' >> "$R58/.bionic/tmp/sweeper-$SID.state"
 poke "$R58" proof-add review record/wave-01-fixture/retry5.md --question evidence --reader r-re5
 expect_eq "63x19 F3 …nor another name's confirmed row acked after its launch: r-re5 registers (exit 0)" "0" "$RC"
+# ---------- T31: a hex placeholder never hides a real base (wave-27 T31; review pass 25 F2) ----------
+# The base is the first value, in the order of places, that is 7 to 40 hex AND names a commit in
+# the plan's repository; a hex word that names none (`deadbeef`, forty zeros) is passed over as a
+# non-hex word is. With no place naming a commit there is no base, and the refusal names the value.
+R63Y="$(make_repo s63y-base)"; ( cd "$R63Y" && git commit -q --allow-empty -m B ) >/dev/null 2>&1
+S63Y_B="$(git -C "$R63Y" rev-parse HEAD)"
+S63Y_H="$(s57_commit "$R63Y" lib/a.sh H)"
+s63y_plan() {  # <frontmatter base> <Step-4 base> -> the plan path
+  local p
+  p="$(s42_plan "$R63Y" 4 "  worktree: .
+  base-sha: $2
+  branch: main")"
+  awk -v b="$1" '{ print } /^scale: / && !f { print "base-sha: " b; f = 1 }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  printf '%s' "$p"
+}
+P63Y="$(s63y_plan "$S63Y_B" deadbeef)"
+expect_eq "63y F2 a real frontmatter base beside a Step-4 base-sha: deadbeef: the base is the real commit" "$S63Y_B" \
+  "$(bash -c '. "$1" && proof_plan_base "$2" "$3"' _ "$S57_LIB" "$P63Y" "$R63Y")"
+mkdir -p "$R63Y/.bionic/docs/record/wave-01-fixture"
+printf 'reviewed: %s..%s\nquestion: evidence\nresult: pass\nscope: piece\n' "$S63Y_B" "$S63Y_H" > "$R63Y/.bionic/docs/record/wave-01-fixture/r63y.md"
+expect_eq "63y2 …and a first reading from it is attested (proof_attested, what proof-add review holds a reading to)" "0 $S63Y_H" \
+  "$(bash -c '. "$1" && x="$(proof_attested review "$2" "$3" "$4" evidence)"; printf "%s %s" "$?" "$x"' _ "$S57_LIB" \
+      "$R63Y/.bionic/docs/record/wave-01-fixture/r63y.md" "$R63Y" "$P63Y")"
+S63Y_ERR="$(bash -c '. "$1" && facts_state "$2" "$3" 2>&1 >/dev/null; echo "rc=$?"' _ "$S57_LIB" "$P63Y" "$S63Y_H")"
+expect_eq "63y3 …and the judge deals the plan (no exit 2, nothing said about its base)" "rc=1" "$S63Y_ERR"
+P63Y="$(s63y_plan 0000000000000000000000000000000000000000 deadbeef)"
+S63Y_ERR="$(bash -c '. "$1" && facts_state "$2" "$3" 2>&1 >/dev/null; echo "rc=$?"' _ "$S57_LIB" "$P63Y" "$S63Y_H")"
+expect_contains "63y4 both places hex and neither a commit: no base, the judge exits 2" "rc=2" "$S63Y_ERR"
+expect_contains "63y5 …naming the value it found and that it is no commit here" "its base-sha: deadbeef is no commit here" "$S63Y_ERR"
 POKE_BOUND="$S63_BOUND_WAS"
 
+# ============================================================
+section "Section 64 §DEBT: a declared red that landed is a fact the run owes until a green run after its token cleared (wave-27 T31; REQ-14 AC-14.3, AC-14.2; D23)"
+# ============================================================
+#
+# `land` prints `landed-red=<suite>` for a row that declared its red at dispatch, and the
+# orchestrator's state line for the row records `landed red: <suite> until <token>`.
+# `facts_owed <rigor> <scale> <tree> <plan>` then deals one `debt<TAB><suite><TAB><token>` per such
+# line, and `facts_state` answers it `covered` only when a floor proof, or a task proof whose log
+# shows that suite green, carries an `at=` later than the token's clearing (an `approval:` token
+# clears at its `approved:` line), `absent` otherwise; `current 8`, which asks the judge, refuses
+# while it is open. `amend` has no way to add the declaration.
+#
+# FIXTURE FIDELITY. §61's shape: a plan bound to this session at `current: 7`, its working branch
+# in a linked worktree, every reading and the floor at the head written by the production writers
+# (s61-style, proof_line placed by proof_add_line, at 2026-10-04T12:00:00Z), and §47's reads
+# column so `approve release` (the verb that writes the approved: line) has a row reading it. The
+# state line is written as the orchestrator writes a state line, by hand, because no verb writes it.
+S64_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+R64="$(make_repo s64-debt)"; ( cd "$R64" && git commit -q --allow-empty -m init )
+git -C "$R64" config user.name "Dana Fixture"
+S64_B="$(git -C "$R64" rev-parse HEAD)"
+P64="$(s42_plan "$R64" 7 "  worktree: .worktrees/01-fixture
+  base-sha: ${S64_B:0:8}
+  branch: wave/01-fixture")"
+awk '
+  /^current: / && !d { print; print "working-branch: wave/01-fixture"; d = 1; next }
+  /^- T1: landed at record\/T1.md/ { print; print "- T9: landed at record/T9.md, landed red: widget.test.sh until approval:release at 2026-10-04T11:00:00Z"; next }
+  /^\| id \| step \|/ { print $0 " reads |"; next }
+  /^\|---\|/ { print $0 "---|"; next }
+  /^\| T5 \|/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " approval:release |"; next }
+  /^\| T[0-9]+ \|/ { print $0 "  |"; next }
+  { print }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+( cd "$R64" && git add -f "$P64" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$R64/.worktrees/01-fixture" "$S64_B" ) >/dev/null 2>&1
+S64_WT="$R64/.worktrees/01-fixture"
+S64_H="$(s57_commit "$S64_WT" lib/a.sh C1)"
+S64_REC="$R64/.bionic/docs/record/wave-01-fixture"; mkdir -p "$S64_REC"
+s64_add() {  # <line> -> placed in P64 by the production placer
+  bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S61_LIB" "$P64" "$1" > "$P64.new" && mv "$P64.new" "$P64"
+}
+s64_proof() {  # <kind> <at> <evidence under record/>
+  s64_add "$(bash -c '. "$1" && proof_line "$2" "$3" "$4" "$5"' _ "$S61_LIB" "$1" "$S64_H" "$2" "$3")"
+}
+s64_owed() {  # the floor and every reading owed at the head, all at 2026-10-04T12:00:00Z
+  local q
+  s64_proof floor 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log
+  for q in evidence adversarial structure; do
+    s64_add "$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" piece' \
+      _ "$S61_LIB" "$S64_H" "record/wave-01-fixture/$q.md" "$q" pass)"
+  done
+  for q in adversarial structure; do
+    s64_add "$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" whole' \
+      _ "$S61_LIB" "$S64_H" "record/wave-01-fixture/$q-whole.md" "$q" pass)"
+  done
+}
+s64_owed
+cp "$P64" "$TMPROOT/s64-clean"
+s64_reset() { cp "$TMPROOT/s64-clean" "$P64"; }
+S64_DEBT="$(printf 'debt\twidget.test.sh\tapproval:release')"
+
+# ---------- the dealing ----------
+expect_eq "64a §DEBT facts_owed with the plan deals one debt line per landed red: state line" "$S64_DEBT" \
+  "$(bash -c '. "$1" && facts_owed audited wave "$2" "$3"' _ "$S61_LIB" "$R64" "$P64" | /usr/bin/grep '^debt')"
+expect_eq "64a2 …and the dealing of a rigor alone carries none (the positive above is the same function)" "" \
+  "$(bash -c '. "$1" && facts_owed audited wave "$2"' _ "$S61_LIB" "$R64" | /usr/bin/grep '^debt')"
+
+# ---------- open: absent, and current 8 refused ----------
+s57_state "$P64" "$S64_H"
+expect_eq "64b AC-14.3 the judge says the debt absent while its token has not cleared" "absent" "$(s57_of "$S64_DEBT")"
+expect_eq "64b2 …so the run does not hold (rc 1)" "1" "$S57_RC"
+expect_eq "64b3 …while the floor at the head is covered" "covered" "$(s57_of floor)"
+s42_snap "$R64" "$P64"
+poke "$R64" current 8
+s42_unchanged "64c AC-14.3 current 8 with the debt open" 1 "$P64"
+expect_contains "64c2 …printing the judge's line for it" "$(printf 'debt\twidget.test.sh\tapproval:release\tabsent')" "$OUT"
+
+# ---------- the token clears; a green proof dated before it does not cover ----------
+poke "$R64" approve release 'Ship it.'
+expect_eq "64d0 precondition: approve release wrote the approved: line" "0" "$RC"
+S64_AP="$(sed -n 's/^approved: release by Dana Fixture \([^ ]*\) .*/\1/p' "$P64")"
+expect_regex "64d0b …at a UTC time later than the fixture's proofs" '^20[0-9]{2}-' "$S64_AP"
+s57_state "$P64" "$S64_H"
+expect_eq "64d …with only the floor proof dated BEFORE the approval, the debt is still absent" "absent" "$(s57_of "$S64_DEBT")"
+cp "$P64" "$TMPROOT/s64-approved"
+
+# ---------- a floor proof after the clearing covers it, and current 8 is admitted ----------
+s64_proof floor 2099-01-01T00:00:00Z record/wave-01-fixture/floor-late.log
+s57_state "$P64" "$S64_H"
+expect_eq "64e a floor proof whose at= is later than the approval covers the debt" "covered" "$(s57_of "$S64_DEBT")"
+expect_eq "64e2 …and the run holds (rc 0)" "0" "$S57_RC"
+s42_snap "$R64" "$P64"
+poke "$R64" current 8
+expect_eq "64f …and current 8 is admitted" "0" "$RC"
+
+# ---------- a task proof covers it only when its log shows that suite green ----------
+cp "$TMPROOT/s64-approved" "$P64"
+printf 'widget.test.sh: 12/12 passed, 0 failed\nrc=0\n' > "$S64_REC/widget-green.log"
+printf 'other.test.sh: 9/9 passed, 0 failed\nrc=0\n' > "$S64_REC/other-green.log"
+s64_proof task 2099-01-01T00:00:00Z record/wave-01-fixture/other-green.log
+s57_state "$P64" "$S64_H"
+expect_eq "64g a later task proof whose log shows another suite green does not cover it" "absent" "$(s57_of "$S64_DEBT")"
+s64_proof task 2099-01-01T00:00:01Z record/wave-01-fixture/widget-green.log
+s57_state "$P64" "$S64_H"
+expect_eq "64g2 …one whose log shows widget.test.sh green does" "covered" "$(s57_of "$S64_DEBT")"
+cp "$TMPROOT/s64-approved" "$P64"
+printf 'widget.test.sh: 11/12 passed, 1 failed\nrc=1\n' > "$S64_REC/widget-red.log"
+s64_proof task 2099-01-01T00:00:00Z record/wave-01-fixture/widget-red.log
+s57_state "$P64" "$S64_H"
+expect_eq "64g3 …and one whose log shows it red does not" "absent" "$(s57_of "$S64_DEBT")"
+
+# ---------- amend cannot add the declaration ----------
+poke "$R64" amend w1 --lands-red+ 'widget.test.sh until approval:release' --reason 'land it red'
+expect_eq "64h AC-14.2 amend has no way to add a declaration: --lands-red+ is a usage refusal (exit 2)" "2" "$RC"
+expect_contains "64h2 …naming the argument" "unknown argument for amend: --lands-red+" "$OUT"
+poke "$R64" amend w1 --red-evidence+ record/wave-01-fixture/T9-red.md --reason 'land it red'
+expect_eq "64h3 …and so is --red-evidence+" "2" "$RC"
+
+# ---------- the line's own time (A-orch-85): no `at <ISO-UTC>`, never covered ----------
+cp "$TMPROOT/s64-approved" "$P64"
+sed 's/ until approval:release at 2026-10-04T11:00:00Z/ until approval:release/' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+s64_proof floor 2099-01-01T00:00:00Z record/wave-01-fixture/floor-late.log
+s57_state "$P64" "$S64_H"
+expect_regex "64i a landed red: line with no at <ISO-UTC> is never covered: absent, the judge naming the missing time" \
+  '^absent	.*at <ISO-UTC>' "$(s57_of "$S64_DEBT")"
+
+# ---------- an ext: debt (A-orch-85): the slug gone from every ## Tasks cell, and a green run after the red landing ----------
+S64_EXT="$(printf 'debt\twidget.test.sh\text:vendor-key')"
+s64_ext_plan() {  # <slug still in T2's deps cell: yes|no> -> P64 with an ext: state line in place of the approval one
+  cp "$TMPROOT/s64-clean" "$P64"
+  awk -v keep="$1" '
+    /landed red: widget.test.sh until approval:release/ { sub(/until approval:release at 2026-10-04T11:00:00Z/, "until ext:vendor-key at 2026-10-05T04:00:00Z") }
+    keep == "yes" && /^\| T2 \|/ { sub(/\| — \| 30 \|/, "| ext:vendor-key | 30 |") }
+    { print }' "$P64" > "$P64.tmp" && mv "$P64.tmp" "$P64"
+}
+s64_ext_plan yes
+expect_eq "64j0 precondition: the slug sits in T2's deps cell" "1" "$(/usr/bin/grep -c '^| T2 |.*ext:vendor-key' "$P64")"
+s64_proof floor 2026-10-05T05:00:00Z record/wave-01-fixture/floor-05.log
+s57_state "$P64" "$S64_H"
+expect_eq "64j the slug still in a cell, a floor proof at 05:00Z after the 04:00Z red landing: absent" "absent" "$(s57_of "$S64_EXT")"
+s64_ext_plan no
+s64_proof floor 2026-10-05T05:00:00Z record/wave-01-fixture/floor-05.log
+s57_state "$P64" "$S64_H"
+expect_eq "64j2 the slug removed from every cell, the same floor proof: covered" "covered" "$(s57_of "$S64_EXT")"
+s64_ext_plan no
+s64_proof floor 2026-10-05T03:00:00Z record/wave-01-fixture/floor-03.log
+s57_state "$P64" "$S64_H"
+expect_eq "64j3 the slug removed and the only green proof dated 03:00Z, before the red landing: absent" "absent" "$(s57_of "$S64_EXT")"
+POKE_BOUND="$S64_BOUND_WAS"
 # ============================================================
 section "Section 65 §DECLINE-VERB §DECLINE-LOG §BUDGET-USER: a wall is never answered on the console (wave-27 T34; REQ-15 AC-15.1, AC-15.4, AC-15.5; D24)"
 # ============================================================

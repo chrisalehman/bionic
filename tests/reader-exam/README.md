@@ -30,6 +30,9 @@ be sat again before the tree is green.
 - `materialize.sh <sample dir> <dest>`: builds the repository a reader is given, with an empty
   `.bionic/` of its own, and prints its range `<a>..<b>`. The key does not travel into it,
   and a `<dest>` whose path, as written or resolved, names the sample in any case is refused.
+- `run-session.sh <dest> <plugin copy> <prompt file> <output file>` and
+  `gen-prompt.sh <brief file>...`: the two helpers step 3 names. The first starts one
+  session headless, the second writes its prompt.
 - `sittings.md`: every sitting, newest last. The suite reads the last one in the file.
 
 ## The samples
@@ -80,18 +83,34 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    reviewer, then the one-mind critic), `red-then-green` twice, and one for each other sample.
    The first sitting used eight, because step 3's proof took a `clean` build for one reviewer.
 3. **Open an engaged session on the built sample.** `cd <dest> && claude --plugin-dir
-   "$PLUGIN"`. The session's project is the built sample, so the readers' working directory,
+   "$PLUGIN"`, or, headless as the first sitting ran it, `bash tests/reader-exam/gen-prompt.sh
+   <brief file>... > <prompt file>` and then `bash tests/reader-exam/run-session.sh <dest>
+   "$PLUGIN" <prompt file> <output file>`. The session's project is the built sample, so the readers' working directory,
    records and searches stay inside it. The built sample carries its own `.bionic/`, so it is
    a bionic root, and the session's first act is `/bionic:canonical-sdlc`, so it is engaged.
    bionic's start push reaches only the readers of an engaged session in a bionic root.
    **The first thing a sitting checks** is that this worked: a reader dispatched there holds
    the pushed files, and its role is the copy's, not the installed plugin's. A sitting whose
    readers held no checks files is not recorded.
+   - **The two helpers.** `run-session.sh` starts the session as `cd <dest> && claude -p
+     --plugin-dir "$PLUGIN" --output-format json "<prompt>"`, with no other flag and no setting
+     that widens what a session may do. It runs the CLI binary and not a shell function of the
+     same name, which may add flags, and it clears the parent session's identity variables, so
+     the session carries only its own. A session or a reader denied a tool is reported to the
+     user and never worked round. It writes `<output file>` (the JSON result, which holds the
+     session's id), `<output file>.err` and `<output file>.time`. `gen-prompt.sh` writes the
+     prompt on stdout: `/bionic:canonical-sdlc` first, then an instruction to dispatch each brief
+     exactly as written, to the agent type named on its first line, in the foreground, and, on a
+     refusal, to stop and never retry; to save any record a reader returned as text, unchanged,
+     at the path its brief names; and to reply with each record's path and whether it exists.
+     Each `<brief file>` is the line `subagent_type: <agent type>` and then the brief of
+     step 4, which is dispatched without that first line. The briefs given to one call are the
+     readers that share a build (step 2), so the prompt sends them together, in one message;
+     `STEP_ZERO=1` has the session quote the agent descriptions first, as below.
    - **Loading the built roles.** `--plugin-dir "$PLUGIN"` loads the copy's roles and hooks in
      place of the installed plugin's for that session. The first sitting (wave-27 T22) ran each
-     session headless, `cd <dest> && claude -p --plugin-dir "$PLUGIN" --output-format json
-     "<prompt>"`, with the prompt opening with `/bionic:canonical-sdlc` and no flag or setting
-     that widens what a session may do. The slash command is all the engagement needs
+     session headless, as `run-session.sh` does, with the prompt opening with
+     `/bionic:canonical-sdlc`. The slash command is all the engagement needs
      (`hooks/engage.sh` writes `<dest>/.bionic/tmp/engaged-<session>.state`). After it the
      session only dispatches: the dispatch wall writes each reader's row, with its
      `questions=`, to `<dest>/.bionic/tmp/roster-<session>.state`, and the start push reads
@@ -100,9 +119,15 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
      listed once, with the `description:` line of `$PLUGIN/agents/<role>.md`. (At the first
      sitting the installed 1.11.0 plugin had no reviewer and another critic description.) Then
      read each reader's transcript,
-     `~/.claude/projects/<dest, each / and . written ->/<session>/subagents/agent-<id>.jsonl`.
-     Its `.meta.json` names the `agentType`. Its `hook_success` attachments name each
-     `SubagentStart` command that ran: one bare `execution-recorder.sh`, and
+     `~/.claude/projects/<name>/<session>/subagents/agent-<id>.jsonl`. `<name>` is the
+     session's physical working directory (`cd <dest> && pwd -P`, which on macOS turns `/var`
+     into `/private/var`) with every character that is not an ASCII letter or digit written
+     `-`: `sed 's/[^A-Za-z0-9]/-/g'`. So `/private/var/folders/x_y/T/tmp.AbC/s1` is
+     `-private-var-folders-x-y-T-tmp-AbC-s1`, and `_` and `.` are rewritten as well as `/`. The
+     session's own transcript is `~/.claude/projects/<name>/<session>.jsonl`, `<session>` being
+     the `session_id` in `<output file>`. The first sitting's eight directories all follow this
+     rule. A reader's `.meta.json` names the `agentType`, and its `hook_success` attachments
+     name each `SubagentStart` command that ran: one bare `execution-recorder.sh`, and
      `execution-recorder.sh <question>` for each question dealt, a registration only the copy's
      `hooks/hooks.json` carries.
 4. **Dispatch the readers** in that session, through the ordinary dispatch path, one dispatch

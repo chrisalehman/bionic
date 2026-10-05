@@ -63,6 +63,8 @@ A cwd guard belongs on the WHOLE command, `cd <tree> || exit 1` first, never on 
 
 **Parallel writers work in spawned worktrees.** Whoever dispatches a parallel writer creates that writer's tree first: creation authority follows dispatch authority at every level, orchestrator included — during a parallel-writer phase an orchestrator that writes tracked files takes a tree of its own, and `.bionic` plan and ledger writes remain a file-ownership question rather than an exemption from this one. The tree comes from `${CLAUDE_PLUGIN_ROOT}/scripts/spawn-worktree.sh`, which verifies what it built and attests it in a single line — the placeholder resolved as above. The dispatcher runs `spawn-worktree.sh create` with `--for <name>`, the roster name it gives the dispatch, so the recorder writes the tree and its measured base commit into the row. Landing is automatic: `worktree_land_for_session` (`standdown`, `spawn-worktree.sh land`) merges into the plan's `working-branch:`, in the checkout that holds it. The harness `isolation: worktree` param is retired from bionic briefs at every level: it creates trees no ledger row can account for. A worktree writer's relative record path lands, via `create`'s alias, in the project's one docs tree — no brief needs an absolute path.
 
+**A red by design is a declared debt.** A proof that needs an owner-gated or external step is planned as its own row behind that step's token. A row that must land red first declares `Lands-red:` and `Red-evidence:`, and the run owes that suite green once the token clears.
+
 **The starting standard.** A subagent may be dispatched only when: the environment attestation from this session is present; a work contract exists at launch, naming the task and a durable deliverable path; and the launch is ledgered the moment it happens.
 
 **Ledger the dispatch, not the return.** A launch is one call: the execution recorder confirms it on the roster, sets the plan row `active` and adds its ledger line. On the completion notification, `task-set` and `ledger-set` the row. The roster the dispatch hook writes at launch and completes at execution-confirmation is the authoritative launch record; the plan's dispatch ledger renders it, not the reverse. The row's `agent` cell carries the ROSTER NAME the dispatch gave the agent (for example `w21-T5`), byte for byte, never the role: the gate matches that cell to a roster name, and the role lives in the task cell's complexity tag and the dispatch ledger.
@@ -110,6 +112,8 @@ Files: <every path the task may create or edit>  # a reader lists its records he
 Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reader dealt evidence names 1 to 3 runs across both labels
 Re-executes: `<cmd>`
 Questions: <q>[, <q>]  # reader roles only
+Lands-red: <suite> until <ext:slug | approval:name>  # optional
+Red-evidence: <path under record/>  # with Lands-red:
 Deliverable-waiver: <reason>  # only for a report returned by message
 ```
 <!-- BRIEF-SCAFFOLD-END -->

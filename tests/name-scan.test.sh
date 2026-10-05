@@ -18,7 +18,7 @@
 #   §BASE   at a head that carries the newest tag the default base is the tag before it
 #           (T32 finding 2).
 #   §LIST   a list line is stripped of edge blanks, a CR and a BOM before use (T32 finding 3,
-#           T52 finding 9).
+#           T52 finding 9), and of every Unicode space perl's \s knows (T61 note).
 #   §TRACE  an inherited GIT_TRACE* file never receives an entry (T32 finding 4, T52 finding 11).
 #   §BASH32 the whole scan under /bin/bash (3.2) prints the lines the PATH bash prints.
 #   §ARGV   no entry is a word of any command line, and git config tracing records none.
@@ -38,13 +38,16 @@
 #   §COST   one pass for the whole list, and a 500-entry clean scan of this repository inside
 #           its time ceiling (T52 finding 13); 20,000 matching lines in one blob inside 5
 #           seconds (T56 N8).
-#   §WRAP   white space inside an entry matches any run of white space holding at most one line
-#           break, and one comment leader after the break; never none (T56 B1).
+#   §WRAP   between two words of an entry: horizontal white space on one line, or ONE line break
+#           with white space, at most 24 symbols and at most three tags on each side; never
+#           none, never a blank line, never symbols on one line (T56 B1, T61 B1).
 #   §PUSHED the objects a push sends: a commit or blob "fixed" by `git replace` is read as the
 #           original, and a nested tag's inner message is read (T56 N1, N3).
-#   §PERLDB a caller's perl debugger variables print no entry (T56 N4).
+#   §PERLDB a caller's perl debugger or module variables print no entry, each of the five with
+#           a row a copy that keeps it fails (T56 N4, T61 S2).
 #   §INERT  the locale pick and the BASH_ENV unset each have a row that fails without them
 #           (T56 N6, N7).
+#   §SIGNAL TERM and HUP at a random moment leave no temporary tree (T61 note).
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"): every
 # repository is a real `git init` under a mktemp directory, with real commits, real
@@ -413,6 +416,31 @@ printf '\357\273\277# a comment\n%s\n' "$EL" > "$TMP/lists/lst5"
 scan "$R" "$TMP/lists/lst5"
 expect_eq "LIST: a comment behind a BOM is skipped and counted — the entry is line 2" "HIT entry=2 at blob $NB line 1" "$(hits)"
 expect_contains "LIST: one entry" "entries=1" "$OUT"
+# a list line is trimmed of every Unicode space at both ends (T61 note): an entry never begins
+# with an empty word, so it is found at the very start of a text
+NBSP=$'\302\240'
+R="$TMP/list2"; fx_repo "$R"
+printf 'mxv9 plover opens this file\n' > "$R/start.txt"; fx_commit "$R" "add start"
+SB="$(s12 "$R" HEAD:start.txt)"
+scan "$R" "$(fx_list lst6 "${NBSP}mxv9 plover${NBSP}")"
+expect_eq "LIST: <NBSP>entry<NBSP> is the entry — found at the very start of a text" "HIT entry=1 at blob $SB line 1" "$(hits)"
+expect_contains "LIST: (same run) one entry" "entries=1" "$OUT"
+# every character perl's \s matches (but the newline a list line cannot hold), at both ends of
+# its own list line: each line is the entry, found at the very start of the text
+SPACES="$(perl -CS -Mfeature=unicode_strings -e 'for (0 .. 0x3000) { my $c = chr; print $c if $c =~ /\s/ && $c ne "\n" }')"
+expect_true "LIST: perl's \\s set holds NBSP and U+3000 (extractor non-empty)" \
+  perl -CSA -e 'exit(($ARGV[0] =~ /\x{a0}/ && $ARGV[0] =~ /\x{3000}/) ? 0 : 1)' "$SPACES"
+perl -CSA -e 'my $s = shift; print "${_}mxv9 plover${_}\n" for split //, $s' "$SPACES" > "$TMP/lists/lst7"
+NSP="$(wc -l < "$TMP/lists/lst7" | tr -d ' ')"
+scan "$R" "$TMP/lists/lst7"
+expect_contains "LIST: one line per white space character, each an entry" "entries=$NSP " "$OUT"
+expect_eq "LIST: every one of the $NSP lines is found at the very start of the text" \
+  "$NSP" "$(hits | grep -c " at blob $SB line 1\$")"
+# a line of nothing but Unicode spaces is blank: skipped, counted, never an empty entry
+printf '%s\n%s\n' "$NBSP$NBSP" "mxv9 plover" > "$TMP/lists/lst8"
+scan "$R" "$TMP/lists/lst8"
+expect_eq "LIST: a line of NBSP alone is skipped but counted — the entry is line 2" "HIT entry=2 at blob $SB line 1" "$(hits)"
+expect_contains "LIST: (same run) it is not an entry" "entries=1 " "$OUT"
 
 section "§TRACE — an inherited git trace file does not record an entry (T32 finding 4, T52 finding 11)"
 
@@ -755,6 +783,11 @@ committer email|look($mail, "commit $sha $who", 0);|look($mail, "commit $sha $wh
 tag name|look($ref, "tag $s", 0);|look("", "tag $s", 0);
 tag message|look($msg, "tag $sha", 0);|look("", "tag $sha", 0);
 wrapped text|join $ws, map|join " ", map
+text blob|(?<ws>\h++|(?<ws>(?!)
+wrapped text|my $run = qr{\h*+(?:$sym\h*+){0,24}};|my $run = qr{(?:$sym){0,24}};
+wrapped text|(?>$side)\R$side|(?>$side)\n$side
+symbol-wrapped text|my $sym = qr{(?!$tag)[^\p{L}\p{Nd}\s]};|my $sym = qr{(?!)};
+tag-wrapped text|my $tag = qr{<[^<>\v]{0,200}+>};|my $tag = qr{(?!)};
 SITES
 
 section "§COST — one pass for the whole list, inside the time ceiling (T52 finding 13)"
@@ -777,7 +810,12 @@ expect_eq "COST: and runs the matcher twice (the power check and the scan), what
 # a clean 500-entry scan of this repository, read-only, under the 20-second ceiling
 if git -C "$BIONIC_SCRIPTS_DIR" rev-parse --verify -q HEAD >/dev/null 2>&1; then
   i=0; : > "$TMP/lists/cost500"
-  while [ "$i" -lt 500 ]; do printf 'zqtm-%04d-xv\n' "$i" >> "$TMP/lists/cost500"; i=$((i + 1)); done
+  # entries of two and three words (T61 note), so the bound times the wrap construction
+  while [ "$i" -lt 500 ]; do
+    if [ $((i % 2)) -eq 0 ]; then printf 'zqtm%04d xvq\n' "$i"; else printf 'zqtm%04d xvq yqj%03d\n' "$i" "$i"; fi >> "$TMP/lists/cost500"
+    i=$((i + 1))
+  done
+  expect_eq "COST: (fixture) half the 500 entries have three words" "250" "$(grep -c '^zqtm[0-9]* xvq yqj' "$TMP/lists/cost500")"
   T0="$(date +%s)"
   scan "$BIONIC_SCRIPTS_DIR" "$TMP/lists/cost500"
   EL_S=$(( $(date +%s) - T0 ))
@@ -801,6 +839,43 @@ echo "COST: a scan with 20,000 matching lines took ${EL_S}s"
 expect_status "COST: 20,000 matching lines — exit 1" 1 "$RC"
 expect_eq "COST: (same run) one hit per line" "20000" "$(hits | grep -c '^HIT ')"
 expect_contains "COST: (same run) the last hit names line 20000" "HIT entry=1 at blob $(s12 "$R" HEAD:many.txt) line 20000" "$(hits)"
+expect_true "COST: and took under 5 seconds (took ${EL_S}s)" [ "$EL_S" -lt 5 ]
+# the wrap construction cannot backtrack without bound (T61 B1): a megabyte of `-`, of `<`, of
+# `"`, and of lines that are blanks and one symbol, the entry's first word every 64 characters
+# so the construction is tried there each time, each a clean scan inside 5 seconds measured here
+R="$TMP/costmb"; fx_repo "$R"
+perl -e 'my $u = "mxv9" . ("-" x 60); print $u x 16384' > "$R/dash.txt"
+perl -e 'my $u = "mxv9" . ("<" x 60); print $u x 16384' > "$R/lt.txt"
+perl -e 'my $u = "mxv9" . ("\"" x 60); print $u x 16384' > "$R/quote.txt"
+perl -e 'my $u = "mxv9\n" . ("     ;     \n" x 5); print $u x 16384' > "$R/blank.txt"
+fx_commit "$R" "a megabyte each"
+for f in dash.txt lt.txt quote.txt blank.txt; do
+  expect_true "COST: (fixture) $f is at least a megabyte" [ "$(wc -c < "$R/$f" | tr -d ' ')" -ge 1048576 ]
+done
+T0="$(date +%s)"
+scan "$R" "$(fx_list costmb "$E3")"
+EL_S=$(( $(date +%s) - T0 ))
+echo "COST: a scan of four megabytes of punctuation and blank lines took ${EL_S}s"
+expect_status "COST: the megabytes of punctuation scan clean" 0 "$RC"
+expect_contains "COST: (same run) one entry read, no hit" "entries=1 hits=0" "$OUT"
+expect_true "COST: and took under 5 seconds (took ${EL_S}s)" [ "$EL_S" -lt 5 ]
+# a list line that opens with a Unicode space, over a text of 200 KB of blanks (T61 note: an
+# entry that began with an empty word cost 100 seconds on 50 KB)
+R="$TMP/cost200k"; fx_repo "$R"
+perl -e 'print "mxv9 plover\n", " \xc2\xa0" x 70000, "see mxv9 plover\n"' > "$R/blanks.txt"
+fx_commit "$R" "blanks"
+expect_true "COST: (fixture) the blank text is over 200 KB" [ "$(wc -c < "$R/blanks.txt" | tr -d ' ')" -ge 204800 ]
+L="$(fx_list cost200k "${NBSP}mxv9 plover")"
+T0="$(date +%s)"
+# a hard ceiling: the scan runs in its own process group, killed whole after 20 seconds (a
+# quadratic scan would otherwise hold the suite for many minutes)
+OUT="$(cd "$R" && perl -e 'setpgrp(0, 0); $SIG{ALRM} = sub { kill "KILL", -$$ }; alarm 20; system @ARGV; exit($? >> 8)' \
+  env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD bash "$SCAN" "$L" 2>&1)"; RC=$?
+EL_S=$(( $(date +%s) - T0 ))
+echo "COST: a scan of 200 KB of blanks with a list line opening on NBSP took ${EL_S}s"
+expect_status "COST: the blank text with a list line opening on NBSP — exit 1" 1 "$RC"
+expect_contains "COST: (same run) the entry at the very start of the blank text is found" "HIT entry=1 at blob $(s12 "$R" HEAD:blanks.txt) line 1" "$(hits)"
+expect_contains "COST: (same run) and the one after the 200 KB of blanks" "HIT entry=1 at blob $(s12 "$R" HEAD:blanks.txt) line 2" "$(hits)"
 expect_true "COST: and took under 5 seconds (took ${EL_S}s)" [ "$EL_S" -lt 5 ]
 
 section "§QUIET — no entry is printed or recorded"
@@ -885,18 +960,46 @@ printf 'see mxv9\n\n\nplover here\n' > "$W/blank-lines.txt"
 printf 'see ZQ-WRAP-6630 here\nand zq-wrap\n6630 there\n' > "$W/one-word.txt"
 printf 'see ZQ.V+\n(1) here\n' > "$W/meta.txt"
 printf 'see zqXvv (1) here\n' > "$W/meta-not.txt"
+# T61 B1: at the one line break, each side may hold horizontal white space, at most 24 symbols
+# and at most three tags, in any mix: the three forms of review pass 37, then the rest
+printf 'echo "the mxv9 " \\\n     "plover case"\n' > "$W/sh-args.sh"
+printf '<text x="60" y="412">the mxv9</text>\n  <text x="60" y="430" class="s">plover case</text>\n' > "$W/text.svg"
+printf '@@ -1,2 +1,4 @@\n+# the mxv9\n+# plover case\n' > "$W/change.patch"
+printf '["mxv9",\n "plover"]\n' > "$W/array.json"
+printf '<p>mxv9<br/>\nplover</p>\n' > "$W/br.html"
+printf '## the mxv9\n## plover\n' > "$W/hash2.md"
+printf '>> mxv9\n>> plover\n' > "$W/quote2.md"
+printf ';; mxv9\n;; plover\n' > "$W/semi2.el"
+printf 'see mxv9\302\240plover here\n' > "$W/nbsp.txt"
+printf 'mxv9 %s\nplover\n' "$(printf '%024d' 0 | tr 0 '-')" > "$W/sym24.txt"
+printf 'x mxv9<a><b><c>\n<d><e><f>plover\n' > "$W/tags3.html"
+printf 'zqtri\nwenlo daspy\n' > "$W/tri-gap1.txt"
+printf 'zqtri wenlo\n# daspy\n' > "$W/tri-gap2.txt"
+printf 'zqtri "\n" wenlo</b>\n  <b>daspy\n' > "$W/tri-both.txt"
+# not found: symbols between two words on ONE line, a blank line, symbols over the bound, a
+# letter at the break, four tags on one side
+printf 'see mxv9, plover here\n' > "$W/comma-one-line.txt"
+printf 'see mxv9 - plover here\n' > "$W/dash-one-line.txt"
+printf 'mxv9 %s\nplover\n' "$(printf '%025d' 0 | tr 0 '-')" > "$W/sym25.txt"
+printf 'see mxv9\nx plover\n' > "$W/letter.txt"
+printf 'x mxv9<a><b><c><d>\nplover\n' > "$W/tags4.html"
 git -C "$R" add -A
 git -C "$R" commit -q -m "$(printf 'docs: where the scan came from\n\nIt was first written for the mxv9\nplover project.')"
-L="$(fx_list wrap1 "$E3" "$EW1" "$EW2")"
+L="$(fx_list wrap1 "$E3" "$EW1" "$EW2" "zqtri wenlo daspy")"
 scan "$R" "$L"
 expect_status "WRAP: a tree and a commit body holding the wrapped entry exit 1" 1 "$RC"
 wb() { s12 "$R" "HEAD:w/$1"; }
-for f in 'md.md|2' 'two-spaces.txt|1' 'tab.txt|1' 'crlf.txt|1' 'hash.sh|1' 'slashes.c|1' 'doc-slashes.rs|1' 'block.c|2' 'quote.md|1' 'dashes.sql|1' 'semi.ini|1'; do
+for f in 'md.md|2' 'two-spaces.txt|1' 'tab.txt|1' 'crlf.txt|1' 'hash.sh|1' 'slashes.c|1' 'doc-slashes.rs|1' 'block.c|2' 'quote.md|1' 'dashes.sql|1' 'semi.ini|1' \
+  'sh-args.sh|1' 'text.svg|1' 'change.patch|2' 'array.json|1' 'br.html|1' 'hash2.md|1' 'quote2.md|1' 'semi2.el|1' 'nbsp.txt|1' 'sym24.txt|1' 'tags3.html|1'; do
   expect_eq "WRAP: ${f%%|*} — the entry is found once, on the line its match starts on" \
     "HIT entry=1 at blob $(wb "${f%%|*}") line ${f#*|}" "$(hits | grep -F "blob $(wb "${f%%|*}") ")"
 done
+for f in tri-gap1.txt tri-gap2.txt tri-both.txt; do
+  expect_eq "WRAP: $f — a three-word entry wrapped at one gap or both is found once, on line 1" \
+    "HIT entry=4 at blob $(wb "$f") line 1" "$(hits | grep -F "blob $(wb "$f") ")"
+done
 expect_contains "WRAP: a commit body wrapped between the words is a hit" "HIT entry=1 at commit $(s12 "$R" HEAD) message" "$(hits)"
-for f in run-together.txt leader-one-line.txt blank-lines.txt meta-not.txt; do
+for f in run-together.txt leader-one-line.txt blank-lines.txt meta-not.txt comma-one-line.txt dash-one-line.txt sym25.txt letter.txt tags4.html; do
   expect_nonempty "WRAP: $f has a blob id (extractor non-empty)" "$(wb "$f")"
   expect_no_regex "WRAP: $f — not a hit (same output)" "blob $(wb "$f")" "$(hits)"
 done
@@ -905,6 +1008,19 @@ expect_eq "WRAP: a one-word entry matches exactly as before — its one-line for
 expect_eq "WRAP: an entry with regex metacharacters is literal, and wraps at its space" \
   "HIT entry=3 at blob $(wb meta.txt) line 1" "$(hits | grep -F "blob $(wb meta.txt) ")"
 expect_eq "WRAP: the scan's whole output holds the two-word entry's words zero times" "0" "$(count_in "$OUT" plover)"
+# the not-found forms alone scan clean (rc=0), and one wrapped form added to them is a hit
+R2="$TMP/wrap2"; fx_repo "$R2"; mkdir -p "$R2/w"
+for f in run-together.txt leader-one-line.txt comma-one-line.txt dash-one-line.txt blank-lines.txt sym25.txt letter.txt tags4.html; do
+  cp "$W/$f" "$R2/w/$f"
+done
+fx_commit "$R2" "the forms that are not a wrap"
+scan "$R2" "$(fx_list wrap2 "$E3")"
+expect_status "WRAP: the forms that are not a wrap, alone — exit 0" 0 "$RC"
+expect_contains "WRAP: (same run) one entry read, no hit" "entries=1 hits=0" "$OUT"
+cp "$W/sh-args.sh" "$R2/w/sh-args.sh"; fx_commit "$R2" "one wrap"
+scan "$R2" "$(fx_list wrap2b "$E3")"
+expect_eq "WRAP: the same tree plus one wrapped form — that one blob is the only hit (control)" \
+  "HIT entry=1 at blob $(s12 "$R2" HEAD:w/sh-args.sh) line 1" "$(hits)"
 
 section "§PUSHED — the objects a push sends, not a local replacement (T56 N1, N3)"
 
@@ -950,6 +1066,43 @@ scan "$R" "$(fx_list perldb "$EPD")" PERL5OPT=-d PERLDB_OPTS='NonStop=1 frame=6 
 expect_status "PERLDB: with the debugger in the caller's environment the run still exits 1" 1 "$RC"
 expect_eq "PERLDB: (same run) it prints the hit" "HIT entry=1 at blob $(s12 "$R" HEAD:b.txt) line 1" "$(hits)"
 expect_eq "PERLDB: (same run) stdout and stderr hold the entry zero times" "0" "$(count_in "$OUT" "$EPD")"
+# each of the five variables the scan unsets has its own row (T61 S2), red on a copy that keeps
+# it: a module directory whose strict.pm prints the matcher's list file (its first argument) to
+# stderr, and a debugger hook that does the same
+HM="$TMP/hostile-lib"; mkdir -p "$HM"
+cat > "$HM/strict.pm" <<'PM'
+package strict;
+sub import { if (@ARGV && open(my $h, "<", $ARGV[0])) { local $/; my $d = <$h>; $d =~ tr/\0/\n/; print STDERR "HOSTILE $d\n" } }
+sub unimport {}
+1;
+PM
+DBHOOK='BEGIN { if (@ARGV && open(my $h, "<", $ARGV[0])) { local $/; my $d = <$h>; $d =~ tr/\0/\n/; print STDERR "HOSTILE $d" } } sub DB::DB {}'
+UNSET='unset PERL5OPT PERL5LIB PERLLIB PERL5DB PERLDB_OPTS'
+# var|the env the row sets|the unset on the copy that must leak (PERL5DB and PERLDB_OPTS act only
+# under -d, which reaches the matcher through PERL5OPT alone: their copies keep PERL5OPT too)
+while IFS='|' read -r var keep mark; do
+  case "$var" in
+    PERL5OPT) set -- PERL5OPT="-I$HM -Mstrict" ;;
+    PERL5LIB) set -- PERL5LIB="$HM" ;;
+    PERLLIB) set -- PERLLIB="$HM" ;;
+    PERL5DB) set -- PERL5OPT=-d PERL5DB="$DBHOOK" ;;
+    PERLDB_OPTS) set -- PERL5OPT=-d PERLDB_OPTS='NonStop=1 frame=6 LineInfo=/dev/stderr' ;;
+  esac
+  scan "$R" "$(fx_list "pv-$var" "$EPD")" "$@"
+  expect_eq "PERLDB: $var set by the caller — the scan still prints the hit" "HIT entry=1 at blob $(s12 "$R" HEAD:b.txt) line 1" "$(hits)"
+  expect_eq "PERLDB: $var — (same run) stdout and stderr hold the entry zero times" "0" "$(count_in "$OUT" "$EPD")"
+  D="$(doctor "keep-$var" "$UNSET" "$keep")"
+  expect_false "PERLDB: $var — the copy that keeps it differs from the scan" cmp -s "$SCAN" "$D"
+  scanx "$D" "$R" "$(fx_list "pvk-$var" "$EPD")" "$@"
+  expect_contains "PERLDB: $var — the copy that keeps it ran what the variable names (positive)" "$mark" "$OUT"
+  expect_ne "PERLDB: $var — and the copy that keeps it prints the entry (the row can fail)" "0" "$(count_in "$OUT" "$EPD")"
+done <<'VARS'
+PERL5OPT|unset PERL5LIB PERLLIB PERL5DB PERLDB_OPTS|HOSTILE
+PERL5LIB|unset PERL5OPT PERLLIB PERL5DB PERLDB_OPTS|HOSTILE
+PERLLIB|unset PERL5OPT PERL5LIB PERL5DB PERLDB_OPTS|HOSTILE
+PERL5DB|unset PERL5LIB PERLLIB PERLDB_OPTS|HOSTILE
+PERLDB_OPTS|unset PERL5LIB PERLLIB PERL5DB|entries=1
+VARS
 
 section "§INERT — the locale pick and the BASH_ENV unset each do something (T56 N6, N7)"
 
@@ -988,5 +1141,32 @@ expect_false "INERT2: the copy without the unset differs from the scan" cmp -s "
 scanx "$NOBASHENV" "$R" "$(fx_list inert2b "$E1")" PATH="$WRAPGIT:$PATH" BASH_ENV="$TMP/bashenv.sh"
 expect_status "INERT2: the copy without the unset still runs (positive)" 1 "$RC"
 expect_ne "INERT2: and without the unset every bash wrapper reads BASH_ENV (the row can fail)" "1" "$(wc -l < "$BENV" | tr -d ' ')"
+
+section "§SIGNAL — TERM and HUP at any moment leave no temporary tree (T61 note)"
+
+# fifty runs per signal, each killed after a random delay inside one measured run's length; the
+# temp root is the run's own TMPDIR, read after the killed scan has exited
+R="$TMP/sig1"; fx_repo "$R"
+printf 'see %s\n' "$E3" > "$R/s.txt"; fx_commit "$R" "add s"
+L="$(fx_list sig1 "$E3")"
+ST="$TMP/sigtmp"; mkdir -p "$ST"
+now() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
+T0="$(now)"; scan "$R" "$L" TMPDIR="$ST"; T1="$(now)"
+expect_status "SIGNAL: an unkilled run is a hit run (control)" 1 "$RC"
+expect_empty "SIGNAL: and leaves nothing under its TMPDIR (control)" "$(ls -A "$ST")"
+for sig in TERM HUP; do
+  killed=0; left=0
+  for k in $(seq 1 50); do
+    d="$(perl -e 'printf "%.3f", rand($ARGV[0] - $ARGV[1])' "$T1" "$T0")"
+    ( cd "$R" && TMPDIR="$ST" exec bash "$SCAN" "$L" >/dev/null 2>&1 ) & p=$!
+    sleep "$d"; kill -"$sig" "$p" 2>/dev/null; wait "$p"; rc=$?
+    [ "$rc" -gt 128 ] && killed=$((killed + 1))
+    sleep 0.2
+    if [ -n "$(ls -A "$ST")" ]; then left=$((left + 1)); rm -rf "${ST:?}"/*; fi
+  done
+  echo "SIGNAL: $sig — 50 runs, $killed ended by the signal, $left left a tree"
+  expect_ne "SIGNAL: $sig — some of the 50 runs ended by the signal (positive)" "0" "$killed"
+  expect_eq "SIGNAL: $sig — no run of the 50 left a tree under its TMPDIR" "0" "$left"
+done
 
 finish

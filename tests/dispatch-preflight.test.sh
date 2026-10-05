@@ -5934,7 +5934,11 @@ for _role in bionic:researcher bionic:test-runner bionic:auditor bionic:critic b
   k2_write_plan "$REPO" 4 ""
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" audited)" "w30e" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
-  expect_status "30e a ${_role} dispatch against the SAME unapproved plan passes" "0" "$GATE_ST"
+  # REBUILT (wave-27 T31; A-orch-43): a deny exits 0 too, so the exit said nothing. The verdict
+  # and the row the wall recorded do.
+  expect_eq "30e a ${_role} dispatch against the SAME unapproved plan is admitted" "allow" "$GATE_VERDICT"
+  expect_eq "30e2 …and the wall recorded its launch row, as that role" "intended ${_role}" \
+    "$(_r=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1); printf '%s %s' "$(roster_field "$_r" status)" "$(roster_field "$_r" subagent_type)")"
 done
 
 # --- 30f: below Step 4 the arm BINDS too (wave-20 T7, AC-9.1) ---
@@ -6036,9 +6040,15 @@ for _role in bionic:researcher bionic:test-runner bionic:critic; do
   REPO=$(make_repo "r31e-${_role##*:}" yes)
   write_attestation "$REPO" "$SID_A"
   k2_write_task_plan "$REPO" T1 ""
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" tested)" "w31e" "claude-sonnet-5" \
+  # A tested critic is dealt three questions, so it names three records (wave-27 T49's rule).
+  _e31=""; [ "$_role" = bionic:critic ] && _e31="
+Files: .bionic/docs/record/w99-widget.txt, .bionic/docs/record/w99-adv.md, .bionic/docs/record/w99-str.md"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL$(k2_questions "$_role" tested)$_e31" "w31e" "claude-sonnet-5" \
                                "$S5_LIVE_TRANSCRIPT" "$_role")"
-  expect_status "31e a ${_role} dispatch against the SAME unapproved task-scale plan passes" "0" "$GATE_ST"
+  # REBUILT (wave-27 T31; A-orch-43), as 30e: the verdict and the recorded row, not the exit.
+  expect_eq "31e a ${_role} dispatch against the SAME unapproved task-scale plan is admitted" "allow" "$GATE_VERDICT"
+  expect_eq "31e2 …and the wall recorded its launch row, as that role" "intended ${_role}" \
+    "$(_r=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1); printf '%s %s' "$(roster_field "$_r" status)" "$(roster_field "$_r" subagent_type)")"
 done
 
 # --- 31f: any n >= 1 binds, not only T1 ---
@@ -6355,10 +6365,11 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # full-run arm, so a brief with no suite set leaves one wall unable to answer, not two. The
 # variable part is one extra fault plus two not-checked lines; the fixed part is unmoved.
 # RAISED 17 -> 18 (wave-27 T17, D5): the scaffold gained the readers' `Questions:` line; the FIXED part is fifteen, ELEVEN scaffold lines.
-expect_eq "§combined meta: the shipped scaffold is eleven lines, the count both caps are built on" \
-  "11" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
-expect_status "§combined …the wire is at most 18 lines (15 + 1 extra fault + 2 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 18 ] && echo 0 || echo 1)"
+# RAISED 18 -> 20 (wave-27 T31, D23): the scaffold gained `Lands-red:` and `Red-evidence:`; the FIXED part is seventeen, THIRTEEN scaffold lines.
+expect_eq "§combined meta: the shipped scaffold is thirteen lines, the count both caps are built on" \
+  "13" "$(scaffold_block "$DISPATCH_FILE" | wc -l | tr -d ' ')"
+expect_status "§combined …the wire is at most 20 lines (17 + 1 extra fault + 2 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 20 ] && echo 0 || echo 1)"
 expect_contains "§combined …and the fixed line that grew it is the prompt-only sentence" \
   "The wall reads the prompt text only." "$GATE_REASON"
 # AND THE FULL-RUN WALL'S LINE IS NAMED — a cap without saying which line fills it is a
@@ -7342,8 +7353,8 @@ expect_contains "§three-arms …and the brief-shape fault" \
 # optional `Subprocess claim:` (§combined holds the nine). Three faults: thirteen plus two.
 # The fixed part is FOURTEEN since wave-24 T9 (AC-4.8): the scaffold's tenth line is the
 # optional `Done marker:` (§combined holds the ten). Three faults: fourteen plus two.
-expect_status "§three-arms …and the wire is at most 17 lines (15 + one per additional fault)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 17 ] && echo 0 || echo 1)"
+expect_status "§three-arms …and the wire is at most 19 lines (17 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 19 ] && echo 0 || echo 1)"
 # NOT VACUOUS: a wire that named nothing extra would also be under the cap. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
 # MOVED WITH THE FIXED PART (wave-21 T7; again at wave-24 T9): a wire that grew by nothing is
@@ -10155,6 +10166,69 @@ expect_eq "FILES-LIST18 a prose item of 55 characters is refused by a deny" "den
 FL_LINE=$(printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused')
 expect_contains "FILES-LIST18 …whose first line names it, cut" "Files: this list covers every file the task may … is not a path (drop it)" "$FL_LINE"
 
+# ============================================================================
+section "§LR — a declared debt is recorded at dispatch, and only a well-formed one (wave-27 T31; REQ-14 AC-14.1, AC-14.2, D23)"
+# ============================================================================
+#
+# A brief may carry `Lands-red: <suite> until <ext:slug | approval:name>` and `Red-evidence: <path
+# under record/>`, each on a line of its own. The wall records both on the launch row as
+# `lands_red=` and `red_evidence=`, and refuses a Lands-red: with no Red-evidence:, a suite outside
+# the row's suite set, and a token of any other shape. It is the keys' one writer: `land` honours
+# only what a row carried from its launch.
+# FIXTURES: adv_brief's writer contract (Suites: tests/widget.test.sh, so the row's set is
+# widget.test.sh), on make_repo's approved, bound plan. SYNTHESIZED.
+# fails-when: a well-formed declaration is refused or not recorded; one of the three faults is
+# admitted; a brief with no declaration, or the scaffold's unfilled slots, records a key.
+lr_gate() {  # <repo tag> <body lines> -> GATE_*, LR_ROW
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief "$2")" "w99-$1")"
+  LR_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+lr_gate lr1 'Lands-red: widget.test.sh until approval:release
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
+expect_eq "LR1 a Lands-red: on the row's own suite, with its evidence and an approval: token, is admitted" "allow" "$GATE_VERDICT"
+expect_eq "LR1b …the row carries lands_red=<suite> until <token>" "widget.test.sh until approval:release" \
+  "$(roster_field "$LR_ROW" lands_red)"
+expect_eq "LR1c …and red_evidence=<path>" ".bionic/docs/record/wave-01-test/T9-red.md" "$(roster_field "$LR_ROW" red_evidence)"
+lr_gate lr1x 'Lands-red: tests/widget.test.sh until ext:vendor-fix
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
+expect_eq "LR1x an ext:<slug> token is admitted too, the suite recorded by its basename" "allow widget.test.sh until ext:vendor-fix" \
+  "$GATE_VERDICT $(roster_field "$LR_ROW" lands_red)"
+
+lr_gate lr2 'Lands-red: widget.test.sh until approval:release'
+expect_eq "LR2 a Lands-red: with no Red-evidence: is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR2b …the line names the missing label" "Lands-red: with no Red-evidence: line" "$GATE_ERR"
+expect_contains "LR2c …and the detail the line to add" "    Red-evidence: <path under record/>" "$GATE_VERR"
+expect_eq "LR2d …and no row is written" "" "$LR_ROW"
+
+lr_gate lr3 'Lands-red: other.test.sh until approval:release
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
+expect_eq "LR3 a Lands-red: on a suite outside the row's suite set is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR3b …naming the suite" "Lands-red: other.test.sh is outside Suites:" "$GATE_ERR"
+expect_contains "LR3c …and the set it may name from" "Suites: widget.test.sh" "$GATE_VERR"
+
+lr_gate lr4 'Lands-red: widget.test.sh until someday
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md'
+expect_eq "LR4 a token that is neither ext:<slug> nor approval:<name> is refused" "deny" "$GATE_VERDICT"
+expect_contains "LR4b …the line says so" "Lands-red: names no blocker token" "$GATE_ERR"
+expect_contains "LR4c …and the detail names the two forms" "ext:<slug>" "$GATE_VERR"
+expect_contains "LR4d …both of them" "approval:<name>" "$GATE_VERR"
+
+lr_gate lr5 'Scope constraint: touch only payload/scripts/lib/widget.sh.'
+expect_eq "LR5 a brief that declares no debt is admitted" "allow" "$GATE_VERDICT"
+expect_contains "LR5b …its row is written (the extractor reads a real row)" "status=intended" "$LR_ROW"
+expect_absent "LR5c …with no lands_red= on it" "lands_red=" "$LR_ROW"
+expect_absent "LR5d …nor red_evidence=" "red_evidence=" "$LR_ROW"
+lr_gate lr6 'Lands-red: <suite> until <ext:slug | approval:name>
+Red-evidence: <path under record/>'
+expect_eq "LR6 the scaffold's two slots pasted unfilled declare nothing: admitted" "allow" "$GATE_VERDICT"
+expect_contains "LR6b …its row is written" "status=intended" "$LR_ROW"
+expect_absent "LR6c …with no lands_red= on it" "lands_red=" "$LR_ROW"
+lr_gate lr7 'Lands-red: widget.test.sh until approval:release  # optional
+Red-evidence: .bionic/docs/record/wave-01-test/T9-red.md  # with Lands-red:'
+expect_eq "LR7 the two lines filled with the scaffold's comments kept: admitted, the comments off the values" \
+  "allow|widget.test.sh until approval:release|.bionic/docs/record/wave-01-test/T9-red.md" \
+  "$GATE_VERDICT|$(roster_field "$LR_ROW" lands_red)|$(roster_field "$LR_ROW" red_evidence)"
 # --- FILES-LIST19..: one pair of punctuation around a path, and a trailing `;` (wave-27 T49; review
 # pass 19 should-fix 1). The reader strips from an item ONE surrounding pair of double quotes, single
 # quotes, parentheses, square brackets or backticks, and a trailing `;`; what is left is judged as any
