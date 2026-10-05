@@ -70,9 +70,15 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    `bash tests/reader-exam/materialize.sh tests/reader-exam/samples/<name> <dest>`, where
    `<dest>` is a new directory under the machine's temporary directory, for example
    `"$(mktemp -d)/s1"`. `materialize.sh` refuses a `<dest>` whose path names the sample, and
-   one that is this checkout or lies inside it, since a build there sits beside every answer
-   key. Keep the printed range, and note which `<dest>` holds which sample: the readers see
-   only `<dest>`.
+   one that lies inside any worktree of this repository (this checkout, a worktree under it,
+   or one elsewhere), since a build there sits beside every answer key. It resolves `<dest>`
+   once, links and `..` followed, and builds where that leads; a `.` or `..` among the parts
+   of `<dest>` that do not exist yet is refused. It runs itself again at once with
+   `PATH=/usr/bin:/bin` and nothing else of the caller's environment, so it finds its
+   worktrees with the git in `/usr/bin` or `/bin`: when it lies in a checkout and that
+   lookup fails, it refuses, saying so. A copy of it outside any checkout refuses on neither
+   ground. Keep the printed range, and note which `<dest>` holds which sample: the readers
+   see only `<dest>`.
 
    Two readers of the same agent type never share a build. On a sample keyed `adversarial`,
    and on `clean`, the critic dealt `adversarial` and the one-mind critic are both
@@ -96,12 +102,21 @@ built sample, outside this checkout, with a copy of this checkout's plugin loade
    - **The two helpers.** `run-session.sh` starts the session as `cd <dest> && claude -p
      --plugin-dir "$PLUGIN" --output-format json "<prompt>"`, with no other flag and no setting
      that widens what a session may do. It runs the CLI binary and not a shell function of the
-     same name, which may add flags, and it refuses, before anything runs, a `<dest>` inside this
-     checkout, a `claude` on `PATH` that is a relative path (an entry `.`, an empty entry) or a file
-     inside `<dest>`, and a fifth argument. It clears the parent session's identity variables, so
-     the session carries only its own. A session or a reader denied a tool is reported to the
-     user and never worked round. It writes `<output file>` (the JSON result, which holds the
-     session's id), `<output file>.err` and `<output file>.time`. `gen-prompt.sh` writes the
+     same name, which may add flags. It refuses, before it runs the CLI or writes anything, a
+     `<dest>` or an `<output file>` inside any worktree of this repository, an `<output file>`
+     inside `<dest>` or one (or its `.err` or `.time`) that exists as anything but a regular
+     file, a `PATH` holding any entry that is not an absolute directory (`.`, an empty entry or
+     a relative one, whether or not a `claude` is there: the session inherits `PATH`), a `claude`
+     that is a file inside `<dest>`, and a fifth argument; inside a checkout whose lookup of its
+     worktrees fails, it refuses too. Its own steps run under an environment it makes, with
+     `PATH=/usr/bin:/bin` and none of the caller's functions, aliases, `CDPATH` or `BASH_ENV`;
+     the caller's `PATH` is read only to find `claude`, and the caller's environment goes to the
+     session alone. Each path it is given is resolved once, physically, and used as resolved,
+     so the session's working directory and its `--plugin-dir` are physical paths. It clears
+     the parent session's identity variables, so the session carries only its own. A session
+     or a reader denied a tool is reported to the user and never worked round. It writes
+     `<output file>` (the JSON result, which holds the session's id), `<output file>.err` and
+     `<output file>.time`. `gen-prompt.sh` writes the
      prompt on stdout: `/bionic:canonical-sdlc` first, then an instruction to dispatch each brief
      exactly as written, to the agent type named on its first line, in the foreground, and, on a
      refusal, to stop and never retry; to save any record a reader returned as text, unchanged,
