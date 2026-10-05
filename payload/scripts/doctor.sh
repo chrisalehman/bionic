@@ -2649,9 +2649,9 @@ if [ "$LEGACY_ALIAS_STATE" != "not-a-file" ]; then
   if [ -n "$_legacy_alias_bound" ]; then
     case "$_legacy_alias_why" in
       ok)       _legacy_alias_label="retired alias, bionic's, in your own code"; _legacy_alias_tail=" → edit it by hand" ;;
-      no-shell) _legacy_alias_label="retired alias, bionic cannot check it"
-                _legacy_alias_tail=" → $(bionic_rc_shell "$(_detect_shell_rc)") is not installed: edit it by hand" ;;
-      no-parse) _legacy_alias_label="retired alias, bionic cannot check it"; _legacy_alias_tail=" → the file does not parse: edit it by hand" ;;
+      # The reason is the label, so the place keeps its column whole (A-T55.9).
+      no-shell) _legacy_alias_label="retired alias, $(bionic_rc_shell "$(_detect_shell_rc)") is not installed"; _legacy_alias_tail=" → edit it by hand" ;;
+      no-parse) _legacy_alias_label="retired alias, the rc does not parse"; _legacy_alias_tail=" → edit it by hand" ;;
       *)        _legacy_alias_label="retired alias, bionic cannot check it"; _legacy_alias_tail=" → edit it by hand" ;;
     esac
     _doctor_env_row "$DOCTOR_NIL" "$_legacy_alias_label" \
