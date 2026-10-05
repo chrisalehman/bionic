@@ -621,6 +621,95 @@ units_live_rows() {
   _UNITS_EVIDENCE="$*" _UNITS_QUESTION="$q" _UNITS_READER="$r" _units_sched liverows "$plan" ""
 }
 
+# A READ AFTER A FIX IS TOLD WHAT MOVED (wave-27 T43; D10; A-orch-48, A-orch-71). Once a question has
+# its `scope=whole` reading, a later read of it covers the fixes that landed past that reading, and
+# the tick names them beside the RANGE line. A row's landing is read from the run's LANDING RECORD,
+# `<docs-root>/record/<plan name>/landing-proofs.log`, which `land` appends (T44): one header line
+# per landing, `landed: row=<id|—> branch=<b> head=<40-hex> merge=<40-hex> at=<ISO-UTC>`, with
+# `stamp/v1|…` lines under it. A row's landing is the `merge=` of the LAST header carrying its row.
+# Never the prose of a state line, and never git: which merges lie inside a range is the caller's
+# answer (the tick's, which already reads git), handed in on stdin.
+#
+# units_whole_read <plan> <row id> -> exit 0 when the row reads `live:head:<q>[+<q>]` and every one
+# of its questions has a `scope=whole` reading; 1 otherwise, a bare row included (it names none).
+units_whole_read() {
+  [ "$(_units_sched whole "${1:-}" "${2:-}" 2>/dev/null)" = whole ]
+}
+
+# units_landings <plan> <record> -> `<row id><TAB><merge or -><TAB><owed or ->`, table order: each
+# `## Tasks` row the record names, with its last merge, and each `build` row that is `landed` or
+# `done` with none, as `-`. `owed` marks a landed or done build row: it must carry a landing, so the
+# caller counts it unknown when the record has none or its merge is no commit. A header whose
+# `row=` is `—` or an id the table lacks names no row; a merge that is not hex is no landing.
+units_landings() { _units_landed landings "${1:-}" "" "${2:-}" < /dev/null; }
+
+# units_rows_in_range <plan> <a>..<b> <record> -> `<row id><TAB><serves><TAB><criteria>` for each
+# row whose landing is one of the merges on stdin (one per line: those the caller found inside
+# <a>..<b>), table order; criteria are the `## Verification Matrix` rows of each requirement it
+# serves, `AC-<n>.<m>` for `REQ-<n>`, comma-joined. Nothing, exit 0, when none is; exit 2 when the
+# range is not `<a>..<b>`.
+units_rows_in_range() {
+  case "${2:-}" in ?*..?*) ;; *) return 2 ;; esac
+  _units_landed inrange "${1:-}" "${2:-}" "${3:-}"
+}
+
+# _units_landed <landings|inrange> <plan> <range> <record> — the one program behind the two verbs:
+# the rows (`units_rows`), the record's header lines, the plan's matrix, then stdin's merges.
+_units_landed() {
+  local mode="$1" plan="$2" rec="$4" rows
+  rows="$(units_rows "$plan" 2>/dev/null)" || return 1
+  {
+    printf '\034rows\n'; printf '%s\n' "$rows"
+    printf '\034rec\n'; [ -f "$rec" ] && awk '{ sub(/\r$/, ""); print }' "$rec" 2>/dev/null
+    printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$plan" 2>/dev/null
+    printf '\034in\n'; [ "$mode" = inrange ] && cat
+  } | awk -F'\t' -v mode="$mode" '
+    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+    $0 == "\034rows" { part = 1; next }
+    $0 == "\034rec" { part = 2; next }
+    $0 == "\034plan" { part = 3; next }
+    $0 == "\034in" { part = 4; next }
+    part == 1 { if ($1 == "") next; n++; id[n] = $1; knd[n] = $3; srv[n] = $8; st[n] = $10; at[$1] = n; next }
+    part == 2 {
+      if ($0 !~ /^landed:[ \t]/) next
+      r = ""; m = ""; nf = split($0, f, /[ \t]+/)
+      for (k = 2; k <= nf; k++) {
+        if (f[k] ~ /^row=/) r = substr(f[k], 5)
+        else if (f[k] ~ /^merge=/) m = tolower(substr(f[k], 7))
+      }
+      if (!(r in at)) next
+      lm[r] = (m ~ /^[0-9a-f]+$/ && length(m) >= 7 && length(m) <= 40) ? m : "-"
+      next
+    }
+    part == 3 {
+      if ($0 ~ /^[ \t]*```/) { fence = !fence; next }
+      if (fence) next
+      if ($0 ~ /^## /) { inm = ($0 ~ /^## Verification Matrix/); next }
+      if (!inm || $0 !~ /^\|[ \t]*AC-[0-9]+\./) next
+      split($0, c, "|"); ac = trim(c[2]); q = ac; sub(/^AC-/, "", q); sub(/\..*$/, "", q)
+      crit[q] = (q in crit) ? crit[q] ", " ac : ac
+      next
+    }
+    part == 4 { v = tolower(trim($0)); if (v != "") inr[v] = 1; next }
+    END {
+      for (i = 1; i <= n; i++) {
+        owed = (knd[i] == "build" && (st[i] == "landed" || st[i] == "done"))
+        if (mode == "landings") {
+          if (id[i] in lm) printf "%s\t%s\t%s\n", id[i], lm[id[i]], (owed ? "owed" : "-")
+          else if (owed) printf "%s\t-\towed\n", id[i]
+          continue
+        }
+        if (!(id[i] in lm) || !(lm[id[i]] in inr)) continue
+        cr = ""; ns = split(srv[i], sv, ",")
+        for (k = 1; k <= ns; k++) {
+          q = trim(sv[k]); if (q !~ /^REQ-[0-9]+$/) continue
+          q = substr(q, 5); if (q in crit) cr = cr (cr == "" ? "" : ", ") crit[q]
+        }
+        printf "%s\t%s\t%s\n", id[i], srv[i], cr
+      }
+    }'
+}
+
 # units_floor_holds <plan> [<id>] -> `<id><TAB><step><TAB><status>`, table order, for each row the
 # FLOOR waits on that has not landed (or been dropped) and writes a tracked file (wave-26 T52;
 # review 14 B1, ruling R1). The floor is row <id>; with no id, every open verify or test row, the
@@ -687,7 +776,7 @@ _units_proof_awk() {
 # `holds` (units_floor_holds) takes the floor row's id, or nothing, in the <step> slot.
 _units_sched() {
   local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows scale=wave hasreads=0 i fst rc
-  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ]; then
+  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ]; then
     case "$step" in
       ''|*[!0-9]*)
         case "$step" in
@@ -851,6 +940,8 @@ _units_sched_awk() {
         # A line with no question (1.11.0) is the last proof of no question (A-T2.4).
         pn++
         if (PROOF_KIND == "review" && PROOF_QUESTION != "") { prvq[PROOF_QUESTION] = PROOF_HEAD; prvn[PROOF_QUESTION] = pn }
+        # A WHOLE READING (wave-27 T43; D10) is remembered per question: units_whole_read asks it.
+        if (PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_SCOPE == "whole") wholeq[PROOF_QUESTION] = 1
       }
       next
     }
@@ -1224,6 +1315,14 @@ _units_sched_awk() {
       # head handed in, one per line, and nothing while one has no reading; units_live_range picks
       # the start among them by ancestry (T43; review pass 17 F2). A bare row, an unknown id, or no
       # id at all is answered here, as through 1.11.0.
+      # THE WHOLE READ OF ONE READ ROW (wave-27 T43): every question it carries has a whole reading.
+      if (mode == "whole") {
+        if (!(want in at) || !nq[at[want]] || rbadq[at[want]]) exit
+        i = at[want]
+        for (k = 1; k <= nq[i]; k++) if (!(rq[i, k] in wholeq)) exit
+        print "whole"
+        exit
+      }
       if (mode == "range") {
         if ((want in at) && nq[at[want]]) {
           i = at[want]
