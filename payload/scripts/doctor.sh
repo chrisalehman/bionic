@@ -2563,7 +2563,7 @@ done
 # `claude()` function that puts the bypass mode in reach of the command a person
 # types — and someone who was asked and said no has a correctly configured
 # machine, not a broken one. So absent is `–` with the route to say yes, never
-# `✗` with a repair. Presence is env.sh's `rc_get` (through detect.sh), so a
+# `✗` with a repair. Presence is env.sh's `rc_state` (through detect.sh), so a
 # claude() function a user wrote for themselves — outside bionic's markers — is
 # neither claimed here nor removable by /bionic:remove.
 #
@@ -2572,6 +2572,11 @@ done
 # person is owed the truth and a command, not a green tick: the ✗ here is
 # matched by the fix line gathered above, which is the invariant those symbols
 # are worth anything under.
+#
+# AND `changed` IS THE USER'S (wave-27 T77): the block holds something bionic never
+# wrote there, so it is named by its lines, to edit by hand: `–`, no fix line and no
+# route, because setup never rewrites it. Its lines and its instruction survive the
+# longest path; the path is what the cut takes.
 _rc_proxy_label="$(bionic_check_label claude-proxy)"
 _rc_proxy_hint="$(bionic_check_hint claude-proxy)"
 if [ "$RC_PROXY_STATE" = "yes" ]; then
@@ -2580,6 +2585,10 @@ if [ "$RC_PROXY_STATE" = "yes" ]; then
 elif [ "$RC_PROXY_STATE" = "stale" ]; then
   _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "stale" \
     "in $(_detect_shell_rc)" " — ${_rc_proxy_hint} rewrites it"
+elif [ "$RC_PROXY_STATE" = "changed" ]; then
+  _rc_proxy_range="$(rc_block_range)"
+  _doctor_env3 "$DOCTOR_NIL" "$_rc_proxy_label" "changed" \
+    "lines ${_rc_proxy_range% *} to ${_rc_proxy_range#* } of $(_doctor_tilde "$(rc_file)")" " — edit it by hand"
 elif [ "$RC_PROXY_STATE" = "malformed" ]; then
   _rc_proxy_where="$(markers_check "$(rc_file)" "$RC_START" "$RC_END")"
   _doctor_env3 "$DOCTOR_BAD" "$_rc_proxy_label" "malformed" "${_rc_proxy_where%%$'\n'*}"

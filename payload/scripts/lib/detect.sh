@@ -20,7 +20,7 @@
 #   agents: state=<stock|modified|unknown> total=<n|unknown> modified=<n|unknown> names=<a.md,b.md|-> cause=<text|->
 #   dep:<name> lane=<3a|3b> present=<yes|no|unknown> version=<v|unknown> constraint=<c> verdict=<ok|violation|unknown>
 #   env:todo-tools present=<yes|no>
-#   env:rc-claude-proxy present=<yes|no|stale>
+#   env:rc-claude-proxy present=<yes|no|stale|changed|malformed|not-a-file>
 #   env:zshrc-legacy present=<yes|no|malformed|not-a-file>
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
@@ -80,8 +80,8 @@ if ! declare -F check_dep >/dev/null 2>&1; then
   . "$(cd "$(_detect_self_dir)" && pwd -P)/deps.sh"
 fi
 
-# env.sh, THE SAME SOFT SOURCE, FOR ITS READ HALF ONLY — `rc_get`, `rc_file` and
-# `rc_default`. Those own the question "is bionic's proxy line inside bionic's
+# env.sh, THE SAME SOFT SOURCE, FOR ITS READ HALF ONLY — `rc_state`, `rc_get`, `rc_file`
+# and `rc_default`. Those own the question "is bionic's proxy line inside bionic's
 # markers", and `detect_rc_claude_proxy` below now asks THEM rather than
 # answering it a second way (epic-19 W1 Step-6 DUPLICATION FAIL: the two
 # predicates disagreed on every machine carrying an older proxy line). env.sh's
@@ -335,9 +335,9 @@ detect_env_todo_tools() {
 #     claude() { command claude --allow-dangerously-skip-permissions "$@"; }
 #     # ─── bionic:rc:end ───
 #
-# ONE OWNER FOR THE PREDICATE, AND IT IS env.sh's. `rc_get` — what setup already
-# consumes to decide whether the item is done — asks whether `rc_default`'s line
-# is INSIDE bionic's markers, and this function asks `rc_get`. It used to grep
+# ONE OWNER FOR THE PREDICATE, AND IT IS env.sh's. `rc_state` — what setup and
+# `rc_set` already consume to decide whether the item is done — reads the block
+# against `rc_default`'s body, and this function prints its answer. It used to grep
 # the START MARKER on its own, which agreed with setup only for as long as the
 # line between the markers never changed; task 4/1 changed it
 # (`--dangerously-skip-permissions` → `--allow-dangerously-skip-permissions`)
@@ -346,18 +346,21 @@ detect_env_todo_tools() {
 # the Step-6 review's DUPLICATION FAIL, closed by deleting the second owner
 # rather than by adding a test that watches them drift.
 #
-# THREE STATES, BECAUSE THERE ARE THREE MACHINES.
+# FOUR STATES, BECAUSE THERE ARE FOUR MACHINES (env.sh `rc_state` says which).
 #
-#   yes    — the markers hold exactly the line this payload writes.
-#   stale  — the markers are there and hold something else: an older payload's
-#            text, or a hand edit between them. This person CONSENTED; what they
-#            carry is bionic's own block gone out of date, which setup rewrites
-#            and doctor must not paint green.
-#   no     — no markers at all. Never asked, or asked and declined — a correctly
-#            configured machine either way.
+#   yes     — bionic's lines are in force: the current body, alone or with the
+#             user's own lines among them (`written`).
+#   stale   — the markers hold nothing, or an earlier body bionic wrote. This person
+#             CONSENTED; what they carry is bionic's own block gone out of date,
+#             which setup rewrites and doctor must not paint green.
+#   changed — the markers hold anything else: the user changed the block since
+#             bionic wrote it (wave-27 T77). Theirs to edit; setup never rewrites
+#             it, and doctor names it by its lines without calling it a fault.
+#   no      — no markers at all. Never asked, or asked and declined — a correctly
+#             configured machine either way.
 #
 # AND TWO FAULTS NO SETUP STEP REPAIRS (wave-27 T46, review pass 14 F2), read
-# before either of the above so neither can be mistaken for them:
+# before any of the above so none can be mistaken for them:
 #
 #   malformed  — the markers do not pair up (markers.sh `markers_check`, the one
 #                reader). Setup refuses such a file, so calling it `stale` sent
@@ -366,26 +369,14 @@ detect_env_todo_tools() {
 #   not-a-file — the rc path is a directory or a dangling link
 #                (markers.sh `markers_regular`); every writer refuses it.
 #
-# The `no`/`stale` split is why the marker test survives at all: it is no longer
-# the predicate, it is what tells a stale block from an absent one — and it is
-# `markers_get`'s answer, a whole-line block, never a substring of the start
-# marker. A `claude()` function a user wrote for themselves sits outside the
-# markers and is none of these — not claimed here, not removed by /bionic:remove.
+# A `claude()` function a user wrote for themselves sits outside the markers and
+# is none of these — not claimed here, not removed by /bionic:remove.
 detect_rc_claude_proxy() {
-  local rc present=no
-  # The file `rc_get` looks in, so every half of this answer is about one file.
-  # Unresolvable (a shell bionic writes no rc for) leaves it empty and the
-  # answer `no`, which is the truth: there is no file that could hold the block.
-  rc="$(rc_file 2>/dev/null)" || rc=""
-  if [ -n "$rc" ] && ! markers_regular "$rc" >/dev/null; then
-    present=not-a-file
-  elif [ -n "$rc" ] && ! markers_check "$rc" "$RC_START" "$RC_END" >/dev/null; then
-    present=malformed
-  elif rc_get claude-proxy 2>/dev/null; then
-    present=yes
-  elif [ -n "$rc" ] && markers_get "$rc" "$RC_START" "$RC_END" >/dev/null; then
-    present=stale
-  fi
+  local present
+  # Unresolvable (a shell bionic writes no rc for) answers nothing, and that is
+  # `no`, the truth: there is no file that could hold the block.
+  present="$(rc_state claude-proxy 2>/dev/null)" || present=no
+  case "$present" in written) present=yes ;; "") present=no ;; esac
   echo "env:rc-claude-proxy present=${present}"
   return 0
 }
