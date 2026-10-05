@@ -192,7 +192,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 |---|---|
 | 0 | `prereqs: ok` |
 | 1, 2, 3 | pointer (presence only) |
-| 4 | pointer; plus `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` |
+| 4 | pointer; plus `worktree:`/`base-sha:`/`branch:` when `use_worktree: true`, which `current 4` fills at wave scale |
 | 5 | `head:`/`cmd:`/`pass:`/`total:`/`output:` with `pass == total`, a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
 | 6 | one fact per owed question (`proved: kind=review`), or its `waived:` line; matrix re-validated here |
 | 7 | `adr:` OR `rca:` OR `n/a:` |

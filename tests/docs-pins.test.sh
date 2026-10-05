@@ -5154,6 +5154,14 @@ w27_check_text_in() {
   has_pin "$1" 'Your job is to find what went wrong in this change.' && echo 'adversarial opening'
   has_pin "$1" "Your job is to falsify the claim that this wave's requirements" && echo 'evidence opening'
   for id in $W27_IDS; do [ -n "$(w27_check_line "$1" "$id")" ] && echo "check line $id"; done
+  # wave-27 T17 (review of T11, F3; the two Step-6 rules): the evidence and adversarial checks'
+  # own sentences, so a role or step file that keeps one in other surroundings is seen.
+  has_pin "$1" 'CONFIRMED / REFUTED / UNVERIFIABLE' && echo 'evidence verdicts'
+  has_pin "$1" 'Agreement without re-execution' && echo 'evidence re-execution'
+  has_pin "$1" 'collectively prove nothing' && echo 'evidence authenticity-alone'
+  has_pin "$1" 'no caller reaches' && echo 'adversarial unreached site'
+  has_pin "$1" 'callsite reaching' && echo 'adversarial unreached site (old wording)'
+  has_pin "$1" 'monitoring-gap analysis' && echo 'adversarial incident framing'
   return 0
 }
 # The extractor reads each checks file's own text: a role file copying any of them is visible.
@@ -5377,6 +5385,16 @@ done
 W27D_S5="$(w26_doctor "$STEP5_MD" "> Your job is to falsify the claim that this wave's requirements were faithfully implemented")"
 expect_nonempty "W27-52m: a steps/5.md that keeps the auditor mandate's text is caught" \
   "$(w27_check_text_in "$W27D_S5")"
+# The two Step-6 rules moved to checks-adversarial.md; either coming back to steps/6.md is caught.
+for _p in 'no caller reaches' 'monitoring-gap analysis'; do
+  expect_nonempty "W27-52c precondition: checks-adversarial.md carries \"${_p}\"" \
+    "$(w26_hits "$_p" "${W27_CHECKS_DIR}/checks-adversarial.md")"
+done
+for _s in '**Architecture closure:** for each new primitive added this wave, trace user input → new code, and confirm the Step-5 T3 readback reached the same code. No callsite reaching it means the substrate is dead: a FAIL.' \
+          'Incident framing: does the fix mask a deeper issue, and is the monitoring-gap analysis honest.'; do
+  expect_nonempty "W27-52cm: a steps/6.md that takes back \"${_s%%:*}\" is caught" \
+    "$(w27_check_text_in "$(w26_doctor "$STEP6_MD" "$_s")")"
+done
 
 # §W27-54 (AC-5.4): Step 6 is governed by a skill the session loads — this one.
 W27D_NAME="$(awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { exit } fm && /^name:/ { print $2 }' "$W27D_SKILL")"
@@ -5420,12 +5438,30 @@ expect_nonempty "W27-102m: an operational-rules.md that still says the critic ca
 
 # The carried items that are a contract, each a positive beside its absence.
 # Item 1 (A-orch-43): a reader writes one file, its record; the tool ban stays (§W27-T11c).
+# Corrected by the review of T11 (F2): one record per question dealt, since the verb reads one
+# `question:` per record.
 for _r in auditor critic reviewer; do
-  expect_nonempty "W27-T17-1: agents/${_r}.md says the reader writes one file, its record" \
-    "$(w26_hits 'You write one file, your record' "${REPO}/agents/${_r}.md")"
-  expect_eq "W27-T17-1b: …and no longer that it writes no files" "" \
-    "$(w26_hits 'You write no files' "${REPO}/agents/${_r}.md")"
+  expect_nonempty "W27-T17-1: agents/${_r}.md says the reader writes one record per question" \
+    "$(w26_hits 'You write one record per question you are dealt, through the shell, and no other file' "${REPO}/agents/${_r}.md")"
+  expect_eq "W27-T17-1b: …and no longer that it writes no files, or one file" "" \
+    "$(w26_hits 'You write no files' "${REPO}/agents/${_r}.md"; w26_hits 'You write one file' "${REPO}/agents/${_r}.md")"
+  expect_nonempty "W27-T17-14 precondition: agents/${_r}.md names the wall that refuses a commit" \
+    "$(w26_hits 'Never commit: bash-walls refuses it.' "${REPO}/agents/${_r}.md")"
+  expect_eq "W27-T17-14: …and claims no wall refuses an edit (F1)" "" \
+    "$(w26_hits 'Never edit, never commit' "${REPO}/agents/${_r}.md")"
 done
+# Item 15 (F3): the auditor's trigger against re-running reaches whoever holds `evidence`.
+expect_nonempty "W27-T17-15: checks-evidence.md says not to re-run the whole suite" \
+  "$(w26_hits 're-verify the feature, or re-run the whole suite' "${W27_CHECKS_DIR}/checks-evidence.md")"
+# Item 10: a task-scale plan's base is the author's frontmatter line.
+expect_nonempty "W27-T17-10: steps/3.md has the author write base-sha: in the frontmatter" \
+  "$(w26_hits 'its author writes `base-sha: <the commit the work started from>`' "${SKILL_DIR}/steps/3.md")"
+expect_nonempty "W27-T17-10b: …and says why: without it the first reading is refused" \
+  "$(w26_hits 'without it the first reading is refused' "${SKILL_DIR}/steps/3.md")"
+# Item 17 (F6): the model_plan fallback for a plan with no tier for a role.
+expect_nonempty "W27-T17-17: steps/0.md says a plan missing a role's tier is not refused" \
+  "$(w26_hits "is not refused; that role runs at its role file's \`model:\`" "${SKILL_DIR}/steps/0.md")"
+
 # Item 3 (A-orch-49): the structure whole read asks the checks that can cross pieces, by id.
 for _id in reuse one-site; do
   expect_contains "W27-T17-3: the structure whole read names \`${_id}\`" "\`${_id}\`" "$W27T33_STRW"
@@ -5435,11 +5471,11 @@ expect_nonempty "W27-T17-4 precondition: steps/3.md states the rebuild's shape" 
   "$(w26_hits 'recreate them in execution order' "${SKILL_DIR}/steps/3.md")"
 expect_eq "W27-T17-4: dispatch.md gives no second shape of it" "" \
   "$(w26_hits 'recreate one entry per step' "$DISPATCH_MD")"
-# Item 5 (A-orch-42, A-orch-46): a Files: span is paths alone.
-expect_nonempty "W27-T17-5: dispatch.md says a Files: span is a comma-separated list of paths" \
-  "$(w26_hits 'a comma-separated list of paths and nothing else' "$DISPATCH_MD")"
-expect_nonempty "W27-T17-5b: …a root file spelled ./NAME, and prose in the span refuses the dispatch" \
-  "$(w26_hits 'a root file is spelled `./NAME`, and prose in the span refuses the dispatch' "$DISPATCH_MD")"
+# Item 5 (A-orch-42, A-orch-46; the sentence T42 handed over): a Files: line is paths alone.
+expect_nonempty "W27-T17-5: dispatch.md says a Files: line is a comma-separated list of paths" \
+  "$(w26_hits 'A `Files:` line is a comma-separated list of paths' "$DISPATCH_MD")"
+expect_nonempty "W27-T17-5b: …an extensionless root file as ./NAME, a note after a trailing #, none alone" \
+  "$(w26_hits 'spell a root file with no extension as `./Makefile`, put any note after a trailing `#`, and write `none` alone for no files' "$DISPATCH_MD")"
 # The roles sentence and the read rows: the three readers and one read row per question.
 for _r in auditor critic reviewer; do
   expect_nonempty "W27-T17-6: dispatch.md's roles sentence names the reader \`${_r}\`" \
