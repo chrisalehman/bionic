@@ -9826,8 +9826,9 @@ fl_findings() { printf '%s\n' "$1" | /usr/bin/grep -c '^finding: '; }
 
 # THE SCAFFOLD LINE, read out of the shipped dispatch.md, never retyped.
 FL_SCAFFOLD="$(scaffold_raw_line "$DISPATCH_FILE" "Files")"
+# RE-POINTED (wave-27 T53, review pass 28 B1): the comment now opens "a reader lists its records".
 expect_contains "FILES-LIST meta: the shipped scaffold's Files: line was read, comment and all" \
-  "  # writers" "$FL_SCAFFOLD"
+  "  # a reader lists" "$FL_SCAFFOLD"
 FL_SLOT="$(printf '%s' "$FL_SCAFFOLD" | sed -e 's/^Files: //' -e 's/  #.*$//')"
 expect_contains "FILES-LIST meta: …and its slot is one item holding white space" "<every path" "$FL_SLOT"
 
@@ -9843,7 +9844,7 @@ expect_contains "FILES-LIST1 …and nothing recorded" "files=
 "
 # Filled as a real brief fills it, comment kept byte for byte: exactly the two paths, no finding.
 FL_FILLED="$(printf '%s' "$FL_SCAFFOLD" | sed 's|<every path the task may create or edit>|src/a.c, tests/a.test.sh|')"
-expect_contains "FILES-LIST2 meta: the filled line keeps the shipped comment" "tests/a.test.sh  # writers" "$FL_FILLED"
+expect_contains "FILES-LIST2 meta: the filled line keeps the shipped comment" "tests/a.test.sh  # a reader lists" "$FL_FILLED"
 FL=$(fl_read "$FL_FILLED")
 expect_contains "FILES-LIST2 the filled scaffold line records exactly its two paths" "files=src/a.c,tests/a.test.sh
 " "$FL
