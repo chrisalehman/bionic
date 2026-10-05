@@ -975,7 +975,7 @@ tick_digest_file() {  # <session-id> -> absolute path, or empty
 # so a re-arm does not raise them a second time. `change=` is the fingerprint of the plan's
 # `## Tasks` statuses and its ready set (wave-26 T15; D16): the task-list duty is owed only when
 # it moved, so `arm` does not carry it and the first tick after an arm compares against nothing.
-write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows> [<facts state>]]]]]] -> 0 written, 1 not
+write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows> [<facts state> [<reconcile cause>]]]]]]] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
   [ -n "$f" ] || return 1
@@ -1014,6 +1014,11 @@ write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <du
     # `proof:review` the same answer on this tick's turn, as it hands the head above. One line.
     if [ -n "${12:-}" ]; then
       printf 'facts_state=%s\n' "$(printf '%s' "${12}" | tr '\n' ' ')"
+    fi
+    # WHY THE RECONCILE IS OWED, when the plan moved (wave-27 T37): `step4` or `grew`, read by the
+    # turn-end wall (lib/stop.sh `stop_turn_facts`) so its refusal gives the tick's own cause.
+    if [ -n "${13:-}" ]; then
+      printf 'reconcile=%s\n' "${13}"
     fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
@@ -5323,6 +5328,15 @@ EOF
     fi
     DC_WHY="$(printf '%s' "$DC_REASON" | tr '|\n\r\t' '    ')"
     DC_WHY="${DC_WHY:0:200}"
+    # THE PRINTED PLACEHOLDER IS NO REASON (wave-27 T37; review pass 42 N1, A-orch-112): the wall's
+    # refusal prints this verb with DECLINE_REASON_SLOT where the reason goes, and the line run as
+    # printed recorded the placeholder as the reason.
+    DC_SLOT="${DECLINE_REASON_SLOT//\'/}"
+    DC_TRIM="$(printf '%s' "$DC_WHY" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    if [ "$DC_TRIM" = "$DC_SLOT" ]; then
+      die "REFUSED — '$DC_SLOT' is the placeholder the refusal prints, not a reason: put the reason in its place; nothing was recorded."
+      exit 1
+    fi
     case "$DC_WHY" in
       *[[:alnum:]]*) : ;;
       *)
@@ -5362,10 +5376,13 @@ EOF
   # `writers=` becomes the user's and its `source=` reads `user`; the frontmatter gains
   # `budget-override: <git user.name> <date> derived=<n> chosen=<n>`, the sibling of
   # `rigor-override:`. `derived=` is the probe's value, read from an override already there so a
-  # second cap keeps it, and the one override line is rewritten, never doubled. A value above the
-  # derived one is recorded too: the user's call, and the dispatch wall then holds the run to it.
+  # second cap keeps it, and the one override line is rewritten, never doubled.
+  # THE VERB ONLY LOWERS (wave-27 T37; review pass 42 N2, A-orch-112). It takes a reply nothing can
+  # verify, so it must not be a way for a model to raise its own cap: a value above the derived
+  # ceiling is refused, and raising it is the user's own edit of the plan's `parallel-budget:` line.
   # It goes through the plan transaction every plan verb takes. REFUSED: a value that is not a
-  # whole number, or 0 (1); a reply with a line break (1); a plan with no budget line to cap (1).
+  # whole number, or 0 (1); one above the derived ceiling (1); a reply with a line break (1); a
+  # plan with no budget line to cap (1).
   budget)
     case "$BG_N" in
       ''|*[!0-9]*)
@@ -5399,6 +5416,11 @@ EOF
         for (i = 2; i <= NF; i++) if ($i ~ /^derived=[0-9]+$/) { print substr($i, 9); exit }
       }' "$PV_PLAN")"
     [ -n "$BG_DERIVED" ] || BG_DERIVED="$BG_HAVE"
+    if [ "$BG_N" -gt "$BG_DERIVED" ] 2>/dev/null; then
+      die "REFUSED — writers=$BG_N is above the derived ceiling of $BG_DERIVED: budget only lowers it."
+      die "Raising it is the user's own edit of the plan's parallel-budget: line in $PV_PLAN; the plan is unchanged."
+      exit 1
+    fi
     BG_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
     if [ -z "$BG_WHO" ] || ! plan_verb_value_ok "$BG_WHO"; then
       die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who capped it; the plan is unchanged."
@@ -5431,10 +5453,7 @@ EOF
       exit 1
     fi
     plan_verb_swap budget "writers=$BG_N (source=user)" writer
-    BG_NOTE=""
-    [ "$BG_N" -gt "$BG_DERIVED" ] \
-      && BG_NOTE=" That is above the probe's derived $BG_DERIVED: the dispatch wall holds the run to $BG_N, and the tick and the turn-end wall size each fill by the pressure rung under it."
-    say "budget — writers=$BG_N source=user and $BG_OVR written to $PV_PLAN; dry-committed first. The dispatch wall, the tick and the turn-end wall read it from the header.$BG_NOTE"
+    say "budget — writers=$BG_N source=user and $BG_OVR written to $PV_PLAN; dry-committed first. The dispatch wall, the tick and the turn-end wall read it from the header."
     exit 0
     ;;
 
@@ -5502,10 +5521,23 @@ EOF
     # suites and runs and no contract (a waiver says so, so no verdict judges it, and no reader of
     # live rows counts it). The budget wall keys on the id, so it reads that row from the next call.
     # An id that is neither is refused, saying why; this verb never exits 0 having changed nothing.
+    # AFTER THE PLACING (wave-27 T37; review pass 36 N2): an `unplaced` row named by the id, written
+    # before the agent was placed, is not the id's row any more once a placed row carries the id
+    # after it. The amend goes to the placed row, and the set the unplaced row recorded goes with
+    # it as additions, so one row speaks for the agent and holds both; no second unplaced row is
+    # written to shadow the placed one.
     if [ -z "$AM_ROW" ] || [ "$(line_field "$AM_ROW" status)" = unplaced ]; then
       AM_IDROW="$(roster_row_for_id "$ROSTER_FILE" "$AMEND_NAME")" || AM_IDROW=""
       AM_IDNAME="$(line_field "$AM_IDROW" name)"
-      if [ -z "$AM_ROW" ] && [ -n "$AM_IDNAME" ] && [ "$(line_field "$AM_IDROW" status)" != unplaced ]; then
+      if [ -n "$AM_IDNAME" ] && [ "$(line_field "$AM_IDROW" status)" != unplaced ] \
+         && { [ -z "$AM_ROW" ] || [ "$AM_IDNAME" != "$AMEND_NAME" ]; }; then
+        if [ -n "$AM_ROW" ]; then
+          AM_UP_SA="$(line_field "$AM_ROW" suites_allowed)"
+          [ "$AM_UP_SA" = none ] || AMEND_SUITES="${AMEND_SUITES}${AM_UP_SA}"$'\n'
+          if row_has_key "$AM_ROW" re_executes; then
+            AMEND_RUNS="${AMEND_RUNS}$(poker_marked_runs "$(clean "$(line_field "$AM_ROW" re_executes)" re_executes)")"$'\n'
+          fi
+        fi
         AMEND_NAME="$AM_IDNAME"
         AM_ROW="$(grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null \
           | grep -F "|name=${AMEND_NAME}|" | tail -1)"
@@ -6681,10 +6713,12 @@ RC_TAGS
         say "unchanged since ${TICK_SINCE} — decision=${TICK_DECIDED}"
       else
         cat "$TICK_BUF" 2>/dev/null
+        # A START IS TOLD BY THE TICK THAT PRINTED ITS LINE (wave-27 T37; review pass 36 S1).
+        [ -z "${US_TOLD_PENDING:-}" ] || printf '%s' "$US_TOLD_PENDING" >> "$ROSTER_FILE" 2>/dev/null
       fi
       rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
-        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" \
+        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
       exit "$rc"
@@ -6716,10 +6750,10 @@ RC_TAGS
     # band or a roster row's liveness prints in full and owes nothing. `TICK_CHANGE` is that
     # fingerprint, kept in the digest as `change=` beside the whole-decision hash and entered
     # into it too, so a tick that says `unchanged` has, by construction, nothing to reconcile.
-    # A QUIET tick owes nothing either way: with a row open it prints WAITING, which asks for
-    # nothing, and with none open there is nothing running to reconcile against (A-orch-4). The
-    # stop wall's collector reads this line, so a turn is not refused for a chore with nothing
-    # behind it.
+    # A QUIET tick owes no reconcile for a status move: with a row open it prints WAITING, which
+    # asks for nothing, and with none open there is nothing running to reconcile against
+    # (A-orch-4). It does owe one when the plan MOVED (`tick_plan_moved`, below). The stop wall's
+    # collector reads this line, so a turn is not refused for a chore with nothing behind it.
     tick_change_rows() {  # -> the plan's id|status lines in table order, then its ready set
       units_rows "$SCHED_PLAN" 2>/dev/null | awk -F'\t' 'NF { print $1 "|" $10 }'
       printf 'ready=%s\n' "$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
@@ -6728,13 +6762,20 @@ RC_TAGS
     # task list, so this line is the only wall the rule has: the duty is also owed when the
     # plan's `current:` was 3 at the last digest and is 4 now, or its row count has grown, and
     # it is owed on a QUIET tick too (a plan at approval has nothing open yet).
+    # WHICH MOVE IT WAS (wave-27 T37; review pass 8 F2) is TICK_RECONCILE, `step4` or `grew`: the
+    # RECONCILE line says it and names the rebuild, and the digest keeps it as `reconcile=` so
+    # the turn-end wall's refusal gives the same cause. A move into Step 4 is named first when
+    # the table also grew: the rebuild it asks for covers the new rows.
+    TICK_RECONCILE=""
     tick_plan_moved() {  # -> 0 when the digest's last reading of the plan is behind this one
       local pc pr
+      TICK_RECONCILE=""
       pc="$(tick_digest_field "$TICK_DIGEST_FILE" plan_current)"
       pr="$(tick_digest_field "$TICK_DIGEST_FILE" plan_rows)"
-      { [ "$pc" = 3 ] && [ "$TICK_PLAN_CUR" = 4 ]; } && return 0
+      if [ "$pc" = 3 ] && [ "$TICK_PLAN_CUR" = 4 ]; then TICK_RECONCILE=step4; return 0; fi
       case "$pr" in ''|*[!0-9]*) return 1 ;; esac
-      [ -n "$TICK_PLAN_ROWS" ] && [ "$TICK_PLAN_ROWS" -gt "$pr" ]
+      [ -n "$TICK_PLAN_ROWS" ] && [ "$TICK_PLAN_ROWS" -gt "$pr" ] || return 1
+      TICK_RECONCILE=grew
     }
     tick_conclude() {  # <decision before the gate>
       local cur="" prev=""
@@ -6768,9 +6809,12 @@ RC_TAGS
               }
               print n "|" st "|" ak
             }' | LC_ALL=C sort
+          # A reader started without its checks: the whole line, and the ids beside it (T37; S1).
+          [ -z "${US_NOTIFY_IDS:-}" ] || printf 'unchecked=%s\n' "$US_NOTIFY_IDS"
           awk '
             $1 != "poker:" { next }
             $2 == "note:" { print $3, $4, $5; next }
+            $2 == "NOTIFY" && index($0, " started without its checks: ") > 0 { print; next }
             $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE|NOTIFY)$/ { print $2, $3, $4 }
           ' "$TICK_BUF" | LC_ALL=C sort
         } | cksum | awk '{ print $1 "-" $2 }' )"
@@ -6797,12 +6841,18 @@ RC_TAGS
       fi
       TICK_SINCE="$(iso_now)"
       TICK_DUTY=none
-      if { [ "$TICK_DECIDED" != QUIET ] && [ "$TICK_CHANGE" != "$(tick_digest_field "$TICK_DIGEST_FILE" change)" ]; } \
-         || tick_plan_moved; then
+      # THE DUTY IS PRINTED (wave-26 T32; review-6 F2). It used to live only in the digest
+      # file, so the Patrol prompt asked for the refresh on a change the model could not see.
+      # The prompt and the stop wall's refusal both name this line. A plan move is asked first,
+      # in its own words (wave-27 T37): a status change beside it is covered by the rebuild.
+      if tick_plan_moved; then
         TICK_DUTY=owed
-        # THE DUTY IS PRINTED (wave-26 T32; review-6 F2). It used to live only in the digest
-        # file, so the Patrol prompt asked for the refresh on a change the model could not see.
-        # The prompt and the stop wall's refusal both name this line.
+        case "$TICK_RECONCILE" in
+          step4) say "RECONCILE — the plan moved from approval into Step 4 since the last tick: TaskList, and rebuild the task list in execution order (delete every pending entry and recreate them)" ;;
+          *)     say "RECONCILE — the ## Tasks table grew since the last tick: TaskList, and rebuild the task list in execution order (delete the pending entries after the new row and recreate them)" ;;
+        esac
+      elif [ "$TICK_DECIDED" != QUIET ] && [ "$TICK_CHANGE" != "$(tick_digest_field "$TICK_DIGEST_FILE" change)" ]; then
+        TICK_DUTY=owed
         say "RECONCILE — a ## Tasks status or the ready set changed since the last tick: TaskList, and bring the task list in line with the plan"
       fi
       tick_write_orders
@@ -7343,18 +7393,30 @@ EOF
     # reader's start could not be placed and its candidates carry different `questions=`: no
     # checks file was pushed, and its own log line is stderr nobody reads. The tick says so ONCE
     # per agent id and writes `event=told` beside it, so the orchestrator stops that reader and
-    # dispatches it again. Nothing else: no stop, no ack. The line enters the decision hash under
-    # its kind (`NOTIFY`), so an otherwise unchanged tick still prints it.
+    # dispatches it again. Nothing else: no stop, no ack.
+    # THE LINE IS HASHED WHOLE, AND TOLD ONLY ONCE PRINTED (wave-27 T37; review pass 36 S1). Under
+    # its kind alone every such line hashed as `NOTIFY — a`, so a second reader's line on a later
+    # tick left the decision unchanged, was dropped, and was still marked told. Now `tick_conclude`
+    # hashes the whole line and the agent ids in US_NOTIFY_IDS (two readers of one role and one
+    # candidate set print the same words), and `event=told` waits in US_TOLD_PENDING for the exit
+    # trap, which writes it only when it prints the buffer. Unbuffered, the line is out already.
+    # A told line ends at its id, so the id is matched at a line end as well as before a `|`.
+    US_NOTIFY_IDS=""; US_TOLD_PENDING=""
     if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
-      US_TOLD="$(grep -F 'start-unchecked/v1|event=told|' "$ROSTER_FILE" 2>/dev/null)"
+      US_TOLD="$(grep -F 'start-unchecked/v1|event=told|' "$ROSTER_FILE" 2>/dev/null)"$'\n'
       while IFS= read -r US_LINE; do
         case "$US_LINE" in "start-unchecked/v1|event=start|"*) : ;; *) continue ;; esac
         US_AID="$(line_field "$US_LINE" agent_id)"
         [ -n "$US_AID" ] || continue
-        case "$US_TOLD" in *"|agent_id=${US_AID}|"*|*"|agent_id=${US_AID}") continue ;; esac
+        case "$US_TOLD" in *"|agent_id=${US_AID}|"*|*"|agent_id=${US_AID}"$'\n'*) continue ;; esac
         say "NOTIFY — a $(clean "$(line_field "$US_LINE" role)") started without its checks: candidates $(clean "$(line_field "$US_LINE" candidates)" | sed 's/,/, /g')"
-        printf 'start-unchecked/v1|event=told|at=%s|session=%s|agent_id=%s\n' "$(iso_now)" "$SESSION_ID" "$US_AID" \
-          >> "$ROSTER_FILE" 2>/dev/null
+        US_NOTIFY_IDS="${US_NOTIFY_IDS:+$US_NOTIFY_IDS,}${US_AID}"
+        US_TOLD_LINE="$(printf 'start-unchecked/v1|event=told|at=%s|session=%s|agent_id=%s' "$(iso_now)" "$SESSION_ID" "$US_AID")"
+        if [ -n "$TICK_BUF" ]; then
+          US_TOLD_PENDING="${US_TOLD_PENDING}${US_TOLD_LINE}"$'\n'
+        else
+          printf '%s\n' "$US_TOLD_LINE" >> "$ROSTER_FILE" 2>/dev/null
+        fi
         US_TOLD="${US_TOLD}|agent_id=${US_AID}|"
       done < <(grep -F 'start-unchecked/v1|event=start|' "$ROSTER_FILE" 2>/dev/null)
     fi
