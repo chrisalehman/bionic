@@ -5507,10 +5507,23 @@ EOF
     # suites and runs and no contract (a waiver says so, so no verdict judges it, and no reader of
     # live rows counts it). The budget wall keys on the id, so it reads that row from the next call.
     # An id that is neither is refused, saying why; this verb never exits 0 having changed nothing.
+    # AFTER THE PLACING (wave-27 T37; review pass 36 N2): an `unplaced` row named by the id, written
+    # before the agent was placed, is not the id's row any more once a placed row carries the id
+    # after it. The amend goes to the placed row, and the set the unplaced row recorded goes with
+    # it as additions, so one row speaks for the agent and holds both; no second unplaced row is
+    # written to shadow the placed one.
     if [ -z "$AM_ROW" ] || [ "$(line_field "$AM_ROW" status)" = unplaced ]; then
       AM_IDROW="$(roster_row_for_id "$ROSTER_FILE" "$AMEND_NAME")" || AM_IDROW=""
       AM_IDNAME="$(line_field "$AM_IDROW" name)"
-      if [ -z "$AM_ROW" ] && [ -n "$AM_IDNAME" ] && [ "$(line_field "$AM_IDROW" status)" != unplaced ]; then
+      if [ -n "$AM_IDNAME" ] && [ "$(line_field "$AM_IDROW" status)" != unplaced ] \
+         && { [ -z "$AM_ROW" ] || [ "$AM_IDNAME" != "$AMEND_NAME" ]; }; then
+        if [ -n "$AM_ROW" ]; then
+          AM_UP_SA="$(line_field "$AM_ROW" suites_allowed)"
+          [ "$AM_UP_SA" = none ] || AMEND_SUITES="${AMEND_SUITES}${AM_UP_SA}"$'\n'
+          if row_has_key "$AM_ROW" re_executes; then
+            AMEND_RUNS="${AMEND_RUNS}$(poker_marked_runs "$(clean "$(line_field "$AM_ROW" re_executes)" re_executes)")"$'\n'
+          fi
+        fi
         AMEND_NAME="$AM_IDNAME"
         AM_ROW="$(grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null \
           | grep -F "|name=${AMEND_NAME}|" | tail -1)"
@@ -6643,6 +6656,8 @@ PF_OTHER_LIST
         say "unchanged since ${TICK_SINCE} — decision=${TICK_DECIDED}"
       else
         cat "$TICK_BUF" 2>/dev/null
+        # A START IS TOLD BY THE TICK THAT PRINTED ITS LINE (wave-27 T37; review pass 36 S1).
+        [ -z "${US_TOLD_PENDING:-}" ] || printf '%s' "$US_TOLD_PENDING" >> "$ROSTER_FILE" 2>/dev/null
       fi
       rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
@@ -6737,9 +6752,12 @@ PF_OTHER_LIST
               }
               print n "|" st "|" ak
             }' | LC_ALL=C sort
+          # A reader started without its checks: the whole line, and the ids beside it (T37; S1).
+          [ -z "${US_NOTIFY_IDS:-}" ] || printf 'unchecked=%s\n' "$US_NOTIFY_IDS"
           awk '
             $1 != "poker:" { next }
             $2 == "note:" { print $3, $4, $5; next }
+            $2 == "NOTIFY" && index($0, " started without its checks: ") > 0 { print; next }
             $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|fill-declined|LAUNCHED|NOT-RECORDED|RANGE|NOTIFY)$/ { print $2, $3, $4 }
           ' "$TICK_BUF" | LC_ALL=C sort
         } | cksum | awk '{ print $1 "-" $2 }' )"
@@ -7318,18 +7336,30 @@ EOF
     # reader's start could not be placed and its candidates carry different `questions=`: no
     # checks file was pushed, and its own log line is stderr nobody reads. The tick says so ONCE
     # per agent id and writes `event=told` beside it, so the orchestrator stops that reader and
-    # dispatches it again. Nothing else: no stop, no ack. The line enters the decision hash under
-    # its kind (`NOTIFY`), so an otherwise unchanged tick still prints it.
+    # dispatches it again. Nothing else: no stop, no ack.
+    # THE LINE IS HASHED WHOLE, AND TOLD ONLY ONCE PRINTED (wave-27 T37; review pass 36 S1). Under
+    # its kind alone every such line hashed as `NOTIFY — a`, so a second reader's line on a later
+    # tick left the decision unchanged, was dropped, and was still marked told. Now `tick_conclude`
+    # hashes the whole line and the agent ids in US_NOTIFY_IDS (two readers of one role and one
+    # candidate set print the same words), and `event=told` waits in US_TOLD_PENDING for the exit
+    # trap, which writes it only when it prints the buffer. Unbuffered, the line is out already.
+    # A told line ends at its id, so the id is matched at a line end as well as before a `|`.
+    US_NOTIFY_IDS=""; US_TOLD_PENDING=""
     if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
-      US_TOLD="$(grep -F 'start-unchecked/v1|event=told|' "$ROSTER_FILE" 2>/dev/null)"
+      US_TOLD="$(grep -F 'start-unchecked/v1|event=told|' "$ROSTER_FILE" 2>/dev/null)"$'\n'
       while IFS= read -r US_LINE; do
         case "$US_LINE" in "start-unchecked/v1|event=start|"*) : ;; *) continue ;; esac
         US_AID="$(line_field "$US_LINE" agent_id)"
         [ -n "$US_AID" ] || continue
-        case "$US_TOLD" in *"|agent_id=${US_AID}|"*|*"|agent_id=${US_AID}") continue ;; esac
+        case "$US_TOLD" in *"|agent_id=${US_AID}|"*|*"|agent_id=${US_AID}"$'\n'*) continue ;; esac
         say "NOTIFY — a $(clean "$(line_field "$US_LINE" role)") started without its checks: candidates $(clean "$(line_field "$US_LINE" candidates)" | sed 's/,/, /g')"
-        printf 'start-unchecked/v1|event=told|at=%s|session=%s|agent_id=%s\n' "$(iso_now)" "$SESSION_ID" "$US_AID" \
-          >> "$ROSTER_FILE" 2>/dev/null
+        US_NOTIFY_IDS="${US_NOTIFY_IDS:+$US_NOTIFY_IDS,}${US_AID}"
+        US_TOLD_LINE="$(printf 'start-unchecked/v1|event=told|at=%s|session=%s|agent_id=%s' "$(iso_now)" "$SESSION_ID" "$US_AID")"
+        if [ -n "$TICK_BUF" ]; then
+          US_TOLD_PENDING="${US_TOLD_PENDING}${US_TOLD_LINE}"$'\n'
+        else
+          printf '%s\n' "$US_TOLD_LINE" >> "$ROSTER_FILE" 2>/dev/null
+        fi
         US_TOLD="${US_TOLD}|agent_id=${US_AID}|"
       done < <(grep -F 'start-unchecked/v1|event=start|' "$ROSTER_FILE" 2>/dev/null)
     fi
