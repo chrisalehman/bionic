@@ -260,7 +260,40 @@ mk_fixture() {
     git checkout -q main
     git merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1
   )
+  plant_facts "$p"
   printf '%s\n' "$p"
+}
+
+# plant_facts <project> -> what the run owes, held at the working branch's head, as a run that
+# reached Step 7 has it (wave-27 T14; D3): the working branch checked out in a linked worktree
+# beside the project (`<project>-wave`), and the floor and every reading lib/proof.sh `facts_owed`
+# deals the plan's rigor and scale, each `result=pass`, at that head. The lines are the product's
+# (`proof_line` placed by `proof_add_line`, the pair `proof-add` writes through); session-poker
+# §56 holds the verb that writes them, and close-out and the gate read plan text whatever wrote
+# it. `close-out.sh run` and `check`, and `current 8`, refuse unless `facts_state` holds these.
+# A plan whose working branch is not a branch here gets nothing: there is no head to hold.
+plant_facts() {
+  local p="$1" plan="$1/$PLAN_REL" wb h
+  case "$p" in "$SANDBOX"/*) : ;; *) echo "plant_facts: refusing outside the sandbox: '$p'" >&2; return 1 ;; esac
+  wb="$(sed -n 's/^working-branch: //p' "$plan" | head -1)"
+  h="$(fixture_git "$p" rev-parse --verify -q "refs/heads/${wb}^{commit}" 2>/dev/null)" || return 0
+  # A REAL BASE (the T45 ruling): the judge deals no reading on a plan with no base-sha naming a
+  # commit, so the run's base, the root commit the working branch grew from, is written first.
+  /usr/bin/grep -q '^base-sha:' "$plan" || {
+    sed "s/^working-branch: .*/&\\
+base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)/" "$plan" > "$plan.b" && mv "$plan.b" "$plan"; }
+  fixture_git "$p" worktree list --porcelain 2>/dev/null | grep -qxF "branch refs/heads/$wb" \
+    || fixture_git "$p" worktree add -q "$p-wave" "$wb" >/dev/null 2>&1
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    facts_owed "$(plan_frontmatter_get "$2" rigor)" "$(plan_frontmatter_get "$2" scale)" \
+      | while IFS="	" read -r k q role scope; do
+          case "$k" in
+            floor)  l="$(proof_line floor "$3" 2026-10-04T12:00:00Z record/wave-01-fixture/floor.log)" ;;
+            review) l="$(proof_line review "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/$q-$scope.md" "$q" w-read pass "$scope")" ;;
+            *) continue ;;
+          esac
+          proof_add_line "$2" "$l" > "$2.pf" && mv "$2.pf" "$2"
+        done' _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h"
 }
 
 # add_unreached_branch <project> -> plants `wt/01-y` carrying one commit the working branch
@@ -729,6 +762,7 @@ P0P="$(mk_census_fixture_nowt p0p "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0P" 
   git checkout -q main
   git merge -q --no-ff -m "merge wave" wave/01-x >/dev/null 2>&1
 )
+plant_facts "$P0P"
 run_close "$P0P" check
 expect_eq "0p1: check does not WOULD-REFUSE — the only wt/* branch is fully merged" "no" \
   "$(contains "$CO_OUT" "WOULD REFUSE")"
@@ -764,6 +798,7 @@ P0Q="$(mk_census_fixture_nowt p0q "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0Q" 
   git merge -q --no-ff -m "merge wave" wave/01-x >/dev/null 2>&1
 )
 add_foreign_unreached_branch "$P0Q"
+plant_facts "$P0Q"
 run_close "$P0Q" check
 expect_eq "0q1: check does not WOULD-REFUSE over a foreign wt/07-z (out of wt/01-* scope)" "no" \
   "$(contains "$CO_OUT" "WOULD REFUSE")"
@@ -829,6 +864,7 @@ mk_task_scale_fixture() {
     git checkout -q main
     git merge -q --no-ff -m "merge fix" "$working" >/dev/null 2>&1
   )
+  plant_facts "$p"
   printf '%s\n' "$p"
 }
 
@@ -1283,27 +1319,65 @@ section "E2E — wave-27 T4 (AC-7.1 close-out half, D14, B1): from Step 7 with n
 # then `close-out.sh run` delivers. The session is bound to the plan the way engagement binds
 # it (tests/lib/bound-marker.sh, the one bound-marker builder).
 #
-# RE-AUTHORED BY T14. Today the verb dry-commits the plan at Step 8, and the gate demands the
-# Step-8 block that only close-out writes, so `current 8` is refused. E2E1–E2E3 pin that
-# refusal, green, as it stands at T4. T14 lands the verb's half (8 exempt as 9 is, refusal on
-# `facts_state`), which turns these rows red. T14 then rewrites them into the target above:
-# plant the review facts the fixture's rigor owes, run `current 8`, then `close-out.sh run`,
-# and assert `delivered:`. T4's record names this mark.
+# RE-AUTHORED BY wave-27 T14 from T4's pin of the refusal (A-T4.1). The verb no longer
+# dry-commits the plan at Step 8, where the gate asked for the Step-8 block only close-out
+# writes; it asks lib/proof.sh `facts_state` at the working head instead (D3). `mk_fixture`
+# holds what a run at Step 7 owes there (`plant_facts`: at `rigor: tested`, `scale: wave`, the
+# floor and the critic's three questions at piece scope and two at whole scope), so `current 8`
+# moves the plan and `close-out.sh run` then delivers, with no hand edit.
 PE="$(mk_fixture e2e)"
 E2E_SID="closeout-e2e-1"
-expect_eq "E2E0: precondition: the fixture is at current: 7 with no Step 9 line" "7/0" \
+expect_eq "E2E0: precondition: the fixture is at current: 7 with no Step 8 block written and no Step 9 line" "7/0" \
   "$(sed -n 's/^current: //p' "$PE/$PLAN_REL")/$(step_lines "$PE/$PLAN_REL" 9)"
+expect_eq "E2E0b: precondition: it carries the six facts the tested wave run owes" "6" \
+  "$(/usr/bin/grep -c '^proved: ' "$PE/$PLAN_REL" | tr -d ' ')"
+expect_eq "E2E0c: precondition: …and a base-sha naming a commit at or before the readings' head" "yes" \
+  "$(b="$(sed -n 's/^base-sha: //p' "$PE/$PLAN_REL")"; [ -n "$b" ] && fixture_git "$PE" merge-base --is-ancestor "$b" wave/01-fixture && echo yes || echo no)"
 ( in_fixture "$PE" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PE" "$E2E_SID" "$PE/$PLAN_REL" )
-PE_SHA="$(sha_of "$PE/$PLAN_REL")"
 ( in_fixture "$PE" || exit 9
   HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     CLAUDE_CODE_SESSION_ID="$E2E_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 ) > "$SANDBOX/e2e-poker" 2>&1
 E2E_POKER_RC=$?
 E2E_POKER_OUT="$(cat "$SANDBOX/e2e-poker")"
-expect_eq "E2E1 (RE-AUTHORED BY T14): the real current 8 is refused today (exit 1)" "1" "$E2E_POKER_RC"
-expect_eq "E2E2 (RE-AUTHORED BY T14): …asking for the Step-8 block close-out writes" "yes" \
-  "$(contains "$E2E_POKER_OUT" "canonical-sdlc step 8 evidence missing required field(s): merge worktree-removed")"
-expect_eq "E2E3 (RE-AUTHORED BY T14): …and the plan is unchanged, still at current: 7" "$PE_SHA" "$(sha_of "$PE/$PLAN_REL")"
+expect_eq "E2E1: AC-7.1 the real current 8 is admitted on the facts (exit 0)" "0" "$E2E_POKER_RC"
+expect_eq "E2E2: …saying the facts hold, not asking for the Step-8 block close-out writes" "yes/no" \
+  "$(contains "$E2E_POKER_OUT" "every fact the run owes holds at")/$(contains "$E2E_POKER_OUT" "missing required field(s): merge worktree-removed")"
+expect_eq "E2E3: …and the plan reads current: 8" "8" "$(sed -n 's/^current: //p' "$PE/$PLAN_REL")"
+run_close "$PE" run
+expect_eq "E2E4: AC-7.1 then close-out.sh run delivers (rc 0)" "0" "$CO_RC"
+expect_eq "E2E5: …the plan carries the delivered line" "yes" "$( [ -n "$(delivered_line "$PE")" ] && echo yes || echo no)"
+expect_eq "E2E6: …and reads closed" "1" "$(run_open_rc "$PE/$PLAN_REL")"
+
+# THE SAME FUNCTION REFUSES IN CLOSE-OUT (D3). A fixture whose structure reading is the newest and
+# fails: `check` says it would refuse, naming the failing line, and `run` refuses with nothing done.
+PF="$(mk_fixture e2e-fail)"; advance_to "$PF" 8
+bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line review "$3" 2026-10-04T13:00:00Z record/wave-01-fixture/structure-fail.md structure w-read fail piece)"' \
+  _ "$REPO_ROOT/payload/scripts/lib" "$PF/$PLAN_REL" "$(fixture_git "$PF" rev-parse wave/01-fixture)" > "$PF/$PLAN_REL.n" \
+  && mv "$PF/$PLAN_REL.n" "$PF/$PLAN_REL"
+run_close "$PF" check
+expect_eq "E2E7: check WOULD REFUSE on the facts" "yes" "$(contains "$CO_OUT" "facts: WOULD REFUSE — the facts the run owes do not all hold at the working head")"
+expect_eq "E2E8: …naming the failing reading and its evidence" "yes" \
+  "$(contains "$CO_OUT" "$(printf 'review\tstructure\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/structure-fail.md')")"
+PF_SHA="$(sha_of "$PF/$PLAN_REL")"
+run_close "$PF" run
+expect_eq "E2E9: run refuses (rc 2)" "2" "$CO_RC"
+expect_eq "E2E10: …in the same words" "yes" "$(contains "$CO_OUT" "bionic: close-out refused — the facts the run owes do not all hold at the working head")"
+expect_eq "E2E11: …the plan untouched and wt/01-x still standing (nothing was done)" "$PF_SHA/yes" \
+  "$(sha_of "$PF/$PLAN_REL")/$(branch_exists "$PF" wt/01-x)"
+PG="$(mk_fixture e2e-holds)"; advance_to "$PG" 8
+run_close "$PG" check
+expect_eq "E2E12: …while on a fixture whose facts hold, check says so (the extractor read E2E7's line on a real plan)" "yes" \
+  "$(contains "$CO_OUT" "facts: every fact the run owes holds at $(fixture_git "$PG" rev-parse wave/01-fixture)")"
+
+# A RELEASE THAT WOULD SPLIT A CELL (A-orch-28): a `|` in `release:` is refused before any act.
+PR="$(mk_fixture e2e-pipe)"; advance_to "$PR" 8
+sed 's/^archive-root: /release: 1.2|3\narchive-root: /' "$PR/$PLAN_REL" > "$PR/$PLAN_REL.n" && mv "$PR/$PLAN_REL.n" "$PR/$PLAN_REL"
+expect_eq "E2E13: precondition: the plan's frontmatter carries release: 1.2|3" "1" "$(/usr/bin/grep -c '^release: 1.2|3$' "$PR/$PLAN_REL" | tr -d ' ')"
+PR_SHA="$(sha_of "$PR/$PLAN_REL")"
+run_close "$PR" run
+expect_eq "E2E14: A-orch-28 run refuses a release holding a | (rc 2)" "2" "$CO_RC"
+expect_eq "E2E15: …saying why, before any act" "yes" "$(contains "$CO_OUT" "the release: field of the plan holds a | (1.2|3), which would split the version cell of the epic row")"
+expect_eq "E2E16: …the plan untouched and wt/01-x still standing" "$PR_SHA/yes" "$(sha_of "$PR/$PLAN_REL")/$(branch_exists "$PR" wt/01-x)"
 
 # ============================================================
 section "4f — REQ-1 (AC-1.1–1.4): the shipped table is found once; the ADR cell is read, not marked"
