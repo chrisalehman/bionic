@@ -2030,6 +2030,14 @@ SURVIVAL_REAL="$(dirname "$HERE")/payload/context/survival.md"
 expect_file "15: the SSoT file this whole section pins against exists" "$SURVIVAL_REAL"
 S15_WANT="$(cat "$SURVIVAL_REAL" 2>/dev/null)"
 expect_nonempty "15: …and it is not empty (a non-vacuous byte-for-byte pin)" "$S15_WANT"
+# THE SCRATCH LINE (wave-27 T30 part two, REQ-13) closes the terms string: survival.md byte for byte,
+# then one line naming the agent's scratch directory. `terms_body` is the string with that last line
+# taken off, and only that line; Section 21 (§SCRATCH) pins the line itself.
+terms_body() {
+  printf '%s\n' "$1" | awk '
+    { if (NR > 1) print prev; prev = $0 }
+    END { if (!(index(prev, "Your scratch directory is ") == 1 && index(prev, "nothing outside it is yours to write as scratch."))) print prev }'
+}
 
 # --- 15a: bionic:senior-implementor, WITH a matching roster row (reuses 14/10's own
 #     fixture idiom) — proves delivery AND that ARM 3's existing identification duty is
@@ -2043,7 +2051,7 @@ S15A_EVENT=$(printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.hookEventName' 
 expect_eq "15a: hookSpecificOutput.hookEventName is SubagentStart" "SubagentStart" "$S15A_EVENT"
 S15A_CTX=$(printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)
 expect_eq "15a: additionalContext equals the byte content of payload/context/survival.md (SSoT pin, item 3)" \
-  "$S15_WANT" "$S15A_CTX"
+  "$S15_WANT" "$(terms_body "$S15A_CTX")"
 # --- 15e: the existing recorder duty still fires alongside delivery, over this same fixture ---
 S15A_ROW=$(grep 'status=identified' "$S15A_ROSTER" 2>/dev/null)
 expect_contains "15e: ARM 3's identification still fires on a bionic type" \
@@ -2060,7 +2068,7 @@ S15B_EVENT=$(printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.hookEventName' 
 expect_eq "15b: hookSpecificOutput.hookEventName is SubagentStart" "SubagentStart" "$S15B_EVENT"
 S15B_CTX=$(printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)
 expect_eq "15b: additionalContext equals the byte content of payload/context/survival.md" \
-  "$S15_WANT" "$S15B_CTX"
+  "$S15_WANT" "$(terms_body "$S15B_CTX")"
 
 # --- 15c: general-purpose (a harness agent) — no dispatch terms; this is not a bionic role. ---
 IFS='|' read -r S15C_REPO S15C_TR S15C_SUB S15C_CFG <<< "$(make_world survivalharness yes)"
@@ -2093,7 +2101,7 @@ IFS='|' read -r S16A_REPO S16A_TR S16A_SUB S16A_CFG <<< "$(make_world tmbionic y
 tm_seed "$S16A_REPO" "w-1" "bionic:researcher"
 run_rec "$(mk_subagent_start "$SID_A" "$S16A_TR" "$S16A_REPO" "w-1" "$START_ID")"
 S16A_CTX=$(printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)
-expect_eq "16a: agent_type=w-1 on a bionic:researcher row — additionalContext is survival.md byte for byte"   "$S15_WANT" "$S16A_CTX"
+expect_eq "16a: agent_type=w-1 on a bionic:researcher row — additionalContext is survival.md byte for byte"   "$S15_WANT" "$(terms_body "$S16A_CTX")"
 S16A_ROW=$(grep 'status=identified' "$S16A_REPO/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)
 expect_contains "16b: …and the identified row gains terms-delivered=" "|terms-delivered=20" "$S16A_ROW"
 expect_eq "16b: …exactly once" "1" "$(printf '%s' "$S16A_ROW" | tr '|' '\n' | grep -c '^terms-delivered=')"
@@ -3146,7 +3154,7 @@ CKA_ROSTER="$CKA_REPO/.bionic/tmp/roster-${SID_A}.state"
 sj_intended "$CKA_REPO" T24 toolu_01CKA bionic:auditor suites_allowed=none questions=evidence
 pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKA_TR" "$CKA_REPO" bionic:auditor "a0000000000ckaud")"
 expect_eq "CK-a1 the terms registration prints one line" "1" "$(pc_lines terms)"
-expect_eq "CK-a2 …survival.md alone, byte for byte" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "CK-a2 …survival.md alone, byte for byte" "$S15_WANT" "$(terms_body "$(pc_ctx terms)")"
 expect_eq "CK-a3 the evidence registration prints one line" "1" "$(pc_lines evidence)"
 expect_eq "CK-a4 …its naming line, then checks-evidence.md" "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
 expect_empty "CK-a5 the adversarial registration prints nothing for an auditor" "$PC_OUT_adversarial"
@@ -3160,7 +3168,7 @@ expect_eq "CK-a9 four hooks on one start append ONE identified row" "1" "$(grep 
 IFS='|' read -r CKB_REPO CKB_TR CKB_SUB CKB_CFG <<< "$(make_world checkscrit yes)"
 sj_intended "$CKB_REPO" w-crit toolu_01CKB bionic:critic suites_allowed=none questions=adversarial,structure
 pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKB_TR" "$CKB_REPO" w-crit "a0000000000ckcrt")"
-expect_eq "CK-b1 a critic teammate's terms are survival.md alone" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "CK-b1 a critic teammate's terms are survival.md alone" "$S15_WANT" "$(terms_body "$(pc_ctx terms)")"
 expect_eq "CK-b2 …its adversarial registration pushes checks-adversarial.md" \
   "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
 expect_eq "CK-b3 …its structure registration pushes checks-structure.md" \
@@ -3171,7 +3179,7 @@ expect_empty "CK-b4 …and its evidence registration prints nothing" "$PC_OUT_ev
 IFS='|' read -r CKC_REPO CKC_TR CKC_SUB CKC_CFG <<< "$(make_world checkswriter yes)"
 sj_intended "$CKC_REPO" T5 toolu_01CKC bionic:implementor suites_allowed=widget.test.sh
 pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKC_TR" "$CKC_REPO" bionic:implementor "a0000000000ckwrt")"
-expect_eq "CK-c1 a writer's delivery is survival.md byte for byte" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "CK-c1 a writer's delivery is survival.md byte for byte" "$S15_WANT" "$(terms_body "$(pc_ctx terms)")"
 expect_eq "CK-c2 …and it was joined (the positive on the roster)" "T5" \
   "$(sj_field "$(grep 'status=identified' "$CKC_REPO/.bionic/tmp/roster-${SID_A}.state")" name)"
 expect_eq "CK-c3 …and no question registration prints anything for it" "||" \
@@ -3216,7 +3224,7 @@ expect_eq "CK-e2 …yet the set both candidates carry is delivered: adversarial"
   "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
 expect_eq "CK-e3 …and structure" "$(ck_want "$CK_CTX" structure)" "$(pc_ctx structure)"
 expect_empty "CK-e4 …and nothing the candidates do not carry" "$PC_OUT_evidence"
-expect_eq "CK-e5 …with the terms beside them" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "CK-e5 …with the terms beside them" "$S15_WANT" "$(terms_body "$(pc_ctx terms)")"
 
 # ---- CK-f: a start that cannot be placed, the candidates carrying different sets ----
 IFS='|' read -r CKF_REPO CKF_TR CKF_SUB CKF_CFG <<< "$(make_world checksdiffer yes)"
@@ -3224,7 +3232,7 @@ CKF_ROSTER="$CKF_REPO/.bionic/tmp/roster-${SID_A}.state"
 sj_intended "$CKF_REPO" F1 toolu_01CKF1 bionic:critic suites_allowed=none questions=adversarial
 sj_intended "$CKF_REPO" F2 toolu_01CKF2 bionic:critic suites_allowed=none questions=adversarial,structure
 pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$CKF_TR" "$CKF_REPO" bionic:critic "a0000000000ckfdf")"
-expect_eq "CK-f1 differing candidates: the terms are still delivered (the positive)" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "CK-f1 differing candidates: the terms are still delivered (the positive)" "$S15_WANT" "$(terms_body "$(pc_ctx terms)")"
 expect_eq "CK-f2 …and no checks file is: adversarial, structure and evidence print nothing" "||" \
   "$PC_OUT_evidence|$PC_OUT_adversarial|$PC_OUT_structure"
 expect_eq "CK-f3 …each registration exits 0" "0 0 0" "$PC_ST_evidence $PC_ST_adversarial $PC_ST_structure"
@@ -3249,7 +3257,7 @@ expect_eq "CK-g2 …and it is pushed the same checks files as the first" "$CKG_F
   "$(pc_ctx adversarial)|$(pc_ctx structure)|$PC_OUT_evidence"
 expect_eq "CK-g3 …which are the dealt ones (not vacuous)" \
   "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
-expect_eq "CK-g4 …and the terms with them" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "CK-g4 …and the terms with them" "$S15_WANT" "$(terms_body "$(pc_ctx terms)")"
 
 # ============================================================
 section "Section 20: §PUSH-CAP — every string the start pushes fits what the harness hands over (wave-27 T30; review pass 24)"
@@ -3312,8 +3320,12 @@ pc_every_deal() {
         if [ -z "$len" ] || [ "$len" -gt "$PC_MAX" ] || [ "$len" -ge 10000 ]; then
           PC_BAD="$PC_BAD [$r/$s/$role $k: ${len:-?} chars]"
         fi
-        if [ "$k" = terms ]; then want="$(cat "$ctx/survival.md")"; else want="$(ck_want "$ctx" "$k")"; fi
-        [ "$(pc_ctx "$k")" = "$want" ] || PC_BAD="$PC_BAD [$r/$s/$role $k: not its file]"
+        if [ "$k" = terms ]; then
+          [ "$(terms_body "$(pc_ctx terms)")" = "$(cat "$ctx/survival.md")" ] || PC_BAD="$PC_BAD [$r/$s/$role terms: not survival.md]"
+          [ "$(pc_ctx terms)" != "$(terms_body "$(pc_ctx terms)")" ] || PC_BAD="$PC_BAD [$r/$s/$role terms: no scratch line]"
+        else
+          [ "$(pc_ctx "$k")" = "$(ck_want "$ctx" "$k")" ] || PC_BAD="$PC_BAD [$r/$s/$role $k: not its file]"
+        fi
       else
         local v="PC_OUT_$k"
         [ -z "${!v}" ] || PC_BAD="$PC_BAD [$r/$s/$role $k: printed for an undealt question]"
@@ -3359,7 +3371,7 @@ expect_eq "PC-c2 …printed as one line" "1" "$(pc_lines structure)"
 expect_eq "PC-c3 …and the start goes on: that registration exits 0" "0" "$PC_ST_structure"
 expect_eq "PC-c4 …and logs exactly one line" "1" "$(printf '%s\n' "$PC_ERR_structure" | grep -c 'execution-recorder:')"
 expect_contains "PC-c5 …naming the file it withheld" "checks-structure.md" "$PC_ERR_structure"
-expect_eq "PC-c6 the other strings are unchanged: the terms" "$S15_WANT" "$(pc_ctx terms)"
+expect_eq "PC-c6 the other strings are unchanged: the terms" "$S15_WANT" "$(terms_body "$(pc_ctx terms)")"
 expect_eq "PC-c7 …evidence" "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
 expect_eq "PC-c8 …adversarial" "$(ck_want "$CK_CTX" adversarial)" "$(pc_ctx adversarial)"
 expect_eq "PC-c9 …and none of them logs anything" "0" \
@@ -3426,5 +3438,83 @@ expect_eq "PC-g3 …and writes nothing" "$PN_BEFORE" "$(cat "$PN_ROSTER")"
 pc_start "$PC_REPO_ROOT" "$PN_PAY" evidence
 expect_eq "PC-g4 …while the evidence registration on the same row pushes (the positive)" \
   "$(ck_want "$CK_CTX" evidence)" "$(pc_ctx evidence)"
+
+# ============================================================
+section "Section 21: §SCRATCH — each agent is pushed a scratch directory of its own (wave-27 T30; REQ-13 AC-13.1, D22)"
+# ============================================================
+#
+# At agent start the terms registration makes `<project root>/.bionic/tmp/scratch/<session>/<roster
+# name>/` and closes the terms string with one line naming it, saying nothing outside it is the
+# agent's to write as scratch. An agent with no roster name gets a directory named by its agent id. A
+# directory that cannot be made is logged, the line left out, and the agent still starts.
+#
+# FIXTURE FIDELITY: rows through `sj_intended` → `roster_row`; the terms registration read from
+# hooks/hooks.json (`pc_start … terms`). The directory is read back OFF THE PUSHED LINE, then checked
+# on disk, so the line and the directory cannot disagree unseen.
+#
+# fails-when: two agents of one session are pushed one directory; the directory is not there; it is
+# not named by the roster name (or the id, with none); an unmakeable directory stops the start or
+# leaves a line naming nothing.
+SC_TAIL=" — nothing outside it is yours to write as scratch."
+sc_line() { pc_ctx terms | tail -1; }
+sc_dir() {  # <line> -> the directory it names, without the trailing slash
+  case "$1" in "Your scratch directory is "*"/$SC_TAIL") : ;; *) return 0 ;; esac
+  local d="${1#Your scratch directory is }"
+  d="${d%"/$SC_TAIL"}"
+  printf '%s' "$d"
+}
+
+# ---- SC-a: two starts in one session, two directories, each ending in its roster name ----
+IFS='|' read -r SCA_REPO SCA_TR SCA_SUB SCA_CFG <<< "$(make_world scratchtwo yes)"
+sj_intended "$SCA_REPO" sc-one toolu_01SCA1 bionic:implementor suites_allowed=widget.test.sh
+sj_intended "$SCA_REPO" sc-two toolu_01SCA2 bionic:researcher suites_allowed=none
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$SCA_TR" "$SCA_REPO" bionic:implementor "a0000000000scaone")" terms
+SCA_L1="$(sc_line)"; SCA_D1="$(sc_dir "$SCA_L1")"
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$SCA_TR" "$SCA_REPO" bionic:researcher "a0000000000scatwo")" terms
+SCA_L2="$(sc_line)"; SCA_D2="$(sc_dir "$SCA_L2")"
+expect_nonempty "SC-a1 the first agent's terms close with its scratch line (the extractor reads it)" "$SCA_D1"
+expect_nonempty "SC-a2 …and the second agent's" "$SCA_D2"
+expect_ne "SC-a3 …naming two different directories" "$SCA_D1" "$SCA_D2"
+expect_true "SC-a4 …the first exists" test -d "$SCA_D1"
+expect_true "SC-a5 …the second exists" test -d "$SCA_D2"
+expect_regex "SC-a6 …the first is .bionic/tmp/scratch/<session>/<its roster name>" \
+  "/\\.bionic/tmp/scratch/${SID_A}/sc-one\$" "$SCA_D1"
+expect_regex "SC-a7 …and the second" "/\\.bionic/tmp/scratch/${SID_A}/sc-two\$" "$SCA_D2"
+expect_true "SC-a8 …under the project root" test "$SCA_D1" -ef "$SCA_REPO/.bionic/tmp/scratch/${SID_A}/sc-one"
+expect_eq "SC-a9 the line, exactly" "Your scratch directory is $SCA_D2/$SC_TAIL" "$SCA_L2"
+expect_eq "SC-a10 …and the rest of the string is survival.md byte for byte" "$S15_WANT" "$(terms_body "$(pc_ctx terms)")"
+
+# ---- SC-b: an agent with no roster name gets a directory named by its agent id ----
+IFS='|' read -r SCB_REPO SCB_TR SCB_SUB SCB_CFG <<< "$(make_world scratchnoname yes)"
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$SCB_TR" "$SCB_REPO" bionic:test-runner "a0000000000scbnon")" terms
+SCB_D="$(sc_dir "$(sc_line)")"
+expect_regex "SC-b1 a start on no roster row is pushed a directory named by its agent id" \
+  "/\\.bionic/tmp/scratch/${SID_A}/a0000000000scbnon\$" "$SCB_D"
+expect_true "SC-b2 …which exists" test -d "$SCB_D"
+
+# ---- SC-c: a directory that cannot be made: logged, the line left out, the agent starts ----
+IFS='|' read -r SCC_REPO SCC_TR SCC_SUB SCC_CFG <<< "$(make_world scratchblocked yes)"
+SCC_ROSTER="$SCC_REPO/.bionic/tmp/roster-${SID_A}.state"
+sj_intended "$SCC_REPO" sc-blocked toolu_01SCC bionic:implementor suites_allowed=widget.test.sh
+printf 'not a directory\n' > "$SCC_REPO/.bionic/tmp/scratch"
+pc_start "$PC_REPO_ROOT" "$(mk_subagent_start "$SID_A" "$SCC_TR" "$SCC_REPO" bionic:implementor "a0000000000sccblk")" terms
+expect_eq "SC-c1 an unmakeable scratch directory stops nothing: exit 0" "0" "$PC_ST_terms"
+expect_eq "SC-c2 …the terms are delivered, survival.md byte for byte with no line" "$S15_WANT" "$(pc_ctx terms)"
+expect_contains "SC-c3 …the failure is logged in the recorder's voice" "execution-recorder:" "$PC_ERR_terms"
+expect_contains "SC-c4 …naming the directory" ".bionic/tmp/scratch/${SID_A}/sc-blocked" "$PC_ERR_terms"
+expect_eq "SC-c5 …and the start is still joined" "sc-blocked" \
+  "$(sj_field "$(grep 'status=identified' "$SCC_ROSTER")" name)"
+
+# ---- SC-d: a resumed copy is pushed the directory the first start was ----
+IFS='|' read -r SCD_REPO SCD_TR SCD_SUB SCD_CFG <<< "$(make_world scratchresume yes)"
+sj_intended "$SCD_REPO" sc-again toolu_01SCD bionic:implementor suites_allowed=widget.test.sh
+SCD_PAY="$(mk_subagent_start "$SID_A" "$SCD_TR" "$SCD_REPO" bionic:implementor "a0000000000scdrsm")"
+pc_start "$PC_REPO_ROOT" "$SCD_PAY" terms
+SCD_D1="$(sc_dir "$(sc_line)")"
+pc_start "$PC_REPO_ROOT" "$SCD_PAY" terms
+expect_contains "SC-d1 the second start is a duplicate start" "status=duplicate-start" \
+  "$(cat "$SCD_REPO/.bionic/tmp/roster-${SID_A}.state")"
+expect_nonempty "SC-d2 …the first start named a directory" "$SCD_D1"
+expect_eq "SC-d3 …and the copy is pushed the same one" "$SCD_D1" "$(sc_dir "$(sc_line)")"
 
 finish
