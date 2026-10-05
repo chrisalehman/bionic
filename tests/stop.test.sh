@@ -1501,4 +1501,55 @@ s7_fire "$LH_D" "$LH_TX"
 expect_absent "LH5: §N4 a proof in the digest's own second leaves its head out: no review of nothing" \
   "Fillable gap" "$(reason_of)$STOP_ERR"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "FILES-REMEDY: the amend the landing refusal prints is one amend accepts, run as printed (wave-27 T29; REQ-12 AC-12.3, D21)"
+
+# THE DEFECT, from a real run: a writer committed a file at the repository root, the landing
+# refused the stop, and the remedy it printed — `amend <name> --files+ 'CONTEXT.md'` — was
+# itself refused by amend, which read a Files: entry as a path only when it carried a `/`.
+# The remedy is now spelled by the one reader in brief.sh that amend reads with: a root file
+# with an extension as written, and a bare name with no file behind it at the root as
+# `./<name>`. The fixture touches one of each, and the printed line is run exactly as printed.
+fr_fixture() {  # -> a git project whose writer tree committed two root files outside Files:
+  local d wt
+  d=$(mkfix)
+  git -C "$d" init -q 2>/dev/null
+  git -C "$d" symbolic-ref HEAD refs/heads/main
+  git -C "$d" config user.email t@example.invalid; git -C "$d" config user.name T
+  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"; echo base > "$d/base.txt"
+  git -C "$d" add .gitignore base.txt; git -C "$d" commit -qm base
+  wt="$d/.worktrees/fr-writer"
+  git -C "$d" worktree add -q "$wt" -b wt/fr-writer >/dev/null 2>&1
+  git -C "$wt" config user.email t@example.invalid; git -C "$wt" config user.name T
+  mkdir -p "$wt/declared"
+  echo one > "$wt/declared/one.sh"; echo ctx > "$wt/CONTEXT.md"; echo w > "$wt/Widgetfile"
+  git -C "$wt" add -A; git -C "$wt" commit -qm work
+  {
+    roster_header
+    roster_row_fixture status=identified session="$SID" name=fr-writer agent_id="$AID" \
+      deliverable=.bionic/docs/record/fr.md launched_at=2026-09-01T00:00:00Z \
+      subagent_type=bionic:implementor files=declared/ suites_allowed=none suites_source=declared \
+      tool_use_id=toolu_FR
+  } > "$d/.bionic/tmp/roster-$SID.state"
+  mkdir -p "$d/.bionic/docs/record"; echo done > "$d/.bionic/docs/record/fr.md"
+  printf '%s' "$d"
+}
+D=$(fr_fixture)
+fire "$D"
+expect_status "FR1 the control — root files outside Files: refuse the stop" "2" "$STOP_RC"
+FR_FIXLINE="$(printf '%s\n' "$STOP_ERR$(reason_of)" | /usr/bin/grep -m1 'session-poker.sh.* amend ' | sed 's/^[[:space:]]*//')"
+expect_contains "FR1 precondition: the refusal prints its amend line" "amend 'fr-writer'" "$FR_FIXLINE"
+expect_contains "FR2 the line spells the root file with an extension as written" "--files+ 'CONTEXT.md'" "$FR_FIXLINE"
+expect_contains "FR3 …and the bare name with no file at the root as ./<name>" "--files+ './Widgetfile'" "$FR_FIXLINE"
+# A fresh fixture for the amend and the second stop, as section 8 does: the first stop has
+# already judged its row, so a second stop over the same fixture never reaches the landing check.
+D=$(fr_fixture)
+FR_OUT=$( cd "$D" && CLAUDE_CODE_SESSION_ID="$SID" bash -c "$FR_FIXLINE" 2>&1 ); FR_RC=$?
+expect_eq "FR4 AC-12.3 the printed amend, run as printed, succeeds" "0" "$FR_RC"
+expect_contains "FR4 …saying it amended" "amended" "$FR_OUT"
+fire "$D"
+expect_absent "FR5 …and the same diff now lands: no landing refusal" "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
+expect_status "FR5 …and the stop is admitted" "0" "$STOP_RC"
+
 finish
